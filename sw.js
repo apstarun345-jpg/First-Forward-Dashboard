@@ -1,5 +1,5 @@
 // First Forward Dashboard — Service Worker for PWA + fast caching
-const CACHE_NAME = 'ff-dashboard-v3.2-robo';
+const CACHE_NAME = 'ff-dashboard-v4.3-pro-20260926';
 const ASSETS = [
   './',
   './index.html',
@@ -29,7 +29,10 @@ const ASSETS = [
   './manifest.webmanifest',
   './favicon.svg',
   './icon-192.png',
-  './icon-512.png'
+  './icon-512.png',
+  './logos/gadivan.png',
+  './logos/first-forward.png',
+  './logos/apna-payment.png'
 ];
 
 self.addEventListener('install', (e) => {
@@ -57,7 +60,20 @@ self.addEventListener('fetch', (e) => {
     e.respondWith(fetch(e.request));
     return;
   }
-  // Assets: cache-first with network fallback
+  // For HTML/CSS/JS in dev preview: network-first to show latest updates immediately
+  if (url.pathname.endsWith('.html') || url.pathname.endsWith('.css') || url.pathname.endsWith('.js') || url.pathname.includes('/logos/')) {
+    e.respondWith(
+      fetch(e.request).then(res => {
+        if (res.ok) {
+          const clone = res.clone();
+          caches.open(CACHE_NAME).then(c => c.put(e.request, clone));
+        }
+        return res;
+      }).catch(() => caches.match(e.request).then(cached => cached || caches.match('./index.html')))
+    );
+    return;
+  }
+  // Other assets: cache-first with network fallback
   e.respondWith(
     caches.match(e.request).then(cached => {
       if (cached) {
