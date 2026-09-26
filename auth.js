@@ -1,6 +1,5 @@
-/* Auth: animated login / signup screen, forgot-password flow, session, permissions (FF.auth.can).
-   Admin manages users in Settings → Users & access / Access matrix.
-   Login flow: form → "Logging in…" animation → "Welcome back, <name>!" splash → dashboard. */
+/* Auth: professional login / signup screen with company logos, pure English, no overlapping.
+   GADIVAN = GV Partner, FIRST forward = IDFC First Forward Toll & Fuel, ApnaPayment with pure yellow triangle. */
 window.FF = window.FF || {};
 (function (FF) {
   'use strict';
@@ -23,13 +22,12 @@ window.FF = window.FF || {};
     return (u.permissions || []).includes(perm);
   }
   function isAdmin() { return !!(state.user && state.user.role === 'admin'); }
-  /** Avatar <img> or initials bubble for any user object. */
   function avatarHtml(user, cls) {
     const u = user || state.user || {};
     const name = String(u.name || u.username || 'U').trim();
     const initials = name.split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase();
     if (u.avatar) return `<span class="av ${cls || ''}"><img src="${esc(u.avatar)}" alt="${esc(name)}"></span>`;
-    return `<span class="av mono ${cls || ''}">${esc(initials)}</span>`;
+    return `<span class="av mono ${cls || ''}\">${esc(initials)}</span>`;
   }
   const roleLabel = (u) => (!u ? '' : u.role === 'admin' ? '👑 Admin' : 'User');
 
@@ -47,15 +45,14 @@ window.FF = window.FF || {};
     const brand = U.$('#brand-name'); if (brand) brand.textContent = FF.config.brand;
     const tag = U.$('#brand-tag'); if (tag) tag.textContent = FF.config.tagline || 'Dashboard';
     const logo = U.$('#brand-logo');
-    if (logo) { logo.innerHTML = FF.config.logo ? `<img src="${esc(FF.config.logo)}" alt="logo">` : esc((FF.config.brand || 'FF').split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase()); logo.classList.toggle('has-img', !!FF.config.logo); }
+    if (logo) { logo.innerHTML = FF.config.logo ? `<img src="${esc(FF.config.logo)}\" alt=\"logo\">` : esc((FF.config.brand || 'FF').split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase()); logo.classList.toggle('has-img', !!FF.config.logo); }
     const favicon = U.$('#site-favicon');
     if (favicon) { favicon.href = FF.config.logo || 'favicon.svg'; favicon.type = FF.config.logo ? ((FF.config.logo.match(/^data:(image\/[^;]+)/) || [])[1] || 'image/png') : 'image/svg+xml'; }
   }
 
-  // ---- login / signup screen -------------------------------------------------------------------
   function screen(html) {
     let el = U.$('#auth-screen');
-    if (!el) { el = U.h('<div id="auth-screen" class="auth-screen"></div>'); document.body.appendChild(el); }
+    if (!el) { el = U.h('<div id="auth-screen" class="auth-screen pro"></div>'); document.body.appendChild(el); }
     el.innerHTML = html;
     el.hidden = false;
     document.body.classList.add('auth-open');
@@ -66,43 +63,51 @@ window.FF = window.FF || {};
     ? `<img class="auth-logo ${size || ''}" src="${esc(FF.config.logo)}" alt="">`
     : `<div class="auth-logo mono-logo ${size || ''}">${esc((FF.config.brand || 'FF').split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase())}</div>`);
 
+  // ---- Professional visual with company logos ----
   function visualHtml() {
     const c = FF.config;
-    const hero = c.loginImage
-      ? `<div class="auth-visual-img" style="background-image:url('${esc(c.loginImage)}')"></div>`
-      : '';
-    return `<div class="auth-visual robo">
-      <div class="robo-grid"></div>
-      <div class="robo-glow g1"></div>
-      <div class="robo-glow g2"></div>
-      <div class="robo-glow g3"></div>
-      <div class="robo-circuit"></div>
-      ${hero}
-      <div class="auth-visual-inner">
-        <div class="auth-brand-big">${logoHtml('big')}<div><b>${esc(c.brand || 'First Forward')}</b><small>${esc(c.tagline || 'Dashboard')}</small><span class="robo-badge">🤖 AI-Powered</span></div></div>
-        <div class="robo-title-wrap">
-          <h2 class="auth-visual-title"><span class="robo-type">Do dashboard,</span> <span class="robo-highlight">ek hi login.</span></h2>
-          <div class="robo-underline"></div>
+    return `<div class="auth-visual pro-visual">
+      <div class="pro-bg"></div>
+      <div class="pro-grid"></div>
+      <div class="pro-glow g1"></div>
+      <div class="pro-glow g2"></div>
+      <div class="auth-visual-inner pro-inner">
+        <!-- Company Logos Header -->
+        <div class="company-header">
+          <div class="company-logos">
+            <div class="c-logo-box gadivan"><img src="./logos/gadivan.png" alt="GADIVAN"><span>GV Partner</span></div>
+            <div class="c-logo-box firstfwd"><img src="./logos/first-forward.png" alt="FIRST forward"><span>IDFC First Forward</span></div>
+            <div class="c-logo-box apna"><img src="./logos/apna-payment.png" alt="ApnaPayment"><span>Payment Partner</span></div>
+          </div>
+          <div class="company-badge">Unified FASTag Platform</div>
         </div>
-        <p class="auth-visual-sub">First Forward (EIR · StockDataa · REPORT) aur GV Partner (GV Master · Tag Assignment · GV REPORT) — issuance, stock, trend aur performance ek jagah. <b>Robotics animated dashboard</b>.</p>
-        <ul class="auth-points robo-points">
-          <li><span class="rp-ico">📊</span><div><b>First Forward</b><small>dashboard & trend · live</small></div><span class="rp-dot live"></span></li>
-          <li><span class="rp-ico">🚀</span><div><b>GV Partner</b><small>dashboard & stock · fast sync</small></div><span class="rp-dot"></span></li>
-          <li><span class="rp-ico">⚖️</span><div><b>GV vs First Forward</b><small>side-by-side comparison</small></div><span class="rp-dot"></span></li>
-          <li><span class="rp-ico">🏆</span><div><b>Performance</b><small>Agent & TL · Excel export</small></div><span class="rp-dot live"></span></li>
-        </ul>
-        <div class="robo-stats">
-          <div class="robo-stat"><b>⚡ Fast Sync</b><small>Background preload</small></div>
-          <div class="robo-stat"><b>🎨 Colorful</b><small>Animated UI</small></div>
-          <div class="robo-stat"><b>📍 Location</b><small>Auto tracking</small></div>
+
+        <div class="pro-brand">${logoHtml('big')}<div><b>${esc(c.brand || 'First Forward')}</b><small>${esc(c.tagline || 'Dashboard')}</small></div><span class="pro-ver">v3.2 Professional</span></div>
+        
+        <h2 class="pro-title">Unified FASTag Intelligence Platform</h2>
+        <p class="pro-sub">Enterprise-grade dashboard for toll and fuel payment operations. Monitor, analyze, and optimize your FASTag business across First Forward and GV Partner channels.</p>
+
+        <div class="pro-features">
+          <div class="pf-card"><div class="pf-icon" style="background:#eef2ff;color:#4f46e5">📊</div><div><b>First Forward Analytics</b><span>EIR issuance log, StockDataa inventory, REPORT performance. Real-time KPIs, VC4 vs Commercial breakdown, agent and TL rankings.</span></div></div>
+          <div class="pf-card"><div class="pf-icon" style="background:#ccfbf1;color:#0d9488">🚀</div><div><b>GV Partner (GADIVAN)</b><span>GV Master issuance, Tag Assignment stock, GV REPORT. Complete partner performance tracking and dispatch alerts.</span></div></div>
+          <div class="pf-card"><div class="pf-icon" style="background:#fef3c7;color:#d97706">⚖️</div><div><b>Comparative Intelligence</b><span>Side-by-side GV vs First Forward comparison, daily MTD trends, projected month-end, class-wise growth analysis.</span></div></div>
+          <div class="pf-card"><div class="pf-icon" style="background:#fce7f3;color:#db2777">🏷️</div><div><b>Tag Issued Insights</b><span>Date-wise detailed issuance — select any date to view VC4, Commercial, class-wise up/down trends for both channels.</span></div></div>
         </div>
-        <div class="auth-float a1 robo-float"><b>MTD Issuance</b><em>live</em><span class="rf-bar"></span></div>
-        <div class="auth-float a2 robo-float"><b>VC4 vs Commercial</b><em>compare</em><span class="rf-bar"></span></div>
-        <div class="auth-float a3 robo-float"><b>GV + FF</b><em>AI sync</em><span class="rf-bar"></span></div>
-      </div>
-      <div class="robo-bot">
-        <div class="robo-head"><div class="robo-eye left"></div><div class="robo-eye right"></div></div>
-        <div class="robo-body"></div>
+
+        <div class="pro-stats-row">
+          <div class="ps-item"><b>⚡ Fast Sync</b><small>Background preload — instant sheet open</small></div>
+          <div class="ps-item"><b>📦 Stock Intelligence</b><small>Days cover, low stock alerts, dispatch priority</small></div>
+          <div class="ps-item"><b>🏆 Performance</b><small>Agent & TL rankings, Excel export, WhatsApp share</small></div>
+        </div>
+
+        <div class="pro-footer-logos">
+          <span>Powered by</span>
+          <img src="./logos/first-forward.png" alt="First Forward" class="mini-logo">
+          <span style="color:#e0e7ff">×</span>
+          <img src="./logos/gadivan.png" alt="GADIVAN" class="mini-logo" style="background:#E53935;border-radius:6px;padding:2px">
+          <span style="color:#e0e7ff">×</span>
+          <img src="./logos/apna-payment.png" alt="ApnaPayment" class="mini-logo" style="background:#111;border-radius:6px;padding:3px">
+        </div>
       </div>
     </div>`;
   }
@@ -110,64 +115,75 @@ window.FF = window.FF || {};
   function formHtml(mode, msg) {
     const c = FF.config;
     const signupOk = c.allowSignup !== false;
-    return `<div class="auth-shell robo-shell">
+    return `<div class="auth-shell pro-shell">
       ${visualHtml()}
-      <div class="auth-panel robo-panel">
-        <div class="robo-panel-glow"></div>
-        <div class="auth-card robo-card">
-          <div class="auth-brand-sm">${logoHtml()}<div><b>${esc(c.appName)}</b><small>${esc(c.tagline || 'Dashboard')} <span class="robo-ver">v3.2 • Robo</span></small></div></div>
-          <div class="robo-welcome">
-            <h3>🤖 Welcome to Future Dashboard</h3>
-            <p>Colorful • Animated • Robotics • Fast Sync • PWA Ready</p>
+      <div class="auth-panel pro-panel">
+        <div class="auth-card pro-card">
+          <div class="auth-brand-sm pro-brand-sm">${logoHtml()}<div><b>${esc(c.appName)}</b><small>Enterprise Dashboard • Secure Access</small></div></div>
+          
+          <div class="pro-login-header">
+            <h3>Secure Login</h3>
+            <p>Access your FASTag operations dashboard. Professional, fast, and secure.</p>
           </div>
-          <p class="auth-mobile-intro robo-intro">📊 <b>Issuance, stock aur performance</b> ek hi colourful dashboard me — First Forward aur GV Partner ka clear comparison, daily report alerts ke saath. <span class="robo-chip">⚡ Fast</span> <span class="robo-chip">🎨 Colorful</span> <span class="robo-chip">🤖 Robo</span></p>
-          <div class="seg auth-tabs robo-tabs"><button class="seg-btn ${mode === 'login' ? 'on' : ''}" data-mode="login">🔐 Login</button>${signupOk ? `<button class="seg-btn ${mode === 'signup' ? 'on' : ''}" data-mode="signup">✨ Sign up</button>` : ''}</div>
-          <form id="auth-form" autocomplete="on" novalidate class="robo-form">
-            ${mode === 'signup' ? `<label class="robo-label"><span>👤 Full name</span><input name="name" class="input robo-input" required maxlength="80" placeholder="Aapka naam" autocomplete="name"></label>` : ''}
-            <label class="robo-label"><span>👤 Username</span><input name="username" class="input robo-input" required minlength="3" maxlength="60" placeholder="e.g. tarun" autocapitalize="none" autocomplete="username"></label>
-            ${mode === 'signup' ? `<div class="two"><label class="robo-label"><span>📞 Mobile <small>(optional)</small></span><input name="mobile" class="input robo-input" inputmode="tel" placeholder="98xxxxxxxx" autocomplete="tel"></label><label class="robo-label"><span>✉️ Email <small>(optional)</small></span><input name="email" class="input robo-input" type="email" placeholder="you@mail.com" autocomplete="email"></label></div>` : ''}
-            <label class="robo-label"><span>🔑 Password</span><span class="pw-wrap"><input name="password" class="input robo-input" type="password" required minlength="6" autocomplete="${mode === 'signup' ? 'new-password' : 'current-password'}" placeholder="min 6 characters"><button type="button" class="pw-eye" data-eye title="Password dikhao / chhupao">👁</button></span></label>
-            <div class="auth-row">
-              <label class="check small"><input type="checkbox" id="auth-remember" checked> <span>Mujhe yaad rakho</span></label>
-              <button type="button" class="link-btn robo-link" id="auth-forgot">Forgot password?</button>
+
+          <div class="seg auth-tabs pro-tabs"><button class="seg-btn ${mode === 'login' ? 'on' : ''}" data-mode="login">Login</button>${signupOk ? `<button class="seg-btn ${mode === 'signup' ? 'on' : ''}" data-mode="signup">Create Account</button>` : ''}</div>
+          
+          <form id="auth-form" autocomplete="on" novalidate class="pro-form">
+            ${mode === 'signup' ? `<label class="pro-label"><span>Full Name</span><input name="name" class="input pro-input" required maxlength="80" placeholder="Enter your full name" autocomplete="name"></label>` : ''}
+            <label class="pro-label"><span>Username</span><input name="username" class="input pro-input" required minlength="3" maxlength="60" placeholder="Enter username" autocapitalize="none" autocomplete="username"></label>
+            ${mode === 'signup' ? `<div class="two"><label class="pro-label"><span>Mobile</span><input name="mobile" class="input pro-input" inputmode="tel" placeholder="98xxxxxxxx" autocomplete="tel"></label><label class="pro-label"><span>Email</span><input name="email" class="input pro-input" type="email" placeholder="you@company.com" autocomplete="email"></label></div>` : ''}
+            <label class="pro-label"><span>Password</span><span class="pw-wrap"><input name="password" class="input pro-input" type="password" required minlength="6" autocomplete="${mode === 'signup' ? 'new-password' : 'current-password'}" placeholder="Enter password (min 6 characters)"><button type="button" class="pw-eye" data-eye title="Show / Hide password">👁</button></span></label>
+            <div class="auth-row pro-row">
+              <label class="check small"><input type="checkbox" id="auth-remember" checked> <span>Remember me</span></label>
+              <button type="button" class="link-btn pro-link" id="auth-forgot">Forgot password?</button>
             </div>
             <div id="auth-msg" class="auth-msg ${msg && msg.kind ? msg.kind : ''}">${msg ? esc(msg.text) : ''}</div>
-            <button class="btn primary big auth-submit robo-submit" type="submit"><span class="btn-label">${mode === 'signup' ? '✨ Create account' : '🚀 Login'} </span><span class="robo-spark"></span></button>
-            <div class="auth-progress" id="auth-progress" hidden><div class="auth-progress-bar robo-bar"></div></div>
-            <p class="dim small auth-note robo-note">${mode === 'signup' ? 'Account banne ke baad admin approve karega aur access set karega. 🤖' : 'Access nahi hai? Admin se account / permission maango. 🛡️'}</p>
+            <button class="btn primary big auth-submit pro-submit" type="submit"><span class="btn-label">${mode === 'signup' ? 'Create Account' : 'Login to Dashboard'}</span></button>
+            <div class="auth-progress" id="auth-progress" hidden><div class="auth-progress-bar"></div></div>
+            
+            <div class="pro-info-box">
+              <b>Dashboard Capabilities:</b>
+              <ul>
+                <li>📊 <b>Issuance Tracking</b> — Daily, MTD, projected, VC4 vs Commercial</li>
+                <li>📦 <b>Inventory Management</b> — Stock in field, days cover, dispatch priority</li>
+                <li>🏆 <b>Performance Analytics</b> — Agent & TL rankings, growth trends</li>
+                <li>🏷️ <b>Date-wise Reports</b> — GV & FF Tag Issued detailed view</li>
+                <li>⚡ <b>Fast & Secure</b> — Background sync, PWA installable, location tracking</li>
+              </ul>
+            </div>
+
+            <p class="dim small pro-note">${mode === 'signup' ? 'New account requires admin approval. You will receive access after verification.' : 'Need access? Contact your administrator for account creation and permissions.'}</p>
           </form>
         </div>
-        <p class="auth-foot dim small robo-foot">${esc(c.brand || '')} · Data Google Sheet se live aata hai · <span class="robo-live">● Live Sync</span>${state.settings && state.settings.updatedAt ? ` · settings updated ${U.timeLabel(new Date(state.settings.updatedAt).getTime())}` : ''}</p>
+        <p class="auth-foot dim small pro-foot">${esc(c.brand || '')} • Live data from Google Sheets • Secure & Enterprise Ready${state.settings && state.settings.updatedAt ? ` • Updated ${U.timeLabel(new Date(state.settings.updatedAt).getTime())}` : ''}</p>
       </div>
     </div>`;
   }
 
-  /** Forgot-password panel: step 1 = request to admin, step 2 = redeem 6-digit code. */
   function forgotHtml(step, msg, help) {
-    const wa = (help && help.whatsapp) ? U.waLink('Hi, mujhe apna dashboard password reset karwana hai.', help.whatsapp) : '';
-    const mail = (help && help.email) ? U.mailLink('Password reset request', 'Mera dashboard account ka password reset kar dijiye.', help.email) : '';
-    return `<div class="auth-shell">
+    const wa = (help && help.whatsapp) ? U.waLink('Hello, I need to reset my dashboard password.', help.whatsapp) : '';
+    const mail = (help && help.email) ? U.mailLink('Password Reset Request', 'Please reset my dashboard account password.', help.email) : '';
+    return `<div class="auth-shell pro-shell">
       ${visualHtml()}
-      <div class="auth-panel">
-        <div class="auth-card">
-          <div class="auth-brand-sm">${logoHtml()}<div><b>Password reset</b><small>${esc(FF.config.appName)}</small></div></div>
-          <div class="seg auth-tabs"><button class="seg-btn ${step === 'ask' ? 'on' : ''}" data-fstep="ask">1 · Request</button><button class="seg-btn ${step === 'code' ? 'on' : ''}" data-fstep="code">2 · Code se reset</button></div>
+      <div class="auth-panel pro-panel">
+        <div class="auth-card pro-card">
+          <div class="auth-brand-sm pro-brand-sm">${logoHtml()}<div><b>Password Reset</b><small>${esc(FF.config.appName)}</small></div></div>
+          <div class="seg auth-tabs pro-tabs"><button class="seg-btn ${step === 'ask' ? 'on' : ''}" data-fstep="ask">1. Request</button><button class="seg-btn ${step === 'code' ? 'on' : ''}" data-fstep="code">2. Reset with Code</button></div>
           ${step === 'ask' ? `<form id="forgot-form">
-            <p class="dim small">Apna username ya registered email daalo — request admin ke paas jayegi aur wo aapko naya password ya 6-digit code dega.</p>
-            <label>Username / Email<input name="username" class="input" required placeholder="tarun ya tarun@mail.com" autocapitalize="none"></label>
+            <p class="dim small">Enter your username or registered email. Your request will be sent to the administrator who will provide a new password or 6-digit code.</p>
+            <label class="pro-label"><span>Username / Email</span><input name="username" class="input pro-input" required placeholder="username or email" autocapitalize="none"></label>
             <div id="auth-msg" class="auth-msg ${msg ? msg.kind || '' : ''}">${msg ? esc(msg.text) : ''}</div>
-            <button class="btn primary big" type="submit">📨 Request bhejo</button>
-            <div class="btn-row" style="margin-top:10px">${wa ? `<a class="btn small" href="${esc(wa)}" target="_blank" rel="noopener">🟢 Admin ko WhatsApp</a>` : ''}${mail ? `<a class="btn small" href="${esc(mail)}">✉️ Email admin</a>` : ''}</div>
-            <p class="dim small">Admin Settings → Users &amp; access → “Reset requests” me aapki request dekh lega.</p>
+            <button class="btn primary big pro-submit" type="submit">Send Request</button>
+            <div class="btn-row" style="margin-top:10px">${wa ? `<a class="btn small" href="${esc(wa)}" target="_blank" rel="noopener">WhatsApp Admin</a>` : ''}${mail ? `<a class="btn small" href="${esc(mail)}">Email Admin</a>` : ''}</div>
           </form>` : `<form id="reset-form">
-            <p class="dim small">Admin se mila 6-digit code aur naya password daalo. Code 30 minute tak valid hai.</p>
-            <label>Username<input name="username" class="input" required autocapitalize="none"></label>
-            <label>6-digit code<input name="code" class="input mono" required inputmode="numeric" maxlength="8" placeholder="123456"></label>
-            <div class="two"><label>Naya password<input name="password" class="input" type="password" required minlength="6" autocomplete="new-password"></label><label>Dobara likho<input name="password2" class="input" type="password" required minlength="6" autocomplete="new-password"></label></div>
+            <p class="dim small">Enter the 6-digit code received from admin and set a new password. Code is valid for 30 minutes.</p>
+            <label class="pro-label"><span>Username</span><input name="username" class="input pro-input" required autocapitalize="none"></label>
+            <label class="pro-label"><span>6-digit Code</span><input name="code" class="input mono pro-input" required inputmode="numeric" maxlength="8" placeholder="123456"></label>
+            <div class="two"><label class="pro-label"><span>New Password</span><input name="password" class="input pro-input" type="password" required minlength="6" autocomplete="new-password"></label><label class="pro-label"><span>Confirm Password</span><input name="password2" class="input pro-input" type="password" required minlength="6" autocomplete="new-password"></label></div>
             <div id="auth-msg" class="auth-msg ${msg ? msg.kind || '' : ''}">${msg ? esc(msg.text) : ''}</div>
-            <button class="btn primary big" type="submit">🔓 Password set karo</button>
+            <button class="btn primary big pro-submit" type="submit">Set New Password</button>
           </form>`}
-          <button class="link-btn" id="auth-back" style="margin-top:12px">← Login par wapas</button>
+          <button class="link-btn pro-link" id="auth-back" style="margin-top:12px">← Back to Login</button>
         </div>
       </div>
     </div>`;
@@ -194,15 +210,15 @@ window.FF = window.FF || {};
       const anim = FF.config.loginAnimation !== false;
       btn.disabled = true;
       btn.classList.add('busy');
-      btn.querySelector('.btn-label').textContent = mode === 'signup' ? 'Account ban raha hai…' : 'Login ho raha hai…';
+      btn.querySelector('.btn-label').textContent = mode === 'signup' ? 'Creating account...' : 'Authenticating...';
       if (progress) progress.hidden = !anim;
       msgEl.className = 'auth-msg'; msgEl.textContent = '';
       try {
         const out = await api(mode === 'signup' ? '/api/auth/signup' : '/api/auth/login', 'POST', data);
         if (out.pending) {
-          btn.disabled = false; btn.classList.remove('busy'); btn.querySelector('.btn-label').textContent = 'Create account';
+          btn.disabled = false; btn.classList.remove('busy'); btn.querySelector('.btn-label').textContent = 'Create Account';
           if (progress) progress.hidden = true;
-          showLogin('login', { kind: 'ok', text: out.message || 'Account ban gaya — admin approval ke baad login karo.' });
+          showLogin('login', { kind: 'ok', text: out.message || 'Account created — waiting for admin approval.' });
           return;
         }
         state.user = out.user; state.permissions = out.permissions || state.permissions; applySettings(out.settings);
@@ -216,7 +232,7 @@ window.FF = window.FF || {};
         msgEl.className = 'auth-msg err';
         msgEl.textContent = err.message;
         btn.disabled = false; btn.classList.remove('busy');
-        btn.querySelector('.btn-label').textContent = mode === 'signup' ? 'Create account' : 'Login';
+        btn.querySelector('.btn-label').textContent = mode === 'signup' ? 'Create Account' : 'Login to Dashboard';
         if (progress) progress.hidden = true;
         form.classList.remove('shake'); void form.offsetWidth; form.classList.add('shake');
       }
@@ -233,7 +249,7 @@ window.FF = window.FF || {};
       e.preventDefault();
       const data = Object.fromEntries(new FormData(ask).entries());
       const btn = ask.querySelector('button[type=submit]');
-      btn.disabled = true; btn.textContent = 'Bhej rahe hain…';
+      btn.disabled = true; btn.textContent = 'Sending...';
       try { const out = await api('/api/auth/forgot', 'POST', { username: data.username }); showForgot('ask', { kind: out.found ? 'ok' : 'warn', text: out.message }, out.help); }
       catch (err) { showForgot('ask', { kind: 'err', text: err.message }); }
     });
@@ -242,23 +258,22 @@ window.FF = window.FF || {};
       e.preventDefault();
       const data = Object.fromEntries(new FormData(rset).entries());
       const msgEl = U.$('#auth-msg', el);
-      if (data.password !== data.password2) { msgEl.className = 'auth-msg err'; msgEl.textContent = 'Dono passwords match nahi karte.'; return; }
+      if (data.password !== data.password2) { msgEl.className = 'auth-msg err'; msgEl.textContent = 'Passwords do not match.'; return; }
       const btn = rset.querySelector('button[type=submit]');
-      btn.disabled = true; btn.textContent = 'Set kar rahe hain…';
+      btn.disabled = true; btn.textContent = 'Setting...';
       try { const out = await api('/api/auth/reset', 'POST', { username: data.username, code: data.code, password: data.password }); showLogin('login', { kind: 'ok', text: out.message }); }
-      catch (err) { msgEl.className = 'auth-msg err'; msgEl.textContent = err.message; btn.disabled = false; btn.textContent = '🔓 Password set karo'; }
+      catch (err) { msgEl.className = 'auth-msg err'; msgEl.textContent = err.message; btn.disabled = false; btn.textContent = 'Set New Password'; }
     });
   }
 
-  // ---- "Welcome back" splash + toast -----------------------------------------------------------
   function splash(user) {
     return new Promise((resolve) => {
       const name = (user && (user.name || user.username)) || '';
-      const el = U.h(`<div class="welcome-splash" id="welcome-splash">
+      const el = U.h(`<div class="welcome-splash pro-splash" id="welcome-splash">
         <div class="welcome-inner">
           <div class="welcome-ring"><span>✓</span></div>
           <h2>Welcome back, <b>${esc(name)}</b>!</h2>
-          <p class="welcome-role">${user && user.role === 'admin' ? '👑 Admin access' : 'User access'} · dashboard load ho raha hai…</p>
+          <p class="welcome-role">${user && user.role === 'admin' ? '👑 Admin Access' : 'User Access'} • Loading dashboard...</p>
           <div class="welcome-bar"><i></i></div>
         </div>
       </div>`);
@@ -271,7 +286,7 @@ window.FF = window.FF || {};
   }
   function welcomeToast(user, first) {
     const name = (user && (user.name || user.username)) || '';
-    if (first) setTimeout(() => U.toast('👑 Aap pehle user ho — aap admin ban gaye', 'ok'), 500);
+    if (first) setTimeout(() => U.toast('👑 You are the first user — admin privileges granted', 'ok'), 500);
     setTimeout(() => U.toast(`Welcome back, ${name} 👋`, 'ok'), first ? 1200 : 400);
   }
 
@@ -283,7 +298,7 @@ window.FF = window.FF || {};
       if (me.user) { state.user = me.user; state.ready = true; return true; }
     } catch (err) {
       console.error(err);
-      screen(`<div class="auth-shell single"><div class="auth-panel"><div class="auth-card"><h2>Server se connect nahi hua</h2><p class="dim">${esc(err.message)}</p><button class="btn primary" onclick="location.reload()">Retry</button></div></div></div>`);
+      screen(`<div class="auth-shell single"><div class="auth-panel"><div class="auth-card"><h2>Unable to connect to server</h2><p class="dim">${esc(err.message)}</p><button class="btn primary" onclick="location.reload()">Retry</button></div></div></div>`);
       return false;
     }
     showLogin('login');
@@ -298,9 +313,8 @@ window.FF = window.FF || {};
   function onExpired() {
     if (!state.user) return;
     state.user = null;
-    showLogin('login', { kind: 'err', text: 'Session khatam ho gaya — dobara login karo.' });
+    showLogin('login', { kind: 'err', text: 'Session expired — please login again.' });
   }
-  /** Refresh cached user after a profile / avatar change. */
   async function refreshUser() {
     const me = await api('/api/auth/me');
     if (me.user) { state.user = me.user; applySettings(me.settings); }
