@@ -974,17 +974,19 @@ table.matrix tr.is-admin td.mx-user { background: #f8fafc; }
   .company-relation { flex-direction: column; align-items: flex-start; }
 }
 
-/* ---------- v4: ApnaPayment top big text no bg, partners below only text ---------- */
+/* ---------- v4.5: ApnaPayment centered, no partner boxes ---------- */
 .auth-visual.v4 { background: linear-gradient(160deg, #0f172a 0%, #1e1b4b 40%, #1e293b 100%); }
-.v4-inner { gap: 18px !important; padding: 26px !important; }
+.v4-inner { gap: 22px !important; padding: 28px !important; }
 .apna-top { text-align: left; padding: 16px 0 8px; border-bottom: 1px solid rgba(255,255,255,.08); }
-.apna-text-logo { font-size: 42px; font-weight: 900; letter-spacing: -.8px; color: #fff; line-height: 1; display: flex; align-items: center; gap: 2px; flex-wrap: wrap; }
+.apna-top.centered { text-align: center; padding: 22px 0 16px; border-bottom: 1px solid rgba(255,255,255,.1); display: flex; flex-direction: column; align-items: center; gap: 14px; width: 100%; }
+.apna-logo-wrap { display: flex; flex-direction: column; align-items: center; gap: 8px; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1); border-radius: 18px; padding: 18px 32px; backdrop-filter: blur(10px); box-shadow: 0 8px 32px rgba(0,0,0,.2); }
+.apna-text-logo { font-size: 46px; font-weight: 900; letter-spacing: -1px; color: #fff; line-height: 1; display: flex; align-items: center; justify-content: center; gap: 2px; flex-wrap: wrap; text-shadow: 0 2px 12px rgba(0,0,0,.3); }
 .apna-text-logo .apna-a { position: relative; color: #fff; display: inline-block; }
-.apna-text-logo .apna-a::after { content: ""; position: absolute; width: 8px; height: 8px; background: #FFFF00; border-radius: 50%; top: 7px; left: 50%; transform: translateX(-50%); box-shadow: 0 0 0 1px rgba(0,0,0,.15); }
-.apna-tri { font-size: 20px; color: #FFFF00 !important; margin-left: 10px; line-height: 1; filter: drop-shadow(0 0 8px rgba(255,255,0,.8)); animation: triPulse 2s ease infinite; display: inline-block; }
-@keyframes triPulse { 0%,100% { transform: scale(1); filter: drop-shadow(0 0 8px rgba(255,255,0,.6)); } 50% { transform: scale(1.15); filter: drop-shadow(0 0 14px rgba(255,255,0,.9)); } }
-.apna-sub { margin-top: 6px; font-size: 12px; font-weight: 700; color: #fde68a; letter-spacing: .12em; text-transform: uppercase; }
-.apna-company-label { margin-top: 8px; font-size: 11px; color: #94a3b8; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.08); padding: 5px 10px; border-radius: 999px; display: inline-block; }
+.apna-text-logo .apna-a::after { content: ""; position: absolute; width: 9px; height: 9px; background: #FFFF00; border-radius: 50%; top: 6px; left: 50%; transform: translateX(-50%); box-shadow: 0 0 0 1px rgba(0,0,0,.2), 0 0 8px rgba(255,255,0,.8); }
+.apna-tri { font-size: 22px; color: #FFFF00 !important; margin-left: 12px; line-height: 1; filter: drop-shadow(0 0 10px rgba(255,255,0,.9)); animation: triPulse 2s ease infinite; display: inline-block; }
+@keyframes triPulse { 0%,100% { transform: scale(1); filter: drop-shadow(0 0 8px rgba(255,255,0,.6)); } 50% { transform: scale(1.18); filter: drop-shadow(0 0 16px rgba(255,255,0,1)); } }
+.apna-sub { font-size: 12px; font-weight: 800; color: #fde68a; letter-spacing: .15em; text-transform: uppercase; }
+.apna-company-label { font-size: 11px; color: #94a3b8; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.08); padding: 7px 16px; border-radius: 999px; display: inline-block; text-align: center; line-height: 1.4; max-width: 100%; }
 
 .partners-row { display: flex; align-items: stretch; gap: 12px; margin-top: 4px; }
 .partner-box { flex: 1; background: #fff; border-radius: 14px; padding: 14px; display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; box-shadow: 0 6px 20px rgba(0,0,0,.18); border: 1px solid rgba(255,255,255,.2); transition: transform .2s, box-shadow .2s; }

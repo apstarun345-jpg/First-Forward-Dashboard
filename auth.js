@@ -71,42 +71,16 @@ window.FF = window.FF || {};
       <div class="pro-glow g1"></div>
       <div class="pro-glow g2"></div>
       <div class="auth-visual-inner pro-inner v4-inner">
-        <!-- ApnaPayment Company - Top, Only Text Big, No Background Color -->
-        <div class="apna-top">
-          <div class="apna-text-logo">
-            <span class="apna-a">A</span>pnaPayment
-            <span class="apna-tri" style="color:#FFFF00">▶</span>
-          </div>
-          <div class="apna-sub">Revolutionary Payment Solution</div>
-          <div class="apna-company-label">ApnaPayment Company - Powering FASTag Ecosystem</div>
-        </div>
-
-        <!-- Partners: GADIVAN GV Partner + FIRST forward Dashboard - Only Text Below Logos, No Background -->
-        <div class="partners-row">
-          <div class="partner-box gadivan-box no-bg">
-            <img src="./logos/gadivan-transparent.png" alt="GADIVAN" class="partner-logo transparent">
-            <div class="partner-text">
-              <b>GADIVAN</b>
-              <span>GV Partner</span>
+        <!-- ApnaPayment Company - Perfectly Centered, Professional, No Background -->
+        <div class="apna-top centered">
+          <div class="apna-logo-wrap">
+            <div class="apna-text-logo">
+              <span class="apna-a">A</span>pnaPayment
+              <span class="apna-tri">▶</span>
             </div>
+            <div class="apna-sub">Revolutionary Payment Solution</div>
           </div>
-          <div class="partner-divider">×</div>
-          <div class="partner-box fwd-box no-bg">
-            <img src="./logos/first-forward-transparent.png" alt="FIRST forward" class="partner-logo fwd transparent">
-            <div class="partner-text">
-              <b>FIRST forward</b>
-              <span>First Forward Dashboard</span>
-              <small>TOLL AND FUEL PAYMENT • IDFC First Forward</small>
-            </div>
-          </div>
-        </div>
-
-        <div class="company-relation">
-          <span class="rel-item"><i>🏢</i> ApnaPayment Company</span>
-          <span class="rel-sep">•</span>
-          <span class="rel-item"><i>🤝</i> GV Partner - GADIVAN</span>
-          <span class="rel-sep">•</span>
-          <span class="rel-item"><i>📊</i> First Forward Dashboard</span>
+          <div class="apna-company-label">ApnaPayment Company • Powering FASTag Ecosystem • GV Partner & First Forward Dashboard</div>
         </div>
         
         <h2 class="pro-title">Unified FASTag Intelligence Platform</h2>

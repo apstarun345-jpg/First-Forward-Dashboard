@@ -1,5 +1,5 @@
 // First Forward Dashboard — Service Worker for PWA + fast caching
-const CACHE_NAME = 'ff-dashboard-v4.4-pro-20260926b';
+const CACHE_NAME = 'ff-dashboard-v4.5-pro-20260926c';
 const ASSETS = [
   './',
   './index.html',
