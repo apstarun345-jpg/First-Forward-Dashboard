@@ -193,14 +193,92 @@ window.FF = window.FF || {};
     const msg = err && err.message ? err.message : String(err);
     return `<div class="error-box"><div class="error-title">⚠️ Data load nahi hua</div><div class="error-msg">${esc(msg)}</div>${retryAttr ? `<button class="btn" ${retryAttr}>Retry</button>` : ''}</div>`;
   }
-  function downloadCsv(filename, header, rows) {
-    const quote = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const csv = [header.map(quote).join(','), ...rows.map((r) => r.map(quote).join(','))].join('\r\n');
-    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
+  function downloadBlob(filename, blob) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = filename; document.body.appendChild(a); a.click();
     setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 800);
+  }
+  function downloadCsv(filename, header, rows) {
+    const quote = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const csv = [header.map(quote).join(','), ...rows.map((r) => r.map(quote).join(','))].join('\r\n');
+    downloadBlob(filename, new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }));
+  }
+  function tableToRows(table) {
+    return [...table.querySelectorAll('tr')].map((tr) => [...tr.children].map((td) => td.textContent.replace(/\s+/g, ' ').trim()));
+  }
+  function slug(text) { return String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'export'; }
+  function stamp() { return new Date().toISOString().slice(0, 10); }
+
+  // ---- sharing (WhatsApp / email / clipboard) --------------------------------
+  function phoneDigits(v) {
+    let d = String(v || '').replace(/\D/g, '');
+    if (!d || /^na$/i.test(String(v))) return '';
+    if (d.length === 10) d = '91' + d;
+    if (d.length === 11 && d.startsWith('0')) d = '91' + d.slice(1);
+    return d.length >= 11 && d.length <= 15 ? d : '';
+  }
+  function waLink(text, phone) {
+    const p = phoneDigits(phone);
+    return `https://wa.me/${p}?text=${encodeURIComponent(text)}`;
+  }
+  function mailLink(subject, body, to) {
+    return `mailto:${encodeURIComponent(to || '')}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  }
+  async function copyText(text) {
+    try { await navigator.clipboard.writeText(text); return true; } catch {
+      const ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select();
+      let ok = false; try { ok = document.execCommand('copy'); } catch { /* ignore */ } ta.remove(); return ok;
+    }
+  }
+
+  /** Autocomplete dropdown for a text input.
+      suggest(input, { items: () => [{ label, sub, value, kind, badge }], onPick(item), min: 1, max: 12, onClear })
+      Items are matched on label/sub/keywords (case-insensitive); Enter picks the highlighted one, Esc closes. */
+  function suggest(input, opts) {
+    const o = { min: 1, max: 12, ...opts };
+    const box = h('<div class="suggest" hidden role="listbox"></div>');
+    input.setAttribute('autocomplete', 'off');
+    input.setAttribute('spellcheck', 'false');
+    const holder = input.parentElement;
+    if (holder && getComputedStyle(holder).position === 'static') holder.style.position = 'relative';
+    (holder || document.body).appendChild(box);
+    let list = [], active = -1;
+    const norm = (s) => String(s || '').toLowerCase();
+    function close() { box.hidden = true; active = -1; }
+    function render() {
+      if (!list.length) { box.innerHTML = `<div class="suggest-empty">Koi match nahi</div>`; box.hidden = false; return; }
+      box.innerHTML = list.map((it, i) => `<div class="suggest-item ${i === active ? 'on' : ''}" data-i="${i}" role="option"><span class="suggest-kind ${esc(it.kind || '')}">${esc(it.kindLabel || it.kind || '')}</span><span class="suggest-main"><b>${esc(it.label)}</b>${it.sub ? `<small>${esc(it.sub)}</small>` : ''}</span>${it.badge ? `<span class="suggest-badge">${esc(it.badge)}</span>` : ''}</div>`).join('');
+      box.hidden = false;
+    }
+    function compute() {
+      const q = norm(input.value.trim());
+      if (q.length < o.min) { close(); return; }
+      const all = typeof o.items === 'function' ? o.items() : o.items || [];
+      const starts = [], contains = [];
+      for (const it of all) {
+        const hay = norm(`${it.label} ${it.sub || ''} ${it.keywords || ''}`);
+        if (!hay.includes(q)) continue;
+        (norm(it.label).startsWith(q) ? starts : contains).push(it);
+        if (starts.length >= o.max) break;
+      }
+      list = starts.concat(contains).slice(0, o.max);
+      active = list.length ? 0 : -1;
+      render();
+    }
+    function pick(i) { const it = list[i]; if (!it) return; input.value = it.inputValue !== undefined ? it.inputValue : it.label; close(); o.onPick && o.onPick(it); }
+    input.addEventListener('input', debounce(compute, 80));
+    input.addEventListener('focus', () => { if (input.value.trim().length >= o.min) compute(); });
+    input.addEventListener('keydown', (e) => {
+      if (box.hidden) { if (e.key === 'Enter' && o.onEnter) { o.onEnter(input.value.trim()); } return; }
+      if (e.key === 'ArrowDown') { e.preventDefault(); active = Math.min(list.length - 1, active + 1); render(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); active = Math.max(0, active - 1); render(); }
+      else if (e.key === 'Enter') { e.preventDefault(); if (active >= 0) pick(active); else if (o.onEnter) { close(); o.onEnter(input.value.trim()); } }
+      else if (e.key === 'Escape') close();
+    });
+    box.addEventListener('mousedown', (e) => { const it = e.target.closest('.suggest-item'); if (it) { e.preventDefault(); pick(Number(it.dataset.i)); } });
+    document.addEventListener('click', (e) => { if (!box.contains(e.target) && e.target !== input) close(); });
+    return { close, refresh: compute, destroy: () => box.remove() };
   }
   function colLetter(index) {
     let s = '';
@@ -244,6 +322,7 @@ window.FF = window.FF || {};
     MONTHS, MONTHS_LONG, DAYS, pad2, parseDate, parseMonthKey, ymKey, dateKey, fromDateKey, ymParts, labelYM, labelDate, labelDateKey,
     weekday, daysInMonth, prevMonthKey, nextMonthKey, weekStart, timeLabel,
     sum, groupSum, topEntries, sortBy, uniq,
-    $, $$, h, debounce, toast, spinner, errorBox, downloadCsv, colLetter, colIndex, initTooltip
+    $, $$, h, debounce, toast, spinner, errorBox, downloadBlob, downloadCsv, tableToRows, slug, stamp, colLetter, colIndex, initTooltip,
+    phoneDigits, waLink, mailLink, copyText, suggest
   };
 })(window.FF);

@@ -5,8 +5,10 @@ window.FF = window.FF || {};
   const U = FF.util;
   const D = FF.data;
 
+  // Normalise a class cell: EIR has "VC4", StockDataa has "4" → both become "VC4".
+  const normClass = (raw) => { const c = U.clean(raw).toUpperCase(); if (!c) return 'NA'; return /^\d+$/.test(c) ? `VC${c}` : c; };
   const classGroup = (cls) => {
-    const c = U.clean(cls).toUpperCase();
+    const c = normClass(cls);
     if (c === 'VC4') return 'VC4';
     if (c === 'VC20') return 'VC20';
     return 'VC5+';
@@ -37,7 +39,7 @@ window.FF = window.FF || {};
       const d = D.cellDate(r[0]);
       const n = D.cellNumber(r[5]);
       if (!d || !n) continue;
-      const cls = D.cellText(r[1]).toUpperCase() || 'NA';
+      const cls = normClass(D.cellText(r[1]));
       rows.push({
         key: U.dateKey(d), d, ym: U.ymKey(d), day: d.getDate(), cls, group: classGroup(cls),
         type: D.cellText(r[2]).toUpperCase() || 'ISSUANCE', vrnType: D.cellText(r[3]),
@@ -84,8 +86,7 @@ window.FF = window.FF || {};
     const tq = `select ${s.cls}, ${s.tlName}, count(${s.tagId}) where ${s.tagId} is not null group by ${s.cls}, ${s.tlName}`;
     const t = await D.query(s.sheet, tq, opts);
     return t.rows.map((r) => {
-      const raw = D.cellText(r[0]);
-      const cls = raw ? (/^\d+$/.test(raw) ? `VC${raw}` : raw.toUpperCase()) : 'NA';
+      const cls = normClass(D.cellText(r[0]));
       return { cls, group: classGroup(cls), tlName: D.cellText(r[1]) || '—', n: D.cellNumber(r[2]) || 0 };
     });
   }
@@ -97,8 +98,51 @@ window.FF = window.FF || {};
     const t = await D.query(s.sheet, tq, opts);
     return t.rows.map((r) => {
       const raw = D.cellText(r[3]);
-      const cls = raw ? (/^\d+$/.test(raw) ? `VC${raw}` : raw.toUpperCase()) : 'NA';
+      const cls = normClass(raw);
       return { agentId: D.cellText(r[0]), agentName: D.cellText(r[1]) || '—', tlName: D.cellText(r[2]) || '—', cls, group: classGroup(cls), n: D.cellNumber(r[4]) || 0 };
+    });
+  }
+
+  /** Agent × TL × month × class group: [{ id, name, tlName, channel, ym, group, type, n }] — powers
+      the VC4 / VC20 / VC5+ last-vs-current comparison for any agent or TL without extra queries. */
+  async function loadAgentClassMonthly(opts) {
+    const e = FF.config.eir;
+    const tq = `select ${e.agentName}, ${e.gvName}, ${e.tlName}, ${e.masterId}, year(${e.date}), month(${e.date}), ${e.cls}, ${e.type}, count(${e.tagId}) where ${e.date} is not null group by ${e.agentName}, ${e.gvName}, ${e.tlName}, ${e.masterId}, year(${e.date}), month(${e.date}), ${e.cls}, ${e.type}`;
+    const t = await D.query(e.sheet, tq, opts);
+    const rows = [];
+    for (const r of t.rows) {
+      const y = D.cellNumber(r[4]), m = D.cellNumber(r[5]), n = D.cellNumber(r[8]);
+      if (y === null || m === null || !n) continue;
+      const agentName = D.cellText(r[0]), gvName = D.cellText(r[1]), tlName = D.cellText(r[2]) || '—';
+      const cls = normClass(D.cellText(r[6]));
+      rows.push({ name: agentName || gvName || 'Unknown', tlName, channel: channelOf(D.cellText(r[3]), tlName), ym: `${y}-${U.pad2(m + 1)}`, cls, group: classGroup(cls), type: D.cellText(r[7]).toUpperCase() || 'ISSUANCE', n });
+    }
+    return rows;
+  }
+
+  /** Raw StockDataa rows for one agent / TL / class (used for Excel export). Returns { header, rows } */
+  async function loadStockRows(filter, opts) {
+    const s = FF.config.stock;
+    const parts = [`${s.tagId} is not null`];
+    if (filter.agent) parts.push(`${s.agentName} = ${D.lit(filter.agent)}`);
+    if (filter.agentId) parts.push(`${s.agentId} = ${D.lit(filter.agentId)}`);
+    if (filter.tl) parts.push(`${s.tlName} = ${D.lit(filter.tl)}`);
+    if (filter.cls) parts.push(`${s.cls} = ${D.lit(String(filter.cls).replace(/^VC/i, ''))}`);
+    const tq = `select * where ${parts.join(' and ')}${filter.limit ? ` limit ${filter.limit}` : ''}`;
+    const t = await D.query(s.sheet, tq, opts);
+    const header = t.cols.map((c, i) => c.label || U.colLetter(i));
+    return { header, rows: D.textRows(t), cols: t.cols };
+  }
+
+  /** Stock per agent × tag type × class (for the agent pivot). */
+  async function loadStockAgentTypes(opts) {
+    const s = FF.config.stock;
+    const tq = `select ${s.agentId}, ${s.agentName}, ${s.tlName}, ${s.cls}, ${s.tagType}, count(${s.tagId}) where ${s.tagId} is not null group by ${s.agentId}, ${s.agentName}, ${s.tlName}, ${s.cls}, ${s.tagType}`;
+    const t = await D.query(s.sheet, tq, opts);
+    return t.rows.map((r) => {
+      const raw = D.cellText(r[3]);
+      const cls = normClass(raw);
+      return { agentId: D.cellText(r[0]), agentName: D.cellText(r[1]) || '—', tlName: D.cellText(r[2]) || '—', cls, group: classGroup(cls), tagType: D.cellText(r[4]) || '—', n: D.cellNumber(r[5]) || 0 };
     });
   }
 
@@ -153,5 +197,5 @@ window.FF = window.FF || {};
     return map;
   }
 
-  FF.model = { classGroup, channelOf, loadDaily, loadAgents, loadStatus, loadStock, loadStockAgents, months, latestDate, dailySeries, summary, byDim };
+  FF.model = { classGroup, channelOf, loadDaily, loadAgents, loadStatus, loadStock, loadStockAgents, loadAgentClassMonthly, loadStockRows, loadStockAgentTypes, months, latestDate, dailySeries, summary, byDim };
 })(window.FF);

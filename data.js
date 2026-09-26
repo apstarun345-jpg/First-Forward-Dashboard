@@ -6,7 +6,7 @@ window.FF = window.FF || {};
 (function (FF) {
   'use strict';
   const U = FF.util;
-  const TTL_MS = 5 * 60 * 1000;
+  const TTL_MS = Infinity; // no auto expiry — data stays until the ↻ button / browser reload
   const cache = new Map(); // key → { t, promise }
   let lastLoadAt = null;
   let lastSource = '';
@@ -78,6 +78,7 @@ window.FF = window.FF || {};
       if (!res.ok) {
         let detail = '';
         try { detail = JSON.parse(text).error || ''; } catch (e) { /* ignore */ }
+        if (res.status === 401 && !url.startsWith('http')) { const e = new Error('Login required'); e.name = 'AuthError'; throw e; }
         throw new Error(`HTTP ${res.status}${detail ? ' – ' + detail : ''}`);
       }
       return { text, source: res.headers.get('x-ff-source') || (url.startsWith('http') ? 'direct' : 'proxy'), cached: res.headers.get('x-cache') === 'HIT' };
@@ -96,7 +97,7 @@ window.FF = window.FF || {};
 
     const attempts = [];
     if (FF.config.proxyPath && FF.config.proxy !== false) attempts.push(buildUrl(FF.config.proxyPath, sheetName, tq, gid, o.fresh ? { fresh: '1' } : null));
-    attempts.push(buildUrl(directBase(), sheetName, tq, gid));
+    if (FF.config.directFallback !== false) attempts.push(buildUrl(directBase(), sheetName, tq, gid));
 
     const promise = (async () => {
       let lastErr = null;
@@ -112,6 +113,7 @@ window.FF = window.FF || {};
         } catch (err) {
           lastErr = err;
           if (err instanceof QueryError) break; // same query would fail directly too
+          if (err.name === 'AuthError') { if (FF.auth && FF.auth.onExpired) FF.auth.onExpired(); break; }
         }
       }
       throw lastErr || new Error('Fetch failed');

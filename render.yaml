@@ -10,5 +10,16 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "20"
+      # Server-side cache of Google responses (seconds). Data still only refreshes when a user clicks ↻ / reloads.
       - key: CACHE_SECONDS
-        value: "120"
+        value: "600"
+      # Admin bootstrap — set these in the Render dashboard (kept out of git). Without them the first start
+      # creates admin / admin123 (forced password change on first login).
+      - key: ADMIN_USER
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      # Where users / sessions / settings JSON live. On the free plan the disk is ephemeral — attach a
+      # persistent disk and point DATA_DIR at it, or use Settings → Backup to export/import.
+      - key: DATA_DIR
+        value: "./data"

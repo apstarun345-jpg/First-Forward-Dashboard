@@ -1,0 +1,4 @@
+node_modules/
+# runtime store (users, sessions, settings) — never commit
+data/
+.DS_Store

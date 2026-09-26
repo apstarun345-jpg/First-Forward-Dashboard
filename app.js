@@ -1,17 +1,17 @@
-/* App shell: sidebar, hash router, drawer, global actions, auto-refresh. */
+/* App shell: login gate, sidebar (permission aware), hash router, drawer, global actions.
+   Data is preloaded once after login (FF.store.preload) — no auto refresh; ↻ button = fresh data from Google. */
 window.FF = window.FF || {};
 (function (FF) {
   'use strict';
   const U = FF.util;
   const esc = U.esc;
   const ANALYTICS = [
-    { id: 'dashboard', icon: '📊', label: 'Dashboard', desc: 'KPIs & charts' },
-    { id: 'trend', icon: '📈', label: 'Trend', desc: 'Daily · Monthly · Last vs Current' },
-    { id: 'performance', icon: '🏆', label: 'Performance', desc: 'Agents & TLs (REPORT)' },
-    { id: 'stock', icon: '📦', label: 'Stock', desc: 'Inventory (StockDataa)' }
+    { id: 'dashboard', icon: '📊', label: 'Dashboard', desc: 'KPIs & charts', perm: 'dashboard' },
+    { id: 'trend', icon: '📈', label: 'Trend', desc: 'Daily · Monthly · Last vs Current', perm: 'trend' },
+    { id: 'performance', icon: '🏆', label: 'Performance', desc: 'Agents & TLs (REPORT)', perm: 'performance' },
+    { id: 'stock', icon: '📦', label: 'Stock', desc: 'Search · pivot · Excel (StockDataa)', perm: 'stock' }
   ];
   let current = { page: '', params: {}, token: 0 };
-  let refreshTimer = null;
 
   function parseHash() {
     const raw = location.hash.replace(/^#\/?/, '');
@@ -19,9 +19,9 @@ window.FF = window.FF || {};
     const segs = pathPart.split('/').filter(Boolean).map(decodeURIComponent);
     const params = {};
     new URLSearchParams(queryPart || '').forEach((v, k) => { params[k] = v; });
-    let page = segs[0] || 'dashboard';
+    let page = segs[0] || firstAllowedPage();
     if (page === 'sheet') { params.name = segs.slice(1).join('/'); }
-    if (!FF.pages[page]) page = 'dashboard';
+    if (!FF.pages[page]) page = firstAllowedPage();
     return { page, params };
   }
   function buildHash(page, params) {
@@ -35,12 +35,32 @@ window.FF = window.FF || {};
   }
   function navigate(page, params) { location.hash = buildHash(page, params || {}); }
   function updateParams(patch) { navigate(current.page, { ...current.params, ...patch }); }
+  function pagePerm(page, params) {
+    if (page === 'sheet') return `sheet:${(params && params.name) || ''}`;
+    if (page === 'settings') return null; // every logged-in user gets "My account"; admin sections are gated inside
+    const a = ANALYTICS.find((x) => x.id === page);
+    return a ? a.perm : null;
+  }
+  function allowed(page, params) { const perm = pagePerm(page, params); return !perm || FF.auth.can(perm); }
+  function firstAllowedPage() {
+    const a = ANALYTICS.find((x) => FF.auth.can(x.perm));
+    if (a) return a.id;
+    const s = FF.config.sheets.find((x) => FF.auth.can(`sheet:${x.name}`));
+    return s ? 'sheet' : 'settings';
+  }
 
   function renderSidebar() {
     const nav = U.$('#nav');
-    const sheets = FF.config.sheets;
-    nav.innerHTML = `<div class="nav-sec">Analytics</div>${ANALYTICS.map((a) => `<a class="nav-item" data-page="${a.id}" href="#/${a.id}"><span class="nav-ico">${a.icon}</span><span class="nav-text"><b>${a.label}</b><small>${a.desc}</small></span></a>`).join('')}
-      <div class="nav-sec">Sheets <span class="nav-count">${sheets.length}</span></div>${sheets.map((s) => `<a class="nav-item sheet" data-page="sheet" data-name="${esc(s.name)}" href="#/sheet/${encodeURIComponent(s.name)}"><span class="nav-ico">${s.icon || '📄'}</span><span class="nav-text"><b>${esc(s.name)}</b><small>${esc(s.desc || '')}</small></span>${s.big ? '<span class="nav-pill">big</span>' : ''}</a>`).join('')}`;
+    const sheets = FF.config.sheets.filter((s) => FF.auth.can(`sheet:${s.name}`));
+    const pages = ANALYTICS.filter((a) => FF.auth.can(a.perm));
+    const u = FF.auth.user;
+    nav.innerHTML = `${pages.length ? `<div class="nav-sec">Analytics</div>${pages.map((a) => `<a class="nav-item" data-page="${a.id}" href="#/${a.id}"><span class="nav-ico">${a.icon}</span><span class="nav-text"><b>${a.label}</b><small>${a.desc}</small></span></a>`).join('')}` : ''}
+      ${sheets.length ? `<div class="nav-sec">Sheets <span class="nav-count">${sheets.length}</span></div>${sheets.map((s) => `<a class="nav-item sheet" data-page="sheet" data-name="${esc(s.name)}" href="#/sheet/${encodeURIComponent(s.name)}"><span class="nav-ico">${s.icon || '📄'}</span><span class="nav-text"><b>${esc(s.name)}</b><small>${esc(s.desc || '')}</small></span>${s.big ? '<span class="nav-pill">big</span>' : ''}</a>`).join('')}` : ''}
+      <div class="nav-sec">Account</div>
+      <a class="nav-item" data-page="settings" href="#/settings"><span class="nav-ico">⚙️</span><span class="nav-text"><b>Settings</b><small>${u && u.role === 'admin' ? 'Branding · data · users · access' : 'My account'}</small></span></a>`;
+    const foot = U.$('#user-box');
+    if (foot && u) foot.innerHTML = `<div class="user-chip"><span class="user-avatar">${esc((u.name || u.username).slice(0, 1).toUpperCase())}</span><span class="user-text"><b>${esc(u.name || u.username)}</b><small>${u.role === 'admin' ? '👑 Admin' : 'User'}</small></span><button class="icon-btn small" id="logout-btn" title="Logout">⎋</button></div>`;
+    const lb = U.$('#logout-btn'); if (lb) lb.addEventListener('click', () => FF.auth.logout());
   }
   function markActive() {
     U.$$('#nav .nav-item').forEach((a) => {
@@ -63,6 +83,10 @@ window.FF = window.FF || {};
     root.className = `page page-${page}`;
     main.replaceChildren(root);
     main.scrollTop = 0; window.scrollTo(0, 0);
+    if (!allowed(page, params)) {
+      root.innerHTML = `<div class="empty-state">🔒 Is page ka access aapke account me nahi hai.<br><small class="dim">Admin se "${esc(pagePerm(page, params) || page)}" permission maango.</small></div>`;
+      return;
+    }
     try {
       await FF.pages[page].render(root, params, ctx || {});
     } catch (err) {
@@ -71,42 +95,71 @@ window.FF = window.FF || {};
     }
     if (token === current.token) updateStatus();
   }
-  function updateStatus() {
+  function updateStatus(progress) {
     const el = U.$('#status');
-    const t = FF.data.lastLoadAt;
-    el.innerHTML = t ? `<span class="dot live"></span> Live · updated ${U.timeLabel(t)}${FF.data.lastSource === 'direct' ? ' · direct' : ''}` : '<span class="dot"></span> Connecting…';
+    if (!el) return;
+    const st = FF.store.state;
+    if (st.loading) { const p = progress || st.progress; el.innerHTML = `<span class="dot busy"></span> Loading ${p.done}/${p.total}…`; return; }
+    const t = FF.store.loadedAt;
+    const errs = Object.keys(st.errors || {}).length;
+    el.innerHTML = t ? `<span class="dot ${errs ? 'warn' : 'live'}"></span> Data ${U.timeLabel(t)}${errs ? ` · ${errs} failed` : ''}` : '<span class="dot"></span> Ready';
+    const btn = U.$('#top-refresh'); if (btn) btn.classList.remove('spin');
   }
-  function refresh() {
-    FF.data.clearCache();
-    U.toast('Google Sheet se fresh data la rahe hain…');
-    renderCurrent({ fresh: true });
+  let refreshing = false;
+  async function refresh() {
+    if (refreshing) return;
+    refreshing = true;
+    const fresh = FF.auth.can('refresh');
+    U.toast(fresh ? 'Google Sheet se fresh data la rahe hain…' : 'Data reload ho raha hai…');
+    const btn = U.$('#top-refresh'); if (btn) btn.classList.add('spin');
+    try {
+      if (FF.pages.performance && FF.pages.performance.reset) FF.pages.performance.reset();
+      await FF.store.preload(true);
+    } catch (err) { console.error(err); }
+    refreshing = false;
+    await renderCurrent({ fresh });
+    U.toast('Data updated ✓', 'ok');
   }
 
   // ---- drawer -------------------------------------------------------------------
-  function openDrawer({ kicker, title, sub, body }) {
+  function openDrawer({ kicker, title, sub, body, actions }) {
     U.$('#drawer-kicker').textContent = kicker || '';
     U.$('#drawer-title').textContent = title || '';
     U.$('#drawer-sub').innerHTML = sub || '';
+    U.$('#drawer-actions').innerHTML = actions || '';
     U.$('#drawer-body').innerHTML = body || '';
     U.$('#drawer').classList.add('open');
     U.$('#drawer-backdrop').hidden = false;
     document.body.classList.add('no-scroll');
+    U.$('#drawer-body').scrollTop = 0;
+    if (FF.charts && FF.charts.mount) FF.charts.mount(U.$('#drawer-body'));
   }
   function closeDrawer() {
     U.$('#drawer').classList.remove('open');
     U.$('#drawer-backdrop').hidden = true;
     document.body.classList.remove('no-scroll');
   }
-  function openSidebar() { document.body.classList.add('side-open'); }
   function closeSidebar() { document.body.classList.remove('side-open'); }
 
   function exportCard(btn) {
+    if (!FF.auth.can('export')) { U.toast('Download permission nahi hai', 'err'); return; }
     const card = btn.closest('.card') || document;
     const table = card.querySelector('table');
     if (!table) return;
-    const rows = [...table.querySelectorAll('tr')].map((tr) => [...tr.children].map((td) => td.textContent.replace(/\s+/g, ' ').trim()));
-    U.downloadCsv(`${btn.dataset.name || 'export'}.csv`, rows[0] || [], rows.slice(1));
+    const rows = U.tableToRows(table);
+    U.downloadCsv(`${btn.dataset.name || 'export'}-${U.stamp()}.csv`, rows[0] || [], rows.slice(1));
     U.toast('CSV downloaded');
+  }
+  /** Share helper: data-share="wa|mail|copy" with data-text (and optional data-phone / data-subject / data-to) */
+  async function share(el) {
+    if (!FF.auth.can('share')) { U.toast('Share permission nahi hai', 'err'); return; }
+    const text = el.dataset.text || '';
+    const kind = el.dataset.share;
+    if (kind === 'copy') { await U.copyText(text); U.toast('Copied ✓', 'ok'); return; }
+    if (kind === 'mail') { location.href = U.mailLink(el.dataset.subject || FF.config.appName, text, el.dataset.to || FF.config.contacts.teamEmail); return; }
+    await U.copyText(text);
+    window.open(U.waLink(text, el.dataset.phone || ''), '_blank', 'noopener');
+    U.toast('Message copied — WhatsApp khul raha hai');
   }
 
   function bind() {
@@ -118,12 +171,15 @@ window.FF = window.FF || {};
     U.$('#drawer-backdrop').addEventListener('click', closeDrawer);
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeDrawer(); closeSidebar(); } });
     document.addEventListener('click', (e) => {
+      const sh = e.target.closest('[data-share]');
+      if (sh) { e.preventDefault(); share(sh); return; }
       const act = e.target.closest('[data-action]');
       if (act) {
         const a = act.dataset.action;
         if (a === 'refresh') refresh();
         else if (a === 'export') exportCard(act);
         else if (a === 'clear-filters') updateParams({ tl: '', agent: '' });
+        else if (a === 'close-drawer') closeDrawer();
         return;
       }
       const link = e.target.closest('[data-link]');
@@ -137,106 +193,27 @@ window.FF = window.FF || {};
       const el = e.target.closest('select[data-param], input[data-param]');
       if (el) updateParams({ [el.dataset.param]: el.value, ...(el.dataset.param === 'tl' ? { agent: '' } : {}), ...(el.dataset.param === 'agent' ? { tl: '' } : {}) });
     });
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible' && FF.data.lastLoadAt && Date.now() - FF.data.lastLoadAt > FF.config.autoRefreshMs) refresh();
-    });
-    refreshTimer = setInterval(() => {
-      if (document.visibilityState === 'visible' && current.page !== 'sheet') { FF.data.clearCache(); renderCurrent({ fresh: true, auto: true }); }
-    }, FF.config.autoRefreshMs);
+    FF.store.on((ev, detail) => { if (ev === 'progress' || ev === 'start' || ev === 'done') updateStatus(detail); });
   }
 
-  /* ---------- Project ZIP + setup guide (only when the server was started with DOWNLOAD_ZIP) ---------- */
-  function fmtBytes(n) { return n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`; }
-
-  function setupGuideHtml(dl) {
-    const esc = U.esc || ((v) => String(v));
-    return `
-      <div class="dl-card">
-        <a class="btn primary big" href="${esc(dl.url)}" download="${esc(dl.name)}" target="_blank" rel="noopener" id="zip-download-link">⬇️ Download ${esc(dl.name)}</a>
-        <div class="dl-meta">${fmtBytes(dl.size)} · poora project (server + website) · koi dependency nahi</div>
-        <div class="dl-meta">Download na chale to ye link nayi tab mein kholo:<br><code class="dl-url">${esc(location.origin + dl.url)}</code></div>
-      </div>
-      <div class="guide">
-        <div class="dsec"><h4>Step 1 · ZIP download & extract</h4>
-          <ol>
-            <li>Upar wale button se ZIP download karo aur <b>extract</b> karo → folder <code>first-forward-dashboard</code> milega (andar <code>server.js</code>, <code>index.html</code>, <code>config.js</code>, <code>app.js</code> …).</li>
-          </ol>
-        </div>
-        <div class="dsec"><h4>Step 2 · GitHub par repository</h4>
-          <ol>
-            <li><a href="https://github.com/new" target="_blank" rel="noopener">github.com/new</a> kholo → Repository name <code>First-Forward-Dashboard</code> → Public ya Private (dono chalega) → <b>Create repository</b>.</li>
-            <li>Nayi repo ke page par <b>"uploading an existing file"</b> link par click karo.</li>
-            <li>Extracted folder <b>ke andar</b> ki saari files/folders (<code>js</code> folder samet) drag-drop karo → <b>Commit changes</b>. <small>(Folder ko poora drag karoge to structure apne aap sahi rahega. <code>.gitignore</code> hidden hai — upload na ho to koi dikkat nahi.)</small></li>
-          </ol>
-          <details><summary>Git command line se karna ho to</summary>
-<pre>cd first-forward-dashboard
-git init
-git add .
-git commit -m "First Forward Dashboard"
-git branch -M main
-git remote add origin https://github.com/&lt;your-username&gt;/First-Forward-Dashboard.git
-git push -u origin main</pre></details>
-        </div>
-        <div class="dsec"><h4>Step 3 · Render par deploy (free)</h4>
-          <ol>
-            <li><a href="https://dashboard.render.com" target="_blank" rel="noopener">dashboard.render.com</a> → <b>Sign in with GitHub</b>.</li>
-            <li><b>New +</b> → <b>Blueprint</b> → apni <code>First-Forward-Dashboard</code> repo select karo → <b>Apply</b>. (Repo mein <code>render.yaml</code> hai, settings khud bhar jaayengi.)</li>
-            <li>Ya manual: <b>New +</b> → <b>Web Service</b> → repo connect →
-              <table class="kv">
-                <tr><td>Runtime</td><td><code>Node</code></td></tr>
-                <tr><td>Build Command</td><td><i>blank chhod do</i></td></tr>
-                <tr><td>Start Command</td><td><code>npm start</code></td></tr>
-                <tr><td>Instance Type</td><td><code>Free</code></td></tr>
-              </table>
-            </li>
-            <li>1–2 min mein live: <code>https://first-forward-dashboard.onrender.com</code> (naam aap choose karoge).</li>
-          </ol>
-        </div>
-        <div class="dsec"><h4>Step 4 · Zaroori baatein</h4>
-          <ol>
-            <li>Google Sheet ki sharing <b>"Anyone with the link → Viewer"</b> rehni chahiye (abhi hai). Sheet update → website 2 min mein update.</li>
-            <li>Password lagana ho: Render → service → <b>Environment</b> → <code>DASH_PASSWORD</code> = apna password (user: <code>admin</code>).</li>
-            <li>Free plan par 15 min idle ke baad pehla open 30–50 sec leta hai — normal hai.</li>
-            <li>Website mein badlaav (naya tab, column shift): sirf <code>config.js</code> edit karke GitHub par replace karo → Render auto-deploy.</li>
-          </ol>
-        </div>
-      </div>`;
-  }
-
-  async function setupDownload() {
-    try {
-      const res = await fetch('/api/health', { cache: 'no-store' });
-      if (!res.ok) return;
-      const health = await res.json();
-      const dl = health && health.download;
-      if (!dl || !dl.url) return;
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.id = 'zip-btn';
-      btn.className = 'btn primary zip-btn';
-      btn.title = 'Project ZIP download + GitHub/Render steps';
-      btn.innerHTML = '⬇️ <span>Download ZIP</span>';
-      btn.addEventListener('click', () => openDrawer({
-        kicker: 'Project files',
-        title: 'First Forward Dashboard — ZIP',
-        sub: 'ZIP download karo → GitHub par upload → Render par deploy. Neeche poore steps hain.',
-        body: setupGuideHtml(dl)
-      }));
-      U.$('#top-actions').prepend(btn);
-      if (location.hash === '#setup' || location.search.includes('setup=1')) btn.click();
-    } catch { /* static hosting / offline → no button */ }
-  }
-
-  function init() {
-    U.$('#brand-name').textContent = FF.config.brand;
-    U.$('#sheet-link').href = FF.config.sheetUrl();
+  function onLogin(first) {
     renderSidebar();
+    FF.auth.applyTheme();
+    document.body.classList.add('ready');
+    FF.store.preload(false).catch(() => {});
+    renderCurrent();
+    const u = FF.auth.user;
+    if (u && u.mustChangePassword) setTimeout(() => U.toast('⚠️ Default password chal raha hai — Settings → My account se badlo', 'err'), 800);
+    if (first) setTimeout(() => U.toast('👑 Aap pehle user ho — aap admin ban gaye', 'ok'), 400);
+  }
+
+  async function init() {
     U.initTooltip();
     bind();
-    renderCurrent();
-    setupDownload();
+    const ok = await FF.auth.init();
+    if (ok) onLogin(false);
   }
 
-  FF.app = { navigate, updateParams, refresh, openDrawer, closeDrawer, get current() { return current; } };
+  FF.app = { navigate, updateParams, refresh, openDrawer, closeDrawer, renderSidebar, renderCurrent, onLogin, get current() { return current; } };
   document.addEventListener('DOMContentLoaded', init);
 })(window.FF);
