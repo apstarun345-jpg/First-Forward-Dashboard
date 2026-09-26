@@ -1,14 +1,14 @@
-/* App shell: login gate, sidebar (grouped + permission aware), top-right user menu, hash router, drawer.
-   Data is preloaded once after login (FF.store + FF.gv) — no auto refresh; ↻ = fresh data from Google. */
+/* App shell: login gate, sidebar, topbar with PWA install + user menu v2, hash router, drawer.
+   Data: FF.store + FF.gv preloaded on login, plus FF.preloader for all sheets in background — instant sheet open. */
 window.FF = window.FF || {};
 (function (FF) {
   'use strict';
   const U = FF.util;
   const esc = U.esc;
 
-  // Pages registry — `group` decides the sidebar section, `perm` the access key.
   const PAGES = [
-    { id: 'home', icon: '🏠', label: 'Home', desc: 'Greeting · overview · shortcuts', perm: 'home', group: 'Main' },
+    { id: 'home', icon: '🏠', label: 'Home', desc: 'Highlights · GV & FF charts', perm: 'home', group: 'Main' },
+    { id: 'tagIssued', icon: '🏷️', label: 'GV & FF Tag Issued', desc: 'Date-wise detailed issuance · VC4 vs Commercial', perm: 'tagIssued', group: 'Main' },
     { id: 'dashboard', icon: '📊', label: 'Dashboard', desc: 'KPIs & charts (EIR)', perm: 'dashboard', group: 'First Forward' },
     { id: 'trend', icon: '📈', label: 'Trend', desc: 'Daily · Monthly · Last vs Current', perm: 'trend', group: 'First Forward' },
     { id: 'performance', icon: '🏆', label: 'Performance', desc: 'Agents & TLs (REPORT)', perm: 'performance', group: 'First Forward' },
@@ -31,7 +31,7 @@ window.FF = window.FF || {};
     new URLSearchParams(queryPart || '').forEach((v, k) => { params[k] = v; });
     let page = segs[0] || firstAllowedPage();
     if (page === 'sheet') { params.name = segs.slice(1).join('/'); }
-    if (!FF.pages[page]) { const alias = { gvPartner: 'gvDashboard', comparison: 'compare', gvd: 'gvDashboard' }; page = alias[page] || firstAllowedPage(); }
+    if (!FF.pages[page]) { const alias = { gvPartner: 'gvDashboard', comparison: 'compare', gvd: 'gvDashboard', tagIssued: 'tagIssued', 'gv-ff': 'tagIssued' }; page = alias[page] || firstAllowedPage(); }
     return { page, params };
   }
   function buildHash(page, params) {
@@ -47,7 +47,7 @@ window.FF = window.FF || {};
   function updateParams(patch) { navigate(current.page, { ...current.params, ...patch }); }
   function pagePerm(page, params) {
     if (page === 'sheet') return `sheet:${(params && params.name) || ''}`;
-    if (page === 'settings') return null; // every logged-in user gets "My account"; admin sections are gated inside
+    if (page === 'settings') return null;
     const p = pageDef(page);
     return p ? p.perm : null;
   }
@@ -61,7 +61,7 @@ window.FF = window.FF || {};
     return s ? 'sheet' : 'settings';
   }
 
-  // ---- sidebar ----------------------------------------------------------------------------------
+  // ---- sidebar ----
   function navItem(id, icon, label, desc, active, href) {
     return `<a class="nav-item ${active ? 'active' : ''}" data-page="${id}" href="${href}"><span class="nav-ico">${icon}</span><span class="nav-text"><b>${esc(label)}</b><small>${esc(desc || '')}</small></span></a>`;
   }
@@ -93,7 +93,45 @@ window.FF = window.FF || {};
     renderTopUser();
   }
 
-  // ---- top-right user menu ----------------------------------------------------------------------
+  // ---- PWA install ----
+  let deferredPrompt = null;
+  let pwaInstalled = false;
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+    updateInstallBtn();
+  });
+  window.addEventListener('appinstalled', () => {
+    pwaInstalled = true;
+    deferredPrompt = null;
+    updateInstallBtn();
+    U.toast('App installed ✓ — ab home screen se kholo', 'ok');
+  });
+  function updateInstallBtn() {
+    const btn = U.$('#pwa-install');
+    if (!btn) return;
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+    if (pwaInstalled || isStandalone || !deferredPrompt) {
+      btn.hidden = true;
+    } else {
+      btn.hidden = false;
+    }
+  }
+  async function promptInstall() {
+    if (!deferredPrompt) {
+      U.toast('Install: browser menu → Install app / Add to Home Screen', 'info');
+      return;
+    }
+    deferredPrompt.prompt();
+    try {
+      const choice = await deferredPrompt.userChoice;
+      if (choice && choice.outcome === 'accepted') U.toast('Installing…', 'ok');
+    } catch {}
+    deferredPrompt = null;
+    updateInstallBtn();
+  }
+
+  // ---- top-right user menu v2 ----
   function renderTopUser() {
     const u = FF.auth.user;
     const btn = U.$('#user-btn');
@@ -102,38 +140,68 @@ window.FF = window.FF || {};
     const menu = U.$('#user-menu');
     if (!menu) return;
     menu.innerHTML = `
-      <div class="user-menu-head">
-        ${FF.auth.avatarHtml(u, 'lg')}
-        <div class="um-info"><b>${esc(u.name || u.username)}</b><span class="dim">@${esc(u.username)}</span>
-          ${u.email ? `<a class="um-email" href="mailto:${esc(u.email)}">✉️ ${esc(u.email)}</a>` : '<span class="dim small">email set nahi hai</span>'}
-          ${u.mobile ? `<span class="dim small">📞 ${esc(u.mobile)}</span>` : ''}
-          <span class="badge ${u.role === 'admin' ? 'indigo' : 'gray'}">${FF.auth.roleLabel(u)}</span>
+      <div class="user-menu-head v2">
+        <div class="um-avatar-wrap" id="um-avatar-wrap" title="Photo badlo - click karo">
+          ${FF.auth.avatarHtml(u, 'lg')}
+          <span class="um-edit-badge">✏️</span>
+          <input type="file" accept="image/*" id="um-avatar" hidden>
+        </div>
+        <div class="um-info">
+          <b>${esc(u.name || u.username)}</b><span class="dim">@${esc(u.username)}</span>
+          <div class="um-fields">
+            <label class="um-field"><span class="um-f-label">Name</span><input class="input" id="um-name" value="${esc(u.name || '')}" placeholder="Full name"></label>
+            <label class="um-field"><span class="um-f-label">Email</span><input class="input" id="um-email" type="email" value="${esc(u.email || '')}" placeholder="you@mail.com"></label>
+            <label class="um-field"><span class="um-f-label">Mobile</span><input class="input" id="um-mobile" value="${esc(u.mobile || '')}" placeholder="98xxxxxxxx" inputmode="tel"></label>
+          </div>
+          <div class="btn-row" style="margin-top:8px"><button class="btn small primary" id="um-save">💾 Save</button><button class="btn small" id="um-pw">🔑 Password</button></div>
+          <span class="badge ${u.role === 'admin' ? 'indigo' : 'gray'}" style="margin-top:6px;display:inline-block">${FF.auth.roleLabel(u)}</span>
         </div>
       </div>
-      <div class="user-menu-body">
+      <div class="user-menu-body v2">
         <a href="#/home" data-close-menu>🏠 Home</a>
-        <a href="#/settings?tab=account" data-close-menu>👤 My account</a>
-        <a href="#/settings?tab=account" data-close-menu>🔑 Password badlo</a>
-        <label class="um-upload">🖼️ Photo upload / badlo<input type="file" accept="image/*" id="um-avatar" hidden></label>
-        ${FF.auth.isAdmin() ? `<a href="#/settings?tab=access" data-close-menu>🔐 Access matrix (admin)</a><a href="#/settings?tab=sources" data-close-menu>🗂️ Sheets &amp; tabs (admin)</a>` : ''}
+        <a href="#/tagIssued" data-close-menu>🏷️ GV & FF Tag Issued</a>
+        <a href="#/settings?tab=account" data-close-menu>⚙️ Settings · My account</a>
+        ${FF.auth.isAdmin() ? `<a href="#/settings?tab=access" data-close-menu>🔐 Access matrix (admin)</a><a href="#/settings?tab=sources" data-close-menu>🗂️ Sheets & tabs (admin)</a>` : ''}
         ${u.mustChangePassword ? '<div class="um-warn">⚠️ Default password chal raha hai — badal lo</div>' : ''}
         <button class="um-logout" id="user-logout">⎋ Logout</button>
       </div>
-      <div class="user-menu-foot dim small">Last login ${u.lastLoginAt ? U.timeLabel(new Date(u.lastLoginAt).getTime()) : '—'}</div>`;
+      <div class="user-menu-foot dim small">Last login ${u.lastLoginAt ? U.timeLabel(new Date(u.lastLoginAt).getTime()) : '—'}${u.lastLocation ? ` · <a href="https://www.google.com/maps?q=${u.lastLocation.latitude},${u.lastLocation.longitude}" target="_blank">📍 ${esc(U.timeLabel(new Date(u.lastLocation.at).getTime()))}</a>` : ''}</div>`;
     const logout = U.$('#user-logout', menu);
     if (logout) logout.addEventListener('click', () => FF.auth.logout());
-    const up = U.$('#um-avatar', menu);
-    if (up) up.addEventListener('change', async () => {
-      const file = up.files && up.files[0];
-      if (!file) return;
+    const saveBtn = U.$('#um-save', menu);
+    if (saveBtn) saveBtn.addEventListener('click', async () => {
+      const name = U.$('#um-name', menu).value.trim();
+      const email = U.$('#um-email', menu).value.trim();
+      const mobile = U.$('#um-mobile', menu).value.trim();
+      saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
       try {
-        const dataUrl = await readAvatar(file);
-        await FF.auth.api('/api/auth/profile', 'POST', { avatar: dataUrl });
+        await FF.auth.api('/api/auth/profile', 'POST', { name, email, mobile });
         await FF.auth.refreshUser();
         renderSidebar();
-        U.toast('Profile photo update ho gayi ✓', 'ok');
-      } catch (err) { U.toast(err.message, 'err'); }
+        renderTopUser();
+        U.toast('Profile update ✓', 'ok');
+      } catch (e) { U.toast(e.message, 'err'); }
+      saveBtn.disabled = false; saveBtn.textContent = '💾 Save';
     });
+    const pwBtn = U.$('#um-pw', menu);
+    if (pwBtn) pwBtn.addEventListener('click', () => { toggleUserMenu(false); location.hash = '#/settings?tab=account'; });
+    const avatarWrap = U.$('#um-avatar-wrap', menu);
+    const up = U.$('#um-avatar', menu);
+    if (avatarWrap && up) {
+      avatarWrap.addEventListener('click', () => up.click());
+      up.addEventListener('change', async () => {
+        const file = up.files && up.files[0];
+        if (!file) return;
+        try {
+          const dataUrl = await readAvatar(file, 256);
+          await FF.auth.api('/api/auth/profile', 'POST', { avatar: dataUrl });
+          await FF.auth.refreshUser();
+          renderSidebar();
+          renderTopUser();
+          U.toast('Profile photo update ✓', 'ok');
+        } catch (err) { U.toast(err.message, 'err'); }
+      });
+    }
   }
   function readAvatar(file, maxSide) {
     return new Promise((resolve, reject) => {
@@ -145,9 +213,22 @@ window.FF = window.FF || {};
         const scale = Math.min(1, size / Math.max(img.width, img.height));
         const c = document.createElement('canvas');
         c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
-        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        const ctx = c.getContext('2d');
+        ctx.imageSmoothingQuality = 'high';
+        // Attractive: white background + centered image with rounded corners
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0,0,c.width,c.height);
+        ctx.drawImage(img, 0, 0, c.width, c.height);
         URL.revokeObjectURL(url);
-        resolve(c.toDataURL('image/jpeg', 0.86));
+        let data = c.toDataURL('image/jpeg', 0.86);
+        if (data.length > 180 * 1024) {
+          const c2 = document.createElement('canvas');
+          const s2 = Math.min(1, 200 / Math.max(c.width, c.height));
+          c2.width = Math.round(c.width * s2); c2.height = Math.round(c.height * s2);
+          c2.getContext('2d').drawImage(c, 0, 0, c2.width, c2.height);
+          data = c2.toDataURL('image/jpeg', 0.78);
+        }
+        resolve(data);
       };
       img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Image load nahi hui')); };
       img.src = url;
@@ -200,16 +281,17 @@ window.FF = window.FF || {};
     const el = U.$('#status');
     if (!el) return;
     const st = FF.store.state, gv = FF.gv ? FF.gv.state : null;
-    const loading = st.loading || (gv && gv.loading);
+    const pre = FF.preloader ? FF.preloader.state : null;
+    const loading = st.loading || (gv && gv.loading) || (pre && pre.running);
     if (loading) {
-      const p = st.loading ? st.progress : gv.progress;
-      const extra = st.loading && gv && gv.loading ? ' (FF + GV)' : st.loading ? ' (FF)' : ' (GV)';
-      el.innerHTML = `<span class="dot busy"></span> Loading ${p.done}/${p.total}${extra}…`;
+      const p = pre && pre.running ? pre.progress : (st.loading ? st.progress : gv.progress);
+      const extra = pre && pre.running ? ` (preloading ${p.loaded}/${p.total})` : st.loading && gv && gv.loading ? ' (FF + GV)' : st.loading ? ' (FF)' : ' (GV)';
+      el.innerHTML = `<span class="dot busy"></span> Loading ${p.done !== undefined ? `${p.done}/${p.total}` : `${p.loaded}/${p.total}`}${extra}…`;
       return;
     }
     const t = FF.store.loadedAt || (gv && gv.loadedAt);
     const errs = Object.keys(st.errors || {}).length + (gv ? Object.keys(gv.errors || {}).length : 0);
-    el.innerHTML = t ? `<span class="dot ${errs ? 'warn' : 'live'}"></span> Data ${U.timeLabel(t)}${errs ? ` · ${errs} failed` : ''}` : '<span class="dot"></span> Ready';
+    el.innerHTML = t ? `<span class="dot ${errs ? 'warn' : 'live'}\"></span> Data ${U.timeLabel(t)}${errs ? ` · ${errs} failed` : ''}${pre && pre.done ? ' · all sheets ready ✓' : ''}` : '<span class="dot"></span> Ready';
     const btn = U.$('#top-refresh'); if (btn) btn.classList.remove('spin');
   }
   let refreshing = false;
@@ -221,16 +303,20 @@ window.FF = window.FF || {};
     const btn = U.$('#top-refresh'); if (btn) btn.classList.add('spin');
     try {
       if (FF.pages.performance && FF.pages.performance.reset) FF.pages.performance.reset();
-      FF.store.reset();
-      if (FF.gv) FF.gv.reset();
-      await Promise.all([FF.store.preload(true).catch(() => {}), FF.gv && FF.gv.enabled() ? FF.gv.preload(true).catch(() => {}) : Promise.resolve()]);
+      if (FF.preloader && FF.preloader.fastSync) {
+        await FF.preloader.fastSync();
+      } else {
+        FF.store.reset();
+        if (FF.gv) FF.gv.reset();
+        await Promise.all([FF.store.preload(true).catch(() => {}), FF.gv && FF.gv.enabled() ? FF.gv.preload(true).catch(() => {}) : Promise.resolve()]);
+      }
     } catch (err) { console.error(err); }
     refreshing = false;
     await renderCurrent({ fresh });
     U.toast('Data updated ✓', 'ok');
   }
 
-  // ---- drawer -------------------------------------------------------------------
+  // ---- drawer ----
   function openDrawer({ kicker, title, sub, body, actions }) {
     U.$('#drawer-kicker').textContent = kicker || '';
     U.$('#drawer-title').textContent = title || '';
@@ -259,7 +345,6 @@ window.FF = window.FF || {};
     U.downloadCsv(`${btn.dataset.name || 'export'}-${U.stamp()}.csv`, rows[0] || [], rows.slice(1));
     U.toast('CSV downloaded');
   }
-  /** Share helper: data-share="wa|mail|copy" with data-text (and optional data-phone / data-subject / data-to) */
   async function share(el) {
     if (!FF.auth.can('share')) { U.toast('Share permission nahi hai', 'err'); return; }
     const text = el.dataset.text || '';
@@ -271,11 +356,66 @@ window.FF = window.FF || {};
     U.toast('Message copied — WhatsApp khul raha hai');
   }
 
+  // ---- location permission on app open — banner + auto ----
+  function ensureLocBanner() {
+    let el = U.$('#loc-banner');
+    if (el) return el;
+    el = U.h('<div id="loc-banner" class="loc-banner" hidden><span>📍 Location access chahiye — field tracking ke liye allow karo</span><button class="btn small primary" id="loc-allow">Allow</button><button class="btn small" id="loc-dismiss">✕</button></div>');
+    document.body.appendChild(el);
+    U.$('#loc-allow', el).addEventListener('click', () => { el.hidden = true; shareLocationSilently(); });
+    U.$('#loc-dismiss', el).addEventListener('click', () => { el.hidden = true; localStorage.setItem('ff_loc_prompt', String(Date.now())); });
+    return el;
+  }
+  function requestLocationOnOpen() {
+    if (!navigator.geolocation) return;
+    const lastPrompt = localStorage.getItem('ff_loc_prompt');
+    if (lastPrompt && Date.now() - Number(lastPrompt) < 24*60*60*1000) return;
+    if (navigator.permissions) {
+      navigator.permissions.query({ name: 'geolocation' }).then(p => {
+        if (p.state === 'denied') return;
+        if (p.state === 'granted') {
+          shareLocationSilently();
+        } else {
+          const banner = ensureLocBanner();
+          banner.hidden = false;
+          U.toast('📍 Location access — banner dekho', 'info');
+          // Also try silent after 2s if user interacts
+          setTimeout(() => { if (!banner.hidden) { /* keep visible */ } }, 100);
+        }
+      }).catch(() => {
+        const banner = ensureLocBanner();
+        banner.hidden = false;
+      });
+    } else {
+      const banner = ensureLocBanner();
+      banner.hidden = false;
+    }
+  }
+  function shareLocationSilently() {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(async (pos) => {
+      try {
+        await FF.auth.api('/api/auth/location', 'POST', { latitude: pos.coords.latitude, longitude: pos.coords.longitude, accuracy: pos.coords.accuracy });
+        await FF.auth.refreshUser();
+        renderTopUser();
+        const b = U.$('#loc-banner'); if (b) b.hidden = true;
+        U.toast('📍 Location shared ✓', 'ok');
+      } catch (e) { console.warn('Location share failed', e.message); }
+    }, (err) => {
+      console.warn('Geolocation error', err.message);
+      localStorage.setItem('ff_loc_prompt', String(Date.now()));
+      const b = U.$('#loc-banner'); if (b) b.hidden = true;
+      if (err.code === 1) U.toast('Location denied — Settings → My account se baad me share kar sakte ho', 'warn');
+    }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 300000 });
+  }
+
   function bind() {
     window.addEventListener('hashchange', () => { renderCurrent(); toggleUserMenu(false); });
     U.$('#menu-btn').addEventListener('click', () => document.body.classList.toggle('side-open'));
     U.$('#side-backdrop').addEventListener('click', closeSidebar);
     U.$('#top-refresh').addEventListener('click', refresh);
+    const pwaBtn = U.$('#pwa-install');
+    if (pwaBtn) pwaBtn.addEventListener('click', promptInstall);
     const ub = U.$('#user-btn');
     if (ub) ub.addEventListener('click', (e) => { e.stopPropagation(); toggleUserMenu(); });
     U.$('#drawer-close').addEventListener('click', closeDrawer);
@@ -299,7 +439,7 @@ window.FF = window.FF || {};
       if (link && !e.target.closest('a')) { location.hash = link.dataset.link; return; }
       const paramBtn = e.target.closest('button[data-param]');
       if (paramBtn) { updateParams({ [paramBtn.dataset.param]: paramBtn.dataset.value }); }
-      const drawerLink = e.target.closest('#drawer a[href^="#/"]');
+      const drawerLink = e.target.closest('#drawer a[href^="/"]');
       if (drawerLink) closeDrawer();
     });
     document.addEventListener('change', (e) => {
@@ -307,18 +447,31 @@ window.FF = window.FF || {};
       if (el) updateParams({ [el.dataset.param]: el.value, ...(el.dataset.param === 'tl' ? { agent: '' } : {}), ...(el.dataset.param === 'agent' ? { tl: '' } : {}) });
     });
     FF.store.on((ev, detail) => { if (ev === 'progress' || ev === 'start' || ev === 'done') updateStatus(detail); });
+    // periodic install btn check
+    setInterval(updateInstallBtn, 3000);
   }
 
   function onLogin() {
     renderSidebar();
     FF.auth.applyTheme();
     document.body.classList.add('ready');
+    // Fast path: core datasets first, then background all sheets
     FF.store.preload(false).catch(() => {});
     if (FF.gv && FF.gv.enabled()) FF.gv.preload(false).catch(() => {});
+    if (FF.preloader) {
+      setTimeout(() => FF.preloader.preloadAll(false).catch(() => {}), 800);
+    }
     if (FF.notifications) FF.notifications.start();
     renderCurrent();
     const u = FF.auth.user;
     if (u && u.mustChangePassword) setTimeout(() => U.toast('⚠️ Default password chal raha hai — Settings → My account se badlo', 'err'), 900);
+    // Location prompt + PWA
+    setTimeout(requestLocationOnOpen, 2000);
+    updateInstallBtn();
+    // Register service worker for PWA
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js').then(() => console.log('SW registered')).catch(e => console.warn('SW failed', e));
+    }
   }
 
   async function init() {
@@ -328,6 +481,6 @@ window.FF = window.FF || {};
     if (ok) onLogin();
   }
 
-  FF.app = { navigate, updateParams, refresh, openDrawer, closeDrawer, renderSidebar, renderCurrent, renderTopUser, onLogin, PAGES, get current() { return current; } };
+  FF.app = { navigate, updateParams, refresh, openDrawer, closeDrawer, renderSidebar, renderCurrent, renderTopUser, onLogin, promptInstall, PAGES, get current() { return current; } };
   document.addEventListener('DOMContentLoaded', init);
 })(window.FF);

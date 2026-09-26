@@ -80,9 +80,15 @@ window.FF = window.FF || {};
 
   async function fetchText(url, timeoutMs) {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), timeoutMs || 60000);
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs || 20000);
     try {
-      const res = await fetch(url, { signal: ctrl.signal, cache: 'no-store', credentials: 'same-origin' });
+      const res = await fetch(url, { 
+        signal: ctrl.signal, 
+        cache: 'no-store', 
+        credentials: 'same-origin',
+        keepalive: true,
+        headers: { 'X-Requested-With': 'FF-Dashboard' }
+      });
       const text = await res.text();
       if (!res.ok) {
         let detail = '';

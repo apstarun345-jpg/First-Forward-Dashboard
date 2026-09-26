@@ -71,22 +71,38 @@ window.FF = window.FF || {};
     const hero = c.loginImage
       ? `<div class="auth-visual-img" style="background-image:url('${esc(c.loginImage)}')"></div>`
       : '';
-    return `<div class="auth-visual">
-      <div class="auth-mesh"></div>
+    return `<div class="auth-visual robo">
+      <div class="robo-grid"></div>
+      <div class="robo-glow g1"></div>
+      <div class="robo-glow g2"></div>
+      <div class="robo-glow g3"></div>
+      <div class="robo-circuit"></div>
       ${hero}
       <div class="auth-visual-inner">
-        <div class="auth-brand-big">${logoHtml('big')}<div><b>${esc(c.brand || 'First Forward')}</b><small>${esc(c.tagline || 'Dashboard')}</small></div></div>
-        <h2 class="auth-visual-title">Do dashboard, ek hi login.</h2>
-        <p class="auth-visual-sub">First Forward (EIR · StockDataa · REPORT) aur GV Partner (GV Master · Tag Assignment · GV REPORT) — issuance, stock, trend aur performance ek jagah.</p>
-        <ul class="auth-points">
-          <li><span>📊</span> First Forward dashboard & trend</li>
-          <li><span>🚀</span> GV Partner dashboard & stock</li>
-          <li><span>⚖️</span> GV vs First Forward comparison</li>
-          <li><span>🏆</span> Agent &amp; TL performance + Excel export</li>
+        <div class="auth-brand-big">${logoHtml('big')}<div><b>${esc(c.brand || 'First Forward')}</b><small>${esc(c.tagline || 'Dashboard')}</small><span class="robo-badge">🤖 AI-Powered</span></div></div>
+        <div class="robo-title-wrap">
+          <h2 class="auth-visual-title"><span class="robo-type">Do dashboard,</span> <span class="robo-highlight">ek hi login.</span></h2>
+          <div class="robo-underline"></div>
+        </div>
+        <p class="auth-visual-sub">First Forward (EIR · StockDataa · REPORT) aur GV Partner (GV Master · Tag Assignment · GV REPORT) — issuance, stock, trend aur performance ek jagah. <b>Robotics animated dashboard</b>.</p>
+        <ul class="auth-points robo-points">
+          <li><span class="rp-ico">📊</span><div><b>First Forward</b><small>dashboard & trend · live</small></div><span class="rp-dot live"></span></li>
+          <li><span class="rp-ico">🚀</span><div><b>GV Partner</b><small>dashboard & stock · fast sync</small></div><span class="rp-dot"></span></li>
+          <li><span class="rp-ico">⚖️</span><div><b>GV vs First Forward</b><small>side-by-side comparison</small></div><span class="rp-dot"></span></li>
+          <li><span class="rp-ico">🏆</span><div><b>Performance</b><small>Agent & TL · Excel export</small></div><span class="rp-dot live"></span></li>
         </ul>
-        <div class="auth-float a1"><b>MTD Issuance</b><em>live</em></div>
-        <div class="auth-float a2"><b>VC4 vs Commercial</b><em>compare</em></div>
-        <div class="auth-float a3"><b>GV + FF</b><em>alag alag</em></div>
+        <div class="robo-stats">
+          <div class="robo-stat"><b>⚡ Fast Sync</b><small>Background preload</small></div>
+          <div class="robo-stat"><b>🎨 Colorful</b><small>Animated UI</small></div>
+          <div class="robo-stat"><b>📍 Location</b><small>Auto tracking</small></div>
+        </div>
+        <div class="auth-float a1 robo-float"><b>MTD Issuance</b><em>live</em><span class="rf-bar"></span></div>
+        <div class="auth-float a2 robo-float"><b>VC4 vs Commercial</b><em>compare</em><span class="rf-bar"></span></div>
+        <div class="auth-float a3 robo-float"><b>GV + FF</b><em>AI sync</em><span class="rf-bar"></span></div>
+      </div>
+      <div class="robo-bot">
+        <div class="robo-head"><div class="robo-eye left"></div><div class="robo-eye right"></div></div>
+        <div class="robo-body"></div>
       </div>
     </div>`;
   }
@@ -94,29 +110,34 @@ window.FF = window.FF || {};
   function formHtml(mode, msg) {
     const c = FF.config;
     const signupOk = c.allowSignup !== false;
-    return `<div class="auth-shell">
+    return `<div class="auth-shell robo-shell">
       ${visualHtml()}
-      <div class="auth-panel">
-        <div class="auth-card">
-          <div class="auth-brand-sm">${logoHtml()}<div><b>${esc(c.appName)}</b><small>${esc(c.tagline || 'Dashboard')}</small></div></div>
-          <p class="auth-mobile-intro">📊 <b>Issuance, stock aur performance</b> ek hi colourful dashboard me — First Forward aur GV Partner ka clear comparison, daily report alerts ke saath.</p>
-          <div class="seg auth-tabs"><button class="seg-btn ${mode === 'login' ? 'on' : ''}" data-mode="login">Login</button>${signupOk ? `<button class="seg-btn ${mode === 'signup' ? 'on' : ''}" data-mode="signup">Sign up</button>` : ''}</div>
-          <form id="auth-form" autocomplete="on" novalidate>
-            ${mode === 'signup' ? `<label>Full name<input name="name" class="input" required maxlength="80" placeholder="Aapka naam" autocomplete="name"></label>` : ''}
-            <label>Username<input name="username" class="input" required minlength="3" maxlength="60" placeholder="e.g. tarun" autocapitalize="none" autocomplete="username"></label>
-            ${mode === 'signup' ? `<div class="two"><label>Mobile <small>(optional)</small><input name="mobile" class="input" inputmode="tel" placeholder="98xxxxxxxx" autocomplete="tel"></label><label>Email <small>(optional)</small><input name="email" class="input" type="email" placeholder="you@mail.com" autocomplete="email"></label></div>` : ''}
-            <label>Password<span class="pw-wrap"><input name="password" class="input" type="password" required minlength="6" autocomplete="${mode === 'signup' ? 'new-password' : 'current-password'}" placeholder="min 6 characters"><button type="button" class="pw-eye" data-eye title="Password dikhao / chhupao">👁</button></span></label>
+      <div class="auth-panel robo-panel">
+        <div class="robo-panel-glow"></div>
+        <div class="auth-card robo-card">
+          <div class="auth-brand-sm">${logoHtml()}<div><b>${esc(c.appName)}</b><small>${esc(c.tagline || 'Dashboard')} <span class="robo-ver">v3.2 • Robo</span></small></div></div>
+          <div class="robo-welcome">
+            <h3>🤖 Welcome to Future Dashboard</h3>
+            <p>Colorful • Animated • Robotics • Fast Sync • PWA Ready</p>
+          </div>
+          <p class="auth-mobile-intro robo-intro">📊 <b>Issuance, stock aur performance</b> ek hi colourful dashboard me — First Forward aur GV Partner ka clear comparison, daily report alerts ke saath. <span class="robo-chip">⚡ Fast</span> <span class="robo-chip">🎨 Colorful</span> <span class="robo-chip">🤖 Robo</span></p>
+          <div class="seg auth-tabs robo-tabs"><button class="seg-btn ${mode === 'login' ? 'on' : ''}" data-mode="login">🔐 Login</button>${signupOk ? `<button class="seg-btn ${mode === 'signup' ? 'on' : ''}" data-mode="signup">✨ Sign up</button>` : ''}</div>
+          <form id="auth-form" autocomplete="on" novalidate class="robo-form">
+            ${mode === 'signup' ? `<label class="robo-label"><span>👤 Full name</span><input name="name" class="input robo-input" required maxlength="80" placeholder="Aapka naam" autocomplete="name"></label>` : ''}
+            <label class="robo-label"><span>👤 Username</span><input name="username" class="input robo-input" required minlength="3" maxlength="60" placeholder="e.g. tarun" autocapitalize="none" autocomplete="username"></label>
+            ${mode === 'signup' ? `<div class="two"><label class="robo-label"><span>📞 Mobile <small>(optional)</small></span><input name="mobile" class="input robo-input" inputmode="tel" placeholder="98xxxxxxxx" autocomplete="tel"></label><label class="robo-label"><span>✉️ Email <small>(optional)</small></span><input name="email" class="input robo-input" type="email" placeholder="you@mail.com" autocomplete="email"></label></div>` : ''}
+            <label class="robo-label"><span>🔑 Password</span><span class="pw-wrap"><input name="password" class="input robo-input" type="password" required minlength="6" autocomplete="${mode === 'signup' ? 'new-password' : 'current-password'}" placeholder="min 6 characters"><button type="button" class="pw-eye" data-eye title="Password dikhao / chhupao">👁</button></span></label>
             <div class="auth-row">
               <label class="check small"><input type="checkbox" id="auth-remember" checked> <span>Mujhe yaad rakho</span></label>
-              <button type="button" class="link-btn" id="auth-forgot">Forgot password?</button>
+              <button type="button" class="link-btn robo-link" id="auth-forgot">Forgot password?</button>
             </div>
             <div id="auth-msg" class="auth-msg ${msg && msg.kind ? msg.kind : ''}">${msg ? esc(msg.text) : ''}</div>
-            <button class="btn primary big auth-submit" type="submit"><span class="btn-label">${mode === 'signup' ? 'Create account' : 'Login'}</span></button>
-            <div class="auth-progress" id="auth-progress" hidden><div class="auth-progress-bar"></div></div>
-            <p class="dim small auth-note">${mode === 'signup' ? 'Account banne ke baad admin approve karega aur access set karega.' : 'Access nahi hai? Admin se account / permission maango.'}</p>
+            <button class="btn primary big auth-submit robo-submit" type="submit"><span class="btn-label">${mode === 'signup' ? '✨ Create account' : '🚀 Login'} </span><span class="robo-spark"></span></button>
+            <div class="auth-progress" id="auth-progress" hidden><div class="auth-progress-bar robo-bar"></div></div>
+            <p class="dim small auth-note robo-note">${mode === 'signup' ? 'Account banne ke baad admin approve karega aur access set karega. 🤖' : 'Access nahi hai? Admin se account / permission maango. 🛡️'}</p>
           </form>
         </div>
-        <p class="auth-foot dim small">${esc(c.brand || '')} · Data Google Sheet se live aata hai${state.settings && state.settings.updatedAt ? ` · settings updated ${U.timeLabel(new Date(state.settings.updatedAt).getTime())}` : ''}</p>
+        <p class="auth-foot dim small robo-foot">${esc(c.brand || '')} · Data Google Sheet se live aata hai · <span class="robo-live">● Live Sync</span>${state.settings && state.settings.updatedAt ? ` · settings updated ${U.timeLabel(new Date(state.settings.updatedAt).getTime())}` : ''}</p>
       </div>
     </div>`;
   }

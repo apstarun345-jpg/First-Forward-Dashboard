@@ -43,7 +43,8 @@ const BLOCKED_DIRS = new Set(['data', 'dev', 'node_modules', '.git']);
 // Fixed page / action permissions. Sheet-tab permissions (`sheet:<tabId>`) are generated from the
 // `tabs` registry below, so the admin can add or hide sheet tabs and control each one per user.
 export const PAGE_PERMISSIONS = [
-  { key: 'home', label: 'Home · greeting & overview', group: 'Pages' },
+  { key: 'home', label: 'Home · highlights & charts', group: 'Pages' },
+  { key: 'tagIssued', label: 'GV & FF Tag Issued (date-wise)', group: 'Pages' },
   { key: 'dashboard', label: 'First Forward · Dashboard', group: 'First Forward' },
   { key: 'trend', label: 'First Forward · Trend', group: 'First Forward' },
   { key: 'performance', label: 'First Forward · Performance', group: 'First Forward' },
@@ -81,7 +82,7 @@ const allPermKeys = (settings) => permissionsFor(settings).map((p) => p.key);
 const allPermKeysNow = () => allPermKeys(db.settings);
 // Back-compat export (some tooling imported PERMISSIONS).
 export const PERMISSIONS = permissionsFor({ tabs: DEFAULT_TABS });
-const DEFAULT_USER_PERMS = ['home', 'dashboard', 'trend', 'stock', 'performance', 'gvDashboard', 'gvTrend', 'gvStock', 'gvPerformance', 'compare',
+const DEFAULT_USER_PERMS = ['home', 'tagIssued', 'dashboard', 'trend', 'stock', 'performance', 'gvDashboard', 'gvTrend', 'gvStock', 'gvPerformance', 'compare',
   'sheet:StockDataa', 'sheet:REPORT', 'sheet:GV Master', 'sheet:Tag Assignment', 'sheet:GV REPORT', 'export'];
 
 const DEFAULT_SETTINGS = {
@@ -775,6 +776,33 @@ const server = http.createServer(async (req, res) => {
 });
 
 async function start() {
+  // Ensure DATA_DIR exists (for Render disk /data)
+  if (!existsSync(DATA_DIR)) {
+    try { mkdirSync(DATA_DIR, { recursive: true }); } catch (e) { console.warn('Could not create DATA_DIR', e.message); }
+  }
+  // Migration helper: if /data is empty but ./data has files (first run after adding disk), copy them
+  try {
+    const localDir = path.join(__dirname, 'data');
+    if (DATA_DIR !== localDir && existsSync(localDir)) {
+      const localFiles = await fs.readdir(localDir).catch(() => []);
+      const targetFiles = existsSync(DATA_DIR) ? await fs.readdir(DATA_DIR).catch(() => []) : [];
+      if (targetFiles.length === 0 && localFiles.length > 0) {
+        for (const f of localFiles) {
+          if (f.endsWith('.json')) {
+            try {
+              const src = path.join(localDir, f);
+              const dst = path.join(DATA_DIR, f);
+              const content = await fs.readFile(src, 'utf8');
+              JSON.parse(content); // validate
+              await fs.writeFile(dst, content);
+              console.log(`Migrated ${f} from ./data to ${DATA_DIR}`);
+            } catch (e) { console.warn('Migration failed for', f, e.message); }
+          }
+        }
+      }
+    }
+  } catch (e) { console.warn('Migration check failed', e.message); }
+
   db.users = await readJson(FILES.users, []);
   db.sessions = await readJson(FILES.sessions, {});
   db.settings = deepMerge(DEFAULT_SETTINGS, await readJson(FILES.settings, {}));
