@@ -1,4 +1,4 @@
-# First Forward Dashboard — First Forward + GV Partner (v3)
+# First Forward Dashboard — First Forward + GV Partner (v3.1)
 
 Colourful dashboard website built directly on top of **do Google Sheets**:
 
@@ -55,10 +55,16 @@ permissions and settings**. Zero npm dependencies.
 | **Sheets (left sidebar)** | Group-wise: **First Forward** (StockDataa · REPORT · EIR) aur **GV Partner** (GV Master · Tag Assignment · GV REPORT) — jo tab registry me enabled hain. Page-wise view, server-side search, sort, CSV / Excel export. |
 | **Settings** | Neeche dekho — sab kuch yahin se badlo. |
 
-**Refresh policy:** koi auto-refresh nahi. Data site khulte hi ek baar poora preload hota hai (aggregates), phir
+**Refresh policy:** koi dashboard auto-refresh nahi. Data site khulte hi ek baar poora preload hota hai (aggregates), phir
 sirf **↻ button** ya browser reload par dobara aata hai. Options click karne par koi network call nahi (sirf
 StockDataa ki raw rows Excel export ke waqt on-demand aati hain). Server bhi Google responses cache karta hai
 (`cacheSeconds`, default 10 min) taaki page reload fast rahe; ↻ hamesha Google se fresh laata hai (permission "Force refresh").
+
+**Comparison correction:** EIR me GV Partner ka `master ID 5845036` aata hai. **GV vs First Forward** page First Forward side se `5845036` (aur configured GV TL marker) ko pehle exclude karta hai, phir GV Master ke against compare karta hai — isliye GV double-count nahi hota. Admin Settings → Data source me ID/marker badal sakta hai.
+
+**Notifications:** top-right 🔔 feed me non-admin user login/page-open, consented location share aur Google Sheet ke newest-day grouped report changes aate hain. Server lightweight grouped query se FF (GV ID excluded) aur GV ko har 5 minutes check karta hai; feed kholte waqt bhi check hota hai. “Browser alerts on karo” ko ek baar allow karne par tab background me hone par native browser alert bhi aata hai. Dashboard data khud auto-refresh nahi hota; notification aane par ↻ dabao.
+
+**Location privacy:** location automatic/silent tracking nahi hai. User Settings → My account → “Share my location” par browser permission de to sirf latest coordinates/accuracy save hoti hai, aur admin Users & access me Maps link dekh sakta hai.
 
 ## Settings (admin)
 

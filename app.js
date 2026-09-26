@@ -187,6 +187,7 @@ window.FF = window.FF || {};
       root.innerHTML = `<div class="empty-state">🔒 Is page ka access aapke account me nahi hai.<br><small class="dim">Admin se "${esc(pagePerm(page, params) || page)}" permission maango (Settings → Access matrix).</small></div>`;
       return;
     }
+    if (FF.notifications) FF.notifications.activity(page === 'sheet' ? `Sheet · ${params.name || ''}` : page);
     try {
       await FF.pages[page].render(root, params, ctx || {});
     } catch (err) {
@@ -314,6 +315,7 @@ window.FF = window.FF || {};
     document.body.classList.add('ready');
     FF.store.preload(false).catch(() => {});
     if (FF.gv && FF.gv.enabled()) FF.gv.preload(false).catch(() => {});
+    if (FF.notifications) FF.notifications.start();
     renderCurrent();
     const u = FF.auth.user;
     if (u && u.mustChangePassword) setTimeout(() => U.toast('⚠️ Default password chal raha hai — Settings → My account se badlo', 'err'), 900);
