@@ -120,21 +120,28 @@ async function handleGviz(res, params) {
 async function serveStatic(res, pathname) {
   let requested = decodeURIComponent(pathname);
   if (requested === '/' || requested === '') requested = '/index.html';
-  const candidate = path.normalize(path.join(__dirname, requested));
-  if (!candidate.startsWith(__dirname)) return sendText(res, 404, 'Not found');
-  const base = path.basename(candidate);
-  if (BLOCKED_FILES.has(base) || base.startsWith('.')) return sendText(res, 404, 'Not found');
-  try {
-    const stat = await fs.stat(candidate);
-    if (!stat.isFile()) throw new Error('not a file');
-    const content = await fs.readFile(candidate);
-    const ext = path.extname(candidate).toLowerCase();
-    res.writeHead(200, headers({ 'Content-Type': MIME[ext] || 'application/octet-stream', 'Content-Length': content.length, 'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=600' }));
-    return res.end(content);
-  } catch {
-    if (!path.extname(requested)) return serveStatic(res, '/index.html'); // pretty URLs → app shell
-    return sendText(res, 404, 'Not found');
+  const candidates = [path.normalize(path.join(__dirname, requested))];
+  // Backward compatibility: older HTML/docs point to /js/*.js while the repo now keeps scripts at the root.
+  if (requested.startsWith('/js/')) candidates.push(path.normalize(path.join(__dirname, path.basename(requested))));
+
+  for (const candidate of candidates) {
+    if (!candidate.startsWith(__dirname)) return sendText(res, 404, 'Not found');
+    const base = path.basename(candidate);
+    if (BLOCKED_FILES.has(base) || base.startsWith('.')) return sendText(res, 404, 'Not found');
+    try {
+      const stat = await fs.stat(candidate);
+      if (!stat.isFile()) continue;
+      const content = await fs.readFile(candidate);
+      const ext = path.extname(candidate).toLowerCase();
+      res.writeHead(200, headers({ 'Content-Type': MIME[ext] || 'application/octet-stream', 'Content-Length': content.length, 'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=600' }));
+      return res.end(content);
+    } catch {
+      // try next candidate
+    }
   }
+
+  if (!path.extname(requested)) return serveStatic(res, '/index.html'); // pretty URLs → app shell
+  return sendText(res, 404, 'Not found');
 }
 
 async function downloadInfo() {
