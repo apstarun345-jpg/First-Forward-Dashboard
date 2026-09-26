@@ -8,6 +8,8 @@
   --green: #10b981; --red: #ef4444; --amber: #f59e0b; --orange: #f97316; --sky: #0ea5e9; --violet: #8b5cf6;
 }
 * { box-sizing: border-box; }
+/* the hidden attribute must always win over author display rules (login screen, toast, tips, suggest box) */
+[hidden] { display: none !important; }
 html, body { margin: 0; padding: 0; }
 body { font-family: Inter, "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif; background: var(--bg); color: var(--ink); font-size: 14px; line-height: 1.45; -webkit-font-smoothing: antialiased; }
 body.no-scroll { overflow: hidden; }
