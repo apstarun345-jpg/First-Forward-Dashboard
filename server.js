@@ -133,7 +133,8 @@ function persist(kind) {
   const prev = writeQueue.get(kind) || Promise.resolve();
   const next = prev.then(async () => {
     const tmp = `${file}.tmp`;
-    await fs.writeFile(tmp, JSON.stringify(db[kind], null, 2));
+    const data = kind === 'watch' ? reportWatch : db[kind];
+    await fs.writeFile(tmp, JSON.stringify(data ?? {}, null, 2));
     await fs.rename(tmp, file);
   }).catch((err) => console.error(`persist ${kind} failed:`, err.message));
   writeQueue.set(kind, next);
