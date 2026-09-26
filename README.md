@@ -32,7 +32,7 @@ PORT=3000 npm start  # kisi aur port par
 
 1. GitHub par new repository banao (e.g. `First-Forward-Dashboard`).
 2. Is folder ki **saari files** (folder structure same rakh ke) upload karo — ZIP se: "Add file → Upload files" mein
-   sab files drag karo (`js/` folder ke saath). Ya git se:
+   sab files drag karo. Ya git se:
 
    ```bash
    git init
@@ -65,7 +65,7 @@ Free plan par 15 min idle ke baad pehla open ~30-50 sec leta hai (normal hai).
 | Variable | Default | Kaam |
 | --- | --- | --- |
 | `PORT` | `8080` (Render khud set karta hai) | Server port |
-| `SHEET_ID` | sheet ki current ID | Dusri sheet use karni ho to (saath mein `js/config.js` ka `sheetId` bhi badlo) |
+| `SHEET_ID` | sheet ki current ID | Dusri sheet use karni ho to (saath mein `config.js` ka `sheetId` bhi badlo) |
 | `CACHE_SECONDS` | `120` | Google responses ka server cache. `0` = no cache |
 | `DASH_USER` / `DASH_PASSWORD` | – / – | `DASH_PASSWORD` set karte hi poori site par login (Basic Auth) lag jaata hai. User default `admin` |
 | `FRAME_PROTECTION` | – | `1` = site ko kisi aur website ke iframe mein khulne se roko |
@@ -74,7 +74,7 @@ Free plan par 15 min idle ke baad pehla open ~30-50 sec leta hai (normal hai).
 
 ## Sheet / column mapping badalna ho to
 
-Sab kuch `js/config.js` mein hai:
+Sab kuch `config.js` mein hai:
 
 * `sheetId` – Google Sheet ID
 * `sheets[]` – tabs ki list (left sidebar isi se banta hai; tab ka naam **exact** hona chahiye, `gid` pata ho to daal do)
@@ -90,17 +90,17 @@ Agar Google Sheet mein koi column add/delete ho jaaye to sirf yahan letters upda
 server.js            Node server: static files + /api/gviz proxy (cache, optional password)
 index.html           App shell (sidebar, topbar, drawer)
 styles.css           Colourful theme, KPI cards, charts, tables
-js/config.js         Sheet ID, tabs, column mapping
-js/util.js           Helpers (formatting, dates, CSV download, toast)
-js/data.js           Google gviz client (proxy → direct Google fallback)
-js/charts.js         Zero-dependency SVG/CSS charts (lines, bars, hbars, donut, spark)
-js/model.js          EIR / StockDataa aggregate queries + summaries
-js/dashboard.js      Dashboard page
-js/trend.js          Trend page (daily / weekly / monthly / last vs current)
-js/stock.js          Stock page
-js/performance.js    Performance page (REPORT sheet)
-js/sheets.js         Generic sheet viewer (full / paged)
-js/app.js            Router, sidebar, refresh, drawer
+config.js            Sheet ID, tabs, column mapping
+util.js              Helpers (formatting, dates, CSV download, toast)
+data.js              Google gviz client (proxy → direct Google fallback)
+charts.js            Zero-dependency SVG/CSS charts (lines, bars, hbars, donut, spark)
+model.js             EIR / StockDataa aggregate queries + summaries
+dashboard.js         Dashboard page
+trend.js             Trend page (daily / weekly / monthly / last vs current)
+stock.js             Stock page
+performance.js       Performance page (REPORT sheet)
+sheets.js            Generic sheet viewer (full / paged)
+app.js               Router, sidebar, refresh, drawer
 render.yaml          Render blueprint
 manifest.webmanifest, icon-192.png, icon-512.png   "Add to Home Screen" support
 ```

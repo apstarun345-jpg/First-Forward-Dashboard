@@ -159,7 +159,7 @@ window.FF = window.FF || {};
       <div class="guide">
         <div class="dsec"><h4>Step 1 · ZIP download & extract</h4>
           <ol>
-            <li>Upar wale button se ZIP download karo aur <b>extract</b> karo → folder <code>first-forward-dashboard</code> milega (andar <code>server.js</code>, <code>index.html</code>, <code>js/</code> folder…).</li>
+            <li>Upar wale button se ZIP download karo aur <b>extract</b> karo → folder <code>first-forward-dashboard</code> milega (andar <code>server.js</code>, <code>index.html</code>, <code>config.js</code>, <code>app.js</code> …).</li>
           </ol>
         </div>
         <div class="dsec"><h4>Step 2 · GitHub par repository</h4>
@@ -197,7 +197,7 @@ git push -u origin main</pre></details>
             <li>Google Sheet ki sharing <b>"Anyone with the link → Viewer"</b> rehni chahiye (abhi hai). Sheet update → website 2 min mein update.</li>
             <li>Password lagana ho: Render → service → <b>Environment</b> → <code>DASH_PASSWORD</code> = apna password (user: <code>admin</code>).</li>
             <li>Free plan par 15 min idle ke baad pehla open 30–50 sec leta hai — normal hai.</li>
-            <li>Website mein badlaav (naya tab, column shift): sirf <code>js/config.js</code> edit karke GitHub par replace karo → Render auto-deploy.</li>
+            <li>Website mein badlaav (naya tab, column shift): sirf <code>config.js</code> edit karke GitHub par replace karo → Render auto-deploy.</li>
           </ol>
         </div>
       </div>`;
