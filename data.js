@@ -105,15 +105,17 @@ window.FF = window.FF || {};
     const o = opts || {};
     const cfg = FF.config.sheetByName(sheetName);
     const gid = o.gid !== undefined ? o.gid : (cfg && cfg.gid) || '';
-    const key = `${sheetName}|${gid}|${o.range || ''}|${tq || ''}`;
+    const configuredRange = (cfg && (cfg.range || (cfg.startCol || cfg.startRow || cfg.endCol || cfg.endRow ? (FF.config.formatRange ? FF.config.formatRange(cfg.startCol, cfg.startRow, cfg.endCol, cfg.endRow) : `${cfg.startCol || 'A'}${cfg.startRow || 1}:${cfg.endCol || ''}${cfg.endRow || ''}`) : ''))) || '';
+    const range = o.range !== undefined ? o.range : configuredRange;
+    const key = `${sheetName}|${gid}|${range || ''}|${tq || ''}`;
     const now = Date.now();
     const hit = cache.get(key);
     if (hit && !o.fresh && now - hit.t < TTL_MS) return hit.promise;
 
-    const extra = { ...(o.fresh ? { fresh: '1' } : {}), ...(o.range ? { range: o.range } : {}) };
+    const extra = { ...(o.fresh ? { fresh: '1' } : {}), ...(range ? { range } : {}) };
     const attempts = [];
     if (FF.config.proxyPath && FF.config.proxy !== false) attempts.push(buildUrl(FF.config.proxyPath, sheetName, tq, gid, extra));
-    if (FF.config.directFallback !== false) attempts.push(buildUrl(directBase(sheetName), sheetName, tq, gid, o.range ? { range: o.range } : null));
+    if (FF.config.directFallback !== false) attempts.push(buildUrl(directBase(sheetName), sheetName, tq, gid, range ? { range } : null));
 
     const promise = (async () => {
       let lastErr = null;

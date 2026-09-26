@@ -180,7 +180,11 @@ FF.pages = FF.pages || {};
     const table = await S.need('report');
     if (state.agents.length && state.sourceTable === table) return;
     const rows = D.textRows(table);
-    if (table.headers > 0) rows.unshift(table.cols.map((c) => c.label || ''));
+    if (table.cols && table.cols.some((c) => /agent profile/i.test(c.label))) {
+      rows.unshift(table.cols.map((c) => c.label || ''));
+    } else if (table.headers > 0) {
+      rows.unshift(table.cols.map((c) => c.label || ''));
+    }
     let idx = -1;
     for (let i = 0; i < Math.min(rows.length, 8); i++) if (rows[i].some((cell) => /agent profile/i.test(cell))) { idx = i; break; }
     if (idx < 0) throw new Error('REPORT tab ka header (Agent Profile Details…) nahi mila — sheet structure badal gayi?');
@@ -513,11 +517,20 @@ FF.pages = FF.pages || {};
       [...state.agents].sort((a, b) => b.curTotal - a.curTotal).forEach((a) => items.push({ kind: 'agent', kindLabel: 'Agent', label: a.name, sub: `${tlLabel(a)} · ${state.months.cur.slice(0, 3)} ${fmt(a.curTotal)} · ID ${a.agentId}`, keywords: `${a.agentId} ${a.id}`, badge: a.priority ? `${a.priority} priority` : '', row: a.__row }));
       return items;
     };
-    const pickFind = (it) => { if (it.kind === 'tl') openTl(it.key); else openAgent(it.row); };
+    const pickFind = (it) => {
+      if (it.label && FF.notifications && FF.notifications.logSearch) FF.notifications.logSearch('Performance Find', it.label);
+      if (it.kind === 'tl') openTl(it.key); else openAgent(it.row);
+    };
     const findInput = U.$('#pf-find', body);
-    U.suggest(findInput, { items: findItems, max: 14, onPick: pickFind, onEnter: (q) => { const all = findItems(); const hit = all.find((i) => norm(i.label) === norm(q)) || all.find((i) => norm(i.label).includes(norm(q))); if (hit) pickFind(hit); else U.toast('Koi agent / TL match nahi hua', 'err'); } });
+    U.suggest(findInput, { items: findItems, max: 14, onPick: pickFind, onEnter: (q) => { if (q && FF.notifications && FF.notifications.logSearch) FF.notifications.logSearch('Performance Find', q); const all = findItems(); const hit = all.find((i) => norm(i.label) === norm(q)) || all.find((i) => norm(i.label).includes(norm(q))); if (hit) pickFind(hit); else U.toast('Koi agent / TL match nahi hua', 'err'); } });
     if (params.q) { findInput.value = params.q; const all = findItems(); const hit = all.find((i) => norm(i.label) === norm(params.q)) || all.find((i) => norm(i.label).includes(norm(params.q))); if (hit) setTimeout(() => pickFind(hit), 50); }
-    U.$('#pf-q', body).addEventListener('input', U.debounce((e) => { state.filters.q = e.target.value; refilter(); }, 160));
+    U.$('#pf-q', body).addEventListener('input', U.debounce((e) => {
+      state.filters.q = e.target.value;
+      if (state.filters.q && FF.notifications && FF.notifications.logSearch) {
+        FF.notifications.logSearch('Performance Filter', state.filters.q);
+      }
+      refilter();
+    }, 400));
     [['pf-tl', 'tl'], ['pf-alert', 'alert']].forEach(([id, key]) => U.$(`#${id}`, body).addEventListener('change', (e) => { state.filters[key] = e.target.value; refilter(); }));
     U.$('#pf-hidezero', body).addEventListener('change', (e) => { state.filters.hideZero = e.target.checked; refilter(); });
     U.$('#pf-clear', body).addEventListener('click', () => { state.filters = EMPTY_FILTERS(); U.$('#pf-q', body).value = ''; ['pf-tl', 'pf-alert'].forEach((id) => { U.$(`#${id}`, body).value = ''; }); U.$('#pf-hidezero', body).checked = false; refilter(); });

@@ -149,8 +149,8 @@ window.FF = window.FF || {};
   }
 
   // ---- derived helpers ---------------------------------------------------------
-  function months(daily) { return U.uniq(daily.map((r) => r.ym)).sort(); }
-  function latestDate(daily) { return daily.reduce((acc, r) => (!acc || r.d > acc ? r.d : acc), null); }
+  function months(daily) { return U.uniq((daily || []).map((r) => r.ym)).sort(); }
+  function latestDate(daily) { return (daily || []).reduce((acc, r) => (!acc || r.d > acc ? r.d : acc), null); }
 
   /** Per-day totals for a month: { days:[1..N], labels, totals[], byGroup:{...} } */
   function dailySeries(daily, ym, dimFn) {

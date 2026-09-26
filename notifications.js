@@ -9,7 +9,7 @@ window.FF = window.FF || {};
   const esc = U.esc;
 
   function icon(item) {
-    return ({ report: '📊', login: '🔐', activity: '👀', location: '📍' }[item.type] || '🔔');
+    return ({ report: '📊', login: '🔐', activity: '👀', location: '📍', search: '🔍', click: '👆' }[item.type] || '🔔');
   }
   function canBrowserAlert() {
     return typeof Notification !== 'undefined' && Notification.permission === 'granted';
@@ -102,6 +102,23 @@ window.FF = window.FF || {};
     if (!FF.auth || !FF.auth.user) return;
     FF.auth.api('/api/activity', 'POST', { page: page || 'dashboard' }).catch(() => {});
   }
-  FF.notifications = { start, stop, poll, toggle, activity, get state() { return state; } };
+  let searchDebounceTimer = null;
+  function logSearch(option, query) {
+    if (!FF.auth || !FF.auth.user || !query || !String(query).trim()) return;
+    const q = String(query).trim();
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => {
+      FF.auth.api('/api/activity', 'POST', { type: 'search', option: option || 'Search', query: q })
+        .then(() => poll(false))
+        .catch(() => {});
+    }, 600);
+  }
+  function logClick(option, details) {
+    if (!FF.auth || !FF.auth.user || !option) return;
+    FF.auth.api('/api/activity', 'POST', { type: 'click', option: option || 'Option', details: details || '' })
+      .then(() => poll(false))
+      .catch(() => {});
+  }
+  FF.notifications = { start, stop, poll, toggle, activity, logSearch, logClick, get state() { return state; } };
   bind();
 })(window.FF);

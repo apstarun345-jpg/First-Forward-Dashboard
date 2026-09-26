@@ -131,7 +131,7 @@ window.FF = window.FF || {};
     updateInstallBtn();
   }
 
-  // ---- top-right user menu v2 ----
+  // ---- top-right user menu ----
   function renderTopUser() {
     const u = FF.auth.user;
     const btn = U.$('#user-btn');
@@ -139,67 +139,52 @@ window.FF = window.FF || {};
     btn.innerHTML = `${FF.auth.avatarHtml(u, 'top')}<span class="user-btn-text"><b>${esc(u.name || u.username)}</b><small>${FF.auth.roleLabel(u)}</small></span><span class="chev">▾</span>`;
     const menu = U.$('#user-menu');
     if (!menu) return;
+    const unread = (FF.notifications && FF.notifications.state && FF.notifications.state.unread) || 0;
     menu.innerHTML = `
-      <div class="user-menu-head v2">
-        <div class="um-avatar-wrap" id="um-avatar-wrap" title="Photo badlo - click karo">
-          ${FF.auth.avatarHtml(u, 'lg')}
-          <span class="um-edit-badge">✏️</span>
-          <input type="file" accept="image/*" id="um-avatar" hidden>
-        </div>
-        <div class="um-info">
-          <b>${esc(u.name || u.username)}</b><span class="dim">@${esc(u.username)}</span>
-          <div class="um-fields">
-            <label class="um-field"><span class="um-f-label">Name</span><input class="input" id="um-name" value="${esc(u.name || '')}" placeholder="Full name"></label>
-            <label class="um-field"><span class="um-f-label">Email</span><input class="input" id="um-email" type="email" value="${esc(u.email || '')}" placeholder="you@mail.com"></label>
-            <label class="um-field"><span class="um-f-label">Mobile</span><input class="input" id="um-mobile" value="${esc(u.mobile || '')}" placeholder="98xxxxxxxx" inputmode="tel"></label>
+      <div class="user-card-clean">
+        <div class="ucc-head">
+          <div class="ucc-avatar">${FF.auth.avatarHtml(u, 'lg')}</div>
+          <div class="ucc-name-box">
+            <h3 class="ucc-name">${esc(u.name || u.username)}</h3>
+            <span class="ucc-role-badge ${u.role === 'admin' ? 'admin' : ''}">${FF.auth.roleLabel(u)}</span>
           </div>
-          <div class="btn-row" style="margin-top:8px"><button class="btn small primary" id="um-save">💾 Save</button><button class="btn small" id="um-pw">🔑 Password</button></div>
-          <span class="badge ${u.role === 'admin' ? 'indigo' : 'gray'}" style="margin-top:6px;display:inline-block">${FF.auth.roleLabel(u)}</span>
         </div>
-      </div>
-      <div class="user-menu-body v2">
-        <a href="#/home" data-close-menu>🏠 Home</a>
-        <a href="#/tagIssued" data-close-menu>🏷️ GV & FF Tag Issued</a>
-        <a href="#/settings?tab=account" data-close-menu>⚙️ Settings · My account</a>
-        ${FF.auth.isAdmin() ? `<a href="#/settings?tab=access" data-close-menu>🔐 Access matrix (admin)</a><a href="#/settings?tab=sources" data-close-menu>🗂️ Sheets & tabs (admin)</a>` : ''}
-        ${u.mustChangePassword ? '<div class="um-warn">⚠️ Default password chal raha hai — badal lo</div>' : ''}
-        <button class="um-logout" id="user-logout">⎋ Logout</button>
-      </div>
-      <div class="user-menu-foot dim small">Last login ${u.lastLoginAt ? U.timeLabel(new Date(u.lastLoginAt).getTime()) : '—'}${u.lastLocation ? ` · <a href="https://www.google.com/maps?q=${u.lastLocation.latitude},${u.lastLocation.longitude}" target="_blank">📍 ${esc(U.timeLabel(new Date(u.lastLocation.at).getTime()))}</a>` : ''}</div>`;
+        <div class="ucc-details">
+          <div class="ucc-row">
+            <span class="ucc-icon">📱</span>
+            <div class="ucc-info">
+              <span class="ucc-label">Mobile Number</span>
+              <b class="ucc-val">${esc(u.mobile || 'Not set')}</b>
+            </div>
+          </div>
+          <div class="ucc-row">
+            <span class="ucc-icon">✉️</span>
+            <div class="ucc-info">
+              <span class="ucc-label">Email Address</span>
+              <b class="ucc-val">${esc(u.email || 'Not set')}</b>
+            </div>
+          </div>
+        </div>
+        <div class="ucc-actions">
+          <button class="ucc-btn ucc-notify" id="um-open-notifications">
+            <span class="ucc-btn-ico">🔔</span>
+            <span class="ucc-btn-text">Notifications</span>
+            ${unread > 0 ? `<span class="ucc-unread">${unread}</span>` : ''}
+          </button>
+          <button class="ucc-btn ucc-logout" id="user-logout">
+            <span class="ucc-btn-ico">⎋</span>
+            <span class="ucc-btn-text">Logout</span>
+          </button>
+        </div>
+      </div>`;
     const logout = U.$('#user-logout', menu);
     if (logout) logout.addEventListener('click', () => FF.auth.logout());
-    const saveBtn = U.$('#um-save', menu);
-    if (saveBtn) saveBtn.addEventListener('click', async () => {
-      const name = U.$('#um-name', menu).value.trim();
-      const email = U.$('#um-email', menu).value.trim();
-      const mobile = U.$('#um-mobile', menu).value.trim();
-      saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
-      try {
-        await FF.auth.api('/api/auth/profile', 'POST', { name, email, mobile });
-        await FF.auth.refreshUser();
-        renderSidebar();
-        renderTopUser();
-        U.toast('Profile update ✓', 'ok');
-      } catch (e) { U.toast(e.message, 'err'); }
-      saveBtn.disabled = false; saveBtn.textContent = '💾 Save';
-    });
-    const pwBtn = U.$('#um-pw', menu);
-    if (pwBtn) pwBtn.addEventListener('click', () => { toggleUserMenu(false); location.hash = '#/settings?tab=account'; });
-    const avatarWrap = U.$('#um-avatar-wrap', menu);
-    const up = U.$('#um-avatar', menu);
-    if (avatarWrap && up) {
-      avatarWrap.addEventListener('click', () => up.click());
-      up.addEventListener('change', async () => {
-        const file = up.files && up.files[0];
-        if (!file) return;
-        try {
-          const dataUrl = await readAvatar(file, 256);
-          await FF.auth.api('/api/auth/profile', 'POST', { avatar: dataUrl });
-          await FF.auth.refreshUser();
-          renderSidebar();
-          renderTopUser();
-          U.toast('Profile photo update ✓', 'ok');
-        } catch (err) { U.toast(err.message, 'err'); }
+    const notifyBtn = U.$('#um-open-notifications', menu);
+    if (notifyBtn) {
+      notifyBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleUserMenu(false);
+        if (FF.notifications) FF.notifications.toggle(true);
       });
     }
   }
@@ -451,18 +436,26 @@ window.FF = window.FF || {};
     setInterval(updateInstallBtn, 3000);
   }
 
+  function onBackgroundDataUpdated() {
+    // If user is on a data page, smoothly re-render so new stock and stats appear automatically
+    if (['stock', 'home', 'tagIssued', 'dashboard', 'trend', 'performance', 'gvStock', 'gvDashboard', 'gvTrend', 'gvPerformance', 'compare', 'sheet'].includes(current.page)) {
+      renderCurrent({ bgUpdated: true });
+    }
+  }
+
   function onLogin() {
     renderSidebar();
     FF.auth.applyTheme();
     document.body.classList.add('ready');
-    // Fast path: core datasets first, then background all sheets
-    FF.store.preload(false).catch(() => {});
-    if (FF.gv && FF.gv.enabled()) FF.gv.preload(false).catch(() => {});
+    renderCurrent(); // Instant initial render
+    // Background update: start immediately with fresh: true so ALL data & sheets update in background!
     if (FF.preloader) {
-      setTimeout(() => FF.preloader.preloadAll(false).catch(() => {}), 800);
+      setTimeout(() => FF.preloader.preloadAll(true).catch(console.warn), 150);
+    } else {
+      FF.store.preload(true).catch(console.warn);
+      if (FF.gv && FF.gv.enabled()) FF.gv.preload(true).catch(console.warn);
     }
     if (FF.notifications) FF.notifications.start();
-    renderCurrent();
     const u = FF.auth.user;
     if (u && u.mustChangePassword) setTimeout(() => U.toast('⚠️ Default password chal raha hai — Settings → My account se badlo', 'err'), 900);
     // Location prompt + PWA
@@ -472,6 +465,12 @@ window.FF = window.FF || {};
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('./sw.js').then(() => console.log('SW registered')).catch(e => console.warn('SW failed', e));
     }
+    // Auto background sync every 5 minutes when tab is open
+    setInterval(() => {
+      if (document.visibilityState === 'visible' && FF.preloader && !FF.preloader.running) {
+        FF.preloader.preloadAll(true).catch(() => {});
+      }
+    }, 5 * 60 * 1000);
   }
 
   async function init() {
@@ -481,6 +480,6 @@ window.FF = window.FF || {};
     if (ok) onLogin();
   }
 
-  FF.app = { navigate, updateParams, refresh, openDrawer, closeDrawer, renderSidebar, renderCurrent, renderTopUser, onLogin, promptInstall, PAGES, get current() { return current; } };
+  FF.app = { navigate, updateParams, refresh, openDrawer, closeDrawer, renderSidebar, renderCurrent, renderTopUser, onLogin, onBackgroundDataUpdated, promptInstall, PAGES, get current() { return current; } };
   document.addEventListener('DOMContentLoaded', init);
 })(window.FF);

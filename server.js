@@ -62,12 +62,12 @@ export const PAGE_PERMISSIONS = [
 
 // Sheet-tab registry defaults (also mirrored in config.js). `enabled:false` hides a tab everywhere.
 export const DEFAULT_TABS = [
-  { id: 'StockDataa', group: 'First Forward', source: 'main', kind: 'stock', icon: '📦', label: 'StockDataa · Inventory', tab: 'StockDataa', gid: '', desc: 'Field stock (tag-wise)', enabled: true },
-  { id: 'REPORT', group: 'First Forward', source: 'main', kind: 'report', icon: '📑', label: 'REPORT', tab: 'REPORT', gid: '242489821', desc: 'Agent-wise summary: stock + issuance + status', enabled: true },
-  { id: 'EIR', group: 'First Forward', source: 'main', kind: 'issuance', icon: '🗂️', label: 'EIR · Issuance log', tab: 'EIR', gid: '', desc: 'Har tag ka issuance record (bada tab)', enabled: false },
-  { id: 'GV Master', group: 'GV Partner', source: 'gv', kind: 'gv-issuance', icon: '🚀', label: 'GV Master · Issuance', tab: 'GV Master', gid: '', desc: 'GV partner ka poora issuance data', enabled: true },
-  { id: 'Tag Assignment', group: 'GV Partner', source: 'gv', kind: 'gv-stock', icon: '📦', label: 'Tag Assignment · Stock', tab: 'Tag Assignment', gid: '', desc: 'GV partner stock (tag-wise, In Stock)', enabled: true },
-  { id: 'GV REPORT', group: 'GV Partner', source: 'gv', kind: 'gv-report', icon: '📑', label: 'GV REPORT · Performance', tab: 'GV REPORT', gid: '1284424234', desc: 'GV agent-wise performance + stock', enabled: true }
+  { id: 'StockDataa', group: 'First Forward', source: 'main', kind: 'stock', icon: '📦', label: 'StockDataa · Inventory', tab: 'StockDataa', gid: '', startCol: 'A', startRow: '1', endCol: 'M', endRow: '', range: '', desc: 'Field stock (tag-wise)', enabled: true, search: ['I', 'H', 'K', 'B', 'D', 'F', 'C'] },
+  { id: 'REPORT', group: 'First Forward', source: 'main', kind: 'report', icon: '📑', label: 'REPORT', tab: 'REPORT', gid: '242489821', startCol: 'A', startRow: '1', endCol: '', endRow: '', range: '', desc: 'Agent-wise summary: stock + issuance + status', enabled: true },
+  { id: 'EIR', group: 'First Forward', source: 'main', kind: 'issuance', icon: '🗂️', label: 'EIR · Issuance log', tab: 'EIR', gid: '', startCol: 'A', startRow: '1', endCol: '', endRow: '', range: '', desc: 'Har tag ka issuance record (bada tab)', enabled: false, search: ['B', 'L', 'G', 'AH', 'E'] },
+  { id: 'GV Master', group: 'GV Partner', source: 'gv', kind: 'gv-issuance', icon: '🚀', label: 'GV Master · Issuance', tab: 'GV Master', gid: '', startCol: 'A', startRow: '1', endCol: 'X', endRow: '', range: '', desc: 'GV partner ka poora issuance data', enabled: true, search: ['B', 'A', 'D', 'E', 'I'] },
+  { id: 'Tag Assignment', group: 'GV Partner', source: 'gv', kind: 'gv-stock', icon: '📦', label: 'Tag Assignment · Stock', tab: 'Tag Assignment', gid: '', startCol: 'A', startRow: '1', endCol: 'M', endRow: '', range: '', desc: 'GV partner stock (tag-wise, In Stock)', enabled: true, search: ['F', 'B', 'C', 'H', 'A'] },
+  { id: 'GV REPORT', group: 'GV Partner', source: 'gv', kind: 'gv-report', icon: '📑', label: 'GV REPORT · Performance', tab: 'GV REPORT', gid: '1284424234', startCol: 'A', startRow: '4', endCol: 'BE', endRow: '', range: 'A4:BE', desc: 'GV agent-wise performance + stock', enabled: true }
 ];
 
 /** Permission descriptors: fixed pages/actions + one per registered sheet tab. */
@@ -335,7 +335,15 @@ function upstreamUrl(params) {
   if (gid) p.set('gid', gid); else if (sheet) p.set('sheet', sheet);
   const tq = params.get('tq');
   if (tq) p.set('tq', tq);
-  const range = params.get('range');
+  let range = params.get('range');
+  if (!range) {
+    const tabs = (db.settings && Array.isArray(db.settings.tabs)) ? db.settings.tabs : DEFAULT_TABS;
+    const tabMatch = tabs.find((t) => (sheet && (t.tab === sheet || t.id === sheet)) || (gid && t.gid === gid));
+    if (tabMatch && tabMatch.range) range = tabMatch.range;
+    else if (tabMatch && (tabMatch.startCol || tabMatch.startRow || tabMatch.endCol || tabMatch.endRow)) {
+      range = `${tabMatch.startCol || 'A'}${tabMatch.startRow || 1}:${tabMatch.endCol || ''}${tabMatch.endRow || ''}`;
+    }
+  }
   if (range) p.set('range', range.slice(0, 40).replace(/[^A-Za-z0-9:$]/g, ''));
   const sheetId = (params.get('id') || db.settings.sheetId || DEFAULT_SHEET_ID).replace(/[^A-Za-z0-9_-]/g, '');
   return `${GVIZ_BASE}/spreadsheets/d/${sheetId}/gviz/tq?${p.toString()}`;
@@ -553,7 +561,32 @@ async function handleApi(req, res, url) {
   if (p === '/api/activity' && method === 'POST') {
     if (!user) throw new HttpError(401, 'Login required');
     const body = await readBody(req);
-    noteActivity(user, body.page);
+    const type = String(body.type || (body.query ? 'search' : 'activity'));
+    if (type === 'search' || body.query) {
+      const q = String(body.query || '').trim().slice(0, 120);
+      const opt = String(body.option || body.page || 'Search').trim().slice(0, 80);
+      if (q) {
+        recordNotification({
+          type: 'search',
+          title: `🔍 Search: ${q}`,
+          body: `${user.name || user.username} (${user.mobile || 'No Mobile'}) ne ${opt} me "${q}" search kiya.`,
+          target: 'broadcast',
+          meta: { username: user.username, name: user.name, mobile: user.mobile, option: opt, query: q, at: new Date().toISOString() }
+        });
+      }
+    } else if (type === 'click' || body.action === 'click') {
+      const opt = String(body.option || body.page || 'Option').trim().slice(0, 80);
+      const det = String(body.details || '').trim().slice(0, 120);
+      recordNotification({
+        type: 'click',
+        title: `👆 Option: ${opt}`,
+        body: `${user.name || user.username} (${user.mobile || 'No Mobile'}) ne "${opt}" option click kiya${det ? ` (${det})` : ''}.`,
+        target: 'broadcast',
+        meta: { username: user.username, name: user.name, mobile: user.mobile, option: opt, details: det, at: new Date().toISOString() }
+      });
+    } else {
+      noteActivity(user, body.page);
+    }
     return sendJson(res, 200, { ok: true });
   }
   // ---- forgot password ("Forgot password?" on the login screen) ----
@@ -636,7 +669,6 @@ async function handleApi(req, res, url) {
 
   // ---- gviz ----
   if (p === '/api/gviz' && method === 'GET') {
-    if (url.searchParams.get('fresh') === '1' && user.role !== 'admin' && !(user.permissions || []).includes('refresh')) url.searchParams.delete('fresh');
     return handleGviz(res, url.searchParams);
   }
 
@@ -658,6 +690,12 @@ async function handleApi(req, res, url) {
         id: String(t.id).slice(0, 60), group: String(t.group || 'First Forward').slice(0, 40), source: t.source === 'gv' ? 'gv' : 'main',
         kind: String(t.kind || 'sheet').slice(0, 30), icon: String(t.icon || '📄').slice(0, 8), label: String(t.label || t.id).slice(0, 80),
         tab: String(t.tab || t.id).slice(0, 80), gid: String(t.gid || '').slice(0, 30), desc: String(t.desc || '').slice(0, 160),
+        startCol: String(t.startCol || '').slice(0, 8).toUpperCase(),
+        startRow: String(t.startRow || '').slice(0, 12),
+        endCol: String(t.endCol || '').slice(0, 8).toUpperCase(),
+        endRow: String(t.endRow || '').slice(0, 12),
+        range: String(t.range || '').slice(0, 40).toUpperCase(),
+        search: Array.isArray(t.search) ? t.search.map((s) => String(s).slice(0, 6).toUpperCase()) : undefined,
         enabled: t.enabled !== false
       }));
     }

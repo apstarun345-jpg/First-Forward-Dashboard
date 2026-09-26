@@ -205,21 +205,53 @@ FF.pages = FF.pages || {};
         <td><select data-tab-field="source"><option value="main" ${(t.source || 'main') === 'main' ? 'selected' : ''}>First Forward sheet</option><option value="gv" ${t.source === 'gv' ? 'selected' : ''}>GV Partner sheet</option></select></td>
         <td><input class="input mono" data-tab-field="tab" value="${esc(t.tab || t.id)}"></td>
         <td><input class="input mono" data-tab-field="gid" value="${esc(t.gid || '')}" placeholder="—"></td>
+        <td><input class="input mono" style="width:52px" data-tab-field="startCol" value="${esc(t.startCol || 'A')}" placeholder="A"></td>
+        <td><input class="input mono" style="width:52px" data-tab-field="startRow" value="${esc(t.startRow || '1')}" placeholder="1"></td>
+        <td><input class="input mono" style="width:52px" data-tab-field="endCol" value="${esc(t.endCol || '')}" placeholder="M"></td>
+        <td><input class="input mono" style="width:52px" data-tab-field="endRow" value="${esc(t.endRow || '')}" placeholder="all"></td>
+        <td><input class="input mono" style="width:85px" data-tab-field="range" value="${esc(t.range || '')}" placeholder="e.g. A1:M"></td>
         <td><input class="input" data-tab-field="desc" value="${esc(t.desc || '')}"></td>
       </tr>`;
     const table = (title, list, hint) => `<h4 class="mx-h">${title}</h4><p class="dim small">${hint}</p>
-      <div class="table-wrap"><table class="tbl compact matrix"><thead><tr><th>Show</th><th>Tab id / permission</th><th>Label</th><th>Sidebar group</th><th>Spreadsheet</th><th>Sheet tab name</th><th>gid</th><th>Description</th></tr></thead><tbody>${list.map(rowHtml).join('')}</tbody></table></div>`;
-    return `${section('🗂️ Sheets & tabs <span class="dim">(kaun si sheet dikhe)</span>', `
-        <p class="dim small">Har row ek Google Sheet tab hai. <b>Show</b> untick karne se wo tab poore app se hide ho jaata hai (nav, sheets page, aur uske permission checkbox bhi hat jaate hain). Sheet ka naam badal gaya ho to yahan exact naam / gid update kar do. Per-user access <b>Access matrix</b> tab me dena hai.</p>
-        ${table('🟦 First Forward sheet', groupsOf('main'), `Sheet ID: <code>${esc(settings.sheetId || '')}</code> · EIR = issuance log (default hidden, 60k+ rows) · StockDataa = stock · REPORT = agent performance`)}
-        ${table('🟩 GV Partner sheet', groupsOf('gv'), `Sheet ID: <code>${esc(settings.gvSheetId || '')}</code> · GV Master = issuance · Tag Assignment = stock · GV REPORT = agent performance`)}
-        <div class="save-bar"><button class="btn primary" id="tabs-save">💾 Save tabs</button><button class="btn" id="tabs-reload">↻ Data dobara load karo</button><span class="dim small" id="tabs-msg"></span></div>`)}
+      <div class="table-wrap"><table class="tbl compact matrix"><thead><tr><th>Show</th><th>Tab id / permission</th><th>Label</th><th>Sidebar group</th><th>Spreadsheet</th><th>Sheet tab name</th><th>gid</th><th title="Start column (e.g. A)">Start Col</th><th title="Start row (e.g. 1)">Start Row</th><th title="End column (e.g. M, Z, BE)">End Col</th><th title="End row (blank for all)">End Row</th><th title="Custom range (e.g. A1:M, A4:BE)">Range</th><th>Description</th></tr></thead><tbody>${list.map(rowHtml).join('')}</tbody></table></div>`;
+
+    const rangeCards = tabs.map((t) => {
+      const calcRange = t.range || (t.startCol || t.startRow || t.endCol || t.endRow ? `${t.startCol || 'A'}${t.startRow || 1}:${t.endCol || ''}${t.endRow || ''}` : 'A1:');
+      return `<div class="range-config-card" data-range-card="${esc(t.id)}">
+        <div class="rcc-head">
+          <span class="rcc-icon">${t.icon || '📄'}</span>
+          <div><b>${esc(t.label || t.id)}</b> <span class="badge ${t.group === 'GV Partner' ? 'teal' : 'indigo'}">${esc(t.group)}</span></div>
+        </div>
+        <p class="dim small">Tab: <code>${esc(t.tab || t.id)}</code>${t.gid ? ` · gid: <code>${esc(t.gid)}</code>` : ''}</p>
+        <div class="rcc-inputs">
+          <label><span>Start Col</span><input class="input mono rcc-field" data-ref="${esc(t.id)}" data-field="startCol" value="${esc(t.startCol || 'A')}" placeholder="A"></label>
+          <label><span>Start Row</span><input class="input mono rcc-field" data-ref="${esc(t.id)}" data-field="startRow" value="${esc(t.startRow || '1')}" placeholder="1"></label>
+          <label><span>End Col</span><input class="input mono rcc-field" data-ref="${esc(t.id)}" data-field="endCol" value="${esc(t.endCol || '')}" placeholder="M, BE..."></label>
+          <label><span>End Row</span><input class="input mono rcc-field" data-ref="${esc(t.id)}" data-field="endRow" value="${esc(t.endRow || '')}" placeholder="Blank = All"></label>
+          <label class="rcc-range-fld"><span>Applied Range</span><input class="input mono rcc-range" data-ref="${esc(t.id)}" data-field="range" value="${esc(calcRange)}" placeholder="e.g. A1:M"></label>
+        </div>
+        <small class="dim rcc-hint">Data <b>${esc(calcRange)}</b> se fetch hoga (e.g. Row ${t.startRow || 1} Column ${t.startCol || 'A'} se lekar ${t.endCol ? `Column ${t.endCol}` : 'aakhri column'} tak).</small>
+      </div>`;
+    }).join('');
+
+    return `${section('🗂️ Sheets & tabs <span class="dim">(kaun si sheet dikhe aur range)</span>', `
+        <p class="dim small">Har row ek Google Sheet tab hai. <b>Show</b> untick karne se wo tab poore app se hide ho jaata hai. Sheet ka exact naam, gid aur <b>Start/End Col &amp; Row (Range)</b> yahan se set karo. Per-user access <b>Access matrix</b> tab me dena hai.</p>
+        ${table('🟦 First Forward sheet', groupsOf('main'), `Sheet ID: <code>${esc(settings.sheetId || '')}</code> · EIR = issuance log · StockDataa = stock (default range A1:M) · REPORT = performance (default range A1:BZ)`)}
+        ${table('🟩 GV Partner sheet', groupsOf('gv'), `Sheet ID: <code>${esc(settings.gvSheetId || '')}</code> · GV Master = issuance (A1:X) · Tag Assignment = stock (A1:M) · GV REPORT = performance (A4:BE)`)}
+        <div class="save-bar"><button class="btn primary" id="tabs-save">💾 Save tabs &amp; ranges</button><button class="btn" id="tabs-reload">↻ Data dobara load karo (Fresh Sync)</button><span class="dim small" id="tabs-msg"></span></div>`)}
+      ${section('📊 Har Sheet Ka Data: Column & Row Range Selection <span class="dim">(Start to End Bounds)</span>', `
+        <p class="dim small">Kis sheet ka data kaun se row aur column se chahiye aur kahan tak — yahan har sheet ke liye customize karo (jaise Column A Row 1 se Column M tak <code>A1:M</code> ya Row 4 se BE tak <code>A4:BE</code>). Save karne par Google Visualization proxy isi range me query karega.</p>
+        <div class="range-config-grid">${rangeCards}</div>
+        <div class="save-bar"><button class="btn primary" id="range-save-btn">💾 Save range settings</button></div>`)}
       ${section('➕ Naya tab jodo <span class="dim">(optional)</span>', `
-        <p class="dim small">Dono Google Sheets me koi naya tab ho (jaise GV Tag Status) to yahan add karke user ko access de sakte ho.</p>
+        <p class="dim small">Dono Google Sheets me koi naya tab ho to yahan add karke user ko access de sakte ho.</p>
         <div class="form-grid"><label class="fld"><span>Tab id (permission key)</span><input class="input" id="nt-id" placeholder="e.g. GV Tag Status"></label>
         <label class="fld"><span>Label</span><input class="input" id="nt-label" placeholder="GV Tag Status · detail"></label>
         <label class="fld"><span>Sheet tab name</span><input class="input" id="nt-tab" placeholder="GV Tag Status"></label>
         <label class="fld"><span>gid</span><input class="input" id="nt-gid" placeholder="optional"></label>
+        <label class="fld"><span>Start Col</span><input class="input mono" id="nt-start-col" value="A" placeholder="A"></label>
+        <label class="fld"><span>Start Row</span><input class="input mono" id="nt-start-row" value="1" placeholder="1"></label>
+        <label class="fld"><span>End Col</span><input class="input mono" id="nt-end-col" placeholder="M or BE"></label>
         <label class="fld"><span>Group</span><select id="nt-group"><option>GV Partner</option><option>First Forward</option></select></label>
         <label class="fld"><span>Spreadsheet</span><select id="nt-source"><option value="gv">GV Partner sheet</option><option value="main">First Forward sheet</option></select></label></div>
         <div class="save-bar"><button class="btn primary" id="nt-add">➕ Add tab</button></div>`)}
@@ -397,38 +429,100 @@ FF.pages = FF.pages || {};
       const avClr = U.$('#av-clear', body);
       if (avClr) avClr.addEventListener('click', async () => { try { await A.api('/api/auth/profile', 'POST', { avatar: '' }); await A.refreshUser(); FF.app.renderSidebar(); U.toast('Photo hata di ✓', 'ok'); draw(); } catch (err) { U.toast(err.message, 'err'); } });
       // sheets & tabs registry
-      const tabsSave = U.$('#tabs-save', body);
-      if (tabsSave) tabsSave.addEventListener('click', async () => {
-        const msg = U.$('#tabs-msg', body);
-        const tabs = U.$$('[data-tab-row]', body).map((row) => ({
-          id: row.dataset.tabRow,
-          enabled: row.querySelector('[data-tab-enabled]').checked,
-          label: row.querySelector('[data-tab-field="label"]').value,
-          group: row.querySelector('[data-tab-field="group"]').value,
-          source: row.querySelector('[data-tab-field="source"]').value,
-          tab: row.querySelector('[data-tab-field="tab"]').value,
-          gid: row.querySelector('[data-tab-field="gid"]').value,
-          desc: row.querySelector('[data-tab-field="desc"]').value
-        }));
-        msg.textContent = 'Saving…';
+      const collectTabsFromUi = () => {
+        return U.$$('[data-tab-row]', body).map((row) => {
+          const tabId = row.dataset.tabRow;
+          const card = U.$(`[data-range-card="${tabId}"]`, body);
+          const startCol = ((card ? card.querySelector('[data-field="startCol"]')?.value : row.querySelector('[data-tab-field="startCol"]')?.value) || 'A').trim().toUpperCase();
+          const startRow = ((card ? card.querySelector('[data-field="startRow"]')?.value : row.querySelector('[data-tab-field="startRow"]')?.value) || '1').trim();
+          const endCol = ((card ? card.querySelector('[data-field="endCol"]')?.value : row.querySelector('[data-tab-field="endCol"]')?.value) || '').trim().toUpperCase();
+          const endRow = ((card ? card.querySelector('[data-field="endRow"]')?.value : row.querySelector('[data-tab-field="endRow"]')?.value) || '').trim();
+          let range = ((card ? card.querySelector('[data-field="range"]')?.value : row.querySelector('[data-tab-field="range"]')?.value) || '').trim().toUpperCase();
+          if (!range && (startCol || startRow || endCol || endRow)) {
+            range = FF.config.formatRange ? FF.config.formatRange(startCol, startRow, endCol, endRow) : `${startCol || 'A'}${startRow || 1}:${endCol || ''}${endRow || ''}`;
+          }
+          return {
+            id: tabId,
+            enabled: row.querySelector('[data-tab-enabled]').checked,
+            label: row.querySelector('[data-tab-field="label"]').value,
+            group: row.querySelector('[data-tab-field="group"]').value,
+            source: row.querySelector('[data-tab-field="source"]').value,
+            tab: row.querySelector('[data-tab-field="tab"]').value,
+            gid: row.querySelector('[data-tab-field="gid"]').value,
+            desc: row.querySelector('[data-tab-field="desc"]').value,
+            startCol,
+            startRow,
+            endCol,
+            endRow,
+            range
+          };
+        });
+      };
+
+      const saveTabsHandler = async (msgEl) => {
+        const tabs = collectTabsFromUi();
+        if (msgEl) msgEl.textContent = 'Saving…';
         try {
           const out = await A.api('/api/settings', 'PUT', { settings: { tabs } });
           settings = JSON.parse(JSON.stringify(out.settings)); A.applySettings(out.settings); FF.app.renderSidebar();
-          msg.textContent = 'Saved ✓'; U.toast('Sheets & tabs save ho gaye ✓', 'ok');
-          FF.store.reset(); if (FF.gv) FF.gv.reset();
-          await Promise.all([FF.store.preload(false).catch(() => {}), FF.gv && FF.gv.enabled() ? FF.gv.preload(false).catch(() => {}) : Promise.resolve()]);
+          if (msgEl) msgEl.textContent = 'Saved ✓'; U.toast('Sheets, tabs aur ranges save ho gaye ✓', 'ok');
+          if (FF.preloader) {
+            await FF.preloader.fastSync();
+          } else {
+            FF.store.reset(); if (FF.gv) FF.gv.reset();
+            await Promise.all([FF.store.preload(true).catch(() => {}), FF.gv && FF.gv.enabled() ? FF.gv.preload(true).catch(() => {}) : Promise.resolve()]);
+          }
           draw();
-        } catch (err) { msg.textContent = ''; U.toast(err.message, 'err'); }
-      });
+        } catch (err) { if (msgEl) msgEl.textContent = ''; U.toast(err.message, 'err'); }
+      };
+
+      const tabsSave = U.$('#tabs-save', body);
+      if (tabsSave) tabsSave.addEventListener('click', () => saveTabsHandler(U.$('#tabs-msg', body)));
+      const rangeSaveBtn = U.$('#range-save-btn', body);
+      if (rangeSaveBtn) rangeSaveBtn.addEventListener('click', () => saveTabsHandler(null));
+
+      // Live sync between range cards and table inputs
+      U.$$('.rcc-field, .rcc-range', body).forEach((inp) => inp.addEventListener('input', (e) => {
+        const tabId = e.target.dataset.ref;
+        const card = U.$(`[data-range-card="${tabId}"]`, body);
+        const row = U.$(`[data-tab-row="${tabId}"]`, body);
+        if (!card || !row) return;
+        const sCol = (card.querySelector('[data-field="startCol"]')?.value || 'A').trim().toUpperCase();
+        const sRow = (card.querySelector('[data-field="startRow"]')?.value || '1').trim();
+        const eCol = (card.querySelector('[data-field="endCol"]')?.value || '').trim().toUpperCase();
+        const eRow = (card.querySelector('[data-field="endRow"]')?.value || '').trim();
+        const rangeEl = card.querySelector('[data-field="range"]');
+        if (e.target.dataset.field !== 'range' && rangeEl) {
+          const calc = `${sCol}${sRow}:${eCol}${eRow}`;
+          rangeEl.value = calc;
+        }
+        const rowRange = row.querySelector('[data-tab-field="range"]');
+        if (rowRange && rangeEl) rowRange.value = rangeEl.value;
+      }));
+
       const tabsReload = U.$('#tabs-reload', body);
-      if (tabsReload) tabsReload.addEventListener('click', async () => { FF.store.reset(); if (FF.gv) FF.gv.reset(); U.toast('Data dobara load ho raha hai…'); await Promise.all([FF.store.preload(false).catch(() => {}), FF.gv && FF.gv.enabled() ? FF.gv.preload(false).catch(() => {}) : Promise.resolve()]); U.toast('Data load ✓', 'ok'); draw(); });
+      if (tabsReload) tabsReload.addEventListener('click', async () => {
+        U.toast('Google se fresh data background sync chal raha hai…', 'info');
+        if (FF.preloader) {
+          await FF.preloader.fastSync();
+        } else {
+          FF.store.reset(); if (FF.gv) FF.gv.reset();
+          await Promise.all([FF.store.preload(true).catch(() => {}), FF.gv && FF.gv.enabled() ? FF.gv.preload(true).catch(() => {}) : Promise.resolve()]);
+        }
+        U.toast('Fresh data load complete ✓', 'ok');
+        draw();
+      });
       const ntAdd = U.$('#nt-add', body);
       if (ntAdd) ntAdd.addEventListener('click', async () => {
         const id = U.$('#nt-id', body).value.trim();
         if (!id) return U.toast('Tab id daalo', 'err');
         const current = (settings.tabs || []).slice();
         if (current.some((t) => t.id === id)) return U.toast('Ye tab id pehle se hai', 'err');
-        current.push({ id, label: U.$('#nt-label', body).value.trim() || id, tab: U.$('#nt-tab', body).value.trim() || id, gid: U.$('#nt-gid', body).value.trim(), group: U.$('#nt-group', body).value, source: U.$('#nt-source', body).value, kind: 'sheet', icon: '📄', desc: '', enabled: true });
+        const startCol = (U.$('#nt-start-col', body)?.value || 'A').trim().toUpperCase();
+        const startRow = (U.$('#nt-start-row', body)?.value || '1').trim();
+        const endCol = (U.$('#nt-end-col', body)?.value || '').trim().toUpperCase();
+        const range = `${startCol}${startRow}:${endCol}`;
+        current.push({ id, label: U.$('#nt-label', body).value.trim() || id, tab: U.$('#nt-tab', body).value.trim() || id, gid: U.$('#nt-gid', body).value.trim(), group: U.$('#nt-group', body).value, source: U.$('#nt-source', body).value, kind: 'sheet', icon: '📄', desc: '', enabled: true, startCol, startRow, endCol, range });
         try { const out = await A.api('/api/settings', 'PUT', { settings: { tabs: current } }); settings = JSON.parse(JSON.stringify(out.settings)); A.applySettings(out.settings); FF.app.renderSidebar(); U.toast('Tab add ho gaya ✓ — ab Access matrix me user ko do', 'ok'); draw(); } catch (err) { U.toast(err.message, 'err'); }
       });
       // backup

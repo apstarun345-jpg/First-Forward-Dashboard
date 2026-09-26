@@ -232,8 +232,22 @@ FF.pages = FF.pages || {};
       if (!s) P.classes.forEach((c) => list.push({ kind: 'cls', kindLabel: 'Class', label: c, sub: `${U.fmt(P.byClass.get(c))} tags`, value: c }));
       return list;
     };
-    const go = (scope, value) => FF.app.navigate('stock', scope === 'agent' ? { agent: value } : scope === 'tl' ? { tl: value } : { cls: value });
-    U.suggest(input, { items, onPick: (it) => go(it.kind, it.value), onEnter: (q) => { const all = items(); const hit = all.find((i) => norm(i.label) === norm(q)) || all.find((i) => norm(i.label).includes(norm(q))); if (hit) go(hit.kind, hit.value); else U.toast('Koi agent / TL match nahi hua', 'err'); } });
+    const go = (scope, value) => {
+      if (FF.notifications && FF.notifications.logClick) {
+        FF.notifications.logClick(`Stock ${scope.toUpperCase()}`, value);
+      }
+      FF.app.navigate('stock', scope === 'agent' ? { agent: value } : scope === 'tl' ? { tl: value } : { cls: value });
+    };
+    const logStockSearch = U.debounce((q) => {
+      if (q && FF.notifications && FF.notifications.logSearch) {
+        FF.notifications.logSearch('Stock / Inventory', q);
+      }
+    }, 600);
+    input.addEventListener('input', () => {
+      const q = input.value.trim();
+      if (q) logStockSearch(q);
+    });
+    U.suggest(input, { items, onPick: (it) => { if (it.value && FF.notifications && FF.notifications.logSearch) FF.notifications.logSearch('Stock / Inventory', it.value); go(it.kind, it.value); }, onEnter: (q) => { if (q && FF.notifications && FF.notifications.logSearch) FF.notifications.logSearch('Stock / Inventory', q); const all = items(); const hit = all.find((i) => norm(i.label) === norm(q)) || all.find((i) => norm(i.label).includes(norm(q))); if (hit) go(hit.kind, hit.value); else U.toast('Koi agent / TL match nahi hua', 'err'); } });
     U.$('#st-clear', root).addEventListener('click', () => FF.app.navigate('stock', {}));
     root.addEventListener('click', (e) => {
       const a = e.target.closest('[data-pick-agent]'); if (a) { go('agent', a.dataset.pickAgent); return; }
@@ -242,7 +256,14 @@ FF.pages = FF.pages || {};
       const x = e.target.closest('#st-xlsx'); if (x && pivot) exportExcel(P, view, pivot, x);
     });
     root.addEventListener('change', (e) => {
-      if (e.target.id === 'st-cls') { view.cls = e.target.value; overview(P, body); C.mount(body); }
+      if (e.target.id === 'st-cls') {
+        view.cls = e.target.value;
+        if (FF.notifications && FF.notifications.logClick) {
+          FF.notifications.logClick('Stock Class Filter', view.cls || 'All classes');
+        }
+        overview(P, body);
+        C.mount(body);
+      }
     });
   }
 
