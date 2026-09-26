@@ -63,33 +63,58 @@ window.FF = window.FF || {};
     ? `<img class="auth-logo ${size || ''}" src="${esc(FF.config.logo)}" alt="">`
     : `<div class="auth-logo mono-logo ${size || ''}">${esc((FF.config.brand || 'FF').split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase())}</div>`);
 
-  // ---- Professional visual with company logos ----
+  // ---- Professional visual v4: ApnaPayment big text top, GADIVAN + FIRST forward below, pure English ----
   function visualHtml() {
-    const c = FF.config;
-    return `<div class="auth-visual pro-visual">
+    return `<div class="auth-visual pro-visual v4">
       <div class="pro-bg"></div>
       <div class="pro-grid"></div>
       <div class="pro-glow g1"></div>
       <div class="pro-glow g2"></div>
-      <div class="auth-visual-inner pro-inner">
-        <!-- Company Logos Header -->
-        <div class="company-header">
-          <div class="company-logos">
-            <div class="c-logo-box gadivan"><img src="./logos/gadivan.png" alt="GADIVAN"><span>GV Partner</span></div>
-            <div class="c-logo-box firstfwd"><img src="./logos/first-forward.png" alt="FIRST forward"><span>IDFC First Forward</span></div>
-            <div class="c-logo-box apna"><img src="./logos/apna-payment.png" alt="ApnaPayment"><span>Payment Partner</span></div>
+      <div class="auth-visual-inner pro-inner v4-inner">
+        <!-- ApnaPayment Company - Top, Only Text Big, No Background Color -->
+        <div class="apna-top">
+          <div class="apna-text-logo">
+            <span class="apna-a">A</span>pnaPayment
+            <span class="apna-tri" style="color:#FFFF00">▶</span>
           </div>
-          <div class="company-badge">Unified FASTag Platform</div>
+          <div class="apna-sub">Revolutionary Payment Solution</div>
+          <div class="apna-company-label">ApnaPayment Company - Powering FASTag Ecosystem</div>
         </div>
 
-        <div class="pro-brand">${logoHtml('big')}<div><b>${esc(c.brand || 'First Forward')}</b><small>${esc(c.tagline || 'Dashboard')}</small></div><span class="pro-ver">v3.2 Professional</span></div>
+        <!-- Partners: GADIVAN GV Partner + FIRST forward Dashboard - Only Text Below Logos -->
+        <div class="partners-row">
+          <div class="partner-box gadivan-box">
+            <img src="./logos/gadivan.png" alt="GADIVAN" class="partner-logo">
+            <div class="partner-text">
+              <b>GADIVAN</b>
+              <span>GV Partner</span>
+            </div>
+          </div>
+          <div class="partner-divider">×</div>
+          <div class="partner-box fwd-box">
+            <img src="./logos/first-forward.png" alt="FIRST forward" class="partner-logo fwd">
+            <div class="partner-text">
+              <b>FIRST forward</b>
+              <span>First Forward Dashboard</span>
+              <small>TOLL AND FUEL PAYMENT • IDFC First Forward</small>
+            </div>
+          </div>
+        </div>
+
+        <div class="company-relation">
+          <span class="rel-item"><i>🏢</i> ApnaPayment Company</span>
+          <span class="rel-sep">•</span>
+          <span class="rel-item"><i>🤝</i> GV Partner - GADIVAN</span>
+          <span class="rel-sep">•</span>
+          <span class="rel-item"><i>📊</i> First Forward Dashboard</span>
+        </div>
         
         <h2 class="pro-title">Unified FASTag Intelligence Platform</h2>
         <p class="pro-sub">Enterprise-grade dashboard for toll and fuel payment operations. Monitor, analyze, and optimize your FASTag business across First Forward and GV Partner channels.</p>
 
         <div class="pro-features">
-          <div class="pf-card"><div class="pf-icon" style="background:#eef2ff;color:#4f46e5">📊</div><div><b>First Forward Analytics</b><span>EIR issuance log, StockDataa inventory, REPORT performance. Real-time KPIs, VC4 vs Commercial breakdown, agent and TL rankings.</span></div></div>
-          <div class="pf-card"><div class="pf-icon" style="background:#ccfbf1;color:#0d9488">🚀</div><div><b>GV Partner (GADIVAN)</b><span>GV Master issuance, Tag Assignment stock, GV REPORT. Complete partner performance tracking and dispatch alerts.</span></div></div>
+          <div class="pf-card"><div class="pf-icon" style="background:#eef2ff;color:#4f46e5">📊</div><div><b>First Forward Dashboard</b><span>EIR issuance log, StockDataa inventory, REPORT performance. Real-time KPIs, VC4 vs Commercial breakdown, agent and TL rankings.</span></div></div>
+          <div class="pf-card"><div class="pf-icon" style="background:#ccfbf1;color:#0d9488">🚀</div><div><b>GV Partner - GADIVAN</b><span>GV Master issuance, Tag Assignment stock, GV REPORT. Complete partner performance tracking and dispatch alerts.</span></div></div>
           <div class="pf-card"><div class="pf-icon" style="background:#fef3c7;color:#d97706">⚖️</div><div><b>Comparative Intelligence</b><span>Side-by-side GV vs First Forward comparison, daily MTD trends, projected month-end, class-wise growth analysis.</span></div></div>
           <div class="pf-card"><div class="pf-icon" style="background:#fce7f3;color:#db2777">🏷️</div><div><b>Tag Issued Insights</b><span>Date-wise detailed issuance — select any date to view VC4, Commercial, class-wise up/down trends for both channels.</span></div></div>
         </div>
@@ -100,14 +125,6 @@ window.FF = window.FF || {};
           <div class="ps-item"><b>🏆 Performance</b><small>Agent & TL rankings, Excel export, WhatsApp share</small></div>
         </div>
 
-        <div class="pro-footer-logos">
-          <span>Powered by</span>
-          <img src="./logos/first-forward.png" alt="First Forward" class="mini-logo">
-          <span style="color:#e0e7ff">×</span>
-          <img src="./logos/gadivan.png" alt="GADIVAN" class="mini-logo" style="background:#E53935;border-radius:6px;padding:2px">
-          <span style="color:#e0e7ff">×</span>
-          <img src="./logos/apna-payment.png" alt="ApnaPayment" class="mini-logo" style="background:#111;border-radius:6px;padding:3px">
-        </div>
       </div>
     </div>`;
   }
@@ -130,8 +147,8 @@ window.FF = window.FF || {};
           
           <form id="auth-form" autocomplete="on" novalidate class="pro-form">
             ${mode === 'signup' ? `<label class="pro-label"><span>Full Name</span><input name="name" class="input pro-input" required maxlength="80" placeholder="Enter your full name" autocomplete="name"></label>` : ''}
-            <label class="pro-label"><span>${mode === 'signup' ? 'Username' : 'Username / Email / Mobile'}</span><input name="username" class="input pro-input" required ${mode === 'signup' ? 'minlength="3" maxlength="60"' : 'minlength="2" maxlength="120"'} placeholder="${mode === 'signup' ? 'Choose a username' : 'Enter username, email or mobile number'}" autocapitalize="none" autocomplete="username" ${mode !== 'signup' ? 'inputmode="text"' : ''}></label>
-            ${mode === 'signup' ? `<div class="two"><label class="pro-label"><span>Mobile</span><input name="mobile" class="input pro-input" inputmode="tel" placeholder="98xxxxxxxx" autocomplete="tel"></label><label class="pro-label"><span>Email</span><input name="email" class="input pro-input" type="email" placeholder="you@company.com" autocomplete="email"></label></div>` : '<div class="pro-hint">💡 You can login with username, registered email, or mobile number + password</div>'}
+            <label class="pro-label"><span>${mode === 'signup' ? 'Username' : 'Username / Mobile Number / Email'}</span><input name="username" class="input pro-input" required ${mode === 'signup' ? 'minlength="3" maxlength="60"' : 'minlength="2" maxlength="120"'} placeholder="${mode === 'signup' ? 'Choose a username' : 'Enter username, mobile number or email'}" autocapitalize="none" autocomplete="username" ${mode !== 'signup' ? 'inputmode="text"' : ''}></label>
+            ${mode === 'signup' ? `<div class="two"><label class="pro-label"><span>Mobile Number</span><input name="mobile" class="input pro-input" inputmode="tel" placeholder="Enter mobile number" autocomplete="tel"></label><label class="pro-label"><span>Email Address</span><input name="email" class="input pro-input" type="email" placeholder="Enter email address" autocomplete="email"></label></div>` : '<div class="pro-hint">💡 You can login with username, mobile number or email + password</div>'}
             <label class="pro-label"><span>Password</span><span class="pw-wrap"><input name="password" class="input pro-input" type="password" required minlength="6" autocomplete="${mode === 'signup' ? 'new-password' : 'current-password'}" placeholder="Enter password (min 6 characters)"><button type="button" class="pw-eye" data-eye title="Show / Hide password">👁</button></span></label>
             <div class="auth-row pro-row">
               <label class="check small"><input type="checkbox" id="auth-remember" checked> <span>Remember me</span></label>
