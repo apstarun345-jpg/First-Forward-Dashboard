@@ -68,11 +68,13 @@ FF.pages = FF.pages || {};
 
   async function render(root, params, ctx) {
     const name = params.name || '';
-    const cfg = FF.config.sheetByName(name) || { name, icon: '📄', title: name, desc: '' };
-    const state = getState(name);
+    const cfg = FF.config.sheetByName(name) || { id: name, tab: name, icon: '📄', label: name, desc: '' };
+    const sheetTab = cfg.tab || name;   // exact Google Sheet tab name
+    const tabId = cfg.id || name;       // registry id (also the permission key)
+    const state = getState(tabId);
     if (ctx && ctx.fresh) { state.full = null; state.total = null; state.mode = null; state.headerRows = null; }
-    root.innerHTML = `<div class="page-head"><div><h1>${cfg.icon || '📄'} ${esc(cfg.title || name)}</h1><p class="sub">${esc(cfg.desc || `Sheet tab "${name}"`)} · <span id="sh-info">loading…</span></p></div>
-      <div class="head-actions"><button class="btn primary" data-action="refresh">↻ Refresh</button>${FF.auth.can('export') ? '<button class="btn" data-action="export-visible">⬇ Export visible (CSV)</button><button class="btn" data-action="export-visible-xlsx">⬇ Excel</button>' : ''}${name === FF.config.stock.sheet && FF.auth.can('stock') ? '<a class="btn" href="#/stock">📦 Stock pivot / search →</a>' : ''}${name === 'REPORT' && FF.auth.can('performance') ? '<a class="btn" href="#/performance">🏆 Performance →</a>' : ''}</div></div>
+    root.innerHTML = `<div class="page-head"><div><h1>${cfg.icon || '📄'} ${esc(cfg.label || cfg.title || name)}</h1><p class="sub">${esc(cfg.desc || `Sheet tab "${sheetTab}"`)} · <b>${esc(cfg.source === 'gv' ? 'GV Partner' : 'First Forward')}</b> · <span id="sh-info">loading…</span></p></div>
+      <div class="head-actions"><button class="btn primary" data-action="refresh">↻ Refresh</button>${FF.auth.can('export') ? '<button class="btn" data-action="export-visible">⬇ Export visible (CSV)</button><button class="btn" data-action="export-visible-xlsx">⬇ Excel</button>' : ''}${cfg.kind === 'stock' && FF.auth.can('stock') ? '<a class="btn" href="#/stock">📦 Stock pivot / search →</a>' : ''}${cfg.kind === 'gv-stock' && FF.auth.can('gvStock') ? '<a class="btn" href="#/gvStock">📦 GV stock search →</a>' : ''}${cfg.kind === 'report' && FF.auth.can('performance') ? '<a class="btn" href="#/performance">🏆 Performance →</a>' : ''}${cfg.kind === 'gv-report' && FF.auth.can('gvPerformance') ? '<a class="btn" href="#/gvPerformance">🏆 GV performance →</a>' : ''}</div></div>
       <div id="sh-warn"></div>
       <div class="card grid-card"><div class="toolbar"><input id="sh-q" class="input wide" placeholder="Search… (Enter)" value="${esc(state.q)}"><span id="sh-mode" class="dim small"></span><div class="pager" id="sh-pager"></div></div>
       <div class="table-wrap grid-wrap" id="sh-grid">${U.spinner('Sheet load ho rahi hai…')}</div></div>`;
@@ -82,8 +84,8 @@ FF.pages = FF.pages || {};
     const fresh = !!(ctx && ctx.fresh);
 
     function checkFallback(table) {
-      if (name !== 'EIR' && D.looksLikeEIR(table)) {
-        warn.innerHTML = `<div class="warn-box">⚠️ Google ne "<b>${esc(name)}</b>" naam ka tab nahi pehchana, isliye pehla tab (EIR) dikh raha hai. Sheet me tab ka exact naam check karo ya Settings → Data source me is sheet ka <code>gid</code> set karo (Google URL me <code>#gid=…</code>).</div>`;
+      if (sheetTab !== 'EIR' && D.looksLikeEIR(table)) {
+        warn.innerHTML = `<div class="warn-box">⚠️ Google ne "<b>${esc(name)}</b>" naam ka tab nahi pehchana, isliye pehla tab dikh raha hai. Sheet me tab ka exact naam check karo ya Settings → Sheets &amp; tabs me is tab ka <code>gid</code> set karo (Google URL me <code>#gid=…</code>).</div>`;
       } else warn.innerHTML = '';
     }
     function searchableCols(cols) {
@@ -145,9 +147,9 @@ FF.pages = FF.pages || {};
     async function loadPaged() {
       grid.innerHTML = U.spinner(`Page ${state.page + 1} load ho raha hai…`);
       try {
-        const probe = state.probeCols || (await D.query(name, 'select * limit 1', { fresh })).cols;
+        const probe = state.probeCols || (await D.query(sheetTab, 'select * limit 1', { fresh })).cols;
         state.probeCols = probe;
-        const table = await D.query(name, buildTq(probe), { fresh });
+        const table = await D.query(sheetTab, buildTq(probe), { fresh });
         if (!root.isConnected) return;
         checkFallback(table);
         if (table.headers === 0 && !state.headerRows && state.page === 0 && !state.q) state.headerRows = detectHeaderRows(table.rows, table.cols);
@@ -158,7 +160,7 @@ FF.pages = FF.pages || {};
           try {
             const sc = searchableCols(probe);
             const q = state.q.toLowerCase().replace(/["\\]/g, '');
-            const ct = await D.query(name, `select count(${probe[0].id}) where (${sc.map((l) => `lower(${l}) contains "${q}"`).join(' or ')})`, { fresh });
+            const ct = await D.query(sheetTab, `select count(${probe[0].id}) where (${sc.map((l) => `lower(${l}) contains "${q}"`).join(' or ')})`, { fresh });
             total = D.cellNumber(ct.rows[0] && ct.rows[0][0]) || 0;
           } catch (e) { total = dataRows.length + state.page * state.pageSize; }
         }
@@ -171,8 +173,8 @@ FF.pages = FF.pages || {};
     async function load() {
       try {
         const [countT, firstT] = await Promise.all([
-          D.query(name, 'select count(A)', { fresh }).catch(() => null),
-          D.query(name, `select * limit ${state.pageSize}`, { fresh })
+          D.query(sheetTab, 'select count(A)', { fresh }).catch(() => null),
+          D.query(sheetTab, `select * limit ${state.pageSize}`, { fresh })
         ]);
         if (!root.isConnected) return;
         checkFallback(firstT);
@@ -193,7 +195,7 @@ FF.pages = FF.pages || {};
           if (firstT.headers === 0) state.headerRows = detectHeaderRows(firstT.rows, firstT.cols);
           renderTable(firstT, state.headerRows ? firstT.rows.slice(state.headerRows.length) : firstT.rows, total || firstT.rows.length);
           modeEl.textContent = 'Full sheet load ho rahi hai…';
-          const fullT = await D.query(name, '', { fresh });
+          const fullT = await D.query(sheetTab, '', { fresh });
           if (!root.isConnected) return;
           if (fullT.headers === 0) state.headerRows = detectHeaderRows(fullT.rows, fullT.cols); else state.headerRows = null;
           state.full = fullT;
@@ -233,8 +235,8 @@ FF.pages = FF.pages || {};
         if (!FF.auth.can('export')) { U.toast('Download permission nahi hai', 'err'); return; }
         const header = current.cols.map((c, i) => c.label || (current.headerRows[current.headerRows.length - 1] || [])[i] || c.id);
         const rows = current.rows.map((r) => current.cols.map((c, i) => D.cellText(r[i], c)));
-        if (ex.dataset.action === 'export-visible') U.downloadCsv(`${name}-page${state.page + 1}.csv`, header, rows);
-        else FF.xlsx.download(`${name}-page${state.page + 1}.xlsx`, [{ name, header, rows: rows.map((r) => r.map((v) => (v !== '' && /^-?\d+(\.\d+)?$/.test(v) && v.length < 15 ? Number(v) : v))) }]);
+        if (ex.dataset.action === 'export-visible') U.downloadCsv(`${tabId}-page${state.page + 1}.csv`, header, rows);
+        else FF.xlsx.download(`${tabId}-page${state.page + 1}.xlsx`, [{ name: sheetTab.slice(0, 28), header, rows: rows.map((r) => r.map((v) => (v !== '' && /^-?\d+(\.\d+)?$/.test(v) && v.length < 15 ? Number(v) : v))) }]);
       }
     });
     if (state.mode === 'full' && state.full && !fresh) { renderFull(); info.textContent = `${U.fmt(state.full.rows.length)} rows · ${state.full.cols.length} columns`; }

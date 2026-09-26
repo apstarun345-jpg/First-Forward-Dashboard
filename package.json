@@ -1,8 +1,8 @@
 {
   "name": "first-forward-dashboard",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "private": true,
-  "description": "First Forward FASTag dashboard \u2014 login-protected issuance, stock, trends and agent performance from a Google Sheet (StockDataa + REPORT), with settings & per-user permissions.",
+  "description": "First Forward + GV Partner FASTag dashboards \u2014 login-protected issuance, stock, trend, performance and GV-vs-FF comparison from two Google Sheets, with animated login, forgot-password flow, per-user/per-sheet access matrix and downloadable Excel/CSV.",
   "type": "module",
   "engines": {
     "node": ">=18"
@@ -13,6 +13,6 @@
     "mock": "node dev/mock-gviz.js",
     "dev:mock": "GVIZ_BASE=http://localhost:9099 DATA_DIR=/tmp/ffdata PORT=8080 node server.js",
     "smoke": "node dev/smoke.js",
-    "check": "node --check server.js && for f in config util xlsx data charts model store auth sheets dashboard trend stock performance settings app; do node -e \"new Function(require('fs').readFileSync('$f.js','utf8'))\" || exit 1; done; echo syntax ok"
+    "check": "node --check server.js && for f in config util xlsx data charts model store gv auth sheets dashboard trend stock performance home gvpages compare settings app; do node -e \"new Function(require('fs').readFileSync('$f.js','utf8'))\" || exit 1; done; echo syntax ok"
   }
 }

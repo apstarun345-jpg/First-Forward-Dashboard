@@ -11,14 +11,23 @@ window.FF = window.FF || {};
   let lastLoadAt = null;
   let lastSource = '';
 
-  function directBase() { return `https://docs.google.com/spreadsheets/d/${FF.config.sheetId}/gviz/tq`; }
+  function directBase(sheet) {
+    const cfg = FF.config.sheetByName(sheet);
+    const id = cfg && cfg.source === 'gv' ? FF.config.gvSheetId : FF.config.sheetId;
+    return `https://docs.google.com/spreadsheets/d/${id}/gviz/tq`;
+  }
+
+  /** Sheet tab config for a name — falls back to a synthetic entry so unknown tabs still load. */
+  function cfgFor(sheet) { return FF.config.sheetByName(sheet) || { id: sheet, tab: sheet, source: 'main', gid: '' }; }
 
   function buildUrl(base, sheet, tq, gid, extra) {
     const p = new URLSearchParams();
     p.set('tqx', 'out:json');
     if (gid) p.set('gid', gid); else p.set('sheet', sheet);
     if (tq) p.set('tq', tq);
-    if (extra) Object.entries(extra).forEach(([k, v]) => p.set(k, v));
+    if (extra) Object.entries(extra).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') p.set(k, v); });
+    const cfg = cfgFor(sheet);
+    if (cfg.source === 'gv' && FF.config.gvSheetId && !base.startsWith('https://docs.google.com')) p.set('id', FF.config.gvSheetId);
     return `${base}?${p.toString()}`;
   }
 
@@ -90,14 +99,15 @@ window.FF = window.FF || {};
     const o = opts || {};
     const cfg = FF.config.sheetByName(sheetName);
     const gid = o.gid !== undefined ? o.gid : (cfg && cfg.gid) || '';
-    const key = `${sheetName}|${gid}|${tq || ''}`;
+    const key = `${sheetName}|${gid}|${o.range || ''}|${tq || ''}`;
     const now = Date.now();
     const hit = cache.get(key);
     if (hit && !o.fresh && now - hit.t < TTL_MS) return hit.promise;
 
+    const extra = { ...(o.fresh ? { fresh: '1' } : {}), ...(o.range ? { range: o.range } : {}) };
     const attempts = [];
-    if (FF.config.proxyPath && FF.config.proxy !== false) attempts.push(buildUrl(FF.config.proxyPath, sheetName, tq, gid, o.fresh ? { fresh: '1' } : null));
-    if (FF.config.directFallback !== false) attempts.push(buildUrl(directBase(), sheetName, tq, gid));
+    if (FF.config.proxyPath && FF.config.proxy !== false) attempts.push(buildUrl(FF.config.proxyPath, sheetName, tq, gid, extra));
+    if (FF.config.directFallback !== false) attempts.push(buildUrl(directBase(sheetName), sheetName, tq, gid, o.range ? { range: o.range } : null));
 
     const promise = (async () => {
       let lastErr = null;

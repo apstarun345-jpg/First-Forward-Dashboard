@@ -34,8 +34,12 @@ const today = new Date(); today.setHours(0, 0, 0, 0);
 const dstr = (d) => `Date(${d.getFullYear()},${d.getMonth()},${d.getDate()})`;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-// ---- EIR: TAG_ID A, VRN B, CLASS C, TYPE D, STATUS E, DATE F, AGENT_ID G, AGENT_NAME H, MASTER_ID I, TL_ID J, GV_ID K, GV_NAME L, GV_TL M, TL_NAME N, VRN_TYPE O, MONTH P, REG_NO Q
-const EIR = { cols: ['TAG_ID', 'VRN', 'TAG_CLASS', 'TAG_TYPE', 'STATUS', 'ISSUE_DATE', 'AGENT_ID', 'AGENT_NAME', 'MASTER_ID', 'TL_ID', 'GV_ID', 'GV_NAME', 'GV_TL', 'TL_NAME', 'VRN_TYPE', 'MONTH', 'REG_NUMBER'].map((l, i) => ({ id: L(i), label: l, type: i === 5 ? 'date' : 'string' })), rows: [] };
+// ---- EIR (width 78, like the live tab): the app reads it by column letter (FF.config.eir) ----------
+const letterIdx = (ref) => { let n = 0; for (const ch of ref.toUpperCase()) n = n * 26 + (ch.charCodeAt(0) - 64); return n - 1; };
+const EIR_AT = { tagId: 'A', vrn: 'B', cls: 'D', type: 'P', status: 'Z', date: 'AA', agentId: 'J', agentName: 'L', masterId: 'AU', tlId: 'AV', gvId: 'AW', gvName: 'AX', gvTl: 'AZ', tlName: 'BA', vrnType: 'BC', monthName: 'BD', regNumber: 'BH' };
+const EIR_LABELS = { A: 'TAG_ID', B: 'VRN', D: 'TAG_CLASS', P: 'TAG_TYPE', Z: 'STATUS', AA: 'ISSUE_DATE', J: 'AGENT_ID', L: 'AGENT_NAME', AU: 'MASTER_ID', AV: 'TL_ID', AW: 'GV_ID', AX: 'GV_NAME', AZ: 'GV_TL', BA: 'TL_NAME', BC: 'VRN_TYPE', BD: 'MONTH', BH: 'REG_NUMBER' };
+const EIR = { cols: new Array(78).fill(0).map((_, i) => ({ id: L(i), label: EIR_LABELS[L(i)] || '', type: L(i) === 'AA' ? 'date' : 'string' })), rows: [] };
+const eirRow = (vals) => { const r = new Array(EIR.cols.length).fill(''); Object.entries(vals).forEach(([k, v]) => { if (EIR_AT[k]) r[letterIdx(EIR_AT[k])] = v; }); return r; };
 let tagSeq = 100000;
 for (let back = 75; back >= 0; back--) {
   const d = new Date(today); d.setDate(d.getDate() - back);
@@ -43,7 +47,13 @@ for (let back = 75; back >= 0; back--) {
     const n = Math.max(0, Math.round(a.rate * (0.5 + rnd()) * (d.getDay() === 0 ? 0.4 : 1) * (back < 30 ? 1.15 : 1)));
     for (let k = 0; k < n; k++) {
       const cls = pick(CLASSES);
-      EIR.rows.push([`34161FA82032${tagSeq++}`, `RJ14${Math.floor(rnd() * 9000 + 1000)}`, cls, TYPES[cls], rnd() < 0.96 ? 'ACTIVE' : 'PENDING', dstr(d), a.id, a.name, a.gv ? 'GV001' : null, a.tlId, a.gv ? 'GV001' : null, a.gv ? 'GV PARTNER LTD' : null, a.gv ? a.tlName : null, a.tlName, rnd() < 0.9 ? 'REGULAR' : 'CHASSIS', `${MONTHS[d.getMonth()]}-${String(d.getFullYear()).slice(2)}`, `RJ14`]);
+      EIR.rows.push(eirRow({
+        tagId: `34161FA82032${tagSeq++}`, vrn: `RJ14${Math.floor(rnd() * 9000 + 1000)}`, cls, type: TYPES[cls],
+        status: rnd() < 0.96 ? 'ACTIVE' : 'PENDING', date: dstr(d), agentId: a.id, agentName: a.name,
+        masterId: a.gv ? '5845036' : '', tlId: a.tlId, gvId: a.gv ? 'GV001' : '', gvName: a.gv ? 'GV PARTNER LTD' : '',
+        gvTl: a.gv ? 'ApnaPayment Pvt. Ltd.' : '', tlName: a.tlName,
+        vrnType: rnd() < 0.9 ? 'REGULAR' : 'CHASSIS', monthName: `${MONTHS[d.getMonth()]}-${String(d.getFullYear()).slice(2)}`, regNumber: 'RJ14'
+      }));
     }
   }
 }
@@ -121,8 +131,95 @@ for (const row of agentRows) {
 const total = new Array(78).fill(''); total[0] = '5845036'; total[1] = '5845036'; total[2] = 'APNA PAYEMENT'; total[4] = '5845036'; total[6] = 'ApnaPayment Pvt. Ltd.';
 REPORT.rows.push(total, ...agentRows);
 
-const SHEETS = { EIR, StockDataa: STOCK, REPORT };
-const GIDS = { '242489821': 'REPORT', '0': 'EIR' };
+// ---- GV Partner sheet (second spreadsheet) ------------------------------------------------------
+// GV Master: issuance log — A unique_id, B agent, C supervisor_id, D supervisor, E vrn, F class,
+// G cch, H serial, I tag_id, J amount, K customer, L product, M commission, N status, O pay status,
+// P date, Q time, R gv tl id, S master cch, T month name, U tag type, W/X gv ids, Y length
+const GVM_COLS = ['unique_id', 'agent_name', 'supervisor_agent_id', 'supervisor_name', 'vno', 'vclass', 'cch', 'sno', 'tag_id_number', 'amount', 'name', 'product_id', 'commission', 'status', 'commission_status', 'Date', 'Time', 'GV TL ID', 'Master CCH', 'Month Name', 'Tag Type', 'x', 'GV Unique ID', 'GV Unique Name', 'lenth'];
+const GV_MASTER = { cols: GVM_COLS.map((l, i) => ({ id: L(i), label: l, type: i === 15 ? 'date' : i === 9 || i === 12 ? 'number' : 'string' })), rows: [] };
+const GV_TYPES = ['VRN', 'VRN', 'VRN', 'Chassis'];
+const GV_STATUS = ['Completed', 'Completed', 'Completed', 'Replacement'];
+let gvSeq = 700000;
+for (let back = 60; back >= 0; back--) {
+  const d = new Date(today); d.setDate(d.getDate() - back);
+  for (const a of AGENTS) {
+    if (rnd() > (a.gv ? 0.85 : 0.35)) continue;               // GV partner has fewer agents
+    const n = Math.max(1, Math.round(a.rate * (a.gv ? 1.1 : 0.5) * (0.6 + rnd())));
+    for (let k = 0; k < n; k++) {
+      const cls = pick(CLASSES);
+      const superA = (a.tlName && a.tlName !== 'APS') ? TLS.find((t) => t.name === a.tlName) || TLS[0] : null;
+      GV_MASTER.rows.push([a.id, a.name, superA ? superA.id : a.id, superA ? superA.name : a.name, `RJ14GV${gvSeq}`, cls, `VC${cls}`, `608116-0${30 + (gvSeq % 9)}-0${gvSeq % 999999}`, `34161FA82GV${gvSeq++}`, 500, `GV CUST ${k}`, '100000005715', 200, pick(GV_STATUS), 'Paid', dstr(d), '12:53:56', superA ? superA.id : a.id, `VC${cls}`, `${MONTHS[d.getMonth()]}${String(d.getFullYear()).slice(2)}`, pick(GV_TYPES), '', a.gv ? 'APS010008' : '', a.gv ? 'Akash Mansingh Thakur' : '', String(cls).length]);
+    }
+  }
+}
+// Tag Assignment: stock — A class, B tag id, C serial, D status, E agent id, F agent name, G tl id, H tl name, L/M gv ids
+const GVA_COLS = ['VEHICLE_CLASS', 'TAG_ID', 'SERIAL_NUMBER', 'TAG_STATUS', 'AGENT_ID', 'AGENT_NAME', 'SUPERVISOR_ID', 'SUPERVISOR_NAME', 'x1', 'x2', 'x3', 'GV Unique ID', 'GV Unique Name', 'x4'];
+const GV_ASSIGN = { cols: GVA_COLS.map((l, i) => ({ id: L(i), label: l, type: 'string' })), rows: [] };
+for (const a of AGENTS) {
+  const superA = (a.tlName && a.tlName !== 'APS') ? TLS.find((t) => t.name === a.tlName) || TLS[0] : null;
+  const n = 5 + Math.floor(rnd() * 70);
+  for (let k = 0; k < n; k++) {
+    const cls = pick(CLASSES);
+    GV_ASSIGN.rows.push([cls, `34161FA82GVS${gvSeq++}`, `608116-037-0${gvSeq % 999999}`, 'In Stock', a.id, a.name, superA ? superA.id : '', superA ? superA.name : '', '', '', '', a.gv ? 'APS010008' : '', a.gv ? 'Akash Mansingh Thakur' : '', '']);
+  }
+}
+// GV REPORT: header row 4 (A…BE), data from row 5 — same shape as the live sheet
+const GVR_COLS = ['Mobile Number', 'AGENT_ID', 'AGENT_NAME', 'TL ID', 'TL Name', 'VC12', 'VC16', 'VC4', 'VC5', 'VC6', 'VC7', 'Grand Total', 'Total CV', 'Minimum Required Inventory', 'Suggested Dispatch Quantity', 'Priority Level', 'TL Total Stock (VC4)', 'TL Total Stock (NVC4)', 'TL Total Stock', 'Issuance Days', 'Last Month  (VC4)', 'Last Month (Comm.)', 'Total Last Month', 'Percent', 'AGENT  Status', 'Agent Performance', 'Today Issued', 'Issuance Days', 'Replace', 'Chassis', 'VC4', 'VC5', 'VC6', 'VC7', 'VC12', 'VC16', 'TOTAL CV CURRENT MONTH', 'Total Issunce', 'Expacted In Month', 'Runrate (VC4)', 'Runrate (NVC4)', 'Runrate', 'TL Last Month (VC4)', 'TL Last Month (Comm.)', 'TL Last Month Total', 'VC4 Issuance', 'NVC4 Issuance', 'TL Total Activation(Current Month)', 'Average Runrate (VC4)', 'Average Runrate (NVC4)', 'eRunrate', 'SUPERVISER ID'];
+const GV_REPORT = { cols: GVR_COLS.map((l, i) => ({ id: L(i), label: l, type: 'string' })), rows: [] };
+GV_REPORT.rows.push(new Array(GVR_COLS.length).fill(''), new Array(GVR_COLS.length).fill(''), new Array(GVR_COLS.length).fill(''), GVR_COLS.slice());
+const gvMonthKey = (d) => `${d.getFullYear()}-${d.getMonth()}`;
+for (const a of AGENTS) {
+  const mine = GV_MASTER.rows.filter((r) => r[0] === a.id);
+  if (!mine.length) continue;
+  const dt = (r) => { const m = String(r[15]).match(/Date\((\d+),(\d+),(\d+)/); return m ? new Date(+m[1], +m[2], +m[3]) : null; };
+  const cur = mine.filter((r) => dt(r) && gvMonthKey(dt(r)) === curKey), last = mine.filter((r) => dt(r) && gvMonthKey(dt(r)) === lastKey);
+  const vc4 = (rows) => rows.filter((r) => r[5] === '4').length;
+  const st = GV_ASSIGN.rows.filter((r) => r[4] === a.id);
+  const sc = (c) => st.filter((r) => r[0] === c).length;
+  const g = last.length ? Math.round(((cur.length - last.length) / last.length) * 100) : 0;
+  const days = Math.max(1, today.getDate());
+  const row = new Array(GVR_COLS.length).fill('');
+  row[0] = `98${10000000 + GV_REPORT.rows.length}`; row[1] = a.id; row[2] = a.name;
+  row[3] = (a.tlName && a.tlName !== 'APS') ? a.tlId : a.id; row[4] = (a.tlName && a.tlName !== 'APS') ? a.tlName : a.name;
+  row[5] = sc('12'); row[6] = sc('16'); row[7] = sc('4'); row[8] = sc('5'); row[9] = sc('6'); row[10] = sc('7');
+  row[11] = st.length; row[12] = st.length - sc('4'); row[13] = Math.round(sc('4') / 8); row[14] = Math.round(Math.max(0, sc('4') / 8 - sc('4')));
+  row[15] = sc('4') / days < 8 ? '🔴 High' : sc('4') / days < 20 ? '🟡 Medium' : '🟢 Low';
+  row[19] = new Set(last.map((r) => r[15])).size; row[20] = vc4(last); row[21] = last.length - vc4(last); row[22] = last.length;
+  row[23] = `${g >= 0 ? '▲ +' : '▼ '}${g}%`; row[24] = cur.length ? '🟢 Active Today' : 'Inactive In Month';
+  row[25] = g > 20 ? '🚀 High Growth' : g >= 0 ? '🟢 Growth' : 'De-Growth';
+  row[26] = cur.filter((r) => dt(r) && dt(r).getDate() === today.getDate()).length;
+  row[27] = new Set(cur.map((r) => r[15])).size; row[28] = cur.filter((r) => /replacement/i.test(r[13])).length; row[29] = cur.filter((r) => /chassis/i.test(r[20])).length;
+  row[30] = vc4(cur); row[31] = cur.filter((r) => r[5] === '5').length; row[32] = cur.filter((r) => r[5] === '6').length; row[33] = cur.filter((r) => r[5] === '7').length;
+  row[34] = cur.filter((r) => r[5] === '12').length; row[35] = cur.filter((r) => r[5] === '16').length; row[36] = cur.length - vc4(cur); row[37] = cur.length;
+  row[38] = Math.round(cur.length * 30 / days); row[39] = (vc4(cur) / days).toFixed(1); row[40] = ((cur.length - vc4(cur)) / days).toFixed(1); row[41] = (cur.length / days).toFixed(1);
+  row[42] = vc4(last); row[43] = last.length - vc4(last); row[44] = last.length;
+  row[45] = vc4(cur); row[46] = cur.length - vc4(cur); row[47] = cur.length;
+  row[48] = (vc4(cur) / days).toFixed(1); row[49] = ((cur.length - vc4(cur)) / days).toFixed(1); row[50] = (cur.length / days).toFixed(1);
+  row[51] = row[3];
+  GV_REPORT.rows.push(row);
+}
+
+const SHEETS = { EIR, StockDataa: STOCK, REPORT, 'GV Master': GV_MASTER, 'Tag Assignment': GV_ASSIGN, 'GV REPORT': GV_REPORT };
+const GIDS = { '242489821': 'REPORT', '0': 'EIR', '1284424234': 'GV REPORT' };
+
+/** gviz `range=A4:BE` → labels from the range's first row, data from the next row. */
+function applyRange(sheet, range) {
+  const m = /^([A-Z]+)(\d+)(?::([A-Z]+)(\d*))?$/i.exec(String(range || '').trim());
+  if (!m) return sheet;
+  const c1 = colIdx(m[1]), r1 = Number(m[2]) - 1;
+  const c2 = m[3] ? colIdx(m[3]) : sheet.cols.length - 1;
+  const r2 = (m[4] !== undefined && m[4] !== '') ? Number(m[4]) : sheet.rows.length;
+  const rows = sheet.rows.slice(r1, r2);
+  const head = rows[0] || [];
+  const cols = [];
+  for (let c = c1; c <= c2; c++) {
+    const label = head[c] !== undefined && head[c] !== null && head[c] !== '' ? String(head[c]).trim() : (sheet.cols[c] ? sheet.cols[c].label : '');
+    cols.push({ id: sheet.cols[c] ? sheet.cols[c].id : L(c), label, type: sheet.cols[c] ? sheet.cols[c].type : 'string' });
+  }
+  const data = rows.slice(1).map((r) => { const out = []; for (let c = c1; c <= c2; c++) out.push(r[c] === undefined ? '' : r[c]); return out; });
+  return { cols, rows: data };
+}
+
 
 // ---- tiny gviz query engine ---------------------------------------------------------------------
 function colIdx(ref) { let n = 0; for (const ch of ref.toUpperCase()) n = n * 26 + (ch.charCodeAt(0) - 64); return n - 1; }
@@ -201,9 +298,11 @@ http.createServer((req, res) => {
   if (!url.pathname.includes('/gviz/tq')) { res.writeHead(404); return res.end('not found'); }
   const gid = url.searchParams.get('gid'), name = url.searchParams.get('sheet');
   const sheetName = gid ? GIDS[gid] || 'EIR' : SHEETS[name] ? name : 'EIR'; // Google falls back to the first tab on unknown names
-  const sheet = SHEETS[sheetName];
+  let sheet = SHEETS[sheetName];
   let body;
   try {
+    const range = url.searchParams.get('range');
+    if (range) sheet = applyRange(sheet, range);
     const table = runQuery(sheet, url.searchParams.get('tq') || '');
     body = `/*O_o*/\ngoogle.visualization.Query.setResponse(${JSON.stringify({ version: '0.6', reqId: '0', status: 'ok', sig: '1', table })});`;
   } catch (err) {
@@ -211,4 +310,4 @@ http.createServer((req, res) => {
   }
   res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
   res.end(body);
-}).listen(PORT, () => console.log(`mock gviz on :${PORT} · EIR ${EIR.rows.length} rows · StockDataa ${STOCK.rows.length} · REPORT ${REPORT.rows.length}`));
+}).listen(PORT, () => console.log(`mock gviz on :${PORT} · EIR ${EIR.rows.length} · StockDataa ${STOCK.rows.length} · REPORT ${REPORT.rows.length} · GV Master ${GV_MASTER.rows.length} · Tag Assignment ${GV_ASSIGN.rows.length} · GV REPORT ${GV_REPORT.rows.length}`));

@@ -40,20 +40,49 @@ const BLOCKED_DIRS = new Set(['data', 'dev', 'node_modules', '.git']);
 // ---------------------------------------------------------------------------------------------
 // Permissions & settings schema
 // ---------------------------------------------------------------------------------------------
-export const PERMISSIONS = [
-  { key: 'dashboard', label: 'Dashboard page', group: 'Pages' },
-  { key: 'trend', label: 'Trend page', group: 'Pages' },
-  { key: 'stock', label: 'Stock page', group: 'Pages' },
-  { key: 'performance', label: 'Performance page', group: 'Pages' },
-  { key: 'sheet:StockDataa', label: 'Sheet · StockDataa', group: 'Pages' },
-  { key: 'sheet:REPORT', label: 'Sheet · REPORT', group: 'Pages' },
+// Fixed page / action permissions. Sheet-tab permissions (`sheet:<tabId>`) are generated from the
+// `tabs` registry below, so the admin can add or hide sheet tabs and control each one per user.
+export const PAGE_PERMISSIONS = [
+  { key: 'home', label: 'Home · greeting & overview', group: 'Pages' },
+  { key: 'dashboard', label: 'First Forward · Dashboard', group: 'First Forward' },
+  { key: 'trend', label: 'First Forward · Trend', group: 'First Forward' },
+  { key: 'performance', label: 'First Forward · Performance', group: 'First Forward' },
+  { key: 'stock', label: 'First Forward · Stock', group: 'First Forward' },
+  { key: 'gvDashboard', label: 'GV Partner · Dashboard', group: 'GV Partner' },
+  { key: 'gvTrend', label: 'GV Partner · Trend', group: 'GV Partner' },
+  { key: 'gvPerformance', label: 'GV Partner · Performance', group: 'GV Partner' },
+  { key: 'gvStock', label: 'GV Partner · Stock', group: 'GV Partner' },
+  { key: 'compare', label: 'GV vs First Forward (comparison)', group: 'GV Partner' },
   { key: 'export', label: 'Download CSV / Excel', group: 'Actions' },
   { key: 'share', label: 'WhatsApp / Email share', group: 'Actions' },
   { key: 'refresh', label: 'Force refresh from Google', group: 'Actions' },
   { key: 'contacts', label: 'See mobile numbers', group: 'Actions' }
 ];
-const ALL_PERMS = PERMISSIONS.map((p) => p.key);
-const DEFAULT_USER_PERMS = ['dashboard', 'trend', 'stock', 'performance', 'sheet:StockDataa', 'sheet:REPORT', 'export'];
+
+// Sheet-tab registry defaults (also mirrored in config.js). `enabled:false` hides a tab everywhere.
+export const DEFAULT_TABS = [
+  { id: 'StockDataa', group: 'First Forward', source: 'main', kind: 'stock', icon: '📦', label: 'StockDataa · Inventory', tab: 'StockDataa', gid: '', desc: 'Field stock (tag-wise)', enabled: true },
+  { id: 'REPORT', group: 'First Forward', source: 'main', kind: 'report', icon: '📑', label: 'REPORT', tab: 'REPORT', gid: '242489821', desc: 'Agent-wise summary: stock + issuance + status', enabled: true },
+  { id: 'EIR', group: 'First Forward', source: 'main', kind: 'issuance', icon: '🗂️', label: 'EIR · Issuance log', tab: 'EIR', gid: '', desc: 'Har tag ka issuance record (bada tab)', enabled: false },
+  { id: 'GV Master', group: 'GV Partner', source: 'gv', kind: 'gv-issuance', icon: '🚀', label: 'GV Master · Issuance', tab: 'GV Master', gid: '', desc: 'GV partner ka poora issuance data', enabled: true },
+  { id: 'Tag Assignment', group: 'GV Partner', source: 'gv', kind: 'gv-stock', icon: '📦', label: 'Tag Assignment · Stock', tab: 'Tag Assignment', gid: '', desc: 'GV partner stock (tag-wise, In Stock)', enabled: true },
+  { id: 'GV REPORT', group: 'GV Partner', source: 'gv', kind: 'gv-report', icon: '📑', label: 'GV REPORT · Performance', tab: 'GV REPORT', gid: '1284424234', desc: 'GV agent-wise performance + stock', enabled: true }
+];
+
+/** Permission descriptors: fixed pages/actions + one per registered sheet tab. */
+export function permissionsFor(settings) {
+  const tabs = (settings && Array.isArray(settings.tabs) && settings.tabs.length) ? settings.tabs : DEFAULT_TABS;
+  return [
+    ...PAGE_PERMISSIONS,
+    ...tabs.filter((t) => t && t.id).map((t) => ({ key: `sheet:${t.id}`, label: `Sheet · ${t.label || t.id}`, group: `Sheets · ${t.group || 'Main'}` }))
+  ];
+}
+const allPermKeys = (settings) => permissionsFor(settings).map((p) => p.key);
+const allPermKeysNow = () => allPermKeys(db.settings);
+// Back-compat export (some tooling imported PERMISSIONS).
+export const PERMISSIONS = permissionsFor({ tabs: DEFAULT_TABS });
+const DEFAULT_USER_PERMS = ['home', 'dashboard', 'trend', 'stock', 'performance', 'gvDashboard', 'gvTrend', 'gvStock', 'gvPerformance', 'compare',
+  'sheet:StockDataa', 'sheet:REPORT', 'sheet:GV Master', 'sheet:Tag Assignment', 'sheet:GV REPORT', 'export'];
 
 const DEFAULT_SETTINGS = {
   appName: 'First Forward Dashboard',
@@ -61,9 +90,17 @@ const DEFAULT_SETTINGS = {
   tagline: 'Dashboard',
   logo: '',          // data URL (uploaded in Settings → Branding)
   loginImage: '',    // data URL (login page / hero image)
-  theme: { sidebarBg: '#1e1b4b', sidebarBg2: '#4c1d95', sidebarText: '#e0e7ff', accent: '#6366f1', accent2: '#a855f7' },
+  loginAnimation: true, // animated login page + "Welcome back" splash
+  theme: { sidebarBg: '#1e1b4b', sidebarBg2: '#4c1d95', sidebarText: '#e0e7ff', accent: '#6366f1', accent2: '#a855f7', gvAccent: '#0d9488' },
   sheetId: DEFAULT_SHEET_ID,
+  gvSheetId: '1LkYX746lGZQKhl5ueoKe3kYOo4SNtu47p5-jkVNUiBA',
+  tabs: DEFAULT_TABS.map((t) => ({ ...t })),
   reportGid: '242489821',
+  gv: {
+    master: { tab: 'GV Master', gid: '', uniqueId: 'A', agentName: 'B', tlId: 'C', tlName: 'D', vrn: 'E', vClass: 'F', cch: 'G', serial: 'H', tagId: 'I', amount: 'J', customer: 'K', productId: 'L', commission: 'M', status: 'N', commissionStatus: 'O', date: 'P', time: 'Q', gvTlId: 'R', masterCch: 'S', monthName: 'T', tagType: 'U', gvUniqueId: 'W', gvUniqueName: 'X' },
+    assignment: { tab: 'Tag Assignment', gid: '', cls: 'A', tagId: 'B', serial: 'C', status: 'D', agentId: 'E', agentName: 'F', tlId: 'G', tlName: 'H', gvUniqueId: 'L', gvUniqueName: 'M' },
+    report: { tab: 'GV REPORT', gid: '1284424234', headerRow: 4, lastCol: 'AZ' }
+  },
   stockSheet: 'StockDataa',
   stockGid: '',
   eirSheet: 'EIR',
@@ -83,8 +120,8 @@ const DEFAULT_SETTINGS = {
 // JSON file store
 // ---------------------------------------------------------------------------------------------
 if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
-const FILES = { users: path.join(DATA_DIR, 'users.json'), sessions: path.join(DATA_DIR, 'sessions.json'), settings: path.join(DATA_DIR, 'settings.json') };
-const db = { users: [], sessions: {}, settings: { ...DEFAULT_SETTINGS } };
+const FILES = { users: path.join(DATA_DIR, 'users.json'), sessions: path.join(DATA_DIR, 'sessions.json'), settings: path.join(DATA_DIR, 'settings.json'), resets: path.join(DATA_DIR, 'resets.json') };
+const db = { users: [], sessions: {}, settings: { ...DEFAULT_SETTINGS }, resets: [] };
 const writeQueue = new Map();
 
 async function readJson(file, fallback) {
@@ -129,7 +166,7 @@ function verifyPassword(password, stored) {
 const normUser = (u) => String(u || '').trim().toLowerCase().replace(/[^a-z0-9._@-]/g, '').slice(0, 60);
 function publicUser(u) {
   if (!u) return null;
-  return { username: u.username, name: u.name || u.username, email: u.email || '', mobile: u.mobile || '', role: u.role, approved: !!u.approved, permissions: u.role === 'admin' ? ALL_PERMS : (u.permissions || []), createdAt: u.createdAt, lastLoginAt: u.lastLoginAt || null, mustChangePassword: !!u.mustChangePassword };
+  return { username: u.username, name: u.name || u.username, email: u.email || '', mobile: u.mobile || '', avatar: u.avatar || '', role: u.role, approved: !!u.approved, permissions: u.role === 'admin' ? allPermKeysNow() : (u.permissions || []), createdAt: u.createdAt, lastLoginAt: u.lastLoginAt || null, mustChangePassword: !!u.mustChangePassword };
 }
 function findUser(username) { return db.users.find((u) => u.username === normUser(username)) || null; }
 function sha(token) { return crypto.createHash('sha256').update(token).digest('hex'); }
@@ -166,22 +203,23 @@ async function bootstrapAdmin() {
   if (ADMIN_USER && ADMIN_PASSWORD) {
     let u = findUser(ADMIN_USER);
     if (!u) { u = { username: ADMIN_USER, name: 'Admin', createdAt: new Date().toISOString() }; db.users.unshift(u); }
-    u.role = 'admin'; u.approved = true; u.permissions = ALL_PERMS.slice(); u.mustChangePassword = false;
+    u.role = 'admin'; u.approved = true; u.permissions = allPermKeysNow(); u.mustChangePassword = false;
     if (!verifyPassword(ADMIN_PASSWORD, u.password)) u.password = hashPassword(ADMIN_PASSWORD);
     await persist('users');
     console.log(`Admin "${ADMIN_USER}" ready (from environment).`);
   } else if (!db.users.some((u) => u.role === 'admin')) {
     const username = 'admin';
     if (!findUser(username)) {
-      db.users.unshift({ username, name: 'Admin', role: 'admin', approved: true, permissions: ALL_PERMS.slice(), password: hashPassword('admin123'), mustChangePassword: true, createdAt: new Date().toISOString() });
+      db.users.unshift({ username, name: 'Admin', role: 'admin', approved: true, permissions: allPermKeysNow(), password: hashPassword('admin123'), mustChangePassword: true, createdAt: new Date().toISOString() });
       await persist('users');
       console.log('⚠️  No admin found → created default admin  user: admin  password: admin123  (change it in Settings → My account, or set ADMIN_USER / ADMIN_PASSWORD env).');
     }
   }
 }
 
-// login throttle (per IP)
+// login / password-reset throttle (per IP)
 const attempts = new Map();
+const forgotHits = new Map();
 function clientIp(req) { return (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || '?'; }
 function throttled(ip) { const a = attempts.get(ip); return a && a.count >= 8 && Date.now() - a.at < 10 * 60e3; }
 function noteFail(ip) { const a = attempts.get(ip) || { count: 0, at: Date.now() }; if (Date.now() - a.at > 10 * 60e3) { a.count = 0; } a.count++; a.at = Date.now(); attempts.set(ip, a); }
@@ -233,6 +271,8 @@ function upstreamUrl(params) {
   if (gid) p.set('gid', gid); else if (sheet) p.set('sheet', sheet);
   const tq = params.get('tq');
   if (tq) p.set('tq', tq);
+  const range = params.get('range');
+  if (range) p.set('range', range.slice(0, 40).replace(/[^A-Za-z0-9:$]/g, ''));
   const sheetId = (params.get('id') || db.settings.sheetId || DEFAULT_SHEET_ID).replace(/[^A-Za-z0-9_-]/g, '');
   return `${GVIZ_BASE}/spreadsheets/d/${sheetId}/gviz/tq?${p.toString()}`;
 }
@@ -258,7 +298,8 @@ async function handleGviz(res, params) {
     let p = inflight.get(url);
     if (!p) { p = fetchUpstream(url).finally(() => inflight.delete(url)); inflight.set(url, p); }
     const { status, body } = await p;
-    if (status >= 200 && status < 300 && body.includes('setResponse')) {
+    const okBody = body.includes('setResponse') && !/"status"\s*:\s*"error"/.test(body);
+    if (status >= 200 && status < 300 && okBody) {
       const entry = { at: Date.now(), body, status };
       cache.set(url, entry);
       if (cache.size > MAX_CACHE_ENTRIES) cache.delete(cache.keys().next().value);
@@ -279,7 +320,7 @@ async function handleGviz(res, params) {
 // ---------------------------------------------------------------------------------------------
 function publicSettings() {
   const s = db.settings;
-  return { appName: s.appName, brand: s.brand, tagline: s.tagline, logo: s.logo, loginImage: s.loginImage, theme: s.theme, allowSignup: s.allowSignup !== false };
+  return { appName: s.appName, brand: s.brand, tagline: s.tagline, logo: s.logo, loginImage: s.loginImage, loginAnimation: s.loginAnimation !== false, theme: s.theme, allowSignup: s.allowSignup !== false };
 }
 function requireAdmin(user) { if (!user || user.role !== 'admin') throw new HttpError(403, 'Admin access required'); }
 function validPassword(pw) { return typeof pw === 'string' && pw.length >= 6 && pw.length <= 200; }
@@ -290,13 +331,13 @@ async function handleApi(req, res, url) {
   const user = sessionUser(req);
 
   if (p === '/api/health' && method === 'GET') {
-    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: 2, users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: DATA_DIR });
+    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: 3, users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: DATA_DIR });
   }
   if (p === '/api/public-config' && method === 'GET') return sendJson(res, 200, publicSettings());
 
   // ---- auth ----
   if (p === '/api/auth/me' && method === 'GET') {
-    return sendJson(res, 200, { user: publicUser(user), settings: user ? db.settings : publicSettings(), permissions: PERMISSIONS });
+    return sendJson(res, 200, { user: publicUser(user), settings: user ? db.settings : publicSettings(), permissions: permissionsFor(db.settings), tabs: db.settings.tabs });
   }
   if (p === '/api/auth/signup' && method === 'POST') {
     if (db.settings.allowSignup === false && db.users.length) throw new HttpError(403, 'Sign up band hai — admin se account maango.');
@@ -306,13 +347,13 @@ async function handleApi(req, res, url) {
     if (!validPassword(body.password)) throw new HttpError(400, 'Password kam se kam 6 characters ka ho.');
     if (findUser(username)) throw new HttpError(409, 'Ye username pehle se hai. Login karo ya dusra username lo.');
     const first = db.users.length === 0;
-    const u = { username, name: String(body.name || '').trim().slice(0, 80) || username, email: String(body.email || '').trim().slice(0, 120), mobile: String(body.mobile || '').replace(/[^\d+]/g, '').slice(0, 16), role: first ? 'admin' : 'user', approved: first, permissions: first ? ALL_PERMS.slice() : [], password: hashPassword(body.password), createdAt: new Date().toISOString(), lastLoginAt: null };
+    const u = { username, name: String(body.name || '').trim().slice(0, 80) || username, email: String(body.email || '').trim().slice(0, 120), mobile: String(body.mobile || '').replace(/[^\d+]/g, '').slice(0, 16), role: first ? 'admin' : 'user', approved: first, permissions: first ? allPermKeysNow() : [], password: hashPassword(body.password), createdAt: new Date().toISOString(), lastLoginAt: null };
     db.users.push(u);
     await persist('users');
     if (first) {
       const token = createSession(username);
       u.lastLoginAt = new Date().toISOString(); persist('users');
-      return sendJson(res, 200, { ok: true, user: publicUser(u), settings: db.settings, permissions: PERMISSIONS, first: true }, { 'Set-Cookie': cookieHeader(req, token, SESSION_DAYS * 86400) });
+      return sendJson(res, 200, { ok: true, user: publicUser(u), settings: db.settings, permissions: permissionsFor(db.settings), tabs: db.settings.tabs, first: true }, { 'Set-Cookie': cookieHeader(req, token, SESSION_DAYS * 86400) });
     }
     return sendJson(res, 200, { ok: true, pending: true, message: 'Account ban gaya. Admin approve karega, phir login kar paoge.' });
   }
@@ -326,8 +367,46 @@ async function handleApi(req, res, url) {
     attempts.delete(ip);
     const token = createSession(u.username);
     u.lastLoginAt = new Date().toISOString(); persist('users');
-    return sendJson(res, 200, { ok: true, user: publicUser(u), settings: db.settings, permissions: PERMISSIONS }, { 'Set-Cookie': cookieHeader(req, token, SESSION_DAYS * 86400) });
+    return sendJson(res, 200, { ok: true, user: publicUser(u), settings: db.settings, permissions: permissionsFor(db.settings), tabs: db.settings.tabs }, { 'Set-Cookie': cookieHeader(req, token, SESSION_DAYS * 86400) });
   }
+  // ---- forgot password ("Forgot password?" on the login screen) ----
+  // No email service: the request is queued for the admin, who either sets a new password or
+  // generates a 6-digit one-time code the user can redeem below. Rate-limited per IP.
+  if (p === '/api/auth/forgot' && method === 'POST') {
+    const ip = clientIp(req);
+    const hits = (forgotHits.get(ip) || []).filter((t) => Date.now() - t < 60 * 60e3);
+    if (hits.length >= 6) throw new HttpError(429, 'Bahut reset requests — thodi der baad try karo ya admin ko seedha message karo.');
+    hits.push(Date.now()); forgotHits.set(ip, hits);
+    const body = await readBody(req);
+    const key = String(body.username || '').trim();
+    const u = findUser(key) || db.users.find((x) => x.email && String(x.email).toLowerCase() === key.toLowerCase());
+    const c = db.settings.contacts || {};
+    const help = { whatsapp: c.teamWhatsapp || '', email: c.teamEmail || '' };
+    if (!u) {
+      return sendJson(res, 200, { ok: true, found: false, help, message: 'Agar ye account hai to request admin ko chali gayi hai. Nahi mila to admin se naya account maango.' });
+    }
+    db.resets = db.resets.filter((r) => r.username !== u.username || r.resolved);
+    db.resets.push({ username: u.username, name: u.name || u.username, email: u.email || '', mobile: u.mobile || '', at: new Date().toISOString(), code: '', codeExpiresAt: null, resolved: false });
+    await persist('resets');
+    return sendJson(res, 200, { ok: true, found: true, help, message: `Request bhej di gayi ✓ — admin approve karke aapko naya password ya 6-digit code dega (user: ${u.username}).` });
+  }
+  if (p === '/api/auth/reset' && method === 'POST') {
+    const body = await readBody(req);
+    const u = findUser(body.username);
+    const code = String(body.code || '').replace(/\D/g, '').slice(0, 8);
+    if (!u || !code) throw new HttpError(400, 'Username ya code galat hai.');
+    const reqRow = db.resets.slice().reverse().find((r) => r.username === u.username && !r.resolved && r.code);
+    if (!reqRow || !reqRow.code || reqRow.code !== code) throw new HttpError(400, 'Code match nahi hua. Admin se naya code maango.');
+    if (!reqRow.codeExpiresAt || new Date(reqRow.codeExpiresAt).getTime() < Date.now()) throw new HttpError(400, 'Code expire ho gaya — admin se naya code maango.');
+    if (!validPassword(body.password)) throw new HttpError(400, 'Naya password kam se kam 6 characters ka ho.');
+    u.password = hashPassword(body.password);
+    u.mustChangePassword = false;
+    reqRow.resolved = true; reqRow.resolvedAt = new Date().toISOString();
+    for (const [k, sess] of Object.entries(db.sessions)) if (sess.username === u.username) delete db.sessions[k];
+    await persist('users'); await persist('sessions'); await persist('resets');
+    return sendJson(res, 200, { ok: true, message: 'Password set ho gaya ✓ — ab naye password se login karo.' });
+  }
+
   if (p === '/api/auth/logout' && method === 'POST') {
     const token = parseCookies(req).ff_sid;
     if (token) { delete db.sessions[sha(token)]; persist('sessions'); }
@@ -349,6 +428,12 @@ async function handleApi(req, res, url) {
     if (body.name !== undefined) user.name = String(body.name).trim().slice(0, 80) || user.username;
     if (body.email !== undefined) user.email = String(body.email).trim().slice(0, 120);
     if (body.mobile !== undefined) user.mobile = String(body.mobile).replace(/[^\d+]/g, '').slice(0, 16);
+    if (body.avatar !== undefined) {
+      const a = String(body.avatar || '');
+      if (a && !/^data:image\/(png|jpe?g|webp|gif|svg\+xml);base64,/.test(a)) throw new HttpError(400, 'Photo: sirf PNG/JPG/WEBP/SVG image allowed.');
+      if (a.length > 1.5 * 1024 * 1024) throw new HttpError(400, 'Photo 1 MB se chhoti rakho.');
+      user.avatar = a;
+    }
     await persist('users');
     return sendJson(res, 200, { ok: true, user: publicUser(user) });
   }
@@ -371,6 +456,16 @@ async function handleApi(req, res, url) {
       if (patch[key] && patch[key].length > 2.5 * 1024 * 1024) throw new HttpError(400, `${key}: image 1.8 MB se chhoti rakho.`);
     }
     if (patch.excludeTls !== undefined && !Array.isArray(patch.excludeTls)) patch.excludeTls = String(patch.excludeTls).split(',').map((s) => s.trim()).filter(Boolean);
+    if (patch.tabs !== undefined) {
+      if (!Array.isArray(patch.tabs)) throw new HttpError(400, 'tabs array hona chahiye');
+      patch.tabs = patch.tabs.filter((t) => t && t.id).map((t) => ({
+        id: String(t.id).slice(0, 60), group: String(t.group || 'First Forward').slice(0, 40), source: t.source === 'gv' ? 'gv' : 'main',
+        kind: String(t.kind || 'sheet').slice(0, 30), icon: String(t.icon || '📄').slice(0, 8), label: String(t.label || t.id).slice(0, 80),
+        tab: String(t.tab || t.id).slice(0, 80), gid: String(t.gid || '').slice(0, 30), desc: String(t.desc || '').slice(0, 160),
+        enabled: t.enabled !== false
+      }));
+    }
+    if (patch.gv && typeof patch.gv === 'object') cache.clear();
     const next = body.reset ? { ...DEFAULT_SETTINGS } : deepMerge(db.settings, patch);
     next.updatedAt = new Date().toISOString(); next.updatedBy = user.username;
     if (next.sheetId !== db.settings.sheetId || next.cacheSeconds !== db.settings.cacheSeconds) cache.clear();
@@ -381,7 +476,10 @@ async function handleApi(req, res, url) {
   if (p === '/api/cache/clear' && method === 'POST') { requireAdmin(user); cache.clear(); return sendJson(res, 200, { ok: true }); }
 
   // ---- users (admin) ----
-  if (p === '/api/users' && method === 'GET') { requireAdmin(user); return sendJson(res, 200, { users: db.users.map(publicUser), permissions: PERMISSIONS, defaults: DEFAULT_USER_PERMS }); }
+  if (p === '/api/users' && method === 'GET') {
+    requireAdmin(user);
+    return sendJson(res, 200, { users: db.users.map(publicUser), permissions: permissionsFor(db.settings), defaults: DEFAULT_USER_PERMS, tabs: db.settings.tabs, resetRequests: db.resets.map((r) => ({ username: r.username, name: r.name || '', email: r.email || '', at: r.at, code: r.code || '', codeExpiresAt: r.codeExpiresAt || null, resolved: !!r.resolved })).filter((r) => !r.resolved) });
+  }
   if (p === '/api/users' && method === 'POST') {
     requireAdmin(user);
     const body = await readBody(req);
@@ -389,10 +487,41 @@ async function handleApi(req, res, url) {
     if (username.length < 3) throw new HttpError(400, 'Username kam se kam 3 characters ka ho.');
     if (findUser(username)) throw new HttpError(409, 'Username pehle se hai.');
     if (!validPassword(body.password)) throw new HttpError(400, 'Password kam se kam 6 characters ka ho.');
-    const perms = Array.isArray(body.permissions) ? body.permissions.filter((k) => ALL_PERMS.includes(k)) : DEFAULT_USER_PERMS.slice();
+    const allow = allPermKeysNow();
+    const perms = Array.isArray(body.permissions) ? body.permissions.filter((k) => allow.includes(k)) : DEFAULT_USER_PERMS.slice();
     const u = { username, name: String(body.name || '').trim().slice(0, 80) || username, email: String(body.email || '').trim().slice(0, 120), mobile: String(body.mobile || '').replace(/[^\d+]/g, '').slice(0, 16), role: body.role === 'admin' ? 'admin' : 'user', approved: body.approved !== false, permissions: perms, password: hashPassword(body.password), mustChangePassword: true, createdAt: new Date().toISOString(), lastLoginAt: null };
     db.users.push(u); await persist('users');
-    return sendJson(res, 200, { ok: true, user: publicUser(u) });
+    return sendJson(res, 200, { ok: true, user: publicUser(u), permissions: permissionsFor(db.settings) });
+  }
+  if (p === '/api/users/reset-requests' && method === 'GET') {
+    requireAdmin(user);
+    const pending = db.resets.filter((r) => !r.resolved).map((r) => {
+      const u = findUser(r.username);
+      return { username: r.username, name: r.name || (u && u.name) || '', email: (u && u.email) || r.email || '', mobile: (u && u.mobile) || r.mobile || '', at: r.at, code: r.code || '', codeExpiresAt: r.codeExpiresAt || null, approved: !!r.code };
+    });
+    return sendJson(res, 200, { requests: pending });
+  }
+  const rr = p.match(/^\/api\/users\/reset-requests\/([^/]+)$/);
+  if (rr && method === 'DELETE') {
+    requireAdmin(user);
+    const target = decodeURIComponent(rr[1]);
+    let touched = false;
+    db.resets.forEach((r) => { if (r.username === target && !r.resolved) { r.resolved = true; r.resolvedAt = new Date().toISOString(); touched = true; } });
+    if (touched) await persist('resets');
+    return sendJson(res, 200, { ok: true });
+  }
+  const rc = p.match(/^\/api\/users\/([^/]+)\/reset-code$/);
+  if (rc && method === 'POST') {
+    requireAdmin(user);
+    const target = findUser(decodeURIComponent(rc[1]));
+    if (!target) throw new HttpError(404, 'User nahi mila');
+    const code = String(crypto.randomInt(100000, 999999));
+    const expires = new Date(Date.now() + 30 * 60e3).toISOString();
+    let row = db.resets.filter((r) => r.username === target.username && !r.resolved).pop();
+    if (!row) { row = { username: target.username, name: target.name, email: target.email || '', mobile: target.mobile || '', at: new Date().toISOString(), resolved: false }; db.resets.push(row); }
+    row.code = code; row.codeExpiresAt = expires; row.codeIssuedBy = user.username; row.resolved = false;
+    await persist('resets');
+    return sendJson(res, 200, { ok: true, username: target.username, code, expiresAt: expires, message: `Code ${code} (30 min valid) — user ko bata do; wo login page par "Forgot password → Code se reset" me daalega.` });
   }
   const um = p.match(/^\/api\/users\/([^/]+)$/);
   if (um) {
@@ -411,7 +540,7 @@ async function handleApi(req, res, url) {
         if (target.role === 'admin' && !body.approved && admins <= 1) throw new HttpError(400, 'Aakhri admin ko disable nahi kar sakte.');
         target.approved = !!body.approved;
       }
-      if (Array.isArray(body.permissions)) target.permissions = body.permissions.filter((k) => ALL_PERMS.includes(k));
+      if (Array.isArray(body.permissions)) { const allow = allPermKeysNow(); target.permissions = body.permissions.filter((k) => allow.includes(k)); }
       if (body.name !== undefined) target.name = String(body.name).trim().slice(0, 80) || target.username;
       if (body.email !== undefined) target.email = String(body.email).trim().slice(0, 120);
       if (body.mobile !== undefined) target.mobile = String(body.mobile).replace(/[^\d+]/g, '').slice(0, 16);
@@ -482,6 +611,7 @@ async function start() {
   db.users = await readJson(FILES.users, []);
   db.sessions = await readJson(FILES.sessions, {});
   db.settings = deepMerge(DEFAULT_SETTINGS, await readJson(FILES.settings, {}));
+  db.resets = await readJson(FILES.resets, []);
   pruneSessions();
   await bootstrapAdmin();
   server.listen(PORT, '0.0.0.0', () => {
