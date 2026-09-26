@@ -299,7 +299,12 @@ FF.pages = FF.pages || {};
     U.suggest(findInput, {
       items: () => [...people.tls.sort((a, b) => b.n - a.n).map((t) => ({ kind: 'tl', kindLabel: 'GV TL', label: t.name, sub: `${U.fmtShort(t.n)} tags stock`, value: t.name })),
         ...people.agents.slice(0, 400).map((a) => ({ kind: 'agent', kindLabel: 'GV Agent', label: a.name, sub: `${a.tl || ''}${a.id ? ` · ${a.id}` : ''}`, value: a.name, id: a.id }))],
-      onPick: (it) => { stockSel = it.kind === 'tl' ? { tl: it.value, agent: '' } : { agent: it.value, tl: '' }; stockView = it.kind === 'tl' ? 'tl' : 'agent'; FF.app.updateParams(it.kind === 'tl' ? { tl: it.value, agent: '', view: 'tl' } : { agent: it.value, tl: '', view: 'agent' }); }
+      onPick: (it) => {
+        if (it.value && FF.notifications && FF.notifications.logSearch) FF.notifications.logSearch('GV Stock Find', it.value);
+        stockSel = it.kind === 'tl' ? { tl: it.value, agent: '' } : { agent: it.value, tl: '' };
+        stockView = it.kind === 'tl' ? 'tl' : 'agent';
+        FF.app.updateParams(it.kind === 'tl' ? { tl: it.value, agent: '', view: 'tl' } : { agent: it.value, tl: '', view: 'agent' });
+      }
     });
 
     const kpis = [
@@ -536,7 +541,17 @@ FF.pages = FF.pages || {};
 
     // interactions
     const q = U.$('#gvp-q', body);
-    U.suggest(q, { items: () => all.map((r) => ({ kind: 'agent', kindLabel: 'GV Agent', label: r.agentName, sub: `${r.tlName} · MTD ${U.fmt(r.curTotal)}`, value: r.agentName })), onPick: (it) => { perf.q = it.value; perf.page = 1; rerender(); }, onEnter: (v) => { perf.q = v; perf.page = 1; rerender(); } });
+    U.suggest(q, {
+      items: () => all.map((r) => ({ kind: 'agent', kindLabel: 'GV Agent', label: r.agentName, sub: `${r.tlName} · MTD ${U.fmt(r.curTotal)}`, value: r.agentName })),
+      onPick: (it) => {
+        if (it.value && FF.notifications && FF.notifications.logSearch) FF.notifications.logSearch('GV Performance', it.value);
+        perf.q = it.value; perf.page = 1; rerender();
+      },
+      onEnter: (v) => {
+        if (v && FF.notifications && FF.notifications.logSearch) FF.notifications.logSearch('GV Performance', v);
+        perf.q = v; perf.page = 1; rerender();
+      }
+    });
     U.$('#gvp-tl', body).addEventListener('change', (e) => { perf.tl = e.target.value; perf.page = 1; rerender(); });
     const clr = U.$('#gvp-clear', body);
     if (clr) clr.addEventListener('click', () => { perf.q = ''; perf.tl = ''; perf.priority = ''; perf.status = ''; perf.page = 1; rerender(); });

@@ -32,13 +32,14 @@ FF.config = {
   // group   → sidebar section ('First Forward' | 'GV Partner')
   // source  → 'main' (First Forward sheet) | 'gv' (GV Partner sheet)
   // tab     → exact Google Sheet tab name,  gid → optional tab id (takes priority when set)
+  // startCol, startRow, endCol, endRow, range → custom column & row bounds for this sheet
   tabs: [
-    { id: 'StockDataa', group: 'First Forward', source: 'main', kind: 'stock', icon: '📦', label: 'StockDataa · Inventory', tab: 'StockDataa', gid: '', desc: 'Field stock (tag-wise)', enabled: true, search: ['I', 'H', 'K', 'B', 'D', 'F', 'C'] },
-    { id: 'REPORT', group: 'First Forward', source: 'main', kind: 'report', icon: '📑', label: 'REPORT', tab: 'REPORT', gid: '242489821', desc: 'Agent-wise summary: stock + issuance + status', enabled: true },
-    { id: 'EIR', group: 'First Forward', source: 'main', kind: 'issuance', icon: '🗂️', label: 'EIR · Issuance log', tab: 'EIR', gid: '', desc: 'Har tag ka issuance record (bada tab)', enabled: false, search: ['B', 'L', 'G', 'AH', 'E'] },
-    { id: 'GV Master', group: 'GV Partner', source: 'gv', kind: 'gv-issuance', icon: '🚀', label: 'GV Master · Issuance', tab: 'GV Master', gid: '', desc: 'GV partner ka poora issuance data', enabled: true, search: ['B', 'A', 'D', 'E', 'I'] },
-    { id: 'Tag Assignment', group: 'GV Partner', source: 'gv', kind: 'gv-stock', icon: '📦', label: 'Tag Assignment · Stock', tab: 'Tag Assignment', gid: '', desc: 'GV partner stock (tag-wise, In Stock)', enabled: true, search: ['F', 'B', 'C', 'H', 'A'] },
-    { id: 'GV REPORT', group: 'GV Partner', source: 'gv', kind: 'gv-report', icon: '📑', label: 'GV REPORT · Performance', tab: 'GV REPORT', gid: '1284424234', desc: 'GV agent-wise performance + stock', enabled: true }
+    { id: 'StockDataa', group: 'First Forward', source: 'main', kind: 'stock', icon: '📦', label: 'StockDataa · Inventory', tab: 'StockDataa', gid: '', startCol: 'A', startRow: '1', endCol: 'M', endRow: '', range: '', desc: 'Field stock (tag-wise)', enabled: true, search: ['I', 'H', 'K', 'B', 'D', 'F', 'C'] },
+    { id: 'REPORT', group: 'First Forward', source: 'main', kind: 'report', icon: '📑', label: 'REPORT', tab: 'REPORT', gid: '242489821', startCol: 'A', startRow: '1', endCol: '', endRow: '', range: '', desc: 'Agent-wise summary: stock + issuance + status', enabled: true },
+    { id: 'EIR', group: 'First Forward', source: 'main', kind: 'issuance', icon: '🗂️', label: 'EIR · Issuance log', tab: 'EIR', gid: '', startCol: 'A', startRow: '1', endCol: '', endRow: '', range: '', desc: 'Har tag ka issuance record (bada tab)', enabled: false, search: ['B', 'L', 'G', 'AH', 'E'] },
+    { id: 'GV Master', group: 'GV Partner', source: 'gv', kind: 'gv-issuance', icon: '🚀', label: 'GV Master · Issuance', tab: 'GV Master', gid: '', startCol: 'A', startRow: '1', endCol: 'X', endRow: '', range: '', desc: 'GV partner ka poora issuance data', enabled: true, search: ['B', 'A', 'D', 'E', 'I'] },
+    { id: 'Tag Assignment', group: 'GV Partner', source: 'gv', kind: 'gv-stock', icon: '📦', label: 'Tag Assignment · Stock', tab: 'Tag Assignment', gid: '', startCol: 'A', startRow: '1', endCol: 'M', endRow: '', range: '', desc: 'GV partner stock (tag-wise, In Stock)', enabled: true, search: ['F', 'B', 'C', 'H', 'A'] },
+    { id: 'GV REPORT', group: 'GV Partner', source: 'gv', kind: 'gv-report', icon: '📑', label: 'GV REPORT · Performance', tab: 'GV REPORT', gid: '1284424234', startCol: 'A', startRow: '4', endCol: 'BE', endRow: '', range: 'A4:BE', desc: 'GV agent-wise performance + stock', enabled: true }
   ],
 
   // Legacy view of the First Forward sheet tabs (kept in sync with `tabs` by refreshViews()).
@@ -88,6 +89,18 @@ FF.config = {
   allowSignup: true,
 
   // ---- helpers ---------------------------------------------------------------------------------
+  /** Format or compute range string from col/row bounds (e.g. A, 1, M, '' → A1:M). */
+  formatRange(startCol, startRow, endCol, endRow, customRange) {
+    if (customRange && String(customRange).trim()) return String(customRange).trim().toUpperCase();
+    const c1 = String(startCol || '').trim().toUpperCase();
+    const r1 = String(startRow || '').trim();
+    const c2 = String(endCol || '').trim().toUpperCase();
+    const r2 = String(endRow || '').trim();
+    if (!c1 && !c2 && !r1 && !r2) return '';
+    const from = `${c1 || 'A'}${r1 || '1'}`;
+    const to = `${c2}${r2}`;
+    return to ? `${from}:${to}` : from;
+  },
   /** All registered tabs (optionally only the enabled ones). */
   allTabs(onlyEnabled) {
     const list = (this.tabs || []).filter((t) => t && t.id);
@@ -131,7 +144,15 @@ FF.config = {
     if (s.contacts) this.contacts = { ...this.contacts, ...s.contacts };
     if (s.eir) this.eir = { ...this.eir, ...s.eir };
     if (s.stock) this.stock = { ...this.stock, ...s.stock };
-    if (Array.isArray(s.tabs) && s.tabs.length) this.tabs = s.tabs.slice();
+    if (Array.isArray(s.tabs) && s.tabs.length) {
+      this.tabs = s.tabs.map((t) => {
+        const copy = { ...t };
+        if (!copy.range && (copy.startCol || copy.startRow || copy.endCol || copy.endRow)) {
+          copy.range = this.formatRange(copy.startCol, copy.startRow, copy.endCol, copy.endRow);
+        }
+        return copy;
+      });
+    }
     if (s.gv) this.gv = { master: { ...this.gv.master, ...(s.gv.master || {}) }, assignment: { ...this.gv.assignment, ...(s.gv.assignment || {}) }, report: { ...this.gv.report, ...(s.gv.report || {}) } };
     if (s.eirSheet) this.eir.sheet = s.eirSheet;
     if (s.stockSheet) this.stock.sheet = s.stockSheet;

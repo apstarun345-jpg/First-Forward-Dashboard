@@ -81,6 +81,7 @@ FF.pages = FF.pages || {};
 
     const grid = U.$('#sh-grid', root), info = U.$('#sh-info', root), modeEl = U.$('#sh-mode', root), pagerEl = U.$('#sh-pager', root), warn = U.$('#sh-warn', root), qInput = U.$('#sh-q', root);
     let current = { cols: [], rows: [], labels: [], headerRows: [] };
+    const range = cfg.range || (cfg.startCol || cfg.startRow || cfg.endCol || cfg.endRow ? (FF.config.formatRange ? FF.config.formatRange(cfg.startCol, cfg.startRow, cfg.endCol, cfg.endRow) : `${cfg.startCol || 'A'}${cfg.startRow || 1}:${cfg.endCol || ''}${cfg.endRow || ''}`) : '');
     const fresh = !!(ctx && ctx.fresh);
 
     function checkFallback(table) {
@@ -147,9 +148,9 @@ FF.pages = FF.pages || {};
     async function loadPaged() {
       grid.innerHTML = U.spinner(`Page ${state.page + 1} load ho raha hai…`);
       try {
-        const probe = state.probeCols || (await D.query(sheetTab, 'select * limit 1', { fresh })).cols;
+        const probe = state.probeCols || (await D.query(sheetTab, 'select * limit 1', { fresh, range })).cols;
         state.probeCols = probe;
-        const table = await D.query(sheetTab, buildTq(probe), { fresh });
+        const table = await D.query(sheetTab, buildTq(probe), { fresh, range });
         if (!root.isConnected) return;
         checkFallback(table);
         if (table.headers === 0 && !state.headerRows && state.page === 0 && !state.q) state.headerRows = detectHeaderRows(table.rows, table.cols);
@@ -160,7 +161,7 @@ FF.pages = FF.pages || {};
           try {
             const sc = searchableCols(probe);
             const q = state.q.toLowerCase().replace(/["\\]/g, '');
-            const ct = await D.query(sheetTab, `select count(${probe[0].id}) where (${sc.map((l) => `lower(${l}) contains "${q}"`).join(' or ')})`, { fresh });
+            const ct = await D.query(sheetTab, `select count(${probe[0].id}) where (${sc.map((l) => `lower(${l}) contains "${q}"`).join(' or ')})`, { fresh, range });
             total = D.cellNumber(ct.rows[0] && ct.rows[0][0]) || 0;
           } catch (e) { total = dataRows.length + state.page * state.pageSize; }
         }
@@ -173,8 +174,8 @@ FF.pages = FF.pages || {};
     async function load() {
       try {
         const [countT, firstT] = await Promise.all([
-          D.query(sheetTab, 'select count(A)', { fresh }).catch(() => null),
-          D.query(sheetTab, `select * limit ${state.pageSize}`, { fresh })
+          D.query(sheetTab, 'select count(A)', { fresh, range }).catch(() => null),
+          D.query(sheetTab, `select * limit ${state.pageSize}`, { fresh, range })
         ]);
         if (!root.isConnected) return;
         checkFallback(firstT);
@@ -195,7 +196,7 @@ FF.pages = FF.pages || {};
           if (firstT.headers === 0) state.headerRows = detectHeaderRows(firstT.rows, firstT.cols);
           renderTable(firstT, state.headerRows ? firstT.rows.slice(state.headerRows.length) : firstT.rows, total || firstT.rows.length);
           modeEl.textContent = 'Full sheet load ho rahi hai…';
-          const fullT = await D.query(sheetTab, '', { fresh });
+          const fullT = await D.query(sheetTab, '', { fresh, range });
           if (!root.isConnected) return;
           if (fullT.headers === 0) state.headerRows = detectHeaderRows(fullT.rows, fullT.cols); else state.headerRows = null;
           state.full = fullT;
@@ -210,7 +211,14 @@ FF.pages = FF.pages || {};
     }
 
     // events
-    const doSearch = () => { state.q = qInput.value.trim(); state.page = 0; refreshView(); };
+    const doSearch = () => {
+      state.q = qInput.value.trim();
+      state.page = 0;
+      if (state.q && FF.notifications && FF.notifications.logSearch) {
+        FF.notifications.logSearch(`Sheet: ${cfg.label || tabId}`, state.q);
+      }
+      refreshView();
+    };
     qInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSearch(); });
     qInput.addEventListener('input', U.debounce(() => { if (state.mode === 'full') doSearch(); else if (!qInput.value.trim() && state.q) doSearch(); }, 250));
     pagerEl.addEventListener('click', (e) => {
@@ -227,6 +235,9 @@ FF.pages = FF.pages || {};
       const th = e.target.closest('th.sortable'); if (!th) return;
       const id = th.dataset.sort; if (!id) return;
       if (state.sort === id) { if (state.dir === 'asc') state.dir = 'desc'; else { state.sort = null; state.dir = 'asc'; } } else { state.sort = id; state.dir = 'asc'; }
+      if (FF.notifications && FF.notifications.logClick) {
+        FF.notifications.logClick(`Sheet Sort: ${cfg.label || tabId}`, `Col ${id} (${state.dir})`);
+      }
       state.page = 0; refreshView();
     });
     root.addEventListener('click', (e) => {
