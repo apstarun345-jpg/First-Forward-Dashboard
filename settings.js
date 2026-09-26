@@ -49,9 +49,8 @@ FF.pages = FF.pages || {};
     });
     return patch;
   }
-  // Resize + compress an image file before it is sent as a settings data URL. Logos keep
-  // transparency; photographs prefer WebP/JPEG. A second dimension pass prevents a huge PNG
-  // from filling Render's JSON store even when its original file is small.
+  // Resize + compress an image file before it is sent as a settings data URL.
+  // Attractive logo handling: auto-size, smart background, high-quality smoothing, multi-pass compression.
   function readImage(file, maxSide) {
     return new Promise((resolve, reject) => {
       if (!/^image\//.test(file.type)) return reject(new Error('Sirf image file (PNG / JPG / WEBP / SVG)'));
@@ -60,17 +59,41 @@ FF.pages = FF.pages || {};
       const url = URL.createObjectURL(file);
       img.onload = () => {
         URL.revokeObjectURL(url);
-        const keepAlpha = file.type === 'image/png' || file.type === 'image/gif';
+        const isLogo = (maxSide || 512) <= 512;
+        const keepAlpha = (file.type === 'image/png' || file.type === 'image/gif') && isLogo;
         let scale = Math.min(1, (maxSide || 512) / Math.max(img.width, img.height));
+        if (isLogo) {
+          const minScale = 128 / Math.max(img.width, img.height);
+          scale = Math.max(scale, Math.min(1, minScale));
+        }
         let data = '';
-        for (let pass = 0; pass < 4; pass++) {
+        for (let pass = 0; pass < 5; pass++) {
           const c = document.createElement('canvas');
-          c.width = Math.max(1, Math.round(img.width * scale)); c.height = Math.max(1, Math.round(img.height * scale));
-          c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+          c.width = Math.max(1, Math.round(img.width * scale));
+          c.height = Math.max(1, Math.round(img.height * scale));
+          const ctx = c.getContext('2d');
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
+          if (keepAlpha) {
+            ctx.clearRect(0,0,c.width,c.height);
+          } else {
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0,0,c.width,c.height);
+          }
+          ctx.drawImage(img, 0, 0, c.width, c.height);
           const mime = keepAlpha ? 'image/png' : 'image/webp';
-          data = c.toDataURL(mime, keepAlpha ? undefined : Math.max(.55, .86 - pass * .1));
-          if (data.length <= 1.45 * 1024 * 1024 || scale <= .35) break;
-          scale *= .78;
+          const quality = keepAlpha ? undefined : Math.max(.65, .92 - pass * .08);
+          data = c.toDataURL(mime, quality);
+          const limit = isLogo ? 600 * 1024 : 1200 * 1024;
+          if (data.length <= limit * 1.37 || scale <= .28) break;
+          scale *= .72;
+        }
+        if (!keepAlpha && data.length > 1.8 * 1024 * 1024) {
+          const c = document.createElement('canvas');
+          c.width = Math.max(1, Math.round(img.width * scale * 0.6));
+          c.height = Math.max(1, Math.round(img.height * scale * 0.6));
+          c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+          data = c.toDataURL('image/jpeg', 0.72);
         }
         resolve(data);
       };

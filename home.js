@@ -1,5 +1,4 @@
-/* Home page: "Hello <name> 👋" greeting, quick stats from both sources, shortcuts and access summary.
-   Shown right after login (and the landing page whenever the user has the `home` permission). */
+/* Home page v2 — No access/shortcuts, only main highlights via GV & FF charts */
 window.FF = window.FF || {};
 FF.pages = FF.pages || {};
 (function (FF) {
@@ -7,17 +6,6 @@ FF.pages = FF.pages || {};
   const U = FF.util, M = FF.model, S = FF.store, G = FF.gv, C = FF.charts;
   const esc = U.esc;
 
-  const AUDIT = [
-    { id: 'dashboard', perm: 'dashboard', icon: '📊', label: 'First Forward · Dashboard', desc: 'KPIs, class mix, VC4 vs Commercial', group: 'First Forward' },
-    { id: 'trend', perm: 'trend', icon: '📈', label: 'First Forward · Trend', desc: 'Daily · weekly · monthly trend', group: 'First Forward' },
-    { id: 'performance', perm: 'performance', icon: '🏆', label: 'First Forward · Performance', desc: 'Agent & TL performance (REPORT)', group: 'First Forward' },
-    { id: 'stock', perm: 'stock', icon: '📦', label: 'First Forward · Stock', desc: 'StockDataa search & pivot', group: 'First Forward' },
-    { id: 'gvDashboard', perm: 'gvDashboard', icon: '🚀', label: 'GV Partner Dashboard', desc: 'GV issuance · stock · performance', group: 'GV Partner' },
-    { id: 'gvTrend', perm: 'gvTrend', icon: '📈', label: 'GV Trend', desc: 'GV Master daily / monthly trend', group: 'GV Partner' },
-    { id: 'gvPerformance', perm: 'gvPerformance', icon: '🏆', label: 'GV Performance', desc: 'GV agent & TL performance', group: 'GV Partner' },
-    { id: 'gvStock', perm: 'gvStock', icon: '📦', label: 'GV Stock', desc: 'Tag Assignment stock search', group: 'GV Partner' },
-    { id: 'compare', perm: 'compare', icon: '⚖️', label: 'GV vs First Forward', desc: 'Side-by-side comparison', group: 'GV Partner' }
-  ];
   function greeting() {
     const h = new Date().getHours();
     if (h < 5) return 'Good night';
@@ -31,95 +19,205 @@ FF.pages = FF.pages || {};
   async function render(root) {
     const u = FF.auth.user || {};
     const avatar = u.avatar ? `<img class="home-avatar" src="${esc(u.avatar)}" alt="">` : `<div class="home-avatar mono-logo">${esc((u.name || u.username || 'U').slice(0, 1).toUpperCase())}</div>`;
-    const links = AUDIT.filter((a) => FF.auth.can(a.perm));
     const canFf = FF.auth.can('dashboard') || FF.auth.can('trend') || FF.auth.can('stock') || FF.auth.can('performance');
     const canGv = FF.auth.can('gvDashboard') || FF.auth.can('gvTrend') || FF.auth.can('gvStock') || FF.auth.can('gvPerformance');
 
-    root.innerHTML = `<div class="home-hero">
+    // Poll sync status
+    let syncPoll = null;
+    const updateSync = () => {
+      const el = document.getElementById('home-sync');
+      if (!el) return;
+      if (FF.preloader && FF.preloader.done) { el.textContent = 'All sheets ready ✓'; el.className = 'sync-fast'; }
+      else if (FF.preloader && FF.preloader.running) { const p = FF.preloader.state.progress; el.textContent = `Preloading ${p.loaded}/${p.total}…`; }
+      else { el.textContent = 'Background sync…'; }
+    };
+    syncPoll = setInterval(updateSync, 1200);
+
+    root.innerHTML = `<div class="home-hero v2">
         <div class="home-hero-main">
           ${avatar}
           <div>
             <h1>Hello <span class="home-name">${esc(u.name || u.username || 'there')}</span> 👋</h1>
-            <p class="sub">${esc(greeting())}! Aap ${u.role === 'admin' ? '<b>👑 Admin</b>' : 'user'} ho${u.email ? ` · ${esc(u.email)}` : ''}${u.lastLoginAt ? ` · last login ${U.timeLabel(new Date(u.lastLoginAt).getTime())}` : ''}</p>
-            <div class="chip-row">${links.slice(0, 6).map((a) => `<a class="chip link" href="#/${a.id}">${a.icon} ${esc(a.label)}</a>`).join('')}</div>
+            <p class="sub">${esc(greeting())}! Aaj ka highlights — GV & First Forward ka live chart overview</p>
+            <div class="home-quick-stats" id="home-quick"></div>
           </div>
         </div>
         <div class="home-hero-side">
           <div class="home-stat"><span class="dim">Data loaded</span><b>${S.loadedAt || G.loadedAt ? U.timeLabel(S.loadedAt || G.loadedAt) : '—'}</b></div>
-          <div class="home-stat"><span class="dim">Pages aapke paas</span><b>${links.length}</b></div>
-          <button class="btn primary" data-action="refresh">↻ Refresh data</button>
+          <div class="home-stat"><span class="dim">Sync</span><b id="home-sync">${FF.preloader && FF.preloader.done ? 'All sheets ready ✓' : 'Background sync…'}</b></div>
+          <button class="btn primary" data-action="refresh">↻ Refresh</button>
+          <a class="btn" href="#/tagIssued">🏷️ Tag Issued →</a>
         </div>
       </div>
-      <div id="home-body">${U.spinner('Aapka overview ban raha hai…')}</div>`;
+      <div id="home-body">${U.spinner('Highlights load ho rahe hain — GV & FF charts…')}</div>`;
 
     const body = U.$('#home-body', root);
-    const [dailyR, stockR, gvMasterR] = await Promise.allSettled([
+    const quick = U.$('#home-quick', root);
+
+    // Background: ensure data
+    const [dailyR, stockR, gvMasterR, gvStockR] = await Promise.allSettled([
       canFf ? S.need('daily') : Promise.reject(new Error('skip')),
       canFf ? S.need('stock') : Promise.reject(new Error('skip')),
-      canGv ? G.need('master') : Promise.reject(new Error('skip'))
+      canGv ? G.need('master') : Promise.reject(new Error('skip')),
+      canGv ? G.need('stockClass') : Promise.reject(new Error('skip'))
     ]);
     if (!root.isConnected) return;
 
-    const cards = [];
-    // ---- First Forward snapshot
+    let ffDaily = null, ffLatest = null, ffCur = null, ffLast = null, ffStockTotal = null;
     if (dailyR.status === 'fulfilled') {
-      const daily = dailyR.value;
-      const latest = M.latestDate(daily);
-      const cur = latest ? U.ymKey(latest) : null;
-      const curS = cur ? M.summary(daily, cur) : null;
-      const lastMtd = cur ? M.summary(daily, U.prevMonthKey(cur), curS.lastDay) : null;
-      const stock = stockR.status === 'fulfilled' ? stockR.value : null;
-      const stockTotal = stock ? U.sum(stock, (r) => r.n) : null;
-      const line = cur ? C.lines({ labels: M.dailySeries(daily, cur).days.map(String), height: 190, series: [
-        { name: U.labelYM(cur), values: M.dailySeries(daily, cur).totals.map((v, i) => (i < latest.getDate() ? v : null)), color: '#6366f1' },
-        { name: U.labelYM(U.prevMonthKey(cur)), values: M.dailySeries(daily, U.prevMonthKey(cur)).totals.slice(0, M.dailySeries(daily, cur).days.length), color: '#c7d2fe', dash: true, area: false }
-      ] }) : '';
-      cards.push(card('📊 First Forward <span class="dim">· EIR + StockDataa</span>', `
-        <div class="kpi-grid mini">${[
-          kpi('g2', `MTD · ${U.labelYM(cur)}`, '🏷️', U.fmt(curS.total), `${U.deltaHtml(U.growth(curS.total, lastMtd.total))} vs last month same period`),
-          kpi('g3', 'VC4 · MTD', '🚗', U.fmt(curS.vc4), `${U.fmtPct(U.pctOf(curS.vc4, curS.total), 0)} share · Commercial <b>${U.fmt(curS.comm)}</b>`),
-          kpi('g9', 'Stock in field', '📦', stockTotal === null ? '—' : U.fmt(stockTotal), 'StockDataa tab')
-        ].join('')}</div>${line}`, `<a class="btn small" href="#/dashboard">Dashboard →</a>`));
-    } else if (canFf) {
-      cards.push(card('📊 First Forward', U.errorBox(dailyR.reason, 'data-action="refresh"')));
+      ffDaily = dailyR.value;
+      ffLatest = M.latestDate(ffDaily);
+      if (ffLatest) {
+        const curKey = U.ymKey(ffLatest);
+        ffCur = M.summary(ffDaily.filter(r=>r.channel!=='GV Partner'), curKey);
+        ffLast = M.summary(ffDaily.filter(r=>r.channel!=='GV Partner'), U.prevMonthKey(curKey), ffCur.lastDay);
+        if (stockR.status === 'fulfilled') ffStockTotal = U.sum(stockR.value, r=>r.n);
+      }
     }
-    // ---- GV Partner snapshot
+    let gvLatest = null, gvCur = null, gvLastMtd = null, gvStockTotal = null;
     if (gvMasterR.status === 'fulfilled') {
-      const latest = G.latestDate();
-      const cur = latest ? U.ymKey(latest) : null;
-      const curS = cur ? G.summary(cur) : null;
-      const lastMtd = cur ? G.summary(U.prevMonthKey(cur), latest.getDate()) : null;
-      const stockClass = G.get('stockClass') || [];
-      const stockTotal = stockClass.length ? U.sum(stockClass, (r) => r.n) : null;
-      const line = cur ? (() => {
-        const cs = G.dailySeries(cur), ls = G.dailySeries(U.prevMonthKey(cur));
-        return C.lines({ labels: cs.days.map(String), height: 190, series: [
-          { name: U.labelYM(cur), values: cs.totals.map((v, i) => (i < latest.getDate() ? v : null)), color: '#0d9488' },
-          { name: U.labelYM(U.prevMonthKey(cur)), values: ls.totals.slice(0, cs.days.length), color: '#99f6e4', dash: true, area: false }
-        ] });
-      })() : '';
-      cards.push(card('🚀 GV Partner <span class="dim">· GV Master + Tag Assignment</span>', `
-        <div class="kpi-grid mini">${[
-          kpi('g2', `MTD · ${U.labelYM(cur)}`, '🏷️', U.fmt(curS.total), `${U.deltaHtml(U.growth(curS.total, lastMtd.total))} vs last month same period`),
-          kpi('g3', 'VC4 · MTD', '🚗', U.fmt(curS.vc4), `${U.fmtPct(U.pctOf(curS.vc4, curS.total), 0)} share · Commercial <b>${U.fmt(curS.comm)}</b>`),
-          kpi('g9', 'GV stock in field', '📦', stockTotal === null ? '—' : U.fmt(stockTotal), 'Tag Assignment tab')
-        ].join('')}</div>${line}`, `<a class="btn small" href="#/gvDashboard">GV dashboard →</a>`));
-    } else if (canGv) {
-      cards.push(card('🚀 GV Partner', U.errorBox(gvMasterR.reason, 'data-action="refresh"')));
+      gvLatest = G.latestDate();
+      if (gvLatest) {
+        const curKey = U.ymKey(gvLatest);
+        gvCur = G.summary(curKey);
+        gvLastMtd = G.summary(U.prevMonthKey(curKey), gvLatest.getDate());
+        if (gvStockR.status === 'fulfilled') gvStockTotal = U.sum(gvStockR.value, r=>r.n);
+      }
     }
-    // ---- shortcuts / access
-    const groups = ['First Forward', 'GV Partner'];
-    cards.push(card('🔗 Shortcuts', groups.map((g) => {
-      const items = AUDIT.filter((a) => a.group === g && FF.auth.can(a.perm));
-      if (!items.length) return '';
-      return `<div class="home-group"><div class="home-group-title">${esc(g)}</div><div class="home-links">${items.map((a) => `<a class="home-link" href="#/${a.id}"><span class="home-link-icon">${a.icon}</span><span><b>${esc(a.label)}</b><small>${esc(a.desc)}</small></span></a>`).join('')}</div></div>`;
-    }).join('') + (FF.auth.can('compare') ? '<div class="home-links"><a class="home-link wide" href="#/compare"><span class="home-link-icon">⚖️</span><span><b>GV vs First Forward</b><small>Dono ka side-by-side comparison — issuance, stock, agents</small></span></a></div>' : ''), ''));
-    cards.push(card('🛡️ Aapka access', `<div class="perm-grid">${(FF.auth.permissions || []).map((p) => `<div class="perm ${FF.auth.can(p.key) ? 'yes' : 'no'}"><span>${FF.auth.can(p.key) ? '✅' : '⛔'}</span><b>${esc(p.label)}</b><small class="dim">${esc(p.group)}</small></div>`).join('')}</div>
-      ${FF.auth.isAdmin() ? '<p class="dim small">Admin ke paas sab access hai — kaun kya dekh sakta hai wo Settings → Access matrix me set karo.</p>' : '<p class="dim small">Koi cheez chahiye? Admin se permission maango.</p>'}`));
 
-    body.innerHTML = `<div class="grid g-2">${cards.slice(0, 2).join('')}</div>${cards.slice(2).join('')}
-      <p class="foot-note">Data sirf ↻ button ya browser reload par update hota hai · Last load ${U.timeLabel(S.loadedAt || G.loadedAt || Date.now())}</p>`;
+    if (quick) {
+      const items = [];
+      if (ffCur) items.push(`<span class="chip on">🟦 FF MTD <b>${U.fmt(ffCur.total)}</b> ${U.deltaHtml(U.growth(ffCur.total, ffLast.total))}</span>`);
+      if (gvCur) items.push(`<span class="chip on">🟩 GV MTD <b>${U.fmt(gvCur.total)}</b> ${U.deltaHtml(U.growth(gvCur.total, gvLastMtd.total))}</span>`);
+      if (ffStockTotal!==null) items.push(`<span class="chip">📦 FF Stock <b>${U.fmt(ffStockTotal)}</b></span>`);
+      if (gvStockTotal!==null) items.push(`<span class="chip">📦 GV Stock <b>${U.fmt(gvStockTotal)}</b></span>`);
+      quick.innerHTML = `<div class="chip-row">${items.join('')}</div>`;
+    }
+
+    const cards = [];
+
+    // FF Highlight
+    if (ffDaily && ffLatest) {
+      const curKey = U.ymKey(ffLatest);
+      const curSeries = M.dailySeries(ffDaily.filter(r=>r.channel!=='GV Partner'), curKey);
+      const lastSeries = M.dailySeries(ffDaily.filter(r=>r.channel!=='GV Partner'), U.prevMonthKey(curKey));
+      const line = C.lines({
+        labels: curSeries.days.map(String),
+        height: 210,
+        series: [
+          { name: U.labelYM(curKey), values: curSeries.totals.map((v,i)=> i < ffLatest.getDate() ? v : null), color: '#6366f1' },
+          { name: U.labelYM(U.prevMonthKey(curKey)), values: lastSeries.totals.slice(0, curSeries.days.length), color: '#c7d2fe', dash: true, area: false }
+        ]
+      });
+      const donut = C.donut({ items: [{ label: 'VC4', value: ffCur.vc4 }, { label: 'VC20', value: ffCur.vc20 }, { label: 'VC5+', value: ffCur.vc5p }], subtitle: 'MTD' });
+      cards.push(`<div class="grid g-2-1">
+        ${card(`🟦 First Forward · ${U.labelYM(curKey)} <span class="dim">MTD ${U.fmt(ffCur.total)} · VC4 ${U.fmtPct(U.pctOf(ffCur.vc4, ffCur.total),0)}</span>`, `
+          <div class="kpi-grid mini">${[
+            kpi('g2', `MTD`, '🏷️', U.fmt(ffCur.total), `${U.deltaHtml(U.growth(ffCur.total, ffLast.total))} vs last same`),
+            kpi('g3', 'VC4', '🚗', U.fmt(ffCur.vc4), `${U.fmtPct(U.pctOf(ffCur.vc4, ffCur.total),0)} share`),
+            kpi('g9', 'Stock', '📦', ffStockTotal!==null?U.fmt(ffStockTotal):'—', ffCur.avgPerDay?`${U.fmt(ffStockTotal/ffCur.avgPerDay)} days cover`:'' )
+          ].join('')}</div>
+          ${line}
+        `, `<a class="btn small" href="#/dashboard">📊 Dashboard →</a>`)}
+        ${card('🍩 FF Class Mix', donut, `<a class="btn small" href="#/trend">Trend →</a>`)}
+      </div>`);
+    }
+
+    // GV Highlight
+    if (gvLatest && gvCur) {
+      const curKey = U.ymKey(gvLatest);
+      const cs = G.dailySeries(curKey), ls = G.dailySeries(U.prevMonthKey(curKey));
+      const line = C.lines({
+        labels: cs.days.map(String),
+        height: 210,
+        series: [
+          { name: U.labelYM(curKey), values: cs.totals.map((v,i)=> i < gvLatest.getDate() ? v : null), color: '#0d9488' },
+          { name: U.labelYM(U.prevMonthKey(curKey)), values: ls.totals.slice(0, cs.days.length), color: '#99f6e4', dash: true, area: false }
+        ]
+      });
+      const donut = C.donut({ items: [{ label: 'VC4', value: gvCur.vc4 }, { label: 'VC20', value: gvCur.vc20 }, { label: 'VC5+', value: gvCur.vc5p }], subtitle: 'MTD' });
+      cards.push(`<div class="grid g-2-1">
+        ${card(`🟩 GV Partner · ${U.labelYM(curKey)} <span class="dim">MTD ${U.fmt(gvCur.total)} · VC4 ${U.fmtPct(U.pctOf(gvCur.vc4, gvCur.total),0)}</span>`, `
+          <div class="kpi-grid mini">${[
+            kpi('g2', `MTD`, '🏷️', U.fmt(gvCur.total), `${U.deltaHtml(U.growth(gvCur.total, gvLastMtd.total))} vs last same`),
+            kpi('g3', 'VC4', '🚗', U.fmt(gvCur.vc4), `${U.fmtPct(U.pctOf(gvCur.vc4, gvCur.total),0)} share`),
+            kpi('g9', 'Stock', '📦', gvStockTotal!==null?U.fmt(gvStockTotal):'—', gvCur.avgPerDay?`${U.fmt(gvStockTotal/gvCur.avgPerDay)} days cover`:'' )
+          ].join('')}</div>
+          ${line}
+        `, `<a class="btn small" href="#/gvDashboard">🚀 GV Dashboard →</a>`)}
+        ${card('🍩 GV Class Mix', donut, `<a class="btn small" href="#/gvTrend">GV Trend →</a>`)}
+      </div>`);
+    }
+
+    // Combined comparison highlight
+    if (ffCur && gvCur) {
+      const cmp = C.bars({
+        labels: ['VC4','VC20','VC5+','Commercial','Total'],
+        height: 220,
+        series: [
+          { name: 'First Forward', values: [ffCur.vc4, ffCur.vc20, ffCur.vc5p, ffCur.comm, ffCur.total], color: '#6366f1' },
+          { name: 'GV Partner', values: [gvCur.vc4, gvCur.vc20, gvCur.vc5p, gvCur.comm, gvCur.total], color: '#0d9488' }
+        ],
+        legendAlways: true
+      });
+      cards.push(card(`⚖️ GV vs FF · ${U.labelYM(U.ymKey(ffLatest||gvLatest))} MTD <span class="dim">VC4 vs Commercial</span>`, `
+        <div class="grid g-2" style="margin-bottom:0">
+          <div>${cmp}</div>
+          <div>
+            <div class="kpi-grid mini" style="grid-template-columns:1fr 1fr">
+              ${kpi('g6', 'FF Projected', '🎯', U.fmt(ffCur.projected), `${U.deltaHtml(U.growth(ffCur.projected, M.summary(ffDaily, U.prevMonthKey(U.ymKey(ffLatest))).total))} vs last full`)}
+              ${kpi('g6', 'GV Projected', '🎯', U.fmt(gvCur.projected), `${U.deltaHtml(U.growth(gvCur.projected, G.summary(U.prevMonthKey(U.ymKey(gvLatest))).total))} vs last full`)}
+            </div>
+            <div style="margin-top:10px">
+              <b>Insights:</b>
+              <ul class="insight-list">
+                <li>GV share <b>${U.fmtPct(U.pctOf(gvCur.total, ffCur.total+gvCur.total),0)}</b> — FF ${U.fmt(ffCur.total)} vs GV ${U.fmt(gvCur.total)}</li>
+                <li>VC4 mix — FF ${U.fmtPct(U.pctOf(ffCur.vc4, ffCur.total),0)} vs GV ${U.fmtPct(U.pctOf(gvCur.vc4, gvCur.total),0)}</li>
+                <li>Stock cover — FF ${ffCur.avgPerDay?U.fmt(ffStockTotal/ffCur.avgPerDay):'—'} days vs GV ${gvCur.avgPerDay?U.fmt(gvStockTotal/gvCur.avgPerDay):'—'} days</li>
+              </ul>
+              <div class="btn-row" style="margin-top:10px"><a class="btn small primary" href="#/tagIssued">🏷️ Tag Issued detailed →</a><a class="btn small" href="#/compare">⚖️ Full comparison →</a></div>
+            </div>
+          </div>
+        </div>
+      `, ''));
+    }
+
+    // Last 14 days trend
+    if (ffDaily && ffLatest) {
+      const days = [];
+      const ffVals = [];
+      const gvVals = [];
+      for (let i=13;i>=0;i--) {
+        const d = new Date(ffLatest); d.setDate(d.getDate()-i);
+        const ym = U.ymKey(d);
+        const day = d.getDate();
+        const f = ffDaily.filter(r=>r.ym===ym && r.day===day);
+        days.push(U.labelDate(d));
+        ffVals.push(U.sum(f.filter(r=>r.channel!=='GV Partner'), r=>r.n));
+        if (gvLatest) {
+          gvVals.push(G.rows().filter(r=>r.ym===ym && r.day===day).length);
+        }
+      }
+      cards.push(card(`📈 Last 14 Days Trend <span class="dim">FF vs GV</span>`, C.lines({
+        labels: days,
+        height: 230,
+        series: [
+          { name: 'First Forward', values: ffVals, color: '#6366f1' },
+          { name: 'GV Partner', values: gvVals, color: '#0d9488' }
+        ]
+      }), ''));
+    }
+
+    if (!cards.length) {
+      body.innerHTML = `<div class="empty-state">Data load nahi hua — ↻ Refresh dabao</div>`;
+    } else {
+      body.innerHTML = `${cards.join('')}<p class="foot-note">Highlights — GV & FF charts ke dwara · Data ${U.timeLabel(S.loadedAt||G.loadedAt||Date.now())} · Background me all sheets preload ho rahe hain for instant open</p>`;
+    }
     C.mount(body);
+    updateSync();
+    // cleanup on page leave
+    const obs = new MutationObserver(() => { if (!document.body.contains(root)) { clearInterval(syncPoll); obs.disconnect(); } });
+    obs.observe(document.body, { childList: true, subtree: true });
   }
 
   FF.pages.home = { title: 'Home', render };

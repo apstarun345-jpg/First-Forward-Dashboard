@@ -10,7 +10,7 @@
   <link id="site-favicon" rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-192.png">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=4.5">
 </head>
 <body>
   <aside class="sidebar" id="sidebar">
@@ -31,6 +31,7 @@
       <button class="icon-btn" id="menu-btn" aria-label="Menu">☰</button>
       <div class="top-title" id="top-title">Dashboard</div>
       <div class="top-actions" id="top-actions">
+        <button class="btn small primary" id="pwa-install" hidden title="Install app">⬇️ Install App</button>
         <button class="icon-btn" id="top-refresh" title="Refresh data (Google Sheet se naya data)" aria-label="Refresh">↻</button>
         <div class="notification-wrap">
           <button class="icon-btn notification-btn" id="notification-btn" title="Notifications" aria-label="Notifications" aria-expanded="false">🔔<span class="notification-count" id="notification-count" hidden>0</span></button>
@@ -54,15 +55,16 @@
     <div class="drawer-body" id="drawer-body"></div>
   </aside>
 
-  <script src="config.js"></script>
-  <script src="util.js"></script>
-  <script src="xlsx.js"></script>
-  <script src="data.js"></script>
-  <script src="charts.js"></script>
-  <script src="model.js"></script>
-  <script src="store.js"></script>
-  <script src="gv.js"></script>
-  <script src="auth.js"></script>
+  <script src="config.js?v=4.5"></script>
+  <script src="util.js?v=4.5"></script>
+  <script src="xlsx.js?v=4.5"></script>
+  <script src="data.js?v=4.5"></script>
+  <script src="charts.js?v=4.5"></script>
+  <script src="model.js?v=4.5"></script>
+  <script src="store.js?v=4.5"></script>
+  <script src="gv.js?v=4.5"></script>
+  <script src="preload.js?v=4.5"></script>
+  <script src="auth.js?v=4.5"></script>
   <script src="notifications.js"></script>
   <script src="sheets.js"></script>
   <script src="dashboard.js"></script>
@@ -72,6 +74,7 @@
   <script src="home.js"></script>
   <script src="gvpages.js"></script>
   <script src="compare.js"></script>
+  <script src="tagIssued.js"></script>
   <script src="settings.js"></script>
   <script src="app.js"></script>
 </body>
