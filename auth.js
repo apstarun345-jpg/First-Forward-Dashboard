@@ -48,6 +48,8 @@ window.FF = window.FF || {};
     const tag = U.$('#brand-tag'); if (tag) tag.textContent = FF.config.tagline || 'Dashboard';
     const logo = U.$('#brand-logo');
     if (logo) { logo.innerHTML = FF.config.logo ? `<img src="${esc(FF.config.logo)}" alt="logo">` : esc((FF.config.brand || 'FF').split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase()); logo.classList.toggle('has-img', !!FF.config.logo); }
+    const favicon = U.$('#site-favicon');
+    if (favicon) { favicon.href = FF.config.logo || 'favicon.svg'; favicon.type = FF.config.logo ? ((FF.config.logo.match(/^data:(image\/[^;]+)/) || [])[1] || 'image/png') : 'image/svg+xml'; }
   }
 
   // ---- login / signup screen -------------------------------------------------------------------
@@ -97,6 +99,7 @@ window.FF = window.FF || {};
       <div class="auth-panel">
         <div class="auth-card">
           <div class="auth-brand-sm">${logoHtml()}<div><b>${esc(c.appName)}</b><small>${esc(c.tagline || 'Dashboard')}</small></div></div>
+          <p class="auth-mobile-intro">📊 <b>Issuance, stock aur performance</b> ek hi colourful dashboard me — First Forward aur GV Partner ka clear comparison, daily report alerts ke saath.</p>
           <div class="seg auth-tabs"><button class="seg-btn ${mode === 'login' ? 'on' : ''}" data-mode="login">Login</button>${signupOk ? `<button class="seg-btn ${mode === 'signup' ? 'on' : ''}" data-mode="signup">Sign up</button>` : ''}</div>
           <form id="auth-form" autocomplete="on" novalidate>
             ${mode === 'signup' ? `<label>Full name<input name="name" class="input" required maxlength="80" placeholder="Aapka naam" autocomplete="name"></label>` : ''}

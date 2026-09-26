@@ -20,7 +20,7 @@ FF.pages = FF.pages || {};
   const tableHtml = (header, rows) => `<div class="table-wrap"><table class="tbl compact"><thead><tr>${header.map((h, i) => `<th class="${i >= 1 && i <= 4 ? 'num' : ''}">${h}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
 
   async function render(root) {
-    root.innerHTML = `<div class="page-head"><div><h1>⚖️ GV vs First Forward</h1><p class="sub">Dono sources ka comparison — GV Partner (GV Master · Tag Assignment · GV REPORT) vs First Forward (EIR · StockDataa · REPORT)</p></div>
+    root.innerHTML = `<div class="page-head"><div><h1>⚖️ GV vs First Forward</h1><p class="sub">Dono sources ka comparison — GV Partner (GV Master · Tag Assignment · GV REPORT) vs First Forward (EIR · StockDataa · REPORT). FF side me GV master ID <b>${esc(FF.config.eir.gvMasterId || '5845036')}</b> pehle exclude hota hai.</p></div>
       <div class="head-actions"><a class="btn" href="#/gvDashboard">🚀 GV dashboard</a><a class="btn" href="#/dashboard">📊 FF dashboard</a><button class="btn primary" data-action="refresh">↻ Refresh</button></div></div>
       <div id="cmp-body">${U.spinner('Dono sources ka data load ho raha hai…')}</div>`;
     const body = U.$('#cmp-body', root);
@@ -32,7 +32,11 @@ FF.pages = FF.pages || {};
     if (!root.isConnected) return;
 
     const daily = dailyR.status === 'fulfilled' ? dailyR.value : null;
+    // EIR contains both streams.  5845036 is the GV master ID in the FF EIR, so the
+    // comparison must use only rows classified as First Forward; otherwise GV is counted twice.
+    const ffDaily = daily ? daily.filter((r) => r.channel !== 'GV Partner') : null;
     const agents = agentsR.status === 'fulfilled' ? agentsR.value : [];
+    const ffAgents = agents.filter((a) => a.channel !== 'GV Partner');
     const ffStock = stockR.status === 'fulfilled' ? stockR.value : [];
     const report = reportR.status === 'fulfilled' ? reportR.value : [];
     const gvStockClass = gvStockR.status === 'fulfilled' ? gvStockR.value : [];
@@ -41,15 +45,15 @@ FF.pages = FF.pages || {};
       return;
     }
 
-    const ffLatest = daily ? M.latestDate(daily) : null;
+    const ffLatest = ffDaily ? M.latestDate(ffDaily) : null;
     const gvLatest = masterR.status === 'fulfilled' ? G.latestDate() : null;
     const latest = ffLatest && gvLatest ? (ffLatest > gvLatest ? ffLatest : gvLatest) : (ffLatest || gvLatest);
     const cur = latest ? U.ymKey(latest) : null;
     const last = cur ? U.prevMonthKey(cur) : null;
     const day = latest ? latest.getDate() : 31;
 
-    const ffCur = daily && cur ? M.summary(daily, cur) : null;
-    const ffLastMtd = daily && last ? M.summary(daily, last, day) : null;
+    const ffCur = ffDaily && cur ? M.summary(ffDaily, cur) : null;
+    const ffLastMtd = ffDaily && last ? M.summary(ffDaily, last, day) : null;
     const gvCur = masterR.status === 'fulfilled' && cur ? G.summary(cur) : null;
     const gvLastMtd = masterR.status === 'fulfilled' && last ? G.summary(last, day) : null;
 
@@ -58,10 +62,10 @@ FF.pages = FF.pages || {};
     const gvStockTotal = U.sum(gvStockClass, (r) => r.n);
     const gvStockVc4 = U.sum(gvStockClass.filter((r) => r.group === 'VC4'), (r) => r.n);
 
-    const ffAgentsCur = new Set(agents.filter((a) => a.ym === cur).map((a) => a.key)).size;
+    const ffAgentsCur = new Set(ffAgents.filter((a) => a.ym === cur).map((a) => a.key)).size;
     const gvAgentsCur = gvCur ? gvCur.activeAgents : 0;
     const gvToday = (() => { if (!masterR.status || masterR.status !== 'fulfilled' || !latest) return 0; return G.rows().filter((r) => r.day === latest.getDate() && r.ym === cur).length; })();
-    const ffToday = daily && latest ? (M.dailySeries(daily, cur).totals[latest.getDate() - 1] || 0) : 0;
+    const ffToday = ffDaily && latest ? (M.dailySeries(ffDaily, cur).totals[latest.getDate() - 1] || 0) : 0;
 
     // ---------- KPIs -------------------------------------------------------------------------
     const ffShare = (ffToday + gvToday) ? (gvToday / (ffToday + gvToday)) * 100 : 0;
@@ -71,7 +75,7 @@ FF.pages = FF.pages || {};
       kpi('g3', 'VC4 (Payable) · MTD', '🚗', `${U.fmt(ffCur ? ffCur.vc4 : 0)} <small>vs</small> ${U.fmt(gvCur ? gvCur.vc4 : 0)}`, `FF share ${U.fmtPct(U.pctOf(ffCur ? ffCur.vc4 : 0, ffCur ? ffCur.total : 0), 0)} · GV share ${U.fmtPct(U.pctOf(gvCur ? gvCur.vc4 : 0, gvCur ? gvCur.total : 0), 0)}`),
       kpi('g4', 'Commercial (NVC4) · MTD', '🚚', `${U.fmt(ffCur ? ffCur.comm : 0)} <small>vs</small> ${U.fmt(gvCur ? gvCur.comm : 0)}`, `FF share ${U.fmtPct(U.pctOf(ffCur ? ffCur.comm : 0, ffCur ? ffCur.total : 0), 0)} · GV share ${U.fmtPct(U.pctOf(gvCur ? gvCur.comm : 0, gvCur ? gvCur.total : 0), 0)}`),
       kpi('g5', 'Avg / Day · MTD', '📅', `${U.fmt(ffCur ? ffCur.avgPerDay : 0)} <small>vs</small> ${U.fmt(gvCur ? gvCur.avgPerDay : 0)}`, `FF active days ${ffCur ? ffCur.activeDays : 0} · GV ${gvCur ? gvCur.activeDays : 0}`),
-      kpi('g6', `Projected Month-End`, '🎯', `${U.fmt(ffCur ? ffCur.projected : 0)} <small>vs</small> ${U.fmt(gvCur ? gvCur.projected : 0)}`, `vs last month full: FF ${U.deltaHtml(U.growth(ffCur ? ffCur.projected : 0, ffLastMtd ? M.summary(daily, last).total : 0), { decimals: 0 })} · GV ${U.deltaHtml(U.growth(gvCur ? gvCur.projected : 0, gvLastMtd ? G.summary(last).total : 0), { decimals: 0 })}`),
+      kpi('g6', `Projected Month-End`, '🎯', `${U.fmt(ffCur ? ffCur.projected : 0)} <small>vs</small> ${U.fmt(gvCur ? gvCur.projected : 0)}`, `vs last month full: FF ${U.deltaHtml(U.growth(ffCur ? ffCur.projected : 0, ffLastMtd ? M.summary(ffDaily, last).total : 0), { decimals: 0 })} · GV ${U.deltaHtml(U.growth(gvCur ? gvCur.projected : 0, gvLastMtd ? G.summary(last).total : 0), { decimals: 0 })}`),
       kpi('g8', 'Active Agents · MTD', '🧑‍💼', `${U.fmt(ffAgentsCur)} <small>vs</small> ${U.fmt(gvAgentsCur)}`, `Avg tags / agent: FF ${U.fmt(ffAgentsCur ? (ffCur ? ffCur.total : 0) / ffAgentsCur : 0)} · GV ${U.fmt(gvAgentsCur ? (gvCur ? gvCur.total : 0) / gvAgentsCur : 0)}`),
       kpi('g9', 'Stock in Field', '📦', `${U.fmt(ffStockTotal)} <small>vs</small> ${U.fmt(gvStockTotal)}`, `FF VC4 ${U.fmt(ffStockVc4)} (${U.fmtPct(U.pctOf(ffStockVc4, ffStockTotal), 0)}) · GV VC4 ${U.fmt(gvStockVc4)} (${U.fmtPct(U.pctOf(gvStockVc4, gvStockTotal), 0)})`),
       kpi('g12', 'Stock Days Cover', '⏳', `${ffCur && ffCur.avgPerDay ? U.fmt(ffStockTotal / ffCur.avgPerDay) : '—'} <small>vs</small> ${gvCur && gvCur.avgPerDay ? U.fmt(gvStockTotal / gvCur.avgPerDay) : '—'}`, 'Current runrate par kitne din ka stock'),
@@ -82,7 +86,7 @@ FF.pages = FF.pages || {};
     // ---------- charts -----------------------------------------------------------------------
     const cmpLine = (() => {
       if (!cur) return '';
-      const ffS = daily ? M.dailySeries(daily, cur) : null;
+      const ffS = ffDaily ? M.dailySeries(ffDaily, cur) : null;
       const gvS = masterR.status === 'fulfilled' ? G.dailySeries(cur) : null;
       if (!ffS && !gvS) return '';
       const labels = ffS ? ffS.days.map(String) : gvS.days.map(String);
@@ -101,11 +105,11 @@ FF.pages = FF.pages || {};
     })();
 
     const monthlyCompare = (() => {
-      const ffMonths = daily ? M.months(daily) : [];
+      const ffMonths = ffDaily ? M.months(ffDaily) : [];
       const gvMonths = masterR.status === 'fulfilled' ? G.months() : [];
       const months = U.uniq([...ffMonths, ...gvMonths]).sort();
       if (!months.length) return '';
-      const ffSums = months.map((m) => (daily ? M.summary(daily, m).total : 0));
+      const ffSums = months.map((m) => (ffDaily ? M.summary(ffDaily, m).total : 0));
       const gvSums = months.map((m) => (masterR.status === 'fulfilled' ? G.summary(m).total : 0));
       return C.bars({ labels: months.map((m) => U.labelYM(m)), height: 230, series: [{ name: 'First Forward', values: ffSums, color: '#6366f1' }, { name: 'GV Partner', values: gvSums, color: '#0d9488' }], legendAlways: true });
     })();
@@ -130,7 +134,7 @@ FF.pages = FF.pages || {};
       row('· Commercial (NVC4)', ffCur ? ffCur.comm : 0, gvCur ? gvCur.comm : 0, 'VC20 + VC5+'),
       row('Issuance (new)', ffCur ? ffCur.issuance : 0, gvCur ? gvCur.issuance : 0, 'Status = issuance / completed'),
       row('Replacement', ffCur ? ffCur.replacement : 0, gvCur ? gvCur.replacement : 0, 'Replacement tags'),
-      row('Last month (full)', daily && last ? M.summary(daily, last).total : 0, masterR.status === 'fulfilled' && last ? G.summary(last).total : 0, U.labelYM(last, true)),
+      row('Last month (full)', ffDaily && last ? M.summary(ffDaily, last).total : 0, masterR.status === 'fulfilled' && last ? G.summary(last).total : 0, U.labelYM(last, true)),
       row('Last month (same period)', ffLastMtd ? ffLastMtd.total : 0, gvLastMtd ? gvLastMtd.total : 0, `day 1-${day}`),
       row('Avg / day (MTD)', ffCur ? ffCur.avgPerDay : 0, gvCur ? gvCur.avgPerDay : 0, 'MTD / days elapsed'),
       row('Projected month-end', ffCur ? ffCur.projected : 0, gvCur ? gvCur.projected : 0, 'Current runrate se'),
@@ -155,7 +159,7 @@ FF.pages = FF.pages || {};
       if (report.length) insight.push(`GV REPORT me <b>${U.fmt(report.filter((r) => /high/i.test(r.priority)).length)}</b> agents high dispatch priority par hain aur <b>${U.fmt(report.filter((r) => /inactive/i.test(r.agentStatus)).length)}</b> inactive hain.`);
     }
 
-    const topFF = U.topEntries(U.groupSum(agents.filter((a) => a.ym === cur), (a) => a.name, (a) => a.n), 8);
+    const topFF = U.topEntries(U.groupSum(ffAgents.filter((a) => a.ym === cur), (a) => a.name, (a) => a.n), 8);
     const topGV = (() => { if (masterR.status !== 'fulfilled' || !cur) return []; return G.agentRollup(cur).slice(0, 8).map((a) => [a.agentName, a.total]); })();
 
     body.innerHTML = `
@@ -174,7 +178,7 @@ FF.pages = FF.pages || {};
         ${card('⭐ Top agents · First Forward (MTD)', C.hbars({ items: topFF.map(([name, v], i) => ({ label: name, value: v, color: C.PALETTE[i % C.PALETTE.length], attr: `data-link="#/performance?q=${encodeURIComponent(name)}"` })), valueLabel: 'MTD' }))}
         ${card('⭐ Top agents · GV Partner (MTD)', C.hbars({ items: topGV.map(([name, v], i) => ({ label: name, value: v, color: C.PALETTE[(i + 4) % C.PALETTE.length], attr: `data-link="#/gvPerformance?q=${encodeURIComponent(name)}"` })), valueLabel: 'MTD' }))}
       </div>
-      <p class="foot-note">Sources: First Forward → EIR (issuance), StockDataa (stock), REPORT (performance) · GV Partner → GV Master, Tag Assignment, GV REPORT · Latest date ${latest ? U.labelDate(latest, true) : '—'} · Loaded ${U.timeLabel(S.loadedAt || G.loadedAt)}</p>`;
+      <p class="foot-note">Sources: First Forward → EIR (issuance; GV master ID ${esc(FF.config.eir.gvMasterId || '5845036')} excluded), StockDataa (stock), REPORT (performance) · GV Partner → GV Master, Tag Assignment, GV REPORT · Latest date ${latest ? U.labelDate(latest, true) : '—'} · Loaded ${U.timeLabel(S.loadedAt || G.loadedAt)}</p>`;
     C.mount(body);
   }
 

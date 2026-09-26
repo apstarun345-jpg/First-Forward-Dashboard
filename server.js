@@ -120,8 +120,10 @@ const DEFAULT_SETTINGS = {
 // JSON file store
 // ---------------------------------------------------------------------------------------------
 if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
-const FILES = { users: path.join(DATA_DIR, 'users.json'), sessions: path.join(DATA_DIR, 'sessions.json'), settings: path.join(DATA_DIR, 'settings.json'), resets: path.join(DATA_DIR, 'resets.json') };
-const db = { users: [], sessions: {}, settings: { ...DEFAULT_SETTINGS }, resets: [] };
+const FILES = { users: path.join(DATA_DIR, 'users.json'), sessions: path.join(DATA_DIR, 'sessions.json'), settings: path.join(DATA_DIR, 'settings.json'), resets: path.join(DATA_DIR, 'resets.json'), notify: path.join(DATA_DIR, 'notifications.json') };
+// Notifications are deliberately kept server-side so the admin can see activity even after a
+// refresh. `watch` stores the last Google Sheet snapshot used by the lightweight report watcher.
+const db = { users: [], sessions: {}, settings: { ...DEFAULT_SETTINGS }, resets: [], notify: { items: [], watch: {} } };
 const writeQueue = new Map();
 
 async function readJson(file, fallback) {
@@ -166,9 +168,43 @@ function verifyPassword(password, stored) {
 const normUser = (u) => String(u || '').trim().toLowerCase().replace(/[^a-z0-9._@-]/g, '').slice(0, 60);
 function publicUser(u) {
   if (!u) return null;
-  return { username: u.username, name: u.name || u.username, email: u.email || '', mobile: u.mobile || '', avatar: u.avatar || '', role: u.role, approved: !!u.approved, permissions: u.role === 'admin' ? allPermKeysNow() : (u.permissions || []), createdAt: u.createdAt, lastLoginAt: u.lastLoginAt || null, mustChangePassword: !!u.mustChangePassword };
+  return { username: u.username, name: u.name || u.username, email: u.email || '', mobile: u.mobile || '', avatar: u.avatar || '', role: u.role, approved: !!u.approved, permissions: u.role === 'admin' ? allPermKeysNow() : (u.permissions || []), createdAt: u.createdAt, lastLoginAt: u.lastLoginAt || null, mustChangePassword: !!u.mustChangePassword, lastLocation: u.lastLocation || null, notificationsSeenAt: u.notificationsSeenAt || null };
 }
 function findUser(username) { return db.users.find((u) => u.username === normUser(username)) || null; }
+
+// ---------------------------------------------------------------------------------------------
+// In-app + browser notification feed
+// ---------------------------------------------------------------------------------------------
+function notifyItems() {
+  if (!db.notify || !Array.isArray(db.notify.items)) db.notify = { items: [], watch: {} };
+  return db.notify.items;
+}
+function notificationVisible(item, user) {
+  if (!item || !user) return false;
+  if (item.target === 'broadcast') return true;
+  if (item.target === 'admin') return user.role === 'admin';
+  return item.target === `user:${user.username}`;
+}
+function recordNotification({ type = 'info', title, body, target = 'admin', meta = {} }) {
+  const item = { id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${crypto.randomBytes(6).toString('hex')}`, type, title: String(title || 'Notification').slice(0, 120), body: String(body || '').slice(0, 800), target, meta, createdAt: new Date().toISOString() };
+  notifyItems().push(item);
+  if (notifyItems().length > 500) db.notify.items = notifyItems().slice(-500);
+  persist('notify');
+  return item;
+}
+function visibleNotifications(user, since) {
+  const after = since ? new Date(since).getTime() : 0;
+  return notifyItems().filter((item) => notificationVisible(item, user) && (!after || new Date(item.createdAt).getTime() > after)).slice(-80);
+}
+const activityLast = new Map();
+function noteActivity(user, page) {
+  if (!user || user.role === 'admin') return null;
+  const cleanPage = String(page || 'dashboard').replace(/[^a-zA-Z0-9 _-]/g, '').slice(0, 80) || 'dashboard';
+  const key = `${user.username}:${cleanPage}`;
+  if (Date.now() - (activityLast.get(key) || 0) < 60e3) return null;
+  activityLast.set(key, Date.now());
+  return recordNotification({ type: 'activity', title: 'User ne app kholi', body: `${user.name || user.username} ne ${cleanPage} open kiya.`, target: 'admin', meta: { username: user.username, page: cleanPage } });
+}
 function sha(token) { return crypto.createHash('sha256').update(token).digest('hex'); }
 function createSession(username) {
   const token = crypto.randomBytes(32).toString('base64url');
@@ -231,7 +267,7 @@ function headers(extra = {}) {
   return {
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'strict-origin-when-cross-origin',
-    'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+    'Permissions-Policy': 'camera=(), microphone=(), geolocation=(self)',
     ...(FRAME_PROTECTION ? { 'X-Frame-Options': 'SAMEORIGIN' } : {}),
     'Content-Security-Policy': "default-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://docs.google.com",
     ...extra
@@ -285,6 +321,104 @@ async function fetchUpstream(url) {
     return { status: response.status, body };
   } finally { clearTimeout(timer); }
 }
+
+// The watcher only asks Google for grouped counts for the newest day. It does not download
+// the full EIR/REPORT tabs. Render can sleep, so the same check also runs when the feed is opened.
+function parseGvizServer(text) {
+  const start = text.indexOf('{'), end = text.lastIndexOf('}');
+  if (start < 0 || end < 0) throw new Error('gviz response parse failed');
+  const json = JSON.parse(text.slice(start, end + 1));
+  if (json.status === 'error') throw new Error((json.errors || []).map((e) => e.detailed_message || e.message).join('; ') || 'Google query error');
+  return json.table || { cols: [], rows: [] };
+}
+function serverCell(row, index) {
+  const cell = row && row.c && row.c[index];
+  return cell && cell.v !== null && cell.v !== undefined ? String(cell.v) : '';
+}
+function serverDate(value) {
+  const m = String(value || '').match(/^Date\((\d{4}),(\d{1,2}),(\d{1,2})/);
+  if (m) return `${m[1]}-${String(+m[2] + 1).padStart(2, '0')}-${String(+m[3]).padStart(2, '0')}`;
+  const iso = String(value || '').match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  return iso ? `${iso[1]}-${String(+iso[2]).padStart(2, '0')}-${String(+iso[3]).padStart(2, '0')}` : '';
+}
+function serverNumber(value) { const n = Number(value); return Number.isFinite(n) ? n : 0; }
+function classBucket(value) {
+  const c = String(value || '').toUpperCase().replace(/\s+/g, '');
+  if (c === '4' || c === 'VC4') return 'VC4';
+  if (c === '20' || c === 'VC20') return 'VC20';
+  return 'VC5+';
+}
+async function reportSnapshot(source) {
+  const s = db.settings;
+  const isGv = source === 'gv';
+  const e = isGv ? (s.gv && s.gv.master) : s.eir;
+  const sheetId = isGv ? s.gvSheetId : s.sheetId;
+  const sheet = isGv ? ((e && e.tab) || 'GV Master') : (s.eirSheet || (e && e.sheet) || 'EIR');
+  const dateCol = isGv ? ((e && e.date) || 'P') : ((e && e.date) || 'AA');
+  const classCol = isGv ? ((e && (e.cch || e.vClass)) || 'G') : ((e && e.cls) || 'D');
+  const tagCol = isGv ? ((e && e.tagId) || 'I') : ((e && e.tagId) || 'A');
+  const masterCol = !isGv ? ((e && e.masterId) || 'AU') : '';
+  const select = isGv ? `${dateCol}, ${classCol}, count(${tagCol})` : `${dateCol}, ${classCol}, ${masterCol}, count(${tagCol})`;
+  const group = isGv ? `${dateCol}, ${classCol}` : `${dateCol}, ${classCol}, ${masterCol}`;
+  const tq = `select ${select} where ${dateCol} is not null group by ${group} order by ${dateCol} desc limit 100`;
+  const params = new URLSearchParams({ id: String(sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet, tq });
+  const out = await fetchUpstream(upstreamUrl(params));
+  if (out.status < 200 || out.status >= 300) throw new Error(`Google responded ${out.status}`);
+  const table = parseGvizServer(out.body);
+  const rows = [];
+  for (const row of table.rows || []) {
+    const date = serverDate(serverCell(row, 0));
+    if (!date) continue;
+    const master = isGv ? '' : serverCell(row, 2).trim();
+    const configuredGvId = String((s.eir && s.eir.gvMasterId) || '5845036').trim().replace(/\.0+$/, '');
+    const excluded = !isGv && master && master.replace(/\.0+$/, '') === configuredGvId;
+    if (excluded) continue;
+    const classIndex = 1;
+    const countIndex = isGv ? 2 : 3;
+    rows.push({ date, cls: classBucket(serverCell(row, classIndex)), n: serverNumber(serverCell(row, countIndex)) });
+  }
+  if (!rows.length) return { date: '', total: 0, classes: {} };
+  const date = rows.map((r) => r.date).sort().pop();
+  const latest = rows.filter((r) => r.date === date);
+  const classes = {};
+  latest.forEach((r) => { classes[r.cls] = (classes[r.cls] || 0) + r.n; });
+  return { date, total: Object.values(classes).reduce((a, b) => a + b, 0), classes };
+}
+function snapshotDelta(prev, next) {
+  if (!prev || !prev.date || !next || !next.date) return null;
+  const keys = new Set([...Object.keys(prev.classes || {}), ...Object.keys(next.classes || {})]);
+  const classes = {};
+  for (const key of keys) { const d = (next.classes[key] || 0) - (prev.classes[key] || 0); if (d) classes[key] = d; }
+  const total = (next.total || 0) - (prev.total || 0);
+  return { total, classes, changed: next.date !== prev.date || total !== 0 };
+}
+function deltaText(delta) {
+  const pieces = Object.entries(delta.classes || {}).map(([k, v]) => `${k} ${v > 0 ? '+' : ''}${v}`);
+  return `${delta.total > 0 ? '+' : ''}${delta.total} tags${pieces.length ? ` · ${pieces.join(' · ')}` : ''}`;
+}
+let reportCheckAt = 0;
+let reportCheckPromise = null;
+async function checkReports(force = false) {
+  if (reportCheckPromise) return reportCheckPromise;
+  if (!force && Date.now() - reportCheckAt < 5 * 60e3) return;
+  reportCheckAt = Date.now();
+  reportCheckPromise = (async () => {
+    for (const source of ['ff', 'gv']) {
+      try {
+        const next = await reportSnapshot(source);
+        const previous = db.notify.watch[source];
+        db.notify.watch[source] = next;
+        const delta = snapshotDelta(previous, next);
+        if (delta && delta.changed && (delta.total > 0 || next.date !== previous.date)) {
+          const label = source === 'gv' ? 'GV Partner' : 'First Forward';
+          recordNotification({ type: 'report', title: `${label} report update`, body: `${next.date}: ${deltaText(delta)} — Google Sheet me naya data aaya.`, target: 'admin', meta: { source, snapshot: next } });
+        }
+      } catch (err) { console.warn(`report watcher ${source}:`, err.message); }
+    }
+    await persist('notify');
+  })().finally(() => { reportCheckPromise = null; });
+  return reportCheckPromise;
+}
 function sendCached(res, entry, tag) {
   res.writeHead(200, headers({ 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', 'X-Cache': tag, 'X-FF-Source': 'proxy', 'X-FF-Age': String(Math.round((Date.now() - entry.at) / 1000)) }));
   res.end(entry.body);
@@ -331,7 +465,7 @@ async function handleApi(req, res, url) {
   const user = sessionUser(req);
 
   if (p === '/api/health' && method === 'GET') {
-    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: 3, users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: DATA_DIR });
+    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.1.0', users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: DATA_DIR });
   }
   if (p === '/api/public-config' && method === 'GET') return sendJson(res, 200, publicSettings());
 
@@ -367,7 +501,31 @@ async function handleApi(req, res, url) {
     attempts.delete(ip);
     const token = createSession(u.username);
     u.lastLoginAt = new Date().toISOString(); persist('users');
+    if (u.role !== 'admin') recordNotification({ type: 'login', title: 'New user login', body: `${u.name || u.username} ne login kiya.`, target: 'admin', meta: { username: u.username } });
     return sendJson(res, 200, { ok: true, user: publicUser(u), settings: db.settings, permissions: permissionsFor(db.settings), tabs: db.settings.tabs }, { 'Set-Cookie': cookieHeader(req, token, SESSION_DAYS * 86400) });
+  }
+  // ---- activity + notifications ---------------------------------------------------------------
+  if (p === '/api/notifications' && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required');
+    checkReports().catch(() => {});
+    const since = url.searchParams.get('since') || '';
+    const items = visibleNotifications(user, since);
+    const all = visibleNotifications(user, '1970-01-01T00:00:00.000Z');
+    const seen = user.notificationsSeenAt ? new Date(user.notificationsSeenAt).getTime() : 0;
+    const unread = all.filter((item) => new Date(item.createdAt).getTime() > seen).length;
+    return sendJson(res, 200, { items, unread, checkAt: new Date().toISOString() });
+  }
+  if (p === '/api/notifications/read' && method === 'POST') {
+    if (!user) throw new HttpError(401, 'Login required');
+    user.notificationsSeenAt = new Date().toISOString();
+    await persist('users');
+    return sendJson(res, 200, { ok: true, at: user.notificationsSeenAt });
+  }
+  if (p === '/api/activity' && method === 'POST') {
+    if (!user) throw new HttpError(401, 'Login required');
+    const body = await readBody(req);
+    noteActivity(user, body.page);
+    return sendJson(res, 200, { ok: true });
   }
   // ---- forgot password ("Forgot password?" on the login screen) ----
   // No email service: the request is queued for the admin, who either sets a new password or
@@ -435,6 +593,15 @@ async function handleApi(req, res, url) {
       user.avatar = a;
     }
     await persist('users');
+    return sendJson(res, 200, { ok: true, user: publicUser(user) });
+  }
+  if (p === '/api/auth/location' && method === 'POST') {
+    const body = await readBody(req);
+    const lat = Number(body.latitude), lon = Number(body.longitude), accuracy = Number(body.accuracy);
+    if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lon) || lon < -180 || lon > 180) throw new HttpError(400, 'Location coordinates valid nahi hain.');
+    user.lastLocation = { latitude: Number(lat.toFixed(6)), longitude: Number(lon.toFixed(6)), accuracy: Number.isFinite(accuracy) ? Math.max(0, Math.min(100000, Math.round(accuracy))) : null, at: new Date().toISOString() };
+    await persist('users');
+    if (user.role !== 'admin') recordNotification({ type: 'location', title: 'User location shared', body: `${user.name || user.username} ne consent ke saath apni location share ki.`, target: 'admin', meta: { username: user.username, location: user.lastLocation } });
     return sendJson(res, 200, { ok: true, user: publicUser(user) });
   }
 
@@ -612,11 +779,15 @@ async function start() {
   db.sessions = await readJson(FILES.sessions, {});
   db.settings = deepMerge(DEFAULT_SETTINGS, await readJson(FILES.settings, {}));
   db.resets = await readJson(FILES.resets, []);
+  const storedNotify = await readJson(FILES.notify, {});
+  db.notify = { items: Array.isArray(storedNotify.items) ? storedNotify.items.slice(-500) : [], watch: storedNotify.watch && typeof storedNotify.watch === 'object' ? storedNotify.watch : {} };
   pruneSessions();
   await bootstrapAdmin();
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`First Forward Dashboard → http://0.0.0.0:${PORT}`);
     console.log(`Sheet ${db.settings.sheetId} · cache ${cacheMs() / 1000}s · data ${DATA_DIR} · users ${db.users.length}${GVIZ_BASE !== 'https://docs.google.com' ? ` · upstream ${GVIZ_BASE}` : ''}`);
+    setTimeout(() => checkReports(true).catch(() => {}), 5000);
+    setInterval(() => checkReports(false).catch(() => {}), 5 * 60e3).unref();
   });
 }
 start();

@@ -15,7 +15,9 @@ window.FF = window.FF || {};
   };
   const channelOf = (masterId, tlName) => {
     const e = FF.config.eir;
-    if (U.clean(masterId) === e.gvMasterId || U.clean(tlName) === e.gvChannelTl) return 'GV Partner';
+    const gvId = U.clean(e.gvMasterId || '5845036').replace(/\.0+$/, '');
+    const id = U.clean(masterId).replace(/\.0+$/, '');
+    if ((gvId && id === gvId) || U.clean(tlName).toLowerCase() === U.clean(e.gvChannelTl || 'ApnaPayment Pvt. Ltd.').toLowerCase()) return 'GV Partner';
     return 'First Forward';
   };
 
