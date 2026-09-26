@@ -130,8 +130,8 @@ window.FF = window.FF || {};
           
           <form id="auth-form" autocomplete="on" novalidate class="pro-form">
             ${mode === 'signup' ? `<label class="pro-label"><span>Full Name</span><input name="name" class="input pro-input" required maxlength="80" placeholder="Enter your full name" autocomplete="name"></label>` : ''}
-            <label class="pro-label"><span>Username</span><input name="username" class="input pro-input" required minlength="3" maxlength="60" placeholder="Enter username" autocapitalize="none" autocomplete="username"></label>
-            ${mode === 'signup' ? `<div class="two"><label class="pro-label"><span>Mobile</span><input name="mobile" class="input pro-input" inputmode="tel" placeholder="98xxxxxxxx" autocomplete="tel"></label><label class="pro-label"><span>Email</span><input name="email" class="input pro-input" type="email" placeholder="you@company.com" autocomplete="email"></label></div>` : ''}
+            <label class="pro-label"><span>${mode === 'signup' ? 'Username' : 'Username / Email / Mobile'}</span><input name="username" class="input pro-input" required ${mode === 'signup' ? 'minlength="3" maxlength="60"' : 'minlength="2" maxlength="120"'} placeholder="${mode === 'signup' ? 'Choose a username' : 'Enter username, email or mobile number'}" autocapitalize="none" autocomplete="username" ${mode !== 'signup' ? 'inputmode="text"' : ''}></label>
+            ${mode === 'signup' ? `<div class="two"><label class="pro-label"><span>Mobile</span><input name="mobile" class="input pro-input" inputmode="tel" placeholder="98xxxxxxxx" autocomplete="tel"></label><label class="pro-label"><span>Email</span><input name="email" class="input pro-input" type="email" placeholder="you@company.com" autocomplete="email"></label></div>` : '<div class="pro-hint">💡 You can login with username, registered email, or mobile number + password</div>'}
             <label class="pro-label"><span>Password</span><span class="pw-wrap"><input name="password" class="input pro-input" type="password" required minlength="6" autocomplete="${mode === 'signup' ? 'new-password' : 'current-password'}" placeholder="Enter password (min 6 characters)"><button type="button" class="pw-eye" data-eye title="Show / Hide password">👁</button></span></label>
             <div class="auth-row pro-row">
               <label class="check small"><input type="checkbox" id="auth-remember" checked> <span>Remember me</span></label>
@@ -170,14 +170,14 @@ window.FF = window.FF || {};
           <div class="auth-brand-sm pro-brand-sm">${logoHtml()}<div><b>Password Reset</b><small>${esc(FF.config.appName)}</small></div></div>
           <div class="seg auth-tabs pro-tabs"><button class="seg-btn ${step === 'ask' ? 'on' : ''}" data-fstep="ask">1. Request</button><button class="seg-btn ${step === 'code' ? 'on' : ''}" data-fstep="code">2. Reset with Code</button></div>
           ${step === 'ask' ? `<form id="forgot-form">
-            <p class="dim small">Enter your username or registered email. Your request will be sent to the administrator who will provide a new password or 6-digit code.</p>
-            <label class="pro-label"><span>Username / Email</span><input name="username" class="input pro-input" required placeholder="username or email" autocapitalize="none"></label>
+            <p class="dim small">Enter your username, email or mobile. Your request will be sent to the administrator who will provide a new password or 6-digit code.</p>
+            <label class="pro-label"><span>Username / Email / Mobile</span><input name="username" class="input pro-input" required placeholder="username, email or mobile" autocapitalize="none"></label>
             <div id="auth-msg" class="auth-msg ${msg ? msg.kind || '' : ''}">${msg ? esc(msg.text) : ''}</div>
             <button class="btn primary big pro-submit" type="submit">Send Request</button>
             <div class="btn-row" style="margin-top:10px">${wa ? `<a class="btn small" href="${esc(wa)}" target="_blank" rel="noopener">WhatsApp Admin</a>` : ''}${mail ? `<a class="btn small" href="${esc(mail)}">Email Admin</a>` : ''}</div>
           </form>` : `<form id="reset-form">
-            <p class="dim small">Enter the 6-digit code received from admin and set a new password. Code is valid for 30 minutes.</p>
-            <label class="pro-label"><span>Username</span><input name="username" class="input pro-input" required autocapitalize="none"></label>
+            <p class="dim small">Enter the 6-digit code received from admin and set a new password. Code is valid for 30 minutes. You can use username, email or mobile.</p>
+            <label class="pro-label"><span>Username / Email / Mobile</span><input name="username" class="input pro-input" required autocapitalize="none" placeholder="username, email or mobile"></label>
             <label class="pro-label"><span>6-digit Code</span><input name="code" class="input mono pro-input" required inputmode="numeric" maxlength="8" placeholder="123456"></label>
             <div class="two"><label class="pro-label"><span>New Password</span><input name="password" class="input pro-input" type="password" required minlength="6" autocomplete="new-password"></label><label class="pro-label"><span>Confirm Password</span><input name="password2" class="input pro-input" type="password" required minlength="6" autocomplete="new-password"></label></div>
             <div id="auth-msg" class="auth-msg ${msg ? msg.kind || '' : ''}">${msg ? esc(msg.text) : ''}</div>

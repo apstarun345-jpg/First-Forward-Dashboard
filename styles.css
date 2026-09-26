@@ -966,6 +966,8 @@ table.matrix tr.is-admin td.mx-user { background: #f8fafc; }
   .auth-panel.pro-panel { padding: 18px; }
 }
 
+.pro-hint { background: linear-gradient(90deg, #fef3c7, #fde68a); border: 1px solid #fcd34d; color: #92400e; font-size: 11.5px; font-weight: 600; padding: 8px 12px; border-radius: 10px; line-height: 1.4; }
+
 /* Animations for all cards */
 .card { transition: transform .2s, box-shadow .2s; }
 .card:hover { transform: translateY(-1px); box-shadow: 0 10px 30px rgba(15,23,42,.08), 0 2px 8px rgba(15,23,42,.06); }

@@ -172,6 +172,33 @@ function publicUser(u) {
   return { username: u.username, name: u.name || u.username, email: u.email || '', mobile: u.mobile || '', avatar: u.avatar || '', role: u.role, approved: !!u.approved, permissions: u.role === 'admin' ? allPermKeysNow() : (u.permissions || []), createdAt: u.createdAt, lastLoginAt: u.lastLoginAt || null, mustChangePassword: !!u.mustChangePassword, lastLocation: u.lastLocation || null, notificationsSeenAt: u.notificationsSeenAt || null };
 }
 function findUser(username) { return db.users.find((u) => u.username === normUser(username)) || null; }
+function findUserByLogin(raw) {
+  const input = String(raw || '').trim();
+  if (!input) return null;
+  // 1) exact username (normalized)
+  const norm = normUser(input);
+  let u = db.users.find((x) => x.username === norm) || null;
+  if (u) return u;
+  // 2) email exact (case-insensitive)
+  const lower = input.toLowerCase();
+  u = db.users.find((x) => x.email && String(x.email).trim().toLowerCase() === lower) || null;
+  if (u) return u;
+  // 3) mobile: digits match (last 10 digits)
+  const digits = input.replace(/\D/g, '');
+  if (digits.length >= 7) {
+    u = db.users.find((x) => {
+      if (!x.mobile) return false;
+      const md = String(x.mobile).replace(/\D/g, '');
+      if (!md) return false;
+      if (md === digits) return true;
+      // compare last 10 digits for Indian numbers etc.
+      if (md.length >= 10 && digits.length >= 10) return md.slice(-10) === digits.slice(-10);
+      return md.endsWith(digits) || digits.endsWith(md);
+    }) || null;
+    if (u) return u;
+  }
+  return null;
+}
 
 // ---------------------------------------------------------------------------------------------
 // In-app + browser notification feed
@@ -494,15 +521,16 @@ async function handleApi(req, res, url) {
   }
   if (p === '/api/auth/login' && method === 'POST') {
     const ip = clientIp(req);
-    if (throttled(ip)) throw new HttpError(429, 'Bahut galat attempts — 10 minute baad try karo.');
+    if (throttled(ip)) throw new HttpError(429, 'Too many failed attempts — try again after 10 minutes.');
     const body = await readBody(req);
-    const u = findUser(body.username);
-    if (!u || !verifyPassword(body.password || '', u.password)) { noteFail(ip); throw new HttpError(401, 'Username ya password galat hai.'); }
-    if (!u.approved) throw new HttpError(403, 'Account abhi admin approval ke wait me hai.');
+    const loginId = String(body.username || body.email || body.mobile || '').trim();
+    const u = findUserByLogin(loginId) || findUserByLogin(body.username);
+    if (!u || !verifyPassword(body.password || '', u.password)) { noteFail(ip); throw new HttpError(401, 'Invalid login — check username / email / mobile and password.'); }
+    if (!u.approved) throw new HttpError(403, 'Account pending admin approval.');
     attempts.delete(ip);
     const token = createSession(u.username);
     u.lastLoginAt = new Date().toISOString(); persist('users');
-    if (u.role !== 'admin') recordNotification({ type: 'login', title: 'New user login', body: `${u.name || u.username} ne login kiya.`, target: 'admin', meta: { username: u.username } });
+    if (u.role !== 'admin') recordNotification({ type: 'login', title: 'New user login', body: `${u.name || u.username} logged in via ${loginId}.`, target: 'admin', meta: { username: u.username, loginId } });
     return sendJson(res, 200, { ok: true, user: publicUser(u), settings: db.settings, permissions: permissionsFor(db.settings), tabs: db.settings.tabs }, { 'Set-Cookie': cookieHeader(req, token, SESSION_DAYS * 86400) });
   }
   // ---- activity + notifications ---------------------------------------------------------------
@@ -534,36 +562,36 @@ async function handleApi(req, res, url) {
   if (p === '/api/auth/forgot' && method === 'POST') {
     const ip = clientIp(req);
     const hits = (forgotHits.get(ip) || []).filter((t) => Date.now() - t < 60 * 60e3);
-    if (hits.length >= 6) throw new HttpError(429, 'Bahut reset requests — thodi der baad try karo ya admin ko seedha message karo.');
+    if (hits.length >= 6) throw new HttpError(429, 'Too many reset requests — wait a while or contact admin directly.');
     hits.push(Date.now()); forgotHits.set(ip, hits);
     const body = await readBody(req);
-    const key = String(body.username || '').trim();
-    const u = findUser(key) || db.users.find((x) => x.email && String(x.email).toLowerCase() === key.toLowerCase());
+    const key = String(body.username || body.email || '').trim();
+    const u = findUserByLogin(key) || db.users.find((x) => x.email && String(x.email).toLowerCase() === key.toLowerCase());
     const c = db.settings.contacts || {};
     const help = { whatsapp: c.teamWhatsapp || '', email: c.teamEmail || '' };
     if (!u) {
-      return sendJson(res, 200, { ok: true, found: false, help, message: 'Agar ye account hai to request admin ko chali gayi hai. Nahi mila to admin se naya account maango.' });
+      return sendJson(res, 200, { ok: true, found: false, help, message: 'If this account exists, request has been sent to admin. If not found, ask admin for new account.' });
     }
     db.resets = db.resets.filter((r) => r.username !== u.username || r.resolved);
     db.resets.push({ username: u.username, name: u.name || u.username, email: u.email || '', mobile: u.mobile || '', at: new Date().toISOString(), code: '', codeExpiresAt: null, resolved: false });
     await persist('resets');
-    return sendJson(res, 200, { ok: true, found: true, help, message: `Request bhej di gayi ✓ — admin approve karke aapko naya password ya 6-digit code dega (user: ${u.username}).` });
+    return sendJson(res, 200, { ok: true, found: true, help, message: `Request sent ✓ — admin will provide new password or 6-digit code (user: ${u.username}).` });
   }
   if (p === '/api/auth/reset' && method === 'POST') {
     const body = await readBody(req);
-    const u = findUser(body.username);
+    const u = findUserByLogin(body.username) || findUser(body.username);
     const code = String(body.code || '').replace(/\D/g, '').slice(0, 8);
-    if (!u || !code) throw new HttpError(400, 'Username ya code galat hai.');
+    if (!u || !code) throw new HttpError(400, 'Username or code invalid.');
     const reqRow = db.resets.slice().reverse().find((r) => r.username === u.username && !r.resolved && r.code);
-    if (!reqRow || !reqRow.code || reqRow.code !== code) throw new HttpError(400, 'Code match nahi hua. Admin se naya code maango.');
-    if (!reqRow.codeExpiresAt || new Date(reqRow.codeExpiresAt).getTime() < Date.now()) throw new HttpError(400, 'Code expire ho gaya — admin se naya code maango.');
-    if (!validPassword(body.password)) throw new HttpError(400, 'Naya password kam se kam 6 characters ka ho.');
+    if (!reqRow || !reqRow.code || reqRow.code !== code) throw new HttpError(400, 'Code did not match. Ask admin for new code.');
+    if (!reqRow.codeExpiresAt || new Date(reqRow.codeExpiresAt).getTime() < Date.now()) throw new HttpError(400, 'Code expired — ask admin for new code.');
+    if (!validPassword(body.password)) throw new HttpError(400, 'New password must be at least 6 characters.');
     u.password = hashPassword(body.password);
     u.mustChangePassword = false;
     reqRow.resolved = true; reqRow.resolvedAt = new Date().toISOString();
     for (const [k, sess] of Object.entries(db.sessions)) if (sess.username === u.username) delete db.sessions[k];
     await persist('users'); await persist('sessions'); await persist('resets');
-    return sendJson(res, 200, { ok: true, message: 'Password set ho gaya ✓ — ab naye password se login karo.' });
+    return sendJson(res, 200, { ok: true, message: 'Password set ✓ — now login with new password.' });
   }
 
   if (p === '/api/auth/logout' && method === 'POST') {
