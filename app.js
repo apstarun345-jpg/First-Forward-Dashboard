@@ -115,6 +115,7 @@ window.FF = window.FF || {};
         <a href="#/settings?tab=account" data-close-menu>👤 My account</a>
         <a href="#/settings?tab=account" data-close-menu>🔑 Password badlo</a>
         <label class="um-upload">🖼️ Photo upload / badlo<input type="file" accept="image/*" id="um-avatar" hidden></label>
+        <a href="#" id="um-loc" data-close-menu>📍 Location share karo</a>
         ${FF.auth.isAdmin() ? `<a href="#/settings?tab=access" data-close-menu>🔐 Access matrix (admin)</a><a href="#/settings?tab=sources" data-close-menu>🗂️ Sheets &amp; tabs (admin)</a>` : ''}
         ${u.mustChangePassword ? '<div class="um-warn">⚠️ Default password chal raha hai — badal lo</div>' : ''}
         <button class="um-logout" id="user-logout">⎋ Logout</button>
@@ -122,6 +123,12 @@ window.FF = window.FF || {};
       <div class="user-menu-foot dim small">Last login ${u.lastLoginAt ? U.timeLabel(new Date(u.lastLoginAt).getTime()) : '—'}</div>`;
     const logout = U.$('#user-logout', menu);
     if (logout) logout.addEventListener('click', () => FF.auth.logout());
+    const locBtn = U.$('#um-loc', menu);
+    if (locBtn) locBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (FF.notify && FF.notify.sendLocation) FF.notify.sendLocation(false);
+      else U.toast('Location module load nahi hua', 'err');
+    });
     const up = U.$('#um-avatar', menu);
     if (up) up.addEventListener('change', async () => {
       const file = up.files && up.files[0];
@@ -315,6 +322,7 @@ window.FF = window.FF || {};
     FF.store.preload(false).catch(() => {});
     if (FF.gv && FF.gv.enabled()) FF.gv.preload(false).catch(() => {});
     renderCurrent();
+    if (FF.notify && FF.notify.start) FF.notify.start();
     const u = FF.auth.user;
     if (u && u.mustChangePassword) setTimeout(() => U.toast('⚠️ Default password chal raha hai — Settings → My account se badlo', 'err'), 900);
   }

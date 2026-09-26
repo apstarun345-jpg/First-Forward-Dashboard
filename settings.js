@@ -49,25 +49,48 @@ FF.pages = FF.pages || {};
     });
     return patch;
   }
-  // resize an image file → data URL
-  function readImage(file, maxSide) {
+  // resize an image file → data URL. Auto-compresses to maxSide px AND (maxBytes) tak —
+  // PNG me side shrink, JPG me quality loop, taaki settings.json halka rahe.
+  function readImage(file, maxSide, maxBytes) {
     return new Promise((resolve, reject) => {
       if (!/^image\//.test(file.type)) return reject(new Error('Sirf image file (PNG / JPG / WEBP / SVG)'));
       if (file.type === 'image/svg+xml') { const r = new FileReader(); r.onload = () => resolve(r.result); r.onerror = reject; r.readAsDataURL(file); return; }
       const img = new Image();
       const url = URL.createObjectURL(file);
       img.onload = () => {
+        const limit = maxBytes || 220 * 1024; // ~220 KB target
         const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
-        const c = document.createElement('canvas'); c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
+        let c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(img.width * scale)); c.height = Math.max(1, Math.round(img.height * scale));
         c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
         URL.revokeObjectURL(url);
-        const png = file.type === 'image/png' || file.type === 'image/gif';
-        resolve(png ? c.toDataURL('image/png') : c.toDataURL('image/jpeg', 0.86));
+        const shrink = (src, f) => {
+          const c2 = document.createElement('canvas');
+          c2.width = Math.max(1, Math.round(src.width * f)); c2.height = Math.max(1, Math.round(src.height * f));
+          const ctx = c2.getContext('2d'); ctx.imageSmoothingQuality = 'high';
+          ctx.drawImage(src, 0, 0, c2.width, c2.height);
+          return c2;
+        };
+        const isPng = file.type === 'image/png' || file.type === 'image/gif';
+        let out;
+        if (isPng) {
+          out = c.toDataURL('image/png');
+          while (out.length > limit && Math.max(c.width, c.height) > 128) { c = shrink(c, 0.8); out = c.toDataURL('image/png'); }
+        } else {
+          out = c.toDataURL('image/jpeg', 0.86);
+          for (const q of [0.82, 0.75, 0.68, 0.6, 0.52, 0.45]) {
+            if (out.length <= limit) break;
+            out = c.toDataURL('image/jpeg', q);
+          }
+          while (out.length > limit && Math.max(c.width, c.height) > 640) { c = shrink(c, 0.75); out = c.toDataURL('image/jpeg', 0.72); }
+        }
+        resolve(out);
       };
       img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Image load nahi hui')); };
       img.src = url;
     });
   }
+  const dataUrlKb = (d) => `${Math.max(1, Math.round((d || '').length * 0.75 / 1024))} KB`;
 
   // ---- tabs --------------------------------------------------------------------------------------
   function avatarBlock() {
@@ -83,15 +106,20 @@ FF.pages = FF.pages || {};
   function accountTab() {
     const u = A.user;
     const perms = A.permissions || [];
+    const locHtml = u.lastLocation
+      ? `<a class="loc-chip" href="https://maps.google.com/?q=${u.lastLocation.lat},${u.lastLocation.lng}" target="_blank" rel="noopener">📍 ${u.lastLocation.lat}, ${u.lastLocation.lng}${u.lastLocation.accuracy ? ` (±${u.lastLocation.accuracy}m)` : ''} · ${U.timeLabel(new Date(u.lastLocation.at).getTime())}</a>`
+      : '<span class="loc-chip muted">📍 Abhi location share nahi hui</span>';
     return `${section('👤 Profile', avatarBlock() + `<div class="form-grid">${field('Username', `<input class="input" value="${esc(u.username)}" disabled>`)}${field('Full name', `<input class="input" id="pf-name" value="${esc(u.name || '')}">`)}${field('Mobile', `<input class="input" id="pf-mobile" value="${esc(u.mobile || '')}" inputmode="tel">`)}${field('Email', `<input class="input" id="pf-email" type="email" value="${esc(u.email || '')}">`)}</div><div class="save-bar"><button class="btn primary" id="pf-save">💾 Save profile</button><span class="dim small">Role: <b>${u.role === 'admin' ? '👑 Admin' : 'User'}</b> · joined ${u.createdAt ? U.timeLabel(new Date(u.createdAt).getTime()) : '—'}</span></div>`)}
       ${section('🔑 Change password', `<div class="form-grid">${field('Current password', '<input class="input" id="pw-cur" type="password" autocomplete="current-password">')}${field('New password', '<input class="input" id="pw-new" type="password" minlength="6" autocomplete="new-password">')}${field('Repeat new password', '<input class="input" id="pw-new2" type="password" minlength="6" autocomplete="new-password">')}</div><div class="save-bar"><button class="btn primary" id="pw-save">🔑 Update password</button>${u.mustChangePassword ? '<span class="badge red">Default password — please change</span>' : ''}</div>`)}
+      ${section('📍 My location', `<p class="dim small">Location share karne par admin ko aapki last location (maps link ke saath) dikhti hai — field activity track karne ke liye. Sirf aapki permission ke baad hi bheji jaati hai.</p><div class="save-bar"><button class="btn primary" id="loc-send">📍 Location abhi bhejo</button>${locHtml}</div>`)}
       ${section('🛡️ My access', `<div class="perm-grid">${perms.map((p) => `<div class="perm ${A.can(p.key) ? 'yes' : 'no'}"><span>${A.can(p.key) ? '✅' : '⛔'}</span><b>${esc(p.label)}</b><small class="dim">${esc(p.group)}</small></div>`).join('')}</div>${u.role === 'admin' ? '<p class="dim small">Admin ke paas sab access hota hai.</p>' : '<p class="dim small">Access badalna ho to admin se kaho.</p>'}`)}`;
   }
   function brandTab() {
     const s = settings, t = s.theme || {};
     const img = (key, label, hint, max) => `<div class="img-field"><div class="img-preview ${key}">${s[key] ? `<img src="${esc(s[key])}" alt="">` : '<span class="dim">No image</span>'}</div><div><b>${label}</b><small class="dim">${hint}</small><div class="btn-row"><label class="btn small">📤 Upload<input type="file" accept="image/*" hidden data-img="${key}" data-max="${max}"></label>${s[key] ? `<button class="btn small" data-img-clear="${key}">✕ Remove</button>` : ''}</div></div></div>`;
-    return `${section('🏷️ Branding', `<div class="form-grid">${field('App name', txt('appName', s.appName), 'Browser title / login page')}${field('Brand (sidebar)', txt('brand', s.brand))}${field('Tagline', txt('tagline', s.tagline))}</div>${saveBar('brand')}`)}
-      ${section('🖼️ Images', `${img('logo', 'Logo', 'Sidebar + login page (square works best, PNG with transparency). Auto-resized to 512px.', 512)}${img('loginImage', 'Login / hero image', 'Left side of the login page (landscape). Auto-resized to 1600px.', 1600)}<p class="dim small">Images server par save hoti hain (settings.json) — upload karte hi live.</p>`)}
+    return `${section('🏷️ Branding', `<div class="brand-preview" id="brand-preview"><div class="bp-logo">${s.logo ? `<img src="${esc(s.logo)}" alt="">` : '<img src="icon.svg" alt="">'}</div><div><b>${esc(s.brand || 'First Forward')}</b><small>${esc(s.tagline || 'Dashboard')} — sidebar me aise dikhega</small></div></div>
+      <div class="form-grid">${field('App name', txt('appName', s.appName), 'Browser title / login page')}${field('Brand (sidebar)', txt('brand', s.brand), 'Left side jo naam likha aata hai — yahan se badlo')}${field('Tagline', txt('tagline', s.tagline))}</div>${saveBar('brand')}`)}
+      ${section('🖼️ Images', `${img('logo', 'FF Logo', 'Sidebar + login page ka logo (square best, transparency wala PNG). Upload karte hi SIZE ke hisab se AUTO-COMPRESS ho jata hai (512px / ~220KB).', 512)}${img('loginImage', 'Login / hero image', 'Login page ka hero image (landscape). Auto-compress: 1600px / ~220KB.', 1600)}<p class="dim small">Images server par save hoti hain (settings.json) — upload karte hi live. Badi image ho to khud chhoti compress ho jayegi.</p>`)}
       ${section('🎨 Theme colours', `<div class="form-grid">${field('Sidebar background (top)', color('theme.sidebarBg', t.sidebarBg))}${field('Sidebar background (bottom)', color('theme.sidebarBg2', t.sidebarBg2))}${field('Sidebar text', color('theme.sidebarText', t.sidebarText))}${field('Accent', color('theme.accent', t.accent))}${field('Accent 2 (gradient)', color('theme.accent2', t.accent2))}</div><p class="dim small">Colour badalte hi preview dikhta hai; Save karne par sabke liye lagta hai.</p>${saveBar('theme')}<button class="btn small" data-reset-theme>↺ Default colours</button>`)}`;
   }
   function dataTab() {
@@ -117,7 +145,10 @@ FF.pages = FF.pages || {};
     const groups = [...new Set(permsCache.map((p) => p.group))];
     const permBoxes = (u) => groups.map((g) => `<div class="perm-group"><small class="dim">${esc(g)}</small>${permsCache.filter((p) => p.group === g).map((p) => `<label class="check"><input type="checkbox" data-perm="${esc(p.key)}" ${u.role === 'admin' || u.permissions.includes(p.key) ? 'checked' : ''} ${u.role === 'admin' ? 'disabled' : ''}> ${esc(p.label)}</label>`).join('')}</div>`).join('');
     const rows = usersCache.map((u) => `<div class="user-card ${u.approved ? '' : 'pending'}" data-user="${esc(u.username)}">
-        <div class="user-head"><span class="user-avatar big">${esc((u.name || u.username).slice(0, 1).toUpperCase())}</span><div class="user-meta"><b>${esc(u.name)}</b> <code>${esc(u.username)}</code>${u.username === A.user.username ? ' <span class="tag">you</span>' : ''}<small class="dim">${esc(u.email || '')}${u.mobile ? ` · ${esc(u.mobile)}` : ''} · joined ${u.createdAt ? U.timeLabel(new Date(u.createdAt).getTime()) : '—'} · last login ${u.lastLoginAt ? U.timeLabel(new Date(u.lastLoginAt).getTime()) : 'never'}</small></div>
+        <div class="user-head"><span class="user-avatar big">${esc((u.name || u.username).slice(0, 1).toUpperCase())}</span><div class="user-meta"><b>${esc(u.name)}</b> <code>${esc(u.username)}</code>${u.username === A.user.username ? ' <span class="tag">you</span>' : ''}<small class="dim">${esc(u.email || '')}${u.mobile ? ` · ${esc(u.mobile)}` : ''} · joined ${u.createdAt ? U.timeLabel(new Date(u.createdAt).getTime()) : '—'} · last login ${u.lastLoginAt ? U.timeLabel(new Date(u.lastLoginAt).getTime()) : 'never'}${u.lastSeenAt ? ` · last seen ${U.timeLabel(new Date(u.lastSeenAt).getTime())}` : ''}${u.lastIp ? ` · IP ${esc(u.lastIp)}` : ''}</small>
+          <div class="btn-row" style="margin-top:6px">${u.lastLocation
+            ? `<a class="loc-chip" href="https://maps.google.com/?q=${u.lastLocation.lat},${u.lastLocation.lng}" target="_blank" rel="noopener">📍 ${u.lastLocation.lat}, ${u.lastLocation.lng}${u.lastLocation.accuracy ? ` (±${u.lastLocation.accuracy}m)` : ''} · ${U.timeLabel(new Date(u.lastLocation.at).getTime())}</a>`
+            : '<span class="loc-chip muted">📍 Location nahi mila</span>'}${u.lastSeenAt ? `<span class="loc-chip muted">👀 Seen ${U.timeLabel(new Date(u.lastSeenAt).getTime())}</span>` : ''}</div></div>
           <div class="user-controls"><label class="check"><input type="checkbox" data-field="approved" ${u.approved ? 'checked' : ''}> ${u.approved ? 'Active' : '<b class="pend">Pending approval</b>'}</label><select data-field="role"><option value="user" ${u.role === 'user' ? 'selected' : ''}>User</option><option value="admin" ${u.role === 'admin' ? 'selected' : ''}>Admin</option></select></div></div>
         <details class="user-perms" ${u.approved ? '' : 'open'}><summary>Permissions (${u.role === 'admin' ? 'all — admin' : `${u.permissions.length}/${permsCache.length}`})</summary><div class="perm-boxes">${permBoxes(u)}</div><div class="btn-row"><button class="btn small" data-perm-all>Select all</button><button class="btn small" data-perm-none>Clear</button><button class="btn small" data-perm-default>Default set</button></div></details>
         <div class="btn-row user-actions"><button class="btn small primary" data-user-save>💾 Save</button><button class="btn small" data-user-pw>🔑 Reset password</button>${u.username !== A.user.username ? '<button class="btn small danger" data-user-del>🗑 Delete</button>' : ''}<span class="dim small" data-user-msg></span></div>
@@ -319,6 +350,12 @@ FF.pages = FF.pages || {};
         if (n1 !== n2) return U.toast('Naye passwords match nahi karte', 'err');
         try { const out = await A.api('/api/auth/password', 'POST', { current: cur, next: n1 }); Object.assign(A.user, out.user); U.toast('Password updated ✓', 'ok'); draw(); } catch (err) { U.toast(err.message, 'err'); }
       });
+      const locSend = U.$('#loc-send', body);
+      if (locSend) locSend.addEventListener('click', () => {
+        if (!FF.notify || !FF.notify.sendLocation) return U.toast('Location module load nahi hua', 'err');
+        FF.notify.sendLocation(false);
+        setTimeout(async () => { try { await A.refreshUser(); draw(); } catch { /* ignore */ } }, 2500);
+      });
       // generic save buttons
       U.$$('[data-save]', body).forEach((btn) => btn.addEventListener('click', () => {
         const card = btn.closest('.card');
@@ -331,10 +368,26 @@ FF.pages = FF.pages || {};
       U.$$('input[type=color][data-path]', body).forEach((inp) => inp.addEventListener('input', () => { inp.nextElementSibling.textContent = inp.value; const t = { ...FF.config.theme }; t[inp.dataset.path.split('.')[1]] = inp.value; FF.config.theme = t; A.applyTheme(); }));
       const rt = U.$('[data-reset-theme]', body);
       if (rt) rt.addEventListener('click', () => save({ theme: defaults.theme }, null).then(draw));
-      // images
+      // images (auto-compress + size badge)
       U.$$('input[type=file][data-img]', body).forEach((inp) => inp.addEventListener('change', async () => {
         const file = inp.files[0]; if (!file) return;
-        try { const dataUrl = await readImage(file, Number(inp.dataset.max) || 512); if (dataUrl.length > 1.8 * 1024 * 1024) throw new Error('Image bahut badi hai — chhoti image use karo'); await save({ [inp.dataset.img]: dataUrl }, null); draw(); } catch (err) { U.toast(err.message, 'err'); }
+        try {
+          const dataUrl = await readImage(file, Number(inp.dataset.max) || 512);
+          if (dataUrl.length > 1.8 * 1024 * 1024) throw new Error('Image bahut badi hai — chhoti image use karo');
+          await save({ [inp.dataset.img]: dataUrl }, null);
+          U.toast(`Image upload ✓ · ${dataUrlKb(dataUrl)} (auto-compressed)`, 'ok');
+          draw();
+        } catch (err) { U.toast(err.message, 'err'); }
+      }));
+      // brand live preview — type karte hi sidebar jaisa preview update
+      U.$$('input[data-path="brand"], input[data-path="tagline"]', body).forEach((inp) => inp.addEventListener('input', () => {
+        const pv = U.$('#brand-preview', body);
+        if (!pv) return;
+        const b = pv.querySelector('b'), sm = pv.querySelector('small');
+        const brand = (body.querySelector('input[data-path="brand"]') || {}).value || 'First Forward';
+        const tag = (body.querySelector('input[data-path="tagline"]') || {}).value || 'Dashboard';
+        if (b) b.textContent = brand;
+        if (sm) sm.textContent = `${tag} — sidebar me aise dikhega`;
       }));
       U.$$('[data-img-clear]', body).forEach((b) => b.addEventListener('click', () => save({ [b.dataset.imgClear]: '' }, null).then(draw)));
       // profile photo

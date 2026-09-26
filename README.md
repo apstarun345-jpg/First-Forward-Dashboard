@@ -1,4 +1,4 @@
-# First Forward Dashboard — First Forward + GV Partner (v3)
+# First Forward Dashboard — First Forward + GV Partner (v4)
 
 Colourful dashboard website built directly on top of **do Google Sheets**:
 
@@ -13,6 +13,28 @@ aur ek **⚖️ GV vs First Forward** page side-by-side comparison deta hai.
 Koi database nahi, koi manual upload nahi — website Google Sheet se data padhti hai
 (Google Visualization API / `gviz`) through a small Node server that also handles **login, users,
 permissions and settings**. Zero npm dependencies.
+
+## ✨ v4 highlights
+
+* **🔔 Notifications (app bell + browser)** — top-right bell with unread badge + Web Notifications.
+  Sab kuch notify hota hai: **daily bank report** (Google Sheet me naya data aate hi — *yesterday tag
+  issuance: GV vs First Forward + VC4 / VC20 / VC5+ split*), **logins**, **site opens**, **signups**,
+  **password resets**, **settings/user changes**, **user locations**. Admin ko sab kuch milta hai;
+  normal users ko broadcasts + apne events. Server khud har 10 min me sheets check karta hai
+  (`data/notifications.json` me feed, `/api/notifications` se poll).
+* **📍 User location** — browser geolocation (permission ke saath) se user ki last location, accuracy,
+  last-seen aur IP track hoti hai (Settings → Users & access me maps link ke saath). User apni location
+  user-menu → "📍 Location share karo" ya Settings → My account se bhej sakta hai.
+* **🎨 Naya login UI (mobile-friendly)** — colourful gradient hero, pills, glassy cards, login ke neeche
+  **about / description** section (feature cards), animated buttons. Phone par ab full-bleed hero +
+  readable layout.
+* **🖼️ Branding + auto-compress** — admin Settings → Branding se **left sidebar ka naam + FF logo**
+  badal sakta hai; image upload par **size ke hisab se auto-compress** (512px / ~220KB target, PNG/JPEG
+  quality loop) + live sidebar preview.
+* **⚖️ Fair GV vs First Forward compare** — EIR me GV Partner ke **master id (5845036)** wale rows
+  First Forward side se auto-exclude ho jaate hain (warna GV ka data do baar count hota tha).
+* **🧭 Browser logo (favicon)** — naya FF "fast-forward" mark (`icon.svg`, `favicon.ico`,
+  `icon-192/512.png`) sidebar, login, PWA aur browser tab teeno me.
 
 ## Login & access
 
@@ -51,7 +73,7 @@ permissions and settings**. Zero npm dependencies.
 | **GV Trend** | GV Master: Daily / Weekly / Monthly / **Last vs Current** (per-class same-period compare), dimension = Total / Class / Type / Status, TL filter + agent quick-find. |
 | **GV Stock** | Tag Assignment: search (agent / TL / class), overview KPIs, TL × class matrix, agent table, class mix, aur agent/TL drill-down me raw rows ka **⬇ Excel** export. |
 | **GV Performance** | GV REPORT: agent quick-find, agent profile drawer (VC4 vs Commercial, MTD vs last month, stock by class, priority, runrate/eRunrate), rankings & alerts, GV REPORT (A–AZ) column view, CSV/Excel + share. |
-| **⚖️ GV vs First Forward** | 12 head-to-head KPIs, insights list, daily issuance lines (FF vs GV), MTD class bars, head-to-head leader table, monthly bars, stock-by-class compare, aur dono taraf ke top agents (click → us brand ka performance page). |
+| **⚖️ GV vs First Forward** | 12 head-to-head KPIs, insights list, daily issuance lines (FF vs GV), MTD class bars, head-to-head leader table, monthly bars, stock-by-class compare, aur dono taraf ke top agents (click → us brand ka performance page). **Fair compare**: FF side se EIR ke GV master-id (5845036) rows exclude. |
 | **Sheets (left sidebar)** | Group-wise: **First Forward** (StockDataa · REPORT · EIR) aur **GV Partner** (GV Master · Tag Assignment · GV REPORT) — jo tab registry me enabled hain. Page-wise view, server-side search, sort, CSV / Excel export. |
 | **Settings** | Neeche dekho — sab kuch yahin se badlo. |
 
@@ -127,10 +149,13 @@ node dev/smoke.js                                          # headless smoke test
 
 ## Files
 
-* `server.js` – static files + `/api/gviz` proxy (cache) + auth/users/settings API (JSON store in `DATA_DIR`)
+* `server.js` – static files + `/api/gviz` proxy (cache) + auth/users/settings API + **notifications feed &
+  daily-report watcher** (JSON store in `DATA_DIR`: users, sessions, settings, resets, notifications, report-watch)
 * `config.js` – defaults (sheets, column letters, thresholds); server settings run-time par merge hote hain
 * `store.js` – ek baar preload hone wala data store (daily, agents, class-month, stock, REPORT)
-* `auth.js` – login / signup screen, permissions, theme apply
+* `auth.js` – colourful login / signup screen + about section, permissions, theme apply
+* `notify.js` – 🔔 notification bell + browser notifications + open/location tracking
 * `dashboard.js` · `trend.js` · `stock.js` · `performance.js` · `sheets.js` · `settings.js` – pages
 * `charts.js` (SVG charts) · `xlsx.js` (Excel writer, no deps) · `util.js` (helpers + suggestion dropdown)
+* `icon.svg` · `icon-192.png` · `icon-512.png` · `favicon.ico` – browser logo / PWA icons
 * `dev/mock-gviz.js`, `dev/smoke.js` – offline test tooling

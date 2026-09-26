@@ -120,8 +120,9 @@ const DEFAULT_SETTINGS = {
 // JSON file store
 // ---------------------------------------------------------------------------------------------
 if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
-const FILES = { users: path.join(DATA_DIR, 'users.json'), sessions: path.join(DATA_DIR, 'sessions.json'), settings: path.join(DATA_DIR, 'settings.json'), resets: path.join(DATA_DIR, 'resets.json') };
-const db = { users: [], sessions: {}, settings: { ...DEFAULT_SETTINGS }, resets: [] };
+const FILES = { users: path.join(DATA_DIR, 'users.json'), sessions: path.join(DATA_DIR, 'sessions.json'), settings: path.join(DATA_DIR, 'settings.json'), resets: path.join(DATA_DIR, 'resets.json'), notifications: path.join(DATA_DIR, 'notifications.json'), watch: path.join(DATA_DIR, 'report-watch.json') };
+const db = { users: [], sessions: {}, settings: { ...DEFAULT_SETTINGS }, resets: [], notifications: [] };
+let reportWatch = { signature: '', lastCheckAt: null, lastReportDate: null, lastSummary: null };
 const writeQueue = new Map();
 
 async function readJson(file, fallback) {
@@ -166,7 +167,7 @@ function verifyPassword(password, stored) {
 const normUser = (u) => String(u || '').trim().toLowerCase().replace(/[^a-z0-9._@-]/g, '').slice(0, 60);
 function publicUser(u) {
   if (!u) return null;
-  return { username: u.username, name: u.name || u.username, email: u.email || '', mobile: u.mobile || '', avatar: u.avatar || '', role: u.role, approved: !!u.approved, permissions: u.role === 'admin' ? allPermKeysNow() : (u.permissions || []), createdAt: u.createdAt, lastLoginAt: u.lastLoginAt || null, mustChangePassword: !!u.mustChangePassword };
+  return { username: u.username, name: u.name || u.username, email: u.email || '', mobile: u.mobile || '', avatar: u.avatar || '', role: u.role, approved: !!u.approved, permissions: u.role === 'admin' ? allPermKeysNow() : (u.permissions || []), createdAt: u.createdAt, lastLoginAt: u.lastLoginAt || null, mustChangePassword: !!u.mustChangePassword, lastSeenAt: u.lastSeenAt || null, lastLocation: u.lastLocation || null, lastIp: u.lastIp || '' };
 }
 function findUser(username) { return db.users.find((u) => u.username === normUser(username)) || null; }
 function sha(token) { return crypto.createHash('sha256').update(token).digest('hex'); }
@@ -223,6 +224,200 @@ const forgotHits = new Map();
 function clientIp(req) { return (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || '?'; }
 function throttled(ip) { const a = attempts.get(ip); return a && a.count >= 8 && Date.now() - a.at < 10 * 60e3; }
 function noteFail(ip) { const a = attempts.get(ip) || { count: 0, at: Date.now() }; if (Date.now() - a.at > 10 * 60e3) { a.count = 0; } a.count++; a.at = Date.now(); attempts.set(ip, a); }
+function userAgentLabel(req) {
+  const ua = String((req.headers['user-agent'] || '')).slice(0, 160);
+  if (/android/i.test(ua)) return 'Android';
+  if (/iphone|ipad/i.test(ua)) return 'iOS';
+  if (/windows/i.test(ua)) return 'Windows';
+  if (/macintosh/i.test(ua)) return 'Mac';
+  if (/linux/i.test(ua)) return 'Linux';
+  return ua ? 'Browser' : 'Unknown';
+}
+
+// -------------------------------------------------------------------------------------------
+// Notifications — in-app bell + browser notifications. Every important event lands here:
+// daily bank-report (Google Sheet watcher), logins, site opens, signups, password resets,
+// settings/user changes and user locations. Admin sees everything; users see broadcasts.
+// -------------------------------------------------------------------------------------------
+function notify(type, title, body, opts = {}) {
+  const item = {
+    id: `${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`,
+    type, title, body,
+    at: new Date().toISOString(),
+    audience: opts.audience === 'all' ? 'all' : 'admin',
+    user: opts.user || '',
+    by: opts.by || '',
+    icon: opts.icon || '🔔',
+    meta: opts.meta || null,
+    read: {}
+  };
+  db.notifications.unshift(item);
+  if (db.notifications.length > 250) db.notifications.length = 250;
+  persist('notifications');
+  return item;
+}
+function visibleNotifications(user) {
+  if (!user) return [];
+  const admin = user.role === 'admin';
+  return db.notifications.filter((n) => admin || n.audience === 'all' || n.user === user.username);
+}
+function lastNotifAt(type, user) {
+  const n = db.notifications.find((x) => x.type === type && (!user || x.user === user));
+  return n ? new Date(n.at).getTime() : 0;
+}
+
+// ---- daily bank-report watcher -------------------------------------------------------------
+// Polls the EIR (First Forward) + GV Master (GV Partner) sheets every few minutes. When the
+// newest report day's issuance numbers change (bank report add / update ho gaya), all users get
+// a notification with yesterday's tag issuance: GV vs First Forward + VC4 / VC20 / VC5+ split.
+function parseGvizBody(text) {
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start < 0 || end < 0) return null;
+  try {
+    const json = JSON.parse(text.slice(start, end + 1));
+    if (!json || json.status === 'error' || !json.table) return null;
+    return (json.table.rows || []).map((r) => (r.c || []).map((c) => (c ? c.v : null)));
+  } catch { return null; }
+}
+function gvizDateKey(v) {
+  if (typeof v === 'string') {
+    const m = /^Date\((\d+),(\d+),(\d+)/.exec(v);
+    if (m) return `${m[1]}-${String(Number(m[2]) + 1).padStart(2, '0')}-${String(Number(m[3])).padStart(2, '0')}`;
+  }
+  return '';
+}
+function istDay(offsetDays = 0) {
+  // Report "days" follow IST (bank data) — keep the watcher consistent with India time.
+  const t = new Date(Date.now() + (5.5 * 60 + new Date().getTimezoneOffset()) * 60e3 + offsetDays * 86400e3);
+  return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+}
+function normCls(raw) {
+  const c = String(raw || '').trim().toUpperCase();
+  if (!c) return 'VC5+';
+  if (/^\d+$/.test(c)) return Number(c) <= 4 ? 'VC4' : Number(c) <= 20 ? 'VC20' : 'VC5+';
+  if (c === 'VC4' || c === '4') return 'VC4';
+  if (c === 'VC20' || c === '20') return 'VC20';
+  return 'VC5+';
+}
+async function gvizCached(sheetId, sheet, gid, tq) {
+  const params = new URLSearchParams();
+  if (gid) params.set('gid', String(gid));
+  if (sheet) params.set('sheet', String(sheet));
+  params.set('tq', tq);
+  params.set('id', String(sheetId));
+  const url = upstreamUrl(params);
+  let entry = cache.get(url);
+  if (!entry || Date.now() - entry.at > Math.max(cacheMs(), 10 * 60e3)) {
+    try {
+      const { status, body } = await fetchUpstream(url);
+      if (status >= 200 && status < 300 && body.includes('setResponse')) {
+        entry = { at: Date.now(), body, status };
+        cache.set(url, entry);
+      }
+    } catch (err) { console.error('watcher fetch:', err.message); }
+  }
+  return entry ? parseGvizBody(entry.body) : null;
+}
+function emptyBuckets() {
+  const b = () => ({ total: 0, vc4: 0, vc20: 0, vc5p: 0 });
+  return { ff: b(), gv: b() };
+}
+function addRow(acc, channel, cls, n) {
+  const k = channel === 'gv' ? 'gv' : 'ff';
+  acc[k].total += n;
+  if (cls === 'VC4') acc[k].vc4 += n;
+  else if (cls === 'VC20') acc[k].vc20 += n;
+  else acc[k].vc5p += n;
+}
+function fmtBucket(b) {
+  return `${b.total} tags (VC4 ${b.vc4} · VC20 ${b.vc20} · VC5+ ${b.vc5p})`;
+}
+function fmtDay(key) {
+  const [y, m, d] = String(key).split('-').map(Number);
+  if (!y) return key;
+  return new Date(y, (m || 1) - 1, d || 1).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+async function checkDailyReport() {
+  reportWatch.lastCheckAt = new Date().toISOString();
+  try {
+    const e = db.settings.eir || DEFAULT_SETTINGS.eir;
+    const gv = (db.settings.gv && db.settings.gv.master) || DEFAULT_SETTINGS.gv.master;
+    const [eirRows, gvRows] = await Promise.all([
+      gvizCached(db.settings.sheetId, e.sheet || 'EIR', '',
+        `select ${e.date}, ${e.cls}, ${e.masterId}, count(${e.tagId}) where ${e.date} is not null group by ${e.date}, ${e.cls}, ${e.masterId}`),
+      gvizCached(db.settings.gvSheetId, gv.tab || 'GV Master', gv.gid || '',
+        `select ${gv.date}, ${gv.vClass}, count(${gv.tagId}) where ${gv.date} is not null group by ${gv.date}, ${gv.vClass}`)
+    ]);
+
+    // per-day buckets — FF side EXCLUDES the GV master id (e.g. 5845036) rows so the two
+    // channels never double-count (same rule as the GV-vs-FF compare page).
+    // GV Partner numbers come from the GV Master sheet; EIR's GV rows are only a fallback.
+    const byDay = new Map();
+    const day = (k) => { if (!byDay.has(k)) byDay.set(k, emptyBuckets()); return byDay.get(k); };
+    const gvFallback = new Map();
+    if (eirRows) {
+      for (const r of eirRows) {
+        const d = gvizDateKey(r[0]);
+        const n = Number(r[3]) || 0;
+        if (!d || !n) continue;
+        const isGv = String(r[2] || '').trim() === String(e.gvMasterId || '5845036').trim();
+        if (isGv) {
+          if (!gvFallback.has(d)) gvFallback.set(d, emptyBuckets());
+          addRow(gvFallback.get(d), 'gv', normCls(r[1]), n);
+        } else {
+          addRow(day(d), 'ff', normCls(r[1]), n);
+        }
+      }
+    }
+    if (gvRows) {
+      for (const r of gvRows) {
+        const d = gvizDateKey(r[0]);
+        const n = Number(r[2]) || 0;
+        if (!d || !n) continue;
+        addRow(day(d), 'gv', normCls(r[1]), n);
+      }
+    } else {
+      for (const [d, acc] of gvFallback) {
+        const t = day(d);
+        t.gv.total += acc.gv.total; t.gv.vc4 += acc.gv.vc4; t.gv.vc20 += acc.gv.vc20; t.gv.vc5p += acc.gv.vc5p;
+      }
+    }
+    if (!byDay.size) return;
+
+    // Newest day with activity — that's the "report" that just arrived.
+    const dates = [...byDay.keys()].sort();
+    const reportDate = dates[dates.length - 1];
+    const acc = byDay.get(reportDate);
+    const signature = `${reportDate}|ff:${acc.ff.total}.${acc.ff.vc4}.${acc.ff.vc20}.${acc.ff.vc5p}|gv:${acc.gv.total}.${acc.gv.vc4}.${acc.gv.vc20}.${acc.gv.vc5p}`;
+    if (signature === reportWatch.signature) return; // nothing new
+
+    const firstEver = !reportWatch.signature;
+    reportWatch.signature = signature;
+    reportWatch.lastReportDate = reportDate;
+    reportWatch.lastSummary = { date: reportDate, ff: acc.ff, gv: acc.gv, at: new Date().toISOString() };
+    persist('watch');
+
+    if (firstEver && reportDate < istDay(-1)) return; // purana data — pehli baar baseline hi rakho
+    const isYesterday = reportDate === istDay(-1);
+    const when = isYesterday ? `Yesterday (${fmtDay(reportDate)})` : fmtDay(reportDate);
+    notify('daily-report', `📊 Daily bank report · ${when}`, [
+      `Yesterday tag issuance (${fmtDay(reportDate)}):`,
+      `First Forward — ${fmtBucket(acc.ff)}`,
+      `GV Partner — ${fmtBucket(acc.gv)}`,
+      `Total — ${acc.ff.total + acc.gv.total} tags`
+    ].join('\n'), {
+      audience: 'all', icon: '📊',
+      meta: { date: reportDate, ff: acc.ff, gv: acc.gv, total: acc.ff.total + acc.gv.total }
+    });
+  } catch (err) {
+    console.error('daily report watcher:', err.message);
+  }
+}
+function startReportWatcher() {
+  setTimeout(() => checkDailyReport().catch(() => {}), 20 * 1000);
+  setInterval(() => checkDailyReport().catch(() => {}), 10 * 60e3);
+}
 
 // ---------------------------------------------------------------------------------------------
 // HTTP helpers
@@ -352,9 +547,11 @@ async function handleApi(req, res, url) {
     await persist('users');
     if (first) {
       const token = createSession(username);
-      u.lastLoginAt = new Date().toISOString(); persist('users');
+      u.lastLoginAt = new Date().toISOString(); u.lastSeenAt = u.lastLoginAt; u.lastIp = clientIp(req); persist('users');
+      notify('first-admin', '👑 First admin account bana', `"${u.name}" (@${u.username}) pehla user hai — admin access mil gayi.`, { audience: 'all', user: u.username, by: u.username, icon: '👑' });
       return sendJson(res, 200, { ok: true, user: publicUser(u), settings: db.settings, permissions: permissionsFor(db.settings), tabs: db.settings.tabs, first: true }, { 'Set-Cookie': cookieHeader(req, token, SESSION_DAYS * 86400) });
     }
+    notify('signup', `🆕 Naya signup · @${username}`, `"${u.name}" (@${username}) ne sign up kiya — approve karke permissions do (Settings → Users & access).`, { user: username, by: username, icon: '🆕', meta: { email: u.email, mobile: u.mobile } });
     return sendJson(res, 200, { ok: true, pending: true, message: 'Account ban gaya. Admin approve karega, phir login kar paoge.' });
   }
   if (p === '/api/auth/login' && method === 'POST') {
@@ -366,7 +563,9 @@ async function handleApi(req, res, url) {
     if (!u.approved) throw new HttpError(403, 'Account abhi admin approval ke wait me hai.');
     attempts.delete(ip);
     const token = createSession(u.username);
-    u.lastLoginAt = new Date().toISOString(); persist('users');
+    const now = new Date().toISOString();
+    u.lastLoginAt = now; u.lastSeenAt = now; u.lastIp = ip; persist('users');
+    notify('login', `🔔 Login · ${u.name || u.username}`, `"${u.name || u.username}" (@${u.username}) ne login kiya · ${userAgentLabel(req)} · IP ${ip}`, { user: u.username, by: u.username, icon: '🔔', meta: { ip, device: userAgentLabel(req) } });
     return sendJson(res, 200, { ok: true, user: publicUser(u), settings: db.settings, permissions: permissionsFor(db.settings), tabs: db.settings.tabs }, { 'Set-Cookie': cookieHeader(req, token, SESSION_DAYS * 86400) });
   }
   // ---- forgot password ("Forgot password?" on the login screen) ----
@@ -388,6 +587,7 @@ async function handleApi(req, res, url) {
     db.resets = db.resets.filter((r) => r.username !== u.username || r.resolved);
     db.resets.push({ username: u.username, name: u.name || u.username, email: u.email || '', mobile: u.mobile || '', at: new Date().toISOString(), code: '', codeExpiresAt: null, resolved: false });
     await persist('resets');
+    notify('reset-request', `🔑 Password reset request · @${u.username}`, `"${u.name || u.username}" ne forgot-password request bheji — Settings → Users & access me naya password ya 6-digit code do.`, { user: u.username, by: u.username, icon: '🔑' });
     return sendJson(res, 200, { ok: true, found: true, help, message: `Request bhej di gayi ✓ — admin approve karke aapko naya password ya 6-digit code dega (user: ${u.username}).` });
   }
   if (p === '/api/auth/reset' && method === 'POST') {
@@ -404,6 +604,7 @@ async function handleApi(req, res, url) {
     reqRow.resolved = true; reqRow.resolvedAt = new Date().toISOString();
     for (const [k, sess] of Object.entries(db.sessions)) if (sess.username === u.username) delete db.sessions[k];
     await persist('users'); await persist('sessions'); await persist('resets');
+    notify('reset-done', `🔓 Password reset · @${u.username}`, `"${u.name || u.username}" ne forgot-password code se naya password set kar liya.`, { user: u.username, by: u.username, icon: '🔓' });
     return sendJson(res, 200, { ok: true, message: 'Password set ho gaya ✓ — ab naye password se login karo.' });
   }
 
@@ -471,9 +672,61 @@ async function handleApi(req, res, url) {
     if (next.sheetId !== db.settings.sheetId || next.cacheSeconds !== db.settings.cacheSeconds) cache.clear();
     db.settings = next;
     await persist('settings');
+    notify('settings', `⚙️ Settings updated · ${user.name || user.username}`, `${user.name || user.username} ne settings badli: ${Object.keys(patch).slice(0, 8).join(', ') || 'reset to defaults'}${Object.keys(patch).length > 8 ? '…' : ''}`, { by: user.username, icon: '⚙️', meta: { keys: Object.keys(patch) } });
     return sendJson(res, 200, { ok: true, settings: db.settings });
   }
   if (p === '/api/cache/clear' && method === 'POST') { requireAdmin(user); cache.clear(); return sendJson(res, 200, { ok: true }); }
+
+  // ---- notifications (bell + browser) ----
+  if (p === '/api/notifications' && method === 'GET') {
+    const items = visibleNotifications(user).slice(0, 60);
+    const unread = items.filter((n) => !(n.read || {})[user.username]).length;
+    return sendJson(res, 200, { items, unread, serverTime: new Date().toISOString() });
+  }
+  if (p === '/api/notifications/read' && method === 'POST') {
+    const body = await readBody(req);
+    const ids = Array.isArray(body && body.ids) ? new Set(body.ids.map(String)) : null;
+    const now = new Date().toISOString();
+    let n = 0;
+    for (const item of db.notifications) {
+      if (ids && !ids.has(item.id)) continue;
+      if (!(item.read || {})[user.username]) { item.read = item.read || {}; item.read[user.username] = now; n++; }
+    }
+    if (n) await persist('notifications');
+    return sendJson(res, 200, { ok: true, marked: n });
+  }
+  if (p === '/api/notifications/test' && method === 'POST') {
+    requireAdmin(user);
+    const body = await readBody(req);
+    const t = String((body && body.title) || '').slice(0, 120);
+    const b = String((body && body.body) || '').slice(0, 400);
+    const item = notify('test', `🧪 ${t || 'Test notification'}`, b || 'Ye test notification hai — bell + browser dono me aana chahiye. 🎉', { audience: 'all', by: user.username, icon: '🧪' });
+    return sendJson(res, 200, { ok: true, item });
+  }
+
+  // ---- activity tracking: site open + user location ----
+  if (p === '/api/track/open' && method === 'POST') {
+    const now = new Date().toISOString();
+    const ip = clientIp(req);
+    user.lastSeenAt = now; user.lastIp = ip;
+    persist('users');
+    // at most one "site opened" notification per user per 30 minutes (admin feed)
+    if (Date.now() - lastNotifAt('visit', user.username) > 30 * 60e3) {
+      notify('visit', `👋 Site opened · ${user.name || user.username}`, `"${user.name || user.username}" (@${user.username}) ne dashboard open kiya · ${userAgentLabel(req)} · IP ${ip}`, { user: user.username, by: user.username, icon: '👋', meta: { ip, device: userAgentLabel(req) } });
+    }
+    return sendJson(res, 200, { ok: true, lastSeenAt: now });
+  }
+  if (p === '/api/track/location' && method === 'POST') {
+    const body = await readBody(req);
+    const lat = Number(body.lat), lng = Number(body.lng), accuracy = Number(body.accuracy) || 0;
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) throw new HttpError(400, 'Location valid nahi hai (lat/lng).');
+    user.lastLocation = { lat: Math.round(lat * 1e6) / 1e6, lng: Math.round(lng * 1e6) / 1e6, accuracy: Math.round(accuracy), at: new Date().toISOString() };
+    persist('users');
+    if (Date.now() - lastNotifAt('location', user.username) > 60 * 60e3) {
+      notify('location', `📍 Location · ${user.name || user.username}`, `"${user.name || user.username}" (@${user.username}) ki location: ${user.lastLocation.lat}, ${user.lastLocation.lng} (±${user.lastLocation.accuracy}m) · https://maps.google.com/?q=${user.lastLocation.lat},${user.lastLocation.lng}`, { user: user.username, by: user.username, icon: '📍', meta: { ...user.lastLocation } });
+    }
+    return sendJson(res, 200, { ok: true, location: user.lastLocation });
+  }
 
   // ---- users (admin) ----
   if (p === '/api/users' && method === 'GET') {
@@ -491,6 +744,7 @@ async function handleApi(req, res, url) {
     const perms = Array.isArray(body.permissions) ? body.permissions.filter((k) => allow.includes(k)) : DEFAULT_USER_PERMS.slice();
     const u = { username, name: String(body.name || '').trim().slice(0, 80) || username, email: String(body.email || '').trim().slice(0, 120), mobile: String(body.mobile || '').replace(/[^\d+]/g, '').slice(0, 16), role: body.role === 'admin' ? 'admin' : 'user', approved: body.approved !== false, permissions: perms, password: hashPassword(body.password), mustChangePassword: true, createdAt: new Date().toISOString(), lastLoginAt: null };
     db.users.push(u); await persist('users');
+    notify('user-create', `➕ User created · @${username}`, `${user.name || user.username} ne naya account banaya: "${u.name}" (@${username}) · role ${u.role} · password user ko bata do.`, { user: username, by: user.username, icon: '➕', meta: { role: u.role } });
     return sendJson(res, 200, { ok: true, user: publicUser(u), permissions: permissionsFor(db.settings) });
   }
   if (p === '/api/users/reset-requests' && method === 'GET') {
@@ -521,6 +775,7 @@ async function handleApi(req, res, url) {
     if (!row) { row = { username: target.username, name: target.name, email: target.email || '', mobile: target.mobile || '', at: new Date().toISOString(), resolved: false }; db.resets.push(row); }
     row.code = code; row.codeExpiresAt = expires; row.codeIssuedBy = user.username; row.resolved = false;
     await persist('resets');
+    notify('reset-code', `🔢 Reset code issued · @${target.username}`, `${user.name || user.username} ne "@${target.username}" ko 6-digit reset code diya (30 min valid).`, { user: target.username, by: user.username, icon: '🔢' });
     return sendJson(res, 200, { ok: true, username: target.username, code, expiresAt: expires, message: `Code ${code} (30 min valid) — user ko bata do; wo login page par "Forgot password → Code se reset" me daalega.` });
   }
   const um = p.match(/^\/api\/users\/([^/]+)$/);
@@ -547,6 +802,7 @@ async function handleApi(req, res, url) {
       if (body.password) { if (!validPassword(body.password)) throw new HttpError(400, 'Password kam se kam 6 characters ka ho.'); target.password = hashPassword(body.password); target.mustChangePassword = true; }
       if (!target.approved) for (const [k, s] of Object.entries(db.sessions)) if (s.username === target.username) delete db.sessions[k];
       await persist('users'); persist('sessions');
+      notify('user-update', `👤 User updated · @${target.username}`, `${user.name || user.username} ne "@${target.username}" ka account update kiya (role: ${target.role} · ${target.approved ? 'active' : 'disabled'} · permissions: ${target.permissions.length}).`, { user: target.username, by: user.username, icon: '👤' });
       return sendJson(res, 200, { ok: true, user: publicUser(target) });
     }
     if (method === 'DELETE') {
@@ -555,6 +811,7 @@ async function handleApi(req, res, url) {
       db.users = db.users.filter((u) => u !== target);
       for (const [k, s] of Object.entries(db.sessions)) if (s.username === target.username) delete db.sessions[k];
       await persist('users'); persist('sessions');
+      notify('user-delete', `🗑️ User deleted · @${target.username}`, `${user.name || user.username} ne "@${target.username}" (${target.name}) ka account delete kar diya.`, { user: target.username, by: user.username, icon: '🗑️' });
       return sendJson(res, 200, { ok: true });
     }
   }
@@ -612,8 +869,11 @@ async function start() {
   db.sessions = await readJson(FILES.sessions, {});
   db.settings = deepMerge(DEFAULT_SETTINGS, await readJson(FILES.settings, {}));
   db.resets = await readJson(FILES.resets, []);
+  db.notifications = await readJson(FILES.notifications, []);
+  reportWatch = { signature: '', lastCheckAt: null, lastReportDate: null, lastSummary: null, ...(await readJson(FILES.watch, {})) };
   pruneSessions();
   await bootstrapAdmin();
+  startReportWatcher();
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`First Forward Dashboard → http://0.0.0.0:${PORT}`);
     console.log(`Sheet ${db.settings.sheetId} · cache ${cacheMs() / 1000}s · data ${DATA_DIR} · users ${db.users.length}${GVIZ_BASE !== 'https://docs.google.com' ? ` · upstream ${GVIZ_BASE}` : ''}`);

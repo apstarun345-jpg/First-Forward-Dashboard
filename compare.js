@@ -20,7 +20,12 @@ FF.pages = FF.pages || {};
   const tableHtml = (header, rows) => `<div class="table-wrap"><table class="tbl compact"><thead><tr>${header.map((h, i) => `<th class="${i >= 1 && i <= 4 ? 'num' : ''}">${h}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
 
   async function render(root) {
-    root.innerHTML = `<div class="page-head"><div><h1>⚖️ GV vs First Forward</h1><p class="sub">Dono sources ka comparison — GV Partner (GV Master · Tag Assignment · GV REPORT) vs First Forward (EIR · StockDataa · REPORT)</p></div>
+    // ⚖️ Fair compare rule: EIR me GV Partner ke master id (e.g. 5845036) wale rows GV channel ke
+    // hain — unhe First Forward side se hata dete hain, warna GV ka data do baar count ho jata.
+    const gvMasterId = U.clean((FF.config.eir || {}).gvMasterId);
+    const isFF = (r) => r.channel === 'First Forward';
+    root.innerHTML = `<div class="page-head"><div><h1>⚖️ GV vs First Forward</h1><p class="sub">Dono sources ka comparison — GV Partner (GV Master · Tag Assignment · GV REPORT) vs First Forward (EIR · StockDataa · REPORT)</p>
+      <div class="badge-row"><span class="badge indigo">✓ Fair compare — FF side se GV master ${esc(gvMasterId || '5845036')} ka data excluded</span><span class="badge teal">GV Partner = GV Master · Tag Assignment · GV REPORT</span></div></div>
       <div class="head-actions"><a class="btn" href="#/gvDashboard">🚀 GV dashboard</a><a class="btn" href="#/dashboard">📊 FF dashboard</a><button class="btn primary" data-action="refresh">↻ Refresh</button></div></div>
       <div id="cmp-body">${U.spinner('Dono sources ka data load ho raha hai…')}</div>`;
     const body = U.$('#cmp-body', root);
@@ -31,8 +36,10 @@ FF.pages = FF.pages || {};
     ]);
     if (!root.isConnected) return;
 
-    const daily = dailyR.status === 'fulfilled' ? dailyR.value : null;
-    const agents = agentsR.status === 'fulfilled' ? agentsR.value : [];
+    const dailyAll = dailyR.status === 'fulfilled' ? dailyR.value : null;
+    const daily = dailyAll ? dailyAll.filter(isFF) : null;
+    const agentsAll = agentsR.status === 'fulfilled' ? agentsR.value : [];
+    const agents = agentsAll.filter(isFF);
     const ffStock = stockR.status === 'fulfilled' ? stockR.value : [];
     const report = reportR.status === 'fulfilled' ? reportR.value : [];
     const gvStockClass = gvStockR.status === 'fulfilled' ? gvStockR.value : [];
@@ -174,7 +181,7 @@ FF.pages = FF.pages || {};
         ${card('⭐ Top agents · First Forward (MTD)', C.hbars({ items: topFF.map(([name, v], i) => ({ label: name, value: v, color: C.PALETTE[i % C.PALETTE.length], attr: `data-link="#/performance?q=${encodeURIComponent(name)}"` })), valueLabel: 'MTD' }))}
         ${card('⭐ Top agents · GV Partner (MTD)', C.hbars({ items: topGV.map(([name, v], i) => ({ label: name, value: v, color: C.PALETTE[(i + 4) % C.PALETTE.length], attr: `data-link="#/gvPerformance?q=${encodeURIComponent(name)}"` })), valueLabel: 'MTD' }))}
       </div>
-      <p class="foot-note">Sources: First Forward → EIR (issuance), StockDataa (stock), REPORT (performance) · GV Partner → GV Master, Tag Assignment, GV REPORT · Latest date ${latest ? U.labelDate(latest, true) : '—'} · Loaded ${U.timeLabel(S.loadedAt || G.loadedAt)}</p>`;
+      <p class="foot-note">Sources: First Forward → EIR (issuance, master ${esc(gvMasterId || '5845036')} wale rows hata kar), StockDataa (stock), REPORT (performance) · GV Partner → GV Master, Tag Assignment, GV REPORT · Latest date ${latest ? U.labelDate(latest, true) : '—'} · Loaded ${U.timeLabel(S.loadedAt || G.loadedAt)}</p>`;
     C.mount(body);
   }
 

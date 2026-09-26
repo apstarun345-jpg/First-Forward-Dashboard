@@ -47,7 +47,10 @@ window.FF = window.FF || {};
     const brand = U.$('#brand-name'); if (brand) brand.textContent = FF.config.brand;
     const tag = U.$('#brand-tag'); if (tag) tag.textContent = FF.config.tagline || 'Dashboard';
     const logo = U.$('#brand-logo');
-    if (logo) { logo.innerHTML = FF.config.logo ? `<img src="${esc(FF.config.logo)}" alt="logo">` : esc((FF.config.brand || 'FF').split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase()); logo.classList.toggle('has-img', !!FF.config.logo); }
+    if (logo) {
+      logo.innerHTML = FF.config.logo ? `<img src="${esc(FF.config.logo)}" alt="logo">` : '<img src="icon.svg" alt="logo">';
+      logo.classList.add('has-img');
+    }
   }
 
   // ---- login / signup screen -------------------------------------------------------------------
@@ -62,7 +65,7 @@ window.FF = window.FF || {};
   function hideScreen() { const el = U.$('#auth-screen'); if (el) el.hidden = true; document.body.classList.remove('auth-open'); }
   const logoHtml = (size) => (FF.config.logo
     ? `<img class="auth-logo ${size || ''}" src="${esc(FF.config.logo)}" alt="">`
-    : `<div class="auth-logo mono-logo ${size || ''}">${esc((FF.config.brand || 'FF').split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase())}</div>`);
+    : `<img class="auth-logo ${size || ''}" src="icon.svg" alt="logo">`);
 
   function visualHtml() {
     const c = FF.config;
@@ -89,6 +92,32 @@ window.FF = window.FF || {};
     </div>`;
   }
 
+  function mobHeroHtml() {
+    const c = FF.config;
+    return `<div class="auth-mob-hero">
+      <div class="auth-mob-brand">${logoHtml('big')}<div><b>${esc(c.brand || 'First Forward')}</b><small>${esc(c.tagline || 'Dashboard')}</small></div></div>
+      <div class="auth-mob-pills">
+        <span class="pill p1">📊 Live dashboard</span>
+        <span class="pill p2">⚖️ GV vs FF</span>
+        <span class="pill p3">🔔 Daily report alerts</span>
+      </div>
+    </div>`;
+  }
+
+  function aboutHtml() {
+    return `<div class="auth-about">
+      <h3>✨ Ye dashboard aapko kya deta hai?</h3>
+      <p class="dim small">FASTag issuance, stock aur agent performance — First Forward aur GV Partner dono ka data ek hi jagah, seedha Google Sheet se live.</p>
+      <div class="about-cards">
+        <div class="about-card c1"><span>📊</span><b>Live Issuance</b><small>Daily · Monthly · VC4 / VC20 / VC5+ split</small></div>
+        <div class="about-card c2"><span>📦</span><b>Stock &amp; Trend</b><small>Tag-wise stock, agent pivot, Excel export</small></div>
+        <div class="about-card c3"><span>⚖️</span><b>GV vs First Forward</b><small>Fair comparison — side by side numbers</small></div>
+        <div class="about-card c4"><span>🔔</span><b>Notifications</b><small>Daily bank report, logins &amp; activity alerts</small></div>
+      </div>
+      <p class="about-note">🔔 <b>Daily report aate hi notification</b> — yesterday ka tag issuance (GV · First Forward · VC4 · VC20 · VC5+) app aur browser dono me &nbsp;·&nbsp; 📍 Location se field activity bhi track hoti hai.</p>
+    </div>`;
+  }
+
   function formHtml(mode, msg) {
     const c = FF.config;
     const signupOk = c.allowSignup !== false;
@@ -96,22 +125,24 @@ window.FF = window.FF || {};
       ${visualHtml()}
       <div class="auth-panel">
         <div class="auth-card">
+          ${mobHeroHtml()}
           <div class="auth-brand-sm">${logoHtml()}<div><b>${esc(c.appName)}</b><small>${esc(c.tagline || 'Dashboard')}</small></div></div>
           <div class="seg auth-tabs"><button class="seg-btn ${mode === 'login' ? 'on' : ''}" data-mode="login">Login</button>${signupOk ? `<button class="seg-btn ${mode === 'signup' ? 'on' : ''}" data-mode="signup">Sign up</button>` : ''}</div>
           <form id="auth-form" autocomplete="on" novalidate>
-            ${mode === 'signup' ? `<label>Full name<input name="name" class="input" required maxlength="80" placeholder="Aapka naam" autocomplete="name"></label>` : ''}
-            <label>Username<input name="username" class="input" required minlength="3" maxlength="60" placeholder="e.g. tarun" autocapitalize="none" autocomplete="username"></label>
-            ${mode === 'signup' ? `<div class="two"><label>Mobile <small>(optional)</small><input name="mobile" class="input" inputmode="tel" placeholder="98xxxxxxxx" autocomplete="tel"></label><label>Email <small>(optional)</small><input name="email" class="input" type="email" placeholder="you@mail.com" autocomplete="email"></label></div>` : ''}
-            <label>Password<span class="pw-wrap"><input name="password" class="input" type="password" required minlength="6" autocomplete="${mode === 'signup' ? 'new-password' : 'current-password'}" placeholder="min 6 characters"><button type="button" class="pw-eye" data-eye title="Password dikhao / chhupao">👁</button></span></label>
+            ${mode === 'signup' ? `<label>👤 Full name<input name="name" class="input" required maxlength="80" placeholder="Aapka naam" autocomplete="name"></label>` : ''}
+            <label>🙋 Username<input name="username" class="input" required minlength="3" maxlength="60" placeholder="e.g. tarun" autocapitalize="none" autocomplete="username"></label>
+            ${mode === 'signup' ? `<div class="two"><label>📞 Mobile <small>(optional)</small><input name="mobile" class="input" inputmode="tel" placeholder="98xxxxxxxx" autocomplete="tel"></label><label>✉️ Email <small>(optional)</small><input name="email" class="input" type="email" placeholder="you@mail.com" autocomplete="email"></label></div>` : ''}
+            <label>🔒 Password<span class="pw-wrap"><input name="password" class="input" type="password" required minlength="6" autocomplete="${mode === 'signup' ? 'new-password' : 'current-password'}" placeholder="min 6 characters"><button type="button" class="pw-eye" data-eye title="Password dikhao / chhupao">👁</button></span></label>
             <div class="auth-row">
               <label class="check small"><input type="checkbox" id="auth-remember" checked> <span>Mujhe yaad rakho</span></label>
               <button type="button" class="link-btn" id="auth-forgot">Forgot password?</button>
             </div>
             <div id="auth-msg" class="auth-msg ${msg && msg.kind ? msg.kind : ''}">${msg ? esc(msg.text) : ''}</div>
-            <button class="btn primary big auth-submit" type="submit"><span class="btn-label">${mode === 'signup' ? 'Create account' : 'Login'}</span></button>
+            <button class="btn primary big auth-submit" type="submit"><span class="btn-label">${mode === 'signup' ? '🚀 Create account' : '🚀 Login'}</span></button>
             <div class="auth-progress" id="auth-progress" hidden><div class="auth-progress-bar"></div></div>
             <p class="dim small auth-note">${mode === 'signup' ? 'Account banne ke baad admin approve karega aur access set karega.' : 'Access nahi hai? Admin se account / permission maango.'}</p>
           </form>
+          ${aboutHtml()}
         </div>
         <p class="auth-foot dim small">${esc(c.brand || '')} · Data Google Sheet se live aata hai${state.settings && state.settings.updatedAt ? ` · settings updated ${U.timeLabel(new Date(state.settings.updatedAt).getTime())}` : ''}</p>
       </div>
@@ -188,6 +219,12 @@ window.FF = window.FF || {};
         hideScreen();
         FF.app && FF.app.onLogin && FF.app.onLogin(out.first);
         welcomeToast(state.user, out.first);
+        // Browser notifications: login click = user gesture, isliye permission maangna safe hai.
+        try {
+          if (typeof Notification !== 'undefined' && Notification.permission === 'default' && FF.notify && FF.notify.requestPermission) {
+            setTimeout(() => FF.notify.requestPermission(), 1500);
+          }
+        } catch { /* ignore */ }
       } catch (err) {
         msgEl.className = 'auth-msg err';
         msgEl.textContent = err.message;
