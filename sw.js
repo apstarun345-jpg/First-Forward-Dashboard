@@ -1,5 +1,5 @@
 // First Forward Dashboard — Service Worker for PWA + fast caching
-const CACHE_NAME = 'ff-dashboard-v4.3-pro-20260926';
+const CACHE_NAME = 'ff-dashboard-v4.4-pro-20260926b';
 const ASSETS = [
   './',
   './index.html',
@@ -32,7 +32,10 @@ const ASSETS = [
   './icon-512.png',
   './logos/gadivan.png',
   './logos/first-forward.png',
-  './logos/apna-payment.png'
+  './logos/apna-payment.png',
+  './logos/gadivan-transparent.png',
+  './logos/first-forward-transparent.png',
+  './logos/apnapayment-text.png'
 ];
 
 self.addEventListener('install', (e) => {

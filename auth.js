@@ -81,18 +81,18 @@ window.FF = window.FF || {};
           <div class="apna-company-label">ApnaPayment Company - Powering FASTag Ecosystem</div>
         </div>
 
-        <!-- Partners: GADIVAN GV Partner + FIRST forward Dashboard - Only Text Below Logos -->
+        <!-- Partners: GADIVAN GV Partner + FIRST forward Dashboard - Only Text Below Logos, No Background -->
         <div class="partners-row">
-          <div class="partner-box gadivan-box">
-            <img src="./logos/gadivan.png" alt="GADIVAN" class="partner-logo">
+          <div class="partner-box gadivan-box no-bg">
+            <img src="./logos/gadivan-transparent.png" alt="GADIVAN" class="partner-logo transparent">
             <div class="partner-text">
               <b>GADIVAN</b>
               <span>GV Partner</span>
             </div>
           </div>
           <div class="partner-divider">×</div>
-          <div class="partner-box fwd-box">
-            <img src="./logos/first-forward.png" alt="FIRST forward" class="partner-logo fwd">
+          <div class="partner-box fwd-box no-bg">
+            <img src="./logos/first-forward-transparent.png" alt="FIRST forward" class="partner-logo fwd transparent">
             <div class="partner-text">
               <b>FIRST forward</b>
               <span>First Forward Dashboard</span>
@@ -136,7 +136,14 @@ window.FF = window.FF || {};
       ${visualHtml()}
       <div class="auth-panel pro-panel">
         <div class="auth-card pro-card">
-          <div class="auth-brand-sm pro-brand-sm">${logoHtml()}<div><b>${esc(c.appName)}</b><small>Enterprise Dashboard • Secure Access</small></div></div>
+          <div class="auth-brand-sm pro-brand-sm v4-card">
+            <div class="v4-card-logos">
+              <img src="./logos/gadivan-transparent.png" alt="GADIVAN" class="v4-logo">
+              <span class="v4-x">×</span>
+              <img src="./logos/first-forward-transparent.png" alt="FIRST forward" class="v4-logo fwd">
+            </div>
+            <div><b>Gv Partner And First Forward Dashboard</b><small>Enterprise Dashboard • Secure Access</small></div>
+          </div>
           
           <div class="pro-login-header">
             <h3>Secure Login</h3>
