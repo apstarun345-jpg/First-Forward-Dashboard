@@ -1,6 +1,12 @@
 /* First Forward Dashboard — configuration.
    Defaults live here; everything can be changed from the Settings page (admin) — those overrides are
-   stored on the server (data/settings.json) and merged in at startup via FF.config.apply(). */
+   stored on the server (data/settings.json) and merged in at startup via FF.config.apply().
+
+   Two data sources ship with the app:
+     • First Forward — main sheet (EIR issuance log + StockDataa inventory + REPORT performance)
+     • GV Partner    — "Tag Issued Report" sheet (GV Master issuance + Tag Assignment stock + GV REPORT performance)
+   `tabs` is the registry of every sheet tab the app can show; each tab is also a permission
+   (`sheet:<id>`) that the admin can grant per user (Settings → Access matrix / Users & access). */
 window.FF = window.FF || {};
 
 FF.config = {
@@ -9,8 +15,10 @@ FF.config = {
   tagline: 'Dashboard',
   logo: '',
   loginImage: '',
-  theme: { sidebarBg: '#1e1b4b', sidebarBg2: '#4c1d95', sidebarText: '#e0e7ff', accent: '#6366f1', accent2: '#a855f7' },
+  loginAnimation: true,
+  theme: { sidebarBg: '#1e1b4b', sidebarBg2: '#4c1d95', sidebarText: '#e0e7ff', accent: '#6366f1', accent2: '#a855f7', gvAccent: '#0d9488' },
   sheetId: '1ZHzmu7xtXl7trZDOXUbFmclJGffy98U4kz2QBSKsfwc',
+  gvSheetId: '1LkYX746lGZQKhl5ueoKe3kYOo4SNtu47p5-jkVNUiBA',
 
   // Server proxy (server.js) — caches Google responses. No auto refresh: data is loaded once when the site
   // opens and again only on the ↻ button or a browser reload.
@@ -19,11 +27,22 @@ FF.config = {
   directFallback: false,
   autoRefreshMs: 0,
 
-  // Sheet tabs shown in the left sidebar under "Sheets" — only StockDataa and REPORT.
-  sheets: [
-    { name: 'StockDataa', icon: '📦', title: 'StockDataa · Inventory', desc: 'Field me pada hua stock (tag-wise)', big: true, search: ['I', 'H', 'K', 'B', 'D', 'F', 'C'], expect: 'ID' },
-    { name: 'REPORT', icon: '📑', title: 'REPORT', desc: 'Agent-wise summary: stock + issuance + status', gid: '242489821' }
+  // ---- sheet tab registry -----------------------------------------------------------------------
+  // id      → unique key (also the `sheet:<id>` permission and the #/sheet/<id> route)
+  // group   → sidebar section ('First Forward' | 'GV Partner')
+  // source  → 'main' (First Forward sheet) | 'gv' (GV Partner sheet)
+  // tab     → exact Google Sheet tab name,  gid → optional tab id (takes priority when set)
+  tabs: [
+    { id: 'StockDataa', group: 'First Forward', source: 'main', kind: 'stock', icon: '📦', label: 'StockDataa · Inventory', tab: 'StockDataa', gid: '', desc: 'Field stock (tag-wise)', enabled: true, search: ['I', 'H', 'K', 'B', 'D', 'F', 'C'] },
+    { id: 'REPORT', group: 'First Forward', source: 'main', kind: 'report', icon: '📑', label: 'REPORT', tab: 'REPORT', gid: '242489821', desc: 'Agent-wise summary: stock + issuance + status', enabled: true },
+    { id: 'EIR', group: 'First Forward', source: 'main', kind: 'issuance', icon: '🗂️', label: 'EIR · Issuance log', tab: 'EIR', gid: '', desc: 'Har tag ka issuance record (bada tab)', enabled: false, search: ['B', 'L', 'G', 'AH', 'E'] },
+    { id: 'GV Master', group: 'GV Partner', source: 'gv', kind: 'gv-issuance', icon: '🚀', label: 'GV Master · Issuance', tab: 'GV Master', gid: '', desc: 'GV partner ka poora issuance data', enabled: true, search: ['B', 'A', 'D', 'E', 'I'] },
+    { id: 'Tag Assignment', group: 'GV Partner', source: 'gv', kind: 'gv-stock', icon: '📦', label: 'Tag Assignment · Stock', tab: 'Tag Assignment', gid: '', desc: 'GV partner stock (tag-wise, In Stock)', enabled: true, search: ['F', 'B', 'C', 'H', 'A'] },
+    { id: 'GV REPORT', group: 'GV Partner', source: 'gv', kind: 'gv-report', icon: '📑', label: 'GV REPORT · Performance', tab: 'GV REPORT', gid: '1284424234', desc: 'GV agent-wise performance + stock', enabled: true }
   ],
+
+  // Legacy view of the First Forward sheet tabs (kept in sync with `tabs` by refreshViews()).
+  sheets: [],
 
   // EIR (issuance log) column letters — used for Dashboard / Trend / class-wise comparisons.
   eir: {
@@ -41,6 +60,24 @@ FF.config = {
     agentId: 'H', agentName: 'I', agentAllocatedAt: 'J', tlName: 'K'
   },
 
+  // GV Partner sheet mapping (tab names + column letters / header row).
+  // GV Master = issuance log, Tag Assignment = stock, GV REPORT = agent-wise performance.
+  gv: {
+    master: {
+      tab: 'GV Master', gid: '',
+      uniqueId: 'A', agentName: 'B', tlId: 'C', tlName: 'D', vrn: 'E', vClass: 'F', cch: 'G',
+      serial: 'H', tagId: 'I', amount: 'J', customer: 'K', productId: 'L', commission: 'M',
+      status: 'N', commissionStatus: 'O', date: 'P', time: 'Q', gvTlId: 'R', masterCch: 'S',
+      monthName: 'T', tagType: 'U', gvUniqueId: 'W', gvUniqueName: 'X'
+    },
+    assignment: {
+      tab: 'Tag Assignment', gid: '',
+      cls: 'A', tagId: 'B', serial: 'C', status: 'D', agentId: 'E', agentName: 'F',
+      tlId: 'G', tlName: 'H', gvUniqueId: 'L', gvUniqueName: 'M'
+    },
+    report: { tab: 'GV REPORT', gid: '1284424234', headerRow: 4, lastCol: 'AZ' }
+  },
+
   report: { sheet: 'REPORT', gid: '242489821' },
 
   // TL names that are NOT real team leaders (placeholder for direct agents) — hidden from every TL view.
@@ -50,8 +87,33 @@ FF.config = {
   pageSize: 50,
   allowSignup: true,
 
-  sheetByName(name) {
-    return this.sheets.find((s) => s.name === name) || null;
+  // ---- helpers ---------------------------------------------------------------------------------
+  /** All registered tabs (optionally only the enabled ones). */
+  allTabs(onlyEnabled) {
+    const list = (this.tabs || []).filter((t) => t && t.id);
+    return onlyEnabled ? list.filter((t) => t.enabled !== false) : list;
+  },
+  /** Tab definition by id, tab name or label. */
+  tabBy(name) {
+    const n = String(name || '');
+    return this.allTabs().find((t) => t.id === n || t.tab === n || t.label === n) || null;
+  },
+  /** Back-compat: sheet viewer / nav used config.sheetByName(name). */
+  sheetByName(name) { return this.tabBy(name); },
+  /** Google spreadsheet id for a tab (or for a raw source key). */
+  sheetIdFor(tab) {
+    const src = typeof tab === 'string' ? (this.tabBy(tab) || {}).source : (tab || {}).source;
+    return src === 'gv' ? this.gvSheetId : this.sheetId;
+  },
+  /** Enabled tabs of one group ('First Forward' | 'GV Partner'). */
+  groupTabs(group, onlyEnabled) {
+    return this.allTabs(onlyEnabled).filter((t) => t.group === group);
+  },
+  /** Recompute the legacy `sheets` / `gvSheets` views after settings are merged in. */
+  refreshViews() {
+    if (!Array.isArray(this.tabs) || !this.tabs.length) this.tabs = FF.configDefaults ? FF.configDefaults.tabs : this.tabs;
+    this.sheets = this.groupTabs('First Forward', true);
+    this.gvSheets = this.groupTabs('GV Partner', true);
   },
   /** True when a TL name is a placeholder (e.g. "APS") that must not appear in TL views. */
   isExcludedTl(name) {
@@ -63,16 +125,22 @@ FF.config = {
   apply(s) {
     if (!s || typeof s !== 'object') return;
     const pick = (k) => { if (s[k] !== undefined && s[k] !== null) this[k] = s[k]; };
-    ['appName', 'brand', 'tagline', 'logo', 'loginImage', 'sheetId', 'excludeTls', 'pageSize', 'allowSignup'].forEach(pick);
+    ['appName', 'brand', 'tagline', 'logo', 'loginImage', 'loginAnimation', 'sheetId', 'gvSheetId', 'excludeTls', 'pageSize', 'allowSignup'].forEach(pick);
     if (s.theme) this.theme = { ...this.theme, ...s.theme };
     if (s.thresholds) this.thresholds = { ...this.thresholds, ...s.thresholds };
     if (s.contacts) this.contacts = { ...this.contacts, ...s.contacts };
     if (s.eir) this.eir = { ...this.eir, ...s.eir };
     if (s.stock) this.stock = { ...this.stock, ...s.stock };
+    if (Array.isArray(s.tabs) && s.tabs.length) this.tabs = s.tabs.slice();
+    if (s.gv) this.gv = { master: { ...this.gv.master, ...(s.gv.master || {}) }, assignment: { ...this.gv.assignment, ...(s.gv.assignment || {}) }, report: { ...this.gv.report, ...(s.gv.report || {}) } };
     if (s.eirSheet) this.eir.sheet = s.eirSheet;
-    if (s.stockSheet) { this.stock.sheet = s.stockSheet; this.sheets[0].name = s.stockSheet; }
-    if (s.stockGid !== undefined) this.sheets[0].gid = s.stockGid || undefined;
-    if (s.reportGid !== undefined) { this.report.gid = s.reportGid; this.sheets[1].gid = s.reportGid; }
+    if (s.stockSheet) this.stock.sheet = s.stockSheet;
+    const stockTab = this.tabBy('StockDataa');
+    if (stockTab) { stockTab.tab = this.stock.sheet; if (s.stockGid !== undefined) stockTab.gid = s.stockGid || ''; }
+    if (s.reportGid !== undefined) { this.report.gid = s.reportGid; const rep = this.tabBy('REPORT'); if (rep) rep.gid = s.reportGid; }
     if (!Array.isArray(this.excludeTls)) this.excludeTls = String(this.excludeTls || '').split(',').map((x) => x.trim()).filter(Boolean);
+    this.refreshViews();
   }
 };
+FF.configDefaults = { tabs: JSON.parse(JSON.stringify(FF.config.tabs)) };
+FF.config.refreshViews();

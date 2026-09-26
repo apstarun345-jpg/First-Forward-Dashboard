@@ -146,9 +146,53 @@ for (const view of ['agents', 'tls', 'alerts', 'columns']) await run(`performanc
 await run('performance.render q=agent (auto-open drawer)', () => pages.performance.render(root(), { q: someAgent }, {}), true);
 await run('performance.render q=tl', () => pages.performance.render(root(), { q: someTl }, {}), true);
 await run('performance.render priority chip', () => pages.performance.render(root(), { view: 'agents', priority: 'High' }, {}), true);
+// ---- GV Partner (second Google Sheet) ----
+await run('gv.preload (master + stock + report)', async () => {
+  await FF.gv.preload(false);
+  const errs = Object.entries(FF.gv.state.errors || {}).filter(([, e]) => e);
+  if (errs.length) throw new Error('gv errors: ' + errs.map(([k, e]) => `${k}: ${e && e.message ? e.message : e}`).join(' | '));
+});
+for (const ds of Object.keys(FF.gv.DATASETS)) {
+  await run(`gv dataset ${ds}`, async () => { const v = await FF.gv.need(ds); const n = Array.isArray(v) ? v.length : -1; if (n <= 0) throw new Error(`empty (${n})`); log(`      ${ds}: ${n} rows`); });
+}
+await run('gv aggregations + people', async () => {
+  const months = FF.gv.months(); const latest = months[months.length - 1];
+  const s = FF.gv.summary(latest); if (!s.total) throw new Error('summary empty');
+  const series = FF.gv.dailySeries(latest); const weekly = FF.gv.weekly(latest);
+  const agents = FF.gv.agentRollup(latest); const tls = FF.gv.tlRollup(latest); const ppl = FF.gv.people();
+  if (!series.totals.some((n) => n > 0)) throw new Error('dailySeries empty');
+  log(`      months ${months.join(', ')} · latest ${FF.util.ymKey(FF.gv.latestDate())} total ${s.total} · week buckets ${weekly.length} · agents ${agents.length} · tls ${tls.length} · people ${ppl.agents.length}/${ppl.tls.length}`);
+});
+await run('page home', () => pages.home.render(root(), {}, {}), true);
+await run('page gvDashboard', () => pages.gvDashboard.render(root(), {}, {}), true);
+await run('page gvTrend daily', () => pages.gvTrend.render(root(), { mode: 'daily' }, {}), true);
+await run('page gvTrend weekly', () => pages.gvTrend.render(root(), { mode: 'weekly' }, {}), true);
+await run('page gvTrend monthly', () => pages.gvTrend.render(root(), { mode: 'monthly' }, {}), true);
+await run('page gvTrend compare', () => pages.gvTrend.render(root(), { mode: 'compare' }, {}), true);
+await run('page gvStock', () => pages.gvStock.render(root(), {}, {}), true);
+const gvAgent = (FF.gv.people().agents[0] || {}).name;
+log(`      sample GV agent "${gvAgent}"`);
+await run('page gvStock tl filter', () => pages.gvStock.render(root(), { tl: (FF.gv.people().tls[0] || {}).name || '' }, {}), true);
+await run('page gvPerformance', () => pages.gvPerformance.render(root(), {}, {}), true);
+await run('page gvPerformance q=agent', () => pages.gvPerformance.render(root(), { q: gvAgent }, {}), true);
+await run('page compare', () => pages.compare.render(root(), {}, {}), true);
+await run('sheet.render GV Master', () => pages.sheet.render(root(), { name: 'GV Master' }, {}), true);
+await run('sheet.render Tag Assignment', () => pages.sheet.render(root(), { name: 'Tag Assignment' }, {}), true);
+await run('sheet.render GV REPORT', () => pages.sheet.render(root(), { name: 'GV REPORT' }, {}), true);
+await run('app.updateParams + drawer', async () => {
+  FF.app.updateParams({ mode: 'monthly' });
+  FF.app.openDrawer({ kicker: 'k', title: 't', body: '<b>hi</b>', actions: '<button class="btn small">x</button>' });
+  FF.app.closeDrawer();
+});
+await run('auth helpers (avatar/role)', async () => {
+  const html = FF.auth.avatarHtml(FF.auth.user, 'top');
+  if (!html || !html.includes('av')) throw new Error('avatarHtml returned nothing');
+  if (!FF.auth.roleLabel(FF.auth.user)) throw new Error('roleLabel empty');
+  if (typeof FF.auth.refreshUser !== 'function') throw new Error('refreshUser missing');
+});
 await run('sheet.render StockDataa', () => pages.sheet.render(root(), { name: 'StockDataa' }, {}), true);
 await run('sheet.render REPORT', () => pages.sheet.render(root(), { name: 'REPORT' }, {}), true);
-await run('settings.render (all tabs)', async () => { for (const tab of ['account', 'brand', 'data', 'rules', 'contacts', 'users', 'backup']) { await pages.settings.render(root(), { tab }, {}); await settle(20); } });
+await run('settings.render (all tabs)', async () => { for (const tab of ['account', 'brand', 'sources', 'access', 'data', 'rules', 'contacts', 'users', 'backup']) { await pages.settings.render(root(), { tab }, {}); await settle(20); } });
 await run('app.refresh (manual ↻)', async () => { await FF.app.refresh(); await settle(100); });
 await run('xlsx builder', async () => { let got = null; FF.util.downloadBlob = (name, blob) => { got = { name, size: blob.size }; }; FF.xlsx.download('t.xlsx', [{ name: 'Summary', header: ['a', 'b'], rows: [['x', 1], ['y', 2]] }, { name: 'StockDataa', header: ['c'], rows: [['z']] }]); if (!got || got.size < 200) throw new Error('xlsx not produced'); log(`      ${got.name} ${got.size} bytes`); });
 await run('logout', async () => { await FF.auth.api('/api/auth/logout', 'POST', {}); });

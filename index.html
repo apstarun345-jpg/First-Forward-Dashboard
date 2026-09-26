@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>First Forward Dashboard</title>
-  <meta name="description" content="First Forward FASTag dashboard — issuance, stock, trends and agent performance.">
+  <meta name="description" content="First Forward + GV Partner FASTag dashboard — issuance, stock, trends and agent performance.">
   <meta name="theme-color" content="#4f46e5">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
@@ -31,6 +31,10 @@
       <div class="top-title" id="top-title">Dashboard</div>
       <div class="top-actions" id="top-actions">
         <button class="icon-btn" id="top-refresh" title="Refresh data (Google Sheet se naya data)" aria-label="Refresh">↻</button>
+        <div class="user-wrap">
+          <button class="user-btn" id="user-btn" aria-haspopup="true" aria-expanded="false"></button>
+          <div class="user-menu" id="user-menu" hidden></div>
+        </div>
       </div>
     </header>
     <main id="main" class="main"></main>
@@ -52,12 +56,16 @@
   <script src="charts.js"></script>
   <script src="model.js"></script>
   <script src="store.js"></script>
+  <script src="gv.js"></script>
   <script src="auth.js"></script>
   <script src="sheets.js"></script>
   <script src="dashboard.js"></script>
   <script src="trend.js"></script>
   <script src="stock.js"></script>
   <script src="performance.js"></script>
+  <script src="home.js"></script>
+  <script src="gvpages.js"></script>
+  <script src="compare.js"></script>
   <script src="settings.js"></script>
   <script src="app.js"></script>
 </body>
