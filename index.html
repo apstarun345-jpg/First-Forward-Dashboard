@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>First Forward Dashboard</title>
-  <meta name="description" content="First Forward FASTag dashboard — live issuance, stock, trends and agent performance from Google Sheets.">
+  <meta name="description" content="First Forward FASTag dashboard — issuance, stock, trends and agent performance.">
   <meta name="theme-color" content="#4f46e5">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
@@ -14,13 +14,13 @@
 <body>
   <aside class="sidebar" id="sidebar">
     <div class="brand">
-      <div class="brand-logo">FF</div>
-      <div class="brand-text"><b id="brand-name">First Forward</b><small>Dashboard</small></div>
+      <div class="brand-logo" id="brand-logo">FF</div>
+      <div class="brand-text"><b id="brand-name">First Forward</b><small id="brand-tag">Dashboard</small></div>
     </div>
     <nav id="nav" class="nav"></nav>
     <div class="side-foot">
-      <div id="status" class="status"><span class="dot"></span> Connecting…</div>
-      <a id="sheet-link" class="side-link" href="#" target="_blank" rel="noopener">Open Google Sheet ↗</a>
+      <div id="status" class="status"><span class="dot"></span> Ready</div>
+      <div id="user-box"></div>
     </div>
   </aside>
   <div class="side-backdrop" id="side-backdrop"></div>
@@ -30,7 +30,7 @@
       <button class="icon-btn" id="menu-btn" aria-label="Menu">☰</button>
       <div class="top-title" id="top-title">Dashboard</div>
       <div class="top-actions" id="top-actions">
-        <button class="icon-btn" id="top-refresh" title="Refresh data" aria-label="Refresh">↻</button>
+        <button class="icon-btn" id="top-refresh" title="Refresh data (Google Sheet se naya data)" aria-label="Refresh">↻</button>
       </div>
     </header>
     <main id="main" class="main"></main>
@@ -39,7 +39,7 @@
   <div class="drawer-backdrop" id="drawer-backdrop" hidden></div>
   <aside class="drawer" id="drawer" aria-hidden="true">
     <div class="drawer-head">
-      <div><div class="drawer-kicker" id="drawer-kicker"></div><h2 id="drawer-title"></h2><div class="drawer-sub" id="drawer-sub"></div></div>
+      <div class="drawer-head-main"><div class="drawer-kicker" id="drawer-kicker"></div><h2 id="drawer-title"></h2><div class="drawer-sub" id="drawer-sub"></div><div class="drawer-actions" id="drawer-actions"></div></div>
       <button class="icon-btn" id="drawer-close" aria-label="Close">✕</button>
     </div>
     <div class="drawer-body" id="drawer-body"></div>
@@ -47,14 +47,18 @@
 
   <script src="config.js"></script>
   <script src="util.js"></script>
+  <script src="xlsx.js"></script>
   <script src="data.js"></script>
   <script src="charts.js"></script>
   <script src="model.js"></script>
+  <script src="store.js"></script>
+  <script src="auth.js"></script>
   <script src="sheets.js"></script>
   <script src="dashboard.js"></script>
   <script src="trend.js"></script>
   <script src="stock.js"></script>
   <script src="performance.js"></script>
+  <script src="settings.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

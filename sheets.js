@@ -71,9 +71,8 @@ FF.pages = FF.pages || {};
     const cfg = FF.config.sheetByName(name) || { name, icon: '📄', title: name, desc: '' };
     const state = getState(name);
     if (ctx && ctx.fresh) { state.full = null; state.total = null; state.mode = null; state.headerRows = null; }
-    const csvUrl = cfg.gid ? `https://docs.google.com/spreadsheets/d/${FF.config.sheetId}/export?format=csv&gid=${cfg.gid}` : `https://docs.google.com/spreadsheets/d/${FF.config.sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(name)}`;
     root.innerHTML = `<div class="page-head"><div><h1>${cfg.icon || '📄'} ${esc(cfg.title || name)}</h1><p class="sub">${esc(cfg.desc || `Sheet tab "${name}"`)} · <span id="sh-info">loading…</span></p></div>
-      <div class="head-actions"><button class="btn primary" data-action="refresh">↻ Refresh</button><button class="btn" data-action="export-visible">⬇ Export visible</button><a class="btn" href="${esc(csvUrl)}" target="_blank" rel="noopener">⬇ Full CSV</a><a class="btn" target="_blank" rel="noopener" href="${esc(FF.config.sheetUrl(name))}">Open in Google ↗</a></div></div>
+      <div class="head-actions"><button class="btn primary" data-action="refresh">↻ Refresh</button>${FF.auth.can('export') ? '<button class="btn" data-action="export-visible">⬇ Export visible (CSV)</button><button class="btn" data-action="export-visible-xlsx">⬇ Excel</button>' : ''}${name === FF.config.stock.sheet && FF.auth.can('stock') ? '<a class="btn" href="#/stock">📦 Stock pivot / search →</a>' : ''}${name === 'REPORT' && FF.auth.can('performance') ? '<a class="btn" href="#/performance">🏆 Performance →</a>' : ''}</div></div>
       <div id="sh-warn"></div>
       <div class="card grid-card"><div class="toolbar"><input id="sh-q" class="input wide" placeholder="Search… (Enter)" value="${esc(state.q)}"><span id="sh-mode" class="dim small"></span><div class="pager" id="sh-pager"></div></div>
       <div class="table-wrap grid-wrap" id="sh-grid">${U.spinner('Sheet load ho rahi hai…')}</div></div>`;
@@ -84,7 +83,7 @@ FF.pages = FF.pages || {};
 
     function checkFallback(table) {
       if (name !== 'EIR' && D.looksLikeEIR(table)) {
-        warn.innerHTML = `<div class="warn-box">⚠️ Google ne "<b>${esc(name)}</b>" naam ka tab nahi pehchana, isliye pehla tab (EIR) dikh raha hai. Sheet me tab ka exact naam check karo ya <code>js/config.js</code> me is sheet ka <code>gid</code> set karo (URL me <code>#gid=…</code>).</div>`;
+        warn.innerHTML = `<div class="warn-box">⚠️ Google ne "<b>${esc(name)}</b>" naam ka tab nahi pehchana, isliye pehla tab (EIR) dikh raha hai. Sheet me tab ka exact naam check karo ya Settings → Data source me is sheet ka <code>gid</code> set karo (Google URL me <code>#gid=…</code>).</div>`;
       } else warn.innerHTML = '';
     }
     function searchableCols(cols) {
@@ -229,9 +228,13 @@ FF.pages = FF.pages || {};
       state.page = 0; refreshView();
     });
     root.addEventListener('click', (e) => {
-      if (e.target.closest('[data-action="export-visible"]')) {
+      const ex = e.target.closest('[data-action="export-visible"], [data-action="export-visible-xlsx"]');
+      if (ex) {
+        if (!FF.auth.can('export')) { U.toast('Download permission nahi hai', 'err'); return; }
         const header = current.cols.map((c, i) => c.label || (current.headerRows[current.headerRows.length - 1] || [])[i] || c.id);
-        U.downloadCsv(`${name}-page${state.page + 1}.csv`, header, current.rows.map((r) => current.cols.map((c, i) => D.cellText(r[i], c))));
+        const rows = current.rows.map((r) => current.cols.map((c, i) => D.cellText(r[i], c)));
+        if (ex.dataset.action === 'export-visible') U.downloadCsv(`${name}-page${state.page + 1}.csv`, header, rows);
+        else FF.xlsx.download(`${name}-page${state.page + 1}.xlsx`, [{ name, header, rows: rows.map((r) => r.map((v) => (v !== '' && /^-?\d+(\.\d+)?$/.test(v) && v.length < 15 ? Number(v) : v))) }]);
       }
     });
     if (state.mode === 'full' && state.full && !fresh) { renderFull(); info.textContent = `${U.fmt(state.full.rows.length)} rows · ${state.full.cols.length} columns`; }

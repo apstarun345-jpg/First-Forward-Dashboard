@@ -1,45 +1,40 @@
 /* First Forward Dashboard — configuration.
-   Sab kuch yahin se control hota hai: Google Sheet ID, tab (sheet) names, aur EIR/StockDataa ke column letters.
-   Sheet public ("Anyone with the link can view") honi chahiye. */
+   Defaults live here; everything can be changed from the Settings page (admin) — those overrides are
+   stored on the server (data/settings.json) and merged in at startup via FF.config.apply(). */
 window.FF = window.FF || {};
 
 FF.config = {
   appName: 'First Forward Dashboard',
   brand: 'First Forward',
+  tagline: 'Dashboard',
+  logo: '',
+  loginImage: '',
+  theme: { sidebarBg: '#1e1b4b', sidebarBg2: '#4c1d95', sidebarText: '#e0e7ff', accent: '#6366f1', accent2: '#a855f7' },
   sheetId: '1ZHzmu7xtXl7trZDOXUbFmclJGffy98U4kz2QBSKsfwc',
 
-  // Server proxy (server.js) — caches Google responses. Static hosting par browser seedha Google se fetch karta hai.
+  // Server proxy (server.js) — caches Google responses. No auto refresh: data is loaded once when the site
+  // opens and again only on the ↻ button or a browser reload.
   proxyPath: '/api/gviz',
-  autoRefreshMs: 5 * 60 * 1000,
+  // Data only flows through the login-protected proxy (no direct browser→Google fallback), so access rules hold.
+  directFallback: false,
+  autoRefreshMs: 0,
 
-  // Sheet ke tabs, usi order mein jaise Google Sheet mein hain (left sidebar isi list se banta hai).
-  // gid pata ho to daal do (URL mein #gid=...). gid na ho to naam se query hoti hai — naam exact hona chahiye.
+  // Sheet tabs shown in the left sidebar under "Sheets" — only StockDataa and REPORT.
   sheets: [
-    { name: 'EIR', icon: '🧾', title: 'EIR · Issuance Log', desc: 'Har issued FASTag ka full log (last + current month)', big: true, search: ['B', 'L', 'J', 'AX', 'AW', 'BA', 'AZ', 'BH'], expect: 'TAG_ID' },
-    { name: 'Payout Pivot Table 7', icon: '💸', title: 'Payout Pivot', desc: 'Payout pivot table' },
-    { name: 'Performer Report', icon: '📋', title: 'Performer Report', desc: 'Sheet ka apna performance dashboard' },
-    { name: 'Agent iD', icon: '🪪', title: 'Agent iD', desc: 'Agent ID mapping / GV partner agents' },
-    { name: 'ARM Master', icon: '🧑‍💼', title: 'ARM Master', desc: 'ARM-wise daily issuance' },
-    { name: 'StockDataa', icon: '📦', title: 'StockDataa · Inventory', desc: 'Field me pada hua stock (tag-wise)', big: true, search: ['I', 'H', 'K', 'B', 'D', 'F'], expect: 'ID' },
-    { name: 'Biomatric Devices', icon: '🔏', title: 'Biomatric Devices', desc: 'Biometric device issuances', big: true },
-    { name: 'REPORT', icon: '📑', title: 'REPORT', desc: 'Agent-wise summary: stock + issuance + status', gid: '242489821' },
-    { name: 'High De-Growth/Inactive', icon: '📉', title: 'High De-Growth / Inactive', desc: 'De-growth, inactive & wrong-VRN agents' },
-    { name: 'Top Performer', icon: '🏆', title: 'Top Performer', desc: 'Top agents & TLs' },
-    { name: 'Search Dashboard', icon: '🔎', title: 'Search Dashboard', desc: 'TL-wise search view' },
-    { name: 'ARM', icon: '🗂️', title: 'ARM', desc: 'Agent → ARM mapping' }
+    { name: 'StockDataa', icon: '📦', title: 'StockDataa · Inventory', desc: 'Field me pada hua stock (tag-wise)', big: true, search: ['I', 'H', 'K', 'B', 'D', 'F', 'C'], expect: 'ID' },
+    { name: 'REPORT', icon: '📑', title: 'REPORT', desc: 'Agent-wise summary: stock + issuance + status', gid: '242489821' }
   ],
 
-  // EIR (issuance log) ke column letters. Sheet ka layout badle to sirf yahan update karo.
+  // EIR (issuance log) column letters — used for Dashboard / Trend / class-wise comparisons.
   eir: {
     sheet: 'EIR',
     tagId: 'A', vrn: 'B', cls: 'D', type: 'P', status: 'Z', date: 'AA',
     agentId: 'J', agentName: 'L', masterId: 'AU', tlId: 'AV', gvId: 'AW', gvName: 'AX',
     gvTl: 'AZ', tlName: 'BA', vrnType: 'BC', monthName: 'BD', regNumber: 'BH',
-    // GV Partner channel ki pehchaan (master account) — is TL/master ke tags "GV Partner" gine jaate hain
     gvMasterId: '5845036', gvChannelTl: 'ApnaPayment Pvt. Ltd.'
   },
 
-  // StockDataa (inventory) ke column letters.
+  // StockDataa (inventory) column letters.
   stock: {
     sheet: 'StockDataa',
     id: 'A', name: 'B', tagId: 'C', barcode: 'D', cls: 'E', tagType: 'F', bcAllocatedAt: 'G',
@@ -48,12 +43,36 @@ FF.config = {
 
   report: { sheet: 'REPORT', gid: '242489821' },
 
+  // TL names that are NOT real team leaders (placeholder for direct agents) — hidden from every TL view.
+  excludeTls: ['APS'],
+  thresholds: { coverRed: 7, coverOrange: 15, coverAmber: 30, inactiveDays: 3, topN: 10 },
+  contacts: { teamWhatsapp: '', teamEmail: '', teamGroupLink: '', signature: 'Team First Forward' },
+  pageSize: 50,
+  allowSignup: true,
+
   sheetByName(name) {
     return this.sheets.find((s) => s.name === name) || null;
   },
-  sheetUrl(name) {
-    const s = name ? this.sheetByName(name) : null;
-    const gid = s && s.gid ? s.gid : '';
-    return `https://docs.google.com/spreadsheets/d/${this.sheetId}/edit${gid ? `?gid=${gid}#gid=${gid}` : ''}`;
+  /** True when a TL name is a placeholder (e.g. "APS") that must not appear in TL views. */
+  isExcludedTl(name) {
+    const n = String(name || '').trim().toUpperCase();
+    if (!n) return true;
+    return (this.excludeTls || []).some((x) => String(x).trim().toUpperCase() === n);
+  },
+  /** Merge server-side settings (Settings page) into this config. */
+  apply(s) {
+    if (!s || typeof s !== 'object') return;
+    const pick = (k) => { if (s[k] !== undefined && s[k] !== null) this[k] = s[k]; };
+    ['appName', 'brand', 'tagline', 'logo', 'loginImage', 'sheetId', 'excludeTls', 'pageSize', 'allowSignup'].forEach(pick);
+    if (s.theme) this.theme = { ...this.theme, ...s.theme };
+    if (s.thresholds) this.thresholds = { ...this.thresholds, ...s.thresholds };
+    if (s.contacts) this.contacts = { ...this.contacts, ...s.contacts };
+    if (s.eir) this.eir = { ...this.eir, ...s.eir };
+    if (s.stock) this.stock = { ...this.stock, ...s.stock };
+    if (s.eirSheet) this.eir.sheet = s.eirSheet;
+    if (s.stockSheet) { this.stock.sheet = s.stockSheet; this.sheets[0].name = s.stockSheet; }
+    if (s.stockGid !== undefined) this.sheets[0].gid = s.stockGid || undefined;
+    if (s.reportGid !== undefined) { this.report.gid = s.reportGid; this.sheets[1].gid = s.reportGid; }
+    if (!Array.isArray(this.excludeTls)) this.excludeTls = String(this.excludeTls || '').split(',').map((x) => x.trim()).filter(Boolean);
   }
 };

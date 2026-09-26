@@ -3,7 +3,7 @@ window.FF = window.FF || {};
 FF.pages = FF.pages || {};
 (function (FF) {
   'use strict';
-  const U = FF.util, M = FF.model, C = FF.charts;
+  const U = FF.util, M = FF.model, C = FF.charts, S = FF.store;
   const esc = U.esc;
   const DIMS = {
     total: { label: 'Total', fn: () => 'Total' },
@@ -35,20 +35,22 @@ FF.pages = FF.pages || {};
     const filter = { tl: p.tl || '', agent: p.agent || '' };
     const filterLabel = filter.agent ? `Agent: ${filter.agent}` : filter.tl ? `TL: ${filter.tl}` : 'All agents';
 
-    root.innerHTML = `<div class="page-head"><div><h1>📈 Trend</h1><p class="sub">Daily · Weekly · Monthly · Last vs Current — EIR issuance log se live</p></div>
+    root.innerHTML = `<div class="page-head"><div><h1>📈 Trend</h1><p class="sub">Daily · Weekly · Monthly · Last vs Current — EIR issuance log</p></div>
       <div class="head-actions"><button class="btn primary" data-action="refresh">↻ Refresh</button></div></div>
       <div id="tr-controls"></div><div id="tr-body">${U.spinner('Trend data aggregate ho raha hai…')}</div>`;
 
-    const [dailyR, agentsR] = await Promise.allSettled([M.loadDaily(filter, { fresh }), M.loadAgents({ fresh })]);
+    // All-agents daily is preloaded; a TL / agent drill-down is one small aggregated query (cached on the server).
+    const [dailyR, agentsR] = await Promise.allSettled([filter.tl || filter.agent ? M.loadDaily(filter, { fresh }) : S.need('daily'), S.need('agents')]);
     if (!root.isConnected) return;
     const body = U.$('#tr-body', root);
     const controls = U.$('#tr-controls', root);
     const agents = agentsR.status === 'fulfilled' ? agentsR.value : [];
 
     // ---- controls ---------------------------------------------------------------
-    const tlVolume = U.groupSum(agents, (a) => a.tlName, (a) => a.n);
+    const tlVolume = U.groupSum(agents.filter((a) => !FF.config.isExcludedTl(a.tlName)), (a) => a.tlName, (a) => a.n);
     const tlOptions = U.topEntries(tlVolume).map(([name, v]) => `<option value="${esc(name)}" ${name === filter.tl ? 'selected' : ''}>${esc(name)} (${U.fmtShort(v)})</option>`).join('');
-    const agentNames = U.topEntries(U.groupSum(agents, (a) => a.name, (a) => a.n), 1500).map((e) => e[0]);
+    const agentVol = U.groupSum(agents, (a) => a.name, (a) => a.n);
+    const agentTl = new Map(); agents.forEach((a) => { if (!agentTl.has(a.name)) agentTl.set(a.name, FF.config.isExcludedTl(a.tlName) ? 'Direct' : a.tlName); });
     const allDaily = dailyR.status === 'fulfilled' ? dailyR.value : [];
     const monthsList = M.months(allDaily);
     const latest = M.latestDate(allDaily);
@@ -58,11 +60,17 @@ FF.pages = FF.pages || {};
         ${mode === 'daily' ? `<label>Month <select data-param="month">${monthsList.map((m) => `<option value="${m}" ${m === curMonth ? 'selected' : ''}>${U.labelYM(m, true)}</option>`).join('')}</select></label>` : ''}
         <label>Breakdown <select data-param="dim">${Object.entries(DIMS).map(([k, d]) => `<option value="${k}" ${k === dimKey ? 'selected' : ''}>${d.label}</option>`).join('')}</select></label>
         <label>TL <select data-param="tl"><option value="">All TLs</option>${tlOptions}</select></label>
-        <label>Agent <input list="tr-agents" data-param="agent" placeholder="Agent name type karo…" value="${esc(filter.agent)}"><datalist id="tr-agents">${agentNames.map((n) => `<option value="${esc(n)}"></option>`).join('')}</datalist></label>
+        <label>Find <span class="finder-input small"><input class="input" id="tr-find" placeholder="Agent / TL naam type karo → select" value="${esc(filter.agent)}"></span></label>
         ${filter.tl || filter.agent ? `<button class="btn small" data-action="clear-filters">✕ Clear filters</button>` : ''}
         <span class="ctrl-note">${esc(filterLabel)}</span>
       </div></div>`;
 
+    const findInput = U.$('#tr-find', controls);
+    U.suggest(findInput, {
+      items: () => [...U.topEntries(tlVolume).map(([name, v]) => ({ kind: 'tl', kindLabel: 'TL', label: name, sub: `${U.fmtShort(v)} tags`, value: name })), ...U.topEntries(agentVol).map(([name, v]) => ({ kind: 'agent', kindLabel: 'Agent', label: name, sub: `${agentTl.get(name) || ''} · ${U.fmtShort(v)} tags`, value: name }))],
+      onPick: (it) => FF.app.updateParams(it.kind === 'tl' ? { tl: it.value, agent: '' } : { agent: it.value, tl: '' }),
+      onEnter: (q) => { if (!q) { FF.app.updateParams({ agent: '', tl: '' }); return; } const hit = [...agentVol.keys()].find((n) => n.toUpperCase() === q.toUpperCase()) || [...agentVol.keys()].find((n) => n.toUpperCase().includes(q.toUpperCase())); if (hit) FF.app.updateParams({ agent: hit, tl: '' }); else U.toast('Koi agent match nahi hua', 'err'); }
+    });
     if (dailyR.status !== 'fulfilled') { body.innerHTML = U.errorBox(dailyR.reason, 'data-action="refresh"'); return; }
     if (!allDaily.length) { body.innerHTML = `<div class="empty-state">😶 Is filter ke liye koi issuance data nahi mila.<br><button class="btn" data-action="clear-filters">Clear filters</button></div>`; return; }
     const dim = DIMS[dimKey];
@@ -167,7 +175,7 @@ FF.pages = FF.pages || {};
         <section class="card"><div class="card-head"><h3>Day-of-month table</h3><div class="card-right"><button class="btn small" data-action="export" data-name="trend-compare">⬇ CSV</button></div></div><div class="card-body">${tableHtml(['Day', cm, lm, 'Diff', 'Δ %', `Cum ${cm}`, `Cum ${lm}`], labels.map((d, i) => [d, curVals[i] === null ? '—' : `<b>${U.fmt(curVals[i])}</b>`, lastVals[i] === null ? '—' : U.fmt(lastVals[i]), curVals[i] === null || lastVals[i] === null ? '—' : `${curVals[i] - lastVals[i] > 0 ? '+' : ''}${U.fmt(curVals[i] - lastVals[i])}`, curVals[i] === null || lastVals[i] === null ? '—' : U.deltaHtml(U.growth(curVals[i], lastVals[i]), { decimals: 0 }), curCum[i] === null ? '—' : U.fmt(curCum[i]), lastCum[i] === null ? '—' : U.fmt(lastCum[i])]), 1)}</div></section>
       </div>`;
     }
-    body.innerHTML = html + `<p class="foot-note">Filter: ${esc(filterLabel)} · Rows aggregated by Google (gviz) · Loaded ${U.timeLabel(FF.data.lastLoadAt)}</p>`;
+    body.innerHTML = html + `<p class="foot-note">Filter: ${esc(filterLabel)} · Rows aggregated by Google (gviz) · Loaded ${U.timeLabel(S.loadedAt || FF.data.lastLoadAt)}</p>`;
     C.mount(body);
   }
 
