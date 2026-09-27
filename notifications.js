@@ -24,7 +24,7 @@ window.FF = window.FF || {};
     { key: 'location', label: '📍 Location shares',        user: false, admin: true }
   ];
   const DEFAULT_PREFS = { login: true, signup: true, report: true, monthly: true, activity: true, click: false, search: true, settings: true, user: true, location: false, info: true, sound: true, push: true };
-  const state = { started: false, bound: false, timer: null, presenceTimer: null, fastTimer: null, lastAt: '', items: [], unread: 0, firstPoll: true, page: 'home', pointer: null, people: [], lastInteraction: Date.now(), pointerBound: false, events: [], dirty: false, lastSent: 0, lastScroll: -1, pushOn: false, prefs: { ...DEFAULT_PREFS }, audioCtx: null };
+  const state = { started: false, bound: false, timer: null, presenceTimer: null, fastTimer: null, lastAt: '', items: [], unread: 0, firstPoll: true, page: 'home', pointer: null, people: [], lastInteraction: Date.now(), pointerBound: false, events: [], dirty: false, lastSent: 0, lastScroll: -1, pushOn: false, pushDevices: 0, pushStatus: null, pushTriedAt: 0, pushError: '', prefs: { ...DEFAULT_PREFS }, audioCtx: null };
   const EMBED = new URLSearchParams(location.search).get('embed') === 'live';
   const sharing = () => localStorage.getItem('ff_presence_pointer') !== '0';
 
@@ -102,7 +102,7 @@ window.FF = window.FF || {};
     return window.matchMedia && (window.matchMedia('(display-mode: standalone)').matches || window.matchMedia('(display-mode: fullscreen)').matches || window.navigator.standalone === true);
   }
   function isIOS() { return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream; }
-  function browserAlert(item) {
+  async function browserAlert(item) {
     if (!item) return;
     // Per-type preference check
     if (state.prefs[item.type] === false) return;
@@ -114,8 +114,28 @@ window.FF = window.FF || {};
       return;
     }
     if (!canBrowserAlert()) return;
+    const title = `${icon(item)} ${item.title}`;
+    const options = {
+      body: item.body || '',
+      icon: FF.config.logo || 'icon-192.png',
+      badge: 'icon-192.png',
+      tag: item.type || 'ff-notification',
+      renotify: true,
+      vibrate: state.prefs.sound !== false ? [200, 100, 200] : undefined,
+      data: { link: (item.meta && item.meta.link) || '' }
+    };
+    // iOS Safari/PWA me `new Notification()` allowed nahi hai — service worker se dikhao.
+    // Android/desktop par bhi SW wala raasta zyada reliable hai (panel me hi aata hai).
     try {
-      const n = new Notification(`${icon(item)} ${item.title}`, { body: item.body, icon: FF.config.logo || 'icon-192.png', tag: item.type || 'ff-notification', silent: state.prefs.sound === false, vibrate: state.prefs.sound !== false ? [200, 100, 200] : undefined });
+      const reg = 'serviceWorker' in navigator ? await navigator.serviceWorker.getRegistration() : null;
+      if (reg && reg.showNotification) {
+        await reg.showNotification(title, options);
+        if (state.prefs.sound !== false && navigator.vibrate) try { navigator.vibrate([200, 100, 200]); } catch {}
+        return;
+      }
+    } catch { /* fall through to the page-level constructor */ }
+    try {
+      const n = new Notification(title, options);
       n.onclick = () => { window.focus(); n.close(); };
       if (state.prefs.sound !== false && navigator.vibrate) try { navigator.vibrate([200, 100, 200]); } catch {}
     } catch { /* private mode / unsupported */ }
@@ -139,20 +159,30 @@ window.FF = window.FF || {};
     const pwa = isInstalledPWA();
     const canPush = 'serviceWorker' in navigator && 'PushManager' in window;
 
-    // iOS needs PWA install before push works
+    // 📲 Mobile / OS notification panel status.
+    // Pehle ka order galat tha: "app install nahi hai" wali hint sabse pehle match ho jaati thi,
+    // isliye bina-PWA-install mobile Chrome par ENABLE button kabhi dikhta hi nahi tha — user chahe
+    // permission de bhi de, push subscribe hone ka raasta hi nahi tha. Ab har case me action dikhta hai.
+    const st = state.pushStatus || {};
+    const lastError = st.lastError ? `Aakhri push fail: <b>${U.esc(String(st.lastError.status || 'network'))}</b>${st.lastError.error ? ` — ${U.esc(String(st.lastError.error).slice(0, 90))}` : ''}` : '';
+    const deviceLine = state.pushOn ? `<small>${state.pushDevices || st.subs || 1} device registered${st.lastOk ? ` · last delivery ${U.esc(U.timeLabel(new Date(st.lastOk.at).getTime()))}` : ''}</small>` : '';
+    const testBtns = `<div class="notify-push-actions"><button class="btn small" data-notify-panel-test title="Phone ke notification panel me ek test alert bhejo">📳 Panel test</button><button class="btn small" data-notify-push-test title="Server se is device par real push bhejo">🛰 Server push test</button></div>`;
     let pushCard = '';
     if (!canPush) {
       pushCard = `<div class="notification-permission warn">⚠️ Is browser me push notifications support nahi. Chrome / Edge / Samsung Internet (Android) ya Safari iOS 16.4+ use karo.</div>`;
-    } else if (!pwa && isIOS()) {
-      pushCard = `<div class="notification-permission warn">📱 iOS (Safari) me notifications ke liye pehle "Add to Home Screen" se app install karo. Install ke baad ye panel khol ke "Enable alerts" dabao.</div>`;
-    } else if (!pwa && !isIOS()) {
-      pushCard = `<div class="notification-permission hint">💡 Better experience ke liye browser ke menu se "Install app" karo — mobile ke notification panel me alerts aayengi.</div>`;
-    } else if (permission === 'default') {
-      pushCard = `<button class="notification-enable" data-notify-enable>📲 Mobile notifications on karo — app band ho tab bhi panel me aayengi</button>`;
     } else if (permission === 'denied') {
-      pushCard = `<div class="notification-permission warn">🚫 Browser notifications blocked hain — browser/padlock settings se allow karo.</div>`;
-    } else if (state.pushOn) {
-      pushCard = `<div class="notification-permission ok">✅ Mobile / desktop push on hai${pwa ? ' · PWA installed' : ''}</div>`;
+      pushCard = `<div class="notification-permission warn">🚫 Browser notifications blocked hain — browser/padlock settings se allow karo, phir yahan "Dobara on karo" dabao.</div>`;
+    } else if (permission !== 'granted') {
+      // iOS par push sirf installed PWA me chalta hai — Android/desktop browser tab me bhi chalega.
+      const iosHint = isIOS() && !pwa ? '<div class="notification-permission warn">📱 iOS: pehle Safari → Share → "Add to Home Screen" se app install karo, phir ye button dabao.</div>' : '';
+      const installHint = !pwa && !isIOS() ? '<div class="notification-permission hint">💡 "Install app" karne par app band hone ke baad bhi alerts milte rahenge (background push).</div>' : '';
+      pushCard = `${iosHint}<button class="notification-enable" data-notify-enable>📲 Mobile notifications on karo — app band ho tab bhi panel me aayengi</button>${installHint}`;
+    } else if (!state.pushOn) {
+      // Permission granted hai lekin subscription nahi bani (key rotate, service worker, ya server drop)
+      pushCard = `<div class="notification-permission warn">⚠️ Permission mil gayi hai par push subscription active nahi${state.pushError ? ` — ${U.esc(state.pushError)}` : ''}. ${lastError}</div>
+        <button class="notification-enable" data-notify-enable>🔁 Push dobara on karo</button>${!pwa && !isIOS() ? '<div class="notification-permission hint">💡 App install nahi hai — "Install app" ke baad background push sabse reliable chalta hai.</div>' : ''}${testBtns}`;
+    } else {
+      pushCard = `<div class="notification-permission ok">✅ Mobile / OS panel push ON hai${pwa ? ' · PWA installed' : ' · browser tab'}</div>${deviceLine}${lastError ? `<div class="notification-permission warn">${lastError}</div>` : ''}${testBtns}`;
     }
 
     // Sound + master push toggles
@@ -211,39 +241,114 @@ window.FF = window.FF || {};
     for (let i = 0; i < b.length; i++) out[i] = b.charCodeAt(i);
     return out;
   }
-  /** 📲 Web push subscribe — server se instant notifications, app band ho tab bhi, mobile panel me. */
-  async function setupPush(silent) {
+  /** Existing subscription kis VAPID key se bani thi? (base64url) */
+  function subKeyB64(sub) {
     try {
-      if (!('serviceWorker' in navigator) || !('PushManager' in window) || typeof Notification === 'undefined') return false;
-      if (Notification.permission !== 'granted') return false;
-      if (state.prefs.push === false) return false;
-      const reg = await navigator.serviceWorker.ready;
-      let sub = await reg.pushManager.getSubscription();
-      if (!sub) {
-        const { publicKey } = await FF.auth.api('/api/push/vapid');
-        if (!publicKey) return false;
-        sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64ToUint8(publicKey) });
+      const k = sub && sub.options && sub.options.applicationServerKey;
+      if (!k) return '';
+      const bytes = k instanceof Uint8Array ? k : new Uint8Array(k);
+      let bin = '';
+      for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+      return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    } catch { return ''; }
+  }
+  /**
+   * Service worker registration — `navigator.serviceWorker.ready` kabhi reject nahi hota aur registration
+   * fail hone par hamesha ke liye atak jaata hai (purana bug: setupPush chup-chaap hang ho jaata tha).
+   * Isliye: registration khud ensure karo + timeout ke saath race karo.
+   */
+  async function swRegistration(timeoutMs = 12000) {
+    if (!('serviceWorker' in navigator)) return null;
+    try {
+      let reg = await navigator.serviceWorker.getRegistration();
+      if (!reg && navigator.serviceWorker.register) reg = await navigator.serviceWorker.register('./sw.js');
+      const ready = await Promise.race([
+        navigator.serviceWorker.ready,
+        new Promise((resolve) => setTimeout(() => resolve(null), timeoutMs))
+      ]);
+      return ready || reg || null;
+    } catch (err) {
+      console.warn('service worker registration:', err && err.message);
+      return null;
+    }
+  }
+  /** Server se current push health (VAPID key + kitne devices registered hain). */
+  async function refreshPushStatus() {
+    try {
+      const out = await FF.auth.api('/api/push/status');
+      if (out && typeof out === 'object') {
+        state.pushStatus = out;
+        state.pushDevices = Number(out.subs || 0);
+        if (out.prefsPush === false && state.prefs.push !== false) { state.prefs.push = false; savePrefsLocal(); }
       }
-      await FF.auth.api('/api/push/subscribe', 'POST', { subscription: sub.toJSON() });
+      return state.pushStatus;
+    } catch { return null; }
+  }
+  /**
+   * 📲 Web push subscribe — server se instant notifications, app band ho tab bhi, mobile panel me.
+   *
+   * Self-healing: agar server ki VAPID key badal gayi ho (redeploy) ya server ne dead subscription
+   * drop kar di ho (403/410), to purani subscription hata kar nayi banate hain. Warna phone ka
+   * notification panel hamesha ke liye silent reh jaata tha jabki in-app bell chalta rehta tha.
+   */
+  async function setupPush(silent, opts) {
+    const force = !!(opts && opts.force);
+    try {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window) || typeof Notification === 'undefined') {
+        state.pushError = 'is browser me push support nahi';
+        return false;
+      }
+      if (Notification.permission !== 'granted') { state.pushError = 'notification permission granted nahi'; return false; }
+      if (state.prefs.push === false && !force) return false;
+      const reg = await swRegistration();
+      if (!reg || !reg.pushManager) { state.pushError = 'service worker ready nahi hua'; if (!silent) U.toast('Service worker ready nahi hua — push on nahi ho paya. App dobara kholo.', 'warn'); return false; }
+      // 1) Server ki current key + registration status
+      const status = (await refreshPushStatus()) || {};
+      let serverKey = status.publicKey || '';
+      if (!serverKey) {
+        const v = await FF.auth.api('/api/push/vapid').catch(() => null);
+        serverKey = (v && v.publicKey) || '';
+      }
+      if (!serverKey) { state.pushError = 'server par VAPID key nahi'; return false; }
+      // 2) SW ke paas pending (stash) subscription ho to server ko de do — session ab valid hai
+      try { if (reg.active && reg.active.postMessage) reg.active.postMessage({ type: 'ff-push-flush' }); } catch { /* ignore */ }
+      // 3) Existing subscription validate karo
+      let sub = await reg.pushManager.getSubscription().catch(() => null);
+      const serverSubs = typeof status.subs === 'number' ? status.subs : null;
+      const keyMismatch = sub && subKeyB64(sub) !== serverKey;
+      const droppedByServer = sub && serverSubs === 0; // server ne dead subscription hata di
+      if (sub && (keyMismatch || droppedByServer || force)) {
+        if (keyMismatch) console.warn('push: server VAPID key changed — re-subscribing so the OS panel works again');
+        if (droppedByServer) console.warn('push: server par ye subscription nahi thi — re-subscribing');
+        await sub.unsubscribe().catch(() => {});
+        sub = null;
+      }
+      if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64ToUint8(serverKey) });
+      const out = await FF.auth.api('/api/push/subscribe', 'POST', { subscription: sub.toJSON() });
       state.pushOn = true;
+      state.pushError = '';
+      state.pushTriedAt = Date.now();
+      state.pushDevices = out && typeof out.subs === 'number' ? out.subs : (state.pushDevices || 1);
       if (!silent) U.toast('📲 Mobile notifications on ✓ — app band ho tab bhi phone ke panel me aayengi', 'ok');
       return true;
     } catch (err) {
-      console.warn('push setup:', err.message);
-      if (!silent) U.toast('Push setup nahi ho paya (browser/PWA support check karo)', 'warn');
+      state.pushOn = false;
+      state.pushError = (err && err.message) || 'setup failed';
+      console.warn('push setup:', state.pushError);
+      if (!silent) U.toast('Push setup nahi ho paya — ' + state.pushError, 'warn');
       return false;
-    }
+    } finally { render(); }
   }
   async function disablePush() {
     try {
-      if (!('serviceWorker' in navigator)) return;
-      const reg = await navigator.serviceWorker.ready;
-      const sub = await reg.pushManager.getSubscription();
+      const reg = await swRegistration(4000);
+      const sub = reg && reg.pushManager ? await reg.pushManager.getSubscription().catch(() => null) : null;
       if (sub) {
         await FF.auth.api('/api/push/unsubscribe', 'POST', { endpoint: sub.endpoint }).catch(() => {});
         await sub.unsubscribe().catch(() => {});
       }
       state.pushOn = false;
+      state.pushDevices = 0;
     } catch { /* ignore */ }
   }
   async function enableBrowser() {
@@ -251,14 +356,43 @@ window.FF = window.FF || {};
     // Unlock audio on first user gesture
     unlockAudio();
     try {
-      const permission = await Notification.requestPermission();
+      const permission = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission();
       if (permission === 'granted') {
-        await setupPush(true);
         state.prefs.push = true; savePrefsLocal();
+        await setupPush(true, { force: true });
       }
       render();
-      U.toast(permission === 'granted' ? (state.pushOn ? '✅ Browser + mobile push alerts on' : 'Browser alerts on ✓') : 'Browser alerts allow nahi hue.', permission === 'granted' ? 'ok' : 'warn');
+      U.toast(permission === 'granted' ? (state.pushOn ? '✅ Browser + mobile push alerts on' : 'Permission mil gayi, par push subscribe nahi hui — "Panel test" se check karo') : 'Browser alerts allow nahi hue.', permission === 'granted' && state.pushOn ? 'ok' : 'warn');
     } catch { U.toast('Browser notification permission nahi mil saki.', 'err'); }
+  }
+  /** OS notification panel ka seedha test — server push se independent (permission + SW check). */
+  async function testPanel() {
+    unlockAudio(); beep();
+    try {
+      const reg = await swRegistration(6000);
+      if (reg && reg.active && reg.active.postMessage) { reg.active.postMessage({ type: 'ff-local-test' }); U.toast('📳 Panel test bheja — phone ke notification panel me dekho', 'ok'); return; }
+      if (reg && reg.showNotification) { await reg.showNotification('🔔 Test notification', { body: 'Ye alert phone ke notification panel me aaya — OS notifications kaam kar rahe hain ✓', icon: 'icon-192.png', badge: 'icon-192.png', tag: 'ff-test', vibrate: [200, 100, 200] }); U.toast('📳 Panel test bheja', 'ok'); return; }
+    } catch { /* fall through */ }
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      browserAlert({ type: 'info', title: 'Test notification', body: 'Ye test alert hai — sound + vibration kaam kar raha hai.', meta: {} });
+      U.toast('🔊 Test alert bheja', 'ok');
+      return;
+    }
+    U.toast('Panel test ke liye pehle notifications allow karo.', 'warn');
+  }
+  /** Server → is device par real web push (app band hone wala raasta). */
+  async function testPush() {
+    const ok = state.pushOn || await setupPush(true, { force: true });
+    if (!ok) { U.toast('Pehle push enable karo — subscription nahi bani.', 'warn'); render(); return; }
+    try {
+      const out = await FF.auth.api('/api/push/test', 'POST', {});
+      const results = (out && out.results) || [];
+      if (out && out.delivered > 0) U.toast(`✅ Test push ${out.delivered} device(s) ko bheja — phone ka notification panel dekho`, 'ok');
+      else if (results.length) U.toast(`⚠️ Push service ne reject kiya (status ${results[0].status || 'network'}) ${results[0].error ? '— ' + results[0].error : ''}`.slice(0, 150), 'err');
+      else U.toast((out && out.hint) || 'Koi push device register nahi hai.', 'warn');
+      await refreshPushStatus();
+      render();
+    } catch (err) { U.toast('Server push test fail: ' + ((err && err.message) || ''), 'err'); }
   }
 
   // ---- UI bind -----------------------------------------------------------------------------------
@@ -292,7 +426,11 @@ window.FF = window.FF || {};
       const watchBtn = e.target.closest('[data-live-watch]');
       if (watchBtn) { e.preventDefault(); toggle(false); if (FF.liveView) FF.liveView.watch(watchBtn.dataset.liveWatch); return; }
       const test = e.target.closest('[data-notify-test]');
-      if (test) { e.preventDefault(); browserAlert({ type: 'info', title: '🔊 Test notification', body: 'Ye test alert hai — sound + vibration kaam kar raha hai.', meta: {} }); return; }
+      if (test) { e.preventDefault(); testSound(); return; }
+      const panelTest = e.target.closest('[data-notify-panel-test]');
+      if (panelTest) { e.preventDefault(); testPanel(); return; }
+      const pushTest = e.target.closest('[data-notify-push-test]');
+      if (pushTest) { e.preventDefault(); testPush(); return; }
       const read = e.target.closest('[data-notify-read]');
       if (read) { e.preventDefault(); FF.auth.api('/api/notifications/read', 'POST', {}).catch(() => {}); setCount(0); render(); }
     });
@@ -335,6 +473,34 @@ window.FF = window.FF || {};
     FF.auth.api('/api/presence', 'POST', body).catch(() => {});
     return force;
   }
+  /** Push na chalne par chup-chaap retry karo (throttled) — redeploy/key-rotate ke baad self-heal. */
+  function retryPush() {
+    if (EMBED || !hasAccess()) return;
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+    if (state.prefs.push === false) return;
+    const due = !state.pushOn ? 30e3 : 10 * 60e3; // fail hone par jaldi, chalne par 10 min me re-validate
+    if (state.pushTriedAt && Date.now() - state.pushTriedAt < due) return;
+    state.pushTriedAt = Date.now();
+    setupPush(true).catch(() => {});
+  }
+  function bindPushWatchers() {
+    if (state.pushWatchersBound) return;
+    state.pushWatchersBound = true;
+    window.addEventListener('online', () => retryPush());
+    // Permission browser settings se change ho (allow/block) → turant react karo
+    try {
+      if (navigator.permissions && navigator.permissions.query) {
+        navigator.permissions.query({ name: 'notifications' }).then((perm) => {
+          perm.addEventListener && perm.addEventListener('change', () => {
+            if (perm.state === 'granted') { state.pushTriedAt = 0; setupPush(true); }
+            else { state.pushOn = false; render(); }
+          });
+        }).catch(() => {});
+      }
+    } catch { /* not supported everywhere */ }
+    // Background me bhi (jab app khuli ho) har 5 min push health re-validate
+    setInterval(() => { if (document.visibilityState === 'visible') retryPush(); }, 5 * 60e3);
+  }
   function start() {
     bind();
     syncBellVisibility();
@@ -349,8 +515,9 @@ window.FF = window.FF || {};
     state.timer = setInterval(() => poll(false), document.visibilityState === 'visible' ? 5e3 : 15e3);
     document.addEventListener('visibilitychange', () => {
       if (state.timer) { clearInterval(state.timer); state.timer = setInterval(() => poll(false), document.visibilityState === 'visible' ? 5e3 : 15e3); }
-      if (document.visibilityState === 'visible') poll(false);
+      if (document.visibilityState === 'visible') { poll(false); retryPush(); }
     });
+    bindPushWatchers();
     state.presenceTimer = setInterval(() => sendPresence(), 15e3);
     state.fastTimer = setInterval(() => {
       if (!sharing() || document.visibilityState !== 'visible') return;
@@ -407,6 +574,6 @@ window.FF = window.FF || {};
   }
   // Test sound button (for settings/test)
   function testSound() { unlockAudio(); beep(); U.toast('🔊 Test beep', 'info'); }
-  FF.notifications = { start, stop, poll, toggle, activity, logSearch, logClick, track, testSound, get state() { return state; }, get prefs() { return state.prefs; } };
+  FF.notifications = { start, stop, poll, toggle, activity, logSearch, logClick, track, testSound, render, setupPush, disablePush, enableBrowser, testPanel, testPush, refreshPushStatus, retryPush, browserAlert, get state() { return state; }, get prefs() { return state.prefs; } };
   bind();
 })(window.FF);

@@ -540,17 +540,92 @@ function deltaText(delta) {
 }
 // ---- 📲 Web Push (VAPID + aes128gcm, zero dependencies) -----------------------------------------
 // Admin ko har notification turant phone/desktop par mile — app band ho tab bhi.
+//
+// ⚠️ VAPID keys DURABLE honi chahiye. Ek browser subscription us applicationServerKey se bandhi hoti
+// hai jis key se wo bani thi — keypair badalte hi push service har message ko 403 se reject kar deta
+// hai aur phone ke notification panel me kuch nahi aata (in-app bell chalta rehta hai kyunki wo poll
+// karta hai). Render par DATA_DIR CONTAINER ki disk hai — har deploy / free-tier spin-down par mit
+// jaati hai — jabki users + notifications durable store (Apps Script sheet) me rehte hain. Isliye
+// keys is order me resolve hoti hain:
+//   1. VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY env (explicit pin)
+//   2. durable store — db.notify.vapid (subscriptions ke saath hi)
+//   3. DATA_DIR/vapid.json (local cache / files backend)
+//   4. generate once → dono jagah (durable + file) save
 const VAPID_FILE = path.join(DATA_DIR, 'vapid.json');
+// 24h TTL: phone off / doze / no-network ho to push service message drop na kare (pehle 120s tha).
+const PUSH_TTL = String(Math.min(2419200, Math.max(60, Number(process.env.PUSH_TTL_SECONDS || 86400))));
+// 4xx = subscription ya key kharab → drop karo taaki device fresh subscribe kare. 5xx/network = retry.
+const PUSH_DEAD_STATUS = new Set([400, 401, 403, 404, 410, 413]);
 let vapidKeys = null;
-function loadVapid() {
+let vapidSource = 'none';
+let vapidDurable = false; // keys durable store me safe hain? (health + banner ke liye)
+const pushTestLast = new Map(); // /api/push/test rate limit (per user)
+
+function applyVapid(publicKey, privateKey) {
+  vapidKeys = { publicKey, privateKey: crypto.createPrivateKey({ key: Buffer.from(privateKey, 'base64url'), format: 'der', type: 'pkcs8' }) };
+  return vapidKeys;
+}
+function exportVapid() {
+  return { publicKey: vapidKeys.publicKey, privateKey: vapidKeys.privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64url') };
+}
+function writeVapidFile() {
+  // Cloud backend me DATA_DIR ephemeral container disk hai — wahan file sirf ek within-boot cache hai.
+  // Use create mat karo: tests (aur operators) isi se confirm karte hain ki cloud mode local store nahi banata.
+  if (CLOUD_BACKEND) return;
   try {
-    const raw = readFileSync(VAPID_FILE, 'utf8');
-    const j = JSON.parse(raw);
-    if (j.publicKey && j.privateKey) { vapidKeys = { publicKey: j.publicKey, privateKey: crypto.createPrivateKey({ key: Buffer.from(j.privateKey, 'base64url'), format: 'der', type: 'pkcs8' }) }; return; }
+    if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(VAPID_FILE, JSON.stringify(exportVapid()), { mode: 0o600 });
+  } catch (err) { console.warn('vapid file cache:', err.message); }
+}
+/** Keys ko durable store (users/notifications ke saath) me save karo — retries ke saath. */
+async function saveVapidDurable() {
+  try {
+    if (!db.notify || typeof db.notify !== 'object') db.notify = { items: [], watch: {}, push: [] };
+    db.notify.vapid = { ...exportVapid(), source: vapidSource, at: new Date().toISOString() };
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try { await persist('notify'); vapidDurable = true; return true; } catch (err) {
+        console.warn(`vapid durable save (attempt ${attempt}/3):`, err.message);
+        await new Promise((r) => setTimeout(r, 1500 * attempt));
+      }
+    }
+    console.error('⚠️  VAPID keys durable storage me save NAHI ho payi — next deploy par phone ke push toot sakte hain. VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY env set karo ya persistent disk lagao.');
+    return false;
+  } catch (err) { console.warn('vapid durable save:', err.message); return false; }
+}
+async function loadVapid() {
+  const envPub = String(process.env.VAPID_PUBLIC_KEY || '').trim();
+  const envPriv = String(process.env.VAPID_PRIVATE_KEY || '').trim();
+  const durable = db.notify && db.notify.vapid;
+  if (envPub && envPriv) {
+    try {
+      applyVapid(envPub, envPriv);
+      vapidSource = 'env'; vapidDurable = true;
+      if (durable && durable.publicKey && durable.publicKey !== envPub) console.warn('⚠️  VAPID_*_KEY env stored key se alag hai — phones app kholte hi re-subscribe kar lenge.');
+      return;
+    } catch (err) { console.warn('VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY unusable:', err.message); }
+  }
+  if (durable && durable.publicKey && durable.privateKey) {
+    try { applyVapid(durable.publicKey, durable.privateKey); vapidSource = 'durable'; vapidDurable = true; writeVapidFile(); return; } catch (err) { console.warn('stored VAPID key unusable, regenerating:', err.message); }
+  }
+  try {
+    const j = JSON.parse(readFileSync(VAPID_FILE, 'utf8'));
+    if (j.publicKey && j.privateKey) {
+      applyVapid(j.publicKey, j.privateKey);
+      vapidSource = 'file';
+      vapidDurable = STORAGE_BACKEND === 'files'; // cloud backend me DATA_DIR ephemeral hai
+      // Boot block mat karo: Apps Script store 'notify' writes ko 4s batch karta hai aur us timer ko
+      // unref kar deta hai — await karne par server listen se pehle hi process exit ho jaata tha.
+      void saveVapidDurable();
+      return;
+    }
   } catch { /* first boot */ }
   const { publicKey, privateKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
   vapidKeys = { publicKey: publicKey.export({ format: 'der', type: 'spki' }).toString('base64url'), privateKey };
-  try { writeFileSync(VAPID_FILE, JSON.stringify({ publicKey: vapidKeys.publicKey, privateKey: privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64url') }), { mode: 0o600 }); } catch (err) { console.warn('vapid persist:', err.message); }
+  vapidSource = 'generated';
+  vapidDurable = STORAGE_BACKEND === 'files';
+  writeVapidFile();
+  void saveVapidDurable();
+  console.log('📲 VAPID keypair generated — durable storage me save ho raha hai taaki push subscriptions redeploy/restart survive karein.');
 }
 const b64url = (buf) => Buffer.from(buf).toString('base64url');
 function hkdfExtract(salt, ikm) { return crypto.createHmac('sha256', salt).update(ikm).digest(); }
@@ -585,21 +660,75 @@ function encryptPush(subscription, data) {
   return body;
 }
 function pushSubs() {
-  if (!db.notify || typeof db.notify !== 'object') db.notify = { items: [], watch: {} };
+  if (!db.notify || typeof db.notify !== 'object') db.notify = { items: [], watch: {}, push: [] };
   if (!Array.isArray(db.notify.push)) db.notify.push = [];
   return db.notify.push;
 }
+function pushLog() {
+  if (!db.notify || typeof db.notify !== 'object') db.notify = { items: [], watch: {}, push: [] };
+  if (!Array.isArray(db.notify.pushLog)) db.notify.pushLog = [];
+  return db.notify.pushLog;
+}
+const hostOf = (sub) => { try { return new URL(sub.endpoint).host; } catch { return 'unknown'; } };
+function dropSub(sub) {
+  const arr = pushSubs();
+  const i = arr.indexOf(sub);
+  if (i >= 0) arr.splice(i, 1);
+}
+/** Har delivery ka result record karo — mobile panel debug karne ke liye (silent failure nahi). */
+function logPushEvent(ev) {
+  const log = pushLog();
+  log.push({ at: new Date().toISOString(), ...ev });
+  if (log.length > 40) db.notify.pushLog = log.slice(-40);
+}
 async function deliverPush(sub, data) {
+  if (!vapidKeys) return { ok: false, status: 0, error: 'VAPID keys not loaded' };
   try {
     const body = encryptPush(sub, data);
     const res = await fetch(sub.endpoint, {
       method: 'POST',
-      headers: { Authorization: `WebPush ${vapidJwt(sub.endpoint)}`, 'Content-Encoding': 'aes128gcm', 'Content-Type': 'application/octet-stream', TTL: '120', Urgency: 'high' },
-      body, signal: AbortSignal.timeout(8000)
+      headers: { Authorization: `WebPush ${vapidJwt(sub.endpoint)}`, 'Content-Encoding': 'aes128gcm', 'Content-Type': 'application/octet-stream', TTL: PUSH_TTL, Urgency: 'high' },
+      body, signal: AbortSignal.timeout(15000)
     });
-    if (res.status === 404 || res.status === 410) return false; // expired — remove
-    return true;
-  } catch { return true; } // network hiccup — keep subscription
+    const status = res.status;
+    if (status >= 200 && status < 300) return { ok: true, status };
+    const text = await res.text().catch(() => '');
+    return { ok: false, status, error: String(text || res.statusText || '').slice(0, 200) };
+  } catch (err) {
+    // Network hiccup / timeout — subscription rakho, next event par retry hoga.
+    return { ok: false, status: 0, error: err.message, transient: true };
+  }
+}
+/** Delivery result ko handle karo: log + dead subscription drop (taaki phone re-subscribe kare). */
+function handlePushResult(sub, result, extra) {
+  const host = hostOf(sub);
+  if (result.ok) { logPushEvent({ username: sub.username, host, status: result.status, ok: true, ...extra }); return true; }
+  const dead = !result.transient && PUSH_DEAD_STATUS.has(result.status);
+  console.warn(`push delivery failed: status ${result.status || 'network'} · ${host} · ${sub.username || '?'}${extra && extra.type ? ` · ${extra.type}` : ''} · ${result.error || ''} — ${dead ? 'subscription drop (device re-subscribe karega)' : 'transient, subscription kept'}`);
+  logPushEvent({ username: sub.username, host, status: result.status, ok: false, error: String(result.error || '').slice(0, 200), dead, ...extra });
+  if (dead) dropSub(sub);
+  return false;
+}
+/** Push health for the signed-in user (bell panel me dikhta hai + mobile debugging). */
+function pushStatusFor(user) {
+  const mine = pushSubs().filter((s) => s.username === user.username);
+  const events = pushLog().filter((e) => e.username === user.username).slice(-10).reverse();
+  const lastError = events.find((e) => !e.ok) || null;
+  const lastOk = events.find((e) => e.ok) || null;
+  const prefs = normalizeNotifyPrefs(user.notifyPrefs);
+  return {
+    ok: true,
+    supported: !!vapidKeys,
+    keySource: vapidSource,
+    publicKey: vapidKeys ? vapidKeys.publicKey : '',
+    ttl: Number(PUSH_TTL),
+    subs: mine.length,
+    devices: mine.map((s) => ({ host: hostOf(s), at: s.at || '' })),
+    prefsPush: prefs.push !== false,
+    notifyAccess: user.role === 'admin' || user.notifyAccess !== false,
+    lastOk: lastOk ? { at: lastOk.at, status: lastOk.status, host: lastOk.host } : null,
+    lastError: lastError ? { at: lastError.at, status: lastError.status, error: lastError.error, host: lastError.host, dead: !!lastError.dead } : null
+  };
 }
 /** Fan-out a notification to push subscriptions (admin-targeted → admin subs, broadcast → everyone). Per-user push + sound preference bhi respect karo. */
 function pushFanout(item) {
@@ -628,8 +757,7 @@ function pushFanout(item) {
       sound: prefs.sound !== false,
       persist: item.type === 'signup' || item.type === 'report' || item.type === 'user' // important types don't auto-dismiss
     };
-    const alive = await deliverPush(s, data);
-    if (!alive) { const arr = pushSubs(); const i = arr.indexOf(s); if (i >= 0) arr.splice(i, 1); }
+    handlePushResult(s, await deliverPush(s, data), { type: item.type });
   })).then(() => persist('notify')).catch(() => {});
 }
 // ---- monthly auto-report: har mahine ki 1–5 tarikh ko pichhle mahine ka FF-vs-GV compare broadcast ----
@@ -724,7 +852,7 @@ async function handleApi(req, res, url) {
   const user = sessionUser(req);
 
   if (p === '/api/health' && method === 'GET') {
-    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.2.0', storage: storageStatus(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null });
+    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.2.0', storage: storageStatus(), push: { enabled: !!vapidKeys, keySource: vapidSource, durable: vapidDurable, devices: pushSubs().length, ttl: Number(PUSH_TTL), warning: vapidKeys && !vapidDurable ? 'VAPID keys sirf temporary container disk par hain — deploy/restart par phone push toot jaayenge. VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY env set karo.' : null }, users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null });
   }
   if (p === '/api/public-config' && method === 'GET') return sendJson(res, 200, publicSettings());
 
@@ -863,7 +991,34 @@ async function handleApi(req, res, url) {
   // ---- 📲 web push subscription ----
   if (p === '/api/push/vapid' && method === 'GET') {
     if (!user) throw new HttpError(401, 'Login required');
-    return sendJson(res, 200, { publicKey: vapidKeys ? vapidKeys.publicKey : '' });
+    return sendJson(res, 200, { publicKey: vapidKeys ? vapidKeys.publicKey : '', ttl: Number(PUSH_TTL), keySource: user.role === 'admin' ? vapidSource : undefined });
+  }
+  // Push health: kitne devices registered hain, last delivery ka result — mobile panel debug karne ke liye.
+  if (p === '/api/push/status' && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required');
+    return sendJson(res, 200, pushStatusFor(user));
+  }
+  // Apne hi devices par ek test push bhejo — panel me aaya ya nahi, turant confirm hota hai.
+  if (p === '/api/push/test' && method === 'POST') {
+    if (!user) throw new HttpError(401, 'Login required');
+    const now = Date.now();
+    if (pushTestLast.get(user.username) && now - pushTestLast.get(user.username) < 5000) throw new HttpError(429, 'Test push 5 second me ek baar — thoda ruko.');
+    pushTestLast.set(user.username, now);
+    const mine = pushSubs().filter((s) => s.username === user.username);
+    if (!mine.length) {
+      return sendJson(res, 200, { ok: false, delivered: 0, failed: 0, results: [], hint: 'Is account par koi push device register nahi hai. Bell panel me "📲 Mobile notifications on karo" dabao (mobile par PWA install karke).' });
+    }
+    const results = await Promise.all(mine.map(async (s) => {
+      const result = await deliverPush(s, {
+        title: '🔔 Test push notification',
+        body: `${user.name || user.username} — ye test alert hai. Phone ke notification panel me dikhna chahiye (app band ho tab bhi).`,
+        tag: 'ff-test', link: '#/home', sound: true, persist: false
+      });
+      handlePushResult(s, result, { type: 'test' });
+      return { host: hostOf(s), status: result.status, ok: result.ok, error: result.error || '' };
+    }));
+    persist('notify').catch(() => {});
+    return sendJson(res, 200, { ok: results.every((r) => r.ok), delivered: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length, results });
   }
   if (p === '/api/push/subscribe' && method === 'POST') {
     if (!user) throw new HttpError(401, 'Login required');
@@ -873,11 +1028,13 @@ async function handleApi(req, res, url) {
     if (!sub || !String(sub.endpoint || '').startsWith('http') || !sub.keys || !sub.keys.p256dh || !sub.keys.auth) throw new HttpError(400, 'Subscription invalid hai.');
     const arr = pushSubs();
     const clean = { username: user.username, endpoint: String(sub.endpoint).slice(0, 600), keys: { p256dh: String(sub.keys.p256dh).slice(0, 200), auth: String(sub.keys.auth).slice(0, 100) }, at: new Date().toISOString() };
-    const i = arr.findIndex((s) => s.endpoint === clean.endpoint);
+    // Same device (same p256dh key) ka purana endpoint replace karo — warna dead subscriptions
+    // accumulate hoti hain aur har fan-out par bekar ke failed requests jaate hain.
+    const i = arr.findIndex((s) => s.endpoint === clean.endpoint || (s.username === clean.username && s.keys.p256dh === clean.keys.p256dh));
     if (i >= 0) arr[i] = clean; else arr.push(clean);
     if (arr.length > 300) arr.splice(0, arr.length - 300);
     await persist('notify');
-    return sendJson(res, 200, { ok: true, subs: arr.length });
+    return sendJson(res, 200, { ok: true, subs: arr.filter((s) => s.username === user.username).length, total: arr.length });
   }
   if (p === '/api/push/unsubscribe' && method === 'POST') {
     if (!user) throw new HttpError(401, 'Login required');
@@ -1317,7 +1474,9 @@ async function start() {
   db.settings = deepMerge(DEFAULT_SETTINGS, stored.settings);
   db.resets = stored.resets;
   const storedNotify = stored.notify;
-  db.notify = { items: Array.isArray(storedNotify.items) ? storedNotify.items.slice(-500) : [], watch: storedNotify.watch && typeof storedNotify.watch === 'object' ? storedNotify.watch : {}, push: Array.isArray(storedNotify.push) ? storedNotify.push.slice(-300) : [] };
+  // `vapid` + `pushLog` bhi durable hain — inke bina har restart par nayi VAPID key banti thi aur
+  // phone ke notification panel me push aana band ho jaata tha (subscriptions 403 par reject hoti thin).
+  db.notify = { items: Array.isArray(storedNotify.items) ? storedNotify.items.slice(-500) : [], watch: storedNotify.watch && typeof storedNotify.watch === 'object' ? storedNotify.watch : {}, push: Array.isArray(storedNotify.push) ? storedNotify.push.slice(-300) : [], pushLog: Array.isArray(storedNotify.pushLog) ? storedNotify.pushLog.slice(-40) : [], vapid: storedNotify.vapid && typeof storedNotify.vapid === 'object' ? storedNotify.vapid : null };
   for (const kind of Object.keys(FILES)) durableSnapshots.set(kind, JSON.stringify(db[kind], null, 2));
   // Upgrade the known previous/default product title in durable settings; preserve admin custom names.
   if (/^First Forward Dashboard(?:\s*[-–—]\s*Robo\s*v?3\.2)?$/i.test(String(db.settings.appName || '').trim())) {
@@ -1331,10 +1490,10 @@ async function start() {
     await Promise.all(Object.keys(FILES).map((kind) => persist(kind)));
     console.log('APP_STORAGE seeded ✓ — users, settings and sessions now survive every deploy/restart.');
   }
-  loadVapid();
+  await loadVapid(); // durable keys load hone ke baad hi push bhejo — warna subscriptions 403 khaati hain
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`First Forward Dashboard → http://0.0.0.0:${server.address().port}`);
-    console.log(`Sheet ${db.settings.sheetId} · cache ${cacheMs() / 1000}s · storage ${sheetsStore ? `Google Sheets / encrypted APP_STORAGE (${STORAGE_BACKEND})` : DATA_DIR} · users ${db.users.length}${GVIZ_BASE !== 'https://docs.google.com' ? ` · upstream ${GVIZ_BASE}` : ''}`);
+    console.log(`Sheet ${db.settings.sheetId} · cache ${cacheMs() / 1000}s · storage ${sheetsStore ? `Google Sheets / encrypted APP_STORAGE (${STORAGE_BACKEND})` : DATA_DIR} · users ${db.users.length} · push ${vapidKeys ? `${pushSubs().length} device(s), VAPID from ${vapidSource}, TTL ${PUSH_TTL}s` : 'DISABLED (no VAPID key)'}${GVIZ_BASE !== 'https://docs.google.com' ? ` · upstream ${GVIZ_BASE}` : ''}`);
     setTimeout(() => checkReports(true).catch(() => {}), 5000);
     setInterval(() => checkReports(false).catch(() => {}), 5 * 60e3).unref();
     setTimeout(() => maybeMonthlyReport(), 8000);
