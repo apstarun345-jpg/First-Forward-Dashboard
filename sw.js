@@ -1,10 +1,10 @@
 // Versioned app shell + offline data cache.
 // Auth login/logout/password endpoints are NEVER cached. Sheet data (gviz), /api/auth/me and
 // /api/settings are network-first with a cached fallback — internet na ho to last loaded data se app khulta hai.
-const CACHE_NAME = 'apnapayment-v13';
+const CACHE_NAME = 'apnapayment-v14';
 const DATA_CACHE = 'ff-data-v3';
 const STASH_CACHE = 'ff-push-stash-v1'; // pushsubscriptionchange ke waqt bani subscription yahan rakho
-const ASSETS = ['./', './index.html', './styles.css?v=14', './favicon.svg?v=5', './icon-192.png?v=5', './icon-512.png?v=5'];
+const ASSETS = ['./', './index.html', './styles.css?v=15', './favicon.svg?v=5', './icon-192.png?v=5', './icon-512.png?v=5'];
 const OFFLINE_API = (path) => path === '/api/gviz' || path === '/api/auth/me' || path === '/api/settings';
 
 // ---- 🔊 Short notification beep (generated with Web Audio on push, no external asset needed) ----
@@ -89,8 +89,12 @@ async function resubscribe(reason) {
   if (!publicKey) return 'failed'; // logged out ya server down — page kholne par dobara try hoga
   const pad = '='.repeat((4 - (publicKey.length % 4)) % 4);
   const bin = atob(publicKey.replace(/-/g, '+').replace(/_/g, '/') + pad);
-  const key = new Uint8Array(bin.length);
+  let key = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) key[i] = bin.charCodeAt(i);
+  // Browser applicationServerKey ke roop me sirf 65-byte raw uncompressed P-256 point (0x04 || X || Y)
+  // accept karta hai — kahin se SPKI DER (91 bytes) aaye to raw point uski aakhri 65 bytes me hota hai.
+  // Warna subscribe "The provided applicationServerKey is not valid" se crash ho jaata hai.
+  if (key.length > 65 && key[key.length - 65] === 4) key = key.slice(key.length - 65);
   let sub = null;
   try {
     const old = await self.registration.pushManager.getSubscription();

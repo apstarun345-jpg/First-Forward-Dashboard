@@ -561,8 +561,28 @@ let vapidSource = 'none';
 let vapidDurable = false; // keys durable store me safe hain? (health + banner ke liye)
 const pushTestLast = new Map(); // /api/push/test rate limit (per user)
 
+/**
+ * Browser (Chrome/Edge/FCM) applicationServerKey ke roop me 65-byte RAW uncompressed P-256
+ * point maangta hai (0x04 || X || Y) — SPKI DER (91 bytes) nahi. Purane build ne DER public key
+ * serve ki thi, jisse pushManager.subscribe() "The provided applicationServerKey is not valid"
+ * ke saath fail hota tha aur phone ka notification panel hamesha silent rehta tha.
+ * Public key HAMESHA private key se derive karo: env / durable store / vapid.json me purana SPKI
+ * format pada ho to bhi SAME keypair ke saath heal ho jaayega — koi subscription nahi tootti.
+ */
+function vapidPublicPoint(keyObject) {
+  // Node ke kuch versions createPublicKey(KeyObject) reject karte hain — isliye seedha JWK export
+  // karo: EC private AUR public dono JWK me public coordinates (x, y) hote hain.
+  const jwk = keyObject.export({ format: 'jwk' });
+  const x = Buffer.from(String(jwk.x || ''), 'base64url');
+  const y = Buffer.from(String(jwk.y || ''), 'base64url');
+  if (jwk.kty !== 'EC' || jwk.crv !== 'P-256' || x.length !== 32 || y.length !== 32) throw new Error('VAPID keypair P-256 (prime256v1) nahi hai');
+  return Buffer.concat([Buffer.from([4]), x, y]).toString('base64url');
+}
 function applyVapid(publicKey, privateKey) {
-  vapidKeys = { publicKey, privateKey: crypto.createPrivateKey({ key: Buffer.from(privateKey, 'base64url'), format: 'der', type: 'pkcs8' }) };
+  const privateKeyObj = crypto.createPrivateKey({ key: Buffer.from(String(privateKey).trim(), 'base64url'), format: 'der', type: 'pkcs8' });
+  const derived = vapidPublicPoint(privateKeyObj);
+  if (publicKey && String(publicKey).trim() !== derived) console.warn('⚠️  Stored VAPID public key purane SPKI-DER format me thi — private key se sahi 65-byte uncompressed point derive kar liya (keypair same, subscriptions safe).');
+  vapidKeys = { publicKey: derived, privateKey: privateKeyObj };
   return vapidKeys;
 }
 function exportVapid() {
@@ -600,12 +620,19 @@ async function loadVapid() {
     try {
       applyVapid(envPub, envPriv);
       vapidSource = 'env'; vapidDurable = true;
-      if (durable && durable.publicKey && durable.publicKey !== envPub) console.warn('⚠️  VAPID_*_KEY env stored key se alag hai — phones app kholte hi re-subscribe kar lenge.');
+      if (durable && durable.publicKey && durable.publicKey !== vapidKeys.publicKey) console.warn('⚠️  VAPID_*_KEY env stored key se alag hai — phones app kholte hi re-subscribe kar lenge.');
       return;
     } catch (err) { console.warn('VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY unusable:', err.message); }
   }
   if (durable && durable.publicKey && durable.privateKey) {
-    try { applyVapid(durable.publicKey, durable.privateKey); vapidSource = 'durable'; vapidDurable = true; writeVapidFile(); return; } catch (err) { console.warn('stored VAPID key unusable, regenerating:', err.message); }
+    try {
+      applyVapid(durable.publicKey, durable.privateKey);
+      vapidSource = 'durable'; vapidDurable = true; writeVapidFile();
+      // Stored copy purane SPKI-DER format ki ho to healed 65-byte point wapas save kar do —
+      // warna agle boot par phir warn karega (aur purane clients ko galat key milti rahegi).
+      if (durable.publicKey !== vapidKeys.publicKey) void saveVapidDurable();
+      return;
+    } catch (err) { console.warn('stored VAPID key unusable, regenerating:', err.message); }
   }
   try {
     const j = JSON.parse(readFileSync(VAPID_FILE, 'utf8'));
@@ -613,6 +640,8 @@ async function loadVapid() {
       applyVapid(j.publicKey, j.privateKey);
       vapidSource = 'file';
       vapidDurable = STORAGE_BACKEND === 'files'; // cloud backend me DATA_DIR ephemeral hai
+      // Healed (65-byte raw point) copy file me bhi wapas likho — warna har boot par heal hota rahega.
+      if (j.publicKey !== vapidKeys.publicKey) writeVapidFile();
       // Boot block mat karo: Apps Script store 'notify' writes ko 4s batch karta hai aur us timer ko
       // unref kar deta hai — await karne par server listen se pehle hi process exit ho jaata tha.
       void saveVapidDurable();
@@ -620,7 +649,7 @@ async function loadVapid() {
     }
   } catch { /* first boot */ }
   const { publicKey, privateKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
-  vapidKeys = { publicKey: publicKey.export({ format: 'der', type: 'spki' }).toString('base64url'), privateKey };
+  vapidKeys = { publicKey: vapidPublicPoint(publicKey), privateKey };
   vapidSource = 'generated';
   vapidDurable = STORAGE_BACKEND === 'files';
   writeVapidFile();

@@ -241,6 +241,26 @@ window.FF = window.FF || {};
     for (let i = 0; i < b.length; i++) out[i] = b.charCodeAt(i);
     return out;
   }
+  function bytesToB64url(bytes) {
+    let bin = '';
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+  /**
+   * Server se aayi VAPID public key ko browser-ready 65-byte uncompressed P-256 point banao.
+   * Chrome/Edge sirf raw point (0x04 || X || Y) accept karte hain — kisi bhi wajah se SPKI DER
+   * (91 bytes) ya usse bada blob aaye to raw point uske andar hota hai (aakhri 65 bytes), nikal lo.
+   * Iske bina subscribe "The provided applicationServerKey is not valid" se fail hota hai.
+   */
+  function vapidKeyBytes(str) {
+    let bytes = urlB64ToUint8(String(str || '').trim());
+    if (bytes.length > 65) {
+      const tail = bytes.slice(bytes.length - 65);
+      if (tail[0] === 4) { console.warn('push: server key SPKI-DER format me thi — raw 65-byte point nikal liya'); bytes = tail; }
+    }
+    if (bytes.length !== 65 || bytes[0] !== 4) throw new Error(`VAPID public key invalid (${bytes.length} bytes) — server par key corrupt hai, admin se config check karwao`);
+    return bytes;
+  }
   /** Existing subscription kis VAPID key se bani thi? (base64url) */
   function subKeyB64(sub) {
     try {
@@ -310,12 +330,16 @@ window.FF = window.FF || {};
         serverKey = (v && v.publicKey) || '';
       }
       if (!serverKey) { state.pushError = 'server par VAPID key nahi'; return false; }
+      // Key ko canonical 65-byte raw point me laao — SPKI DER aane par subscribe crash hota tha.
+      let serverKeyBytes;
+      try { serverKeyBytes = vapidKeyBytes(serverKey); } catch (err) { state.pushError = (err && err.message) || 'VAPID key invalid'; return false; }
+      const serverKeyCanon = bytesToB64url(serverKeyBytes);
       // 2) SW ke paas pending (stash) subscription ho to server ko de do — session ab valid hai
       try { if (reg.active && reg.active.postMessage) reg.active.postMessage({ type: 'ff-push-flush' }); } catch { /* ignore */ }
       // 3) Existing subscription validate karo
       let sub = await reg.pushManager.getSubscription().catch(() => null);
       const serverSubs = typeof status.subs === 'number' ? status.subs : null;
-      const keyMismatch = sub && subKeyB64(sub) !== serverKey;
+      const keyMismatch = sub && subKeyB64(sub) !== serverKeyCanon;
       const droppedByServer = sub && serverSubs === 0; // server ne dead subscription hata di
       if (sub && (keyMismatch || droppedByServer || force)) {
         if (keyMismatch) console.warn('push: server VAPID key changed — re-subscribing so the OS panel works again');
@@ -323,7 +347,7 @@ window.FF = window.FF || {};
         await sub.unsubscribe().catch(() => {});
         sub = null;
       }
-      if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64ToUint8(serverKey) });
+      if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: serverKeyBytes });
       const out = await FF.auth.api('/api/push/subscribe', 'POST', { subscription: sub.toJSON() });
       state.pushOn = true;
       state.pushError = '';
