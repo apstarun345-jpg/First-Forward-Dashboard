@@ -193,6 +193,48 @@ test('web push survives a Render redeploy: VAPID key stays stable and deliveries
   }
 });
 
+test('VAPID_* env vars in the standard web-push tool format (32-byte scalar) work end-to-end', async () => {
+  // Render env me operator sabse zyada `npx web-push generate-vapid-keys` ka output paste karta hai:
+  // publicKey = 65-byte raw point (base64url), privateKey = 32-byte raw scalar (base64url).
+  // Server ko dono accept karke browser-ready key serve karni chahiye aur deliveries verify honi chahiye.
+  const ecdh = crypto.createECDH('prime256v1'); ecdh.generateKeys();
+  let d = ecdh.getPrivateKey(); if (d.length < 32) d = Buffer.concat([Buffer.alloc(32 - d.length), d]);
+  const envPub = ecdh.getPublicKey().toString('base64url');      // web-push tool publicKey
+  const envPriv = d.toString('base64url');                        // web-push tool privateKey (43 chars)
+  const kpJwk = ecdh.getPublicKey();
+  const expectedPub = Buffer.concat([Buffer.from([4]), kpJwk.subarray(1, 65)]).toString('base64url');
+
+  const mock = await startMockAppsScript({ secret: SECRET });
+  const push = await startMockPushService();
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'apna-push-env-'));
+  let server;
+  try {
+    server = await startServer({ STORAGE_BACKEND: '', APPS_SCRIPT_URL: mock.url, APPS_SCRIPT_SECRET: SECRET, ADMIN_USER: 'owner', ADMIN_PASSWORD: 'owner-password', RENDER: 'true', GVIZ_BASE: '', DATA_DIR: dir, VAPID_PUBLIC_KEY: envPub, VAPID_PRIVATE_KEY: envPriv });
+    const cookie = (await (await fetch(server.base + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'owner', password: 'owner-password' }) })).headers.get('set-cookie')).split(';')[0];
+    const call = (route, method = 'GET', body) => fetch(server.base + route, { method, headers: { cookie, 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) }).then((r) => r.json());
+
+    const vapid = (await call('/api/push/vapid')).publicKey;
+    assert.equal(vapid, expectedPub, 'env keypair ka raw 65-byte point serve hona chahiye');
+    const health = await call('/api/health');
+    assert.equal(health.push.enabled, true);
+    assert.equal(health.push.keySource, 'env', 'keySource env hona chahiye');
+
+    const ua = makeUA();
+    push.state.ua = ua;
+    push.state.expectedKey = vapid;
+    const sub = { subscription: { endpoint: push.url('env-device'), keys: { p256dh: ua.publicKey.toString('base64url'), auth: ua.authSecret.toString('base64url') } } };
+    await fetch(server.base + '/api/push/subscribe', { method: 'POST', headers: { cookie, 'Content-Type': 'application/json' }, body: JSON.stringify(sub) });
+    await fetch(server.base + '/api/activity', { method: 'POST', headers: { cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'settings', details: 'env key test' }) });
+    for (let i = 0; i < 40 && !push.state.deliveries.length; i++) await sleep(50);
+    assert.equal(push.state.deliveries.length, 1, 'env-key push deliver honi chahiye');
+    assert.equal(push.state.deliveries[0].status, 201, `push service ne reject kiya: ${push.state.deliveries[0].error}`);
+  } finally {
+    if (server) await server.stop();
+    await push.close(); await mock.close();
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('a subscription signed with a rotated key is reported and dropped so the phone re-subscribes', async () => {
   const mock = await startMockAppsScript({ secret: SECRET });
   const push = await startMockPushService();

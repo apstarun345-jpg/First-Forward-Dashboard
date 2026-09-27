@@ -57,7 +57,11 @@ feed keeps working (it polls) while the phone panel goes completely silent.
 
 Keys are therefore resolved in this order:
 
-1. `VAPID_PUBLIC_KEY` + `VAPID_PRIVATE_KEY` environment variables (explicit pin).
+1. `VAPID_PUBLIC_KEY` + `VAPID_PRIVATE_KEY` environment variables (explicit pin). Optional —
+   the durable store below keeps keys stable without them. If you do pin them, the standard
+   `npx web-push generate-vapid-keys` output works as-is (65-byte raw-point public key + 32-byte
+   private scalar); the server also accepts its own internal PKCS8/SPKI formats and always
+   derives the browser-ready public point from the private key.
 2. Durable storage — `notify.vapid` in the same Apps Script / Sheets record as the users and
    notification feed. This is what makes push survive a redeploy on a service with no disk.
 3. `DATA_DIR/vapid.json` (local `files` backend, or a within-boot cache on a container disk).

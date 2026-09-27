@@ -578,8 +578,20 @@ function vapidPublicPoint(keyObject) {
   if (jwk.kty !== 'EC' || jwk.crv !== 'P-256' || x.length !== 32 || y.length !== 32) throw new Error('VAPID keypair P-256 (prime256v1) nahi hai');
   return Buffer.concat([Buffer.from([4]), x, y]).toString('base64url');
 }
+/** Private key dono roop me accept karo: hamara internal PKCS8 DER, YA web-push tool
+ *  (`npx web-push generate-vapid-keys`) ka 32-byte raw P-256 scalar — dono se KeyObject banao. */
+function privateKeyFromAny(privateKey) {
+  const raw = Buffer.from(String(privateKey).trim(), 'base64url');
+  if (raw.length === 32) {
+    const ecdh = crypto.createECDH('prime256v1');
+    ecdh.setPrivateKey(raw);
+    const pub = ecdh.getPublicKey(); // 65-byte uncompressed point
+    return crypto.createPrivateKey({ key: { kty: 'EC', crv: 'P-256', x: pub.subarray(1, 33).toString('base64url'), y: pub.subarray(33, 65).toString('base64url'), d: raw.toString('base64url') }, format: 'jwk' });
+  }
+  return crypto.createPrivateKey({ key: raw, format: 'der', type: 'pkcs8' });
+}
 function applyVapid(publicKey, privateKey) {
-  const privateKeyObj = crypto.createPrivateKey({ key: Buffer.from(String(privateKey).trim(), 'base64url'), format: 'der', type: 'pkcs8' });
+  const privateKeyObj = privateKeyFromAny(privateKey);
   const derived = vapidPublicPoint(privateKeyObj);
   if (publicKey && String(publicKey).trim() !== derived) console.warn('⚠️  Stored VAPID public key purane SPKI-DER format me thi — private key se sahi 65-byte uncompressed point derive kar liya (keypair same, subscriptions safe).');
   vapidKeys = { publicKey: derived, privateKey: privateKeyObj };
