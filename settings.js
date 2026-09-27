@@ -53,7 +53,10 @@ FF.pages = FF.pages || {};
   }
   // Resize + compress an image file before it is sent as a settings data URL.
   // Attractive logo handling: auto-size, smart background, high-quality smoothing, multi-pass compression.
-  function readImage(file, maxSide) {
+  // opts.square → centre-crop to a perfect square first (profile photo), so the round avatar never
+  // looks zoomed / cut. opts.minSide keeps a minimum output size for logos (never upscaled beyond 1:1).
+  function readImage(file, maxSide, opts) {
+    const o = opts || {};
     return new Promise((resolve, reject) => {
       if (!/^image\//.test(file.type)) return reject(new Error('Sirf image file (PNG / JPG / WEBP / SVG)'));
       if (file.type === 'image/svg+xml') { const r = new FileReader(); r.onload = () => resolve(r.result); r.onerror = reject; r.readAsDataURL(file); return; }
@@ -61,18 +64,24 @@ FF.pages = FF.pages || {};
       const url = URL.createObjectURL(file);
       img.onload = () => {
         URL.revokeObjectURL(url);
-        const isLogo = (maxSide || 512) <= 512;
-        const keepAlpha = (file.type === 'image/png' || file.type === 'image/gif') && isLogo;
-        let scale = Math.min(1, (maxSide || 512) / Math.max(img.width, img.height));
-        if (isLogo) {
-          const minScale = 128 / Math.max(img.width, img.height);
-          scale = Math.max(scale, Math.min(1, minScale));
+        const isLogo = (maxSide || 512) <= 512 && !o.square;
+        const keepAlpha = (file.type === 'image/png' || file.type === 'image/gif') && (isLogo || o.square);
+        // Source rect: full image, or centred square crop for avatars.
+        let sx = 0, sy = 0, sw = img.width, sh = img.height;
+        if (o.square) {
+          const side = Math.min(img.width, img.height);
+          sx = Math.round((img.width - side) / 2); sy = Math.round((img.height - side) / 2);
+          sw = side; sh = side;
+        }
+        let scale = Math.min(1, (maxSide || 512) / Math.max(sw, sh));
+        if (isLogo && o.minSide) {
+          scale = Math.max(scale, Math.min(1, o.minSide / Math.max(sw, sh)));
         }
         let data = '';
         for (let pass = 0; pass < 5; pass++) {
           const c = document.createElement('canvas');
-          c.width = Math.max(1, Math.round(img.width * scale));
-          c.height = Math.max(1, Math.round(img.height * scale));
+          c.width = Math.max(1, Math.round(sw * scale));
+          c.height = Math.max(1, Math.round(sh * scale));
           const ctx = c.getContext('2d');
           ctx.imageSmoothingEnabled = true;
           ctx.imageSmoothingQuality = 'high';
@@ -82,7 +91,7 @@ FF.pages = FF.pages || {};
             ctx.fillStyle = '#ffffff';
             ctx.fillRect(0,0,c.width,c.height);
           }
-          ctx.drawImage(img, 0, 0, c.width, c.height);
+          ctx.drawImage(img, sx, sy, sw, sh, 0, 0, c.width, c.height);
           const mime = keepAlpha ? 'image/png' : 'image/webp';
           const quality = keepAlpha ? undefined : Math.max(.65, .92 - pass * .08);
           data = c.toDataURL(mime, quality);
@@ -92,9 +101,9 @@ FF.pages = FF.pages || {};
         }
         if (!keepAlpha && data.length > 1.8 * 1024 * 1024) {
           const c = document.createElement('canvas');
-          c.width = Math.max(1, Math.round(img.width * scale * 0.6));
-          c.height = Math.max(1, Math.round(img.height * scale * 0.6));
-          c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+          c.width = Math.max(1, Math.round(sw * scale * 0.6));
+          c.height = Math.max(1, Math.round(sh * scale * 0.6));
+          c.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, c.width, c.height);
           data = c.toDataURL('image/jpeg', 0.72);
         }
         resolve(data);
@@ -103,16 +112,23 @@ FF.pages = FF.pages || {};
       img.src = url;
     });
   }
+  // Human-friendly size info for a stored data-URL image (e.g. "256×256 · 48 KB").
+  function imgSizeInfo(dataUrl) {
+    const kb = Math.max(1, Math.round(String(dataUrl || '').length * 0.75 / 1024));
+    return `${kb} KB`;
+  }
 
   // ---- tabs --------------------------------------------------------------------------------------
   function avatarBlock() {
     const u = A.user;
+    const savedSize = Number(localStorage.getItem('ff_avatar_size')) || 256;
+    const sizeOpts = [128, 192, 256, 384, 512].map((s) => `<option value="${s}" ${s === savedSize ? 'selected' : ''}>${s === 128 ? 'Chhota (128px)' : s === 192 ? 'Medium (192px)' : s === 256 ? 'Standard (256px)' : s === 384 ? 'Bada (384px)' : 'HD (512px)'}</option>`).join('');
     return `<div class="avatar-edit">
       <div class="avatar-big">${u.avatar ? `<img src="${esc(u.avatar)}" alt="">` : `<span>${esc((u.name || u.username).slice(0, 1).toUpperCase())}</span>`}</div>
       <div>
         <b>Profile photo</b>
-        <small class="dim">Top-right menu, sidebar aur home page par dikhti hai. Square image best (256px par resize hoti hai).</small>
-        <div class="btn-row"><label class="btn small">📤 Photo upload<input type="file" accept="image/*" id="av-upload" hidden></label>${u.avatar ? '<button class="btn small" id="av-clear">✕ Remove</button>' : ''}</div>
+        <small class="dim">Top-right menu, sidebar aur home page par dikhti hai. Photo auto centre-crop + resize hoti hai — koi bhi image upload karo, square me sahi set ho jayegi${u.avatar ? ` · current ${imgSizeInfo(u.avatar)}` : ''}.</small>
+        <div class="btn-row"><label class="btn small">📤 Photo upload<input type="file" accept="image/*" id="av-upload" hidden></label><label class="fld inline-size"><span>📐 Size</span><select class="input small" id="av-size">${sizeOpts}</select></label>${u.avatar ? '<button class="btn small" id="av-clear">✕ Remove</button>' : ''}</div>
       </div></div>`;
   }
   function accountTab() {
@@ -127,11 +143,18 @@ FF.pages = FF.pages || {};
       ${section('🔑 Change password', `<div class="form-grid">${field('Current password', '<input class="input" id="pw-cur" type="password" autocomplete="current-password">')}${field('New password', '<input class="input" id="pw-new" type="password" minlength="6" autocomplete="new-password">')}${field('Repeat new password', '<input class="input" id="pw-new2" type="password" minlength="6" autocomplete="new-password">')}</div><div class="save-bar"><button class="btn primary" id="pw-save">🔑 Update password</button>${u.mustChangePassword ? '<span class="badge red">Default password — please change</span>' : ''}</div>`)}
       ${section('🛡️ My access', `<div class="perm-grid">${perms.map((p) => `<div class="perm ${A.can(p.key) ? 'yes' : 'no'}"><span>${A.can(p.key) ? '✅' : '⛔'}</span><b>${esc(p.label)}</b><small class="dim">${esc(p.group)}</small></div>`).join('')}</div>${u.role === 'admin' ? '<p class="dim small">Admin ke paas sab access hota hai.</p>' : '<p class="dim small">Access badalna ho to admin se kaho.</p>'}`)}`;
   }
+  const IMG_SIZES = { logo: [256, 384, 512, 768], loginImage: [1200, 1600, 2000, 2400] };
   function brandTab() {
     const s = settings, t = s.theme || {};
-    const img = (key, label, hint, max) => `<div class="img-field"><div class="img-preview ${key}">${s[key] ? `<img src="${esc(s[key])}" alt="">` : '<span class="dim">No image</span>'}</div><div><b>${label}</b><small class="dim">${hint}</small><div class="btn-row"><label class="btn small">📤 Upload<input type="file" accept="image/*" hidden data-img="${key}" data-max="${max}"></label>${s[key] ? `<button class="btn small" data-img-clear="${key}">✕ Remove</button>` : ''}</div></div></div>`;
+    const img = (key, label, hint, max) => {
+      const sizes = IMG_SIZES[key] || [max];
+      const savedKey = `ff_img_size_${key}`;
+      const savedSize = Number(localStorage.getItem(savedKey)) || max;
+      const sizeSel = `<label class="fld inline-size"><span>📐 Size</span><select class="input small" data-img-size="${key}">${sizes.map((v) => `<option value="${v}" ${v === savedSize ? 'selected' : ''}>${v}px</option>`).join('')}</select></label>`;
+      return `<div class="img-field"><div class="img-preview ${key}">${s[key] ? `<img src="${esc(s[key])}" alt="">` : '<span class="dim">No image</span>'}</div><div><b>${label}</b><small class="dim">${hint}</small><small class="dim img-info" data-img-info="${key}">${s[key] ? `Saved: ${imgSizeInfo(s[key])}` : ''}</small><div class="btn-row"><label class="btn small">📤 Upload<input type="file" accept="image/*" hidden data-img="${key}" data-max="${max}"></label>${sizeSel}${s[key] ? `<button class="btn small" data-img-clear="${key}">✕ Remove</button>` : ''}</div></div></div>`;
+    };
     return `${section('🏷️ Branding', `<div class="form-grid">${field('App name', txt('appName', s.appName), 'Browser title / login page')}${field('Brand (sidebar)', txt('brand', s.brand))}${field('Tagline', txt('tagline', s.tagline))}</div>${saveBar('brand')}`)}
-      ${section('🖼️ Images', `${img('logo', 'Logo', 'Sidebar + login page (square works best, PNG with transparency). Auto-resized to 512px.', 512)}${img('loginImage', 'Login / hero image', 'Left side of the login page (landscape). Auto-resized to 1600px.', 1600)}<p class="dim small">Images server par save hoti hain (settings.json) — upload karte hi live.</p>`)}
+      ${section('🖼️ Images', `${img('logo', 'Logo', 'Sidebar + login page (square works best, PNG with transparency). Upload ke baad selected size par auto-resize hota hai.', 512)}${img('loginImage', 'Login / hero image', 'Left side of the login page (landscape). Upload ke baad selected size par auto-resize hoti hai.', 1600)}<p class="dim small">Images server par save hoti hain (settings.json) — upload karte hi live. 📐 Size dropdown se choose karo kitne pixels par resize ho.</p>`)}
       ${section('🎨 Theme colours', `<div class="form-grid">${field('Sidebar background (top)', color('theme.sidebarBg', t.sidebarBg))}${field('Sidebar background (bottom)', color('theme.sidebarBg2', t.sidebarBg2))}${field('Sidebar text', color('theme.sidebarText', t.sidebarText))}${field('Accent', color('theme.accent', t.accent))}${field('Accent 2 (gradient)', color('theme.accent2', t.accent2))}</div><p class="dim small">Colour preview turant dikhta hai; picker selection complete karne par automatically save hota hai. Save button bhi use kar sakte hain.</p>${saveBar('theme')}<button class="btn small" data-reset-theme>↺ Default colours</button>`)}`;
   }
   function dataTab() {
@@ -141,7 +164,45 @@ FF.pages = FF.pages || {};
         <div class="form-grid">${field('Excluded TL names (not real TLs)', `<input class="input" data-path="excludeTls" data-list value="${esc((s.excludeTls || []).join(', '))}">`, 'Comma separated. Ye naam kisi bhi TL list / ranking me nahi aayenge (e.g. APS = direct agents)')}${field('GV master ID', txt('eir.gvMasterId', s.eir.gvMasterId))}${field('GV channel TL name', txt('eir.gvChannelTl', s.eir.gvChannelTl))}</div>`)}
       ${section('🟩 GV Partner sheet <span class="dim">(dusra Google Sheet)</span>', `<div class="form-grid">${field('GV Sheet ID', txt('gvSheetId', s.gvSheetId, 'class="input mono"'), 'GV Partner ki sheet — "Anyone with the link can view" honi chahiye')}${field('GV Master tab', txt('gv.master.tab', (s.gv || {}).master ? s.gv.master.tab : ''), 'Issuance log tab ka exact naam')}${field('GV Master gid (optional)', txt('gv.master.gid', (s.gv || {}).master ? s.gv.master.gid : ''))}${field('Tag Assignment tab', txt('gv.assignment.tab', (s.gv || {}).assignment ? s.gv.assignment.tab : ''), 'Stock tab ka exact naam')}${field('GV REPORT tab', txt('gv.report.tab', (s.gv || {}).report ? s.gv.report.tab : ''))}${field('GV REPORT gid', txt('gv.report.gid', (s.gv || {}).report ? s.gv.report.gid : ''), 'Google URL me #gid=… (GV REPORT tab)')}${field('GV REPORT header row', numI('gv.report.headerRow', (s.gv || {}).report ? s.gv.report.headerRow : 4), 'GV REPORT me heading row (default 4)')}${field('GV REPORT last column', txt('gv.report.lastCol', (s.gv || {}).report ? s.gv.report.lastCol : 'BE'), 'Sabse aakhri column (default BE)')}</div>${saveBar('data')}`)}
       ${section('🔠 EIR column letters', letters(s.eir, ['tagId', 'vrn', 'cls', 'type', 'status', 'date', 'agentId', 'agentName', 'masterId', 'tlId', 'gvId', 'gvName', 'gvTl', 'tlName', 'vrnType', 'monthName', 'regNumber'], 'eir') + saveBar('eir'), 'Sheet me column shift ho to sirf letters badlo')}
-      ${section('🔠 StockDataa column letters', letters(s.stock, ['id', 'name', 'tagId', 'barcode', 'cls', 'tagType', 'bcAllocatedAt', 'agentId', 'agentName', 'agentAllocatedAt', 'tlName'], 'stock') + saveBar('stock'))}`;
+      ${section('🔠 StockDataa column letters', letters(s.stock, ['id', 'name', 'tagId', 'barcode', 'cls', 'tagType', 'bcAllocatedAt', 'agentId', 'agentName', 'agentAllocatedAt', 'tlName'], 'stock') + saveBar('stock'))}
+      ${section('📥 Bulk CSV tool <span class="dim">(Google Sheet me rows paste karne ke liye)</span>', `<p class="dim small">CSV file upload karo → preview dekho → <b>📋 Copy for Google Sheets</b> dabao → Google Sheet me select karke Ctrl+V se paste kar do. Excel (.xlsx) file ho to pehle Excel me <b>File → Save As → CSV</b> karke lao. Data sirf aapke browser me parse hota hai — sheet me dashboard khud kuch nahi likhta.</p>
+        <div class="btn-row"><label class="btn small primary">📤 CSV upload<input type="file" accept=".csv,.txt,text/csv,text/plain" id="bulk-file" hidden></label><button class="btn small" id="bulk-copy" disabled>📋 Copy for Google Sheets</button><button class="btn small" id="bulk-dl" disabled>⬇ CSV download</button><button class="btn small" id="bulk-template">⬇ StockDataa template</button><button class="btn small" id="bulk-clear" disabled>✕ Clear</button><span class="dim small" id="bulk-info"></span></div>
+        <div id="bulk-preview" style="margin-top:10px"></div>`)}`;
+  }
+
+  // ---- bulk CSV parsing (RFC-4180-ish: quotes, commas, newlines) ----
+  let bulkRows = null;
+  function parseCsv(text) {
+    const rows = []; let row = [], cell = '', inQ = false;
+    const src = String(text || '').replace(/^\uFEFF/, '');
+    for (let i = 0; i < src.length; i++) {
+      const ch = src[i];
+      if (inQ) {
+        if (ch === '"') { if (src[i + 1] === '"') { cell += '"'; i++; } else inQ = false; }
+        else cell += ch;
+      } else if (ch === '"' && cell === '') inQ = true;
+      else if (ch === ',') { row.push(cell); cell = ''; }
+      else if (ch === '\n' || ch === '\r') {
+        if (ch === '\r' && src[i + 1] === '\n') i++;
+        row.push(cell); cell = '';
+        if (row.length > 1 || row[0] !== '') rows.push(row);
+        row = [];
+      } else cell += ch;
+    }
+    if (cell !== '' || row.length) { row.push(cell); if (row.length > 1 || row[0] !== '') rows.push(row); }
+    return rows;
+  }
+  function csvEscape(v) { const s = String(v ?? ''); return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }
+  function renderBulkPreview() {
+    const box = U.$('#bulk-preview'); const info = U.$('#bulk-info');
+    if (!box) return;
+    const has = bulkRows && bulkRows.length;
+    U.$('#bulk-copy').disabled = !has; U.$('#bulk-dl').disabled = !has; U.$('#bulk-clear').disabled = !has;
+    if (!has) { box.innerHTML = ''; if (info) info.textContent = ''; return; }
+    const cols = Math.max(...bulkRows.slice(0, 50).map((r) => r.length));
+    if (info) info.textContent = `${bulkRows.length} rows · ${cols} columns`;
+    const head = bulkRows[0].map((h) => `<th>${esc(h)}</th>`).join('') + (cols > bulkRows[0].length ? `<th colspan="${cols - bulkRows[0].length}"></th>` : '');
+    box.innerHTML = `<div class="table-wrap tall"><table class="tbl compact sticky-first"><thead><tr>${head}</tr></thead><tbody>${bulkRows.slice(1, 51).map((r) => `<tr>${Array.from({ length: cols }, (_, i) => `<td>${esc(r[i] !== undefined ? r[i] : '')}</td>`).join('')}</tr>`).join('')}</tbody></table></div>${bulkRows.length > 51 ? `<p class="dim small">Preview me pehli 50 rows — copy/download me poori ${bulkRows.length} rows jayengi.</p>` : ''}`;
   }
   function rulesTab() {
     const t = settings.thresholds || {};
@@ -453,18 +514,70 @@ FF.pages = FF.pages || {};
       }));
       const rt = U.$('[data-reset-theme]', body);
       if (rt) rt.addEventListener('click', () => save({ theme: defaults.theme }, null).then(draw));
-      // images
+      // images (branding) — size dropdown decides the resize target
+      U.$$('select[data-img-size]', body).forEach((sel) => sel.addEventListener('change', () => localStorage.setItem(`ff_img_size_${sel.dataset.imgSize}`, sel.value)));
       U.$$('input[type=file][data-img]', body).forEach((inp) => inp.addEventListener('change', async () => {
         const file = inp.files[0]; if (!file) return;
-        try { const dataUrl = await readImage(file, Number(inp.dataset.max) || 512); if (dataUrl.length > 1.8 * 1024 * 1024) throw new Error('Image bahut badi hai — chhoti image use karo'); await save({ [inp.dataset.img]: dataUrl }, null); draw(); } catch (err) { U.toast(err.message, 'err'); }
+        const sizeSel = U.$(`select[data-img-size="${inp.dataset.img}"]`, body);
+        const max = (sizeSel ? Number(sizeSel.value) : 0) || Number(inp.dataset.max) || 512;
+        if (sizeSel) localStorage.setItem(`ff_img_size_${inp.dataset.img}`, sizeSel.value);
+        try { const dataUrl = await readImage(file, max, { minSide: max <= 512 ? 128 : 0 }); if (dataUrl.length > 1.8 * 1024 * 1024) throw new Error('Image bahut badi hai — chhoti image use karo'); await save({ [inp.dataset.img]: dataUrl }, null); U.toast('Image save ho gayi ✓', 'ok'); draw(); } catch (err) { U.toast(err.message, 'err'); }
       }));
       U.$$('[data-img-clear]', body).forEach((b) => b.addEventListener('click', () => save({ [b.dataset.imgClear]: '' }, null).then(draw)));
-      // profile photo
+      // show real pixel dimensions of stored images once they decode
+      U.$$('[data-img-info]', body).forEach((el) => {
+        const data = settings[el.dataset.imgInfo];
+        if (!data) return;
+        const im = new Image();
+        im.onload = () => { if (U.$(`[data-img-info="${el.dataset.imgInfo}"]`, body)) el.textContent = `Saved: ${im.naturalWidth}×${im.naturalHeight}px · ${imgSizeInfo(data)}`; };
+        im.src = data;
+      });
+      // bulk CSV tool
+      const bulkFile = U.$('#bulk-file', body);
+      if (bulkFile) bulkFile.addEventListener('change', () => {
+        const file = bulkFile.files[0]; if (!file) return;
+        if (file.size > 8 * 1024 * 1024) { U.toast('File 8 MB se badi hai', 'err'); return; }
+        const rd = new FileReader();
+        rd.onload = () => {
+          bulkRows = parseCsv(rd.result);
+          if (!bulkRows.length) { U.toast('CSV khali hai ya parse nahi hui', 'err'); bulkRows = null; }
+          else U.toast(`CSV ready: ${bulkRows.length} rows ✓`, 'ok');
+          renderBulkPreview();
+        };
+        rd.onerror = () => U.toast('File read nahi hui', 'err');
+        rd.readAsText(file);
+      });
+      const bulkCopy = U.$('#bulk-copy', body);
+      if (bulkCopy) bulkCopy.addEventListener('click', async () => {
+        if (!bulkRows || !bulkRows.length) return;
+        const tsv = bulkRows.map((r) => r.join('\t')).join('\n');
+        const ok = await U.copyText(tsv);
+        U.toast(ok ? 'Copy ho gaya ✓ — ab Google Sheet me Ctrl+V se paste karo' : 'Copy fail — browser permission check karo', ok ? 'ok' : 'err');
+      });
+      const bulkDl = U.$('#bulk-dl', body);
+      if (bulkDl) bulkDl.addEventListener('click', () => {
+        if (!bulkRows || !bulkRows.length) return;
+        const csv = bulkRows.map((r) => r.map(csvEscape).join(',')).join('\r\n');
+        U.downloadBlob(`bulk-${U.stamp()}.csv`, new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' }));
+      });
+      const bulkTpl = U.$('#bulk-template', body);
+      if (bulkTpl) bulkTpl.addEventListener('click', () => {
+        const s = settings.stock || {};
+        const header = [['id', 'ID'], ['name', 'Name'], ['tagId', 'Tag ID'], ['barcode', 'Barcode'], ['cls', 'Class'], ['tagType', 'Tag Type'], ['bcAllocatedAt', 'BC Allocated At'], ['agentId', 'Agent ID'], ['agentName', 'Agent Name'], ['agentAllocatedAt', 'Agent Allocated At'], ['tlName', 'TL Name']].map(([k, label]) => (s[k] ? `${label} (${s[k]})` : label));
+        U.downloadBlob('stockdataa-template.csv', new Blob([`\uFEFF${header.join(',')}\r\n`], { type: 'text/csv;charset=utf-8' }));
+      });
+      const bulkClear = U.$('#bulk-clear', body);
+      if (bulkClear) bulkClear.addEventListener('click', () => { bulkRows = null; renderBulkPreview(); });
+      renderBulkPreview();
+      // profile photo — centre-crop square, size from dropdown
       const avUp = U.$('#av-upload', body);
       if (avUp) avUp.addEventListener('change', async () => {
         const file = avUp.files[0]; if (!file) return;
+        const sizeSel = U.$('#av-size', body);
+        const size = (sizeSel ? Number(sizeSel.value) : 0) || 256;
+        if (sizeSel) localStorage.setItem('ff_avatar_size', sizeSel.value);
         try {
-          const dataUrl = await readImage(file, 256);
+          const dataUrl = await readImage(file, size, { square: true });
           if (dataUrl.length > 1.2 * 1024 * 1024) throw new Error('Photo chhoti rakho (1 MB se kam)');
           await A.api('/api/auth/profile', 'POST', { avatar: dataUrl });
           await A.refreshUser(); FF.app.renderSidebar(); U.toast('Photo update ✓', 'ok'); draw();

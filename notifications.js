@@ -5,13 +5,13 @@ window.FF = window.FF || {};
 (function (FF) {
   'use strict';
   const U = FF.util;
-  const state = { started: false, bound: false, timer: null, presenceTimer: null, fastTimer: null, lastAt: '', items: [], unread: 0, firstPoll: true, page: 'home', pointer: null, people: [], lastInteraction: Date.now(), pointerBound: false, events: [], dirty: false, lastSent: 0, lastScroll: -1 };
+  const state = { started: false, bound: false, timer: null, presenceTimer: null, fastTimer: null, lastAt: '', items: [], unread: 0, firstPoll: true, page: 'home', pointer: null, people: [], lastInteraction: Date.now(), pointerBound: false, events: [], dirty: false, lastSent: 0, lastScroll: -1, pushOn: false };
   const EMBED = new URLSearchParams(location.search).get('embed') === 'live';
   const sharing = () => localStorage.getItem('ff_presence_pointer') !== '0';
   const esc = U.esc;
 
   function icon(item) {
-    return ({ report: '📊', login: '🔐', activity: '👀', location: '📍', search: '🔍', click: '👆', settings: '⚙️', user: '👤' }[item.type] || '🔔');
+    return ({ report: '📊', monthly: '📅', login: '🔐', activity: '👀', location: '📍', search: '🔍', click: '👆', settings: '⚙️', user: '👤' }[item.type] || '🔔');
   }
   function canBrowserAlert() {
     return typeof Notification !== 'undefined' && Notification.permission === 'granted';
@@ -42,7 +42,7 @@ window.FF = window.FF || {};
     const presence = isAdmin ? `<section class="presence-panel"><div class="presence-title">🟢 User activity <small>Admin only · live / last seen</small></div>${state.people.length ? state.people.map((p) => `<div class="presence-row"><span class="presence-dot ${p.active ? 'is-live' : ''}"></span><div><b>${esc(p.name || p.username)}</b><small>${p.active ? `Active now · ${esc(p.page)}` : `Last active ${esc(U.timeLabel(p.lastSeen))} · last page: ${esc(p.page)}`}</small>${p.lastEvent ? `<small>Last action: ${esc(p.lastEvent.label || p.lastEvent.kind)}</small>` : ''}</div><span class="presence-side"><span class="presence-state">${p.online && p.active ? 'LIVE' : p.online ? 'IDLE' : 'AWAY'}</span>${isAdmin ? `<button class="btn small" data-live-watch="${esc(p.username)}">👁 Live view</button>` : ''}</span></div>`).join('') : '<div class="notification-empty">Users seen after this server started will appear here.</div>'}</section>` : '';
     pop.innerHTML = `<div class="notification-head"><div><b>Notifications</b><small>${state.unread ? `${state.unread} unread` : 'Sab updated hai'}</small></div><button class="btn small" data-notify-read>✓ Mark read</button></div>
       ${presence}
-      ${permission === 'default' ? '<button class="notification-enable" data-notify-enable>🔔 Browser alerts on karo</button>' : permission === 'denied' ? '<div class="notification-permission">Browser alerts blocked hain — browser settings se allow karo.</div>' : permission === 'granted' ? '<div class="notification-permission ok">✅ Browser alerts on hain</div>' : ''}
+      ${permission === 'default' ? '<button class="notification-enable" data-notify-enable>🔔 Instant alerts on karo — app band ho tab bhi</button>' : permission === 'denied' ? '<div class="notification-permission">Browser alerts blocked hain — browser settings se allow karo.</div>' : permission === 'granted' ? `<div class="notification-permission ok">✅ Browser alerts on hain${state.pushOn ? ' · 📲 push bhi on ✓' : ''}</div>` : ''}
       <div class="notification-list">${rows || '<div class="notification-empty">Abhi koi notification nahi. User login/page open, report update aur shared location yahan dikhegi.</div>'}</div>`;
   }
   async function poll(initial) {
@@ -65,12 +65,42 @@ window.FF = window.FF || {};
       if (err && err.status === 401) stop();
     } finally { state.firstPoll = false; }
   }
+  function urlB64ToUint8(str) {
+    const pad = '='.repeat((4 - (str.length % 4)) % 4);
+    const b = atob(String(str).replace(/-/g, '+').replace(/_/g, '/') + pad);
+    const out = new Uint8Array(b.length);
+    for (let i = 0; i < b.length; i++) out[i] = b.charCodeAt(i);
+    return out;
+  }
+  /** 🔔 Web push subscribe — server se instant notifications, app band ho tab bhi. */
+  async function setupPush(silent) {
+    try {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window) || typeof Notification === 'undefined') return false;
+      if (Notification.permission !== 'granted') return false;
+      const reg = await navigator.serviceWorker.ready;
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub) {
+        const { publicKey } = await FF.auth.api('/api/push/vapid');
+        if (!publicKey) return false;
+        sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64ToUint8(publicKey) });
+      }
+      await FF.auth.api('/api/push/subscribe', 'POST', { subscription: sub.toJSON() });
+      state.pushOn = true;
+      if (!silent) U.toast('🔔 Instant push notifications on ✓ — app band ho tab bhi milengi', 'ok');
+      return true;
+    } catch (err) {
+      console.warn('push setup:', err.message);
+      if (!silent) U.toast('Push setup nahi ho paya (browser support check karo)', 'warn');
+      return false;
+    }
+  }
   async function enableBrowser() {
     if (typeof Notification === 'undefined') { U.toast('Is browser me notifications supported nahi hain.', 'err'); return; }
     try {
       const permission = await Notification.requestPermission();
+      if (permission === 'granted') await setupPush(true);
       render();
-      U.toast(permission === 'granted' ? 'Browser alerts on ✓' : 'Browser alerts allow nahi hue.', permission === 'granted' ? 'ok' : 'warn');
+      U.toast(permission === 'granted' ? (state.pushOn ? 'Browser + push alerts on ✓' : 'Browser alerts on ✓') : 'Browser alerts allow nahi hue.', permission === 'granted' ? 'ok' : 'warn');
     } catch { U.toast('Browser notification permission nahi mil saki.', 'err'); }
   }
   function toggle(show) {
@@ -95,7 +125,7 @@ window.FF = window.FF || {};
       const enable = e.target.closest('[data-notify-enable]');
       if (enable) { e.preventDefault(); enableBrowser(); }
       const openBtn = e.target.closest('[data-notify-open]');
-      if (openBtn) { e.preventDefault(); const item = state.items.find((x) => x.id === openBtn.dataset.notifyOpen); toggle(false); if (item && FF.liveView) FF.liveView.openNotification(item); return; }
+      if (openBtn) { e.preventDefault(); const item = state.items.find((x) => x.id === openBtn.dataset.notifyOpen); toggle(false); if (item && item.meta && item.meta.link) { location.hash = item.meta.link; return; } if (item && FF.liveView) FF.liveView.openNotification(item); return; }
       const watchBtn = e.target.closest('[data-live-watch]');
       if (watchBtn) { e.preventDefault(); toggle(false); if (FF.liveView) FF.liveView.watch(watchBtn.dataset.liveWatch); return; }
       const read = e.target.closest('[data-notify-read]');
@@ -144,6 +174,7 @@ window.FF = window.FF || {};
     bind();
     if (state.started || EMBED) return;
     state.started = true;
+    setupPush(true); // agar permission pehle se granted hai, push silently on karo
     poll(true);
     sendPresence();
     state.timer = setInterval(() => poll(false), 15e3);

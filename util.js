@@ -317,12 +317,109 @@ window.FF = window.FF || {};
     });
   }
 
+  // ---- date-time parsing (Excel export: real dates instead of text) -------------------------
+  const MON_IDX = { JAN: 1, FEB: 2, MAR: 3, APR: 4, MAY: 5, JUN: 6, JUL: 7, AUG: 8, SEP: 9, SEPT: 9, OCT: 10, NOV: 11, DEC: 12 };
+  /** Parse dd/mm/yyyy [hh:mm[:ss]] · yyyy-mm-dd[ hh:mm[:ss]] · dd-MMM-yyyy → Date (local). Null if not a date. */
+  function parseDateTime(value) {
+    const s = String(value ?? '').trim();
+    if (!s || s.length < 6 || s.length > 30 || !/\d/.test(s)) return null;
+    let y = 0, mo = 0, d = 0, hh = 0, mi = 0, ss = 0;
+    let m = /^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})(?:[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/.exec(s);
+    if (m) {
+      d = +m[1]; mo = +m[2]; y = +m[3]; if (y < 100) y += 2000;
+      if (mo > 12 && d <= 12) { const t = mo; mo = d; d = t; } // tolerate mm/dd
+      if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+      hh = +(m[4] || 0); mi = +(m[5] || 0); ss = +(m[6] || 0);
+    } else if ((m = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/.exec(s))) {
+      y = +m[1]; mo = +m[2]; d = +m[3]; hh = +(m[4] || 0); mi = +(m[5] || 0); ss = +(m[6] || 0);
+      if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+    } else if ((m = /^(\d{1,2})[\s/-]+([A-Za-z]{3,4})[\s/-]+(\d{2,4})(?:[ T]+(\d{1,2}):(\d{2}))?$/.exec(s))) {
+      d = +m[1]; mo = MON_IDX[m[2].toUpperCase()] || 0; y = +m[3]; if (y < 100) y += 2000;
+      if (!mo || d < 1 || d > 31) return null;
+      hh = +(m[4] || 0); mi = +(m[5] || 0);
+    } else if ((m = /^([A-Za-z]{3,4})[\s/-]+(\d{1,2}),?\s+(\d{2,4})$/.exec(s))) {
+      mo = MON_IDX[m[1].toUpperCase()] || 0; d = +m[2]; y = +m[3]; if (y < 100) y += 2000;
+      if (!mo || d < 1 || d > 31) return null;
+    } else return null;
+    if (hh > 23 || mi > 59 || ss > 59) return null;
+    const dt = new Date(y, mo - 1, d, hh, mi, ss);
+    if (dt.getFullYear() !== y || dt.getMonth() !== mo - 1 || dt.getDate() !== d) return null;
+    return dt;
+  }
+
+  // ---- print / PDF report ---------------------------------------------------------------------
+  /** Open a clean print-ready window (browser se "Save as PDF" bhi ho sakta hai). */
+  function printReport(opts) {
+    const o = opts || {};
+    const w = window.open('', '_blank');
+    if (!w) { toast('Popup block ho gaya — browser se popup allow karo.', 'err'); return; }
+    const brand = (FF.config && FF.config.brand) || 'Dashboard';
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(o.title || 'Report')}</title><style>
+      body { font-family: Inter, "Segoe UI", system-ui, sans-serif; color: #0f172a; margin: 28px; font-size: 12.5px; }
+      h1 { font-size: 19px; margin: 0 0 2px; } h2 { font-size: 14px; margin: 18px 0 6px; }
+      .sub { color: #64748b; margin: 0 0 4px; } .meta { color: #94a3b8; font-size: 11px; margin-bottom: 14px; }
+      .kpis { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
+      .kpi { border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px 12px; min-width: 130px; }
+      .kpi b { display: block; font-size: 16px; } .kpi small { color: #64748b; }
+      table { border-collapse: collapse; width: 100%; margin: 8px 0 16px; page-break-inside: auto; }
+      th { background: #4f46e5; color: #fff; text-align: left; }
+      th, td { border: 1px solid #e2e8f0; padding: 5px 8px; font-size: 11.5px; }
+      tr { page-break-inside: avoid; } .num { text-align: right; }
+      .foot { margin-top: 18px; color: #94a3b8; font-size: 10.5px; border-top: 1px solid #e2e8f0; padding-top: 8px; }
+      @media print { body { margin: 8mm; } }
+    </style></head><body>
+      <h1>${esc(o.title || 'Report')}</h1>
+      ${o.subtitle ? `<p class="sub">${o.subtitle}</p>` : ''}
+      <p class="meta">${esc(brand)} · Generated ${esc(new Date().toLocaleString('en-IN'))}</p>
+      ${o.html || ''}
+      <div class="foot">${esc(brand)} · ${esc((FF.config && FF.config.appName) || '')} · Print / Save as PDF</div>
+      <script>window.onload = function () { setTimeout(function () { window.print(); }, 250); };<\/script>
+    </body></html>`);
+    w.document.close();
+  }
+
+  // ---- recent searches (localStorage) -----------------------------------------------------------
+  function recentList(key, max) {
+    try { const arr = JSON.parse(localStorage.getItem(`ff_recent_${key}`) || '[]'); return Array.isArray(arr) ? arr.slice(0, max || 5) : []; } catch { return []; }
+  }
+  function recentAdd(key, item, max) {
+    if (!item || !item.label) return recentList(key, max);
+    const cap = max || 5;
+    const list = recentList(key, cap).filter((x) => !(x && String(x.label).toLowerCase() === String(item.label).toLowerCase()));
+    list.unshift({ label: item.label, kind: item.kind || '', value: item.value !== undefined ? item.value : item.label });
+    try { localStorage.setItem(`ff_recent_${key}`, JSON.stringify(list.slice(0, cap))); } catch { /* storage full */ }
+    return list.slice(0, cap);
+  }
+
+  /** 🗣 Voice search — Web Speech API (en-IN). Bol ke search, result onText(text) me milta hai. */
+  function voiceInput(onText, hint) {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { toast('🗣 Voice search is browser me supported nahi hai — Chrome/Edge try karo.', 'warn'); return; }
+    try {
+      const rec = new SR();
+      rec.lang = 'en-IN'; rec.interimResults = false; rec.maxAlternatives = 1;
+      toast(hint || '🎤 Bolo… sun raha hoon', 'info');
+      rec.onresult = (e) => {
+        const t = e.results && e.results[0] && e.results[0][0] ? String(e.results[0][0].transcript).trim() : '';
+        if (t && onText) onText(t);
+      };
+      rec.onerror = (e) => {
+        const code = e && e.error;
+        if (code === 'not-allowed' || code === 'service-not-allowed') toast('Mic permission allow karo (browser settings me)', 'err');
+        else if (code === 'no-speech') toast('Kuch sunai nahi diya — dobara try karo.', 'warn');
+        else if (code !== 'aborted') toast('Awaaz samajh nahi aayi — dobara try karo.', 'warn');
+      };
+      rec.start();
+    } catch { toast('Voice search start nahi ho paya.', 'err'); }
+  }
+
   FF.util = {
     esc, clean, num, fmt, fmtShort, pctOf, growth, fmtPct, fmtSigned, deltaHtml,
     MONTHS, MONTHS_LONG, DAYS, pad2, parseDate, parseMonthKey, ymKey, dateKey, fromDateKey, ymParts, labelYM, labelDate, labelDateKey,
     weekday, daysInMonth, prevMonthKey, nextMonthKey, weekStart, timeLabel,
     sum, groupSum, topEntries, sortBy, uniq,
     $, $$, h, debounce, toast, spinner, errorBox, downloadBlob, downloadCsv, tableToRows, slug, stamp, colLetter, colIndex, initTooltip,
-    phoneDigits, waLink, mailLink, copyText, suggest
+    phoneDigits, waLink, mailLink, copyText, suggest,
+    parseDateTime, printReport, recentList, recentAdd, voiceInput
   };
 })(window.FF);

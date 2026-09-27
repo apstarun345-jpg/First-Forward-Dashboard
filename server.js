@@ -7,7 +7,7 @@
 // Run locally:  npm start   (PORT defaults to 8080; Render sets PORT automatically)
 import http from 'node:http';
 import fs from 'node:fs/promises';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -52,6 +52,7 @@ const BLOCKED_DIRS = new Set(['data', 'dev', 'node_modules', '.git', 'google-app
 export const PAGE_PERMISSIONS = [
   { key: 'home', label: 'Home · highlights & charts', group: 'Pages' },
   { key: 'tagIssued', label: 'GV & FF Tag Issued (date-wise)', group: 'Pages' },
+  { key: 'targets', label: 'Targets · agent-wise monthly targets', group: 'Pages' },
   { key: 'dashboard', label: 'First Forward · Dashboard', group: 'First Forward' },
   { key: 'trend', label: 'First Forward · Trend', group: 'First Forward' },
   { key: 'performance', label: 'First Forward · Performance', group: 'First Forward' },
@@ -89,7 +90,7 @@ const allPermKeys = (settings) => permissionsFor(settings).map((p) => p.key);
 const allPermKeysNow = () => allPermKeys(db.settings);
 // Back-compat export (some tooling imported PERMISSIONS).
 export const PERMISSIONS = permissionsFor({ tabs: DEFAULT_TABS });
-const DEFAULT_USER_PERMS = ['home', 'tagIssued', 'dashboard', 'trend', 'stock', 'performance', 'gvDashboard', 'gvTrend', 'gvStock', 'gvPerformance', 'compare',
+const DEFAULT_USER_PERMS = ['home', 'tagIssued', 'targets', 'dashboard', 'trend', 'stock', 'performance', 'gvDashboard', 'gvTrend', 'gvStock', 'gvPerformance', 'compare',
   'sheet:StockDataa', 'sheet:REPORT', 'sheet:GV Master', 'sheet:Tag Assignment', 'sheet:GV REPORT', 'export'];
 
 const DEFAULT_SETTINGS = {
@@ -265,6 +266,7 @@ function recordNotification({ type = 'info', title, body, target = 'admin', meta
   notifyItems().push(item);
   if (notifyItems().length > 500) db.notify.items = notifyItems().slice(-500);
   persist('notify');
+  pushFanout(item); // 🔔 instant web push — app band ho tab bhi
   return item;
 }
 function visibleNotifications(user, since) {
@@ -520,6 +522,104 @@ function deltaText(delta) {
   const pieces = Object.entries(delta.classes || {}).map(([k, v]) => `${k} ${v > 0 ? '+' : ''}${v}`);
   return `${delta.total > 0 ? '+' : ''}${delta.total} tags${pieces.length ? ` · ${pieces.join(' · ')}` : ''}`;
 }
+// ---- 📲 Web Push (VAPID + aes128gcm, zero dependencies) -----------------------------------------
+// Admin ko har notification turant phone/desktop par mile — app band ho tab bhi.
+const VAPID_FILE = path.join(DATA_DIR, 'vapid.json');
+let vapidKeys = null;
+function loadVapid() {
+  try {
+    const raw = readFileSync(VAPID_FILE, 'utf8');
+    const j = JSON.parse(raw);
+    if (j.publicKey && j.privateKey) { vapidKeys = { publicKey: j.publicKey, privateKey: crypto.createPrivateKey({ key: Buffer.from(j.privateKey, 'base64url'), format: 'der', type: 'pkcs8' }) }; return; }
+  } catch { /* first boot */ }
+  const { publicKey, privateKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+  vapidKeys = { publicKey: publicKey.export({ format: 'der', type: 'spki' }).toString('base64url'), privateKey };
+  try { writeFileSync(VAPID_FILE, JSON.stringify({ publicKey: vapidKeys.publicKey, privateKey: privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64url') }), { mode: 0o600 }); } catch (err) { console.warn('vapid persist:', err.message); }
+}
+const b64url = (buf) => Buffer.from(buf).toString('base64url');
+function hkdfExtract(salt, ikm) { return crypto.createHmac('sha256', salt).update(ikm).digest(); }
+function hkdfExpand(prk, info, len) {
+  let t = Buffer.alloc(0), out = Buffer.alloc(0), i = 1;
+  while (out.length < len) { t = crypto.createHmac('sha256', prk).update(Buffer.concat([t, Buffer.from(info), Buffer.from([i])])).digest(); out = Buffer.concat([out, t]); i++; }
+  return out.subarray(0, len);
+}
+function vapidJwt(endpoint) {
+  const aud = new URL(endpoint).origin;
+  const header = b64url(JSON.stringify({ typ: 'JWT', alg: 'ES256' }));
+  const payload = b64url(JSON.stringify({ aud, exp: Math.floor(Date.now() / 1000) + 12 * 3600, sub: 'mailto:admin@apnapayment.local' }));
+  const sig = crypto.createSign('sha256').update(`${header}.${payload}`).sign({ key: vapidKeys.privateKey, dsaEncoding: 'ieee-p1363' });
+  return `${header}.${payload}.${b64url(sig)}`;
+}
+/** RFC 8291 aes128gcm encrypted push body. */
+function encryptPush(subscription, data) {
+  const uaPub = Buffer.from(subscription.keys.p256dh, 'base64url');
+  const authSecret = Buffer.from(subscription.keys.auth, 'base64url');
+  const ecdh = crypto.createECDH('prime256v1'); ecdh.generateKeys();
+  const serverPub = ecdh.getPublicKey();
+  const sharedSecret = ecdh.computeSecret(uaPub);
+  // RFC 8291 §3.4: ikm = HKDF-Expand(HKDF-Extract(auth_secret, ecdh_secret), "WebPush: info" || 0x00 || ua_public || as_public, 32)
+  const ikm = hkdfExpand(hkdfExtract(authSecret, sharedSecret), Buffer.concat([Buffer.from('WebPush: info\0'), uaPub, serverPub]), 32);
+  const salt = crypto.randomBytes(16);
+  const cek = hkdfExpand(hkdfExtract(salt, ikm), 'Content-Encoding: aes128gcm\0', 16);
+  const nonce = hkdfExpand(hkdfExtract(salt, ikm), 'Content-Encoding: nonce\0', 12);
+  const plain = Buffer.concat([Buffer.from(JSON.stringify(data), 'utf8'), Buffer.from([2])]); // pad 0x02 = final record
+  const cipher = crypto.createCipheriv('aes-128-gcm', cek, nonce);
+  const ct = Buffer.concat([cipher.update(plain), cipher.final(), cipher.getAuthTag()]);
+  const body = Buffer.concat([salt, Buffer.from([0, 0, 16, 0]), Buffer.from([65]), serverPub, ct]); // rs=4096, idlen=65
+  return body;
+}
+function pushSubs() {
+  if (!db.notify || typeof db.notify !== 'object') db.notify = { items: [], watch: {} };
+  if (!Array.isArray(db.notify.push)) db.notify.push = [];
+  return db.notify.push;
+}
+async function deliverPush(sub, data) {
+  try {
+    const body = encryptPush(sub, data);
+    const res = await fetch(sub.endpoint, {
+      method: 'POST',
+      headers: { Authorization: `WebPush ${vapidJwt(sub.endpoint)}`, 'Content-Encoding': 'aes128gcm', 'Content-Type': 'application/octet-stream', TTL: '120', Urgency: 'high' },
+      body, signal: AbortSignal.timeout(8000)
+    });
+    if (res.status === 404 || res.status === 410) return false; // expired — remove
+    return true;
+  } catch { return true; } // network hiccup — keep subscription
+}
+/** Fan-out a notification to push subscriptions (admin-targeted → admin subs, broadcast → everyone). */
+function pushFanout(item) {
+  if (!vapidKeys || !item) return;
+  const data = { title: item.title, body: (item.body || '').replace(/\s+/g, ' ').slice(0, 180), tag: item.type || 'ff', link: (item.meta && item.meta.link) || '' };
+  const subs = pushSubs().filter((s) => {
+    if (item.target === 'broadcast') return true;
+    if (item.target === 'admin') { const u = findUser(s.username); return u && u.role === 'admin'; }
+    return item.target === `user:${s.username}`;
+  });
+  if (!subs.length) return;
+  Promise.all(subs.map(async (s) => { const alive = await deliverPush(s, data); if (!alive) { const arr = pushSubs(); const i = arr.indexOf(s); if (i >= 0) arr.splice(i, 1); } })).then(() => persist('notify')).catch(() => {});
+}
+// ---- monthly auto-report: har mahine ki 1–5 tarikh ko pichhle mahine ka FF-vs-GV compare broadcast ----
+function maybeMonthlyReport() {
+  try {
+    const now = new Date();
+    const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    if (!db.notify.watch || typeof db.notify.watch !== 'object') db.notify.watch = {};
+    if (now.getDate() > 5 || db.notify.watch.monthlyReport === ym) return;
+    db.notify.watch.monthlyReport = ym;
+    const [y, m] = ym.split('-').map(Number);
+    const prevY = m === 1 ? y - 1 : y, prevM = m === 1 ? 12 : m - 1;
+    const prev = `${prevY}-${String(prevM).padStart(2, '0')}`;
+    const prevPrev = prevM === 1 ? `${prevY - 1}-12` : `${prevY}-${String(prevM - 1).padStart(2, '0')}`;
+    const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    recordNotification({
+      type: 'monthly',
+      title: `📅 Monthly report ready · ${MON[prevM - 1]} ${prevY}`,
+      body: `${MON[prevM - 1]} ${prevY} ka FF vs GV comparison ready hai. Click karke Compare page par dono months side-by-side dekho.`,
+      target: 'broadcast',
+      meta: { monthlyReport: prev, link: `#/compare?monthA=${prev}&monthB=${prevPrev}` }
+    });
+    console.log(`monthly report notification sent for ${prev}`);
+  } catch (err) { console.warn('monthly report:', err.message); }
+}
 let reportCheckAt = 0;
 let reportCheckPromise = null;
 async function checkReports(force = false) {
@@ -675,6 +775,7 @@ async function handleApi(req, res, url) {
   if (p === '/api/notifications' && method === 'GET') {
     if (!user) throw new HttpError(401, 'Login required');
     checkReports().catch(() => {});
+    maybeMonthlyReport();
     const since = url.searchParams.get('since') || '';
     const items = visibleNotifications(user, since);
     const all = visibleNotifications(user, '1970-01-01T00:00:00.000Z');
@@ -687,6 +788,32 @@ async function handleApi(req, res, url) {
     user.notificationsSeenAt = new Date().toISOString();
     await persist('users');
     return sendJson(res, 200, { ok: true, at: user.notificationsSeenAt });
+  }
+  // ---- 📲 web push subscription ----
+  if (p === '/api/push/vapid' && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required');
+    return sendJson(res, 200, { publicKey: vapidKeys ? vapidKeys.publicKey : '' });
+  }
+  if (p === '/api/push/subscribe' && method === 'POST') {
+    if (!user) throw new HttpError(401, 'Login required');
+    const body = await readBody(req);
+    const sub = body.subscription;
+    if (!sub || !String(sub.endpoint || '').startsWith('http') || !sub.keys || !sub.keys.p256dh || !sub.keys.auth) throw new HttpError(400, 'Subscription invalid hai.');
+    const arr = pushSubs();
+    const clean = { username: user.username, endpoint: String(sub.endpoint).slice(0, 600), keys: { p256dh: String(sub.keys.p256dh).slice(0, 200), auth: String(sub.keys.auth).slice(0, 100) }, at: new Date().toISOString() };
+    const i = arr.findIndex((s) => s.endpoint === clean.endpoint);
+    if (i >= 0) arr[i] = clean; else arr.push(clean);
+    if (arr.length > 300) arr.splice(0, arr.length - 300);
+    await persist('notify');
+    return sendJson(res, 200, { ok: true, subs: arr.length });
+  }
+  if (p === '/api/push/unsubscribe' && method === 'POST') {
+    if (!user) throw new HttpError(401, 'Login required');
+    const body = await readBody(req);
+    const ep = String((body && body.endpoint) || '');
+    db.notify.push = pushSubs().filter((s) => s.endpoint !== ep);
+    await persist('notify');
+    return sendJson(res, 200, { ok: true });
   }
   if (p === '/api/activity' && method === 'POST') {
     if (!user) throw new HttpError(401, 'Login required');
@@ -1089,7 +1216,7 @@ async function start() {
   db.settings = deepMerge(DEFAULT_SETTINGS, stored.settings);
   db.resets = stored.resets;
   const storedNotify = stored.notify;
-  db.notify = { items: Array.isArray(storedNotify.items) ? storedNotify.items.slice(-500) : [], watch: storedNotify.watch && typeof storedNotify.watch === 'object' ? storedNotify.watch : {} };
+  db.notify = { items: Array.isArray(storedNotify.items) ? storedNotify.items.slice(-500) : [], watch: storedNotify.watch && typeof storedNotify.watch === 'object' ? storedNotify.watch : {}, push: Array.isArray(storedNotify.push) ? storedNotify.push.slice(-300) : [] };
   for (const kind of Object.keys(FILES)) durableSnapshots.set(kind, JSON.stringify(db[kind], null, 2));
   // Upgrade the known previous/default product title in durable settings; preserve admin custom names.
   if (/^First Forward Dashboard(?:\s*[-–—]\s*Robo\s*v?3\.2)?$/i.test(String(db.settings.appName || '').trim())) {
@@ -1103,11 +1230,14 @@ async function start() {
     await Promise.all(Object.keys(FILES).map((kind) => persist(kind)));
     console.log('APP_STORAGE seeded ✓ — users, settings and sessions now survive every deploy/restart.');
   }
+  loadVapid();
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`First Forward Dashboard → http://0.0.0.0:${server.address().port}`);
     console.log(`Sheet ${db.settings.sheetId} · cache ${cacheMs() / 1000}s · storage ${sheetsStore ? `Google Sheets / encrypted APP_STORAGE (${STORAGE_BACKEND})` : DATA_DIR} · users ${db.users.length}${GVIZ_BASE !== 'https://docs.google.com' ? ` · upstream ${GVIZ_BASE}` : ''}`);
     setTimeout(() => checkReports(true).catch(() => {}), 5000);
     setInterval(() => checkReports(false).catch(() => {}), 5 * 60e3).unref();
+    setTimeout(() => maybeMonthlyReport(), 8000);
+    setInterval(() => maybeMonthlyReport(), 60 * 60e3).unref();
   });
 }
 start().catch((err) => { console.error('Startup stopped to protect stored data:', err); process.exitCode = 1; });

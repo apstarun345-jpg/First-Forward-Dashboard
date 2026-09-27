@@ -132,7 +132,17 @@ window.FF = window.FF || {};
     if (filter.cls) parts.push(`${s.cls} = ${D.lit(String(filter.cls).replace(/^VC/i, ''))}`);
     const tq = `select * where ${parts.join(' and ')}${filter.limit ? ` limit ${filter.limit}` : ''}`;
     const t = await D.query(s.sheet, tq, opts);
-    const header = t.cols.map((c, i) => c.label || U.colLetter(i));
+    // Friendly names for known StockDataa columns — used when gviz gives no label (or just a letter).
+    const friendly = {};
+    [['id', 'ID'], ['name', 'Name'], ['tagId', 'Tag ID'], ['barcode', 'Barcode'], ['cls', 'Class'], ['tagType', 'Tag Type'], ['bcAllocatedAt', 'BC Allocated At'], ['agentId', 'Agent ID'], ['agentName', 'Agent Name'], ['agentAllocatedAt', 'Agent Allocated At'], ['tlName', 'TL Name']].forEach(([k, label]) => {
+      const L = String(s[k] || '').trim().toUpperCase(); if (L) friendly[L] = label;
+    });
+    const header = t.cols.map((c, i) => {
+      const lbl = U.clean(c.label);
+      const letter = U.colLetter(i);
+      if (lbl && lbl.toUpperCase() !== letter) return lbl; // real header text from the sheet
+      return friendly[letter] || lbl || letter;
+    });
     return { header, rows: D.textRows(t), cols: t.cols };
   }
 

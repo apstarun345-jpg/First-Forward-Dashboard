@@ -104,12 +104,40 @@ FF.pages = FF.pages || {};
       const filter = sel.scope === 'agent' ? { agent: sel.value } : sel.scope === 'tl' ? { tl: sel.value } : { cls: sel.value };
       const raw = await M.loadStockRows(filter);
       const meta = [['Report', `${FF.config.brand} · Stock report`], ['Scope', `${sel.scope.toUpperCase()}: ${sel.value}`], ['Generated', new Date().toLocaleString('en-IN')], ['Total tags', raw.rows.length], []];
-      const summary = { name: 'Summary', header: pivot.header, rows: [...pivot.rows, [], ...meta.map((m) => m.map((x) => x))] };
-      const rawRows = raw.rows.map((r) => r.map((v) => (v !== '' && /^-?\d+(\.\d+)?$/.test(v) && v.length < 15 ? Number(v) : v)));
+      // filterRows = header + pivot rows only → Excel/WPS ka header filter meta rows (Report/Scope/…) ko include nahi karega.
+      const summary = { name: 'Summary', header: pivot.header, rows: [...pivot.rows, [], ...meta.map((m) => m.map((x) => x))], filterRows: pivot.rows.length + 1 };
+      // Date-like columns (ALLOCATED AT / DATE / TIME…) → real Excel dates; baaki numeric-looking text → numbers.
+      const dateCol = raw.header.map((h) => /(allocated|date|time|\bat\b)/i.test(String(h)));
+      const rawRows = raw.rows.map((r) => r.map((v, ci) => {
+        if (v === '' || v === null || v === undefined) return v;
+        if (dateCol[ci]) { const d = U.parseDateTime(v); if (d) return d; }
+        return /^-?\d+(\.\d+)?$/.test(v) && v.length < 15 ? Number(v) : v;
+      }));
       FF.xlsx.download(`stock-${U.slug(sel.value)}-${U.stamp()}.xlsx`, [summary, { name: 'StockDataa', header: raw.header, rows: rawRows }]);
       U.toast(`Excel ready · ${U.fmt(raw.rows.length)} tag rows`, 'ok');
     } catch (err) { console.error(err); U.toast(`Export fail: ${err.message}`, 'err'); }
     btn.disabled = false; btn.textContent = label;
+  }
+
+  // ---- print / PDF report ------------------------------------------------------------------------
+  function printStockReport(P, sel, pivot) {
+    if (!FF.auth.can('export')) { U.toast('Download permission nahi hai', 'err'); return; }
+    const esc = U.esc;
+    const scopeLabel = sel.scope === 'agent' ? `Agent: ${sel.value}` : sel.scope === 'tl' ? `TL: ${sel.value}` : `Class: ${sel.value}`;
+    const src = sel.scope === 'agent' ? P.agents.find((a) => norm(a.name) === norm(sel.value))
+      : sel.scope === 'tl' ? P.tls.find((t) => norm(t.name) === norm(sel.value)) : null;
+    const kpiBox = (label, value, sub) => `<div class="kpi"><small>${esc(label)}</small><b>${value}</b>${sub ? `<small>${sub}</small>` : ''}</div>`;
+    let kpis = '';
+    if (src) {
+      const tlLabel = sel.scope === 'agent' ? `TL ${FF.config.isExcludedTl(src.tl) ? 'Direct' : src.tl}` : `${(pivot.list || []).length} agents holding stock`;
+      kpis = `<div class="kpis">${kpiBox('Total stock', U.fmt(src.total), tlLabel)}${kpiBox('VC4 stock', U.fmt(src.vc4), `${U.fmtPct(U.pctOf(src.vc4, src.total), 0)} of stock`)}${kpiBox('Commercial stock', U.fmt(src.comm))}${kpiBox('MTD issued', U.fmt(src.iss), P.cur ? U.labelYM(P.cur) : '')}${kpiBox('VC4 cover', src.cover === null ? '—' : `${U.fmt(src.cover)} days`, 'stock ÷ avg daily issuance')}</div>`;
+    } else if (sel.scope === 'cls') {
+      const totalCls = P.byClass.get(sel.value) || 0;
+      kpis = `<div class="kpis">${kpiBox(`${sel.value} stock`, U.fmt(totalCls), `${U.fmtPct(U.pctOf(totalCls, P.total), 1)} of all stock`)}${kpiBox('Total stock (all classes)', U.fmt(P.total))}${kpiBox('VC4 stock', U.fmt(P.vc4))}</div>`;
+    }
+    const table = `<table><thead><tr>${pivot.header.map((hd) => `<th>${esc(hd)}</th>`).join('')}</tr></thead><tbody>${pivot.rows.map((r, ri) => `<tr${ri === pivot.rows.length - 1 && r.includes('Total') ? ' style="font-weight:700"' : ''}>${r.map((c) => `<td class="${typeof c === 'number' ? 'num' : ''}">${typeof c === 'number' ? U.fmt(c, 1) : esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+    U.printReport({ title: `${FF.config.brand} — Stock Report`, subtitle: `${scopeLabel} · pivot + summary`, html: `${kpis}<h2>🧮 Pivot</h2>${table}<p class="sub">Full StockDataa rows ke liye dashboard se Excel (Summary + StockDataa rows) download karo.</p>` });
+    if (FF.notifications && FF.notifications.logClick) FF.notifications.logClick('Stock Print/PDF', scopeLabel);
   }
 
   // ---- views -----------------------------------------------------------------------------------
@@ -133,7 +161,7 @@ FF.pages = FF.pages || {};
           ${card('🍩 Class share', C.donut({ items: P.classes.map((c) => ({ label: c, value: agent.byClass.get(c) || 0, color: isVc4(c) ? '#6366f1' : undefined })), subtitle: 'tags' }))}
         </div>
         ${card(`🧮 Pivot · Class × Tag type <span class="dim">(${esc(agent.name)})</span>`, pivotTable(pv), `<button class="btn small primary" id="st-xlsx">⬇ Excel (Summary + StockDataa rows)</button><button class="btn small" data-action="export" data-name="stock-${U.slug(agent.name)}">⬇ CSV</button>`)}
-        <div class="share-row"><button class="btn" data-share="wa" data-text="${esc(text)}">📲 WhatsApp</button><button class="btn" data-share="mail" data-subject="Stock report · ${esc(agent.name)}" data-text="${esc(text)}">✉️ Email</button><button class="btn" data-share="copy" data-text="${esc(text)}">📋 Copy summary</button><a class="btn" href="#/performance?q=${encodeURIComponent(agent.name)}">🏆 Performance →</a><a class="btn" href="#/trend?agent=${encodeURIComponent(agent.name)}">📈 Trend →</a></div>`;
+        <div class="share-row"><button class="btn" data-share="wa" data-text="${esc(text)}">📲 WhatsApp</button><button class="btn" data-share="mail" data-subject="Stock report · ${esc(agent.name)}" data-text="${esc(text)}">✉️ Email</button><button class="btn" data-share="copy" data-text="${esc(text)}">📋 Copy summary</button><button class="btn" data-print>🖨 PDF / Print</button><a class="btn" href="#/performance?q=${encodeURIComponent(agent.name)}">🏆 Performance →</a><a class="btn" href="#/trend?agent=${encodeURIComponent(agent.name)}">📈 Trend →</a></div>`;
       return pv;
     }
     if (sel.scope === 'tl') {
@@ -153,7 +181,7 @@ FF.pages = FF.pages || {};
           ${card('🧑‍💼 Top agents by stock', C.hbars({ items: top.map((a, i) => ({ label: a.name, sub: `VC4 ${U.fmt(a.vc4)} · Comm ${U.fmt(a.comm)}`, value: a.total, color: C.PALETTE[i % C.PALETTE.length], attr: `data-pick-agent="${esc(a.name)}"` })), valueLabel: 'Stock' }))}
         </div>
         ${card(`🧮 Pivot · Agent × Class <span class="dim">(TL ${esc(tl.name)} · ${pv.list.length} agents)</span>`, pivotTable(pv, { rowAttr: (r, ri) => (ri < pv.rows.length - 1 ? `data-pick-agent="${esc(r[1])}" class="clickable"` : '') }), `<button class="btn small primary" id="st-xlsx">⬇ Excel (Summary + StockDataa rows)</button><button class="btn small" data-action="export" data-name="stock-tl-${U.slug(tl.name)}">⬇ CSV</button>`)}
-        <div class="share-row"><button class="btn" data-share="wa" data-text="${esc(text)}">📲 WhatsApp</button><button class="btn" data-share="mail" data-subject="Stock report · TL ${esc(tl.name)}" data-text="${esc(text)}">✉️ Email</button><button class="btn" data-share="copy" data-text="${esc(text)}">📋 Copy summary</button><a class="btn" href="#/performance?view=tls&tl=${encodeURIComponent(tl.name)}">🏆 Performance →</a><a class="btn" href="#/trend?tl=${encodeURIComponent(tl.name)}">📈 Trend →</a></div>`;
+        <div class="share-row"><button class="btn" data-share="wa" data-text="${esc(text)}">📲 WhatsApp</button><button class="btn" data-share="mail" data-subject="Stock report · TL ${esc(tl.name)}" data-text="${esc(text)}">✉️ Email</button><button class="btn" data-share="copy" data-text="${esc(text)}">📋 Copy summary</button><button class="btn" data-print>🖨 PDF / Print</button><a class="btn" href="#/performance?view=tls&tl=${encodeURIComponent(tl.name)}">🏆 Performance →</a><a class="btn" href="#/trend?tl=${encodeURIComponent(tl.name)}">📈 Trend →</a></div>`;
       return pv;
     }
     if (sel.scope === 'cls') {
@@ -167,7 +195,7 @@ FF.pages = FF.pages || {};
           ${kpi('g4', 'Agents holding', '🧑‍💼', U.fmt(agentsHolding.length), `Top: ${esc(agentsHolding[0] ? agentsHolding[0].name : '—')}`)}
           ${kpi('g6', 'vs VC4', '⚖️', isVc4(cls) ? '—' : U.fmtPct(U.pctOf(totalCls, P.vc4), 1), isVc4(cls) ? 'This is VC4' : `${esc(cls)} ÷ VC4 stock`)}
         </div>
-        ${card(`🧮 Pivot · TL × ${esc(cls)}`, pivotTable(pv, { numFrom: 1, rowAttr: (r) => `data-pick-tl="${esc(r[0])}" class="clickable"` }), `<button class="btn small primary" id="st-xlsx">⬇ Excel (Summary + StockDataa rows)</button><button class="btn small" data-action="export" data-name="stock-${U.slug(cls)}">⬇ CSV</button>`)}
+        ${card(`🧮 Pivot · TL × ${esc(cls)}`, pivotTable(pv, { numFrom: 1, rowAttr: (r) => `data-pick-tl="${esc(r[0])}" class="clickable"` }), `<button class="btn small primary" id="st-xlsx">⬇ Excel (Summary + StockDataa rows)</button><button class="btn small" data-action="export" data-name="stock-${U.slug(cls)}">⬇ CSV</button><button class="btn small" data-print>🖨 PDF / Print</button>`)}
         ${card(`🧑‍💼 Agents holding ${esc(cls)} <span class="dim">(top 100)</span>`, `<div class="table-wrap tall"><table class="tbl"><thead><tr><th>Agent</th><th>TL</th><th class="num">${esc(cls)}</th><th class="num">Total stock</th></tr></thead><tbody>${agentsHolding.slice(0, 100).map((a) => `<tr data-pick-agent="${esc(a.name)}" class="clickable"><td>${esc(a.name)}</td><td>${esc(FF.config.isExcludedTl(a.tl) ? 'Direct' : a.tl)}</td><td class="num"><b>${U.fmt(a.byClass.get(cls))}</b></td><td class="num">${U.fmt(a.total)}</td></tr>`).join('')}</tbody></table></div>`, `<button class="btn small" data-action="export" data-name="agents-${U.slug(cls)}">⬇ CSV</button>`)}`;
       return pv;
     }
@@ -204,11 +232,12 @@ FF.pages = FF.pages || {};
     if (params.agent) { view.scope = 'agent'; view.value = params.agent; } else if (params.tl) { view.scope = 'tl'; view.value = params.tl; } else if (params.cls) { view.scope = 'cls'; view.value = params.cls; } else { view.scope = ''; view.value = ''; }
     root.innerHTML = `<div class="page-head"><div><h1>📦 Stock / Inventory</h1><p class="sub">StockDataa — agent / TL / class wise stock · VC4 vs Commercial · pivot + Excel export</p></div>
       <div class="head-actions"><button class="btn primary" data-action="refresh">↻ Refresh</button>${FF.auth.can('sheet:StockDataa') ? `<a class="btn" href="#/sheet/${encodeURIComponent(FF.config.stock.sheet)}">Full StockDataa sheet →</a>` : ''}</div></div>
-      <div class="card controls finder"><div class="finder-row"><div class="finder-input"><span class="finder-ico">🔎</span><input class="input" id="st-q" placeholder="Agent ya TL ka naam type karo… (dropdown se select karo)" value="${esc(view.scope === 'cls' ? '' : view.value)}"></div>
+      <div class="card controls finder"><div class="finder-row"><div class="finder-input"><span class="finder-ico">🔎</span><input class="input" id="st-q" placeholder="Agent ya TL ka naam type karo… (dropdown se select karo)" value="${esc(view.scope === 'cls' ? '' : view.value)}"><button class="btn mic-btn" id="st-mic" title="🗣 Bol ke search karo" type="button">🎤</button></div>
         <label>Criteria <select id="st-scope"><option value="">Agent + TL</option><option value="agent">Agent only</option><option value="tl">TL only</option></select></label>
         <button class="btn small" id="st-clear" ${view.scope ? '' : 'disabled'}>✕ Clear</button>
         <span class="ctrl-note" id="st-note"></span></div>
-        <div class="chip-row" id="st-chips"></div></div>
+        <div class="chip-row" id="st-chips"></div>
+        <div class="chip-row recent" id="st-recent" hidden></div></div>
       <div id="st-body">${U.spinner('StockDataa aggregate ho raha hai…')}</div>`;
     const body = U.$('#st-body', root);
     try { await S.need('stock'); await Promise.allSettled([S.need('stockAgents'), S.need('stockTypes'), S.need('daily'), S.need('agents'), S.need('agentClass')]); } catch (err) { body.innerHTML = U.errorBox(err, 'data-action="refresh"'); return; }
@@ -232,10 +261,20 @@ FF.pages = FF.pages || {};
       if (!s) P.classes.forEach((c) => list.push({ kind: 'cls', kindLabel: 'Class', label: c, sub: `${U.fmt(P.byClass.get(c))} tags`, value: c }));
       return list;
     };
+    const drawRecent = () => {
+      const box = U.$('#st-recent', root);
+      if (!box) return;
+      if (view.scope) { box.hidden = true; box.innerHTML = ''; return; }
+      const recents = U.recentList('stock', 5);
+      if (!recents.length) { box.hidden = true; box.innerHTML = ''; return; }
+      box.hidden = false;
+      box.innerHTML = `<span class="dim small">🕘 Recent:</span>${recents.map((r) => `<button class="chip recent" data-recent-kind="${esc(r.kind)}" data-recent-value="${esc(r.value)}">${r.kind === 'tl' ? '👥' : r.kind === 'cls' ? '🏷️' : '🧑‍💼'} ${esc(r.label)}</button>`).join('')}<button class="chip ghost" data-recent-clear>✕ Clear</button>`;
+    };
     const go = (scope, value) => {
       if (FF.notifications && FF.notifications.logClick) {
         FF.notifications.logClick(`Stock ${scope.toUpperCase()}`, value);
       }
+      U.recentAdd('stock', { kind: scope, value, label: value });
       FF.app.navigate('stock', scope === 'agent' ? { agent: value } : scope === 'tl' ? { tl: value } : { cls: value });
     };
     const logStockSearch = U.debounce((q) => {
@@ -248,12 +287,25 @@ FF.pages = FF.pages || {};
       if (q) logStockSearch(q);
     });
     U.suggest(input, { items, onPick: (it) => { if (it.value && FF.notifications && FF.notifications.logSearch) FF.notifications.logSearch('Stock / Inventory', it.value); go(it.kind, it.value); }, onEnter: (q) => { if (q && FF.notifications && FF.notifications.logSearch) FF.notifications.logSearch('Stock / Inventory', q); const all = items(); const hit = all.find((i) => norm(i.label) === norm(q)) || all.find((i) => norm(i.label).includes(norm(q))); if (hit) go(hit.kind, hit.value); else U.toast('Koi agent / TL match nahi hua', 'err'); } });
+    drawRecent();
+    // 🗣 voice search — bol ke agent/TL kholo
+    const mic = U.$('#st-mic', root);
+    if (mic && U.voiceInput) mic.addEventListener('click', () => U.voiceInput((text) => {
+      input.value = text;
+      const all = items();
+      const hit = all.find((i) => norm(i.label) === norm(text)) || all.find((i) => norm(i.label).includes(norm(text)));
+      if (hit) { U.toast(`🗣 "${text}" → ${hit.label}`, 'ok'); go(hit.kind, hit.value); }
+      else { U.toast(`"${text}" ka koi match nahi mila — dropdown se select karo`, 'warn'); input.dispatchEvent(new Event('input', { bubbles: true })); }
+    }, 'Agent ya TL ka naam bolo…'));
     U.$('#st-clear', root).addEventListener('click', () => FF.app.navigate('stock', {}));
     root.addEventListener('click', (e) => {
+      const rc = e.target.closest('[data-recent-clear]'); if (rc) { try { localStorage.removeItem('ff_recent_stock'); } catch {} drawRecent(); return; }
+      const r = e.target.closest('[data-recent]'); if (r && r.dataset.recentKind) { go(r.dataset.recentKind, r.dataset.recentValue); return; }
       const a = e.target.closest('[data-pick-agent]'); if (a) { go('agent', a.dataset.pickAgent); return; }
       const t = e.target.closest('[data-pick-tl]'); if (t) { go('tl', t.dataset.pickTl); return; }
       const c = e.target.closest('[data-pick-cls]'); if (c) { go('cls', c.dataset.pickCls); return; }
       const x = e.target.closest('#st-xlsx'); if (x && pivot) exportExcel(P, view, pivot, x);
+      const pr = e.target.closest('[data-print]'); if (pr && pivot) printStockReport(P, view, pivot);
     });
     root.addEventListener('change', (e) => {
       if (e.target.id === 'st-cls') {

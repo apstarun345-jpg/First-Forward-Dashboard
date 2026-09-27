@@ -145,6 +145,12 @@ const someAgent = agents.find((a) => a.n > 3)?.name; const someTl = agents.find(
 log(`      sample agent "${someAgent}" · TL "${someTl}"`);
 await run('trend.render tl filter', () => pages.trend.render(root(), { mode: 'daily', tl: someTl }, {}), true);
 await run('trend.render agent filter', () => pages.trend.render(root(), { mode: 'compare', agent: someAgent }, {}), true);
+await run('targets.render', () => pages.targets.render(root(), {}, {}), true);
+await run('targets.render gv+month', () => pages.targets.render(root(), { month: FF.util.prevMonthKey(FF.util.ymKey(new Date())) }, {}), true);
+await run('targets.render achievements tab', () => pages.targets.render(root(), { tab: 'achieve' }, {}), true);
+await run('targets.render tl rollup tab', () => pages.targets.render(root(), { tab: 'tl' }, {}), true);
+await run('rangeReport.render default', () => pages.rangeReport.render(root(), {}, {}), true);
+await run('rangeReport.render custom range', () => { const d = new Date(); d.setDate(d.getDate() - 20); return pages.rangeReport.render(root(), { from: FF.util.dateKey(d), to: FF.util.dateKey(new Date()) }, {}); }, true);
 await run('stock.render overview', () => pages.stock.render(root(), {}, {}), true);
 await run('stock.render agent', () => pages.stock.render(root(), { agent: someAgent }, {}), true);
 await run('stock.render tl', () => pages.stock.render(root(), { tl: someTl }, {}), true);
@@ -174,7 +180,7 @@ await run('gv aggregations + people', async () => {
   if (!series.totals.some((n) => n > 0)) throw new Error('dailySeries empty');
   log(`      months ${months.join(', ')} · latest ${FF.util.ymKey(FF.gv.latestDate())} total ${s.total} · week buckets ${weekly.length} · agents ${agents.length} · tls ${tls.length} · people ${ppl.agents.length}/${ppl.tls.length}`);
 });
-await run('page home', () => pages.home.render(root(), {}, {}), true);
+await run('page home', async () => { const r = root(); await pages.home.render(r, {}, {}); await settle(150); const all = [r.innerHTML, ...REG.values().map((e) => e.innerHTML), ...body.children.map((c) => c.innerHTML)].join('\n'); if (!/Champions of/.test(all)) throw new Error('gamification champions card missing from home'); }, true);
 await run('page gvDashboard', () => pages.gvDashboard.render(root(), {}, {}), true);
 await run('page gvTrend daily', () => pages.gvTrend.render(root(), { mode: 'daily' }, {}), true);
 await run('page gvTrend weekly', () => pages.gvTrend.render(root(), { mode: 'weekly' }, {}), true);
