@@ -1,5 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="First Forward">
-  <defs><linearGradient id="g" x1="4" y1="4" x2="60" y2="60" gradientUnits="userSpaceOnUse"><stop stop-color="#6366f1"/><stop offset=".55" stop-color="#ec4899"/><stop offset="1" stop-color="#fb923c"/></linearGradient></defs>
-  <rect width="64" height="64" rx="17" fill="url(#g)"/>
-  <path d="M14 14h36v8H23v8h21v8H23v12h-9V14Zm27 24 9 0-8 12h-9l8-12Z" fill="#fff"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" role="img" aria-label="ApnaPayment">
+  <rect width="192" height="192" rx="40" fill="#111214"/>
+  <circle cx="69" cy="51" r="10" fill="#ffff00"/>
+  <path d="M37 137 59 73h22l23 64H84l-4-14H58l-4 14Zm26-30h12l-6-21Z" fill="white"/>
+  <path d="m116 73 43 32-43 32Z" fill="#ffff00"/>
 </svg>

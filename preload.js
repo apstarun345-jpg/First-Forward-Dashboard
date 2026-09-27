@@ -1,107 +1,60 @@
-/* Background preloader — site open / refresh par sab kuch background me update, phir har sheet aur stock instant dikhe */
+/* Warm the exact queries used by every permitted sheet, alongside dashboard datasets.
+   Normal opens reuse the server cache. Only explicit refresh bypasses it. */
 window.FF = window.FF || {};
 (function (FF) {
   'use strict';
-  const U = FF.util;
-  const D = FF.data;
-  const state = { running: false, done: false, progress: { total: 0, loaded: 0 }, errors: [] };
-
-  async function preloadAll(fresh = true) {
+  let generation = 0;
+  const state = { running: false, done: false, progress: { total: 0, loaded: 0 }, errors: [], promise: null };
+  async function warmTab(tab, fresh) {
+    const name = tab.tab || tab.id;
+    const opts = { fresh, gid: tab.gid || '' };
+    const [count, first] = await Promise.all([
+      FF.data.query(name, 'select count(A)', opts).catch(() => null),
+      FF.data.query(name, 'select * limit 100', opts)
+    ]);
+    const total = count && FF.data.cellNumber(count.rows[0] && count.rows[0][0]);
+    // Never download a huge raw inventory just because its count query failed.
+    if ((total !== null && total !== undefined && total <= 2500) || (!count && first.rows.length < 100)) {
+      await FF.data.query(name, '', opts);
+    }
+  }
+  function preloadAll(fresh = false) {
     if (state.running) return state.promise;
-    state.running = true;
-    state.done = false;
-    state.errors = [];
-    const tabs = (FF.config.allTabs ? FF.config.allTabs(true) : []).filter(t => t && t.id);
-    const datasets = Object.keys(FF.store.DATASETS || {});
-    const gvDatasets = FF.gv ? Object.keys(FF.gv.DATASETS || {}) : [];
-    
-    // Total steps: FF store + GV store + each sheet tab
-    const total = datasets.length + gvDatasets.length + tabs.length;
-    state.progress = { total, loaded: 0 };
-    
-    const emit = () => {
-      if (FF.store && FF.store.state) {
-        FF.store.state.progress = { done: state.progress.loaded, total: state.progress.total };
+    const version = generation;
+    state.running = true; state.done = false; state.errors = [];
+    const tabs = FF.config.allTabs(true).filter(t => FF.auth.can(`sheet:${t.id}`));
+    const tasks = [() => FF.store.preload(fresh)];
+    if (FF.gv && FF.gv.enabled()) tasks.push(() => FF.gv.preload(fresh));
+    state.progress = { total: tasks.length + tabs.length, loaded: 0 };
+    const run = async (task) => {
+      try { await task(); }
+      catch (err) { if (version === generation) state.errors.push(err); }
+      finally { if (version === generation) { state.progress.loaded++; if (FF.app && FF.app.updateStatus) FF.app.updateStatus(); } }
+    };
+    // Sheets start NOW, not after the slowest dashboard request finishes.
+    let next = 0;
+    const worker = async () => {
+      while (version === generation && next < tabs.length) {
+        const tab = tabs[next++];
+        await run(() => warmTab(tab, fresh));
       }
     };
-
-    const p = (async () => {
-      try {
-        // Phase 1: Core datasets in parallel (fastest) — both FF and GV
-        const corePromises = [];
-        if (FF.store) {
-          corePromises.push(FF.store.preload(!!fresh).then(() => {
-            state.progress.loaded += datasets.length;
-            emit();
-          }).catch(e => { state.errors.push(e); }));
-        }
-        
-        if (FF.gv && FF.gv.enabled()) {
-          corePromises.push(FF.gv.preload(!!fresh).then(() => {
-            state.progress.loaded += gvDatasets.length;
-            emit();
-          }).catch(e => { state.errors.push(e); }));
-        }
-        
-        await Promise.allSettled(corePromises);
-        
-        // Phase 2: Preload all sheet tabs in background with configured ranges (chunked)
-        const preloadTab = async (tab) => {
-          try {
-            const gid = tab.gid || '';
-            const range = tab.range || (tab.startCol || tab.startRow || tab.endCol || tab.endRow ? (FF.config.formatRange ? FF.config.formatRange(tab.startCol, tab.startRow, tab.endCol, tab.endRow) : `${tab.startCol || 'A'}${tab.startRow || 1}:${tab.endCol || ''}${tab.endRow || ''}`) : '');
-            const tabName = tab.tab || tab.id;
-            // Warm cache with count + first page (or full sheet for small ones)
-            await D.query(tabName, 'select count(A)', { fresh: !!fresh, gid, range }).catch(() => {});
-            await D.query(tabName, 'select * limit 100', { fresh: !!fresh, gid, range }).catch(() => {});
-            // If report or small sheet, pre-cache full data so opening the tab is 100% instant
-            if (tab.kind === 'report' || tab.kind === 'gv-report' || tab.kind === 'gv-issuance') {
-              await D.query(tabName, '', { fresh: !!fresh, gid, range }).catch(() => {});
-            }
-          } catch (e) {
-            state.errors.push(e);
-          } finally {
-            state.progress.loaded++;
-            emit();
-          }
-        };
-
-        // Load tabs in batches of 2 to avoid overwhelming Google
-        const batchSize = 2;
-        for (let i = 0; i < tabs.length; i += batchSize) {
-          const batch = tabs.slice(i, i + batchSize);
-          await Promise.allSettled(batch.map(preloadTab));
-          await new Promise(r => setTimeout(r, 60));
-        }
-        
-        state.done = true;
-        // Notify active view that fresh background data is ready
-        if (FF.app && FF.app.onBackgroundDataUpdated) {
-          FF.app.onBackgroundDataUpdated();
-        }
-        U.toast(`All sheets & stock data updated ✓ (${tabs.length} sheets)`, 'ok');
-      } finally {
-        state.running = false;
-      }
-    })();
-    
-    state.promise = p;
-    return p;
+    state.promise = Promise.all([...tasks.map(run), ...Array.from({ length: Math.min(3, tabs.length) }, () => Promise.resolve().then(worker))])
+      .then(() => {
+        if (version !== generation) return state;
+        state.errors.push(...Object.values(FF.store.state.errors));
+        if (FF.gv && FF.gv.enabled()) state.errors.push(...Object.keys(FF.gv.DATASETS).map(k => FF.gv.error(k)).filter(Boolean));
+        state.done = state.errors.length === 0;
+        return state;
+      }).finally(() => { if (version === generation) { state.running = false; if (FF.app && FF.app.updateStatus) FF.app.updateStatus(); } });
+    return state.promise;
   }
-
-  // Fast sync: force fresh + clear cache + reload all
-  async function fastSync() {
-    D.clearCache();
-    if (FF.store) FF.store.reset();
-    if (FF.gv) FF.gv.reset();
-    return preloadAll(true);
+  async function fastSync(fresh = true) {
+    if (state.running) await state.promise;
+    // Retain displayed data during refresh; no blank screen or global cache race.
+    if (FF.pages.sheet && FF.pages.sheet.reset) FF.pages.sheet.reset();
+    return preloadAll(fresh);
   }
-
-  FF.preloader = {
-    preloadAll,
-    fastSync,
-    get state() { return state; },
-    get running() { return state.running; },
-    get done() { return state.done; }
-  };
+  function reset() { generation++; state.running = false; state.done = false; state.promise = null; state.errors = []; }
+  FF.preloader = { preloadAll, fastSync, reset, get state() { return state; }, get running() { return state.running; }, get done() { return state.done; } };
 })(window.FF);

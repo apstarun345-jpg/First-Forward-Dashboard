@@ -8,6 +8,7 @@ FF.pages = FF.pages || {};
   const esc = U.esc;
   const TABS = [['account', '👤 My account'], ['brand', '🎨 Branding & images'], ['sources', '🗂️ Sheets & tabs'], ['access', '🔐 Access matrix'], ['data', '🔌 Data source'], ['rules', '📐 Thresholds'], ['contacts', '📲 Contacts & sharing'], ['users', '👥 Users & access'], ['backup', '💾 Backup']];
   let tab = 'account';
+  let storage = null;
   let settings = null, defaults = null, usersCache = null, permsCache = [];
 
   const field = (label, input, hint) => `<label class="fld"><span>${label}</span>${input}${hint ? `<small class="dim">${hint}</small>` : ''}</label>`;
@@ -21,7 +22,8 @@ FF.pages = FF.pages || {};
   const saveBar = (id) => `<div class="save-bar"><button class="btn primary" data-save="${id}">💾 Save</button><span class="dim small" id="save-msg-${id}"></span></div>`;
 
   async function loadSettings() {
-    const out = await A.api('/api/settings');
+    const [out, health] = await Promise.all([A.api('/api/settings'), A.api('/api/health').catch(() => ({}))]);
+    storage = health.storage;
     settings = JSON.parse(JSON.stringify(out.settings)); defaults = out.defaults;
   }
   async function save(patch, msgEl, opts) {
@@ -33,8 +35,8 @@ FF.pages = FF.pages || {};
       FF.app.renderSidebar();
       if (msgEl) msgEl.textContent = `Saved ✓ ${U.timeLabel(Date.now())}`;
       U.toast('Settings saved ✓', 'ok');
-      if (opts && opts.reload) { U.toast('Sheet mapping badli — data dobara load ho raha hai…'); FF.store.reset(); if (FF.pages.performance.reset) FF.pages.performance.reset(); FF.store.preload(false).catch(() => {}); }
-    } catch (err) { if (msgEl) msgEl.textContent = ''; U.toast(err.message, 'err'); }
+      if (opts && opts.reload) { U.toast('Sheet mapping badli — data dobara load ho raha hai…'); FF.store.reset(); if (FF.gv) FF.gv.reset(); if (FF.pages.sheet.reset) FF.pages.sheet.reset(); if (FF.pages.performance.reset) FF.pages.performance.reset(); FF.preloader.fastSync(false).catch(() => {}); }
+    } catch (err) { if (msgEl) msgEl.textContent = 'Not saved — retry'; if (A.settings) A.applySettings(A.settings); U.toast(err.message, 'err'); }
   }
   function collect(root, base) {
     const patch = JSON.parse(JSON.stringify(base || {}));
@@ -129,7 +131,7 @@ FF.pages = FF.pages || {};
     const img = (key, label, hint, max) => `<div class="img-field"><div class="img-preview ${key}">${s[key] ? `<img src="${esc(s[key])}" alt="">` : '<span class="dim">No image</span>'}</div><div><b>${label}</b><small class="dim">${hint}</small><div class="btn-row"><label class="btn small">📤 Upload<input type="file" accept="image/*" hidden data-img="${key}" data-max="${max}"></label>${s[key] ? `<button class="btn small" data-img-clear="${key}">✕ Remove</button>` : ''}</div></div></div>`;
     return `${section('🏷️ Branding', `<div class="form-grid">${field('App name', txt('appName', s.appName), 'Browser title / login page')}${field('Brand (sidebar)', txt('brand', s.brand))}${field('Tagline', txt('tagline', s.tagline))}</div>${saveBar('brand')}`)}
       ${section('🖼️ Images', `${img('logo', 'Logo', 'Sidebar + login page (square works best, PNG with transparency). Auto-resized to 512px.', 512)}${img('loginImage', 'Login / hero image', 'Left side of the login page (landscape). Auto-resized to 1600px.', 1600)}<p class="dim small">Images server par save hoti hain (settings.json) — upload karte hi live.</p>`)}
-      ${section('🎨 Theme colours', `<div class="form-grid">${field('Sidebar background (top)', color('theme.sidebarBg', t.sidebarBg))}${field('Sidebar background (bottom)', color('theme.sidebarBg2', t.sidebarBg2))}${field('Sidebar text', color('theme.sidebarText', t.sidebarText))}${field('Accent', color('theme.accent', t.accent))}${field('Accent 2 (gradient)', color('theme.accent2', t.accent2))}</div><p class="dim small">Colour badalte hi preview dikhta hai; Save karne par sabke liye lagta hai.</p>${saveBar('theme')}<button class="btn small" data-reset-theme>↺ Default colours</button>`)}`;
+      ${section('🎨 Theme colours', `<div class="form-grid">${field('Sidebar background (top)', color('theme.sidebarBg', t.sidebarBg))}${field('Sidebar background (bottom)', color('theme.sidebarBg2', t.sidebarBg2))}${field('Sidebar text', color('theme.sidebarText', t.sidebarText))}${field('Accent', color('theme.accent', t.accent))}${field('Accent 2 (gradient)', color('theme.accent2', t.accent2))}</div><p class="dim small">Colour preview turant dikhta hai; picker selection complete karne par automatically save hota hai. Save button bhi use kar sakte hain.</p>${saveBar('theme')}<button class="btn small" data-reset-theme>↺ Default colours</button>`)}`;
   }
   function dataTab() {
     const s = settings;
@@ -188,7 +190,7 @@ FF.pages = FF.pages || {};
     });
   }
   function backupTab() {
-    return `${section('💾 Backup / restore settings', `<p class="dim small">Render free plan par disk ephemeral hoti hai — har deploy ke baad settings/users reset ho sakte hain. Isliye settings ka JSON download karke rakho, aur Render par <code>ADMIN_USER</code> / <code>ADMIN_PASSWORD</code> env set rakho (admin hamesha bana rahega). Persistent disk ho to <code>DATA_DIR</code> set karo.</p><div class="btn-row"><button class="btn" id="bk-export">⬇ Download settings JSON</button><label class="btn">📤 Import settings JSON<input type="file" accept="application/json" hidden id="bk-import"></label></div>`)}
+    return `${section('💾 Backup / restore settings', `${storage && storage.warning ? `<div class="warn-box">⚠️ ${esc(storage.warning)}</div>` : ''}${storage && storage.error ? `<div class="warn-box">${esc(storage.error)}</div>` : ''}<p class="dim small">Storage: <code>${esc(storage && storage.backend === 'sheets' ? 'Same Google Sheet / APP_STORAGE' : storage && storage.dataDir || 'DATA_DIR')}</code> · ${storage && storage.backend === 'sheets' ? 'Encrypted cloud storage ✓ — users, sessions and settings' : storage && storage.persistentDiskMounted ? 'Persistent mount detected ✓' : 'Local storage — verify durable hosting before deploying'}. Settings export contains only settings, NOT users or sessions. Before changing Render storage, securely back up all runtime JSON files from the old data directory using Render Shell. Never put those files in Git. Environment admin credentials are used only on first setup.</p><div class="btn-row"><button class="btn" id="bk-export">⬇ Download settings JSON</button><label class="btn">📤 Import settings JSON<input type="file" accept="application/json" hidden id="bk-import"></label></div>`)}
       ${section('🧹 Maintenance', `<div class="btn-row"><button class="btn" id="bk-cache">🧹 Clear server cache</button><button class="btn danger" id="bk-reset">↺ Reset ALL settings to defaults</button></div><p class="dim small">Last saved: ${settings.updatedAt ? `${U.timeLabel(new Date(settings.updatedAt).getTime())} by ${esc(settings.updatedBy || '')}` : 'never'}</p>`)}`;
   }
 
@@ -216,7 +218,7 @@ FF.pages = FF.pages || {};
       <div class="table-wrap"><table class="tbl compact matrix"><thead><tr><th>Show</th><th>Tab id / permission</th><th>Label</th><th>Sidebar group</th><th>Spreadsheet</th><th>Sheet tab name</th><th>gid</th><th title="Start column (e.g. A)">Start Col</th><th title="Start row (e.g. 1)">Start Row</th><th title="End column (e.g. M, Z, BE)">End Col</th><th title="End row (blank for all)">End Row</th><th title="Custom range (e.g. A1:M, A4:BE)">Range</th><th>Description</th></tr></thead><tbody>${list.map(rowHtml).join('')}</tbody></table></div>`;
 
     const rangeCards = tabs.map((t) => {
-      const calcRange = t.range || (t.startCol || t.startRow || t.endCol || t.endRow ? `${t.startCol || 'A'}${t.startRow || 1}:${t.endCol || ''}${t.endRow || ''}` : 'A1:');
+      const calcRange = t.range || FF.config.formatRange(t.startCol, t.startRow, t.endCol, t.endRow);
       return `<div class="range-config-card" data-range-card="${esc(t.id)}">
         <div class="rcc-head">
           <span class="rcc-icon">${t.icon || '📄'}</span>
@@ -407,6 +409,10 @@ FF.pages = FF.pages || {};
       }));
       // live colour preview
       U.$$('input[type=color][data-path]', body).forEach((inp) => inp.addEventListener('input', () => { inp.nextElementSibling.textContent = inp.value; const t = { ...FF.config.theme }; t[inp.dataset.path.split('.')[1]] = inp.value; FF.config.theme = t; A.applyTheme(); }));
+      U.$$('input[type=color][data-path]', body).forEach((inp) => inp.addEventListener('change', () => {
+        const theme = collect(inp.closest('.card'), {}).theme;
+        if (theme) save({ theme }, U.$('#save-msg-theme', body));
+      }));
       const rt = U.$('[data-reset-theme]', body);
       if (rt) rt.addEventListener('click', () => save({ theme: defaults.theme }, null).then(draw));
       // images
@@ -442,6 +448,7 @@ FF.pages = FF.pages || {};
             range = FF.config.formatRange ? FF.config.formatRange(startCol, startRow, endCol, endRow) : `${startCol || 'A'}${startRow || 1}:${endCol || ''}${endRow || ''}`;
           }
           return {
+            ...((settings.tabs || []).find(t => t.id === tabId) || {}),
             id: tabId,
             enabled: row.querySelector('[data-tab-enabled]').checked,
             label: row.querySelector('[data-tab-field="label"]').value,
@@ -473,7 +480,7 @@ FF.pages = FF.pages || {};
             await Promise.all([FF.store.preload(true).catch(() => {}), FF.gv && FF.gv.enabled() ? FF.gv.preload(true).catch(() => {}) : Promise.resolve()]);
           }
           draw();
-        } catch (err) { if (msgEl) msgEl.textContent = ''; U.toast(err.message, 'err'); }
+        } catch (err) { if (msgEl) msgEl.textContent = 'Not saved — retry'; if (A.settings) A.applySettings(A.settings); U.toast(err.message, 'err'); }
       };
 
       const tabsSave = U.$('#tabs-save', body);
@@ -493,7 +500,7 @@ FF.pages = FF.pages || {};
         const eRow = (card.querySelector('[data-field="endRow"]')?.value || '').trim();
         const rangeEl = card.querySelector('[data-field="range"]');
         if (e.target.dataset.field !== 'range' && rangeEl) {
-          const calc = `${sCol}${sRow}:${eCol}${eRow}`;
+          const calc = FF.config.formatRange(sCol, sRow, eCol, eRow);
           rangeEl.value = calc;
         }
         const rowRange = row.querySelector('[data-tab-field="range"]');
@@ -521,7 +528,7 @@ FF.pages = FF.pages || {};
         const startCol = (U.$('#nt-start-col', body)?.value || 'A').trim().toUpperCase();
         const startRow = (U.$('#nt-start-row', body)?.value || '1').trim();
         const endCol = (U.$('#nt-end-col', body)?.value || '').trim().toUpperCase();
-        const range = `${startCol}${startRow}:${endCol}`;
+        const range = FF.config.formatRange(startCol, startRow, endCol, '');
         current.push({ id, label: U.$('#nt-label', body).value.trim() || id, tab: U.$('#nt-tab', body).value.trim() || id, gid: U.$('#nt-gid', body).value.trim(), group: U.$('#nt-group', body).value, source: U.$('#nt-source', body).value, kind: 'sheet', icon: '📄', desc: '', enabled: true, startCol, startRow, endCol, range });
         try { const out = await A.api('/api/settings', 'PUT', { settings: { tabs: current } }); settings = JSON.parse(JSON.stringify(out.settings)); A.applySettings(out.settings); FF.app.renderSidebar(); U.toast('Tab add ho gaya ✓ — ab Access matrix me user ko do', 'ok'); draw(); } catch (err) { U.toast(err.message, 'err'); }
       });

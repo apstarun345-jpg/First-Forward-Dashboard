@@ -3,16 +3,21 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>First Forward Dashboard</title>
+  <title>ApnaPayment Dashboard</title>
   <meta name="description" content="First Forward + GV Partner FASTag dashboard — issuance, stock, trends and agent performance.">
-  <meta name="theme-color" content="#4f46e5">
+  <meta name="theme-color" content="#111214">
   <link rel="manifest" href="manifest.webmanifest">
-  <link id="site-favicon" rel="icon" type="image/svg+xml" href="favicon.svg">
-  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
-  <link rel="apple-touch-icon" href="icon-192.png">
-  <link rel="stylesheet" href="styles.css?v=4.5">
+  <link id="site-favicon" rel="icon" type="image/svg+xml" href="favicon.svg?v=5">
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png?v=5">
+  <link rel="apple-touch-icon" href="icon-192.png?v=5">
+  <link rel="stylesheet" href="styles.css?v=5">
 </head>
 <body>
+  <div id="app-boot" class="app-boot" role="status" aria-live="polite">
+    <img src="logos/apna-payment.png" alt="ApnaPayment" width="280" height="153">
+    <p>Opening your workspace…</p><small>Checking your secure session…</small>
+    <div class="boot-progress"></div>
+  </div>
   <aside class="sidebar" id="sidebar">
     <div class="brand">
       <div class="brand-logo" id="brand-logo">FF</div>
@@ -55,27 +60,27 @@
     <div class="drawer-body" id="drawer-body"></div>
   </aside>
 
-  <script src="config.js?v=4.5"></script>
-  <script src="util.js?v=4.5"></script>
-  <script src="xlsx.js?v=4.5"></script>
-  <script src="data.js?v=4.5"></script>
-  <script src="charts.js?v=4.5"></script>
-  <script src="model.js?v=4.5"></script>
-  <script src="store.js?v=4.5"></script>
-  <script src="gv.js?v=4.5"></script>
-  <script src="preload.js?v=4.5"></script>
-  <script src="auth.js?v=4.5"></script>
-  <script src="notifications.js"></script>
-  <script src="sheets.js"></script>
-  <script src="dashboard.js"></script>
-  <script src="trend.js"></script>
-  <script src="stock.js"></script>
-  <script src="performance.js"></script>
-  <script src="home.js"></script>
-  <script src="gvpages.js"></script>
-  <script src="compare.js"></script>
-  <script src="tagIssued.js"></script>
-  <script src="settings.js"></script>
-  <script src="app.js"></script>
+  <script defer src="config.js?v=5"></script>
+  <script defer src="util.js?v=5"></script>
+  <script defer src="xlsx.js?v=5"></script>
+  <script defer src="data.js?v=5"></script>
+  <script defer src="charts.js?v=5"></script>
+  <script defer src="model.js?v=5"></script>
+  <script defer src="store.js?v=5"></script>
+  <script defer src="gv.js?v=5"></script>
+  <script defer src="preload.js?v=5"></script>
+  <script defer src="auth.js?v=5"></script>
+  <script defer src="notifications.js?v=5"></script>
+  <script defer src="sheets.js?v=5"></script>
+  <script defer src="dashboard.js?v=5"></script>
+  <script defer src="trend.js?v=5"></script>
+  <script defer src="stock.js?v=5"></script>
+  <script defer src="performance.js?v=5"></script>
+  <script defer src="home.js?v=5"></script>
+  <script defer src="gvpages.js?v=5"></script>
+  <script defer src="compare.js?v=5"></script>
+  <script defer src="tagIssued.js?v=5"></script>
+  <script defer src="settings.js?v=5"></script>
+  <script defer src="app.js?v=5"></script>
 </body>
 </html>

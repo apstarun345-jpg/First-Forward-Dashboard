@@ -17,7 +17,7 @@ permissions and settings**. Zero npm dependencies.
 ## Login & access
 
 * Site **login ke bina nahi khulti**. Pehli baar server start hote hi ek admin ban jaata hai:
-  * Render / env me `ADMIN_USER` + `ADMIN_PASSWORD` set ho → wahi admin.
+  * Render / env me `ADMIN_USER` + `ADMIN_PASSWORD` set ho → first setup par admin create hota hai; existing account/password restart par overwrite nahi hota.
   * Nahi to **`admin` / `admin123`** (pehle login par password badalne ko kaha jaayega — Settings → My account).
 * **Login page**: animated split-screen design, "Login ho raha hai…" progress animation, remember-me
   (username yaad rehta hai), password show/hide, aur login ke baad **"Welcome back, <name>!"** splash animation.
@@ -80,9 +80,17 @@ StockDataa ki raw rows Excel export ke waqt on-demand aati hain). Server bhi Goo
 | Users & access | Approve / role / per-feature permissions / reset password / delete / create user |
 | Backup | Settings JSON export / import, clear server cache, reset to defaults |
 
-> **Render free plan par disk ephemeral hai** — deploy/restart par `data/` (users, settings, uploaded images) reset ho sakta hai.
-> Isliye: (1) `ADMIN_USER` / `ADMIN_PASSWORD` env set rakho (admin hamesha wapas ban jaata hai), (2) Settings → Backup se JSON
-> download karke rakho aur zaroorat par import karo, ya (3) Render persistent disk attach karke `DATA_DIR` us par point karo.
+> **Production storage is required, not optional.** Render's application directory is ephemeral.
+> The app now supports **encrypted storage in `APP_STORAGE` inside the SAME main Google Sheet**:
+> see [same-sheet setup and migration](SHEETS_STORAGE.md). Set `STORAGE_BACKEND=sheets` only after
+> private Google credentials, the permanent encryption key and the one-time migration are ready.
+> This mode does not need a persistent disk for accounts/settings/sessions. Never put readable
+> credentials in the public workbook; a hidden tab is not a security boundary.
+>
+> File mode remains the default for safe compatibility: use a paid persistent disk at `/data`
+> and `DATA_DIR=/data` if keeping that mode. Environment admin credentials only bootstrap a
+> missing account, not a backup. Settings JSON export does NOT include users or sessions.
+> Back up existing records before any deployment or storage switch.
 
 ## Requirements
 
@@ -116,16 +124,24 @@ node dev/smoke.js                                          # headless smoke test
 | Runtime | Node |
 | Build Command | *(blank)* — koi dependency nahi hai |
 | Start Command | `npm start` |
-| Instance type | Free |
+| Instance type | Starter (persistent disk support; avoids free-service idle cold starts) |
+| Disk mount | `/data` · 1 GB |
+| Environment | `DATA_DIR=/data` |
 | Health check path | `/api/health` |
+
+For **same-sheet encrypted storage**, follow [SHEETS_STORAGE.md](SHEETS_STORAGE.md) instead of provisioning a new disk. Do not remove an existing disk before backing up and verifying migration.
 
 ### Environment variables
 
 | Variable | Default | Kaam |
 | --- | --- | --- |
+| `STORAGE_BACKEND` | `files` | `sheets` = encrypted APP_STORAGE tab in the same main spreadsheet |
+| `STORAGE_SHEET_ID` | Main `SHEET_ID` | Pin to the existing main spreadsheet ID; set explicitly for migration |
+| `GOOGLE_SERVICE_ACCOUNT_FILE` / `GOOGLE_SERVICE_ACCOUNT_JSON` | – | Server-only Google write credential; never in browser/settings/Git |
+| `STORAGE_ENCRYPTION_KEY` | – | Permanent random 32-byte base64 secret; back it up privately |
 | `PORT` | `8080` (Render khud set karta hai) | Server port |
-| `ADMIN_USER` / `ADMIN_PASSWORD` | – | Bootstrap admin (recommended). Na ho to `admin` / `admin123` |
-| `DATA_DIR` | `./data` | Users / sessions / settings JSON folder (persistent disk ho to wahan) |
+| `ADMIN_USER` / `ADMIN_PASSWORD` | – | First-time bootstrap only; saved credentials win on restart. Na ho to `admin` / `admin123` |
+| `DATA_DIR` | Local: `./data`; production: set `/data` | Users / sessions / settings JSON folder (persistent disk ho to wahan) |
 | `SHEET_ID` | sheet ki current ID | Default Google Sheet ID (Settings me bhi badal sakte ho) |
 | `CACHE_SECONDS` | `600` | Server cache default (Settings → Data source override karta hai) |
 | `FRAME_PROTECTION` | – | `1` = site ko kisi aur website ke iframe mein khulne se roko |
@@ -140,3 +156,27 @@ node dev/smoke.js                                          # headless smoke test
 * `dashboard.js` · `trend.js` · `stock.js` · `performance.js` · `sheets.js` · `settings.js` – pages
 * `charts.js` (SVG charts) · `xlsx.js` (Excel writer, no deps) · `util.js` (helpers + suggestion dropdown)
 * `dev/mock-gviz.js`, `dev/smoke.js` – offline test tooling
+
+## Regression checks (v3.2)
+
+- `npm run check` — server, service worker and all browser scripts.
+- `npm test` — real server restart/session persistence, saved profiles/users/theme/password,
+  failed disk-write rollback, corrupt-store protection, query deduplication, unbounded ranges,
+  per-dataset readiness and parallel permission-aware preloading.
+- `npm run smoke` — against a running local mock server (above): all page render paths,
+  including **zero new gviz requests when opening all preloaded sheet tabs**.
+
+Normal opens reuse the authenticated server cache. FF, GV and permitted sheet previews start
+loading together; each page waits only for the datasets it needs. Large sheets preload count +
+first 100 rows, not the entire lakh-row inventory. Small sheets also warm their full view.
+Searches, later pages and previously unused filters still need their own queries. First uncached
+loads depend on Google/network latency; loading a whole account's data cannot be instantaneous.
+Manual refresh bypasses the server cache without blanking already displayed data.
+
+### Same-sheet storage checks
+
+`npm test` also verifies encrypted storage against a mock Google Sheets API, including a real
+server restart with the entire ephemeral DATA_DIR removed, session/theme persistence,
+authenticated encryption, chunking, API failure rollback and quota retries. No real Google
+credentials are used by tests. `npm run storage:migrate` is an explicit, one-time command;
+read SHEETS_STORAGE.md and supply secrets privately before using it.

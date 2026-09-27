@@ -21,41 +21,54 @@ window.FF = window.FF || {};
   function on(fn) { state.listeners.add(fn); return () => state.listeners.delete(fn); }
 
   /** Load all datasets in parallel. fresh=true bypasses the server cache (Google se naya data). */
+  let generation = 0;
+  const jobs = new Map();
+  function loadKey(key, fresh) {
+    if (jobs.has(key)) return jobs.get(key);
+    const version = generation;
+    const p = Promise.resolve().then(() => DATASETS[key].load({ fresh })).then((value) => {
+      if (version === generation) { state.data[key] = value; delete state.errors[key]; }
+      return value;
+    }).catch((err) => {
+      if (version === generation) state.errors[key] = err;
+      throw err;
+    }).finally(() => {
+      if (version !== generation) return;
+      jobs.delete(key);
+      state.progress.done++;
+      emit('progress', { key, ...state.progress });
+    });
+    jobs.set(key, p);
+    return p;
+  }
   function preload(fresh) {
-    if (state.promise && !fresh) return state.promise;
-    if (fresh) { D.clearCache(); state.data = {}; }
+    if (state.loading) return state.promise;
+    if (state.promise && !fresh && !Object.keys(state.errors).length) return state.promise;
     const keys = Object.keys(DATASETS);
+    const version = generation;
     state.loading = true; state.errors = {}; state.progress = { done: 0, total: keys.length };
     emit('start');
-    const p = Promise.all(keys.map(async (key) => {
-      try {
-        state.data[key] = await DATASETS[key].load({ fresh });
-      } catch (err) {
-        console.error(`store: ${key} failed`, err);
-        state.errors[key] = err;
-        if (err && err.name === 'AuthError') throw err;
-      } finally {
-        state.progress.done++;
-        emit('progress', { key, ...state.progress });
+    state.promise = Promise.allSettled(keys.map((key) => loadKey(key, !!fresh))).then(() => {
+      if (version === generation) {
+        state.loading = false; state.loadedAt = Date.now();
+        emit('done');
       }
-    })).then(() => {
-      state.loading = false; state.loadedAt = Date.now();
-      emit('done');
       return state.data;
-    }).catch((err) => { state.loading = false; emit('error', err); throw err; });
-    state.promise = p;
-    return p;
+    });
+    return state.promise;
   }
   function get(key) { return state.data[key]; }
   function error(key) { return state.errors[key]; }
-  /** Await a dataset (resolves after preload). Throws the dataset's own error when it failed. */
   async function need(key) {
+    // A slow unrelated stock/report query must not block this page.
+    if (state.data[key] !== undefined) return state.data[key];
     if (!state.promise) preload(false);
-    await state.promise.catch(() => {});
-    if (state.errors[key]) throw state.errors[key];
-    return state.data[key];
+    return loadKey(key, false);
   }
-  function reset() { state.promise = null; state.data = {}; state.errors = {}; state.loadedAt = null; D.clearCache(); }
+  function reset() {
+    generation++; jobs.clear(); state.loading = false; state.promise = null;
+    state.data = {}; state.errors = {}; state.loadedAt = null; D.clearCache();
+  }
 
   // Quick-find index (agents + TLs from EIR, StockDataa & REPORT) — shared by every search box.
   function people() {

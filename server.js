@@ -3,7 +3,7 @@
 //  • Proxies + caches Google Sheets gviz queries (/api/gviz) — login required
 //  • Login / signup, sessions, per-user permissions (/api/auth/*, /api/users)
 //  • Dashboard settings (branding, sheet mapping, thresholds, contacts) (/api/settings)
-// Data (users, sessions, settings) is stored as JSON files in DATA_DIR (default ./data).
+// Durable storage: local JSON files OR encrypted APP_STORAGE tab in the same Google spreadsheet.
 // Run locally:  npm start   (PORT defaults to 8080; Render sets PORT automatically)
 import http from 'node:http';
 import fs from 'node:fs/promises';
@@ -11,6 +11,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { sheetsStoreFromEnv } from './sheets-storage.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 8080);
@@ -19,7 +20,9 @@ const DEFAULT_CACHE_SECONDS = Math.max(0, Number(process.env.CACHE_SECONDS || 60
 const MAX_CACHE_ENTRIES = 400;
 const UPSTREAM_TIMEOUT_MS = 45_000;
 const GVIZ_BASE = process.env.GVIZ_BASE || 'https://docs.google.com'; // override only for local testing with a mock
-const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(__dirname, 'data'));
+const DATA_DIR = path.resolve(process.env.DATA_DIR || (process.env.RENDER && existsSync('/data') ? '/data' : path.join(__dirname, 'data')));
+const STORAGE_BACKEND = process.env.STORAGE_BACKEND || 'files';
+let sheetsStore = null;
 const FRAME_PROTECTION = process.env.FRAME_PROTECTION === '1';
 const SESSION_DAYS = Math.max(1, Number(process.env.SESSION_DAYS || 30));
 // Admin bootstrap: ADMIN_USER / ADMIN_PASSWORD (recommended on Render). If no user exists and no env is set,
@@ -34,7 +37,7 @@ const MIME = {
   '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.ico': 'image/x-icon',
   '.txt': 'text/plain; charset=utf-8', '.md': 'text/plain; charset=utf-8'
 };
-const BLOCKED_FILES = new Set(['server.js', 'package.json', 'package-lock.json', 'render.yaml', 'README.md', '.env']);
+const BLOCKED_FILES = new Set(['server.js', 'sheets-storage.js', 'DEPLOYMENT.md', 'SHEETS_STORAGE.md', 'package.json', 'package-lock.json', 'render.yaml', 'README.md', '.env']);
 const BLOCKED_DIRS = new Set(['data', 'dev', 'node_modules', '.git']);
 
 // ---------------------------------------------------------------------------------------------
@@ -120,24 +123,61 @@ const DEFAULT_SETTINGS = {
 // ---------------------------------------------------------------------------------------------
 // JSON file store
 // ---------------------------------------------------------------------------------------------
-if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
 const FILES = { users: path.join(DATA_DIR, 'users.json'), sessions: path.join(DATA_DIR, 'sessions.json'), settings: path.join(DATA_DIR, 'settings.json'), resets: path.join(DATA_DIR, 'resets.json'), notify: path.join(DATA_DIR, 'notifications.json') };
 // Notifications are deliberately kept server-side so the admin can see activity even after a
 // refresh. `watch` stores the last Google Sheet snapshot used by the lightweight report watcher.
 const db = { users: [], sessions: {}, settings: { ...DEFAULT_SETTINGS }, resets: [], notify: { items: [], watch: {} } };
 const writeQueue = new Map();
 
+const storageFailures = new Map();
+const durableSnapshots = new Map();
+let persistentDiskMounted = false;
+const storageStatus = () => ({
+  backend: STORAGE_BACKEND,
+  encrypted: STORAGE_BACKEND === 'sheets',
+  tab: STORAGE_BACKEND === 'sheets' ? 'APP_STORAGE' : null,
+  lastSavedAt: sheetsStore?.lastSavedAt || null,
+  persistentDiskMounted,
+  dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null,
+  error: [...storageFailures.values()].join(' ') || null,
+  warning: STORAGE_BACKEND === 'files' && process.env.RENDER && !persistentDiskMounted
+    ? 'Persistent disk not detected. Back up existing data, attach a Render disk at /data and set DATA_DIR=/data before redeploying.' : null
+});
 async function readJson(file, fallback) {
-  try { return JSON.parse(await fs.readFile(file, 'utf8')); } catch { return fallback; }
+  try { return JSON.parse(await fs.readFile(file, 'utf8')); }
+  catch (err) {
+    if (err.code === 'ENOENT') return fallback;
+    // Never silently replace corrupt/unreadable accounts with a new default admin.
+    throw new Error(`Cannot read persistent data ${path.basename(file)}: ${err.message}`);
+  }
 }
 function persist(kind) {
   const file = FILES[kind];
+  const snapshot = JSON.stringify(db[kind], null, 2);
   const prev = writeQueue.get(kind) || Promise.resolve();
-  const next = prev.then(async () => {
-    const tmp = `${file}.tmp`;
-    await fs.writeFile(tmp, JSON.stringify(db[kind], null, 2));
-    await fs.rename(tmp, file);
-  }).catch((err) => console.error(`persist ${kind} failed:`, err.message));
+  const next = prev.catch(() => {}).then(async () => {
+    if (sheetsStore) {
+      await sheetsStore.save(kind, JSON.parse(snapshot));
+    } else {
+      const tmp = `${file}.tmp`;
+      const handle = await fs.open(tmp, 'w', 0o600);
+      try { await handle.writeFile(snapshot); await handle.sync(); }
+      finally { await handle.close(); }
+      await fs.rename(tmp, file);
+    }
+    durableSnapshots.set(kind, snapshot);
+    storageFailures.delete(kind);
+  }).catch((err) => {
+    const storageError = sheetsStore
+      ? `Could not save ${kind} to Google Sheets. Save not confirmed; check API access/quota and retry.`
+      : `Could not save ${kind}. Check DATA_DIR disk permissions and free space.`;
+    storageFailures.set(kind, storageError);
+    if (JSON.stringify(db[kind], null, 2) === snapshot && durableSnapshots.has(kind)) db[kind] = JSON.parse(durableSnapshots.get(kind));
+    console.error(storageError, err.message);
+    throw new HttpError(503, storageError);
+  });
+  // Observe background notification writes too, without hiding failures from API callers.
+  next.catch(() => {});
   writeQueue.set(kind, next);
   return next;
 }
@@ -234,11 +274,12 @@ function noteActivity(user, page) {
   return recordNotification({ type: 'activity', title: 'User ne app kholi', body: `${user.name || user.username} ne ${cleanPage} open kiya.`, target: 'admin', meta: { username: user.username, page: cleanPage } });
 }
 function sha(token) { return crypto.createHash('sha256').update(token).digest('hex'); }
-function createSession(username) {
+async function createSession(username) {
   const token = crypto.randomBytes(32).toString('base64url');
   db.sessions[sha(token)] = { username, createdAt: Date.now(), expiresAt: Date.now() + SESSION_DAYS * 86400e3 };
   pruneSessions();
-  persist('sessions');
+  try { await persist('sessions'); }
+  catch (err) { delete db.sessions[sha(token)]; throw err; }
   return token;
 }
 function pruneSessions() {
@@ -265,12 +306,13 @@ function cookieHeader(req, token, maxAgeSec) {
 }
 async function bootstrapAdmin() {
   if (ADMIN_USER && ADMIN_PASSWORD) {
-    let u = findUser(ADMIN_USER);
-    if (!u) { u = { username: ADMIN_USER, name: 'Admin', createdAt: new Date().toISOString() }; db.users.unshift(u); }
-    u.role = 'admin'; u.approved = true; u.permissions = allPermKeysNow(); u.mustChangePassword = false;
-    if (!verifyPassword(ADMIN_PASSWORD, u.password)) u.password = hashPassword(ADMIN_PASSWORD);
+    if (findUser(ADMIN_USER)) return; // Environment credentials bootstrap ONCE, not every restart.
+    const u = { username: ADMIN_USER, name: 'Admin', createdAt: new Date().toISOString(),
+      role: 'admin', approved: true, permissions: allPermKeysNow(), mustChangePassword: false,
+      password: hashPassword(ADMIN_PASSWORD) };
+    db.users.unshift(u);
     await persist('users');
-    console.log(`Admin "${ADMIN_USER}" ready (from environment).`);
+    console.log(`Admin "${ADMIN_USER}" created from environment.`);
   } else if (!db.users.some((u) => u.role === 'admin')) {
     const username = 'admin';
     if (!findUser(username)) {
@@ -341,9 +383,12 @@ function upstreamUrl(params) {
     const tabMatch = tabs.find((t) => (sheet && (t.tab === sheet || t.id === sheet)) || (gid && t.gid === gid));
     if (tabMatch && tabMatch.range) range = tabMatch.range;
     else if (tabMatch && (tabMatch.startCol || tabMatch.startRow || tabMatch.endCol || tabMatch.endRow)) {
-      range = `${tabMatch.startCol || 'A'}${tabMatch.startRow || 1}:${tabMatch.endCol || ''}${tabMatch.endRow || ''}`;
+      const from = `${tabMatch.startCol || 'A'}${tabMatch.startRow || 1}`;
+      const end = `${tabMatch.endCol || ''}${tabMatch.endRow || ''}`;
+      range = end ? `${from}:${end}` : (from === 'A1' ? '' : `${from}:ZZZ`);
     }
   }
+  if (/^[A-Z]+[0-9]+:$/i.test(range)) range = range.toUpperCase() === 'A1:' ? '' : `${range}ZZZ`;
   if (range) p.set('range', range.slice(0, 40).replace(/[^A-Za-z0-9:$]/g, ''));
   const sheetId = (params.get('id') || db.settings.sheetId || DEFAULT_SHEET_ID).replace(/[^A-Za-z0-9_-]/g, '');
   return `${GVIZ_BASE}/spreadsheets/d/${sheetId}/gviz/tq?${p.toString()}`;
@@ -501,7 +546,7 @@ async function handleApi(req, res, url) {
   const user = sessionUser(req);
 
   if (p === '/api/health' && method === 'GET') {
-    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.1.0', users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: DATA_DIR });
+    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.2.0', storage: storageStatus(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null });
   }
   if (p === '/api/public-config' && method === 'GET') return sendJson(res, 200, publicSettings());
 
@@ -521,8 +566,8 @@ async function handleApi(req, res, url) {
     db.users.push(u);
     await persist('users');
     if (first) {
-      const token = createSession(username);
-      u.lastLoginAt = new Date().toISOString(); persist('users');
+      const token = await createSession(username);
+      u.lastLoginAt = new Date().toISOString(); await persist('users');
       return sendJson(res, 200, { ok: true, user: publicUser(u), settings: db.settings, permissions: permissionsFor(db.settings), tabs: db.settings.tabs, first: true }, { 'Set-Cookie': cookieHeader(req, token, SESSION_DAYS * 86400) });
     }
     return sendJson(res, 200, { ok: true, pending: true, message: 'Account ban gaya. Admin approve karega, phir login kar paoge.' });
@@ -536,8 +581,9 @@ async function handleApi(req, res, url) {
     if (!u || !verifyPassword(body.password || '', u.password)) { noteFail(ip); throw new HttpError(401, 'Invalid login — check username / email / mobile and password.'); }
     if (!u.approved) throw new HttpError(403, 'Account pending admin approval.');
     attempts.delete(ip);
-    const token = createSession(u.username);
-    u.lastLoginAt = new Date().toISOString(); persist('users');
+    u.lastLoginAt = new Date().toISOString();
+    // One Google Sheets batch can confirm the user timestamp and session together.
+    const [token] = await Promise.all([createSession(u.username), persist('users')]);
     if (u.role !== 'admin') recordNotification({ type: 'login', title: 'New user login', body: `${u.name || u.username} logged in via ${loginId}.`, target: 'admin', meta: { username: u.username, loginId } });
     return sendJson(res, 200, { ok: true, user: publicUser(u), settings: db.settings, permissions: permissionsFor(db.settings), tabs: db.settings.tabs }, { 'Set-Cookie': cookieHeader(req, token, SESSION_DAYS * 86400) });
   }
@@ -629,7 +675,7 @@ async function handleApi(req, res, url) {
 
   if (p === '/api/auth/logout' && method === 'POST') {
     const token = parseCookies(req).ff_sid;
-    if (token) { delete db.sessions[sha(token)]; persist('sessions'); }
+    if (token) { delete db.sessions[sha(token)]; await persist('sessions'); }
     return sendJson(res, 200, { ok: true }, { 'Set-Cookie': cookieHeader(req, '', 0) });
   }
 
@@ -780,7 +826,7 @@ async function handleApi(req, res, url) {
       if (body.mobile !== undefined) target.mobile = String(body.mobile).replace(/[^\d+]/g, '').slice(0, 16);
       if (body.password) { if (!validPassword(body.password)) throw new HttpError(400, 'Password kam se kam 6 characters ka ho.'); target.password = hashPassword(body.password); target.mustChangePassword = true; }
       if (!target.approved) for (const [k, s] of Object.entries(db.sessions)) if (s.username === target.username) delete db.sessions[k];
-      await persist('users'); persist('sessions');
+      await persist('users'); await persist('sessions');
       return sendJson(res, 200, { ok: true, user: publicUser(target) });
     }
     if (method === 'DELETE') {
@@ -788,7 +834,7 @@ async function handleApi(req, res, url) {
       if (target.role === 'admin' && db.users.filter((u) => u.role === 'admin').length <= 1) throw new HttpError(400, 'Aakhri admin ko delete nahi kar sakte.');
       db.users = db.users.filter((u) => u !== target);
       for (const [k, s] of Object.entries(db.sessions)) if (s.username === target.username) delete db.sessions[k];
-      await persist('users'); persist('sessions');
+      await persist('users'); await persist('sessions');
       return sendJson(res, 200, { ok: true });
     }
   }
@@ -808,13 +854,13 @@ async function serveStatic(res, pathname) {
     const rel = path.relative(__dirname, candidate);
     const top = rel.split(path.sep)[0];
     const base = path.basename(candidate);
-    if (BLOCKED_FILES.has(base) || base.startsWith('.') || BLOCKED_DIRS.has(top)) return sendText(res, 404, 'Not found');
+    if (BLOCKED_FILES.has(base) || base.startsWith('.') || BLOCKED_DIRS.has(top) || ['.json', '.pem', '.key', '.env'].includes(path.extname(base).toLowerCase())) return sendText(res, 404, 'Not found');
     try {
       const stat = await fs.stat(candidate);
       if (!stat.isFile()) continue;
       const content = await fs.readFile(candidate);
       const ext = path.extname(candidate).toLowerCase();
-      res.writeHead(200, headers({ 'Content-Type': MIME[ext] || 'application/octet-stream', 'Content-Length': content.length, 'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=600' }));
+      res.writeHead(200, headers({ 'Content-Type': MIME[ext] || 'application/octet-stream', 'Content-Length': content.length, 'Cache-Control': ['.html', '.js', '.css', '.webmanifest'].includes(ext) ? 'no-cache' : 'public, max-age=600' }));
       return res.end(content);
     } catch { /* try next */ }
   }
@@ -841,47 +887,74 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+async function readLocalStore() {
+  return {
+    users: await readJson(FILES.users, []),
+    sessions: await readJson(FILES.sessions, {}),
+    settings: deepMerge(DEFAULT_SETTINGS, await readJson(FILES.settings, {})),
+    resets: await readJson(FILES.resets, []),
+    notify: await readJson(FILES.notify, { items: [], watch: {} })
+  };
+}
 async function start() {
-  // Ensure DATA_DIR exists (for Render disk /data)
-  if (!existsSync(DATA_DIR)) {
-    try { mkdirSync(DATA_DIR, { recursive: true }); } catch (e) { console.warn('Could not create DATA_DIR', e.message); }
-  }
-  // Migration helper: if /data is empty but ./data has files (first run after adding disk), copy them
-  try {
-    const localDir = path.join(__dirname, 'data');
-    if (DATA_DIR !== localDir && existsSync(localDir)) {
-      const localFiles = await fs.readdir(localDir).catch(() => []);
-      const targetFiles = existsSync(DATA_DIR) ? await fs.readdir(DATA_DIR).catch(() => []) : [];
-      if (targetFiles.length === 0 && localFiles.length > 0) {
-        for (const f of localFiles) {
-          if (f.endsWith('.json')) {
-            try {
-              const src = path.join(localDir, f);
-              const dst = path.join(DATA_DIR, f);
-              const content = await fs.readFile(src, 'utf8');
-              JSON.parse(content); // validate
-              await fs.writeFile(dst, content);
-              console.log(`Migrated ${f} from ./data to ${DATA_DIR}`);
-            } catch (e) { console.warn('Migration failed for', f, e.message); }
-          }
-        }
-      }
+  if (!['files', 'sheets'].includes(STORAGE_BACKEND)) throw new Error('STORAGE_BACKEND must be files or sheets.');
+  let stored;
+  if (STORAGE_BACKEND === 'sheets') {
+    // Google is authoritative. Never fall back to ephemeral files or a new default admin.
+    sheetsStore = await sheetsStoreFromEnv(DEFAULT_SHEET_ID);
+    stored = await sheetsStore.read();
+    if (!stored) {
+      if (process.env.STORAGE_INITIALIZE !== '1') throw new Error('APP_STORAGE is missing/empty. Follow SHEETS_STORAGE.md to migrate existing data once. No accounts were reset.');
+      stored = await readLocalStore();
+      if (stored.settings.sheetId && stored.settings.sheetId !== sheetsStore.sheetId) throw new Error('Set STORAGE_SHEET_ID to the existing main sheet ID from settings before migration.');
+      await sheetsStore.initialize(stored);
+      console.log('Encrypted APP_STORAGE initialized and verified. Remove STORAGE_INITIALIZE from the environment now.');
     }
-  } catch (e) { console.warn('Migration check failed', e.message); }
-
-  db.users = await readJson(FILES.users, []);
-  db.sessions = await readJson(FILES.sessions, {});
-  db.settings = deepMerge(DEFAULT_SETTINGS, await readJson(FILES.settings, {}));
-  db.resets = await readJson(FILES.resets, []);
-  const storedNotify = await readJson(FILES.notify, {});
+  } else {
+    if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
+    // Optional migration to a newly attached persistent disk. Validate every file BEFORE copying.
+    const localDir = path.join(__dirname, 'data');
+    if (DATA_DIR !== localDir && existsSync(localDir) && !(await fs.readdir(DATA_DIR)).length) {
+      const copies = [];
+      for (const file of Object.values(FILES)) {
+        const src = path.join(localDir, path.basename(file));
+        if (existsSync(src)) { const content = await fs.readFile(src, 'utf8'); JSON.parse(content); copies.push([file, content]); }
+      }
+      for (const [file, content] of copies) await fs.writeFile(file, content, { mode: 0o600 });
+    }
+    stored = await readLocalStore();
+    const mountInfo = await fs.readFile('/proc/self/mountinfo', 'utf8').catch(() => '');
+    persistentDiskMounted = mountInfo.split('\n').some(line => {
+      const mount = (line.split(' ')[4] || '').replace(/\\040/g, ' ');
+      return mount !== '/' && mount !== '' && (DATA_DIR === mount || DATA_DIR.startsWith(mount + '/'));
+    });
+    if (storageStatus().warning) console.warn('⚠️ ', storageStatus().warning);
+    const probe = path.join(DATA_DIR, '.write-check');
+    await fs.writeFile(probe, 'ok', { mode: 0o600 }); await fs.unlink(probe);
+  }
+  db.users = stored.users;
+  db.sessions = stored.sessions;
+  db.settings = deepMerge(DEFAULT_SETTINGS, stored.settings);
+  db.resets = stored.resets;
+  const storedNotify = stored.notify;
   db.notify = { items: Array.isArray(storedNotify.items) ? storedNotify.items.slice(-500) : [], watch: storedNotify.watch && typeof storedNotify.watch === 'object' ? storedNotify.watch : {} };
+  for (const kind of Object.keys(FILES)) durableSnapshots.set(kind, JSON.stringify(db[kind], null, 2));
   pruneSessions();
   await bootstrapAdmin();
   server.listen(PORT, '0.0.0.0', () => {
-    console.log(`First Forward Dashboard → http://0.0.0.0:${PORT}`);
-    console.log(`Sheet ${db.settings.sheetId} · cache ${cacheMs() / 1000}s · data ${DATA_DIR} · users ${db.users.length}${GVIZ_BASE !== 'https://docs.google.com' ? ` · upstream ${GVIZ_BASE}` : ''}`);
+    console.log(`First Forward Dashboard → http://0.0.0.0:${server.address().port}`);
+    console.log(`Sheet ${db.settings.sheetId} · cache ${cacheMs() / 1000}s · storage ${sheetsStore ? 'Google Sheets / encrypted APP_STORAGE' : DATA_DIR} · users ${db.users.length}${GVIZ_BASE !== 'https://docs.google.com' ? ` · upstream ${GVIZ_BASE}` : ''}`);
     setTimeout(() => checkReports(true).catch(() => {}), 5000);
     setInterval(() => checkReports(false).catch(() => {}), 5 * 60e3).unref();
   });
 }
-start();
+start().catch((err) => { console.error('Startup stopped to protect stored data:', err); process.exitCode = 1; });
+for (const signal of ['SIGTERM', 'SIGINT']) {
+  process.on(signal, () => {
+    server.close(async () => {
+      await Promise.allSettled([...writeQueue.values()]);
+      process.exit(0);
+    });
+    setTimeout(() => process.exit(1), 10000).unref();
+  });
+}

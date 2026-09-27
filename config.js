@@ -99,7 +99,8 @@ FF.config = {
     if (!c1 && !c2 && !r1 && !r2) return '';
     const from = `${c1 || 'A'}${r1 || '1'}`;
     const to = `${c2}${r2}`;
-    return to ? `${from}:${to}` : from;
+    // A1 alone means ONE CELL to Google, not an open-ended sheet.
+    return to ? `${from}:${to}` : (from === 'A1' ? '' : `${from}:ZZZ`);
   },
   /** All registered tabs (optionally only the enabled ones). */
   allTabs(onlyEnabled) {
