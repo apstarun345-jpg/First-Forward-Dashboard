@@ -1,6 +1,6 @@
 // Versioned app shell only. Auth/API data must NEVER live in a service-worker cache.
-const CACHE_NAME = 'apnapayment-v5';
-const ASSETS = ['./index.html', './styles.css?v=5', './favicon.svg?v=5', './icon-192.png?v=5', './icon-512.png?v=5'];
+const CACHE_NAME = 'apnapayment-v7';
+const ASSETS = ['./index.html', './styles.css?v=8', './favicon.svg?v=5', './icon-192.png?v=5', './icon-512.png?v=5'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(ASSETS)).then(() => self.skipWaiting()));
 });

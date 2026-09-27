@@ -7,13 +7,32 @@ FF.pages = FF.pages || {};
   const U = FF.util, M = FF.model, S = FF.store, G = FF.gv, C = FF.charts;
   const esc = U.esc;
 
-  const kpi = (cls, title, icon, value, foot) => `<div class="kpi ${cls}"><div class="kpi-top"><span class="kpi-title">${esc(title)}</span><span class="kpi-icon">${icon}</span></div><div class="kpi-value">${value}</div><div class="kpi-foot">${foot || ''}</div></div>`;
+  const kpi = (cls, title, icon, value, foot) => `<button type="button" class="kpi ${cls} kpi-clickable" data-kpi-title="${esc(title)}" data-kpi-value="${esc(String(value).replace(/<[^>]*>/g, ' '))}" data-kpi-foot="${esc(String(foot || '').replace(/<[^>]*>/g, ' '))}"><span class="kpi-top"><span class="kpi-title">${esc(title)}</span><span class="kpi-icon">${icon}</span></span><span class="kpi-value">${value}</span><span class="kpi-foot">${foot || ''}</span></button>`;
   const card = (title, body, right) => `<section class="card"><div class="card-head"><h3>${title}</h3>${right ? `<div class="card-right">${right}</div>` : ''}</div><div class="card-body">${body}</div></section>`;
   const mini = (label, value, foot, cls) => `<div class="mini-kpi ${cls||''}"><span class="mini-label">${esc(label)}</span><span class="mini-value">${value}</span>${foot?`<span class="mini-foot">${foot}</span>`:''}</div>`;
 
   function todayKey() {
     const d = new Date();
     return `${d.getFullYear()}-${U.pad2(d.getMonth()+1)}-${U.pad2(d.getDate())}`;
+  }
+
+  function inRange(row, from, to) {
+    const key = row.key || (row.date ? U.dateKey(row.date) : '');
+    return key && key >= from && key <= to;
+  }
+  function rangeSummary(rows, channel) {
+    const out = { total: 0, vc4: 0, vc20: 0, vc5p: 0, replacement: 0, chassis: 0, wrongVrn: 0, issuance: 0 };
+    for (const r of rows) {
+      if (channel && r.channel && r.channel !== channel) continue;
+      const n = r.n === undefined ? 1 : r.n;
+      out.total += n;
+      if (r.group === 'VC4') out.vc4 += n; else if (r.group === 'VC20') out.vc20 += n; else out.vc5p += n;
+      if (/replacement/i.test(r.type || r.status || '')) out.replacement += n; else out.issuance += n;
+      if (/chassis/i.test(r.vrnType || r.tagType || '')) out.chassis += n;
+      if (/wrong/i.test(r.vrnType || '')) out.wrongVrn += n;
+    }
+    out.comm = out.vc20 + out.vc5p;
+    return out;
   }
 
   function parseInputDate(val) {
@@ -69,16 +88,20 @@ FF.pages = FF.pages || {};
     const initialDate = params.date || todayKey();
     root.innerHTML = `<div class="page-head"><div><h1>🏷️ GV & FF Tag Issued</h1><p class="sub">Date-wise detailed issuance — VC4 / Commercial / class-wise up-down, GV + First Forward</p></div>
       <div class="head-actions"><button class="btn primary" data-action="refresh">↻ Refresh</button></div></div>
-      <div class="card controls"><div class="ctrl-row">
-        <label>📅 Date <input type="date" class="input" id="ti-date" value="${esc(initialDate)}" max="${todayKey()}"></label>
+      <div class="card controls"><div class="ctrl-row ti-range-controls">
+        <label>📅 From <input type="date" class="input" id="ti-from" value="${esc(params.from || initialDate)}" max="${todayKey()}"></label>
+        <label>To <input type="date" class="input" id="ti-date" value="${esc(params.to || initialDate)}" max="${todayKey()}"></label>
         <button class="btn" id="ti-today">Today</button>
         <button class="btn" id="ti-yest">Yesterday</button>
-        <span class="dim small">Date select karte hi niche GV & FF ka detailed issuance ayega</span>
+        <span class="dim small">Selected date range ka total aur GV vs FF comparison niche dekhein.</span>
       </div></div>
+      <div id="ti-range-summary"></div>
       <div id="ti-body">${U.spinner('Data load ho raha hai…')}</div>`;
 
     const body = U.$('#ti-body', root);
     const dateInput = U.$('#ti-date', root);
+    const fromInput = U.$('#ti-from', root);
+    const rangeRoot = U.$('#ti-range-summary', root);
 
     // Ensure data loaded
     try {
@@ -87,14 +110,67 @@ FF.pages = FF.pages || {};
       body.innerHTML = U.errorBox(e, 'data-action="refresh"');
       return;
     }
+    if (!params.date && !params.to) {
+      const ffLatest = M.latestDate(S.get('daily') || []);
+      const gvLatest = G.latestDate();
+      const latest = [ffLatest, gvLatest].filter(Boolean).sort((a, b) => b - a)[0];
+      if (latest) {
+        const endKey = U.dateKey(latest);
+        dateInput.value = endKey;
+        if (!params.from) {
+          const span = Math.max(1, Math.min(90, Number(localStorage.getItem('ti_range_days')) || 1));
+          const start = new Date(latest); start.setDate(start.getDate() - span + 1);
+          fromInput.value = U.dateKey(start);
+        }
+      }
+    }
 
     async function draw() {
       const val = dateInput.value || todayKey();
       const dateObj = parseInputDate(val);
       if (!dateObj) { body.innerHTML = `<div class="empty-state">Invalid date</div>`; return; }
+      const fromVal = fromInput.value || val;
+      if (fromVal > val) { rangeRoot.innerHTML = '<div class="warn-box">From date, To date se baad nahi ho sakti.</div>'; return; }
+
+      // Date interval analytics (daily EIR aggregates + row-level GV Master).
+      const dailyRows = S.get('daily') || [];
+      const ffRangeRows = dailyRows.filter((r) => r.channel !== 'GV Partner' && inRange(r, fromVal, val));
+      const gvRangeRows = G.rows().filter((r) => inRange({ date: r.date }, fromVal, val)).map((r) => ({ ...r, type: r.status, vrnType: '', n: 1 }));
+      const ffRange = rangeSummary(ffRangeRows);
+      const gvRange = rangeSummary(gvRangeRows);
+      const combined = ffRange.total + gvRange.total;
+      const rangeLabel = `${U.labelDate(parseInputDate(fromVal), true)} – ${U.labelDate(dateObj, true)}`;
+      const cmpChart = C.bars({ labels: ['VC4', 'VC20', 'VC5+', 'Commercial'], height: 230, series: [
+        { name: 'First Forward', values: [ffRange.vc4, ffRange.vc20, ffRange.vc5p, ffRange.comm], color: '#6366f1' },
+        { name: 'GV Partner', values: [gvRange.vc4, gvRange.vc20, gvRange.vc5p, gvRange.comm], color: '#0d9488' }
+      ], legendAlways: true });
+      const opsChart = C.bars({ labels: ['Issuance', 'Replacement', 'Chassis', 'Wrong VRN'], height: 220, series: [
+        { name: 'First Forward', values: [ffRange.issuance, ffRange.replacement, ffRange.chassis, ffRange.wrongVrn], color: '#6366f1' },
+        { name: 'GV Partner', values: [gvRange.issuance, gvRange.replacement, gvRange.chassis, gvRange.wrongVrn], color: '#0d9488' }
+      ], legendAlways: true });
+      const rankCount = Math.max(5, Math.min(20, Number(localStorage.getItem('ti_chart_limit')) || 10));
+      const gvAgentMap = new Map(), gvTlMap = new Map();
+      gvRangeRows.forEach((r) => { const k = r.agentName || r.agentId || 'Unknown'; const o = gvAgentMap.get(k) || { total: 0, vc4: 0, comm: 0 }; o.total++; if (r.group === 'VC4') o.vc4++; else o.comm++; gvAgentMap.set(k, o); const tl = r.tlName || 'Direct'; gvTlMap.set(tl, (gvTlMap.get(tl) || 0) + 1); });
+      const gvTopRows = [...gvAgentMap].sort((a,b)=>b[1].total-a[1].total).slice(0,rankCount);
+      const gvTopVc4 = [...gvAgentMap].sort((a,b)=>b[1].vc4-a[1].vc4).slice(0,rankCount);
+      const gvTopCommercial = [...gvAgentMap].sort((a,b)=>b[1].comm-a[1].comm).slice(0,rankCount);
+      const ffMonths = new Set(dailyRows.filter(r => r.channel !== 'GV Partner' && inRange(r, fromVal, val)).map(r => r.ym));
+      const ffAgentTotals = new Map();
+      (S.get('agents') || []).forEach((a) => { if (a.channel === 'First Forward' && ffMonths.has(a.ym)) ffAgentTotals.set(a.name, (ffAgentTotals.get(a.name)||0)+a.n); });
+      const topFfAgents = U.topEntries(ffAgentTotals, rankCount);
+      const classMetrics = [['Total', 'total'], ['VC4', 'vc4'], ['VC20', 'vc20'], ['VC5+', 'vc5p'], ['Commercial', 'comm'], ['Issuance', 'issuance'], ['Replacement', 'replacement'], ['Chassis', 'chassis'], ['Wrong VRN', 'wrongVrn']];
+      const compareRows = classMetrics.map(([label,key]) => `<tr><td>${esc(label)}</td><td class="num">${U.fmt(ffRange[key])}</td><td class="num">${U.fmt(gvRange[key])}</td><td class="num"><b>${U.fmt(ffRange[key] + gvRange[key])}</b></td></tr>`).join('');
+      rangeRoot.innerHTML = `<section class="range-summary card"><div class="card-head"><h3>📊 GV vs First Forward · ${esc(rangeLabel)}</h3><span class="badge indigo">${U.fmt(combined)} tags total</span></div>
+        <div class="range-total-row"><div><small>First Forward</small><b>${U.fmt(ffRange.total)}</b></div><div><small>GV Partner</small><b>${U.fmt(gvRange.total)}</b></div><div><small>Combined total</small><b>${U.fmt(combined)}</b></div></div>
+        <div class="grid g-2">${card('🏷️ Tag class comparison · VC4 / VC20 / VC5+', cmpChart)}${card('🔧 Issuance, replacement & exceptions', opsChart)}</div>
+        <div class="grid g-2">${card('🏆 Top GV agents · selected date range', C.hbars({items:gvTopRows.map(([name,o],i)=>({label:name,sub:`VC4 ${U.fmt(o.vc4)} · Commercial ${U.fmt(o.comm)}`,value:o.total,color:C.PALETTE[i%C.PALETTE.length]})),valueLabel:'Tags'}))}${card('⭐ Top First Forward agents · available month summaries', `${C.hbars({items:topFfAgents.map(([name,n],i)=>({label:name,value:n,color:C.PALETTE[i%C.PALETTE.length]})),valueLabel:'Tags'})}<small class="dim">Agent source is month-level, so partial-month selections include the full selected month(s).</small>`)}</div>
+        <div class="grid g-2">${card('🚗 Top GV VC4 agents', C.hbars({items:gvTopVc4.map(([name,o],i)=>({label:name,value:o.vc4,color:C.PALETTE[i%C.PALETTE.length]})),valueLabel:'VC4 tags'}))}${card('🚚 Top GV Commercial agents', C.hbars({items:gvTopCommercial.map(([name,o],i)=>({label:name,value:o.comm,color:C.PALETTE[(i+3)%C.PALETTE.length]})),valueLabel:'Commercial tags'}))}</div>
+        ${card('🏢 Top GV teams / supervisors', C.hbars({items:U.topEntries(gvTlMap,rankCount).map(([name,n],i)=>({label:name,value:n,color:C.PALETTE[(i+5)%C.PALETTE.length]})),valueLabel:'Tags'}))}
+        ${card('🔢 Exact range totals', `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Metric</th><th class="num">First Forward</th><th class="num">GV Partner</th><th class="num">Combined</th></tr></thead><tbody>${compareRows}</tbody></table></div><p class="dim small">GV Master does not expose a separate Wrong VRN field; GV Wrong VRN is shown as 0 / unavailable. Chassis counts GV tags typed as chassis.</p>`)}</section>`;
+      C.mount(rangeRoot);
 
       // Update URL without reload
-      const newHash = `#/tagIssued?date=${val}`;
+      const newHash = `#/tagIssued?from=${fromVal}&to=${val}&date=${val}`;
       if (location.hash !== newHash) history.replaceState(null, '', newHash);
 
       const daily = S.get('daily') || [];
@@ -214,8 +290,9 @@ FF.pages = FF.pages || {};
     }
 
     dateInput.addEventListener('change', draw);
-    U.$('#ti-today', root).addEventListener('click', () => { dateInput.value = todayKey(); draw(); });
-    U.$('#ti-yest', root).addEventListener('click', () => { const d = new Date(); d.setDate(d.getDate()-1); dateInput.value = `${d.getFullYear()}-${U.pad2(d.getMonth()+1)}-${U.pad2(d.getDate())}`; draw(); });
+    fromInput.addEventListener('change', draw);
+    U.$('#ti-today', root).addEventListener('click', () => { fromInput.value = dateInput.value = todayKey(); draw(); });
+    U.$('#ti-yest', root).addEventListener('click', () => { const d = new Date(); d.setDate(d.getDate()-1); fromInput.value = dateInput.value = `${d.getFullYear()}-${U.pad2(d.getMonth()+1)}-${U.pad2(d.getDate())}`; draw(); });
 
     await draw();
   }

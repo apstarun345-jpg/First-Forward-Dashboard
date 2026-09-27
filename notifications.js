@@ -5,7 +5,7 @@ window.FF = window.FF || {};
 (function (FF) {
   'use strict';
   const U = FF.util;
-  const state = { started: false, bound: false, timer: null, lastAt: '', items: [], unread: 0, firstPoll: true };
+  const state = { started: false, bound: false, timer: null, presenceTimer: null, lastAt: '', items: [], unread: 0, firstPoll: true, page: 'home', pointer: null, people: [], lastInteraction: Date.now(), pointerBound: false };
   const esc = U.esc;
 
   function icon(item) {
@@ -36,7 +36,9 @@ window.FF = window.FF || {};
     const permission = browser ? Notification.permission : 'unsupported';
     const rows = state.items.slice().reverse().slice(0, 40).map((item) => `<div class="notification-item ${item.type || ''}">
       <span class="notification-icon">${icon(item)}</span><div><b>${esc(item.title)}</b><p>${esc(item.body)}</p><small>${esc(U.timeLabel(new Date(item.createdAt).getTime()))}</small></div></div>`).join('');
+    const presence = FF.auth.user && FF.auth.user.role === 'admin' ? `<section class="presence-panel"><div class="presence-title">🟢 User activity <small>Admin only · live / last seen</small></div>${state.people.length ? state.people.map((p) => `<div class="presence-row"><span class="presence-dot ${p.active ? 'is-live' : ''}"></span><div><b>${esc(p.name || p.username)}</b><small>${p.active ? `Active now · ${esc(p.page)}` : `Last active ${esc(U.timeLabel(p.lastSeen))} · last page: ${esc(p.page)}`}</small>${p.active && p.pointer ? `<small>Pointer: ${Math.round(p.pointer.x)}% from left, ${Math.round(p.pointer.y)}% from top</small>` : ''}</div><span class="presence-state">${p.active ? 'LIVE' : 'AWAY'}</span></div>`).join('') : '<div class="notification-empty">Users seen after this server started will appear here.</div>'}</section>` : '';
     pop.innerHTML = `<div class="notification-head"><div><b>Notifications</b><small>${state.unread ? `${state.unread} unread` : 'Sab updated hai'}</small></div><button class="btn small" data-notify-read>✓ Mark read</button></div>
+      ${presence}
       ${permission === 'default' ? '<button class="notification-enable" data-notify-enable>🔔 Browser alerts on karo</button>' : permission === 'denied' ? '<div class="notification-permission">Browser alerts blocked hain — browser settings se allow karo.</div>' : permission === 'granted' ? '<div class="notification-permission ok">✅ Browser alerts on hain</div>' : ''}
       <div class="notification-list">${rows || '<div class="notification-empty">Abhi koi notification nahi. User login/page open, report update aur shared location yahan dikhegi.</div>'}</div>`;
   }
@@ -52,6 +54,9 @@ window.FF = window.FF || {};
       state.items = [...state.items, ...incoming].filter((x, i, a) => a.findIndex((y) => y.id === x.id) === i).slice(-100);
       state.lastAt = latestTime(state.items) || out.checkAt || state.lastAt;
       setCount(out.unread);
+      if (FF.auth.user && FF.auth.user.role === 'admin') {
+        try { const live = await FF.auth.api('/api/presence'); state.people = Array.isArray(live.people) ? live.people : []; } catch { /* unavailable on older server */ }
+      }
       render();
     } catch (err) {
       if (err && err.status === 401) stop();
@@ -90,17 +95,36 @@ window.FF = window.FF || {};
       if (read) { e.preventDefault(); FF.auth.api('/api/notifications/read', 'POST', {}).catch(() => {}); setCount(0); render(); }
     });
   }
+  function sendPresence() {
+    if (!FF.auth || !FF.auth.user) return;
+    const pointerEnabled = localStorage.getItem('ff_presence_pointer') !== '0';
+    FF.auth.api('/api/presence', 'POST', { page: state.page, pointer: pointerEnabled ? state.pointer : null, engaged: Date.now() - state.lastInteraction < 90e3 }).catch(() => {});
+  }
   function start() {
     bind();
     if (state.started) return;
     state.started = true;
     poll(true);
-    state.timer = setInterval(() => poll(false), 45e3);
+    sendPresence();
+    state.timer = setInterval(() => poll(false), 15e3);
+    state.presenceTimer = setInterval(sendPresence, 15e3);
+    if (!state.pointerBound) {
+      state.pointerBound = true;
+      document.addEventListener('pointermove', (e) => {
+        state.lastInteraction = Date.now();
+        if (localStorage.getItem('ff_presence_pointer') === '0') return;
+        state.pointer = { x: Math.round((e.clientX / Math.max(1, window.innerWidth)) * 100), y: Math.round((e.clientY / Math.max(1, window.innerHeight)) * 100) };
+      }, { passive: true });
+      ['click', 'keydown', 'wheel', 'touchstart'].forEach((type) => document.addEventListener(type, () => { state.lastInteraction = Date.now(); }, { passive: true }));
+    }
   }
-  function stop() { clearInterval(state.timer); state.timer = null; state.started = false; }
+  function stop() { clearInterval(state.timer); clearInterval(state.presenceTimer); state.timer = null; state.presenceTimer = null; state.started = false; }
   function activity(page) {
     if (!FF.auth || !FF.auth.user) return;
-    FF.auth.api('/api/activity', 'POST', { page: page || 'dashboard' }).catch(() => {});
+    state.page = String(page || 'dashboard');
+    state.lastInteraction = Date.now();
+    FF.auth.api('/api/activity', 'POST', { page: state.page }).catch(() => {});
+    sendPresence();
   }
   let searchDebounceTimer = null;
   function logSearch(option, query) {

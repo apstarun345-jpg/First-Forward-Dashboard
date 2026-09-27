@@ -17,7 +17,8 @@ window.FF = window.FF || {};
     { id: 'gvTrend', icon: '📈', label: 'GV Trend', desc: 'GV Master daily / monthly', perm: 'gvTrend', group: 'GV Partner' },
     { id: 'gvPerformance', icon: '🏆', label: 'GV Performance', desc: 'GV agents & TLs (GV REPORT)', perm: 'gvPerformance', group: 'GV Partner' },
     { id: 'gvStock', icon: '📦', label: 'GV Stock', desc: 'Tag Assignment stock search', perm: 'gvStock', group: 'GV Partner' },
-    { id: 'compare', icon: '⚖️', label: 'GV vs First Forward', desc: 'Dono ka side-by-side comparison', perm: 'compare', group: 'GV Partner' }
+    { id: 'compare', icon: '⚖️', label: 'GV vs First Forward', desc: 'Dono ka side-by-side comparison', perm: 'compare', group: 'GV Partner' },
+    { id: 'charts', icon: '📊', label: 'Charts', desc: 'Chart-only GV vs FF analysis', perm: 'compare', group: 'GV Partner' }
   ];
   const GROUP_ICON = { 'Main': '🏠', 'First Forward': '🟦', 'GV Partner': '🟩' };
   const pageDef = (id) => PAGES.find((p) => p.id === id) || null;
@@ -395,7 +396,18 @@ window.FF = window.FF || {};
     }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 300000 });
   }
 
+  function showKpiSummary(title, value, foot) {
+    U.$('#kpi-summary-modal')?.remove();
+    const modal = document.createElement('div');
+    modal.id = 'kpi-summary-modal'; modal.className = 'kpi-modal-backdrop';
+    modal.innerHTML = `<section class="kpi-modal" role="dialog" aria-modal="true" aria-label="${esc(title)}"><button class="icon-btn kpi-modal-close" aria-label="Close">✕</button><span class="kpi-modal-kicker">KPI SUMMARY · ${esc(FF.pages[current.page]?.title || current.page)}</span><h2>${esc(title)}</h2><strong>${esc(value)}</strong><p>${esc(foot || 'Selected KPI total.')}</p><button class="btn primary kpi-modal-done">Done</button></section>`;
+    document.body.append(modal);
+    const close = () => modal.remove();
+    modal.addEventListener('click', (e) => { if (e.target === modal || e.target.closest('.kpi-modal-close,.kpi-modal-done')) close(); });
+  }
+
   function bind() {
+    document.body.classList.toggle('sidebar-auto', localStorage.getItem('ff_sidebar_auto') !== '0');
     window.addEventListener('hashchange', () => { renderCurrent(); toggleUserMenu(false); });
     U.$('#menu-btn').addEventListener('click', () => document.body.classList.toggle('side-open'));
     U.$('#side-backdrop').addEventListener('click', closeSidebar);
@@ -410,6 +422,14 @@ window.FF = window.FF || {};
     document.addEventListener('click', (e) => {
       if (!e.target.closest('#user-menu') && !e.target.closest('#user-btn')) toggleUserMenu(false);
       if (e.target.closest('#user-menu a')) toggleUserMenu(false);
+      const kpi = e.target.closest('.kpi');
+      if (kpi && !e.target.closest('a,button:not(.kpi)')) {
+        const title = kpi.dataset.kpiTitle || U.$('.kpi-title', kpi)?.textContent || 'KPI summary';
+        const value = kpi.dataset.kpiValue || U.$('.kpi-value', kpi)?.innerText || '—';
+        const foot = kpi.dataset.kpiFoot || U.$('.kpi-foot', kpi)?.innerText || '';
+        showKpiSummary(title, value, foot);
+        return;
+      }
       const sh = e.target.closest('[data-share]');
       if (sh) { e.preventDefault(); share(sh); return; }
       const act = e.target.closest('[data-action]');
@@ -439,7 +459,7 @@ window.FF = window.FF || {};
 
   function onBackgroundDataUpdated() {
     // If user is on a data page, smoothly re-render so new stock and stats appear automatically
-    if (['stock', 'home', 'tagIssued', 'dashboard', 'trend', 'performance', 'gvStock', 'gvDashboard', 'gvTrend', 'gvPerformance', 'compare', 'sheet'].includes(current.page)) {
+    if (['stock', 'home', 'tagIssued', 'dashboard', 'trend', 'performance', 'gvStock', 'gvDashboard', 'gvTrend', 'gvPerformance', 'compare', 'charts', 'sheet'].includes(current.page)) {
       renderCurrent({ bgUpdated: true });
     }
   }
