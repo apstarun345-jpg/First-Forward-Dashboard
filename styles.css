@@ -438,6 +438,9 @@ body.ready .content, body.ready .sidebar { visibility: visible; }
 .img-preview.logo { width: 90px; }
 .img-preview img { max-width: 100%; max-height: 100%; object-fit: contain; }
 .btn-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px; }
+.fld.inline-size { flex-direction: row; align-items: center; gap: 6px; font-size: 11.5px; margin: 0; }
+.fld.inline-size .input.small { width: auto; min-width: 0; padding: 5px 8px; font-size: 12px; border-radius: 8px; }
+.img-info { display: block; font-size: 11px; }
 .perm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
 .perm { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; padding: 8px 10px; border-radius: 10px; background: #f8f9fd; font-size: 12.5px; }
 .perm small { grid-column: 2; }
@@ -541,7 +544,7 @@ body.ready .content, body.ready .sidebar { visibility: visible; }
 
 /* ---------- avatars + top-right user menu ---------- */
 .av { width: 34px; height: 34px; border-radius: 50%; overflow: hidden; display: inline-grid; place-items: center; background: linear-gradient(135deg, var(--brand), var(--brand-2)); color: #fff; font-weight: 800; font-size: 13px; flex: none; box-shadow: 0 2px 8px rgba(15, 23, 42, .18); }
-.av img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.av img { width: 100%; height: 100%; object-fit: contain; display: block; background: #fff; }
 .av.sm { width: 32px; height: 32px; font-size: 12px; }
 .av.top { width: 36px; height: 36px; }
 .av.lg { width: 54px; height: 54px; font-size: 18px; border-radius: 16px; }
@@ -574,7 +577,7 @@ body.ready .content, body.ready .sidebar { visibility: visible; }
 .home-hero h1 { margin: 0 0 4px; font-size: 26px; letter-spacing: -.5px; }
 .home-name { background: linear-gradient(135deg, var(--brand), var(--brand-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .home-hero .sub { margin: 0 0 10px; color: var(--muted); }
-.home-avatar { width: 74px; height: 74px; border-radius: 22px; object-fit: cover; box-shadow: 0 10px 26px rgba(15, 23, 42, .18); flex: none; }
+.home-avatar { width: 74px; height: 74px; border-radius: 22px; object-fit: contain; background: #fff; box-shadow: 0 10px 26px rgba(15, 23, 42, .18); flex: none; }
 .home-avatar.mono-logo { display: grid; place-items: center; font-size: 30px; font-weight: 900; color: #fff; background: linear-gradient(135deg, var(--brand), var(--brand-2)); }
 .home-hero-side { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .home-stat { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; display: flex; flex-direction: column; box-shadow: var(--shadow); }
@@ -609,7 +612,7 @@ body.ready .content, body.ready .sidebar { visibility: visible; }
 /* ---------- avatar edit (settings) ---------- */
 .avatar-edit { display: flex; gap: 14px; align-items: center; padding: 12px; border: 1px dashed var(--line); border-radius: 14px; margin-bottom: 14px; background: #fbfbff; }
 .avatar-big { width: 84px; height: 84px; border-radius: 24px; background: linear-gradient(135deg, var(--brand), var(--brand-2)); color: #fff; display: grid; place-items: center; font-size: 32px; font-weight: 900; overflow: hidden; flex: none; }
-.avatar-big img { width: 100%; height: 100%; object-fit: cover; }
+.avatar-big img { width: 100%; height: 100%; object-fit: contain; background: #fff; }
 
 /* ---------- access matrix / tabs registry ---------- */
 .matrix-wrap { max-height: 70vh; overflow: auto; }

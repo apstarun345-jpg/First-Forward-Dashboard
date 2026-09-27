@@ -196,16 +196,18 @@ window.FF = window.FF || {};
       const img = new Image();
       const url = URL.createObjectURL(file);
       img.onload = () => {
+        // Centre-crop to a square so the round avatar never looks zoomed / cut off.
+        const side = Math.min(img.width, img.height);
+        const sx = Math.round((img.width - side) / 2), sy = Math.round((img.height - side) / 2);
         const size = maxSide || 256;
-        const scale = Math.min(1, size / Math.max(img.width, img.height));
+        const scale = Math.min(1, size / side);
         const c = document.createElement('canvas');
-        c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
+        c.width = Math.max(1, Math.round(side * scale)); c.height = c.width;
         const ctx = c.getContext('2d');
         ctx.imageSmoothingQuality = 'high';
-        // Attractive: white background + centered image with rounded corners
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0,0,c.width,c.height);
-        ctx.drawImage(img, 0, 0, c.width, c.height);
+        ctx.drawImage(img, sx, sy, side, side, 0, 0, c.width, c.height);
         URL.revokeObjectURL(url);
         let data = c.toDataURL('image/jpeg', 0.86);
         if (data.length > 180 * 1024) {

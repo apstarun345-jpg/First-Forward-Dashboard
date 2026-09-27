@@ -104,7 +104,8 @@ FF.pages = FF.pages || {};
       const filter = sel.scope === 'agent' ? { agent: sel.value } : sel.scope === 'tl' ? { tl: sel.value } : { cls: sel.value };
       const raw = await M.loadStockRows(filter);
       const meta = [['Report', `${FF.config.brand} · Stock report`], ['Scope', `${sel.scope.toUpperCase()}: ${sel.value}`], ['Generated', new Date().toLocaleString('en-IN')], ['Total tags', raw.rows.length], []];
-      const summary = { name: 'Summary', header: pivot.header, rows: [...pivot.rows, [], ...meta.map((m) => m.map((x) => x))] };
+      // filterRows = header + pivot rows only → Excel/WPS ka header filter meta rows (Report/Scope/…) ko include nahi karega.
+      const summary = { name: 'Summary', header: pivot.header, rows: [...pivot.rows, [], ...meta.map((m) => m.map((x) => x))], filterRows: pivot.rows.length + 1 };
       const rawRows = raw.rows.map((r) => r.map((v) => (v !== '' && /^-?\d+(\.\d+)?$/.test(v) && v.length < 15 ? Number(v) : v)));
       FF.xlsx.download(`stock-${U.slug(sel.value)}-${U.stamp()}.xlsx`, [summary, { name: 'StockDataa', header: raw.header, rows: rawRows }]);
       U.toast(`Excel ready · ${U.fmt(raw.rows.length)} tag rows`, 'ok');
