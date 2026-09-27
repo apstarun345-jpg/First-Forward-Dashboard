@@ -145,6 +145,8 @@ const someAgent = agents.find((a) => a.n > 3)?.name; const someTl = agents.find(
 log(`      sample agent "${someAgent}" · TL "${someTl}"`);
 await run('trend.render tl filter', () => pages.trend.render(root(), { mode: 'daily', tl: someTl }, {}), true);
 await run('trend.render agent filter', () => pages.trend.render(root(), { mode: 'compare', agent: someAgent }, {}), true);
+await run('targets.render', () => pages.targets.render(root(), {}, {}), true);
+await run('targets.render gv+month', () => pages.targets.render(root(), { month: FF.util.prevMonthKey(FF.util.ymKey(new Date())) }, {}), true);
 await run('stock.render overview', () => pages.stock.render(root(), {}, {}), true);
 await run('stock.render agent', () => pages.stock.render(root(), { agent: someAgent }, {}), true);
 await run('stock.render tl', () => pages.stock.render(root(), { tl: someTl }, {}), true);

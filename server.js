@@ -52,6 +52,7 @@ const BLOCKED_DIRS = new Set(['data', 'dev', 'node_modules', '.git', 'google-app
 export const PAGE_PERMISSIONS = [
   { key: 'home', label: 'Home · highlights & charts', group: 'Pages' },
   { key: 'tagIssued', label: 'GV & FF Tag Issued (date-wise)', group: 'Pages' },
+  { key: 'targets', label: 'Targets · agent-wise monthly targets', group: 'Pages' },
   { key: 'dashboard', label: 'First Forward · Dashboard', group: 'First Forward' },
   { key: 'trend', label: 'First Forward · Trend', group: 'First Forward' },
   { key: 'performance', label: 'First Forward · Performance', group: 'First Forward' },
@@ -89,7 +90,7 @@ const allPermKeys = (settings) => permissionsFor(settings).map((p) => p.key);
 const allPermKeysNow = () => allPermKeys(db.settings);
 // Back-compat export (some tooling imported PERMISSIONS).
 export const PERMISSIONS = permissionsFor({ tabs: DEFAULT_TABS });
-const DEFAULT_USER_PERMS = ['home', 'tagIssued', 'dashboard', 'trend', 'stock', 'performance', 'gvDashboard', 'gvTrend', 'gvStock', 'gvPerformance', 'compare',
+const DEFAULT_USER_PERMS = ['home', 'tagIssued', 'targets', 'dashboard', 'trend', 'stock', 'performance', 'gvDashboard', 'gvTrend', 'gvStock', 'gvPerformance', 'compare',
   'sheet:StockDataa', 'sheet:REPORT', 'sheet:GV Master', 'sheet:Tag Assignment', 'sheet:GV REPORT', 'export'];
 
 const DEFAULT_SETTINGS = {

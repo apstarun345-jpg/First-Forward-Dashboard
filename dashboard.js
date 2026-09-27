@@ -16,10 +16,57 @@ FF.pages = FF.pages || {};
   }
   function sectionError(title, err) { return card(title, U.errorBox(err)); }
 
+  // ---- 🧮 multi-sheet Excel bundle: poora workspace ek file me ----
+  async function exportBundle(btn) {
+    if (!FF.auth.can('export')) { U.toast('Download permission nahi hai', 'err'); return; }
+    btn.disabled = true; const label = btn.textContent; btn.textContent = '⏳ Bundle ban raha hai…';
+    try {
+      const daily = await S.need('daily');
+      const [stock, stockAgents, report] = await Promise.all([
+        S.need('stock').catch(() => []), S.need('stockAgents').catch(() => []), S.need('report').catch(() => null)
+      ]);
+      let gvMonthsData = null;
+      try { if (FF.gv && FF.gv.enabled && FF.gv.enabled()) { await FF.gv.need('master'); gvMonthsData = FF.gv.months(); } } catch { /* GV optional */ }
+      const latest = M.latestDate(daily);
+      const cur = latest ? U.ymKey(latest) : '';
+      const months = M.months(daily);
+      const monthly = months.map((m) => { const s = M.summary(daily, m); return [U.labelYM(m, true), s.total, s.vc4, s.vc20, s.vc5p, s.comm, s.replacement, s.activeDays, Math.round(s.avgPerDay), s.projected]; });
+      const series = cur ? M.dailySeries(daily, cur) : null;
+      const dailyRows = series ? series.days.map((d, i) => { const ymd = daily.filter((r) => r.ym === cur && r.day === d); return [d, series.totals[i] || 0, U.sum(ymd.filter((r) => r.group === 'VC4'), (r) => r.n), U.sum(ymd.filter((r) => r.group !== 'VC4'), (r) => r.n), U.sum(ymd.filter((r) => r.type === 'REPLACEMENT'), (r) => r.n)]; }) : [];
+      const classes = U.uniq(stock.map((r) => r.cls)).sort();
+      const tls = U.uniq(stock.map((r) => r.tlName));
+      const stockTlRows = tls.map((t) => [t, ...classes.map((c) => U.sum(stock.filter((r) => r.tlName === t && r.cls === c), (r) => r.n)), U.sum(stock.filter((r) => r.tlName === t && r.group === 'VC4'), (r) => r.n), U.sum(stock.filter((r) => r.tlName === t), (r) => r.n)]);
+      const agMap = new Map();
+      for (const r of stockAgents) { const k = `${r.agentName}|${r.tlName}`; const o = agMap.get(k) || { name: r.agentName, tl: r.tlName, vc4: 0, comm: 0, total: 0 }; o.total += r.n; if (r.group === 'VC4') o.vc4 += r.n; else o.comm += r.n; agMap.set(k, o); }
+      const agentStockRows = [...agMap.values()].sort((a, b) => b.total - a.total).map((a) => [a.name, a.tl, a.vc4, a.comm, a.total]);
+      const gvMonthly = gvMonthsData ? gvMonthsData.map((m) => { const s = FF.gv.summary(m); return [U.labelYM(m, true), s.total, s.vc4, s.comm, s.replacement, s.activeAgents, Math.round(s.avgPerDay)]; }) : null;
+      const sheets = [
+        { name: 'Summary', filterRows: 7, header: ['Metric', 'Value'], rows: [
+          ['Report', `${FF.config.brand} · Full Excel bundle`], ['Generated', new Date().toLocaleString('en-IN')],
+          ['Latest date', latest ? U.labelDate(latest, true) : '—'], ['Current month', cur ? U.labelYM(cur, true) : '—'],
+          ['MTD total', cur ? M.summary(daily, cur).total : 0], ['Stock tags', U.sum(stock, (r) => r.n)],
+          ['Sheets', 'Monthly · Daily · Stock by TL · Agent stock · REPORT' + (gvMonthly ? ' · GV monthly' : '')]
+        ] },
+        { name: 'Monthly issuance', header: ['Month', 'Total', 'VC4', 'VC20', 'VC5+', 'Commercial', 'Replacement', 'Active days', 'Avg/day', 'Projected'], rows: monthly },
+        { name: `Daily ${cur}`, header: ['Day', 'Total', 'VC4', 'Commercial', 'Replacement'], rows: dailyRows },
+        { name: 'Stock by TL', header: ['TL', ...classes, 'VC4', 'Total'], rows: stockTlRows },
+        { name: 'Agent stock', header: ['Agent', 'TL', 'VC4', 'Commercial', 'Total'], rows: agentStockRows }
+      ];
+      if (report && report.cols && report.rows) sheets.push({ name: 'REPORT sheet', header: report.cols.map((c, i) => c.label || U.colLetter(i)), rows: FF.data.textRows(report).slice(0, 5000) });
+      if (gvMonthly) sheets.push({ name: 'GV monthly', header: ['Month', 'Total', 'VC4', 'Commercial', 'Replacement', 'Active agents', 'Avg/day'], rows: gvMonthly });
+      FF.xlsx.download(`workspace-bundle-${U.stamp()}.xlsx`, sheets);
+      U.toast(`Bundle ready · ${sheets.length} sheets ✓`, 'ok');
+      if (FF.notifications && FF.notifications.logClick) FF.notifications.logClick('Excel Bundle', `${sheets.length} sheets`);
+    } catch (err) { console.error(err); U.toast(`Bundle fail: ${err.message}`, 'err'); }
+    btn.disabled = false; btn.textContent = label;
+  }
+
   async function render(root) {
     root.innerHTML = `<div class="page-head"><div><h1>📊 Dashboard</h1><p class="sub">Summary · EIR issuance + StockDataa inventory · VC4 vs Commercial</p></div>
-      <div class="head-actions"><button class="btn primary" data-action="refresh">↻ Refresh</button></div></div>
+      <div class="head-actions"><button class="btn" id="db-bundle" title="Monthly + Daily + Stock + REPORT + GV — sab ek xlsx me">⬇ Excel bundle</button><button class="btn primary" data-action="refresh">↻ Refresh</button></div></div>
       <div id="db-body">${U.spinner('Data load ho raha hai… (pehli baar 5-10 sec lag sakte hain)')}</div>`;
+    const bundleBtn = U.$('#db-bundle', root);
+    if (bundleBtn) bundleBtn.addEventListener('click', () => exportBundle(bundleBtn));
 
     const [dailyR, agentsR, statusR, stockR, stockAgentsR] = await Promise.allSettled([S.need('daily'), S.need('agents'), S.need('status'), S.need('stock'), S.need('stockAgents')]);
     if (!root.isConnected) return;

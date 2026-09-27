@@ -9,6 +9,7 @@ window.FF = window.FF || {};
   const PAGES = [
     { id: 'home', icon: '🏠', label: 'Home', desc: 'Highlights · GV & FF charts', perm: 'home', group: 'Main' },
     { id: 'tagIssued', icon: '🏷️', label: 'GV & FF Tag Issued', desc: 'Date-wise detailed issuance · VC4 vs Commercial', perm: 'tagIssued', group: 'Main' },
+    { id: 'targets', icon: '🎯', label: 'Agent Targets', desc: 'Shortlist · target · progress · Excel', perm: 'targets', group: 'Main' },
     { id: 'dashboard', icon: '📊', label: 'Dashboard', desc: 'KPIs & charts (EIR)', perm: 'dashboard', group: 'First Forward' },
     { id: 'trend', icon: '📈', label: 'Trend', desc: 'Daily · Monthly · Last vs Current', perm: 'trend', group: 'First Forward' },
     { id: 'performance', icon: '🏆', label: 'Performance', desc: 'Agents & TLs (REPORT)', perm: 'performance', group: 'First Forward' },
@@ -43,9 +44,80 @@ window.FF = window.FF || {};
     settings: { label: 'सेटिंग्स' }
   };
   const HI_GROUPS = { 'First Forward': 'फर्स्ट फॉरवर्ड', 'GV Partner': 'जीवी पार्टनर', 'Account': 'अकाउंट', 'Sheets': 'शीट्स' };
-  function lang() { try { return localStorage.getItem('ff_lang') === 'hi' ? 'hi' : 'en'; } catch { return 'en'; } }
-  function pageLabel(p) { return lang() === 'hi' && HI_PAGES[p.id] ? { ...p, ...HI_PAGES[p.id] } : p; }
+  const EN_PAGES = {
+    home: { desc: 'Highlights · GV & FF charts' },
+    tagIssued: { desc: 'Date-wise detailed issuance · VC4 vs Commercial' },
+    targets: { desc: 'Shortlist agents · set targets · track progress · Excel' },
+    compare: { desc: 'Side-by-side comparison of both channels' },
+    stock: { desc: 'Search · pivot · Excel (StockDataa)' }
+  };
+  // Exact textContent translations for page heads + common buttons (applied after every render).
+  const TEXT = {
+    hi: {
+      '📊 Dashboard': '📊 डैशबोर्ड',
+      'Summary · EIR issuance + StockDataa inventory · VC4 vs Commercial': 'सारांश · EIR जारी + स्टॉकडेटा इन्वेंटरी · VC4 बनाम कॉमर्शियल',
+      '📦 Stock / Inventory': '📦 स्टॉक / इन्वेंटरी',
+      'StockDataa — agent / TL / class wise stock · VC4 vs Commercial · pivot + Excel export': 'स्टॉकडेटा — एजेंट / TL / क्लास अनुसार स्टॉक · VC4 बनाम कॉमर्शियल · पिवट + एक्सेल',
+      '⚖️ GV vs First Forward': '⚖️ GV बनाम फर्स्ट फॉरवर्ड',
+      '🎯 Agent Targets': '🎯 एजेंट टार्गेट',
+      '⚙️ Settings': '⚙️ सेटिंग्स',
+      '↻ Refresh': '↻ रिफ्रेश',
+      '🖨 PDF / Print': '🖨 PDF / प्रिंट',
+      '📋 Copy summary': '📋 सारांश कॉपी करें',
+      '⬇ Excel (Summary + StockDataa rows)': '⬇ एक्सेल (सारांश + स्टॉकडेटा पंक्तियाँ)',
+      '⬇ Excel bundle': '⬇ एक्सेल बंडल',
+      '💾 Save targets': '💾 टार्गेट सेव करें',
+      '⬇ Excel': '⬇ एक्सेल',
+      '✕ Clear': '✕ साफ़ करें',
+      '☑ Visible select': '☑ दिख रहे चुनें',
+      '✕ Selection clear': '✕ चयन हटाएँ',
+      '📴 Offline — last loaded data dikh raha hai': '📴 ऑफलाइन — आखिरी लोड हुआ डेटा दिख रहा है'
+    },
+    en: {
+      '📴 Offline — last loaded data dikh raha hai': '📴 Offline — showing last loaded data'
+    }
+  };
+  const LANGS = [['en', '🇬🇧 English'], ['hinglish', '🗣️ Hinglish'], ['hi', '🇮🇳 हिंदी']];
+  function lang() { try { const v = localStorage.getItem('ff_lang'); return v === 'hi' || v === 'en' ? v : 'hinglish'; } catch { return 'hinglish'; } }
+  function setLang(v) {
+    try { localStorage.setItem('ff_lang', v); } catch {}
+    renderSidebar();
+    U.toast(v === 'hi' ? 'भाषा: हिंदी ✓' : v === 'en' ? 'Language: English ✓' : 'Language: Hinglish ✓', 'ok');
+    renderCurrent();
+  }
+  function toggleLangMenu() {
+    const old = U.$('#lang-pop'); if (old) { old.remove(); return; }
+    const btn = U.$('#lang-toggle'); if (!btn || !btn.parentElement) return;
+    const pop = document.createElement('div');
+    pop.id = 'lang-pop'; pop.className = 'lang-pop';
+    const cur = lang();
+    pop.innerHTML = LANGS.map(([v, l]) => `<button type="button" class="lang-opt ${cur === v ? 'on' : ''}" data-lang="${v}">${l}${cur === v ? ' ✓' : ''}</button>`).join('');
+    btn.parentElement.style.position = 'relative';
+    btn.parentElement.appendChild(pop);
+    pop.addEventListener('click', (e) => { const b = e.target.closest('[data-lang]'); if (!b) return; pop.remove(); if (b.dataset.lang !== cur) setLang(b.dataset.lang); });
+    setTimeout(() => {
+      document.addEventListener('click', function close(ev) {
+        if (pop && !pop.contains(ev.target) && ev.target !== btn) { if (pop.parentElement) pop.remove(); document.removeEventListener('click', close); }
+      });
+    }, 10);
+  }
+  function pageLabel(p) {
+    if (lang() === 'hi' && HI_PAGES[p.id]) return { ...p, ...HI_PAGES[p.id] };
+    if (lang() === 'en' && EN_PAGES[p.id]) return { ...p, ...EN_PAGES[p.id] };
+    return p;
+  }
   const groupLabel = (g) => (lang() === 'hi' && HI_GROUPS[g] ? HI_GROUPS[g] : g);
+  /** DOM auto-translation: page heads, buttons, seg tabs (exact textContent match only). */
+  function translateDom(root) {
+    const mode = lang();
+    if (mode === 'hinglish') return;
+    const dict = TEXT[mode]; if (!dict) return;
+    U.$$('.page-head h1, .page-head .sub, .btn, .seg-btn', root || document).forEach((el) => {
+      if (!el || (el.querySelector && el.querySelector('input,select,img,svg')) || el.childElementCount > 0) return;
+      const key = (el.textContent || '').trim();
+      if (dict[key] !== undefined) el.textContent = dict[key];
+    });
+  }
 
   // ---- theme (light / dark) ---------------------------------------------------------------------
   function themeMode() { try { return localStorage.getItem('ff_theme') === 'dark' ? 'dark' : 'light'; } catch { return 'light'; } }
@@ -58,13 +130,6 @@ window.FF = window.FF || {};
     try { localStorage.setItem('ff_theme', themeMode() === 'dark' ? 'light' : 'dark'); } catch {}
     applyThemeMode();
   }
-  function toggleLang() {
-    try { localStorage.setItem('ff_lang', lang() === 'hi' ? 'en' : 'hi'); } catch {}
-    renderSidebar();
-    U.toast(lang() === 'hi' ? 'भाषा: हिंदी ✓' : 'Language: English ✓', 'ok');
-    renderCurrent();
-  }
-
   // ---- chart PNG buttons -------------------------------------------------------------------------
   function enhanceCharts(root) {
     if (!FF.charts || !FF.charts.download) return;
@@ -299,7 +364,12 @@ window.FF = window.FF || {};
       const on = a.dataset.page === current.page && (current.page !== 'sheet' || a.dataset.name === current.params.name);
       a.classList.toggle('active', on);
     });
-    const title = current.page === 'sheet' ? (current.params.name || 'Sheet') : (FF.pages[current.page] && FF.pages[current.page].title) || '';
+    let title = current.page === 'sheet' ? (current.params.name || 'Sheet') : (FF.pages[current.page] && FF.pages[current.page].title) || '';
+    const mode = lang();
+    if (mode === 'hi') {
+      const HI_TITLES = { Home: 'होम', Dashboard: 'डैशबोर्ड', Trend: 'ट्रेंड', Performance: 'परफ़ॉर्मेंस', Stock: 'स्टॉक', 'Stock Report': 'स्टॉक रिपोर्ट', Targets: 'टार्गेट', Settings: 'सेटिंग्स', 'GV vs First Forward': 'GV बनाम फर्स्ट फॉरवर्ड', Compare: 'तुलना' };
+      title = HI_TITLES[title] || title;
+    }
     U.$('#top-title').textContent = title;
     document.title = `${title} · ${FF.config.appName}`;
   }
@@ -327,7 +397,7 @@ window.FF = window.FF || {};
       console.error(err);
       if (token === current.token) root.innerHTML = U.errorBox(err, 'data-action="refresh"');
     }
-    if (token === current.token) { updateStatus(); enhanceCharts(root); }
+    if (token === current.token) { updateStatus(); enhanceCharts(root); translateDom(root); }
   }
   function updateStatus(progress) {
     const el = U.$('#status');
@@ -342,8 +412,11 @@ window.FF = window.FF || {};
       return;
     }
     const t = FF.store.loadedAt || (gv && gv.loadedAt);
-    const errs = Object.keys(st.errors || {}).length + (gv ? Object.keys(gv.errors || {}).length : 0);
-    el.innerHTML = t ? `<span class="dot ${errs ? 'warn' : 'live'}\"></span> Data ${U.timeLabel(t)}${errs ? ` · ${errs} failed` : ''}${pre && pre.done ? ' · all sheets ready ✓' : ''}` : '<span class="dot"></span> Ready';
+    const errs = Object.keys(st.errors || {}).length + (gv ? Object.keys(gv.errors).length : 0);
+    const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+    el.innerHTML = offline
+      ? '<span class="dot warn"></span> 📴 Offline — last loaded data dikh raha hai'
+      : (t ? `<span class="dot ${errs ? 'warn' : 'live'}\"></span> Data ${U.timeLabel(t)}${errs ? ` · ${errs} failed` : ''}${pre && pre.done ? ' · all sheets ready ✓' : ''}` : '<span class="dot"></span> Ready');
     const btn = U.$('#top-refresh'); if (btn) btn.classList.remove('spin');
   }
   let refreshing = false;
@@ -383,6 +456,7 @@ window.FF = window.FF || {};
     U.$('#drawer-body').scrollTop = 0;
     if (FF.charts && FF.charts.mount) FF.charts.mount(U.$('#drawer-body'));
     enhanceCharts(U.$('#drawer-body'));
+    translateDom(U.$('#drawer-body'));
   }
   function closeDrawer() {
     U.$('#drawer').classList.remove('open');
@@ -479,8 +553,10 @@ window.FF = window.FF || {};
     window.addEventListener('hashchange', () => { renderCurrent(); toggleUserMenu(false); });
     U.$('#menu-btn').addEventListener('click', () => document.body.classList.toggle('side-open'));
     const themeBtn = U.$('#theme-toggle'); if (themeBtn) themeBtn.addEventListener('click', toggleThemeMode);
-    const langBtn = U.$('#lang-toggle'); if (langBtn) langBtn.addEventListener('click', toggleLang);
+    const langBtn = U.$('#lang-toggle'); if (langBtn) langBtn.addEventListener('click', toggleLangMenu);
     applyThemeMode();
+    window.addEventListener('online', () => { updateStatus(); U.toast('🌐 Internet wapas aa gaya — ↻ se fresh data lao', 'ok'); });
+    window.addEventListener('offline', () => { updateStatus(); U.toast('📴 Offline ho — last loaded data dikhega', 'warn'); });
     U.$('#side-backdrop').addEventListener('click', closeSidebar);
     U.$('#top-refresh').addEventListener('click', refresh);
     const pwaBtn = U.$('#pwa-install');
@@ -601,6 +677,6 @@ window.FF = window.FF || {};
     if (ok) onLogin();
   }
 
-  FF.app = { storageBanner, liveShareChip, navigate, updateParams, refresh, openDrawer, closeDrawer, renderSidebar, renderCurrent, renderTopUser, updateStatus, onLogin, onBackgroundDataUpdated, promptInstall, enhanceCharts, themeMode, toggleThemeMode, lang, toggleLang, PAGES, get current() { return current; } };
+  FF.app = { storageBanner, liveShareChip, navigate, updateParams, refresh, openDrawer, closeDrawer, renderSidebar, renderCurrent, renderTopUser, updateStatus, onLogin, onBackgroundDataUpdated, promptInstall, enhanceCharts, themeMode, toggleThemeMode, lang, setLang, toggleLangMenu, PAGES, get current() { return current; } };
   document.addEventListener('DOMContentLoaded', init);
 })(window.FF);
