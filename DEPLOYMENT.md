@@ -57,7 +57,11 @@ feed keeps working (it polls) while the phone panel goes completely silent.
 
 Keys are therefore resolved in this order:
 
-1. `VAPID_PUBLIC_KEY` + `VAPID_PRIVATE_KEY` environment variables (explicit pin).
+1. `VAPID_PUBLIC_KEY` + `VAPID_PRIVATE_KEY` environment variables (explicit pin). Optional —
+   the durable store below keeps keys stable without them. If you do pin them, the standard
+   `npx web-push generate-vapid-keys` output works as-is (65-byte raw-point public key + 32-byte
+   private scalar); the server also accepts its own internal PKCS8/SPKI formats and always
+   derives the browser-ready public point from the private key.
 2. Durable storage — `notify.vapid` in the same Apps Script / Sheets record as the users and
    notification feed. This is what makes push survive a redeploy on a service with no disk.
 3. `DATA_DIR/vapid.json` (local `files` backend, or a within-boot cache on a container disk).
@@ -65,6 +69,12 @@ Keys are therefore resolved in this order:
 
 After deploying, verify:
 
+0. `GET /api/push/vapid` → `publicKey` must decode (base64url) to **65 bytes starting with
+   `0x04`** — the raw uncompressed P-256 point browsers require as `applicationServerKey`.
+   A 91-byte value was the old SPKI-DER bug that made Chrome throw
+   *"The provided applicationServerKey is not valid"*; the server now always derives the raw
+   point from the private key, heals any stored/env key in the old format automatically, and
+   re-saves the healed copy, so signing keys (and existing subscriptions) stay unchanged.
 1. `GET /api/health` → `push.enabled` is `true`, `push.durable` is `true`, `push.warning` is
    `null`, `push.ttl` is `86400`. Admins also see a 📲 banner in the app when `push.warning`
    is set. If `durable` is `false`, set the two `VAPID_*` variables (or attach a disk) — otherwise

@@ -28,6 +28,23 @@ process.env.APPS_SCRIPT_ALLOW_LOCAL = '1';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SECRET = 'test-secret-0123456789-abcdef';
 
+// ---- VAPID key helpers --------------------------------------------------------------------------
+// Browsers demand the RAW 65-byte uncompressed P-256 point (0x04 || X || Y) as applicationServerKey.
+// Purana server SPKI DER (91 bytes) deta tha — Chrome usse "The provided applicationServerKey is not
+// valid" bol ke reject karta tha. Server ab hamesha raw point serve karta hai.
+function rawPointOf(publicKeyObject) {
+  const jwk = publicKeyObject.export({ format: 'jwk' }); // EC public JWK me x/y hote hain
+  return Buffer.concat([Buffer.from([4]), Buffer.from(jwk.x, 'base64url'), Buffer.from(jwk.y, 'base64url')]).toString('base64url');
+}
+/** KeyObject banao — chahe 65-byte raw point ho ya 91-byte SPKI DER (legacy). */
+function pubKeyFromAny(b64) {
+  const raw = Buffer.from(b64, 'base64url');
+  if (raw.length === 65 && raw[0] === 4) {
+    return crypto.createPublicKey({ key: { kty: 'EC', crv: 'P-256', x: raw.subarray(1, 33).toString('base64url'), y: raw.subarray(33, 65).toString('base64url') }, format: 'jwk' });
+  }
+  return crypto.createPublicKey({ key: raw, format: 'der', type: 'spki' });
+}
+
 // ---- RFC 8291 helpers (client side of the encryption the server performs) -----------------------
 function hkdf(salt, ikm, info, len) {
   const prk = crypto.createHmac('sha256', salt).update(ikm).digest();
@@ -82,7 +99,7 @@ function startMockPushService() {
       const [h, p, s] = m[1].split('.');
       let verified = false;
       try {
-        const pub = crypto.createPublicKey({ key: Buffer.from(state.expectedKey, 'base64url'), format: 'der', type: 'spki' });
+        const pub = pubKeyFromAny(state.expectedKey);
         verified = crypto.verify('sha256', Buffer.from(`${h}.${p}`), { key: pub, dsaEncoding: 'ieee-p1363' }, Buffer.from(s, 'base64url'));
         rec.aud = JSON.parse(Buffer.from(p, 'base64url').toString()).aud;
       } catch (err) { rec.error = `jwt: ${err.message}`; }
@@ -130,6 +147,10 @@ test('web push survives a Render redeploy: VAPID key stays stable and deliveries
 
     const vapid1 = (await call('/api/push/vapid')).json.publicKey;
     assert.ok(vapid1, 'server must expose a VAPID public key');
+    // Browser-ready format: 65-byte uncompressed P-256 point (0x04 || X || Y), SPKI DER NAHI.
+    const vapid1Bytes = Buffer.from(vapid1, 'base64url');
+    assert.equal(vapid1Bytes.length, 65, `applicationServerKey 65-byte raw point hona chahiye, mila ${vapid1Bytes.length} bytes — Chrome ise reject karega`);
+    assert.equal(vapid1Bytes[0], 4, 'uncompressed EC point 0x04 se shuru hona chahiye');
 
     // "Browser" subscribes with that key — exactly like notifications.js setupPush() does.
     const ua = makeUA();
@@ -172,6 +193,48 @@ test('web push survives a Render redeploy: VAPID key stays stable and deliveries
   }
 });
 
+test('VAPID_* env vars in the standard web-push tool format (32-byte scalar) work end-to-end', async () => {
+  // Render env me operator sabse zyada `npx web-push generate-vapid-keys` ka output paste karta hai:
+  // publicKey = 65-byte raw point (base64url), privateKey = 32-byte raw scalar (base64url).
+  // Server ko dono accept karke browser-ready key serve karni chahiye aur deliveries verify honi chahiye.
+  const ecdh = crypto.createECDH('prime256v1'); ecdh.generateKeys();
+  let d = ecdh.getPrivateKey(); if (d.length < 32) d = Buffer.concat([Buffer.alloc(32 - d.length), d]);
+  const envPub = ecdh.getPublicKey().toString('base64url');      // web-push tool publicKey
+  const envPriv = d.toString('base64url');                        // web-push tool privateKey (43 chars)
+  const kpJwk = ecdh.getPublicKey();
+  const expectedPub = Buffer.concat([Buffer.from([4]), kpJwk.subarray(1, 65)]).toString('base64url');
+
+  const mock = await startMockAppsScript({ secret: SECRET });
+  const push = await startMockPushService();
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'apna-push-env-'));
+  let server;
+  try {
+    server = await startServer({ STORAGE_BACKEND: '', APPS_SCRIPT_URL: mock.url, APPS_SCRIPT_SECRET: SECRET, ADMIN_USER: 'owner', ADMIN_PASSWORD: 'owner-password', RENDER: 'true', GVIZ_BASE: '', DATA_DIR: dir, VAPID_PUBLIC_KEY: envPub, VAPID_PRIVATE_KEY: envPriv });
+    const cookie = (await (await fetch(server.base + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'owner', password: 'owner-password' }) })).headers.get('set-cookie')).split(';')[0];
+    const call = (route, method = 'GET', body) => fetch(server.base + route, { method, headers: { cookie, 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) }).then((r) => r.json());
+
+    const vapid = (await call('/api/push/vapid')).publicKey;
+    assert.equal(vapid, expectedPub, 'env keypair ka raw 65-byte point serve hona chahiye');
+    const health = await call('/api/health');
+    assert.equal(health.push.enabled, true);
+    assert.equal(health.push.keySource, 'env', 'keySource env hona chahiye');
+
+    const ua = makeUA();
+    push.state.ua = ua;
+    push.state.expectedKey = vapid;
+    const sub = { subscription: { endpoint: push.url('env-device'), keys: { p256dh: ua.publicKey.toString('base64url'), auth: ua.authSecret.toString('base64url') } } };
+    await fetch(server.base + '/api/push/subscribe', { method: 'POST', headers: { cookie, 'Content-Type': 'application/json' }, body: JSON.stringify(sub) });
+    await fetch(server.base + '/api/activity', { method: 'POST', headers: { cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'settings', details: 'env key test' }) });
+    for (let i = 0; i < 40 && !push.state.deliveries.length; i++) await sleep(50);
+    assert.equal(push.state.deliveries.length, 1, 'env-key push deliver honi chahiye');
+    assert.equal(push.state.deliveries[0].status, 201, `push service ne reject kiya: ${push.state.deliveries[0].error}`);
+  } finally {
+    if (server) await server.stop();
+    await push.close(); await mock.close();
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('a subscription signed with a rotated key is reported and dropped so the phone re-subscribes', async () => {
   const mock = await startMockAppsScript({ secret: SECRET });
   const push = await startMockPushService();
@@ -189,7 +252,7 @@ test('a subscription signed with a rotated key is reported and dropped so the ph
     push.state.ua = ua;
     await call('/api/push/subscribe', 'POST', { subscription: { endpoint: push.url('device-2'), keys: { p256dh: ua.publicKey.toString('base64url'), auth: ua.authSecret.toString('base64url') } } });
     // Pretend the push service knows a DIFFERENT app server key for that subscription (rotated VAPID).
-    push.state.expectedKey = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).publicKey.export({ format: 'der', type: 'spki' }).toString('base64url');
+    push.state.expectedKey = rawPointOf(crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).publicKey);
 
     await call('/api/activity', 'POST', { type: 'settings', details: 'stale key test' });
     for (let i = 0; i < 40 && !push.state.deliveries.length; i++) await sleep(50);
@@ -271,8 +334,8 @@ function loadNotifications({ serverKey, existingKey, permission = 'granted', pwa
 }
 
 test('client re-subscribes when the server VAPID key changed, and reuses a matching subscription', async () => {
-  const staleKey = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).publicKey.export({ format: 'der', type: 'spki' }).toString('base64url');
-  const freshKey = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).publicKey.export({ format: 'der', type: 'spki' }).toString('base64url');
+  const staleKey = rawPointOf(crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).publicKey);
+  const freshKey = rawPointOf(crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).publicKey);
 
   const rotated = loadNotifications({ serverKey: freshKey, existingKey: staleKey });
   assert.equal(await rotated.FF.notifications.setupPush(true), true, `setupPush failed: ${rotated.FF.notifications.state.pushError}`);
@@ -285,6 +348,26 @@ test('client re-subscribes when the server VAPID key changed, and reuses a match
   assert.equal(await matching.FF.notifications.setupPush(true), true, `setupPush failed: ${matching.FF.notifications.state.pushError}`);
   assert.ok(!matching.calls.includes('subscribe'), 'a subscription with the right key must not be churned');
   assert.equal(matching.state.posted.length, 1, 'it is still re-registered with the server (endpoint can rotate)');
+});
+
+test('client heals a legacy SPKI-DER VAPID key instead of crashing subscribe()', async () => {
+  // Purane server build ka bug: /api/push/vapid se 91-byte SPKI DER aata tha aur Chrome
+  // pushManager.subscribe() par "The provided applicationServerKey is not valid" phenkta tha.
+  // Client ab raw 65-byte point nikaal ke subscribe karta hai.
+  const kp = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+  const spkiKey = kp.publicKey.export({ format: 'der', type: 'spki' }).toString('base64url');
+  const rawKey = rawPointOf(kp.publicKey);
+  assert.equal(Buffer.from(spkiKey, 'base64url').length, 91, 'sanity: SPKI DER is 91 bytes, not browser-ready');
+
+  const healed = loadNotifications({ serverKey: spkiKey, existingKey: null });
+  assert.equal(await healed.FF.notifications.setupPush(true), true, `setupPush failed: ${healed.FF.notifications.state.pushError}`);
+  assert.equal(healed.state.subscribedWith, rawKey, 'subscribe() ko raw 65-byte point milna chahiye (Chrome-compatible)');
+  assert.equal(healed.state.posted.length, 1, 'healed subscription server par register honi chahiye');
+
+  // Agar existing subscription isi key se bani hai (raw point), to SPKI server key ke baawajood churn nahi hona chahiye.
+  const reuse = loadNotifications({ serverKey: spkiKey, existingKey: rawKey });
+  assert.equal(await reuse.FF.notifications.setupPush(true), true, `setupPush failed: ${reuse.FF.notifications.state.pushError}`);
+  assert.ok(!reuse.calls.includes('subscribe'), 'matching raw-point subscription ko dobara nahi banana chahiye');
 });
 
 test('bell panel always offers a way to turn on OS-panel notifications (mobile, PWA not installed)', async () => {
