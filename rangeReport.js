@@ -63,16 +63,16 @@ FF.pages = FF.pages || {};
     if (R.minKey) { fromIn.min = R.minKey; toIn.min = R.minKey; }
     if (R.maxKey) { fromIn.max = R.maxKey; toIn.max = R.maxKey; }
 
-    const kpi = (title, value, icon, foot) => `<div class="kpi"><div class="kpi-top"><span class="kpi-title">${title}</span><span class="kpi-icon">${icon}</span></div><div class="kpi-value">${value}</div><div class="kpi-foot">${foot || ''}</div></div>`;
+    const kpi = (cls, title, value, icon, foot) => `<div class="kpi ${cls}"><div class="kpi-top"><span class="kpi-title">${title}</span><span class="kpi-icon">${icon}</span></div><div class="kpi-value">${value}</div><div class="kpi-foot">${foot || ''}</div></div>`;
     const ff = R.ff, gv = R.gv;
     body.innerHTML = `<p class="dim small">Range: <b>${esc(U.labelDateKey(view.from, true))}</b> → <b>${esc(U.labelDateKey(view.to, true))}</b> · ${U.fmt(days)} din${view.weekly ? ' · weekly chart (range lambi hai)' : ''}</p>
-      <div class="kpi-grid">
-        ${kpi('First Forward tags', U.fmt(ff.issuance), '🟦', `${U.fmt(ff.replacement)} replacement · avg ${U.fmt(Math.round(ff.issuance / Math.max(1, ff.activeDays)))}/day`)}
-        ${kpi('GV tags', U.fmt(gv.total), '🟩', `${U.fmt(gv.replacement)} replacement · avg ${U.fmt(Math.round(gv.total / Math.max(1, gv.activeDays)))}/day`)}
-        ${kpi('Combined', U.fmt(ff.issuance + gv.total), '🏷️', `${esc(U.labelDateKey(view.from))} → ${esc(U.labelDateKey(view.to))}`)}
-        ${kpi('VC4 tags (GV)', U.fmt(gv.vc4), '🚗', gv.total ? `${U.fmtPct((gv.vc4 / gv.total) * 100, 1)} of GV` : '')}
-        ${kpi('Commercial (GV)', U.fmt(gv.comm), '🚚', gv.total ? `${U.fmtPct((gv.comm / gv.total) * 100, 1)} of GV` : '')}
-        ${kpi('GV commission', `₹${U.fmt(Math.round(gv.amount))}`, '💰', `${U.fmt(gv.rows)} entries`)}
+      <div class="kpi-grid six">
+        ${kpi('g1', 'First Forward tags', U.fmt(ff.issuance), '🟦', `${U.fmt(ff.replacement)} replacement · avg ${U.fmt(Math.round(ff.issuance / Math.max(1, ff.activeDays)))}/day`)}
+        ${kpi('g2', 'GV tags', U.fmt(gv.total), '🟩', `${U.fmt(gv.replacement)} replacement · avg ${U.fmt(Math.round(gv.total / Math.max(1, gv.activeDays)))}/day`)}
+        ${kpi('g3', 'Combined', U.fmt(ff.issuance + gv.total), '🏷️', `${esc(U.labelDateKey(view.from))} → ${esc(U.labelDateKey(view.to))}`)}
+        ${kpi('g4', 'VC4 tags (GV)', U.fmt(gv.vc4), '🚗', gv.total ? `${U.fmtPct((gv.vc4 / gv.total) * 100, 1)} of GV` : '')}
+        ${kpi('g5', 'Commercial (GV)', U.fmt(gv.comm), '🚚', gv.total ? `${U.fmtPct((gv.comm / gv.total) * 100, 1)} of GV` : '')}
+        ${kpi('g6', 'GV commission', `₹${U.fmt(Math.round(gv.amount))}`, '💰', `${U.fmt(gv.rows)} entries`)}
       </div>
       ${card(`📈 Daily trend <span class="dim">· FF vs GV · ${U.fmt(days)} din</span>`,
         days ? C.lines({ labels: R.labels, tipLabels: R.tipLabels, height: 260, series: [

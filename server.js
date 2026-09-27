@@ -711,8 +711,12 @@ async function handleApi(req, res, url) {
     if (first) {
       const token = await createSession(username);
       u.lastLoginAt = new Date().toISOString(); await persist('users');
+      recordNotification({ type: 'user', title: 'Welcome — Admin account ready', body: 'Aap first user hain, admin privileges mil gaye hain. Settings se branding aur data source set kar sakte ho.', target: `user:${username}`, meta: { first: true } });
       return sendJson(res, 200, { ok: true, user: publicUser(u), settings: db.settings, permissions: permissionsFor(db.settings), tabs: db.settings.tabs, first: true }, { 'Set-Cookie': cookieHeader(req, token, SESSION_DAYS * 86400) });
     }
+    // 🔔 Admin ko turant notification do + new user ko welcome notification
+    recordNotification({ type: 'user', title: '🆕 Naya signup', body: `${u.name || username} ne account banaya hai (${u.email || u.mobile || 'no contact'}). Approval pending.`, target: 'admin', meta: { username, name: u.name, email: u.email, mobile: u.mobile } });
+    recordNotification({ type: 'user', title: 'Account created ✓', body: 'Aapka account ban gaya hai. Admin approve karega, phir aap login kar paoge.', target: `user:${username}` });
     return sendJson(res, 200, { ok: true, pending: true, message: 'Account ban gaya. Admin approve karega, phir login kar paoge.' });
   }
   if (p === '/api/auth/login' && method === 'POST') {
@@ -727,7 +731,23 @@ async function handleApi(req, res, url) {
     u.lastLoginAt = new Date().toISOString();
     // One Google Sheets batch can confirm the user timestamp and session together.
     const [token] = await Promise.all([createSession(u.username), persist('users')]);
-    if (u.role !== 'admin') recordNotification({ type: 'login', title: 'New user login', body: `${u.name || u.username} logged in via ${loginId}.`, target: 'admin', meta: { username: u.username, loginId } });
+    const ipLabel = ip ? ` · IP ${ip}` : '';
+    const hour = new Date().getHours();
+    const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+    // 🔔 Admin ko user login notification (throttle: repeat every 10 min per user)
+    if (u.role !== 'admin') {
+      const k = `login:${u.username}`;
+      if (!activityLast.has(k) || Date.now() - activityLast.get(k) > 10 * 60e3) {
+        activityLast.set(k, Date.now());
+        recordNotification({ type: 'login', title: '🔐 User login', body: `${u.name || u.username} logged in via ${loginId}${ipLabel}.`, target: 'admin', meta: { username: u.username, loginId, ip } });
+      }
+    }
+    // 🔔 User ko bhi unka apna login confirm / security notice (throttled 1/min)
+    const selfKey = `self-login:${u.username}`;
+    if (!activityLast.has(selfKey) || Date.now() - activityLast.get(selfKey) > 60e3) {
+      activityLast.set(selfKey, Date.now());
+      recordNotification({ type: 'login', title: `${greeting}, ${u.name || u.username} 👋`, body: 'Login successful. Dashboard ready hai — data background me load ho raha hai.', target: `user:${u.username}`, meta: { loginId, ip } });
+    }
     return sendJson(res, 200, { ok: true, user: publicUser(u), settings: db.settings, permissions: permissionsFor(db.settings), tabs: db.settings.tabs }, { 'Set-Cookie': cookieHeader(req, token, SESSION_DAYS * 86400) });
   }
   // ---- admin-only live presence ---------------------------------------------------------------
@@ -834,12 +854,26 @@ async function handleApi(req, res, url) {
     } else if (type === 'click' || body.action === 'click') {
       const opt = String(body.option || body.page || 'Option').trim().slice(0, 80);
       const det = String(body.details || '').trim().slice(0, 120);
+      // Throttle click notifications: ek hi option ke liye 5s me ek baar
+      const ck = `click:${user.username}:${opt}`;
+      if (!activityLast.has(ck) || Date.now() - activityLast.get(ck) > 5e3) {
+        activityLast.set(ck, Date.now());
+        recordNotification({
+          type: 'click',
+          title: `👆 ${opt}`,
+          body: `${user.name || user.username} ne "${opt}"${det ? ` — ${det}` : ''} use kiya.`,
+          target: user.role === 'admin' ? 'admin' : 'broadcast',
+          meta: { username: user.username, name: user.name, mobile: user.mobile, option: opt, details: det, at: new Date().toISOString() }
+        });
+      }
+    } else if (type === 'settings') {
+      const det = String(body.details || '').trim().slice(0, 200);
       recordNotification({
-        type: 'click',
-        title: `👆 Option: ${opt}`,
-        body: `${user.name || user.username} (${user.mobile || 'No Mobile'}) ne "${opt}" option click kiya${det ? ` (${det})` : ''}.`,
-        target: 'broadcast',
-        meta: { username: user.username, name: user.name, mobile: user.mobile, option: opt, details: det, at: new Date().toISOString() }
+        type: 'settings',
+        title: '⚙️ Settings update',
+        body: `${user.name || user.username} ne settings update ki${det ? `: ${det}` : 'ya'}.`,
+        target: 'admin',
+        meta: { username: user.username, name: user.name, fields: det }
       });
     } else {
       noteActivity(user, body.page);
@@ -886,7 +920,7 @@ async function handleApi(req, res, url) {
 
   if (p === '/api/auth/logout' && method === 'POST') {
     const token = parseCookies(req).ff_sid;
-    if (token) { delete db.sessions[sha(token)]; await persist('sessions'); }
+    if (token) { delete db.sessions[sha(token)]; persist('sessions').catch(() => {}); } // ⚡ don't await persistence — client already moved on
     return sendJson(res, 200, { ok: true }, { 'Set-Cookie': cookieHeader(req, '', 0) });
   }
 
@@ -897,7 +931,9 @@ async function handleApi(req, res, url) {
     if (!verifyPassword(body.current || '', user.password)) throw new HttpError(400, 'Current password galat hai.');
     if (!validPassword(body.next)) throw new HttpError(400, 'Naya password kam se kam 6 characters ka ho.');
     user.password = hashPassword(body.next); user.mustChangePassword = false;
-    await persist('users');
+    persist('users').catch(() => {});
+    recordNotification({ type: 'user', title: '🔑 Password changed', body: `${user.name || user.username} ne apna password change kiya.`, target: `user:${user.username}` });
+    if (user.role !== 'admin') recordNotification({ type: 'user', title: '🔑 Password changed', body: `${user.name || user.username} ne apna password change kiya.`, target: 'admin', meta: { username: user.username } });
     return sendJson(res, 200, { ok: true, user: publicUser(user) });
   }
   if (p === '/api/auth/profile' && method === 'POST') {

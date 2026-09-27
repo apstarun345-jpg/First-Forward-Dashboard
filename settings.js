@@ -29,6 +29,12 @@ FF.pages = FF.pages || {};
   async function save(patch, msgEl, opts) {
     try {
       if (msgEl) msgEl.textContent = 'Saving…';
+      // ⚡ Optimistic: theme/branding changes turant apply karo — UI instantly feel kare
+      const optimistic = { ...settings };
+      Object.keys(patch).forEach((k) => { optimistic[k] = patch[k]; });
+      settings = JSON.parse(JSON.stringify(optimistic));
+      A.applySettings(optimistic);
+      if (patch.tabs) FF.app.renderSidebar();
       const out = await A.api('/api/settings', 'PUT', { settings: patch });
       settings = JSON.parse(JSON.stringify(out.settings));
       A.applySettings(out.settings);
@@ -36,7 +42,12 @@ FF.pages = FF.pages || {};
       if (msgEl) msgEl.textContent = `Saved ✓ ${U.timeLabel(Date.now())}`;
       U.toast('Settings saved ✓', 'ok');
       if (opts && opts.reload) { U.toast('Sheet mapping badli — data dobara load ho raha hai…'); FF.store.reset(); if (FF.gv) FF.gv.reset(); if (FF.pages.sheet.reset) FF.pages.sheet.reset(); if (FF.pages.performance.reset) FF.pages.performance.reset(); FF.preloader.fastSync(false).catch(() => {}); }
-    } catch (err) { if (msgEl) msgEl.textContent = 'Not saved — retry'; if (A.settings) A.applySettings(A.settings); U.toast(err.message, 'err'); }
+    } catch (err) {
+      // Rollback optimistic change on failure
+      if (A.settings) { settings = JSON.parse(JSON.stringify(A.settings)); A.applySettings(A.settings); FF.app.renderSidebar(); }
+      if (msgEl) msgEl.textContent = 'Not saved — retry';
+      U.toast(err.message, 'err');
+    }
   }
   function collect(root, base) {
     const patch = JSON.parse(JSON.stringify(base || {}));

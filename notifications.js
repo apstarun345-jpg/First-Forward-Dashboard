@@ -17,7 +17,13 @@ window.FF = window.FF || {};
     return typeof Notification !== 'undefined' && Notification.permission === 'granted';
   }
   function browserAlert(item) {
-    if (!canBrowserAlert() || !item || document.visibilityState === 'visible') return;
+    if (!item) return;
+    // 🔔 Jab tab visible hai → in-app toast dikhao (instant feedback). Jab background me hai → browser push notification.
+    if (document.visibilityState === 'visible') {
+      if (U && U.toast) U.toast(`${icon(item)} ${item.title}`, 'info');
+      return;
+    }
+    if (!canBrowserAlert()) return;
     try {
       const n = new Notification(`${icon(item)} ${item.title}`, { body: item.body, icon: FF.config.logo || 'icon-192.png', tag: item.type || 'ff-notification' });
       n.onclick = () => { window.focus(); n.close(); };
@@ -177,7 +183,13 @@ window.FF = window.FF || {};
     setupPush(true); // agar permission pehle se granted hai, push silently on karo
     poll(true);
     sendPresence();
-    state.timer = setInterval(() => poll(false), 15e3);
+    // ⚡ Near-instant notifications: first poll in 800ms (login/signup welcome turant aaye), har 5s me refresh visible tab par, 15s hidden.
+    const firstFast = setTimeout(() => poll(false), 800);
+    state.timer = setInterval(() => poll(false), document.visibilityState === 'visible' ? 5e3 : 15e3);
+    document.addEventListener('visibilitychange', () => {
+      if (state.timer) { clearInterval(state.timer); state.timer = setInterval(() => poll(false), document.visibilityState === 'visible' ? 5e3 : 15e3); }
+      if (document.visibilityState === 'visible') poll(false);
+    });
     // Heartbeat every 15s; while the user is moving / clicking, send ~1x per second (live cursor for admin).
     state.presenceTimer = setInterval(() => sendPresence(), 15e3);
     state.fastTimer = setInterval(() => {
