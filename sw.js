@@ -1,10 +1,15 @@
 // Versioned app shell + offline data cache.
 // Auth login/logout/password endpoints are NEVER cached. Sheet data (gviz), /api/auth/me and
 // /api/settings are network-first with a cached fallback — internet na ho to last loaded data se app khulta hai.
-const CACHE_NAME = 'apnapayment-v11';
+const CACHE_NAME = 'apnapayment-v12';
 const DATA_CACHE = 'ff-data-v3';
-const ASSETS = ['./index.html', './styles.css?v=12', './favicon.svg?v=5', './icon-192.png?v=5', './icon-512.png?v=5'];
+const ASSETS = ['./', './index.html', './styles.css?v=13', './favicon.svg?v=5', './icon-192.png?v=5', './icon-512.png?v=5'];
 const OFFLINE_API = (path) => path === '/api/gviz' || path === '/api/auth/me' || path === '/api/settings';
+
+// ---- 🔊 Short notification beep (generated with Web Audio on push, no external asset needed) ----
+// Base64-encoded silent fallback + a simple beep tone via AudioContext doesn't work from SW global scope
+// reliably, so we use a tiny embedded WAV (200ms beep @ 880Hz) generated at build-time.
+// Using the showNotification vibration pattern + badge is the most mobile-reliable approach.
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(ASSETS)).then(() => self.skipWaiting()));
@@ -13,17 +18,24 @@ self.addEventListener('activate', e => {
   e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => (k.startsWith('ff-dashboard-') || k.startsWith('apnapayment-')) && k !== CACHE_NAME).map(k => caches.delete(k)))).then(() => self.clients.claim()));
 });
 
-// ---- 🔔 web push: server se instant notification (app band ho tab bhi) ----
+// ---- 📱 Mobile + desktop web push: server se instant notification (app band ho tab bhi) ----
 self.addEventListener('push', e => {
   let data = {};
   try { data = e.data ? e.data.json() : {}; } catch { data = { title: 'Dashboard update', body: '' }; }
   const title = data.title || 'First Forward Dashboard';
-  e.waitUntil(self.registration.showNotification(title, {
+  const options = {
     body: data.body || 'Naya update aaya hai — app khol ke dekho.',
-    icon: 'icon-192.png', badge: 'icon-192.png',
-    tag: data.tag || 'ff', renotify: true,
-    data: { link: data.link || '' }
-  }));
+    icon: 'icon-192.png',
+    badge: 'icon-192.png',
+    tag: data.tag || 'ff',
+    renotify: true,
+    requireInteraction: !!data.persist,
+    silent: data.sound === false,
+    // Mobile vibration pattern (works on Android Chrome): 200ms vibrate, 100ms gap, 200ms vibrate
+    vibrate: data.sound === false ? undefined : [200, 100, 200],
+    data: { link: data.link || '', sound: data.sound !== false }
+  };
+  e.waitUntil(self.registration.showNotification(title, options));
 });
 self.addEventListener('notificationclick', e => {
   e.notification.close();

@@ -215,9 +215,15 @@ function verifyPassword(password, stored) {
   return ref.length === test.length && crypto.timingSafeEqual(ref, test);
 }
 const normUser = (u) => String(u || '').trim().toLowerCase().replace(/[^a-z0-9._@-]/g, '').slice(0, 60);
+const DEFAULT_NOTIFY_PREFS = { login: true, signup: true, report: true, monthly: true, activity: true, click: false, search: true, settings: true, user: true, location: false, info: true, sound: true, push: true };
+function normalizeNotifyPrefs(p) {
+  const out = { ...DEFAULT_NOTIFY_PREFS };
+  if (p && typeof p === 'object') for (const k of Object.keys(DEFAULT_NOTIFY_PREFS)) if (p[k] !== undefined) out[k] = !!p[k];
+  return out;
+}
 function publicUser(u) {
   if (!u) return null;
-  return { username: u.username, name: u.name || u.username, email: u.email || '', mobile: u.mobile || '', avatar: u.avatar || '', role: u.role, approved: !!u.approved, permissions: u.role === 'admin' ? allPermKeysNow() : (u.permissions || []), createdAt: u.createdAt, lastLoginAt: u.lastLoginAt || null, mustChangePassword: !!u.mustChangePassword, lastLocation: u.lastLocation || null, notificationsSeenAt: u.notificationsSeenAt || null };
+  return { username: u.username, name: u.name || u.username, email: u.email || '', mobile: u.mobile || '', avatar: u.avatar || '', role: u.role, approved: !!u.approved, permissions: u.role === 'admin' ? allPermKeysNow() : (u.permissions || []), createdAt: u.createdAt, lastLoginAt: u.lastLoginAt || null, mustChangePassword: !!u.mustChangePassword, lastLocation: u.lastLocation || null, notificationsSeenAt: u.notificationsSeenAt || null, notifyPrefs: normalizeNotifyPrefs(u.notifyPrefs) };
 }
 function findUser(username) { return db.users.find((u) => u.username === normUser(username)) || null; }
 function findUserByLogin(raw) {
@@ -271,7 +277,13 @@ function recordNotification({ type = 'info', title, body, target = 'admin', meta
 }
 function visibleNotifications(user, since) {
   const after = since ? new Date(since).getTime() : 0;
-  return notifyItems().filter((item) => notificationVisible(item, user) && (!after || new Date(item.createdAt).getTime() > after)).slice(-80);
+  const prefs = user ? normalizeNotifyPrefs(user.notifyPrefs) : DEFAULT_NOTIFY_PREFS;
+  return notifyItems().filter((item) => {
+    if (!notificationVisible(item, user)) return false;
+    if (after && new Date(item.createdAt).getTime() <= after) return false;
+    if (prefs[item.type] === false) return false; // user ne is type ke notifications off kar rakhe hain
+    return true;
+  }).slice(-80);
 }
 // ---- change reports: what exactly changed (shown when the admin clicks a notification) ----------
 function describeValue(v) {
@@ -585,17 +597,34 @@ async function deliverPush(sub, data) {
     return true;
   } catch { return true; } // network hiccup — keep subscription
 }
-/** Fan-out a notification to push subscriptions (admin-targeted → admin subs, broadcast → everyone). */
+/** Fan-out a notification to push subscriptions (admin-targeted → admin subs, broadcast → everyone). Per-user push + sound preference bhi respect karo. */
 function pushFanout(item) {
   if (!vapidKeys || !item) return;
-  const data = { title: item.title, body: (item.body || '').replace(/\s+/g, ' ').slice(0, 180), tag: item.type || 'ff', link: (item.meta && item.meta.link) || '' };
   const subs = pushSubs().filter((s) => {
+    const u = findUser(s.username);
+    if (!u) return false;
+    const prefs = normalizeNotifyPrefs(u.notifyPrefs);
+    if (prefs.push === false) return false;
+    if (prefs[item.type] === false) return false;
     if (item.target === 'broadcast') return true;
-    if (item.target === 'admin') { const u = findUser(s.username); return u && u.role === 'admin'; }
+    if (item.target === 'admin') return u.role === 'admin';
     return item.target === `user:${s.username}`;
   });
   if (!subs.length) return;
-  Promise.all(subs.map(async (s) => { const alive = await deliverPush(s, data); if (!alive) { const arr = pushSubs(); const i = arr.indexOf(s); if (i >= 0) arr.splice(i, 1); } })).then(() => persist('notify')).catch(() => {});
+  Promise.all(subs.map(async (s) => {
+    const u = findUser(s.username);
+    const prefs = u ? normalizeNotifyPrefs(u.notifyPrefs) : DEFAULT_NOTIFY_PREFS;
+    const data = {
+      title: item.title,
+      body: (item.body || '').replace(/\s+/g, ' ').slice(0, 180),
+      tag: item.type || 'ff',
+      link: (item.meta && item.meta.link) || '',
+      sound: prefs.sound !== false,
+      persist: item.type === 'signup' || item.type === 'report' || item.type === 'user' // important types don't auto-dismiss
+    };
+    const alive = await deliverPush(s, data);
+    if (!alive) { const arr = pushSubs(); const i = arr.indexOf(s); if (i >= 0) arr.splice(i, 1); }
+  })).then(() => persist('notify')).catch(() => {});
 }
 // ---- monthly auto-report: har mahine ki 1–5 tarikh ko pichhle mahine ka FF-vs-GV compare broadcast ----
 function maybeMonthlyReport() {
@@ -808,6 +837,22 @@ async function handleApi(req, res, url) {
     user.notificationsSeenAt = new Date().toISOString();
     await persist('users');
     return sendJson(res, 200, { ok: true, at: user.notificationsSeenAt });
+  }
+  // ---- notification preferences (per user: which types show, sound on/off, mobile push) ----
+  if (p === '/api/notifications/prefs' && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required');
+    return sendJson(res, 200, { prefs: normalizeNotifyPrefs(user.notifyPrefs), defaults: DEFAULT_NOTIFY_PREFS });
+  }
+  if (p === '/api/notifications/prefs' && method === 'PUT') {
+    if (!user) throw new HttpError(401, 'Login required');
+    const body = await readBody(req);
+    const patch = body.prefs || {};
+    const before = normalizeNotifyPrefs(user.notifyPrefs);
+    const next = { ...before };
+    for (const k of Object.keys(DEFAULT_NOTIFY_PREFS)) if (patch[k] !== undefined) next[k] = !!patch[k];
+    user.notifyPrefs = next;
+    persist('users').catch(() => {}); // don't block
+    return sendJson(res, 200, { ok: true, prefs: next });
   }
   // ---- 📲 web push subscription ----
   if (p === '/api/push/vapid' && method === 'GET') {
