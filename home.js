@@ -12,7 +12,7 @@ FF.pages = FF.pages || {};
     if (h < 17) return 'Good afternoon';
     return 'Good evening';
   }
-  const kpi = (cls, title, icon, value, foot) => `<div class="kpi ${cls}"><div class="kpi-top"><span class="kpi-title">${esc(title)}</span><span class="kpi-icon">${icon}</span></div><div class="kpi-value">${value}</div><div class="kpi-foot">${foot || ''}</div></div>`;
+  const kpi = (cls, title, icon, value, foot, spec) => `<div class="kpi ${cls}"${spec ? ` data-kpi="${esc(spec)}"` : ''}><div class="kpi-top"><span class="kpi-title">${esc(title)}</span><span class="kpi-icon">${icon}</span></div><div class="kpi-value">${value}</div><div class="kpi-foot">${foot || ''}</div></div>`;
   const card = (title, body, right) => `<section class="card"><div class="card-head"><h3>${title}</h3>${right ? `<div class="card-right">${right}</div>` : ''}</div><div class="card-body">${body}</div></section>`;
 
   async function render(root) {
@@ -116,9 +116,9 @@ FF.pages = FF.pages || {};
       cards.push(`<div class="grid g-2-1">
         ${card(`🟦 First Forward · ${U.labelYM(curKey)} <span class="dim">MTD ${U.fmt(ffCur.total)} · VC4 ${U.fmtPct(U.pctOf(ffCur.vc4, ffCur.total),0)}</span>`, `
           <div class="kpi-grid mini">${[
-            kpi('g2', `MTD`, '🏷️', U.fmt(ffCur.total), `${U.deltaHtml(U.growth(ffCur.total, ffLast.total))} vs last same`),
-            kpi('g3', 'VC4', '🚗', U.fmt(ffCur.vc4), `${U.fmtPct(U.pctOf(ffCur.vc4, ffCur.total),0)} share`),
-            kpi('g9', 'Stock', '📦', ffStockTotal!==null?U.fmt(ffStockTotal):'—', ffCur.avgPerDay?`${U.fmt(ffStockTotal/ffCur.avgPerDay)} days cover`:'' )
+            kpi('g2', `MTD`, '🏷️', U.fmt(ffCur.total), `${U.deltaHtml(U.growth(ffCur.total, ffLast.total))} vs last same`, 'src=ff&scope=mtd&f=ff'),
+            kpi('g3', 'VC4', '🚗', U.fmt(ffCur.vc4), `${U.fmtPct(U.pctOf(ffCur.vc4, ffCur.total),0)} share`, 'src=ff&scope=mtd&f=ff,vc4'),
+            kpi('g9', 'Stock', '📦', ffStockTotal!==null?U.fmt(ffStockTotal):'—', ffCur.avgPerDay?`${U.fmt(ffStockTotal/ffCur.avgPerDay)} days cover`:'', 'src=ff&scope=stock' )
           ].join('')}</div>
           ${line}
         `, `<a class="btn small" href="#/dashboard">📊 Dashboard →</a>`)}
@@ -142,9 +142,9 @@ FF.pages = FF.pages || {};
       cards.push(`<div class="grid g-2-1">
         ${card(`🟩 GV Partner · ${U.labelYM(curKey)} <span class="dim">MTD ${U.fmt(gvCur.total)} · VC4 ${U.fmtPct(U.pctOf(gvCur.vc4, gvCur.total),0)}</span>`, `
           <div class="kpi-grid mini">${[
-            kpi('g2', `MTD`, '🏷️', U.fmt(gvCur.total), `${U.deltaHtml(U.growth(gvCur.total, gvLastMtd.total))} vs last same`),
-            kpi('g3', 'VC4', '🚗', U.fmt(gvCur.vc4), `${U.fmtPct(U.pctOf(gvCur.vc4, gvCur.total),0)} share`),
-            kpi('g9', 'Stock', '📦', gvStockTotal!==null?U.fmt(gvStockTotal):'—', gvCur.avgPerDay?`${U.fmt(gvStockTotal/gvCur.avgPerDay)} days cover`:'' )
+            kpi('g2', `MTD`, '🏷️', U.fmt(gvCur.total), `${U.deltaHtml(U.growth(gvCur.total, gvLastMtd.total))} vs last same`, 'src=gv&scope=mtd'),
+            kpi('g3', 'VC4', '🚗', U.fmt(gvCur.vc4), `${U.fmtPct(U.pctOf(gvCur.vc4, gvCur.total),0)} share`, 'src=gv&scope=mtd&f=vc4'),
+            kpi('g9', 'Stock', '📦', gvStockTotal!==null?U.fmt(gvStockTotal):'—', gvCur.avgPerDay?`${U.fmt(gvStockTotal/gvCur.avgPerDay)} days cover`:'', 'src=gv&scope=stock' )
           ].join('')}</div>
           ${line}
         `, `<a class="btn small" href="#/gvDashboard">🚀 GV Dashboard →</a>`)}
@@ -168,8 +168,8 @@ FF.pages = FF.pages || {};
           <div>${cmp}</div>
           <div>
             <div class="kpi-grid mini" style="grid-template-columns:1fr 1fr">
-              ${kpi('g6', 'FF Projected', '🎯', U.fmt(ffCur.projected), `${U.deltaHtml(U.growth(ffCur.projected, M.summary(ffDaily, U.prevMonthKey(U.ymKey(ffLatest))).total))} vs last full`)}
-              ${kpi('g6', 'GV Projected', '🎯', U.fmt(gvCur.projected), `${U.deltaHtml(U.growth(gvCur.projected, G.summary(U.prevMonthKey(U.ymKey(gvLatest))).total))} vs last full`)}
+              ${kpi('g6', 'FF Projected', '🎯', U.fmt(ffCur.projected), `${U.deltaHtml(U.growth(ffCur.projected, M.summary(ffDaily, U.prevMonthKey(U.ymKey(ffLatest))).total))} vs last full`, 'src=ff&scope=mtd&f=ff')}
+              ${kpi('g6', 'GV Projected', '🎯', U.fmt(gvCur.projected), `${U.deltaHtml(U.growth(gvCur.projected, G.summary(U.prevMonthKey(U.ymKey(gvLatest))).total))} vs last full`, 'src=gv&scope=mtd')}
             </div>
             <div style="margin-top:10px">
               <b>Insights:</b>

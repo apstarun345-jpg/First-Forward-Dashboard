@@ -85,6 +85,11 @@ FF.pages = FF.pages || {};
       kpi('g12', 'Activated / Hotlisted · MTD', '✅', status ? `${U.fmtPct(U.pctOf(activated, statusTotal), 0)} <small>/ ${U.fmtPct(U.pctOf(hotlisted, statusTotal))}</small>` : '—', status ? `Activated <b>${U.fmt(activated)}</b> · Hotlisted <b>${U.fmt(hotlisted)}</b>` : 'Status data load nahi hua')
     ];
 
+    // KPI drill-down specs (click any card → full breakdown, see kpiDetail.js)
+    const latestK = U.dateKey(latest);
+    const specs = [`src=ff&scope=day&date=${latestK}`, `src=ff&scope=mtd&ym=${cur}`, `src=ff&scope=mtd&ym=${cur}&f=vc4`, `src=ff&scope=mtd&ym=${cur}&f=comm`, `src=ff&scope=mtd&ym=${cur}`, `src=ff&scope=mtd&ym=${cur}`, `src=ff&scope=mtd&ym=${cur}&f=repl`, `src=ff&scope=mtd&ym=${cur}&f=chassis`, 'src=ff&scope=stock', `src=ff&scope=agents&ym=${cur}`, `src=ff&scope=mtd&ym=${cur}`, `src=ff&scope=status&ym=${cur}`];
+    kpis.forEach((html, i) => { if (specs[i]) kpis[i] = html.replace('<div class="kpi ', `<div data-kpi="${esc(specs[i])}" class="kpi `); });
+
     // charts data
     const dayLabels = curSeries.days.map(String);
     const lastVals = lastSeries.totals.slice(0, curSeries.days.length).map((v, i) => (i < lastSeries.totals.length ? v : null));

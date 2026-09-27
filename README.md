@@ -78,8 +78,12 @@ StockDataa ki raw rows Excel export ke waqt on-demand aati hain). Server bhi Goo
 | Thresholds | Stock-cover red/orange/amber days, inactive days, Top N, rows per page, sign-up on/off |
 | Contacts & sharing | Team WhatsApp number, team email, WhatsApp group link, message signature |
 | Users & access | Approve / role / per-feature permissions / reset password / delete / create user |
-| Backup | Settings JSON export / import, clear server cache, reset to defaults |
+| Storage & backup | ☁️ Google Sheet storage wizard (permanent save), settings JSON export / import, clear cache, reset |
 
+> ✅ **Easiest fix for "settings / users reset after deploy": [STORAGE_SETUP.md](STORAGE_SETUP.md)** —
+> Settings → ☁️ Storage & backup wizard + Apps Script web app + 2 Render env vars
+> (`APPS_SCRIPT_URL`, `APPS_SCRIPT_SECRET`). No service account or disk needed.
+>
 > **Production storage is required, not optional.** Render's application directory is ephemeral.
 > The app now supports **encrypted storage in `APP_STORAGE` inside the SAME main Google Sheet**:
 > see [same-sheet setup and migration](SHEETS_STORAGE.md). Set `STORAGE_BACKEND=sheets` only after
@@ -135,7 +139,9 @@ For **same-sheet encrypted storage**, follow [SHEETS_STORAGE.md](SHEETS_STORAGE.
 
 | Variable | Default | Kaam |
 | --- | --- | --- |
-| `STORAGE_BACKEND` | `files` | `sheets` = encrypted APP_STORAGE tab in the same main spreadsheet |
+| `APPS_SCRIPT_URL` | – | Apps Script web-app `/exec` URL → storage backend `appsscript` (see STORAGE_SETUP.md) |
+| `APPS_SCRIPT_SECRET` | – | Same secret as in Code.gs (≥16 chars). Never change it after setup |
+| `STORAGE_BACKEND` | `appsscript` if `APPS_SCRIPT_URL` set, else `files` | `sheets` = encrypted APP_STORAGE tab via service account |
 | `STORAGE_SHEET_ID` | Main `SHEET_ID` | Pin to the existing main spreadsheet ID; set explicitly for migration |
 | `GOOGLE_SERVICE_ACCOUNT_FILE` / `GOOGLE_SERVICE_ACCOUNT_JSON` | – | Server-only Google write credential; never in browser/settings/Git |
 | `STORAGE_ENCRYPTION_KEY` | – | Permanent random 32-byte base64 secret; back it up privately |

@@ -7,7 +7,7 @@ FF.pages = FF.pages || {};
   const U = FF.util, M = FF.model, S = FF.store, G = FF.gv, C = FF.charts;
   const esc = U.esc;
 
-  const kpi = (cls, title, icon, value, foot) => `<button type="button" class="kpi ${cls} kpi-clickable" data-kpi-title="${esc(title)}" data-kpi-value="${esc(String(value).replace(/<[^>]*>/g, ' '))}" data-kpi-foot="${esc(String(foot || '').replace(/<[^>]*>/g, ' '))}"><span class="kpi-top"><span class="kpi-title">${esc(title)}</span><span class="kpi-icon">${icon}</span></span><span class="kpi-value">${value}</span><span class="kpi-foot">${foot || ''}</span></button>`;
+  const kpi = (cls, title, icon, value, foot, spec) => `<button type="button" class="kpi ${cls} kpi-clickable" ${spec ? `data-kpi="${esc(spec)}"` : ''} data-kpi-title="${esc(title)}" data-kpi-value="${esc(String(value).replace(/<[^>]*>/g, ' '))}" data-kpi-foot="${esc(String(foot || '').replace(/<[^>]*>/g, ' '))}"><span class="kpi-top"><span class="kpi-title">${esc(title)}</span><span class="kpi-icon">${icon}</span></span><span class="kpi-value">${value}</span><span class="kpi-foot">${foot || ''}</span></button>`;
   const card = (title, body, right) => `<section class="card"><div class="card-head"><h3>${title}</h3>${right ? `<div class="card-right">${right}</div>` : ''}</div><div class="card-body">${body}</div></section>`;
   const mini = (label, value, foot, cls) => `<div class="mini-kpi ${cls||''}"><span class="mini-label">${esc(label)}</span><span class="mini-value">${value}</span>${foot?`<span class="mini-foot">${foot}</span>`:''}</div>`;
 
@@ -192,13 +192,14 @@ FF.pages = FF.pages || {};
       const total = ffData.total + gvData.total;
       const totalPrev = ffPrev.total + gvPrev.total;
 
+      const dk = U.dateKey(dateObj);
       const kpis = [
-        kpi('g2', `Total Issued · ${U.labelDate(dateObj,true)}`, '🏷️', U.fmt(total), `${growthBadge(total, totalPrev)} vs prev day (${U.fmt(totalPrev)}) · FF <b>${U.fmt(ffData.total)}</b> · GV <b>${U.fmt(gvData.total)}</b>`),
-        kpi('g3', 'FF · VC4', '🚗', U.fmt(ffData.vc4), `${growthBadge(ffData.vc4, ffPrev.vc4)} vs prev · Commercial <b>${U.fmt(ffData.comm)}</b> · share ${U.fmtPct(U.pctOf(ffData.vc4, ffData.total),0)}`),
-        kpi('g5', 'GV · VC4', '🚀', U.fmt(gvData.vc4), `${growthBadge(gvData.vc4, gvPrev.vc4)} vs prev · Commercial <b>${U.fmt(gvData.comm)}</b> · share ${U.fmtPct(U.pctOf(gvData.vc4, gvData.total),0)}`),
-        kpi('g4', 'Commercial Total', '🚚', U.fmt(ffData.comm + gvData.comm), `FF ${U.fmt(ffData.comm)} (VC20 ${U.fmt(ffData.vc20)} + VC5+ ${U.fmt(ffData.vc5p)}) · GV ${U.fmt(gvData.comm)}`),
-        kpi('g1', 'FF Growth vs Week Ago', '📈', growthBadge(ffData.total, ffWeek.total), `Week ago ${U.labelDate(weekAgo,true)}: <b>${U.fmt(ffWeek.total)}</b> · GV week ago: <b>${U.fmt(gvWeek.total)}</b>`),
-        kpi('g9', 'Class Mix Today', '🔖', Object.keys(allData.byClass).length ? Object.entries(allData.byClass).sort((a,b)=>b[1]-a[1])[0][0] : '—', Object.entries(allData.byClass).map(([k,v])=>`${k} <b>${U.fmt(v)}</b>`).join(' · '))
+        kpi('g2', `Total Issued · ${U.labelDate(dateObj,true)}`, '🏷️', U.fmt(total), `${growthBadge(total, totalPrev)} vs prev day (${U.fmt(totalPrev)}) · FF <b>${U.fmt(ffData.total)}</b> · GV <b>${U.fmt(gvData.total)}</b>`, `src=both&scope=day&date=${dk}`),
+        kpi('g3', 'FF · VC4', '🚗', U.fmt(ffData.vc4), `${growthBadge(ffData.vc4, ffPrev.vc4)} vs prev · Commercial <b>${U.fmt(ffData.comm)}</b> · share ${U.fmtPct(U.pctOf(ffData.vc4, ffData.total),0)}`, `src=both&scope=day&date=${dk}&f=ff,vc4`),
+        kpi('g5', 'GV · VC4', '🚀', U.fmt(gvData.vc4), `${growthBadge(gvData.vc4, gvPrev.vc4)} vs prev · Commercial <b>${U.fmt(gvData.comm)}</b> · share ${U.fmtPct(U.pctOf(gvData.vc4, gvData.total),0)}`, `src=gv&scope=day&date=${dk}&f=vc4`),
+        kpi('g4', 'Commercial Total', '🚚', U.fmt(ffData.comm + gvData.comm), `FF ${U.fmt(ffData.comm)} (VC20 ${U.fmt(ffData.vc20)} + VC5+ ${U.fmt(ffData.vc5p)}) · GV ${U.fmt(gvData.comm)}`, `src=both&scope=day&date=${dk}&f=comm`),
+        kpi('g1', 'FF Growth vs Week Ago', '📈', growthBadge(ffData.total, ffWeek.total), `Week ago ${U.labelDate(weekAgo,true)}: <b>${U.fmt(ffWeek.total)}</b> · GV week ago: <b>${U.fmt(gvWeek.total)}</b>`, `src=both&scope=day&date=${dk}&f=ff`),
+        kpi('g9', 'Class Mix Today', '🔖', Object.keys(allData.byClass).length ? Object.entries(allData.byClass).sort((a,b)=>b[1]-a[1])[0][0] : '—', Object.entries(allData.byClass).map(([k,v])=>`${k} <b>${U.fmt(v)}</b>`).join(' · '), `src=both&scope=day&date=${dk}`)
       ];
 
       // Class-wise table

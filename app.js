@@ -13,6 +13,7 @@ window.FF = window.FF || {};
     { id: 'trend', icon: '📈', label: 'Trend', desc: 'Daily · Monthly · Last vs Current', perm: 'trend', group: 'First Forward' },
     { id: 'performance', icon: '🏆', label: 'Performance', desc: 'Agents & TLs (REPORT)', perm: 'performance', group: 'First Forward' },
     { id: 'stock', icon: '📦', label: 'Stock', desc: 'Search · pivot · Excel (StockDataa)', perm: 'stock', group: 'First Forward' },
+    { id: 'stockReport', icon: '📋', label: 'Stock Report', desc: 'REPORT · agent & TL-wise stock', perm: 'performance', group: 'First Forward' },
     { id: 'gvDashboard', icon: '🚀', label: 'GV Partner Dashboard', desc: 'GV issuance · stock · performance', perm: 'gvDashboard', group: 'GV Partner' },
     { id: 'gvTrend', icon: '📈', label: 'GV Trend', desc: 'GV Master daily / monthly', perm: 'gvTrend', group: 'GV Partner' },
     { id: 'gvPerformance', icon: '🏆', label: 'GV Performance', desc: 'GV agents & TLs (GV REPORT)', perm: 'gvPerformance', group: 'GV Partner' },
@@ -305,7 +306,8 @@ window.FF = window.FF || {};
   }
 
   // ---- drawer ----
-  function openDrawer({ kicker, title, sub, body, actions }) {
+  function openDrawer({ kicker, title, sub, body, actions, wide }) {
+    U.$('#drawer').classList.toggle('wide', !!wide);
     U.$('#drawer-kicker').textContent = kicker || '';
     U.$('#drawer-title').textContent = title || '';
     U.$('#drawer-sub').innerHTML = sub || '';
@@ -407,7 +409,8 @@ window.FF = window.FF || {};
   }
 
   function bind() {
-    document.body.classList.toggle('sidebar-auto', localStorage.getItem('ff_sidebar_auto') !== '0');
+    // Sidebar stays fixed/visible on desktop — the old hover auto-hide mode is removed.
+    document.body.classList.remove('sidebar-auto'); try { localStorage.removeItem('ff_sidebar_auto'); } catch { /* private mode */ }
     window.addEventListener('hashchange', () => { renderCurrent(); toggleUserMenu(false); });
     U.$('#menu-btn').addEventListener('click', () => document.body.classList.toggle('side-open'));
     U.$('#side-backdrop').addEventListener('click', closeSidebar);
@@ -423,7 +426,8 @@ window.FF = window.FF || {};
       if (!e.target.closest('#user-menu') && !e.target.closest('#user-btn')) toggleUserMenu(false);
       if (e.target.closest('#user-menu a')) toggleUserMenu(false);
       const kpi = e.target.closest('.kpi');
-      if (kpi && !e.target.closest('a,button:not(.kpi)')) {
+      if (kpi && !e.target.closest('a,button:not(.kpi)') && !kpi.closest('#drawer')) {
+        if (FF.kpiDetail) { FF.kpiDetail.open(kpi); return; }
         const title = kpi.dataset.kpiTitle || U.$('.kpi-title', kpi)?.textContent || 'KPI summary';
         const value = kpi.dataset.kpiValue || U.$('.kpi-value', kpi)?.innerText || '—';
         const foot = kpi.dataset.kpiFoot || U.$('.kpi-foot', kpi)?.innerText || '';
@@ -459,13 +463,39 @@ window.FF = window.FF || {};
 
   function onBackgroundDataUpdated() {
     // If user is on a data page, smoothly re-render so new stock and stats appear automatically
-    if (['stock', 'home', 'tagIssued', 'dashboard', 'trend', 'performance', 'gvStock', 'gvDashboard', 'gvTrend', 'gvPerformance', 'compare', 'charts', 'sheet'].includes(current.page)) {
+    if (['stock', 'stockReport', 'home', 'tagIssued', 'dashboard', 'trend', 'performance', 'gvStock', 'gvDashboard', 'gvTrend', 'gvPerformance', 'compare', 'charts', 'sheet'].includes(current.page)) {
       renderCurrent({ bgUpdated: true });
     }
   }
 
   let syncTimer = null;
+  const EMBED_LIVE = new URLSearchParams(location.search).get('embed') === 'live' && window.top !== window;
+  function storageBanner(storage) {
+    const old = U.$('#storage-banner'); if (old) old.remove();
+    if (!storage || (storage.durable !== false && !storage.warning && !storage.error)) return;
+    const el = U.h(`<div class="storage-banner" id="storage-banner" role="alert"><span>⚠️ <b>Settings aur user details permanent save nahi ho rahe</b> — ${U.esc(storage.error || 'Render restart / deploy par sab default ho jaayega.')} </span><a class="btn small primary" href="#/settings?tab=backup">☁️ Google Sheet storage setup karo</a><button class="btn small ghost" aria-label="Hide" data-hide-banner>✕</button></div>`);
+    el.querySelector('[data-hide-banner]').addEventListener('click', () => el.remove());
+    const main = U.$('#main');
+    if (main && main.parentNode) main.parentNode.insertBefore(el, main); else document.body.prepend(el);
+  }
+  function liveShareChip() {
+    const foot = U.$('.side-foot'); if (!foot) return;
+    let chip = U.$('#live-share-chip');
+    const u = FF.auth.user;
+    const on = u && u.role !== 'admin' && localStorage.getItem('ff_presence_pointer') !== '0';
+    if (!on) { if (chip) chip.remove(); return; }
+    if (!chip) { chip = U.h('<a class="live-share-chip" id="live-share-chip" href="#/settings?tab=account" title="Admin aapka page, cursor aur clicks live dekh sakta hai. Settings → My account me band kar sakte ho.">👁 Admin live view on</a>'); foot.insertBefore(chip, foot.firstChild); }
+  }
   function onLogin() {
+    if (EMBED_LIVE) {
+      // Admin live-view mirror: render only the page, no timers / prompts / notifications.
+      document.body.classList.add('embed-live', 'ready');
+      renderSidebar();
+      FF.auth.applyTheme();
+      if (FF.preloader) FF.preloader.preloadAll(false).catch(console.warn);
+      renderCurrent();
+      return;
+    }
     renderSidebar();
     FF.auth.applyTheme();
     document.body.classList.add('ready');
@@ -474,10 +504,9 @@ window.FF = window.FF || {};
     renderCurrent();
     if (FF.config.loginAnimation !== false) FF.auth.splash(FF.auth.user);
     if (FF.notifications) FF.notifications.start();
+    liveShareChip();
     const u = FF.auth.user;
-    if (FF.auth.isAdmin()) FF.auth.api('/api/health').then(h => {
-      if (h.storage && (h.storage.warning || h.storage.error)) U.toast(h.storage.error || h.storage.warning, 'warn');
-    }).catch(() => {});
+    if (FF.auth.isAdmin()) FF.auth.api('/api/health').then(h => storageBanner(h.storage)).catch(() => {});
     if (u && u.mustChangePassword) setTimeout(() => U.toast('⚠️ Default password chal raha hai — Settings → My account se badlo', 'err'), 900);
     // Location prompt + PWA
     setTimeout(requestLocationOnOpen, 2000);
@@ -504,6 +533,6 @@ window.FF = window.FF || {};
     if (ok) onLogin();
   }
 
-  FF.app = { navigate, updateParams, refresh, openDrawer, closeDrawer, renderSidebar, renderCurrent, renderTopUser, updateStatus, onLogin, onBackgroundDataUpdated, promptInstall, PAGES, get current() { return current; } };
+  FF.app = { storageBanner, liveShareChip, navigate, updateParams, refresh, openDrawer, closeDrawer, renderSidebar, renderCurrent, renderTopUser, updateStatus, onLogin, onBackgroundDataUpdated, promptInstall, PAGES, get current() { return current; } };
   document.addEventListener('DOMContentLoaded', init);
 })(window.FF);

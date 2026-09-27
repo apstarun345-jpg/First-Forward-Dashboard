@@ -1,5 +1,9 @@
 # ApnaPayment: safe production update
 
+> **Recommended (free, 5 min): [STORAGE_SETUP.md](STORAGE_SETUP.md)** — Apps Script web app +
+> `APPS_SCRIPT_URL` / `APPS_SCRIPT_SECRET` on Render. The in-app wizard (Settings → ☁️ Storage &
+> backup) copies current users/settings into the sheet before you set the variables.
+
 > **Updated storage choice:** accounts and settings can now live encrypted in `APP_STORAGE`
 > inside the SAME existing Google Sheet. Follow [SHEETS_STORAGE.md](SHEETS_STORAGE.md) for
 > that setup; no new spreadsheet or persistent disk is needed for that mode. Back up the

@@ -34,7 +34,7 @@ FF.pages = FF.pages || {};
   const state = {
     agents: [], filtered: [], tlGroups: [], allTlGroups: [], columns: {}, sections: [], months: { last: 'Last Month', cur: 'Current Month' }, dayLabels: [], daysElapsed: null,
     view: 'overview', filters: EMPTY_FILTERS(),
-    sort: { agents: { key: 'curTotal', dir: 'desc' }, tls: { key: 'tlCurTotal', dir: 'desc' } }, page: 1, pageSize: 50, loadedAt: 0, sourceTable: null
+    sort: { agents: { key: 'curTotal', dir: 'desc' }, tls: { key: 'tlCurTotal', dir: 'desc' }, stock: { key: 'stockTotal', dir: 'desc' }, stockTl: { key: 'tlStockTotal', dir: 'desc' } }, page: 1, pageSize: 50, loadedAt: 0, sourceTable: null
   };
 
   // ---- helpers ------------------------------------------------------------------
@@ -463,6 +463,93 @@ FF.pages = FF.pages || {};
     el.innerHTML = `<section class="card"><div class="card-head"><h3>Team Leaders <span class="dim">${fmt(sorted.length)} TLs · APS / direct agents excluded${direct.length ? ` (${direct.length} direct agents in Agents tab)` : ''}</span></h3><div class="card-right">${FF.auth.can('export') ? `<button class="btn small" data-act="export-tls">⬇ CSV</button>` : ''}</div></div><div class="table-wrap tall">${tableHtml(columns, sorted, state.sort.tls, (g) => `data-tl="${esc(g.tlKey)}" class="clickable"`)}</div></section>`;
     el.__sorted = sorted;
   }
+  // ---- 📦 Stock Report (REPORT tab: Agent Inventory Summary + TL stock + dispatch/stock alerts) ----
+  const clsLabel = (key, fallback) => (state.columns[key] && state.columns[key].label) || fallback;
+  const STOCK_COLUMNS = () => [
+    { key: 'name', label: 'Agent', sticky: true, sortValue: (a) => a.name, render: (a) => `${cellMain(a.name, a.agentId || a.id)}${a.isMaster ? '<span class="tag">Master</span>' : ''}` },
+    { key: 'tlName', label: 'TL', sortValue: (a) => tlLabel(a), render: (a) => cellMain(tlLabel(a), a.tlExcluded ? '' : a.tlId) },
+    { key: 'stockVc4', label: 'VC4', num: true, sortValue: (a) => a.stockVc4, render: (a) => `<b>${fmt(a.stockVc4)}</b>` },
+    { key: 'stockC1', label: clsLabel('stockC1', 'VC5'), num: true, sortValue: (a) => a.stockC1, render: (a) => fmt(a.stockC1) },
+    { key: 'stockC2', label: clsLabel('stockC2', 'VC6'), num: true, sortValue: (a) => a.stockC2, render: (a) => fmt(a.stockC2) },
+    { key: 'stockC3', label: clsLabel('stockC3', 'VC7'), num: true, sortValue: (a) => a.stockC3, render: (a) => fmt(a.stockC3) },
+    { key: 'stockC4', label: clsLabel('stockC4', 'VC12'), num: true, sortValue: (a) => a.stockC4, render: (a) => fmt(a.stockC4) },
+    { key: 'stockC5', label: clsLabel('stockC5', 'VC16'), num: true, sortValue: (a) => a.stockC5, render: (a) => fmt(a.stockC5) },
+    { key: 'stockNvc4', label: 'Commercial', num: true, sortValue: (a) => a.stockNvc4, render: (a) => fmt(a.stockNvc4) },
+    { key: 'stockTotal', label: 'Total stock', num: true, sortValue: (a) => a.stockTotal, render: (a) => `<b>${fmt(a.stockTotal)}</b>` },
+    { key: 'avgTotal', label: 'Avg/day', num: true, sortValue: (a) => a.avgTotal, render: (a) => fmt(a.avgTotal, true) },
+    { key: 'agentStockDays', label: 'Stock days', num: true, sortValue: (a) => a.agentStockDays, render: (a) => fmt(a.agentStockDays) },
+    { key: 'agentPriority', label: 'Dispatch priority', sortValue: (a) => a.agentPriority, render: (a) => badge(a.agentPriority) },
+    { key: 'tlStockAlert', label: 'TL stock alert', sortValue: (a) => a.tlStockAlert, render: (a) => badge(a.tlStockAlert) },
+    { key: 'gvStockVc4', label: 'GV stock VC4 / Comm', num: true, sortValue: (a) => (a.gvStockVc4 || 0) + (a.gvStockNvc4 || 0), render: (a) => (a.gvStockVc4 || a.gvStockNvc4 ? `${fmt(a.gvStockVc4)} <small class="dim">/ ${fmt(a.gvStockNvc4)}</small>` : '<span class="dim">—</span>') }
+  ];
+  const STOCK_TL_COLUMNS = () => [
+    { key: 'tlName', label: 'Team Leader', sticky: true, sortValue: (g) => g.tlName || g.tlKey, render: (g) => cellMain(g.tlName || g.tlKey, `${g.tlId || ''}${g.tlMobile && !/^na$/i.test(g.tlMobile) && canContacts() ? ` · ${g.tlMobile}` : ''}`) },
+    { key: 'agentCount', label: 'Agents', num: true, sortValue: (g) => g.agentCount, render: (g) => fmt(g.agentCount) },
+    { key: 'tlStockVc4', label: 'VC4 stock', num: true, sortValue: (g) => g.tlStockVc4, render: (g) => `<b>${fmt(g.tlStockVc4)}</b>` },
+    { key: 'tlStockNvc4', label: 'Commercial stock', num: true, sortValue: (g) => g.tlStockNvc4, render: (g) => fmt(g.tlStockNvc4) },
+    { key: 'tlStockTotal', label: 'Total stock', num: true, sortValue: (g) => g.tlStockTotal, render: (g) => `<b>${fmt(g.tlStockTotal)}</b>` },
+    { key: 'agentStockSum', label: 'Agents stock (sum)', num: true, sortValue: (g) => U.sum(g.agents, (a) => a.stockTotal), render: (g) => fmt(U.sum(g.agents, (a) => a.stockTotal)) },
+    { key: 'tlAvgTotal', label: 'Avg/day', num: true, sortValue: (g) => g.tlAvgTotal, render: (g) => fmt(g.tlAvgTotal, true) },
+    { key: 'tlVc4Days', label: 'VC4 days', num: true, sortValue: (g) => g.tlVc4Days, render: (g) => fmt(g.tlVc4Days) },
+    { key: 'tlNvc4Days', label: 'Comm days', num: true, sortValue: (g) => g.tlNvc4Days, render: (g) => fmt(g.tlNvc4Days) },
+    { key: 'tlPriority', label: 'Priority (VC4)', sortValue: (g) => g.tlPriority, render: (g) => badge(g.tlPriority) },
+    { key: 'tlStockAlert', label: 'Alert (VC4)', sortValue: (g) => g.tlStockAlert, render: (g) => badge(g.tlStockAlert) },
+    { key: 'tlCommPriority', label: 'Priority (Comm)', sortValue: (g) => g.tlCommPriority, render: (g) => badge(g.tlCommPriority) },
+    { key: 'tlCommAlert', label: 'Alert (Comm)', sortValue: (g) => g.tlCommAlert, render: (g) => badge(g.tlCommAlert) }
+  ];
+  function stockReportRows() { return state.filtered.filter((a) => !a.isMaster); }
+  function renderStockReport(el) {
+    const list = stockReportRows();
+    const master = state.filtered.find((a) => a.isMaster);
+    const classes = [['VC4', 'stockVc4'], [clsLabel('stockC1', 'VC5'), 'stockC1'], [clsLabel('stockC2', 'VC6'), 'stockC2'], [clsLabel('stockC3', 'VC7'), 'stockC3'], [clsLabel('stockC4', 'VC12'), 'stockC4'], [clsLabel('stockC5', 'VC16'), 'stockC5']];
+    const totals = classes.map(([label, key]) => [label, U.sum(list, (a) => a[key] || 0)]);
+    const total = U.sum(list, (a) => a.stockTotal || 0), comm = U.sum(list, (a) => a.stockNvc4 || 0);
+    const withStock = list.filter((a) => (a.stockTotal || 0) > 0).length;
+    const zeroStockActive = list.filter((a) => !(a.stockTotal > 0) && a.hasIssuance).length;
+    const over = state.tlGroups.filter((g) => /over ?stock/i.test(clean(g.tlStockAlert))).length;
+    const risk = state.tlGroups.filter((g) => /risk|low|critical|urgent/i.test(clean(g.tlStockAlert)) && !/stock ok/i.test(clean(g.tlStockAlert))).length;
+    const cols = STOCK_COLUMNS(), tlCols = STOCK_TL_COLUMNS();
+    const sorted = sortList(list, cols, state.sort.stock);
+    const tlSorted = sortList(state.tlGroups, tlCols, state.sort.stockTl);
+    const pages = Math.max(1, Math.ceil(sorted.length / state.pageSize));
+    state.page = Math.min(state.page, pages);
+    const slice = sorted.slice((state.page - 1) * state.pageSize, state.page * state.pageSize);
+    const alertCounts = countBy(list, (a) => a.tlStockAlert || '(blank)').filter(([v]) => v !== '(blank)');
+    const tile = (label, value, foot, cls) => `<div class="kpi ${cls}" data-kpi="stockreport" data-kpi-title="${esc(label)}"><div class="kpi-top"><span class="kpi-title">${esc(label)}</span><span class="kpi-icon">📦</span></div><div class="kpi-value">${value}</div><div class="kpi-foot">${foot}</div></div>`;
+    el.innerHTML = `<div class="kpi-grid six">
+        ${tile('Total stock in field', fmt(total), `VC4 <b>${fmt(totals[0][1])}</b> · Commercial <b>${fmt(comm)}</b>`, 'g9')}
+        ${totals.slice(0, 1).map(([l, v]) => tile(`${l} stock`, fmt(v), `${U.fmtPct(U.pctOf(v, total), 0)} of total`, 'g3')).join('')}
+        ${tile('Commercial stock', fmt(comm), totals.slice(1).map(([l, v]) => `${esc(l)} <b>${fmt(v)}</b>`).join(' · '), 'g4')}
+        ${tile('Agents with stock', fmt(withStock), `of ${fmt(list.length)} agents · <b>${fmt(zeroStockActive)}</b> active with 0 stock`, 'g10')}
+        ${tile('TL stock risk', fmt(risk), 'Dispatch needed (VC4 alert)', 'g8')}
+        ${tile('Over-stocked TLs', fmt(over), 'Dispatch hold · &gt;50 days', 'g6')}
+      </div>
+      <div class="grid g-2-1">
+        <section class="card"><div class="card-head"><h3>📦 Stock Report · class-wise</h3><div class="card-right dim">REPORT → Agent Inventory Summary${master ? ` · Master (${esc(master.name)}) ${fmt(master.stockTotal)} alag rakha` : ''}</div></div><div class="card-body">${C.bars({ labels: totals.map((t) => t[0]), height: 200, series: [{ name: 'Stock', values: totals.map((t) => t[1]), color: '#0ea5e9' }] })}</div></section>
+        <section class="card"><div class="card-head"><h3>🚦 Stock alert mix</h3></div><div class="card-body">${distList(alertCounts.map(([v, c]) => [v, c]), list.length, 'alert')}</div></section>
+      </div>
+      <section class="card"><div class="card-head"><h3>👥 TL-wise Stock Report <span class="dim">${fmt(tlSorted.length)} TLs</span></h3><div class="card-right">${FF.auth.can('export') ? '<button class="btn small" data-act="export-stock-xlsx">⬇ Excel (Stock Report)</button>' : ''}</div></div><div class="table-wrap tall">${tableHtml(tlCols, tlSorted, state.sort.stockTl, (g) => `data-tl="${esc(g.tlKey)}" class="clickable" data-sort-table="stockTl"`).replace(/<th class="sortable/g, '<th data-sort-table="stockTl" class="sortable')}</div></section>
+      <section class="card"><div class="card-head"><h3>🧑‍💼 Agent-wise Stock Report <span class="dim">${fmt(sorted.length)} agents</span></h3><div class="card-right">${FF.auth.can('export') ? '<button class="btn small" data-act="export-stock-csv">⬇ CSV</button>' : ''}</div></div>
+      <div class="table-wrap tall">${tableHtml(cols, slice, state.sort.stock, (a) => `data-agent="${a.__row}" class="clickable"`).replace(/<th class="sortable/g, '<th data-sort-table="stock" class="sortable')}</div>
+      <div class="pager center"><button class="btn small" data-act="page" data-page="${state.page - 1}" ${state.page <= 1 ? 'disabled' : ''}>‹ Prev</button><span>Page ${state.page} / ${pages} · ${fmt(sorted.length)} agents</span><button class="btn small" data-act="page" data-page="${state.page + 1}" ${state.page >= pages ? 'disabled' : ''}>Next ›</button><select data-act="pagesize">${[25, 50, 100, 250].map((n) => `<option value="${n}" ${n === state.pageSize ? 'selected' : ''}>${n}/page</option>`).join('')}</select></div></section>`;
+    el.__sorted = sorted;
+    el.__tlSorted = tlSorted;
+  }
+  function exportStockReport(kind) {
+    if (!FF.auth.can('export')) return U.toast('Download permission nahi hai', 'err');
+    const cols = STOCK_COLUMNS(), tlCols = STOCK_TL_COLUMNS();
+    const plain = (c, item) => { const v = c.sortValue(item); return v === null || v === undefined ? '' : (typeof v === 'string' ? stripEmoji(v) || v : v); };
+    const agents = sortList(stockReportRows(), cols, state.sort.stock);
+    const header = ['Agent', 'Agent ID', ...cols.slice(1).map((c) => c.label)];
+    const rows = agents.map((a) => [a.name, a.agentId || a.id, ...cols.slice(1).map((c) => (c.key === 'gvStockVc4' ? `${a.gvStockVc4 || 0} / ${a.gvStockNvc4 || 0}` : plain(c, a)))]);
+    if (kind === 'csv') { U.downloadCsv(`stock-report-${U.stamp()}.csv`, header, rows); return U.toast('Stock Report CSV ready', 'ok'); }
+    const tls = sortList(state.tlGroups, tlCols, state.sort.stockTl);
+    FF.xlsx.download(`stock-report-${U.stamp()}.xlsx`, [
+      { name: 'Agent Stock', header, rows },
+      { name: 'TL Stock', header: tlCols.map((c) => c.label), rows: tls.map((g) => tlCols.map((c) => plain(c, g))) }
+    ]);
+    U.toast('Stock Report Excel ready', 'ok');
+  }
   function renderAlerts(el) {
     const b = alertBuckets(), cap = 100;
     const tlRows = (list, extra) => list.slice(0, cap).map((g) => `<tr data-tl="${esc(g.tlKey)}" class="clickable"><td>${cellMain(g.tlName || g.tlKey, g.tlId)}</td><td class="num">${fmt(g.tlStockVc4)} <small class="dim">/ ${fmt(g.tlStockNvc4)}</small></td><td class="num">${fmt(g.tlAvgTotal, true)}</td><td class="num"><b>${fmt(g.tlVc4Days)}</b></td><td class="num">${fmt(g.tlNvc4Days)}</td><td>${badge(g.tlStockAlert)}</td><td>${badge(g.tlCommAlert)}</td><td>${badge(extra(g))}</td></tr>`).join('');
@@ -480,7 +567,7 @@ FF.pages = FF.pages || {};
 
   // ---- page ------------------------------------------------------------------------------
   async function render(root, params) {
-    if (params.view && ['overview', 'agents', 'tls', 'alerts'].includes(params.view)) state.view = params.view;
+    if (params.view && ['overview', 'agents', 'tls', 'stock', 'alerts'].includes(params.view)) state.view = params.view;
     if (params.tl !== undefined) state.filters.tl = params.tl;
     if (params.q !== undefined) state.filters.q = '';
     root.innerHTML = `<div class="page-head"><div><h1>🏆 Performance</h1><p class="sub" id="pf-sub">REPORT tab se agent & TL performance…</p></div>
@@ -494,7 +581,7 @@ FF.pages = FF.pages || {};
     const tlOpts = () => [...state.allTlGroups].sort((a, b) => (a.tlName || '').localeCompare(b.tlName || ''));
     body.innerHTML = `<div class="card controls finder"><div class="finder-row"><div class="finder-input"><span class="finder-ico">🔎</span><input class="input" id="pf-find" placeholder="Quick find: agent / TL naam type karo → click karte hi poora profile (charts, VC4 vs Commercial, last vs current)…"></div><span class="ctrl-note dim">Enter = pehla match · list se click karo</span></div></div>
       <div id="pf-kpis"></div>
-      <div class="card controls"><div class="seg" id="pf-tabs">${[['overview', '🏠 Overview'], ['agents', '🧑‍💼 Agents'], ['tls', '👥 TLs'], ['alerts', '🚨 Alerts']].map(([k, l]) => `<button class="seg-btn ${state.view === k ? 'on' : ''}" data-view="${k}">${l}</button>`).join('')}</div>
+      <div class="card controls"><div class="seg" id="pf-tabs">${[['overview', '🏠 Overview'], ['agents', '🧑‍💼 Agents'], ['tls', '👥 TLs'], ['stock', '📦 Stock Report'], ['alerts', '🚨 Alerts']].map(([k, l]) => `<button class="seg-btn ${state.view === k ? 'on' : ''}" data-view="${k}">${l}</button>`).join('')}</div>
         <div class="ctrl-row"><input class="input" id="pf-q" placeholder="Filter list: agent / ID / TL / mobile…" value="${esc(state.filters.q)}">
           <label>TL <select id="pf-tl"><option value="">All TLs</option>${tlOpts().map((t) => `<option value="${esc(t.tlKey)}" ${t.tlKey === state.filters.tl || norm(t.tlName) === norm(state.filters.tl) ? 'selected' : ''}>${esc(t.tlName || t.tlKey)} · ${t.agentCount}</option>`).join('')}</select></label>
           <label>Stock alert <select id="pf-alert"><option value="">All</option>${countBy(state.agents, (a) => a.tlStockAlert || '(blank)').map(([v, c]) => `<option value="${esc(v)}" ${v === state.filters.alert ? 'selected' : ''}>${esc(v)} · ${c}</option>`).join('')}</select></label>
@@ -507,7 +594,7 @@ FF.pages = FF.pages || {};
       renderKpis(kpisEl);
       U.$('#pf-chips', body).innerHTML = chipBar();
       U.$$('#pf-tabs .seg-btn', body).forEach((b) => b.classList.toggle('on', b.dataset.view === state.view));
-      if (state.view === 'overview') renderOverview(viewEl); else if (state.view === 'agents') renderAgents(viewEl); else if (state.view === 'tls') renderTls(viewEl); else renderAlerts(viewEl);
+      if (state.view === 'overview') renderOverview(viewEl); else if (state.view === 'agents') renderAgents(viewEl); else if (state.view === 'tls') renderTls(viewEl); else if (state.view === 'stock') renderStockReport(viewEl); else renderAlerts(viewEl);
     };
     const refilter = () => { applyFilters(); draw(); };
     // quick find (dropdown)
@@ -550,7 +637,7 @@ FF.pages = FF.pages || {};
         refilter(); return;
       }
       const th = e.target.closest('th.sortable');
-      if (th) { const t = state.view === 'tls' ? 'tls' : 'agents'; const s = state.sort[t]; const cols = t === 'tls' ? TL_COLUMNS() : AGENT_COLUMNS(); if (s.key === th.dataset.sort) s.dir = s.dir === 'asc' ? 'desc' : 'asc'; else { s.key = th.dataset.sort; const col = cols.find((c) => c.key === s.key); s.dir = col && (col.num || /Total|Count/.test(s.key)) ? 'desc' : 'asc'; } draw(); return; }
+      if (th) { const t = th.dataset.sortTable || (state.view === 'tls' ? 'tls' : 'agents'); const s = state.sort[t]; const cols = t === 'tls' ? TL_COLUMNS() : t === 'stock' ? STOCK_COLUMNS() : t === 'stockTl' ? STOCK_TL_COLUMNS() : AGENT_COLUMNS(); if (s.key === th.dataset.sort) s.dir = s.dir === 'asc' ? 'desc' : 'asc'; else { s.key = th.dataset.sort; const col = cols.find((c) => c.key === s.key); s.dir = col && (col.num || /Total|Count/.test(s.key)) ? 'desc' : 'asc'; } draw(); return; }
       const act = e.target.closest('[data-act]');
       if (!act) return;
       if (act.dataset.act === 'page') { state.page = Number(act.dataset.page); draw(); viewEl.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
@@ -563,6 +650,8 @@ FF.pages = FF.pages || {};
         U.toast('Agents export ready', 'ok');
       }
       if (act.dataset.act === 'export-tls') { if (!FF.auth.can('export')) return U.toast('Download permission nahi hai', 'err'); const cols = TL_COLUMNS(); U.downloadCsv(`tl-summary-${U.stamp()}.csv`, cols.map((c) => c.label), (viewEl.__sorted || state.tlGroups).map((g) => cols.map((c) => { const v = c.sortValue(g); return v === null || v === undefined ? '' : v; }))); U.toast('TL CSV exported'); }
+      if (act.dataset.act === 'export-stock-xlsx') exportStockReport('xlsx');
+      if (act.dataset.act === 'export-stock-csv') exportStockReport('csv');
       if (act.dataset.act === 'share') shareSummary('wa');
       if (act.dataset.act === 'mail') shareSummary('mail');
     });
@@ -588,5 +677,7 @@ FF.pages = FF.pages || {};
     U.toast('Summary copied — WhatsApp khul raha hai');
   }
 
-  FF.pages.performance = { title: 'Performance', render, openAgent, openTl, reset, agents: () => state.agents };
+  FF.pages.performance = { title: 'Performance', render, openAgent, openTl, reset, ensureLoaded, agents: () => state.agents };
+  // Sidebar shortcut: First Forward → 📋 Stock Report opens the Performance page on the Stock Report view.
+  FF.pages.stockReport = { title: 'Stock Report', render: (root, params) => { state.view = 'stock'; return render(root, { ...(params || {}), view: 'stock' }); } };
 })(window.FF);
