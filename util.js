@@ -391,6 +391,28 @@ window.FF = window.FF || {};
     return list.slice(0, cap);
   }
 
+  /** 🗣 Voice search — Web Speech API (en-IN). Bol ke search, result onText(text) me milta hai. */
+  function voiceInput(onText, hint) {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { toast('🗣 Voice search is browser me supported nahi hai — Chrome/Edge try karo.', 'warn'); return; }
+    try {
+      const rec = new SR();
+      rec.lang = 'en-IN'; rec.interimResults = false; rec.maxAlternatives = 1;
+      toast(hint || '🎤 Bolo… sun raha hoon', 'info');
+      rec.onresult = (e) => {
+        const t = e.results && e.results[0] && e.results[0][0] ? String(e.results[0][0].transcript).trim() : '';
+        if (t && onText) onText(t);
+      };
+      rec.onerror = (e) => {
+        const code = e && e.error;
+        if (code === 'not-allowed' || code === 'service-not-allowed') toast('Mic permission allow karo (browser settings me)', 'err');
+        else if (code === 'no-speech') toast('Kuch sunai nahi diya — dobara try karo.', 'warn');
+        else if (code !== 'aborted') toast('Awaaz samajh nahi aayi — dobara try karo.', 'warn');
+      };
+      rec.start();
+    } catch { toast('Voice search start nahi ho paya.', 'err'); }
+  }
+
   FF.util = {
     esc, clean, num, fmt, fmtShort, pctOf, growth, fmtPct, fmtSigned, deltaHtml,
     MONTHS, MONTHS_LONG, DAYS, pad2, parseDate, parseMonthKey, ymKey, dateKey, fromDateKey, ymParts, labelYM, labelDate, labelDateKey,
@@ -398,6 +420,6 @@ window.FF = window.FF || {};
     sum, groupSum, topEntries, sortBy, uniq,
     $, $$, h, debounce, toast, spinner, errorBox, downloadBlob, downloadCsv, tableToRows, slug, stamp, colLetter, colIndex, initTooltip,
     phoneDigits, waLink, mailLink, copyText, suggest,
-    parseDateTime, printReport, recentList, recentAdd
+    parseDateTime, printReport, recentList, recentAdd, voiceInput
   };
 })(window.FF);

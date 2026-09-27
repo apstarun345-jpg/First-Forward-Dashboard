@@ -10,6 +10,7 @@ window.FF = window.FF || {};
     { id: 'home', icon: '🏠', label: 'Home', desc: 'Highlights · GV & FF charts', perm: 'home', group: 'Main' },
     { id: 'tagIssued', icon: '🏷️', label: 'GV & FF Tag Issued', desc: 'Date-wise detailed issuance · VC4 vs Commercial', perm: 'tagIssued', group: 'Main' },
     { id: 'targets', icon: '🎯', label: 'Agent Targets', desc: 'Shortlist · target · progress · Excel', perm: 'targets', group: 'Main' },
+    { id: 'rangeReport', icon: '📅', label: 'Range Report', desc: 'Custom from→to report · FF + GV · Excel', perm: 'tagIssued', group: 'Main' },
     { id: 'dashboard', icon: '📊', label: 'Dashboard', desc: 'KPIs & charts (EIR)', perm: 'dashboard', group: 'First Forward' },
     { id: 'trend', icon: '📈', label: 'Trend', desc: 'Daily · Monthly · Last vs Current', perm: 'trend', group: 'First Forward' },
     { id: 'performance', icon: '🏆', label: 'Performance', desc: 'Agents & TLs (REPORT)', perm: 'performance', group: 'First Forward' },
@@ -30,6 +31,8 @@ window.FF = window.FF || {};
   const HI_PAGES = {
     home: { label: 'होम', desc: 'हाइलाइट्स · GV और FF चार्ट' },
     tagIssued: { label: 'GV और FF टैग जारी', desc: 'तारीख़ अनुसार विस्तृत जारी · VC4 बनाम कॉमर्शियल' },
+    targets: { label: 'एजेंट टार्गेट', desc: 'शॉर्टलिस्ट · टार्गेट · प्रोग्रेस · उपलब्धि इतिहास · TL रोलअप' },
+    rangeReport: { label: 'रेंज रिपोर्ट', desc: 'मनचाही तारीख़ रेंज · FF + GV संयुक्त · एक्सेल' },
     dashboard: { label: 'डैशबोर्ड', desc: 'KPI और चार्ट (EIR)' },
     trend: { label: 'ट्रेंड', desc: 'दैनिक · मासिक · पिछला बनाम चालू' },
     performance: { label: 'परफ़ॉर्मेंस', desc: 'एजेंट और TL (REPORT)' },
@@ -48,6 +51,7 @@ window.FF = window.FF || {};
     home: { desc: 'Highlights · GV & FF charts' },
     tagIssued: { desc: 'Date-wise detailed issuance · VC4 vs Commercial' },
     targets: { desc: 'Shortlist agents · set targets · track progress · Excel' },
+    rangeReport: { desc: 'Pick any from→to dates · FF + GV combined · Excel' },
     compare: { desc: 'Side-by-side comparison of both channels' },
     stock: { desc: 'Search · pivot · Excel (StockDataa)' }
   };

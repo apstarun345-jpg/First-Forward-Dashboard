@@ -58,11 +58,12 @@ FF.pages = FF.pages || {};
     const quick = U.$('#home-quick', root);
 
     // Background: ensure data
-    const [dailyR, stockR, gvMasterR, gvStockR] = await Promise.allSettled([
+    const [dailyR, stockR, gvMasterR, gvStockR, agentsR, agentClassR] = await Promise.allSettled([
       canFf ? S.need('daily') : Promise.reject(new Error('skip')),
       canFf ? S.need('stock') : Promise.reject(new Error('skip')),
       canGv ? G.need('master') : Promise.reject(new Error('skip')),
-      canGv ? G.need('stockClass') : Promise.reject(new Error('skip'))
+      canGv ? G.need('stockClass') : Promise.reject(new Error('skip')),
+      S.need('agents'), S.need('agentClass')
     ]);
     if (!root.isConnected) return;
 
@@ -183,6 +184,72 @@ FF.pages = FF.pages || {};
           </div>
         </div>
       `, ''));
+    }
+
+    // 🏆 Gamification — is mahine ke achievers
+    {
+      const norm = (s) => U.clean(s).toUpperCase().replace(/\s+/g, ' ');
+      const keyOf = (source, name) => `${source}|${norm(name)}`;
+      const curKey = ffLatest ? U.ymKey(ffLatest) : (gvLatest ? U.ymKey(gvLatest) : '');
+      const lastKey = curKey ? U.prevMonthKey(curKey) : '';
+      const badges = [];
+      const badge = (emoji, title, name, sub, link) => {
+        if (!name) return '';
+        return `<a class="champ" href="${link || '#/performance'}" title="${esc(title)}"><span class="champ-emoji">${emoji}</span><span class="champ-body"><b>${esc(name)}</b><small>${esc(title)}${sub ? ` · ${esc(sub)}` : ''}</small></span></a>`;
+      };
+      // FF + GV current month agent maps
+      const agents = agentsR.status === 'fulfilled' ? agentsR.value : [];
+      const ffCurMap = new Map(), ffLastMap = new Map();
+      for (const a of agents) {
+        if (a.channel !== 'First Forward') continue;
+        if (a.ym === curKey) ffCurMap.set(a.name, (ffCurMap.get(a.name) || 0) + a.n);
+        if (a.ym === lastKey) ffLastMap.set(a.name, (ffLastMap.get(a.name) || 0) + a.n);
+      }
+      const gvRoll = gvMasterR.status === 'fulfilled' && curKey ? G.agentRollup(curKey) : [];
+      const gvLastRoll = gvMasterR.status === 'fulfilled' && lastKey ? G.agentRollup(lastKey) : [];
+      const gvLastMap = new Map(gvLastRoll.map((a) => [a.agentName, a.total]));
+      // 1) FF top issuer
+      const ffTop = [...ffCurMap.entries()].sort((a, b) => b[1] - a[1])[0];
+      if (ffTop) badges.push(badge('🥇', 'FF Top Issuer', ffTop[0], `${U.fmt(ffTop[1])} tags · ${U.labelYM(curKey)}`, '#/performance'));
+      // 2) GV top issuer
+      if (gvRoll.length) badges.push(badge('👑', 'GV Top Issuer', gvRoll[0].agentName, `${U.fmt(gvRoll[0].total)} tags · ${U.labelYM(curKey)}`, '#/gvPerformance'));
+      // 3) VC4 King — jo sabse zyada VC4 tags laya (FF agentClass + GV rollup combined)
+      const vc4Map = new Map();
+      if (agentClassR.status === 'fulfilled') {
+        for (const r of agentClassR.value) if (r.ym === curKey && r.group === 'VC4') vc4Map.set(`FF · ${r.name}`, (vc4Map.get(`FF · ${r.name}`) || 0) + r.n);
+      }
+      for (const a of gvRoll) if (a.vc4) vc4Map.set(`GV · ${a.agentName}`, (vc4Map.get(`GV · ${a.agentName}`) || 0) + a.vc4);
+      const vc4King = [...vc4Map.entries()].sort((a, b) => b[1] - a[1])[0];
+      if (vc4King && vc4King[1]) badges.push(badge('🚗', 'VC4 King', vc4King[0], `${U.fmt(vc4King[1])} VC4 tags`, '#/tagIssued'));
+      // 4) Fastest grower — last vs current, minimum base 10 tags
+      let grower = null;
+      for (const [name, cur] of ffCurMap) { const last = ffLastMap.get(name) || 0; if (last >= 10 && cur > last) { const g = ((cur - last) / last) * 100; if (!grower || g > grower.g) grower = { name: `FF · ${name}`, g, cur }; } }
+      for (const a of gvRoll) { const last = gvLastMap.get(a.agentName) || 0; if (last >= 10 && a.total > last) { const g = ((a.total - last) / last) * 100; if (!grower || g > grower.g) grower = { name: `GV · ${a.agentName}`, g, cur: a.total }; } }
+      if (grower) badges.push(badge('🚀', 'Fastest Grower', grower.name, `+${Math.round(grower.g)}% (${U.fmt(grower.cur)} tags)`, '#/trend'));
+      // 5) Top TL (FF + GV combined issuance)
+      const tlMap = new Map();
+      for (const a of agents) if (a.channel === 'First Forward' && a.ym === curKey && a.tlName) tlMap.set(a.tlName, (tlMap.get(a.tlName) || 0) + a.n);
+      for (const a of gvRoll) if (a.tlName && a.tlName !== 'Direct') tlMap.set(a.tlName, (tlMap.get(a.tlName) || 0) + a.total);
+      const topTl = [...tlMap.entries()].sort((a, b) => b[1] - a[1])[0];
+      if (topTl) badges.push(badge('🧑‍💼', 'Top TL', topTl[0], `${U.fmt(topTl[1])} tags team`, '#/targets?tab=tl'));
+      // 6) Target achievers — settings.targets me se current month
+      const tg = ((FF.auth.settings && FF.auth.settings.targets) || []).filter((t) => t && t.ym === curKey && Number(t.target) > 0);
+      if (tg.length) {
+        let done = 0, stars = [];
+        for (const t of tg) {
+          const nm = (t.agent || t.key.split('|')[1] || '').trim();
+          const actual = t.key.startsWith('gv|') ? ((gvRoll.find((a) => norm(a.agentName) === norm(nm)) || {}).total || 0) : (ffCurMap.get(nm) || [...ffCurMap.entries()].find(([k]) => norm(k) === norm(nm)) || [0, 0])[1];
+          if (actual >= Number(t.target)) { done++; stars.push({ name: nm, p: Math.round((actual / Number(t.target)) * 100) }); }
+        }
+        stars.sort((a, b) => b.p - a.p);
+        badges.push(badge('🎯', 'Targets Achieved', `${done}/${tg.length} agents`, stars.length ? `🌟 ${stars[0].name} (${stars[0].p}%)` : 'koi nahi — push karo!', '#/targets?tab=achieve'));
+      }
+      if (badges.length) {
+        cards.push(card(`🏆 Champions of ${curKey ? U.labelYM(curKey) : 'this month'} <span class="dim">· gamification — FF + GV combined</span>`,
+          `<div class="champ-grid">${badges.join('')}</div>
+           <p class="dim small">Ye badges har mahine ke live data se bante hain. 🎯 Targets page par jao aur apne agents ko targets do — agle mahine inke naam champions me dikhenge. <a href="#/targets">Targets →</a></p>`,
+          `<a class="btn small" href="#/targets?tab=tl">👥 TL rollup →</a>`));
+      }
     }
 
     // Last 14 days trend

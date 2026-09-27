@@ -232,7 +232,7 @@ FF.pages = FF.pages || {};
     if (params.agent) { view.scope = 'agent'; view.value = params.agent; } else if (params.tl) { view.scope = 'tl'; view.value = params.tl; } else if (params.cls) { view.scope = 'cls'; view.value = params.cls; } else { view.scope = ''; view.value = ''; }
     root.innerHTML = `<div class="page-head"><div><h1>📦 Stock / Inventory</h1><p class="sub">StockDataa — agent / TL / class wise stock · VC4 vs Commercial · pivot + Excel export</p></div>
       <div class="head-actions"><button class="btn primary" data-action="refresh">↻ Refresh</button>${FF.auth.can('sheet:StockDataa') ? `<a class="btn" href="#/sheet/${encodeURIComponent(FF.config.stock.sheet)}">Full StockDataa sheet →</a>` : ''}</div></div>
-      <div class="card controls finder"><div class="finder-row"><div class="finder-input"><span class="finder-ico">🔎</span><input class="input" id="st-q" placeholder="Agent ya TL ka naam type karo… (dropdown se select karo)" value="${esc(view.scope === 'cls' ? '' : view.value)}"></div>
+      <div class="card controls finder"><div class="finder-row"><div class="finder-input"><span class="finder-ico">🔎</span><input class="input" id="st-q" placeholder="Agent ya TL ka naam type karo… (dropdown se select karo)" value="${esc(view.scope === 'cls' ? '' : view.value)}"><button class="btn mic-btn" id="st-mic" title="🗣 Bol ke search karo" type="button">🎤</button></div>
         <label>Criteria <select id="st-scope"><option value="">Agent + TL</option><option value="agent">Agent only</option><option value="tl">TL only</option></select></label>
         <button class="btn small" id="st-clear" ${view.scope ? '' : 'disabled'}>✕ Clear</button>
         <span class="ctrl-note" id="st-note"></span></div>
@@ -288,6 +288,15 @@ FF.pages = FF.pages || {};
     });
     U.suggest(input, { items, onPick: (it) => { if (it.value && FF.notifications && FF.notifications.logSearch) FF.notifications.logSearch('Stock / Inventory', it.value); go(it.kind, it.value); }, onEnter: (q) => { if (q && FF.notifications && FF.notifications.logSearch) FF.notifications.logSearch('Stock / Inventory', q); const all = items(); const hit = all.find((i) => norm(i.label) === norm(q)) || all.find((i) => norm(i.label).includes(norm(q))); if (hit) go(hit.kind, hit.value); else U.toast('Koi agent / TL match nahi hua', 'err'); } });
     drawRecent();
+    // 🗣 voice search — bol ke agent/TL kholo
+    const mic = U.$('#st-mic', root);
+    if (mic && U.voiceInput) mic.addEventListener('click', () => U.voiceInput((text) => {
+      input.value = text;
+      const all = items();
+      const hit = all.find((i) => norm(i.label) === norm(text)) || all.find((i) => norm(i.label).includes(norm(text)));
+      if (hit) { U.toast(`🗣 "${text}" → ${hit.label}`, 'ok'); go(hit.kind, hit.value); }
+      else { U.toast(`"${text}" ka koi match nahi mila — dropdown se select karo`, 'warn'); input.dispatchEvent(new Event('input', { bubbles: true })); }
+    }, 'Agent ya TL ka naam bolo…'));
     U.$('#st-clear', root).addEventListener('click', () => FF.app.navigate('stock', {}));
     root.addEventListener('click', (e) => {
       const rc = e.target.closest('[data-recent-clear]'); if (rc) { try { localStorage.removeItem('ff_recent_stock'); } catch {} drawRecent(); return; }
