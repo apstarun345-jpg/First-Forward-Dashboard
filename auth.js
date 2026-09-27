@@ -303,10 +303,16 @@ window.FF = window.FF || {};
     return false;
   }
   async function logout() {
-    try { await api('/api/auth/logout', 'POST', {}); } catch (err) { U.toast('Logout failed. Please retry when connected.', 'err'); return; }
+    // ⚡ Instant UI — don't wait for the network round-trip before clearing state.
     state.user = null;
+    try { localStorage.removeItem('ff_user'); } catch { /* ignore */ }
+    if (FF.notifications && FF.notifications.stop) FF.notifications.stop();
+    U.toast('Logged out ✓', 'ok');
     location.hash = '';
-    location.reload();
+    // Fire-and-forget server logout + reload immediately (instant feel, cookie cleared on next load).
+    api('/api/auth/logout', 'POST', {}).catch(() => {});
+    // Use requestAnimationFrame + microtask for a snappy reload (gives the toast a frame to paint).
+    requestAnimationFrame(() => { location.replace(location.pathname); });
   }
   function onExpired() {
     if (!state.user) return;

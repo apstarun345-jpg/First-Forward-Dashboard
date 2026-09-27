@@ -29,6 +29,12 @@ FF.pages = FF.pages || {};
   async function save(patch, msgEl, opts) {
     try {
       if (msgEl) msgEl.textContent = 'Saving…';
+      // ⚡ Optimistic: theme/branding changes turant apply karo — UI instantly feel kare
+      const optimistic = { ...settings };
+      Object.keys(patch).forEach((k) => { optimistic[k] = patch[k]; });
+      settings = JSON.parse(JSON.stringify(optimistic));
+      A.applySettings(optimistic);
+      if (patch.tabs) FF.app.renderSidebar();
       const out = await A.api('/api/settings', 'PUT', { settings: patch });
       settings = JSON.parse(JSON.stringify(out.settings));
       A.applySettings(out.settings);
@@ -36,7 +42,12 @@ FF.pages = FF.pages || {};
       if (msgEl) msgEl.textContent = `Saved ✓ ${U.timeLabel(Date.now())}`;
       U.toast('Settings saved ✓', 'ok');
       if (opts && opts.reload) { U.toast('Sheet mapping badli — data dobara load ho raha hai…'); FF.store.reset(); if (FF.gv) FF.gv.reset(); if (FF.pages.sheet.reset) FF.pages.sheet.reset(); if (FF.pages.performance.reset) FF.pages.performance.reset(); FF.preloader.fastSync(false).catch(() => {}); }
-    } catch (err) { if (msgEl) msgEl.textContent = 'Not saved — retry'; if (A.settings) A.applySettings(A.settings); U.toast(err.message, 'err'); }
+    } catch (err) {
+      // Rollback optimistic change on failure
+      if (A.settings) { settings = JSON.parse(JSON.stringify(A.settings)); A.applySettings(A.settings); FF.app.renderSidebar(); }
+      if (msgEl) msgEl.textContent = 'Not saved — retry';
+      U.toast(err.message, 'err');
+    }
   }
   function collect(root, base) {
     const patch = JSON.parse(JSON.stringify(base || {}));
@@ -221,9 +232,12 @@ FF.pages = FF.pages || {};
         <div class="user-head"><span class="user-avatar big">${esc((u.name || u.username).slice(0, 1).toUpperCase())}</span><div class="user-meta"><b>${esc(u.name)}</b> <code>${esc(u.username)}</code>${u.username === A.user.username ? ' <span class="tag">you</span>' : ''}<small class="dim">${esc(u.email || '')}${u.mobile ? ` · ${esc(u.mobile)}` : ''} · joined ${u.createdAt ? U.timeLabel(new Date(u.createdAt).getTime()) : '—'} · last login ${u.lastLoginAt ? U.timeLabel(new Date(u.lastLoginAt).getTime()) : 'never'}${u.lastLocation ? ` · <a href="https://www.google.com/maps?q=${encodeURIComponent(`${u.lastLocation.latitude},${u.lastLocation.longitude}`)}" target="_blank" rel="noopener">📍 last location</a>` : ''}</small></div>
           <div class="user-controls"><label class="check"><input type="checkbox" data-field="approved" ${u.approved ? 'checked' : ''}> ${u.approved ? 'Active' : '<b class="pend">Pending approval</b>'}</label><select data-field="role"><option value="user" ${u.role === 'user' ? 'selected' : ''}>User</option><option value="admin" ${u.role === 'admin' ? 'selected' : ''}>Admin</option></select></div></div>
         <details class="user-perms" ${u.approved ? '' : 'open'}><summary>Permissions (${u.role === 'admin' ? 'all — admin' : `${u.permissions.length}/${permsCache.length}`})</summary><div class="perm-boxes">${permBoxes(u)}</div><div class="btn-row"><button class="btn small" data-perm-all>Select all</button><button class="btn small" data-perm-none>Clear</button><button class="btn small" data-perm-default>Default set</button></div></details>
+        <div class="user-notify-prefs">
+          <label class="check"><input type="checkbox" data-field="notifyAccess" ${u.role === 'admin' || u.notifyAccess !== false ? 'checked' : ''} ${u.role === 'admin' ? 'disabled' : ''}> 🔔 Notifications access <small class="dim">(in-app bell, browser alerts, mobile push — sab band ho jayega off karne par)</small></label>
+        </div>
         <div class="btn-row user-actions"><button class="btn small primary" data-user-save>💾 Save</button><button class="btn small" data-user-pw>🔑 Reset password</button>${u.username !== A.user.username ? '<button class="btn small danger" data-user-del>🗑 Delete</button>' : ''}<span class="dim small" data-user-msg></span></div>
       </div>`).join('');
-    root.innerHTML = `${section(`🔐 Users <span class="dim">(${usersCache.length} · ${usersCache.filter((u) => !u.approved).length} pending)</span>`, `<p class="dim small">Naya user sign up karta hai → yahan "Pending" dikhega → Active tick karo, permissions choose karo, Save. Admin ke paas sab access hota hai.</p><div class="user-list">${rows}</div>`)}
+    root.innerHTML = `${section(`🔐 Users <span class="dim">(${usersCache.length} · ${usersCache.filter((u) => !u.approved).length} pending)</span>`, `<p class="dim small">Naya user sign up karta hai → yahan "Pending" dikhega → Active tick karo, permissions choose karo, Save. Admin ke paas sab access hota hai. <b>🔔 Notifications access</b> off karne se user ko koi notification nahi dikhega / nahi milega — saari activity admin ko hi aayegi.</p><div class="user-list">${rows}</div>`)}
       ${section('➕ Add user directly', `<div class="form-grid"><label class="fld"><span>Username</span><input class="input" id="nu-username" autocapitalize="none"></label><label class="fld"><span>Full name</span><input class="input" id="nu-name"></label><label class="fld"><span>Password</span><input class="input" id="nu-password" type="text" value="${Math.random().toString(36).slice(2, 10)}"></label><label class="fld"><span>Role</span><select id="nu-role"><option value="user">User</option><option value="admin">Admin</option></select></label><label class="fld"><span>Mobile</span><input class="input" id="nu-mobile"></label><label class="fld"><span>Email</span><input class="input" id="nu-email"></label></div><div class="save-bar"><button class="btn primary" id="nu-add">➕ Create user</button><span class="dim small">Default permissions milengi; baad me edit karo. Password user ko bata do (pehle login par badalne ko kaha jaayega).</span></div>`)}`;
     root.querySelectorAll('.user-card').forEach((card) => {
       const username = card.dataset.user;
@@ -235,6 +249,8 @@ FF.pages = FF.pages || {};
       card.querySelector('[data-perm-default]').addEventListener('click', () => card.querySelectorAll('[data-perm]').forEach((cb) => { cb.checked = out.defaults.includes(cb.dataset.perm); }));
       card.querySelector('[data-user-save]').addEventListener('click', async () => {
         const body = { approved: card.querySelector('[data-field="approved"]').checked, role: roleSel.value, permissions: [...card.querySelectorAll('[data-perm]')].filter((cb) => cb.checked).map((cb) => cb.dataset.perm) };
+        const naBox = card.querySelector('[data-field="notifyAccess"]');
+        if (naBox && !naBox.disabled) body.notifyAccess = naBox.checked;
         msg.textContent = 'Saving…';
         try { await A.api(`/api/users/${encodeURIComponent(username)}`, 'PUT', body); msg.textContent = 'Saved ✓'; U.toast(`${username} updated ✓`, 'ok'); if (username === A.user.username) setTimeout(() => location.reload(), 600); else usersTab(root); } catch (err) { msg.textContent = ''; U.toast(err.message, 'err'); }
       });

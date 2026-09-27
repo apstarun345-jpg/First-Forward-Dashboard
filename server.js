@@ -215,9 +215,15 @@ function verifyPassword(password, stored) {
   return ref.length === test.length && crypto.timingSafeEqual(ref, test);
 }
 const normUser = (u) => String(u || '').trim().toLowerCase().replace(/[^a-z0-9._@-]/g, '').slice(0, 60);
+const DEFAULT_NOTIFY_PREFS = { login: true, signup: true, report: true, monthly: true, activity: true, click: true, search: true, settings: true, user: true, location: true, info: true, sound: true, push: true };
+function normalizeNotifyPrefs(p) {
+  const out = { ...DEFAULT_NOTIFY_PREFS };
+  if (p && typeof p === 'object') for (const k of Object.keys(DEFAULT_NOTIFY_PREFS)) if (p[k] !== undefined) out[k] = !!p[k];
+  return out;
+}
 function publicUser(u) {
   if (!u) return null;
-  return { username: u.username, name: u.name || u.username, email: u.email || '', mobile: u.mobile || '', avatar: u.avatar || '', role: u.role, approved: !!u.approved, permissions: u.role === 'admin' ? allPermKeysNow() : (u.permissions || []), createdAt: u.createdAt, lastLoginAt: u.lastLoginAt || null, mustChangePassword: !!u.mustChangePassword, lastLocation: u.lastLocation || null, notificationsSeenAt: u.notificationsSeenAt || null };
+  return { username: u.username, name: u.name || u.username, email: u.email || '', mobile: u.mobile || '', avatar: u.avatar || '', role: u.role, approved: !!u.approved, permissions: u.role === 'admin' ? allPermKeysNow() : (u.permissions || []), createdAt: u.createdAt, lastLoginAt: u.lastLoginAt || null, mustChangePassword: !!u.mustChangePassword, lastLocation: u.lastLocation || null, notificationsSeenAt: u.notificationsSeenAt || null, notifyAccess: u.role === 'admin' ? true : (u.notifyAccess !== false), notifyPrefs: normalizeNotifyPrefs(u.notifyPrefs) };
 }
 function findUser(username) { return db.users.find((u) => u.username === normUser(username)) || null; }
 function findUserByLogin(raw) {
@@ -257,8 +263,12 @@ function notifyItems() {
 }
 function notificationVisible(item, user) {
   if (!item || !user) return false;
+  // Admin ko HAR notification dikhta hai (sab users ki activity, reports, settings — total panel)
+  if (user.role === 'admin') return true;
+  // Non-admin user: sirf apne personal target wale notifications dikhte hain (login welcome, password change, account created, broadcast).
+  // Aur bhi: admin ne us user ko notification access diya ho tab hi.
+  if (user.notifyAccess === false) return false;
   if (item.target === 'broadcast') return true;
-  if (item.target === 'admin') return user.role === 'admin';
   return item.target === `user:${user.username}`;
 }
 function recordNotification({ type = 'info', title, body, target = 'admin', meta = {} }) {
@@ -271,7 +281,13 @@ function recordNotification({ type = 'info', title, body, target = 'admin', meta
 }
 function visibleNotifications(user, since) {
   const after = since ? new Date(since).getTime() : 0;
-  return notifyItems().filter((item) => notificationVisible(item, user) && (!after || new Date(item.createdAt).getTime() > after)).slice(-80);
+  const prefs = user ? normalizeNotifyPrefs(user.notifyPrefs) : DEFAULT_NOTIFY_PREFS;
+  return notifyItems().filter((item) => {
+    if (!notificationVisible(item, user)) return false;
+    if (after && new Date(item.createdAt).getTime() <= after) return false;
+    if (prefs[item.type] === false) return false; // user ne is type ke notifications off kar rakhe hain
+    return true;
+  }).slice(-80);
 }
 // ---- change reports: what exactly changed (shown when the admin clicks a notification) ----------
 function describeValue(v) {
@@ -316,7 +332,7 @@ function noteActivity(user, page) {
   const key = `${user.username}:${cleanPage}`;
   if (Date.now() - (activityLast.get(key) || 0) < 60e3) return null;
   activityLast.set(key, Date.now());
-  return recordNotification({ type: 'activity', title: 'User ne app kholi', body: `${user.name || user.username} ne ${cleanPage} open kiya.`, target: 'admin', meta: { username: user.username, page: cleanPage } });
+  return recordNotification({ type: 'activity', title: '👀 User ne page khola', body: `${user.name || user.username} ne "${cleanPage}" open kiya.`, target: 'admin', meta: { username: user.username, page: cleanPage } });
 }
 function sha(token) { return crypto.createHash('sha256').update(token).digest('hex'); }
 async function createSession(username) {
@@ -585,17 +601,36 @@ async function deliverPush(sub, data) {
     return true;
   } catch { return true; } // network hiccup — keep subscription
 }
-/** Fan-out a notification to push subscriptions (admin-targeted → admin subs, broadcast → everyone). */
+/** Fan-out a notification to push subscriptions (admin-targeted → admin subs, broadcast → everyone). Per-user push + sound preference bhi respect karo. */
 function pushFanout(item) {
   if (!vapidKeys || !item) return;
-  const data = { title: item.title, body: (item.body || '').replace(/\s+/g, ' ').slice(0, 180), tag: item.type || 'ff', link: (item.meta && item.meta.link) || '' };
   const subs = pushSubs().filter((s) => {
+    const u = findUser(s.username);
+    if (!u) return false;
+    if (u.role !== 'admin' && u.notifyAccess === false) return false;
+    const prefs = normalizeNotifyPrefs(u.notifyPrefs);
+    if (prefs.push === false) return false;
+    if (prefs[item.type] === false) return false;
+    // Admin ko HAR notification push hota hai; normal user ko sirf apna personal/broadcast
+    if (u.role === 'admin') return true;
     if (item.target === 'broadcast') return true;
-    if (item.target === 'admin') { const u = findUser(s.username); return u && u.role === 'admin'; }
     return item.target === `user:${s.username}`;
   });
   if (!subs.length) return;
-  Promise.all(subs.map(async (s) => { const alive = await deliverPush(s, data); if (!alive) { const arr = pushSubs(); const i = arr.indexOf(s); if (i >= 0) arr.splice(i, 1); } })).then(() => persist('notify')).catch(() => {});
+  Promise.all(subs.map(async (s) => {
+    const u = findUser(s.username);
+    const prefs = u ? normalizeNotifyPrefs(u.notifyPrefs) : DEFAULT_NOTIFY_PREFS;
+    const data = {
+      title: item.title,
+      body: (item.body || '').replace(/\s+/g, ' ').slice(0, 180),
+      tag: item.type || 'ff',
+      link: (item.meta && item.meta.link) || '',
+      sound: prefs.sound !== false,
+      persist: item.type === 'signup' || item.type === 'report' || item.type === 'user' // important types don't auto-dismiss
+    };
+    const alive = await deliverPush(s, data);
+    if (!alive) { const arr = pushSubs(); const i = arr.indexOf(s); if (i >= 0) arr.splice(i, 1); }
+  })).then(() => persist('notify')).catch(() => {});
 }
 // ---- monthly auto-report: har mahine ki 1–5 tarikh ko pichhle mahine ka FF-vs-GV compare broadcast ----
 function maybeMonthlyReport() {
@@ -711,8 +746,12 @@ async function handleApi(req, res, url) {
     if (first) {
       const token = await createSession(username);
       u.lastLoginAt = new Date().toISOString(); await persist('users');
+      recordNotification({ type: 'user', title: 'Welcome — Admin account ready', body: 'Aap first user hain, admin privileges mil gaye hain. Settings se branding aur data source set kar sakte ho.', target: `user:${username}`, meta: { first: true } });
       return sendJson(res, 200, { ok: true, user: publicUser(u), settings: db.settings, permissions: permissionsFor(db.settings), tabs: db.settings.tabs, first: true }, { 'Set-Cookie': cookieHeader(req, token, SESSION_DAYS * 86400) });
     }
+    // 🔔 Admin ko turant notification do + new user ko welcome notification
+    recordNotification({ type: 'user', title: '🆕 Naya signup', body: `${u.name || username} ne account banaya hai (${u.email || u.mobile || 'no contact'}). Approval pending.`, target: 'admin', meta: { username, name: u.name, email: u.email, mobile: u.mobile } });
+    recordNotification({ type: 'user', title: 'Account created ✓', body: 'Aapka account ban gaya hai. Admin approve karega, phir aap login kar paoge.', target: `user:${username}` });
     return sendJson(res, 200, { ok: true, pending: true, message: 'Account ban gaya. Admin approve karega, phir login kar paoge.' });
   }
   if (p === '/api/auth/login' && method === 'POST') {
@@ -727,7 +766,23 @@ async function handleApi(req, res, url) {
     u.lastLoginAt = new Date().toISOString();
     // One Google Sheets batch can confirm the user timestamp and session together.
     const [token] = await Promise.all([createSession(u.username), persist('users')]);
-    if (u.role !== 'admin') recordNotification({ type: 'login', title: 'New user login', body: `${u.name || u.username} logged in via ${loginId}.`, target: 'admin', meta: { username: u.username, loginId } });
+    const ipLabel = ip ? ` · IP ${ip}` : '';
+    const hour = new Date().getHours();
+    const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+    // 🔔 Admin ko user login notification (throttle: repeat every 10 min per user)
+    if (u.role !== 'admin') {
+      const k = `login:${u.username}`;
+      if (!activityLast.has(k) || Date.now() - activityLast.get(k) > 10 * 60e3) {
+        activityLast.set(k, Date.now());
+        recordNotification({ type: 'login', title: '🔐 User login', body: `${u.name || u.username} logged in via ${loginId}${ipLabel}.`, target: 'admin', meta: { username: u.username, loginId, ip } });
+      }
+    }
+    // 🔔 User ko bhi unka apna login confirm / security notice (throttled 1/min)
+    const selfKey = `self-login:${u.username}`;
+    if (!activityLast.has(selfKey) || Date.now() - activityLast.get(selfKey) > 60e3) {
+      activityLast.set(selfKey, Date.now());
+      recordNotification({ type: 'login', title: `${greeting}, ${u.name || u.username} 👋`, body: 'Login successful. Dashboard ready hai — data background me load ho raha hai.', target: `user:${u.username}`, meta: { loginId, ip } });
+    }
     return sendJson(res, 200, { ok: true, user: publicUser(u), settings: db.settings, permissions: permissionsFor(db.settings), tabs: db.settings.tabs }, { 'Set-Cookie': cookieHeader(req, token, SESSION_DAYS * 86400) });
   }
   // ---- admin-only live presence ---------------------------------------------------------------
@@ -789,6 +844,22 @@ async function handleApi(req, res, url) {
     await persist('users');
     return sendJson(res, 200, { ok: true, at: user.notificationsSeenAt });
   }
+  // ---- notification preferences (per user: which types show, sound on/off, mobile push) ----
+  if (p === '/api/notifications/prefs' && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required');
+    return sendJson(res, 200, { prefs: normalizeNotifyPrefs(user.notifyPrefs), defaults: DEFAULT_NOTIFY_PREFS });
+  }
+  if (p === '/api/notifications/prefs' && method === 'PUT') {
+    if (!user) throw new HttpError(401, 'Login required');
+    const body = await readBody(req);
+    const patch = body.prefs || {};
+    const before = normalizeNotifyPrefs(user.notifyPrefs);
+    const next = { ...before };
+    for (const k of Object.keys(DEFAULT_NOTIFY_PREFS)) if (patch[k] !== undefined) next[k] = !!patch[k];
+    user.notifyPrefs = next;
+    persist('users').catch(() => {}); // don't block
+    return sendJson(res, 200, { ok: true, prefs: next });
+  }
   // ---- 📲 web push subscription ----
   if (p === '/api/push/vapid' && method === 'GET') {
     if (!user) throw new HttpError(401, 'Login required');
@@ -796,6 +867,7 @@ async function handleApi(req, res, url) {
   }
   if (p === '/api/push/subscribe' && method === 'POST') {
     if (!user) throw new HttpError(401, 'Login required');
+    if (user.role !== 'admin' && user.notifyAccess === false) throw new HttpError(403, 'Notifications access disabled by admin.');
     const body = await readBody(req);
     const sub = body.subscription;
     if (!sub || !String(sub.endpoint || '').startsWith('http') || !sub.keys || !sub.keys.p256dh || !sub.keys.auth) throw new HttpError(400, 'Subscription invalid hai.');
@@ -822,24 +894,45 @@ async function handleApi(req, res, url) {
     if (type === 'search' || body.query) {
       const q = String(body.query || '').trim().slice(0, 120);
       const opt = String(body.option || body.page || 'Search').trim().slice(0, 80);
-      if (q) {
-        recordNotification({
-          type: 'search',
-          title: `🔍 Search: ${q}`,
-          body: `${user.name || user.username} (${user.mobile || 'No Mobile'}) ne ${opt} me "${q}" search kiya.`,
-          target: 'broadcast',
-          meta: { username: user.username, name: user.name, mobile: user.mobile, option: opt, query: q, at: new Date().toISOString() }
-        });
+      if (q && user.role !== 'admin') {
+        // Search notifications SIRF admin ko (throttle: same query 15s me ek baar per user)
+        const sk = `search:${user.username}:${q}`;
+        if (!activityLast.has(sk) || Date.now() - activityLast.get(sk) > 15e3) {
+          activityLast.set(sk, Date.now());
+          recordNotification({
+            type: 'search',
+            title: `🔍 Search: ${q}`,
+            body: `${user.name || user.username}${user.mobile ? ` (${user.mobile})` : ''} ne ${opt} me "${q}" search kiya.`,
+            target: 'admin',
+            meta: { username: user.username, name: user.name, mobile: user.mobile, option: opt, query: q }
+          });
+        }
       }
     } else if (type === 'click' || body.action === 'click') {
       const opt = String(body.option || body.page || 'Option').trim().slice(0, 80);
       const det = String(body.details || '').trim().slice(0, 120);
+      if (user.role !== 'admin') {
+        // Click/use notifications SIRF admin ko (throttle: 8s per option per user)
+        const ck = `click:${user.username}:${opt}`;
+        if (!activityLast.has(ck) || Date.now() - activityLast.get(ck) > 8e3) {
+          activityLast.set(ck, Date.now());
+          recordNotification({
+            type: 'click',
+            title: `👆 ${opt}`,
+            body: `${user.name || user.username} ne "${opt}"${det ? ` — ${det}` : ''} use kiya.`,
+            target: 'admin',
+            meta: { username: user.username, name: user.name, mobile: user.mobile, option: opt, details: det }
+          });
+        }
+      }
+    } else if (type === 'settings') {
+      const det = String(body.details || '').trim().slice(0, 200);
       recordNotification({
-        type: 'click',
-        title: `👆 Option: ${opt}`,
-        body: `${user.name || user.username} (${user.mobile || 'No Mobile'}) ne "${opt}" option click kiya${det ? ` (${det})` : ''}.`,
-        target: 'broadcast',
-        meta: { username: user.username, name: user.name, mobile: user.mobile, option: opt, details: det, at: new Date().toISOString() }
+        type: 'settings',
+        title: '⚙️ Settings update',
+        body: `${user.name || user.username} ne settings update ki${det ? `: ${det}` : 'ya'}.`,
+        target: 'admin',
+        meta: { username: user.username, name: user.name, fields: det }
       });
     } else {
       noteActivity(user, body.page);
@@ -886,7 +979,7 @@ async function handleApi(req, res, url) {
 
   if (p === '/api/auth/logout' && method === 'POST') {
     const token = parseCookies(req).ff_sid;
-    if (token) { delete db.sessions[sha(token)]; await persist('sessions'); }
+    if (token) { delete db.sessions[sha(token)]; persist('sessions').catch(() => {}); } // ⚡ don't await persistence — client already moved on
     return sendJson(res, 200, { ok: true }, { 'Set-Cookie': cookieHeader(req, '', 0) });
   }
 
@@ -897,7 +990,9 @@ async function handleApi(req, res, url) {
     if (!verifyPassword(body.current || '', user.password)) throw new HttpError(400, 'Current password galat hai.');
     if (!validPassword(body.next)) throw new HttpError(400, 'Naya password kam se kam 6 characters ka ho.');
     user.password = hashPassword(body.next); user.mustChangePassword = false;
-    await persist('users');
+    persist('users').catch(() => {});
+    recordNotification({ type: 'user', title: '🔑 Password changed', body: `${user.name || user.username} ne apna password change kiya.`, target: `user:${user.username}` });
+    if (user.role !== 'admin') recordNotification({ type: 'user', title: '🔑 Password changed', body: `${user.name || user.username} ne apna password change kiya.`, target: 'admin', meta: { username: user.username } });
     return sendJson(res, 200, { ok: true, user: publicUser(user) });
   }
   if (p === '/api/auth/profile' && method === 'POST') {
@@ -1072,7 +1167,13 @@ async function handleApi(req, res, url) {
       if (body.name !== undefined) target.name = String(body.name).trim().slice(0, 80) || target.username;
       if (body.email !== undefined) target.email = String(body.email).trim().slice(0, 120);
       if (body.mobile !== undefined) target.mobile = String(body.mobile).replace(/[^\d+]/g, '').slice(0, 16);
+      // notifyAccess: admin control karta hai ki user ko notifications/bell dikhegi ya nahi
+      if (Object.prototype.hasOwnProperty.call(body, 'notifyAccess')) target.notifyAccess = body.notifyAccess !== false;
       if (body.password) { if (!validPassword(body.password)) throw new HttpError(400, 'Password kam se kam 6 characters ka ho.'); target.password = hashPassword(body.password); target.mustChangePassword = true; }
+      // Agar admin ne user ki notification access band ki ya user ko unapproved kiya → uske push subscriptions hata do
+      if (target.notifyAccess === false || !target.approved) {
+        for (let i = pushSubs().length - 1; i >= 0; i--) if (pushSubs()[i].username === target.username) pushSubs().splice(i, 1);
+      }
       if (!target.approved) for (const [k, s] of Object.entries(db.sessions)) if (s.username === target.username) delete db.sessions[k];
       await persist('users'); await persist('sessions');
       const afterUser = userSnapshot(target);
