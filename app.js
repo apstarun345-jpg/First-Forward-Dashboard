@@ -17,7 +17,8 @@ window.FF = window.FF || {};
     { id: 'gvTrend', icon: '📈', label: 'GV Trend', desc: 'GV Master daily / monthly', perm: 'gvTrend', group: 'GV Partner' },
     { id: 'gvPerformance', icon: '🏆', label: 'GV Performance', desc: 'GV agents & TLs (GV REPORT)', perm: 'gvPerformance', group: 'GV Partner' },
     { id: 'gvStock', icon: '📦', label: 'GV Stock', desc: 'Tag Assignment stock search', perm: 'gvStock', group: 'GV Partner' },
-    { id: 'compare', icon: '⚖️', label: 'GV vs First Forward', desc: 'Dono ka side-by-side comparison', perm: 'compare', group: 'GV Partner' }
+    { id: 'compare', icon: '⚖️', label: 'GV vs First Forward', desc: 'Dono ka side-by-side comparison', perm: 'compare', group: 'GV Partner' },
+    { id: 'charts', icon: '📊', label: 'Charts', desc: 'Chart-only GV vs FF analysis', perm: 'compare', group: 'GV Partner' }
   ];
   const GROUP_ICON = { 'Main': '🏠', 'First Forward': '🟦', 'GV Partner': '🟩' };
   const pageDef = (id) => PAGES.find((p) => p.id === id) || null;
@@ -458,7 +459,7 @@ window.FF = window.FF || {};
 
   function onBackgroundDataUpdated() {
     // If user is on a data page, smoothly re-render so new stock and stats appear automatically
-    if (['stock', 'home', 'tagIssued', 'dashboard', 'trend', 'performance', 'gvStock', 'gvDashboard', 'gvTrend', 'gvPerformance', 'compare', 'sheet'].includes(current.page)) {
+    if (['stock', 'home', 'tagIssued', 'dashboard', 'trend', 'performance', 'gvStock', 'gvDashboard', 'gvTrend', 'gvPerformance', 'compare', 'charts', 'sheet'].includes(current.page)) {
       renderCurrent({ bgUpdated: true });
     }
   }

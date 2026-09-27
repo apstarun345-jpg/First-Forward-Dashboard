@@ -1439,3 +1439,4 @@ table.matrix tr.is-admin td.mx-user { background: #f8fafc; }
 .presence-dot.is-live { background: #10b981; box-shadow: 0 0 0 3px #d1fae5; }
 .presence-state { color: var(--muted); font-size: 9px; font-weight: 800; }
 .presence-row:has(.is-live) .presence-state { color: #047857; }
+.chart-range-note { margin: 0 0 14px; padding: 11px 14px; border: 1px solid #c7d2fe; border-radius: 12px; color: #1e3a8a; background: linear-gradient(90deg,#eef2ff,#f8fafc); font-weight: 800; }
