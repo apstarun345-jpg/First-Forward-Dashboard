@@ -182,7 +182,7 @@ FF.pages = FF.pages || {};
         const total = countT && countT.rows[0] ? D.cellNumber(countT.rows[0][0]) : null;
         state.total = total;
         state.probeCols = firstT.cols;
-        if (total !== null && total > FULL_LIMIT) {
+        if ((total !== null && total > FULL_LIMIT) || (total === null && firstT.rows.length >= state.pageSize)) {
           state.mode = 'paged';
           if (firstT.headers === 0) state.headerRows = detectHeaderRows(firstT.rows, firstT.cols);
           if (state.page === 0 && !state.q && !state.sort) {
@@ -254,5 +254,5 @@ FF.pages = FF.pages || {};
     else await load();
   }
 
-  FF.pages.sheet = { title: 'Sheet', render };
+  FF.pages.sheet = { title: 'Sheet', render, reset() { states.clear(); } };
 })(window.FF);

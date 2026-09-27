@@ -1,3 +1,6 @@
+# This blueprint preserves file-mode storage. For encrypted storage in the SAME Google Sheet,
+# follow SHEETS_STORAGE.md and configure the existing service secrets after migration.
+# Do not remove an existing disk automatically; verify backups and the cloud migration first.
 # Render Blueprint: "New +" → "Blueprint" → select this repo. Or create a Web Service manually (see README).
 services:
   - type: web

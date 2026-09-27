@@ -65,7 +65,9 @@ const document = {
 const location = { hash: '#/dashboard', href: `${BASE}/#/dashboard`, origin: BASE, pathname: '/', search: '', reload() {}, replace() {} };
 const storage = new Map();
 const localStorage = { getItem: (k) => (storage.has(k) ? storage.get(k) : null), setItem: (k, v) => storage.set(k, String(v)), removeItem: (k) => storage.delete(k), clear: () => storage.clear() };
+let sheetNetworkRequests = 0;
 const fetchImpl = async (url, opts = {}) => {
+  if (url.includes('/api/gviz')) sheetNetworkRequests++;
   const abs = url.startsWith('http') ? url : BASE + url;
   const headers = { ...(opts.headers || {}) };
   if (cookie) headers.cookie = cookie;
@@ -124,6 +126,15 @@ for (const ds of FF.store.DATASETS ? Object.keys(FF.store.DATASETS) : ['daily', 
 await run('store.suggestions', async () => { const s = FF.store.suggestions({ agents: true, tls: true }); if (!s.length) throw new Error('no suggestions'); if (s.some((x) => /^APS$/i.test(x.label) && x.kind === 'tl')) throw new Error('APS leaked into TL suggestions'); log(`      ${s.length} suggestions, e.g. ${s.slice(0, 3).map((x) => `${x.kind}:${x.label}`).join(', ')}`); });
 
 const pages = FF.pages;
+await run('all permitted sheets preload before navigation (zero extra network requests on click)', async () => {
+  await FF.preloader.preloadAll(false);
+  const before = sheetNetworkRequests;
+  for (const tab of FF.config.allTabs(true).filter(t => FF.auth.can('sheet:' + t.id))) {
+    await pages.sheet.render(root(), { name: tab.id }, {});
+  }
+  if (sheetNetworkRequests !== before) throw new Error(`${sheetNetworkRequests - before} unexpected query requests after preload`);
+  log('      sheet navigation: 0 new Google/proxy requests');
+});
 await run('dashboard.render', () => pages.dashboard.render(root(), {}, {}), true);
 await run('trend.render daily', () => pages.trend.render(root(), { mode: 'daily' }, {}), true);
 await run('trend.render weekly', () => pages.trend.render(root(), { mode: 'weekly' }, {}), true);

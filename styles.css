@@ -1372,3 +1372,26 @@ table.matrix tr.is-admin td.mx-user { background: #f8fafc; }
 }
 
 
+
+/* Fast, non-blocking ApnaPayment launch. Never hold the dashboard behind a timed splash. */
+.app-boot { position: fixed; inset: 0; z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: #111214; color: #fff; text-align: center; padding: 24px; }
+.app-boot img { width: min(280px, 80vw); height: auto; border-radius: 14px; }
+.app-boot p { font-size: 20px; margin: 0; font-weight: 600; }
+.app-boot small { color: #b7b9c1; }
+.boot-progress { width: 160px; height: 3px; overflow: hidden; border-radius: 9px; background: #343438; margin-top: 12px; }
+.boot-progress::after { content: ''; display: block; width: 45%; height: 100%; background: #ffff00; animation: boot-slide 1.2s ease-in-out infinite alternate; }
+.welcome-greeting { position: fixed; z-index: 1000; top: 78px; right: 24px; max-width: 530px; display: flex; align-items: center; gap: 16px; padding: 20px; border: 1px solid #ffffff22; border-radius: 20px; background: #17181e; color: #fff; box-shadow: 0 16px 55px #10101830; animation: greeting-in .45s ease-out both; }
+.welcome-greeting img { border-radius: 12px; flex-shrink: 0; }
+.welcome-greeting small { font-size: 9px; letter-spacing: 1.6px; color: #eded63; }
+.welcome-greeting h2 { font-size: 20px; line-height: 1.3; margin: 5px 0; }
+.welcome-greeting p { font-size: 12px; color: #bfc2ce; margin: 0; }
+.welcome-greeting .icon-btn { color: #fff; flex-shrink: 0; align-self: flex-start; }
+.greeting-wave { display: inline-block; transform-origin: 70% 80%; animation: greeting-wave 1s ease-in-out 2; }
+.home-hero.v2 { animation: greeting-in .4s ease-out both; }
+@keyframes greeting-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes greeting-wave { 25% { transform: rotate(18deg); } 75% { transform: rotate(-12deg); } }
+@keyframes boot-slide { to { transform: translateX(125%); } }
+@media (max-width: 600px) { .welcome-greeting { top: calc(80px + env(safe-area-inset-top)); bottom: auto; left: 14px; right: 14px; padding: 16px; gap: 12px; } .welcome-greeting h2 { font-size: 17px; } }
+@media (prefers-reduced-motion: reduce) { .app-boot *, .welcome-greeting, .greeting-wave, .home-hero.v2 { animation: none !important; } .boot-progress::after { animation: none; width: 100%; } }
+
+@media (max-width: 600px) { .loc-banner { left: 12px; right: 12px; bottom: 12px; transform: none; max-width: none; flex-wrap: wrap; } .loc-banner > span { flex: 1 1 170px; } }

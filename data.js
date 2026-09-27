@@ -80,13 +80,12 @@ window.FF = window.FF || {};
 
   async function fetchText(url, timeoutMs) {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), timeoutMs || 20000);
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs || 55000);
     try {
       const res = await fetch(url, { 
         signal: ctrl.signal, 
         cache: 'no-store', 
         credentials: 'same-origin',
-        keepalive: true,
         headers: { 'X-Requested-With': 'FF-Dashboard' }
       });
       const text = await res.text();
@@ -106,11 +105,13 @@ window.FF = window.FF || {};
     const cfg = FF.config.sheetByName(sheetName);
     const gid = o.gid !== undefined ? o.gid : (cfg && cfg.gid) || '';
     const configuredRange = (cfg && (cfg.range || (cfg.startCol || cfg.startRow || cfg.endCol || cfg.endRow ? (FF.config.formatRange ? FF.config.formatRange(cfg.startCol, cfg.startRow, cfg.endCol, cfg.endRow) : `${cfg.startCol || 'A'}${cfg.startRow || 1}:${cfg.endCol || ''}${cfg.endRow || ''}`) : ''))) || '';
-    const range = o.range !== undefined ? o.range : configuredRange;
-    const key = `${sheetName}|${gid}|${range || ''}|${tq || ''}`;
+    let range = o.range !== undefined ? o.range : configuredRange;
+    if (/^[A-Z]+[0-9]+:$/i.test(range)) range = range.toUpperCase() === 'A1:' ? '' : `${range}ZZZ`;
+    const sourceId = cfg && cfg.source === 'gv' ? FF.config.gvSheetId : FF.config.sheetId;
+    const key = `${sourceId}|${sheetName}|${gid}|${range || ''}|${tq || ''}`;
     const now = Date.now();
     const hit = cache.get(key);
-    if (hit && !o.fresh && now - hit.t < TTL_MS) return hit.promise;
+    if (hit && (hit.pending || (!o.fresh && now - hit.t < TTL_MS))) return hit.promise;
 
     const extra = { ...(o.fresh ? { fresh: '1' } : {}), ...(range ? { range } : {}) };
     const attempts = [];
@@ -136,7 +137,9 @@ window.FF = window.FF || {};
       }
       throw lastErr || new Error('Fetch failed');
     })();
-    cache.set(key, { t: now, promise });
+    const entry = { t: now, promise, pending: true };
+    cache.set(key, entry);
+    promise.then(() => { entry.pending = false; }, () => { entry.pending = false; });
     promise.catch(() => { if (cache.get(key) && cache.get(key).promise === promise) cache.delete(key); });
     return promise;
   }

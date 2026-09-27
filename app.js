@@ -239,6 +239,7 @@ window.FF = window.FF || {};
   }
 
   async function renderCurrent(ctx) {
+    if (!FF.auth.user) return;
     const { page, params } = parseHash();
     current = { page, params, token: current.token + 1 };
     const token = current.token;
@@ -289,7 +290,7 @@ window.FF = window.FF || {};
     try {
       if (FF.pages.performance && FF.pages.performance.reset) FF.pages.performance.reset();
       if (FF.preloader && FF.preloader.fastSync) {
-        await FF.preloader.fastSync();
+        await FF.preloader.fastSync(fresh);
       } else {
         FF.store.reset();
         if (FF.gv) FF.gv.reset();
@@ -297,8 +298,9 @@ window.FF = window.FF || {};
       }
     } catch (err) { console.error(err); }
     refreshing = false;
-    await renderCurrent({ fresh });
-    U.toast('Data updated ✓', 'ok');
+    await renderCurrent();
+    const errors = FF.preloader ? FF.preloader.state.errors : [];
+    U.toast(errors.length ? 'Some sheets could not update. Retry refresh.' : 'Data updated ✓', errors.length ? 'warn' : 'ok');
   }
 
   // ---- drawer ----
@@ -363,7 +365,6 @@ window.FF = window.FF || {};
         } else {
           const banner = ensureLocBanner();
           banner.hidden = false;
-          U.toast('📍 Location access — banner dekho', 'info');
           // Also try silent after 2s if user interacts
           setTimeout(() => { if (!banner.hidden) { /* keep visible */ } }, 100);
         }
@@ -443,20 +444,20 @@ window.FF = window.FF || {};
     }
   }
 
+  let syncTimer = null;
   function onLogin() {
     renderSidebar();
     FF.auth.applyTheme();
     document.body.classList.add('ready');
-    renderCurrent(); // Instant initial render
-    // Background update: start immediately with fresh: true so ALL data & sheets update in background!
-    if (FF.preloader) {
-      setTimeout(() => FF.preloader.preloadAll(true).catch(console.warn), 150);
-    } else {
-      FF.store.preload(true).catch(console.warn);
-      if (FF.gv && FF.gv.enabled()) FF.gv.preload(true).catch(console.warn);
-    }
+    // Start one shared load BEFORE rendering; page requests join it.
+    if (FF.preloader) FF.preloader.preloadAll(false).catch(console.warn);
+    renderCurrent();
+    if (FF.config.loginAnimation !== false) FF.auth.splash(FF.auth.user);
     if (FF.notifications) FF.notifications.start();
     const u = FF.auth.user;
+    if (FF.auth.isAdmin()) FF.auth.api('/api/health').then(h => {
+      if (h.storage && (h.storage.warning || h.storage.error)) U.toast(h.storage.error || h.storage.warning, 'warn');
+    }).catch(() => {});
     if (u && u.mustChangePassword) setTimeout(() => U.toast('⚠️ Default password chal raha hai — Settings → My account se badlo', 'err'), 900);
     // Location prompt + PWA
     setTimeout(requestLocationOnOpen, 2000);
@@ -466,9 +467,12 @@ window.FF = window.FF || {};
       navigator.serviceWorker.register('./sw.js').then(() => console.log('SW registered')).catch(e => console.warn('SW failed', e));
     }
     // Auto background sync every 5 minutes when tab is open
-    setInterval(() => {
-      if (document.visibilityState === 'visible' && FF.preloader && !FF.preloader.running) {
-        FF.preloader.preloadAll(true).catch(() => {});
+    clearInterval(syncTimer);
+    syncTimer = setInterval(() => {
+      if (FF.auth.user && document.visibilityState === 'visible' && FF.preloader && !FF.preloader.running) {
+        FF.preloader.preloadAll(true).then(() => {
+          if (FF.auth.user && !['settings', 'sheet'].includes(current.page)) onBackgroundDataUpdated();
+        }).catch(() => {});
       }
     }, 5 * 60 * 1000);
   }
@@ -480,6 +484,6 @@ window.FF = window.FF || {};
     if (ok) onLogin();
   }
 
-  FF.app = { navigate, updateParams, refresh, openDrawer, closeDrawer, renderSidebar, renderCurrent, renderTopUser, onLogin, onBackgroundDataUpdated, promptInstall, PAGES, get current() { return current; } };
+  FF.app = { navigate, updateParams, refresh, openDrawer, closeDrawer, renderSidebar, renderCurrent, renderTopUser, updateStatus, onLogin, onBackgroundDataUpdated, promptInstall, PAGES, get current() { return current; } };
   document.addEventListener('DOMContentLoaded', init);
 })(window.FF);

@@ -8,7 +8,10 @@ window.FF = window.FF || {};
   const state = { user: null, permissions: [], settings: null, ready: false };
 
   async function api(path, method, body) {
-    const res = await fetch(path, { method: method || 'GET', headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined, credentials: 'same-origin', cache: 'no-store' });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 60000);
+    let res;
+    try { res = await fetch(path, { signal: controller.signal, method: method || 'GET', headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined, credentials: 'same-origin', cache: 'no-store' }); } finally { clearTimeout(timer); }
     let json = null;
     try { json = await res.json(); } catch { /* ignore */ }
     if (!res.ok) { const err = new Error((json && json.error) || `HTTP ${res.status}`); err.status = res.status; throw err; }
@@ -46,8 +49,9 @@ window.FF = window.FF || {};
     const tag = U.$('#brand-tag'); if (tag) tag.textContent = FF.config.tagline || 'Dashboard';
     const logo = U.$('#brand-logo');
     if (logo) { logo.innerHTML = FF.config.logo ? `<img src="${esc(FF.config.logo)}\" alt=\"logo\">` : esc((FF.config.brand || 'FF').split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase()); logo.classList.toggle('has-img', !!FF.config.logo); }
+    // App/tab identity stays ApnaPayment; uploaded branding still controls the sidebar.
     const favicon = U.$('#site-favicon');
-    if (favicon) { favicon.href = FF.config.logo || 'favicon.svg'; favicon.type = FF.config.logo ? ((FF.config.logo.match(/^data:(image\/[^;]+)/) || [])[1] || 'image/png') : 'image/svg+xml'; }
+    if (favicon) { favicon.href = 'favicon.svg?v=5'; favicon.type = 'image/svg+xml'; }
   }
 
   function screen(html) {
@@ -55,6 +59,7 @@ window.FF = window.FF || {};
     if (!el) { el = U.h('<div id="auth-screen" class="auth-screen pro"></div>'); document.body.appendChild(el); }
     el.innerHTML = html;
     el.hidden = false;
+    const boot = U.$('#app-boot'); if (boot) boot.remove();
     document.body.classList.add('auth-open');
     return el;
   }
@@ -196,7 +201,8 @@ window.FF = window.FF || {};
       b.classList.toggle('on', inp.type === 'text');
     }));
     U.$('#auth-forgot', el).addEventListener('click', () => showForgot('ask'));
-    const remembered = localStorage.getItem('ff_user');
+    let remembered = '';
+    try { remembered = localStorage.getItem('ff_user') || ''; } catch { /* cookies still restore the session when browser storage is blocked */ }
     if (remembered) { const inp = el.querySelector('input[name=username]'); if (inp && !inp.value) inp.value = remembered; }
     const form = U.$('#auth-form', el);
     form.addEventListener('submit', async (e) => {
@@ -220,9 +226,10 @@ window.FF = window.FF || {};
           return;
         }
         state.user = out.user; state.permissions = out.permissions || state.permissions; applySettings(out.settings);
-        if (U.$('#auth-remember', el) && U.$('#auth-remember', el).checked) localStorage.setItem('ff_user', data.username || '');
-        else localStorage.removeItem('ff_user');
-        if (anim) { await splash(state.user); } else hideScreen();
+        try {
+          if (U.$('#auth-remember', el) && U.$('#auth-remember', el).checked) localStorage.setItem('ff_user', data.username || '');
+          else localStorage.removeItem('ff_user');
+        } catch { /* username hint is optional; never block a successful login */ }
         hideScreen();
         FF.app && FF.app.onLogin && FF.app.onLogin(out.first);
         welcomeToast(state.user, out.first);
@@ -265,22 +272,20 @@ window.FF = window.FF || {};
   }
 
   function splash(user) {
-    return new Promise((resolve) => {
-      const name = (user && (user.name || user.username)) || '';
-      const el = U.h(`<div class="welcome-splash pro-splash" id="welcome-splash">
-        <div class="welcome-inner">
-          <div class="welcome-ring"><span>✓</span></div>
-          <h2>Welcome back, <b>${esc(name)}</b>!</h2>
-          <p class="welcome-role">${user && user.role === 'admin' ? '👑 Admin Access' : 'User Access'} • Loading dashboard...</p>
-          <div class="welcome-bar"><i></i></div>
-        </div>
-      </div>`);
-      document.body.appendChild(el);
-      document.body.classList.add('auth-open');
-      const done = () => { el.classList.add('out'); setTimeout(() => { el.remove(); document.body.classList.remove('auth-open'); resolve(); }, 320); };
-      el.addEventListener('click', done);
-      setTimeout(done, 1700);
-    });
+    // Non-blocking welcome: data loads immediately and navigation stays usable.
+    const old = U.$('#welcome-splash'); if (old) old.remove();
+    const hour = new Date().getHours();
+    const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+    const name = user && (user.name || user.username) || '';
+    const el = U.h(`<section class="welcome-greeting" id="welcome-splash" role="status" aria-live="polite">
+      <img src="icon-192.png?v=5" alt="ApnaPayment" width="48" height="48">
+      <div><small>APNAPAYMENT · YOUR WORKSPACE</small><h2>${greeting}, ${esc(name)} <span class="greeting-wave">👋</span></h2><p>Welcome back. Your sheets are getting ready in the background.</p></div>
+      <button class="icon-btn" aria-label="Dismiss welcome">✕</button></section>`);
+    document.body.appendChild(el);
+    let timer;
+    const done = () => { clearTimeout(timer); el.remove(); };
+    el.querySelector('button').addEventListener('click', done);
+    timer = setTimeout(done, 4200);
   }
   function welcomeToast(user, first) {
     const name = (user && (user.name || user.username)) || '';
@@ -293,7 +298,7 @@ window.FF = window.FF || {};
       const me = await api('/api/auth/me');
       state.permissions = me.permissions || [];
       applySettings(me.settings);
-      if (me.user) { state.user = me.user; state.ready = true; return true; }
+      if (me.user) { state.user = me.user; state.ready = true; const boot = U.$('#app-boot'); if (boot) boot.remove(); return true; }
     } catch (err) {
       console.error(err);
       screen(`<div class="auth-shell single"><div class="auth-panel"><div class="auth-card"><h2>Unable to connect to server</h2><p class="dim">${esc(err.message)}</p><button class="btn primary" onclick="location.reload()">Retry</button></div></div></div>`);
@@ -303,7 +308,7 @@ window.FF = window.FF || {};
     return false;
   }
   async function logout() {
-    try { await api('/api/auth/logout', 'POST', {}); } catch { /* ignore */ }
+    try { await api('/api/auth/logout', 'POST', {}); } catch (err) { U.toast('Logout failed. Please retry when connected.', 'err'); return; }
     state.user = null;
     location.hash = '';
     location.reload();
@@ -311,6 +316,10 @@ window.FF = window.FF || {};
   function onExpired() {
     if (!state.user) return;
     state.user = null;
+    if (FF.preloader) FF.preloader.reset();
+    FF.store.reset(); if (FF.gv) FF.gv.reset();
+    if (FF.pages.sheet && FF.pages.sheet.reset) FF.pages.sheet.reset();
+    if (FF.pages.performance && FF.pages.performance.reset) FF.pages.performance.reset();
     showLogin('login', { kind: 'err', text: 'Session expired — please login again.' });
   }
   async function refreshUser() {

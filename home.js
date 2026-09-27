@@ -8,7 +8,6 @@ FF.pages = FF.pages || {};
 
   function greeting() {
     const h = new Date().getHours();
-    if (h < 5) return 'Good night';
     if (h < 12) return 'Good morning';
     if (h < 17) return 'Good afternoon';
     return 'Good evening';
@@ -26,9 +25,13 @@ FF.pages = FF.pages || {};
     let syncPoll = null;
     const updateSync = () => {
       const el = document.getElementById('home-sync');
+      if (!root.isConnected) { clearInterval(syncPoll); return; }
+      const loaded = U.$('#home-loaded', root);
+      if (loaded && (S.loadedAt || G.loadedAt)) loaded.textContent = U.timeLabel(S.loadedAt || G.loadedAt);
       if (!el) return;
       if (FF.preloader && FF.preloader.done) { el.textContent = 'All sheets ready ✓'; el.className = 'sync-fast'; }
       else if (FF.preloader && FF.preloader.running) { const p = FF.preloader.state.progress; el.textContent = `Preloading ${p.loaded}/${p.total}…`; }
+      else if (FF.preloader && FF.preloader.state.errors.length) { el.textContent = 'Some sheets unavailable · retry ↻'; }
       else { el.textContent = 'Background sync…'; }
     };
     syncPoll = setInterval(updateSync, 1200);
@@ -37,13 +40,13 @@ FF.pages = FF.pages || {};
         <div class="home-hero-main">
           ${avatar}
           <div>
-            <h1>Hello <span class="home-name">${esc(u.name || u.username || 'there')}</span> 👋</h1>
-            <p class="sub">${esc(greeting())}! Aaj ka highlights — GV & First Forward ka live chart overview</p>
+            <h1>${esc(greeting())}, <span class="home-name">${esc(u.name || u.username || 'there')}</span> 👋</h1>
+            <p class="sub">Aaj ka highlights — GV & First Forward ka live chart overview</p>
             <div class="home-quick-stats" id="home-quick"></div>
           </div>
         </div>
         <div class="home-hero-side">
-          <div class="home-stat"><span class="dim">Data loaded</span><b>${S.loadedAt || G.loadedAt ? U.timeLabel(S.loadedAt || G.loadedAt) : '—'}</b></div>
+          <div class="home-stat"><span class="dim">Data loaded</span><b id="home-loaded">${S.loadedAt || G.loadedAt ? U.timeLabel(S.loadedAt || G.loadedAt) : '—'}</b></div>
           <div class="home-stat"><span class="dim">Sync</span><b id="home-sync">${FF.preloader && FF.preloader.done ? 'All sheets ready ✓' : 'Background sync…'}</b></div>
           <button class="btn primary" data-action="refresh">↻ Refresh</button>
           <a class="btn" href="#/tagIssued">🏷️ Tag Issued →</a>

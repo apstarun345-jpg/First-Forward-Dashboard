@@ -48,7 +48,7 @@ window.FF = window.FF || {};
   /** Which datasets this user actually needs (permission aware). */
   function wanted() {
     const can = (p) => FF.auth.can(p);
-    const pages = ['gvDashboard', 'gvTrend', 'gvStock', 'gvPerformance', 'compare'];
+    const pages = ['home', 'tagIssued', 'gvDashboard', 'gvTrend', 'gvStock', 'gvPerformance', 'compare'];
     const anyPage = pages.some(can);
     const list = [];
     if (anyPage || can('sheet:GV Master')) list.push('master');
@@ -58,35 +58,58 @@ window.FF = window.FF || {};
   }
   /** True when this user can see anything from the GV sheet. */
   function enabled() {
-    return ['gvDashboard', 'gvTrend', 'gvStock', 'gvPerformance', 'compare'].some((p) => FF.auth.can(p))
+    return ['home', 'tagIssued', 'gvDashboard', 'gvTrend', 'gvStock', 'gvPerformance', 'compare'].some((p) => FF.auth.can(p))
       || !!FF.config.tabBy('GV Master') && FF.auth.can('sheet:' + (FF.config.tabBy('GV Master') || {}).id);
   }
 
-  function preload(fresh, only) {
-    if (state.promise && !fresh) return state.promise;
-    if (fresh) { D.clearCache(); state.data = {}; }
-    const keys = (only && only.length ? only : wanted()).filter((k) => DATASETS[k]);
-    if (!keys.length) { state.loadedAt = Date.now(); return Promise.resolve(state.data); }
-    state.loading = true; state.errors = {}; state.progress = { done: 0, total: keys.length };
-    const p = Promise.all(keys.map(async (key) => {
-      try { state.data[key] = await LOADERS[key]({ fresh }); }
-      catch (err) { console.error(`gv store: ${key} failed`, err); state.errors[key] = err; }
-      finally { state.progress.done++; }
-    })).then(() => { state.loading = false; state.loadedAt = Date.now(); return state.data; });
-    state.promise = p;
+  let generation = 0;
+  const jobs = new Map();
+  function loadKey(key, fresh) {
+    if (jobs.has(key)) return jobs.get(key);
+    const version = generation;
+    const p = Promise.resolve().then(() => LOADERS[key]({ fresh })).then((value) => {
+      if (version === generation) { state.data[key] = value; delete state.errors[key]; }
+      return value;
+    }).catch((err) => {
+      if (version === generation) state.errors[key] = err;
+      throw err;
+    }).finally(() => {
+      if (version !== generation) return;
+      jobs.delete(key);
+      state.progress.done++;
+
+    });
+    jobs.set(key, p);
     return p;
+  }
+  function preload(fresh, only) {
+    if (state.loading) return state.promise;
+    if (state.promise && !fresh && !Object.keys(state.errors).length) return state.promise;
+    const keys = (only && only.length ? only : wanted()).filter((k) => DATASETS[k]);
+    const version = generation;
+    state.loading = true; state.errors = {}; state.progress = { done: 0, total: keys.length };
+
+    state.promise = Promise.allSettled(keys.map((key) => loadKey(key, !!fresh))).then(() => {
+      if (version === generation) {
+        state.loading = false; state.loadedAt = Date.now();
+
+      }
+      return state.data;
+    });
+    return state.promise;
   }
   function get(key) { return state.data[key]; }
   function error(key) { return state.errors[key]; }
   async function need(key) {
-    const wantedList = wanted();
-    if (!state.promise) preload(false, wantedList);
-    await state.promise.catch(() => {});
-    if (state.errors[key]) throw state.errors[key];
-    if (state.data[key] === undefined) { state.data[key] = await LOADERS[key]({ fresh: false }); }
-    return state.data[key];
+    // A slow unrelated stock/report query must not block this page.
+    if (state.data[key] !== undefined) return state.data[key];
+    if (!state.promise) preload(false);
+    return loadKey(key, false);
   }
-  function reset() { state.promise = null; state.data = {}; state.errors = {}; state.loadedAt = null; D.clearCache(); }
+  function reset() {
+    generation++; jobs.clear(); state.loading = false; state.promise = null;
+    state.data = {}; state.errors = {}; state.loadedAt = null; D.clearCache();
+  }
 
   // ---- loaders -----------------------------------------------------------------------------------
   /** GV Master (issuance log) — small tab, loaded fully so every page can aggregate in memory. */
