@@ -21,7 +21,7 @@ FF.pages = FF.pages || {};
       <div class="head-actions"><button class="btn primary" data-action="refresh">↻ Refresh</button></div></div>
       <div id="db-body">${U.spinner('Data load ho raha hai… (pehli baar 5-10 sec lag sakte hain)')}</div>`;
 
-    const [dailyR, agentsR, statusR, stockR] = await Promise.allSettled([S.need('daily'), S.need('agents'), S.need('status'), S.need('stock')]);
+    const [dailyR, agentsR, statusR, stockR, stockAgentsR] = await Promise.allSettled([S.need('daily'), S.need('agents'), S.need('status'), S.need('stock'), S.need('stockAgents')]);
     if (!root.isConnected) return;
     const body = U.$('#db-body', root);
     if (dailyR.status !== 'fulfilled') {
@@ -32,6 +32,7 @@ FF.pages = FF.pages || {};
     const agents = agentsR.status === 'fulfilled' ? agentsR.value : null;
     const status = statusR.status === 'fulfilled' ? statusR.value : null;
     const stock = stockR.status === 'fulfilled' ? stockR.value : null;
+    const stockAgents = stockAgentsR.status === 'fulfilled' ? stockAgentsR.value : null;
 
     const monthsList = M.months(daily);
     const latest = M.latestDate(daily);
@@ -155,7 +156,40 @@ FF.pages = FF.pages || {};
       return `<tr><td>${U.labelDate(r.d)} <span class="dim">${U.weekday(r.d)}</span></td><td class="num"><b>${U.fmt(r.total)}</b></td><td class="num">${U.fmt(r.vc4)}</td><td class="num">${U.fmt(r.comm)}</td><td class="num">${U.fmt(r.repl)}</td><td class="num">${U.fmt(r.gv)}</td><td>${prev ? U.deltaHtml(U.growth(r.total, prev.total), { decimals: 0 }) : '—'}</td></tr>`;
     }).join('');
 
+    // ---- 🚨 Low VC4 stock alerts: cover (VC4 stock ÷ avg daily issuance) red threshold se kam ----
+    let lowStockHtml = '', lowStockKey = '';
+    if (stockAgents && agents) {
+      const t = FF.config.thresholds;
+      const normK = (s) => String(s || '').trim().toUpperCase();
+      const agIssued = new Map();
+      for (const ag of agents) { if (ag.ym !== cur) continue; agIssued.set(normK(ag.name), (agIssued.get(normK(ag.name)) || 0) + ag.n); }
+      const agVc4 = new Map(), agTl = new Map();
+      for (const r of stockAgents) {
+        const k = normK(r.agentName); if (!k) continue;
+        if (r.group === 'VC4') agVc4.set(k, (agVc4.get(k) || 0) + r.n);
+        if (r.tlName && !agTl.has(k)) agTl.set(k, r.tlName);
+      }
+      const critical = [];
+      for (const [k, vc4] of agVc4) {
+        if (vc4 <= 0) continue;
+        const iss = agIssued.get(k) || 0;
+        const perDay = curS.lastDay ? iss / curS.lastDay : 0;
+        if (!perDay) continue;
+        const cover = vc4 / perDay;
+        if (cover < t.coverRed) critical.push({ name: k, vc4, iss, cover, tl: agTl.get(k) || '—' });
+      }
+      critical.sort((x, y) => x.cover - y.cover);
+      lowStockKey = `${cur}|${critical.slice(0, 25).map((c) => `${c.name}:${Math.round(c.cover)}`).join(',')}`;
+      let dismissed = ''; try { dismissed = localStorage.getItem('ff_lowstock_dismissed') || ''; } catch {}
+      if (critical.length && dismissed !== lowStockKey) {
+        lowStockHtml = `<section class="card low-stock"><div class="card-head"><h3>🚨 Low VC4 stock alert <span class="dim">· ${critical.length} agents ka cover ${t.coverRed} din se kam</span></h3><div class="card-right"><a class="btn small primary" href="#/stock">📦 Stock page →</a><button class="btn small" id="ls-dismiss" title="Data change hone par alert wapas aayega">✕ Dismiss</button></div></div>
+        <div class="card-body"><div class="table-wrap"><table class="tbl compact"><thead><tr><th>Agent</th><th>TL</th><th class="num">VC4 stock</th><th class="num">MTD issued</th><th class="num">Cover (din)</th></tr></thead><tbody>${critical.slice(0, 8).map((c) => `<tr class="clickable" data-ls-agent="${esc(c.name)}"><td><b>${esc(c.name)}</b></td><td>${esc(FF.config.isExcludedTl(c.tl) ? 'Direct' : c.tl)}</td><td class="num">${U.fmt(c.vc4)}</td><td class="num">${U.fmt(c.iss)}</td><td class="num"><span class="badge red">🔴 ${U.fmt(c.cover, 1)}</span></td></tr>`).join('')}</tbody></table></div>
+        <p class="dim small">Cover = VC4 stock ÷ avg daily issuance (MTD). In agents ko dispatch priority do — row click karke agent ka stock dekho. ${critical.length > 8 ? `(+${critical.length - 8} aur)` : ''}</p></div></section>`;
+      }
+    }
+
     body.innerHTML = `
+      ${lowStockHtml}
       <div class="kpi-grid">${kpis.join('')}</div>
       <div class="grid g-2-1">
         ${card(`📈 Daily Issuance · ${cm} <span class="dim">vs</span> ${lm}`, lineChart, { right: `<a class="btn small" href="#/trend?mode=compare">Full trend →</a>` })}
@@ -183,6 +217,12 @@ FF.pages = FF.pages || {};
       </div>
       <p class="foot-note">Source: EIR (issuance log) · StockDataa (inventory) · Loaded ${U.timeLabel(S.loadedAt || FF.data.lastLoadAt)} · Months in data: ${monthLabels.join(', ')} · Data sirf ↻ ya browser refresh par update hota hai</p>`;
     C.mount(body);
+    const lsDismiss = U.$('#ls-dismiss', body);
+    if (lsDismiss) lsDismiss.addEventListener('click', () => { try { localStorage.setItem('ff_lowstock_dismissed', lowStockKey); } catch {} const c = lsDismiss.closest('.card'); if (c) c.remove(); });
+    body.addEventListener('click', (e) => {
+      const r = e.target.closest('[data-ls-agent]');
+      if (r) FF.app.navigate('stock', { agent: r.dataset.lsAgent });
+    });
   }
 
   FF.pages.dashboard = { title: 'Dashboard', render };

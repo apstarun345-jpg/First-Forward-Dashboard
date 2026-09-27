@@ -520,6 +520,29 @@ function deltaText(delta) {
   const pieces = Object.entries(delta.classes || {}).map(([k, v]) => `${k} ${v > 0 ? '+' : ''}${v}`);
   return `${delta.total > 0 ? '+' : ''}${delta.total} tags${pieces.length ? ` · ${pieces.join(' · ')}` : ''}`;
 }
+// ---- monthly auto-report: har mahine ki 1–5 tarikh ko pichhle mahine ka FF-vs-GV compare broadcast ----
+function maybeMonthlyReport() {
+  try {
+    const now = new Date();
+    const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    if (!db.notify.watch || typeof db.notify.watch !== 'object') db.notify.watch = {};
+    if (now.getDate() > 5 || db.notify.watch.monthlyReport === ym) return;
+    db.notify.watch.monthlyReport = ym;
+    const [y, m] = ym.split('-').map(Number);
+    const prevY = m === 1 ? y - 1 : y, prevM = m === 1 ? 12 : m - 1;
+    const prev = `${prevY}-${String(prevM).padStart(2, '0')}`;
+    const prevPrev = prevM === 1 ? `${prevY - 1}-12` : `${prevY}-${String(prevM - 1).padStart(2, '0')}`;
+    const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    recordNotification({
+      type: 'monthly',
+      title: `📅 Monthly report ready · ${MON[prevM - 1]} ${prevY}`,
+      body: `${MON[prevM - 1]} ${prevY} ka FF vs GV comparison ready hai. Click karke Compare page par dono months side-by-side dekho.`,
+      target: 'broadcast',
+      meta: { monthlyReport: prev, link: `#/compare?monthA=${prev}&monthB=${prevPrev}` }
+    });
+    console.log(`monthly report notification sent for ${prev}`);
+  } catch (err) { console.warn('monthly report:', err.message); }
+}
 let reportCheckAt = 0;
 let reportCheckPromise = null;
 async function checkReports(force = false) {
@@ -675,6 +698,7 @@ async function handleApi(req, res, url) {
   if (p === '/api/notifications' && method === 'GET') {
     if (!user) throw new HttpError(401, 'Login required');
     checkReports().catch(() => {});
+    maybeMonthlyReport();
     const since = url.searchParams.get('since') || '';
     const items = visibleNotifications(user, since);
     const all = visibleNotifications(user, '1970-01-01T00:00:00.000Z');
@@ -1108,6 +1132,8 @@ async function start() {
     console.log(`Sheet ${db.settings.sheetId} · cache ${cacheMs() / 1000}s · storage ${sheetsStore ? `Google Sheets / encrypted APP_STORAGE (${STORAGE_BACKEND})` : DATA_DIR} · users ${db.users.length}${GVIZ_BASE !== 'https://docs.google.com' ? ` · upstream ${GVIZ_BASE}` : ''}`);
     setTimeout(() => checkReports(true).catch(() => {}), 5000);
     setInterval(() => checkReports(false).catch(() => {}), 5 * 60e3).unref();
+    setTimeout(() => maybeMonthlyReport(), 8000);
+    setInterval(() => maybeMonthlyReport(), 60 * 60e3).unref();
   });
 }
 start().catch((err) => { console.error('Startup stopped to protect stored data:', err); process.exitCode = 1; });

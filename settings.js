@@ -164,7 +164,45 @@ FF.pages = FF.pages || {};
         <div class="form-grid">${field('Excluded TL names (not real TLs)', `<input class="input" data-path="excludeTls" data-list value="${esc((s.excludeTls || []).join(', '))}">`, 'Comma separated. Ye naam kisi bhi TL list / ranking me nahi aayenge (e.g. APS = direct agents)')}${field('GV master ID', txt('eir.gvMasterId', s.eir.gvMasterId))}${field('GV channel TL name', txt('eir.gvChannelTl', s.eir.gvChannelTl))}</div>`)}
       ${section('🟩 GV Partner sheet <span class="dim">(dusra Google Sheet)</span>', `<div class="form-grid">${field('GV Sheet ID', txt('gvSheetId', s.gvSheetId, 'class="input mono"'), 'GV Partner ki sheet — "Anyone with the link can view" honi chahiye')}${field('GV Master tab', txt('gv.master.tab', (s.gv || {}).master ? s.gv.master.tab : ''), 'Issuance log tab ka exact naam')}${field('GV Master gid (optional)', txt('gv.master.gid', (s.gv || {}).master ? s.gv.master.gid : ''))}${field('Tag Assignment tab', txt('gv.assignment.tab', (s.gv || {}).assignment ? s.gv.assignment.tab : ''), 'Stock tab ka exact naam')}${field('GV REPORT tab', txt('gv.report.tab', (s.gv || {}).report ? s.gv.report.tab : ''))}${field('GV REPORT gid', txt('gv.report.gid', (s.gv || {}).report ? s.gv.report.gid : ''), 'Google URL me #gid=… (GV REPORT tab)')}${field('GV REPORT header row', numI('gv.report.headerRow', (s.gv || {}).report ? s.gv.report.headerRow : 4), 'GV REPORT me heading row (default 4)')}${field('GV REPORT last column', txt('gv.report.lastCol', (s.gv || {}).report ? s.gv.report.lastCol : 'BE'), 'Sabse aakhri column (default BE)')}</div>${saveBar('data')}`)}
       ${section('🔠 EIR column letters', letters(s.eir, ['tagId', 'vrn', 'cls', 'type', 'status', 'date', 'agentId', 'agentName', 'masterId', 'tlId', 'gvId', 'gvName', 'gvTl', 'tlName', 'vrnType', 'monthName', 'regNumber'], 'eir') + saveBar('eir'), 'Sheet me column shift ho to sirf letters badlo')}
-      ${section('🔠 StockDataa column letters', letters(s.stock, ['id', 'name', 'tagId', 'barcode', 'cls', 'tagType', 'bcAllocatedAt', 'agentId', 'agentName', 'agentAllocatedAt', 'tlName'], 'stock') + saveBar('stock'))}`;
+      ${section('🔠 StockDataa column letters', letters(s.stock, ['id', 'name', 'tagId', 'barcode', 'cls', 'tagType', 'bcAllocatedAt', 'agentId', 'agentName', 'agentAllocatedAt', 'tlName'], 'stock') + saveBar('stock'))}
+      ${section('📥 Bulk CSV tool <span class="dim">(Google Sheet me rows paste karne ke liye)</span>', `<p class="dim small">CSV file upload karo → preview dekho → <b>📋 Copy for Google Sheets</b> dabao → Google Sheet me select karke Ctrl+V se paste kar do. Excel (.xlsx) file ho to pehle Excel me <b>File → Save As → CSV</b> karke lao. Data sirf aapke browser me parse hota hai — sheet me dashboard khud kuch nahi likhta.</p>
+        <div class="btn-row"><label class="btn small primary">📤 CSV upload<input type="file" accept=".csv,.txt,text/csv,text/plain" id="bulk-file" hidden></label><button class="btn small" id="bulk-copy" disabled>📋 Copy for Google Sheets</button><button class="btn small" id="bulk-dl" disabled>⬇ CSV download</button><button class="btn small" id="bulk-template">⬇ StockDataa template</button><button class="btn small" id="bulk-clear" disabled>✕ Clear</button><span class="dim small" id="bulk-info"></span></div>
+        <div id="bulk-preview" style="margin-top:10px"></div>`)}`;
+  }
+
+  // ---- bulk CSV parsing (RFC-4180-ish: quotes, commas, newlines) ----
+  let bulkRows = null;
+  function parseCsv(text) {
+    const rows = []; let row = [], cell = '', inQ = false;
+    const src = String(text || '').replace(/^\uFEFF/, '');
+    for (let i = 0; i < src.length; i++) {
+      const ch = src[i];
+      if (inQ) {
+        if (ch === '"') { if (src[i + 1] === '"') { cell += '"'; i++; } else inQ = false; }
+        else cell += ch;
+      } else if (ch === '"' && cell === '') inQ = true;
+      else if (ch === ',') { row.push(cell); cell = ''; }
+      else if (ch === '\n' || ch === '\r') {
+        if (ch === '\r' && src[i + 1] === '\n') i++;
+        row.push(cell); cell = '';
+        if (row.length > 1 || row[0] !== '') rows.push(row);
+        row = [];
+      } else cell += ch;
+    }
+    if (cell !== '' || row.length) { row.push(cell); if (row.length > 1 || row[0] !== '') rows.push(row); }
+    return rows;
+  }
+  function csvEscape(v) { const s = String(v ?? ''); return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }
+  function renderBulkPreview() {
+    const box = U.$('#bulk-preview'); const info = U.$('#bulk-info');
+    if (!box) return;
+    const has = bulkRows && bulkRows.length;
+    U.$('#bulk-copy').disabled = !has; U.$('#bulk-dl').disabled = !has; U.$('#bulk-clear').disabled = !has;
+    if (!has) { box.innerHTML = ''; if (info) info.textContent = ''; return; }
+    const cols = Math.max(...bulkRows.slice(0, 50).map((r) => r.length));
+    if (info) info.textContent = `${bulkRows.length} rows · ${cols} columns`;
+    const head = bulkRows[0].map((h) => `<th>${esc(h)}</th>`).join('') + (cols > bulkRows[0].length ? `<th colspan="${cols - bulkRows[0].length}"></th>` : '');
+    box.innerHTML = `<div class="table-wrap tall"><table class="tbl compact sticky-first"><thead><tr>${head}</tr></thead><tbody>${bulkRows.slice(1, 51).map((r) => `<tr>${Array.from({ length: cols }, (_, i) => `<td>${esc(r[i] !== undefined ? r[i] : '')}</td>`).join('')}</tr>`).join('')}</tbody></table></div>${bulkRows.length > 51 ? `<p class="dim small">Preview me pehli 50 rows — copy/download me poori ${bulkRows.length} rows jayengi.</p>` : ''}`;
   }
   function rulesTab() {
     const t = settings.thresholds || {};
@@ -494,6 +532,43 @@ FF.pages = FF.pages || {};
         im.onload = () => { if (U.$(`[data-img-info="${el.dataset.imgInfo}"]`, body)) el.textContent = `Saved: ${im.naturalWidth}×${im.naturalHeight}px · ${imgSizeInfo(data)}`; };
         im.src = data;
       });
+      // bulk CSV tool
+      const bulkFile = U.$('#bulk-file', body);
+      if (bulkFile) bulkFile.addEventListener('change', () => {
+        const file = bulkFile.files[0]; if (!file) return;
+        if (file.size > 8 * 1024 * 1024) { U.toast('File 8 MB se badi hai', 'err'); return; }
+        const rd = new FileReader();
+        rd.onload = () => {
+          bulkRows = parseCsv(rd.result);
+          if (!bulkRows.length) { U.toast('CSV khali hai ya parse nahi hui', 'err'); bulkRows = null; }
+          else U.toast(`CSV ready: ${bulkRows.length} rows ✓`, 'ok');
+          renderBulkPreview();
+        };
+        rd.onerror = () => U.toast('File read nahi hui', 'err');
+        rd.readAsText(file);
+      });
+      const bulkCopy = U.$('#bulk-copy', body);
+      if (bulkCopy) bulkCopy.addEventListener('click', async () => {
+        if (!bulkRows || !bulkRows.length) return;
+        const tsv = bulkRows.map((r) => r.join('\t')).join('\n');
+        const ok = await U.copyText(tsv);
+        U.toast(ok ? 'Copy ho gaya ✓ — ab Google Sheet me Ctrl+V se paste karo' : 'Copy fail — browser permission check karo', ok ? 'ok' : 'err');
+      });
+      const bulkDl = U.$('#bulk-dl', body);
+      if (bulkDl) bulkDl.addEventListener('click', () => {
+        if (!bulkRows || !bulkRows.length) return;
+        const csv = bulkRows.map((r) => r.map(csvEscape).join(',')).join('\r\n');
+        U.downloadBlob(`bulk-${U.stamp()}.csv`, new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' }));
+      });
+      const bulkTpl = U.$('#bulk-template', body);
+      if (bulkTpl) bulkTpl.addEventListener('click', () => {
+        const s = settings.stock || {};
+        const header = [['id', 'ID'], ['name', 'Name'], ['tagId', 'Tag ID'], ['barcode', 'Barcode'], ['cls', 'Class'], ['tagType', 'Tag Type'], ['bcAllocatedAt', 'BC Allocated At'], ['agentId', 'Agent ID'], ['agentName', 'Agent Name'], ['agentAllocatedAt', 'Agent Allocated At'], ['tlName', 'TL Name']].map(([k, label]) => (s[k] ? `${label} (${s[k]})` : label));
+        U.downloadBlob('stockdataa-template.csv', new Blob([`\uFEFF${header.join(',')}\r\n`], { type: 'text/csv;charset=utf-8' }));
+      });
+      const bulkClear = U.$('#bulk-clear', body);
+      if (bulkClear) bulkClear.addEventListener('click', () => { bulkRows = null; renderBulkPreview(); });
+      renderBulkPreview();
       // profile photo — centre-crop square, size from dropdown
       const avUp = U.$('#av-upload', body);
       if (avUp) avUp.addEventListener('change', async () => {

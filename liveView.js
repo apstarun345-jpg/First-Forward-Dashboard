@@ -87,6 +87,7 @@
 
   function openNotification(item) {
     if (!item) return;
+    if (item.meta && item.meta.link) { location.hash = item.meta.link; return; }
     const view = item.type === 'report' ? reportView(item)
       : (item.type === 'settings' || item.type === 'user') ? changesView(item)
         : activityView(item);

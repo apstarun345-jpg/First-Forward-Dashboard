@@ -11,7 +11,7 @@ window.FF = window.FF || {};
   const esc = U.esc;
 
   function icon(item) {
-    return ({ report: '📊', login: '🔐', activity: '👀', location: '📍', search: '🔍', click: '👆', settings: '⚙️', user: '👤' }[item.type] || '🔔');
+    return ({ report: '📊', monthly: '📅', login: '🔐', activity: '👀', location: '📍', search: '🔍', click: '👆', settings: '⚙️', user: '👤' }[item.type] || '🔔');
   }
   function canBrowserAlert() {
     return typeof Notification !== 'undefined' && Notification.permission === 'granted';
@@ -95,7 +95,7 @@ window.FF = window.FF || {};
       const enable = e.target.closest('[data-notify-enable]');
       if (enable) { e.preventDefault(); enableBrowser(); }
       const openBtn = e.target.closest('[data-notify-open]');
-      if (openBtn) { e.preventDefault(); const item = state.items.find((x) => x.id === openBtn.dataset.notifyOpen); toggle(false); if (item && FF.liveView) FF.liveView.openNotification(item); return; }
+      if (openBtn) { e.preventDefault(); const item = state.items.find((x) => x.id === openBtn.dataset.notifyOpen); toggle(false); if (item && item.meta && item.meta.link) { location.hash = item.meta.link; return; } if (item && FF.liveView) FF.liveView.openNotification(item); return; }
       const watchBtn = e.target.closest('[data-live-watch]');
       if (watchBtn) { e.preventDefault(); toggle(false); if (FF.liveView) FF.liveView.watch(watchBtn.dataset.liveWatch); return; }
       const read = e.target.closest('[data-notify-read]');
