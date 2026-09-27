@@ -231,12 +231,28 @@ function parseWhere(tokens) {
   function primary() {
     if (peek() === '(') { i++; const e = orExpr(); i++; return e; }
     let fn = null, col = tokens[i++];
-    if (/^(lower|upper)$/i.test(col)) { fn = col.toLowerCase(); i++; col = tokens[i++]; i++; }
+    if (/^(lower|upper|todate)$/i.test(col)) { fn = col.toLowerCase(); i++; col = tokens[i++]; i++; }
     const ci = colIdx(col);
     const op = peek();
     if (op === 'is') { i++; if (peek() === 'not') { i += 2; return (r) => r[ci] !== null && r[ci] !== undefined && r[ci] !== ''; } i++; return (r) => r[ci] === null || r[ci] === undefined || r[ci] === ''; }
     i++;
+    // date 'yyyy-mm-dd' literal (used with toDate(col) comparisons)
+    if (peek() === 'date') {
+      i++;
+      const dl = tokens[i++].replace(/^['"]|['"]$/g, '');
+      const [yy, mm, dd] = dl.split('-').map(Number);
+      const lim = new Date(yy, mm - 1, dd).getTime();
+      const dv = (r) => { const d = toDate(r[ci]); return d ? d.getTime() : NaN; };
+      const cmpD = { '=': (a) => a === lim, '!=': (a) => a !== lim, '<>': (a) => a !== lim, '>': (a) => a > lim, '>=': (a) => a >= lim, '<': (a) => a < lim, '<=': (a) => a <= lim }[op];
+      if (!cmpD) throw new Error(`Unsupported date operator ${op}`);
+      return (r) => { const a = dv(r); return Number.isFinite(a) && cmpD(a); };
+    }
     let lit = tokens[i++]; lit = lit.replace(/^['"]|['"]$/g, '');
+    if (['>', '>=', '<', '<='].includes(op)) {
+      const n = Number(lit);
+      const f = { '>': (a, b) => a > b, '>=': (a, b) => a >= b, '<': (a, b) => a < b, '<=': (a, b) => a <= b }[op];
+      return (r) => { const v = r[ci]; if (v === null || v === undefined || v === '') return false; return Number.isFinite(n) ? f(Number(v), n) : f(String(v), lit); };
+    }
     const val = (r) => { let v = r[ci]; v = v === null || v === undefined ? '' : String(v); if (fn === 'lower') v = v.toLowerCase(); if (fn === 'upper') v = v.toUpperCase(); return v; };
     if (op === '=') return (r) => val(r) === lit;
     if (op === '!=' || op === '<>') return (r) => val(r) !== lit;

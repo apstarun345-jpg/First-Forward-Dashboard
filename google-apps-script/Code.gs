@@ -1,0 +1,110 @@
+/**
+ * ApnaPayment / First Forward Dashboard — permanent storage in Google Sheets.
+ *
+ * Users, settings, sessions, password-reset requests and notifications are saved in a hidden
+ * tab "APP_STORAGE" of the spreadsheet this script is attached to. Data arrives ALREADY ENCRYPTED
+ * by the dashboard server, so the cells only contain unreadable text. Do not edit that tab by hand.
+ *
+ * SETUP (one time, ~5 minutes) — see STORAGE_SETUP.md in the repository:
+ *  1. Open the Google Sheet (a new private sheet is best) → Extensions → Apps Script.
+ *  2. Delete the sample code, paste this whole file, and set SECRET below to a long random value
+ *     (at least 16 characters, e.g. 32 random letters/numbers). Save.
+ *  3. Deploy → New deployment → type "Web app" → Execute as: Me → Who has access: Anyone → Deploy.
+ *     Allow the permissions. Copy the Web app URL (ends with /exec).
+ *  4. Render → your service → Environment: add
+ *        APPS_SCRIPT_URL    = <the /exec URL>
+ *        APPS_SCRIPT_SECRET = <the same SECRET as below>
+ *     Save → Render redeploys. /api/health will show storage.backend = "appsscript".
+ *
+ * NEVER change SECRET after data is saved (the old records could no longer be decrypted).
+ */
+const SECRET = 'PASTE_A_LONG_RANDOM_SECRET_HERE';
+const TAB = 'APP_STORAGE';
+const CHUNK = 45000; // a Google Sheets cell holds max 50,000 characters
+const KINDS = ['users', 'sessions', 'settings', 'resets', 'notify'];
+
+function doGet() {
+  return json_({ ok: true, service: 'apnapayment-storage', note: 'POST only. Storage is working if you can see this.' });
+}
+
+function doPost(e) {
+  let body;
+  try { body = JSON.parse((e && e.postData && e.postData.contents) || '{}'); }
+  catch (err) { return json_({ ok: false, error: 'invalid JSON' }); }
+  if (!SECRET || SECRET.indexOf('PASTE_') === 0 || SECRET.length < 16) return json_({ ok: false, error: 'Set SECRET in Code.gs (min 16 chars) and redeploy.' });
+  if (body.secret !== SECRET) return json_({ ok: false, error: 'unauthorized (secret mismatch)' });
+
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(25000)) return json_({ ok: false, error: 'busy, retry' });
+  try {
+    const sheet = sheet_();
+    if (body.action === 'ping') return json_({ ok: true, tab: TAB, spreadsheet: SpreadsheetApp.getActive().getName() });
+    if (body.action === 'read') return json_({ ok: true, records: readAll_(sheet) });
+    if (body.action === 'write') {
+      const records = body.records || {};
+      Object.keys(records).forEach(function (kind) {
+        if (KINDS.indexOf(kind) < 0) throw new Error('unknown kind ' + kind);
+        writeRecord_(sheet, kind, records[kind]);
+      });
+      SpreadsheetApp.flush();
+      return json_({ ok: true, savedAt: new Date().toISOString(), kinds: Object.keys(records) });
+    }
+    return json_({ ok: false, error: 'unknown action' });
+  } catch (err) {
+    return json_({ ok: false, error: String(err && err.message || err) });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function sheet_() {
+  const ss = SpreadsheetApp.getActive();
+  let sh = ss.getSheetByName(TAB);
+  if (!sh) {
+    sh = ss.insertSheet(TAB);
+    sh.getRange(1, 1, 1, 4).setValues([['kind', 'version', 'updatedAt', 'chunks']]);
+    try { sh.hideSheet(); } catch (e) { /* the only sheet cannot be hidden */ }
+  }
+  return sh;
+}
+
+function readAll_(sh) {
+  const out = {};
+  const lastRow = sh.getLastRow(), lastCol = sh.getLastColumn();
+  if (lastRow < 2 || lastCol < 4) return out;
+  const values = sh.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  values.forEach(function (row) {
+    const kind = String(row[0] || '');
+    if (KINDS.indexOf(kind) < 0) return;
+    const count = Number(row[3]) || 0;
+    const parts = [];
+    for (let i = 0; i < count; i++) parts.push(String(row[4 + i] || '').replace(/^~/, ''));
+    out[kind] = { v: String(row[1] || ''), data: parts.join(''), updatedAt: row[2] ? String(row[2]) : '' };
+  });
+  return out;
+}
+
+function writeRecord_(sh, kind, record) {
+  if (!record || typeof record.data !== 'string') throw new Error('bad record for ' + kind);
+  const chunks = [];
+  for (let i = 0; i < record.data.length; i += CHUNK) chunks.push('~' + record.data.slice(i, i + CHUNK));
+  if (!chunks.length) chunks.push('~');
+  const width = 4 + chunks.length;
+  if (sh.getMaxColumns() < width) sh.insertColumnsAfter(sh.getMaxColumns(), width - sh.getMaxColumns());
+  let rowIndex = -1;
+  const lastRow = sh.getLastRow();
+  if (lastRow >= 2) {
+    const kinds = sh.getRange(2, 1, lastRow - 1, 1).getValues();
+    for (let i = 0; i < kinds.length; i++) if (String(kinds[i][0]) === kind) { rowIndex = i + 2; break; }
+  }
+  if (rowIndex < 0) rowIndex = Math.max(2, lastRow + 1);
+  const lastCol = Math.max(sh.getLastColumn(), width);
+  sh.getRange(rowIndex, 1, 1, lastCol).clearContent();
+  const range = sh.getRange(rowIndex, 1, 1, width);
+  range.setNumberFormat('@');
+  range.setValues([[kind, record.v || '', new Date().toISOString(), String(chunks.length)].concat(chunks)]);
+}
+
+function json_(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+}

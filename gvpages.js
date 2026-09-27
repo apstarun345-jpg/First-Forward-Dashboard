@@ -76,6 +76,11 @@ FF.pages = FF.pages || {};
       kpi('g12', 'Report Stock (GV REPORT)', '🏬', report.length ? U.fmt(reportStock) : '—', report.length ? `${U.fmtPct(U.pctOf(U.sum(report, (r) => r.stockVc4), reportStock), 0)} VC4 · ${U.fmt(report.length)} agents` : '—')
     ];
 
+    {
+      const latestK = U.dateKey(latest);
+      const specs = [`src=gv&scope=day&date=${latestK}`, `src=gv&scope=mtd&ym=${cur}`, `src=gv&scope=mtd&ym=${cur}&f=vc4`, `src=gv&scope=mtd&ym=${cur}&f=comm`, `src=gv&scope=mtd&ym=${cur}`, `src=gv&scope=mtd&ym=${cur}`, `src=gv&scope=mtd&ym=${cur}&f=repl`, `src=gv&scope=agents&ym=${cur}`, 'src=gv&scope=stock', 'src=gv&scope=stock', `src=gv&scope=mtd&ym=${cur}`, 'src=gv&scope=stock'];
+      kpis.forEach((html, i) => { if (specs[i]) kpis[i] = html.replace('<div class="kpi ', `<div data-kpi="${esc(specs[i])}" class="kpi `); });
+    }
     const dayLabels = curSeries.days.map(String);
     const lineChart = C.lines({
       labels: dayLabels, tipLabels: curSeries.days.map((d) => `Day ${d}`), height: 250, series: [

@@ -12,6 +12,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { sheetsStoreFromEnv } from './sheets-storage.js';
+import { appsScriptStoreFromEnv, AppsScriptStore } from './apps-script-storage.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 8080);
@@ -21,7 +22,10 @@ const MAX_CACHE_ENTRIES = 400;
 const UPSTREAM_TIMEOUT_MS = 45_000;
 const GVIZ_BASE = process.env.GVIZ_BASE || 'https://docs.google.com'; // override only for local testing with a mock
 const DATA_DIR = path.resolve(process.env.DATA_DIR || (process.env.RENDER && existsSync('/data') ? '/data' : path.join(__dirname, 'data')));
-const STORAGE_BACKEND = process.env.STORAGE_BACKEND || 'files';
+// Storage backend: 'appsscript' is chosen automatically when APPS_SCRIPT_URL is configured (recommended on
+// Render free / no-disk plans — see STORAGE_SETUP.md). 'sheets' = service-account mode, 'files' = local JSON.
+const STORAGE_BACKEND = process.env.STORAGE_BACKEND || ((process.env.APPS_SCRIPT_URL || '').trim() ? 'appsscript' : 'files');
+const CLOUD_BACKEND = STORAGE_BACKEND === 'sheets' || STORAGE_BACKEND === 'appsscript';
 let sheetsStore = null;
 const FRAME_PROTECTION = process.env.FRAME_PROTECTION === '1';
 const SESSION_DAYS = Math.max(1, Number(process.env.SESSION_DAYS || 30));
@@ -37,8 +41,8 @@ const MIME = {
   '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.ico': 'image/x-icon',
   '.txt': 'text/plain; charset=utf-8', '.md': 'text/plain; charset=utf-8'
 };
-const BLOCKED_FILES = new Set(['server.js', 'sheets-storage.js', 'DEPLOYMENT.md', 'SHEETS_STORAGE.md', 'package.json', 'package-lock.json', 'render.yaml', 'README.md', '.env']);
-const BLOCKED_DIRS = new Set(['data', 'dev', 'node_modules', '.git']);
+const BLOCKED_FILES = new Set(['server.js', 'sheets-storage.js', 'apps-script-storage.js', 'DEPLOYMENT.md', 'SHEETS_STORAGE.md', 'STORAGE_SETUP.md', 'package.json', 'package-lock.json', 'render.yaml', 'README.md', '.env']);
+const BLOCKED_DIRS = new Set(['data', 'dev', 'node_modules', '.git', 'google-apps-script']);
 
 // ---------------------------------------------------------------------------------------------
 // Permissions & settings schema
@@ -134,14 +138,15 @@ const durableSnapshots = new Map();
 let persistentDiskMounted = false;
 const storageStatus = () => ({
   backend: STORAGE_BACKEND,
-  encrypted: STORAGE_BACKEND === 'sheets',
-  tab: STORAGE_BACKEND === 'sheets' ? 'APP_STORAGE' : null,
+  durable: CLOUD_BACKEND || persistentDiskMounted || !process.env.RENDER,
+  encrypted: CLOUD_BACKEND,
+  tab: CLOUD_BACKEND ? 'APP_STORAGE' : null,
   lastSavedAt: sheetsStore?.lastSavedAt || null,
   persistentDiskMounted,
   dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null,
   error: [...storageFailures.values()].join(' ') || null,
   warning: STORAGE_BACKEND === 'files' && process.env.RENDER && !persistentDiskMounted
-    ? 'Persistent disk not detected. Back up existing data, attach a Render disk at /data and set DATA_DIR=/data before redeploying.' : null
+    ? 'Settings, users aur sessions abhi TEMPORARY folder me save ho rahe hain — Render har deploy/restart par unhe mita deta hai, isliye defaults wapas aa jaate hain. Google Sheet storage connect karo (Settings → Backup → Google Sheet storage setup, ya STORAGE_SETUP.md).' : null
 });
 async function readJson(file, fallback) {
   try { return JSON.parse(await fs.readFile(file, 'utf8')); }
@@ -155,7 +160,9 @@ function persist(kind) {
   const file = FILES[kind];
   const snapshot = JSON.stringify(db[kind], null, 2);
   const prev = writeQueue.get(kind) || Promise.resolve();
-  const next = prev.catch(() => {}).then(async () => {
+  // Apps Script store batches + orders writes itself, so don't serialise (each call would wait seconds).
+  const chain = STORAGE_BACKEND === 'appsscript' ? Promise.resolve() : prev.catch(() => {});
+  const next = chain.then(async () => {
     if (sheetsStore) {
       await sheetsStore.save(kind, JSON.parse(snapshot));
     } else {
@@ -169,7 +176,7 @@ function persist(kind) {
     storageFailures.delete(kind);
   }).catch((err) => {
     const storageError = sheetsStore
-      ? `Could not save ${kind} to Google Sheets. Save not confirmed; check API access/quota and retry.`
+      ? `Could not save ${kind} to Google Sheets${STORAGE_BACKEND === 'appsscript' ? ' (Apps Script)' : ''}. Save not confirmed; check the Apps Script deployment / secret and retry.`
       : `Could not save ${kind}. Check DATA_DIR disk permissions and free space.`;
     storageFailures.set(kind, storageError);
     if (JSON.stringify(db[kind], null, 2) === snapshot && durableSnapshots.has(kind)) db[kind] = JSON.parse(durableSnapshots.get(kind));
@@ -263,6 +270,40 @@ function recordNotification({ type = 'info', title, body, target = 'admin', meta
 function visibleNotifications(user, since) {
   const after = since ? new Date(since).getTime() : 0;
   return notifyItems().filter((item) => notificationVisible(item, user) && (!after || new Date(item.createdAt).getTime() > after)).slice(-80);
+}
+// ---- change reports: what exactly changed (shown when the admin clicks a notification) ----------
+function describeValue(v) {
+  if (v === undefined || v === null || v === '') return '—';
+  if (typeof v === 'string' && /^data:image\//.test(v)) return `[image ${Math.round(v.length * 0.75 / 1024)} KB]`;
+  if (typeof v === 'boolean') return v ? 'ON ✓' : 'OFF ✗';
+  if (Array.isArray(v)) return v.length > 12 ? `${v.slice(0, 12).join(', ')} … (+${v.length - 12})` : v.join(', ') || '—';
+  if (typeof v === 'object') return JSON.stringify(v).slice(0, 160);
+  return String(v).slice(0, 160);
+}
+function flattenForDiff(obj, prefix = '', out = {}) {
+  if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+    for (const [k, v] of Object.entries(obj)) flattenForDiff(v, prefix ? `${prefix}.${k}` : k, out);
+  } else if (Array.isArray(obj) && obj.length && obj.every((x) => x && typeof x === 'object' && x.id)) {
+    for (const item of obj) flattenForDiff(item, `${prefix}[${item.id}]`, out);
+  } else out[prefix] = obj;
+  return out;
+}
+function changeList(before, after, { skip = [] } = {}) {
+  const a = flattenForDiff(before || {}), b = flattenForDiff(after || {});
+  const keys = [...new Set([...Object.keys(a), ...Object.keys(b)])];
+  const out = [];
+  for (const key of keys) {
+    if (skip.some((s) => key === s || key.startsWith(`${s}.`))) continue;
+    const x = a[key], y = b[key];
+    if (JSON.stringify(x ?? null) === JSON.stringify(y ?? null)) continue;
+    out.push({ field: key, before: describeValue(x), after: describeValue(y) });
+  }
+  return out.slice(0, 120);
+}
+const userSnapshot = (u) => u ? { name: u.name, email: u.email || '', mobile: u.mobile || '', role: u.role, approved: !!u.approved, permissions: (u.permissions || []).slice().sort(), avatar: u.avatar ? `[photo ${Math.round(String(u.avatar).length * 0.75 / 1024)} KB]` : '' } : {};
+function permissionDiff(before, after) {
+  const b = new Set(before || []), a = new Set(after || []);
+  return { added: [...a].filter((k) => !b.has(k)), removed: [...b].filter((k) => !a.has(k)) };
 }
 const activityLast = new Map();
 // Ephemeral in-memory presence: page + viewport-relative pointer only (never GPS or screen contents).
@@ -494,7 +535,7 @@ async function checkReports(force = false) {
         const delta = snapshotDelta(previous, next);
         if (delta && delta.changed && (delta.total > 0 || next.date !== previous.date)) {
           const label = source === 'gv' ? 'GV Partner' : 'First Forward';
-          recordNotification({ type: 'report', title: `${label} report update`, body: `${next.date}: ${deltaText(delta)} — Google Sheet me naya data aaya.`, target: 'admin', meta: { source, snapshot: next } });
+          recordNotification({ type: 'report', title: `${label} report update`, body: `${next.date}: ${deltaText(delta)} — Google Sheet me naya data aaya.`, target: 'admin', meta: { source, snapshot: next, previous, delta } });
         }
       } catch (err) { console.warn(`report watcher ${source}:`, err.message); }
     }
@@ -554,7 +595,7 @@ async function handleApi(req, res, url) {
 
   // ---- auth ----
   if (p === '/api/auth/me' && method === 'GET') {
-    return sendJson(res, 200, { user: publicUser(user), settings: user ? db.settings : publicSettings(), permissions: permissionsFor(db.settings), tabs: db.settings.tabs });
+    return sendJson(res, 200, { user: publicUser(user), settings: user ? db.settings : publicSettings(), permissions: permissionsFor(db.settings), tabs: db.settings.tabs, ...(user && user.role === 'admin' ? { storage: storageStatus() } : {}) });
   }
   if (p === '/api/auth/signup' && method === 'POST') {
     if (db.settings.allowSignup === false && db.users.length) throw new HttpError(403, 'Sign up band hai — admin se account maango.');
@@ -594,26 +635,40 @@ async function handleApi(req, res, url) {
     if (!user) throw new HttpError(401, 'Login required');
     if (user.role === 'admin') return sendJson(res, 200, { ok: true });
     const body = await readBody(req);
-    const page = String(body.page || 'dashboard').replace(/[^a-zA-Z0-9 _/#?&=.-]/g, '').slice(0, 120) || 'dashboard';
-    const previous = livePresence.get(user.username) || {};
+    const cleanText = (v, n) => String(v || '').replace(/[\u0000-\u001f<>]/g, '').slice(0, n);
+    const page = String(body.page || 'dashboard').replace(/[^a-zA-Z0-9 _/#?&=.%:-]/g, '').slice(0, 160) || 'dashboard';
+    const previous = livePresence.get(user.username) || { events: [] };
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, Number(v) || 0));
     const pointer = Object.prototype.hasOwnProperty.call(body, 'pointer')
-      ? (body.pointer && typeof body.pointer === 'object' ? {
-        x: Math.max(0, Math.min(100, Number(body.pointer.x) || 0)),
-        y: Math.max(0, Math.min(100, Number(body.pointer.y) || 0))
-      } : null)
+      ? (body.pointer && typeof body.pointer === 'object' ? { x: clamp(body.pointer.x, 0, 100), y: clamp(body.pointer.y, 0, 100), down: !!body.pointer.down } : null)
       : previous.pointer || null;
+    const viewport = body.viewport && typeof body.viewport === 'object' ? { w: clamp(body.viewport.w, 200, 8000), h: clamp(body.viewport.h, 200, 8000) } : previous.viewport || null;
+    const scroll = body.scroll && typeof body.scroll === 'object' ? { y: clamp(body.scroll.y, 0, 1e6), h: clamp(body.scroll.h, 0, 1e6), el: cleanText(body.scroll.el, 20) } : previous.scroll || null;
+    const events = Array.isArray(previous.events) ? previous.events.slice() : [];
+    if (Array.isArray(body.events)) {
+      for (const ev of body.events.slice(-20)) {
+        if (!ev || typeof ev !== 'object') continue;
+        events.push({ at: Number(ev.at) || Date.now(), kind: cleanText(ev.kind, 20) || 'action', label: cleanText(ev.label, 140), page: cleanText(ev.page, 80) });
+      }
+    }
     const now = Date.now();
     const lastSeen = body.engaged === true ? now : (previous.lastSeen || now);
-    livePresence.set(user.username, { username: user.username, name: user.name || user.username, page, pointer, lastSeen });
+    livePresence.set(user.username, { username: user.username, name: user.name || user.username, mobile: user.mobile || '', page, title: cleanText(body.title, 80) || previous.title || '', overlay: body.overlay !== undefined ? cleanText(body.overlay, 120) : (previous.overlay || ''), visible: body.visible !== false, pointer, viewport, scroll, events: events.slice(-60), lastSeen, updatedAt: now });
     for (const [key, entry] of livePresence) if (Date.now() - entry.lastSeen > 7 * 86400e3) livePresence.delete(key);
     return sendJson(res, 200, { ok: true });
   }
   if (p === '/api/presence' && method === 'GET') {
     if (!user || user.role !== 'admin') throw new HttpError(403, 'Admin only');
     const now = Date.now();
+    const one = url.searchParams.get('user');
+    if (one) {
+      const entry = livePresence.get(normUser(one));
+      if (!entry) return sendJson(res, 200, { person: null, checkAt: new Date(now).toISOString() });
+      return sendJson(res, 200, { person: { ...entry, active: now - entry.lastSeen < 90e3, online: now - (entry.updatedAt || entry.lastSeen) < 45e3 }, checkAt: new Date(now).toISOString() });
+    }
     const people = [...livePresence.values()].filter((entry) => now - entry.lastSeen < 7 * 86400e3)
       .sort((a,b) => b.lastSeen - a.lastSeen)
-      .map((entry) => ({ ...entry, active: now - entry.lastSeen < 90e3 }));
+      .map(({ events, ...entry }) => ({ ...entry, lastEvent: events && events.length ? events[events.length - 1] : null, active: now - entry.lastSeen < 90e3, online: now - (entry.updatedAt || entry.lastSeen) < 45e3 }));
     return sendJson(res, 200, { people, checkAt: new Date(now).toISOString() });
   }
   // ---- activity + notifications ---------------------------------------------------------------
@@ -720,6 +775,7 @@ async function handleApi(req, res, url) {
   }
   if (p === '/api/auth/profile' && method === 'POST') {
     const body = await readBody(req);
+    const beforeProfile = userSnapshot(user);
     if (body.name !== undefined) user.name = String(body.name).trim().slice(0, 80) || user.username;
     if (body.email !== undefined) user.email = String(body.email).trim().slice(0, 120);
     if (body.mobile !== undefined) user.mobile = String(body.mobile).replace(/[^\d+]/g, '').slice(0, 16);
@@ -730,6 +786,8 @@ async function handleApi(req, res, url) {
       user.avatar = a;
     }
     await persist('users');
+    const profileChanges = changeList(beforeProfile, userSnapshot(user));
+    if (profileChanges.length) recordNotification({ type: 'user', title: `👤 Profile updated · ${user.name || user.username}`, body: `${user.name || user.username} ne apni details badli: ${profileChanges.map((c) => c.field).join(', ')}.`, target: 'admin', meta: { username: user.username, name: user.name, subject: user.username, changes: profileChanges } });
     return sendJson(res, 200, { ok: true, user: publicUser(user) });
   }
   if (p === '/api/auth/location' && method === 'POST') {
@@ -745,6 +803,36 @@ async function handleApi(req, res, url) {
   // ---- gviz ----
   if (p === '/api/gviz' && method === 'GET') {
     return handleGviz(res, url.searchParams);
+  }
+
+  // ---- Google Sheet storage setup helpers (admin) --------------------------------------------
+  if (p === '/api/storage/apps-script' && method === 'GET') {
+    requireAdmin(user);
+    const code = await fs.readFile(path.join(__dirname, 'google-apps-script', 'Code.gs'), 'utf8');
+    return sendJson(res, 200, { code, storage: storageStatus() });
+  }
+  if ((p === '/api/storage/test' || p === '/api/storage/migrate') && method === 'POST') {
+    requireAdmin(user);
+    const body = await readBody(req);
+    let probe;
+    try { probe = new AppsScriptStore({ url: String(body.url || '').trim(), secret: String(body.secret || '').trim() }); }
+    catch (err) { throw new HttpError(400, err.message); }
+    try {
+      const ping = await probe.ping();
+      const existing = await probe.read();
+      if (p === '/api/storage/test') return sendJson(res, 200, { ok: true, spreadsheet: ping.spreadsheet || '', hasData: !!existing, users: existing && Array.isArray(existing.users) ? existing.users.length : 0 });
+      if (existing && !body.force) throw new HttpError(409, `Is sheet me pehle se data hai (${Array.isArray(existing.users) ? existing.users.length : 0} users). Wahi data use hoga — migrate ki zaroorat nahi.`);
+      const saves = Object.keys(FILES).map((kind) => probe.save(kind, db[kind]));
+      await probe.flush();
+      await Promise.all(saves);
+      const verify = await probe.read();
+      if (!verify || !Array.isArray(verify.users) || verify.users.length !== db.users.length) throw new Error('Verification failed');
+      recordNotification({ type: 'settings', title: '☁️ Data copied to Google Sheet storage', body: `${user.name || user.username} ne users/settings/sessions Google Sheet (APP_STORAGE) me copy kiye.`, target: 'admin', meta: { username: user.username, changes: [{ field: 'storage', before: STORAGE_BACKEND, after: 'appsscript (copied, set Render env next)' }] } });
+      return sendJson(res, 200, { ok: true, migrated: true, users: verify.users.length, spreadsheet: ping.spreadsheet || '' });
+    } catch (err) {
+      if (err instanceof HttpError) throw err;
+      throw new HttpError(502, `Apps Script connection failed: ${err.message}`);
+    }
   }
 
   // ---- settings ----
@@ -778,8 +866,10 @@ async function handleApi(req, res, url) {
     const next = body.reset ? { ...DEFAULT_SETTINGS } : deepMerge(db.settings, patch);
     next.updatedAt = new Date().toISOString(); next.updatedBy = user.username;
     if (next.sheetId !== db.settings.sheetId || next.cacheSeconds !== db.settings.cacheSeconds) cache.clear();
+    const changes = changeList(db.settings, next, { skip: ['updatedAt', 'updatedBy'] });
     db.settings = next;
     await persist('settings');
+    if (changes.length || body.reset) recordNotification({ type: 'settings', title: body.reset ? '⚙️ Settings reset to defaults' : `⚙️ Settings changed (${changes.length})`, body: `${user.name || user.username} ne ${changes.slice(0, 4).map((c) => c.field).join(', ')}${changes.length > 4 ? ` +${changes.length - 4} more` : ''} update kiya.`, target: 'admin', meta: { username: user.username, name: user.name, changes, reset: !!body.reset } });
     return sendJson(res, 200, { ok: true, settings: db.settings });
   }
   if (p === '/api/cache/clear' && method === 'POST') { requireAdmin(user); cache.clear(); return sendJson(res, 200, { ok: true }); }
@@ -800,6 +890,7 @@ async function handleApi(req, res, url) {
     const perms = Array.isArray(body.permissions) ? body.permissions.filter((k) => allow.includes(k)) : DEFAULT_USER_PERMS.slice();
     const u = { username, name: String(body.name || '').trim().slice(0, 80) || username, email: String(body.email || '').trim().slice(0, 120), mobile: String(body.mobile || '').replace(/[^\d+]/g, '').slice(0, 16), role: body.role === 'admin' ? 'admin' : 'user', approved: body.approved !== false, permissions: perms, password: hashPassword(body.password), mustChangePassword: true, createdAt: new Date().toISOString(), lastLoginAt: null };
     db.users.push(u); await persist('users');
+    recordNotification({ type: 'user', title: `👤 New user created · ${u.name}`, body: `${user.name || user.username} ne ${u.username} (${u.role}) account banaya.`, target: 'admin', meta: { username: user.username, subject: u.username, changes: changeList({}, userSnapshot(u)), permissions: { added: perms, removed: [] } } });
     return sendJson(res, 200, { ok: true, user: publicUser(u), permissions: permissionsFor(db.settings) });
   }
   if (p === '/api/users/reset-requests' && method === 'GET') {
@@ -839,6 +930,7 @@ async function handleApi(req, res, url) {
     if (!target) throw new HttpError(404, 'User nahi mila');
     if (method === 'PUT') {
       const body = await readBody(req);
+      const beforeUser = userSnapshot(target);
       const admins = db.users.filter((u) => u.role === 'admin' && u.approved).length;
       if (body.role !== undefined) {
         const role = body.role === 'admin' ? 'admin' : 'user';
@@ -856,6 +948,11 @@ async function handleApi(req, res, url) {
       if (body.password) { if (!validPassword(body.password)) throw new HttpError(400, 'Password kam se kam 6 characters ka ho.'); target.password = hashPassword(body.password); target.mustChangePassword = true; }
       if (!target.approved) for (const [k, s] of Object.entries(db.sessions)) if (s.username === target.username) delete db.sessions[k];
       await persist('users'); await persist('sessions');
+      const afterUser = userSnapshot(target);
+      const userChanges = changeList({ ...beforeUser, permissions: undefined }, { ...afterUser, permissions: undefined });
+      const perms = permissionDiff(beforeUser.permissions, afterUser.permissions);
+      if (body.password) userChanges.push({ field: 'password', before: '••••', after: 'reset by admin' });
+      if (userChanges.length || perms.added.length || perms.removed.length) recordNotification({ type: 'user', title: `👥 User updated · ${target.name || target.username}`, body: `${user.name || user.username} ne ${target.username} update kiya${perms.added.length || perms.removed.length ? ` · access +${perms.added.length} / −${perms.removed.length}` : ''}${userChanges.length ? ` · ${userChanges.map((c) => c.field).join(', ')}` : ''}.`, target: 'admin', meta: { username: user.username, subject: target.username, changes: userChanges, permissions: perms } });
       return sendJson(res, 200, { ok: true, user: publicUser(target) });
     }
     if (method === 'DELETE') {
@@ -864,6 +961,7 @@ async function handleApi(req, res, url) {
       db.users = db.users.filter((u) => u !== target);
       for (const [k, s] of Object.entries(db.sessions)) if (s.username === target.username) delete db.sessions[k];
       await persist('users'); await persist('sessions');
+      recordNotification({ type: 'user', title: `🗑️ User deleted · ${target.name || target.username}`, body: `${user.name || user.username} ne ${target.username} ka account delete kiya.`, target: 'admin', meta: { username: user.username, subject: target.username, changes: changeList(userSnapshot(target), {}) } });
       return sendJson(res, 200, { ok: true });
     }
   }
@@ -926,9 +1024,34 @@ async function readLocalStore() {
   };
 }
 async function start() {
-  if (!['files', 'sheets'].includes(STORAGE_BACKEND)) throw new Error('STORAGE_BACKEND must be files or sheets.');
+  if (!['files', 'sheets', 'appsscript'].includes(STORAGE_BACKEND)) throw new Error('STORAGE_BACKEND must be files, sheets or appsscript.');
   let stored;
-  if (STORAGE_BACKEND === 'sheets') {
+  let cloudWasEmpty = false;
+  if (STORAGE_BACKEND === 'appsscript') {
+    // Google Sheet (via Apps Script web app) is authoritative. Never start with defaults if it can't be read.
+    sheetsStore = appsScriptStoreFromEnv();
+    let lastErr;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try { stored = await sheetsStore.read(); lastErr = null; break; }
+      catch (err) { lastErr = err; if (/decrypt|no users row|unauthorized|Set SECRET|HTML page/i.test(err.message)) break; await new Promise((r) => setTimeout(r, 1500 * (attempt + 1))); }
+    }
+    if (lastErr) throw lastErr;
+    if (!stored) {
+      // First run: seed the sheet from whatever this instance has (local files if any, else defaults).
+      cloudWasEmpty = true;
+      stored = await readLocalStore();
+      console.log('APP_STORAGE (Apps Script) is empty → seeding it from the current local data.');
+    } else {
+      stored = {
+        users: Array.isArray(stored.users) ? stored.users : [],
+        sessions: stored.sessions && typeof stored.sessions === 'object' ? stored.sessions : {},
+        settings: stored.settings && typeof stored.settings === 'object' ? stored.settings : {},
+        resets: Array.isArray(stored.resets) ? stored.resets : [],
+        notify: stored.notify && typeof stored.notify === 'object' ? stored.notify : { items: [], watch: {} }
+      };
+      console.log(`Loaded users/settings/sessions from Google Sheet APP_STORAGE (Apps Script) · users ${stored.users.length}`);
+    }
+  } else if (STORAGE_BACKEND === 'sheets') {
     // Google is authoritative. Never fall back to ephemeral files or a new default admin.
     sheetsStore = await sheetsStoreFromEnv(DEFAULT_SHEET_ID);
     stored = await sheetsStore.read();
@@ -976,9 +1099,13 @@ async function start() {
   }
   pruneSessions();
   await bootstrapAdmin();
+  if (cloudWasEmpty) {
+    await Promise.all(Object.keys(FILES).map((kind) => persist(kind)));
+    console.log('APP_STORAGE seeded ✓ — users, settings and sessions now survive every deploy/restart.');
+  }
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`First Forward Dashboard → http://0.0.0.0:${server.address().port}`);
-    console.log(`Sheet ${db.settings.sheetId} · cache ${cacheMs() / 1000}s · storage ${sheetsStore ? 'Google Sheets / encrypted APP_STORAGE' : DATA_DIR} · users ${db.users.length}${GVIZ_BASE !== 'https://docs.google.com' ? ` · upstream ${GVIZ_BASE}` : ''}`);
+    console.log(`Sheet ${db.settings.sheetId} · cache ${cacheMs() / 1000}s · storage ${sheetsStore ? `Google Sheets / encrypted APP_STORAGE (${STORAGE_BACKEND})` : DATA_DIR} · users ${db.users.length}${GVIZ_BASE !== 'https://docs.google.com' ? ` · upstream ${GVIZ_BASE}` : ''}`);
     setTimeout(() => checkReports(true).catch(() => {}), 5000);
     setInterval(() => checkReports(false).catch(() => {}), 5 * 60e3).unref();
   });
@@ -986,6 +1113,7 @@ async function start() {
 start().catch((err) => { console.error('Startup stopped to protect stored data:', err); process.exitCode = 1; });
 for (const signal of ['SIGTERM', 'SIGINT']) {
   process.on(signal, () => {
+    if (sheetsStore && sheetsStore.drain) sheetsStore.drain().catch(() => {});
     server.close(async () => {
       await Promise.allSettled([...writeQueue.values()]);
       process.exit(0);

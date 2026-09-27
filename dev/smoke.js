@@ -206,6 +206,40 @@ await run('sheet.render REPORT', () => pages.sheet.render(root(), { name: 'REPOR
 await run('settings.render (all tabs)', async () => { for (const tab of ['account', 'brand', 'sources', 'access', 'data', 'rules', 'contacts', 'users', 'backup']) { await pages.settings.render(root(), { tab }, {}); await settle(20); } });
 await run('app.refresh (manual ↻)', async () => { await FF.app.refresh(); await settle(100); });
 await run('xlsx builder', async () => { let got = null; FF.util.downloadBlob = (name, blob) => { got = { name, size: blob.size }; }; FF.xlsx.download('t.xlsx', [{ name: 'Summary', header: ['a', 'b'], rows: [['x', 1], ['y', 2]] }, { name: 'StockDataa', header: ['c'], rows: [['z']] }]); if (!got || got.size < 200) throw new Error('xlsx not produced'); log(`      ${got.name} ${got.size} bytes`); });
+const drawerHtml = () => (REG.get('drawer-body') || {}).innerHTML || '';
+const kpiSpecs = [
+  { src: 'both', scope: 'day', title: 'Yesterday total' }, { src: 'ff', scope: 'mtd', title: 'FF MTD', f: 'vc4' }, { src: 'gv', scope: 'mtd', title: 'GV MTD' },
+  { src: 'both', scope: 'mtd', f: 'ff,vc4', title: 'FF VC4' }, { src: 'ff', scope: 'stock', title: 'Stock' }, { src: 'ff', scope: 'stockreport', title: 'Stock Report' },
+  { src: 'ff', scope: 'agents', title: 'Agents' }, { src: 'ff', scope: 'status', title: 'Status' }
+];
+for (const spec of kpiSpecs) {
+  await run(`kpiDetail.open ${spec.src}/${spec.scope}${spec.f ? `/${spec.f}` : ''}`, async () => {
+    await FF.kpiDetail.open(spec);
+    const h = drawerHtml();
+    if (!h.includes('kd-')) throw new Error('KPI drawer did not render a breakdown: ' + h.slice(0, 200));
+    if (/error-box|Error:/i.test(h)) throw new Error('KPI drawer error: ' + h.slice(0, 300));
+    log(`      drawer ${h.length} chars ok · ${(REG.get('drawer-title') || {}).textContent} · ${String((REG.get('drawer-sub') || {}).innerHTML).replace(/<[^>]+>/g, '').slice(0, 90)}`);
+  });
+}
+await run('kpiDetail raw EIR toDate range query', async () => {
+  const e = FF.config.eir;
+  const daily = FF.store.get('daily') || [];
+  const last = FF.model.latestDate(daily);
+  const key = FF.util.dateKey(last);
+  const t = await FF.data.query(e.sheet, `select ${e.date}, ${e.tagId}, ${e.cls} where toDate(${e.date}) >= date '${key}' and toDate(${e.date}) <= date '${key}' order by ${e.date} desc limit 60000`, {});
+  const expect = daily.filter((r) => r.key === key).reduce((a, r) => a + r.n, 0);
+  if (!t.rows.length) throw new Error('no raw rows for latest day');
+  log(`      raw rows ${t.rows.length} · daily total ${expect}`);
+});
+await run('liveView.openNotification (report / settings / login)', async () => {
+  FF.liveView.openNotification({ id: 'a', type: 'report', title: 'First Forward report update', body: 'x', createdAt: new Date().toISOString(), meta: { source: 'ff', snapshot: { date: '2026-09-26', total: 120, classes: { VC4: 100, VC5: 20 } }, previous: { date: '2026-09-26', total: 90, classes: { VC4: 80, VC5: 10 } }, delta: { total: 30, classes: { VC4: 20, VC5: 10 } } } });
+  if (!drawerHtml().includes('+30')) throw new Error('report delta missing');
+  FF.liveView.openNotification({ id: 'b', type: 'settings', title: 'Settings changed', body: 'x', createdAt: new Date().toISOString(), meta: { username: 'admin', changes: [{ field: 'brand', before: 'A', after: 'B' }] } });
+  if (!drawerHtml().includes('brand')) throw new Error('settings diff missing');
+  FF.liveView.openNotification({ id: 'c', type: 'login', title: 'Login', body: 'x', createdAt: new Date().toISOString(), meta: { username: 'ravi', loginId: 'ravi' } });
+  if (!drawerHtml().includes('data-lv-watch')) throw new Error('live view button missing');
+  FF.app.closeDrawer();
+});
 await run('logout', async () => { await FF.auth.api('/api/auth/logout', 'POST', {}); });
 
 log(failures.length ? `\n${failures.length} FAILED: ${failures.join(', ')}` : '\nALL OK');

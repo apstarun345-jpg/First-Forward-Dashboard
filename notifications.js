@@ -5,11 +5,13 @@ window.FF = window.FF || {};
 (function (FF) {
   'use strict';
   const U = FF.util;
-  const state = { started: false, bound: false, timer: null, presenceTimer: null, lastAt: '', items: [], unread: 0, firstPoll: true, page: 'home', pointer: null, people: [], lastInteraction: Date.now(), pointerBound: false };
+  const state = { started: false, bound: false, timer: null, presenceTimer: null, fastTimer: null, lastAt: '', items: [], unread: 0, firstPoll: true, page: 'home', pointer: null, people: [], lastInteraction: Date.now(), pointerBound: false, events: [], dirty: false, lastSent: 0, lastScroll: -1 };
+  const EMBED = new URLSearchParams(location.search).get('embed') === 'live';
+  const sharing = () => localStorage.getItem('ff_presence_pointer') !== '0';
   const esc = U.esc;
 
   function icon(item) {
-    return ({ report: '📊', login: '🔐', activity: '👀', location: '📍', search: '🔍', click: '👆' }[item.type] || '🔔');
+    return ({ report: '📊', login: '🔐', activity: '👀', location: '📍', search: '🔍', click: '👆', settings: '⚙️', user: '👤' }[item.type] || '🔔');
   }
   function canBrowserAlert() {
     return typeof Notification !== 'undefined' && Notification.permission === 'granted';
@@ -34,9 +36,10 @@ window.FF = window.FF || {};
     if (!pop) return;
     const browser = typeof Notification !== 'undefined';
     const permission = browser ? Notification.permission : 'unsupported';
-    const rows = state.items.slice().reverse().slice(0, 40).map((item) => `<div class="notification-item ${item.type || ''}">
-      <span class="notification-icon">${icon(item)}</span><div><b>${esc(item.title)}</b><p>${esc(item.body)}</p><small>${esc(U.timeLabel(new Date(item.createdAt).getTime()))}</small></div></div>`).join('');
-    const presence = FF.auth.user && FF.auth.user.role === 'admin' ? `<section class="presence-panel"><div class="presence-title">🟢 User activity <small>Admin only · live / last seen</small></div>${state.people.length ? state.people.map((p) => `<div class="presence-row"><span class="presence-dot ${p.active ? 'is-live' : ''}"></span><div><b>${esc(p.name || p.username)}</b><small>${p.active ? `Active now · ${esc(p.page)}` : `Last active ${esc(U.timeLabel(p.lastSeen))} · last page: ${esc(p.page)}`}</small>${p.active && p.pointer ? `<small>Pointer: ${Math.round(p.pointer.x)}% from left, ${Math.round(p.pointer.y)}% from top</small>` : ''}</div><span class="presence-state">${p.active ? 'LIVE' : 'AWAY'}</span></div>`).join('') : '<div class="notification-empty">Users seen after this server started will appear here.</div>'}</section>` : '';
+    const isAdmin = FF.auth.user && FF.auth.user.role === 'admin';
+    const rows = state.items.slice().reverse().slice(0, 60).map((item) => `<button type="button" class="notification-item ${item.type || ''}" data-notify-open="${esc(item.id)}" title="Click → poori report: kya change hua">
+      <span class="notification-icon">${icon(item)}</span><div><b>${esc(item.title)}</b><p>${esc(item.body)}</p><small>${esc(U.timeLabel(new Date(item.createdAt).getTime()))} · <u>details dekho →</u></small></div></button>`).join('');
+    const presence = isAdmin ? `<section class="presence-panel"><div class="presence-title">🟢 User activity <small>Admin only · live / last seen</small></div>${state.people.length ? state.people.map((p) => `<div class="presence-row"><span class="presence-dot ${p.active ? 'is-live' : ''}"></span><div><b>${esc(p.name || p.username)}</b><small>${p.active ? `Active now · ${esc(p.page)}` : `Last active ${esc(U.timeLabel(p.lastSeen))} · last page: ${esc(p.page)}`}</small>${p.lastEvent ? `<small>Last action: ${esc(p.lastEvent.label || p.lastEvent.kind)}</small>` : ''}</div><span class="presence-side"><span class="presence-state">${p.online && p.active ? 'LIVE' : p.online ? 'IDLE' : 'AWAY'}</span>${isAdmin ? `<button class="btn small" data-live-watch="${esc(p.username)}">👁 Live view</button>` : ''}</span></div>`).join('') : '<div class="notification-empty">Users seen after this server started will appear here.</div>'}</section>` : '';
     pop.innerHTML = `<div class="notification-head"><div><b>Notifications</b><small>${state.unread ? `${state.unread} unread` : 'Sab updated hai'}</small></div><button class="btn small" data-notify-read>✓ Mark read</button></div>
       ${presence}
       ${permission === 'default' ? '<button class="notification-enable" data-notify-enable>🔔 Browser alerts on karo</button>' : permission === 'denied' ? '<div class="notification-permission">Browser alerts blocked hain — browser settings se allow karo.</div>' : permission === 'granted' ? '<div class="notification-permission ok">✅ Browser alerts on hain</div>' : ''}
@@ -91,38 +94,93 @@ window.FF = window.FF || {};
       if (!e.target.closest('#notification-pop') && !e.target.closest('#notification-btn')) toggle(false);
       const enable = e.target.closest('[data-notify-enable]');
       if (enable) { e.preventDefault(); enableBrowser(); }
+      const openBtn = e.target.closest('[data-notify-open]');
+      if (openBtn) { e.preventDefault(); const item = state.items.find((x) => x.id === openBtn.dataset.notifyOpen); toggle(false); if (item && FF.liveView) FF.liveView.openNotification(item); return; }
+      const watchBtn = e.target.closest('[data-live-watch]');
+      if (watchBtn) { e.preventDefault(); toggle(false); if (FF.liveView) FF.liveView.watch(watchBtn.dataset.liveWatch); return; }
       const read = e.target.closest('[data-notify-read]');
       if (read) { e.preventDefault(); FF.auth.api('/api/notifications/read', 'POST', {}).catch(() => {}); setCount(0); render(); }
     });
   }
-  function sendPresence() {
-    if (!FF.auth || !FF.auth.user) return;
-    const pointerEnabled = localStorage.getItem('ff_presence_pointer') !== '0';
-    FF.auth.api('/api/presence', 'POST', { page: state.page, pointer: pointerEnabled ? state.pointer : null, engaged: Date.now() - state.lastInteraction < 90e3 }).catch(() => {});
+  function labelOf(el) {
+    if (!el || el === document.body) return '';
+    const target = el.closest('button, a, .kpi, [data-link], [data-agent], [data-tl], th, .seg-btn, .chip, .nav-item, tr.clickable, .notification-item, select, label, input') || el;
+    if (target.matches('input[type=password]')) return 'password field';
+    if (target.matches('input, textarea')) return `${target.placeholder || target.name || 'input'} (typing)`;
+    const kpi = target.closest('.kpi');
+    if (kpi) return `KPI: ${(kpi.querySelector('.kpi-title') || kpi).textContent.trim().slice(0, 60)} = ${(kpi.querySelector('.kpi-value') || {}).textContent || ''}`.trim();
+    const text = (target.getAttribute('aria-label') || target.title || target.innerText || target.textContent || '').replace(/\s+/g, ' ').trim();
+    return text.slice(0, 90) || target.tagName.toLowerCase();
+  }
+  function track(kind, label) {
+    if (EMBED || !FF.auth || !FF.auth.user || FF.auth.user.role === 'admin' || !sharing()) return;
+    state.events.push({ at: Date.now(), kind, label: String(label || '').slice(0, 140), page: state.page });
+    if (state.events.length > 30) state.events.shift();
+    state.dirty = true;
+  }
+  function overlayLabel() {
+    const drawer = document.getElementById('drawer');
+    if (drawer && drawer.classList.contains('open')) return `Drawer: ${(document.getElementById('drawer-title') || {}).textContent || ''}`;
+    const modal = document.querySelector('.kpi-modal, .live-modal');
+    return modal ? 'Popup open' : '';
+  }
+  function sendPresence(force) {
+    if (EMBED || !FF.auth || !FF.auth.user || FF.auth.user.role === 'admin') return;
+    const share = sharing();
+    const body = { page: state.page, title: document.title, engaged: Date.now() - state.lastInteraction < 90e3, visible: document.visibilityState === 'visible' };
+    if (share) {
+      body.pointer = state.pointer; body.viewport = { w: window.innerWidth, h: window.innerHeight };
+      body.scroll = { y: Math.round(window.scrollY), h: document.documentElement.scrollHeight };
+      body.overlay = overlayLabel();
+      body.hash = location.hash;
+      if (state.events.length) { body.events = state.events.splice(0); }
+    } else body.pointer = null;
+    body.page = share ? (location.hash.replace(/^#\/?/, '') || state.page) : state.page;
+    state.dirty = false; state.lastSent = Date.now();
+    FF.auth.api('/api/presence', 'POST', body).catch(() => {});
+    return force;
   }
   function start() {
     bind();
-    if (state.started) return;
+    if (state.started || EMBED) return;
     state.started = true;
     poll(true);
     sendPresence();
     state.timer = setInterval(() => poll(false), 15e3);
-    state.presenceTimer = setInterval(sendPresence, 15e3);
+    // Heartbeat every 15s; while the user is moving / clicking, send ~1x per second (live cursor for admin).
+    state.presenceTimer = setInterval(() => sendPresence(), 15e3);
+    state.fastTimer = setInterval(() => {
+      if (!sharing() || document.visibilityState !== 'visible') return;
+      const sc = Math.round(window.scrollY);
+      if (sc !== state.lastScroll) { state.lastScroll = sc; state.dirty = true; }
+      if (state.dirty && Date.now() - state.lastSent > 800) sendPresence();
+    }, 400);
     if (!state.pointerBound) {
       state.pointerBound = true;
       document.addEventListener('pointermove', (e) => {
         state.lastInteraction = Date.now();
-        if (localStorage.getItem('ff_presence_pointer') === '0') return;
-        state.pointer = { x: Math.round((e.clientX / Math.max(1, window.innerWidth)) * 100), y: Math.round((e.clientY / Math.max(1, window.innerHeight)) * 100) };
+        if (!sharing()) return;
+        state.pointer = { x: Math.round((e.clientX / Math.max(1, window.innerWidth)) * 1000) / 10, y: Math.round((e.clientY / Math.max(1, window.innerHeight)) * 1000) / 10 };
+        state.dirty = true;
       }, { passive: true });
-      ['click', 'keydown', 'wheel', 'touchstart'].forEach((type) => document.addEventListener(type, () => { state.lastInteraction = Date.now(); }, { passive: true }));
+      document.addEventListener('pointerdown', (e) => {
+        state.lastInteraction = Date.now();
+        if (!sharing()) return;
+        state.pointer = { x: Math.round((e.clientX / Math.max(1, window.innerWidth)) * 1000) / 10, y: Math.round((e.clientY / Math.max(1, window.innerHeight)) * 1000) / 10, down: true };
+        track('click', labelOf(e.target));
+      }, { passive: true, capture: true });
+      document.addEventListener('change', (e) => { if (e.target && e.target.matches && e.target.matches('select')) track('select', `${labelOf(e.target.closest('label') || e.target)} → ${e.target.options[e.target.selectedIndex] ? e.target.options[e.target.selectedIndex].text : ''}`); }, true);
+      window.addEventListener('hashchange', () => track('page', `Opened ${location.hash.replace(/^#\/?/, '') || 'home'}`));
+      document.addEventListener('visibilitychange', () => { track('tab', document.visibilityState === 'visible' ? 'Came back to the tab' : 'Switched away from the tab'); sendPresence(); });
+      ['keydown', 'wheel', 'touchstart'].forEach((type) => document.addEventListener(type, () => { state.lastInteraction = Date.now(); }, { passive: true }));
     }
   }
-  function stop() { clearInterval(state.timer); clearInterval(state.presenceTimer); state.timer = null; state.presenceTimer = null; state.started = false; }
+  function stop() { clearInterval(state.timer); clearInterval(state.presenceTimer); clearInterval(state.fastTimer); state.timer = null; state.presenceTimer = null; state.fastTimer = null; state.started = false; }
   function activity(page) {
     if (!FF.auth || !FF.auth.user) return;
     state.page = String(page || 'dashboard');
     state.lastInteraction = Date.now();
+    if (EMBED) return;
     FF.auth.api('/api/activity', 'POST', { page: state.page }).catch(() => {});
     sendPresence();
   }
@@ -132,6 +190,7 @@ window.FF = window.FF || {};
     const q = String(query).trim();
     clearTimeout(searchDebounceTimer);
     searchDebounceTimer = setTimeout(() => {
+      track('search', `Searched "${q}" in ${option || 'Search'}`);
       FF.auth.api('/api/activity', 'POST', { type: 'search', option: option || 'Search', query: q })
         .then(() => poll(false))
         .catch(() => {});
@@ -143,6 +202,6 @@ window.FF = window.FF || {};
       .then(() => poll(false))
       .catch(() => {});
   }
-  FF.notifications = { start, stop, poll, toggle, activity, logSearch, logClick, get state() { return state; } };
+  FF.notifications = { start, stop, poll, toggle, activity, logSearch, logClick, track, get state() { return state; } };
   bind();
 })(window.FF);
