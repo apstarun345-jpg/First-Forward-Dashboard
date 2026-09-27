@@ -9,23 +9,35 @@ window.FF = window.FF || {};
   'use strict';
   const U = FF.util;
   const NOTIFY_TYPES = [
-    { key: 'login',    label: '🔐 Login / welcome',    admin: false },
-    { key: 'signup',   label: '🆕 New account signup', admin: true  },
-    { key: 'report',   label: '📊 Report data update', admin: true  },
-    { key: 'monthly',  label: '📅 Monthly auto report', admin: false },
-    { key: 'activity', label: '👀 User page opens',    admin: true  },
-    { key: 'click',    label: '👆 Button / option use', admin: true  },
-    { key: 'search',   label: '🔍 Searches',           admin: true  },
-    { key: 'settings', label: '⚙️ Settings changes',   admin: true  },
-    { key: 'user',     label: '👤 Profile / account',  admin: false },
-    { key: 'location', label: '📍 Location shares',    admin: true  }
+    // Non-admin relevant types (user ko apne hisse ke alerts):
+    { key: 'login',    label: '🔐 Login / welcome',       user: true,  admin: true },
+    { key: 'monthly',  label: '📅 Monthly auto report',    user: true,  admin: true },
+    { key: 'user',     label: '👤 Account / security',     user: true,  admin: true },
+    { key: 'info',     label: 'ℹ️ Info / updates',         user: true,  admin: true },
+    // Admin-only activity types (sab users ki activity admin ko hi milti hai):
+    { key: 'signup',   label: '🆕 New account signup',     user: false, admin: true },
+    { key: 'report',   label: '📊 Report data update',     user: false, admin: true },
+    { key: 'activity', label: '👀 User page opens',        user: false, admin: true },
+    { key: 'click',    label: '👆 Button / option use',    user: false, admin: true },
+    { key: 'search',   label: '🔍 Searches',               user: false, admin: true },
+    { key: 'settings', label: '⚙️ Settings changes',       user: false, admin: true },
+    { key: 'location', label: '📍 Location shares',        user: false, admin: true }
   ];
   const DEFAULT_PREFS = { login: true, signup: true, report: true, monthly: true, activity: true, click: false, search: true, settings: true, user: true, location: false, info: true, sound: true, push: true };
   const state = { started: false, bound: false, timer: null, presenceTimer: null, fastTimer: null, lastAt: '', items: [], unread: 0, firstPoll: true, page: 'home', pointer: null, people: [], lastInteraction: Date.now(), pointerBound: false, events: [], dirty: false, lastSent: 0, lastScroll: -1, pushOn: false, prefs: { ...DEFAULT_PREFS }, audioCtx: null };
   const EMBED = new URLSearchParams(location.search).get('embed') === 'live';
   const sharing = () => localStorage.getItem('ff_presence_pointer') !== '0';
 
-  // ---- preferences -------------------------------------------------------------------------------
+  function hasAccess() {
+    const u = FF.auth && FF.auth.user;
+    if (!u) return false;
+    if (u.role === 'admin') return true;
+    return u.notifyAccess !== false;
+  }
+  function syncBellVisibility() {
+    const btn = U.$('#notification-btn'), wrap = btn && btn.closest('.notification-wrap');
+    if (wrap) wrap.hidden = !hasAccess();
+  }
   function loadPrefsLocal() {
     try {
       const raw = localStorage.getItem('ff_notify_prefs');
@@ -38,6 +50,8 @@ window.FF = window.FF || {};
   function savePrefsLocal() { try { localStorage.setItem('ff_notify_prefs', JSON.stringify(state.prefs)); } catch {} }
   async function loadPrefs() {
     loadPrefsLocal();
+    syncBellVisibility();
+    if (!hasAccess()) return;
     try {
       const out = await FF.auth.api('/api/notifications/prefs');
       if (out && out.prefs) state.prefs = { ...DEFAULT_PREFS, ...out.prefs };
@@ -122,7 +136,6 @@ window.FF = window.FF || {};
     if (!pop) return;
     const browser = typeof Notification !== 'undefined';
     const permission = browser ? Notification.permission : 'unsupported';
-    const isAdmin = FF.auth.user && FF.auth.user.role === 'admin';
     const pwa = isInstalledPWA();
     const canPush = 'serviceWorker' in navigator && 'PushManager' in window;
 
@@ -148,9 +161,11 @@ window.FF = window.FF || {};
       <label class="check small"><input type="checkbox" data-pref-toggle="push" ${state.prefs.push !== false ? 'checked' : ''}> 📲 Push notifications (app band ho tab bhi)</label>
     </div>`;
 
-    // Per-type preferences
-    const types = NOTIFY_TYPES.filter((t) => !t.admin || isAdmin);
+    // Per-type preferences — admin ko sab types (activity + data); normal user ko sirf apne types
+    const isAdmin = FF.auth.user && FF.auth.user.role === 'admin';
+    const types = NOTIFY_TYPES.filter((t) => isAdmin ? t.admin : t.user);
     const prefsHtml = `<details class="notify-prefs"><summary>⚙️ Notification preferences · konse alerts chahiye?</summary>
+      ${isAdmin ? `<div class="notify-pref-hint dim small">👑 Admin ko sab users ki har activity yahan + browser + mobile push pe milti hai. Band kar ke unwanted types hata sakte ho.</div>` : ''}
       <div class="notify-pref-list">
         ${types.map((t) => `<label class="check small"><input type="checkbox" data-pref-toggle="${t.key}" ${state.prefs[t.key] !== false ? 'checked' : ''}> ${t.label}</label>`).join('')}
       </div></details>`;
@@ -263,7 +278,7 @@ window.FF = window.FF || {};
     const btn = U.$('#notification-btn');
     if (!btn) return;
     state.bound = true;
-    btn.addEventListener('click', (e) => { e.stopPropagation(); toggle(); unlockAudio(); });
+    btn.addEventListener('click', (e) => { if (!hasAccess()) return; e.stopPropagation(); toggle(); unlockAudio(); });
     document.addEventListener('pointerdown', unlockAudio, { once: true, passive: true });
     document.addEventListener('keydown', unlockAudio, { once: true, passive: true });
     document.addEventListener('click', (e) => {
@@ -322,7 +337,9 @@ window.FF = window.FF || {};
   }
   function start() {
     bind();
+    syncBellVisibility();
     if (state.started || EMBED) return;
+    if (!hasAccess()) { state.started = true; return; } // bell off — no polling, no push
     state.started = true;
     loadPrefs().then(() => { setupPush(true); render(); });
     poll(true);

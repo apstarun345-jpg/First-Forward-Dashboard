@@ -215,7 +215,7 @@ function verifyPassword(password, stored) {
   return ref.length === test.length && crypto.timingSafeEqual(ref, test);
 }
 const normUser = (u) => String(u || '').trim().toLowerCase().replace(/[^a-z0-9._@-]/g, '').slice(0, 60);
-const DEFAULT_NOTIFY_PREFS = { login: true, signup: true, report: true, monthly: true, activity: true, click: false, search: true, settings: true, user: true, location: false, info: true, sound: true, push: true };
+const DEFAULT_NOTIFY_PREFS = { login: true, signup: true, report: true, monthly: true, activity: true, click: true, search: true, settings: true, user: true, location: true, info: true, sound: true, push: true };
 function normalizeNotifyPrefs(p) {
   const out = { ...DEFAULT_NOTIFY_PREFS };
   if (p && typeof p === 'object') for (const k of Object.keys(DEFAULT_NOTIFY_PREFS)) if (p[k] !== undefined) out[k] = !!p[k];
@@ -223,7 +223,7 @@ function normalizeNotifyPrefs(p) {
 }
 function publicUser(u) {
   if (!u) return null;
-  return { username: u.username, name: u.name || u.username, email: u.email || '', mobile: u.mobile || '', avatar: u.avatar || '', role: u.role, approved: !!u.approved, permissions: u.role === 'admin' ? allPermKeysNow() : (u.permissions || []), createdAt: u.createdAt, lastLoginAt: u.lastLoginAt || null, mustChangePassword: !!u.mustChangePassword, lastLocation: u.lastLocation || null, notificationsSeenAt: u.notificationsSeenAt || null, notifyPrefs: normalizeNotifyPrefs(u.notifyPrefs) };
+  return { username: u.username, name: u.name || u.username, email: u.email || '', mobile: u.mobile || '', avatar: u.avatar || '', role: u.role, approved: !!u.approved, permissions: u.role === 'admin' ? allPermKeysNow() : (u.permissions || []), createdAt: u.createdAt, lastLoginAt: u.lastLoginAt || null, mustChangePassword: !!u.mustChangePassword, lastLocation: u.lastLocation || null, notificationsSeenAt: u.notificationsSeenAt || null, notifyAccess: u.role === 'admin' ? true : (u.notifyAccess !== false), notifyPrefs: normalizeNotifyPrefs(u.notifyPrefs) };
 }
 function findUser(username) { return db.users.find((u) => u.username === normUser(username)) || null; }
 function findUserByLogin(raw) {
@@ -263,8 +263,12 @@ function notifyItems() {
 }
 function notificationVisible(item, user) {
   if (!item || !user) return false;
+  // Admin ko HAR notification dikhta hai (sab users ki activity, reports, settings — total panel)
+  if (user.role === 'admin') return true;
+  // Non-admin user: sirf apne personal target wale notifications dikhte hain (login welcome, password change, account created, broadcast).
+  // Aur bhi: admin ne us user ko notification access diya ho tab hi.
+  if (user.notifyAccess === false) return false;
   if (item.target === 'broadcast') return true;
-  if (item.target === 'admin') return user.role === 'admin';
   return item.target === `user:${user.username}`;
 }
 function recordNotification({ type = 'info', title, body, target = 'admin', meta = {} }) {
@@ -328,7 +332,7 @@ function noteActivity(user, page) {
   const key = `${user.username}:${cleanPage}`;
   if (Date.now() - (activityLast.get(key) || 0) < 60e3) return null;
   activityLast.set(key, Date.now());
-  return recordNotification({ type: 'activity', title: 'User ne app kholi', body: `${user.name || user.username} ne ${cleanPage} open kiya.`, target: 'admin', meta: { username: user.username, page: cleanPage } });
+  return recordNotification({ type: 'activity', title: '👀 User ne page khola', body: `${user.name || user.username} ne "${cleanPage}" open kiya.`, target: 'admin', meta: { username: user.username, page: cleanPage } });
 }
 function sha(token) { return crypto.createHash('sha256').update(token).digest('hex'); }
 async function createSession(username) {
@@ -603,11 +607,13 @@ function pushFanout(item) {
   const subs = pushSubs().filter((s) => {
     const u = findUser(s.username);
     if (!u) return false;
+    if (u.role !== 'admin' && u.notifyAccess === false) return false;
     const prefs = normalizeNotifyPrefs(u.notifyPrefs);
     if (prefs.push === false) return false;
     if (prefs[item.type] === false) return false;
+    // Admin ko HAR notification push hota hai; normal user ko sirf apna personal/broadcast
+    if (u.role === 'admin') return true;
     if (item.target === 'broadcast') return true;
-    if (item.target === 'admin') return u.role === 'admin';
     return item.target === `user:${s.username}`;
   });
   if (!subs.length) return;
@@ -861,6 +867,7 @@ async function handleApi(req, res, url) {
   }
   if (p === '/api/push/subscribe' && method === 'POST') {
     if (!user) throw new HttpError(401, 'Login required');
+    if (user.role !== 'admin' && user.notifyAccess === false) throw new HttpError(403, 'Notifications access disabled by admin.');
     const body = await readBody(req);
     const sub = body.subscription;
     if (!sub || !String(sub.endpoint || '').startsWith('http') || !sub.keys || !sub.keys.p256dh || !sub.keys.auth) throw new HttpError(400, 'Subscription invalid hai.');
@@ -887,29 +894,36 @@ async function handleApi(req, res, url) {
     if (type === 'search' || body.query) {
       const q = String(body.query || '').trim().slice(0, 120);
       const opt = String(body.option || body.page || 'Search').trim().slice(0, 80);
-      if (q) {
-        recordNotification({
-          type: 'search',
-          title: `🔍 Search: ${q}`,
-          body: `${user.name || user.username} (${user.mobile || 'No Mobile'}) ne ${opt} me "${q}" search kiya.`,
-          target: 'broadcast',
-          meta: { username: user.username, name: user.name, mobile: user.mobile, option: opt, query: q, at: new Date().toISOString() }
-        });
+      if (q && user.role !== 'admin') {
+        // Search notifications SIRF admin ko (throttle: same query 15s me ek baar per user)
+        const sk = `search:${user.username}:${q}`;
+        if (!activityLast.has(sk) || Date.now() - activityLast.get(sk) > 15e3) {
+          activityLast.set(sk, Date.now());
+          recordNotification({
+            type: 'search',
+            title: `🔍 Search: ${q}`,
+            body: `${user.name || user.username}${user.mobile ? ` (${user.mobile})` : ''} ne ${opt} me "${q}" search kiya.`,
+            target: 'admin',
+            meta: { username: user.username, name: user.name, mobile: user.mobile, option: opt, query: q }
+          });
+        }
       }
     } else if (type === 'click' || body.action === 'click') {
       const opt = String(body.option || body.page || 'Option').trim().slice(0, 80);
       const det = String(body.details || '').trim().slice(0, 120);
-      // Throttle click notifications: ek hi option ke liye 5s me ek baar
-      const ck = `click:${user.username}:${opt}`;
-      if (!activityLast.has(ck) || Date.now() - activityLast.get(ck) > 5e3) {
-        activityLast.set(ck, Date.now());
-        recordNotification({
-          type: 'click',
-          title: `👆 ${opt}`,
-          body: `${user.name || user.username} ne "${opt}"${det ? ` — ${det}` : ''} use kiya.`,
-          target: user.role === 'admin' ? 'admin' : 'broadcast',
-          meta: { username: user.username, name: user.name, mobile: user.mobile, option: opt, details: det, at: new Date().toISOString() }
-        });
+      if (user.role !== 'admin') {
+        // Click/use notifications SIRF admin ko (throttle: 8s per option per user)
+        const ck = `click:${user.username}:${opt}`;
+        if (!activityLast.has(ck) || Date.now() - activityLast.get(ck) > 8e3) {
+          activityLast.set(ck, Date.now());
+          recordNotification({
+            type: 'click',
+            title: `👆 ${opt}`,
+            body: `${user.name || user.username} ne "${opt}"${det ? ` — ${det}` : ''} use kiya.`,
+            target: 'admin',
+            meta: { username: user.username, name: user.name, mobile: user.mobile, option: opt, details: det }
+          });
+        }
       }
     } else if (type === 'settings') {
       const det = String(body.details || '').trim().slice(0, 200);
@@ -1153,7 +1167,13 @@ async function handleApi(req, res, url) {
       if (body.name !== undefined) target.name = String(body.name).trim().slice(0, 80) || target.username;
       if (body.email !== undefined) target.email = String(body.email).trim().slice(0, 120);
       if (body.mobile !== undefined) target.mobile = String(body.mobile).replace(/[^\d+]/g, '').slice(0, 16);
+      // notifyAccess: admin control karta hai ki user ko notifications/bell dikhegi ya nahi
+      if (Object.prototype.hasOwnProperty.call(body, 'notifyAccess')) target.notifyAccess = body.notifyAccess !== false;
       if (body.password) { if (!validPassword(body.password)) throw new HttpError(400, 'Password kam se kam 6 characters ka ho.'); target.password = hashPassword(body.password); target.mustChangePassword = true; }
+      // Agar admin ne user ki notification access band ki ya user ko unapproved kiya → uske push subscriptions hata do
+      if (target.notifyAccess === false || !target.approved) {
+        for (let i = pushSubs().length - 1; i >= 0; i--) if (pushSubs()[i].username === target.username) pushSubs().splice(i, 1);
+      }
       if (!target.approved) for (const [k, s] of Object.entries(db.sessions)) if (s.username === target.username) delete db.sessions[k];
       await persist('users'); await persist('sessions');
       const afterUser = userSnapshot(target);
