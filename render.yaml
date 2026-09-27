@@ -27,6 +27,14 @@ services:
       # Persistent disk mount — isse har deploy par users/settings reset nahi honge
       - key: DATA_DIR
         value: "/data"
+      # 📲 Mobile push (OS notification panel): VAPID keys durable rehni chahiye. Disk + cloud storage
+      # dono me keys save hoti hain; env se pin karna optional hai (multi-instance ke liye recommended).
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: PUSH_TTL_SECONDS
+        value: "86400"
     disk:
       name: ffdata
       mountPath: /data

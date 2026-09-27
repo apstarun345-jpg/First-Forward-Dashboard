@@ -1,9 +1,10 @@
 // Versioned app shell + offline data cache.
 // Auth login/logout/password endpoints are NEVER cached. Sheet data (gviz), /api/auth/me and
 // /api/settings are network-first with a cached fallback — internet na ho to last loaded data se app khulta hai.
-const CACHE_NAME = 'apnapayment-v12';
+const CACHE_NAME = 'apnapayment-v13';
 const DATA_CACHE = 'ff-data-v3';
-const ASSETS = ['./', './index.html', './styles.css?v=13', './favicon.svg?v=5', './icon-192.png?v=5', './icon-512.png?v=5'];
+const STASH_CACHE = 'ff-push-stash-v1'; // pushsubscriptionchange ke waqt bani subscription yahan rakho
+const ASSETS = ['./', './index.html', './styles.css?v=14', './favicon.svg?v=5', './icon-192.png?v=5', './icon-512.png?v=5'];
 const OFFLINE_API = (path) => path === '/api/gviz' || path === '/api/auth/me' || path === '/api/settings';
 
 // ---- 🔊 Short notification beep (generated with Web Audio on push, no external asset needed) ----
@@ -23,6 +24,7 @@ self.addEventListener('push', e => {
   let data = {};
   try { data = e.data ? e.data.json() : {}; } catch { data = { title: 'Dashboard update', body: '' }; }
   const title = data.title || 'First Forward Dashboard';
+  const sound = data.sound !== false;
   const options = {
     body: data.body || 'Naya update aaya hai — app khol ke dekho.',
     icon: 'icon-192.png',
@@ -30,26 +32,114 @@ self.addEventListener('push', e => {
     tag: data.tag || 'ff',
     renotify: true,
     requireInteraction: !!data.persist,
-    silent: data.sound === false,
-    // Mobile vibration pattern (works on Android Chrome): 200ms vibrate, 100ms gap, 200ms vibrate
-    vibrate: data.sound === false ? undefined : [200, 100, 200],
-    data: { link: data.link || '', sound: data.sound !== false }
+    // Mobile vibration pattern (Android Chrome): 200ms vibrate, 100ms gap, 200ms vibrate
+    vibrate: sound ? [200, 100, 200] : undefined,
+    data: { link: data.link || '', sound }
   };
-  e.waitUntil(self.registration.showNotification(title, options));
+  // Chrome ka rule: har push event par ek notification dikhani hi padti hai, warna
+  // "notification not shown" error aata hai aur future push band ho sakte hain.
+  e.waitUntil(self.registration.showNotification(title, options).catch(err => console.warn('showNotification:', err && err.message)));
 });
 self.addEventListener('notificationclick', e => {
   e.notification.close();
-  const link = (e.notification.data && e.notification.data.link) || '';
+  const raw = (e.notification.data && e.notification.data.link) || '';
+  // Link '#/targets' jaisa hash hota hai — SW ki script URL ('/sw.js') se resolve karne par
+  // '/sw.js#/targets' ban jaata tha. Isliye registration.scope (app root) se banao.
+  let target = self.registration.scope || './';
+  try { target = new URL(raw || './', self.registration.scope || self.location.origin + '/').href; } catch { /* keep scope */ }
   e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
     for (const client of list) {
-      if ('focus' in client) { if (link) client.navigate(link).catch(() => {}); return client.focus(); }
+      if ('focus' in client) {
+        client.navigate(target).catch(() => {});
+        return client.focus();
+      }
     }
-    return self.clients.openWindow(link || './');
+    return self.clients.openWindow(target);
   }));
 });
+
+// ---- 🔁 Subscription refresh: push service khud subscription badal deta hai (Android par aksar) ----
+// Purana code kuch nahi karta tha → subscription chup-chaap dead ho jaati thi aur panel silent.
+// Ab: nayi subscription banao, server ko bhejo; session na ho to stash kar do (app khulte hi flush).
+async function stashPut(key, value) {
+  const cache = await caches.open(STASH_CACHE);
+  await cache.put(new Request(`/__ff_push_stash__/${key}`), new Response(JSON.stringify(value)));
+}
+async function stashGet(key) {
+  const cache = await caches.open(STASH_CACHE);
+  const res = await cache.match(new Request(`/__ff_push_stash__/${key}`));
+  return res ? res.json().catch(() => null) : null;
+}
+async function stashDel(key) {
+  const cache = await caches.open(STASH_CACHE);
+  await cache.delete(new Request(`/__ff_push_stash__/${key}`));
+}
+async function serverVapidKey() {
+  try {
+    const res = await fetch('/api/push/vapid', { credentials: 'include' });
+    if (!res.ok) return null;
+    const out = await res.json();
+    return out && out.publicKey ? out.publicKey : null;
+  } catch { return null; }
+}
+/** Current VAPID key se (re)subscribe karo aur server ko bhejo. 'ok' | 'stashed' | 'failed' */
+async function resubscribe(reason) {
+  if (!self.registration || !self.registration.pushManager) return 'failed';
+  const publicKey = await serverVapidKey();
+  if (!publicKey) return 'failed'; // logged out ya server down — page kholne par dobara try hoga
+  const pad = '='.repeat((4 - (publicKey.length % 4)) % 4);
+  const bin = atob(publicKey.replace(/-/g, '+').replace(/_/g, '/') + pad);
+  const key = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) key[i] = bin.charCodeAt(i);
+  let sub = null;
+  try {
+    const old = await self.registration.pushManager.getSubscription();
+    sub = old;
+    if (old) {
+      // Purani subscription kisi AUR VAPID key se bani hai? Drop karke nayi banao.
+      const cur = old.options && old.options.applicationServerKey ? new Uint8Array(old.options.applicationServerKey) : null;
+      const same = !!cur && cur.length === key.length && cur.every((b, i) => b === key[i]);
+      if (!same) { await old.unsubscribe().catch(() => {}); sub = null; }
+    }
+    if (!sub) sub = await self.registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+  } catch (err) { console.warn('push resubscribe:', (err && err.message) || err); return 'failed'; }
+  if (!sub) return 'failed';
+  try {
+    const res = await fetch('/api/push/subscribe', {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subscription: sub.toJSON(), reason: reason || 'sw' })
+    });
+    if (res.ok) { await stashDel('pending'); return 'ok'; }
+  } catch { /* network */ }
+  // Session expire / offline → subscription stash kar do, app khulte hi page ise server ko bhej dega.
+  try { await stashPut('pending', { subscription: sub.toJSON(), reason: reason || 'sw', at: new Date().toISOString() }); } catch { /* ignore */ }
+  return 'stashed';
+}
 self.addEventListener('pushsubscriptionchange', e => {
-  // Naya subscription chahiye hoga — app khulte hi notifications.js re-subscribe kar lega.
-  e.waitUntil(Promise.resolve());
+  e.waitUntil(resubscribe('pushsubscriptionchange').catch(() => {}));
+});
+// Page se commands: pending subscription flush, forced re-subscribe, aur OS-panel test notification.
+self.addEventListener('message', e => {
+  const msg = e.data || {};
+  if (msg.type === 'ff-push-flush') {
+    e.waitUntil((async () => {
+      const pending = await stashGet('pending');
+      if (!pending || !pending.subscription) return;
+      try {
+        const res = await fetch('/api/push/subscribe', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pending) });
+        if (res.ok) await stashDel('pending');
+      } catch { /* offline — next open par retry */ }
+    })());
+    return;
+  }
+  if (msg.type === 'ff-push-resubscribe') { e.waitUntil(resubscribe(msg.reason || 'manual')); return; }
+  if (msg.type === 'ff-local-test') {
+    e.waitUntil(self.registration.showNotification('🔔 Test notification', {
+      body: 'Ye alert phone ke notification panel me aaya — OS notifications kaam kar rahe hain ✓',
+      icon: 'icon-192.png', badge: 'icon-192.png', tag: 'ff-test', vibrate: [200, 100, 200]
+    }).catch(() => {}));
+  }
 });
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);

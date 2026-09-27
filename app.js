@@ -617,12 +617,45 @@ window.FF = window.FF || {};
   }
 
   let syncTimer = null;
+  let swRegistrationPromise = null;
+  /** 📲 Service worker ko notifications.start() se PEHLE register karo — warna push subscribe
+      `navigator.serviceWorker.ready` par atak jaata tha aur mobile panel silent reh jaata tha. */
+  function registerServiceWorker() {
+    if (!('serviceWorker' in navigator)) return Promise.resolve(null);
+    if (!swRegistrationPromise) {
+      swRegistrationPromise = navigator.serviceWorker.register('./sw.js')
+        .then((reg) => {
+          console.log('SW registered · scope', reg.scope, '· push', !!(reg.pushManager));
+          // SW ne khud skipWaiting() kiya hai; update milte hi clients.claim() ho jaata hai.
+          reg.addEventListener('updatefound', () => {
+            const nw = reg.installing;
+            if (nw) nw.addEventListener('statechange', () => { if (nw.state === 'activated' && FF.notifications && FF.notifications.retryPush) FF.notifications.retryPush(); });
+          });
+          return reg;
+        })
+        .catch((err) => {
+          console.warn('SW registration failed', err && err.message);
+          swRegistrationPromise = null; // agli baar retry ho sake
+          return null;
+        });
+    }
+    return swRegistrationPromise;
+  }
   const EMBED_LIVE = new URLSearchParams(location.search).get('embed') === 'live' && window.top !== window;
   function storageBanner(storage) {
     const old = U.$('#storage-banner'); if (old) old.remove();
     if (!storage || (storage.durable !== false && !storage.warning && !storage.error)) return;
     const el = U.h(`<div class="storage-banner" id="storage-banner" role="alert"><span>⚠️ <b>Settings aur user details permanent save nahi ho rahe</b> — ${U.esc(storage.error || 'Render restart / deploy par sab default ho jaayega.')} </span><a class="btn small primary" href="#/settings?tab=backup">☁️ Google Sheet storage setup karo</a><button class="btn small ghost" aria-label="Hide" data-hide-banner>✕</button></div>`);
     el.querySelector('[data-hide-banner]').addEventListener('click', () => el.remove());
+    const main = U.$('#main');
+    if (main && main.parentNode) main.parentNode.insertBefore(el, main); else document.body.prepend(el);
+  }
+  /** 📲 Push health banner (admin) — VAPID keys durable na hon to phone panel silent ho jaata hai. */
+  function pushBanner(push) {
+    const old = U.$('#push-banner'); if (old) old.remove();
+    if (!push || push.enabled === false || !push.warning) return;
+    const el = U.h(`<div class="storage-banner" id="push-banner" role="alert"><span>📲 <b>Mobile push notifications toot sakte hain</b> — ${U.esc(push.warning)} </span><button class="btn small ghost" aria-label="Hide" data-hide-push-banner>✕</button></div>`);
+    el.querySelector('[data-hide-push-banner]').addEventListener('click', () => el.remove());
     const main = U.$('#main');
     if (main && main.parentNode) main.parentNode.insertBefore(el, main); else document.body.prepend(el);
   }
@@ -651,18 +684,15 @@ window.FF = window.FF || {};
     if (FF.preloader) FF.preloader.preloadAll(false).catch(console.warn);
     renderCurrent();
     if (FF.config.loginAnimation !== false) FF.auth.splash(FF.auth.user);
+    registerServiceWorker(); // push notifications ke liye SW pehle ready ho
     if (FF.notifications) FF.notifications.start();
     liveShareChip();
     const u = FF.auth.user;
-    if (FF.auth.isAdmin()) FF.auth.api('/api/health').then(h => storageBanner(h.storage)).catch(() => {});
+    if (FF.auth.isAdmin()) FF.auth.api('/api/health').then(h => { storageBanner(h.storage); pushBanner(h.push); }).catch(() => {});
     if (u && u.mustChangePassword) setTimeout(() => U.toast('⚠️ Default password chal raha hai — Settings → My account se badlo', 'err'), 900);
     // Location prompt + PWA
     setTimeout(requestLocationOnOpen, 2000);
     updateInstallBtn();
-    // Register service worker for PWA
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('./sw.js').then(() => console.log('SW registered')).catch(e => console.warn('SW failed', e));
-    }
     // Auto background sync every 5 minutes when tab is open
     clearInterval(syncTimer);
     syncTimer = setInterval(() => {
@@ -681,6 +711,6 @@ window.FF = window.FF || {};
     if (ok) onLogin();
   }
 
-  FF.app = { storageBanner, liveShareChip, navigate, updateParams, refresh, openDrawer, closeDrawer, renderSidebar, renderCurrent, renderTopUser, updateStatus, onLogin, onBackgroundDataUpdated, promptInstall, enhanceCharts, themeMode, toggleThemeMode, lang, setLang, toggleLangMenu, PAGES, get current() { return current; } };
+  FF.app = { storageBanner, pushBanner, liveShareChip, navigate, updateParams, refresh, openDrawer, closeDrawer, renderSidebar, renderCurrent, renderTopUser, updateStatus, onLogin, onBackgroundDataUpdated, promptInstall, enhanceCharts, themeMode, toggleThemeMode, lang, setLang, toggleLangMenu, PAGES, get current() { return current; } };
   document.addEventListener('DOMContentLoaded', init);
 })(window.FF);

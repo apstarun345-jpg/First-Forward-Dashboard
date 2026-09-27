@@ -47,6 +47,38 @@ this branch to the existing service.
    password are unchanged. Test explicit logout separately. Sessions remain valid for the
    configured `SESSION_DAYS` (default 30), unless revoked or browser cookies are cleared.
 
+## Mobile push notifications (OS notification panel)
+
+Alerts must reach the phone's notification panel even when the app is closed. That path is
+web push, and it depends on the **VAPID keypair staying the same across deploys**: a browser
+subscription is bound to the `applicationServerKey` it was created with, so a new keypair makes
+the push service reject every message with `403`. The symptom is easy to misread — the in-app 🔔
+feed keeps working (it polls) while the phone panel goes completely silent.
+
+Keys are therefore resolved in this order:
+
+1. `VAPID_PUBLIC_KEY` + `VAPID_PRIVATE_KEY` environment variables (explicit pin).
+2. Durable storage — `notify.vapid` in the same Apps Script / Sheets record as the users and
+   notification feed. This is what makes push survive a redeploy on a service with no disk.
+3. `DATA_DIR/vapid.json` (local `files` backend, or a within-boot cache on a container disk).
+4. Generated once, then written to both the durable store and the file.
+
+After deploying, verify:
+
+1. `GET /api/health` → `push.enabled` is `true`, `push.durable` is `true`, `push.warning` is
+   `null`, `push.ttl` is `86400`. Admins also see a 📲 banner in the app when `push.warning`
+   is set. If `durable` is `false`, set the two `VAPID_*` variables (or attach a disk) — otherwise
+   the next deploy silently breaks every registered phone.
+2. Restart the service once and confirm `GET /api/push/vapid` returns **the same** `publicKey`.
+3. On the phone: install the app (Android Chrome menu → Install app; iOS 16.4+ → Add to Home
+   Screen), open the 🔔 panel, tap **📲 Mobile notifications on karo**, then **🛰 Server push test**.
+   The alert should appear in the OS panel with the app closed. `GET /api/push/status` shows the
+   registered device count plus `lastOk` / `lastError` for that account.
+4. Existing devices that subscribed under an older (now lost) key heal themselves: on the next app
+   open the client compares the server key with its subscription and re-subscribes when they differ.
+   `sw.js` also handles `pushsubscriptionchange`, and stashes the new subscription if the session
+   had expired so the page can flush it on the next open.
+
 If current data was already lost on an earlier deployment, the code cannot reconstruct it;
 restore a known backup or recreate the missing accounts/settings. If sessions were lost,
 one new login is necessary after durable storage is configured.

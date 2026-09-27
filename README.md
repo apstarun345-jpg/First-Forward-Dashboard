@@ -62,7 +62,15 @@ StockDataa ki raw rows Excel export ke waqt on-demand aati hain). Server bhi Goo
 
 **Comparison correction:** EIR me GV Partner ka `master ID 5845036` aata hai. **GV vs First Forward** page First Forward side se `5845036` (aur configured GV TL marker) ko pehle exclude karta hai, phir GV Master ke against compare karta hai — isliye GV double-count nahi hota. Admin Settings → Data source me ID/marker badal sakta hai.
 
-**Notifications:** top-right 🔔 feed me non-admin user login/page-open, consented location share aur Google Sheet ke newest-day grouped report changes aate hain. Server lightweight grouped query se FF (GV ID excluded) aur GV ko har 5 minutes check karta hai; feed kholte waqt bhi check hota hai. “Browser alerts on karo” ko ek baar allow karne par tab background me hone par native browser alert bhi aata hai. Dashboard data khud auto-refresh nahi hota; notification aane par ↻ dabao.
+**Notifications:** top-right 🔔 feed me non-admin user login/page-open, consented location share aur Google Sheet ke newest-day grouped report changes aate hain.
+
+**📱 Mobile / OS notification panel (web push):** bell panel me **"📲 Mobile notifications on karo"** ek baar allow karo — uske baad alerts **phone ke notification panel** me aate hain, **app band ho tab bhi** (Android Chrome/Edge/Samsung Internet; iOS 16.4+ par pehle "Add to Home Screen" se install karna zaroori hai). Panel me do test button hain:
+- **📳 Panel test** — service worker se seedha OS notification (permission + panel kaam kar raha hai ya nahi)
+- **🛰 Server push test** — server se real web push (`/api/push/test`), delivery status turant dikhta hai
+
+Push ka health/diagnostics: `GET /api/push/status` (apne devices, last delivery, last error) aur admin ke liye `/api/health` → `push` (`keySource`, `durable`, `devices`, `ttl`).
+
+> ⚠️ **VAPID keys hamesha durable storage me rahni chahiye.** Browser subscription us `applicationServerKey` se bandhi hoti hai jis se wo bani thi — keypair badalte hi push service har message ko **403** se reject kar deta hai: in-app bell chalta rehta hai par **phone ka panel silent** ho jaata hai. Isliye keys ab `DATA_DIR/vapid.json` ke bharose nahi hain (Render par wo container disk har deploy/spin-down par mit jaati hai) — wo durable store (`notify.vapid`) me save hoti hain, aur env se pin bhi kar sakte ho. Client bhi self-heal karta hai: server ki key badli ho ya server ne dead subscription drop kar di ho to app khulte hi nayi subscription ban jaati hai. Server lightweight grouped query se FF (GV ID excluded) aur GV ko har 5 minutes check karta hai; feed kholte waqt bhi check hota hai. “Browser alerts on karo” ko ek baar allow karne par tab background me hone par native browser alert bhi aata hai. Dashboard data khud auto-refresh nahi hota; notification aane par ↻ dabao.
 
 **Location privacy:** location automatic/silent tracking nahi hai. User Settings → My account → “Share my location” par browser permission de to sirf latest coordinates/accuracy save hoti hai, aur admin Users & access me Maps link dekh sakta hai.
 
@@ -150,6 +158,8 @@ For **same-sheet encrypted storage**, follow [SHEETS_STORAGE.md](SHEETS_STORAGE.
 | `DATA_DIR` | Local: `./data`; production: set `/data` | Users / sessions / settings JSON folder (persistent disk ho to wahan) |
 | `SHEET_ID` | sheet ki current ID | Default Google Sheet ID (Settings me bhi badal sakte ho) |
 | `CACHE_SECONDS` | `600` | Server cache default (Settings → Data source override karta hai) |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | – (auto, durable store me save) | Web-push keys ko explicitly pin karo. Set na karo to server khud banata hai aur **durable storage** (Apps Script / Sheets / `DATA_DIR`) me save karta hai |
+| `PUSH_TTL_SECONDS` | `86400` | Push message kitni der tak retry-window me rahe (phone off/doze ho to drop na ho) |
 | `FRAME_PROTECTION` | – | `1` = site ko kisi aur website ke iframe mein khulne se roko |
 | `GVIZ_BASE` | `https://docs.google.com` | Sirf local testing (mock server). Production mein set mat karo |
 
