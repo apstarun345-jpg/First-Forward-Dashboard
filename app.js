@@ -395,7 +395,18 @@ window.FF = window.FF || {};
     }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 300000 });
   }
 
+  function showKpiSummary(title, value, foot) {
+    U.$('#kpi-summary-modal')?.remove();
+    const modal = document.createElement('div');
+    modal.id = 'kpi-summary-modal'; modal.className = 'kpi-modal-backdrop';
+    modal.innerHTML = `<section class="kpi-modal" role="dialog" aria-modal="true" aria-label="${esc(title)}"><button class="icon-btn kpi-modal-close" aria-label="Close">✕</button><span class="kpi-modal-kicker">KPI SUMMARY · ${esc(FF.pages[current.page]?.title || current.page)}</span><h2>${esc(title)}</h2><strong>${esc(value)}</strong><p>${esc(foot || 'Selected KPI total.')}</p><button class="btn primary kpi-modal-done">Done</button></section>`;
+    document.body.append(modal);
+    const close = () => modal.remove();
+    modal.addEventListener('click', (e) => { if (e.target === modal || e.target.closest('.kpi-modal-close,.kpi-modal-done')) close(); });
+  }
+
   function bind() {
+    document.body.classList.toggle('sidebar-auto', localStorage.getItem('ff_sidebar_auto') !== '0');
     window.addEventListener('hashchange', () => { renderCurrent(); toggleUserMenu(false); });
     U.$('#menu-btn').addEventListener('click', () => document.body.classList.toggle('side-open'));
     U.$('#side-backdrop').addEventListener('click', closeSidebar);
@@ -410,6 +421,14 @@ window.FF = window.FF || {};
     document.addEventListener('click', (e) => {
       if (!e.target.closest('#user-menu') && !e.target.closest('#user-btn')) toggleUserMenu(false);
       if (e.target.closest('#user-menu a')) toggleUserMenu(false);
+      const kpi = e.target.closest('.kpi');
+      if (kpi && !e.target.closest('a,button:not(.kpi)')) {
+        const title = kpi.dataset.kpiTitle || U.$('.kpi-title', kpi)?.textContent || 'KPI summary';
+        const value = kpi.dataset.kpiValue || U.$('.kpi-value', kpi)?.innerText || '—';
+        const foot = kpi.dataset.kpiFoot || U.$('.kpi-foot', kpi)?.innerText || '';
+        showKpiSummary(title, value, foot);
+        return;
+      }
       const sh = e.target.closest('[data-share]');
       if (sh) { e.preventDefault(); share(sh); return; }
       const act = e.target.closest('[data-action]');

@@ -89,7 +89,7 @@ const DEFAULT_USER_PERMS = ['home', 'tagIssued', 'dashboard', 'trend', 'stock', 
   'sheet:StockDataa', 'sheet:REPORT', 'sheet:GV Master', 'sheet:Tag Assignment', 'sheet:GV REPORT', 'export'];
 
 const DEFAULT_SETTINGS = {
-  appName: 'First Forward Dashboard',
+  appName: 'First Forward & Gv Partner Dashboard',
   brand: 'First Forward',
   tagline: 'Dashboard',
   logo: '',          // data URL (uploaded in Settings → Branding)
@@ -265,6 +265,8 @@ function visibleNotifications(user, since) {
   return notifyItems().filter((item) => notificationVisible(item, user) && (!after || new Date(item.createdAt).getTime() > after)).slice(-80);
 }
 const activityLast = new Map();
+// Ephemeral in-memory presence: page + viewport-relative pointer only (never GPS or screen contents).
+const livePresence = new Map();
 function noteActivity(user, page) {
   if (!user || user.role === 'admin') return null;
   const cleanPage = String(page || 'dashboard').replace(/[^a-zA-Z0-9 _-]/g, '').slice(0, 80) || 'dashboard';
@@ -586,6 +588,33 @@ async function handleApi(req, res, url) {
     const [token] = await Promise.all([createSession(u.username), persist('users')]);
     if (u.role !== 'admin') recordNotification({ type: 'login', title: 'New user login', body: `${u.name || u.username} logged in via ${loginId}.`, target: 'admin', meta: { username: u.username, loginId } });
     return sendJson(res, 200, { ok: true, user: publicUser(u), settings: db.settings, permissions: permissionsFor(db.settings), tabs: db.settings.tabs }, { 'Set-Cookie': cookieHeader(req, token, SESSION_DAYS * 86400) });
+  }
+  // ---- admin-only live presence ---------------------------------------------------------------
+  if (p === '/api/presence' && method === 'POST') {
+    if (!user) throw new HttpError(401, 'Login required');
+    if (user.role === 'admin') return sendJson(res, 200, { ok: true });
+    const body = await readBody(req);
+    const page = String(body.page || 'dashboard').replace(/[^a-zA-Z0-9 _/#?&=.-]/g, '').slice(0, 120) || 'dashboard';
+    const previous = livePresence.get(user.username) || {};
+    const pointer = Object.prototype.hasOwnProperty.call(body, 'pointer')
+      ? (body.pointer && typeof body.pointer === 'object' ? {
+        x: Math.max(0, Math.min(100, Number(body.pointer.x) || 0)),
+        y: Math.max(0, Math.min(100, Number(body.pointer.y) || 0))
+      } : null)
+      : previous.pointer || null;
+    const now = Date.now();
+    const lastSeen = body.engaged === true ? now : (previous.lastSeen || now);
+    livePresence.set(user.username, { username: user.username, name: user.name || user.username, page, pointer, lastSeen });
+    for (const [key, entry] of livePresence) if (Date.now() - entry.lastSeen > 7 * 86400e3) livePresence.delete(key);
+    return sendJson(res, 200, { ok: true });
+  }
+  if (p === '/api/presence' && method === 'GET') {
+    if (!user || user.role !== 'admin') throw new HttpError(403, 'Admin only');
+    const now = Date.now();
+    const people = [...livePresence.values()].filter((entry) => now - entry.lastSeen < 7 * 86400e3)
+      .sort((a,b) => b.lastSeen - a.lastSeen)
+      .map((entry) => ({ ...entry, active: now - entry.lastSeen < 90e3 }));
+    return sendJson(res, 200, { people, checkAt: new Date(now).toISOString() });
   }
   // ---- activity + notifications ---------------------------------------------------------------
   if (p === '/api/notifications' && method === 'GET') {
@@ -939,6 +968,12 @@ async function start() {
   const storedNotify = stored.notify;
   db.notify = { items: Array.isArray(storedNotify.items) ? storedNotify.items.slice(-500) : [], watch: storedNotify.watch && typeof storedNotify.watch === 'object' ? storedNotify.watch : {} };
   for (const kind of Object.keys(FILES)) durableSnapshots.set(kind, JSON.stringify(db[kind], null, 2));
+  // Upgrade the known previous/default product title in durable settings; preserve admin custom names.
+  if (/^First Forward Dashboard(?:\s*[-–—]\s*Robo\s*v?3\.2)?$/i.test(String(db.settings.appName || '').trim())) {
+    db.settings.appName = 'First Forward & Gv Partner Dashboard';
+    await persist('settings');
+    console.log('Updated saved app name to First Forward & Gv Partner Dashboard.');
+  }
   pruneSessions();
   await bootstrapAdmin();
   server.listen(PORT, '0.0.0.0', () => {

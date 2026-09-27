@@ -10,7 +10,7 @@
 window.FF = window.FF || {};
 
 FF.config = {
-  appName: 'First Forward Dashboard',
+  appName: 'First Forward & Gv Partner Dashboard',
   brand: 'First Forward',
   tagline: 'Dashboard',
   logo: '',

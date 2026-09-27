@@ -115,13 +115,8 @@ window.FF = window.FF || {};
       ${visualHtml()}
       <div class="auth-panel pro-panel">
         <div class="auth-card pro-card">
-          <div class="auth-brand-sm pro-brand-sm v4-card">
-            <div class="v4-card-logos">
-              <img src="./logos/gadivan-transparent.png" alt="GADIVAN" class="v4-logo">
-              <span class="v4-x">×</span>
-              <img src="./logos/first-forward-transparent.png" alt="FIRST forward" class="v4-logo fwd">
-            </div>
-            <div><b>Gv Partner And First Forward Dashboard</b><small>Enterprise Dashboard • Secure Access</small></div>
+          <div class="auth-brand-sm pro-brand-sm login-app-brand">
+            <b class="login-app-name">${esc(c.appName)}</b>
           </div>
           
           <div class="pro-login-header">
