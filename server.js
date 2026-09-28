@@ -125,9 +125,16 @@ const DEFAULT_SETTINGS = {
   tabs: DEFAULT_TABS.map((t) => ({ ...t })),
   reportGid: '242489821',
   ffCommission: { rateCol: '', earnedCol: '', categoryCol: '', dateCol: '' }, // optional REPORT letters; blank = heading auto-detection
+  commissionSlabs: {
+    enabled: false, model: 'agentTier',
+    channels: {
+      ff: [{ min: 1, max: 50, rate: '' }, { min: 51, max: 100, rate: '' }, { min: 101, max: 150, rate: '' }, { min: 151, max: 250, rate: '' }, { min: 251, max: null, rate: '' }],
+      gv: [{ min: 1, max: 50, rate: '' }, { min: 51, max: 100, rate: '' }, { min: 101, max: 150, rate: '' }, { min: 151, max: 250, rate: '' }, { min: 251, max: null, rate: '' }]
+    }
+  },
   gv: {
     master: { tab: 'GV Master', gid: '', uniqueId: 'A', agentName: 'B', tlId: 'C', tlName: 'D', vrn: 'E', vClass: 'F', cch: 'G', serial: 'H', tagId: 'I', amount: 'J', customer: 'K', productId: 'L', commission: 'M', status: 'N', commissionStatus: 'O', date: 'P', time: 'Q', gvTlId: 'R', masterCch: 'S', monthName: 'T', tagType: 'U', gvUniqueId: 'W', gvUniqueName: 'X' },
-    assignment: { tab: 'Tag Assignment', gid: '', cls: 'A', tagId: 'B', serial: 'C', status: 'D', agentId: 'E', agentName: 'F', tlId: 'G', tlName: 'H', gvUniqueId: 'L', gvUniqueName: 'M' },
+    assignment: { tab: 'Tag Assignment', gid: '', cls: 'A', tagId: 'B', serial: 'C', status: 'D', agentId: 'E', agentName: 'F', tlId: 'G', tlName: 'H', gvUniqueId: 'L', gvUniqueName: 'M', allocatedAt: '' },
     report: { tab: 'GV REPORT', gid: '1284424234', headerRow: 4, lastCol: 'AZ' }
   },
   stockSheet: 'StockDataa',
@@ -2926,6 +2933,26 @@ async function handleApi(req, res, url) {
         patch.ffCommission[key] = col;
       }
     }
+    if (patch.commissionSlabs !== undefined) {
+      if (!patch.commissionSlabs || typeof patch.commissionSlabs !== 'object' || Array.isArray(patch.commissionSlabs)) throw new HttpError(400, 'commissionSlabs object hona chahiye.');
+      if (patch.commissionSlabs.enabled !== undefined) patch.commissionSlabs.enabled = patch.commissionSlabs.enabled === true || patch.commissionSlabs.enabled === 'true';
+      if (patch.commissionSlabs.model !== undefined && !['agentTier', 'marginal'].includes(patch.commissionSlabs.model)) throw new HttpError(400, 'Commission slab model agentTier ya marginal hona chahiye.');
+      if (patch.commissionSlabs.channels !== undefined) {
+        const bands = [{ min: 1, max: 50 }, { min: 51, max: 100 }, { min: 101, max: 150 }, { min: 151, max: 250 }, { min: 251, max: null }];
+        if (!patch.commissionSlabs.channels || typeof patch.commissionSlabs.channels !== 'object' || Array.isArray(patch.commissionSlabs.channels)) throw new HttpError(400, 'commissionSlabs.channels object hona chahiye.');
+        for (const channel of ['ff', 'gv']) {
+          const input = patch.commissionSlabs.channels[channel];
+          if (input === undefined) continue;
+          if (!Array.isArray(input) || input.length !== bands.length) throw new HttpError(400, `${channel} ke liye paanch commission slabs required hain.`);
+          patch.commissionSlabs.channels[channel] = bands.map((band, i) => {
+            const raw = input[i] && input[i].rate;
+            const rate = raw === '' || raw === null || raw === undefined ? '' : Number(raw);
+            if (rate !== '' && (!Number.isFinite(rate) || rate < 0 || rate > 1000000)) throw new HttpError(400, `${channel} slab ${i + 1}: ₹ rate 0 se 1000000 ke beech hona chahiye.`);
+            return { ...band, rate: rate === '' ? '' : Math.round(rate * 10000) / 10000 };
+          });
+        }
+      }
+    }
     if (patch.stockMovement !== undefined) {
       if (!patch.stockMovement || typeof patch.stockMovement !== 'object' || Array.isArray(patch.stockMovement)) throw new HttpError(400, 'stockMovement mapping object hona chahiye.');
       if (patch.stockMovement.sheet !== undefined) patch.stockMovement.sheet = String(patch.stockMovement.sheet || '').trim().slice(0, 80);
@@ -2937,7 +2964,16 @@ async function handleApi(req, res, url) {
       }
       cache.clear();
     }
-    if (patch.gv && typeof patch.gv === 'object') cache.clear();
+    if (patch.gv !== undefined) {
+      if (!patch.gv || typeof patch.gv !== 'object' || Array.isArray(patch.gv)) throw new HttpError(400, 'gv mapping object hona chahiye.');
+      const allocation = patch.gv.assignment && patch.gv.assignment.allocatedAt;
+      if (allocation !== undefined) {
+        const col = String(allocation || '').trim().toUpperCase();
+        if (col && !/^[A-Z]{1,3}$/.test(col)) throw new HttpError(400, 'gv.assignment.allocatedAt: valid column letter chahiye (e.g. N).');
+        patch.gv.assignment.allocatedAt = col;
+      }
+      cache.clear();
+    }
     const next = body.reset ? { ...DEFAULT_SETTINGS } : deepMerge(db.settings, patch);
     next.updatedAt = new Date().toISOString(); next.updatedBy = user.username;
     if (next.sheetId !== db.settings.sheetId || next.cacheSeconds !== db.settings.cacheSeconds) cache.clear();

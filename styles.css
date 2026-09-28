@@ -1946,7 +1946,14 @@ html[data-theme="dark"] .direct-filter:not(.primary), html[data-theme="dark"] .s
 /* High-contrast intelligence panels requested for commission and cross-channel reviews. */
 .ins-metrics .ins-metric { background:#090b0f; color:#fff; border:1px solid #252a33; font:inherit; text-align:left; cursor:pointer; transition:transform .15s ease,border-color .15s ease; }
 .ins-metrics .ins-metric:hover { transform:translateY(-2px); border-color:var(--brand); }
+.ins-metrics .ins-metric:not(.good):not(.bad) { background:linear-gradient(135deg,#101a2b,#090b0f 72%); border-color:#29384e; }
+.ins-metrics .ins-metric.good { background:linear-gradient(135deg,#06281d,#090b0f 72%); border-color:#14583f; }
+.ins-metrics .ins-metric.bad { background:linear-gradient(135deg,#321116,#090b0f 72%); border-color:#73313a; }
+.ins-metrics .ins-metric { color:#fff; font-weight:750; }
 .ins-detail-dialog { width:min(1100px,94vw); max-height:85vh; overflow:auto; border:1px solid #343944; border-radius:14px; padding:18px; background:#0b0d11; color:#fff; }
+.ins-detail-dialog .ins-table th { position:sticky; top:0; z-index:1; color:#fff; background:#171b23; border-bottom:1px solid #394150; padding:8px; text-align:left; }
+.ins-detail-dialog .ins-table td { color:#f3f4f6; border-bottom:1px solid #252a33; padding:8px; vertical-align:top; }
+.ins-detail-dialog .ins-table td small { color:#b8c0cc; }
 .ins-detail-dialog::backdrop { background:rgba(0,0,0,.72); }
 .ins-detail-dialog .card-head { display:flex; justify-content:space-between; align-items:center; position:sticky; top:0; background:#0b0d11; z-index:2; padding:4px 0 10px; }
 .ins-metrics .ins-metric b { color:#fff; font-weight:800; }

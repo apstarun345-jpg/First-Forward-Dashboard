@@ -125,6 +125,7 @@ window.FF = window.FF || {};
       const date = D.cellDate(r[U.colIndex(m.date)]);
       const rawCls = get(m.cch) || get(m.vClass);
       const cls = normClass(rawCls);
+      const commissionRaw = D.cellText(r[U.colIndex(m.commission)]);
       rows.push({
         date, ym: date ? U.ymKey(date) : '', day: date ? date.getDate() : 0,
         agentId, agentName: U.clean(get(m.agentName)) || agentId,
@@ -136,6 +137,7 @@ window.FF = window.FF || {};
         customer: U.clean(get(m.customer)), productId: U.clean(get(m.productId)),
         amount: D.cellNumber(r[U.colIndex(m.amount)]) || 0,
         commission: D.cellNumber(r[U.colIndex(m.commission)]) || 0,
+        commissionHasValue: commissionRaw !== '',
         gvUniqueId: U.clean(get(m.gvUniqueId)), gvUniqueName: U.clean(get(m.gvUniqueName)),
         monthName: U.clean(get(m.monthName)), time: U.clean(get(m.time))
       });

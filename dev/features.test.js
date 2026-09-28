@@ -124,6 +124,21 @@ test('features flags: defaults, admin modify (deep-merge), member se 4xx, SMTP s
     assert.equal(after.features.alerts.midMonth, true, 'deep-merge: baaki alerts untouched rehne chahiye');
     assert.equal(after.features.share, true, 'deep-merge: baaki feature flags untouched');
 
+    // 2b) Admin commission slabs save hote hain; invalid rates are rejected.
+    const slabs = [
+      { min: 1, max: 50, rate: '2.5' }, { min: 51, max: 100, rate: '3' },
+      { min: 101, max: 150, rate: '4' }, { min: 151, max: 250, rate: '5' },
+      { min: 251, max: null, rate: '6' }
+    ];
+    const slabPut = await call('/api/settings', 'PUT', { settings: { commissionSlabs: { enabled: true, model: 'agentTier', channels: { ff: slabs, gv: slabs } } } }, adminCookie);
+    assert.equal(slabPut.res.status, 200, `valid FF/GV commission slabs save hone chahiye — ${JSON.stringify(slabPut.json)}`);
+    const savedSlabs = (await call('/api/settings', 'GET', null, adminCookie)).json.settings.commissionSlabs;
+    assert.equal(savedSlabs.channels.ff[0].rate, 2.5);
+    assert.equal(savedSlabs.channels.gv[4].rate, 6);
+    const badSlabs = slabs.map((x) => ({ ...x })); badSlabs[0].rate = '-1';
+    const invalidSlabs = await call('/api/settings', 'PUT', { settings: { commissionSlabs: { channels: { ff: badSlabs } } } }, adminCookie);
+    assert.equal(invalidSlabs.res.status, 400, 'negative slab rate reject hona chahiye');
+
     // 3) Member feature PUT nahi kar sakta.
     const denied = await call('/api/settings', 'PUT', { settings: { features: { search: true } } }, memberCookie);
     assert.ok(denied.res.status >= 400, 'non-admin feature modify nahi kar sakta');
