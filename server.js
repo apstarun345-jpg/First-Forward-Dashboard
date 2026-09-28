@@ -124,7 +124,7 @@ const DEFAULT_SETTINGS = {
   gvSheetId: '1LkYX746lGZQKhl5ueoKe3kYOo4SNtu47p5-jkVNUiBA',
   tabs: DEFAULT_TABS.map((t) => ({ ...t })),
   reportGid: '242489821',
-  ffCommission: { rateCol: '', earnedCol: '', categoryCol: '' }, // optional REPORT letters; blank = heading auto-detection
+  ffCommission: { rateCol: '', earnedCol: '', categoryCol: '', dateCol: '' }, // optional REPORT letters; blank = heading auto-detection
   gv: {
     master: { tab: 'GV Master', gid: '', uniqueId: 'A', agentName: 'B', tlId: 'C', tlName: 'D', vrn: 'E', vClass: 'F', cch: 'G', serial: 'H', tagId: 'I', amount: 'J', customer: 'K', productId: 'L', commission: 'M', status: 'N', commissionStatus: 'O', date: 'P', time: 'Q', gvTlId: 'R', masterCch: 'S', monthName: 'T', tagType: 'U', gvUniqueId: 'W', gvUniqueName: 'X' },
     assignment: { tab: 'Tag Assignment', gid: '', cls: 'A', tagId: 'B', serial: 'C', status: 'D', agentId: 'E', agentName: 'F', tlId: 'G', tlName: 'H', gvUniqueId: 'L', gvUniqueName: 'M' },
@@ -2919,7 +2919,7 @@ async function handleApi(req, res, url) {
     }
     if (patch.ffCommission !== undefined) {
       if (!patch.ffCommission || typeof patch.ffCommission !== 'object' || Array.isArray(patch.ffCommission)) throw new HttpError(400, 'ffCommission mapping object hona chahiye.');
-      for (const key of ['rateCol', 'earnedCol', 'categoryCol']) {
+      for (const key of ['rateCol', 'earnedCol', 'categoryCol', 'dateCol']) {
         if (patch.ffCommission[key] === undefined) continue;
         const col = String(patch.ffCommission[key] || '').trim().toUpperCase();
         if (col && !/^[A-Z]{1,3}$/.test(col)) throw new HttpError(400, `${key}: valid column letter chahiye (e.g. BZ).`);

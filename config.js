@@ -108,7 +108,7 @@ FF.config = {
   },
 
   report: { sheet: 'REPORT', gid: '242489821' },
-  ffCommission: { rateCol: '', earnedCol: '', categoryCol: '' }, // blank = dynamic REPORT heading discovery
+  ffCommission: { rateCol: '', earnedCol: '', categoryCol: '', dateCol: '' }, // blank = dynamic REPORT heading discovery
 
   // TL names that are NOT real team leaders (placeholder for direct agents) — hidden from every TL view.
   excludeTls: ['APS'],
