@@ -6,7 +6,7 @@ FF.pages = FF.pages || {};
   'use strict';
   const U = FF.util, A = FF.auth;
   const esc = U.esc;
-  const TABS = [['account', '👤 My account'], ['brand', '🎨 Branding & images'], ['sources', '🗂️ Sheets & tabs'], ['access', '🔐 Access matrix'], ['data', '🔌 Data source'], ['rules', '📐 Thresholds'], ['contacts', '📲 Contacts & sharing'], ['users', '👥 Users & access'], ['backup', '☁️ Storage & backup']];
+  const TABS = [['account', '👤 My account'], ['brand', '🎨 Branding & images'], ['sources', '🗂️ Sheets & tabs'], ['access', '🔐 Access matrix'], ['data', '🔌 Data source'], ['rules', '📐 Thresholds'], ['features', '🎛 Features'], ['contacts', '📲 Contacts & sharing'], ['users', '👥 Users & access'], ['links', '🔗 Personal links'], ['audit', '📜 Audit log'], ['backup', '☁️ Storage & backup']];
   let tab = 'account';
   let storage = null;
   let settings = null, defaults = null, usersCache = null, permsCache = [];
@@ -156,14 +156,17 @@ FF.pages = FF.pages || {};
     const prefs = notifyPrefsNow();
     const on = prefs.enabled !== false;
     const types = ((FF.notifications || {}).notifyTypes || []).filter((t) => (A.isAdmin() ? t.admin : t.user));
-    return section('🔔 Notifications', `
+    return section('🔔 Notifications <span class="dim">(app + mobile)</span>', `
+      <p class="dim small">Har notification <b>app ke andar (bell)</b> aur <b>mobile / desktop ke notification panel</b> dono par aati hai — app band hone par bhi Web Push se phone par alert chala jaata hai. Neeche decide karo kaunsi notifications aani chahiye.</p>
       <div class="notify-switches" style="background:transparent;padding:0;border:0">
         ${switchRow('master', 'Notifications ON / OFF', on ? 'ON — app ke andar toast + phone / desktop ke notification panel par alert (app band ho tab bhi)' : 'OFF — koi alert nahi aayega (list bell me padh sakte ho)', on)}
         ${switchRow('sound', '🔊 Sound / vibration', 'Alert ke saath short beep + mobile vibration', prefs.sound !== false, !on)}
         ${switchRow('monthly', '📅 Monthly report', 'Har mahine ki 1–5 tarikh ko pichhle mahine ka FF vs GV compare', prefs.monthly !== false, !on)}
       </div>
-      <details class="notify-prefs" style="border:0;margin-top:6px"><summary>Konse alerts chahiye? (type ke hisaab se on/off)</summary>
+      <details class="notify-prefs" open style="border:0;margin-top:6px"><summary>Kaunsi notifications aayengi? (type-wise on/off — in-app + mobile dono par apply)</summary>
         <div class="notify-pref-grid">${types.map((t) => `<span class="check small">${ffSwitch(t.key, prefs[t.key] !== false, !on)} ${t.label}</span>`).join('')}</div>
+        <p class="dim small" style="margin:6px 2px 0">${A.isAdmin() ? '👑 Admin ko sab users ki activity aati hai — naya signup, login, search, button click, page open, settings change, report/sheet update, location — sab. Upar se type ke hisaab se ON/OFF karo.' : 'Apne liye kaunsi alerts chahiye wo upar choose karo — ye in-app + phone panel dono par lagta hai.'}</p>
+        ${A.isAdmin() ? `<div class="save-bar" style="margin-top:8px"><button class="btn small primary" data-notify-all-on>🔁 Sab notifications ON karo</button><button class="btn small" data-notify-digest-test title="Kal/MTD/stock wala roz ka summary turant bhejo — pipeline ka test">📅 Digest abhi bhejo</button><span class="dim small">Ek click me saare types chalu — signup / search / click / page open / settings / report … sab aayengi. Digest = subah ka summary (issuance + stock + VC4 cover) roz ek baar.</span></div>` : ''}
       </details>
       ${A.isAdmin() ? `<div id="push-diag-slot" class="push-diag" style="margin-top:12px"><p class="dim small">📲 Push diagnostics load ho rahi hain…</p></div>` : ''}`);
   }
@@ -315,6 +318,7 @@ FF.pages = FF.pages || {};
         <div class="user-head"><span class="user-avatar big">${esc((u.name || u.username).slice(0, 1).toUpperCase())}</span><div class="user-meta"><b>${esc(u.name)}</b> <code>${esc(u.username)}</code>${u.username === A.user.username ? ' <span class="tag">you</span>' : ''}<small class="dim">${esc(u.email || '')}${u.mobile ? ` · ${esc(u.mobile)}` : ''} · joined ${u.createdAt ? U.timeLabel(new Date(u.createdAt).getTime()) : '—'} · last login ${u.lastLoginAt ? U.timeLabel(new Date(u.lastLoginAt).getTime()) : 'never'}${u.lastLocation ? ` · <a href="https://www.google.com/maps?q=${encodeURIComponent(`${u.lastLocation.latitude},${u.lastLocation.longitude}`)}" target="_blank" rel="noopener">📍 last location</a>` : ''}</small></div>
           <div class="user-controls"><label class="check"><input type="checkbox" data-field="approved" ${u.approved ? 'checked' : ''}> ${u.approved ? 'Active' : '<b class="pend">Pending approval</b>'}</label><select data-field="role"><option value="user" ${u.role === 'user' ? 'selected' : ''}>User</option><option value="admin" ${u.role === 'admin' ? 'selected' : ''}>Admin</option></select></div></div>
         <details class="user-perms" ${u.approved ? '' : 'open'}><summary>Permissions (${u.role === 'admin' ? 'all — admin' : `${u.permissions.length}/${permsCache.length}`})</summary><div class="perm-boxes">${permBoxes(u)}</div><div class="btn-row"><button class="btn small" data-perm-all>Select all</button><button class="btn small" data-perm-none>Clear</button><button class="btn small" data-perm-default>Default set</button></div></details>
+        ${u.loginHistory && u.loginHistory.length ? `<details class="user-perms"><summary>🕘 Login history (${u.loginHistory.length})</summary><div class="table-wrap"><table class="tbl compact"><thead><tr><th>Kab</th><th>Login ID se</th><th>IP</th></tr></thead><tbody>${u.loginHistory.slice().reverse().map((l) => `<tr><td>${esc(U.timeLabel(new Date(l.at).getTime()))}</td><td>${esc(l.id || '—')}</td><td class="mono">${esc(l.ip || '—')}</td></tr>`).join('')}</tbody></table></div><p class="dim small" style="margin-top:4px">Last ${u.loginHistory.length} logins (max 20 store hote hain).</p></details>` : ''}
         <div class="user-notify-prefs">
           <label class="check"><input type="checkbox" data-field="notifyAccess" ${u.role === 'admin' || u.notifyAccess !== false ? 'checked' : ''} ${u.role === 'admin' ? 'disabled' : ''}> 🔔 Notifications access <small class="dim">(in-app bell, browser alerts, mobile push — sab band ho jayega off karne par)</small></label>
         </div>
@@ -335,7 +339,7 @@ FF.pages = FF.pages || {};
         const naBox = card.querySelector('[data-field="notifyAccess"]');
         if (naBox && !naBox.disabled) body.notifyAccess = naBox.checked;
         msg.textContent = 'Saving…';
-        try { await A.api(`/api/users/${encodeURIComponent(username)}`, 'PUT', body); msg.textContent = 'Saved ✓'; U.toast(`${username} updated ✓`, 'ok'); if (username === A.user.username) setTimeout(() => location.reload(), 600); else usersTab(root); } catch (err) { msg.textContent = ''; U.toast(err.message, 'err'); }
+        try { await A.api(`/api/users/${encodeURIComponent(username)}`, 'PUT', body); msg.textContent = 'Saved ✓'; U.toast(`${username} updated ✓`, 'ok'); if (username === A.user.username) setTimeout(() => location.reload(), 600); else usersTab(root); if (FF.app && FF.app.refreshPendingBadge) FF.app.refreshPendingBadge(); } catch (err) { msg.textContent = ''; U.toast(err.message, 'err'); }
       });
       card.querySelector('[data-user-pw]').addEventListener('click', async () => {
         const pw = prompt(`Naya password for ${username} (min 6 chars):`, Math.random().toString(36).slice(2, 10));
@@ -343,11 +347,11 @@ FF.pages = FF.pages || {};
         try { await A.api(`/api/users/${encodeURIComponent(username)}`, 'PUT', { password: pw }); U.toast(`Password reset ✓ — user ko bata do: ${pw}`, 'ok'); await U.copyText(pw); } catch (err) { U.toast(err.message, 'err'); }
       });
       const del = card.querySelector('[data-user-del]');
-      if (del) del.addEventListener('click', async () => { if (!confirm(`Delete user "${username}"?`)) return; try { await A.api(`/api/users/${encodeURIComponent(username)}`, 'DELETE'); U.toast('Deleted', 'ok'); usersTab(root); } catch (err) { U.toast(err.message, 'err'); } });
+      if (del) del.addEventListener('click', async () => { if (!confirm(`Delete user "${username}"?`)) return; try { await A.api(`/api/users/${encodeURIComponent(username)}`, 'DELETE'); U.toast('Deleted', 'ok'); usersTab(root); if (FF.app && FF.app.refreshPendingBadge) FF.app.refreshPendingBadge(); } catch (err) { U.toast(err.message, 'err'); } });
     });
     U.$('#nu-add', root).addEventListener('click', async () => {
       const body = { username: U.$('#nu-username', root).value, name: U.$('#nu-name', root).value, password: U.$('#nu-password', root).value, role: U.$('#nu-role', root).value, mobile: U.$('#nu-mobile', root).value, email: U.$('#nu-email', root).value };
-      try { await A.api('/api/users', 'POST', body); U.toast(`User ${body.username} created ✓ (password: ${body.password})`, 'ok'); usersTab(root); } catch (err) { U.toast(err.message, 'err'); }
+      try { await A.api('/api/users', 'POST', body); U.toast(`User ${body.username} created ✓ (password: ${body.password})`, 'ok'); usersTab(root); if (FF.app && FF.app.refreshPendingBadge) FF.app.refreshPendingBadge(); } catch (err) { U.toast(err.message, 'err'); }
     });
   }
   function storageSecret() {
@@ -548,6 +552,226 @@ FF.pages = FF.pages || {};
     });
   }
 
+  // ---- 🎛 Features tab: har feature ka ON/OFF + modify numbers (admin) ---------------------------
+  function featuresTab() {
+    const df = (defaults && defaults.features) || {};
+    const f = { ...df, ...((settings && settings.features) || {}) };
+    f.alerts = { ...(df.alerts || {}), ...(((settings && settings.features) || {}).alerts || {}) };
+    const em = { ...((defaults && defaults.email) || {}), ...((settings && settings.email) || {}) };
+    const c = (key, label, hint) => `<label class="check"><input type="checkbox" data-path="features.${key}" ${f[key] !== false ? 'checked' : ''}> <b>${label}</b>${hint ? `<br><small class="dim" style="margin-left:20px">${hint}</small>` : ''}</label>`;
+    const a = (key, label, hint) => `<label class="check"><input type="checkbox" data-path="features.alerts.${key}" ${f.alerts[key] !== false ? 'checked' : ''}> <b>${label}</b>${hint ? `<br><small class="dim" style="margin-left:20px">${hint}</small>` : ''}</label>`;
+    const n = (path, value, label, attrs) => field(label, numI(path, value, attrs || 'min="0" max="999"'));
+    const uiCard = section('🎛 App features <span class="dim">(on / off)</span>', `
+      <p class="dim small">Har nayi/purani feature yahan se band-chalu kar sakte ho — user ko dikhega ya nahi, aap decide karo. Notification ke types alag se 👤 My account → 🔔 Notifications me hain.</p>
+      <div class="feat-grid">
+        ${c('search', '🔍 Global search (Ctrl / ⌘ + K)', 'Topbar 🔍 button + ek box me pages, sheets, agents, TLs')}
+        ${c('share', '📤 WhatsApp share buttons', 'Dashboard / Trend / Stock header ke 📤 + pivot share-row')}
+        ${c('targetBar', '🎯 Dashboard target progress bar', 'MTD vs target ka colored bar (Targets page par target set karo)')}
+        ${c('stockTrend', '📉 Stock trend chart', 'Stock page par last-30-din ka line chart (server snapshots)')}
+        ${c('tlCover', '📈 TL-wise cover list', 'Stock page — kam cover wale TLs upar, band emoji ke saath')}
+        ${c('recon', '🧾 Stock in vs issued', 'Stock page — MTD issuance + stock change se approx in-flow')}
+        ${c('loginHistory', '🕘 Login history table', 'Users tab me: kab, kis login ID se, kis IP se (last 20)')}
+        ${c('pendingBadge', '⏳ Pending-approvals badge', 'Sidebar Settings par pending signup count')}
+        ${c('updateToast', '🔄 “Update available” toast', 'Server version badle to app me Reload banner')}
+        ${c('backupReminder', '☁️ Settings backup reminder', `Backup purana ho to roz info alert — age threshold → ⚙️ neeche`)}
+        ${c('tvMode', '📺 TV mode page', 'Office TV ke liye Dashboard → Trend → Stock → Targets auto-rotation (sidebar me 📺 TV Mode)')}
+        ${c('weekCompare', '🗓 Same-day-last-week KPI', 'Dashboard par “aaj vs pichhle hafte ke same din” comparison')}
+        ${c('agedStock', '🧓 Aged stock buckets', 'Stock page — 0-15 / 16-30 / 31-60 / 60+ din purana stock')}
+        ${c('auditLog', '📜 Audit log', 'Settings me 📜 tab — login, settings, users, OTP sab kuch (admin only)')}
+        ${c('announcements', '📢 Announcement composer', 'Settings me sab users ko ek saath broadcast karne ka box')}
+        ${c('tlGoals', '🎯 TL monthly goals', 'Targets page TL rollup me goal column + admin editable goals')}
+        ${c('otp2fa', '🔐 OTP on new-IP login', 'Naye IP par login = 6-digit OTP email (SMTP set ho tabhi) — known device par seedha login')}
+        ${c('badges', '🏅 Weekly badges + rank card', 'Performance page — 🥇🥈🥉 top agents/TL + ek click me shareable image')}
+        ${c('voiceSummary', '🗣️ Voice summary (Hindi)', 'Dashboard par 🔊 button — aaj ke numbers bol kar sunata hai (browser TTS)')}
+        ${c('askBox', '🤖 Sawal-jawab box', 'Search (Ctrl+K) me likho “aaj ka VC4?” / “Rahul ka MTD” — seedha jawab')}
+        ${c('teamMap', '🗺 Team map', 'Admin sidebar page — location share karne walo ka distance map (office se)')}
+        ${c('personalLinks', '🔗 Personal links', 'Har agent/TL ka secret read-only performance link — Settings me 🔗 tab')}
+        ${c('customAlerts', '🗓 Custom alert scheduler', 'Apne reminders/status — roz / har Somwar / har mahine fixed time par bell me')}
+        ${c('championEmail', '🥇 Champion certificate email', 'Mahine ke top agents ka certificate SMTP se email (SMTP set ho tabhi)')}
+        ${c('followupTracker', '⏰ Follow-up tracker', '3+ din se tag na dene wale agents — roz ek list (bell + Alerts card)')}
+        ${c('dispatchPlan', '🎯 Suggested dispatch cards', 'High + Medium priority agents: cover din + suggested tag qty (GV + FF)')}
+      </div>${saveBar('feat-ui')}`);
+    const alertCard = section('🔴 Alert automation <span class="dim">(server-side — tab bhi chalta hai jab app band ho)</span>', `
+      <div class="feat-grid">
+        ${a('lowCover', '🔴 VC4 low-cover alert', 'Cover band bigadne par turant + red zone me roz (bands → 📐 Thresholds)')}
+        ${a('midMonth', '🎯 Mid-month target miss', 'Window me ek baar — pace 40%+ peeche ho to warning')}
+        ${a('inactive', '💤 Weekly inactive users', 'Har Monday 9 AM IST — 3+ din silent users ki list')}
+        ${a('zeroDay', '⚠️ Zero-day / sharp-drop', 'Raat 9 IST — aaj 0 issuance ya avg se bahut kam')}
+        ${a('newLoginIp', '🔐 Naye IP se login', 'Known IPs se bahar naye IP par login par admin alert')}
+        ${a('anomaly', '📉 Agent anomaly (raat 9)', 'Koi agent achanak 0 / bahut kam ho jaye to alert — threshold % ⚙️ neeche')}
+        <label class="check"><input type="checkbox" data-path="features.tlAnomaly" ${f.tlAnomaly !== false ? 'checked' : ''}> <b>🏆 TL anomaly (raat 9)</b><br><small class="dim" style="margin-left:20px">Poori team ka issuance achanak gira ho to TL-level alert — threshold same %</small></label>
+      </div>
+      <p class="dim small">In alerts ki ON/OFF apne phone par bhi chahiye to 👤 My account → 🔔 Notifications me <b>🔴 Critical alerts</b> type bhi ON rakho.</p>${saveBar('feat-alerts')}`);
+    const modsCard = section('⚙️ Alert modify <span class="dim">(numbers tune karo)</span>', `
+      <div class="form-grid">
+        ${n('features.digestHour', f.digestHour, '🌅 Digest hour (IST)', 'min="0" max="23"')}
+        ${n('features.midFrom', f.midFrom, '🎯 Mid-month window: from (tareekh)', 'min="1" max="28"')}
+        ${n('features.midTo', f.midTo, 'Mid-month window: to (tareekh)', 'min="2" max="31"')}
+        ${n('features.midGapPct', f.midGapPct, '🎯 Kitna % peeche = alert (%)', 'min="5" max="90"')}
+        ${n('features.zeroDropPct', f.zeroDropPct, '⚠️ Sharp-drop threshold (%) — 0 = sirf zero-day', 'min="0" max="90"')}
+        ${n('features.backupDays', f.backupDays, '☁️ Backup reminder age (din)', 'min="1" max="120"')}
+        ${n('features.anomalyPct', f.anomalyPct, '📉 Anomaly: avg se kitna % neeche = alert', 'min="10" max="95"')}
+        ${n('features.championHour', f.championHour ?? 10, '🥇 Champion email hour (IST)', 'min="0" max="23"')}
+        ${n('features.championTop', f.championTop ?? 3, '🥇 Kitne top champions (1-10)', 'min="1" max="10"')}
+        ${n('features.followupDays', f.followupDays ?? 3, '⏰ Follow-up: kitne din silent = alert', 'min="1" max="30"')}
+        ${n('features.followupHour', f.followupHour ?? 10, '⏰ Follow-up hour (IST)', 'min="0" max="23"')}
+        ${n('features.suggestDays', f.suggestDays ?? 15, '🎯 Suggested dispatch target cover (din)', 'min="3" max="90"')}
+      </div>
+      <p class="dim small">Cover bands (🔴/🟠/🟡) aur “went quiet” days → <b>📐 Thresholds</b> tab. Digest ka ON/OFF type → 🔔 Notifications.</p>${saveBar('feat-mods')}`);
+    const waCard = section('📤 WhatsApp share number', `
+      <div class="form-grid">${field('Direct number (blank = WhatsApp share picker)', txt('features.waNumber', f.waNumber || '', 'placeholder="9198xxxxxxxx00 · country code ke saath" inputmode="tel"'))}</div>
+      <p class="dim small">Number blank ho to WhatsApp apna contact picker kholta hai. Contacts tab ka team number fallback me use hota hai.</p>${saveBar('feat-wa')}`);
+    const emailCard = section('📧 Email digest <span class="dim">(SMTP — optional)</span>', `
+      <label class="check" style="margin-bottom:6px"><input type="checkbox" data-path="features.emailDigest" ${f.emailDigest ? 'checked' : ''}> <b>Digest email se bhi bhejo</b> <small class="dim">(push ke saath-saath subah ka summary email par)</small></label>
+      <label class="check" style="margin-bottom:6px"><input type="checkbox" data-path="features.weeklyEmail" ${f.weeklyEmail === true ? 'checked' : ''}> <b>📬 Weekly auto-digest email (admin on/off)</b> <small class="dim">— har Monday, pichhle Mon–Sun ka FF/GV summary + stock. Hour → ⬇️ neeche</small></label>
+      <label class="check" style="margin-bottom:6px"><input type="checkbox" data-path="features.emailReport" ${f.emailReport === true ? 'checked' : ''}> <b>📊 Roz ka scheduled report email (HTML + CSV)</b> <small class="dim">— last-14-din table, CSV attach. Hour → ⬇️ neeche</small></label>
+      <div class="form-grid">
+        ${field('Weekly email hour (IST)', numI('features.weeklyEmailHour', f.weeklyEmailHour ?? 9, 'min="0" max="23"'))}
+        ${field('Report email hour (IST)', numI('features.emailReportHour', f.emailReportHour ?? 21, 'min="0" max="23"'))}
+        ${field('SMTP host', txt('email.host', em.host || '', 'placeholder="smtp.gmail.com"'))}
+        ${field('Port', numI('email.port', em.port || 587, 'min="1" max="65535"'))}
+        ${field('TLS (465 / implicit)', `<input type="checkbox" data-path="email.secure" ${em.secure ? 'checked' : ''}>`)}
+        ${field('User', txt('email.user', em.user || '', 'autocomplete="off"'))}
+        ${field('Password / app password', `<input class="input" type="password" data-path="email.pass" value="${esc(em.pass || '')}" autocomplete="new-password">`)}
+        ${field('From', txt('email.from', em.from || '', 'placeholder="alerts@yourdomain.com"'))}
+        ${field('To (comma-separated)', txt('email.to', em.to || '', 'placeholder="boss@x.com, team@x.com"'))}
+      </div>
+      <div class="save-bar"><button class="btn primary" data-save="feat-email">💾 Save</button><button class="btn" id="em-test">📧 Test email bhejo</button><span class="dim small" id="save-msg-feat-email"></span></div>
+      <p class="dim small">Gmail ke liye normal password nahi chalta — Google Account → 2-Step → <b>App passwords</b> banao. SMTP kabhi koi data leak nahi karti; password sirf server settings me rehta hai (non-admin ko dikhta bhi nahi).</p>`);
+    const announceCard = section('📢 Announcement <span class="dim">(sab users ko ek message)</span>', `
+      <p class="dim small">Type karo aur bhejo — sab logged-in users ke bell panel me turant dikhega (jaise ek broadcast). Ye raha preview:</p>
+      <textarea class="input" id="an-text" rows="3" maxlength="500" placeholder="e.g. Kal 11 AM sabka monthly meeting hai — attendance zaroori."></textarea>
+      <div class="save-bar" style="margin-top:8px"><button class="btn primary" id="an-send">📢 Broadcast karo</button><span class="dim small" id="an-msg"></span></div>`);
+    const mapCard = section('🗺 Office location <span class="dim">(team map ka center)</span>', `
+      <p class="dim small">Team map (🗺 sidebar page) yahan ke coordinates ko “office” maanta hai — har user ki distance isi se nikalti hai. Google Maps me office kholo → URL me jo lat,lng dikhe wo yahan daalo.</p>
+      <div class="form-grid">
+        ${field('Office latitude', numI('features.officeLat', f.officeLat ?? 0, 'step="0.000001" min="-90" max="90"'))}
+        ${field('Office longitude', numI('features.officeLng', f.officeLng ?? 0, 'step="0.000001" min="-180" max="180"'))}
+      </div>${saveBar('feat-map')}`);
+    const schedOn = f.customAlerts !== false;
+    const schedCard = section('🗓 Custom alert scheduler <span class="dim">(reminders · status messages)</span>', `
+      <p class="dim small">Jaise chaho waise yaad dilao — <b>roz</b>, <b>har {weekday}</b> (e.g. Somwar), ya <b>har mahine ki tareekh</b> par fixed IST hour. Text me <code>{today}</code> (aaj ke tags) · <code>{mtd}</code> (MTD total) · <code>{date}</code> use kar sakte ho. Target = sirf admin ya <b>sab users (broadcast)</b>.</p>
+      ${schedOn ? '' : '<p class="check" style="background:#fef3c7;border:1px solid #fcd34d;border-radius:10px;padding:8px 12px;margin-bottom:10px">⏸️ Scheduler band hai — Features se ON karo tabhi reminders jayenge.</p>'}
+      <div class="finder-row" style="margin-bottom:8px">
+        <input class="input" id="sc-title" placeholder="Title — e.g. Aaj ka status" style="min-width:170px" maxlength="60">
+        <input class="input" id="sc-text" placeholder='Message — e.g. "Aaj {today} tags hue (MTD {mtd}) — sab apna target pura karo!"' style="min-width:280px" maxlength="240">
+        <select class="input" id="sc-kind" style="width:auto"><option value="daily">Roz</option><option value="weekly">Har hafte</option><option value="monthly">Har mahine</option></select>
+        <select class="input" id="sc-when" style="width:auto"></select>
+        <select class="input" id="sc-target" style="width:auto"><option value="admin">Sirf admin</option><option value="broadcast">Sab users</option></select>
+        <button class="btn primary" id="sc-add">➕ Schedule add</button>
+      </div>
+      <div id="sched-list">${schedListHtml((settings && settings.schedules) || [])}</div>
+      <div class="save-bar" style="margin-top:8px">
+        <button class="btn" id="ch-fire" title="SMTP par abhi champion certificate bhejo (test)">🥇 Champion email abhi bhejo</button>
+        <button class="btn" id="fu-fire" title="Abhi follow-up list check karo + notification bhejo">⏰ Follow-up abhi chalao</button>
+        <span class="dim small" id="save-msg-feat-sched"></span>
+      </div>
+      <p class="dim small">Champion email ko SMTP chahiye (upar 📧 Email card). Follow-up = jinka pichhla issuance N+ din purana ho gaya.</p>`);
+    return `${uiCard}${alertCard}${modsCard}${waCard}${emailCard}${announceCard}${mapCard}${schedCard}`;
+  }
+
+  // ---- 🗓 schedule list (features tab) ---------------------------------------------------------
+  function schedWhenLabel(s) {
+    const DAYS = ['Ravivar', 'Somwar', 'Mangalwar', 'Budhwar', 'Guruwar', 'Shukrawar', 'Shanivar'];
+    if (s.kind === 'weekly') return `${DAYS[Number(s.weekday) || 0]} ${Number(s.hour) || 0}:00`;
+    if (s.kind === 'monthly') return `Har mahine ${Number(s.day) || 1} tareekh · ${Number(s.hour) || 0}:00`;
+    return `Roz ${Number(s.hour) || 0}:00`;
+  }
+  function schedListHtml(list) {
+    if (!list.length) return '<p class="dim">Abhi koi schedule nahi — upar title + message daal ke add karo.</p>';
+    const KIND = { daily: '🔁 Roz', weekly: '📅 Hafte', monthly: '🗓 Mahine' };
+    return `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Kab</th><th>Title</th><th>Message</th><th>Target</th><th>Status</th><th></th></tr></thead><tbody>
+      ${list.map((s) => `<tr>
+        <td>${KIND[s.kind] || '🔁'} <b>${esc(schedWhenLabel(s))}</b></td>
+        <td><b>${esc(s.title || '')}</b></td>
+        <td class="small">${esc(String(s.text || '').slice(0, 60))}</td>
+        <td class="small">${s.target === 'broadcast' ? '📢 Sabko' : '👑 Admin'}</td>
+        <td>${s.enabled === false ? '<span class="badge red">OFF</span>' : '<span class="badge">ON</span>'}</td>
+        <td class="num" style="white-space:nowrap">
+          <button class="btn small sc-fire" data-id="${esc(s.id)}" title="Abhi bhejo (test)">▶️</button>
+          <button class="btn small sc-tog" data-id="${esc(s.id)}">${s.enabled === false ? '▶️ ON' : '⏸️'}</button>
+          <button class="btn small sc-del" data-id="${esc(s.id)}">🗑</button>
+        </td></tr>`).join('')}
+      </tbody></table></div>`;
+  }
+
+  // ---- 📜 Audit log (admin) ---------------------------------------------------------------------------
+  async function auditTab(body) {
+    let entries = [];
+    try { entries = (await A.api('/api/audit')).entries || []; } catch (err) { body.innerHTML = U.errorBox(err); return; }
+    if (!entries.length) { body.innerHTML = `<div class="card"><p class="dim">Abhi tak koi audit entry nahi — login, settings change, user create karte hi yahan dikhega.</p></div>`; return; }
+    const actions = [...new Set(entries.map((e) => e.action))].sort();
+    body.innerHTML = `<div class="card">
+      <div class="page-head" style="margin-bottom:8px"><div><h2>📜 Audit log <span class="dim small">(last ${entries.length})</span></h2>
+      <p class="sub">Kaunne kab kya kiya — login/OTP, settings, users, announcements, email sends. Server par last 400 entries rakhi jaati hain.</p></div></div>
+      <div class="form-grid" style="max-width:420px">${field('Action filter', `<select class="input" id="au-filter"><option value="">Sab</option>${actions.map((a2) => `<option value="${esc(a2)}">${esc(a2)}</option>`).join('')}</select>`)}</div>
+      <div class="table-wrap" style="max-height:70vh;overflow:auto;margin-top:10px"><table class="table" id="au-table"><thead><tr><th>⏰ When</th><th>👤 Who</th><th>Action</th><th>Target</th><th>IP / note</th></tr></thead><tbody>
+      ${entries.map((e) => `<tr data-action="${esc(e.action)}"><td class="mono small">${esc((e.at || '').replace('T', ' ').slice(0, 19))}</td><td><b>${esc(e.actor || '—')}</b>${e.role ? ` <span class="dim small">${esc(e.role)}</span>` : ''}</td><td>${esc(e.action)}</td><td class="mono small">${esc(e.target || '')}</td><td class="small dim">${esc(e.ip || '')}${e.note ? ` · ${esc(e.note)}` : ''}</td></tr>`).join('')}
+      </tbody></table></div></div>`;
+    const sel = U.$('#au-filter', body);
+    sel.addEventListener('change', () => {
+      U.$$('#au-table tbody tr', body).forEach((tr) => { tr.hidden = !!sel.value && tr.dataset.action !== sel.value; });
+    });
+  }
+
+  // ---- 🔗 Personal links (admin) — agent/TL ka secret read-only URL --------------------------
+  async function linksTab(body) {
+    let links = [];
+    try { links = (await A.api('/api/personal-links')).links || []; } catch (err) { body.innerHTML = U.errorBox(err); return; }
+    const on = !settings || !settings.features || settings.features.personalLinks !== false;
+    const origin = location.origin;
+    const offBanner = on ? '' : '<p class="check" style="background:#fef3c7;border:1px solid #fcd34d;border-radius:10px;padding:8px 12px;margin-bottom:10px">⏸️ Feature <b>band</b> hai — sabhi links ab 404 denge. <a href="#/settings?tab=features">🎛 Features → Personal links ON karo</a>.</p>';
+    body.innerHTML = `<div class="card">
+      <div class="page-head" style="margin-bottom:8px"><div><h2>🔗 Personal links <span class="dim small">(read-only · bina login)</span></h2>
+      <p class="sub">Har agent/TL ka ek secret URL jisme sirf uska apna performance dikhta hai — naam, MTD, 14-din chart, (TL ho to goal + team list). Link WhatsApp se bhej do; koi aur page kholega to bas wahi dekh payega.</p></div></div>
+      ${offBanner}
+      <div class="finder-row" style="margin-bottom:10px">
+        <select class="input" id="pl-kind" style="width:auto"><option value="agent">🧑‍💼 Agent</option><option value="tl">👥 TL</option></select>
+        <input class="input" id="pl-name" placeholder="Naam (jaise sheet me hai) — e.g. Rahul Sharma" style="min-width:260px" maxlength="80">
+        <button class="btn primary" id="pl-create">🔗 Naya link banao</button>
+        <span class="dim small" id="pl-msg"></span>
+      </div>
+      ${links.length ? `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Kind</th><th>Naam</th><th>Link</th><th>Bana</th><th>Status</th><th></th></tr></thead><tbody>
+      ${links.map((l) => `<tr>
+        <td>${l.kind === 'tl' ? '👥 TL' : '🧑‍💼 Agent'}</td>
+        <td><b>${esc(l.name)}</b></td>
+        <td class="mono small"><a href="/p/${esc(l.token)}" target="_blank" rel="noopener">${esc(origin)}/p/${esc(String(l.token).slice(0, 10))}…</a></td>
+        <td class="small dim">${esc(String(l.createdAt || '').slice(0, 10))} · ${esc(l.by || '')}</td>
+        <td>${l.enabled !== false ? '<span class="badge">✅ ON</span>' : '<span class="badge red">⛔ OFF</span>'}</td>
+        <td class="num" style="white-space:nowrap">
+          <button class="btn small pl-copy" data-token="${esc(l.token)}" title="Poora URL copy karo">📋</button>
+          <button class="btn small pl-toggle" data-id="${esc(l.id)}" data-on="${l.enabled === false ? '1' : ''}">${l.enabled !== false ? '⏸️' : '▶️'}</button>
+          <button class="btn small pl-del" data-id="${esc(l.id)}" title="Delete">🗑</button>
+        </td></tr>`).join('')}
+      </tbody></table></div>` : '<p class="dim">Abhi koi link nahi — upar naam daal ke pehla banao.</p>'}
+      <p class="dim small" style="margin-top:10px">Token random hota hai — guess karna namumkin. Band karna ho to ⏸️ ya 🗑 — audit log me sab record hota hai.</p>
+    </div>`;
+    const msg = U.$('#pl-msg', body);
+    const create = U.$('#pl-create', body);
+    create.addEventListener('click', async () => {
+      const kind = U.$('#pl-kind', body).value;
+      const name = (U.$('#pl-name', body).value || '').trim();
+      if (!name) return U.toast('Pehle naam likho', 'err');
+      create.disabled = true;
+      try {
+        await A.api('/api/personal-links', 'POST', { kind, name });
+        U.toast('🔗 Link ban gaya ✓', 'ok');
+        draw();
+      } catch (err) { U.toast(err.message, 'err'); create.disabled = false; if (msg) msg.textContent = err.message; }
+    });
+    U.$$('.pl-copy', body).forEach((b) => b.addEventListener('click', () => {
+      const url = `${origin}/p/${b.dataset.token}`;
+      U.copyText(url).then(() => U.toast('📋 Link copy ho gaya', 'ok')).catch(() => { window.prompt('Copy karo:', url); });
+    }));
+    U.$$('.pl-toggle', body).forEach((b) => b.addEventListener('click', async () => {
+      try { await A.api(`/api/personal-links/${encodeURIComponent(b.dataset.id)}/enable`, 'POST', { enabled: b.dataset.on === '1' }); draw(); } catch (err) { U.toast(err.message, 'err'); }
+    }));
+    U.$$('.pl-del', body).forEach((b) => b.addEventListener('click', async () => {
+      if (!window.confirm('Ye link delete kar dein?')) return;
+      try { await A.api(`/api/personal-links/${encodeURIComponent(b.dataset.id)}`, 'DELETE'); U.toast('Link delete ✓', 'ok'); draw(); } catch (err) { U.toast(err.message, 'err'); }
+    }));
+  }
+
   // ---- page ------------------------------------------------------------------------------------
   async function render(root, params) {
     const admin = A.isAdmin();
@@ -567,6 +791,9 @@ FF.pages = FF.pages || {};
       else if (tab === 'access') { body.innerHTML = U.spinner('Access matrix…'); await accessTab(body); }
       else if (tab === 'data') body.innerHTML = dataTab();
       else if (tab === 'rules') body.innerHTML = rulesTab();
+      else if (tab === 'features') body.innerHTML = featuresTab();
+      else if (tab === 'audit') { body.innerHTML = U.spinner('Audit log…'); await auditTab(body); }
+      else if (tab === 'links') { body.innerHTML = U.spinner('Personal links…'); await linksTab(body); }
       else if (tab === 'contacts') body.innerHTML = contactsTab();
       else if (tab === 'backup') body.innerHTML = backupTab();
       else if (tab === 'users') { body.innerHTML = U.spinner('Users…'); await usersTab(body); }
@@ -608,6 +835,105 @@ FF.pages = FF.pages || {};
         const reload = ['data', 'eir', 'stock'].includes(btn.dataset.save);
         save(patch, msg, { reload });
       }));
+      // 📧 Features → email: pehle save, phir SMTP par test mail
+      const emTest = U.$('#em-test', body);
+      if (emTest) emTest.addEventListener('click', async () => {
+        const cardEl = emTest.closest('.card');
+        save(collect(cardEl, {}), U.$('#save-msg-feat-email', body));
+        emTest.disabled = true;
+        const lbl = emTest.textContent;
+        emTest.textContent = '⏳ Bhej rahe hain…';
+        try {
+          await A.api('/api/notifications/email/test', 'POST', {});
+          U.toast('📧 Test email bhej diya — inbox (aur spam) check karo', 'ok');
+        } catch (err) {
+          U.toast(`SMTP test fail: ${err.message}`, 'err');
+        } finally {
+          emTest.disabled = false;
+          emTest.textContent = lbl;
+        }
+      });
+      // 📢 Announcement broadcast (featuresTab)
+      const anSend = U.$('#an-send', body);
+      if (anSend) anSend.addEventListener('click', async () => {
+        const text = (U.$('#an-text', body).value || '').trim();
+        if (!text) return U.toast('Pehle message likho', 'err');
+        anSend.disabled = true;
+        try {
+          await A.api('/api/announcements', 'POST', { text });
+          U.$('#an-text', body).value = '';
+          U.$('#an-msg', body).textContent = 'Broadcast bhej diya ✓';
+          U.toast('📢 Announcement sabko bhej diya', 'ok');
+        } catch (err) { U.toast(err.message, 'err'); }
+        finally { anSend.disabled = false; }
+      });
+      // 🗓 Custom alert scheduler (featuresTab)
+      const scWhen = U.$('#sc-when', body);
+      if (scWhen) {
+        const fillWhen = () => {
+          const kind = U.$('#sc-kind', body).value;
+          const hours = (pfx) => `<optgroup label="Hour (IST)">${Array.from({ length: 24 }, (_, h) => `<option value="${pfx}${h}">${String(h).padStart(2, '0')}:00</option>`).join('')}</optgroup>`;
+          if (kind === 'daily') scWhen.innerHTML = Array.from({ length: 24 }, (_, h) => `<option value="${h}">${String(h).padStart(2, '0')}:00 IST</option>`).join('');
+          else if (kind === 'weekly') scWhen.innerHTML = ['Ravivar', 'Somwar', 'Mangalwar', 'Budhwar', 'Guruwar', 'Shukrawar', 'Shanivar'].map((d, i) => `<option value="w${i}">${d}</option>`).join('') + hours('wh');
+          else scWhen.innerHTML = Array.from({ length: 28 }, (_, i) => `<option value="d${i + 1}">Tareekh ${i + 1}</option>`).join('') + hours('dh');
+        };
+        fillWhen();
+        U.$('#sc-kind', body).addEventListener('change', fillWhen);
+        const schedsNow = () => (settings && Array.isArray(settings.schedules)) ? settings.schedules : [];
+        const saveScheds = async (list, btn) => {
+          if (btn) btn.disabled = true;
+          try {
+            const out = await A.api('/api/settings', 'PUT', { schedules: list });
+            if (out.settings) settings = out.settings;
+            const box = U.$('#sched-list', body);
+            if (box) box.innerHTML = schedListHtml((settings && settings.schedules) || []);
+            return true;
+          } catch (err) { U.toast(err.message, 'err'); return false; }
+          finally { if (btn) btn.disabled = false; }
+        };
+        const parseWhen = (kind, val) => {
+          if (kind === 'weekly') return { weekday: Number((String(val).match(/^w(\d+)/) || [])[1] || 0), hour: Number((String(val).match(/wh(\d+)/) || [])[1] || 9) };
+          if (kind === 'monthly') return { day: Number((String(val).match(/^d(\d+)/) || [])[1] || 1), hour: Number((String(val).match(/dh(\d+)/) || [])[1] || 9) };
+          return { hour: Number(val) || 9 };
+        };
+        const scAdd = U.$('#sc-add', body);
+        if (scAdd) scAdd.addEventListener('click', async () => {
+          const title = (U.$('#sc-title', body).value || '').trim();
+          const text = (U.$('#sc-text', body).value || '').trim();
+          const kind = U.$('#sc-kind', body).value;
+          if (!title || !text) return U.toast('Title + message dono chahiye', 'err');
+          const sched = { id: `sc_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, title, text, kind, ...parseWhen(kind, scWhen.value), target: U.$('#sc-target', body).value, enabled: true };
+          if (await saveScheds([...schedsNow(), sched], scAdd)) {
+            U.$('#sc-title', body).value = ''; U.$('#sc-text', body).value = '';
+            U.toast('🗓 Schedule add ho gaya ✓', 'ok');
+          }
+        });
+        U.$$('#sched-list .sc-fire', body).forEach((b) => b.addEventListener('click', async () => {
+          b.disabled = true;
+          try { const out = await A.api(`/api/schedules/${encodeURIComponent(b.dataset.id)}/fire`, 'POST', {}); U.toast(out.ok ? '▶️ Notification bhej di ✓' : 'Kuch nahi hua', out.ok ? 'ok' : 'warn'); }
+          catch (err) { U.toast(err.message, 'err'); } finally { b.disabled = false; }
+        }));
+        U.$$('#sched-list .sc-tog', body).forEach((b) => b.addEventListener('click', async () => {
+          const list = schedsNow().map((s) => s.id === b.dataset.id ? { ...s, enabled: s.enabled === false } : s);
+          await saveScheds(list, b);
+        }));
+        U.$$('#sched-list .sc-del', body).forEach((b) => b.addEventListener('click', async () => {
+          if (!window.confirm('Schedule delete karein?')) return;
+          await saveScheds(schedsNow().filter((s) => s.id !== b.dataset.id), b);
+        }));
+      }
+      const chFire = U.$('#ch-fire', body);
+      if (chFire) chFire.addEventListener('click', async () => {
+        chFire.disabled = true;
+        try { const out = await A.api('/api/notifications/champion-email', 'POST', {}); U.toast(out.ok ? `🥇 Champion email gaya — ${out.month} · ${(out.top || []).join(', ')}` : 'Kuch nahi hua', out.ok ? 'ok' : 'warn'); }
+        catch (err) { U.toast(err.message, 'err'); } finally { chFire.disabled = false; }
+      });
+      const fuFire = U.$('#fu-fire', body);
+      if (fuFire) fuFire.addEventListener('click', async () => {
+        fuFire.disabled = true;
+        try { const out = await A.api('/api/followup?fire=1'); U.toast(out.fired ? `⏰ ${out.list.length} silent agents — notification bhej di` : (out.list && out.list.length ? `⏰ ${out.list.length} silent agents (alert pehle ja chuka tha)` : 'Sab active hain — koi silent nahi'), 'ok'); }
+        catch (err) { U.toast(err.message, 'err'); } finally { fuFire.disabled = false; }
+      });
       // live colour preview
       U.$$('input[type=color][data-path]', body).forEach((inp) => inp.addEventListener('input', () => { inp.nextElementSibling.textContent = inp.value; const t = { ...FF.config.theme }; t[inp.dataset.path.split('.')[1]] = inp.value; FF.config.theme = t; A.applyTheme(); }));
       U.$$('input[type=color][data-path]', body).forEach((inp) => inp.addEventListener('change', () => {
@@ -814,7 +1140,8 @@ FF.pages = FF.pages || {};
       if (stEnv) stEnv.addEventListener('click', async () => { const v = stVals(); if (!v.url) return U.toast('Pehle Web app URL paste karo', 'err'); await U.copyText(`APPS_SCRIPT_URL=${v.url}\nAPPS_SCRIPT_SECRET=${v.secret}`); U.toast('Env values copied ✓ — Render → Environment me paste karo', 'ok'); });
       // backup
       const ex = U.$('#bk-export', body);
-      if (ex) ex.addEventListener('click', () => { const s = { ...settings }; U.downloadBlob(`ff-settings-${U.stamp()}.json`, new Blob([JSON.stringify(s, null, 2)], { type: 'application/json' })); });
+      if (ex) ex.addEventListener('click', () => { const s = { ...settings }; U.downloadBlob(`ff-settings-${U.stamp()}.json`, new Blob([JSON.stringify(s, null, 2)], { type: 'application/json' })); // ☁️ reminder ke liye server par timestamp (changeList skip karta hai — koi notification nahi)
+        A.api('/api/settings', 'PUT', { settings: { lastBackupAt: new Date().toISOString() } }).then((out) => { settings = JSON.parse(JSON.stringify(out.settings)); }).catch(() => {}); });
       const im = U.$('#bk-import', body);
       if (im) im.addEventListener('change', async () => { const f = im.files[0]; if (!f) return; try { const json = JSON.parse(await f.text()); if (!json || typeof json !== 'object') throw new Error('Invalid JSON'); delete json.updatedAt; delete json.updatedBy; await save(json, null, { reload: true }); draw(); } catch (err) { U.toast(err.message, 'err'); } });
       const cc = U.$('#bk-cache', body);

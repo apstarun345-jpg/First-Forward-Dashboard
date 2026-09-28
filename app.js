@@ -11,6 +11,8 @@ window.FF = window.FF || {};
     { id: 'tagIssued', icon: '🏷️', label: 'GV & FF Tag Issued', desc: 'Date-wise detailed issuance · VC4 vs Commercial', perm: 'tagIssued', group: 'Main' },
     { id: 'targets', icon: '🎯', label: 'Agent Targets', desc: 'Shortlist · target · progress · Excel', perm: 'targets', group: 'Main' },
     { id: 'rangeReport', icon: '📅', label: 'Range Report', desc: 'Custom from→to report · FF + GV · Excel', perm: 'tagIssued', group: 'Main' },
+    { id: 'tv', icon: '📺', label: 'TV Mode', desc: 'Big-screen rotation · fullscreen', perm: 'home', group: 'Main', feat: 'tvMode' },
+    { id: 'teamMap', icon: '🗺️', label: 'Team map', desc: 'Location + office distance (admin)', perm: 'home', group: 'Main', feat: 'teamMap', adminOnly: true },
     { id: 'dashboard', icon: '📊', label: 'Dashboard', desc: 'KPIs & charts (EIR)', perm: 'dashboard', group: 'First Forward' },
     { id: 'trend', icon: '📈', label: 'Trend', desc: 'Daily · Monthly · Last vs Current', perm: 'trend', group: 'First Forward' },
     { id: 'performance', icon: '🏆', label: 'Performance', desc: 'Agents & TLs (REPORT)', perm: 'performance', group: 'First Forward' },
@@ -33,6 +35,7 @@ window.FF = window.FF || {};
     tagIssued: { label: 'GV और FF टैग जारी', desc: 'तारीख़ अनुसार विस्तृत जारी · VC4 बनाम कॉमर्शियल' },
     targets: { label: 'एजेंट टार्गेट', desc: 'शॉर्टलिस्ट · टार्गेट · प्रोग्रेस · उपलब्धि इतिहास · TL रोलअप' },
     rangeReport: { label: 'रेंज रिपोर्ट', desc: 'मनचाही तारीख़ रेंज · FF + GV संयुक्त · एक्सेल' },
+    tv: { label: 'टीवी मोड', desc: 'बड़ी स्क्रीन रोटेशन · फुलस्क्रीन' },
     dashboard: { label: 'डैशबोर्ड', desc: 'KPI और चार्ट (EIR)' },
     trend: { label: 'ट्रेंड', desc: 'दैनिक · मासिक · पिछला बनाम चालू' },
     performance: { label: 'परफ़ॉर्मेंस', desc: 'एजेंट और TL (REPORT)' },
@@ -52,6 +55,7 @@ window.FF = window.FF || {};
     tagIssued: { desc: 'Date-wise detailed issuance · VC4 vs Commercial' },
     targets: { desc: 'Shortlist agents · set targets · track progress · Excel' },
     rangeReport: { desc: 'Pick any from→to dates · FF + GV combined · Excel' },
+    tv: { desc: 'Big-screen rotation · auto slides · fullscreen' },
     compare: { desc: 'Side-by-side comparison of both channels' },
     stock: { desc: 'Search · pivot · Excel (StockDataa)' }
   };
@@ -184,7 +188,11 @@ window.FF = window.FF || {};
     const p = pageDef(page);
     return p ? p.perm : null;
   }
-  function allowed(page, params) { const perm = pagePerm(page, params); return !perm || FF.auth.can(perm); }
+  function featOk(p) {
+    if (p.adminOnly && !(FF.auth.user && FF.auth.user.role === 'admin')) return false;
+    return !p.feat || !FF.config.features || FF.config.features[p.feat] !== false;
+  }
+  function allowed(page, params) { const perm = pagePerm(page, params); const p = pageDef(page); if (p && !featOk(p)) return false; return !perm || FF.auth.can(perm); }
   function enabledTabs() { return (FF.config.allTabs ? FF.config.allTabs(true) : (FF.config.sheets || [])); }
   function firstAllowedPage() {
     if (FF.auth.can('home')) return 'home';
@@ -195,9 +203,55 @@ window.FF = window.FF || {};
   }
 
   // ---- sidebar ----
-  function navItem(id, icon, label, desc, active, href) {
-    return `<a class="nav-item ${active ? 'active' : ''}" data-page="${id}" href="${href}"><span class="nav-ico">${icon}</span><span class="nav-text"><b>${esc(label)}</b><small>${esc(desc || '')}</small></span></a>`;
+  function navItem(id, icon, label, desc, active, href, badge) {
+    return `<a class="nav-item ${active ? 'active' : ''}" data-page="${id}" href="${href}"><span class="nav-ico">${icon}</span><span class="nav-text"><b>${esc(label)}</b><small>${esc(desc || '')}${badge || ''}</small></span></a>`;
   }
+  // ⏳ Pending account approvals (admin) — sidebar Settings item par live badge.
+  let pendingSignups = 0;
+  function setPendingSignups(n) { pendingSignups = Math.max(0, Number(n) || 0); }
+  function refreshPendingBadge() {
+    if (!FF.auth.isAdmin || !FF.auth.isAdmin()) return Promise.resolve();
+    if (FF.config.feat && FF.config.feat('pendingBadge') === false) { setPendingSignups(0); renderSidebar(); return Promise.resolve(); }
+    return FF.auth.api('/api/health').then((h) => {
+      const n = Number(h && h.pendingSignups) || 0;
+      if (n !== pendingSignups) { setPendingSignups(n); renderSidebar(); }
+    }).catch(() => {});
+  }
+  // 📤 WhatsApp share — features.share ON ho tabhi; number blank ho to WhatsApp ka share picker khulta hai.
+  function shareWhatsApp(text) {
+    if (FF.config.feat && FF.config.feat('share') === false) return false;
+    const f = FF.config.features || {};
+    const num = String(f.waNumber || (FF.config.contacts && FF.config.contacts.teamWhatsapp) || '').replace(/\D/g, '');
+    const url = `https://wa.me/${num}?text=${encodeURIComponent(String(text || '').slice(0, 1800))}`;
+    window.open(url, '_blank', 'noopener');
+    return true;
+  }
+  // 🔄 App update toast — server ka sw.js version badla to banner dikhao (Reload se naya cache).
+  let versionSeen = '', versionShown = false;
+  async function checkVersion() {
+    try {
+      const out = await fetch(`/api/version?t=${Date.now()}`, { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null));
+      const v = out && out.version;
+      if (!v || v === 'dev') return;
+      if (!versionSeen) { versionSeen = v; return; }
+      if (v === versionSeen || versionShown) return;
+      if (FF.config.feat && FF.config.feat('updateToast') === false) return;
+      versionShown = true;
+      if (U.$('#update-toast')) return;
+      const el = U.h(`<div class="update-toast" id="update-toast" role="status"><span>🔄 Naya version aaya (${U.esc(v)})</span><button class="btn small primary" id="update-reload">Reload</button><button class="btn small" id="update-later">Baad me</button></div>`);
+      document.body.appendChild(el);
+      U.$('#update-reload', el).addEventListener('click', () => location.reload());
+      U.$('#update-later', el).addEventListener('click', () => el.remove());
+    } catch { /* offline */ }
+  }
+  function startVersionWatch() {
+    checkVersion();
+    clearInterval(startVersionWatch.timer);
+    startVersionWatch.timer = setInterval(checkVersion, 10 * 60e3);
+    document.removeEventListener('visibilitychange', onVisibleVersion);
+    document.addEventListener('visibilitychange', onVisibleVersion);
+  }
+  const onVisibleVersion = () => { if (document.visibilityState === 'visible') checkVersion(); };
   function renderSidebar() {
     const nav = U.$('#nav');
     if (!nav) return;
@@ -206,7 +260,7 @@ window.FF = window.FF || {};
     const groups = [...new Set(PAGES.map((p) => p.group))];
     let html = '';
     for (const group of groups) {
-      const items = PAGES.filter((p) => p.group === group && FF.auth.can(p.perm));
+      const items = PAGES.filter((p) => p.group === group && FF.auth.can(p.perm) && featOk(p));
       const groupSheets = group === 'Main' ? [] : sheets.filter((s) => (s.group || 'First Forward') === group);
       if (!items.length && !groupSheets.length) continue;
       const label = group === 'Main' ? '' : `${GROUP_ICON[group] || ''} ${groupLabel(group)}`;
@@ -217,7 +271,7 @@ window.FF = window.FF || {};
         html += groupSheets.map((s) => `<a class="nav-item sheet ${current.page === 'sheet' && current.params.name === s.id ? 'active' : ''}" data-page="sheet" data-name="${esc(s.id)}" href="#/sheet/${encodeURIComponent(s.id)}"><span class="nav-ico">${s.icon || '📄'}</span><span class="nav-text"><b>${esc(s.id)}</b><small>${esc(s.desc || '')}</small></span></a>`).join('');
       }
     }
-    html += `<div class="nav-sec">${groupLabel('Account')}</div>` + navItem('settings', '⚙️', pageLabel({ id: 'settings', label: 'Settings' }).label, u && u.role === 'admin' ? 'Branding · data · users · access' : 'My account', current.page === 'settings', '#/settings');
+    html += `<div class="nav-sec">${groupLabel('Account')}</div>` + navItem('settings', '⚙️', pageLabel({ id: 'settings', label: 'Settings' }).label, u && u.role === 'admin' ? 'Branding · data · users · access' : 'My account', current.page === 'settings', '#/settings', u && u.role === 'admin' && pendingSignups > 0 ? ` <span class="nav-count" title="${pendingSignups} account approval pending — Settings → Users">${pendingSignups} pending ⏳</span>` : '');
     nav.innerHTML = html;
 
     const foot = U.$('#user-box');
@@ -484,6 +538,7 @@ window.FF = window.FF || {};
     const kind = el.dataset.share;
     if (kind === 'copy') { await U.copyText(text); U.toast('Copied ✓', 'ok'); return; }
     if (kind === 'mail') { location.href = U.mailLink(el.dataset.subject || FF.config.appName, text, el.dataset.to || FF.config.contacts.teamEmail); return; }
+    if (FF.config.feat && FF.config.feat('share') === false) { U.toast('WhatsApp share band hai — Settings → 🎛 Features se ON karo', 'warn'); return; }
     await U.copyText(text);
     window.open(U.waLink(text, el.dataset.phone || ''), '_blank', 'noopener');
     U.toast('Message copied — WhatsApp khul raha hai');
@@ -687,8 +742,12 @@ window.FF = window.FF || {};
     registerServiceWorker(); // push notifications ke liye SW pehle ready ho
     if (FF.notifications) FF.notifications.start();
     liveShareChip();
+    // 🔍 Global search button — features.search OFF ho to hide
+    const gsBtn = U.$('#global-search-btn');
+    if (gsBtn) gsBtn.hidden = FF.config.feat && FF.config.feat('search') === false;
+    startVersionWatch(); // 🔄 update-available toast (features.updateToast)
     const u = FF.auth.user;
-    if (FF.auth.isAdmin()) FF.auth.api('/api/health').then(h => { storageBanner(h.storage); pushBanner(h.push); }).catch(() => {});
+    if (FF.auth.isAdmin()) FF.auth.api('/api/health').then(h => { storageBanner(h.storage); pushBanner(h.push); setPendingSignups(h.pendingSignups); renderSidebar(); }).catch(() => {});
     if (u && u.mustChangePassword) setTimeout(() => U.toast('⚠️ Default password chal raha hai — Settings → My account se badlo', 'err'), 900);
     // Location prompt + PWA
     setTimeout(requestLocationOnOpen, 2000);
@@ -711,6 +770,6 @@ window.FF = window.FF || {};
     if (ok) onLogin();
   }
 
-  FF.app = { storageBanner, pushBanner, liveShareChip, navigate, updateParams, refresh, openDrawer, closeDrawer, renderSidebar, renderCurrent, renderTopUser, updateStatus, onLogin, onBackgroundDataUpdated, promptInstall, enhanceCharts, themeMode, toggleThemeMode, lang, setLang, toggleLangMenu, PAGES, get current() { return current; } };
+  FF.app = { storageBanner, pushBanner, liveShareChip, navigate, updateParams, refresh, openDrawer, closeDrawer, renderSidebar, renderCurrent, renderTopUser, updateStatus, onLogin, onBackgroundDataUpdated, promptInstall, enhanceCharts, themeMode, toggleThemeMode, lang, setLang, toggleLangMenu, PAGES, refreshPendingBadge, setPendingSignups, shareWhatsApp, checkVersion, get pendingSignups() { return pendingSignups; }, get current() { return current; } };
   document.addEventListener('DOMContentLoaded', init);
 })(window.FF);

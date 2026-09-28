@@ -10,6 +10,8 @@ import fs from 'node:fs/promises';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import net from 'node:net';
+import tls from 'node:tls';
 import { fileURLToPath } from 'node:url';
 import { sheetsStoreFromEnv } from './sheets-storage.js';
 import { appsScriptStoreFromEnv, AppsScriptStore } from './apps-script-storage.js';
@@ -118,6 +120,61 @@ const DEFAULT_SETTINGS = {
   excludeTls: ['APS'],
   thresholds: { coverRed: 7, coverOrange: 15, coverAmber: 30, inactiveDays: 3, topN: 10 },
   contacts: { teamWhatsapp: '', teamEmail: '', teamGroupLink: '', signature: 'Team First Forward' },
+  // 🎛 Har feature ka admin toggle (Settings → 🎛 Features). UI features client par apply hote hain,
+  //    alerts server-side scheduled checks me isi se gate hote hain. Modify numbers bhi yahin.
+  features: {
+    search: true,        // 🔍 global search (Ctrl/⌘ + K) + topbar button
+    share: true,         // 📤 WhatsApp share buttons (Dashboard / Trend / Stock)
+    targetBar: true,     // 🎯 Dashboard target progress bar
+    stockTrend: true,    // 📉 Stock page 30-din trend chart
+    tlCover: true,       // 📈 TL-wise cover list (Stock)
+    recon: true,         // 🧾 Stock in vs issued (Stock)
+    loginHistory: true,  // 🕘 Login history table (Settings → Users)
+    pendingBadge: true,  // ⏳ Pending-approvals sidebar badge
+    updateToast: true,   // 🔄 "Update available" toast
+    backupReminder: true,// ☁️ Settings backup reminder
+    waNumber: '',        // 📤 WhatsApp share target number (blank = share picker)
+    alerts: { lowCover: true, midMonth: true, inactive: true, zeroDay: true, newLoginIp: true },
+    digestHour: 8,       // 🌅 digest kab se mile (IST hour, once after this)
+    midFrom: 15, midTo: 25, midGapPct: 40, // 🎯 mid-month window (tareekh) + peeche hone ki %
+    zeroDropPct: 50,     // ⚠️ itna % gira to sharp-drop alert (0 = sirf zero-day)
+    backupDays: 7,       // ☁️ settings backup ki reminder age (days)
+    emailDigest: false,  // 📧 digest email se bhi bhejo (SMTP niche configure karo)
+    // ---- round 2 ke 10 naye features (sab Settings → 🎛 Features se on/off) ----
+    tvMode: true,        // 📺 office TV mode (auto-rotate dashboard/trend/stock)
+    weekCompare: true,   // 🔁 dashboard par "aaj vs pichhle hafte ke same day"
+    agedStock: true,     // 📦 stock aging card (kitne din se pada hai)
+    auditLog: true,      // 📜 Settings → Audit log tab
+    announcements: true, // 📢 admin announcements (bell me broadcast)
+    tlGoals: true,       // 🧮 TL-level monthly goals (Targets → TL rollup)
+    otp2fa: true,        // 🔐 naye IP par OTP (email) — SMTP+email na ho to purana raasta
+    emailReport: false,  // 📧 roz ka scheduled report email (HTML + CSV attach)
+    emailReportHour: 21,
+    weeklyEmail: false,  // 📬 weekly auto digest email (Monday)
+    weeklyEmailHour: 9,
+    anomalyPct: 80,      // 🔍 agent anomaly: itna % gira to alert
+    // ---- round 3 ke 6 naye features (sab Settings → 🎛 Features se on/off) ----
+    badges: true,        // 🏅 weekly badges + shareable rank card (Performance)
+    voiceSummary: true,  // 🗣️ Dashboard par 🔊 voice summary (Hindi TTS)
+    askBox: true,        // 🤖 search box me sawal-jawab ("aaj ka VC4?")
+    teamMap: true,       // 🗺 team location map (admin)
+    tlAnomaly: true,     // 🏆 TL-level anomaly (agent ke saath)
+    personalLinks: true, // 🔗 personal read-only links (agent + TL)
+    // ---- round 4 ke naye features ----
+    customAlerts: true,  // 🗓 custom alert scheduler (admin ke apne reminders/status)
+    championEmail: false,// 🥇 monthly champion certificate email (SMTP chahiye)
+    championHour: 10, championTop: 3,
+    followupTracker: true, // ⏰ follow-up tracker (3+ din silent agents)
+    followupDays: 3, followupHour: 10,
+    dispatchPlan: true,  // 🎯 suggested-dispatch highlighted cards (GV + FF)
+    suggestDays: 15,     // 🎯 suggested qty = avg VC4/day × ye din − stock
+    officeLat: 0, officeLng: 0, // 🗺 office location (0 = unset — map card se set karo)
+    alerts: { lowCover: true, midMonth: true, inactive: true, zeroDay: true, newLoginIp: true, anomaly: true }
+  },
+  personalLinks: [],     // 🔗 { id, kind, name, token, enabled } — sirf admin (settingsFor non-admin ko strip karta hai)
+  schedules: [],         // 🗓 { id, title, text, kind: daily|weekly|monthly, hour, weekday, day, target, enabled }
+  email: { host: '', port: 587, secure: false, user: '', pass: '', from: '', to: '' },
+  lastBackupAt: null,
   cacheSeconds: DEFAULT_CACHE_SECONDS,
   pageSize: 50,
   allowSignup: true,
@@ -198,6 +255,122 @@ function deepMerge(base, patch) {
   }
   return patch === undefined ? base : patch;
 }
+/** Admin ke feature flags + modify numbers (Settings → 🎛 Features) — defaults ke saath merged. */
+function feats() { return deepMerge(DEFAULT_SETTINGS.features, (db.settings && db.settings.features) || {}); }
+/** Settings payload: bina login (ya non-admin) ke email SMTP secrets kabhi mat bhejo. */
+function settingsFor(u) {
+  if (u && u.role === 'admin') return db.settings;
+  const s = { ...db.settings };
+  if (s.email) s.email = { host: s.email.host || '', port: s.email.port || '', secure: !!s.email.secure, user: '', pass: '', from: s.email.from || '', to: s.email.to || '' };
+  delete s.personalLinks; // 🔗 secret tokens sirf admin ko
+  delete s.schedules;     // 🗓 admin ke custom reminders
+  return s;
+}
+/** sw.js ka CACHE_NAME — app version (update-toast ke liye). */
+let SW_VERSION = '';
+try { SW_VERSION = (readFileSync(path.join(__dirname, 'sw.js'), 'utf8').match(/CACHE_NAME\s*=\s*['"]([^'"]+)['"]/) || [])[1] || ''; } catch { /* dev mode */ }
+
+/**
+ * 📧 Minimal SMTP client (koi naya dependency nahi): EHLO → optional STARTTLS → optional AUTH LOGIN
+ * → RCPT → DATA. cfg = { host, port, secure, user, pass, from, to } (Settings → 🎛 Features).
+ * self-signed SMTP certs ke liye rejectUnauthorized false (internal mail relay chalte rahe).
+ */
+function smtpSend(cfg, subject, text, opts = {}) {
+  return new Promise((resolve, reject) => {
+    const host = String(cfg.host || '').trim();
+    const port = Number(cfg.port) || 587;
+    const directTls = cfg.secure === true || port === 465;
+    const from = String(cfg.from || cfg.user || '').trim();
+    const toList = String(cfg.to || '').split(/[,;]/).map((s) => s.trim()).filter(Boolean);
+    if (!host) return reject(new Error('SMTP host set nahi hai'));
+    if (!from) return reject(new Error('"From" address set nahi hai'));
+    if (!toList.length) return reject(new Error('"To" address set nahi hai'));
+    let sock = null, buf = '', step = 0, caps = '', done = false, rcptIdx = 0;
+    const timer = setTimeout(() => fail('SMTP timeout (15s)'), 15000);
+    const fail = (m) => { if (done) return; done = true; clearTimeout(timer); try { sock && sock.destroy(); } catch { /* ignore */ } reject(new Error(m)); };
+    const win = () => { if (done) return; done = true; clearTimeout(timer); try { sock && sock.end(); } catch { /* ignore */ } resolve(true); };
+    const w = (l) => sock.write(l + '\r\n');
+    const b64 = (s) => Buffer.from(String(s), 'utf8').toString('base64');
+    function bind(s) {
+      sock = s;
+      if (typeof sock.setEncoding === 'function') sock.setEncoding('utf8');
+      sock.setTimeout && sock.setTimeout(15000, () => fail('SMTP timeout (15s)'));
+      sock.on('error', (e) => fail(`SMTP: ${e.message || e}`));
+      sock.on('data', onData);
+    }
+    function onData(chunk) {
+      buf += chunk;
+      let i;
+      while (!done && (i = buf.search(/\r?\n/)) >= 0) {
+        const line = buf.slice(0, i).replace(/\r$/, '');
+        buf = buf.slice(i + (buf[i] === '\r' ? 2 : 1));
+        if (!line) continue;
+        const code = Number(line.slice(0, 3));
+        if (/^\d{3}-/.test(line)) { caps += line + '\n'; continue; } // multiline 250- caps
+        if (code >= 400 && step !== 9) return fail(`SMTP error: ${line}`);
+        handle(line, code);
+      }
+    }
+    function afterEhlo() {
+      if (String(cfg.user || '')) { step = 5; return w('AUTH LOGIN'); }
+      step = 6; return w(`MAIL FROM:<${from}>`);
+    }
+    function handle(line, code) {
+      if (step === 0) { step = 1; return w('EHLO localhost'); }
+      if (step === 1) { // pehla EHLO (plain par)
+        if (!directTls && !sock.authorized && /STARTTLS/i.test(caps)) { step = 2; return w('STARTTLS'); }
+        return afterEhlo();
+      }
+      if (step === 2) { // 220 TLS go — is socket par TLS wrapper lagao
+        const plain = sock;
+        plain.removeAllListeners('data'); plain.removeAllListeners('error'); plain.removeAllListeners('timeout');
+        const s2 = tls.connect({ socket: plain, servername: host, rejectUnauthorized: false }, () => {
+          caps = ''; step = 3; bind(s2); w('EHLO localhost');
+        });
+        s2.on('error', (e) => fail(`TLS: ${e.message || e}`));
+        return;
+      }
+      if (step === 3) return afterEhlo(); // TLS ke baad wapas EHLO
+      if (step === 5) { step = 51; return w(b64(String(cfg.user || ''))); } // 334 username
+      if (step === 51) { step = 52; return w(b64(String(cfg.pass || ''))); } // 334 password
+      if (step === 52) { step = 6; return w(`MAIL FROM:<${from}>`); }        // 235 auth ok
+      if (step === 6) { step = 7; return w(`RCPT TO:<${toList[rcptIdx]}>`); }
+      if (step === 7) {
+        rcptIdx++;
+        if (rcptIdx < toList.length) return w(`RCPT TO:<${toList[rcptIdx]}>`);
+        step = 8; return w('DATA');
+      }
+      if (step === 8) {
+        step = 9;
+        const b64w = (s) => Buffer.from(String(s), 'utf8').toString('base64').replace(/(.{76})/g, '$1\r\n');
+        const subjHdr = `From: ${from}\r\nTo: ${toList.join(', ')}\r\nSubject: =?UTF-8?B?${b64(subject)}?=\r\nMIME-Version: 1.0\r\n`;
+        let mime;
+        if (opts.attachments && opts.attachments.length) {
+          const boundary = `ff-b-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+          const chunks = [`--${boundary}\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n${b64w(text)}`];
+          for (const a of opts.attachments) {
+            chunks.push(`--${boundary}\r\nContent-Type: text/csv; name="${String(a.name || 'report.csv').replace(/"/g, '')}"\r\nContent-Transfer-Encoding: base64\r\nContent-Disposition: attachment; filename="${String(a.name || 'report.csv').replace(/"/g, '')}"\r\n\r\n${b64w(a.content)}`);
+          }
+          chunks.push(`--${boundary}--\r\n`);
+          mime = `${subjHdr}Content-Type: multipart/mixed; boundary="${boundary}"\r\n\r\n${chunks.join('\r\n')}`;
+        } else if (opts.html) {
+          mime = `${subjHdr}Content-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n${b64w(opts.html)}`;
+        } else {
+          mime = `${subjHdr}Content-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n${b64w(text)}`;
+        }
+        // DATA terminator: last body line ke baad alag line par "." (warna mock/real SMTP kabhi 250 nahi bhejenge)
+        return w(`${mime.replace(/\r?\n+$/, '')}\r\n.\r\n`);
+      }
+      if (step === 9) { w('QUIT'); return win(); }
+      void code;
+    }
+    const conn = directTls
+      ? tls.connect({ host, port, servername: host, rejectUnauthorized: false }, () => { /* greeting aane ka wait */ })
+      : net.connect({ host, port });
+    conn.once('error', (e) => fail(`SMTP connect: ${e.message || e}`));
+    bind(conn);
+  });
+}
 
 // ---------------------------------------------------------------------------------------------
 // Passwords, sessions, users
@@ -217,7 +390,7 @@ function verifyPassword(password, stored) {
 const normUser = (u) => String(u || '').trim().toLowerCase().replace(/[^a-z0-9._@-]/g, '').slice(0, 60);
 // `enabled` = master switch (UI me ek hi "Notifications ON/OFF" button hai). OFF → koi in-app toast
 // nahi, koi browser alert nahi, koi mobile push nahi. Feed items phir bhi save hote hain (history).
-const DEFAULT_NOTIFY_PREFS = { enabled: true, login: true, signup: true, report: true, monthly: true, activity: true, click: true, search: true, settings: true, user: true, location: true, info: true, sound: true, push: true };
+const DEFAULT_NOTIFY_PREFS = { enabled: true, login: true, signup: true, report: true, monthly: true, digest: true, alert: true, activity: true, click: true, search: true, settings: true, user: true, location: true, info: true, sound: true, push: true };
 function normalizeNotifyPrefs(p) {
   const out = { ...DEFAULT_NOTIFY_PREFS };
   if (p && typeof p === 'object') for (const k of Object.keys(DEFAULT_NOTIFY_PREFS)) if (p[k] !== undefined) out[k] = !!p[k];
@@ -225,7 +398,7 @@ function normalizeNotifyPrefs(p) {
 }
 function publicUser(u) {
   if (!u) return null;
-  return { username: u.username, name: u.name || u.username, email: u.email || '', mobile: u.mobile || '', avatar: u.avatar || '', role: u.role, approved: !!u.approved, permissions: u.role === 'admin' ? allPermKeysNow() : (u.permissions || []), createdAt: u.createdAt, lastLoginAt: u.lastLoginAt || null, mustChangePassword: !!u.mustChangePassword, lastLocation: u.lastLocation || null, notificationsSeenAt: u.notificationsSeenAt || null, notifyAccess: u.role === 'admin' ? true : (u.notifyAccess !== false), notifyPrefs: normalizeNotifyPrefs(u.notifyPrefs) };
+  return { username: u.username, name: u.name || u.username, email: u.email || '', mobile: u.mobile || '', avatar: u.avatar || '', role: u.role, approved: !!u.approved, permissions: u.role === 'admin' ? allPermKeysNow() : (u.permissions || []), createdAt: u.createdAt, lastLoginAt: u.lastLoginAt || null, mustChangePassword: !!u.mustChangePassword, lastLocation: u.lastLocation || null, notificationsSeenAt: u.notificationsSeenAt || null, notifyAccess: u.role === 'admin' ? true : (u.notifyAccess !== false), notifyPrefs: normalizeNotifyPrefs(u.notifyPrefs), loginHistory: Array.isArray(u.loginHistory) ? u.loginHistory.slice(-10) : [] };
 }
 function findUser(username) { return db.users.find((u) => u.username === normUser(username)) || null; }
 function findUserByLogin(raw) {
@@ -278,9 +451,27 @@ function recordNotification({ type = 'info', title, body, target = 'admin', meta
   notifyItems().push(item);
   if (notifyItems().length > 500) db.notify.items = notifyItems().slice(-500);
   persist('notify');
-  pushFanout(item); // 🔔 instant web push — app band ho tab bhi
-  return item;
-}
+    pushFanout(item); // 🔔 instant web push — app band ho tab bhi
+    return item;
+  }
+  /** 📜 Audit log (sirf admin Settings → 📜 tab) — best-effort, kabhi action fail nahi karwana. */
+  function logAudit(user, action, detail = {}) {
+    try {
+      if (!db.notify || typeof db.notify !== 'object') db.notify = { items: [], watch: {} };
+      if (!Array.isArray(db.notify.audit)) db.notify.audit = [];
+      db.notify.audit.push({
+        at: new Date().toISOString(),
+        actor: (user && user.username) || String(detail.actor || 'anon').slice(0, 40),
+        role: user ? user.role : '',
+        action: String(action).slice(0, 40),
+        target: String(detail.target || '').slice(0, 80),
+        note: String(detail.note || '').slice(0, 200),
+        ip: String(detail.ip || '').slice(0, 60)
+      });
+      if (db.notify.audit.length > 400) db.notify.audit = db.notify.audit.slice(-400);
+      persist('notify').catch(() => {});
+    } catch { /* audit never breaks the main action */ }
+  }
 function visibleNotifications(user, since) {
   const after = since ? new Date(since).getTime() : 0;
   const prefs = user ? normalizeNotifyPrefs(user.notifyPrefs) : DEFAULT_NOTIFY_PREFS;
@@ -326,6 +517,28 @@ function permissionDiff(before, after) {
   return { added: [...a].filter((k) => !b.has(k)), removed: [...b].filter((k) => !a.has(k)) };
 }
 const activityLast = new Map();
+// Client routes (app.js PAGES) — notification tap par seedha usi page par le jao.
+const CLIENT_PAGES = new Set(['home', 'tagIssued', 'targets', 'rangeReport', 'dashboard', 'trend', 'performance', 'stock', 'stockReport', 'gvDashboard', 'gvTrend', 'gvPerformance', 'gvStock', 'compare', 'charts']);
+/** Search/click ki "option" se client route banao (deep link — mobile push tap → seedha page). */
+function pageLinkFor(option, query) {
+  const t = String(option || '').trim();
+  if (!t) return '';
+  if (/^sheet:/i.test(t)) return `#/sheet/${encodeURIComponent(t.replace(/^sheet:\s*/i, '').trim())}`;
+  // GV wale options pehle — warna "GV Stock Find" generic /stock par chala jaata.
+  if (/gv\s*stock/i.test(t)) return '#/gvStock';
+  if (/gv\s*trend/i.test(t)) return '#/gvTrend';
+  if (/gv\s*performance/i.test(t)) return '#/gvPerformance';
+  if (/^gv\b/i.test(t)) return '#/gvDashboard';
+  if (/performance/i.test(t)) return `#/performance${query ? `?q=${encodeURIComponent(String(query).slice(0, 60))}` : ''}`;
+  if (/stock/i.test(t)) return '#/stock';
+  if (/trend/i.test(t)) return '#/trend';
+  if (/targets/i.test(t)) return '#/targets';
+  if (/range\s*report/i.test(t)) return '#/rangeReport';
+  if (/excel\s*bundle/i.test(t)) return '#/dashboard';
+  if (/tag\s*issued/i.test(t)) return '#/tagIssued';
+  if (/drawer|kpi/i.test(t)) return '#/dashboard';
+  return '';
+}
 // Ephemeral in-memory presence: page + viewport-relative pointer only (never GPS or screen contents).
 const livePresence = new Map();
 function noteActivity(user, page) {
@@ -334,7 +547,7 @@ function noteActivity(user, page) {
   const key = `${user.username}:${cleanPage}`;
   if (Date.now() - (activityLast.get(key) || 0) < 60e3) return null;
   activityLast.set(key, Date.now());
-  return recordNotification({ type: 'activity', title: '👀 User ne page khola', body: `${user.name || user.username} ne "${cleanPage}" open kiya.`, target: 'admin', meta: { username: user.username, page: cleanPage } });
+  return recordNotification({ type: 'activity', title: '👀 User ne page khola', body: `${user.name || user.username} ne "${cleanPage}" open kiya.`, target: 'admin', meta: { username: user.username, page: cleanPage, ...(CLIENT_PAGES.has(cleanPage) ? { link: `#/${cleanPage}` } : {}) } });
 }
 function sha(token) { return crypto.createHash('sha256').update(token).digest('hex'); }
 async function createSession(username) {
@@ -388,6 +601,7 @@ async function bootstrapAdmin() {
 
 // login / password-reset throttle (per IP)
 const attempts = new Map();
+const otps = new Map(); // 📱 pending login OTP tickets (ticket → {username, code, exp, tries, ip, loginId})
 const forgotHits = new Map();
 function clientIp(req) { return (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || '?'; }
 function throttled(ip) { const a = attempts.get(ip); return a && a.count >= 8 && Date.now() - a.at < 10 * 60e3; }
@@ -1006,8 +1220,727 @@ function maybeMonthlyReport() {
     console.log(`monthly report notification sent for ${prev}`);
   } catch (err) { console.warn('monthly report:', err.message); }
 }
+// ---- 🌅 daily digest: roz ek baar (IST subah 8 ke baad) — kal ki issuance, MTD, abhi ka stock ----
+const MON_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function istNow() { return new Date(Date.now() + 5.5 * 3600e3); } // sirf date/hour ke liye (UTC+5:30)
+/** IST ka aaj ka YYYY-MM-DD */
+function dateKeyNow() { const ist = istNow(); const pad = (n) => String(n).padStart(2, '0'); return `${ist.getUTCFullYear()}-${pad(ist.getUTCMonth() + 1)}-${pad(ist.getUTCDate())}`; }
+/** StockDataa ka current total + class split (ek gviz group-by query). */
+async function stockSnapshot() {
+  try {
+    const s = db.settings;
+    const cfg = s.stock || {};
+    const clsCol = cfg.cls || 'E', tagCol = cfg.tagId || 'C';
+    const sheet = s.stockSheet || 'StockDataa';
+    const tq = `select ${clsCol}, count(${tagCol}) where ${tagCol} is not null group by ${clsCol}`;
+    const params = new URLSearchParams({ id: String(s.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet, tq });
+    const out = await fetchUpstream(upstreamUrl(params));
+    if (out.status < 200 || out.status >= 300) throw new Error(`Google responded ${out.status}`);
+    const table = parseGvizServer(out.body);
+    const classes = {}; let total = 0;
+    for (const row of table.rows || []) {
+      const n = serverNumber(serverCell(row, 1));
+      if (!n) continue;
+      const b = classBucket(serverCell(row, 0));
+      classes[b] = (classes[b] || 0) + n;
+      total += n;
+    }
+    return total ? { total, classes } : null;
+  } catch (err) { console.warn('digest stock snapshot:', err.message); return null; }
+}
+/**
+ * Subah ek baar admin ko ek compact digest push: kal ki FF/GV issuance, MTD + avg per day,
+ * abhi ka stock (VC4/Comm) aur approx VC4 cover (threshold emoji ke saath).
+ * Server free-tier par sote waqt fir jaata hai — isliye window "8 baje ke baad, roz ek baar" hai
+ * (pehla wake-up us din digest bhej dega). force=true se Settings ka button kabhi bhi bhej sakta hai.
+ */
+async function maybeDailyDigest(force = false) {
+  try {
+    if (!db.notify || typeof db.notify !== 'object') db.notify = { items: [], watch: {} };
+    if (!db.notify.watch || typeof db.notify.watch !== 'object') db.notify.watch = {};
+    const ist = istNow();
+    const pad = (n) => String(n).padStart(2, '0');
+    const dateKey = `${ist.getUTCFullYear()}-${pad(ist.getUTCMonth() + 1)}-${pad(ist.getUTCDate())}`;
+    if (!force) {
+      const F = feats();
+      if (ist.getUTCHours() < (Number(F.digestHour) || 8)) return null; // digest hour (default subah 8)
+      if (db.notify.watch.digestDate === dateKey) return null; // aaj ka digest already gaya
+    }
+    await checkReports(false).catch(() => {}); // taaza FF/GV snapshots (5-min throttle respected)
+    const ff = db.notify.watch.ff && db.notify.watch.ff.date ? db.notify.watch.ff : null;
+    const gv = db.notify.watch.gv && db.notify.watch.gv.date ? db.notify.watch.gv : null;
+    const daily = db.notify.watch.daily && typeof db.notify.watch.daily === 'object' ? db.notify.watch.daily : {};
+    const monthKey = dateKey.slice(0, 7);
+    let ffMtd = 0, mtdDays = 0;
+    for (const [d, v] of Object.entries(daily)) if (d.startsWith(monthKey) && v && Number(v.ff)) { ffMtd += Number(v.ff); mtdDays++; }
+    const stock = await stockSnapshot();
+    const th = db.settings.thresholds || {};
+    const coverRed = Number(th.coverRed) || 7, coverOrange = Number(th.coverOrange) || 15, coverAmber = Number(th.coverAmber) || 30;
+    const parts = [];
+    const topClass = (classes) => { const e = Object.entries(classes || {}).sort((a, b) => b[1] - a[1])[0]; return e ? `${e[0]} ${e[1]}` : ''; };
+    const dLabel = (iso) => { const d = Number(String(iso).slice(8, 10)), m = Number(String(iso).slice(5, 7)) - 1; return `${d} ${MON_SHORT[m] || ''}`.trim(); };
+    if (ff) parts.push(`🟦 FF ${dLabel(ff.date)} · ${ff.total} tags${topClass(ff.classes) ? ` (${topClass(ff.classes)})` : ''}`);
+    if (gv) parts.push(`🟩 GV · ${gv.total} tags${topClass(gv.classes) ? ` (${topClass(gv.classes)})` : ''}`);
+    const avg = mtdDays ? ffMtd / mtdDays : 0;
+    if (mtdDays) parts.push(`📈 MTD ${ffMtd} · ${mtdDays} din · ≈${Math.round(avg)}/din`);
+    if (stock) {
+      const vc4 = (stock.classes && stock.classes.VC4) || 0;
+      parts.push(`📦 Stock ${stock.total} (VC4 ${vc4} | Comm ${stock.total - vc4})`);
+      if (vc4 && avg > 0) {
+        const cover = vc4 / avg;
+        const emo = cover < coverRed ? '🔴' : cover < coverOrange ? '🟠' : cover < coverAmber ? '🟡' : '🟢';
+        parts.push(`VC4 cover ≈ ${Math.round(cover)} din ${emo}`);
+      }
+    }
+    if (!parts.length) parts.push('Abhi tak koi fresh sheet data nahi mila — sheet update hote hi kal ye digest sahi numbers dikhayega.');
+    const item = recordNotification({
+      type: 'digest',
+      title: `🌅 Daily digest · ${dLabel(dateKey)}`,
+      body: parts.join(' · '),
+      target: 'admin',
+      meta: { date: dateKey, link: '#/dashboard', ffMtd, mtdDays, stock: stock ? stock.total : null }
+    });
+    db.notify.watch.digestDate = dateKey;
+    persist('notify').catch(() => {});
+    console.log(`daily digest sent for ${dateKey} (${parts.length} lines)`);
+    // 📧 Email digest (admin Features tab me ON + SMTP configured ho to).
+    const F = feats(), ecfg = db.settings.email || {};
+    if (F.emailDigest && ecfg.host && ecfg.to) {
+      smtpSend(ecfg, `🌅 Daily digest · ${dLabel(dateKey)}`, parts.join('\n'))
+        .then(() => console.log('digest email sent'))
+        .catch((e) => console.warn('digest email:', e.message));
+    }
+    return item;
+  } catch (err) { console.warn('daily digest:', err.message); return null; }
+}
+// ---- 🔴 low-cover alert + 📉 stock history (server ke snapshots) --------------------------------
+let stockCheckAt = 0;
+/**
+ * Stock ka current snapshot: history me save (Stock page ka 30-din chart) + cover band calculate
+ * (VC4 stock ÷ MTD avg daily issuance). Cover agar kharab hua — turant alert; red zone me to roz
+ * ek reminder. 30-min throttle (gviz query bacha rahe).
+ */
+async function refreshStockState(force = false) {
+  if (!force && Date.now() - stockCheckAt < 30 * 60e3) return null;
+  stockCheckAt = Date.now();
+  try {
+    if (!db.notify || typeof db.notify !== 'object') db.notify = { items: [], watch: {} };
+    if (!db.notify.watch || typeof db.notify.watch !== 'object') db.notify.watch = {};
+    const watch = db.notify.watch;
+    const stock = await stockSnapshot();
+    if (!stock) return null;
+    const ist = istNow();
+    const pad = (n) => String(n).padStart(2, '0');
+    const dateKey = `${ist.getUTCFullYear()}-${pad(ist.getUTCMonth() + 1)}-${pad(ist.getUTCDate())}`;
+    // 📉 Per-day history (last write wins) — Stock page par last-30-din ka line chart.
+    if (!watch.stockHistory || typeof watch.stockHistory !== 'object') watch.stockHistory = {};
+    const vc4 = (stock.classes && stock.classes.VC4) || 0;
+    const entry = { total: stock.total, vc4, comm: stock.total - vc4 };
+    const prevEntry = watch.stockHistory[dateKey] || {};
+    let changed = false;
+    if (prevEntry.total !== entry.total || prevEntry.vc4 !== entry.vc4) {
+      watch.stockHistory[dateKey] = entry;
+      changed = true;
+      const keys = Object.keys(watch.stockHistory).sort();
+      for (let i = 0; i < Math.max(0, keys.length - 400); i++) delete watch.stockHistory[keys[i]];
+    }
+    // 🔴 Cover = VC4 stock ÷ is mahine ka avg daily issuance (server ki per-date history se).
+    const daily = watch.daily && typeof watch.daily === 'object' ? watch.daily : {};
+    const monthKey = dateKey.slice(0, 7);
+    let ffMtd = 0, mtdDays = 0;
+    for (const [d, v] of Object.entries(daily)) if (d.startsWith(monthKey) && v && Number(v.ff)) { ffMtd += Number(v.ff); mtdDays++; }
+    const avg = mtdDays ? ffMtd / mtdDays : 0;
+    if (!vc4 || avg <= 0 || mtdDays < 3) { if (changed) persist('notify').catch(() => {}); return null; } // alert ke liye ≥3 din ka data
+    const th = db.settings.thresholds || {};
+    const coverRed = Number(th.coverRed) || 7, coverOrange = Number(th.coverOrange) || 15, coverAmber = Number(th.coverAmber) || 30;
+    const cover = vc4 / avg;
+    const band = cover < coverRed ? 'red' : cover < coverOrange ? 'orange' : cover < coverAmber ? 'amber' : 'green';
+    const prevBand = watch.cover && watch.cover.band;
+    watch.cover = { at: new Date().toISOString(), cover: Math.round(cover * 10) / 10, band, vc4, avg: Math.round(avg) };
+    const rank = { green: 0, amber: 1, orange: 2, red: 3 };
+    const emoji = { red: '🔴', orange: '🟠', amber: '🟡', green: '🟢' };
+    const worsened = !!prevBand && rank[band] > rank[prevBand];
+    const dailyRed = band === 'red' && watch.coverAlertDate !== dateKey;
+    if ((worsened || dailyRed) && feats().alerts.lowCover !== false) {
+      if (band === 'red') watch.coverAlertDate = dateKey;
+      recordNotification({
+        type: 'alert',
+        title: `${emoji[band]} VC4 stock cover ≈ ${Math.round(cover)} din`,
+        body: `Cover ${band} zone me${band === 'red' ? ` (< ${coverRed} din)` : ''} — VC4 stock ${vc4} ÷ MTD avg ${Math.round(avg)}/din.${worsened ? ` Pichhle check me ${prevBand} tha.` : ''} Stock page se class / TL wise dekho.`,
+        target: 'admin',
+        meta: { link: '#/stock', band, cover: Math.round(cover), vc4, avg: Math.round(avg) }
+      });
+      changed = true;
+    }
+    if (changed) persist('notify').catch(() => {});
+    return { stock, cover, band, mtdDays };
+  } catch (err) { console.warn('stock state:', err.message); return null; }
+}
+// ---- 🎯 mid-month target check (mahine ki 15–25 tareekh ke beech, ek baar) ----------------------
+async function maybeMidMonthAlert() {
+  try {
+    if (!db.notify || typeof db.notify !== 'object') db.notify = { items: [], watch: {} };
+    if (!db.notify.watch || typeof db.notify.watch !== 'object') db.notify.watch = {};
+    const ist = istNow();
+    const pad = (n) => String(n).padStart(2, '0');
+    const dateKey = `${ist.getUTCFullYear()}-${pad(ist.getUTCMonth() + 1)}-${pad(ist.getUTCDate())}`;
+    const day = Number(dateKey.slice(8, 10));
+    const ym = dateKey.slice(0, 7);
+    const F = feats();
+    if (F.alerts.midMonth === false) return null;
+    // Server free-tier par sota hai — window (default 15–25) rakhi taaki wake-up par bhi check ho jaye.
+    if (day < (Number(F.midFrom) || 15) || day > (Number(F.midTo) || 25)) return null;
+    if (db.notify.watch.midMonthAlert === ym) return null;
+    const targets = Array.isArray(db.settings.targets) ? db.settings.targets : [];
+    const totalTarget = targets.filter((t) => t && t.ym === ym && Number(t.target) > 0).reduce((a, t) => a + Number(t.target), 0);
+    const daily = db.notify.watch.daily && typeof db.notify.watch.daily === 'object' ? db.notify.watch.daily : {};
+    let ffMtd = 0, gvMtd = 0;
+    for (const [d, v] of Object.entries(daily)) if (d.startsWith(ym) && v) { ffMtd += Number(v.ff) || 0; gvMtd += Number(v.gv) || 0; }
+    const achieved = ffMtd + gvMtd;
+    const daysInMonth = new Date(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)), 0).getDate();
+    const monthLabel = `${day} ${MON_SHORT[Number(dateKey.slice(5, 7)) - 1]}`;
+    const keep = 1 - (Number(F.midGapPct) || 40) / 100; // 40%+ peeche = achieved expected ka 60% se kam
+    let behind = false, body = '';
+    if (totalTarget > 0) {
+      const expected = totalTarget * (day / daysInMonth);
+      const pct = expected > 0 ? Math.round((achieved / expected) * 100) : 100;
+      // 40%+ peeche = achieved expected pace ka 60% se kam.
+      if (expected > 0 && achieved < expected * keep) {
+        behind = true;
+        body = `${monthLabel} (day ${day}/${daysInMonth}): FF+GV ${achieved.toLocaleString('en-IN')} tags vs target ${totalTarget.toLocaleString('en-IN')} ka expected pace ${Math.round(expected).toLocaleString('en-IN')} — sirf ${pct}% (lagbhag ${100 - pct}% peeche). Targets page par agents ko push karo.`;
+      }
+    } else {
+      // Target set nahi hai → pichhle mahine isi tarikh tak ka actual = benchmark.
+      const prevD = new Date(Date.UTC(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)) - 1, 0));
+      const prevYm = `${prevD.getUTCFullYear()}-${pad(prevD.getUTCMonth() + 1)}`;
+      let prevSame = 0;
+      for (const [d, v] of Object.entries(daily)) if (d.startsWith(prevYm) && Number(d.slice(8, 10)) <= day && v) prevSame += (Number(v.ff) || 0) + (Number(v.gv) || 0);
+      if (prevSame > 0 && achieved < prevSame * keep) {
+        behind = true;
+        body = `${monthLabel}: FF+GV ${achieved.toLocaleString('en-IN')} tags — pichhle mahine isi tarikh tak ${prevSame.toLocaleString('en-IN')} the (lagbhag ${100 - Math.round((achieved / prevSame) * 100)}% peeche). Target set karo (Targets page) ya pace badhao.`;
+      }
+    }
+    if (!behind) return null;
+    db.notify.watch.midMonthAlert = ym;
+    persist('notify').catch(() => {});
+    return recordNotification({ type: 'alert', title: `🎯 Mid-month target miss · ${monthLabel}`, body, target: 'admin', meta: { link: '#/targets', achieved, totalTarget, day } });
+  } catch (err) { console.warn('mid-month alert:', err.message); return null; }
+}
+// ---- 💤 weekly inactive users (Monday, 9 AM IST ke baad — hafte me ek baar) ----------------------
+function maybeInactiveUsers() {
+  try {
+    if (feats().alerts.inactive === false) return null;
+    if (!db.notify || typeof db.notify !== 'object') db.notify = { items: [], watch: {} };
+    if (!db.notify.watch || typeof db.notify.watch !== 'object') db.notify.watch = {};
+    const ist = istNow();
+    if (ist.getUTCDay() !== 1 || ist.getUTCHours() < 9) return null; // sirf Monday ≥ 09:00 IST
+    const pad = (n) => String(n).padStart(2, '0');
+    const monday = new Date(ist.getTime() - ((ist.getUTCDay() + 6) % 7) * 86400e3);
+    const weekKey = `${monday.getUTCFullYear()}-${pad(monday.getUTCMonth() + 1)}-${pad(monday.getUTCDate())}`;
+    if (db.notify.watch.inactiveWeek === weekKey) return null;
+    const th = db.settings.thresholds || {};
+    const maxDays = Number(th.inactiveDays) || 3;
+    const now = Date.now();
+    const stale = db.users.filter((u) => u && u.approved && u.role !== 'admin').map((u) => {
+      const last = Date.parse(u.lastLoginAt || '') || Date.parse(u.createdAt || '');
+      return { username: u.username, name: u.name || u.username, days: last ? Math.floor((now - last) / 86400e3) : null };
+    }).filter((u) => u.days === null || u.days >= maxDays);
+    db.notify.watch.inactiveWeek = weekKey;
+    persist('notify').catch(() => {});
+    if (!stale.length) return null;
+    const list = stale.sort((a, b) => (b.days === null ? 999 : b.days) - (a.days === null ? 999 : a.days)).slice(0, 12)
+      .map((u) => `${u.name} ${u.days === null ? '(kabhi login nahi kiya)' : `(${u.days} din)`}`);
+    return recordNotification({
+      type: 'info',
+      title: `💤 Inactive users · ${stale.length} user ${maxDays}+ din se nahi aaye`,
+      body: list.join(', ') + (stale.length > 12 ? ' …' : ''),
+      target: 'admin',
+      meta: { link: '#/settings?tab=users', users: stale.map((u) => u.username).slice(0, 40) }
+    });
+  } catch (err) { console.warn('inactive users:', err.message); return null; }
+}
+/** Ek jagah se saare scheduled checks — boot + har 30 min. */
+function runScheduledChecks() {
+  const F = feats();
+  return Promise.allSettled([
+    maybeDailyDigest(false),
+    maybeMidMonthAlert(),
+    maybeInactiveUsers(),
+    F.alerts.zeroDay === false ? Promise.resolve() : maybeZeroDayAlert(),
+    F.backupReminder === false ? Promise.resolve() : maybeBackupReminder(),
+    maybeAgentAnomaly(),
+    schedulesTick(),
+    maybeChampionEmail(false),
+    maybeFollowup(false),
+    sendWeeklyEmail(false),
+    sendReportEmail(false),
+    refreshStockState(false)
+  ]);
+}
+// ---- ⚠️ zero-day / sharp-drop alert (raat 9 IST ke baad, din me ek baar) ------------------------
+async function maybeZeroDayAlert() {
+  try {
+    if (feats().alerts.zeroDay === false) return null;
+    const ist = istNow();
+    if (ist.getUTCHours() < 21) return null; // din khatam hone ka wait
+    const pad = (n) => String(n).padStart(2, '0');
+    const dateKey = `${ist.getUTCFullYear()}-${pad(ist.getUTCMonth() + 1)}-${pad(ist.getUTCDate())}`;
+    if (db.notify.watch.zeroAlertDate === dateKey) return null;
+    await checkReports(false).catch(() => {}); // taaza FF snapshot (5-min throttle)
+    const watch = db.notify.watch || {};
+    const daily = watch.daily && typeof watch.daily === 'object' ? watch.daily : {};
+    const F = feats();
+    const dropPct = Number(F.zeroDropPct) || 50;
+    const padDay = (d) => { const dt = new Date(d); return `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())}`; };
+    const nowD = new Date(`${dateKey}T00:00:00Z`);
+    // Prev 7 din (aaj ke pehle) — jin ka entry hai unka avg.
+    let prevSum = 0, prevDays = 0;
+    for (let i = 1; i <= 7; i++) {
+      const k = padDay(new Date(nowD.getTime() - i * 86400e3));
+      const v = Number(daily[k] && daily[k].ff) || 0;
+      if (daily[k]) { prevSum += v; prevDays++; }
+    }
+    const prevAvg = prevDays ? prevSum / prevDays : 0;
+    if (prevAvg <= 0) return null; // benchmark hi nahi
+    const todayFf = daily[dateKey] ? Number(daily[dateKey].ff) || 0 : null;
+    const ffSnap = watch.ff && watch.ff.date ? watch.ff : null;
+    const sheetHasToday = !!(ffSnap && ffSnap.date >= dateKey);
+    // Case A: sheet me aaj ki rows hi nahi (snapshot ka date aaj se pehle ka) → 0 issuance day.
+    const staleOk = ffSnap && ffSnap.date && ffSnap.date >= padDay(new Date(nowD.getTime() - 3 * 86400e3));
+    const isZero = !sheetHasToday && staleOk;
+    // Case B: aaj data hai par pichhle avg se dropPct+ kam.
+    const isDrop = !isZero && todayFf !== null && todayFf < prevAvg * (1 - dropPct / 100);
+    if (!isZero && !isDrop) return null;
+    db.notify.watch.zeroAlertDate = dateKey;
+    persist('notify').catch(() => {});
+    const base = `Pichhle ${prevDays} active din ka avg ≈ ${Math.round(prevAvg)}/din.`;
+    return recordNotification({
+      type: 'alert',
+      title: isZero ? `⚠️ Aaj abhi tak 0 issuance (${dateKey.slice(8, 10)} ${MON_SHORT[Number(dateKey.slice(5, 7)) - 1]})` : `⚠️ Sharp drop · aaj sirf ${todayFf} tags (avg ${Math.round(prevAvg)})`,
+      body: isZero
+        ? `${base} Sheet me aaj ka koi ISSUE_DATE nahi mila — EIR sheet update hui ya nahi, ek baar dekh lo.`
+        : `${base} Aaj ${Math.round(100 - (todayFf / prevAvg) * 100)}% kam (${dropPct}%+ gira threshold). Trend page par day-wise dekho.`,
+      target: 'admin',
+      meta: { link: '#/trend', date: dateKey, prevAvg: Math.round(prevAvg), today: todayFf || 0 }
+    });
+  } catch (err) { console.warn('zero-day alert:', err.message); return null; }
+}
+// ---- ☁️ settings backup reminder (roz ek baar, backup purana ho to) -----------------------------
+function maybeBackupReminder() {
+  try {
+    const F = feats();
+    if (F.backupReminder === false) return null;
+    const ist = istNow();
+    if (ist.getUTCHours() < 10) return null;
+    const pad = (n) => String(n).padStart(2, '0');
+    const dateKey = `${ist.getUTCFullYear()}-${pad(ist.getUTCMonth() + 1)}-${pad(ist.getUTCDate())}`;
+    if (db.notify.watch.backupRemindDate === dateKey) return null;
+    const maxAge = Number(F.backupDays) || 7;
+    const last = Date.parse(db.settings.lastBackupAt || '') || Date.parse(db.settings.updatedAt || '') || 0;
+    if (!last) return null;
+    const age = (Date.now() - last) / 86400e3;
+    if (age < maxAge) return null;
+    db.notify.watch.backupRemindDate = dateKey;
+    persist('notify').catch(() => {});
+    return recordNotification({
+      type: 'info',
+      title: `☁️ Settings backup purana hai (${Math.floor(age)} din)`,
+      body: `Settings → ☁️ Storage & backup se settings JSON download kar lo — ${maxAge} din se purana ho chuka hai. Render/storage badalne se pehle ye zaroori hai.`,
+      target: 'admin',
+      meta: { link: '#/settings?tab=backup', ageDays: Math.floor(age) }
+    });
+  } catch (err) { console.warn('backup reminder:', err.message); return null; }
+}
+// ---- 📬 weekly auto-digest email (Monday) + 📧 roz scheduled report email (HTML + CSV) ----------
+function emailCfgOrThrow(force) {
+  const cfg = db.settings.email || {};
+  if (!cfg.host || !cfg.to) {
+    if (force) throw new Error('SMTP host / to set nahi — Settings → 🎛 Features → Email configure karo');
+    return null;
+  }
+  return cfg;
+}
+/** Pichhle Monday–Sunday (ya aaj week) ka FF/GV summary — email body ke liye. */
+function weekRows(monday) {
+  const pad = (n) => String(n).padStart(2, '0');
+  const daily = (db.notify.watch && db.notify.watch.daily) || {};
+  const rows = [];
+  let ff = 0, gv = 0, best = 0, bestDay = '';
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(monday.getTime() + i * 86400e3);
+    const k = `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+    const v = daily[k] || {};
+    const f = Number(v.ff) || 0, g = Number(v.gv) || 0;
+    ff += f; gv += g;
+    if (f + g > best) { best = f + g; bestDay = k; }
+    rows.push({ date: k, ff: f, gv: g, total: f + g });
+  }
+  return { rows, ff, gv, best, bestDay, days: rows.filter((r) => r.total > 0).length };
+}
+async function sendWeeklyEmail(force = false) {
+  const F = feats();
+  if (!force && F.weeklyEmail !== true) return null; // default OFF — admin Features tab se ON kare
+  const cfg = emailCfgOrThrow(force);
+  if (!cfg) return null;
+  const ist = istNow();
+  if (!force) {
+    if (ist.getUTCDay() !== 1) return null; // Monday
+    if (ist.getUTCHours() < (Number(F.weeklyEmailHour) || 9)) return null;
+  }
+  const pad = (n) => String(n).padStart(2, '0');
+  const monday = new Date(ist.getTime() - ((ist.getUTCDay() + 6) % 7) * 86400e3);
+  const weekKey = `${monday.getUTCFullYear()}-${pad(monday.getUTCMonth() + 1)}-${pad(monday.getUTCDate())}`;
+  if (!force && db.notify.watch.weeklyEmailKey === weekKey) return null;
+  await checkReports(false).catch(() => {});
+  const w = weekRows(monday);
+  const stock = await stockSnapshot();
+  const th = db.settings.thresholds || {};
+  const coverRed = Number(th.coverRed) || 7, coverOrange = Number(th.coverOrange) || 15, coverAmber = Number(th.coverAmber) || 30;
+  let coverTxt = '';
+  if (stock && stock.classes && stock.classes.VC4) {
+    const avg = w.days ? (w.ff + w.gv) / w.days : 0;
+    const cover = avg > 0 ? stock.classes.VC4 / avg : 0;
+    const band = !cover ? '' : cover < coverRed ? '🔴' : cover < coverOrange ? '🟠' : cover < coverAmber ? '🟡' : '🟢';
+    coverTxt = cover ? `\n🚗 VC4 cover ≈ ${Math.round(cover)} din ${band}` : '';
+  }
+  const subject = `📬 Weekly digest · ${weekKey} week (FF ${w.ff} · GV ${w.gv})`;
+  const text = [
+    `Weekly digest — ${db.settings.brand || 'Dashboard'} · week ${weekKey}`,
+    '',
+    `🟦 FF tags: ${w.ff}`,
+    `🟩 GV tags: ${w.gv}`,
+    `📈 Total: ${w.ff + w.gv} · active days: ${w.days}/7${w.bestDay ? ` · best day: ${w.bestDay} (${w.best})` : ''}`,
+    stock ? `📦 Stock: ${stock.total} (VC4 ${stock.classes.VC4 || 0} | Comm ${stock.total - (stock.classes.VC4 || 0)})` : '',
+    coverTxt,
+    '',
+    'Day-wise:',
+    ...w.rows.map((r) => `  ${r.date}: FF ${r.ff} · GV ${r.gv} · ${r.total}`),
+    '',
+    `Dashboard: (is app me kholo)`
+  ].filter((l) => l !== '').join('\n');
+  await smtpSend(cfg, subject, text);
+  db.notify.watch.weeklyEmailKey = weekKey;
+  persist('notify').catch(() => {});
+  logAudit(null, 'weekly_email_sent', { actor: 'scheduler', note: `FF ${w.ff} · GV ${w.gv} · total ${w.ff + w.gv}` });
+  console.log(`weekly digest email sent (${weekKey}: FF ${w.ff} · GV ${w.gv})`);
+  return { week: weekKey, ff: w.ff, gv: w.gv };
+}
+async function sendReportEmail(force = false) {
+  const F = feats();
+  if (!force && F.emailReport !== true) return null;
+  const cfg = emailCfgOrThrow(force);
+  if (!cfg) return null;
+  const ist = istNow();
+  const dateKey = dateKeyNow();
+  if (!force) {
+    if (ist.getUTCHours() < (Number(F.emailReportHour) || 21)) return null;
+    if (db.notify.watch.reportEmailDate === dateKey) return null;
+  }
+  await checkReports(false).catch(() => {});
+  const pad = (n) => String(n).padStart(2, '0');
+  const daily = (db.notify.watch && db.notify.watch.daily) || {};
+  const keys = Object.keys(daily).sort().slice(-14);
+  if (!keys.length) return null;
+  let ffMtd = 0, gvMtd = 0, mtdDays = 0;
+  const mk = dateKey.slice(0, 7);
+  for (const [d, v] of Object.entries(daily)) if (d.startsWith(mk) && v) { const f = Number(v.ff) || 0, g = Number(v.gv) || 0; if (f || g) mtdDays++; ffMtd += f; gvMtd += g; }
+  const stock = await stockSnapshot();
+  const rows = keys.map((k) => ({ date: k, ff: Number(daily[k].ff) || 0, gv: Number(daily[k].gv) || 0 }));
+  const csv = ['Date,FF,GV,Total', ...rows.map((r) => `${r.date},${r.ff},${r.gv},${r.ff + r.gv}`)].join('\n');
+  const html = `<div style="font-family:Arial,Helvetica,sans-serif;color:#0f172a">
+    <h2 style="margin:0 0 8px">📊 Daily report · ${dateKey}</h2>
+    <p style="margin:0 0 10px;color:#64748b">${db.settings.brand || 'Dashboard'} · MTD FF <b>${ffMtd}</b> + GV <b>${gvMtd}</b> (${mtdDays} din)${stock ? ` · stock <b>${stock.total}</b> (VC4 ${stock.classes.VC4 || 0})` : ''}</p>
+    <table border="1" cellspacing="0" cellpadding="6" style="border-collapse:collapse;font-size:13px">
+      <tr style="background:#eef2ff"><th>Date</th><th>FF</th><th>GV</th><th>Total</th></tr>
+      ${rows.reverse().map((r) => `<tr><td>${r.date}</td><td>${r.ff}</td><td>${r.gv}</td><td><b>${r.ff + r.gv}</b></td></tr>`).join('')}
+    </table>
+    <p style="color:#64748b;font-size:12px">CSV attach hai — Excel me seedha khul jayega.</p></div>`;
+  const text = `Daily report ${dateKey} · MTD FF ${ffMtd} + GV ${gvMtd} · last ${rows.length} din ka CSV attach.\n` + rows.map((r) => `${r.date}: ${r.ff + r.gv}`).join('\n');
+  await smtpSend(cfg, `📊 Daily report · ${dateKey} (MTD ${ffMtd + gvMtd})`, text, { html, attachments: [{ name: `report-${dateKey}.csv`, content: csv }] });
+  db.notify.watch.reportEmailDate = dateKey;
+  persist('notify').catch(() => {});
+  logAudit(null, 'report_email_sent', { actor: 'scheduler', note: `${rows.length} days · MTD ${ffMtd + gvMtd}` });
+  console.log(`scheduled report email sent (${dateKey})`);
+  return { date: dateKey, days: rows.length };
+}
+// ---- 🔍 agent anomaly (raat 9 IST) — achanak 0 / bahut kam issuance wale agents -----------------
+async function maybeAgentAnomaly(force = false) {
+  try {
+    const F = feats();
+    const doAgent = F.alerts.anomaly !== false;
+    const doTl = F.tlAnomaly !== false;
+    if (!doAgent && !doTl) return null;
+    if (!force) {
+      const ist = istNow();
+      if (ist.getUTCHours() < 21) return null; // din khatam hone ka wait
+      const dk0 = dateKeyNow();
+      if (db.notify.watch.anomalyDate === dk0) return null;
+    }
+    const dateKey = dateKeyNow();
+    await checkReports(false).catch(() => {}); // aaj ka FF snapshot confirm karne ke liye
+    const sheetToday = !!(db.notify.watch.ff && db.notify.watch.ff.date && db.notify.watch.ff.date >= dateKey);
+    const s = db.settings.eir || {};
+    const sheet = db.settings.eirSheet || 'EIR';
+    const agentCol = s.agentName || 'L', tlCol = s.tlName || 'BA', dateCol = s.date || 'AA', tagCol = s.tagId || 'A';
+    const params = (tq) => new URLSearchParams({ id: String(db.settings.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet, tq });
+    const loadByName = async (firstCol) => {
+      const tq = `select ${firstCol}, ${dateCol}, count(${tagCol}) where ${tagCol} is not null group by ${firstCol}, ${dateCol} order by ${dateCol} desc limit 3000`;
+      const out = await fetchUpstream(upstreamUrl(params(tq)));
+      if (out.status < 200 || out.status >= 300) return null;
+      const table = parseGvizServer(out.body);
+      const map = new Map();
+      for (const row of table.rows || []) {
+        const name = serverCell(row, 0).trim();
+        const dk = serverDate(serverCell(row, 1));
+        if (!name || !dk) continue;
+        if (!map.has(name)) map.set(name, new Map());
+        map.get(name).set(dk, serverNumber(serverCell(row, 2)));
+      }
+      return map;
+    };
+    const pad = (n) => String(n).padStart(2, '0');
+    const dayMinus = (k, i) => { const d = new Date(`${k}T00:00:00Z`); d.setUTCDate(d.getUTCDate() - i); return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`; };
+    const pct = Number(F.anomalyPct) || 80;
+    const evaluate = (byName, minAvg) => {
+      const suspects = [];
+      for (const [name, m] of byName) {
+        let sum = 0, days = 0;
+        for (let i = 1; i <= 7; i++) { const k = dayMinus(dateKey, i); if (m.has(k)) { sum += m.get(k); days++; } }
+        const avg = days ? sum / days : 0;
+        if (days < 3 || avg < minAvg) continue;
+        const hasToday = m.has(dateKey);
+        const todayN = hasToday ? m.get(dateKey) : 0;
+        const isDrop = hasToday && todayN <= avg * (1 - pct / 100);
+        const isZero = !hasToday && avg >= minAvg * 1.6 && sheetToday;
+        if (isDrop || isZero) suspects.push({ name, today: todayN, avg: Math.round(avg * 10) / 10 });
+      }
+      suspects.sort((a, b) => b.avg - a.avg);
+      return suspects;
+    };
+    const out = { agent: null, tl: null };
+    const excluded = new Set((Array.isArray(db.settings.excludeTls) ? db.settings.excludeTls : []).map((x) => String(x).trim().toLowerCase()).filter(Boolean));
+    if (doAgent) {
+      const byAgent = await loadByName(agentCol);
+      if (byAgent) {
+        const suspects = evaluate(byAgent, 3);
+        if (suspects.length) {
+          const top = suspects.slice(0, 12);
+          out.agent = recordNotification({
+            type: 'alert',
+            title: `📉 Agent anomaly · ${suspects.length} agent ${pct}%+ down (${dateKey.slice(8, 10)} ${MON_SHORT[Number(dateKey.slice(5, 7)) - 1]})`,
+            body: top.map((x) => `${x.name} (${x.today} vs avg ${x.avg})`).join(', ') + (suspects.length > top.length ? ` …+${suspects.length - top.length}` : '') + `. Aaj ke numbers vs pichhle 7 din ka avg — Performance page par dekho.`,
+            target: 'admin',
+            meta: { link: '#/performance', date: dateKey, count: suspects.length, pct }
+          });
+          logAudit(null, 'agent_anomaly', { actor: 'scheduler', note: `${suspects.length} agents ≥${pct}% down` });
+        }
+      }
+    }
+    if (doTl) {
+      const byTl = await loadByName(tlCol);
+      if (byTl) {
+        const clean = new Map([...byTl].filter(([n]) => n && n !== '—' && !excluded.has(n.toLowerCase())));
+        const suspects = evaluate(clean, 5);
+        if (suspects.length) {
+          const top = suspects.slice(0, 10);
+          out.tl = recordNotification({
+            type: 'alert',
+            title: `🏆 TL anomaly · ${suspects.length} TL ${pct}%+ down (${dateKey.slice(8, 10)} ${MON_SHORT[Number(dateKey.slice(5, 7)) - 1]})`,
+            body: top.map((x) => `${x.name} (${x.today} vs avg ${x.avg})`).join(', ') + (suspects.length > top.length ? ` …+${suspects.length - top.length}` : '') + `. Team issuance vs pichhle 7 din ka avg — Performance → TLs me dekho.`,
+            target: 'admin',
+            meta: { link: '#/performance?view=tls', date: dateKey, count: suspects.length, pct }
+          });
+          logAudit(null, 'tl_anomaly', { actor: 'scheduler', note: `${suspects.length} TLs ≥${pct}% down` });
+        }
+      }
+    }
+    if (sheetToday || out.agent || out.tl) { db.notify.watch.anomalyDate = dateKey; persist('notify').catch(() => {}); }
+    return out;
+  } catch (err) { console.warn('agent anomaly:', err.message); return null; }
+}
 let reportCheckAt = 0;
 let reportCheckPromise = null;
+
+// ---- 🗓 custom alert scheduler (admin ke reminders/status) ------------------------------------
+function renderSchedText(text) {
+  const daily = (db.notify.watch && db.notify.watch.daily) || {};
+  const ff = (db.notify.watch && db.notify.watch.ff) || {};
+  const ym = dateKeyNow().slice(0, 7);
+  let mtd = 0;
+  for (const [d, v] of Object.entries(daily)) if (d.startsWith(ym)) mtd += (Number(v.ff) || 0) + (Number(v.gv) || 0);
+  const today = ff.date === dateKeyNow() ? Number(ff.total) || 0 : 0;
+  return String(text || '')
+    .replace(/\{date\}/g, dateKeyNow())
+    .replace(/\{today\}/g, String(today))
+    .replace(/\{mtd\}/g, String(mtd));
+}
+async function fireSchedule(sched, opts = {}) {
+  const item = recordNotification({
+    type: sched.type === 'alert' ? 'alert' : 'info',
+    title: `🗓 ${sched.title || 'Reminder'}`,
+    body: renderSchedText(sched.text),
+    target: sched.target === 'broadcast' ? 'broadcast' : 'admin',
+    meta: { schedule: true, link: sched.link || '', ...(opts.meta || {}) }
+  });
+  logAudit(null, 'schedule_fired', { actor: opts.force ? 'admin:test' : 'scheduler', target: String(sched.id || sched.title || ''), note: String(sched.text || '').slice(0, 60) });
+  return item;
+}
+async function schedulesTick(forceSched = null) {
+  try {
+    const F = feats();
+    const list = Array.isArray(db.settings.schedules) ? db.settings.schedules : [];
+    if (forceSched) return await fireSchedule(forceSched, { force: true });
+    if (F.customAlerts === false || !list.length) return [];
+    const ist = istNow();
+    const hour = ist.getUTCHours(), dow = ist.getUTCDay(), dom = Number(ist.getUTCDate());
+    const dateKey = dateKeyNow();
+    if (!Array.isArray(db.notify.watch.schedFired)) db.notify.watch.schedFired = [];
+    const fired = new Set(db.notify.watch.schedFired);
+    const out = [];
+    for (const s of list) {
+      if (!s || s.enabled === false) continue;
+      const h = Number(s.hour);
+      if (!Number.isFinite(h) || hour !== h) continue;
+      const ok = s.kind === 'weekly' ? Number(s.weekday) === dow
+        : s.kind === 'monthly' ? Number(s.day) === dom
+        : true; // daily (default)
+      if (!ok) continue;
+      const key = `${s.id || s.title}|${dateKey}|${h}`;
+      if (fired.has(key)) continue;
+      fired.add(key);
+      out.push(await fireSchedule(s));
+    }
+    if (out.length) {
+      const keys = [...fired].slice(-240);
+      db.notify.watch.schedFired = keys;
+      persist('notify').catch(() => {});
+    }
+    return out;
+  } catch (err) { console.warn('schedules:', err.message); return []; }
+}
+// ---- 🥇 monthly champion certificate email (SMTP) --------------------------------------------
+async function championsList(topN) {
+  const s = db.settings.eir || {};
+  const sheet = db.settings.eirSheet || 'EIR';
+  const agentCol = s.agentName || 'L', dateCol = s.date || 'AA', tagCol = s.tagId || 'A';
+  const tq = `select ${agentCol}, ${dateCol}, count(${tagCol}) where ${tagCol} is not null group by ${agentCol}, ${dateCol} order by ${dateCol} desc limit 6000`;
+  const params = new URLSearchParams({ id: String(db.settings.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet, tq });
+  const out = await fetchUpstream(upstreamUrl(params));
+  if (out.status < 200 || out.status >= 300) throw new Error(`sheet ${out.status}`);
+  const table = parseGvizServer(out.body);
+  const ist = istNow();
+  const prev = new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth() - 1, 1));
+  const prevYm = `${prev.getUTCFullYear()}-${pad2(prev.getUTCMonth() + 1)}`;
+  const totals = new Map();
+  for (const row of table.rows || []) {
+    const name = serverCell(row, 0).trim();
+    const dk = serverDate(serverCell(row, 1));
+    if (!name || !dk.startsWith(prevYm)) continue;
+    totals.set(name, (totals.get(name) || 0) + serverNumber(serverCell(row, 2)));
+  }
+  const list = [...totals.entries()].map(([name, total]) => ({ name, total })).sort((a, b) => b.total - a.total);
+  return { month: prevYm, list: list.slice(0, Math.max(1, Math.min(10, Number(topN) || 3))) };
+}
+function championHtml(monthLabel, champs) {
+  const accent = (db.settings.theme && db.settings.theme.accent) || '#2563eb';
+  const medals = ['🥇', '🥈', '🥉'];
+  return `<div style="font-family:Arial,Helvetica,sans-serif;background:#0f172a;color:#fff;padding:26px;border-radius:18px;max-width:600px">
+    <p style="margin:0 0 4px;color:#94a3b8;letter-spacing:.14em;font-size:12px">🏅 MONTHLY CHAMPIONS · ${escHtml(monthLabel)}</p>
+    <h2 style="margin:0 0 18px;font-size:26px">${escHtml(db.settings.brand || 'Dashboard')} — Hall of Fame</h2>
+    ${champs.map((c, i) => `<div style="background:#1e293b;border:1px solid ${i === 0 ? accent : '#334155'};border-radius:14px;padding:14px 16px;margin-bottom:10px;display:flex;align-items:center;gap:14px">
+      <div style="font-size:34px">${medals[i] || `#${i + 1}`}</div>
+      <div style="flex:1"><div style="font-size:18px;font-weight:700">${escHtml(c.name)}</div>
+      <div style="color:#94a3b8;font-size:13px">Last month issuance</div></div>
+      <div style="font-size:30px;font-weight:800;color:#fde047">${c.total}</div>
+    </div>`).join('')}
+    <p style="color:#94a3b8;font-size:12px;margin-top:14px">Certified by ${escHtml(db.settings.brand || 'Dashboard')} · data live sheet se</p></div>`;
+}
+async function maybeChampionEmail(force = false) {
+  try {
+    const F = feats();
+    if (!force && F.championEmail !== true) return null;
+    const cfg = db.settings.email || {};
+    if (!cfg.host || !cfg.to) { if (force) throw new Error('SMTP host/to set nahi — Features → Email configure karo'); return null; }
+    if (!force) {
+      const ist = istNow();
+      if (ist.getUTCHours() < (Number(F.championHour) || 10)) return null;
+      const prev = new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth() - 1, 1));
+      const prevYm = `${prev.getUTCFullYear()}-${pad2(prev.getUTCMonth() + 1)}`;
+      if (db.notify.watch.championMonth === prevYm) return null;
+    }
+    const { month, list } = await championsList(F.championTop);
+    if (!list.length) { if (force) throw new Error('Pichhle mahine ka data nahi mila'); return null; }
+    const monthLabel = U_labelYmSafe(month);
+    const html = championHtml(monthLabel, list);
+    const text = `🏆 ${monthLabel} champions — ` + list.map((c, i) => `${i + 1}. ${c.name} (${c.total})`).join(' · ');
+    await smtpSend(cfg, `🥇 ${monthLabel} Champions · ${db.settings.brand || 'Dashboard'}`, text, { html });
+    db.notify.watch.championMonth = month;
+    persist('notify').catch(() => {});
+    logAudit(null, 'champion_email_sent', { actor: force ? 'admin:test' : 'scheduler', note: list.map((c) => `${c.name}:${c.total}`).join(', ') });
+    return { month, list };
+  } catch (err) { console.warn('champion email:', err.message); if (force) throw err; return null; }
+}
+function U_labelYmSafe(ym) {
+  const m = Number(String(ym).slice(5, 7)) - 1;
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${MONTHS[m] || ''} ${String(ym).slice(0, 4)}`.trim();
+}
+// ---- ⏰ follow-up tracker (N din silent agents) ------------------------------------------------
+async function followupList() {
+  const s = db.settings.eir || {};
+  const sheet = db.settings.eirSheet || 'EIR';
+  const agentCol = s.agentName || 'L', dateCol = s.date || 'AA', tagCol = s.tagId || 'A';
+  const tq = `select ${agentCol}, ${dateCol}, count(${tagCol}) where ${tagCol} is not null group by ${agentCol}, ${dateCol} order by ${dateCol} desc limit 6000`;
+  const params = new URLSearchParams({ id: String(db.settings.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet, tq });
+  const out = await fetchUpstream(upstreamUrl(params));
+  if (out.status < 200 || out.status >= 300) throw new Error(`sheet ${out.status}`);
+  const table = parseGvizServer(out.body);
+  const latest = new Map();
+  for (const row of table.rows || []) {
+    const name = serverCell(row, 0).trim();
+    const dk = serverDate(serverCell(row, 1));
+    if (!name || !dk) continue;
+    if (!latest.has(name) || dk > latest.get(name)) latest.set(name, dk);
+  }
+  const days = Math.max(1, Number(feats().followupDays) || 3);
+  const today = new Date(`${dateKeyNow()}T00:00:00Z`);
+  const cut = new Date(today.getTime() - days * 86400e3);
+  const monthAgo = new Date(today.getTime() - 30 * 86400e3);
+  const cutKey = cut.toISOString().slice(0, 10);
+  const activeKey = monthAgo.toISOString().slice(0, 10);
+  const silent = [];
+  for (const [name, last] of latest) {
+    if (last < cutKey && last >= activeKey) silent.push({ name, last, days: Math.round((today - new Date(`${last}T00:00:00Z`)) / 86400e3) });
+  }
+  silent.sort((a, b) => b.days - a.days);
+  return { days, list: silent.slice(0, 40) };
+}
+async function maybeFollowup(force = false) {
+  try {
+    const F = feats();
+    if (!force && F.followupTracker === false) return null;
+    if (!force) {
+      const ist = istNow();
+      if (ist.getUTCHours() < (Number(F.followupHour) || 10)) return null;
+      const dateKey = dateKeyNow();
+      if (db.notify.watch.followupDate === dateKey) return null;
+    }
+    const { days, list } = await followupList();
+    db.notify.watch.followupDate = dateKeyNow();
+    persist('notify').catch(() => {});
+    if (!list.length) return null;
+    const top = list.slice(0, 15);
+    const item = recordNotification({
+      type: 'info',
+      title: `⏰ Follow-up · ${list.length} agent ${days}+ din silent`,
+      body: top.map((x) => `${x.name} (${x.days} din)`).join(', ') + (list.length > top.length ? ` …+${list.length - top.length}` : '') + `. In tak pahuncho — pichhla issuance ${days}+ din pehle.`,
+      target: 'broadcast',
+      meta: { link: '#/performance?view=alerts', days, count: list.length }
+    });
+    logAudit(null, 'followup_alert', { actor: force ? 'admin:test' : 'scheduler', note: `${list.length} agents ≥${days} din silent` });
+    return item;
+  } catch (err) { console.warn('followup:', err.message); if (force) throw err; return null; }
+}
 async function checkReports(force = false) {
   if (reportCheckPromise) return reportCheckPromise;
   if (!force && Date.now() - reportCheckAt < 5 * 60e3) return;
@@ -1018,6 +1951,17 @@ async function checkReports(force = false) {
         const next = await reportSnapshot(source);
         const previous = db.notify.watch[source];
         db.notify.watch[source] = next;
+        // Per-date issuance history (daily digest ke liye): jab tak server alive hai, har snapshot
+        // date ka latest total store hota rehta hai — digest MTD / avg / cover nikaal sakta hai.
+        if (next && next.date && next.total) {
+          if (!db.notify.watch.daily || typeof db.notify.watch.daily !== 'object') db.notify.watch.daily = {};
+          const prevEntry = db.notify.watch.daily[next.date] || {};
+          if (prevEntry[source] !== next.total) {
+            db.notify.watch.daily[next.date] = { ...prevEntry, [source]: next.total };
+            const keys = Object.keys(db.notify.watch.daily).sort();
+            for (let i = 0; i < keys.length - 400; i++) delete db.notify.watch.daily[keys[i]];
+          }
+        }
         const delta = snapshotDelta(previous, next);
         if (delta && delta.changed && (delta.total > 0 || next.date !== previous.date)) {
           const label = source === 'gv' ? 'GV Partner' : 'First Forward';
@@ -1069,19 +2013,89 @@ function publicSettings() {
 function requireAdmin(user) { if (!user || user.role !== 'admin') throw new HttpError(403, 'Admin access required'); }
 function validPassword(pw) { return typeof pw === 'string' && pw.length >= 6 && pw.length <= 200; }
 
+/**
+ * 🔐 OTP (2FA) — sirf tab jab: feature ON + naye IP (known IPs se bahar) + user ka email +
+ * SMTP configured. Code email par jaata hai; SMTP/email na ho to null → purana login raasta.
+ */
+async function maybeRequireOtp(u, loginId, ip) {
+  try {
+    if (feats().otp2fa === false) return null;
+    if (!u || !u.email) return null;
+    const cfg = db.settings.email || {};
+    if (!cfg.host) return null;
+    const knownIps = new Set((Array.isArray(u.loginHistory) ? u.loginHistory : []).map((l) => l && l.ip).filter(Boolean));
+    if (!ip || knownIps.size === 0 || knownIps.has(ip)) return null; // pehla login ya known IP → seedha andar
+    const code = String(crypto.randomInt(100000, 1000000));
+    const ticket = crypto.randomBytes(16).toString('hex');
+    otps.set(ticket, { username: u.username, code, exp: Date.now() + 10 * 60e3, tries: 0, ip, loginId });
+    if (otps.size > 50) { for (const [k, v] of otps) if (v.exp < Date.now()) otps.delete(k); }
+    await smtpSend({ ...cfg, to: u.email }, `🔐 Login OTP ${code} · ${db.settings.brand || 'Dashboard'}`,
+      `Aapka login code: ${code}\n\nYe code 10 min ke liye hai. login ID "${loginId}" · IP ${ip}.\nAgar ye aap nahi the to turant password badal do.`);
+    logAudit(u, 'otp_sent', { target: loginId, ip, note: 'naye IP par OTP email bheja' });
+    return { ticket, hint: `Code ${u.email} par bheja gaya (10 min valid)` };
+  } catch (err) {
+    console.warn('otp send (login hi aage jayega):', err.message);
+    return null; // SMTP fail → login block mat karo (purana naye-IP alert raasta)
+  }
+}
+/** Password check ke baad wala hissa — login aur OTP verify dono isi se complete hote hain. */
+async function finalizeLogin(req, res, u, loginId, ip) {
+  attempts.delete(ip);
+  u.lastLoginAt = new Date().toISOString();
+  // 🕘 Login history (admin ko Users tab me dikhta hai): kab, kis ID se, kis IP se — last 20.
+  if (!Array.isArray(u.loginHistory)) u.loginHistory = [];
+  // 🔐 Naye IP se login — pehle known IPs se bahar ho to admin ko alert (Features tab se band kar sakte ho).
+  const knownIps = new Set(u.loginHistory.map((l) => l && l.ip).filter(Boolean));
+  if (ip && knownIps.size > 0 && !knownIps.has(ip) && feats().alerts.newLoginIp !== false) {
+    recordNotification({
+      type: 'alert',
+      title: `🔐 Naye IP se login — ${u.name || u.username}`,
+      body: `${u.username} ne "${loginId}" se ${ip} par login kiya — ye IP is account ke history me pehle nahi mila (${u.loginHistory.length} purane logins). Agar ye aap nahi the to password badal do.`,
+      target: 'admin',
+      meta: { username: u.username, loginId, ip, link: '#/settings?tab=users' }
+    });
+  }
+  u.loginHistory.push({ at: u.lastLoginAt, id: String(loginId).slice(0, 60), ip: ip || '' });
+  if (u.loginHistory.length > 20) u.loginHistory = u.loginHistory.slice(-20);
+  logAudit(u, 'login', { target: loginId, ip, note: knownIps.size && !knownIps.has(ip) ? 'naya IP (OTP ok)' : '' });
+  // One Google Sheets batch can confirm the user timestamp and session together.
+  const [token] = await Promise.all([createSession(u.username), persist('users')]);
+  const ipLabel = ip ? ` · IP ${ip}` : '';
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+  // 🔔 Admin ko user login notification (throttle: repeat every 10 min per user)
+  if (u.role !== 'admin') {
+    const k = `login:${u.username}`;
+    if (!activityLast.has(k) || Date.now() - activityLast.get(k) > 10 * 60e3) {
+      activityLast.set(k, Date.now());
+      recordNotification({ type: 'login', title: '🔐 User login', body: `${u.name || u.username} logged in via ${loginId}${ipLabel}.`, target: 'admin', meta: { username: u.username, loginId, ip, link: '#/settings?tab=users' } });
+    }
+  }
+  // 🔔 User ko bhi unka apna login confirm / security notice (throttled 1/min)
+  const selfKey = `self-login:${u.username}`;
+  if (!activityLast.has(selfKey) || Date.now() - activityLast.get(selfKey) > 60e3) {
+    activityLast.set(selfKey, Date.now());
+    recordNotification({ type: 'login', title: `${greeting}, ${u.name || u.username} 👋`, body: 'Login successful. Dashboard ready hai — data background me load ho raha hai.', target: `user:${u.username}`, meta: { loginId, ip } });
+  }
+  return sendJson(res, 200, { ok: true, user: publicUser(u), settings: settingsFor(u), permissions: permissionsFor(db.settings), tabs: db.settings.tabs }, { 'Set-Cookie': cookieHeader(req, token, SESSION_DAYS * 86400) });
+}
+
 async function handleApi(req, res, url) {
   const p = url.pathname;
   const method = req.method;
   const user = sessionUser(req);
 
   if (p === '/api/health' && method === 'GET') {
-    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.2.0', storage: storageStatus(), push: pushHealth(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null });
+    // pendingSignups sirf admin ko (sidebar badge ke liye) — public health me leak nahi.
+    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.2.0', storage: storageStatus(), push: pushHealth(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length } : {}) });
   }
   if (p === '/api/public-config' && method === 'GET') return sendJson(res, 200, publicSettings());
+  // App version (sw.js CACHE_NAME) — update-toast ke liye; logged-in se pehle bhi chahiye.
+  if (p === '/api/version' && method === 'GET') return sendJson(res, 200, { version: SW_VERSION || 'dev' });
 
   // ---- auth ----
   if (p === '/api/auth/me' && method === 'GET') {
-    return sendJson(res, 200, { user: publicUser(user), settings: user ? db.settings : publicSettings(), permissions: permissionsFor(db.settings), tabs: db.settings.tabs, ...(user && user.role === 'admin' ? { storage: storageStatus() } : {}) });
+    return sendJson(res, 200, { user: publicUser(user), settings: user ? settingsFor(user) : publicSettings(), permissions: permissionsFor(db.settings), tabs: db.settings.tabs, ...(user && user.role === 'admin' ? { storage: storageStatus(), pendingSignups: db.users.filter((u) => !u.approved).length } : {}) });
   }
   if (p === '/api/auth/signup' && method === 'POST') {
     if (db.settings.allowSignup === false && db.users.length) throw new HttpError(403, 'Sign up band hai — admin se account maango.');
@@ -1094,14 +2108,16 @@ async function handleApi(req, res, url) {
     const u = { username, name: String(body.name || '').trim().slice(0, 80) || username, email: String(body.email || '').trim().slice(0, 120), mobile: String(body.mobile || '').replace(/[^\d+]/g, '').slice(0, 16), role: first ? 'admin' : 'user', approved: first, permissions: first ? allPermKeysNow() : [], password: hashPassword(body.password), createdAt: new Date().toISOString(), lastLoginAt: null };
     db.users.push(u);
     await persist('users');
+    logAudit(u, first ? 'first_admin_setup' : 'signup', { target: username, ip: clientIp(req), note: u.email || u.mobile });
     if (first) {
       const token = await createSession(username);
       u.lastLoginAt = new Date().toISOString(); await persist('users');
       recordNotification({ type: 'user', title: 'Welcome — Admin account ready', body: 'Aap first user hain, admin privileges mil gaye hain. Settings se branding aur data source set kar sakte ho.', target: `user:${username}`, meta: { first: true } });
       return sendJson(res, 200, { ok: true, user: publicUser(u), settings: db.settings, permissions: permissionsFor(db.settings), tabs: db.settings.tabs, first: true }, { 'Set-Cookie': cookieHeader(req, token, SESSION_DAYS * 86400) });
     }
-    // 🔔 Admin ko turant notification do + new user ko welcome notification
-    recordNotification({ type: 'user', title: '🆕 Naya signup', body: `${u.name || username} ne account banaya hai (${u.email || u.mobile || 'no contact'}). Approval pending.`, target: 'admin', meta: { username, name: u.name, email: u.email, mobile: u.mobile } });
+    // 🔔 Admin ko turant notification (type 'signup' — Settings me "New account signup" toggle isi ko
+    // control karta hai) + new user ko welcome notification
+    recordNotification({ type: 'signup', title: '🆕 Naya signup', body: `${u.name || username} ne account banaya hai (${u.email || u.mobile || 'no contact'}). Approval pending.`, target: 'admin', meta: { username, name: u.name, email: u.email, mobile: u.mobile, link: '#/settings?tab=users' } });
     recordNotification({ type: 'user', title: 'Account created ✓', body: 'Aapka account ban gaya hai. Admin approve karega, phir aap login kar paoge.', target: `user:${username}` });
     return sendJson(res, 200, { ok: true, pending: true, message: 'Account ban gaya. Admin approve karega, phir login kar paoge.' });
   }
@@ -1111,30 +2127,26 @@ async function handleApi(req, res, url) {
     const body = await readBody(req);
     const loginId = String(body.username || body.email || body.mobile || '').trim();
     const u = findUserByLogin(loginId) || findUserByLogin(body.username);
-    if (!u || !verifyPassword(body.password || '', u.password)) { noteFail(ip); throw new HttpError(401, 'Invalid login — check username / email / mobile and password.'); }
+    if (!u || !verifyPassword(body.password || '', u.password)) { noteFail(ip); logAudit(null, 'login_failed', { actor: loginId, ip, note: 'galat password/ID' }); throw new HttpError(401, 'Invalid login — check username / email / mobile and password.'); }
     if (!u.approved) throw new HttpError(403, 'Account pending admin approval.');
-    attempts.delete(ip);
-    u.lastLoginAt = new Date().toISOString();
-    // One Google Sheets batch can confirm the user timestamp and session together.
-    const [token] = await Promise.all([createSession(u.username), persist('users')]);
-    const ipLabel = ip ? ` · IP ${ip}` : '';
-    const hour = new Date().getHours();
-    const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
-    // 🔔 Admin ko user login notification (throttle: repeat every 10 min per user)
-    if (u.role !== 'admin') {
-      const k = `login:${u.username}`;
-      if (!activityLast.has(k) || Date.now() - activityLast.get(k) > 10 * 60e3) {
-        activityLast.set(k, Date.now());
-        recordNotification({ type: 'login', title: '🔐 User login', body: `${u.name || u.username} logged in via ${loginId}${ipLabel}.`, target: 'admin', meta: { username: u.username, loginId, ip } });
-      }
-    }
-    // 🔔 User ko bhi unka apna login confirm / security notice (throttled 1/min)
-    const selfKey = `self-login:${u.username}`;
-    if (!activityLast.has(selfKey) || Date.now() - activityLast.get(selfKey) > 60e3) {
-      activityLast.set(selfKey, Date.now());
-      recordNotification({ type: 'login', title: `${greeting}, ${u.name || u.username} 👋`, body: 'Login successful. Dashboard ready hai — data background me load ho raha hai.', target: `user:${u.username}`, meta: { loginId, ip } });
-    }
-    return sendJson(res, 200, { ok: true, user: publicUser(u), settings: db.settings, permissions: permissionsFor(db.settings), tabs: db.settings.tabs }, { 'Set-Cookie': cookieHeader(req, token, SESSION_DAYS * 86400) });
+    // 🔐 OTP (2FA): naye IP par email code possible ho to login yahin rok do.
+    const otp = await maybeRequireOtp(u, loginId, ip);
+    if (otp) return sendJson(res, 428, { error: 'OTP bheja gaya — email check karo', otpRequired: true, ticket: otp.ticket, hint: otp.hint });
+    return finalizeLogin(req, res, u, loginId, ip);
+  }
+  // 📱 OTP verify (abhi login nahi hua) — code sahi to wahi finalizeLogin (session + history + alerts).
+  if (p === '/api/auth/otp' && method === 'POST') {
+    const body = await readBody(req);
+    const ticket = String(body.ticket || '');
+    const rec = otps.get(ticket);
+    if (!rec || rec.exp < Date.now()) { if (rec) otps.delete(ticket); throw new HttpError(400, 'OTP expire ho gaya — dobara login karo.'); }
+    rec.tries = (rec.tries || 0) + 1;
+    if (rec.tries > 5) { otps.delete(ticket); throw new HttpError(429, 'Bohot galat tries — dobara login karo.'); }
+    if (String(body.code || '').trim() !== rec.code) { logAudit(null, 'otp_fail', { actor: rec.username, target: rec.loginId, ip: rec.ip }); throw new HttpError(401, 'Galat OTP — dobara try karo.'); }
+    otps.delete(ticket);
+    const u = findUser(rec.username);
+    if (!u || !u.approved) throw new HttpError(401, 'Account unavailable.');
+    return finalizeLogin(req, res, u, rec.loginId, rec.ip);
   }
   // ---- admin-only live presence ---------------------------------------------------------------
   if (p === '/api/presence' && method === 'POST') {
@@ -1196,6 +2208,162 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { ok: true, at: user.notificationsSeenAt });
   }
   // ---- notification preferences (per user: which types show, sound on/off, mobile push) ----
+  if (p === '/api/stock-history' && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required');
+    // Pehli baar koi maange to abhi ka snapshot bana lo (Stock page ka chart khali na dikhe).
+    if (!stockCheckAt) { try { await refreshStockState(true); } catch { /* optional */ } }
+    const watch = (db.notify && db.notify.watch) || {};
+    const hist = watch.stockHistory && typeof watch.stockHistory === 'object' ? watch.stockHistory : {};
+    const points = Object.keys(hist).sort().slice(-60).map((date) => ({ date, total: Number(hist[date] && hist[date].total) || 0, vc4: Number(hist[date] && hist[date].vc4) || 0, comm: Number(hist[date] && hist[date].comm) || 0 }));
+    // MTD (FF + GV) — target bar aur stock "in vs issued" reconciliation ke liye.
+    const daily = watch.daily && typeof watch.daily === 'object' ? watch.daily : {};
+    const monthKey = dateKeyNow();
+    let ffMtd = 0, gvMtd = 0, mtdDays = 0;
+    for (const [d, v] of Object.entries(daily)) if (d.startsWith(monthKey) && v) { const f = Number(v.ff) || 0, g = Number(v.gv) || 0; if (f || g) mtdDays++; ffMtd += f; gvMtd += g; }
+    return sendJson(res, 200, { points, cover: watch.cover || null, thresholds: db.settings.thresholds || {}, mtd: { ff: ffMtd, gv: gvMtd, days: mtdDays } });
+  }
+  if (p === '/api/notifications/email/test' && method === 'POST') {
+    requireAdmin(user);
+    const cfg = db.settings.email || {};
+    if (feats().emailDigest === false) { /* ON nahi — phir bhi test karne do (config check) */ }
+    try {
+      await smtpSend(cfg, `✅ Test email · ${db.settings.brand || 'Dashboard'}`, `Ye test email hai — SMTP configuration sahi chal rahi hai.\n\nDigest isi tarah subah (${feats().digestHour || 8} IST) push ke saath email par bhi aayega (features.emailDigest ON ho to).\n${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST`);
+      logAudit(user, 'email_test', { ip: clientIp(req), note: cfg.host });
+      return sendJson(res, 200, { ok: true });
+    } catch (err) { throw new HttpError(502, `SMTP test fail: ${err.message}`); }
+  }
+  // 📬 Weekly auto-digest email — force (Settings button / test); schedule maybeWeeklyEmail chalta hai.
+  if (p === '/api/notifications/weekly-email' && method === 'POST') {
+    requireAdmin(user);
+    try {
+      const out = await sendWeeklyEmail(true);
+      return sendJson(res, 200, { ok: !!out, detail: out || 'kuch data nahi mila' });
+    } catch (err) { throw new HttpError(502, `Weekly email fail: ${err.message}`); }
+  }
+  // 📧 Roz ka scheduled report email (HTML + CSV) — force.
+  if (p === '/api/notifications/report-email' && method === 'POST') {
+    requireAdmin(user);
+    try {
+      const out = await sendReportEmail(true);
+      return sendJson(res, 200, { ok: !!out, detail: out || 'no data' });
+    } catch (err) { throw new HttpError(502, `Report email fail: ${err.message}`); }
+  }
+  // 📢 Announcement — sab users ke liye bell broadcast (admin hi bhej sakta hai).
+  if (p === '/api/announcements' && method === 'POST') {
+    requireAdmin(user);
+    const body = await readBody(req);
+    const text = String(body.text || '').trim().slice(0, 500);
+    if (!text) throw new HttpError(400, 'Announcement khali hai.');
+    const item = recordNotification({
+      type: 'info',
+      title: `📢 Announcement · ${user.name || user.username}`,
+      body: text,
+      target: 'broadcast',
+      meta: { announce: true, by: user.username, link: body.link ? String(body.link).slice(0, 60) : '' }
+    });
+    logAudit(user, 'announcement', { ip: clientIp(req), note: text.slice(0, 80) });
+    return sendJson(res, 200, { ok: true, item });
+  }
+  // 📜 Audit log — sirf admin.
+  if (p === '/api/audit' && method === 'GET') {
+    requireAdmin(user);
+    const entries = (db.notify && Array.isArray(db.notify.audit) ? db.notify.audit : []).slice(-250).reverse();
+    return sendJson(res, 200, { entries });
+  }
+  // 🗺 Team location (admin) — jinhone Settings/phone se location share ki hai
+  if (p === '/api/team-location' && method === 'GET') {
+    requireAdmin(user);
+    const people = db.users.filter((u) => u.lastLocation && u.lastLocation.latitude).map((u) => ({
+      username: u.username, name: u.name || u.username, role: u.role, approved: !!u.approved,
+      lat: u.lastLocation.latitude, lng: u.lastLocation.longitude, accuracy: u.lastLocation.accuracy || null,
+      at: u.lastLocation.at || null, lastLoginAt: u.lastLoginAt || null
+    })).sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
+    return sendJson(res, 200, { people, office: { lat: Number(feats().officeLat) || 0, lng: Number(feats().officeLng) || 0 } });
+  }
+  // 🔍 Agent + TL anomaly — force (raat 9 ke alawa bhi test/admin "abhi chalao")
+  if (p === '/api/notifications/anomaly' && method === 'POST') {
+    requireAdmin(user);
+    const out = await maybeAgentAnomaly(true);
+    return sendJson(res, 200, { ok: !!(out && (out.agent || out.tl)), agent: out && out.agent ? out.agent.title : null, tl: out && out.tl ? out.tl.title : null });
+  }
+  // 🔗 Personal read-only links (agent + TL) — CRUD sirf admin
+  if (p === '/api/personal-links' && method === 'GET') {
+    requireAdmin(user);
+    return sendJson(res, 200, { links: Array.isArray(db.settings.personalLinks) ? db.settings.personalLinks : [] });
+  }
+  if (p === '/api/personal-links' && method === 'POST') {
+    requireAdmin(user);
+    const body = await readBody(req);
+    const kind = body.kind === 'tl' ? 'tl' : 'agent';
+    const name = String(body.name || '').trim().slice(0, 80);
+    if (!name) throw new HttpError(400, 'Agent/TL ka naam likho.');
+    if (feats().personalLinks === false) throw new HttpError(403, 'Personal links feature band hai — Features tab se ON karo.');
+    const link = { id: `pl_${crypto.randomBytes(6).toString('hex')}`, kind, name, token: crypto.randomBytes(18).toString('hex'), enabled: true, by: user.username, createdAt: new Date().toISOString() };
+    if (!Array.isArray(db.settings.personalLinks)) db.settings.personalLinks = [];
+    db.settings.personalLinks.push(link);
+    await persist('settings');
+    logAudit(user, 'link_create', { target: `${kind}:${name}`, ip: clientIp(req) });
+    return sendJson(res, 200, { ok: true, link });
+  }
+  const plDel = p.match(/^\/api\/personal-links\/([^/]+)$/);
+  if (plDel && method === 'DELETE') {
+    requireAdmin(user);
+    const id = decodeURIComponent(plDel[1]);
+    const before = (db.settings.personalLinks || []).length;
+    db.settings.personalLinks = (db.settings.personalLinks || []).filter((l) => l.id !== id);
+    if (db.settings.personalLinks.length === before) throw new HttpError(404, 'Link nahi mila.');
+    await persist('settings');
+    logAudit(user, 'link_revoke', { target: id, ip: clientIp(req) });
+    return sendJson(res, 200, { ok: true });
+  }
+  const plToggle = p.match(/^\/api\/personal-links\/([^/]+)\/enable$/);
+  if (plToggle && method === 'POST') {
+    requireAdmin(user);
+    const id = decodeURIComponent(plToggle[1]);
+    const link = (db.settings.personalLinks || []).find((l) => l.id === id);
+    if (!link) throw new HttpError(404, 'Link nahi mila.');
+    const body = await readBody(req);
+    link.enabled = body.enabled !== false;
+    await persist('settings');
+    logAudit(user, 'link_toggle', { target: `${link.kind}:${link.name}`, note: link.enabled ? 'ON' : 'OFF' });
+    return sendJson(res, 200, { ok: true, link });
+  }
+  // 🗓 Schedule fire-now (admin test)
+  const schFire = p.match(/^\/api\/schedules\/([^/]+)\/fire$/);
+  if (schFire && method === 'POST') {
+    requireAdmin(user);
+    if (feats().customAlerts === false) throw new HttpError(403, '🗓 Custom alerts band hain — Features tab se ON karo.');
+    const id = decodeURIComponent(schFire[1]);
+    const sched = (Array.isArray(db.settings.schedules) ? db.settings.schedules : []).find((s) => s && s.id === id);
+    if (!sched) throw new HttpError(404, 'Schedule nahi mila.');
+    const item = await schedulesTick(sched);
+    return sendJson(res, 200, { ok: !!item, item: item || null });
+  }
+  // 🥇 Champion certificate email — force
+  if (p === '/api/notifications/champion-email' && method === 'POST') {
+    requireAdmin(user);
+    if (feats().championEmail !== true) throw new HttpError(403, '🥇 Champion email feature ON nahi — Features tab se ON karo.');
+    try {
+      const out = await maybeChampionEmail(true);
+      return sendJson(res, 200, { ok: !!out, month: out && out.month, top: out ? out.list.map((c) => `${c.name}:${c.total}`) : [] });
+    } catch (err) { throw new HttpError(502, `Champion email fail: ${err.message}`); }
+  }
+  // ⏰ Follow-up list (admin, on-demand) — Alerts card isi ko use karti hai; ?fire=1 to notification bhi
+  if (p === '/api/followup' && method === 'GET') {
+    requireAdmin(user);
+    const out = await followupList();
+    if (url.searchParams.get('fire') === '1') {
+      if (feats().followupTracker === false) throw new HttpError(403, '⏰ Follow-up tracker band hai — Features tab se ON karo.');
+      const item = await maybeFollowup(true); return sendJson(res, 200, { ...out, fired: !!item });
+    }
+    return sendJson(res, 200, out);
+  }
+  if (p === '/api/notifications/digest' && method === 'POST') {
+    if (!user) throw new HttpError(401, 'Login required');
+    requireAdmin(user);
+    const item = await maybeDailyDigest(true);
+    return sendJson(res, 200, { ok: !!item, item: item || null });
+  }
   if (p === '/api/notifications/prefs' && method === 'GET') {
     if (!user) throw new HttpError(401, 'Login required');
     return sendJson(res, 200, { prefs: normalizeNotifyPrefs(user.notifyPrefs), defaults: DEFAULT_NOTIFY_PREFS });
@@ -1284,7 +2452,7 @@ async function handleApi(req, res, url) {
             title: `🔍 Search: ${q}`,
             body: `${user.name || user.username}${user.mobile ? ` (${user.mobile})` : ''} ne ${opt} me "${q}" search kiya.`,
             target: 'admin',
-            meta: { username: user.username, name: user.name, mobile: user.mobile, option: opt, query: q }
+            meta: { username: user.username, name: user.name, mobile: user.mobile, option: opt, query: q, link: pageLinkFor(opt, q) }
           });
         }
       }
@@ -1301,7 +2469,7 @@ async function handleApi(req, res, url) {
             title: `👆 ${opt}`,
             body: `${user.name || user.username} ne "${opt}"${det ? ` — ${det}` : ''} use kiya.`,
             target: 'admin',
-            meta: { username: user.username, name: user.name, mobile: user.mobile, option: opt, details: det }
+            meta: { username: user.username, name: user.name, mobile: user.mobile, option: opt, details: det, link: pageLinkFor(opt) }
           });
         }
       }
@@ -1312,7 +2480,7 @@ async function handleApi(req, res, url) {
         title: '⚙️ Settings update',
         body: `${user.name || user.username} ne settings update ki${det ? `: ${det}` : 'ya'}.`,
         target: 'admin',
-        meta: { username: user.username, name: user.name, fields: det }
+        meta: { username: user.username, name: user.name, fields: det, link: '#/settings' }
       });
     } else {
       noteActivity(user, body.page);
@@ -1338,6 +2506,9 @@ async function handleApi(req, res, url) {
     db.resets = db.resets.filter((r) => r.username !== u.username || r.resolved);
     db.resets.push({ username: u.username, name: u.name || u.username, email: u.email || '', mobile: u.mobile || '', at: new Date().toISOString(), code: '', codeExpiresAt: null, resolved: false });
     await persist('resets');
+    // 🔔 Admin ko password-reset request ki notification (in-app feed + mobile push dono me).
+    recordNotification({ type: 'user', title: '🔑 Password reset request', body: `${u.name || u.username} ne password reset ki request ki (${u.email || u.mobile || 'no contact'}). Settings → Users se ye account update kar sakte ho.`, target: 'admin', meta: { username: u.username, name: u.name, email: u.email, mobile: u.mobile, link: '#/settings?tab=users' } });
+    logAudit(u, 'forgot_request', { target: u.username, ip: clientIp(req) });
     return sendJson(res, 200, { ok: true, found: true, help, message: `Request sent ✓ — admin will provide new password or 6-digit code (user: ${u.username}).` });
   }
   if (p === '/api/auth/reset' && method === 'POST') {
@@ -1354,6 +2525,7 @@ async function handleApi(req, res, url) {
     reqRow.resolved = true; reqRow.resolvedAt = new Date().toISOString();
     for (const [k, sess] of Object.entries(db.sessions)) if (sess.username === u.username) delete db.sessions[k];
     await persist('users'); await persist('sessions'); await persist('resets');
+    logAudit(u, 'password_reset_completed', { target: u.username, ip: clientIp(req), note: 'code se reset' });
     return sendJson(res, 200, { ok: true, message: 'Password set ✓ — now login with new password.' });
   }
 
@@ -1371,8 +2543,9 @@ async function handleApi(req, res, url) {
     if (!validPassword(body.next)) throw new HttpError(400, 'Naya password kam se kam 6 characters ka ho.');
     user.password = hashPassword(body.next); user.mustChangePassword = false;
     persist('users').catch(() => {});
-    recordNotification({ type: 'user', title: '🔑 Password changed', body: `${user.name || user.username} ne apna password change kiya.`, target: `user:${user.username}` });
-    if (user.role !== 'admin') recordNotification({ type: 'user', title: '🔑 Password changed', body: `${user.name || user.username} ne apna password change kiya.`, target: 'admin', meta: { username: user.username } });
+    recordNotification({ type: 'user', title: '🔑 Password changed', body: `${user.name || user.username} ne apna password change kiya.`, target: `user:${user.username}`, meta: { link: '#/settings?tab=account' } });
+    if (user.role !== 'admin') recordNotification({ type: 'user', title: '🔑 Password changed', body: `${user.name || user.username} ne apna password change kiya.`, target: 'admin', meta: { username: user.username, link: '#/settings?tab=users' } });
+    logAudit(user, 'password_changed', { target: user.username, ip: clientIp(req) });
     return sendJson(res, 200, { ok: true, user: publicUser(user) });
   }
   if (p === '/api/auth/profile' && method === 'POST') {
@@ -1389,7 +2562,7 @@ async function handleApi(req, res, url) {
     }
     await persist('users');
     const profileChanges = changeList(beforeProfile, userSnapshot(user));
-    if (profileChanges.length) recordNotification({ type: 'user', title: `👤 Profile updated · ${user.name || user.username}`, body: `${user.name || user.username} ne apni details badli: ${profileChanges.map((c) => c.field).join(', ')}.`, target: 'admin', meta: { username: user.username, name: user.name, subject: user.username, changes: profileChanges } });
+    if (profileChanges.length) recordNotification({ type: 'user', title: `👤 Profile updated · ${user.name || user.username}`, body: `${user.name || user.username} ne apni details badli: ${profileChanges.map((c) => c.field).join(', ')}.`, target: 'admin', meta: { username: user.username, name: user.name, subject: user.username, changes: profileChanges, link: '#/settings?tab=account' } });
     return sendJson(res, 200, { ok: true, user: publicUser(user) });
   }
   if (p === '/api/auth/location' && method === 'POST') {
@@ -1398,7 +2571,7 @@ async function handleApi(req, res, url) {
     if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lon) || lon < -180 || lon > 180) throw new HttpError(400, 'Location coordinates valid nahi hain.');
     user.lastLocation = { latitude: Number(lat.toFixed(6)), longitude: Number(lon.toFixed(6)), accuracy: Number.isFinite(accuracy) ? Math.max(0, Math.min(100000, Math.round(accuracy))) : null, at: new Date().toISOString() };
     await persist('users');
-    if (user.role !== 'admin') recordNotification({ type: 'location', title: 'User location shared', body: `${user.name || user.username} ne consent ke saath apni location share ki.`, target: 'admin', meta: { username: user.username, location: user.lastLocation } });
+    if (user.role !== 'admin') recordNotification({ type: 'location', title: 'User location shared', body: `${user.name || user.username} ne consent ke saath apni location share ki.`, target: 'admin', meta: { username: user.username, location: user.lastLocation, link: '#/settings?tab=users' } });
     return sendJson(res, 200, { ok: true, user: publicUser(user) });
   }
 
@@ -1438,7 +2611,7 @@ async function handleApi(req, res, url) {
   }
 
   // ---- settings ----
-  if (p === '/api/settings' && method === 'GET') return sendJson(res, 200, { settings: db.settings, defaults: DEFAULT_SETTINGS });
+  if (p === '/api/settings' && method === 'GET') return sendJson(res, 200, { settings: settingsFor(user), defaults: DEFAULT_SETTINGS });
   if (p === '/api/settings' && method === 'PUT') {
     requireAdmin(user);
     const body = await readBody(req);
@@ -1468,10 +2641,12 @@ async function handleApi(req, res, url) {
     const next = body.reset ? { ...DEFAULT_SETTINGS } : deepMerge(db.settings, patch);
     next.updatedAt = new Date().toISOString(); next.updatedBy = user.username;
     if (next.sheetId !== db.settings.sheetId || next.cacheSeconds !== db.settings.cacheSeconds) cache.clear();
-    const changes = changeList(db.settings, next, { skip: ['updatedAt', 'updatedBy'] });
+    const changes = changeList(db.settings, next, { skip: ['updatedAt', 'updatedBy', 'lastBackupAt', 'personalLinks'] });
     db.settings = next;
     await persist('settings');
-    if (changes.length || body.reset) recordNotification({ type: 'settings', title: body.reset ? '⚙️ Settings reset to defaults' : `⚙️ Settings changed (${changes.length})`, body: `${user.name || user.username} ne ${changes.slice(0, 4).map((c) => c.field).join(', ')}${changes.length > 4 ? ` +${changes.length - 4} more` : ''} update kiya.`, target: 'admin', meta: { username: user.username, name: user.name, changes, reset: !!body.reset } });
+    if (patch.lastBackupAt) logAudit(user, 'backup_export', { ip: clientIp(req), note: 'settings JSON download' });
+    else if (changes.length || body.reset) logAudit(user, 'settings_update', { ip: clientIp(req), note: (changes.slice(0, 5).map((c) => c.field).join(', ') + (changes.length > 5 ? '…' : '')) || 'reset' });
+    if (changes.length || body.reset) recordNotification({ type: 'settings', title: body.reset ? '⚙️ Settings reset to defaults' : `⚙️ Settings changed (${changes.length})`, body: `${user.name || user.username} ne ${changes.slice(0, 4).map((c) => c.field).join(', ')}${changes.length > 4 ? ` +${changes.length - 4} more` : ''} update kiya.`, target: 'admin', meta: { username: user.username, name: user.name, changes, reset: !!body.reset, link: '#/settings' } });
     return sendJson(res, 200, { ok: true, settings: db.settings });
   }
   if (p === '/api/cache/clear' && method === 'POST') { requireAdmin(user); cache.clear(); return sendJson(res, 200, { ok: true }); }
@@ -1492,7 +2667,8 @@ async function handleApi(req, res, url) {
     const perms = Array.isArray(body.permissions) ? body.permissions.filter((k) => allow.includes(k)) : DEFAULT_USER_PERMS.slice();
     const u = { username, name: String(body.name || '').trim().slice(0, 80) || username, email: String(body.email || '').trim().slice(0, 120), mobile: String(body.mobile || '').replace(/[^\d+]/g, '').slice(0, 16), role: body.role === 'admin' ? 'admin' : 'user', approved: body.approved !== false, permissions: perms, password: hashPassword(body.password), mustChangePassword: true, createdAt: new Date().toISOString(), lastLoginAt: null };
     db.users.push(u); await persist('users');
-    recordNotification({ type: 'user', title: `👤 New user created · ${u.name}`, body: `${user.name || user.username} ne ${u.username} (${u.role}) account banaya.`, target: 'admin', meta: { username: user.username, subject: u.username, changes: changeList({}, userSnapshot(u)), permissions: { added: perms, removed: [] } } });
+    logAudit(user, 'user_create', { target: username, ip: clientIp(req), note: `${u.role} · approved=${u.approved}` });
+    recordNotification({ type: 'user', title: `👤 New user created · ${u.name}`, body: `${user.name || user.username} ne ${u.username} (${u.role}) account banaya.`, target: 'admin', meta: { username: user.username, subject: u.username, changes: changeList({}, userSnapshot(u)), permissions: { added: perms, removed: [] }, link: '#/settings?tab=users' } });
     return sendJson(res, 200, { ok: true, user: publicUser(u), permissions: permissionsFor(db.settings) });
   }
   if (p === '/api/users/reset-requests' && method === 'GET') {
@@ -1560,7 +2736,8 @@ async function handleApi(req, res, url) {
       const userChanges = changeList({ ...beforeUser, permissions: undefined }, { ...afterUser, permissions: undefined });
       const perms = permissionDiff(beforeUser.permissions, afterUser.permissions);
       if (body.password) userChanges.push({ field: 'password', before: '••••', after: 'reset by admin' });
-      if (userChanges.length || perms.added.length || perms.removed.length) recordNotification({ type: 'user', title: `👥 User updated · ${target.name || target.username}`, body: `${user.name || user.username} ne ${target.username} update kiya${perms.added.length || perms.removed.length ? ` · access +${perms.added.length} / −${perms.removed.length}` : ''}${userChanges.length ? ` · ${userChanges.map((c) => c.field).join(', ')}` : ''}.`, target: 'admin', meta: { username: user.username, subject: target.username, changes: userChanges, permissions: perms } });
+      logAudit(user, 'user_update', { target: target.username, ip: clientIp(req), note: userChanges.slice(0, 5).map((c) => c.field).join(', ') || 'permissions/approve' });
+      if (userChanges.length || perms.added.length || perms.removed.length) recordNotification({ type: 'user', title: `👥 User updated · ${target.name || target.username}`, body: `${user.name || user.username} ne ${target.username} update kiya${perms.added.length || perms.removed.length ? ` · access +${perms.added.length} / −${perms.removed.length}` : ''}${userChanges.length ? ` · ${userChanges.map((c) => c.field).join(', ')}` : ''}.`, target: 'admin', meta: { username: user.username, subject: target.username, changes: userChanges, permissions: perms, link: '#/settings?tab=users' } });
       return sendJson(res, 200, { ok: true, user: publicUser(target) });
     }
     if (method === 'DELETE') {
@@ -1569,7 +2746,8 @@ async function handleApi(req, res, url) {
       db.users = db.users.filter((u) => u !== target);
       for (const [k, s] of Object.entries(db.sessions)) if (s.username === target.username) delete db.sessions[k];
       await persist('users'); await persist('sessions');
-      recordNotification({ type: 'user', title: `🗑️ User deleted · ${target.name || target.username}`, body: `${user.name || user.username} ne ${target.username} ka account delete kiya.`, target: 'admin', meta: { username: user.username, subject: target.username, changes: changeList(userSnapshot(target), {}) } });
+      logAudit(user, 'user_delete', { target: target.username, ip: clientIp(req) });
+      recordNotification({ type: 'user', title: `🗑️ User deleted · ${target.name || target.username}`, body: `${user.name || user.username} ne ${target.username} ka account delete kiya.`, target: 'admin', meta: { username: user.username, subject: target.username, changes: changeList(userSnapshot(target), {}), link: '#/settings?tab=users' } });
       return sendJson(res, 200, { ok: true });
     }
   }
@@ -1604,6 +2782,181 @@ async function serveStatic(res, pathname) {
 }
 
 // ---------------------------------------------------------------------------------------------
+// -------------------------------------------------------------------------------------------
+// 🔗 Personal read-only pages — /p/<token> (bina login; agent/TL ka apna performance)
+// -------------------------------------------------------------------------------------------
+const escHtml = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const pad2 = (n) => String(n).padStart(2, '0');
+function gvizLiteral(name) { return `'${String(name).replace(/\\/g, '').replace(/'/g, "\\'")}'`; }
+async function personalDailyRows(link) {
+  const s = db.settings.eir || {};
+  const sheet = db.settings.eirSheet || 'EIR';
+  const dateCol = s.date || 'AA', tagCol = s.tagId || 'A', clsCol = s.cls || 'D';
+  const nameCol = link.kind === 'tl' ? (s.tlName || 'BA') : (s.agentName || 'L');
+  const tq = `select ${dateCol}, ${clsCol}, count(${tagCol}) where ${tagCol} is not null and ${nameCol} = ${gvizLiteral(link.name)} group by ${dateCol}, ${clsCol} order by ${dateCol} desc limit 70`;
+  const params = new URLSearchParams({ id: String(db.settings.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet, tq });
+  const out = await fetchUpstream(upstreamUrl(params));
+  if (out.status < 200 || out.status >= 300) throw new Error(`sheet ${out.status}`);
+  const table = parseGvizServer(out.body);
+  const rows = [];
+  for (const row of table.rows || []) {
+    const dk = serverDate(serverCell(row, 0));
+    if (!dk) continue;
+    rows.push({ date: dk, cls: classBucket(serverCell(row, 1)), n: serverNumber(serverCell(row, 2)) });
+  }
+  return rows;
+}
+async function personalTeamAgents(link) {
+  const s = db.settings.eir || {};
+  const sheet = db.settings.eirSheet || 'EIR';
+  const dateCol = s.date || 'AA', tagCol = s.tagId || 'A', agentCol = s.agentName || 'L', tlCol = s.tlName || 'BA';
+  const tq = `select ${agentCol}, ${dateCol}, count(${tagCol}) where ${tagCol} is not null and ${tlCol} = ${gvizLiteral(link.name)} group by ${agentCol}, ${dateCol} order by ${dateCol} desc limit 2500`;
+  const params = new URLSearchParams({ id: String(db.settings.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet, tq });
+  const out = await fetchUpstream(upstreamUrl(params));
+  if (out.status < 200 || out.status >= 300) throw new Error(`sheet ${out.status}`);
+  const table = parseGvizServer(out.body);
+  const byAgent = new Map();
+  for (const row of table.rows || []) {
+    const name = serverCell(row, 0).trim();
+    const dk = serverDate(serverCell(row, 1));
+    if (!name || !dk) continue;
+    if (!byAgent.has(name)) byAgent.set(name, new Map());
+    byAgent.get(name).set(dk, (byAgent.get(name).get(dk) || 0) + serverNumber(serverCell(row, 2)));
+  }
+  return byAgent;
+}
+function personalStats(rows) {
+  const ym = dateKeyNow().slice(0, 7);
+  const todayKey = dateKeyNow();
+  const daily = new Map(); // date → n
+  const cls = {};
+  for (const r of rows) {
+    daily.set(r.date, (daily.get(r.date) || 0) + r.n);
+    if (r.date.startsWith(ym)) cls[r.cls] = (cls[r.cls] || 0) + r.n;
+  }
+  let mtd = 0;
+  for (const [d, n] of daily) if (d.startsWith(ym)) mtd += n;
+  const prev = new Date(`${todayKey}T00:00:00Z`); prev.setUTCMonth(prev.getUTCMonth() - 1);
+  const prevYm = `${prev.getUTCFullYear()}-${pad2(prev.getUTCMonth() + 1)}`;
+  const dayNow = Number(todayKey.slice(8, 10));
+  let prevSame = 0;
+  for (const [d, n] of daily) if (d.startsWith(prevYm) && Number(d.slice(8, 10)) <= dayNow) prevSame += n;
+  const keys = [...daily.keys()].sort();
+  const last14 = keys.slice(-14).map((d) => ({ date: d, n: daily.get(d) }));
+  let streak = 0;
+  for (let i = keys.length - 1; i >= 0; i--) { const n = daily.get(keys[i]); if (n > 0) streak++; else break; }
+  let best = { date: '', n: 0 };
+  for (const [d, n] of daily) if (n > best.n) best = { date: d, n };
+  const clsTotal = Object.values(cls).reduce((a, b) => a + b, 0);
+  return { mtd, prevSame, last14, streak, best, cls, clsTotal, activeDays: last14.filter((x) => x.n > 0).length };
+}
+async function servePersonalPage(req, res, rawToken) {
+  const token = String(rawToken || '').split(/[/?#]/)[0].trim();
+  const fail = (code, msg) => sendHtml(res, code, personalShell({ title: 'Link unavailable', heading: '🔒 Link kaam nahi kar raha', body: `<p>${escHtml(msg)}</p>` }));
+  if (feats().personalLinks === false) return fail(404, 'Ye feature admin ne band kar rakha hai.');
+  const link = (Array.isArray(db.settings.personalLinks) ? db.settings.personalLinks : []).find((l) => l.token === token);
+  if (!link) return fail(404, 'Ye link ya to khatam ho gaya ya galat hai. Admin se naya maango.');
+  if (!link.enabled) return fail(403, 'Admin ne ye link band kar diya hai.');
+  try {
+    const rows = await personalDailyRows(link);
+    if (!rows.length) return fail(404, `"${link.name}" ka data abhi sheet me nahi mila (ya naam alag hai).`);
+    const st = personalStats(rows);
+    let team = [];
+    let goal = null, target = null;
+    const ym = dateKeyNow().slice(0, 7);
+    if (link.kind === 'tl') {
+      goal = ((Array.isArray(db.settings.tlTargets) ? db.settings.tlTargets : []).find((t) => t && t.ym === ym && t.tl === link.name) || null);
+      const byAgent = await personalTeamAgents(link);
+      for (const [name, m] of byAgent) {
+        let mtdA = 0;
+        for (const [d, n] of m) if (d.startsWith(ym)) mtdA += n;
+        if (mtdA > 0) team.push({ name, mtd: mtdA });
+      }
+      team.sort((a, b) => b.mtd - a.mtd);
+      team = team.slice(0, 15);
+    } else {
+      target = ((Array.isArray(db.settings.targets) ? db.settings.targets : []).find((t) => t && t.ym === ym && String(t.agent || '') === link.name) || null);
+    }
+    const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
+    const maxBar = Math.max(1, ...st.last14.map((x) => x.n));
+    const bars = st.last14.map((x) => `<div class="pb-col" title="${escHtml(x.date)}: ${x.n}"><div class="pb-bar" style="height:${Math.max(4, Math.round((x.n / maxBar) * 100))}%"></div><span>${escHtml(x.date.slice(8, 10))}</span></div>`).join('');
+    const clsRows = Object.entries(st.cls).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<div class="pb-kv"><span>${escHtml(k)}</span><b>${v}</b> <i>${pct(v, st.clsTotal)}%</i></div>`).join('') || '<p class="dim">—</p>';
+    const goalHtml = goal ? `<div class="pb-goal"><div class="pb-goal-top"><span>🎯 TL goal ${escHtml(ym)}</span><b>${st.mtd} / ${Number(goal.target) || 0} (${pct(st.mtd, Number(goal.target))}%)</b></div><div class="pb-track"><div class="pb-fill" style="width:${Math.min(100, pct(st.mtd, Number(goal.target)))}%"></div></div></div>` : '';
+    const targetHtml = target ? `<div class="pb-kv"><span>🎯 Your target ${escHtml(ym)}</span><b>${st.mtd} / ${Number(target.target) || 0} (${pct(st.mtd, Number(target.target))}%)</b></div>` : '';
+    const teamHtml = team.length ? `<section class="pb-card"><h3>👥 Team (is mahine)</h3>${team.map((t, i) => `<div class="pb-rank"><span class="pb-pos">${i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1}</span><span class="pb-name">${escHtml(t.name)}</span><b>${t.mtd}</b></div>`).join('')}</section>` : '';
+    const diff = st.mtd - st.prevSame;
+    const html = personalShell({
+      title: `${link.name} · Performance`,
+      heading: `${link.kind === 'tl' ? '👥' : '🧑‍💼'} ${escHtml(link.name)}`,
+      sub: `${link.kind === 'tl' ? 'Team Leader' : 'Agent'} · personal view · read-only`,
+      body: `
+      ${goalHtml || targetHtml ? `<section class="pb-card pb-goalcard">${goalHtml}${targetHtml}</section>` : ''}
+      <section class="pb-kpis">
+        <div class="pb-kpi"><small>MTD issued</small><b>${st.mtd}</b><span>${escHtml(ym)}</span></div>
+        <div class="pb-kpi"><small>Pichhle mahine same period</small><b>${st.prevSame}</b><span class="${diff >= 0 ? 'up' : 'down'}">${diff >= 0 ? '▲' : '▼'} ${Math.abs(diff)}</span></div>
+        <div class="pb-kpi"><small>Streak</small><b>${st.streak}</b><span>din se active 🔥</span></div>
+        <div class="pb-kpi"><small>Best day</small><b>${st.best.n}</b><span>${escHtml(st.best.date)}</span></div>
+      </section>
+      <section class="pb-card"><h3>📅 Last ${st.last14.length} din</h3><div class="pb-bars">${bars || '<p class="dim">data nahi</p>'}</div></section>
+      <section class="pb-grid2">
+        <div class="pb-card"><h3>🏷️ Class mix (MTD)</h3>${clsRows}</div>
+        <div class="pb-card"><h3>📈 Snapshot</h3>
+          <div class="pb-kv"><span>Active days (last 14)</span><b>${st.activeDays}</b></div>
+          <div class="pb-kv"><span>Avg / active day</span><b>${st.activeDays ? (st.mtd / Math.max(1, st.activeDays)).toFixed(1) : '—'}</b></div>
+          <div class="pb-kv"><span>Total rows (14 din chart)</span><b>${st.last14.reduce((a, b) => a + b.n, 0)}</b></div>
+        </div>
+      </section>
+      ${teamHtml}
+      <p class="pb-foot">Read-only link · data live sheet se · ${escHtml(db.settings.brand || 'Dashboard')}</p>`
+    });
+    return sendHtml(res, 200, html, { 'Cache-Control': 'no-store' });
+  } catch (err) {
+    console.warn('personal page:', err.message);
+    return fail(500, 'Data load nahi hua — thodi der baad try karo.');
+  }
+}
+function personalShell({ title, heading, sub, body }) {
+  const accent = (db.settings.theme && db.settings.theme.accent) || '#2563eb';
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow"><title>${escHtml(title)}</title>
+<style>
+:root{--a:${escHtml(accent)}}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#f4f6fb;color:#0f172a;padding:18px;line-height:1.45}
+.pb-wrap{max-width:640px;margin:0 auto}
+.pb-head{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.pb-logo{width:44px;height:44px;border-radius:12px;background:var(--a);color:#fff;display:grid;place-items:center;font-weight:800;font-size:17px}
+.pb-head h1{font-size:20px}.pb-head p{font-size:12.5px;color:#64748b}
+.pb-card{background:#fff;border:1px solid #e5e9f5;border-radius:14px;padding:14px;margin-bottom:12px;box-shadow:0 2px 10px rgba(15,23,42,.04)}
+.pb-card h3{font-size:13.5px;color:#475569;margin-bottom:10px}
+.pb-kpis{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:12px}
+.pb-kpi{background:#fff;border:1px solid #e5e9f5;border-radius:14px;padding:12px}
+.pb-kpi small{color:#64748b;font-size:11.5px;display:block}.pb-kpi b{font-size:26px;display:block;margin:2px 0}.pb-kpi span{font-size:12px;color:#64748b}
+.pb-kpi .up{color:#10b981}.pb-kpi .down{color:#ef4444}
+.pb-bars{display:flex;align-items:flex-end;gap:5px;height:120px}
+.pb-col{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%}
+.pb-bar{width:100%;background:linear-gradient(180deg,var(--a),#93c5fd);border-radius:5px 5px 2px 2px;min-height:4px}
+.pb-col span{font-size:9.5px;color:#94a3b8;margin-top:3px}
+.pb-grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.pb-kv{display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px dashed #eef2f9;font-size:13.5px}
+.pb-kv:last-child{border:0}.pb-kv i{color:#94a3b8;font-style:normal;font-size:12px}
+.pb-rank{display:flex;align-items:center;gap:10px;padding:7px 4px;border-bottom:1px dashed #eef2f9;font-size:14px}
+.pb-rank:last-child{border:0}.pb-pos{width:26px;text-align:center}.pb-name{flex:1;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pb-goal-top{display:flex;justify-content:space-between;font-size:13.5px;margin-bottom:6px}
+.pb-track{height:10px;background:#eef0f8;border-radius:99px;overflow:hidden}.pb-fill{height:100%;background:var(--a);border-radius:99px}
+.pb-foot{text-align:center;color:#94a3b8;font-size:11.5px;margin-top:16px}
+.dim{color:#94a3b8}
+@media(max-width:480px){.pb-grid2{grid-template-columns:1fr}}
+</style></head><body><div class="pb-wrap">
+<header class="pb-head"><div class="pb-logo">${escHtml(String(db.settings.brand || 'FF').split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase())}</div>
+<div><h1>${heading}</h1><p>${sub}</p></div></header>
+${body}
+</div></body></html>`;
+}
+function sendHtml(res, status, html, extra = {}) {
+  res.writeHead(status, headers({ 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': Buffer.byteLength(html), ...extra }));
+  res.end(html);
+}
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
@@ -1613,6 +2966,9 @@ const server = http.createServer(async (req, res) => {
         console.error(err);
         return sendJson(res, 500, { error: 'Server error' });
       }
+    }
+    if (url.pathname.startsWith('/p/')) {
+      try { return await servePersonalPage(req, res, url.pathname.slice(3)); } catch (err) { console.error(err); return sendText(res, 500, 'Server error'); }
     }
     if (req.method !== 'GET' && req.method !== 'HEAD') return sendText(res, 405, 'Method not allowed');
     return await serveStatic(res, url.pathname);
@@ -1726,6 +3082,10 @@ async function start() {
     setInterval(() => checkReports(false).catch(() => {}), 5 * 60e3).unref();
     setTimeout(() => maybeMonthlyReport(), 8000);
     setInterval(() => maybeMonthlyReport(), 60 * 60e3).unref();
+    // 🌅 Scheduled checks: daily digest (subah 8 IST ke baad roz ek baar) + mid-month target +
+    //    weekly inactive users + 🔴 cover alert / 📉 stock history — boot par aur har 30 min.
+    setTimeout(() => runScheduledChecks(), 15000);
+    setInterval(() => runScheduledChecks(), 30 * 60e3).unref();
   });
 }
 start().catch((err) => { console.error('Startup stopped to protect stored data:', err); process.exitCode = 1; });

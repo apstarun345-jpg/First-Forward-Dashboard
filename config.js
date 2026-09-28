@@ -45,6 +45,27 @@ FF.config = {
   // Legacy view of the First Forward sheet tabs (kept in sync with `tabs` by refreshViews()).
   sheets: [],
 
+  // 🎛 Feature switches — server (Settings → 🎛 Features) se overwrite hote hain. Admin yahin se
+  //    on/off/modify karta hai; defaults sab ON (alerts ke saath).
+  features: {
+    search: true, share: true, targetBar: true, stockTrend: true, tlCover: true, recon: true,
+    loginHistory: true, pendingBadge: true, updateToast: true, backupReminder: true,
+    waNumber: '',
+    alerts: { lowCover: true, midMonth: true, inactive: true, zeroDay: true, newLoginIp: true, anomaly: true },
+    digestHour: 8, midFrom: 15, midTo: 25, midGapPct: 40, zeroDropPct: 50, backupDays: 7,
+    emailDigest: false,
+    tvMode: true, weekCompare: true, agedStock: true, auditLog: true, announcements: true,
+    tlGoals: true, otp2fa: true, emailReport: false, emailReportHour: 21,
+    weeklyEmail: false, weeklyEmailHour: 9, anomalyPct: 80,
+    badges: true, voiceSummary: true, askBox: true, teamMap: true, tlAnomaly: true, personalLinks: true,
+    customAlerts: true, championEmail: false, championHour: 10, championTop: 3,
+    followupTracker: true, followupDays: 3, followupHour: 10,
+    dispatchPlan: true, suggestDays: 15,
+    officeLat: 0, officeLng: 0
+  },
+  /** Feature flag padho — FF.config.feat('search') / FF.config.feat('alerts').lowCover */
+  feat(key) { const f = this.features || {}; return f[key]; },
+
   // EIR (issuance log) column letters — used for Dashboard / Trend / class-wise comparisons.
   eir: {
     sheet: 'EIR',
@@ -142,6 +163,11 @@ FF.config = {
     ['appName', 'brand', 'tagline', 'logo', 'loginImage', 'loginAnimation', 'sheetId', 'gvSheetId', 'excludeTls', 'pageSize', 'allowSignup'].forEach(pick);
     if (s.theme) this.theme = { ...this.theme, ...s.theme };
     if (s.thresholds) this.thresholds = { ...this.thresholds, ...s.thresholds };
+    if (s.features) {
+      const f = { ...this.features, ...s.features };
+      f.alerts = { ...(this.features && this.features.alerts), ...(s.features.alerts || {}) };
+      this.features = f;
+    }
     if (s.contacts) this.contacts = { ...this.contacts, ...s.contacts };
     if (s.eir) this.eir = { ...this.eir, ...s.eir };
     if (s.stock) this.stock = { ...this.stock, ...s.stock };

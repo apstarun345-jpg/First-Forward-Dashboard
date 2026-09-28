@@ -19,6 +19,23 @@ FF.pages = FF.pages || {};
     if (days < t.coverAmber) return `<span class="badge amber">🟡 ${U.fmt(days)} days</span>`;
     return `<span class="badge green">🟢 ${U.fmt(days)} days</span>`;
   }
+  // 🚗 4-way class helpers — VC4 | VC20 | VC5+ · All Comm = VC20 + VC5+ (NVC4)
+  const binsFromByClass = (byClass) => { const b = { VC4: 0, VC20: 0, 'VC5+': 0 }; if (byClass) for (const [c, n] of byClass) { const g = FF.model.classGroup(c); b[g] = (b[g] || 0) + n; } return b; };
+  const classDefine = '<div class="dim small" style="margin-top:8px">🚗 <b>VC4</b> = 4-wheeler (payable) · 🛻 <b>VC20</b> / <b>VC5+</b> = bade commercial vehicles · <b>All Comm = VC20 + VC5+ (NVC4)</b></div>';
+  function classTable(stBins, isBins, elapsed) {
+    const st = [stBins.VC4, stBins.VC20, stBins['VC5+'], (stBins.VC20 || 0) + (stBins['VC5+'] || 0)];
+    const is = [isBins.VC4 || 0, isBins.VC20 || 0, isBins['VC5+'] || 0, (isBins.VC20 || 0) + (isBins['VC5+'] || 0)];
+    const heads = ['VC4', 'VC20', 'VC5+', 'All Comm'];
+    const per = is.map((v) => (elapsed ? v / elapsed : 0));
+    const cell = (i) => per[i] ? coverBadge(st[i] / per[i]) : '<span class="dim">—</span>';
+    return `<table class="tbl compact" style="margin-top:12px"><thead><tr><th></th>${heads.map((h) => `<th class="num" ${h === 'All Comm' ? 'title="VC20 + VC5+"' : ''}>${h}</th>`).join('')}</tr></thead>
+      <tbody>
+        <tr><td>Stock</td>${st.map((v) => `<td class="num"><b>${U.fmt(v)}</b></td>`).join('')}</tr>
+        <tr><td>Issued MTD</td>${is.map((v) => `<td class="num">${U.fmt(v)}</td>`).join('')}</tr>
+        <tr><td>Per day</td>${per.map((v) => `<td class="num">${U.fmt(v, 1)}</td>`).join('')}</tr>
+        <tr><td>Days cover</td>${heads.map((_, i) => `<td>${cell(i)}</td>`).join('')}</tr>
+      </tbody></table>`;
+  }
   const compareBar = (a, b, la, lb, ca, cb) => {
     const t = (a || 0) + (b || 0);
     const pa = t ? (a / t) * 100 : 0;
@@ -42,6 +59,15 @@ FF.pages = FF.pages || {};
     const agentClass = S.get('agentClass') || [];
     for (const a of issued) { if (a.ym !== cur) continue; tlIssued.set(norm(a.tlName), (tlIssued.get(norm(a.tlName)) || 0) + a.n); agIssued.set(norm(a.name), (agIssued.get(norm(a.name)) || 0) + a.n); }
     for (const a of agentClass) { if (a.ym !== cur || a.group !== 'VC4') continue; agIssuedVc4.set(norm(a.name), (agIssuedVc4.get(norm(a.name)) || 0) + a.n); }
+    // 🚗 MTD issued ka 4-way bins (VC4 / VC20 / VC5+) — agent + TL dono ke liye
+    const agBins = new Map(), tlBins = new Map();
+    const emptyBins = () => ({ VC4: 0, VC20: 0, 'VC5+': 0 });
+    for (const a of agentClass) {
+      if (a.ym !== cur) continue;
+      const g = a.group === 'VC4' || a.group === 'VC20' ? a.group : 'VC5+';
+      const kb = norm(a.name); const ab = agBins.get(kb) || emptyBins(); ab[g] += a.n; agBins.set(kb, ab);
+      const kt = norm(a.tlName); const tb = tlBins.get(kt) || emptyBins(); tb[g] += a.n; tlBins.set(kt, tb);
+    }
     // agent map
     const agMap = new Map();
     for (const a of stockAgents) {
@@ -50,7 +76,7 @@ FF.pages = FF.pages || {};
       const o = agMap.get(k); o.total += a.n; if (a.group === 'VC4') o.vc4 += a.n; else o.comm += a.n; o.byClass.set(a.cls, (o.byClass.get(a.cls) || 0) + a.n);
       if (!o.id && a.agentId) o.id = a.agentId;
     }
-    const agents = [...agMap.values()].map((a) => { a.iss = agIssued.get(norm(a.name)) || 0; a.issVc4 = agIssuedVc4.get(norm(a.name)) || 0; const perDay = elapsed ? a.iss / elapsed : 0; a.cover = perDay ? a.vc4 / perDay : null; return a; }).sort((a, b) => b.total - a.total);
+    const agents = [...agMap.values()].map((a) => { a.iss = agIssued.get(norm(a.name)) || 0; a.issVc4 = agIssuedVc4.get(norm(a.name)) || 0; a.issBins = agBins.get(norm(a.name)) || { VC4: 0, VC20: 0, 'VC5+': 0 }; const perDay = elapsed ? a.iss / elapsed : 0; a.cover = perDay ? a.vc4 / perDay : null; return a; }).sort((a, b) => b.total - a.total);
     // TL map (APS etc. excluded from TL views, but counted in totals)
     const tlMap = new Map();
     for (const r of stock) {
@@ -58,7 +84,7 @@ FF.pages = FF.pages || {};
       if (!tlMap.has(k)) tlMap.set(k, { name: k, total: 0, vc4: 0, comm: 0, byClass: new Map(), excluded: FF.config.isExcludedTl(k) });
       const o = tlMap.get(k); o.total += r.n; if (r.group === 'VC4') o.vc4 += r.n; else o.comm += r.n; o.byClass.set(r.cls, (o.byClass.get(r.cls) || 0) + r.n);
     }
-    const tls = [...tlMap.values()].map((t) => { t.iss = tlIssued.get(norm(t.name)) || 0; const perDay = elapsed ? t.iss / elapsed : 0; t.cover = perDay ? t.vc4 / perDay : null; t.agents = agents.filter((a) => norm(a.tl) === norm(t.name)).length; return t; }).sort((a, b) => b.total - a.total);
+    const tls = [...tlMap.values()].map((t) => { t.iss = tlIssued.get(norm(t.name)) || 0; t.issBins = tlBins.get(norm(t.name)) || { VC4: 0, VC20: 0, 'VC5+': 0 }; const perDay = elapsed ? t.iss / elapsed : 0; t.cover = perDay ? t.vc4 / perDay : null; t.agents = agents.filter((a) => norm(a.tl) === norm(t.name)).length; return t; }).sort((a, b) => b.total - a.total);
     const total = U.sum(stock, (r) => r.n), vc4 = U.sum(stock.filter((r) => r.group === 'VC4'), (r) => r.n);
     const byClass = U.groupSum(stock, (r) => r.cls, (r) => r.n);
     const curS = cur ? M.summary(daily, cur) : null;
@@ -154,10 +180,10 @@ FF.pages = FF.pages || {};
           ${kpi('g9', 'Total stock', '📦', U.fmt(agent.total), `${esc(agent.name)} · TL ${esc(tlName)}`)}
           ${kpi('g1', 'VC4 stock', '🚗', U.fmt(agent.vc4), `${U.fmtPct(U.pctOf(agent.vc4, agent.total), 0)} of stock`)}
           ${kpi('g4', 'Commercial stock', '🚚', U.fmt(agent.comm), P.classes.filter((c) => !isVc4(c) && agent.byClass.get(c)).map((c) => `${c} <b>${U.fmt(agent.byClass.get(c))}</b>`).join(' · ') || '—')}
-          ${kpi('g6', `MTD issued${P.cur ? ` · ${U.labelYM(P.cur)}` : ''}`, '🏷️', U.fmt(agent.iss), `VC4 <b>${U.fmt(agent.issVc4)}</b> · Comm <b>${U.fmt(agent.iss - agent.issVc4)}</b> · ${perDay ? `${U.fmt(perDay, 1)}/day` : ''} · cover ${coverBadge(agent.cover)}`)}
+          ${kpi('g6', `MTD issued${P.cur ? ` · ${U.labelYM(P.cur)}` : ''}`, '🏷️', U.fmt(agent.iss), `VC4 <b>${U.fmt(agent.issBins.VC4)}</b> · VC20 <b>${U.fmt(agent.issBins.VC20)}</b> · VC5+ <b>${U.fmt(agent.issBins['VC5+'])}</b> · ${perDay ? `${U.fmt(perDay, 1)}/day` : ''} · cover ${coverBadge(agent.cover)}`)}
         </div>
         <div class="grid g-2">
-          ${card('⚖️ VC4 vs Commercial', `${compareBar(agent.vc4, agent.comm, 'VC4 stock', 'Commercial stock')}${compareBar(agent.issVc4, agent.iss - agent.issVc4, 'VC4 issued (MTD)', 'Commercial issued (MTD)', '#10b981', '#f97316')}<div class="dim small" style="margin-top:8px">Stock days = stock ÷ avg daily issuance (MTD)</div>`)}
+          ${card('⚖️ Class split <span class="dim">· stock vs MTD issued</span>', `${classTable(binsFromByClass(agent.byClass), agent.issBins, P.elapsed)}${classDefine}<div class="dim small" style="margin-top:6px">Stock days = stock ÷ avg daily issuance (MTD)</div>`)}
           ${card('🍩 Class share', C.donut({ items: P.classes.map((c) => ({ label: c, value: agent.byClass.get(c) || 0, color: isVc4(c) ? '#6366f1' : undefined })), subtitle: 'tags' }))}
         </div>
         ${card(`🧮 Pivot · Class × Tag type <span class="dim">(${esc(agent.name)})</span>`, pivotTable(pv), `<button class="btn small primary" id="st-xlsx">⬇ Excel (Summary + StockDataa rows)</button><button class="btn small" data-action="export" data-name="stock-${U.slug(agent.name)}">⬇ CSV</button>`)}
@@ -177,7 +203,7 @@ FF.pages = FF.pages || {};
           ${kpi('g6', `MTD issued${P.cur ? ` · ${U.labelYM(P.cur)}` : ''}`, '🏷️', U.fmt(tl.iss), `${P.elapsed ? `${U.fmt(tl.iss / P.elapsed, 1)}/day` : ''} · stock turns ${tl.iss && tl.total ? (tl.iss / tl.total).toFixed(2) : '—'}×`)}
         </div>
         <div class="grid g-2">
-          ${card('⚖️ VC4 vs Commercial', `${compareBar(tl.vc4, tl.comm, 'VC4 stock', 'Commercial stock')}<div style="margin-top:14px">${C.bars({ labels: P.classes.filter((c) => tl.byClass.get(c)), height: 170, series: [{ name: 'Stock', values: P.classes.filter((c) => tl.byClass.get(c)).map((c) => tl.byClass.get(c)), color: '#14b8a6' }] })}</div>`)}
+          ${card('⚖️ Class split <span class="dim">· stock vs MTD issued</span>', `${classTable(binsFromByClass(tl.byClass), tl.issBins, P.elapsed)}${classDefine}<div style="margin-top:14px">${C.bars({ labels: P.classes.filter((c) => tl.byClass.get(c)), height: 170, series: [{ name: 'Stock', values: P.classes.filter((c) => tl.byClass.get(c)).map((c) => tl.byClass.get(c)), color: '#14b8a6' }] })}</div>`)}
           ${card('🧑‍💼 Top agents by stock', C.hbars({ items: top.map((a, i) => ({ label: a.name, sub: `VC4 ${U.fmt(a.vc4)} · Comm ${U.fmt(a.comm)}`, value: a.total, color: C.PALETTE[i % C.PALETTE.length], attr: `data-pick-agent="${esc(a.name)}"` })), valueLabel: 'Stock' }))}
         </div>
         ${card(`🧮 Pivot · Agent × Class <span class="dim">(TL ${esc(tl.name)} · ${pv.list.length} agents)</span>`, pivotTable(pv, { rowAttr: (r, ri) => (ri < pv.rows.length - 1 ? `data-pick-agent="${esc(r[1])}" class="clickable"` : '') }), `<button class="btn small primary" id="st-xlsx">⬇ Excel (Summary + StockDataa rows)</button><button class="btn small" data-action="export" data-name="stock-tl-${U.slug(tl.name)}">⬇ CSV</button>`)}
@@ -216,22 +242,105 @@ FF.pages = FF.pages || {};
         ${kpi('g9', 'Total stock in field', '📦', U.fmt(P.total), `${tls.length} TLs · ${U.fmt(P.agents.length)} agents holding stock${directTotal ? ` · direct ${U.fmt(directTotal)}` : ''}`)}
         ${kpi('g1', 'VC4 stock', '🚗', U.fmt(P.vc4), `${U.fmtPct(U.pctOf(P.vc4, P.total), 0)} of stock · ${perDayVc4 ? `${U.fmt(P.vc4 / perDayVc4)} days cover @ ${U.fmt(perDayVc4)} VC4/day` : ''}`)}
         ${kpi('g4', 'Commercial stock', '🚚', U.fmt(P.comm), `${U.fmtPct(U.pctOf(P.comm, P.total), 0)} of stock · ${perDayComm ? `${U.fmt(P.comm / perDayComm)} days cover @ ${U.fmt(perDayComm)} comm/day` : ''}`)}
-        ${kpi('g6', P.cur ? `${U.labelYM(P.cur)} issued (MTD)` : 'MTD issued', '🏷️', U.fmt(P.curS ? P.curS.total : 0), `VC4 <b>${U.fmt(curVc4)}</b> · Commercial <b>${U.fmt(curComm)}</b> · ${P.elapsed} days`)}
+        ${kpi('g6', P.cur ? `${U.labelYM(P.cur)} issued (MTD)` : 'MTD issued', '🏷️', U.fmt(P.curS ? P.curS.total : 0), `VC4 <b>${U.fmt(curVc4)}</b> · VC20 <b>${U.fmt(P.curS ? P.curS.vc20 : 0)}</b> · VC5+ <b>${U.fmt(P.curS ? P.curS.vc5p : 0)}</b> · ${P.elapsed} days`)}
       </div>
       <div class="grid g-3">
-        ${card('⚖️ VC4 vs Commercial', `${compareBar(P.vc4, P.comm, 'VC4 stock', 'Commercial stock')}${compareBar(curVc4, curComm, 'VC4 issued MTD', 'Commercial issued MTD', '#10b981', '#f97316')}<table class="tbl compact" style="margin-top:12px"><thead><tr><th></th><th class="num">VC4</th><th class="num">Commercial</th></tr></thead><tbody><tr><td>Stock</td><td class="num"><b>${U.fmt(P.vc4)}</b></td><td class="num"><b>${U.fmt(P.comm)}</b></td></tr><tr><td>Issued MTD</td><td class="num">${U.fmt(curVc4)}</td><td class="num">${U.fmt(curComm)}</td></tr><tr><td>Per day</td><td class="num">${U.fmt(perDayVc4, 1)}</td><td class="num">${U.fmt(perDayComm, 1)}</td></tr><tr><td>Days cover</td><td>${coverBadge(perDayVc4 ? P.vc4 / perDayVc4 : null)}</td><td>${coverBadge(perDayComm ? P.comm / perDayComm : null)}</td></tr><tr><td>Stock turns / month</td><td class="num">${P.vc4 && curVc4 ? (curVc4 / P.vc4).toFixed(2) : '—'}×</td><td class="num">${P.comm && curComm ? (curComm / P.comm).toFixed(2) : '—'}×</td></tr></tbody></table>`)}
+        ${card('⚖️ Class split · stock vs issued <span class="dim">· VC4 / VC20 / VC5+ / All Comm</span>', `${compareBar(P.vc4, P.comm, 'VC4 stock', 'Commercial stock')}${classTable(binsFromByClass(P.byClass), { VC4: curVc4, VC20: P.curS ? P.curS.vc20 : 0, 'VC5+': P.curS ? P.curS.vc5p : 0 }, P.elapsed)}${classDefine}`)}
         ${card('📊 Stock by class', C.bars({ labels: P.classes, height: 200, series: [{ name: 'Stock', values: P.classes.map((c) => P.byClass.get(c)), color: '#14b8a6' }], onClickAttr: (i) => `data-pick-cls="${esc(P.classes[i])}"` }) + `<div class="chip-row" style="margin-top:10px">${P.classes.map((c) => `<button class="chip ${isVc4(c) ? 'vc4' : 'comm'}" data-pick-cls="${esc(c)}">${esc(c)} <b>${U.fmtShort(P.byClass.get(c))}</b></button>`).join('')}</div>`)}
         ${card('🏬 Top TLs by stock <span class="dim">(APS excluded)</span>', C.hbars({ items: topTls, valueLabel: 'Stock' }))}
       </div>
+      ${!FF.config.feat || FF.config.feat('stockTrend') !== false ? `<div id="st-trend-card">${card('📉 Stock trend <span class="dim">(server snapshots · last 30 din)</span>', `<div id="st-trend"><div class="dim small">History load ho rahi hai…</div></div>`, `<span class="dim small" id="st-trend-cover"></span>`)}</div>` : ''}
+      ${!FF.config.feat || FF.config.feat('recon') !== false ? `<div id="st-recon-card">${card('🧾 Stock in vs issued <span class="dim">(is mahine · approx)</span>', `<div id="st-recon"><div class="dim small">Reconciliation load ho raha hai…</div></div>`)}</div>` : ''}
+      ${!FF.config.feat || FF.config.feat('agedStock') !== false ? `<div id="st-aged-card">${card('🧓 Aged stock <span class="dim">(bcAllocatedAt ke hisaab se · 0-15 / 16-30 / 31-60 / 60+ din)</span>', `<div id="st-aged"><div class="dim small">Aging load ho raha hai…</div></div>`, `<span class="dim small" id="st-aged-note"></span>`)}</div>` : ''}
+      ${!FF.config.feat || FF.config.feat('tlCover') !== false ? card(`📈 TL-wise cover <span class="dim">(sabse kam cover upar · VC4 stock ÷ avg daily issuance MTD)</span>`, `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>TL</th><th class="num">VC4 stock</th><th class="num">MTD issued</th><th class="num">Avg / din</th><th>Cover</th></tr></thead><tbody>${(() => {
+        const sorted = [...tls].sort((a, b) => (a.cover === null ? 1 : b.cover === null ? -1 : a.cover - b.cover)).slice(0, 14);
+        return sorted.map((t) => `<tr data-pick-tl="${esc(t.name)}" class="clickable"><td><b>${esc(t.name)}</b></td><td class="num">${U.fmt(t.vc4)}</td><td class="num">${U.fmt(t.iss)}</td><td class="num">${P.elapsed ? U.fmt(t.iss / P.elapsed, 1) : '—'}</td><td>${coverBadge(t.cover)}</td></tr>`).join('');
+      })()}</tbody></table></div>`) : ''}
       ${card('🧮 TL × Class stock matrix <span class="dim">(click TL → pivot + Excel · VC4 cover = VC4 stock ÷ avg daily issuance MTD)</span>', tlTable, `<button class="btn small" data-action="export" data-name="stock-by-tl">⬇ CSV</button>`)}
       ${card(`🧑‍💼 Agent-wise stock <span class="dim">(${U.fmt(filtered.length)} agents${view.cls ? ` · ${esc(view.cls === 'COMM' ? 'Commercial' : view.cls)} only` : ''})</span>`, `<div class="table-wrap tall"><table class="tbl" id="st-agent-table"><thead><tr><th>Agent ID</th><th>Agent</th><th>TL</th><th class="num">VC4</th><th class="num">Commercial</th><th class="num">Total</th><th class="num">MTD issued</th><th>VC4 cover</th></tr></thead><tbody id="st-agent-body">${filtered.slice(0, 200).map(agentRow).join('')}</tbody></table></div><div class="dim small" id="st-agent-note">${filtered.length > 200 ? 'Top 200 dikh rahe hain — upar search karo.' : `${U.fmt(filtered.length)} agents`}</div>`, `<select id="st-cls"><option value="">All classes</option><option value="VC4" ${view.cls === 'VC4' ? 'selected' : ''}>VC4 only</option><option value="COMM" ${view.cls === 'COMM' ? 'selected' : ''}>Commercial only</option>${P.classes.map((c) => `<option value="${esc(c)}" ${view.cls === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select><button class="btn small" data-action="export" data-name="stock-by-agent">⬇ CSV</button>`)}`;
+  }
+
+  // ---- 📉 stock trend + 🧾 in-vs-issued (server ke snapshots, ek hi fetch) ------------------------
+  function loadStockExtras(body) {
+    const box = U.$('#st-trend', body);
+    const reconBox = U.$('#st-recon', body);
+    const agedBox = U.$('#st-aged', body);
+    if ((!box && !reconBox && !agedBox) || !FF.auth || !FF.auth.api) return;
+    // 🧓 Aged stock (features.agedStock) — stock row ki allocation date se buckets (alag query, fail-safe)
+    if (agedBox && FF.model && FF.model.loadStockAging) {
+      const agedNote = U.$('#st-aged-note', body);
+      FF.model.loadStockAging().then((res) => {
+        if (!agedBox.isConnected) return;
+        if (res.error) { agedBox.innerHTML = `<div class="dim small">⚠️ ${esc(res.error)}</div>`; return; }
+        if (!res.total) { agedBox.innerHTML = '<div class="dim small">Stock rows nahi mile.</div>'; return; }
+        const items = [
+          ['🌱 0-15 din', res.buckets['0-15'], '#10b981'],
+          ['🟡 16-30 din', res.buckets['16-30'], '#f59e0b'],
+          ['🟠 31-60 din', res.buckets['31-60'], '#f97316'],
+          ['🔴 60+ din', res.buckets['60+'], '#ef4444'],
+          ['❔ Unknown date', res.unknown, '#94a3b8']
+        ];
+        const max = Math.max(1, ...items.map((i) => i[1]));
+        agedBox.innerHTML = `<div class="feat-grid">${items.map(([label, n, col]) => `<div class="aged-row"><div class="aged-head"><span>${label}</span><b>${U.fmt(n)}</b> <span class="dim small">${U.fmtPct(U.pctOf(n, res.total), 0)}</span></div><div class="tgt-track"><div class="tgt-fill" style="width:${Math.max(2, (n / max) * 100)}%;background:${col}"></div></div></div>`).join('')}</div>`;
+        if (agedNote) agedNote.textContent = res.oldest ? `sabse purana: ${res.oldest} din` : '';
+      }).catch((err) => { if (agedBox.isConnected) agedBox.innerHTML = `<div class="dim small">⚠️ Aging load nahi hui — ${esc(err.message || 'error')}. Refresh karke dekho.</div>`; });
+    }
+    FF.auth.api('/api/stock-history').then((out) => {
+      // 📉 Trend chart (features.stockTrend)
+      if (box && box.isConnected) {
+        const pts = ((out && out.points) || []).slice(-30);
+        const coverEl = U.$('#st-trend-cover', body);
+        if (coverEl && out && out.cover && out.cover.cover) {
+          const b = out.cover.band;
+          coverEl.innerHTML = `Abhi cover ≈ <b>${U.fmt(out.cover.cover)}</b> din ${b === 'red' ? '🔴' : b === 'orange' ? '🟠' : b === 'amber' ? '🟡' : b === 'green' ? '🟢' : ''}`;
+        }
+        if (pts.length < 2) {
+          box.innerHTML = `<div class="dim small">Stock history abhi store ho rahi hai — server jab bhi snapshot lega (30 min me ek baar), yahan last-30-din ka chart dikhega.</div>`;
+        } else {
+          const labels = pts.map((p) => `${p.date.slice(8)}/${p.date.slice(5, 7)}`);
+          box.innerHTML = C.lines({
+            labels,
+            tipLabels: pts.map((p) => p.date),
+            height: 210,
+            series: [
+              { name: 'Total stock', values: pts.map((p) => p.total), color: '#6366f1' },
+              { name: 'VC4', values: pts.map((p) => p.vc4), color: '#10b981', area: false }
+            ]
+          });
+          C.mount(body);
+        }
+      }
+      // 🧾 Stock in vs issued (features.recon): issued = MTD FF+GV · in = issued + net stock change
+      if (reconBox && reconBox.isConnected) {
+        const mtd = (out && out.mtd) || {};
+        const issued = (Number(mtd.ff) || 0) + (Number(mtd.gv) || 0);
+        const ym = new Date().getFullYear() + '-' + String(new Date().getMonth() + 1).padStart(2, '0');
+        const monthPts = ((out && out.points) || []).filter((p) => String(p.date).startsWith(ym));
+        if (monthPts.length < 2 || !issued) {
+          reconBox.innerHTML = `<div class="dim small">Recompile ho raha hai — is mahine ke ≥2 stock snapshots aur MTD issuance ke baad yahan dikhega (server 30 min me snapshot leta hai).</div>`;
+        } else {
+          const first = monthPts[0], last = monthPts[monthPts.length - 1];
+          const change = last.total - first.total;
+          const added = Math.max(0, change) + issued; // approximate in-flow
+          reconBox.innerHTML = `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Kya</th><th class="num">Tags</th><th>Detail</th></tr></thead><tbody>
+            <tr><td>📤 Issued (out)</td><td class="num"><b>${U.fmt(issued)}</b></td><td class="dim">MTD · FF ${U.fmt(Number(mtd.ff) || 0)} + GV ${U.fmt(Number(mtd.gv) || 0)}${mtd.days ? ` · ${mtd.days} din` : ''}</td></tr>
+            <tr><td>📦 Net stock change</td><td class="num">${change >= 0 ? '+' : ''}${U.fmt(change)}</td><td class="dim">${first.date.slice(8)}/${first.date.slice(5, 7)} (${U.fmt(first.total)}) → ${last.date.slice(8)}/${last.date.slice(5, 7)} (${U.fmt(last.total)})</td></tr>
+            <tr><td>📥 Approx stock-in</td><td class="num"><b>${U.fmt(added)}</b></td><td class="dim">issued + net change (pehle snapshot ke baad se)</td></tr>
+          </tbody></table></div><p class="dim small" style="margin-top:6px">Formula: in ≈ out + (ending stock − starting stock). History server snapshots par depend karti hai.</p>`;
+        }
+      }
+    }).catch(() => {
+      if (box && box.isConnected) box.innerHTML = `<div class="dim small">History load nahi hui (offline?) — Refresh karke dekho.</div>`;
+      if (reconBox && reconBox.isConnected) reconBox.innerHTML = `<div class="dim small">History load nahi hui — Refresh karke dekho.</div>`;
+    });
   }
 
   // ---- page -----------------------------------------------------------------------------------
   async function render(root, params) {
     if (params.agent) { view.scope = 'agent'; view.value = params.agent; } else if (params.tl) { view.scope = 'tl'; view.value = params.tl; } else if (params.cls) { view.scope = 'cls'; view.value = params.cls; } else { view.scope = ''; view.value = ''; }
+    const shareOn = !FF.config.feat || FF.config.feat('share') !== false;
     root.innerHTML = `<div class="page-head"><div><h1>📦 Stock / Inventory</h1><p class="sub">StockDataa — agent / TL / class wise stock · VC4 vs Commercial · pivot + Excel export</p></div>
-      <div class="head-actions"><button class="btn primary" data-action="refresh">↻ Refresh</button>${FF.auth.can('sheet:StockDataa') ? `<a class="btn" href="#/sheet/${encodeURIComponent(FF.config.stock.sheet)}">Full StockDataa sheet →</a>` : ''}</div></div>
+      <div class="head-actions">${shareOn ? '<button class="btn" id="st-wa" title="Stock summary WhatsApp par bhejo">📤 WhatsApp</button>' : ''}<button class="btn primary" data-action="refresh">↻ Refresh</button>${FF.auth.can('sheet:StockDataa') ? `<a class="btn" href="#/sheet/${encodeURIComponent(FF.config.stock.sheet)}">Full StockDataa sheet →</a>` : ''}</div></div>
       <div class="card controls finder"><div class="finder-row"><div class="finder-input"><span class="finder-ico">🔎</span><input class="input" id="st-q" placeholder="Agent ya TL ka naam type karo… (dropdown se select karo)" value="${esc(view.scope === 'cls' ? '' : view.value)}"><button class="btn mic-btn" id="st-mic" title="🗣 Bol ke search karo" type="button">🎤</button></div>
         <label>Criteria <select id="st-scope"><option value="">Agent + TL</option><option value="agent">Agent only</option><option value="tl">TL only</option></select></label>
         <button class="btn small" id="st-clear" ${view.scope ? '' : 'disabled'}>✕ Clear</button>
@@ -243,6 +352,12 @@ FF.pages = FF.pages || {};
     try { await S.need('stock'); await Promise.allSettled([S.need('stockAgents'), S.need('stockTypes'), S.need('daily'), S.need('agents'), S.need('agentClass')]); } catch (err) { body.innerHTML = U.errorBox(err, 'data-action="refresh"'); return; }
     if (!root.isConnected) return;
     const P = prep();
+    const waSt = U.$('#st-wa', root);
+    if (waSt) waSt.addEventListener('click', () => {
+      const perDayVc4 = P.elapsed ? (P.curS ? P.curS.vc4 : 0) / P.elapsed : 0;
+      const text = [`*${FF.config.brand} – Stock summary*`, `📅 ${new Date().toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}`, `Total stock: *${U.fmt(P.total)}* (VC4 ${U.fmt(P.vc4)} | Commercial ${U.fmt(P.comm)})`, `MTD issued: ${U.fmt(P.curS ? P.curS.total : 0)}${P.cur ? ` · ${U.labelYM(P.cur)}` : ''}`, `VC4 cover: ${perDayVc4 ? `${U.fmt(P.vc4 / perDayVc4)} din` : '—'}`, `— ${FF.config.contacts.signature || ''}`].join('\n');
+      FF.app.shareWhatsApp(text);
+    });
     const noteEl = U.$('#st-note', root);
     noteEl.textContent = view.scope ? `${view.scope === 'cls' ? 'Class' : view.scope === 'tl' ? 'TL' : 'Agent'}: ${view.value}` : `${U.fmt(P.total)} tags · ${U.fmt(P.agents.length)} agents · ${P.tls.filter((t) => !t.excluded).length} TLs`;
     U.$('#st-chips', root).innerHTML = `<span class="dim small">Quick:</span>${P.tls.filter((t) => !t.excluded).slice(0, 8).map((t) => `<button class="chip ${view.scope === 'tl' && norm(view.value) === norm(t.name) ? 'on' : ''}" data-pick-tl="${esc(t.name)}">👥 ${esc(t.name)}</button>`).join('')}<button class="chip vc4 ${view.scope === 'cls' && view.value === 'VC4' ? 'on' : ''}" data-pick-cls="VC4">VC4</button>${P.classes.filter((c) => !isVc4(c)).map((c) => `<button class="chip comm ${view.scope === 'cls' && view.value === c ? 'on' : ''}" data-pick-cls="${esc(c)}">${esc(c)}</button>`).join('')}`;
@@ -250,6 +365,7 @@ FF.pages = FF.pages || {};
     let pivot = null;
     if (view.scope) pivot = selectionView(P, body); else overview(P, body);
     C.mount(body);
+    if (!view.scope) loadStockExtras(body); // overview par trend chart + in-vs-issued (ek fetch)
 
     // search
     const input = U.$('#st-q', root), scopeSel = U.$('#st-scope', root);

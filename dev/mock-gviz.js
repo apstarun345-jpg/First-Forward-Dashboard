@@ -117,6 +117,16 @@ const agentRows = AGENTS.map((a) => {
   t.curVc4 += vc4(cur); t.curN += cur.length; t.lastVc4 += vc4(last); t.lastN += last.length; t.sVc4 += sc('4'); t.sN += st.length - sc('4'); tlAgg.set(a.tlId, t);
   return row;
 });
+// 🎯 cover-days ka realistic spread (tercile) — High/Medium/Low dispatch priority + 🎯 sug card coverage
+{
+  const ranked = [...agentRows].sort((x, y) => Number(x[66]) - Number(y[66]));
+  const third = ranked.length / 3;
+  ranked.forEach((row, i) => {
+    if (i < third) { row[67] = PRIO[0]; row[66] = 3 + (i % 12); }            // 🔴 High · cover < 15 din
+    else if (i < third * 2) { row[67] = PRIO[1]; row[66] = 16 + (i % 30); }   // 🟡 Medium
+    else { row[67] = PRIO[2]; row[66] = 90 + i; }                             // 🟢 Low
+  });
+}
 for (const row of agentRows) {
   const t = tlAgg.get(row[4]); const days = Math.max(1, today.getDate());
   const vc4Days = Math.round(t.sVc4 / Math.max(0.1, t.curVc4 / days)), nDays = Math.round(t.sN / Math.max(0.1, (t.curN - t.curVc4) / days));

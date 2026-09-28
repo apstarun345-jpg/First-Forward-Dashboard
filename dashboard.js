@@ -3,6 +3,7 @@ window.FF = window.FF || {};
 FF.pages = FF.pages || {};
 (function (FF) {
   'use strict';
+  let voiceText = '';
   const U = FF.util, M = FF.model, C = FF.charts, S = FF.store;
   const esc = U.esc;
   const excl = (name) => FF.config.isExcludedTl(name);
@@ -62,11 +63,74 @@ FF.pages = FF.pages || {};
   }
 
   async function render(root) {
+    const shareOn = !FF.config.feat || FF.config.feat('share') !== false;
+    const voiceOn = !FF.config.feat || FF.config.feat('voiceSummary') !== false;
     root.innerHTML = `<div class="page-head"><div><h1>📊 Dashboard</h1><p class="sub">Summary · EIR issuance + StockDataa inventory · VC4 vs Commercial</p></div>
-      <div class="head-actions"><button class="btn" id="db-bundle" title="Monthly + Daily + Stock + REPORT + GV — sab ek xlsx me">⬇ Excel bundle</button><button class="btn primary" data-action="refresh">↻ Refresh</button></div></div>
+      <div class="head-actions">${shareOn ? '<button class="btn" id="db-wa" title="Current numbers WhatsApp par bhejo">📤 WhatsApp</button>' : ''}${voiceOn ? '<button class="btn" id="db-voice" title="Aaj ke numbers Hindi me bol kar sunao (browser TTS) — dobara click = band">🔊 Suno</button>' : ''}<button class="btn" id="db-bundle" title="Monthly + Daily + Stock + REPORT + GV — sab ek xlsx me">⬇ Excel bundle</button><button class="btn primary" data-action="refresh">↻ Refresh</button></div></div>
+      <div id="db-targetbar"></div>
       <div id="db-body">${U.spinner('Data load ho raha hai… (pehli baar 5-10 sec lag sakte hain)')}</div>`;
     const bundleBtn = U.$('#db-bundle', root);
     if (bundleBtn) bundleBtn.addEventListener('click', () => exportBundle(bundleBtn));
+    // 🗣️ Voice summary (features.voiceSummary) — speechSynthesis, koi server call nahi
+    const voiceBtn = U.$('#db-voice', root);
+    if (voiceBtn) voiceBtn.addEventListener('click', () => {
+      if (!('speechSynthesis' in window)) return U.toast('Is browser/OS me voice supported nahi hai', 'err');
+      if (window.speechSynthesis.speaking) { window.speechSynthesis.cancel(); voiceBtn.classList.remove('on'); return; }
+      if (!voiceText) return U.toast('Data abhi load ho raha hai — thodi der baad', 'warn');
+      const u = new SpeechSynthesisUtterance(voiceText);
+      const vs = window.speechSynthesis.getVoices() || [];
+      const v = vs.find((x) => /^hi/i.test(x.lang)) || vs.find((x) => /en-IN/i.test(x.lang)) || vs.find((x) => /^en/i.test(x.lang));
+      if (v) u.voice = v;
+      u.lang = (v && v.lang) || 'hi-IN';
+      u.rate = 1.03;
+      u.onend = () => voiceBtn.classList.remove('on');
+      voiceBtn.classList.add('on');
+      window.speechSynthesis.speak(u);
+    });
+
+    // 🎯 Target progress bar (Features → targetBar) + 📤 WhatsApp share — server MTD + targets se.
+    let shareCtx = '';
+    let stockShare = null;
+    (async () => {
+      try {
+        const wantBar = !FF.config.feat || FF.config.feat('targetBar') !== false;
+        const wantShare = !FF.config.feat || FF.config.feat('share') !== false;
+        if (!wantBar && !wantShare) return;
+        const sh = await FF.auth.api('/api/stock-history');
+        const st = (FF.auth.settings) || {};
+        const ist = new Date();
+        const pad = (n) => String(n).padStart(2, '0');
+        const ym = `${ist.getFullYear()}-${pad(ist.getMonth() + 1)}`;
+        const targets = Array.isArray(st.targets) ? st.targets : [];
+        const totalTarget = targets.filter((t) => t && t.ym === ym && Number(t.target) > 0).reduce((a, t) => a + Number(t.target), 0);
+        const mtd = (sh && sh.mtd) || {};
+        const achieved = (Number(mtd.ff) || 0) + (Number(mtd.gv) || 0);
+        shareCtx = `\n🏷️ MTD: ${U.fmt(achieved)} tags${mtd.days ? ` (${mtd.days} din)` : ''}${totalTarget ? ` · 🎯 Target: ${U.fmt(totalTarget)}` : ''}`;
+        if (!wantBar || !totalTarget) return;
+        const day = ist.getDate();
+        const daysInMonth = new Date(ist.getFullYear(), ist.getMonth() + 1, 0).getDate();
+        const expected = totalTarget * (day / daysInMonth);
+        const pct = totalTarget > 0 ? Math.round((achieved / totalTarget) * 100) : 0;
+        const pace = achieved >= expected ? '🟢 pace theek hai' : achieved >= expected * 0.6 ? '🟡 thoda peeche hai' : '🔴 40%+ peeche';
+        const daysLeft = daysInMonth - day;
+        const needPerDay = daysLeft > 0 && achieved < totalTarget ? Math.ceil((totalTarget - achieved) / daysLeft) : 0;
+        const fill = Math.max(2, Math.min(100, pct));
+        const tone = achieved >= expected ? 'ok' : achieved >= expected * 0.6 ? 'mid' : 'bad';
+        const box = U.$('#db-targetbar', root);
+        if (box) {
+          box.innerHTML = `<a class="target-bar ${tone}" href="#/targets" title="Targets page — agent-wise target do / progress dekho">
+            <span class="tb-ico">🎯</span>
+            <span class="tb-main"><span class="tb-line"><b>Target ${U.labelYM ? U.labelYM(ym) : ym}</b> · <b>${U.fmt(achieved)}</b> / ${U.fmt(totalTarget)} (${pct}%) · day ${day}/${daysInMonth} <span class="tb-status">${pace}</span></span>
+            <span class="tb-track"><span class="tb-fill" style="width:${fill}%"></span></span></span>
+            <span class="tb-right dim small">${needPerDay ? `≈ ${U.fmt(needPerDay)}/din chahiye · ` : ''}${daysLeft} din baaki →</span></a>`;
+        }
+      } catch { /* target bar optional */ }
+    })();
+    const waBtn = U.$('#db-wa', root);
+    if (waBtn) waBtn.addEventListener('click', () => {
+      const text = `📊 ${FF.config.brand} Dashboard · ${new Date().toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}\n${shareCtx || ''}${stockShare ? `\n📦 Stock: ${U.fmt(stockShare.total)} (VC4 ${U.fmt(stockShare.vc4)})` : ''}`;
+      FF.app.shareWhatsApp(text);
+    });
 
     const [dailyR, agentsR, statusR, stockR, stockAgentsR] = await Promise.allSettled([S.need('daily'), S.need('agents'), S.need('status'), S.need('stock'), S.need('stockAgents')]);
     if (!root.isConnected) return;
@@ -80,6 +144,7 @@ FF.pages = FF.pages || {};
     const status = statusR.status === 'fulfilled' ? statusR.value : null;
     const stock = stockR.status === 'fulfilled' ? stockR.value : null;
     const stockAgents = stockAgentsR.status === 'fulfilled' ? stockAgentsR.value : null;
+    if (stock) stockShare = { total: U.sum(stock, (r) => r.n), vc4: U.sum(stock.filter((r) => r.group === 'VC4'), (r) => r.n) };
 
     const monthsList = M.months(daily);
     const latest = M.latestDate(daily);
@@ -132,6 +197,14 @@ FF.pages = FF.pages || {};
       kpi('g11', 'GV Partner Share · MTD', '🤝', U.fmtPct(U.pctOf(curS.gv, curS.total), 0), `GV <b>${U.fmt(curS.gv)}</b> · First Forward <b>${U.fmt(curS.ff)}</b>`),
       kpi('g12', 'Activated / Hotlisted · MTD', '✅', status ? `${U.fmtPct(U.pctOf(activated, statusTotal), 0)} <small>/ ${U.fmtPct(U.pctOf(hotlisted, statusTotal))}</small>` : '—', status ? `Activated <b>${U.fmt(activated)}</b> · Hotlisted <b>${U.fmt(hotlisted)}</b>` : 'Status data load nahi hua')
     ];
+
+    // 🗓 Same-day-last-week (Features → weekCompare): latest data din vs usi weekday ka pichhla haf
+    if (!FF.config.feat || FF.config.feat('weekCompare') !== false) {
+      const prevW = new Date(latest); prevW.setDate(prevW.getDate() - 7);
+      const sumDay = (dt) => U.sum(daily.filter((r) => r.d && r.d.getFullYear() === dt.getFullYear() && r.d.getMonth() === dt.getMonth() && r.d.getDate() === dt.getDate()), (r) => r.n);
+      const wdN = sumDay(latest), wlN = sumDay(prevW);
+      kpis.push(kpi('g13', `🗓 ${U.weekday(latest)} vs last week`, '🗓', U.fmt(wdN), `${U.deltaHtml(U.growth(wdN, wlN), { decimals: 0 })} vs ${U.labelDate(prevW)} (${U.fmt(wlN)}) · same weekday`));
+    }
 
     // KPI drill-down specs (click any card → full breakdown, see kpiDetail.js)
     const latestK = U.dateKey(latest);
@@ -234,6 +307,14 @@ FF.pages = FF.pages || {};
         <p class="dim small">Cover = VC4 stock ÷ avg daily issuance (MTD). In agents ko dispatch priority do — row click karke agent ka stock dekho. ${critical.length > 8 ? `(+${critical.length - 8} aur)` : ''}</p></div></section>`;
       }
     }
+
+    // 🗣️ Voice summary text (features.voiceSummary — 🔊 button isi ko bolta hai)
+    voiceText = [
+      `Namaste. ${FF.config.brand} dashboard update.`,
+      `${U.labelYM(cur, true)} me kul ${curS.total} tags issue hue — VC4 ${curS.vc4}, commercial ${curS.comm}.`,
+      `${U.labelDate(latest)} ko ${todayN} tags.`,
+      stockTotal != null ? `Stock field me ${stockTotal} tags, jisme VC4 stock ${stockVc4} hai.` : ''
+    ].filter(Boolean).join(' ');
 
     body.innerHTML = `
       ${lowStockHtml}
