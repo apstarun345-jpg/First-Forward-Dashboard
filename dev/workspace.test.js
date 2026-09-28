@@ -48,11 +48,24 @@ test('saved views and follow-up notes are permission-safe and durable across res
   try {
     server = await startServer(dir);
     const admin = await login(server.base, 'owner', 'initial-password');
-    const badMap = await jsonCall(server.base, '/api/settings', 'PUT', { settings: { ffCommission: { rateCol: 'not-a-column' } } }, admin);
-    assert.equal(badMap.res.status, 400);
+    const badMap = await jsonCall(server.base, '/api/settings', 'PUT', { settings: { ffCommission: { rateCol: 'x'.repeat(90) } } }, admin);
+    assert.equal(badMap.res.status, 400, '90-character mapping reject hona chahiye');
     const goodMap = await jsonCall(server.base, '/api/settings', 'PUT', { settings: { ffCommission: { rateCol: 'bz', earnedCol: 'CA', categoryCol: '' } } }, admin);
     assert.equal(goodMap.res.status, 200);
     assert.equal(goodMap.json.settings.ffCommission.rateCol, 'BZ');
+    const namedMap = await jsonCall(server.base, '/api/settings', 'PUT', { settings: { ffCommission: { earnedCol: 'Earned Commission', categoryCol: 'Commission Rate' } } }, admin);
+    assert.equal(namedMap.res.status, 200, JSON.stringify(namedMap.json));
+    assert.equal(namedMap.json.settings.ffCommission.earnedCol, 'Earned Commission');
+    assert.equal(namedMap.json.settings.ffCommission.categoryCol, 'Commission Rate');
+    const resetMap = await jsonCall(server.base, '/api/settings', 'PUT', { settings: { ffCommission: { rateCol: 'BZ', earnedCol: 'CA', categoryCol: '' } } }, admin);
+    assert.equal(resetMap.res.status, 200);
+    const alertsCfg = await jsonCall(server.base, '/api/settings', 'PUT', { settings: { commissionAlerts: { enabled: true, outlierPct: '35', mismatchMin: 60 }, dispatch: { tagsPerBox: '30', horizon: 15, minNeed: 2 } } }, admin);
+    assert.equal(alertsCfg.res.status, 200, JSON.stringify(alertsCfg.json));
+    assert.equal(alertsCfg.json.settings.commissionAlerts.outlierPct, 35, 'string number ko clamp karke number hona chahiye');
+    assert.equal(alertsCfg.json.settings.dispatch.tagsPerBox, 30);
+    assert.equal(alertsCfg.json.settings.dispatch.horizon, 15);
+    const badAlerts = await jsonCall(server.base, '/api/settings', 'PUT', { settings: { commissionAlerts: { outlierPct: 'abc' } } }, admin);
+    assert.equal(badAlerts.res.status, 400, 'non-numeric threshold reject hona chahiye');
     const view = await jsonCall(server.base, '/api/workspace/views', 'POST', { title: 'High-risk stock', route: '#/forecast?risk=High', shared: true }, admin);
     assert.equal(view.res.status, 201, JSON.stringify(view.json));
     const note = await jsonCall(server.base, '/api/workspace/notes', 'POST', { entityType: 'agent', entityKey: 'A-1', entityName: 'Agent One', channel: 'both', text: 'Call before Friday', priority: 'high', status: 'open' }, admin);

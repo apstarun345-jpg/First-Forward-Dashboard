@@ -49,6 +49,7 @@ class El {
   removeAttribute(k) { delete this.attrs[k]; }
   hasAttribute(k) { return k in this.attrs; }
   focus() {} blur() {} click() {} select() {} scrollIntoView() {} scrollTo() {}
+  showModal() { this.open = true; } show() { this.open = true; } close() { this.open = false; }
   contains() { return false; }
   matches() { return false; }
   getContext() { return { drawImage() {}, fillRect() {}, measureText: () => ({ width: 10 }) }; }
@@ -245,19 +246,124 @@ await run('page gvPerformance', async () => { const r = root(); await pages.gvPe
 await run('page gvPerformance q=agent', () => pages.gvPerformance.render(root(), { q: gvAgent }, {}), true);
 await run('page compare', () => pages.compare.render(root(), {}, {}), true);
 await run('professional page executive cockpit', () => pages.executive.render(root(), {}, {}), true);
-await run('professional page GV commission', () => pages.gvCommission.render(root(), { group: 'weekday' }, {}), true);
+await run('FF commission wide-range fallback (right-side column bhi mile)', async () => {
+  const store = FF.store.state.data;
+  const full = store.report;
+  if (!full || !full.rows) throw new Error('REPORT table store me nahi hai');
+  const orig = FF.data.query.bind(FF.data);
+  let wideAsked = 0;
+  FF.data.query = async (sheet, tq, opts = {}) => { if (sheet === 'REPORT' && opts.range) wideAsked++; return orig(sheet, tq, opts); };
+  store.report = { ...full, rows: full.rows.map((r) => r.slice(0, 40)), cols: (full.cols || []).slice(0, 40) };
+  try {
+    FF.data.clearCache();
+    const mapping = await FF.insights.ffCommissionData();
+    if (!wideAsked) throw new Error('wide (A1:ZZ) re-fetch trigger nahi hua');
+    if (wideAsked < 1) throw new Error('koi wide query nahi gayi');
+    if (mapping.lastColLetter !== 'CB') throw new Error(`wide ke baad trailing blanks trim nahi hue (last ${mapping.lastColLetter}, CB expected)`);
+    if (!mapping.rateCol || mapping.rateCol.index < 40) throw new Error('wide range ke baad bhi commission rate column nahi mila');
+    if (!mapping.wideUsed) throw new Error('wide table adopt nahi hua');
+    if (!mapping.needsWiderRange || mapping.outOfRange < 1) throw new Error('chhota range detect nahi hua (needsWiderRange)');
+  } finally { store.report = full; FF.data.query = orig; FF.data.clearCache(); }
+  const mapping = await FF.insights.ffCommissionData();
+  if (mapping.needsWiderRange) throw new Error('full-width table ke saath needsWiderRange galat true hai');
+  if (!mapping.agents.some((a) => Number.isFinite(a.computed))) throw new Error('full width me computed commission nahi bana');
+}, false);
+
+await run('professional page GV commission · per-class boards', async () => {
+  const r = root(); await pages.gvCommission.render(r, { group: 'weekday' }, {});
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const label of ['Class boards · agent-wise commission', 'VC4 · Car / Jeep', 'VC20 · Light commercial', 'VC5+ · Commercial', 'Class-wise commission summary']) {
+    if (!html.includes(label)) throw new Error(`GV commission class board me "${label}" nahi mila`);
+  }
+  for (const id of ['gvc-class-vc4-csv', 'gvc-class-vc20-csv', 'gvc-class-vc5-csv']) if (!html.includes(id)) throw new Error(`class CSV button ${id} missing`);
+  if (!/Effective rate/.test(html) || !/Commission \/ tag/.test(html)) throw new Error('class board columns missing');
+  if (/commission-selfcheck|Rate column \(row 2 heading\)|ffc-tl-csv/.test(html)) throw new Error('FF-only markup GV page me leak ho gaya');
+}, true);
+await run('FF commission · row-2 heading (2-header REPORT) detect hota hai', async () => {
+  const store = FF.store.state.data;
+  const full = store.report;
+  if (!full || !full.rows) throw new Error('REPORT table store me nahi hai');
+  // Live sheet jaisa: row 1 section ka naam, row 2 me asli heading. Row 1 me commission ka zikr hi na ho
+  // (sirf row 2 me "Commission Rate" / "Earned Commission") — detection ko phir bhi kaam karna chahiye.
+  const rows = full.rows.map((r) => r.slice());
+  rows[0] = rows[0].map((c, i) => (i === 78 || i === 79 ? '' : c));
+  const cfg = FF.config.ffCommission; const before = { ...cfg };
+  try {
+    cfg.rateCol = ''; cfg.earnedCol = ''; cfg.categoryCol = ''; cfg.dateCol = '';
+    store.report = { ...full, rows };
+    FF.data.clearCache();
+    const m = await FF.insights.ffCommissionData();
+    if (!m.rateCol || m.rateCol.index !== 78) throw new Error(`row-2 rate heading detect nahi hui (got ${m.rateCol && m.rateCol.letter})`);
+    if (!m.amountCol || m.amountCol.index !== 79) throw new Error('row-2 earned heading detect nahi hui');
+    if (m.rateCol.sub !== 'Commission Rate') throw new Error(`rate heading ka sub row "${m.rateCol.sub}" hai`);
+    if (m.rateIsPercent) throw new Error('per-tag rate ko percent maan liya gaya');
+    if (!m.agents.some((a) => Number.isFinite(a.computed))) throw new Error('row-2 heading ke saath computed commission nahi bana');
+    // duplicate heading: ek duplicate khaali column add karo — values wala column jeetna chahiye
+    const dup = rows.map((r) => r.slice());
+    dup[0] = dup[0].concat(['']);
+    dup[1] = dup[1].concat(['Commission Rate']);
+    for (let r = 2; r < dup.length; r++) dup[r] = dup[r].concat(['']);
+    store.report = { ...full, rows: dup, cols: (full.cols || []).concat([{ id: 'CC', label: '', type: 'number' }]) };
+    FF.data.clearCache();
+    const m2 = await FF.insights.ffCommissionData();
+    if (m2.rateCol.index !== 78) throw new Error(`duplicate heading me khaali column chun liya (${m2.rateCol.letter})`);
+  } finally { Object.assign(cfg, before); store.report = full; FF.data.clearCache(); }
+}, false);
+
 await run('professional page FF reported commission (dynamic mapping)', async () => {
-  const r = root(); await pages.ffCommission.render(r, {}, {});
-  if (!/source is not available|reported commission/i.test(r.innerHTML)) throw new Error('commission mapping/source state missing');
+  const mapping = await FF.insights.ffCommissionData();
+  if (!mapping.amountCol) throw new Error('REPORT ka earned-commission heading detect nahi hua');
+  if (!mapping.rateCol) throw new Error('REPORT ka commission-rate heading detect nahi hua');
+  if (mapping.rateCol.letter !== 'CA' || mapping.amountCol.letter !== 'CB') throw new Error(`commission columns galat detect hue: ${mapping.rateCol.letter}/${mapping.amountCol.letter}`);
+  if (!mapping.agents.some((a) => Number.isFinite(a.earned))) throw new Error('earned commission values read nahi hue');
+  if (!mapping.agents.some((a) => Number.isFinite(a.computed))) { throw new Error('rate × tags fallback compute nahi hua'); }
+  const r = root(); await pages.ffCommission.render(r, { headings: 'all' }, {});
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const s of ['REPORT commission column finder', 'Commission rate source', 'Rate range in sheet', 'Agent-wise commission', 'Rate × tags', 'Heading map', 'ffc-fresh-top', 'Commission source self-check', 'Rate column (row 2 heading)', 'TL-wise commission rollup', 'ffc-tl-csv']) if (!html.includes(s)) throw new Error(`FF commission me "${s}" nahi mila`);
+  if (!/CA/.test(html) || !/CB/.test(html)) throw new Error('heading map me column letters nahi dikh rahe');
+}, true);
+await run('FF commission · Settings me heading ka naam (letter nahi) bhi chalta hai', async () => {
+  const cfg = FF.config.ffCommission;
+  const before = { ...cfg };
+  try {
+    cfg.rateCol = 'commission rate';           // chhote letters + space
+    cfg.earnedCol = '  Earned   Commission  '; // extra spaces
+    FF.data.clearCache();
+    const m = await FF.insights.ffCommissionData();
+    if (!m.rateCol || m.rateCol.letter !== 'CA' || m.rateCol.via !== 'name') throw new Error(`rate naam se resolve nahi hua: ${JSON.stringify(m.rateCol && { l: m.rateCol.letter, via: m.rateCol.via })}`);
+    if (!m.amountCol || m.amountCol.letter !== 'CB' || m.amountCol.via !== 'name') throw new Error('earned naam se resolve nahi hua');
+    if (m.warnings.length) throw new Error('resolved mapping ke liye warning nahi honi chahiye');
+    cfg.rateCol = 'Aisi Heading Nahin Hai';
+    FF.data.clearCache();
+    const bad = await FF.insights.ffCommissionData();
+    if (!bad.warnings.some((w) => w.key === 'rateCol')) throw new Error('galat heading naam par warning nahi mili');
+    const r = root(); await pages.ffCommission.render(r, {}, {});
+    const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+    if (!/REPORT me nahi mila/.test(html)) throw new Error('missing-heading warning page par nahi dikhi');
+  } finally { Object.assign(cfg, before); FF.data.clearCache(); }
 }, true);
 await run('professional page verified dual-channel agents', async () => {
   const identity = await FF.insights.buildCross();
   if (!identity.rows.length) throw new Error('mock identity join returned zero verified agents');
   if (!identity.rows.some((r) => r.methods.includes('barcode') && r.methods.includes('gv-id'))) throw new Error('two-signal overlap missing');
   const r = root(); await pages.dualChannel.render(r, {}, {});
-  if (!/barcode|unique-ID|unique ID/i.test(r.innerHTML)) throw new Error('identity evidence missing');
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  if (!/barcode|unique-ID|unique ID/i.test(html)) throw new Error('identity evidence missing');
+  for (const label of ['Double-mapped barcodes', 'Double-mapped barcodes CSV', 'FF tags · matched agents', 'GV tags · matched agents', 'cross-double-csv', 'FF TL', 'GV TL']) {
+    if (!html.includes(label)) throw new Error(`dual-channel me "${label}" nahi mila`);
+  }
+  const onlyDouble = root(); await pages.dualChannel.render(onlyDouble, { dup: 'double' }, {});
+  if (!/Doubled|Double-mapped|double-mapped/i.test(onlyDouble.innerHTML)) throw new Error('double-mapped filter view missing');
 }, true);
-await run('professional page stock forecast', () => pages.forecast.render(root(), { growth: '20', safety: '7' }, {}), true);
+await run('professional page stock forecast', async () => {
+  const r = root(); await pages.forecast.render(r, { growth: '20', safety: '7' }, {});
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const label of ['Urgent dispatch list', 'Channel summary', 'TL-wise replenishment rollup', 'Agent-level requirement forecast', '7-day replenishment need', 'Stock-out within 7 days', 'forecast-urgent-csv']) {
+    if (!html.includes(label)) throw new Error(`stock forecast me "${label}" nahi mila`);
+  }
+  const pageRisks = (html.match(/class="risk-chip (critical|high|medium|covered|norate)"/g) || []).length;
+  if (pageRisks !== 5) throw new Error(`risk strip ke 5 chips expected, mile ${pageRisks}`);
+}, true);
 await run('professional page forecast accuracy backtest', async () => {
   const accuracy = await FF.insights.forecastAccuracy(28), sample = accuracy.horizons[7].combined;
   if (!sample || !sample.agents || sample.predicted <= 0 || sample.actual <= 0) throw new Error('backtest sample coverage/predicted/actual is empty');
@@ -294,10 +400,119 @@ await run('professional page stock-balance reconciliation', async () => {
     if (!html.includes('First Forward') || !html.includes('GV Partner')) throw new Error('both stock-balance channels missing');
   } finally { FF.auth.api = originalApi; FF.config.stockMovement.enabled = originalEnabled; }
 }, true);
+await run('cockpit · payout reconciliation (sheet vs rate×tags vs slab)', async () => {
+  const d = await FF.cockpit.payoutRecon();
+  if (!d.rows.length) throw new Error('payout rows khali hain');
+  const withFigure = d.rows.filter((r) => r.recommended !== null);
+  if (!withFigure.length) throw new Error('kisi bhi agent ka payout figure nahi bana');
+  if (!d.rows.some((r) => r.source === 'REPORT earned')) throw new Error('sheet earned source detect nahi hua');
+  if (!d.rows.some((r) => r.source === 'Rate × tags')) throw new Error('rate × tags fallback use nahi hua');
+  if (!d.rows.some((r) => (r.flags || []).includes('Rate missing'))) throw new Error('missing-rate flag nahi mila');
+  if (!(d.totals.ffAmount > 0)) throw new Error('payout total 0 hai');
+  if (!d.gvRows.length || !(d.totals.gvAmount > 0)) throw new Error('GV payout sheet khali hai');
+  const r = root(); await pages.ffCommission.render(r, {}, {});
+  await settle(250);
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const label of ['Payout reconciliation', 'Payout to process', 'ffp-payout-csv', 'ffp-payout-xlsx', 'ffp-payout-copy', 'Rate × tags (verified)', 'Slab expected']) {
+    if (!html.includes(label)) throw new Error(`payout card me "${label}" nahi mila`);
+  }
+}, false);
+
+await run('cockpit · commission alerts rule engine', async () => {
+  const list = await FF.cockpit.commissionAlerts();
+  if (!Array.isArray(list) || !list.length) throw new Error('koi alert nahi mila');
+  const ids = list.map((a) => a.id);
+  for (const id of ['rate-missing', 'rate-outlier']) if (!ids.includes(id)) throw new Error(`${id} alert nahi bana`);
+  const first = list[0];
+  if (!first.title || !first.detail || !first.count) throw new Error('alert shape adhoora hai');
+  if (!first.samples.length) throw new Error('alert samples khali hain');
+  if (!['critical', 'high', 'medium', 'info'].includes(first.severity)) throw new Error(`severity galat: ${first.severity}`);
+  const r = root(); await pages.ffCommission.render(r, {}, {});
+  await settle(250);
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const label of ['Commission alerts', 'alert-row sev-', 'ffa-alerts-csv', 'ffa-alerts-wa', 'data-alert-samples']) {
+    if (!html.includes(label)) throw new Error(`alerts card me "${label}" nahi mila`);
+  }
+  // ghata hua mapping → source alert
+  const cfg = FF.config.ffCommission; const before = { ...cfg };
+  try {
+    cfg.rateCol = 'aisi heading nahi'; cfg.earnedCol = '';
+    FF.data.clearCache();
+    const again = await FF.cockpit.commissionAlerts();
+    if (!again.some((a) => a.id === 'rate-missing')) throw new Error('mapping tootne par alert nahi aaya');
+  } finally { Object.assign(cfg, before); FF.data.clearCache(); }
+}, false);
+
+await run('cockpit · Agent 360 drawer (FF + GV + risk + quality + notes)', async () => {
+  await FF.pages.performance.ensureLoaded();
+  const agent = FF.pages.performance.agents().find((a) => Number(a.curTotal || 0) > 0);
+  const res = await FF.cockpit.agent360({ name: agent.name, id: agent.agentId || agent.id });
+  if (!res || res.displayName !== agent.name) throw new Error('agent 360 resolve nahi hua');
+  if (!Array.isArray(res.rows) || res.rows.length < 10) throw new Error('agent CSV rows kam hain');
+  const body = (REG.get('drawer-body') && REG.get('drawer-body').innerHTML) || '';
+  for (const label of ['FF tags · MTD', 'GV tags', 'Commission', 'Stock risk', 'Issuance trend', 'Class split', 'Data quality', 'Cross-channel', 'Notes &amp; follow-ups']) {
+    if (!body.includes(label)) throw new Error(`Agent 360 me "${label}" section nahi mila`);
+  }
+  if (!(body.match(/class="dkpi"/g) || []).length) throw new Error('Agent 360 KPI cards nahi bane');
+  const ff = root(); await pages.ffCommission.render(ff, {}, {});
+  await settle(250);
+  const html = ff.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  if (!/data-agent360="/.test(html)) throw new Error('FF commission page par Agent 360 links nahi hain');
+  const gv = root(); await pages.gvCommission.render(gv, {}, {});
+  await settle(200);
+  const gvHtml = gv.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  if (!/data-agent360="/.test(gvHtml)) throw new Error('GV commission page par Agent 360 links nahi hain');
+}, false);
+
+await run('professional page dispatch planner (boxes + pick-list)', async () => {
+  const data = await FF.cockpit.dispatchPlan({ horizon: 7 });
+  if (!data.rows.length) throw new Error('dispatch rows khali hain');
+  const first = data.rows[0];
+  if (!(first.boxes >= 1) || !(first.dispatchTags >= first.need)) throw new Error('box math galat hai');
+  if (first.dispatchTags !== first.boxes * 25) throw new Error('dispatch tags = boxes × box-size nahi hai');
+  if (!data.rows.every((r) => r.priority >= 1)) throw new Error('priority rank missing');
+  const r = root(); await pages.dispatchPlan.render(r, { horizon: '7' }, {});
+  await settle(300);
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const label of ['Auto dispatch plan', 'Printable pick-list', 'slip-block', 'dp-csv', 'dp-xlsx', 'dp-wa', 'dp-log', 'dp-controls', 'Need 7d', 'Buffer tags']) {
+    if (!html.includes(label)) throw new Error(`dispatch planner me "${label}" nahi mila`);
+  }
+  const r15 = root(); await pages.dispatchPlan.render(r15, { horizon: '15', box: '50' }, {});
+  await settle(250);
+  const h15 = r15.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  if (!/Need 15d/.test(h15) || !/1 box = 50/.test(h15)) throw new Error('horizon/box param page par reflect nahi hua');
+}, true);
+
+await run('professional page TL scorecard (score · grade · target)', async () => {
+  const data = await FF.cockpit.tlScorecard();
+  if (!data.rows.length) throw new Error('TL rows khali hain');
+  const first = data.rows[0];
+  if (!(first.score >= 0 && first.score <= 120)) throw new Error(`score range galat: ${first.score}`);
+  if (!/^[ABCD]\+?$/.test(first.grade)) throw new Error(`grade galat: ${first.grade}`);
+  if (!first.agents) throw new Error('agents count missing');
+  if (!data.rows.every((r, i, arr) => i === 0 || arr[i - 1].score >= r.score)) throw new Error('rows score ke hisaab se sorted nahi hain');
+  const r = root(); await pages.tlScorecard.render(r, {}, {});
+  await settle(300);
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const label of ['TL-wise scoreboard', 'Top 3 TLs', 'Focus needed', 'tl-csv', 'tl-xlsx', 'tl-wa', 'Average TL score', 'Comm. %', 'commission completeness']) {
+    if (!html.includes(label)) throw new Error(`TL scorecard me "${label}" nahi mila`);
+  }
+}, true);
+
 await run('professional page data quality', async () => {
   const quality = await FF.insights.qualityIssues();
   if (!quality.scanned.stock || !quality.scanned.assignment || !quality.scanned.master) throw new Error('quality source scan incomplete');
-  await pages.dataQuality.render(root(), {}, {});
+  if (!quality.checksRun || quality.passed > quality.checksRun) throw new Error('quality check counters invalid');
+  if (!quality.sources.length || !quality.categoryRows.length) throw new Error('quality source/category summary missing');
+  const r = root(); await pages.dataQuality.render(r, {}, {});
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const label of ['Findings table', 'Sample rows', 'Category-wise check summary', 'Checks passed', 'dq-findings-csv', 'dq-samples-csv']) {
+    if (!html.includes(label)) throw new Error(`data quality me "${label}" nahi mila`);
+  }
+  if (/<details class="quality-item/.test(html)) throw new Error('purana accordion layout abhi bhi render ho raha hai');
+  const dialog = FF.insights.openInsDialog(root(), 'Sample rows · smoke', ['Field', 'Value'], [['TAG_ID', '34161FA820320001'], ['VRN', 'RJ14' + '1'.repeat(4)]], 'smoke note');
+  if (!dialog || !/34161FA820320001/.test(dialog.innerHTML)) throw new Error('shared sample dialog rows render nahi kar raha');
+  if (!/smoke note/.test(dialog.innerHTML) || !/ins-detail-dialog/.test(dialog.className)) throw new Error('dialog header/note missing');
 }, true);
 await run('workspace saved views API + page', async () => {
   const created = await FF.auth.api('/api/workspace/views', 'POST', { title: 'Smoke view', route: '#/forecast?risk=High', shared: false });
