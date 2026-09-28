@@ -15,6 +15,7 @@
     "smoke": "node dev/smoke.js",
     "check": "node --check server.js && node --check sheets-storage.js && node --check apps-script-storage.js && node --check sw.js && for f in config util xlsx data charts model store gv preload auth notifications sheets dashboard trend stock performance home gvpages compare tagIssued chartExplorer kpiDetail liveView settings targets rangeReport app; do node --check \"$f.js\" || exit 1; done; echo syntax ok",
     "test": "node --test dev/*.test.js",
-    "storage:migrate": "node dev/migrate-to-sheets.js"
+    "storage:migrate": "node dev/migrate-to-sheets.js",
+    "push:keys": "node dev/vapid-keys.js"
   }
 }

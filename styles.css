@@ -685,6 +685,38 @@ html[data-theme="dark"] .notify-toggles { background: #182240; }
 html[data-theme="dark"] .notification-permission.warn { background: rgba(251,191,36,.1); color: #fcd34d; }
 html[data-theme="dark"] .notification-permission.hint { background: rgba(59,130,246,.1); color: #93c5fd; }
 html[data-theme="dark"] .notification-enable { background: #1e2a4a; color: #c7d2fe; }
+/* 🔔 Bell panel ab minimal hai: sirf ON/OFF switches (iOS style). Panel test / push diagnostics
+   Settings → My account me chale gaye, isliye yahan warning-cards ka CSS use nahi hota. */
+.notify-switches { padding: 2px 13px 8px; border-bottom: 1px solid var(--line); background: #fafafa; display: grid; gap: 0; }
+.notify-switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; }
+.notify-switch-row + .notify-switch-row { border-top: 1px dashed var(--line); }
+.nsr-text { min-width: 0; }
+.nsr-text b { display: block; font-size: 12.5px; color: var(--ink); }
+.nsr-text small { display: block; color: var(--muted); font-size: 10.5px; line-height: 1.45; margin-top: 2px; }
+.ff-switch { position: relative; flex: 0 0 auto; width: 46px; height: 26px; border-radius: 999px; border: 0; background: #cbd5e1; cursor: pointer; padding: 0; transition: background .18s ease; }
+.ff-switch .ff-switch-knob { position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgba(15, 23, 42, .35); transition: transform .18s ease; }
+.ff-switch.on { background: linear-gradient(135deg, var(--brand), var(--brand-2)); }
+.ff-switch.on .ff-switch-knob { transform: translateX(20px); }
+.ff-switch:disabled { opacity: .4; cursor: not-allowed; }
+.ff-switch:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.notify-line { padding: 8px 13px; border-bottom: 1px solid var(--line); font-size: 11px; line-height: 1.5; color: var(--muted); }
+.notify-line.warn { color: #92400e; background: #fffbeb; }
+.notify-line.muted { background: #f8fafc; }
+/* Settings → My account: notification preferences + admin push diagnostics */
+.notify-pref-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 6px 14px; margin-top: 8px; }
+.notify-pref-grid .check { font-size: 12px; }
+.push-diag { display: grid; gap: 6px; font-size: 12px; }
+.push-diag .row { display: flex; gap: 8px; align-items: baseline; }
+.push-diag .row b { min-width: 132px; color: var(--muted); font-weight: 600; }
+.push-diag code { word-break: break-all; font-size: 11px; }
+.push-diag .ok-box, .push-diag .warn-box { margin: 0; }
+.warn-box { padding: 9px 11px; border-radius: 10px; background: #fffbeb; color: #92400e; font-size: 12px; border: 1px solid #fde68a; }
+html[data-theme="dark"] .warn-box { background: rgba(251, 191, 36, .1); color: #fcd34d; border-color: rgba(251, 191, 36, .25); }
+html[data-theme="dark"] .notify-switches { background: #182240; }
+html[data-theme="dark"] .notify-line { background: #131c36; }
+html[data-theme="dark"] .notify-line.warn { background: rgba(251, 191, 36, .1); color: #fcd34d; }
+html[data-theme="dark"] .notify-line.muted { background: #16203c; }
+html[data-theme="dark"] .ff-switch { background: #33415c; }
 .notification-list { max-height: 490px; overflow: auto; padding: 5px; }
 .notification-item { display: flex; gap: 10px; padding: 10px 9px; border-radius: 11px; border-bottom: 1px solid #f1f5f9; }
 .notification-item:hover { background: #f8fafc; }

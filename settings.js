@@ -142,6 +142,88 @@ FF.pages = FF.pages || {};
         <div class="btn-row"><label class="btn small">📤 Photo upload<input type="file" accept="image/*" id="av-upload" hidden></label><label class="fld inline-size"><span>📐 Size</span><select class="input small" id="av-size">${sizeOpts}</select></label>${u.avatar ? '<button class="btn small" id="av-clear">✕ Remove</button>' : ''}</div>
       </div></div>`;
   }
+  // ---- 🔔 Notifications (har user) + 📲 Push diagnostics (sirf admin) ------------------------------
+  // Bell panel me sirf ek ON/OFF switch hai; poori fine-tuning + troubleshooting yahin rehti hai.
+  const ffSwitch = (key, isOn, disabled) => `<button type="button" class="ff-switch ${isOn ? 'on' : ''}" role="switch" aria-checked="${isOn ? 'true' : 'false'}" ${disabled ? 'disabled' : ''} data-notify-switch="${esc(key)}"><span class="ff-switch-knob"></span></button>`;
+  function notifyPrefsNow() {
+    const N = FF.notifications || {};
+    return { ...((A.user && A.user.notifyPrefs) || {}), ...(N.prefs || {}) };
+  }
+  function switchRow(key, label, note, isOn, disabled) {
+    return `<div class="notify-switch-row"><div class="nsr-text"><b>${label}</b>${note ? `<small>${note}</small>` : ''}</div>${ffSwitch(key, isOn, disabled)}</div>`;
+  }
+  function notificationsSection() {
+    const prefs = notifyPrefsNow();
+    const on = prefs.enabled !== false;
+    const types = ((FF.notifications || {}).notifyTypes || []).filter((t) => (A.isAdmin() ? t.admin : t.user));
+    return section('🔔 Notifications', `
+      <div class="notify-switches" style="background:transparent;padding:0;border:0">
+        ${switchRow('master', 'Notifications ON / OFF', on ? 'ON — app ke andar toast + phone / desktop ke notification panel par alert (app band ho tab bhi)' : 'OFF — koi alert nahi aayega (list bell me padh sakte ho)', on)}
+        ${switchRow('sound', '🔊 Sound / vibration', 'Alert ke saath short beep + mobile vibration', prefs.sound !== false, !on)}
+        ${switchRow('monthly', '📅 Monthly report', 'Har mahine ki 1–5 tarikh ko pichhle mahine ka FF vs GV compare', prefs.monthly !== false, !on)}
+      </div>
+      <details class="notify-prefs" style="border:0;margin-top:6px"><summary>Konse alerts chahiye? (type ke hisaab se on/off)</summary>
+        <div class="notify-pref-grid">${types.map((t) => `<span class="check small">${ffSwitch(t.key, prefs[t.key] !== false, !on)} ${t.label}</span>`).join('')}</div>
+      </details>
+      ${A.isAdmin() ? `<div id="push-diag-slot" class="push-diag" style="margin-top:12px"><p class="dim small">📲 Push diagnostics load ho rahi hain…</p></div>` : ''}`);
+  }
+  function pushDiagHtml(st, health) {
+    const p = (health && health.push) || {};
+    const selfTest = st.selfTest || p.selfTest || {};
+    const rows = [
+      ['VAPID key source', `${esc(String(st.keySource || p.keySource || 'none'))} · ${st.keyDurable || p.durable ? 'durable ✓ (redeploy par same rahegi)' : '⚠️ TEMPORARY — deploy/restart par key badal jaayegi'}`],
+      ['Auth scheme + subject', `${esc(String(st.scheme || p.scheme || 'vapid'))} · ${esc(String(st.subject || ''))}`],
+      ['Self test', selfTest.ok ? '✅ pass — JWT apni public key se verify ho gaya' : `🔴 FAIL — ${esc(String(selfTest.error || ''))}`],
+      ['Mere devices', `${st.subs || 0}${st.staleKeySubs ? ` (⚠️ ${st.staleKeySubs} purani VAPID key wale)` : ''}`],
+      ['Total devices (sab users)', String(p.devices !== undefined ? p.devices : (st.allSubs !== undefined ? st.allSubs : '—'))],
+      ['TTL (retry window)', `${st.ttl || p.ttl || 0} seconds`],
+      ['Aakhri delivery OK', st.lastOk ? `${esc(U.timeLabel(new Date(st.lastOk.at).getTime()))} · status ${esc(String(st.lastOk.status))} · ${esc(String(st.lastOk.host || ''))}` : '—'],
+      ['Aakhri delivery fail', st.lastError ? `${esc(U.timeLabel(new Date(st.lastError.at).getTime()))} · status ${esc(String(st.lastError.status || 'network'))} · ${esc(String(st.lastError.error || '').slice(0, 140))}` : '—']
+    ];
+    const boxes = [];
+    if (st.configError) boxes.push(`<div class="warn-box">⚠️ Push service delivery reject kar rahi hai (status ${esc(String(st.configError.status || '?'))}) — ${esc(String(st.configError.error || '').slice(0, 200))}${st.configError.hint ? `<br><small>${esc(String(st.configError.hint))}</small>` : ''}</div>`);
+    if (p.warning) boxes.push(`<div class="warn-box">⚠️ ${esc(String(p.warning))}</div>`);
+    if (!boxes.length) boxes.push('<div class="ok-box" style="margin:0">✅ Push pipeline theek hai — VAPID keys durable hain, self-test pass, aur delivery 2xx aa rahi hai.</div>');
+    return `${boxes.join('')}
+      <div class="push-diag" style="margin-top:8px">${rows.map(([k, v]) => `<div class="row"><b>${k}</b><span>${v}</span></div>`).join('')}</div>
+      <div class="btn-row" style="margin-top:10px;flex-wrap:wrap">
+        <button class="btn small" data-notify-panel-test title="Phone ke notification panel me ek test alert">📳 Panel test</button>
+        <button class="btn small" data-notify-push-test title="Server se is device par real web push">🛰 Server push test</button>
+        <button class="btn small" id="push-force-resub" title="Purani subscription hata kar nayi banao">🔁 Force re-subscribe</button>
+        <button class="btn small" id="push-copy-key" data-pubkey="${esc(String(st.publicKey || ''))}" title="applicationServerKey copy karo">🔑 Public key copy</button>
+      </div>
+      <p class="dim small" style="margin-top:6px">applicationServerKey (65-byte raw point): <code>${esc(String(st.publicKey || '').slice(0, 60))}…</code></p>`;
+  }
+  async function bindNotifications(body) {
+    const slot = U.$('#push-diag-slot', body);
+    if (!slot) return;
+    const drawDiag = async () => {
+      slot.innerHTML = '<p class="dim small">📲 Push diagnostics load ho rahi hain…</p>';
+      const [st, health] = await Promise.all([A.api('/api/push/status').catch(() => ({})), A.api('/api/health').catch(() => ({}))]);
+      slot.innerHTML = pushDiagHtml(st || {}, health || {});
+      const force = U.$('#push-force-resub', slot);
+      if (force) force.addEventListener('click', async () => {
+        force.disabled = true; force.textContent = 'Re-subscribe ho raha hai…';
+        try {
+          const reg = 'serviceWorker' in navigator ? await navigator.serviceWorker.getRegistration() : null;
+          if (reg && reg.active && reg.active.postMessage) reg.active.postMessage({ type: 'ff-push-resubscribe', reason: 'settings' });
+          if (FF.notifications) await FF.notifications.setupPush(true, { force: true });
+          U.toast('🔁 Subscription dobara ban gayi — ab Server push test dabao', 'ok');
+        } catch (err) { U.toast('Re-subscribe fail: ' + ((err && err.message) || err), 'err'); }
+        await new Promise((r) => setTimeout(r, 1200));
+        drawDiag();
+      });
+      const copy = U.$('#push-copy-key', slot);
+      if (copy) copy.addEventListener('click', async () => {
+        try { await U.copyText(copy.dataset.pubkey || ''); U.toast('VAPID public key copy ✓', 'ok'); } catch { U.toast('Copy nahi ho paya', 'err'); }
+      });
+    };
+    await drawDiag();
+    // Test buttons notifications.js ke delegated handler se chalte hain — unke baad numbers refresh karo.
+    slot.addEventListener('click', (e) => {
+      if (e.target.closest('[data-notify-panel-test]') || e.target.closest('[data-notify-push-test]')) setTimeout(() => { if (document.body.contains(slot)) drawDiag(); }, 2500);
+    });
+  }
   function accountTab() {
     const u = A.user;
     const perms = A.permissions || [];
@@ -150,6 +232,7 @@ FF.pages = FF.pages || {};
     const locationLink = loc ? `https://www.google.com/maps?q=${encodeURIComponent(`${loc.latitude},${loc.longitude}`)}` : '';
     return `${section('👤 Profile', avatarBlock() + `<div class="form-grid">${field('Username', `<input class="input" value="${esc(u.username)}" disabled>`)}${field('Full name', `<input class="input" id="pf-name" value="${esc(u.name || '')}">`)}${field('Mobile', `<input class="input" id="pf-mobile" value="${esc(u.mobile || '')}" inputmode="tel">`)}${field('Email', `<input class="input" id="pf-email" type="email" value="${esc(u.email || '')}">`)}</div><div class="save-bar"><button class="btn primary" id="pf-save">💾 Save profile</button><span class="dim small">Role: <b>${u.role === 'admin' ? '👑 Admin' : 'User'}</b> · joined ${u.createdAt ? U.timeLabel(new Date(u.createdAt).getTime()) : '—'}</span></div>`)}
       ${section('🧭 Workspace display & activity sharing', `<p class="dim small">Left navigation panel desktop par hamesha ek jagah fixed dikhta hai. Mobile me ☰ menu button se khulta hai.</p><div class="form-grid"><label>Tag Issued default range<select class="input" id="ti-range-days"><option value="1" ${localStorage.getItem('ti_range_days') === '7' || localStorage.getItem('ti_range_days') === '30' || localStorage.getItem('ti_range_days') === '90' ? '' : 'selected'}>Latest day</option><option value="7" ${localStorage.getItem('ti_range_days') === '7' ? 'selected' : ''}>Last 7 days</option><option value="30" ${localStorage.getItem('ti_range_days') === '30' ? 'selected' : ''}>Last 30 days</option><option value="90" ${localStorage.getItem('ti_range_days') === '90' ? 'selected' : ''}>Last 90 days</option></select></label><label>Top agent / team charts<select class="input" id="ti-chart-limit"><option value="5" ${localStorage.getItem('ti_chart_limit') === '5' ? 'selected' : ''}>Top 5</option><option value="10" ${localStorage.getItem('ti_chart_limit') !== '5' && localStorage.getItem('ti_chart_limit') !== '15' && localStorage.getItem('ti_chart_limit') !== '20' ? 'selected' : ''}>Top 10</option><option value="15" ${localStorage.getItem('ti_chart_limit') === '15' ? 'selected' : ''}>Top 15</option><option value="20" ${localStorage.getItem('ti_chart_limit') === '20' ? 'selected' : ''}>Top 20</option></select></label></div><label class="check"><input type="checkbox" id="presence-share-toggle" ${localStorage.getItem('ff_presence_pointer') !== '0' ? 'checked' : ''}> Admin <b>Live view</b> share karo — khula page, scroll, live cursor aur kin buttons / cards par click kiya.</label><p class="dim small">Admin notification panel se aapka live screen view (page + cursor + actions) dekh sakta hai. Typed text / passwords kabhi share nahi hote. Is option ko kabhi bhi band kar sakte hain.</p>`)}
+      ${notificationsSection()}
       ${section('📍 Location (optional, consent ke saath)', `<p class="dim small">Location sirf tab li jayegi jab aap khud “Share my location” dabayenge. Browser permission ke bina koi GPS tracking nahi hoti. Admin ko aapki last shared location dikhegi.</p><div class="location-status">${loc ? '✅' : '⚪'} ${esc(locationText)} ${locationLink ? `<a class="btn small" href="${esc(locationLink)}" target="_blank" rel="noopener">🗺️ Maps me dekho</a>` : ''}</div><div class="save-bar"><button class="btn" id="location-share">📍 Share my location</button></div>`)}
       ${section('🔑 Change password', `<div class="form-grid">${field('Current password', '<input class="input" id="pw-cur" type="password" autocomplete="current-password">')}${field('New password', '<input class="input" id="pw-new" type="password" minlength="6" autocomplete="new-password">')}${field('Repeat new password', '<input class="input" id="pw-new2" type="password" minlength="6" autocomplete="new-password">')}</div><div class="save-bar"><button class="btn primary" id="pw-save">🔑 Update password</button>${u.mustChangePassword ? '<span class="badge red">Default password — please change</span>' : ''}</div>`)}
       ${section('🛡️ My access', `<div class="perm-grid">${perms.map((p) => `<div class="perm ${A.can(p.key) ? 'yes' : 'no'}"><span>${A.can(p.key) ? '✅' : '⛔'}</span><b>${esc(p.label)}</b><small class="dim">${esc(p.group)}</small></div>`).join('')}</div>${u.role === 'admin' ? '<p class="dim small">Admin ke paas sab access hota hai.</p>' : '<p class="dim small">Access badalna ho to admin se kaho.</p>'}`)}`;
@@ -490,6 +573,9 @@ FF.pages = FF.pages || {};
       bindTab();
     };
     function bindTab() {
+      // 🔔 notification switches notifications.js ke delegated handler se chalte hain;
+      // admin ki push diagnostics yahin async load hoti hai.
+      if (FF.notifications) void bindNotifications(body);
       // account
       const presenceShare = U.$('#presence-share-toggle', body);
       if (presenceShare) presenceShare.addEventListener('change', () => { localStorage.setItem('ff_presence_pointer', presenceShare.checked ? '1' : '0'); if (FF.app.liveShareChip) FF.app.liveShareChip(); if (!presenceShare.checked && FF.auth.user.role !== 'admin') FF.auth.api('/api/presence', 'POST', { page: 'settings', pointer: null, overlay: '' }).catch(() => {}); });

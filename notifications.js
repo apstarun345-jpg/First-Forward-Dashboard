@@ -23,7 +23,8 @@ window.FF = window.FF || {};
     { key: 'settings', label: '⚙️ Settings changes',       user: false, admin: true },
     { key: 'location', label: '📍 Location shares',        user: false, admin: true }
   ];
-  const DEFAULT_PREFS = { login: true, signup: true, report: true, monthly: true, activity: true, click: false, search: true, settings: true, user: true, location: false, info: true, sound: true, push: true };
+  // `enabled` = master switch. UI me sirf ek "Notifications ON/OFF" button hai (Settings me baaki fine-tuning).
+  const DEFAULT_PREFS = { enabled: true, login: true, signup: true, report: true, monthly: true, activity: true, click: false, search: true, settings: true, user: true, location: false, info: true, sound: true, push: true };
   const state = { started: false, bound: false, timer: null, presenceTimer: null, fastTimer: null, lastAt: '', items: [], unread: 0, firstPoll: true, page: 'home', pointer: null, people: [], lastInteraction: Date.now(), pointerBound: false, events: [], dirty: false, lastSent: 0, lastScroll: -1, pushOn: false, pushDevices: 0, pushStatus: null, pushTriedAt: 0, pushError: '', prefs: { ...DEFAULT_PREFS }, audioCtx: null };
   const EMBED = new URLSearchParams(location.search).get('embed') === 'live';
   const sharing = () => localStorage.getItem('ff_presence_pointer') !== '0';
@@ -67,8 +68,9 @@ window.FF = window.FF || {};
   }
 
   // ---- 🔊 in-app sound (Web Audio beep — 880Hz, 200ms, works without asset file) -----------------
-  function beep() {
+  function beep(force) {
     if (state.prefs.sound === false) return;
+    if (!force && state.prefs.enabled === false) return; // master switch OFF → koi sound nahi
     try {
       const Ctx = window.AudioContext || window.webkitAudioContext;
       if (!Ctx) return;
@@ -104,6 +106,7 @@ window.FF = window.FF || {};
   function isIOS() { return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream; }
   async function browserAlert(item) {
     if (!item) return;
+    if (state.prefs.enabled === false) return; // 🔕 master switch OFF
     // Per-type preference check
     if (state.prefs[item.type] === false) return;
     if (document.visibilityState === 'visible') {
@@ -151,63 +154,54 @@ window.FF = window.FF || {};
   function latestTime(items) { return (items || []).reduce((max, x) => !max || x.createdAt > max ? x.createdAt : max, ''); }
 
   // ---- render ------------------------------------------------------------------------------------
+  /* Bell panel JAAN-BOOJH kar minimal hai: sirf ek "Notifications ON/OFF" switch + monthly report
+     switch + list. Push diagnostics / panel test / server push test sab Settings me chale gaye
+     (admin wahan troubleshoot karta hai) — warna har user ko warning-cards ka dhher dikhta tha. */
+  function switchRow({ id, label, note, on, disabled }) {
+    return `<div class="notify-switch-row">
+      <div class="nsr-text"><b>${label}</b><small>${note}</small></div>
+      <button type="button" class="ff-switch ${on ? 'on' : ''}" role="switch" aria-checked="${on ? 'true' : 'false'}" ${disabled ? 'disabled' : ''} ${id ? `data-notify-switch="${id}"` : ''}><span class="ff-switch-knob"></span></button>
+    </div>`;
+  }
+  /** Panel ke andar sirf wahi warning jo action maangti hai — bina technical noise ke. */
+  function hintLine() {
+    const browser = typeof Notification !== 'undefined';
+    const permission = browser ? Notification.permission : 'unsupported';
+    const canPush = 'serviceWorker' in navigator && 'PushManager' in window;
+    const on = state.prefs.enabled !== false;
+    const st = state.pushStatus || {};
+    const isAdmin = FF.auth.user && FF.auth.user.role === 'admin';
+    if (!on) return `<div class="notify-line muted">🔕 Notifications OFF — koi alert nahi aayega. List phir bhi andar padh sakte ho.</div>`;
+    if (isAdmin && st.configError) return `<div class="notify-line warn">⚠️ Push service delivery reject kar rahi hai (status ${U.esc(String(st.configError.status || '?'))}) — Settings → 👤 My account → Push diagnostics dekho.</div>`;
+    if (permission === 'denied') return `<div class="notify-line warn">🚫 Browser ne notifications block kar rakhe hain — address bar ke 🔒 icon se Allow karo, phir switch OFF-ON karo.</div>`;
+    if (!browser || !canPush) {
+      // iOS par web push sirf installed PWA me chalta hai — ye ek line zaroori hai, warna panel chup-chaap silent rehta hai.
+      if (isIOS() && !isInstalledPWA()) return `<div class="notify-line">📱 iOS par panel push sirf installed app me chalta hai — Safari → Share → “Add to Home Screen”, phir app kholo.</div>`;
+      return `<div class="notify-line muted">ℹ️ Is browser me sirf in-app alerts milenge. Phone panel ke liye Chrome / Edge / Samsung Internet (Android) ya iOS 16.4+ (installed app) chahiye.</div>`;
+    }
+    if (permission !== 'granted') return `<div class="notify-line">🔔 Phone / desktop panel alerts ke liye switch OFF karke wapas ON karo aur “Allow” dabao.</div>`;
+    if (!state.pushOn) return `<div class="notify-line">📲 Push subscription ban rahi hai… app band ho tab bhi alerts milenge.</div>`;
+    return '';
+  }
   function render() {
     const pop = U.$('#notification-pop');
     if (!pop) return;
-    const browser = typeof Notification !== 'undefined';
-    const permission = browser ? Notification.permission : 'unsupported';
-    const pwa = isInstalledPWA();
-    const canPush = 'serviceWorker' in navigator && 'PushManager' in window;
-
-    // 📲 Mobile / OS notification panel status.
-    // Pehle ka order galat tha: "app install nahi hai" wali hint sabse pehle match ho jaati thi,
-    // isliye bina-PWA-install mobile Chrome par ENABLE button kabhi dikhta hi nahi tha — user chahe
-    // permission de bhi de, push subscribe hone ka raasta hi nahi tha. Ab har case me action dikhta hai.
-    const st = state.pushStatus || {};
-    const lastError = st.lastError ? `Aakhri push fail: <b>${U.esc(String(st.lastError.status || 'network'))}</b>${st.lastError.error ? ` — ${U.esc(String(st.lastError.error).slice(0, 90))}` : ''}` : '';
-    const deviceLine = state.pushOn ? `<small>${state.pushDevices || st.subs || 1} device registered${st.lastOk ? ` · last delivery ${U.esc(U.timeLabel(new Date(st.lastOk.at).getTime()))}` : ''}</small>` : '';
-    const testBtns = `<div class="notify-push-actions"><button class="btn small" data-notify-panel-test title="Phone ke notification panel me ek test alert bhejo">📳 Panel test</button><button class="btn small" data-notify-push-test title="Server se is device par real push bhejo">🛰 Server push test</button></div>`;
-    let pushCard = '';
-    if (!canPush) {
-      pushCard = `<div class="notification-permission warn">⚠️ Is browser me push notifications support nahi. Chrome / Edge / Samsung Internet (Android) ya Safari iOS 16.4+ use karo.</div>`;
-    } else if (permission === 'denied') {
-      pushCard = `<div class="notification-permission warn">🚫 Browser notifications blocked hain — browser/padlock settings se allow karo, phir yahan "Dobara on karo" dabao.</div>`;
-    } else if (permission !== 'granted') {
-      // iOS par push sirf installed PWA me chalta hai — Android/desktop browser tab me bhi chalega.
-      const iosHint = isIOS() && !pwa ? '<div class="notification-permission warn">📱 iOS: pehle Safari → Share → "Add to Home Screen" se app install karo, phir ye button dabao.</div>' : '';
-      const installHint = !pwa && !isIOS() ? '<div class="notification-permission hint">💡 "Install app" karne par app band hone ke baad bhi alerts milte rahenge (background push).</div>' : '';
-      pushCard = `${iosHint}<button class="notification-enable" data-notify-enable>📲 Mobile notifications on karo — app band ho tab bhi panel me aayengi</button>${installHint}`;
-    } else if (!state.pushOn) {
-      // Permission granted hai lekin subscription nahi bani (key rotate, service worker, ya server drop)
-      pushCard = `<div class="notification-permission warn">⚠️ Permission mil gayi hai par push subscription active nahi${state.pushError ? ` — ${U.esc(state.pushError)}` : ''}. ${lastError}</div>
-        <button class="notification-enable" data-notify-enable>🔁 Push dobara on karo</button>${!pwa && !isIOS() ? '<div class="notification-permission hint">💡 App install nahi hai — "Install app" ke baad background push sabse reliable chalta hai.</div>' : ''}${testBtns}`;
-    } else {
-      pushCard = `<div class="notification-permission ok">✅ Mobile / OS panel push ON hai${pwa ? ' · PWA installed' : ' · browser tab'}</div>${deviceLine}${lastError ? `<div class="notification-permission warn">${lastError}</div>` : ''}${testBtns}`;
-    }
-
-    // Sound + master push toggles
-    const toggles = `<div class="notify-toggles">
-      <label class="check small"><input type="checkbox" data-pref-toggle="sound" ${state.prefs.sound !== false ? 'checked' : ''}> 🔊 Sound / vibration</label>
-      <label class="check small"><input type="checkbox" data-pref-toggle="push" ${state.prefs.push !== false ? 'checked' : ''}> 📲 Push notifications (app band ho tab bhi)</label>
-    </div>`;
-
-    // Per-type preferences — admin ko sab types (activity + data); normal user ko sirf apne types
+    const on = state.prefs.enabled !== false;
+    const monthly = state.prefs.monthly !== false;
     const isAdmin = FF.auth.user && FF.auth.user.role === 'admin';
-    const types = NOTIFY_TYPES.filter((t) => isAdmin ? t.admin : t.user);
-    const prefsHtml = `<details class="notify-prefs"><summary>⚙️ Notification preferences · konse alerts chahiye?</summary>
-      ${isAdmin ? `<div class="notify-pref-hint dim small">👑 Admin ko sab users ki har activity yahan + browser + mobile push pe milti hai. Band kar ke unwanted types hata sakte ho.</div>` : ''}
-      <div class="notify-pref-list">
-        ${types.map((t) => `<label class="check small"><input type="checkbox" data-pref-toggle="${t.key}" ${state.prefs[t.key] !== false ? 'checked' : ''}> ${t.label}</label>`).join('')}
-      </div></details>`;
+
+    const switches = `<div class="notify-switches">
+      ${switchRow({ id: 'master', label: '🔔 Notifications', note: on ? 'ON — app ke andar + phone / desktop panel par' : 'OFF — koi alert nahi aayega', on })}
+      ${switchRow({ id: 'monthly', label: '📅 Monthly report', note: 'Har mahine ki 1–5 tarikh ko pichhle mahine ka FF vs GV compare', on: monthly, disabled: !on })}
+    </div>`;
 
     const rows = state.items.slice().reverse().slice(0, 60).map((item) => `<button type="button" class="notification-item ${item.type || ''}" data-notify-open="${U.esc(item.id)}" title="Click → poori report: kya change hua">
       <span class="notification-icon">${icon(item)}</span><div><b>${U.esc(item.title)}</b><p>${U.esc(item.body)}</p><small>${U.esc(U.timeLabel(new Date(item.createdAt).getTime()))} · <u>details dekho →</u></small></div></button>`).join('');
     const presence = isAdmin ? `<section class="presence-panel"><div class="presence-title">🟢 User activity <small>Admin only · live / last seen</small></div>${state.people.length ? state.people.map((p) => `<div class="presence-row"><span class="presence-dot ${p.active ? 'is-live' : ''}"></span><div><b>${U.esc(p.name || p.username)}</b><small>${p.active ? `Active now · ${U.esc(p.page)}` : `Last active ${U.esc(U.timeLabel(p.lastSeen))} · last page: ${U.esc(p.page)}`}</small>${p.lastEvent ? `<small>Last action: ${U.esc(p.lastEvent.label || p.lastEvent.kind)}</small>` : ''}</div><span class="presence-side"><span class="presence-state">${p.online && p.active ? 'LIVE' : p.online ? 'IDLE' : 'AWAY'}</span>${isAdmin ? `<button class="btn small" data-live-watch="${U.esc(p.username)}">👁 Live view</button>` : ''}</span></div>`).join('') : '<div class="notification-empty">Users seen after this server started will appear here.</div>'}</section>` : '';
-    pop.innerHTML = `<div class="notification-head"><div><b>Notifications</b><small>${state.unread ? `${state.unread} unread` : 'Sab updated hai'}</small></div><div style="display:flex;gap:6px"><button class="btn small" data-notify-test>🔊 Test</button><button class="btn small" data-notify-read>✓ Mark read</button></div></div>
+    pop.innerHTML = `<div class="notification-head"><div><b>Notifications</b><small>${state.unread ? `${state.unread} unread` : 'Sab updated hai'}</small></div><div style="display:flex;gap:6px"><button class="btn small" data-notify-read>✓ Mark read</button></div></div>
       ${presence}
-      ${pushCard}
-      ${toggles}
-      ${prefsHtml}
+      ${switches}
+      ${hintLine()}
       <div class="notification-list">${rows || '<div class="notification-empty">Abhi koi notification nahi. User login/page open, report update aur shared location yahan dikhegi.</div>'}</div>`;
   }
 
@@ -319,7 +313,7 @@ window.FF = window.FF || {};
         return false;
       }
       if (Notification.permission !== 'granted') { state.pushError = 'notification permission granted nahi'; return false; }
-      if (state.prefs.push === false && !force) return false;
+      if ((state.prefs.push === false || state.prefs.enabled === false) && !force) return false;
       const reg = await swRegistration();
       if (!reg || !reg.pushManager) { state.pushError = 'service worker ready nahi hua'; if (!silent) U.toast('Service worker ready nahi hua — push on nahi ho paya. App dobara kholo.', 'warn'); return false; }
       // 1) Server ki current key + registration status
@@ -375,23 +369,84 @@ window.FF = window.FF || {};
       state.pushDevices = 0;
     } catch { /* ignore */ }
   }
-  async function enableBrowser() {
-    if (typeof Notification === 'undefined') { U.toast('Is browser me notifications supported nahi hain.', 'err'); return; }
-    // Unlock audio on first user gesture
-    unlockAudio();
+  /** Browser permission maango (agar zaroorat ho) + push subscribe karo. `silent` = koi toast nahi. */
+  async function enableBrowser(silent) {
+    if (typeof Notification === 'undefined') { if (!silent) U.toast('Is browser me notifications supported nahi hain.', 'err'); return false; }
+    unlockAudio(); // sound iOS/Safari me sirf user gesture ke baad chalta hai
     try {
       const permission = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission();
+      markPermissionAsked();
       if (permission === 'granted') {
         state.prefs.push = true; savePrefsLocal();
         await setupPush(true, { force: true });
       }
       render();
-      U.toast(permission === 'granted' ? (state.pushOn ? '✅ Browser + mobile push alerts on' : 'Permission mil gayi, par push subscribe nahi hui — "Panel test" se check karo') : 'Browser alerts allow nahi hue.', permission === 'granted' && state.pushOn ? 'ok' : 'warn');
-    } catch { U.toast('Browser notification permission nahi mil saki.', 'err'); }
+      if (!silent) {
+        U.toast(
+          permission !== 'granted' ? 'Browser ne permission nahi di — address bar ke lock icon se Notifications Allow karo, phir switch OFF-ON karo.'
+            : state.pushOn ? '🔔 Notifications ON — app ke andar + phone / desktop panel dono par aayengi'
+            : '🔔 Notifications ON — in-app alerts chalu. Phone panel push apne aap subscribe ho jaayegi.',
+          permission === 'granted' ? 'ok' : 'warn'
+        );
+      }
+      return permission === 'granted';
+    } catch { if (!silent) U.toast('Browser notification permission nahi mil saki.', 'err'); return false; }
+  }
+  /**
+   * 🔔 Master switch — panel me yahi EK button hai.
+   * ON  → permission maango + web push subscribe (app band ho tab bhi panel me alert).
+   * OFF → push unsubscribe + koi toast / browser alert / sound nahi (list andar padh sakte ho).
+   */
+  async function setEnabled(on, opts) {
+    const quiet = !!(opts && opts.quiet);
+    unlockAudio();
+    if (on) {
+      state.prefs.enabled = true; state.prefs.push = true; savePrefsLocal(); render();
+      const granted = await enableBrowser(true);
+      await savePrefs({ enabled: true, push: true }, true);
+      if (!quiet) {
+        U.toast(
+          granted && state.pushOn ? '🔔 Notifications ON ✓ — phone / desktop ke notification panel par bhi aayengi'
+            : granted ? '🔔 Notifications ON ✓ — push subscription ban rahi hai, panel par bhi aayengi'
+            : '🔕 In-app notifications ON, par browser permission nahi mili — lock icon se Allow karo',
+          granted ? 'ok' : 'warn'
+        );
+      }
+      render();
+      return granted;
+    }
+    state.prefs.enabled = false; savePrefsLocal(); render();
+    await disablePush();
+    await savePrefs({ enabled: false, push: false }, true);
+    if (!quiet) U.toast('🔕 Notifications OFF — ab koi alert nahi aayega', 'info');
+    render();
+    return false;
+  }
+  // ---- permission: ek hi baar khud maango (user ko button dhoondhna na pade) ----------------------
+  const ASKED_KEY = 'ff_notify_permission_asked';
+  function permissionAsked() { try { return localStorage.getItem(ASKED_KEY) === '1'; } catch { return true; } }
+  function markPermissionAsked() { try { localStorage.setItem(ASKED_KEY, '1'); } catch { /* ignore */ } }
+  /**
+   * Login ke baad pehli user interaction par ek hi baar permission prompt dikhao. Isse push bina
+   * koi extra button dabaye kaam karne lagta hai — permission milte hi subscription silently ban jaati hai.
+   */
+  function maybeAskPermission() {
+    if (EMBED || !hasAccess()) return false;
+    if (typeof Notification === 'undefined' || Notification.permission !== 'default') return false;
+    if (state.prefs.enabled === false || permissionAsked()) return false;
+    if (document.visibilityState !== 'visible') return false;
+    markPermissionAsked();
+    Promise.resolve(Notification.requestPermission()).then((permission) => {
+      if (permission === 'granted') {
+        state.prefs.push = true; savePrefsLocal();
+        setupPush(true).then(() => render()).catch(() => render());
+      } else render();
+    }).catch(() => render());
+    return true;
   }
   /** OS notification panel ka seedha test — server push se independent (permission + SW check). */
   async function testPanel() {
-    unlockAudio(); beep();
+    unlockAudio(); beep(true);
     try {
       const reg = await swRegistration(6000);
       if (reg && reg.active && reg.active.postMessage) { reg.active.postMessage({ type: 'ff-local-test' }); U.toast('📳 Panel test bheja — phone ke notification panel me dekho', 'ok'); return; }
@@ -439,12 +494,41 @@ window.FF = window.FF || {};
     btn.addEventListener('click', (e) => { if (!hasAccess()) return; e.stopPropagation(); toggle(); unlockAudio(); });
     document.addEventListener('pointerdown', unlockAudio, { once: true, passive: true });
     document.addEventListener('keydown', unlockAudio, { once: true, passive: true });
+    // Login ke baad pehli interaction par ek hi baar permission maango — push khud chalu ho jaata hai.
+    const askOnGesture = () => {
+      if (!hasAccess()) return;
+      document.removeEventListener('pointerdown', askOnGesture);
+      document.removeEventListener('keydown', askOnGesture);
+      maybeAskPermission();
+    };
+    document.addEventListener('pointerdown', askOnGesture, { passive: true });
+    document.addEventListener('keydown', askOnGesture);
     document.addEventListener('click', (e) => {
       if (!e.target.closest('#notification-pop') && !e.target.closest('#notification-btn')) toggle(false);
+      // 🔔 Switch — popover ka master ON/OFF + monthly (Settings bhi isi attribute ko use karta hai)
+      const sw = e.target.closest('[data-notify-switch]');
+      if (sw && !sw.disabled) {
+        e.preventDefault(); e.stopPropagation();
+        const which = sw.dataset.notifySwitch;
+        const on = sw.getAttribute('aria-checked') !== 'true';
+        sw.classList.toggle('on', on); sw.setAttribute('aria-checked', String(on));
+        if (which === 'master') setEnabled(on);
+        else if (which === 'sound') { savePrefs({ sound: on }); if (on) beep(true); }
+        else savePrefs({ [which]: on });
+        return;
+      }
       const enable = e.target.closest('[data-notify-enable]');
       if (enable) { e.preventDefault(); enableBrowser(); return; }
       const prefBox = e.target.closest('[data-pref-toggle]');
-      if (prefBox) { e.preventDefault(); e.stopPropagation(); const k = prefBox.dataset.prefToggle; const val = prefBox.checked; if (k === 'push' && val === false) disablePush(); if (k === 'push' && val === true) enableBrowser(); else savePrefs({ [k]: val }); return; }
+      if (prefBox) {
+        e.preventDefault(); e.stopPropagation();
+        const k = prefBox.dataset.prefToggle;
+        const val = prefBox.type === 'checkbox' ? prefBox.checked : prefBox.getAttribute('aria-checked') !== 'true';
+        if (k === 'enabled') { setEnabled(val); return; }
+        if (k === 'push') { if (val) enableBrowser(); else disablePush().then(() => savePrefs({ push: false })); return; }
+        savePrefs({ [k]: val });
+        return;
+      }
       const openBtn = e.target.closest('[data-notify-open]');
       if (openBtn) { e.preventDefault(); const item = state.items.find((x) => x.id === openBtn.dataset.notifyOpen); toggle(false); if (item && item.meta && item.meta.link) { location.hash = item.meta.link; return; } if (item && FF.liveView) FF.liveView.openNotification(item); return; }
       const watchBtn = e.target.closest('[data-live-watch]');
@@ -500,6 +584,7 @@ window.FF = window.FF || {};
   /** Push na chalne par chup-chaap retry karo (throttled) — redeploy/key-rotate ke baad self-heal. */
   function retryPush() {
     if (EMBED || !hasAccess()) return;
+    if (state.prefs.enabled === false) return; // 🔕 master switch OFF → push mat banao
     if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
     if (state.prefs.push === false) return;
     const due = !state.pushOn ? 30e3 : 10 * 60e3; // fail hone par jaldi, chalne par 10 min me re-validate
@@ -597,7 +682,7 @@ window.FF = window.FF || {};
       .catch(() => {});
   }
   // Test sound button (for settings/test)
-  function testSound() { unlockAudio(); beep(); U.toast('🔊 Test beep', 'info'); }
-  FF.notifications = { start, stop, poll, toggle, activity, logSearch, logClick, track, testSound, render, setupPush, disablePush, enableBrowser, testPanel, testPush, refreshPushStatus, retryPush, browserAlert, get state() { return state; }, get prefs() { return state.prefs; } };
+  function testSound() { unlockAudio(); beep(true); U.toast('🔊 Test beep', 'info'); } // force: master OFF ho tab bhi test chale
+  FF.notifications = { start, stop, poll, toggle, activity, logSearch, logClick, track, testSound, render, setupPush, disablePush, enableBrowser, setEnabled, maybeAskPermission, testPanel, testPush, refreshPushStatus, retryPush, browserAlert, notifyTypes: NOTIFY_TYPES, get state() { return state; }, get prefs() { return state.prefs; } };
   bind();
 })(window.FF);

@@ -50,18 +50,39 @@ this branch to the existing service.
 ## Mobile push notifications (OS notification panel)
 
 Alerts must reach the phone's notification panel even when the app is closed. That path is
-web push, and it depends on the **VAPID keypair staying the same across deploys**: a browser
-subscription is bound to the `applicationServerKey` it was created with, so a new keypair makes
-the push service reject every message with `403`. The symptom is easy to misread — the in-app 🔔
-feed keeps working (it polls) while the phone panel goes completely silent.
+web push, and it breaks in exactly two ways — both were live bugs here and both are now fixed:
+
+1. **The VAPID keypair changed between deploys.** A browser subscription is bound to the
+   `applicationServerKey` it was created with, so a new keypair makes the push service reject
+   every message with `403`.
+2. **The VAPID auth headers were wrong.** The server used the legacy draft-01 scheme
+   (`Authorization: WebPush <jwt>`) *without* the mandatory
+   `Crypto-Key: p256ecdsa=<public key>` header, so FCM answered every delivery with
+   `403 permission denied: crypto-key header had no public application server key specified`.
+
+The symptom of both is easy to misread — the in-app 🔔 feed keeps working (it polls) while the
+phone panel goes completely silent, and the app says *"Permission mil gayi hai par push
+subscription active nahi"* because the old code also deleted the subscription on any `403`.
+
+Today the server sends **RFC 8292** credentials (`Authorization: vapid t=<jwt>, k=<public key>`,
+no `Crypto-Key` needed) and automatically falls back to the legacy pair
+(`WebPush <jwt>` + `Crypto-Key: p256ecdsa=<key>`) for a push service that only understands that
+scheme; whichever scheme succeeds becomes the default for the rest of the process lifetime
+(`PUSH_AUTH_SCHEME=legacy` forces the other starting point). A `401/403` now only deletes a
+subscription when the message really is about that subscription (key mismatch / expired /
+unregistered); a server-side credential problem keeps every subscription intact and is reported
+as `configError` in `/api/push/status` and `/api/health`.
 
 Keys are therefore resolved in this order:
 
 1. `VAPID_PUBLIC_KEY` + `VAPID_PRIVATE_KEY` environment variables (explicit pin). Optional —
-   the durable store below keeps keys stable without them. If you do pin them, the standard
-   `npx web-push generate-vapid-keys` output works as-is (65-byte raw-point public key + 32-byte
-   private scalar); the server also accepts its own internal PKCS8/SPKI formats and always
-   derives the browser-ready public point from the private key.
+   the durable store below keeps keys stable without them — but this is the *permanent* option:
+   keys can then never change, no matter what happens to storage. Generate a pair with
+   `npm run push:keys` (zero dependencies; same output shape as
+   `npx web-push generate-vapid-keys`), paste both values into Render → Environment, deploy.
+   Never commit the private key. The server also accepts its own internal PKCS8/SPKI formats and
+   always derives the browser-ready public point from the private key. Optionally set
+   `VAPID_SUBJECT` (`mailto:` or `https:` contact; localhost-style values get `403 BadJwtToken`).
 2. Durable storage — `notify.vapid` in the same Apps Script / Sheets record as the users and
    notification feed. This is what makes push survive a redeploy on a service with no disk.
 3. `DATA_DIR/vapid.json` (local `files` backend, or a within-boot cache on a container disk).
@@ -76,18 +97,40 @@ After deploying, verify:
    point from the private key, heals any stored/env key in the old format automatically, and
    re-saves the healed copy, so signing keys (and existing subscriptions) stay unchanged.
 1. `GET /api/health` → `push.enabled` is `true`, `push.durable` is `true`, `push.warning` is
-   `null`, `push.ttl` is `86400`. Admins also see a 📲 banner in the app when `push.warning`
-   is set. If `durable` is `false`, set the two `VAPID_*` variables (or attach a disk) — otherwise
-   the next deploy silently breaks every registered phone.
+   `null`, `push.ttl` is `86400`, `push.scheme` is `vapid`, and **`push.selfTest.ok` is `true`**.
+   The self-test signs a JWT and verifies it with the server's own public key, checks the 65-byte
+   raw-point format and the `sub` claim — i.e. it proves the credentials are sendable before any
+   phone is involved. Admins also see a 📲 banner in the app when `push.warning` is set. If
+   `durable` is `false`, set the two `VAPID_*` variables (or attach a disk) — otherwise the next
+   deploy silently breaks every registered phone. The server retries the durable save every 60 s
+   until it succeeds.
 2. Restart the service once and confirm `GET /api/push/vapid` returns **the same** `publicKey`.
 3. On the phone: install the app (Android Chrome menu → Install app; iOS 16.4+ → Add to Home
-   Screen), open the 🔔 panel, tap **📲 Mobile notifications on karo**, then **🛰 Server push test**.
-   The alert should appear in the OS panel with the app closed. `GET /api/push/status` shows the
-   registered device count plus `lastOk` / `lastError` for that account.
+   Screen) and sign in. The 🔔 panel has a single **Notifications ON/OFF** switch — turn it on and
+   allow the browser prompt (it is also requested automatically on the first click after login).
+   Then, as admin, open **Settings → 👤 My account → 📲 Push diagnostics** and tap
+   **🛰 Server push test**. The alert should appear in the OS panel with the app closed.
+   `GET /api/push/status` shows the registered device count plus `lastOk` / `lastError` /
+   `configError` for that account.
 4. Existing devices that subscribed under an older (now lost) key heal themselves: on the next app
    open the client compares the server key with its subscription and re-subscribes when they differ.
    `sw.js` also handles `pushsubscriptionchange`, and stashes the new subscription if the session
    had expired so the page can flush it on the next open.
+
+### Push troubleshooting
+
+| Symptom (in `/api/push/status` → `lastError.error`, or the boot log) | Cause | Fix |
+| --- | --- | --- |
+| `403 permission denied: crypto-key header had no public application server key specified` | Legacy `Authorization: WebPush` scheme sent without the `Crypto-Key: p256ecdsa=` header (the old bug) | Fixed in code — deliveries now use `Authorization: vapid t=…, k=…`. Redeploy; the subscription is kept, so the phone recovers on its own |
+| `403 BadJwtToken` / `invalid JWT` | `sub` claim is a localhost-style address, server clock is skewed, or the keypair is corrupt | Set `VAPID_SUBJECT` to a real `mailto:`; check the container clock; `push.selfTest` in `/api/health` names the exact problem |
+| `403 …does not match the application server key of the subscription` | The VAPID keypair changed after the phone subscribed | Pin `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` (`npm run push:keys`). Stale subscriptions are pruned at boot and every client re-subscribes on next open |
+| `push.durable: false` / `push.warning` set | Keys live only on the ephemeral container disk | Set the two `VAPID_*` env vars, or configure Apps Script/Sheets storage, or attach a Render disk |
+| `404` / `410` | The browser/push service retired that subscription | Automatic: the subscription is dropped and the device re-subscribes on next open |
+| Nothing at all, `subs: 0` | No device ever subscribed (permission not granted, or iOS without an installed PWA) | Flip the 🔔 switch on (or Settings → My account → 🔔 Notifications); on iOS install to the home screen first |
+| `configError` set, deliveries rejected | Server-side credentials rejected | Open Settings → 👤 My account → 📲 Push diagnostics (admin) and read the self-test line; subscriptions are *not* deleted in this state |
+
+Every delivery attempt is logged (`db.notify.pushLog`, last 40) with its status, scheme, host and
+verdict, so "the phone is silent" is never a guessing game again.
 
 If current data was already lost on an earlier deployment, the code cannot reconstruct it;
 restore a known backup or recreate the missing accounts/settings. If sessions were lost,
