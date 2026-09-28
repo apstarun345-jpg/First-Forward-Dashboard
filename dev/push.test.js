@@ -85,26 +85,48 @@ function decryptPush(body, ua) {
 
 // ---- mock push service (FCM-like) ---------------------------------------------------------------
 function startMockPushService() {
-  const state = { expectedKey: null, ua: null, deliveries: [], failWith: 0 };
+  const state = { expectedKey: null, ua: null, deliveries: [], failWith: 0, failError: '', legacyOnly: false };
   const server = http.createServer((req, res) => {
     const chunks = [];
     req.on('data', (c) => chunks.push(c));
     req.on('end', () => {
       const body = Buffer.concat(chunks);
-      const rec = { url: req.url, ttl: req.headers.ttl, urgency: req.headers.urgency, encoding: req.headers['content-encoding'], status: 0, payload: null, error: null };
+      const rec = { url: req.url, ttl: req.headers.ttl, urgency: req.headers.urgency, encoding: req.headers['content-encoding'], auth: req.headers.authorization || '', cryptoKey: req.headers['crypto-key'] || '', status: 0, payload: null, error: null };
       state.deliveries.push(rec);
-      if (state.failWith) { rec.status = state.failWith; rec.error = 'forced'; res.writeHead(state.failWith); return res.end(); }
-      const m = /^WebPush (.+)$/.exec(req.headers.authorization || '');
-      if (!m) { rec.status = 401; rec.error = 'no VAPID JWT'; res.writeHead(401); return res.end(); }
-      const [h, p, s] = m[1].split('.');
+      const reject = (status, error) => { rec.status = status; rec.error = error; res.writeHead(status); return res.end(error); };
+      if (state.failWith) return reject(state.failWith, state.failError || 'forced');
+      /* FCM-faithful VAPID parsing:
+           RFC 8292 (modern) → Authorization: vapid t=<jwt>, k=<public key>
+           draft-01 (legacy) → Authorization: WebPush <jwt>  +  Crypto-Key: p256ecdsa=<public key>
+         Legacy scheme me Crypto-Key missing ho to FCM exactly ye bhejta hai:
+           403 permission denied: crypto-key header had no public application server key specified
+         (wahi bug jisne phone ka notification panel hamesha silent rakha) */
+      let jwt = null, sentKey = null, scheme = null;
+      const vapidM = /^vapid\s+t=([^,\s]+)\s*,\s*k=([^,\s]+)\s*$/i.exec(req.headers.authorization || '');
+      const legacyM = /^WebPush\s+(\S+)\s*$/i.exec(req.headers.authorization || '');
+      if (vapidM) { scheme = 'vapid'; jwt = vapidM[1]; sentKey = vapidM[2]; }
+      else if (legacyM) {
+        scheme = 'legacy'; jwt = legacyM[1];
+        const ck = /(?:^|,)\s*p256ecdsa=([^,\s]+)/i.exec(req.headers['crypto-key'] || '');
+        if (!ck) return reject(403, 'permission denied: crypto-key header had no public application server key specified');
+        sentKey = ck[1];
+      } else return reject(401, 'no VAPID JWT');
+      rec.scheme = scheme; rec.sentKey = sentKey;
+      if (state.legacyOnly && scheme !== 'legacy') return reject(403, 'permission denied: unsupported authorization scheme');
+      // Subscription kis applicationServerKey se bani thi — wahi key request me honi chahiye.
+      if (state.expectedKey && sentKey !== state.expectedKey) return reject(403, 'permission denied: the JWT public key does not match the application server key of the subscription');
+      const [h, p, s2] = jwt.split('.');
       let verified = false;
       try {
-        const pub = pubKeyFromAny(state.expectedKey);
-        verified = crypto.verify('sha256', Buffer.from(`${h}.${p}`), { key: pub, dsaEncoding: 'ieee-p1363' }, Buffer.from(s, 'base64url'));
-        rec.aud = JSON.parse(Buffer.from(p, 'base64url').toString()).aud;
+        const pub = pubKeyFromAny(sentKey);
+        verified = crypto.verify('sha256', Buffer.from(`${h}.${p}`), { key: pub, dsaEncoding: 'ieee-p1363' }, Buffer.from(s2, 'base64url'));
+        const claims = JSON.parse(Buffer.from(p, 'base64url').toString());
+        rec.aud = claims.aud; rec.sub = claims.sub;
+        if (!/^(mailto:|https:)/.test(String(claims.sub))) return reject(403, 'invalid JWT: sub claim must be a mailto: or https: URI');
+        if (/localhost|\.local$/i.test(String(claims.sub))) return reject(403, 'BadJwtToken: sub claim looks like a localhost address');
+        if (claims.exp && claims.exp * 1000 < Date.now()) return reject(403, 'invalid JWT: expired');
       } catch (err) { rec.error = `jwt: ${err.message}`; }
-      // FCM rejects a JWT that is not signed by the key the subscription was created with.
-      if (!verified) { rec.status = 403; rec.error = rec.error || 'VAPID signature does not match the subscription applicationServerKey'; res.writeHead(403); return res.end(); }
+      if (!verified) return reject(403, rec.error || 'invalid JWT signature');
       try { rec.payload = decryptPush(body, state.ua); } catch (err) { rec.status = 400; rec.error = `decrypt: ${err.message}`; res.writeHead(400); return res.end(); }
       rec.status = 201;
       res.writeHead(201); res.end();
@@ -281,7 +303,7 @@ test('a subscription signed with a rotated key is reported and dropped so the ph
 });
 
 // ---- client side: notifications.js must notice a changed VAPID key and re-subscribe -------------
-function loadNotifications({ serverKey, existingKey, permission = 'granted', pwa = false, ios = false, popup = null }) {
+function loadNotifications({ serverKey, existingKey, permission = 'granted', grantOnAsk, pwa = false, ios = false, popup = null, role = 'admin' }) {
   const calls = [];
   const ua = makeUA();
   const b64ToBytes = (str) => { const pad = '='.repeat((4 - (str.length % 4)) % 4); const b = Buffer.from(String(str).replace(/-/g, '+').replace(/_/g, '/') + pad, 'base64'); return new Uint8Array(b); };
@@ -291,7 +313,7 @@ function loadNotifications({ serverKey, existingKey, permission = 'granted', pwa
     toJSON: () => ({ endpoint: 'https://fcm.googleapis.com/fcm/send/device', keys: { p256dh: ua.publicKey.toString('base64url'), auth: ua.authSecret.toString('base64url') } }),
     unsubscribe: async () => { calls.push('unsubscribe'); state.currentSub = null; return true; }
   });
-  const state = { currentSub: existingKey ? makeSub(existingKey) : null, posted: [] };
+  const state = { currentSub: existingKey ? makeSub(existingKey) : null, posted: [], prefsSaved: [] };
   const pushManager = {
     getSubscription: async () => state.currentSub,
     subscribe: async (opts) => {
@@ -307,22 +329,30 @@ function loadNotifications({ serverKey, existingKey, permission = 'granted', pwa
     setTimeout, clearTimeout, setInterval, clearInterval, PushManager: class {}, ServiceWorkerRegistration: class {},
     URL, URLSearchParams, Promise, Date, Math, JSON, Number, String, Array, Object, Buffer,
     location: { search: '', hash: '#/home', href: 'https://app.test/#/home' },
-    localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    localStorage: (() => { const m = new Map(); return { getItem: (k) => (m.has(String(k)) ? m.get(String(k)) : null), setItem: (k, v) => m.set(String(k), String(v)), removeItem: (k) => m.delete(String(k)) }; })(),
     document: { visibilityState: 'visible', title: 'x', addEventListener() {}, removeEventListener() {}, getElementById: () => null, querySelector: () => null },
     matchMedia: (q) => ({ matches: !!pwa && /standalone|fullscreen/.test(String(q)), addEventListener() {} }),
-    Notification: { permission, requestPermission: async () => permission },
+    // Real browser jaisa: prompt ke baad Notification.permission khud update hota hai.
+    Notification: (() => {
+      let perm = permission;
+      return { get permission() { return perm; }, requestPermission: async () => { perm = grantOnAsk === undefined ? permission : grantOnAsk; return perm; } };
+    })(),
     navigator: { userAgent: ios ? 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Version/17.0 Mobile/15E148 Safari/604.1' : 'Android Chrome', serviceWorker: { ready: Promise.resolve(reg), getRegistration: async () => reg, register: async () => reg }, vibrate: () => true, onLine: true, permissions: { query: async () => ({ state: permission, addEventListener() {} }) } }
   };
+  // Real iOS Safari (bina "Add to Home Screen") me serviceWorker / PushManager hote hi nahi —
+  // isliye wahan push support ka pata lagane wala check bhi false aana chahiye.
+  if (ios && !pwa) { delete sandbox.PushManager; delete sandbox.navigator.serviceWorker; }
   sandbox.window = sandbox; sandbox.self = sandbox; sandbox.globalThis = sandbox;
   sandbox.FF = {
     config: {},
     util: { $: (sel) => (sel === '#notification-pop' && popup ? popup : (sel === '#notification-btn' ? null : null)), toast: (m, k) => calls.push(`toast:${k}`), esc: (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])), timeLabel: () => 'now' },
     auth: {
-      user: { username: 'owner', role: 'admin', notifyAccess: true },
+      user: { username: role === 'user' ? 'staff' : 'owner', role, notifyAccess: true },
       api: async (route, method, body) => {
         calls.push(`${method || 'GET'} ${route}`);
         if (route === '/api/push/vapid') return { publicKey: serverKey };
         if (route === '/api/push/subscribe') { state.posted.push(body.subscription); return { ok: true }; }
+        if (route === '/api/notifications/prefs' && method === 'PUT') { state.prefsSaved.push((body && body.prefs) || {}); return { ok: true, prefs: body.prefs }; }
         if (route === '/api/push/status') return { ok: true, subs: state.posted.length || 1, publicKey: serverKey };
         return { ok: true };
       }
@@ -370,45 +400,233 @@ test('client heals a legacy SPKI-DER VAPID key instead of crashing subscribe()',
   assert.ok(!reuse.calls.includes('subscribe'), 'matching raw-point subscription ko dobara nahi banana chahiye');
 });
 
-test('bell panel always offers a way to turn on OS-panel notifications (mobile, PWA not installed)', async () => {
-  const key = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).publicKey.export({ format: 'der', type: 'spki' }).toString('base64url');
+// ---- 🧹 bell panel UI: sirf ek Notifications ON/OFF switch (+ monthly) ----------------------------
+test('bell panel me sirf Notifications ON/OFF + monthly switch hai — panel test / push test / warnings hata diye', async () => {
+  const key = rawPointOf(crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).publicKey);
   const mkPopup = () => { const el = { hidden: true, _html: '' }; Object.defineProperty(el, 'innerHTML', { get: () => el._html, set: (v) => { el._html = String(v); } }); return el; };
 
-  // Android Chrome, app installed NAHI hai, permission abhi maangi nahi gayi.
-  // Purana code yahan sirf "install app" hint dikhata tha — enable button reachable hi nahi tha.
+  // 1) Android Chrome, permission abhi maangi nahi gayi → switch + ek line hint (koi debug card nahi)
   const pop1 = mkPopup();
   const a = loadNotifications({ serverKey: key, permission: 'default', popup: pop1 });
   a.FF.notifications.state.items = [];
   a.FF.notifications.render();
-  assert.match(pop1.innerHTML, /data-notify-enable/, 'permission maangne ka button har haal me dikhna chahiye');
-  assert.match(pop1.innerHTML, /Mobile notifications on karo/);
+  assert.match(pop1.innerHTML, /data-notify-switch="master"/, 'master ON/OFF switch har haal me dikhna chahiye');
+  assert.match(pop1.innerHTML, /data-notify-switch="monthly"/, 'monthly report ka switch bhi chahiye');
+  assert.doesNotMatch(pop1.innerHTML, /data-notify-panel-test/, '📳 Panel test button panel se hata diya');
+  assert.doesNotMatch(pop1.innerHTML, /data-notify-push-test/, '🛰 Server push test button panel se hata diya');
+  assert.doesNotMatch(pop1.innerHTML, /data-notify-enable/, 'purana "Mobile notifications on karo" card hata diya');
+  assert.doesNotMatch(pop1.innerHTML, /Notification preferences/, 'per-type preference list ab Settings me hai');
+  assert.doesNotMatch(pop1.innerHTML, /data-notify-test/, '🔊 Test button bhi panel se gaya');
+  assert.equal((pop1.innerHTML.match(/notify-line/g) || []).length, 1, 'ek se zyada warning line nahi honi chahiye');
 
-  // iOS Safari, PWA installed nahi → install hint + button dono.
+  // 2) iOS Safari, PWA installed nahi → install ka lecture nahi, sirf switch
   const pop2 = mkPopup();
   const b = loadNotifications({ serverKey: key, permission: 'default', popup: pop2, ios: true });
   b.FF.notifications.render();
-  assert.match(pop2.innerHTML, /data-notify-enable/);
-  assert.match(pop2.innerHTML, /Add to Home Screen/);
+  assert.match(pop2.innerHTML, /data-notify-switch="master"/);
+  assert.match(pop2.innerHTML, /Add to Home Screen/, 'iOS par install ke bina push possible nahi — ek line ka hint zaroori hai');
+  assert.doesNotMatch(pop2.innerHTML, /notification-enable|notify-push-actions/, 'bade enable/test cards nahi chahiye');
+  assert.equal((pop2.innerHTML.match(/notify-line/g) || []).length, 1);
 
-  // Permission granted but subscription dead (VAPID rotate / server ne drop ki) → retry + diagnostics.
+  // 3) permission denied → ek chhoti line (technical dump nahi)
   const pop3 = mkPopup();
-  const c = loadNotifications({ serverKey: key, permission: 'granted', existingKey: null, popup: pop3 });
-  c.FF.notifications.state.pushOn = false;
-  c.FF.notifications.state.pushError = 'server par VAPID key nahi';
-  c.FF.notifications.state.pushStatus = { subs: 0, lastError: { status: 403, error: 'invalid VAPID key' } };
+  const c = loadNotifications({ serverKey: key, permission: 'denied', popup: pop3 });
+  c.FF.notifications.state.pushStatus = { subs: 0, lastError: { status: 403, error: 'permission denied: crypto-key header had no public application server key specified' } };
   c.FF.notifications.render();
-  assert.match(pop3.innerHTML, /data-notify-enable/, 'granted-but-broken state me retry button chahiye');
-  assert.match(pop3.innerHTML, /403/, 'failure ka status user ko dikhna chahiye (silent nahi)');
+  assert.match(pop3.innerHTML, /block/i, 'blocked permission ki ek saaf line chahiye');
+  assert.doesNotMatch(pop3.innerHTML, /crypto-key header/i, 'push service ka raw error user ko nahi dikhana');
+  assert.equal((pop3.innerHTML.match(/notify-line/g) || []).length, 1);
 
-  // Push ON → status + dono test buttons.
+  // 4) admin ko server-side config problem ka ishara mile (silent failure nahi) — normal user ko nahi
   const pop4 = mkPopup();
-  const d = loadNotifications({ serverKey: key, permission: 'granted', existingKey: key, popup: pop4 });
+  const d = loadNotifications({ serverKey: key, permission: 'granted', popup: pop4 });
   d.FF.notifications.state.pushOn = true;
-  d.FF.notifications.state.pushDevices = 2;
-  d.FF.notifications.state.pushStatus = { subs: 2, lastOk: { at: new Date().toISOString(), status: 201 } };
+  d.FF.notifications.state.pushStatus = { subs: 1, configError: { status: 403, error: 'permission denied: crypto-key header had no public application server key specified' } };
   d.FF.notifications.render();
-  assert.match(pop4.innerHTML, /push ON/);
-  assert.match(pop4.innerHTML, /data-notify-panel-test/);
-  assert.match(pop4.innerHTML, /data-notify-push-test/);
-  assert.match(pop4.innerHTML, /2 device registered/);
+  assert.match(pop4.innerHTML, /Push diagnostics/, 'admin ko Settings ke diagnostics ki taraf bhejo');
+
+  const pop5 = mkPopup();
+  const e = loadNotifications({ serverKey: key, permission: 'granted', popup: pop5, role: 'user' });
+  e.FF.notifications.state.pushOn = true;
+  e.FF.notifications.state.pushStatus = { subs: 1, configError: { status: 403, error: 'crypto-key header had no public application server key specified' } };
+  e.FF.notifications.render();
+  assert.doesNotMatch(pop5.innerHTML, /crypto-key|Push diagnostics/, 'normal user ko server internals nahi dikhne chahiye');
+
+  // 5) master OFF → switch off, monthly disabled, ek line note
+  const pop6 = mkPopup();
+  const f = loadNotifications({ serverKey: key, permission: 'granted', popup: pop6 });
+  f.FF.notifications.state.prefs.enabled = false;
+  f.FF.notifications.render();
+  assert.match(pop6.innerHTML, /class="ff-switch " role="switch" aria-checked="false"/, 'master switch OFF dikhe');
+  assert.match(pop6.innerHTML, /OFF — koi alert nahi/);
+  assert.match(pop6.innerHTML, /disabled[^>]*data-notify-switch="monthly"/, 'master OFF me monthly switch disabled');
+});
+
+test('master switch: ON → permission + push subscribe, OFF → unsubscribe + koi alert nahi', async () => {
+  const key = rawPointOf(crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).publicKey);
+  const c = loadNotifications({ serverKey: key, permission: 'default', grantOnAsk: 'granted' });
+  const N = c.FF.notifications;
+
+  assert.equal(await N.setEnabled(true), true, 'permission milne par setEnabled(true) succeed hona chahiye');
+  assert.ok(c.calls.includes('subscribe'), 'ON karte hi web push subscribe honi chahiye');
+  assert.equal(c.state.posted.length, 1, 'nayi subscription server par register honi chahiye');
+  assert.equal(N.prefs.enabled, true);
+  assert.equal(N.state.pushOn, true);
+  const saved = c.state.prefsSaved[c.state.prefsSaved.length - 1] || {};
+  assert.equal(saved.enabled, true, 'preference server par save honi chahiye (dusra device bhi sync rahe)');
+  assert.ok(c.calls.includes('PUT /api/notifications/prefs'));
+
+  await N.setEnabled(false);
+  assert.ok(c.calls.includes('unsubscribe'), 'OFF karte hi push subscription hat jaani chahiye');
+  assert.equal(N.prefs.enabled, false);
+  assert.equal(N.state.pushOn, false);
+  assert.equal((c.state.prefsSaved[c.state.prefsSaved.length - 1] || {}).enabled, false);
+
+  c.calls.length = 0;
+  await N.browserAlert({ type: 'info', title: 'hello', body: 'x', meta: {} });
+  assert.ok(!c.calls.some((x) => x.startsWith('toast:')), 'master OFF me koi in-app toast nahi aana chahiye');
+});
+
+test('permission sirf ek hi baar khud maangi jaati hai (baar-baar prompt nahi)', async () => {
+  const key = rawPointOf(crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).publicKey);
+  const c = loadNotifications({ serverKey: key, permission: 'default', grantOnAsk: 'granted' });
+  const N = c.FF.notifications;
+  assert.equal(N.maybeAskPermission(), true, 'pehli baar permission maangni chahiye');
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(c.state.posted.length, 1, 'permission milte hi subscription server par chali jaani chahiye');
+  assert.equal(N.maybeAskPermission(), false, 'doosri baar prompt nahi (user pareshan na ho)');
+
+  // Master OFF ho to permission bhi nahi maangni chahiye.
+  const d = loadNotifications({ serverKey: key, permission: 'default', grantOnAsk: 'granted' });
+  d.FF.notifications.state.prefs.enabled = false;
+  assert.equal(d.FF.notifications.maybeAskPermission(), false);
+});
+
+test('server-side config error (FCM crypto-key 403) subscription KO DROP NAHI karta', async () => {
+  // Ye wahi haalat hai jisne phone ka panel hamesha silent rakha: push service 403 deti thi aur
+  // server use "dead subscription" maan kar delete kar deta tha → client "permission granted par
+  // subscription active nahi" loop me phans jaata tha.
+  const mock = await startMockAppsScript({ secret: SECRET });
+  const push = await startMockPushService();
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'apna-push-cfg-'));
+  let server;
+  try {
+    server = await startServer({ STORAGE_BACKEND: '', APPS_SCRIPT_URL: mock.url, APPS_SCRIPT_SECRET: SECRET, ADMIN_USER: 'owner', ADMIN_PASSWORD: 'owner-password', RENDER: 'true', DATA_DIR: dir });
+    let cookie = '';
+    const call = async (route, method = 'GET', body) => {
+      const res = await fetch(server.base + route, { method, headers: { cookie, 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
+      return { res, json: await res.json().catch(() => ({})) };
+    };
+    cookie = (await call('/api/auth/login', 'POST', { username: 'owner', password: 'owner-password' })).res.headers.get('set-cookie').split(';')[0];
+    const vapid = (await call('/api/push/vapid')).json.publicKey;
+    const ua = makeUA();
+    push.state.ua = ua;
+    push.state.expectedKey = vapid;
+    await call('/api/push/subscribe', 'POST', { subscription: { endpoint: push.url('cfg-device'), keys: { p256dh: ua.publicKey.toString('base64url'), auth: ua.authSecret.toString('base64url') } } });
+
+    // Delivery modern RFC 8292 scheme se honi chahiye: Authorization: vapid t=…, k=<public key>
+    push.state.failWith = 403;
+    push.state.failError = 'permission denied: crypto-key header had no public application server key specified';
+    await call('/api/activity', 'POST', { type: 'settings', details: 'config error test' });
+    for (let i = 0; i < 40 && !push.state.deliveries.length; i++) await sleep(50);
+    assert.equal(push.state.deliveries[0].status, 403);
+    await sleep(300);
+    const status = (await call('/api/push/status')).json;
+    assert.equal(status.subs, 1, 'server ki config problem me user ki subscription delete nahi honi chahiye');
+    assert.ok(status.configError, 'config error surface hona chahiye (silent failure nahi)');
+    assert.match(status.configError.error, /crypto-key/);
+    const health = (await call('/api/health')).json;
+    assert.match(health.push.warning, /crypto-key|reject/, 'admin ko /api/health par warning dikhni chahiye');
+    assert.equal(health.push.selfTest.ok, true, 'VAPID self-test pass hona chahiye');
+    assert.equal(health.push.scheme, 'vapid');
+    assert.match(health.push.subject, /^mailto:/);
+
+    // Config theek hote hi (failWith hataya) wahi subscription deliver ho jaati hai — re-subscribe ki zaroorat nahi.
+    push.state.failWith = 0; push.state.failError = '';
+    push.state.deliveries.length = 0;
+    await call('/api/activity', 'POST', { type: 'settings', details: 'recovered' });
+    for (let i = 0; i < 40 && !push.state.deliveries.length; i++) await sleep(50);
+    assert.equal(push.state.deliveries[0].status, 201, `recovery ke baad delivery chahiye: ${push.state.deliveries[0].error}`);
+    assert.equal(push.state.deliveries[0].scheme, 'vapid', 'delivery RFC 8292 vapid scheme se honi chahiye');
+    assert.match(push.state.deliveries[0].auth, /^vapid t=[^,]+, k=/);
+    assert.equal(push.state.deliveries[0].sentKey, vapid, 'public key Authorization header me honi chahiye');
+    assert.equal(push.state.deliveries[0].cryptoKey, '', 'aes128gcm ke saath Crypto-Key header ki zaroorat nahi');
+  } finally {
+    if (server) await server.stop();
+    await push.close(); await mock.close();
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('legacy-only push service (WebPush + Crypto-Key) par automatic fallback chalta hai', async () => {
+  const mock = await startMockAppsScript({ secret: SECRET });
+  const push = await startMockPushService();
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'apna-push-legacy-'));
+  let server;
+  try {
+    server = await startServer({ STORAGE_BACKEND: '', APPS_SCRIPT_URL: mock.url, APPS_SCRIPT_SECRET: SECRET, ADMIN_USER: 'owner', ADMIN_PASSWORD: 'owner-password', RENDER: 'true', DATA_DIR: dir });
+    let cookie = '';
+    const call = async (route, method = 'GET', body) => {
+      const res = await fetch(server.base + route, { method, headers: { cookie, 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
+      return { res, json: await res.json().catch(() => ({})) };
+    };
+    cookie = (await call('/api/auth/login', 'POST', { username: 'owner', password: 'owner-password' })).res.headers.get('set-cookie').split(';')[0];
+    const vapid = (await call('/api/push/vapid')).json.publicKey;
+    const ua = makeUA();
+    push.state.ua = ua;
+    push.state.expectedKey = vapid;
+    push.state.legacyOnly = true; // purani push service: sirf WebPush + Crypto-Key samajhti hai
+    await call('/api/push/subscribe', 'POST', { subscription: { endpoint: push.url('legacy-device'), keys: { p256dh: ua.publicKey.toString('base64url'), auth: ua.authSecret.toString('base64url') } } });
+    const out = await call('/api/push/test', 'POST', {});
+    assert.equal(out.json.delivered, 1, JSON.stringify(out.json));
+    const ok = push.state.deliveries.find((d) => d.status === 201);
+    assert.ok(ok, 'legacy scheme par delivery honi chahiye');
+    assert.equal(ok.scheme, 'legacy');
+    assert.match(ok.cryptoKey, /^p256ecdsa=/, 'legacy scheme me Crypto-Key: p256ecdsa=<key> bhejna zaroori hai');
+    assert.match(ok.auth, /^WebPush /);
+    assert.equal((await call('/api/health')).json.push.scheme, 'legacy', 'kaam karne wala scheme yaad rehna chahiye');
+  } finally {
+    if (server) await server.stop();
+    await push.close(); await mock.close();
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('master switch OFF wale user ko server push fan-out nahi karta', async () => {
+  const mock = await startMockAppsScript({ secret: SECRET });
+  const push = await startMockPushService();
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'apna-push-off-'));
+  let server;
+  try {
+    server = await startServer({ STORAGE_BACKEND: '', APPS_SCRIPT_URL: mock.url, APPS_SCRIPT_SECRET: SECRET, ADMIN_USER: 'owner', ADMIN_PASSWORD: 'owner-password', RENDER: 'true', DATA_DIR: dir });
+    let cookie = '';
+    const call = async (route, method = 'GET', body) => {
+      const res = await fetch(server.base + route, { method, headers: { cookie, 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
+      return { res, json: await res.json().catch(() => ({})) };
+    };
+    cookie = (await call('/api/auth/login', 'POST', { username: 'owner', password: 'owner-password' })).res.headers.get('set-cookie').split(';')[0];
+    const vapid = (await call('/api/push/vapid')).json.publicKey;
+    const ua = makeUA();
+    push.state.ua = ua;
+    push.state.expectedKey = vapid;
+    await call('/api/push/subscribe', 'POST', { subscription: { endpoint: push.url('off-device'), keys: { p256dh: ua.publicKey.toString('base64url'), auth: ua.authSecret.toString('base64url') } } });
+
+    await call('/api/activity', 'POST', { type: 'settings', details: 'on test' });
+    for (let i = 0; i < 40 && !push.state.deliveries.length; i++) await sleep(50);
+    assert.equal(push.state.deliveries.length, 1, 'switch ON me push aani chahiye');
+
+    assert.equal((await call('/api/notifications/prefs', 'PUT', { prefs: { enabled: false } })).json.prefs.enabled, false);
+    assert.equal((await call('/api/push/status')).json.enabled, false);
+    push.state.deliveries.length = 0;
+    await call('/api/activity', 'POST', { type: 'settings', details: 'off test' });
+    await sleep(600);
+    assert.equal(push.state.deliveries.length, 0, '🔕 Notifications OFF hone par koi push nahi jaani chahiye');
+    // Feed me entry phir bhi banti hai (history), sirf alert band hota hai.
+    const feed = (await call('/api/notifications')).json;
+    assert.ok(Array.isArray(feed.items), 'feed kaam karta rahe');
+  } finally {
+    if (server) await server.stop();
+    await push.close(); await mock.close();
+    await fs.rm(dir, { recursive: true, force: true });
+  }
 });

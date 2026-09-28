@@ -654,7 +654,7 @@ window.FF = window.FF || {};
   function pushBanner(push) {
     const old = U.$('#push-banner'); if (old) old.remove();
     if (!push || push.enabled === false || !push.warning) return;
-    const el = U.h(`<div class="storage-banner" id="push-banner" role="alert"><span>📲 <b>Mobile push notifications toot sakte hain</b> — ${U.esc(push.warning)} </span><button class="btn small ghost" aria-label="Hide" data-hide-push-banner>✕</button></div>`);
+    const el = U.h(`<div class="storage-banner" id="push-banner" role="alert"><span>📲 <b>Mobile push notifications toot sakte hain</b> — ${U.esc(push.warning)} </span><a class="btn small primary" href="#/settings?tab=account">🩺 Push diagnostics</a><button class="btn small ghost" aria-label="Hide" data-hide-push-banner>✕</button></div>`);
     el.querySelector('[data-hide-push-banner]').addEventListener('click', () => el.remove());
     const main = U.$('#main');
     if (main && main.parentNode) main.parentNode.insertBefore(el, main); else document.body.prepend(el);

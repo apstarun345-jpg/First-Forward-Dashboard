@@ -215,7 +215,9 @@ function verifyPassword(password, stored) {
   return ref.length === test.length && crypto.timingSafeEqual(ref, test);
 }
 const normUser = (u) => String(u || '').trim().toLowerCase().replace(/[^a-z0-9._@-]/g, '').slice(0, 60);
-const DEFAULT_NOTIFY_PREFS = { login: true, signup: true, report: true, monthly: true, activity: true, click: true, search: true, settings: true, user: true, location: true, info: true, sound: true, push: true };
+// `enabled` = master switch (UI me ek hi "Notifications ON/OFF" button hai). OFF → koi in-app toast
+// nahi, koi browser alert nahi, koi mobile push nahi. Feed items phir bhi save hote hain (history).
+const DEFAULT_NOTIFY_PREFS = { enabled: true, login: true, signup: true, report: true, monthly: true, activity: true, click: true, search: true, settings: true, user: true, location: true, info: true, sound: true, push: true };
 function normalizeNotifyPrefs(p) {
   const out = { ...DEFAULT_NOTIFY_PREFS };
   if (p && typeof p === 'object') for (const k of Object.keys(DEFAULT_NOTIFY_PREFS)) if (p[k] !== undefined) out[k] = !!p[k];
@@ -555,7 +557,39 @@ const VAPID_FILE = path.join(DATA_DIR, 'vapid.json');
 // 24h TTL: phone off / doze / no-network ho to push service message drop na kare (pehle 120s tha).
 const PUSH_TTL = String(Math.min(2419200, Math.max(60, Number(process.env.PUSH_TTL_SECONDS || 86400))));
 // 4xx = subscription ya key kharab → drop karo taaki device fresh subscribe kare. 5xx/network = retry.
-const PUSH_DEAD_STATUS = new Set([400, 401, 403, 404, 410, 413]);
+// ⚠️ 401/403 is list me JAAN-BOOJH kar nahi hain: wo push-service ki auth/header complaint bhi ho
+// sakti hai (server config problem) — aisi halat me subscription drop karna galat hai, warna phone
+// "permission granted par subscription active nahi" wale loop me phans jaata hai. Faisla message se
+// hota hai (classifyPushFailure) + subscription kis VAPID key se bani thi (sub.vapid) se.
+const PUSH_DEAD_STATUS = new Set([400, 404, 410, 413]);
+// RFC 8292 §2.1 'sub' claim: mailto:/https: contact. FCM + Apple localhost/.local jaise subjects ko
+// 403 BadJwtToken se reject kar dete hain, isliye default ek real domain hai (env se override karo).
+const VAPID_SUBJECT = (() => {
+  const env = String(process.env.VAPID_SUBJECT || '').trim();
+  if (env) return /^(mailto:|https:)/i.test(env) ? env : `mailto:${env}`;
+  return 'mailto:admin@apnapayment.com';
+})();
+/**
+ * Push service ko bhejne wale auth headers.
+ *
+ * 🔴 PERMANENT FIX — pehle ka bug: sirf `Authorization: WebPush <jwt>` bheja jaata tha.
+ * "WebPush" legacy scheme (draft-ietf-webpush-vapid-01) me public application server key
+ * `Crypto-Key: p256ecdsa=<key>` header me bhejna ZAROORI hai. Uske bina FCM (Android Chrome ke
+ * saare endpoints) ye 403 deta hai:
+ *     permission denied: crypto-key header had no public application server key specified
+ * — aur 403 ko "dead subscription" maan kar hum use delete kar dete the, isliye phone ka panel
+ * hamesha silent reh jaata tha jabki in-app bell chalta rehta tha.
+ *
+ * Ab modern RFC 8292 scheme default hai (`Authorization: vapid t=<jwt>, k=<public key>`) — isme
+ * public key Authorization header me hi hoti hai, koi Crypto-Key header nahi chahiye. Legacy-only
+ * push services ke liye automatic fallback bhi hai (`WebPush` + `Crypto-Key: p256ecdsa=`).
+ */
+let pushAuthScheme = String(process.env.PUSH_AUTH_SCHEME || '').trim().toLowerCase() === 'legacy' ? 'legacy' : 'vapid';
+/** Server-side VAPID config (headers/JWT/key) ki complaint — subscription isme BEKASOOR hai. */
+const PUSH_CONFIG_ERROR_RE = /(crypto[- ]?key|public application server key|p256ecdsa|badjwttoken|jwt|vapid|permission denied|unauthorized|unauthorised|invalid[ _-]?(authorization|auth|token|key|header)|missing (required )?(header|key)|not authorized)/i;
+/** Subscription khud kharab (key rotate / expired / unregister) — device ko re-subscribe karna chahiye. */
+const PUSH_MISMATCH_RE = /(does ?n[o']?t match|not match|mismatch|different (application server )?key|wrong key|expired|invalid[ _-]?registration|not registered|unregistered|subscription (is )?(no longer|invalid|expired))/i;
+let pushConfigError = null; // { status, error, at, host } — health + admin banner ke liye
 let vapidKeys = null;
 let vapidSource = 'none';
 let vapidDurable = false; // keys durable store me safe hain? (health + banner ke liye)
@@ -678,9 +712,57 @@ function hkdfExpand(prk, info, len) {
 function vapidJwt(endpoint) {
   const aud = new URL(endpoint).origin;
   const header = b64url(JSON.stringify({ typ: 'JWT', alg: 'ES256' }));
-  const payload = b64url(JSON.stringify({ aud, exp: Math.floor(Date.now() / 1000) + 12 * 3600, sub: 'mailto:admin@apnapayment.local' }));
+  // exp ≤ 24h (RFC 8292) aur aud = push resource ka origin — dono push services strictly check karti hain.
+  const payload = b64url(JSON.stringify({ aud, exp: Math.floor(Date.now() / 1000) + 12 * 3600, sub: VAPID_SUBJECT }));
   const sig = crypto.createSign('sha256').update(`${header}.${payload}`).sign({ key: vapidKeys.privateKey, dsaEncoding: 'ieee-p1363' });
   return `${header}.${payload}.${b64url(sig)}`;
+}
+/**
+ * Auth headers — 'vapid' (RFC 8292, default) ya 'legacy' (draft-01: WebPush + Crypto-Key).
+ * Dono me public key 65-byte raw uncompressed point (base64url) hi jaati hai.
+ */
+function vapidHeaders(endpoint, scheme) {
+  const jwt = vapidJwt(endpoint);
+  const pub = vapidKeys.publicKey;
+  if (scheme === 'legacy') return { Authorization: `WebPush ${jwt}`, 'Crypto-Key': `p256ecdsa=${pub}` };
+  return { Authorization: `vapid t=${jwt}, k=${pub}` };
+}
+/** 400/401/403 ka matlab: hamari config kharab, ya subscription kharab? */
+function classifyPushFailure(status, error) {
+  const text = String(error || '');
+  if (status === 0) return 'transient';
+  if (!PUSH_DEAD_STATUS.has(status) && ![401, 403].includes(status)) return 'transient';
+  if (PUSH_MISMATCH_RE.test(text)) return 'mismatch';
+  if (PUSH_CONFIG_ERROR_RE.test(text)) return 'config';
+  // Message pehchaan me nahi aaya: 400/404/410/413 = subscription dead. 401/403 = server ki
+  // auth problem maano (subscription drop karne se user ka panel hamesha ke liye toot jaata tha).
+  return PUSH_DEAD_STATUS.has(status) ? 'mismatch' : 'config';
+}
+/**
+ * Boot-time self test: apni hi public key se JWT verify karo + key ka format check karo.
+ * Isse deploy ke turant baad pata chal jaata hai ki push bhejne layak hai ya nahi — phone par
+ * trial karne ki zaroorat nahi. /api/health me bhi dikhta hai.
+ */
+function vapidSelfTest() {
+  if (!vapidKeys) return { ok: false, error: 'VAPID keys load nahi hui' };
+  const endpoint = 'https://fcm.googleapis.com/fcm/send/selftest';
+  try {
+    const bytes = Buffer.from(vapidKeys.publicKey, 'base64url');
+    if (bytes.length !== 65 || bytes[0] !== 4) throw new Error(`public key ${bytes.length} bytes ki hai — browser/push service 65-byte raw point (0x04||X||Y) maangte hain`);
+    const [h, p, s] = vapidJwt(endpoint).split('.');
+    const pub = crypto.createPublicKey({ key: { kty: 'EC', crv: 'P-256', x: bytes.subarray(1, 33).toString('base64url'), y: bytes.subarray(33, 65).toString('base64url') }, format: 'jwk' });
+    if (!crypto.verify('sha256', Buffer.from(`${h}.${p}`), { key: pub, dsaEncoding: 'ieee-p1363' }, Buffer.from(s, 'base64url'))) throw new Error('JWT apni hi public key se verify nahi hua (keypair corrupt)');
+    const claims = JSON.parse(Buffer.from(p, 'base64url').toString());
+    if (claims.aud !== 'https://fcm.googleapis.com') throw new Error('JWT ka aud claim push service origin nahi hai');
+    if (!/^(mailto:|https:)/.test(claims.sub)) throw new Error(`JWT ka sub claim mailto:/https: hona chahiye, mila: ${claims.sub}`);
+    if (/localhost|\.local$/i.test(claims.sub)) throw new Error(`sub claim "${claims.sub}" localhost jaisa hai — FCM/Apple ise 403 BadJwtToken dete hain (VAPID_SUBJECT env set karo)`);
+    const headers = vapidHeaders(endpoint, pushAuthScheme);
+    if (pushAuthScheme === 'legacy' && !headers['Crypto-Key']) throw new Error('legacy scheme me Crypto-Key header missing');
+    if (pushAuthScheme !== 'legacy' && !/k=/.test(headers.Authorization)) throw new Error('vapid scheme me public key (k=) missing — push service 403 degi');
+    return { ok: true, scheme: pushAuthScheme, subject: claims.sub, publicKeyBytes: bytes.length, durable: vapidDurable, source: vapidSource };
+  } catch (err) {
+    return { ok: false, scheme: pushAuthScheme, subject: VAPID_SUBJECT, durable: vapidDurable, source: vapidSource, error: err.message };
+  }
 }
 /** RFC 8291 aes128gcm encrypted push body. */
 function encryptPush(subscription, data) {
@@ -722,53 +804,152 @@ function logPushEvent(ev) {
   log.push({ at: new Date().toISOString(), ...ev });
   if (log.length > 40) db.notify.pushLog = log.slice(-40);
 }
-async function deliverPush(sub, data) {
-  if (!vapidKeys) return { ok: false, status: 0, error: 'VAPID keys not loaded' };
-  try {
-    const body = encryptPush(sub, data);
-    const res = await fetch(sub.endpoint, {
-      method: 'POST',
-      headers: { Authorization: `WebPush ${vapidJwt(sub.endpoint)}`, 'Content-Encoding': 'aes128gcm', 'Content-Type': 'application/octet-stream', TTL: PUSH_TTL, Urgency: 'high' },
-      body, signal: AbortSignal.timeout(15000)
-    });
-    const status = res.status;
-    if (status >= 200 && status < 300) return { ok: true, status };
-    const text = await res.text().catch(() => '');
-    return { ok: false, status, error: String(text || res.statusText || '').slice(0, 200) };
-  } catch (err) {
-    // Network hiccup / timeout — subscription rakho, next event par retry hoga.
-    return { ok: false, status: 0, error: err.message, transient: true };
-  }
+async function pushRequest(sub, body, scheme) {
+  const res = await fetch(sub.endpoint, {
+    method: 'POST',
+    headers: { ...vapidHeaders(sub.endpoint, scheme), 'Content-Encoding': 'aes128gcm', 'Content-Type': 'application/octet-stream', TTL: PUSH_TTL, Urgency: 'high' },
+    body, signal: AbortSignal.timeout(15000)
+  });
+  const status = res.status;
+  if (status >= 200 && status < 300) return { ok: true, status, scheme };
+  const text = await res.text().catch(() => '');
+  return { ok: false, status, scheme, error: String(text || res.statusText || '').slice(0, 200) };
 }
-/** Delivery result ko handle karo: log + dead subscription drop (taaki phone re-subscribe kare). */
+async function deliverPush(sub, data) {
+  if (!vapidKeys) return { ok: false, status: 0, error: 'VAPID keys not loaded', kind: 'config' };
+  // Subscription kis VAPID key se bani thi? Key rotate ho gayi ho to request bhejne se pehle hi
+  // bata do — push service ka 403 guess karne ki zaroorat nahi (device khud re-subscribe karega).
+  if (sub.vapid && sub.vapid !== vapidKeys.publicKey) {
+    return { ok: false, status: 0, error: 'subscription purani VAPID key se bani hai (key rotate hui) — device re-subscribe karega', kind: 'mismatch' };
+  }
+  let body;
+  try { body = encryptPush(sub, data); } catch (err) { return { ok: false, status: 0, error: `encrypt failed: ${err.message}`, kind: 'config' }; }
+  // Pehle preferred scheme; auth/header wali complaint (403 crypto-key / jwt) aaye to dusri scheme
+  // se ek retry — isse koi bhi push service (FCM, Mozilla, Apple) miss nahi hoti.
+  const order = pushAuthScheme === 'legacy' ? ['legacy', 'vapid'] : ['vapid', 'legacy'];
+  let result = null;
+  for (let i = 0; i < order.length; i++) {
+    const scheme = order[i];
+    try {
+      result = await pushRequest(sub, body, scheme);
+    } catch (err) {
+      // Network hiccup / timeout — subscription rakho, next event par retry hoga.
+      return { ok: false, status: 0, error: err.message, transient: true, kind: 'transient', scheme };
+    }
+    if (result.ok) {
+      if (scheme !== pushAuthScheme) {
+        pushAuthScheme = scheme;
+        console.log(`📲 Push auth scheme "${scheme}" kaam kar gaya — aage ke saare push isi se bhejenge.`);
+      }
+      return result;
+    }
+    if (classifyPushFailure(result.status, result.error) !== 'config') break; // subscription dead → doosri scheme bekar
+  }
+  if (result) result.kind = classifyPushFailure(result.status, result.error);
+  return result;
+}
+/** Delivery result ko handle karo: log + sirf genuinely dead subscription drop (taaki phone re-subscribe kare). */
 function handlePushResult(sub, result, extra) {
   const host = hostOf(sub);
-  if (result.ok) { logPushEvent({ username: sub.username, host, status: result.status, ok: true, ...extra }); return true; }
-  const dead = !result.transient && PUSH_DEAD_STATUS.has(result.status);
-  console.warn(`push delivery failed: status ${result.status || 'network'} · ${host} · ${sub.username || '?'}${extra && extra.type ? ` · ${extra.type}` : ''} · ${result.error || ''} — ${dead ? 'subscription drop (device re-subscribe karega)' : 'transient, subscription kept'}`);
-  logPushEvent({ username: sub.username, host, status: result.status, ok: false, error: String(result.error || '').slice(0, 200), dead, ...extra });
+  if (result.ok) {
+    if (pushConfigError) { pushConfigError = null; console.log('📲 Push delivery wapas sahi ho gayi — config warning hata di.'); }
+    logPushEvent({ username: sub.username, host, status: result.status, ok: true, scheme: result.scheme || pushAuthScheme, ...extra });
+    return true;
+  }
+  const kind = result.kind || classifyPushFailure(result.status, result.error);
+  const transient = kind === 'transient' || !!result.transient;
+  const dead = !transient && (kind === 'mismatch' || PUSH_DEAD_STATUS.has(result.status));
+  const config = !transient && !dead;
+  const verdict = dead ? 'subscription drop (device re-subscribe karega)' : config ? 'SERVER CONFIG problem — subscription rakhi gayi' : 'transient, subscription kept';
+  console.warn(`push delivery failed: status ${result.status || 'network'} · ${host} · ${sub.username || '?'}${extra && extra.type ? ` · ${extra.type}` : ''} · scheme ${result.scheme || pushAuthScheme} · ${result.error || ''} — ${verdict}`);
+  logPushEvent({ username: sub.username, host, status: result.status, ok: false, error: String(result.error || '').slice(0, 200), dead, config, scheme: result.scheme || pushAuthScheme, ...extra });
+  if (config) {
+    pushConfigError = { status: result.status, error: String(result.error || '').slice(0, 300), host, at: new Date().toISOString(), hint: 'Push service ne VAPID auth reject ki. /api/health ka push.selfTest dekho; zaroorat ho to VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY env set karo.' };
+    if (!db.notify || typeof db.notify !== 'object') db.notify = { items: [], watch: {}, push: [] };
+    db.notify.pushHealth = pushConfigError;
+  } else if (pushConfigError && db.notify) {
+    delete db.notify.pushHealth;
+  }
   if (dead) dropSub(sub);
   return false;
 }
-/** Push health for the signed-in user (bell panel me dikhta hai + mobile debugging). */
+/**
+ * Jinki subscription kisi PURANI VAPID key se bani thi unhe boot par hi hata do. Push service unhe
+ * hamesha 403 degi; pehle wo har fan-out par fail hoti thin aur device ka panel silent reh jaata tha.
+ * Hataane se client (notifications.js / sw.js) app khulte hi nayi subscription bana leta hai.
+ */
+function pruneStalePushSubs() {
+  if (!vapidKeys) return 0;
+  const arr = pushSubs();
+  const keep = arr.filter((s) => !s.vapid || s.vapid === vapidKeys.publicKey);
+  const removed = arr.length - keep.length;
+  if (removed > 0) {
+    db.notify.push = keep;
+    console.warn(`📲 ${removed} purani VAPID key wali subscription hata di — ye devices app khulte hi dobara subscribe kar lenge.`);
+    persist('notify').catch(() => {});
+  }
+  return removed;
+}
+/** Global push health — /api/health (public) me dikhta hai taaki deploy ke turant baad confirm ho. */
+function pushHealth() {
+  const selfTest = vapidSelfTest();
+  const warnings = [];
+  if (!vapidKeys) warnings.push('VAPID keypair load nahi hui — mobile push band hai.');
+  else if (!vapidDurable) warnings.push('VAPID keys sirf temporary container disk par hain — deploy/restart par phone push toot jaayenge. VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY env set karo.');
+  if (!selfTest.ok) warnings.push(`VAPID self-test fail: ${selfTest.error}`);
+  if (pushConfigError) warnings.push(`Push service ne delivery reject ki (${pushConfigError.status}): ${pushConfigError.error}`);
+  return {
+    enabled: !!vapidKeys,
+    keySource: vapidSource,
+    durable: vapidDurable,
+    scheme: pushAuthScheme,
+    subject: VAPID_SUBJECT,
+    devices: pushSubs().length,
+    ttl: Number(PUSH_TTL),
+    selfTest,
+    configError: pushConfigError,
+    warning: warnings.join(' ') || null
+  };
+}
+/** Keys durable store me na ja saki ho (Apps Script timeout) to background me retry karte raho. */
+function ensureVapidDurable() {
+  if (vapidDurable || STORAGE_BACKEND === 'files') return;
+  const timer = setInterval(() => {
+    if (vapidDurable) { clearInterval(timer); return; }
+    console.warn('📲 VAPID keys abhi durable nahi hain — dobara save karne ki koshish…');
+    void saveVapidDurable();
+  }, 60e3);
+  timer.unref();
+}
+/** Push health for the signed-in user (bell panel + Settings → Push diagnostics). */
 function pushStatusFor(user) {
   const mine = pushSubs().filter((s) => s.username === user.username);
   const events = pushLog().filter((e) => e.username === user.username).slice(-10).reverse();
   const lastError = events.find((e) => !e.ok) || null;
   const lastOk = events.find((e) => e.ok) || null;
   const prefs = normalizeNotifyPrefs(user.notifyPrefs);
+  const staleKey = mine.filter((s) => s.vapid && vapidKeys && s.vapid !== vapidKeys.publicKey).length;
   return {
     ok: true,
     supported: !!vapidKeys,
     keySource: vapidSource,
+    keyDurable: vapidDurable,
+    scheme: pushAuthScheme,
+    subject: VAPID_SUBJECT,
+    selfTest: vapidSelfTest(),
+    configError: pushConfigError,
     publicKey: vapidKeys ? vapidKeys.publicKey : '',
     ttl: Number(PUSH_TTL),
     subs: mine.length,
-    devices: mine.map((s) => ({ host: hostOf(s), at: s.at || '' })),
+    staleKeySubs: staleKey,
+    devices: mine.map((s) => ({ host: hostOf(s), at: s.at || '', staleKey: !!(s.vapid && vapidKeys && s.vapid !== vapidKeys.publicKey) })),
+    enabled: prefs.enabled !== false,
     prefsPush: prefs.push !== false,
     notifyAccess: user.role === 'admin' || user.notifyAccess !== false,
     lastOk: lastOk ? { at: lastOk.at, status: lastOk.status, host: lastOk.host } : null,
-    lastError: lastError ? { at: lastError.at, status: lastError.status, error: lastError.error, host: lastError.host, dead: !!lastError.dead } : null
+    lastError: lastError ? { at: lastError.at, status: lastError.status, error: lastError.error, host: lastError.host, dead: !!lastError.dead, config: !!lastError.config } : null,
+    // Admin ko poora picture: sab devices + global config health (normal user ko sirf apna).
+    ...(user.role === 'admin' ? { allSubs: pushSubs().length, totalDevices: pushSubs().length } : {})
   };
 }
 /** Fan-out a notification to push subscriptions (admin-targeted → admin subs, broadcast → everyone). Per-user push + sound preference bhi respect karo. */
@@ -779,6 +960,7 @@ function pushFanout(item) {
     if (!u) return false;
     if (u.role !== 'admin' && u.notifyAccess === false) return false;
     const prefs = normalizeNotifyPrefs(u.notifyPrefs);
+    if (prefs.enabled === false) return false; // master switch OFF → koi push nahi
     if (prefs.push === false) return false;
     if (prefs[item.type] === false) return false;
     // Admin ko HAR notification push hota hai; normal user ko sirf apna personal/broadcast
@@ -893,7 +1075,7 @@ async function handleApi(req, res, url) {
   const user = sessionUser(req);
 
   if (p === '/api/health' && method === 'GET') {
-    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.2.0', storage: storageStatus(), push: { enabled: !!vapidKeys, keySource: vapidSource, durable: vapidDurable, devices: pushSubs().length, ttl: Number(PUSH_TTL), warning: vapidKeys && !vapidDurable ? 'VAPID keys sirf temporary container disk par hain — deploy/restart par phone push toot jaayenge. VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY env set karo.' : null }, users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null });
+    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.2.0', storage: storageStatus(), push: pushHealth(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null });
   }
   if (p === '/api/public-config' && method === 'GET') return sendJson(res, 200, publicSettings());
 
@@ -1068,7 +1250,7 @@ async function handleApi(req, res, url) {
     const sub = body.subscription;
     if (!sub || !String(sub.endpoint || '').startsWith('http') || !sub.keys || !sub.keys.p256dh || !sub.keys.auth) throw new HttpError(400, 'Subscription invalid hai.');
     const arr = pushSubs();
-    const clean = { username: user.username, endpoint: String(sub.endpoint).slice(0, 600), keys: { p256dh: String(sub.keys.p256dh).slice(0, 200), auth: String(sub.keys.auth).slice(0, 100) }, at: new Date().toISOString() };
+    const clean = { username: user.username, endpoint: String(sub.endpoint).slice(0, 600), keys: { p256dh: String(sub.keys.p256dh).slice(0, 200), auth: String(sub.keys.auth).slice(0, 100) }, at: new Date().toISOString(), vapid: vapidKeys ? vapidKeys.publicKey : '' };
     // Same device (same p256dh key) ka purana endpoint replace karo — warna dead subscriptions
     // accumulate hoti hain aur har fan-out par bekar ke failed requests jaate hain.
     const i = arr.findIndex((s) => s.endpoint === clean.endpoint || (s.username === clean.username && s.keys.p256dh === clean.keys.p256dh));
@@ -1532,6 +1714,11 @@ async function start() {
     console.log('APP_STORAGE seeded ✓ — users, settings and sessions now survive every deploy/restart.');
   }
   await loadVapid(); // durable keys load hone ke baad hi push bhejo — warna subscriptions 403 khaati hain
+  const selfTest = vapidSelfTest();
+  if (selfTest.ok) console.log(`📲 Push ready — VAPID ${vapidSource}${vapidDurable ? ' (durable ✓)' : ' (⚠️ TEMPORARY — deploy par tootegi)'}, auth scheme "${pushAuthScheme}", subject ${VAPID_SUBJECT}, ${pushSubs().length} device registered.`);
+  else console.error(`🔴 Push self-test FAIL: ${selfTest.error} — phone par notifications nahi aayengi jab tak ye theek nahi hota.`);
+  pruneStalePushSubs();
+  ensureVapidDurable();
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`First Forward Dashboard → http://0.0.0.0:${server.address().port}`);
     console.log(`Sheet ${db.settings.sheetId} · cache ${cacheMs() / 1000}s · storage ${sheetsStore ? `Google Sheets / encrypted APP_STORAGE (${STORAGE_BACKEND})` : DATA_DIR} · users ${db.users.length} · push ${vapidKeys ? `${pushSubs().length} device(s), VAPID from ${vapidSource}, TTL ${PUSH_TTL}s` : 'DISABLED (no VAPID key)'}${GVIZ_BASE !== 'https://docs.google.com' ? ` · upstream ${GVIZ_BASE}` : ''}`);
