@@ -24,7 +24,10 @@ window.FF = window.FF || {};
     { key: 'location', label: '📍 Location shares',        user: false, admin: true }
   ];
   // `enabled` = master switch. UI me sirf ek "Notifications ON/OFF" button hai (Settings me baaki fine-tuning).
-  const DEFAULT_PREFS = { enabled: true, login: true, signup: true, report: true, monthly: true, activity: true, click: false, search: true, settings: true, user: true, location: false, info: true, sound: true, push: true };
+  // ⚠️ Sab keys TRUE rakho — savePrefs PURA object server par PUT karta hai, isliye yahan kisi
+  // type ko false rakhne se wo permanently OFF save ho jaata tha (feed + mobile push dono band) —
+  // isi wajah se admin ko sirf kuch types (sheet update) hi aati thi.
+  const DEFAULT_PREFS = { enabled: true, login: true, signup: true, report: true, monthly: true, activity: true, click: true, search: true, settings: true, user: true, location: true, info: true, sound: true, push: true };
   const state = { started: false, bound: false, timer: null, presenceTimer: null, fastTimer: null, lastAt: '', items: [], unread: 0, firstPoll: true, page: 'home', pointer: null, people: [], lastInteraction: Date.now(), pointerBound: false, events: [], dirty: false, lastSent: 0, lastScroll: -1, pushOn: false, pushDevices: 0, pushStatus: null, pushTriedAt: 0, pushError: '', prefs: { ...DEFAULT_PREFS }, audioCtx: null };
   const EMBED = new URLSearchParams(location.search).get('embed') === 'live';
   const sharing = () => localStorage.getItem('ff_presence_pointer') !== '0';
@@ -515,6 +518,27 @@ window.FF = window.FF || {};
         if (which === 'master') setEnabled(on);
         else if (which === 'sound') { savePrefs({ sound: on }); if (on) beep(true); }
         else savePrefs({ [which]: on });
+        return;
+      }
+      // 🔁 Settings → Notifications: ek click me sabhi type ON — signup / search / click / page open /
+      // settings / report … sab ek saath chalu (in-app feed + mobile push dono par).
+      const allOn = e.target.closest('[data-notify-all-on]');
+      if (allOn) {
+        e.preventDefault(); e.stopPropagation();
+        const patch = { enabled: true, push: true, sound: true, monthly: true };
+        NOTIFY_TYPES.forEach((t) => { patch[t.key] = true; });
+        savePrefs(patch, true);
+        enableBrowser(true).then((granted) => {
+          if (granted) setupPush(true, { force: true }).catch(() => {});
+          // Settings page ke saare type switches visually bhi ON kar do (wahi DOM dobara render hua bina).
+          try {
+            document.querySelectorAll('[data-notify-switch]').forEach((el) => {
+              el.classList.add('on'); el.setAttribute('aria-checked', 'true'); el.disabled = false;
+            });
+          } catch { /* no DOM */ }
+          U.toast(granted ? '✅ Sab notifications ON — app + mobile panel dono par aayengi (app band ho tab bhi)' : '✅ Sab types ON — browser permission mile to phone panel par bhi aayengi', granted ? 'ok' : 'warn');
+          render();
+        });
         return;
       }
       const enable = e.target.closest('[data-notify-enable]');

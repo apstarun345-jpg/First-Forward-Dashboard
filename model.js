@@ -132,18 +132,57 @@ window.FF = window.FF || {};
     if (filter.cls) parts.push(`${s.cls} = ${D.lit(String(filter.cls).replace(/^VC/i, ''))}`);
     const tq = `select * where ${parts.join(' and ')}${filter.limit ? ` limit ${filter.limit}` : ''}`;
     const t = await D.query(s.sheet, tq, opts);
-    // Friendly names for known StockDataa columns — used when gviz gives no label (or just a letter).
+    // Friendly names for known StockDataa columns — ABSOLUTE sheet column letter (config ke
+    // id/name/tagId/… letters) se map hote hain, taaki manual range (A5:M, B2:N …) badalne par bhi
+    // Excel header column ka sahi naam rakhe.
     const friendly = {};
     [['id', 'ID'], ['name', 'Name'], ['tagId', 'Tag ID'], ['barcode', 'Barcode'], ['cls', 'Class'], ['tagType', 'Tag Type'], ['bcAllocatedAt', 'BC Allocated At'], ['agentId', 'Agent ID'], ['agentName', 'Agent Name'], ['agentAllocatedAt', 'Agent Allocated At'], ['tlName', 'TL Name']].forEach(([k, label]) => {
       const L = String(s[k] || '').trim().toUpperCase(); if (L) friendly[L] = label;
     });
-    const header = t.cols.map((c, i) => {
-      const lbl = U.clean(c.label);
-      const letter = U.colLetter(i);
-      if (lbl && lbl.toUpperCase() !== letter) return lbl; // real header text from the sheet
-      return friendly[letter] || lbl || letter;
-    });
-    return { header, rows: D.textRows(t), cols: t.cols };
+    // Manual range ka start column (Settings → sheets & tabs) — returned columns isi se absolute hote hain.
+    const tab = (FF.config.sheetByName && FF.config.sheetByName(s.sheet)) || null;
+    const rangeStr = String((tab && tab.range) || '').toUpperCase();
+    const mRange = rangeStr.match(/^([A-Z]+)\d*/);
+    const startLetter = (mRange ? mRange[1] : String((tab && tab.startCol) || 'A')).toUpperCase() || 'A';
+    const startIdx = Math.max(0, U.colIndex(startLetter));
+    const labels = t.cols.map((c) => U.clean(c.label));
+    const isLetterLabel = (v) => /^[A-Z]{1,3}$/.test(String(v || '').trim().toUpperCase());
+    const looksLikeData = (v) => {
+      const x = String(v || '');
+      if (!x) return false;
+      if (/^-?\d+(\.\d+)?$/.test(x)) return true;                 // pure number (id, count)
+      if (/\d{3,}/.test(x)) return true;                          // tag / agent IDs, serials, dates
+      if (/^Date\(/.test(x)) return true;                         // gviz Date(…) cell
+      return /\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b/.test(x);         // 12/05/2026 style date
+    };
+    const parsedHeader = Number(t.headers || 0) > 0;
+    const dataCols = labels.filter((v) => v && !isLetterLabel(v) && looksLikeData(v)).length;
+    // Bug fix: manual range header row se shuru na ho to gviz pehle DATA row ko hi header bana
+    // deta hai — Excel (Summary + StockDataa rows) me "header" row me IDs aur naam aa jaate the.
+    // Pehchano: header agar data jaisa dikhe to config se banao aur khedi gayi data row wapas jodo.
+    const bogusHeader = parsedHeader && dataCols > 0 && (dataCols >= 2 || dataCols / Math.max(1, labels.length) >= 0.15);
+    let rows = D.textRows(t);
+    let header;
+    if (parsedHeader && !bogusHeader) {
+      header = labels.map((l, i) => {
+        const abs = U.colLetter(startIdx + i);
+        // Letter label (koi header parse nahi hua) → config ka naam; real header text hi asli header.
+        if (l && isLetterLabel(l)) return friendly[abs] || abs;
+        return l || friendly[abs] || abs;
+      });
+    } else {
+      header = t.cols.map((c, i) => {
+        const abs = U.colLetter(startIdx + i);
+        const lbl = labels[i];
+        // Data row header ban chuki ho ya letter labels hon → config ke naam (absolute column se).
+        if (bogusHeader || (lbl && isLetterLabel(lbl))) return friendly[abs] || abs;
+        return friendly[abs] || lbl || abs;
+      });
+      // gviz ne header banai hui data row Excel me row-1 thi, rows me nahi aayi — wapas jodo taaki
+      // ek bhi StockDataa row export se drop na ho.
+      if (bogusHeader) rows = [labels.map((l) => l || ''), ...rows];
+    }
+    return { header, rows, cols: t.cols };
   }
 
   /** Stock per agent × tag type × class (for the agent pivot). */

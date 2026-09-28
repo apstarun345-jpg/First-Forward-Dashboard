@@ -204,8 +204,8 @@ FF.pages = FF.pages || {};
     U.suggest(findInput, {
       items: () => [...people.tls.sort((a, b) => b.n - a.n).map((t) => ({ kind: 'tl', kindLabel: 'GV TL', label: t.name, sub: `${U.fmtShort(t.n)} tags`, value: t.name })),
         ...people.agents.slice(0, 400).map((a) => ({ kind: 'agent', kindLabel: 'GV Agent', label: a.name, sub: a.tl || a.id, value: a.name }))],
-      onPick: (it) => FF.app.updateParams(it.kind === 'tl' ? { tl: it.value, agent: '' } : { agent: it.value, tl: '' }),
-      onEnter: (q) => { if (!q) { FF.app.updateParams({ agent: '', tl: '' }); return; } const hit = people.agents.find((a) => norm(a.name).includes(norm(q))); if (hit) FF.app.updateParams({ agent: hit.name, tl: '' }); else U.toast('Koi GV agent match nahi hua', 'err'); }
+      onPick: (it) => { if (it.value && FF.notifications && FF.notifications.logSearch) FF.notifications.logSearch('GV Trend Find', it.value); FF.app.updateParams(it.kind === 'tl' ? { tl: it.value, agent: '' } : { agent: it.value, tl: '' }); },
+      onEnter: (q) => { if (!q) { FF.app.updateParams({ agent: '', tl: '' }); return; } if (q && FF.notifications && FF.notifications.logSearch) FF.notifications.logSearch('GV Trend Find', q); const hit = people.agents.find((a) => norm(a.name).includes(norm(q))); if (hit) FF.app.updateParams({ agent: hit.name, tl: '' }); else U.toast('Koi GV agent match nahi hua', 'err'); }
     });
 
     if (!rows.length) { body.innerHTML = `<div class="empty-state">😶 Is filter ke liye GV issuance data nahi mila.<br><button class="btn" data-action="clear-filters">Clear filters</button></div>`; return; }

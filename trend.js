@@ -68,8 +68,8 @@ FF.pages = FF.pages || {};
     const findInput = U.$('#tr-find', controls);
     U.suggest(findInput, {
       items: () => [...U.topEntries(tlVolume).map(([name, v]) => ({ kind: 'tl', kindLabel: 'TL', label: name, sub: `${U.fmtShort(v)} tags`, value: name })), ...U.topEntries(agentVol).map(([name, v]) => ({ kind: 'agent', kindLabel: 'Agent', label: name, sub: `${agentTl.get(name) || ''} · ${U.fmtShort(v)} tags`, value: name }))],
-      onPick: (it) => FF.app.updateParams(it.kind === 'tl' ? { tl: it.value, agent: '' } : { agent: it.value, tl: '' }),
-      onEnter: (q) => { if (!q) { FF.app.updateParams({ agent: '', tl: '' }); return; } const hit = [...agentVol.keys()].find((n) => n.toUpperCase() === q.toUpperCase()) || [...agentVol.keys()].find((n) => n.toUpperCase().includes(q.toUpperCase())); if (hit) FF.app.updateParams({ agent: hit, tl: '' }); else U.toast('Koi agent match nahi hua', 'err'); }
+      onPick: (it) => { if (it.value && FF.notifications && FF.notifications.logSearch) FF.notifications.logSearch('Trend Find', it.value); FF.app.updateParams(it.kind === 'tl' ? { tl: it.value, agent: '' } : { agent: it.value, tl: '' }); },
+      onEnter: (q) => { if (!q) { FF.app.updateParams({ agent: '', tl: '' }); return; } if (FF.notifications && FF.notifications.logSearch) FF.notifications.logSearch('Trend Find', q); const hit = [...agentVol.keys()].find((n) => n.toUpperCase() === q.toUpperCase()) || [...agentVol.keys()].find((n) => n.toUpperCase().includes(q.toUpperCase())); if (hit) FF.app.updateParams({ agent: hit, tl: '' }); else U.toast('Koi agent match nahi hua', 'err'); }
     });
     if (dailyR.status !== 'fulfilled') { body.innerHTML = U.errorBox(dailyR.reason, 'data-action="refresh"'); return; }
     if (!allDaily.length) { body.innerHTML = `<div class="empty-state">😶 Is filter ke liye koi issuance data nahi mila.<br><button class="btn" data-action="clear-filters">Clear filters</button></div>`; return; }

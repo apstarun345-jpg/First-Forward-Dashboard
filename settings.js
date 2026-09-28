@@ -156,14 +156,17 @@ FF.pages = FF.pages || {};
     const prefs = notifyPrefsNow();
     const on = prefs.enabled !== false;
     const types = ((FF.notifications || {}).notifyTypes || []).filter((t) => (A.isAdmin() ? t.admin : t.user));
-    return section('🔔 Notifications', `
+    return section('🔔 Notifications <span class="dim">(app + mobile)</span>', `
+      <p class="dim small">Har notification <b>app ke andar (bell)</b> aur <b>mobile / desktop ke notification panel</b> dono par aati hai — app band hone par bhi Web Push se phone par alert chala jaata hai. Neeche decide karo kaunsi notifications aani chahiye.</p>
       <div class="notify-switches" style="background:transparent;padding:0;border:0">
         ${switchRow('master', 'Notifications ON / OFF', on ? 'ON — app ke andar toast + phone / desktop ke notification panel par alert (app band ho tab bhi)' : 'OFF — koi alert nahi aayega (list bell me padh sakte ho)', on)}
         ${switchRow('sound', '🔊 Sound / vibration', 'Alert ke saath short beep + mobile vibration', prefs.sound !== false, !on)}
         ${switchRow('monthly', '📅 Monthly report', 'Har mahine ki 1–5 tarikh ko pichhle mahine ka FF vs GV compare', prefs.monthly !== false, !on)}
       </div>
-      <details class="notify-prefs" style="border:0;margin-top:6px"><summary>Konse alerts chahiye? (type ke hisaab se on/off)</summary>
+      <details class="notify-prefs" open style="border:0;margin-top:6px"><summary>Kaunsi notifications aayengi? (type-wise on/off — in-app + mobile dono par apply)</summary>
         <div class="notify-pref-grid">${types.map((t) => `<span class="check small">${ffSwitch(t.key, prefs[t.key] !== false, !on)} ${t.label}</span>`).join('')}</div>
+        <p class="dim small" style="margin:6px 2px 0">${A.isAdmin() ? '👑 Admin ko sab users ki activity aati hai — naya signup, login, search, button click, page open, settings change, report/sheet update, location — sab. Upar se type ke hisaab se ON/OFF karo.' : 'Apne liye kaunsi alerts chahiye wo upar choose karo — ye in-app + phone panel dono par lagta hai.'}</p>
+        ${A.isAdmin() ? `<div class="save-bar" style="margin-top:8px"><button class="btn small primary" data-notify-all-on>🔁 Sab notifications ON karo</button><span class="dim small">Ek click me saare types chalu — signup / search / click / page open / settings / report … sab aayengi.</span></div>` : ''}
       </details>
       ${A.isAdmin() ? `<div id="push-diag-slot" class="push-diag" style="margin-top:12px"><p class="dim small">📲 Push diagnostics load ho rahi hain…</p></div>` : ''}`);
   }

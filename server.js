@@ -1100,8 +1100,9 @@ async function handleApi(req, res, url) {
       recordNotification({ type: 'user', title: 'Welcome — Admin account ready', body: 'Aap first user hain, admin privileges mil gaye hain. Settings se branding aur data source set kar sakte ho.', target: `user:${username}`, meta: { first: true } });
       return sendJson(res, 200, { ok: true, user: publicUser(u), settings: db.settings, permissions: permissionsFor(db.settings), tabs: db.settings.tabs, first: true }, { 'Set-Cookie': cookieHeader(req, token, SESSION_DAYS * 86400) });
     }
-    // 🔔 Admin ko turant notification do + new user ko welcome notification
-    recordNotification({ type: 'user', title: '🆕 Naya signup', body: `${u.name || username} ne account banaya hai (${u.email || u.mobile || 'no contact'}). Approval pending.`, target: 'admin', meta: { username, name: u.name, email: u.email, mobile: u.mobile } });
+    // 🔔 Admin ko turant notification (type 'signup' — Settings me "New account signup" toggle isi ko
+    // control karta hai) + new user ko welcome notification
+    recordNotification({ type: 'signup', title: '🆕 Naya signup', body: `${u.name || username} ne account banaya hai (${u.email || u.mobile || 'no contact'}). Approval pending.`, target: 'admin', meta: { username, name: u.name, email: u.email, mobile: u.mobile, link: '#/settings' } });
     recordNotification({ type: 'user', title: 'Account created ✓', body: 'Aapka account ban gaya hai. Admin approve karega, phir aap login kar paoge.', target: `user:${username}` });
     return sendJson(res, 200, { ok: true, pending: true, message: 'Account ban gaya. Admin approve karega, phir login kar paoge.' });
   }
@@ -1338,6 +1339,8 @@ async function handleApi(req, res, url) {
     db.resets = db.resets.filter((r) => r.username !== u.username || r.resolved);
     db.resets.push({ username: u.username, name: u.name || u.username, email: u.email || '', mobile: u.mobile || '', at: new Date().toISOString(), code: '', codeExpiresAt: null, resolved: false });
     await persist('resets');
+    // 🔔 Admin ko password-reset request ki notification (in-app feed + mobile push dono me).
+    recordNotification({ type: 'user', title: '🔑 Password reset request', body: `${u.name || u.username} ne password reset ki request ki (${u.email || u.mobile || 'no contact'}). Settings → Users se ye account update kar sakte ho.`, target: 'admin', meta: { username: u.username, name: u.name, email: u.email, mobile: u.mobile, link: '#/settings' } });
     return sendJson(res, 200, { ok: true, found: true, help, message: `Request sent ✓ — admin will provide new password or 6-digit code (user: ${u.username}).` });
   }
   if (p === '/api/auth/reset' && method === 'POST') {
