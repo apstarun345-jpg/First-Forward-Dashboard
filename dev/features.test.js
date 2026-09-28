@@ -375,3 +375,149 @@ test('📢 announcement broadcast, 📜 audit log, 📬 weekly digest + 📊 rep
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+// ---------------------------------------------------------------------------------------------
+// Round 3: 🔗 personal links (agent + TL), 🗺 team location, 🏆 TL/agent anomaly force, flags
+// ---------------------------------------------------------------------------------------------
+test('🔗 personal links (agent+TL) /p/ pages, 🗺 team location, 🏆 anomaly force (agent+TL)', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'apna-feat-r3-'));
+  const pad = (n) => String(n).padStart(2, '0');
+  const dcell = (d) => `Date(${d.getFullYear()},${d.getMonth()},${d.getDate()})`;
+  const dayBack = (i) => new Date(Date.now() - i * 86400e3);
+  // personal daily rows: aaj se 12 din (7,7,…) + pichhle mahine ke 5 din
+  const personalRows = [];
+  for (let i = 0; i < 12; i++) personalRows.push({ c: [{ v: dcell(dayBack(i)) }, { v: '1' }, { v: 7 }] });
+  const pm = new Date(); pm.setMonth(pm.getMonth() - 1);
+  for (let d = 1; d <= 5; d++) personalRows.push({ c: [{ v: dcell(new Date(pm.getFullYear(), pm.getMonth(), d)) }, { v: '1' }, { v: 5 }] });
+  // anomaly rows: prev7 full, aaj ZERO (row hi nahi)
+  const agentRows = [];
+  for (let i = 1; i <= 7; i++) agentRows.push({ c: [{ v: 'Rahul Dravid' }, { v: dcell(dayBack(i)) }, { v: 10 }] });
+  const tlRows = [];
+  for (let i = 1; i <= 7; i++) tlRows.push({ c: [{ v: 'Zoya Khan' }, { v: dcell(dayBack(i)) }, { v: 20 }] });
+  // TL team rows (personal TL page)
+  const teamRows = [];
+  for (let i = 1; i <= 7; i++) teamRows.push({ c: [{ v: 'Team Member One' }, { v: dcell(dayBack(i)) }, { v: 9 }] });
+  teamRows.push({ c: [{ v: 'Team Member One' }, { v: dcell(dayBack(0)) }, { v: 6 }] });
+  const snapRows = [{ c: [{ v: dcell(new Date()) }, { v: '1' }, { v: '999' }, { v: 40 }] }, { c: [{ v: dcell(dayBack(1)) }, { v: '1' }, { v: '999' }, { v: 35 }] }];
+  const gvRows = [{ c: [{ v: dcell(new Date()) }, { v: '1' }, { v: 12 }] }];
+  const upstream = http.createServer((req, res) => {
+    const tq = new URL(req.url, 'http://x').searchParams.get('tq') || '';
+    let rows = [];
+    if (/group by AA, D, AU/.test(tq)) rows = snapRows;
+    else if (/group by L, AA/.test(tq) && /where BA/.test(tq)) rows = teamRows;      // personal TL team
+    else if (/group by L, AA/.test(tq)) rows = agentRows;                            // agent anomaly
+    else if (/group by BA, AA/.test(tq)) rows = tlRows;                              // TL anomaly
+    else if (/group by AA, D/.test(tq)) rows = personalRows;                         // personal daily
+    else if (/group by P, G/.test(tq)) rows = gvRows;
+    res.end(`google.visualization.Query.setResponse(${JSON.stringify({ status: 'ok', table: { cols: [{ id: 'A', type: 'date' }, { id: 'B', type: 'string' }, { id: 'C', type: 'number' }, { id: 'D', type: 'number' }], rows } })});`);
+  });
+  upstream.listen(0, '127.0.0.1');
+  await once(upstream, 'listening');
+  let server;
+  const call = async (route, method = 'GET', body, cookie = '', headers = {}) => {
+    const res = await fetch(server.base + route, {
+      method,
+      headers: { cookie, 'Content-Type': 'application/json', 'X-Forwarded-Proto': 'https', ...headers },
+      body: body ? JSON.stringify(body) : undefined
+    });
+    const setCookie = res.headers.get('set-cookie');
+    const json = await res.json().catch(() => ({}));
+    const text = await res.text().catch(() => '');
+    return { res, json, setCookie, text };
+  };
+  try {
+    server = await startServer(dir, `http://127.0.0.1:${upstream.address().port}`);
+    const adminCookie = (await call('/api/auth/login', 'POST', { username: 'owner', password: 'initial-password' })).setCookie.split(';')[0];
+    await call('/api/users', 'POST', { username: 'r3user', name: 'R3 User', password: 'r3-pass-1', role: 'user' }, adminCookie);
+    const memberCookie = (await call('/api/auth/login', 'POST', { username: 'r3user', password: 'r3-pass-1' })).setCookie.split(';')[0];
+
+    // ---- 🔗 agent link ----
+    const ca = await call('/api/personal-links', 'POST', { kind: 'agent', name: 'Rahul Dravid' }, adminCookie);
+    assert.equal(ca.res.status, 200, `agent link create — ${JSON.stringify(ca.json).slice(0, 180)}`);
+    const agentToken = ca.json.link.token;
+    const pageA = await fetch(`${server.base}/p/${agentToken}`);
+    assert.equal(pageA.status, 200, `agent /p/ page 200 — ${pageA.status}`);
+    const htmlA = await pageA.text();
+    assert.ok(htmlA.includes('Rahul Dravid'), 'page me agent naam');
+    assert.ok(htmlA.includes('MTD issued'), 'MTD KPI card hai');
+    assert.ok(htmlA.includes('Last'), 'last-14-din chart section hai');
+    assert.ok(!/personalLinks|password/i.test(htmlA), 'page me koi secret nahi');
+
+    // ---- 🔗 TL link (team + goal section) ----
+    const ct = await call('/api/personal-links', 'POST', { kind: 'tl', name: 'Zoya Khan' }, adminCookie);
+    assert.equal(ct.res.status, 200, `TL link create — ${JSON.stringify(ct.json).slice(0, 180)}`);
+    const pageT = await fetch(`${server.base}/p/${ct.json.link.token}`);
+    assert.equal(pageT.status, 200, `TL /p/ page 200`);
+    const htmlT = await pageT.text();
+    assert.ok(htmlT.includes('Zoya Khan'), 'TL naam page par');
+    assert.ok(htmlT.includes('Team (is mahine)'), 'TL team list section');
+
+    // ---- member ko link management chahiye hi nahi ----
+    const mList = await call('/api/personal-links', 'GET', undefined, memberCookie);
+    assert.ok(mList.res.status >= 400, `member personal-links list nahi dekh sakta (${mList.res.status})`);
+    const me = await call('/api/auth/me', 'GET', undefined, memberCookie);
+    assert.equal(me.json.settings && me.json.settings.personalLinks, undefined, 'member settings me personalLinks (tokens) nahi aate');
+
+    // ---- revoke → 404 ----
+    const del = await call(`/api/personal-links/${ca.json.link.id}`, 'DELETE', undefined, adminCookie);
+    assert.equal(del.res.status, 200, 'revoke ok');
+    const gone = await fetch(`${server.base}/p/${agentToken}`);
+    assert.equal(gone.status, 404, `revoked link 404 (${gone.status})`);
+
+    // ---- feature OFF → TL link bhi 404 + create 403 ----
+    await call('/api/settings', 'PUT', { settings: { features: { personalLinks: false } } }, adminCookie);
+    const offPage = await fetch(`${server.base}/p/${ct.json.link.token}`);
+    assert.equal(offPage.status, 404, `feature off = 404 (${offPage.status})`);
+    const offCreate = await call('/api/personal-links', 'POST', { kind: 'agent', name: 'Anyone' }, adminCookie);
+    assert.ok(offCreate.res.status >= 400, `feature off = create blocked (${offCreate.res.status})`);
+    await call('/api/settings', 'PUT', { settings: { features: { personalLinks: true } } }, adminCookie);
+
+    // ---- 🗺 team location ----
+    const loc = await call('/api/auth/location', 'POST', { latitude: 26.9124, longitude: 75.7873, accuracy: 12 }, memberCookie);
+    assert.equal(loc.res.status, 200, `location save — ${JSON.stringify(loc.json).slice(0, 160)}`);
+    const mLoc = await call('/api/team-location', 'GET', undefined, memberCookie);
+    assert.ok(mLoc.res.status >= 400, `member team-location nahi dekh sakta (${mLoc.res.status})`);
+    const aLoc = await call('/api/team-location', 'GET', undefined, adminCookie);
+    assert.equal(aLoc.res.status, 200, 'admin team-location 200');
+    const mePerson = (aLoc.json.people || []).find((p) => p.username === 'r3user');
+    assert.ok(mePerson && Math.abs(mePerson.lat - 26.9124) < 0.001, `user ki location mili — ${JSON.stringify(mePerson)}`);
+
+    // ---- 🏆 anomaly force: agent + TL dono alert ----
+    const an = await call('/api/notifications/anomaly', 'POST', {}, adminCookie);
+    assert.equal(an.res.status, 200, `anomaly force — ${JSON.stringify(an.json).slice(0, 220)}`);
+    assert.equal(an.json.ok, true, `dono anomalies mile — ${JSON.stringify(an.json)}`);
+    assert.ok(/Agent anomaly/.test(an.json.agent || ''), `agent title — ${an.json.agent}`);
+    assert.ok(/TL anomaly/.test(an.json.tl || ''), `TL title — ${an.json.tl}`);
+    const nlist = await call('/api/notifications', 'GET', undefined, adminCookie);
+    const titles = (nlist.json.items || []).map((i) => i.title);
+    assert.ok(titles.some((t) => /Agent anomaly/.test(t)), `notifications me agent anomaly — ${titles.slice(0, 6).join(' | ')}`);
+    assert.ok(titles.some((t) => /TL anomaly/.test(t)), 'notifications me TL anomaly');
+    // sirf TL ON ho to sirf TL
+    await call('/api/settings', 'PUT', { settings: { features: { alerts: { anomaly: false }, tlAnomaly: true } } }, adminCookie);
+    const onlyTl = await call('/api/notifications/anomaly', 'POST', {}, adminCookie);
+    assert.equal(onlyTl.json.ok, true, 'tlAnomaly ON = TL alert still works');
+    assert.equal(onlyTl.json.agent, null, 'alerts.anomaly OFF = agent alert nahi');
+    assert.ok(/TL anomaly/.test(onlyTl.json.tl || ''), 'TL alert aa raha hai');
+    await call('/api/settings', 'PUT', { settings: { features: { alerts: { anomaly: true }, tlAnomaly: false } } }, adminCookie);
+
+    // ---- 🔁 round-3 flags persist ----
+    const flags = await call('/api/settings', 'PUT', { settings: { features: { badges: false, voiceSummary: false, askBox: false, teamMap: false } } }, adminCookie);
+    const ff = (flags.json.settings || {}).features || {};
+    assert.equal(ff.badges, false, 'badges OFF save');
+    assert.equal(ff.voiceSummary, false, 'voiceSummary OFF save');
+    assert.equal(ff.askBox, false, 'askBox OFF save');
+    assert.equal(ff.teamMap, false, 'teamMap OFF save');
+    await call('/api/settings', 'PUT', { settings: { features: { badges: true, voiceSummary: true, askBox: true, teamMap: true, tlAnomaly: true } } }, adminCookie);
+
+    // ---- 📜 audit me link + anomaly entries ----
+    const audit = await call('/api/audit', 'GET', undefined, adminCookie);
+    const acts = (audit.json.entries || []).map((e) => e.action);
+    for (const need of ['link_create', 'link_revoke', 'agent_anomaly', 'tl_anomaly']) {
+      assert.ok(acts.includes(need), `audit me ${need} — ${acts.join(',')}`);
+    }
+  } finally {
+    if (server) await server.stop();
+    await new Promise((r) => upstream.close(r));
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});

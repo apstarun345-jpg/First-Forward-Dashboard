@@ -56,7 +56,9 @@ FF.config = {
     emailDigest: false,
     tvMode: true, weekCompare: true, agedStock: true, auditLog: true, announcements: true,
     tlGoals: true, otp2fa: true, emailReport: false, emailReportHour: 21,
-    weeklyEmail: false, weeklyEmailHour: 9, anomalyPct: 80
+    weeklyEmail: false, weeklyEmailHour: 9, anomalyPct: 80,
+    badges: true, voiceSummary: true, askBox: true, teamMap: true, tlAnomaly: true, personalLinks: true,
+    officeLat: 0, officeLng: 0
   },
   /** Feature flag padho — FF.config.feat('search') / FF.config.feat('alerts').lowCover */
   feat(key) { const f = this.features || {}; return f[key]; },

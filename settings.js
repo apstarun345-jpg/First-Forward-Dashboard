@@ -6,7 +6,7 @@ FF.pages = FF.pages || {};
   'use strict';
   const U = FF.util, A = FF.auth;
   const esc = U.esc;
-  const TABS = [['account', '👤 My account'], ['brand', '🎨 Branding & images'], ['sources', '🗂️ Sheets & tabs'], ['access', '🔐 Access matrix'], ['data', '🔌 Data source'], ['rules', '📐 Thresholds'], ['features', '🎛 Features'], ['contacts', '📲 Contacts & sharing'], ['users', '👥 Users & access'], ['audit', '📜 Audit log'], ['backup', '☁️ Storage & backup']];
+  const TABS = [['account', '👤 My account'], ['brand', '🎨 Branding & images'], ['sources', '🗂️ Sheets & tabs'], ['access', '🔐 Access matrix'], ['data', '🔌 Data source'], ['rules', '📐 Thresholds'], ['features', '🎛 Features'], ['contacts', '📲 Contacts & sharing'], ['users', '👥 Users & access'], ['links', '🔗 Personal links'], ['audit', '📜 Audit log'], ['backup', '☁️ Storage & backup']];
   let tab = 'account';
   let storage = null;
   let settings = null, defaults = null, usersCache = null, permsCache = [];
@@ -581,6 +581,11 @@ FF.pages = FF.pages || {};
         ${c('announcements', '📢 Announcement composer', 'Settings me sab users ko ek saath broadcast karne ka box')}
         ${c('tlGoals', '🎯 TL monthly goals', 'Targets page TL rollup me goal column + admin editable goals')}
         ${c('otp2fa', '🔐 OTP on new-IP login', 'Naye IP par login = 6-digit OTP email (SMTP set ho tabhi) — known device par seedha login')}
+        ${c('badges', '🏅 Weekly badges + rank card', 'Performance page — 🥇🥈🥉 top agents/TL + ek click me shareable image')}
+        ${c('voiceSummary', '🗣️ Voice summary (Hindi)', 'Dashboard par 🔊 button — aaj ke numbers bol kar sunata hai (browser TTS)')}
+        ${c('askBox', '🤖 Sawal-jawab box', 'Search (Ctrl+K) me likho “aaj ka VC4?” / “Rahul ka MTD” — seedha jawab')}
+        ${c('teamMap', '🗺 Team map', 'Admin sidebar page — location share karne walo ka distance map (office se)')}
+        ${c('personalLinks', '🔗 Personal links', 'Har agent/TL ka secret read-only performance link — Settings me 🔗 tab')}
       </div>${saveBar('feat-ui')}`);
     const alertCard = section('🔴 Alert automation <span class="dim">(server-side — tab bhi chalta hai jab app band ho)</span>', `
       <div class="feat-grid">
@@ -590,6 +595,7 @@ FF.pages = FF.pages || {};
         ${a('zeroDay', '⚠️ Zero-day / sharp-drop', 'Raat 9 IST — aaj 0 issuance ya avg se bahut kam')}
         ${a('newLoginIp', '🔐 Naye IP se login', 'Known IPs se bahar naye IP par login par admin alert')}
         ${a('anomaly', '📉 Agent anomaly (raat 9)', 'Koi agent achanak 0 / bahut kam ho jaye to alert — threshold % ⚙️ neeche')}
+        <label class="check"><input type="checkbox" data-path="features.tlAnomaly" ${f.tlAnomaly !== false ? 'checked' : ''}> <b>🏆 TL anomaly (raat 9)</b><br><small class="dim" style="margin-left:20px">Poori team ka issuance achanak gira ho to TL-level alert — threshold same %</small></label>
       </div>
       <p class="dim small">In alerts ki ON/OFF apne phone par bhi chahiye to 👤 My account → 🔔 Notifications me <b>🔴 Critical alerts</b> type bhi ON rakho.</p>${saveBar('feat-alerts')}`);
     const modsCard = section('⚙️ Alert modify <span class="dim">(numbers tune karo)</span>', `
@@ -627,7 +633,13 @@ FF.pages = FF.pages || {};
       <p class="dim small">Type karo aur bhejo — sab logged-in users ke bell panel me turant dikhega (jaise ek broadcast). Ye raha preview:</p>
       <textarea class="input" id="an-text" rows="3" maxlength="500" placeholder="e.g. Kal 11 AM sabka monthly meeting hai — attendance zaroori."></textarea>
       <div class="save-bar" style="margin-top:8px"><button class="btn primary" id="an-send">📢 Broadcast karo</button><span class="dim small" id="an-msg"></span></div>`);
-    return `${uiCard}${alertCard}${modsCard}${waCard}${emailCard}${announceCard}`;
+    const mapCard = section('🗺 Office location <span class="dim">(team map ka center)</span>', `
+      <p class="dim small">Team map (🗺 sidebar page) yahan ke coordinates ko “office” maanta hai — har user ki distance isi se nikalti hai. Google Maps me office kholo → URL me jo lat,lng dikhe wo yahan daalo.</p>
+      <div class="form-grid">
+        ${field('Office latitude', numI('features.officeLat', f.officeLat ?? 0, 'step="0.000001" min="-90" max="90"'))}
+        ${field('Office longitude', numI('features.officeLng', f.officeLng ?? 0, 'step="0.000001" min="-180" max="180"'))}
+      </div>${saveBar('feat-map')}`);
+    return `${uiCard}${alertCard}${modsCard}${waCard}${emailCard}${announceCard}${mapCard}`;
   }
 
   // ---- 📜 Audit log (admin) ---------------------------------------------------------------------------
@@ -647,6 +659,64 @@ FF.pages = FF.pages || {};
     sel.addEventListener('change', () => {
       U.$$('#au-table tbody tr', body).forEach((tr) => { tr.hidden = !!sel.value && tr.dataset.action !== sel.value; });
     });
+  }
+
+  // ---- 🔗 Personal links (admin) — agent/TL ka secret read-only URL --------------------------
+  async function linksTab(body) {
+    let links = [];
+    try { links = (await A.api('/api/personal-links')).links || []; } catch (err) { body.innerHTML = U.errorBox(err); return; }
+    const on = !settings || !settings.features || settings.features.personalLinks !== false;
+    const origin = location.origin;
+    const offBanner = on ? '' : '<p class="check" style="background:#fef3c7;border:1px solid #fcd34d;border-radius:10px;padding:8px 12px;margin-bottom:10px">⏸️ Feature <b>band</b> hai — sabhi links ab 404 denge. <a href="#/settings?tab=features">🎛 Features → Personal links ON karo</a>.</p>';
+    body.innerHTML = `<div class="card">
+      <div class="page-head" style="margin-bottom:8px"><div><h2>🔗 Personal links <span class="dim small">(read-only · bina login)</span></h2>
+      <p class="sub">Har agent/TL ka ek secret URL jisme sirf uska apna performance dikhta hai — naam, MTD, 14-din chart, (TL ho to goal + team list). Link WhatsApp se bhej do; koi aur page kholega to bas wahi dekh payega.</p></div></div>
+      ${offBanner}
+      <div class="finder-row" style="margin-bottom:10px">
+        <select class="input" id="pl-kind" style="width:auto"><option value="agent">🧑‍💼 Agent</option><option value="tl">👥 TL</option></select>
+        <input class="input" id="pl-name" placeholder="Naam (jaise sheet me hai) — e.g. Rahul Sharma" style="min-width:260px" maxlength="80">
+        <button class="btn primary" id="pl-create">🔗 Naya link banao</button>
+        <span class="dim small" id="pl-msg"></span>
+      </div>
+      ${links.length ? `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Kind</th><th>Naam</th><th>Link</th><th>Bana</th><th>Status</th><th></th></tr></thead><tbody>
+      ${links.map((l) => `<tr>
+        <td>${l.kind === 'tl' ? '👥 TL' : '🧑‍💼 Agent'}</td>
+        <td><b>${esc(l.name)}</b></td>
+        <td class="mono small"><a href="/p/${esc(l.token)}" target="_blank" rel="noopener">${esc(origin)}/p/${esc(String(l.token).slice(0, 10))}…</a></td>
+        <td class="small dim">${esc(String(l.createdAt || '').slice(0, 10))} · ${esc(l.by || '')}</td>
+        <td>${l.enabled !== false ? '<span class="badge">✅ ON</span>' : '<span class="badge red">⛔ OFF</span>'}</td>
+        <td class="num" style="white-space:nowrap">
+          <button class="btn small pl-copy" data-token="${esc(l.token)}" title="Poora URL copy karo">📋</button>
+          <button class="btn small pl-toggle" data-id="${esc(l.id)}" data-on="${l.enabled === false ? '1' : ''}">${l.enabled !== false ? '⏸️' : '▶️'}</button>
+          <button class="btn small pl-del" data-id="${esc(l.id)}" title="Delete">🗑</button>
+        </td></tr>`).join('')}
+      </tbody></table></div>` : '<p class="dim">Abhi koi link nahi — upar naam daal ke pehla banao.</p>'}
+      <p class="dim small" style="margin-top:10px">Token random hota hai — guess karna namumkin. Band karna ho to ⏸️ ya 🗑 — audit log me sab record hota hai.</p>
+    </div>`;
+    const msg = U.$('#pl-msg', body);
+    const create = U.$('#pl-create', body);
+    create.addEventListener('click', async () => {
+      const kind = U.$('#pl-kind', body).value;
+      const name = (U.$('#pl-name', body).value || '').trim();
+      if (!name) return U.toast('Pehle naam likho', 'err');
+      create.disabled = true;
+      try {
+        await A.api('/api/personal-links', 'POST', { kind, name });
+        U.toast('🔗 Link ban gaya ✓', 'ok');
+        draw();
+      } catch (err) { U.toast(err.message, 'err'); create.disabled = false; if (msg) msg.textContent = err.message; }
+    });
+    U.$$('.pl-copy', body).forEach((b) => b.addEventListener('click', () => {
+      const url = `${origin}/p/${b.dataset.token}`;
+      U.copyText(url).then(() => U.toast('📋 Link copy ho gaya', 'ok')).catch(() => { window.prompt('Copy karo:', url); });
+    }));
+    U.$$('.pl-toggle', body).forEach((b) => b.addEventListener('click', async () => {
+      try { await A.api(`/api/personal-links/${encodeURIComponent(b.dataset.id)}/enable`, 'POST', { enabled: b.dataset.on === '1' }); draw(); } catch (err) { U.toast(err.message, 'err'); }
+    }));
+    U.$$('.pl-del', body).forEach((b) => b.addEventListener('click', async () => {
+      if (!window.confirm('Ye link delete kar dein?')) return;
+      try { await A.api(`/api/personal-links/${encodeURIComponent(b.dataset.id)}`, 'DELETE'); U.toast('Link delete ✓', 'ok'); draw(); } catch (err) { U.toast(err.message, 'err'); }
+    }));
   }
 
   // ---- page ------------------------------------------------------------------------------------
@@ -670,6 +740,7 @@ FF.pages = FF.pages || {};
       else if (tab === 'rules') body.innerHTML = rulesTab();
       else if (tab === 'features') body.innerHTML = featuresTab();
       else if (tab === 'audit') { body.innerHTML = U.spinner('Audit log…'); await auditTab(body); }
+      else if (tab === 'links') { body.innerHTML = U.spinner('Personal links…'); await linksTab(body); }
       else if (tab === 'contacts') body.innerHTML = contactsTab();
       else if (tab === 'backup') body.innerHTML = backupTab();
       else if (tab === 'users') { body.innerHTML = U.spinner('Users…'); await usersTab(body); }

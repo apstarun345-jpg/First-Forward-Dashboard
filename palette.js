@@ -24,11 +24,136 @@ window.FF = window.FF || {};
     return null;
   }
 
+  // ---- 🤖 Sawal-jawab box (features.askBox) — "aaj ka VC4?", "Rahul ka MTD", "stock kitna?" -----
+  let askLoading = false;
+  const QUESTION_WORDS = /(aaj|kal|today|yesterday|mtd|is month|yeh month|yahi month|pichhla|last month|7 din|week|hafte|din ka|din ki|total|vc4|commercial|comm\b|\bgv\b|\bff\b|stock|cover|replacement|chassis|active agent|kitna|kitne|kya|kaise|how much|what|bata|dikh)/;
+  function askItems(q) {
+    if (FF.config.feat && FF.config.feat('askBox') === false) return [];
+    const n = norm(q);
+    if (n.length < 3 || !QUESTION_WORDS.test(n)) return [];
+    const daily = FF.store.get('daily');
+    const agents = FF.store.get('agents');
+    if (!daily || !daily.length) {
+      if (!askLoading && FF.store.need) {
+        askLoading = true;
+        FF.store.need('daily').catch(() => {}).finally(() => {
+          askLoading = false;
+          if (input && document.activeElement === input) draw(input.value);
+        });
+      }
+      return [{ group: '🤖 Jawab', icon: '⏳', label: 'Data load ho raha hai…', sub: 'dobara type karo', answer: null }];
+    }
+    const pad = (x) => String(x).padStart(2, '0');
+    const key = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    // latest date (data ke hisaab se, aaj nahi)
+    let latest = null;
+    for (const r of daily) if (!latest || r.key > latest) latest = r.key;
+    const latestD = latest ? new Date(`${latest}T00:00:00`) : new Date();
+    const isAgentAsk = /(ka|ke|ki)\s+(mtd|total|issuance|issue|target|kya|kitna|pichhla|last|growth|performance)/.test(n) || /ka total/.test(n);
+    // ---- entity: query me kisi agent/TL ka naam? (suggestions se) ----
+    let entity = null;
+    if (isAgentAsk && FF.store.suggestions) {
+      try {
+        const ppl = FF.store.suggestions({ agents: true, tls: true });
+        for (const s of ppl) {
+          const full = norm(s.value || s.label);
+          if (full && n.includes(full)) { if (!entity || full.length > entity.full.length) entity = { ...s, full, kind: s.kind }; }
+        }
+        if (!entity) {
+          for (const s of ppl) {
+            const words = norm(s.label).split(/\s+/).filter((w) => w.length >= 4);
+            if (words.some((w) => new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(n))) {
+              const full = norm(s.value || s.label);
+              if (!entity || full.length > entity.full.length) entity = { ...s, full, kind: s.kind };
+            }
+          }
+        }
+      } catch { /* suggestions not ready */ }
+    }
+    if (entity) {
+      const target = norm(entity.value || entity.label);
+      const match = (r) => norm(r.name) === target;
+      const rows = agents || [];
+      const curYm = latest.slice(0, 7);
+      const pm = new Date(`${curYm}-01T00:00:00`); pm.setMonth(pm.getMonth() - 1);
+      const prevYm = `${pm.getFullYear()}-${pad(pm.getMonth() + 1)}`;
+      let mtd = 0, prev = 0, tl = '';
+      for (const r of rows) {
+        if (!match(r)) continue;
+        if (!tl && r.tlName) tl = r.tlName;
+        if (r.ym === curYm) mtd += r.n || 0;
+        if (r.ym === prevYm) prev += r.n || 0;
+      }
+      const growth = prev ? Math.round(((mtd - prev) / prev) * 100) : null;
+      return [{
+        group: '🤖 Jawab', icon: entity.kind === 'tl' ? '👥' : '🧑‍💼',
+        label: `${entity.label}: ${U.fmt(mtd)} tags MTD`,
+        sub: `${curYm} · pichhle mahine ${U.fmt(prev)}${growth !== null ? ` · ${growth >= 0 ? '▲' : '▼'} ${Math.abs(growth)}%` : ''}${tl && entity.kind !== 'tl' ? ` · TL ${tl}` : ''}`,
+        answer: `${entity.label} — MTD ${mtd} tags (${curYm}), pichhle mahine ${prev}${growth !== null ? `, growth ${growth >= 0 ? '+' : ''}${growth}%` : ''}.`
+      }];
+    }
+    // ---- period decide karo ----
+    const period = /(pichhla|last)\s*(month|mahina)/.test(n) ? 'prevMonth'
+      : /(7 din|last 7|hafte|week)/.test(n) ? 'week7'
+      : /(kal|yesterday)/.test(n) && !/(is|yeh|yahi)\s*hafte/.test(n) ? 'yesterday'
+      : /(aaj|today)/.test(n) ? 'today'
+      : 'mtd';
+    const ymCur = latest.slice(0, 7);
+    const pmD = new Date(`${ymCur}-01T00:00:00`); pmD.setMonth(pmD.getMonth() - 1);
+    const ymPrev = `${pmD.getFullYear()}-${pad(pmD.getMonth() + 1)}`;
+    const pick = () => {
+      if (period === 'today') return { rows: daily.filter((r) => r.key === latest), label: `aaj (${latest})` };
+      if (period === 'yesterday') { const y = key(new Date(latestD.getTime() - 86400e3)); return { rows: daily.filter((r) => r.key === y), label: `kal (${y})` }; }
+      if (period === 'week7') {
+        const set = new Set();
+        for (let i = 0; i < 7; i++) set.add(key(new Date(latestD.getTime() - i * 86400e3)));
+        return { rows: daily.filter((r) => set.has(r.key)), label: `last 7 din (${latest} tak)` };
+      }
+      if (period === 'prevMonth') return { rows: daily.filter((r) => r.ym === ymPrev), label: `pichhla mahina (${ymPrev})` };
+      return { rows: daily.filter((r) => r.ym === ymCur), label: `is mahine ka MTD (${ymCur})` };
+    };
+    const { rows, label } = pick();
+    const sum = (f) => rows.reduce((a, r) => a + (f(r) ? r.n : 0), 0);
+    const metric = /\bvc4\b/.test(n) ? 'vc4'
+      : /(commercial|comm\b)/.test(n) ? 'comm'
+      : /\bgv\b|gadivan/.test(n) ? 'gv'
+      : /\bff\b|first forward/.test(n) ? 'ff'
+      : /replacement/.test(n) ? 'repl'
+      : /chassis/.test(n) ? 'chassis'
+      : /stock/.test(n) ? 'stock'
+      : /cover/.test(n) ? 'cover'
+      : 'total';
+    const stock = FF.store.get('stock');
+    if (metric === 'stock' || metric === 'cover') {
+      const st = (stock || []).reduce((a, r) => a + (r.n || 0), 0);
+      const vc4 = (stock || []).filter((r) => r.group === 'VC4').reduce((a, r) => a + (r.n || 0), 0);
+      if (metric === 'stock') return [{ group: '🤖 Jawab', icon: '📦', label: `Stock: ${U.fmt(st)} tags`, sub: `VC4 ${U.fmt(vc4)} · Commercial ${U.fmt(st - vc4)}${stock && stock.length ? '' : ' (stock abhi load nahi hua)'}`, answer: `Stock in field: ${st} tags (VC4 ${vc4}, commercial ${st - vc4}).` }];
+      const mtdVc4 = daily.filter((r) => r.ym === ymCur && r.group === 'VC4').reduce((a, r) => a + r.n, 0);
+      const elapsed = Number(latest.slice(8, 10));
+      const cover = mtdVc4 && elapsed ? (vc4 / (mtdVc4 / elapsed)) : 0;
+      return [{ group: '🤖 Jawab', icon: '📈', label: `VC4 cover: ${cover ? cover.toFixed(1) : '—'} din`, sub: `stock VC4 ${U.fmt(vc4)} ÷ avg ${elapsed} din me ${U.fmt(mtdVc4)}/din`, answer: `VC4 cover ≈ ${cover.toFixed(1)} din (stock ${vc4}, MTD issued ${mtdVc4}).` }];
+    }
+    let n2 = 0, sub2 = '';
+    if (metric === 'vc4') n2 = sum((r) => r.group === 'VC4');
+    else if (metric === 'comm') n2 = sum((r) => r.group !== 'VC4');
+    else if (metric === 'gv') n2 = sum((r) => /gv/i.test(r.channel || ''));
+    else if (metric === 'ff') n2 = sum((r) => /first/i.test(r.channel || ''));
+    else if (metric === 'repl') n2 = sum((r) => r.type === 'REPLACEMENT');
+    else if (metric === 'chassis') n2 = sum((r) => r.type === 'CHASSIS');
+    else n2 = sum(() => true);
+    const metricName = { vc4: 'VC4', comm: 'Commercial', gv: 'GV', ff: 'FF', repl: 'Replacement', chassis: 'Chassis', total: 'Total issued' }[metric];
+    const vc4v = sum((r) => r.group === 'VC4');
+    sub2 = metric === 'total' ? `VC4 ${U.fmt(vc4v)} · Commercial ${U.fmt(n2 - vc4v)} · ${rows.length} rows` : label;
+    return [{ group: '🤖 Jawab', icon: '🤖', label: `${metricName} — ${label}: ${U.fmt(n2)} tags`, sub: sub2, answer: `${metricName} ${label}: ${n2} tags.` }];
+  }
+
   function pool() {
     const items = [];
     // Pages (jiske paas permission hai wahi)
     (FF.app && FF.app.PAGES ? FF.app.PAGES : []).forEach((p) => {
-      if (FF.auth.can(p.perm)) items.push({ group: 'Pages', icon: p.icon || '📄', label: p.label, sub: p.desc || '', href: `#/${p.id}` });
+      const adminOk = !p.adminOnly || (FF.auth.user && FF.auth.user.role === 'admin');
+      const featOk = !p.feat || !FF.config.features || FF.config.features[p.feat] !== false;
+      if (FF.auth.can(p.perm) && adminOk && featOk) items.push({ group: 'Pages', icon: p.icon || '📄', label: p.label, sub: p.desc || '', href: `#/${p.id}` });
     });
     if (FF.auth.user) items.push({ group: 'Pages', icon: '⚙️', label: 'Settings', sub: 'Branding · users · access · notifications · features', href: '#/settings' });
     // Sheets tabs
@@ -87,13 +212,14 @@ window.FF = window.FF || {};
     // Calculator: "12*340" jaisa query ho to result sabse upar.
     const res = nq ? calcResult(nq) : null;
     const calcItem = res === null ? [] : [{ group: 'Calculate', icon: '🧮', label: `= ${U.fmt(res)}`, sub: 'Enter dabao → copy ho jayega', calc: res }];
+    const askItem = nq ? askItems(nq) : [];
     // Group-wise cap: q khali ho to har group se top; warna total top 24.
     if (!nq) {
       const caps = { Pages: 8, Sheets: 6, Agents: 8, TLs: 6, Dates: 6, Recent: 6 };
       const seen = {};
       return scored.map((x) => x.it).filter((it) => { seen[it.group] = (seen[it.group] || 0) + 1; return seen[it.group] <= (caps[it.group] || 6); });
     }
-    return [...calcItem, ...scored.slice(0, 24).map((x) => x.it)];
+    return [...askItem, ...calcItem, ...scored.slice(0, 24).map((x) => x.it)];
   }
 
   function draw(q) {
@@ -124,6 +250,7 @@ window.FF = window.FF || {};
     if (!it) return;
     close();
     if (it.calc !== undefined && it.calc !== null) { U.copyText(String(it.calc)).then(() => U.toast(`Copied: ${it.calc}`, 'ok')).catch(() => {}); return; }
+    if (it.answer) { U.copyText(String(it.answer)).then(() => U.toast('📋 Jawab copy ho gaya', 'ok')).catch(() => {}); return; }
     if (it.notif) { if (FF.liveView && FF.liveView.openNotification) FF.liveView.openNotification(it.notif); return; }
     if (location.hash === it.href) { FF.app.renderCurrent && FF.app.renderCurrent(); } else location.hash = it.href;
   }

@@ -209,7 +209,8 @@ await run('auth helpers (avatar/role)', async () => {
 });
 await run('sheet.render StockDataa', () => pages.sheet.render(root(), { name: 'StockDataa' }, {}), true);
 await run('sheet.render REPORT', () => pages.sheet.render(root(), { name: 'REPORT' }, {}), true);
-await run('settings.render (all tabs)', async () => { for (const tab of ['account', 'brand', 'sources', 'access', 'data', 'rules', 'features', 'contacts', 'users', 'audit', 'backup']) { await pages.settings.render(root(), { tab }, {}); await settle(20); } });
+await run('settings.render (all tabs)', async () => { for (const tab of ['account', 'brand', 'sources', 'access', 'data', 'rules', 'features', 'contacts', 'users', 'links', 'audit', 'backup']) { await pages.settings.render(root(), { tab }, {}); await settle(20); } });
+await run('teamMap.render (admin location map)', () => pages.teamMap.render(root(), {}, {}), true);
 await run('tv.render (TV mode rotation)', () => pages.tv.render(root(), {}, {}), true);
 await run('tv unmount', () => { if (pages.tv.unmount) pages.tv.unmount(); });
 await run('app.refresh (manual ↻)', async () => { await FF.app.refresh(); await settle(100); });

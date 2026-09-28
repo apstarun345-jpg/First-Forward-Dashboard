@@ -153,8 +153,17 @@ const DEFAULT_SETTINGS = {
     weeklyEmail: false,  // 📬 weekly auto digest email (Monday)
     weeklyEmailHour: 9,
     anomalyPct: 80,      // 🔍 agent anomaly: itna % gira to alert
+    // ---- round 3 ke 6 naye features (sab Settings → 🎛 Features se on/off) ----
+    badges: true,        // 🏅 weekly badges + shareable rank card (Performance)
+    voiceSummary: true,  // 🗣️ Dashboard par 🔊 voice summary (Hindi TTS)
+    askBox: true,        // 🤖 search box me sawal-jawab ("aaj ka VC4?")
+    teamMap: true,       // 🗺 team location map (admin)
+    tlAnomaly: true,     // 🏆 TL-level anomaly (agent ke saath)
+    personalLinks: true, // 🔗 personal read-only links (agent + TL)
+    officeLat: 0, officeLng: 0, // 🗺 office location (0 = unset — map card se set karo)
     alerts: { lowCover: true, midMonth: true, inactive: true, zeroDay: true, newLoginIp: true, anomaly: true }
   },
+  personalLinks: [],     // 🔗 { id, kind, name, token, enabled } — sirf admin (settingsFor non-admin ko strip karta hai)
   email: { host: '', port: 587, secure: false, user: '', pass: '', from: '', to: '' },
   lastBackupAt: null,
   cacheSeconds: DEFAULT_CACHE_SECONDS,
@@ -244,6 +253,7 @@ function settingsFor(u) {
   if (u && u.role === 'admin') return db.settings;
   const s = { ...db.settings };
   if (s.email) s.email = { host: s.email.host || '', port: s.email.port || '', secure: !!s.email.secure, user: '', pass: '', from: s.email.from || '', to: s.email.to || '' };
+  delete s.personalLinks; // 🔗 secret tokens sirf admin ko
   return s;
 }
 /** sw.js ka CACHE_NAME — app version (update-toast ke liye). */
@@ -1448,7 +1458,7 @@ function runScheduledChecks() {
     maybeInactiveUsers(),
     F.alerts.zeroDay === false ? Promise.resolve() : maybeZeroDayAlert(),
     F.backupReminder === false ? Promise.resolve() : maybeBackupReminder(),
-    F.alerts.anomaly === false ? Promise.resolve() : maybeAgentAnomaly(),
+    maybeAgentAnomaly(),
     sendWeeklyEmail(false),
     sendReportEmail(false),
     refreshStockState(false)
@@ -1641,65 +1651,98 @@ async function sendReportEmail(force = false) {
   return { date: dateKey, days: rows.length };
 }
 // ---- 🔍 agent anomaly (raat 9 IST) — achanak 0 / bahut kam issuance wale agents -----------------
-async function maybeAgentAnomaly() {
+async function maybeAgentAnomaly(force = false) {
   try {
     const F = feats();
-    if (F.alerts.anomaly === false) return null;
-    const ist = istNow();
-    if (ist.getUTCHours() < 21) return null; // din khatam hone ka wait
+    const doAgent = F.alerts.anomaly !== false;
+    const doTl = F.tlAnomaly !== false;
+    if (!doAgent && !doTl) return null;
+    if (!force) {
+      const ist = istNow();
+      if (ist.getUTCHours() < 21) return null; // din khatam hone ka wait
+      const dk0 = dateKeyNow();
+      if (db.notify.watch.anomalyDate === dk0) return null;
+    }
     const dateKey = dateKeyNow();
-    if (db.notify.watch.anomalyDate === dateKey) return null;
     await checkReports(false).catch(() => {}); // aaj ka FF snapshot confirm karne ke liye
     const sheetToday = !!(db.notify.watch.ff && db.notify.watch.ff.date && db.notify.watch.ff.date >= dateKey);
     const s = db.settings.eir || {};
     const sheet = db.settings.eirSheet || 'EIR';
-    const agentCol = s.agentName || 'L', dateCol = s.date || 'AA', tagCol = s.tagId || 'A';
-    const tq = `select ${agentCol}, ${dateCol}, count(${tagCol}) where ${tagCol} is not null group by ${agentCol}, ${dateCol} order by ${dateCol} desc limit 3000`;
-    const params = new URLSearchParams({ id: String(db.settings.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet, tq });
-    const out = await fetchUpstream(upstreamUrl(params));
-    if (out.status < 200 || out.status >= 300) return null;
-    const table = parseGvizServer(out.body);
-    const byAgent = new Map();
-    for (const row of table.rows || []) {
-      const name = serverCell(row, 0).trim();
-      const dk = serverDate(serverCell(row, 1));
-      if (!name || !dk) continue;
-      const n = serverNumber(serverCell(row, 2));
-      if (!byAgent.has(name)) byAgent.set(name, new Map());
-      byAgent.get(name).set(dk, n);
-    }
+    const agentCol = s.agentName || 'L', tlCol = s.tlName || 'BA', dateCol = s.date || 'AA', tagCol = s.tagId || 'A';
+    const params = (tq) => new URLSearchParams({ id: String(db.settings.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet, tq });
+    const loadByName = async (firstCol) => {
+      const tq = `select ${firstCol}, ${dateCol}, count(${tagCol}) where ${tagCol} is not null group by ${firstCol}, ${dateCol} order by ${dateCol} desc limit 3000`;
+      const out = await fetchUpstream(upstreamUrl(params(tq)));
+      if (out.status < 200 || out.status >= 300) return null;
+      const table = parseGvizServer(out.body);
+      const map = new Map();
+      for (const row of table.rows || []) {
+        const name = serverCell(row, 0).trim();
+        const dk = serverDate(serverCell(row, 1));
+        if (!name || !dk) continue;
+        if (!map.has(name)) map.set(name, new Map());
+        map.get(name).set(dk, serverNumber(serverCell(row, 2)));
+      }
+      return map;
+    };
     const pad = (n) => String(n).padStart(2, '0');
     const dayMinus = (k, i) => { const d = new Date(`${k}T00:00:00Z`); d.setUTCDate(d.getUTCDate() - i); return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`; };
     const pct = Number(F.anomalyPct) || 80;
-    const suspects = [];
-    for (const [name, m] of byAgent) {
-      let sum = 0, days = 0;
-      for (let i = 1; i <= 7; i++) { const k = dayMinus(dateKey, i); if (m.has(k)) { sum += m.get(k); days++; } }
-      const avg = days ? sum / days : 0;
-      if (days < 3 || avg < 3) continue;
-      const hasToday = m.has(dateKey);
-      const todayN = hasToday ? m.get(dateKey) : 0;
-      const isDrop = hasToday && todayN <= avg * (1 - pct / 100);
-      const isZero = !hasToday && avg >= 5 && sheetToday;
-      if (isDrop || isZero) suspects.push({ name, today: todayN, avg: Math.round(avg * 10) / 10 });
+    const evaluate = (byName, minAvg) => {
+      const suspects = [];
+      for (const [name, m] of byName) {
+        let sum = 0, days = 0;
+        for (let i = 1; i <= 7; i++) { const k = dayMinus(dateKey, i); if (m.has(k)) { sum += m.get(k); days++; } }
+        const avg = days ? sum / days : 0;
+        if (days < 3 || avg < minAvg) continue;
+        const hasToday = m.has(dateKey);
+        const todayN = hasToday ? m.get(dateKey) : 0;
+        const isDrop = hasToday && todayN <= avg * (1 - pct / 100);
+        const isZero = !hasToday && avg >= minAvg * 1.6 && sheetToday;
+        if (isDrop || isZero) suspects.push({ name, today: todayN, avg: Math.round(avg * 10) / 10 });
+      }
+      suspects.sort((a, b) => b.avg - a.avg);
+      return suspects;
+    };
+    const out = { agent: null, tl: null };
+    const excluded = new Set((Array.isArray(db.settings.excludeTls) ? db.settings.excludeTls : []).map((x) => String(x).trim().toLowerCase()).filter(Boolean));
+    if (doAgent) {
+      const byAgent = await loadByName(agentCol);
+      if (byAgent) {
+        const suspects = evaluate(byAgent, 3);
+        if (suspects.length) {
+          const top = suspects.slice(0, 12);
+          out.agent = recordNotification({
+            type: 'alert',
+            title: `📉 Agent anomaly · ${suspects.length} agent ${pct}%+ down (${dateKey.slice(8, 10)} ${MON_SHORT[Number(dateKey.slice(5, 7)) - 1]})`,
+            body: top.map((x) => `${x.name} (${x.today} vs avg ${x.avg})`).join(', ') + (suspects.length > top.length ? ` …+${suspects.length - top.length}` : '') + `. Aaj ke numbers vs pichhle 7 din ka avg — Performance page par dekho.`,
+            target: 'admin',
+            meta: { link: '#/performance', date: dateKey, count: suspects.length, pct }
+          });
+          logAudit(null, 'agent_anomaly', { actor: 'scheduler', note: `${suspects.length} agents ≥${pct}% down` });
+        }
+      }
     }
-    if (!suspects.length) {
-      if (sheetToday || (db.notify.watch.ff && db.notify.watch.ff.date === dateKey)) { db.notify.watch.anomalyDate = dateKey; persist('notify').catch(() => {}); }
-      return null;
+    if (doTl) {
+      const byTl = await loadByName(tlCol);
+      if (byTl) {
+        const clean = new Map([...byTl].filter(([n]) => n && n !== '—' && !excluded.has(n.toLowerCase())));
+        const suspects = evaluate(clean, 5);
+        if (suspects.length) {
+          const top = suspects.slice(0, 10);
+          out.tl = recordNotification({
+            type: 'alert',
+            title: `🏆 TL anomaly · ${suspects.length} TL ${pct}%+ down (${dateKey.slice(8, 10)} ${MON_SHORT[Number(dateKey.slice(5, 7)) - 1]})`,
+            body: top.map((x) => `${x.name} (${x.today} vs avg ${x.avg})`).join(', ') + (suspects.length > top.length ? ` …+${suspects.length - top.length}` : '') + `. Team issuance vs pichhle 7 din ka avg — Performance → TLs me dekho.`,
+            target: 'admin',
+            meta: { link: '#/performance?view=tls', date: dateKey, count: suspects.length, pct }
+          });
+          logAudit(null, 'tl_anomaly', { actor: 'scheduler', note: `${suspects.length} TLs ≥${pct}% down` });
+        }
+      }
     }
-    db.notify.watch.anomalyDate = dateKey;
-    persist('notify').catch(() => {});
-    suspects.sort((a, b) => b.avg - a.avg);
-    const top = suspects.slice(0, 12);
-    const item = recordNotification({
-      type: 'alert',
-      title: `📉 Agent anomaly · ${suspects.length} agent ${pct}%+ down (${dateKey.slice(8, 10)} ${MON_SHORT[Number(dateKey.slice(5, 7)) - 1]})`,
-      body: top.map((s2) => `${s2.name} (${s2.today} vs avg ${s2.avg})`).join(', ') + (suspects.length > top.length ? ` …+${suspects.length - top.length}` : '') + `. Aaj ke numbers vs pichhle 7 din ka avg — Performance page par dekho.`,
-      target: 'admin',
-      meta: { link: '#/performance', date: dateKey, count: suspects.length, pct }
-    });
-    logAudit(null, 'agent_anomaly', { actor: 'scheduler', note: `${suspects.length} agents ≥${pct}% down` });
-    return item;
+    if (sheetToday || out.agent || out.tl) { db.notify.watch.anomalyDate = dateKey; persist('notify').catch(() => {}); }
+    return out;
   } catch (err) { console.warn('agent anomaly:', err.message); return null; }
 }
 let reportCheckAt = 0;
@@ -2033,6 +2076,64 @@ async function handleApi(req, res, url) {
     const entries = (db.notify && Array.isArray(db.notify.audit) ? db.notify.audit : []).slice(-250).reverse();
     return sendJson(res, 200, { entries });
   }
+  // 🗺 Team location (admin) — jinhone Settings/phone se location share ki hai
+  if (p === '/api/team-location' && method === 'GET') {
+    requireAdmin(user);
+    const people = db.users.filter((u) => u.lastLocation && u.lastLocation.latitude).map((u) => ({
+      username: u.username, name: u.name || u.username, role: u.role, approved: !!u.approved,
+      lat: u.lastLocation.latitude, lng: u.lastLocation.longitude, accuracy: u.lastLocation.accuracy || null,
+      at: u.lastLocation.at || null, lastLoginAt: u.lastLoginAt || null
+    })).sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
+    return sendJson(res, 200, { people, office: { lat: Number(feats().officeLat) || 0, lng: Number(feats().officeLng) || 0 } });
+  }
+  // 🔍 Agent + TL anomaly — force (raat 9 ke alawa bhi test/admin "abhi chalao")
+  if (p === '/api/notifications/anomaly' && method === 'POST') {
+    requireAdmin(user);
+    const out = await maybeAgentAnomaly(true);
+    return sendJson(res, 200, { ok: !!(out && (out.agent || out.tl)), agent: out && out.agent ? out.agent.title : null, tl: out && out.tl ? out.tl.title : null });
+  }
+  // 🔗 Personal read-only links (agent + TL) — CRUD sirf admin
+  if (p === '/api/personal-links' && method === 'GET') {
+    requireAdmin(user);
+    return sendJson(res, 200, { links: Array.isArray(db.settings.personalLinks) ? db.settings.personalLinks : [] });
+  }
+  if (p === '/api/personal-links' && method === 'POST') {
+    requireAdmin(user);
+    const body = await readBody(req);
+    const kind = body.kind === 'tl' ? 'tl' : 'agent';
+    const name = String(body.name || '').trim().slice(0, 80);
+    if (!name) throw new HttpError(400, 'Agent/TL ka naam likho.');
+    if (feats().personalLinks === false) throw new HttpError(403, 'Personal links feature band hai — Features tab se ON karo.');
+    const link = { id: `pl_${crypto.randomBytes(6).toString('hex')}`, kind, name, token: crypto.randomBytes(18).toString('hex'), enabled: true, by: user.username, createdAt: new Date().toISOString() };
+    if (!Array.isArray(db.settings.personalLinks)) db.settings.personalLinks = [];
+    db.settings.personalLinks.push(link);
+    await persist('settings');
+    logAudit(user, 'link_create', { target: `${kind}:${name}`, ip: clientIp(req) });
+    return sendJson(res, 200, { ok: true, link });
+  }
+  const plDel = p.match(/^\/api\/personal-links\/([^/]+)$/);
+  if (plDel && method === 'DELETE') {
+    requireAdmin(user);
+    const id = decodeURIComponent(plDel[1]);
+    const before = (db.settings.personalLinks || []).length;
+    db.settings.personalLinks = (db.settings.personalLinks || []).filter((l) => l.id !== id);
+    if (db.settings.personalLinks.length === before) throw new HttpError(404, 'Link nahi mila.');
+    await persist('settings');
+    logAudit(user, 'link_revoke', { target: id, ip: clientIp(req) });
+    return sendJson(res, 200, { ok: true });
+  }
+  const plToggle = p.match(/^\/api\/personal-links\/([^/]+)\/enable$/);
+  if (plToggle && method === 'POST') {
+    requireAdmin(user);
+    const id = decodeURIComponent(plToggle[1]);
+    const link = (db.settings.personalLinks || []).find((l) => l.id === id);
+    if (!link) throw new HttpError(404, 'Link nahi mila.');
+    const body = await readBody(req);
+    link.enabled = body.enabled !== false;
+    await persist('settings');
+    logAudit(user, 'link_toggle', { target: `${link.kind}:${link.name}`, note: link.enabled ? 'ON' : 'OFF' });
+    return sendJson(res, 200, { ok: true, link });
+  }
   if (p === '/api/notifications/digest' && method === 'POST') {
     if (!user) throw new HttpError(401, 'Login required');
     requireAdmin(user);
@@ -2316,7 +2417,7 @@ async function handleApi(req, res, url) {
     const next = body.reset ? { ...DEFAULT_SETTINGS } : deepMerge(db.settings, patch);
     next.updatedAt = new Date().toISOString(); next.updatedBy = user.username;
     if (next.sheetId !== db.settings.sheetId || next.cacheSeconds !== db.settings.cacheSeconds) cache.clear();
-    const changes = changeList(db.settings, next, { skip: ['updatedAt', 'updatedBy', 'lastBackupAt'] });
+    const changes = changeList(db.settings, next, { skip: ['updatedAt', 'updatedBy', 'lastBackupAt', 'personalLinks'] });
     db.settings = next;
     await persist('settings');
     if (patch.lastBackupAt) logAudit(user, 'backup_export', { ip: clientIp(req), note: 'settings JSON download' });
@@ -2457,6 +2558,181 @@ async function serveStatic(res, pathname) {
 }
 
 // ---------------------------------------------------------------------------------------------
+// -------------------------------------------------------------------------------------------
+// 🔗 Personal read-only pages — /p/<token> (bina login; agent/TL ka apna performance)
+// -------------------------------------------------------------------------------------------
+const escHtml = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const pad2 = (n) => String(n).padStart(2, '0');
+function gvizLiteral(name) { return `'${String(name).replace(/\\/g, '').replace(/'/g, "\\'")}'`; }
+async function personalDailyRows(link) {
+  const s = db.settings.eir || {};
+  const sheet = db.settings.eirSheet || 'EIR';
+  const dateCol = s.date || 'AA', tagCol = s.tagId || 'A', clsCol = s.cls || 'D';
+  const nameCol = link.kind === 'tl' ? (s.tlName || 'BA') : (s.agentName || 'L');
+  const tq = `select ${dateCol}, ${clsCol}, count(${tagCol}) where ${tagCol} is not null and ${nameCol} = ${gvizLiteral(link.name)} group by ${dateCol}, ${clsCol} order by ${dateCol} desc limit 70`;
+  const params = new URLSearchParams({ id: String(db.settings.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet, tq });
+  const out = await fetchUpstream(upstreamUrl(params));
+  if (out.status < 200 || out.status >= 300) throw new Error(`sheet ${out.status}`);
+  const table = parseGvizServer(out.body);
+  const rows = [];
+  for (const row of table.rows || []) {
+    const dk = serverDate(serverCell(row, 0));
+    if (!dk) continue;
+    rows.push({ date: dk, cls: classBucket(serverCell(row, 1)), n: serverNumber(serverCell(row, 2)) });
+  }
+  return rows;
+}
+async function personalTeamAgents(link) {
+  const s = db.settings.eir || {};
+  const sheet = db.settings.eirSheet || 'EIR';
+  const dateCol = s.date || 'AA', tagCol = s.tagId || 'A', agentCol = s.agentName || 'L', tlCol = s.tlName || 'BA';
+  const tq = `select ${agentCol}, ${dateCol}, count(${tagCol}) where ${tagCol} is not null and ${tlCol} = ${gvizLiteral(link.name)} group by ${agentCol}, ${dateCol} order by ${dateCol} desc limit 2500`;
+  const params = new URLSearchParams({ id: String(db.settings.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet, tq });
+  const out = await fetchUpstream(upstreamUrl(params));
+  if (out.status < 200 || out.status >= 300) throw new Error(`sheet ${out.status}`);
+  const table = parseGvizServer(out.body);
+  const byAgent = new Map();
+  for (const row of table.rows || []) {
+    const name = serverCell(row, 0).trim();
+    const dk = serverDate(serverCell(row, 1));
+    if (!name || !dk) continue;
+    if (!byAgent.has(name)) byAgent.set(name, new Map());
+    byAgent.get(name).set(dk, (byAgent.get(name).get(dk) || 0) + serverNumber(serverCell(row, 2)));
+  }
+  return byAgent;
+}
+function personalStats(rows) {
+  const ym = dateKeyNow().slice(0, 7);
+  const todayKey = dateKeyNow();
+  const daily = new Map(); // date → n
+  const cls = {};
+  for (const r of rows) {
+    daily.set(r.date, (daily.get(r.date) || 0) + r.n);
+    if (r.date.startsWith(ym)) cls[r.cls] = (cls[r.cls] || 0) + r.n;
+  }
+  let mtd = 0;
+  for (const [d, n] of daily) if (d.startsWith(ym)) mtd += n;
+  const prev = new Date(`${todayKey}T00:00:00Z`); prev.setUTCMonth(prev.getUTCMonth() - 1);
+  const prevYm = `${prev.getUTCFullYear()}-${pad2(prev.getUTCMonth() + 1)}`;
+  const dayNow = Number(todayKey.slice(8, 10));
+  let prevSame = 0;
+  for (const [d, n] of daily) if (d.startsWith(prevYm) && Number(d.slice(8, 10)) <= dayNow) prevSame += n;
+  const keys = [...daily.keys()].sort();
+  const last14 = keys.slice(-14).map((d) => ({ date: d, n: daily.get(d) }));
+  let streak = 0;
+  for (let i = keys.length - 1; i >= 0; i--) { const n = daily.get(keys[i]); if (n > 0) streak++; else break; }
+  let best = { date: '', n: 0 };
+  for (const [d, n] of daily) if (n > best.n) best = { date: d, n };
+  const clsTotal = Object.values(cls).reduce((a, b) => a + b, 0);
+  return { mtd, prevSame, last14, streak, best, cls, clsTotal, activeDays: last14.filter((x) => x.n > 0).length };
+}
+async function servePersonalPage(req, res, rawToken) {
+  const token = String(rawToken || '').split(/[/?#]/)[0].trim();
+  const fail = (code, msg) => sendHtml(res, code, personalShell({ title: 'Link unavailable', heading: '🔒 Link kaam nahi kar raha', body: `<p>${escHtml(msg)}</p>` }));
+  if (feats().personalLinks === false) return fail(404, 'Ye feature admin ne band kar rakha hai.');
+  const link = (Array.isArray(db.settings.personalLinks) ? db.settings.personalLinks : []).find((l) => l.token === token);
+  if (!link) return fail(404, 'Ye link ya to khatam ho gaya ya galat hai. Admin se naya maango.');
+  if (!link.enabled) return fail(403, 'Admin ne ye link band kar diya hai.');
+  try {
+    const rows = await personalDailyRows(link);
+    if (!rows.length) return fail(404, `"${link.name}" ka data abhi sheet me nahi mila (ya naam alag hai).`);
+    const st = personalStats(rows);
+    let team = [];
+    let goal = null, target = null;
+    const ym = dateKeyNow().slice(0, 7);
+    if (link.kind === 'tl') {
+      goal = ((Array.isArray(db.settings.tlTargets) ? db.settings.tlTargets : []).find((t) => t && t.ym === ym && t.tl === link.name) || null);
+      const byAgent = await personalTeamAgents(link);
+      for (const [name, m] of byAgent) {
+        let mtdA = 0;
+        for (const [d, n] of m) if (d.startsWith(ym)) mtdA += n;
+        if (mtdA > 0) team.push({ name, mtd: mtdA });
+      }
+      team.sort((a, b) => b.mtd - a.mtd);
+      team = team.slice(0, 15);
+    } else {
+      target = ((Array.isArray(db.settings.targets) ? db.settings.targets : []).find((t) => t && t.ym === ym && String(t.agent || '') === link.name) || null);
+    }
+    const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
+    const maxBar = Math.max(1, ...st.last14.map((x) => x.n));
+    const bars = st.last14.map((x) => `<div class="pb-col" title="${escHtml(x.date)}: ${x.n}"><div class="pb-bar" style="height:${Math.max(4, Math.round((x.n / maxBar) * 100))}%"></div><span>${escHtml(x.date.slice(8, 10))}</span></div>`).join('');
+    const clsRows = Object.entries(st.cls).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<div class="pb-kv"><span>${escHtml(k)}</span><b>${v}</b> <i>${pct(v, st.clsTotal)}%</i></div>`).join('') || '<p class="dim">—</p>';
+    const goalHtml = goal ? `<div class="pb-goal"><div class="pb-goal-top"><span>🎯 TL goal ${escHtml(ym)}</span><b>${st.mtd} / ${Number(goal.target) || 0} (${pct(st.mtd, Number(goal.target))}%)</b></div><div class="pb-track"><div class="pb-fill" style="width:${Math.min(100, pct(st.mtd, Number(goal.target)))}%"></div></div></div>` : '';
+    const targetHtml = target ? `<div class="pb-kv"><span>🎯 Your target ${escHtml(ym)}</span><b>${st.mtd} / ${Number(target.target) || 0} (${pct(st.mtd, Number(target.target))}%)</b></div>` : '';
+    const teamHtml = team.length ? `<section class="pb-card"><h3>👥 Team (is mahine)</h3>${team.map((t, i) => `<div class="pb-rank"><span class="pb-pos">${i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1}</span><span class="pb-name">${escHtml(t.name)}</span><b>${t.mtd}</b></div>`).join('')}</section>` : '';
+    const diff = st.mtd - st.prevSame;
+    const html = personalShell({
+      title: `${link.name} · Performance`,
+      heading: `${link.kind === 'tl' ? '👥' : '🧑‍💼'} ${escHtml(link.name)}`,
+      sub: `${link.kind === 'tl' ? 'Team Leader' : 'Agent'} · personal view · read-only`,
+      body: `
+      ${goalHtml || targetHtml ? `<section class="pb-card pb-goalcard">${goalHtml}${targetHtml}</section>` : ''}
+      <section class="pb-kpis">
+        <div class="pb-kpi"><small>MTD issued</small><b>${st.mtd}</b><span>${escHtml(ym)}</span></div>
+        <div class="pb-kpi"><small>Pichhle mahine same period</small><b>${st.prevSame}</b><span class="${diff >= 0 ? 'up' : 'down'}">${diff >= 0 ? '▲' : '▼'} ${Math.abs(diff)}</span></div>
+        <div class="pb-kpi"><small>Streak</small><b>${st.streak}</b><span>din se active 🔥</span></div>
+        <div class="pb-kpi"><small>Best day</small><b>${st.best.n}</b><span>${escHtml(st.best.date)}</span></div>
+      </section>
+      <section class="pb-card"><h3>📅 Last ${st.last14.length} din</h3><div class="pb-bars">${bars || '<p class="dim">data nahi</p>'}</div></section>
+      <section class="pb-grid2">
+        <div class="pb-card"><h3>🏷️ Class mix (MTD)</h3>${clsRows}</div>
+        <div class="pb-card"><h3>📈 Snapshot</h3>
+          <div class="pb-kv"><span>Active days (last 14)</span><b>${st.activeDays}</b></div>
+          <div class="pb-kv"><span>Avg / active day</span><b>${st.activeDays ? (st.mtd / Math.max(1, st.activeDays)).toFixed(1) : '—'}</b></div>
+          <div class="pb-kv"><span>Total rows (14 din chart)</span><b>${st.last14.reduce((a, b) => a + b.n, 0)}</b></div>
+        </div>
+      </section>
+      ${teamHtml}
+      <p class="pb-foot">Read-only link · data live sheet se · ${escHtml(db.settings.brand || 'Dashboard')}</p>`
+    });
+    return sendHtml(res, 200, html, { 'Cache-Control': 'no-store' });
+  } catch (err) {
+    console.warn('personal page:', err.message);
+    return fail(500, 'Data load nahi hua — thodi der baad try karo.');
+  }
+}
+function personalShell({ title, heading, sub, body }) {
+  const accent = (db.settings.theme && db.settings.theme.accent) || '#2563eb';
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow"><title>${escHtml(title)}</title>
+<style>
+:root{--a:${escHtml(accent)}}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#f4f6fb;color:#0f172a;padding:18px;line-height:1.45}
+.pb-wrap{max-width:640px;margin:0 auto}
+.pb-head{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.pb-logo{width:44px;height:44px;border-radius:12px;background:var(--a);color:#fff;display:grid;place-items:center;font-weight:800;font-size:17px}
+.pb-head h1{font-size:20px}.pb-head p{font-size:12.5px;color:#64748b}
+.pb-card{background:#fff;border:1px solid #e5e9f5;border-radius:14px;padding:14px;margin-bottom:12px;box-shadow:0 2px 10px rgba(15,23,42,.04)}
+.pb-card h3{font-size:13.5px;color:#475569;margin-bottom:10px}
+.pb-kpis{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:12px}
+.pb-kpi{background:#fff;border:1px solid #e5e9f5;border-radius:14px;padding:12px}
+.pb-kpi small{color:#64748b;font-size:11.5px;display:block}.pb-kpi b{font-size:26px;display:block;margin:2px 0}.pb-kpi span{font-size:12px;color:#64748b}
+.pb-kpi .up{color:#10b981}.pb-kpi .down{color:#ef4444}
+.pb-bars{display:flex;align-items:flex-end;gap:5px;height:120px}
+.pb-col{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%}
+.pb-bar{width:100%;background:linear-gradient(180deg,var(--a),#93c5fd);border-radius:5px 5px 2px 2px;min-height:4px}
+.pb-col span{font-size:9.5px;color:#94a3b8;margin-top:3px}
+.pb-grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.pb-kv{display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px dashed #eef2f9;font-size:13.5px}
+.pb-kv:last-child{border:0}.pb-kv i{color:#94a3b8;font-style:normal;font-size:12px}
+.pb-rank{display:flex;align-items:center;gap:10px;padding:7px 4px;border-bottom:1px dashed #eef2f9;font-size:14px}
+.pb-rank:last-child{border:0}.pb-pos{width:26px;text-align:center}.pb-name{flex:1;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pb-goal-top{display:flex;justify-content:space-between;font-size:13.5px;margin-bottom:6px}
+.pb-track{height:10px;background:#eef0f8;border-radius:99px;overflow:hidden}.pb-fill{height:100%;background:var(--a);border-radius:99px}
+.pb-foot{text-align:center;color:#94a3b8;font-size:11.5px;margin-top:16px}
+.dim{color:#94a3b8}
+@media(max-width:480px){.pb-grid2{grid-template-columns:1fr}}
+</style></head><body><div class="pb-wrap">
+<header class="pb-head"><div class="pb-logo">${escHtml(String(db.settings.brand || 'FF').split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase())}</div>
+<div><h1>${heading}</h1><p>${sub}</p></div></header>
+${body}
+</div></body></html>`;
+}
+function sendHtml(res, status, html, extra = {}) {
+  res.writeHead(status, headers({ 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': Buffer.byteLength(html), ...extra }));
+  res.end(html);
+}
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
@@ -2466,6 +2742,9 @@ const server = http.createServer(async (req, res) => {
         console.error(err);
         return sendJson(res, 500, { error: 'Server error' });
       }
+    }
+    if (url.pathname.startsWith('/p/')) {
+      try { return await servePersonalPage(req, res, url.pathname.slice(3)); } catch (err) { console.error(err); return sendText(res, 500, 'Server error'); }
     }
     if (req.method !== 'GET' && req.method !== 'HEAD') return sendText(res, 405, 'Method not allowed');
     return await serveStatic(res, url.pathname);

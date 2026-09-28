@@ -414,14 +414,103 @@ FF.pages = FF.pages || {};
       return `<div class="dist-row ${active ? 'on' : ''}" data-chip="${filterKey}" data-value="${esc(value)}"><div class="dist-head">${badge(label)}<b>${fmt(count)}</b></div><div class="hbar-track"><div class="hbar-fill ${tone(label)}" style="width:${total ? (count / total) * 100 : 0}%"></div></div></div>`;
     }).join('')}</div>`;
   }
+  // ---- 🏅 Weekly badges + shareable rank card (features.badges) --------------------------------
+  const badgesOn = () => !FF.config.feat || FF.config.feat('badges') !== false;
+  const streakOf = (w) => { let s = 0; for (let i = (w || []).length - 1; i >= 0; i--) { if ((w[i] || 0) > 0) s++; else break; } return s; };
+  const badgeAgents = () => [...state.filtered].sort((a, b) => (b.weekTotal || 0) - (a.weekTotal || 0));
+  const badgeTls = () => [...state.tlGroups].sort((a, b) => (b.weekTotal || 0) - (a.weekTotal || 0));
+  function badgesSection() {
+    const medals = ['🥇', '🥈', '🥉'];
+    const topA = badgeAgents().slice(0, 3).filter((a) => (a.weekTotal || 0) > 0);
+    const topT = badgeTls().slice(0, 3).filter((g) => (g.weekTotal || 0) > 0);
+    if (!topA.length && !topT.length) return '';
+    const row = (g, i, kind) => {
+      const name = kind === 'tl' ? (g.tlName || g.tlKey) : g.name;
+      const st = streakOf(g.week);
+      return `<div class="badge-row"><span class="badge-medal">${medals[i]}</span>
+        <span class="badge-name"><b>${esc(name)}</b><small>${kind === 'tl' ? 'TL' : (tlLabel(g) || 'Agent')} · ${state.dayLabels[0] || ''} → ${state.dayLabels[6] || ''}</small></span>
+        <span class="badge-stats"><b>${fmt(g.weekTotal)}</b><small>${st ? `🔥 ${st} din streak` : '—'}</small></span>
+        <button class="btn small" data-rc="${badgeList(kind).indexOf(g)}" data-rc-kind="${kind}" title="Shareable PNG image (WhatsApp status)">🎴 Rank card</button></div>`;
+    };
+    return `<section class="card badges-card"><div class="card-head"><h3>🏅 Weekly badges <span class="dim">· last 7 days</span></h3>
+      <div class="card-right dim small">🥇 agent + TL podium · image ek click me</div></div>
+      <div class="card-body badge-grid">
+        <div><h4 class="badge-h">🧑‍💼 Agents</h4>${topA.length ? topA.map((a, i) => row(a, i, 'agent')).join('') : '<p class="dim small">koi data nahi</p>'}</div>
+        <div><h4 class="badge-h">👥 TLs</h4>${topT.length ? topT.map((g, i) => row(g, i, 'tl')).join('') : '<p class="dim small">koi data nahi</p>'}</div>
+      </div></section>`;
+  }
+  function shareRankCard(idx, kind) {
+    const list = badgeList(kind);
+    const g = list[idx];
+    if (!g) return U.toast('Rank card data nahi mila', 'err');
+    const name = kind === 'tl' ? (g.tlName || g.tlKey) : g.name;
+    const total = g.weekTotal || 0;
+    const st = streakOf(g.week);
+    const medal = ['🥇', '🥈', '🥉'][idx] || `#${idx + 1}`;
+    const cv = document.createElement('canvas');
+    cv.width = 720; cv.height = 720;
+    const x = cv.getContext('2d');
+    const accent = (FF.config.theme && FF.config.theme.accent) || '#2563eb';
+    const grad = x.createLinearGradient(0, 0, 720, 720);
+    grad.addColorStop(0, accent); grad.addColorStop(1, '#0f172a');
+    x.fillStyle = grad; x.fillRect(0, 0, 720, 720);
+    x.globalAlpha = 0.1; x.fillStyle = '#fff';
+    x.beginPath(); x.arc(640, 90, 160, 0, Math.PI * 2); x.fill();
+    x.beginPath(); x.arc(70, 660, 130, 0, Math.PI * 2); x.fill();
+    x.globalAlpha = 1;
+    x.textAlign = 'left';
+    x.font = '72px "Segoe UI Emoji", "Noto Color Emoji", serif';
+    x.fillText(kind === 'tl' ? (idx < 3 ? medal : '👥') : (idx < 3 ? medal : '🧑‍💼'), 52, 128);
+    x.fillStyle = 'rgba(255,255,255,.85)';
+    x.font = '600 20px system-ui, sans-serif';
+    x.fillText(`WEEKLY RANK CARD · LAST 7 DAYS · ${kind === 'tl' ? 'TEAM LEADER' : 'AGENT'}`, 52, 178);
+    x.fillStyle = '#fff';
+    x.font = '800 46px system-ui, sans-serif';
+    const nm = String(name || '').length > 17 ? `${String(name).slice(0, 16)}…` : String(name);
+    x.fillText(nm, 52, 244);
+    x.textAlign = 'right';
+    x.fillStyle = '#fde047';
+    x.font = '900 130px system-ui, sans-serif';
+    x.fillText(`#${idx + 1}`, 668, 260);
+    x.textAlign = 'left';
+    // stats boxes
+    const box = (bx, big, small) => {
+      x.fillStyle = 'rgba(255,255,255,.14)';
+      x.beginPath(); x.roundRect ? x.roundRect(bx, 320, 280, 150, 18) : x.rect(bx, 320, 280, 150); x.fill();
+      x.fillStyle = '#fff'; x.font = '800 56px system-ui, sans-serif';
+      x.fillText(String(big), bx + 22, 400);
+      x.fillStyle = 'rgba(255,255,255,.8)'; x.font = '500 19px system-ui, sans-serif';
+      x.fillText(small, bx + 22, 440);
+    };
+    box(52, total, 'Tags issued (7 din)');
+    box(360, `${st}🔥`, 'Din ki streak');
+    x.fillStyle = 'rgba(255,255,255,.9)';
+    x.font = '600 24px system-ui, sans-serif';
+    x.fillText(`Issued per day (avg): ${total ? (total / 7).toFixed(1) : 0}`, 52, 540);
+    x.strokeStyle = 'rgba(255,255,255,.35)'; x.lineWidth = 2;
+    x.beginPath(); x.moveTo(52, 570); x.lineTo(668, 570); x.stroke();
+    x.font = '700 30px system-ui, sans-serif'; x.fillStyle = '#fff';
+    x.fillText(FF.config.brand || 'Dashboard', 52, 626);
+    x.font = '500 18px system-ui, sans-serif'; x.fillStyle = 'rgba(255,255,255,.75)';
+    x.fillText(new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) + ' · keep going 💪', 52, 664);
+    cv.toBlob((blob) => {
+      if (!blob) return U.toast('Image nahi bani', 'err');
+      U.downloadBlob(`rank-card-${U.slug(name)}-w${U.stamp()}.png`, blob);
+      U.toast('🎴 Rank card ready — WhatsApp status me daalo', 'ok');
+      if (FF.notifications && FF.notifications.logClick) FF.notifications.logClick('Rank card', `${name} · #${idx + 1}`);
+    }, 'image/png');
+  }
+  function badgeList(kind) { return kind === 'tl' ? badgeTls() : badgeAgents(); }
+
   function renderOverview(el) {
+    const badgesHtml = badgesOn() ? badgesSection() : '';
     const k = kpiData();
     const topN = FF.config.thresholds.topN || 10;
     const topAgents = [...state.filtered].sort((a, b) => b.curTotal - a.curTotal).slice(0, topN);
     const topTls = [...state.tlGroups].sort((a, b) => (b.tlCurTotal || 0) - (a.tlCurTotal || 0)).slice(0, topN);
     const activity = [['active', 'Active'], ['inactive-7', 'Inactive 1–7 days'], ['inactive-8', 'Inactive 8+ days'], ['inactive-month', 'Inactive in month'], ['notfound', 'Not found'], ['other', 'Other']].map(([key, label]) => [label, state.filtered.filter((a) => a.activeCat === key).length, key]).filter((r) => r[1] > 0);
     const shareCur = k.curTotal ? (k.curVc4 / k.curTotal) * 100 : 0, shareLast = k.lastTotal ? (k.lastVc4 / k.lastTotal) * 100 : 0;
-    el.innerHTML = `<div class="grid g-2-1">
+    el.innerHTML = `${badgesHtml}<div class="grid g-2-1">
         <section class="card"><div class="card-head"><h3>⚖️ VC4 vs Commercial · ${esc(state.months.last)} → ${esc(state.months.cur)}</h3><div class="card-right dim">VC4 share ${U.fmtPct(shareLast, 0)} → ${U.fmtPct(shareCur, 0)}</div></div><div class="card-body">
           <div class="grid g-2" style="margin-bottom:0">
             <div>${C.bars({ labels: ['VC4', 'Commercial'], height: 190, series: [{ name: state.months.last, values: [k.lastVc4, k.lastNvc4], color: '#c7d2fe' }, { name: `${state.months.cur} (MTD)`, values: [k.curVc4, k.curNvc4], color: '#6366f1' }], legendAlways: true })}</div>
@@ -624,6 +713,8 @@ FF.pages = FF.pages || {};
     body.addEventListener('click', (e) => {
       const tab = e.target.closest('#pf-tabs .seg-btn');
       if (tab) { state.view = tab.dataset.view; history.replaceState(null, '', `#/performance?view=${state.view}`); draw(); return; }
+      const rcEl = e.target.closest('[data-rc]');
+      if (rcEl) { if (!FF.auth.can('export')) return U.toast('Download permission nahi hai', 'err'); shareRankCard(Number(rcEl.dataset.rc), rcEl.dataset.rcKind || 'agent'); return; }
       const agentEl = e.target.closest('[data-agent]');
       if (agentEl) { openAgent(Number(agentEl.dataset.agent)); return; }
       const tlEl = e.target.closest('[data-tl]');

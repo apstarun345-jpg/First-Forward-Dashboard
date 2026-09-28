@@ -12,6 +12,7 @@ window.FF = window.FF || {};
     { id: 'targets', icon: '🎯', label: 'Agent Targets', desc: 'Shortlist · target · progress · Excel', perm: 'targets', group: 'Main' },
     { id: 'rangeReport', icon: '📅', label: 'Range Report', desc: 'Custom from→to report · FF + GV · Excel', perm: 'tagIssued', group: 'Main' },
     { id: 'tv', icon: '📺', label: 'TV Mode', desc: 'Big-screen rotation · fullscreen', perm: 'home', group: 'Main', feat: 'tvMode' },
+    { id: 'teamMap', icon: '🗺️', label: 'Team map', desc: 'Location + office distance (admin)', perm: 'home', group: 'Main', feat: 'teamMap', adminOnly: true },
     { id: 'dashboard', icon: '📊', label: 'Dashboard', desc: 'KPIs & charts (EIR)', perm: 'dashboard', group: 'First Forward' },
     { id: 'trend', icon: '📈', label: 'Trend', desc: 'Daily · Monthly · Last vs Current', perm: 'trend', group: 'First Forward' },
     { id: 'performance', icon: '🏆', label: 'Performance', desc: 'Agents & TLs (REPORT)', perm: 'performance', group: 'First Forward' },
@@ -187,7 +188,10 @@ window.FF = window.FF || {};
     const p = pageDef(page);
     return p ? p.perm : null;
   }
-  function featOk(p) { return !p.feat || !FF.config.features || FF.config.features[p.feat] !== false; }
+  function featOk(p) {
+    if (p.adminOnly && !(FF.auth.user && FF.auth.user.role === 'admin')) return false;
+    return !p.feat || !FF.config.features || FF.config.features[p.feat] !== false;
+  }
   function allowed(page, params) { const perm = pagePerm(page, params); const p = pageDef(page); if (p && !featOk(p)) return false; return !perm || FF.auth.can(perm); }
   function enabledTabs() { return (FF.config.allTabs ? FF.config.allTabs(true) : (FF.config.sheets || [])); }
   function firstAllowedPage() {

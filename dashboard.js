@@ -3,6 +3,7 @@ window.FF = window.FF || {};
 FF.pages = FF.pages || {};
 (function (FF) {
   'use strict';
+  let voiceText = '';
   const U = FF.util, M = FF.model, C = FF.charts, S = FF.store;
   const esc = U.esc;
   const excl = (name) => FF.config.isExcludedTl(name);
@@ -63,12 +64,29 @@ FF.pages = FF.pages || {};
 
   async function render(root) {
     const shareOn = !FF.config.feat || FF.config.feat('share') !== false;
+    const voiceOn = !FF.config.feat || FF.config.feat('voiceSummary') !== false;
     root.innerHTML = `<div class="page-head"><div><h1>📊 Dashboard</h1><p class="sub">Summary · EIR issuance + StockDataa inventory · VC4 vs Commercial</p></div>
-      <div class="head-actions">${shareOn ? '<button class="btn" id="db-wa" title="Current numbers WhatsApp par bhejo">📤 WhatsApp</button>' : ''}<button class="btn" id="db-bundle" title="Monthly + Daily + Stock + REPORT + GV — sab ek xlsx me">⬇ Excel bundle</button><button class="btn primary" data-action="refresh">↻ Refresh</button></div></div>
+      <div class="head-actions">${shareOn ? '<button class="btn" id="db-wa" title="Current numbers WhatsApp par bhejo">📤 WhatsApp</button>' : ''}${voiceOn ? '<button class="btn" id="db-voice" title="Aaj ke numbers Hindi me bol kar sunao (browser TTS) — dobara click = band">🔊 Suno</button>' : ''}<button class="btn" id="db-bundle" title="Monthly + Daily + Stock + REPORT + GV — sab ek xlsx me">⬇ Excel bundle</button><button class="btn primary" data-action="refresh">↻ Refresh</button></div></div>
       <div id="db-targetbar"></div>
       <div id="db-body">${U.spinner('Data load ho raha hai… (pehli baar 5-10 sec lag sakte hain)')}</div>`;
     const bundleBtn = U.$('#db-bundle', root);
     if (bundleBtn) bundleBtn.addEventListener('click', () => exportBundle(bundleBtn));
+    // 🗣️ Voice summary (features.voiceSummary) — speechSynthesis, koi server call nahi
+    const voiceBtn = U.$('#db-voice', root);
+    if (voiceBtn) voiceBtn.addEventListener('click', () => {
+      if (!('speechSynthesis' in window)) return U.toast('Is browser/OS me voice supported nahi hai', 'err');
+      if (window.speechSynthesis.speaking) { window.speechSynthesis.cancel(); voiceBtn.classList.remove('on'); return; }
+      if (!voiceText) return U.toast('Data abhi load ho raha hai — thodi der baad', 'warn');
+      const u = new SpeechSynthesisUtterance(voiceText);
+      const vs = window.speechSynthesis.getVoices() || [];
+      const v = vs.find((x) => /^hi/i.test(x.lang)) || vs.find((x) => /en-IN/i.test(x.lang)) || vs.find((x) => /^en/i.test(x.lang));
+      if (v) u.voice = v;
+      u.lang = (v && v.lang) || 'hi-IN';
+      u.rate = 1.03;
+      u.onend = () => voiceBtn.classList.remove('on');
+      voiceBtn.classList.add('on');
+      window.speechSynthesis.speak(u);
+    });
 
     // 🎯 Target progress bar (Features → targetBar) + 📤 WhatsApp share — server MTD + targets se.
     let shareCtx = '';
@@ -289,6 +307,14 @@ FF.pages = FF.pages || {};
         <p class="dim small">Cover = VC4 stock ÷ avg daily issuance (MTD). In agents ko dispatch priority do — row click karke agent ka stock dekho. ${critical.length > 8 ? `(+${critical.length - 8} aur)` : ''}</p></div></section>`;
       }
     }
+
+    // 🗣️ Voice summary text (features.voiceSummary — 🔊 button isi ko bolta hai)
+    voiceText = [
+      `Namaste. ${FF.config.brand} dashboard update.`,
+      `${U.labelYM(cur, true)} me kul ${curS.total} tags issue hue — VC4 ${curS.vc4}, commercial ${curS.comm}.`,
+      `${U.labelDate(latest)} ko ${todayN} tags.`,
+      stockTotal != null ? `Stock field me ${stockTotal} tags, jisme VC4 stock ${stockVc4} hai.` : ''
+    ].filter(Boolean).join(' ');
 
     body.innerHTML = `
       ${lowStockHtml}
