@@ -270,7 +270,7 @@ FF.pages = FF.pages || {};
     U.$('#tg-sort', body).addEventListener('change', (e) => { view.sort = e.target.value; draw(); });
     U.$('#tg-q', body).addEventListener('input', U.debounce((e) => { view.q = e.target.value; draw(); }, 220));
     const mic = U.$('#tg-mic', body);
-    if (mic && U.voiceInput) mic.addEventListener('click', () => U.voiceInput((text) => { view.q = text; const q = U.$('#tg-q', body); if (q) q.value = text; draw(); }, 'Agent ya TL ka naam bolo…'));
+    if (mic && U.voiceInput) mic.addEventListener('click', () => U.voiceInput((text) => { view.q = text; const q = U.$('#tg-q', body); if (q) q.value = text; draw(); }, 'Agent ya TL ka naam bolo…', { button: mic }));
     const onlyChk = U.$('#tg-only', body);
     if (onlyChk) onlyChk.addEventListener('change', () => { view.onlyWithTarget = onlyChk.checked; draw(); });
     body.addEventListener('click', (e) => {
@@ -286,7 +286,8 @@ FF.pages = FF.pages || {};
       if (e.target.closest('#tg-all')) { const on = e.target.closest('#tg-all').checked; filteredRows().forEach((r) => { if (on) selected.add(r.key); else selected.delete(r.key); }); draw(); return; }
       if (e.target.closest('#tg-select-page')) { filteredRows().forEach((r) => selected.add(r.key)); draw(); return; }
       if (e.target.closest('#tg-clear-sel')) { selected.clear(); draw(); return; }
-      if (e.target.closest('#tg-save')) { saveTargets(); return; }
+      const saveBtn = e.target.closest('#tg-save');
+      if (saveBtn) { U.withButtonBusy(saveBtn, saveTargets, 'Saving targets…'); return; }
       if (e.target.closest('#tg-xlsx')) { exportExcel(); return; }
       const apply = e.target.closest('#tg-bulk-apply');
       if (apply) {
@@ -480,12 +481,14 @@ FF.pages = FF.pages || {};
         const others = (((FF.auth.settings && FF.auth.settings.tlTargets) || []).filter((t) => t && t.ym && t.ym !== view.ym));
         const next = others.concat(entries);
         const btn = e.target.closest('#tl-goal-save');
-        btn.disabled = true;
-        FF.auth.api('/api/settings', 'PUT', { tlTargets: next }).then(() => {
-          FF.auth.settings.tlTargets = next;
-          U.toast('🎯 TL goals save ho gaye ✓', 'ok');
-          drawTl();
-        }).catch((err) => { U.toast(err.message, 'err'); btn.disabled = false; });
+        U.withButtonBusy(btn, async () => {
+          try {
+            await FF.auth.api('/api/settings', 'PUT', { tlTargets: next });
+            FF.auth.settings.tlTargets = next;
+            U.toast('🎯 TL goals save ho gaye ✓', 'ok');
+            drawTl();
+          } catch (err) { U.toast(err.message, 'err'); }
+        }, 'Saving goals…');
         return;
       }
       if (e.target.closest('#tl-xlsx')) {

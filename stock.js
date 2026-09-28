@@ -250,7 +250,7 @@ FF.pages = FF.pages || {};
         ${card('🏬 Top TLs by stock <span class="dim">(APS excluded)</span>', C.hbars({ items: topTls, valueLabel: 'Stock' }))}
       </div>
       ${!FF.config.feat || FF.config.feat('stockTrend') !== false ? `<div id="st-trend-card">${card('📉 Stock trend <span class="dim">(server snapshots · last 30 din)</span>', `<div id="st-trend"><div class="dim small">History load ho rahi hai…</div></div>`, `<span class="dim small" id="st-trend-cover"></span>`)}</div>` : ''}
-      ${!FF.config.feat || FF.config.feat('recon') !== false ? `<div id="st-recon-card">${card('🧾 Stock in vs issued <span class="dim">(is mahine · approx)</span>', `<div id="st-recon"><div class="dim small">Reconciliation load ho raha hai…</div></div>`)}</div>` : ''}
+      ${!FF.config.feat || FF.config.feat('recon') !== false ? `<div id="st-recon-card">${card('🧾 FF stock balance <span class="dim">(is mahine · implied movement)</span>', `<div id="st-recon"><div class="dim small">Reconciliation load ho raha hai…</div></div>`, '<a class="btn small" href="#/forecast?view=balance">Full stock balance →</a>')}</div>` : ''}
       ${!FF.config.feat || FF.config.feat('agedStock') !== false ? `<div id="st-aged-card">${card('🧓 Aged stock <span class="dim">(bcAllocatedAt ke hisaab se · 0-15 / 16-30 / 31-60 / 60+ din)</span>', `<div id="st-aged"><div class="dim small">Aging load ho raha hai…</div></div>`, `<span class="dim small" id="st-aged-note"></span>`)}</div>` : ''}
       ${!FF.config.feat || FF.config.feat('tlCover') !== false ? card(`📈 TL-wise cover <span class="dim">(sabse kam cover upar · VC4 stock ÷ avg daily issuance MTD)</span>`, `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>TL</th><th class="num">VC4 stock</th><th class="num">MTD issued</th><th class="num">Avg / din</th><th>Cover</th></tr></thead><tbody>${(() => {
         const sorted = [...tls].sort((a, b) => (a.cover === null ? 1 : b.cover === null ? -1 : a.cover - b.cover)).slice(0, 14);
@@ -310,23 +310,23 @@ FF.pages = FF.pages || {};
           C.mount(body);
         }
       }
-      // 🧾 Stock in vs issued (features.recon): issued = MTD FF+GV · in = issued + net stock change
+      // 🧾 FF stock balance: legacy snapshots are FF, so only exact FF issuance belongs in this equation.
       if (reconBox && reconBox.isConnected) {
-        const mtd = (out && out.mtd) || {};
-        const issued = (Number(mtd.ff) || 0) + (Number(mtd.gv) || 0);
         const ym = new Date().getFullYear() + '-' + String(new Date().getMonth() + 1).padStart(2, '0');
         const monthPts = ((out && out.points) || []).filter((p) => String(p.date).startsWith(ym));
-        if (monthPts.length < 2 || !issued) {
-          reconBox.innerHTML = `<div class="dim small">Recompile ho raha hai — is mahine ke ≥2 stock snapshots aur MTD issuance ke baad yahan dikhega (server 30 min me snapshot leta hai).</div>`;
+        if (monthPts.length < 2) {
+          reconBox.innerHTML = `<div class="dim small">Recompile ho raha hai — is mahine ke ≥2 stock snapshots ke baad yahan dikhega (server 30 min me snapshot leta hai).</div>`;
         } else {
           const first = monthPts[0], last = monthPts[monthPts.length - 1];
+          const issueDays = ((out && out.issuance) || []).filter((p) => p.date > first.date && p.date <= last.date);
+          const issued = issueDays.reduce((n,p)=>n+(Number(p.ff)||0),0);
           const change = last.total - first.total;
-          const added = Math.max(0, change) + issued; // approximate in-flow
+          const added = change + issued; // implied net movement from the stock balance identity
           reconBox.innerHTML = `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Kya</th><th class="num">Tags</th><th>Detail</th></tr></thead><tbody>
-            <tr><td>📤 Issued (out)</td><td class="num"><b>${U.fmt(issued)}</b></td><td class="dim">MTD · FF ${U.fmt(Number(mtd.ff) || 0)} + GV ${U.fmt(Number(mtd.gv) || 0)}${mtd.days ? ` · ${mtd.days} din` : ''}</td></tr>
+            <tr><td>📤 FF issued (out)</td><td class="num"><b>${U.fmt(issued)}</b></td><td class="dim">Exact FF issuance · opening snapshot ke baad · ${issueDays.length} recorded din</td></tr>
             <tr><td>📦 Net stock change</td><td class="num">${change >= 0 ? '+' : ''}${U.fmt(change)}</td><td class="dim">${first.date.slice(8)}/${first.date.slice(5, 7)} (${U.fmt(first.total)}) → ${last.date.slice(8)}/${last.date.slice(5, 7)} (${U.fmt(last.total)})</td></tr>
-            <tr><td>📥 Approx stock-in</td><td class="num"><b>${U.fmt(added)}</b></td><td class="dim">issued + net change (pehle snapshot ke baad se)</td></tr>
-          </tbody></table></div><p class="dim small" style="margin-top:6px">Formula: in ≈ out + (ending stock − starting stock). History server snapshots par depend karti hai.</p>`;
+            <tr><td>📥 Implied net movement</td><td class="num"><b>${U.fmt(added)}</b></td><td class="dim">issued + net change (opening snapshot ke baad)</td></tr>
+          </tbody></table></div><p class="dim small" style="margin-top:6px">Ye residual estimate hai, actual inward nahi. Exact IN/OUT/transfer reconciliation ke liye <a href="#/forecast?view=balance">Stock Balance</a> me movement ledger connect karein.</p>`;
         }
       }
     }).catch(() => {
@@ -412,7 +412,7 @@ FF.pages = FF.pages || {};
       const hit = all.find((i) => norm(i.label) === norm(text)) || all.find((i) => norm(i.label).includes(norm(text)));
       if (hit) { U.toast(`🗣 "${text}" → ${hit.label}`, 'ok'); go(hit.kind, hit.value); }
       else { U.toast(`"${text}" ka koi match nahi mila — dropdown se select karo`, 'warn'); input.dispatchEvent(new Event('input', { bubbles: true })); }
-    }, 'Agent ya TL ka naam bolo…'));
+    }, 'Agent ya TL ka naam bolo…', { button: mic }));
     U.$('#st-clear', root).addEventListener('click', () => FF.app.navigate('stock', {}));
     root.addEventListener('click', (e) => {
       const rc = e.target.closest('[data-recent-clear]'); if (rc) { try { localStorage.removeItem('ff_recent_stock'); } catch {} drawRecent(); return; }

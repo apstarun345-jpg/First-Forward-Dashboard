@@ -158,7 +158,7 @@ for (let back = 60; back >= 0; back--) {
     for (let k = 0; k < n; k++) {
       const cls = pick(CLASSES);
       const superA = (a.tlName && a.tlName !== 'APS') ? TLS.find((t) => t.name === a.tlName) || TLS[0] : null;
-      GV_MASTER.rows.push([a.id, a.name, superA ? superA.id : a.id, superA ? superA.name : a.name, `RJ14GV${gvSeq}`, cls, `VC${cls}`, `608116-0${30 + (gvSeq % 9)}-0${gvSeq % 999999}`, `34161FA82GV${gvSeq++}`, 500, `GV CUST ${k}`, '100000005715', 200, pick(GV_STATUS), 'Paid', dstr(d), '12:53:56', superA ? superA.id : a.id, `VC${cls}`, `${MONTHS[d.getMonth()]}${String(d.getFullYear()).slice(2)}`, pick(GV_TYPES), '', a.gv ? 'APS010008' : '', a.gv ? 'Akash Mansingh Thakur' : '', String(cls).length]);
+      GV_MASTER.rows.push([a.id, a.name, superA ? superA.id : a.id, superA ? superA.name : a.name, `RJ14GV${gvSeq}`, cls, `VC${cls}`, `608116-0${30 + (gvSeq % 9)}-0${gvSeq % 999999}`, `34161FA82GV${gvSeq++}`, 500, `GV CUST ${k}`, '100000005715', 200, pick(GV_STATUS), 'Paid', dstr(d), '12:53:56', superA ? superA.id : a.id, `VC${cls}`, `${MONTHS[d.getMonth()]}${String(d.getFullYear()).slice(2)}`, pick(GV_TYPES), '', a.gv ? 'APS09129' : '', a.gv ? 'Akash Mansingh Thakur' : '', String(cls).length]);
     }
   }
 }
@@ -170,7 +170,10 @@ for (const a of AGENTS) {
   const n = 5 + Math.floor(rnd() * 70);
   for (let k = 0; k < n; k++) {
     const cls = pick(CLASSES);
-    GV_ASSIGN.rows.push([cls, `34161FA82GVS${gvSeq++}`, `608116-037-0${gvSeq % 999999}`, 'In Stock', a.id, a.name, superA ? superA.id : '', superA ? superA.name : '', '', '', '', a.gv ? 'APS010008' : '', a.gv ? 'Akash Mansingh Thakur' : '', '']);
+    // A handful of deterministic dual-channel rows exercise the production identity join:
+    // Tag Assignment serial ↔ StockDataa barcode, plus REPORT "GV ID Found" ↔ GV Unique ID.
+    const ffBarcode = a.gv && k === 0 ? ((STOCK.rows.find((r) => r[7] === a.id) || [])[3] || '') : '';
+    GV_ASSIGN.rows.push([cls, `34161FA82GVS${gvSeq++}`, ffBarcode || `608116-037-0${gvSeq % 999999}`, 'In Stock', a.id, a.name, superA ? superA.id : '', superA ? superA.name : '', '', '', '', a.gv ? 'APS09129' : '', a.gv ? 'Akash Mansingh Thakur' : '', '']);
   }
 }
 // GV REPORT: header row 4 (A…BE), data from row 5 — same shape as the live sheet
@@ -209,7 +212,15 @@ for (const a of AGENTS) {
   GV_REPORT.rows.push(row);
 }
 
-const SHEETS = { EIR, StockDataa: STOCK, REPORT, 'GV Master': GV_MASTER, 'Tag Assignment': GV_ASSIGN, 'GV REPORT': GV_REPORT };
+// Optional unified movement ledger used by stock-balance reconciliation.
+const STOCK_MOVEMENTS = { cols: ['Date', 'Channel', 'Type', 'Quantity', 'Class', 'From', 'To', 'Reference', 'Note'].map((l, i) => ({ id: L(i), label: l, type: i === 0 ? 'date' : i === 3 ? 'number' : 'string' })), rows: [] };
+for (let back = 55; back >= 0; back -= 5) {
+  const d = new Date(today); d.setDate(d.getDate() - back);
+  STOCK_MOVEMENTS.rows.push([dstr(d), 'First Forward', 'IN', 90 + (back % 17), back % 10 ? 'VC4' : 'VC20', 'Warehouse', 'FF Field', `FF-GRN-${back}`, 'Mock received stock']);
+  STOCK_MOVEMENTS.rows.push([dstr(d), 'GV Partner', 'IN', 45 + (back % 11), 'VC4', 'Warehouse', 'GV Field', `GV-GRN-${back}`, 'Mock received stock']);
+  if (back % 10 === 0) STOCK_MOVEMENTS.rows.push([dstr(d), 'First Forward', 'TRANSFER', 12, 'VC4', 'Agent A', 'Agent B', `TR-${back}`, 'Internal transfer']);
+}
+const SHEETS = { EIR, StockDataa: STOCK, REPORT, 'GV Master': GV_MASTER, 'Tag Assignment': GV_ASSIGN, 'GV REPORT': GV_REPORT, 'Stock Movements': STOCK_MOVEMENTS };
 const GIDS = { '242489821': 'REPORT', '0': 'EIR', '1284424234': 'GV REPORT' };
 
 /** gviz `range=A4:BE` → labels from the range's first row, data from the next row. */

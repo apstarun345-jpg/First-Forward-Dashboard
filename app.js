@@ -7,25 +7,35 @@ window.FF = window.FF || {};
   const esc = U.esc;
 
   const PAGES = [
-    { id: 'home', icon: '🏠', label: 'Home', desc: 'Highlights · GV & FF charts', perm: 'home', group: 'Main' },
-    { id: 'tagIssued', icon: '🏷️', label: 'GV & FF Tag Issued', desc: 'Date-wise detailed issuance · VC4 vs Commercial', perm: 'tagIssued', group: 'Main' },
-    { id: 'targets', icon: '🎯', label: 'Agent Targets', desc: 'Shortlist · target · progress · Excel', perm: 'targets', group: 'Main' },
-    { id: 'rangeReport', icon: '📅', label: 'Range Report', desc: 'Custom from→to report · FF + GV · Excel', perm: 'tagIssued', group: 'Main' },
-    { id: 'tv', icon: '📺', label: 'TV Mode', desc: 'Big-screen rotation · fullscreen', perm: 'home', group: 'Main', feat: 'tvMode' },
-    { id: 'teamMap', icon: '🗺️', label: 'Team map', desc: 'Location + office distance (admin)', perm: 'home', group: 'Main', feat: 'teamMap', adminOnly: true },
+    { id: 'home', icon: '🏠', label: 'Home', desc: 'Highlights · GV & FF charts', perm: 'home', group: 'Management' },
+    { id: 'executive', icon: '🧭', label: 'Executive Cockpit', desc: 'Management KPIs · outlook · exceptions', perm: 'executive', group: 'Management' },
+    { id: 'tagIssued', icon: '🏷️', label: 'GV & FF Tag Issued', desc: 'Date-wise detailed issuance · VC4 vs Commercial', perm: 'tagIssued', group: 'Management' },
+    { id: 'targets', icon: '🎯', label: 'Agent Targets', desc: 'Shortlist · target · progress · Excel', perm: 'targets', group: 'Management' },
+    { id: 'rangeReport', icon: '📅', label: 'Range Report', desc: 'Custom from→to report · FF + GV · Excel', perm: 'tagIssued', group: 'Management' },
+    { id: 'tv', icon: '📺', label: 'TV Mode', desc: 'Big-screen rotation · fullscreen', perm: 'home', group: 'Management', feat: 'tvMode' },
+    { id: 'teamMap', icon: '🗺️', label: 'Team map', desc: 'Location + office distance (admin)', perm: 'home', group: 'Management', feat: 'teamMap', adminOnly: true },
     { id: 'dashboard', icon: '📊', label: 'Dashboard', desc: 'KPIs & charts (EIR)', perm: 'dashboard', group: 'First Forward' },
     { id: 'trend', icon: '📈', label: 'Trend', desc: 'Daily · Monthly · Last vs Current', perm: 'trend', group: 'First Forward' },
     { id: 'performance', icon: '🏆', label: 'Performance', desc: 'Agents & TLs (REPORT)', perm: 'performance', group: 'First Forward' },
     { id: 'stock', icon: '📦', label: 'Stock', desc: 'Search · pivot · Excel (StockDataa)', perm: 'stock', group: 'First Forward' },
     { id: 'stockReport', icon: '📋', label: 'Stock Report', desc: 'REPORT · agent & TL-wise stock', perm: 'performance', group: 'First Forward' },
+    { id: 'ffCommission', icon: '₹', label: 'Commission Intelligence', desc: 'Reported rate & earned commission · Direct vs TL', perm: 'ffCommission', group: 'First Forward' },
     { id: 'gvDashboard', icon: '🚀', label: 'GV Partner Dashboard', desc: 'GV issuance · stock · performance', perm: 'gvDashboard', group: 'GV Partner' },
     { id: 'gvTrend', icon: '📈', label: 'GV Trend', desc: 'GV Master daily / monthly', perm: 'gvTrend', group: 'GV Partner' },
     { id: 'gvPerformance', icon: '🏆', label: 'GV Performance', desc: 'GV agents & TLs (GV REPORT)', perm: 'gvPerformance', group: 'GV Partner' },
     { id: 'gvStock', icon: '📦', label: 'GV Stock', desc: 'Tag Assignment stock search', perm: 'gvStock', group: 'GV Partner' },
-    { id: 'compare', icon: '⚖️', label: 'GV vs First Forward', desc: 'Dono ka side-by-side comparison', perm: 'compare', group: 'GV Partner' },
-    { id: 'charts', icon: '📊', label: 'Charts', desc: 'Chart-only GV vs FF analysis', perm: 'compare', group: 'GV Partner' }
+    { id: 'gvStockReport', icon: '📋', label: 'GV Stock Report', desc: 'GV REPORT · agent, TL, class & dispatch', perm: 'gvStock', group: 'GV Partner' },
+    { id: 'gvCommission', icon: '₹', label: 'Commission Intelligence', desc: 'Amount · issuance rate · commission by day/class', perm: 'gvCommission', group: 'GV Partner' },
+    { id: 'dualChannel', icon: '🔗', label: 'Dual-channel Agents', desc: 'Verified GV + FF overlap · separate & combined', perm: 'dualChannel', group: 'Cross Channel' },
+    { id: 'compare', icon: '⚖️', label: 'GV vs First Forward', desc: 'Dono ka side-by-side comparison', perm: 'compare', group: 'Cross Channel' },
+    { id: 'charts', icon: '📊', label: 'Charts', desc: 'Chart-only GV vs FF analysis', perm: 'compare', group: 'Cross Channel' },
+    { id: 'forecast', icon: '🔭', label: 'Stock Forecasting', desc: 'Projection · accuracy · reconciled closing stock', perm: 'forecast', group: 'Cross Channel' },
+    { id: 'dataQuality', icon: '🧪', label: 'Data Quality Center', desc: 'Duplicates · missing IDs · stale & mismatch checks', perm: 'dataQuality', group: 'Cross Channel' },
+    { id: 'savedViews', icon: '⭐', label: 'Saved Views', desc: 'Reusable filters · shareable links', perm: 'savedViews', group: 'Workspace' },
+    { id: 'reportStudio', icon: '🗓️', label: 'Report Studio', desc: 'Scheduled email · CSV · PDF · share', perm: 'savedViews', group: 'Workspace' },
+    { id: 'followups', icon: '📝', label: 'Notes & Follow-ups', desc: 'Agent/TL timeline · owner · due date', perm: 'followups', group: 'Workspace' }
   ];
-  const GROUP_ICON = { 'Main': '🏠', 'First Forward': '🟦', 'GV Partner': '🟩' };
+  const GROUP_ICON = { 'Management': '🧭', 'First Forward': '🟦', 'GV Partner': '🟩', 'Cross Channel': '🔗', 'Workspace': '🗂️', 'Account': '👤' };
   const pageDef = (id) => PAGES.find((p) => p.id === id) || null;
   let current = { page: '', params: {}, token: 0 };
 
@@ -45,11 +55,12 @@ window.FF = window.FF || {};
     gvTrend: { label: 'GV ट्रेंड', desc: 'GV मास्टर दैनिक / मासिक' },
     gvPerformance: { label: 'GV परफ़ॉर्मेंस', desc: 'GV एजेंट और TL (GV REPORT)' },
     gvStock: { label: 'GV स्टॉक', desc: 'टैग असाइनमेंट स्टॉक सर्च' },
+    gvStockReport: { label: 'GV स्टॉक रिपोर्ट', desc: 'एजेंट · TL · क्लास · डिस्पैच' },
     compare: { label: 'GV बनाम फर्स्ट फॉरवर्ड', desc: 'दोनों की तुलना' },
     charts: { label: 'चार्ट्स', desc: 'सिर्फ़ चार्ट · GV बनाम FF' },
     settings: { label: 'सेटिंग्स' }
   };
-  const HI_GROUPS = { 'First Forward': 'फर्स्ट फॉरवर्ड', 'GV Partner': 'जीवी पार्टनर', 'Account': 'अकाउंट', 'Sheets': 'शीट्स' };
+  const HI_GROUPS = { 'Management': 'मैनेजमेंट', 'First Forward': 'फर्स्ट फॉरवर्ड', 'GV Partner': 'जीवी पार्टनर', 'Cross Channel': 'क्रॉस चैनल', 'Workspace': 'वर्कस्पेस', 'Account': 'अकाउंट', 'Sheets': 'शीट्स' };
   const EN_PAGES = {
     home: { desc: 'Highlights · GV & FF charts' },
     tagIssued: { desc: 'Date-wise detailed issuance · VC4 vs Commercial' },
@@ -252,6 +263,21 @@ window.FF = window.FF || {};
     document.addEventListener('visibilitychange', onVisibleVersion);
   }
   const onVisibleVersion = () => { if (document.visibilityState === 'visible') checkVersion(); };
+  let openNavGroup = (() => { try { return localStorage.getItem('ff_nav_group') || 'Management'; } catch { return 'Management'; } })();
+  function currentNavGroup(page, params) {
+    if (page === 'settings') return 'Account';
+    if (page === 'sheet') {
+      const tab = enabledTabs().find((s) => s.id === (params && params.name));
+      return tab ? (tab.group || 'First Forward') : 'Management';
+    }
+    const def = pageDef(page);
+    return def ? def.group : 'Management';
+  }
+  function selectNavGroup(group, rerender) {
+    openNavGroup = group || 'Management';
+    try { localStorage.setItem('ff_nav_group', openNavGroup); } catch {}
+    if (rerender !== false) renderSidebar();
+  }
   function renderSidebar() {
     const nav = U.$('#nav');
     if (!nav) return;
@@ -261,18 +287,25 @@ window.FF = window.FF || {};
     let html = '';
     for (const group of groups) {
       const items = PAGES.filter((p) => p.group === group && FF.auth.can(p.perm) && featOk(p));
-      const groupSheets = group === 'Main' ? [] : sheets.filter((s) => (s.group || 'First Forward') === group);
+      const groupSheets = group === 'Management' || group === 'Cross Channel' || group === 'Workspace' ? [] : sheets.filter((s) => (s.group || 'First Forward') === group);
       if (!items.length && !groupSheets.length) continue;
-      const label = group === 'Main' ? '' : `${GROUP_ICON[group] || ''} ${groupLabel(group)}`;
-      html += `<div class="nav-sec ${group === 'GV Partner' ? 'gv' : group === 'First Forward' ? 'ff' : ''}">${label}${group === 'First Forward' || group === 'GV Partner' ? `<span class="nav-count">${items.length + groupSheets.length}</span>` : ''}</div>`;
+      const expanded = openNavGroup === group;
+      const bodyId = `nav-group-${U.slug(group)}`;
+      const channelClass = group === 'GV Partner' ? 'gv' : group === 'First Forward' ? 'ff' : group === 'Cross Channel' ? 'cross' : '';
+      html += `<button type="button" class="nav-sec nav-sec-toggle ${channelClass} ${expanded ? 'open' : ''}" data-nav-group="${esc(group)}" aria-expanded="${expanded}" aria-controls="${bodyId}"><span>${GROUP_ICON[group] || '▦'} ${groupLabel(group)}</span><span class="nav-count">${items.length + groupSheets.length}</span><span class="nav-chevron" aria-hidden="true">›</span></button>`;
+      html += `<div class="nav-group-body" id="${bodyId}" ${expanded ? '' : 'hidden'}>`;
       html += items.map((p) => { const L = pageLabel(p); return navItem(p.id, p.icon, L.label, L.desc, current.page === p.id, `#/${p.id}`); }).join('');
       if (groupSheets.length) {
         html += `<div class="nav-sub">${groupLabel('Sheets')}</div>`;
         html += groupSheets.map((s) => `<a class="nav-item sheet ${current.page === 'sheet' && current.params.name === s.id ? 'active' : ''}" data-page="sheet" data-name="${esc(s.id)}" href="#/sheet/${encodeURIComponent(s.id)}"><span class="nav-ico">${s.icon || '📄'}</span><span class="nav-text"><b>${esc(s.id)}</b><small>${esc(s.desc || '')}</small></span></a>`).join('');
       }
+      html += '</div>';
     }
-    html += `<div class="nav-sec">${groupLabel('Account')}</div>` + navItem('settings', '⚙️', pageLabel({ id: 'settings', label: 'Settings' }).label, u && u.role === 'admin' ? 'Branding · data · users · access' : 'My account', current.page === 'settings', '#/settings', u && u.role === 'admin' && pendingSignups > 0 ? ` <span class="nav-count" title="${pendingSignups} account approval pending — Settings → Users">${pendingSignups} pending ⏳</span>` : '');
+    const accountOpen = openNavGroup === 'Account';
+    html += `<button type="button" class="nav-sec nav-sec-toggle ${accountOpen ? 'open' : ''}" data-nav-group="Account" aria-expanded="${accountOpen}" aria-controls="nav-group-account"><span>${GROUP_ICON.Account} ${groupLabel('Account')}</span><span class="nav-chevron" aria-hidden="true">›</span></button><div class="nav-group-body" id="nav-group-account" ${accountOpen ? '' : 'hidden'}>`
+      + navItem('settings', '⚙️', pageLabel({ id: 'settings', label: 'Settings' }).label, u && u.role === 'admin' ? 'Branding · data · users · access' : 'My account', current.page === 'settings', '#/settings', u && u.role === 'admin' && pendingSignups > 0 ? ` <span class="nav-count" title="${pendingSignups} account approval pending — Settings → Users">${pendingSignups} pending ⏳</span>` : '') + '</div>';
     nav.innerHTML = html;
+    nav.querySelectorAll('[data-nav-group]').forEach((btn) => btn.addEventListener('click', () => selectNavGroup(btn.dataset.navGroup)));
 
     const foot = U.$('#user-box');
     if (foot && u) foot.innerHTML = `<div class="user-chip">${FF.auth.avatarHtml(u, 'sm')}<span class="user-text"><b>${esc(u.name || u.username)}</b><small>${FF.auth.roleLabel(u)}</small></span><button class="icon-btn small" id="logout-btn" title="Logout">⎋</button></div>`;
@@ -437,15 +470,19 @@ window.FF = window.FF || {};
     const { page, params } = parseHash();
     current = { page, params, token: current.token + 1 };
     const token = current.token;
+    const pageGroup = currentNavGroup(page, params);
+    if (openNavGroup !== pageGroup) selectNavGroup(pageGroup);
     markActive();
     closeSidebar();
     const main = U.$('#main');
     const root = document.createElement('div');
     root.className = `page page-${page}`;
+    main.setAttribute('aria-busy', 'true');
     main.replaceChildren(root);
     main.scrollTop = 0; window.scrollTo(0, 0);
     if (!allowed(page, params)) {
       root.innerHTML = `<div class="empty-state">🔒 Is page ka access aapke account me nahi hai.<br><small class="dim">Admin se "${esc(pagePerm(page, params) || page)}" permission maango (Settings → Access matrix).</small></div>`;
+      main.setAttribute('aria-busy', 'false');
       return;
     }
     if (FF.notifications) FF.notifications.activity(page === 'sheet' ? `Sheet · ${params.name || ''}` : page);
@@ -455,7 +492,7 @@ window.FF = window.FF || {};
       console.error(err);
       if (token === current.token) root.innerHTML = U.errorBox(err, 'data-action="refresh"');
     }
-    if (token === current.token) { updateStatus(); enhanceCharts(root); translateDom(root); }
+    if (token === current.token) { main.setAttribute('aria-busy', 'false'); updateStatus(); enhanceCharts(root); translateDom(root); }
   }
   function updateStatus(progress) {
     const el = U.$('#status');
@@ -486,6 +523,7 @@ window.FF = window.FF || {};
     const btn = U.$('#top-refresh'); if (btn) btn.classList.add('spin');
     try {
       if (FF.pages.performance && FF.pages.performance.reset) FF.pages.performance.reset();
+      if (FF.insights && FF.insights.reset) FF.insights.reset();
       if (FF.preloader && FF.preloader.fastSync) {
         await FF.preloader.fastSync(fresh);
       } else {
@@ -618,6 +656,11 @@ window.FF = window.FF || {};
     window.addEventListener('offline', () => { updateStatus(); U.toast('📴 Offline ho — last loaded data dikhega', 'warn'); });
     U.$('#side-backdrop').addEventListener('click', closeSidebar);
     U.$('#top-refresh').addEventListener('click', refresh);
+    const saveViewBtn = U.$('#save-view-btn');
+    if (saveViewBtn) saveViewBtn.addEventListener('click', () => {
+      if (FF.workspace && FF.workspace.openSave) FF.workspace.openSave();
+      else U.toast('Saved views module ready nahi hai', 'warn');
+    });
     const pwaBtn = U.$('#pwa-install');
     if (pwaBtn) pwaBtn.addEventListener('click', promptInstall);
     const ub = U.$('#user-btn');
@@ -651,7 +694,13 @@ window.FF = window.FF || {};
       const link = e.target.closest('[data-link]');
       if (link && !e.target.closest('a')) { location.hash = link.dataset.link; return; }
       const paramBtn = e.target.closest('button[data-param]');
-      if (paramBtn) { updateParams({ [paramBtn.dataset.param]: paramBtn.dataset.value }); }
+      if (paramBtn) {
+        const patch = { [paramBtn.dataset.param]: paramBtn.dataset.value };
+        // GV Stock tabs/Clear must not leave an old TL/agent search in the URL; otherwise that
+        // stale parameter wins on the next render and makes the selected tab look broken.
+        if (current.page === 'gvStock' && paramBtn.dataset.param === 'view') Object.assign(patch, { tl: '', agent: '' });
+        updateParams(patch);
+      }
       const drawerLink = e.target.closest('#drawer a[href^="/"]');
       if (drawerLink) closeDrawer();
     });
@@ -666,7 +715,7 @@ window.FF = window.FF || {};
 
   function onBackgroundDataUpdated() {
     // If user is on a data page, smoothly re-render so new stock and stats appear automatically
-    if (['stock', 'stockReport', 'home', 'tagIssued', 'dashboard', 'trend', 'performance', 'gvStock', 'gvDashboard', 'gvTrend', 'gvPerformance', 'compare', 'charts', 'sheet'].includes(current.page)) {
+    if (['stock', 'stockReport', 'home', 'executive', 'forecast', 'dataQuality', 'dualChannel', 'ffCommission', 'gvCommission', 'tagIssued', 'dashboard', 'trend', 'performance', 'gvStock', 'gvStockReport', 'gvDashboard', 'gvTrend', 'gvPerformance', 'compare', 'charts', 'sheet'].includes(current.page)) {
       renderCurrent({ bgUpdated: true });
     }
   }
@@ -745,6 +794,8 @@ window.FF = window.FF || {};
     // 🔍 Global search button — features.search OFF ho to hide
     const gsBtn = U.$('#global-search-btn');
     if (gsBtn) gsBtn.hidden = FF.config.feat && FF.config.feat('search') === false;
+    const svBtn = U.$('#save-view-btn');
+    if (svBtn) svBtn.hidden = !FF.auth.can('savedViews');
     startVersionWatch(); // 🔄 update-available toast (features.updateToast)
     const u = FF.auth.user;
     if (FF.auth.isAdmin()) FF.auth.api('/api/health').then(h => { storageBanner(h.storage); pushBanner(h.push); setPendingSignups(h.pendingSignups); renderSidebar(); }).catch(() => {});

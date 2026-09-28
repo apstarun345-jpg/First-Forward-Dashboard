@@ -48,17 +48,17 @@ window.FF = window.FF || {};
   /** Which datasets this user actually needs (permission aware). */
   function wanted() {
     const can = (p) => FF.auth.can(p);
-    const pages = ['home', 'tagIssued', 'gvDashboard', 'gvTrend', 'gvStock', 'gvPerformance', 'compare'];
+    const pages = ['home', 'executive', 'forecast', 'dataQuality', 'tagIssued', 'gvDashboard', 'gvTrend', 'gvStock', 'gvPerformance', 'gvCommission', 'dualChannel', 'compare'];
     const anyPage = pages.some(can);
     const list = [];
     if (anyPage || can('sheet:GV Master')) list.push('master');
-    if (can('gvStock') || can('gvDashboard') || can('compare') || can('sheet:Tag Assignment')) list.push('stockClass', 'stockTl', 'stockTlClass', 'stockAgent', 'stockAgentClass');
-    if (can('gvPerformance') || can('gvDashboard') || can('compare') || can('sheet:GV REPORT')) list.push('report');
+    if (can('gvStock') || can('gvDashboard') || can('gvCommission') || can('dualChannel') || can('forecast') || can('dataQuality') || can('compare') || can('sheet:Tag Assignment')) list.push('stockClass', 'stockTl', 'stockTlClass', 'stockAgent', 'stockAgentClass');
+    if (can('gvPerformance') || can('gvDashboard') || can('gvCommission') || can('dualChannel') || can('forecast') || can('executive') || can('compare') || can('sheet:GV REPORT')) list.push('report');
     return list.length ? list : (anyPage ? Object.keys(DATASETS) : []);
   }
   /** True when this user can see anything from the GV sheet. */
   function enabled() {
-    return ['home', 'tagIssued', 'gvDashboard', 'gvTrend', 'gvStock', 'gvPerformance', 'compare'].some((p) => FF.auth.can(p))
+    return ['home', 'executive', 'forecast', 'dataQuality', 'tagIssued', 'gvDashboard', 'gvTrend', 'gvStock', 'gvPerformance', 'gvCommission', 'dualChannel', 'compare'].some((p) => FF.auth.can(p))
       || !!FF.config.tabBy('GV Master') && FF.auth.can('sheet:' + (FF.config.tabBy('GV Master') || {}).id);
   }
 
@@ -226,10 +226,12 @@ window.FF = window.FF || {};
       const g = String(pctText).match(/[-+]?\d+(?:\.\d+)?/);
       let growth = g ? Number(g[0]) : null;
       if (growth !== null && /▼/.test(pctText) && growth > 0) growth = -growth;
+      const tlId = U.clean(cell(r, 'tlId')) || U.clean(cell(r, 'supervisorId'));
+      const rawTlName = U.clean(cell(r, 'tlName'));
       rows.push({
         agentId, agentName: U.clean(cell(r, 'agentName')) || agentId, mobile: U.clean(cell(r, 'mobile')),
-        tlId: U.clean(cell(r, 'tlId')) || U.clean(cell(r, 'supervisorId')),
-        tlName: U.clean(cell(r, 'tlName')) || U.clean(cell(r, 'agentName')) || 'Direct',
+        tlId,
+        tlName: rawTlName || (tlId ? `TL ${tlId}` : 'Direct'), directAgent: !rawTlName && !tlId,
         stockVc4: num(r, 'stockVc4') || 0, stockComm: num(r, 'stockComm') || 0, stockTotal: num(r, 'stockTotal') || 0,
         stockByClass: Object.fromEntries([['VC12', 'stockVc12'], ['VC16', 'stockVc16'], ['VC4', 'stockVc4'], ['VC5', 'stockVc5'], ['VC6', 'stockVc6'], ['VC7', 'stockVc7']].map(([k, key]) => [k, num(r, key) || 0])),
         minRequired: num(r, 'minRequired') || 0, suggestedDispatch: num(r, 'suggestedDispatch') || 0,

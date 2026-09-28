@@ -1,4 +1,4 @@
-# First Forward Dashboard — First Forward + GV Partner (v3.1)
+# First Forward Dashboard — First Forward + GV Partner (v3.6)
 
 Colourful dashboard website built directly on top of **do Google Sheets**:
 
@@ -51,16 +51,27 @@ permissions and settings**. Zero npm dependencies.
 | **GV Trend** | GV Master: Daily / Weekly / Monthly / **Last vs Current** (per-class same-period compare), dimension = Total / Class / Type / Status, TL filter + agent quick-find. |
 | **GV Stock** | Tag Assignment: search (agent / TL / class), overview KPIs, TL × class matrix, agent table, class mix, aur agent/TL drill-down me raw rows ka **⬇ Excel** export. |
 | **GV Performance** | GV REPORT: agent quick-find, agent profile drawer (VC4 vs Commercial, MTD vs last month, stock by class, priority, runrate/eRunrate), rankings & alerts, GV REPORT (A–AZ) column view, CSV/Excel + share. |
+| **GV Commission Intelligence** | GV Master ka exact transaction amount, earned commission, commission/tag aur effective rate — agent, TL/direct, class, date aur Monday–Sunday breakdown; CSV/Excel/PDF. |
+| **FF Commission Intelligence** | REPORT headings se dynamically detected rate aur earned commission; Direct Agent / TL-managed / real sheet category split. Missing source par explicit mapping state — guessed payout kabhi nahi. |
+| **Dual-channel Agents** | StockDataa barcode ↔ Tag Assignment serial aur REPORT `GV ID Found` ↔ GV unique ID se verified overlap; FF/GV issuance, stock, class mix aur separate/combined summary. Name-only join nahi. |
+| **Stock Forecasting** | Live stock-out/replenishment projection; rolling 7/15/30-day forecast-accuracy backtests with WAPE/bias; and FF/GV stock-balance reconciliation: opening + exact movement ledger − predicted/actual consumption vs observed closing stock, with unexplained variance, source coverage and CSV/Excel/PDF. |
+| **Data Quality Center** | Duplicate tags/barcodes, missing agent/TL, unassigned stock, invalid/stale dates and cross-sheet mismatches with samples and recommended correction. |
+| **Executive Cockpit** | Combined management pulse: MTD/projected issuance, stock, reported earnings, 14-day channel trend and key operational exceptions. |
+| **Saved Views / Report Studio / Notes** | Exact filter-route bookmarks and shareable links; scheduled daily HTML+CSV and weekly SMTP reports; export/PDF/WhatsApp controls; collaborative agent/TL note and follow-up timeline. |
 | **⚖️ GV vs First Forward** | 12 head-to-head KPIs, insights list, daily issuance lines (FF vs GV), MTD class bars, head-to-head leader table, monthly bars, stock-by-class compare, aur dono taraf ke top agents (click → us brand ka performance page). |
-| **Sheets (left sidebar)** | Group-wise: **First Forward** (StockDataa · REPORT · EIR) aur **GV Partner** (GV Master · Tag Assignment · GV REPORT) — jo tab registry me enabled hain. Page-wise view, server-side search, sort, CSV / Excel export. |
+| **Sidebar / Sheets** | Permission-safe accordion: ek waqt me Management, First Forward, GV Partner, Cross Channel ya Workspace section khulta hai; unrelated channel options hidden rehte hain. Registered sheet tabs apne channel ke andar hi dikhte hain. |
 | **Settings** | Neeche dekho — sab kuch yahin se badlo. |
 
 **Refresh policy:** koi dashboard auto-refresh nahi. Data site khulte hi ek baar poora preload hota hai (aggregates), phir
-sirf **↻ button** ya browser reload par dobara aata hai. Options click karne par koi network call nahi (sirf
-StockDataa ki raw rows Excel export ke waqt on-demand aati hain). Server bhi Google responses cache karta hai
+sirf **↻ button** ya browser reload par dobara aata hai. Preloaded dashboard options click karne par network call nahi;
+exact custom-date reports, forecast-accuracy backtests aur raw-row Excel exports zarurat par on-demand query karte hain. Server bhi Google responses cache karta hai
 (`cacheSeconds`, default 10 min) taaki page reload fast rahe; ↻ hamesha Google se fresh laata hai (permission "Force refresh").
 
 **Comparison correction:** EIR me GV Partner ka `master ID 5845036` aata hai. **GV vs First Forward** page First Forward side se `5845036` (aur configured GV TL marker) ko pehle exclude karta hai, phir GV Master ke against compare karta hai — isliye GV double-count nahi hota. Admin Settings → Data source me ID/marker badal sakta hai.
+
+**Forecast-accuracy methodology:** selected 7/15/30-day holdout se immediately pehle ke 14 ya 28 calendar days ka agent-wise daily run-rate historical prediction banta hai. Prediction ko subsequent exact EIR (First Forward) aur GV Master issuance/replacement se compare kiya jata hai. Headline accuracy `max(0, 100 − WAPE)` hai; bias positive ho to over-forecast aur negative ho to under-forecast. Stock transfers/inward movement ko consumption nahi maana jata, aur zero-history rows ko accurate score nahi diya jata.
+
+**Stock-balance reconciliation:** server daily FF `StockDataa` aur GV `Tag Assignment` closing snapshots rakhta hai. Optional `Stock Movements` tab (Settings → Data source) me Date, Channel, Type, Quantity, Class, From, To, Reference aur Note map kiye ja sakte hain. Equation `opening + recorded net movement − consumption = closing` hai. `IN` positive, `OUT` negative, internal `TRANSFER` net zero aur `ADJUSTMENT` signed hota hai. Ledger absent ho to dashboard sirf **implied net movement/residual** dikhata hai—use actual inward label nahi karta.
 
 **Notifications:** top-right 🔔 feed me non-admin user login/page-open, consented location share aur Google Sheet ke newest-day grouped report changes aate hain.
 

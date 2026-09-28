@@ -82,6 +82,13 @@ FF.config = {
     agentId: 'H', agentName: 'I', agentAllocatedAt: 'J', tlName: 'K'
   },
 
+  // Optional unified movement ledger in the First Forward spreadsheet. One row = one real stock
+  // movement. Channel must be First Forward or GV Partner; Type is IN / OUT / TRANSFER / ADJUSTMENT.
+  stockMovement: {
+    enabled: false, sheet: 'Stock Movements', date: 'A', channel: 'B', type: 'C', quantity: 'D',
+    cls: 'E', from: 'F', to: 'G', reference: 'H', note: 'I'
+  },
+
   // GV Partner sheet mapping (tab names + column letters / header row).
   // GV Master = issuance log, Tag Assignment = stock, GV REPORT = agent-wise performance.
   gv: {
@@ -101,6 +108,7 @@ FF.config = {
   },
 
   report: { sheet: 'REPORT', gid: '242489821' },
+  ffCommission: { rateCol: '', earnedCol: '', categoryCol: '' }, // blank = dynamic REPORT heading discovery
 
   // TL names that are NOT real team leaders (placeholder for direct agents) — hidden from every TL view.
   excludeTls: ['APS'],
@@ -156,6 +164,16 @@ FF.config = {
     if (!n) return true;
     return (this.excludeTls || []).some((x) => String(x).trim().toUpperCase() === n);
   },
+  /** Shared FF/GV dispatch classification: direct/APS agents do not need stock dispatch. */
+  isDirectAgent(agent) {
+    if (!agent || typeof agent !== 'object') return false;
+    if (agent.isDirect === true || agent.directAgent === true || agent.tlExcluded === true) return true;
+    const tl = String(agent.tlName || agent.tl || '').trim();
+    if (!tl && !String(agent.tlId || agent.supervisorId || '').trim()) return true;
+    if (tl && (this.isExcludedTl(tl) || /^(?:direct|direct agent|no tl)$/i.test(tl))) return true;
+    return [agent.agentClass, agent.tlClass, agent.channelClass]
+      .some((value) => /(^|[\s/_-])(APS|DIRECT)(?=$|[\s/_-])/i.test(String(value || '').trim()));
+  },
   /** Merge server-side settings (Settings page) into this config. */
   apply(s) {
     if (!s || typeof s !== 'object') return;
@@ -171,6 +189,7 @@ FF.config = {
     if (s.contacts) this.contacts = { ...this.contacts, ...s.contacts };
     if (s.eir) this.eir = { ...this.eir, ...s.eir };
     if (s.stock) this.stock = { ...this.stock, ...s.stock };
+    if (s.stockMovement) this.stockMovement = { ...this.stockMovement, ...s.stockMovement };
     if (Array.isArray(s.tabs) && s.tabs.length) {
       this.tabs = s.tabs.map((t) => {
         const copy = { ...t };
@@ -181,6 +200,7 @@ FF.config = {
       });
     }
     if (s.gv) this.gv = { master: { ...this.gv.master, ...(s.gv.master || {}) }, assignment: { ...this.gv.assignment, ...(s.gv.assignment || {}) }, report: { ...this.gv.report, ...(s.gv.report || {}) } };
+    if (s.ffCommission) this.ffCommission = { ...this.ffCommission, ...s.ffCommission };
     if (s.eirSheet) this.eir.sheet = s.eirSheet;
     if (s.stockSheet) this.stock.sheet = s.stockSheet;
     const stockTab = this.tabBy('StockDataa');

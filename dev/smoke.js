@@ -119,6 +119,24 @@ await run('login via API', async () => {
 });
 await run('auth.init (me + settings + theme)', async () => { const ok = await FF.auth.init(); if (!ok) throw new Error('auth.init returned false'); if (!FF.auth.user) throw new Error('no user'); });
 await run('app.onLogin boot (sidebar/status)', async () => { await FF.app.onLogin(true); await settle(200); });
+await run('sidebar channel accordion hides unrelated groups', async () => {
+  const nav = REG.get('nav'); const html = nav && nav.innerHTML || '';
+  if (!html.includes('data-nav-group="First Forward"') || !html.includes('data-nav-group="GV Partner"') || !html.includes('data-nav-group="Cross Channel"')) throw new Error('channel groups missing');
+  if (!/data-nav-group="First Forward"[^>]*aria-expanded="true"/.test(html)) throw new Error('current First Forward group is not expanded');
+  if (!/id="nav-group-gv-partner" hidden/.test(html) || !/id="nav-group-cross-channel" hidden/.test(html)) throw new Error('unrelated channel groups are not hidden');
+});
+await run('autocomplete dropdown stays outside/below search input', async () => {
+  const input = new El('input'); input.value = 'ra';
+  input.getBoundingClientRect = () => ({ top: 20, left: 100, width: 320, height: 38, right: 420, bottom: 58 });
+  body.appendChild(input);
+  const ac = FF.util.suggest(input, { items: [{ kind: 'agent', label: 'Rahul', sub: 'Test TL' }] });
+  ac.refresh(); await settle(10);
+  const box = body.children[body.children.length - 1];
+  if (box.parentNode !== body) throw new Error('suggestion list body portal me nahi hai');
+  if (Number.parseFloat(box.style.top || '0') < 66) throw new Error(`dropdown input ko cover kar raha hai (top ${box.style.top})`);
+  if (input.getAttribute('aria-expanded') !== 'true') throw new Error('autocomplete aria-expanded update nahi hua');
+  ac.destroy(); input.remove();
+});
 await run('store.preload', async () => { await FF.store.preload(false); const st = FF.store.state; const errs = Object.entries(st.errors || {}).filter(([, e]) => e); if (errs.length) throw new Error('dataset errors: ' + errs.map(([k, e]) => `${k}: ${e.message || e}`).join(' | ')); });
 for (const ds of FF.store.DATASETS ? Object.keys(FF.store.DATASETS) : ['daily', 'agents', 'agentClass', 'status', 'stock', 'stockAgents', 'stockTypes', 'report']) {
   await run(`dataset ${ds}`, async () => { const v = await FF.store.need(ds); const n = Array.isArray(v) ? v.length : v && v.rows ? v.rows.length : -1; if (n <= 0) throw new Error(`empty (${n})`); log(`      ${ds}: ${n} rows`); });
@@ -184,6 +202,7 @@ await run('performance 4-way + suggested dispatch card', async () => {
   await pages.performance.render(r, { view: 'alerts' }, {});
   html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
   if (!html.includes('Suggested dispatch plan')) throw new Error('alerts view me 🎯 dispatch plan card nahi');
+  if (!html.includes('Direct Agents · no dispatch')) throw new Error('alerts view me Direct Agents filter nahi');
 }, true);
 // ---- GV Partner (second Google Sheet) ----
 await run('gv.preload (master + stock + report)', async () => {
@@ -209,6 +228,7 @@ await run('gvDashboard 4-way + suggested dispatch card', async () => {
   const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
   for (const s of ['VC20', 'VC5+', 'All Comm']) if (!html.includes(s)) throw new Error(`gvDashboard me "${s}" nahi mila`);
   if (!html.includes('Suggested dispatch plan')) throw new Error('gvDashboard me 🎯 dispatch plan card nahi');
+  if (!html.includes('Direct Agents · no dispatch')) throw new Error('gvDashboard me Direct Agents filter nahi');
 }, true);
 await run('page gvTrend daily', () => pages.gvTrend.render(root(), { mode: 'daily' }, {}), true);
 await run('page gvTrend weekly', () => pages.gvTrend.render(root(), { mode: 'weekly' }, {}), true);
@@ -218,9 +238,79 @@ await run('page gvStock', () => pages.gvStock.render(root(), {}, {}), true);
 const gvAgent = (FF.gv.people().agents[0] || {}).name;
 log(`      sample GV agent "${gvAgent}"`);
 await run('page gvStock tl filter', () => pages.gvStock.render(root(), { tl: (FF.gv.people().tls[0] || {}).name || '' }, {}), true);
-await run('page gvPerformance', () => pages.gvPerformance.render(root(), {}, {}), true);
+await run('gvStock explicit tab clears stale TL param', async () => { const r = root(); await pages.gvStock.render(r, { view: 'class', tl: 'stale-TL' }, {}); const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n'); if (!html.includes('Class × TL matrix')) throw new Error('explicit class tab stale TL se override hua'); }, true);
+await run('page gvStockReport agents', () => pages.gvStockReport.render(root(), { view: 'agents' }, {}), true);
+await run('page gvStockReport dispatch', async () => { const r = root(); await pages.gvStockReport.render(r, { view: 'dispatch' }, {}); const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n'); for (const s of ['Dispatch plan & Direct Agent status', 'Show Direct only', 'WhatsApp']) if (!html.includes(s)) throw new Error(`GV Stock Report me "${s}" nahi mila`); }, true);
+await run('page gvPerformance', async () => { const r = root(); await pages.gvPerformance.render(r, {}, {}); const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n'); for (const s of ['WhatsApp report', 'GV Stock Report', 'Overview', 'Agents', 'TLs', 'Alerts']) if (!html.includes(s)) throw new Error(`GV Performance me "${s}" nahi mila`); }, true);
 await run('page gvPerformance q=agent', () => pages.gvPerformance.render(root(), { q: gvAgent }, {}), true);
 await run('page compare', () => pages.compare.render(root(), {}, {}), true);
+await run('professional page executive cockpit', () => pages.executive.render(root(), {}, {}), true);
+await run('professional page GV commission', () => pages.gvCommission.render(root(), { group: 'weekday' }, {}), true);
+await run('professional page FF reported commission (dynamic mapping)', async () => {
+  const r = root(); await pages.ffCommission.render(r, {}, {});
+  if (!/source is not available|reported commission/i.test(r.innerHTML)) throw new Error('commission mapping/source state missing');
+}, true);
+await run('professional page verified dual-channel agents', async () => {
+  const identity = await FF.insights.buildCross();
+  if (!identity.rows.length) throw new Error('mock identity join returned zero verified agents');
+  if (!identity.rows.some((r) => r.methods.includes('barcode') && r.methods.includes('gv-id'))) throw new Error('two-signal overlap missing');
+  const r = root(); await pages.dualChannel.render(r, {}, {});
+  if (!/barcode|unique-ID|unique ID/i.test(r.innerHTML)) throw new Error('identity evidence missing');
+}, true);
+await run('professional page stock forecast', () => pages.forecast.render(root(), { growth: '20', safety: '7' }, {}), true);
+await run('professional page forecast accuracy backtest', async () => {
+  const accuracy = await FF.insights.forecastAccuracy(28), sample = accuracy.horizons[7].combined;
+  if (!sample || !sample.agents || sample.predicted <= 0 || sample.actual <= 0) throw new Error('backtest sample coverage/predicted/actual is empty');
+  for (const horizon of [7, 15, 30]) if (!accuracy.horizons[horizon].combined || !accuracy.horizons[horizon].combined.agents) throw new Error(`${horizon}-day backtest coverage is empty`);
+  for (const key of ['accuracy', 'wape', 'bias', 'absoluteError', 'mae']) if (!Number.isFinite(sample[key])) throw new Error(`${key} metric is not finite`);
+  if (accuracy.horizons[7].combinedWindows.length < 2) throw new Error('rolling accuracy trend needs multiple completed windows');
+  if (!sample.sources.some((s) => s.channel === 'First Forward') || !sample.sources.some((s) => s.channel === 'GV Partner')) throw new Error('both channel backtests are not covered');
+  const r = root(); await pages.forecast.render(r, { view: 'accuracy', horizon: '7', lookback: '28', channel: 'all' }, {});
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const s of ['Forecast Accuracy', 'Forecast accuracy', 'WAPE', 'Predicted consumption', 'Actual consumption', 'Forecast bias', 'Agent-wise predicted vs actual consumption', 'Methodology']) if (!html.includes(s)) throw new Error(`forecast accuracy me "${s}" nahi mila`);
+  if (!/\d+\.\d%/.test(html)) throw new Error('forecast accuracy metric missing');
+  if (/0 exact daily agent groups/.test(html) || /0 issuance rows/.test(html)) throw new Error('forecast history coverage is zero');
+}, true);
+await run('stock-history API exposes FF + GV closing snapshots', async () => {
+  const out = await FF.auth.api('/api/stock-history'), latest = (out.points || []).at(-1);
+  if (!latest || !latest.ff || !latest.gv) throw new Error('channel-wise FF/GV stock snapshot missing');
+  if (!(latest.ff.total > 0) || !(latest.gv.total > 0) || !(latest.combined.total > 0)) throw new Error('stock snapshot totals are empty');
+  if (!out.mtd || !Number.isFinite(Number(out.mtd.ff)) || !Number.isFinite(Number(out.mtd.gv))) throw new Error('channel MTD issuance missing');
+  if (!Array.isArray(out.issuance)) throw new Error('date-wise issuance reconciliation series missing');
+});
+await run('professional page stock-balance reconciliation', async () => {
+  const originalApi = FF.auth.api, originalEnabled = FF.config.stockMovement && FF.config.stockMovement.enabled;
+  const latest = FF.model.latestDate(await FF.store.need('daily')) || new Date();
+  const key = (offset) => { const d = new Date(latest); d.setDate(d.getDate() + offset); return FF.util.dateKey(d); };
+  FF.config.stockMovement.enabled = true;
+  FF.auth.api = async (path, ...args) => path === '/api/stock-history' ? { points: [
+    { date: key(-7), ff: { total: 4510, vc4: 3400, comm: 1110 }, gv: { total: 2200, vc4: 1700, comm: 500 } },
+    { date: key(0), ff: { total: 4488, vc4: 3380, comm: 1108 }, gv: { total: 2185, vc4: 1688, comm: 497 } }
+  ] } : originalApi(path, ...args);
+  try {
+    const r = root(); await pages.forecast.render(r, { view: 'balance', horizon: '7', lookback: '28', channel: 'all' }, {});
+    const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+    for (const s of ['Stock Balance Reconciliation', 'Movement ledger connected', 'Closing-stock accuracy', 'Projected closing', 'Observed actual closing', 'Unexplained variance', 'Channel reconciliation detail', 'Balance methodology']) if (!html.includes(s)) throw new Error(`stock balance me "${s}" nahi mila`);
+    if (!html.includes('First Forward') || !html.includes('GV Partner')) throw new Error('both stock-balance channels missing');
+  } finally { FF.auth.api = originalApi; FF.config.stockMovement.enabled = originalEnabled; }
+}, true);
+await run('professional page data quality', async () => {
+  const quality = await FF.insights.qualityIssues();
+  if (!quality.scanned.stock || !quality.scanned.assignment || !quality.scanned.master) throw new Error('quality source scan incomplete');
+  await pages.dataQuality.render(root(), {}, {});
+}, true);
+await run('workspace saved views API + page', async () => {
+  const created = await FF.auth.api('/api/workspace/views', 'POST', { title: 'Smoke view', route: '#/forecast?risk=High', shared: false });
+  await pages.savedViews.render(root(), {}, {});
+  if (created.view && created.view.id) await FF.auth.api(`/api/workspace/views/${created.view.id}`, 'DELETE');
+}, true);
+await run('professional report studio', () => pages.reportStudio.render(root(), {}, {}), true);
+await run('workspace note timeline API + page', async () => {
+  const created = await FF.auth.api('/api/workspace/notes', 'POST', { entityName: 'Smoke Agent', entityKey: 'SMOKE-1', entityType: 'agent', channel: 'both', text: 'Smoke follow-up', status: 'open' });
+  await FF.auth.api(`/api/workspace/notes/${created.note.id}`, 'PATCH', { status: 'done' });
+  await pages.followups.render(root(), { status: 'done' }, {});
+  await FF.auth.api(`/api/workspace/notes/${created.note.id}`, 'DELETE');
+}, true);
 await run('sheet.render GV Master', () => pages.sheet.render(root(), { name: 'GV Master' }, {}), true);
 await run('sheet.render Tag Assignment', () => pages.sheet.render(root(), { name: 'Tag Assignment' }, {}), true);
 await run('sheet.render GV REPORT', () => pages.sheet.render(root(), { name: 'GV REPORT' }, {}), true);
@@ -238,6 +328,7 @@ await run('auth helpers (avatar/role)', async () => {
 await run('sheet.render StockDataa', () => pages.sheet.render(root(), { name: 'StockDataa' }, {}), true);
 await run('sheet.render REPORT', () => pages.sheet.render(root(), { name: 'REPORT' }, {}), true);
 await run('settings.render (all tabs)', async () => { for (const tab of ['account', 'brand', 'sources', 'access', 'data', 'rules', 'features', 'contacts', 'users', 'links', 'audit', 'backup']) { await pages.settings.render(root(), { tab }, {}); await settle(20); } });
+await run('settings notification audience matrix', async () => { const r = root(); await pages.settings.render(r, { tab: 'features' }, {}); await settle(30); const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n'); for (const s of ['Notification audience', 'Low-stock / cover alert', 'Monthly champions', 'Sirf admin', 'Admin + users', 'Kisi ko nahi']) if (!html.includes(s)) throw new Error(`notification matrix me "${s}" nahi mila`); });
 await run('teamMap.render (admin location map)', () => pages.teamMap.render(root(), {}, {}), true);
 await run('tv.render (TV mode rotation)', () => pages.tv.render(root(), {}, {}), true);
 await run('tv unmount', () => { if (pages.tv.unmount) pages.tv.unmount(); });

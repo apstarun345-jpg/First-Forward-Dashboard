@@ -14,7 +14,7 @@ window.FF = window.FF || {};
   'use strict';
   const U = FF.util;
   const esc = U.esc;
-  const PAGE_SRC = { dashboard: 'ff', trend: 'ff', stock: 'ff', performance: 'ff', stockReport: 'ff', gvDashboard: 'gv', gvTrend: 'gv', gvStock: 'gv', gvPerformance: 'gv', home: 'both', tagIssued: 'both', compare: 'both', charts: 'both' };
+  const PAGE_SRC = { dashboard: 'ff', trend: 'ff', stock: 'ff', performance: 'ff', stockReport: 'ff', gvDashboard: 'gv', gvTrend: 'gv', gvStock: 'gv', gvStockReport: 'gv', gvPerformance: 'gv', home: 'both', tagIssued: 'both', compare: 'both', charts: 'both' };
   const FILTERS = {
     vc4: { label: 'VC4', fn: (r) => r.group === 'VC4' },
     comm: { label: 'Commercial (NVC4)', fn: (r) => r.group !== 'VC4' },

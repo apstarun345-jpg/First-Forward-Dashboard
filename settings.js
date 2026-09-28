@@ -27,26 +27,34 @@ FF.pages = FF.pages || {};
     settings = JSON.parse(JSON.stringify(out.settings)); defaults = out.defaults;
   }
   async function save(patch, msgEl, opts) {
+    const clone = (v) => JSON.parse(JSON.stringify(v || {}));
+    const merge = (base, next) => {
+      if (!next || typeof next !== 'object' || Array.isArray(next)) return next;
+      const out = { ...(base && typeof base === 'object' && !Array.isArray(base) ? base : {}) };
+      Object.entries(next).forEach(([k, v]) => { out[k] = v && typeof v === 'object' && !Array.isArray(v) ? merge(out[k], v) : v; });
+      return out;
+    };
+    const before = clone(settings || A.settings || {});
     try {
-      if (msgEl) msgEl.textContent = 'Saving…';
-      // ⚡ Optimistic: theme/branding changes turant apply karo — UI instantly feel kare
-      const optimistic = { ...settings };
-      Object.keys(patch).forEach((k) => { optimistic[k] = patch[k]; });
-      settings = JSON.parse(JSON.stringify(optimistic));
+      if (msgEl) msgEl.textContent = 'Saving… server confirmation ka wait hai';
+      // ⚡ Optimistic preview, but nested Features values ko accidentally drop mat karo.
+      const optimistic = merge(before, patch);
+      settings = clone(optimistic);
       A.applySettings(optimistic);
       if (patch.tabs) FF.app.renderSidebar();
       const out = await A.api('/api/settings', 'PUT', { settings: patch });
-      settings = JSON.parse(JSON.stringify(out.settings));
+      settings = clone(out.settings);
       A.applySettings(out.settings);
       FF.app.renderSidebar();
       if (msgEl) msgEl.textContent = `Saved ✓ ${U.timeLabel(Date.now())}`;
       U.toast('Settings saved ✓', 'ok');
       if (opts && opts.reload) { U.toast('Sheet mapping badli — data dobara load ho raha hai…'); FF.store.reset(); if (FF.gv) FF.gv.reset(); if (FF.pages.sheet.reset) FF.pages.sheet.reset(); if (FF.pages.performance.reset) FF.pages.performance.reset(); FF.preloader.fastSync(false).catch(() => {}); }
+      return true;
     } catch (err) {
-      // Rollback optimistic change on failure
-      if (A.settings) { settings = JSON.parse(JSON.stringify(A.settings)); A.applySettings(A.settings); FF.app.renderSidebar(); }
+      settings = clone(before); A.applySettings(before); FF.app.renderSidebar();
       if (msgEl) msgEl.textContent = 'Not saved — retry';
       U.toast(err.message, 'err');
+      return false;
     }
   }
   function collect(root, base) {
@@ -255,13 +263,15 @@ FF.pages = FF.pages || {};
       ${section('🎨 Theme colours', `<div class="form-grid">${field('Sidebar background (top)', color('theme.sidebarBg', t.sidebarBg))}${field('Sidebar background (bottom)', color('theme.sidebarBg2', t.sidebarBg2))}${field('Sidebar text', color('theme.sidebarText', t.sidebarText))}${field('Accent', color('theme.accent', t.accent))}${field('Accent 2 (gradient)', color('theme.accent2', t.accent2))}</div><p class="dim small">Colour preview turant dikhta hai; picker selection complete karne par automatically save hota hai. Save button bhi use kar sakte hain.</p>${saveBar('theme')}<button class="btn small" data-reset-theme>↺ Default colours</button>`)}`;
   }
   function dataTab() {
-    const s = settings;
+    const s = settings, fc = s.ffCommission || {}, sm = s.stockMovement || {};
     const letters = (obj, keys, prefix) => `<div class="letter-grid">${keys.map((k) => `<label><small>${k}</small><input class="input mono" data-path="${prefix}.${k}" value="${esc(obj[k] ?? '')}"></label>`).join('')}</div>`;
     return `${section('📄 Google Sheet', `<div class="form-grid">${field('Sheet ID', txt('sheetId', s.sheetId, 'class="input mono"'), 'docs.google.com/spreadsheets/d/<b>ID</b>/edit — sheet "Anyone with the link can view" honi chahiye')}${field('EIR tab name', txt('eirSheet', s.eirSheet))}${field('StockDataa tab name', txt('stockSheet', s.stockSheet))}${field('StockDataa gid (optional)', txt('stockGid', s.stockGid))}${field('REPORT gid', txt('reportGid', s.reportGid), 'Google URL me #gid=… (REPORT tab)')}${field('Server cache (seconds)', numI('cacheSeconds', s.cacheSeconds, 'min="0"'), 'Browser reload par itni der tak server ka cached data milta hai; ↻ button hamesha fresh laata hai')}</div>
-        <div class="form-grid">${field('Excluded TL names (not real TLs)', `<input class="input" data-path="excludeTls" data-list value="${esc((s.excludeTls || []).join(', '))}">`, 'Comma separated. Ye naam kisi bhi TL list / ranking me nahi aayenge (e.g. APS = direct agents)')}${field('GV master ID', txt('eir.gvMasterId', s.eir.gvMasterId))}${field('GV channel TL name', txt('eir.gvChannelTl', s.eir.gvChannelTl))}</div>`)}
+        <div class="form-grid">${field('Excluded TL names (not real TLs)', `<input class="input" data-path="excludeTls" data-list value="${esc((s.excludeTls || []).join(', '))}">`, 'Comma separated. Ye naam kisi bhi TL list / ranking me nahi aayenge (e.g. APS = direct agents)')}${field('GV master ID', txt('eir.gvMasterId', s.eir.gvMasterId))}${field('GV channel TL name', txt('eir.gvChannelTl', s.eir.gvChannelTl))}</div>
+        <h4 style="margin:14px 0 8px">₹ FF REPORT commission mapping <span class="dim small">(optional)</span></h4><div class="form-grid">${field('Commission rate column', txt('ffCommission.rateCol', fc.rateCol || '', 'placeholder="e.g. BZ" maxlength="3"'), 'Blank = heading se auto-detect')}${field('Earned commission column', txt('ffCommission.earnedCol', fc.earnedCol || '', 'placeholder="e.g. CA" maxlength="3"'), 'REPORT ka actual earned/payout amount; blank = auto-detect')}${field('Agent category column', txt('ffCommission.categoryCol', fc.categoryCol || '', 'placeholder="optional" maxlength="3"'), 'Sheet me Direct/TL ke alawa real category ho to')}</div><p class="dim small">Column letters sirf exact source mapping ke liye hain. Blank chhodne par dashboard Commission / Rate / Payout headings ko dynamically discover karta hai; missing amount ko issuance × guessed rate se kabhi calculate nahi karta.</p>`)}
       ${section('🟩 GV Partner sheet <span class="dim">(dusra Google Sheet)</span>', `<div class="form-grid">${field('GV Sheet ID', txt('gvSheetId', s.gvSheetId, 'class="input mono"'), 'GV Partner ki sheet — "Anyone with the link can view" honi chahiye')}${field('GV Master tab', txt('gv.master.tab', (s.gv || {}).master ? s.gv.master.tab : ''), 'Issuance log tab ka exact naam')}${field('GV Master gid (optional)', txt('gv.master.gid', (s.gv || {}).master ? s.gv.master.gid : ''))}${field('Tag Assignment tab', txt('gv.assignment.tab', (s.gv || {}).assignment ? s.gv.assignment.tab : ''), 'Stock tab ka exact naam')}${field('GV REPORT tab', txt('gv.report.tab', (s.gv || {}).report ? s.gv.report.tab : ''))}${field('GV REPORT gid', txt('gv.report.gid', (s.gv || {}).report ? s.gv.report.gid : ''), 'Google URL me #gid=… (GV REPORT tab)')}${field('GV REPORT header row', numI('gv.report.headerRow', (s.gv || {}).report ? s.gv.report.headerRow : 4), 'GV REPORT me heading row (default 4)')}${field('GV REPORT last column', txt('gv.report.lastCol', (s.gv || {}).report ? s.gv.report.lastCol : 'BE'), 'Sabse aakhri column (default BE)')}</div>${saveBar('data')}`)}
       ${section('🔠 EIR column letters', letters(s.eir, ['tagId', 'vrn', 'cls', 'type', 'status', 'date', 'agentId', 'agentName', 'masterId', 'tlId', 'gvId', 'gvName', 'gvTl', 'tlName', 'vrnType', 'monthName', 'regNumber'], 'eir') + saveBar('eir'), 'Sheet me column shift ho to sirf letters badlo')}
       ${section('🔠 StockDataa column letters', letters(s.stock, ['id', 'name', 'tagId', 'barcode', 'cls', 'tagType', 'bcAllocatedAt', 'agentId', 'agentName', 'agentAllocatedAt', 'tlName'], 'stock') + saveBar('stock'))}
+      ${section('🔄 Stock movement ledger <span class="dim">(optional · exact inward / transfer reconciliation)</span>', `${check('stockMovement.enabled', sm.enabled === true, 'Google Sheet movement ledger connect karo')}<p class="dim small">First Forward spreadsheet me ek unified tab use hota hai. Har real movement ki ek row rakho. Channel = <code>First Forward</code> ya <code>GV Partner</code>; Type = <code>IN</code>, <code>OUT</code>, <code>TRANSFER</code>, ya signed <code>ADJUSTMENT</code>. Unknown type ko dashboard guess nahi karega.</p><div class="form-grid">${field('Movement tab name', txt('stockMovement.sheet', sm.sheet || 'Stock Movements'), 'Main First Forward spreadsheet ke andar')}${field('Date column', txt('stockMovement.date', sm.date || 'A', 'maxlength="3"'))}${field('Channel column', txt('stockMovement.channel', sm.channel || 'B', 'maxlength="3"'))}${field('Movement type column', txt('stockMovement.type', sm.type || 'C', 'maxlength="3"'))}${field('Quantity column', txt('stockMovement.quantity', sm.quantity || 'D', 'maxlength="3"'))}${field('Vehicle class column', txt('stockMovement.cls', sm.cls || 'E', 'maxlength="3"'))}${field('From column', txt('stockMovement.from', sm.from || 'F', 'maxlength="3"'))}${field('To column', txt('stockMovement.to', sm.to || 'G', 'maxlength="3"'))}${field('Reference column', txt('stockMovement.reference', sm.reference || 'H', 'maxlength="3"'))}${field('Note column', txt('stockMovement.note', sm.note || 'I', 'maxlength="3"'))}</div><div class="btn-row"><button class="btn small" id="movement-template">⬇ Movement CSV template</button><a class="btn small" href="#/forecast?view=balance">Open reconciliation</a></div>${saveBar('stockMovement')}`)}
       ${section('📥 Bulk CSV tool <span class="dim">(Google Sheet me rows paste karne ke liye)</span>', `<p class="dim small">CSV file upload karo → preview dekho → <b>📋 Copy for Google Sheets</b> dabao → Google Sheet me select karke Ctrl+V se paste kar do. Excel (.xlsx) file ho to pehle Excel me <b>File → Save As → CSV</b> karke lao. Data sirf aapke browser me parse hota hai — sheet me dashboard khud kuch nahi likhta.</p>
         <div class="btn-row"><label class="btn small primary">📤 CSV upload<input type="file" accept=".csv,.txt,text/csv,text/plain" id="bulk-file" hidden></label><button class="btn small" id="bulk-copy" disabled>📋 Copy for Google Sheets</button><button class="btn small" id="bulk-dl" disabled>⬇ CSV download</button><button class="btn small" id="bulk-template">⬇ StockDataa template</button><button class="btn small" id="bulk-clear" disabled>✕ Clear</button><span class="dim small" id="bulk-info"></span></div>
         <div id="bulk-preview" style="margin-top:10px"></div>`)}`;
@@ -334,13 +344,14 @@ FF.pages = FF.pages || {};
       card.querySelector('[data-perm-all]').addEventListener('click', () => card.querySelectorAll('[data-perm]').forEach((cb) => { cb.checked = true; }));
       card.querySelector('[data-perm-none]').addEventListener('click', () => card.querySelectorAll('[data-perm]').forEach((cb) => { cb.checked = false; }));
       card.querySelector('[data-perm-default]').addEventListener('click', () => card.querySelectorAll('[data-perm]').forEach((cb) => { cb.checked = out.defaults.includes(cb.dataset.perm); }));
-      card.querySelector('[data-user-save]').addEventListener('click', async () => {
+      const userSave = card.querySelector('[data-user-save]');
+      userSave.addEventListener('click', () => U.withButtonBusy(userSave, async () => {
         const body = { approved: card.querySelector('[data-field="approved"]').checked, role: roleSel.value, permissions: [...card.querySelectorAll('[data-perm]')].filter((cb) => cb.checked).map((cb) => cb.dataset.perm) };
         const naBox = card.querySelector('[data-field="notifyAccess"]');
         if (naBox && !naBox.disabled) body.notifyAccess = naBox.checked;
-        msg.textContent = 'Saving…';
-        try { await A.api(`/api/users/${encodeURIComponent(username)}`, 'PUT', body); msg.textContent = 'Saved ✓'; U.toast(`${username} updated ✓`, 'ok'); if (username === A.user.username) setTimeout(() => location.reload(), 600); else usersTab(root); if (FF.app && FF.app.refreshPendingBadge) FF.app.refreshPendingBadge(); } catch (err) { msg.textContent = ''; U.toast(err.message, 'err'); }
-      });
+        msg.textContent = 'Saving… server confirmation ka wait hai';
+        try { await A.api(`/api/users/${encodeURIComponent(username)}`, 'PUT', body); msg.textContent = 'Saved ✓'; U.toast(`${username} updated ✓`, 'ok'); if (username === A.user.username) setTimeout(() => location.reload(), 600); else await usersTab(root); if (FF.app && FF.app.refreshPendingBadge) FF.app.refreshPendingBadge(); } catch (err) { msg.textContent = ''; U.toast(err.message, 'err'); }
+      }, 'Saving user…'));
       card.querySelector('[data-user-pw]').addEventListener('click', async () => {
         const pw = prompt(`Naya password for ${username} (min 6 chars):`, Math.random().toString(36).slice(2, 10));
         if (!pw) return;
@@ -349,10 +360,11 @@ FF.pages = FF.pages || {};
       const del = card.querySelector('[data-user-del]');
       if (del) del.addEventListener('click', async () => { if (!confirm(`Delete user "${username}"?`)) return; try { await A.api(`/api/users/${encodeURIComponent(username)}`, 'DELETE'); U.toast('Deleted', 'ok'); usersTab(root); if (FF.app && FF.app.refreshPendingBadge) FF.app.refreshPendingBadge(); } catch (err) { U.toast(err.message, 'err'); } });
     });
-    U.$('#nu-add', root).addEventListener('click', async () => {
+    const addUser = U.$('#nu-add', root);
+    addUser.addEventListener('click', () => U.withButtonBusy(addUser, async () => {
       const body = { username: U.$('#nu-username', root).value, name: U.$('#nu-name', root).value, password: U.$('#nu-password', root).value, role: U.$('#nu-role', root).value, mobile: U.$('#nu-mobile', root).value, email: U.$('#nu-email', root).value };
-      try { await A.api('/api/users', 'POST', body); U.toast(`User ${body.username} created ✓ (password: ${body.password})`, 'ok'); usersTab(root); if (FF.app && FF.app.refreshPendingBadge) FF.app.refreshPendingBadge(); } catch (err) { U.toast(err.message, 'err'); }
-    });
+      try { await A.api('/api/users', 'POST', body); U.toast(`User ${body.username} created ✓ (password: ${body.password})`, 'ok'); await usersTab(root); if (FF.app && FF.app.refreshPendingBadge) FF.app.refreshPendingBadge(); } catch (err) { U.toast(err.message, 'err'); }
+    }, 'Creating user…'));
   }
   function storageSecret() {
     let sec = sessionStorage.getItem('ff_storage_secret');
@@ -533,9 +545,10 @@ FF.pages = FF.pages || {};
         }
       }
     });
-    U.$('#mx-save', root).addEventListener('click', async () => {
+    const mxSave = U.$('#mx-save', root);
+    mxSave.addEventListener('click', () => U.withButtonBusy(mxSave, async () => {
       const msg = U.$('#mx-msg', root);
-      msg.textContent = 'Saving…';
+      msg.textContent = 'Saving… server confirmation ka wait hai';
       try {
         for (const u of users) {
           if (u.role === 'admin') continue;
@@ -549,7 +562,7 @@ FF.pages = FF.pages || {};
         U.toast('Access update ho gaya ✓', 'ok');
         if (users.some((u) => u.username === A.user.username)) { await A.refreshUser(); FF.app.renderSidebar(); }
       } catch (err) { msg.textContent = ''; U.toast(err.message, 'err'); }
-    });
+    }, 'Saving access…'));
   }
 
   // ---- 🎛 Features tab: har feature ka ON/OFF + modify numbers (admin) ---------------------------
@@ -558,6 +571,8 @@ FF.pages = FF.pages || {};
     const f = { ...df, ...((settings && settings.features) || {}) };
     f.alerts = { ...(df.alerts || {}), ...(((settings && settings.features) || {}).alerts || {}) };
     const em = { ...((defaults && defaults.email) || {}), ...((settings && settings.email) || {}) };
+    const routeDefaults = (defaults && defaults.notificationRoutes) || {};
+    const routes = { ...routeDefaults, ...((settings && settings.notificationRoutes) || {}) };
     const c = (key, label, hint) => `<label class="check"><input type="checkbox" data-path="features.${key}" ${f[key] !== false ? 'checked' : ''}> <b>${label}</b>${hint ? `<br><small class="dim" style="margin-left:20px">${hint}</small>` : ''}</label>`;
     const a = (key, label, hint) => `<label class="check"><input type="checkbox" data-path="features.alerts.${key}" ${f.alerts[key] !== false ? 'checked' : ''}> <b>${label}</b>${hint ? `<br><small class="dim" style="margin-left:20px">${hint}</small>` : ''}</label>`;
     const n = (path, value, label, attrs) => field(label, numI(path, value, attrs || 'min="0" max="999"'));
@@ -588,7 +603,7 @@ FF.pages = FF.pages || {};
         ${c('personalLinks', '🔗 Personal links', 'Har agent/TL ka secret read-only performance link — Settings me 🔗 tab')}
         ${c('customAlerts', '🗓 Custom alert scheduler', 'Apne reminders/status — roz / har Somwar / har mahine fixed time par bell me')}
         ${c('championEmail', '🥇 Champion certificate email', 'Mahine ke top agents ka certificate SMTP se email (SMTP set ho tabhi)')}
-        ${c('followupTracker', '⏰ Follow-up tracker', '3+ din se tag na dene wale agents — roz ek list (bell + Alerts card)')}
+        ${c('followupTracker', '⏰ Follow-up tracker', 'Silent agents + due agent/TL notes — roz owner timeline reminder')}
         ${c('dispatchPlan', '🎯 Suggested dispatch cards', 'High + Medium priority agents: cover din + suggested tag qty (GV + FF)')}
       </div>${saveBar('feat-ui')}`);
     const alertCard = section('🔴 Alert automation <span class="dim">(server-side — tab bhi chalta hai jab app band ho)</span>', `
@@ -602,6 +617,26 @@ FF.pages = FF.pages || {};
         <label class="check"><input type="checkbox" data-path="features.tlAnomaly" ${f.tlAnomaly !== false ? 'checked' : ''}> <b>🏆 TL anomaly (raat 9)</b><br><small class="dim" style="margin-left:20px">Poori team ka issuance achanak gira ho to TL-level alert — threshold same %</small></label>
       </div>
       <p class="dim small">In alerts ki ON/OFF apne phone par bhi chahiye to 👤 My account → 🔔 Notifications me <b>🔴 Critical alerts</b> type bhi ON rakho.</p>${saveBar('feat-alerts')}`);
+    const routeLabels = [
+      ['dailyDigest', '🌅 Daily digest', 'Roz ka FF/GV + stock summary'],
+      ['monthlyReport', '📅 Monthly report', 'Pichhle mahine ka FF vs GV comparison'],
+      ['lowStock', '🔴 Low-stock / cover alert', 'VC4 cover band low hone par'],
+      ['midMonth', '🎯 Mid-month target miss', 'Target pace se peeche hone par'],
+      ['zeroDay', '⚠️ Zero-day / sharp drop', 'Aaj issuance zero ya bahut kam'],
+      ['agentAnomaly', '📉 Agent anomaly', 'Agent ka issuance achanak girne par'],
+      ['tlAnomaly', '🏆 TL anomaly', 'Team issuance achanak girne par'],
+      ['followup', '⏰ Follow-up list', 'Silent agents ki daily list'],
+      ['champion', '🥇 Monthly champions', 'Champion email ke baad winner notification'],
+      ['reportUpdate', '🔄 Sheet/report update', 'Google Sheet me fresh rows aane par'],
+      ['inactiveUsers', '💤 Inactive app users', 'Dashboard login inactivity report'],
+      ['backupReminder', '☁️ Backup reminder', 'Settings backup purana hone par']
+    ];
+    const routeOptions = (value) => [['admin', '👑 Sirf admin'], ['users', '👥 Sirf users'], ['both', '📢 Admin + users'], ['off', '⛔ Kisi ko nahi']]
+      .map(([v, label]) => `<option value="${v}" ${value === v ? 'selected' : ''}>${label}</option>`).join('');
+    const routesCard = section('🔔 Notification audience <span class="dim">(admin decide kare: kisko kya jaye)</span>', `
+      <p class="dim small">Har automated event ka bell + browser/mobile push audience select karo. <b>Users</b> = sab approved non-admin users jinke account me notification access aur unka personal master switch ON hai. Login/password/security events privacy ke liye hamesha personal/admin hi rehte hain.</p>
+      <div class="notify-route-grid">${routeLabels.map(([key, label, hint]) => `<label class="notify-route"><span><b>${label}</b><small>${hint}</small></span><select class="input" data-path="notificationRoutes.${key}">${routeOptions(routes[key] || routeDefaults[key] || 'admin')}</select></label>`).join('')}</div>
+      ${saveBar('feat-routes')}`);
     const modsCard = section('⚙️ Alert modify <span class="dim">(numbers tune karo)</span>', `
       <div class="form-grid">
         ${n('features.digestHour', f.digestHour, '🌅 Digest hour (IST)', 'min="0" max="23"')}
@@ -637,7 +672,7 @@ FF.pages = FF.pages || {};
         ${field('To (comma-separated)', txt('email.to', em.to || '', 'placeholder="boss@x.com, team@x.com"'))}
       </div>
       <div class="save-bar"><button class="btn primary" data-save="feat-email">💾 Save</button><button class="btn" id="em-test">📧 Test email bhejo</button><span class="dim small" id="save-msg-feat-email"></span></div>
-      <p class="dim small">Gmail ke liye normal password nahi chalta — Google Account → 2-Step → <b>App passwords</b> banao. SMTP kabhi koi data leak nahi karti; password sirf server settings me rehta hai (non-admin ko dikhta bhi nahi).</p>`);
+      <p class="dim small"><b>Gmail:</b> host <code>smtp.gmail.com</code>, port <b>587</b> + TLS unchecked (STARTTLS), ya port <b>465</b> + TLS checked. Normal password nahi chalta — Google Account → 2-Step Verification → <b>App passwords</b>. “Test email” pehle durable save confirm karta hai, phir SMTP test karta hai.</p>`);
     const announceCard = section('📢 Announcement <span class="dim">(sab users ko ek message)</span>', `
       <p class="dim small">Type karo aur bhejo — sab logged-in users ke bell panel me turant dikhega (jaise ek broadcast). Ye raha preview:</p>
       <textarea class="input" id="an-text" rows="3" maxlength="500" placeholder="e.g. Kal 11 AM sabka monthly meeting hai — attendance zaroori."></textarea>
@@ -667,7 +702,7 @@ FF.pages = FF.pages || {};
         <span class="dim small" id="save-msg-feat-sched"></span>
       </div>
       <p class="dim small">Champion email ko SMTP chahiye (upar 📧 Email card). Follow-up = jinka pichhla issuance N+ din purana ho gaya.</p>`);
-    return `${uiCard}${alertCard}${modsCard}${waCard}${emailCard}${announceCard}${mapCard}${schedCard}`;
+    return `${uiCard}${alertCard}${routesCard}${modsCard}${waCard}${emailCard}${announceCard}${mapCard}${schedCard}`;
   }
 
   // ---- 🗓 schedule list (features tab) ---------------------------------------------------------
@@ -723,16 +758,18 @@ FF.pages = FF.pages || {};
     const offBanner = on ? '' : '<p class="check" style="background:#fef3c7;border:1px solid #fcd34d;border-radius:10px;padding:8px 12px;margin-bottom:10px">⏸️ Feature <b>band</b> hai — sabhi links ab 404 denge. <a href="#/settings?tab=features">🎛 Features → Personal links ON karo</a>.</p>';
     body.innerHTML = `<div class="card">
       <div class="page-head" style="margin-bottom:8px"><div><h2>🔗 Personal links <span class="dim small">(read-only · bina login)</span></h2>
-      <p class="sub">Har agent/TL ka ek secret URL jisme sirf uska apna performance dikhta hai — naam, MTD, 14-din chart, (TL ho to goal + team list). Link WhatsApp se bhej do; koi aur page kholega to bas wahi dekh payega.</p></div></div>
+      <p class="sub">First Forward ya GV agent/TL ka secret URL — exact naam suggestion se choose karo. Link me sirf uska live performance, class mix aur target/team dikhta hai.</p></div></div>
       ${offBanner}
       <div class="finder-row" style="margin-bottom:10px">
+        <select class="input" id="pl-source" style="width:auto"><option value="ff">🟦 First Forward</option><option value="gv">🟩 GV Partner</option></select>
         <select class="input" id="pl-kind" style="width:auto"><option value="agent">🧑‍💼 Agent</option><option value="tl">👥 TL</option></select>
-        <input class="input" id="pl-name" placeholder="Naam (jaise sheet me hai) — e.g. Rahul Sharma" style="min-width:260px" maxlength="80">
+        <div class="finder-input" style="min-width:280px"><span class="finder-ico">🔎</span><input class="input" id="pl-name" placeholder="Naam type karke suggestion choose karo" maxlength="80"></div>
         <button class="btn primary" id="pl-create">🔗 Naya link banao</button>
         <span class="dim small" id="pl-msg"></span>
       </div>
-      ${links.length ? `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Kind</th><th>Naam</th><th>Link</th><th>Bana</th><th>Status</th><th></th></tr></thead><tbody>
+      ${links.length ? `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Source</th><th>Kind</th><th>Naam</th><th>Link</th><th>Bana</th><th>Status</th><th></th></tr></thead><tbody>
       ${links.map((l) => `<tr>
+        <td>${l.source === 'gv' ? '🟩 GV' : '🟦 FF'}</td>
         <td>${l.kind === 'tl' ? '👥 TL' : '🧑‍💼 Agent'}</td>
         <td><b>${esc(l.name)}</b></td>
         <td class="mono small"><a href="/p/${esc(l.token)}" target="_blank" rel="noopener">${esc(origin)}/p/${esc(String(l.token).slice(0, 10))}…</a></td>
@@ -743,32 +780,64 @@ FF.pages = FF.pages || {};
           <button class="btn small pl-toggle" data-id="${esc(l.id)}" data-on="${l.enabled === false ? '1' : ''}">${l.enabled !== false ? '⏸️' : '▶️'}</button>
           <button class="btn small pl-del" data-id="${esc(l.id)}" title="Delete">🗑</button>
         </td></tr>`).join('')}
-      </tbody></table></div>` : '<p class="dim">Abhi koi link nahi — upar naam daal ke pehla banao.</p>'}
-      <p class="dim small" style="margin-top:10px">Token random hota hai — guess karna namumkin. Band karna ho to ⏸️ ya 🗑 — audit log me sab record hota hai.</p>
+      </tbody></table></div>` : '<p class="dim">Abhi koi link nahi — source + exact naam choose karke pehla banao.</p>'}
+      <p class="dim small" style="margin-top:10px">⚡ Personal page current + previous month ka bounded query use karti hai aur short server cache se jaldi khulti hai. Token random hai; ⏸️ ya 🗑 se turant revoke kar sakte ho.</p>
     </div>`;
-    const msg = U.$('#pl-msg', body);
-    const create = U.$('#pl-create', body);
+    const msg = U.$('#pl-msg', body), create = U.$('#pl-create', body);
+    const sourceEl = U.$('#pl-source', body), kindEl = U.$('#pl-kind', body), nameEl = U.$('#pl-name', body);
+    const suggestionItems = () => {
+      let people;
+      if (sourceEl.value === 'gv' && FF.gv && FF.gv.people) people = FF.gv.people();
+      else {
+        // EIR me GV rows bhi hain; FF selector me unke naam dobara dikhana source mismatch
+        // kar raha tha. Source-labelled agent dataset se sirf First Forward suggestions banao.
+        const agents = new Map(), tls = new Map();
+        const rows = FF.store && FF.store.get ? (FF.store.get('agents') || []) : [];
+        rows.filter((a) => a.channel === 'First Forward').forEach((a) => {
+          const name = String(a.name || '').trim(), tl = String(a.tlName || '').trim();
+          if (name) {
+            const old = agents.get(name) || { name, tl, id: a.id || '', n: 0 };
+            old.n += Number(a.n) || 0; old.tl = old.tl || tl; old.id = old.id || a.id || ''; agents.set(name, old);
+          }
+          if (tl && !FF.config.isExcludedTl(tl)) tls.set(tl, (tls.get(tl) || 0) + (Number(a.n) || 0));
+        });
+        people = { agents: [...agents.values()], tls: [...tls.entries()].map(([name, n]) => ({ name, n })) };
+      }
+      if (kindEl.value === 'tl') return (people.tls || []).map((t) => ({ kind: 'tl', kindLabel: 'TL', label: t.name, sub: t.n ? `${U.fmtShort(t.n)} tags` : '', value: t.name }));
+      return (people.agents || []).map((a) => ({ kind: 'agent', kindLabel: 'Agent', label: a.name, sub: a.tl || (a.id ? `ID ${a.id}` : ''), keywords: a.id || '', value: a.name }));
+    };
+    U.suggest(nameEl, { min: 1, items: suggestionItems, onPick: (it) => { nameEl.value = it.value || it.label; }, onEnter: (q) => { nameEl.value = q; } });
+    [sourceEl, kindEl].forEach((el) => el.addEventListener('change', () => { nameEl.value = ''; nameEl.focus(); }));
     create.addEventListener('click', async () => {
-      const kind = U.$('#pl-kind', body).value;
-      const name = (U.$('#pl-name', body).value || '').trim();
-      if (!name) return U.toast('Pehle naam likho', 'err');
-      create.disabled = true;
-      try {
-        await A.api('/api/personal-links', 'POST', { kind, name });
-        U.toast('🔗 Link ban gaya ✓', 'ok');
-        draw();
-      } catch (err) { U.toast(err.message, 'err'); create.disabled = false; if (msg) msg.textContent = err.message; }
+      const source = sourceEl.value === 'gv' ? 'gv' : 'ff';
+      const kind = kindEl.value === 'tl' ? 'tl' : 'agent';
+      const name = (nameEl.value || '').trim();
+      if (!name) return U.toast('Pehle exact naam choose karo', 'err');
+      msg.textContent = 'Google Sheet storage me link save ho raha hai…';
+      await U.withButtonBusy(create, async () => {
+        try {
+          const out = await A.api('/api/personal-links', 'POST', { source, kind, name });
+          const url = `${origin}/p/${out.link.token}`;
+          await U.copyText(url).catch(() => false);
+          U.toast('🔗 Link ban gaya aur copy ho gaya ✓', 'ok');
+          await draw();
+        } catch (err) { U.toast(err.message, 'err'); if (msg) msg.textContent = err.message; }
+      }, 'Link save ho raha hai…');
     });
     U.$$('.pl-copy', body).forEach((b) => b.addEventListener('click', () => {
       const url = `${origin}/p/${b.dataset.token}`;
       U.copyText(url).then(() => U.toast('📋 Link copy ho gaya', 'ok')).catch(() => { window.prompt('Copy karo:', url); });
     }));
-    U.$$('.pl-toggle', body).forEach((b) => b.addEventListener('click', async () => {
-      try { await A.api(`/api/personal-links/${encodeURIComponent(b.dataset.id)}/enable`, 'POST', { enabled: b.dataset.on === '1' }); draw(); } catch (err) { U.toast(err.message, 'err'); }
-    }));
+    U.$$('.pl-toggle', body).forEach((b) => b.addEventListener('click', () => U.withButtonBusy(b, async () => {
+      try { await A.api(`/api/personal-links/${encodeURIComponent(b.dataset.id)}/enable`, 'POST', { enabled: b.dataset.on === '1' }); await draw(); }
+      catch (err) { U.toast(err.message, 'err'); }
+    }, '…')));
     U.$$('.pl-del', body).forEach((b) => b.addEventListener('click', async () => {
       if (!window.confirm('Ye link delete kar dein?')) return;
-      try { await A.api(`/api/personal-links/${encodeURIComponent(b.dataset.id)}`, 'DELETE'); U.toast('Link delete ✓', 'ok'); draw(); } catch (err) { U.toast(err.message, 'err'); }
+      await U.withButtonBusy(b, async () => {
+        try { await A.api(`/api/personal-links/${encodeURIComponent(b.dataset.id)}`, 'DELETE'); U.toast('Link delete ✓', 'ok'); await draw(); }
+        catch (err) { U.toast(err.message, 'err'); }
+      }, '…');
     }));
   }
 
@@ -811,7 +880,7 @@ FF.pages = FF.pages || {};
       const chartLimit = U.$('#ti-chart-limit', body);
       if (chartLimit) chartLimit.addEventListener('change', () => localStorage.setItem('ti_chart_limit', chartLimit.value));
       const pfSave = U.$('#pf-save', body);
-      if (pfSave) pfSave.addEventListener('click', async () => { try { await A.api('/api/auth/profile', 'POST', { name: U.$('#pf-name', body).value, mobile: U.$('#pf-mobile', body).value, email: U.$('#pf-email', body).value }); U.toast('Profile saved ✓', 'ok'); const me = await A.api('/api/auth/me'); if (me.user) { Object.assign(A.user, me.user); FF.app.renderSidebar(); } } catch (err) { U.toast(err.message, 'err'); } });
+      if (pfSave) pfSave.addEventListener('click', () => U.withButtonBusy(pfSave, async () => { try { await A.api('/api/auth/profile', 'POST', { name: U.$('#pf-name', body).value, mobile: U.$('#pf-mobile', body).value, email: U.$('#pf-email', body).value }); U.toast('Profile saved ✓', 'ok'); const me = await A.api('/api/auth/me'); if (me.user) { Object.assign(A.user, me.user); FF.app.renderSidebar(); } } catch (err) { U.toast(err.message, 'err'); } }, 'Saving profile…'));
       const locationShare = U.$('#location-share', body);
       if (locationShare) locationShare.addEventListener('click', () => {
         if (!navigator.geolocation) return U.toast('Is browser me location supported nahi hai.', 'err');
@@ -825,33 +894,34 @@ FF.pages = FF.pages || {};
       if (pwSave) pwSave.addEventListener('click', async () => {
         const cur = U.$('#pw-cur', body).value, n1 = U.$('#pw-new', body).value, n2 = U.$('#pw-new2', body).value;
         if (n1 !== n2) return U.toast('Naye passwords match nahi karte', 'err');
-        try { const out = await A.api('/api/auth/password', 'POST', { current: cur, next: n1 }); Object.assign(A.user, out.user); U.toast('Password updated ✓', 'ok'); draw(); } catch (err) { U.toast(err.message, 'err'); }
+        await U.withButtonBusy(pwSave, async () => {
+          try { const out = await A.api('/api/auth/password', 'POST', { current: cur, next: n1 }); Object.assign(A.user, out.user); U.toast('Password updated ✓', 'ok'); await draw(); }
+          catch (err) { U.toast(err.message, 'err'); }
+        }, 'Updating…');
       });
       // generic save buttons
       U.$$('[data-save]', body).forEach((btn) => btn.addEventListener('click', () => {
         const card = btn.closest('.card');
         const patch = collect(card, {});
         const msg = U.$(`#save-msg-${btn.dataset.save}`, body);
-        const reload = ['data', 'eir', 'stock'].includes(btn.dataset.save);
-        save(patch, msg, { reload });
+        const reload = ['data', 'eir', 'stock', 'stockMovement'].includes(btn.dataset.save);
+        U.withButtonBusy(btn, () => save(patch, msg, { reload }), 'Saving…');
       }));
       // 📧 Features → email: pehle save, phir SMTP par test mail
       const emTest = U.$('#em-test', body);
       if (emTest) emTest.addEventListener('click', async () => {
         const cardEl = emTest.closest('.card');
-        save(collect(cardEl, {}), U.$('#save-msg-feat-email', body));
-        emTest.disabled = true;
-        const lbl = emTest.textContent;
-        emTest.textContent = '⏳ Bhej rahe hain…';
-        try {
-          await A.api('/api/notifications/email/test', 'POST', {});
-          U.toast('📧 Test email bhej diya — inbox (aur spam) check karo', 'ok');
-        } catch (err) {
-          U.toast(`SMTP test fail: ${err.message}`, 'err');
-        } finally {
-          emTest.disabled = false;
-          emTest.textContent = lbl;
-        }
+        await U.withButtonBusy(emTest, async () => {
+          // Save ko CONFIRM hone do; pehle test request race karke purani SMTP config use kar leti thi.
+          const saved = await save(collect(cardEl, {}), U.$('#save-msg-feat-email', body));
+          if (!saved) return;
+          try {
+            await A.api('/api/notifications/email/test', 'POST', {});
+            U.toast('📧 SMTP connected — test email bhej diya. Inbox/spam check karo.', 'ok');
+          } catch (err) {
+            U.toast(err.message, 'err');
+          }
+        }, 'Saving + testing SMTP…');
       });
       // 📢 Announcement broadcast (featuresTab)
       const anSend = U.$('#an-send', body);
@@ -929,11 +999,10 @@ FF.pages = FF.pages || {};
         catch (err) { U.toast(err.message, 'err'); } finally { chFire.disabled = false; }
       });
       const fuFire = U.$('#fu-fire', body);
-      if (fuFire) fuFire.addEventListener('click', async () => {
-        fuFire.disabled = true;
+      if (fuFire) fuFire.addEventListener('click', () => U.withButtonBusy(fuFire, async () => {
         try { const out = await A.api('/api/followup?fire=1'); U.toast(out.fired ? `⏰ ${out.list.length} silent agents — notification bhej di` : (out.list && out.list.length ? `⏰ ${out.list.length} silent agents (alert pehle ja chuka tha)` : 'Sab active hain — koi silent nahi'), 'ok'); }
-        catch (err) { U.toast(err.message, 'err'); } finally { fuFire.disabled = false; }
-      });
+        catch (err) { U.toast(err.message, 'err'); }
+      }, 'Checking…'));
       // live colour preview
       U.$$('input[type=color][data-path]', body).forEach((inp) => inp.addEventListener('input', () => { inp.nextElementSibling.textContent = inp.value; const t = { ...FF.config.theme }; t[inp.dataset.path.split('.')[1]] = inp.value; FF.config.theme = t; A.applyTheme(); }));
       U.$$('input[type=color][data-path]', body).forEach((inp) => inp.addEventListener('change', () => {
@@ -994,6 +1063,11 @@ FF.pages = FF.pages || {};
         const header = [['id', 'ID'], ['name', 'Name'], ['tagId', 'Tag ID'], ['barcode', 'Barcode'], ['cls', 'Class'], ['tagType', 'Tag Type'], ['bcAllocatedAt', 'BC Allocated At'], ['agentId', 'Agent ID'], ['agentName', 'Agent Name'], ['agentAllocatedAt', 'Agent Allocated At'], ['tlName', 'TL Name']].map(([k, label]) => (s[k] ? `${label} (${s[k]})` : label));
         U.downloadBlob('stockdataa-template.csv', new Blob([`\uFEFF${header.join(',')}\r\n`], { type: 'text/csv;charset=utf-8' }));
       });
+      const movementTpl = U.$('#movement-template', body);
+      if (movementTpl) movementTpl.addEventListener('click', () => {
+        const csv = 'Date,Channel,Type,Quantity,Class,From,To,Reference,Note\r\n2026-09-01,First Forward,IN,500,VC4,Warehouse,Field,GRN-001,Received stock\r\n2026-09-02,GV Partner,TRANSFER,50,VC4,Agent A,Agent B,TR-001,Internal transfer — net zero\r\n2026-09-03,First Forward,ADJUSTMENT,-2,VC4,Field,,ADJ-001,Damaged tags';
+        U.downloadBlob('stock-movements-template.csv', new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' }));
+      });
       const bulkClear = U.$('#bulk-clear', body);
       if (bulkClear) bulkClear.addEventListener('click', () => { bulkRows = null; renderBulkPreview(); });
       renderBulkPreview();
@@ -1047,7 +1121,7 @@ FF.pages = FF.pages || {};
 
       const saveTabsHandler = async (msgEl) => {
         const tabs = collectTabsFromUi();
-        if (msgEl) msgEl.textContent = 'Saving…';
+        if (msgEl) msgEl.textContent = 'Saving… server confirmation ka wait hai';
         try {
           const out = await A.api('/api/settings', 'PUT', { settings: { tabs } });
           settings = JSON.parse(JSON.stringify(out.settings)); A.applySettings(out.settings); FF.app.renderSidebar();
@@ -1063,9 +1137,9 @@ FF.pages = FF.pages || {};
       };
 
       const tabsSave = U.$('#tabs-save', body);
-      if (tabsSave) tabsSave.addEventListener('click', () => saveTabsHandler(U.$('#tabs-msg', body)));
+      if (tabsSave) tabsSave.addEventListener('click', () => U.withButtonBusy(tabsSave, () => saveTabsHandler(U.$('#tabs-msg', body)), 'Saving + syncing…'));
       const rangeSaveBtn = U.$('#range-save-btn', body);
-      if (rangeSaveBtn) rangeSaveBtn.addEventListener('click', () => saveTabsHandler(null));
+      if (rangeSaveBtn) rangeSaveBtn.addEventListener('click', () => U.withButtonBusy(rangeSaveBtn, () => saveTabsHandler(null), 'Saving + syncing…'));
 
       // Live sync between range cards and table inputs
       U.$$('.rcc-field, .rcc-range', body).forEach((inp) => inp.addEventListener('input', (e) => {
