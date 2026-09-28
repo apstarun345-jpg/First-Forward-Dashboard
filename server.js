@@ -71,6 +71,8 @@ export const PAGE_PERMISSIONS = [
   { key: 'gvStock', label: 'GV Partner · Stock', group: 'GV Partner' },
   { key: 'gvCommission', label: 'GV Partner · Commission Intelligence', group: 'GV Partner' },
   { key: 'dualChannel', label: 'Cross-channel · Identity & combined analysis', group: 'Cross Channel' },
+  { key: 'dispatchPlan', label: 'Cross-channel · Dispatch planner (auto box plan)', group: 'Cross Channel' },
+  { key: 'tlScorecard', label: 'Cross-channel · TL scorecard', group: 'Cross Channel' },
   { key: 'compare', label: 'GV vs First Forward (comparison)', group: 'Cross Channel' },
   { key: 'export', label: 'Download CSV / Excel', group: 'Actions' },
   { key: 'share', label: 'WhatsApp / Email share', group: 'Actions' },
@@ -101,7 +103,7 @@ const allPermKeysNow = () => allPermKeys(db.settings);
 // Back-compat export (some tooling imported PERMISSIONS).
 export const PERMISSIONS = permissionsFor({ tabs: DEFAULT_TABS });
 const DEFAULT_USER_PERMS = ['home', 'executive', 'forecast', 'dataQuality', 'savedViews', 'followups', 'tagIssued', 'targets', 'dashboard', 'trend', 'stock', 'performance', 'ffCommission', 'gvDashboard', 'gvTrend', 'gvStock', 'gvPerformance', 'gvCommission', 'dualChannel', 'compare',
-  'sheet:StockDataa', 'sheet:REPORT', 'sheet:GV Master', 'sheet:Tag Assignment', 'sheet:GV REPORT', 'export'];
+  'sheet:StockDataa', 'sheet:REPORT', 'sheet:GV Master', 'sheet:Tag Assignment', 'sheet:GV REPORT', 'charts', 'export', 'dispatchPlan', 'tlScorecard'];
 
 // Admin-controlled audience for automated notifications. `users` means all approved non-admin
 // users who have notification access; each user's own master/type preferences still apply.
@@ -125,6 +127,8 @@ const DEFAULT_SETTINGS = {
   tabs: DEFAULT_TABS.map((t) => ({ ...t })),
   reportGid: '242489821',
   ffCommission: { rateCol: '', earnedCol: '', categoryCol: '', dateCol: '' }, // optional REPORT letters; blank = heading auto-detection
+  commissionAlerts: { enabled: true, outlierPct: 25, gvGapPct: 40, mismatchPct: 5, mismatchMin: 50, zeroEarnedMin: 1 }, // cockpit.js alert thresholds
+  dispatch: { tagsPerBox: 25, horizon: 7, minNeed: 1, top: 40 }, // dispatch planner defaults
   commissionSlabs: {
     enabled: false, model: 'agentTier',
     channels: {
@@ -591,7 +595,7 @@ function permissionDiff(before, after) {
 }
 const activityLast = new Map();
 // Client routes (app.js PAGES) — notification tap par seedha usi page par le jao.
-const CLIENT_PAGES = new Set(['home', 'tagIssued', 'targets', 'rangeReport', 'dashboard', 'trend', 'performance', 'stock', 'stockReport', 'gvDashboard', 'gvTrend', 'gvPerformance', 'gvStock', 'gvStockReport', 'compare', 'charts']);
+const CLIENT_PAGES = new Set(['home', 'tagIssued', 'targets', 'rangeReport', 'dashboard', 'trend', 'performance', 'stock', 'stockReport', 'gvDashboard', 'gvTrend', 'gvPerformance', 'gvStock', 'gvStockReport', 'compare', 'charts', 'dispatchPlan', 'tlScorecard']);
 /** Search/click ki "option" se client route banao (deep link — mobile push tap → seedha page). */
 function pageLinkFor(option, query) {
   const t = String(option || '').trim();
@@ -2262,7 +2266,7 @@ async function handleApi(req, res, url) {
 
   if (p === '/api/health' && method === 'GET') {
     // pendingSignups sirf admin ko (sidebar badge ke liye) — public health me leak nahi.
-    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.7.0', storage: storageStatus(), push: pushHealth(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length } : {}) });
+    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.8.0', storage: storageStatus(), push: pushHealth(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length } : {}) });
   }
   if (p === '/api/public-config' && method === 'GET') return sendJson(res, 200, publicSettings());
   // App version (sw.js CACHE_NAME) — update-toast ke liye; logged-in se pehle bhi chahiye.
@@ -2966,6 +2970,31 @@ async function handleApi(req, res, url) {
             return { ...band, rate: rate === '' ? '' : Math.round(rate * 10000) / 10000 };
           });
         }
+      }
+    }
+    // 🚨 Commission alerts / 🚚 dispatch planner thresholds (cockpit.js) — numbers ko safe range me clamp karo
+    if (patch.commissionAlerts !== undefined || patch.dispatch !== undefined) {
+      const clampNum = (obj, key, min, max, label) => {
+        if (obj[key] === undefined) return;
+        const raw = obj[key] === '' ? null : Number(obj[key]);
+        if (raw !== null && !Number.isFinite(raw)) throw new HttpError(400, `${label}: number chahiye.`);
+        obj[key] = raw === null ? obj[key] : Math.max(min, Math.min(max, raw));
+      };
+      if (patch.commissionAlerts !== undefined) {
+        if (!patch.commissionAlerts || typeof patch.commissionAlerts !== 'object' || Array.isArray(patch.commissionAlerts)) throw new HttpError(400, 'commissionAlerts object hona chahiye.');
+        if (patch.commissionAlerts.enabled !== undefined) patch.commissionAlerts.enabled = patch.commissionAlerts.enabled === true || patch.commissionAlerts.enabled === 'true';
+        clampNum(patch.commissionAlerts, 'outlierPct', 1, 200, 'commissionAlerts.outlierPct');
+        clampNum(patch.commissionAlerts, 'gvGapPct', 1, 100, 'commissionAlerts.gvGapPct');
+        clampNum(patch.commissionAlerts, 'mismatchPct', 0, 100, 'commissionAlerts.mismatchPct');
+        clampNum(patch.commissionAlerts, 'mismatchMin', 0, 100000, 'commissionAlerts.mismatchMin');
+        clampNum(patch.commissionAlerts, 'zeroEarnedMin', 0, 10000, 'commissionAlerts.zeroEarnedMin');
+      }
+      if (patch.dispatch !== undefined) {
+        if (!patch.dispatch || typeof patch.dispatch !== 'object' || Array.isArray(patch.dispatch)) throw new HttpError(400, 'dispatch object hona chahiye.');
+        clampNum(patch.dispatch, 'tagsPerBox', 1, 1000, 'dispatch.tagsPerBox');
+        clampNum(patch.dispatch, 'horizon', 1, 90, 'dispatch.horizon');
+        clampNum(patch.dispatch, 'minNeed', 0, 100000, 'dispatch.minNeed');
+        clampNum(patch.dispatch, 'top', 1, 500, 'dispatch.top');
       }
     }
     if (patch.stockMovement !== undefined) {

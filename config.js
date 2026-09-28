@@ -109,6 +109,9 @@ FF.config = {
 
   report: { sheet: 'REPORT', gid: '242489821' },
   ffCommission: { rateCol: '', earnedCol: '', categoryCol: '', dateCol: '' }, // blank = dynamic REPORT heading discovery
+  // Cockpit (cockpit.js) ke thresholds — Settings se server par bhi save ho sakte hain.
+  commissionAlerts: { enabled: true, outlierPct: 25, gvGapPct: 40, mismatchPct: 5, mismatchMin: 50, zeroEarnedMin: 1 },
+  dispatch: { tagsPerBox: 25, horizon: 7, minNeed: 1, top: 40 },
   commissionSlabs: {
     enabled: false, model: 'agentTier',
     channels: {
@@ -206,7 +209,9 @@ FF.config = {
         return copy;
       });
     }
-    if (s.gv) this.gv = { master: { ...this.gv.master, ...(s.gv.master || {}) }, assignment: { ...this.gv.assignment, ...(s.gv.assignment || {}) }, report: { ...this.gv.report, ...(s.gv.report || {}) } };
+    if (s.gv) this.gv = { master: { ...this.gv.master, ...(s.gv.master || {}) }, assignment: { ...this.gv.assignment, ...(s.gv.assignment || {}) }, report: { ...this.gv.report, ...(s.gv.report || {}) } }
+    if (s.commissionAlerts) this.commissionAlerts = { ...this.commissionAlerts, ...s.commissionAlerts };
+    if (s.dispatch) this.dispatch = { ...this.dispatch, ...s.dispatch };;
     if (s.ffCommission) this.ffCommission = { ...this.ffCommission, ...s.ffCommission };
     if (s.commissionSlabs) this.commissionSlabs = { ...this.commissionSlabs, ...s.commissionSlabs, channels: { ...this.commissionSlabs.channels, ...(s.commissionSlabs.channels || {}) } };
     if (s.eirSheet) this.eir.sheet = s.eirSheet;

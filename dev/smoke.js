@@ -400,6 +400,105 @@ await run('professional page stock-balance reconciliation', async () => {
     if (!html.includes('First Forward') || !html.includes('GV Partner')) throw new Error('both stock-balance channels missing');
   } finally { FF.auth.api = originalApi; FF.config.stockMovement.enabled = originalEnabled; }
 }, true);
+await run('cockpit · payout reconciliation (sheet vs rate×tags vs slab)', async () => {
+  const d = await FF.cockpit.payoutRecon();
+  if (!d.rows.length) throw new Error('payout rows khali hain');
+  const withFigure = d.rows.filter((r) => r.recommended !== null);
+  if (!withFigure.length) throw new Error('kisi bhi agent ka payout figure nahi bana');
+  if (!d.rows.some((r) => r.source === 'REPORT earned')) throw new Error('sheet earned source detect nahi hua');
+  if (!d.rows.some((r) => r.source === 'Rate × tags')) throw new Error('rate × tags fallback use nahi hua');
+  if (!d.rows.some((r) => (r.flags || []).includes('Rate missing'))) throw new Error('missing-rate flag nahi mila');
+  if (!(d.totals.ffAmount > 0)) throw new Error('payout total 0 hai');
+  if (!d.gvRows.length || !(d.totals.gvAmount > 0)) throw new Error('GV payout sheet khali hai');
+  const r = root(); await pages.ffCommission.render(r, {}, {});
+  await settle(250);
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const label of ['Payout reconciliation', 'Payout to process', 'ffp-payout-csv', 'ffp-payout-xlsx', 'ffp-payout-copy', 'Rate × tags (verified)', 'Slab expected']) {
+    if (!html.includes(label)) throw new Error(`payout card me "${label}" nahi mila`);
+  }
+}, false);
+
+await run('cockpit · commission alerts rule engine', async () => {
+  const list = await FF.cockpit.commissionAlerts();
+  if (!Array.isArray(list) || !list.length) throw new Error('koi alert nahi mila');
+  const ids = list.map((a) => a.id);
+  for (const id of ['rate-missing', 'rate-outlier']) if (!ids.includes(id)) throw new Error(`${id} alert nahi bana`);
+  const first = list[0];
+  if (!first.title || !first.detail || !first.count) throw new Error('alert shape adhoora hai');
+  if (!first.samples.length) throw new Error('alert samples khali hain');
+  if (!['critical', 'high', 'medium', 'info'].includes(first.severity)) throw new Error(`severity galat: ${first.severity}`);
+  const r = root(); await pages.ffCommission.render(r, {}, {});
+  await settle(250);
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const label of ['Commission alerts', 'alert-row sev-', 'ffa-alerts-csv', 'ffa-alerts-wa', 'data-alert-samples']) {
+    if (!html.includes(label)) throw new Error(`alerts card me "${label}" nahi mila`);
+  }
+  // ghata hua mapping → source alert
+  const cfg = FF.config.ffCommission; const before = { ...cfg };
+  try {
+    cfg.rateCol = 'aisi heading nahi'; cfg.earnedCol = '';
+    FF.data.clearCache();
+    const again = await FF.cockpit.commissionAlerts();
+    if (!again.some((a) => a.id === 'rate-missing')) throw new Error('mapping tootne par alert nahi aaya');
+  } finally { Object.assign(cfg, before); FF.data.clearCache(); }
+}, false);
+
+await run('cockpit · Agent 360 drawer (FF + GV + risk + quality + notes)', async () => {
+  await FF.pages.performance.ensureLoaded();
+  const agent = FF.pages.performance.agents().find((a) => Number(a.curTotal || 0) > 0);
+  const res = await FF.cockpit.agent360({ name: agent.name, id: agent.agentId || agent.id });
+  if (!res || res.displayName !== agent.name) throw new Error('agent 360 resolve nahi hua');
+  if (!Array.isArray(res.rows) || res.rows.length < 10) throw new Error('agent CSV rows kam hain');
+  const body = (REG.get('drawer-body') && REG.get('drawer-body').innerHTML) || '';
+  for (const label of ['FF tags · MTD', 'GV tags', 'Commission', 'Stock risk', 'Issuance trend', 'Class split', 'Data quality', 'Cross-channel', 'Notes &amp; follow-ups']) {
+    if (!body.includes(label)) throw new Error(`Agent 360 me "${label}" section nahi mila`);
+  }
+  if (!(body.match(/class="dkpi"/g) || []).length) throw new Error('Agent 360 KPI cards nahi bane');
+  const ff = root(); await pages.ffCommission.render(ff, {}, {});
+  await settle(250);
+  const html = ff.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  if (!/data-agent360="/.test(html)) throw new Error('FF commission page par Agent 360 links nahi hain');
+  const gv = root(); await pages.gvCommission.render(gv, {}, {});
+  await settle(200);
+  const gvHtml = gv.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  if (!/data-agent360="/.test(gvHtml)) throw new Error('GV commission page par Agent 360 links nahi hain');
+}, false);
+
+await run('professional page dispatch planner (boxes + pick-list)', async () => {
+  const data = await FF.cockpit.dispatchPlan({ horizon: 7 });
+  if (!data.rows.length) throw new Error('dispatch rows khali hain');
+  const first = data.rows[0];
+  if (!(first.boxes >= 1) || !(first.dispatchTags >= first.need)) throw new Error('box math galat hai');
+  if (first.dispatchTags !== first.boxes * 25) throw new Error('dispatch tags = boxes × box-size nahi hai');
+  if (!data.rows.every((r) => r.priority >= 1)) throw new Error('priority rank missing');
+  const r = root(); await pages.dispatchPlan.render(r, { horizon: '7' }, {});
+  await settle(300);
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const label of ['Auto dispatch plan', 'Printable pick-list', 'slip-block', 'dp-csv', 'dp-xlsx', 'dp-wa', 'dp-log', 'dp-controls', 'Need 7d', 'Buffer tags']) {
+    if (!html.includes(label)) throw new Error(`dispatch planner me "${label}" nahi mila`);
+  }
+  const r15 = root(); await pages.dispatchPlan.render(r15, { horizon: '15', box: '50' }, {});
+  await settle(250);
+  const h15 = r15.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  if (!/Need 15d/.test(h15) || !/1 box = 50/.test(h15)) throw new Error('horizon/box param page par reflect nahi hua');
+}, true);
+
+await run('professional page TL scorecard (score · grade · target)', async () => {
+  const data = await FF.cockpit.tlScorecard();
+  if (!data.rows.length) throw new Error('TL rows khali hain');
+  const first = data.rows[0];
+  if (!(first.score >= 0 && first.score <= 120)) throw new Error(`score range galat: ${first.score}`);
+  if (!/^[ABCD]\+?$/.test(first.grade)) throw new Error(`grade galat: ${first.grade}`);
+  if (!first.agents) throw new Error('agents count missing');
+  if (!data.rows.every((r, i, arr) => i === 0 || arr[i - 1].score >= r.score)) throw new Error('rows score ke hisaab se sorted nahi hain');
+  const r = root(); await pages.tlScorecard.render(r, {}, {});
+  await settle(300);
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const label of ['TL-wise scoreboard', 'Top 3 TLs', 'Focus needed', 'tl-csv', 'tl-xlsx', 'tl-wa', 'Average TL score', 'Comm. %', 'commission completeness']) {
+    if (!html.includes(label)) throw new Error(`TL scorecard me "${label}" nahi mila`);
+  }
+}, true);
+
 await run('professional page data quality', async () => {
   const quality = await FF.insights.qualityIssues();
   if (!quality.scanned.stock || !quality.scanned.assignment || !quality.scanned.master) throw new Error('quality source scan incomplete');
