@@ -225,6 +225,7 @@ FF.pages = FF.pages || {};
       </div>
       ${!FF.config.feat || FF.config.feat('stockTrend') !== false ? `<div id="st-trend-card">${card('📉 Stock trend <span class="dim">(server snapshots · last 30 din)</span>', `<div id="st-trend"><div class="dim small">History load ho rahi hai…</div></div>`, `<span class="dim small" id="st-trend-cover"></span>`)}</div>` : ''}
       ${!FF.config.feat || FF.config.feat('recon') !== false ? `<div id="st-recon-card">${card('🧾 Stock in vs issued <span class="dim">(is mahine · approx)</span>', `<div id="st-recon"><div class="dim small">Reconciliation load ho raha hai…</div></div>`)}</div>` : ''}
+      ${!FF.config.feat || FF.config.feat('agedStock') !== false ? `<div id="st-aged-card">${card('🧓 Aged stock <span class="dim">(bcAllocatedAt ke hisaab se · 0-15 / 16-30 / 31-60 / 60+ din)</span>', `<div id="st-aged"><div class="dim small">Aging load ho raha hai…</div></div>`, `<span class="dim small" id="st-aged-note"></span>`)}</div>` : ''}
       ${!FF.config.feat || FF.config.feat('tlCover') !== false ? card(`📈 TL-wise cover <span class="dim">(sabse kam cover upar · VC4 stock ÷ avg daily issuance MTD)</span>`, `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>TL</th><th class="num">VC4 stock</th><th class="num">MTD issued</th><th class="num">Avg / din</th><th>Cover</th></tr></thead><tbody>${(() => {
         const sorted = [...tls].sort((a, b) => (a.cover === null ? 1 : b.cover === null ? -1 : a.cover - b.cover)).slice(0, 14);
         return sorted.map((t) => `<tr data-pick-tl="${esc(t.name)}" class="clickable"><td><b>${esc(t.name)}</b></td><td class="num">${U.fmt(t.vc4)}</td><td class="num">${U.fmt(t.iss)}</td><td class="num">${P.elapsed ? U.fmt(t.iss / P.elapsed, 1) : '—'}</td><td>${coverBadge(t.cover)}</td></tr>`).join('');
@@ -237,7 +238,27 @@ FF.pages = FF.pages || {};
   function loadStockExtras(body) {
     const box = U.$('#st-trend', body);
     const reconBox = U.$('#st-recon', body);
-    if ((!box && !reconBox) || !FF.auth || !FF.auth.api) return;
+    const agedBox = U.$('#st-aged', body);
+    if ((!box && !reconBox && !agedBox) || !FF.auth || !FF.auth.api) return;
+    // 🧓 Aged stock (features.agedStock) — stock row ki allocation date se buckets (alag query, fail-safe)
+    if (agedBox && FF.model && FF.model.loadStockAging) {
+      const agedNote = U.$('#st-aged-note', body);
+      FF.model.loadStockAging().then((res) => {
+        if (!agedBox.isConnected) return;
+        if (res.error) { agedBox.innerHTML = `<div class="dim small">⚠️ ${esc(res.error)}</div>`; return; }
+        if (!res.total) { agedBox.innerHTML = '<div class="dim small">Stock rows nahi mile.</div>'; return; }
+        const items = [
+          ['🌱 0-15 din', res.buckets['0-15'], '#10b981'],
+          ['🟡 16-30 din', res.buckets['16-30'], '#f59e0b'],
+          ['🟠 31-60 din', res.buckets['31-60'], '#f97316'],
+          ['🔴 60+ din', res.buckets['60+'], '#ef4444'],
+          ['❔ Unknown date', res.unknown, '#94a3b8']
+        ];
+        const max = Math.max(1, ...items.map((i) => i[1]));
+        agedBox.innerHTML = `<div class="feat-grid">${items.map(([label, n, col]) => `<div class="aged-row"><div class="aged-head"><span>${label}</span><b>${U.fmt(n)}</b> <span class="dim small">${U.fmtPct(U.pctOf(n, res.total), 0)}</span></div><div class="tgt-track"><div class="tgt-fill" style="width:${Math.max(2, (n / max) * 100)}%;background:${col}"></div></div></div>`).join('')}</div>`;
+        if (agedNote) agedNote.textContent = res.oldest ? `sabse purana: ${res.oldest} din` : '';
+      }).catch((err) => { if (agedBox.isConnected) agedBox.innerHTML = `<div class="dim small">⚠️ Aging load nahi hui — ${esc(err.message || 'error')}. Refresh karke dekho.</div>`; });
+    }
     FF.auth.api('/api/stock-history').then((out) => {
       // 📉 Trend chart (features.stockTrend)
       if (box && box.isConnected) {

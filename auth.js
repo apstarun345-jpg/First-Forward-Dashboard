@@ -14,7 +14,7 @@ window.FF = window.FF || {};
     try { res = await fetch(path, { signal: controller.signal, method: method || 'GET', headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined, credentials: 'same-origin', cache: 'no-store' }); } finally { clearTimeout(timer); }
     let json = null;
     try { json = await res.json(); } catch { /* ignore */ }
-    if (!res.ok) { const err = new Error((json && json.error) || `HTTP ${res.status}`); err.status = res.status; throw err; }
+    if (!res.ok) { const err = new Error((json && json.error) || `HTTP ${res.status}`); err.status = res.status; err.data = json; throw err; }
     return json || {};
   }
 
@@ -229,6 +229,8 @@ window.FF = window.FF || {};
         FF.app && FF.app.onLogin && FF.app.onLogin(out.first);
         welcomeToast(state.user, out.first);
       } catch (err) {
+        // 🔐 Naye IP OTP: server 428 bhejta hai → OTP screen dikhao.
+        if (err.status === 428 && err.data && err.data.otpRequired && mode !== 'signup') { showOtp(err.data); return; }
         msgEl.className = 'auth-msg err';
         msgEl.textContent = err.message;
         btn.disabled = false; btn.classList.remove('busy');
@@ -238,6 +240,44 @@ window.FF = window.FF || {};
       }
     });
     setTimeout(() => { const f = form.querySelector('input'); f && f.focus(); }, 60);
+  }
+
+  // 📱 OTP screen — code email par aata hai; sahi ho to wahi login success path chalte hai.
+  function showOtp(data, msg) {
+    const ticket = String(data.ticket || '');
+    const el = screen(`<div class="auth-card pro-card" style="max-width:430px">
+      <div class="auth-head">${logoHtml('lg')}<div><div class="auth-title">🔐 Verification code</div>
+      <div class="auth-sub">${esc(data.hint || 'Email par 6-digit code bheja gaya')}</div></div></div>
+      <div class="auth-msg${msg ? (msg.kind === 'ok' ? '' : ' err') : ''}" id="auth-msg">${msg ? esc(msg.text) : ''}</div>
+      <form id="otp-form" class="auth-fields" autocomplete="one-time-code">
+        <label class="auth-label">OTP (6 digits)</label>
+        <input name="code" class="auth-input" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="••••••" required autofocus>
+        <button type="submit" class="btn primary wide" style="margin-top:14px"><span class="btn-label">Verify &amp; Continue</span></button>
+      </form>
+      <div class="auth-foot"><a href="#" id="otp-back">← Wapas login</a><span class="auth-hint">Code 10 min valid hai</span></div>
+    </div>`);
+    U.$('#otp-back', el).addEventListener('click', (e) => { e.preventDefault(); showLogin('login'); });
+    const form = U.$('#otp-form', el);
+    setTimeout(() => { const i = form.querySelector('input'); i && i.focus(); }, 60);
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = form.querySelector('button[type=submit]');
+      const msgEl = U.$('#auth-msg', el);
+      btn.disabled = true; btn.querySelector('.btn-label').textContent = 'Verifying...';
+      msgEl.className = 'auth-msg'; msgEl.textContent = '';
+      try {
+        const out = await api('/api/auth/otp', 'POST', { ticket, code: new FormData(form).get('code') });
+        state.user = out.user; state.permissions = out.permissions || state.permissions; applySettings(out.settings);
+        hideScreen();
+        FF.app && FF.app.onLogin && FF.app.onLogin(false);
+        welcomeToast(state.user, false);
+      } catch (err) {
+        msgEl.className = 'auth-msg err';
+        msgEl.textContent = err.message || 'OTP verify fail';
+        btn.disabled = false; btn.querySelector('.btn-label').textContent = 'Verify & Continue';
+        form.classList.remove('shake'); void form.offsetWidth; form.classList.add('shake');
+      }
+    });
   }
 
   function showForgot(step, msg, help) {

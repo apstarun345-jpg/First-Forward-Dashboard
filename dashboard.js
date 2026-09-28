@@ -180,6 +180,14 @@ FF.pages = FF.pages || {};
       kpi('g12', 'Activated / Hotlisted · MTD', '✅', status ? `${U.fmtPct(U.pctOf(activated, statusTotal), 0)} <small>/ ${U.fmtPct(U.pctOf(hotlisted, statusTotal))}</small>` : '—', status ? `Activated <b>${U.fmt(activated)}</b> · Hotlisted <b>${U.fmt(hotlisted)}</b>` : 'Status data load nahi hua')
     ];
 
+    // 🗓 Same-day-last-week (Features → weekCompare): latest data din vs usi weekday ka pichhla haf
+    if (!FF.config.feat || FF.config.feat('weekCompare') !== false) {
+      const prevW = new Date(latest); prevW.setDate(prevW.getDate() - 7);
+      const sumDay = (dt) => U.sum(daily.filter((r) => r.d && r.d.getFullYear() === dt.getFullYear() && r.d.getMonth() === dt.getMonth() && r.d.getDate() === dt.getDate()), (r) => r.n);
+      const wdN = sumDay(latest), wlN = sumDay(prevW);
+      kpis.push(kpi('g13', `🗓 ${U.weekday(latest)} vs last week`, '🗓', U.fmt(wdN), `${U.deltaHtml(U.growth(wdN, wlN), { decimals: 0 })} vs ${U.labelDate(prevW)} (${U.fmt(wlN)}) · same weekday`));
+    }
+
     // KPI drill-down specs (click any card → full breakdown, see kpiDetail.js)
     const latestK = U.dateKey(latest);
     const specs = [`src=ff&scope=day&date=${latestK}`, `src=ff&scope=mtd&ym=${cur}`, `src=ff&scope=mtd&ym=${cur}&f=vc4`, `src=ff&scope=mtd&ym=${cur}&f=comm`, `src=ff&scope=mtd&ym=${cur}`, `src=ff&scope=mtd&ym=${cur}`, `src=ff&scope=mtd&ym=${cur}&f=repl`, `src=ff&scope=mtd&ym=${cur}&f=chassis`, 'src=ff&scope=stock', `src=ff&scope=agents&ym=${cur}`, `src=ff&scope=mtd&ym=${cur}`, `src=ff&scope=status&ym=${cur}`];

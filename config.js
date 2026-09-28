@@ -51,9 +51,12 @@ FF.config = {
     search: true, share: true, targetBar: true, stockTrend: true, tlCover: true, recon: true,
     loginHistory: true, pendingBadge: true, updateToast: true, backupReminder: true,
     waNumber: '',
-    alerts: { lowCover: true, midMonth: true, inactive: true, zeroDay: true, newLoginIp: true },
+    alerts: { lowCover: true, midMonth: true, inactive: true, zeroDay: true, newLoginIp: true, anomaly: true },
     digestHour: 8, midFrom: 15, midTo: 25, midGapPct: 40, zeroDropPct: 50, backupDays: 7,
-    emailDigest: false
+    emailDigest: false,
+    tvMode: true, weekCompare: true, agedStock: true, auditLog: true, announcements: true,
+    tlGoals: true, otp2fa: true, emailReport: false, emailReportHour: 21,
+    weeklyEmail: false, weeklyEmailHour: 9, anomalyPct: 80
   },
   /** Feature flag padho — FF.config.feat('search') / FF.config.feat('alerts').lowCover */
   feat(key) { const f = this.features || {}; return f[key]; },

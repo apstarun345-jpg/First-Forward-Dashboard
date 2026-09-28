@@ -426,6 +426,15 @@ FF.pages = FF.pages || {};
         g.cur += x.cur; g.last += x.last; g.vc4 += x.vc4;
       }
       let arr = [...groups.values()].map((g) => ({ ...g, growth: U.growth(g.cur, g.last), p: pct(g.cur, g.target) }));
+      // 🎯 TL monthly goals (admin set karta hai; feature tlGoals ON ho to dikhenge)
+      const goalsOn = FF.config.features ? FF.config.features.tlGoals !== false : true;
+      const goalMap = new Map(goalsOn ? (((FF.auth.settings && FF.auth.settings.tlTargets) || []).filter((t) => t && t.ym === view.ym && Number(t.target) >= 0)).map((t) => [t.tl, Number(t.target)]) : []);
+      if (goalsOn) arr.forEach((g) => { g.goal = goalMap.get(g.tl) || 0; });
+      const goalCell = (g) => {
+        if (!goalsOn) return '';
+        if (FF.auth.isAdmin()) return `<input class="input" type="number" min="0" style="width:96px" data-tlgoal="${esc(g.tl)}" value="${g.goal || ''}" title="TL ka is mahine ka goal (0 = none)">`;
+        return g.goal ? `<b>${U.fmt(g.goal)}</b><br><small class="dim">${U.fmtPct((g.cur / g.goal) * 100, 0)}</small>` : '<span class="dim">—</span>';
+      };
       const sorters = {
         cur: (a, b) => b.cur - a.cur,
         pct: (a, b) => (b.p === null ? -1 : b.p) - (a.p === null ? -1 : a.p),
@@ -443,8 +452,8 @@ FF.pages = FF.pages || {};
           <div class="kpi g1"><div class="kpi-top"><span class="kpi-title">Top TL</span><span class="kpi-icon">🏆</span></div><div class="kpi-value" style="font-size:18px">${arr.length ? esc(arr.sort((a, b) => b.cur - a.cur)[0].tl) : '—'}</div><div class="kpi-foot">Issuance leaderboard</div></div>
         </div>
         ${card(`👥 TL-wise rollup <span class="dim">· ${esc(U.labelYM(view.ym))}${view.ym === P.cur ? ' (MTD)' : ''}</span>`,
-        arr.length ? `<div class="table-wrap tall"><table class="tbl sticky-first"><thead><tr><th>#</th><th>Team Leader</th><th class="num">Agents</th><th class="num">Target</th><th class="num">Issuance</th><th style="min-width:130px">Achievement</th><th class="num">Last month</th><th class="num">Growth</th><th class="num">Targets achieved</th></tr></thead><tbody>${(() => { const sorted = [...arr].sort((a, b) => b.cur - a.cur); return arr.map((g) => { const rank = sorted.indexOf(g); const bar = g.target ? `<div class="tgt-track"><div class="tgt-fill ${(g.p || 0) >= 100 ? 'ok' : (g.p || 0) >= 60 ? 'mid' : 'low'}" style="width:${Math.min(100, g.p || 0)}%"></div></div><small class="dim">${Math.round(g.p || 0)}%</small>` : '<span class="dim">no target</span>'; const gr = g.growth === null ? '<span class="dim">new</span>' : U.deltaHtml(g.growth, { decimals: 0 }); return `<tr><td>${rank < 3 ? medals[rank] : rank + 1}</td><td><b>${esc(g.tl)}</b></td><td class="num">${U.fmt(g.agents)}</td><td class="num">${g.target ? U.fmt(g.target) : '<span class="dim">—</span>'}</td><td class="num"><b>${U.fmt(g.cur)}</b></td><td>${bar}</td><td class="num">${U.fmt(g.last)}</td><td class="num">${gr}</td><td class="num">${g.withTarget ? `${g.achieved}/${g.withTarget}` : '<span class="dim">—</span>'}</td></tr>`; }).join(''); })()}</tbody></table></div>` : '<div class="empty-state">Is month me koi data nahi mila.</div>',
-        `<button class="btn small" id="tl-xlsx">⬇ Excel</button>`)}
+        arr.length ? `<div class="table-wrap tall"><table class="tbl sticky-first"><thead><tr><th>#</th><th>Team Leader</th><th class="num">Agents</th><th class="num">Target</th><th class="num">Issuance</th><th style="min-width:130px">Achievement</th><th class="num">Last month</th><th class="num">Growth</th><th class="num">Targets achieved</th>${goalsOn ? '<th class="num">🎯 TL goal</th>' : ''}</tr></thead><tbody>${(() => { const sorted = [...arr].sort((a, b) => b.cur - a.cur); return arr.map((g) => { const rank = sorted.indexOf(g); const bar = g.target ? `<div class="tgt-track"><div class="tgt-fill ${(g.p || 0) >= 100 ? 'ok' : (g.p || 0) >= 60 ? 'mid' : 'low'}" style="width:${Math.min(100, g.p || 0)}%"></div></div><small class="dim">${Math.round(g.p || 0)}%</small>` : '<span class="dim">no target</span>'; const gr = g.growth === null ? '<span class="dim">new</span>' : U.deltaHtml(g.growth, { decimals: 0 }); return `<tr><td>${rank < 3 ? medals[rank] : rank + 1}</td><td><b>${esc(g.tl)}</b></td><td class="num">${U.fmt(g.agents)}</td><td class="num">${g.target ? U.fmt(g.target) : '<span class="dim">—</span>'}</td><td class="num"><b>${U.fmt(g.cur)}</b></td><td>${bar}</td><td class="num">${U.fmt(g.last)}</td><td class="num">${gr}</td><td class="num">${g.withTarget ? `${g.achieved}/${g.withTarget}` : '<span class="dim">—</span>'}</td>${goalsOn ? `<td class="num">${goalCell(g)}</td>` : ''}</tr>`; }).join(''); })()}</tbody></table></div>` : '<div class="empty-state">Is month me koi data nahi mila.</div>',
+        `${FF.auth.isAdmin() && goalsOn ? '<button class="btn small primary" id="tl-goal-save" title="Upar goal column me numbers daal ke yahan Save karo">💾 Save TL goals</button>' : ''}<button class="btn small" id="tl-xlsx">⬇ Excel</button>`)}
         <p class="dim small">Jo agents kisi TL ke under nahi hain wo <b>Direct (no TL)</b> group me dikhte hain. Leaderboard issuance ke hisaab se ranked hai.</p>`;
     };
     drawTl();
@@ -455,6 +464,22 @@ FF.pages = FF.pages || {};
     body.addEventListener('click', (e) => {
       const src = e.target.closest('[data-tlsrc]');
       if (src) { view.source = src.dataset.tlsrc; U.$$('[data-tlsrc]', body).forEach((b) => b.classList.toggle('on', b === src)); drawTl(); return; }
+      if (e.target.closest('#tl-goal-save')) {
+        if (!FF.auth.isAdmin()) return;
+        const inputs = U.$$('[data-tlgoal]', body);
+        const entries = [];
+        inputs.forEach((inp) => { const v = Math.max(0, Math.floor(Number(inp.value) || 0)); if (v > 0) entries.push({ ym: view.ym, tl: inp.dataset.tlgoal, target: v }); });
+        const others = (((FF.auth.settings && FF.auth.settings.tlTargets) || []).filter((t) => t && t.ym && t.ym !== view.ym));
+        const next = others.concat(entries);
+        const btn = e.target.closest('#tl-goal-save');
+        btn.disabled = true;
+        FF.auth.api('/api/settings', 'PUT', { tlTargets: next }).then(() => {
+          FF.auth.settings.tlTargets = next;
+          U.toast('🎯 TL goals save ho gaye ✓', 'ok');
+          drawTl();
+        }).catch((err) => { U.toast(err.message, 'err'); btn.disabled = false; });
+        return;
+      }
       if (e.target.closest('#tl-xlsx')) {
         if (!FF.auth.can('export')) { U.toast('Download permission nahi hai', 'err'); return; }
         let r = list; if (view.source !== 'all') r = r.filter((x) => x.source === view.source);

@@ -210,3 +210,168 @@ test('📧 email test endpoint mock SMTP par mail deliver karta hai (AUTH + DATA
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+// ---------------------------------------------------------------------------------------------
+// Round 2: 🔐 OTP (2FA on new IP) — 428 flow + email code + audit + admin ON/OFF toggle
+// ---------------------------------------------------------------------------------------------
+test('🔐 OTP 2FA: naye IP par 428 + email code verify, audit log, feature OFF = seedha login', async () => {
+  const smtp = await startSmtp();
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'apna-feat-otp-'));
+  const upstream = http.createServer((req, res) => {
+    res.end('google.visualization.Query.setResponse({"status":"ok","table":{"cols":[{"id":"A","type":"number"}],"rows":[]}});');
+  });
+  upstream.listen(0, '127.0.0.1');
+  await once(upstream, 'listening');
+  let server;
+  const call = async (route, method = 'GET', body, cookie = '', headers = {}) => {
+    const res = await fetch(server.base + route, {
+      method,
+      headers: { cookie, 'Content-Type': 'application/json', 'X-Forwarded-Proto': 'https', ...headers },
+      body: body ? JSON.stringify(body) : undefined
+    });
+    const setCookie = res.headers.get('set-cookie');
+    const json = await res.json().catch(() => ({}));
+    return { res, json, setCookie };
+  };
+  try {
+    server = await startServer(dir, `http://127.0.0.1:${upstream.address().port}`);
+    const adminCookie = (await call('/api/auth/login', 'POST', { username: 'owner', password: 'initial-password' })).setCookie.split(';')[0];
+    const mk = await call('/api/users', 'POST', { username: 'otpuser', name: 'OTP User', email: 'otp@example.test', password: 'otp-pass-1', role: 'user' }, adminCookie);
+    assert.equal(mk.res.status, 200, `user create — ${JSON.stringify(mk.json)}`);
+    const save = await call('/api/settings', 'PUT', { settings: { email: { host: '127.0.0.1', port: smtp.port, secure: false, user: 'mailer', pass: 'secret-1', from: 'alerts@example.test', to: 'boss@example.test' } } }, adminCookie);
+    assert.equal(save.res.status, 200, `SMTP save — ${JSON.stringify(save.json)}`);
+    // pehla login (history khali) → seedha
+    const l1 = await call('/api/auth/login', 'POST', { username: 'otpuser', password: 'otp-pass-1' });
+    assert.equal(l1.res.status, 200, `pehla login seedha — ${JSON.stringify(l1.json)}`);
+    // naye IP se login → 428 OTP
+    const l2 = await call('/api/auth/login', 'POST', { username: 'otpuser', password: 'otp-pass-1' }, '', { 'X-Forwarded-For': '203.0.113.9' });
+    assert.equal(l2.res.status, 428, `naye IP par 428 OTP chahiye — ${JSON.stringify(l2.json)}`);
+    assert.ok(l2.json.otpRequired && l2.json.ticket && l2.json.hint, 'otpRequired + ticket + hint milna chahiye');
+    // code email me
+    await new Promise((r) => setTimeout(r, 250));
+    const bodyB64 = (smtp.inbox.split(/\r?\n\r?\n/) || []).slice(1).join('').replace(/\r?\n/g, '').replace(/\.$/, '');
+    const bodyTxt = Buffer.from(bodyB64, 'base64').toString('utf8');
+    const code = (bodyTxt.match(/code: (\d{6})/) || [])[1];
+    assert.ok(code, `OTP code mail ke body me milna chahiye — ${bodyTxt.slice(0, 220)}`);
+    // galat code → 401, sahi → session
+    const bad = await call('/api/auth/otp', 'POST', { ticket: l2.json.ticket, code: '000000' });
+    assert.equal(bad.res.status, 401, `galat OTP 401 — ${JSON.stringify(bad.json)}`);
+    const ok = await call('/api/auth/otp', 'POST', { ticket: l2.json.ticket, code });
+    assert.equal(ok.res.status, 200, `sahi OTP se login — ${JSON.stringify(ok.json)}`);
+    const otpCookie = (ok.setCookie || '').split(';')[0];
+    assert.ok(otpCookie, 'OTP login session cookie chahiye');
+    const me = await call('/api/auth/me', 'GET', undefined, otpCookie);
+    assert.equal(me.json.user && me.json.user.username, 'otpuser', 'OTP ke baad session chal raha hai');
+    // 📜 audit me otp_sent + otp_fail (admin only)
+    const audit = await call('/api/audit', 'GET', undefined, adminCookie);
+    assert.equal(audit.res.status, 200, `admin audit 200 — ${JSON.stringify(audit.json).slice(0, 160)}`);
+    const acts = (audit.json.entries || []).map((e) => e.action);
+    assert.ok(acts.includes('otp_sent') && acts.includes('otp_fail'), `audit me otp_sent + otp_fail chahiye — ${acts.join(',')}`);
+    // 🔐 admin toggle OFF → naye IP par bhi seedha login
+    const off = await call('/api/settings', 'PUT', { settings: { features: { otp2fa: false } } }, adminCookie);
+    assert.equal(off.json.settings && off.json.settings.features.otp2fa, false, `features.otp2fa false save hua — ${JSON.stringify(off.json).slice(0, 200)}`);
+    const l3 = await call('/api/auth/login', 'POST', { username: 'otpuser', password: 'otp-pass-1' }, '', { 'X-Forwarded-For': '198.51.100.4' });
+    assert.equal(l3.res.status, 200, `otp2fa OFF = naye IP par bhi seedha login — ${JSON.stringify(l3.json)}`);
+  } finally {
+    if (server) await server.stop();
+    await new Promise((r) => upstream.close(r));
+    await new Promise((r) => smtp.srv.close(r));
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------------------------
+// Round 2: 📢 announcements + 📜 audit + 📬 weekly auto digest + 📊 report email (CSV attach)
+// ---------------------------------------------------------------------------------------------
+test('📢 announcement broadcast, 📜 audit log, 📬 weekly digest + 📊 report email force (HTML+CSV)', async () => {
+  const smtp = await startSmtp();
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'apna-feat-round2-'));
+  const pad = (n) => String(n).padStart(2, '0');
+  const dcell = (d) => `Date(${d.getFullYear()},${d.getMonth()},${d.getDate()})`;
+  const today = new Date();
+  const yest = new Date(Date.now() - 86400e3);
+  const rowsFF = [{ c: [{ v: dcell(today) }, { v: '1' }, { v: '999' }, { v: 40 }] }, { c: [{ v: dcell(yest) }, { v: '1' }, { v: '999' }, { v: 35 }] }];
+  const rowsGV = [{ c: [{ v: dcell(today) }, { v: '1' }, { v: 12 }] }, { c: [{ v: dcell(yest) }, { v: '1' }, { v: 9 }] }];
+  const upstream = http.createServer((req, res) => {
+    const tq = new URL(req.url, 'http://x').searchParams.get('tq') || '';
+    let rows = [];
+    if (/group by AA/.test(tq)) rows = rowsFF;            // FF EIR snapshot (date, class, master, count)
+    else if (/group by P, G/.test(tq)) rows = rowsGV;     // GV master snapshot (date, class, count)
+    res.end(`google.visualization.Query.setResponse(${JSON.stringify({ status: 'ok', table: { cols: [{ id: 'A', type: 'date' }, { id: 'B', type: 'string' }, { id: 'C', type: 'number' }, { id: 'D', type: 'number' }], rows } })});`);
+  });
+  upstream.listen(0, '127.0.0.1');
+  await once(upstream, 'listening');
+  let server;
+  const call = async (route, method = 'GET', body, cookie = '', headers = {}) => {
+    const res = await fetch(server.base + route, {
+      method,
+      headers: { cookie, 'Content-Type': 'application/json', 'X-Forwarded-Proto': 'https', ...headers },
+      body: body ? JSON.stringify(body) : undefined
+    });
+    const setCookie = res.headers.get('set-cookie');
+    const json = await res.json().catch(() => ({}));
+    return { res, json, setCookie };
+  };
+  const decodeMails = () => smtp.inbox.split(/\r?\n\.\r?\n/).filter(Boolean).map((seg) => {
+    const parts = seg.split(/\r?\n\r?\n/);
+    const body = (parts.slice(1).join('\n\n')).replace(/\r?\n/g, '');
+    return Buffer.from(body, 'base64').toString('utf8');
+  });
+  try {
+    server = await startServer(dir, `http://127.0.0.1:${upstream.address().port}`);
+    const adminCookie = (await call('/api/auth/login', 'POST', { username: 'owner', password: 'initial-password' })).setCookie.split(';')[0];
+    await call('/api/users', 'POST', { username: 'annuser', name: 'Ann User', password: 'ann-pass-1', role: 'user' }, adminCookie);
+    const memberCookie = (await call('/api/auth/login', 'POST', { username: 'annuser', password: 'ann-pass-1' })).setCookie.split(';')[0];
+
+    // 📢 announcement → sab users ke bell me broadcast
+    const an = await call('/api/announcements', 'POST', { text: 'Kal 11 AM sabka monthly meeting — attendance zaroori.' }, adminCookie);
+    assert.equal(an.res.status, 200, `announcement bhej di — ${JSON.stringify(an.json).slice(0, 200)}`);
+    const list = await call('/api/notifications', 'GET', undefined, memberCookie);
+    const found = (list.json.items || []).find((n) => n.meta && n.meta.announce);
+    assert.ok(found, 'member ke bell panel me announcement dikhni chahiye');
+    assert.match(found.body || '', /monthly meeting/, 'announcement text sahi hai');
+
+    // SMTP on + forces
+    await call('/api/settings', 'PUT', { settings: { email: { host: '127.0.0.1', port: smtp.port, secure: false, user: 'mailer', pass: 'secret-1', from: 'alerts@example.test', to: 'boss@example.test' } } }, adminCookie);
+    const wk = await call('/api/notifications/weekly-email', 'POST', {}, adminCookie);
+    assert.equal(wk.res.status, 200, `weekly force — ${JSON.stringify(wk.json).slice(0, 200)}`);
+    assert.equal(wk.json.ok, true, `weekly email bheji — ${JSON.stringify(wk.json)}`);
+    const rp = await call('/api/notifications/report-email', 'POST', {}, adminCookie);
+    assert.equal(rp.res.status, 200, `report force — ${JSON.stringify(rp.json).slice(0, 200)}`);
+    assert.equal(rp.json.ok, true, `report email bheji (daily rows ke saath) — ${JSON.stringify(rp.json)}`);
+    await new Promise((r) => setTimeout(r, 250));
+    const mails = decodeMails();
+    assert.ok(mails.some((t) => /Weekly digest/.test(t)), `weekly mail body me "Weekly digest" — ${mails.map((t) => t.slice(0, 60)).join(' | ')}`);
+    // report mail multipart hoti hai — subject decode karke check karo (body MIME-structured hai)
+    const subjects = [...smtp.inbox.matchAll(/Subject: =\?UTF-8\?B\?([A-Za-z0-9+/=]+)\?=/g)].map((m) => Buffer.from(m[1], 'base64').toString('utf8'));
+    assert.ok(subjects.some((t) => /Daily report/.test(t)), `report mail subject me "Daily report" — ${subjects.join(' | ')}`);
+    assert.ok(subjects.some((t) => /Weekly digest/.test(t)), `weekly mail subject bhi encoded — ${subjects.join(' | ')}`);
+    assert.ok(smtp.inbox.includes('Content-Type: multipart/mixed'), 'report mail multipart (CSV attach) hai');
+    assert.ok(smtp.inbox.includes('Content-Type: text/csv') && smtp.inbox.includes('filename="report-'), 'CSV attachment header hai');
+
+    // 📜 audit: announcement + email sends + admin-only access
+    const audit = await call('/api/audit', 'GET', undefined, adminCookie);
+    const acts = (audit.json.entries || []).map((e) => e.action);
+    for (const need of ['announcement', 'weekly_email_sent', 'report_email_sent', 'login']) {
+      assert.ok(acts.includes(need), `audit me "${need}" chahiye — ${acts.join(',')}`);
+    }
+    const denied = await call('/api/audit', 'GET', undefined, memberCookie);
+    assert.ok(denied.res.status >= 400, `member audit nahi dekh sakta (${denied.res.status})`);
+
+    // 🔁 feature toggles persist (admin on/off — jaise weekly digest email ka control)
+    const on = await call('/api/settings', 'PUT', { settings: { features: { weeklyEmail: true, emailReport: true, announcements: false } } }, adminCookie);
+    const onF = (on.json.settings || {}).features || {};
+    assert.equal(onF.weeklyEmail, true, `weeklyEmail ON save — ${JSON.stringify(onF).slice(0, 200)}`);
+    assert.equal(onF.emailReport, true, 'emailReport ON save');
+    assert.equal(onF.announcements, false, 'announcements OFF save');
+    const off = await call('/api/settings', 'PUT', { settings: { features: { weeklyEmail: false, emailReport: false, announcements: true } } }, adminCookie);
+    const offF = (off.json.settings || {}).features || {};
+    assert.equal(offF.weeklyEmail, false, 'weeklyEmail OFF wapas');
+    assert.equal(offF.emailReport, false, 'emailReport OFF wapas');
+  } finally {
+    if (server) await server.stop();
+    await new Promise((r) => upstream.close(r));
+    await new Promise((r) => smtp.srv.close(r));
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});

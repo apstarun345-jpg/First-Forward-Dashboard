@@ -11,6 +11,7 @@ window.FF = window.FF || {};
     { id: 'tagIssued', icon: '🏷️', label: 'GV & FF Tag Issued', desc: 'Date-wise detailed issuance · VC4 vs Commercial', perm: 'tagIssued', group: 'Main' },
     { id: 'targets', icon: '🎯', label: 'Agent Targets', desc: 'Shortlist · target · progress · Excel', perm: 'targets', group: 'Main' },
     { id: 'rangeReport', icon: '📅', label: 'Range Report', desc: 'Custom from→to report · FF + GV · Excel', perm: 'tagIssued', group: 'Main' },
+    { id: 'tv', icon: '📺', label: 'TV Mode', desc: 'Big-screen rotation · fullscreen', perm: 'home', group: 'Main', feat: 'tvMode' },
     { id: 'dashboard', icon: '📊', label: 'Dashboard', desc: 'KPIs & charts (EIR)', perm: 'dashboard', group: 'First Forward' },
     { id: 'trend', icon: '📈', label: 'Trend', desc: 'Daily · Monthly · Last vs Current', perm: 'trend', group: 'First Forward' },
     { id: 'performance', icon: '🏆', label: 'Performance', desc: 'Agents & TLs (REPORT)', perm: 'performance', group: 'First Forward' },
@@ -33,6 +34,7 @@ window.FF = window.FF || {};
     tagIssued: { label: 'GV और FF टैग जारी', desc: 'तारीख़ अनुसार विस्तृत जारी · VC4 बनाम कॉमर्शियल' },
     targets: { label: 'एजेंट टार्गेट', desc: 'शॉर्टलिस्ट · टार्गेट · प्रोग्रेस · उपलब्धि इतिहास · TL रोलअप' },
     rangeReport: { label: 'रेंज रिपोर्ट', desc: 'मनचाही तारीख़ रेंज · FF + GV संयुक्त · एक्सेल' },
+    tv: { label: 'टीवी मोड', desc: 'बड़ी स्क्रीन रोटेशन · फुलस्क्रीन' },
     dashboard: { label: 'डैशबोर्ड', desc: 'KPI और चार्ट (EIR)' },
     trend: { label: 'ट्रेंड', desc: 'दैनिक · मासिक · पिछला बनाम चालू' },
     performance: { label: 'परफ़ॉर्मेंस', desc: 'एजेंट और TL (REPORT)' },
@@ -52,6 +54,7 @@ window.FF = window.FF || {};
     tagIssued: { desc: 'Date-wise detailed issuance · VC4 vs Commercial' },
     targets: { desc: 'Shortlist agents · set targets · track progress · Excel' },
     rangeReport: { desc: 'Pick any from→to dates · FF + GV combined · Excel' },
+    tv: { desc: 'Big-screen rotation · auto slides · fullscreen' },
     compare: { desc: 'Side-by-side comparison of both channels' },
     stock: { desc: 'Search · pivot · Excel (StockDataa)' }
   };
@@ -184,7 +187,8 @@ window.FF = window.FF || {};
     const p = pageDef(page);
     return p ? p.perm : null;
   }
-  function allowed(page, params) { const perm = pagePerm(page, params); return !perm || FF.auth.can(perm); }
+  function featOk(p) { return !p.feat || !FF.config.features || FF.config.features[p.feat] !== false; }
+  function allowed(page, params) { const perm = pagePerm(page, params); const p = pageDef(page); if (p && !featOk(p)) return false; return !perm || FF.auth.can(perm); }
   function enabledTabs() { return (FF.config.allTabs ? FF.config.allTabs(true) : (FF.config.sheets || [])); }
   function firstAllowedPage() {
     if (FF.auth.can('home')) return 'home';
@@ -252,7 +256,7 @@ window.FF = window.FF || {};
     const groups = [...new Set(PAGES.map((p) => p.group))];
     let html = '';
     for (const group of groups) {
-      const items = PAGES.filter((p) => p.group === group && FF.auth.can(p.perm));
+      const items = PAGES.filter((p) => p.group === group && FF.auth.can(p.perm) && featOk(p));
       const groupSheets = group === 'Main' ? [] : sheets.filter((s) => (s.group || 'First Forward') === group);
       if (!items.length && !groupSheets.length) continue;
       const label = group === 'Main' ? '' : `${GROUP_ICON[group] || ''} ${groupLabel(group)}`;

@@ -197,6 +197,44 @@ window.FF = window.FF || {};
     });
   }
 
+  /**
+   * 🧓 Aged stock — kitna stock kitne din purana (bcAllocatedAt se). Buckets: 0-15 / 16-30 / 31-60 / 60+.
+   * Fail-safe: sheet/date parse fail ho to { error } return — card dim note dikhata hai.
+   */
+  async function loadStockAging(opts) {
+    const s = FF.config.stock;
+    const bc = String(s.bcAllocatedAt || '').trim().toUpperCase();
+    if (!bc || !s.tagId) return { error: 'BC Allocated At column set nahi (Settings → Sheets & tabs)' };
+    const tq = `select ${s.tagId}, ${bc} where ${s.tagId} is not null`;
+    const t = await D.query(s.sheet, tq, opts);
+    const rows = D.textRows(t);
+    const parseDay = (v) => {
+      const x = String(v || '');
+      let m = x.match(/Date\((\d{4}),(\d{1,2}),(\d{1,2})/);
+      if (m) return Date.UTC(+m[1], +m[2], +m[3]);
+      m = x.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+      if (m) return Date.UTC(+m[1], +m[2] - 1, +m[3]);
+      m = x.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})/); // dd/MM/yyyy (IST sheet format)
+      if (m) { const y = +m[3] < 100 ? 2000 + +m[3] : +m[3]; return Date.UTC(y, +m[2] - 1, +m[1]); }
+      return 0;
+    };
+    const now = Date.now();
+    const b = { '0-15': 0, '16-30': 0, '31-60': 0, '60+': 0 };
+    let unknown = 0, total = 0, oldest = 0;
+    for (const r of rows) {
+      total++;
+      const day = parseDay(r[1]);
+      if (!day) { unknown++; continue; }
+      const age = Math.floor((now - day) / 86400e3);
+      if (age > oldest) oldest = age;
+      if (age <= 15) b['0-15']++;
+      else if (age <= 30) b['16-30']++;
+      else if (age <= 60) b['31-60']++;
+      else b['60+']++;
+    }
+    return { buckets: b, unknown, total, oldest };
+  }
+
   // ---- derived helpers ---------------------------------------------------------
   function months(daily) { return U.uniq((daily || []).map((r) => r.ym)).sort(); }
   function latestDate(daily) { return (daily || []).reduce((acc, r) => (!acc || r.d > acc ? r.d : acc), null); }
@@ -248,5 +286,5 @@ window.FF = window.FF || {};
     return map;
   }
 
-  FF.model = { classGroup, channelOf, loadDaily, loadAgents, loadStatus, loadStock, loadStockAgents, loadAgentClassMonthly, loadStockRows, loadStockAgentTypes, months, latestDate, dailySeries, summary, byDim };
+  FF.model = { classGroup, channelOf, loadDaily, loadAgents, loadStatus, loadStock, loadStockAgents, loadAgentClassMonthly, loadStockRows, loadStockAgentTypes, loadStockAging, months, latestDate, dailySeries, summary, byDim };
 })(window.FF);

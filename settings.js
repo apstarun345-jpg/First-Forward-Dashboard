@@ -6,7 +6,7 @@ FF.pages = FF.pages || {};
   'use strict';
   const U = FF.util, A = FF.auth;
   const esc = U.esc;
-  const TABS = [['account', '👤 My account'], ['brand', '🎨 Branding & images'], ['sources', '🗂️ Sheets & tabs'], ['access', '🔐 Access matrix'], ['data', '🔌 Data source'], ['rules', '📐 Thresholds'], ['features', '🎛 Features'], ['contacts', '📲 Contacts & sharing'], ['users', '👥 Users & access'], ['backup', '☁️ Storage & backup']];
+  const TABS = [['account', '👤 My account'], ['brand', '🎨 Branding & images'], ['sources', '🗂️ Sheets & tabs'], ['access', '🔐 Access matrix'], ['data', '🔌 Data source'], ['rules', '📐 Thresholds'], ['features', '🎛 Features'], ['contacts', '📲 Contacts & sharing'], ['users', '👥 Users & access'], ['audit', '📜 Audit log'], ['backup', '☁️ Storage & backup']];
   let tab = 'account';
   let storage = null;
   let settings = null, defaults = null, usersCache = null, permsCache = [];
@@ -574,6 +574,13 @@ FF.pages = FF.pages || {};
         ${c('pendingBadge', '⏳ Pending-approvals badge', 'Sidebar Settings par pending signup count')}
         ${c('updateToast', '🔄 “Update available” toast', 'Server version badle to app me Reload banner')}
         ${c('backupReminder', '☁️ Settings backup reminder', `Backup purana ho to roz info alert — age threshold → ⚙️ neeche`)}
+        ${c('tvMode', '📺 TV mode page', 'Office TV ke liye Dashboard → Trend → Stock → Targets auto-rotation (sidebar me 📺 TV Mode)')}
+        ${c('weekCompare', '🗓 Same-day-last-week KPI', 'Dashboard par “aaj vs pichhle hafte ke same din” comparison')}
+        ${c('agedStock', '🧓 Aged stock buckets', 'Stock page — 0-15 / 16-30 / 31-60 / 60+ din purana stock')}
+        ${c('auditLog', '📜 Audit log', 'Settings me 📜 tab — login, settings, users, OTP sab kuch (admin only)')}
+        ${c('announcements', '📢 Announcement composer', 'Settings me sab users ko ek saath broadcast karne ka box')}
+        ${c('tlGoals', '🎯 TL monthly goals', 'Targets page TL rollup me goal column + admin editable goals')}
+        ${c('otp2fa', '🔐 OTP on new-IP login', 'Naye IP par login = 6-digit OTP email (SMTP set ho tabhi) — known device par seedha login')}
       </div>${saveBar('feat-ui')}`);
     const alertCard = section('🔴 Alert automation <span class="dim">(server-side — tab bhi chalta hai jab app band ho)</span>', `
       <div class="feat-grid">
@@ -582,6 +589,7 @@ FF.pages = FF.pages || {};
         ${a('inactive', '💤 Weekly inactive users', 'Har Monday 9 AM IST — 3+ din silent users ki list')}
         ${a('zeroDay', '⚠️ Zero-day / sharp-drop', 'Raat 9 IST — aaj 0 issuance ya avg se bahut kam')}
         ${a('newLoginIp', '🔐 Naye IP se login', 'Known IPs se bahar naye IP par login par admin alert')}
+        ${a('anomaly', '📉 Agent anomaly (raat 9)', 'Koi agent achanak 0 / bahut kam ho jaye to alert — threshold % ⚙️ neeche')}
       </div>
       <p class="dim small">In alerts ki ON/OFF apne phone par bhi chahiye to 👤 My account → 🔔 Notifications me <b>🔴 Critical alerts</b> type bhi ON rakho.</p>${saveBar('feat-alerts')}`);
     const modsCard = section('⚙️ Alert modify <span class="dim">(numbers tune karo)</span>', `
@@ -592,6 +600,7 @@ FF.pages = FF.pages || {};
         ${n('features.midGapPct', f.midGapPct, '🎯 Kitna % peeche = alert (%)', 'min="5" max="90"')}
         ${n('features.zeroDropPct', f.zeroDropPct, '⚠️ Sharp-drop threshold (%) — 0 = sirf zero-day', 'min="0" max="90"')}
         ${n('features.backupDays', f.backupDays, '☁️ Backup reminder age (din)', 'min="1" max="120"')}
+        ${n('features.anomalyPct', f.anomalyPct, '📉 Anomaly: avg se kitna % neeche = alert', 'min="10" max="95"')}
       </div>
       <p class="dim small">Cover bands (🔴/🟠/🟡) aur “went quiet” days → <b>📐 Thresholds</b> tab. Digest ka ON/OFF type → 🔔 Notifications.</p>${saveBar('feat-mods')}`);
     const waCard = section('📤 WhatsApp share number', `
@@ -599,7 +608,11 @@ FF.pages = FF.pages || {};
       <p class="dim small">Number blank ho to WhatsApp apna contact picker kholta hai. Contacts tab ka team number fallback me use hota hai.</p>${saveBar('feat-wa')}`);
     const emailCard = section('📧 Email digest <span class="dim">(SMTP — optional)</span>', `
       <label class="check" style="margin-bottom:6px"><input type="checkbox" data-path="features.emailDigest" ${f.emailDigest ? 'checked' : ''}> <b>Digest email se bhi bhejo</b> <small class="dim">(push ke saath-saath subah ka summary email par)</small></label>
+      <label class="check" style="margin-bottom:6px"><input type="checkbox" data-path="features.weeklyEmail" ${f.weeklyEmail === true ? 'checked' : ''}> <b>📬 Weekly auto-digest email (admin on/off)</b> <small class="dim">— har Monday, pichhle Mon–Sun ka FF/GV summary + stock. Hour → ⬇️ neeche</small></label>
+      <label class="check" style="margin-bottom:6px"><input type="checkbox" data-path="features.emailReport" ${f.emailReport === true ? 'checked' : ''}> <b>📊 Roz ka scheduled report email (HTML + CSV)</b> <small class="dim">— last-14-din table, CSV attach. Hour → ⬇️ neeche</small></label>
       <div class="form-grid">
+        ${field('Weekly email hour (IST)', numI('features.weeklyEmailHour', f.weeklyEmailHour ?? 9, 'min="0" max="23"'))}
+        ${field('Report email hour (IST)', numI('features.emailReportHour', f.emailReportHour ?? 21, 'min="0" max="23"'))}
         ${field('SMTP host', txt('email.host', em.host || '', 'placeholder="smtp.gmail.com"'))}
         ${field('Port', numI('email.port', em.port || 587, 'min="1" max="65535"'))}
         ${field('TLS (465 / implicit)', `<input type="checkbox" data-path="email.secure" ${em.secure ? 'checked' : ''}>`)}
@@ -610,7 +623,30 @@ FF.pages = FF.pages || {};
       </div>
       <div class="save-bar"><button class="btn primary" data-save="feat-email">💾 Save</button><button class="btn" id="em-test">📧 Test email bhejo</button><span class="dim small" id="save-msg-feat-email"></span></div>
       <p class="dim small">Gmail ke liye normal password nahi chalta — Google Account → 2-Step → <b>App passwords</b> banao. SMTP kabhi koi data leak nahi karti; password sirf server settings me rehta hai (non-admin ko dikhta bhi nahi).</p>`);
-    return `${uiCard}${alertCard}${modsCard}${waCard}${emailCard}`;
+    const announceCard = section('📢 Announcement <span class="dim">(sab users ko ek message)</span>', `
+      <p class="dim small">Type karo aur bhejo — sab logged-in users ke bell panel me turant dikhega (jaise ek broadcast). Ye raha preview:</p>
+      <textarea class="input" id="an-text" rows="3" maxlength="500" placeholder="e.g. Kal 11 AM sabka monthly meeting hai — attendance zaroori."></textarea>
+      <div class="save-bar" style="margin-top:8px"><button class="btn primary" id="an-send">📢 Broadcast karo</button><span class="dim small" id="an-msg"></span></div>`);
+    return `${uiCard}${alertCard}${modsCard}${waCard}${emailCard}${announceCard}`;
+  }
+
+  // ---- 📜 Audit log (admin) ---------------------------------------------------------------------------
+  async function auditTab(body) {
+    let entries = [];
+    try { entries = (await A.api('/api/audit')).entries || []; } catch (err) { body.innerHTML = U.errorBox(err); return; }
+    if (!entries.length) { body.innerHTML = `<div class="card"><p class="dim">Abhi tak koi audit entry nahi — login, settings change, user create karte hi yahan dikhega.</p></div>`; return; }
+    const actions = [...new Set(entries.map((e) => e.action))].sort();
+    body.innerHTML = `<div class="card">
+      <div class="page-head" style="margin-bottom:8px"><div><h2>📜 Audit log <span class="dim small">(last ${entries.length})</span></h2>
+      <p class="sub">Kaunne kab kya kiya — login/OTP, settings, users, announcements, email sends. Server par last 400 entries rakhi jaati hain.</p></div></div>
+      <div class="form-grid" style="max-width:420px">${field('Action filter', `<select class="input" id="au-filter"><option value="">Sab</option>${actions.map((a2) => `<option value="${esc(a2)}">${esc(a2)}</option>`).join('')}</select>`)}</div>
+      <div class="table-wrap" style="max-height:70vh;overflow:auto;margin-top:10px"><table class="table" id="au-table"><thead><tr><th>⏰ When</th><th>👤 Who</th><th>Action</th><th>Target</th><th>IP / note</th></tr></thead><tbody>
+      ${entries.map((e) => `<tr data-action="${esc(e.action)}"><td class="mono small">${esc((e.at || '').replace('T', ' ').slice(0, 19))}</td><td><b>${esc(e.actor || '—')}</b>${e.role ? ` <span class="dim small">${esc(e.role)}</span>` : ''}</td><td>${esc(e.action)}</td><td class="mono small">${esc(e.target || '')}</td><td class="small dim">${esc(e.ip || '')}${e.note ? ` · ${esc(e.note)}` : ''}</td></tr>`).join('')}
+      </tbody></table></div></div>`;
+    const sel = U.$('#au-filter', body);
+    sel.addEventListener('change', () => {
+      U.$$('#au-table tbody tr', body).forEach((tr) => { tr.hidden = !!sel.value && tr.dataset.action !== sel.value; });
+    });
   }
 
   // ---- page ------------------------------------------------------------------------------------
@@ -633,6 +669,7 @@ FF.pages = FF.pages || {};
       else if (tab === 'data') body.innerHTML = dataTab();
       else if (tab === 'rules') body.innerHTML = rulesTab();
       else if (tab === 'features') body.innerHTML = featuresTab();
+      else if (tab === 'audit') { body.innerHTML = U.spinner('Audit log…'); await auditTab(body); }
       else if (tab === 'contacts') body.innerHTML = contactsTab();
       else if (tab === 'backup') body.innerHTML = backupTab();
       else if (tab === 'users') { body.innerHTML = U.spinner('Users…'); await usersTab(body); }
@@ -691,6 +728,20 @@ FF.pages = FF.pages || {};
           emTest.disabled = false;
           emTest.textContent = lbl;
         }
+      });
+      // 📢 Announcement broadcast (featuresTab)
+      const anSend = U.$('#an-send', body);
+      if (anSend) anSend.addEventListener('click', async () => {
+        const text = (U.$('#an-text', body).value || '').trim();
+        if (!text) return U.toast('Pehle message likho', 'err');
+        anSend.disabled = true;
+        try {
+          await A.api('/api/announcements', 'POST', { text });
+          U.$('#an-text', body).value = '';
+          U.$('#an-msg', body).textContent = 'Broadcast bhej diya ✓';
+          U.toast('📢 Announcement sabko bhej diya', 'ok');
+        } catch (err) { U.toast(err.message, 'err'); }
+        finally { anSend.disabled = false; }
       });
       // live colour preview
       U.$$('input[type=color][data-path]', body).forEach((inp) => inp.addEventListener('input', () => { inp.nextElementSibling.textContent = inp.value; const t = { ...FF.config.theme }; t[inp.dataset.path.split('.')[1]] = inp.value; FF.config.theme = t; A.applyTheme(); }));
