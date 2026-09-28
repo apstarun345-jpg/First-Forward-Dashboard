@@ -160,10 +160,19 @@ const DEFAULT_SETTINGS = {
     teamMap: true,       // 🗺 team location map (admin)
     tlAnomaly: true,     // 🏆 TL-level anomaly (agent ke saath)
     personalLinks: true, // 🔗 personal read-only links (agent + TL)
+    // ---- round 4 ke naye features ----
+    customAlerts: true,  // 🗓 custom alert scheduler (admin ke apne reminders/status)
+    championEmail: false,// 🥇 monthly champion certificate email (SMTP chahiye)
+    championHour: 10, championTop: 3,
+    followupTracker: true, // ⏰ follow-up tracker (3+ din silent agents)
+    followupDays: 3, followupHour: 10,
+    dispatchPlan: true,  // 🎯 suggested-dispatch highlighted cards (GV + FF)
+    suggestDays: 15,     // 🎯 suggested qty = avg VC4/day × ye din − stock
     officeLat: 0, officeLng: 0, // 🗺 office location (0 = unset — map card se set karo)
     alerts: { lowCover: true, midMonth: true, inactive: true, zeroDay: true, newLoginIp: true, anomaly: true }
   },
   personalLinks: [],     // 🔗 { id, kind, name, token, enabled } — sirf admin (settingsFor non-admin ko strip karta hai)
+  schedules: [],         // 🗓 { id, title, text, kind: daily|weekly|monthly, hour, weekday, day, target, enabled }
   email: { host: '', port: 587, secure: false, user: '', pass: '', from: '', to: '' },
   lastBackupAt: null,
   cacheSeconds: DEFAULT_CACHE_SECONDS,
@@ -254,6 +263,7 @@ function settingsFor(u) {
   const s = { ...db.settings };
   if (s.email) s.email = { host: s.email.host || '', port: s.email.port || '', secure: !!s.email.secure, user: '', pass: '', from: s.email.from || '', to: s.email.to || '' };
   delete s.personalLinks; // 🔗 secret tokens sirf admin ko
+  delete s.schedules;     // 🗓 admin ke custom reminders
   return s;
 }
 /** sw.js ka CACHE_NAME — app version (update-toast ke liye). */
@@ -1459,6 +1469,9 @@ function runScheduledChecks() {
     F.alerts.zeroDay === false ? Promise.resolve() : maybeZeroDayAlert(),
     F.backupReminder === false ? Promise.resolve() : maybeBackupReminder(),
     maybeAgentAnomaly(),
+    schedulesTick(),
+    maybeChampionEmail(false),
+    maybeFollowup(false),
     sendWeeklyEmail(false),
     sendReportEmail(false),
     refreshStockState(false)
@@ -1747,6 +1760,187 @@ async function maybeAgentAnomaly(force = false) {
 }
 let reportCheckAt = 0;
 let reportCheckPromise = null;
+
+// ---- 🗓 custom alert scheduler (admin ke reminders/status) ------------------------------------
+function renderSchedText(text) {
+  const daily = (db.notify.watch && db.notify.watch.daily) || {};
+  const ff = (db.notify.watch && db.notify.watch.ff) || {};
+  const ym = dateKeyNow().slice(0, 7);
+  let mtd = 0;
+  for (const [d, v] of Object.entries(daily)) if (d.startsWith(ym)) mtd += (Number(v.ff) || 0) + (Number(v.gv) || 0);
+  const today = ff.date === dateKeyNow() ? Number(ff.total) || 0 : 0;
+  return String(text || '')
+    .replace(/\{date\}/g, dateKeyNow())
+    .replace(/\{today\}/g, String(today))
+    .replace(/\{mtd\}/g, String(mtd));
+}
+async function fireSchedule(sched, opts = {}) {
+  const item = recordNotification({
+    type: sched.type === 'alert' ? 'alert' : 'info',
+    title: `🗓 ${sched.title || 'Reminder'}`,
+    body: renderSchedText(sched.text),
+    target: sched.target === 'broadcast' ? 'broadcast' : 'admin',
+    meta: { schedule: true, link: sched.link || '', ...(opts.meta || {}) }
+  });
+  logAudit(null, 'schedule_fired', { actor: opts.force ? 'admin:test' : 'scheduler', target: String(sched.id || sched.title || ''), note: String(sched.text || '').slice(0, 60) });
+  return item;
+}
+async function schedulesTick(forceSched = null) {
+  try {
+    const F = feats();
+    const list = Array.isArray(db.settings.schedules) ? db.settings.schedules : [];
+    if (forceSched) return await fireSchedule(forceSched, { force: true });
+    if (F.customAlerts === false || !list.length) return [];
+    const ist = istNow();
+    const hour = ist.getUTCHours(), dow = ist.getUTCDay(), dom = Number(ist.getUTCDate());
+    const dateKey = dateKeyNow();
+    if (!Array.isArray(db.notify.watch.schedFired)) db.notify.watch.schedFired = [];
+    const fired = new Set(db.notify.watch.schedFired);
+    const out = [];
+    for (const s of list) {
+      if (!s || s.enabled === false) continue;
+      const h = Number(s.hour);
+      if (!Number.isFinite(h) || hour !== h) continue;
+      const ok = s.kind === 'weekly' ? Number(s.weekday) === dow
+        : s.kind === 'monthly' ? Number(s.day) === dom
+        : true; // daily (default)
+      if (!ok) continue;
+      const key = `${s.id || s.title}|${dateKey}|${h}`;
+      if (fired.has(key)) continue;
+      fired.add(key);
+      out.push(await fireSchedule(s));
+    }
+    if (out.length) {
+      const keys = [...fired].slice(-240);
+      db.notify.watch.schedFired = keys;
+      persist('notify').catch(() => {});
+    }
+    return out;
+  } catch (err) { console.warn('schedules:', err.message); return []; }
+}
+// ---- 🥇 monthly champion certificate email (SMTP) --------------------------------------------
+async function championsList(topN) {
+  const s = db.settings.eir || {};
+  const sheet = db.settings.eirSheet || 'EIR';
+  const agentCol = s.agentName || 'L', dateCol = s.date || 'AA', tagCol = s.tagId || 'A';
+  const tq = `select ${agentCol}, ${dateCol}, count(${tagCol}) where ${tagCol} is not null group by ${agentCol}, ${dateCol} order by ${dateCol} desc limit 6000`;
+  const params = new URLSearchParams({ id: String(db.settings.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet, tq });
+  const out = await fetchUpstream(upstreamUrl(params));
+  if (out.status < 200 || out.status >= 300) throw new Error(`sheet ${out.status}`);
+  const table = parseGvizServer(out.body);
+  const ist = istNow();
+  const prev = new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth() - 1, 1));
+  const prevYm = `${prev.getUTCFullYear()}-${pad2(prev.getUTCMonth() + 1)}`;
+  const totals = new Map();
+  for (const row of table.rows || []) {
+    const name = serverCell(row, 0).trim();
+    const dk = serverDate(serverCell(row, 1));
+    if (!name || !dk.startsWith(prevYm)) continue;
+    totals.set(name, (totals.get(name) || 0) + serverNumber(serverCell(row, 2)));
+  }
+  const list = [...totals.entries()].map(([name, total]) => ({ name, total })).sort((a, b) => b.total - a.total);
+  return { month: prevYm, list: list.slice(0, Math.max(1, Math.min(10, Number(topN) || 3))) };
+}
+function championHtml(monthLabel, champs) {
+  const accent = (db.settings.theme && db.settings.theme.accent) || '#2563eb';
+  const medals = ['🥇', '🥈', '🥉'];
+  return `<div style="font-family:Arial,Helvetica,sans-serif;background:#0f172a;color:#fff;padding:26px;border-radius:18px;max-width:600px">
+    <p style="margin:0 0 4px;color:#94a3b8;letter-spacing:.14em;font-size:12px">🏅 MONTHLY CHAMPIONS · ${escHtml(monthLabel)}</p>
+    <h2 style="margin:0 0 18px;font-size:26px">${escHtml(db.settings.brand || 'Dashboard')} — Hall of Fame</h2>
+    ${champs.map((c, i) => `<div style="background:#1e293b;border:1px solid ${i === 0 ? accent : '#334155'};border-radius:14px;padding:14px 16px;margin-bottom:10px;display:flex;align-items:center;gap:14px">
+      <div style="font-size:34px">${medals[i] || `#${i + 1}`}</div>
+      <div style="flex:1"><div style="font-size:18px;font-weight:700">${escHtml(c.name)}</div>
+      <div style="color:#94a3b8;font-size:13px">Last month issuance</div></div>
+      <div style="font-size:30px;font-weight:800;color:#fde047">${c.total}</div>
+    </div>`).join('')}
+    <p style="color:#94a3b8;font-size:12px;margin-top:14px">Certified by ${escHtml(db.settings.brand || 'Dashboard')} · data live sheet se</p></div>`;
+}
+async function maybeChampionEmail(force = false) {
+  try {
+    const F = feats();
+    if (!force && F.championEmail !== true) return null;
+    const cfg = db.settings.email || {};
+    if (!cfg.host || !cfg.to) { if (force) throw new Error('SMTP host/to set nahi — Features → Email configure karo'); return null; }
+    if (!force) {
+      const ist = istNow();
+      if (ist.getUTCHours() < (Number(F.championHour) || 10)) return null;
+      const prev = new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth() - 1, 1));
+      const prevYm = `${prev.getUTCFullYear()}-${pad2(prev.getUTCMonth() + 1)}`;
+      if (db.notify.watch.championMonth === prevYm) return null;
+    }
+    const { month, list } = await championsList(F.championTop);
+    if (!list.length) { if (force) throw new Error('Pichhle mahine ka data nahi mila'); return null; }
+    const monthLabel = U_labelYmSafe(month);
+    const html = championHtml(monthLabel, list);
+    const text = `🏆 ${monthLabel} champions — ` + list.map((c, i) => `${i + 1}. ${c.name} (${c.total})`).join(' · ');
+    await smtpSend(cfg, `🥇 ${monthLabel} Champions · ${db.settings.brand || 'Dashboard'}`, text, { html });
+    db.notify.watch.championMonth = month;
+    persist('notify').catch(() => {});
+    logAudit(null, 'champion_email_sent', { actor: force ? 'admin:test' : 'scheduler', note: list.map((c) => `${c.name}:${c.total}`).join(', ') });
+    return { month, list };
+  } catch (err) { console.warn('champion email:', err.message); if (force) throw err; return null; }
+}
+function U_labelYmSafe(ym) {
+  const m = Number(String(ym).slice(5, 7)) - 1;
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${MONTHS[m] || ''} ${String(ym).slice(0, 4)}`.trim();
+}
+// ---- ⏰ follow-up tracker (N din silent agents) ------------------------------------------------
+async function followupList() {
+  const s = db.settings.eir || {};
+  const sheet = db.settings.eirSheet || 'EIR';
+  const agentCol = s.agentName || 'L', dateCol = s.date || 'AA', tagCol = s.tagId || 'A';
+  const tq = `select ${agentCol}, ${dateCol}, count(${tagCol}) where ${tagCol} is not null group by ${agentCol}, ${dateCol} order by ${dateCol} desc limit 6000`;
+  const params = new URLSearchParams({ id: String(db.settings.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet, tq });
+  const out = await fetchUpstream(upstreamUrl(params));
+  if (out.status < 200 || out.status >= 300) throw new Error(`sheet ${out.status}`);
+  const table = parseGvizServer(out.body);
+  const latest = new Map();
+  for (const row of table.rows || []) {
+    const name = serverCell(row, 0).trim();
+    const dk = serverDate(serverCell(row, 1));
+    if (!name || !dk) continue;
+    if (!latest.has(name) || dk > latest.get(name)) latest.set(name, dk);
+  }
+  const days = Math.max(1, Number(feats().followupDays) || 3);
+  const today = new Date(`${dateKeyNow()}T00:00:00Z`);
+  const cut = new Date(today.getTime() - days * 86400e3);
+  const monthAgo = new Date(today.getTime() - 30 * 86400e3);
+  const cutKey = cut.toISOString().slice(0, 10);
+  const activeKey = monthAgo.toISOString().slice(0, 10);
+  const silent = [];
+  for (const [name, last] of latest) {
+    if (last < cutKey && last >= activeKey) silent.push({ name, last, days: Math.round((today - new Date(`${last}T00:00:00Z`)) / 86400e3) });
+  }
+  silent.sort((a, b) => b.days - a.days);
+  return { days, list: silent.slice(0, 40) };
+}
+async function maybeFollowup(force = false) {
+  try {
+    const F = feats();
+    if (!force && F.followupTracker === false) return null;
+    if (!force) {
+      const ist = istNow();
+      if (ist.getUTCHours() < (Number(F.followupHour) || 10)) return null;
+      const dateKey = dateKeyNow();
+      if (db.notify.watch.followupDate === dateKey) return null;
+    }
+    const { days, list } = await followupList();
+    db.notify.watch.followupDate = dateKeyNow();
+    persist('notify').catch(() => {});
+    if (!list.length) return null;
+    const top = list.slice(0, 15);
+    const item = recordNotification({
+      type: 'info',
+      title: `⏰ Follow-up · ${list.length} agent ${days}+ din silent`,
+      body: top.map((x) => `${x.name} (${x.days} din)`).join(', ') + (list.length > top.length ? ` …+${list.length - top.length}` : '') + `. In tak pahuncho — pichhla issuance ${days}+ din pehle.`,
+      target: 'broadcast',
+      meta: { link: '#/performance?view=alerts', days, count: list.length }
+    });
+    logAudit(null, 'followup_alert', { actor: force ? 'admin:test' : 'scheduler', note: `${list.length} agents ≥${days} din silent` });
+    return item;
+  } catch (err) { console.warn('followup:', err.message); if (force) throw err; return null; }
+}
 async function checkReports(force = false) {
   if (reportCheckPromise) return reportCheckPromise;
   if (!force && Date.now() - reportCheckAt < 5 * 60e3) return;
@@ -2133,6 +2327,36 @@ async function handleApi(req, res, url) {
     await persist('settings');
     logAudit(user, 'link_toggle', { target: `${link.kind}:${link.name}`, note: link.enabled ? 'ON' : 'OFF' });
     return sendJson(res, 200, { ok: true, link });
+  }
+  // 🗓 Schedule fire-now (admin test)
+  const schFire = p.match(/^\/api\/schedules\/([^/]+)\/fire$/);
+  if (schFire && method === 'POST') {
+    requireAdmin(user);
+    if (feats().customAlerts === false) throw new HttpError(403, '🗓 Custom alerts band hain — Features tab se ON karo.');
+    const id = decodeURIComponent(schFire[1]);
+    const sched = (Array.isArray(db.settings.schedules) ? db.settings.schedules : []).find((s) => s && s.id === id);
+    if (!sched) throw new HttpError(404, 'Schedule nahi mila.');
+    const item = await schedulesTick(sched);
+    return sendJson(res, 200, { ok: !!item, item: item || null });
+  }
+  // 🥇 Champion certificate email — force
+  if (p === '/api/notifications/champion-email' && method === 'POST') {
+    requireAdmin(user);
+    if (feats().championEmail !== true) throw new HttpError(403, '🥇 Champion email feature ON nahi — Features tab se ON karo.');
+    try {
+      const out = await maybeChampionEmail(true);
+      return sendJson(res, 200, { ok: !!out, month: out && out.month, top: out ? out.list.map((c) => `${c.name}:${c.total}`) : [] });
+    } catch (err) { throw new HttpError(502, `Champion email fail: ${err.message}`); }
+  }
+  // ⏰ Follow-up list (admin, on-demand) — Alerts card isi ko use karti hai; ?fire=1 to notification bhi
+  if (p === '/api/followup' && method === 'GET') {
+    requireAdmin(user);
+    const out = await followupList();
+    if (url.searchParams.get('fire') === '1') {
+      if (feats().followupTracker === false) throw new HttpError(403, '⏰ Follow-up tracker band hai — Features tab se ON karo.');
+      const item = await maybeFollowup(true); return sendJson(res, 200, { ...out, fired: !!item });
+    }
+    return sendJson(res, 200, out);
   }
   if (p === '/api/notifications/digest' && method === 'POST') {
     if (!user) throw new HttpError(401, 'Login required');

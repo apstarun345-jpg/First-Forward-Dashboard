@@ -124,11 +124,32 @@ FF.pages = FF.pages || {};
     const weekdayChart = C.bars({ labels: wdOrder.map((i) => U.DAYS[i]), height: 190, series: [{ name: 'Avg / day', values: wdOrder.map((i) => (wdDays[i].size ? Math.round(wdSum[i] / wdDays[i].size) : 0)), color: '#0d9488' }] });
 
     const cmpRow = (label, a, b) => `<tr><td>${label}</td><td class="num"><b>${U.fmt(a)}</b></td><td class="num">${U.fmt(b)}</td><td class="num">${U.deltaHtml(U.growth(a, b), { decimals: 0 })}</td></tr>`;
-    const vc4Comm = `<div class="grid g-2" style="margin-bottom:0"><div>${C.bars({ labels: ['VC4', 'VC20', 'VC5+', 'Commercial'], height: 200, series: [{ name: `${lm} (same period)`, values: [lastMtd.vc4, lastMtd.vc20, lastMtd.vc5p, lastMtd.comm], color: '#99f6e4' }, { name: `${cm} MTD`, values: [curS.vc4, curS.vc20, curS.vc5p, curS.comm], color: '#0d9488' }], legendAlways: true })}</div>
+    const vc4Comm = `<div class="grid g-2" style="margin-bottom:0"><div>${C.bars({ labels: ['VC4', 'VC20', 'VC5+', 'All Comm'], height: 200, series: [{ name: `${lm} (same period)`, values: [lastMtd.vc4, lastMtd.vc20, lastMtd.vc5p, lastMtd.comm], color: '#99f6e4' }, { name: `${cm} MTD`, values: [curS.vc4, curS.vc20, curS.vc5p, curS.comm], color: '#0d9488' }], legendAlways: true })}</div>
       <table class="tbl compact"><thead><tr><th></th><th class="num">${cm} MTD</th><th class="num">${lm} same period</th><th class="num">Growth</th></tr></thead><tbody>${cmpRow('VC4', curS.vc4, lastMtd.vc4)}${cmpRow('VC20', curS.vc20, lastMtd.vc20)}${cmpRow('VC5+', curS.vc5p, lastMtd.vc5p)}${cmpRow('<b>Commercial (VC20 + VC5+)</b>', curS.comm, lastMtd.comm)}${cmpRow('<b>Total</b>', curS.total, lastMtd.total)}</tbody></table></div>`;
 
+    // 🎯 Suggested dispatch plan — GV REPORT ke High/Medium priority agents (highlighted card)
+    const dispatchPlan = (() => {
+      if (FF.config.feat && FF.config.feat('dispatchPlan') === false) return '';
+      if (!report.length) return '';
+      const days = Number(FF.config.features && FF.config.features.suggestDays) || 15;
+      const rows = report
+        .filter((r) => /high/i.test(r.priority || '') || /medium/i.test(r.priority || ''))
+        .map((r) => {
+          const daily = (r.curVc4 || 0) / Math.max(1, r.curDays || 0);
+          const cover = daily > 0 && r.stockVc4 != null ? r.stockVc4 / daily : null;
+          const given = r.suggestedDispatch != null && r.suggestedDispatch !== '' && !Number.isNaN(Number(r.suggestedDispatch)) ? Number(r.suggestedDispatch) : null;
+          const sug = given != null ? given : Math.max(0, Math.ceil(daily * days - (r.stockVc4 || 0)));
+          return { r, sug, cover, daily };
+        })
+        .sort((a, b) => (a.cover ?? 9999) - (b.cover ?? 9999))
+        .slice(0, 40);
+      if (!rows.length) return '';
+      const coverTd = (c) => (c == null ? '<span class="dim">—</span>' : `<span class="count ${c < 7 ? 'red' : c < 15 ? 'amber' : ''}">${U.fmt(c)}</span>`);
+      return card('🎯 Suggested dispatch plan · High + Medium priority', `<div class="table-wrap tall"><table class="tbl compact"><thead><tr><th>Agent</th><th>TL</th><th>Priority</th><th class="num">VC4 stock</th><th class="num">Avg VC4/day</th><th class="num">Cover (din)</th><th class="num">Suggested qty 🎯</th></tr></thead><tbody>${rows.map(({ r, sug, cover, daily }) => `<tr data-link="#/gvPerformance?q=${encodeURIComponent(r.agentName)}"><td><b>${esc(r.agentName)}</b></td><td>${esc(r.tlName)}</td><td>${badge(r.priority)}</td><td class="num">${U.fmt(r.stockVc4)}</td><td class="num">${U.fmt(daily, true)}</td><td class="num">${coverTd(cover)}</td><td class="num"><b class="sug-chip">${U.fmt(sug)}</b></td></tr>`).join('')}</tbody></table></div><div class="dim small" style="margin-top:8px">🎯 Suggested qty = GV REPORT "Suggested Dispatch Qty" (ya avg VC4/day × ${days} − stock) · cover = VC4 stock ÷ avg daily VC4 · 🔴 cover &lt; 7 · 🟠 &lt; 15 din</div>`, { cls: 'dispatch-plan', right: `<span class="dim">target ${days} din</span>` });
+    })();
     body.innerHTML = `
       <div class="kpi-grid">${kpis.join('')}</div>
+      ${dispatchPlan}
       <div class="grid g-2-1">
         ${card(`📈 GV Daily Issuance · ${cm} <span class="dim">vs</span> ${lm}`, lineChart, { right: `<a class="btn small" href="#/gvTrend?mode=compare">Full GV trend →</a>` })}
         ${card('🍩 GV Class Mix · MTD', classDonut)}

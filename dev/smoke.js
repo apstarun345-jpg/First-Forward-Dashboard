@@ -149,6 +149,11 @@ await run('targets.render', () => pages.targets.render(root(), {}, {}), true);
 await run('targets.render gv+month', () => pages.targets.render(root(), { month: FF.util.prevMonthKey(FF.util.ymKey(new Date())) }, {}), true);
 await run('targets.render achievements tab', () => pages.targets.render(root(), { tab: 'achieve' }, {}), true);
 await run('targets.render tl rollup tab', () => pages.targets.render(root(), { tab: 'tl' }, {}), true);
+await run('targets 4-way header (VC20 · VC5+ · All Comm)', async () => {
+  const r = root(); await pages.targets.render(r, {}, {});
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const s of ['VC20', 'VC5+', 'All Comm']) if (!html.includes(s)) throw new Error(`targets table me "${s}" nahi mila`);
+}, true);
 await run('rangeReport.render default', () => pages.rangeReport.render(root(), {}, {}), true);
 await run('rangeReport.render custom range', () => { const d = new Date(); d.setDate(d.getDate() - 20); return pages.rangeReport.render(root(), { from: FF.util.dateKey(d), to: FF.util.dateKey(new Date()) }, {}); }, true);
 await run('stock.render overview', () => pages.stock.render(root(), {}, {}), true);
@@ -156,6 +161,11 @@ await run('stock.render agent', () => pages.stock.render(root(), { agent: someAg
 await run('stock.render tl', () => pages.stock.render(root(), { tl: someTl }, {}), true);
 await run('stock.render cls', () => pages.stock.render(root(), { cls: 'VC4' }, {}), true);
 await run('stock.render cls commercial', () => pages.stock.render(root(), { cls: '12' }, {}), true);
+await run('stock 4-way class split (VC4/VC20/VC5+/All Comm)', async () => {
+  const r = root(); await pages.stock.render(r, {}, {});
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const s of ['VC20', 'VC5+', 'All Comm']) if (!html.includes(s)) throw new Error(`stock overview me "${s}" nahi mila`);
+}, true);
 await run('model.loadStockRows (xlsx source)', async () => { const r = await FF.model.loadStockRows({ agent: someAgent, limit: 50 }); if (!r.rows.length) throw new Error('no rows'); log(`      ${r.rows.length} raw rows · ${r.header.length} cols`); });
 await run('performance.render overview', () => pages.performance.render(root(), {}, {}), true);
 await run('performance agents()', async () => { const list = pages.performance.agents(); if (!list.length) throw new Error('no agents parsed from REPORT'); const withTl = list.filter((a) => a.tlExcluded).length; log(`      ${list.length} agents · ${withTl} direct (APS) · months ${JSON.stringify(list[0] && pages.performance.months ? pages.performance.months() : '')}`); });
@@ -163,6 +173,18 @@ for (const view of ['agents', 'tls', 'alerts', 'columns']) await run(`performanc
 await run('performance.render q=agent (auto-open drawer)', () => pages.performance.render(root(), { q: someAgent }, {}), true);
 await run('performance.render q=tl', () => pages.performance.render(root(), { q: someTl }, {}), true);
 await run('performance.render priority chip', () => pages.performance.render(root(), { view: 'agents', priority: 'High' }, {}), true);
+await run('performance 4-way + suggested dispatch card', async () => {
+  const r = root();
+  await pages.performance.render(r, { view: 'overview' }, {});
+  let html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const s of ['VC20', 'VC5+', 'All Comm']) if (!html.includes(s)) throw new Error(`performance overview me "${s}" nahi mila`);
+  await pages.performance.render(r, { view: 'agents' }, {});
+  html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  if (!html.includes('Comm · V20/V5+')) throw new Error('agents table me 4-way column label nahi');
+  await pages.performance.render(r, { view: 'alerts' }, {});
+  html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  if (!html.includes('Suggested dispatch plan')) throw new Error('alerts view me 🎯 dispatch plan card nahi');
+}, true);
 // ---- GV Partner (second Google Sheet) ----
 await run('gv.preload (master + stock + report)', async () => {
   await FF.gv.preload(false);
@@ -182,6 +204,12 @@ await run('gv aggregations + people', async () => {
 });
 await run('page home', async () => { const r = root(); await pages.home.render(r, {}, {}); await settle(150); const all = [r.innerHTML, ...REG.values().map((e) => e.innerHTML), ...body.children.map((c) => c.innerHTML)].join('\n'); if (!/Champions of/.test(all)) throw new Error('gamification champions card missing from home'); }, true);
 await run('page gvDashboard', () => pages.gvDashboard.render(root(), {}, {}), true);
+await run('gvDashboard 4-way + suggested dispatch card', async () => {
+  const r = root(); await pages.gvDashboard.render(r, {}, {});
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const s of ['VC20', 'VC5+', 'All Comm']) if (!html.includes(s)) throw new Error(`gvDashboard me "${s}" nahi mila`);
+  if (!html.includes('Suggested dispatch plan')) throw new Error('gvDashboard me 🎯 dispatch plan card nahi');
+}, true);
 await run('page gvTrend daily', () => pages.gvTrend.render(root(), { mode: 'daily' }, {}), true);
 await run('page gvTrend weekly', () => pages.gvTrend.render(root(), { mode: 'weekly' }, {}), true);
 await run('page gvTrend monthly', () => pages.gvTrend.render(root(), { mode: 'monthly' }, {}), true);

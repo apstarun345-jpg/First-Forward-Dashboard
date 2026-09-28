@@ -46,24 +46,28 @@ FF.pages = FF.pages || {};
       if (a.ym === last) ffLast.set(k, (ffLast.get(k) || 0) + a.n);
       if (a.tlName && !ffTl.has(k)) ffTl.set(k, a.tlName);
     }
-    const ffVc4 = new Map(), ffComm = new Map();
+    const ffVc4 = new Map(), ffVc20 = new Map(), ffVc5p = new Map();
     for (const r of agentClass) {
       if (r.ym !== view.ym) continue;
       const k = keyOf('ff', r.name);
-      if (r.group === 'VC4') ffVc4.set(k, (ffVc4.get(k) || 0) + r.n); else ffComm.set(k, (ffComm.get(k) || 0) + r.n);
+      if (r.group === 'VC4') ffVc4.set(k, (ffVc4.get(k) || 0) + r.n);
+      else if (r.group === 'VC20') ffVc20.set(k, (ffVc20.get(k) || 0) + r.n);
+      else ffVc5p.set(k, (ffVc5p.get(k) || 0) + r.n);
     }
     // GV agents (GV Master)
     const gvCur = masterR.status === 'fulfilled' ? new Map(G.agentRollup(view.ym).map((a) => [keyOf('gv', a.agentName), a])) : new Map();
     const gvLast = masterR.status === 'fulfilled' ? new Map(G.agentRollup(last).map((a) => [keyOf('gv', a.agentName), a])) : new Map();
 
     const rows = [];
-    const push = (source, name, tl, curN, lastN, vc4, comm) => {
-      rows.push({ key: keyOf(source, name), source, name, tl: tl || '—', cur: curN || 0, last: lastN || 0, vc4: vc4 || 0, comm: comm || 0, growth: U.growth(curN || 0, lastN || 0) });
+    // 4-way split: VC4 | VC20 | VC5+ · All Comm = VC20 + VC5+ (NVC4)
+    const push = (source, name, tl, curN, lastN, vc4, vc20, vc5p) => {
+      const comm = (vc20 || 0) + (vc5p || 0);
+      rows.push({ key: keyOf(source, name), source, name, tl: tl || '—', cur: curN || 0, last: lastN || 0, vc4: vc4 || 0, vc20: vc20 || 0, vc5p: vc5p || 0, comm, growth: U.growth(curN || 0, lastN || 0) });
     };
-    for (const [k, n] of ffCur) { const name = k.split('|')[1]; push('ff', name, ffTl.get(k), n, ffLast.get(k) || 0, ffVc4.get(k) || 0, ffComm.get(k) || 0); }
-    for (const [k, n] of ffLast) { if (!ffCur.has(k)) push('ff', k.split('|')[1], ffTl.get(k), 0, n, 0, 0); }
-    for (const [k, a] of gvCur) push('gv', a.agentName, a.tlName, a.total, (gvLast.get(k) || {}).total || 0, a.vc4, a.comm);
-    for (const [k, a] of gvLast) { if (!gvCur.has(k)) push('gv', a.agentName, a.tlName, 0, a.total, 0, 0); }
+    for (const [k, n] of ffCur) { const name = k.split('|')[1]; push('ff', name, ffTl.get(k), n, ffLast.get(k) || 0, ffVc4.get(k) || 0, ffVc20.get(k) || 0, ffVc5p.get(k) || 0); }
+    for (const [k, n] of ffLast) { if (!ffCur.has(k)) push('ff', k.split('|')[1], ffTl.get(k), 0, n, 0, 0, 0); }
+    for (const [k, a] of gvCur) push('gv', a.agentName, a.tlName, a.total, (gvLast.get(k) || {}).total || 0, a.vc4, a.vc20 || 0, a.vc5p || 0);
+    for (const [k, a] of gvLast) { if (!gvCur.has(k)) push('gv', a.agentName, a.tlName, 0, a.total, 0, 0, 0); }
 
     // saved targets for this month
     savedTargets = allSavedTargets().filter((t) => t.ym === view.ym);
@@ -83,6 +87,8 @@ FF.pages = FF.pages || {};
       last: (a, b) => b.last - a.last,
       growth: (a, b) => (b.growth === null ? -999 : b.growth) - (a.growth === null ? -999 : a.growth),
       vc4: (a, b) => b.vc4 - a.vc4,
+      vc20: (a, b) => b.vc20 - a.vc20,
+      vc5p: (a, b) => b.vc5p - a.vc5p,
       comm: (a, b) => b.comm - a.comm,
       name: (a, b) => a.name.localeCompare(b.name)
     };
@@ -103,12 +109,12 @@ FF.pages = FF.pages || {};
   function exportExcel() {
     if (!FF.auth.can('export')) { U.toast('Download permission nahi hai', 'err'); return; }
     const rows = filteredRows();
-    const header = ['Source', 'Agent', 'TL', 'Target', `${U.labelYM(view.ym)} issuance`, 'Last month', 'VC4', 'Commercial', 'VC4 %', 'Growth %', 'Progress %', 'Status'];
+    const header = ['Source', 'Agent', 'TL', 'Target', `${U.labelYM(view.ym)} issuance`, 'Last month', 'VC4 (4-wheeler payable)', 'VC20', 'VC5+', 'All Commercial (VC20+VC5+)', 'VC4 %', 'Growth %', 'Progress %', 'Status'];
     const body = rows.map((r) => {
       const t = targetDrafts.get(r.key) || 0;
       const p = pct(r.cur, t);
       const status = !t ? 'No target' : p >= 100 ? '✅ Achieved' : p >= 70 ? '🟢 On track' : p >= 40 ? '🟠 Behind' : '🔴 Far behind';
-      return [r.source === 'ff' ? 'First Forward' : 'GV Partner', r.name, r.tl, t || '', r.cur, r.last, r.vc4, r.comm, r.cur ? Number(((r.vc4 / r.cur) * 100).toFixed(1)) : 0, r.growth === null ? '' : Number(r.growth.toFixed(1)), p === null ? '' : Math.round(p), status];
+      return [r.source === 'ff' ? 'First Forward' : 'GV Partner', r.name, r.tl, t || '', r.cur, r.last, r.vc4, r.vc20, r.vc5p, r.comm, r.cur ? Number(((r.vc4 / r.cur) * 100).toFixed(1)) : 0, r.growth === null ? '' : Number(r.growth.toFixed(1)), p === null ? '' : Math.round(p), status];
     });
     const withT = rows.filter((r) => (targetDrafts.get(r.key) || 0) > 0);
     const achieved = withT.filter((r) => r.cur >= (targetDrafts.get(r.key) || 0)).length;
@@ -191,7 +197,7 @@ FF.pages = FF.pages || {};
         <div class="finder-row">
           <label>📅 Month <select class="input" id="tg-ym"></select></label>
           <div class="seg" id="tg-source"><button class="seg-btn ${view.source === 'all' ? 'on' : ''}" data-src="all">All</button><button class="seg-btn ${view.source === 'ff' ? 'on' : ''}" data-src="ff">🟦 First Forward</button><button class="seg-btn ${view.source === 'gv' ? 'on' : ''}" data-src="gv">🟩 GV Partner</button></div>
-          <label>Sort <select class="input" id="tg-sort"><option value="cur">Issuance (high → low)</option><option value="last">Last month</option><option value="growth">Growth %</option><option value="vc4">VC4 tags</option><option value="comm">Commercial tags</option><option value="name">Name (A-Z)</option></select></label>
+          <label>Sort <select class="input" id="tg-sort"><option value="cur">Issuance (high → low)</option><option value="last">Last month</option><option value="growth">Growth %</option><option value="vc4">VC4 tags</option><option value="vc20">VC20 tags</option><option value="vc5p">VC5+ tags</option><option value="comm">All Comm tags</option><option value="name">Name (A-Z)</option></select></label>
           <div class="finder-input"><span class="finder-ico">🔎</span><input class="input" id="tg-q" placeholder="Agent ya TL search…" value="${esc(view.q)}"><button class="btn mic-btn" id="tg-mic" title="🗣 Bol ke search karo" type="button">🎤</button></div>
         </div>
         <div class="chip-row" id="tg-quick"><span class="dim small">Quick select:</span>
@@ -241,16 +247,18 @@ FF.pages = FF.pages || {};
           <td class="num">${U.fmt(r.last)}</td>
           <td class="num"><b>${U.fmt(r.cur)}</b></td>
           <td class="num">${U.fmt(r.vc4)} <small class="dim">(${r.cur ? U.fmtPct(U.pctOf(r.vc4, r.cur), 0) : '0%'})</small></td>
-          <td class="num">${U.fmt(r.comm)}</td>
+          <td class="num">${U.fmt(r.vc20)}</td>
+          <td class="num">${U.fmt(r.vc5p)}</td>
+          <td class="num"><b>${U.fmt(r.comm)}</b> <small class="dim">(V20+V5+)</small></td>
           <td class="num">${g}</td>
           <td class="num"><input class="input tgt-input" type="number" min="0" data-target="${esc(r.key)}" value="${t || ''}" placeholder="0"></td>
           <td style="min-width:110px">${bar}</td></tr>`;
       };
       inner.innerHTML = `${kpis}
         ${card(`🎯 Target table <span class="dim">· ${U.fmt(rows.length)} agents · ${esc(srcLbl)} · ${esc(U.labelYM(view.ym))}${isCurMonth ? ' (MTD)' : ''}</span>`,
-        rows.length ? `<div class="table-wrap tall"><table class="tbl sticky-first"><thead><tr><th><label class="check"><input type="checkbox" id="tg-all" ${rows.length && rows.every((r) => selected.has(r.key)) ? 'checked' : ''}></label></th><th>Agent / TL</th><th>Source</th><th class="num">Last month</th><th class="num">${esc(U.labelYM(view.ym))}</th><th class="num">VC4</th><th class="num">Comm</th><th class="num">Growth</th><th class="num">Target</th><th>Progress</th></tr></thead><tbody>${rows.slice(0, 400).map(rowHtml).join('')}</tbody></table></div>${rows.length > 400 ? '<p class="dim small">Pehle 400 rows — filter/search se list chhoti karo.</p>' : ''}` : '<div class="empty-state">Koi agent match nahi hua — filter badlo.</div>',
+        rows.length ? `<div class="table-wrap tall"><table class="tbl sticky-first"><thead><tr><th><label class="check"><input type="checkbox" id="tg-all" ${rows.length && rows.every((r) => selected.has(r.key)) ? 'checked' : ''}></label></th><th>Agent / TL</th><th>Source</th><th class="num">Last month</th><th class="num">${esc(U.labelYM(view.ym))}</th><th class="num">VC4</th><th class="num">VC20</th><th class="num">VC5+</th><th class="num" title="All Commercial = VC20 + VC5+ (NVC4)">All Comm</th><th class="num">Growth</th><th class="num">Target</th><th>Progress</th></tr></thead><tbody>${rows.slice(0, 400).map(rowHtml).join('')}</tbody></table></div>${rows.length > 400 ? '<p class="dim small">Pehle 400 rows — filter/search se list chhoti karo.</p>' : ''}` : '<div class="empty-state">Koi agent match nahi hua — filter badlo.</div>',
         `<button class="btn small" id="tg-select-page">☑ Visible select</button><button class="btn small" id="tg-clear-sel">✕ Selection clear</button><button class="btn small primary" id="tg-save" ${FF.auth.isAdmin() ? '' : 'disabled title="Admin only"'}>💾 Save targets</button><button class="btn small" id="tg-xlsx">⬇ Excel</button>`)}
-        <p class="dim small">Targets month <b>${esc(U.labelYM(view.ym, true))}</b> ke liye save hote hain (settings me — Google Sheet storage backup ke saath). Progress = issuance ÷ target. ${FF.auth.isAdmin() ? '' : '<b>Save sirf admin kar sakta hai.</b>'}</p>`;
+        <p class="dim small">🚗 <b>VC4</b> = 4-wheeler (payable) · 🛻 <b>VC20</b> / <b>VC5+</b> = bade commercial vehicles · <b>All Comm = VC20 + VC5+ (NVC4)</b>. Targets month <b>${esc(U.labelYM(view.ym, true))}</b> ke liye save hote hain (settings me — Google Sheet storage backup ke saath). Progress = issuance ÷ target. ${FF.auth.isAdmin() ? '' : '<b>Save sirf admin kar sakta hai.</b>'}</p>`;
       const cnt = U.$('#tg-sel-count', body);
       if (cnt) cnt.textContent = selected.size ? `${selected.size} selected` : '';
     };
@@ -419,11 +427,11 @@ FF.pages = FF.pages || {};
       for (const x of r) {
         const tl = x.tl && x.tl !== '—' ? x.tl : 'Direct (no TL)';
         let g = groups.get(tl);
-        if (!g) { g = { tl, agents: 0, withTarget: 0, achieved: 0, target: 0, cur: 0, last: 0, vc4: 0 }; groups.set(tl, g); }
+        if (!g) { g = { tl, agents: 0, withTarget: 0, achieved: 0, target: 0, cur: 0, last: 0, vc4: 0, vc20: 0, vc5p: 0 }; groups.set(tl, g); }
         g.agents++;
         const t = targetDrafts.get(x.key) || 0;
         if (t) { g.withTarget++; g.target += t; if (x.cur >= t) g.achieved++; }
-        g.cur += x.cur; g.last += x.last; g.vc4 += x.vc4;
+        g.cur += x.cur; g.last += x.last; g.vc4 += x.vc4; g.vc20 += (x.vc20 || 0); g.vc5p += (x.vc5p || 0);
       }
       let arr = [...groups.values()].map((g) => ({ ...g, growth: U.growth(g.cur, g.last), p: pct(g.cur, g.target) }));
       // 🎯 TL monthly goals (admin set karta hai; feature tlGoals ON ho to dikhenge)
@@ -452,7 +460,7 @@ FF.pages = FF.pages || {};
           <div class="kpi g1"><div class="kpi-top"><span class="kpi-title">Top TL</span><span class="kpi-icon">🏆</span></div><div class="kpi-value" style="font-size:18px">${arr.length ? esc(arr.sort((a, b) => b.cur - a.cur)[0].tl) : '—'}</div><div class="kpi-foot">Issuance leaderboard</div></div>
         </div>
         ${card(`👥 TL-wise rollup <span class="dim">· ${esc(U.labelYM(view.ym))}${view.ym === P.cur ? ' (MTD)' : ''}</span>`,
-        arr.length ? `<div class="table-wrap tall"><table class="tbl sticky-first"><thead><tr><th>#</th><th>Team Leader</th><th class="num">Agents</th><th class="num">Target</th><th class="num">Issuance</th><th style="min-width:130px">Achievement</th><th class="num">Last month</th><th class="num">Growth</th><th class="num">Targets achieved</th>${goalsOn ? '<th class="num">🎯 TL goal</th>' : ''}</tr></thead><tbody>${(() => { const sorted = [...arr].sort((a, b) => b.cur - a.cur); return arr.map((g) => { const rank = sorted.indexOf(g); const bar = g.target ? `<div class="tgt-track"><div class="tgt-fill ${(g.p || 0) >= 100 ? 'ok' : (g.p || 0) >= 60 ? 'mid' : 'low'}" style="width:${Math.min(100, g.p || 0)}%"></div></div><small class="dim">${Math.round(g.p || 0)}%</small>` : '<span class="dim">no target</span>'; const gr = g.growth === null ? '<span class="dim">new</span>' : U.deltaHtml(g.growth, { decimals: 0 }); return `<tr><td>${rank < 3 ? medals[rank] : rank + 1}</td><td><b>${esc(g.tl)}</b></td><td class="num">${U.fmt(g.agents)}</td><td class="num">${g.target ? U.fmt(g.target) : '<span class="dim">—</span>'}</td><td class="num"><b>${U.fmt(g.cur)}</b></td><td>${bar}</td><td class="num">${U.fmt(g.last)}</td><td class="num">${gr}</td><td class="num">${g.withTarget ? `${g.achieved}/${g.withTarget}` : '<span class="dim">—</span>'}</td>${goalsOn ? `<td class="num">${goalCell(g)}</td>` : ''}</tr>`; }).join(''); })()}</tbody></table></div>` : '<div class="empty-state">Is month me koi data nahi mila.</div>',
+        arr.length ? `<div class="table-wrap tall"><table class="tbl sticky-first"><thead><tr><th>#</th><th>Team Leader</th><th class="num">Agents</th><th class="num">Target</th><th class="num">Issuance</th><th style="min-width:130px">Achievement</th><th class="num">Last month</th><th class="num">Growth</th><th class="num">Targets achieved</th>${goalsOn ? '<th class="num">🎯 TL goal</th>' : ''}</tr></thead><tbody>${(() => { const sorted = [...arr].sort((a, b) => b.cur - a.cur); return arr.map((g) => { const rank = sorted.indexOf(g); const bar = g.target ? `<div class="tgt-track"><div class="tgt-fill ${(g.p || 0) >= 100 ? 'ok' : (g.p || 0) >= 60 ? 'mid' : 'low'}" style="width:${Math.min(100, g.p || 0)}%"></div></div><small class="dim">${Math.round(g.p || 0)}%</small>` : '<span class="dim">no target</span>'; const gr = g.growth === null ? '<span class="dim">new</span>' : U.deltaHtml(g.growth, { decimals: 0 }); return `<tr><td>${rank < 3 ? medals[rank] : rank + 1}</td><td><b>${esc(g.tl)}</b></td><td class="num">${U.fmt(g.agents)}</td><td class="num">${g.target ? U.fmt(g.target) : '<span class="dim">—</span>'}</td><td class="num"><b>${U.fmt(g.cur)}</b><br><small class="dim" title="VC4 · VC20 · VC5+ (All Comm = VC20 + VC5+)">V4 ${U.fmt(g.vc4)} · V20 ${U.fmt(g.vc20)} · V5+ ${U.fmt(g.vc5p)}</small></td><td>${bar}</td><td class="num">${U.fmt(g.last)}</td><td class="num">${gr}</td><td class="num">${g.withTarget ? `${g.achieved}/${g.withTarget}` : '<span class="dim">—</span>'}</td>${goalsOn ? `<td class="num">${goalCell(g)}</td>` : ''}</tr>`; }).join(''); })()}</tbody></table></div>` : '<div class="empty-state">Is month me koi data nahi mila.</div>',
         `${FF.auth.isAdmin() && goalsOn ? '<button class="btn small primary" id="tl-goal-save" title="Upar goal column me numbers daal ke yahan Save karo">💾 Save TL goals</button>' : ''}<button class="btn small" id="tl-xlsx">⬇ Excel</button>`)}
         <p class="dim small">Jo agents kisi TL ke under nahi hain wo <b>Direct (no TL)</b> group me dikhte hain. Leaderboard issuance ke hisaab se ranked hai.</p>`;
     };
@@ -494,7 +502,7 @@ FF.pages = FF.pages || {};
           g.cur += x.cur; g.last += x.last;
         }
         const arr = [...groups.values()].sort((a, b) => b.cur - a.cur);
-        const sheet = { name: 'TL rollup', header: ['Rank', 'Team Leader', 'Agents', 'Target', 'Issuance', 'Achievement %', 'Last month', 'Targets achieved'], rows: arr.map((g, i) => [i + 1, g.tl, g.agents, g.target || '', g.cur, g.target ? Math.round((g.cur / g.target) * 100) : '', g.last, g.withTarget ? `${g.achieved}/${g.withTarget}` : '']) };
+        const sheet = { name: 'TL rollup', header: ['Rank', 'Team Leader', 'Agents', 'Target', 'Issuance', 'VC4', 'VC20', 'VC5+', 'All Commercial', 'Achievement %', 'Last month', 'Targets achieved'], rows: arr.map((g, i) => [i + 1, g.tl, g.agents, g.target || '', g.cur, g.vc4, g.vc20, g.vc5p, (g.vc20 || 0) + (g.vc5p || 0), g.target ? Math.round((g.cur / g.target) * 100) : '', g.last, g.withTarget ? `${g.achieved}/${g.withTarget}` : '']) };
         const sum = { name: 'Summary', filterRows: 7, header: ['Metric', 'Value'], rows: [['Report', `${FF.config.brand} · TL-wise rollup`], ['Month', U.labelYM(view.ym, true)], ['TLs', arr.length], ['Total issuance', U.sum(arr, (g) => g.cur)], ['Total target', U.sum(arr, (g) => g.target)], ['Generated', new Date().toLocaleString('en-IN')]] };
         FF.xlsx.download(`tl-rollup-${view.ym}-${U.stamp()}.xlsx`, [sum, sheet]);
         U.toast('TL rollup Excel ready ✓', 'ok');

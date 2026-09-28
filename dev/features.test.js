@@ -521,3 +521,151 @@ test('🔗 personal links (agent+TL) /p/ pages, 🗺 team location, 🏆 anomaly
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+// ---------------------------------------------------------------------------------------------
+// Round 4: 🗓 custom alert scheduler · 🥇 champion certificate email · ⏰ follow-up tracker
+//          · 🚗 4-way feature flags (dispatchPlan / suggestDays …)
+// ---------------------------------------------------------------------------------------------
+test('🗓 scheduler force-fire, 🥇 champion email (SMTP), ⏰ follow-up list+alert, round-4 flags', async () => {
+  const smtp = await startSmtp();
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'apna-feat-r4-'));
+  const pad = (n) => String(n).padStart(2, '0');
+  const dcell = (d) => `Date(${d.getFullYear()},${d.getMonth()},${d.getDate()})`;
+  const dayBack = (i) => new Date(Date.now() - i * 86400e3);
+  const pm = new Date(); pm.setMonth(pm.getMonth() - 1);
+  // 🥇 champions: prev-month rows (pinned to actual previous month, month-start safe)
+  // ⏰ follow-up: Silent Sam (8 din silent · window me), Fresh Fiza (aaj), Old Ollie (40 din = bahar)
+  const chRows = [];
+  for (let d = 1; d <= 6; d++) chRows.push({ c: [{ v: 'Virat Kohli' }, { v: dcell(new Date(pm.getFullYear(), pm.getMonth(), d)) }, { v: 100 }] });
+  for (let d = 1; d <= 3; d++) chRows.push({ c: [{ v: 'Rohit Sharma' }, { v: dcell(new Date(pm.getFullYear(), pm.getMonth(), d)) }, { v: 50 }] });
+  chRows.push({ c: [{ v: 'Silent Sam' }, { v: dcell(dayBack(8)) }, { v: 12 }] });
+  chRows.push({ c: [{ v: 'Silent Sam' }, { v: dcell(dayBack(20)) }, { v: 9 }] });
+  chRows.push({ c: [{ v: 'Fresh Fiza' }, { v: dcell(dayBack(0)) }, { v: 7 }] });
+  chRows.push({ c: [{ v: 'Old Ollie' }, { v: dcell(dayBack(40)) }, { v: 5 }] });
+  const upstream = http.createServer((req, res) => {
+    const tq = new URL(req.url, 'http://x').searchParams.get('tq') || '';
+    let rows = [];
+    if (/group by L, AA/.test(tq) && !/where BA/.test(tq)) rows = chRows; // champion + follow-up query
+    res.end(`google.visualization.Query.setResponse(${JSON.stringify({ status: 'ok', table: { cols: [{ id: 'A', type: 'string' }, { id: 'AA', type: 'date' }, { id: 'B', type: 'number' }], rows } })});`);
+  });
+  upstream.listen(0, '127.0.0.1');
+  await once(upstream, 'listening');
+  let server;
+  const call = async (route, method = 'GET', body, cookie = '', headers = {}) => {
+    const res = await fetch(server.base + route, {
+      method,
+      headers: { cookie, 'Content-Type': 'application/json', 'X-Forwarded-Proto': 'https', ...headers },
+      body: body ? JSON.stringify(body) : undefined
+    });
+    const setCookie = res.headers.get('set-cookie');
+    const json = await res.json().catch(() => ({}));
+    return { res, json, setCookie };
+  };
+  try {
+    server = await startServer(dir, `http://127.0.0.1:${upstream.address().port}`);
+    const adminCookie = (await call('/api/auth/login', 'POST', { username: 'owner', password: 'initial-password' })).setCookie.split(';')[0];
+    await call('/api/users', 'POST', { username: 'r4user', name: 'R4 User', password: 'r4-pass-1', role: 'user' }, adminCookie);
+    const memberCookie = (await call('/api/auth/login', 'POST', { username: 'r4user', password: 'r4-pass-1' })).setCookie.split(';')[0];
+
+    // ---- 🚗 round-4 flags: defaults + admin round-trip ----
+    const def = await call('/api/settings', 'GET', undefined, adminCookie);
+    assert.equal(def.json.defaults.features.suggestDays, 15, 'default suggestDays=15');
+    assert.equal(def.json.defaults.features.dispatchPlan, true, 'default dispatchPlan ON');
+    assert.equal(def.json.defaults.features.championEmail, false, 'default championEmail OFF (auto band)');
+    const fput = await call('/api/settings', 'PUT', { settings: { features: { customAlerts: true, championEmail: false, followupTracker: true, dispatchPlan: true, championHour: 10, championTop: 3, followupDays: 5, followupHour: 10, suggestDays: 20 } } }, adminCookie);
+    assert.equal(fput.res.status, 200, 'flags PUT 200');
+    const ff = fput.json.settings.features;
+    for (const [k, v] of Object.entries({ customAlerts: true, championEmail: false, followupTracker: true, dispatchPlan: true, championHour: 10, championTop: 3, followupDays: 5, followupHour: 10, suggestDays: 20 })) {
+      assert.equal(ff[k], v, `features.${k} round-trip = ${v} (got ${ff[k]})`);
+    }
+
+    // ---- 🥇 champion force = 403 jab tak feature ON nahi ----
+    const champOff = await call('/api/notifications/champion-email', 'POST', {}, adminCookie);
+    assert.equal(champOff.res.status, 403, `champion OFF = 403 (got ${champOff.res.status})`);
+
+    // ---- 🗓 schedule create + force fire → notification + audit ----
+    const sput = await call('/api/settings', 'PUT', { schedules: [{ id: 's4', title: 'Subah check-in', text: 'Aaj {date} · today {today} · mtd {mtd}', kind: 'daily', hour: 9, target: 'broadcast', enabled: true, type: 'info' }] }, adminCookie);
+    assert.equal(sput.res.status, 200, `schedule save — ${JSON.stringify(sput.json).slice(0, 160)}`);
+    assert.equal((sput.json.settings.schedules || []).length, 1, 'schedule saved');
+    const admSet = (await call('/api/settings', 'GET', undefined, adminCookie)).json.settings;
+    assert.equal((admSet.schedules || []).length, 1, 'admin GET me schedules');
+    const memSet = (await call('/api/settings', 'GET', undefined, memberCookie)).json.settings;
+    assert.equal(memSet.schedules, undefined, 'member ko schedules nahi dikhte');
+    const memFire = await call('/api/schedules/s4/fire', 'POST', {}, memberCookie);
+    assert.ok(memFire.res.status >= 400, `member schedule fire blocked (${memFire.res.status})`);
+    const fire = await call('/api/schedules/s4/fire', 'POST', {}, adminCookie);
+    assert.equal(fire.res.status, 200, `force fire — ${JSON.stringify(fire.json).slice(0, 200)}`);
+    assert.equal(fire.json.ok, true, 'schedule fired');
+    assert.match(fire.json.item.title, /^🗓 Subah check-in/, `notification title — ${fire.json.item.title}`);
+    assert.match(fire.json.item.body, /\d{4}-\d{2}-\d{2}/, '{date} token render hua');
+    assert.match(fire.json.item.body, /today \d+/, '{today} token render hua');
+    const nlist = await call('/api/notifications', 'GET', undefined, adminCookie);
+    assert.ok((nlist.json.items || []).some((i) => /Subah check-in/.test(i.title)), 'notifications me schedule entry');
+    // feature OFF → fire 403, wapas ON
+    await call('/api/settings', 'PUT', { settings: { features: { customAlerts: false } } }, adminCookie);
+    const fireOff = await call('/api/schedules/s4/fire', 'POST', {}, adminCookie);
+    assert.equal(fireOff.res.status, 403, `customAlerts OFF = 403 (${fireOff.res.status})`);
+    await call('/api/settings', 'PUT', { settings: { features: { customAlerts: true } } }, adminCookie);
+    const fire404 = await call('/api/schedules/nope/fire', 'POST', {}, adminCookie);
+    assert.equal(fire404.res.status, 404, 'unknown schedule 404');
+
+    // ---- 🥇 champion email: SMTP configure + force → mail + audit ----
+    const esave = await call('/api/settings', 'PUT', { settings: { email: { host: '127.0.0.1', port: smtp.port, secure: false, user: 'mailer', pass: 'secret-1', from: 'alerts@example.test', to: 'boss@example.test' } } }, adminCookie);
+    assert.equal(esave.res.status, 200, 'email settings save');
+    await call('/api/settings', 'PUT', { settings: { features: { championEmail: true } } }, adminCookie);
+    const champ = await call('/api/notifications/champion-email', 'POST', {}, adminCookie);
+    assert.equal(champ.res.status, 200, `champion force — ${JSON.stringify(champ.json).slice(0, 240)}`);
+    assert.equal(champ.json.ok, true, 'champion mail bheja');
+    assert.match(champ.json.month || '', /^\d{4}-\d{2}$/, `prev month — ${champ.json.month}`);
+    assert.ok(champ.json.top.some((t) => t.startsWith('Virat Kohli:')), `Virat top par — ${champ.json.top.join(', ')}`);
+    assert.ok(champ.json.top.some((t) => t.startsWith('Rohit Sharma:')), `Rohit list me — ${champ.json.top.join(', ')}`);
+    await new Promise((r) => setTimeout(r, 250));
+    assert.ok(smtp.inbox.includes('Subject: =?UTF-8?B?'), 'DATA me encoded subject');
+    const subjB64 = (smtp.inbox.match(/Subject: =\?UTF-8\?B\?([A-Za-z0-9+/=]+)\?=/) || [])[1] || '';
+    assert.match(Buffer.from(subjB64, 'base64').toString('utf8'), /Champions/i, 'subject me "Champions"');
+    const bodyB64 = (smtp.inbox.split(/\r?\n\r?\n/) || []).slice(1).join('').replace(/\r?\n/g, '').replace(/\.$/, '');
+    const html = Buffer.from(bodyB64, 'base64').toString('utf8');
+    assert.match(html, /Hall of Fame/, 'certificate HTML body');
+    assert.match(html, /Virat Kohli/, 'certificate me champion naam');
+    const audit = await call('/api/audit', 'GET', undefined, adminCookie);
+    const acts = (audit.json.entries || []).map((e) => e.action);
+    for (const need of ['schedule_fired', 'champion_email_sent']) assert.ok(acts.includes(need), `audit me ${need} — ${acts.join(',')}`);
+
+    // ---- ⏰ follow-up: list (silent agents) + ?fire=1 notification ----
+    const fu = await call('/api/followup', 'GET', undefined, adminCookie);
+    assert.equal(fu.res.status, 200, `followup list — ${JSON.stringify(fu.json).slice(0, 200)}`);
+    assert.equal(fu.json.days, 5, 'followupDays=5 apply hua');
+    const names = (fu.json.list || []).map((x) => x.name);
+    assert.ok(names.includes('Silent Sam'), `Sam silent — ${names.join(', ')}`);
+    assert.ok(!names.includes('Fresh Fiza'), 'Fiza aaj active = silent nahi');
+    assert.ok(!names.includes('Old Ollie'), 'Ollie 40 din purana = 30-din window se bahar');
+    const sam = (fu.json.list || []).find((x) => x.name === 'Silent Sam');
+    assert.ok(sam.days >= 5, `Sam ka days count — ${sam.days}`);
+    const memFu = await call('/api/followup', 'GET', undefined, memberCookie);
+    assert.ok(memFu.res.status >= 400, `member followup nahi dekh sakta (${memFu.res.status})`);
+    const fuFire = await call('/api/followup?fire=1', 'GET', undefined, adminCookie);
+    assert.equal(fuFire.res.status, 200, 'followup fire 200');
+    assert.equal(fuFire.json.fired, true, 'notification fired');
+    const nlist2 = await call('/api/notifications', 'GET', undefined, adminCookie);
+    const fuItem = (nlist2.json.items || []).find((i) => /Follow-up · \d+ agent/.test(i.title));
+    assert.ok(fuItem, `follow-up notification — ${(nlist2.json.items || []).map((i) => i.title).slice(0, 6).join(' | ')}`);
+    assert.equal(fuItem.meta && fuItem.meta.link, '#/performance?view=alerts', 'notification meta.link alerts view par');
+    const audit2 = await call('/api/audit', 'GET', undefined, adminCookie);
+    assert.ok((audit2.json.entries || []).map((e) => e.action).includes('followup_alert'), `audit me followup_alert — ${(audit2.json.entries || []).map((e) => e.action).slice(0, 8).join(',')}`);
+    // feature OFF → ?fire=1 blocked
+    await call('/api/settings', 'PUT', { settings: { features: { followupTracker: false } } }, adminCookie);
+    const fuOff = await call('/api/followup?fire=1', 'GET', undefined, adminCookie);
+    assert.equal(fuOff.res.status, 403, `followup OFF = 403 (${fuOff.res.status})`);
+    const fuListStill = await call('/api/followup', 'GET', undefined, adminCookie);
+    assert.equal(fuListStill.res.status, 200, 'list (read-only) feature OFF par bhi chalti hai');
+    await call('/api/settings', 'PUT', { settings: { features: { followupTracker: true, followupDays: 3, championTop: 3, suggestDays: 15 } } }, adminCookie);
+    const fin = (await call('/api/settings', 'GET', undefined, adminCookie)).json.settings.features;
+    assert.equal(fin.dispatchPlan, true, 'dispatchPlan persist');
+    assert.equal(fin.suggestDays, 15, 'suggestDays wapas default par');
+  } finally {
+    if (server) await server.stop();
+    await new Promise((r) => upstream.close(r));
+    await new Promise((r) => smtp.srv.close(r));
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});

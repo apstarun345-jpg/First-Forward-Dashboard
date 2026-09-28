@@ -320,10 +320,10 @@ window.FF = window.FF || {};
     for (const r of rows()) {
       if (ym && r.ym !== ym) continue;
       const k = r.agentId || r.agentName;
-      if (!map.has(k)) map.set(k, { agentId: r.agentId, agentName: r.agentName, tlName: r.tlName, total: 0, vc4: 0, comm: 0, replacement: 0, days: new Set() });
+      if (!map.has(k)) map.set(k, { agentId: r.agentId, agentName: r.agentName, tlName: r.tlName, total: 0, vc4: 0, vc20: 0, vc5p: 0, comm: 0, replacement: 0, days: new Set() });
       const o = map.get(k);
       o.total += 1;
-      if (r.group === 'VC4') o.vc4 += 1; else o.comm += 1;
+      if (r.group === 'VC4') o.vc4 += 1; else if (r.group === 'VC20') { o.vc20 += 1; o.comm += 1; } else { o.vc5p += 1; o.comm += 1; }
       if (/replacement/i.test(r.status)) o.replacement += 1;
       if (r.day) o.days.add(r.day);
       if (r.tlName && o.tlName === 'Direct') o.tlName = r.tlName;

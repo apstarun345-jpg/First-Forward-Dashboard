@@ -586,6 +586,10 @@ FF.pages = FF.pages || {};
         ${c('askBox', '🤖 Sawal-jawab box', 'Search (Ctrl+K) me likho “aaj ka VC4?” / “Rahul ka MTD” — seedha jawab')}
         ${c('teamMap', '🗺 Team map', 'Admin sidebar page — location share karne walo ka distance map (office se)')}
         ${c('personalLinks', '🔗 Personal links', 'Har agent/TL ka secret read-only performance link — Settings me 🔗 tab')}
+        ${c('customAlerts', '🗓 Custom alert scheduler', 'Apne reminders/status — roz / har Somwar / har mahine fixed time par bell me')}
+        ${c('championEmail', '🥇 Champion certificate email', 'Mahine ke top agents ka certificate SMTP se email (SMTP set ho tabhi)')}
+        ${c('followupTracker', '⏰ Follow-up tracker', '3+ din se tag na dene wale agents — roz ek list (bell + Alerts card)')}
+        ${c('dispatchPlan', '🎯 Suggested dispatch cards', 'High + Medium priority agents: cover din + suggested tag qty (GV + FF)')}
       </div>${saveBar('feat-ui')}`);
     const alertCard = section('🔴 Alert automation <span class="dim">(server-side — tab bhi chalta hai jab app band ho)</span>', `
       <div class="feat-grid">
@@ -607,6 +611,11 @@ FF.pages = FF.pages || {};
         ${n('features.zeroDropPct', f.zeroDropPct, '⚠️ Sharp-drop threshold (%) — 0 = sirf zero-day', 'min="0" max="90"')}
         ${n('features.backupDays', f.backupDays, '☁️ Backup reminder age (din)', 'min="1" max="120"')}
         ${n('features.anomalyPct', f.anomalyPct, '📉 Anomaly: avg se kitna % neeche = alert', 'min="10" max="95"')}
+        ${n('features.championHour', f.championHour ?? 10, '🥇 Champion email hour (IST)', 'min="0" max="23"')}
+        ${n('features.championTop', f.championTop ?? 3, '🥇 Kitne top champions (1-10)', 'min="1" max="10"')}
+        ${n('features.followupDays', f.followupDays ?? 3, '⏰ Follow-up: kitne din silent = alert', 'min="1" max="30"')}
+        ${n('features.followupHour', f.followupHour ?? 10, '⏰ Follow-up hour (IST)', 'min="0" max="23"')}
+        ${n('features.suggestDays', f.suggestDays ?? 15, '🎯 Suggested dispatch target cover (din)', 'min="3" max="90"')}
       </div>
       <p class="dim small">Cover bands (🔴/🟠/🟡) aur “went quiet” days → <b>📐 Thresholds</b> tab. Digest ka ON/OFF type → 🔔 Notifications.</p>${saveBar('feat-mods')}`);
     const waCard = section('📤 WhatsApp share number', `
@@ -639,7 +648,51 @@ FF.pages = FF.pages || {};
         ${field('Office latitude', numI('features.officeLat', f.officeLat ?? 0, 'step="0.000001" min="-90" max="90"'))}
         ${field('Office longitude', numI('features.officeLng', f.officeLng ?? 0, 'step="0.000001" min="-180" max="180"'))}
       </div>${saveBar('feat-map')}`);
-    return `${uiCard}${alertCard}${modsCard}${waCard}${emailCard}${announceCard}${mapCard}`;
+    const schedOn = f.customAlerts !== false;
+    const schedCard = section('🗓 Custom alert scheduler <span class="dim">(reminders · status messages)</span>', `
+      <p class="dim small">Jaise chaho waise yaad dilao — <b>roz</b>, <b>har {weekday}</b> (e.g. Somwar), ya <b>har mahine ki tareekh</b> par fixed IST hour. Text me <code>{today}</code> (aaj ke tags) · <code>{mtd}</code> (MTD total) · <code>{date}</code> use kar sakte ho. Target = sirf admin ya <b>sab users (broadcast)</b>.</p>
+      ${schedOn ? '' : '<p class="check" style="background:#fef3c7;border:1px solid #fcd34d;border-radius:10px;padding:8px 12px;margin-bottom:10px">⏸️ Scheduler band hai — Features se ON karo tabhi reminders jayenge.</p>'}
+      <div class="finder-row" style="margin-bottom:8px">
+        <input class="input" id="sc-title" placeholder="Title — e.g. Aaj ka status" style="min-width:170px" maxlength="60">
+        <input class="input" id="sc-text" placeholder='Message — e.g. "Aaj {today} tags hue (MTD {mtd}) — sab apna target pura karo!"' style="min-width:280px" maxlength="240">
+        <select class="input" id="sc-kind" style="width:auto"><option value="daily">Roz</option><option value="weekly">Har hafte</option><option value="monthly">Har mahine</option></select>
+        <select class="input" id="sc-when" style="width:auto"></select>
+        <select class="input" id="sc-target" style="width:auto"><option value="admin">Sirf admin</option><option value="broadcast">Sab users</option></select>
+        <button class="btn primary" id="sc-add">➕ Schedule add</button>
+      </div>
+      <div id="sched-list">${schedListHtml((settings && settings.schedules) || [])}</div>
+      <div class="save-bar" style="margin-top:8px">
+        <button class="btn" id="ch-fire" title="SMTP par abhi champion certificate bhejo (test)">🥇 Champion email abhi bhejo</button>
+        <button class="btn" id="fu-fire" title="Abhi follow-up list check karo + notification bhejo">⏰ Follow-up abhi chalao</button>
+        <span class="dim small" id="save-msg-feat-sched"></span>
+      </div>
+      <p class="dim small">Champion email ko SMTP chahiye (upar 📧 Email card). Follow-up = jinka pichhla issuance N+ din purana ho gaya.</p>`);
+    return `${uiCard}${alertCard}${modsCard}${waCard}${emailCard}${announceCard}${mapCard}${schedCard}`;
+  }
+
+  // ---- 🗓 schedule list (features tab) ---------------------------------------------------------
+  function schedWhenLabel(s) {
+    const DAYS = ['Ravivar', 'Somwar', 'Mangalwar', 'Budhwar', 'Guruwar', 'Shukrawar', 'Shanivar'];
+    if (s.kind === 'weekly') return `${DAYS[Number(s.weekday) || 0]} ${Number(s.hour) || 0}:00`;
+    if (s.kind === 'monthly') return `Har mahine ${Number(s.day) || 1} tareekh · ${Number(s.hour) || 0}:00`;
+    return `Roz ${Number(s.hour) || 0}:00`;
+  }
+  function schedListHtml(list) {
+    if (!list.length) return '<p class="dim">Abhi koi schedule nahi — upar title + message daal ke add karo.</p>';
+    const KIND = { daily: '🔁 Roz', weekly: '📅 Hafte', monthly: '🗓 Mahine' };
+    return `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Kab</th><th>Title</th><th>Message</th><th>Target</th><th>Status</th><th></th></tr></thead><tbody>
+      ${list.map((s) => `<tr>
+        <td>${KIND[s.kind] || '🔁'} <b>${esc(schedWhenLabel(s))}</b></td>
+        <td><b>${esc(s.title || '')}</b></td>
+        <td class="small">${esc(String(s.text || '').slice(0, 60))}</td>
+        <td class="small">${s.target === 'broadcast' ? '📢 Sabko' : '👑 Admin'}</td>
+        <td>${s.enabled === false ? '<span class="badge red">OFF</span>' : '<span class="badge">ON</span>'}</td>
+        <td class="num" style="white-space:nowrap">
+          <button class="btn small sc-fire" data-id="${esc(s.id)}" title="Abhi bhejo (test)">▶️</button>
+          <button class="btn small sc-tog" data-id="${esc(s.id)}">${s.enabled === false ? '▶️ ON' : '⏸️'}</button>
+          <button class="btn small sc-del" data-id="${esc(s.id)}">🗑</button>
+        </td></tr>`).join('')}
+      </tbody></table></div>`;
   }
 
   // ---- 📜 Audit log (admin) ---------------------------------------------------------------------------
@@ -813,6 +866,73 @@ FF.pages = FF.pages || {};
           U.toast('📢 Announcement sabko bhej diya', 'ok');
         } catch (err) { U.toast(err.message, 'err'); }
         finally { anSend.disabled = false; }
+      });
+      // 🗓 Custom alert scheduler (featuresTab)
+      const scWhen = U.$('#sc-when', body);
+      if (scWhen) {
+        const fillWhen = () => {
+          const kind = U.$('#sc-kind', body).value;
+          const hours = (pfx) => `<optgroup label="Hour (IST)">${Array.from({ length: 24 }, (_, h) => `<option value="${pfx}${h}">${String(h).padStart(2, '0')}:00</option>`).join('')}</optgroup>`;
+          if (kind === 'daily') scWhen.innerHTML = Array.from({ length: 24 }, (_, h) => `<option value="${h}">${String(h).padStart(2, '0')}:00 IST</option>`).join('');
+          else if (kind === 'weekly') scWhen.innerHTML = ['Ravivar', 'Somwar', 'Mangalwar', 'Budhwar', 'Guruwar', 'Shukrawar', 'Shanivar'].map((d, i) => `<option value="w${i}">${d}</option>`).join('') + hours('wh');
+          else scWhen.innerHTML = Array.from({ length: 28 }, (_, i) => `<option value="d${i + 1}">Tareekh ${i + 1}</option>`).join('') + hours('dh');
+        };
+        fillWhen();
+        U.$('#sc-kind', body).addEventListener('change', fillWhen);
+        const schedsNow = () => (settings && Array.isArray(settings.schedules)) ? settings.schedules : [];
+        const saveScheds = async (list, btn) => {
+          if (btn) btn.disabled = true;
+          try {
+            const out = await A.api('/api/settings', 'PUT', { schedules: list });
+            if (out.settings) settings = out.settings;
+            const box = U.$('#sched-list', body);
+            if (box) box.innerHTML = schedListHtml((settings && settings.schedules) || []);
+            return true;
+          } catch (err) { U.toast(err.message, 'err'); return false; }
+          finally { if (btn) btn.disabled = false; }
+        };
+        const parseWhen = (kind, val) => {
+          if (kind === 'weekly') return { weekday: Number((String(val).match(/^w(\d+)/) || [])[1] || 0), hour: Number((String(val).match(/wh(\d+)/) || [])[1] || 9) };
+          if (kind === 'monthly') return { day: Number((String(val).match(/^d(\d+)/) || [])[1] || 1), hour: Number((String(val).match(/dh(\d+)/) || [])[1] || 9) };
+          return { hour: Number(val) || 9 };
+        };
+        const scAdd = U.$('#sc-add', body);
+        if (scAdd) scAdd.addEventListener('click', async () => {
+          const title = (U.$('#sc-title', body).value || '').trim();
+          const text = (U.$('#sc-text', body).value || '').trim();
+          const kind = U.$('#sc-kind', body).value;
+          if (!title || !text) return U.toast('Title + message dono chahiye', 'err');
+          const sched = { id: `sc_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, title, text, kind, ...parseWhen(kind, scWhen.value), target: U.$('#sc-target', body).value, enabled: true };
+          if (await saveScheds([...schedsNow(), sched], scAdd)) {
+            U.$('#sc-title', body).value = ''; U.$('#sc-text', body).value = '';
+            U.toast('🗓 Schedule add ho gaya ✓', 'ok');
+          }
+        });
+        U.$$('#sched-list .sc-fire', body).forEach((b) => b.addEventListener('click', async () => {
+          b.disabled = true;
+          try { const out = await A.api(`/api/schedules/${encodeURIComponent(b.dataset.id)}/fire`, 'POST', {}); U.toast(out.ok ? '▶️ Notification bhej di ✓' : 'Kuch nahi hua', out.ok ? 'ok' : 'warn'); }
+          catch (err) { U.toast(err.message, 'err'); } finally { b.disabled = false; }
+        }));
+        U.$$('#sched-list .sc-tog', body).forEach((b) => b.addEventListener('click', async () => {
+          const list = schedsNow().map((s) => s.id === b.dataset.id ? { ...s, enabled: s.enabled === false } : s);
+          await saveScheds(list, b);
+        }));
+        U.$$('#sched-list .sc-del', body).forEach((b) => b.addEventListener('click', async () => {
+          if (!window.confirm('Schedule delete karein?')) return;
+          await saveScheds(schedsNow().filter((s) => s.id !== b.dataset.id), b);
+        }));
+      }
+      const chFire = U.$('#ch-fire', body);
+      if (chFire) chFire.addEventListener('click', async () => {
+        chFire.disabled = true;
+        try { const out = await A.api('/api/notifications/champion-email', 'POST', {}); U.toast(out.ok ? `🥇 Champion email gaya — ${out.month} · ${(out.top || []).join(', ')}` : 'Kuch nahi hua', out.ok ? 'ok' : 'warn'); }
+        catch (err) { U.toast(err.message, 'err'); } finally { chFire.disabled = false; }
+      });
+      const fuFire = U.$('#fu-fire', body);
+      if (fuFire) fuFire.addEventListener('click', async () => {
+        fuFire.disabled = true;
+        try { const out = await A.api('/api/followup?fire=1'); U.toast(out.fired ? `⏰ ${out.list.length} silent agents — notification bhej di` : (out.list && out.list.length ? `⏰ ${out.list.length} silent agents (alert pehle ja chuka tha)` : 'Sab active hain — koi silent nahi'), 'ok'); }
+        catch (err) { U.toast(err.message, 'err'); } finally { fuFire.disabled = false; }
       });
       // live colour preview
       U.$$('input[type=color][data-path]', body).forEach((inp) => inp.addEventListener('input', () => { inp.nextElementSibling.textContent = inp.value; const t = { ...FF.config.theme }; t[inp.dataset.path.split('.')[1]] = inp.value; FF.config.theme = t; A.applyTheme(); }));

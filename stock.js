@@ -19,6 +19,23 @@ FF.pages = FF.pages || {};
     if (days < t.coverAmber) return `<span class="badge amber">🟡 ${U.fmt(days)} days</span>`;
     return `<span class="badge green">🟢 ${U.fmt(days)} days</span>`;
   }
+  // 🚗 4-way class helpers — VC4 | VC20 | VC5+ · All Comm = VC20 + VC5+ (NVC4)
+  const binsFromByClass = (byClass) => { const b = { VC4: 0, VC20: 0, 'VC5+': 0 }; if (byClass) for (const [c, n] of byClass) { const g = FF.model.classGroup(c); b[g] = (b[g] || 0) + n; } return b; };
+  const classDefine = '<div class="dim small" style="margin-top:8px">🚗 <b>VC4</b> = 4-wheeler (payable) · 🛻 <b>VC20</b> / <b>VC5+</b> = bade commercial vehicles · <b>All Comm = VC20 + VC5+ (NVC4)</b></div>';
+  function classTable(stBins, isBins, elapsed) {
+    const st = [stBins.VC4, stBins.VC20, stBins['VC5+'], (stBins.VC20 || 0) + (stBins['VC5+'] || 0)];
+    const is = [isBins.VC4 || 0, isBins.VC20 || 0, isBins['VC5+'] || 0, (isBins.VC20 || 0) + (isBins['VC5+'] || 0)];
+    const heads = ['VC4', 'VC20', 'VC5+', 'All Comm'];
+    const per = is.map((v) => (elapsed ? v / elapsed : 0));
+    const cell = (i) => per[i] ? coverBadge(st[i] / per[i]) : '<span class="dim">—</span>';
+    return `<table class="tbl compact" style="margin-top:12px"><thead><tr><th></th>${heads.map((h) => `<th class="num" ${h === 'All Comm' ? 'title="VC20 + VC5+"' : ''}>${h}</th>`).join('')}</tr></thead>
+      <tbody>
+        <tr><td>Stock</td>${st.map((v) => `<td class="num"><b>${U.fmt(v)}</b></td>`).join('')}</tr>
+        <tr><td>Issued MTD</td>${is.map((v) => `<td class="num">${U.fmt(v)}</td>`).join('')}</tr>
+        <tr><td>Per day</td>${per.map((v) => `<td class="num">${U.fmt(v, 1)}</td>`).join('')}</tr>
+        <tr><td>Days cover</td>${heads.map((_, i) => `<td>${cell(i)}</td>`).join('')}</tr>
+      </tbody></table>`;
+  }
   const compareBar = (a, b, la, lb, ca, cb) => {
     const t = (a || 0) + (b || 0);
     const pa = t ? (a / t) * 100 : 0;
@@ -42,6 +59,15 @@ FF.pages = FF.pages || {};
     const agentClass = S.get('agentClass') || [];
     for (const a of issued) { if (a.ym !== cur) continue; tlIssued.set(norm(a.tlName), (tlIssued.get(norm(a.tlName)) || 0) + a.n); agIssued.set(norm(a.name), (agIssued.get(norm(a.name)) || 0) + a.n); }
     for (const a of agentClass) { if (a.ym !== cur || a.group !== 'VC4') continue; agIssuedVc4.set(norm(a.name), (agIssuedVc4.get(norm(a.name)) || 0) + a.n); }
+    // 🚗 MTD issued ka 4-way bins (VC4 / VC20 / VC5+) — agent + TL dono ke liye
+    const agBins = new Map(), tlBins = new Map();
+    const emptyBins = () => ({ VC4: 0, VC20: 0, 'VC5+': 0 });
+    for (const a of agentClass) {
+      if (a.ym !== cur) continue;
+      const g = a.group === 'VC4' || a.group === 'VC20' ? a.group : 'VC5+';
+      const kb = norm(a.name); const ab = agBins.get(kb) || emptyBins(); ab[g] += a.n; agBins.set(kb, ab);
+      const kt = norm(a.tlName); const tb = tlBins.get(kt) || emptyBins(); tb[g] += a.n; tlBins.set(kt, tb);
+    }
     // agent map
     const agMap = new Map();
     for (const a of stockAgents) {
@@ -50,7 +76,7 @@ FF.pages = FF.pages || {};
       const o = agMap.get(k); o.total += a.n; if (a.group === 'VC4') o.vc4 += a.n; else o.comm += a.n; o.byClass.set(a.cls, (o.byClass.get(a.cls) || 0) + a.n);
       if (!o.id && a.agentId) o.id = a.agentId;
     }
-    const agents = [...agMap.values()].map((a) => { a.iss = agIssued.get(norm(a.name)) || 0; a.issVc4 = agIssuedVc4.get(norm(a.name)) || 0; const perDay = elapsed ? a.iss / elapsed : 0; a.cover = perDay ? a.vc4 / perDay : null; return a; }).sort((a, b) => b.total - a.total);
+    const agents = [...agMap.values()].map((a) => { a.iss = agIssued.get(norm(a.name)) || 0; a.issVc4 = agIssuedVc4.get(norm(a.name)) || 0; a.issBins = agBins.get(norm(a.name)) || { VC4: 0, VC20: 0, 'VC5+': 0 }; const perDay = elapsed ? a.iss / elapsed : 0; a.cover = perDay ? a.vc4 / perDay : null; return a; }).sort((a, b) => b.total - a.total);
     // TL map (APS etc. excluded from TL views, but counted in totals)
     const tlMap = new Map();
     for (const r of stock) {
@@ -58,7 +84,7 @@ FF.pages = FF.pages || {};
       if (!tlMap.has(k)) tlMap.set(k, { name: k, total: 0, vc4: 0, comm: 0, byClass: new Map(), excluded: FF.config.isExcludedTl(k) });
       const o = tlMap.get(k); o.total += r.n; if (r.group === 'VC4') o.vc4 += r.n; else o.comm += r.n; o.byClass.set(r.cls, (o.byClass.get(r.cls) || 0) + r.n);
     }
-    const tls = [...tlMap.values()].map((t) => { t.iss = tlIssued.get(norm(t.name)) || 0; const perDay = elapsed ? t.iss / elapsed : 0; t.cover = perDay ? t.vc4 / perDay : null; t.agents = agents.filter((a) => norm(a.tl) === norm(t.name)).length; return t; }).sort((a, b) => b.total - a.total);
+    const tls = [...tlMap.values()].map((t) => { t.iss = tlIssued.get(norm(t.name)) || 0; t.issBins = tlBins.get(norm(t.name)) || { VC4: 0, VC20: 0, 'VC5+': 0 }; const perDay = elapsed ? t.iss / elapsed : 0; t.cover = perDay ? t.vc4 / perDay : null; t.agents = agents.filter((a) => norm(a.tl) === norm(t.name)).length; return t; }).sort((a, b) => b.total - a.total);
     const total = U.sum(stock, (r) => r.n), vc4 = U.sum(stock.filter((r) => r.group === 'VC4'), (r) => r.n);
     const byClass = U.groupSum(stock, (r) => r.cls, (r) => r.n);
     const curS = cur ? M.summary(daily, cur) : null;
@@ -154,10 +180,10 @@ FF.pages = FF.pages || {};
           ${kpi('g9', 'Total stock', '📦', U.fmt(agent.total), `${esc(agent.name)} · TL ${esc(tlName)}`)}
           ${kpi('g1', 'VC4 stock', '🚗', U.fmt(agent.vc4), `${U.fmtPct(U.pctOf(agent.vc4, agent.total), 0)} of stock`)}
           ${kpi('g4', 'Commercial stock', '🚚', U.fmt(agent.comm), P.classes.filter((c) => !isVc4(c) && agent.byClass.get(c)).map((c) => `${c} <b>${U.fmt(agent.byClass.get(c))}</b>`).join(' · ') || '—')}
-          ${kpi('g6', `MTD issued${P.cur ? ` · ${U.labelYM(P.cur)}` : ''}`, '🏷️', U.fmt(agent.iss), `VC4 <b>${U.fmt(agent.issVc4)}</b> · Comm <b>${U.fmt(agent.iss - agent.issVc4)}</b> · ${perDay ? `${U.fmt(perDay, 1)}/day` : ''} · cover ${coverBadge(agent.cover)}`)}
+          ${kpi('g6', `MTD issued${P.cur ? ` · ${U.labelYM(P.cur)}` : ''}`, '🏷️', U.fmt(agent.iss), `VC4 <b>${U.fmt(agent.issBins.VC4)}</b> · VC20 <b>${U.fmt(agent.issBins.VC20)}</b> · VC5+ <b>${U.fmt(agent.issBins['VC5+'])}</b> · ${perDay ? `${U.fmt(perDay, 1)}/day` : ''} · cover ${coverBadge(agent.cover)}`)}
         </div>
         <div class="grid g-2">
-          ${card('⚖️ VC4 vs Commercial', `${compareBar(agent.vc4, agent.comm, 'VC4 stock', 'Commercial stock')}${compareBar(agent.issVc4, agent.iss - agent.issVc4, 'VC4 issued (MTD)', 'Commercial issued (MTD)', '#10b981', '#f97316')}<div class="dim small" style="margin-top:8px">Stock days = stock ÷ avg daily issuance (MTD)</div>`)}
+          ${card('⚖️ Class split <span class="dim">· stock vs MTD issued</span>', `${classTable(binsFromByClass(agent.byClass), agent.issBins, P.elapsed)}${classDefine}<div class="dim small" style="margin-top:6px">Stock days = stock ÷ avg daily issuance (MTD)</div>`)}
           ${card('🍩 Class share', C.donut({ items: P.classes.map((c) => ({ label: c, value: agent.byClass.get(c) || 0, color: isVc4(c) ? '#6366f1' : undefined })), subtitle: 'tags' }))}
         </div>
         ${card(`🧮 Pivot · Class × Tag type <span class="dim">(${esc(agent.name)})</span>`, pivotTable(pv), `<button class="btn small primary" id="st-xlsx">⬇ Excel (Summary + StockDataa rows)</button><button class="btn small" data-action="export" data-name="stock-${U.slug(agent.name)}">⬇ CSV</button>`)}
@@ -177,7 +203,7 @@ FF.pages = FF.pages || {};
           ${kpi('g6', `MTD issued${P.cur ? ` · ${U.labelYM(P.cur)}` : ''}`, '🏷️', U.fmt(tl.iss), `${P.elapsed ? `${U.fmt(tl.iss / P.elapsed, 1)}/day` : ''} · stock turns ${tl.iss && tl.total ? (tl.iss / tl.total).toFixed(2) : '—'}×`)}
         </div>
         <div class="grid g-2">
-          ${card('⚖️ VC4 vs Commercial', `${compareBar(tl.vc4, tl.comm, 'VC4 stock', 'Commercial stock')}<div style="margin-top:14px">${C.bars({ labels: P.classes.filter((c) => tl.byClass.get(c)), height: 170, series: [{ name: 'Stock', values: P.classes.filter((c) => tl.byClass.get(c)).map((c) => tl.byClass.get(c)), color: '#14b8a6' }] })}</div>`)}
+          ${card('⚖️ Class split <span class="dim">· stock vs MTD issued</span>', `${classTable(binsFromByClass(tl.byClass), tl.issBins, P.elapsed)}${classDefine}<div style="margin-top:14px">${C.bars({ labels: P.classes.filter((c) => tl.byClass.get(c)), height: 170, series: [{ name: 'Stock', values: P.classes.filter((c) => tl.byClass.get(c)).map((c) => tl.byClass.get(c)), color: '#14b8a6' }] })}</div>`)}
           ${card('🧑‍💼 Top agents by stock', C.hbars({ items: top.map((a, i) => ({ label: a.name, sub: `VC4 ${U.fmt(a.vc4)} · Comm ${U.fmt(a.comm)}`, value: a.total, color: C.PALETTE[i % C.PALETTE.length], attr: `data-pick-agent="${esc(a.name)}"` })), valueLabel: 'Stock' }))}
         </div>
         ${card(`🧮 Pivot · Agent × Class <span class="dim">(TL ${esc(tl.name)} · ${pv.list.length} agents)</span>`, pivotTable(pv, { rowAttr: (r, ri) => (ri < pv.rows.length - 1 ? `data-pick-agent="${esc(r[1])}" class="clickable"` : '') }), `<button class="btn small primary" id="st-xlsx">⬇ Excel (Summary + StockDataa rows)</button><button class="btn small" data-action="export" data-name="stock-tl-${U.slug(tl.name)}">⬇ CSV</button>`)}
@@ -216,10 +242,10 @@ FF.pages = FF.pages || {};
         ${kpi('g9', 'Total stock in field', '📦', U.fmt(P.total), `${tls.length} TLs · ${U.fmt(P.agents.length)} agents holding stock${directTotal ? ` · direct ${U.fmt(directTotal)}` : ''}`)}
         ${kpi('g1', 'VC4 stock', '🚗', U.fmt(P.vc4), `${U.fmtPct(U.pctOf(P.vc4, P.total), 0)} of stock · ${perDayVc4 ? `${U.fmt(P.vc4 / perDayVc4)} days cover @ ${U.fmt(perDayVc4)} VC4/day` : ''}`)}
         ${kpi('g4', 'Commercial stock', '🚚', U.fmt(P.comm), `${U.fmtPct(U.pctOf(P.comm, P.total), 0)} of stock · ${perDayComm ? `${U.fmt(P.comm / perDayComm)} days cover @ ${U.fmt(perDayComm)} comm/day` : ''}`)}
-        ${kpi('g6', P.cur ? `${U.labelYM(P.cur)} issued (MTD)` : 'MTD issued', '🏷️', U.fmt(P.curS ? P.curS.total : 0), `VC4 <b>${U.fmt(curVc4)}</b> · Commercial <b>${U.fmt(curComm)}</b> · ${P.elapsed} days`)}
+        ${kpi('g6', P.cur ? `${U.labelYM(P.cur)} issued (MTD)` : 'MTD issued', '🏷️', U.fmt(P.curS ? P.curS.total : 0), `VC4 <b>${U.fmt(curVc4)}</b> · VC20 <b>${U.fmt(P.curS ? P.curS.vc20 : 0)}</b> · VC5+ <b>${U.fmt(P.curS ? P.curS.vc5p : 0)}</b> · ${P.elapsed} days`)}
       </div>
       <div class="grid g-3">
-        ${card('⚖️ VC4 vs Commercial', `${compareBar(P.vc4, P.comm, 'VC4 stock', 'Commercial stock')}${compareBar(curVc4, curComm, 'VC4 issued MTD', 'Commercial issued MTD', '#10b981', '#f97316')}<table class="tbl compact" style="margin-top:12px"><thead><tr><th></th><th class="num">VC4</th><th class="num">Commercial</th></tr></thead><tbody><tr><td>Stock</td><td class="num"><b>${U.fmt(P.vc4)}</b></td><td class="num"><b>${U.fmt(P.comm)}</b></td></tr><tr><td>Issued MTD</td><td class="num">${U.fmt(curVc4)}</td><td class="num">${U.fmt(curComm)}</td></tr><tr><td>Per day</td><td class="num">${U.fmt(perDayVc4, 1)}</td><td class="num">${U.fmt(perDayComm, 1)}</td></tr><tr><td>Days cover</td><td>${coverBadge(perDayVc4 ? P.vc4 / perDayVc4 : null)}</td><td>${coverBadge(perDayComm ? P.comm / perDayComm : null)}</td></tr><tr><td>Stock turns / month</td><td class="num">${P.vc4 && curVc4 ? (curVc4 / P.vc4).toFixed(2) : '—'}×</td><td class="num">${P.comm && curComm ? (curComm / P.comm).toFixed(2) : '—'}×</td></tr></tbody></table>`)}
+        ${card('⚖️ Class split · stock vs issued <span class="dim">· VC4 / VC20 / VC5+ / All Comm</span>', `${compareBar(P.vc4, P.comm, 'VC4 stock', 'Commercial stock')}${classTable(binsFromByClass(P.byClass), { VC4: curVc4, VC20: P.curS ? P.curS.vc20 : 0, 'VC5+': P.curS ? P.curS.vc5p : 0 }, P.elapsed)}${classDefine}`)}
         ${card('📊 Stock by class', C.bars({ labels: P.classes, height: 200, series: [{ name: 'Stock', values: P.classes.map((c) => P.byClass.get(c)), color: '#14b8a6' }], onClickAttr: (i) => `data-pick-cls="${esc(P.classes[i])}"` }) + `<div class="chip-row" style="margin-top:10px">${P.classes.map((c) => `<button class="chip ${isVc4(c) ? 'vc4' : 'comm'}" data-pick-cls="${esc(c)}">${esc(c)} <b>${U.fmtShort(P.byClass.get(c))}</b></button>`).join('')}</div>`)}
         ${card('🏬 Top TLs by stock <span class="dim">(APS excluded)</span>', C.hbars({ items: topTls, valueLabel: 'Stock' }))}
       </div>

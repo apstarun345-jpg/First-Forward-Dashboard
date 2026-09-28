@@ -190,6 +190,7 @@ FF.pages = FF.pages || {};
     if (idx < 0) throw new Error('REPORT tab ka header (Agent Profile Details…) nahi mila — sheet structure badal gayi?');
     resolveSchema(rows[idx], rows[idx + 1] || []);
     state.agents = buildAgents(rows, idx + 2);
+    attachBins(state.agents, classBinsIndex()); // 🚗 EIR 4-way bins (VC4/VC20/VC5+) per agent
     if (!state.agents.length) throw new Error('REPORT me koi agent row nahi mili.');
     state.allTlGroups = buildTlGroups(state.agents, false);
     state.sourceTable = table;
@@ -213,8 +214,13 @@ FF.pages = FF.pages || {};
     k.weekTotal = k.week.reduce((a, b) => a + b, 0); k.lastDay = k.week[6];
     k.growth = k.lastTotal > 0 ? (k.projected / k.lastTotal - 1) * 100 : null;
     k.dailyAvg = state.daysElapsed ? k.curTotal / state.daysElapsed : null;
+    // 🚗 EIR 4-way split (agentClass bins) — sab agents me se jo bins carry karte hain
+    k.curVc20 = U.sum(list, (a) => (a.curBins ? a.curBins.VC20 : 0));
+    k.curVc5p = U.sum(list, (a) => (a.curBins ? a.curBins['VC5+'] : 0));
+    k.hasBins = list.some((a) => a.curBins);
     return k;
   }
+  const binsFoot = (k) => (k.hasBins && (k.curVc20 || k.curVc5p)) ? ` · VC20 <b>${fmt(k.curVc20)}</b> · VC5+ <b>${fmt(k.curVc5p)}</b>` : '';
   function alertBuckets() {
     const groups = state.tlGroups;
     const isLow = (t) => /risk|critical|low stock|urgent|out of stock|reorder/i.test(clean(t)) && !/stock ok/i.test(clean(t));
@@ -241,23 +247,55 @@ FF.pages = FF.pages || {};
     const agg = (ym) => { const o = { VC4: 0, VC20: 0, 'VC5+': 0, total: 0, repl: 0 }; mine.filter((r) => r.ym === ym).forEach((r) => { o[r.group] += r.n; o.total += r.n; if (r.type === 'REPLACEMENT') o.repl += r.n; }); return o; };
     return { cur, last, curS: agg(cur), lastS: agg(last), curLabel: U.labelYM(cur), lastLabel: U.labelYM(last), day: latest.getDate() };
   }
-  function vsCommercialCard(title, cur, last, labels) {
+  const CLASS_DEFINE = '<div class="dim small" style="margin-top:8px">🚗 <b>VC4</b> = 4-wheeler (payable) · 🛻 <b>VC20</b> / <b>VC5+</b> = bade commercial vehicles · <b>All Comm = VC20 + VC5+ (NVC4)</b></div>';
+  function vsCommercialCard(title, cur, last, labels, note) {
     const lc = labels || { cur: state.months.cur, last: state.months.last };
-    const rows = [['VC4', cur.vc4, last.vc4], ['Commercial', cur.comm, last.comm], ['Total', cur.total, last.total]];
+    const split = cur.vc20 != null && cur.vc5p != null && last.vc20 != null && last.vc5p != null;
+    const commOf = (x) => (x.vc20 || 0) + (x.vc5p || 0);
+    const rows = split
+      ? [['VC4', cur.vc4, last.vc4], ['VC20', cur.vc20, last.vc20], ['VC5+', cur.vc5p, last.vc5p], ['All Comm', commOf(cur), commOf(last)], ['Total', cur.total, last.total]]
+      : [['VC4', cur.vc4, last.vc4], ['Commercial', cur.comm, last.comm], ['Total', cur.total, last.total]];
     const share = (v, t) => (t ? U.fmtPct((v / t) * 100, 0) : '—');
-    return `<div class="dsec"><h4>${title}</h4>${C.bars({ labels: ['VC4', 'Commercial', 'Total'], height: 150, series: [{ name: lc.last, values: [last.vc4, last.comm, last.total], color: '#c7d2fe' }, { name: lc.cur, values: [cur.vc4, cur.comm, cur.total], color: '#6366f1' }], legendAlways: true })}
-      <table class="tbl compact" style="margin-top:10px"><thead><tr><th></th><th class="num">${esc(lc.cur)}</th><th class="num">${esc(lc.last)}</th><th class="num">Growth</th><th class="num">Share (cur)</th></tr></thead><tbody>${rows.map(([l, a, b]) => `<tr><td><b>${l}</b></td><td class="num"><b>${fmt(a)}</b></td><td class="num">${fmt(b)}</td><td class="num">${U.deltaHtml(U.growth(a, b), { decimals: 0 })}</td><td class="num">${share(a, cur.total)}</td></tr>`).join('')}</tbody></table></div>`;
+    const head = rows.map(([l]) => l);
+    return `<div class="dsec"><h4>${title}</h4>${C.bars({ labels: head, height: 150, series: [{ name: lc.last, values: rows.map(([, , b]) => b), color: '#c7d2fe' }, { name: lc.cur, values: rows.map(([, a]) => a), color: '#6366f1' }], legendAlways: true })}
+      <table class="tbl compact" style="margin-top:10px"><thead><tr><th></th><th class="num">${esc(lc.cur)}</th><th class="num">${esc(lc.last)}</th><th class="num">Growth</th><th class="num">Share (cur)</th></tr></thead><tbody>${rows.map(([l, a, b]) => `<tr><td><b>${l}</b></td><td class="num"><b>${fmt(a)}</b></td><td class="num">${fmt(b)}</td><td class="num">${U.deltaHtml(U.growth(a, b), { decimals: 0 })}</td><td class="num">${share(a, cur.total)}</td></tr>`).join('')}</tbody></table>${note ? `<div class="dim small" style="margin-top:6px">${note}</div>` : ''}${CLASS_DEFINE}</div>`;
+  }
+  // 🚗 EIR agentClass se per-agent 4-way bins (cur + prev month) — classSplit ka bulk version.
+  function classBinsIndex() {
+    const rows = S.get('agentClass') || [];
+    const daily = S.get('daily') || [];
+    const latest = daily.length ? FF.model.latestDate(daily) : null;
+    const out = { cur: null, last: null, map: new Map() };
+    if (!latest || !rows.length) return out;
+    out.cur = U.ymKey(latest); out.last = U.prevMonthKey(out.cur);
+    const blank = () => ({ VC4: 0, VC20: 0, 'VC5+': 0, total: 0 });
+    for (const r of rows) {
+      const k = norm(r.name);
+      if (!out.map.has(k)) out.map.set(k, { cur: blank(), last: blank() });
+      const slot = r.ym === out.cur ? out.map.get(k).cur : r.ym === out.last ? out.map.get(k).last : null;
+      if (!slot) continue;
+      slot[r.group] = (slot[r.group] || 0) + r.n; slot.total += r.n;
+    }
+    return out;
+  }
+  function attachBins(agents, idx) {
+    if (!idx || !idx.cur) return;
+    for (const a of agents) {
+      const b = idx.map.get(norm(a.name));
+      a.curBins = b ? b.cur : null; a.lastBins = b ? b.last : null;
+    }
   }
 
   // ---- table helpers ------------------------------------------------------------------
   const cellMain = (main, sub) => `<div class="cell-main" title="${esc(main)}">${esc(main || '—')}</div>${sub ? `<span class="cell-sub">${esc(sub)}</span>` : ''}`;
+  const binSub = (b) => (b && (b.VC20 || b['VC5+'])) ? ` <small class="dim">V20 ${fmt(b.VC20)} · V5+ ${fmt(b['VC5+'])}</small>` : '';
   const tlLabel = (a) => (a.tlExcluded ? 'Direct (no TL)' : a.tlName);
   const AGENT_COLUMNS = () => [
     { key: 'name', label: 'Agent', sticky: true, sortValue: (a) => a.name, render: (a) => `${cellMain(a.name, a.agentId || a.id)}${a.isMaster ? '<span class="tag">Master</span>' : ''}` },
     { key: 'tlName', label: 'TL', sortValue: (a) => tlLabel(a), render: (a) => cellMain(tlLabel(a), a.tlExcluded ? '' : a.tlId) },
     { key: 'lastTotal', label: `${state.months.last.slice(0, 3)} total`, num: true, sortValue: (a) => a.lastTotal, render: (a) => `${fmt(a.lastTotal)} <small class="dim">${fmt(a.lastVc4)}/${fmt(a.lastNvc4)}</small>` },
     { key: 'curVc4', label: 'VC4', num: true, sortValue: (a) => a.curVc4, render: (a) => fmt(a.curVc4) },
-    { key: 'curNvc4', label: 'Commercial', num: true, sortValue: (a) => a.curNvc4, render: (a) => fmt(a.curNvc4) },
+    { key: 'curNvc4', label: 'Comm · V20/V5+', num: true, sortValue: (a) => a.curNvc4, render: (a) => `${fmt(a.curNvc4)}${binSub(a.curBins)}` },
     { key: 'curTotal', label: `${state.months.cur.slice(0, 3)} total`, num: true, strong: true, sortValue: (a) => a.curTotal, render: (a) => `<b>${fmt(a.curTotal)}</b>` },
     { key: 'curProjected', label: 'Projected', num: true, sortValue: (a) => a.curProjected, render: (a) => fmt(a.curProjected) },
     { key: 'avgTotal', label: 'Avg/day', num: true, sortValue: (a) => a.avgTotal, render: (a) => fmt(a.avgTotal, true) },
@@ -316,7 +354,8 @@ FF.pages = FF.pages || {};
   }
   function tlText(g) {
     const agents = [...g.agents].sort((a, b) => b.curTotal - a.curTotal);
-    return [`*${FF.config.brand} – TL Report – ${g.tlName || g.tlKey}*`, `Agents: ${g.agentCount} (${g.activeCount} active)`, `${state.months.cur} MTD: *${fmt(g.tlCurTotal)}* (VC4 ${fmt(g.tlCurVc4)} | Commercial ${fmt(g.tlCurNvc4)}) · ${fmt(g.tlAvgTotal, true)}/day`, `${state.months.last}: ${fmt(g.tlLastTotal)} (VC4 ${fmt(g.tlLastVc4)} | Commercial ${fmt(g.tlLastNvc4)}) · Growth ${stripEmoji(g.tlGrowth) || '—'}`, `Projected: ${fmt(g.tlProjected)} · Status ${stripEmoji(g.tlStatus) || '—'}`, `Stock: VC4 ${fmt(g.tlStockVc4)} (${fmt(g.tlVc4Days)} days · ${stripEmoji(g.tlStockAlert) || '—'} · priority ${g.priority || '—'}) · Commercial ${fmt(g.tlStockNvc4)} (${fmt(g.tlNvc4Days)} days · priority ${g.commPriority || '—'})`, '', '*Top agents*', ...agents.slice(0, 5).map((a, i) => `${i + 1}. ${a.name} – ${fmt(a.curTotal)}`), agents.filter((a) => !a.hasIssuance).length ? `Inactive this month: ${agents.filter((a) => !a.hasIssuance).length}` : '', sig()].filter(Boolean).join('\n');
+    const cs = classSplit(g.tlName, true);
+    return [`*${FF.config.brand} – TL Report – ${g.tlName || g.tlKey}*`, `Agents: ${g.agentCount} (${g.activeCount} active)`, `${state.months.cur} MTD: *${fmt(g.tlCurTotal)}* (VC4 ${fmt(g.tlCurVc4)} | Commercial ${fmt(g.tlCurNvc4)}) · ${fmt(g.tlAvgTotal, true)}/day`, `${state.months.last}: ${fmt(g.tlLastTotal)} (VC4 ${fmt(g.tlLastVc4)} | Commercial ${fmt(g.tlLastNvc4)}) · Growth ${stripEmoji(g.tlGrowth) || '—'}`, cs ? `Class split ${cs.curLabel}: VC4 ${fmt(cs.curS.VC4)} · VC20 ${fmt(cs.curS.VC20)} · VC5+ ${fmt(cs.curS['VC5+'])} · All Comm ${fmt(cs.curS.VC20 + cs.curS['VC5+'])}` : '', `Projected: ${fmt(g.tlProjected)} · Status ${stripEmoji(g.tlStatus) || '—'}`, `Stock: VC4 ${fmt(g.tlStockVc4)} (${fmt(g.tlVc4Days)} days · ${stripEmoji(g.tlStockAlert) || '—'} · priority ${g.priority || '—'}) · Commercial ${fmt(g.tlStockNvc4)} (${fmt(g.tlNvc4Days)} days · priority ${g.commPriority || '—'})`, '', '*Top agents*', ...agents.slice(0, 5).map((a, i) => `${i + 1}. ${a.name} – ${fmt(a.curTotal)}`), agents.filter((a) => !a.hasIssuance).length ? `Inactive this month: ${agents.filter((a) => !a.hasIssuance).length}` : '', sig()].filter(Boolean).join('\n');
   }
   function shareButtons(text, subject, phone) {
     if (!FF.auth.can('share')) return '';
@@ -344,9 +383,10 @@ FF.pages = FF.pages || {};
         <div class="dkpi"><small>Growth</small><b>${trend(agent.growth)}</b><span>Projected ${fmt(agent.curProjected)}</span></div>
         <div class="dkpi"><small>Stock</small><b>${fmt(agent.stockTotal)}</b><span>VC4 ${fmt(agent.stockVc4)} · ${fmt(agent.agentStockDays)} days</span></div>
       </div><div class="badge-row">${badge(agent.agentStatus)}${badge(agent.lastActive)}${agent.agentPriority ? `<span class="dim small">Priority</span>${badge(agent.agentPriority)}` : ''}${agent.biometric ? `<span class="dim small">Device</span>${badge(agent.biometric)}` : ''}</div></div>`;
-    const compare = vsCommercialCard(`⚖️ VC4 vs Commercial · ${esc(state.months.last)} → ${esc(state.months.cur)}`, { vc4: agent.curVc4, comm: agent.curNvc4, total: agent.curTotal }, { vc4: agent.lastVc4, comm: agent.lastNvc4, total: agent.lastTotal });
-    const classCard = cs ? `<div class="dsec"><h4>🚗 Class split (EIR) · VC4 / VC20 / VC5+ · ${esc(cs.lastLabel)} vs ${esc(cs.curLabel)}</h4>${C.bars({ labels: ['VC4', 'VC20', 'VC5+'], height: 150, series: [{ name: cs.lastLabel, values: [cs.lastS.VC4, cs.lastS.VC20, cs.lastS['VC5+']], color: '#fbcfe8' }, { name: cs.curLabel, values: [cs.curS.VC4, cs.curS.VC20, cs.curS['VC5+']], color: '#ec4899' }], legendAlways: true })}
-        <table class="tbl compact" style="margin-top:10px"><thead><tr><th></th><th class="num">VC4</th><th class="num">VC20</th><th class="num">VC5+</th><th class="num">Total</th><th class="num">Replacement</th></tr></thead><tbody><tr><td><b>${esc(cs.curLabel)}</b> (till ${cs.day})</td><td class="num"><b>${fmt(cs.curS.VC4)}</b></td><td class="num"><b>${fmt(cs.curS.VC20)}</b></td><td class="num"><b>${fmt(cs.curS['VC5+'])}</b></td><td class="num"><b>${fmt(cs.curS.total)}</b></td><td class="num">${fmt(cs.curS.repl)}</td></tr><tr><td>${esc(cs.lastLabel)} (full)</td><td class="num">${fmt(cs.lastS.VC4)}</td><td class="num">${fmt(cs.lastS.VC20)}</td><td class="num">${fmt(cs.lastS['VC5+'])}</td><td class="num">${fmt(cs.lastS.total)}</td><td class="num">${fmt(cs.lastS.repl)}</td></tr><tr><td>Growth</td><td class="num">${U.deltaHtml(U.growth(cs.curS.VC4, cs.lastS.VC4), { decimals: 0 })}</td><td class="num">${U.deltaHtml(U.growth(cs.curS.VC20, cs.lastS.VC20), { decimals: 0 })}</td><td class="num">${U.deltaHtml(U.growth(cs.curS['VC5+'], cs.lastS['VC5+']), { decimals: 0 })}</td><td class="num">${U.deltaHtml(U.growth(cs.curS.total, cs.lastS.total), { decimals: 0 })}</td><td></td></tr></tbody></table></div>` : '';
+    const compare = cs
+      ? vsCommercialCard(`⚖️ Class split · ${esc(cs.lastLabel)} → ${esc(cs.curLabel)} (till ${cs.day})`, { vc4: cs.curS.VC4, vc20: cs.curS.VC20, vc5p: cs.curS['VC5+'], comm: cs.curS.VC20 + cs.curS['VC5+'], total: cs.curS.total }, { vc4: cs.lastS.VC4, vc20: cs.lastS.VC20, vc5p: cs.lastS['VC5+'], comm: cs.lastS.VC20 + cs.lastS['VC5+'], total: cs.lastS.total }, { cur: cs.curLabel, last: cs.lastLabel }, `Replacement (EIR): ${esc(cs.curLabel)} <b>${fmt(cs.curS.repl)}</b> · ${esc(cs.lastLabel)} ${fmt(cs.lastS.repl)}`)
+      : vsCommercialCard(`⚖️ VC4 vs Commercial · ${esc(state.months.last)} → ${esc(state.months.cur)}`, { vc4: agent.curVc4, comm: agent.curNvc4, total: agent.curTotal }, { vc4: agent.lastVc4, comm: agent.lastNvc4, total: agent.lastTotal });
+    const classCard = '';
     const stockClasses = ['stockVc4', 'stockC1', 'stockC2', 'stockC3', 'stockC4', 'stockC5'].map((k) => ({ label: state.columns[k].label, value: agent[k] || 0 })).filter((x) => x.value > 0);
     const stockCard = `<div class="dsec"><h4>📦 Stock in hand · ${fmt(agent.stockTotal)} <small class="dim">(VC4 ${fmt(agent.stockVc4)} · Commercial ${fmt(agent.stockNvc4)})</small></h4>${stockClasses.length ? C.bars({ labels: stockClasses.map((x) => x.label), height: 130, series: [{ name: 'Stock', values: stockClasses.map((x) => x.value), color: '#14b8a6' }] }) : '<div class="dim">No stock</div>'}<div class="dgrid" style="margin-top:8px">${row('Stock days (VC4)', `<b>${fmt(agent.agentStockDays)}</b>`)}${row('Priority', badge(agent.agentPriority))}${row('Daily avg', `<b>${fmt(agent.agentAvg, true)}</b>`)}</div></div>`;
     const sections = state.sections.filter((s) => !['profile', 'stock'].includes(s.key)).map((section) => {
@@ -370,11 +410,12 @@ FF.pages = FF.pages || {};
         <div class="dkpi"><small>Growth</small><b>${trend(group.tlGrowth)}</b><span>Projected ${fmt(group.tlProjected)} · ${fmt(group.tlAvgTotal, true)}/day</span></div>
         <div class="dkpi"><small>Agents</small><b>${group.agentCount}</b><span>${group.activeCount} active · ${group.agentCount - group.activeCount} inactive</span></div>
       </div><div class="badge-row">${badge(group.tlStatus)}${badge(group.tlLastActive)}<span class="dim small">VC4</span>${badge(group.tlPriority)}${badge(group.tlStockAlert)}<span class="dim small">Comm</span>${badge(group.tlCommPriority)}${badge(group.tlCommAlert)}</div></div>
-      ${vsCommercialCard(`⚖️ VC4 vs Commercial · ${esc(state.months.last)} → ${esc(state.months.cur)}`, { vc4: group.tlCurVc4 || 0, comm: group.tlCurNvc4 || 0, total: group.tlCurTotal || 0 }, { vc4: group.tlLastVc4 || 0, comm: group.tlLastNvc4 || 0, total: group.tlLastTotal || 0 })}
-      ${cs ? `<div class="dsec"><h4>🚗 Class split (EIR) · VC4 / VC20 / VC5+</h4>${C.bars({ labels: ['VC4', 'VC20', 'VC5+'], height: 140, series: [{ name: cs.lastLabel, values: [cs.lastS.VC4, cs.lastS.VC20, cs.lastS['VC5+']], color: '#fbcfe8' }, { name: cs.curLabel, values: [cs.curS.VC4, cs.curS.VC20, cs.curS['VC5+']], color: '#ec4899' }], legendAlways: true })}<div class="dgrid" style="margin-top:8px">${row(`${esc(cs.curLabel)} (till ${cs.day})`, `<b>${fmt(cs.curS.VC4)} / ${fmt(cs.curS.VC20)} / ${fmt(cs.curS['VC5+'])}</b>`)}${row(`${esc(cs.lastLabel)} (full)`, `<b>${fmt(cs.lastS.VC4)} / ${fmt(cs.lastS.VC20)} / ${fmt(cs.lastS['VC5+'])}</b>`)}</div></div>` : ''}
+      ${cs
+        ? vsCommercialCard(`⚖️ Class split · ${esc(cs.lastLabel)} → ${esc(cs.curLabel)} (till ${cs.day})`, { vc4: cs.curS.VC4, vc20: cs.curS.VC20, vc5p: cs.curS['VC5+'], comm: cs.curS.VC20 + cs.curS['VC5+'], total: cs.curS.total }, { vc4: cs.lastS.VC4, vc20: cs.lastS.VC20, vc5p: cs.lastS['VC5+'], comm: cs.lastS.VC20 + cs.lastS['VC5+'], total: cs.lastS.total }, { cur: cs.curLabel, last: cs.lastLabel }, `Replacement (EIR): ${esc(cs.curLabel)} <b>${fmt(cs.curS.repl)}</b> · ${esc(cs.lastLabel)} ${fmt(cs.lastS.repl)}`)
+        : vsCommercialCard(`⚖️ VC4 vs Commercial · ${esc(state.months.last)} → ${esc(state.months.cur)}`, { vc4: group.tlCurVc4 || 0, comm: group.tlCurNvc4 || 0, total: group.tlCurTotal || 0 }, { vc4: group.tlLastVc4 || 0, comm: group.tlLastNvc4 || 0, total: group.tlLastTotal || 0 })}
       <div class="dsec"><h4>📅 Last 7 days (agents) · ${fmt(group.weekTotal)}</h4>${C.bars({ labels: state.dayLabels, height: 130, series: [{ name: 'Issued', values: group.week, color: '#ec4899' }] })}</div>
       <div class="dsec"><h4>📦 Stock & dispatch</h4><div class="dgrid">${row('Stock VC4', `<b>${fmt(group.tlStockVc4)}</b>`)}${row('Stock Commercial', `<b>${fmt(group.tlStockNvc4)}</b>`)}${row('Stock total', `<b>${fmt(group.tlStockTotal)}</b>`)}${row('VC4 stock days', `<b>${fmt(group.tlVc4Days)}</b>`)}${row('Alert (VC4)', badge(group.tlStockAlert))}${row('Priority (VC4)', badge(group.tlPriority))}${row('Comm stock days', `<b>${fmt(group.tlNvc4Days)}</b>`)}${row('Alert (Comm)', badge(group.tlCommAlert))}${row('Priority (Comm)', badge(group.tlCommPriority))}</div></div>
-      <div class="dsec"><h4>🧑‍💼 Agents (${agents.length})</h4><div class="table-wrap"><table class="tbl compact"><thead><tr><th>Agent</th><th class="num">${esc(state.months.cur.slice(0, 3))}</th><th class="num">VC4</th><th class="num">Comm</th><th class="num">7d</th><th>Last active</th><th>Status</th><th>Priority</th></tr></thead><tbody>${agents.map((a) => `<tr data-agent="${a.__row}" class="clickable"><td>${cellMain(a.name, a.agentId)}</td><td class="num"><b>${fmt(a.curTotal)}</b></td><td class="num">${fmt(a.curVc4)}</td><td class="num">${fmt(a.curNvc4)}</td><td class="num">${fmt(a.weekTotal)}</td><td>${badge(a.lastActive)}</td><td>${badge(a.agentStatus)}</td><td>${badge(a.agentPriority)}</td></tr>`).join('')}</tbody></table></div></div>`;
+      <div class="dsec"><h4>🧑‍💼 Agents (${agents.length})</h4><div class="table-wrap"><table class="tbl compact"><thead><tr><th>Agent</th><th class="num">${esc(state.months.cur.slice(0, 3))}</th><th class="num">VC4</th><th class="num">Comm · V20/V5+</th><th class="num">7d</th><th>Last active</th><th>Status</th><th>Priority</th></tr></thead><tbody>${agents.map((a) => `<tr data-agent="${a.__row}" class="clickable"><td>${cellMain(a.name, a.agentId)}</td><td class="num"><b>${fmt(a.curTotal)}</b></td><td class="num">${fmt(a.curVc4)}</td><td class="num">${fmt(a.curNvc4)}${binSub(a.curBins)}</td><td class="num">${fmt(a.weekTotal)}</td><td>${badge(a.lastActive)}</td><td>${badge(a.agentStatus)}</td><td>${badge(a.agentPriority)}</td></tr>`).join('')}</tbody></table></div></div>`;
     const text = tlText(group);
     FF.app.openDrawer({ kicker: 'Team Leader', title: group.tlName || group.tlKey, sub: `ID ${esc(group.tlId || group.tlKey)}${mobileHtml(group.tlMobile)} · ${group.agentCount} agents · ${group.activeCount} active`, actions: `${shareButtons(text, `TL report · ${group.tlName || group.tlKey}`, group.tlMobile)}<a class="btn small" href="#/stock?tl=${encodeURIComponent(group.tlName || '')}">📦 Stock</a><a class="btn small" href="#/trend?tl=${encodeURIComponent(group.tlName || '')}">📈 Trend</a>`, body });
   }
@@ -384,7 +425,7 @@ FF.pages = FF.pages || {};
     const k = kpiData(), al = alertBuckets();
     el.innerHTML = `<div class="kpi-grid six">
       <div class="kpi g1"><div class="kpi-top"><span class="kpi-title">Agents</span><span class="kpi-icon">🧑‍💼</span></div><div class="kpi-value">${fmt(k.agents)}</div><div class="kpi-foot">Active <b>${fmt(k.active)}</b> · Inactive <b>${fmt(k.agents - k.active)}</b></div></div>
-      <div class="kpi g2"><div class="kpi-top"><span class="kpi-title">${esc(state.months.cur)} issued</span><span class="kpi-icon">🏷️</span></div><div class="kpi-value">${fmt(k.curTotal)}</div><div class="kpi-foot">VC4 <b>${fmt(k.curVc4)}</b> · Comm <b>${fmt(k.curNvc4)}</b>${k.dailyAvg !== null ? ` · <b>${fmt(k.dailyAvg, true)}</b>/day` : ''}</div></div>
+      <div class="kpi g2"><div class="kpi-top"><span class="kpi-title">${esc(state.months.cur)} issued</span><span class="kpi-icon">🏷️</span></div><div class="kpi-value">${fmt(k.curTotal)}</div><div class="kpi-foot">VC4 <b>${fmt(k.curVc4)}</b> · Comm <b>${fmt(k.curNvc4)}</b>${binsFoot(k)}${k.dailyAvg !== null ? ` · <b>${fmt(k.dailyAvg, true)}</b>/day` : ''}</div></div>
       <div class="kpi g6"><div class="kpi-top"><span class="kpi-title">Projected vs ${esc(state.months.last)}</span><span class="kpi-icon">🎯</span></div><div class="kpi-value">${fmt(k.projected)}</div><div class="kpi-foot">${esc(state.months.last)} <b>${fmt(k.lastTotal)}</b> · ${U.deltaHtml(k.growth, { decimals: 0 })}</div></div>
       <div class="kpi g5"><div class="kpi-top"><span class="kpi-title">${esc(state.dayLabels[6] || 'Last day')}</span><span class="kpi-icon">⚡</span></div><div class="kpi-value">${fmt(k.lastDay)}</div><div class="kpi-foot">7-day <b>${fmt(k.weekTotal)}</b> · avg <b>${fmt(k.weekTotal / 7, true)}</b>/day</div></div>
       <div class="kpi g9"><div class="kpi-top"><span class="kpi-title">Stock in field</span><span class="kpi-icon">📦</span></div><div class="kpi-value">${fmt(k.stockTotal)}</div><div class="kpi-foot">VC4 <b>${fmt(k.stockVc4)}</b> · Comm <b>${fmt(k.stockNvc4)}</b></div></div>
@@ -502,6 +543,25 @@ FF.pages = FF.pages || {};
   }
   function badgeList(kind) { return kind === 'tl' ? badgeTls() : badgeAgents(); }
 
+  // Filtered agents ki EIR (agentClass) 4-way aggregate — overview ⚖️ card ke liye.
+  function classAggFiltered() {
+    const rows = S.get('agentClass') || [];
+    const daily = S.get('daily') || [];
+    const latest = daily.length ? FF.model.latestDate(daily) : null;
+    if (!latest || !rows.length) return null;
+    const names = new Set(state.filtered.map((a) => norm(a.name)));
+    if (!names.size) return null;
+    const cur = U.ymKey(latest), last = U.prevMonthKey(cur);
+    const blank = () => ({ VC4: 0, VC20: 0, 'VC5+': 0, total: 0 });
+    const c = blank(), l = blank();
+    for (const r of rows) {
+      if (!names.has(norm(r.name))) continue;
+      const slot = r.ym === cur ? c : r.ym === last ? l : null;
+      if (!slot) continue;
+      slot[r.group] = (slot[r.group] || 0) + r.n; slot.total += r.n;
+    }
+    return { cur, last, curS: c, lastS: l, curLabel: U.labelYM(cur), lastLabel: U.labelYM(last), day: latest.getDate() };
+  }
   function renderOverview(el) {
     const badgesHtml = badgesOn() ? badgesSection() : '';
     const k = kpiData();
@@ -510,9 +570,26 @@ FF.pages = FF.pages || {};
     const topTls = [...state.tlGroups].sort((a, b) => (b.tlCurTotal || 0) - (a.tlCurTotal || 0)).slice(0, topN);
     const activity = [['active', 'Active'], ['inactive-7', 'Inactive 1–7 days'], ['inactive-8', 'Inactive 8+ days'], ['inactive-month', 'Inactive in month'], ['notfound', 'Not found'], ['other', 'Other']].map(([key, label]) => [label, state.filtered.filter((a) => a.activeCat === key).length, key]).filter((r) => r[1] > 0);
     const shareCur = k.curTotal ? (k.curVc4 / k.curTotal) * 100 : 0, shareLast = k.lastTotal ? (k.lastVc4 / k.lastTotal) * 100 : 0;
-    el.innerHTML = `${badgesHtml}<div class="grid g-2-1">
-        <section class="card"><div class="card-head"><h3>⚖️ VC4 vs Commercial · ${esc(state.months.last)} → ${esc(state.months.cur)}</h3><div class="card-right dim">VC4 share ${U.fmtPct(shareLast, 0)} → ${U.fmtPct(shareCur, 0)}</div></div><div class="card-body">
-          <div class="grid g-2" style="margin-bottom:0">
+    const agg = classAggFiltered(); // 🚗 EIR 4-way (VC4 / VC20 / VC5+ / All Comm)
+    const aggTitle = agg ? `⚖️ Class split · ${esc(agg.lastLabel)} → ${esc(agg.curLabel)}` : `⚖️ VC4 vs Commercial · ${esc(state.months.last)} → ${esc(state.months.cur)}`;
+    const aggShare = agg
+      ? `${U.fmtPct(agg.lastS.total ? (agg.lastS.VC4 / agg.lastS.total) * 100 : 0, 0)} → ${U.fmtPct(agg.curS.total ? (agg.curS.VC4 / agg.curS.total) * 100 : 0, 0)}`
+      : `${U.fmtPct(shareLast, 0)} → ${U.fmtPct(shareCur, 0)}`;
+    const aggRows = agg
+      ? [['VC4', agg.curS.VC4, agg.lastS.VC4], ['VC20', agg.curS.VC20, agg.lastS.VC20], ['VC5+', agg.curS['VC5+'], agg.lastS['VC5+']], ['All Comm', agg.curS.VC20 + agg.curS['VC5+'], agg.lastS.VC20 + agg.lastS['VC5+']], ['Total', agg.curS.total, agg.lastS.total]]
+      : [];
+    const aggTable = agg
+      ? `<table class="tbl compact"><thead><tr><th></th><th class="num">${esc(agg.curLabel)}</th><th class="num">${esc(agg.lastLabel)}</th><th class="num">Growth</th><th class="num">Share (cur)</th></tr></thead><tbody>
+              ${aggRows.map(([l, a, b]) => `<tr><td><b>${l}</b></td><td class="num"><b>${fmt(a)}</b></td><td class="num">${fmt(b)}</td><td class="num">${U.deltaHtml(U.growth(a, b), { decimals: 0 })}</td><td class="num">${agg.curS.total ? U.fmtPct((a / agg.curS.total) * 100, 0) : '—'}</td></tr>`).join('')}
+              <tr><td>Per day (MTD)</td>${aggRows.map(([, a]) => `<td class="num">${agg.day ? fmt(a / agg.day, true) : '—'}</td>`).join('')}</tr>
+            </tbody></table>`
+      : '';
+    const aggStock = agg
+      ? `<div class="dim small" style="margin-top:8px">📦 Stock (report): VC4 <b>${fmt(k.stockVc4)}</b> · Commercial <b>${fmt(k.stockNvc4)}</b> · Total <b>${fmt(k.stockTotal)}</b> · cover (days) VC4 ${state.daysElapsed && k.curVc4 ? `<b>${fmt(k.stockVc4 / (k.curVc4 / state.daysElapsed))}</b>` : '—'} · Comm ${state.daysElapsed && k.curNvc4 ? `<b>${fmt(k.stockNvc4 / (k.curNvc4 / state.daysElapsed))}</b>` : '—'}</div>${CLASS_DEFINE}`
+      : '';
+    const vsBody = agg
+      ? `<div class="grid g-2" style="margin-bottom:0"><div>${C.bars({ labels: ['VC4', 'VC20', 'VC5+', 'All Comm'], height: 190, series: [{ name: agg.lastLabel, values: [agg.lastS.VC4, agg.lastS.VC20, agg.lastS['VC5+'], agg.lastS.VC20 + agg.lastS['VC5+']], color: '#c7d2fe' }, { name: `${agg.curLabel} (MTD)`, values: [agg.curS.VC4, agg.curS.VC20, agg.curS['VC5+'], agg.curS.VC20 + agg.curS['VC5+']], color: '#6366f1' }], legendAlways: true })}</div>${aggTable}</div>${aggStock}`
+      : `<div class="grid g-2" style="margin-bottom:0">
             <div>${C.bars({ labels: ['VC4', 'Commercial'], height: 190, series: [{ name: state.months.last, values: [k.lastVc4, k.lastNvc4], color: '#c7d2fe' }, { name: `${state.months.cur} (MTD)`, values: [k.curVc4, k.curNvc4], color: '#6366f1' }], legendAlways: true })}</div>
             <table class="tbl compact"><thead><tr><th></th><th class="num">VC4</th><th class="num">Commercial</th><th class="num">Total</th></tr></thead><tbody>
               <tr><td>${esc(state.months.cur)} MTD</td><td class="num"><b>${fmt(k.curVc4)}</b></td><td class="num"><b>${fmt(k.curNvc4)}</b></td><td class="num"><b>${fmt(k.curTotal)}</b></td></tr>
@@ -521,11 +598,13 @@ FF.pages = FF.pages || {};
               <tr><td>Per day (MTD)</td><td class="num">${state.daysElapsed ? fmt(k.curVc4 / state.daysElapsed, true) : '—'}</td><td class="num">${state.daysElapsed ? fmt(k.curNvc4 / state.daysElapsed, true) : '—'}</td><td class="num">${k.dailyAvg !== null ? fmt(k.dailyAvg, true) : '—'}</td></tr>
               <tr><td>Stock in field</td><td class="num">${fmt(k.stockVc4)}</td><td class="num">${fmt(k.stockNvc4)}</td><td class="num">${fmt(k.stockTotal)}</td></tr>
               <tr><td>Stock days</td><td class="num">${state.daysElapsed && k.curVc4 ? fmt(k.stockVc4 / (k.curVc4 / state.daysElapsed)) : '—'}</td><td class="num">${state.daysElapsed && k.curNvc4 ? fmt(k.stockNvc4 / (k.curNvc4 / state.daysElapsed)) : '—'}</td><td class="num">${k.dailyAvg ? fmt(k.stockTotal / k.dailyAvg) : '—'}</td></tr>
-            </tbody></table></div></div></section>
+            </tbody></table></div>`;
+    el.innerHTML = `${badgesHtml}<div class="grid g-2-1">
+        <section class="card"><div class="card-head"><h3>${aggTitle}</h3><div class="card-right dim">VC4 share ${aggShare}</div></div><div class="card-body">${vsBody}</div></section>
         <section class="card"><div class="card-head"><h3>📅 Last 7 days</h3><div class="card-right dim">Total ${fmt(k.weekTotal)} · avg ${fmt(k.weekTotal / 7, true)}/day</div></div><div class="card-body">${C.bars({ labels: state.dayLabels, series: [{ name: 'Issued', values: k.week, color: '#6366f1' }], height: 200 })}</div></section>
       </div>
       <div class="grid g-2">
-        <section class="card"><div class="card-head"><h3>⭐ Top agents · ${esc(state.months.cur)}</h3><div class="card-right dim">ghost bar = ${esc(state.months.last)}</div></div><div class="card-body">${C.hbars({ items: topAgents.map((a, i) => ({ label: a.name + (a.isMaster ? ' (Master)' : ''), sub: `${tlLabel(a)} · VC4 ${fmt(a.curVc4)} · Comm ${fmt(a.curNvc4)}`, value: a.curTotal, compare: a.lastTotal, color: C.PALETTE[i % C.PALETTE.length], attr: `data-agent="${a.__row}"` })), valueLabel: state.months.cur, compareLabel: state.months.last })}</div></section>
+        <section class="card"><div class="card-head"><h3>⭐ Top agents · ${esc(state.months.cur)}</h3><div class="card-right dim">ghost bar = ${esc(state.months.last)}</div></div><div class="card-body">${C.hbars({ items: topAgents.map((a, i) => ({ label: a.name + (a.isMaster ? ' (Master)' : ''), sub: `${tlLabel(a)} · VC4 ${fmt(a.curVc4)} · Comm ${fmt(a.curNvc4)}${binSub(a.curBins)}`, value: a.curTotal, compare: a.lastTotal, color: C.PALETTE[i % C.PALETTE.length], attr: `data-agent="${a.__row}"` })), valueLabel: state.months.cur, compareLabel: state.months.last })}</div></section>
         <section class="card"><div class="card-head"><h3>🏅 Top TLs · ${esc(state.months.cur)}</h3><div class="card-right dim">APS excluded · ghost bar = ${esc(state.months.last)}</div></div><div class="card-body">${C.hbars({ items: topTls.map((g, i) => ({ label: g.tlName || g.tlKey, sub: `${g.activeCount}/${g.agentCount} active · VC4 ${fmt(g.tlCurVc4)} · Comm ${fmt(g.tlCurNvc4)}`, value: g.tlCurTotal || 0, compare: g.tlLastTotal || 0, color: C.PALETTE[(i + 4) % C.PALETTE.length], attr: `data-tl="${esc(g.tlKey)}"` })), valueLabel: state.months.cur, compareLabel: state.months.last })}</div></section>
       </div>
       <div class="grid g-3">
@@ -639,14 +718,35 @@ FF.pages = FF.pages || {};
     ]);
     U.toast('Stock Report Excel ready', 'ok');
   }
+  // 🎯 Suggested dispatch plan — High + Medium priority agents: suggested qty + cover din (highlighted card)
+  function dispatchPlanRows() {
+    if (!FF.config.feat || FF.config.feat('dispatchPlan') === false) return { days: 15, rows: [] };
+    const days = Number(FF.config.features && FF.config.features.suggestDays) || 15;
+    const rows = state.filtered
+      .filter((a) => a.priority === 'High' || a.priority === 'Medium')
+      .map((a) => {
+        const daily = a.avgVc4 || (state.daysElapsed ? a.curVc4 / state.daysElapsed : 0) || 0;
+        const sug = Math.max(0, Math.ceil(daily * days - (a.stockVc4 || 0)));
+        const cover = a.agentStockDays != null && a.agentStockDays !== '' && !Number.isNaN(Number(a.agentStockDays)) ? Number(a.agentStockDays) : null;
+        return { a, sug, cover, daily };
+      })
+      .sort((x, y) => (x.cover ?? 9999) - (y.cover ?? 9999))
+      .slice(0, 60);
+    return { days, rows };
+  }
   function renderAlerts(el) {
     const b = alertBuckets(), cap = 100;
+    const dp = dispatchPlanRows();
+    const coverTd = (c) => (c == null ? '<span class="dim">—</span>' : `<span class="count ${c < 7 ? 'red' : c < 15 ? 'amber' : ''}">${fmt(c)}</span>`);
+    const dispatchCard = dp.rows.length
+      ? `<section class="card dispatch-plan"><div class="card-head"><h3>🎯 Suggested dispatch plan · High + Medium priority <span class="count amber">${fmt(dp.rows.length)}</span></h3><div class="card-right dim">target cover ${dp.days} din · suggested = avg VC4/day × ${dp.days} − stock${FF.auth.can('export') ? ` <button class="btn small" data-action="export" data-name="suggested-dispatch">⬇ CSV</button>` : ''}</div></div><div class="table-wrap tall"><table class="tbl"><thead><tr><th>Agent</th><th>TL</th><th>Priority</th><th class="num">VC4 stock</th><th class="num">Avg VC4/day</th><th class="num">Cover (din)</th><th class="num">Suggested qty 🎯</th></tr></thead><tbody>${dp.rows.map(({ a, sug, cover, daily }) => `<tr data-agent="${a.__row}" class="clickable"><td>${cellMain(a.name, a.agentId)}</td><td>${cellMain(tlLabel(a), '')}</td><td>${badge(a.agentPriority)}</td><td class="num">${fmt(a.stockVc4)}</td><td class="num">${fmt(daily, true)}</td><td class="num">${coverTd(cover)}</td><td class="num"><b class="sug-chip">${fmt(sug)}</b></td></tr>`).join('')}</tbody></table></div><div class="card-body dim small">🎯 Suggested qty = avg VC4/day × ${dp.days} din − stock · cover = VC4 stock ÷ avg daily VC4 · 🔴 cover &lt; 7 · 🟠 &lt; 15 din</div></section>`
+      : '';
     const tlRows = (list, extra) => list.slice(0, cap).map((g) => `<tr data-tl="${esc(g.tlKey)}" class="clickable"><td>${cellMain(g.tlName || g.tlKey, g.tlId)}</td><td class="num">${fmt(g.tlStockVc4)} <small class="dim">/ ${fmt(g.tlStockNvc4)}</small></td><td class="num">${fmt(g.tlAvgTotal, true)}</td><td class="num"><b>${fmt(g.tlVc4Days)}</b></td><td class="num">${fmt(g.tlNvc4Days)}</td><td>${badge(g.tlStockAlert)}</td><td>${badge(g.tlCommAlert)}</td><td>${badge(extra(g))}</td></tr>`).join('');
     const agentRows = (list, valueFn) => list.slice(0, cap).map((a) => `<tr data-agent="${a.__row}" class="clickable"><td>${cellMain(a.name, a.agentId)}</td><td>${cellMain(tlLabel(a), a.tlMobile && !/^na$/i.test(a.tlMobile) && canContacts() ? a.tlMobile : '')}</td><td class="num">${fmt(a.lastTotal)}</td><td class="num">${fmt(a.curTotal)}</td><td class="num"><b>${valueFn(a)}</b></td><td>${badge(a.lastActive)}</td><td>${badge(a.agentStatus)}</td></tr>`).join('');
     const tlHead = (x) => `<thead><tr><th>TL</th><th class="num">Stock VC4 / Comm</th><th class="num">Avg/day</th><th class="num">VC4 days</th><th class="num">Comm days</th><th>Alert (VC4)</th><th>Alert (Comm)</th><th>${x}</th></tr></thead>`;
     const agentHead = (x) => `<thead><tr><th>Agent</th><th>TL</th><th class="num">${esc(state.months.last.slice(0, 3))}</th><th class="num">${esc(state.months.cur.slice(0, 3))}</th><th class="num">${x}</th><th>Last active</th><th>Status</th></tr></thead>`;
     const card = (title, count, tone, body, sub, name) => `<section class="card"><div class="card-head"><h3>${title} <span class="count ${tone}">${fmt(count)}</span></h3><div class="card-right dim">${sub || ''}${count && FF.auth.can('export') ? ` <button class="btn small" data-action="export" data-name="${name}">⬇ CSV</button>` : ''}</div></div>${count ? `<div class="table-wrap tall">${body}</div>` : '<div class="card-body empty">Sab theek hai — koi entry nahi.</div>'}</section>`;
-    el.innerHTML = `${card('🔴 High priority agents · dispatch', b.highPriority.length, 'red', `<table class="tbl">${agentHead('Stock days')}<tbody>${agentRows(b.highPriority, (a) => fmt(a.agentStockDays))}</tbody></table>`, 'Agent priority "High" · sorted by lowest stock days', 'high-priority-agents')}
+    el.innerHTML = `${dispatchCard}${card('🔴 High priority agents · dispatch', b.highPriority.length, 'red', `<table class="tbl">${agentHead('Stock days')}<tbody>${agentRows(b.highPriority, (a) => fmt(a.agentStockDays))}</tbody></table>`, 'Agent priority "High" · sorted by lowest stock days', 'high-priority-agents')}
       ${card('🚨 Dispatch needed · TL stock risk', b.lowStock.length, 'red', `<table class="tbl">${tlHead('Priority')}<tbody>${tlRows(b.lowStock, (g) => g.tlPriority)}</tbody></table>`, 'Active TLs jinka VC4 (ya Commercial) stock alert risk dikha raha hai', 'tl-stock-risk')}
       ${card('🧊 Over-stocked TLs', b.overStock.length, 'amber', `<table class="tbl">${tlHead('TL status')}<tbody>${tlRows(b.overStock, (g) => g.tlStatus)}</tbody></table>`, 'Stock zaroorat se zyada — dispatch hold', 'tl-over-stock')}
       ${card('📉 De-growth agents', b.deGrowth.length, 'red', `<table class="tbl">${agentHead('Projected')}<tbody>${agentRows(b.deGrowth, (a) => fmt(a.curProjected))}</tbody></table>`, `Status "De-Growth" · sorted by biggest drop vs ${esc(state.months.last)}`, 'de-growth-agents')}
