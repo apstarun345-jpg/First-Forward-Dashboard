@@ -286,7 +286,7 @@ await run('professional page FF reported commission (dynamic mapping)', async ()
   if (!mapping.agents.some((a) => Number.isFinite(a.computed))) { throw new Error('rate × tags fallback compute nahi hua'); }
   const r = root(); await pages.ffCommission.render(r, { headings: 'all' }, {});
   const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  for (const s of ['REPORT commission column finder', 'Commission rate source', 'Rate range in sheet', 'Agent-wise commission', 'Rate × tags', 'Heading map']) if (!html.includes(s)) throw new Error(`FF commission me "${s}" nahi mila`);
+  for (const s of ['REPORT commission column finder', 'Commission rate source', 'Rate range in sheet', 'Agent-wise commission', 'Rate × tags', 'Heading map', 'ffc-fresh-top']) if (!html.includes(s)) throw new Error(`FF commission me "${s}" nahi mila`);
   if (!/CA/.test(html) || !/CB/.test(html)) throw new Error('heading map me column letters nahi dikh rahe');
 }, true);
 await run('FF commission · Settings me heading ka naam (letter nahi) bhi chalta hai', async () => {
