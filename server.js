@@ -53,17 +53,25 @@ const BLOCKED_DIRS = new Set(['data', 'dev', 'node_modules', '.git', 'google-app
 // `tabs` registry below, so the admin can add or hide sheet tabs and control each one per user.
 export const PAGE_PERMISSIONS = [
   { key: 'home', label: 'Home · highlights & charts', group: 'Pages' },
+  { key: 'executive', label: 'Management · Executive Cockpit', group: 'Professional Insights' },
+  { key: 'forecast', label: 'Management · Forecast Accuracy & Stock Balance', group: 'Professional Insights' },
+  { key: 'dataQuality', label: 'Management · Data Quality Center', group: 'Professional Insights' },
+  { key: 'savedViews', label: 'Workspace · Saved views & report studio', group: 'Professional Insights' },
+  { key: 'followups', label: 'Workspace · Agent/TL notes & follow-ups', group: 'Professional Insights' },
   { key: 'tagIssued', label: 'GV & FF Tag Issued (date-wise)', group: 'Pages' },
   { key: 'targets', label: 'Targets · agent-wise monthly targets', group: 'Pages' },
   { key: 'dashboard', label: 'First Forward · Dashboard', group: 'First Forward' },
   { key: 'trend', label: 'First Forward · Trend', group: 'First Forward' },
   { key: 'performance', label: 'First Forward · Performance', group: 'First Forward' },
   { key: 'stock', label: 'First Forward · Stock', group: 'First Forward' },
+  { key: 'ffCommission', label: 'First Forward · Commission Intelligence', group: 'First Forward' },
   { key: 'gvDashboard', label: 'GV Partner · Dashboard', group: 'GV Partner' },
   { key: 'gvTrend', label: 'GV Partner · Trend', group: 'GV Partner' },
   { key: 'gvPerformance', label: 'GV Partner · Performance', group: 'GV Partner' },
   { key: 'gvStock', label: 'GV Partner · Stock', group: 'GV Partner' },
-  { key: 'compare', label: 'GV vs First Forward (comparison)', group: 'GV Partner' },
+  { key: 'gvCommission', label: 'GV Partner · Commission Intelligence', group: 'GV Partner' },
+  { key: 'dualChannel', label: 'Cross-channel · Identity & combined analysis', group: 'Cross Channel' },
+  { key: 'compare', label: 'GV vs First Forward (comparison)', group: 'Cross Channel' },
   { key: 'export', label: 'Download CSV / Excel', group: 'Actions' },
   { key: 'share', label: 'WhatsApp / Email share', group: 'Actions' },
   { key: 'refresh', label: 'Force refresh from Google', group: 'Actions' },
@@ -92,8 +100,17 @@ const allPermKeys = (settings) => permissionsFor(settings).map((p) => p.key);
 const allPermKeysNow = () => allPermKeys(db.settings);
 // Back-compat export (some tooling imported PERMISSIONS).
 export const PERMISSIONS = permissionsFor({ tabs: DEFAULT_TABS });
-const DEFAULT_USER_PERMS = ['home', 'tagIssued', 'targets', 'dashboard', 'trend', 'stock', 'performance', 'gvDashboard', 'gvTrend', 'gvStock', 'gvPerformance', 'compare',
+const DEFAULT_USER_PERMS = ['home', 'executive', 'forecast', 'dataQuality', 'savedViews', 'followups', 'tagIssued', 'targets', 'dashboard', 'trend', 'stock', 'performance', 'ffCommission', 'gvDashboard', 'gvTrend', 'gvStock', 'gvPerformance', 'gvCommission', 'dualChannel', 'compare',
   'sheet:StockDataa', 'sheet:REPORT', 'sheet:GV Master', 'sheet:Tag Assignment', 'sheet:GV REPORT', 'export'];
+
+// Admin-controlled audience for automated notifications. `users` means all approved non-admin
+// users who have notification access; each user's own master/type preferences still apply.
+const DEFAULT_NOTIFICATION_ROUTES = Object.freeze({
+  dailyDigest: 'admin', monthlyReport: 'both', lowStock: 'admin', midMonth: 'admin',
+  zeroDay: 'admin', agentAnomaly: 'admin', tlAnomaly: 'admin', followup: 'both',
+  champion: 'both', reportUpdate: 'admin', inactiveUsers: 'admin', backupReminder: 'admin'
+});
+const NOTIFICATION_AUDIENCES = new Set(['admin', 'users', 'both', 'off']);
 
 const DEFAULT_SETTINGS = {
   appName: 'First Forward & Gv Partner Dashboard',
@@ -107,6 +124,7 @@ const DEFAULT_SETTINGS = {
   gvSheetId: '1LkYX746lGZQKhl5ueoKe3kYOo4SNtu47p5-jkVNUiBA',
   tabs: DEFAULT_TABS.map((t) => ({ ...t })),
   reportGid: '242489821',
+  ffCommission: { rateCol: '', earnedCol: '', categoryCol: '' }, // optional REPORT letters; blank = heading auto-detection
   gv: {
     master: { tab: 'GV Master', gid: '', uniqueId: 'A', agentName: 'B', tlId: 'C', tlName: 'D', vrn: 'E', vClass: 'F', cch: 'G', serial: 'H', tagId: 'I', amount: 'J', customer: 'K', productId: 'L', commission: 'M', status: 'N', commissionStatus: 'O', date: 'P', time: 'Q', gvTlId: 'R', masterCch: 'S', monthName: 'T', tagType: 'U', gvUniqueId: 'W', gvUniqueName: 'X' },
     assignment: { tab: 'Tag Assignment', gid: '', cls: 'A', tagId: 'B', serial: 'C', status: 'D', agentId: 'E', agentName: 'F', tlId: 'G', tlName: 'H', gvUniqueId: 'L', gvUniqueName: 'M' },
@@ -117,6 +135,7 @@ const DEFAULT_SETTINGS = {
   eirSheet: 'EIR',
   eir: { tagId: 'A', vrn: 'B', cls: 'D', type: 'P', status: 'Z', date: 'AA', agentId: 'J', agentName: 'L', masterId: 'AU', tlId: 'AV', gvId: 'AW', gvName: 'AX', gvTl: 'AZ', tlName: 'BA', vrnType: 'BC', monthName: 'BD', regNumber: 'BH', gvMasterId: '5845036', gvChannelTl: 'ApnaPayment Pvt. Ltd.' },
   stock: { id: 'A', name: 'B', tagId: 'C', barcode: 'D', cls: 'E', tagType: 'F', bcAllocatedAt: 'G', agentId: 'H', agentName: 'I', agentAllocatedAt: 'J', tlName: 'K' },
+  stockMovement: { enabled: false, sheet: 'Stock Movements', date: 'A', channel: 'B', type: 'C', quantity: 'D', cls: 'E', from: 'F', to: 'G', reference: 'H', note: 'I' },
   excludeTls: ['APS'],
   thresholds: { coverRed: 7, coverOrange: 15, coverAmber: 30, inactiveDays: 3, topN: 10 },
   contacts: { teamWhatsapp: '', teamEmail: '', teamGroupLink: '', signature: 'Team First Forward' },
@@ -171,6 +190,7 @@ const DEFAULT_SETTINGS = {
     officeLat: 0, officeLng: 0, // 🗺 office location (0 = unset — map card se set karo)
     alerts: { lowCover: true, midMonth: true, inactive: true, zeroDay: true, newLoginIp: true, anomaly: true }
   },
+  notificationRoutes: { ...DEFAULT_NOTIFICATION_ROUTES }, // 🔔 automated event → admin/users/both/off
   personalLinks: [],     // 🔗 { id, kind, name, token, enabled } — sirf admin (settingsFor non-admin ko strip karta hai)
   schedules: [],         // 🗓 { id, title, text, kind: daily|weekly|monthly, hour, weekday, day, target, enabled }
   email: { host: '', port: 587, secure: false, user: '', pass: '', from: '', to: '' },
@@ -280,11 +300,20 @@ function smtpSend(cfg, subject, text, opts = {}) {
     const host = String(cfg.host || '').trim();
     const port = Number(cfg.port) || 587;
     const directTls = cfg.secure === true || port === 465;
-    const from = String(cfg.from || cfg.user || '').trim();
-    const toList = String(cfg.to || '').split(/[,;]/).map((s) => s.trim()).filter(Boolean);
+    const fromHeader = String(cfg.from || cfg.user || '').trim();
+    const rawRecipients = String(cfg.to || '').split(/[,;]/).map((s) => s.trim()).filter(Boolean);
+    const mailbox = (raw) => {
+      const clean = String(raw || '').replace(/[\r\n]/g, '').trim();
+      const angled = clean.match(/<([^<>]+)>/);
+      return (angled ? angled[1] : clean).trim();
+    };
+    const from = mailbox(fromHeader);
+    const toList = rawRecipients.map(mailbox).filter(Boolean);
     if (!host) return reject(new Error('SMTP host set nahi hai'));
     if (!from) return reject(new Error('"From" address set nahi hai'));
     if (!toList.length) return reject(new Error('"To" address set nahi hai'));
+    if (!/^[^\s<>@]+@[^\s<>@]+$/.test(from)) return reject(new Error('"From" email valid nahi hai'));
+    if (toList.some((x) => !/^[^\s<>@]+@[^\s<>@]+$/.test(x))) return reject(new Error('"To" me ek email valid nahi hai'));
     let sock = null, buf = '', step = 0, caps = '', done = false, rcptIdx = 0;
     const timer = setTimeout(() => fail('SMTP timeout (15s)'), 15000);
     const fail = (m) => { if (done) return; done = true; clearTimeout(timer); try { sock && sock.destroy(); } catch { /* ignore */ } reject(new Error(m)); };
@@ -307,7 +336,8 @@ function smtpSend(cfg, subject, text, opts = {}) {
         if (!line) continue;
         const code = Number(line.slice(0, 3));
         if (/^\d{3}-/.test(line)) { caps += line + '\n'; continue; } // multiline 250- caps
-        if (code >= 400 && step !== 9) return fail(`SMTP error: ${line}`);
+        // DATA ke baad aaya 5xx bhi failure hai; rejected mail ko success kabhi mat dikhao.
+        if (code >= 400) return fail(`SMTP error: ${line}`);
         handle(line, code);
       }
     }
@@ -343,7 +373,8 @@ function smtpSend(cfg, subject, text, opts = {}) {
       if (step === 8) {
         step = 9;
         const b64w = (s) => Buffer.from(String(s), 'utf8').toString('base64').replace(/(.{76})/g, '$1\r\n');
-        const subjHdr = `From: ${from}\r\nTo: ${toList.join(', ')}\r\nSubject: =?UTF-8?B?${b64(subject)}?=\r\nMIME-Version: 1.0\r\n`;
+        const safeFromHeader = fromHeader.replace(/[\r\n]/g, '') || from;
+        const subjHdr = `From: ${safeFromHeader}\r\nTo: ${toList.join(', ')}\r\nSubject: =?UTF-8?B?${b64(subject)}?=\r\nMIME-Version: 1.0\r\n`;
         let mime;
         if (opts.attachments && opts.attachments.length) {
           const boundary = `ff-b-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
@@ -436,24 +467,42 @@ function notifyItems() {
   if (!db.notify || !Array.isArray(db.notify.items)) db.notify = { items: [], watch: {} };
   return db.notify.items;
 }
+function notificationRoutes() {
+  const saved = db.settings && db.settings.notificationRoutes;
+  const out = { ...DEFAULT_NOTIFICATION_ROUTES };
+  if (saved && typeof saved === 'object') for (const key of Object.keys(out)) {
+    if (NOTIFICATION_AUDIENCES.has(saved[key])) out[key] = saved[key];
+  }
+  return out;
+}
 function notificationVisible(item, user) {
   if (!item || !user) return false;
-  // Admin ko HAR notification dikhta hai (sab users ki activity, reports, settings — total panel)
+  // Naye routed items admin/user audience ko exactly respect karte hain. Legacy items ka purana
+  // behaviour preserve hai: admin ko poora operational feed, user ko personal/broadcast only.
+  if (item.audience) {
+    if (user.role === 'admin') return item.audience === 'admin' || item.audience === 'both';
+    if (user.notifyAccess === false) return false;
+    return item.audience === 'users' || item.audience === 'both';
+  }
   if (user.role === 'admin') return true;
-  // Non-admin user: sirf apne personal target wale notifications dikhte hain (login welcome, password change, account created, broadcast).
-  // Aur bhi: admin ne us user ko notification access diya ho tab hi.
   if (user.notifyAccess === false) return false;
   if (item.target === 'broadcast') return true;
   return item.target === `user:${user.username}`;
 }
-function recordNotification({ type = 'info', title, body, target = 'admin', meta = {} }) {
-  const item = { id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${crypto.randomBytes(6).toString('hex')}`, type, title: String(title || 'Notification').slice(0, 120), body: String(body || '').slice(0, 800), target, meta, createdAt: new Date().toISOString() };
+function recordNotification({ type = 'info', title, body, target = 'admin', meta = {}, routeKey = '' }) {
+  let audience = '';
+  if (routeKey && Object.hasOwn(DEFAULT_NOTIFICATION_ROUTES, routeKey)) {
+    audience = notificationRoutes()[routeKey];
+    if (audience === 'off') return null;
+    target = audience === 'admin' ? 'admin' : 'broadcast';
+  }
+  const item = { id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${crypto.randomBytes(6).toString('hex')}`, type, title: String(title || 'Notification').slice(0, 120), body: String(body || '').slice(0, 800), target, ...(routeKey ? { routeKey, audience } : {}), meta, createdAt: new Date().toISOString() };
   notifyItems().push(item);
   if (notifyItems().length > 500) db.notify.items = notifyItems().slice(-500);
   persist('notify');
-    pushFanout(item); // 🔔 instant web push — app band ho tab bhi
-    return item;
-  }
+  pushFanout(item); // 🔔 instant web push — app band ho tab bhi
+  return item;
+}
   /** 📜 Audit log (sirf admin Settings → 📜 tab) — best-effort, kabhi action fail nahi karwana. */
   function logAudit(user, action, detail = {}) {
     try {
@@ -518,7 +567,7 @@ function permissionDiff(before, after) {
 }
 const activityLast = new Map();
 // Client routes (app.js PAGES) — notification tap par seedha usi page par le jao.
-const CLIENT_PAGES = new Set(['home', 'tagIssued', 'targets', 'rangeReport', 'dashboard', 'trend', 'performance', 'stock', 'stockReport', 'gvDashboard', 'gvTrend', 'gvPerformance', 'gvStock', 'compare', 'charts']);
+const CLIENT_PAGES = new Set(['home', 'tagIssued', 'targets', 'rangeReport', 'dashboard', 'trend', 'performance', 'stock', 'stockReport', 'gvDashboard', 'gvTrend', 'gvPerformance', 'gvStock', 'gvStockReport', 'compare', 'charts']);
 /** Search/click ki "option" se client route banao (deep link — mobile push tap → seedha page). */
 function pageLinkFor(option, query) {
   const t = String(option || '').trim();
@@ -614,9 +663,10 @@ function headers(extra = {}) {
   return {
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'strict-origin-when-cross-origin',
-    'Permissions-Policy': 'camera=(), microphone=(), geolocation=(self)',
+    // Voice search needs microphone access after an explicit user click; camera stays disabled.
+    'Permissions-Policy': 'camera=(), microphone=(self), geolocation=(self)',
     ...(FRAME_PROTECTION ? { 'X-Frame-Options': 'SAMEORIGIN' } : {}),
-    'Content-Security-Policy': "default-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://docs.google.com",
+    'Content-Security-Policy': "default-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'; img-src 'self' data: blob: https://tile.openstreetmap.org; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://docs.google.com",
     ...extra
   };
 }
@@ -678,6 +728,25 @@ async function fetchUpstream(url) {
     const body = await response.text();
     return { status: response.status, body };
   } finally { clearTimeout(timer); }
+}
+/** Reuse the gviz proxy cache for server-rendered personal pages (and stale data if Google blips). */
+async function fetchUpstreamCached(url) {
+  const hit = cache.get(url);
+  if (hit && Date.now() - hit.at < cacheMs()) return { status: hit.status || 200, body: hit.body, cached: true };
+  try {
+    let job = inflight.get(url);
+    if (!job) { job = fetchUpstream(url).finally(() => inflight.delete(url)); inflight.set(url, job); }
+    const out = await job;
+    const okBody = out.status >= 200 && out.status < 300 && out.body.includes('setResponse') && !/"status"\s*:\s*"error"/.test(out.body);
+    if (okBody) {
+      cache.set(url, { at: Date.now(), body: out.body, status: out.status });
+      if (cache.size > MAX_CACHE_ENTRIES) cache.delete(cache.keys().next().value);
+    }
+    return out;
+  } catch (err) {
+    if (hit) return { status: hit.status || 200, body: hit.body, cached: true, stale: true };
+    throw err;
+  }
 }
 
 // The watcher only asks Google for grouped counts for the newest day. It does not download
@@ -1001,6 +1070,27 @@ function pushSubs() {
   if (!Array.isArray(db.notify.push)) db.notify.push = [];
   return db.notify.push;
 }
+/**
+ * Small collaborative workspace stored with notifications so it works with every persistence
+ * backend (files, Sheets API and Apps Script) without adding another storage table.
+ */
+function workspaceStore() {
+  if (!db.notify || typeof db.notify !== 'object') db.notify = { items: [], watch: {}, push: [] };
+  if (!db.notify.workspace || typeof db.notify.workspace !== 'object') db.notify.workspace = {};
+  const w = db.notify.workspace;
+  if (!Array.isArray(w.views)) w.views = [];
+  if (!Array.isArray(w.notes)) w.notes = [];
+  return w;
+}
+const workspaceId = (prefix) => `${prefix}_${Date.now().toString(36)}_${crypto.randomBytes(5).toString('hex')}`;
+const shortText = (value, max) => String(value ?? '').trim().slice(0, max);
+function visibleWorkspaceView(view, user) {
+  return !!view && (view.shared === true || view.owner === user.username || user.role === 'admin');
+}
+function publicWorkspaceUser(username) {
+  const u = findUser(username);
+  return u ? { username: u.username, name: u.name || u.username } : { username, name: username };
+}
 function pushLog() {
   if (!db.notify || typeof db.notify !== 'object') db.notify = { items: [], watch: {}, push: [] };
   if (!Array.isArray(db.notify.pushLog)) db.notify.pushLog = [];
@@ -1172,15 +1262,12 @@ function pushFanout(item) {
   const subs = pushSubs().filter((s) => {
     const u = findUser(s.username);
     if (!u) return false;
-    if (u.role !== 'admin' && u.notifyAccess === false) return false;
+    if (!notificationVisible(item, u)) return false;
     const prefs = normalizeNotifyPrefs(u.notifyPrefs);
     if (prefs.enabled === false) return false; // master switch OFF → koi push nahi
     if (prefs.push === false) return false;
     if (prefs[item.type] === false) return false;
-    // Admin ko HAR notification push hota hai; normal user ko sirf apna personal/broadcast
-    if (u.role === 'admin') return true;
-    if (item.target === 'broadcast') return true;
-    return item.target === `user:${s.username}`;
+    return true;
   });
   if (!subs.length) return;
   Promise.all(subs.map(async (s) => {
@@ -1215,6 +1302,7 @@ function maybeMonthlyReport() {
       title: `📅 Monthly report ready · ${MON[prevM - 1]} ${prevY}`,
       body: `${MON[prevM - 1]} ${prevY} ka FF vs GV comparison ready hai. Click karke Compare page par dono months side-by-side dekho.`,
       target: 'broadcast',
+      routeKey: 'monthlyReport',
       meta: { monthlyReport: prev, link: `#/compare?monthA=${prev}&monthB=${prevPrev}` }
     });
     console.log(`monthly report notification sent for ${prev}`);
@@ -1225,15 +1313,11 @@ const MON_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep'
 function istNow() { return new Date(Date.now() + 5.5 * 3600e3); } // sirf date/hour ke liye (UTC+5:30)
 /** IST ka aaj ka YYYY-MM-DD */
 function dateKeyNow() { const ist = istNow(); const pad = (n) => String(n).padStart(2, '0'); return `${ist.getUTCFullYear()}-${pad(ist.getUTCMonth() + 1)}-${pad(ist.getUTCDate())}`; }
-/** StockDataa ka current total + class split (ek gviz group-by query). */
-async function stockSnapshot() {
+/** Current stock total + class split from one inventory tab (one gviz group-by query). */
+async function stockSnapshotFrom(sheetId, sheet, clsCol, tagCol, label) {
   try {
-    const s = db.settings;
-    const cfg = s.stock || {};
-    const clsCol = cfg.cls || 'E', tagCol = cfg.tagId || 'C';
-    const sheet = s.stockSheet || 'StockDataa';
     const tq = `select ${clsCol}, count(${tagCol}) where ${tagCol} is not null group by ${clsCol}`;
-    const params = new URLSearchParams({ id: String(s.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet, tq });
+    const params = new URLSearchParams({ id: String(sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet, tq });
     const out = await fetchUpstream(upstreamUrl(params));
     if (out.status < 200 || out.status >= 300) throw new Error(`Google responded ${out.status}`);
     const table = parseGvizServer(out.body);
@@ -1246,7 +1330,17 @@ async function stockSnapshot() {
       total += n;
     }
     return total ? { total, classes } : null;
-  } catch (err) { console.warn('digest stock snapshot:', err.message); return null; }
+  } catch (err) { console.warn(`${label || 'stock'} snapshot:`, err.message); return null; }
+}
+/** StockDataa (First Forward) current stock. */
+async function stockSnapshot() {
+  const s = db.settings, cfg = s.stock || {};
+  return stockSnapshotFrom(s.sheetId, s.stockSheet || 'StockDataa', cfg.cls || 'E', cfg.tagId || 'C', 'FF stock');
+}
+/** Tag Assignment (GV Partner) current stock. */
+async function gvStockSnapshot() {
+  const s = db.settings, cfg = (s.gv && s.gv.assignment) || {};
+  return stockSnapshotFrom(s.gvSheetId, cfg.tab || 'Tag Assignment', cfg.cls || 'A', cfg.tagId || 'B', 'GV stock');
 }
 /**
  * Subah ek baar admin ko ek compact digest push: kal ki FF/GV issuance, MTD + avg per day,
@@ -1298,6 +1392,7 @@ async function maybeDailyDigest(force = false) {
       title: `🌅 Daily digest · ${dLabel(dateKey)}`,
       body: parts.join(' · '),
       target: 'admin',
+      routeKey: 'dailyDigest',
       meta: { date: dateKey, link: '#/dashboard', ffMtd, mtdDays, stock: stock ? stock.total : null }
     });
     db.notify.watch.digestDate = dateKey;
@@ -1327,24 +1422,36 @@ async function refreshStockState(force = false) {
     if (!db.notify || typeof db.notify !== 'object') db.notify = { items: [], watch: {} };
     if (!db.notify.watch || typeof db.notify.watch !== 'object') db.notify.watch = {};
     const watch = db.notify.watch;
-    const stock = await stockSnapshot();
-    if (!stock) return null;
+    const [stock, gvStock] = await Promise.all([stockSnapshot(), gvStockSnapshot()]);
+    if (!stock && !gvStock) return null;
     const ist = istNow();
     const pad = (n) => String(n).padStart(2, '0');
     const dateKey = `${ist.getUTCFullYear()}-${pad(ist.getUTCMonth() + 1)}-${pad(ist.getUTCDate())}`;
-    // 📉 Per-day history (last write wins) — Stock page par last-30-din ka line chart.
+    // 📉 Per-day history (last changed snapshot wins). Legacy top-level fields remain FF-compatible.
     if (!watch.stockHistory || typeof watch.stockHistory !== 'object') watch.stockHistory = {};
-    const vc4 = (stock.classes && stock.classes.VC4) || 0;
-    const entry = { total: stock.total, vc4, comm: stock.total - vc4 };
+    const snap = (value) => {
+      if (!value) return null;
+      const vc4 = (value.classes && value.classes.VC4) || 0;
+      return { total: value.total, vc4, comm: value.total - vc4, classes: { ...(value.classes || {}) } };
+    };
+    const ffEntry = snap(stock), gvEntry = snap(gvStock);
+    const combinedEntry = (ffEntry || gvEntry) ? {
+      total: Number(ffEntry && ffEntry.total || 0) + Number(gvEntry && gvEntry.total || 0),
+      vc4: Number(ffEntry && ffEntry.vc4 || 0) + Number(gvEntry && gvEntry.vc4 || 0),
+      comm: Number(ffEntry && ffEntry.comm || 0) + Number(gvEntry && gvEntry.comm || 0)
+    } : null;
+    const values = { total: Number(ffEntry && ffEntry.total || 0), vc4: Number(ffEntry && ffEntry.vc4 || 0), comm: Number(ffEntry && ffEntry.comm || 0), ff: ffEntry, gv: gvEntry, combined: combinedEntry };
     const prevEntry = watch.stockHistory[dateKey] || {};
+    const previousValues = { total: Number(prevEntry.total || 0), vc4: Number(prevEntry.vc4 || 0), comm: Number(prevEntry.comm || 0), ff: prevEntry.ff || null, gv: prevEntry.gv || null, combined: prevEntry.combined || null };
     let changed = false;
-    if (prevEntry.total !== entry.total || prevEntry.vc4 !== entry.vc4) {
-      watch.stockHistory[dateKey] = entry;
+    if (JSON.stringify(previousValues) !== JSON.stringify(values)) {
+      watch.stockHistory[dateKey] = { ...values, capturedAt: new Date().toISOString() };
       changed = true;
       const keys = Object.keys(watch.stockHistory).sort();
       for (let i = 0; i < Math.max(0, keys.length - 400); i++) delete watch.stockHistory[keys[i]];
     }
-    // 🔴 Cover = VC4 stock ÷ is mahine ka avg daily issuance (server ki per-date history se).
+    const vc4 = Number(ffEntry && ffEntry.vc4 || 0);
+    // 🔴 Cover = FF VC4 stock ÷ is mahine ka avg daily issuance (server ki per-date history se).
     const daily = watch.daily && typeof watch.daily === 'object' ? watch.daily : {};
     const monthKey = dateKey.slice(0, 7);
     let ffMtd = 0, mtdDays = 0;
@@ -1368,6 +1475,7 @@ async function refreshStockState(force = false) {
         title: `${emoji[band]} VC4 stock cover ≈ ${Math.round(cover)} din`,
         body: `Cover ${band} zone me${band === 'red' ? ` (< ${coverRed} din)` : ''} — VC4 stock ${vc4} ÷ MTD avg ${Math.round(avg)}/din.${worsened ? ` Pichhle check me ${prevBand} tha.` : ''} Stock page se class / TL wise dekho.`,
         target: 'admin',
+        routeKey: 'lowStock',
         meta: { link: '#/stock', band, cover: Math.round(cover), vc4, avg: Math.round(avg) }
       });
       changed = true;
@@ -1423,7 +1531,7 @@ async function maybeMidMonthAlert() {
     if (!behind) return null;
     db.notify.watch.midMonthAlert = ym;
     persist('notify').catch(() => {});
-    return recordNotification({ type: 'alert', title: `🎯 Mid-month target miss · ${monthLabel}`, body, target: 'admin', meta: { link: '#/targets', achieved, totalTarget, day } });
+    return recordNotification({ type: 'alert', title: `🎯 Mid-month target miss · ${monthLabel}`, body, target: 'admin', routeKey: 'midMonth', meta: { link: '#/targets', achieved, totalTarget, day } });
   } catch (err) { console.warn('mid-month alert:', err.message); return null; }
 }
 // ---- 💤 weekly inactive users (Monday, 9 AM IST ke baad — hafte me ek baar) ----------------------
@@ -1455,6 +1563,7 @@ function maybeInactiveUsers() {
       title: `💤 Inactive users · ${stale.length} user ${maxDays}+ din se nahi aaye`,
       body: list.join(', ') + (stale.length > 12 ? ' …' : ''),
       target: 'admin',
+      routeKey: 'inactiveUsers',
       meta: { link: '#/settings?tab=users', users: stale.map((u) => u.username).slice(0, 40) }
     });
   } catch (err) { console.warn('inactive users:', err.message); return null; }
@@ -1472,6 +1581,7 @@ function runScheduledChecks() {
     schedulesTick(),
     maybeChampionEmail(false),
     maybeFollowup(false),
+    maybeWorkspaceFollowups(false),
     sendWeeklyEmail(false),
     sendReportEmail(false),
     refreshStockState(false)
@@ -1521,6 +1631,7 @@ async function maybeZeroDayAlert() {
         ? `${base} Sheet me aaj ka koi ISSUE_DATE nahi mila — EIR sheet update hui ya nahi, ek baar dekh lo.`
         : `${base} Aaj ${Math.round(100 - (todayFf / prevAvg) * 100)}% kam (${dropPct}%+ gira threshold). Trend page par day-wise dekho.`,
       target: 'admin',
+      routeKey: 'zeroDay',
       meta: { link: '#/trend', date: dateKey, prevAvg: Math.round(prevAvg), today: todayFf || 0 }
     });
   } catch (err) { console.warn('zero-day alert:', err.message); return null; }
@@ -1547,6 +1658,7 @@ function maybeBackupReminder() {
       title: `☁️ Settings backup purana hai (${Math.floor(age)} din)`,
       body: `Settings → ☁️ Storage & backup se settings JSON download kar lo — ${maxAge} din se purana ho chuka hai. Render/storage badalne se pehle ye zaroori hai.`,
       target: 'admin',
+      routeKey: 'backupReminder',
       meta: { link: '#/settings?tab=backup', ageDays: Math.floor(age) }
     });
   } catch (err) { console.warn('backup reminder:', err.message); return null; }
@@ -1730,6 +1842,7 @@ async function maybeAgentAnomaly(force = false) {
             title: `📉 Agent anomaly · ${suspects.length} agent ${pct}%+ down (${dateKey.slice(8, 10)} ${MON_SHORT[Number(dateKey.slice(5, 7)) - 1]})`,
             body: top.map((x) => `${x.name} (${x.today} vs avg ${x.avg})`).join(', ') + (suspects.length > top.length ? ` …+${suspects.length - top.length}` : '') + `. Aaj ke numbers vs pichhle 7 din ka avg — Performance page par dekho.`,
             target: 'admin',
+            routeKey: 'agentAnomaly',
             meta: { link: '#/performance', date: dateKey, count: suspects.length, pct }
           });
           logAudit(null, 'agent_anomaly', { actor: 'scheduler', note: `${suspects.length} agents ≥${pct}% down` });
@@ -1748,6 +1861,7 @@ async function maybeAgentAnomaly(force = false) {
             title: `🏆 TL anomaly · ${suspects.length} TL ${pct}%+ down (${dateKey.slice(8, 10)} ${MON_SHORT[Number(dateKey.slice(5, 7)) - 1]})`,
             body: top.map((x) => `${x.name} (${x.today} vs avg ${x.avg})`).join(', ') + (suspects.length > top.length ? ` …+${suspects.length - top.length}` : '') + `. Team issuance vs pichhle 7 din ka avg — Performance → TLs me dekho.`,
             target: 'admin',
+            routeKey: 'tlAnomaly',
             meta: { link: '#/performance?view=tls', date: dateKey, count: suspects.length, pct }
           });
           logAudit(null, 'tl_anomaly', { actor: 'scheduler', note: `${suspects.length} TLs ≥${pct}% down` });
@@ -1876,6 +1990,14 @@ async function maybeChampionEmail(force = false) {
     await smtpSend(cfg, `🥇 ${monthLabel} Champions · ${db.settings.brand || 'Dashboard'}`, text, { html });
     db.notify.watch.championMonth = month;
     persist('notify').catch(() => {});
+    recordNotification({
+      type: 'monthly',
+      title: `🥇 ${monthLabel} champions · ${list.map((c) => c.name).join(', ')}`,
+      body: list.map((c, i) => `${i + 1}. ${c.name} — ${c.total} tags`).join(' · '),
+      target: 'broadcast',
+      routeKey: 'champion',
+      meta: { link: '#/performance', month, champions: list }
+    });
     logAudit(null, 'champion_email_sent', { actor: force ? 'admin:test' : 'scheduler', note: list.map((c) => `${c.name}:${c.total}`).join(', ') });
     return { month, list };
   } catch (err) { console.warn('champion email:', err.message); if (force) throw err; return null; }
@@ -1935,11 +2057,40 @@ async function maybeFollowup(force = false) {
       title: `⏰ Follow-up · ${list.length} agent ${days}+ din silent`,
       body: top.map((x) => `${x.name} (${x.days} din)`).join(', ') + (list.length > top.length ? ` …+${list.length - top.length}` : '') + `. In tak pahuncho — pichhla issuance ${days}+ din pehle.`,
       target: 'broadcast',
+      routeKey: 'followup',
       meta: { link: '#/performance?view=alerts', days, count: list.length }
     });
     logAudit(null, 'followup_alert', { actor: force ? 'admin:test' : 'scheduler', note: `${list.length} agents ≥${days} din silent` });
     return item;
   } catch (err) { console.warn('followup:', err.message); if (force) throw err; return null; }
+}
+/** Notes timeline ke due/open items ka daily reminder; old inactivity follow-up remains separate. */
+async function maybeWorkspaceFollowups(force = false) {
+  try {
+    const F = feats();
+    if (!force && F.followupTracker === false) return null;
+    const ist = istNow();
+    if (!force && ist.getUTCHours() < (Number(F.followupHour) || 10)) return null;
+    const dateKey = dateKeyNow();
+    const w = workspaceStore();
+    const due = w.notes.filter((n) => n && n.status !== 'done' && n.dueAt && Date.parse(n.dueAt) <= Date.now())
+      .sort((a, b) => Date.parse(a.dueAt) - Date.parse(b.dueAt));
+    if (!force && db.notify.watch.workspaceFollowupDate === dateKey) return null;
+    db.notify.watch.workspaceFollowupDate = dateKey;
+    persist('notify').catch(() => {});
+    if (!due.length) return null;
+    const top = due.slice(0, 10);
+    const item = recordNotification({
+      type: 'info',
+      title: `📝 Due follow-ups · ${due.length} item`,
+      body: top.map((n) => `${n.entityName}${n.assignee ? ` → ${n.assignee}` : ''}`).join(', ') + (due.length > top.length ? ` …+${due.length - top.length}` : ''),
+      target: 'broadcast',
+      routeKey: 'followup',
+      meta: { link: '#/followups?status=open', count: due.length, noteIds: due.slice(0, 30).map((n) => n.id) }
+    });
+    logAudit(null, 'workspace_followup_alert', { actor: force ? 'admin:test' : 'scheduler', note: `${due.length} due timeline items` });
+    return item;
+  } catch (err) { console.warn('workspace followups:', err.message); if (force) throw err; return null; }
 }
 async function checkReports(force = false) {
   if (reportCheckPromise) return reportCheckPromise;
@@ -1965,7 +2116,7 @@ async function checkReports(force = false) {
         const delta = snapshotDelta(previous, next);
         if (delta && delta.changed && (delta.total > 0 || next.date !== previous.date)) {
           const label = source === 'gv' ? 'GV Partner' : 'First Forward';
-          recordNotification({ type: 'report', title: `${label} report update`, body: `${next.date}: ${deltaText(delta)} — Google Sheet me naya data aaya.`, target: 'admin', meta: { source, snapshot: next, previous, delta } });
+          recordNotification({ type: 'report', title: `${label} report update`, body: `${next.date}: ${deltaText(delta)} — Google Sheet me naya data aaya.`, target: 'admin', routeKey: 'reportUpdate', meta: { source, snapshot: next, previous, delta } });
         }
       } catch (err) { console.warn(`report watcher ${source}:`, err.message); }
     }
@@ -2087,7 +2238,7 @@ async function handleApi(req, res, url) {
 
   if (p === '/api/health' && method === 'GET') {
     // pendingSignups sirf admin ko (sidebar badge ke liye) — public health me leak nahi.
-    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.2.0', storage: storageStatus(), push: pushHealth(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length } : {}) });
+    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.6.0', storage: storageStatus(), push: pushHealth(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length } : {}) });
   }
   if (p === '/api/public-config' && method === 'GET') return sendJson(res, 200, publicSettings());
   // App version (sw.js CACHE_NAME) — update-toast ke liye; logged-in se pehle bhi chahiye.
@@ -2214,13 +2365,22 @@ async function handleApi(req, res, url) {
     if (!stockCheckAt) { try { await refreshStockState(true); } catch { /* optional */ } }
     const watch = (db.notify && db.notify.watch) || {};
     const hist = watch.stockHistory && typeof watch.stockHistory === 'object' ? watch.stockHistory : {};
-    const points = Object.keys(hist).sort().slice(-60).map((date) => ({ date, total: Number(hist[date] && hist[date].total) || 0, vc4: Number(hist[date] && hist[date].vc4) || 0, comm: Number(hist[date] && hist[date].comm) || 0 }));
-    // MTD (FF + GV) — target bar aur stock "in vs issued" reconciliation ke liye.
+    const stockShape = (value) => value ? { total: Number(value.total) || 0, vc4: Number(value.vc4) || 0, comm: Number(value.comm) || 0, classes: value.classes && typeof value.classes === 'object' ? value.classes : {} } : null;
+    const points = Object.keys(hist).sort().slice(-180).map((date) => {
+      const raw = hist[date] || {};
+      // Old records stored FF at the top level only; preserve those as valid FF history.
+      const ff = stockShape(raw.ff || (Object.hasOwn(raw, 'total') ? raw : null));
+      const gv = stockShape(raw.gv);
+      const combined = stockShape(raw.combined) || (ff || gv ? { total: Number(ff && ff.total || 0) + Number(gv && gv.total || 0), vc4: Number(ff && ff.vc4 || 0) + Number(gv && gv.vc4 || 0), comm: Number(ff && ff.comm || 0) + Number(gv && gv.comm || 0), classes: {} } : null);
+      return { date, capturedAt: raw.capturedAt || null, total: Number(ff && ff.total || 0), vc4: Number(ff && ff.vc4 || 0), comm: Number(ff && ff.comm || 0), ff, gv, combined };
+    });
+    // MTD (FF + GV) — stock balance reconciliation ke liye.
     const daily = watch.daily && typeof watch.daily === 'object' ? watch.daily : {};
-    const monthKey = dateKeyNow();
+    const monthKey = dateKeyNow().slice(0, 7);
     let ffMtd = 0, gvMtd = 0, mtdDays = 0;
     for (const [d, v] of Object.entries(daily)) if (d.startsWith(monthKey) && v) { const f = Number(v.ff) || 0, g = Number(v.gv) || 0; if (f || g) mtdDays++; ffMtd += f; gvMtd += g; }
-    return sendJson(res, 200, { points, cover: watch.cover || null, thresholds: db.settings.thresholds || {}, mtd: { ff: ffMtd, gv: gvMtd, days: mtdDays } });
+    const issuance = Object.keys(daily).sort().slice(-180).map((date) => ({ date, ff: Number(daily[date] && daily[date].ff) || 0, gv: Number(daily[date] && daily[date].gv) || 0 }));
+    return sendJson(res, 200, { points, issuance, cover: watch.cover || null, thresholds: db.settings.thresholds || {}, mtd: { ff: ffMtd, gv: gvMtd, days: mtdDays } });
   }
   if (p === '/api/notifications/email/test' && method === 'POST') {
     requireAdmin(user);
@@ -2230,7 +2390,15 @@ async function handleApi(req, res, url) {
       await smtpSend(cfg, `✅ Test email · ${db.settings.brand || 'Dashboard'}`, `Ye test email hai — SMTP configuration sahi chal rahi hai.\n\nDigest isi tarah subah (${feats().digestHour || 8} IST) push ke saath email par bhi aayega (features.emailDigest ON ho to).\n${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST`);
       logAudit(user, 'email_test', { ip: clientIp(req), note: cfg.host });
       return sendJson(res, 200, { ok: true });
-    } catch (err) { throw new HttpError(502, `SMTP test fail: ${err.message}`); }
+    } catch (err) {
+      const raw = String(err && err.message || err);
+      const hint = /535|534|authentication|credentials/i.test(raw)
+        ? ' Gmail ho to normal password nahi, 2-Step Verification ka App Password use karo.'
+        : /timeout|ECONN|ENETUNREACH|EHOSTUNREACH|connect/i.test(raw)
+          ? ' Host/port check karo: STARTTLS = 587 + TLS unchecked; implicit TLS = 465 + TLS checked.'
+          : '';
+      throw new HttpError(502, `SMTP test fail: ${raw}${hint}`);
+    }
   }
   // 📬 Weekly auto-digest email — force (Settings button / test); schedule maybeWeeklyEmail chalta hai.
   if (p === '/api/notifications/weekly-email' && method === 'POST') {
@@ -2273,7 +2441,7 @@ async function handleApi(req, res, url) {
   // 🗺 Team location (admin) — jinhone Settings/phone se location share ki hai
   if (p === '/api/team-location' && method === 'GET') {
     requireAdmin(user);
-    const people = db.users.filter((u) => u.lastLocation && u.lastLocation.latitude).map((u) => ({
+    const people = db.users.filter((u) => u.lastLocation && Number.isFinite(Number(u.lastLocation.latitude)) && Number.isFinite(Number(u.lastLocation.longitude))).map((u) => ({
       username: u.username, name: u.name || u.username, role: u.role, approved: !!u.approved,
       lat: u.lastLocation.latitude, lng: u.lastLocation.longitude, accuracy: u.lastLocation.accuracy || null,
       at: u.lastLocation.at || null, lastLoginAt: u.lastLoginAt || null
@@ -2289,20 +2457,31 @@ async function handleApi(req, res, url) {
   // 🔗 Personal read-only links (agent + TL) — CRUD sirf admin
   if (p === '/api/personal-links' && method === 'GET') {
     requireAdmin(user);
-    return sendJson(res, 200, { links: Array.isArray(db.settings.personalLinks) ? db.settings.personalLinks : [] });
+    const links = (Array.isArray(db.settings.personalLinks) ? db.settings.personalLinks : []).map((l) => ({ ...l, source: l.source === 'gv' ? 'gv' : 'ff' }));
+    return sendJson(res, 200, { links });
   }
   if (p === '/api/personal-links' && method === 'POST') {
     requireAdmin(user);
     const body = await readBody(req);
     const kind = body.kind === 'tl' ? 'tl' : 'agent';
-    const name = String(body.name || '').trim().slice(0, 80);
-    if (!name) throw new HttpError(400, 'Agent/TL ka naam likho.');
+    const source = body.source === 'gv' ? 'gv' : 'ff';
+    const name = String(body.name || '').trim().replace(/[\u0000-\u001f<>]/g, '').slice(0, 80);
+    if (!name) throw new HttpError(400, 'Agent/TL ka exact naam likho.');
     if (feats().personalLinks === false) throw new HttpError(403, 'Personal links feature band hai — Features tab se ON karo.');
-    const link = { id: `pl_${crypto.randomBytes(6).toString('hex')}`, kind, name, token: crypto.randomBytes(18).toString('hex'), enabled: true, by: user.username, createdAt: new Date().toISOString() };
+    const duplicate = (db.settings.personalLinks || []).find((l) => (l.source === 'gv' ? 'gv' : 'ff') === source && l.kind === kind && String(l.name).toLowerCase() === name.toLowerCase() && l.enabled !== false);
+    if (duplicate) {
+      void personalDailyRows({ ...duplicate, source }).catch(() => {});
+      if (kind === 'tl') void personalTeamAgents({ ...duplicate, source }).catch(() => {});
+      return sendJson(res, 200, { ok: true, link: { ...duplicate, source }, reused: true });
+    }
+    const link = { id: `pl_${crypto.randomBytes(6).toString('hex')}`, source, kind, name, token: crypto.randomBytes(18).toString('hex'), enabled: true, by: user.username, createdAt: new Date().toISOString() };
     if (!Array.isArray(db.settings.personalLinks)) db.settings.personalLinks = [];
     db.settings.personalLinks.push(link);
     await persist('settings');
-    logAudit(user, 'link_create', { target: `${kind}:${name}`, ip: clientIp(req) });
+    logAudit(user, 'link_create', { target: `${source}:${kind}:${name}`, ip: clientIp(req) });
+    // User WhatsApp/open kare usse pehle Google query warm kar do; response ko is par block nahi karte.
+    void personalDailyRows(link).catch(() => {});
+    if (kind === 'tl') void personalTeamAgents(link).catch(() => {});
     return sendJson(res, 200, { ok: true, link });
   }
   const plDel = p.match(/^\/api\/personal-links\/([^/]+)$/);
@@ -2575,6 +2754,102 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { ok: true, user: publicUser(user) });
   }
 
+  // ---- collaborative workspace: saved views + agent/TL notes -------------------------------
+  if (p === '/api/workspace' && method === 'GET') {
+    const w = workspaceStore();
+    const canViews = user.role === 'admin' || (user.permissions || []).includes('savedViews');
+    const canNotes = user.role === 'admin' || (user.permissions || []).includes('followups');
+    return sendJson(res, 200, {
+      views: canViews ? w.views.filter((v) => visibleWorkspaceView(v, user)).map((v) => ({ ...v, ownerUser: publicWorkspaceUser(v.owner) })) : [],
+      notes: canNotes ? w.notes.map((n) => ({ ...n, createdByUser: publicWorkspaceUser(n.createdBy), updatedByUser: publicWorkspaceUser(n.updatedBy || n.createdBy) })) : []
+    });
+  }
+  if (p === '/api/workspace/views' && method === 'POST') {
+    if (user.role !== 'admin' && !(user.permissions || []).includes('savedViews')) throw new HttpError(403, 'Saved views access disabled.');
+    const body = await readBody(req);
+    const title = shortText(body.title, 100);
+    const route = shortText(body.route, 700);
+    if (!title) throw new HttpError(400, 'View name required.');
+    if (!/^#\/[A-Za-z0-9_%?=&+.,:\/-]+$/.test(route)) throw new HttpError(400, 'Dashboard filter link invalid hai.');
+    const w = workspaceStore();
+    const now = new Date().toISOString();
+    const row = { id: workspaceId('view'), title, description: shortText(body.description, 240), route, shared: body.shared === true, owner: user.username, createdAt: now, updatedAt: now };
+    w.views.push(row);
+    if (w.views.length > 150) w.views.splice(0, w.views.length - 150);
+    await persist('notify');
+    logAudit(user, 'saved_view_created', { target: row.id, ip: clientIp(req), note: row.title });
+    return sendJson(res, 201, { ok: true, view: { ...row, ownerUser: publicWorkspaceUser(row.owner) } });
+  }
+  const viewPath = p.match(/^\/api\/workspace\/views\/([^/]+)$/);
+  if (viewPath && method === 'DELETE') {
+    if (user.role !== 'admin' && !(user.permissions || []).includes('savedViews')) throw new HttpError(403, 'Saved views access disabled.');
+    const w = workspaceStore();
+    const i = w.views.findIndex((v) => v.id === viewPath[1]);
+    if (i < 0) throw new HttpError(404, 'Saved view nahi mila.');
+    if (w.views[i].owner !== user.username && user.role !== 'admin') throw new HttpError(403, 'Sirf owner is view ko delete kar sakta hai.');
+    const [removed] = w.views.splice(i, 1);
+    await persist('notify');
+    logAudit(user, 'saved_view_deleted', { target: removed.id, ip: clientIp(req), note: removed.title });
+    return sendJson(res, 200, { ok: true });
+  }
+  if (p === '/api/workspace/notes' && method === 'POST') {
+    if (user.role !== 'admin' && !(user.permissions || []).includes('followups')) throw new HttpError(403, 'Notes access disabled.');
+    const body = await readBody(req);
+    const text = shortText(body.text, 4000);
+    const entityName = shortText(body.entityName, 120);
+    if (!text || !entityName) throw new HttpError(400, 'Agent/TL name aur note required hain.');
+    const allowedStatus = new Set(['open', 'waiting', 'done']);
+    const status = allowedStatus.has(body.status) ? body.status : 'open';
+    const due = body.dueAt && Number.isFinite(Date.parse(body.dueAt)) ? new Date(body.dueAt).toISOString() : null;
+    const now = new Date().toISOString();
+    const row = {
+      id: workspaceId('note'), entityType: ['agent', 'tl', 'general'].includes(body.entityType) ? body.entityType : 'agent',
+      entityKey: shortText(body.entityKey || entityName, 160), entityName, channel: ['ff', 'gv', 'both'].includes(body.channel) ? body.channel : 'both',
+      text, status, priority: ['low', 'normal', 'high'].includes(body.priority) ? body.priority : 'normal', dueAt: due,
+      assignee: shortText(body.assignee, 80), createdBy: user.username, updatedBy: user.username, createdAt: now, updatedAt: now,
+      timeline: [{ at: now, by: user.username, action: 'created', detail: text.slice(0, 240) }]
+    };
+    const w = workspaceStore();
+    w.notes.push(row);
+    if (w.notes.length > 1000) w.notes.splice(0, w.notes.length - 1000);
+    await persist('notify');
+    return sendJson(res, 201, { ok: true, note: { ...row, createdByUser: publicWorkspaceUser(row.createdBy), updatedByUser: publicWorkspaceUser(row.updatedBy) } });
+  }
+  const notePath = p.match(/^\/api\/workspace\/notes\/([^/]+)$/);
+  if (notePath && method === 'PATCH') {
+    if (user.role !== 'admin' && !(user.permissions || []).includes('followups')) throw new HttpError(403, 'Notes access disabled.');
+    const w = workspaceStore();
+    const row = w.notes.find((n) => n.id === notePath[1]);
+    if (!row) throw new HttpError(404, 'Note nahi mila.');
+    const body = await readBody(req);
+    const before = row.status;
+    if (body.status !== undefined) {
+      if (!['open', 'waiting', 'done'].includes(body.status)) throw new HttpError(400, 'Status invalid hai.');
+      row.status = body.status;
+    }
+    if (body.text !== undefined) { const text = shortText(body.text, 4000); if (!text) throw new HttpError(400, 'Note khali nahi ho sakta.'); row.text = text; }
+    if (body.priority !== undefined && ['low', 'normal', 'high'].includes(body.priority)) row.priority = body.priority;
+    if (body.assignee !== undefined) row.assignee = shortText(body.assignee, 80);
+    if (body.dueAt !== undefined) row.dueAt = body.dueAt && Number.isFinite(Date.parse(body.dueAt)) ? new Date(body.dueAt).toISOString() : null;
+    const now = new Date().toISOString();
+    row.updatedAt = now; row.updatedBy = user.username;
+    if (!Array.isArray(row.timeline)) row.timeline = [];
+    row.timeline.push({ at: now, by: user.username, action: before !== row.status ? `status:${row.status}` : 'updated', detail: shortText(body.timelineNote || '', 240) });
+    row.timeline = row.timeline.slice(-30);
+    await persist('notify');
+    return sendJson(res, 200, { ok: true, note: { ...row, createdByUser: publicWorkspaceUser(row.createdBy), updatedByUser: publicWorkspaceUser(row.updatedBy) } });
+  }
+  if (notePath && method === 'DELETE') {
+    if (user.role !== 'admin' && !(user.permissions || []).includes('followups')) throw new HttpError(403, 'Notes access disabled.');
+    const w = workspaceStore();
+    const i = w.notes.findIndex((n) => n.id === notePath[1]);
+    if (i < 0) throw new HttpError(404, 'Note nahi mila.');
+    if (w.notes[i].createdBy !== user.username && user.role !== 'admin') throw new HttpError(403, 'Sirf creator is note ko delete kar sakta hai.');
+    w.notes.splice(i, 1);
+    await persist('notify');
+    return sendJson(res, 200, { ok: true });
+  }
+
   // ---- gviz ----
   if (p === '/api/gviz' && method === 'GET') {
     return handleGviz(res, url.searchParams);
@@ -2636,6 +2911,31 @@ async function handleApi(req, res, url) {
         search: Array.isArray(t.search) ? t.search.map((s) => String(s).slice(0, 6).toUpperCase()) : undefined,
         enabled: t.enabled !== false
       }));
+    }
+    if (patch.notificationRoutes !== undefined) {
+      if (!patch.notificationRoutes || typeof patch.notificationRoutes !== 'object' || Array.isArray(patch.notificationRoutes)) throw new HttpError(400, 'notificationRoutes object hona chahiye');
+      patch.notificationRoutes = Object.fromEntries(Object.entries(patch.notificationRoutes)
+        .filter(([key, value]) => Object.hasOwn(DEFAULT_NOTIFICATION_ROUTES, key) && NOTIFICATION_AUDIENCES.has(value)));
+    }
+    if (patch.ffCommission !== undefined) {
+      if (!patch.ffCommission || typeof patch.ffCommission !== 'object' || Array.isArray(patch.ffCommission)) throw new HttpError(400, 'ffCommission mapping object hona chahiye.');
+      for (const key of ['rateCol', 'earnedCol', 'categoryCol']) {
+        if (patch.ffCommission[key] === undefined) continue;
+        const col = String(patch.ffCommission[key] || '').trim().toUpperCase();
+        if (col && !/^[A-Z]{1,3}$/.test(col)) throw new HttpError(400, `${key}: valid column letter chahiye (e.g. BZ).`);
+        patch.ffCommission[key] = col;
+      }
+    }
+    if (patch.stockMovement !== undefined) {
+      if (!patch.stockMovement || typeof patch.stockMovement !== 'object' || Array.isArray(patch.stockMovement)) throw new HttpError(400, 'stockMovement mapping object hona chahiye.');
+      if (patch.stockMovement.sheet !== undefined) patch.stockMovement.sheet = String(patch.stockMovement.sheet || '').trim().slice(0, 80);
+      for (const key of ['date', 'channel', 'type', 'quantity', 'cls', 'from', 'to', 'reference', 'note']) {
+        if (patch.stockMovement[key] === undefined) continue;
+        const col = String(patch.stockMovement[key] || '').trim().toUpperCase();
+        if (col && !/^[A-Z]{1,3}$/.test(col)) throw new HttpError(400, `stockMovement.${key}: valid column letter chahiye.`);
+        patch.stockMovement[key] = col;
+      }
+      cache.clear();
     }
     if (patch.gv && typeof patch.gv === 'object') cache.clear();
     const next = body.reset ? { ...DEFAULT_SETTINGS } : deepMerge(db.settings, patch);
@@ -2788,31 +3088,65 @@ async function serveStatic(res, pathname) {
 const escHtml = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const pad2 = (n) => String(n).padStart(2, '0');
 function gvizLiteral(name) { return `'${String(name).replace(/\\/g, '').replace(/'/g, "\\'")}'`; }
+function personalWindow() {
+  const today = dateKeyNow();
+  const [y, m] = today.split('-').map(Number);
+  const prev = new Date(Date.UTC(y, m - 2, 1));
+  const start = `${prev.getUTCFullYear()}-${pad2(prev.getUTCMonth() + 1)}-01`;
+  return { start, today };
+}
+function personalConfig(link) {
+  const source = link.source === 'gv' ? 'gv' : 'ff';
+  if (source === 'gv') {
+    const m = (db.settings.gv && db.settings.gv.master) || {};
+    return {
+      source, sheetId: db.settings.gvSheetId, sheet: m.tab || 'GV Master',
+      dateCol: m.date || 'P', tagCol: m.tagId || 'I', clsCol: m.cch || m.vClass || 'G',
+      nameCol: link.kind === 'tl' ? (m.tlName || 'D') : (m.agentName || 'B'),
+      agentCol: m.agentName || 'B', tlCol: m.tlName || 'D', masterCol: ''
+    };
+  }
+  const e = db.settings.eir || {};
+  return {
+    source, sheetId: db.settings.sheetId, sheet: db.settings.eirSheet || e.sheet || 'EIR',
+    dateCol: e.date || 'AA', tagCol: e.tagId || 'A', clsCol: e.cls || 'D',
+    nameCol: link.kind === 'tl' ? (e.tlName || 'BA') : (e.agentName || 'L'),
+    agentCol: e.agentName || 'L', tlCol: e.tlName || 'BA', masterCol: e.masterId || 'AU'
+  };
+}
+function isFfPersonalRow(master, tl) {
+  const e = db.settings.eir || {};
+  const gvId = String(e.gvMasterId || '5845036').trim().replace(/\.0+$/, '');
+  const id = String(master || '').trim().replace(/\.0+$/, '');
+  const gvTl = String(e.gvChannelTl || 'ApnaPayment Pvt. Ltd.').trim().toLowerCase();
+  return !((gvId && id === gvId) || (gvTl && String(tl || '').trim().toLowerCase() === gvTl));
+}
 async function personalDailyRows(link) {
-  const s = db.settings.eir || {};
-  const sheet = db.settings.eirSheet || 'EIR';
-  const dateCol = s.date || 'AA', tagCol = s.tagId || 'A', clsCol = s.cls || 'D';
-  const nameCol = link.kind === 'tl' ? (s.tlName || 'BA') : (s.agentName || 'L');
-  const tq = `select ${dateCol}, ${clsCol}, count(${tagCol}) where ${tagCol} is not null and ${nameCol} = ${gvizLiteral(link.name)} group by ${dateCol}, ${clsCol} order by ${dateCol} desc limit 70`;
-  const params = new URLSearchParams({ id: String(db.settings.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet, tq });
-  const out = await fetchUpstream(upstreamUrl(params));
+  const c = personalConfig(link);
+  const { start, today } = personalWindow();
+  const extra = c.source === 'ff' ? `, ${c.masterCol}, ${c.tlCol}` : '';
+  const tq = `select ${c.dateCol}, ${c.clsCol}${extra}, count(${c.tagCol}) where ${c.tagCol} is not null and ${c.dateCol} >= date '${start}' and ${c.dateCol} <= date '${today}' and ${c.nameCol} = ${gvizLiteral(link.name)} group by ${c.dateCol}, ${c.clsCol}${extra} order by ${c.dateCol} desc limit 5000`;
+  const params = new URLSearchParams({ id: String(c.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet: c.sheet, tq });
+  const out = await fetchUpstreamCached(upstreamUrl(params));
   if (out.status < 200 || out.status >= 300) throw new Error(`sheet ${out.status}`);
   const table = parseGvizServer(out.body);
   const rows = [];
   for (const row of table.rows || []) {
     const dk = serverDate(serverCell(row, 0));
     if (!dk) continue;
-    rows.push({ date: dk, cls: classBucket(serverCell(row, 1)), n: serverNumber(serverCell(row, 2)) });
+    const cells = (row && row.c) || [];
+    if (c.source === 'ff' && cells.length >= 5 && !isFfPersonalRow(serverCell(row, 2), serverCell(row, 3))) continue;
+    rows.push({ date: dk, cls: classBucket(serverCell(row, 1)), n: serverNumber(serverCell(row, Math.max(0, cells.length - 1))) });
   }
   return rows;
 }
 async function personalTeamAgents(link) {
-  const s = db.settings.eir || {};
-  const sheet = db.settings.eirSheet || 'EIR';
-  const dateCol = s.date || 'AA', tagCol = s.tagId || 'A', agentCol = s.agentName || 'L', tlCol = s.tlName || 'BA';
-  const tq = `select ${agentCol}, ${dateCol}, count(${tagCol}) where ${tagCol} is not null and ${tlCol} = ${gvizLiteral(link.name)} group by ${agentCol}, ${dateCol} order by ${dateCol} desc limit 2500`;
-  const params = new URLSearchParams({ id: String(db.settings.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet, tq });
-  const out = await fetchUpstream(upstreamUrl(params));
+  const c = personalConfig(link);
+  const { start, today } = personalWindow();
+  const extra = c.source === 'ff' ? `, ${c.masterCol}, ${c.tlCol}` : '';
+  const tq = `select ${c.agentCol}, ${c.dateCol}${extra}, count(${c.tagCol}) where ${c.tagCol} is not null and ${c.dateCol} >= date '${start}' and ${c.dateCol} <= date '${today}' and ${c.nameCol} = ${gvizLiteral(link.name)} group by ${c.agentCol}, ${c.dateCol}${extra} order by ${c.dateCol} desc limit 5000`;
+  const params = new URLSearchParams({ id: String(c.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet: c.sheet, tq });
+  const out = await fetchUpstreamCached(upstreamUrl(params));
   if (out.status < 200 || out.status >= 300) throw new Error(`sheet ${out.status}`);
   const table = parseGvizServer(out.body);
   const byAgent = new Map();
@@ -2820,43 +3154,52 @@ async function personalTeamAgents(link) {
     const name = serverCell(row, 0).trim();
     const dk = serverDate(serverCell(row, 1));
     if (!name || !dk) continue;
+    const cells = (row && row.c) || [];
+    if (c.source === 'ff' && cells.length >= 5 && !isFfPersonalRow(serverCell(row, 2), serverCell(row, 3))) continue;
     if (!byAgent.has(name)) byAgent.set(name, new Map());
-    byAgent.get(name).set(dk, (byAgent.get(name).get(dk) || 0) + serverNumber(serverCell(row, 2)));
+    byAgent.get(name).set(dk, (byAgent.get(name).get(dk) || 0) + serverNumber(serverCell(row, Math.max(0, cells.length - 1))));
   }
   return byAgent;
 }
+
 function personalStats(rows) {
   const ym = dateKeyNow().slice(0, 7);
   const todayKey = dateKeyNow();
-  const daily = new Map(); // date → n
+  const daily = new Map();
   const cls = {};
   for (const r of rows) {
     daily.set(r.date, (daily.get(r.date) || 0) + r.n);
     if (r.date.startsWith(ym)) cls[r.cls] = (cls[r.cls] || 0) + r.n;
   }
-  let mtd = 0;
-  for (const [d, n] of daily) if (d.startsWith(ym)) mtd += n;
+  let mtd = 0, mtdActiveDays = 0;
+  for (const [d, n] of daily) if (d.startsWith(ym)) { mtd += n; if (n > 0) mtdActiveDays++; }
   const prev = new Date(`${todayKey}T00:00:00Z`); prev.setUTCMonth(prev.getUTCMonth() - 1);
   const prevYm = `${prev.getUTCFullYear()}-${pad2(prev.getUTCMonth() + 1)}`;
   const dayNow = Number(todayKey.slice(8, 10));
   let prevSame = 0;
   for (const [d, n] of daily) if (d.startsWith(prevYm) && Number(d.slice(8, 10)) <= dayNow) prevSame += n;
-  const keys = [...daily.keys()].sort();
-  const last14 = keys.slice(-14).map((d) => ({ date: d, n: daily.get(d) }));
+  const keyAt = (offset) => {
+    const d = new Date(`${todayKey}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + offset);
+    return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`;
+  };
+  // Real calendar days (zeros included), not the last 14 *active* rows.
+  const last14 = Array.from({ length: 14 }, (_, i) => { const date = keyAt(i - 13); return { date, n: daily.get(date) || 0 }; });
   let streak = 0;
-  for (let i = keys.length - 1; i >= 0; i--) { const n = daily.get(keys[i]); if (n > 0) streak++; else break; }
+  for (let i = 0; i < 366; i++) { if ((daily.get(keyAt(-i)) || 0) > 0) streak++; else break; }
   let best = { date: '', n: 0 };
-  for (const [d, n] of daily) if (n > best.n) best = { date: d, n };
+  for (const [d, n] of daily) if (d.startsWith(ym) && n > best.n) best = { date: d, n };
   const clsTotal = Object.values(cls).reduce((a, b) => a + b, 0);
-  return { mtd, prevSame, last14, streak, best, cls, clsTotal, activeDays: last14.filter((x) => x.n > 0).length };
+  return { mtd, mtdActiveDays, prevSame, last14, streak, best, cls, clsTotal, activeDays: last14.filter((x) => x.n > 0).length };
 }
+
 async function servePersonalPage(req, res, rawToken) {
   const token = String(rawToken || '').split(/[/?#]/)[0].trim();
   const fail = (code, msg) => sendHtml(res, code, personalShell({ title: 'Link unavailable', heading: '🔒 Link kaam nahi kar raha', body: `<p>${escHtml(msg)}</p>` }));
   if (feats().personalLinks === false) return fail(404, 'Ye feature admin ne band kar rakha hai.');
-  const link = (Array.isArray(db.settings.personalLinks) ? db.settings.personalLinks : []).find((l) => l.token === token);
-  if (!link) return fail(404, 'Ye link ya to khatam ho gaya ya galat hai. Admin se naya maango.');
-  if (!link.enabled) return fail(403, 'Admin ne ye link band kar diya hai.');
+  const savedLink = (Array.isArray(db.settings.personalLinks) ? db.settings.personalLinks : []).find((l) => l.token === token);
+  if (!savedLink) return fail(404, 'Ye link ya to khatam ho gaya ya galat hai. Admin se naya maango.');
+  if (!savedLink.enabled) return fail(403, 'Admin ne ye link band kar diya hai.');
+  const link = { ...savedLink, source: savedLink.source === 'gv' ? 'gv' : 'ff' };
   try {
     const rows = await personalDailyRows(link);
     if (!rows.length) return fail(404, `"${link.name}" ka data abhi sheet me nahi mila (ya naam alag hai).`);
@@ -2864,8 +3207,9 @@ async function servePersonalPage(req, res, rawToken) {
     let team = [];
     let goal = null, target = null;
     const ym = dateKeyNow().slice(0, 7);
+    const normPerson = (v) => String(v || '').trim().toUpperCase().replace(/\s+/g, ' ');
     if (link.kind === 'tl') {
-      goal = ((Array.isArray(db.settings.tlTargets) ? db.settings.tlTargets : []).find((t) => t && t.ym === ym && t.tl === link.name) || null);
+      goal = ((Array.isArray(db.settings.tlTargets) ? db.settings.tlTargets : []).find((t) => t && t.ym === ym && normPerson(t.tl) === normPerson(link.name)) || null);
       const byAgent = await personalTeamAgents(link);
       for (const [name, m] of byAgent) {
         let mtdA = 0;
@@ -2875,7 +3219,7 @@ async function servePersonalPage(req, res, rawToken) {
       team.sort((a, b) => b.mtd - a.mtd);
       team = team.slice(0, 15);
     } else {
-      target = ((Array.isArray(db.settings.targets) ? db.settings.targets : []).find((t) => t && t.ym === ym && String(t.agent || '') === link.name) || null);
+      target = ((Array.isArray(db.settings.targets) ? db.settings.targets : []).find((t) => t && t.ym === ym && (t.source || 'ff') === link.source && normPerson(t.agent) === normPerson(link.name)) || null);
     }
     const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
     const maxBar = Math.max(1, ...st.last14.map((x) => x.n));
@@ -2888,7 +3232,7 @@ async function servePersonalPage(req, res, rawToken) {
     const html = personalShell({
       title: `${link.name} · Performance`,
       heading: `${link.kind === 'tl' ? '👥' : '🧑‍💼'} ${escHtml(link.name)}`,
-      sub: `${link.kind === 'tl' ? 'Team Leader' : 'Agent'} · personal view · read-only`,
+      sub: `${link.source === 'gv' ? 'GV Partner' : 'First Forward'} · ${link.kind === 'tl' ? 'Team Leader' : 'Agent'} · personal view · read-only`,
       body: `
       ${goalHtml || targetHtml ? `<section class="pb-card pb-goalcard">${goalHtml}${targetHtml}</section>` : ''}
       <section class="pb-kpis">
@@ -2902,7 +3246,7 @@ async function servePersonalPage(req, res, rawToken) {
         <div class="pb-card"><h3>🏷️ Class mix (MTD)</h3>${clsRows}</div>
         <div class="pb-card"><h3>📈 Snapshot</h3>
           <div class="pb-kv"><span>Active days (last 14)</span><b>${st.activeDays}</b></div>
-          <div class="pb-kv"><span>Avg / active day</span><b>${st.activeDays ? (st.mtd / Math.max(1, st.activeDays)).toFixed(1) : '—'}</b></div>
+          <div class="pb-kv"><span>MTD avg / active day</span><b>${st.mtdActiveDays ? (st.mtd / st.mtdActiveDays).toFixed(1) : '—'}</b></div>
           <div class="pb-kv"><span>Total rows (14 din chart)</span><b>${st.last14.reduce((a, b) => a + b.n, 0)}</b></div>
         </div>
       </section>
@@ -2949,8 +3293,8 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background
 @media(max-width:480px){.pb-grid2{grid-template-columns:1fr}}
 </style></head><body><div class="pb-wrap">
 <header class="pb-head"><div class="pb-logo">${escHtml(String(db.settings.brand || 'FF').split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase())}</div>
-<div><h1>${heading}</h1><p>${sub}</p></div></header>
-${body}
+<div><h1>${heading || escHtml(title || '')}</h1>${sub ? `<p>${sub}</p>` : ''}</div></header>
+${body || ''}
 </div></body></html>`;
 }
 function sendHtml(res, status, html, extra = {}) {
@@ -3055,7 +3399,7 @@ async function start() {
   const storedNotify = stored.notify;
   // `vapid` + `pushLog` bhi durable hain — inke bina har restart par nayi VAPID key banti thi aur
   // phone ke notification panel me push aana band ho jaata tha (subscriptions 403 par reject hoti thin).
-  db.notify = { items: Array.isArray(storedNotify.items) ? storedNotify.items.slice(-500) : [], watch: storedNotify.watch && typeof storedNotify.watch === 'object' ? storedNotify.watch : {}, push: Array.isArray(storedNotify.push) ? storedNotify.push.slice(-300) : [], pushLog: Array.isArray(storedNotify.pushLog) ? storedNotify.pushLog.slice(-40) : [], vapid: storedNotify.vapid && typeof storedNotify.vapid === 'object' ? storedNotify.vapid : null };
+  db.notify = { items: Array.isArray(storedNotify.items) ? storedNotify.items.slice(-500) : [], watch: storedNotify.watch && typeof storedNotify.watch === 'object' ? storedNotify.watch : {}, push: Array.isArray(storedNotify.push) ? storedNotify.push.slice(-300) : [], pushLog: Array.isArray(storedNotify.pushLog) ? storedNotify.pushLog.slice(-40) : [], vapid: storedNotify.vapid && typeof storedNotify.vapid === 'object' ? storedNotify.vapid : null, workspace: storedNotify.workspace && typeof storedNotify.workspace === 'object' ? storedNotify.workspace : { views: [], notes: [] } };
   for (const kind of Object.keys(FILES)) durableSnapshots.set(kind, JSON.stringify(db[kind], null, 2));
   // Upgrade the known previous/default product title in durable settings; preserve admin custom names.
   if (/^First Forward Dashboard(?:\s*[-–—]\s*Robo\s*v?3\.2)?$/i.test(String(db.settings.appName || '').trim())) {

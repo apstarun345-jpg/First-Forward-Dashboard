@@ -34,18 +34,20 @@ window.FF = window.FF || {};
   /** Daily rows: [{ key, d, ym, day, cls, group, type, vrnType, channel, n }] */
   async function loadDaily(filter, opts) {
     const e = FF.config.eir;
-    const tq = `select ${e.date}, ${e.cls}, ${e.type}, ${e.vrnType}, ${e.masterId}, count(${e.tagId}) where ${whereClause(filter)} group by ${e.date}, ${e.cls}, ${e.type}, ${e.vrnType}, ${e.masterId} order by ${e.date}`;
+    // TL name bhi select karo: kuch legacy GV rows me master ID blank hai, lekin GV channel TL
+    // present hai. Sirf master ID dekhne se woh galat First Forward totals me jud jaate the.
+    const tq = `select ${e.date}, ${e.cls}, ${e.type}, ${e.vrnType}, ${e.masterId}, ${e.tlName}, count(${e.tagId}) where ${whereClause(filter)} group by ${e.date}, ${e.cls}, ${e.type}, ${e.vrnType}, ${e.masterId}, ${e.tlName} order by ${e.date}`;
     const t = await D.query(e.sheet, tq, opts);
     const rows = [];
     for (const r of t.rows) {
       const d = D.cellDate(r[0]);
-      const n = D.cellNumber(r[5]);
+      const n = D.cellNumber(r[6]);
       if (!d || !n) continue;
       const cls = normClass(D.cellText(r[1]));
       rows.push({
         key: U.dateKey(d), d, ym: U.ymKey(d), day: d.getDate(), cls, group: classGroup(cls),
         type: D.cellText(r[2]).toUpperCase() || 'ISSUANCE', vrnType: D.cellText(r[3]),
-        channel: channelOf(D.cellText(r[4]), ''), n
+        channel: channelOf(D.cellText(r[4]), D.cellText(r[5])), n
       });
     }
     return rows;
@@ -120,6 +122,82 @@ window.FF = window.FF || {};
       rows.push({ name: agentName || gvName || 'Unknown', tlName, channel: channelOf(D.cellText(r[3]), tlName), ym: `${y}-${U.pad2(m + 1)}`, cls, group: classGroup(cls), type: D.cellText(r[7]).toUpperCase() || 'ISSUANCE', n });
     }
     return rows;
+  }
+
+  /**
+   * Exact custom-range people rows. Grouping by date keeps active-day counts accurate while Google
+   * does the heavy aggregation (the browser never downloads raw EIR rows).
+   * [{ id, name, tlName, channel, key, cls, group, type, dateKey, n }]
+   */
+  async function loadRangePeople(from, to, opts) {
+    const iso = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : '';
+    const start = iso(from), end = iso(to);
+    if (!start || !end || start > end) throw new Error('Date range valid nahi hai.');
+    const e = FF.config.eir;
+    const tq = `select ${e.agentId}, ${e.agentName}, ${e.gvId}, ${e.gvName}, ${e.tlId}, ${e.tlName}, ${e.masterId}, ${e.date}, ${e.cls}, ${e.type}, count(${e.tagId}) where ${e.date} >= date '${start}' and ${e.date} <= date '${end}' and ${e.tagId} is not null group by ${e.agentId}, ${e.agentName}, ${e.gvId}, ${e.gvName}, ${e.tlId}, ${e.tlName}, ${e.masterId}, ${e.date}, ${e.cls}, ${e.type}`;
+    const t = await D.query(e.sheet, tq, opts);
+    const rows = [];
+    for (const r of t.rows) {
+      const d = D.cellDate(r[7]);
+      const n = D.cellNumber(r[10]);
+      if (!d || !n) continue;
+      const agentId = D.cellText(r[0]), agentName = U.clean(D.cellText(r[1]));
+      const gvId = D.cellText(r[2]), gvName = U.clean(D.cellText(r[3]));
+      const tlName = U.clean(D.cellText(r[5])) || 'Direct';
+      const channel = channelOf(D.cellText(r[6]), tlName);
+      const id = channel === 'GV Partner' ? (gvId || agentId) : (agentId || gvId);
+      const name = channel === 'GV Partner' ? (gvName || agentName || id) : (agentName || gvName || id);
+      if (!name) continue;
+      const cls = normClass(D.cellText(r[8]));
+      rows.push({ id, name, tlId: D.cellText(r[4]), tlName, channel, key: `${channel}|${id || name}`, cls, group: classGroup(cls), type: D.cellText(r[9]).toUpperCase() || 'ISSUANCE', dateKey: U.dateKey(d), n });
+    }
+    return rows;
+  }
+
+  /**
+   * Optional unified stock-movement ledger (First Forward spreadsheet).
+   * Expected columns are configurable: Date, Channel, Type, Quantity, Class, From, To, Reference, Note.
+   * Returns signed stock impact without guessing unknown movement types.
+   */
+  async function loadStockMovements(from, to, opts) {
+    const m = FF.config.stockMovement || {};
+    if (m.enabled !== true) return { configured: false, rows: [], invalid: [] };
+    const iso = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : '';
+    const start = iso(from), end = iso(to);
+    if (!start || !end || start > end) throw new Error('Movement date range valid nahi hai.');
+    const required = ['date', 'channel', 'type', 'quantity'];
+    if (!m.sheet || required.some((key) => !/^[A-Z]{1,3}$/i.test(String(m[key] || '')))) throw new Error('Stock movement ledger mapping incomplete hai.');
+    const selected = [['date', m.date], ['channel', m.channel], ['type', m.type], ['quantity', m.quantity], ['cls', m.cls], ['from', m.from], ['to', m.to], ['reference', m.reference], ['note', m.note]]
+      .map(([key, col]) => [key, String(col || '').trim().toUpperCase()]).filter(([, col]) => col);
+    const index = Object.fromEntries(selected.map(([key], i) => [key, i]));
+    const select = selected.map(([, col]) => col).join(', ');
+    const tq = `select ${select} where ${m.date} >= date '${start}' and ${m.date} <= date '${end}' and ${m.quantity} is not null order by ${m.date}`;
+    const t = await D.query(m.sheet, tq, opts);
+    const normalizeChannel = (value) => {
+      const x = U.clean(value).toUpperCase();
+      if (/\bGV\b|GV PARTNER/.test(x)) return 'GV Partner';
+      if (/\bFF\b|FIRST FORWARD/.test(x)) return 'First Forward';
+      return '';
+    };
+    const signedImpact = (type, quantity) => {
+      const x = U.clean(type).toUpperCase().replace(/[_-]+/g, ' '), q = Number(quantity);
+      if (!Number.isFinite(q) || q === 0) return null;
+      if (/TRANSFER\s*IN|^IN$|INWARD|RECEIPT|RECEIVED|RESTOCK|RETURN\s*IN/.test(x)) return Math.abs(q);
+      if (/TRANSFER\s*OUT|^OUT$|OUTWARD|DAMAGE|DAMAGED|LOSS|LOST|WRITE\s*OFF|RETURN\s*OUT/.test(x)) return -Math.abs(q);
+      if (/^TRANSFER$|INTERNAL\s*TRANSFER/.test(x)) return 0;
+      if (/ADJUST/.test(x)) return q;
+      return null;
+    };
+    const rows = [], invalid = [];
+    t.rows.forEach((r, rowIndex) => {
+      const at = (key) => index[key] === undefined ? null : r[index[key]];
+      const date = D.cellDate(at('date')), channel = normalizeChannel(D.cellText(at('channel'))), type = D.cellText(at('type')), quantity = D.cellNumber(at('quantity'));
+      const impact = signedImpact(type, quantity);
+      const row = { date, dateKey: date ? U.dateKey(date) : '', channel, type, quantity: Number(quantity) || 0, impact,
+        cls: D.cellText(at('cls')) || 'NA', from: D.cellText(at('from')), to: D.cellText(at('to')), reference: D.cellText(at('reference')), note: D.cellText(at('note')), row: rowIndex + 2 };
+      if (!date || !channel || impact === null) invalid.push(row); else rows.push(row);
+    });
+    return { configured: true, rows, invalid, source: m.sheet };
   }
 
   /** Raw StockDataa rows for one agent / TL / class (used for Excel export). Returns { header, rows } */
@@ -286,5 +364,5 @@ window.FF = window.FF || {};
     return map;
   }
 
-  FF.model = { classGroup, channelOf, loadDaily, loadAgents, loadStatus, loadStock, loadStockAgents, loadAgentClassMonthly, loadStockRows, loadStockAgentTypes, loadStockAging, months, latestDate, dailySeries, summary, byDim };
+  FF.model = { classGroup, channelOf, loadDaily, loadAgents, loadStatus, loadStock, loadStockAgents, loadAgentClassMonthly, loadRangePeople, loadStockMovements, loadStockRows, loadStockAgentTypes, loadStockAging, months, latestDate, dailySeries, summary, byDim };
 })(window.FF);

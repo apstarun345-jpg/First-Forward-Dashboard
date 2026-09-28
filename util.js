@@ -177,6 +177,35 @@ window.FF = window.FF || {};
     let timer = null;
     return function (...args) { clearTimeout(timer); timer = setTimeout(() => fn.apply(this, args), ms); };
   }
+
+  // Consistent async button feedback. Cloud-backed saves can take a few seconds; disabling the
+  // button + showing a real spinner makes it clear that the request is progressing (not hung).
+  const busyButtons = new WeakMap();
+  function setButtonBusy(button, busy, label) {
+    if (!button) return false;
+    if (busy) {
+      if (busyButtons.has(button)) return false;
+      busyButtons.set(button, { html: button.innerHTML, disabled: button.disabled, aria: button.getAttribute('aria-busy') });
+      button.classList.add('is-busy');
+      button.setAttribute('aria-busy', 'true');
+      button.disabled = true;
+      if (label) button.textContent = label;
+      return true;
+    }
+    const old = busyButtons.get(button);
+    if (!old) return false;
+    button.innerHTML = old.html;
+    button.disabled = old.disabled;
+    button.classList.remove('is-busy');
+    if (old.aria === null) button.removeAttribute('aria-busy'); else button.setAttribute('aria-busy', old.aria);
+    busyButtons.delete(button);
+    return true;
+  }
+  async function withButtonBusy(button, action, label) {
+    if (!setButtonBusy(button, true, label || 'Please wait…')) return undefined;
+    try { return await (typeof action === 'function' ? action() : action); }
+    finally { setButtonBusy(button, false); }
+  }
   function toast(message, kind) {
     let el = $('#toast');
     if (!el) { el = h('<div id="toast" class="toast" hidden></div>'); document.body.appendChild(el); }
@@ -234,24 +263,73 @@ window.FF = window.FF || {};
 
   /** Autocomplete dropdown for a text input.
       suggest(input, { items: () => [{ label, sub, value, kind, badge }], onPick(item), min: 1, max: 12, onClear })
-      Items are matched on label/sub/keywords (case-insensitive); Enter picks the highlighted one, Esc closes. */
+      Items are matched on label/sub/keywords (case-insensitive); Enter picks the highlighted one, Esc closes.
+      The list is portalled to <body> and anchored outside the input, so it can never cover typed text
+      or get clipped by a card/table overflow container. */
+  let suggestSeq = 0;
   function suggest(input, opts) {
     const o = { min: 1, max: 12, ...opts };
-    const box = h('<div class="suggest" hidden role="listbox"></div>');
+    const box = h('<div class="suggest" hidden role="listbox" aria-label="Search suggestions"></div>');
+    const boxId = `ff-suggest-${++suggestSeq}`;
+    box.id = boxId;
     input.setAttribute('autocomplete', 'off');
     input.setAttribute('spellcheck', 'false');
-    const holder = input.parentElement;
-    if (holder && getComputedStyle(holder).position === 'static') holder.style.position = 'relative';
-    (holder || document.body).appendChild(box);
-    let list = [], active = -1;
+    input.setAttribute('aria-autocomplete', 'list');
+    input.setAttribute('aria-haspopup', 'listbox');
+    input.setAttribute('aria-controls', boxId);
+    input.setAttribute('aria-expanded', 'false');
+    // Body portal avoids stacking/overflow bugs in cards, drawers and horizontally scrolling tables.
+    document.body.appendChild(box);
+    let list = [], active = -1, destroyed = false;
     const norm = (s) => String(s || '').toLowerCase();
-    function close() { box.hidden = true; active = -1; }
+
+    function place() {
+      if (destroyed || !input.isConnected) return;
+      const rect = input.getBoundingClientRect();
+      const vw = Math.max(240, window.innerWidth || document.documentElement.clientWidth || 1024);
+      const vh = Math.max(240, window.innerHeight || document.documentElement.clientHeight || 768);
+      const gap = 8, edge = 8;
+      const maxWidth = Math.max(220, vw - edge * 2);
+      const width = Math.min(Math.max(rect.width || 0, Math.min(280, maxWidth)), maxWidth);
+      const left = Math.max(edge, Math.min(rect.left, vw - width - edge));
+      const below = vh - rect.bottom - gap - edge;
+      const above = rect.top - gap - edge;
+      const openAbove = below < 180 && above > below;
+      const available = Math.max(88, openAbove ? above : below);
+      box.dataset.placement = openAbove ? 'top' : 'bottom';
+      box.style.position = 'fixed';
+      box.style.left = `${Math.round(left)}px`;
+      box.style.width = `${Math.round(width)}px`;
+      box.style.maxHeight = `${Math.round(Math.min(360, available))}px`;
+      if (openAbove) {
+        box.style.top = 'auto';
+        box.style.bottom = `${Math.max(edge, Math.round(vh - rect.top + gap))}px`;
+      } else {
+        box.style.bottom = 'auto';
+        box.style.top = `${Math.min(vh - edge, Math.round(rect.bottom + gap))}px`;
+      }
+    }
+    function close() {
+      box.hidden = true; active = -1;
+      input.setAttribute('aria-expanded', 'false');
+      input.removeAttribute('aria-activedescendant');
+    }
+    function show() { box.hidden = false; input.setAttribute('aria-expanded', 'true'); place(); }
     function render() {
-      if (!list.length) { box.innerHTML = `<div class="suggest-empty">Koi match nahi</div>`; box.hidden = false; return; }
-      box.innerHTML = list.map((it, i) => `<div class="suggest-item ${i === active ? 'on' : ''}" data-i="${i}" role="option"><span class="suggest-kind ${esc(it.kind || '')}">${esc(it.kindLabel || it.kind || '')}</span><span class="suggest-main"><b>${esc(it.label)}</b>${it.sub ? `<small>${esc(it.sub)}</small>` : ''}</span>${it.badge ? `<span class="suggest-badge">${esc(it.badge)}</span>` : ''}</div>`).join('');
-      box.hidden = false;
+      if (!list.length) {
+        active = -1;
+        box.innerHTML = '<div class="suggest-empty">Koi match nahi</div>';
+        input.removeAttribute('aria-activedescendant');
+        show(); return;
+      }
+      box.innerHTML = list.map((it, i) => `<div id="${boxId}-option-${i}" class="suggest-item ${i === active ? 'on' : ''}" data-i="${i}" role="option" aria-selected="${i === active ? 'true' : 'false'}"><span class="suggest-kind ${esc(it.kind || '')}">${esc(it.kindLabel || it.kind || '')}</span><span class="suggest-main"><b>${esc(it.label)}</b>${it.sub ? `<small>${esc(it.sub)}</small>` : ''}</span>${it.badge ? `<span class="suggest-badge">${esc(it.badge)}</span>` : ''}</div>`).join('');
+      if (active >= 0) input.setAttribute('aria-activedescendant', `${boxId}-option-${active}`);
+      else input.removeAttribute('aria-activedescendant');
+      show();
+      if (active >= 0) requestAnimationFrame(() => box.querySelector('.suggest-item.on')?.scrollIntoView({ block: 'nearest' }));
     }
     function compute() {
+      if (destroyed || !input.isConnected) { destroy(); return; }
       const q = norm(input.value.trim());
       if (q.length < o.min) { close(); return; }
       const all = typeof o.items === 'function' ? o.items() : o.items || [];
@@ -266,19 +344,58 @@ window.FF = window.FF || {};
       active = list.length ? 0 : -1;
       render();
     }
-    function pick(i) { const it = list[i]; if (!it) return; input.value = it.inputValue !== undefined ? it.inputValue : it.label; close(); o.onPick && o.onPick(it); }
-    input.addEventListener('input', debounce(compute, 80));
-    input.addEventListener('focus', () => { if (input.value.trim().length >= o.min) compute(); });
-    input.addEventListener('keydown', (e) => {
-      if (box.hidden) { if (e.key === 'Enter' && o.onEnter) { o.onEnter(input.value.trim()); } return; }
+    function pick(i) {
+      const it = list[i]; if (!it) return;
+      input.value = it.inputValue !== undefined ? it.inputValue : it.label;
+      close(); o.onPick && o.onPick(it);
+    }
+    const onInput = debounce(compute, 80);
+    const onFocus = () => { if (input.value.trim().length >= o.min) compute(); };
+    const onKeydown = (e) => {
+      if (box.hidden) { if (e.key === 'Enter' && o.onEnter) { e.preventDefault(); o.onEnter(input.value.trim()); } return; }
       if (e.key === 'ArrowDown') { e.preventDefault(); active = Math.min(list.length - 1, active + 1); render(); }
       else if (e.key === 'ArrowUp') { e.preventDefault(); active = Math.max(0, active - 1); render(); }
       else if (e.key === 'Enter') { e.preventDefault(); if (active >= 0) pick(active); else if (o.onEnter) { close(); o.onEnter(input.value.trim()); } }
-      else if (e.key === 'Escape') close();
-    });
-    box.addEventListener('mousedown', (e) => { const it = e.target.closest('.suggest-item'); if (it) { e.preventDefault(); pick(Number(it.dataset.i)); } });
-    document.addEventListener('click', (e) => { if (!box.contains(e.target) && e.target !== input) close(); });
-    return { close, refresh: compute, destroy: () => box.remove() };
+      else if (e.key === 'Escape') { e.preventDefault(); close(); }
+      else if (e.key === 'Tab') close();
+    };
+    const onBlur = () => setTimeout(() => { if (!box.contains(document.activeElement)) close(); }, 0);
+    const onBoxMouseDown = (e) => { const it = e.target.closest('.suggest-item'); if (it) { e.preventDefault(); pick(Number(it.dataset.i)); } };
+    const outsideClick = (e) => {
+      if (!input.isConnected) { destroy(); return; }
+      if (!box.contains(e.target) && e.target !== input) close();
+    };
+    const viewportChange = () => { if (!input.isConnected) destroy(); else if (!box.hidden) place(); };
+    function destroy() {
+      if (destroyed) return;
+      destroyed = true;
+      document.removeEventListener('click', outsideClick);
+      window.removeEventListener('resize', viewportChange);
+      window.removeEventListener('scroll', viewportChange, true);
+      if (window.visualViewport) {
+        window.visualViewport.removeEventListener('resize', viewportChange);
+        window.visualViewport.removeEventListener('scroll', viewportChange);
+      }
+      input.removeEventListener('input', onInput);
+      input.removeEventListener('focus', onFocus);
+      input.removeEventListener('keydown', onKeydown);
+      input.removeEventListener('blur', onBlur);
+      box.removeEventListener('mousedown', onBoxMouseDown);
+      box.remove();
+    }
+    input.addEventListener('input', onInput);
+    input.addEventListener('focus', onFocus);
+    input.addEventListener('keydown', onKeydown);
+    input.addEventListener('blur', onBlur);
+    box.addEventListener('mousedown', onBoxMouseDown);
+    document.addEventListener('click', outsideClick);
+    window.addEventListener('resize', viewportChange);
+    window.addEventListener('scroll', viewportChange, true);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', viewportChange);
+      window.visualViewport.addEventListener('scroll', viewportChange);
+    }
+    return { close, refresh: compute, reposition: place, destroy };
   }
   function colLetter(index) {
     let s = '';
@@ -391,26 +508,67 @@ window.FF = window.FF || {};
     return list.slice(0, cap);
   }
 
-  /** 🗣 Voice search — Web Speech API (en-IN). Bol ke search, result onText(text) me milta hai. */
-  function voiceInput(onText, hint) {
+  /** 🗣 Voice search — Web Speech API (Indian English). Click again to stop. */
+  let activeVoice = null;
+  function voiceInput(onText, hint, opts) {
+    const o = opts || {};
+    const button = o.button || null;
+    if (activeVoice) {
+      const same = !button || activeVoice.button === button;
+      try { same ? activeVoice.rec.stop() : activeVoice.rec.abort(); } catch { /* already ending */ }
+      if (same) return activeVoice.rec;
+    }
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) { toast('🗣 Voice search is browser me supported nahi hai — Chrome/Edge try karo.', 'warn'); return; }
+    if (!SR) { toast('🗣 Voice search is browser me supported nahi hai — latest Chrome/Edge try karo.', 'warn'); return null; }
+    if (window.isSecureContext === false) { toast('Mic ke liye secure HTTPS connection chahiye.', 'err'); return null; }
     try {
       const rec = new SR();
-      rec.lang = 'en-IN'; rec.interimResults = false; rec.maxAlternatives = 1;
+      let gotResult = false;
+      rec.lang = o.lang || 'en-IN';
+      rec.interimResults = false;
+      rec.continuous = false;
+      rec.maxAlternatives = 1;
+      const cleanup = () => {
+        if (button) {
+          button.classList.remove('listening');
+          button.setAttribute('aria-pressed', 'false');
+          button.removeAttribute('aria-busy');
+          button.title = button.dataset.voiceTitle || '🗣 Bol ke search karo';
+        }
+        if (activeVoice && activeVoice.rec === rec) activeVoice = null;
+      };
+      if (button) {
+        button.dataset.voiceTitle = button.title || '🗣 Bol ke search karo';
+        button.classList.add('listening');
+        button.setAttribute('aria-pressed', 'true');
+        button.setAttribute('aria-busy', 'true');
+        button.title = 'Sun raha hoon… dobara dabao to stop';
+      }
+      activeVoice = { rec, button };
       toast(hint || '🎤 Bolo… sun raha hoon', 'info');
       rec.onresult = (e) => {
         const t = e.results && e.results[0] && e.results[0][0] ? String(e.results[0][0].transcript).trim() : '';
+        gotResult = !!t;
         if (t && onText) onText(t);
       };
       rec.onerror = (e) => {
         const code = e && e.error;
-        if (code === 'not-allowed' || code === 'service-not-allowed') toast('Mic permission allow karo (browser settings me)', 'err');
+        if (code === 'not-allowed' || code === 'service-not-allowed') toast('Mic permission blocked hai — address bar ke 🔒 icon se Microphone Allow karo.', 'err');
+        else if (code === 'audio-capture') toast('Microphone nahi mila — device/browser mic setting check karo.', 'err');
+        else if (code === 'network') toast('Voice service network se connect nahi hui — internet check karke retry karo.', 'warn');
         else if (code === 'no-speech') toast('Kuch sunai nahi diya — dobara try karo.', 'warn');
         else if (code !== 'aborted') toast('Awaaz samajh nahi aayi — dobara try karo.', 'warn');
       };
+      rec.onend = () => { cleanup(); if (!gotResult && o.onEmpty) o.onEmpty(); };
+      rec.onspeechend = () => { try { rec.stop(); } catch { /* ending */ } };
       rec.start();
-    } catch { toast('Voice search start nahi ho paya.', 'err'); }
+      return rec;
+    } catch {
+      if (button) { button.classList.remove('listening'); button.setAttribute('aria-pressed', 'false'); button.removeAttribute('aria-busy'); }
+      activeVoice = null;
+      toast('Voice search start nahi ho paya — mic permission check karo.', 'err');
+      return null;
+    }
   }
 
   FF.util = {
@@ -418,7 +576,7 @@ window.FF = window.FF || {};
     MONTHS, MONTHS_LONG, DAYS, pad2, parseDate, parseMonthKey, ymKey, dateKey, fromDateKey, ymParts, labelYM, labelDate, labelDateKey,
     weekday, daysInMonth, prevMonthKey, nextMonthKey, weekStart, timeLabel,
     sum, groupSum, topEntries, sortBy, uniq,
-    $, $$, h, debounce, toast, spinner, errorBox, downloadBlob, downloadCsv, tableToRows, slug, stamp, colLetter, colIndex, initTooltip,
+    $, $$, h, debounce, setButtonBusy, withButtonBusy, toast, spinner, errorBox, downloadBlob, downloadCsv, tableToRows, slug, stamp, colLetter, colIndex, initTooltip,
     phoneDigits, waLink, mailLink, copyText, suggest,
     parseDateTime, printReport, recentList, recentAdd, voiceInput
   };

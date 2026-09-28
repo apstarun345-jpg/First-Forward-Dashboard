@@ -42,7 +42,7 @@ async function startServer(dir, upstream) {
 
 /** Minimal SMTP mock — EHLO/AUTH/MAIL/RCPT/DATA/QUIT; DATA capture karta hai. */
 function startSmtp() {
-  let inbox = '';
+  let inbox = '', rejectData = false;
   const srv = net.createServer((sock) => {
     let buf = '', inData = false, authStage = 0;
     sock.write('220 mock-ESMTP ready\r\n');
@@ -50,7 +50,7 @@ function startSmtp() {
       const s = d.toString('utf8');
       if (inData) {
         inbox += s;
-        if (/\r?\n\.\r?\n/.test(s)) { inData = false; sock.write('250 queued\r\n'); }
+        if (/\r?\n\.\r?\n/.test(s)) { inData = false; sock.write(rejectData ? '550 message rejected\r\n' : '250 queued\r\n'); }
         return;
       }
       buf += s;
@@ -76,7 +76,7 @@ function startSmtp() {
     });
     sock.on('error', () => { /* test teardown */ });
   });
-  return new Promise((resolve) => { srv.listen(0, '127.0.0.1', () => resolve({ srv, port: srv.address().port, get inbox() { return inbox; } })); });
+  return new Promise((resolve) => { srv.listen(0, '127.0.0.1', () => resolve({ srv, port: srv.address().port, get inbox() { return inbox; }, setRejectData(v) { rejectData = !!v; } })); });
 }
 
 test('features flags: defaults, admin modify (deep-merge), member se 4xx, SMTP secrets redacted, /api/version', async () => {
@@ -135,6 +135,10 @@ test('features flags: defaults, admin modify (deep-merge), member se 4xx, SMTP s
     const cache = (sw.match(/CACHE_NAME\s*=\s*['"]([^'"]+)['"]/) || [])[1];
     assert.ok(cache, 'sw.js CACHE_NAME milna chahiye');
     assert.equal(ver.json.version, cache, '/api/version sw.js ke CACHE_NAME ke barabar hona chahiye');
+    const shell = await fetch(server.base + '/');
+    assert.match(shell.headers.get('permissions-policy') || '', /microphone=\(self\)/, 'voice-search mic same-origin ke liye allowed');
+    assert.doesNotMatch(shell.headers.get('permissions-policy') || '', /microphone=\(\)/, 'mic globally blocked nahi');
+    assert.match(shell.headers.get('content-security-policy') || '', /tile\.openstreetmap\.org/, 'real team-map tiles CSP me allowed');
 
     // 5) lastBackupAt save — par "Settings changed" notification NA aaye (silently track).
     let items = (await call('/api/notifications', 'GET', null, adminCookie)).json.items || [];
@@ -198,6 +202,12 @@ test('📧 email test endpoint mock SMTP par mail deliver karta hai (AUTH + DATA
     const bodyTxt = Buffer.from(bodyB64, 'base64').toString('utf8');
     assert.match(bodyTxt, /test email/i, 'mail body decode hokar "test email" dikhna chahiye');
     assert.ok(smtp.inbox.includes('To: boss@example.test, team@example.test'), 'multiple recipients RCPT ke saath DATA header me');
+    // SMTP DATA ke baad 550 de to UI/API ko jhootha success nahi dikhna chahiye.
+    smtp.setRejectData(true);
+    const rejected = await call('/api/notifications/email/test', 'POST', {}, adminCookie);
+    assert.equal(rejected.res.status, 502, `DATA rejection 502 hona chahiye — ${JSON.stringify(rejected.json)}`);
+    assert.match(rejected.json.error || '', /550 message rejected/, 'actual SMTP rejection admin ko samajh aaye');
+    smtp.setRejectData(false);
     // member ko yeh endpoint chahiye hi nahi
     await call('/api/users', 'POST', { username: 'mailr', name: 'M', password: 'mail-pass-1', role: 'user' }, adminCookie);
     const mc = (await call('/api/auth/login', 'POST', { username: 'mailr', password: 'mail-pass-1' })).setCookie.split(';')[0];
@@ -452,6 +462,17 @@ test('🔗 personal links (agent+TL) /p/ pages, 🗺 team location, 🏆 anomaly
     assert.ok(htmlT.includes('Zoya Khan'), 'TL naam page par');
     assert.ok(htmlT.includes('Team (is mahine)'), 'TL team list section');
 
+    // ---- 🟩 GV source link: GV Master columns/query + source badge ----
+    const cg = await call('/api/personal-links', 'POST', { source: 'gv', kind: 'agent', name: 'GV Agent One' }, adminCookie);
+    assert.equal(cg.res.status, 200, `GV link create — ${JSON.stringify(cg.json).slice(0, 180)}`);
+    assert.equal(cg.json.link.source, 'gv', 'link source durable payload me GV');
+    const pageG = await fetch(`${server.base}/p/${cg.json.link.token}`);
+    assert.equal(pageG.status, 200, 'GV personal page 200');
+    const htmlG = await pageG.text();
+    assert.ok(htmlG.includes('GV Agent One') && htmlG.includes('GV Partner'), 'GV naam + source personal page par');
+    const linkList = await call('/api/personal-links', 'GET', undefined, adminCookie);
+    assert.equal((linkList.json.links || []).find((l) => l.id === cg.json.link.id).source, 'gv', 'GET list source preserve karta hai');
+
     // ---- member ko link management chahiye hi nahi ----
     const mList = await call('/api/personal-links', 'GET', undefined, memberCookie);
     assert.ok(mList.res.status >= 400, `member personal-links list nahi dekh sakta (${mList.res.status})`);
@@ -463,6 +484,7 @@ test('🔗 personal links (agent+TL) /p/ pages, 🗺 team location, 🏆 anomaly
     assert.equal(del.res.status, 200, 'revoke ok');
     const gone = await fetch(`${server.base}/p/${agentToken}`);
     assert.equal(gone.status, 404, `revoked link 404 (${gone.status})`);
+    assert.doesNotMatch(await gone.text(), />undefined</, 'error page par literal undefined subtitle nahi');
 
     // ---- feature OFF → TL link bhi 404 + create 403 ----
     await call('/api/settings', 'PUT', { settings: { features: { personalLinks: false } } }, adminCookie);
@@ -572,6 +594,9 @@ test('🗓 scheduler force-fire, 🥇 champion email (SMTP), ⏰ follow-up list+
     assert.equal(def.json.defaults.features.suggestDays, 15, 'default suggestDays=15');
     assert.equal(def.json.defaults.features.dispatchPlan, true, 'default dispatchPlan ON');
     assert.equal(def.json.defaults.features.championEmail, false, 'default championEmail OFF (auto band)');
+    assert.equal(def.json.defaults.notificationRoutes.lowStock, 'admin', 'low stock default → admin');
+    assert.equal(def.json.defaults.notificationRoutes.champion, 'both', 'champion default → admin + users');
+    assert.deepEqual(new Set(Object.values(def.json.defaults.notificationRoutes)), new Set(['admin', 'both']), 'default routes only valid audience values');
     const fput = await call('/api/settings', 'PUT', { settings: { features: { customAlerts: true, championEmail: false, followupTracker: true, dispatchPlan: true, championHour: 10, championTop: 3, followupDays: 5, followupHour: 10, suggestDays: 20 } } }, adminCookie);
     assert.equal(fput.res.status, 200, 'flags PUT 200');
     const ff = fput.json.settings.features;
@@ -627,6 +652,10 @@ test('🗓 scheduler force-fire, 🥇 champion email (SMTP), ⏰ follow-up list+
     const html = Buffer.from(bodyB64, 'base64').toString('utf8');
     assert.match(html, /Hall of Fame/, 'certificate HTML body');
     assert.match(html, /Virat Kohli/, 'certificate me champion naam');
+    const memberChampionFeed = await call('/api/notifications', 'GET', undefined, memberCookie);
+    const championItem = (memberChampionFeed.json.items || []).find((i) => i.routeKey === 'champion');
+    assert.ok(championItem, 'champion ka routed in-app notification member ko mila');
+    assert.equal(championItem.audience, 'both', 'champion audience = both');
     const audit = await call('/api/audit', 'GET', undefined, adminCookie);
     const acts = (audit.json.entries || []).map((e) => e.action);
     for (const need of ['schedule_fired', 'champion_email_sent']) assert.ok(acts.includes(need), `audit me ${need} — ${acts.join(',')}`);
@@ -650,6 +679,28 @@ test('🗓 scheduler force-fire, 🥇 champion email (SMTP), ⏰ follow-up list+
     const fuItem = (nlist2.json.items || []).find((i) => /Follow-up · \d+ agent/.test(i.title));
     assert.ok(fuItem, `follow-up notification — ${(nlist2.json.items || []).map((i) => i.title).slice(0, 6).join(' | ')}`);
     assert.equal(fuItem.meta && fuItem.meta.link, '#/performance?view=alerts', 'notification meta.link alerts view par');
+    assert.equal(fuItem.audience, 'both', 'default follow-up admin + users dono ko');
+
+    // ---- 🔔 route matrix: users-only admin feed/push visibility ko bypass nahi kar sakta ----
+    const routeUsers = await call('/api/settings', 'PUT', { settings: { notificationRoutes: { followup: 'users', champion: 'not-valid', unknownEvent: 'both' } } }, adminCookie);
+    assert.equal(routeUsers.res.status, 200, 'notification route settings save');
+    assert.equal(routeUsers.json.settings.notificationRoutes.followup, 'users', 'follow-up → users-only round-trip');
+    assert.equal(routeUsers.json.settings.notificationRoutes.champion, 'both', 'invalid champion route ignored / normalized');
+    assert.equal(routeUsers.json.settings.notificationRoutes.unknownEvent, undefined, 'unknown event key server ne drop ki');
+    const memberBefore = new Set(((await call('/api/notifications', 'GET', undefined, memberCookie)).json.items || []).map((i) => i.id));
+    const usersFire = await call('/api/followup?fire=1', 'GET', undefined, adminCookie);
+    assert.equal(usersFire.json.fired, true, 'users-only routed follow-up create hua');
+    const memberAfter = ((await call('/api/notifications', 'GET', undefined, memberCookie)).json.items || []);
+    const userOnlyItem = memberAfter.find((i) => !memberBefore.has(i.id) && i.routeKey === 'followup');
+    assert.ok(userOnlyItem, 'users-only follow-up member feed me visible');
+    assert.equal(userOnlyItem.audience, 'users', 'stored audience users');
+    const adminAfterUsers = ((await call('/api/notifications', 'GET', undefined, adminCookie)).json.items || []);
+    assert.ok(!adminAfterUsers.some((i) => i.id === userOnlyItem.id), 'users-only item admin feed me leak nahi hua');
+    await call('/api/settings', 'PUT', { settings: { notificationRoutes: { followup: 'off' } } }, adminCookie);
+    const offFire = await call('/api/followup?fire=1', 'GET', undefined, adminCookie);
+    assert.equal(offFire.json.fired, false, 'off route notification create nahi karta');
+    await call('/api/settings', 'PUT', { settings: { notificationRoutes: { followup: 'both' } } }, adminCookie);
+
     const audit2 = await call('/api/audit', 'GET', undefined, adminCookie);
     assert.ok((audit2.json.entries || []).map((e) => e.action).includes('followup_alert'), `audit me followup_alert — ${(audit2.json.entries || []).map((e) => e.action).slice(0, 8).join(',')}`);
     // feature OFF → ?fire=1 blocked

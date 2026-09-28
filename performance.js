@@ -33,7 +33,7 @@ FF.pages = FF.pages || {};
   const EMPTY_FILTERS = () => ({ q: '', tl: '', status: '', active: '', alert: '', priority: '', tlPriority: '', commPriority: '', hideZero: false });
   const state = {
     agents: [], filtered: [], tlGroups: [], allTlGroups: [], columns: {}, sections: [], months: { last: 'Last Month', cur: 'Current Month' }, dayLabels: [], daysElapsed: null,
-    view: 'overview', filters: EMPTY_FILTERS(),
+    view: 'overview', filters: EMPTY_FILTERS(), dispatchScope: 'eligible',
     sort: { agents: { key: 'curTotal', dir: 'desc' }, tls: { key: 'tlCurTotal', dir: 'desc' }, stock: { key: 'stockTotal', dir: 'desc' }, stockTl: { key: 'tlStockTotal', dir: 'desc' } }, page: 1, pageSize: 50, loadedAt: 0, sourceTable: null
   };
 
@@ -142,7 +142,7 @@ FF.pages = FF.pages || {};
       agent.curVc4 = agent.curVc4 ?? 0; agent.curNvc4 = agent.curNvc4 ?? 0; agent.lastVc4 = agent.lastVc4 ?? 0; agent.lastNvc4 = agent.lastNvc4 ?? 0;
       agent.hasIssuance = agent.curTotal > 0;
       agent.tlKey = agent.tlId && !/^na$/i.test(agent.tlId) ? agent.tlId : (agent.tlName || 'Unknown');
-      agent.tlExcluded = FF.config.isExcludedTl(agent.tlName) || (!agent.tlName && FF.config.isExcludedTl(agent.tlKey));
+      agent.tlExcluded = FF.config.isDirectAgent(agent);
       agent.isMaster = Boolean(agent.agentId) && agent.agentId === agent.tlId && /apna\s*paye?ment/i.test(agent.name);
       agent.activeCat = activeCategory(agent.lastActive);
       agent.inactiveDays = inactiveDays(agent.lastActive);
@@ -720,26 +720,31 @@ FF.pages = FF.pages || {};
   }
   // 🎯 Suggested dispatch plan — High + Medium priority agents: suggested qty + cover din (highlighted card)
   function dispatchPlanRows() {
-    if (!FF.config.feat || FF.config.feat('dispatchPlan') === false) return { days: 15, rows: [] };
+    if (!FF.config.feat || FF.config.feat('dispatchPlan') === false) return { enabled: false, days: 15, rows: [], counts: { eligible: 0, direct: 0, all: 0 } };
     const days = Number(FF.config.features && FF.config.features.suggestDays) || 15;
-    const rows = state.filtered
+    const all = state.filtered
       .filter((a) => a.priority === 'High' || a.priority === 'Medium')
       .map((a) => {
         const daily = a.avgVc4 || (state.daysElapsed ? a.curVc4 / state.daysElapsed : 0) || 0;
-        const sug = Math.max(0, Math.ceil(daily * days - (a.stockVc4 || 0)));
+        const calculated = Math.max(0, Math.ceil(daily * days - (a.stockVc4 || 0)));
         const cover = a.agentStockDays != null && a.agentStockDays !== '' && !Number.isNaN(Number(a.agentStockDays)) ? Number(a.agentStockDays) : null;
-        return { a, sug, cover, daily };
+        const direct = !!a.tlExcluded;
+        // APS/direct agents ko dispatch stock nahi dena hai; unka calculated gap sirf audit ke liye rakho.
+        return { a, sug: direct ? 0 : calculated, calculated, cover, daily, direct };
       })
-      .sort((x, y) => (x.cover ?? 9999) - (y.cover ?? 9999))
-      .slice(0, 60);
-    return { days, rows };
+      .sort((x, y) => (x.direct - y.direct) || (x.cover ?? 9999) - (y.cover ?? 9999));
+    const counts = { all: all.length, direct: all.filter((x) => x.direct).length, eligible: all.filter((x) => !x.direct && x.sug > 0).length };
+    const rows = (state.dispatchScope === 'direct' ? all.filter((x) => x.direct)
+      : state.dispatchScope === 'all' ? all
+        : all.filter((x) => !x.direct && x.sug > 0)).slice(0, 60);
+    return { enabled: true, days, rows, counts };
   }
   function renderAlerts(el) {
     const b = alertBuckets(), cap = 100;
     const dp = dispatchPlanRows();
     const coverTd = (c) => (c == null ? '<span class="dim">—</span>' : `<span class="count ${c < 7 ? 'red' : c < 15 ? 'amber' : ''}">${fmt(c)}</span>`);
-    const dispatchCard = dp.rows.length
-      ? `<section class="card dispatch-plan"><div class="card-head"><h3>🎯 Suggested dispatch plan · High + Medium priority <span class="count amber">${fmt(dp.rows.length)}</span></h3><div class="card-right dim">target cover ${dp.days} din · suggested = avg VC4/day × ${dp.days} − stock${FF.auth.can('export') ? ` <button class="btn small" data-action="export" data-name="suggested-dispatch">⬇ CSV</button>` : ''}</div></div><div class="table-wrap tall"><table class="tbl"><thead><tr><th>Agent</th><th>TL</th><th>Priority</th><th class="num">VC4 stock</th><th class="num">Avg VC4/day</th><th class="num">Cover (din)</th><th class="num">Suggested qty 🎯</th></tr></thead><tbody>${dp.rows.map(({ a, sug, cover, daily }) => `<tr data-agent="${a.__row}" class="clickable"><td>${cellMain(a.name, a.agentId)}</td><td>${cellMain(tlLabel(a), '')}</td><td>${badge(a.agentPriority)}</td><td class="num">${fmt(a.stockVc4)}</td><td class="num">${fmt(daily, true)}</td><td class="num">${coverTd(cover)}</td><td class="num"><b class="sug-chip">${fmt(sug)}</b></td></tr>`).join('')}</tbody></table></div><div class="card-body dim small">🎯 Suggested qty = avg VC4/day × ${dp.days} din − stock · cover = VC4 stock ÷ avg daily VC4 · 🔴 cover &lt; 7 · 🟠 &lt; 15 din</div></section>`
+    const dispatchCard = dp.enabled
+      ? `<div class="dispatch-filter-bar"><span><b>Dispatch eligibility:</b> Direct/APS agents ko stock dispatch nahi chahiye</span><div class="dispatch-scope" role="group" aria-label="Dispatch eligibility filter"><button class="btn small ${state.dispatchScope === 'eligible' ? 'primary' : ''}" data-dispatch-scope="eligible">📦 Need stock <b>${fmt(dp.counts.eligible)}</b></button><button class="btn small direct-filter ${state.dispatchScope === 'direct' ? 'primary' : ''}" data-dispatch-scope="direct">🚫 Direct Agents · no dispatch <b>${fmt(dp.counts.direct)}</b></button><button class="btn small ${state.dispatchScope === 'all' ? 'primary' : ''}" data-dispatch-scope="all">All priority <b>${fmt(dp.counts.all)}</b></button></div></div><section class="card dispatch-plan"><div class="card-head"><h3>🎯 Suggested dispatch plan · High + Medium priority <span class="count amber">${fmt(dp.rows.length)}</span></h3><div class="card-right dim">target cover ${dp.days} din · suggested = avg VC4/day × ${dp.days} − stock${FF.auth.can('export') ? ` <button class="btn small" data-action="export" data-name="suggested-dispatch-${state.dispatchScope}">⬇ CSV</button>` : ''}</div></div>${dp.rows.length ? `<div class="table-wrap tall"><table class="tbl"><thead><tr><th>Agent</th><th>TL / class</th><th>Priority</th><th>Dispatch status</th><th class="num">VC4 stock</th><th class="num">Avg VC4/day</th><th class="num">Cover (din)</th><th class="num">Suggested qty 🎯</th></tr></thead><tbody>${dp.rows.map(({ a, sug, cover, daily, direct }) => `<tr data-agent="${a.__row}" class="clickable ${direct ? 'dispatch-direct' : ''}"><td>${cellMain(a.name, a.agentId)}</td><td>${cellMain(direct ? 'Direct Agent' : tlLabel(a), direct ? 'APS / direct class' : '')}</td><td>${badge(a.agentPriority)}</td><td>${direct ? '<span class="tag ok">Not required</span>' : '<span class="tag warn">Dispatch required</span>'}</td><td class="num">${fmt(a.stockVc4)}</td><td class="num">${fmt(daily, true)}</td><td class="num">${coverTd(cover)}</td><td class="num">${direct ? '<b class="sug-chip direct">No stock</b>' : `<b class="sug-chip">${fmt(sug)}</b>`}</td></tr>`).join('')}</tbody></table></div>` : `<div class="card-body empty">${state.dispatchScope === 'direct' ? 'Is filter me koi High/Medium Direct Agent nahi hai.' : 'Current filters me kisi priority agent ko dispatch stock ki zarurat nahi.'}</div>`}<div class="card-body dim small">🚫 Direct/APS agents ko stock dispatch nahi chahiye. 🎯 Suggested qty = avg VC4/day × ${dp.days} din − stock · cover = VC4 stock ÷ avg daily VC4 · 🔴 cover &lt; 7 · 🟠 &lt; 15 din</div></section>`
       : '';
     const tlRows = (list, extra) => list.slice(0, cap).map((g) => `<tr data-tl="${esc(g.tlKey)}" class="clickable"><td>${cellMain(g.tlName || g.tlKey, g.tlId)}</td><td class="num">${fmt(g.tlStockVc4)} <small class="dim">/ ${fmt(g.tlStockNvc4)}</small></td><td class="num">${fmt(g.tlAvgTotal, true)}</td><td class="num"><b>${fmt(g.tlVc4Days)}</b></td><td class="num">${fmt(g.tlNvc4Days)}</td><td>${badge(g.tlStockAlert)}</td><td>${badge(g.tlCommAlert)}</td><td>${badge(extra(g))}</td></tr>`).join('');
     const agentRows = (list, valueFn) => list.slice(0, cap).map((a) => `<tr data-agent="${a.__row}" class="clickable"><td>${cellMain(a.name, a.agentId)}</td><td>${cellMain(tlLabel(a), a.tlMobile && !/^na$/i.test(a.tlMobile) && canContacts() ? a.tlMobile : '')}</td><td class="num">${fmt(a.lastTotal)}</td><td class="num">${fmt(a.curTotal)}</td><td class="num"><b>${valueFn(a)}</b></td><td>${badge(a.lastActive)}</td><td>${badge(a.agentStatus)}</td></tr>`).join('');
@@ -815,6 +820,8 @@ FF.pages = FF.pages || {};
       if (tab) { state.view = tab.dataset.view; history.replaceState(null, '', `#/performance?view=${state.view}`); draw(); return; }
       const rcEl = e.target.closest('[data-rc]');
       if (rcEl) { if (!FF.auth.can('export')) return U.toast('Download permission nahi hai', 'err'); shareRankCard(Number(rcEl.dataset.rc), rcEl.dataset.rcKind || 'agent'); return; }
+      const dispatchScope = e.target.closest('[data-dispatch-scope]');
+      if (dispatchScope) { state.dispatchScope = dispatchScope.dataset.dispatchScope; draw(); return; }
       const agentEl = e.target.closest('[data-agent]');
       if (agentEl) { openAgent(Number(agentEl.dataset.agent)); return; }
       const tlEl = e.target.closest('[data-tl]');
