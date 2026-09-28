@@ -69,16 +69,25 @@ test('signup / reset request / user search / user click sab admin ki feed me aat
     // 1) Pehle admin ki prefs check karo — SAB types default par ON.
     const prefs = (await call('/api/notifications/prefs', 'GET', null, adminCookie)).json.prefs;
     assert.ok(prefs && typeof prefs === 'object', 'prefs milni chahiye');
-    for (const key of ['enabled', 'login', 'signup', 'report', 'monthly', 'activity', 'click', 'search', 'settings', 'user', 'location', 'info', 'sound', 'push']) {
+    for (const key of ['enabled', 'login', 'signup', 'report', 'monthly', 'digest', 'activity', 'click', 'search', 'settings', 'user', 'location', 'info', 'sound', 'push']) {
       assert.equal(prefs[key], true, `default prefs me "${key}" ON hona chahiye — false matlab feed + mobile push dono se gayab`);
     }
 
-    // 2) Naya signup → admin feed me type 'signup'.
+    // 1b) Health (public): public response me pendingSignups leak nahi hona chahiye.
+    const healthPublic = (await call('/api/health', 'GET')).json;
+    assert.equal(healthPublic.pendingSignups, undefined, 'public health me pendingSignups nahi aana chahiye');
+
+    // 2) Naya signup → admin feed me type 'signup' + deep link (tap → seedha Users tab).
     await call('/api/auth/signup', 'POST', { username: 'newbie', name: 'New Bee', email: 'newbie@example.test', password: 'newbie-pass-1' });
     let items = (await call('/api/notifications', 'GET', null, adminCookie)).json.items || [];
     const signup = items.find((i) => /Naya signup/.test(i.title));
     assert.ok(signup, 'admin ko naye signup ki notification chahiye');
     assert.equal(signup.type, 'signup', 'signup notification ka type signup hona chahiye (Settings ka toggle isi ko control karta hai)');
+    assert.equal(signup.meta && signup.meta.link, '#/settings?tab=users', 'signup tap par seedha Users (approval) tab khulna chahiye');
+
+    // 2b) Signup ke baad admin health me pending count (sidebar ⏳ badge ke liye).
+    const healthAdmin = (await call('/api/health', 'GET', null, adminCookie)).json;
+    assert.ok(Number(healthAdmin.pendingSignups) >= 1, `admin health me pendingSignups chahiye — got ${healthAdmin.pendingSignups}`);
 
     // 3) Forgot-password request → admin feed me reset notification.
     await call('/api/auth/forgot', 'POST', { username: 'newbie' });
@@ -99,6 +108,24 @@ test('signup / reset request / user search / user click sab admin ki feed me aat
     assert.match(titles, /click:.*Excel Bundle/s, `admin ko user ki click notification chahiye — got:\n${titles}`);
     assert.match(titles, /activity:.*page khola/s, `admin ko user ke page open ki notification chahiye — got:\n${titles}`);
     assert.match(titles, /user:.*New user created/s, 'admin ko naye user creation ki notification chahiye');
+    // Deep links: notification tap (app ya phone panel) seedha sahi page par le jaye.
+    const searchItem = items.find((i) => i.type === 'search');
+    const clickItem = items.find((i) => i.type === 'click');
+    const activityItem = items.find((i) => i.type === 'activity');
+    assert.equal(searchItem.meta && searchItem.meta.link, '#/stock', 'Stock search → #/stock deep link');
+    assert.equal(clickItem.meta && clickItem.meta.link, '#/dashboard', 'Excel Bundle click → #/dashboard deep link');
+    assert.equal(activityItem.meta && activityItem.meta.link, '#/stock', 'page open → usi page ki deep link');
+
+    // 4b) 🌅 Daily digest — admin ka button force bhej sakta hai; feed me type digest aani chahiye.
+    const dig = await call('/api/notifications/digest', 'POST', {}, adminCookie);
+    assert.equal(dig.res.status, 200, `digest endpoint 200 dena chahiye — ${JSON.stringify(dig.json)}`);
+    assert.equal(dig.json.ok, true, 'digest item banna chahiye');
+    assert.equal(dig.json.item && dig.json.item.type, 'digest');
+    assert.equal(dig.json.item && dig.json.item.target, 'admin', 'digest sirf admin ko jaani chahiye');
+    items = (await call('/api/notifications', 'GET', null, adminCookie)).json.items || [];
+    assert.ok(items.some((i) => i.type === 'digest'), 'digest feed me dikhni chahiye');
+    const digDenied = await call('/api/notifications/digest', 'POST', {}, userCookie);
+    assert.ok(digDenied.res.status >= 400, 'non-admin digest nahi bhej sakta');
 
     // 5) Notification ki prefs ke saath ek band toggle bhi kaam kare — aur wapas ON karne par
     //    wo type feed me phir dikhne lage (admin setting jo maangi gayi hai).

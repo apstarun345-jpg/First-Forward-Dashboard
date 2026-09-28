@@ -217,7 +217,7 @@ function verifyPassword(password, stored) {
 const normUser = (u) => String(u || '').trim().toLowerCase().replace(/[^a-z0-9._@-]/g, '').slice(0, 60);
 // `enabled` = master switch (UI me ek hi "Notifications ON/OFF" button hai). OFF → koi in-app toast
 // nahi, koi browser alert nahi, koi mobile push nahi. Feed items phir bhi save hote hain (history).
-const DEFAULT_NOTIFY_PREFS = { enabled: true, login: true, signup: true, report: true, monthly: true, activity: true, click: true, search: true, settings: true, user: true, location: true, info: true, sound: true, push: true };
+const DEFAULT_NOTIFY_PREFS = { enabled: true, login: true, signup: true, report: true, monthly: true, digest: true, activity: true, click: true, search: true, settings: true, user: true, location: true, info: true, sound: true, push: true };
 function normalizeNotifyPrefs(p) {
   const out = { ...DEFAULT_NOTIFY_PREFS };
   if (p && typeof p === 'object') for (const k of Object.keys(DEFAULT_NOTIFY_PREFS)) if (p[k] !== undefined) out[k] = !!p[k];
@@ -326,6 +326,28 @@ function permissionDiff(before, after) {
   return { added: [...a].filter((k) => !b.has(k)), removed: [...b].filter((k) => !a.has(k)) };
 }
 const activityLast = new Map();
+// Client routes (app.js PAGES) — notification tap par seedha usi page par le jao.
+const CLIENT_PAGES = new Set(['home', 'tagIssued', 'targets', 'rangeReport', 'dashboard', 'trend', 'performance', 'stock', 'stockReport', 'gvDashboard', 'gvTrend', 'gvPerformance', 'gvStock', 'compare', 'charts']);
+/** Search/click ki "option" se client route banao (deep link — mobile push tap → seedha page). */
+function pageLinkFor(option, query) {
+  const t = String(option || '').trim();
+  if (!t) return '';
+  if (/^sheet:/i.test(t)) return `#/sheet/${encodeURIComponent(t.replace(/^sheet:\s*/i, '').trim())}`;
+  // GV wale options pehle — warna "GV Stock Find" generic /stock par chala jaata.
+  if (/gv\s*stock/i.test(t)) return '#/gvStock';
+  if (/gv\s*trend/i.test(t)) return '#/gvTrend';
+  if (/gv\s*performance/i.test(t)) return '#/gvPerformance';
+  if (/^gv\b/i.test(t)) return '#/gvDashboard';
+  if (/performance/i.test(t)) return `#/performance${query ? `?q=${encodeURIComponent(String(query).slice(0, 60))}` : ''}`;
+  if (/stock/i.test(t)) return '#/stock';
+  if (/trend/i.test(t)) return '#/trend';
+  if (/targets/i.test(t)) return '#/targets';
+  if (/range\s*report/i.test(t)) return '#/rangeReport';
+  if (/excel\s*bundle/i.test(t)) return '#/dashboard';
+  if (/tag\s*issued/i.test(t)) return '#/tagIssued';
+  if (/drawer|kpi/i.test(t)) return '#/dashboard';
+  return '';
+}
 // Ephemeral in-memory presence: page + viewport-relative pointer only (never GPS or screen contents).
 const livePresence = new Map();
 function noteActivity(user, page) {
@@ -334,7 +356,7 @@ function noteActivity(user, page) {
   const key = `${user.username}:${cleanPage}`;
   if (Date.now() - (activityLast.get(key) || 0) < 60e3) return null;
   activityLast.set(key, Date.now());
-  return recordNotification({ type: 'activity', title: '👀 User ne page khola', body: `${user.name || user.username} ne "${cleanPage}" open kiya.`, target: 'admin', meta: { username: user.username, page: cleanPage } });
+  return recordNotification({ type: 'activity', title: '👀 User ne page khola', body: `${user.name || user.username} ne "${cleanPage}" open kiya.`, target: 'admin', meta: { username: user.username, page: cleanPage, ...(CLIENT_PAGES.has(cleanPage) ? { link: `#/${cleanPage}` } : {}) } });
 }
 function sha(token) { return crypto.createHash('sha256').update(token).digest('hex'); }
 async function createSession(username) {
@@ -1006,6 +1028,89 @@ function maybeMonthlyReport() {
     console.log(`monthly report notification sent for ${prev}`);
   } catch (err) { console.warn('monthly report:', err.message); }
 }
+// ---- 🌅 daily digest: roz ek baar (IST subah 8 ke baad) — kal ki issuance, MTD, abhi ka stock ----
+const MON_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function istNow() { return new Date(Date.now() + 5.5 * 3600e3); } // sirf date/hour ke liye (UTC+5:30)
+/** StockDataa ka current total + class split (ek gviz group-by query). */
+async function stockSnapshot() {
+  try {
+    const s = db.settings;
+    const cfg = s.stock || {};
+    const clsCol = cfg.cls || 'E', tagCol = cfg.tagId || 'C';
+    const sheet = s.stockSheet || 'StockDataa';
+    const tq = `select ${clsCol}, count(${tagCol}) where ${tagCol} is not null group by ${clsCol}`;
+    const params = new URLSearchParams({ id: String(s.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet, tq });
+    const out = await fetchUpstream(upstreamUrl(params));
+    if (out.status < 200 || out.status >= 300) throw new Error(`Google responded ${out.status}`);
+    const table = parseGvizServer(out.body);
+    const classes = {}; let total = 0;
+    for (const row of table.rows || []) {
+      const n = serverNumber(serverCell(row, 1));
+      if (!n) continue;
+      const b = classBucket(serverCell(row, 0));
+      classes[b] = (classes[b] || 0) + n;
+      total += n;
+    }
+    return total ? { total, classes } : null;
+  } catch (err) { console.warn('digest stock snapshot:', err.message); return null; }
+}
+/**
+ * Subah ek baar admin ko ek compact digest push: kal ki FF/GV issuance, MTD + avg per day,
+ * abhi ka stock (VC4/Comm) aur approx VC4 cover (threshold emoji ke saath).
+ * Server free-tier par sote waqt fir jaata hai — isliye window "8 baje ke baad, roz ek baar" hai
+ * (pehla wake-up us din digest bhej dega). force=true se Settings ka button kabhi bhi bhej sakta hai.
+ */
+async function maybeDailyDigest(force = false) {
+  try {
+    if (!db.notify || typeof db.notify !== 'object') db.notify = { items: [], watch: {} };
+    if (!db.notify.watch || typeof db.notify.watch !== 'object') db.notify.watch = {};
+    const ist = istNow();
+    const pad = (n) => String(n).padStart(2, '0');
+    const dateKey = `${ist.getUTCFullYear()}-${pad(ist.getUTCMonth() + 1)}-${pad(ist.getUTCDate())}`;
+    if (!force) {
+      if (ist.getUTCHours() < 8) return null; // subah 8 baje se pehle nahi
+      if (db.notify.watch.digestDate === dateKey) return null; // aaj ka digest already gaya
+    }
+    await checkReports(false).catch(() => {}); // taaza FF/GV snapshots (5-min throttle respected)
+    const ff = db.notify.watch.ff && db.notify.watch.ff.date ? db.notify.watch.ff : null;
+    const gv = db.notify.watch.gv && db.notify.watch.gv.date ? db.notify.watch.gv : null;
+    const daily = db.notify.watch.daily && typeof db.notify.watch.daily === 'object' ? db.notify.watch.daily : {};
+    const monthKey = dateKey.slice(0, 7);
+    let ffMtd = 0, mtdDays = 0;
+    for (const [d, v] of Object.entries(daily)) if (d.startsWith(monthKey) && v && Number(v.ff)) { ffMtd += Number(v.ff); mtdDays++; }
+    const stock = await stockSnapshot();
+    const th = db.settings.thresholds || {};
+    const coverRed = Number(th.coverRed) || 7, coverOrange = Number(th.coverOrange) || 15, coverAmber = Number(th.coverAmber) || 30;
+    const parts = [];
+    const topClass = (classes) => { const e = Object.entries(classes || {}).sort((a, b) => b[1] - a[1])[0]; return e ? `${e[0]} ${e[1]}` : ''; };
+    const dLabel = (iso) => { const d = Number(String(iso).slice(8, 10)), m = Number(String(iso).slice(5, 7)) - 1; return `${d} ${MON_SHORT[m] || ''}`.trim(); };
+    if (ff) parts.push(`🟦 FF ${dLabel(ff.date)} · ${ff.total} tags${topClass(ff.classes) ? ` (${topClass(ff.classes)})` : ''}`);
+    if (gv) parts.push(`🟩 GV · ${gv.total} tags${topClass(gv.classes) ? ` (${topClass(gv.classes)})` : ''}`);
+    const avg = mtdDays ? ffMtd / mtdDays : 0;
+    if (mtdDays) parts.push(`📈 MTD ${ffMtd} · ${mtdDays} din · ≈${Math.round(avg)}/din`);
+    if (stock) {
+      const vc4 = (stock.classes && stock.classes.VC4) || 0;
+      parts.push(`📦 Stock ${stock.total} (VC4 ${vc4} | Comm ${stock.total - vc4})`);
+      if (vc4 && avg > 0) {
+        const cover = vc4 / avg;
+        const emo = cover < coverRed ? '🔴' : cover < coverOrange ? '🟠' : cover < coverAmber ? '🟡' : '🟢';
+        parts.push(`VC4 cover ≈ ${Math.round(cover)} din ${emo}`);
+      }
+    }
+    if (!parts.length) parts.push('Abhi tak koi fresh sheet data nahi mila — sheet update hote hi kal ye digest sahi numbers dikhayega.');
+    const item = recordNotification({
+      type: 'digest',
+      title: `🌅 Daily digest · ${dLabel(dateKey)}`,
+      body: parts.join(' · '),
+      target: 'admin',
+      meta: { date: dateKey, link: '#/dashboard', ffMtd, mtdDays, stock: stock ? stock.total : null }
+    });
+    db.notify.watch.digestDate = dateKey;
+    persist('notify').catch(() => {});
+    console.log(`daily digest sent for ${dateKey} (${parts.length} lines)`);
+    return item;
+  } catch (err) { console.warn('daily digest:', err.message); return null; }
+}
 let reportCheckAt = 0;
 let reportCheckPromise = null;
 async function checkReports(force = false) {
@@ -1018,6 +1123,17 @@ async function checkReports(force = false) {
         const next = await reportSnapshot(source);
         const previous = db.notify.watch[source];
         db.notify.watch[source] = next;
+        // Per-date issuance history (daily digest ke liye): jab tak server alive hai, har snapshot
+        // date ka latest total store hota rehta hai — digest MTD / avg / cover nikaal sakta hai.
+        if (next && next.date && next.total) {
+          if (!db.notify.watch.daily || typeof db.notify.watch.daily !== 'object') db.notify.watch.daily = {};
+          const prevEntry = db.notify.watch.daily[next.date] || {};
+          if (prevEntry[source] !== next.total) {
+            db.notify.watch.daily[next.date] = { ...prevEntry, [source]: next.total };
+            const keys = Object.keys(db.notify.watch.daily).sort();
+            for (let i = 0; i < keys.length - 400; i++) delete db.notify.watch.daily[keys[i]];
+          }
+        }
         const delta = snapshotDelta(previous, next);
         if (delta && delta.changed && (delta.total > 0 || next.date !== previous.date)) {
           const label = source === 'gv' ? 'GV Partner' : 'First Forward';
@@ -1075,13 +1191,14 @@ async function handleApi(req, res, url) {
   const user = sessionUser(req);
 
   if (p === '/api/health' && method === 'GET') {
-    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.2.0', storage: storageStatus(), push: pushHealth(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null });
+    // pendingSignups sirf admin ko (sidebar badge ke liye) — public health me leak nahi.
+    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.2.0', storage: storageStatus(), push: pushHealth(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length } : {}) });
   }
   if (p === '/api/public-config' && method === 'GET') return sendJson(res, 200, publicSettings());
 
   // ---- auth ----
   if (p === '/api/auth/me' && method === 'GET') {
-    return sendJson(res, 200, { user: publicUser(user), settings: user ? db.settings : publicSettings(), permissions: permissionsFor(db.settings), tabs: db.settings.tabs, ...(user && user.role === 'admin' ? { storage: storageStatus() } : {}) });
+    return sendJson(res, 200, { user: publicUser(user), settings: user ? db.settings : publicSettings(), permissions: permissionsFor(db.settings), tabs: db.settings.tabs, ...(user && user.role === 'admin' ? { storage: storageStatus(), pendingSignups: db.users.filter((u) => !u.approved).length } : {}) });
   }
   if (p === '/api/auth/signup' && method === 'POST') {
     if (db.settings.allowSignup === false && db.users.length) throw new HttpError(403, 'Sign up band hai — admin se account maango.');
@@ -1102,7 +1219,7 @@ async function handleApi(req, res, url) {
     }
     // 🔔 Admin ko turant notification (type 'signup' — Settings me "New account signup" toggle isi ko
     // control karta hai) + new user ko welcome notification
-    recordNotification({ type: 'signup', title: '🆕 Naya signup', body: `${u.name || username} ne account banaya hai (${u.email || u.mobile || 'no contact'}). Approval pending.`, target: 'admin', meta: { username, name: u.name, email: u.email, mobile: u.mobile, link: '#/settings' } });
+    recordNotification({ type: 'signup', title: '🆕 Naya signup', body: `${u.name || username} ne account banaya hai (${u.email || u.mobile || 'no contact'}). Approval pending.`, target: 'admin', meta: { username, name: u.name, email: u.email, mobile: u.mobile, link: '#/settings?tab=users' } });
     recordNotification({ type: 'user', title: 'Account created ✓', body: 'Aapka account ban gaya hai. Admin approve karega, phir aap login kar paoge.', target: `user:${username}` });
     return sendJson(res, 200, { ok: true, pending: true, message: 'Account ban gaya. Admin approve karega, phir login kar paoge.' });
   }
@@ -1126,7 +1243,7 @@ async function handleApi(req, res, url) {
       const k = `login:${u.username}`;
       if (!activityLast.has(k) || Date.now() - activityLast.get(k) > 10 * 60e3) {
         activityLast.set(k, Date.now());
-        recordNotification({ type: 'login', title: '🔐 User login', body: `${u.name || u.username} logged in via ${loginId}${ipLabel}.`, target: 'admin', meta: { username: u.username, loginId, ip } });
+        recordNotification({ type: 'login', title: '🔐 User login', body: `${u.name || u.username} logged in via ${loginId}${ipLabel}.`, target: 'admin', meta: { username: u.username, loginId, ip, link: '#/settings?tab=users' } });
       }
     }
     // 🔔 User ko bhi unka apna login confirm / security notice (throttled 1/min)
@@ -1197,6 +1314,12 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { ok: true, at: user.notificationsSeenAt });
   }
   // ---- notification preferences (per user: which types show, sound on/off, mobile push) ----
+  if (p === '/api/notifications/digest' && method === 'POST') {
+    if (!user) throw new HttpError(401, 'Login required');
+    requireAdmin(user);
+    const item = await maybeDailyDigest(true);
+    return sendJson(res, 200, { ok: !!item, item: item || null });
+  }
   if (p === '/api/notifications/prefs' && method === 'GET') {
     if (!user) throw new HttpError(401, 'Login required');
     return sendJson(res, 200, { prefs: normalizeNotifyPrefs(user.notifyPrefs), defaults: DEFAULT_NOTIFY_PREFS });
@@ -1285,7 +1408,7 @@ async function handleApi(req, res, url) {
             title: `🔍 Search: ${q}`,
             body: `${user.name || user.username}${user.mobile ? ` (${user.mobile})` : ''} ne ${opt} me "${q}" search kiya.`,
             target: 'admin',
-            meta: { username: user.username, name: user.name, mobile: user.mobile, option: opt, query: q }
+            meta: { username: user.username, name: user.name, mobile: user.mobile, option: opt, query: q, link: pageLinkFor(opt, q) }
           });
         }
       }
@@ -1302,7 +1425,7 @@ async function handleApi(req, res, url) {
             title: `👆 ${opt}`,
             body: `${user.name || user.username} ne "${opt}"${det ? ` — ${det}` : ''} use kiya.`,
             target: 'admin',
-            meta: { username: user.username, name: user.name, mobile: user.mobile, option: opt, details: det }
+            meta: { username: user.username, name: user.name, mobile: user.mobile, option: opt, details: det, link: pageLinkFor(opt) }
           });
         }
       }
@@ -1313,7 +1436,7 @@ async function handleApi(req, res, url) {
         title: '⚙️ Settings update',
         body: `${user.name || user.username} ne settings update ki${det ? `: ${det}` : 'ya'}.`,
         target: 'admin',
-        meta: { username: user.username, name: user.name, fields: det }
+        meta: { username: user.username, name: user.name, fields: det, link: '#/settings' }
       });
     } else {
       noteActivity(user, body.page);
@@ -1340,7 +1463,7 @@ async function handleApi(req, res, url) {
     db.resets.push({ username: u.username, name: u.name || u.username, email: u.email || '', mobile: u.mobile || '', at: new Date().toISOString(), code: '', codeExpiresAt: null, resolved: false });
     await persist('resets');
     // 🔔 Admin ko password-reset request ki notification (in-app feed + mobile push dono me).
-    recordNotification({ type: 'user', title: '🔑 Password reset request', body: `${u.name || u.username} ne password reset ki request ki (${u.email || u.mobile || 'no contact'}). Settings → Users se ye account update kar sakte ho.`, target: 'admin', meta: { username: u.username, name: u.name, email: u.email, mobile: u.mobile, link: '#/settings' } });
+    recordNotification({ type: 'user', title: '🔑 Password reset request', body: `${u.name || u.username} ne password reset ki request ki (${u.email || u.mobile || 'no contact'}). Settings → Users se ye account update kar sakte ho.`, target: 'admin', meta: { username: u.username, name: u.name, email: u.email, mobile: u.mobile, link: '#/settings?tab=users' } });
     return sendJson(res, 200, { ok: true, found: true, help, message: `Request sent ✓ — admin will provide new password or 6-digit code (user: ${u.username}).` });
   }
   if (p === '/api/auth/reset' && method === 'POST') {
@@ -1374,8 +1497,8 @@ async function handleApi(req, res, url) {
     if (!validPassword(body.next)) throw new HttpError(400, 'Naya password kam se kam 6 characters ka ho.');
     user.password = hashPassword(body.next); user.mustChangePassword = false;
     persist('users').catch(() => {});
-    recordNotification({ type: 'user', title: '🔑 Password changed', body: `${user.name || user.username} ne apna password change kiya.`, target: `user:${user.username}` });
-    if (user.role !== 'admin') recordNotification({ type: 'user', title: '🔑 Password changed', body: `${user.name || user.username} ne apna password change kiya.`, target: 'admin', meta: { username: user.username } });
+    recordNotification({ type: 'user', title: '🔑 Password changed', body: `${user.name || user.username} ne apna password change kiya.`, target: `user:${user.username}`, meta: { link: '#/settings?tab=account' } });
+    if (user.role !== 'admin') recordNotification({ type: 'user', title: '🔑 Password changed', body: `${user.name || user.username} ne apna password change kiya.`, target: 'admin', meta: { username: user.username, link: '#/settings?tab=users' } });
     return sendJson(res, 200, { ok: true, user: publicUser(user) });
   }
   if (p === '/api/auth/profile' && method === 'POST') {
@@ -1392,7 +1515,7 @@ async function handleApi(req, res, url) {
     }
     await persist('users');
     const profileChanges = changeList(beforeProfile, userSnapshot(user));
-    if (profileChanges.length) recordNotification({ type: 'user', title: `👤 Profile updated · ${user.name || user.username}`, body: `${user.name || user.username} ne apni details badli: ${profileChanges.map((c) => c.field).join(', ')}.`, target: 'admin', meta: { username: user.username, name: user.name, subject: user.username, changes: profileChanges } });
+    if (profileChanges.length) recordNotification({ type: 'user', title: `👤 Profile updated · ${user.name || user.username}`, body: `${user.name || user.username} ne apni details badli: ${profileChanges.map((c) => c.field).join(', ')}.`, target: 'admin', meta: { username: user.username, name: user.name, subject: user.username, changes: profileChanges, link: '#/settings?tab=account' } });
     return sendJson(res, 200, { ok: true, user: publicUser(user) });
   }
   if (p === '/api/auth/location' && method === 'POST') {
@@ -1401,7 +1524,7 @@ async function handleApi(req, res, url) {
     if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lon) || lon < -180 || lon > 180) throw new HttpError(400, 'Location coordinates valid nahi hain.');
     user.lastLocation = { latitude: Number(lat.toFixed(6)), longitude: Number(lon.toFixed(6)), accuracy: Number.isFinite(accuracy) ? Math.max(0, Math.min(100000, Math.round(accuracy))) : null, at: new Date().toISOString() };
     await persist('users');
-    if (user.role !== 'admin') recordNotification({ type: 'location', title: 'User location shared', body: `${user.name || user.username} ne consent ke saath apni location share ki.`, target: 'admin', meta: { username: user.username, location: user.lastLocation } });
+    if (user.role !== 'admin') recordNotification({ type: 'location', title: 'User location shared', body: `${user.name || user.username} ne consent ke saath apni location share ki.`, target: 'admin', meta: { username: user.username, location: user.lastLocation, link: '#/settings?tab=users' } });
     return sendJson(res, 200, { ok: true, user: publicUser(user) });
   }
 
@@ -1474,7 +1597,7 @@ async function handleApi(req, res, url) {
     const changes = changeList(db.settings, next, { skip: ['updatedAt', 'updatedBy'] });
     db.settings = next;
     await persist('settings');
-    if (changes.length || body.reset) recordNotification({ type: 'settings', title: body.reset ? '⚙️ Settings reset to defaults' : `⚙️ Settings changed (${changes.length})`, body: `${user.name || user.username} ne ${changes.slice(0, 4).map((c) => c.field).join(', ')}${changes.length > 4 ? ` +${changes.length - 4} more` : ''} update kiya.`, target: 'admin', meta: { username: user.username, name: user.name, changes, reset: !!body.reset } });
+    if (changes.length || body.reset) recordNotification({ type: 'settings', title: body.reset ? '⚙️ Settings reset to defaults' : `⚙️ Settings changed (${changes.length})`, body: `${user.name || user.username} ne ${changes.slice(0, 4).map((c) => c.field).join(', ')}${changes.length > 4 ? ` +${changes.length - 4} more` : ''} update kiya.`, target: 'admin', meta: { username: user.username, name: user.name, changes, reset: !!body.reset, link: '#/settings' } });
     return sendJson(res, 200, { ok: true, settings: db.settings });
   }
   if (p === '/api/cache/clear' && method === 'POST') { requireAdmin(user); cache.clear(); return sendJson(res, 200, { ok: true }); }
@@ -1495,7 +1618,7 @@ async function handleApi(req, res, url) {
     const perms = Array.isArray(body.permissions) ? body.permissions.filter((k) => allow.includes(k)) : DEFAULT_USER_PERMS.slice();
     const u = { username, name: String(body.name || '').trim().slice(0, 80) || username, email: String(body.email || '').trim().slice(0, 120), mobile: String(body.mobile || '').replace(/[^\d+]/g, '').slice(0, 16), role: body.role === 'admin' ? 'admin' : 'user', approved: body.approved !== false, permissions: perms, password: hashPassword(body.password), mustChangePassword: true, createdAt: new Date().toISOString(), lastLoginAt: null };
     db.users.push(u); await persist('users');
-    recordNotification({ type: 'user', title: `👤 New user created · ${u.name}`, body: `${user.name || user.username} ne ${u.username} (${u.role}) account banaya.`, target: 'admin', meta: { username: user.username, subject: u.username, changes: changeList({}, userSnapshot(u)), permissions: { added: perms, removed: [] } } });
+    recordNotification({ type: 'user', title: `👤 New user created · ${u.name}`, body: `${user.name || user.username} ne ${u.username} (${u.role}) account banaya.`, target: 'admin', meta: { username: user.username, subject: u.username, changes: changeList({}, userSnapshot(u)), permissions: { added: perms, removed: [] }, link: '#/settings?tab=users' } });
     return sendJson(res, 200, { ok: true, user: publicUser(u), permissions: permissionsFor(db.settings) });
   }
   if (p === '/api/users/reset-requests' && method === 'GET') {
@@ -1563,7 +1686,7 @@ async function handleApi(req, res, url) {
       const userChanges = changeList({ ...beforeUser, permissions: undefined }, { ...afterUser, permissions: undefined });
       const perms = permissionDiff(beforeUser.permissions, afterUser.permissions);
       if (body.password) userChanges.push({ field: 'password', before: '••••', after: 'reset by admin' });
-      if (userChanges.length || perms.added.length || perms.removed.length) recordNotification({ type: 'user', title: `👥 User updated · ${target.name || target.username}`, body: `${user.name || user.username} ne ${target.username} update kiya${perms.added.length || perms.removed.length ? ` · access +${perms.added.length} / −${perms.removed.length}` : ''}${userChanges.length ? ` · ${userChanges.map((c) => c.field).join(', ')}` : ''}.`, target: 'admin', meta: { username: user.username, subject: target.username, changes: userChanges, permissions: perms } });
+      if (userChanges.length || perms.added.length || perms.removed.length) recordNotification({ type: 'user', title: `👥 User updated · ${target.name || target.username}`, body: `${user.name || user.username} ne ${target.username} update kiya${perms.added.length || perms.removed.length ? ` · access +${perms.added.length} / −${perms.removed.length}` : ''}${userChanges.length ? ` · ${userChanges.map((c) => c.field).join(', ')}` : ''}.`, target: 'admin', meta: { username: user.username, subject: target.username, changes: userChanges, permissions: perms, link: '#/settings?tab=users' } });
       return sendJson(res, 200, { ok: true, user: publicUser(target) });
     }
     if (method === 'DELETE') {
@@ -1572,7 +1695,7 @@ async function handleApi(req, res, url) {
       db.users = db.users.filter((u) => u !== target);
       for (const [k, s] of Object.entries(db.sessions)) if (s.username === target.username) delete db.sessions[k];
       await persist('users'); await persist('sessions');
-      recordNotification({ type: 'user', title: `🗑️ User deleted · ${target.name || target.username}`, body: `${user.name || user.username} ne ${target.username} ka account delete kiya.`, target: 'admin', meta: { username: user.username, subject: target.username, changes: changeList(userSnapshot(target), {}) } });
+      recordNotification({ type: 'user', title: `🗑️ User deleted · ${target.name || target.username}`, body: `${user.name || user.username} ne ${target.username} ka account delete kiya.`, target: 'admin', meta: { username: user.username, subject: target.username, changes: changeList(userSnapshot(target), {}), link: '#/settings?tab=users' } });
       return sendJson(res, 200, { ok: true });
     }
   }
@@ -1729,6 +1852,9 @@ async function start() {
     setInterval(() => checkReports(false).catch(() => {}), 5 * 60e3).unref();
     setTimeout(() => maybeMonthlyReport(), 8000);
     setInterval(() => maybeMonthlyReport(), 60 * 60e3).unref();
+    // 🌅 Daily digest: subah 8 (IST) ke baad pehli wake-up par roz ek baar.
+    setTimeout(() => maybeDailyDigest(false).catch(() => {}), 15000);
+    setInterval(() => maybeDailyDigest(false).catch(() => {}), 30 * 60e3).unref();
   });
 }
 start().catch((err) => { console.error('Startup stopped to protect stored data:', err); process.exitCode = 1; });

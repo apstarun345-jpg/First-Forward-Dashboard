@@ -17,6 +17,7 @@ window.FF = window.FF || {};
     // Admin-only activity types (sab users ki activity admin ko hi milti hai):
     { key: 'signup',   label: '🆕 New account signup',     user: false, admin: true },
     { key: 'report',   label: '📊 Report data update',     user: false, admin: true },
+    { key: 'digest',   label: '🌅 Daily digest (subah · issuance + stock + cover)', user: false, admin: true },
     { key: 'activity', label: '👀 User page opens',        user: false, admin: true },
     { key: 'click',    label: '👆 Button / option use',    user: false, admin: true },
     { key: 'search',   label: '🔍 Searches',               user: false, admin: true },
@@ -27,7 +28,7 @@ window.FF = window.FF || {};
   // ⚠️ Sab keys TRUE rakho — savePrefs PURA object server par PUT karta hai, isliye yahan kisi
   // type ko false rakhne se wo permanently OFF save ho jaata tha (feed + mobile push dono band) —
   // isi wajah se admin ko sirf kuch types (sheet update) hi aati thi.
-  const DEFAULT_PREFS = { enabled: true, login: true, signup: true, report: true, monthly: true, activity: true, click: true, search: true, settings: true, user: true, location: true, info: true, sound: true, push: true };
+  const DEFAULT_PREFS = { enabled: true, login: true, signup: true, report: true, monthly: true, digest: true, activity: true, click: true, search: true, settings: true, user: true, location: true, info: true, sound: true, push: true };
   const state = { started: false, bound: false, timer: null, presenceTimer: null, fastTimer: null, lastAt: '', items: [], unread: 0, firstPoll: true, page: 'home', pointer: null, people: [], lastInteraction: Date.now(), pointerBound: false, events: [], dirty: false, lastSent: 0, lastScroll: -1, pushOn: false, pushDevices: 0, pushStatus: null, pushTriedAt: 0, pushError: '', prefs: { ...DEFAULT_PREFS }, audioCtx: null };
   const EMBED = new URLSearchParams(location.search).get('embed') === 'live';
   const sharing = () => localStorage.getItem('ff_presence_pointer') !== '0';
@@ -100,7 +101,7 @@ window.FF = window.FF || {};
 
   // ---- icon / helpers ----------------------------------------------------------------------------
   function icon(item) {
-    return ({ report: '📊', monthly: '📅', login: '🔐', activity: '👀', location: '📍', search: '🔍', click: '👆', settings: '⚙️', user: '👤', info: 'ℹ️' }[item.type] || '🔔');
+    return ({ report: '📊', monthly: '📅', digest: '🌅', login: '🔐', activity: '👀', location: '📍', search: '🔍', click: '👆', settings: '⚙️', user: '👤', info: 'ℹ️' }[item.type] || '🔔');
   }
   function canBrowserAlert() { return typeof Notification !== 'undefined' && Notification.permission === 'granted'; }
   function isInstalledPWA() {
@@ -218,6 +219,8 @@ window.FF = window.FF || {};
       const known = new Set(state.items.map((x) => x.id));
       const fresh = incoming.filter((x) => !known.has(x.id) && state.prefs[x.type] !== false);
       if (!initial) fresh.forEach(browserAlert);
+      // Naya signup aaya → sidebar ke pending-approvals badge ko turant update karo.
+      if (fresh.some((x) => x.type === 'signup') && FF.app && FF.app.refreshPendingBadge) FF.app.refreshPendingBadge();
       state.items = [...state.items, ...incoming].filter((x, i, a) => a.findIndex((y) => y.id === x.id) === i).slice(-100);
       state.lastAt = latestTime(state.items) || out.checkAt || state.lastAt;
       setCount(out.unread);
@@ -563,6 +566,20 @@ window.FF = window.FF || {};
       if (panelTest) { e.preventDefault(); testPanel(); return; }
       const pushTest = e.target.closest('[data-notify-push-test]');
       if (pushTest) { e.preventDefault(); testPush(); return; }
+      // 📅 Settings → "Digest abhi bhejo" — Roz ka morning digest (issuance + stock + cover) turant bhejo.
+      const digTest = e.target.closest('[data-notify-digest-test]');
+      if (digTest) {
+        e.preventDefault(); e.stopPropagation();
+        digTest.disabled = true;
+        const label = digTest.textContent;
+        digTest.textContent = '⏳ Ban raha hai…';
+        FF.auth.api('/api/notifications/digest', 'POST', {}).then((out) => {
+          if (out && out.ok && out.item) { U.toast('🌅 Digest bhej diya — bell list + phone panel dono par', 'ok'); poll(false); }
+          else U.toast('Digest nahi ban paya — pehle ek baar data sync (↻) karke dobara try karo', 'warn');
+        }).catch((err) => U.toast('Digest fail: ' + ((err && err.message) || ''), 'err'))
+          .finally(() => { digTest.disabled = false; digTest.textContent = label; });
+        return;
+      }
       const read = e.target.closest('[data-notify-read]');
       if (read) { e.preventDefault(); FF.auth.api('/api/notifications/read', 'POST', {}).catch(() => {}); setCount(0); render(); }
     });

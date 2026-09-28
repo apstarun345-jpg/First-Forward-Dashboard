@@ -195,8 +195,18 @@ window.FF = window.FF || {};
   }
 
   // ---- sidebar ----
-  function navItem(id, icon, label, desc, active, href) {
-    return `<a class="nav-item ${active ? 'active' : ''}" data-page="${id}" href="${href}"><span class="nav-ico">${icon}</span><span class="nav-text"><b>${esc(label)}</b><small>${esc(desc || '')}</small></span></a>`;
+  function navItem(id, icon, label, desc, active, href, badge) {
+    return `<a class="nav-item ${active ? 'active' : ''}" data-page="${id}" href="${href}"><span class="nav-ico">${icon}</span><span class="nav-text"><b>${esc(label)}</b><small>${esc(desc || '')}${badge || ''}</small></span></a>`;
+  }
+  // ⏳ Pending account approvals (admin) — sidebar Settings item par live badge.
+  let pendingSignups = 0;
+  function setPendingSignups(n) { pendingSignups = Math.max(0, Number(n) || 0); }
+  function refreshPendingBadge() {
+    if (!FF.auth.isAdmin || !FF.auth.isAdmin()) return Promise.resolve();
+    return FF.auth.api('/api/health').then((h) => {
+      const n = Number(h && h.pendingSignups) || 0;
+      if (n !== pendingSignups) { setPendingSignups(n); renderSidebar(); }
+    }).catch(() => {});
   }
   function renderSidebar() {
     const nav = U.$('#nav');
@@ -217,7 +227,7 @@ window.FF = window.FF || {};
         html += groupSheets.map((s) => `<a class="nav-item sheet ${current.page === 'sheet' && current.params.name === s.id ? 'active' : ''}" data-page="sheet" data-name="${esc(s.id)}" href="#/sheet/${encodeURIComponent(s.id)}"><span class="nav-ico">${s.icon || '📄'}</span><span class="nav-text"><b>${esc(s.id)}</b><small>${esc(s.desc || '')}</small></span></a>`).join('');
       }
     }
-    html += `<div class="nav-sec">${groupLabel('Account')}</div>` + navItem('settings', '⚙️', pageLabel({ id: 'settings', label: 'Settings' }).label, u && u.role === 'admin' ? 'Branding · data · users · access' : 'My account', current.page === 'settings', '#/settings');
+    html += `<div class="nav-sec">${groupLabel('Account')}</div>` + navItem('settings', '⚙️', pageLabel({ id: 'settings', label: 'Settings' }).label, u && u.role === 'admin' ? 'Branding · data · users · access' : 'My account', current.page === 'settings', '#/settings', u && u.role === 'admin' && pendingSignups > 0 ? ` <span class="nav-count" title="${pendingSignups} account approval pending — Settings → Users">${pendingSignups} pending ⏳</span>` : '');
     nav.innerHTML = html;
 
     const foot = U.$('#user-box');
@@ -688,7 +698,7 @@ window.FF = window.FF || {};
     if (FF.notifications) FF.notifications.start();
     liveShareChip();
     const u = FF.auth.user;
-    if (FF.auth.isAdmin()) FF.auth.api('/api/health').then(h => { storageBanner(h.storage); pushBanner(h.push); }).catch(() => {});
+    if (FF.auth.isAdmin()) FF.auth.api('/api/health').then(h => { storageBanner(h.storage); pushBanner(h.push); setPendingSignups(h.pendingSignups); renderSidebar(); }).catch(() => {});
     if (u && u.mustChangePassword) setTimeout(() => U.toast('⚠️ Default password chal raha hai — Settings → My account se badlo', 'err'), 900);
     // Location prompt + PWA
     setTimeout(requestLocationOnOpen, 2000);
@@ -711,6 +721,6 @@ window.FF = window.FF || {};
     if (ok) onLogin();
   }
 
-  FF.app = { storageBanner, pushBanner, liveShareChip, navigate, updateParams, refresh, openDrawer, closeDrawer, renderSidebar, renderCurrent, renderTopUser, updateStatus, onLogin, onBackgroundDataUpdated, promptInstall, enhanceCharts, themeMode, toggleThemeMode, lang, setLang, toggleLangMenu, PAGES, get current() { return current; } };
+  FF.app = { storageBanner, pushBanner, liveShareChip, navigate, updateParams, refresh, openDrawer, closeDrawer, renderSidebar, renderCurrent, renderTopUser, updateStatus, onLogin, onBackgroundDataUpdated, promptInstall, enhanceCharts, themeMode, toggleThemeMode, lang, setLang, toggleLangMenu, PAGES, refreshPendingBadge, setPendingSignups, get pendingSignups() { return pendingSignups; }, get current() { return current; } };
   document.addEventListener('DOMContentLoaded', init);
 })(window.FF);
