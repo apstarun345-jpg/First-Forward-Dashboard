@@ -245,19 +245,92 @@ await run('page gvPerformance', async () => { const r = root(); await pages.gvPe
 await run('page gvPerformance q=agent', () => pages.gvPerformance.render(root(), { q: gvAgent }, {}), true);
 await run('page compare', () => pages.compare.render(root(), {}, {}), true);
 await run('professional page executive cockpit', () => pages.executive.render(root(), {}, {}), true);
-await run('professional page GV commission', () => pages.gvCommission.render(root(), { group: 'weekday' }, {}), true);
+await run('FF commission wide-range fallback (right-side column bhi mile)', async () => {
+  const store = FF.store.state.data;
+  const full = store.report;
+  if (!full || !full.rows) throw new Error('REPORT table store me nahi hai');
+  const orig = FF.data.query.bind(FF.data);
+  let wideAsked = 0;
+  FF.data.query = async (sheet, tq, opts = {}) => { if (sheet === 'REPORT' && opts.range) wideAsked++; return orig(sheet, tq, opts); };
+  store.report = { ...full, rows: full.rows.map((r) => r.slice(0, 40)), cols: (full.cols || []).slice(0, 40) };
+  try {
+    FF.data.clearCache();
+    const mapping = await FF.insights.ffCommissionData();
+    if (!wideAsked) throw new Error('wide (A1:ZZ) re-fetch trigger nahi hua');
+    if (wideAsked < 1) throw new Error('koi wide query nahi gayi');
+    if (mapping.lastColLetter !== 'CB') throw new Error(`wide ke baad trailing blanks trim nahi hue (last ${mapping.lastColLetter}, CB expected)`);
+    if (!mapping.rateCol || mapping.rateCol.index < 40) throw new Error('wide range ke baad bhi commission rate column nahi mila');
+    if (!mapping.wideUsed) throw new Error('wide table adopt nahi hua');
+    if (!mapping.needsWiderRange || mapping.outOfRange < 1) throw new Error('chhota range detect nahi hua (needsWiderRange)');
+  } finally { store.report = full; FF.data.query = orig; FF.data.clearCache(); }
+  const mapping = await FF.insights.ffCommissionData();
+  if (mapping.needsWiderRange) throw new Error('full-width table ke saath needsWiderRange galat true hai');
+  if (!mapping.agents.some((a) => Number.isFinite(a.computed))) throw new Error('full width me computed commission nahi bana');
+}, false);
+
+await run('professional page GV commission · per-class boards', async () => {
+  const r = root(); await pages.gvCommission.render(r, { group: 'weekday' }, {});
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const label of ['Class boards · agent-wise commission', 'VC4 · Car / Jeep', 'VC20 · Light commercial', 'VC5+ · Commercial', 'Class-wise commission summary']) {
+    if (!html.includes(label)) throw new Error(`GV commission class board me "${label}" nahi mila`);
+  }
+  for (const id of ['gvc-class-vc4-csv', 'gvc-class-vc20-csv', 'gvc-class-vc5-csv']) if (!html.includes(id)) throw new Error(`class CSV button ${id} missing`);
+  if (!/Effective rate/.test(html) || !/Commission \/ tag/.test(html)) throw new Error('class board columns missing');
+}, true);
 await run('professional page FF reported commission (dynamic mapping)', async () => {
-  const r = root(); await pages.ffCommission.render(r, {}, {});
-  if (!/source is not available|reported commission/i.test(r.innerHTML)) throw new Error('commission mapping/source state missing');
+  const mapping = await FF.insights.ffCommissionData();
+  if (!mapping.amountCol) throw new Error('REPORT ka earned-commission heading detect nahi hua');
+  if (!mapping.rateCol) throw new Error('REPORT ka commission-rate heading detect nahi hua');
+  if (mapping.rateCol.letter !== 'CA' || mapping.amountCol.letter !== 'CB') throw new Error(`commission columns galat detect hue: ${mapping.rateCol.letter}/${mapping.amountCol.letter}`);
+  if (!mapping.agents.some((a) => Number.isFinite(a.earned))) throw new Error('earned commission values read nahi hue');
+  if (!mapping.agents.some((a) => Number.isFinite(a.computed))) { throw new Error('rate × tags fallback compute nahi hua'); }
+  const r = root(); await pages.ffCommission.render(r, { headings: 'all' }, {});
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const s of ['REPORT commission column finder', 'Commission rate source', 'Rate range in sheet', 'Agent-wise commission', 'Rate × tags', 'Heading map']) if (!html.includes(s)) throw new Error(`FF commission me "${s}" nahi mila`);
+  if (!/CA/.test(html) || !/CB/.test(html)) throw new Error('heading map me column letters nahi dikh rahe');
+}, true);
+await run('FF commission · Settings me heading ka naam (letter nahi) bhi chalta hai', async () => {
+  const cfg = FF.config.ffCommission;
+  const before = { ...cfg };
+  try {
+    cfg.rateCol = 'commission rate';           // chhote letters + space
+    cfg.earnedCol = '  Earned   Commission  '; // extra spaces
+    FF.data.clearCache();
+    const m = await FF.insights.ffCommissionData();
+    if (!m.rateCol || m.rateCol.letter !== 'CA' || m.rateCol.via !== 'name') throw new Error(`rate naam se resolve nahi hua: ${JSON.stringify(m.rateCol && { l: m.rateCol.letter, via: m.rateCol.via })}`);
+    if (!m.amountCol || m.amountCol.letter !== 'CB' || m.amountCol.via !== 'name') throw new Error('earned naam se resolve nahi hua');
+    if (m.warnings.length) throw new Error('resolved mapping ke liye warning nahi honi chahiye');
+    cfg.rateCol = 'Aisi Heading Nahin Hai';
+    FF.data.clearCache();
+    const bad = await FF.insights.ffCommissionData();
+    if (!bad.warnings.some((w) => w.key === 'rateCol')) throw new Error('galat heading naam par warning nahi mili');
+    const r = root(); await pages.ffCommission.render(r, {}, {});
+    const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+    if (!/REPORT me nahi mila/.test(html)) throw new Error('missing-heading warning page par nahi dikhi');
+  } finally { Object.assign(cfg, before); FF.data.clearCache(); }
 }, true);
 await run('professional page verified dual-channel agents', async () => {
   const identity = await FF.insights.buildCross();
   if (!identity.rows.length) throw new Error('mock identity join returned zero verified agents');
   if (!identity.rows.some((r) => r.methods.includes('barcode') && r.methods.includes('gv-id'))) throw new Error('two-signal overlap missing');
   const r = root(); await pages.dualChannel.render(r, {}, {});
-  if (!/barcode|unique-ID|unique ID/i.test(r.innerHTML)) throw new Error('identity evidence missing');
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  if (!/barcode|unique-ID|unique ID/i.test(html)) throw new Error('identity evidence missing');
+  for (const label of ['Double-mapped barcodes', 'Double-mapped barcodes CSV', 'FF tags · matched agents', 'GV tags · matched agents', 'cross-double-csv', 'FF TL', 'GV TL']) {
+    if (!html.includes(label)) throw new Error(`dual-channel me "${label}" nahi mila`);
+  }
+  const onlyDouble = root(); await pages.dualChannel.render(onlyDouble, { dup: 'double' }, {});
+  if (!/Doubled|Double-mapped|double-mapped/i.test(onlyDouble.innerHTML)) throw new Error('double-mapped filter view missing');
 }, true);
-await run('professional page stock forecast', () => pages.forecast.render(root(), { growth: '20', safety: '7' }, {}), true);
+await run('professional page stock forecast', async () => {
+  const r = root(); await pages.forecast.render(r, { growth: '20', safety: '7' }, {});
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const label of ['Urgent dispatch list', 'Channel summary', 'TL-wise replenishment rollup', 'Agent-level requirement forecast', '7-day replenishment need', 'Stock-out within 7 days', 'forecast-urgent-csv']) {
+    if (!html.includes(label)) throw new Error(`stock forecast me "${label}" nahi mila`);
+  }
+  const pageRisks = (html.match(/class="risk-chip (critical|high|medium|covered|norate)"/g) || []).length;
+  if (pageRisks !== 5) throw new Error(`risk strip ke 5 chips expected, mile ${pageRisks}`);
+}, true);
 await run('professional page forecast accuracy backtest', async () => {
   const accuracy = await FF.insights.forecastAccuracy(28), sample = accuracy.horizons[7].combined;
   if (!sample || !sample.agents || sample.predicted <= 0 || sample.actual <= 0) throw new Error('backtest sample coverage/predicted/actual is empty');
@@ -297,7 +370,14 @@ await run('professional page stock-balance reconciliation', async () => {
 await run('professional page data quality', async () => {
   const quality = await FF.insights.qualityIssues();
   if (!quality.scanned.stock || !quality.scanned.assignment || !quality.scanned.master) throw new Error('quality source scan incomplete');
-  await pages.dataQuality.render(root(), {}, {});
+  if (!quality.checksRun || quality.passed > quality.checksRun) throw new Error('quality check counters invalid');
+  if (!quality.sources.length || !quality.categoryRows.length) throw new Error('quality source/category summary missing');
+  const r = root(); await pages.dataQuality.render(r, {}, {});
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const label of ['Findings table', 'Sample rows', 'Category-wise check summary', 'Checks passed', 'dq-findings-csv', 'dq-samples-csv']) {
+    if (!html.includes(label)) throw new Error(`data quality me "${label}" nahi mila`);
+  }
+  if (/<details class="quality-item/.test(html)) throw new Error('purana accordion layout abhi bhi render ho raha hai');
 }, true);
 await run('workspace saved views API + page', async () => {
   const created = await FF.auth.api('/api/workspace/views', 'POST', { title: 'Smoke view', route: '#/forecast?risk=High', shared: false });

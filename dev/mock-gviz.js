@@ -68,7 +68,7 @@ for (const a of AGENTS) {
 }
 // ---- REPORT (gid 242489821): 2 header rows + data ---------------------------------------------
 const curM = MONTHS[today.getMonth()], lastM = MONTHS[(today.getMonth() + 11) % 12];
-const R1 = new Array(78).fill(''); const R2 = new Array(78).fill('');
+const R1 = new Array(80).fill(''); const R2 = new Array(80).fill('');
 const sec = (i, title, labels) => { R1[i] = title; labels.forEach((l, k) => { R2[i + k] = l; }); };
 sec(0, 'Agent Profile Details', ['Agent ID', 'ID', 'Name']);
 sec(3, "TL's Master Data", ['GV ID Found', 'TL ID', 'Mo. Number', 'TL Name']);
@@ -89,29 +89,37 @@ sec(72, 'Device', ['Biomatric Device']);
 sec(73, 'GV STOCK', ['VC4', 'NVC4']);
 sec(75, 'GV Issuance Last Month', ['Total']);
 sec(76, 'GV Issuance Current Month', ['Total']);
+// 🆕 v3.7 — commission columns (heading discovery + rate × tags fallback yahin se test hote hain)
+sec(78, 'Commission (FF)', ['Commission Rate', 'Earned Commission']);
 const PRIO = ['🔴 High', '🟡 Medium', '🟢 Low'];
 const STATUS = ['🚀 High Growth', '🟢 Growth', '🟡 Slight Low', '🔻 High De-Growth', '🔴 Inactive In Current Month'];
-const REPORT = { cols: new Array(78).fill(0).map((_, i) => ({ id: L(i), label: '', type: 'string' })), rows: [R1, R2] };
+const REPORT = { cols: new Array(80).fill(0).map((_, i) => ({ id: L(i), label: '', type: 'string' })), rows: [R1, R2] };
 const monthKey = (d) => `${d.getFullYear()}-${d.getMonth()}`;
 const curKey = monthKey(today), lastKey = monthKey(new Date(today.getFullYear(), today.getMonth() - 1, 1));
 const tlAgg = new Map();
 const agentRows = AGENTS.map((a) => {
-  const mine = EIR.rows.filter((r) => r[6] === a.id);
-  const dt = (r) => { const m = r[5].match(/\d+/g); return new Date(+m[0], +m[1], +m[2]); };
+  // EIR me agent ID column J (index 9) aur issue date column AA (index 26) hai — isse hi REPORT ka
+  // "current month" hissa banta hai (pehle galti se VRN column padha jata tha, isliye sab 0 aata tha).
+  const mine = EIR.rows.filter((r) => r[9] === a.id);
+  const dt = (r) => { const m = String(r[26] || '').match(/\d+/g); return m && m.length >= 3 ? new Date(+m[0], +m[1], +m[2]) : new Date(0); };
   const cur = mine.filter((r) => monthKey(dt(r)) === curKey), last = mine.filter((r) => monthKey(dt(r)) === lastKey);
   const vc4 = (rows) => rows.filter((r) => r[2] === '4').length;
   const st = STOCK.rows.filter((r) => r[7] === a.id);
   const sc = (c) => st.filter((r) => r[4] === c).length;
   const week = dayLabels.map((lab, i) => { const d = new Date(today); d.setDate(d.getDate() - (6 - i)); return mine.filter((r) => dt(r).getTime() === d.getTime()).length; });
   const g = last.length ? Math.round(((cur.length - last.length) / last.length) * 100) : 0;
-  const row = new Array(78).fill('');
+  const row = new Array(80).fill('');
   row[0] = a.id; row[1] = a.id; row[2] = a.name; row[3] = a.gv ? 'APS09129' : 'NOT FOUND'; row[4] = a.tlId; row[5] = a.tlMobile; row[6] = a.tlName;
   row[7] = sc('4'); row[8] = sc('5'); row[9] = sc('6'); row[10] = sc('7'); row[11] = sc('12'); row[12] = sc('16'); row[13] = st.length; row[14] = st.length - sc('4');
-  row[22] = new Set(last.map((r) => r[5])).size; row[23] = vc4(last); row[24] = last.length - vc4(last); row[25] = last.length;
+  row[22] = new Set(last.map((r) => dt(r).getTime())).size; row[23] = vc4(last); row[24] = last.length - vc4(last); row[25] = last.length;
   row[26] = Math.floor(rnd() * 3); row[27] = ''; row[28] = vc4(cur); row[29] = cur.filter((r) => r[2] === '5').length; row[30] = cur.filter((r) => r[2] === '6').length; row[31] = cur.filter((r) => r[2] === '7').length; row[32] = cur.filter((r) => r[2] === '12').length; row[33] = cur.filter((r) => r[2] === '16').length; row[34] = cur.length - vc4(cur); row[35] = cur.length; row[36] = Math.round(cur.length * 30 / Math.max(1, today.getDate())); row[37] = (vc4(cur) / Math.max(1, today.getDate())).toFixed(1); row[38] = ((cur.length - vc4(cur)) / Math.max(1, today.getDate())).toFixed(1); row[39] = (cur.length / Math.max(1, today.getDate())).toFixed(1);
   row[40] = `${g >= 0 ? '▲ +' : '▼ '}${g}%`; row[41] = week[6] ? '🟢 Active' : `🔴 ${1 + Math.floor(rnd() * 6)} days inactive`; row[42] = cur.length === 0 ? STATUS[4] : g > 20 ? STATUS[0] : g >= 0 ? STATUS[1] : g > -20 ? STATUS[2] : STATUS[3];
-  row[43] = new Set(cur.map((r) => r[5])).size; week.forEach((v, i) => { row[44 + i] = v; });
+  row[43] = new Set(cur.map((r) => dt(r).getTime())).size; week.forEach((v, i) => { row[44 + i] = v; });
   row[65] = row[39]; row[66] = Math.round(sc('4') / Math.max(0.1, Number(row[37]))); row[67] = row[66] < 10 ? PRIO[0] : row[66] < 25 ? PRIO[1] : PRIO[2];
+  // Commission rate per tag + earned amount (kuch rows me earned blank rehta hai — wo case bhi cover hota hai)
+  const rate = [0, 2.5, 3, 3.5, 4, 5][Math.floor(rnd() * 6)];
+  row[78] = rate ? rate : '';
+  row[79] = rate && rnd() > 0.25 ? Math.round(rate * cur.length * 100) / 100 : '';
   row[72] = rnd() < 0.6 ? 'YES' : 'NO'; row[73] = a.gv ? 120 : ''; row[74] = a.gv ? 30 : ''; row[75] = a.gv ? 40 : ''; row[76] = a.gv ? 55 : '';
   const t = tlAgg.get(a.tlId) || { curVc4: 0, curN: 0, lastVc4: 0, lastN: 0, sVc4: 0, sN: 0 };
   t.curVc4 += vc4(cur); t.curN += cur.length; t.lastVc4 += vc4(last); t.lastN += last.length; t.sVc4 += sc('4'); t.sN += st.length - sc('4'); tlAgg.set(a.tlId, t);
@@ -138,7 +146,7 @@ for (const row of agentRows) {
   row[61] = `${g >= 0 ? '▲ +' : '▼ '}${g}%`; row[62] = '🟢 Active'; row[63] = g > 10 ? '🚀 High Growth' : g >= 0 ? '🟢 Growth' : '🔻 De-Growth'; row[64] = Math.round(t.curN * 30 / days);
   row[68] = nDays; row[69] = Math.round((t.curN - t.curVc4) * 30 / days); row[70] = nDays < 10 ? PRIO[0] : nDays < 25 ? PRIO[1] : PRIO[2]; row[71] = nDays > 50 ? '🔴 Over Stocked (>50 days)' : '🟢 Stock OK';
 }
-const total = new Array(78).fill(''); total[0] = '5845036'; total[1] = '5845036'; total[2] = 'APNA PAYEMENT'; total[4] = '5845036'; total[6] = 'ApnaPayment Pvt. Ltd.';
+const total = new Array(80).fill(''); total[0] = '5845036'; total[1] = '5845036'; total[2] = 'APNA PAYEMENT'; total[4] = '5845036'; total[6] = 'ApnaPayment Pvt. Ltd.';
 REPORT.rows.push(total, ...agentRows);
 
 // ---- GV Partner sheet (second spreadsheet) ------------------------------------------------------

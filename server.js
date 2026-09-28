@@ -284,6 +284,23 @@ function deepMerge(base, patch) {
 }
 /** Admin ke feature flags + modify numbers (Settings → 🎛 Features) — defaults ke saath merged. */
 function feats() { return deepMerge(DEFAULT_SETTINGS.features, (db.settings && db.settings.features) || {}); }
+/**
+ * FF REPORT commission mapping ka value — column letter (BZ) YA heading ka naam ("Commission Rate").
+ * Naam wale values ko browser exact heading se match karta hai, isliye admin sheet ke heading ka
+ * poora naam likh sakta hai (pehle sirf 1–3 letter allowed the aur save hi fail ho jata tha).
+ */
+function cleanColumnMapping(raw, key) {
+  const text = String(raw === null || raw === undefined ? '' : raw)
+    .replace(/[\u0000-\u001f\u007f]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!text) return '';
+  if (/^[A-Za-z]{1,3}$/.test(text)) return text.toUpperCase();
+  if (text.length > 80) throw new HttpError(400, `${key}: column letter (jaise BZ) ya heading ka naam 80 characters tak likho.`);
+  if (!/[A-Za-z0-9]/.test(text)) throw new HttpError(400, `${key}: column letter (e.g. BZ) ya REPORT heading ka naam likho.`);
+  if (!/^[\w\s%₹/().#&+:'",\-@*]+$/u.test(text)) throw new HttpError(400, `${key}: heading ke naam me sirf normal characters use karo (letters, digits, %, ₹, /, ( ), -, .).`);
+  return text;
+}
 /** Settings payload: bina login (ya non-admin) ke email SMTP secrets kabhi mat bhejo. */
 function settingsFor(u) {
   if (u && u.role === 'admin') return db.settings;
@@ -2245,7 +2262,7 @@ async function handleApi(req, res, url) {
 
   if (p === '/api/health' && method === 'GET') {
     // pendingSignups sirf admin ko (sidebar badge ke liye) — public health me leak nahi.
-    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.6.0', storage: storageStatus(), push: pushHealth(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length } : {}) });
+    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.7.0', storage: storageStatus(), push: pushHealth(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length } : {}) });
   }
   if (p === '/api/public-config' && method === 'GET') return sendJson(res, 200, publicSettings());
   // App version (sw.js CACHE_NAME) — update-toast ke liye; logged-in se pehle bhi chahiye.
@@ -2928,9 +2945,7 @@ async function handleApi(req, res, url) {
       if (!patch.ffCommission || typeof patch.ffCommission !== 'object' || Array.isArray(patch.ffCommission)) throw new HttpError(400, 'ffCommission mapping object hona chahiye.');
       for (const key of ['rateCol', 'earnedCol', 'categoryCol', 'dateCol']) {
         if (patch.ffCommission[key] === undefined) continue;
-        const col = String(patch.ffCommission[key] || '').trim().toUpperCase();
-        if (col && !/^[A-Z]{1,3}$/.test(col)) throw new HttpError(400, `${key}: valid column letter chahiye (e.g. BZ).`);
-        patch.ffCommission[key] = col;
+        patch.ffCommission[key] = cleanColumnMapping(patch.ffCommission[key], key);
       }
     }
     if (patch.commissionSlabs !== undefined) {
