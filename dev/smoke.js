@@ -49,6 +49,7 @@ class El {
   removeAttribute(k) { delete this.attrs[k]; }
   hasAttribute(k) { return k in this.attrs; }
   focus() {} blur() {} click() {} select() {} scrollIntoView() {} scrollTo() {}
+  showModal() { this.open = true; } show() { this.open = true; } close() { this.open = false; }
   contains() { return false; }
   matches() { return false; }
   getContext() { return { drawImage() {}, fillRect() {}, measureText: () => ({ width: 10 }) }; }
@@ -378,6 +379,9 @@ await run('professional page data quality', async () => {
     if (!html.includes(label)) throw new Error(`data quality me "${label}" nahi mila`);
   }
   if (/<details class="quality-item/.test(html)) throw new Error('purana accordion layout abhi bhi render ho raha hai');
+  const dialog = FF.insights.openInsDialog(root(), 'Sample rows · smoke', ['Field', 'Value'], [['TAG_ID', '34161FA820320001'], ['VRN', 'RJ14' + '1'.repeat(4)]], 'smoke note');
+  if (!dialog || !/34161FA820320001/.test(dialog.innerHTML)) throw new Error('shared sample dialog rows render nahi kar raha');
+  if (!/smoke note/.test(dialog.innerHTML) || !/ins-detail-dialog/.test(dialog.className)) throw new Error('dialog header/note missing');
 }, true);
 await run('workspace saved views API + page', async () => {
   const created = await FF.auth.api('/api/workspace/views', 'POST', { title: 'Smoke view', route: '#/forecast?risk=High', shared: false });

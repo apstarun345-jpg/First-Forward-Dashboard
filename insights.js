@@ -100,7 +100,7 @@ FF.pages = FF.pages || {};
     root.append(dialog);
     const close = dialog.querySelector('[data-close]'); if (close) close.onclick = () => dialog.close();
     dialog.addEventListener('click', (e) => { if (e.target === dialog) dialog.close(); });
-    dialog.showModal();
+    if (typeof dialog.showModal === 'function') dialog.showModal(); else dialog.setAttribute('open', '');
     return dialog;
   }
   function bindExports(root, base, filename, sheetName, header, rows, extraSheets) {
@@ -1389,5 +1389,5 @@ FF.pages = FF.pages || {};
   FF.pages.reportStudio = { title: 'Report Studio', render: renderReportStudio };
   FF.pages.followups = { title: 'Notes & Follow-ups', render: renderFollowups };
   FF.workspace = { openSave, load: workspace, reset };
-  FF.insights = { reset, loadDetails, buildCross, ffCommissionData, qualityIssues, forecastAccuracy, stockBalanceReconciliation, commissionSlabExpected: slabExpected };
+  FF.insights = { reset, loadDetails, buildCross, ffCommissionData, qualityIssues, forecastAccuracy, stockBalanceReconciliation, commissionSlabExpected: slabExpected, openInsDialog };
 })(window.FF);
