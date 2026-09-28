@@ -35,8 +35,9 @@ FF.pages = FF.pages || {};
     const filter = { tl: p.tl || '', agent: p.agent || '' };
     const filterLabel = filter.agent ? `Agent: ${filter.agent}` : filter.tl ? `TL: ${filter.tl}` : 'All agents';
 
+    const shareOn = !FF.config.feat || FF.config.feat('share') !== false;
     root.innerHTML = `<div class="page-head"><div><h1>📈 Trend</h1><p class="sub">Daily · Weekly · Monthly · Last vs Current — EIR issuance log</p></div>
-      <div class="head-actions"><button class="btn primary" data-action="refresh">↻ Refresh</button></div></div>
+      <div class="head-actions">${shareOn ? '<button class="btn" id="tr-wa" title="Trend summary WhatsApp par bhejo">📤 WhatsApp</button>' : ''}<button class="btn primary" data-action="refresh">↻ Refresh</button></div></div>
       <div id="tr-controls"></div><div id="tr-body">${U.spinner('Trend data aggregate ho raha hai…')}</div>`;
 
     // All-agents daily is preloaded; a TL / agent drill-down is one small aggregated query (cached on the server).
@@ -53,6 +54,13 @@ FF.pages = FF.pages || {};
     const agentTl = new Map(); agents.forEach((a) => { if (!agentTl.has(a.name)) agentTl.set(a.name, FF.config.isExcludedTl(a.tlName) ? 'Direct' : a.tlName); });
     const allDaily = dailyR.status === 'fulfilled' ? dailyR.value : [];
     const monthsList = M.months(allDaily);
+    const waBtn = U.$('#tr-wa', root);
+    if (waBtn) waBtn.addEventListener('click', () => {
+      const cm = monthsList[monthsList.length - 1];
+      const s = cm ? M.summary(allDaily, cm) : null;
+      const text = `📈 ${FF.config.brand} Trend · ${mode === 'daily' ? 'Daily' : mode === 'weekly' ? 'Weekly' : mode === 'monthly' ? 'Monthly' : 'Compare'}${filterLabel !== 'All agents' ? ` · ${filterLabel}` : ''}\n${s ? `${U.labelYM(cm, true)}: ${U.fmt(s.total)} tags · avg ${U.fmt(s.avgPerDay)}/din${s.projected ? ` · projected ${U.fmt(s.projected)}` : ''}` : ''}\n📅 ${new Date().toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}`;
+      FF.app.shareWhatsApp(text);
+    });
     const latest = M.latestDate(allDaily);
     const curMonth = monthsList.includes(p.month) ? p.month : (latest ? U.ymKey(latest) : monthsList[monthsList.length - 1]);
     controls.innerHTML = `<div class="card controls"><div class="seg">${MODES.map(([k, l]) => `<button class="seg-btn ${k === mode ? 'on' : ''}" data-param="mode" data-value="${k}">${l}</button>`).join('')}</div>

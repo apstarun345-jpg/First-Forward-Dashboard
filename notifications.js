@@ -30,7 +30,7 @@ window.FF = window.FF || {};
   // type ko false rakhne se wo permanently OFF save ho jaata tha (feed + mobile push dono band) —
   // isi wajah se admin ko sirf kuch types (sheet update) hi aati thi.
   const DEFAULT_PREFS = { enabled: true, login: true, signup: true, report: true, monthly: true, digest: true, alert: true, activity: true, click: true, search: true, settings: true, user: true, location: true, info: true, sound: true, push: true };
-  const state = { started: false, bound: false, timer: null, presenceTimer: null, fastTimer: null, lastAt: '', items: [], unread: 0, firstPoll: true, page: 'home', pointer: null, people: [], lastInteraction: Date.now(), pointerBound: false, events: [], dirty: false, lastSent: 0, lastScroll: -1, pushOn: false, pushDevices: 0, pushStatus: null, pushTriedAt: 0, pushError: '', prefs: { ...DEFAULT_PREFS }, audioCtx: null };
+  const state = { started: false, bound: false, timer: null, presenceTimer: null, fastTimer: null, lastAt: '', items: [], unread: 0, firstPoll: true, page: 'home', pointer: null, people: [], lastInteraction: Date.now(), pointerBound: false, events: [], dirty: false, lastSent: 0, lastScroll: -1, pushOn: false, pushDevices: 0, pushStatus: null, pushTriedAt: 0, pushError: '', prefs: { ...DEFAULT_PREFS }, audioCtx: null, expanded: null };
   const EMBED = new URLSearchParams(location.search).get('embed') === 'live';
   const sharing = () => localStorage.getItem('ff_presence_pointer') !== '0';
 
@@ -103,6 +103,44 @@ window.FF = window.FF || {};
   // ---- icon / helpers ----------------------------------------------------------------------------
   function icon(item) {
     return ({ report: '📊', monthly: '📅', digest: '🌅', alert: '🔴', login: '🔐', activity: '👀', location: '📍', search: '🔍', click: '👆', settings: '⚙️', user: '👤', info: 'ℹ️' }[item.type] || '🔔');
+  }
+  // ---- 📂 notification ka data (panel me expand + redirect) --------------------------------------
+  const META_LABEL = { date: 'Date', ip: 'IP', loginId: 'Login ID', username: 'User', page: 'Page', band: 'Cover band', cover: 'Cover (din)', vc4: 'VC4 stock', avg: 'Avg / din', ffMtd: 'FF MTD', mtdDays: 'MTD days', achieved: 'Achieved', totalTarget: 'Target', day: 'Day', users: 'Users', ageDays: 'Age (din)', prevAvg: 'Pichhle avg', today: 'Aaj', source: 'Source', reset: 'Reset link', changes: 'Changes' };
+  function fmtMeta(v) {
+    if (v === null || v === undefined || v === '') return '';
+    if (Array.isArray(v)) return v.length > 8 ? `${v.slice(0, 8).map((x) => (typeof x === 'object' ? JSON.stringify(x) : String(x))).join(', ')} …(+${v.length - 8})` : v.map((x) => (typeof x === 'object' ? JSON.stringify(x) : String(x))).join(', ');
+    if (typeof v === 'object') return JSON.stringify(v);
+    return String(v);
+  }
+  function linkPageLabel(link) {
+    try {
+      const hash = String(link).replace(/^#\/?/, '');
+      const pageId = hash.split('?')[0];
+      if (pageId === 'sheet') return decodeURIComponent((hash.split('/')[1] || 'Sheet').split('?')[0]);
+      const p = ((FF.app && FF.app.PAGES) || []).find((x) => x.id === pageId);
+      if (p) return p.label;
+      return pageId === 'settings' ? 'Settings' : (pageId || 'Page');
+    } catch { return 'Page'; }
+  }
+  /** Item ke andar click karne par khulne wala data block — meta ke key/values + page link. */
+  function detailHtml(item) {
+    const m = item.meta || {};
+    const rows = [];
+    Object.entries(m).forEach(([k, v]) => {
+      if (k === 'link' || k === 'changes') return;
+      const s = fmtMeta(v);
+      if (!s) return;
+      rows.push(`<tr><td>${U.esc(META_LABEL[k] || k)}</td><td><b>${U.esc(s)}</b></td></tr>`);
+    });
+    const chg = Array.isArray(m.changes) && m.changes.length
+      ? `<table class="kd-tbl" style="margin-top:4px"><tbody>${m.changes.slice(0, 10).map((c) => `<tr><td>${U.esc(String(c.field || ''))}</td><td>${U.esc(fmtMeta(c.before))} → <b>${U.esc(fmtMeta(c.after))}</b></td></tr>`).join('')}</tbody></table>` : '';
+    return `<div class="notif-detail">
+      ${rows.length ? `<table class="kd-tbl"><tbody>${rows.join('')}</tbody></table>` : ''}
+      ${chg}
+      <div class="notif-detail-actions">
+        ${m.link ? `<button type="button" class="btn small primary" data-notify-goto="${U.esc(item.id)}">➡️ ${U.esc(linkPageLabel(m.link))} par jao</button>` : ''}
+        <button type="button" class="btn small" data-notify-drawer="${U.esc(item.id)}">🔎 Details drawer me</button>
+      </div></div>`;
   }
   function canBrowserAlert() { return typeof Notification !== 'undefined' && Notification.permission === 'granted'; }
   function isInstalledPWA() {
@@ -200,8 +238,11 @@ window.FF = window.FF || {};
       ${switchRow({ id: 'monthly', label: '📅 Monthly report', note: 'Har mahine ki 1–5 tarikh ko pichhle mahine ka FF vs GV compare', on: monthly, disabled: !on })}
     </div>`;
 
-    const rows = state.items.slice().reverse().slice(0, 60).map((item) => `<button type="button" class="notification-item ${item.type || ''}" data-notify-open="${U.esc(item.id)}" title="Click → poori report: kya change hua">
-      <span class="notification-icon">${icon(item)}</span><div><b>${U.esc(item.title)}</b><p>${U.esc(item.body)}</p><small>${U.esc(U.timeLabel(new Date(item.createdAt).getTime()))} · <u>details dekho →</u></small></div></button>`).join('');
+    const rows = state.items.slice().reverse().slice(0, 60).map((item) => {
+      const open = state.expanded === item.id;
+      return `<div class="notif-wrap ${open ? 'open' : ''}"><button type="button" class="notification-item ${item.type || ''} ${open ? 'active' : ''}" data-notify-open="${U.esc(item.id)}" title="Click → data expand karo" aria-expanded="${open ? 'true' : 'false'}">
+      <span class="notification-icon">${icon(item)}</span><div><b>${U.esc(item.title)}</b><p>${U.esc(item.body)}</p><small>${U.esc(U.timeLabel(new Date(item.createdAt).getTime()))} · <u>${open ? 'band karo ↑' : 'data dekho ↓'}</u></small></div></button>${open ? detailHtml(item) : ''}</div>`;
+    }).join('');
     const presence = isAdmin ? `<section class="presence-panel"><div class="presence-title">🟢 User activity <small>Admin only · live / last seen</small></div>${state.people.length ? state.people.map((p) => `<div class="presence-row"><span class="presence-dot ${p.active ? 'is-live' : ''}"></span><div><b>${U.esc(p.name || p.username)}</b><small>${p.active ? `Active now · ${U.esc(p.page)}` : `Last active ${U.esc(U.timeLabel(p.lastSeen))} · last page: ${U.esc(p.page)}`}</small>${p.lastEvent ? `<small>Last action: ${U.esc(p.lastEvent.label || p.lastEvent.kind)}</small>` : ''}</div><span class="presence-side"><span class="presence-state">${p.online && p.active ? 'LIVE' : p.online ? 'IDLE' : 'AWAY'}</span>${isAdmin ? `<button class="btn small" data-live-watch="${U.esc(p.username)}">👁 Live view</button>` : ''}</span></div>`).join('') : '<div class="notification-empty">Users seen after this server started will appear here.</div>'}</section>` : '';
     pop.innerHTML = `<div class="notification-head"><div><b>Notifications</b><small>${state.unread ? `${state.unread} unread` : 'Sab updated hai'}</small></div><div style="display:flex;gap:6px"><button class="btn small" data-notify-read>✓ Mark read</button></div></div>
       ${presence}
@@ -558,7 +599,30 @@ window.FF = window.FF || {};
         return;
       }
       const openBtn = e.target.closest('[data-notify-open]');
-      if (openBtn) { e.preventDefault(); const item = state.items.find((x) => x.id === openBtn.dataset.notifyOpen); toggle(false); if (item && item.meta && item.meta.link) { location.hash = item.meta.link; return; } if (item && FF.liveView) FF.liveView.openNotification(item); return; }
+      if (openBtn) { // pehli click → panel ke andar data expand; wapas click → band
+        e.preventDefault();
+        state.expanded = state.expanded === openBtn.dataset.notifyOpen ? null : openBtn.dataset.notifyOpen;
+        render();
+        return;
+      }
+      const gotoBtn = e.target.closest('[data-notify-goto]');
+      if (gotoBtn) { // expanded data par click → seedha us page par redirect
+        e.preventDefault();
+        const item = state.items.find((x) => x.id === gotoBtn.dataset.notifyGoto);
+        state.expanded = null;
+        toggle(false);
+        if (item && item.meta && item.meta.link) location.hash = item.meta.link;
+        return;
+      }
+      const drawerBtn = e.target.closest('[data-notify-drawer]');
+      if (drawerBtn) { // poora data drawer me (liveView) — link ho to drawer me hi redirect button ke saath
+        e.preventDefault();
+        const item = state.items.find((x) => x.id === drawerBtn.dataset.notifyDrawer);
+        state.expanded = null;
+        toggle(false);
+        if (item && FF.liveView) FF.liveView.openNotification(item);
+        return;
+      }
       const watchBtn = e.target.closest('[data-live-watch]');
       if (watchBtn) { e.preventDefault(); toggle(false); if (FF.liveView) FF.liveView.watch(watchBtn.dataset.liveWatch); return; }
       const test = e.target.closest('[data-notify-test]');

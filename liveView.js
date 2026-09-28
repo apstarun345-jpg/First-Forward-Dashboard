@@ -87,10 +87,15 @@
 
   function openNotification(item) {
     if (!item) return;
-    if (item.meta && item.meta.link) { location.hash = item.meta.link; return; }
     const view = item.type === 'report' ? reportView(item)
       : (item.type === 'settings' || item.type === 'user') ? changesView(item)
         : activityView(item);
+    // Data drawer me expand + (link ho to) us data page par redirect button — dono options.
+    const m = item.meta || {};
+    if (m.link) {
+      const lbl = (() => { try { const id = String(m.link).replace(/^#\/?/, '').split('?')[0]; const p = ((FF.app && FF.app.PAGES) || []).find((x) => x.id === id); if (id === 'sheet') return decodeURIComponent((String(m.link).split('/')[1] || 'Sheet').split('?')[0]); if (p) return p.label; return id === 'settings' ? 'Settings' : id; } catch { return 'Page'; } })();
+      view.body += `<p style="margin:10px 0 2px"><a class="btn small primary" href="${esc(m.link)}" data-lv-close>➡️ ${esc(lbl)} par jao</a> <span class="dim small">notification ke data par redirect</span></p>`;
+    }
     FF.app.openDrawer({ ...view, wide: item.type === 'report' || item.type === 'settings' || item.type === 'user' });
   }
 

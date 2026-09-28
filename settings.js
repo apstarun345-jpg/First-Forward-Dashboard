@@ -6,7 +6,7 @@ FF.pages = FF.pages || {};
   'use strict';
   const U = FF.util, A = FF.auth;
   const esc = U.esc;
-  const TABS = [['account', '👤 My account'], ['brand', '🎨 Branding & images'], ['sources', '🗂️ Sheets & tabs'], ['access', '🔐 Access matrix'], ['data', '🔌 Data source'], ['rules', '📐 Thresholds'], ['contacts', '📲 Contacts & sharing'], ['users', '👥 Users & access'], ['backup', '☁️ Storage & backup']];
+  const TABS = [['account', '👤 My account'], ['brand', '🎨 Branding & images'], ['sources', '🗂️ Sheets & tabs'], ['access', '🔐 Access matrix'], ['data', '🔌 Data source'], ['rules', '📐 Thresholds'], ['features', '🎛 Features'], ['contacts', '📲 Contacts & sharing'], ['users', '👥 Users & access'], ['backup', '☁️ Storage & backup']];
   let tab = 'account';
   let storage = null;
   let settings = null, defaults = null, usersCache = null, permsCache = [];
@@ -552,6 +552,67 @@ FF.pages = FF.pages || {};
     });
   }
 
+  // ---- 🎛 Features tab: har feature ka ON/OFF + modify numbers (admin) ---------------------------
+  function featuresTab() {
+    const df = (defaults && defaults.features) || {};
+    const f = { ...df, ...((settings && settings.features) || {}) };
+    f.alerts = { ...(df.alerts || {}), ...(((settings && settings.features) || {}).alerts || {}) };
+    const em = { ...((defaults && defaults.email) || {}), ...((settings && settings.email) || {}) };
+    const c = (key, label, hint) => `<label class="check"><input type="checkbox" data-path="features.${key}" ${f[key] !== false ? 'checked' : ''}> <b>${label}</b>${hint ? `<br><small class="dim" style="margin-left:20px">${hint}</small>` : ''}</label>`;
+    const a = (key, label, hint) => `<label class="check"><input type="checkbox" data-path="features.alerts.${key}" ${f.alerts[key] !== false ? 'checked' : ''}> <b>${label}</b>${hint ? `<br><small class="dim" style="margin-left:20px">${hint}</small>` : ''}</label>`;
+    const n = (path, value, label, attrs) => field(label, numI(path, value, attrs || 'min="0" max="999"'));
+    const uiCard = section('🎛 App features <span class="dim">(on / off)</span>', `
+      <p class="dim small">Har nayi/purani feature yahan se band-chalu kar sakte ho — user ko dikhega ya nahi, aap decide karo. Notification ke types alag se 👤 My account → 🔔 Notifications me hain.</p>
+      <div class="feat-grid">
+        ${c('search', '🔍 Global search (Ctrl / ⌘ + K)', 'Topbar 🔍 button + ek box me pages, sheets, agents, TLs')}
+        ${c('share', '📤 WhatsApp share buttons', 'Dashboard / Trend / Stock header ke 📤 + pivot share-row')}
+        ${c('targetBar', '🎯 Dashboard target progress bar', 'MTD vs target ka colored bar (Targets page par target set karo)')}
+        ${c('stockTrend', '📉 Stock trend chart', 'Stock page par last-30-din ka line chart (server snapshots)')}
+        ${c('tlCover', '📈 TL-wise cover list', 'Stock page — kam cover wale TLs upar, band emoji ke saath')}
+        ${c('recon', '🧾 Stock in vs issued', 'Stock page — MTD issuance + stock change se approx in-flow')}
+        ${c('loginHistory', '🕘 Login history table', 'Users tab me: kab, kis login ID se, kis IP se (last 20)')}
+        ${c('pendingBadge', '⏳ Pending-approvals badge', 'Sidebar Settings par pending signup count')}
+        ${c('updateToast', '🔄 “Update available” toast', 'Server version badle to app me Reload banner')}
+        ${c('backupReminder', '☁️ Settings backup reminder', `Backup purana ho to roz info alert — age threshold → ⚙️ neeche`)}
+      </div>${saveBar('feat-ui')}`);
+    const alertCard = section('🔴 Alert automation <span class="dim">(server-side — tab bhi chalta hai jab app band ho)</span>', `
+      <div class="feat-grid">
+        ${a('lowCover', '🔴 VC4 low-cover alert', 'Cover band bigadne par turant + red zone me roz (bands → 📐 Thresholds)')}
+        ${a('midMonth', '🎯 Mid-month target miss', 'Window me ek baar — pace 40%+ peeche ho to warning')}
+        ${a('inactive', '💤 Weekly inactive users', 'Har Monday 9 AM IST — 3+ din silent users ki list')}
+        ${a('zeroDay', '⚠️ Zero-day / sharp-drop', 'Raat 9 IST — aaj 0 issuance ya avg se bahut kam')}
+        ${a('newLoginIp', '🔐 Naye IP se login', 'Known IPs se bahar naye IP par login par admin alert')}
+      </div>
+      <p class="dim small">In alerts ki ON/OFF apne phone par bhi chahiye to 👤 My account → 🔔 Notifications me <b>🔴 Critical alerts</b> type bhi ON rakho.</p>${saveBar('feat-alerts')}`);
+    const modsCard = section('⚙️ Alert modify <span class="dim">(numbers tune karo)</span>', `
+      <div class="form-grid">
+        ${n('features.digestHour', f.digestHour, '🌅 Digest hour (IST)', 'min="0" max="23"')}
+        ${n('features.midFrom', f.midFrom, '🎯 Mid-month window: from (tareekh)', 'min="1" max="28"')}
+        ${n('features.midTo', f.midTo, 'Mid-month window: to (tareekh)', 'min="2" max="31"')}
+        ${n('features.midGapPct', f.midGapPct, '🎯 Kitna % peeche = alert (%)', 'min="5" max="90"')}
+        ${n('features.zeroDropPct', f.zeroDropPct, '⚠️ Sharp-drop threshold (%) — 0 = sirf zero-day', 'min="0" max="90"')}
+        ${n('features.backupDays', f.backupDays, '☁️ Backup reminder age (din)', 'min="1" max="120"')}
+      </div>
+      <p class="dim small">Cover bands (🔴/🟠/🟡) aur “went quiet” days → <b>📐 Thresholds</b> tab. Digest ka ON/OFF type → 🔔 Notifications.</p>${saveBar('feat-mods')}`);
+    const waCard = section('📤 WhatsApp share number', `
+      <div class="form-grid">${field('Direct number (blank = WhatsApp share picker)', txt('features.waNumber', f.waNumber || '', 'placeholder="9198xxxxxxxx00 · country code ke saath" inputmode="tel"'))}</div>
+      <p class="dim small">Number blank ho to WhatsApp apna contact picker kholta hai. Contacts tab ka team number fallback me use hota hai.</p>${saveBar('feat-wa')}`);
+    const emailCard = section('📧 Email digest <span class="dim">(SMTP — optional)</span>', `
+      <label class="check" style="margin-bottom:6px"><input type="checkbox" data-path="features.emailDigest" ${f.emailDigest ? 'checked' : ''}> <b>Digest email se bhi bhejo</b> <small class="dim">(push ke saath-saath subah ka summary email par)</small></label>
+      <div class="form-grid">
+        ${field('SMTP host', txt('email.host', em.host || '', 'placeholder="smtp.gmail.com"'))}
+        ${field('Port', numI('email.port', em.port || 587, 'min="1" max="65535"'))}
+        ${field('TLS (465 / implicit)', `<input type="checkbox" data-path="email.secure" ${em.secure ? 'checked' : ''}>`)}
+        ${field('User', txt('email.user', em.user || '', 'autocomplete="off"'))}
+        ${field('Password / app password', `<input class="input" type="password" data-path="email.pass" value="${esc(em.pass || '')}" autocomplete="new-password">`)}
+        ${field('From', txt('email.from', em.from || '', 'placeholder="alerts@yourdomain.com"'))}
+        ${field('To (comma-separated)', txt('email.to', em.to || '', 'placeholder="boss@x.com, team@x.com"'))}
+      </div>
+      <div class="save-bar"><button class="btn primary" data-save="feat-email">💾 Save</button><button class="btn" id="em-test">📧 Test email bhejo</button><span class="dim small" id="save-msg-feat-email"></span></div>
+      <p class="dim small">Gmail ke liye normal password nahi chalta — Google Account → 2-Step → <b>App passwords</b> banao. SMTP kabhi koi data leak nahi karti; password sirf server settings me rehta hai (non-admin ko dikhta bhi nahi).</p>`);
+    return `${uiCard}${alertCard}${modsCard}${waCard}${emailCard}`;
+  }
+
   // ---- page ------------------------------------------------------------------------------------
   async function render(root, params) {
     const admin = A.isAdmin();
@@ -571,6 +632,7 @@ FF.pages = FF.pages || {};
       else if (tab === 'access') { body.innerHTML = U.spinner('Access matrix…'); await accessTab(body); }
       else if (tab === 'data') body.innerHTML = dataTab();
       else if (tab === 'rules') body.innerHTML = rulesTab();
+      else if (tab === 'features') body.innerHTML = featuresTab();
       else if (tab === 'contacts') body.innerHTML = contactsTab();
       else if (tab === 'backup') body.innerHTML = backupTab();
       else if (tab === 'users') { body.innerHTML = U.spinner('Users…'); await usersTab(body); }
@@ -612,6 +674,24 @@ FF.pages = FF.pages || {};
         const reload = ['data', 'eir', 'stock'].includes(btn.dataset.save);
         save(patch, msg, { reload });
       }));
+      // 📧 Features → email: pehle save, phir SMTP par test mail
+      const emTest = U.$('#em-test', body);
+      if (emTest) emTest.addEventListener('click', async () => {
+        const cardEl = emTest.closest('.card');
+        save(collect(cardEl, {}), U.$('#save-msg-feat-email', body));
+        emTest.disabled = true;
+        const lbl = emTest.textContent;
+        emTest.textContent = '⏳ Bhej rahe hain…';
+        try {
+          await A.api('/api/notifications/email/test', 'POST', {});
+          U.toast('📧 Test email bhej diya — inbox (aur spam) check karo', 'ok');
+        } catch (err) {
+          U.toast(`SMTP test fail: ${err.message}`, 'err');
+        } finally {
+          emTest.disabled = false;
+          emTest.textContent = lbl;
+        }
+      });
       // live colour preview
       U.$$('input[type=color][data-path]', body).forEach((inp) => inp.addEventListener('input', () => { inp.nextElementSibling.textContent = inp.value; const t = { ...FF.config.theme }; t[inp.dataset.path.split('.')[1]] = inp.value; FF.config.theme = t; A.applyTheme(); }));
       U.$$('input[type=color][data-path]', body).forEach((inp) => inp.addEventListener('change', () => {
@@ -818,7 +898,8 @@ FF.pages = FF.pages || {};
       if (stEnv) stEnv.addEventListener('click', async () => { const v = stVals(); if (!v.url) return U.toast('Pehle Web app URL paste karo', 'err'); await U.copyText(`APPS_SCRIPT_URL=${v.url}\nAPPS_SCRIPT_SECRET=${v.secret}`); U.toast('Env values copied ✓ — Render → Environment me paste karo', 'ok'); });
       // backup
       const ex = U.$('#bk-export', body);
-      if (ex) ex.addEventListener('click', () => { const s = { ...settings }; U.downloadBlob(`ff-settings-${U.stamp()}.json`, new Blob([JSON.stringify(s, null, 2)], { type: 'application/json' })); });
+      if (ex) ex.addEventListener('click', () => { const s = { ...settings }; U.downloadBlob(`ff-settings-${U.stamp()}.json`, new Blob([JSON.stringify(s, null, 2)], { type: 'application/json' })); // ☁️ reminder ke liye server par timestamp (changeList skip karta hai — koi notification nahi)
+        A.api('/api/settings', 'PUT', { settings: { lastBackupAt: new Date().toISOString() } }).then((out) => { settings = JSON.parse(JSON.stringify(out.settings)); }).catch(() => {}); });
       const im = U.$('#bk-import', body);
       if (im) im.addEventListener('change', async () => { const f = im.files[0]; if (!f) return; try { const json = JSON.parse(await f.text()); if (!json || typeof json !== 'object') throw new Error('Invalid JSON'); delete json.updatedAt; delete json.updatedBy; await save(json, null, { reload: true }); draw(); } catch (err) { U.toast(err.message, 'err'); } });
       const cc = U.$('#bk-cache', body);

@@ -10,6 +10,8 @@ import fs from 'node:fs/promises';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import net from 'node:net';
+import tls from 'node:tls';
 import { fileURLToPath } from 'node:url';
 import { sheetsStoreFromEnv } from './sheets-storage.js';
 import { appsScriptStoreFromEnv, AppsScriptStore } from './apps-script-storage.js';
@@ -118,6 +120,29 @@ const DEFAULT_SETTINGS = {
   excludeTls: ['APS'],
   thresholds: { coverRed: 7, coverOrange: 15, coverAmber: 30, inactiveDays: 3, topN: 10 },
   contacts: { teamWhatsapp: '', teamEmail: '', teamGroupLink: '', signature: 'Team First Forward' },
+  // 🎛 Har feature ka admin toggle (Settings → 🎛 Features). UI features client par apply hote hain,
+  //    alerts server-side scheduled checks me isi se gate hote hain. Modify numbers bhi yahin.
+  features: {
+    search: true,        // 🔍 global search (Ctrl/⌘ + K) + topbar button
+    share: true,         // 📤 WhatsApp share buttons (Dashboard / Trend / Stock)
+    targetBar: true,     // 🎯 Dashboard target progress bar
+    stockTrend: true,    // 📉 Stock page 30-din trend chart
+    tlCover: true,       // 📈 TL-wise cover list (Stock)
+    recon: true,         // 🧾 Stock in vs issued (Stock)
+    loginHistory: true,  // 🕘 Login history table (Settings → Users)
+    pendingBadge: true,  // ⏳ Pending-approvals sidebar badge
+    updateToast: true,   // 🔄 "Update available" toast
+    backupReminder: true,// ☁️ Settings backup reminder
+    waNumber: '',        // 📤 WhatsApp share target number (blank = share picker)
+    alerts: { lowCover: true, midMonth: true, inactive: true, zeroDay: true, newLoginIp: true },
+    digestHour: 8,       // 🌅 digest kab se mile (IST hour, once after this)
+    midFrom: 15, midTo: 25, midGapPct: 40, // 🎯 mid-month window (tareekh) + peeche hone ki %
+    zeroDropPct: 50,     // ⚠️ itna % gira to sharp-drop alert (0 = sirf zero-day)
+    backupDays: 7,       // ☁️ settings backup ki reminder age (days)
+    emailDigest: false   // 📧 digest email se bhi bhejo (SMTP niche configure karo)
+  },
+  email: { host: '', port: 587, secure: false, user: '', pass: '', from: '', to: '' },
+  lastBackupAt: null,
   cacheSeconds: DEFAULT_CACHE_SECONDS,
   pageSize: 50,
   allowSignup: true,
@@ -197,6 +222,104 @@ function deepMerge(base, patch) {
     return out;
   }
   return patch === undefined ? base : patch;
+}
+/** Admin ke feature flags + modify numbers (Settings → 🎛 Features) — defaults ke saath merged. */
+function feats() { return deepMerge(DEFAULT_SETTINGS.features, (db.settings && db.settings.features) || {}); }
+/** Settings payload: bina login (ya non-admin) ke email SMTP secrets kabhi mat bhejo. */
+function settingsFor(u) {
+  if (u && u.role === 'admin') return db.settings;
+  const s = { ...db.settings };
+  if (s.email) s.email = { host: s.email.host || '', port: s.email.port || '', secure: !!s.email.secure, user: '', pass: '', from: s.email.from || '', to: s.email.to || '' };
+  return s;
+}
+/** sw.js ka CACHE_NAME — app version (update-toast ke liye). */
+let SW_VERSION = '';
+try { SW_VERSION = (readFileSync(path.join(__dirname, 'sw.js'), 'utf8').match(/CACHE_NAME\s*=\s*['"]([^'"]+)['"]/) || [])[1] || ''; } catch { /* dev mode */ }
+
+/**
+ * 📧 Minimal SMTP client (koi naya dependency nahi): EHLO → optional STARTTLS → optional AUTH LOGIN
+ * → RCPT → DATA. cfg = { host, port, secure, user, pass, from, to } (Settings → 🎛 Features).
+ * self-signed SMTP certs ke liye rejectUnauthorized false (internal mail relay chalte rahe).
+ */
+function smtpSend(cfg, subject, text) {
+  return new Promise((resolve, reject) => {
+    const host = String(cfg.host || '').trim();
+    const port = Number(cfg.port) || 587;
+    const directTls = cfg.secure === true || port === 465;
+    const from = String(cfg.from || cfg.user || '').trim();
+    const toList = String(cfg.to || '').split(/[,;]/).map((s) => s.trim()).filter(Boolean);
+    if (!host) return reject(new Error('SMTP host set nahi hai'));
+    if (!from) return reject(new Error('"From" address set nahi hai'));
+    if (!toList.length) return reject(new Error('"To" address set nahi hai'));
+    let sock = null, buf = '', step = 0, caps = '', done = false, rcptIdx = 0;
+    const timer = setTimeout(() => fail('SMTP timeout (15s)'), 15000);
+    const fail = (m) => { if (done) return; done = true; clearTimeout(timer); try { sock && sock.destroy(); } catch { /* ignore */ } reject(new Error(m)); };
+    const win = () => { if (done) return; done = true; clearTimeout(timer); try { sock && sock.end(); } catch { /* ignore */ } resolve(true); };
+    const w = (l) => sock.write(l + '\r\n');
+    const b64 = (s) => Buffer.from(String(s), 'utf8').toString('base64');
+    function bind(s) {
+      sock = s;
+      if (typeof sock.setEncoding === 'function') sock.setEncoding('utf8');
+      sock.setTimeout && sock.setTimeout(15000, () => fail('SMTP timeout (15s)'));
+      sock.on('error', (e) => fail(`SMTP: ${e.message || e}`));
+      sock.on('data', onData);
+    }
+    function onData(chunk) {
+      buf += chunk;
+      let i;
+      while (!done && (i = buf.search(/\r?\n/)) >= 0) {
+        const line = buf.slice(0, i).replace(/\r$/, '');
+        buf = buf.slice(i + (buf[i] === '\r' ? 2 : 1));
+        if (!line) continue;
+        const code = Number(line.slice(0, 3));
+        if (/^\d{3}-/.test(line)) { caps += line + '\n'; continue; } // multiline 250- caps
+        if (code >= 400 && step !== 9) return fail(`SMTP error: ${line}`);
+        handle(line, code);
+      }
+    }
+    function afterEhlo() {
+      if (String(cfg.user || '')) { step = 5; return w('AUTH LOGIN'); }
+      step = 6; return w(`MAIL FROM:<${from}>`);
+    }
+    function handle(line, code) {
+      if (step === 0) { step = 1; return w('EHLO localhost'); }
+      if (step === 1) { // pehla EHLO (plain par)
+        if (!directTls && !sock.authorized && /STARTTLS/i.test(caps)) { step = 2; return w('STARTTLS'); }
+        return afterEhlo();
+      }
+      if (step === 2) { // 220 TLS go — is socket par TLS wrapper lagao
+        const plain = sock;
+        plain.removeAllListeners('data'); plain.removeAllListeners('error'); plain.removeAllListeners('timeout');
+        const s2 = tls.connect({ socket: plain, servername: host, rejectUnauthorized: false }, () => {
+          caps = ''; step = 3; bind(s2); w('EHLO localhost');
+        });
+        s2.on('error', (e) => fail(`TLS: ${e.message || e}`));
+        return;
+      }
+      if (step === 3) return afterEhlo(); // TLS ke baad wapas EHLO
+      if (step === 5) { step = 51; return w(b64(String(cfg.user || ''))); } // 334 username
+      if (step === 51) { step = 52; return w(b64(String(cfg.pass || ''))); } // 334 password
+      if (step === 52) { step = 6; return w(`MAIL FROM:<${from}>`); }        // 235 auth ok
+      if (step === 6) { step = 7; return w(`RCPT TO:<${toList[rcptIdx]}>`); }
+      if (step === 7) {
+        rcptIdx++;
+        if (rcptIdx < toList.length) return w(`RCPT TO:<${toList[rcptIdx]}>`);
+        step = 8; return w('DATA');
+      }
+      if (step === 8) {
+        step = 9;
+        const mimeBody = Buffer.from(text, 'utf8').toString('base64').replace(/(.{76})/g, '$1\r\n');
+        return w(`From: ${from}\r\nTo: ${toList.join(', ')}\r\nSubject: =?UTF-8?B?${b64(subject)}?=\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n${mimeBody}\r\n.\r\n`);
+      }
+      if (step === 9) { w('QUIT'); return win(); }
+      void code;
+    }
+    const conn = directTls
+      ? tls.connect({ host, port, servername: host, rejectUnauthorized: false }, () => { /* greeting aane ka wait */ })
+      : net.connect({ host, port });
+    conn.once('error', (e) => fail(`SMTP connect: ${e.message || e}`));
+    bind(conn);
+  });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1031,6 +1154,8 @@ function maybeMonthlyReport() {
 // ---- 🌅 daily digest: roz ek baar (IST subah 8 ke baad) — kal ki issuance, MTD, abhi ka stock ----
 const MON_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 function istNow() { return new Date(Date.now() + 5.5 * 3600e3); } // sirf date/hour ke liye (UTC+5:30)
+/** IST ka aaj ka YYYY-MM-DD */
+function dateKeyNow() { const ist = istNow(); const pad = (n) => String(n).padStart(2, '0'); return `${ist.getUTCFullYear()}-${pad(ist.getUTCMonth() + 1)}-${pad(ist.getUTCDate())}`; }
 /** StockDataa ka current total + class split (ek gviz group-by query). */
 async function stockSnapshot() {
   try {
@@ -1068,7 +1193,8 @@ async function maybeDailyDigest(force = false) {
     const pad = (n) => String(n).padStart(2, '0');
     const dateKey = `${ist.getUTCFullYear()}-${pad(ist.getUTCMonth() + 1)}-${pad(ist.getUTCDate())}`;
     if (!force) {
-      if (ist.getUTCHours() < 8) return null; // subah 8 baje se pehle nahi
+      const F = feats();
+      if (ist.getUTCHours() < (Number(F.digestHour) || 8)) return null; // digest hour (default subah 8)
       if (db.notify.watch.digestDate === dateKey) return null; // aaj ka digest already gaya
     }
     await checkReports(false).catch(() => {}); // taaza FF/GV snapshots (5-min throttle respected)
@@ -1108,6 +1234,13 @@ async function maybeDailyDigest(force = false) {
     db.notify.watch.digestDate = dateKey;
     persist('notify').catch(() => {});
     console.log(`daily digest sent for ${dateKey} (${parts.length} lines)`);
+    // 📧 Email digest (admin Features tab me ON + SMTP configured ho to).
+    const F = feats(), ecfg = db.settings.email || {};
+    if (F.emailDigest && ecfg.host && ecfg.to) {
+      smtpSend(ecfg, `🌅 Daily digest · ${dLabel(dateKey)}`, parts.join('\n'))
+        .then(() => console.log('digest email sent'))
+        .catch((e) => console.warn('digest email:', e.message));
+    }
     return item;
   } catch (err) { console.warn('daily digest:', err.message); return null; }
 }
@@ -1159,7 +1292,7 @@ async function refreshStockState(force = false) {
     const emoji = { red: '🔴', orange: '🟠', amber: '🟡', green: '🟢' };
     const worsened = !!prevBand && rank[band] > rank[prevBand];
     const dailyRed = band === 'red' && watch.coverAlertDate !== dateKey;
-    if (worsened || dailyRed) {
+    if ((worsened || dailyRed) && feats().alerts.lowCover !== false) {
       if (band === 'red') watch.coverAlertDate = dateKey;
       recordNotification({
         type: 'alert',
@@ -1184,8 +1317,10 @@ async function maybeMidMonthAlert() {
     const dateKey = `${ist.getUTCFullYear()}-${pad(ist.getUTCMonth() + 1)}-${pad(ist.getUTCDate())}`;
     const day = Number(dateKey.slice(8, 10));
     const ym = dateKey.slice(0, 7);
-    // Server free-tier par sota hai — window 15–25 rakhi taaki wake-up par bhi check ho jaye.
-    if (day < 15 || day > 25) return null;
+    const F = feats();
+    if (F.alerts.midMonth === false) return null;
+    // Server free-tier par sota hai — window (default 15–25) rakhi taaki wake-up par bhi check ho jaye.
+    if (day < (Number(F.midFrom) || 15) || day > (Number(F.midTo) || 25)) return null;
     if (db.notify.watch.midMonthAlert === ym) return null;
     const targets = Array.isArray(db.settings.targets) ? db.settings.targets : [];
     const totalTarget = targets.filter((t) => t && t.ym === ym && Number(t.target) > 0).reduce((a, t) => a + Number(t.target), 0);
@@ -1195,12 +1330,13 @@ async function maybeMidMonthAlert() {
     const achieved = ffMtd + gvMtd;
     const daysInMonth = new Date(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)), 0).getDate();
     const monthLabel = `${day} ${MON_SHORT[Number(dateKey.slice(5, 7)) - 1]}`;
+    const keep = 1 - (Number(F.midGapPct) || 40) / 100; // 40%+ peeche = achieved expected ka 60% se kam
     let behind = false, body = '';
     if (totalTarget > 0) {
       const expected = totalTarget * (day / daysInMonth);
       const pct = expected > 0 ? Math.round((achieved / expected) * 100) : 100;
       // 40%+ peeche = achieved expected pace ka 60% se kam.
-      if (expected > 0 && achieved < expected * 0.6) {
+      if (expected > 0 && achieved < expected * keep) {
         behind = true;
         body = `${monthLabel} (day ${day}/${daysInMonth}): FF+GV ${achieved.toLocaleString('en-IN')} tags vs target ${totalTarget.toLocaleString('en-IN')} ka expected pace ${Math.round(expected).toLocaleString('en-IN')} — sirf ${pct}% (lagbhag ${100 - pct}% peeche). Targets page par agents ko push karo.`;
       }
@@ -1210,7 +1346,7 @@ async function maybeMidMonthAlert() {
       const prevYm = `${prevD.getUTCFullYear()}-${pad(prevD.getUTCMonth() + 1)}`;
       let prevSame = 0;
       for (const [d, v] of Object.entries(daily)) if (d.startsWith(prevYm) && Number(d.slice(8, 10)) <= day && v) prevSame += (Number(v.ff) || 0) + (Number(v.gv) || 0);
-      if (prevSame > 0 && achieved < prevSame * 0.6) {
+      if (prevSame > 0 && achieved < prevSame * keep) {
         behind = true;
         body = `${monthLabel}: FF+GV ${achieved.toLocaleString('en-IN')} tags — pichhle mahine isi tarikh tak ${prevSame.toLocaleString('en-IN')} the (lagbhag ${100 - Math.round((achieved / prevSame) * 100)}% peeche). Target set karo (Targets page) ya pace badhao.`;
       }
@@ -1224,6 +1360,7 @@ async function maybeMidMonthAlert() {
 // ---- 💤 weekly inactive users (Monday, 9 AM IST ke baad — hafte me ek baar) ----------------------
 function maybeInactiveUsers() {
   try {
+    if (feats().alerts.inactive === false) return null;
     if (!db.notify || typeof db.notify !== 'object') db.notify = { items: [], watch: {} };
     if (!db.notify.watch || typeof db.notify.watch !== 'object') db.notify.watch = {};
     const ist = istNow();
@@ -1255,7 +1392,89 @@ function maybeInactiveUsers() {
 }
 /** Ek jagah se saare scheduled checks — boot + har 30 min. */
 function runScheduledChecks() {
-  return Promise.allSettled([maybeDailyDigest(false), maybeMidMonthAlert(), maybeInactiveUsers(), refreshStockState(false)]);
+  const F = feats();
+  return Promise.allSettled([
+    maybeDailyDigest(false),
+    maybeMidMonthAlert(),
+    maybeInactiveUsers(),
+    F.alerts.zeroDay === false ? Promise.resolve() : maybeZeroDayAlert(),
+    F.backupReminder === false ? Promise.resolve() : maybeBackupReminder(),
+    refreshStockState(false)
+  ]);
+}
+// ---- ⚠️ zero-day / sharp-drop alert (raat 9 IST ke baad, din me ek baar) ------------------------
+async function maybeZeroDayAlert() {
+  try {
+    if (feats().alerts.zeroDay === false) return null;
+    const ist = istNow();
+    if (ist.getUTCHours() < 21) return null; // din khatam hone ka wait
+    const pad = (n) => String(n).padStart(2, '0');
+    const dateKey = `${ist.getUTCFullYear()}-${pad(ist.getUTCMonth() + 1)}-${pad(ist.getUTCDate())}`;
+    if (db.notify.watch.zeroAlertDate === dateKey) return null;
+    await checkReports(false).catch(() => {}); // taaza FF snapshot (5-min throttle)
+    const watch = db.notify.watch || {};
+    const daily = watch.daily && typeof watch.daily === 'object' ? watch.daily : {};
+    const F = feats();
+    const dropPct = Number(F.zeroDropPct) || 50;
+    const padDay = (d) => { const dt = new Date(d); return `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())}`; };
+    const nowD = new Date(`${dateKey}T00:00:00Z`);
+    // Prev 7 din (aaj ke pehle) — jin ka entry hai unka avg.
+    let prevSum = 0, prevDays = 0;
+    for (let i = 1; i <= 7; i++) {
+      const k = padDay(new Date(nowD.getTime() - i * 86400e3));
+      const v = Number(daily[k] && daily[k].ff) || 0;
+      if (daily[k]) { prevSum += v; prevDays++; }
+    }
+    const prevAvg = prevDays ? prevSum / prevDays : 0;
+    if (prevAvg <= 0) return null; // benchmark hi nahi
+    const todayFf = daily[dateKey] ? Number(daily[dateKey].ff) || 0 : null;
+    const ffSnap = watch.ff && watch.ff.date ? watch.ff : null;
+    const sheetHasToday = !!(ffSnap && ffSnap.date >= dateKey);
+    // Case A: sheet me aaj ki rows hi nahi (snapshot ka date aaj se pehle ka) → 0 issuance day.
+    const staleOk = ffSnap && ffSnap.date && ffSnap.date >= padDay(new Date(nowD.getTime() - 3 * 86400e3));
+    const isZero = !sheetHasToday && staleOk;
+    // Case B: aaj data hai par pichhle avg se dropPct+ kam.
+    const isDrop = !isZero && todayFf !== null && todayFf < prevAvg * (1 - dropPct / 100);
+    if (!isZero && !isDrop) return null;
+    db.notify.watch.zeroAlertDate = dateKey;
+    persist('notify').catch(() => {});
+    const base = `Pichhle ${prevDays} active din ka avg ≈ ${Math.round(prevAvg)}/din.`;
+    return recordNotification({
+      type: 'alert',
+      title: isZero ? `⚠️ Aaj abhi tak 0 issuance (${dateKey.slice(8, 10)} ${MON_SHORT[Number(dateKey.slice(5, 7)) - 1]})` : `⚠️ Sharp drop · aaj sirf ${todayFf} tags (avg ${Math.round(prevAvg)})`,
+      body: isZero
+        ? `${base} Sheet me aaj ka koi ISSUE_DATE nahi mila — EIR sheet update hui ya nahi, ek baar dekh lo.`
+        : `${base} Aaj ${Math.round(100 - (todayFf / prevAvg) * 100)}% kam (${dropPct}%+ gira threshold). Trend page par day-wise dekho.`,
+      target: 'admin',
+      meta: { link: '#/trend', date: dateKey, prevAvg: Math.round(prevAvg), today: todayFf || 0 }
+    });
+  } catch (err) { console.warn('zero-day alert:', err.message); return null; }
+}
+// ---- ☁️ settings backup reminder (roz ek baar, backup purana ho to) -----------------------------
+function maybeBackupReminder() {
+  try {
+    const F = feats();
+    if (F.backupReminder === false) return null;
+    const ist = istNow();
+    if (ist.getUTCHours() < 10) return null;
+    const pad = (n) => String(n).padStart(2, '0');
+    const dateKey = `${ist.getUTCFullYear()}-${pad(ist.getUTCMonth() + 1)}-${pad(ist.getUTCDate())}`;
+    if (db.notify.watch.backupRemindDate === dateKey) return null;
+    const maxAge = Number(F.backupDays) || 7;
+    const last = Date.parse(db.settings.lastBackupAt || '') || Date.parse(db.settings.updatedAt || '') || 0;
+    if (!last) return null;
+    const age = (Date.now() - last) / 86400e3;
+    if (age < maxAge) return null;
+    db.notify.watch.backupRemindDate = dateKey;
+    persist('notify').catch(() => {});
+    return recordNotification({
+      type: 'info',
+      title: `☁️ Settings backup purana hai (${Math.floor(age)} din)`,
+      body: `Settings → ☁️ Storage & backup se settings JSON download kar lo — ${maxAge} din se purana ho chuka hai. Render/storage badalne se pehle ye zaroori hai.`,
+      target: 'admin',
+      meta: { link: '#/settings?tab=backup', ageDays: Math.floor(age) }
+    });
+  } catch (err) { console.warn('backup reminder:', err.message); return null; }
 }
 let reportCheckAt = 0;
 let reportCheckPromise = null;
@@ -1341,10 +1560,12 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.2.0', storage: storageStatus(), push: pushHealth(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length } : {}) });
   }
   if (p === '/api/public-config' && method === 'GET') return sendJson(res, 200, publicSettings());
+  // App version (sw.js CACHE_NAME) — update-toast ke liye; logged-in se pehle bhi chahiye.
+  if (p === '/api/version' && method === 'GET') return sendJson(res, 200, { version: SW_VERSION || 'dev' });
 
   // ---- auth ----
   if (p === '/api/auth/me' && method === 'GET') {
-    return sendJson(res, 200, { user: publicUser(user), settings: user ? db.settings : publicSettings(), permissions: permissionsFor(db.settings), tabs: db.settings.tabs, ...(user && user.role === 'admin' ? { storage: storageStatus(), pendingSignups: db.users.filter((u) => !u.approved).length } : {}) });
+    return sendJson(res, 200, { user: publicUser(user), settings: user ? settingsFor(user) : publicSettings(), permissions: permissionsFor(db.settings), tabs: db.settings.tabs, ...(user && user.role === 'admin' ? { storage: storageStatus(), pendingSignups: db.users.filter((u) => !u.approved).length } : {}) });
   }
   if (p === '/api/auth/signup' && method === 'POST') {
     if (db.settings.allowSignup === false && db.users.length) throw new HttpError(403, 'Sign up band hai — admin se account maango.');
@@ -1381,6 +1602,17 @@ async function handleApi(req, res, url) {
     u.lastLoginAt = new Date().toISOString();
     // 🕘 Login history (admin ko Users tab me dikhta hai): kab, kis ID se, kis IP se — last 20.
     if (!Array.isArray(u.loginHistory)) u.loginHistory = [];
+    // 🔐 Naye IP se login — pehle known IPs se bahar ho to admin ko alert (Features tab se band kar sakte ho).
+    const knownIps = new Set(u.loginHistory.map((l) => l && l.ip).filter(Boolean));
+    if (ip && knownIps.size > 0 && !knownIps.has(ip) && feats().alerts.newLoginIp !== false) {
+      recordNotification({
+        type: 'alert',
+        title: `🔐 Naye IP se login — ${u.name || u.username}`,
+        body: `${u.username} ne "${loginId}" se ${ip} par login kiya — ye IP is account ke history me pehle nahi mila (${u.loginHistory.length} purane logins). Agar ye aap nahi the to password badal do.`,
+        target: 'admin',
+        meta: { username: u.username, loginId, ip, link: '#/settings?tab=users' }
+      });
+    }
     u.loginHistory.push({ at: u.lastLoginAt, id: String(loginId).slice(0, 60), ip: ip || '' });
     if (u.loginHistory.length > 20) u.loginHistory = u.loginHistory.slice(-20);
     // One Google Sheets batch can confirm the user timestamp and session together.
@@ -1471,7 +1703,21 @@ async function handleApi(req, res, url) {
     const watch = (db.notify && db.notify.watch) || {};
     const hist = watch.stockHistory && typeof watch.stockHistory === 'object' ? watch.stockHistory : {};
     const points = Object.keys(hist).sort().slice(-60).map((date) => ({ date, total: Number(hist[date] && hist[date].total) || 0, vc4: Number(hist[date] && hist[date].vc4) || 0, comm: Number(hist[date] && hist[date].comm) || 0 }));
-    return sendJson(res, 200, { points, cover: watch.cover || null, thresholds: db.settings.thresholds || {} });
+    // MTD (FF + GV) — target bar aur stock "in vs issued" reconciliation ke liye.
+    const daily = watch.daily && typeof watch.daily === 'object' ? watch.daily : {};
+    const monthKey = dateKeyNow();
+    let ffMtd = 0, gvMtd = 0, mtdDays = 0;
+    for (const [d, v] of Object.entries(daily)) if (d.startsWith(monthKey) && v) { const f = Number(v.ff) || 0, g = Number(v.gv) || 0; if (f || g) mtdDays++; ffMtd += f; gvMtd += g; }
+    return sendJson(res, 200, { points, cover: watch.cover || null, thresholds: db.settings.thresholds || {}, mtd: { ff: ffMtd, gv: gvMtd, days: mtdDays } });
+  }
+  if (p === '/api/notifications/email/test' && method === 'POST') {
+    requireAdmin(user);
+    const cfg = db.settings.email || {};
+    if (feats().emailDigest === false) { /* ON nahi — phir bhi test karne do (config check) */ }
+    try {
+      await smtpSend(cfg, `✅ Test email · ${db.settings.brand || 'Dashboard'}`, `Ye test email hai — SMTP configuration sahi chal rahi hai.\n\nDigest isi tarah subah (${feats().digestHour || 8} IST) push ke saath email par bhi aayega (features.emailDigest ON ho to).\n${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST`);
+      return sendJson(res, 200, { ok: true });
+    } catch (err) { throw new HttpError(502, `SMTP test fail: ${err.message}`); }
   }
   if (p === '/api/notifications/digest' && method === 'POST') {
     if (!user) throw new HttpError(401, 'Login required');
@@ -1723,7 +1969,7 @@ async function handleApi(req, res, url) {
   }
 
   // ---- settings ----
-  if (p === '/api/settings' && method === 'GET') return sendJson(res, 200, { settings: db.settings, defaults: DEFAULT_SETTINGS });
+  if (p === '/api/settings' && method === 'GET') return sendJson(res, 200, { settings: settingsFor(user), defaults: DEFAULT_SETTINGS });
   if (p === '/api/settings' && method === 'PUT') {
     requireAdmin(user);
     const body = await readBody(req);
@@ -1753,7 +1999,7 @@ async function handleApi(req, res, url) {
     const next = body.reset ? { ...DEFAULT_SETTINGS } : deepMerge(db.settings, patch);
     next.updatedAt = new Date().toISOString(); next.updatedBy = user.username;
     if (next.sheetId !== db.settings.sheetId || next.cacheSeconds !== db.settings.cacheSeconds) cache.clear();
-    const changes = changeList(db.settings, next, { skip: ['updatedAt', 'updatedBy'] });
+    const changes = changeList(db.settings, next, { skip: ['updatedAt', 'updatedBy', 'lastBackupAt'] });
     db.settings = next;
     await persist('settings');
     if (changes.length || body.reset) recordNotification({ type: 'settings', title: body.reset ? '⚙️ Settings reset to defaults' : `⚙️ Settings changed (${changes.length})`, body: `${user.name || user.username} ne ${changes.slice(0, 4).map((c) => c.field).join(', ')}${changes.length > 4 ? ` +${changes.length - 4} more` : ''} update kiya.`, target: 'admin', meta: { username: user.username, name: user.name, changes, reset: !!body.reset, link: '#/settings' } });

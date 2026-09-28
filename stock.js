@@ -223,48 +223,77 @@ FF.pages = FF.pages || {};
         ${card('📊 Stock by class', C.bars({ labels: P.classes, height: 200, series: [{ name: 'Stock', values: P.classes.map((c) => P.byClass.get(c)), color: '#14b8a6' }], onClickAttr: (i) => `data-pick-cls="${esc(P.classes[i])}"` }) + `<div class="chip-row" style="margin-top:10px">${P.classes.map((c) => `<button class="chip ${isVc4(c) ? 'vc4' : 'comm'}" data-pick-cls="${esc(c)}">${esc(c)} <b>${U.fmtShort(P.byClass.get(c))}</b></button>`).join('')}</div>`)}
         ${card('🏬 Top TLs by stock <span class="dim">(APS excluded)</span>', C.hbars({ items: topTls, valueLabel: 'Stock' }))}
       </div>
-      ${card('📉 Stock trend <span class="dim">(server snapshots · last 30 din)</span>', `<div id="st-trend"><div class="dim small">History load ho rahi hai…</div></div>`, `<span class="dim small" id="st-trend-cover"></span>`)}
+      ${!FF.config.feat || FF.config.feat('stockTrend') !== false ? `<div id="st-trend-card">${card('📉 Stock trend <span class="dim">(server snapshots · last 30 din)</span>', `<div id="st-trend"><div class="dim small">History load ho rahi hai…</div></div>`, `<span class="dim small" id="st-trend-cover"></span>`)}</div>` : ''}
+      ${!FF.config.feat || FF.config.feat('recon') !== false ? `<div id="st-recon-card">${card('🧾 Stock in vs issued <span class="dim">(is mahine · approx)</span>', `<div id="st-recon"><div class="dim small">Reconciliation load ho raha hai…</div></div>`)}</div>` : ''}
+      ${!FF.config.feat || FF.config.feat('tlCover') !== false ? card(`📈 TL-wise cover <span class="dim">(sabse kam cover upar · VC4 stock ÷ avg daily issuance MTD)</span>`, `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>TL</th><th class="num">VC4 stock</th><th class="num">MTD issued</th><th class="num">Avg / din</th><th>Cover</th></tr></thead><tbody>${(() => {
+        const sorted = [...tls].sort((a, b) => (a.cover === null ? 1 : b.cover === null ? -1 : a.cover - b.cover)).slice(0, 14);
+        return sorted.map((t) => `<tr data-pick-tl="${esc(t.name)}" class="clickable"><td><b>${esc(t.name)}</b></td><td class="num">${U.fmt(t.vc4)}</td><td class="num">${U.fmt(t.iss)}</td><td class="num">${P.elapsed ? U.fmt(t.iss / P.elapsed, 1) : '—'}</td><td>${coverBadge(t.cover)}</td></tr>`).join('');
+      })()}</tbody></table></div>`) : ''}
       ${card('🧮 TL × Class stock matrix <span class="dim">(click TL → pivot + Excel · VC4 cover = VC4 stock ÷ avg daily issuance MTD)</span>', tlTable, `<button class="btn small" data-action="export" data-name="stock-by-tl">⬇ CSV</button>`)}
       ${card(`🧑‍💼 Agent-wise stock <span class="dim">(${U.fmt(filtered.length)} agents${view.cls ? ` · ${esc(view.cls === 'COMM' ? 'Commercial' : view.cls)} only` : ''})</span>`, `<div class="table-wrap tall"><table class="tbl" id="st-agent-table"><thead><tr><th>Agent ID</th><th>Agent</th><th>TL</th><th class="num">VC4</th><th class="num">Commercial</th><th class="num">Total</th><th class="num">MTD issued</th><th>VC4 cover</th></tr></thead><tbody id="st-agent-body">${filtered.slice(0, 200).map(agentRow).join('')}</tbody></table></div><div class="dim small" id="st-agent-note">${filtered.length > 200 ? 'Top 200 dikh rahe hain — upar search karo.' : `${U.fmt(filtered.length)} agents`}</div>`, `<select id="st-cls"><option value="">All classes</option><option value="VC4" ${view.cls === 'VC4' ? 'selected' : ''}>VC4 only</option><option value="COMM" ${view.cls === 'COMM' ? 'selected' : ''}>Commercial only</option>${P.classes.map((c) => `<option value="${esc(c)}" ${view.cls === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select><button class="btn small" data-action="export" data-name="stock-by-agent">⬇ CSV</button>`)}`;
   }
 
-  // ---- 📉 stock trend (server ke daily snapshots → line chart) ----------------------------------
-  function loadStockTrend(body) {
+  // ---- 📉 stock trend + 🧾 in-vs-issued (server ke snapshots, ek hi fetch) ------------------------
+  function loadStockExtras(body) {
     const box = U.$('#st-trend', body);
-    if (!box || !FF.auth || !FF.auth.api) return;
+    const reconBox = U.$('#st-recon', body);
+    if ((!box && !reconBox) || !FF.auth || !FF.auth.api) return;
     FF.auth.api('/api/stock-history').then((out) => {
-      if (!box.isConnected) return;
-      const pts = ((out && out.points) || []).slice(-30);
-      const coverBadge = U.$('#st-trend-cover', body);
-      if (coverBadge && out && out.cover && out.cover.cover) {
-        const b = out.cover.band;
-        coverBadge.innerHTML = `Abhi cover ≈ <b>${U.fmt(out.cover.cover)}</b> din ${b === 'red' ? '🔴' : b === 'orange' ? '🟠' : b === 'amber' ? '🟡' : b === 'green' ? '🟢' : ''}`;
+      // 📉 Trend chart (features.stockTrend)
+      if (box && box.isConnected) {
+        const pts = ((out && out.points) || []).slice(-30);
+        const coverEl = U.$('#st-trend-cover', body);
+        if (coverEl && out && out.cover && out.cover.cover) {
+          const b = out.cover.band;
+          coverEl.innerHTML = `Abhi cover ≈ <b>${U.fmt(out.cover.cover)}</b> din ${b === 'red' ? '🔴' : b === 'orange' ? '🟠' : b === 'amber' ? '🟡' : b === 'green' ? '🟢' : ''}`;
+        }
+        if (pts.length < 2) {
+          box.innerHTML = `<div class="dim small">Stock history abhi store ho rahi hai — server jab bhi snapshot lega (30 min me ek baar), yahan last-30-din ka chart dikhega.</div>`;
+        } else {
+          const labels = pts.map((p) => `${p.date.slice(8)}/${p.date.slice(5, 7)}`);
+          box.innerHTML = C.lines({
+            labels,
+            tipLabels: pts.map((p) => p.date),
+            height: 210,
+            series: [
+              { name: 'Total stock', values: pts.map((p) => p.total), color: '#6366f1' },
+              { name: 'VC4', values: pts.map((p) => p.vc4), color: '#10b981', area: false }
+            ]
+          });
+          C.mount(body);
+        }
       }
-      if (pts.length < 2) {
-        box.innerHTML = `<div class="dim small">Stock history abhi store ho rahi hai — server jab bhi snapshot lega (30 min me ek baar), yahan last-30-din ka chart dikhega.</div>`;
-        return;
+      // 🧾 Stock in vs issued (features.recon): issued = MTD FF+GV · in = issued + net stock change
+      if (reconBox && reconBox.isConnected) {
+        const mtd = (out && out.mtd) || {};
+        const issued = (Number(mtd.ff) || 0) + (Number(mtd.gv) || 0);
+        const ym = new Date().getFullYear() + '-' + String(new Date().getMonth() + 1).padStart(2, '0');
+        const monthPts = ((out && out.points) || []).filter((p) => String(p.date).startsWith(ym));
+        if (monthPts.length < 2 || !issued) {
+          reconBox.innerHTML = `<div class="dim small">Recompile ho raha hai — is mahine ke ≥2 stock snapshots aur MTD issuance ke baad yahan dikhega (server 30 min me snapshot leta hai).</div>`;
+        } else {
+          const first = monthPts[0], last = monthPts[monthPts.length - 1];
+          const change = last.total - first.total;
+          const added = Math.max(0, change) + issued; // approximate in-flow
+          reconBox.innerHTML = `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Kya</th><th class="num">Tags</th><th>Detail</th></tr></thead><tbody>
+            <tr><td>📤 Issued (out)</td><td class="num"><b>${U.fmt(issued)}</b></td><td class="dim">MTD · FF ${U.fmt(Number(mtd.ff) || 0)} + GV ${U.fmt(Number(mtd.gv) || 0)}${mtd.days ? ` · ${mtd.days} din` : ''}</td></tr>
+            <tr><td>📦 Net stock change</td><td class="num">${change >= 0 ? '+' : ''}${U.fmt(change)}</td><td class="dim">${first.date.slice(8)}/${first.date.slice(5, 7)} (${U.fmt(first.total)}) → ${last.date.slice(8)}/${last.date.slice(5, 7)} (${U.fmt(last.total)})</td></tr>
+            <tr><td>📥 Approx stock-in</td><td class="num"><b>${U.fmt(added)}</b></td><td class="dim">issued + net change (pehle snapshot ke baad se)</td></tr>
+          </tbody></table></div><p class="dim small" style="margin-top:6px">Formula: in ≈ out + (ending stock − starting stock). History server snapshots par depend karti hai.</p>`;
+        }
       }
-      const labels = pts.map((p) => `${p.date.slice(8)}/${p.date.slice(5, 7)}`);
-      box.innerHTML = C.lines({
-        labels,
-        tipLabels: pts.map((p) => p.date),
-        height: 210,
-        series: [
-          { name: 'Total stock', values: pts.map((p) => p.total), color: '#6366f1' },
-          { name: 'VC4', values: pts.map((p) => p.vc4), color: '#10b981', area: false }
-        ]
-      });
-      C.mount(body);
     }).catch(() => {
-      if (box.isConnected) box.innerHTML = `<div class="dim small">History load nahi hui (offline?) — Refresh karke dekho.</div>`;
+      if (box && box.isConnected) box.innerHTML = `<div class="dim small">History load nahi hui (offline?) — Refresh karke dekho.</div>`;
+      if (reconBox && reconBox.isConnected) reconBox.innerHTML = `<div class="dim small">History load nahi hui — Refresh karke dekho.</div>`;
     });
   }
 
   // ---- page -----------------------------------------------------------------------------------
   async function render(root, params) {
     if (params.agent) { view.scope = 'agent'; view.value = params.agent; } else if (params.tl) { view.scope = 'tl'; view.value = params.tl; } else if (params.cls) { view.scope = 'cls'; view.value = params.cls; } else { view.scope = ''; view.value = ''; }
+    const shareOn = !FF.config.feat || FF.config.feat('share') !== false;
     root.innerHTML = `<div class="page-head"><div><h1>📦 Stock / Inventory</h1><p class="sub">StockDataa — agent / TL / class wise stock · VC4 vs Commercial · pivot + Excel export</p></div>
-      <div class="head-actions"><button class="btn primary" data-action="refresh">↻ Refresh</button>${FF.auth.can('sheet:StockDataa') ? `<a class="btn" href="#/sheet/${encodeURIComponent(FF.config.stock.sheet)}">Full StockDataa sheet →</a>` : ''}</div></div>
+      <div class="head-actions">${shareOn ? '<button class="btn" id="st-wa" title="Stock summary WhatsApp par bhejo">📤 WhatsApp</button>' : ''}<button class="btn primary" data-action="refresh">↻ Refresh</button>${FF.auth.can('sheet:StockDataa') ? `<a class="btn" href="#/sheet/${encodeURIComponent(FF.config.stock.sheet)}">Full StockDataa sheet →</a>` : ''}</div></div>
       <div class="card controls finder"><div class="finder-row"><div class="finder-input"><span class="finder-ico">🔎</span><input class="input" id="st-q" placeholder="Agent ya TL ka naam type karo… (dropdown se select karo)" value="${esc(view.scope === 'cls' ? '' : view.value)}"><button class="btn mic-btn" id="st-mic" title="🗣 Bol ke search karo" type="button">🎤</button></div>
         <label>Criteria <select id="st-scope"><option value="">Agent + TL</option><option value="agent">Agent only</option><option value="tl">TL only</option></select></label>
         <button class="btn small" id="st-clear" ${view.scope ? '' : 'disabled'}>✕ Clear</button>
@@ -276,6 +305,12 @@ FF.pages = FF.pages || {};
     try { await S.need('stock'); await Promise.allSettled([S.need('stockAgents'), S.need('stockTypes'), S.need('daily'), S.need('agents'), S.need('agentClass')]); } catch (err) { body.innerHTML = U.errorBox(err, 'data-action="refresh"'); return; }
     if (!root.isConnected) return;
     const P = prep();
+    const waSt = U.$('#st-wa', root);
+    if (waSt) waSt.addEventListener('click', () => {
+      const perDayVc4 = P.elapsed ? (P.curS ? P.curS.vc4 : 0) / P.elapsed : 0;
+      const text = [`*${FF.config.brand} – Stock summary*`, `📅 ${new Date().toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}`, `Total stock: *${U.fmt(P.total)}* (VC4 ${U.fmt(P.vc4)} | Commercial ${U.fmt(P.comm)})`, `MTD issued: ${U.fmt(P.curS ? P.curS.total : 0)}${P.cur ? ` · ${U.labelYM(P.cur)}` : ''}`, `VC4 cover: ${perDayVc4 ? `${U.fmt(P.vc4 / perDayVc4)} din` : '—'}`, `— ${FF.config.contacts.signature || ''}`].join('\n');
+      FF.app.shareWhatsApp(text);
+    });
     const noteEl = U.$('#st-note', root);
     noteEl.textContent = view.scope ? `${view.scope === 'cls' ? 'Class' : view.scope === 'tl' ? 'TL' : 'Agent'}: ${view.value}` : `${U.fmt(P.total)} tags · ${U.fmt(P.agents.length)} agents · ${P.tls.filter((t) => !t.excluded).length} TLs`;
     U.$('#st-chips', root).innerHTML = `<span class="dim small">Quick:</span>${P.tls.filter((t) => !t.excluded).slice(0, 8).map((t) => `<button class="chip ${view.scope === 'tl' && norm(view.value) === norm(t.name) ? 'on' : ''}" data-pick-tl="${esc(t.name)}">👥 ${esc(t.name)}</button>`).join('')}<button class="chip vc4 ${view.scope === 'cls' && view.value === 'VC4' ? 'on' : ''}" data-pick-cls="VC4">VC4</button>${P.classes.filter((c) => !isVc4(c)).map((c) => `<button class="chip comm ${view.scope === 'cls' && view.value === c ? 'on' : ''}" data-pick-cls="${esc(c)}">${esc(c)}</button>`).join('')}`;
@@ -283,7 +318,7 @@ FF.pages = FF.pages || {};
     let pivot = null;
     if (view.scope) pivot = selectionView(P, body); else overview(P, body);
     C.mount(body);
-    if (!view.scope) loadStockTrend(body); // overview par server snapshots ka line chart
+    if (!view.scope) loadStockExtras(body); // overview par trend chart + in-vs-issued (ek fetch)
 
     // search
     const input = U.$('#st-q', root), scopeSel = U.$('#st-scope', root);

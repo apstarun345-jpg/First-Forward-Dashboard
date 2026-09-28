@@ -62,11 +62,57 @@ FF.pages = FF.pages || {};
   }
 
   async function render(root) {
+    const shareOn = !FF.config.feat || FF.config.feat('share') !== false;
     root.innerHTML = `<div class="page-head"><div><h1>📊 Dashboard</h1><p class="sub">Summary · EIR issuance + StockDataa inventory · VC4 vs Commercial</p></div>
-      <div class="head-actions"><button class="btn" id="db-bundle" title="Monthly + Daily + Stock + REPORT + GV — sab ek xlsx me">⬇ Excel bundle</button><button class="btn primary" data-action="refresh">↻ Refresh</button></div></div>
+      <div class="head-actions">${shareOn ? '<button class="btn" id="db-wa" title="Current numbers WhatsApp par bhejo">📤 WhatsApp</button>' : ''}<button class="btn" id="db-bundle" title="Monthly + Daily + Stock + REPORT + GV — sab ek xlsx me">⬇ Excel bundle</button><button class="btn primary" data-action="refresh">↻ Refresh</button></div></div>
+      <div id="db-targetbar"></div>
       <div id="db-body">${U.spinner('Data load ho raha hai… (pehli baar 5-10 sec lag sakte hain)')}</div>`;
     const bundleBtn = U.$('#db-bundle', root);
     if (bundleBtn) bundleBtn.addEventListener('click', () => exportBundle(bundleBtn));
+
+    // 🎯 Target progress bar (Features → targetBar) + 📤 WhatsApp share — server MTD + targets se.
+    let shareCtx = '';
+    let stockShare = null;
+    (async () => {
+      try {
+        const wantBar = !FF.config.feat || FF.config.feat('targetBar') !== false;
+        const wantShare = !FF.config.feat || FF.config.feat('share') !== false;
+        if (!wantBar && !wantShare) return;
+        const sh = await FF.auth.api('/api/stock-history');
+        const st = (FF.auth.settings) || {};
+        const ist = new Date();
+        const pad = (n) => String(n).padStart(2, '0');
+        const ym = `${ist.getFullYear()}-${pad(ist.getMonth() + 1)}`;
+        const targets = Array.isArray(st.targets) ? st.targets : [];
+        const totalTarget = targets.filter((t) => t && t.ym === ym && Number(t.target) > 0).reduce((a, t) => a + Number(t.target), 0);
+        const mtd = (sh && sh.mtd) || {};
+        const achieved = (Number(mtd.ff) || 0) + (Number(mtd.gv) || 0);
+        shareCtx = `\n🏷️ MTD: ${U.fmt(achieved)} tags${mtd.days ? ` (${mtd.days} din)` : ''}${totalTarget ? ` · 🎯 Target: ${U.fmt(totalTarget)}` : ''}`;
+        if (!wantBar || !totalTarget) return;
+        const day = ist.getDate();
+        const daysInMonth = new Date(ist.getFullYear(), ist.getMonth() + 1, 0).getDate();
+        const expected = totalTarget * (day / daysInMonth);
+        const pct = totalTarget > 0 ? Math.round((achieved / totalTarget) * 100) : 0;
+        const pace = achieved >= expected ? '🟢 pace theek hai' : achieved >= expected * 0.6 ? '🟡 thoda peeche hai' : '🔴 40%+ peeche';
+        const daysLeft = daysInMonth - day;
+        const needPerDay = daysLeft > 0 && achieved < totalTarget ? Math.ceil((totalTarget - achieved) / daysLeft) : 0;
+        const fill = Math.max(2, Math.min(100, pct));
+        const tone = achieved >= expected ? 'ok' : achieved >= expected * 0.6 ? 'mid' : 'bad';
+        const box = U.$('#db-targetbar', root);
+        if (box) {
+          box.innerHTML = `<a class="target-bar ${tone}" href="#/targets" title="Targets page — agent-wise target do / progress dekho">
+            <span class="tb-ico">🎯</span>
+            <span class="tb-main"><span class="tb-line"><b>Target ${U.labelYM ? U.labelYM(ym) : ym}</b> · <b>${U.fmt(achieved)}</b> / ${U.fmt(totalTarget)} (${pct}%) · day ${day}/${daysInMonth} <span class="tb-status">${pace}</span></span>
+            <span class="tb-track"><span class="tb-fill" style="width:${fill}%"></span></span></span>
+            <span class="tb-right dim small">${needPerDay ? `≈ ${U.fmt(needPerDay)}/din chahiye · ` : ''}${daysLeft} din baaki →</span></a>`;
+        }
+      } catch { /* target bar optional */ }
+    })();
+    const waBtn = U.$('#db-wa', root);
+    if (waBtn) waBtn.addEventListener('click', () => {
+      const text = `📊 ${FF.config.brand} Dashboard · ${new Date().toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}\n${shareCtx || ''}${stockShare ? `\n📦 Stock: ${U.fmt(stockShare.total)} (VC4 ${U.fmt(stockShare.vc4)})` : ''}`;
+      FF.app.shareWhatsApp(text);
+    });
 
     const [dailyR, agentsR, statusR, stockR, stockAgentsR] = await Promise.allSettled([S.need('daily'), S.need('agents'), S.need('status'), S.need('stock'), S.need('stockAgents')]);
     if (!root.isConnected) return;
@@ -80,6 +126,7 @@ FF.pages = FF.pages || {};
     const status = statusR.status === 'fulfilled' ? statusR.value : null;
     const stock = stockR.status === 'fulfilled' ? stockR.value : null;
     const stockAgents = stockAgentsR.status === 'fulfilled' ? stockAgentsR.value : null;
+    if (stock) stockShare = { total: U.sum(stock, (r) => r.n), vc4: U.sum(stock.filter((r) => r.group === 'VC4'), (r) => r.n) };
 
     const monthsList = M.months(daily);
     const latest = M.latestDate(daily);
