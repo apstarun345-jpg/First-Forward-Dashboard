@@ -72,7 +72,7 @@ FF.pages = FF.pages || {};
       kpi('g8', 'Active Agents · MTD', '🧑‍💼', U.fmt(curS.activeAgents), `${U.fmt(curS.activeTls)} TLs active · ${lastS.activeAgents} last month`),
       kpi('g9', 'GV Stock in Field', '📦', U.fmt(stockTotal), `VC4 <b>${U.fmt(stockVc4)}</b> · Commercial <b>${U.fmt(stockComm)}</b>${perDay ? ` · ${U.fmt(stockTotal / perDay)} days cover` : ''}`),
       kpi('g10', 'High Dispatch Priority', '🔺', report.length ? U.fmt(highPrio) : '—', report.length ? `GV REPORT agents jinko dispatch chahiye · Inactive <b>${U.fmt(inactive)}</b>` : 'GV REPORT load nahi hua'),
-      kpi('g11', 'Commission · MTD', '💰', U.fmt(curS.commission), `Amount <b>${U.fmt(curS.amount)}</b> · avg ₹${U.fmt(curS.total ? curS.commission / curS.total : 0)} / tag`),
+      kpi('g11', 'Commission · MTD', '💰', U.fmt(curS.commission), `Amount <b>${U.fmt(curS.amount)}</b> · class sum: VC4 <b>₹${U.fmt(curS.commissionVc4 || 0)}</b> · VC20 <b>₹${U.fmt(curS.commissionVc20 || 0)}</b> · VC5+ <b>₹${U.fmt(curS.commissionVc5p || 0)}</b>`),
       kpi('g12', 'Report Stock (GV REPORT)', '🏬', report.length ? U.fmt(reportStock) : '—', report.length ? `${U.fmtPct(U.pctOf(U.sum(report, (r) => r.stockVc4), reportStock), 0)} VC4 · ${U.fmt(report.length)} agents` : '—')
     ];
 

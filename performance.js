@@ -9,6 +9,8 @@ FF.pages = FF.pages || {};
   const esc = U.esc, clean = U.clean, num = U.num;
 
   // Columns whose sub-header is blank in the sheet (verified against StockDataa TAG_CLASS totals).
+  // Jo columns yahan blank/missing hain unke liye sheet ki apni row-2 heading use hoti hai (e.g. AB2
+  // = "Commission Rate") — blank chhodne par label "Column AB" jaisa nahi, asli heading dikhti hai.
   const LABEL_OVERRIDES = { stockC1: 'VC5', stockC2: 'VC6', stockC3: 'VC7', stockC4: 'VC12', stockC5: 'VC16', colAB: '', curC1: 'VC5', curC2: 'VC6', curC3: 'VC7', curC4: 'VC12', curC5: 'VC16', colBR: '' };
   const SCHEMA = [
     { key: 'profile', title: 'Agent Profile', match: /agent profile/i, fixed: 0, cols: [{ key: 'agentId', label: 'Agent ID' }, { key: 'id', label: 'ID' }, { key: 'name', label: 'Agent Name' }] },
@@ -94,7 +96,13 @@ FF.pages = FF.pages || {};
         const index = start + offset;
         let label = col.label, unknown = false;
         if (label === '@header') label = clean(subRow[index]) || `Day ${offset}`;
-        if (label === null) { const o = clean(LABEL_OVERRIDES[col.key]); if (o) label = o; else { label = `Column ${U.colLetter(index)}`; unknown = true; } }
+        if (label === null) {
+          const o = clean(LABEL_OVERRIDES[col.key]);
+          const sheetHead = clean(subRow[index]);
+          if (o) label = o;
+          else if (sheetHead) label = sheetHead;   // sheet ki apni row-2 heading (e.g. AB2 "Commission Rate")
+          else { label = `Column ${U.colLetter(index)}`; unknown = true; }
+        }
         const resolved = { key: col.key, index, label, type: col.type || 'text', unknown, section: section.key, letter: U.colLetter(index) };
         found[col.key] = resolved;
         return resolved;

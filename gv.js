@@ -263,7 +263,7 @@ window.FF = window.FF || {};
   const latestDate = () => rows().reduce((acc, r) => (!acc || (r.date && r.date > acc) ? r.date : acc), null);
 
   function summary(ym, upToDay) {
-    const s = { ym, total: 0, vc4: 0, vc20: 0, vc5p: 0, comm: 0, issuance: 0, replacement: 0, vrn: 0, chassis: 0, agents: new Set(), tls: new Set(), days: new Set(), lastDay: 0, amount: 0, commission: 0 };
+    const s = { ym, total: 0, vc4: 0, vc20: 0, vc5p: 0, comm: 0, issuance: 0, replacement: 0, vrn: 0, chassis: 0, agents: new Set(), tls: new Set(), days: new Set(), lastDay: 0, amount: 0, commission: 0, commissionVc4: 0, commissionVc20: 0, commissionVc5p: 0, amountVc4: 0, amountVc20: 0, amountVc5p: 0 };
     for (const r of rows()) {
       if (ym && r.ym !== ym) continue;
       if (upToDay && r.day > upToDay) continue;
@@ -273,6 +273,9 @@ window.FF = window.FF || {};
       if (/chassis/i.test(r.tagType)) s.chassis += 1; else s.vrn += 1;
       s.agents.add(r.agentId); s.tls.add(r.tlName || 'Direct');
       s.amount += r.amount; s.commission += r.commission;
+      if (r.group === 'VC4') { s.commissionVc4 += r.commission || 0; s.amountVc4 += r.amount || 0; }
+      else if (r.group === 'VC20') { s.commissionVc20 += r.commission || 0; s.amountVc20 += r.amount || 0; }
+      else { s.commissionVc5p += r.commission || 0; s.amountVc5p += r.amount || 0; }
       if (r.day) { s.days.add(r.day); if (r.day > s.lastDay) s.lastDay = r.day; }
     }
     s.comm = s.vc20 + s.vc5p;

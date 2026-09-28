@@ -469,6 +469,16 @@ window.FF = window.FF || {};
     document.title = `${title} · ${FF.config.appName}`;
   }
 
+  /** Animated page skeleton — data await ke dauraan hang ki jagah buffering dikhta hai. */
+  function pageLoaderHtml(label) {
+    return `<div class="page-loader" role="status" aria-live="polite">
+      <div class="page-loader-head"><span class="page-loader-spin" aria-hidden="true"></span><b>${esc(String(label || 'Page'))}</b><small>data load ho raha hai<span class="dots">…</span></small></div>
+      <div class="page-loader-grid">${'<div class="skel skel-card"></div>'.repeat(6)}</div>
+      <div class="skel skel-line w80"></div><div class="skel skel-line w60"></div>
+      <div class="skel skel-block"></div>
+    </div>`;
+  }
+
   async function renderCurrent(ctx) {
     if (!FF.auth.user) return;
     const { page, params } = parseHash();
@@ -484,6 +494,11 @@ window.FF = window.FF || {};
     main.setAttribute('aria-busy', 'true');
     main.replaceChildren(root);
     main.scrollTop = 0; window.scrollTo(0, 0);
+    // Slow page render ho to blank screen ("hang") ki jagah animated skeleton — page ka apna content
+    // aate hi wo skeleton overwrite kar deta hai (root me content aa chuka ho to loader lagta hi nahi).
+    const loaderTimer = setTimeout(() => {
+      if (token === current.token && !root.childNodes.length) root.innerHTML = pageLoaderHtml(page === 'sheet' ? params.name : (FF.pages[page] && FF.pages[page].title) || page);
+    }, 120);
     if (!allowed(page, params)) {
       root.innerHTML = `<div class="empty-state">🔒 Is page ka access aapke account me nahi hai.<br><small class="dim">Admin se "${esc(pagePerm(page, params) || page)}" permission maango (Settings → Access matrix).</small></div>`;
       main.setAttribute('aria-busy', 'false');
@@ -496,6 +511,7 @@ window.FF = window.FF || {};
       console.error(err);
       if (token === current.token) root.innerHTML = U.errorBox(err, 'data-action="refresh"');
     }
+    clearTimeout(loaderTimer);
     if (token === current.token) { main.setAttribute('aria-busy', 'false'); updateStatus(); enhanceCharts(root); translateDom(root); }
   }
   function updateStatus(progress) {
