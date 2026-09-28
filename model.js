@@ -336,11 +336,14 @@ window.FF = window.FF || {};
     return { ym, days, labels: days.map(String), dates: days.map((d) => new Date(y, m - 1, d)), totals, dims };
   }
 
-  function summary(daily, ym, upToDay) {
-    const s = { ym, total: 0, vc4: 0, vc20: 0, vc5p: 0, comm: 0, issuance: 0, replacement: 0, chassis: 0, wrongVrn: 0, ff: 0, gv: 0, days: new Set(), lastDay: 0 };
+  /** Summary for one month. `channelOnly` = 'First Forward' | 'GV Partner' → sirf us channel ke rows
+      (EIR me GV master ID 5845036 wali rows) count hote hain — combined totals me double count nahi. */
+  function summary(daily, ym, upToDay, channelOnly) {
+    const s = { ym, total: 0, vc4: 0, vc20: 0, vc5p: 0, comm: 0, issuance: 0, replacement: 0, chassis: 0, wrongVrn: 0, ff: 0, gv: 0, days: new Set(), lastDay: 0, channelOnly: channelOnly || '' };
     for (const r of daily) {
       if (r.ym !== ym) continue;
       if (upToDay && r.day > upToDay) continue;
+      if (channelOnly && r.channel !== channelOnly) continue;
       s.total += r.n;
       if (r.group === 'VC4') s.vc4 += r.n; else if (r.group === 'VC20') s.vc20 += r.n; else s.vc5p += r.n;
       if (r.type === 'REPLACEMENT') s.replacement += r.n; else s.issuance += r.n;

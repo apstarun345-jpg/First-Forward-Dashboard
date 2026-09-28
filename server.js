@@ -127,6 +127,7 @@ const DEFAULT_SETTINGS = {
   tabs: DEFAULT_TABS.map((t) => ({ ...t })),
   reportGid: '242489821',
   ffCommission: { rateCol: '', earnedCol: '', categoryCol: '', dateCol: '' }, // optional REPORT letters; blank = heading auto-detection
+  ffPayout: { sheet: 'payout', gid: '', labelCol: '', classCol: '', rateCol: '', penaltyCol: '', noteCol: '' }, // FF sheet "payout" tab: per-class commission rate + penalty (blank = auto-detect)
   commissionAlerts: { enabled: true, outlierPct: 25, gvGapPct: 40, mismatchPct: 5, mismatchMin: 50, zeroEarnedMin: 1 }, // cockpit.js alert thresholds
   dispatch: { tagsPerBox: 25, horizon: 7, minNeed: 1, top: 40 }, // dispatch planner defaults
   commissionSlabs: {
@@ -2950,6 +2951,15 @@ async function handleApi(req, res, url) {
       for (const key of ['rateCol', 'earnedCol', 'categoryCol', 'dateCol']) {
         if (patch.ffCommission[key] === undefined) continue;
         patch.ffCommission[key] = cleanColumnMapping(patch.ffCommission[key], key);
+      }
+    }
+    if (patch.ffPayout !== undefined) {
+      if (!patch.ffPayout || typeof patch.ffPayout !== 'object' || Array.isArray(patch.ffPayout)) throw new HttpError(400, 'ffPayout mapping object hona chahiye.');
+      if (patch.ffPayout.sheet !== undefined) patch.ffPayout.sheet = String(patch.ffPayout.sheet || '').trim().slice(0, 80);
+      if (patch.ffPayout.gid !== undefined) patch.ffPayout.gid = String(patch.ffPayout.gid || '').trim().slice(0, 30);
+      for (const key of ['labelCol', 'classCol', 'rateCol', 'penaltyCol', 'noteCol']) {
+        if (patch.ffPayout[key] === undefined) continue;
+        patch.ffPayout[key] = cleanColumnMapping(patch.ffPayout[key], `ffPayout.${key}`);
       }
     }
     if (patch.commissionSlabs !== undefined) {

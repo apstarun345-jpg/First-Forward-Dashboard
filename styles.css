@@ -2225,3 +2225,33 @@ html[data-theme="dark"] .direct-filter:not(.primary), html[data-theme="dark"] .s
   .dispatch-slip { grid-template-columns: 1fr 1fr; }
   .slip-block { border: 1px solid #999; }
 }
+
+/* ---- v3.9 · animated page loader / skeleton — slow pages par buffering, hang nahi ---- */
+.page { animation: pageIn .22s ease both; }
+@keyframes pageIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.page-loader { padding: 18px 2px 30px; display: flex; flex-direction: column; gap: 14px; }
+.page-loader-head { display: flex; align-items: center; gap: 10px; }
+.page-loader-head b { font-size: 17px; }
+.page-loader-head small { color: var(--muted); font-weight: 700; }
+.page-loader-spin { width: 18px; height: 18px; flex: 0 0 18px; border-radius: 50%; border: 3px solid color-mix(in srgb, var(--brand, #6366f1) 22%, transparent); border-top-color: var(--brand, #6366f1); animation: loaderSpin .7s linear infinite; }
+.page-loader .dots { display: inline-block; overflow: hidden; vertical-align: bottom; width: 1.25em; animation: dotsCycle 1.25s steps(4) infinite; }
+.page-loader-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 12px; }
+.skel { position: relative; overflow: hidden; border-radius: 12px; background: color-mix(in srgb, var(--muted, #64748b) 12%, transparent); }
+.skel::after { content: ''; position: absolute; inset: 0; transform: translateX(-100%); background: linear-gradient(100deg, transparent 25%, color-mix(in srgb, #ffffff 65%, transparent) 46%, transparent 67%); animation: skelSweep 1.15s ease-in-out infinite; }
+html[data-theme='dark'] .skel::after { background: linear-gradient(100deg, transparent 25%, color-mix(in srgb, #ffffff 14%, transparent) 46%, transparent 67%); }
+.skel-card { height: 84px; }
+.skel-line { height: 14px; }
+.skel-block { height: 190px; }
+.w80 { width: 80%; }
+.w60 { width: 60%; }
+@keyframes skelSweep { to { transform: translateX(100%); } }
+@keyframes loaderSpin { to { transform: rotate(360deg); } }
+@keyframes dotsCycle { 0% { width: 0; } 100% { width: 1.25em; } }
+/* Boot splash zyada "live" lage — glow + breathing logo */
+.app-boot img { animation: bootBreathe 2.2s ease-in-out infinite; }
+.boot-progress { width: 190px; height: 4px; }
+@keyframes bootBreathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.03); } }
+@media (prefers-reduced-motion: reduce) {
+  .page, .page-loader .dots, .page-loader-spin, .skel::after, .app-boot img { animation: none !important; }
+  .skel::after { display: none; }
+}

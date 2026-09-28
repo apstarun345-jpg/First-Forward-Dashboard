@@ -342,6 +342,37 @@ await run('FF commission · Settings me heading ka naam (letter nahi) bhi chalta
     if (!/REPORT me nahi mila/.test(html)) throw new Error('missing-heading warning page par nahi dikhi');
   } finally { Object.assign(cfg, before); FF.data.clearCache(); }
 }, true);
+await run('FF commission · payout sheet class rates + expected commission', async () => {
+  const payout = await FF.insights.ffPayoutRates();
+  if (!payout.found) throw new Error(`payout tab parse nahi hui: ${payout.error || ''}`);
+  const vc4 = payout.byClass.get('VC4');
+  if (!vc4 || Number(vc4.rate) !== 3.5) throw new Error(`VC4 payout rate galat: ${JSON.stringify(vc4 && vc4.rate)}`);
+  if (!payout.penaltyRows.some((p) => p.key === 'wrong-vrn' && Number(p.penalty) === 50)) throw new Error('Wrong VRN penalty line nahi mili');
+  const sample = { name: 'S', curVc4: 10, curC1: 2, curC2: 0, curC3: 0, curC4: 0, curC5: 0, curNvc4: 4, wrongVrn: 1 }; // NVC4=4 me VC5(2)+VC20(2)
+  const calc = FF.insights.payoutExpected(sample, payout);
+  if (!calc || calc.expected !== (10 * 3.5 + 2 * 5 + 2 * 8) - 50) throw new Error(`payout expected calc galat: ${JSON.stringify(calc)}`);
+  const r = root(); await pages.ffCommission.render(r, {}, {});
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const s of ['Payout sheet · class-wise rates', 'Expected commission · payout rates', 'Payout expected', 'ffc-payout-csv', 'Wrong VRN penalty']) if (!html.includes(s)) throw new Error(`payout card me "${s}" nahi mila`);
+}, true);
+await run('GV commission · per-class agent matrix (exact sums, no average)', async () => {
+  const r = root(); await pages.gvCommission.render(r, {}, {});
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const s of ['Agent × class commission', 'gvc-matrix-csv', 'VC5+ · exact class split', 'VC4 commission', 'VC20 commission', 'VC5+ commission', 'Commission (sum)']) if (!html.includes(s)) throw new Error(`GV class matrix me "${s}" nahi mila`);
+  if (/commission-selfcheck|ffc-tl-csv/.test(html)) throw new Error('FF-only markup GV page me leak ho gaya');
+}, true);
+await run('stock forecasting · FF demand se GV rows (5845036) exclude', async () => {
+  const rows = await FF.insights.forecastRows(0, 5);
+  if (!rows.length) throw new Error('forecast rows khali hain');
+  const r = root(); await pages.forecast.render(r, {}, {});
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  if (!/5845036 exclude/.test(html)) throw new Error('channel summary me GV-exclude note nahi');
+}, true);
+await run('executive cockpit · FF/GV combined me double count nahi', async () => {
+  const r = root(); await pages.executive.render(r, {}, {});
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  if (!/5845036/.test(html) || !/double count nahi/.test(html)) throw new Error('executive me GV-exclude note nahi');
+}, true);
 await run('professional page verified dual-channel agents', async () => {
   const identity = await FF.insights.buildCross();
   if (!identity.rows.length) throw new Error('mock identity join returned zero verified agents');

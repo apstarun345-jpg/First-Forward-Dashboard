@@ -228,7 +228,23 @@ for (let back = 55; back >= 0; back -= 5) {
   STOCK_MOVEMENTS.rows.push([dstr(d), 'GV Partner', 'IN', 45 + (back % 11), 'VC4', 'Warehouse', 'GV Field', `GV-GRN-${back}`, 'Mock received stock']);
   if (back % 10 === 0) STOCK_MOVEMENTS.rows.push([dstr(d), 'First Forward', 'TRANSFER', 12, 'VC4', 'Agent A', 'Agent B', `TR-${back}`, 'Internal transfer']);
 }
-const SHEETS = { EIR, StockDataa: STOCK, REPORT, 'GV Master': GV_MASTER, 'Tag Assignment': GV_ASSIGN, 'GV REPORT': GV_REPORT, 'Stock Movements': STOCK_MOVEMENTS };
+// Payout sheet: har class ka commission rate + penalty (user ki real FF sheet jaisi structure).
+const PAYOUT = {
+  cols: ['Particulars', 'Vehicle Class', 'Commission Per Tag', 'Penalty', 'Note'].map((l, i) => ({ id: L(i), label: l, type: i === 2 || i === 3 ? 'number' : 'string' })),
+  rows: [
+    ['FASTag issuance · Car / Jeep / Van', 'VC4', 3.5, '', 'per tag'],
+    ['FASTag issuance · LCV', 'VC20', 5, '', ''],
+    ['FASTag issuance · Bus 2 axle', 'VC5', 8, '', ''],
+    ['FASTag issuance · Truck 3 axle', 'VC6', 10, '', ''],
+    ['FASTag issuance · Truck 4-6 axle', 'VC7', 12, '', ''],
+    ['FASTag issuance · Truck 7+ axle', 'VC12', 15, '', ''],
+    ['FASTag issuance · HCM / EME', 'VC16', 18, '', ''],
+    ['Commercial fallback (any CV)', 'VC5+', 12, '', 'jab exact class row na ho'],
+    ['Wrong VRN penalty', '', '', 50, 'per wrong VRN'],
+    ['Replacement charges', '', '', 25, 'per replacement']
+  ]
+};
+const SHEETS = { EIR, StockDataa: STOCK, REPORT, 'GV Master': GV_MASTER, 'Tag Assignment': GV_ASSIGN, 'GV REPORT': GV_REPORT, 'Stock Movements': STOCK_MOVEMENTS, Payout: PAYOUT, payout: PAYOUT };
 const GIDS = { '242489821': 'REPORT', '0': 'EIR', '1284424234': 'GV REPORT' };
 
 /** gviz `range=A4:BE` → labels from the range's first row, data from the next row. */

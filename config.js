@@ -109,6 +109,8 @@ FF.config = {
 
   report: { sheet: 'REPORT', gid: '242489821' },
   ffCommission: { rateCol: '', earnedCol: '', categoryCol: '', dateCol: '' }, // blank = dynamic REPORT heading discovery
+  // FF Google Sheet ki "payout" tab — har class ka commission rate aur penalty. Blank fields auto-detect.
+  ffPayout: { sheet: 'payout', gid: '', labelCol: '', classCol: '', rateCol: '', penaltyCol: '', noteCol: '' },
   // Cockpit (cockpit.js) ke thresholds — Settings se server par bhi save ho sakte hain.
   commissionAlerts: { enabled: true, outlierPct: 25, gvGapPct: 40, mismatchPct: 5, mismatchMin: 50, zeroEarnedMin: 1 },
   dispatch: { tagsPerBox: 25, horizon: 7, minNeed: 1, top: 40 },
@@ -213,6 +215,7 @@ FF.config = {
     if (s.commissionAlerts) this.commissionAlerts = { ...this.commissionAlerts, ...s.commissionAlerts };
     if (s.dispatch) this.dispatch = { ...this.dispatch, ...s.dispatch };;
     if (s.ffCommission) this.ffCommission = { ...this.ffCommission, ...s.ffCommission };
+    if (s.ffPayout) this.ffPayout = { ...this.ffPayout, ...s.ffPayout };
     if (s.commissionSlabs) this.commissionSlabs = { ...this.commissionSlabs, ...s.commissionSlabs, channels: { ...this.commissionSlabs.channels, ...(s.commissionSlabs.channels || {}) } };
     if (s.eirSheet) this.eir.sheet = s.eirSheet;
     if (s.stockSheet) this.stock.sheet = s.stockSheet;

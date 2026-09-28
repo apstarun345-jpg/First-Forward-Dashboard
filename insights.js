@@ -6,7 +6,7 @@ FF.pages = FF.pages || {};
   'use strict';
   const U = FF.util, D = FF.data, S = FF.store, G = FF.gv, M = FF.model, C = FF.charts;
   const esc = U.esc, clean = U.clean;
-  const mem = { details: null, detailsPromise: null, cross: null, quality: null, workspace: null, workspacePromise: null, workspaceVersion: 0, forecastHistory: null, forecastHistoryPromise: null };
+  const mem = { details: null, detailsPromise: null, cross: null, quality: null, workspace: null, workspacePromise: null, workspaceVersion: 0, forecastHistory: null, forecastHistoryPromise: null, payout: null, payoutPromise: null };
 
   const head = (icon, title, sub, actions) => `<div class="page-head"><div><h1>${icon} ${esc(title)}</h1><p class="sub">${sub}</p></div><div class="head-actions">${actions || ''}<button class="btn primary" data-action="refresh">↻ Refresh</button></div></div>`;
   const money = (value, digits) => Number(value || 0).toLocaleString('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: digits === undefined ? 0 : digits });
@@ -182,7 +182,19 @@ FF.pages = FF.pages || {};
     const mapping = FF.config.ffCommission || {};
     /** One gviz table → REPORT ke section/sub-heading + commission-like columns. */
     const buildHeads = (tbl) => {
-      const rws = tbl.rows || [];
+      let rws = tbl.rows || [];
+      // Production gviz: REPORT ki row 1 (sections) column labels me chali jaati hai aur rows row 2
+      // se shuru hote hain. 2-header REPORT me (section, sub) ka alignment theek rakhne ke liye wahi
+      // labels row wapas prepend karo — warna "Commission Rate" (AB2) section ki jagah data row me
+      // dhoondhi jaati thi. Mock/local tables (labels khali) par koi change nahi hota.
+      const colLabels = (tbl.cols || []).map((c) => ({ v: clean((c && c.label) || '') }));
+      const labelsAreSections = (tbl.cols || []).some((c) => /agent profile/i.test(c.label || '')) || (tbl.headers || 0) > 0;
+      const rowsAlreadyHeaded = (rws[0] || []).some((cell) => /agent profile/i.test(D.cellText(cell)));
+      if (labelsAreSections && !rowsAlreadyHeaded) rws = [colLabels, ...rws];
+      // Header kahin aur ho (manual range row 2 se shuru) to 'Agent Profile' row tak trim karo.
+      let startIdx = -1;
+      for (let i = 0; i < Math.min(rws.length, 6); i++) if ((rws[i] || []).some((cell) => /agent profile/i.test(D.cellText(cell)))) { startIdx = i; break; }
+      if (startIdx > 0) rws = rws.slice(startIdx);
       const sectionRaw = (rws[0] || []).map((c) => D.cellText(c));
       const subRaw = (rws[1] || []).map((c) => D.cellText(c));
       const width = Math.max(sectionRaw.length, subRaw.length, (tbl.cols || []).length);
@@ -205,7 +217,7 @@ FF.pages = FF.pages || {};
       const isEmptyAt = (idx) => {
         const h = b.headers[idx];
         if (h && (clean(h.sectionOwn) || clean(h.sub) || clean(h.col))) return false;
-        for (let r = 2; r < tbl.rowCount; r++) {
+        for (let r = 2; r < b.rows.length; r++) {
           const row = b.rows[r]; if (!row) continue;
           const cell = row[idx]; if (cell !== undefined && cell !== null && cell !== '' && clean(D.cellText(cell))) return false;
         }
@@ -231,7 +243,8 @@ FF.pages = FF.pages || {};
       for (const extra of [24, 72]) {
         if (built.candidates.length && !configuredAbsent()) break;
         try {
-          const wide = await D.query(sheetName, '', { gid, range: `A1:${U.colLetter(base + extra - 1)}`, fresh: true });
+          // fresh nahi: repeat open par cache se instantly mile (↻ refresh khud cache clear karta hai).
+          const wide = await D.query(sheetName, '', { gid, range: `A1:${U.colLetter(base + extra - 1)}` });
           if (!wide || !wide.rows || !wide.rows.length) break;
           const alt = trimTrailingEmpty({ rows: wide.rows, rowCount: wide.rows.length }, buildHeads(wide));
           if (alt.candidates.length > built.candidates.length || alt.width > built.width) { table = wide; built = alt; }
@@ -332,6 +345,11 @@ FF.pages = FF.pages || {};
     const pair = pickPair();
     let rateCol = (configRate && !configRate.missing ? configRate : null) || pair.rate || configRate || null;
     let amountCol = (configAmount && !configAmount.missing ? configAmount : null) || pair.amount || configAmount || null;
+    // Sheet me commission rate column AB (AB2 heading) me likha ho aur koi bhi heading match na ho —
+    // phir bhi AB (index 27) me numeric rate values hon to usi ko rate column maano (screenshot-verified).
+    if (!rateCol && headers[27] && sampleRatio(headers[27]) >= 0.15) {
+      rateCol = { ...headers[27], via: 'ab-fallback', fallback: true };
+    }
     if (rateCol && amountCol && rateCol.index === amountCol.index) {
       const other = candidates.find((h) => h.index !== rateCol.index && roleScore(h, 'amount') > -Infinity);
       amountCol = configAmount && !configAmount.missing ? amountCol : (other || null);
@@ -373,6 +391,154 @@ FF.pages = FF.pages || {};
     return { table, headers: headingRows, candidates, rateCol, amountCol, categoryCol, dateCol, agents, warnings, rateIsPercent, configRate, configAmount, populatedAmount, populatedRate, lastColLetter: U.colLetter(Math.max(0, width - 1)), narrowWidth, wideUsed: table !== narrowTable, needsWiderRange, outOfRange, map: mapping };
   }
 
+  // ---- FF payout sheet · class-wise commission rate + penalty -------------------------------------
+  // FF Google Sheet ki "payout" tab (Settings → Data source se naam/columns badal sakte hain).
+  // Har class ka ₹ commission rate aur penalty yahin se padha jaata hai; expected commission isi se
+  // banta hai (REPORT ki AB2 "Commission Rate" alag, sheet-reported rate hai).
+  const payoutClassToken = (raw) => {
+    const t = clean(raw).toUpperCase().replace(/[^A-Z0-9+ ]+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!t || /^(NA|N A|TOTAL|GRAND TOTAL|SLAB|PARTICULARS|ITEM|DESCRIPTION)$/.test(t)) return null;
+    const group = (exact) => (exact === 'VC4' ? 'VC4' : exact === 'VC20' ? 'VC20' : 'VC5+');
+    const make = (exact) => ({ exact, group: group(exact) });
+    if (/\bVC?5\s*\+|5\s*AND\s*ABOVE|5\s*PLUS|ABOVE\s*5/.test(t)) return make('VC5+');
+    if (/\bN\s*V\s*C\s*4\b|COMMERCI|HEAVY\s*VEHICLE|\bCV\b/.test(t)) return make('VC5+');
+    const num = t.match(/\b(?:VC|CLASS)?\s*(\d{1,2})\b/);
+    if (num) {
+      const n = Number(num[1]);
+      if (n === 4) return make('VC4');
+      if (n === 20) return make('VC20');
+      if ([5, 6, 7, 12, 16].includes(n)) return make(`VC${n}`);
+    }
+    if (/CAR|JEEP|VAN|\bLMV\b|TAXI|PASSENGER/.test(t)) return make('VC4');
+    if (/\bLCV\b|LIGHT\s*COMM/.test(t)) return make('VC20');
+    if (/\bBUS\b|2\s*AXLE/.test(t)) return make('VC5');
+    if (/HCM|\bEME\b|SPECIAL/.test(t)) return make('VC16');
+    if (/7\s*\+?\s*AXLE|MULTI\s*AXLE/.test(t)) return make('VC12');
+    if (/\bTRUCK\b|6\s*AXLE/.test(t)) return make('VC6');
+    if (/4\s*-?\s*6\s*AXLE/.test(t)) return make('VC7');
+    return null;
+  };
+  const payoutPenaltyLabel = (label) => {
+    const t = clean(label).toUpperCase().replace(/\s+/g, ' ').trim();
+    if (!t) return '';
+    if (/WRONG\s*VRN|VRN\s*WRONG|GALAT\s*VRN/.test(t)) return 'wrong-vrn';
+    if (/REPLAC|REISSUE/.test(t)) return 'replacement';
+    if (/CHASSIS/.test(t)) return 'chassis';
+    if (/PENALT|FINE|DEDUCT|CUT|CHARGE|LOSS|WRONG/.test(t)) return t.slice(0, 60);
+    return '';
+  };
+  async function loadPayoutRates(fresh) {
+    if (mem.payout && !fresh) return mem.payout;
+    if (mem.payoutPromise && !fresh) return mem.payoutPromise;
+    const cfg = FF.config.ffPayout || {};
+    const tabName = clean(cfg.sheet) || 'payout';
+    mem.payoutPromise = (async () => {
+      let table;
+      try {
+        // limit 150: rates sheet chhoti hoti hai — fallback par bhi koi bada tab download nahi hota.
+        table = await D.query(tabName, 'select * limit 150', { gid: clean(cfg.gid) || '' });
+      } catch (err) {
+        return { found: false, tab: tabName, rows: [], penaltyRows: [], byClass: new Map(), byGroup: new Map(), error: err.message || 'Payout tab load nahi hui' };
+      }
+      const labels = (table.cols || []).map((c) => clean((c && c.label) || ''));
+      const bodyRows = D.textRows(table);
+      const mat = [labels, ...bodyRows.slice(0, 60)];
+      const RE = { cls: /class|vehicle|category|segment/i, label: /particular|description|item|detail|slab|type|name|fee|charge/i, rate: /comm|rate|payout|earning|incentive|royalt|₹|\brs\b|per\s*tag|amount/i, penalty: /penalt|fine|deduct|cut|loss|charge/i, note: /note|remark|comment/i };
+      let hIdx = -1, roles = null;
+      for (let i = 0; i < mat.length; i++) {
+        const row = mat[i] || [];
+        const role = { label: -1, cls: -1, rate: -1, penalty: -1, note: -1 };
+        row.forEach((cell, ci) => {
+          const t = clean(cell);
+          if (!t || t.length > 60) return;
+          const isPenalty = RE.penalty.test(t);
+          if (RE.cls.test(t) && role.cls < 0) role.cls = ci;
+          if (RE.rate.test(t) && !isPenalty && role.rate < 0) role.rate = ci;
+          if (isPenalty && role.penalty < 0) role.penalty = ci;
+          if (RE.label.test(t) && !RE.cls.test(t) && !RE.rate.test(t) && role.label < 0) role.label = ci;
+          if (RE.note.test(t) && role.note < 0) role.note = ci;
+        });
+        if (role.cls >= 0 && (role.rate >= 0 || role.penalty >= 0)) { hIdx = i; roles = role; break; }
+      }
+      if (hIdx < 0) return { found: false, tab: tabName, rows: [], penaltyRows: [], byClass: new Map(), byGroup: new Map(), error: 'Payout tab me class + commission/penalty columns nahi mile (structure recognize nahi hua — Settings me column mapping set karein)' };
+      const numVal = (v) => { const raw = clean(v); if (!raw) return { value: null, percent: false }; return { value: U.num(raw), percent: /%/.test(raw) }; };
+      const rows = [], penaltyRows = [], byClass = new Map(), byGroup = new Map();
+      const colLetter = (i) => U.colLetter(i);
+      mat.slice(hIdx + 1).forEach((row) => {
+        const label = roles.label >= 0 ? clean(row[roles.label]) : '';
+        const clsRaw = roles.cls >= 0 ? clean(row[roles.cls]) : '';
+        const rateRaw = roles.rate >= 0 ? clean(row[roles.rate]) : '';
+        const penRaw = roles.penalty >= 0 ? clean(row[roles.penalty]) : '';
+        const note = roles.note >= 0 ? clean(row[roles.note]) : '';
+        const rate = numVal(rateRaw), penalty = numVal(penRaw);
+        const token = payoutClassToken(clsRaw || label);
+        const penKey = payoutPenaltyLabel([label, clsRaw].join(' '));
+        if (token) {
+          const rec = { label: label || clsRaw, cls: clsRaw, exact: token.exact, group: token.group, rate: rate.value, ratePercent: rate.percent, penalty: penalty.value, note, raw: row };
+          rows.push(rec);
+          if (!byClass.has(rec.exact) || (!validValue(byClass.get(rec.exact).rate) && validValue(rec.rate))) byClass.set(rec.exact, rec);
+          if (rec.exact === rec.group && (!byGroup.has(rec.group) || (!validValue(byGroup.get(rec.group).rate) && validValue(rec.rate)))) byGroup.set(rec.group, rec);
+        } else if (penKey && (validValue(rate.value) || validValue(penalty.value))) {
+          penaltyRows.push({ key: penKey, label: label || clsRaw, rate: rate.value, penalty: penalty.value, note, raw: row });
+        } else if (label && (validValue(rate.value) || validValue(penalty.value)) && /penalt|fine|deduct|wrong|charge|cut/i.test(label)) {
+          penaltyRows.push({ key: penKey || clean(label).toLowerCase().slice(0, 40), label, rate: rate.value, penalty: penalty.value, note, raw: row });
+        }
+      });
+      const headers = labels.map((l, i) => ({ letter: colLetter(i), label: l, role: Object.entries(roles).find(([, v]) => v === i)?.[0] || '' }));
+      const found = rows.length > 0 || penaltyRows.length > 0;
+      return { found, tab: tabName, headers, rows, penaltyRows, byClass, byGroup, headerRow: hIdx + 1, error: found ? '' : 'Payout tab me koi rate row nahi mili' };
+    })().catch((err) => ({ found: false, tab: tabName, rows: [], penaltyRows: [], byClass: new Map(), byGroup: new Map(), error: err.message || 'Payout tab parse nahi hui' }));
+    const out = await mem.payoutPromise;
+    mem.payout = out;
+    mem.payoutPromise = null;
+    return out;
+  }
+  /** Payout-sheet rate for one exact class — exact row pehle, phir group (VC5+) rate. */
+  function payoutRateOf(payout, exact) {
+    const e = payout.byClass && payout.byClass.get(exact);
+    if (e && validValue(e.rate)) return e.rate;
+    const g = payout.byGroup && payout.byGroup.get(exact === 'VC4' ? 'VC4' : exact === 'VC20' ? 'VC20' : 'VC5+');
+    return g && validValue(g.rate) ? g.rate : null;
+  }
+  /**
+   * Agent ka expected commission = class-wise counts × payout-sheet rates − penalty lines.
+   * Counts: REPORT curVc4 + curC1..C5 (VC5/VC6/VC7/VC12/VC16); VC20 EIR bins (curBins) se,
+   * warna (NVC4 − VC5+ exact classes) se derive hota hai. Kabhi average nahi — sirf exact sums.
+   */
+  function payoutBreakdown(agent, payout) {
+    const bins = agent.curBins || null;
+    const exacts = { VC4: Math.round(agent.curVc4 || 0), VC5: Math.round(agent.curC1 || 0), VC6: Math.round(agent.curC2 || 0), VC7: Math.round(agent.curC3 || 0), VC12: Math.round(agent.curC4 || 0), VC16: Math.round(agent.curC5 || 0) };
+    const exactSum5p = exacts.VC5 + exacts.VC6 + exacts.VC7 + exacts.VC12 + exacts.VC16;
+    const vc20Count = bins ? Math.round(bins.VC20 || 0) : Math.max(0, Math.round((agent.curNvc4 || 0) - exactSum5p));
+    const extra5p = bins ? Math.max(0, Math.round((bins['VC5+'] || 0) - exactSum5p)) : 0;
+    const lines = [], missing = [];
+    const add = (cls, n, rate) => { if (!n) return; if (!validValue(rate)) { missing.push(cls); return; } lines.push({ cls, n, rate, amount: n * rate }); };
+    add('VC4', exacts.VC4, payoutRateOf(payout, 'VC4'));
+    add('VC20', vc20Count, payoutRateOf(payout, 'VC20'));
+    ['VC5', 'VC6', 'VC7', 'VC12', 'VC16'].forEach((c) => add(c, exacts[c], payoutRateOf(payout, c)));
+    if (extra5p) add('VC5+ (other)', extra5p, payoutRateOf(payout, 'VC5+'));
+    const gross = lines.reduce((n, l) => n + l.amount, 0);
+    const penaltyLines = [];
+    (payout.penaltyRows || []).forEach((p) => {
+      const rate = validValue(p.penalty) ? p.penalty : (validValue(p.rate) ? p.rate : null);
+      if (!validValue(rate)) return;
+      if (p.key === 'wrong-vrn' || /wrong\s*vrn/i.test(p.label || '')) {
+        const n = Math.round(agent.wrongVrn || 0);
+        if (n) penaltyLines.push({ label: p.label || 'Wrong VRN', n, rate, amount: n * rate });
+      }
+    });
+    const penalty = penaltyLines.reduce((n, l) => n + l.amount, 0);
+    return { lines, gross, penaltyLines, penalty, expected: lines.length ? gross - penalty : null, missing, complete: lines.length > 0 && !missing.length };
+  }
+  /** "Payout vs sheet" cell — expected − (earned ya rate × tags). */
+  function payoutDiffCell(r) {
+    const c = r.payoutCalc;
+    const base = validValue(r.earned) ? r.earned : (validValue(r.computed) ? r.computed : null);
+    if (!c || c.expected === null || !validValue(base)) return '<span class="dim">—</span>';
+    const diff = c.expected - base;
+    return statusPill(`${diff > 0 ? '+' : ''}${money(diff, 2)}`, Math.abs(diff) <= 1 ? 'green' : diff > 0 ? 'amber' : 'red');
+  }
+
   // ---- GV commission intelligence ---------------------------------------------------------------
   function aggregateGv(rows, group) {
     const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -387,17 +553,46 @@ FF.pages = FF.pages || {};
     const map = new Map();
     rows.forEach((r) => {
       const key = keyFn(r);
-      mapAdd(map, key, () => ({ key, label: key.includes('|') ? key.split('|')[1] || key.split('|')[0] : key, id: key.includes('|') ? key.split('|')[0] : '', agentLabel: r.agentName || r.agentId || 'Unknown agent', tlName: r.tlName || '', classLabel: r.cls || 'NA', issuances: 0, amount: 0, commission: 0, commissionRows: 0, commissionPopulatedRows: 0, agents: new Set(), classes: {}, direct: 0, managed: 0 }), (o) => {
-        o.issuances++; o.amount += r.amount || 0; o.commission += r.commission || 0; o.commissionRows++; if (r.commissionHasValue === true) o.commissionPopulatedRows++; o.agents.add(r.agentId || r.agentName);
+      mapAdd(map, key, () => ({ key, label: key.includes('|') ? key.split('|')[1] || key.split('|')[0] : key, id: key.includes('|') ? key.split('|')[0] : '', agentLabel: r.agentName || r.agentId || 'Unknown agent', tlName: r.tlName || '', classLabel: r.cls || 'NA', issuances: 0, uniqueTags: 0, tagSet: new Set(), amount: 0, commission: 0, commissionRows: 0, commissionPopulatedRows: 0, agents: new Set(), classes: {}, direct: 0, managed: 0 }), (o) => {
+        o.issuances++; o.amount += r.amount || 0; o.commission += r.commission || 0; o.commissionRows++; if (r.commissionHasValue === true) o.commissionPopulatedRows++; o.agents.add(r.agentId || r.agentName); o.tagSet.add(normBarcode(r.tagId || r.serial || '') || `#${o.issuances}`);
         o.classes[r.cls || 'NA'] = (o.classes[r.cls || 'NA'] || 0) + 1;
         if (directAgent(r)) o.direct++; else o.managed++;
       });
     });
-    let out = [...map.values()].map((o) => ({ ...o, agentCount: o.agents.size, commissionComplete: o.commissionRows > 0 && o.commissionRows === o.commissionPopulatedRows, perTag: o.issuances ? o.commission / o.issuances : 0, avgAmount: o.issuances ? o.amount / o.issuances : 0, effectiveRate: ratePct(o.commission, o.amount) }));
+    let out = [...map.values()].map((o) => ({ ...o, agentCount: o.agents.size, uniqueTags: o.tagSet.size, commissionComplete: o.commissionRows > 0 && o.commissionRows === o.commissionPopulatedRows, perTag: o.issuances ? o.commission / o.issuances : 0, avgAmount: o.issuances ? o.amount / o.issuances : 0, effectiveRate: ratePct(o.commission, o.amount) }));
     if (group === 'weekday') { const order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday', 'Invalid date']; out.sort((a, b) => order.indexOf(a.label) - order.indexOf(b.label)); }
     else if (group === 'day') out.sort((a, b) => b.label.localeCompare(a.label));
     else out.sort((a, b) => b.commission - a.commission || b.issuances - a.issuances);
     return out;
+  }
+
+  /**
+   * Agent × class commission matrix — har agent ke liye VC4 / VC20 / VC5+ ka commission ALAG
+   * (exact sum). Koi blended average nahi; VC5+ ke andar exact class (VC5/VC6/…) split bhi.
+   * Unique tags = distinct tag/serial count (duplicate sheet rows pakadne ke liye).
+   */
+  function gvClassMatrix(rows) {
+    const blank = () => ({ tags: 0, unique: 0, amount: 0, commission: 0, tagSet: new Set() });
+    const map = new Map();
+    rows.forEach((r) => {
+      const key = `${r.agentId || ''}|${r.agentName || 'Unknown agent'}`;
+      const g = r.group || (G.classGroup ? G.classGroup(r.cls) : r.cls) || 'NA';
+      const slot = ['VC4', 'VC20', 'VC5+'].includes(g) ? g : 'VC5+';
+      mapAdd(map, key, () => ({ label: r.agentName || r.agentId || 'Unknown agent', id: r.agentId || '', tlName: r.tlName || '', VC4: blank(), VC20: blank(), 'VC5+': blank(), exact: {}, totalCommission: 0, totalTags: 0 }), (o) => {
+        const s = o[slot];
+        s.tags++; s.amount += r.amount || 0; s.commission += r.commission || 0;
+        s.tagSet.add(normBarcode(r.tagId || r.serial || '') || `#${s.tags}`);
+        o.totalCommission += r.commission || 0; o.totalTags++;
+        const cls = r.cls || 'NA';
+        const e = o.exact[cls] || (o.exact[cls] = { tags: 0, commission: 0 });
+        e.tags++; e.commission += r.commission || 0;
+      });
+    });
+    return [...map.values()].map((o) => {
+      ['VC4', 'VC20', 'VC5+'].forEach((g) => { o[g].unique = o[g].tagSet.size; delete o[g].tagSet; });
+      o.vc5Exact = Object.entries(o.exact).filter(([cls]) => cls !== 'VC4' && cls !== 'VC20').sort((a, b) => b[1].commission - a[1].commission || b[1].tags - a[1].tags);
+      return o;
+    }).sort((a, b) => b.totalCommission - a.totalCommission || b.totalTags - a.totalTags);
   }
 
   // ---- GV commission · separate board per vehicle class (VC4 / VC20 / VC5+) ----------------------
@@ -419,12 +614,13 @@ FF.pages = FF.pages || {};
     const share = totals.commission ? (commission / totals.commission) * 100 : 0;
     const perTag = rows.length ? commission / rows.length : 0;
     const exact = [...new Set(rows.map((r) => r.cls).filter(Boolean))].sort();
+    const uniqueAll = new Set(rows.map((r) => normBarcode(r.tagId || r.serial || '')).filter(Boolean)).size || rows.length;
     const csvId = classBoardId(def.key);
     const head = `<div class="board-head"><span class="board-icon">${def.icon}</span><div><h3>${esc(def.title)}</h3><div class="board-sub">${esc(def.note)}${exact.length ? ` · sheet classes: ${esc(exact.join(', '))}` : ''}</div></div><div class="board-stats">
-      <div><small>Tags</small><b>${U.fmt(rows.length)}</b></div>
+      <div><small>Tags (unique)</small><b>${U.fmt(rows.length)}${uniqueAll !== rows.length ? ` <small class="dim">/ ${U.fmt(uniqueAll)}</small>` : ''}</b></div>
       <div><small>Agents</small><b>${U.fmt(agents.length)}</b></div>
-      <div><small>Commission</small><b>${money(commission, 2)}</b></div>
-      <div><small>₹ / tag</small><b>${money(perTag, 2)}</b></div>
+      <div><small>Commission (sum)</small><b>${money(commission, 2)}</b></div>
+      <div><small>₹ / tag (avg)</small><b>${money(perTag, 2)}</b></div>
       <div><small>Share</small><b>${share.toFixed(1)}%</b></div>
     </div></div>`;
     if (!rows.length) return `<div class="class-board tone-${def.tone}">${head}<div class="board-body">${empty(`${def.title} · koi row nahi`, 'Selected period / network filter me is class ka koi issuance nahi hai.')}</div></div>`;
@@ -469,6 +665,9 @@ FF.pages = FF.pages || {};
     const classTotals = { amount: totalAmount, commission: totalCommission, count: filtered.length };
     const boards = GV_CLASS_BOARDS.map((def) => ({ def, rows: filtered.filter((r) => (r.group || (G.classGroup ? G.classGroup(r.cls) : r.cls)) === def.key) }));
     const boardRowsFor = (def) => boards.find((b) => b.def.key === def.key) || { def, rows: [] };
+    const matrix = gvClassMatrix(filtered);
+    const gvGroupCommission = { VC4: sum(filtered.filter((r) => (r.group || (G.classGroup ? G.classGroup(r.cls) : r.cls)) === 'VC4'), (r) => r.commission), VC20: sum(filtered.filter((r) => (r.group || (G.classGroup ? G.classGroup(r.cls) : r.cls)) === 'VC20'), (r) => r.commission), 'VC5+': sum(filtered.filter((r) => !['VC4', 'VC20'].includes(r.group || (G.classGroup ? G.classGroup(r.cls) : r.cls))), (r) => r.commission) };
+    const gvUniqueTotal = new Set(filtered.map((r) => normBarcode(r.tagId || r.serial || '')).filter(Boolean)).size;
     const classList = [...new Set(filtered.map((r) => r.cls || 'NA'))].map((cls) => {
       const list = filtered.filter((r) => (r.cls || 'NA') === cls);
       const top = aggregateGv(list, 'agent')[0];
@@ -488,11 +687,19 @@ FF.pages = FF.pages || {};
       ${vividMetrics([
         { label: 'Tag issuances', value: U.fmt(filtered.length), foot: `${U.fmt(new Set(filtered.map((r) => r.agentId)).size)} agents · ${activeDays ? (filtered.length / activeDays).toFixed(1) : '0'} / active day`, tone: 'g1', icon: '🏷️' },
         { label: 'Transaction amount', value: money(totalAmount), foot: `${money(filtered.length ? totalAmount / filtered.length : 0, 2)} / tag`, tone: 'g3', icon: '💳' },
-        { label: 'Earned commission', value: money(totalCommission, 2), foot: `${money(filtered.length ? totalCommission / filtered.length : 0, 2)} / tag`, tone: 'g5', icon: '💰' },
+        { label: 'Earned commission (exact sum)', value: money(totalCommission, 2), foot: `VC4 ${money(gvGroupCommission.VC4, 2)} · VC20 ${money(gvGroupCommission.VC20, 2)} · VC5+ ${money(gvGroupCommission['VC5+'], 2)} — koi average nahi`, tone: 'g5', icon: '💰' },
         { label: 'Effective commission rate', value: `${ratePct(totalCommission, totalAmount).toFixed(2)}%`, foot: 'Commission ÷ amount · descriptive, not an assumed tariff', tone: 'g8', icon: '📈' },
-        { label: 'VC4 / VC20 / VC5+ split', value: `${U.fmt(boardRowsFor({ key: 'VC4' }).rows.length)} <small>/ ${U.fmt(boardRowsFor({ key: 'VC20' }).rows.length)} / ${U.fmt(boardRowsFor({ key: 'VC5+' }).rows.length)}</small>`, foot: boards.map((b) => `${b.def.key} ${money(sum(b.rows, (r) => r.commission), 2)}`).join(' · '), tone: 'g6', icon: '🚗' },
+        { label: 'Class commission (VC4 / VC20 / VC5+)', value: `${money(gvGroupCommission.VC4, 0)} <small>/ ${money(gvGroupCommission.VC20, 0)} / ${money(gvGroupCommission['VC5+'], 0)}</small>`, foot: boards.map((b) => `${b.def.key} ${U.fmt(b.rows.length)} tags${(() => { const u = new Set(b.rows.map((r) => normBarcode(r.tagId || r.serial || '')).filter(Boolean)).size; return u && u !== b.rows.length ? ` (${U.fmt(u)} unique)` : ''; })()}`).join(' · '), tone: 'g6', icon: '🚗' },
         { label: 'Class commission variance flags', value: U.fmt(commissionAnomalies.length), foot: '±30% vs class median · min 3 tags per agent', tone: commissionAnomalies.length ? 'g7' : 'g9', icon: '🚨' }
       ])}
+      <div class="card"><div class="card-head"><h3>🧮 Agent × class commission · VC4 / VC20 / VC5+ alag</h3><span class="dim small">Har class ka commission uska exact sum hai — koi blended average nahi${gvUniqueTotal && gvUniqueTotal !== filtered.length ? ` · ${U.fmt(filtered.length)} rows me ${U.fmt(gvUniqueTotal)} unique tags` : ''}</span><button class="btn small" id="gvc-matrix-csv">⬇ Matrix CSV</button></div>
+        <div class="table-wrap"><table class="data-table ins-table"><thead><tr><th class="tone-violet">Agent</th><th class="tone-violet">TL / Direct</th><th class="tone-violet num">VC4 tags</th><th class="tone-violet num">VC4 commission</th><th class="tone-violet num">VC20 tags</th><th class="tone-violet num">VC20 commission</th><th class="tone-violet num">VC5+ tags</th><th class="tone-violet num">VC5+ commission</th><th class="tone-violet">VC5+ · exact class split</th><th class="tone-violet num">Total commission</th></tr></thead><tbody>
+        ${matrix.map((m) => {
+          const cell = (g) => `<td class="num">${U.fmt(m[g].tags)}${m[g].unique && m[g].unique !== m[g].tags ? `<small class="dim">${U.fmt(m[g].unique)} unique</small>` : ''}</td><td class="num"><b>${money(m[g].commission, 2)}</b></td>`;
+          return `<tr><td><b class="agent-link" data-agent360="${esc(m.label)}" data-agent360-id="${esc(m.id || '')}" title="Agent 360 kholo">${esc(m.label)}</b><small>${esc(m.id || '')}</small></td><td>${esc(m.tlName || 'Direct / Unmapped')}</td>${cell('VC4')}${cell('VC20')}${cell('VC5+')}<td class="small">${m.vc5Exact.length ? esc(m.vc5Exact.map(([cls, v]) => `${cls} ${money(v.commission, 0)}`).join(' · ')) : '<span class="dim">—</span>'}</td><td class="num"><b>${money(m.totalCommission, 2)}</b></td></tr>`;
+        }).join('') || `<tr><td colspan="10">${empty('No matching rows', 'Filters change karke dekhein.')}</td></tr>`}
+        </tbody>${matrix.length ? `<tfoot><tr class="row-total"><td colspan="2">Total · ${U.fmt(matrix.length)} agents</td><td class="num">${U.fmt(sum(matrix, (m) => m.VC4.tags))}</td><td class="num">${money(gvGroupCommission.VC4, 2)}</td><td class="num">${U.fmt(sum(matrix, (m) => m.VC20.tags))}</td><td class="num">${money(gvGroupCommission.VC20, 2)}</td><td class="num">${U.fmt(sum(matrix, (m) => m['VC5+'].tags))}</td><td class="num">${money(gvGroupCommission['VC5+'], 2)}</td><td></td><td class="num">${money(totalCommission, 2)}</td></tr></tfoot>` : ''}</table></div>
+      </div>
       <div class="card"><div class="card-head"><h3>🗂️ Class-wise commission summary</h3><span class="dim small">Exact sheet classes · selected period</span></div><div class="table-wrap"><table class="data-table ins-table"><thead><tr><th class="tone-slate">Vehicle class</th><th class="tone-slate">Board</th><th class="tone-slate num">Tags</th><th class="tone-slate num">Agents</th><th class="tone-slate num">Amount</th><th class="tone-slate num">Commission</th><th class="tone-slate num">₹ / tag</th><th class="tone-slate num">Effective rate</th><th class="tone-slate">Top agent</th></tr></thead><tbody>${classList.map((c) => `<tr><td><b>${esc(c.cls)}</b></td><td>${statusPill(c.group, c.group === 'VC4' ? 'blue' : c.group === 'VC20' ? 'amber' : '')}</td><td class="num">${U.fmt(c.tags)}</td><td class="num">${U.fmt(c.agents)}</td><td class="num">${money(c.amount, 2)}</td><td class="num"><b>${money(c.commission, 2)}</b></td><td class="num">${money(c.tags ? c.commission / c.tags : 0, 2)}</td><td class="num">${ratePct(c.commission, c.amount).toFixed(2)}%</td><td>${esc(c.top)}</td></tr>`).join('') || `<tr><td colspan="9">${empty('No commission rows', 'Filters change karke dekhein.')}</td></tr>`}</tbody><tfoot><tr class="row-total"><td colspan="2">All classes</td><td class="num">${U.fmt(filtered.length)}</td><td class="num">${U.fmt(new Set(filtered.map((r) => r.agentId)).size)}</td><td class="num">${money(totalAmount, 2)}</td><td class="num">${money(totalCommission, 2)}</td><td class="num">${money(filtered.length ? totalCommission / filtered.length : 0, 2)}</td><td class="num">${ratePct(totalCommission, totalAmount).toFixed(2)}%</td><td></td></tr></tfoot></table></div></div>
       <div class="card-head" style="padding:2px 2px 10px"><h3 style="margin:0">🚦 Class boards · agent-wise commission</h3><span class="dim small">VC4, VC20 aur VC5+ ka apna alag table · har board ka apna CSV</span></div>
       ${boards.map((b) => gvClassBoard(b.def, b.rows, classTotals)).join('')}
@@ -518,6 +725,10 @@ FF.pages = FF.pages || {};
       ...boards.filter((b) => b.rows.length).map(({ def, rows: list }) => ({ name: `GV ${def.key} agents`.slice(0, 31), header: GV_CLASS_HEADERS, rows: gvClassRows(list) })),
       { name: 'Class Variance Review', header: ['Agent','Agent ID','TL','Class','Tags','Observed commission/tag','Class median/tag','Deviation %','Peer variance amount'], rows: commissionAnomalies.map((r) => [r.agentLabel,r.id,r.tlName,r.classLabel,r.issuances,r.perTag,r.benchmark,r.deviationPct,r.varianceAmount]) }
     ]);
+    const matrixCsv = U.$('#gvc-matrix-csv', root);
+    if (matrixCsv) matrixCsv.addEventListener('click', () => U.downloadCsv(`gv-agent-class-commission-${U.stamp()}.csv`,
+      ['Agent', 'Agent ID', 'TL / Direct', 'VC4 tags', 'VC4 unique tags', 'VC4 commission', 'VC20 tags', 'VC20 unique tags', 'VC20 commission', 'VC5+ tags', 'VC5+ unique tags', 'VC5+ commission', 'VC5+ exact classes', 'Total commission'],
+      matrix.map((m) => [m.label, m.id || '', m.tlName || 'Direct / Unmapped', m.VC4.tags, m.VC4.unique, m.VC4.commission, m.VC20.tags, m.VC20.unique, m.VC20.commission, m['VC5+'].tags, m['VC5+'].unique, m['VC5+'].commission, m.vc5Exact.map(([cls, v]) => `${cls}: ${v.tags} tags / ${v.commission}`).join(' | '), m.totalCommission])));
     const varianceCsv = U.$('#gvc-variance-csv', root); if (varianceCsv) varianceCsv.addEventListener('click', () => U.downloadCsv(`gv-class-commission-review-${U.stamp()}.csv`, ['Agent','Agent ID','TL','Class','Tags','Observed commission/tag','Class median/tag','Deviation %','Peer variance amount'], commissionAnomalies.map((r) => [r.agentLabel,r.id,r.tlName,r.classLabel,r.issuances,r.perTag,r.benchmark,r.deviationPct,r.varianceAmount])));
     const gvSlabHeaders = ['Agent','Agent ID','TL','Tags','Slab','Model','Expected payout','Actual payout','Actual minus expected','Status'];
     const gvSlabExportRows = gvSlabResults.map((r) => [r.name,r.id,r.tl,r.count,r.tier,r.model,r.expected,r.actual,r.variance,r.status]);
@@ -545,6 +756,7 @@ FF.pages = FF.pages || {};
 
   async function renderFfCommission(root, params) {
     const data = await ffCommissionData();
+    const payout = await loadPayoutRates();
     const segment = ['all', 'direct', 'managed', 'other'].includes(params.segment) ? params.segment : 'all';
     const period = ['today','7','15','30','month','all','custom'].includes(String(params.period)) ? String(params.period) : 'month';
     const showAllHeadings = params.headings === 'all';
@@ -552,6 +764,9 @@ FF.pages = FF.pages || {};
     const now = new Date(); now.setHours(23,59,59,999); const from = new Date(now); from.setHours(0,0,0,0); if (['7','15','30'].includes(period)) from.setDate(from.getDate()-(Number(period)-1));
     const customFrom = params.from ? U.parseDate(params.from) : null, customTo = params.to ? U.parseDate(params.to) : null; if (customTo) customTo.setHours(23,59,59,999);
     const rows = data.agents.filter((r) => (segment === 'direct' ? r.segment === 'Direct Agent' : segment === 'managed' ? r.segment === 'TL-managed' : segment === 'other' ? r.segment === 'Other / unmapped' : true) && (!data.dateCol || period === 'all' || (period === 'custom' ? r.date && customFrom && customTo && r.date >= customFrom && r.date <= customTo : (period === 'month' ? r.date && U.ymKey(r.date) === U.ymKey(now) : r.date && r.date >= from && r.date <= now))) && (!q || [r.name, r.agentId, r.tlName, r.tlId, r.sourceCategory, r.rateRaw, r.amountRaw].join(' ').toLowerCase().includes(q)));
+    // Payout-sheet class rates se expected commission (exact sums — koi average nahi).
+    rows.forEach((r) => { r.payoutCalc = payout.found ? payoutBreakdown(r, payout) : null; });
+    const payoutExpectedTotal = payout.found ? sum(rows, (r) => (r.payoutCalc && r.payoutCalc.expected !== null ? r.payoutCalc.expected : 0)) : null;
     const ffSlabResults = slabVarianceRows(rows, 'ff', (r) => r.curTotal, (r) => r.earned, (r) => r.name, (r) => r.agentId, (r) => r.tlName);
     const ffSlabMismatches = ffSlabResults.filter((r) => r.variance !== null && Math.abs(r.variance) > 0.01);
     const rateFound = !!(data.rateCol && !data.rateCol.missing);
@@ -595,6 +810,17 @@ FF.pages = FF.pages || {};
           <div class="${rateFound && !data.rateIsPercent ? 'ok' : 'warn'}"><small>Rate ka unit</small><b>${rateFound ? (data.rateIsPercent ? 'Percent (%)' : '₹ per tag') : '—'}</b><span>${rateFound && data.rateIsPercent ? 'Percent rate se payout nahi banaya jaata (base amount chahiye)' : 'Rate × issuance = computed commission'}</span></div>
           <div class="${data.needsWiderRange ? 'bad' : 'ok'}"><small>Fetch range</small><b>${data.needsWiderRange ? 'Chhota hai' : `Theek hai (A–${esc(data.lastColLetter)})`}</b><span>${data.needsWiderRange ? `${U.fmt(data.outOfRange)} agents ke values range ke bahar — one-click fix upar hai` : `${U.fmt(data.headers.length)} columns scan hue`}</span></div>
         </div></div>
+      <div class="card payout-card"><div class="card-head"><h3>📋 Payout sheet · class-wise rates &amp; penalties</h3>${payout.found ? statusPill(`${U.fmt(payout.rows.length)} rate rows · tab “${esc(payout.tab)}”`, 'green') : statusPill('Payout tab recognize nahi hui', 'amber')}<button class="btn small" id="ffc-payout-csv">⬇ Rates CSV</button></div>
+        ${payout.found ? `
+          <p class="dim small">FF Google Sheet ki <b>${esc(payout.tab)}</b> tab se exact class rates · expected commission = <b>class-wise counts × rate − penalty lines</b> (koi average nahi, sirf exact sums). VC20 count EIR bins se ya (NVC4 − VC5/6/7/12/16) se aata hai.</p>
+          <div class="table-wrap"><table class="data-table ins-table"><thead><tr><th class="tone-teal">Particulars</th><th class="tone-teal">Class</th><th class="tone-teal">Group</th><th class="tone-teal num">Commission ₹ / tag</th><th class="tone-teal num">Penalty ₹</th><th class="tone-teal">Note</th></tr></thead><tbody>
+            ${payout.rows.map((p) => `<tr><td>${esc(p.label || p.cls)}</td><td><code class="col-code">${esc(p.cls || p.exact)}</code></td><td>${statusPill(p.group, p.group === 'VC4' ? 'blue' : p.group === 'VC20' ? 'amber' : '')}</td><td class="num"><b>${validValue(p.rate) ? money(p.rate, 2) : '<span class="dim">—</span>'}${p.ratePercent ? ' <small>% basis</small>' : ''}</b></td><td class="num">${validValue(p.penalty) ? money(p.penalty, 2) : '<span class="dim">—</span>'}</td><td class="small dim">${esc(p.note || '')}</td></tr>`).join('')}
+            ${payout.penaltyRows.map((p) => `<tr><td>⚖️ ${esc(p.label)}</td><td><code class="col-code">penalty</code></td><td>—</td><td class="num">${validValue(p.rate) ? money(p.rate, 2) : '<span class="dim">—</span>'}</td><td class="num"><b>${validValue(p.penalty) ? money(p.penalty, 2) : '<span class="dim">—</span>'}</b></td><td class="small dim">${esc(p.note || 'Wrong VRN / replacement jaisi penalty line')}</td></tr>`).join('')}
+          </tbody></table></div>
+          <div class="split-cards"><div class="card"><div class="card-head"><h3>Expected commission · payout rates</h3>${statusPill('Selected agents', 'blue')}</div><div class="ins-big">${money(payoutExpectedTotal, 2)}</div><p class="dim small">${U.fmt(rows.length)} agents · gross ${money(sum(rows, (r) => (r.payoutCalc ? r.payoutCalc.gross : 0)), 2)} − penalties ${money(sum(rows, (r) => (r.payoutCalc ? r.payoutCalc.penalty : 0)), 2)}</p></div>
+          <div class="card"><div class="card-head"><h3>Sheet AB rate × tags</h3>${statusPill('REPORT rate', 'amber')}</div><div class="ins-big">${rateFound ? money(computedTotal, 2) : '—'}</div><p class="dim small">${rateFound ? `${esc(data.rateCol.letter)} · ${esc(data.rateCol.sub || data.rateCol.section || '')}` : 'REPORT me rate column detect nahi hua'}</p></div></div>
+        ` : `<div class="mapping-state"><div class="mapping-icon">🧾</div><div><b>“${esc(payout.tab)}” tab se class rates load nahi hue</b><span>${esc(payout.error || 'Sheet me payout tab honi chahiye jisme class, commission rate aur penalty columns ho.')}</span><small>Settings → Data source → <b>FF payout sheet</b> me tab ka exact naam/columns set karo (default naam: <code>payout</code>). Jab tak rates nahi milte, dashboard guessed payout calculate nahi karta.</small></div></div>`}
+      </div>
       <div id="ffc-tools"></div>
       <div class="ins-filters">
         ${data.dateCol ? `<label>Period<select class="select" data-param="period">${[['today','Today'],['7','Last 7 days'],['15','Last 15 days'],['30','Last 30 days'],['month','This month'],['custom','Custom range'],['all','All dates']].map(([v,l])=>`<option value="${v}" ${v===period?'selected':''}>${l}</option>`).join('')}</select></label>${period==='custom'?`<form id="ffc-date-range" class="ins-search"><input class="input" type="date" name="from" value="${esc(params.from||'')}"><input class="input" type="date" name="to" value="${esc(params.to||'')}"><button class="btn">Apply range</button></form>`:''}` : ''}
@@ -616,9 +842,9 @@ FF.pages = FF.pages || {};
       </div>
       <div class="split-cards">${segments.map((s) => `<div class="card"><div class="card-head"><h3>${esc(s.label)}</h3>${statusPill(`${U.fmt(s.count)} agents`, s.label === 'Direct Agent' ? 'blue' : s.label === 'TL-managed' ? 'green' : 'amber')}</div><div class="ins-big">${amountFound ? money(s.earned, 2) : s.computed ? money(s.computed, 2) : '—'}</div><p class="dim">${U.fmt(s.issuance)} issuance · ${U.fmt(s.withEarned)} rows me sheet earned value${!amountFound && s.computed ? ` · computed ${money(s.computed, 2)}` : ''}</p></div>`).join('')}</div>
       ${realCategories.length ? `<div class="card compact-card"><div class="card-head"><h3>Additional categories found in REPORT</h3><span class="dim small">${esc(data.categoryCol.label)}</span></div><div class="category-strip">${realCategories.map((c) => `<div><b>${esc(c.label)}</b><span>${U.fmt(c.count)} agents · ${U.fmt(c.issuance)} issued</span><strong>${amountFound ? money(c.earned,2) : '—'}</strong></div>`).join('')}</div></div>` : ''}
-      <div class="card"><div class="card-head"><h3>Agent-wise commission</h3><span class="dim small">Sheet values + (जब earned blank ho) rate × issuance computed column</span></div><div class="table-wrap"><table class="data-table ins-table"><thead><tr><th class="tone-blue">Agent</th><th class="tone-blue">Network</th>${realCategories.length ? '<th class="tone-blue">Sheet category</th>' : ''}<th class="tone-blue">TL / Direct</th><th class="tone-blue num">Issuance</th><th class="tone-blue num">Rate (sheet)</th><th class="tone-blue num">Earned (sheet)</th><th class="tone-blue num">Rate × tags</th></tr></thead><tbody>
-        ${rows.map((r) => `<tr><td><b class="agent-link" data-agent360="${esc(r.name || r.agentId)}" data-agent360-id="${esc(r.agentId || '')}" title="Agent 360 kholo">${esc(r.name || r.agentId)}</b><small>${esc(r.agentId || '')}</small></td><td>${statusPill(r.segment, r.segment === 'Direct Agent' ? 'blue' : r.segment === 'TL-managed' ? 'green' : '')}</td>${realCategories.length ? `<td>${esc(r.sourceCategory || '—')}</td>` : ''}<td>${esc(r.segment === 'Direct Agent' ? 'Direct' : r.tlName || '—')}</td><td class="num">${U.fmt(r.curTotal || 0)}</td><td class="num">${rateFound && validValue(r.rateValue) ? esc(r.rateRaw || U.fmt(r.rateValue, 2)) : '<span class="dim">—</span>'}</td><td class="num">${amountFound && validValue(r.earned) ? `<b>${money(r.earned, 2)}</b>` : '<span class="dim">blank</span>'}</td><td class="num">${validValue(r.computed) ? `<b>${money(r.computed, 2)}</b>` : '<span class="dim">—</span>'}</td></tr>`).join('') || `<tr><td colspan="${realCategories.length ? 8 : 7}">${empty('No agents match', 'Search ya filter change karo.')}</td></tr>`}
-      </tbody>${rows.length ? `<tfoot><tr class="row-total"><td colspan="${realCategories.length ? 4 : 3}">Total · ${U.fmt(rows.length)} agents</td><td class="num">${U.fmt(sum(rows, (r) => r.curTotal))}</td><td class="num">${rateFound ? `${U.fmt(rateMin, 2)}–${U.fmt(rateMax, 2)}` : '—'}</td><td class="num">${amountFound ? money(earned, 2) : '—'}</td><td class="num">${validValue(computedTotal) && computedRows.length ? money(computedTotal, 2) : '—'}</td></tr></tfoot>` : ''}</table></div></div>
+      <div class="card"><div class="card-head"><h3>Agent-wise commission</h3><span class="dim small">Sheet values + (जब earned blank ho) rate × issuance computed column</span></div><div class="table-wrap"><table class="data-table ins-table"><thead><tr><th class="tone-blue">Agent</th><th class="tone-blue">Network</th>${realCategories.length ? '<th class="tone-blue">Sheet category</th>' : ''}<th class="tone-blue">TL / Direct</th><th class="tone-blue num">Issuance</th><th class="tone-blue num">Rate (sheet)</th><th class="tone-blue num">Earned (sheet)</th><th class="tone-blue num">Rate × tags</th>${payout.found ? '<th class="tone-blue num">Payout expected</th><th class="tone-blue num">Payout vs sheet</th>' : ''}</tr></thead><tbody>
+        ${rows.map((r) => `<tr><td><b class="agent-link" data-agent360="${esc(r.name || r.agentId)}" data-agent360-id="${esc(r.agentId || '')}" title="Agent 360 kholo">${esc(r.name || r.agentId)}</b><small>${esc(r.agentId || '')}</small></td><td>${statusPill(r.segment, r.segment === 'Direct Agent' ? 'blue' : r.segment === 'TL-managed' ? 'green' : '')}</td>${realCategories.length ? `<td>${esc(r.sourceCategory || '—')}</td>` : ''}<td>${esc(r.segment === 'Direct Agent' ? 'Direct' : r.tlName || '—')}</td><td class="num">${U.fmt(r.curTotal || 0)}</td><td class="num">${rateFound && validValue(r.rateValue) ? esc(r.rateRaw || U.fmt(r.rateValue, 2)) : '<span class="dim">—</span>'}</td><td class="num">${amountFound && validValue(r.earned) ? `<b>${money(r.earned, 2)}</b>` : '<span class="dim">blank</span>'}</td><td class="num">${validValue(r.computed) ? `<b>${money(r.computed, 2)}</b>` : '<span class="dim">—</span>'}</td>${payout.found ? `<td class="num">${r.payoutCalc && r.payoutCalc.expected !== null ? `<b>${money(r.payoutCalc.expected, 2)}</b>${r.payoutCalc.missing.length ? `<small class="dim">rate missing: ${esc(r.payoutCalc.missing.join(', '))}</small>` : ''}` : '<span class="dim">—</span>'}</td><td class="num">${payoutDiffCell(r)}</td>` : ''}</tr>`).join('') || `<tr><td colspan="${(realCategories.length ? 8 : 7) + (payout.found ? 2 : 0)}">${empty('No agents match', 'Search ya filter change karo.')}</td></tr>`}
+      </tbody>${rows.length ? `<tfoot><tr class="row-total"><td colspan="${realCategories.length ? 4 : 3}">Total · ${U.fmt(rows.length)} agents</td><td class="num">${U.fmt(sum(rows, (r) => r.curTotal))}</td><td class="num">${rateFound ? `${U.fmt(rateMin, 2)}–${U.fmt(rateMax, 2)}` : '—'}</td><td class="num">${amountFound ? money(earned, 2) : '—'}</td><td class="num">${validValue(computedTotal) && computedRows.length ? money(computedTotal, 2) : '—'}</td>${payout.found ? `<td class="num"><b>${money(payoutExpectedTotal, 2)}</b></td><td></td>` : ''}</tr></tfoot>` : ''}</table></div></div>
       <div class="card"><div class="card-head"><h3>TL-wise commission rollup</h3><span class="dim small">${U.fmt(tlRows.length)} TL / groups · selected period</span><button class="btn small" id="ffc-tl-csv">⬇ TL rollup CSV</button></div>
         <div class="table-wrap"><table class="data-table ins-table"><thead><tr><th class="tone-teal">TL / group</th><th class="tone-teal num">Agents</th><th class="tone-teal num">Issuance</th><th class="tone-teal num">Earned (sheet)</th><th class="tone-teal num">Rate × tags</th><th class="tone-teal num">Total commission</th><th class="tone-teal num">₹ / tag</th><th class="tone-teal">Top agent</th></tr></thead><tbody>
           ${tlRows.map((t) => { const total = amountFound ? t.earned + (t.earnedRows ? 0 : t.computed) : t.computed; const rowsWithValue = amountFound ? t.earnedRows : t.computedRows; return `<tr class="${t.direct ? 'dup-row' : ''}"><td><b>${esc(t.label)}</b></td><td class="num">${U.fmt(t.agents)}</td><td class="num">${U.fmt(t.issuance)}</td><td class="num">${t.earnedRows ? money(t.earned, 2) : '<span class="dim">—</span>'}</td><td class="num">${t.computedRows ? money(t.computed, 2) : '<span class="dim">—</span>'}</td><td class="num"><b>${rowsWithValue ? money(total, 2) : '—'}</b></td><td class="num">${t.issuance && rowsWithValue ? money(total / t.issuance, 2) : '—'}</td><td>${t.top && t.top.amount ? `${esc(t.top.name)} <small>${money(t.top.amount, 2)}</small>` : '<span class="dim">—</span>'}</td></tr>`; }).join('') || `<tr><td colspan="8">${empty('No TL rows', 'Selected filters me koi agent nahi mila.')}</td></tr>`}
@@ -660,12 +886,17 @@ FF.pages = FF.pages || {};
     bindExports(root, 'ffc-export', `ff-commission-${U.stamp()}`, 'FF Commission', FF_AGENT_HEADERS, rows.map((r) => [r.agentId, r.name, r.segment, r.tlName, r.curTotal, r.rateRaw, r.earned, r.computed, rateFound ? (r.rateRaw ? 'sheet' : '') : '', r.dateRaw]), [
       { name: 'REPORT Heading Map', header: FF_HEADING_HEADERS, rows: headingRows },
       { name: 'TL Rollup', header: tlHeaders, rows: tlCsvRows },
-      { name: 'Slab Reconciliation', header: ['Agent','Agent ID','TL','Tags','Slab','Model','Expected payout','Actual payout','Actual minus expected','Status'], rows: ffSlabResults.map((r) => [r.name,r.id,r.tl,r.count,r.tier,r.model,r.expected,r.actual,r.variance,r.status]) }
+      { name: 'Slab Reconciliation', header: ['Agent','Agent ID','TL','Tags','Slab','Model','Expected payout','Actual payout','Actual minus expected','Status'], rows: ffSlabResults.map((r) => [r.name,r.id,r.tl,r.count,r.tier,r.model,r.expected,r.actual,r.variance,r.status]) },
+      ...(payout.found ? [
+        { name: 'Payout Rates', header: ['Particulars','Class','Group','Commission per tag','Penalty','Note'], rows: [...payout.rows.map((p) => [p.label, p.cls, p.group, validValue(p.rate) ? p.rate : '', validValue(p.penalty) ? p.penalty : '', p.note]), ...payout.penaltyRows.map((p) => [p.label, 'penalty', '', validValue(p.rate) ? p.rate : '', validValue(p.penalty) ? p.penalty : '', p.note])] },
+        { name: 'Payout Expected', header: ['Agent','Agent ID','TL','VC4 ₹','VC20 ₹','VC5+ ₹','Gross','Penalty','Expected'], rows: rows.map((r) => { const c = r.payoutCalc || {}; const g = {}; (c.lines || []).forEach((l) => { const k = l.cls.indexOf('VC4') === 0 ? 'VC4' : l.cls.indexOf('VC20') === 0 ? 'VC20' : 'VC5+'; g[k] = (g[k] || 0) + l.amount; }); return [r.name, r.agentId, r.tlName, g.VC4 ?? '', g.VC20 ?? '', g['VC5+'] ?? '', c.gross ?? '', c.penalty ?? '', c.expected ?? '']; }) }
+      ] : [])
     ]);
     const ffSlabHeaders = ['Agent','Agent ID','TL','Tags','Slab','Model','Expected payout','Actual payout','Actual minus expected','Status'];
     const ffSlabRows = ffSlabResults.map((r) => [r.name,r.id,r.tl,r.count,r.tier,r.model,r.expected,r.actual,r.variance,r.status]);
     const ffSlabCsv = U.$('#ffc-slab-csv', root); if (ffSlabCsv) ffSlabCsv.addEventListener('click', () => U.downloadCsv(`ff-slab-reconciliation-${U.stamp()}.csv`, ffSlabHeaders, ffSlabRows));
     const tlCsv = U.$('#ffc-tl-csv', root); if (tlCsv) tlCsv.addEventListener('click', () => U.downloadCsv(`ff-commission-tl-rollup-${U.stamp()}.csv`, tlHeaders, tlCsvRows));
+    const payoutCsv = U.$('#ffc-payout-csv', root); if (payoutCsv) payoutCsv.addEventListener('click', () => U.downloadCsv(`ff-payout-class-rates-${U.stamp()}.csv`, ['Particulars','Class','Group','Commission per tag','Penalty','Note'], [...payout.rows.map((p) => [p.label, p.cls, p.group, validValue(p.rate) ? p.rate : '', validValue(p.penalty) ? p.penalty : '', p.note]), ...payout.penaltyRows.map((p) => [p.label, 'penalty', '', validValue(p.rate) ? p.rate : '', validValue(p.penalty) ? p.penalty : '', p.note])]));
     // Payout reconciliation + commission alerts (cockpit.js) — FF commission page ke andar hi render hote hain.
     if (FF.cockpit && FF.cockpit.mountFfTools) FF.cockpit.mountFfTools(root).catch(() => {});
     bindMetricDetails(root, 'FF REPORT', FF_AGENT_HEADERS, rows.map((r) => [r.agentId, r.name, r.segment, r.tlName, r.curTotal, r.rateRaw, r.earned, r.computed, r.rateRaw ? 'sheet' : '', r.dateRaw]), {
@@ -1107,7 +1338,7 @@ FF.pages = FF.pages || {};
   }
   async function forecastRows(growthPct, safetyDays) {
     await FF.pages.performance.ensureLoaded();
-    const gvReport = await G.need('report');
+    const [gvReport, eirAgents] = await Promise.all([G.need('report'), S.need('agents')]);
     const multiplier = 1 + (growthPct / 100);
     const make = (channel, id, name, tlName, stock, baseRate) => {
       const rate = Math.max(0, Number(baseRate) || 0) * multiplier;
@@ -1117,7 +1348,26 @@ FF.pages = FF.pages || {};
       const outDate = Number.isFinite(stockDays) ? new Date(Date.now() + Math.max(0, stockDays) * 864e5) : null;
       return { channel, id, name, tlName, stock, baseRate: Number(baseRate) || 0, rate, safety, stockDays, outDate, need7: need(7), need15: need(15), need30: need(30), risk: rate <= 0 ? 'No run-rate' : stockDays <= 3 ? 'Critical' : stockDays <= 7 ? 'High' : stockDays <= 15 ? 'Medium' : 'Covered' };
     };
-    const ff = FF.pages.performance.agents().filter((a) => a.name || a.agentId).map((a) => make('First Forward', a.agentId || a.id, a.name, a.tlName, a.stockTotal || 0, a.avgTotal || (a.activeDays ? (a.curTotal || 0) / a.activeDays : 0)));
+    // EIR channel split: master ID 5845036 (configurable) = GV Partner rows. FF demand rate me wo
+    // issuance nahi aana chahiye — warna GV Master ke against double count hota (dual-channel agents).
+    const ffIssu = new Map(), allIssu = new Map();
+    const yms = (eirAgents || []).map((r) => r.ym).filter(Boolean).sort();
+    const curYm = yms.includes(U.ymKey(new Date())) ? U.ymKey(new Date()) : (yms.at(-1) || '');
+    (eirAgents || []).forEach((r) => {
+      if (curYm && r.ym !== curYm) return;
+      const k = normName(r.name);
+      allIssu.set(k, (allIssu.get(k) || 0) + (Number(r.n) || 0));
+      if (r.channel === 'First Forward') ffIssu.set(k, (ffIssu.get(k) || 0) + (Number(r.n) || 0));
+    });
+    const ff = FF.pages.performance.agents().filter((a) => a.name || a.agentId).filter((a) => {
+      const k = normName(a.name), all = allIssu.get(k) || 0;
+      return !(all > 0 && (ffIssu.get(k) || 0) === 0); // poori issuance GV channel ki hai → GV side me already
+    }).map((a) => {
+      const k = normName(a.name);
+      const all = allIssu.get(k) || 0, ffN = ffIssu.get(k) || 0;
+      const base = a.avgTotal || (a.activeDays ? (a.curTotal || 0) / a.activeDays : 0);
+      return make('First Forward', a.agentId || a.id, a.name, a.tlName, a.stockTotal || 0, all > 0 ? base * (ffN / all) : base);
+    });
     const gv = gvReport.map((a) => make('GV Partner', a.agentId, a.agentName, a.tlName, a.stockTotal || 0, a.runrate || (a.curDays ? a.curTotal / a.curDays : 0)));
     return [...ff, ...gv].sort((a, b) => a.stockDays - b.stockDays || b.rate - a.rate);
   }
@@ -1182,7 +1432,7 @@ FF.pages = FF.pages || {};
       <div class="risk-strip">${FORECAST_RISK_ORDER.map((rk) => { const n = count(rows, rk); return `<div class="risk-chip ${FORECAST_RISK_TONE[rk]}"><small>${rk}</small><b>${U.fmt(n)}</b><span>${all.length ? ((n / all.length) * 100).toFixed(0) : 0}% of ${U.fmt(all.length)} agents · need 7d ${U.fmt(sum(rows.filter((r) => r.risk === rk), (r) => r.need7))}</span></div>`; }).join('')}</div>
       <div class="ins-filters"><label>Channel<select class="select" data-param="channel"><option value="all">Both channels</option><option value="ff" ${channel === 'ff' ? 'selected' : ''}>First Forward</option><option value="gv" ${channel === 'gv' ? 'selected' : ''}>GV Partner</option></select></label><label>Risk<select class="select" data-param="risk">${['all','Critical','High','Medium','Covered','No run-rate'].map((v) => `<option value="${v}" ${v === risk ? 'selected' : ''}>${v === 'all' ? 'All risk levels' : v}</option>`).join('')}</select></label><form id="forecast-search" class="ins-search"><input class="input" name="q" value="${esc(params.q || '')}" placeholder="Agent, ID or TL…"><button class="btn">Search</button></form></div>
       <div class="card"><div class="card-head"><h3>🚨 Urgent dispatch list · top ${U.fmt(urgent.length)}</h3><span class="dim small">Critical + High risk aur positive 7-day need · pehle yahi dispatch karo</span><button class="btn small" id="forecast-urgent-csv">⬇ Urgent list CSV</button></div><div class="table-wrap"><table class="data-table ins-table"><thead><tr><th class="tone-rose">#</th><th class="tone-rose">Agent</th><th class="tone-rose">Channel</th><th class="tone-rose">TL</th><th class="tone-rose num">Stock</th><th class="tone-rose num">Demand / day</th><th class="tone-rose num">Cover days</th><th class="tone-rose">Stock-out</th><th class="tone-rose num">Need 7d</th><th class="tone-rose num">Need 15d</th><th class="tone-rose">Risk</th></tr></thead><tbody>${urgent.map((r, i) => `<tr${rowRiskClass(r.risk)}><td>${i + 1}</td><td><b class="agent-link" data-agent360="${esc(r.name || r.id)}" data-agent360-id="${esc(r.id || '')}" title="Agent 360 kholo">${esc(r.name || r.id || '')}</b><small>${esc(r.id || '')}</small></td><td>${statusPill(r.channel, r.channel === 'GV Partner' ? 'green' : 'blue')}</td><td>${esc(r.tlName || 'Direct / Unmapped')}</td><td class="num">${U.fmt(r.stock)}</td><td class="num">${r.rate.toFixed(1)}</td><td class="num"><b>${Number.isFinite(r.stockDays) ? r.stockDays.toFixed(1) : '—'}</b></td><td>${r.outDate ? dateText(r.outDate) : '—'}</td><td class="num"><b>${U.fmt(r.need7)}</b></td><td class="num">${U.fmt(r.need15)}</td><td>${statusPill(r.risk, FORECAST_RISK_PILL[r.risk])}</td></tr>`).join('') || `<tr><td colspan="11">${empty('Koi urgent dispatch nahi', 'Har filtered agent ka stock current run-rate ke liye kaafi hai.')}</td></tr>`}</tbody></table></div></div>
-      <div class="card"><div class="card-head"><h3>🏢 Channel summary</h3><span class="dim small">Projection ko channel-wise compare karo</span></div><div class="table-wrap"><table class="data-table ins-table"><thead><tr><th class="tone-teal">Channel</th><th class="tone-teal num">Agents</th><th class="tone-teal num">With run-rate</th><th class="tone-teal num">Stock</th><th class="tone-teal num">Demand / day</th><th class="tone-teal num">Cover days</th><th class="tone-teal num">Need 7d</th><th class="tone-teal num">Need 15d</th><th class="tone-teal num">Need 30d</th><th class="tone-teal num">Critical</th><th class="tone-teal num">High</th><th class="tone-teal num">No run-rate</th></tr></thead><tbody>${channelRows.map((c) => `<tr><td><b>${esc(c.channel)}</b></td><td class="num">${U.fmt(c.agents)}</td><td class="num">${U.fmt(c.active)}</td><td class="num">${U.fmt(c.stock)}</td><td class="num">${c.rate.toFixed(1)}</td><td class="num">${Number.isFinite(c.coverDays) ? c.coverDays.toFixed(1) : '—'}</td><td class="num">${U.fmt(c.need7)}</td><td class="num">${U.fmt(c.need15)}</td><td class="num">${U.fmt(c.need30)}</td><td class="num">${U.fmt(c.critical)}</td><td class="num">${U.fmt(c.high)}</td><td class="num">${U.fmt(c.noRate)}</td></tr>`).join('')}</tbody><tfoot><tr class="row-total"><td>Both channels</td><td class="num">${U.fmt(sum(channelRows, (c) => c.agents))}</td><td class="num">${U.fmt(sum(channelRows, (c) => c.active))}</td><td class="num">${U.fmt(sum(channelRows, (c) => c.stock))}</td><td class="num">${U.fmt(sum(channelRows, (c) => c.rate).toFixed(1))}</td><td class="num">${Number.isFinite(avgCover) ? avgCover.toFixed(1) : '—'}</td><td class="num">${U.fmt(required7)}</td><td class="num">${U.fmt(required15)}</td><td class="num">${U.fmt(required30)}</td><td class="num">${U.fmt(count(all, 'Critical'))}</td><td class="num">${U.fmt(count(all, 'High'))}</td><td class="num">${U.fmt(count(all, 'No run-rate'))}</td></tr></tfoot></table></div></div>
+      <div class="card"><div class="card-head"><h3>🏢 Channel summary</h3><span class="dim small">FF demand = sirf First Forward channel ki issuance (GV rows · ID 5845036 exclude) — GV side alag GV Master se · double count nahi</span></div><div class="table-wrap"><table class="data-table ins-table"><thead><tr><th class="tone-teal">Channel</th><th class="tone-teal num">Agents</th><th class="tone-teal num">With run-rate</th><th class="tone-teal num">Stock</th><th class="tone-teal num">Demand / day</th><th class="tone-teal num">Cover days</th><th class="tone-teal num">Need 7d</th><th class="tone-teal num">Need 15d</th><th class="tone-teal num">Need 30d</th><th class="tone-teal num">Critical</th><th class="tone-teal num">High</th><th class="tone-teal num">No run-rate</th></tr></thead><tbody>${channelRows.map((c) => `<tr><td><b>${esc(c.channel)}</b></td><td class="num">${U.fmt(c.agents)}</td><td class="num">${U.fmt(c.active)}</td><td class="num">${U.fmt(c.stock)}</td><td class="num">${c.rate.toFixed(1)}</td><td class="num">${Number.isFinite(c.coverDays) ? c.coverDays.toFixed(1) : '—'}</td><td class="num">${U.fmt(c.need7)}</td><td class="num">${U.fmt(c.need15)}</td><td class="num">${U.fmt(c.need30)}</td><td class="num">${U.fmt(c.critical)}</td><td class="num">${U.fmt(c.high)}</td><td class="num">${U.fmt(c.noRate)}</td></tr>`).join('')}</tbody><tfoot><tr class="row-total"><td>Both channels</td><td class="num">${U.fmt(sum(channelRows, (c) => c.agents))}</td><td class="num">${U.fmt(sum(channelRows, (c) => c.active))}</td><td class="num">${U.fmt(sum(channelRows, (c) => c.stock))}</td><td class="num">${U.fmt(sum(channelRows, (c) => c.rate).toFixed(1))}</td><td class="num">${Number.isFinite(avgCover) ? avgCover.toFixed(1) : '—'}</td><td class="num">${U.fmt(required7)}</td><td class="num">${U.fmt(required15)}</td><td class="num">${U.fmt(required30)}</td><td class="num">${U.fmt(count(all, 'Critical'))}</td><td class="num">${U.fmt(count(all, 'High'))}</td><td class="num">${U.fmt(count(all, 'No run-rate'))}</td></tr></tfoot></table></div></div>
       <div class="card"><div class="card-head"><h3>👥 TL-wise replenishment rollup</h3><span class="dim small">${U.fmt(tlRows.length)} TL / direct groups · worst risk first</span></div><div class="table-wrap"><table class="data-table ins-table"><thead><tr><th class="tone-violet">TL / Direct</th><th class="tone-violet">Channel</th><th class="tone-violet num">Agents</th><th class="tone-violet num">Active</th><th class="tone-violet num">Stock</th><th class="tone-violet num">Demand / day</th><th class="tone-violet num">Cover days</th><th class="tone-violet num">Need 7d</th><th class="tone-violet num">Need 15d</th><th class="tone-violet num">Need 30d</th><th class="tone-violet">Worst risk</th><th class="tone-violet">Risk mix</th></tr></thead><tbody>${tlRows.map((t) => `<tr${rowRiskClass(t.worst)}><td><b>${esc(t.tlName)}</b></td><td>${statusPill(t.channel, t.channel === 'GV Partner' ? 'green' : 'blue')}</td><td class="num">${U.fmt(t.agents)}</td><td class="num">${U.fmt(t.active)}</td><td class="num">${U.fmt(t.stock)}</td><td class="num">${t.rate.toFixed(1)}</td><td class="num"><b>${Number.isFinite(t.coverDays) ? t.coverDays.toFixed(1) : '—'}</b></td><td class="num">${U.fmt(t.need7)}</td><td class="num">${U.fmt(t.need15)}</td><td class="num">${U.fmt(t.need30)}</td><td>${statusPill(t.worst, FORECAST_RISK_PILL[t.worst])}</td><td class="small">${FORECAST_RISK_ORDER.filter((rk) => t.risks[rk]).map((rk) => `${rk} ${U.fmt(t.risks[rk])}`).join(' · ')}</td></tr>`).join('') || `<tr><td colspan="12">${empty('No TL rows', 'Filter change karke dekhein.')}</td></tr>`}</tbody></table></div></div>
       <div class="card"><div class="card-head"><h3>Agent-level requirement forecast</h3><span class="dim small">Recommendation only · no dispatch approval workflow</span></div><div class="table-wrap"><table class="data-table ins-table"><thead><tr><th class="tone-blue">Agent</th><th class="tone-blue">Channel</th><th class="tone-blue num">Stock</th><th class="tone-blue num">Adjusted / day</th><th class="tone-blue num">Stock cover</th><th class="tone-blue">Projected stock-out</th><th class="tone-blue num">Safety units</th><th class="tone-blue num">Need · 7d</th><th class="tone-blue num">Need · 15d</th><th class="tone-blue num">Need · 30d</th></tr></thead><tbody>
         ${rows.map((r) => `<tr${rowRiskClass(r.risk)}><td><b class="agent-link" data-agent360="${esc(r.name || r.id)}" data-agent360-id="${esc(r.id || '')}" title="Agent 360 kholo">${esc(r.name || r.id)}</b><small>${esc(r.id || '')} · ${esc(r.tlName || 'Direct')}</small></td><td>${statusPill(r.channel, r.channel === 'GV Partner' ? 'green' : 'blue')}</td><td class="num">${U.fmt(r.stock)}</td><td class="num">${r.rate.toFixed(1)}<small>base ${r.baseRate.toFixed(1)}</small></td><td class="num">${statusPill(Number.isFinite(r.stockDays) ? `${r.stockDays.toFixed(1)} days` : 'No consumption', FORECAST_RISK_PILL[r.risk])}<small>${esc(r.risk)}</small></td><td>${r.outDate ? dateText(r.outDate) : '—'}</td><td class="num">${U.fmt(r.safety)}</td><td class="num"><b>${U.fmt(r.need7)}</b></td><td class="num">${U.fmt(r.need15)}</td><td class="num">${U.fmt(r.need30)}</td></tr>`).join('') || `<tr><td colspan="10">${empty('No forecast rows', 'Filter change karein ya source history badhne dein.')}</td></tr>`}
@@ -1357,8 +1607,11 @@ FF.pages = FF.pages || {};
     const [daily, stockAgents, gvMaster, gvStockClass, gvReport] = await Promise.all([S.need('daily'), S.need('stockAgents'), G.need('master'), G.need('stockClass'), G.need('report')]);
     await FF.pages.performance.ensureLoaded();
     const ffMonths = M.months(daily), ffMonth = ffMonths.at(-1) || U.ymKey(new Date()), gvMonth = latestMonth(gvMaster);
-    const ff = M.summary(daily, ffMonth), gv = G.summary(gvMonth);
-    const ffLast = M.summary(daily, U.prevMonthKey(ffMonth), Math.min(ff.lastDay || 31, U.daysInMonth(U.prevMonthKey(ffMonth))));
+    // FF side = sirf First Forward channel. EIR me GV Partner ke rows master ID 5845036 (configurable)
+    // rakhte hain — unhe FF totals se exclude kiye bina FF + GV combined me double count hota hai.
+    const ff = M.summary(daily, ffMonth, null, 'First Forward'), gv = G.summary(gvMonth);
+    const gvRowsInEir = M.summary(daily, ffMonth).gv || 0;
+    const ffLast = M.summary(daily, U.prevMonthKey(ffMonth), Math.min(ff.lastDay || 31, U.daysInMonth(U.prevMonthKey(ffMonth))), 'First Forward');
     const gvLast = G.summary(U.prevMonthKey(gvMonth), Math.min(gv.lastDay || 31, U.daysInMonth(U.prevMonthKey(gvMonth))));
     const ffStock = sum(stockAgents, (r) => r.n), gvStock = sum(gvStockClass, (r) => r.n);
     const ffAgents = FF.pages.performance.agents(), lowFf = ffAgents.filter((a) => (a.stockTotal || 0) > 0 && (a.avgTotal || 0) > 0 && (a.stockTotal / a.avgTotal) <= 7).length;
@@ -1370,7 +1623,7 @@ FF.pages = FF.pages || {};
     for (let i = 0; i < 14; i++) { const d = new Date(start); d.setDate(start.getDate() + i); const k = U.dateKey(d); labels.push(d.toLocaleDateString('en-IN',{day:'2-digit',month:'short'})); ffVals.push(sum(daily.filter((r) => r.key === k && r.channel === 'First Forward'), (r) => r.n)); gvVals.push(gvMaster.filter((r) => r.date && U.dateKey(r.date) === k).length); }
     const top = aggregateGv(gvRows, 'agent').slice(0, 7);
     root.innerHTML = head('🧭','Management Executive Cockpit','One-screen business pulse · issuance, growth, stock cover, earnings and management exceptions', `${exportButtons('exec-export')} ${printButton}`) + `
-      <div class="cockpit-banner"><div><small>Combined month-to-date issuance</small><strong>${U.fmt(ff.total + gv.total)}</strong><span>${esc(U.labelYM(ffMonth))} FF + ${esc(U.labelYM(gvMonth))} GV</span></div><div class="cockpit-split"><span>First Forward <b>${U.fmt(ff.total)}</b> ${U.deltaHtml(U.growth(ff.total,ffLast.total),{decimals:0})}</span><span>GV Partner <b>${U.fmt(gv.total)}</b> ${U.deltaHtml(U.growth(gv.total,gvLast.total),{decimals:0})}</span></div></div>
+      <div class="cockpit-banner"><div><small>Combined month-to-date issuance</small><strong>${U.fmt(ff.total + gv.total)}</strong><span>${esc(U.labelYM(ffMonth))} FF + ${esc(U.labelYM(gvMonth))} GV · FF se GV rows (ID ${esc(FF.config.eir.gvMasterId || '5845036')}) exclude — ${U.fmt(gvRowsInEir)} EIR rows double count nahi</span></div><div class="cockpit-split"><span>First Forward <b>${U.fmt(ff.total)}</b> ${U.deltaHtml(U.growth(ff.total,ffLast.total),{decimals:0})}</span><span>GV Partner <b>${U.fmt(gv.total)}</b> ${U.deltaHtml(U.growth(gv.total,gvLast.total),{decimals:0})}</span></div></div>
       <div class="ins-metrics">${metric('Projected month-end', U.fmt(ff.projected + gv.projected), `FF ${U.fmt(ff.projected)} · GV ${U.fmt(gv.projected)}`)}${metric('Combined field stock', U.fmt(ffStock + gvStock), `FF ${U.fmt(ffStock)} · GV ${U.fmt(gvStock)}`)}${metric('GV earned commission', money(commission,2), `${money(amount)} transaction amount`, 'good')}${metric('FF reported commission', ffCommission === null ? 'Unavailable' : money(ffCommission,2), ffCommission === null ? 'No commission heading in loaded REPORT' : 'REPORT earned amount')}</div>
       <div class="cockpit-grid"><div class="card span2"><div class="card-head"><h3>14-day channel pulse</h3><span class="dim small">Sheet-recorded issuances</span></div>${C.bars({labels,series:[{name:'First Forward',values:ffVals},{name:'GV Partner',values:gvVals}],height:230,showValues:false})}</div><div class="card"><div class="card-head"><h3>Management focus</h3></div><a class="focus-row ${lowFf+lowGv?'risk':''}" href="#/forecast?risk=High"><span>Stock cover ≤ 7 days</span><b>${U.fmt(lowFf+lowGv)}</b><small>FF ${lowFf} · GV ${lowGv}</small></a><a class="focus-row" href="#/dataQuality"><span>Run data quality checks</span><b>Open</b><small>Six source families</small></a><a class="focus-row" href="#/dualChannel"><span>Verified dual-channel agents</span><b>Review</b><small>Barcode + unique-ID evidence</small></a><a class="focus-row" href="#/followups?status=open"><span>Agent/TL follow-ups</span><b>Open</b><small>Owner and due-date timeline</small></a></div></div>
       <div class="split-cards"><div class="card"><div class="card-head"><h3>Channel operating summary</h3></div><div class="exec-channel"><div><b>First Forward</b><span>${U.fmt(ff.total)} issued · ${U.fmt(ffStock)} stock</span><small>${U.fmt(ff.vc4)} VC4 · ${U.fmt(ff.comm)} commercial · ${ff.activeDays} active days</small></div><div><b>GV Partner</b><span>${U.fmt(gv.total)} issued · ${U.fmt(gvStock)} stock</span><small>${U.fmt(gv.vc4)} VC4 · ${U.fmt(gv.comm)} commercial · ${gv.activeAgents} agents</small></div></div></div><div class="card"><div class="card-head"><h3>Top GV commission contributors</h3><a href="#/gvCommission">Full analysis →</a></div>${C.hbars({items:top.map((r)=>({label:r.label,sub:`${r.issuances} tags`,value:r.commission})),format:(v)=>money(v,0),valueLabel:'Commission'})}</div></div>`;
@@ -1465,7 +1718,7 @@ FF.pages = FF.pages || {};
     root.onclick = async(e)=>{const sb=e.target.closest('[data-note-status]');if(sb){U.setButtonBusy(sb,true,'Saving…');try{await FF.auth.api(`/api/workspace/notes/${encodeURIComponent(sb.dataset.id)}`,'PATCH',{status:sb.dataset.noteStatus});mem.workspace=null;renderFollowups(root,params);}catch(err){U.toast(err.message,'err');}return;}const ob=e.target.closest('[data-note-open]');if(ob){const n=all.find(x=>x.id===ob.dataset.noteOpen);if(!n)return;FF.app.openDrawer({kicker:`${n.entityType} · ${n.channel}`,title:n.entityName,sub:`${n.status} · ${n.priority} priority`,actions:n.createdBy===FF.auth.user.username||FF.auth.isAdmin()?`<button class="btn small danger" id="note-delete">Delete</button>`:'',body:`<div class="note-full">${esc(n.text)}</div><h3 class="drawer-section-title">Timeline</h3><div class="note-history">${(n.timeline||[]).slice().reverse().map(t=>`<div><i></i><p><b>${esc(t.action)}</b><span>${esc(t.by)} · ${esc(dateTimeText(t.at))}</span>${t.detail?`<small>${esc(t.detail)}</small>`:''}</p></div>`).join('')}</div>`});const del=U.$('#note-delete');if(del)del.onclick=async()=>{if(!confirm('Is note ko permanently delete karein?'))return;try{await FF.auth.api(`/api/workspace/notes/${encodeURIComponent(n.id)}`,'DELETE');mem.workspace=null;FF.app.closeDrawer();renderFollowups(root,params);}catch(err){U.toast(err.message,'err');}};}};
   }
 
-  function reset() { mem.details = null; mem.detailsPromise = null; mem.cross = null; mem.quality = null; mem.workspaceVersion++; mem.workspace = null; mem.workspacePromise = null; mem.forecastHistory = null; mem.forecastHistoryPromise = null; }
+  function reset() { mem.details = null; mem.detailsPromise = null; mem.cross = null; mem.quality = null; mem.workspaceVersion++; mem.workspace = null; mem.workspacePromise = null; mem.forecastHistory = null; mem.forecastHistoryPromise = null; mem.payout = null; mem.payoutPromise = null; }
 
   FF.pages.executive = { title: 'Executive Cockpit', render: renderExecutive };
   FF.pages.gvCommission = { title: 'GV Commission', render: renderGvCommission };
@@ -1479,5 +1732,5 @@ FF.pages = FF.pages || {};
   FF.workspace = { openSave, load: workspace, reset };
   // Page chrome helpers shared with cockpit.js (v3.8) so naye pages bilkul same look rakhein.
   const UI_KIT = { head, sourceChip, printButton, exportButtons, bindExports, vividMetrics, metric, statusPill, empty, money, validValue, clean, sum, normId, normName, segmentOf };
-  FF.insights = { reset, loadDetails, buildCross, ffCommissionData, qualityIssues, forecastAccuracy, stockBalanceReconciliation, commissionSlabExpected: slabExpected, openInsDialog, forecastRows, slabVariance: slabVarianceRows, ui: UI_KIT };
+  FF.insights = { reset, loadDetails, buildCross, ffCommissionData, ffPayoutRates: loadPayoutRates, payoutExpected: payoutBreakdown, qualityIssues, forecastAccuracy, stockBalanceReconciliation, commissionSlabExpected: slabExpected, openInsDialog, forecastRows, slabVariance: slabVarianceRows, ui: UI_KIT };
 })(window.FF);
