@@ -2175,3 +2175,13 @@ html[data-theme="dark"] .direct-filter:not(.primary), html[data-theme="dark"] .s
 .ins-table code.col-code { background: color-mix(in srgb, var(--brand) 10%, var(--bg)); border: 1px solid color-mix(in srgb, var(--brand) 24%, var(--line)); border-radius: 6px; padding: 1px 6px; font-weight: 800; font-size: 11px; }
 .ins-table tr.col-used td { background: color-mix(in srgb, var(--green) 8%, transparent) !important; }
 .btn.tiny { padding: 3px 8px; font-size: 10.5px; border-radius: 8px; }
+
+/* ---------- 6. commission source self-check (FF commission page) ---------- */
+.commission-selfcheck .check-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.commission-selfcheck .check-grid > div { border: 1px solid var(--line); border-left: 4px solid var(--brand); border-radius: 12px; padding: 10px 12px; background: var(--bg); display: grid; gap: 3px; }
+.commission-selfcheck .check-grid > div.ok { border-left-color: var(--green, #10b981); }
+.commission-selfcheck .check-grid > div.warn { border-left-color: var(--amber, #f59e0b); }
+.commission-selfcheck .check-grid > div.bad { border-left-color: var(--red, #ef4444); }
+.commission-selfcheck small { color: var(--muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; }
+.commission-selfcheck b { font-size: 13.5px; }
+.commission-selfcheck span { font-size: 11px; color: var(--muted); }

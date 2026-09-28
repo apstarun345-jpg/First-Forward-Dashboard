@@ -277,7 +277,39 @@ await run('professional page GV commission · per-class boards', async () => {
   }
   for (const id of ['gvc-class-vc4-csv', 'gvc-class-vc20-csv', 'gvc-class-vc5-csv']) if (!html.includes(id)) throw new Error(`class CSV button ${id} missing`);
   if (!/Effective rate/.test(html) || !/Commission \/ tag/.test(html)) throw new Error('class board columns missing');
+  if (/commission-selfcheck|Rate column \(row 2 heading\)|ffc-tl-csv/.test(html)) throw new Error('FF-only markup GV page me leak ho gaya');
 }, true);
+await run('FF commission · row-2 heading (2-header REPORT) detect hota hai', async () => {
+  const store = FF.store.state.data;
+  const full = store.report;
+  if (!full || !full.rows) throw new Error('REPORT table store me nahi hai');
+  // Live sheet jaisa: row 1 section ka naam, row 2 me asli heading. Row 1 me commission ka zikr hi na ho
+  // (sirf row 2 me "Commission Rate" / "Earned Commission") — detection ko phir bhi kaam karna chahiye.
+  const rows = full.rows.map((r) => r.slice());
+  rows[0] = rows[0].map((c, i) => (i === 78 || i === 79 ? '' : c));
+  const cfg = FF.config.ffCommission; const before = { ...cfg };
+  try {
+    cfg.rateCol = ''; cfg.earnedCol = ''; cfg.categoryCol = ''; cfg.dateCol = '';
+    store.report = { ...full, rows };
+    FF.data.clearCache();
+    const m = await FF.insights.ffCommissionData();
+    if (!m.rateCol || m.rateCol.index !== 78) throw new Error(`row-2 rate heading detect nahi hui (got ${m.rateCol && m.rateCol.letter})`);
+    if (!m.amountCol || m.amountCol.index !== 79) throw new Error('row-2 earned heading detect nahi hui');
+    if (m.rateCol.sub !== 'Commission Rate') throw new Error(`rate heading ka sub row "${m.rateCol.sub}" hai`);
+    if (m.rateIsPercent) throw new Error('per-tag rate ko percent maan liya gaya');
+    if (!m.agents.some((a) => Number.isFinite(a.computed))) throw new Error('row-2 heading ke saath computed commission nahi bana');
+    // duplicate heading: ek duplicate khaali column add karo — values wala column jeetna chahiye
+    const dup = rows.map((r) => r.slice());
+    dup[0] = dup[0].concat(['']);
+    dup[1] = dup[1].concat(['Commission Rate']);
+    for (let r = 2; r < dup.length; r++) dup[r] = dup[r].concat(['']);
+    store.report = { ...full, rows: dup, cols: (full.cols || []).concat([{ id: 'CC', label: '', type: 'number' }]) };
+    FF.data.clearCache();
+    const m2 = await FF.insights.ffCommissionData();
+    if (m2.rateCol.index !== 78) throw new Error(`duplicate heading me khaali column chun liya (${m2.rateCol.letter})`);
+  } finally { Object.assign(cfg, before); store.report = full; FF.data.clearCache(); }
+}, false);
+
 await run('professional page FF reported commission (dynamic mapping)', async () => {
   const mapping = await FF.insights.ffCommissionData();
   if (!mapping.amountCol) throw new Error('REPORT ka earned-commission heading detect nahi hua');
@@ -287,7 +319,7 @@ await run('professional page FF reported commission (dynamic mapping)', async ()
   if (!mapping.agents.some((a) => Number.isFinite(a.computed))) { throw new Error('rate × tags fallback compute nahi hua'); }
   const r = root(); await pages.ffCommission.render(r, { headings: 'all' }, {});
   const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  for (const s of ['REPORT commission column finder', 'Commission rate source', 'Rate range in sheet', 'Agent-wise commission', 'Rate × tags', 'Heading map', 'ffc-fresh-top']) if (!html.includes(s)) throw new Error(`FF commission me "${s}" nahi mila`);
+  for (const s of ['REPORT commission column finder', 'Commission rate source', 'Rate range in sheet', 'Agent-wise commission', 'Rate × tags', 'Heading map', 'ffc-fresh-top', 'Commission source self-check', 'Rate column (row 2 heading)', 'TL-wise commission rollup', 'ffc-tl-csv']) if (!html.includes(s)) throw new Error(`FF commission me "${s}" nahi mila`);
   if (!/CA/.test(html) || !/CB/.test(html)) throw new Error('heading map me column letters nahi dikh rahe');
 }, true);
 await run('FF commission · Settings me heading ka naam (letter nahi) bhi chalta hai', async () => {

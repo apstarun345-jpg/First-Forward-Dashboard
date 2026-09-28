@@ -276,10 +276,67 @@ FF.pages = FF.pages || {};
     const configAmount = mapped(mapping.earnedCol, 'Earned commission');
     const configCategory = mapped(mapping.categoryCol, 'Agent category');
     const configDate = mapped(mapping.dateCol, 'Commission date');
-    let rateCol = (configRate && !configRate.missing ? configRate : null) || candidates.find((h) => RATE_HEADING_RE.test(h.label)) || candidates[0] || configRate || null;
-    let amountCol = (configAmount && !configAmount.missing ? configAmount : null) || candidates.find((h) => RATE_HEADING_RE.test(h.label) === false && AMOUNT_HEADING_RE.test(h.label)) || candidates.find((h) => RATE_HEADING_RE.test(h.label) === false) || null;
-    if (amountCol && rateCol && amountCol.index === rateCol.index) amountCol = candidates.find((h) => h.index !== rateCol.index && !RATE_HEADING_RE.test(h.label)) || null;
-    if (rateCol && amountCol && rateCol.index === amountCol.index) rateCol = null;
+    // ---- rate / earned column chunav ------------------------------------------------------------------
+    // REPORT me heading 2 rows me hoti hai: row 1 = section ("Commission (FF)"), row 2 = asli heading
+    // ("Commission Rate"). Isliye row-2 heading ko sabse zyada weight milta hai, phir gviz ka column
+    // label, phir row-1 section. Do columns ka naam ek jaisa ho to jisme values zyada hain wahi jeetta hai
+    // (numericRatio), aur rate/earned dono ek hi column par claim na kar sake iske liye pair search hoti hai.
+    const RATE_ROLE_RES = [/commission\s*(rate|%)/i, /comm\.?\s*(rate|%)/i, /^rate$/i, /^%$|percent/i, /rate\s*\/\s*tag/i, /per\s*tag/i];
+    const AMOUNT_ROLE_RES = [/earned\s*commission/i, /^earned$/i, /commission\s*(amount|payable|payout|value)/i, /^payout$/i, /^incentive$/i, /commission\s*amount/i];
+    const sampleRatio = (h) => {
+      if (!h || h.index < 0) return 0;
+      let filled = 0, numeric = 0;
+      for (let r = 2; r < Math.min(rows.length, 160); r++) {
+        const raw = clean(D.cellText((rows[r] || [])[h.index]));
+        if (!raw) continue;
+        filled++;
+        if (validValue(U.num(raw))) numeric++;
+      }
+      return filled ? numeric / filled : 0;
+    };
+    const roleScore = (h, role) => {
+      if (!h || h.index < 0) return -Infinity;
+      const words = role === 'rate' ? RATE_ROLE_RES : AMOUNT_ROLE_RES;
+      const sub = clean(h.sub), own = clean(h.sectionOwn), sec = clean(h.section), col = clean(h.col), label = clean(h.label);
+      const hit = (text) => !!text && words.some((re) => re.test(text));
+      const generic = role === 'rate' ? RATE_HEADING_RE.test(label) : (!RATE_HEADING_RE.test(label) && AMOUNT_HEADING_RE.test(label));
+      const wrongSide = role === 'rate' ? (AMOUNT_ROLE_RES.some((re) => re.test(label)) && !RATE_ROLE_RES.some((re) => re.test(label))) : RATE_ROLE_RES.some((re) => re.test(label));
+      let score = 0;
+      if (hit(sub)) score += 100;            // row 2 heading exact role naam
+      if (hit(col)) score += 70;
+      if (hit(own) || hit(sec)) score += 55;
+      if (hit(label)) score += 40;
+      if (generic) score += 15;
+      if (wrongSide) score -= 45;
+      if (h.commissionLike) score += 10;
+      score += Math.round(sampleRatio(h) * 20); // jisme values hain wahi preferred
+      return score;
+    };
+    const pickPair = () => {
+      const pool = candidates.filter((h) => h && h.index >= 0);
+      if (!pool.length) return { rate: null, amount: null };
+      if (pool.length === 1) {
+        const only = pool[0];
+        return roleScore(only, 'rate') >= roleScore(only, 'amount') ? { rate: only, amount: null } : { rate: null, amount: only };
+      }
+      let best = null;
+      for (const a of pool) for (const b of pool) {
+        if (a.index === b.index) continue;
+        const total = roleScore(a, 'rate') + roleScore(b, 'amount');
+        if (!best || total > best.total) best = { total, rate: a, amount: b };
+      }
+      // Ek hi commission-like column ho (ya pair ka score bura ho) to jo mile usko uske role me rakho.
+      if (best && best.total <= 0) { const only = pool[0]; return roleScore(only, 'rate') >= roleScore(only, 'amount') ? { rate: only, amount: null } : { rate: null, amount: only }; }
+      return best || { rate: null, amount: null };
+    };
+    const pair = pickPair();
+    let rateCol = (configRate && !configRate.missing ? configRate : null) || pair.rate || configRate || null;
+    let amountCol = (configAmount && !configAmount.missing ? configAmount : null) || pair.amount || configAmount || null;
+    if (rateCol && amountCol && rateCol.index === amountCol.index) {
+      const other = candidates.find((h) => h.index !== rateCol.index && roleScore(h, 'amount') > -Infinity);
+      amountCol = configAmount && !configAmount.missing ? amountCol : (other || null);
+      if (rateCol.index === (amountCol && amountCol.index)) rateCol = null;
+    }
     const categoryCol = (configCategory && !configCategory.missing ? configCategory : null) || headers.find((h) => /(agent\s*(category|type)|business\s*category|channel|segment|network|payout\s*type)/i.test(h.label) && !/(tag|vehicle|vrn|serial)/i.test(h.label)) || null;
     const dateCol = (configDate && !configDate.missing ? configDate : null) || headers.find((h) => /^(date|period|month|report date|commission date|payout date)$/i.test(clean(h.sub || h.label))) || null;
     // Rate ka unit heading se aur actual values se dono tarah verify hota hai — "2%" wali rate ko
@@ -510,6 +567,19 @@ FF.pages = FF.pages || {};
     const headlineFoot = amountFound ? `${earnedRows.length}/${rows.length} rows me sheet earned value` : rateFound ? `Computed · ${data.rateIsPercent ? 'rate is % — base amount chahiye' : 'rate × current issuance'}` : 'No commission heading detected in REPORT';
     const segments = ['Direct Agent', 'TL-managed', 'Other / unmapped'].map((label) => { const list = data.agents.filter((r) => r.segment === label); return { label, count: list.length, issuance: sum(list, (r) => r.curTotal), earned: sum(list.filter((r) => validValue(r.earned)), (r) => r.earned), computed: sum(list.filter((r) => validValue(r.computed)), (r) => r.computed), withEarned: list.filter((r) => validValue(r.earned)).length }; });
     const realCategories = data.categoryCol && !data.categoryCol.missing ? [...new Set(data.agents.map((r) => r.sourceCategory || 'Blank').filter(Boolean))].map((label) => { const list = data.agents.filter((r) => (r.sourceCategory || 'Blank') === label); return { label, count: list.length, issuance: sum(list, (r) => r.curTotal), earned: sum(list.filter((r) => validValue(r.earned)), (r) => r.earned) }; }).sort((a,b) => b.earned - a.earned || b.issuance - a.issuance) : [];
+    // TL-wise rollup — kis TL ke agents ka commission kitna bana (Direct agents alag group me).
+    const tlMap = new Map();
+    rows.forEach((r) => {
+      const key = r.segment === 'Direct Agent' ? 'Direct agents (koi TL nahi)' : (r.tlName || 'TL naam blank');
+      if (!tlMap.has(key)) tlMap.set(key, { label: key, agents: 0, issuance: 0, earned: 0, earnedRows: 0, computed: 0, computedRows: 0, direct: r.segment === 'Direct Agent', top: null });
+      const x = tlMap.get(key);
+      x.agents++; x.issuance += Number(r.curTotal || 0);
+      if (validValue(r.earned)) { x.earned += r.earned; x.earnedRows++; }
+      if (validValue(r.computed)) { x.computed += r.computed; x.computedRows++; }
+      const own = validValue(r.earned) ? r.earned : (validValue(r.computed) ? r.computed : 0);
+      if (!x.top || own > x.top.amount) x.top = { name: r.name, amount: own };
+    });
+    const tlRows = [...tlMap.values()].sort((a, b) => (b.earned + b.computed) - (a.earned + a.computed) || b.issuance - a.issuance);
     const headingList = data.headers.filter((h) => showAllHeadings || h.role || h.commissionLike || h.configured);
     const canMap = !!(FF.auth && FF.auth.isAdmin && FF.auth.isAdmin());
     const mappingButtons = (h) => canMap ? `<div class="btn-row">${[['rate', 'rate'], ['earned', 'earned'], ['category', 'category'], ['date', 'date']].map(([role, text]) => `<button class="btn tiny" data-use-col="${esc(h.letter)}" data-use-role="${role}" title="REPORT column ${esc(h.letter)} ko ${text} mapping me set karo">${text === 'rate' ? '₹ Rate' : text === 'earned' ? '₹ Earned' : text === 'category' ? 'Category' : 'Date'}</button>`).join('')}</div>` : '';
@@ -518,6 +588,13 @@ FF.pages = FF.pages || {};
       ${data.warnings.length ? `<div class="mapping-state warn"><div class="mapping-icon">⚠️</div><div><h3>Settings me diya gaya column naam REPORT me nahi mila</h3>${data.warnings.map((w) => `<p><b>${esc(w.label)}</b> = “${esc(w.value)}” → ${esc(w.message)}</p>`).join('')}<small>Neeche <b>🔍 REPORT commission column finder</b> me apni heading dekho aur ek click me sahi column set kar do (ya Settings → Data source me letter/naam likho).</small></div></div>` : ''}
       ${data.needsWiderRange ? `<div class="mapping-state warn"><div class="mapping-icon">↔️</div><div><h3>Commission column mil gaya, par REPORT ka fetch range chhota hai</h3><p>Column <b>${esc(data.rateCol ? data.rateCol.letter : '')}</b> sheet ke right side me hai, lekin Settings me REPORT ka range sirf <b>${U.fmt(data.narrowWidth)}</b> columns tak set hai — isliye ${U.fmt(data.outOfRange)} agents ke rate / earned values load nahi ho pa rahe (headings dikh rahi hain, values nahi).</p><div class="btn-row"><button class="btn primary" id="ffc-fix-range">🔧 REPORT range poora karo (one click)</button><a class="btn" href="#/settings?tab=sources">Settings → 🗂️ Sheets &amp; tabs</a></div></div></div>` : ''}
       ${!available ? `<div class="mapping-state warn"><div class="mapping-icon">⚠️</div><div><h3>Is REPORT snapshot me koi commission / rate heading nahi mili</h3><p>Columns A:${esc(data.lastColLetter)} poore scan hue (${U.fmt(data.headers.length)} columns). Dashboard kisi bhi guessed rate se payout calculate nahi karta. Agar aapne abhi sheet me <b>“Commission Rate”</b> column add kiya hai, to pehle <b>fresh sync</b> karo — Google/proxy ka purana snapshot hold kar raha ho sakta hai.</p><div class="btn-row"><button class="btn primary" id="ffc-fresh">🔄 REPORT fresh sync (Google se naya data)</button><a class="btn" href="#/settings?tab=sources">Settings → column mapping</a></div><small>Sync ke baad bhi heading na dikhe to neeche list se sahi column ek click me set kar do (Settings → Data source → <b>FF REPORT commission column</b>).</small></div></div>` : ''}
+      <div class="card compact-card commission-selfcheck"><div class="card-head"><h3>✅ Commission source self-check</h3><span class="dim small">2-header REPORT: row 1 = section, row 2 = heading</span>${available && (data.populatedRate || data.populatedAmount) ? statusPill('Values mil rahi hain', 'green') : available ? statusPill('Column mila, values khali', 'amber') : statusPill('Column nahi mila', 'red')}</div>
+        <div class="check-grid">
+          <div class="${rateFound ? 'ok' : 'bad'}"><small>Rate column (row 2 heading)</small><b>${rateFound ? `${esc(data.rateCol.letter)} · ${esc(data.rateCol.sub || data.rateCol.col || data.rateCol.section)}` : 'Nahi mila'}</b><span>${rateFound ? `${U.fmt(data.populatedRate)} / ${U.fmt(data.agents.length)} agents me rate value` : 'Settings me letter (BZ) ya heading naam (Commission Rate) likho'}</span></div>
+          <div class="${amountFound ? 'ok' : 'warn'}"><small>Earned column</small><b>${amountFound ? `${esc(data.amountCol.letter)} · ${esc(data.amountCol.sub || data.amountCol.col || data.amountCol.section)}` : 'Nahi mila'}</b><span>${amountFound ? `${U.fmt(data.populatedAmount)} rows me earned value` : 'Blank earned ko dashboard guess nahi karta'}</span></div>
+          <div class="${rateFound && !data.rateIsPercent ? 'ok' : 'warn'}"><small>Rate ka unit</small><b>${rateFound ? (data.rateIsPercent ? 'Percent (%)' : '₹ per tag') : '—'}</b><span>${rateFound && data.rateIsPercent ? 'Percent rate se payout nahi banaya jaata (base amount chahiye)' : 'Rate × issuance = computed commission'}</span></div>
+          <div class="${data.needsWiderRange ? 'bad' : 'ok'}"><small>Fetch range</small><b>${data.needsWiderRange ? 'Chhota hai' : `Theek hai (A–${esc(data.lastColLetter)})`}</b><span>${data.needsWiderRange ? `${U.fmt(data.outOfRange)} agents ke values range ke bahar — one-click fix upar hai` : `${U.fmt(data.headers.length)} columns scan hue`}</span></div>
+        </div></div>
       <div class="ins-filters">
         ${data.dateCol ? `<label>Period<select class="select" data-param="period">${[['today','Today'],['7','Last 7 days'],['15','Last 15 days'],['30','Last 30 days'],['month','This month'],['custom','Custom range'],['all','All dates']].map(([v,l])=>`<option value="${v}" ${v===period?'selected':''}>${l}</option>`).join('')}</select></label>${period==='custom'?`<form id="ffc-date-range" class="ins-search"><input class="input" type="date" name="from" value="${esc(params.from||'')}"><input class="input" type="date" name="to" value="${esc(params.to||'')}"><button class="btn">Apply range</button></form>`:''}` : ''}
         <label>Network<select class="select" data-param="segment"><option value="all">All categories</option><option value="direct" ${segment === 'direct' ? 'selected' : ''}>Direct Agents</option><option value="managed" ${segment === 'managed' ? 'selected' : ''}>TL-managed</option><option value="other" ${segment === 'other' ? 'selected' : ''}>Other / unmapped</option></select></label>
@@ -541,6 +618,10 @@ FF.pages = FF.pages || {};
       <div class="card"><div class="card-head"><h3>Agent-wise commission</h3><span class="dim small">Sheet values + (जब earned blank ho) rate × issuance computed column</span></div><div class="table-wrap"><table class="data-table ins-table"><thead><tr><th class="tone-blue">Agent</th><th class="tone-blue">Network</th>${realCategories.length ? '<th class="tone-blue">Sheet category</th>' : ''}<th class="tone-blue">TL / Direct</th><th class="tone-blue num">Issuance</th><th class="tone-blue num">Rate (sheet)</th><th class="tone-blue num">Earned (sheet)</th><th class="tone-blue num">Rate × tags</th></tr></thead><tbody>
         ${rows.map((r) => `<tr><td><b>${esc(r.name || r.agentId)}</b><small>${esc(r.agentId || '')}</small></td><td>${statusPill(r.segment, r.segment === 'Direct Agent' ? 'blue' : r.segment === 'TL-managed' ? 'green' : '')}</td>${realCategories.length ? `<td>${esc(r.sourceCategory || '—')}</td>` : ''}<td>${esc(r.segment === 'Direct Agent' ? 'Direct' : r.tlName || '—')}</td><td class="num">${U.fmt(r.curTotal || 0)}</td><td class="num">${rateFound && validValue(r.rateValue) ? esc(r.rateRaw || U.fmt(r.rateValue, 2)) : '<span class="dim">—</span>'}</td><td class="num">${amountFound && validValue(r.earned) ? `<b>${money(r.earned, 2)}</b>` : '<span class="dim">blank</span>'}</td><td class="num">${validValue(r.computed) ? `<b>${money(r.computed, 2)}</b>` : '<span class="dim">—</span>'}</td></tr>`).join('') || `<tr><td colspan="${realCategories.length ? 8 : 7}">${empty('No agents match', 'Search ya filter change karo.')}</td></tr>`}
       </tbody>${rows.length ? `<tfoot><tr class="row-total"><td colspan="${realCategories.length ? 4 : 3}">Total · ${U.fmt(rows.length)} agents</td><td class="num">${U.fmt(sum(rows, (r) => r.curTotal))}</td><td class="num">${rateFound ? `${U.fmt(rateMin, 2)}–${U.fmt(rateMax, 2)}` : '—'}</td><td class="num">${amountFound ? money(earned, 2) : '—'}</td><td class="num">${validValue(computedTotal) && computedRows.length ? money(computedTotal, 2) : '—'}</td></tr></tfoot>` : ''}</table></div></div>
+      <div class="card"><div class="card-head"><h3>TL-wise commission rollup</h3><span class="dim small">${U.fmt(tlRows.length)} TL / groups · selected period</span><button class="btn small" id="ffc-tl-csv">⬇ TL rollup CSV</button></div>
+        <div class="table-wrap"><table class="data-table ins-table"><thead><tr><th class="tone-teal">TL / group</th><th class="tone-teal num">Agents</th><th class="tone-teal num">Issuance</th><th class="tone-teal num">Earned (sheet)</th><th class="tone-teal num">Rate × tags</th><th class="tone-teal num">Total commission</th><th class="tone-teal num">₹ / tag</th><th class="tone-teal">Top agent</th></tr></thead><tbody>
+          ${tlRows.map((t) => { const total = amountFound ? t.earned + (t.earnedRows ? 0 : t.computed) : t.computed; const rowsWithValue = amountFound ? t.earnedRows : t.computedRows; return `<tr class="${t.direct ? 'dup-row' : ''}"><td><b>${esc(t.label)}</b></td><td class="num">${U.fmt(t.agents)}</td><td class="num">${U.fmt(t.issuance)}</td><td class="num">${t.earnedRows ? money(t.earned, 2) : '<span class="dim">—</span>'}</td><td class="num">${t.computedRows ? money(t.computed, 2) : '<span class="dim">—</span>'}</td><td class="num"><b>${rowsWithValue ? money(total, 2) : '—'}</b></td><td class="num">${t.issuance && rowsWithValue ? money(total / t.issuance, 2) : '—'}</td><td>${t.top && t.top.amount ? `${esc(t.top.name)} <small>${money(t.top.amount, 2)}</small>` : '<span class="dim">—</span>'}</td></tr>`; }).join('') || `<tr><td colspan="8">${empty('No TL rows', 'Selected filters me koi agent nahi mila.')}</td></tr>`}
+        </tbody></table></div></div>
       <div class="card slab-review"><div class="card-head"><h3>FF slab payout reconciliation · agent-wise</h3>${!FF.config.commissionSlabs || !FF.config.commissionSlabs.enabled ? statusPill('Slab comparison off', 'amber') : statusPill(`${U.fmt(ffSlabMismatches.length)} payout differences`, ffSlabMismatches.length ? 'red' : 'green')}<button class="btn small" id="ffc-slab-csv">⬇ Slab detail CSV</button></div><p class="dim small">Selected-period REPORT issuance chooses the configured FF band. Expected payout compares with the earned-commission column only; no missing source values are inferred.</p>${FF.config.commissionSlabs && FF.config.commissionSlabs.enabled ? `<div class="table-wrap"><table class="data-table ins-table"><thead><tr><th class="tone-amber">Agent</th><th class="tone-amber">TL</th><th class="tone-amber num">Tags</th><th class="tone-amber">Slab / rate</th><th class="tone-amber num">Expected</th><th class="tone-amber num">Actual REPORT payout</th><th class="tone-amber num">Actual − expected</th><th class="tone-amber">Status</th></tr></thead><tbody>${ffSlabResults.filter((r)=>r.status!=='Matches slab').sort((a,b)=>Math.abs(b.variance||0)-Math.abs(a.variance||0)).map((r)=>`<tr><td><b>${esc(r.name)}</b><small>${esc(r.id)}</small></td><td>${esc(r.tl)}</td><td class="num">${U.fmt(r.count)}</td><td>${esc(r.tier)}${r.rate!==undefined?` · ${money(r.rate,2)}/tag`:''}</td><td class="num">${r.expected===null?'Rate not configured':money(r.expected,2)}</td><td class="num">${r.actual===null?'Unavailable':money(r.actual,2)}</td><td class="num">${r.variance===null?'—':`${r.variance>0?'+':''}${money(r.variance,2)}`}</td><td>${statusPill(r.status,r.status==='Less actual than slab'?'red':r.status==='More actual than slab'?'amber':'')}</td></tr>`).join('') || `<tr><td colspan="8">${empty('No slab differences', 'No FF agents have comparable actual payouts and configured slab rates for this period.')}</td></tr>`}</tbody></table></div>` : `<div class="mapping-state"><b>Slab comparison is off.</b><span>Settings → Data source → Commission slabs me FF rates enter karein, phir comparison enable karein.</span></div>`}</div>`;
     U.$('#ffc-search', root).addEventListener('submit', (e) => { e.preventDefault(); FF.app.updateParams({ q: new FormData(e.currentTarget).get('q') || '' }); });
     const rangeForm = U.$('#ffc-date-range', root); if (rangeForm) rangeForm.addEventListener('submit', (e) => { e.preventDefault(); const f = new FormData(rangeForm); FF.app.updateParams({ period:'custom', from:f.get('from') || '', to:f.get('to') || '' }); });
@@ -573,13 +654,17 @@ FF.pages = FF.pages || {};
     const headingCsv = U.$('#ffc-heading-csv', root);
     if (headingCsv) headingCsv.addEventListener('click', () => U.downloadCsv(`ff-report-commission-headings-${U.stamp()}.csv`, FF_HEADING_HEADERS, headingRows));
     const exportRows = rows.map((r) => [r.agentId, r.name, r.segment, r.sourceCategory, r.tlName, r.curTotal, r.rateRaw, r.earned, r.computed]);
+    const tlHeaders = ['TL / group', 'Type', 'Agents', 'Issuance', 'Earned (sheet)', 'Rate × tags', 'Total commission', 'Rows with earned value', 'Rows with computed value', 'Top agent', 'Top agent commission'];
+    const tlCsvRows = tlRows.map((t) => { const total = amountFound ? t.earned + (t.earnedRows ? 0 : t.computed) : t.computed; return [t.label, t.direct ? 'Direct agents' : 'TL-managed', t.agents, t.issuance, t.earned, t.computed, total, t.earnedRows, t.computedRows, t.top ? t.top.name : '', t.top ? t.top.amount : '']; });
     bindExports(root, 'ffc-export', `ff-commission-${U.stamp()}`, 'FF Commission', FF_AGENT_HEADERS, rows.map((r) => [r.agentId, r.name, r.segment, r.tlName, r.curTotal, r.rateRaw, r.earned, r.computed, rateFound ? (r.rateRaw ? 'sheet' : '') : '', r.dateRaw]), [
       { name: 'REPORT Heading Map', header: FF_HEADING_HEADERS, rows: headingRows },
+      { name: 'TL Rollup', header: tlHeaders, rows: tlCsvRows },
       { name: 'Slab Reconciliation', header: ['Agent','Agent ID','TL','Tags','Slab','Model','Expected payout','Actual payout','Actual minus expected','Status'], rows: ffSlabResults.map((r) => [r.name,r.id,r.tl,r.count,r.tier,r.model,r.expected,r.actual,r.variance,r.status]) }
     ]);
     const ffSlabHeaders = ['Agent','Agent ID','TL','Tags','Slab','Model','Expected payout','Actual payout','Actual minus expected','Status'];
     const ffSlabRows = ffSlabResults.map((r) => [r.name,r.id,r.tl,r.count,r.tier,r.model,r.expected,r.actual,r.variance,r.status]);
     const ffSlabCsv = U.$('#ffc-slab-csv', root); if (ffSlabCsv) ffSlabCsv.addEventListener('click', () => U.downloadCsv(`ff-slab-reconciliation-${U.stamp()}.csv`, ffSlabHeaders, ffSlabRows));
+    const tlCsv = U.$('#ffc-tl-csv', root); if (tlCsv) tlCsv.addEventListener('click', () => U.downloadCsv(`ff-commission-tl-rollup-${U.stamp()}.csv`, tlHeaders, tlCsvRows));
     bindMetricDetails(root, 'FF REPORT', FF_AGENT_HEADERS, rows.map((r) => [r.agentId, r.name, r.segment, r.tlName, r.curTotal, r.rateRaw, r.earned, r.computed, r.rateRaw ? 'sheet' : '', r.dateRaw]), {
       'Slab payout differences': { title: 'FF actual-vs-slab by agent', headers: ffSlabHeaders, rows: ffSlabRows },
       'Reported earned commission': { title: 'Rows with a sheet earned-commission value', headers: FF_AGENT_HEADERS, rows: exportRows.filter((r) => validValue(r[7])).map((r) => [r[0], r[1], r[2], r[4], r[5], r[6], r[7], r[8], 'sheet', '']) },
