@@ -6,7 +6,7 @@ FF.pages = FF.pages || {};
   'use strict';
   const U = FF.util, D = FF.data, S = FF.store, G = FF.gv, M = FF.model, C = FF.charts;
   const esc = U.esc, clean = U.clean;
-  const mem = { details: null, detailsPromise: null, cross: null, quality: null, workspace: null, forecastHistory: null, forecastHistoryPromise: null };
+  const mem = { details: null, detailsPromise: null, cross: null, quality: null, workspace: null, workspacePromise: null, workspaceVersion: 0, forecastHistory: null, forecastHistoryPromise: null };
 
   const head = (icon, title, sub, actions) => `<div class="page-head"><div><h1>${icon} ${esc(title)}</h1><p class="sub">${sub}</p></div><div class="head-actions">${actions || ''}<button class="btn primary" data-action="refresh">↻ Refresh</button></div></div>`;
   const money = (value, digits) => Number(value || 0).toLocaleString('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: digits === undefined ? 0 : digits });
@@ -18,6 +18,34 @@ FF.pages = FF.pages || {};
   const sum = (rows, fn) => rows.reduce((n, row) => n + (Number(fn(row)) || 0), 0);
   const mapAdd = (map, key, init, apply) => { if (!map.has(key)) map.set(key, init()); const row = map.get(key); apply(row); return row; };
   const classMix = (obj) => Object.entries(obj || {}).filter(([, n]) => n).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${U.fmt(n)}`).join(' · ') || '—';
+  const defaultSlabs = [{ min: 1, max: 50, rate: '' }, { min: 51, max: 100, rate: '' }, { min: 101, max: 150, rate: '' }, { min: 151, max: 250, rate: '' }, { min: 251, max: null, rate: '' }];
+  function slabExpected(count, channel) {
+    const settings = FF.config.commissionSlabs || {}, n = Math.max(0, Math.floor(Number(count) || 0));
+    if (!settings.enabled) return { expected: null, tier: 'Disabled', model: settings.model || 'agentTier' };
+    if (!n) return { expected: 0, tier: '0 tags', model: settings.model || 'agentTier' };
+    const model = settings.model === 'marginal' ? 'marginal' : 'agentTier';
+    const bands = settings.channels && settings.channels[channel] || defaultSlabs;
+    const bandLabel = (b) => b.max === null ? `${b.min}+` : `${b.min}–${b.max}`;
+    if (model === 'agentTier') {
+      const band = bands.find((b) => n >= Number(b.min) && (b.max === null || n <= Number(b.max)));
+      if (!band || band.rate === '' || band.rate === null || band.rate === undefined || !Number.isFinite(Number(band.rate))) return { expected: null, tier: band ? bandLabel(band) : 'No slab', model };
+      return { expected: n * Number(band.rate), tier: bandLabel(band), rate: Number(band.rate), model };
+    }
+    let expected = 0, missing = [], applied = [];
+    bands.forEach((b) => {
+      const upper = b.max === null ? n : Math.min(n, Number(b.max));
+      const qty = Math.max(0, upper - Number(b.min) + 1);
+      if (!qty) return;
+      if (b.rate === '' || b.rate === null || b.rate === undefined || !Number.isFinite(Number(b.rate))) missing.push(bandLabel(b));
+      else { expected += qty * Number(b.rate); applied.push(`${bandLabel(b)} × ${qty}`); }
+    });
+    return { expected: missing.length ? null : expected, tier: applied.join(', ') || (missing.length ? `Rate missing: ${missing.join(', ')}` : '—'), missing, model };
+  }
+  const slabVarianceRows = (items, channel, getCount, getActual, getName, getId, getTl) => items.map((r) => {
+    const count = Number(getCount(r)) || 0, actualRaw = getActual(r), actual = actualRaw === null || actualRaw === undefined || actualRaw === '' ? null : Number(actualRaw), calc = slabExpected(count, channel);
+    const variance = actual !== null && calc.expected !== null ? actual - calc.expected : null;
+    return { name: getName(r) || getId(r) || 'Unknown agent', id: getId(r) || '', tl: getTl(r) || 'Direct / Unmapped', count, actual, ...calc, variance, status: variance === null ? (calc.expected === null ? 'Rate not configured' : 'Actual payout unavailable') : Math.abs(variance) <= 0.01 ? 'Matches slab' : variance > 0 ? 'More actual than slab' : 'Less actual than slab' };
+  });
   const latestMonth = (rows) => [...new Set((rows || []).map((r) => r.ym).filter(Boolean))].sort().pop() || U.ymKey(new Date());
   const directAgent = (row) => {
     const r = row || {};
@@ -42,12 +70,14 @@ FF.pages = FF.pages || {};
   const csvButton = (id, text) => `<button class="btn" id="${id}">⬇ ${esc(text || 'CSV')}</button>`;
   const exportButtons = (base) => `${csvButton(`${base}-csv`, 'CSV')}<button class="btn" id="${base}-xlsx">⬇ Excel</button>`;
   const printButton = '<button class="btn" onclick="window.print()">🖨 PDF / Print</button>';
-  function bindMetricDetails(root, title, headers, rows) {
+  function bindMetricDetails(root, title, headers, rows, detailSets) {
     root.querySelectorAll('.ins-metrics .ins-metric').forEach((el) => { el.dataset.metricDetail = el.querySelector('small')?.textContent || 'Metric'; el.setAttribute('role', 'button'); el.setAttribute('tabindex', '0'); el.setAttribute('aria-label', `${el.dataset.metricDetail}; click to view rows`); const open = () => {
       const old = root.querySelector('#metric-detail-dialog'); if (old) old.remove();
-      const body = rows.slice(0, 500).map((r) => `<tr>${r.map((v) => `<td>${esc(v ?? '—')}</td>`).join('')}</tr>`).join('');
+      const chosen = detailSets && detailSets[el.dataset.metricDetail] || {};
+      const detailRows = chosen.rows || rows, detailHeaders = chosen.headers || headers, detailTitle = chosen.title || title;
+      const body = detailRows.slice(0, 500).map((r) => `<tr>${r.map((v) => `<td>${esc(v ?? '—')}</td>`).join('')}</tr>`).join('');
       const dialog = document.createElement('dialog'); dialog.id = 'metric-detail-dialog'; dialog.className = 'ins-detail-dialog';
-      dialog.innerHTML = `<div class="card-head"><h3>${esc(el.dataset.metricDetail)} · ${esc(title)}</h3><button class="btn small" data-close>Close</button></div><p class="dim small">${U.fmt(rows.length)} matching rows${rows.length > 500 ? ' · first 500 shown' : ''}</p><div class="table-wrap"><table class="data-table ins-table"><thead><tr>${headers.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${body || `<tr><td colspan="${headers.length}">No detail rows available</td></tr>`}</tbody></table></div>`;
+      dialog.innerHTML = `<div class="card-head"><h3>${esc(el.dataset.metricDetail)} · ${esc(detailTitle)}</h3><button class="btn small" data-close>Close</button></div><p class="dim small">${U.fmt(detailRows.length)} matching rows${detailRows.length > 500 ? ' · first 500 shown' : ''}</p><div class="table-wrap"><table class="data-table ins-table"><thead><tr>${detailHeaders.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${body || `<tr><td colspan="${detailHeaders.length}">No detail rows available</td></tr>`}</tbody></table></div>`;
       root.append(dialog); dialog.querySelector('[data-close]').onclick = () => dialog.close(); dialog.addEventListener('click', (e) => { if (e.target === dialog) dialog.close(); }); dialog.showModal();
     }; el.addEventListener('click', open); el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } }); });
   }
@@ -64,21 +94,33 @@ FF.pages = FF.pages || {};
 
   // ---- detailed rows used only by cross-channel and quality pages -------------------------------
   async function querySelectedRows(sheet, columns, whereColumn, fresh) {
-    const rows = [], pageSize = 25000, hardCap = 250000;
-    for (let offset = 0; offset < hardCap; offset += pageSize) {
-      const q = `select ${columns.join(', ')} where ${whereColumn} is not null limit ${pageSize} offset ${offset}`;
-      const table = await D.query(sheet, q, { fresh: !!fresh });
-      rows.push(...table.rows);
-      if (table.rows.length < pageSize) return { rows, truncated: false };
+    const rows = [], pageSize = 25000, hardCap = 250000, pageBatch = 3;
+    const fetchPage = (offset) => D.query(sheet, `select ${columns.join(', ')} where ${whereColumn} is not null limit ${pageSize} offset ${offset}`, { fresh: !!fresh });
+    let offset = 0;
+    while (offset < hardCap) {
+      // Fetch the first page alone, then overlap the next small page batch. Large detail scans
+      // finish in fewer network round trips without pulling whole inventory tabs into the UI.
+      const first = await fetchPage(offset);
+      rows.push(...first.rows);
+      if (first.rows.length < pageSize) return { rows, truncated: false };
+      offset += pageSize;
+      if (offset >= hardCap) break;
+      const offsets = Array.from({ length: Math.min(pageBatch, Math.ceil((hardCap - offset) / pageSize)) }, (_, i) => offset + i * pageSize);
+      const pages = await Promise.all(offsets.map(fetchPage));
+      for (let i = 0; i < pages.length; i++) {
+        rows.push(...pages[i].rows);
+        offset = offsets[i] + pageSize;
+        if (pages[i].rows.length < pageSize) return { rows, truncated: false };
+      }
     }
-    return { rows, truncated: true };
+    return { rows, truncated: rows.length >= hardCap };
   }
   async function loadDetails(fresh) {
     if (mem.details && !fresh) return mem.details;
     if (mem.detailsPromise && !fresh) return mem.detailsPromise;
     const s = FF.config.stock || {}, a = (FF.config.gv && FF.config.gv.assignment) || {}, gm = (FF.config.gv && FF.config.gv.master) || {};
     const stockCols = [s.barcode, s.tagId, s.agentId, s.agentName, s.tlName, s.cls, s.agentAllocatedAt, s.bcAllocatedAt].filter(Boolean);
-    const assignCols = [a.serial, a.tagId, a.agentId, a.agentName, a.tlId, a.tlName, a.cls, a.gvUniqueId, a.gvUniqueName].filter(Boolean);
+    const assignCols = [...new Set([a.serial, a.tagId, a.agentId, a.agentName, a.tlId, a.tlName, a.cls, a.gvUniqueId, a.gvUniqueName, a.allocatedAt].filter(Boolean))];
     mem.detailsPromise = Promise.all([
       querySelectedRows(s.sheet || 'StockDataa', stockCols, s.tagId || s.barcode, fresh),
       querySelectedRows('Tag Assignment', assignCols, a.tagId || a.serial, fresh),
@@ -90,7 +132,7 @@ FF.pages = FF.pages || {};
       }).filter((r) => r.barcode || r.tagId);
       const assignment = assignmentResult.rows.map((r) => {
         const o = {}; assignCols.forEach((col, i) => { o[col] = D.cellText(r[i]); });
-        return { serial: clean(o[a.serial]), tagId: clean(o[a.tagId]), agentId: clean(o[a.agentId]), agentName: clean(o[a.agentName]), tlId: clean(o[a.tlId]), tlName: clean(o[a.tlName]), cls: G.normClass ? G.normClass(o[a.cls]) : clean(o[a.cls]), gvUniqueId: clean(o[a.gvUniqueId]), gvUniqueName: clean(o[a.gvUniqueName]) };
+        return { serial: clean(o[a.serial]), tagId: clean(o[a.tagId]), agentId: clean(o[a.agentId]), agentName: clean(o[a.agentName]), tlId: clean(o[a.tlId]), tlName: clean(o[a.tlName]), cls: G.normClass ? G.normClass(o[a.cls]) : clean(o[a.cls]), gvUniqueId: clean(o[a.gvUniqueId]), gvUniqueName: clean(o[a.gvUniqueName]), allocatedAt: a.allocatedAt ? clean(o[a.allocatedAt]) : '' };
       }).filter((r) => r.serial || r.tagId);
       const rawMaster = masterTable.rows.map((r) => ({
         agentId: colGet(r, gm.uniqueId), agentName: colGet(r, gm.agentName), tlId: colGet(r, gm.tlId), tlName: colGet(r, gm.tlName),
@@ -146,20 +188,20 @@ FF.pages = FF.pages || {};
       agent: (r) => `${r.agentId}|${r.agentName}`,
       tl: (r) => `${r.tlId}|${r.tlName || 'Direct'}`,
       class: (r) => r.cls || 'NA',
-      agentClass: (r) => `${r.agentName || r.agentId || 'Unknown'} · ${r.cls || 'NA'}`,
+      agentClass: (r) => `${r.agentId || ''}|${r.agentName || 'Unknown agent'}|${r.cls || 'NA'}`,
       weekday: (r) => r.date ? days[r.date.getDay()] : 'Invalid date',
       day: (r) => r.date ? U.dateKey(r.date) : 'Invalid date'
     }[group] || ((r) => `${r.agentId}|${r.agentName}`);
     const map = new Map();
     rows.forEach((r) => {
       const key = keyFn(r);
-      mapAdd(map, key, () => ({ key, label: key.includes('|') ? key.split('|')[1] || key.split('|')[0] : key, id: key.includes('|') ? key.split('|')[0] : '', issuances: 0, amount: 0, commission: 0, agents: new Set(), classes: {}, direct: 0, managed: 0 }), (o) => {
-        o.issuances++; o.amount += r.amount || 0; o.commission += r.commission || 0; o.agents.add(r.agentId || r.agentName);
+      mapAdd(map, key, () => ({ key, label: key.includes('|') ? key.split('|')[1] || key.split('|')[0] : key, id: key.includes('|') ? key.split('|')[0] : '', agentLabel: r.agentName || r.agentId || 'Unknown agent', tlName: r.tlName || '', classLabel: r.cls || 'NA', issuances: 0, amount: 0, commission: 0, commissionRows: 0, commissionPopulatedRows: 0, agents: new Set(), classes: {}, direct: 0, managed: 0 }), (o) => {
+        o.issuances++; o.amount += r.amount || 0; o.commission += r.commission || 0; o.commissionRows++; if (r.commissionHasValue === true) o.commissionPopulatedRows++; o.agents.add(r.agentId || r.agentName);
         o.classes[r.cls || 'NA'] = (o.classes[r.cls || 'NA'] || 0) + 1;
         if (directAgent(r)) o.direct++; else o.managed++;
       });
     });
-    let out = [...map.values()].map((o) => ({ ...o, agentCount: o.agents.size, perTag: o.issuances ? o.commission / o.issuances : 0, avgAmount: o.issuances ? o.amount / o.issuances : 0, effectiveRate: ratePct(o.commission, o.amount) }));
+    let out = [...map.values()].map((o) => ({ ...o, agentCount: o.agents.size, commissionComplete: o.commissionRows > 0 && o.commissionRows === o.commissionPopulatedRows, perTag: o.issuances ? o.commission / o.issuances : 0, avgAmount: o.issuances ? o.amount / o.issuances : 0, effectiveRate: ratePct(o.commission, o.amount) }));
     if (group === 'weekday') { const order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday', 'Invalid date']; out.sort((a, b) => order.indexOf(a.label) - order.indexOf(b.label)); }
     else if (group === 'day') out.sort((a, b) => b.label.localeCompare(a.label));
     else out.sort((a, b) => b.commission - a.commission || b.issuances - a.issuances);
@@ -171,7 +213,7 @@ FF.pages = FF.pages || {};
     const months = G.months ? G.months() : [...new Set(master.map((r) => r.ym))].sort();
     const month = months.includes(params.month) ? params.month : (months.at(-1) || U.ymKey(new Date()));
     const period = ['today', '7', '15', '30', 'month', 'custom'].includes(String(params.period)) ? String(params.period) : 'month';
-    const group = ['agent', 'tl', 'class', 'weekday', 'day', 'agentClass'].includes(params.group) ? params.group : 'agent';
+    const group = ['agent', 'tl', 'class', 'weekday', 'day', 'agentClass'].includes(params.group) ? params.group : 'agentClass';
     const segment = ['all', 'direct', 'managed'].includes(params.segment) ? params.segment : 'all';
     const q = clean(params.q).toLowerCase();
     const today = new Date(); today.setHours(23, 59, 59, 999);
@@ -180,6 +222,16 @@ FF.pages = FF.pages || {};
     const base = master.filter((r) => period === 'month' ? r.ym === month : period === 'custom' ? (r.date && customFrom && customTo && r.date >= customFrom && r.date <= customTo) : (r.date && r.date >= from && r.date <= today));
     const filtered = base.filter((r) => (segment === 'direct' ? directAgent(r) : segment === 'managed' ? !directAgent(r) : true) && (!q || [r.agentId, r.agentName, r.tlId, r.tlName, r.cls, r.tagId].join(' ').toLowerCase().includes(q)));
     const grouped = aggregateGv(filtered, group);
+    const agentClassGroups = aggregateGv(filtered, 'agentClass');
+    const med = (values) => { const sorted = values.slice().sort((a,b)=>a-b); if (!sorted.length) return 0; const middle = Math.floor(sorted.length / 2); return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2; };
+    const classBenchmarks = new Map();
+    agentClassGroups.filter((r) => r.issuances >= 3 && r.perTag > 0).forEach((r) => { if (!classBenchmarks.has(r.classLabel)) classBenchmarks.set(r.classLabel, []); classBenchmarks.get(r.classLabel).push(r.perTag); });
+    const classMedians = new Map([...classBenchmarks].filter(([, values]) => values.length >= 3).map(([cls, values]) => [cls, med(values)]));
+    const commissionAnomalies = agentClassGroups.map((r) => { const benchmark = classMedians.get(r.classLabel) || 0; const deviationPct = benchmark ? ((r.perTag - benchmark) / benchmark) * 100 : 0; return { ...r, benchmark, deviationPct, varianceAmount: (r.perTag - benchmark) * r.issuances }; }).filter((r) => r.issuances >= 3 && r.benchmark > 0 && Math.abs(r.deviationPct) >= 30).sort((a,b)=>Math.abs(b.deviationPct)-Math.abs(a.deviationPct));
+    const gvAgentAgg = aggregateGv(filtered, 'agent');
+    const gvSlabResults = slabVarianceRows(gvAgentAgg, 'gv', (r) => r.issuances, (r) => r.commissionComplete ? r.commission : null, (r) => r.agentLabel || r.label, (r) => r.id, (r) => r.tlName);
+    const gvSlabMismatches = gvSlabResults.filter((r) => r.variance !== null && Math.abs(r.variance) > 0.01);
+    const gvSlabMissingActual = gvSlabResults.filter((r) => r.count > 0 && r.actual === null).length;
     const totalAmount = sum(filtered, (r) => r.amount), totalCommission = sum(filtered, (r) => r.commission);
     const activeDays = new Set(filtered.filter((r) => r.date).map((r) => U.dateKey(r.date))).size;
     const direct = filtered.filter(directAgent), managed = filtered.filter((r) => !directAgent(r));
@@ -199,19 +251,30 @@ FF.pages = FF.pages || {};
         ${metric('Transaction amount', money(totalAmount), `${money(filtered.length ? totalAmount / filtered.length : 0, 2)} / tag`)}
         ${metric('Earned commission', money(totalCommission, 2), `${money(filtered.length ? totalCommission / filtered.length : 0, 2)} / tag`, 'good')}
         ${metric('Effective commission rate', `${ratePct(totalCommission, totalAmount).toFixed(2)}%`, 'Commission ÷ amount · descriptive, not an assumed tariff')}
+        ${metric('Class commission variance flags', U.fmt(commissionAnomalies.length), '±30% vs class median · min 3 tags per agent', commissionAnomalies.length ? 'bad' : 'good')}
+        ${metric('Slab payout differences', FF.config.commissionSlabs && FF.config.commissionSlabs.enabled ? U.fmt(gvSlabMismatches.length) : 'Off', FF.config.commissionSlabs && FF.config.commissionSlabs.enabled ? `Actual GV payout vs slab · ${U.fmt(gvSlabMissingActual)} agents missing complete payout` : 'Set FF/GV slab rates in Settings', gvSlabMismatches.length ? 'bad' : '')}
       </div>
       <div class="split-cards">
         <div class="card"><div class="card-head"><h3>Direct Agents</h3>${statusPill(`${U.fmt(direct.length)} tags`, 'blue')}</div><div class="ins-big">${money(sum(direct, (r) => r.commission), 2)}</div><p class="dim">${U.fmt(new Set(direct.map((r) => r.agentId)).size)} agents · ${money(sum(direct, (r) => r.amount))} amount</p></div>
         <div class="card"><div class="card-head"><h3>TL-managed Agents</h3>${statusPill(`${U.fmt(managed.length)} tags`, 'green')}</div><div class="ins-big">${money(sum(managed, (r) => r.commission), 2)}</div><p class="dim">${U.fmt(new Set(managed.map((r) => r.agentId)).size)} agents · ${money(sum(managed, (r) => r.amount))} amount</p></div>
       </div>
+      <div class="card slab-review"><div class="card-head"><h3>GV slab payout reconciliation · agent-wise</h3><button class="btn small" id="gvc-slab-csv">⬇ Slab detail CSV</button></div><p class="dim small">Selected-period agent issuance chooses the configured GV band. Expected payout = configured rate logic; compares only with commission actually present in GV Master.</p>${FF.config.commissionSlabs && FF.config.commissionSlabs.enabled ? `<div class="table-wrap"><table class="data-table ins-table"><thead><tr><th>Agent</th><th>TL</th><th>Tags</th><th>Slab / rate</th><th>Expected</th><th>Actual sheet commission</th><th>Actual − expected</th><th>Status</th></tr></thead><tbody>${gvSlabResults.filter((r)=>r.status!=='Matches slab').sort((a,b)=>Math.abs(b.variance||0)-Math.abs(a.variance||0)).map((r)=>`<tr><td><b>${esc(r.name)}</b><small>${esc(r.id)}</small></td><td>${esc(r.tl)}</td><td>${U.fmt(r.count)}</td><td>${esc(r.tier)}${r.rate!==undefined?` · ${money(r.rate,2)}/tag`:''}</td><td>${r.expected===null?'Rate not configured':money(r.expected,2)}</td><td>${r.actual===null?'Unavailable':money(r.actual,2)}</td><td>${r.variance===null?'—':`${r.variance>0?'+':''}${money(r.variance,2)}`}</td><td>${statusPill(r.status,r.status==='Less actual than slab'?'red':r.status==='More actual than slab'?'amber':'')}</td></tr>`).join('') || `<tr><td colspan="8">${empty('No slab differences', 'All comparable GV agent payouts match the configured expected amount.')}</td></tr>`}</tbody></table></div>` : `<div class="mapping-state"><b>Slab comparison is off.</b><span>Settings → Data source → Commission slabs me GV rates enter karein, phir comparison enable karein.</span></div>`}</div>
+      <div class="card variance-card"><div class="card-head"><h3>Commission review · agent vs same-class benchmark</h3><button class="btn small" id="gvc-variance-csv">⬇ Variance CSV</button><span class="dim small">${classMedians.size ? 'Observed data only · not an official tariff' : 'Need at least 3 agents with 3+ tags in a class for peer baseline'}</span></div><p class="dim small">Flags agents whose observed commission per tag differs by at least 30% from the same-class median. This is a review signal—not proof of underpayment or an assumed commission rate.</p><div class="table-wrap"><table class="data-table ins-table"><thead><tr><th>Agent</th><th>TL</th><th>Class</th><th>Tags</th><th>Observed / tag</th><th>Class median / tag</th><th>Difference</th><th>Peer variance amount</th></tr></thead><tbody>${commissionAnomalies.map((r)=>`<tr><td><b>${esc(r.agentLabel)}</b><small>${esc(r.id || '')}</small></td><td>${esc(r.tlName || 'Direct / Unmapped')}</td><td><b>${esc(r.classLabel)}</b></td><td>${U.fmt(r.issuances)}</td><td>${money(r.perTag,2)}</td><td>${money(r.benchmark,2)}</td><td>${statusPill(`${r.deviationPct>0?'+':''}${r.deviationPct.toFixed(1)}%`,r.deviationPct<0?'red':'amber')}</td><td>${money(r.varianceAmount,2)}</td></tr>`).join('') || `<tr><td colspan="8">${empty('No class-based variance flags', 'More class-agent samples may be needed. No reference tariff has been assumed.')}</td></tr>`}</tbody></table></div></div>
       <div class="card"><div class="card-head"><h3>${esc(group === 'weekday' ? 'Monday–Sunday commission pattern' : group === 'day' ? 'Day-wise commission' : `${group[0].toUpperCase() + group.slice(1)}-wise commission`)}</h3><span class="dim small">${U.fmt(grouped.length)} rows</span></div>
-        <div class="table-wrap"><table class="data-table ins-table" id="gvc-table"><thead><tr><th>${group === 'agent' ? 'Agent' : group === 'tl' ? 'TL / Direct' : group === 'class' ? 'Class' : group === 'agentClass' ? 'Agent × Class' : group === 'weekday' ? 'Weekday' : 'Date'}</th><th>Issuance</th><th>Amount</th><th>Commission</th><th>Commission / tag</th><th>Effective rate</th><th>Class mix</th></tr></thead><tbody>
-        ${grouped.map((r) => `<tr><td><b>${esc(group === 'day' ? dateText(`${r.label}T00:00:00`) : r.label)}</b>${r.id ? `<small>${esc(r.id)}</small>` : ''}</td><td>${U.fmt(r.issuances)}</td><td>${money(r.amount, 2)}</td><td><b>${money(r.commission, 2)}</b></td><td>${money(r.perTag, 2)}</td><td>${r.effectiveRate.toFixed(2)}%</td><td class="small">${esc(classMix(r.classes))}</td></tr>`).join('') || `<tr><td colspan="7">${empty('No matching rows', 'Filters change karke dekhein.')}</td></tr>`}
+        <div class="table-wrap"><table class="data-table ins-table" id="gvc-table"><thead><tr>${group === 'agentClass' ? '<th>Agent</th><th>Vehicle class</th>' : `<th>${group === 'agent' ? 'Agent' : group === 'tl' ? 'TL / Direct' : group === 'class' ? 'Class' : group === 'weekday' ? 'Weekday' : 'Date'}</th>`}<th>Issuance</th><th>Amount</th><th>Commission</th><th>Commission / tag</th><th>Effective rate</th>${group === 'agentClass' ? '' : '<th>Class mix</th>'}</tr></thead><tbody>
+        ${grouped.map((r) => `<tr>${group === 'agentClass' ? `<td><b>${esc(r.agentLabel)}</b><small>${esc(r.id || '')}</small></td><td><b>${esc(r.classLabel)}</b></td>` : `<td><b>${esc(group === 'day' ? dateText(`${r.label}T00:00:00`) : r.label)}</b>${r.id ? `<small>${esc(r.id)}</small>` : ''}</td>`}<td>${U.fmt(r.issuances)}</td><td>${money(r.amount, 2)}</td><td><b>${money(r.commission, 2)}</b></td><td>${money(r.perTag, 2)}</td><td>${r.effectiveRate.toFixed(2)}%</td>${group === 'agentClass' ? '' : `<td class="small">${esc(classMix(r.classes))}</td>`}</tr>`).join('') || `<tr><td colspan="${group === 'agentClass' ? 6 : 7}">${empty('No matching rows', 'Filters change karke dekhein.')}</td></tr>`}
         </tbody></table></div></div>`;
     U.$('#gvc-search', root).addEventListener('submit', (e) => { e.preventDefault(); FF.app.updateParams({ q: new FormData(e.currentTarget).get('q') || '' }); });
     const rangeForm = U.$('#gvc-date-range', root); if (rangeForm) rangeForm.addEventListener('submit', (e) => { e.preventDefault(); const f = new FormData(rangeForm); FF.app.updateParams({ period:'custom', from:f.get('from')||'', to:f.get('to')||'' }); });
-    bindExports(root, 'gvc-export', `gv-commission-${month}-${U.stamp()}`, 'GV Commission', ['Group','ID','Issuance','Amount','Commission','Commission per tag','Effective rate %','Class mix'], grouped.map((r) => [r.label,r.id,r.issuances,r.amount,r.commission,r.perTag,r.effectiveRate,classMix(r.classes)]));
-    bindMetricDetails(root, period === 'month' ? U.labelYM(month) : `Last ${period === 'today' ? '1' : period} day(s)`, ['Date','Agent','Agent ID','TL','Class','Barcode','Amount','Commission'], filtered.map((r) => [r.date ? U.dateKey(r.date) : '',r.agentName,r.agentId,r.tlName,r.cls,r.tagId,r.amount,r.commission]));
+    bindExports(root, 'gvc-export', `gv-commission-${month}-${U.stamp()}`, 'GV Commission', ['Group','Agent','Agent ID','Vehicle class','Issuance','Amount','Commission','Commission per tag','Effective rate %','Class mix'], grouped.map((r) => [group,r.agentLabel,r.id,r.classLabel,r.issuances,r.amount,r.commission,r.perTag,r.effectiveRate,classMix(r.classes)]), [{ name: 'Class Variance Review', header: ['Agent','Agent ID','TL','Class','Tags','Observed commission/tag','Class median/tag','Deviation %','Peer variance amount'], rows: commissionAnomalies.map((r) => [r.agentLabel,r.id,r.tlName,r.classLabel,r.issuances,r.perTag,r.benchmark,r.deviationPct,r.varianceAmount]) }]);
+    const varianceCsv = U.$('#gvc-variance-csv', root); if (varianceCsv) varianceCsv.addEventListener('click', () => U.downloadCsv(`gv-class-commission-review-${U.stamp()}.csv`, ['Agent','Agent ID','TL','Class','Tags','Observed commission/tag','Class median/tag','Deviation %','Peer variance amount'], commissionAnomalies.map((r) => [r.agentLabel,r.id,r.tlName,r.classLabel,r.issuances,r.perTag,r.benchmark,r.deviationPct,r.varianceAmount])));
+    const gvSlabHeaders = ['Agent','Agent ID','TL','Tags','Slab','Model','Expected payout','Actual payout','Actual minus expected','Status'];
+    const gvSlabExportRows = gvSlabResults.map((r) => [r.name,r.id,r.tl,r.count,r.tier,r.model,r.expected,r.actual,r.variance,r.status]);
+    const gvSlabCsv = U.$('#gvc-slab-csv', root); if (gvSlabCsv) gvSlabCsv.addEventListener('click', () => U.downloadCsv(`gv-slab-reconciliation-${U.stamp()}.csv`, gvSlabHeaders, gvSlabExportRows));
+    bindMetricDetails(root, period === 'month' ? U.labelYM(month) : `Last ${period === 'today' ? '1' : period} day(s)`, ['Date','Agent','Agent ID','TL','Class','Barcode','Amount','Commission'], filtered.map((r) => [r.date ? U.dateKey(r.date) : '',r.agentName,r.agentId,r.tlName,r.cls,r.tagId,r.amount,r.commission]), {
+      'Class commission variance flags': { title: 'Same-class commission peer review', headers: ['Agent','Agent ID','TL','Class','Tags','Observed commission/tag','Class median/tag','Deviation %','Peer variance amount'], rows: commissionAnomalies.map((r) => [r.agentLabel,r.id,r.tlName,r.classLabel,r.issuances,r.perTag,r.benchmark,r.deviationPct,r.varianceAmount]) },
+      'Slab payout differences': { title: 'GV actual-vs-slab by agent', headers: gvSlabHeaders, rows: gvSlabExportRows }
+    });
   }
 
   // ---- FF reported commission ------------------------------------------------------------------
@@ -223,6 +286,8 @@ FF.pages = FF.pages || {};
     const now = new Date(); now.setHours(23,59,59,999); const from = new Date(now); from.setHours(0,0,0,0); if (['7','15','30'].includes(period)) from.setDate(from.getDate()-(Number(period)-1));
     const customFrom = params.from ? U.parseDate(params.from) : null, customTo = params.to ? U.parseDate(params.to) : null; if (customTo) customTo.setHours(23,59,59,999);
     const rows = data.agents.filter((r) => (segment === 'direct' ? r.segment === 'Direct Agent' : segment === 'managed' ? r.segment === 'TL-managed' : segment === 'other' ? r.segment === 'Other / unmapped' : true) && (!data.dateCol || period === 'all' || (period === 'custom' ? r.date && customFrom && customTo && r.date >= customFrom && r.date <= customTo : (period === 'month' ? r.date && U.ymKey(r.date) === U.ymKey(now) : r.date && r.date >= from && r.date <= now))) && (!q || [r.name, r.agentId, r.tlName, r.tlId, r.sourceCategory].join(' ').toLowerCase().includes(q)));
+    const ffSlabResults = slabVarianceRows(rows, 'ff', (r) => r.curTotal, (r) => r.earned, (r) => r.name, (r) => r.agentId, (r) => r.tlName);
+    const ffSlabMismatches = ffSlabResults.filter((r) => r.variance !== null && Math.abs(r.variance) > 0.01);
     const available = !!(data.rateCol || data.amountCol);
     const earnedRows = rows.filter((r) => r.earned !== null && r.earned !== undefined);
     const earned = sum(earnedRows, (r) => r.earned);
@@ -241,16 +306,23 @@ FF.pages = FF.pages || {};
         ${metric('Reported earned commission', data.amountCol ? money(earned, 2) : 'Unavailable', data.amountCol ? `${earnedRows.length}/${rows.length} rows populated` : 'No earned-amount column detected', data.amountCol ? 'good' : '')}
         ${metric('Rate source', data.rateCol ? esc(data.rateCol.letter) : 'Unavailable', data.rateCol ? esc(data.rateCol.sub || data.rateCol.section) : 'No rate column detected')}
         ${metric('Additional sheet category', data.categoryCol ? esc(data.categoryCol.sub || data.categoryCol.letter) : 'None found', data.categoryCol ? `Column ${esc(data.categoryCol.letter)}` : 'Direct/TL split uses verified TL fields')}
+        ${metric('Slab payout differences', !(FF.config.commissionSlabs && FF.config.commissionSlabs.enabled) ? 'Off' : !data.amountCol ? 'No actual column' : U.fmt(ffSlabMismatches.length), FF.config.commissionSlabs && FF.config.commissionSlabs.enabled ? (data.amountCol ? 'Actual FF REPORT payout vs configured slab' : 'Map earned-commission column in Settings') : 'Set FF/GV slab rates in Settings', ffSlabMismatches.length ? 'bad' : '')}
       </div>
       <div class="segment-summary">${segments.map((s) => `<div><b>${esc(s.label)}</b><span>${U.fmt(s.count)} agents · ${U.fmt(s.issuance)} issued</span><strong>${data.amountCol ? money(s.earned, 2) : 'Source unavailable'}</strong></div>`).join('')}</div>
       ${realCategories.length ? `<div class="card compact-card"><div class="card-head"><h3>Additional categories found in REPORT</h3><span class="dim small">${esc(data.categoryCol.label)}</span></div><div class="category-strip">${realCategories.map((c) => `<div><b>${esc(c.label)}</b><span>${U.fmt(c.count)} agents · ${U.fmt(c.issuance)} issued</span><strong>${data.amountCol ? money(c.earned,2) : '—'}</strong></div>`).join('')}</div></div>` : ''}
+      <div class="card slab-review"><div class="card-head"><h3>FF slab payout reconciliation · agent-wise</h3><button class="btn small" id="ffc-slab-csv">⬇ Slab detail CSV</button></div><p class="dim small">Selected-period REPORT issuance chooses the configured FF band. Expected payout compares with the earned-commission column only; no missing source values are inferred.</p>${FF.config.commissionSlabs && FF.config.commissionSlabs.enabled ? `<div class="table-wrap"><table class="data-table ins-table"><thead><tr><th>Agent</th><th>TL</th><th>Tags</th><th>Slab / rate</th><th>Expected</th><th>Actual REPORT payout</th><th>Actual − expected</th><th>Status</th></tr></thead><tbody>${ffSlabResults.filter((r)=>r.status!=='Matches slab').sort((a,b)=>Math.abs(b.variance||0)-Math.abs(a.variance||0)).map((r)=>`<tr><td><b>${esc(r.name)}</b><small>${esc(r.id)}</small></td><td>${esc(r.tl)}</td><td>${U.fmt(r.count)}</td><td>${esc(r.tier)}${r.rate!==undefined?` · ${money(r.rate,2)}/tag`:''}</td><td>${r.expected===null?'Rate not configured':money(r.expected,2)}</td><td>${r.actual===null?'Unavailable':money(r.actual,2)}</td><td>${r.variance===null?'—':`${r.variance>0?'+':''}${money(r.variance,2)}`}</td><td>${statusPill(r.status,r.status==='Less actual than slab'?'red':r.status==='More actual than slab'?'amber':'')}</td></tr>`).join('') || `<tr><td colspan="8">${empty('No slab differences', 'No FF agents have comparable actual payouts and configured slab rates for this period.')}</td></tr>`}</tbody></table></div>` : `<div class="mapping-state"><b>Slab comparison is off.</b><span>Settings → Data source → Commission slabs me FF rates enter karein, phir comparison enable karein.</span></div>`}</div>
       <div class="card"><div class="card-head"><h3>Agent-wise reported commission</h3><span class="dim small">Sheet values only · no derived payout</span></div><div class="table-wrap"><table class="data-table ins-table"><thead><tr><th>Agent</th><th>Network</th>${data.categoryCol ? '<th>Sheet category</th>' : ''}<th>TL</th><th>Current issuance</th><th>Commission rate</th><th>Earned commission</th></tr></thead><tbody>
         ${rows.map((r) => `<tr><td><b>${esc(r.name || r.agentId)}</b><small>${esc(r.agentId || '')}</small></td><td>${statusPill(r.segment, r.segment === 'Direct Agent' ? 'blue' : r.segment === 'TL-managed' ? 'green' : '')}</td>${data.categoryCol ? `<td>${esc(r.sourceCategory || '—')}</td>` : ''}<td>${esc(r.segment === 'Direct Agent' ? 'Direct' : r.tlName || '—')}</td><td>${U.fmt(r.curTotal || 0)}</td><td>${data.rateCol ? esc(r.rateRaw || '—') : '<span class="dim">Unavailable</span>'}</td><td>${data.amountCol && validValue(r.earned) ? `<b>${money(r.earned, 2)}</b>` : '<span class="dim">Unavailable</span>'}</td></tr>`).join('') || `<tr><td colspan="7">${empty('No agents match', '')}</td></tr>`}
       </tbody></table></div></div>`;
     U.$('#ffc-search', root).addEventListener('submit', (e) => { e.preventDefault(); FF.app.updateParams({ q: new FormData(e.currentTarget).get('q') || '' }); });
     const rangeForm = U.$('#ffc-date-range', root); if (rangeForm) rangeForm.addEventListener('submit', (e) => { e.preventDefault(); const f = new FormData(rangeForm); FF.app.updateParams({ period:'custom', from:f.get('from') || '', to:f.get('to') || '' }); });
-    bindExports(root, 'ffc-export', `ff-commission-${U.stamp()}`, 'FF Commission', ['Agent ID','Agent','Network','Sheet category','TL','Current issuance','Commission rate (reported)','Earned commission (reported)'], rows.map((r) => [r.agentId,r.name,r.segment,r.sourceCategory,r.tlName,r.curTotal,r.rateRaw,r.earned]));
-    bindMetricDetails(root, 'FF REPORT', ['Agent ID','Agent','Network','Category','TL','Issuance','Rate','Earned'], rows.map((r) => [r.agentId,r.name,r.segment,r.sourceCategory,r.tlName,r.curTotal,r.rateRaw,r.earned]));
+    bindExports(root, 'ffc-export', `ff-commission-${U.stamp()}`, 'FF Commission', ['Agent ID','Agent','Network','Sheet category','TL','Current issuance','Commission rate (reported)','Earned commission (reported)'], rows.map((r) => [r.agentId,r.name,r.segment,r.sourceCategory,r.tlName,r.curTotal,r.rateRaw,r.earned]), [{ name: 'Slab Reconciliation', header: ['Agent','Agent ID','TL','Tags','Slab','Model','Expected payout','Actual payout','Actual minus expected','Status'], rows: ffSlabResults.map((r) => [r.name,r.id,r.tl,r.count,r.tier,r.model,r.expected,r.actual,r.variance,r.status]) }]);
+    const ffSlabHeaders = ['Agent','Agent ID','TL','Tags','Slab','Model','Expected payout','Actual payout','Actual minus expected','Status'];
+    const ffSlabRows = ffSlabResults.map((r) => [r.name,r.id,r.tl,r.count,r.tier,r.model,r.expected,r.actual,r.variance,r.status]);
+    const ffSlabCsv = U.$('#ffc-slab-csv', root); if (ffSlabCsv) ffSlabCsv.addEventListener('click', () => U.downloadCsv(`ff-slab-reconciliation-${U.stamp()}.csv`, ffSlabHeaders, ffSlabRows));
+    bindMetricDetails(root, 'FF REPORT', ['Agent ID','Agent','Network','Category','TL','Issuance','Rate','Earned'], rows.map((r) => [r.agentId,r.name,r.segment,r.sourceCategory,r.tlName,r.curTotal,r.rateRaw,r.earned]), {
+      'Slab payout differences': { title: 'FF actual-vs-slab by agent', headers: ffSlabHeaders, rows: ffSlabRows }
+    });
   }
 
   // ---- verified dual-channel identity ------------------------------------------------------------
@@ -268,19 +340,30 @@ FF.pages = FF.pages || {};
     details.assignment.forEach((r) => { const k = gvKey(r.agentId, r.agentName); if (!gvPeople.has(k)) gvPeople.set(k, { id: r.agentId, name: r.agentName || r.agentId, tlName: r.tlName }); });
 
     const assignmentByBarcode = new Map();
-    details.assignment.forEach((r) => { const k = normBarcode(r.serial); if (!k) return; if (!assignmentByBarcode.has(k)) assignmentByBarcode.set(k, []); assignmentByBarcode.get(k).push(r); });
+    const ffBarcodeOccurrences = new Map(), gvBarcodeOccurrences = new Map();
+    const countBarcode = (map, key, owner) => { if (!key) return; const x = map.get(key) || { count: 0, owners: new Set() }; x.count++; if (owner) x.owners.add(owner); map.set(key, x); };
+    details.assignment.forEach((r) => { const k = normBarcode(r.serial); if (!k) return; if (!assignmentByBarcode.has(k)) assignmentByBarcode.set(k, []); assignmentByBarcode.get(k).push(r); countBarcode(gvBarcodeOccurrences, k, gvKey(r.agentId, r.agentName)); });
+    details.stock.forEach((r) => countBarcode(ffBarcodeOccurrences, normBarcode(r.barcode), ffKey(r.agentId, r.agentName)));
     const pairs = new Map();
     function addPair(fk, gk, method, detail) {
       if (!fk || !gk || !ffPeople.has(fk) || !gvPeople.has(gk)) return;
       const pk = `${fk}→${gk}`;
-      if (!pairs.has(pk)) pairs.set(pk, { ffKey: fk, gvKey: gk, methods: new Set(), barcodeCount: 0, barcodes: new Set(), idValue: '', evidence: [] });
-      const p = pairs.get(pk); p.methods.add(method); if (method === 'barcode') { p.barcodeCount++; if (detail) p.barcodes.add(String(detail)); } if (method === 'gv-id') p.idValue = detail || p.idValue; if (p.evidence.length < 5 && detail) p.evidence.push(detail);
+      if (!pairs.has(pk)) pairs.set(pk, { ffKey: fk, gvKey: gk, methods: new Set(), barcodeCount: 0, barcodes: new Set(), barcodeDetails: new Map(), idValue: '', evidence: [] });
+      const p = pairs.get(pk); p.methods.add(method); if (method === 'barcode' && detail) { const barcodeKey = normBarcode(typeof detail === 'string' ? detail : detail.ffBarcode); p.barcodes.add(String(typeof detail === 'string' ? detail : detail.ffBarcode)); if (detail && typeof detail === 'object' && barcodeKey) p.barcodeDetails.set(barcodeKey, { ...(p.barcodeDetails.get(barcodeKey) || {}), ...detail, normalizedBarcode: barcodeKey }); p.barcodeCount = p.barcodeDetails.size || p.barcodes.size; } if (method === 'gv-id') p.idValue = detail || p.idValue; if (p.evidence.length < 5 && detail) p.evidence.push(typeof detail === 'string' ? detail : detail.ffBarcode);
     }
     details.stock.forEach((r) => {
       const barcode = normBarcode(r.barcode); if (!barcode) return;
       const matches = assignmentByBarcode.get(barcode) || [];
       const fk = ffKey(r.agentId, r.agentName);
-      matches.forEach((g) => addPair(fk, gvKey(g.agentId, g.agentName), 'barcode', r.barcode));
+      matches.forEach((g) => {
+        const gk = gvKey(g.agentId, g.agentName), ffCount = ffBarcodeOccurrences.get(barcode), gvCount = gvBarcodeOccurrences.get(barcode);
+        addPair(fk, gk, 'barcode', {
+          ffBarcode: r.barcode, gvSerial: g.serial, ffAgentId: r.agentId, ffAgentName: r.agentName, ffTlName: r.tlName, ffClass: r.cls, ffBarcodeAllocatedAt: r.bcAllocatedAt || '', ffAgentAllocatedAt: r.agentAllocatedAt || '',
+          gvAgentId: g.agentId, gvAgentName: g.agentName, gvTlName: g.tlName, gvClass: g.cls, gvAllocatedAt: g.allocatedAt || '',
+          ffOccurrences: ffCount ? ffCount.count : 1, gvOccurrences: gvCount ? gvCount.count : 1,
+          ffOwnerCount: ffCount ? ffCount.owners.size : 1, gvOwnerCount: gvCount ? gvCount.owners.size : 1
+        });
+      });
     });
 
     const gvUnique = new Map();
@@ -320,6 +403,8 @@ FF.pages = FF.pages || {};
       const corroborated = list.filter((p) => p.methods.has('barcode') && p.methods.has('gv-id'));
       if (corroborated.length === 1) resolvedPairs.push(corroborated[0]); else ambiguousPairs++;
     });
+    const resolvedSet = new Set(resolvedPairs);
+    const barcodeAudit = [...pairs.values()].flatMap((p) => [...p.barcodeDetails.values()].map((b) => ({ ...b, ffKey: p.ffKey, gvKey: p.gvKey, methods: [...p.methods], verified: resolvedSet.has(p), ff: ffPeople.get(p.ffKey), gv: gvPeople.get(p.gvKey) })));
     const rows = resolvedPairs.map((p) => {
       const ff = ffPeople.get(p.ffKey), gv = gvPeople.get(p.gvKey), ga = gvAgg.get(p.gvKey) || { issuance: 0, amount: 0, commission: 0, classes: {} };
       const gs = gvStockAgg.get(p.gvKey) || { n: 0, classes: {} }, fs = ffStockAgg.get(p.ffKey) || { n: 0, classes: {} };
@@ -327,7 +412,7 @@ FF.pages = FF.pages || {};
       const confidence = methods.length > 1 ? 'Very high · 2 signals' : methods[0] === 'gv-id' ? 'High · unique ID' : p.barcodeCount > 1 ? `High · ${p.barcodeCount} barcodes` : 'Verified · barcode';
       return { ...p, ff, gv, methods, confidence, ffIssuance: ff.report ? ff.report.curTotal || 0 : 0, gvIssuance: ga.issuance, ffStock: fs.n, gvStock: gs.n, ffClasses: fs.classes, gvClasses: gs.classes, amount: ga.amount, commission: ga.commission, segment: segmentOf(ff.report || ff) };
     }).sort((a, b) => (b.ffIssuance + b.gvIssuance) - (a.ffIssuance + a.gvIssuance));
-    mem.cross = { rows, month, scanned: { ffStock: details.stock.length, gvAssignment: details.assignment.length, ffAgents: ffPeople.size, gvAgents: gvPeople.size }, truncated: details.truncated, ambiguousIds, ambiguousPairs };
+    mem.cross = { rows, barcodeAudit, month, scanned: { ffStock: details.stock.length, gvAssignment: details.assignment.length, ffAgents: ffPeople.size, gvAgents: gvPeople.size }, truncated: details.truncated, ambiguousIds, ambiguousPairs };
     return mem.cross;
   }
 
@@ -335,28 +420,60 @@ FF.pages = FF.pages || {};
     const data = await buildCross();
     const q = clean(params.q).toLowerCase(), method = ['all','barcode','gv-id','both'].includes(params.method) ? params.method : 'all';
     const rows = data.rows.filter((r) => (!q || [r.ff.name,r.ff.id,r.gv.name,r.gv.id,r.ff.tlName,r.gv.tlName].join(' ').toLowerCase().includes(q)) && (method === 'all' || method === 'both' ? (method === 'all' || r.methods.length > 1) : r.methods.includes(method)));
+    const barcodeRows = (data.barcodeAudit || []).filter((b) => (!q || [b.ff && b.ff.name,b.ff && b.ff.id,b.ff && b.ff.tlName,b.gv && b.gv.name,b.gv && b.gv.id,b.gv && b.gv.tlName].join(' ').toLowerCase().includes(q)) && (method === 'all' || method === 'barcode' || (method === 'both' ? b.methods.length > 1 : b.methods.includes(method)))).map((b) => ({ ...b, ffAgent: b.ff && (b.ff.name || b.ff.id) || b.ffAgentName, ffId: b.ff && b.ff.id || b.ffAgentId, ffTl: b.ff && b.ff.tlName || b.ffTlName || '', gvAgent: b.gv && (b.gv.name || b.gv.id) || b.gvAgentName, gvId: b.gv && b.gv.id || b.gvAgentId, gvTl: b.gv && b.gv.tlName || b.gvTlName || '' }));
+    const duplicateBarcodeRows = barcodeRows.filter((b) => b.ffOccurrences > 1 || b.ffOwnerCount > 1 || b.gvOccurrences > 1 || b.gvOwnerCount > 1);
+    const todayKey = U.dateKey(new Date());
+    const allocatedToday = (value) => { const date = value ? U.parseDate(value) : null; return !!(date && U.dateKey(date) === todayKey); };
+    const dailyDuplicateRows = duplicateBarcodeRows.filter((b) => allocatedToday(b.ffBarcodeAllocatedAt) || allocatedToday(b.ffAgentAllocatedAt) || allocatedToday(b.gvAllocatedAt));
+    const gvAllocationDateMapped = !!(FF.config.gv && FF.config.gv.assignment && FF.config.gv.assignment.allocatedAt);
     const ffIssue = sum(rows, (r) => r.ffIssuance), gvIssue = sum(rows, (r) => r.gvIssuance), ffStock = sum(rows, (r) => r.ffStock), gvStock = sum(rows, (r) => r.gvStock);
-    const tlSummary = new Map(); rows.forEach((r) => { const key = `${r.ff.tlName || 'Direct / Unmapped'} ↔ ${r.gv.tlName || 'Direct / Unmapped'}`; if (!tlSummary.has(key)) tlSummary.set(key, { label: key, agents: 0, ff: 0, gv: 0, barcodes: 0 }); const x = tlSummary.get(key); x.agents++; x.ff += r.ffIssuance; x.gv += r.gvIssuance; x.barcodes += r.barcodeCount; });
-    root.innerHTML = head('🔗', 'Dual-channel Agent Intelligence', 'Only verified joins: normalized barcode match and/or FF “GV ID Found” ↔ GV unique ID · name-only guesses are never used', `${exportButtons('cross-export')} ${printButton}`) + `
+    const tlSummary = new Map(); rows.forEach((r) => {
+      const key = `${r.ff.tlName || 'Direct / Unmapped'} ↔ ${r.gv.tlName || 'Direct / Unmapped'}`;
+      if (!tlSummary.has(key)) tlSummary.set(key, { label: key, agentRows: [], agents: 0, ff: 0, gv: 0, ffStock: 0, gvStock: 0, commission: 0, amount: 0, barcodes: 0 });
+      const x = tlSummary.get(key); x.agents++; x.agentRows.push(r); x.ff += r.ffIssuance; x.gv += r.gvIssuance; x.ffStock += r.ffStock; x.gvStock += r.gvStock; x.commission += r.commission; x.amount += r.amount; x.barcodes += r.barcodeCount;
+    });
+    const netIssuance = gvIssue - ffIssue, netStock = gvStock - ffStock;
+    root.innerHTML = head('🔗', 'Dual-channel Agent Intelligence', 'Only verified joins: normalized barcode match and/or FF “GV ID Found” ↔ GV unique ID · name-only guesses are never used', `${exportButtons('cross-export')}<button class="btn" id="cross-barcode-csv">⬇ Barcode detail CSV</button> ${printButton}`) + `
       <div class="source-row">${sourceChip('StockDataa', `${U.fmt(data.scanned.ffStock)} barcode rows`)}${sourceChip('Tag Assignment', `${U.fmt(data.scanned.gvAssignment)} serial rows`)}${sourceChip('FF REPORT', `${U.fmt(data.scanned.ffAgents)} identities`)}${sourceChip('GV Master', `${U.fmt(data.scanned.gvAgents)} identities`)}</div>
       ${data.truncated && (data.truncated.stock || data.truncated.assignment) ? `<div class="mapping-state warn"><b>Detailed identity scan reached the 250,000-row safety cap.</b><span>Results are explicitly partial; archive old assignment rows or narrow the source tab.</span></div>` : ''}
       <div class="ins-filters"><label>Evidence<select class="select" data-param="method"><option value="all">All verified matches</option><option value="both" ${method === 'both' ? 'selected' : ''}>Both signals</option><option value="barcode" ${method === 'barcode' ? 'selected' : ''}>Barcode</option><option value="gv-id" ${method === 'gv-id' ? 'selected' : ''}>GV unique ID</option></select></label><form id="cross-search" class="ins-search"><input class="input" name="q" value="${esc(params.q || '')}" placeholder="FF/GV agent, ID or TL…"><button class="btn">Search</button></form></div>
       <div class="ins-metrics">
-        ${metric('Verified overlapping agents', U.fmt(rows.length), `${data.rows.filter((r) => r.methods.length > 1).length} verified by both signals`, 'good')}
-        ${metric('First Forward', U.fmt(ffIssue), `${U.fmt(ffStock)} stock · current REPORT issuance`)}
-        ${metric('GV Partner', U.fmt(gvIssue), `${U.fmt(gvStock)} stock · ${esc(U.labelYM(data.month))}`)}
-        ${metric('Combined footprint', U.fmt(ffIssue + gvIssue), `${U.fmt(ffStock + gvStock)} total stock`)}
+        ${metric('Verified overlapping agents', U.fmt(rows.length), `${rows.filter((r) => r.methods.length > 1).length} verified by both signals`, 'good')}
+        ${metric('Matched FF issuance', U.fmt(ffIssue), `${U.fmt(ffStock)} matched-agent stock · current REPORT`)}
+        ${metric('Matched GV issuance', U.fmt(gvIssue), `${U.fmt(gvStock)} matched-agent stock · ${esc(U.labelYM(data.month))}`)}
+        ${metric('Combined footprint', U.fmt(ffIssue + gvIssue), `${U.fmt(ffStock + gvStock)} matched-agent stock`)}
+        ${metric('Net issuance gap · GV − FF', `${netIssuance > 0 ? '+' : ''}${U.fmt(netIssuance)}`, `Stock gap GV − FF: ${netStock > 0 ? '+' : ''}${U.fmt(netStock)}`)}
+        ${metric('Barcode review flags', U.fmt(duplicateBarcodeRows.length), 'Repeated barcode or assigned to multiple owners', duplicateBarcodeRows.length ? 'bad' : 'good')}
+        ${metric('Today’s duplicate review', U.fmt(dailyDuplicateRows.length), gvAllocationDateMapped ? 'FF/GV allocation dates · assigned today' : 'Set GV allocation-date column for full daily coverage', dailyDuplicateRows.length ? 'bad' : 'good')}
       </div>
       ${data.ambiguousIds || data.ambiguousPairs ? `<div class="mapping-state"><b>${U.fmt(data.ambiguousIds + data.ambiguousPairs)} ambiguous identities were not auto-joined.</b><span>${U.fmt(data.ambiguousIds)} non-unique GV IDs · ${U.fmt(data.ambiguousPairs)} conflicting barcode owners. Corroboration is required to prevent false overlap.</span></div>` : ''}
       ${!data.rows.length ? `<div class="mapping-state warn"><div class="mapping-icon">🔎</div><div><h3>No verified overlap in the loaded snapshot</h3><p>The join completed, but no normalized StockDataa barcode matched Tag Assignment serial and no unique “GV ID Found” matched exactly one GV identity. No name-based records were added.</p></div></div>` : ''}
       <div class="split-cards"><div class="card"><div class="card-head"><h3>Channel-wise summary</h3></div><div class="summary-grid"><div><small>FF issuance</small><b>${U.fmt(ffIssue)}</b></div><div><small>GV issuance</small><b>${U.fmt(gvIssue)}</b></div><div><small>FF stock</small><b>${U.fmt(ffStock)}</b></div><div><small>GV stock</small><b>${U.fmt(gvStock)}</b></div></div></div><div class="card"><div class="card-head"><h3>Combined commercial summary</h3></div><div class="summary-grid"><div><small>Total issuance</small><b>${U.fmt(ffIssue + gvIssue)}</b></div><div><small>Total stock</small><b>${U.fmt(ffStock + gvStock)}</b></div><div><small>GV amount</small><b>${money(sum(rows, (r) => r.amount))}</b></div><div><small>GV commission</small><b>${money(sum(rows, (r) => r.commission), 2)}</b></div></div></div></div>
-      <div class="card"><div class="card-head"><h3>TL-wise overlap summary</h3><span class="dim small">Matched identities only</span></div><div class="table-wrap"><table class="data-table ins-table"><thead><tr><th>FF TL ↔ GV TL</th><th>Matched agents</th><th>Shared barcodes</th><th>FF issuance</th><th>GV issuance</th><th>Combined</th></tr></thead><tbody>${[...tlSummary.values()].sort((a,b)=>b.ff+b.gv-a.ff-a.gv).map((t)=>`<tr><td><b>${esc(t.label)}</b></td><td>${U.fmt(t.agents)}</td><td>${U.fmt(t.barcodes)}</td><td>${U.fmt(t.ff)}</td><td>${U.fmt(t.gv)}</td><td><b>${U.fmt(t.ff+t.gv)}</b></td></tr>`).join('') || `<tr><td colspan="6">No TL overlap data</td></tr>`}</tbody></table></div></div>
+      <div class="card"><div class="card-head"><h3>TL-wise matched-channel comparison</h3><span class="dim small">GV − FF gaps · matched identities only</span></div><div class="table-wrap"><table class="data-table ins-table"><thead><tr><th>FF TL ↔ GV TL</th><th>Agents</th><th>Shared barcodes</th><th>FF issuance</th><th>GV issuance</th><th>Issuance gap</th><th>FF stock</th><th>GV stock</th><th>Stock gap</th><th>GV commission</th><th>Agent drill-down</th></tr></thead><tbody>${[...tlSummary.values()].sort((a,b)=>b.ff+b.gv-a.ff-a.gv).map((t)=>`<tr><td><b>${esc(t.label)}</b></td><td>${U.fmt(t.agents)}</td><td>${U.fmt(t.barcodes)}</td><td>${U.fmt(t.ff)}</td><td>${U.fmt(t.gv)}</td><td><b>${t.gv-t.ff>0?'+':''}${U.fmt(t.gv-t.ff)}</b></td><td>${U.fmt(t.ffStock)}</td><td>${U.fmt(t.gvStock)}</td><td><b>${t.gvStock-t.ffStock>0?'+':''}${U.fmt(t.gvStock-t.ffStock)}</b></td><td>${money(t.commission,2)}</td><td><details class="tl-drill"><summary>Show ${U.fmt(t.agents)} agents</summary><div class="table-wrap"><table class="data-table ins-table"><thead><tr><th>FF Agent / ID</th><th>GV Agent / ID</th><th>Evidence</th><th>Barcodes</th><th>FF tags / stock</th><th>GV tags / stock</th><th>GV commission</th></tr></thead><tbody>${t.agentRows.slice(0,20).map((r)=>`<tr><td><b>${esc(r.ff.name||r.ff.id)}</b><small>${esc(r.ff.id||'')} · ${esc(r.ff.tlName||'Direct / Unmapped')}</small></td><td><b>${esc(r.gv.name||r.gv.id)}</b><small>${esc(r.gv.id||'')} · ${esc(r.gv.tlName||'Direct / Unmapped')}</small></td><td>${esc(r.methods.join(' + '))}</td><td>${U.fmt(r.barcodeCount)}</td><td>${U.fmt(r.ffIssuance)} / ${U.fmt(r.ffStock)}</td><td>${U.fmt(r.gvIssuance)} / ${U.fmt(r.gvStock)}</td><td>${money(r.commission,2)}</td></tr>`).join('')}</tbody></table></div>${t.agents>20?`<small class="dim">Showing first 20 of ${U.fmt(t.agents)} agent pairs; use the full Dual Channel CSV for all rows.</small>`:''}</details></td></tr>`).join('') || `<tr><td colspan="11">No TL overlap data</td></tr>`}</tbody></table></div></div>
+      <div class="card"><div class="card-head"><h3>Barcode overlap audit · exact FF ↔ GV matches</h3><span class="dim small">${U.fmt(barcodeRows.length)} shared barcode records · CSV contains all rows</span></div><p class="dim small">“Repeated in FF/GV” means the normalized barcode occurs more than once in that source; owner count highlights assignment across multiple agents. Today’s review uses allocation dates. ${gvAllocationDateMapped ? 'GV allocation-date mapping is active.' : 'GV assignment date is not mapped; configure it in Settings → Data source → Tag Assignment allocation-date column for complete daily coverage.'} Preview is capped for smooth loading.</p><div class="table-wrap"><table class="data-table ins-table"><thead><tr><th>Barcode (FF) ↔ Serial (GV)</th><th>FF agent · TL · class</th><th>GV agent · TL · class</th><th>FF repeats / owners</th><th>GV repeats / owners</th><th>Audit</th><th>Agent pair</th></tr></thead><tbody>${barcodeRows.slice(0,300).map((b)=>{const ffDup=b.ffOccurrences>1||b.ffOwnerCount>1, gvDup=b.gvOccurrences>1||b.gvOwnerCount>1; return `<tr><td><b>${esc(b.ffBarcode)}</b><small>GV serial: ${esc(b.gvSerial || '—')}</small></td><td>${esc(b.ffAgent)}<small>${esc(b.ffId)} · ${esc(b.ffTl || 'Direct / Unmapped')} · ${esc(b.ffClass || '—')} · barcode alloc: ${esc(b.ffBarcodeAllocatedAt ? dateText(b.ffBarcodeAllocatedAt) : '—')} · agent alloc: ${esc(b.ffAgentAllocatedAt ? dateText(b.ffAgentAllocatedAt) : '—')}</small></td><td>${esc(b.gvAgent)}<small>${esc(b.gvId)} · ${esc(b.gvTl || 'Direct / Unmapped')} · ${esc(b.gvClass || '—')} · alloc: ${esc(b.gvAllocatedAt ? dateText(b.gvAllocatedAt) : 'date not mapped')}</small></td><td>${U.fmt(b.ffOccurrences)} / ${U.fmt(b.ffOwnerCount)}</td><td>${U.fmt(b.gvOccurrences)} / ${U.fmt(b.gvOwnerCount)}</td><td>${ffDup||gvDup?statusPill(`Repeated${ffDup?' · FF':''}${gvDup?' · GV':''}`,'amber'):statusPill('One row per source','green')}</td><td>${b.verified?statusPill('Resolved pair','green'):statusPill('Ambiguous owner · review','red')}</td></tr>`;}).join('') || `<tr><td colspan="7">No exact barcode join found for this filter.</td></tr>`}</tbody></table></div>${barcodeRows.length>300?`<p class="dim small">Showing first 300 of ${U.fmt(barcodeRows.length)} matched barcodes; use Barcode detail CSV for the full list.</p>`:''}</div>
       <div class="card"><div class="card-head"><h3>Verified agents active in both channels</h3><span class="dim small">${U.fmt(rows.length)} shown</span></div><div class="table-wrap"><table class="data-table ins-table"><thead><tr><th>First Forward identity</th><th>GV identity</th><th>Evidence</th><th>Shared barcodes</th><th>FF issuance</th><th>GV issuance</th><th>FF stock</th><th>GV stock</th><th>Total footprint</th><th>Class mix · FF</th><th>Class mix · GV</th></tr></thead><tbody>
-        ${rows.map((r) => `<tr><td><b>${esc(r.ff.name || r.ff.id)}</b><small>${esc(r.ff.id || '')} · ${esc(r.segment)}</small></td><td><b>${esc(r.gv.name || r.gv.id)}</b><small>${esc(r.gv.id || '')}</small></td><td>${statusPill(r.confidence, r.methods.length > 1 ? 'green' : 'blue')}<small>${esc(r.methods.join(' + '))}</small></td><td><b>${U.fmt(r.barcodeCount)}</b>${r.barcodes.size ? `<small title="${esc([...r.barcodes].join(', '))}">${esc([...r.barcodes].slice(0,3).join(', '))}${r.barcodes.size>3?'…':''}</small>` : '<small>—</small>'}</td><td>${U.fmt(r.ffIssuance)}</td><td>${U.fmt(r.gvIssuance)}</td><td>${U.fmt(r.ffStock)}</td><td>${U.fmt(r.gvStock)}</td><td><b>${U.fmt(r.ffIssuance + r.gvIssuance)}</b><small>${U.fmt(r.ffStock + r.gvStock)} stock</small></td><td class="small">${esc(classMix(r.ffClasses))}</td><td class="small">${esc(classMix(r.gvClasses))}</td></tr>`).join('') || `<tr><td colspan="11">${empty('No matching verified agents', 'Evidence/search filter change karke dekhein.')}</td></tr>`}
+        ${rows.map((r) => `<tr><td><b>${esc(r.ff.name || r.ff.id)}</b><small>${esc(r.ff.id || '')} · TL: ${esc(r.ff.tlName || 'Direct / Unmapped')} · ${esc(r.segment)}</small></td><td><b>${esc(r.gv.name || r.gv.id)}</b><small>${esc(r.gv.id || '')} · TL: ${esc(r.gv.tlName || 'Direct / Unmapped')}</small></td><td>${statusPill(r.confidence, r.methods.length > 1 ? 'green' : 'blue')}<small>${esc(r.methods.join(' + '))}</small></td><td><b>${U.fmt(r.barcodeCount)}</b>${r.barcodes.size ? `<small title="${esc([...r.barcodes].join(', '))}">${esc([...r.barcodes].slice(0,3).join(', '))}${r.barcodes.size>3?'…':''}</small>` : '<small>—</small>'}</td><td>${U.fmt(r.ffIssuance)}</td><td>${U.fmt(r.gvIssuance)}</td><td>${U.fmt(r.ffStock)}</td><td>${U.fmt(r.gvStock)}</td><td><b>${U.fmt(r.ffIssuance + r.gvIssuance)}</b><small>${U.fmt(r.ffStock + r.gvStock)} stock</small></td><td class="small">${esc(classMix(r.ffClasses))}</td><td class="small">${esc(classMix(r.gvClasses))}</td></tr>`).join('') || `<tr><td colspan="11">${empty('No matching verified agents', 'Evidence/search filter change karke dekhein.')}</td></tr>`}
       </tbody></table></div></div>`;
     U.$('#cross-search', root).addEventListener('submit', (e) => { e.preventDefault(); FF.app.updateParams({ q: new FormData(e.currentTarget).get('q') || '' }); });
-    bindExports(root, 'cross-export', `dual-channel-${U.stamp()}`, 'Dual Channel', ['FF Agent ID','FF Agent','GV Agent ID','GV Agent','Evidence','Confidence','Shared barcode count','Shared barcodes','FF Issuance','GV Issuance','Combined Issuance','FF Stock','GV Stock','Combined Stock','FF Class Mix','GV Class Mix','GV Amount','GV Commission'], rows.map((r) => [r.ff.id,r.ff.name,r.gv.id,r.gv.name,r.methods.join('+'),r.confidence,r.barcodeCount,[...r.barcodes].join(' | '),r.ffIssuance,r.gvIssuance,r.ffIssuance+r.gvIssuance,r.ffStock,r.gvStock,r.ffStock+r.gvStock,classMix(r.ffClasses),classMix(r.gvClasses),r.amount,r.commission]));
-    bindMetricDetails(root, 'Dual-channel agents', ['FF Agent','FF ID','FF TL','GV Agent','GV ID','GV TL','Evidence','Barcode count','Barcodes','FF issued','GV issued','FF stock','GV stock'], rows.map((r) => [r.ff.name,r.ff.id,r.ff.tlName,r.gv.name,r.gv.id,r.gv.tlName,r.methods.join(' + '),r.barcodeCount,[...r.barcodes].join(' | '),r.ffIssuance,r.gvIssuance,r.ffStock,r.gvStock]));
+    const barcodeHeaders = ['Barcode · FF','Serial · GV','FF Agent ID','FF Agent','FF TL','FF Class','FF barcode allocation date','FF agent allocation date','GV Agent ID','GV Agent','GV TL','GV Class','GV allocation date','FF source occurrences','FF distinct owners','GV source occurrences','GV distinct owners','Repeated in FF','Repeated in GV','Agent pair resolution'];
+    const barcodeExportRows = barcodeRows.map((b) => [b.ffBarcode,b.gvSerial,b.ffId,b.ffAgent,b.ffTl,b.ffClass,b.ffBarcodeAllocatedAt,b.ffAgentAllocatedAt,b.gvId,b.gvAgent,b.gvTl,b.gvClass,b.gvAllocatedAt,b.ffOccurrences,b.ffOwnerCount,b.gvOccurrences,b.gvOwnerCount,b.ffOccurrences>1||b.ffOwnerCount>1?'YES':'NO',b.gvOccurrences>1||b.gvOwnerCount>1?'YES':'NO',b.verified?'Resolved':'Ambiguous - review']);
+    bindExports(root, 'cross-export', `dual-channel-${U.stamp()}`, 'Dual Channel', ['FF Agent ID','FF Agent','FF TL','GV Agent ID','GV Agent','GV TL','Evidence','Confidence','Shared barcode count','Shared barcodes','FF Issuance','GV Issuance','Combined Issuance','FF Stock','GV Stock','Combined Stock','FF Class Mix','GV Class Mix','GV Amount','GV Commission'], rows.map((r) => [r.ff.id,r.ff.name,r.ff.tlName,r.gv.id,r.gv.name,r.gv.tlName,r.methods.join('+'),r.confidence,r.barcodeCount,[...r.barcodes].join(' | '),r.ffIssuance,r.gvIssuance,r.ffIssuance+r.gvIssuance,r.ffStock,r.gvStock,r.ffStock+r.gvStock,classMix(r.ffClasses),classMix(r.gvClasses),r.amount,r.commission]), [{ name: 'Barcode Details', header: barcodeHeaders, rows: barcodeExportRows }]);
+    const barcodeCsv = U.$('#cross-barcode-csv', root); if (barcodeCsv) barcodeCsv.addEventListener('click', () => U.downloadCsv(`dual-channel-barcodes-${U.stamp()}.csv`, barcodeHeaders, barcodeExportRows));
+    const fullCrossHeaders = ['FF Agent','FF ID','FF TL','GV Agent','GV ID','GV TL','Join evidence','Shared barcodes','FF issuance','GV issuance','Combined issuance','FF stock','GV stock','Combined stock','FF classes','GV classes','GV amount','GV commission'];
+    const barcodeReviewHeaders = ['FF barcode','GV serial','FF agent','FF ID','FF TL','FF class','FF barcode allocation date','FF agent allocation date','GV agent','GV ID','GV TL','GV class','GV allocation date','FF repeats','FF owners','GV repeats','GV owners','Resolved pair'];
+    const barcodeReviewDetailRows = duplicateBarcodeRows.map((b) => [b.ffBarcode,b.gvSerial,b.ffAgent,b.ffId,b.ffTl,b.ffClass,b.ffBarcodeAllocatedAt,b.ffAgentAllocatedAt,b.gvAgent,b.gvId,b.gvTl,b.gvClass,b.gvAllocatedAt,b.ffOccurrences,b.ffOwnerCount,b.gvOccurrences,b.gvOwnerCount,b.verified?'Resolved':'Ambiguous - review']);
+    const fullCrossRows = rows.map((r) => [r.ff.name,r.ff.id,r.ff.tlName || 'Direct / Unmapped',r.gv.name,r.gv.id,r.gv.tlName || 'Direct / Unmapped',r.methods.join(' + '),[...r.barcodes].join(' | '),r.ffIssuance,r.gvIssuance,r.ffIssuance+r.gvIssuance,r.ffStock,r.gvStock,r.ffStock+r.gvStock,classMix(r.ffClasses),classMix(r.gvClasses),r.amount,r.commission]);
+    const ffOnlyHeaders = ['FF Agent','FF ID','FF TL','Issuance','Stock','Classes'];
+    const gvOnlyHeaders = ['GV Agent','GV ID','GV TL','Issuance','Stock','Classes','Transaction amount','Commission'];
+    bindMetricDetails(root, 'Dual-channel agent summary', fullCrossHeaders, fullCrossRows, {
+      'Verified overlapping agents': { title: 'Verified FF ↔ GV pairs', headers: fullCrossHeaders, rows: fullCrossRows },
+      'Matched FF issuance': { title: 'First Forward side of matched agents', headers: ffOnlyHeaders, rows: rows.map((r) => [r.ff.name,r.ff.id,r.ff.tlName || 'Direct / Unmapped',r.ffIssuance,r.ffStock,classMix(r.ffClasses)]) },
+      'Matched GV issuance': { title: 'GV Partner side of matched agents', headers: gvOnlyHeaders, rows: rows.map((r) => [r.gv.name,r.gv.id,r.gv.tlName || 'Direct / Unmapped',r.gvIssuance,r.gvStock,classMix(r.gvClasses),r.amount,r.commission]) },
+      'Combined footprint': { title: 'Combined channel footprint by matched agent', headers: fullCrossHeaders, rows: fullCrossRows },
+      'Net issuance gap · GV − FF': { title: 'GV minus FF per matched agent', headers: fullCrossHeaders, rows: fullCrossRows },
+      'Barcode review flags': { title: 'Repeated or multi-owner matched barcodes', headers: barcodeReviewHeaders, rows: barcodeReviewDetailRows },
+      'Today’s duplicate review': { title: `Duplicate barcode assignments dated ${todayKey}`, headers: barcodeReviewHeaders, rows: dailyDuplicateRows.map((b) => [b.ffBarcode,b.gvSerial,b.ffAgent,b.ffId,b.ffTl,b.ffClass,b.ffBarcodeAllocatedAt,b.ffAgentAllocatedAt,b.gvAgent,b.gvId,b.gvTl,b.gvClass,b.gvAllocatedAt,b.ffOccurrences,b.ffOwnerCount,b.gvOccurrences,b.gvOwnerCount,b.verified?'Resolved':'Ambiguous - review']) }
+    });
   }
 
   // ---- stock forecasting + historical accuracy backtest -----------------------------------------
@@ -749,8 +866,11 @@ FF.pages = FF.pages || {};
   // ---- saved views + report studio ---------------------------------------------------------------
   async function workspace(force) {
     if (mem.workspace && !force) return mem.workspace;
-    mem.workspace = await FF.auth.api('/api/workspace');
-    return mem.workspace;
+    if (mem.workspacePromise && !force) return mem.workspacePromise;
+    const version = mem.workspaceVersion;
+    const pending = FF.auth.api('/api/workspace').then((data) => { if (version === mem.workspaceVersion) mem.workspace = data; return data; }).finally(() => { if (mem.workspacePromise === pending) mem.workspacePromise = null; });
+    mem.workspacePromise = pending;
+    return pending;
   }
   function shareUrl(route) { return `${location.origin}${location.pathname}${route}`; }
   function openSave() {
@@ -763,13 +883,13 @@ FF.pages = FF.pages || {};
   }
 
   async function renderSavedViews(root) {
-    const data = await workspace(true);
+    const data = await workspace(false);
     const views = (data.views || []).slice().sort((a,b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
     root.innerHTML = head('⭐','Saved Views','Reusable filtered dashboard links · personal or shared with the team', '<button class="btn primary" id="new-view">＋ Save current view</button>') + `
       <div class="view-help"><b>Shareable filters are built in.</b><span>Har saved view exact <code>#/page?filter=value</code> route rakhta hai. Link copy karke WhatsApp/email me bhej sakte hain; receiver ke permissions still apply.</span></div>
       <div class="saved-grid">${views.map((v) => `<article class="saved-card"><div class="saved-icon">${v.shared?'👥':'⭐'}</div><div><h3>${esc(v.title)}</h3><p>${esc(v.description || 'No description')}</p><code>${esc(v.route)}</code><small>${v.shared?'Shared':'Personal'} · ${esc(v.ownerUser && v.ownerUser.name || v.owner)} · ${esc(dateTimeText(v.updatedAt))}</small></div><div class="saved-actions"><a class="btn small primary" href="${esc(v.route)}">Open</a><button class="btn small" data-copy-view="${esc(v.id)}">🔗 Copy</button>${v.owner === FF.auth.user.username || FF.auth.isAdmin() ? `<button class="btn small danger" data-delete-view="${esc(v.id)}">Delete</button>`:''}</div></article>`).join('') || empty('No saved views yet','Kisi filtered page par top-bar ☆ dabakar first view save karein.')}</div>`;
     U.$('#new-view',root).addEventListener('click',openSave);
-    root.addEventListener('click',async(e)=>{ const copy=e.target.closest('[data-copy-view]'); if(copy){const v=views.find(x=>x.id===copy.dataset.copyView); if(v){await U.copyText(shareUrl(v.route)); U.toast('Shareable link copied ✓','ok');} return;} const del=e.target.closest('[data-delete-view]'); if(del&&confirm('Is saved view ko delete karein?')){try{await FF.auth.api(`/api/workspace/views/${encodeURIComponent(del.dataset.deleteView)}`,'DELETE');mem.workspace=null;renderSavedViews(root);}catch(err){U.toast(err.message,'err');}} });
+    root.onclick = async (e)=>{ const copy=e.target.closest('[data-copy-view]'); if(copy){const v=views.find(x=>x.id===copy.dataset.copyView); if(v){await U.copyText(shareUrl(v.route)); U.toast('Shareable link copied ✓','ok');} return;} const del=e.target.closest('[data-delete-view]'); if(del&&confirm('Is saved view ko delete karein?')){try{await FF.auth.api(`/api/workspace/views/${encodeURIComponent(del.dataset.deleteView)}`,'DELETE');mem.workspace=null;renderSavedViews(root);}catch(err){U.toast(err.message,'err');}} };
   }
 
   async function renderReportStudio(root) {
@@ -780,6 +900,17 @@ FF.pages = FF.pages || {};
       <div class="report-studio-grid"><div class="card"><div class="card-head"><h3>Build / export now</h3></div><div class="ins-form"><label>Report<select class="select" id="studio-report">${reports.map(([v,l])=>`<option value="${v}">${esc(l)}</option>`).join('')}</select></label><div class="button-row"><button class="btn primary" id="studio-open">Open report</button><button class="btn" id="studio-copy">🔗 Copy share link</button><button class="btn" id="studio-print">🖨 PDF / Print</button></div><p class="dim small">CSV/Excel buttons selected report ke header me available hain. PDF uses the browser's print-to-PDF so charts and management cards stay visual.</p></div></div>
       <div class="card"><div class="card-head"><h3>Scheduled delivery</h3>${FF.auth.isAdmin()?statusPill('Admin controls','blue'):statusPill('View only')}</div><div class="schedule-controls"><label class="check"><input type="checkbox" id="schedule-daily" ${f.emailReport===true?'checked':''} ${FF.auth.isAdmin()?'':'disabled'}> <span><b>Daily professional report</b><small>HTML summary + CSV attachment</small></span></label><label>Hour (IST)<input class="input" id="schedule-daily-hour" type="number" min="0" max="23" value="${Number(f.emailReportHour??21)}" ${FF.auth.isAdmin()?'':'disabled'}></label><label class="check"><input type="checkbox" id="schedule-weekly" ${f.weeklyEmail===true?'checked':''} ${FF.auth.isAdmin()?'':'disabled'}> <span><b>Weekly management digest</b><small>Every Monday · FF + GV summary and stock</small></span></label><label>Hour (IST)<input class="input" id="schedule-weekly-hour" type="number" min="0" max="23" value="${Number(f.weeklyEmailHour??9)}" ${FF.auth.isAdmin()?'':'disabled'}></label>${FF.auth.isAdmin()?'<button class="btn primary" id="schedule-save">Save schedule</button>':''}<a class="btn" href="#/settings">SMTP & recipients settings</a></div></div></div>
       <div class="card"><div class="card-head"><h3>Delivery tests</h3><span class="dim small">Admin only · sends immediately to configured recipients</span></div><div class="button-row"><button class="btn" id="send-daily" ${FF.auth.isAdmin()?'':'disabled'}>📧 Send daily report now</button><button class="btn" id="send-weekly" ${FF.auth.isAdmin()?'':'disabled'}>📬 Send weekly digest now</button><button class="btn" id="share-wa">💬 Share selected report on WhatsApp</button></div><div id="studio-msg" class="dim small"></div></div>`;
+    const studioHeaders = ['Setting','Current value','Details'];
+    const dailyStudio = [['Daily delivery',f.emailReport===true?'Active':'Off',`Every day at ${Number(f.emailReportHour??21)}:00 IST · HTML summary + CSV attachment`]];
+    const weeklyStudio = [['Weekly delivery',f.weeklyEmail===true?'Active':'Off',`Every Monday at ${Number(f.weeklyEmailHour??9)}:00 IST · FF + GV management summary`]];
+    const recipientStudio = [['Recipients',email.to||'Not configured','Configure in Settings → email/SMTP; card shows recipient count when configured']];
+    const engineStudio = [['SMTP delivery engine',email.host||'Not configured',email.host?'SMTP host is configured; credentials are not shown here.':'Configure SMTP in Settings before scheduling delivery.']];
+    bindMetricDetails(root, 'Report Studio setup', studioHeaders, [...dailyStudio,...weeklyStudio,...recipientStudio,...engineStudio], {
+      'Daily HTML + CSV email': { title: 'Daily report schedule', headers: studioHeaders, rows: dailyStudio },
+      'Weekly management digest': { title: 'Weekly digest schedule', headers: studioHeaders, rows: weeklyStudio },
+      Recipients: { title: 'Email recipients', headers: studioHeaders, rows: recipientStudio },
+      'Delivery engine': { title: 'SMTP configuration status', headers: studioHeaders, rows: engineStudio }
+    });
     const selected=()=>U.$('#studio-report',root).value;
     U.$('#studio-open',root).addEventListener('click',()=>FF.app.navigate(selected()));
     U.$('#studio-copy',root).addEventListener('click',async()=>{await U.copyText(shareUrl(`#/${selected()}`));U.toast('Report link copied ✓','ok');});
@@ -795,7 +926,7 @@ FF.pages = FF.pages || {};
 
   // ---- notes / follow-up timeline ---------------------------------------------------------------
   async function renderFollowups(root, params) {
-    const data = await workspace(true), all = data.notes || [];
+    const data = await workspace(false), all = data.notes || [];
     const status = ['all','open','waiting','done'].includes(params.status) ? params.status : 'all';
     const q = clean(params.q).toLowerCase();
     const notes = all.filter((n)=>(status==='all'||n.status===status)&&(!q||[n.entityName,n.entityKey,n.text,n.assignee,n.channel].join(' ').toLowerCase().includes(q))).sort((a,b)=>String(b.updatedAt).localeCompare(String(a.updatedAt)));
@@ -804,13 +935,21 @@ FF.pages = FF.pages || {};
       <div class="ins-metrics">${metric('Open',U.fmt(all.filter(n=>n.status==='open').length),'Needs follow-up')}${metric('Waiting',U.fmt(all.filter(n=>n.status==='waiting').length),'External/team response')}${metric('Overdue',U.fmt(overdue),'Open items past due',overdue?'bad':'good')}${metric('Completed',U.fmt(all.filter(n=>n.status==='done').length),'Closed timeline items','good')}</div>
       <div class="ins-filters"><label>Status<select class="select" data-param="status">${['all','open','waiting','done'].map(v=>`<option value="${v}" ${v===status?'selected':''}>${v==='all'?'All statuses':v[0].toUpperCase()+v.slice(1)}</option>`).join('')}</select></label><form id="notes-search" class="ins-search"><input class="input" name="q" value="${esc(params.q||'')}" placeholder="Agent, TL, owner or note…"><button class="btn">Search</button></form></div>
       <div class="timeline-list">${notes.map(n=>{const isOver=n.status!=='done'&&n.dueAt&&Date.parse(n.dueAt)<now;return `<article class="timeline-card ${n.status} ${isOver?'overdue':''}" data-note-id="${esc(n.id)}"><div class="timeline-dot"></div><div class="timeline-main"><div class="timeline-head"><div><b>${esc(n.entityName)}</b>${statusPill(n.entityType.toUpperCase(),n.channel==='gv'?'green':'blue')}${statusPill(n.status,n.status==='done'?'green':isOver?'red':n.status==='waiting'?'amber':'blue')}</div><small>${esc(dateTimeText(n.updatedAt))}</small></div><p>${esc(n.text)}</p><div class="timeline-meta"><span>📍 ${esc(n.channel==='both'?'GV + FF':n.channel.toUpperCase())}</span><span>👤 ${esc(n.assignee||n.createdByUser&&n.createdByUser.name||'Unassigned')}</span><span>⚑ ${esc(n.priority)}</span><span>📅 ${n.dueAt?dateText(n.dueAt):'No due date'}${isOver?' · overdue':''}</span></div><div class="button-row"><button class="btn small" data-note-open="${esc(n.id)}">Timeline</button>${n.status!=='done'?`<button class="btn small primary" data-note-status="done" data-id="${esc(n.id)}">Mark done</button>`:`<button class="btn small" data-note-status="open" data-id="${esc(n.id)}">Reopen</button>`}</div></div></article>`;}).join('')||empty('No follow-ups match','Add an agent/TL note or change filters.')}</div>`;
+    const noteHeaders = ['Agent / TL','Type','Channel','Status','Priority','Owner','Due date','Last updated','Note'];
+    const noteRows = (items) => items.map((n) => [n.entityName,n.entityType,n.channel,n.status,n.priority,n.assignee || n.createdByUser && n.createdByUser.name || 'Unassigned',n.dueAt ? dateText(n.dueAt) : '—',dateTimeText(n.updatedAt),n.text]);
+    bindMetricDetails(root, 'Follow-up summary', noteHeaders, noteRows(all), {
+      Open: { title: 'Open follow-ups', headers: noteHeaders, rows: noteRows(all.filter((n) => n.status === 'open')) },
+      Waiting: { title: 'Waiting follow-ups', headers: noteHeaders, rows: noteRows(all.filter((n) => n.status === 'waiting')) },
+      Overdue: { title: 'Overdue follow-ups', headers: noteHeaders, rows: noteRows(all.filter((n) => n.status !== 'done' && n.dueAt && Date.parse(n.dueAt) < now)) },
+      Completed: { title: 'Completed follow-ups', headers: noteHeaders, rows: noteRows(all.filter((n) => n.status === 'done')) }
+    });
     U.$('#notes-search',root).addEventListener('submit',(e)=>{e.preventDefault();FF.app.updateParams({q:new FormData(e.currentTarget).get('q')||''});});
     const openForm=()=>{FF.app.openDrawer({kicker:'Follow-up',title:'Add agent / TL note',sub:'This becomes a shared timeline item for permitted users.',body:`<form id="note-form" class="ins-form"><label>Entity type<select class="select" name="entityType"><option value="agent">Agent</option><option value="tl">Team Leader</option><option value="general">General</option></select></label><label>Agent / TL name<input class="input" name="entityName" required maxlength="120" placeholder="Searchable name or ID"></label><label>Channel<select class="select" name="channel"><option value="both">GV + First Forward</option><option value="ff">First Forward</option><option value="gv">GV Partner</option></select></label><label>Note<textarea class="input" name="text" rows="5" maxlength="4000" required placeholder="Context, promised action, next step…"></textarea></label><div class="form-grid"><label>Priority<select class="select" name="priority"><option value="normal">Normal</option><option value="high">High</option><option value="low">Low</option></select></label><label>Due date<input class="input" type="date" name="dueAt"></label></div><label>Owner / assignee<input class="input" name="assignee" maxlength="80" value="${esc(FF.auth.user.name||FF.auth.user.username)}"></label><button class="btn primary" type="submit">Save follow-up</button></form>`});const form=U.$('#note-form');form.addEventListener('submit',async(e)=>{e.preventDefault();const fd=Object.fromEntries(new FormData(form));fd.entityKey=fd.entityName;fd.dueAt=fd.dueAt?`${fd.dueAt}T18:00:00+05:30`:null;const b=form.querySelector('button');U.setButtonBusy(b,true,'Saving…');try{await FF.auth.api('/api/workspace/notes','POST',fd);mem.workspace=null;FF.app.closeDrawer();renderFollowups(root,params);U.toast('Follow-up saved ✓','ok');}catch(err){U.toast(err.message,'err');}finally{U.setButtonBusy(b,false);}});};
     U.$('#note-new',root).addEventListener('click',openForm);
-    root.addEventListener('click',async(e)=>{const sb=e.target.closest('[data-note-status]');if(sb){U.setButtonBusy(sb,true,'Saving…');try{await FF.auth.api(`/api/workspace/notes/${encodeURIComponent(sb.dataset.id)}`,'PATCH',{status:sb.dataset.noteStatus});mem.workspace=null;renderFollowups(root,params);}catch(err){U.toast(err.message,'err');}return;}const ob=e.target.closest('[data-note-open]');if(ob){const n=all.find(x=>x.id===ob.dataset.noteOpen);if(!n)return;FF.app.openDrawer({kicker:`${n.entityType} · ${n.channel}`,title:n.entityName,sub:`${n.status} · ${n.priority} priority`,actions:n.createdBy===FF.auth.user.username||FF.auth.isAdmin()?`<button class="btn small danger" id="note-delete">Delete</button>`:'',body:`<div class="note-full">${esc(n.text)}</div><h3 class="drawer-section-title">Timeline</h3><div class="note-history">${(n.timeline||[]).slice().reverse().map(t=>`<div><i></i><p><b>${esc(t.action)}</b><span>${esc(t.by)} · ${esc(dateTimeText(t.at))}</span>${t.detail?`<small>${esc(t.detail)}</small>`:''}</p></div>`).join('')}</div>`});const del=U.$('#note-delete');if(del)del.addEventListener('click',async()=>{if(!confirm('Is note ko permanently delete karein?'))return;try{await FF.auth.api(`/api/workspace/notes/${encodeURIComponent(n.id)}`,'DELETE');mem.workspace=null;FF.app.closeDrawer();renderFollowups(root,params);}catch(err){U.toast(err.message,'err');}});}});
+    root.onclick = async(e)=>{const sb=e.target.closest('[data-note-status]');if(sb){U.setButtonBusy(sb,true,'Saving…');try{await FF.auth.api(`/api/workspace/notes/${encodeURIComponent(sb.dataset.id)}`,'PATCH',{status:sb.dataset.noteStatus});mem.workspace=null;renderFollowups(root,params);}catch(err){U.toast(err.message,'err');}return;}const ob=e.target.closest('[data-note-open]');if(ob){const n=all.find(x=>x.id===ob.dataset.noteOpen);if(!n)return;FF.app.openDrawer({kicker:`${n.entityType} · ${n.channel}`,title:n.entityName,sub:`${n.status} · ${n.priority} priority`,actions:n.createdBy===FF.auth.user.username||FF.auth.isAdmin()?`<button class="btn small danger" id="note-delete">Delete</button>`:'',body:`<div class="note-full">${esc(n.text)}</div><h3 class="drawer-section-title">Timeline</h3><div class="note-history">${(n.timeline||[]).slice().reverse().map(t=>`<div><i></i><p><b>${esc(t.action)}</b><span>${esc(t.by)} · ${esc(dateTimeText(t.at))}</span>${t.detail?`<small>${esc(t.detail)}</small>`:''}</p></div>`).join('')}</div>`});const del=U.$('#note-delete');if(del)del.onclick=async()=>{if(!confirm('Is note ko permanently delete karein?'))return;try{await FF.auth.api(`/api/workspace/notes/${encodeURIComponent(n.id)}`,'DELETE');mem.workspace=null;FF.app.closeDrawer();renderFollowups(root,params);}catch(err){U.toast(err.message,'err');}};}};
   }
 
-  function reset() { mem.details = null; mem.detailsPromise = null; mem.cross = null; mem.quality = null; mem.workspace = null; mem.forecastHistory = null; mem.forecastHistoryPromise = null; }
+  function reset() { mem.details = null; mem.detailsPromise = null; mem.cross = null; mem.quality = null; mem.workspaceVersion++; mem.workspace = null; mem.workspacePromise = null; mem.forecastHistory = null; mem.forecastHistoryPromise = null; }
 
   FF.pages.executive = { title: 'Executive Cockpit', render: renderExecutive };
   FF.pages.gvCommission = { title: 'GV Commission', render: renderGvCommission };
@@ -822,5 +961,5 @@ FF.pages = FF.pages || {};
   FF.pages.reportStudio = { title: 'Report Studio', render: renderReportStudio };
   FF.pages.followups = { title: 'Notes & Follow-ups', render: renderFollowups };
   FF.workspace = { openSave, load: workspace, reset };
-  FF.insights = { reset, loadDetails, buildCross, ffCommissionData, qualityIssues, forecastAccuracy, stockBalanceReconciliation };
+  FF.insights = { reset, loadDetails, buildCross, ffCommissionData, qualityIssues, forecastAccuracy, stockBalanceReconciliation, commissionSlabExpected: slabExpected };
 })(window.FF);

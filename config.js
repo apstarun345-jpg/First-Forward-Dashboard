@@ -102,13 +102,20 @@ FF.config = {
     assignment: {
       tab: 'Tag Assignment', gid: '',
       cls: 'A', tagId: 'B', serial: 'C', status: 'D', agentId: 'E', agentName: 'F',
-      tlId: 'G', tlName: 'H', gvUniqueId: 'L', gvUniqueName: 'M'
+      tlId: 'G', tlName: 'H', gvUniqueId: 'L', gvUniqueName: 'M', allocatedAt: ''
     },
     report: { tab: 'GV REPORT', gid: '1284424234', headerRow: 4, lastCol: 'AZ' }
   },
 
   report: { sheet: 'REPORT', gid: '242489821' },
   ffCommission: { rateCol: '', earnedCol: '', categoryCol: '', dateCol: '' }, // blank = dynamic REPORT heading discovery
+  commissionSlabs: {
+    enabled: false, model: 'agentTier',
+    channels: {
+      ff: [{ min: 1, max: 50, rate: '' }, { min: 51, max: 100, rate: '' }, { min: 101, max: 150, rate: '' }, { min: 151, max: 250, rate: '' }, { min: 251, max: null, rate: '' }],
+      gv: [{ min: 1, max: 50, rate: '' }, { min: 51, max: 100, rate: '' }, { min: 101, max: 150, rate: '' }, { min: 151, max: 250, rate: '' }, { min: 251, max: null, rate: '' }]
+    }
+  },
 
   // TL names that are NOT real team leaders (placeholder for direct agents) — hidden from every TL view.
   excludeTls: ['APS'],
@@ -201,6 +208,7 @@ FF.config = {
     }
     if (s.gv) this.gv = { master: { ...this.gv.master, ...(s.gv.master || {}) }, assignment: { ...this.gv.assignment, ...(s.gv.assignment || {}) }, report: { ...this.gv.report, ...(s.gv.report || {}) } };
     if (s.ffCommission) this.ffCommission = { ...this.ffCommission, ...s.ffCommission };
+    if (s.commissionSlabs) this.commissionSlabs = { ...this.commissionSlabs, ...s.commissionSlabs, channels: { ...this.commissionSlabs.channels, ...(s.commissionSlabs.channels || {}) } };
     if (s.eirSheet) this.eir.sheet = s.eirSheet;
     if (s.stockSheet) this.stock.sheet = s.stockSheet;
     const stockTab = this.tabBy('StockDataa');
