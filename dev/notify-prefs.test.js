@@ -69,7 +69,7 @@ test('signup / reset request / user search / user click sab admin ki feed me aat
     // 1) Pehle admin ki prefs check karo — SAB types default par ON.
     const prefs = (await call('/api/notifications/prefs', 'GET', null, adminCookie)).json.prefs;
     assert.ok(prefs && typeof prefs === 'object', 'prefs milni chahiye');
-    for (const key of ['enabled', 'login', 'signup', 'report', 'monthly', 'digest', 'activity', 'click', 'search', 'settings', 'user', 'location', 'info', 'sound', 'push']) {
+    for (const key of ['enabled', 'login', 'signup', 'report', 'monthly', 'digest', 'alert', 'activity', 'click', 'search', 'settings', 'user', 'location', 'info', 'sound', 'push']) {
       assert.equal(prefs[key], true, `default prefs me "${key}" ON hona chahiye — false matlab feed + mobile push dono se gayab`);
     }
 
@@ -126,6 +126,24 @@ test('signup / reset request / user search / user click sab admin ki feed me aat
     assert.ok(items.some((i) => i.type === 'digest'), 'digest feed me dikhni chahiye');
     const digDenied = await call('/api/notifications/digest', 'POST', {}, userCookie);
     assert.ok(digDenied.res.status >= 400, 'non-admin digest nahi bhej sakta');
+
+    // 4c) 🕘 Login history — Users tab ka table (kab, kis login ID se, kis IP se), sirf admin.
+    const usersAdmin = (await call('/api/users', 'GET', null, adminCookie)).json.users || [];
+    const member = usersAdmin.find((u) => u.username === 'member');
+    assert.ok(member && Array.isArray(member.loginHistory), 'publicUser me loginHistory array chahiye (Users tab 🕘 table)');
+    assert.ok(member.loginHistory.length >= 1, 'member ke login history me kam se kam 1 entry chahiye');
+    const lh = member.loginHistory[member.loginHistory.length - 1];
+    assert.ok(lh.at && lh.ip && lh.id, `login entry me at / ip / id chahiye — ${JSON.stringify(lh)}`);
+    const usersDenied = await call('/api/users', 'GET', null, userCookie);
+    assert.ok(usersDenied.res.status >= 400, 'non-admin /api/users nahi dekh sakta');
+
+    // 4d) 📉 Stock history — Stock page ke 30-din chart ke liye points + cover thresholds.
+    const sh = await call('/api/stock-history', 'GET', null, adminCookie);
+    assert.equal(sh.res.status, 200, `stock-history 200 dena chahiye — ${JSON.stringify(sh.json)}`);
+    assert.ok(Array.isArray(sh.json.points), 'stock-history me points array chahiye');
+    assert.ok(sh.json.thresholds && typeof sh.json.thresholds === 'object', 'thresholds chahiye (cover bands)');
+    const shUser = await call('/api/stock-history', 'GET', null, userCookie);
+    assert.equal(shUser.res.status, 200, 'member ko bhi stock-history chahiye (Stock page par chart)');
 
     // 5) Notification ki prefs ke saath ek band toggle bhi kaam kare — aur wapas ON karne par
     //    wo type feed me phir dikhne lage (admin setting jo maangi gayi hai).

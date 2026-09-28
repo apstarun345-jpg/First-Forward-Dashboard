@@ -223,8 +223,41 @@ FF.pages = FF.pages || {};
         ${card('📊 Stock by class', C.bars({ labels: P.classes, height: 200, series: [{ name: 'Stock', values: P.classes.map((c) => P.byClass.get(c)), color: '#14b8a6' }], onClickAttr: (i) => `data-pick-cls="${esc(P.classes[i])}"` }) + `<div class="chip-row" style="margin-top:10px">${P.classes.map((c) => `<button class="chip ${isVc4(c) ? 'vc4' : 'comm'}" data-pick-cls="${esc(c)}">${esc(c)} <b>${U.fmtShort(P.byClass.get(c))}</b></button>`).join('')}</div>`)}
         ${card('🏬 Top TLs by stock <span class="dim">(APS excluded)</span>', C.hbars({ items: topTls, valueLabel: 'Stock' }))}
       </div>
+      ${card('📉 Stock trend <span class="dim">(server snapshots · last 30 din)</span>', `<div id="st-trend"><div class="dim small">History load ho rahi hai…</div></div>`, `<span class="dim small" id="st-trend-cover"></span>`)}
       ${card('🧮 TL × Class stock matrix <span class="dim">(click TL → pivot + Excel · VC4 cover = VC4 stock ÷ avg daily issuance MTD)</span>', tlTable, `<button class="btn small" data-action="export" data-name="stock-by-tl">⬇ CSV</button>`)}
       ${card(`🧑‍💼 Agent-wise stock <span class="dim">(${U.fmt(filtered.length)} agents${view.cls ? ` · ${esc(view.cls === 'COMM' ? 'Commercial' : view.cls)} only` : ''})</span>`, `<div class="table-wrap tall"><table class="tbl" id="st-agent-table"><thead><tr><th>Agent ID</th><th>Agent</th><th>TL</th><th class="num">VC4</th><th class="num">Commercial</th><th class="num">Total</th><th class="num">MTD issued</th><th>VC4 cover</th></tr></thead><tbody id="st-agent-body">${filtered.slice(0, 200).map(agentRow).join('')}</tbody></table></div><div class="dim small" id="st-agent-note">${filtered.length > 200 ? 'Top 200 dikh rahe hain — upar search karo.' : `${U.fmt(filtered.length)} agents`}</div>`, `<select id="st-cls"><option value="">All classes</option><option value="VC4" ${view.cls === 'VC4' ? 'selected' : ''}>VC4 only</option><option value="COMM" ${view.cls === 'COMM' ? 'selected' : ''}>Commercial only</option>${P.classes.map((c) => `<option value="${esc(c)}" ${view.cls === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select><button class="btn small" data-action="export" data-name="stock-by-agent">⬇ CSV</button>`)}`;
+  }
+
+  // ---- 📉 stock trend (server ke daily snapshots → line chart) ----------------------------------
+  function loadStockTrend(body) {
+    const box = U.$('#st-trend', body);
+    if (!box || !FF.auth || !FF.auth.api) return;
+    FF.auth.api('/api/stock-history').then((out) => {
+      if (!box.isConnected) return;
+      const pts = ((out && out.points) || []).slice(-30);
+      const coverBadge = U.$('#st-trend-cover', body);
+      if (coverBadge && out && out.cover && out.cover.cover) {
+        const b = out.cover.band;
+        coverBadge.innerHTML = `Abhi cover ≈ <b>${U.fmt(out.cover.cover)}</b> din ${b === 'red' ? '🔴' : b === 'orange' ? '🟠' : b === 'amber' ? '🟡' : b === 'green' ? '🟢' : ''}`;
+      }
+      if (pts.length < 2) {
+        box.innerHTML = `<div class="dim small">Stock history abhi store ho rahi hai — server jab bhi snapshot lega (30 min me ek baar), yahan last-30-din ka chart dikhega.</div>`;
+        return;
+      }
+      const labels = pts.map((p) => `${p.date.slice(8)}/${p.date.slice(5, 7)}`);
+      box.innerHTML = C.lines({
+        labels,
+        tipLabels: pts.map((p) => p.date),
+        height: 210,
+        series: [
+          { name: 'Total stock', values: pts.map((p) => p.total), color: '#6366f1' },
+          { name: 'VC4', values: pts.map((p) => p.vc4), color: '#10b981', area: false }
+        ]
+      });
+      C.mount(body);
+    }).catch(() => {
+      if (box.isConnected) box.innerHTML = `<div class="dim small">History load nahi hui (offline?) — Refresh karke dekho.</div>`;
+    });
   }
 
   // ---- page -----------------------------------------------------------------------------------
@@ -250,6 +283,7 @@ FF.pages = FF.pages || {};
     let pivot = null;
     if (view.scope) pivot = selectionView(P, body); else overview(P, body);
     C.mount(body);
+    if (!view.scope) loadStockTrend(body); // overview par server snapshots ka line chart
 
     // search
     const input = U.$('#st-q', root), scopeSel = U.$('#st-scope', root);

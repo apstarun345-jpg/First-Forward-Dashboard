@@ -18,6 +18,7 @@ window.FF = window.FF || {};
     { key: 'signup',   label: '🆕 New account signup',     user: false, admin: true },
     { key: 'report',   label: '📊 Report data update',     user: false, admin: true },
     { key: 'digest',   label: '🌅 Daily digest (subah · issuance + stock + cover)', user: false, admin: true },
+    { key: 'alert',    label: '🔴 Critical alerts (low cover · mid-month target miss)', user: false, admin: true },
     { key: 'activity', label: '👀 User page opens',        user: false, admin: true },
     { key: 'click',    label: '👆 Button / option use',    user: false, admin: true },
     { key: 'search',   label: '🔍 Searches',               user: false, admin: true },
@@ -28,7 +29,7 @@ window.FF = window.FF || {};
   // ⚠️ Sab keys TRUE rakho — savePrefs PURA object server par PUT karta hai, isliye yahan kisi
   // type ko false rakhne se wo permanently OFF save ho jaata tha (feed + mobile push dono band) —
   // isi wajah se admin ko sirf kuch types (sheet update) hi aati thi.
-  const DEFAULT_PREFS = { enabled: true, login: true, signup: true, report: true, monthly: true, digest: true, activity: true, click: true, search: true, settings: true, user: true, location: true, info: true, sound: true, push: true };
+  const DEFAULT_PREFS = { enabled: true, login: true, signup: true, report: true, monthly: true, digest: true, alert: true, activity: true, click: true, search: true, settings: true, user: true, location: true, info: true, sound: true, push: true };
   const state = { started: false, bound: false, timer: null, presenceTimer: null, fastTimer: null, lastAt: '', items: [], unread: 0, firstPoll: true, page: 'home', pointer: null, people: [], lastInteraction: Date.now(), pointerBound: false, events: [], dirty: false, lastSent: 0, lastScroll: -1, pushOn: false, pushDevices: 0, pushStatus: null, pushTriedAt: 0, pushError: '', prefs: { ...DEFAULT_PREFS }, audioCtx: null };
   const EMBED = new URLSearchParams(location.search).get('embed') === 'live';
   const sharing = () => localStorage.getItem('ff_presence_pointer') !== '0';
@@ -101,7 +102,7 @@ window.FF = window.FF || {};
 
   // ---- icon / helpers ----------------------------------------------------------------------------
   function icon(item) {
-    return ({ report: '📊', monthly: '📅', digest: '🌅', login: '🔐', activity: '👀', location: '📍', search: '🔍', click: '👆', settings: '⚙️', user: '👤', info: 'ℹ️' }[item.type] || '🔔');
+    return ({ report: '📊', monthly: '📅', digest: '🌅', alert: '🔴', login: '🔐', activity: '👀', location: '📍', search: '🔍', click: '👆', settings: '⚙️', user: '👤', info: 'ℹ️' }[item.type] || '🔔');
   }
   function canBrowserAlert() { return typeof Notification !== 'undefined' && Notification.permission === 'granted'; }
   function isInstalledPWA() {

@@ -217,7 +217,7 @@ function verifyPassword(password, stored) {
 const normUser = (u) => String(u || '').trim().toLowerCase().replace(/[^a-z0-9._@-]/g, '').slice(0, 60);
 // `enabled` = master switch (UI me ek hi "Notifications ON/OFF" button hai). OFF → koi in-app toast
 // nahi, koi browser alert nahi, koi mobile push nahi. Feed items phir bhi save hote hain (history).
-const DEFAULT_NOTIFY_PREFS = { enabled: true, login: true, signup: true, report: true, monthly: true, digest: true, activity: true, click: true, search: true, settings: true, user: true, location: true, info: true, sound: true, push: true };
+const DEFAULT_NOTIFY_PREFS = { enabled: true, login: true, signup: true, report: true, monthly: true, digest: true, alert: true, activity: true, click: true, search: true, settings: true, user: true, location: true, info: true, sound: true, push: true };
 function normalizeNotifyPrefs(p) {
   const out = { ...DEFAULT_NOTIFY_PREFS };
   if (p && typeof p === 'object') for (const k of Object.keys(DEFAULT_NOTIFY_PREFS)) if (p[k] !== undefined) out[k] = !!p[k];
@@ -225,7 +225,7 @@ function normalizeNotifyPrefs(p) {
 }
 function publicUser(u) {
   if (!u) return null;
-  return { username: u.username, name: u.name || u.username, email: u.email || '', mobile: u.mobile || '', avatar: u.avatar || '', role: u.role, approved: !!u.approved, permissions: u.role === 'admin' ? allPermKeysNow() : (u.permissions || []), createdAt: u.createdAt, lastLoginAt: u.lastLoginAt || null, mustChangePassword: !!u.mustChangePassword, lastLocation: u.lastLocation || null, notificationsSeenAt: u.notificationsSeenAt || null, notifyAccess: u.role === 'admin' ? true : (u.notifyAccess !== false), notifyPrefs: normalizeNotifyPrefs(u.notifyPrefs) };
+  return { username: u.username, name: u.name || u.username, email: u.email || '', mobile: u.mobile || '', avatar: u.avatar || '', role: u.role, approved: !!u.approved, permissions: u.role === 'admin' ? allPermKeysNow() : (u.permissions || []), createdAt: u.createdAt, lastLoginAt: u.lastLoginAt || null, mustChangePassword: !!u.mustChangePassword, lastLocation: u.lastLocation || null, notificationsSeenAt: u.notificationsSeenAt || null, notifyAccess: u.role === 'admin' ? true : (u.notifyAccess !== false), notifyPrefs: normalizeNotifyPrefs(u.notifyPrefs), loginHistory: Array.isArray(u.loginHistory) ? u.loginHistory.slice(-10) : [] };
 }
 function findUser(username) { return db.users.find((u) => u.username === normUser(username)) || null; }
 function findUserByLogin(raw) {
@@ -1111,6 +1111,152 @@ async function maybeDailyDigest(force = false) {
     return item;
   } catch (err) { console.warn('daily digest:', err.message); return null; }
 }
+// ---- 🔴 low-cover alert + 📉 stock history (server ke snapshots) --------------------------------
+let stockCheckAt = 0;
+/**
+ * Stock ka current snapshot: history me save (Stock page ka 30-din chart) + cover band calculate
+ * (VC4 stock ÷ MTD avg daily issuance). Cover agar kharab hua — turant alert; red zone me to roz
+ * ek reminder. 30-min throttle (gviz query bacha rahe).
+ */
+async function refreshStockState(force = false) {
+  if (!force && Date.now() - stockCheckAt < 30 * 60e3) return null;
+  stockCheckAt = Date.now();
+  try {
+    if (!db.notify || typeof db.notify !== 'object') db.notify = { items: [], watch: {} };
+    if (!db.notify.watch || typeof db.notify.watch !== 'object') db.notify.watch = {};
+    const watch = db.notify.watch;
+    const stock = await stockSnapshot();
+    if (!stock) return null;
+    const ist = istNow();
+    const pad = (n) => String(n).padStart(2, '0');
+    const dateKey = `${ist.getUTCFullYear()}-${pad(ist.getUTCMonth() + 1)}-${pad(ist.getUTCDate())}`;
+    // 📉 Per-day history (last write wins) — Stock page par last-30-din ka line chart.
+    if (!watch.stockHistory || typeof watch.stockHistory !== 'object') watch.stockHistory = {};
+    const vc4 = (stock.classes && stock.classes.VC4) || 0;
+    const entry = { total: stock.total, vc4, comm: stock.total - vc4 };
+    const prevEntry = watch.stockHistory[dateKey] || {};
+    let changed = false;
+    if (prevEntry.total !== entry.total || prevEntry.vc4 !== entry.vc4) {
+      watch.stockHistory[dateKey] = entry;
+      changed = true;
+      const keys = Object.keys(watch.stockHistory).sort();
+      for (let i = 0; i < Math.max(0, keys.length - 400); i++) delete watch.stockHistory[keys[i]];
+    }
+    // 🔴 Cover = VC4 stock ÷ is mahine ka avg daily issuance (server ki per-date history se).
+    const daily = watch.daily && typeof watch.daily === 'object' ? watch.daily : {};
+    const monthKey = dateKey.slice(0, 7);
+    let ffMtd = 0, mtdDays = 0;
+    for (const [d, v] of Object.entries(daily)) if (d.startsWith(monthKey) && v && Number(v.ff)) { ffMtd += Number(v.ff); mtdDays++; }
+    const avg = mtdDays ? ffMtd / mtdDays : 0;
+    if (!vc4 || avg <= 0 || mtdDays < 3) { if (changed) persist('notify').catch(() => {}); return null; } // alert ke liye ≥3 din ka data
+    const th = db.settings.thresholds || {};
+    const coverRed = Number(th.coverRed) || 7, coverOrange = Number(th.coverOrange) || 15, coverAmber = Number(th.coverAmber) || 30;
+    const cover = vc4 / avg;
+    const band = cover < coverRed ? 'red' : cover < coverOrange ? 'orange' : cover < coverAmber ? 'amber' : 'green';
+    const prevBand = watch.cover && watch.cover.band;
+    watch.cover = { at: new Date().toISOString(), cover: Math.round(cover * 10) / 10, band, vc4, avg: Math.round(avg) };
+    const rank = { green: 0, amber: 1, orange: 2, red: 3 };
+    const emoji = { red: '🔴', orange: '🟠', amber: '🟡', green: '🟢' };
+    const worsened = !!prevBand && rank[band] > rank[prevBand];
+    const dailyRed = band === 'red' && watch.coverAlertDate !== dateKey;
+    if (worsened || dailyRed) {
+      if (band === 'red') watch.coverAlertDate = dateKey;
+      recordNotification({
+        type: 'alert',
+        title: `${emoji[band]} VC4 stock cover ≈ ${Math.round(cover)} din`,
+        body: `Cover ${band} zone me${band === 'red' ? ` (< ${coverRed} din)` : ''} — VC4 stock ${vc4} ÷ MTD avg ${Math.round(avg)}/din.${worsened ? ` Pichhle check me ${prevBand} tha.` : ''} Stock page se class / TL wise dekho.`,
+        target: 'admin',
+        meta: { link: '#/stock', band, cover: Math.round(cover), vc4, avg: Math.round(avg) }
+      });
+      changed = true;
+    }
+    if (changed) persist('notify').catch(() => {});
+    return { stock, cover, band, mtdDays };
+  } catch (err) { console.warn('stock state:', err.message); return null; }
+}
+// ---- 🎯 mid-month target check (mahine ki 15–25 tareekh ke beech, ek baar) ----------------------
+async function maybeMidMonthAlert() {
+  try {
+    if (!db.notify || typeof db.notify !== 'object') db.notify = { items: [], watch: {} };
+    if (!db.notify.watch || typeof db.notify.watch !== 'object') db.notify.watch = {};
+    const ist = istNow();
+    const pad = (n) => String(n).padStart(2, '0');
+    const dateKey = `${ist.getUTCFullYear()}-${pad(ist.getUTCMonth() + 1)}-${pad(ist.getUTCDate())}`;
+    const day = Number(dateKey.slice(8, 10));
+    const ym = dateKey.slice(0, 7);
+    // Server free-tier par sota hai — window 15–25 rakhi taaki wake-up par bhi check ho jaye.
+    if (day < 15 || day > 25) return null;
+    if (db.notify.watch.midMonthAlert === ym) return null;
+    const targets = Array.isArray(db.settings.targets) ? db.settings.targets : [];
+    const totalTarget = targets.filter((t) => t && t.ym === ym && Number(t.target) > 0).reduce((a, t) => a + Number(t.target), 0);
+    const daily = db.notify.watch.daily && typeof db.notify.watch.daily === 'object' ? db.notify.watch.daily : {};
+    let ffMtd = 0, gvMtd = 0;
+    for (const [d, v] of Object.entries(daily)) if (d.startsWith(ym) && v) { ffMtd += Number(v.ff) || 0; gvMtd += Number(v.gv) || 0; }
+    const achieved = ffMtd + gvMtd;
+    const daysInMonth = new Date(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)), 0).getDate();
+    const monthLabel = `${day} ${MON_SHORT[Number(dateKey.slice(5, 7)) - 1]}`;
+    let behind = false, body = '';
+    if (totalTarget > 0) {
+      const expected = totalTarget * (day / daysInMonth);
+      const pct = expected > 0 ? Math.round((achieved / expected) * 100) : 100;
+      // 40%+ peeche = achieved expected pace ka 60% se kam.
+      if (expected > 0 && achieved < expected * 0.6) {
+        behind = true;
+        body = `${monthLabel} (day ${day}/${daysInMonth}): FF+GV ${achieved.toLocaleString('en-IN')} tags vs target ${totalTarget.toLocaleString('en-IN')} ka expected pace ${Math.round(expected).toLocaleString('en-IN')} — sirf ${pct}% (lagbhag ${100 - pct}% peeche). Targets page par agents ko push karo.`;
+      }
+    } else {
+      // Target set nahi hai → pichhle mahine isi tarikh tak ka actual = benchmark.
+      const prevD = new Date(Date.UTC(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)) - 1, 0));
+      const prevYm = `${prevD.getUTCFullYear()}-${pad(prevD.getUTCMonth() + 1)}`;
+      let prevSame = 0;
+      for (const [d, v] of Object.entries(daily)) if (d.startsWith(prevYm) && Number(d.slice(8, 10)) <= day && v) prevSame += (Number(v.ff) || 0) + (Number(v.gv) || 0);
+      if (prevSame > 0 && achieved < prevSame * 0.6) {
+        behind = true;
+        body = `${monthLabel}: FF+GV ${achieved.toLocaleString('en-IN')} tags — pichhle mahine isi tarikh tak ${prevSame.toLocaleString('en-IN')} the (lagbhag ${100 - Math.round((achieved / prevSame) * 100)}% peeche). Target set karo (Targets page) ya pace badhao.`;
+      }
+    }
+    if (!behind) return null;
+    db.notify.watch.midMonthAlert = ym;
+    persist('notify').catch(() => {});
+    return recordNotification({ type: 'alert', title: `🎯 Mid-month target miss · ${monthLabel}`, body, target: 'admin', meta: { link: '#/targets', achieved, totalTarget, day } });
+  } catch (err) { console.warn('mid-month alert:', err.message); return null; }
+}
+// ---- 💤 weekly inactive users (Monday, 9 AM IST ke baad — hafte me ek baar) ----------------------
+function maybeInactiveUsers() {
+  try {
+    if (!db.notify || typeof db.notify !== 'object') db.notify = { items: [], watch: {} };
+    if (!db.notify.watch || typeof db.notify.watch !== 'object') db.notify.watch = {};
+    const ist = istNow();
+    if (ist.getUTCDay() !== 1 || ist.getUTCHours() < 9) return null; // sirf Monday ≥ 09:00 IST
+    const pad = (n) => String(n).padStart(2, '0');
+    const monday = new Date(ist.getTime() - ((ist.getUTCDay() + 6) % 7) * 86400e3);
+    const weekKey = `${monday.getUTCFullYear()}-${pad(monday.getUTCMonth() + 1)}-${pad(monday.getUTCDate())}`;
+    if (db.notify.watch.inactiveWeek === weekKey) return null;
+    const th = db.settings.thresholds || {};
+    const maxDays = Number(th.inactiveDays) || 3;
+    const now = Date.now();
+    const stale = db.users.filter((u) => u && u.approved && u.role !== 'admin').map((u) => {
+      const last = Date.parse(u.lastLoginAt || '') || Date.parse(u.createdAt || '');
+      return { username: u.username, name: u.name || u.username, days: last ? Math.floor((now - last) / 86400e3) : null };
+    }).filter((u) => u.days === null || u.days >= maxDays);
+    db.notify.watch.inactiveWeek = weekKey;
+    persist('notify').catch(() => {});
+    if (!stale.length) return null;
+    const list = stale.sort((a, b) => (b.days === null ? 999 : b.days) - (a.days === null ? 999 : a.days)).slice(0, 12)
+      .map((u) => `${u.name} ${u.days === null ? '(kabhi login nahi kiya)' : `(${u.days} din)`}`);
+    return recordNotification({
+      type: 'info',
+      title: `💤 Inactive users · ${stale.length} user ${maxDays}+ din se nahi aaye`,
+      body: list.join(', ') + (stale.length > 12 ? ' …' : ''),
+      target: 'admin',
+      meta: { link: '#/settings?tab=users', users: stale.map((u) => u.username).slice(0, 40) }
+    });
+  } catch (err) { console.warn('inactive users:', err.message); return null; }
+}
+/** Ek jagah se saare scheduled checks — boot + har 30 min. */
+function runScheduledChecks() {
+  return Promise.allSettled([maybeDailyDigest(false), maybeMidMonthAlert(), maybeInactiveUsers(), refreshStockState(false)]);
+}
 let reportCheckAt = 0;
 let reportCheckPromise = null;
 async function checkReports(force = false) {
@@ -1233,6 +1379,10 @@ async function handleApi(req, res, url) {
     if (!u.approved) throw new HttpError(403, 'Account pending admin approval.');
     attempts.delete(ip);
     u.lastLoginAt = new Date().toISOString();
+    // 🕘 Login history (admin ko Users tab me dikhta hai): kab, kis ID se, kis IP se — last 20.
+    if (!Array.isArray(u.loginHistory)) u.loginHistory = [];
+    u.loginHistory.push({ at: u.lastLoginAt, id: String(loginId).slice(0, 60), ip: ip || '' });
+    if (u.loginHistory.length > 20) u.loginHistory = u.loginHistory.slice(-20);
     // One Google Sheets batch can confirm the user timestamp and session together.
     const [token] = await Promise.all([createSession(u.username), persist('users')]);
     const ipLabel = ip ? ` · IP ${ip}` : '';
@@ -1314,6 +1464,15 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { ok: true, at: user.notificationsSeenAt });
   }
   // ---- notification preferences (per user: which types show, sound on/off, mobile push) ----
+  if (p === '/api/stock-history' && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required');
+    // Pehli baar koi maange to abhi ka snapshot bana lo (Stock page ka chart khali na dikhe).
+    if (!stockCheckAt) { try { await refreshStockState(true); } catch { /* optional */ } }
+    const watch = (db.notify && db.notify.watch) || {};
+    const hist = watch.stockHistory && typeof watch.stockHistory === 'object' ? watch.stockHistory : {};
+    const points = Object.keys(hist).sort().slice(-60).map((date) => ({ date, total: Number(hist[date] && hist[date].total) || 0, vc4: Number(hist[date] && hist[date].vc4) || 0, comm: Number(hist[date] && hist[date].comm) || 0 }));
+    return sendJson(res, 200, { points, cover: watch.cover || null, thresholds: db.settings.thresholds || {} });
+  }
   if (p === '/api/notifications/digest' && method === 'POST') {
     if (!user) throw new HttpError(401, 'Login required');
     requireAdmin(user);
@@ -1852,9 +2011,10 @@ async function start() {
     setInterval(() => checkReports(false).catch(() => {}), 5 * 60e3).unref();
     setTimeout(() => maybeMonthlyReport(), 8000);
     setInterval(() => maybeMonthlyReport(), 60 * 60e3).unref();
-    // 🌅 Daily digest: subah 8 (IST) ke baad pehli wake-up par roz ek baar.
-    setTimeout(() => maybeDailyDigest(false).catch(() => {}), 15000);
-    setInterval(() => maybeDailyDigest(false).catch(() => {}), 30 * 60e3).unref();
+    // 🌅 Scheduled checks: daily digest (subah 8 IST ke baad roz ek baar) + mid-month target +
+    //    weekly inactive users + 🔴 cover alert / 📉 stock history — boot par aur har 30 min.
+    setTimeout(() => runScheduledChecks(), 15000);
+    setInterval(() => runScheduledChecks(), 30 * 60e3).unref();
   });
 }
 start().catch((err) => { console.error('Startup stopped to protect stored data:', err); process.exitCode = 1; });
