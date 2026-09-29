@@ -17,6 +17,7 @@ class El {
   constructor(tag = 'div') { this.tagName = tag.toUpperCase(); this._html = ''; this.children = []; this.classList = new ClassList(); this.dataset = {}; this.style = { setProperty() {}, removeProperty() {} }; this.attrs = {}; this.value = ''; this.files = []; this.parentNode = null; this.listeners = {}; }
   get innerHTML() { return this._html; } set innerHTML(v) { this._html = String(v); this.children = []; }
   get outerHTML() { return this._html; } get isConnected() { return true; }
+  get childNodes() { return this.children; }
   get content() { const f = new El('fragment'); f.children = [new El('div')]; return f; }
   get firstElementChild() { return this.children[0] || new El(); } get nextElementSibling() { return new El(); }
   get offsetWidth() { return 800; } get offsetHeight() { return 400; } get clientWidth() { return 800; } get scrollWidth() { return 800; }

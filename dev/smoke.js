@@ -22,6 +22,7 @@ class El {
   get innerHTML() { return this._html; } set innerHTML(v) { this._html = String(v); this.children = []; }
   get outerHTML() { return this._html; }
   get isConnected() { return true; }
+  get childNodes() { return this.children; }
   get content() { const f = new El('fragment'); f.children = [new El('div')]; return f; }
   get firstElementChild() { return this.children[0] || new El(); }
   get nextElementSibling() { return new El(); }

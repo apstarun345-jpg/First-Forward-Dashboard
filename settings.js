@@ -235,6 +235,107 @@ FF.pages = FF.pages || {};
       if (e.target.closest('[data-notify-panel-test]') || e.target.closest('[data-notify-push-test]')) setTimeout(() => { if (document.body.contains(slot)) drawDiag(); }, 2500);
     });
   }
+  // ---- 🛡️ My access · colorful, clickable page cards (data summary ke saath) ---------------------
+  // Har panel ka apna colour (Management / First Forward / GV Partner / Cross Channel / Workspace /
+  // Actions / Sheets). Card = link (page khulta hai), band access = locked card + toast.
+  // Summary sirf IN-MEMORY data se bharata hai — settings page par koi extra network call nahi.
+  const ACC_TONE = { 'Management': 't-mgmt', 'First Forward': 't-ff', 'GV Partner': 't-gv', 'Cross Channel': 't-cross', 'Workspace': 't-ws', 'Actions': 't-act', 'Sheets': 't-sheet' };
+  const ACC_ICON = { 'Management': '🧭', 'First Forward': '🟦', 'GV Partner': '🟩', 'Cross Channel': '🔗', 'Workspace': '🗂️', 'Actions': '⚡', 'Sheets': '📄' };
+  function accStats() {
+    const s = {};
+    try {
+      const pick = (obj, key) => (obj && typeof obj.get === 'function' ? obj.get(key) : null);
+      const mk = U.ymKey(new Date());
+      const daily = pick(FF.store, 'daily');
+      if (Array.isArray(daily) && daily.length) {
+        const ffDaily = daily.filter((r) => !r.channel || r.channel === 'First Forward');
+        const sumN = (rows) => rows.reduce((n, r) => n + (Number(r.n) || 0), 0);
+        s.ffTags = sumN(ffDaily);
+        const keys = ffDaily.filter((r) => r.key && r.n).map((r) => r.key).sort();
+        s.ffLast = keys.length ? keys[keys.length - 1] : '';
+        s.ffMtd = sumN(ffDaily.filter((r) => r.key && r.key.startsWith(mk)));
+      }
+      const stockAgents = pick(FF.store, 'stockAgents');
+      if (Array.isArray(stockAgents)) s.ffStock = stockAgents.reduce((n, r) => n + (Number(r.n) || 0), 0);
+      const report = pick(FF.store, 'report');
+      if (report && Array.isArray(report.rows)) s.reportRows = Math.max(0, report.rows.length - 2);
+      const gvm = pick(FF.gv, 'master');
+      if (Array.isArray(gvm) && gvm.length) {
+        s.gvRows = gvm.length;
+        const mtd = gvm.filter((r) => r.ym === mk);
+        s.gvMtd = mtd.length;
+        s.gvComm = mtd.reduce((n, r) => n + (Number(r.commission) || 0), 0);
+        const yms = gvm.filter((r) => r.ym).map((r) => r.ym).sort();
+        s.gvLast = yms.length ? yms[yms.length - 1] : '';
+      }
+      const gvStock = pick(FF.gv, 'stockClass');
+      if (Array.isArray(gvStock)) s.gvStock = gvStock.reduce((n, r) => n + (Number(r.n) || 0), 0);
+    } catch { /* data optional — summary tabhi dikhegi jab data already loaded ho */ }
+    return s;
+  }
+  function accSummaryFor(id, s) {
+    const f = (n) => U.fmt(Math.round(n || 0));
+    const gvBit = s.gvRows ? ` · GV ${f(s.gvRows)}` : '';
+    switch (id) {
+      case 'home': case 'dashboard': case 'trend':
+        return s.ffTags ? `${f(s.ffTags)} FF tags${s.ffLast ? ` · data till ${s.ffLast}` : ''}` : '';
+      case 'executive':
+        return (s.ffMtd || s.gvMtd) ? `MTD · FF ${f(s.ffMtd)}${s.gvMtd != null ? ` · GV ${f(s.gvMtd)}` : ''}${s.gvComm ? ` · GV comm ${U.fmt(s.gvComm)}` : ''}` : '';
+      case 'tagIssued': case 'rangeReport':
+        return (s.ffTags || s.gvRows) ? `FF ${f(s.ffTags)}${gvBit} rows` : '';
+      case 'targets': case 'tv': case 'teamMap':
+        return s.ffMtd ? `FF MTD ${f(s.ffMtd)} tags` : '';
+      case 'stock': case 'stockReport':
+        return s.ffStock ? `${f(s.ffStock)} tags field stock` : '';
+      case 'performance': case 'ffCommission':
+        return s.reportRows ? `REPORT ${f(s.reportRows)} agent rows` : '';
+      case 'gvDashboard': case 'gvTrend': case 'gvPerformance':
+        return s.gvRows ? `GV ${f(s.gvRows)} rows${s.gvLast ? ` · ${U.labelYM(s.gvLast)}` : ''}` : '';
+      case 'gvCommission':
+        return s.gvRows ? `GV comm ${s.gvComm ? U.fmt(s.gvComm) : '—'}${gvBit} rows` : '';
+      case 'gvStock': case 'gvStockReport':
+        return s.gvStock ? `${f(s.gvStock)} tags GV stock` : '';
+      case 'dualChannel': case 'compare': case 'charts': case 'forecast': case 'dataQuality': case 'dispatchPlan': case 'tlScorecard':
+        return (s.ffTags && s.gvRows) ? `FF ${f(s.ffTags)}${gvBit} rows` : '';
+      default: return '';
+    }
+  }
+  function accessSection(perms, u) {
+    const pages = (FF.app && FF.app.PAGES) || [];
+    const tone = (group) => ACC_TONE[group] || 't-pages';
+    const cardHtml = (icon, label, desc, href, allowed, toneClass, sumId) => {
+      const badge = allowed ? (href ? '<span class="acc-go">→</span>' : '<span class="acc-go">✅</span>') : '<span class="acc-lock">⛔</span>';
+      const inner = `<span class="acc-ico">${icon}</span><span class="acc-main"><b>${esc(label)}</b>${desc ? `<small>${esc(desc)}</small>` : ''}${sumId ? `<em class="acc-sum" data-acc-sum="${esc(sumId)}"></em>` : ''}</span>${badge}`;
+      if (!href) return `<span class="acc-card ${toneClass} ${allowed ? 'done' : 'locked'}" ${allowed ? '' : `data-acc-locked="${esc(label)}"`}>${inner}</span>`;
+      if (allowed) return `<a class="acc-card ${toneClass}" href="${esc(href)}">${inner}</a>`;
+      return `<button type="button" class="acc-card ${toneClass} locked" data-acc-locked="${esc(label)}">${inner}</button>`;
+    };
+    const order = ['Management', 'First Forward', 'GV Partner', 'Cross Channel', 'Workspace'];
+    const panels = order.map((g) => ({ g, items: pages.filter((p) => p.group === g) })).filter((p) => p.items.length);
+    let html = '<div class="acc-panels">';
+    panels.forEach((panel) => {
+      const t = tone(panel.g);
+      const items = panel.items.map((p) => {
+        const allowed = A.can(p.perm) && (!p.adminOnly || A.isAdmin()) && (!p.feat || !FF.config.features || FF.config.features[p.feat] !== false);
+        return cardHtml(p.icon, p.label, p.desc, `#/${p.id}`, allowed, t, p.id);
+      }).join('');
+      html += `<div class="acc-panel"><div class="acc-panel-head"><span class="acc-panel-ico">${ACC_ICON[panel.g] || '▦'}</span><b>${esc(panel.g)}</b><span class="acc-count">${panel.items.length} pages</span></div><div class="acc-grid">${items}</div></div>`;
+    });
+    const pagePermKeys = new Set(pages.map((p) => p.perm));
+    const actionPerms = perms.filter((p) => !pagePermKeys.has(p.key) && !String(p.key).startsWith('sheet:'));
+    if (actionPerms.length) {
+      html += `<div class="acc-panel"><div class="acc-panel-head"><span class="acc-panel-ico">${ACC_ICON.Actions}</span><b>Actions</b><span class="acc-count">${actionPerms.length} permissions</span></div><div class="acc-grid">${actionPerms.map((p) => cardHtml('⚡', p.label, 'Har page ke andar available action', '', A.can(p.key), tone('Actions'), '')).join('')}</div></div>`;
+    }
+    const sheets = perms.filter((p) => String(p.key).startsWith('sheet:'));
+    if (sheets.length) {
+      html += `<div class="acc-panel"><div class="acc-panel-head"><span class="acc-panel-ico">${ACC_ICON.Sheets}</span><b>Sheets</b><span class="acc-count">${sheets.length} tabs</span></div><div class="acc-grid">${sheets.map((p) => cardHtml('📄', p.label.replace(/^Sheet · /, ''), p.group, `#/sheet/${encodeURIComponent(p.key.slice(6))}`, A.can(p.key), tone('Sheets'), '')).join('')}</div></div>`;
+    }
+    html += '</div>';
+    const granted = perms.filter((p) => A.can(p.key)).length;
+    html += `<p class="dim small" style="margin-top:10px">${u.role === 'admin' ? '👑 Admin — sab pages khule hain.' : `Access: <b>${granted}/${perms.length}</b> · koi page band ho to admin se kaho.`} Card par click = wahi page data summary ke saath khulega.</p>`;
+    return html;
+  }
+
   function accountTab() {
     const u = A.user;
     const perms = A.permissions || [];
@@ -246,7 +347,7 @@ FF.pages = FF.pages || {};
       ${notificationsSection()}
       ${section('📍 Location (optional, consent ke saath)', `<p class="dim small">Location sirf tab li jayegi jab aap khud “Share my location” dabayenge. Browser permission ke bina koi GPS tracking nahi hoti. Admin ko aapki last shared location dikhegi.</p><div class="location-status">${loc ? '✅' : '⚪'} ${esc(locationText)} ${locationLink ? `<a class="btn small" href="${esc(locationLink)}" target="_blank" rel="noopener">🗺️ Maps me dekho</a>` : ''}</div><div class="save-bar"><button class="btn" id="location-share">📍 Share my location</button></div>`)}
       ${section('🔑 Change password', `<div class="form-grid">${field('Current password', '<input class="input" id="pw-cur" type="password" autocomplete="current-password">')}${field('New password', '<input class="input" id="pw-new" type="password" minlength="6" autocomplete="new-password">')}${field('Repeat new password', '<input class="input" id="pw-new2" type="password" minlength="6" autocomplete="new-password">')}</div><div class="save-bar"><button class="btn primary" id="pw-save">🔑 Update password</button>${u.mustChangePassword ? '<span class="badge red">Default password — please change</span>' : ''}</div>`)}
-      ${section('🛡️ My access', `<div class="perm-grid">${perms.map((p) => `<div class="perm ${A.can(p.key) ? 'yes' : 'no'}"><span>${A.can(p.key) ? '✅' : '⛔'}</span><b>${esc(p.label)}</b><small class="dim">${esc(p.group)}</small></div>`).join('')}</div>${u.role === 'admin' ? '<p class="dim small">Admin ke paas sab access hota hai.</p>' : '<p class="dim small">Access badalna ho to admin se kaho.</p>'}`)}`;
+      ${section('🛡️ My access <span class="dim">· colorful · click = page + data summary</span>', accessSection(perms, u))}`;
   }
   const IMG_SIZES = { logo: [256, 384, 512, 768], loginImage: [1200, 1600, 2000, 2400] };
   function brandTab() {
@@ -887,6 +988,12 @@ FF.pages = FF.pages || {};
       // admin ki push diagnostics yahin async load hoti hai.
       if (FF.notifications) void bindNotifications(body);
       // account
+      // 🛡️ My access cards — locked cards par toast + live data summary (sirf in-memory, no network).
+      U.$$('[data-acc-locked]', body).forEach((b) => b.addEventListener('click', () => U.toast(`⛔ "${b.dataset.accLocked}" ke liye access chahiye — admin se Settings → Users me enable karwao.`, 'err')));
+      try {
+        const aStats = accStats();
+        U.$$('[data-acc-sum]', body).forEach((el) => { const t = accSummaryFor(el.dataset.accSum, aStats); if (t) el.textContent = t; else el.remove(); });
+      } catch { /* summary optional */ }
       const presenceShare = U.$('#presence-share-toggle', body);
       if (presenceShare) presenceShare.addEventListener('change', () => { localStorage.setItem('ff_presence_pointer', presenceShare.checked ? '1' : '0'); if (FF.app.liveShareChip) FF.app.liveShareChip(); if (!presenceShare.checked && FF.auth.user.role !== 'admin') FF.auth.api('/api/presence', 'POST', { page: 'settings', pointer: null, overlay: '' }).catch(() => {}); });
       const rangeDays = U.$('#ti-range-days', body);

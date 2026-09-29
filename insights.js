@@ -559,7 +559,7 @@ FF.pages = FF.pages || {};
         if (directAgent(r)) o.direct++; else o.managed++;
       });
     });
-    let out = [...map.values()].map((o) => ({ ...o, agentCount: o.agents.size, uniqueTags: o.tagSet.size, commissionComplete: o.commissionRows > 0 && o.commissionRows === o.commissionPopulatedRows, perTag: o.issuances ? o.commission / o.issuances : 0, avgAmount: o.issuances ? o.amount / o.issuances : 0, effectiveRate: ratePct(o.commission, o.amount) }));
+    let out = [...map.values()].map((o) => ({ ...o, agentCount: o.agents.size, uniqueTags: o.tagSet.size, commissionComplete: o.commissionRows > 0 && o.commissionRows === o.commissionPopulatedRows, perTag: (o.commissionPopulatedRows || o.issuances) ? o.commission / (o.commissionPopulatedRows || o.issuances) : 0, avgAmount: o.issuances ? o.amount / o.issuances : 0, effectiveRate: ratePct(o.commission, o.amount) }));
     if (group === 'weekday') { const order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday', 'Invalid date']; out.sort((a, b) => order.indexOf(a.label) - order.indexOf(b.label)); }
     else if (group === 'day') out.sort((a, b) => b.label.localeCompare(a.label));
     else out.sort((a, b) => b.commission - a.commission || b.issuances - a.issuances);
@@ -570,26 +570,31 @@ FF.pages = FF.pages || {};
    * Agent × class commission matrix — har agent ke liye VC4 / VC20 / VC5+ ka commission ALAG
    * (exact sum). Koi blended average nahi; VC5+ ke andar exact class (VC5/VC6/…) split bhi.
    * Unique tags = distinct tag/serial count (duplicate sheet rows pakadne ke liye).
+   * Rate (₹/tag) = sheet commission column se: sum(commission) ÷ jis row me value hai (paid rows).
    */
   function gvClassMatrix(rows) {
-    const blank = () => ({ tags: 0, unique: 0, amount: 0, commission: 0, tagSet: new Set() });
+    const blank = () => ({ tags: 0, paid: 0, unique: 0, amount: 0, commission: 0, rate: null, tagSet: new Set() });
     const map = new Map();
     rows.forEach((r) => {
       const key = `${r.agentId || ''}|${r.agentName || 'Unknown agent'}`;
       const g = r.group || (G.classGroup ? G.classGroup(r.cls) : r.cls) || 'NA';
       const slot = ['VC4', 'VC20', 'VC5+'].includes(g) ? g : 'VC5+';
-      mapAdd(map, key, () => ({ label: r.agentName || r.agentId || 'Unknown agent', id: r.agentId || '', tlName: r.tlName || '', VC4: blank(), VC20: blank(), 'VC5+': blank(), exact: {}, totalCommission: 0, totalTags: 0 }), (o) => {
+      mapAdd(map, key, () => ({ label: r.agentName || r.agentId || 'Unknown agent', id: r.agentId || '', tlName: r.tlName || '', VC4: blank(), VC20: blank(), 'VC5+': blank(), exact: {}, totalCommission: 0, totalPaid: 0, totalTags: 0, rate: null }), (o) => {
         const s = o[slot];
         s.tags++; s.amount += r.amount || 0; s.commission += r.commission || 0;
+        if (r.commissionHasValue === true) { s.paid++; o.totalPaid++; }
         s.tagSet.add(normBarcode(r.tagId || r.serial || '') || `#${s.tags}`);
         o.totalCommission += r.commission || 0; o.totalTags++;
         const cls = r.cls || 'NA';
-        const e = o.exact[cls] || (o.exact[cls] = { tags: 0, commission: 0 });
+        const e = o.exact[cls] || (o.exact[cls] = { tags: 0, paid: 0, commission: 0, rate: null });
         e.tags++; e.commission += r.commission || 0;
+        if (r.commissionHasValue === true) e.paid++;
       });
     });
     return [...map.values()].map((o) => {
-      ['VC4', 'VC20', 'VC5+'].forEach((g) => { o[g].unique = o[g].tagSet.size; delete o[g].tagSet; });
+      ['VC4', 'VC20', 'VC5+'].forEach((g) => { o[g].unique = o[g].tagSet.size; delete o[g].tagSet; o[g].rate = o[g].paid > 0 ? o[g].commission / o[g].paid : null; });
+      Object.values(o.exact).forEach((v) => { v.rate = v.paid > 0 ? v.commission / v.paid : null; });
+      o.rate = o.totalPaid > 0 ? o.totalCommission / o.totalPaid : null;
       o.vc5Exact = Object.entries(o.exact).filter(([cls]) => cls !== 'VC4' && cls !== 'VC20').sort((a, b) => b[1].commission - a[1].commission || b[1].tags - a[1].tags);
       return o;
     }).sort((a, b) => b.totalCommission - a.totalCommission || b.totalTags - a.totalTags);
@@ -668,6 +673,14 @@ FF.pages = FF.pages || {};
     const matrix = gvClassMatrix(filtered);
     const gvGroupCommission = { VC4: sum(filtered.filter((r) => (r.group || (G.classGroup ? G.classGroup(r.cls) : r.cls)) === 'VC4'), (r) => r.commission), VC20: sum(filtered.filter((r) => (r.group || (G.classGroup ? G.classGroup(r.cls) : r.cls)) === 'VC20'), (r) => r.commission), 'VC5+': sum(filtered.filter((r) => !['VC4', 'VC20'].includes(r.group || (G.classGroup ? G.classGroup(r.cls) : r.cls))), (r) => r.commission) };
     const gvUniqueTotal = new Set(filtered.map((r) => normBarcode(r.tagId || r.serial || '')).filter(Boolean)).size;
+    // Class-wise ₹/tag rate — GV Master commission column se (sum ÷ rows jisme value hai).
+    const gvClassGroupOf = (r) => r.group || (G.classGroup ? G.classGroup(r.cls) : r.cls);
+    const gvRateFor = (key) => {
+      const list = filtered.filter((r) => (key === 'VC5+' ? !['VC4', 'VC20'].includes(gvClassGroupOf(r)) : gvClassGroupOf(r) === key));
+      const paid = list.filter((r) => r.commissionHasValue === true).length;
+      return paid ? sum(list, (r) => r.commission) / paid : null;
+    };
+    const gvRateHtml = (key) => { const rt = gvRateFor(key); return rt !== null ? `<small class="rate-line">${money(rt, 2)} / tag</small>` : '<small class="dim">rate —</small>'; };
     const classList = [...new Set(filtered.map((r) => r.cls || 'NA'))].map((cls) => {
       const list = filtered.filter((r) => (r.cls || 'NA') === cls);
       const top = aggregateGv(list, 'agent')[0];
@@ -692,13 +705,13 @@ FF.pages = FF.pages || {};
         { label: 'Class commission (VC4 / VC20 / VC5+)', value: `${money(gvGroupCommission.VC4, 0)} <small>/ ${money(gvGroupCommission.VC20, 0)} / ${money(gvGroupCommission['VC5+'], 0)}</small>`, foot: boards.map((b) => `${b.def.key} ${U.fmt(b.rows.length)} tags${(() => { const u = new Set(b.rows.map((r) => normBarcode(r.tagId || r.serial || '')).filter(Boolean)).size; return u && u !== b.rows.length ? ` (${U.fmt(u)} unique)` : ''; })()}`).join(' · '), tone: 'g6', icon: '🚗' },
         { label: 'Class commission variance flags', value: U.fmt(commissionAnomalies.length), foot: '±30% vs class median · min 3 tags per agent', tone: commissionAnomalies.length ? 'g7' : 'g9', icon: '🚨' }
       ])}
-      <div class="card"><div class="card-head"><h3>🧮 Agent × class commission · VC4 / VC20 / VC5+ alag</h3><span class="dim small">Har class ka commission uska exact sum hai — koi blended average nahi${gvUniqueTotal && gvUniqueTotal !== filtered.length ? ` · ${U.fmt(filtered.length)} rows me ${U.fmt(gvUniqueTotal)} unique tags` : ''}</span><button class="btn small" id="gvc-matrix-csv">⬇ Matrix CSV</button></div>
-        <div class="table-wrap"><table class="data-table ins-table"><thead><tr><th class="tone-violet">Agent</th><th class="tone-violet">TL / Direct</th><th class="tone-violet num">VC4 tags</th><th class="tone-violet num">VC4 commission</th><th class="tone-violet num">VC20 tags</th><th class="tone-violet num">VC20 commission</th><th class="tone-violet num">VC5+ tags</th><th class="tone-violet num">VC5+ commission</th><th class="tone-violet">VC5+ · exact class split</th><th class="tone-violet num">Total commission</th></tr></thead><tbody>
+      <div class="card"><div class="card-head"><h3>🧮 Agent × class commission · VC4 / VC20 / VC5+ alag</h3><span class="dim small">Commission = sheet ka exact sum · <b>₹/tag rate = GV Master commission column se</b> (class-wise)${gvUniqueTotal && gvUniqueTotal !== filtered.length ? ` · ${U.fmt(filtered.length)} rows me ${U.fmt(gvUniqueTotal)} unique tags` : ''}</span><button class="btn small" id="gvc-matrix-csv">⬇ Matrix CSV</button></div>
+        <div class="table-wrap"><table class="data-table ins-table"><thead><tr><th class="tone-violet">Agent</th><th class="tone-violet">TL / Direct</th><th class="tone-violet num">VC4 tags</th><th class="tone-violet num">VC4 commission · rate</th><th class="tone-violet num">VC20 tags</th><th class="tone-violet num">VC20 commission · rate</th><th class="tone-violet num">VC5+ tags</th><th class="tone-violet num">VC5+ commission · rate</th><th class="tone-violet">VC5+ · exact class split</th><th class="tone-violet num">Total commission</th></tr></thead><tbody>
         ${matrix.map((m) => {
-          const cell = (g) => `<td class="num">${U.fmt(m[g].tags)}${m[g].unique && m[g].unique !== m[g].tags ? `<small class="dim">${U.fmt(m[g].unique)} unique</small>` : ''}</td><td class="num"><b>${money(m[g].commission, 2)}</b></td>`;
-          return `<tr><td><b class="agent-link" data-agent360="${esc(m.label)}" data-agent360-id="${esc(m.id || '')}" title="Agent 360 kholo">${esc(m.label)}</b><small>${esc(m.id || '')}</small></td><td>${esc(m.tlName || 'Direct / Unmapped')}</td>${cell('VC4')}${cell('VC20')}${cell('VC5+')}<td class="small">${m.vc5Exact.length ? esc(m.vc5Exact.map(([cls, v]) => `${cls} ${money(v.commission, 0)}`).join(' · ')) : '<span class="dim">—</span>'}</td><td class="num"><b>${money(m.totalCommission, 2)}</b></td></tr>`;
+          const cell = (g) => `<td class="num">${U.fmt(m[g].tags)}${m[g].unique && m[g].unique !== m[g].tags ? `<small class="dim">${U.fmt(m[g].unique)} unique</small>` : ''}</td><td class="num"><b>${money(m[g].commission, 2)}</b>${m[g].rate !== null && m[g].rate !== undefined ? `<small class="rate-line">${money(m[g].rate, 2)} / tag</small>` : '<small class="dim">rate —</small>'}</td>`;
+          return `<tr><td><b class="agent-link" data-agent360="${esc(m.label)}" data-agent360-id="${esc(m.id || '')}" title="Agent 360 kholo">${esc(m.label)}</b><small>${esc(m.id || '')}</small></td><td>${esc(m.tlName || 'Direct / Unmapped')}</td>${cell('VC4')}${cell('VC20')}${cell('VC5+')}<td class="small">${m.vc5Exact.length ? esc(m.vc5Exact.map(([cls, v]) => `${cls} ${money(v.commission, 0)}${v.rate !== null && v.rate !== undefined ? ` · ${money(v.rate, 1)}/tag` : ''}`).join(' · ')) : '<span class="dim">—</span>'}</td><td class="num"><b>${money(m.totalCommission, 2)}</b>${m.rate !== null && m.rate !== undefined ? `<small class="rate-line">${money(m.rate, 2)} / tag</small>` : ''}</td></tr>`;
         }).join('') || `<tr><td colspan="10">${empty('No matching rows', 'Filters change karke dekhein.')}</td></tr>`}
-        </tbody>${matrix.length ? `<tfoot><tr class="row-total"><td colspan="2">Total · ${U.fmt(matrix.length)} agents</td><td class="num">${U.fmt(sum(matrix, (m) => m.VC4.tags))}</td><td class="num">${money(gvGroupCommission.VC4, 2)}</td><td class="num">${U.fmt(sum(matrix, (m) => m.VC20.tags))}</td><td class="num">${money(gvGroupCommission.VC20, 2)}</td><td class="num">${U.fmt(sum(matrix, (m) => m['VC5+'].tags))}</td><td class="num">${money(gvGroupCommission['VC5+'], 2)}</td><td></td><td class="num">${money(totalCommission, 2)}</td></tr></tfoot>` : ''}</table></div>
+        </tbody>${matrix.length ? `<tfoot><tr class="row-total"><td colspan="2">Total · ${U.fmt(matrix.length)} agents</td><td class="num">${U.fmt(sum(matrix, (m) => m.VC4.tags))}</td><td class="num">${money(gvGroupCommission.VC4, 2)}${gvRateHtml('VC4')}</td><td class="num">${U.fmt(sum(matrix, (m) => m.VC20.tags))}</td><td class="num">${money(gvGroupCommission.VC20, 2)}${gvRateHtml('VC20')}</td><td class="num">${U.fmt(sum(matrix, (m) => m['VC5+'].tags))}</td><td class="num">${money(gvGroupCommission['VC5+'], 2)}${gvRateHtml('VC5+')}</td><td></td><td class="num">${money(totalCommission, 2)}</td></tr></tfoot>` : ''}</table></div>
       </div>
       <div class="card"><div class="card-head"><h3>🗂️ Class-wise commission summary</h3><span class="dim small">Exact sheet classes · selected period</span></div><div class="table-wrap"><table class="data-table ins-table"><thead><tr><th class="tone-slate">Vehicle class</th><th class="tone-slate">Board</th><th class="tone-slate num">Tags</th><th class="tone-slate num">Agents</th><th class="tone-slate num">Amount</th><th class="tone-slate num">Commission</th><th class="tone-slate num">₹ / tag</th><th class="tone-slate num">Effective rate</th><th class="tone-slate">Top agent</th></tr></thead><tbody>${classList.map((c) => `<tr><td><b>${esc(c.cls)}</b></td><td>${statusPill(c.group, c.group === 'VC4' ? 'blue' : c.group === 'VC20' ? 'amber' : '')}</td><td class="num">${U.fmt(c.tags)}</td><td class="num">${U.fmt(c.agents)}</td><td class="num">${money(c.amount, 2)}</td><td class="num"><b>${money(c.commission, 2)}</b></td><td class="num">${money(c.tags ? c.commission / c.tags : 0, 2)}</td><td class="num">${ratePct(c.commission, c.amount).toFixed(2)}%</td><td>${esc(c.top)}</td></tr>`).join('') || `<tr><td colspan="9">${empty('No commission rows', 'Filters change karke dekhein.')}</td></tr>`}</tbody><tfoot><tr class="row-total"><td colspan="2">All classes</td><td class="num">${U.fmt(filtered.length)}</td><td class="num">${U.fmt(new Set(filtered.map((r) => r.agentId)).size)}</td><td class="num">${money(totalAmount, 2)}</td><td class="num">${money(totalCommission, 2)}</td><td class="num">${money(filtered.length ? totalCommission / filtered.length : 0, 2)}</td><td class="num">${ratePct(totalCommission, totalAmount).toFixed(2)}%</td><td></td></tr></tfoot></table></div></div>
       <div class="card-head" style="padding:2px 2px 10px"><h3 style="margin:0">🚦 Class boards · agent-wise commission</h3><span class="dim small">VC4, VC20 aur VC5+ ka apna alag table · har board ka apna CSV</span></div>
@@ -727,8 +740,8 @@ FF.pages = FF.pages || {};
     ]);
     const matrixCsv = U.$('#gvc-matrix-csv', root);
     if (matrixCsv) matrixCsv.addEventListener('click', () => U.downloadCsv(`gv-agent-class-commission-${U.stamp()}.csv`,
-      ['Agent', 'Agent ID', 'TL / Direct', 'VC4 tags', 'VC4 unique tags', 'VC4 commission', 'VC20 tags', 'VC20 unique tags', 'VC20 commission', 'VC5+ tags', 'VC5+ unique tags', 'VC5+ commission', 'VC5+ exact classes', 'Total commission'],
-      matrix.map((m) => [m.label, m.id || '', m.tlName || 'Direct / Unmapped', m.VC4.tags, m.VC4.unique, m.VC4.commission, m.VC20.tags, m.VC20.unique, m.VC20.commission, m['VC5+'].tags, m['VC5+'].unique, m['VC5+'].commission, m.vc5Exact.map(([cls, v]) => `${cls}: ${v.tags} tags / ${v.commission}`).join(' | '), m.totalCommission])));
+      ['Agent', 'Agent ID', 'TL / Direct', 'VC4 tags', 'VC4 unique tags', 'VC4 commission', 'VC4 rate (₹/tag)', 'VC20 tags', 'VC20 unique tags', 'VC20 commission', 'VC20 rate (₹/tag)', 'VC5+ tags', 'VC5+ unique tags', 'VC5+ commission', 'VC5+ rate (₹/tag)', 'VC5+ exact classes', 'Total commission', 'Overall rate (₹/tag)'],
+      matrix.map((m) => [m.label, m.id || '', m.tlName || 'Direct / Unmapped', m.VC4.tags, m.VC4.unique, m.VC4.commission, m.VC4.rate ?? '', m.VC20.tags, m.VC20.unique, m.VC20.commission, m.VC20.rate ?? '', m['VC5+'].tags, m['VC5+'].unique, m['VC5+'].commission, m['VC5+'].rate ?? '', m.vc5Exact.map(([cls, v]) => `${cls}: ${v.tags} tags / ${v.commission}${v.rate !== null && v.rate !== undefined ? ` (${v.rate}/tag)` : ''}`).join(' | '), m.totalCommission, m.rate ?? ''])));
     const varianceCsv = U.$('#gvc-variance-csv', root); if (varianceCsv) varianceCsv.addEventListener('click', () => U.downloadCsv(`gv-class-commission-review-${U.stamp()}.csv`, ['Agent','Agent ID','TL','Class','Tags','Observed commission/tag','Class median/tag','Deviation %','Peer variance amount'], commissionAnomalies.map((r) => [r.agentLabel,r.id,r.tlName,r.classLabel,r.issuances,r.perTag,r.benchmark,r.deviationPct,r.varianceAmount])));
     const gvSlabHeaders = ['Agent','Agent ID','TL','Tags','Slab','Model','Expected payout','Actual payout','Actual minus expected','Status'];
     const gvSlabExportRows = gvSlabResults.map((r) => [r.name,r.id,r.tl,r.count,r.tier,r.model,r.expected,r.actual,r.variance,r.status]);
@@ -1617,18 +1630,36 @@ FF.pages = FF.pages || {};
     const ffAgents = FF.pages.performance.agents(), lowFf = ffAgents.filter((a) => (a.stockTotal || 0) > 0 && (a.avgTotal || 0) > 0 && (a.stockTotal / a.avgTotal) <= 7).length;
     const lowGv = gvReport.filter((a) => (a.stockTotal || 0) > 0 && (a.runrate || 0) > 0 && (a.stockTotal / a.runrate) <= 7).length;
     const gvRows = gvMaster.filter((r) => r.ym === gvMonth), commission = sum(gvRows, (r) => r.commission), amount = sum(gvRows, (r) => r.amount);
-    let ffCommission = null; try { const c = await ffCommissionData(); if (c.amountCol) ffCommission = sum(c.agents.filter((a) => validValue(a.earned)), (a) => a.earned); } catch { /* source optional */ }
+    // FF commission: pehle sheet earned amount; column na ho to REPORT rate × current issuance se
+    // calculate karo (rate hai to "Unavailable" dikhana galat hai).
+    let ffCommission = null, ffCommissionSrc = 'Rate/earned heading REPORT me nahi mili — Settings → FF REPORT commission column';
+    try {
+      const c = await ffCommissionData();
+      const ownValue = (a) => (validValue(a.earned) ? a.earned : (validValue(a.computed) ? a.computed : null));
+      const withVal = (c.agents || []).filter((a) => ownValue(a) !== null);
+      if (withVal.length) {
+        ffCommission = sum(withVal, ownValue);
+        const earnedN = withVal.filter((a) => validValue(a.earned)).length;
+        ffCommissionSrc = earnedN === withVal.length
+          ? `REPORT earned amount · ${earnedN}/${c.agents.length} rows`
+          : c.rateCol && !c.rateCol.missing && !c.rateIsPercent
+            ? `Earned ${earnedN} + rate × tags (col ${c.rateCol.letter}) · ${withVal.length}/${c.agents.length} agents`
+            : `Earned ${earnedN} + computed · ${withVal.length}/${c.agents.length} agents`;
+      } else if (c.rateCol && !c.rateCol.missing) {
+        ffCommissionSrc = c.rateIsPercent ? `Rate ${c.rateCol.letter} percent (%) hai — base amount chahiye` : `Rate ${c.rateCol.letter} mila par values khali — REPORT range / fresh sync check karo`;
+      }
+    } catch { /* source optional */ }
     const today = new Date(); today.setHours(0,0,0,0); const start = new Date(today); start.setDate(start.getDate() - 13);
     const labels = [], ffVals = [], gvVals = [];
     for (let i = 0; i < 14; i++) { const d = new Date(start); d.setDate(start.getDate() + i); const k = U.dateKey(d); labels.push(d.toLocaleDateString('en-IN',{day:'2-digit',month:'short'})); ffVals.push(sum(daily.filter((r) => r.key === k && r.channel === 'First Forward'), (r) => r.n)); gvVals.push(gvMaster.filter((r) => r.date && U.dateKey(r.date) === k).length); }
     const top = aggregateGv(gvRows, 'agent').slice(0, 7);
     root.innerHTML = head('🧭','Management Executive Cockpit','One-screen business pulse · issuance, growth, stock cover, earnings and management exceptions', `${exportButtons('exec-export')} ${printButton}`) + `
       <div class="cockpit-banner"><div><small>Combined month-to-date issuance</small><strong>${U.fmt(ff.total + gv.total)}</strong><span>${esc(U.labelYM(ffMonth))} FF + ${esc(U.labelYM(gvMonth))} GV · FF se GV rows (ID ${esc(FF.config.eir.gvMasterId || '5845036')}) exclude — ${U.fmt(gvRowsInEir)} EIR rows double count nahi</span></div><div class="cockpit-split"><span>First Forward <b>${U.fmt(ff.total)}</b> ${U.deltaHtml(U.growth(ff.total,ffLast.total),{decimals:0})}</span><span>GV Partner <b>${U.fmt(gv.total)}</b> ${U.deltaHtml(U.growth(gv.total,gvLast.total),{decimals:0})}</span></div></div>
-      <div class="ins-metrics">${metric('Projected month-end', U.fmt(ff.projected + gv.projected), `FF ${U.fmt(ff.projected)} · GV ${U.fmt(gv.projected)}`)}${metric('Combined field stock', U.fmt(ffStock + gvStock), `FF ${U.fmt(ffStock)} · GV ${U.fmt(gvStock)}`)}${metric('GV earned commission', money(commission,2), `${money(amount)} transaction amount`, 'good')}${metric('FF reported commission', ffCommission === null ? 'Unavailable' : money(ffCommission,2), ffCommission === null ? 'No commission heading in loaded REPORT' : 'REPORT earned amount')}</div>
+      <div class="ins-metrics">${metric('Projected month-end', U.fmt(ff.projected + gv.projected), `FF ${U.fmt(ff.projected)} · GV ${U.fmt(gv.projected)}`)}${metric('Combined field stock', U.fmt(ffStock + gvStock), `FF ${U.fmt(ffStock)} · GV ${U.fmt(gvStock)}`)}${metric('GV earned commission', money(commission,2), `${money(amount)} transaction amount`, 'good')}${metric('FF commission', ffCommission === null ? 'Unavailable' : money(ffCommission,2), esc(ffCommissionSrc), ffCommission === null ? '' : 'good')}</div>
       <div class="cockpit-grid"><div class="card span2"><div class="card-head"><h3>14-day channel pulse</h3><span class="dim small">Sheet-recorded issuances</span></div>${C.bars({labels,series:[{name:'First Forward',values:ffVals},{name:'GV Partner',values:gvVals}],height:230,showValues:false})}</div><div class="card"><div class="card-head"><h3>Management focus</h3></div><a class="focus-row ${lowFf+lowGv?'risk':''}" href="#/forecast?risk=High"><span>Stock cover ≤ 7 days</span><b>${U.fmt(lowFf+lowGv)}</b><small>FF ${lowFf} · GV ${lowGv}</small></a><a class="focus-row" href="#/dataQuality"><span>Run data quality checks</span><b>Open</b><small>Six source families</small></a><a class="focus-row" href="#/dualChannel"><span>Verified dual-channel agents</span><b>Review</b><small>Barcode + unique-ID evidence</small></a><a class="focus-row" href="#/followups?status=open"><span>Agent/TL follow-ups</span><b>Open</b><small>Owner and due-date timeline</small></a></div></div>
       <div class="split-cards"><div class="card"><div class="card-head"><h3>Channel operating summary</h3></div><div class="exec-channel"><div><b>First Forward</b><span>${U.fmt(ff.total)} issued · ${U.fmt(ffStock)} stock</span><small>${U.fmt(ff.vc4)} VC4 · ${U.fmt(ff.comm)} commercial · ${ff.activeDays} active days</small></div><div><b>GV Partner</b><span>${U.fmt(gv.total)} issued · ${U.fmt(gvStock)} stock</span><small>${U.fmt(gv.vc4)} VC4 · ${U.fmt(gv.comm)} commercial · ${gv.activeAgents} agents</small></div></div></div><div class="card"><div class="card-head"><h3>Top GV commission contributors</h3><a href="#/gvCommission">Full analysis →</a></div>${C.hbars({items:top.map((r)=>({label:r.label,sub:`${r.issuances} tags`,value:r.commission})),format:(v)=>money(v,0),valueLabel:'Commission'})}</div></div>`;
     bindExports(root, 'exec-export', `executive-cockpit-${U.stamp()}`, 'Executive Summary', ['Metric','First Forward','GV Partner','Combined'], [
-      ['Month-to-date issuance',ff.total,gv.total,ff.total+gv.total],['Projected month-end',ff.projected,gv.projected,ff.projected+gv.projected],['Field stock',ffStock,gvStock,ffStock+gvStock],['VC4 issuance',ff.vc4,gv.vc4,ff.vc4+gv.vc4],['Commercial issuance',ff.comm,gv.comm,ff.comm+gv.comm],['Stock cover ≤ 7 days',lowFf,lowGv,lowFf+lowGv],['Reported commission',ffCommission===null?'Unavailable':ffCommission,commission,ffCommission===null?'Partial · GV only':ffCommission+commission]
+      ['Month-to-date issuance',ff.total,gv.total,ff.total+gv.total],['Projected month-end',ff.projected,gv.projected,ff.projected+gv.projected],['Field stock',ffStock,gvStock,ffStock+gvStock],['VC4 issuance',ff.vc4,gv.vc4,ff.vc4+gv.vc4],['Commercial issuance',ff.comm,gv.comm,ff.comm+gv.comm],['Stock cover ≤ 7 days',lowFf,lowGv,lowFf+lowGv],['FF commission (earned / rate × tags)',ffCommission===null?'Unavailable':ffCommission,commission,ffCommission===null?'Partial · GV only':ffCommission+commission]
     ]);
   }
 
