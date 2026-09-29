@@ -228,6 +228,7 @@ window.FF = window.FF || {};
         hideScreen();
         FF.app && FF.app.onLogin && FF.app.onLogin(out.first);
         welcomeToast(state.user, out.first);
+        try { dispatchEvent(new CustomEvent('ff-login', { detail: { first: !!out.first, user: state.user } })); } catch { /* non-browser */ }
       } catch (err) {
         // 🔐 Naye IP OTP: server 428 bhejta hai → OTP screen dikhao.
         if (err.status === 428 && err.data && err.data.otpRequired && mode !== 'signup') { showOtp(err.data); return; }
@@ -271,6 +272,7 @@ window.FF = window.FF || {};
         hideScreen();
         FF.app && FF.app.onLogin && FF.app.onLogin(false);
         welcomeToast(state.user, false);
+        try { dispatchEvent(new CustomEvent('ff-login', { detail: { first: false, user: state.user } })); } catch { /* non-browser */ }
       } catch (err) {
         msgEl.className = 'auth-msg err';
         msgEl.textContent = err.message || 'OTP verify fail';

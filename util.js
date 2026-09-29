@@ -508,7 +508,9 @@ window.FF = window.FF || {};
     return list.slice(0, cap);
   }
 
-  /** 🗣 Voice search — Web Speech API (Indian English). Click again to stop. */
+  /** 🗣 Voice search — Web Speech API (Indian English). Click again to stop.
+   *  opts.onInterim(transcript) → live dictation preview (interimResults on).
+   *  opts.dictation → continuous listening, har final phrase onText se aata hai (bolkar likho). */
   let activeVoice = null;
   function voiceInput(onText, hint, opts) {
     const o = opts || {};
@@ -525,8 +527,8 @@ window.FF = window.FF || {};
       const rec = new SR();
       let gotResult = false;
       rec.lang = o.lang || 'en-IN';
-      rec.interimResults = false;
-      rec.continuous = false;
+      rec.interimResults = !!o.onInterim || !!o.dictation;
+      rec.continuous = !!o.dictation;
       rec.maxAlternatives = 1;
       const cleanup = () => {
         if (button) {
@@ -535,6 +537,7 @@ window.FF = window.FF || {};
           button.removeAttribute('aria-busy');
           button.title = button.dataset.voiceTitle || '🗣 Bol ke search karo';
         }
+        if (o.onEnd) { try { o.onEnd(gotResult); } catch { /* listener error */ } }
         if (activeVoice && activeVoice.rec === rec) activeVoice = null;
       };
       if (button) {
@@ -547,9 +550,18 @@ window.FF = window.FF || {};
       activeVoice = { rec, button };
       toast(hint || '🎤 Bolo… sun raha hoon', 'info');
       rec.onresult = (e) => {
-        const t = e.results && e.results[0] && e.results[0][0] ? String(e.results[0][0].transcript).trim() : '';
-        gotResult = !!t;
-        if (t && onText) onText(t);
+        let interim = '', finalText = '';
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          const t = e.results[i] && e.results[i][0] ? String(e.results[i][0].transcript).trim() : '';
+          if (e.results[i].isFinal) finalText += (finalText ? ' ' : '') + t;
+          else interim += (interim ? ' ' : '') + t;
+        }
+        if (interim && o.onInterim) o.onInterim(interim);
+        if (finalText) {
+          gotResult = true;
+          if (o.onInterim) o.onInterim(''); // interim khatam
+          if (onText) onText(finalText);
+        }
       };
       rec.onerror = (e) => {
         const code = e && e.error;
@@ -560,7 +572,7 @@ window.FF = window.FF || {};
         else if (code !== 'aborted') toast('Awaaz samajh nahi aayi — dobara try karo.', 'warn');
       };
       rec.onend = () => { cleanup(); if (!gotResult && o.onEmpty) o.onEmpty(); };
-      rec.onspeechend = () => { try { rec.stop(); } catch { /* ending */ } };
+      if (!o.dictation) rec.onspeechend = () => { try { rec.stop(); } catch { /* ending */ } };
       rec.start();
       return rec;
     } catch {
@@ -583,6 +595,169 @@ window.FF = window.FF || {};
     return p;
   }
 
+  // ---- 🎙 "Meri awaaz" voice profile — uploaded/recorded sample se TTS tone-match ----------
+  // User apni awaaz ka sample upload/record karta hai → PCM analysis se pitch (Hz), pace
+  // (syllables/sec) aur timbre (brightness) nikalta hai → us hisaab se speechSynthesis ka
+  // pitch/rate set hota hai + best-matching system voice choose hoti hai. Profile localStorage
+  // me sirf derived numbers rakhti hai (audio file store nahi hoti — privacy + size).
+  const clampNum = (n, lo, hi) => Math.min(hi, Math.max(lo, n));
+
+  /** Box-average decimation — analysis ko fast banane ke liye PCM ko ~8kHz par lao. */
+  function resamplePcm(samples, fromRate, toRate) {
+    const src = samples || [];
+    if (!src.length || !(toRate > 0) || !(fromRate > toRate)) return Float32Array.from(src);
+    const ratio = fromRate / toRate;
+    const outLen = Math.floor(src.length / ratio);
+    const out = new Float32Array(outLen);
+    for (let i = 0; i < outLen; i++) {
+      const start = Math.floor(i * ratio), end = Math.min(src.length, Math.floor((i + 1) * ratio) + 1);
+      let s = 0;
+      for (let j = start; j < end; j++) s += src[j];
+      out[i] = s / Math.max(1, end - start);
+    }
+    return out;
+  }
+
+  /** Core DSP (node-testable): Float32 PCM → { hz, pitch, rate, gender, syllPerSec, brightness }.
+   *  Pitch = voiced frames ki median autocorrelation F0; pace = energy-envelope ke syllable
+   *  nuclei peaks/sec; brightness = zero-crossing rate (warm ↔ sharp voice). */
+  function analyzePcm(samples, sampleRate) {
+    const sr = Number(sampleRate) > 0 ? Number(sampleRate) : 8000;
+    const pcm = Float32Array.from(samples || []);
+    const seconds = pcm.length / sr;
+    if (pcm.length < sr * 0.4) return { ok: false, reason: 'Sample bahut chhota hai — kam se kam 2–3 second ki awaaz record/upload karo.', seconds };
+    const win = Math.max(16, Math.round(sr * 0.04)); // 40 ms
+    const hop = Math.max(8, Math.round(sr * 0.02));  // 20 ms hop
+    const energies = [];
+    for (let start = 0; start + win <= pcm.length; start += hop) {
+      let sum2 = 0;
+      for (let i = start; i < start + win; i++) sum2 += pcm[i] * pcm[i];
+      energies.push(Math.sqrt(sum2 / win));
+    }
+    const sortedE = energies.slice().sort((a, b) => a - b);
+    const medianE = sortedE[Math.floor(sortedE.length / 2)] || 0;
+    const peakE = sortedE[Math.floor(sortedE.length * 0.95)] || 0;
+    if (peakE < 0.008) return { ok: false, reason: 'Sample me awaaz nahi mili — mic ke paas bol kar record karo ya clear audio file upload karo.', seconds };
+    const voiceFloor = Math.max(0.012, peakE * 0.22);
+
+    // ---- pitch: har voiced frame par normalized autocorrelation ----
+    const minLag = Math.floor(sr / 400); // 400 Hz max (child/female high)
+    const maxLag = Math.floor(sr / 65);  // 65 Hz min (deep male)
+    const f0s = [];
+    for (let start = 0, fi = 0; start + win <= pcm.length; start += hop, fi++) {
+      const rms = energies[fi];
+      if (!(rms > voiceFloor)) continue;
+      const corr = new Float32Array(maxLag + 2);
+      let bestCorr = 0;
+      for (let lag = minLag; lag <= Math.min(maxLag, win - 2); lag++) {
+        let c = 0, energy = 0;
+        for (let i = 0; i + lag < win; i++) {
+          const a = pcm[start + i];
+          c += a * pcm[start + i + lag];
+          energy += a * a;
+        }
+        corr[lag] = energy > 0 ? c / energy : 0;
+        if (corr[lag] > bestCorr) bestCorr = corr[lag];
+      }
+      if (bestCorr > 0.5) {
+        // Sine me har period-multiple par correlation ~1 hoti hai — pehla significant
+        // peak lo (>= 85% of best), warna 200Hz galat 66Hz padh jayega.
+        let pick = 0;
+        const hi = Math.min(maxLag, win - 2);
+        for (let lag = minLag + 1; lag < hi; lag++) {
+          if (corr[lag] >= bestCorr * 0.85 && corr[lag] >= corr[lag - 1] && corr[lag] >= corr[lag + 1]) { pick = lag; break; }
+        }
+        if (!pick) for (let lag = minLag; lag <= hi; lag++) { if (corr[lag] === bestCorr) { pick = lag; break; } }
+        if (pick) f0s.push(clampNum(sr / pick, 60, 420));
+      }
+    }
+    f0s.sort((a, b) => a - b);
+    const hz = f0s.length ? f0s[Math.floor(f0s.length / 2)] : 0;
+
+    // ---- pace: energy envelope ke local maxima = syllable nuclei ----
+    const smooth = energies.map((e, i) => (energies[i - 1] || e) + e + (energies[i + 1] || e));
+    const smoothPeak = Math.max(...smooth, 1);
+    let peaks = 0;
+    for (let i = 1; i < smooth.length - 1; i++) {
+      if (smooth[i] > smooth[i - 1] && smooth[i] >= smooth[i + 1] && smooth[i] > smoothPeak * 0.24 && energies[i] > voiceFloor) peaks++;
+    }
+    const syllPerSec = clampNum(peaks / Math.max(seconds, 0.5), 1, 8);
+
+    // ---- brightness: zero-crossing rate ----
+    let zc = 0;
+    for (let i = 1; i < pcm.length; i++) if ((pcm[i - 1] < 0) !== (pcm[i] < 0)) zc++;
+    const brightness = (zc / pcm.length) * sr; // crossings per second
+
+    const gender = hz ? (hz < 165 ? 'male' : 'female') : (brightness > 1400 ? 'female' : 'male');
+    // speechSynthesis mapping: ~200Hz ≈ pitch 1.0 (typical default awaaz)
+    const pitch = clampNum(Math.round((hz ? hz / 200 : gender === 'female' ? 1 : 0.7) * 20) / 20, 0.5, 1.6);
+    const rate = clampNum(Math.round((0.82 + (syllPerSec - 3.2) * 0.11) * 20) / 20, 0.75, 1.4);
+    return { ok: true, seconds: Math.round(seconds * 10) / 10, hz: Math.round(hz), pitch, rate, gender, syllPerSec: Math.round(syllPerSec * 10) / 10, brightness: Math.round(brightness), voicedFrames: f0s.length, medianEnergy: Math.round(medianE * 1000) / 1000 };
+  }
+
+  /** Browser path: audio file/recorded blob → decode → analyzePcm (8kHz analysis rate). */
+  async function analyzeVoiceBlob(blob) {
+    const AC = (typeof window !== 'undefined') && (window.AudioContext || window.webkitAudioContext);
+    if (!AC) throw new Error('Audio decoding is browser me support nahi hai — Chrome/Edge try karo.');
+    const ctx = new AC();
+    try {
+      const arr = await blob.arrayBuffer();
+      const audio = await ctx.decodeAudioData(arr);
+      const ch = audio.getChannelData(0);
+      const target = 8000;
+      const pcm = resamplePcm(ch, audio.sampleRate, target);
+      const res = analyzePcm(pcm, target);
+      return { ...res, duration: Math.round((audio.duration || 0) * 10) / 10 };
+    } finally { try { if (ctx.close) ctx.close(); } catch { /* optional */ } }
+  }
+
+  const VOICE_PROFILE_LIMIT = { minSeconds: 1.5, maxSeconds: 45 };
+  /** "Meri awaaz" profile (derived numbers only — audio kabhi store nahi hoti). */
+  function voiceProfile() {
+    const p = voicePrefs();
+    return p && typeof p.profile === 'object' && p.profile && p.profile.pitch ? p.profile : null;
+  }
+  /** Profile save (apply bhi kar do pitch/rate) ya null se clear. */
+  function setVoiceProfile(profile) {
+    if (!profile) return setVoicePrefs({ profile: null, pitch: 0, rate: 0 });
+    const cleanProfile = {
+      pitch: clampNum(Number(profile.pitch) || 1, 0.5, 1.6),
+      rate: clampNum(Number(profile.rate) || 1, 0.75, 1.4),
+      hz: Number(profile.hz) || 0,
+      gender: profile.gender === 'male' ? 'male' : 'female',
+      syllPerSec: Number(profile.syllPerSec) || 0,
+      brightness: Number(profile.brightness) || 0,
+      seconds: Number(profile.seconds) || 0,
+      name: String(profile.name || 'Meri awaaz').slice(0, 40),
+      at: Date.now()
+    };
+    return setVoicePrefs({ profile: cleanProfile, pitch: cleanProfile.pitch, rate: cleanProfile.rate });
+  }
+
+  /** Best system voice: pehle user ki chosen URI, phir language, phir profile gender hint. */
+  function matchVoice(voices, langKey, profile) {
+    const vs = voices || [];
+    const p = voicePrefs();
+    const wantURI = langKey === 'en' ? p.en : p.hi;
+    const chosen = wantURI && vs.find((v) => v.voiceURI === wantURI);
+    if (chosen) return chosen;
+    const langScore = (v) => {
+      const l = String(v.lang || '');
+      if (langKey === 'en') return /^en[-_]IN/i.test(l) ? 0 : /^en/i.test(l) ? 1 : 2;
+      return /^hi[-_]IN/i.test(l) ? 0 : /^hi/i.test(l) ? 1 : 2;
+    };
+    const gender = (profile && profile.gender) || (voiceProfile() && voiceProfile().gender) || '';
+    const genderScore = (v) => {
+      if (!gender) return 0;
+      const n = String(v.name || '').toLowerCase();
+      const fem = /(female|woman|heera|kalpana|neerja|swara|madhur|veena|isha|aditi|samantha|zira|jenny|aria|sonia|google.*हिन्दी)/.test(n);
+      const masc = /(male|man[^a-z]|ravi|hemant|prabhat|kumar|amit|rishabh|david|guy|mark|alex)/.test(n);
+      if (gender === 'female') return fem ? -3 : masc ? 3 : 0;
+      return masc ? -3 : fem ? 3 : 0;
+    };
+    return vs.slice().sort((a, b) => langScore(a) - langScore(b) || genderScore(a) - genderScore(b) || String(a.name || '').localeCompare(String(b.name || '')))[0] || vs[0] || null;
+  }
+
   FF.util = {
     esc, clean, num, fmt, fmtShort, pctOf, growth, fmtPct, fmtSigned, deltaHtml,
     MONTHS, MONTHS_LONG, DAYS, pad2, parseDate, parseMonthKey, ymKey, dateKey, fromDateKey, ymParts, labelYM, labelDate, labelDateKey,
@@ -590,6 +765,7 @@ window.FF = window.FF || {};
     sum, groupSum, topEntries, sortBy, uniq,
     $, $$, h, debounce, setButtonBusy, withButtonBusy, toast, spinner, errorBox, downloadBlob, downloadCsv, tableToRows, slug, stamp, colLetter, colIndex, initTooltip,
     phoneDigits, waLink, mailLink, copyText, suggest,
-    parseDateTime, printReport, recentList, recentAdd, voiceInput, voicePrefs, setVoicePrefs
+    parseDateTime, printReport, recentList, recentAdd, voiceInput, voicePrefs, setVoicePrefs,
+    resamplePcm, analyzePcm, analyzeVoiceBlob, voiceProfile, setVoiceProfile, matchVoice, VOICE_PROFILE_LIMIT
   };
 })(window.FF);
