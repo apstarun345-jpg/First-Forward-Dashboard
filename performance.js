@@ -209,13 +209,19 @@ FF.pages = FF.pages || {};
   function reset() { state.agents = []; state.sourceTable = null; state.allTlGroups = []; }
 
   // ---- filters / kpis -------------------------------------------------------------
+  // 🔠 v3.18 — TL filter ab MULTIPLE SELECT hai: ek saath kai TL (ya "Direct agents") chune ja sakte hain.
+  // state.filters.tl string, array ya Set ho sakta hai — U.asValueSet normalise kar deta hai
+  // (khaali = All TLs, isliye purane `filters.tl = ''` wale code bhi chalte hain).
+  const tlSetOf = () => U.asValueSet(state.filters.tl);
   function applyFilters() {
     const f = state.filters, q = f.q.trim().toLowerCase();
-    state.filtered = state.agents.filter((a) => !(q && !a.searchText.includes(q)) && !(f.tl === '__direct__' ? !a.tlExcluded : (f.tl && a.tlKey !== f.tl && norm(a.tlName) !== norm(f.tl))) && !(f.status && (a.agentStatus || '(blank)') !== f.status) && !(f.active && a.activeCat !== f.active) && !(f.alert && (a.tlStockAlert || '(blank)') !== f.alert) && !(f.priority && a.priority !== f.priority) && !(f.tlPriority && prio(a.tlPriority) !== f.tlPriority) && !(f.commPriority && prio(a.tlCommPriority) !== f.commPriority) && !(f.hideZero && !a.hasIssuance));
+    const tlSet = tlSetOf();
+    const tlOk = (a) => !tlSet.size || [...tlSet].some((v) => (v === '__direct__' ? a.tlExcluded : a.tlKey === v || norm(a.tlName) === norm(v)));
+    state.filtered = state.agents.filter((a) => !(q && !a.searchText.includes(q)) && tlOk(a) && !(f.status && (a.agentStatus || '(blank)') !== f.status) && !(f.active && a.activeCat !== f.active) && !(f.alert && (a.tlStockAlert || '(blank)') !== f.alert) && !(f.priority && a.priority !== f.priority) && !(f.tlPriority && prio(a.tlPriority) !== f.tlPriority) && !(f.commPriority && prio(a.tlCommPriority) !== f.commPriority) && !(f.hideZero && !a.hasIssuance));
     state.tlGroups = buildTlGroups(state.filtered, false);
     state.page = 1;
   }
-  const filtersActive = () => { const f = state.filters; return Boolean(f.q || f.tl || f.status || f.active || f.alert || f.priority || f.tlPriority || f.commPriority || f.hideZero); };
+  const filtersActive = () => { const f = state.filters; return Boolean(f.q || tlSetOf().size || f.status || f.active || f.alert || f.priority || f.tlPriority || f.commPriority || f.hideZero); };
   function countBy(list, getter) { const m = new Map(); list.forEach((i) => { const k = getter(i); m.set(k, (m.get(k) || 0) + 1); }); return [...m.entries()].sort((a, b) => b[1] - a[1]); }
   function kpiData() {
     const list = state.filtered;
@@ -819,7 +825,7 @@ FF.pages = FF.pages || {};
       <div id="pf-kpis"></div>
       <div class="card controls"><div class="seg" id="pf-tabs">${[['overview', '🏠 Overview'], ['agents', '🧑‍💼 Agents'], ['tls', '👥 TLs'], ['stock', '📦 Stock Report'], ['alerts', '🚨 Alerts']].map(([k, l]) => `<button class="seg-btn ${state.view === k ? 'on' : ''}" data-view="${k}">${l}</button>`).join('')}</div>
         <div class="ctrl-row"><input class="input" id="pf-q" placeholder="Filter list: agent / ID / TL / mobile…" value="${esc(state.filters.q)}">
-          <label>TL <select id="pf-tl"><option value="">All TLs</option>${directAgentCount ? `<option value="__direct__" ${state.filters.tl === '__direct__' ? 'selected' : ''}>🚫 Direct Agents · APS (${directAgentCount})</option>` : ''}${tlOpts().map((t) => `<option value="${esc(t.tlKey)}" ${t.tlKey === state.filters.tl || norm(t.tlName) === norm(state.filters.tl) ? 'selected' : ''}>${esc(t.tlName || t.tlKey)} · ${t.agentCount}</option>`).join('')}</select></label>
+          <label>TL <button type="button" class="btn small" id="pf-tl" title="Ek se zyada TL chuno (multiple select)">👥 All TLs</button></label>
           <label>Stock alert <select id="pf-alert"><option value="">All</option>${countBy(state.agents, (a) => a.tlStockAlert || '(blank)').map(([v, c]) => `<option value="${esc(v)}" ${v === state.filters.alert ? 'selected' : ''}>${esc(v)} · ${c}</option>`).join('')}</select></label>
           <label class="check"><input type="checkbox" id="pf-hidezero" ${state.filters.hideZero ? 'checked' : ''}> Hide 0-issuance</label>
           <button class="btn small" id="pf-clear">✕ Clear</button></div>
@@ -854,9 +860,19 @@ FF.pages = FF.pages || {};
       }
       refilter();
     }, 400));
-    [['pf-tl', 'tl'], ['pf-alert', 'alert']].forEach(([id, key]) => U.$(`#${id}`, body).addEventListener('change', (e) => { state.filters[key] = e.target.value; refilter(); }));
+    // 🔠 TL = multiple selection (ek saath kai TL / Direct agents)
+    const tlMulti = U.multiSelect(U.$('#pf-tl', body), {
+      title: 'TL', icon: '👥', allLabel: 'All TLs', noneLabel: 'Clear', placeholder: 'TL search…',
+      options: () => [
+        ...(directAgentCount ? [{ value: '__direct__', label: `🚫 Direct Agents · APS`, icon: '', count: directAgentCount }] : []),
+        ...tlOpts().map((t) => ({ value: t.tlKey, label: t.tlName || t.tlKey, count: t.agentCount }))
+      ],
+      selected: () => state.filters.tl,
+      onChange: (vals) => { state.filters.tl = vals; refilter(); }
+    });
+    [['pf-alert', 'alert']].forEach(([id, key]) => U.$(`#${id}`, body).addEventListener('change', (e) => { state.filters[key] = e.target.value; refilter(); }));
     U.$('#pf-hidezero', body).addEventListener('change', (e) => { state.filters.hideZero = e.target.checked; refilter(); });
-    U.$('#pf-clear', body).addEventListener('click', () => { state.filters = EMPTY_FILTERS(); U.$('#pf-q', body).value = ''; ['pf-tl', 'pf-alert'].forEach((id) => { U.$(`#${id}`, body).value = ''; }); U.$('#pf-hidezero', body).checked = false; refilter(); });
+    U.$('#pf-clear', body).addEventListener('click', () => { state.filters = EMPTY_FILTERS(); U.$('#pf-q', body).value = ''; U.$('#pf-alert', body).value = ''; U.$('#pf-hidezero', body).checked = false; if (tlMulti) tlMulti.refresh(); refilter(); });
     body.addEventListener('click', (e) => {
       const tab = e.target.closest('#pf-tabs .seg-btn');
       if (tab) { state.view = tab.dataset.view; history.replaceState(null, '', `#/performance?view=${state.view}`); draw(); return; }

@@ -477,6 +477,158 @@ window.FF = window.FF || {};
     }
     return { close, refresh: compute, reposition: place, destroy };
   }
+
+  // ---- 🔠 MULTI-SELECT popover (multiple selection anywhere) ------------------------------------
+  /** Normalise any filter value — Set / Array / string / 'all' / '' — into a Set of values.
+      An EMPTY set means "All" (no restriction), which is what every multi-select filter uses. */
+  function asValueSet(value) {
+    const drop = (x) => { const s = clean(x); return s && s !== 'all' && s !== '*'; };
+    if (value instanceof Set) return new Set([...value].filter(drop));
+    if (Array.isArray(value)) return new Set(value.filter(drop));
+    const one = clean(value);
+    return drop(one) ? new Set([one]) : new Set();
+  }
+  /** Human label for a multi-select: "All", "High", or "High + Medium" (max 2 shown, then +N). */
+  function valueSetLabel(values, options, allLabel) {
+    const set = asValueSet(values);
+    const all = clean(allLabel) || 'All';
+    if (!set.size) return all;
+    const names = [...set].map((v) => {
+      const o = (options || []).find((x) => String(x.value) === String(v));
+      return (o && (o.label || o.value)) || v;
+    });
+    if (names.length === 1) return names[0];
+    if (names.length === 2) return `${names[0]} + ${names[1]}`;
+    return `${names[0]} +${names.length - 1}`;
+  }
+
+  /**
+   * multiSelect(button, opts) → { open, close, refresh, destroy, selected }
+   * Body-portalled checkbox popover so it can never be clipped by a card / table overflow.
+   * opts: {
+   *   title: 'Priority',                       popover heading
+   *   allLabel: 'All', noneLabel: 'Clear',
+   *   options: () => [{ value, label, icon, cls, count, disabled }],
+   *   selected: () => ['High','Medium'],       current values (array / Set / string)
+   *   onChange(valuesArray),                   called after every tick (live filtering)
+   *   searchable: true, placeholder: 'Search…',
+   *   allowEmpty: true                         false = at least one value must stay ticked
+   * }
+   * The button gets a `.msel-btn` look + a `.msel-count` badge + a summary label.
+   */
+  function multiSelect(button, opts) {
+    const o = { title: '', allLabel: 'All', noneLabel: 'Clear', searchable: true, placeholder: 'Search…', allowEmpty: true, icon: '', ...opts };
+    if (!button) return null;
+    const pop = h(`<div class="msel-pop" hidden role="dialog" aria-label="${esc(o.title || 'Select')}"><div class="msel-head"><b>${esc(o.title || 'Select')}</b><button type="button" class="msel-x" aria-label="Close">✕</button></div><div class="msel-body"></div><div class="msel-foot"></div></div>`);
+    document.body.appendChild(pop);
+    button.classList.add('msel-btn');
+    if (!button.hasAttribute('aria-haspopup')) button.setAttribute('aria-haspopup', 'dialog');
+    let destroyed = false, q = '';
+
+    const options = () => (typeof o.options === 'function' ? o.options() : o.options) || [];
+    const selected = () => asValueSet(typeof o.selected === 'function' ? o.selected() : o.selected);
+
+    function label() {
+      const set = selected(), all = options();
+      const text = valueSetLabel(set, all, o.allLabel);
+      button.innerHTML = `${o.icon ? `<span class="msel-ico">${esc(o.icon)}</span>` : ''}<span class="msel-label">${esc(text)}</span>${set.size ? `<b class="msel-count">${set.size}</b>` : ''}<span class="msel-chev">▾</span>`;
+      button.classList.toggle('on', set.size > 0);
+      button.setAttribute('aria-expanded', pop.hidden ? 'false' : 'true');
+      button.title = set.size ? `${o.title || 'Filter'}: ${text}` : `${o.title || 'Filter'}: ${o.allLabel}`;
+    }
+    function place() {
+      if (destroyed || !button.isConnected || pop.hidden) return;
+      const rect = button.getBoundingClientRect();
+      const vw = Math.max(240, window.innerWidth || document.documentElement.clientWidth || 1024);
+      const vh = Math.max(240, window.innerHeight || document.documentElement.clientHeight || 768);
+      const gap = 8, edge = 8;
+      const width = Math.min(340, Math.max(240, rect.width + 60, vw - edge * 2));
+      const left = Math.max(edge, Math.min(rect.left, vw - width - edge));
+      const below = vh - rect.bottom - gap - edge;
+      const above = rect.top - gap - edge;
+      const openAbove = below < 240 && above > below;
+      const available = Math.max(140, openAbove ? above : below);
+      pop.style.position = 'fixed';
+      pop.style.left = `${Math.round(left)}px`;
+      pop.style.width = `${Math.round(width)}px`;
+      pop.style.maxHeight = `${Math.round(Math.min(440, available))}px`;
+      if (openAbove) { pop.style.top = 'auto'; pop.style.bottom = `${Math.max(edge, Math.round(vh - rect.top + gap))}px`; }
+      else { pop.style.bottom = 'auto'; pop.style.top = `${Math.min(vh - edge, Math.round(rect.bottom + gap))}px`; }
+    }
+    function paint() {
+      const set = selected(), all = options();
+      const list = all.filter((it) => {
+        if (!q) return true;
+        return `${it.label} ${it.value} ${it.icon || ''}`.toLowerCase().includes(q);
+      });
+      const body = pop.querySelector('.msel-body');
+      const foot = pop.querySelector('.msel-foot');
+      body.innerHTML = `${o.searchable ? `<input class="input msel-q" type="search" placeholder="${esc(o.placeholder)}" value="${esc(q)}" aria-label="Search options">` : ''}<div class="msel-list">${list.length ? list.map((it) => {
+        const v = String(it.value);
+        const on = set.has(v);
+        return `<label class="msel-item ${esc(it.cls || '')} ${on ? 'on' : ''}"><input type="checkbox" value="${esc(v)}" ${on ? 'checked' : ''}><span class="msel-ico">${esc(it.icon || '')}</span><span class="msel-txt">${esc(it.label)}</span>${it.count != null ? `<b class="msel-n">${esc(fmt(it.count))}</b>` : ''}</label>`;
+      }).join('') : '<div class="msel-empty">Koi option nahi mila</div>'}</div>`;
+      foot.innerHTML = `<button type="button" class="msel-mini" data-msel="all">✓ ${esc(o.allLabel === 'All' ? 'Select all' : o.allLabel)}</button><button type="button" class="msel-mini" data-msel="none">✕ ${esc(o.noneLabel)}</button><button type="button" class="btn small primary" data-msel="done">Done</button>`;
+      const input = body.querySelector('.msel-q');
+      if (input && document.activeElement !== input) {
+        input.addEventListener('input', (e) => { q = e.target.value.toLowerCase().trim(); paint(); const el = pop.querySelector('.msel-q'); if (el) { el.focus(); try { el.setSelectionRange(q.length, q.length); } catch { /* search inputs */ } } });
+      }
+      place();
+    }
+    function commit(values) {
+      const next = asValueSet(values);
+      if (!next.size && !o.allowEmpty) return;
+      if (typeof o.onChange === 'function') o.onChange([...next]);
+      label(); paint();
+    }
+    function close() { if (pop.hidden) return; pop.hidden = true; button.setAttribute('aria-expanded', 'false'); }
+    function open() {
+      if (pop.hidden === false) { close(); return; }
+      pop.hidden = false; q = ''; paint(); label();
+      requestAnimationFrame(place);
+    }
+    const onClick = (e) => {
+      const box = e.target.closest('input[type="checkbox"]');
+      if (box) {
+        e.preventDefault();
+        const set = selected(), v = String(box.value);
+        if (set.has(v)) set.delete(v); else set.add(v);
+        commit(set);
+        return;
+      }
+      const act = e.target.closest('[data-msel]');
+      if (act) {
+        const a = act.dataset.msel;
+        if (a === 'done') { close(); return; }
+        if (a === 'none') { commit([]); return; }
+        if (a === 'all') { commit(options().map((it) => it.value)); return; }
+      }
+      if (e.target.closest('.msel-x')) close();
+    };
+    const onBtnClick = (e) => { e.preventDefault(); e.stopPropagation(); open(); };
+    const outside = (e) => { if (destroyed) return; if (!pop.hidden && !pop.contains(e.target) && e.target !== button && !button.contains(e.target)) close(); };
+    const onKey = (e) => { if (e.key === 'Escape' && !pop.hidden) { close(); button.focus(); } };
+    const viewportChange = () => { if (destroyed) { destroy(); return; } if (!pop.hidden) place(); };
+    function destroy() {
+      if (destroyed) return;
+      destroyed = true;
+      pop.remove();
+      button.removeEventListener('click', onBtnClick);
+      document.removeEventListener('mousedown', outside);
+      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('resize', viewportChange);
+      window.removeEventListener('scroll', viewportChange, true);
+    }
+    button.addEventListener('click', onBtnClick);
+    pop.addEventListener('click', onClick);
+    document.addEventListener('mousedown', outside);
+    document.addEventListener('keydown', onKey);
+    window.addEventListener('resize', viewportChange);
+    window.addEventListener('scroll', viewportChange, true);
+    label();
+    return { open, close, refresh: () => { label(); if (!pop.hidden) paint(); }, destroy, get selected() { return [...selected()]; } };
+  }
+
   function colLetter(index) {
     let s = '';
     let i = index + 1;
@@ -960,6 +1112,7 @@ window.FF = window.FF || {};
     $, $$, h, debounce, setButtonBusy, withButtonBusy, toast, spinner, errorBox, downloadBlob, downloadCsv, tableToRows, slug, stamp, colLetter, colIndex, initTooltip,
     phoneDigits, waLink, mailLink, copyText, suggest,
     parseDateTime, printReport, recentList, recentAdd, voiceInput, voicePrefs, setVoicePrefs,
+    multiSelect, asValueSet, valueSetLabel,
     resamplePcm, analyzePcm, analyzeVoiceBlob, startVoiceCapture, analyzeVoiceCapture, voiceProfile, setVoiceProfile, matchVoice, VOICE_PROFILE_LIMIT,
     wakeNorm, wakeWordMatch
   };

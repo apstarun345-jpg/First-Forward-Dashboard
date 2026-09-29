@@ -502,13 +502,15 @@ window.FF = window.FF || {};
   }
 
   // ---------- voice output (default voices + "Meri awaaz" profile) ----------
-  /** speak(text, { onEnd, cancel, force }) — chaining ke liye onEnd; cancel:false se queue hota hai. */
+  /** speak(text, { onEnd, onError, cancel, force }) — chaining ke liye onEnd; cancel:false se queue hota hai.
+      onError(reason) browser ke autoplay/voice error par chalta hai (Office Bell isi se ting par fallback karta hai). */
   function speak(text, opts) {
     const o = opts || {};
     let done = false;
     const finish = () => { if (!done) { done = true; if (o.onEnd) { try { o.onEnd(); } catch { /* listener */ } } } };
-    if (!('speechSynthesis' in window)) { finish(); return; }
-    if (!speakOn && !o.force) { finish(); return; }
+    const fail = (reason) => { if (done) return; if (o.onError) { try { o.onError(reason); } catch { /* listener */ } } finish(); };
+    if (!('speechSynthesis' in window)) { fail('unsupported'); return; }
+    if (!speakOn && !o.force) { fail('muted'); return; }
     try {
       if (o.cancel !== false) window.speechSynthesis.cancel();
       const plain = String(text).replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
@@ -523,9 +525,10 @@ window.FF = window.FF || {};
       u.rate = Number(p.rate) > 0 ? Number(p.rate) : 1.02;
       u.pitch = Number(p.pitch) > 0 ? Number(p.pitch) : 1;
       u.onend = finish;
-      u.onerror = finish;
+      // Chrome autoplay policy: bina user gesture ke speak() "not-allowed" error deta hai.
+      u.onerror = (ev) => fail((ev && ev.error) || 'error');
       window.speechSynthesis.speak(u);
-    } catch { finish(); }
+    } catch (err) { fail(err && err.message ? err.message : 'exception'); }
   }
 
   // ---------- UI ----------

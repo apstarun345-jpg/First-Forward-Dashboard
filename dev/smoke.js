@@ -549,6 +549,16 @@ await run('v3.16.1 · Office Bell + Voice Announcer (agent-wise query + announce
   if (!/Rahul/.test(multi) || !/Priya/.test(multi)) throw new Error('multi-agent announce text galat: ' + multi);
   const blast = FF.officeBell.announceText([], 55);
   if (!/55/.test(blast)) throw new Error('blast announce text galat: ' + blast);
+  // 🔊 v3.18 — voice unlock + prefs + log (DOM shim me speechSynthesis nahi hai, isliye
+  // sirf API surface + prefs round-trip verify karte hain; real browser path voice-unlock.test.js me hai)
+  for (const fn of ['unlock', 'speakAnnounce', 'queueAnnounce', 'flushPending', 'prefs', 'setPrefs', 'logList']) {
+    if (typeof FF.officeBell[fn] !== 'function') throw new Error(`FF.officeBell.${fn} missing`);
+  }
+  FF.officeBell.setPrefs({ minTags: 5, gv: false });
+  if (FF.officeBell.prefs().minTags !== 5 || FF.officeBell.prefs().gv !== false) throw new Error('bell prefs save nahi hue');
+  FF.officeBell.setPrefs({ minTags: 1, gv: true });
+  FF.officeBell.logAdd({ at: Date.now(), ff: 2, gv: 1, total: 3, who: 'smoke (3)' });
+  if (!FF.officeBell.logList().length) throw new Error('bell announcement log khali hai');
   log(`      agent-wise rows ${t.rows.length} · "${single}"`);
 }, false);
 await run('v3.11 · Activity Calendar (heatmap + streak + sparkline board)', async () => {
@@ -822,6 +832,22 @@ await run('professional page dispatch planner (boxes + pick-list)', async () => 
   for (const label of ['data-dp-sort="net"', 'data-dp-open="', 'WITH stock', 'W/O stock', 'Cover']) if (!table.includes(label)) throw new Error(`planner table me "${label}" nahi mila`);
   const tls = DP.collectTls(DP.collectAgents());
   if (!tls.length) throw new Error('TL-wise rows nahi bane');
+  // 🔠 v3.18 — multiple selection: multi-select controls, row picks + bulk bar, saved filters
+  for (const id of ['dp2-tl', 'dp2-prio', 'dp2-need', 'dp2-ch', 'dp2-selbar']) {
+    if (!html.includes(id)) throw new Error(`dispatch planner me multi-select control "${id}" nahi mila`);
+  }
+  if (!/data-dp-pick-all/.test(html)) throw new Error('dispatch table me select-all checkbox nahi hai');
+  if (!/aria-pressed=/.test(html)) throw new Error('filter pills multi-select (aria-pressed) nahi hain');
+  DP.state.ch = new Set(['ff', 'gv']); DP.state.prio = new Set(['High', 'Medium']);
+  const both = DP.collectAgents().map((x) => DP.withCalc(x, 'total')).filter((x) => DP.passes(x));
+  if (!both.some((x) => x.ch === 'ff') || !both.some((x) => x.ch === 'gv')) throw new Error('dono channel ek saath select nahi ho rahe');
+  const multiChips = DP.chipsHtml(DP.collectAgents().map((x) => DP.withCalc(x, 'total')));
+  if (!/data-dp-f="prio:High" aria-pressed="true"/.test(multiChips) || !/data-dp-f="prio:Medium" aria-pressed="true"/.test(multiChips)) throw new Error('multiple selected pills pressed mark nahi ho rahe');
+  DP.clearPicks(); DP.togglePick(rows[0].uid); DP.togglePick(rows[1].uid);
+  if (DP.pickedCount !== 2) throw new Error('row multi-select kaam nahi kar raha');
+  DP.state.ch = new Set(); DP.state.prio = new Set(); DP.clearPicks();
+  if (!FF.util.multiSelect || !FF.util.asValueSet || !FF.util.valueSetLabel) throw new Error('U.multiSelect helpers missing');
+  if (FF.util.valueSetLabel(['High', 'Medium'], [{ value: 'High', label: 'High' }, { value: 'Medium', label: 'Medium' }]) !== 'High + Medium') throw new Error('multi-select label galat');
 }, true);
 
 await run('professional page TL scorecard (score · grade · target)', async () => {
@@ -883,7 +909,7 @@ await run('auth helpers (avatar/role)', async () => {
 });
 await run('sheet.render StockDataa', () => pages.sheet.render(root(), { name: 'StockDataa' }, {}), true);
 await run('sheet.render REPORT', () => pages.sheet.render(root(), { name: 'REPORT' }, {}), true);
-await run('settings.render (all tabs)', async () => { for (const tab of ['account', 'brand', 'sources', 'access', 'data', 'rules', 'features', 'contacts', 'users', 'links', 'audit', 'backup']) { await pages.settings.render(root(), { tab }, {}); await settle(20); } });
+await run('settings.render (all tabs)', async () => { for (const tab of ['account', 'sound', 'brand', 'sources', 'access', 'data', 'rules', 'features', 'contacts', 'users', 'links', 'audit', 'backup']) { await pages.settings.render(root(), { tab }, {}); await settle(20); } });
 await run('v3.16.1 · My access me sirf granted cards (locked ⛔ cards nahi)', async () => {
   const realCan = FF.auth.can;
   // member simulation: sirf Management ke 4 pages + ek sheet + ek action

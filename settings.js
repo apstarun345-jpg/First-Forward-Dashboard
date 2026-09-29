@@ -6,7 +6,7 @@ FF.pages = FF.pages || {};
   'use strict';
   const U = FF.util, A = FF.auth;
   const esc = U.esc;
-  const TABS = [['account', '👤 My account'], ['brand', '🎨 Branding & images'], ['sources', '🗂️ Sheets & tabs'], ['access', '🔐 Access matrix'], ['data', '🔌 Data source'], ['direct', '🧍 Direct agents'], ['rules', '📐 Thresholds'], ['features', '🎛 Features'], ['contacts', '📲 Contacts & sharing'], ['users', '👥 Users & access'], ['links', '🔗 Personal links'], ['audit', '📜 Audit log'], ['backup', '☁️ Storage & backup']];
+  const TABS = [['account', '👤 My account'], ['sound', '🔊 Sound & voice'], ['brand', '🎨 Branding & images'], ['sources', '🗂️ Sheets & tabs'], ['access', '🔐 Access matrix'], ['data', '🔌 Data source'], ['direct', '🧍 Direct agents'], ['rules', '📐 Thresholds'], ['features', '🎛 Features'], ['contacts', '📲 Contacts & sharing'], ['users', '👥 Users & access'], ['links', '🔗 Personal links'], ['audit', '📜 Audit log'], ['backup', '☁️ Storage & backup']];
   let tab = 'account';
   let storage = null;
   let settings = null, defaults = null, usersCache = null, permsCache = [];
@@ -660,6 +660,81 @@ FF.pages = FF.pages || {};
     const t = settings.thresholds || {};
     return section('📐 Thresholds & display', `<div class="form-grid">${field('Stock cover 🔴 red below (days)', numI('thresholds.coverRed', t.coverRed, 'min="0"'))}${field('Stock cover 🟠 orange below (days)', numI('thresholds.coverOrange', t.coverOrange, 'min="0"'))}${field('Stock cover 🟡 amber below (days)', numI('thresholds.coverAmber', t.coverAmber, 'min="0"'), '🟢 green above this')}${field('"Went quiet" after (inactive days)', numI('thresholds.inactiveDays', t.inactiveDays, 'min="1"'))}${field('Top N in rankings', numI('thresholds.topN', t.topN, 'min="3" max="50"'))}${field('Default rows per page', numI('pageSize', settings.pageSize, 'min="10" max="500"'))}</div>${check('allowSignup', settings.allowSignup !== false, 'Login page par "Sign up" allow karo (naye account admin approval ke baad hi chalte hain)')}${saveBar('rules')}`);
   }
+  // ---- 🔊 Sound & voice (Office Bell + Voice Announcer) — v3.18 ----------------------------------
+  /** Naye tags ki awaaz yahan se test / configure hoti hai (topbar 🔊 menu ka hi doosra darwaza). */
+  function soundTab() {
+    const B = FF.officeBell;
+    const p = B ? B.prefs() : { minTags: 1, ff: true, gv: true, ting: true, muteUntil: 0 };
+    const unlocked = !!(B && B.unlocked);
+    const badge = unlocked ? '<span class="badge green">SOUND UNLOCKED ✓</span>'
+      : `<span class="badge ${B && B.lastError ? 'red' : 'amber'}">${B && B.lastError ? `BLOCKED · ${esc(B.lastError)}` : 'TAP TO UNLOCK'}</span>`;
+    const log = B ? B.logList() : [];
+    const clock = (t) => { try { return new Date(t).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
+    return `${section(`🔊 Office Bell · naye tags ki awaaz ${badge}`, `
+      <p class="dim small">Sheet me naya tag aate hi office me khabar — <b>🎙️ bol kar</b> ya <b>🔔 ting</b> se.
+      Browser autoplay rokta hai, isliye pehli baar <b>Enable sound</b> dabana zaroori hai (ek hi baar).</p>
+      <div class="form-grid">
+        ${field('🎙️ Voice announcer', `<label class="check"><input type="checkbox" data-snd="voice" ${B && B.voiceOn ? 'checked' : ''}> Naye tags bol kar sunao</label>`, 'Off karne par sirf ting bajega')}
+        ${field('🔔 Ting sound', `<label class="check"><input type="checkbox" data-snd="ting" ${p.ting !== false ? 'checked' : ''}> WebAudio ting bajao</label>`)}
+        ${field('🟦 First Forward tags', `<label class="check"><input type="checkbox" data-snd="ff" ${p.ff !== false ? 'checked' : ''}> FF ke naye tags announce karo</label>`)}
+        ${field('🟩 GV Partner tags', `<label class="check"><input type="checkbox" data-snd="gv" ${p.gv !== false ? 'checked' : ''}> GV ke naye tags announce karo</label>`)}
+        ${field('🏷️ Kam se kam kitne tags par bolo', `<select id="snd-min">${[1, 2, 5, 10, 25].map((n) => `<option value="${n}" ${Number(p.minTags) === n ? 'selected' : ''}>${n} tag${n > 1 ? 's' : ''}</option>`).join('')}</select>`, 'Chhote bursts par chup rehna ho to badhao')}
+        ${field('⏱️ Poll interval', '<span class="dim">30 second (fixed)</span>', 'Har 30 sec aaj ka agent-wise count check hota hai')}
+      </div>
+      <div class="save-bar">
+        <button class="btn primary" id="snd-unlock">🔊 Enable sound</button>
+        <button class="btn" id="snd-test">🎙️ Test voice</button>
+        <button class="btn" id="snd-mute">${B && Number(p.muteUntil) > Date.now() ? '🔔 Unmute' : '🔕 Mute 30 min'}</button>
+        <button class="btn" id="snd-check">↻ Check now</button>
+        <span class="dim small" id="snd-msg"></span>
+      </div>
+      <p class="dim small">Awaaz assistant ki voice settings follow karti hai — <b>👤 My account → 🎙 Assistant voice</b> se language, pitch aur "Meri awaaz" profile badlo.</p>`)}
+      ${section(`🕘 Aaj ki khabar <span class="dim">(${log.length})</span>`, log.length
+        ? `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Time</th><th class="num">Tags</th><th>Channel</th><th>Top agents</th></tr></thead><tbody>${log.slice(0, 30).map((l) => `<tr><td>${esc(clock(l.at))}</td><td class="num"><b>+${U.fmt(l.total || 0)}</b></td><td>${l.ff ? `🟦 ${U.fmt(l.ff)}` : ''}${l.ff && l.gv ? ' · ' : ''}${l.gv ? `🟩 ${U.fmt(l.gv)}` : ''}</td><td class="dim">${esc(l.who || '—')}</td></tr>`).join('')}</tbody></table></div>`
+        : '<p class="dim small">Abhi tak koi naya tag announce nahi hua. Bell 🔔 on karo aur sheet me naya tag aane do.</p>')}
+      ${section('🎯 Voice kyun nahi aa rahi thi? (fix)', `<ul class="guide"><li><b>Problem:</b> Chrome / Edge <b>autoplay policy</b> ki wajah se bina user gesture ke <code>speechSynthesis.speak()</code> block kar dete hain (<code>not-allowed</code>). Office Bell background me poll karta hai, isliye awaaz chup-chaap fail ho jaati thi.</li><li><b>Fix 1:</b> pehle click / tap / keypress par audio <b>unlock</b> hota hai (AudioContext resume + silent utterance).</li><li><b>Fix 2:</b> unlock se pehle aayi khabar <b>queue</b> me jaati hai aur unlock hote hi boli jaati hai — kuch miss nahi hota.</li><li><b>Fix 3:</b> speak fail ho to <b>ting</b> bajta hai aur <b>"Enable sound"</b> nudge dikhta hai — ab pata chal jaata hai ki awaaz block hai.</li><li><b>Fix 4:</b> tab background me ho to bhi poll chalta hai; awaaz tab visible hote hi nikalti hai.</li></ul>`)}
+      ${section('🔠 Multiple selection (v3.18)', `<ul class="guide"><li><b>🚚 Dispatch Planner</b> — Channel, Type, Priority, Need aur TL filters par ek saath <b>kai values</b> choose karo (jaise FF + GV, ya High + Medium).</li><li>Table me har row par <b>☑ checkbox</b> — kai agents/TL select karke ek saath <b>CSV / Excel / WhatsApp / Summary</b> nikalo.</li><li><b>🏆 Performance</b> — TL filter bhi multiple select hai.</li><li><b>📧 Dispatch email</b> — schedule me ek saath kai channel aur priority bhej sakte ho.</li></ul>`)}`;
+  }
+  function bindSoundTab(body, redraw) {
+    const B = FF.officeBell;
+    if (!B) return;
+    const draw = typeof redraw === 'function' ? redraw : () => {};
+    const msg = U.$('#snd-msg', body);
+    const say = (t) => { if (msg) msg.textContent = t; };
+    U.$$('[data-snd]', body).forEach((el) => el.addEventListener('change', () => {
+      const k = el.dataset.snd;
+      if (k === 'voice') { try { localStorage.setItem('ff-office-bell-voice', el.checked ? '1' : '0'); } catch { /* ignore */ } if (el.checked) B.unlock('retry'); }
+      else B.setPrefs({ [k]: el.checked });
+      say('Saved ✓');
+    }));
+    const min = U.$('#snd-min', body);
+    if (min) min.addEventListener('change', () => { B.setPrefs({ minTags: Number(min.value) || 1 }); say('Saved ✓'); });
+    const unlockBtn = U.$('#snd-unlock', body);
+    if (unlockBtn) unlockBtn.addEventListener('click', () => {
+      B.unlock('retry');
+      B.speakAnnounce('Awaaz chalu ho gayi — ab har naya tag bol kar sunaunga.', 3)
+        .then((ok) => { say(ok ? 'Voice chalu ✓' : `Block hai: ${B.lastError || 'browser'}`); U.toast(ok ? '🔊 Voice ready ✓' : '⚠️ Voice block hai', ok ? 'ok' : 'err'); draw(); });
+    });
+    const testBtn = U.$('#snd-test', body);
+    if (testBtn) testBtn.addEventListener('click', () => {
+      B.unlock('retry');
+      B.speakAnnounce('Ye ek test hai — Rahul ne paanch naye tags issue kiye.', 5)
+        .then((ok) => { say(ok ? 'Test bol diya ✓' : `Block hai: ${B.lastError || 'browser'}`); });
+    });
+    const muteBtn = U.$('#snd-mute', body);
+    if (muteBtn) muteBtn.addEventListener('click', () => {
+      const isMuted = Number(B.prefs().muteUntil || 0) > Date.now();
+      B.setPrefs({ muteUntil: isMuted ? 0 : Date.now() + 30 * 60 * 1000 });
+      say(isMuted ? 'Unmute ✓' : '30 minute ke liye mute ✓');
+      draw();
+    });
+    const checkBtn = U.$('#snd-check', body);
+    if (checkBtn) checkBtn.addEventListener('click', async () => {
+      say('Live count le rahe hain…');
+      try { const c = await B.countsToday(); say(`Aaj: FF ${U.fmt(c.ff)} · GV ${U.fmt(c.gv)} · baseline set — agle naye tag par khabar milegi.`); }
+      catch (err) { say(`Error: ${err.message}`); }
+    });
+  }
   function contactsTab() {
     const c = settings.contacts || {};
     return section('📲 Contacts & sharing', `<div class="form-grid">${field('Team WhatsApp number', txt('contacts.teamWhatsapp', c.teamWhatsapp, 'inputmode="tel" placeholder="91xxxxxxxxxx"'), 'WhatsApp buttons is number par khulenge (blank = number choose karo)')}${field('Team email', txt('contacts.teamEmail', c.teamEmail, 'type="email"'), 'Email buttons ka default "To"')}${field('WhatsApp group link', txt('contacts.teamGroupLink', c.teamGroupLink, 'placeholder="https://chat.whatsapp.com/…"'))}${field('Message signature', txt('contacts.signature', c.signature))}</div><p class="dim small">Agent / TL profile me "WhatsApp TL" button REPORT sheet ke TL mobile par jaata hai (permission "See mobile numbers" chahiye).</p>${saveBar('contacts')}`);
@@ -1239,6 +1314,7 @@ FF.pages = FF.pages || {};
       U.$$('#set-tabs .seg-btn', root).forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
       history.replaceState(null, '', `#/settings?tab=${tab}`);
       if (tab === 'account') body.innerHTML = accountTab();
+      else if (tab === 'sound') { body.innerHTML = soundTab(); bindSoundTab(body, draw); }
       else if (tab === 'brand') body.innerHTML = brandTab();
       else if (tab === 'sources') body.innerHTML = sourcesTab();
       else if (tab === 'access') { body.innerHTML = U.spinner('Access matrix…'); await accessTab(body); }

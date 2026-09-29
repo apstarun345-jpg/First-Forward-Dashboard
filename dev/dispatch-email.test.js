@@ -109,3 +109,41 @@ test('email builder includes selected CSV attachments and leaves unknown priorit
   const summaryOnly = dispatchEmailContent(plan, { ...schedule, sections: ['summary'] }, 'FF + GV', '2026-09-29');
   assert.equal(summaryOnly.attachments.length, 0);
 });
+
+/* 🔠 v3.18 — multiple selection in the scheduled dispatch email. */
+test('channel + priority accept multiple values (array, comma or plus separated)', () => {
+  const both = normalizeDispatchEmail({ ...DEFAULT_DISPATCH_EMAIL, channel: ['ff', 'gv'], priority: 'High,Medium', sections: ['agents'] });
+  assert.equal(both.channel, 'ff,gv');
+  assert.equal(both.priority, 'High,Medium');
+  assert.equal(normalizeDispatchEmail({ ...DEFAULT_DISPATCH_EMAIL, channel: 'ff+gv' }).channel, 'ff,gv');
+  assert.equal(normalizeDispatchEmail({ ...DEFAULT_DISPATCH_EMAIL, channel: [] }).channel, 'all', 'khaali = All');
+  assert.equal(normalizeDispatchEmail({ ...DEFAULT_DISPATCH_EMAIL, priority: 'all' }).priority, 'all');
+  assert.throws(() => normalizeDispatchEmail({ ...DEFAULT_DISPATCH_EMAIL, channel: 'ff,xv' }), /Channel/i);
+  assert.throws(() => normalizeDispatchEmail({ ...DEFAULT_DISPATCH_EMAIL, priority: 'High,URGENT' }), /Priority/i);
+});
+
+test('multiple channels + priorities widen the emailed rows, single values behave as before', () => {
+  const multi = normalizeDispatchEmail({ ...DEFAULT_DISPATCH_EMAIL, channel: 'ff,gv', priority: 'High', sections: ['agents'] });
+  const plan = buildDispatchPlan(sources, multi, { settings, days: 25, now });
+  assert.deepEqual(plan.agents.map((r) => r.name).sort(), ['GV Ramesh', 'Ravi Kumar']);
+
+  const two = buildDispatchPlan(sources, { ...multi, priority: 'High,Low' }, { settings, days: 25, now });
+  assert.deepEqual(two.agents.map((r) => r.name).sort(), ['GV Free', 'GV Ramesh', 'Ravi Kumar', 'Sita Devi']);
+
+  // single value = purana behaviour (regression lock)
+  const single = buildDispatchPlan(sources, { ...multi, channel: 'gv', priority: 'High' }, { settings, days: 25, now });
+  assert.deepEqual(single.agents.map((r) => r.name), ['GV Ramesh']);
+});
+
+test('email subject/labels read well for a multi-selection', () => {
+  const multi = normalizeDispatchEmail({ ...DEFAULT_DISPATCH_EMAIL, channel: 'ff,gv', priority: 'High,other', sections: ['summary', 'agents'] });
+  const plan = buildDispatchPlan(sources, multi, { settings, days: 25, now });
+  const email = dispatchEmailContent(plan, multi, 'ApnaPayment', '29 Sep 2026');
+  assert.match(email.subject, /^Dispatch Planner · 29 Sep 2026$/);
+  assert.match(email.text, /First Forward \+ GV Partner · All tags · High priority \+ Other \/ source value/);
+
+  const one = normalizeDispatchEmail({ ...DEFAULT_DISPATCH_EMAIL, channel: 'gv', priority: 'High', sections: ['summary'] });
+  const oneEmail = dispatchEmailContent(buildDispatchPlan(sources, one, { settings, days: 25, now }), one, 'ApnaPayment', '29 Sep 2026');
+  assert.match(oneEmail.subject, /· GV Partner$/);
+  assert.match(oneEmail.text, /GV Partner · All tags · High priority/);
+});

@@ -35,11 +35,41 @@ FF.pages = FF.pages || {};
   const CH = { ff: { label: 'First Forward', short: 'FF', icon: '🟦' }, gv: { label: 'GV Partner', short: 'GV', icon: '🟩' } };
 
   // ---- state (page se bahar jaake wapas aane par filters yaad rehte hain) -------------------------------
+  // v3.18 — MULTIPLE SELECTION: ch / type / prio / need ab Sets hain. Khaali set = "All" (koi rok nahi),
+  // isliye ek saath 2+ channels / priorities / needs choose ho sakte hain. Purane string values
+  // (state.ch = 'ff' jaisa) bhi kaam karte hain — U.asValueSet normalise kar deta hai.
+  const LS_STATE = 'ff-dispatch-planner-state';
+  const emptySet = () => new Set();
   const state = {
-    view: 'agents', ch: 'all', type: 'all', prio: 'all', basis: 'total', need: 'all', tl: '', q: '', limit: 100,
+    view: 'agents', ch: emptySet(), type: emptySet(), prio: emptySet(), basis: 'total', need: emptySet(),
+    tl: [], q: '', limit: 100,
     sort: { agents: { key: 'net', dir: 'desc' }, tls: { key: 'net', dir: 'desc' } }
   };
+  // Row multi-select — ticked agents/TLs (uid) for bulk WhatsApp / CSV / Excel / summary.
+  const picked = new Set();
   const FILTER_KEYS = ['view', 'ch', 'type', 'prio', 'basis', 'need', 'tl', 'q'];
+  const SET_DIMS = ['ch', 'type', 'prio', 'need'];
+
+  /** Remember the chosen filters so the planner looks the same on the next visit. */
+  function saveState() {
+    try {
+      localStorage.setItem(LS_STATE, JSON.stringify({
+        view: state.view, ch: [...U.asValueSet(state.ch)], type: [...U.asValueSet(state.type)],
+        prio: [...U.asValueSet(state.prio)], need: [...U.asValueSet(state.need)],
+        basis: state.basis, tl: [...U.asValueSet(state.tl)], q: state.q
+      }));
+    } catch { /* private mode */ }
+  }
+  function loadState() {
+    let s = null;
+    try { s = JSON.parse(localStorage.getItem(LS_STATE) || 'null'); } catch { s = null; }
+    if (!s || typeof s !== 'object') return;
+    SET_DIMS.forEach((k) => { state[k] = U.asValueSet(s[k]); });
+    state.tl = [...U.asValueSet(s.tl)];
+    if (['agents', 'tls'].includes(s.view)) state.view = s.view;
+    if (['total', 'vc4', 'comm'].includes(s.basis)) state.basis = s.basis;
+    if (typeof s.q === 'string') state.q = s.q;
+  }
 
   // ---- data ---------------------------------------------------------------------------------------------
   const gvOn = () => !!(FF.gv && (FF.gv.enabled ? FF.gv.enabled() : true));
@@ -126,6 +156,8 @@ FF.pages = FF.pages || {};
   }
 
   // ---- filtering / sorting ------------------------------------------------------------------------------
+  // Har DIM ek value par test karta hai; `passes` set ke kisi bhi value par OR kar deta hai
+  // (multi-select). Khaali set = sab pass.
   const DIMS = {
     ch: (r, v) => v === 'all' || r.ch === v,
     type: (r, v) => v === 'all' || (v === 'direct' ? r.direct : !r.direct),
@@ -134,7 +166,14 @@ FF.pages = FF.pages || {};
     tl: (r, v) => !v || (r.kind === 'tl' ? norm(r.name) === norm(v) : norm(r.tl) === norm(v)),
     q: (r, v) => { const q = clean(v).toLowerCase(); return !q || [r.name, r.id, r.tl, r.directLabel, r.ch === 'gv' ? 'gv' : 'ff first forward', r.priority].join(' ').toLowerCase().includes(q); }
   };
-  const passes = (r, skip) => Object.keys(DIMS).every((k) => k === skip || DIMS[k](r, state[k]));
+  /** Multi-select aware filter test. `skip` = ek dim mat lagao (chip counters ke liye). */
+  const passes = (r, skip) => Object.keys(DIMS).every((k) => {
+    if (k === skip) return true;
+    if (k === 'tl') return [...U.asValueSet(state.tl)].some((v) => DIMS.tl(r, v)) || U.asValueSet(state.tl).size === 0;
+    const set = U.asValueSet(state[k]);
+    if (!set.size) return true;                       // khaali = All
+    return [...set].some((v) => DIMS[k](r, v));        // koi bhi chosen value match kare
+  });
   const SORTERS = {
     name: (r) => clean(r.name).toLowerCase(), tl: (r) => clean(r.direct ? r.directLabel : r.tl).toLowerCase(), prio: (r) => PRIO_RANK[r.priority],
     last: (r) => r.lastV, cur: (r) => r.curV, rate: (r) => r.rate, required: (r) => r.required, stock: (r) => r.stockV, net: (r) => r.net, gross: (r) => r.gross, cover: (r) => r.cover,
@@ -199,7 +238,7 @@ FF.pages = FF.pages || {};
   }
   function head(view) {
     const s = state.sort[view];
-    return `<thead><tr><th class="dp2-idx">#</th>${columns(view).map((c) => {
+    return `<thead><tr><th class="dp2-pick"><input type="checkbox" data-dp-pick-all title="Visible rows select karo" aria-label="Select visible rows"></th><th class="dp2-idx">#</th>${columns(view).map((c) => {
       const on = c.k && s.key === c.k;
       return `<th class="${c.num ? 'num ' : ''}${c.k ? 'dp2-sort ' : ''}${on ? 'on ' : ''}${c.hot ? `hot${c.hot}` : ''}" ${c.k ? `data-dp-sort="${c.k}"` : ''}><span>${esc(c.t)}${c.k ? `<i>${on ? (s.dir === 'asc' ? '▲' : '▼') : '↕'}</i>` : ''}</span>${c.sub ? `<small>${esc(c.sub)}</small>` : ''}</th>`;
     }).join('')}</tr></thead>`;
@@ -207,8 +246,9 @@ FF.pages = FF.pages || {};
   function rowHtml(r, i, view) {
     const tlCell = r.direct ? typeLabel(r) : r.tl ? `<a class="dp2-tl" data-dp-tl="${esc(r.ch)}|${esc(r.tl)}" title="TL ka poora summary">${esc(r.tl)}</a>` : '<span class="dim">—</span>';
     const nameCell = `<div class="dp2-name"><b>${esc(r.name)}</b><small>${chBadge(r.ch)}${r.id ? ` <span>${esc(r.id)}</span>` : ''}${r.direct && view === 'tls' ? ` <span class="direct-chip">🚫 direct</span>` : ''}</small></div>`;
-    return `<tr class="dp2-row ${r.direct ? 'is-direct' : ''} ${r.cover != null && r.cover < 7 && !r.direct ? 'is-low' : ''}" data-dp-open="${r.uid}">
-      <td class="dp2-idx">${i + 1}</td><td>${nameCell}</td>${view === 'tls' ? `<td class="num">${fmt(r.agents)}</td>` : `<td>${tlCell}</td>`}<td>${prioBadge(r.priority)}</td>
+    const on = picked.has(r.uid);
+    return `<tr class="dp2-row ${r.direct ? 'is-direct' : ''} ${r.cover != null && r.cover < 7 && !r.direct ? 'is-low' : ''} ${on ? 'is-picked' : ''}" data-dp-open="${r.uid}">
+      <td class="dp2-pick"><input type="checkbox" data-dp-pick="${r.uid}" ${on ? 'checked' : ''} aria-label="Select ${esc(r.name)}"></td><td class="dp2-idx">${i + 1}</td><td>${nameCell}</td>${view === 'tls' ? `<td class="num">${fmt(r.agents)}</td>` : `<td>${tlCell}</td>`}<td>${prioBadge(r.priority)}</td>
       <td class="num">${fmt(r.lastV)}</td><td class="num"><b>${fmt(r.curV)}</b>${growthChip(r.c.growth)}</td><td class="num">${fmt(r.rate, true)}</td><td class="num">${fmt(r.required)}</td><td class="num">${fmt(r.stockV)}</td>
       <td class="num dp2-hot1"><b>${fmt(r.net)}</b></td><td class="num dp2-hot2"><b>${fmt(r.gross)}</b></td><td class="num">${coverCell(r.cover)}</td>
       <td><span class="dp2-act ${r.action.cls}">${r.action.t}</span></td></tr>`;
@@ -217,8 +257,8 @@ FF.pages = FF.pages || {};
     const shown = list.slice(0, state.limit);
     const t = agg(list);
     const label = view === 'tls' ? 'TLs' : 'agents';
-    const foot = list.length ? `<tfoot><tr class="row-total"><td></td><td colspan="${view === 'tls' ? 1 : 1}">Total · ${fmt(list.length)} ${label}</td><td class="num">${view === 'tls' ? fmt(U.sum(list, (r) => r.agents)) : ''}</td><td></td><td class="num">${fmt(t.last)}</td><td class="num">${fmt(t.cur)}</td><td class="num">${fmt(t.rate, true)}</td><td class="num">${fmt(t.required)}</td><td class="num">${fmt(t.stock)}</td><td class="num dp2-hot1">${fmt(t.net)}</td><td class="num dp2-hot2">${fmt(t.gross)}</td><td class="num">${coverCell(t.cover)}</td><td></td></tr></tfoot>` : '';
-    const body = shown.map((r, i) => rowHtml(r, i, view)).join('') || `<tr><td colspan="14"><div class="empty-state">Is filter par koi ${label === 'TLs' ? 'TL' : 'agent'} nahi mila<br><span class="dim small">Filters clear karke dekho</span></div></td></tr>`;
+    const foot = list.length ? `<tfoot><tr class="row-total"><td></td><td></td><td colspan="${view === 'tls' ? 1 : 1}">Total · ${fmt(list.length)} ${label}</td><td class="num">${view === 'tls' ? fmt(U.sum(list, (r) => r.agents)) : ''}</td><td></td><td class="num">${fmt(t.last)}</td><td class="num">${fmt(t.cur)}</td><td class="num">${fmt(t.rate, true)}</td><td class="num">${fmt(t.required)}</td><td class="num">${fmt(t.stock)}</td><td class="num dp2-hot1">${fmt(t.net)}</td><td class="num dp2-hot2">${fmt(t.gross)}</td><td class="num">${coverCell(t.cover)}</td><td></td></tr></tfoot>` : '';
+    const body = shown.map((r, i) => rowHtml(r, i, view)).join('') || `<tr><td colspan="15"><div class="empty-state">Is filter par koi ${label === 'TLs' ? 'TL' : 'agent'} nahi mila<br><span class="dim small">Filters clear karke dekho</span></div></td></tr>`;
     return `<div class="table-wrap dp2-wrap"><table class="dp2-table">${head(view)}<tbody>${body}</tbody>${foot}</table></div>
       ${list.length > shown.length ? `<div class="dp2-more"><button class="btn small" data-dp-more="1">⬇ Aur dikhao (${fmt(list.length - shown.length)} baaki)</button><span class="dim small">Showing ${fmt(shown.length)} / ${fmt(list.length)} · sort karne par poori list sort hoti hai</span></div>` : ''}`;
   }
@@ -238,32 +278,54 @@ FF.pages = FF.pages || {};
     ].join('');
   }
 
-  // ---- filter chips -------------------------------------------------------------------------------------
+  // ---- filter chips (MULTIPLE SELECTION) ---------------------------------------------------------------
+  // Ek saath kai values ON ho sakti hain — "All" pill poora set clear kar deta hai.
+  const FILTER_OPTIONS = {
+    ch: { label: 'Channel', icon: '🌐', all: '🌐 Both', opts: [['ff', '🟦 First Forward', 'ff'], ['gv', '🟩 GV Partner', 'gv']] },
+    type: { label: 'Type', icon: '👥', all: '👥 All', opts: [['managed', '🧑‍💼 TL-managed', ''], ['direct', '🚫 Direct agents', 'violet']] },
+    prio: { label: 'Priority', icon: '🎚️', all: 'All', opts: [['High', '🔴 High', 'red'], ['Medium', '🟠 Medium', 'amber'], ['Low', '🟢 Low', 'green'], ['other', '📄 Other / source', 'gray']] },
+    basis: { label: 'Tags', icon: '🏷️', all: '🏷️ All tags', opts: [['vc4', '🚗 VC4', ''], ['comm', '🚛 Commercial', '']], single: true },
+    need: { label: 'Need', icon: '🚚', all: 'All', opts: [['need', '🚚 Dispatch chahiye', ''], ['low', '🚨 Cover < 7 din', 'red'], ['zero', '0 stock', '']] }
+  };
   function chipsHtml(all) {
-    const grp = (dim, label, opts) => {
-      const items = opts.map(([v, text, cls]) => {
-        const n = all.filter((r) => passes(r, dim) && (dim === 'basis' ? true : DIMS[dim] ? DIMS[dim](r, v) : true)).length;
-        const on = state[dim] === v;
-        return `<button class="dp2-pill ${cls || ''} ${on ? 'on' : ''}" data-dp-f="${dim}:${v}">${text}${dim === 'basis' ? '' : ` <b>${fmt(n)}</b>`}</button>`;
+    const grp = (dim) => {
+      const def = FILTER_OPTIONS[dim];
+      const set = dim === 'basis' ? U.asValueSet(state.basis === 'total' ? '' : state.basis) : U.asValueSet(state[dim]);
+      const items = def.opts.map(([v, text, cls]) => {
+        // 'basis' (All tags / VC4 / Commercial) single-select hai — uska count nahi dikhate.
+        const n = def.single ? null : all.filter((r) => passes(r, dim) && DIMS[dim](r, v)).length;
+        const on = set.has(v);
+        return `<button type="button" class="dp2-pill ${cls || ''} ${on ? 'on' : ''}" data-dp-f="${dim}:${v}" aria-pressed="${on ? 'true' : 'false'}" title="${def.single ? '' : (on ? 'Click to remove' : 'Click to add') + ' — multiple select ho sakta hai'}">${text}${n == null ? '' : ` <b>${fmt(n)}</b>`}</button>`;
       }).join('');
-      return `<div class="dp2-grp"><span class="dp2-lbl">${label}</span><div class="dp2-pills">${items}</div></div>`;
+      const allOn = !set.size;
+      const allPill = def.single
+        ? `<button type="button" class="dp2-pill ${allOn ? 'on' : ''}" data-dp-f="${dim}:all" aria-pressed="${allOn ? 'true' : 'false'}" title="Poore ${def.label} par wapas jao">${def.all}</button>`
+        : `<button type="button" class="dp2-pill ${allOn ? 'on' : ''}" data-dp-f="${dim}:all" aria-pressed="${allOn ? 'true' : 'false'}" title="Poora ${def.label} filter hatao">${def.all} <b>${fmt(all.filter((r) => passes(r, dim)).length)}</b></button>`;
+      const multi = !def.single && set.size > 1 ? `<span class="dp2-multi" title="${esc([...set].join(' + '))}">+${set.size} selected</span>` : '';
+      return `<div class="dp2-grp"><span class="dp2-lbl">${def.label}${multi}</span><div class="dp2-pills">${allPill}${items}</div></div>`;
     };
-    return [
-      grp('ch', 'Channel', [['all', '🌐 Both'], ['ff', '🟦 First Forward', 'ff'], ['gv', '🟩 GV Partner', 'gv']]),
-      grp('type', 'Type', [['all', '👥 All'], ['managed', '🧑‍💼 TL-managed'], ['direct', '🚫 Direct agents', 'violet']]),
-      grp('prio', 'Priority', [['all', 'All'], ['High', '🔴 High', 'red'], ['Medium', '🟠 Medium', 'amber'], ['Low', '🟢 Low', 'green'], ['other', '📄 Other / source', 'gray']]),
-      grp('basis', 'Tags', [['total', '🏷️ All tags'], ['vc4', '🚗 VC4'], ['comm', '🚛 Commercial']]),
-      grp('need', 'Need', [['all', 'All'], ['need', '🚚 Dispatch chahiye'], ['low', '🚨 Cover < 7 din', 'red'], ['zero', '0 stock']])
-    ].join('');
+    return Object.keys(FILTER_OPTIONS).map(grp).join('');
+  }
+  /** Filter chips ke liye option list (multiSelect popover ke liye bhi yahi use hota hai). */
+  function filterOptions(dim, all) {
+    const def = FILTER_OPTIONS[dim];
+    if (!def || def.single || typeof DIMS[dim] !== 'function') return [];
+    return def.opts.map(([v, text, cls]) => ({ value: v, label: text, cls, count: all.filter((r) => passes(r, dim) && DIMS[dim](r, v)).length }));
   }
 
   // ---- export / share -----------------------------------------------------------------------------------
   const CSV_HEAD = (view) => [view === 'tls' ? 'TL' : 'Agent', 'ID', 'Channel', 'Type', view === 'tls' ? 'Agents' : 'TL', 'Priority', 'Last month', 'This month', 'Run-rate / day', `Required (× ${U.suggestDays()} din)`, 'Stock', 'Dispatch WITH stock', 'Dispatch W/O stock', 'Cover (din)', 'Status'];
   const csvRow = (r, view) => [r.name, r.id, CH[r.ch].label, r.direct ? 'Direct' : 'TL-managed', view === 'tls' ? r.agents : (r.direct ? r.directLabel : r.tl), r.priority, r.lastV, r.curV, Number(r.rate.toFixed(2)), r.required, r.stockV, r.net, r.gross, r.cover == null ? '' : Number(r.cover.toFixed(1)), r.action.t.replace(/^\S+\s/, '')];
+  /** Channel filter ka readable label — multi-select ke saath "First Forward + GV Partner". */
+  function channelLabel() {
+    const set = U.asValueSet(state.ch);
+    if (!set.size) return 'FF + GV';
+    return [...set].map((v) => (CH[v] || {}).label || v).join(' + ');
+  }
   function waText(list, view) {
     const t = agg(list);
     const lines = [`*🚚 Dispatch plan · ${U.suggestDays()} din* (${new Date().toLocaleDateString('en-IN')})`,
-      `${state.ch === 'all' ? 'FF + GV' : CH[state.ch].label} · ${BASIS[state.basis]} · ${fmt(t.count)} ${view === 'tls' ? 'TLs' : 'agents'}`,
+      `${channelLabel()} · ${BASIS[state.basis]} · ${fmt(t.count)} ${view === 'tls' ? 'TLs' : 'agents'}`,
       `Run-rate ${fmt(t.rate, true)}/day (÷ ${U.runRateDays()} din) · Required ${fmt(t.required)}`,
       `WITH stock *${fmt(t.net)}* · W/O stock *${fmt(t.gross)}*`, ''];
     [...list].filter((r) => r.net > 0).sort((a, b) => b.net - a.net).slice(0, 15).forEach((r, i) => lines.push(`${i + 1}. ${r.name} (${CH[r.ch].short}${r.direct ? ' · direct' : r.tl && view !== 'tls' ? ` · ${r.tl}` : ''}) — ${fmt(r.net)} · w/o ${fmt(r.gross)} · cover ${r.cover == null ? '—' : fmt(r.cover, true)} din`));
@@ -300,7 +362,7 @@ FF.pages = FF.pages || {};
     if (key === 'low') top = list.filter((r) => r.cover != null && r.cover < 7);
     if (key === 'net') top = list.filter((r) => r.net > 0);
     top = sortRows(top, { key: sortKey, dir: asc ? 'asc' : 'desc' }).slice(0, 25);
-    const body = openDrawer({ kicker: `🚚 Dispatch Planner · ${view === 'tls' ? 'TL-wise' : 'Agent-wise'} summary`, title: `${icon} ${title}`, sub: esc(`${state.ch === 'all' ? 'FF + GV' : CH[state.ch].label} · ${BASIS[state.basis]} · run-rate = issue ÷ ${el} din · required = run-rate × ${days} din`), body: '<div id="dp2-drawer-slot"></div>', actions: '' });
+    const body = openDrawer({ kicker: `🚚 Dispatch Planner · ${view === 'tls' ? 'TL-wise' : 'Agent-wise'} summary`, title: `${icon} ${title}`, sub: esc(`${channelLabel()} · ${BASIS[state.basis]} · run-rate = issue ÷ ${el} din · required = run-rate × ${days} din`), body: '<div id="dp2-drawer-slot"></div>', actions: '' });
     if (!body) return;
     const slot = U.$('#dp2-drawer-slot', body) || body;
     slot.innerHTML = `<div class="mp">
@@ -344,6 +406,33 @@ FF.pages = FF.pages || {};
     };
   }
 
+  /** ✅ Multi-select ka summary drawer — jo rows tick kiye unka combined plan. */
+  function selectionDrawer(rows, ctx) {
+    if (!rows || !rows.length) return;
+    const t = agg(rows);
+    const days = U.suggestDays(), el = U.runRateDays();
+    const boxes = Math.ceil(t.net / Math.max(1, Number((FF.config.dispatch || {}).tagsPerBox) || 25));
+    const body = openDrawer({
+      kicker: '🚚 Dispatch Planner · selected rows', title: `✅ ${fmt(rows.length)} selected`,
+      sub: esc(`${channelLabel()} · ${BASIS[state.basis]} · run-rate = issue ÷ ${el} din · required = run-rate × ${days} din`),
+      body: '<div id="dp2-drawer-slot"></div>', actions: ''
+    });
+    if (!body) return;
+    const slot = U.$('#dp2-drawer-slot', body) || body;
+    const needy = sortRows(rows.filter((r) => !r.direct && r.net > 0), { key: 'net', dir: 'desc' });
+    slot.innerHTML = `<div class="mp"><div class="mp-kpis">
+      <div class="mp-kpi k1"><small>Rows selected</small><b>${fmt(t.count)}</b><em>${fmt(t.ff)} FF · ${fmt(t.gv)} GV</em></div>
+      <div class="mp-kpi k2"><small>This month</small><b>${fmt(t.cur)}</b><em>last ${fmt(t.last)} ${t.growth == null ? '' : U.pctHtml(t.growth)}</em></div>
+      <div class="mp-kpi k3"><small>Run-rate / day</small><b>${fmt(t.rate, true)}</b><em>÷ ${fmt(el)} din</em></div>
+      <div class="mp-kpi k4"><small>Required · ${fmt(days)} din</small><b>${fmt(t.required)}</b><em>stock ${fmt(t.stock)}</em></div>
+      <div class="mp-kpi k5"><small>WITH stock</small><b>${fmt(t.net)}</b><em>≈ ${fmt(boxes)} box</em></div>
+      <div class="mp-kpi k6"><small>W/O stock</small><b>${fmt(t.gross)}</b><em>cover ${t.cover == null ? '—' : `${fmt(t.cover, true)} din`}</em></div></div>
+      ${aggTable('🌐 Channel-wise', [['🟦 First Forward', rows.filter((r) => r.ch === 'ff')], ['🟩 GV Partner', rows.filter((r) => r.ch === 'gv')], ['Total', rows]])}
+      ${aggTable('🧑‍💼 Type', [['TL-managed', rows.filter((r) => !r.direct)], ['Direct agents (tags only)', rows.filter((r) => r.direct)]])}
+      ${topTable(`🚚 Dispatch list · ${fmt(needy.length)} ko chahiye`, needy.slice(0, 200), [['This month', (x) => fmt(x.curV)], ['Run-rate', (x) => fmt(x.rate, true)], ['Stock', (x) => fmt(x.stockV)], ['WITH stock', (x) => `<b class="sug-chip">${fmt(x.net)}</b>`], ['W/O stock', (x) => fmt(x.gross)], ['Cover', (x) => coverCell(x.cover)]])}</div>`;
+    bindDrawer(body, ctx);
+  }
+
   function personOf(r) {
     return { kind: `${r.ch}-${r.kind}`, name: r.name, sub: r.id, tlSet: new Set(r.tl ? [r.tl] : []), classMap: new Map(), bars: new Set(), direct: r.direct, directLabel: r.directLabel, kicker: `🚚 Dispatch Planner · ${CH[r.ch].label} ${r.kind === 'tl' ? 'TL' : 'agent'}` };
   }
@@ -362,6 +451,7 @@ FF.pages = FF.pages || {};
   // ---- page ---------------------------------------------------------------------------------------------
   async function render(root, params) {
     params = params || {};
+    loadState();                       // pichli baar ke filters (multi-select) wapas lao
     // URL / assistant se aaye params
     const legacy = { channel: 'ch', pool: '' };
     const incoming = {};
@@ -369,7 +459,13 @@ FF.pages = FF.pages || {};
     if (params.channel && ['ff', 'gv', 'all'].includes(params.channel)) incoming.ch = params.channel;
     if (params.pool === 'direct') incoming.type = 'direct';
     if (params.priority) incoming.prio = params.priority;
-    if (Object.keys(incoming).length) Object.assign(state, incoming, { limit: 100 });
+    if (Object.keys(incoming).length) {
+      // URL/assistant params string ya comma-separated list ho sakte hain — Set bana do.
+      const toSet = (v) => (typeof v === 'string' ? U.asValueSet(v.split(/[,+]/)) : U.asValueSet(v));
+      SET_DIMS.forEach((k) => { if (incoming[k] !== undefined) incoming[k] = toSet(incoming[k]); });
+      if (incoming.tl !== undefined) incoming.tl = [...toSet(incoming.tl)];
+      Object.assign(state, incoming, { limit: 100 });
+    }
     if (!['agents', 'tls'].includes(state.view)) state.view = 'agents';
     void legacy;
 
@@ -390,9 +486,9 @@ FF.pages = FF.pages || {};
           <label class="fld"><span>Hour (IST)</span><input class="input" id="dp2-email-hour" type="number" min="0" max="23" value="${mailHour}"></label>
           <label class="fld dp-mail-weekday" data-dp-mail-weekday ${savedMail.kind === 'weekly' ? '' : 'hidden'}><span>Weekday</span><select class="select" id="dp2-email-weekday">${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((d, i) => opt(String(i), d, String(mailWeekday))).join('')}</select></label>
           <label class="fld dp-mail-monthday" data-dp-mail-monthday ${savedMail.kind === 'monthly' ? '' : 'hidden'}><span>Day of month</span><select class="select" id="dp2-email-day">${Array.from({ length: 28 }, (_, i) => opt(String(i + 1), `${i + 1}`, String(mailDay))).join('')}</select></label>
-          <label class="fld"><span>Channel</span><select class="select" id="dp2-email-channel">${opt('all', 'First Forward + GV', savedMail.channel || 'all')}${opt('ff', 'First Forward only', savedMail.channel || 'all')}${opt('gv', 'GV Partner only', savedMail.channel || 'all')}</select></label>
+          <label class="fld"><span>Channel <small>(multiple select)</small></span><button type="button" class="btn small" id="dp2-email-channel">🌐 Both channels</button></label>
           <label class="fld"><span>Tag basis</span><select class="select" id="dp2-email-basis">${opt('total', 'All tags', savedMail.basis || 'total')}${opt('vc4', 'VC4', savedMail.basis || 'total')}${opt('comm', 'Commercial', savedMail.basis || 'total')}</select></label>
-          <label class="fld"><span>Priority filter</span><select class="select" id="dp2-email-priority">${opt('all', 'All priorities', savedMail.priority || 'all')}${opt('High', 'High', savedMail.priority || 'all')}${opt('Medium', 'Medium', savedMail.priority || 'all')}${opt('Low', 'Low', savedMail.priority || 'all')}${opt('other', 'Other / source value', savedMail.priority || 'all')}</select></label>
+          <label class="fld"><span>Priority filter <small>(multiple select)</small></span><button type="button" class="btn small" id="dp2-email-priority">🎚️ All priorities</button></label>
           <label class="fld"><span>Maximum rows per CSV</span><select class="select" id="dp2-email-rows">${[50, 100, 250, 500].map((n) => opt(String(n), `${n} rows`, String(savedMail.maxRows || 250))).join('')}</select></label>
         </div>
         <div class="dp-mail-sections"><b>Data to send</b><label class="check"><input type="checkbox" data-dp-mail-section="summary" ${mailSections.includes('summary') ? 'checked' : ''}> Summary</label><label class="check"><input type="checkbox" data-dp-mail-section="agents" ${mailSections.includes('agents') ? 'checked' : ''}> Agent-wise CSV</label><label class="check"><input type="checkbox" data-dp-mail-section="tls" ${mailSections.includes('tls') ? 'checked' : ''}> TL-wise CSV</label></div>
@@ -428,14 +524,28 @@ FF.pages = FF.pages || {};
         enabled: U.$('#dp2-email-enabled', root).checked,
         recipients: U.$('#dp2-email-to', root).value.trim(),
         sections: U.$$('[data-dp-mail-section]:checked', root).map((el) => el.dataset.dpMailSection),
-        channel: U.$('#dp2-email-channel', root).value,
+        channel: mailChannel.length ? mailChannel.join(',') : 'all',
         basis: U.$('#dp2-email-basis', root).value,
-        priority: U.$('#dp2-email-priority', root).value,
+        priority: mailPriority.length ? mailPriority.join(',') : 'all',
         maxRows: Number(U.$('#dp2-email-rows', root).value),
         kind: kindEl.value,
         hour: Number(U.$('#dp2-email-hour', root).value),
         weekday: Number(U.$('#dp2-email-weekday', root).value),
         day: Number(U.$('#dp2-email-day', root).value)
+      });
+      // 🔠 multiple selection — ek saath kai channel / priority email me bheje ja sakte hain.
+      const splitList = (v) => String(v || '').split(/[,+]/).map((x) => x.trim()).filter((x) => x && x !== 'all');
+      let mailChannel = splitList(savedMail.channel);
+      let mailPriority = splitList(savedMail.priority);
+      U.multiSelect(U.$('#dp2-email-channel', root), {
+        title: 'Channel', icon: '🌐', allLabel: 'Both channels', noneLabel: 'Clear', searchable: false,
+        options: () => [{ value: 'ff', label: '🟦 First Forward' }, { value: 'gv', label: '🟩 GV Partner' }],
+        selected: () => mailChannel, onChange: (v) => { mailChannel = v; }
+      });
+      U.multiSelect(U.$('#dp2-email-priority', root), {
+        title: 'Priority', icon: '🎚️', allLabel: 'All priorities', noneLabel: 'Clear', searchable: false,
+        options: () => [{ value: 'High', label: '🔴 High' }, { value: 'Medium', label: '🟠 Medium' }, { value: 'Low', label: '🟢 Low' }, { value: 'other', label: '📄 Other / source value' }],
+        selected: () => mailPriority, onChange: (v) => { mailPriority = v; }
       });
       const statusEl = U.$('#dp2-email-status', root);
       const saveBtn = U.$('#dp2-email-save', root);
@@ -470,13 +580,22 @@ FF.pages = FF.pages || {};
     const days = U.suggestDays(), el = U.runRateDays();
     U.$('#dp2-formula', root).innerHTML = `<span><b>Run-rate</b> = issue ÷ (aaj − 1) = <em>${fmt(el)} din</em></span><span><b>Required</b> = run-rate × <em>${fmt(days)} din</em></span><span><b>WITH stock</b> = Required − stock</span><span><b>W/O stock</b> = Required</span><a href="#/settings" title="Kitne din — Settings → Alert modify">⚙️ ${fmt(days)} din</a>`;
 
-    const tlNames = () => [...new Set(agents.filter((a) => !a.direct && a.tl && (state.ch === 'all' || a.ch === state.ch)).map((a) => a.tl))].sort((a, b) => a.localeCompare(b));
+    const tlNames = () => {
+      const chSet = U.asValueSet(state.ch);       // live padho — channel filter multi-select hai
+      return [...new Set(agents.filter((a) => !a.direct && a.tl && (!chSet.size || chSet.has(a.ch))).map((a) => a.tl))].sort((a, b) => a.localeCompare(b));
+    };
     U.$('#dp2-body', root).innerHTML = `
       <section class="dp2-panel">
         <div class="dp2-tabs" id="dp2-tabs"></div>
         <div id="dp2-chips" class="dp2-chips"></div>
-        <div class="dp2-search"><span>🔎</span><input class="input" id="dp2-q" placeholder="Agent / TL / ID search…" value="${esc(state.q)}"><label>TL <select class="select" id="dp2-tl"></select></label><button class="btn small" id="dp2-clear">✕ Clear</button></div>
+        <div class="dp2-search"><span>🔎</span><input class="input" id="dp2-q" placeholder="Agent / TL / ID search…" value="${esc(state.q)}">
+          <button type="button" class="btn small" id="dp2-tl" title="Ek se zyada TL chuno">👥 TL</button>
+          <button type="button" class="btn small" id="dp2-prio" title="Ek se zyada priority chuno">🎚️ Priority</button>
+          <button type="button" class="btn small" id="dp2-need" title="Ek se zyada condition chuno">🚚 Need</button>
+          <button type="button" class="btn small" id="dp2-ch" title="Channel chuno">🌐 Channel</button>
+          <button class="btn small" id="dp2-clear">✕ Clear</button></div>
       </section>
+      <div id="dp2-selbar" class="dp2-selbar" hidden></div>
       <div id="dp2-kpis" class="dp2-kpis"></div>
       <section class="card dp2-card"><div class="card-head"><h3 id="dp2-title"></h3><span class="dim small" id="dp2-sub"></span></div><div id="dp2-table"></div></section>
       <p class="foot-note">Direct agents (GV: TL ID + TL Name khaali · FF: TL Name APS) ko stock nahi jaata — unki qty <b>tags</b> me hai (High/Medium ko chahiye). Row / TL naam / KPI par click karo → drawer.</p>`;
@@ -493,12 +612,77 @@ FF.pages = FF.pages || {};
     function drawTabs() {
       U.$('#dp2-tabs', root).innerHTML = [['agents', '🧑‍💼 Agent-wise'], ['tls', '👥 TL-wise']].map(([k, l]) => `<button class="dp2-tab ${state.view === k ? 'on' : ''}" data-dp-view="${k}">${l}</button>`).join('');
     }
-    function drawTlSelect() {
-      const sel = U.$('#dp2-tl', root);
+    // ---- 🔠 multi-select controls (TL / priority / need / channel) — ek saath kai values -------------
+    const multiCtrls = {};
+    function tlOptions() {
       const names = tlNames();
-      if (state.tl && !names.some((t) => norm(t) === norm(state.tl))) state.tl = '';
-      sel.innerHTML = `<option value="">All TLs (${fmt(names.length)})</option>${names.map((t) => `<option value="${esc(t)}" ${norm(t) === norm(state.tl) ? 'selected' : ''}>${esc(t)}</option>`).join('')}`;
+      const all = currentRows();
+      const chosen = U.asValueSet(state.tl);
+      // Jo TL ab list me nahi hai (channel badalne par) usko filter se hata do.
+      [...chosen].forEach((n) => { if (!names.some((t) => norm(t) === norm(n))) chosen.delete(n); });
+      state.tl = [...chosen];
+      return names.map((n) => ({ value: n, label: n, count: all.filter((r) => (r.kind === 'tl' ? norm(r.name) === norm(n) : norm(r.tl) === norm(n))).length }));
     }
+    function bindMulti(id, dim, title, icon, optsFn, apply) {
+      const btn = U.$(id, root);
+      if (!btn) return null;
+      multiCtrls[id] = U.multiSelect(btn, {
+        title, icon, allLabel: `All ${title}`, noneLabel: 'Clear',
+        options: optsFn,
+        selected: () => (dim === 'tl' ? state.tl : state[dim]),
+        onChange: (vals) => { apply(vals); saveState(); state.limit = 100; drawResults(); }
+      });
+      return multiCtrls[id];
+    }
+    bindMulti('#dp2-tl', 'tl', 'TL', '👥', tlOptions, (vals) => { state.tl = vals; });
+    bindMulti('#dp2-prio', 'prio', 'Priority', '🎚️', () => filterOptions('prio', currentRows()), (vals) => { state.prio = U.asValueSet(vals); });
+    bindMulti('#dp2-need', 'need', 'Need', '🚚', () => filterOptions('need', currentRows()), (vals) => { state.need = U.asValueSet(vals); });
+    bindMulti('#dp2-ch', 'ch', 'Channel', '🌐', () => filterOptions('ch', currentRows()), (vals) => { state.ch = U.asValueSet(vals); state.tl = []; });
+
+    // ---- ✅ row multi-select + bulk actions -----------------------------------------------------------
+    const pickedRows = () => ctx.list.filter((r) => picked.has(r.uid));
+    /** Header ka "select all" box visible rows ke hisaab se sync rakho. */
+    function syncPickAll() {
+      const box = U.$('[data-dp-pick-all]', root);
+      if (!box) return;
+      const visible = ctx.list.slice(0, state.limit);
+      const n = visible.filter((r) => picked.has(r.uid)).length;
+      box.checked = visible.length > 0 && n === visible.length;
+      box.indeterminate = n > 0 && n < visible.length;
+      box.title = box.checked ? 'Sab unselect karo' : 'Visible rows select karo';
+    }
+    /** Ek row tick/untick — poori table dobara render mat karo (scroll position bacha rahe). */
+    function paintPick(uid, on) {
+      const tr = U.$(`tr[data-dp-open="${uid}"]`, root);
+      if (tr) tr.classList.toggle('is-picked', !!on);
+      const sub = U.$('#dp2-sub', root);
+      if (sub) sub.textContent = `${fmt(ctx.list.length)} ${state.view === 'tls' ? 'TLs' : 'agents'} · ${BASIS[state.basis]} · sorted by ${state.sort[state.view].key} ${state.sort[state.view].dir}${picked.size ? ` · ${fmt(picked.size)} selected` : ''}`;
+      drawSelBar();
+      syncPickAll();
+    }
+    function drawSelBar() {
+      const bar = U.$('#dp2-selbar', root);
+      if (!bar) return;
+      // Doosre view me chhupi hui selection mat dikhao.
+      const visible = ctx.list.filter((r) => picked.has(r.uid));
+      if (!visible.length) { picked.clear(); }
+      if (!picked.size) { bar.hidden = true; bar.innerHTML = ''; return; }
+      const rows = pickedRows();
+      const t = agg(rows);
+      bar.hidden = false;
+      bar.innerHTML = `<span class="dp2-sel-count"><b>${fmt(picked.size)}</b> selected</span>
+        <span class="dp2-sel-sum">Required <b>${fmt(t.required)}</b> · WITH stock <b>${fmt(t.net)}</b> · W/O <b>${fmt(t.gross)}</b></span>
+        <span class="dp2-sel-actions">
+          <button class="btn small" data-dp-sel="all">☑ Visible select</button>
+          <button class="btn small" data-dp-sel="needy">🚚 Jinko dispatch chahiye</button>
+          <button class="btn small" data-dp-sel="csv">⬇ CSV</button>
+          <button class="btn small" data-dp-sel="xlsx">⬇ Excel</button>
+          <button class="btn small" data-dp-sel="wa">📲 WhatsApp</button>
+          <button class="btn small primary" data-dp-sel="sum">🧾 Summary</button>
+          <button class="btn small" data-dp-sel="none">✕ Clear</button>
+        </span>`;
+    }
+
     function drawResults() {
       const all = currentRows();
       ctx.view = state.view;
@@ -509,19 +693,53 @@ FF.pages = FF.pages || {};
       const t = agg(sorted);
       U.$('#dp2-kpis', root).innerHTML = kpiHtml(t, state.view);
       U.$('#dp2-title', root).textContent = state.view === 'tls' ? '👥 TL-wise dispatch' : '🧑‍💼 Agent-wise dispatch';
-      U.$('#dp2-sub', root).textContent = `${fmt(sorted.length)} ${state.view === 'tls' ? 'TLs' : 'agents'} · ${BASIS[state.basis]} · sorted by ${state.sort[state.view].key} ${state.sort[state.view].dir}`;
+      U.$('#dp2-sub', root).textContent = `${fmt(sorted.length)} ${state.view === 'tls' ? 'TLs' : 'agents'} · ${BASIS[state.basis]} · sorted by ${state.sort[state.view].key} ${state.sort[state.view].dir}${picked.size ? ` · ${fmt(picked.size)} selected` : ''}`;
       U.$('#dp2-table', root).innerHTML = tableHtml(sorted, state.view);
+      drawSelBar();
+      syncPickAll();
       if (FF.app && FF.app.translateDom) { try { FF.app.translateDom(root); } catch { /* optional */ } }
     }
-    const redraw = () => { drawTabs(); drawTlSelect(); drawResults(); };
+    const refreshMulti = () => Object.values(multiCtrls).forEach((c) => { try { c.refresh(); } catch { /* detached */ } });
+    const redraw = () => { drawTabs(); refreshMulti(); drawResults(); saveState(); };
     redraw();
 
     // --- events (root par ek hi listener)
     root.addEventListener('click', (e) => {
+      const pickAll = e.target.closest('[data-dp-pick-all]');
+      if (pickAll) {
+        const want = pickAll.checked;
+        ctx.list.slice(0, state.limit).forEach((r) => { if (want) picked.add(r.uid); else picked.delete(r.uid); });
+        U.$$(`tr[data-dp-open]`, root).slice(0, state.limit).forEach((tr) => tr.classList.toggle('is-picked', picked.has(tr.dataset.dpOpen)));
+        const sub = U.$('#dp2-sub', root);
+        if (sub) sub.textContent = `${fmt(ctx.list.length)} ${state.view === 'tls' ? 'TLs' : 'agents'} · ${BASIS[state.basis]} · sorted by ${state.sort[state.view].key} ${state.sort[state.view].dir}${picked.size ? ` · ${fmt(picked.size)} selected` : ''}`;
+        drawSelBar(); syncPickAll(); return;
+      }
+      const pickOne = e.target.closest('[data-dp-pick]');
+      if (pickOne) {
+        e.stopPropagation();
+        const uid = pickOne.dataset.dpPick;
+        if (pickOne.checked) picked.add(uid); else picked.delete(uid);
+        paintPick(uid, pickOne.checked); return;
+      }
+      const sel = e.target.closest('[data-dp-sel]');
+      if (sel) { bulkAction(sel.dataset.dpSel, ctx); return; }
       const f = e.target.closest('[data-dp-f]');
-      if (f) { const [dim, val] = f.dataset.dpF.split(':'); state[dim] = state[dim] === val && dim !== 'basis' && val !== 'all' ? 'all' : val; state.limit = 100; if (dim === 'ch') state.tl = ''; redraw(); return; }
+      if (f) {
+        const [dim, val] = f.dataset.dpF.split(':');
+        // Tag basis single-select hai (formula badal jaata hai) — baaki sab multi-select.
+        if (dim === 'basis') { state.basis = (val === 'all' || !val) ? 'total' : val; }
+        else if (val === 'all') { state[dim] = U.asValueSet([]); }        // "All" pill = poora set clear
+        else {                                                            // toggle — multiple selection
+          const set = U.asValueSet(state[dim]);
+          if (set.has(val)) set.delete(val); else set.add(val);
+          state[dim] = set;
+        }
+        state.limit = 100;
+        if (dim === 'ch') state.tl = [];
+        redraw(); refreshMulti(); return;
+      }
       const tab = e.target.closest('[data-dp-view]');
-      if (tab) { state.view = tab.dataset.dpView; state.limit = 100; if (state.view === 'tls') state.tl = ''; redraw(); return; }
+      if (tab) { state.view = tab.dataset.dpView; state.limit = 100; if (state.view === 'tls') state.tl = []; picked.clear(); redraw(); refreshMulti(); return; }
       const sortTh = e.target.closest('[data-dp-sort]');
       if (sortTh) {
         const s = state.sort[state.view], k = sortTh.dataset.dpSort;
@@ -537,9 +755,33 @@ FF.pages = FF.pages || {};
       if (row) openRow(row.dataset.dpOpen, ctx);
     });
     const q = U.$('#dp2-q', root);
-    q.addEventListener('input', U.debounce(() => { state.q = q.value; state.limit = 100; drawResults(); }, 180));
-    U.$('#dp2-tl', root).addEventListener('change', (e) => { state.tl = e.target.value; state.limit = 100; drawResults(); });
-    U.$('#dp2-clear', root).addEventListener('click', () => { Object.assign(state, { ch: 'all', type: 'all', prio: 'all', need: 'all', tl: '', q: '', limit: 100 }); q.value = ''; redraw(); });
+    q.addEventListener('input', U.debounce(() => { state.q = q.value; state.limit = 100; drawResults(); saveState(); }, 180));
+    U.$('#dp2-clear', root).addEventListener('click', () => {
+      Object.assign(state, { ch: U.asValueSet([]), type: U.asValueSet([]), prio: U.asValueSet([]), need: U.asValueSet([]), tl: [], q: '', limit: 100 });
+      picked.clear(); q.value = ''; redraw(); refreshMulti();
+    });
+
+    // ---- ✅ bulk actions on the selected rows --------------------------------------------------------
+    function bulkAction(act, context) {
+      const rows = pickedRows();
+      if (act === 'none') { picked.clear(); drawResults(); return; }
+      if (!rows.length) { U.toast('Pehle row select karo (☑)', 'warn'); return; }
+      if (act === 'all') { ctx.list.slice(0, state.limit).forEach((r) => picked.add(r.uid)); drawResults(); U.toast(`${fmt(picked.size)} rows selected`, 'ok'); return; }
+      if (act === 'needy') {
+        picked.clear();
+        ctx.list.forEach((r) => { if (!r.direct && r.net > 0) picked.add(r.uid); });
+        drawResults();
+        U.toast(picked.size ? `${fmt(picked.size)} rows jinhe dispatch chahiye selected` : 'Is view me kisi ko dispatch nahi chahiye', picked.size ? 'ok' : 'warn');
+        return;
+      }
+      if (act === 'csv') { U.downloadCsv(`dispatch-selection-${state.view}-${U.stamp()}.csv`, CSV_HEAD(state.view), rows.map((r) => csvRow(r, state.view))); U.toast(`${fmt(rows.length)} selected rows → CSV`, 'ok'); return; }
+      if (act === 'xlsx') {
+        FF.xlsx.download(`dispatch-selection-${U.stamp()}.xlsx`, [{ name: state.view === 'tls' ? 'Selected TLs' : 'Selected agents', header: CSV_HEAD(state.view), rows: rows.map((r) => csvRow(r, state.view)) }]);
+        U.toast(`${fmt(rows.length)} selected rows → Excel`, 'ok'); return;
+      }
+      if (act === 'wa') { if (FF.app && FF.app.shareWhatsApp) FF.app.shareWhatsApp(waText(rows, state.view)); return; }
+      if (act === 'sum') { selectionDrawer(rows, context); }
+    }
 
     const list = () => ctx.list;
     U.$('#dp2-csv', root).addEventListener('click', () => { U.downloadCsv(`dispatch-planner-${state.view}-${U.stamp()}.csv`, CSV_HEAD(state.view), list().map((r) => csvRow(r, state.view))); U.toast('Dispatch CSV ready', 'ok'); });
@@ -556,6 +798,14 @@ FF.pages = FF.pages || {};
     return { agents: agents.length, tls: allTls.length };
   }
 
-  FF.dispatchPlanner = { collectAgents, collectTls, withCalc, agg, state, prioOf, passes, sortRows, columns, tableHtml, chipsHtml, kpiHtml };
+  FF.dispatchPlanner = {
+    collectAgents, collectTls, withCalc, agg, state, prioOf, passes, sortRows, columns, tableHtml, chipsHtml, kpiHtml,
+    // v3.18 — multiple selection
+    filterOptions, channelLabel, FILTER_OPTIONS,
+    get picked() { return picked; }, get pickedCount() { return picked.size; },
+    togglePick(uid) { if (picked.has(uid)) picked.delete(uid); else picked.add(uid); return picked.has(uid); },
+    clearPicks() { picked.clear(); },
+    saveState, loadState
+  };
   FF.pages.dispatchPlan = { title: 'Dispatch Planner', render };
 })(window.FF);
