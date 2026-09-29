@@ -100,10 +100,24 @@
   }
 
   // ---- 👁 Live view ------------------------------------------------------------------------------
-  const live = { user: '', timer: null, modal: null, lastPage: '', lastEventAt: 0, mirror: true, busy: false };
+  const live = { user: '', timer: null, modal: null, lastPage: '', lastEventAt: 0, mirror: true, busy: false, speed: 1000, lastRenderAt: 0 };
+  /** Exact instant label — HH:MM:SS.mmm (jaise live telemetry me hota hai). */
+  const exactClock = (ts) => {
+    const d = new Date(ts || Date.now());
+    const p = (n, w) => String(n).padStart(w || 2, '0');
+    return Number.isFinite(d.getTime()) ? `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}` : '—';
+  };
+  /** Kitna fresh hai: <2.5s = live, <15s = thoda purana, warna stale. */
+  function freshness(ts) {
+    const lag = Math.max(0, Date.now() - Number(ts || 0));
+    const cls = lag <= 2500 ? 'dot-on' : lag <= 15000 ? 'dot-stale' : 'dot-off';
+    const label = lag < 1000 ? 'abhi' : lag < 60000 ? `${(lag / 1000).toFixed(lag < 10000 ? 1 : 0)}s pehle` : `${Math.round(lag / 60000)}m pehle`;
+    return { lag, cls, label };
+  }
 
   function stopWatch() {
     clearInterval(live.timer); live.timer = null;
+    clearInterval(live.clockTimer); live.clockTimer = null;
     if (live.modal) live.modal.remove();
     live.modal = null; live.user = ''; live.lastPage = ''; live.lastEventAt = 0;
     document.body.classList.remove('no-scroll');
@@ -120,8 +134,17 @@
     const modal = U.h(`<div class="live-modal" role="dialog" aria-label="Live view">
       <div class="live-head">
         <div class="live-who"><span class="live-dot"></span><div><b id="lv-name">${esc(live.user)}</b><small id="lv-page">Connecting…</small></div></div>
+        <span class="live-fresh dot-off" id="lv-fresh"><i></i><span id="lv-fresh-text">connecting…</span></span>
         <div class="live-status" id="lv-status">…</div>
         <label class="live-toggle"><input type="checkbox" id="lv-mirror" ${live.mirror ? 'checked' : ''}> Page mirror</label>
+        <label class="live-toggle">⚡ Speed
+          <select id="lv-speed">
+            <option value="500" ${live.speed === 500 ? 'selected' : ''}>0.5s (instant)</option>
+            <option value="1000" ${live.speed === 1000 ? 'selected' : ''}>1s</option>
+            <option value="2000">2s</option>
+            <option value="5000">5s</option>
+          </select>
+        </label>
         <button class="btn small" id="lv-close">✕ Close</button>
       </div>
       <div class="live-main">
@@ -131,8 +154,9 @@
           <div class="live-cursor" id="lv-cursor" hidden><svg viewBox="0 0 24 24" width="22" height="22"><path d="M3 2l7 19 2.6-7.6L20 11z" fill="#ef4444" stroke="#fff" stroke-width="1.5"/></svg><span id="lv-cursor-name"></span></div>
           <div class="live-blank" id="lv-blank" hidden></div>
         </div></div>
-        <aside class="live-side"><h4>Live actions</h4><ol class="live-events" id="lv-events"><li class="dim">Waiting for activity…</li></ol>
-          <p class="dim small">Mirror aapke (admin) data se render hota hai; cursor, scroll, page aur clicks user ke browser se live aate hain. Typed text / passwords share nahi hote.</p></aside>
+        <aside class="live-side"><h4>Live actions <span class="live-instant" id="lv-instant">—</span></h4><ol class="live-events" id="lv-events"><li class="dim">Waiting for activity…</li></ol>
+          <div class="live-data-clock" id="lv-data-clock"></div>
+          <p class="dim small">Mirror aapke (admin) data se render hota hai; cursor, scroll, page aur clicks user ke browser se live aate hain. Typed text / passwords share nahi hote. Speed 0.5s par sabse instant view milta hai.</p></aside>
       </div></div>`);
     document.body.appendChild(modal);
     document.body.classList.add('no-scroll');
@@ -140,10 +164,27 @@
     U.$('#lv-cursor-name', modal).textContent = live.user;
     U.$('#lv-close', modal).addEventListener('click', stopWatch);
     U.$('#lv-mirror', modal).addEventListener('change', (e) => { live.mirror = e.target.checked; localStorage.setItem('ff_live_mirror', live.mirror ? '1' : '0'); live.lastPage = ''; tick(); });
+    U.$('#lv-speed', modal).addEventListener('change', (e) => {
+      live.speed = Math.max(500, Math.min(10000, Number(e.target.value) || 1000));
+      clearInterval(live.timer);
+      live.timer = setInterval(tick, live.speed);
+      U.toast(`Live refresh ${(live.speed / 1000).toFixed(1)}s ✓`, 'ok');
+    });
     document.addEventListener('keydown', escClose);
     window.addEventListener('resize', () => live.modal && fit(live.lastPerson), { passive: true });
     tick();
-    live.timer = setInterval(tick, 1000);
+    live.timer = setInterval(tick, live.speed);
+    // ⏱ "exact instant" clock — hamesha tick karta hai, chahe network call pending ho.
+    live.clockTimer = setInterval(() => {
+      if (!live.modal) { clearInterval(live.clockTimer); return; }
+      const p = live.lastPerson;
+      const el = U.$('#lv-fresh', live.modal), txt = U.$('#lv-fresh-text', live.modal);
+      if (!el || !txt) return;
+      if (!p) { el.className = 'live-fresh dot-off'; txt.textContent = 'offline'; return; }
+      const f = freshness(p.updatedAt || p.lastSeen);
+      el.className = `live-fresh ${f.cls}`;
+      txt.innerHTML = `exact <span class="live-instant">${esc(exactClock(p.updatedAt || p.lastSeen))}</span> · ${esc(f.label)}`;
+    }, 250);
   }
 
   function fit(person) {
@@ -187,9 +228,28 @@
       return;
     }
     live.lastPerson = p;
+    live.lastRenderAt = Date.now();
     U.$('#lv-name', m).textContent = p.name || p.username;
     const online = p.online && p.visible !== false;
-    status.innerHTML = `<span class="presence-state ${online && p.active ? 'live' : ''}">${online ? (p.active ? '● LIVE' : 'IDLE') : 'AWAY'}</span> <small class="dim">updated ${esc(U.timeLabel(p.updatedAt || p.lastSeen))}</small>`;
+    // ⏱ exact instant — har render par ms-level timestamp (network lag bhi dikhta hai)
+    status.innerHTML = `<span class="presence-state ${online && p.active ? 'live' : ''}">${online ? (p.active ? '● LIVE' : 'IDLE') : 'AWAY'}</span> <small class="dim">synced <span class="live-instant">${esc(exactClock(Date.now()))}</span></small>`;
+    const inst = U.$('#lv-instant', m);
+    if (inst) inst.textContent = `render ${exactClock(Date.now())} · poll ${(live.speed / 1000).toFixed(1)}s`;
+    const clockBox = U.$('#lv-data-clock', m);
+    if (clockBox) {
+      const ffLoad = FF.store && FF.store.loadedAt ? exactClock(FF.store.loadedAt) : '—';
+      const gvLoad = FF.gv && FF.gv.loadedAt ? exactClock(FF.gv.loadedAt) : '—';
+      const today = U.dateKey(new Date());
+      const daily = (FF.store && FF.store.get && FF.store.get('daily')) || [];
+      const ffToday = daily.filter((r) => r.key === today && r.channel !== 'GV Partner').reduce((n, r) => n + (Number(r.n) || 0), 0);
+      const gvRows = (FF.gv && FF.gv.rows && FF.gv.rows()) || [];
+      const gvToday = gvRows.filter((r) => r.date && U.dateKey(r.date) === today).length;
+      clockBox.innerHTML = `<div class="notify-line muted" style="border-radius:10px;margin-top:10px">
+        <b style="color:#e2e8f0">Live data clock</b><br>
+        FF sheet load <span class="live-instant">${esc(ffLoad)}</span> · GV sheet load <span class="live-instant">${esc(gvLoad)}</span><br>
+        Aaj: <b style="color:#5eead4">FF ${ffToday}</b> · <b style="color:#5eead4">GV ${gvToday}</b> · total <b style="color:#fde047">${ffToday + gvToday}</b> tags
+      </div>`;
+    }
     m.classList.toggle('is-live', !!(online && p.active));
     pageEl.textContent = `${p.title || ''} · #/${p.page || ''}`;
     fit(p);
@@ -221,7 +281,7 @@
       if (!live.lastEventAt) list.innerHTML = '';
       events.forEach((e) => {
         if (e.kind === 'click' && p.pointer && Date.now() - e.at < 4000) ripple(p.pointer.x, p.pointer.y);
-        list.insertAdjacentHTML('afterbegin', `<li class="ev-${esc(e.kind)}"><span>${esc(({ click: '👆', page: '📄', search: '🔍', kpi: '📊', select: '🔽', tab: '🪟' })[e.kind] || '•')}</span><div><b>${esc(e.label)}</b><small>${esc(new Date(e.at).toLocaleTimeString('en-IN'))}${e.page ? ` · ${esc(e.page)}` : ''}</small></div></li>`);
+        list.insertAdjacentHTML('afterbegin', `<li class="ev-${esc(e.kind)}"><span>${esc(({ click: '👆', page: '📄', search: '🔍', kpi: '📊', select: '🔽', tab: '🪟' })[e.kind] || '•')}</span><div><b>${esc(e.label)}</b><small><span class="live-instant">${esc(exactClock(e.at))}</span> · ${esc(freshness(e.at).label)}${e.page ? ` · ${esc(e.page)}` : ''}</small></div></li>`);
       });
       while (list.children.length > 80) list.lastElementChild.remove();
       live.lastEventAt = Math.max(...events.map((e) => e.at));

@@ -61,6 +61,10 @@ FF.config = {
     customAlerts: true, championEmail: false, championHour: 10, championTop: 3,
     followupTracker: true, followupDays: 3, followupHour: 10,
     dispatchPlan: true, suggestDays: 15,
+    // v3.11 — naye feature flags (Settings → Features se on/off ho sakte hain)
+    masterSearch: true, tabHeartbeat: true, themePacks: true, heatmap: true,
+    networkGraph: true, sparklines: true, reportCards: true, anomalyRadar: true,
+    chatCharts: true, levelUp: true, memoryLane: true,
     officeLat: 0, officeLng: 0
   },
   /** Feature flag padho — FF.config.feat('search') / FF.config.feat('alerts').lowCover */

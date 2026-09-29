@@ -52,6 +52,7 @@ FF.pages = FF.pages || {};
           <a class="btn" href="#/tagIssued">🏷️ Tag Issued →</a>
         </div>
       </div>
+      <div id="home-search"></div>
       <div id="home-body">${U.spinner('Highlights load ho rahe hain — GV & FF charts…')}</div>`;
 
     const body = U.$('#home-body', root);
@@ -278,12 +279,25 @@ FF.pages = FF.pages || {};
       }), ''));
     }
 
+    // 📅 Aaj ka din — pichhle mahine / saal ki memories (wowzone)
+    if (FF.wowzone) {
+      try {
+        const memories = await FF.wowzone.memoryLane();
+        const memCard = FF.wowzone.memoryLaneCard(memories);
+        if (memCard) cards.push(memCard);
+      } catch { /* memory lane optional */ }
+    }
+    if (!root.isConnected) return;
+
     if (!cards.length) {
       body.innerHTML = `<div class="empty-state">Data load nahi hua — ↻ Refresh dabao</div>`;
     } else {
       body.innerHTML = `${cards.join('')}<p class="foot-note">Highlights — GV & FF charts ke dwara · Data ${U.timeLabel(S.loadedAt||G.loadedAt||Date.now())} · Background me all sheets preload ho rahe hain for instant open</p>`;
     }
     C.mount(body);
+    // 🔎 Master search panel — naam, TL, ID, GV ID, barcode, tag ID sab kuch yahin se
+    const searchMount = U.$('#home-search', root);
+    if (searchMount && FF.masterSearch) { try { FF.masterSearch.mountHome(searchMount); } catch { /* search optional */ } }
     updateSync();
     // cleanup on page leave
     const obs = new MutationObserver(() => { if (!document.body.contains(root)) { clearInterval(syncPoll); obs.disconnect(); } });

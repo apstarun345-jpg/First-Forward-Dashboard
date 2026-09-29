@@ -121,6 +121,15 @@ await run('login via API', async () => {
 });
 await run('auth.init (me + settings + theme)', async () => { const ok = await FF.auth.init(); if (!ok) throw new Error('auth.init returned false'); if (!FF.auth.user) throw new Error('no user'); });
 await run('app.onLogin boot (sidebar/status)', async () => { await FF.app.onLogin(true); await settle(200); });
+await run('v3.11 · topbar master search bar mount (dropdown input ke neeche, overlap nahi)', async () => {
+  // onLogin ke baad bar khud mount ho jaata hai; DOM shim HTML strings nahi rakhta,
+  // isliye module ka mount-flag + light index readiness verify karte hain.
+  if (!FF.masterSearch.topbarMounted) throw new Error('topbar me master search bar mount nahi hua');
+  await FF.masterSearch.buildLight();
+  if (!FF.masterSearch.ready) throw new Error('search index ready nahi hua');
+  const items = FF.masterSearch.suggestItems('a');
+  if (!items.length) throw new Error('suggestions empty');
+}, false);
 await run('sidebar channel accordion hides unrelated groups', async () => {
   const nav = REG.get('nav'); const html = nav && nav.innerHTML || '';
   if (!html.includes('data-nav-group="First Forward"') || !html.includes('data-nav-group="GV Partner"') || !html.includes('data-nav-group="Cross Channel"')) throw new Error('channel groups missing');
@@ -224,6 +233,12 @@ await run('gv aggregations + people', async () => {
   log(`      months ${months.join(', ')} · latest ${FF.util.ymKey(FF.gv.latestDate())} total ${s.total} · week buckets ${weekly.length} · agents ${agents.length} · tls ${tls.length} · people ${ppl.agents.length}/${ppl.tls.length}`);
 });
 await run('page home', async () => { const r = root(); await pages.home.render(r, {}, {}); await settle(150); const all = [r.innerHTML, ...REG.values().map((e) => e.innerHTML), ...body.children.map((c) => c.innerHTML)].join('\n'); if (!/Champions of/.test(all)) throw new Error('gamification champions card missing from home'); }, true);
+await run('v3.11 · Home me master search panel + "Aaj ka din" memories', async () => {
+  const r = root(); await pages.home.render(r, {}, {}); await settle(400);
+  const html = [r.innerHTML, ...REG.values().map((e) => e.innerHTML)].join('\n');
+  if (!/home-master-search|Master Search/.test(html)) throw new Error('home par master search panel nahi mila');
+  if (!/home-master-input|Master Search/.test(html)) throw new Error('home search input missing');
+}, true);
 await run('page gvDashboard', () => pages.gvDashboard.render(root(), {}, {}), true);
 await run('gvDashboard 4-way + suggested dispatch card', async () => {
   const r = root(); await pages.gvDashboard.render(r, {}, {});
@@ -456,6 +471,94 @@ await run('wow zone · War Room live pulse', async () => {
   for (const label of ['WAR ROOM', 'AAJ KA TOTAL', 'war-counter', 'Live ticker', 'Fullscreen', 'war-race']) {
     if (!html.includes(label)) throw new Error(`War Room me "${label}" nahi mila`);
   }
+}, true);await run('wow zone · Agent Arena (levels, badges, challenges, crystal ball)', async () => {
+  const r = root(); await pages.arena.render(r, {}, {});
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const label of ['Agent Arena', 'Crystal Ball', 'Leaderboard', 'Badge gallery', 'Is month ke challenges', 'Tag Machine', 'Rookie', 'XP', 'ins-metric-tap']) {
+    if (!html.includes(label)) throw new Error(`Agent Arena me "${label}" nahi mila`);
+  }
+}, true);
+await run('wow zone · Wall of Fame (champions + winner cards)', async () => {
+  const r = root(); await pages.fame.render(r, {}, {});
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const label of ['Wall of Fame', 'Is month ke champions', 'First Forward', 'GV Partner', 'Winner card', 'fame-card-btn']) {
+    if (!html.includes(label)) throw new Error(`Wall of Fame me "${label}" nahi mila`);
+  }
+}, true);
+await run('wow zone · War Room live pulse', async () => {
+  const r = root(); await pages.warRoom.render(r, {}, {});
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const label of ['WAR ROOM', 'AAJ KA TOTAL', 'war-counter', 'Live ticker', 'Fullscreen', 'war-race']) {
+    if (!html.includes(label)) throw new Error(`War Room me "${label}" nahi mila`);
+  }
+}, true);
+await run('v3.11 · War Room detailed breakdown (VC4/VC20/VC5+ · chassis · replacement · wrong VRN · TL-wise)', async () => {
+  const r = root(); await pages.warRoom.render(r, {}, {});
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const label of ['Aaj ka detailed breakdown', 'VC4 tags', 'VC20 tags', 'VC5+ tags', 'Chassis', 'Wrong VRN', 'Replacement', 'Month-to-date detail', 'TL-wise aaj ka detail', 'war-kv', 'live-instant']) {
+    if (!html.includes(label)) throw new Error(`War Room detail me "${label}" nahi mila`);
+  }
+}, true);
+await run('v3.11 · Activity Calendar (heatmap + streak + sparkline board)', async () => {
+  const r = root(); await pages.activity.render(r, {}, {});
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const label of ['Activity Calendar', 'heat-cols', 'heat-cell', 'heat-legend', 'Current streak', 'Longest streak', 'Sparkline board', 'Month-wise activity', 'Weekday pattern']) {
+    if (!html.includes(label)) throw new Error(`Activity Calendar me "${label}" nahi mila`);
+  }
+}, true);
+await run('v3.11 · Team Network (TL-agent constellation + hover tips)', async () => {
+  const r = root(); await pages.network.render(r, {}, {});
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const label of ['Team Network', 'net-wrap', 'data-net-tl', 'net-link', 'net-legend', 'net-orbit']) {
+    if (!html.includes(label)) throw new Error(`Team Network me "${label}" nahi mila`);
+  }
+}, true);
+await run('v3.11 · Anomaly Radar (rule engine + severity cards)', async () => {
+  const findings = await FF.wowzone.anomalyFindings();
+  if (!Array.isArray(findings)) throw new Error('anomalyFindings array nahi hai');
+  const r = root(); await pages.radar.render(r, {}, {});
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  if (!/Anomaly Radar/.test(html)) throw new Error('radar page head missing');
+  if (!/radar-card|Koi anomaly nahi mili/.test(html)) throw new Error('radar cards / empty state missing');
+  log(`      ${findings.length} signals: ${findings.map((f) => f.id).join(', ') || 'none'}`);
+}, true);
+await run('v3.11 · Agent Report Cards (grades + auto remarks + sign block)', async () => {
+  const list = pages.performance.agents();
+  const name = (list[0] || {}).name;
+  if (!name) throw new Error('koi agent nahi mila');
+  const r = root(); await pages.reportCards.render(r, { q: name }, {});
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const label of ['Agent Report Card', 'rc-grade', 'Teacher remarks', 'TL sign', 'Issuance volume', 'VC4 share', 'Growth vs last month']) {
+    if (!html.includes(label)) throw new Error(`Report Card me "${label}" nahi mila`);
+  }
+}, true);
+await run('v3.11 · Master search (naam / TL / ID index + suggestions + results markup)', async () => {
+  const list = pages.performance.agents();
+  const probe = (list[0] || {}).name || '';
+  if (!probe) throw new Error('probe agent nahi mila');
+  await FF.masterSearch.buildLight();
+  const res = FF.masterSearch.search(probe.slice(0, 5));
+  if (!res.people.length) throw new Error(`"${probe.slice(0, 5)}" se koi person nahi mila`);
+  const items = FF.masterSearch.suggestItems(probe.slice(0, 5));
+  if (!items.length || !items[0].label) throw new Error('suggestions nahi bane');
+  const html = FF.masterSearch.resultsHtml(res);
+  if (!/ms-section|ms-kundli/.test(html)) throw new Error('results markup missing');
+  await FF.masterSearch.buildFull();
+  log(`      light match ${res.people.length} people · suggestions ${items.length} · heavy ready ${FF.masterSearch.heavyReady}`);
+}, true);
+await run('v3.11 · Executive combined stock — GV-parked rows NAAM/TL se bhi exclude', async () => {
+  const stockAgents = FF.store.get('stockAgents') || [];
+  const gvId = String(FF.config.eir.gvMasterId || '5845036');
+  const isGv = (r) => String(r.agentId || '').trim() === gvId || /^apna\s*pay/i.test(String(r.agentName || '')) || /^apnapayment pvt\.? ltd\.?$/i.test(String(r.tlName || ''));
+  const gvHeld = stockAgents.filter(isGv).reduce((n, x) => n + (x.n || 0), 0);
+  const ffClean = stockAgents.filter((r) => !isGv(r)).reduce((n, x) => n + (x.n || 0), 0);
+  if (!(gvHeld > 0)) throw new Error('mock me GV-parked rows hi nahi');
+  const r = root(); await pages.executive.render(r, {}, {});
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  const gvStock = (FF.gv.get('stockClass') || []).reduce((n, x) => n + (x.n || 0), 0);
+  const combined = FF.util.fmt(ffClean + gvStock);
+  if (!html.includes(`<b>${combined}</b>`)) throw new Error(`combined field stock ${combined} nahi mila (name/TL based exclusion?)`);
+  if (!/GV-parked/.test(html)) throw new Error('exclusion ka naya label nahi dikha');
 }, true);
 await run('professional page FASTag Champions (vivid KPI + clickable full-data drill-down)', async () => {
   const r = root(); await pages.fastagChampions.render(r, {}, {});

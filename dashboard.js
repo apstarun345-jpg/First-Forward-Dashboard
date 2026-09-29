@@ -8,8 +8,8 @@ FF.pages = FF.pages || {};
   const esc = U.esc;
   const excl = (name) => FF.config.isExcludedTl(name);
 
-  function kpi(cls, title, icon, value, foot, tip) {
-    return `<div class="kpi ${cls}" ${tip ? `data-tip="${esc(tip)}"` : ''}><div class="kpi-top"><span class="kpi-title">${esc(title)}</span><span class="kpi-icon">${icon}</span></div><div class="kpi-value">${value}</div><div class="kpi-foot">${foot || ''}</div></div>`;
+  function kpi(cls, title, icon, value, foot, tip, spark) {
+    return `<div class="kpi ${cls}" ${tip ? `data-tip="${esc(tip)}"` : ''}><div class="kpi-top"><span class="kpi-title">${esc(title)}</span><span class="kpi-icon">${icon}</span></div><div class="kpi-value">${value}${spark || ''}</div><div class="kpi-foot">${foot || ''}</div></div>`;
   }
   function card(title, body, opts) {
     const o = opts || {};
@@ -183,14 +183,23 @@ FF.pages = FF.pages || {};
     const activated = U.sum(statusCur.filter((s) => s.status === 'ACTIVATED'), (s) => s.n);
 
     const lm = U.labelYM(last), cm = U.labelYM(cur);
+    // 📈 KPI sparklines (v3.11) — har KPI card ke andar chhota trend; series jahan available hai.
+    const sparkOf = (vals) => (FF.wowzone && FF.wowzone.sparkline ? FF.wowzone.sparkline(vals, { w: 96, h: 26 }) : '');
+    const mtdDays = curSeries.totals.slice(0, latest.getDate());
+    const cum = []; mtdDays.reduce((a, v) => { const n = a + (v || 0); cum.push(n); return n; }, 0);
+    const monthlyTotals = monthsList.map((m) => M.summary(daily, m).total);
+    const monthlyVc4 = monthsList.map((m) => M.summary(daily, m).vc4);
+    const monthlyComm = monthsList.map((m) => M.summary(daily, m).comm);
+    const avgSeries = monthsList.map((m) => Math.round(M.summary(daily, m).avgPerDay || 0));
+    const replSeries = monthsList.map((m) => M.summary(daily, m).replacement);
     const kpis = [
-      kpi('g1', `Latest Day · ${U.labelDate(latest)} (${U.weekday(latest)})`, '⚡', U.fmt(todayN), `${U.deltaHtml(U.growth(todayN, prevDayN), { decimals: 0 })} vs previous day (${U.fmt(prevDayN)})`),
-      kpi('g2', `MTD Issuance · ${cm}`, '🏷️', U.fmt(curS.total), `${U.deltaHtml(U.growth(curS.total, lastMtd.total))} vs ${lm} same period (${U.fmt(lastMtd.total)})`),
-      kpi('g3', 'VC4 (Payable) · MTD', '🚗', U.fmt(curS.vc4), `${U.fmtPct(U.pctOf(curS.vc4, curS.total), 0)} share · ${U.deltaHtml(U.growth(curS.vc4, lastMtd.vc4))} vs ${lm}`),
-      kpi('g4', 'Commercial (NVC4) · MTD', '🚚', U.fmt(curS.comm), `VC20 <b>${U.fmt(curS.vc20)}</b> · VC5+ <b>${U.fmt(curS.vc5p)}</b> · ${U.deltaHtml(U.growth(curS.comm, lastMtd.comm))}`),
-      kpi('g5', 'Avg / Day · MTD', '📅', U.fmt(curS.avgPerDay), `${lm}: ${U.fmt(lastFull.avgPerDay)} / day · ${curS.activeDays} active days`),
-      kpi('g6', `Projected Month-End · ${cm}`, '🎯', U.fmt(curS.projected), `${U.deltaHtml(U.growth(curS.projected, lastFull.total))} vs ${lm} full (${U.fmt(lastFull.total)})`),
-      kpi('g7', 'Replacements · MTD', '🔁', U.fmt(curS.replacement), `${U.fmtPct(U.pctOf(curS.replacement, curS.total))} of total · ${U.deltaHtml(U.growth(curS.replacement, lastMtd.replacement))} vs ${lm}`),
+      kpi('g1', `Latest Day · ${U.labelDate(latest)} (${U.weekday(latest)})`, '⚡', U.fmt(todayN), `${U.deltaHtml(U.growth(todayN, prevDayN), { decimals: 0 })} vs previous day (${U.fmt(prevDayN)})`, null, sparkOf(mtdDays)),
+      kpi('g2', `MTD Issuance · ${cm}`, '🏷️', U.fmt(curS.total), `${U.deltaHtml(U.growth(curS.total, lastMtd.total))} vs ${lm} same period (${U.fmt(lastMtd.total)})`, null, sparkOf(cum)),
+      kpi('g3', 'VC4 (Payable) · MTD', '🚗', U.fmt(curS.vc4), `${U.fmtPct(U.pctOf(curS.vc4, curS.total), 0)} share · ${U.deltaHtml(U.growth(curS.vc4, lastMtd.vc4))} vs ${lm}`, null, sparkOf(monthlyVc4)),
+      kpi('g4', 'Commercial (NVC4) · MTD', '🚚', U.fmt(curS.comm), `VC20 <b>${U.fmt(curS.vc20)}</b> · VC5+ <b>${U.fmt(curS.vc5p)}</b> · ${U.deltaHtml(U.growth(curS.comm, lastMtd.comm))}`, null, sparkOf(monthlyComm)),
+      kpi('g5', 'Avg / Day · MTD', '📅', U.fmt(curS.avgPerDay), `${lm}: ${U.fmt(lastFull.avgPerDay)} / day · ${curS.activeDays} active days`, null, sparkOf(avgSeries)),
+      kpi('g6', `Projected Month-End · ${cm}`, '🎯', U.fmt(curS.projected), `${U.deltaHtml(U.growth(curS.projected, lastFull.total))} vs ${lm} full (${U.fmt(lastFull.total)})`, null, sparkOf(monthlyTotals)),
+      kpi('g7', 'Replacements · MTD', '🔁', U.fmt(curS.replacement), `${U.fmtPct(U.pctOf(curS.replacement, curS.total))} of total · ${U.deltaHtml(U.growth(curS.replacement, lastMtd.replacement))} vs ${lm}`, null, sparkOf(replSeries)),
       kpi('g8', 'Chassis / Wrong VRN · MTD', '🧩', `${U.fmt(curS.chassis)} <small>/ ${U.fmt(curS.wrongVrn)}</small>`, `Chassis ${U.fmtPct(U.pctOf(curS.chassis, curS.total))} · Wrong VRN ${U.fmtPct(U.pctOf(curS.wrongVrn, curS.total), 2)}`),
       kpi('g9', 'Stock in Field', '📦', stock ? U.fmt(stockTotal) : '—', stock ? `VC4 <b>${U.fmt(stockVc4)}</b> · Commercial <b>${U.fmt(stockComm)}</b> · ${curS.avgPerDay ? `${U.fmt(stockTotal / curS.avgPerDay)} days cover` : ''}` : 'StockDataa load nahi hua'),
       kpi('g10', 'Active Agents · MTD', '🧑‍💼', agents ? U.fmt(activeCur) : '—', agents ? `FF <b>${U.fmt(ffAgents)}</b> · GV <b>${U.fmt(gvAgents)}</b> · ${U.deltaHtml(U.growth(activeCur, activeLast), { decimals: 0 })} vs ${lm} (${U.fmt(activeLast)})` : 'Agent data load nahi hua'),

@@ -904,6 +904,17 @@ FF.pages = FF.pages || {};
         ${c('championEmail', '🥇 Champion certificate email', 'Mahine ke top agents ka certificate SMTP se email (SMTP set ho tabhi)')}
         ${c('followupTracker', '⏰ Follow-up tracker', 'Silent agents + due agent/TL notes — roz owner timeline reminder')}
         ${c('dispatchPlan', '🎯 Suggested dispatch cards', 'High + Medium priority agents: cover din + suggested tag qty (GV + FF)')}
+        ${c('masterSearch', '🔎 Master search bar', 'Topbar + Home panel — naam, TL, ID, GV ID, barcode, tag ID sab ek search me (dropdown suggestions + kundli cards)')}
+        ${c('tabHeartbeat', '🟢 Live tab heartbeat', 'Browser tab title me live aaj ka tag count + top agent (doosre tab me bhi pulse)')}
+        ${c('themePacks', '🎨 Theme packs', 'Topbar 🎨 — Default · Neon · Glass · Diwali festive · Gold · Mono')}
+        ${c('heatmap', '📅 Activity Calendar (heatmap)', 'Poore saal ka GitHub-style calendar — FF / GV / combined + streak stats')}
+        ${c('networkGraph', '🕸️ Team Network graph', 'TL centre me, agents orbit karte hue — animated constellation')}
+        ${c('sparklines', '📈 KPI sparklines', 'Dashboard ke KPI cards ke andar mini trend chart')}
+        ${c('reportCards', '🧾 Agent Report Cards', 'Monthly report card (grades + auto remarks + TL sign) — print/PDF')}
+        ${c('anomalyRadar', '🚨 Anomaly Radar', 'Spike · crash · naya star · wrong-VRN burst · stale sheet auto-detect')}
+        ${c('chatCharts', '🤖 Chat me charts', 'Assistant se “last 7 days ka graph” pucho — jawab ke saath chart')}
+        ${c('levelUp', '🎖️ Level-Up Ceremony', 'Promotion par fullscreen golden ceremony + trumpet (Agent Arena)')}
+        ${c('memoryLane', '📅 “Aaj ka din” memories', 'Pichhle mahine/saal ki isi din ki activity Home par')}
       </div>${saveBar('feat-ui')}`);
     const alertCard = section('🔴 Alert automation <span class="dim">(server-side — tab bhi chalta hai jab app band ho)</span>', `
       <div class="feat-grid">

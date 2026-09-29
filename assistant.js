@@ -593,7 +593,12 @@ window.FF = window.FF || {};
     let a;
     try { a = await answer(text); } catch (e) { a = T(`Data load nahi hua (${esc(e.message || 'error')}) — thodi der baad try karo.`, `Could not load data (${esc(e.message || 'error')}) — please try again shortly.`); }
     wait.remove();
-    bubble(a, 'bot');
+    const botEl = bubble(a, 'bot');
+    // 📊 Chat ke andar hi chart — "last 7 days ka graph", "monthly trend", "VC4 vs commercial",
+    // "GV vs FF" jaise sawaal par bubble me chart mount ho jaata hai (koi page change nahi).
+    if (FF.wowzone && FF.wowzone.chatChart) {
+      try { await FF.wowzone.chatChart(text, botEl); } catch { /* chart optional */ }
+    }
     ctx.lastBot = a;
     speak(a, { onEnd: () => { if (convMode) scheduleListen(); } });
     renderFollowups();

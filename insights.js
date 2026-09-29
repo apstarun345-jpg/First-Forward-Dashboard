@@ -1658,7 +1658,10 @@ FF.pages = FF.pages || {};
     });
     const ff = FF.pages.performance.agents().filter((a) => a.name || a.agentId).filter((a) => {
       const k = normName(a.name), all = allIssu.get(k) || 0;
-      return !(all > 0 && (ffIssu.get(k) || 0) === 0); // poori issuance GV channel ki hai → GV side me already
+      // (a) poori issuance GV channel ki hai → GV side me already; (b) GV-parked StockDataa holder
+      // (Apna Payment / master ID) ka stock GV register me ginta hai — FF me dobara nahi.
+      if (isGvMasterFfHolder(a.name, a.agentId || a.id)) return false;
+      return !(all > 0 && (ffIssu.get(k) || 0) === 0);
     }).map((a) => {
       const k = normName(a.name);
       const all = allIssu.get(k) || 0, ffN = ffIssu.get(k) || 0;
@@ -1921,8 +1924,18 @@ FF.pages = FF.pages || {};
     // FF stock me wo rows rakhte to GV ke saath double count hota. Isliye FF stock se GV master ID
     // exclude hai, aur GV side = GV agents ke paas jo combined stock hai (Tag Assignment).
     const gvMasterIdNorm = normId(FF.config.eir.gvMasterId || '5845036');
-    const ffStockRows = stockAgents.filter((r) => normId(r.agentId) !== gvMasterIdNorm);
-    const ffStockExcluded = sum(stockAgents, (r) => r.n) - sum(ffStockRows, (r) => r.n);
+    // ⚠️ v3.11 fix: pehle sirf agentId === 5845036 wali rows exclude hoti thi. StockDataa me GV ka
+    // parked stock kabhi kabhi ID blank / naam "APNA PAYEMENT" / TL "ApnaPayment Pvt. Ltd." ke saath
+    // aata hai — wo rows FF me ginti thi, isliye "combined field stock" galat (zyada) aa raha tha.
+    // Ab teeno signals check hote hain: (a) GV master ID, (b) "Apna Pay…" holder naam, (c) GV channel TL naam.
+    const gvChannelTlNorm = normName(FF.config.eir.gvChannelTl || 'ApnaPayment Pvt. Ltd.');
+    const isGvParkedFfStock = (r) => isGvMasterFfHolder(r.agentName, r.agentId)
+      || (!!gvChannelTlNorm && normName(r.tlName) === gvChannelTlNorm)
+      || normId(r.agentId) === gvMasterIdNorm;
+    const ffStockRows = stockAgents.filter((r) => !isGvParkedFfStock(r));
+    const ffStockExcludedRows = stockAgents.filter((r) => isGvParkedFfStock(r));
+    const ffStockExcluded = sum(ffStockExcludedRows, (r) => r.n);
+    const ffStockExcludedHolders = U.uniq(ffStockExcludedRows.map((r) => clean(r.agentName || r.agentId || '—'))).slice(0, 3).join(', ');
     const ffStock = sum(ffStockRows, (r) => r.n), gvStock = sum(gvStockClass, (r) => r.n);
     const ffAgents = FF.pages.performance.agents(), lowFf = ffAgents.filter((a) => (a.stockTotal || 0) > 0 && (a.avgTotal || 0) > 0 && (a.stockTotal / a.avgTotal) <= 7).length;
     const lowGv = gvReport.filter((a) => (a.stockTotal || 0) > 0 && (a.runrate || 0) > 0 && (a.stockTotal / a.runrate) <= 7).length;
@@ -1955,12 +1968,12 @@ FF.pages = FF.pages || {};
       <div class="cockpit-banner"><div><small>Combined month-to-date issuance</small><strong>${U.fmt(ff.total + gv.total)}</strong><span>${esc(U.labelYM(ffMonth))} FF + ${esc(U.labelYM(gvMonth))} GV · FF se GV rows (ID ${esc(FF.config.eir.gvMasterId || '5845036')}) exclude — ${U.fmt(gvRowsInEir)} EIR rows double count nahi</span></div><div class="cockpit-split"><span>First Forward <b>${U.fmt(ff.total)}</b> ${U.deltaHtml(U.growth(ff.total,ffLast.total),{decimals:0})}</span><span>GV Partner <b>${U.fmt(gv.total)}</b> ${U.deltaHtml(U.growth(gv.total,gvLast.total),{decimals:0})}</span></div></div>
       ${vividMetrics([
         { label: 'Projected month-end', value: U.fmt(ff.projected + gv.projected), foot: `FF ${U.fmt(ff.projected)} · GV ${U.fmt(gv.projected)}`, tone: 'g3', icon: '🔭' },
-        { label: 'Combined field stock', value: U.fmt(ffStock + gvStock), foot: `FF ${U.fmt(ffStock)} (ID ${esc(FF.config.eir.gvMasterId || '5845036')} exclude${ffStockExcluded ? ` · ${U.fmt(ffStockExcluded)} tags GV side` : ''}) · GV agents ${U.fmt(gvStock)}`, tone: 'g4', icon: '📦' },
+        { label: 'Combined field stock', value: U.fmt(ffStock + gvStock), foot: `FF ${U.fmt(ffStock)} (GV-parked ${U.fmt(ffStockExcluded)} tags excluded${ffStockExcludedHolders ? ` · ${esc(ffStockExcludedHolders)}` : ''}) + GV ${U.fmt(gvStock)} · GV rows alag register se`, tone: 'g4', icon: '📦' },
         { label: 'GV earned commission', value: money(commission, 2), foot: `${money(amount)} transaction amount · ${U.fmt(gvRows.length)} tags`, tone: 'g5', icon: '💰' },
         { label: 'FF commission', value: ffCommission === null ? 'Unavailable' : money(ffCommission, 2), foot: esc(ffCommissionSrc), tone: ffCommission === null ? 'g7' : 'g1', icon: '💸' }
       ])}
       <div class="cockpit-grid"><div class="card card-primary span2"><div class="card-head"><h3>14-day channel pulse</h3><span class="dim small">Sheet-recorded issuances</span></div>${C.bars({labels,series:[{name:'First Forward',values:ffVals},{name:'GV Partner',values:gvVals}],height:230,showValues:false})}</div><div class="card card-warning"><div class="card-head"><h3>Management focus</h3></div><a class="focus-row ${lowFf+lowGv?'risk':''}" href="#/forecast?risk=High"><span>Stock cover ≤ 7 days</span><b>${U.fmt(lowFf+lowGv)}</b><small>FF ${lowFf} · GV ${lowGv}</small></a><a class="focus-row" href="#/dataQuality"><span>Run data quality checks</span><b>Open</b><small>Six source families</small></a><a class="focus-row" href="#/dualChannel"><span>Verified dual-channel agents</span><b>Review</b><small>Barcode + unique-ID evidence</small></a><a class="focus-row" href="#/followups?status=open"><span>Agent/TL follow-ups</span><b>Open</b><small>Owner and due-date timeline</small></a></div></div>
-      <div class="split-cards"><div class="card card-primary"><div class="card-head"><h3>Channel operating summary</h3></div><div class="exec-channel"><div><b>First Forward</b><span>${U.fmt(ff.total)} issued · ${U.fmt(ffStock)} stock</span><small>${U.fmt(ff.vc4)} VC4 · ${U.fmt(ff.comm)} commercial · ${ff.activeDays} active days · stock me ID ${esc(FF.config.eir.gvMasterId || '5845036')} (GV) exclude</small></div><div><b>GV Partner</b><span>${U.fmt(gv.total)} issued · ${U.fmt(gvStock)} stock</span><small>${U.fmt(gv.vc4)} VC4 · ${U.fmt(gv.comm)} commercial · ${gv.activeAgents} agents · stock = GV agents ke paas (Tag Assignment)</small></div></div></div><div class="card card-success"><div class="card-head"><h3>Top GV commission contributors</h3><a href="#/gvCommission">Full analysis →</a></div>${C.hbars({items:top.map((r)=>({label:r.label,sub:`${r.issuances} tags`,value:r.commission})),format:(v)=>money(v,0),valueLabel:'Commission'})}</div></div>`;
+      <div class="split-cards"><div class="card card-primary"><div class="card-head"><h3>Channel operating summary</h3></div><div class="exec-channel"><div><b>First Forward</b><span>${U.fmt(ff.total)} issued · ${U.fmt(ffStock)} stock</span><small>${U.fmt(ff.vc4)} VC4 · ${U.fmt(ff.comm)} commercial · ${ff.activeDays} active days · StockDataa me GV-parked stock (${U.fmt(ffStockExcluded)} tags — ID ${esc(FF.config.eir.gvMasterId || '5845036')} / Apna Payment) FF me count nahi hota</small></div><div><b>GV Partner</b><span>${U.fmt(gv.total)} issued · ${U.fmt(gvStock)} stock</span><small>${U.fmt(gv.vc4)} VC4 · ${U.fmt(gv.comm)} commercial · ${gv.activeAgents} agents · stock = GV agents ke paas (Tag Assignment)</small></div></div></div><div class="card card-success"><div class="card-head"><h3>Top GV commission contributors</h3><a href="#/gvCommission">Full analysis →</a></div>${C.hbars({items:top.map((r)=>({label:r.label,sub:`${r.issuances} tags`,value:r.commission})),format:(v)=>money(v,0),valueLabel:'Commission'})}</div></div>`;
     bindExports(root, 'exec-export', `executive-cockpit-${U.stamp()}`, 'Executive Summary', ['Metric','First Forward','GV Partner','Combined'], [
       ['Month-to-date issuance',ff.total,gv.total,ff.total+gv.total],['Projected month-end',ff.projected,gv.projected,ff.projected+gv.projected],['Field stock',ffStock,gvStock,ffStock+gvStock],['VC4 issuance',ff.vc4,gv.vc4,ff.vc4+gv.vc4],['Commercial issuance',ff.comm,gv.comm,ff.comm+gv.comm],['Stock cover ≤ 7 days',lowFf,lowGv,lowFf+lowGv],['FF commission (earned / rate × tags)',ffCommission===null?'Unavailable':ffCommission,commission,ffCommission===null?'Partial · GV only':ffCommission+commission]
     ]);
@@ -1993,7 +2006,7 @@ FF.pages = FF.pages || {};
     }).sort((x, y) => (Number(y[6]) || 0) - (Number(x[6]) || 0));
     bindMetricDetails(root, `Executive Cockpit · ${U.labelYM(ffMonth)} FF / ${U.labelYM(gvMonth)} GV`, projHeaders, projRows, {
       'Projected month-end': { title: 'Channel-wise month-to-date + projection', headers: projHeaders, rows: projRows, stats: [`${U.labelYM(ffMonth)} FF · ${U.labelYM(gvMonth)} GV`, 'Projection = MTD ÷ active days × days in month'] },
-      'Combined field stock': { title: 'Agent-wise field stock (FF + GV)', headers: stockHeaders, rows: stockRows, stats: [`FF ${U.fmt(ffStock)} · ID ${FF.config.eir.gvMasterId || '5845036'} exclude`, `GV agents ke paas (Tag Assignment) ${U.fmt(gvStock)}`, ffStockExcluded ? `${U.fmt(ffStockExcluded)} tags GV master ID ke the — GV side gine gaye, double count nahi` : ''] },
+      'Combined field stock': { title: 'Agent-wise field stock (FF + GV)', headers: stockHeaders, rows: stockRows, stats: [`FF ${U.fmt(ffStock)} · GV-parked ${U.fmt(ffStockExcluded)} tags exclude (ID ${FF.config.eir.gvMasterId || '5845036'} / Apna Payment / ${FF.config.eir.gvChannelTl || 'ApnaPayment Pvt. Ltd.'})`, `GV agents ke paas (Tag Assignment register) ${U.fmt(gvStock)}`, ffStockExcluded ? `${U.fmt(ffStockExcluded)} tags GV ke the (${ffStockExcludedHolders}) — GV side me gine gaye, double count nahi` : ''] },
       'GV earned commission': { title: `GV agent-wise commission · ${U.labelYM(gvMonth)}`, headers: gvCommHeaders, rows: gvCommRows, stats: [`${U.fmt(gvCommAll.length)} agents`, `Total ${money(commission, 2)} · amount ${money(amount)}`] },
       'FF commission': { title: 'FF agent-wise commission (REPORT)', headers: ffCommHeaders, rows: ffCommRows, stats: [ffCommissionSrc] }
     });

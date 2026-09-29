@@ -40,9 +40,13 @@ window.FF = window.FF || {};
     { id: 'fastagChampions', icon: '🏆', label: 'FASTag Champions', desc: 'Top agents/TLs by VC4, Commercial, Chassis, Replacement, Wrong VRN — FF & GV', perm: 'fastagChampions', group: 'Cross Channel' },
     { id: 'arena', icon: '🎮', label: 'Agent Arena', desc: 'Levels · badges · challenges · crystal ball — gamified leaderboard', perm: 'arena', group: 'Wow Zone' },
     { id: 'fame', icon: '🏆', label: 'Wall of Fame', desc: 'Monthly champions · shareable winner cards (PNG)', perm: 'fame', group: 'Wow Zone' },
-    { id: 'warRoom', icon: '🔴', label: 'War Room', desc: 'Full-screen live pulse · counters · race · ticker', perm: 'warRoom', group: 'Wow Zone' }
+    { id: 'warRoom', icon: '🔴', label: 'War Room', desc: 'Full-screen live pulse · counters · VC4/VC20/VC5 · chassis · replacement', perm: 'warRoom', group: 'Wow Zone' },
+    { id: 'activity', icon: '📅', label: 'Activity Calendar', desc: 'GitHub-style heatmap · streak · poore saal ka pattern', perm: 'activity', group: 'Wow Zone' },
+    { id: 'network', icon: '🕸️', label: 'Team Network', desc: 'TL centre · agents orbit — animated constellation', perm: 'network', group: 'Wow Zone' },
+    { id: 'radar', icon: '🚨', label: 'Anomaly Radar', desc: 'Spike · crash · naya dhamaka · stale sheet auto-detect', perm: 'radar', group: 'Wow Zone' },
+    { id: 'reportCards', icon: '🧾', label: 'Agent Report Cards', desc: 'Monthly report card · grades · auto remarks · print/PDF', perm: 'reportCards', group: 'Wow Zone' }
   ];
-  const GROUP_ICON = { 'Management': '🧭', 'First Forward': '🟦', 'GV Partner': '🟩', 'Cross Channel': '🔗', 'Workspace': '🗂️', 'Account': '👤' };
+  const GROUP_ICON = { 'Management': '🧭', 'First Forward': '🟦', 'GV Partner': '🟩', 'Cross Channel': '🔗', 'Workspace': '🗂️', 'Account': '👤', 'Wow Zone': '🎉' };
   const pageDef = (id) => PAGES.find((p) => p.id === id) || null;
   let current = { page: '', params: {}, token: 0 };
 
@@ -747,6 +751,7 @@ window.FF = window.FF || {};
   }
 
   let syncTimer = null;
+  const appHeartbeat = { timer: null, instance: null };
   let swRegistrationPromise = null;
   /** 📲 Service worker ko notifications.start() se PEHLE register karo — warna push subscribe
       `navigator.serviceWorker.ready` par atak jaata tha aur mobile panel silent reh jaata tha. */
@@ -817,9 +822,35 @@ window.FF = window.FF || {};
     registerServiceWorker(); // push notifications ke liye SW pehle ready ho
     if (FF.notifications) FF.notifications.start();
     liveShareChip();
+    // 🔎 Master search bar (har page par) + 🎨 theme packs + 🟢 live tab heartbeat
+    if (!(FF.config.feat && FF.config.feat('masterSearch') === false)) {
+      Promise.all([FF.store.need('agents'), FF.gv.enabled && FF.gv.enabled() ? FF.gv.need('master').catch(() => []) : Promise.resolve([])])
+        .then(() => { if (FF.masterSearch) FF.masterSearch.mountTopbar(); })
+        .catch(() => { if (FF.masterSearch) FF.masterSearch.mountTopbar(); });
+    }
+    if (FF.wowzone) {
+      if (!(FF.config.feat && FF.config.feat('themePacks') === false)) FF.wowzone.mountThemePicker();
+      if (!(FF.config.feat && FF.config.feat('tabHeartbeat') === false)) {
+        clearInterval(appHeartbeat.timer);
+        if (appHeartbeat.instance) appHeartbeat.instance.stop();
+        appHeartbeat.instance = FF.wowzone.startHeartbeat({ interval: 45000 });
+      }
+    }
     // 🔍 Global search button — features.search OFF ho to hide
     const gsBtn = U.$('#global-search-btn');
-    if (gsBtn) gsBtn.hidden = FF.config.feat && FF.config.feat('search') === false;
+    if (gsBtn) {
+      gsBtn.hidden = FF.config.feat && FF.config.feat('search') === false;
+      if (!gsBtn.__ffWired) {
+        gsBtn.__ffWired = true;
+        gsBtn.addEventListener('click', () => {
+          if (FF.masterSearch && FF.masterSearch.mountTopbar()) {
+            const inp = U.$('#master-search-input');
+            if (inp) { inp.focus(); inp.select(); return; }
+          }
+          if (FF.palette) FF.palette.toggle();
+        });
+      }
+    }
     const svBtn = U.$('#save-view-btn');
     if (svBtn) svBtn.hidden = !FF.auth.can('savedViews');
     startVersionWatch(); // 🔄 update-available toast (features.updateToast)
@@ -847,6 +878,28 @@ window.FF = window.FF || {};
     if (ok) onLogin();
   }
 
-  FF.app = { storageBanner, pushBanner, liveShareChip, navigate, updateParams, refresh, openDrawer, closeDrawer, renderSidebar, renderCurrent, renderTopUser, updateStatus, onLogin, onBackgroundDataUpdated, promptInstall, enhanceCharts, themeMode, toggleThemeMode, lang, setLang, toggleLangMenu, PAGES, refreshPendingBadge, setPendingSignups, shareWhatsApp, checkVersion, get pendingSignups() { return pendingSignups; }, get current() { return current; } };
+  // ---- ⌨️ command palette (Ctrl/⌘+K) helpers — FF.palette inhe call karta hai ----
+  function exportCurrentCsv(kind) {
+    const table = U.$('#main table');
+    if (!table) { U.toast('Is page par koi table nahi hai', 'warn'); return; }
+    if (!FF.auth.can('export')) { U.toast('Download permission nahi hai', 'err'); return; }
+    const rows = U.tableToRows(table);
+    const head0 = rows[0] || [];
+    const body = rows.slice(1);
+    if (kind === 'xlsx' && FF.xlsx) {
+      FF.xlsx.download(`${U.slug((current.page || 'view'))}-${U.stamp()}.xlsx`, [{ name: 'View', header: head0, rows: body }]);
+      U.toast('Excel download ho raha hai ✓', 'ok');
+      return;
+    }
+    U.downloadCsv(`${U.slug(current.page || 'view')}-${U.stamp()}.csv`, head0, body);
+    U.toast('CSV download ho raha hai ✓', 'ok');
+  }
+  function toggleLangQuick() {
+    const order = ['hinglish', 'en', 'hi'];
+    const next = order[(order.indexOf(lang()) + 1) % order.length];
+    setLang(next);
+  }
+
+  FF.app = { storageBanner, pushBanner, liveShareChip, navigate, updateParams, refresh, openDrawer, closeDrawer, renderSidebar, renderCurrent, renderTopUser, updateStatus, onLogin, onBackgroundDataUpdated, promptInstall, enhanceCharts, themeMode, toggleThemeMode, lang, setLang, toggleLangMenu, PAGES, refreshPendingBadge, setPendingSignups, shareWhatsApp, checkVersion, exportCSV: () => exportCurrentCsv('csv'), exportXLSX: () => exportCurrentCsv('xlsx'), toggleTheme: toggleThemeMode, toggleLang: toggleLangQuick, get pendingSignups() { return pendingSignups; }, get current() { return current; } };
   document.addEventListener('DOMContentLoaded', init);
 })(window.FF);
