@@ -320,28 +320,26 @@ FF.pages = FF.pages || {};
       return `<button type="button" class="acc-card ${toneClass} locked" data-acc-locked="${esc(label)}">${inner}</button>`;
     };
     const order = ['Management', 'First Forward', 'GV Partner', 'Cross Channel', 'Workspace'];
-    const panels = order.map((g) => ({ g, items: pages.filter((p) => p.group === g) })).filter((p) => p.items.length);
+    const allowedOf = (p) => A.can(p.perm) && (!p.adminOnly || A.isAdmin()) && (!p.feat || !FF.config.features || FF.config.features[p.feat] !== false);
+    const panels = order.map((g) => ({ g, items: pages.filter((p) => p.group === g && allowedOf(p)) })).filter((p) => p.items.length);
     let html = '<div class="acc-panels">';
     panels.forEach((panel) => {
       const t = tone(panel.g);
-      const items = panel.items.map((p) => {
-        const allowed = A.can(p.perm) && (!p.adminOnly || A.isAdmin()) && (!p.feat || !FF.config.features || FF.config.features[p.feat] !== false);
-        return cardHtml(p.icon, p.label, p.desc, `#/${p.id}`, allowed, t, p.id);
-      }).join('');
+      const items = panel.items.map((p) => cardHtml(p.icon, p.label, p.desc, `#/${p.id}`, true, t, p.id)).join('');
       html += `<div class="acc-panel"><div class="acc-panel-head"><span class="acc-panel-ico">${ACC_ICON[panel.g] || '▦'}</span><b>${esc(panel.g)}</b><span class="acc-count">${panel.items.length} pages</span></div><div class="acc-grid">${items}</div></div>`;
     });
     const pagePermKeys = new Set(pages.map((p) => p.perm));
-    const actionPerms = perms.filter((p) => !pagePermKeys.has(p.key) && !String(p.key).startsWith('sheet:'));
+    const actionPerms = perms.filter((p) => !pagePermKeys.has(p.key) && !String(p.key).startsWith('sheet:') && A.can(p.key));
     if (actionPerms.length) {
-      html += `<div class="acc-panel"><div class="acc-panel-head"><span class="acc-panel-ico">${ACC_ICON.Actions}</span><b>Actions</b><span class="acc-count">${actionPerms.length} permissions</span></div><div class="acc-grid">${actionPerms.map((p) => cardHtml('⚡', p.label, 'Har page ke andar available action', '', A.can(p.key), tone('Actions'), '')).join('')}</div></div>`;
+      html += `<div class="acc-panel"><div class="acc-panel-head"><span class="acc-panel-ico">${ACC_ICON.Actions}</span><b>Actions</b><span class="acc-count">${actionPerms.length} permissions</span></div><div class="acc-grid">${actionPerms.map((p) => cardHtml('⚡', p.label, 'Har page ke andar available action', '', true, tone('Actions'), '')).join('')}</div></div>`;
     }
-    const sheets = perms.filter((p) => String(p.key).startsWith('sheet:'));
+    const sheets = perms.filter((p) => String(p.key).startsWith('sheet:') && A.can(p.key));
     if (sheets.length) {
-      html += `<div class="acc-panel"><div class="acc-panel-head"><span class="acc-panel-ico">${ACC_ICON.Sheets}</span><b>Sheets</b><span class="acc-count">${sheets.length} tabs</span></div><div class="acc-grid">${sheets.map((p) => cardHtml('📄', p.label.replace(/^Sheet · /, ''), p.group, `#/sheet/${encodeURIComponent(p.key.slice(6))}`, A.can(p.key), tone('Sheets'), '')).join('')}</div></div>`;
+      html += `<div class="acc-panel"><div class="acc-panel-head"><span class="acc-panel-ico">${ACC_ICON.Sheets}</span><b>Sheets</b><span class="acc-count">${sheets.length} tabs</span></div><div class="acc-grid">${sheets.map((p) => cardHtml('📄', p.label.replace(/^Sheet · /, ''), p.group, `#/sheet/${encodeURIComponent(p.key.slice(6))}`, true, tone('Sheets'), '')).join('')}</div></div>`;
     }
     html += '</div>';
     const granted = perms.filter((p) => A.can(p.key)).length;
-    html += `<p class="dim small" style="margin-top:10px">${u.role === 'admin' ? '👑 Admin — sab pages khule hain.' : `Access: <b>${granted}/${perms.length}</b> · koi page band ho to admin se kaho.`} Card par click = wahi page data summary ke saath khulega.</p>`;
+    html += `<p class="dim small" style="margin-top:10px">${u.role === 'admin' ? '👑 Admin — sab pages khule hain.' : `Aapke paas <b>${granted}</b> permissions active hain — sirf wahi yahan dikhte hain.`} Card par click = wahi page data summary ke saath khulega.</p>`;
     return html;
   }
 

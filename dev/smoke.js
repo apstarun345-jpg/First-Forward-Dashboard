@@ -536,13 +536,19 @@ await run('v3.16 · Good Morning card (yesterday + MTD + expected calculations)'
   if (e !== null && (!Number.isFinite(e) || e < 0)) throw new Error('expectedToday invalid');
   log(`      yesterday ${y.yestTotal} · MTD ${m.total} · expected ${e}`);
 }, false);
-await run('v3.16 · Office Bell (module + lightweight live count query)', async () => {
+await run('v3.16.1 · Office Bell + Voice Announcer (agent-wise query + announce text)', async () => {
   if (!FF.officeBell || typeof FF.officeBell.mount !== 'function') throw new Error('FF.officeBell.mount missing');
   const e = FF.config.eir;
   const today = FF.util.dateKey(new Date());
-  const t = await FF.data.query(e.sheet, `select count(${e.tagId}) where ${e.date} = date '${today}'`, { timeoutMs: 20000, fresh: true });
-  if (!t || !t.rows) throw new Error('office bell live count query failed');
-  log(`      live count query ok (${t.rows.length} row)`);
+  const t = await FF.data.query(e.sheet, `select ${e.agentName}, count(${e.tagId}) where ${e.date} = date '${today}' group by ${e.agentName}`, { timeoutMs: 20000, fresh: true });
+  if (!t || !t.rows || !t.rows.length) throw new Error('agent-wise live query returned no rows');
+  const single = FF.officeBell.announceText([{ ch: 'FF', agent: 'Rahul Sharma', n: 5 }], 5);
+  if (!/Rahul/.test(single) || !/5/.test(single)) throw new Error('single-agent announce text galat: ' + single);
+  const multi = FF.officeBell.announceText([{ ch: 'FF', agent: 'Rahul', n: 5 }, { ch: 'GV', agent: 'Priya', n: 3 }, { ch: 'FF', agent: 'Amit', n: 2 }], 10);
+  if (!/Rahul/.test(multi) || !/Priya/.test(multi)) throw new Error('multi-agent announce text galat: ' + multi);
+  const blast = FF.officeBell.announceText([], 55);
+  if (!/55/.test(blast)) throw new Error('blast announce text galat: ' + blast);
+  log(`      agent-wise rows ${t.rows.length} · "${single}"`);
 }, false);
 await run('v3.11 · Activity Calendar (heatmap + streak + sparkline board)', async () => {
   const r = root(); await pages.activity.render(r, {}, {});
@@ -869,6 +875,21 @@ await run('auth helpers (avatar/role)', async () => {
 await run('sheet.render StockDataa', () => pages.sheet.render(root(), { name: 'StockDataa' }, {}), true);
 await run('sheet.render REPORT', () => pages.sheet.render(root(), { name: 'REPORT' }, {}), true);
 await run('settings.render (all tabs)', async () => { for (const tab of ['account', 'brand', 'sources', 'access', 'data', 'rules', 'features', 'contacts', 'users', 'links', 'audit', 'backup']) { await pages.settings.render(root(), { tab }, {}); await settle(20); } });
+await run('v3.16.1 · My access me sirf granted cards (locked ⛔ cards nahi)', async () => {
+  const realCan = FF.auth.can;
+  // member simulation: sirf Management ke 4 pages + ek sheet + ek action
+  FF.auth.can = (perm) => ['home', 'targets', 'rangeReport', 'tv', 'sheet:EIR', 'refresh'].includes(perm);
+  try {
+    const r = root(); await pages.settings.render(r, { tab: 'account' }, {}); await settle(20);
+    const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+    if (html.includes('data-acc-locked')) throw new Error('locked card abhi bhi dikh raha hai');
+    if (html.includes('acc-lock')) throw new Error('lock icon abhi bhi dikh raha hai');
+    if (!html.includes('acc-card')) throw new Error('granted cards gayab');
+    if (!/4 pages/.test(html)) throw new Error('Management panel me sirf granted pages count nahi');
+    if (/<b>First Forward<\/b>/.test(html) || /<b>GV Partner<\/b>/.test(html)) throw new Error('bina access wale panels bhi dikh rahe hain');
+    if (!html.includes('EIR')) throw new Error('granted sheet card missing');
+  } finally { FF.auth.can = realCan; }
+});
 await run('settings notification audience matrix', async () => { const r = root(); await pages.settings.render(r, { tab: 'features' }, {}); await settle(30); const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n'); for (const s of ['Notification audience', 'Low-stock / cover alert', 'Monthly champions', 'Sirf admin', 'Admin + users', 'Kisi ko nahi']) if (!html.includes(s)) throw new Error(`notification matrix me "${s}" nahi mila`); });
 await run('teamMap.render (admin location map)', () => pages.teamMap.render(root(), {}, {}), true);
 await run('tv.render (TV mode rotation)', () => pages.tv.render(root(), {}, {}), true);

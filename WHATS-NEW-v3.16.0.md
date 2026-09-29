@@ -46,3 +46,18 @@ Aath clickable KPI cards — kisi par bhi click karo, poora day-breakdown drawer
 - Naye permissions: `sprints`, `stockRadar` (default users ko granted).
 - Service worker v42 · asset cache v36 · package 3.16.0.
 - Smoke tests: 5 naye v3.16 checks (home board, sprints, radar FF+GV, morning card math, bell query).
+
+---
+
+# 🔔➡️🎙️ v3.16.1 (update)
+
+## Voice Announcer — bell ki jagah ab BOLEGA
+- Office Bell ab **agent-wise live query** karta hai — pata chalta hai kis agent ke naye tags aaye.
+- Voice ON (🔊) → **"Rahul ne 5 naye tags issue kiye"** bol kar sunata hai (Hindi/Hinglish ya English — assistant language ke hisaab se). Ting ki jagah awaaz.
+- Voice OFF (🔇) → purana WebAudio ting.
+- Bahut bada burst (40+ tags) → "Zabardast!" announcement. Ticker chip hamesha dikhta hai.
+- Topbar me do buttons: 🔔 bell on/off + 🔊 voice on/off (dono yaad rehte hain).
+
+## Settings · My access — sirf aapka access
+- Ab "My access" section me **sirf wahi pages/actions/sheets dikhte hain jinka access user ko hai**.
+- Band (locked ⛔) cards aur bina-access ke panels ab dikhte hi nahi — clean, confusion-free.
