@@ -229,8 +229,8 @@ FF.pages = FF.pages || {};
       if (grower) badges.push(badge('🚀', 'Fastest Grower', grower.name, `+${Math.round(grower.g)}% (${U.fmt(grower.cur)} tags)`, '#/trend'));
       // 5) Top TL (FF + GV combined issuance)
       const tlMap = new Map();
-      for (const a of agents) if (a.channel === 'First Forward' && a.ym === curKey && a.tlName) tlMap.set(a.tlName, (tlMap.get(a.tlName) || 0) + a.n);
-      for (const a of gvRoll) if (a.tlName && a.tlName !== 'Direct') tlMap.set(a.tlName, (tlMap.get(a.tlName) || 0) + a.total);
+      for (const a of agents) if (a.channel === 'First Forward' && a.ym === curKey && a.tlName && FF.config.isRealTl(a.tlName)) tlMap.set(a.tlName, (tlMap.get(a.tlName) || 0) + a.n);
+      for (const a of gvRoll) if (a.tlName && FF.config.isRealTl(a.tlName) && a.directAgent !== true) tlMap.set(a.tlName, (tlMap.get(a.tlName) || 0) + a.total);
       const topTl = [...tlMap.entries()].sort((a, b) => b[1] - a[1])[0];
       if (topTl) badges.push(badge('🧑‍💼', 'Top TL', topTl[0], `${U.fmt(topTl[1])} tags team`, '#/targets?tab=tl'));
       // 6) Target achievers — settings.targets me se current month

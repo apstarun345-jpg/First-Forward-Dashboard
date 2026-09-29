@@ -33,7 +33,9 @@ FF.pages = FF.pages || {};
     const mode = MODES.some((m) => m[0] === p.mode) ? p.mode : 'daily';
     const dimKey = DIMS[p.dim] ? p.dim : (mode === 'compare' ? 'total' : 'class');
     const filter = { tl: p.tl || '', agent: p.agent || '' };
-    const filterLabel = filter.agent ? `Agent: ${filter.agent}` : filter.tl ? `TL: ${filter.tl}` : 'All agents';
+    const ffDirectNames = (FF.config.directRules().ffTlNames || ['APS']).filter(Boolean);
+    const isDirectTlFilter = !!filter.tl && ffDirectNames.some((n) => n.toUpperCase() === String(filter.tl).toUpperCase());
+    const filterLabel = filter.agent ? `Agent: ${filter.agent}` : isDirectTlFilter ? `🚫 Direct Agents (${filter.tl}) — TL-managed nahi` : filter.tl ? `TL: ${filter.tl}` : 'All agents';
 
     const shareOn = !FF.config.feat || FF.config.feat('share') !== false;
     root.innerHTML = `<div class="page-head"><div><h1>📈 Trend</h1><p class="sub">Daily · Weekly · Monthly · Last vs Current — EIR issuance log</p></div>
@@ -50,8 +52,11 @@ FF.pages = FF.pages || {};
     // ---- controls ---------------------------------------------------------------
     const tlVolume = U.groupSum(agents.filter((a) => !FF.config.isExcludedTl(a.tlName)), (a) => a.tlName, (a) => a.n);
     const tlOptions = U.topEntries(tlVolume).map(([name, v]) => `<option value="${esc(name)}" ${name === filter.tl ? 'selected' : ''}>${esc(name)} (${U.fmtShort(v)})</option>`).join('');
+    // 🧍 Direct agents ka apna filter — FF rule: TL Name APS (configured names se).
+    const directVol = U.sum(agents.filter((a) => FF.config.isExcludedTl(a.tlName)), (a) => a.n);
+    const directOptions = directVol ? ffDirectNames.map((n) => `<option value="${esc(n)}" ${String(filter.tl).toUpperCase() === n.toUpperCase() ? 'selected' : ''}>🚫 Direct Agents · ${esc(n)} (${U.fmtShort(directVol)})</option>`).join('') : '';
     const agentVol = U.groupSum(agents, (a) => a.name, (a) => a.n);
-    const agentTl = new Map(); agents.forEach((a) => { if (!agentTl.has(a.name)) agentTl.set(a.name, FF.config.isExcludedTl(a.tlName) ? 'Direct' : a.tlName); });
+    const agentTl = new Map(); agents.forEach((a) => { if (!agentTl.has(a.name)) agentTl.set(a.name, FF.config.isExcludedTl(a.tlName) ? FF.config.directLabel(a, 'ff') : a.tlName); });
     const allDaily = dailyR.status === 'fulfilled' ? dailyR.value : [];
     const monthsList = M.months(allDaily);
     const waBtn = U.$('#tr-wa', root);
@@ -67,7 +72,7 @@ FF.pages = FF.pages || {};
       <div class="ctrl-row">
         ${mode === 'daily' ? `<label>Month <select data-param="month">${monthsList.map((m) => `<option value="${m}" ${m === curMonth ? 'selected' : ''}>${U.labelYM(m, true)}</option>`).join('')}</select></label>` : ''}
         <label>Breakdown <select data-param="dim">${Object.entries(DIMS).map(([k, d]) => `<option value="${k}" ${k === dimKey ? 'selected' : ''}>${d.label}</option>`).join('')}</select></label>
-        <label>TL <select data-param="tl"><option value="">All TLs</option>${tlOptions}</select></label>
+        <label>TL <select data-param="tl"><option value="">All TLs</option>${directOptions}${tlOptions}</select></label>
         <label>Find <span class="finder-input small"><input class="input" id="tr-find" placeholder="Agent / TL naam type karo → select" value="${esc(filter.agent)}"></span></label>
         ${filter.tl || filter.agent ? `<button class="btn small" data-action="clear-filters">✕ Clear filters</button>` : ''}
         <span class="ctrl-note">${esc(filterLabel)}</span>

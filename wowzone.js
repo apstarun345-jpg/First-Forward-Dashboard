@@ -182,7 +182,9 @@ FF.pages = FF.pages || {};
     const tls = new Map();
     items.forEach((r) => {
       if (!r || !r.name) return;
-      const tl = clean(r.tlName) || 'Direct';
+      // 🧍 Direct agents ka apna hub — kisi asli TL ke orbit me nahi.
+      const isDirect = FF.config.isDirectAgent(r, r.channel === 'GV Partner' ? 'gv' : 'ff');
+      const tl = isDirect ? FF.config.directLabel(r, r.channel === 'GV Partner' ? 'gv' : 'ff') : (clean(r.tlName) || 'Unassigned');
       if (!tls.has(tl)) tls.set(tl, []);
       tls.get(tl).push(r);
     });
@@ -256,13 +258,14 @@ FF.pages = FF.pages || {};
     const ym = months.includes(params.month) ? params.month : (months[months.length - 1] || U.ymKey(new Date()));
     const channel = ['all', 'ff', 'gv'].includes(params.channel) ? params.channel : 'all';
     const rows = [];
-    if (channel !== 'gv') agents.filter((a) => a.ym === ym && a.channel !== 'GV Partner').forEach((a) => rows.push({ name: a.name, tlName: a.tlName, n: a.n, channel: 'First Forward' }));
+    if (channel !== 'gv') agents.filter((a) => a.ym === ym && a.channel !== 'GV Partner').forEach((a) => rows.push({ name: a.name, tlName: a.tlName, n: a.n, channel: 'First Forward', direct: FF.config.isDirectAgent(a, 'ff') }));
     if (channel !== 'ff') {
       const gvAgg = new Map();
-      master.filter((r) => r.ym === ym).forEach((r) => { const k = `${r.agentName}|${r.tlName}`; const cur = gvAgg.get(k) || { name: r.agentName, tlName: r.tlName, n: 0, channel: 'GV Partner' }; cur.n += 1; gvAgg.set(k, cur); });
+      master.filter((r) => r.ym === ym).forEach((r) => { const k = `${r.agentName}|${r.tlName}`; const cur = gvAgg.get(k) || { name: r.agentName, tlName: r.tlName, n: 0, channel: 'GV Partner', direct: FF.config.isDirectAgent(r, 'gv') }; cur.n += 1; gvAgg.set(k, cur); });
       gvAgg.forEach((v) => rows.push(v));
     }
-    const tlCount = U.uniq(rows.map((r) => clean(r.tlName) || 'Direct')).length;
+    const directRows = rows.filter((r) => r.direct);
+    const tlCount = U.uniq(rows.filter((r) => !r.direct).map((r) => clean(r.tlName))).filter((n) => FF.config.isRealTl(n)).length;
     root.innerHTML = head('🕸️', 'Team Network', `TL centre me, agents orbit karte hue — team structure ek nazar me. ${esc(U.labelYM(ym, true))} · ${rows.length} agents · ${tlCount} TLs`,
       ['all', 'ff', 'gv'].map((c) => `<button class="btn small ${c === channel ? 'primary' : ''}" data-param="channel" data-value="${c}">${c === 'ff' ? '🟦 FF' : c === 'gv' ? '🟩 GV' : '🔗 Both'}</button>`).join('') +
       (months.length > 1 ? `<select class="input" data-param="month" style="width:150px">${months.slice().reverse().map((m) => `<option value="${m}" ${m === ym ? 'selected' : ''}>${U.labelYM(m, true)}</option>`).join('')}</select>` : '')) + `
@@ -270,10 +273,10 @@ FF.pages = FF.pages || {};
       { label: 'Agents in network', value: U.fmt(rows.length), foot: `${U.fmt(tlCount)} TL groups`, tone: 'g1', icon: '🧑‍💼' },
       { label: 'Total tags', value: U.fmt(sum(rows, (r) => r.n)), foot: esc(U.labelYM(ym, true)), tone: 'g2', icon: '🏷️' },
       { label: 'Biggest TL', value: esc(([...new Map(rows.map((r) => [clean(r.tlName) || 'Direct', 0])).keys()].sort((a, b) => sum(rows.filter((r) => (clean(r.tlName) || 'Direct') === b), (r) => r.n) - sum(rows.filter((r) => (clean(r.tlName) || 'Direct') === a), (r) => r.n))[0]) || '—'), foot: 'team tags ke hisaab se', tone: 'g6', icon: '👑' },
-      { label: 'Direct (no TL)', value: U.fmt(rows.filter((r) => !clean(r.tlName) || /direct/i.test(r.tlName)).length), foot: 'apne dum par kaam karne wale agents', tone: 'g4', icon: '🚫' }
+      { label: 'Direct Agents (no TL)', value: U.fmt(directRows.length), foot: `FF APS ${U.fmt(directRows.filter((r) => r.channel === 'First Forward').length)} · GV blank TL ${U.fmt(directRows.filter((r) => r.channel === 'GV Partner').length)} · alag hub me`, tone: 'g4', icon: '🚫' }
     ])}
       ${card('🌌 Team constellation', networkGraph(rows, { maxAgents: 16 }), `<span class="dim small">TL par click → performance · agent par click → Agent 360</span>`)}
-      ${card('🏅 TL-wise strength <span class="dim">(node size = tags)</span>', C.hbars({ items: [...U.groupSum(rows, (r) => clean(r.tlName) || 'Direct', (r) => r.n).entries()].sort((a, b) => b[1] - a[1]).slice(0, 15).map(([label, value]) => ({ label, value, sub: `${rows.filter((r) => (clean(r.tlName) || 'Direct') === label).length} agents`, attr: `data-link="#/performance?tl=${encodeURIComponent(label)}"` })), valueLabel: 'Tags' }))}
+      ${card('🏅 TL-wise strength <span class="dim">(node size = tags · direct agents alag row)</span>', C.hbars({ items: [...U.groupSum(rows.filter((r) => !r.direct), (r) => clean(r.tlName) || 'Unassigned', (r) => r.n).entries()].sort((a, b) => b[1] - a[1]).slice(0, 15).map(([label, value]) => ({ label, value, sub: `${rows.filter((r) => !r.direct && (clean(r.tlName) || 'Unassigned') === label).length} agents`, attr: `data-link="#/performance?tl=${encodeURIComponent(label)}"` })).concat(directRows.length ? [{ label: '🚫 Direct Agents (no TL)', value: sum(directRows, (r) => r.n), sub: `${directRows.length} agents · dispatch exempt`, attr: 'data-link="#/directAgents"' }] : []), valueLabel: 'Tags' }))}
       <p class="foot-note">Data: EIR agent-month rollup (FF) + GV Master issuance (GV) · ${esc(U.labelYM(ym, true))} · orbit distance = activity share (zyada tags = centre ke paas).</p>`;
     C.mount(root);
     bindNetwork(root);
@@ -337,7 +340,7 @@ FF.pages = FF.pages || {};
     if (master.length) {
       const rep = G.get('report') || [];
       const risk = rep.filter((r) => /high/i.test(r.priority || '') && Number(r.stockVc4) === 0);
-      if (risk.length) out.push({ id: 'gv-risk', severity: 'high', icon: '🚨', title: 'GV high-priority agents with ZERO VC4 stock', count: risk.length, detail: 'Priority High hai par VC4 stock 0 — dispatch turant chahiye warna issuance rukega.', samples: risk.slice(0, 40).map((r) => `${r.agentName} (${r.tlName}) · MTD ${U.fmt(r.curTotal)}`), route: '#/gvStockReport?view=dispatch' });
+      if (risk.length) out.push({ id: 'gv-risk', severity: 'high', icon: '🚨', title: 'GV high-priority agents with ZERO VC4 stock', count: risk.length, detail: 'Priority High hai par VC4 stock 0 — dispatch turant chahiye warna issuance rukega.', samples: risk.slice(0, 40).map((r) => `${r.agentName} (${FF.config.isDirectAgent(r, 'gv') ? FF.config.directLabel(r, 'gv') : r.tlName}) · MTD ${U.fmt(r.curTotal)}`), route: '#/gvStockReport?view=dispatch' });
     }
 
     // 5) Stale data — latest record kitne din purana

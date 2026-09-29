@@ -68,7 +68,7 @@ FF.pages = FF.pages || {};
         const name = r.agentName || r.agentId || 'Unknown';
         const a = people.get(name) || { total: 0, vc4: 0, commercial: 0 };
         a.total++; if (r.group === 'VC4') a.vc4++; else a.commercial++; people.set(name,a);
-        const tl = r.tlName || 'Direct'; teams.set(tl,(teams.get(tl)||0)+1);
+        const tl = FF.config.isRealTl(r.tlName) ? r.tlName : FF.config.directLabel({ tlName: r.tlName }, r.channel === 'GV Partner' ? 'gv' : 'ff'); teams.set(tl,(teams.get(tl)||0)+1);
       });
       const top = (key) => [...people].sort((a,b) => b[1][key]-a[1][key]).slice(0,12);
       const bars = (data, key, label) => C.hbars({ items: data.map(([name,a],i) => ({ label: name, value: typeof a === 'number' ? a : a[key], sub: typeof a === 'number' ? '' : `Total ${U.fmt(a.total)} · VC4 ${U.fmt(a.vc4)} · Commercial ${U.fmt(a.commercial)}`, color: C.PALETTE[i%C.PALETTE.length] })), valueLabel: label });

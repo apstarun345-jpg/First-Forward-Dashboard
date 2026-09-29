@@ -6,7 +6,7 @@ FF.pages = FF.pages || {};
   'use strict';
   const U = FF.util, A = FF.auth;
   const esc = U.esc;
-  const TABS = [['account', '👤 My account'], ['brand', '🎨 Branding & images'], ['sources', '🗂️ Sheets & tabs'], ['access', '🔐 Access matrix'], ['data', '🔌 Data source'], ['rules', '📐 Thresholds'], ['features', '🎛 Features'], ['contacts', '📲 Contacts & sharing'], ['users', '👥 Users & access'], ['links', '🔗 Personal links'], ['audit', '📜 Audit log'], ['backup', '☁️ Storage & backup']];
+  const TABS = [['account', '👤 My account'], ['brand', '🎨 Branding & images'], ['sources', '🗂️ Sheets & tabs'], ['access', '🔐 Access matrix'], ['data', '🔌 Data source'], ['direct', '🧍 Direct agents'], ['rules', '📐 Thresholds'], ['features', '🎛 Features'], ['contacts', '📲 Contacts & sharing'], ['users', '👥 Users & access'], ['links', '🔗 Personal links'], ['audit', '📜 Audit log'], ['backup', '☁️ Storage & backup']];
   let tab = 'account';
   let storage = null;
   let settings = null, defaults = null, usersCache = null, permsCache = [];
@@ -610,6 +610,54 @@ FF.pages = FF.pages || {};
     const head = bulkRows[0].map((h) => `<th>${esc(h)}</th>`).join('') + (cols > bulkRows[0].length ? `<th colspan="${cols - bulkRows[0].length}"></th>` : '');
     box.innerHTML = `<div class="table-wrap tall"><table class="tbl compact sticky-first"><thead><tr>${head}</tr></thead><tbody>${bulkRows.slice(1, 51).map((r) => `<tr>${Array.from({ length: cols }, (_, i) => `<td>${esc(r[i] !== undefined ? r[i] : '')}</td>`).join('')}</tr>`).join('')}</tbody></table></div>${bulkRows.length > 51 ? `<p class="dim small">Preview me pehli 50 rows — copy/download me poori ${bulkRows.length} rows jayengi.</p>` : ''}`;
   }
+  // 🧍 Direct Agents & TLs — ek hi rule poore site par (FF: TL Name APS · GV: TL ID + TL Name blank).
+  function directTab() {
+    const s = settings || {};
+    const d = Object.assign({}, (FF.config && FF.config.direct) || {}, s.direct || {});
+    const on = (v, def) => (v === undefined ? def : v !== false);
+    const placeholders = (s.directPlaceholderTls && s.directPlaceholderTls.length ? s.directPlaceholderTls : (FF.config.directPlaceholderTls || []));
+    return `${section('🧍 Direct Agents & TLs <span class="dim">· ek hi rule poore site par</span>', `
+      <p class="dim small">Direct agent = jiske paas asli TL nahi. Yahi rule <b>har page</b> par lagta hai — GV Stock Report (dispatch filter), Dispatch Planner ka “Direct pool”, Performance ka TL dropdown (🚫 option), Stock page ka direct chip, Team Network ka alag hub, Master search aur <a href="#/directAgents">🧍 Direct Agents page</a>. Direct agents TL ranking/table me kabhi nahi aate aur (default) unko stock dispatch nahi jaata.</p>
+      <div class="direct-rule-grid">
+        <div class="direct-rule-card"><div class="direct-rule-head"><span>🟦</span><b>First Forward</b><small>TL Name rule</small></div>
+          <p>Jinke <b>TL Name</b> neeche list me hain → <b>Direct Agent (APS)</b>.</p>
+          ${field('FF direct TL names', `<input class="input" data-path="direct.ffTlNames" data-list value="${esc((d.ffTlNames || ['APS']).join(', '))}">`, 'Comma separated · default APS')}
+        </div>
+        <div class="direct-rule-card"><div class="direct-rule-head"><span>🟩</span><b>GV Partner</b><small>TL ID + TL Name rule</small></div>
+          <p>Jinke <b>TL ID aur TL Name dono khaali</b> → <b>Direct Agent (no TL)</b>.</p>
+          ${check('direct.gvNoTl', on(d.gvNoTl, true), 'TL ID + TL Name dono blank = direct')}
+          ${check('direct.gvSelfSupervised', on(d.gvSelfSupervised, true), 'Agent hi apna supervisor (self) = direct')}
+        </div>
+      </div>
+      <div class="form-grid">${field('FF label', txt('direct.labelFf', d.labelFf || 'Direct Agent (APS)'))}${field('GV label', txt('direct.labelGv', d.labelGv || 'Direct Agent (no TL)'))}</div>
+      <div class="form-grid"><label class="check"><input type="checkbox" data-path="direct.enabled" ${on(d.enabled, true) ? 'checked' : ''}> <b>Rule ON</b></label>${check('direct.hideFromTlViews', on(d.hideFromTlViews, true), 'TL lists / rankings / TL tables se hatao')}${check('direct.dispatchExempt', on(d.dispatchExempt, true), 'Stock dispatch exempt (planner me alag “Direct pool”)')}</div>
+      ${field('Placeholder TL names (kabhi asli TL nahi)', `<input class="input" data-path="directPlaceholderTls" data-list value="${esc(placeholders.join(', '))}">`, 'Comma separated — Direct, No TL, Unassigned… Ye har channel me TL list se bahar rehte hain')}
+      <div class="btn-row"><a class="btn small" href="#/directAgents">🧍 Direct agents list →</a><a class="btn small" href="#/gvStockReport?view=dispatch">📋 GV dispatch view →</a><a class="btn small" href="#/dispatchPlan">🚚 Dispatch planner →</a><a class="btn small" href="#/performance?view=alerts">🏆 FF dispatch alerts →</a></div>
+      ${saveBar('direct')}`)}
+      ${section('🔍 Live preview <span class="dim">· is rule se kaun direct ban raha hai</span>', `<div id="dir-preview"><div class="dim small">Preview ban raha hai…</div></div>`)}`;
+  }
+  async function fillDirectPreview(body) {
+    const box = U.$('#dir-preview', body);
+    if (!box) return;
+    const rows = [];
+    try {
+      if (FF.pages.performance && FF.pages.performance.ensureLoaded) await FF.pages.performance.ensureLoaded();
+      const ff = (FF.pages.performance.agents && FF.pages.performance.agents()) || [];
+      const directFf = ff.filter((a) => FF.config.isDirectAgent(a, 'ff'));
+      rows.push(`<tr><td>🟦 First Forward <small class="dim">REPORT</small></td><td class="num"><b>${U.fmt(ff.length)}</b></td><td class="num"><b>${U.fmt(directFf.length)}</b></td><td class="small">${directFf.slice(0, 8).map((a) => esc(a.name)).join(', ') || '<span class="dim">—</span>'}</td></tr>`);
+    } catch (err) { /* FF data optional */ }
+    try {
+      if (FF.gv && FF.gv.need) {
+        const rep = await FF.gv.need('report');
+        const directGv = (rep || []).filter((r) => FF.config.isDirectAgent(r, 'gv'));
+        rows.push(`<tr><td>🟩 GV Partner <small class="dim">GV REPORT</small></td><td class="num"><b>${U.fmt((rep || []).length)}</b></td><td class="num"><b>${U.fmt(directGv.length)}</b></td><td class="small">${directGv.slice(0, 8).map((r) => esc(r.agentName)).join(', ') || '<span class="dim">—</span>'}</td></tr>`);
+      }
+    } catch (err) { /* GV data optional */ }
+    if (!box.isConnected) return;
+    box.innerHTML = rows.length
+      ? `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Channel</th><th class="num">Total agents</th><th class="num">🚫 Direct</th><th>Examples</th></tr></thead><tbody>${rows.join('')}</tbody></table></div><p class="dim small">Ye numbers current loaded data se live hain. Rule save karne ke baad har page (dispatch, TL lists, search) naye rule par chalti hai.</p>`
+      : '<div class="dim small">Data load nahi hua — login ke baad ye preview bharega.</div>';
+  }
   function rulesTab() {
     const t = settings.thresholds || {};
     return section('📐 Thresholds & display', `<div class="form-grid">${field('Stock cover 🔴 red below (days)', numI('thresholds.coverRed', t.coverRed, 'min="0"'))}${field('Stock cover 🟠 orange below (days)', numI('thresholds.coverOrange', t.coverOrange, 'min="0"'))}${field('Stock cover 🟡 amber below (days)', numI('thresholds.coverAmber', t.coverAmber, 'min="0"'), '🟢 green above this')}${field('"Went quiet" after (inactive days)', numI('thresholds.inactiveDays', t.inactiveDays, 'min="1"'))}${field('Top N in rankings', numI('thresholds.topN', t.topN, 'min="3" max="50"'))}${field('Default rows per page', numI('pageSize', settings.pageSize, 'min="10" max="500"'))}</div>${check('allowSignup', settings.allowSignup !== false, 'Login page par "Sign up" allow karo (naye account admin approval ke baad hi chalte hain)')}${saveBar('rules')}`);
@@ -1169,6 +1217,7 @@ FF.pages = FF.pages || {};
       else if (tab === 'sources') body.innerHTML = sourcesTab();
       else if (tab === 'access') { body.innerHTML = U.spinner('Access matrix…'); await accessTab(body); }
       else if (tab === 'data') body.innerHTML = dataTab();
+      else if (tab === 'direct') { body.innerHTML = directTab(); void fillDirectPreview(body); }
       else if (tab === 'rules') body.innerHTML = rulesTab();
       else if (tab === 'features') body.innerHTML = featuresTab();
       else if (tab === 'audit') { body.innerHTML = U.spinner('Audit log…'); await auditTab(body); }

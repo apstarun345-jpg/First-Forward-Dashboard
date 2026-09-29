@@ -59,6 +59,16 @@ FF.pages = FF.pages || {};
   const dayDiff = (a, b) => Math.round((new Date(`${b}T00:00:00`) - new Date(`${a}T00:00:00`)) / 864e5);
 
   /** FF agents-month rows + agentClass rows + GV master rows → agent-wise wow stats. */
+  /** TL display for arena rows — 🧍 direct agent ko uske channel ka direct label milta hai. */
+  function arenaTlLabel(s) {
+    const ch = (s && (s.ffTotal || s.ffCur)) ? 'ff' : (s && (s.gvTotal || s.gvCur) ? 'gv' : '');
+    if (ch && FF.config && FF.config.isDirectAgent) {
+      const row = { tlName: s.tlName, channel: ch === 'gv' ? 'GV Partner' : 'First Forward' };
+      if (FF.config.isDirectAgent(row, ch)) return FF.config.directLabel(row, ch);
+    }
+    return (s && s.tlName) || '—';
+  }
+
   function buildStats(agentsRows, agentClassRows, gvRows, ym) {
     const prevYm = U.prevMonthKey(ym);
     const map = new Map();
@@ -348,7 +358,7 @@ FF.pages = FF.pages || {};
         <div class="table-wrap"><table class="data-table ins-table wow-table"><thead><tr><th class="tone-violet">#</th><th class="tone-violet">Agent</th><th class="tone-violet">Level</th><th class="tone-violet num">XP</th><th class="tone-violet">Badges</th><th class="tone-violet num">Is month</th><th class="tone-violet num">Streak</th><th class="tone-violet num">VC4</th><th class="tone-violet">Challenges</th></tr></thead><tbody>
           ${list.slice(0, 100).map((s) => `<tr>
             <td>${s.rank <= 3 ? ['🥇', '🥈', '🥉'][s.rank - 1] : s.rank}</td>
-            <td><b>${esc(s.name)}</b><small>${esc(s.tlName || 'Direct')} · total ${fmt(s.total)}</small></td>
+            <td><b>${esc(s.name)}</b><small>${esc(arenaTlLabel(s))} · total ${fmt(s.total)}</small></td>
             <td><span class="wow-level">${s.level.icon} ${esc(s.level.name)}</span>${levelBar(s)}<small class="dim">${s.level.next ? `${fmt(s.level.intoLevel)}/${fmt(s.level.need)} XP` : 'MAX level 🏆'}</small></td>
             <td class="num"><b>${fmt(s.xp)}</b></td>
             <td>${s.badges.map(badgeIcon).join('') || '<span class="dim">—</span>'}</td>
@@ -373,7 +383,7 @@ FF.pages = FF.pages || {};
       const p = promotions[Number(b.dataset.levelup)];
       if (p) FF.wowzone.levelUpCeremony(p);
     });
-    if (UI.bindMetricDetails) UI.bindMetricDetails(body, 'Agent Arena · full data', ['Rank', 'Agent', 'TL', 'Level', 'XP', 'Is month', 'Prev', 'Total', 'Streak', 'Badges'], stats.map((s) => [s.rank, s.name, s.tlName, s.level.name, s.xp, s.cur, s.prev, s.total, s.streakDays, s.badges.map((b) => b.name).join(', ')]), {
+    if (UI.bindMetricDetails) UI.bindMetricDetails(body, 'Agent Arena · full data', ['Rank', 'Agent', 'TL', 'Level', 'XP', 'Is month', 'Prev', 'Total', 'Streak', 'Badges'], stats.map((s) => [s.rank, s.name, arenaTlLabel(s), s.level.name, s.xp, s.cur, s.prev, s.total, s.streakDays, s.badges.map((b) => b.name).join(', ')]), {
       'Arena players': { title: 'Sab players XP order me', headers: ['Rank', 'Agent', 'Level', 'XP', 'Total tags'], rows: stats.slice().sort((a, b) => b.xp - a.xp).map((s) => [s.rank, s.name, `${s.level.icon} ${s.level.name}`, s.xp, s.total]) },
       'Badges earned': { title: 'Badge-wise winners', headers: ['Badge', 'Players'], rows: BADGES.map((b) => [`${b.icon} ${b.name} — ${b.desc}`, stats.filter((s) => s.badges.some((x) => x.id === b.id)).length]) },
       'Total XP': { title: 'XP leaderboard', headers: ['Rank', 'Agent', 'XP', 'Level', 'Badges'], rows: stats.slice().sort((a, b) => b.xp - a.xp).map((s) => [s.rank, s.name, s.xp, s.level.name, s.badges.length]) },
@@ -471,7 +481,9 @@ FF.pages = FF.pages || {};
         // per-TL breakdown (today)
         const tlToday = new Map();
         const bump = (tl, ch, r) => {
-          const key = tl || 'Direct';
+          // 🧍 Direct agents alag group — kisi asli TL ke under nahi.
+          const direct = FF.config.isDirectAgent(r, ch === 'gv' ? 'gv' : 'ff');
+          const key = direct ? FF.config.directLabel(r, ch === 'gv' ? 'gv' : 'ff') : (FF.config.isRealTl(tl) ? tl : 'Unassigned');
           const o = tlToday.get(key) || { tl: key, ff: 0, gv: 0, vc4: 0, comm: 0, repl: 0, chassis: 0 };
           if (ch === 'ff') { o.ff += r.n || 0; if (r.group === 'VC4') o.vc4 += r.n || 0; else o.comm += r.n || 0; if (/replacement/i.test(r.type || '')) o.repl += r.n || 0; if (/chassis/i.test(r.type || '')) o.chassis += r.n || 0; }
           else { o.gv += 1; if (r.group === 'VC4') o.vc4 += 1; else o.comm += 1; if (/replacement/i.test(r.status || '')) o.repl += 1; if (/chassis/i.test(r.tagType || '')) o.chassis += 1; }
@@ -537,7 +549,7 @@ FF.pages = FF.pages || {};
             </div>
             <div class="war-panel">
               <h3>⚡ Live ticker · GV latest</h3>
-              <div class="war-ticker">${lastGv.map((r) => `<div class="war-tick"><span class="war-tick-dot"></span><b>${esc(r.agentName || r.agentId || 'Agent')}</b><small>${r.tlName || ''} · ${new Date(r.date).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</small></div>`).join('') || '<p class="war-note">Aaj abhi koi GV activity nahi.</p>'}</div>
+              <div class="war-ticker">${lastGv.map((r) => `<div class="war-tick"><span class="war-tick-dot"></span><b>${esc(r.agentName || r.agentId || 'Agent')}</b><small>${FF.config.isDirectAgent(r, 'gv') ? FF.config.directLabel(r, 'gv') : (r.tlName || '')} · ${new Date(r.date).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</small></div>`).join('') || '<p class="war-note">Aaj abhi koi GV activity nahi.</p>'}</div>
             </div>
           </div>
           <div class="war-detail">

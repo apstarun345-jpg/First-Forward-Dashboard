@@ -14,6 +14,14 @@ Koi database nahi, koi manual upload nahi — website Google Sheet se data padht
 (Google Visualization API / `gviz`) through a small Node server that also handles **login, users,
 permissions and settings**. Zero npm dependencies.
 
+## ✨ v3.12.0 highlights — 🧍 Direct Agents & TLs (ek hi rule, poori site par)
+
+- **Rule (configured, Settings → 🧍 Direct Agents):** GV direct = **TL ID + TL Name dono khaali** · FF direct = **TL Name APS**.
+- **Ek hi classifier** poore app me: `FF.config.isDirectAgent(row, channel)` + `FF.direct` helpers — dispatch filters, TL dropdowns, TL rollups, ranking, search suggestions, network graph, war room, commission, certificates sab isi rule par.
+- **GV Stock Report dispatch** me 🚫 **Direct Agents — alag list (no dispatch)** + TL/Dispatch filter me direct option; **FF Performance** me `🚫 Direct Agents · APS` filter; **Dispatch Planner** me alag direct pool.
+- **Naya page** `#/directAgents` — dono channel ke direct agents ka roster (reason, stock, MTD issuance) + CSV + rule cards.
+- Docs + tests: [WHATS-NEW-v3.12.0.md](WHATS-NEW-v3.12.0.md) · `dev/direct-agent.test.js` · smoke me v3.12 checks.
+
 ## ✨ v3.11.0 highlights — Master Search + Wow Zone 2.0 🔎
 
 - **🔎 Master Search (har page par)** — topbar search bar + Home panel master search. Naam, TL naam,

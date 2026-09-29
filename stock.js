@@ -9,7 +9,7 @@ FF.pages = FF.pages || {};
   const norm = (s) => U.clean(s).toUpperCase().replace(/\s+/g, ' ');
   const clsNum = (c) => parseInt(String(c).replace(/\D/g, ''), 10) || 999;
   const isVc4 = (cls) => M.classGroup(cls) === 'VC4';
-  const view = { scope: '', value: '', cls: '', q: '' };
+  const view = { scope: '', value: '', cls: '', q: '', direct: false };
 
   function coverBadge(days) {
     const t = FF.config.thresholds;
@@ -155,7 +155,7 @@ FF.pages = FF.pages || {};
     const kpiBox = (label, value, sub) => `<div class="kpi"><small>${esc(label)}</small><b>${value}</b>${sub ? `<small>${sub}</small>` : ''}</div>`;
     let kpis = '';
     if (src) {
-      const tlLabel = sel.scope === 'agent' ? `TL ${FF.config.isExcludedTl(src.tl) ? 'Direct' : src.tl}` : `${(pivot.list || []).length} agents holding stock`;
+      const tlLabel = sel.scope === 'agent' ? `TL ${FF.config.isExcludedTl(src.tl) ? FF.config.directLabel({ tlName: src.tl, channel: 'First Forward' }, 'ff') : src.tl}` : `${(pivot.list || []).length} agents holding stock`;
       kpis = `<div class="kpis">${kpiBox('Total stock', U.fmt(src.total), tlLabel)}${kpiBox('VC4 stock', U.fmt(src.vc4), `${U.fmtPct(U.pctOf(src.vc4, src.total), 0)} of stock`)}${kpiBox('Commercial stock', U.fmt(src.comm))}${kpiBox('MTD issued', U.fmt(src.iss), P.cur ? U.labelYM(P.cur) : '')}${kpiBox('VC4 cover', src.cover === null ? '—' : `${U.fmt(src.cover)} days`, 'stock ÷ avg daily issuance')}</div>`;
     } else if (sel.scope === 'cls') {
       const totalCls = P.byClass.get(sel.value) || 0;
@@ -173,7 +173,7 @@ FF.pages = FF.pages || {};
       const agent = P.agents.find((a) => norm(a.name) === norm(sel.value));
       if (!agent) { el.innerHTML = `<div class="empty-state">"${esc(sel.value)}" ke naam par StockDataa me koi stock nahi hai.</div>`; return null; }
       const pv = agentPivot(P, agent);
-      const tlName = FF.config.isExcludedTl(agent.tl) ? 'Direct (no TL)' : agent.tl;
+      const tlName = FF.config.isExcludedTl(agent.tl) ? FF.config.directLabel({ tlName: agent.tl, channel: 'First Forward' }, 'ff') : agent.tl;
       const perDay = P.elapsed ? agent.iss / P.elapsed : 0;
       const text = [`*${FF.config.brand} – Stock – ${agent.name}*`, `TL: ${tlName} · ID ${agent.id || '—'}`, `Total stock: *${U.fmt(agent.total)}* (VC4 ${U.fmt(agent.vc4)} | Commercial ${U.fmt(agent.comm)})`, ...P.classes.filter((c) => agent.byClass.get(c)).map((c) => `• ${c}: ${U.fmt(agent.byClass.get(c))}`), `MTD issued: ${U.fmt(agent.iss)} (VC4 ${U.fmt(agent.issVc4)})`, `VC4 stock cover: ${agent.cover === null ? '—' : `${U.fmt(agent.cover)} days`}`, `— ${FF.config.contacts.signature || ''}`].join('\n');
       el.innerHTML = `<div class="kpi-grid">
@@ -217,7 +217,7 @@ FF.pages = FF.pages || {};
       const agentsHolding = P.agents.filter((a) => (a.byClass.get(cls) || 0) > 0).sort((a, b) => (b.byClass.get(cls) || 0) - (a.byClass.get(cls) || 0));
       el.innerHTML = `<div class="kpi-grid">
           ${kpi('g9', `${esc(cls)} stock`, '📦', U.fmt(totalCls), `${U.fmtPct(U.pctOf(totalCls, P.total), 1)} of all stock · ${isVc4(cls) ? 'VC4 (payable)' : 'Commercial'}`)}
-          ${kpi('g1', 'TLs holding', '👥', U.fmt(pv.rows.length), 'APS / direct excluded from TL list')}
+          ${kpi('g1', 'TLs holding', '👥', U.fmt(pv.rows.length), 'Direct agents (TL Name APS) TL list se alag')}
           ${kpi('g4', 'Agents holding', '🧑‍💼', U.fmt(agentsHolding.length), `Top: ${esc(agentsHolding[0] ? agentsHolding[0].name : '—')}`)}
           ${kpi('g6', 'vs VC4', '⚖️', isVc4(cls) ? '—' : U.fmtPct(U.pctOf(totalCls, P.vc4), 1), isVc4(cls) ? 'This is VC4' : `${esc(cls)} ÷ VC4 stock`)}
         </div>
@@ -236,10 +236,12 @@ FF.pages = FF.pages || {};
     const perDayVc4 = P.elapsed ? curVc4 / P.elapsed : 0, perDayComm = P.elapsed ? curComm / P.elapsed : 0;
     const topTls = tls.slice(0, FF.config.thresholds.topN || 10).map((t, i) => ({ label: t.name, value: t.total, sub: `VC4 ${U.fmt(t.vc4)} · Comm ${U.fmt(t.comm)} · ${t.agents} agents`, color: C.PALETTE[(i + 3) % C.PALETTE.length], attr: `data-pick-tl="${esc(t.name)}"` }));
     const tlTable = `<div class="table-wrap tall"><table class="tbl sticky-first"><thead><tr><th>TL</th><th class="num">Agents</th>${P.classes.map((c) => `<th class="num">${esc(c)}</th>`).join('')}<th class="num">VC4</th><th class="num">Commercial</th><th class="num">Total</th><th class="num">MTD issued</th><th>VC4 cover</th></tr></thead><tbody>${tls.map((t) => `<tr data-pick-tl="${esc(t.name)}" class="clickable"><td><b>${esc(t.name)}</b></td><td class="num">${t.agents}</td>${P.classes.map((c) => `<td class="num">${t.byClass.get(c) ? U.fmt(t.byClass.get(c)) : '<span class="dim">·</span>'}</td>`).join('')}<td class="num">${U.fmt(t.vc4)}</td><td class="num">${U.fmt(t.comm)}</td><td class="num"><b>${U.fmt(t.total)}</b></td><td class="num">${U.fmt(t.iss)}</td><td>${coverBadge(t.cover)}</td></tr>`).join('')}</tbody><tfoot><tr><td><b>TL total</b></td><td class="num">${U.sum(tls, (t) => t.agents)}</td>${P.classes.map((c) => `<td class="num"><b>${U.fmt(U.sum(tls, (t) => t.byClass.get(c) || 0))}</b></td>`).join('')}<td class="num"><b>${U.fmt(U.sum(tls, (t) => t.vc4))}</b></td><td class="num"><b>${U.fmt(U.sum(tls, (t) => t.comm))}</b></td><td class="num"><b>${U.fmt(U.sum(tls, (t) => t.total))}</b></td><td class="num"><b>${U.fmt(U.sum(tls, (t) => t.iss))}</b></td><td></td></tr>${direct.length ? `<tr class="dim"><td>Direct agents (${esc(direct.map((d) => d.name).join(', '))}) — not a TL</td><td class="num">${U.sum(direct, (t) => t.agents)}</td>${P.classes.map((c) => `<td class="num">${U.fmt(U.sum(direct, (t) => t.byClass.get(c) || 0))}</td>`).join('')}<td class="num">${U.fmt(U.sum(direct, (t) => t.vc4))}</td><td class="num">${U.fmt(U.sum(direct, (t) => t.comm))}</td><td class="num">${U.fmt(directTotal)}</td><td class="num">${U.fmt(U.sum(direct, (t) => t.iss))}</td><td></td></tr>` : ''}</tfoot></table></div>`;
-    const agentRow = (a) => `<tr data-pick-agent="${esc(a.name)}" class="clickable"><td class="mono">${esc(a.id)}</td><td><b>${esc(a.name)}</b></td><td>${esc(FF.config.isExcludedTl(a.tl) ? 'Direct' : a.tl)}</td><td class="num">${U.fmt(a.vc4)}</td><td class="num">${U.fmt(a.comm)}</td><td class="num"><b>${U.fmt(a.total)}</b></td><td class="num">${U.fmt(a.iss)}</td><td>${coverBadge(a.cover)}</td></tr>`;
-    const filtered = view.cls ? P.agents.filter((a) => (view.cls === 'VC4' ? a.vc4 : view.cls === 'COMM' ? a.comm : a.byClass.get(view.cls) || 0) > 0) : P.agents;
+    const agentRow = (a) => `<tr data-pick-agent="${esc(a.name)}" class="clickable"><td class="mono">${esc(a.id)}</td><td><b>${esc(a.name)}</b></td><td>${esc(FF.config.isExcludedTl(a.tl) ? FF.config.directLabel({ tlName: a.tl, channel: 'First Forward' }, 'ff') : a.tl)}</td><td class="num">${U.fmt(a.vc4)}</td><td class="num">${U.fmt(a.comm)}</td><td class="num"><b>${U.fmt(a.total)}</b></td><td class="num">${U.fmt(a.iss)}</td><td>${coverBadge(a.cover)}</td></tr>`;
+    // 🚫 Direct agents (TL Name APS / excluded) — TL-wise table se alag, demand par filterable.
+    const directAgents = P.agents.filter((a) => FF.config.isExcludedTl(a.tl));
+    const filtered = view.direct ? directAgents : view.cls ? P.agents.filter((a) => (view.cls === 'VC4' ? a.vc4 : view.cls === 'COMM' ? a.comm : a.byClass.get(view.cls) || 0) > 0) : P.agents;
     el.innerHTML = `<div class="kpi-grid">
-        ${kpi('g9', 'Total stock in field', '📦', U.fmt(P.total), `${tls.length} TLs · ${U.fmt(P.agents.length)} agents holding stock${directTotal ? ` · direct ${U.fmt(directTotal)}` : ''}`)}
+        ${kpi('g9', 'Total stock in field', '📦', U.fmt(P.total), `${tls.length} TLs · ${U.fmt(P.agents.length)} agents holding stock · 🚫 ${U.fmt(directAgents.length)} direct (${U.fmt(directTotal)} tags)`)}
         ${kpi('g1', 'VC4 stock', '🚗', U.fmt(P.vc4), `${U.fmtPct(U.pctOf(P.vc4, P.total), 0)} of stock · ${perDayVc4 ? `${U.fmt(P.vc4 / perDayVc4)} days cover @ ${U.fmt(perDayVc4)} VC4/day` : ''}`)}
         ${kpi('g4', 'Commercial stock', '🚚', U.fmt(P.comm), `${U.fmtPct(U.pctOf(P.comm, P.total), 0)} of stock · ${perDayComm ? `${U.fmt(P.comm / perDayComm)} days cover @ ${U.fmt(perDayComm)} comm/day` : ''}`)}
         ${kpi('g6', P.cur ? `${U.labelYM(P.cur)} issued (MTD)` : 'MTD issued', '🏷️', U.fmt(P.curS ? P.curS.total : 0), `VC4 <b>${U.fmt(curVc4)}</b> · VC20 <b>${U.fmt(P.curS ? P.curS.vc20 : 0)}</b> · VC5+ <b>${U.fmt(P.curS ? P.curS.vc5p : 0)}</b> · ${P.elapsed} days`)}
@@ -257,7 +259,7 @@ FF.pages = FF.pages || {};
         return sorted.map((t) => `<tr data-pick-tl="${esc(t.name)}" class="clickable"><td><b>${esc(t.name)}</b></td><td class="num">${U.fmt(t.vc4)}</td><td class="num">${U.fmt(t.iss)}</td><td class="num">${P.elapsed ? U.fmt(t.iss / P.elapsed, 1) : '—'}</td><td>${coverBadge(t.cover)}</td></tr>`).join('');
       })()}</tbody></table></div>`) : ''}
       ${card('🧮 TL × Class stock matrix <span class="dim">(click TL → pivot + Excel · VC4 cover = VC4 stock ÷ avg daily issuance MTD)</span>', tlTable, `<button class="btn small" data-action="export" data-name="stock-by-tl">⬇ CSV</button>`)}
-      ${card(`🧑‍💼 Agent-wise stock <span class="dim">(${U.fmt(filtered.length)} agents${view.cls ? ` · ${esc(view.cls === 'COMM' ? 'Commercial' : view.cls)} only` : ''})</span>`, `<div class="table-wrap tall"><table class="tbl" id="st-agent-table"><thead><tr><th>Agent ID</th><th>Agent</th><th>TL</th><th class="num">VC4</th><th class="num">Commercial</th><th class="num">Total</th><th class="num">MTD issued</th><th>VC4 cover</th></tr></thead><tbody id="st-agent-body">${filtered.slice(0, 200).map(agentRow).join('')}</tbody></table></div><div class="dim small" id="st-agent-note">${filtered.length > 200 ? 'Top 200 dikh rahe hain — upar search karo.' : `${U.fmt(filtered.length)} agents`}</div>`, `<select id="st-cls"><option value="">All classes</option><option value="VC4" ${view.cls === 'VC4' ? 'selected' : ''}>VC4 only</option><option value="COMM" ${view.cls === 'COMM' ? 'selected' : ''}>Commercial only</option>${P.classes.map((c) => `<option value="${esc(c)}" ${view.cls === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select><button class="btn small" data-action="export" data-name="stock-by-agent">⬇ CSV</button>`)}`;
+      ${card(`🧑‍💼 Agent-wise stock <span class="dim">(${U.fmt(filtered.length)} agents${view.cls ? ` · ${esc(view.cls === 'COMM' ? 'Commercial' : view.cls)} only` : ''})</span>`, `<div class="table-wrap tall"><table class="tbl" id="st-agent-table"><thead><tr><th>Agent ID</th><th>Agent</th><th>TL</th><th class="num">VC4</th><th class="num">Commercial</th><th class="num">Total</th><th class="num">MTD issued</th><th>VC4 cover</th></tr></thead><tbody id="st-agent-body">${filtered.slice(0, 200).map(agentRow).join('')}</tbody></table></div><div class="dim small" id="st-agent-note">${view.direct ? '🚫 Direct agents (FF rule: TL Name APS) — inko stock dispatch nahi hota · ' : ''}${filtered.length > 200 ? 'Top 200 dikh rahe hain — upar search karo.' : `${U.fmt(filtered.length)} agents`}</div>`, `<select id="st-cls"><option value="">All classes</option><option value="VC4" ${view.cls === 'VC4' ? 'selected' : ''}>VC4 only</option><option value="COMM" ${view.cls === 'COMM' ? 'selected' : ''}>Commercial only</option>${P.classes.map((c) => `<option value="${esc(c)}" ${view.cls === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select><button class="btn small" data-action="export" data-name="stock-by-agent">⬇ CSV</button>`)}`;
   }
 
   // ---- 📉 stock trend + 🧾 in-vs-issued (server ke snapshots, ek hi fetch) ------------------------
@@ -342,7 +344,7 @@ FF.pages = FF.pages || {};
     root.innerHTML = `<div class="page-head"><div><h1>📦 Stock / Inventory</h1><p class="sub">StockDataa — agent / TL / class wise stock · VC4 vs Commercial · pivot + Excel export</p></div>
       <div class="head-actions">${shareOn ? '<button class="btn" id="st-wa" title="Stock summary WhatsApp par bhejo">📤 WhatsApp</button>' : ''}<button class="btn primary" data-action="refresh">↻ Refresh</button>${FF.auth.can('sheet:StockDataa') ? `<a class="btn" href="#/sheet/${encodeURIComponent(FF.config.stock.sheet)}">Full StockDataa sheet →</a>` : ''}</div></div>
       <div class="card controls finder"><div class="finder-row"><div class="finder-input"><span class="finder-ico">🔎</span><input class="input" id="st-q" placeholder="Agent ya TL ka naam type karo… (dropdown se select karo)" value="${esc(view.scope === 'cls' ? '' : view.value)}"><button class="btn mic-btn" id="st-mic" title="🗣 Bol ke search karo" type="button">🎤</button></div>
-        <label>Criteria <select id="st-scope"><option value="">Agent + TL</option><option value="agent">Agent only</option><option value="tl">TL only</option></select></label>
+        <label>Criteria <select id="st-scope"><option value="">Agent + TL</option><option value="agent">Agent only</option><option value="tl">TL only</option><option value="direct">🚫 Direct agents only</option></select></label>
         <button class="btn small" id="st-clear" ${view.scope ? '' : 'disabled'}>✕ Clear</button>
         <span class="ctrl-note" id="st-note"></span></div>
         <div class="chip-row" id="st-chips"></div>
@@ -360,7 +362,7 @@ FF.pages = FF.pages || {};
     });
     const noteEl = U.$('#st-note', root);
     noteEl.textContent = view.scope ? `${view.scope === 'cls' ? 'Class' : view.scope === 'tl' ? 'TL' : 'Agent'}: ${view.value}` : `${U.fmt(P.total)} tags · ${U.fmt(P.agents.length)} agents · ${P.tls.filter((t) => !t.excluded).length} TLs`;
-    U.$('#st-chips', root).innerHTML = `<span class="dim small">Quick:</span>${P.tls.filter((t) => !t.excluded).slice(0, 8).map((t) => `<button class="chip ${view.scope === 'tl' && norm(view.value) === norm(t.name) ? 'on' : ''}" data-pick-tl="${esc(t.name)}">👥 ${esc(t.name)}</button>`).join('')}<button class="chip vc4 ${view.scope === 'cls' && view.value === 'VC4' ? 'on' : ''}" data-pick-cls="VC4">VC4</button>${P.classes.filter((c) => !isVc4(c)).map((c) => `<button class="chip comm ${view.scope === 'cls' && view.value === c ? 'on' : ''}" data-pick-cls="${esc(c)}">${esc(c)}</button>`).join('')}`;
+    U.$('#st-chips', root).innerHTML = `<span class="dim small">Quick:</span>${P.tls.filter((t) => !t.excluded).slice(0, 8).map((t) => `<button class="chip ${view.scope === 'tl' && norm(view.value) === norm(t.name) ? 'on' : ''}" data-pick-tl="${esc(t.name)}">👥 ${esc(t.name)}</button>`).join('')}<button class="chip direct-chip ${view.direct ? 'on' : ''}" data-pick-direct="1">🚫 Direct agents (${U.fmt(P.agents.filter((a) => FF.config.isExcludedTl(a.tl)).length)})</button><button class="chip vc4 ${view.scope === 'cls' && view.value === 'VC4' ? 'on' : ''}" data-pick-cls="VC4">VC4</button>${P.classes.filter((c) => !isVc4(c)).map((c) => `<button class="chip comm ${view.scope === 'cls' && view.value === c ? 'on' : ''}" data-pick-cls="${esc(c)}">${esc(c)}</button>`).join('')}`;
 
     let pivot = null;
     if (view.scope) pivot = selectionView(P, body); else overview(P, body);
@@ -373,7 +375,7 @@ FF.pages = FF.pages || {};
       const s = scopeSel.value;
       const list = [];
       if (s !== 'agent') P.tls.filter((t) => !t.excluded).forEach((t) => list.push({ kind: 'tl', kindLabel: 'TL', label: t.name, sub: `${U.fmt(t.total)} tags · ${t.agents} agents`, value: t.name }));
-      if (s !== 'tl') P.agents.forEach((a) => list.push({ kind: 'agent', kindLabel: 'Agent', label: a.name, sub: `${FF.config.isExcludedTl(a.tl) ? 'Direct' : a.tl} · ${U.fmt(a.total)} tags`, keywords: a.id, value: a.name }));
+      if (s !== 'tl') P.agents.filter((a) => (s === 'direct' ? FF.config.isExcludedTl(a.tl) : true)).forEach((a) => list.push({ kind: 'agent', kindLabel: FF.config.isExcludedTl(a.tl) ? '🚫 Direct Agent' : 'Agent', label: a.name, sub: `${FF.config.isExcludedTl(a.tl) ? FF.config.directLabel({ tlName: a.tl, channel: 'First Forward' }, 'ff') : a.tl} · ${U.fmt(a.total)} tags`, keywords: a.id, value: a.name }));
       if (!s) P.classes.forEach((c) => list.push({ kind: 'cls', kindLabel: 'Class', label: c, sub: `${U.fmt(P.byClass.get(c))} tags`, value: c }));
       return list;
     };
@@ -419,6 +421,7 @@ FF.pages = FF.pages || {};
       const r = e.target.closest('[data-recent]'); if (r && r.dataset.recentKind) { go(r.dataset.recentKind, r.dataset.recentValue); return; }
       const a = e.target.closest('[data-pick-agent]'); if (a) { go('agent', a.dataset.pickAgent); return; }
       const t = e.target.closest('[data-pick-tl]'); if (t) { go('tl', t.dataset.pickTl); return; }
+      const dchip = e.target.closest('[data-pick-direct]'); if (dchip) { view.direct = !view.direct; dchip.classList.toggle('on', view.direct); if (!view.scope) { overview(P, body); C.mount(body); } return; }
       const c = e.target.closest('[data-pick-cls]'); if (c) { go('cls', c.dataset.pickCls); return; }
       const x = e.target.closest('#st-xlsx'); if (x && pivot) exportExcel(P, view, pivot, x);
       const pr = e.target.closest('[data-print]'); if (pr && pivot) printStockReport(P, view, pivot);

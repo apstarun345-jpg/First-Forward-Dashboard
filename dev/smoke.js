@@ -546,6 +546,45 @@ await run('v3.11 · Master search (naam / TL / ID index + suggestions + results 
   await FF.masterSearch.buildFull();
   log(`      light match ${res.people.length} people · suggestions ${items.length} · heavy ready ${FF.masterSearch.heavyReady}`);
 }, true);
+await run('v3.12 · Direct Agents rule (FF: TL Name APS · GV: TL ID + Name blank) — page + dono dispatch filters', async () => {
+  // classifier contract (channel-specific)
+  if (FF.config.isDirectAgent({ tlName: 'APS' }, 'ff') !== true) throw new Error('FF: TL Name APS → direct nahi bana');
+  if (FF.config.isDirectAgent({ tlName: 'AJAY SINGH M', tlId: 'APN2354' }, 'ff') !== false) throw new Error('FF: TL-managed agent direct ban gaya');
+  if (FF.config.isDirectAgent({ agentName: 'X', agentId: '5846001' }, 'gv') !== true) throw new Error('GV: TL ID + TL Name blank → direct nahi bana');
+  if (FF.config.isDirectAgent({ agentName: 'X', tlId: 'APN2354' }, 'gv') !== false) throw new Error('GV: TL id present row direct ban gaya');
+  if (FF.config.directLabel({}, 'gv') !== 'Direct Agent (no TL)') throw new Error('GV label galat');
+  // GV data me direct agents milte hain + rollup TL list se alag hai
+  const report = FF.gv.get('report') || [];
+  const gvDirect = report.filter((r) => FF.config.isDirectAgent(r, 'gv'));
+  if (!gvDirect.length) throw new Error('mock GV REPORT me koi no-TL direct agent nahi mila');
+  const tlRoll = (FF.gv.tlRollup() || []).map((t) => t.tlName);
+  if (tlRoll.some((n) => /^(APS|Direct|Unassigned|)$/i.test(n || ''))) throw new Error('TL rollup me direct/placeholder TL leak');
+  // FF performance data me direct agents (APS) + TL dropdown me option
+  const list = pages.performance.agents();
+  if (!list.some((a) => a.tlExcluded)) throw new Error('FF REPORT me APS direct agents nahi mile');
+  const r1 = root(); await pages.performance.render(r1, { view: 'alerts' }, {});
+  let html = r1.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  if (!/Direct Agents · no dispatch/.test(html)) throw new Error('FF dispatch bar me Direct Agents filter nahi');
+  // GV Stock Report dispatch + TL filter
+  const r2 = root(); await pages.gvStockReport.render(r2, { view: 'dispatch' }, {});
+  html = r2.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  if (!/Direct Agents — alag list/.test(html)) throw new Error('GV dispatch me Direct Agents alag list nahi');
+  if (!/Direct Agent \(no TL\)|no TL/.test(html)) throw new Error('GV direct reason label nahi');
+  if (!/direct-rule-banner/.test(html)) throw new Error('GV Stock Report par direct rule banner nahi');
+  const r3 = root(); await pages.gvStockReport.render(r3, { view: 'agents', tl: '__direct__' }, {});
+  html = r3.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  if (!/Direct Agents · no TL/.test(html)) throw new Error('GV Stock Report TL dropdown me direct option nahi');
+  // dedicated page
+  const r4 = root(); await pages.directAgents.render(r4, {}, {});
+  html = r4.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const label of ['Direct Agents', 'direct-rule-card', 'GV Partner', 'First Forward', 'TL Name', 'no TL', 'direct-row']) {
+    if (!html.includes(label)) throw new Error(`Direct Agents page me \"${label}\" nahi mila`);
+  }
+  // settings tab
+  const roster = await FF.direct.roster();
+  if (!roster.length) throw new Error('direct roster khali hai');
+  log(`      GV direct ${gvDirect.length} · FF direct ${list.filter((a) => a.tlExcluded).length} · roster ${roster.length} · tls ${tlRoll.length}`);
+}, true);
 await run('v3.11 · Executive combined stock — GV-parked rows NAAM/TL se bhi exclude', async () => {
   const stockAgents = FF.store.get('stockAgents') || [];
   const gvId = String(FF.config.eir.gvMasterId || '5845036');

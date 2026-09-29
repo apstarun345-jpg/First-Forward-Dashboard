@@ -126,10 +126,17 @@ window.FF = window.FF || {};
       const rawCls = get(m.cch) || get(m.vClass);
       const cls = normClass(rawCls);
       const commissionRaw = D.cellText(r[U.colIndex(m.commission)]);
+      const tlId = U.clean(get(m.tlId));
+      const rawTlName = U.clean(get(m.tlName));
+      const agentName = U.clean(get(m.agentName)) || agentId;
+      const tlName = rawTlName || (tlId ? `TL ${tlId}` : 'Direct');
       rows.push({
         date, ym: date ? U.ymKey(date) : '', day: date ? date.getDate() : 0,
-        agentId, agentName: U.clean(get(m.agentName)) || agentId,
-        tlId: U.clean(get(m.tlId)), tlName: U.clean(get(m.tlName)) || 'Direct',
+        agentId, agentName,
+        tlId, tlName,
+        // 🧍 GV direct rule: TL ID + TL Name dono khaali (ya agent hi apna supervisor) → direct agent.
+        directAgent: FF.config.isDirectAgent({ agentId, agentName, tlId, tlName: rawTlName, channel: 'GV Partner' }, 'gv'),
+        channel: 'GV Partner',
         cls, group: classGroup(cls),
         status: U.clean(get(m.status)) || 'Issuance',
         tagType: U.clean(get(m.tagType)) || 'Other',
@@ -160,7 +167,10 @@ window.FF = window.FF || {};
     const t = await D.query('Tag Assignment', `select ${a.tlId}, ${a.tlName}, count(${a.tagId}) group by ${a.tlId}, ${a.tlName} order by count(${a.tagId}) desc`, opts);
     return t.rows.map((r) => ({ tlId: D.cellText(r[0]), tlName: U.clean(D.cellText(r[1])), n: D.cellNumber(r[2]) || 0 }))
       .filter((r) => r.n && !isHeaderRow([r.tlId, r.tlName]))
-      .map((r) => ({ ...r, tlName: r.tlName || 'Unassigned' }));
+      .map((r) => {
+        const tlName = r.tlName || (U.clean(r.tlId) ? `TL ${U.clean(r.tlId)}` : 'Unassigned');
+        return { ...r, tlName, channel: 'GV Partner', directAgent: !U.clean(r.tlName) && !U.clean(r.tlId), isRealTl: FF.config.isRealTl(tlName) };
+      });
   }
   /** Tag Assignment: TL × class. */
   async function loadStockTlClass(opts) {
@@ -172,8 +182,16 @@ window.FF = window.FF || {};
   /** Tag Assignment: agent-wise stock. */
   async function loadStockAgent(opts) {
     const a = assignCfg();
-    const t = await D.query('Tag Assignment', `select ${a.agentId}, ${a.agentName}, ${a.tlName}, count(${a.tagId}) group by ${a.agentId}, ${a.agentName}, ${a.tlName} order by count(${a.tagId}) desc`, opts);
-    return t.rows.map((r) => ({ agentId: U.clean(D.cellText(r[0])), agentName: U.clean(D.cellText(r[1])) || U.clean(D.cellText(r[0])), tlName: U.clean(D.cellText(r[2])), n: D.cellNumber(r[3]) || 0 }))
+    const t = await D.query('Tag Assignment', `select ${a.agentId}, ${a.agentName}, ${a.tlId}, ${a.tlName}, count(${a.tagId}) group by ${a.agentId}, ${a.agentName}, ${a.tlId}, ${a.tlName} order by count(${a.tagId}) desc`, opts);
+    return t.rows.map((r) => {
+      const agentId = U.clean(D.cellText(r[0])), agentName = U.clean(D.cellText(r[1])) || U.clean(D.cellText(r[0]));
+      const tlId = U.clean(D.cellText(r[2])), tlName = U.clean(D.cellText(r[3]));
+      return {
+        agentId, agentName, tlId, tlName: tlName || (tlId ? `TL ${tlId}` : 'Direct'), n: D.cellNumber(r[4]) || 0,
+        channel: 'GV Partner',
+        directAgent: FF.config.isDirectAgent({ agentId, agentName, tlId, tlName, channel: 'GV Partner' }, 'gv')
+      };
+    })
       .filter((r) => r.n && !isHeaderRow([r.agentId, r.agentName]));
   }
   /** Tag Assignment: agent × class. */
@@ -263,7 +281,7 @@ window.FF = window.FF || {};
   const latestDate = () => rows().reduce((acc, r) => (!acc || (r.date && r.date > acc) ? r.date : acc), null);
 
   function summary(ym, upToDay) {
-    const s = { ym, total: 0, vc4: 0, vc20: 0, vc5p: 0, comm: 0, issuance: 0, replacement: 0, vrn: 0, chassis: 0, agents: new Set(), tls: new Set(), days: new Set(), lastDay: 0, amount: 0, commission: 0, commissionVc4: 0, commissionVc20: 0, commissionVc5p: 0, amountVc4: 0, amountVc20: 0, amountVc5p: 0 };
+    const s = { ym, total: 0, vc4: 0, vc20: 0, vc5p: 0, comm: 0, issuance: 0, replacement: 0, vrn: 0, chassis: 0, agents: new Set(), tls: new Set(), directSet: new Set(), days: new Set(), lastDay: 0, amount: 0, commission: 0, commissionVc4: 0, commissionVc20: 0, commissionVc5p: 0, amountVc4: 0, amountVc20: 0, amountVc5p: 0 };
     for (const r of rows()) {
       if (ym && r.ym !== ym) continue;
       if (upToDay && r.day > upToDay) continue;
@@ -271,7 +289,9 @@ window.FF = window.FF || {};
       if (r.group === 'VC4') s.vc4 += 1; else if (r.group === 'VC20') s.vc20 += 1; else s.vc5p += 1;
       if (/replacement/i.test(r.status)) s.replacement += 1; else s.issuance += 1;
       if (/chassis/i.test(r.tagType)) s.chassis += 1; else s.vrn += 1;
-      s.agents.add(r.agentId); s.tls.add(r.tlName || 'Direct');
+      s.agents.add(r.agentId);
+      if (r.directAgent === true || FF.config.isDirectAgent(r, 'gv')) s.directSet.add(r.agentId);
+      else s.tls.add(r.tlName || 'Direct');
       s.amount += r.amount; s.commission += r.commission;
       if (r.group === 'VC4') { s.commissionVc4 += r.commission || 0; s.amountVc4 += r.amount || 0; }
       else if (r.group === 'VC20') { s.commissionVc20 += r.commission || 0; s.amountVc20 += r.amount || 0; }
@@ -281,6 +301,7 @@ window.FF = window.FF || {};
     s.comm = s.vc20 + s.vc5p;
     s.activeAgents = s.agents.size;
     s.activeTls = s.tls.size;
+    s.directAgents = s.directSet.size;
     s.activeDays = s.days.size;
     s.avgPerDay = s.lastDay ? s.total / s.lastDay : 0;
     s.daysInMonth = ym ? U.daysInMonth(ym) : 30;
@@ -327,8 +348,9 @@ window.FF = window.FF || {};
     for (const r of rows()) {
       if (ym && r.ym !== ym) continue;
       const k = r.agentId || r.agentName;
-      if (!map.has(k)) map.set(k, { agentId: r.agentId, agentName: r.agentName, tlName: r.tlName, total: 0, vc4: 0, vc20: 0, vc5p: 0, comm: 0, replacement: 0, days: new Set() });
+      if (!map.has(k)) map.set(k, { agentId: r.agentId, agentName: r.agentName, tlName: r.tlName, channel: 'GV Partner', directAgent: r.directAgent === true, total: 0, vc4: 0, vc20: 0, vc5p: 0, comm: 0, replacement: 0, days: new Set() });
       const o = map.get(k);
+      o.directAgent = o.directAgent && r.directAgent !== false;
       o.total += 1;
       if (r.group === 'VC4') o.vc4 += 1; else if (r.group === 'VC20') { o.vc20 += 1; o.comm += 1; } else { o.vc5p += 1; o.comm += 1; }
       if (/replacement/i.test(r.status)) o.replacement += 1;
@@ -341,6 +363,8 @@ window.FF = window.FF || {};
     const map = new Map();
     for (const r of rows()) {
       if (ym && r.ym !== ym) continue;
+      // 🧍 Direct agents kisi TL ke under nahi — TL ranking/table me kabhi nahi aate (directRollup dekho).
+      if (r.directAgent === true || FF.config.isDirectAgent(r, 'gv')) continue;
       const k = r.tlName || 'Direct';
       if (!map.has(k)) map.set(k, { tlName: k, tlId: r.tlId, total: 0, vc4: 0, comm: 0, agents: new Set() });
       const o = map.get(k);
@@ -350,33 +374,51 @@ window.FF = window.FF || {};
     }
     return [...map.values()].map((t) => ({ ...t, agentCount: t.agents.size })).sort((a, b) => b.total - a.total);
   }
+  /** Direct agents ka rollup (GV Master se) — TL lists se alag rehta hai. */
+  function directRollup(ym) {
+    const map = new Map();
+    for (const r of rows()) {
+      if (ym && r.ym !== ym) continue;
+      if (!(r.directAgent === true || FF.config.isDirectAgent(r, 'gv'))) continue;
+      const k = r.agentId || r.agentName;
+      if (!map.has(k)) map.set(k, { agentId: r.agentId, agentName: r.agentName, tlName: 'Direct', reason: FF.direct ? FF.direct.reason(r, 'gv') : 'GV direct agent', total: 0, vc4: 0, comm: 0, commission: 0, last: null });
+      const o = map.get(k);
+      o.total += 1;
+      if (r.group === 'VC4') o.vc4 += 1; else o.comm += 1;
+      o.commission += Number(r.commission || 0);
+      if (r.date && (!o.last || r.date > o.last)) o.last = r.date;
+    }
+    return [...map.values()].sort((a, b) => b.total - a.total);
+  }
   /** Searchable people list (agents + TLs) for the suggestion dropdowns. */
   function people() {
     const map = new Map(), tls = new Map();
     for (const a of state.data.stockAgent || []) {
       const k = U.clean(a.agentName).toUpperCase();
       if (!k) continue;
-      const e = map.get(k) || { name: a.agentName, id: a.agentId, tl: a.tlName, n: 0 };
+      const e = map.get(k) || { name: a.agentName, id: a.agentId, tl: a.tlName, n: 0, direct: a.directAgent === true };
       e.n += a.n; if (!e.tl && a.tlName) e.tl = a.tlName; if (!e.id && a.agentId) e.id = a.agentId;
       map.set(k, e);
     }
     for (const r of state.data.report || []) {
       const k = U.clean(r.agentName).toUpperCase();
       if (!k) continue;
+      const direct = FF.config.isDirectAgent(r, 'gv');
       const e = map.get(k) || { name: r.agentName, id: r.agentId, tl: r.tlName, n: 0, report: true };
       e.report = true; if (!e.tl) e.tl = r.tlName; if (!e.id) e.id = r.agentId;
+      e.direct = e.direct || direct;
       map.set(k, e);
-      const tl = U.clean(r.tlName) || 'Direct';
-      if (tl && tl !== 'Direct') tls.set(tl, (tls.get(tl) || 0) + r.curTotal);
+      const tl = U.clean(r.tlName);
+      if (!direct && tl && FF.config.isRealTl(tl)) tls.set(tl, (tls.get(tl) || 0) + r.curTotal);
     }
-    for (const t of state.data.stockTl || []) if (t.tlName && t.tlName !== 'Unassigned') tls.set(t.tlName, (tls.get(t.tlName) || 0) + t.n);
+    for (const t of state.data.stockTl || []) if (t.tlName && FF.config.isRealTl(t.tlName) && t.directAgent !== true) tls.set(t.tlName, (tls.get(t.tlName) || 0) + t.n);
     return { agents: [...map.values()], tls: [...tls.entries()].map(([name, n]) => ({ name, n })) };
   }
 
   const GV = {
     DATASETS, preload, need, get, error, reset, enabled, wanted,
     normClass, classGroup, clsNum,
-    rows, months, latestDate, summary, dailySeries, weekly, byDim, agentRollup, tlRollup, people,
+    rows, months, latestDate, summary, dailySeries, weekly, byDim, agentRollup, tlRollup, directRollup, people,
     REPORT_COLS, REPORT_COLS_LABELS,
     get state() { return state; },
     get loadedAt() { return state.loadedAt; },

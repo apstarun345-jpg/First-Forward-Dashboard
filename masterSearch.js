@@ -36,14 +36,29 @@ FF.pages = FF.pages || {};
       ids: new Map()       // normId(id) → { name, kind, tl }
     };
   }
+  /** TL naam → site-wide label (direct placeholder ko "Direct Agent (APS)/(no TL)" banao). */
+  function tlText(name, channel) {
+    const n = clean(name);
+    if (!n) return '';
+    const ch = channel || '';
+    if (!FF.config.isRealTl(n)) return FF.config.directLabel({ tlName: n }, ch || 'ff');
+    return n;
+  }
   function person(idx, kind, name, tlName, cls, sub) {
     const nm = clean(name);
     if (!nm) return null;
+    // 🧍 Placeholder TL names ("APS", "Direct", "Unassigned") kabhi TL card nahi banate.
+    if (kind === 'ff-tl' || kind === 'gv-tl') { if (!FF.config.isRealTl(nm)) return null; }
     const k = `${kind}|${normName(nm)}`;
     let p = idx.people.get(k);
-    if (!p) { p = { kind, name: nm, sub: sub || '', tlSet: new Set(), classMap: new Map(), bars: new Set(), last: '', n: 0 }; idx.people.set(k, p); }
+    if (!p) { p = { kind, name: nm, sub: sub || '', tlSet: new Set(), classMap: new Map(), bars: new Set(), last: '', n: 0, direct: false }; idx.people.set(k, p); }
     if (sub && !p.sub) p.sub = clean(sub);
-    if (clean(tlName)) p.tlSet.add(clean(tlName));
+    if (kind === 'ff-agent' || kind === 'gv-agent') {
+      const ch = kind === 'gv-agent' ? 'gv' : 'ff';
+      const direct = FF.config.isDirectAgent({ tlName, channel: ch === 'gv' ? 'GV Partner' : 'First Forward' }, ch);
+      if (direct) { p.direct = true; p.directLabel = FF.config.directLabel({ tlName }, ch); }
+    }
+    if (clean(tlName) && !(p.direct && !FF.config.isRealTl(clean(tlName)))) p.tlSet.add(clean(tlName));
     if (clean(cls)) p.classMap.set(clean(cls), (p.classMap.get(clean(cls)) || 0) + 1);
     return p;
   }
@@ -264,7 +279,7 @@ FF.pages = FF.pages || {};
   }
 
   function personKundli(p) {
-    const tl = [...p.tlSet].slice(0, 4).join(', ');
+    const tl = p.direct ? (p.directLabel || 'Direct Agent') : [...p.tlSet].slice(0, 4).map((n) => tlText(n, p.kind === 'gv-agent' ? 'gv' : 'ff')).join(', ');
     return `<article class="ms-kundli">
       <div class="ms-kundli-head">
         <span class="ms-avatar">${esc(p.name.slice(0, 1).toUpperCase())}</span>
@@ -276,7 +291,7 @@ FF.pages = FF.pages || {};
       <div class="ms-kundli-stats">
         <div><small>Tags / barcodes</small><b>${p.bars.size ? U.fmt(p.bars.size) : U.fmt(p.n)}</b></div>
         <div><small>Activity rows</small><b>${U.fmt(p.n)}</b></div>
-        <div><small>TL</small><b>${esc(tl || '—')}</b></div>
+        <div><small>TL</small><b>${p.direct ? `<span class="direct-chip">🚫 ${esc(tl)}</span>` : esc(tl || '—')}</b></div>
         <div><small>Last allocation</small><b>${esc(p.last || '—')}</b></div>
       </div>
       <div class="ms-pill-row">${classPills(p.classMap)}</div>
@@ -302,8 +317,8 @@ FF.pages = FF.pages || {};
         const f = t.ff[0] || {}, g = t.gv[0] || {};
         const st = tagStatus(t);
         return `<tr><td><b>${esc(t.key)}</b></td><td>${esc((f.tagId || g.tagId) || '—')}</td>
-            <td>${esc(f.agentName || '—')}${f.agentId ? `<small>${esc(f.agentId)}</small>` : ''}</td><td>${esc(f.tlName || '—')}</td>
-            <td>${esc(g.agentName || '—')}${g.agentId ? `<small>${esc(g.agentId)}</small>` : ''}</td><td>${esc(g.tlName || '—')}</td>
+            <td>${esc(f.agentName || '—')}${f.agentId ? `<small>${esc(f.agentId)}</small>` : ''}</td><td>${esc(tlText(f.tlName, 'ff') || '—')}</td>
+            <td>${esc(g.agentName || '—')}${g.agentId ? `<small>${esc(g.agentId)}</small>` : ''}</td><td>${esc(tlText(g.tlName, 'gv') || '—')}</td>
             <td>${esc(g.gvName || '—')}${g.gvId ? `<small>${esc(g.gvId)}</small>` : ''}</td><td>${esc(f.cls || g.cls || '—')}</td>
             <td><span class="badge ${st.tone}">${esc(st.t)}</span></td><td>${esc(f.allocated || g.allocated || '—')}</td></tr>`;
       }).join('')}
@@ -316,7 +331,7 @@ FF.pages = FF.pages || {};
     if (res.ids.length) {
       parts.push(`<section class="ms-section"><h3>🆔 ID matches <span class="dim small">${U.fmt(res.ids.length)}</span></h3>
         <div class="table-wrap"><table class="tbl compact"><thead><tr><th>ID</th><th>Naam</th><th>Role</th><th>TL</th><th></th></tr></thead><tbody>
-        ${res.ids.slice(0, 40).map((v) => `<tr><td><b>${esc(v.id)}</b></td><td>${esc(v.name || '—')}</td><td>${esc(KIND_LABEL[v.kind] || v.kind)}</td><td>${esc(v.tl || '—')}</td><td><button class="btn tiny" data-ms-again="${esc(v.name || v.id)}">🔎 Kholo</button></td></tr>`).join('')}
+        ${res.ids.slice(0, 40).map((v) => `<tr><td><b>${esc(v.id)}</b></td><td>${esc(v.name || '—')}</td><td>${esc(KIND_LABEL[v.kind] || v.kind)}</td><td>${esc(tlText(v.tl, v.kind && v.kind.startsWith('gv') ? 'gv' : 'ff') || '—')}</td><td><button class="btn tiny" data-ms-again="${esc(v.name || v.id)}">🔎 Kholo</button></td></tr>`).join('')}
         </tbody></table></div></section>`);
     }
     return parts.join('');

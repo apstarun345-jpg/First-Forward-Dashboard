@@ -272,8 +272,8 @@ window.FF = window.FF || {};
       const byAgent = new Map(); (agents || []).forEach((r) => byAgent.set(`${r.agentName} · ${r.tlName}`, (byAgent.get(`${r.agentName} · ${r.tlName}`) || 0) + r.n));
       parts.push(`<h3 class="kd-h">🟦 First Forward stock (StockDataa) · <b>${U.fmt(tot)}</b></h3>
         <div class="kd-grid">${breakdownTable('Class-wise', tally(rows, (r) => r.cls), null, tot, { head: 'Class', sortCls: true })}${breakdownTable('Tag type', byType, null, total([...byType.values()].map((n) => ({ n }))), { head: 'Tag type' })}</div>
-        ${breakdownTable('TL-wise stock', tally(rows, (r) => r.tlName), null, tot, { head: 'TL' })}
-        ${matrix('TL × class', rows, (r) => r.tlName, (r) => r.cls, { head: 'TL' })}
+        ${breakdownTable('TL-wise stock', tally(rows, (r) => (FF.config.isDirectAgent(r, 'gv') ? FF.config.directLabel(r, 'gv') : r.tlName)), null, tot, { head: 'TL' })}
+        ${matrix('TL × class', rows, (r) => (FF.config.isDirectAgent(r, 'gv') ? FF.config.directLabel(r, 'gv') : r.tlName), (r) => r.cls, { head: 'TL' })}
         ${breakdownTable('Top 30 agents (stock)', new Map([...byAgent.entries()].sort((a, b) => b[1] - a[1]).slice(0, 30)), null, tot, { head: 'Agent · TL' })}`);
     }
     if (spec.src === 'gv' || spec.src === 'both') {
@@ -283,7 +283,7 @@ window.FF = window.FF || {};
       try { agents = await G.need('stockAgent'); } catch { /* */ }
       const tot = total(cls || []); grand += tot;
       parts.push(`<h3 class="kd-h">🟩 GV Partner stock (Tag Assignment) · <b>${U.fmt(tot)}</b></h3>
-        <div class="kd-grid">${breakdownTable('Class-wise', tally(cls || [], (r) => r.cls), null, tot, { head: 'Class', sortCls: true })}${breakdownTable('TL-wise', tally(tls || [], (r) => r.tlName), null, total(tls || []), { head: 'TL' })}</div>
+        <div class="kd-grid">${breakdownTable('Class-wise', tally(cls || [], (r) => r.cls), null, tot, { head: 'Class', sortCls: true })}${breakdownTable('TL-wise', tally(tls || [], (r) => (r.directAgent === true || !FF.config.isRealTl(r.tlName) ? FF.config.directLabel({ tlName: r.tlName, channel: 'GV Partner' }, 'gv') : r.tlName)), null, total(tls || []), { head: 'TL' })}</div>
         ${breakdownTable('Top 30 agents (stock)', new Map((agents || []).slice(0, 30).map((a) => [`${a.agentName} · ${a.tlName || '—'}`, a.n])), null, tot, { head: 'Agent · TL' })}`);
     }
     return { kicker: 'KPI detail · Stock', title: spec.title || 'Stock in field', sub: `Total <b>${U.fmt(grand)}</b> tags in field`, body: parts.join('') || '<div class="empty">Stock data nahi mila.</div>' };
@@ -295,10 +295,10 @@ window.FF = window.FF || {};
     const keys = [['VC4', 'stockVc4'], ['VC5', 'stockC1'], ['VC6', 'stockC2'], ['VC7', 'stockC3'], ['VC12', 'stockC4'], ['VC16', 'stockC5']];
     const cls = new Map(keys.map(([l, k]) => [l, U.sum(agents, (a) => a[k] || 0)]));
     const tot = U.sum(agents, (a) => a.stockTotal || 0);
-    const byTl = new Map(); agents.forEach((a) => byTl.set(a.tlExcluded ? 'Direct (no TL)' : (a.tlName || '—'), (byTl.get(a.tlExcluded ? 'Direct (no TL)' : (a.tlName || '—')) || 0) + (a.stockTotal || 0)));
+    const byTl = new Map(); agents.forEach((a) => { const k = a.tlExcluded ? FF.config.directLabel(a, 'ff') : (a.tlName || '—'); byTl.set(k, (byTl.get(k) || 0) + (a.stockTotal || 0)); });
     const alerts = new Map(); agents.forEach((a) => { const k = String(a.tlStockAlert || '—').replace(/^[^\w]+/u, ''); alerts.set(k, (alerts.get(k) || 0) + 1); });
     const prio = new Map(); agents.forEach((a) => { const k = a.priority || '—'; prio.set(k, (prio.get(k) || 0) + 1); });
-    const topAgents = new Map([...agents].sort((a, b) => (b.stockTotal || 0) - (a.stockTotal || 0)).slice(0, 30).map((a) => [`${a.name} · ${a.tlExcluded ? 'Direct' : a.tlName}`, a.stockTotal || 0]));
+    const topAgents = new Map([...agents].sort((a, b) => (b.stockTotal || 0) - (a.stockTotal || 0)).slice(0, 30).map((a) => [`${a.name} · ${a.tlExcluded ? FF.config.directLabel(a, 'ff') : a.tlName}`, a.stockTotal || 0]));
     return { kicker: 'KPI detail · Stock Report', title: spec.title || 'Stock Report', sub: `REPORT → Agent Inventory Summary · <b>${U.fmt(tot)}</b> tags · ${agents.length} agents`, body: `<div class="kd-grid">${breakdownTable('Class-wise stock', cls, null, tot, { head: 'Class', sortCls: true })}${breakdownTable('Dispatch priority (agents)', prio, null, agents.length, { head: 'Priority' })}</div>${breakdownTable('TL stock alert (agents)', alerts, null, agents.length, { head: 'Alert' })}${breakdownTable('TL-wise stock', byTl, null, tot, { head: 'TL' })}${breakdownTable('Top 30 agents by stock', topAgents, null, tot, { head: 'Agent · TL' })}` };
   }
   async function agentsDetail(spec) {

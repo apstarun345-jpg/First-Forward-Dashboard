@@ -1,6 +1,6 @@
 {
   "name": "first-forward-dashboard",
-  "version": "3.11.0",
+  "version": "3.12.0",
   "private": true,
   "description": "First Forward + GV Partner FASTag dashboards \u2014 login-protected issuance, stock, trend, performance and GV-vs-FF comparison from two Google Sheets, with animated login, forgot-password flow, per-user/per-sheet access matrix and downloadable Excel/CSV.",
   "type": "module",
@@ -13,7 +13,7 @@
     "mock": "node dev/mock-gviz.js",
     "dev:mock": "GVIZ_BASE=http://localhost:9099 DATA_DIR=/tmp/ffdata PORT=8080 node server.js",
     "smoke": "node dev/smoke.js",
-    "check": "set -e; node --check server.js && node --check sheets-storage.js && node --check apps-script-storage.js && node --check sw.js && for f in config util xlsx data charts model store gv preload auth notifications sheets dashboard trend stock performance home gvpages compare tagIssued chartExplorer kpiDetail liveView settings targets rangeReport certificates assistant insights cockpit wow wowzone masterSearch app palette tv map; do node --check \"$f.js\" || exit 1; done; echo syntax ok",
+    "check": "set -e; node --check server.js && node --check sheets-storage.js && node --check apps-script-storage.js && node --check sw.js && for f in config util xlsx data charts model store gv preload auth notifications sheets dashboard trend stock performance home gvpages compare tagIssued chartExplorer kpiDetail liveView settings targets rangeReport certificates assistant insights cockpit wow wowzone masterSearch directAgents app palette tv map; do node --check \"$f.js\" || exit 1; done; echo syntax ok",
     "test": "node --test dev/*.test.js",
     "storage:migrate": "node dev/migrate-to-sheets.js",
     "push:keys": "node dev/vapid-keys.js"

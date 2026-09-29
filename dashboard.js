@@ -35,7 +35,7 @@ FF.pages = FF.pages || {};
       const series = cur ? M.dailySeries(daily, cur) : null;
       const dailyRows = series ? series.days.map((d, i) => { const ymd = daily.filter((r) => r.ym === cur && r.day === d); return [d, series.totals[i] || 0, U.sum(ymd.filter((r) => r.group === 'VC4'), (r) => r.n), U.sum(ymd.filter((r) => r.group !== 'VC4'), (r) => r.n), U.sum(ymd.filter((r) => r.type === 'REPLACEMENT'), (r) => r.n)]; }) : [];
       const classes = U.uniq(stock.map((r) => r.cls)).sort();
-      const tls = U.uniq(stock.map((r) => r.tlName));
+      const tls = U.uniq(stock.map((r) => r.tlName)).filter((n) => FF.config.isRealTl(n));
       const stockTlRows = tls.map((t) => [t, ...classes.map((c) => U.sum(stock.filter((r) => r.tlName === t && r.cls === c), (r) => r.n)), U.sum(stock.filter((r) => r.tlName === t && r.group === 'VC4'), (r) => r.n), U.sum(stock.filter((r) => r.tlName === t), (r) => r.n)]);
       const agMap = new Map();
       for (const r of stockAgents) { const k = `${r.agentName}|${r.tlName}`; const o = agMap.get(k) || { name: r.agentName, tl: r.tlName, vc4: 0, comm: 0, total: 0 }; o.total += r.n; if (r.group === 'VC4') o.vc4 += r.n; else o.comm += r.n; agMap.set(k, o); }
@@ -246,7 +246,7 @@ FF.pages = FF.pages || {};
 
     const topN = FF.config.thresholds.topN || 10;
     const topTls = U.topEntries(tlCur, topN).map(([name, v], i) => ({ label: name, value: v, compare: tlLast.get(name) || 0, color: C.PALETTE[i % C.PALETTE.length], attr: `data-link="#/performance?view=tls&tl=${encodeURIComponent(name)}"` }));
-    const topAgents = U.topEntries(agCur, topN).map(([key, v], i) => { const a = agMeta.get(key); return { label: a.name, sub: `${a.channel === 'GV Partner' ? 'GV · ' : ''}${excl(a.tlName) ? 'Direct' : a.tlName}`, value: v, color: a.channel === 'GV Partner' ? C.COLORS['GV Partner'] : C.PALETTE[i % C.PALETTE.length], attr: `data-link="#/performance?q=${encodeURIComponent(a.name)}"` }; });
+    const topAgents = U.topEntries(agCur, topN).map(([key, v], i) => { const a = agMeta.get(key); return { label: a.name, sub: `${a.channel === 'GV Partner' ? 'GV · ' : ''}${excl(a.tlName) ? FF.config.directLabel({ tlName: a.tlName, channel: a.channel }, a.channel === 'GV Partner' ? 'gv' : 'ff') : a.tlName}`, value: v, color: a.channel === 'GV Partner' ? C.COLORS['GV Partner'] : C.PALETTE[i % C.PALETTE.length], attr: `data-link="#/performance?q=${encodeURIComponent(a.name)}"` }; });
     // VC4 vs Commercial comparison (MTD vs last month same period / full)
     const cmpRow = (label, a, b) => `<tr><td>${label}</td><td class="num"><b>${U.fmt(a)}</b></td><td class="num">${U.fmt(b)}</td><td class="num">${U.deltaHtml(U.growth(a, b), { decimals: 0 })}</td></tr>`;
     const vc4Comm = `<div class="grid g-2" style="margin-bottom:0"><div>${C.bars({ labels: ['VC4', 'VC20', 'VC5+', 'Commercial'], height: 200, series: [{ name: `${lm} (same period)`, values: [lastMtd.vc4, lastMtd.vc20, lastMtd.vc5p, lastMtd.comm], color: '#c7d2fe' }, { name: `${cm} MTD`, values: [curS.vc4, curS.vc20, curS.vc5p, curS.comm], color: '#6366f1' }], legendAlways: true })}</div>
@@ -257,7 +257,7 @@ FF.pages = FF.pages || {};
       const byCls = M.byDim(stock.map((r) => ({ ...r, ym: cur })), null, (r) => r.cls);
       const order = [...byCls.keys()].sort((a, b) => (parseInt(a.replace(/\D/g, ''), 10) || 999) - (parseInt(b.replace(/\D/g, ''), 10) || 999));
       stockByClass = C.bars({ labels: order, height: 190, series: [{ name: 'Stock', values: order.map((k) => byCls.get(k)), color: '#14b8a6' }] });
-      const tlStock = U.groupSum(stock, (r) => r.tlName, (r) => r.n);
+      const tlStock = U.groupSum(stock.filter((r) => FF.config.isRealTl(r.tlName)), (r) => r.tlName, (r) => r.n);
       for (const k of [...tlStock.keys()]) if (excl(k)) tlStock.delete(k);
       stockTls = C.hbars({ items: U.topEntries(tlStock, topN).map(([name, v], i) => ({ label: name, value: v, color: C.PALETTE[(i + 3) % C.PALETTE.length], sub: `VC4 ${U.fmt(U.sum(stock.filter((r) => r.tlName === name && r.group === 'VC4'), (r) => r.n))} · Comm ${U.fmt(U.sum(stock.filter((r) => r.tlName === name && r.group !== 'VC4'), (r) => r.n))}`, attr: `data-link="#/stock?tl=${encodeURIComponent(name)}"` })), valueLabel: 'Stock' });
     }
@@ -312,7 +312,7 @@ FF.pages = FF.pages || {};
       let dismissed = ''; try { dismissed = localStorage.getItem('ff_lowstock_dismissed') || ''; } catch {}
       if (critical.length && dismissed !== lowStockKey) {
         lowStockHtml = `<section class="card low-stock"><div class="card-head"><h3>🚨 Low VC4 stock alert <span class="dim">· ${critical.length} agents ka cover ${t.coverRed} din se kam</span></h3><div class="card-right"><a class="btn small primary" href="#/stock">📦 Stock page →</a><button class="btn small" id="ls-dismiss" title="Data change hone par alert wapas aayega">✕ Dismiss</button></div></div>
-        <div class="card-body"><div class="table-wrap"><table class="tbl compact"><thead><tr><th>Agent</th><th>TL</th><th class="num">VC4 stock</th><th class="num">MTD issued</th><th class="num">Cover (din)</th></tr></thead><tbody>${critical.slice(0, 8).map((c) => `<tr class="clickable" data-ls-agent="${esc(c.name)}"><td><b>${esc(c.name)}</b></td><td>${esc(FF.config.isExcludedTl(c.tl) ? 'Direct' : c.tl)}</td><td class="num">${U.fmt(c.vc4)}</td><td class="num">${U.fmt(c.iss)}</td><td class="num"><span class="badge red">🔴 ${U.fmt(c.cover, 1)}</span></td></tr>`).join('')}</tbody></table></div>
+        <div class="card-body"><div class="table-wrap"><table class="tbl compact"><thead><tr><th>Agent</th><th>TL</th><th class="num">VC4 stock</th><th class="num">MTD issued</th><th class="num">Cover (din)</th></tr></thead><tbody>${critical.slice(0, 8).map((c) => `<tr class="clickable" data-ls-agent="${esc(c.name)}"><td><b>${esc(c.name)}</b></td><td>${esc(FF.config.isExcludedTl(c.tl) ? FF.config.directLabel({ tlName: c.tl }, 'ff') : c.tl)}</td><td class="num">${U.fmt(c.vc4)}</td><td class="num">${U.fmt(c.iss)}</td><td class="num"><span class="badge red">🔴 ${U.fmt(c.cover, 1)}</span></td></tr>`).join('')}</tbody></table></div>
         <p class="dim small">Cover = VC4 stock ÷ avg daily issuance (MTD). In agents ko dispatch priority do — row click karke agent ka stock dekho. ${critical.length > 8 ? `(+${critical.length - 8} aur)` : ''}</p></div></section>`;
       }
     }
