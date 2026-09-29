@@ -85,18 +85,32 @@ FF.pages = FF.pages || {};
 
     // ---------- KPIs -------------------------------------------------------------------------
     const ffShare = ffToday !== null && gvToday !== null && (ffToday + gvToday) ? (gvToday / (ffToday + gvToday)) * 100 : 0;
-    const kpis = [
-      kpi('g2', `${isCurrent ? 'MTD Issuance' : 'Issuance'} · ${U.labelYM(cur)}`, '🏷️', `${U.fmt(ffCur ? ffCur.total : 0)} <small>vs</small> ${U.fmt(gvCur ? gvCur.total : 0)}`, `First Forward vs GV Partner · GV share <b>${U.fmtPct(U.pctOf(gvCur ? gvCur.total : 0, (ffCur ? ffCur.total : 0) + (gvCur ? gvCur.total : 0)), 0)}</b>`),
-      kpi('g1', isCurrent ? `Today · ${latest ? U.labelDate(latest) : '—'}` : 'Latest day', '⚡', ffToday === null || gvToday === null ? '<span class="dim">— (sirf current month ke liye)</span>' : `${U.fmt(ffToday)} <small>vs</small> ${U.fmt(gvToday)}`, isCurrent ? `GV share of today: <b>${U.fmtPct(ffShare, 0)}</b>` : `Month A current nahi hai — upar se current month chuno`),
-      kpi('g3', `VC4 (Payable) · ${U.labelYM(cur)}`, '🚗', `${U.fmt(ffCur ? ffCur.vc4 : 0)} <small>vs</small> ${U.fmt(gvCur ? gvCur.vc4 : 0)}`, `FF share ${U.fmtPct(U.pctOf(ffCur ? ffCur.vc4 : 0, ffCur ? ffCur.total : 0), 0)} · GV share ${U.fmtPct(U.pctOf(gvCur ? gvCur.vc4 : 0, gvCur ? gvCur.total : 0), 0)}`),
-      kpi('g4', `Commercial (NVC4) · ${U.labelYM(cur)}`, '🚚', `${U.fmt(ffCur ? ffCur.comm : 0)} <small>vs</small> ${U.fmt(gvCur ? gvCur.comm : 0)}`, `FF share ${U.fmtPct(U.pctOf(ffCur ? ffCur.comm : 0, ffCur ? ffCur.total : 0), 0)} · GV share ${U.fmtPct(U.pctOf(gvCur ? gvCur.comm : 0, gvCur ? gvCur.total : 0), 0)}`),
-      kpi('g5', `Avg / Day · ${U.labelYM(cur)}`, '📅', `${U.fmt(ffCur ? ffCur.avgPerDay : 0)} <small>vs</small> ${U.fmt(gvCur ? gvCur.avgPerDay : 0)}`, `FF active days ${ffCur ? ffCur.activeDays : 0} · GV ${gvCur ? gvCur.activeDays : 0}`),
-      kpi('g6', isCurrent ? 'Projected Month-End' : `Full Month · ${U.labelYM(cur)}`, '🎯', `${U.fmt(ffCur ? (isCurrent ? ffCur.projected : ffCur.total) : 0)} <small>vs</small> ${U.fmt(gvCur ? (isCurrent ? gvCur.projected : gvCur.total) : 0)}`, `vs ${U.labelYM(last)} full: FF ${U.deltaHtml(U.growth(ffCur ? (isCurrent ? ffCur.projected : ffCur.total) : 0, ffLastMtd ? M.summary(ffDaily, last).total : 0), { decimals: 0 })} · GV ${U.deltaHtml(U.growth(gvCur ? (isCurrent ? gvCur.projected : gvCur.total) : 0, gvLastMtd ? G.summary(last).total : 0), { decimals: 0 })}`),
-      kpi('g8', `Active Agents · ${U.labelYM(cur)}`, '🧑‍💼', `${U.fmt(ffAgentsCur)} <small>vs</small> ${U.fmt(gvAgentsCur)}`, `Avg tags / agent: FF ${U.fmt(ffAgentsCur ? (ffCur ? ffCur.total : 0) / ffAgentsCur : 0)} · GV ${U.fmt(gvAgentsCur ? (gvCur ? gvCur.total : 0) / gvAgentsCur : 0)}`),
-      kpi('g9', 'Stock in Field', '📦', `${U.fmt(ffStockTotal)} <small>vs</small> ${U.fmt(gvStockTotal)}`, `FF VC4 ${U.fmt(ffStockVc4)} (${U.fmtPct(U.pctOf(ffStockVc4, ffStockTotal), 0)}) · GV VC4 ${U.fmt(gvStockVc4)} (${U.fmtPct(U.pctOf(gvStockVc4, gvStockTotal), 0)})`),
-      kpi('g12', 'Stock Days Cover', '⏳', `${ffCur && ffCur.avgPerDay ? U.fmt(ffStockTotal / ffCur.avgPerDay) : '—'} <small>vs</small> ${gvCur && gvCur.avgPerDay ? U.fmt(gvStockTotal / gvCur.avgPerDay) : '—'}`, 'Current runrate par kitne din ka stock'),
-      kpi('g7', `Replacements · ${U.labelYM(cur)}`, '🔁', `${U.fmt(ffCur ? ffCur.replacement : 0)} <small>vs</small> ${U.fmt(gvCur ? gvCur.replacement : 0)}`, `Share of total: FF ${U.fmtPct(U.pctOf(ffCur ? ffCur.replacement : 0, ffCur ? ffCur.total : 0), 1)} · GV ${U.fmtPct(U.pctOf(gvCur ? gvCur.replacement : 0, gvCur ? gvCur.total : 0), 1)}`),
-      kpi('g10', 'GV REPORT · High Priority', '🔺', U.fmt(report.filter((r) => /high/i.test(r.priority)).length), report.length ? `Inactive agents: <b>${U.fmt(report.filter((r) => /inactive/i.test(r.agentStatus)).length)}</b> · Total GV agents in REPORT: ${U.fmt(report.length)}` : 'GV REPORT load nahi hua')
+    // v3.8.3: KPI cards ab vivid + clickable hain — click karo to full FF-vs-GV data dialog khulta hai.
+    const LBL = {
+      issuance: `${isCurrent ? 'MTD Issuance' : 'Issuance'} · ${U.labelYM(cur)}`,
+      today: isCurrent ? `Today · ${latest ? U.labelDate(latest) : '—'}` : 'Latest day',
+      vc4: `VC4 (Payable) · ${U.labelYM(cur)}`,
+      comm: `Commercial (NVC4) · ${U.labelYM(cur)}`,
+      avg: `Avg / Day · ${U.labelYM(cur)}`,
+      proj: isCurrent ? 'Projected Month-End' : `Full Month · ${U.labelYM(cur)}`,
+      agents: `Active Agents · ${U.labelYM(cur)}`,
+      stock: 'Stock in Field',
+      cover: 'Stock Days Cover',
+      repl: `Replacements · ${U.labelYM(cur)}`,
+      high: 'GV REPORT · High Priority'
+    };
+    const kpiDefs = [
+      { tone: 'g2', icon: '🏷️', label: LBL.issuance, value: `${U.fmt(ffCur ? ffCur.total : 0)} <small>vs</small> ${U.fmt(gvCur ? gvCur.total : 0)}`, foot: `First Forward vs GV Partner · GV share <b>${U.fmtPct(U.pctOf(gvCur ? gvCur.total : 0, (ffCur ? ffCur.total : 0) + (gvCur ? gvCur.total : 0)), 0)}</b>` },
+      { tone: 'g1', icon: '⚡', label: LBL.today, value: ffToday === null || gvToday === null ? '<span class="dim">— (sirf current month ke liye)</span>' : `${U.fmt(ffToday)} <small>vs</small> ${U.fmt(gvToday)}`, foot: isCurrent ? `GV share of today: <b>${U.fmtPct(ffShare, 0)}</b>` : 'Month A current nahi hai — upar se current month chuno' },
+      { tone: 'g3', icon: '🚗', label: LBL.vc4, value: `${U.fmt(ffCur ? ffCur.vc4 : 0)} <small>vs</small> ${U.fmt(gvCur ? gvCur.vc4 : 0)}`, foot: `FF share ${U.fmtPct(U.pctOf(ffCur ? ffCur.vc4 : 0, ffCur ? ffCur.total : 0), 0)} · GV share ${U.fmtPct(U.pctOf(gvCur ? gvCur.vc4 : 0, gvCur ? gvCur.total : 0), 0)}` },
+      { tone: 'g4', icon: '🚚', label: LBL.comm, value: `${U.fmt(ffCur ? ffCur.comm : 0)} <small>vs</small> ${U.fmt(gvCur ? gvCur.comm : 0)}`, foot: `FF share ${U.fmtPct(U.pctOf(ffCur ? ffCur.comm : 0, ffCur ? ffCur.total : 0), 0)} · GV share ${U.fmtPct(U.pctOf(gvCur ? gvCur.comm : 0, gvCur ? gvCur.total : 0), 0)}` },
+      { tone: 'g5', icon: '📅', label: LBL.avg, value: `${U.fmt(ffCur ? ffCur.avgPerDay : 0)} <small>vs</small> ${U.fmt(gvCur ? gvCur.avgPerDay : 0)}`, foot: `FF active days ${ffCur ? ffCur.activeDays : 0} · GV ${gvCur ? gvCur.activeDays : 0}` },
+      { tone: 'g6', icon: '🎯', label: LBL.proj, value: `${U.fmt(ffCur ? (isCurrent ? ffCur.projected : ffCur.total) : 0)} <small>vs</small> ${U.fmt(gvCur ? (isCurrent ? gvCur.projected : gvCur.total) : 0)}`, foot: `vs ${U.labelYM(last)} full: FF ${U.deltaHtml(U.growth(ffCur ? (isCurrent ? ffCur.projected : ffCur.total) : 0, ffLastMtd ? M.summary(ffDaily, last).total : 0), { decimals: 0 })} · GV ${U.deltaHtml(U.growth(gvCur ? (isCurrent ? gvCur.projected : gvCur.total) : 0, gvLastMtd ? G.summary(last).total : 0), { decimals: 0 })}` },
+      { tone: 'g8', icon: '🧑‍💼', label: LBL.agents, value: `${U.fmt(ffAgentsCur)} <small>vs</small> ${U.fmt(gvAgentsCur)}`, foot: `Avg tags / agent: FF ${U.fmt(ffAgentsCur ? (ffCur ? ffCur.total : 0) / ffAgentsCur : 0)} · GV ${U.fmt(gvAgentsCur ? (gvCur ? gvCur.total : 0) / gvAgentsCur : 0)}` },
+      { tone: 'g9', icon: '📦', label: LBL.stock, value: `${U.fmt(ffStockTotal)} <small>vs</small> ${U.fmt(gvStockTotal)}`, foot: `FF VC4 ${U.fmt(ffStockVc4)} (${U.fmtPct(U.pctOf(ffStockVc4, ffStockTotal), 0)}) · GV VC4 ${U.fmt(gvStockVc4)} (${U.fmtPct(U.pctOf(gvStockVc4, gvStockTotal), 0)})` },
+      { tone: 'g12', icon: '⏳', label: LBL.cover, value: `${ffCur && ffCur.avgPerDay ? U.fmt(ffStockTotal / ffCur.avgPerDay) : '—'} <small>vs</small> ${gvCur && gvCur.avgPerDay ? U.fmt(gvStockTotal / gvCur.avgPerDay) : '—'}`, foot: 'Current runrate par kitne din ka stock' },
+      { tone: 'g7', icon: '🔁', label: LBL.repl, value: `${U.fmt(ffCur ? ffCur.replacement : 0)} <small>vs</small> ${U.fmt(gvCur ? gvCur.replacement : 0)}`, foot: `Share of total: FF ${U.fmtPct(U.pctOf(ffCur ? ffCur.replacement : 0, ffCur ? ffCur.total : 0), 1)} · GV ${U.fmtPct(U.pctOf(gvCur ? gvCur.replacement : 0, gvCur ? gvCur.total : 0), 1)}` },
+      { tone: 'g10', icon: '🔺', label: LBL.high, value: U.fmt(report.filter((r) => /high/i.test(r.priority)).length), foot: report.length ? `Inactive agents: <b>${U.fmt(report.filter((r) => /inactive/i.test(r.agentStatus)).length)}</b> · Total GV agents in REPORT: ${U.fmt(report.length)}` : 'GV REPORT load nahi hua' }
     ];
 
     // ---------- charts -----------------------------------------------------------------------
@@ -178,8 +192,50 @@ FF.pages = FF.pages || {};
     const topFF = U.topEntries(U.groupSum(ffAgents.filter((a) => a.ym === cur), (a) => a.name, (a) => a.n), 8);
     const topGV = (() => { if (masterR.status !== 'fulfilled' || !cur) return []; return G.agentRollup(cur).slice(0, 8).map((a) => [a.agentName, a.total]); })();
 
+    // ---- KPI click detail data (v3.8.3) -----------------------------------------------------------
+    const VS_HEADERS = ['Period', 'First Forward', 'GV Partner', 'GV share'];
+    const vsRow = (label, ff, gv) => [label, U.fmt(ff), U.fmt(gv), U.fmtPct(U.pctOf(gv, ff + gv), 1)];
+    const allMonths = U.uniq([...(ffDaily ? M.months(ffDaily) : []), ...(masterR.status === 'fulfilled' ? G.months() : [])]).sort().reverse();
+    const monthRows = (field) => allMonths.map((m) => {
+      const f = ffDaily ? M.summary(ffDaily, m) : null;
+      const g = masterR.status === 'fulfilled' ? G.summary(m) : null;
+      return vsRow(U.labelYM(m), f ? f[field] : 0, g ? g[field] : 0);
+    });
+    const dailyRows = (() => {
+      if (!cur) return [];
+      const ffS = ffDaily ? M.dailySeries(ffDaily, cur) : null;
+      const gvS = masterR.status === 'fulfilled' ? G.dailySeries(cur) : null;
+      const days = Math.max(ffS ? ffS.totals.length : 0, gvS ? gvS.totals.length : 0);
+      const out = [];
+      for (let i = 0; i < days; i++) out.push(vsRow(`Day ${i + 1}`, ffS ? (ffS.totals[i] || 0) : 0, gvS ? (gvS.totals[i] || 0) : 0));
+      return out.reverse();
+    })();
+    const stockRows = (() => {
+      const clsNum = (c) => parseInt(String(c).replace(/\D/g, ''), 10) || 999;
+      const classes = U.uniq([...ffStock.map((r) => r.cls), ...gvStockClass.map((r) => r.cls)]).sort((a, b) => clsNum(a) - clsNum(b));
+      return classes.map((c) => {
+        const f = U.sum(ffStock.filter((r) => r.cls === c), (r) => r.n);
+        const g = U.sum(gvStockClass.filter((r) => r.cls === c), (r) => r.n);
+        return vsRow(c, f, g);
+      }).concat([vsRow('Total', ffStockTotal, gvStockTotal)]);
+    })();
+    const highRows = report.filter((r) => /high/i.test(r.priority)).map((r) => [r.agentName, r.agentId, r.tlName, r.priority, r.agentStatus, U.fmt(r.stockTotal)]);
+    const kpiDetails = {
+      [LBL.issuance]: { title: 'Month-wise issuance · FF vs GV', headers: VS_HEADERS, rows: monthRows('total') },
+      [LBL.today]: { title: `${U.labelYM(cur)} daily FF vs GV`, headers: VS_HEADERS, rows: dailyRows },
+      [LBL.vc4]: { title: 'Month-wise VC4 · FF vs GV', headers: VS_HEADERS, rows: monthRows('vc4') },
+      [LBL.comm]: { title: 'Month-wise Commercial · FF vs GV', headers: VS_HEADERS, rows: monthRows('comm') },
+      [LBL.avg]: { title: 'Daily run-rate detail', stats: [`FF: ${U.fmt(ffCur ? ffCur.total : 0)} tags ÷ ${ffCur ? ffCur.activeDays : 0} active days`, `GV: ${U.fmt(gvCur ? gvCur.total : 0)} tags ÷ ${gvCur ? gvCur.activeDays : 0} active days`], headers: VS_HEADERS, rows: dailyRows },
+      [LBL.proj]: { title: 'Projection vs last month', headers: VS_HEADERS, rows: monthRows('total') },
+      [LBL.agents]: { title: 'Top agents MTD · FF vs GV', headers: ['Channel', 'Agent', 'MTD tags'], rows: [...topFF.map(([n, v]) => ['First Forward', n, U.fmt(v)]), ...topGV.map(([n, v]) => ['GV Partner', n, U.fmt(v)])] },
+      [LBL.stock]: { title: 'Class-wise field stock · FF vs GV', headers: VS_HEADERS, rows: stockRows },
+      [LBL.cover]: { title: 'Stock cover days', stats: [`FF: ${U.fmt(ffStockTotal)} stock ÷ ${U.fmt(ffCur ? ffCur.avgPerDay : 0)}/day = ${ffCur && ffCur.avgPerDay ? U.fmt(ffStockTotal / ffCur.avgPerDay) : '—'} din`, `GV: ${U.fmt(gvStockTotal)} stock ÷ ${U.fmt(gvCur ? gvCur.avgPerDay : 0)}/day = ${gvCur && gvCur.avgPerDay ? U.fmt(gvStockTotal / gvCur.avgPerDay) : '—'} din`], headers: VS_HEADERS, rows: stockRows },
+      [LBL.repl]: { title: 'Month-wise replacements · FF vs GV', headers: VS_HEADERS, rows: monthRows('replacement') },
+      [LBL.high]: { title: `${highRows.length} high-priority GV agents`, headers: ['Agent', 'Agent ID', 'TL', 'Priority', 'Status', 'Stock'], rows: highRows }
+    };
+
     body.innerHTML = `
-      <div class="kpi-grid">${kpis.join('')}</div>
+      ${FF.insights.ui.vividMetrics(kpiDefs)}
       ${card('💡 Insights', `<ul class="insight-list">${insight.map((i) => `<li>${i}</li>`).join('')}</ul>`)}
       <div class="grid g-2">
         ${card(`📈 Daily issuance · ${U.labelYM(cur)} <span class="dim">(FF vs GV)</span>`, cmpLine)}
@@ -195,6 +251,7 @@ FF.pages = FF.pages || {};
         ${card('⭐ Top agents · GV Partner (MTD)', C.hbars({ items: topGV.map(([name, v], i) => ({ label: name, value: v, color: C.PALETTE[(i + 4) % C.PALETTE.length], attr: `data-link="#/gvPerformance?q=${encodeURIComponent(name)}"` })), valueLabel: 'MTD' }))}
       </div>
       <p class="foot-note">Sources: First Forward → EIR (issuance; GV master ID ${esc(FF.config.eir.gvMasterId || '5845036')} excluded), StockDataa (stock), REPORT (performance) · GV Partner → GV Master, Tag Assignment, GV REPORT · Latest date ${latest ? U.labelDate(latest, true) : '—'} · Loaded ${U.timeLabel(S.loadedAt || G.loadedAt)}</p>`;
+    FF.insights.ui.bindMetricDetails(body, 'GV vs First Forward · full data', [], [], kpiDetails);
     C.mount(body);
   }
 

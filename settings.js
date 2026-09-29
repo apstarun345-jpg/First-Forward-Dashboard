@@ -365,6 +365,8 @@ FF.pages = FF.pages || {};
     return section('🎙 Assistant awaaz & bhasha', `<p class="dim small">Voice assistant ka jawab kis awaaz me bole — Hindi / English voice, speed aur pitch yahan se set karo. Har language ki apni voice choose hoti hai; assistant panel ke 🌐 button se language turant switch hoti hai (mic ki bhasha bhi saath me badalti hai — hi-IN ⇄ en-IN). Test karke sun lo, pasand aaye to bas.</p>
       <div class="form-grid">${langSel}${voiceSel('hi', '🗣 Hindi / Hinglish awaaz')}${voiceSel('en', '🗣 English awaaz')}${slider('rate', '⚡ Speed', 1.02)}${slider('pitch', '🎵 Pitch', 1)}</div>
       <div class="form-grid"><label class="check"><input type="checkbox" id="voice-greet" ${p.greet !== false ? 'checked' : ''}> 🌅 <b>Login par voice greeting</b> — "Good morning &lt;naam&gt;, kaise ho aap?" bol kar welcome</label><label class="check"><input type="checkbox" id="voice-conv" ${p.convMode === true ? 'checked' : ''}> 🎧 <b>Hands-free conversation mode</b> — har jawab ke baad khud sunta rahega (Alexa-style)</label></div>
+      <div class="form-grid"><label class="check"><input type="checkbox" id="voice-wake" ${p.wake !== false ? 'checked' : ''}> 👂 <b>Wake word ON</b> — word bolte hi voice assistant active (Alexa/Siri style)</label><label class="fld"><span>🗣 Wake word (konsa word sunna hai)</span><input class="input" id="voice-wake-word" value="${esc(p.wakeWord || 'Hey Gems')}" maxlength="30" placeholder="Hey Gems"></label></div>
+      <p class="dim small" id="voice-wake-status"></p>
       <div class="btn-row"><button class="btn small" id="voice-test-hi">🔊 Hindi test</button><button class="btn small" id="voice-test-en">🔊 English test</button><button class="btn small" id="voice-refresh">🔄 Voice list refresh</button><button class="btn small" id="voice-reset">↺ Default</button></div>
       <p class="dim small" id="voice-count"></p>
       <h4 class="drawer-section-title">🎤 Meri awaaz — sample upload / record</h4>
@@ -394,6 +396,37 @@ FF.pages = FF.pages || {};
       U.setVoicePrefs({ convMode: convCb.checked });
       U.toast(convCb.checked ? '🎧 Hands-free mode ON — assistant har jawab ke baad khud sunega.' : '🎧 Hands-free mode OFF.', 'ok');
     });
+    // 👂 Wake word — on/off + apna word set karo (assistant turant sync hota hai)
+    const wakeCb = U.$('#voice-wake', body), wakeWordEl = U.$('#voice-wake-word', body), wakeStatusEl = U.$('#voice-wake-status', body);
+    const wakeInfo = () => {
+      if (!wakeStatusEl) return;
+      const A2 = FF.assistant;
+      const word = String((U.voicePrefs().wakeWord || 'Hey Gems')).trim() || 'Hey Gems';
+      const on = U.voicePrefs().wake !== false;
+      const supported = !A2 || !A2.wakeSupported || A2.wakeSupported();
+      if (!supported) wakeStatusEl.textContent = '⚠️ Is browser me speech recognition nahi hai — wake word Chrome/Edge me best chalta hai.';
+      else if (!on) wakeStatusEl.textContent = '🔕 Wake word OFF hai — checkbox lagao to assistant word sunkar active hoga.';
+      else wakeStatusEl.textContent = `🟢 Wake word ON — jab aap "${word}" bolenge, assistant khud active ho kar sawaal sunega. FAB par green dot = sun raha hai.`;
+    };
+    wakeInfo();
+    if (wakeCb) wakeCb.addEventListener('change', () => {
+      U.setVoicePrefs({ wake: wakeCb.checked });
+      wakeInfo();
+      U.toast(wakeCb.checked ? `👂 Wake word ON — "${(wakeWordEl && wakeWordEl.value.trim()) || 'Hey Gems'}" bolo to assistant active.` : '🔕 Wake word OFF.', 'ok');
+    });
+    if (wakeWordEl) {
+      let wakeTimer = null;
+      wakeWordEl.addEventListener('input', () => {
+        clearTimeout(wakeTimer);
+        wakeTimer = setTimeout(() => {
+          const word = wakeWordEl.value.trim();
+          if (word.length < 2) { if (wakeStatusEl) wakeStatusEl.textContent = '⚠️ Wake word kam se kam 2 letters ka rakho.'; return; }
+          U.setVoicePrefs({ wakeWord: word });
+          wakeInfo();
+          U.toast(`🗣 Wake word set: "${word}" ✓`, 'ok');
+        }, 600);
+      });
+    }
     U.$$('[data-vkey]', body).forEach((el) => {
       el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', () => {
         const key = el.dataset.vkey;
@@ -430,12 +463,14 @@ FF.pages = FF.pages || {};
       U.toast('🎙 Voice settings default par reset ✓', 'ok');
     });
     // ---- 🎤 Meri awaaz — sample upload/record → analyze → apply (shared U helpers) ----
-    const applyVoiceSample = async (blob, name) => {
+    // cap = { blob } (upload) ya { blob, pcm, sampleRate } (record) — recording raw PCM se analyse
+    // hoti hai, isliye browser audio-decode fail hone par bhi kaam karti hai.
+    const applyVoiceSample = async (cap, name) => {
       const status = U.$('#voice-rec-status', body);
-      if (!blob) return;
+      if (!cap) return;
       if (status) status.textContent = '🔍 Awaaz analyze ho rahi hai…';
       try {
-        const res = await U.analyzeVoiceBlob(blob);
+        const res = await U.analyzeVoiceCapture(cap);
         if (!res.ok) { if (status) status.textContent = `⚠️ ${res.reason}`; return; }
         res.name = name || 'Meri awaaz';
         U.setVoiceProfile(res);
@@ -443,38 +478,35 @@ FF.pages = FF.pages || {};
         U.toast('✅ Meri awaaz lag gayi — assistant ab isi tone me bolega!', 'ok');
       } catch (err) {
         if (status) status.textContent = `⚠️ ${err.message || 'Decode nahi hua'}`;
+        U.toast(err.message || 'Audio analyze nahi hua — dobara try karo.', 'err');
       }
     };
     const fileEl = U.$('#voice-file', body);
     if (fileEl) fileEl.addEventListener('change', () => {
       const f = fileEl.files && fileEl.files[0];
-      if (f) applyVoiceSample(f, f.name.replace(/\.[a-z0-9]+$/i, '').slice(0, 40) || 'Meri awaaz');
+      if (f) applyVoiceSample({ blob: f }, f.name.replace(/\.[a-z0-9]+$/i, '').slice(0, 40) || 'Meri awaaz');
+      fileEl.value = ''; // same file dobara select karne par bhi change fire ho
     });
     const recBtn = U.$('#voice-rec', body);
     if (recBtn) recBtn.addEventListener('click', async () => {
       const status = U.$('#voice-rec-status', body);
-      if (recBtn.dataset.recording === '1' && recBtn._mediaRec) {
-        recBtn._mediaRec.stop();
+      if (recBtn.dataset.recording === '1' && recBtn._capture) {
+        const cap = await recBtn._capture.stop();
+        recBtn._capture = null;
+        recBtn.dataset.recording = '0';
+        recBtn.textContent = '⏺ Record karo';
+        if (status) status.textContent = 'Recording complete ✓ analyze ho raha hai…';
+        applyVoiceSample(cap, 'Meri awaaz');
         return;
       }
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const chunks = [];
-        const mr = new MediaRecorder(stream);
-        recBtn._mediaRec = mr;
-        mr.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
-        mr.onstop = () => {
-          stream.getTracks().forEach((t) => t.stop());
-          recBtn.dataset.recording = '0';
-          recBtn.textContent = '⏺ Record karo';
-          applyVoiceSample(new Blob(chunks, { type: mr.mimeType || 'audio/webm' }), 'Meri awaaz');
-        };
-        mr.start();
+        recBtn._capture = await U.startVoiceCapture();
         recBtn.dataset.recording = '1';
         recBtn.textContent = '⏹ Stop';
         if (status) status.textContent = '⏺ Recording… bolo abhi (5–15 second)';
-      } catch {
-        U.toast('Mic permission chahiye — recording ke liye Allow karo.', 'err');
+      } catch (err) {
+        U.toast(err.message || 'Mic permission chahiye — recording ke liye Allow karo.', 'err');
+        if (status) status.textContent = `⚠️ ${err.message || 'Mic permission chahiye — Allow karo'}`;
       }
     });
     const profClear = U.$('#voice-prof-clear', body);

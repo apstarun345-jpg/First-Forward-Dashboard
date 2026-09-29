@@ -66,6 +66,12 @@ for (const a of AGENTS) {
     STOCK.rows.push(['5845036', 'APNA PAYEMENT', `34161FA82032${tagSeq++}`, `BC${tagSeq}`, cls, TYPES[cls], '11-07-2025 18:38:03 IST', a.id, a.name, '12-07-2025 10:00:00 IST', a.tlName, a.tlId, a.tlName]);
   }
 }
+// GV channel ka stock jo FF StockDataa me GV master ID 5845036 (agent) ke naam parked hai —
+// Executive Cockpit ise FF field stock se exclude karta hai (GV side Tag Assignment se aati hai).
+for (let k = 0; k < 500; k++) {
+  const cls = pick(CLASSES);
+  STOCK.rows.push(['5845036', 'APNA PAYEMENT', `34161FA82032${tagSeq++}`, `BC${tagSeq}`, cls, TYPES[cls], '11-07-2025 18:38:03 IST', '5845036', 'APNA PAYEMENT', '12-07-2025 10:00:00 IST', 'ApnaPayment Pvt. Ltd.', 'TLGV', 'ApnaPayment Pvt. Ltd.']);
+}
 // ---- REPORT (gid 242489821): 2 header rows + data ---------------------------------------------
 const curM = MONTHS[today.getMonth()], lastM = MONTHS[(today.getMonth() + 11) % 12];
 const R1 = new Array(80).fill(''); const R2 = new Array(80).fill('');

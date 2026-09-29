@@ -14,6 +14,32 @@ Koi database nahi, koi manual upload nahi — website Google Sheet se data padht
 (Google Visualization API / `gviz`) through a small Node server that also handles **login, users,
 permissions and settings**. Zero npm dependencies.
 
+## ✨ v3.10.0 highlights — WOW ZONE 🎉
+
+- **🎮 Agent Arena** — levels & XP, 11 badges, monthly challenges, badge-unlock par
+  🎊 confetti + fanfare, badge gallery, medals leaderboard.
+- **🔮 Crystal Ball** — month-end projection + confidence, record-watch agents.
+- **🏆 Wall of Fame** — 6-month champion gallery + shareable **Winner Card PNG** (WhatsApp-ready).
+- **🔴 War Room** — fullscreen live pulse: count-up counters, FF vs GV race, live ticker,
+  🚨 lead-change celebration, 30s auto-refresh.
+- **🌅 Morning auto-briefing** — din ke pehle login par assistant khud daily briefing sunata hai
+  (voice: "briefing band/chalu karo").
+- Full notes: [WHATS-NEW-v3.10.0.md](WHATS-NEW-v3.10.0.md)
+
+## v3.9.0 highlights
+
+- **🗄 Master Stock (naya page)** — barcode / agent / TL / GV name / GV TL search karo →
+  StockDataa ↔ Tag Assignment ki total information; kitne Tag Assignment barcodes StockDataa me
+  **missing** hain; overlap donut + class charts; ⏰ aged-stock alerts (30–60 / 60+ din).
+- **🔗 Dual-channel ghost rule** — barcode double-mapped sirf tab jab FF holder Apna Payment
+  (master 5845036) NA ho aur GV side not-assigned ke alawa asli ID ho.
+- **🎯 GV dispatch** — dispatch plan + **Direct agents ki alag list** (GV Stock Report → Dispatch tab).
+- **🌈 Clickable KPIs everywhere** — compare / charts / dispatch planner / TL scorecard / forecast /
+  data quality: har KPI colorful gradient + click → full data dialog (search + CSV).
+- **⚡ Commission pages instant open** + FF **Payout Excel** (gross / penalty / net, 5 sheets).
+- **🎙 Voice navigation** — "master stock kholo", "open data quality" — 19 pages, permission-aware.
+- Full notes: [WHATS-NEW-v3.9.0.md](WHATS-NEW-v3.9.0.md) · previous: [v3.8.2](WHATS-NEW-v3.8.2.md)
+
 ## Login & access
 
 * Site **login ke bina nahi khulti**. Pehli baar server start hote hi ek admin ban jaata hai:

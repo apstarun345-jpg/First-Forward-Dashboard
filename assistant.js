@@ -109,6 +109,52 @@ window.FF = window.FF || {};
       );
     }
 
+    // ---- briefing on/off (v3.10 morning auto-briefing ka switch) ----
+    if (has('BRIEFING BAND', 'BRIEFING OFF', 'NO BRIEFING', 'BRIEFING STOP', 'STOP BRIEFING')) {
+      U.setVoicePrefs({ brief: false });
+      return ans('Theek hai — morning auto-briefing BAND kar di 🔕. \"Briefing chalu karo\" bologe to wapas on.', 'Okay — morning auto-briefing is OFF 🔕. Say "briefing chalu karo" to turn it back on.');
+    }
+    if (has('BRIEFING CHALU', 'BRIEFING ON', 'START BRIEFING', 'BRIEFING SHURU')) {
+      U.setVoicePrefs({ brief: true });
+      return ans('Morning auto-briefing CHALU kar di 🔔 — din ke pehle login par khud sunaunga.', 'Morning auto-briefing is ON 🔔 — I will brief you on the first login of the day.');
+    }
+
+    // ---- voice navigation (v3.8.3) — "X kholo / open X / X page" ----
+    if (has('KHOLO', 'KHOL DO', 'KHOLNA', 'OPEN', 'DIKHAO', 'SHOW ME', 'NAVIGATE', 'GO TO', 'CHALAO', 'PAGE')) {
+      const NAV_MAP = [
+        { keys: ['MASTER STOCK'], page: 'masterStock', label: 'Master Stock' },
+        { keys: ['EXECUTIVE', 'COCKPIT'], page: 'executive', label: 'Executive Cockpit' },
+        { keys: ['DUAL CHANNEL', 'DUAL AGENT'], page: 'dualChannel', label: 'Dual-channel Agents' },
+        { keys: ['DATA QUALITY'], page: 'dataQuality', label: 'Data Quality Center' },
+        { keys: ['FORECAST'], page: 'forecast', label: 'Stock Forecasting' },
+        { keys: ['GV COMMISSION'], page: 'gvCommission', label: 'GV Commission Intelligence' },
+        { keys: ['COMMISSION'], page: 'ffCommission', label: 'FF Commission Intelligence' },
+        { keys: ['DISPATCH'], page: 'dispatchPlan', label: 'Dispatch Planner' },
+        { keys: ['SCORECARD'], page: 'tlScorecard', label: 'TL Scorecard' },
+        { keys: ['CHAMPION'], page: 'fastagChampions', label: 'FASTag Champions' },
+        { keys: ['COMPARE'], page: 'compare', label: 'GV vs First Forward' },
+        { keys: ['GV DASHBOARD'], page: 'gvDashboard', label: 'GV Partner Dashboard' },
+        { keys: ['GV STOCK REPORT'], page: 'gvStockReport', label: 'GV Stock Report' },
+        { keys: ['GV STOCK'], page: 'gvStock', label: 'GV Stock' },
+        { keys: ['DASHBOARD'], page: 'dashboard', label: 'FF Dashboard' },
+        { keys: ['STOCK REPORT'], page: 'stockReport', label: 'FF Stock Report' },
+        { keys: ['STOCK'], page: 'stock', label: 'FF Stock' },
+        { keys: ['TREND'], page: 'trend', label: 'Trend' },
+        { keys: ['HOME'], page: 'home', label: 'Home' }
+      ];
+      const hit = NAV_MAP.find((n) => n.keys.some((k) => q.includes(k)));
+      if (hit) {
+        if (FF.auth && typeof FF.auth.can === 'function' && !FF.auth.can(hit.page)) {
+          return ans(`${hit.label} ka access aapke account me nahi hai 🔒 — admin se permission maango (Settings → Access matrix).`, `Your account does not have access to ${hit.label} 🔒 — ask an admin (Settings → Access matrix).`);
+        }
+        if (FF.app && typeof FF.app.navigate === 'function') {
+          FF.app.navigate(hit.page, {});
+          return ans(`${hit.label} khol diya ✅`, `Opened ${hit.label} ✅`, [['aaj ka total issuance', 'Aaj ka total'], ['help', 'Help']]);
+        }
+        return ans(`${hit.label} sidebar me hai — wahan se kholo.`, `${hit.label} is in the sidebar — open it from there.`);
+      }
+    }
+
     // ---- data freshness ----
     if (has('DATA KAB', 'FRESH', 'UPDATE HUA', 'LAST UPDATE', 'REFRESH HUA')) {
       const ffDates = D.daily.map((r) => r.key).filter(Boolean).sort();
@@ -554,9 +600,111 @@ window.FF = window.FF || {};
     busy = false;
   }
 
+  // ---------- 👂 Wake word ("Hey Gems" → assistant active) ----------
+  // Settings: U.voicePrefs().wake (on/off, default ON) + .wakeWord (default "Hey Gems").
+  // Web Speech recognition continuous chalata hai; word sunte hi panel khulta hai aur mic question sunta hai.
+  let wakeRec = null, wakeRestartTimer = null, wakeCooldownUntil = 0, wakeDeniedToast = false, wakeGestureBound = false;
+  const wakeCfg = () => {
+    let p = {}; try { p = U.voicePrefs(); } catch { /* optional */ }
+    return { on: p.wake !== false, word: String(p.wakeWord || '').trim() || 'Hey Gems' };
+  };
+  const wakeSupported = () => typeof window !== 'undefined' && !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+  const wakeAllowed = () => !(FF.auth && FF.auth.can) || FF.auth.can('voiceAssistant'); // admin-gated
+  function updateWakeBadge() {
+    try { const fab = typeof document !== 'undefined' && document.getElementById('ask-fab'); if (fab) fab.classList.toggle('wake-on', !!wakeRec); } catch { /* optional */ }
+  }
+  function stopWake() {
+    if (wakeRestartTimer) { clearTimeout(wakeRestartTimer); wakeRestartTimer = null; }
+    const rec = wakeRec; wakeRec = null;
+    if (rec) { try { if (rec.abort) rec.abort(); else rec.stop(); } catch { /* already ending */ } }
+    updateWakeBadge();
+  }
+  function startWake() {
+    const cfg = wakeCfg();
+    if (!cfg.on || !wakeSupported() || !wakeAllowed()) { stopWake(); return; }
+    if (wakeRec || wakeRestartTimer) return;
+    if (convMode) return; // hands-free already listening
+    if (Date.now() < wakeCooldownUntil) { wakeRestartTimer = setTimeout(() => { wakeRestartTimer = null; startWake(); }, Math.max(400, wakeCooldownUntil - Date.now())); return; }
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let rec;
+    try { rec = new SR(); } catch { return; }
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.maxAlternatives = 1;
+    rec.lang = lang === 'en' ? 'en-IN' : 'hi-IN';
+    let fired = false;
+    rec.onresult = (e) => {
+      if (fired) return;
+      let text = '';
+      for (let i = Math.max(0, (e.resultIndex || 0)); i < e.results.length; i++) {
+        const t = e.results[i] && e.results[i][0] ? String(e.results[i][0].transcript) : '';
+        if (t) text += (text ? ' ' : '') + t;
+      }
+      if (text && U.wakeWordMatch(text, cfg.word)) { fired = true; onWakeHeard(cfg.word); }
+    };
+    rec.onerror = (e) => {
+      const code = e && e.error;
+      if (code === 'not-allowed' || code === 'service-not-allowed') {
+        if (!wakeDeniedToast) { wakeDeniedToast = true; U.toast(`👂 Wake word "${cfg.word}" sunne ke liye mic permission chahiye — address bar ke 🔒 icon se Microphone Allow karo.`, 'warn'); }
+        stopWake();
+      }
+      // no-speech / aborted / network → onend se restart hoga
+    };
+    rec.onend = () => {
+      if (wakeRec !== rec) return;
+      wakeRec = null;
+      updateWakeBadge();
+      if (fired) return; // trigger ke baad flow khud resume karega
+      const c2 = wakeCfg();
+      if (c2.on && wakeSupported() && wakeAllowed() && !convMode) { wakeRestartTimer = setTimeout(() => { wakeRestartTimer = null; startWake(); }, 400); }
+    };
+    try { rec.start(); wakeRec = rec; updateWakeBadge(); } catch { /* already started */ }
+  }
+  /** Mic busy ho (ask/dictate/conv) to wake side me chala jao; khali hone par wapas. */
+  function wakePause() { stopWake(); }
+  function wakeResumeSoon(ms) { if (convMode) return; stopWake(); wakeRestartTimer = setTimeout(() => { wakeRestartTimer = null; startWake(); }, ms || 900); }
+  function wakeBeep() {
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+      const ac = new AC(); const o = ac.createOscillator(); const g = ac.createGain();
+      o.connect(g); g.connect(ac.destination);
+      o.frequency.setValueAtTime(880, ac.currentTime); o.frequency.setValueAtTime(1320, ac.currentTime + 0.09);
+      g.gain.setValueAtTime(0.0001, ac.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.18, ac.currentTime + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + 0.22);
+      o.start(); o.stop(ac.currentTime + 0.24);
+      o.onended = () => { try { ac.close(); } catch { /* optional */ } };
+    } catch { /* optional */ }
+  }
+  function onWakeHeard(word) {
+    stopWake();
+    wakeCooldownUntil = Date.now() + 6000;
+    wakeBeep();
+    if (panel) {
+      if (panel.hidden) {
+        log = panel.querySelector('.ask-log');
+        panel.hidden = false;
+        if (log && !log.children.length) bubble(WELCOME[lang], 'bot');
+      }
+      bubble(T(`👂 "${word}" suna — boliye, main sun raha hoon!`, `👂 Heard "${word}" — speak, I'm listening!`), 'bot');
+    }
+    setTimeout(() => { if (panel) { const mic = panel.querySelector('.ask-mic'); if (mic) micListen(mic); } }, 400);
+  }
+  /** Settings/voice-prefs change → wake sync (word badla ya on/off hua). */
+  function syncWake() { const cfg = wakeCfg(); if (cfg.on && wakeSupported() && wakeAllowed() && !convMode) { stopWake(); startWake(); } else stopWake(); }
+  /** Pehli user gesture ke baad wake start karo (mic permission prompt gesture ke baad hi sahi lagta hai). */
+  function bindWakeGesture() {
+    if (wakeGestureBound || typeof window === 'undefined') return;
+    wakeGestureBound = true;
+    const go = () => { window.removeEventListener('pointerdown', go); window.removeEventListener('keydown', go); setTimeout(startWake, 900); };
+    window.addEventListener('pointerdown', go);
+    window.addEventListener('keydown', go);
+  }
+
   function micListen(btn) {
     try { if ('speechSynthesis' in window) window.speechSynthesis.cancel(); } catch { /* barge-in */ }
-    U.voiceInput((t) => ask(t), MIC_HINT[lang], { lang: lang === 'en' ? 'en-IN' : 'hi-IN', button: btn });
+    wakePause(); // ek waqt par ek hi mic session
+    U.voiceInput((t) => ask(t), MIC_HINT[lang], { lang: lang === 'en' ? 'en-IN' : 'hi-IN', button: btn, onEnd: () => { if (!convMode) wakeResumeSoon(); } });
   }
 
   // 🎧 hands-free loop — jawab bolne ke baad khud dobara sunna shuru (Alexa-style).
@@ -581,6 +729,7 @@ window.FF = window.FF || {};
     const hint = panel.querySelector('.ask-dictate-hint');
     if (!inp) return;
     if (btn.classList.contains('listening')) { U.voiceInput(() => {}, '', { button: btn }); return; } // stop toggle
+    wakePause();
     let base = inp.value.replace(/\s+$/, '');
     if (hint) { hint.classList.add('on'); hint.innerHTML = `<b>✍️ Sun raha hoon…</b> ${esc(DICTATE_HINT[lang])}`; }
     inp.classList.add('dictating');
@@ -600,6 +749,7 @@ window.FF = window.FF || {};
       onEnd: () => {
         inp.classList.remove('dictating');
         if (hint) hint.classList.remove('on');
+        if (!convMode) wakeResumeSoon();
       }
     });
   }
@@ -635,6 +785,16 @@ window.FF = window.FF || {};
         speak(p, { onEnd: () => { if (convMode) scheduleListen(); } });
       }
     });
+    // v3.10 🌅 Morning auto-briefing: din ke pehle login par greeting ke baad khud "briefing do" chalta hai
+    // (ek baar per din · Voice prefs me brief:false se band ho sakta hai).
+    try {
+      const todayK = U.dateKey(new Date());
+      const briefOff = U.voicePrefs && typeof U.voicePrefs === 'function' && U.voicePrefs().brief === false;
+      if (!briefOff && localStorage.getItem('ff-brief-day') !== todayK) {
+        localStorage.setItem('ff-brief-day', todayK);
+        setTimeout(() => { if (panel && !panel.hidden) ask(lang === 'en' ? 'morning brief' : 'briefing do'); }, 4200);
+      }
+    } catch { /* optional */ }
     // autoplay-policy fallback: sound block ho to friendly hint.
     setTimeout(() => {
       try {
@@ -690,6 +850,7 @@ window.FF = window.FF || {};
         <div class="ask-studio-tabs" role="tablist">
           <button class="on" data-tab="default" role="tab">🗣 Default voices</button>
           <button data-tab="mine" role="tab">🎤 Meri awaaz</button>
+          <button data-tab="wake" role="tab">👂 Wake word</button>
         </div>
         <div class="ask-studio-pane on" data-pane="default">
           <p class="ask-studio-note">Browser ki system voices — Hindi/English ke liye alag voice, speed aur pitch choose karo. 🟣 = online voice (zyada natural).</p>
@@ -708,6 +869,14 @@ window.FF = window.FF || {};
           <div data-preview-wrap hidden><audio class="ask-audio-preview" controls data-preview></audio></div>
           <div class="ask-voice-chips" data-analysis></div>
           <div class="btn-row"><button class="btn primary" data-apply hidden>✅ Meri awaaz lagao</button><button class="btn small" data-test-mine hidden>🔊 Test meri awaaz me</button>${prof ? '<button class="btn small danger" data-clear>🗑 Profile hatao</button>' : ''}</div>
+        </div>
+        <div class="ask-studio-pane" data-pane="wake">
+          <p class="ask-studio-note"><b>Wake word 👂</b> — jab aap ye word bolenge (jaise <b>"Hey Gems"</b>), assistant khud active ho jayega aur aapka sawaal sunega. Alexa/Siri jaisa hands-free start. Word apna khud ka bhi rakh sakte ho.</p>
+          <label class="check" style="display:flex;gap:8px;align-items:center;font-weight:750"><input type="checkbox" data-wake-on ${p.wake !== false ? 'checked' : ''}> <span>👂 Wake word <b>ON</b> — word bolte hi assistant active</span></label>
+          <label class="fld"><span>🗣 Wake word (konsa word sunna hai)</span><input class="input" data-wake-word value="${esc(p.wakeWord || 'Hey Gems')}" maxlength="30" placeholder="Hey Gems"></label>
+          <div class="ask-voice-chips"><span class="ins-pill" data-wake-status>…</span></div>
+          <div class="btn-row"><button class="btn small" data-wake-test>🧪 Abhi test karo (10 sec sunega)</button></div>
+          <p class="ask-studio-note dim">Note: wake word browser ki speech recognition se suna jaata hai — Chrome/Edge me best chalta hai aur mic permission maangega. Word 2–3 shabdon ka rakho taaki galat trigger na ho.</p>
         </div>
       </div>`;
     document.body.appendChild(dialog);
@@ -794,7 +963,9 @@ window.FF = window.FF || {};
         analysisEl.innerHTML = `<span class="ins-pill">⚠️ ${esc(err.message || 'Decode nahi hua')}</span>`;
       }
     };
-    drop.addEventListener('click', () => fileInput.click());
+    // Bug fix: fileInput drop ke ANDAR hai — .click() ka synthetic click bubble kar ke drop
+    // handler dobara chala deta tha aur file dialog turant cancel ho jaata tha ("upload kaam nahi karta").
+    drop.addEventListener('click', (e) => { if (e.target === fileInput) return; fileInput.click(); });
     drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('drag'); });
     drop.addEventListener('dragleave', () => drop.classList.remove('drag'));
     drop.addEventListener('drop', (e) => {
@@ -805,32 +976,38 @@ window.FF = window.FF || {};
     fileInput.addEventListener('change', () => {
       const f = fileInput.files && fileInput.files[0];
       if (f) handleBlob(f, f.name.replace(/\.[a-z0-9]+$/i, '').slice(0, 40) || 'Meri awaaz');
+      fileInput.value = ''; // same file dobara select karne par bhi change fire ho
     });
-    let mediaRec = null, recChunks = [];
+    // 🎙 Recording — U.startVoiceCapture: blob ke saath RAW PCM bhi capture hota hai, isliye
+    // analysis browser audio-decode par depend nahi karti (pehle kai browsers me silently fail hota tha).
+    let capture = null;
     recBtn.addEventListener('click', async () => {
-      if (mediaRec && mediaRec.state === 'recording') {
-        mediaRec.stop();
+      if (capture) {
+        const cap = capture; capture = null;
         recBtn.textContent = '⏺ Record karo';
         recBtn.classList.remove('danger');
+        recStatus.textContent = 'Recording complete ✓ analyze ho raha hai…';
+        try {
+          const res = await U.analyzeVoiceCapture(cap);
+          if (!res.ok) { analysisEl.innerHTML = `<span class="ins-pill">⚠️ ${esc(res.reason)}</span>`; recStatus.textContent = '⚠️ ' + res.reason; return; }
+          res.name = 'Meri awaaz';
+          showAnalysis(res, cap.blob);
+          recStatus.textContent = 'Recording complete ✓';
+          U.toast('Awaaz analyze ho gayi — "Meri awaaz lagao" dabao ✓', 'ok');
+        } catch (err) {
+          analysisEl.innerHTML = `<span class="ins-pill">⚠️ ${esc(err.message || 'Analyze nahi hua')}</span>`;
+          recStatus.textContent = `⚠️ ${err.message || 'Analyze nahi hua'}`;
+        }
         return;
       }
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        recChunks = [];
-        mediaRec = new MediaRecorder(stream);
-        mediaRec.ondataavailable = (e) => { if (e.data && e.data.size) recChunks.push(e.data); };
-        mediaRec.onstop = () => {
-          stream.getTracks().forEach((t) => t.stop());
-          const blob = new Blob(recChunks, { type: mediaRec.mimeType || 'audio/webm' });
-          recStatus.textContent = 'Recording complete ✓';
-          handleBlob(blob, 'Meri awaaz');
-        };
-        mediaRec.start();
+        capture = await U.startVoiceCapture();
         recBtn.textContent = '⏹ Stop';
         recBtn.classList.add('danger');
         recStatus.textContent = '⏺ Recording… bolo abhi (5–15 second)';
-      } catch {
-        U.toast('Mic permission chahiye — recording ke liye Allow karo.', 'err');
+      } catch (err) {
+        U.toast(err.message || 'Mic permission chahiye — recording ke liye Allow karo.', 'err');
+        recStatus.textContent = `⚠️ ${err.message || 'Mic permission chahiye — Allow karo'}`;
       }
     });
     applyBtn.addEventListener('click', () => {
@@ -845,6 +1022,58 @@ window.FF = window.FF || {};
       U.setVoiceProfile(null);
       U.toast('🗑 Voice profile hata di — default voice wapas.', 'ok');
       close(); openVoiceStudio();
+    });
+
+    // ---- 👂 wake word pane ----
+    const wakeOn = dialog.querySelector('[data-wake-on]');
+    const wakeWordInput = dialog.querySelector('[data-wake-word]');
+    const wakeStatusEl = dialog.querySelector('[data-wake-status]');
+    const wakeStatus = () => {
+      if (!wakeStatusEl) return;
+      const cfg = wakeCfg();
+      if (!wakeSupported()) wakeStatusEl.textContent = '⚠️ Is browser me speech recognition nahi hai — Chrome/Edge use karo.';
+      else if (!cfg.on) wakeStatusEl.textContent = '🔕 Wake word OFF hai.';
+      else wakeStatusEl.textContent = `🟢 ON — "${cfg.word}" bolte hi assistant active hoga.`;
+    };
+    wakeStatus();
+    if (wakeOn) wakeOn.addEventListener('change', () => {
+      U.setVoicePrefs({ wake: wakeOn.checked });
+      wakeStatus();
+      U.toast(wakeOn.checked ? `👂 Wake word ON — "${(wakeWordInput && wakeWordInput.value.trim()) || 'Hey Gems'}" bolo to assistant active.` : '🔕 Wake word OFF.', 'ok');
+    });
+    if (wakeWordInput) {
+      let saveTimer = null;
+      wakeWordInput.addEventListener('input', () => {
+        clearTimeout(saveTimer);
+        saveTimer = setTimeout(() => {
+          const word = wakeWordInput.value.trim();
+          if (word.length < 2) { wakeStatusEl && (wakeStatusEl.textContent = '⚠️ Word kam se kam 2 letters ka rakho.'); return; }
+          U.setVoicePrefs({ wakeWord: word });
+          wakeStatus();
+        }, 500);
+      });
+    }
+    const wakeTestBtn = dialog.querySelector('[data-wake-test]');
+    if (wakeTestBtn) wakeTestBtn.addEventListener('click', () => {
+      if (!wakeSupported()) return U.toast('Is browser me speech recognition support nahi hai — Chrome/Edge try karo.', 'warn');
+      const cfg = wakeCfg();
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      let rec;
+      try { rec = new SR(); } catch { return U.toast('Speech recognition start nahi hua.', 'err'); }
+      rec.lang = lang === 'en' ? 'en-IN' : 'hi-IN';
+      rec.interimResults = true;
+      let done = false;
+      const finish = (msg, tone) => { if (done) return; done = true; try { rec.stop(); } catch { /* ending */ } U.toast(msg, tone || 'info'); };
+      rec.onresult = (e) => {
+        let t = '';
+        for (let i = 0; i < e.results.length; i++) t += (t ? ' ' : '') + (e.results[i][0] ? String(e.results[i][0].transcript) : '');
+        if (U.wakeWordMatch(t, cfg.word)) finish(`✅ Sun liya — "${cfg.word}" match hua! Assistant active ho jata.`, 'ok');
+      };
+      rec.onerror = (e) => { if (e && e.error === 'not-allowed') finish('🎤 Mic permission chahiye — Allow karo.', 'err'); };
+      rec.onend = () => finish('⏱ 10 second me word nahi suna — dobara try karo ya word aasan rakho.', 'warn');
+      try { rec.start(); } catch { return U.toast('Speech recognition start nahi hua.', 'err'); }
+      U.toast(`🧪 Sun raha hoon — abhi "${cfg.word}" bolo…`, 'info');
+      setTimeout(() => finish('⏱ 10 second ho gaye — word nahi suna. Dobara try karo.', 'warn'), 10000);
     });
 
     if (typeof dialog.showModal === 'function') dialog.showModal(); else dialog.setAttribute('open', '');
@@ -876,6 +1105,8 @@ window.FF = window.FF || {};
 
   function build() {
     if (mounted || !(FF.config.feat ? FF.config.feat('askBox') !== false : true)) return;
+    // 🔐 Admin decide karta hai kise voice assistant milega (Settings → Access matrix → voiceAssistant).
+    if (FF.auth && FF.auth.can && !FF.auth.can('voiceAssistant')) return;
     mounted = true;
     const fab = document.createElement('button');
     fab.id = 'ask-fab';
@@ -923,11 +1154,13 @@ window.FF = window.FF || {};
       e.currentTarget.classList.toggle('on', convMode);
       e.currentTarget.title = convMode ? '🎧 Hands-free ON — jawab ke baad khud sunta hai' : '🎧 Hands-free mode chalu karo (Alexa-style)';
       if (convMode) {
+        stopWake(); // hands-free khud sun raha hai — wake word ki zaroorat nahi
         bubble(T('🎧 Hands-free mode ON — ab main har jawab ke baad khud sunta rahunga. Bas boliye! "Stop listening" bolo toh band.', '🎧 Hands-free mode ON — I will keep listening after every answer. Just speak! Say "stop listening" to stop.'), 'bot');
         scheduleListen();
       } else {
         try { if ('speechSynthesis' in window) window.speechSynthesis.cancel(); } catch { /* optional */ }
         bubble(T('🎧 Hands-free mode OFF — ab sirf tap/type par jawab.', '🎧 Hands-free mode OFF — I will answer only on tap/type.'), 'bot');
+        wakeResumeSoon(1200);
       }
     });
     wrap.querySelector('.ask-mic').addEventListener('click', (e) => micListen(e.currentTarget));
@@ -948,12 +1181,16 @@ window.FF = window.FF || {};
         convMode = e.detail.convMode;
         const conv = panel.querySelector('[data-act="conv"]');
         if (conv) conv.classList.toggle('on', convMode);
+        if (convMode) stopWake(); else wakeResumeSoon(1200);
       }
+      syncWake(); // wake word on/off ya word badla → listener restart
     });
 
     // 🌅 greeting — fresh login (ff-login event) turant; warna pehli baar tab open hone par.
     if (pendingGreet) { const k = pendingGreet; pendingGreet = null; setTimeout(() => startGreeting(k), 650); }
     else setTimeout(maybeGreet, 1400);
+    // 👂 Wake word ("Hey Gems") — first user gesture ke baad sunna shuru.
+    bindWakeGesture();
   }
 
   // Mount jab login ho jaye (sidebar user-chip aa jaye) — lightweight poll, ek hi baar.
@@ -968,5 +1205,5 @@ window.FF = window.FF || {};
     }, 800);
   })();
 
-  FF.assistant = { ask, answer, getLang, setLang, speak, openVoiceStudio, startGreeting, greetingWord, greetingText, get context() { return ctx; } };
+  FF.assistant = { ask, answer, getLang, setLang, speak, openVoiceStudio, startGreeting, greetingWord, greetingText, startWake, stopWake, wakeCfg, wakeSupported, get context() { return ctx; } };
 })(window.FF);

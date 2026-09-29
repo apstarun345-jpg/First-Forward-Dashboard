@@ -78,13 +78,33 @@ FF.pages = FF.pages || {};
       const topFf = U.topEntries(ffAgents, 12).map(([name,n],i)=>({ label:name,value:n,color:C.PALETTE[i%C.PALETTE.length] }));
       const totalsDonut = C.donut({ items: [{ label: 'First Forward', value: ff.total, color: '#6366f1' }, { label: 'GV Partner', value: gv.total, color: '#0d9488' }], subtitle: `${U.labelDate(date(from),true)} to ${U.labelDate(date(to),true)}` });
       const tooLong = dates.length >= 181 ? '<p class="dim small">Daily chart me pehle 180 din dikhaye gaye hain.</p>' : '';
-      output.innerHTML = `<div class="chart-range-note">${esc(U.labelDate(date(from),true))} – ${esc(U.labelDate(date(to),true))} · FF ${U.fmt(ff.total)} tags · GV ${U.fmt(gv.total)} tags · Total ${U.fmt(ff.total+gv.total)}</div>
+      // v3.8.3: colorful clickable KPI strip — click karo to daily FF-vs-GV table khulti hai.
+      const rangeDays = Math.max(1, dates.length);
+      const topGvAgent = [...people].sort((a, b) => b[1].total - a[1].total)[0];
+      const dailyTableRows = dates.map((x) => { const f = countFor(ffRows, x), g = countFor(gvRows, x); return [U.labelDate(date(x), true), U.fmt(f), U.fmt(g), U.fmt(f + g), U.fmtPct(U.pctOf(g, f + g), 0)]; });
+      const cxKpis = [
+        { tone: 'g1', icon: '🏷️', label: 'First Forward tags', value: U.fmt(ff.total), foot: `VC4 ${U.fmt(ff.vc4)} · Commercial ${U.fmt(ff.comm)}` },
+        { tone: 'g6', icon: '🚗', label: 'GV Partner tags', value: U.fmt(gv.total), foot: `VC4 ${U.fmt(gv.vc4)} · Commercial ${U.fmt(gv.comm)}` },
+        { tone: 'g2', icon: '🤝', label: 'Combined total', value: U.fmt(ff.total + gv.total), foot: `GV share ${U.fmtPct(U.pctOf(gv.total, ff.total + gv.total), 0)} · ${rangeDays} din` },
+        { tone: 'g4', icon: '📅', label: 'Avg / day', value: `${U.fmt(ff.total / rangeDays)} <small>vs</small> ${U.fmt(gv.total / rangeDays)}`, foot: 'Selected range ka daily average' },
+        { tone: 'g7', icon: '🔁', label: 'Replacements', value: `${U.fmt(ff.replacement)} <small>vs</small> ${U.fmt(gv.replacement)}`, foot: `Chassis ${U.fmt(ff.chassis)} vs ${U.fmt(gv.chassis)}` },
+        { tone: 'g5', icon: '🏆', label: 'Top GV agent', value: esc(topGvAgent ? topGvAgent[0] : '—'), foot: topGvAgent ? `${U.fmt(topGvAgent[1].total)} tags · VC4 ${U.fmt(topGvAgent[1].vc4)}` : 'Range me koi GV tag nahi' }
+      ];
+      output.innerHTML = `${FF.insights.ui.vividMetrics(cxKpis)}<div class="chart-range-note">${esc(U.labelDate(date(from),true))} – ${esc(U.labelDate(date(to),true))} · FF ${U.fmt(ff.total)} tags · GV ${U.fmt(gv.total)} tags · Total ${U.fmt(ff.total+gv.total)}</div>
         <div class="grid g-2">${card('📈 Daily issuance trend · GV vs FF', `${trend}${tooLong}`)}${card('🤝 Total share by channel', totalsDonut)}</div>
         <div class="grid g-2">${card('🏷️ Vehicle class comparison', classChart)}${card('🔧 Issuance, replacement & exceptions', `${opsChart}<p class="dim small">GV source me separate Wrong VRN field available nahi hai; GV ka Wrong VRN chart value unavailable hai.</p>`)}</div>
         <div class="grid g-2">${card('🏆 Top GV agents · all tags', bars(top('total'),'total','Tags'))}${card('🚗 Top GV VC4 agents', bars(top('vc4'),'vc4','VC4 tags'))}</div>
         <div class="grid g-2">${card('🚚 Top GV Commercial agents', bars(top('commercial'),'commercial','Commercial tags'))}${card('🏢 Top GV TLs / supervisors', C.hbars({items:U.topEntries(teams,12).map(([label,value],i)=>({label,value,color:C.PALETTE[(i+4)%C.PALETTE.length]})),valueLabel:'Tags'}))}</div>
         ${card('⭐ Top First Forward agents · month-level source', C.hbars({items:topFf,valueLabel:'Tags'}) + '<p class="dim small">FF agent totals are available by month only; partial-month date ranges include the full month(s).')}`;
       C.mount(output);
+      FF.insights.ui.bindMetricDetails(output, 'Daily FF vs GV detail', ['Date', 'First Forward', 'GV Partner', 'Total', 'GV share'], dailyTableRows, {
+        'First Forward tags': { title: 'Daily FF tags', headers: ['Date', 'First Forward', 'GV Partner', 'Total', 'GV share'], rows: dailyTableRows, stats: [`VC4 ${U.fmt(ff.vc4)} · Commercial ${U.fmt(ff.comm)} · Replacement ${U.fmt(ff.replacement)}`] },
+        'GV Partner tags': { title: 'Daily GV tags', headers: ['Date', 'First Forward', 'GV Partner', 'Total', 'GV share'], rows: dailyTableRows, stats: [`VC4 ${U.fmt(gv.vc4)} · Commercial ${U.fmt(gv.comm)} · Replacement ${U.fmt(gv.replacement)}`] },
+        'Combined total': { title: 'Day-wise combined issuance', headers: ['Date', 'First Forward', 'GV Partner', 'Total', 'GV share'], rows: dailyTableRows },
+        'Avg / day': { title: 'Daily averages', stats: [`FF ${U.fmt(ff.total)} ÷ ${rangeDays} din = ${U.fmt(ff.total / rangeDays)}`, `GV ${U.fmt(gv.total)} ÷ ${rangeDays} din = ${U.fmt(gv.total / rangeDays)}`], headers: ['Date', 'First Forward', 'GV Partner', 'Total', 'GV share'], rows: dailyTableRows },
+        'Replacements': { title: 'Replacement & chassis', stats: [`FF replacement ${U.fmt(ff.replacement)} · chassis ${U.fmt(ff.chassis)} · wrong VRN ${U.fmt(ff.wrongVrn)}`, `GV replacement ${U.fmt(gv.replacement)} · chassis ${U.fmt(gv.chassis)}`], headers: ['Date', 'First Forward', 'GV Partner', 'Total', 'GV share'], rows: dailyTableRows },
+        'Top GV agent': { title: 'Top GV agents is range me', headers: ['Agent', 'Total', 'VC4', 'Commercial'], rows: [...people].sort((a, b) => b[1].total - a[1].total).slice(0, 50).map(([n, a]) => [n, U.fmt(a.total), U.fmt(a.vc4), U.fmt(a.commercial)]) }
+      });
       history.replaceState(null, '', `#/charts?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
     }
     fromEl.addEventListener('change', draw); toEl.addEventListener('change', draw);

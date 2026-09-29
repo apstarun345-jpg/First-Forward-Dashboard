@@ -11,32 +11,36 @@ window.FF = window.FF || {};
     { id: 'executive', icon: '🧭', label: 'Executive Cockpit', desc: 'Management KPIs · outlook · exceptions', perm: 'executive', group: 'Management' },
     { id: 'tagIssued', icon: '🏷️', label: 'GV & FF Tag Issued', desc: 'Date-wise detailed issuance · VC4 vs Commercial', perm: 'tagIssued', group: 'Management' },
     { id: 'targets', icon: '🎯', label: 'Agent Targets', desc: 'Shortlist · target · progress · Excel', perm: 'targets', group: 'Management' },
-    { id: 'rangeReport', icon: '📅', label: 'Range Report', desc: 'Custom from→to report · FF + GV · Excel', perm: 'tagIssued', group: 'Management' },
-    { id: 'tv', icon: '📺', label: 'TV Mode', desc: 'Big-screen rotation · fullscreen', perm: 'home', group: 'Management', feat: 'tvMode' },
-    { id: 'teamMap', icon: '🗺️', label: 'Team map', desc: 'Location + office distance (admin)', perm: 'home', group: 'Management', feat: 'teamMap', adminOnly: true },
+    { id: 'rangeReport', icon: '📅', label: 'Range Report', desc: 'Custom from→to report · FF + GV · Excel', perm: 'rangeReport', group: 'Management' },
+    { id: 'tv', icon: '📺', label: 'TV Mode', desc: 'Big-screen rotation · fullscreen', perm: 'tv', group: 'Management', feat: 'tvMode' },
+    { id: 'teamMap', icon: '🗺️', label: 'Team map', desc: 'Location + office distance (admin)', perm: 'teamMap', group: 'Management', feat: 'teamMap', adminOnly: true },
     { id: 'dashboard', icon: '📊', label: 'Dashboard', desc: 'KPIs & charts (EIR)', perm: 'dashboard', group: 'First Forward' },
     { id: 'trend', icon: '📈', label: 'Trend', desc: 'Daily · Monthly · Last vs Current', perm: 'trend', group: 'First Forward' },
     { id: 'performance', icon: '🏆', label: 'Performance', desc: 'Agents & TLs (REPORT)', perm: 'performance', group: 'First Forward' },
     { id: 'stock', icon: '📦', label: 'Stock', desc: 'Search · pivot · Excel (StockDataa)', perm: 'stock', group: 'First Forward' },
-    { id: 'stockReport', icon: '📋', label: 'Stock Report', desc: 'REPORT · agent & TL-wise stock', perm: 'performance', group: 'First Forward' },
+    { id: 'stockReport', icon: '📋', label: 'Stock Report', desc: 'REPORT · agent & TL-wise stock', perm: 'stockReport', group: 'First Forward' },
     { id: 'ffCommission', icon: '₹', label: 'Commission Intelligence', desc: 'Reported rate & earned commission · Direct vs TL', perm: 'ffCommission', group: 'First Forward' },
     { id: 'gvDashboard', icon: '🚀', label: 'GV Partner Dashboard', desc: 'GV issuance · stock · performance', perm: 'gvDashboard', group: 'GV Partner' },
     { id: 'gvTrend', icon: '📈', label: 'GV Trend', desc: 'GV Master daily / monthly', perm: 'gvTrend', group: 'GV Partner' },
     { id: 'gvPerformance', icon: '🏆', label: 'GV Performance', desc: 'GV agents & TLs (GV REPORT)', perm: 'gvPerformance', group: 'GV Partner' },
     { id: 'gvStock', icon: '📦', label: 'GV Stock', desc: 'Tag Assignment stock search', perm: 'gvStock', group: 'GV Partner' },
-    { id: 'gvStockReport', icon: '📋', label: 'GV Stock Report', desc: 'GV REPORT · agent, TL, class & dispatch', perm: 'gvStock', group: 'GV Partner' },
+    { id: 'gvStockReport', icon: '📋', label: 'GV Stock Report', desc: 'GV REPORT · agent, TL, class & dispatch', perm: 'gvStockReport', group: 'GV Partner' },
     { id: 'gvCommission', icon: '₹', label: 'Commission Intelligence', desc: 'Amount · issuance rate · commission by day/class', perm: 'gvCommission', group: 'GV Partner' },
     { id: 'dualChannel', icon: '🔗', label: 'Dual-channel Agents', desc: 'Verified GV + FF overlap · separate & combined', perm: 'dualChannel', group: 'Cross Channel' },
+    { id: 'masterStock', icon: '🗄️', label: 'Master Stock', desc: 'Barcode / agent / TL / GV search · StockDataa ↔ Tag Assignment reconciliation', perm: 'masterStock', group: 'Cross Channel' },
     { id: 'compare', icon: '⚖️', label: 'GV vs First Forward', desc: 'Dono ka side-by-side comparison', perm: 'compare', group: 'Cross Channel' },
-    { id: 'charts', icon: '📊', label: 'Charts', desc: 'Chart-only GV vs FF analysis', perm: 'compare', group: 'Cross Channel' },
+    { id: 'charts', icon: '📊', label: 'Charts', desc: 'Chart-only GV vs FF analysis', perm: 'charts', group: 'Cross Channel' },
     { id: 'forecast', icon: '🔭', label: 'Stock Forecasting', desc: 'Projection · accuracy · reconciled closing stock', perm: 'forecast', group: 'Cross Channel' },
     { id: 'dataQuality', icon: '🧪', label: 'Data Quality Center', desc: 'Duplicates · missing IDs · stale & mismatch checks', perm: 'dataQuality', group: 'Cross Channel' },
     { id: 'dispatchPlan', icon: '🚚', label: 'Dispatch Planner', desc: 'Auto box plan · printable pick-list · WhatsApp', perm: 'dispatchPlan', group: 'Cross Channel' },
     { id: 'tlScorecard', icon: '🏅', label: 'TL Scorecard', desc: 'TL-wise score · target · commission · risk', perm: 'tlScorecard', group: 'Cross Channel' },
     { id: 'savedViews', icon: '⭐', label: 'Saved Views', desc: 'Reusable filters · shareable links', perm: 'savedViews', group: 'Workspace' },
-    { id: 'reportStudio', icon: '🗓️', label: 'Report Studio', desc: 'Scheduled email · CSV · PDF · share', perm: 'savedViews', group: 'Workspace' },
+    { id: 'reportStudio', icon: '🗓️', label: 'Report Studio', desc: 'Scheduled email · CSV · PDF · share', perm: 'reportStudio', group: 'Workspace' },
     { id: 'followups', icon: '📝', label: 'Notes & Follow-ups', desc: 'Agent/TL timeline · owner · due date', perm: 'followups', group: 'Workspace' },
-    { id: 'fastagChampions', icon: '🏆', label: 'FASTag Champions', desc: 'Top agents/TLs by VC4, Commercial, Chassis, Replacement, Wrong VRN — FF & GV', perm: 'fastagChampions', group: 'Cross Channel' }
+    { id: 'fastagChampions', icon: '🏆', label: 'FASTag Champions', desc: 'Top agents/TLs by VC4, Commercial, Chassis, Replacement, Wrong VRN — FF & GV', perm: 'fastagChampions', group: 'Cross Channel' },
+    { id: 'arena', icon: '🎮', label: 'Agent Arena', desc: 'Levels · badges · challenges · crystal ball — gamified leaderboard', perm: 'arena', group: 'Wow Zone' },
+    { id: 'fame', icon: '🏆', label: 'Wall of Fame', desc: 'Monthly champions · shareable winner cards (PNG)', perm: 'fame', group: 'Wow Zone' },
+    { id: 'warRoom', icon: '🔴', label: 'War Room', desc: 'Full-screen live pulse · counters · race · ticker', perm: 'warRoom', group: 'Wow Zone' }
   ];
   const GROUP_ICON = { 'Management': '🧭', 'First Forward': '🟦', 'GV Partner': '🟩', 'Cross Channel': '🔗', 'Workspace': '🗂️', 'Account': '👤' };
   const pageDef = (id) => PAGES.find((p) => p.id === id) || null;
@@ -737,7 +741,7 @@ window.FF = window.FF || {};
 
   function onBackgroundDataUpdated() {
     // If user is on a data page, smoothly re-render so new stock and stats appear automatically
-    if (['stock', 'stockReport', 'home', 'executive', 'forecast', 'dataQuality', 'dualChannel', 'fastagChampions', 'ffCommission', 'gvCommission', 'tagIssued', 'dashboard', 'trend', 'performance', 'gvStock', 'gvStockReport', 'gvDashboard', 'gvTrend', 'gvPerformance', 'compare', 'charts', 'sheet'].includes(current.page)) {
+    if (['stock', 'stockReport', 'home', 'executive', 'forecast', 'dataQuality', 'dualChannel', 'masterStock', 'fastagChampions', 'ffCommission', 'gvCommission', 'tagIssued', 'dashboard', 'trend', 'performance', 'gvStock', 'gvStockReport', 'gvDashboard', 'gvTrend', 'gvPerformance', 'compare', 'charts', 'sheet'].includes(current.page)) {
       renderCurrent({ bgUpdated: true });
     }
   }
