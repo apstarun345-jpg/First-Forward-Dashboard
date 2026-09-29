@@ -471,6 +471,44 @@ html[data-theme="dark"] .class-defs { background: #17233e; border-color: #29456f
 .perm { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; padding: 8px 10px; border-radius: 10px; background: #f8f9fd; font-size: 12.5px; }
 .perm small { grid-column: 2; }
 .perm.no { opacity: .6; }
+
+/* 🛡️ My access — colorful, clickable page cards with live data summary (settings → account) */
+.acc-panels { display: grid; gap: 14px; }
+.acc-panel { border: 1px solid var(--line); border-radius: 16px; padding: 12px 12px 11px; background: linear-gradient(180deg, color-mix(in srgb, var(--brand) 5%, transparent), transparent 45%), var(--card); }
+.acc-panel-head { display: flex; align-items: center; gap: 9px; margin-bottom: 10px; }
+.acc-panel-ico { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; background: color-mix(in srgb, var(--brand) 14%, #fff); font-size: 15px; flex: none; }
+.acc-panel-head b { font-size: 13.5px; letter-spacing: .01em; }
+.acc-panel-head .acc-count { margin-left: auto; font-size: 11px; color: var(--muted); font-weight: 700; background: color-mix(in srgb, var(--brand) 9%, transparent); padding: 3px 9px; border-radius: 999px; }
+.acc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+.acc-card { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: start; padding: 11px 12px; border-radius: 14px; border: 1px solid rgba(255,255,255,.18); color: #fff; text-align: left; text-decoration: none; cursor: pointer; font: inherit; box-shadow: 0 6px 16px rgba(15,23,42,.14); position: relative; overflow: hidden; transition: transform .15s ease, box-shadow .15s ease, filter .15s ease; }
+.acc-card::after { content: ''; position: absolute; inset: 0; background: radial-gradient(130px 70px at 100% 0, rgba(255,255,255,.3), transparent 72%); pointer-events: none; }
+.acc-card:hover { transform: translateY(-2px); box-shadow: 0 12px 26px rgba(15,23,42,.24); text-decoration: none; filter: saturate(1.08); }
+.acc-card:active { transform: translateY(0); }
+.acc-card:focus-visible { outline: 3px solid color-mix(in srgb, var(--brand) 55%, transparent); outline-offset: 2px; }
+.acc-card .acc-ico { width: 34px; height: 34px; border-radius: 10px; background: rgba(255,255,255,.22); display: grid; place-items: center; font-size: 17px; flex: none; position: relative; z-index: 1; }
+.acc-card .acc-main { min-width: 0; position: relative; z-index: 1; }
+.acc-card .acc-main b { display: block; font-size: 13.5px; font-weight: 800; line-height: 1.25; }
+.acc-card .acc-main small { display: block; font-size: 11px; opacity: .95; line-height: 1.4; margin-top: 2px; }
+.acc-card .acc-sum { display: none; font-style: normal; font-size: 10.5px; font-weight: 800; margin-top: 7px; background: rgba(255,255,255,.2); border: 1px solid rgba(255,255,255,.28); border-radius: 8px; padding: 3px 7px; width: fit-content; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acc-card .acc-sum:not(:empty) { display: inline-block; }
+.acc-card .acc-go, .acc-card .acc-lock { font-size: 14px; opacity: .92; flex: none; position: relative; z-index: 1; }
+.acc-card.locked { filter: grayscale(.5) brightness(.9); border-style: dashed; border-color: rgba(255,255,255,.4); }
+.acc-card.locked:hover { filter: grayscale(.15) brightness(.98); }
+.acc-card.done { cursor: default; }
+.acc-card.t-mgmt { background: linear-gradient(135deg, #4f46e5, #8b5cf6); }
+.acc-card.t-ff { background: linear-gradient(135deg, #1d4ed8, #38bdf8); }
+.acc-card.t-gv { background: linear-gradient(135deg, #047857, #34d399); }
+.acc-card.t-cross { background: linear-gradient(135deg, #0369a1, #22d3ee); }
+.acc-card.t-ws { background: linear-gradient(135deg, #c2410c, #f59e0b); }
+.acc-card.t-act { background: linear-gradient(135deg, #0f766e, #2dd4bf); }
+.acc-card.t-sheet { background: linear-gradient(135deg, #be185d, #fb7185); }
+.acc-card.t-pages { background: linear-gradient(135deg, #6366f1, #a855f7); }
+/* GV/FF commission cells — class-wise ₹ per tag (sheet commission se) */
+.rate-line { display: block; font-size: 10.5px; font-weight: 800; color: #0f766e; margin-top: 2px; letter-spacing: .01em; }
+html[data-theme="dark"] .rate-line { color: #5eead4; }
+html[data-theme="dark"] .acc-panel { background: #131c36; border-color: #2b3a5e; }
+html[data-theme="dark"] .acc-panel-ico { background: #1b2540; }
+@media (max-width: 560px) { .acc-grid { grid-template-columns: 1fr; } }
 .user-list { display: flex; flex-direction: column; gap: 12px; }
 .user-card { border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; background: #fff; }
 .user-card.pending { border-color: #fcd34d; background: #fffdf5; }
@@ -574,7 +612,7 @@ html[data-theme="dark"] .user-notify-prefs { background: #1a2444; }
 
 /* ---------- avatars + top-right user menu ---------- */
 .av { width: 34px; height: 34px; border-radius: 50%; overflow: hidden; display: inline-grid; place-items: center; background: linear-gradient(135deg, var(--brand), var(--brand-2)); color: #fff; font-weight: 800; font-size: 13px; flex: none; box-shadow: 0 2px 8px rgba(15, 23, 42, .18); }
-.av img { width: 100%; height: 100%; object-fit: contain; display: block; background: #fff; }
+.av img { width: 100%; height: 100%; object-fit: cover; object-position: center; display: block; background: #fff; }
 .av.sm { width: 32px; height: 32px; font-size: 12px; }
 .av.top { width: 36px; height: 36px; }
 .av.lg { width: 54px; height: 54px; font-size: 18px; border-radius: 16px; }
@@ -607,7 +645,7 @@ html[data-theme="dark"] .user-notify-prefs { background: #1a2444; }
 .home-hero h1 { margin: 0 0 4px; font-size: 26px; letter-spacing: -.5px; }
 .home-name { background: linear-gradient(135deg, var(--brand), var(--brand-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .home-hero .sub { margin: 0 0 10px; color: var(--muted); }
-.home-avatar { width: 74px; height: 74px; border-radius: 22px; object-fit: contain; background: #fff; box-shadow: 0 10px 26px rgba(15, 23, 42, .18); flex: none; }
+.home-avatar { width: 74px; height: 74px; border-radius: 22px; object-fit: cover; object-position: center; background: #fff; box-shadow: 0 10px 26px rgba(15, 23, 42, .18); flex: none; }
 .home-avatar.mono-logo { display: grid; place-items: center; font-size: 30px; font-weight: 900; color: #fff; background: linear-gradient(135deg, var(--brand), var(--brand-2)); }
 .home-hero-side { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .home-stat { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; display: flex; flex-direction: column; box-shadow: var(--shadow); }
@@ -642,7 +680,7 @@ html[data-theme="dark"] .user-notify-prefs { background: #1a2444; }
 /* ---------- avatar edit (settings) ---------- */
 .avatar-edit { display: flex; gap: 14px; align-items: center; padding: 12px; border: 1px dashed var(--line); border-radius: 14px; margin-bottom: 14px; background: #fbfbff; }
 .avatar-big { width: 84px; height: 84px; border-radius: 24px; background: linear-gradient(135deg, var(--brand), var(--brand-2)); color: #fff; display: grid; place-items: center; font-size: 32px; font-weight: 900; overflow: hidden; flex: none; }
-.avatar-big img { width: 100%; height: 100%; object-fit: contain; background: #fff; }
+.avatar-big img { width: 100%; height: 100%; object-fit: cover; object-position: center; background: #fff; }
 
 /* ---------- access matrix / tabs registry ---------- */
 .matrix-wrap { max-height: 70vh; overflow: auto; }
