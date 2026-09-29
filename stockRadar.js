@@ -32,8 +32,8 @@ FF.pages = FF.pages || {};
         const g = map.get(tl) || { tl, ch: 'ff', stockVc4: 0, stockComm: 0, avgVc4: 0, avgComm: 0, agents: 0 };
         g.stockVc4 += Number(a.stockVc4) || 0;
         g.stockComm += Number(a.stockNvc4) || 0;
-        g.avgVc4 += Number(a.avgVc4) || 0;
-        g.avgComm += Number(a.avgNvc4) || 0;
+        g.avgVc4 += U.runRate(Number(a.curVc4) || 0);
+        g.avgComm += U.runRate(Number(a.curNvc4) || 0);
         g.agents++;
         map.set(tl, g);
       }
@@ -52,8 +52,8 @@ FF.pages = FF.pages || {};
         const g = map.get(key) || { tl, ch: 'gv', stockVc4: 0, stockComm: 0, avgVc4: 0, avgComm: 0, agents: 0 };
         g.stockVc4 += Number(r.stockVc4) || 0;
         g.stockComm += Number(r.stockComm) || 0;
-        g.avgVc4 += (Number(r.curVc4) || 0) / Math.max(1, Number(r.curDays) || 1);
-        g.avgComm += (Number(r.curComm) || 0) / Math.max(1, Number(r.curDays) || 1);
+        g.avgVc4 += U.runRate(Number(r.curVc4) || 0);
+        g.avgComm += U.runRate(Number(r.curComm) || 0);
         g.agents++;
         map.set(key, g);
       }

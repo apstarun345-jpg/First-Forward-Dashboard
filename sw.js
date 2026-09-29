@@ -1,10 +1,10 @@
 // Versioned app shell + offline data cache.
 // Auth login/logout/password endpoints are NEVER cached. Sheet data (gviz), /api/auth/me and
 // /api/settings are network-first with a cached fallback — internet na ho to last loaded data se app khulta hai.
-const CACHE_NAME = 'apnapayment-v43';
+const CACHE_NAME = 'apnapayment-v44';
 const DATA_CACHE = 'ff-data-v3';
 const STASH_CACHE = 'ff-push-stash-v1'; // pushsubscriptionchange ke waqt bani subscription yahan rakho
-const ASSETS = ['./', './index.html', './styles.css?v=37', './assistant.js?v=37', './masterSearch.js?v=37', './directAgents.js?v=37', './masterProfile.js?v=37', './newAgents.js?v=37', './masterSearch.js?v=37', './wowzone.js?v=37', './favicon.svg?v=5', './icon-192.png?v=5', './icon-512.png?v=5'];
+const ASSETS = ['./', './index.html', './styles.css?v=38', './assistant.js?v=38', './masterSearch.js?v=38', './directAgents.js?v=38', './masterProfile.js?v=38', './newAgents.js?v=38', './masterSearch.js?v=38', './wowzone.js?v=38', './favicon.svg?v=5', './icon-192.png?v=5', './icon-512.png?v=5'];
 const OFFLINE_API = (path) => path === '/api/gviz' || path === '/api/auth/me' || path === '/api/settings';
 
 // ---- 🔊 Short notification beep (generated with Web Audio on push, no external asset needed) ----

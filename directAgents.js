@@ -135,8 +135,8 @@ FF.pages = FF.pages || {};
           stock: Number(a.stockTotal || 0), issued: Number(a.curTotal || 0),
           status: clean(a.agentStatus || ''), priority: clean(a.priority || a.agentPriority || ''),
           vc4Stock: Number(a.stockVc4 || 0),
-          suggested: suggestQty({ daily: a.avgVc4 || ((FF.pages.performance.daysElapsed && FF.pages.performance.daysElapsed()) ? a.curVc4 / FF.pages.performance.daysElapsed() : 0), stock: a.stockVc4 }),
-          suggestedGross: suggestGrossQty({ daily: a.avgVc4 || ((FF.pages.performance.daysElapsed && FF.pages.performance.daysElapsed()) ? a.curVc4 / FF.pages.performance.daysElapsed() : 0) }),
+          suggested: suggestQty({ daily: U.runRate(a.curVc4 || 0), stock: a.stockVc4 }),
+          suggestedGross: suggestGrossQty({ daily: U.runRate(a.curVc4 || 0) }),
           route: `#/performance?q=${encodeURIComponent(a.name || '')}`
         });
       });
@@ -160,8 +160,8 @@ FF.pages = FF.pages || {};
           stock: Number(r.stockTotal || 0), issued: Number(r.curTotal || 0),
           status: clean(r.agentStatus || ''), priority: clean(r.priority || ''),
           vc4Stock: Number(r.stockVc4 || 0),
-          suggested: suggestQty({ given: r.suggestedDispatch, daily: (r.curVc4 || 0) / Math.max(1, r.curDays || 0), stock: r.stockVc4 }),
-          suggestedGross: suggestGrossQty({ daily: (r.curVc4 || 0) / Math.max(1, r.curDays || 0) }),
+          suggested: suggestQty({ daily: U.runRate(r.curVc4 || 0), stock: r.stockVc4 }),
+          suggestedGross: suggestGrossQty({ daily: U.runRate(r.curVc4 || 0) }),
           route: `#/gvPerformance?q=${encodeURIComponent(r.agentName || '')}`
         });
       });

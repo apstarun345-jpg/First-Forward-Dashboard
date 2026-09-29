@@ -447,7 +447,8 @@ await run('cross-channel KPI cards colorful + clickable (compare / charts / disp
     if (!cxHtml.includes(label)) throw new Error(`charts page me "${label}" nahi mila`);
   }
   const dp = root(); await pages.dispatchPlan.render(dp, {}, {});
-  if (!dp.innerHTML.includes('ins-metric-tap')) throw new Error('dispatch planner KPI cards clickable nahi');
+  await settle(200);
+  if (![...REG.values()].some((e) => String(e.innerHTML).includes('data-dp-kpi='))) throw new Error('dispatch planner KPI cards clickable nahi');
   const tl = root(); await pages.tlScorecard.render(tl, {}, {});
   if (!tl.innerHTML.includes('ins-metric-tap')) throw new Error('TL scorecard KPI cards clickable nahi');
 }, true);
@@ -803,16 +804,24 @@ await run('professional page dispatch planner (boxes + pick-list)', async () => 
   if (!(first.boxes >= 1) || !(first.dispatchTags >= first.need)) throw new Error('box math galat hai');
   if (first.dispatchTags !== first.boxes * 25) throw new Error('dispatch tags = boxes × box-size nahi hai');
   if (!data.rows.every((r) => r.priority >= 1)) throw new Error('priority rank missing');
-  const r = root(); await pages.dispatchPlan.render(r, { horizon: '7' }, {});
+  // 🚚 Dispatch Planner v2 (dispatchPlanner.js): GV + FF, filters, sortable columns, run-rate formula, clickable rows
+  const r = root(); const info = await pages.dispatchPlan.render(r, {}, {});
   await settle(300);
   const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  for (const label of ['Auto dispatch plan', 'Printable pick-list', 'slip-block', 'dp-csv', 'dp-xlsx', 'dp-wa', 'dp-log', 'dp-controls', 'Need 7d', 'Buffer tags']) {
-    if (!html.includes(label)) throw new Error(`dispatch planner me "${label}" nahi mila`);
+  for (const label of ['Dispatch Planner', 'dp2-hero', 'Run-rate', 'dp2-formula', 'dp2-csv', 'dp2-xlsx', 'dp2-wa', 'dp2-tabs', 'dp2-chips', 'dp2-kpis']) {
+    if (!html.includes(label)) throw new Error(`dispatch planner v2 me "${label}" nahi mila`);
   }
-  const r15 = root(); await pages.dispatchPlan.render(r15, { horizon: '15', box: '50' }, {});
-  await settle(250);
-  const h15 = r15.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  if (!/Need 15d/.test(h15) || !/1 box = 50/.test(h15)) throw new Error('horizon/box param page par reflect nahi hua');
+  if (!info || !info.agents) throw new Error('planner me agents load nahi hue');
+  const DP = FF.dispatchPlanner;
+  const rows = DP.collectAgents().map((x) => DP.withCalc(x, 'total'));
+  if (!rows.some((x) => x.ch === 'ff') || !rows.some((x) => x.ch === 'gv')) throw new Error('planner me FF + GV dono nahi hain');
+  const days = FF.util.suggestDays(), el = FF.util.runRateDays();
+  const one = rows.find((x) => x.cur.total > 0);
+  if (one && (Math.abs(one.rate - one.cur.total / el) > 1e-9 || one.required !== Math.max(0, Math.ceil(one.rate * days)) || one.net !== Math.max(0, Math.ceil(one.rate * days - one.stock.total)))) throw new Error('run-rate / required / with-stock formula galat');
+  const table = DP.tableHtml(DP.sortRows(rows, { key: 'net', dir: 'desc' }), 'agents');
+  for (const label of ['data-dp-sort="net"', 'data-dp-open="', 'WITH stock', 'W/O stock', 'Cover']) if (!table.includes(label)) throw new Error(`planner table me "${label}" nahi mila`);
+  const tls = DP.collectTls(DP.collectAgents());
+  if (!tls.length) throw new Error('TL-wise rows nahi bane');
 }, true);
 
 await run('professional page TL scorecard (score · grade · target)', async () => {

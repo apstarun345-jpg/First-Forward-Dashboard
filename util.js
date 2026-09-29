@@ -95,6 +95,32 @@ window.FF = window.FF || {};
     const d = days || suggestDays();
     return Math.max(0, Math.ceil((Number(avg) || 0) * d));
   }
+  /** 📐 RUN-RATE (poori site ka ek hi formula): jitne issue kiye ÷ (aaj ki date − 1).
+      Aaj ki poori entry abhi nahi aayi hoti, isliye kal tak ke din count hote hain (min 1). */
+  function runRateDays(now) {
+    const d = now instanceof Date ? now : new Date();
+    return Math.max(1, d.getDate() - 1);
+  }
+  function runRate(issued, now) {
+    return (Number(issued) || 0) / ((FF.util && FF.util.runRateDays) || runRateDays)(now);
+  }
+  /** 🚚 Dispatch calculation ek jagah: rate = cur ÷ (today−1) · required = rate × suggestDays ·
+      net (WITH stock) = required − stock · gross (W/O stock) = required · cover = stock ÷ rate din. */
+  function dispatchCalc(o) {
+    o = o || {};
+    const days = o.days || suggestDays();
+    const cur = Number(o.cur) || 0, last = Number(o.last) || 0, stock = Number(o.stock) || 0;
+    const elapsed = ((FF.util && FF.util.runRateDays) || runRateDays)();
+    const rate = cur / elapsed;
+    const required = Math.max(0, Math.ceil(rate * days));
+    return {
+      days, elapsed, cur, last, stock, rate, required,
+      net: Math.max(0, Math.ceil(rate * days - stock)),
+      gross: required,
+      cover: rate > 0 ? stock / rate : null,
+      growth: last > 0 ? ((cur - last) / last) * 100 : null
+    };
+  }
   /** Dono criteria ek saath: { days, mode, net (stock −), gross (bina stock) }. */
   function suggestPair(avg, stock) {
     const days = suggestDays();
@@ -925,7 +951,7 @@ window.FF = window.FF || {};
 
   FF.util = {
     esc, clean, num, fmt, fmtShort, pctOf, growth, fmtPct, fmtSigned, deltaHtml, pctHtml,
-    suggestDays, suggestMode, suggestNet, suggestGross, suggestPair, sugCell, sugText,
+    suggestDays, suggestMode, runRateDays, runRate, dispatchCalc, suggestNet, suggestGross, suggestPair, sugCell, sugText,
     MONTHS, MONTHS_LONG, DAYS, pad2, parseDate, parseMonthKey, ymKey, dateKey, fromDateKey, ymParts, labelYM, labelDate, labelDateKey,
     weekday, daysInMonth, prevMonthKey, nextMonthKey, weekStart, timeLabel,
     sum, groupSum, topEntries, sortBy, uniq,
