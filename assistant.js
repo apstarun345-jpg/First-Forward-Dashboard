@@ -109,6 +109,16 @@ window.FF = window.FF || {};
       );
     }
 
+    // ---- briefing on/off (v3.10 morning auto-briefing ka switch) ----
+    if (has('BRIEFING BAND', 'BRIEFING OFF', 'NO BRIEFING', 'BRIEFING STOP', 'STOP BRIEFING')) {
+      U.setVoicePrefs({ brief: false });
+      return ans('Theek hai — morning auto-briefing BAND kar di 🔕. \"Briefing chalu karo\" bologe to wapas on.', 'Okay — morning auto-briefing is OFF 🔕. Say "briefing chalu karo" to turn it back on.');
+    }
+    if (has('BRIEFING CHALU', 'BRIEFING ON', 'START BRIEFING', 'BRIEFING SHURU')) {
+      U.setVoicePrefs({ brief: true });
+      return ans('Morning auto-briefing CHALU kar di 🔔 — din ke pehle login par khud sunaunga.', 'Morning auto-briefing is ON 🔔 — I will brief you on the first login of the day.');
+    }
+
     // ---- voice navigation (v3.8.3) — "X kholo / open X / X page" ----
     if (has('KHOLO', 'KHOL DO', 'KHOLNA', 'OPEN', 'DIKHAO', 'SHOW ME', 'NAVIGATE', 'GO TO', 'CHALAO', 'PAGE')) {
       const NAV_MAP = [
@@ -775,6 +785,16 @@ window.FF = window.FF || {};
         speak(p, { onEnd: () => { if (convMode) scheduleListen(); } });
       }
     });
+    // v3.10 🌅 Morning auto-briefing: din ke pehle login par greeting ke baad khud "briefing do" chalta hai
+    // (ek baar per din · Voice prefs me brief:false se band ho sakta hai).
+    try {
+      const todayK = U.dateKey(new Date());
+      const briefOff = U.voicePrefs && typeof U.voicePrefs === 'function' && U.voicePrefs().brief === false;
+      if (!briefOff && localStorage.getItem('ff-brief-day') !== todayK) {
+        localStorage.setItem('ff-brief-day', todayK);
+        setTimeout(() => { if (panel && !panel.hidden) ask(lang === 'en' ? 'morning brief' : 'briefing do'); }, 4200);
+      }
+    } catch { /* optional */ }
     // autoplay-policy fallback: sound block ho to friendly hint.
     setTimeout(() => {
       try {

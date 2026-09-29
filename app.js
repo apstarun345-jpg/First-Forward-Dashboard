@@ -37,7 +37,10 @@ window.FF = window.FF || {};
     { id: 'savedViews', icon: '⭐', label: 'Saved Views', desc: 'Reusable filters · shareable links', perm: 'savedViews', group: 'Workspace' },
     { id: 'reportStudio', icon: '🗓️', label: 'Report Studio', desc: 'Scheduled email · CSV · PDF · share', perm: 'reportStudio', group: 'Workspace' },
     { id: 'followups', icon: '📝', label: 'Notes & Follow-ups', desc: 'Agent/TL timeline · owner · due date', perm: 'followups', group: 'Workspace' },
-    { id: 'fastagChampions', icon: '🏆', label: 'FASTag Champions', desc: 'Top agents/TLs by VC4, Commercial, Chassis, Replacement, Wrong VRN — FF & GV', perm: 'fastagChampions', group: 'Cross Channel' }
+    { id: 'fastagChampions', icon: '🏆', label: 'FASTag Champions', desc: 'Top agents/TLs by VC4, Commercial, Chassis, Replacement, Wrong VRN — FF & GV', perm: 'fastagChampions', group: 'Cross Channel' },
+    { id: 'arena', icon: '🎮', label: 'Agent Arena', desc: 'Levels · badges · challenges · crystal ball — gamified leaderboard', perm: 'arena', group: 'Wow Zone' },
+    { id: 'fame', icon: '🏆', label: 'Wall of Fame', desc: 'Monthly champions · shareable winner cards (PNG)', perm: 'fame', group: 'Wow Zone' },
+    { id: 'warRoom', icon: '🔴', label: 'War Room', desc: 'Full-screen live pulse · counters · race · ticker', perm: 'warRoom', group: 'Wow Zone' }
   ];
   const GROUP_ICON = { 'Management': '🧭', 'First Forward': '🟦', 'GV Partner': '🟩', 'Cross Channel': '🔗', 'Workspace': '🗂️', 'Account': '👤' };
   const pageDef = (id) => PAGES.find((p) => p.id === id) || null;

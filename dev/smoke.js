@@ -436,6 +436,27 @@ await run('cross-channel KPI cards colorful + clickable (compare / charts / disp
   const tl = root(); await pages.tlScorecard.render(tl, {}, {});
   if (!tl.innerHTML.includes('ins-metric-tap')) throw new Error('TL scorecard KPI cards clickable nahi');
 }, true);
+await run('wow zone · Agent Arena (levels, badges, challenges, crystal ball)', async () => {
+  const r = root(); await pages.arena.render(r, {}, {});
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const label of ['Agent Arena', 'Crystal Ball', 'Leaderboard', 'Badge gallery', 'Is month ke challenges', 'Tag Machine', 'Rookie', 'XP', 'ins-metric-tap']) {
+    if (!html.includes(label)) throw new Error(`Agent Arena me "${label}" nahi mila`);
+  }
+}, true);
+await run('wow zone · Wall of Fame (champions + winner cards)', async () => {
+  const r = root(); await pages.fame.render(r, {}, {});
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const label of ['Wall of Fame', 'Is month ke champions', 'First Forward', 'GV Partner', 'Winner card', 'fame-card-btn']) {
+    if (!html.includes(label)) throw new Error(`Wall of Fame me "${label}" nahi mila`);
+  }
+}, true);
+await run('wow zone · War Room live pulse', async () => {
+  const r = root(); await pages.warRoom.render(r, {}, {});
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const label of ['WAR ROOM', 'AAJ KA TOTAL', 'war-counter', 'Live ticker', 'Fullscreen', 'war-race']) {
+    if (!html.includes(label)) throw new Error(`War Room me "${label}" nahi mila`);
+  }
+}, true);
 await run('professional page FASTag Champions (vivid KPI + clickable full-data drill-down)', async () => {
   const r = root(); await pages.fastagChampions.render(r, {}, {});
   const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');

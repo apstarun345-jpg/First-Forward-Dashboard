@@ -14,7 +14,19 @@ Koi database nahi, koi manual upload nahi — website Google Sheet se data padht
 (Google Visualization API / `gviz`) through a small Node server that also handles **login, users,
 permissions and settings**. Zero npm dependencies.
 
-## ✨ v3.9.0 highlights
+## ✨ v3.10.0 highlights — WOW ZONE 🎉
+
+- **🎮 Agent Arena** — levels & XP, 11 badges, monthly challenges, badge-unlock par
+  🎊 confetti + fanfare, badge gallery, medals leaderboard.
+- **🔮 Crystal Ball** — month-end projection + confidence, record-watch agents.
+- **🏆 Wall of Fame** — 6-month champion gallery + shareable **Winner Card PNG** (WhatsApp-ready).
+- **🔴 War Room** — fullscreen live pulse: count-up counters, FF vs GV race, live ticker,
+  🚨 lead-change celebration, 30s auto-refresh.
+- **🌅 Morning auto-briefing** — din ke pehle login par assistant khud daily briefing sunata hai
+  (voice: "briefing band/chalu karo").
+- Full notes: [WHATS-NEW-v3.10.0.md](WHATS-NEW-v3.10.0.md)
+
+## v3.9.0 highlights
 
 - **🗄 Master Stock (naya page)** — barcode / agent / TL / GV name / GV TL search karo →
   StockDataa ↔ Tag Assignment ki total information; kitne Tag Assignment barcodes StockDataa me
