@@ -60,7 +60,7 @@ FF.config = {
     badges: true, voiceSummary: true, askBox: true, teamMap: true, tlAnomaly: true, personalLinks: true,
     customAlerts: true, championEmail: false, championHour: 10, championTop: 3,
     followupTracker: true, followupDays: 3, followupHour: 10,
-    dispatchPlan: true, suggestDays: 15,
+    dispatchPlan: true, suggestDays: 15, suggestMode: 'both',
     // v3.11 — naye feature flags (Settings → Features se on/off ho sakte hain)
     masterSearch: true, tabHeartbeat: true, themePacks: true, heatmap: true,
     networkGraph: true, sparklines: true, reportCards: true, anomalyRadar: true,

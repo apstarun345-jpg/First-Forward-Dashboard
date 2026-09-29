@@ -95,7 +95,9 @@ export const PAGE_PERMISSIONS = [
   { key: 'activity', label: 'Wow Zone · Activity Calendar (heatmap + streak)', group: 'Wow Zone' },
   { key: 'network', label: 'Wow Zone · Team Network (TL–agent constellation)', group: 'Wow Zone' },
   { key: 'radar', label: 'Wow Zone · Anomaly Radar (spike / crash / stale auto-detect)', group: 'Wow Zone' },
-  { key: 'reportCards', label: 'Wow Zone · Agent Report Cards (printable monthly card)', group: 'Wow Zone' }
+  { key: 'reportCards', label: 'Wow Zone · Agent Report Cards (printable monthly card)', group: 'Wow Zone' },
+  { key: 'sprints', label: 'Wow Zone · Hourly Sprints (live TL/agent race per hour)', group: 'Wow Zone' },
+  { key: 'stockRadar', label: 'Cross Channel · Stock Radar (TL bubbles + suggested qty)', group: 'Cross Channel' }
 ];
 
 // Sheet-tab registry defaults (also mirrored in config.js). `enabled:false` hides a tab everywhere.
@@ -121,7 +123,7 @@ const allPermKeysNow = () => allPermKeys(db.settings);
 // Back-compat export (some tooling imported PERMISSIONS).
 export const PERMISSIONS = permissionsFor({ tabs: DEFAULT_TABS });
 const DEFAULT_USER_PERMS = ['home', 'executive', 'forecast', 'dataQuality', 'savedViews', 'reportStudio', 'followups', 'tagIssued', 'rangeReport', 'targets', 'dashboard', 'trend', 'stock', 'stockReport', 'performance', 'ffCommission', 'gvDashboard', 'gvTrend', 'gvStock', 'gvStockReport', 'gvPerformance', 'gvCommission', 'dualChannel', 'masterStock', 'compare', 'tv', 'teamMap',
-  'sheet:StockDataa', 'sheet:REPORT', 'sheet:GV Master', 'sheet:Tag Assignment', 'sheet:GV REPORT', 'charts', 'export', 'dispatchPlan', 'tlScorecard', 'voiceAssistant', 'arena', 'fame', 'warRoom', 'activity', 'network', 'radar', 'reportCards', 'directAgents', 'newAgents'];
+  'sheet:StockDataa', 'sheet:REPORT', 'sheet:GV Master', 'sheet:Tag Assignment', 'sheet:GV REPORT', 'charts', 'export', 'dispatchPlan', 'tlScorecard', 'voiceAssistant', 'arena', 'fame', 'warRoom', 'activity', 'network', 'radar', 'reportCards', 'directAgents', 'newAgents', 'sprints', 'stockRadar'];
 
 // Admin-controlled audience for automated notifications. `users` means all approved non-admin
 // users who have notification access; each user's own master/type preferences still apply.
@@ -217,6 +219,7 @@ const DEFAULT_SETTINGS = {
     followupDays: 3, followupHour: 10,
     dispatchPlan: true,  // 🎯 suggested-dispatch highlighted cards (GV + FF)
     suggestDays: 15,     // 🎯 suggested qty = avg VC4/day × ye din − stock
+    suggestMode: 'both', // 🎯 kaise dikhaye: 'both' = stock − aur bina stock dono | 'net' | 'gross'
     officeLat: 0, officeLng: 0, // 🗺 office location (0 = unset — map card se set karo)
     alerts: { lowCover: true, midMonth: true, inactive: true, zeroDay: true, newLoginIp: true, anomaly: true }
   },
@@ -2174,7 +2177,7 @@ async function handleApi(req, res, url) {
 
   if (p === '/api/health' && method === 'GET') {
     // pendingSignups sirf admin ko (sidebar badge ke liye) — public health me leak nahi.
-    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.14.0', storage: storageStatus(), push: pushHealth(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length } : {}) });
+    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.15.0', storage: storageStatus(), push: pushHealth(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length } : {}) });
   }
   if (p === '/api/public-config' && method === 'GET') return sendJson(res, 200, publicSettings());
   // App version (sw.js CACHE_NAME) — update-toast ke liye; logged-in se pehle bhi chahiye.

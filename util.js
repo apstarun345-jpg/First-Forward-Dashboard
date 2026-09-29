@@ -63,6 +63,58 @@ window.FF = window.FF || {};
     const arrow = cls === 'up' ? '▲' : cls === 'down' ? '▼' : '•';
     return `<span class="delta ${cls}">${arrow} ${fmtSigned(p, o.decimals)} ${esc(o.suffix || '')}</span>`;
   }
+  /** Signed % with colour — minus RED, plus GREEN + bold (site-wide rule). */
+  function pctHtml(p, opts) {
+    const o = opts || {};
+    if (p === null || p === undefined || !Number.isFinite(p)) return '<span class="dim">—</span>';
+    const d = o.decimals === undefined ? 1 : o.decimals;
+    const cls = p > 0 ? 'pos' : p < 0 ? 'neg' : 'flat';
+    const arrow = o.arrows === false ? '' : (p > 0 ? '▲ ' : p < 0 ? '▼ ' : '');
+    return `<span class="pct ${cls}">${arrow}${p > 0 ? '+' : ''}${p.toFixed(d)}%</span>`;
+  }
+
+  // ---- 🎯 suggested dispatch (run-rate based) ---------------------------------
+  /** Kitne din ka suggestion banana hai — Settings → ⚙️ Alert modify me set hota hai. */
+  function suggestDays() {
+    try { return Number(FF.config && FF.config.features && FF.config.features.suggestDays) || 15; } catch { return 15; }
+  }
+  /** Kaise dikhaye — 'both' (default: stock − aur bina stock dono) | 'net' | 'gross'. */
+  function suggestMode() {
+    try {
+      const m = FF.config && FF.config.features && FF.config.features.suggestMode;
+      return m === 'net' || m === 'gross' ? m : 'both';
+    } catch { return 'both'; }
+  }
+  /** Net requirement = avg/day × din − stock (stock ghatane ke baad). */
+  function suggestNet(avg, stock, days) {
+    const d = days || suggestDays();
+    return Math.max(0, Math.ceil((Number(avg) || 0) * d - (Number(stock) || 0)));
+  }
+  /** Gross requirement = avg/day × din (bina stock ghataye — pure run-rate need). */
+  function suggestGross(avg, days) {
+    const d = days || suggestDays();
+    return Math.max(0, Math.ceil((Number(avg) || 0) * d));
+  }
+  /** Dono criteria ek saath: { days, mode, net (stock −), gross (bina stock) }. */
+  function suggestPair(avg, stock) {
+    const days = suggestDays();
+    return { days, mode: suggestMode(), net: suggestNet(avg, stock, days), gross: suggestGross(avg, days) };
+  }
+  /** Inline table-cell HTML — mode ke hisaab se net / gross / dono. */
+  function sugCell(net, gross, chipClass) {
+    const mode = suggestMode();
+    const chip = (n) => `<b class="sug-chip${chipClass ? ` ${chipClass}` : ''}">${fmt(n)}</b>`;
+    if (mode === 'net') return chip(net);
+    if (mode === 'gross') return chip(gross);
+    return `${chip(net)}<span class="sug-wo" title="Bina stock ghataye — run-rate × din">w/o stock <b>${fmt(gross)}</b></span>`;
+  }
+  /** Compact inline text (suggestions / kundli ke liye) — "net · w/o gross". */
+  function sugText(net, gross) {
+    const mode = suggestMode();
+    if (mode === 'net') return fmt(net);
+    if (mode === 'gross') return `w/o ${fmt(gross)}`;
+    return `${fmt(net)} · w/o ${fmt(gross)}`;
+  }
 
   // ---- dates -----------------------------------------------------------------
   const pad2 = (n) => String(n).padStart(2, '0');
@@ -872,7 +924,8 @@ window.FF = window.FF || {};
   }
 
   FF.util = {
-    esc, clean, num, fmt, fmtShort, pctOf, growth, fmtPct, fmtSigned, deltaHtml,
+    esc, clean, num, fmt, fmtShort, pctOf, growth, fmtPct, fmtSigned, deltaHtml, pctHtml,
+    suggestDays, suggestMode, suggestNet, suggestGross, suggestPair, sugCell, sugText,
     MONTHS, MONTHS_LONG, DAYS, pad2, parseDate, parseMonthKey, ymKey, dateKey, fromDateKey, ymParts, labelYM, labelDate, labelDateKey,
     weekday, daysInMonth, prevMonthKey, nextMonthKey, weekStart, timeLabel,
     sum, groupSum, topEntries, sortBy, uniq,

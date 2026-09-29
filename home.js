@@ -49,6 +49,7 @@ FF.pages = FF.pages || {};
           <div class="home-stat"><span class="dim">Data loaded</span><b id="home-loaded">${S.loadedAt || G.loadedAt ? U.timeLabel(S.loadedAt || G.loadedAt) : '—'}</b></div>
           <div class="home-stat"><span class="dim">Sync</span><b id="home-sync">${FF.preloader && FF.preloader.done ? 'All sheets ready ✓' : 'Background sync…'}</b></div>
           <button class="btn primary" data-action="refresh">↻ Refresh</button>
+          <button class="btn" id="home-morning-card" title="Boss ke liye WhatsApp Good-Morning card (PNG)">📲 Morning Card</button>
           <a class="btn" href="#/tagIssued">🏷️ Tag Issued →</a>
         </div>
       </div>
@@ -100,6 +101,47 @@ FF.pages = FF.pages || {};
     }
 
     const cards = [];
+
+    // 🟩 GV · AAJ KA LIVE — class/type-wise KPI cards + Expected Today (run-rate) — click → full detail
+    if (gvMasterR.status === 'fulfilled' && G.rows) {
+      const gvAll = G.rows();
+      const now = new Date();
+      const tk = U.dateKey(now);
+      const todayRows = gvAll.filter((r) => r.date && U.dateKey(r.date) === tk);
+      const sum = (fn) => todayRows.filter(fn).length;
+      const gvAajTotal = todayRows.length;
+      const gvAajVc4 = sum((r) => r.group === 'VC4');
+      const gvAajVc20 = sum((r) => r.group === 'VC20');
+      const gvAajVc5p = sum((r) => r.group === 'VC5+');
+      const gvAajChassis = sum((r) => /chassis/i.test(r.tagType || ''));
+      const gvAajRepl = sum((r) => /replacement/i.test(r.status || ''));
+      // Pichhle same 4 week-days ki run-rate (isi weekday ka average) → Expected today
+      const wd = now.getDay();
+      const byDay = new Map();
+      for (const r of gvAll) { if (!r.date || r.date.getDay() !== wd) continue; const k = U.dateKey(r.date); if (k === tk) continue; byDay.set(k, (byDay.get(k) || 0) + 1); }
+      const last4 = [...byDay.entries()].sort((a, b) => b[0].localeCompare(a[0])).slice(0, 4);
+      const runRate = last4.length ? Math.round(last4.reduce((n, [, v]) => n + v, 0) / last4.length) : null;
+      // Aaj ki rate (pace) se projection — abhi tak jitna hua, din ke bache hue hisaab se
+      const dayStart = new Date(now); dayStart.setHours(0, 0, 0, 0);
+      const hoursGone = Math.max(1, (now - dayStart) / 3600000);
+      const paceProj = gvAajTotal > 0 ? Math.round((gvAajTotal / hoursGone) * 24) : null;
+      const expectFoot = runRate != null ? `pichhle ${last4.length} same-weekday avg` : 'history kam hai';
+      const paceFoot = paceProj != null ? `aaj ki rate se · abhi ${U.fmt(gvAajTotal)} ho chuka` : 'abhi issuance nahi hui';
+      cards.push(`<section class="card gv-aaj"><div class="card-head"><h3>🟩 GV · Aaj ka live <span class="dim">· ${esc(now.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' }))}</span></h3>
+        <div class="card-right dim">kisi bhi card par click karo → poora detail khulega</div></div><div class="card-body">
+        <div class="kpi-grid mini gv-aaj-grid">${[
+          kpi('g11', 'Aaj Total', '🏷️', U.fmt(gvAajTotal), runRate != null ? `expected ${U.fmt(runRate)} · pace ${paceProj != null ? U.fmt(paceProj) : '—'}` : 'aaj ka GV total', `src=gv&scope=day&date=${tk}`),
+          kpi('g3', 'VC4 tags', '🚗', U.fmt(gvAajVc4), gvAajTotal ? `${U.fmtPct(U.pctOf(gvAajVc4, gvAajTotal), 0)} share` : '—', `src=gv&scope=day&date=${tk}&f=vc4`),
+          kpi('g8', 'VC20 tags', '🛻', U.fmt(gvAajVc20), gvAajTotal ? `${U.fmtPct(U.pctOf(gvAajVc20, gvAajTotal), 0)} share` : '—', `src=gv&scope=day&date=${tk}&f=vc20`),
+          kpi('g6', 'VC5+ tags', '🚚', U.fmt(gvAajVc5p), gvAajTotal ? `${U.fmtPct(U.pctOf(gvAajVc5p, gvAajTotal), 0)} share` : '—', `src=gv&scope=day&date=${tk}&f=vc5p`),
+          kpi('g4', 'Chassis tags', '🔧', U.fmt(gvAajChassis), gvAajTotal ? `${U.fmtPct(U.pctOf(gvAajChassis, gvAajTotal), 0)} of today` : '—', `src=gv&scope=day&date=${tk}&f=chassis`),
+          kpi('g7', 'Replacement tags', '🔁', U.fmt(gvAajRepl), gvAajTotal ? `${U.fmtPct(U.pctOf(gvAajRepl, gvAajTotal), 0)} of today` : '—', `src=gv&scope=day&date=${tk}&f=repl`),
+          kpi('g5', 'Expected Today', '🎯', runRate != null ? U.fmt(runRate) : '—', expectFoot, `src=gv&scope=day&date=${tk}`),
+          kpi('g10', 'Aaj ki Rate (pace)', '⚡', paceProj != null ? U.fmt(paceProj) : '—', paceFoot, `src=gv&scope=day&date=${tk}`)
+        ].join('')}</div>
+        <p class="dim small">Expected = pichhle 4 same-weekday ki run-rate · Pace = abhi tak ki speed se din ke end tak ka andaza · ↻ se fresh hota hai</p>
+      </div></section>`);
+    }
 
     // FF Highlight
     if (ffDaily && ffLatest) {
@@ -298,6 +340,8 @@ FF.pages = FF.pages || {};
     // 🔎 Master search panel — naam, TL, ID, GV ID, barcode, tag ID sab kuch yahin se
     const searchMount = U.$('#home-search', root);
     if (searchMount && FF.masterSearch) { try { FF.masterSearch.mountHome(searchMount); } catch { /* search optional */ } }
+    const morningBtn = U.$('#home-morning-card', root);
+    if (morningBtn) morningBtn.addEventListener('click', () => { if (FF.morningCard) FF.morningCard.generate(root); });
     updateSync();
     // cleanup on page leave
     const obs = new MutationObserver(() => { if (!document.body.contains(root)) { clearInterval(syncPoll); obs.disconnect(); } });
