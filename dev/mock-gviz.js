@@ -172,7 +172,12 @@ for (let back = 60; back >= 0; back--) {
     for (let k = 0; k < n; k++) {
       const cls = pick(CLASSES);
       const superA = (a.tlName && a.tlName !== 'APS') ? TLS.find((t) => t.name === a.tlName) || TLS[0] : null;
-      GV_MASTER.rows.push([a.id, a.name, superA ? superA.id : a.id, superA ? superA.name : a.name, `RJ14GV${gvSeq}`, cls, `VC${cls}`, `608116-0${30 + (gvSeq % 9)}-0${gvSeq % 999999}`, `34161FA82GV${gvSeq++}`, 500, `GV CUST ${k}`, '100000005715', 200, pick(GV_STATUS), 'Paid', dstr(d), '12:53:56', superA ? superA.id : a.id, `VC${cls}`, `${MONTHS[d.getMonth()]}${String(d.getFullYear()).slice(2)}`, pick(GV_TYPES), '', a.gv ? 'APS09129' : '', a.gv ? 'Akash Mansingh Thakur' : '', String(cls).length]);
+      // 🧍 GV direct-agent rule: TL ID + TL Name dono blank. Deterministic subset — preview/tests
+      // isi se "Direct Agents (no TL)" wala path cover karte hain (self-supervised se pehle).
+      const directGv = !!a.gv && k % 4 === 3;
+      const supId = directGv ? '' : (superA ? superA.id : a.id);
+      const supName = directGv ? '' : (superA ? superA.name : a.name);
+      GV_MASTER.rows.push([a.id, a.name, supId, supName, `RJ14GV${gvSeq}`, cls, `VC${cls}`, `608116-0${30 + (gvSeq % 9)}-0${gvSeq % 999999}`, `34161FA82GV${gvSeq++}`, 500, `GV CUST ${k}`, '100000005715', 200, pick(GV_STATUS), 'Paid', dstr(d), '12:53:56', supId, `VC${cls}`, `${MONTHS[d.getMonth()]}${String(d.getFullYear()).slice(2)}`, pick(GV_TYPES), '', a.gv ? 'APS09129' : '', a.gv ? 'Akash Mansingh Thakur' : '', String(cls).length]);
     }
   }
 }
@@ -187,7 +192,8 @@ for (const a of AGENTS) {
     // A handful of deterministic dual-channel rows exercise the production identity join:
     // Tag Assignment serial ↔ StockDataa barcode, plus REPORT "GV ID Found" ↔ GV Unique ID.
     const ffBarcode = a.gv && k === 0 ? ((STOCK.rows.find((r) => r[7] === a.id) || [])[3] || '') : '';
-    GV_ASSIGN.rows.push([cls, `34161FA82GVS${gvSeq++}`, ffBarcode || `608116-037-0${gvSeq % 999999}`, 'In Stock', a.id, a.name, superA ? superA.id : '', superA ? superA.name : '', '', '', '', a.gv ? 'APS09129' : '', a.gv ? 'Akash Mansingh Thakur' : '', '']);
+    const noTl = !!a.gv && k % 6 === 4;
+    GV_ASSIGN.rows.push([cls, `34161FA82GVS${gvSeq++}`, ffBarcode || `608116-037-0${gvSeq % 999999}`, 'In Stock', a.id, a.name, noTl ? '' : (superA ? superA.id : ''), noTl ? '' : (superA ? superA.name : ''), '', '', '', a.gv ? 'APS09129' : '', a.gv ? 'Akash Mansingh Thakur' : '', '']);
   }
 }
 // GV REPORT: header row 4 (A…BE), data from row 5 — same shape as the live sheet
@@ -207,7 +213,10 @@ for (const a of AGENTS) {
   const days = Math.max(1, today.getDate());
   const row = new Array(GVR_COLS.length).fill('');
   row[0] = `98${10000000 + GV_REPORT.rows.length}`; row[1] = a.id; row[2] = a.name;
-  row[3] = (a.tlName && a.tlName !== 'APS') ? a.tlId : a.id; row[4] = (a.tlName && a.tlName !== 'APS') ? a.tlName : a.name;
+  const gvDirect = !!a.gv && GV_MASTER.rows.some((r) => r[0] === a.id && !r[2] && !r[3]);
+  // 🧍 GV direct: TL ID + TL Name dono blank (warna self/real TL)
+  row[3] = gvDirect ? '' : ((a.tlName && a.tlName !== 'APS') ? a.tlId : a.id);
+  row[4] = gvDirect ? '' : ((a.tlName && a.tlName !== 'APS') ? a.tlName : a.name);
   row[5] = sc('12'); row[6] = sc('16'); row[7] = sc('4'); row[8] = sc('5'); row[9] = sc('6'); row[10] = sc('7');
   row[11] = st.length; row[12] = st.length - sc('4'); row[13] = Math.round(sc('4') / 8); row[14] = Math.round(Math.max(0, sc('4') / 8 - sc('4')));
   row[15] = sc('4') / days < 8 ? '🔴 High' : sc('4') / days < 20 ? '🟡 Medium' : '🟢 Low';

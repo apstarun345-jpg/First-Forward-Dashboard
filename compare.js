@@ -219,7 +219,7 @@ FF.pages = FF.pages || {};
         return vsRow(c, f, g);
       }).concat([vsRow('Total', ffStockTotal, gvStockTotal)]);
     })();
-    const highRows = report.filter((r) => /high/i.test(r.priority)).map((r) => [r.agentName, r.agentId, r.tlName, r.priority, r.agentStatus, U.fmt(r.stockTotal)]);
+    const highRows = report.filter((r) => /high/i.test(r.priority)).map((r) => [r.agentName, r.agentId, FF.config.isDirectAgent(r, 'gv') ? FF.config.directLabel(r, 'gv') : r.tlName, r.priority, r.agentStatus, U.fmt(r.stockTotal)]);
     const kpiDetails = {
       [LBL.issuance]: { title: 'Month-wise issuance · FF vs GV', headers: VS_HEADERS, rows: monthRows('total') },
       [LBL.today]: { title: `${U.labelYM(cur)} daily FF vs GV`, headers: VS_HEADERS, rows: dailyRows },

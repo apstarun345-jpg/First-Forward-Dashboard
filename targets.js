@@ -44,7 +44,7 @@ FF.pages = FF.pages || {};
       const k = keyOf('ff', a.name);
       if (a.ym === view.ym) ffCur.set(k, (ffCur.get(k) || 0) + a.n);
       if (a.ym === last) ffLast.set(k, (ffLast.get(k) || 0) + a.n);
-      if (a.tlName && !ffTl.has(k)) ffTl.set(k, a.tlName);
+      if (a.tlName && FF.config.isRealTl(a.tlName) && !ffTl.has(k)) ffTl.set(k, a.tlName);
     }
     const ffVc4 = new Map(), ffVc20 = new Map(), ffVc5p = new Map();
     for (const r of agentClass) {
@@ -426,7 +426,7 @@ FF.pages = FF.pages || {};
       if (view.source !== 'all') r = r.filter((x) => x.source === view.source);
       const groups = new Map();
       for (const x of r) {
-        const tl = x.tl && x.tl !== '—' ? x.tl : 'Direct (no TL)';
+        const tl = x.tl && x.tl !== '—' && FF.config.isRealTl(x.tl) ? x.tl : `🚫 ${FF.config.directLabel({ tlName: x.tl }, x.channel === 'GV Partner' ? 'gv' : 'ff')}`;
         let g = groups.get(tl);
         if (!g) { g = { tl, agents: 0, withTarget: 0, achieved: 0, target: 0, cur: 0, last: 0, vc4: 0, vc20: 0, vc5p: 0 }; groups.set(tl, g); }
         g.agents++;
@@ -463,7 +463,7 @@ FF.pages = FF.pages || {};
         ${card(`👥 TL-wise rollup <span class="dim">· ${esc(U.labelYM(view.ym))}${view.ym === P.cur ? ' (MTD)' : ''}</span>`,
         arr.length ? `<div class="table-wrap tall"><table class="tbl sticky-first"><thead><tr><th>#</th><th>Team Leader</th><th class="num">Agents</th><th class="num">Target</th><th class="num">Issuance</th><th style="min-width:130px">Achievement</th><th class="num">Last month</th><th class="num">Growth</th><th class="num">Targets achieved</th>${goalsOn ? '<th class="num">🎯 TL goal</th>' : ''}</tr></thead><tbody>${(() => { const sorted = [...arr].sort((a, b) => b.cur - a.cur); return arr.map((g) => { const rank = sorted.indexOf(g); const bar = g.target ? `<div class="tgt-track"><div class="tgt-fill ${(g.p || 0) >= 100 ? 'ok' : (g.p || 0) >= 60 ? 'mid' : 'low'}" style="width:${Math.min(100, g.p || 0)}%"></div></div><small class="dim">${Math.round(g.p || 0)}%</small>` : '<span class="dim">no target</span>'; const gr = g.growth === null ? '<span class="dim">new</span>' : U.deltaHtml(g.growth, { decimals: 0 }); return `<tr><td>${rank < 3 ? medals[rank] : rank + 1}</td><td><b>${esc(g.tl)}</b></td><td class="num">${U.fmt(g.agents)}</td><td class="num">${g.target ? U.fmt(g.target) : '<span class="dim">—</span>'}</td><td class="num"><b>${U.fmt(g.cur)}</b><br><small class="dim" title="VC4 · VC20 · VC5+ (All Comm = VC20 + VC5+)">V4 ${U.fmt(g.vc4)} · V20 ${U.fmt(g.vc20)} · V5+ ${U.fmt(g.vc5p)}</small></td><td>${bar}</td><td class="num">${U.fmt(g.last)}</td><td class="num">${gr}</td><td class="num">${g.withTarget ? `${g.achieved}/${g.withTarget}` : '<span class="dim">—</span>'}</td>${goalsOn ? `<td class="num">${goalCell(g)}</td>` : ''}</tr>`; }).join(''); })()}</tbody></table></div>` : '<div class="empty-state">Is month me koi data nahi mila.</div>',
         `${FF.auth.isAdmin() && goalsOn ? '<button class="btn small primary" id="tl-goal-save" title="Upar goal column me numbers daal ke yahan Save karo">💾 Save TL goals</button>' : ''}<button class="btn small" id="tl-xlsx">⬇ Excel</button>`)}
-        <p class="dim small">Jo agents kisi TL ke under nahi hain wo <b>Direct (no TL)</b> group me dikhte hain. Leaderboard issuance ke hisaab se ranked hai.</p>`;
+        <p class="dim small">Jo agents kisi TL ke under nahi hain wo <b>🚫 Direct Agent</b> group me dikhte hain (FF rule: TL Name APS · GV rule: TL ID + TL Name blank). Leaderboard issuance ke hisaab se ranked hai.</p>`;
     };
     drawTl();
 
@@ -496,7 +496,7 @@ FF.pages = FF.pages || {};
         let r = list; if (view.source !== 'all') r = r.filter((x) => x.source === view.source);
         const groups = new Map();
         for (const x of r) {
-          const tl = x.tl && x.tl !== '—' ? x.tl : 'Direct (no TL)';
+          const tl = x.tl && x.tl !== '—' && FF.config.isRealTl(x.tl) ? x.tl : `🚫 ${FF.config.directLabel({ tlName: x.tl }, x.channel === 'GV Partner' ? 'gv' : 'ff')}`;
           let g = groups.get(tl);
           if (!g) { g = { tl, agents: 0, withTarget: 0, achieved: 0, target: 0, cur: 0, last: 0 }; groups.set(tl, g); }
           g.agents++;

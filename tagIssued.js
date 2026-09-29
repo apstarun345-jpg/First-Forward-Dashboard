@@ -150,7 +150,7 @@ FF.pages = FF.pages || {};
       ], legendAlways: true });
       const rankCount = Math.max(5, Math.min(20, Number(localStorage.getItem('ti_chart_limit')) || 10));
       const gvAgentMap = new Map(), gvTlMap = new Map();
-      gvRangeRows.forEach((r) => { const k = r.agentName || r.agentId || 'Unknown'; const o = gvAgentMap.get(k) || { total: 0, vc4: 0, comm: 0 }; o.total++; if (r.group === 'VC4') o.vc4++; else o.comm++; gvAgentMap.set(k, o); const tl = r.tlName || 'Direct'; gvTlMap.set(tl, (gvTlMap.get(tl) || 0) + 1); });
+      gvRangeRows.forEach((r) => { const k = r.agentName || r.agentId || 'Unknown'; const o = gvAgentMap.get(k) || { total: 0, vc4: 0, comm: 0 }; o.total++; if (r.group === 'VC4') o.vc4++; else o.comm++; gvAgentMap.set(k, o); const tl = FF.config.isDirectAgent(r, 'gv') ? FF.config.directLabel(r, 'gv') : (r.tlName || 'Unassigned'); gvTlMap.set(tl, (gvTlMap.get(tl) || 0) + 1); });
       const gvTopRows = [...gvAgentMap].sort((a,b)=>b[1].total-a[1].total).slice(0,rankCount);
       const gvTopVc4 = [...gvAgentMap].sort((a,b)=>b[1].vc4-a[1].vc4).slice(0,rankCount);
       const gvTopCommercial = [...gvAgentMap].sort((a,b)=>b[1].comm-a[1].comm).slice(0,rankCount);

@@ -1,4 +1,4 @@
-# First Forward Dashboard — First Forward + GV Partner (v3.6)
+# First Forward Dashboard — First Forward + GV Partner (v3.11)
 
 Colourful dashboard website built directly on top of **do Google Sheets**:
 
@@ -13,6 +13,31 @@ aur ek **⚖️ GV vs First Forward** page side-by-side comparison deta hai.
 Koi database nahi, koi manual upload nahi — website Google Sheet se data padhti hai
 (Google Visualization API / `gviz`) through a small Node server that also handles **login, users,
 permissions and settings**. Zero npm dependencies.
+
+## ✨ v3.12.0 highlights — 🧍 Direct Agents & TLs (ek hi rule, poori site par)
+
+- **Rule (configured, Settings → 🧍 Direct Agents):** GV direct = **TL ID + TL Name dono khaali** · FF direct = **TL Name APS**.
+- **Ek hi classifier** poore app me: `FF.config.isDirectAgent(row, channel)` + `FF.direct` helpers — dispatch filters, TL dropdowns, TL rollups, ranking, search suggestions, network graph, war room, commission, certificates sab isi rule par.
+- **GV Stock Report dispatch** me 🚫 **Direct Agents — alag list (no dispatch)** + TL/Dispatch filter me direct option; **FF Performance** me `🚫 Direct Agents · APS` filter; **Dispatch Planner** me alag direct pool.
+- **Naya page** `#/directAgents` — dono channel ke direct agents ka roster (reason, stock, MTD issuance) + CSV + rule cards.
+- Docs + tests: [WHATS-NEW-v3.12.0.md](WHATS-NEW-v3.12.0.md) · `dev/direct-agent.test.js` · smoke me v3.12 checks.
+
+## ✨ v3.11.0 highlights — Master Search + Wow Zone 2.0 🔎
+
+- **🔎 Master Search (har page par)** — topbar search bar + Home panel master search. Naam, TL naam,
+  agent ID, TL ID, GV ID, barcode, tag ID — sab ek search me (dropdown suggestions input ke **neeche**,
+  overlap nahi). Search karne par **poori kundli**: colourful profile cards + barcode/tag tables + CSV.
+- **🧭 Executive Cockpit stock fix** — GV-parked StockDataa rows (master ID · "Apna Payment" naam ·
+  GV channel TL) **teeno signals** se exclude — combined field stock ab sahi (double count khatam).
+- **🔴 War Room detailed** — aaj + MTD ka VC4 / VC20 / VC5+ / chassis / replacement / wrong-VRN breakdown,
+  TL-wise table, exact render timestamp.
+- **👁 Live view instant** — ms-level `exact HH:MM:SS.mmm`, freshness dot, 0.5s–5s speed selector,
+  live data clock (sheet load times + aaj ke tags).
+- **🎉 Naye Wow pages** — 📅 Activity Calendar (GitHub-style heatmap + streak), 🕸️ Team Network
+  (animated TL↔agent constellation), 🚨 Anomaly Radar, 🧾 Agent Report Cards (grades + auto remarks + print).
+- **✨ Aur bhi** — 📈 KPI sparklines, 🟢 live tab heartbeat, 🎨 theme packs (Neon · Glass · 🪔 Diwali · Gold · Mono),
+  🎖️ Level-Up Ceremony, 📅 "Aaj ka din" memories, 💬 chat me charts.
+- Full notes: [WHATS-NEW-v3.11.0.md](WHATS-NEW-v3.11.0.md)
 
 ## ✨ v3.10.0 highlights — WOW ZONE 🎉
 

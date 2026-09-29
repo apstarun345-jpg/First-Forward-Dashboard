@@ -481,13 +481,18 @@
       })
       .filter((r) => r.need >= Math.max(1, Number(opts.minNeed) || dcfg.minNeed))
       .sort((a, b) => a.priority - b.priority || b.need - a.need || b.rate - a.rate);
+    // 🧍 Direct agents (GV: no TL ID + no TL name · FF: TL Name APS) ko stock dispatch nahi jaata.
+    const directRows = rows.filter((r) => r.direct);
+    const pool = ['eligible', 'direct', 'all'].includes(opts.pool) ? opts.pool : 'eligible';
+    const plan = pool === 'direct' ? directRows : pool === 'all' ? rows : rows.filter((r) => !r.direct);
     const totals = {
-      agents: rows.length, tags: sum(rows, (r) => r.dispatchTags), boxes: sum(rows, (r) => r.boxes),
-      critical: rows.filter((r) => r.risk === 'Critical').length, high: rows.filter((r) => r.risk === 'High').length,
-      ff: rows.filter((r) => r.channel === 'First Forward').length, gv: rows.filter((r) => r.channel === 'GV Partner').length,
+      agents: plan.length, tags: sum(plan, (r) => r.dispatchTags), boxes: sum(plan, (r) => r.boxes),
+      critical: plan.filter((r) => r.risk === 'Critical').length, high: plan.filter((r) => r.risk === 'High').length,
+      ff: plan.filter((r) => r.channel === 'First Forward').length, gv: plan.filter((r) => r.channel === 'GV Partner').length,
+      direct: directRows.length, eligible: rows.filter((r) => !r.direct).length, pool,
       horizon, perBox, growth, safety
     };
-    return { rows, totals, cfg: dcfg };
+    return { rows: plan, allRows: rows, directRows, totals, cfg: dcfg };
   }
 
   async function renderDispatchPlan(root, params) {
@@ -498,13 +503,14 @@
     const perBox = Number(params.box) > 0 ? Number(params.box) : dcfg.tagsPerBox;
     const channel = ['all', 'ff', 'gv'].includes(params.channel) ? params.channel : 'all';
     const q = clean(params.q).toLowerCase();
-    const data = await dispatchPlan({ horizon, growth, safety, tagsPerBox: perBox });
-    const rows = data.rows.filter((r) => (channel === 'ff' ? r.channel === 'First Forward' : channel === 'gv' ? r.channel === 'GV Partner' : true) && (!q || [r.name, r.id, r.tlName, r.risk].join(' ').toLowerCase().includes(q)));
+    const pool = ['eligible', 'direct', 'all'].includes(params.pool) ? params.pool : 'eligible';
+    const data = await dispatchPlan({ horizon, growth, safety, tagsPerBox: perBox, pool });
+    const rows = data.rows.filter((r) => (channel === 'ff' ? r.channel === 'First Forward' : channel === 'gv' ? r.channel === 'GV Partner' : true) && (!q || [r.name, r.id, r.tlName, r.risk, r.direct ? 'direct' : ''].join(' ').toLowerCase().includes(q)));
     const t = data.totals;
     const tlGroups = new Map();
-    rows.forEach((r) => { const k = r.tlName || 'Direct / unmapped'; if (!tlGroups.has(k)) tlGroups.set(k, []); tlGroups.get(k).push(r); });
+    rows.forEach((r) => { const k = r.direct ? FF.config.directLabel(r, r.channel === 'GV Partner' ? 'gv' : 'ff') : (r.tlName || 'Direct / unmapped'); if (!tlGroups.has(k)) tlGroups.set(k, []); tlGroups.get(k).push(r); });
     const D_HEADERS = ['Agent', 'Agent ID', 'Channel', 'TL', 'Stock', 'Demand / day', 'Cover days', 'Risk', `Need ${horizon}d`, 'Boxes', 'Dispatch tags', 'Buffer tags', 'Class split'];
-    const toArray = (r) => [r.name, r.id, r.channel, r.tlName, r.stock, Number.isFinite(r.rate) ? Number(r.rate.toFixed(2)) : '', Number.isFinite(r.stockDays) ? Number(r.stockDays.toFixed(1)) : '', r.risk, r.need, r.boxes, r.dispatchTags, r.extra, r.classes.map((c) => `${c.cls} ${c.tags}`).join(' | ')];
+    const toArray = (r) => [r.name, r.id, r.channel, r.direct ? FF.config.directLabel(r, r.channel === 'GV Partner' ? 'gv' : 'ff') : r.tlName, r.stock, Number.isFinite(r.rate) ? Number(r.rate.toFixed(2)) : '', Number.isFinite(r.stockDays) ? Number(r.stockDays.toFixed(1)) : '', r.risk, r.need, r.boxes, r.dispatchTags, r.extra, r.classes.map((c) => `${c.cls} ${c.tags}`).join(' | ')];
     const planText = () => {
       const lines = [`*Dispatch plan · ${horizon} din* (${new Date().toLocaleDateString('en-IN')})`, `${t.agents} agents · ${U.fmt(rows.reduce((a, r) => a + r.dispatchTags, 0))} tags · ${U.fmt(rows.reduce((a, r) => a + r.boxes, 0))} boxes`, ''];
       [...tlGroups.entries()].slice(0, 12).forEach(([tl, list]) => {
@@ -515,12 +521,13 @@
     };
     root.innerHTML = UI.head('🚚', 'Dispatch Planner', `Forecast ke urgent agents ka auto plan — boxes, class split aur printable pick-list. Growth ${growth}% · safety ${safety} din · 1 box = ${perBox} tags`,
       `<button class="btn small" id="dp-csv">⬇ Plan CSV</button><button class="btn small" id="dp-xlsx">⬇ Plan Excel</button><button class="btn small" id="dp-wa">📲 WhatsApp</button><button class="btn small" id="dp-log">📝 Log plan</button>${UI.printButton}`) + `
-      <div class="source-row">${UI.sourceChip('Forecast engine', `${U.fmt(data.rows.length)} agents need stock`)}${UI.sourceChip('Box size', `${U.fmt(perBox)} tags / box`)}${UI.sourceChip('Horizon', `${horizon} din ahead`)}<span class="dim small">Need = projected demand × safety buffer − current stock; boxes upar round hote hain</span></div>
+      <div class="source-row">${UI.sourceChip('Forecast engine', `${U.fmt(data.allRows.length)} agents need stock`)}${UI.sourceChip('🚫 Direct agents', `${U.fmt(data.totals.direct)} dispatch exempt`)}${UI.sourceChip('Box size', `${U.fmt(perBox)} tags / box`)}${UI.sourceChip('Horizon', `${horizon} din ahead`)}<span class="dim small">Need = projected demand × safety buffer − current stock; boxes upar round hote hain</span></div>
       <div class="ins-filters">
         <form id="dp-controls" class="ins-search"><label class="fld"><span>Horizon</span><select class="select" name="horizon">${[7, 15, 30].map((h) => `<option value="${h}" ${h === horizon ? 'selected' : ''}>${h} din</option>`).join('')}</select></label>
         <label class="fld"><span>Growth %</span><input class="input" type="number" name="growth" min="-50" max="150" value="${growth}" style="width:82px"></label>
         <label class="fld"><span>Safety din</span><input class="input" type="number" name="safety" min="0" max="30" value="${safety}" style="width:70px"></label>
         <label class="fld"><span>Box size</span><input class="input" type="number" name="box" min="1" max="500" value="${perBox}" style="width:78px"></label>
+        <label class="fld"><span>Dispatch pool</span><select class="select" data-param="pool"><option value="eligible" ${pool === 'eligible' ? 'selected' : ''}>🚚 Need stock (direct excluded)</option><option value="direct" ${pool === 'direct' ? 'selected' : ''}>🚫 Direct agents (no dispatch)</option><option value="all" ${pool === 'all' ? 'selected' : ''}>All forecast agents</option></select></label>
         <label class="fld"><span>Channel</span><select class="select" data-param="channel"><option value="all">Both</option><option value="ff" ${channel === 'ff' ? 'selected' : ''}>First Forward</option><option value="gv" ${channel === 'gv' ? 'selected' : ''}>GV Partner</option></select></label>
         <input class="input" name="q" value="${esc(params.q || '')}" placeholder="Agent / TL / risk…"><button class="btn primary">Apply</button></form>
       </div>
@@ -535,7 +542,7 @@
       <div class="card"><div class="card-head"><h3>🎯 Auto dispatch plan · priority order</h3><span class="dim small">${U.fmt(rows.length)} agents · ${U.fmt(sum(rows, (r) => r.boxes))} boxes</span><div class="btn-row"><button class="btn small" id="dp-csv-2">⬇ CSV</button><button class="btn small" id="dp-copy">📋 Copy</button></div></div>
         <p class="dim small">Priority: <b>Critical → High → Medium</b>, phir sabse zyada need. Class split current month ke issuance share se nikalta hai (VC4 / VC20 / VC5+), sirf guidance ke liye — total boxes upar hi set hain.</p>
         <div class="table-wrap"><table class="data-table ins-table"><thead><tr><th class="tone-blue">#</th><th class="tone-blue">Agent</th><th class="tone-blue">Channel</th><th class="tone-blue">TL</th><th class="tone-blue num">Stock</th><th class="tone-blue num">Demand / day</th><th class="tone-blue num">Cover</th><th class="tone-blue">Risk</th><th class="tone-blue num">Need ${horizon}d</th><th class="tone-blue num">Boxes</th><th class="tone-blue num">Dispatch tags</th><th class="tone-blue">Class split</th></tr></thead><tbody>
-          ${rows.slice(0, 120).map((r, i) => `<tr class="${r.risk === 'Critical' ? 'dup-row' : ''}"><td>${i + 1}</td><td><b class="agent-link" data-agent360="${esc(r.name)}">${esc(r.name)}</b><small>${esc(r.id || '')}</small></td><td>${statusPillSafe(r.channel)}</td><td>${esc(r.tlName || 'Direct')}</td><td class="num">${U.fmt(r.stock)}</td><td class="num">${Number.isFinite(r.rate) ? r.rate.toFixed(1) : '—'}</td><td class="num">${Number.isFinite(r.stockDays) ? `<span class="badge ${r.stockDays <= 3 ? 'red' : r.stockDays <= 7 ? 'amber' : 'green'}">${r.stockDays.toFixed(1)}</span>` : '—'}</td><td>${statusPillSafe(r.risk)}</td><td class="num"><b>${U.fmt(r.need)}</b></td><td class="num"><b>${U.fmt(r.boxes)}</b></td><td class="num">${U.fmt(r.dispatchTags)}</td><td class="small">${r.classes.length ? esc(r.classes.map((c) => `${c.cls} ${c.tags}`).join(' · ')) : '<span class="dim">class history nahi</span>'}</td></tr>`).join('') || `<tr><td colspan="12">${empty('Dispatch ki zaroorat nahi', 'Is filter par koi agent 7 din me stock-out nahi ho raha.')}</td></tr>`}
+          ${rows.slice(0, 120).map((r, i) => `<tr class="${r.risk === 'Critical' ? 'dup-row' : ''}"><td>${i + 1}</td><td><b class="agent-link" data-agent360="${esc(r.name)}">${esc(r.name)}</b><small>${esc(r.id || '')}</small></td><td>${statusPillSafe(r.channel)}</td><td>${r.direct ? `<b class="direct-chip">🚫 ${esc(FF.config.directLabel(r, r.channel === 'GV Partner' ? 'gv' : 'ff'))}</b>` : esc(r.tlName || 'Direct')}</td><td class="num">${U.fmt(r.stock)}</td><td class="num">${Number.isFinite(r.rate) ? r.rate.toFixed(1) : '—'}</td><td class="num">${Number.isFinite(r.stockDays) ? `<span class="badge ${r.stockDays <= 3 ? 'red' : r.stockDays <= 7 ? 'amber' : 'green'}">${r.stockDays.toFixed(1)}</span>` : '—'}</td><td>${statusPillSafe(r.risk)}</td><td class="num"><b>${U.fmt(r.need)}</b></td><td class="num"><b>${U.fmt(r.boxes)}</b></td><td class="num">${U.fmt(r.dispatchTags)}</td><td class="small">${r.classes.length ? esc(r.classes.map((c) => `${c.cls} ${c.tags}`).join(' · ')) : '<span class="dim">class history nahi</span>'}</td></tr>`).join('') || `<tr><td colspan="12">${empty('Dispatch ki zaroorat nahi', 'Is filter par koi agent 7 din me stock-out nahi ho raha.')}</td></tr>`}
         </tbody>${rows.length ? `<tfoot><tr class="row-total"><td colspan="9">Total · ${U.fmt(rows.length)} agents</td><td class="num">${U.fmt(sum(rows, (r) => r.boxes))}</td><td class="num">${U.fmt(sum(rows, (r) => r.dispatchTags))}</td><td></td></tr></tfoot>` : ''}</table></div>
       </div>
       <div class="card dispatch-slip-card"><div class="card-head"><h3>🖨️ Printable pick-list · TL-wise</h3><span class="dim small">Print karke warehouse ko do</span><button class="btn small" id="dp-print">🖨️ Print</button></div>

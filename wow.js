@@ -59,6 +59,16 @@ FF.pages = FF.pages || {};
   const dayDiff = (a, b) => Math.round((new Date(`${b}T00:00:00`) - new Date(`${a}T00:00:00`)) / 864e5);
 
   /** FF agents-month rows + agentClass rows + GV master rows → agent-wise wow stats. */
+  /** TL display for arena rows — 🧍 direct agent ko uske channel ka direct label milta hai. */
+  function arenaTlLabel(s) {
+    const ch = (s && (s.ffTotal || s.ffCur)) ? 'ff' : (s && (s.gvTotal || s.gvCur) ? 'gv' : '');
+    if (ch && FF.config && FF.config.isDirectAgent) {
+      const row = { tlName: s.tlName, channel: ch === 'gv' ? 'GV Partner' : 'First Forward' };
+      if (FF.config.isDirectAgent(row, ch)) return FF.config.directLabel(row, ch);
+    }
+    return (s && s.tlName) || '—';
+  }
+
   function buildStats(agentsRows, agentClassRows, gvRows, ym) {
     const prevYm = U.prevMonthKey(ym);
     const map = new Map();
@@ -295,6 +305,22 @@ FF.pages = FF.pages || {};
       s.badges.forEach((b) => { if (s.cur > 0) celebrateOnce(`${ymKey}-badge-${s.key}-${b.id}`, `${s.name} ne "${b.name}" badge unlock kiya`, `${b.icon} ${b.desc}`); });
       s.challenges.filter((c) => c.done).forEach((c) => celebrateOnce(`${ymKey}-ch-${s.key}-${c.id}`, `${s.name} ne challenge complete kiya`, `${c.icon} ${c.name}`));
     });
+    // 🎖️ Level-Up Ceremony (v3.11) — jab koi agent naye level par promote ho to fullscreen golden
+    // ceremony + trumpet (ek hi baar per level, localStorage guard se). Top-3 tak hi, spam control.
+    const promotions = [];
+    stats.slice(0, 3).forEach((s) => {
+      const seen = LS.get('ff-levelup', {});
+      const before = seen[s.key];
+      const isUp = before && before !== s.level.name
+        && LEVELS.map((l) => l.name).indexOf(s.level.name) > LEVELS.map((l) => l.name).indexOf(before);
+      if (isUp && s.cur > 0) promotions.push({ name: s.name, icon: s.level.icon, from: before, to: s.level.name, stats: [{ label: 'Is month', value: fmt(s.cur) }, { label: 'XP', value: fmt(s.xp) }, { label: 'Badges', value: fmt(s.badges.length) }] });
+    });
+    if (FF.wowzone && FF.wowzone.celebratePromotion) {
+      stats.slice(0, 50).forEach((s) => FF.wowzone.celebratePromotion(s.name, s.level.icon, s.level.name, [{ label: 'Is month', value: fmt(s.cur) }, { label: 'XP', value: fmt(s.xp) }, { label: 'Badges', value: fmt(s.badges.length) }]));
+    }
+    const promotionBanner = promotions.length ? `<section class="card card-warning"><div class="card-head"><h3>🎖️ Level-up ceremony ready</h3><span class="dim small">Promotion detect hui — dobara dekhne ke liye click karo</span></div>
+      <div class="btn-row" style="padding:0 4px 6px">${promotions.map((p, i) => `<button class="btn small primary" data-levelup="${i}">${p.icon} ${esc(p.name)} — ${esc(p.from)} → ${esc(p.to)}</button>`).join('')}</div>
+      <p class="dim small" style="margin:6px 0 0">Golden ceremony screen + trumpet bajta hai; poori team ke saath celebrate karo 🎉</p></section>` : '';
 
     const badgeIcon = (b) => `<span class="wow-badge-chip" data-tip="<b>${esc(b.name)}</b><br>${esc(b.desc)}">${b.icon}</span>`;
     const levelBar = (s) => `<div class="wow-levelbar"><div class="wow-levelbar-fill" style="width:${(s.level.progress * 100).toFixed(0)}%"></div></div>`;
@@ -308,6 +334,7 @@ FF.pages = FF.pages || {};
         { label: 'Challenges done', value: fmt(challengesDone), foot: `${CHALLENGES.length} monthly challenges × ${fmt(stats.length)} players`, tone: 'g9', icon: '🎯' },
         { label: 'Record-pace agents', value: fmt(cr.recordWatch.length), foot: 'apna best month todne ke pace par', tone: cr.recordWatch.length ? 'g7' : 'g9', icon: '🔮' }
       ]) : ''}
+      ${promotionBanner}
       <section class="card wow-crystal">
         <div class="card-head"><h3>🔮 Crystal Ball · ${esc(U.labelYM(ym, true))}</h3><span class="dim small">Month-end projection + confidence · run-rate based</span></div>
         <div class="wow-crystal-grid">
@@ -331,7 +358,7 @@ FF.pages = FF.pages || {};
         <div class="table-wrap"><table class="data-table ins-table wow-table"><thead><tr><th class="tone-violet">#</th><th class="tone-violet">Agent</th><th class="tone-violet">Level</th><th class="tone-violet num">XP</th><th class="tone-violet">Badges</th><th class="tone-violet num">Is month</th><th class="tone-violet num">Streak</th><th class="tone-violet num">VC4</th><th class="tone-violet">Challenges</th></tr></thead><tbody>
           ${list.slice(0, 100).map((s) => `<tr>
             <td>${s.rank <= 3 ? ['🥇', '🥈', '🥉'][s.rank - 1] : s.rank}</td>
-            <td><b>${esc(s.name)}</b><small>${esc(s.tlName || 'Direct')} · total ${fmt(s.total)}</small></td>
+            <td><b>${esc(s.name)}</b><small>${esc(arenaTlLabel(s))} · total ${fmt(s.total)}</small></td>
             <td><span class="wow-level">${s.level.icon} ${esc(s.level.name)}</span>${levelBar(s)}<small class="dim">${s.level.next ? `${fmt(s.level.intoLevel)}/${fmt(s.level.need)} XP` : 'MAX level 🏆'}</small></td>
             <td class="num"><b>${fmt(s.xp)}</b></td>
             <td>${s.badges.map(badgeIcon).join('') || '<span class="dim">—</span>'}</td>
@@ -349,7 +376,14 @@ FF.pages = FF.pages || {};
 
     const search = U.$('#arena-search', root);
     if (search) search.addEventListener('submit', (e) => { e.preventDefault(); FF.app.updateParams({ q: new FormData(search).get('q') || '' }); });
-    if (UI.bindMetricDetails) UI.bindMetricDetails(body, 'Agent Arena · full data', ['Rank', 'Agent', 'TL', 'Level', 'XP', 'Is month', 'Prev', 'Total', 'Streak', 'Badges'], stats.map((s) => [s.rank, s.name, s.tlName, s.level.name, s.xp, s.cur, s.prev, s.total, s.streakDays, s.badges.map((b) => b.name).join(', ')]), {
+    // 🎖️ ceremony ko dobara dekhne ke liye buttons
+    body.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-levelup]');
+      if (!b || !FF.wowzone) return;
+      const p = promotions[Number(b.dataset.levelup)];
+      if (p) FF.wowzone.levelUpCeremony(p);
+    });
+    if (UI.bindMetricDetails) UI.bindMetricDetails(body, 'Agent Arena · full data', ['Rank', 'Agent', 'TL', 'Level', 'XP', 'Is month', 'Prev', 'Total', 'Streak', 'Badges'], stats.map((s) => [s.rank, s.name, arenaTlLabel(s), s.level.name, s.xp, s.cur, s.prev, s.total, s.streakDays, s.badges.map((b) => b.name).join(', ')]), {
       'Arena players': { title: 'Sab players XP order me', headers: ['Rank', 'Agent', 'Level', 'XP', 'Total tags'], rows: stats.slice().sort((a, b) => b.xp - a.xp).map((s) => [s.rank, s.name, `${s.level.icon} ${s.level.name}`, s.xp, s.total]) },
       'Badges earned': { title: 'Badge-wise winners', headers: ['Badge', 'Players'], rows: BADGES.map((b) => [`${b.icon} ${b.name} — ${b.desc}`, stats.filter((s) => s.badges.some((x) => x.id === b.id)).length]) },
       'Total XP': { title: 'XP leaderboard', headers: ['Rank', 'Agent', 'XP', 'Level', 'Badges'], rows: stats.slice().sort((a, b) => b.xp - a.xp).map((s) => [s.rank, s.name, s.xp, s.level.name, s.badges.length]) },
@@ -434,6 +468,46 @@ FF.pages = FF.pages || {};
         const ffTop = U.topEntries(U.groupSum((agents || []).filter((a) => a.ym === ym && a.channel !== 'GV Partner'), (a) => a.name, (a) => a.n), 5);
         const gvTop = typeof G.agentRollup === 'function' ? (G.agentRollup(ym) || []).slice(0, 5).map((a) => [a.agentName, a.total]) : [];
         const lastGv = gvRows.filter((r) => r.date && U.dateKey(r.date) === today).slice(-6).reverse();
+        // ---- 📊 Detailed breakdown: VC4 / VC20 / VC5+ · chassis · replacement · wrong VRN (FF + GV) ----
+        const ffTodayRows = (daily || []).filter((r) => r.key === today && r.channel !== 'GV Partner');
+        const gvTodayRows = gvRows.filter((r) => r.date && U.dateKey(r.date) === today);
+        const vc4Today = U.sum(ffTodayRows.filter((r) => r.group === 'VC4'), (r) => r.n) + gvTodayRows.filter((r) => r.group === 'VC4').length;
+        const vc20Today = U.sum(ffTodayRows.filter((r) => r.group === 'VC20'), (r) => r.n) + gvTodayRows.filter((r) => r.group === 'VC20').length;
+        const vc5Today = U.sum(ffTodayRows.filter((r) => r.group && r.group !== 'VC4' && r.group !== 'VC20'), (r) => r.n) + gvTodayRows.filter((r) => r.group && r.group !== 'VC4' && r.group !== 'VC20').length;
+        const replToday = U.sum(ffTodayRows.filter((r) => /replacement/i.test(r.type || '')), (r) => r.n) + gvTodayRows.filter((r) => /replacement/i.test(r.status || '')).length;
+        const chassisToday = U.sum(ffTodayRows.filter((r) => /chassis/i.test(r.type || '')), (r) => r.n) + gvTodayRows.filter((r) => /chassis/i.test(r.tagType || '')).length;
+        const wrongToday = U.sum(ffTodayRows.filter((r) => /wrong/i.test(r.vrnType || '')), (r) => r.n);
+        const agentsToday = new Set([...ffTodayRows.map((r) => r.name), ...gvTodayRows.map((r) => r.agentName)]).size;
+        // per-TL breakdown (today)
+        const tlToday = new Map();
+        const bump = (tl, ch, r) => {
+          // 🧍 Direct agents alag group — kisi asli TL ke under nahi.
+          const direct = FF.config.isDirectAgent(r, ch === 'gv' ? 'gv' : 'ff');
+          const key = direct ? FF.config.directLabel(r, ch === 'gv' ? 'gv' : 'ff') : (FF.config.isRealTl(tl) ? tl : 'Unassigned');
+          const o = tlToday.get(key) || { tl: key, ff: 0, gv: 0, vc4: 0, comm: 0, repl: 0, chassis: 0 };
+          if (ch === 'ff') { o.ff += r.n || 0; if (r.group === 'VC4') o.vc4 += r.n || 0; else o.comm += r.n || 0; if (/replacement/i.test(r.type || '')) o.repl += r.n || 0; if (/chassis/i.test(r.type || '')) o.chassis += r.n || 0; }
+          else { o.gv += 1; if (r.group === 'VC4') o.vc4 += 1; else o.comm += 1; if (/replacement/i.test(r.status || '')) o.repl += 1; if (/chassis/i.test(r.tagType || '')) o.chassis += 1; }
+          tlToday.set(key, o);
+        };
+        ffTodayRows.forEach((r) => bump(r.tlName, 'ff', r));
+        gvTodayRows.forEach((r) => bump(r.tlName, 'gv', r));
+        const tlTable = [...tlToday.values()].sort((a, b) => (b.ff + b.gv) - (a.ff + a.gv)).slice(0, 12);
+        // month-to-date detail too (VC4/VC20/VC5+, chassis, replacement, wrong VRN)
+        const ffMonthRows = (daily || []).filter((r) => r.ym === ym && r.channel !== 'GV Partner');
+        const gvMonthRows = gvRows.filter((r) => r.ym === ym);
+        const mtd = {
+          vc4: U.sum(ffMonthRows.filter((r) => r.group === 'VC4'), (r) => r.n) + gvMonthRows.filter((r) => r.group === 'VC4').length,
+          vc20: U.sum(ffMonthRows.filter((r) => r.group === 'VC20'), (r) => r.n) + gvMonthRows.filter((r) => r.group === 'VC20').length,
+          vc5p: U.sum(ffMonthRows.filter((r) => r.group && r.group !== 'VC4' && r.group !== 'VC20'), (r) => r.n) + gvMonthRows.filter((r) => r.group && r.group !== 'VC4' && r.group !== 'VC20').length,
+          repl: U.sum(ffMonthRows.filter((r) => /replacement/i.test(r.type || '')), (r) => r.n) + gvMonthRows.filter((r) => /replacement/i.test(r.status || '')).length,
+          chassis: U.sum(ffMonthRows.filter((r) => /chassis/i.test(r.type || '')), (r) => r.n) + gvMonthRows.filter((r) => /chassis/i.test(r.tagType || '')).length,
+          wrong: U.sum(ffMonthRows.filter((r) => /wrong/i.test(r.vrnType || '')), (r) => r.n)
+        };
+        const liveStamp = new Date().toLocaleTimeString('en-IN', { hour12: false });
+        const dataStamps = [
+          S.loadedAt ? `FF data ${new Date(S.loadedAt).toLocaleTimeString('en-IN', { hour12: false })}` : 'FF data —',
+          G.loadedAt ? `GV data ${new Date(G.loadedAt).toLocaleTimeString('en-IN', { hour12: false })}` : 'GV data —'
+        ].join(' · ');
         const daysIn = U.daysInMonth(ym), dayNow = new Date().getDate();
         const targetToday = Math.ceil((ffProj + gvProj) / daysIn);
         const combined = ffToday + gvToday;
@@ -475,10 +549,45 @@ FF.pages = FF.pages || {};
             </div>
             <div class="war-panel">
               <h3>⚡ Live ticker · GV latest</h3>
-              <div class="war-ticker">${lastGv.map((r) => `<div class="war-tick"><span class="war-tick-dot"></span><b>${esc(r.agentName || r.agentId || 'Agent')}</b><small>${r.tlName || ''} · ${new Date(r.date).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</small></div>`).join('') || '<p class="war-note">Aaj abhi koi GV activity nahi.</p>'}</div>
+              <div class="war-ticker">${lastGv.map((r) => `<div class="war-tick"><span class="war-tick-dot"></span><b>${esc(r.agentName || r.agentId || 'Agent')}</b><small>${FF.config.isDirectAgent(r, 'gv') ? FF.config.directLabel(r, 'gv') : (r.tlName || '')} · ${new Date(r.date).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</small></div>`).join('') || '<p class="war-note">Aaj abhi koi GV activity nahi.</p>'}</div>
             </div>
           </div>
-          <div class="war-foot">Auto-refresh har 30 sec · data: EIR + GV Master · <a href="#/arena">🎮 Arena</a> · <a href="#/fame">🏆 Fame</a></div>`;
+          <div class="war-detail">
+            <div class="war-detail-card">
+              <h3>📊 Aaj ka detailed breakdown · ${esc(new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }))}</h3>
+              <div class="war-kv">
+                <div class="issuance"><small>Issuance</small><b>${fmt(Math.max(0, combined - replToday))}</b></div>
+                <div class="repl"><small>🔁 Replacement</small><b>${fmt(replToday)}</b></div>
+                <div class="vc4"><small>🚗 VC4 tags</small><b>${fmt(vc4Today)}</b></div>
+                <div class="vc20"><small>🚚 VC20 tags</small><b>${fmt(vc20Today)}</b></div>
+                <div class="vc5p"><small>🚛 VC5+ tags</small><b>${fmt(vc5Today)}</b></div>
+                <div class="chassis"><small>🔧 Chassis</small><b>${fmt(chassisToday)}</b></div>
+                <div class="wrong"><small>🧩 Wrong VRN</small><b>${fmt(wrongToday)}</b></div>
+                <div class="agents"><small>🧑‍💼 Active agents</small><b>${fmt(agentsToday)}</b></div>
+              </div>
+              <p class="war-note">Total aaj ${fmt(combined)} tags (FF ${fmt(ffToday)} · GV ${fmt(gvToday)}) · VC4 share ${combined ? (((vc4Today / combined) * 100).toFixed(0)) : 0}% · wrong-VRN ${combined ? (((wrongToday / combined) * 100).toFixed(2)) : 0}%</p>
+            </div>
+            <div class="war-detail-card">
+              <h3>🗓️ Month-to-date detail · ${esc(U.labelYM(ym))}</h3>
+              <div class="war-kv">
+                <div class="vc4"><small>🚗 VC4 (payable)</small><b>${fmt(mtd.vc4)}</b></div>
+                <div class="vc20"><small>🚚 VC20</small><b>${fmt(mtd.vc20)}</b></div>
+                <div class="vc5p"><small>🚛 VC5+</small><b>${fmt(mtd.vc5p)}</b></div>
+                <div class="repl"><small>🔁 Replacement</small><b>${fmt(mtd.repl)}</b></div>
+                <div class="chassis"><small>🔧 Chassis</small><b>${fmt(mtd.chassis)}</b></div>
+                <div class="wrong"><small>🧩 Wrong VRN (FF)</small><b>${fmt(mtd.wrong)}</b></div>
+              </div>
+              <p class="war-note">Commercial = VC20 + VC5+ = ${fmt(mtd.vc20 + mtd.vc5p)} · projected month-end ${fmt(Math.round(ffProj + gvProj))} · day ${dayNow}/${daysIn}</p>
+            </div>
+            <div class="war-detail-card" style="grid-column:1/-1">
+              <h3>👥 TL-wise aaj ka detail</h3>
+              ${tlTable.length ? `<table class="war-table"><thead><tr><th>TL</th><th class="num">FF</th><th class="num">GV</th><th class="num">VC4</th><th class="num">Comm.</th><th class="num">Repl.</th><th class="num">Chassis</th><th class="num">Total</th></tr></thead><tbody>
+                ${tlTable.map((t) => `<tr><td><b>${esc(t.tl)}</b></td><td class="num">${fmt(t.ff)}</td><td class="num">${fmt(t.gv)}</td><td class="num">${fmt(t.vc4)}</td><td class="num">${fmt(t.comm)}</td><td class="num">${fmt(t.repl)}</td><td class="num">${fmt(t.chassis)}</td><td class="num"><b>${fmt(t.ff + t.gv)}</b></td></tr>`).join('')}
+              </tbody></table>` : '<p class="war-note">Aaj abhi kisi TL ki activity nahi aayi.</p>'}
+              <p class="war-note">Aaj ke tags channel + class + type ke hisaab se — TL-wise dispatch aur quality review ke liye.</p>
+            </div>
+          </div>
+          <div class="war-foot">Auto-refresh har 30 sec · last render <span class="live-instant">${esc(liveStamp)}</span> · ${esc(dataStamps)} · data: EIR + GV Master · <a href="#/arena">🎮 Arena</a> · <a href="#/fame">🏆 Fame</a> · <a href="#/activity">📅 Calendar</a></div>`;
         // count-up animation
         body.querySelectorAll('[data-count]').forEach((el) => {
           const target = Number(el.dataset.count) || 0, t0 = Date.now(), dur = 900;

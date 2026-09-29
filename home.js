@@ -52,6 +52,7 @@ FF.pages = FF.pages || {};
           <a class="btn" href="#/tagIssued">🏷️ Tag Issued →</a>
         </div>
       </div>
+      <div id="home-search"></div>
       <div id="home-body">${U.spinner('Highlights load ho rahe hain — GV & FF charts…')}</div>`;
 
     const body = U.$('#home-body', root);
@@ -228,8 +229,8 @@ FF.pages = FF.pages || {};
       if (grower) badges.push(badge('🚀', 'Fastest Grower', grower.name, `+${Math.round(grower.g)}% (${U.fmt(grower.cur)} tags)`, '#/trend'));
       // 5) Top TL (FF + GV combined issuance)
       const tlMap = new Map();
-      for (const a of agents) if (a.channel === 'First Forward' && a.ym === curKey && a.tlName) tlMap.set(a.tlName, (tlMap.get(a.tlName) || 0) + a.n);
-      for (const a of gvRoll) if (a.tlName && a.tlName !== 'Direct') tlMap.set(a.tlName, (tlMap.get(a.tlName) || 0) + a.total);
+      for (const a of agents) if (a.channel === 'First Forward' && a.ym === curKey && a.tlName && FF.config.isRealTl(a.tlName)) tlMap.set(a.tlName, (tlMap.get(a.tlName) || 0) + a.n);
+      for (const a of gvRoll) if (a.tlName && FF.config.isRealTl(a.tlName) && a.directAgent !== true) tlMap.set(a.tlName, (tlMap.get(a.tlName) || 0) + a.total);
       const topTl = [...tlMap.entries()].sort((a, b) => b[1] - a[1])[0];
       if (topTl) badges.push(badge('🧑‍💼', 'Top TL', topTl[0], `${U.fmt(topTl[1])} tags team`, '#/targets?tab=tl'));
       // 6) Target achievers — settings.targets me se current month
@@ -278,12 +279,25 @@ FF.pages = FF.pages || {};
       }), ''));
     }
 
+    // 📅 Aaj ka din — pichhle mahine / saal ki memories (wowzone)
+    if (FF.wowzone) {
+      try {
+        const memories = await FF.wowzone.memoryLane();
+        const memCard = FF.wowzone.memoryLaneCard(memories);
+        if (memCard) cards.push(memCard);
+      } catch { /* memory lane optional */ }
+    }
+    if (!root.isConnected) return;
+
     if (!cards.length) {
       body.innerHTML = `<div class="empty-state">Data load nahi hua — ↻ Refresh dabao</div>`;
     } else {
       body.innerHTML = `${cards.join('')}<p class="foot-note">Highlights — GV & FF charts ke dwara · Data ${U.timeLabel(S.loadedAt||G.loadedAt||Date.now())} · Background me all sheets preload ho rahe hain for instant open</p>`;
     }
     C.mount(body);
+    // 🔎 Master search panel — naam, TL, ID, GV ID, barcode, tag ID sab kuch yahin se
+    const searchMount = U.$('#home-search', root);
+    if (searchMount && FF.masterSearch) { try { FF.masterSearch.mountHome(searchMount); } catch { /* search optional */ } }
     updateSync();
     // cleanup on page leave
     const obs = new MutationObserver(() => { if (!document.body.contains(root)) { clearInterval(syncPoll); obs.disconnect(); } });

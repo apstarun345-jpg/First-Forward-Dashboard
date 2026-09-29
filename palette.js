@@ -219,7 +219,31 @@ window.FF = window.FF || {};
       const seen = {};
       return scored.map((x) => x.it).filter((it) => { seen[it.group] = (seen[it.group] || 0) + 1; return seen[it.group] <= (caps[it.group] || 6); });
     }
-    return [...askItem, ...calcItem, ...scored.slice(0, 24).map((x) => x.it)];
+    // 🔎 Master search (v3.11) — barcode / tag ID / GV ID / kisi bhi naam ki POORI kundli.
+    const master = nq ? masterItems(q) : [];
+    return [...master, ...askItem, ...calcItem, ...scored.slice(0, 24).map((x) => x.it)];
+  }
+
+  /** Master search (FF + GV barcode register) ke results — Ctrl+K se seedha kundli panel. */
+  function masterItems(q) {
+    const out = [];
+    const MS = FF.masterSearch;
+    if (!MS) return out;
+    const val = String(q || '').trim();
+    if (val.length < 2) return out;
+    try {
+      const res = MS.search(val);
+      (res.tags || []).slice(0, 4).forEach((t) => {
+        const f = t.ff[0] || {}, g = t.gv[0] || {};
+        out.push({ group: '🔎 Master search', icon: '🏷️', label: t.key, sub: [f.agentName ? `FF ${f.agentName}` : '', g.agentName ? `GV ${g.agentName}` : '', f.cls || g.cls || ''].filter(Boolean).join(' · ') || 'barcode / tag', master: t.key });
+      });
+      (res.ids || []).slice(0, 3).forEach((v) => out.push({ group: '🔎 Master search', icon: '🆔', label: v.id, sub: `${v.name || ''}${v.tl ? ` · TL ${v.tl}` : ''}`.trim(), master: v.id }));
+      const people = (res.people || []).slice(0, 3);
+      people.forEach((person) => out.push({ group: '🔎 Master search', icon: '🧑‍💼', label: person.name, sub: `${[...person.tlSet].slice(0, 1).join('') || 'Direct'} · kundli + tags kholo`, master: person.name }));
+      // Always offer the full-search escape hatch
+      out.push({ group: '🔎 Master search', icon: '🔎', label: `“${val}” ki poori kundli kholo`, sub: 'Barcode · tag ID · agent · TL · GV ID — sab sections ek panel me', master: val });
+    } catch { /* master search optional */ }
+    return out.slice(0, 8);
   }
 
   function draw(q) {
@@ -252,6 +276,7 @@ window.FF = window.FF || {};
     if (it.calc !== undefined && it.calc !== null) { U.copyText(String(it.calc)).then(() => U.toast(`Copied: ${it.calc}`, 'ok')).catch(() => {}); return; }
     if (it.answer) { U.copyText(String(it.answer)).then(() => U.toast('📋 Jawab copy ho gaya', 'ok')).catch(() => {}); return; }
     if (it.notif) { if (FF.liveView && FF.liveView.openNotification) FF.liveView.openNotification(it.notif); return; }
+    if (it.master !== undefined) { if (FF.masterSearch) FF.masterSearch.openPanel(it.master); return; }
     if (location.hash === it.href) { FF.app.renderCurrent && FF.app.renderCurrent(); } else location.hash = it.href;
   }
 
@@ -259,9 +284,9 @@ window.FF = window.FF || {};
     if (backdrop) return;
     backdrop = U.h(`<div class="palette-backdrop" id="palette-backdrop" hidden>
       <div class="palette-box" role="dialog" aria-label="Global search">
-        <div class="palette-input-row"><span class="palette-search-ico">🔍</span><input class="palette-input" id="palette-input" placeholder="Agent, TL, page, sheet… (Ctrl / ⌘ + K)" autocomplete="off" spellcheck="false"><kbd class="palette-kbd">Esc</kbd></div>
+        <div class="palette-input-row"><span class="palette-search-ico">🔍</span><input class="palette-input" id="palette-input" placeholder="Agent, TL, barcode, tag ID, GV ID, page… (Ctrl / ⌘ + K)" autocomplete="off" spellcheck="false"><kbd class="palette-kbd">Esc</kbd></div>
         <div class="palette-list" id="palette-list"></div>
-        <div class="palette-foot"><span><kbd>↑↓</kbd> move · <kbd>Enter</kbd> open</span><span>Pages · Sheets · Agents · TLs · Dates · calc</span></div>
+        <div class="palette-foot"><span><kbd>↑↓</kbd> move · <kbd>Enter</kbd> open</span><span>Pages · Agents · TLs · Barcode / Tag ID · Dates · calc</span></div>
       </div></div>`);
     document.body.appendChild(backdrop);
     input = U.$('#palette-input', backdrop);

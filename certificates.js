@@ -6,6 +6,15 @@ window.FF = window.FF || {};
 (function (FF) {
   'use strict';
 
+  // 🧍 Direct-agent rule helpers — browser me FF.config ka shared rule, warna safe fallback
+  // (FF: TL Name APS · GV: TL ID + TL Name dono blank).
+  const cfgCall = (name, args, fallback) => {
+    const f = FF.config && FF.config[name];
+    return typeof f === 'function' ? f.apply(FF.config, args) : fallback;
+  };
+  const isRealTl = (n) => cfgCall('isRealTl', [n], !!String(n == null ? '' : n).trim());
+  const directLabel = (a, ch) => cfgCall('directLabel', [a || {}, ch], ch === 'gv' ? 'Direct Agent (no TL)' : 'Direct Agent (APS)');
+
   const RANKS = [
     { medal: '🥇', title: 'CHAMPION' },
     { medal: '🥈', title: 'RUNNER-UP' },
@@ -21,7 +30,7 @@ window.FF = window.FF || {};
       title: (RANKS[i] || { title: `RANK ${i + 1}` }).title,
       name: String(r.name || '—'),
       id: String(r.id || ''),
-      tl: String(r.tl || r.tlName || 'Direct'),
+      tl: isRealTl(r.tl || r.tlName) ? String(r.tl || r.tlName) : directLabel({ tlName: r.tl || r.tlName }, r.channel === 'GV Partner' ? 'gv' : 'ff'),
       value: val(r)
     }));
   }
@@ -42,7 +51,7 @@ window.FF = window.FF || {};
           ne <b>${escHtml(o.monthLabel || '')}</b> me <b>${escHtml(o.category || 'Top Issuance')}</b> category me<br>
           <b class="cert-count">${Number(o.value || 0).toLocaleString('en-IN')}</b> FASTag issue karke</p>
         <div class="cert-rank"><span class="cert-medal">${rank.medal}</span> RANK #${o.rank} — ${escHtml(rank.title)}</div>
-        <p class="cert-line dim">Reporting TL: <b>${escHtml(o.tl || 'Direct')}</b></p>
+        <p class="cert-line dim">Reporting TL: <b>${escHtml(o.tl || directLabel({}, 'ff'))}</b></p>
         <div class="cert-foot">
           <span>Issued: ${new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
           <span class="cert-seal">🏆</span>

@@ -52,7 +52,8 @@ FF.pages = FF.pages || {};
     const stockTotal = U.sum(stockClass, (r) => r.n);
     const stockVc4 = U.sum(stockClass.filter((r) => r.group === 'VC4'), (r) => r.n);
     const stockComm = stockTotal - stockVc4;
-    const topTlStock = stockTl.filter((r) => r.tlName !== 'Unassigned');
+    const directStock = stockTl.filter((r) => r.directAgent === true || FF.config.isDirectAgent(r, 'gv'));
+    const topTlStock = stockTl.filter((r) => r.tlName !== 'Unassigned' && r.directAgent !== true && FF.config.isRealTl(r.tlName));
     const perDay = curS.avgPerDay || 0;
 
     // report-derived
@@ -69,7 +70,7 @@ FF.pages = FF.pages || {};
       kpi('g5', 'Avg / Day · MTD', '📅', U.fmt(curS.avgPerDay), `${lm}: ${U.fmt(lastS.avgPerDay)} / day · ${curS.activeDays} active days`),
       kpi('g6', `Projected Month-End · ${cm}`, '🎯', U.fmt(curS.projected), `${U.deltaHtml(U.growth(curS.projected, lastS.total))} vs ${lm} full (${U.fmt(lastS.total)})`),
       kpi('g7', 'Replacements · MTD', '🔁', U.fmt(curS.replacement), `${U.fmtPct(U.pctOf(curS.replacement, curS.total))} of total · VRN ${U.fmt(curS.vrn)} · Chassis ${U.fmt(curS.chassis)}`),
-      kpi('g8', 'Active Agents · MTD', '🧑‍💼', U.fmt(curS.activeAgents), `${U.fmt(curS.activeTls)} TLs active · ${lastS.activeAgents} last month`),
+      kpi('g8', 'Active Agents · MTD', '🧑‍💼', U.fmt(curS.activeAgents), `${U.fmt(curS.activeTls)} TLs active · 🚫 <b>${U.fmt(curS.directAgents || 0)}</b> direct (no TL) · ${lastS.activeAgents} last month`),
       kpi('g9', 'GV Stock in Field', '📦', U.fmt(stockTotal), `VC4 <b>${U.fmt(stockVc4)}</b> · Commercial <b>${U.fmt(stockComm)}</b>${perDay ? ` · ${U.fmt(stockTotal / perDay)} days cover` : ''}`),
       kpi('g10', 'High Dispatch Priority', '🔺', report.length ? U.fmt(highPrio) : '—', report.length ? `GV REPORT agents jinko dispatch chahiye · Inactive <b>${U.fmt(inactive)}</b>` : 'GV REPORT load nahi hua'),
       kpi('g11', 'Commission · MTD', '💰', U.fmt(curS.commission), `Amount <b>${U.fmt(curS.amount)}</b> · class sum: VC4 <b>₹${U.fmt(curS.commissionVc4 || 0)}</b> · VC20 <b>₹${U.fmt(curS.commissionVc20 || 0)}</b> · VC5+ <b>₹${U.fmt(curS.commissionVc5p || 0)}</b>`),
@@ -102,9 +103,13 @@ FF.pages = FF.pages || {};
     const tlsCur = G.tlRollup(cur), tlsLast = new Map(G.tlRollup(last).map((t) => [t.tlName, t.total]));
     const agentsCur = G.agentRollup(cur), agentsLast = new Map(G.agentRollup(last).map((a) => [a.agentId, a.total]));
     const topTls = tlsCur.slice(0, topN).map((t, i) => ({ label: t.tlName, sub: `${t.agentCount} agents`, value: t.total, compare: tlsLast.get(t.tlName) || 0, color: C.PALETTE[i % C.PALETTE.length], attr: `data-link="#/gvPerformance?tl=${encodeURIComponent(t.tlName)}"` }));
-    const topAgents = agentsCur.slice(0, topN).map((a, i) => ({ label: a.agentName, sub: a.tlName, value: a.total, compare: agentsLast.get(a.agentId) || 0, color: C.PALETTE[(i + 2) % C.PALETTE.length], attr: `data-link="#/gvPerformance?q=${encodeURIComponent(a.agentName)}"` }));
+    if (curS.directAgents) topTls.push({ label: '🚫 Direct Agents (no TL)', sub: `${curS.directAgents} agents · TL ID + Name blank`, value: G.directRollup(cur).reduce((n, r) => n + r.total, 0), compare: G.directRollup(last).reduce((n, r) => n + r.total, 0), color: '#f59e0b', attr: 'data-link="#/directAgents"' });
+    const topAgents = agentsCur.slice(0, topN).map((a, i) => ({ label: a.agentName, sub: a.directAgent === true ? '🚫 Direct (no TL)' : a.tlName, value: a.total, compare: agentsLast.get(a.agentId) || 0, color: C.PALETTE[(i + 2) % C.PALETTE.length], attr: `data-link="#/gvPerformance?q=${encodeURIComponent(a.agentName)}"` }));
     const stockByClass = C.donut({ items: stockClass.map((r) => ({ label: r.cls, value: r.n })), subtitle: 'in stock' });
-    const stockTlBars = C.hbars({ items: topTlStock.slice(0, topN).map((t, i) => ({ label: t.tlName, value: t.n, color: C.PALETTE[(i + 4) % C.PALETTE.length], attr: `data-link="#/gvStock?tl=${encodeURIComponent(t.tlName)}"`, })), valueLabel: 'Stock' });
+    const stockTlBars = C.hbars({ items: [
+      ...topTlStock.slice(0, topN).map((t, i) => ({ label: t.tlName, value: t.n, color: C.PALETTE[(i + 4) % C.PALETTE.length], attr: `data-link="#/gvStock?tl=${encodeURIComponent(t.tlName)}"` })),
+      ...(directStock.length ? [{ label: '🚫 Direct Agents (no TL)', value: U.sum(directStock, (t) => t.n), color: '#f59e0b', attr: 'data-link="#/directAgents"' }] : [])
+    ], valueLabel: 'Stock' });
 
     // recent 14 days
     const recent = [];
@@ -138,7 +143,7 @@ FF.pages = FF.pages || {};
         .map((r) => {
           const daily = (r.curVc4 || 0) / Math.max(1, r.curDays || 0);
           const cover = daily > 0 && r.stockVc4 != null ? r.stockVc4 / daily : null;
-          const direct = FF.config.isDirectAgent(r);
+          const direct = FF.config.isDirectAgent(r, 'gv');
           const given = Number(r.suggestedDispatch) > 0 ? Number(r.suggestedDispatch) : null;
           const calculated = given != null ? given : Math.max(0, Math.ceil(daily * days - (r.stockVc4 || 0)));
           return { r, sug: direct ? 0 : calculated, cover, daily, direct };
@@ -171,13 +176,13 @@ FF.pages = FF.pages || {};
       </div>
       <div class="grid g-3">
         ${card('📦 GV Stock by Class <span class="dim">(Tag Assignment)</span>', stockByClass, { right: `<a class="btn small" href="#/gvStock">GV stock →</a>` })}
-        ${card('🏬 Top TLs by GV Stock', stockTlBars)}
+        ${card('🏬 Top TLs by GV Stock <span class="dim">(+ 🚫 direct agents)</span>', stockTlBars)}
         ${card('📆 Weekday Pattern <span class="dim">(avg/day, last 8 weeks)</span>', weekdayChart)}
       </div>
       <div class="grid g-2">
         ${card('🕒 Last 14 Days', tableHtml(['Date', 'Total', 'VC4', 'Comm', 'Repl', 'Agents', 'vs prev'], recentRows, 1))}
         ${card('🔺 Dispatch / Status Watch <span class="dim">(GV REPORT)</span>', tableHtml(['Agent', 'TL', 'Stock', 'MTD', 'Priority', 'Status'],
-          report.slice().sort((a, b) => (b.suggestedDispatch || 0) - (a.suggestedDispatch || 0)).slice(0, 12).map((r) => `<tr data-link="#/gvPerformance?q=${encodeURIComponent(r.agentName)}"><td><b>${esc(r.agentName)}</b></td><td>${esc(r.tlName)}</td><td class="num">${U.fmt(r.stockTotal)}</td><td class="num">${U.fmt(r.curTotal)}</td><td>${esc(r.priority || '—')}</td><td>${esc(r.agentStatus || '—')}</td></tr>`), 2))}
+          report.slice().sort((a, b) => (b.suggestedDispatch || 0) - (a.suggestedDispatch || 0)).slice(0, 12).map((r) => `<tr data-link="#/gvPerformance?q=${encodeURIComponent(r.agentName)}"><td><b>${esc(r.agentName)}</b></td><td>${FF.config.isDirectAgent(r, 'gv') ? '<b>Direct Agent</b>' : esc(r.tlName)}</td><td class="num">${U.fmt(r.stockTotal)}</td><td class="num">${U.fmt(r.curTotal)}</td><td>${esc(r.priority || '—')}</td><td>${esc(r.agentStatus || '—')}</td></tr>`), 2))}
       </div>
       <p class="foot-note">Source: GV Partner sheet — GV Master (issuance) · Tag Assignment (stock) · GV REPORT (performance) · ${stockAgent.length} agents in stock · Loaded ${U.timeLabel(G.loadedAt || D.lastLoadAt)} · Data sirf ↻ ya browser refresh par update hota hai</p>`;
     C.mount(body);
@@ -191,7 +196,7 @@ FF.pages = FF.pages || {};
     class: { label: 'Class (VC4 / VC20 / VC5+)', fn: (r) => r.group, order: ['VC4', 'VC20', 'VC5+'] },
     status: { label: 'Issuance vs Replacement', fn: (r) => (/replacement/i.test(r.status) ? 'Replacement' : 'Issuance'), order: ['Issuance', 'Replacement'] },
     vrn: { label: 'VRN vs Chassis', fn: (r) => (/chassis/i.test(r.tagType) ? 'Chassis' : 'VRN'), order: ['VRN', 'Chassis'] },
-    tl: { label: 'TL', fn: (r) => r.tlName || 'Direct' },
+    tl: { label: 'TL', fn: (r) => (FF.config.isDirectAgent(r, 'gv') ? FF.config.directLabel(r, 'gv') : (r.tlName || 'Unassigned')) },
     agent: { label: 'Agent', fn: (r) => r.agentName }
   };
   const MODES = [['daily', '📅 Daily'], ['weekly', '🗓️ Weekly'], ['monthly', '📆 Monthly'], ['compare', '⚖️ Last vs Current']];
@@ -334,7 +339,7 @@ FF.pages = FF.pages || {};
       </div></div>`;
     const findInput = U.$('#gvs-find', controls);
     const findItems = () => [...people.tls.slice().sort((a, b) => b.n - a.n).map((t) => ({ kind: 'tl', kindLabel: 'GV TL', label: t.name, sub: `${U.fmtShort(t.n)} tags stock`, value: t.name })),
-      ...people.agents.map((a) => ({ kind: 'agent', kindLabel: 'GV Agent', label: a.name, sub: `${a.tl || ''}${a.id ? ` · ${a.id}` : ''}`, keywords: `${a.id || ''} ${a.tl || ''}`, value: a.name, id: a.id }))];
+      ...people.agents.map((a) => ({ kind: 'agent', kindLabel: a.direct ? 'GV Direct Agent' : 'GV Agent', label: a.name, sub: `${a.direct ? 'Direct Agent (no TL)' : (a.tl || '')}${a.id ? ` · ${a.id}` : ''}`, keywords: `${a.id || ''} ${a.tl || ''} direct`, value: a.name, id: a.id, direct: a.direct }))];
     const pickStockResult = (it) => {
       if (it.value && FF.notifications && FF.notifications.logSearch) FF.notifications.logSearch('GV Stock Find', it.value);
       stockSel = it.kind === 'tl' ? { tl: it.value, agent: '' } : { agent: it.value, tl: '' };
@@ -358,10 +363,10 @@ FF.pages = FF.pages || {};
     const kpis = [
       kpi('g9', 'GV Stock in Field', '📦', U.fmt(total), `VC4 <b>${U.fmt(vc4)}</b> (${U.fmtPct(U.pctOf(vc4, total), 0)}) · Commercial <b>${U.fmt(comm)}</b>`),
       kpi('g12', 'Stock Days Cover', '⏳', perDay ? U.fmt(total / perDay) : '—', perDay ? `GV avg ${U.fmt(perDay)} tags/day par` : 'Issuance data load nahi hua'),
-      kpi('g10', 'TLs with Stock', '👥', U.fmt(byTl.filter((r) => r.tlName !== 'Unassigned').length), `Unassigned: <b>${U.fmt((byTl.find((r) => r.tlName === 'Unassigned') || {}).n || 0)}</b>`),
+      kpi('g10', 'TLs with Stock', '👥', U.fmt(byTl.filter((r) => FF.config.isRealTl(r.tlName) && r.directAgent !== true).length), `🚫 Direct agents (no TL): <b>${U.fmt((byTl.filter((r) => !FF.config.isRealTl(r.tlName) || r.directAgent === true).reduce((a, r) => a + r.n, 0)))}</b> tags`),
       kpi('g8', 'Agents with Stock', '🧑‍💼', U.fmt(byAgent.length), `Avg <b>${U.fmt(byAgent.length ? total / byAgent.length : 0)}</b> tags / agent`),
       kpi('g3', 'Biggest Class', '🚗', classes.length ? classes.slice().sort((a, b) => (byClass.find((x) => x.cls === b).n) - (byClass.find((x) => x.cls === a).n))[0] : '—', classes.slice().sort((a, b) => (byClass.find((x) => x.cls === b).n) - (byClass.find((x) => x.cls === a).n)).slice(0, 3).map((c) => `${c} <b>${U.fmt(byClass.find((x) => x.cls === c).n)}</b>`).join(' · ')),
-      kpi('g11', 'Top TL by Stock', '🏬', (byTl.find((r) => r.tlName !== 'Unassigned') || {}).tlName || '—', (byTl.find((r) => r.tlName !== 'Unassigned') || {}).n ? `${U.fmt(byTl.find((r) => r.tlName !== 'Unassigned').n)} tags` : '')
+      kpi('g11', 'Top TL by Stock', '🏬', (byTl.find((r) => FF.config.isRealTl(r.tlName) && r.directAgent !== true) || {}).tlName || '—', (byTl.find((r) => FF.config.isRealTl(r.tlName) && r.directAgent !== true) || {}).n ? `${U.fmt(byTl.find((r) => FF.config.isRealTl(r.tlName) && r.directAgent !== true).n)} tags` : '')
     ];
 
     let viewHtml = '';
@@ -373,12 +378,12 @@ FF.pages = FF.pages || {};
       ${card('🏬 TL-wise GV Stock', tableHtml(['#', 'TL', 'Stock', 'VC4', 'Commercial', 'Share', ''], byTl.slice(0, 60).map((t, i) => {
         const cls = byTlClass.filter((r) => norm(r.tlName) === norm(t.tlName));
         const tVc4 = U.sum(cls.filter((r) => r.group === 'VC4'), (r) => r.n), tComm = U.sum(cls, (r) => r.n) - tVc4;
-        return `<tr><td class="dim">${i + 1}</td><td><b>${esc(t.tlName)}</b></td><td class="num"><b>${U.fmt(t.n)}</b></td><td class="num">${U.fmt(tVc4)}</td><td class="num">${U.fmt(tComm)}</td><td class="num">${U.fmtPct(U.pctOf(t.n, total), 0)}</td><td><button class="btn small" data-link="#/gvStock?tl=${encodeURIComponent(t.tlName)}&view=tl">View →</button></td></tr>`;
+        return `<tr><td class="dim">${i + 1}</td><td><b>${!FF.config.isRealTl(t.tlName) || t.directAgent === true ? '🚫 Direct Agents (no TL)' : esc(t.tlName)}</b></td><td class="num"><b>${U.fmt(t.n)}</b></td><td class="num">${U.fmt(tVc4)}</td><td class="num">${U.fmt(tComm)}</td><td class="num">${U.fmtPct(U.pctOf(t.n, total), 0)}</td><td><button class="btn small" data-link="#/gvStock?tl=${encodeURIComponent(t.tlName)}&view=tl">View →</button></td></tr>`;
       }), 2), { right: exportBtn('gv-stock-tl') })}
       ${card('🧑‍💼 Agent-wise GV Stock <span class="dim">(top 60)</span>', tableHtml(['#', 'Agent', 'TL', 'Stock', 'VC4', 'Comm'], byAgent.slice(0, 60).map((a, i) => {
         const cls = byAgentClass.filter((r) => norm(r.agentName) === norm(a.agentName));
         const aVc4 = U.sum(cls.filter((r) => r.group === 'VC4'), (r) => r.n);
-        return `<tr><td class="dim">${i + 1}</td><td><b>${esc(a.agentName)}</b> <small class="dim">${esc(a.agentId)}</small></td><td>${esc(a.tlName || '—')}</td><td class="num"><b>${U.fmt(a.n)}</b></td><td class="num">${U.fmt(aVc4)}</td><td class="num">${U.fmt(a.n - aVc4)}</td></tr>`;
+        return `<tr><td class="dim">${i + 1}</td><td><b>${esc(a.agentName)}</b> <small class="dim">${esc(a.agentId)}</small></td><td>${a.direct ? '<b class="direct-chip">🚫 Direct (no TL)</b>' : esc(a.tlName || '—')}</td><td class="num"><b>${U.fmt(a.n)}</b></td><td class="num">${U.fmt(aVc4)}</td><td class="num">${U.fmt(a.n - aVc4)}</td></tr>`;
       }), 3), { right: exportBtn('gv-stock-agents') })}`;
     } else if (stockView === 'tl') {
       const tlRows = byTl.filter((r) => !stockSel.tl || norm(r.tlName) === norm(stockSel.tl));
@@ -415,7 +420,7 @@ FF.pages = FF.pages || {};
         return `<tr><td><b>${esc(c)}</b></td><td>${esc(G.classGroup(c))}</td><td class="num"><b>${U.fmt(U.sum(rowsForClass, (r) => r.n))}</b></td><td class="num">${U.fmtPct(U.pctOf(U.sum(rowsForClass, (r) => r.n), total), 0)}</td><td>${top ? `${esc(top[0])} <span class="dim">(${U.fmt(top[1])})</span>` : '—'}</td></tr>`;
       }), 2), { right: exportBtn('gv-stock-class') })}
       ${card('🔠 Class × TL matrix', (() => {
-        const tls = U.topEntries(U.groupSum(byTl.filter((r) => r.tlName !== 'Unassigned'), (r) => r.tlName, (r) => r.n), 15).map((e) => e[0]);
+        const tls = U.topEntries(U.groupSum(byTl.filter((r) => FF.config.isRealTl(r.tlName) && r.directAgent !== true), (r) => r.tlName, (r) => r.n), 15).map((e) => e[0]);
         return tableHtml(['TL', ...classes, 'Total'], tls.map((tl) => {
           const rowsFor = classRows.filter((r) => norm(r.tlName) === norm(tl));
           return `<tr><td><b>${esc(tl)}</b></td>${classes.map((c) => `<td class="num">${U.fmt(U.sum(rowsFor.filter((r) => r.cls === c), (r) => r.n))}</td>`).join('')}<td class="num"><b>${U.fmt(U.sum(rowsFor, (r) => r.n))}</b></td></tr>`;
@@ -486,9 +491,10 @@ FF.pages = FF.pages || {};
       if (perf.growth === 'down' && !(Number(r.growth) < 0)) return false;
       if (perf.growth === 'flat' && Number(r.growth) !== 0) return false;
       if (perf.stock === 'zero' && Number(r.stockTotal) !== 0) return false;
-      if (perf.stock === 'direct' && !FF.config.isDirectAgent(r)) return false;
-      if (perf.stock === 'need' && (FF.config.isDirectAgent(r) || !(/high|medium/i.test(r.priority || '')))) return false;
-      if (perf.tl && norm(r.tlName) !== norm(perf.tl)) return false;
+      if (perf.stock === 'direct' && !FF.config.isDirectAgent(r, 'gv')) return false;
+      if (perf.stock === 'need' && (FF.config.isDirectAgent(r, 'gv') || !(/high|medium/i.test(r.priority || '')))) return false;
+      if (perf.tl === '__direct__') { if (!FF.config.isDirectAgent(r, 'gv')) return false; }
+      else if (perf.tl && norm(r.tlName) !== norm(perf.tl)) return false;
       return true;
     }).sort((a, b) => {
       const k = perf.sort.key, d = perf.sort.dir === 'asc' ? 1 : -1;
@@ -512,7 +518,7 @@ FF.pages = FF.pages || {};
       <div class="btn-row" style="margin-top:10px">${shareBtn(`${r.agentName} (${r.tlName}) — GV stock ${U.fmt(r.stockTotal)} · MTD ${U.fmt(r.curTotal)} · last month ${U.fmt(r.lastTotal)} · growth ${r.growth === null ? '—' : `${r.growth}%`} · priority ${r.priority || '—'}`, `GV Partner report · ${r.agentName}`)}</div>`;
     FF.app.openDrawer({
       kicker: 'GV Partner · GV REPORT', title: r.agentName,
-      sub: `<span class="dim">${esc(r.agentId)} · ${esc(r.tlName)}${r.mobile && FF.auth.can('contacts') ? ` · 📞 <a href="tel:${esc(r.mobile)}">${esc(r.mobile)}</a>` : ''}</span>`,
+      sub: `<span class="dim">${esc(r.agentId)} · ${esc(FF.config.isDirectAgent(r, 'gv') ? FF.config.directLabel(r, 'gv') : r.tlName)}${r.mobile && FF.auth.can('contacts') ? ` · 📞 <a href="tel:${esc(r.mobile)}">${esc(r.mobile)}</a>` : ''}</span>`,
       body, actions: `<a class="btn small" href="#/gvStock?agent=${encodeURIComponent(r.agentName)}&view=agent">📦 GV stock →</a>`
     });
   }
@@ -542,11 +548,14 @@ FF.pages = FF.pages || {};
     const pages = Math.max(1, Math.ceil(list.length / pageSize));
     if (perf.page > pages) perf.page = pages;
     const pageRows = list.slice((perf.page - 1) * pageSize, perf.page * pageSize);
-    const allTlOptions = [...U.groupSum(all, (r) => r.tlName || 'Direct', () => 1).entries()].sort((a, b) => a[0].localeCompare(b[0]));
+    const gvDirectCount = all.filter((r) => FF.config.isDirectAgent(r, 'gv')).length;
+    const allTlOptions = [...U.groupSum(all.filter((r) => !FF.config.isDirectAgent(r, 'gv')), (r) => r.tlName, () => 1).entries()]
+      .filter(([name]) => FF.config.isRealTl(name)).sort((a, b) => a[0].localeCompare(b[0]));
     const tlGroups = new Map();
     for (const r of list) {
-      const k = r.tlName || 'Direct';
-      if (!tlGroups.has(k)) tlGroups.set(k, { tlName: k, tlId: r.tlId, agents: 0, stock: 0, stockVc4: 0, last: 0, cur: 0, curVc4: 0, high: 0, inactive: 0 });
+      const direct = FF.config.isDirectAgent(r, 'gv');
+      const k = direct ? `🚫 ${FF.config.directLabel(r, 'gv')}` : (r.tlName || 'TL (blank)');
+      if (!tlGroups.has(k)) tlGroups.set(k, { tlName: k, tlId: direct ? '__direct__' : r.tlId, agents: 0, stock: 0, stockVc4: 0, last: 0, cur: 0, curVc4: 0, high: 0, inactive: 0 });
       const t = tlGroups.get(k);
       t.agents += 1; t.stock += r.stockTotal; t.stockVc4 += r.stockVc4; t.last += r.lastTotal; t.cur += r.curTotal; t.curVc4 += r.curVc4;
       if (/high/i.test(r.priority)) t.high += 1;
@@ -563,23 +572,23 @@ FF.pages = FF.pages || {};
     const chips = [['', 'All priority'], ['high', '🔺 High'], ['medium', '🟡 Medium'], ['low', '🟢 Low']];
     const statusChips = [['', 'All status'], ['active', 'Active'], ['inactive', 'Inactive']];
     const growthChips = [['', 'Any growth'], ['up', '↗ Growing'], ['down', '↘ De-growth'], ['flat', '→ Flat']];
-    const stockChips = [['', 'All stock'], ['need', '📦 Dispatch need'], ['direct', '🚫 Direct'], ['zero', '0 stock']];
+    const stockChips = [['', 'All stock'], ['need', '📦 Dispatch need'], ['direct', '🚫 Direct Agents · no TL'], ['zero', '0 stock']];
 
     const sortTh = (key, label, num) => `<th class="${num ? 'num' : ''} sortable ${perf.sort.key === key ? 'sorted' : ''}" data-sort="${key}">${esc(label)}${perf.sort.key === key ? `<i>${perf.sort.dir === 'asc' ? '▲' : '▼'}</i>` : ''}</th>`;
     const tableRows = pageRows.map((r) => `<tr class="clickable" data-agent="${esc(r.agentName)}">
       <td><b>${esc(r.agentName)}</b><br><small class="dim">${esc(r.agentId)}</small></td>
-      <td>${esc(r.tlName)}</td>
+      <td>${FF.config.isDirectAgent(r, 'gv') ? `<b class="direct-chip">🚫 ${esc(FF.config.directLabel(r, 'gv'))}</b>` : esc(r.tlName)}</td>
       <td class="num">${U.fmt(r.stockTotal)}</td><td class="num">${U.fmt(r.stockVc4)}</td><td class="num">${U.fmt(r.stockComm)}</td>
       <td class="num">${U.fmt(r.lastTotal)}</td><td class="num"><b>${U.fmt(r.curTotal)}</b></td><td class="num">${U.fmt(r.curVc4)}</td>
       <td class="num">${U.deltaHtml(r.growth, { decimals: 0 })}</td><td class="num">${U.fmt(r.todayIssued)}</td><td class="num">${U.fmt(r.curDays)}</td>
       <td class="num">${U.fmt(r.expected)}</td><td class="num">${U.fmt(r.runrate)}</td><td>${badge(r.priority)}</td><td>${badge(r.agentStatus)}</td></tr>`).join('');
     const alertList = list.filter((r) => /high|medium/i.test(r.priority || '') || /inactive/i.test(r.agentStatus || '') || Number(r.stockTotal) === 0 || Number(r.growth) < 0);
-    const directCount = list.filter((r) => FF.config.isDirectAgent(r)).length;
-    const attentionRows = alertList.slice(0, 150).map((r) => `<tr class="clickable ${FF.config.isDirectAgent(r) ? 'dispatch-direct' : ''}" data-agent="${esc(r.agentName)}"><td><b>${esc(r.agentName)}</b><small class="cell-sub">${esc(r.agentId)}</small></td><td>${FF.config.isDirectAgent(r) ? '<b>Direct Agent</b>' : esc(r.tlName)}</td><td>${badge(r.priority)}</td><td>${badge(r.agentStatus)}</td><td class="num">${U.fmt(r.stockTotal)}</td><td class="num">${U.deltaHtml(r.growth, { decimals: 0 })}</td><td>${FF.config.isDirectAgent(r) ? '<span class="tag ok">No dispatch</span>' : /high|medium/i.test(r.priority || '') ? '<span class="tag warn">Review dispatch</span>' : '<span class="dim">Review</span>'}</td></tr>`).join('');
+    const directCount = list.filter((r) => FF.config.isDirectAgent(r, 'gv')).length;
+    const attentionRows = alertList.slice(0, 150).map((r) => `<tr class="clickable ${FF.config.isDirectAgent(r, 'gv') ? 'dispatch-direct' : ''}" data-agent="${esc(r.agentName)}"><td><b>${esc(r.agentName)}</b><small class="cell-sub">${esc(r.agentId)}</small></td><td>${FF.config.isDirectAgent(r, 'gv') ? '<b>Direct Agent</b>' : esc(r.tlName)}</td><td>${badge(r.priority)}</td><td>${badge(r.agentStatus)}</td><td class="num">${U.fmt(r.stockTotal)}</td><td class="num">${U.deltaHtml(r.growth, { decimals: 0 })}</td><td>${FF.config.isDirectAgent(r, 'gv') ? '<span class="tag ok">No dispatch</span>' : /high|medium/i.test(r.priority || '') ? '<span class="tag warn">Review dispatch</span>' : '<span class="dim">Review</span>'}</td></tr>`).join('');
 
     body.innerHTML = `
       <div class="kpi-grid">
-        ${kpi('g8', 'GV Agents (REPORT)', '🧑‍💼', U.fmt(totals.agents), `${tls.length} TLs · ${U.fmt(totals.growing)} growing agents`)}
+        ${kpi('g8', 'GV Agents (REPORT)', '🧑‍💼', U.fmt(totals.agents), `${tls.length} TLs · ${U.fmt(gvDirectCount)} direct (no TL) · ${U.fmt(totals.growing)} growing`)}
         ${kpi('g9', 'GV Stock (REPORT)', '📦', U.fmt(totals.stock), `VC4 <b>${U.fmt(totals.stockVc4)}</b> · Comm <b>${U.fmt(totals.stock - totals.stockVc4)}</b>`)}
         ${kpi('g3', 'MTD Issuance', '🏷️', U.fmt(totals.cur), `VC4 <b>${U.fmt(totals.curVc4)}</b> · ${U.deltaHtml(U.growth(totals.cur, totals.last), { decimals: 0 })} vs last month (${U.fmt(totals.last)})`)}
         ${kpi('g1', 'Today Issued', '⚡', U.fmt(totals.today), 'GV REPORT ka "Today Issued" column')}
@@ -590,7 +599,7 @@ FF.pages = FF.pages || {};
         <div class="seg" id="gvp-tabs">${[['overview', '🏠 Overview'], ['agents', '🧑‍💼 Agents'], ['tls', '👥 TLs'], ['alerts', '🚨 Alerts']].map(([k, l]) => `<button class="seg-btn ${perf.view === k ? 'on' : ''}" data-gvp-view="${k}">${l}</button>`).join('')}</div>
         <div class="ctrl-row">
           <label>Quick find <span class="finder-input"><input class="input" id="gvp-q" placeholder="GV agent / TL / ID type karo → Enter" value="${esc(perf.q)}"></span></label>
-          <label>TL <select id="gvp-tl"><option value="">All TLs</option>${allTlOptions.map(([name, count]) => `<option value="${esc(name)}" ${norm(name) === norm(perf.tl) ? 'selected' : ''}>${esc(name)} (${count})</option>`).join('')}</select></label>
+          <label>TL <select id="gvp-tl"><option value="">All TLs</option>${gvDirectCount ? `<option value="__direct__" ${perf.tl === '__direct__' ? 'selected' : ''}>🚫 Direct Agents · no TL (${gvDirectCount})</option>` : ''}${allTlOptions.map(([name, count]) => `<option value="${esc(name)}" ${norm(name) === norm(perf.tl) ? 'selected' : ''}>${esc(name)} (${count})</option>`).join('')}</select></label>
           <span class="chip-row">${chips.map(([k, l]) => `<button class="chip ${perf.priority === k ? 'on' : ''}" data-priority="${k}">${l}</button>`).join('')}</span>
           <span class="chip-row">${statusChips.map(([k, l]) => `<button class="chip ${perf.status === k ? 'on' : ''}" data-status="${k}">${l}</button>`).join('')}</span>
           <label>Growth <select id="gvp-growth">${growthChips.map(([k, l]) => `<option value="${k}" ${perf.growth === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
@@ -600,12 +609,12 @@ FF.pages = FF.pages || {};
         </div>
       </div>
       <div class="gvp-view" ${perf.view !== 'overview' ? 'hidden' : ''}><div class="grid g-2">
-        ${card(`⭐ Top GV agents · MTD`, C.hbars({ items: list.slice(0, 12).map((r, i) => ({ label: r.agentName, sub: r.tlName, value: r.curTotal, compare: r.lastTotal, color: C.PALETTE[i % C.PALETTE.length], attr: `data-agent="${esc(r.agentName)}"` })), compareLabel: 'Last month', valueLabel: 'MTD' }))}
+        ${card(`⭐ Top GV agents · MTD`, C.hbars({ items: list.slice(0, 12).map((r, i) => ({ label: r.agentName, sub: FF.config.isDirectAgent(r, 'gv') ? FF.config.directLabel(r, 'gv') : r.tlName, value: r.curTotal, compare: r.lastTotal, color: C.PALETTE[i % C.PALETTE.length], attr: `data-agent="${esc(r.agentName)}"` })), compareLabel: 'Last month', valueLabel: 'MTD' }))}
         ${card(`🏅 GV TL rollup`, C.hbars({ items: tls.slice(0, 12).map((t, i) => ({ label: t.tlName, sub: `${t.agents} agents · stock ${U.fmtShort(t.stock)}`, value: t.cur, compare: t.last, color: C.PALETTE[(i + 3) % C.PALETTE.length] })), compareLabel: 'Last month', valueLabel: 'MTD' }))}
       </div></div>
       <div class="gvp-view" ${perf.view !== 'agents' ? 'hidden' : ''}>${card('📋 GV agents', `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Agent</th><th>TL</th>${PERF_COLS.slice(2).map((c) => sortTh(c.key, c.label, c.num)).join('')}</tr></thead><tbody>${tableRows || `<tr><td colspan="15" class="empty">Koi agent match nahi hua</td></tr>`}</tbody></table></div>
         <div class="pager"><button class="btn small" data-gvp-pg="prev" ${perf.page <= 1 ? 'disabled' : ''}>‹ Prev</button><span>Page ${perf.page} / ${U.fmt(pages)}</span><button class="btn small" data-gvp-pg="next" ${perf.page >= pages ? 'disabled' : ''}>Next ›</button></div>`, { right: `${FF.auth.can('share') ? `<button class="btn small" data-share="wa" data-text="${esc(`GV Partner MTD ${U.fmt(totals.cur)} tags · stock ${U.fmt(totals.stock)} · ${tls.length} TLs`)}">🟢 Share</button>` : ''}` })}</div>
-      <div class="gvp-view" ${perf.view !== 'tls' ? 'hidden' : ''}>${card('👥 GV TL-wise summary', tableHtml(['#', 'TL', 'Agents', 'Stock', 'Stock VC4', 'Last month', 'MTD', 'MTD VC4', 'High prio', 'Inactive'], tls.map((t, i) => `<tr data-link="#/gvPerformance?tl=${encodeURIComponent(t.tlName)}"><td class="dim">${i + 1}</td><td><b>${esc(t.tlName)}</b></td><td class="num">${U.fmt(t.agents)}</td><td class="num">${U.fmt(t.stock)}</td><td class="num">${U.fmt(t.stockVc4)}</td><td class="num">${U.fmt(t.last)}</td><td class="num"><b>${U.fmt(t.cur)}</b></td><td class="num">${U.fmt(t.curVc4)}</td><td class="num">${U.fmt(t.high)}</td><td class="num">${U.fmt(t.inactive)}</td></tr>`), 2), { right: exportBtn('gv-tl-summary') })}</div>
+      <div class="gvp-view" ${perf.view !== 'tls' ? 'hidden' : ''}>${card('👥 GV TL-wise summary', tableHtml(['#', 'TL', 'Agents', 'Stock', 'Stock VC4', 'Last month', 'MTD', 'MTD VC4', 'High prio', 'Inactive'], tls.map((t, i) => `<tr data-link="${t.tlId === '__direct__' ? '#/directAgents' : `#/gvPerformance?tl=${encodeURIComponent(t.tlName)}`}"><td class="dim">${i + 1}</td><td><b>${esc(t.tlName)}</b></td><td class="num">${U.fmt(t.agents)}</td><td class="num">${U.fmt(t.stock)}</td><td class="num">${U.fmt(t.stockVc4)}</td><td class="num">${U.fmt(t.last)}</td><td class="num"><b>${U.fmt(t.cur)}</b></td><td class="num">${U.fmt(t.curVc4)}</td><td class="num">${U.fmt(t.high)}</td><td class="num">${U.fmt(t.inactive)}</td></tr>`), 2), { right: exportBtn('gv-tl-summary') })}</div>
       <div class="gvp-view" ${perf.view !== 'alerts' ? 'hidden' : ''}>
         <div class="mini-grid">${miniKpi('Attention list', U.fmt(alertList.length), 'priority / inactive / zero-stock / de-growth', 'c4')}${miniKpi('High priority', U.fmt(list.filter((r) => /high/i.test(r.priority || '')).length), 'dispatch review', 'c6')}${miniKpi('Inactive', U.fmt(list.filter((r) => /inactive/i.test(r.agentStatus || '')).length), 'follow-up', 'c2')}${miniKpi('Direct agents', U.fmt(directCount), 'stock dispatch not required', 'c3')}</div>
         ${card('🚨 GV attention & dispatch watch', `<div class="table-wrap tall"><table class="tbl compact"><thead><tr><th>Agent</th><th>TL / class</th><th>Priority</th><th>Status</th><th class="num">Stock</th><th class="num">Growth</th><th>Action</th></tr></thead><tbody>${attentionRows || '<tr><td colspan="7" class="empty">Current filters me koi alert nahi.</td></tr>'}</tbody></table></div>`, { right: `<span class="dim">${U.fmt(alertList.length)} rows</span>` })}
@@ -623,7 +632,8 @@ FF.pages = FF.pages || {};
       }
       if (action === 'mail') { location.href = U.mailLink('GV Partner performance report', summaryText(), FF.config.contacts.teamEmail); return; }
       const header = PERF_COLS.map((c) => c.label);
-      const rows = list.map((r) => PERF_COLS.map((c) => r[c.key] == null ? '' : r[c.key]));
+      const cell = (r, c) => (c.key === 'tlName' && FF.config.isDirectAgent(r, 'gv') ? FF.config.directLabel(r, 'gv') : (r[c.key] == null ? '' : r[c.key]));
+      const rows = list.map((r) => PERF_COLS.map((c) => cell(r, c)));
       if (action === 'csv') { U.downloadCsv(`gv-performance-${U.stamp()}.csv`, header, rows); U.toast(`${U.fmt(rows.length)} GV agents CSV ready`, 'ok'); return; }
       if (action === 'xlsx') {
         const tlHeader = ['TL', 'Agents', 'Stock', 'Stock VC4', 'Last month', 'MTD', 'MTD VC4', 'High priority', 'Inactive'];
@@ -695,23 +705,26 @@ FF.pages = FF.pages || {};
     const assignmentClass = G.get('stockClass') || [];
     const assignmentTotal = U.sum(assignmentClass, (r) => r.n);
     const classNames = U.uniq(all.flatMap((r) => Object.keys(r.stockByClass || {}))).sort((a, b) => G.clsNum(a) - G.clsNum(b));
-    const tlNames = U.uniq(all.map((r) => r.tlName || 'Direct')).sort((a, b) => a.localeCompare(b));
+    const gvDirectList = all.filter((r) => FF.config.isDirectAgent(r, 'gv'));
+    const tlNames = U.uniq(all.filter((r) => !FF.config.isDirectAgent(r, 'gv')).map((r) => r.tlName))
+      .filter((name) => FF.config.isRealTl(name)).sort((a, b) => a.localeCompare(b));
     const qn = norm(stockReportState.q);
     const filtered = all.filter((r) => {
-      const direct = FF.config.isDirectAgent(r);
+      const direct = FF.config.isDirectAgent(r, 'gv');
       if (qn && !norm(`${r.agentName} ${r.agentId} ${r.tlName} ${r.mobile || ''}`).includes(qn)) return false;
-      if (stockReportState.tl && norm(r.tlName) !== norm(stockReportState.tl)) return false;
+      if (stockReportState.tl === '__direct__') { if (!direct) return false; }
+      else if (stockReportState.tl && norm(r.tlName) !== norm(stockReportState.tl)) return false;
       if (stockReportState.cls && Number((r.stockByClass || {})[stockReportState.cls] || 0) <= 0) return false;
       if (stockReportState.dispatch === 'direct' && !direct) return false;
       if (stockReportState.dispatch === 'need' && (direct || !/high|medium/i.test(r.priority || ''))) return false;
       if (stockReportState.dispatch === 'zero' && Number(r.stockTotal) !== 0) return false;
       return true;
     }).sort((a, b) => b.stockTotal - a.stockTotal || a.agentName.localeCompare(b.agentName));
-    const totals = { stock: U.sum(filtered, (r) => r.stockTotal), vc4: U.sum(filtered, (r) => r.stockVc4), comm: U.sum(filtered, (r) => r.stockComm), direct: filtered.filter((r) => FF.config.isDirectAgent(r)).length };
-    totals.need = filtered.filter((r) => !FF.config.isDirectAgent(r) && /high|medium/i.test(r.priority || '')).length;
+    const totals = { stock: U.sum(filtered, (r) => r.stockTotal), vc4: U.sum(filtered, (r) => r.stockVc4), comm: U.sum(filtered, (r) => r.stockComm), direct: filtered.filter((r) => FF.config.isDirectAgent(r, 'gv')).length };
+    totals.need = filtered.filter((r) => !FF.config.isDirectAgent(r, 'gv') && /high|medium/i.test(r.priority || '')).length;
     const tlMap = new Map();
     for (const r of filtered) {
-      const name = FF.config.isDirectAgent(r) ? 'Direct Agents' : (r.tlName || 'Unassigned');
+      const name = FF.config.isDirectAgent(r, 'gv') ? '🚫 Direct Agents (no TL)' : (r.tlName || 'TL (blank)');
       if (!tlMap.has(name)) tlMap.set(name, { name, agents: 0, stock: 0, vc4: 0, comm: 0, high: 0, zero: 0 });
       const t = tlMap.get(name); t.agents += 1; t.stock += r.stockTotal; t.vc4 += r.stockVc4; t.comm += r.stockComm;
       if (/high/i.test(r.priority || '')) t.high += 1; if (!r.stockTotal) t.zero += 1;
@@ -719,8 +732,8 @@ FF.pages = FF.pages || {};
     const tls = [...tlMap.values()].sort((a, b) => b.stock - a.stock);
     const classes = classNames.map((name) => ({ name, stock: U.sum(filtered, (r) => Number((r.stockByClass || {})[name] || 0)) })).filter((r) => r.stock > 0);
     const days = Number(FF.config.features && FF.config.features.suggestDays) || 15;
-    const dispatch = filtered.filter((r) => /high|medium/i.test(r.priority || '') || FF.config.isDirectAgent(r)).map((r) => {
-      const direct = FF.config.isDirectAgent(r), daily = r.curVc4 / Math.max(1, r.curDays || 0);
+    const dispatch = filtered.filter((r) => /high|medium/i.test(r.priority || '') || FF.config.isDirectAgent(r, 'gv')).map((r) => {
+      const direct = FF.config.isDirectAgent(r, 'gv'), daily = r.curVc4 / Math.max(1, r.curDays || 0);
       const calculated = Number(r.suggestedDispatch) > 0 ? Number(r.suggestedDispatch) : Math.max(0, Math.ceil(daily * days - r.stockVc4));
       return { r, direct, daily, suggested: direct ? 0 : calculated, cover: daily > 0 ? r.stockVc4 / daily : null };
     }).sort((a, b) => (a.direct - b.direct) || (a.cover ?? 9999) - (b.cover ?? 9999));
@@ -731,27 +744,27 @@ FF.pages = FF.pages || {};
     const rerender = () => renderStockReport(root, { view: stockReportState.view });
     const controls = `<div class="card controls"><div class="seg">${[['agents', '🧑‍💼 Agents'], ['tls', '👥 TLs'], ['classes', '🚗 Classes'], ['dispatch', '🎯 Dispatch / Direct']].map(([key, label]) => `<button class="seg-btn ${stockReportState.view === key ? 'on' : ''}" data-gvsr-view="${key}">${label}</button>`).join('')}</div><div class="ctrl-row">
       <label>Find <input class="input" id="gvsr-q" placeholder="Agent / TL / ID / mobile" value="${esc(stockReportState.q)}"></label>
-      <label>TL <select id="gvsr-tl"><option value="">All TLs</option>${tlNames.map((name) => `<option value="${esc(name)}" ${norm(name) === norm(stockReportState.tl) ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select></label>
+      <label>TL <select id="gvsr-tl"><option value="">All TLs</option>${gvDirectList.length ? `<option value="__direct__" ${stockReportState.tl === '__direct__' ? 'selected' : ''}>🚫 Direct Agents · no TL (${gvDirectList.length})</option>` : ''}${tlNames.map((name) => `<option value="${esc(name)}" ${norm(name) === norm(stockReportState.tl) ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select></label>
       <label>Class <select id="gvsr-cls"><option value="">All classes</option>${classNames.map((name) => `<option value="${esc(name)}" ${name === stockReportState.cls ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select></label>
       <label>Dispatch <select id="gvsr-dispatch"><option value="">All agents</option><option value="need" ${stockReportState.dispatch === 'need' ? 'selected' : ''}>📦 Dispatch need</option><option value="direct" ${stockReportState.dispatch === 'direct' ? 'selected' : ''}>🚫 Direct · no stock</option><option value="zero" ${stockReportState.dispatch === 'zero' ? 'selected' : ''}>0 stock</option></select></label>
       ${stockReportState.q || stockReportState.tl || stockReportState.cls || stockReportState.dispatch ? '<button class="btn small" id="gvsr-clear">✕ Clear</button>' : ''}<span class="ctrl-note"><b>${U.fmt(filtered.length)}</b> / ${U.fmt(all.length)} agents</span></div></div>`;
-    const agentRows = pageRows.map((r) => `<tr class="clickable ${FF.config.isDirectAgent(r) ? 'dispatch-direct' : ''}" data-gvsr-agent="${esc(r.agentName)}"><td><b>${esc(r.agentName)}</b><small class="cell-sub">${esc(r.agentId)}</small></td><td>${FF.config.isDirectAgent(r) ? '<b>Direct Agent</b><small class="cell-sub">No dispatch</small>' : esc(r.tlName)}</td>${classNames.map((name) => `<td class="num">${U.fmt((r.stockByClass || {})[name] || 0)}</td>`).join('')}<td class="num"><b>${U.fmt(r.stockTotal)}</b></td><td class="num">${U.fmt(r.curVc4)}</td><td>${badge(r.priority)}</td><td>${FF.config.isDirectAgent(r) ? '<span class="tag ok">Not required</span>' : /high|medium/i.test(r.priority || '') ? '<span class="tag warn">Review</span>' : '<span class="dim">—</span>'}</td></tr>`).join('');
+    const agentRows = pageRows.map((r) => `<tr class="clickable ${FF.config.isDirectAgent(r, 'gv') ? 'dispatch-direct' : ''}" data-gvsr-agent="${esc(r.agentName)}"><td><b>${esc(r.agentName)}</b><small class="cell-sub">${esc(r.agentId)}</small></td><td>${FF.config.isDirectAgent(r, 'gv') ? '<b>Direct Agent</b><small class="cell-sub">No dispatch</small>' : esc(r.tlName)}</td>${classNames.map((name) => `<td class="num">${U.fmt((r.stockByClass || {})[name] || 0)}</td>`).join('')}<td class="num"><b>${U.fmt(r.stockTotal)}</b></td><td class="num">${U.fmt(r.curVc4)}</td><td>${badge(r.priority)}</td><td>${FF.config.isDirectAgent(r, 'gv') ? '<span class="tag ok">Not required</span>' : /high|medium/i.test(r.priority || '') ? '<span class="tag warn">Review</span>' : '<span class="dim">—</span>'}</td></tr>`).join('');
     const agentTable = card('📋 Agent inventory detail', `<div class="table-wrap tall"><table class="tbl compact"><thead><tr><th>Agent</th><th>TL / class</th>${classNames.map((name) => `<th class="num">${esc(name)}</th>`).join('')}<th class="num">Total</th><th class="num">MTD VC4</th><th>Priority</th><th>Dispatch</th></tr></thead><tbody>${agentRows || `<tr><td colspan="${classNames.length + 7}" class="empty">No matching agents</td></tr>`}</tbody></table></div><div class="pager"><button class="btn small" data-gvsr-page="prev" ${stockReportState.page <= 1 ? 'disabled' : ''}>‹ Prev</button><span>Page ${stockReportState.page} / ${pages}</span><button class="btn small" data-gvsr-page="next" ${stockReportState.page >= pages ? 'disabled' : ''}>Next ›</button></div>`);
-    const tlTable = card('👥 TL stock rollup', tableHtml(['#', 'TL / class', 'Agents', 'VC4', 'Commercial', 'Total stock', 'High priority', 'Zero stock'], tls.map((t, i) => `<tr><td class="dim">${i + 1}</td><td><b>${esc(t.name)}</b></td><td class="num">${U.fmt(t.agents)}</td><td class="num">${U.fmt(t.vc4)}</td><td class="num">${U.fmt(t.comm)}</td><td class="num"><b>${U.fmt(t.stock)}</b></td><td class="num">${U.fmt(t.high)}</td><td class="num">${U.fmt(t.zero)}</td></tr>`), 2));
+    const tlTable = card('👥 TL stock rollup', tableHtml(['#', 'TL / class', 'Agents', 'VC4', 'Commercial', 'Total stock', 'High priority', 'Zero stock'], tls.map((t, i) => `<tr class="${/Direct Agents/.test(t.name) ? 'direct-row' : ''}"><td class="dim">${i + 1}</td><td><b>${esc(t.name)}</b></td><td class="num">${U.fmt(t.agents)}</td><td class="num">${U.fmt(t.vc4)}</td><td class="num">${U.fmt(t.comm)}</td><td class="num"><b>${U.fmt(t.stock)}</b></td><td class="num">${U.fmt(t.high)}</td><td class="num">${U.fmt(t.zero)}</td></tr>`), 2));
     const classView = `<div class="grid g-2">${card('🍩 GV REPORT stock mix', C.donut({ items: classes.map((r) => ({ label: r.name, value: r.stock })), subtitle: 'report stock' }))}${card('📊 Class totals', tableHtml(['Class', 'GV REPORT stock', 'Share'], classes.map((r) => `<tr><td><b>${esc(r.name)}</b></td><td class="num">${U.fmt(r.stock)}</td><td class="num">${U.fmtPct(U.pctOf(r.stock, totals.stock), 1)}</td></tr>`), 1))}</div>${card('🔎 Source reconciliation', `<div class="reconcile-grid"><div><span>GV REPORT (current filters)</span><b>${U.fmt(totals.stock)}</b></div><div><span>Tag Assignment (all in-stock tags)</span><b>${U.fmt(assignmentTotal)}</b></div><div class="${discrepancy ? 'warn' : 'ok'}"><span>Difference</span><b>${discrepancy > 0 ? '+' : ''}${U.fmt(discrepancy)}</b></div></div><p class="dim small">Filters GV REPORT side par apply hote hain; Tag Assignment figure poora operational source total hai. Difference reconciliation cue hai, error ka automatic proof nahi.</p>`)} `;
     // Dispatch view ab do alag hisso me hai: (1) jinhe stock chahiye — dispatch plan,
     // (2) Direct/APS agents ki ALAG list — inko kabhi stock dispatch nahi hota.
     const dispatchNeed = dispatch.filter((d) => !d.direct);
-    const directAgents = filtered.filter((r) => FF.config.isDirectAgent(r)).sort((a, b) => b.stockTotal - a.stockTotal);
+    const directAgents = filtered.filter((r) => FF.config.isDirectAgent(r, 'gv')).sort((a, b) => b.stockTotal - a.stockTotal);
     const dispatchRows = dispatchNeed.slice(0, 200).map(({ r, daily, suggested, cover }) => `<tr class="clickable" data-gvsr-agent="${esc(r.agentName)}"><td><b>${esc(r.agentName)}</b><small class="cell-sub">${esc(r.agentId)}</small></td><td>${esc(r.tlName)}</td><td>${badge(r.priority)}</td><td class="num">${U.fmt(r.stockVc4)}</td><td class="num">${U.fmt(daily, true)}</td><td class="num">${cover == null ? '—' : U.fmt(cover, true)}</td><td><b class="sug-chip">${U.fmt(suggested)}</b></td></tr>`).join('');
     const totalSuggested = U.sum(dispatchNeed, (d) => d.suggested);
-    const directRowsHtml = directAgents.slice(0, 200).map((r) => `<tr class="clickable dispatch-direct" data-gvsr-agent="${esc(r.agentName)}"><td><b>${esc(r.agentName)}</b><small class="cell-sub">${esc(r.agentId)}</small></td><td><b>Direct Agent</b><small class="cell-sub">APS / no TL</small></td><td>${badge(r.priority)}</td><td>${badge(r.agentStatus || 'active')}</td><td class="num">${U.fmt(r.stockTotal)}</td><td class="num">${U.fmt(r.curVc4)}</td><td><span class="tag ok">No dispatch required</span></td></tr>`).join('');
+    const directRowsHtml = directAgents.slice(0, 200).map((r) => `<tr class="clickable dispatch-direct" data-gvsr-agent="${esc(r.agentName)}"><td><b>${esc(r.agentName)}</b><small class="cell-sub">${esc(r.agentId)}</small></td><td><b>Direct Agent</b><small class="cell-sub">${esc(FF.direct ? FF.direct.reason(r, 'gv') : 'TL ID + TL Name blank')}</small></td><td>${badge(r.priority)}</td><td>${badge(r.agentStatus || 'active')}</td><td class="num">${U.fmt(r.stockTotal)}</td><td class="num">${U.fmt(r.curVc4)}</td><td><span class="tag ok">No dispatch required</span></td></tr>`).join('');
     const dispatchView = `<div class="dispatch-filter-bar"><span><b>Dispatch plan me sirf stock-worthy agents · Direct agents ki list neeche alag hai</b></span><button class="btn small direct-filter" data-gvsr-direct="1">🚫 Direct filter · ${U.fmt(totals.direct)}</button></div>
       <div class="grid g-2">
       ${card('📦 GV Dispatch plan — stock chahiye', `<div class="dispatch-mini"><span>Agents needing stock <b>${U.fmt(dispatchNeed.length)}</b></span><span>Total suggested qty <b>${U.fmt(totalSuggested)}</b></span><span>Target cover <b>${days} din</b></span></div><div class="table-wrap tall"><table class="tbl compact"><thead><tr><th>Agent</th><th>TL / class</th><th>Priority</th><th class="num">VC4 stock</th><th class="num">Avg VC4/day</th><th class="num">Cover</th><th>Suggested qty 🎯</th></tr></thead><tbody>${dispatchRows || '<tr><td colspan="7" class="empty">Current filters me dispatch ki zarurat nahi.</td></tr>'}</tbody></table></div><p class="dim small">Suggested qty = GV REPORT value (ya avg VC4/day × ${days} − stock) · Direct/APS agents yahan kabhi nahi aate.</p>`)}
       ${card('🚫 Direct Agents — alag list (no dispatch)', `<div class="dispatch-mini"><span>Direct/APS agents <b>${U.fmt(directAgents.length)}</b></span><span>Inka stock <b>${U.fmt(U.sum(directAgents, (r) => r.stockTotal))}</b></span><span>MTD VC4 <b>${U.fmt(U.sum(directAgents, (r) => r.curVc4))}</b></span></div><div class="table-wrap tall"><table class="tbl compact"><thead><tr><th>Agent</th><th>Type</th><th>Priority</th><th>Status</th><th class="num">Total stock</th><th class="num">MTD VC4</th><th>Dispatch</th></tr></thead><tbody>${directRowsHtml || '<tr><td colspan="7" class="empty">Current filters me koi Direct agent nahi.</td></tr>'}</tbody></table></div><p class="dim small">Direct/APS agents ko stock dispatch <b>nahi</b> hota — yeh list sirf visibility ke liye alag rakhi hai.</p>`)}
       </div>`;
-    body.innerHTML = `<div class="kpi-grid six">${kpi('g9', 'GV REPORT Stock', '📦', U.fmt(totals.stock), `${U.fmt(filtered.length)} filtered agents`)}${kpi('g3', 'VC4 Stock', '🚗', U.fmt(totals.vc4), `${U.fmtPct(U.pctOf(totals.vc4, totals.stock), 0)} of report stock`)}${kpi('g8', 'Commercial Stock', '🏷️', U.fmt(totals.comm), `${U.fmtPct(U.pctOf(totals.comm, totals.stock), 0)} of report stock`)}${kpi('g12', 'Tag Assignment', '🔗', U.fmt(assignmentTotal), `source difference ${discrepancy > 0 ? '+' : ''}${U.fmt(discrepancy)}`)}${kpi('g10', 'Dispatch Review', '🎯', U.fmt(totals.need), 'High + Medium, Direct excluded')}${kpi('g5', 'Direct Agents', '🚫', U.fmt(totals.direct), 'Stock dispatch not required')}</div>${controls}<div class="gvsr-view">${stockReportState.view === 'agents' ? agentTable : stockReportState.view === 'tls' ? tlTable : stockReportState.view === 'classes' ? classView : dispatchView}</div><p class="foot-note">Sources: <b>GV REPORT</b> + <b>Tag Assignment</b> · Report agents ${U.fmt(all.length)} · Loaded ${U.timeLabel(G.loadedAt || D.lastLoadAt)}</p>`;
+    body.innerHTML = `${FF.direct ? FF.direct.ruleBanner('gv') : ''}<div class="kpi-grid six">${kpi('g9', 'GV REPORT Stock', '📦', U.fmt(totals.stock), `${U.fmt(filtered.length)} filtered agents`)}${kpi('g3', 'VC4 Stock', '🚗', U.fmt(totals.vc4), `${U.fmtPct(U.pctOf(totals.vc4, totals.stock), 0)} of report stock`)}${kpi('g8', 'Commercial Stock', '🏷️', U.fmt(totals.comm), `${U.fmtPct(U.pctOf(totals.comm, totals.stock), 0)} of report stock`)}${kpi('g12', 'Tag Assignment', '🔗', U.fmt(assignmentTotal), `source difference ${discrepancy > 0 ? '+' : ''}${U.fmt(discrepancy)}`)}${kpi('g10', 'Dispatch Review', '🎯', U.fmt(totals.need), 'High + Medium, Direct excluded')}${kpi('g5', 'Direct Agents (no TL)', '🚫', U.fmt(totals.direct), 'GV rule: TL ID + TL Name blank · stock dispatch not required')}</div>${controls}<div class="gvsr-view">${stockReportState.view === 'agents' ? agentTable : stockReportState.view === 'tls' ? tlTable : stockReportState.view === 'classes' ? classView : dispatchView}</div><p class="foot-note">Sources: <b>GV REPORT</b> + <b>Tag Assignment</b> · Report agents ${U.fmt(all.length)} · Loaded ${U.timeLabel(G.loadedAt || D.lastLoadAt)}</p>`;
     C.mount(body);
     const summary = () => [`*GV Stock Report*`, `Agents: ${U.fmt(filtered.length)} / ${U.fmt(all.length)}`, `GV REPORT stock: *${U.fmt(totals.stock)}* (VC4 ${U.fmt(totals.vc4)} · Commercial ${U.fmt(totals.comm)})`, `Tag Assignment stock: ${U.fmt(assignmentTotal)} · Difference ${discrepancy > 0 ? '+' : ''}${U.fmt(discrepancy)}`, `Dispatch review: ${U.fmt(totals.need)} · Direct/no-dispatch: ${U.fmt(totals.direct)}`, '', ...tls.slice(0, 5).map((t, i) => `${i + 1}. ${t.name} — ${U.fmt(t.stock)} stock`), '', 'Generated by First Forward & GV Partner Dashboard'].join('\n');
     U.$$('[data-gvsr-action]', root).forEach((button) => button.addEventListener('click', async () => {
@@ -759,12 +772,12 @@ FF.pages = FF.pages || {};
       if (action === 'wa') { const text = summary(); await U.copyText(text); window.open(U.waLink(text, FF.config.contacts.teamWhatsapp), '_blank', 'noopener'); U.toast('GV Stock Report copied', 'ok'); return; }
       if (action === 'mail') { location.href = U.mailLink('GV Stock Report', summary(), FF.config.contacts.teamEmail); return; }
       const header = ['Agent ID', 'Agent', 'TL / class', ...classNames, 'VC4', 'Commercial', 'Total', 'Priority', 'Dispatch status'];
-      const rows = filtered.map((r) => [r.agentId, r.agentName, FF.config.isDirectAgent(r) ? 'Direct Agent' : r.tlName, ...classNames.map((name) => Number((r.stockByClass || {})[name] || 0)), r.stockVc4, r.stockComm, r.stockTotal, r.priority, FF.config.isDirectAgent(r) ? 'Not required' : /high|medium/i.test(r.priority || '') ? 'Review' : '']);
+      const rows = filtered.map((r) => [r.agentId, r.agentName, FF.config.isDirectAgent(r, 'gv') ? 'Direct Agent' : r.tlName, ...classNames.map((name) => Number((r.stockByClass || {})[name] || 0)), r.stockVc4, r.stockComm, r.stockTotal, r.priority, FF.config.isDirectAgent(r, 'gv') ? 'Not required' : /high|medium/i.test(r.priority || '') ? 'Review' : '']);
       if (action === 'csv') { U.downloadCsv(`gv-stock-report-${U.stamp()}.csv`, header, rows); U.toast('GV Stock CSV ready', 'ok'); return; }
       if (action === 'xlsx') { FF.xlsx.download(`gv-stock-report-${U.stamp()}.xlsx`, [{ name: 'Summary', header: ['Metric', 'Value'], rows: [['Agents', filtered.length], ['GV REPORT stock', totals.stock], ['VC4', totals.vc4], ['Commercial', totals.comm], ['Tag Assignment', assignmentTotal], ['Difference', discrepancy], ['Dispatch review', totals.need], ['Direct agents', totals.direct]] }, { name: 'Agents', header, rows }, { name: 'TL Summary', header: ['TL', 'Agents', 'VC4', 'Commercial', 'Total', 'High priority', 'Zero stock'], rows: tls.map((t) => [t.name, t.agents, t.vc4, t.comm, t.stock, t.high, t.zero]) }, { name: 'Classes', header: ['Class', 'Stock'], rows: classes.map((r) => [r.name, r.stock]) }, { name: 'Dispatch', header: ['Agent', 'TL / class', 'Priority', 'VC4 stock', 'Avg VC4/day', 'Cover', 'Suggested', 'Status'], rows: dispatch.map((d) => [d.r.agentName, d.direct ? 'Direct Agent' : d.r.tlName, d.r.priority, d.r.stockVc4, d.daily, d.cover == null ? '' : d.cover, d.suggested, d.direct ? 'Not required' : 'Review']) }]); U.toast('GV Stock Report Excel ready', 'ok'); }
     }));
     const find = U.$('#gvsr-q', body);
-    U.suggest(find, { items: () => all.map((r) => ({ kind: 'agent', kindLabel: FF.config.isDirectAgent(r) ? 'Direct Agent' : 'GV Agent', label: r.agentName, sub: `${r.tlName} · stock ${U.fmt(r.stockTotal)}`, keywords: `${r.agentId} ${r.mobile || ''}` })), onPick: (it) => { stockReportState.q = it.label; stockReportState.page = 1; rerender(); }, onEnter: (value) => { stockReportState.q = value; stockReportState.page = 1; rerender(); } });
+    U.suggest(find, { items: () => all.map((r) => ({ kind: 'agent', kindLabel: FF.config.isDirectAgent(r, 'gv') ? 'Direct Agent' : 'GV Agent', label: r.agentName, sub: `${r.tlName} · stock ${U.fmt(r.stockTotal)}`, keywords: `${r.agentId} ${r.mobile || ''}` })), onPick: (it) => { stockReportState.q = it.label; stockReportState.page = 1; rerender(); }, onEnter: (value) => { stockReportState.q = value; stockReportState.page = 1; rerender(); } });
     [['gvsr-tl', 'tl'], ['gvsr-cls', 'cls'], ['gvsr-dispatch', 'dispatch']].forEach(([id, key]) => U.$(`#${id}`, body).addEventListener('change', (e) => { stockReportState[key] = e.target.value; stockReportState.page = 1; rerender(); }));
     const clear = U.$('#gvsr-clear', body); if (clear) clear.addEventListener('click', () => { Object.assign(stockReportState, { q: '', tl: '', cls: '', dispatch: '', page: 1 }); rerender(); });
     body.addEventListener('click', (e) => {

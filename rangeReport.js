@@ -3,6 +3,15 @@ window.FF = window.FF || {};
 FF.pages = FF.pages || {};
 (function (FF) {
   'use strict';
+
+  // 🧍 Direct-agent rule helpers — browser me FF.config ka shared rule, warna safe fallback
+  // (FF: TL Name APS · GV: TL ID + TL Name dono blank).
+  const cfgCall = (name, args, fallback) => {
+    const f = FF.config && FF.config[name];
+    return typeof f === 'function' ? f.apply(FF.config, args) : fallback;
+  };
+  const isRealTl = (n) => cfgCall('isRealTl', [n], !!String(n == null ? '' : n).trim());
+  const directLabel = (a, ch) => cfgCall('directLabel', [a || {}, ch], ch === 'gv' ? 'Direct Agent (no TL)' : 'Direct Agent (APS)');
   const U = FF.util, S = FF.store, G = FF.gv, M = FF.model, C = FF.charts;
   const esc = U.esc;
   const card = (title, body, right) => `<section class="card"><div class="card-head"><h3>${title}</h3>${right ? `<div class="card-right">${right}</div>` : ''}</div><div class="card-body">${body}</div></section>`;
@@ -147,9 +156,9 @@ FF.pages = FF.pages || {};
     for (const r of rows) {
       if (r.channel !== 'First Forward') continue;
       const ak = r.id || r.name;
-      const a = agents.get(ak) || { agentName: r.name, tlName: r.tlName || 'Direct', total: 0, vc4: 0, vc20: 0, vc5p: 0, comm: 0, replacement: 0, days: new Set() };
+      const a = agents.get(ak) || { agentName: r.name, tlName: isRealTl(r.tlName) ? r.tlName : directLabel({ tlName: r.tlName }, r.channel === 'GV Partner' ? 'gv' : 'ff'), total: 0, vc4: 0, vc20: 0, vc5p: 0, comm: 0, replacement: 0, days: new Set() };
       a.total += r.n; addClass(a, r.group, r.n); if (r.type === 'REPLACEMENT') a.replacement += r.n; a.days.add(r.dateKey); agents.set(ak, a);
-      const tk = r.tlName || 'Direct';
+      const tk = isRealTl(r.tlName) ? r.tlName : directLabel({ tlName: r.tlName }, r.channel === 'GV Partner' ? 'gv' : 'ff');
       const t = tls.get(tk) || { tlName: tk, total: 0, vc4: 0, vc20: 0, vc5p: 0, comm: 0, agents: new Set(), days: new Set() };
       t.total += r.n; addClass(t, r.group, r.n); t.agents.add(ak); t.days.add(r.dateKey); tls.set(tk, t);
     }
@@ -207,9 +216,9 @@ FF.pages = FF.pages || {};
       if (/replacement/i.test(r.status)) gv.replacement++;
       gv.amount += r.commission || 0; gv.days.add(k); gvByDay.set(k, (gvByDay.get(k) || 0) + 1);
       const ak = r.agentId || r.agentName;
-      const a = agMap.get(ak) || { agentName: r.agentName, tlName: r.tlName || 'Direct', total: 0, vc4: 0, vc20: 0, vc5p: 0, comm: 0, replacement: 0, days: new Set() };
+      const a = agMap.get(ak) || { agentName: r.agentName, tlName: isRealTl(r.tlName) ? r.tlName : directLabel({ tlName: r.tlName }, r.channel === 'GV Partner' ? 'gv' : 'ff'), total: 0, vc4: 0, vc20: 0, vc5p: 0, comm: 0, replacement: 0, days: new Set() };
       a.total++; addClass(a, r.group, 1); if (/replacement/i.test(r.status)) a.replacement++; a.days.add(k); agMap.set(ak, a);
-      const tk = r.tlName || 'Direct';
+      const tk = isRealTl(r.tlName) ? r.tlName : directLabel({ tlName: r.tlName }, r.channel === 'GV Partner' ? 'gv' : 'ff');
       const t = tlMap.get(tk) || { tlName: tk, total: 0, vc4: 0, vc20: 0, vc5p: 0, comm: 0, agents: new Set(), days: new Set() };
       t.total++; addClass(t, r.group, 1); t.agents.add(ak); t.days.add(k); tlMap.set(tk, t);
     }

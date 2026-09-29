@@ -61,6 +61,10 @@ FF.config = {
     customAlerts: true, championEmail: false, championHour: 10, championTop: 3,
     followupTracker: true, followupDays: 3, followupHour: 10,
     dispatchPlan: true, suggestDays: 15,
+    // v3.11 — naye feature flags (Settings → Features se on/off ho sakte hain)
+    masterSearch: true, tabHeartbeat: true, themePacks: true, heatmap: true,
+    networkGraph: true, sparklines: true, reportCards: true, anomalyRadar: true,
+    chatCharts: true, levelUp: true, memoryLane: true,
     officeLat: 0, officeLng: 0
   },
   /** Feature flag padho — FF.config.feat('search') / FF.config.feat('alerts').lowCover */
@@ -124,6 +128,26 @@ FF.config = {
 
   // TL names that are NOT real team leaders (placeholder for direct agents) — hidden from every TL view.
   excludeTls: ['APS'],
+  // 🧍 Direct Agents & TLs — poore site ka ek hi rule (Settings → 🧍 Direct Agents).
+  // Direct agent = jiske paas asli TL nahi hai. Rule channel ke hisaab se:
+  //   • First Forward : TL Name = ffTlNames (default "APS") → Direct Agent (APS)
+  //   • GV Partner    : TL ID aur TL Name DONO blank (jinke paas TL hi nahi) → Direct Agent (no TL)
+  // Extra signals (off karne ke liye false karo): agent khud apna supervisor, placeholder TL naam,
+  // ya explicit isDirect/directAgent/tlExcluded flag. Direct agents TL ranking/TL table me nahi aate
+  // aur (dispatchExempt) unko stock dispatch bhi nahi bhejna hota.
+  direct: {
+    enabled: true,
+    ffTlNames: ['APS'],
+    gvNoTl: true,
+    gvSelfSupervised: true,
+    hideFromTlViews: true,
+    dispatchExempt: true,
+    labelFf: 'Direct Agent (APS)',
+    labelGv: 'Direct Agent (no TL)',
+    labelBoth: 'Direct Agent'
+  },
+  // TL naam jo sirf placeholder hain (kabhi asli TL nahi) — har channel me TL list se bahar.
+  directPlaceholderTls: ['DIRECT', 'DIRECT AGENT', 'DIRECTS', 'NO TL', 'NO TL ASSIGNED', 'NO SUPERVISOR', 'UNASSIGNED', 'NOT ASSIGNED', 'N/A', 'NA', '-', '--', '—'],
   thresholds: { coverRed: 7, coverOrange: 15, coverAmber: 30, inactiveDays: 3, topN: 10 },
   contacts: { teamWhatsapp: '', teamEmail: '', teamGroupLink: '', signature: 'Team First Forward' },
   pageSize: 50,
@@ -170,27 +194,96 @@ FF.config = {
     this.sheets = this.groupTabs('First Forward', true);
     this.gvSheets = this.groupTabs('GV Partner', true);
   },
-  /** True when a TL name is a placeholder (e.g. "APS") that must not appear in TL views. */
+  /** Direct-agent rules (Settings → 🧍 Direct Agents). */
+  directRules() { return this.direct || {}; },
+  /** FF direct TL names — `direct.ffTlNames` + legacy `excludeTls` (jaise APS). */
+  directTlNames() {
+    const d = this.directRules();
+    const list = [...(d.ffTlNames || []), ...(this.excludeTls || [])];
+    const seen = new Set();
+    return list.map((x) => String(x || '').trim()).filter((x) => { const k = x.toUpperCase(); if (!x || seen.has(k)) return false; seen.add(k); return true; });
+  },
+  /** True when a TL name is a placeholder (e.g. "APS", "Direct", "Unassigned") — never a real TL. */
   isExcludedTl(name) {
     const n = String(name || '').trim().toUpperCase();
     if (!n) return true;
-    return (this.excludeTls || []).some((x) => String(x).trim().toUpperCase() === n);
+    if (this.directTlNames().some((x) => x.toUpperCase() === n)) return true;
+    return (this.directPlaceholderTls || []).some((x) => String(x).trim().toUpperCase() === n);
   },
-  /** Shared FF/GV dispatch classification: direct/APS agents do not need stock dispatch. */
-  isDirectAgent(agent) {
+  /** 'ff' | 'gv' | '' — channel of an agent/row (explicit param, else from the object). */
+  directChannelOf(agent, channel) {
+    const explicit = String(channel || '').trim().toLowerCase();
+    if (explicit) return /^g/.test(explicit) ? 'gv' : /^f|^ff/.test(explicit) ? 'ff' : explicit;
+    if (!agent || typeof agent !== 'object') return '';
+    if (agent.isGv === true || agent.gv === true) return 'gv';
+    const raw = String(agent.channel || agent.network || agent.source || agent.segment || '').trim().toLowerCase();
+    if (/gv|partner/.test(raw)) return 'gv';
+    if (/ff|first|forward/.test(raw)) return 'ff';
+    return '';
+  },
+  /** True when the agent is "self-supervised": apna hi naam/ID supervisor column me likha hai. */
+  isSelfSupervised(agent) {
+    if (!agent || typeof agent !== 'object') return false;
+    const self = (a, b) => {
+      const x = String(a || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+      const y = String(b || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+      return Boolean(x && y && x === y);
+    };
+    return self(agent.tlName || agent.tl, agent.agentName || agent.name) || self(agent.tlId || agent.supervisorId, agent.agentId || agent.id);
+  },
+  /** `VC4`-style class/token signal: APS ya DIRECT kisi bhi class/channel column me. */
+  hasDirectToken(agent) {
+    if (!agent || typeof agent !== 'object') return false;
+    return [agent.agentClass, agent.tlClass, agent.channelClass, agent.stockClass]
+      .some((value) => /(^|[\s/_-])(APS|DIRECT)(?=$|[\s/_-])/i.test(String(value || '').trim()));
+  },
+  /**
+   * Shared FF/GV classification — kya ye agent DIRECT hai (koi asli TL nahi)?
+   * Channel do (ya agent.channel se auto): 'ff' | 'gv'.
+   *   FF : TL Name APS (ffTlNames) / placeholder / koi TL hi nahi.
+   *   GV : TL ID + TL Name dono khaali, ya agent hi apna supervisor.
+   * Channel pata na ho to dono rules ka union (safe side).
+   */
+  isDirectAgent(agent, channel) {
     if (!agent || typeof agent !== 'object') return false;
     if (agent.isDirect === true || agent.directAgent === true || agent.tlExcluded === true) return true;
-    const tl = String(agent.tlName || agent.tl || '').trim();
-    if (!tl && !String(agent.tlId || agent.supervisorId || '').trim()) return true;
-    if (tl && (this.isExcludedTl(tl) || /^(?:direct|direct agent|no tl)$/i.test(tl))) return true;
-    return [agent.agentClass, agent.tlClass, agent.channelClass]
-      .some((value) => /(^|[\s/_-])(APS|DIRECT)(?=$|[\s/_-])/i.test(String(value || '').trim()));
+    const d = this.directRules();
+    if (d.enabled === false && !agent.isDirect && !agent.directAgent && !agent.tlExcluded) return false;
+    const selfSupervised = d.gvSelfSupervised !== false && this.isSelfSupervised(agent);
+    const ffRule = () => {
+      const tl = String(agent.tlName || agent.tl || '').trim();
+      if (tl && this.isExcludedTl(tl)) return true;
+      if (!tl && !String(agent.tlId || agent.supervisorId || '').trim()) return true;
+      return selfSupervised;
+    };
+    const gvRule = () => {
+      const tl = String(agent.tlName || agent.tl || '').trim();
+      const id = String(agent.tlId || agent.supervisorId || '').trim();
+      if (d.gvNoTl !== false && !tl && !id) return true;
+      if (tl && this.isExcludedTl(tl)) return true;
+      return selfSupervised;
+    };
+    const ch = this.directChannelOf(agent, channel);
+    if (ch === 'gv') return gvRule() || this.hasDirectToken(agent);
+    if (ch === 'ff') return ffRule() || this.hasDirectToken(agent);
+    return ffRule() || gvRule() || this.hasDirectToken(agent);
+  },
+  /** Kya ye TL naam asli team leader hai (direct placeholder nahi)? */
+  isRealTl(name) { return !this.isExcludedTl(name); },
+  /** Agent ke liye site-wide label: "Direct Agent (APS)" / "Direct Agent (no TL)" / asli TL naam. */
+  directLabel(agent, channel) {
+    const ch = this.directChannelOf(agent, channel);
+    const d = this.directRules();
+    if (ch === 'gv') return d.labelGv || 'Direct Agent (no TL)';
+    if (ch === 'ff') return d.labelFf || 'Direct Agent (APS)';
+    return d.labelBoth || 'Direct Agent';
   },
   /** Merge server-side settings (Settings page) into this config. */
   apply(s) {
     if (!s || typeof s !== 'object') return;
     const pick = (k) => { if (s[k] !== undefined && s[k] !== null) this[k] = s[k]; };
-    ['appName', 'brand', 'tagline', 'logo', 'loginImage', 'loginAnimation', 'sheetId', 'gvSheetId', 'excludeTls', 'pageSize', 'allowSignup'].forEach(pick);
+    ['appName', 'brand', 'tagline', 'logo', 'loginImage', 'loginAnimation', 'sheetId', 'gvSheetId', 'excludeTls', 'pageSize', 'allowSignup', 'directPlaceholderTls'].forEach(pick);
+    if (s.direct) this.direct = { ...this.direct, ...s.direct };
     if (s.theme) this.theme = { ...this.theme, ...s.theme };
     if (s.thresholds) this.thresholds = { ...this.thresholds, ...s.thresholds };
     if (s.features) {
