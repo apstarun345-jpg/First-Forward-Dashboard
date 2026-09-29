@@ -95,7 +95,9 @@ export const PAGE_PERMISSIONS = [
   { key: 'activity', label: 'Wow Zone · Activity Calendar (heatmap + streak)', group: 'Wow Zone' },
   { key: 'network', label: 'Wow Zone · Team Network (TL–agent constellation)', group: 'Wow Zone' },
   { key: 'radar', label: 'Wow Zone · Anomaly Radar (spike / crash / stale auto-detect)', group: 'Wow Zone' },
-  { key: 'reportCards', label: 'Wow Zone · Agent Report Cards (printable monthly card)', group: 'Wow Zone' }
+  { key: 'reportCards', label: 'Wow Zone · Agent Report Cards (printable monthly card)', group: 'Wow Zone' },
+  { key: 'sprints', label: 'Wow Zone · Hourly Sprints (live TL/agent race per hour)', group: 'Wow Zone' },
+  { key: 'stockRadar', label: 'Cross Channel · Stock Radar (TL bubbles + suggested qty)', group: 'Cross Channel' }
 ];
 
 // Sheet-tab registry defaults (also mirrored in config.js). `enabled:false` hides a tab everywhere.
@@ -121,7 +123,7 @@ const allPermKeysNow = () => allPermKeys(db.settings);
 // Back-compat export (some tooling imported PERMISSIONS).
 export const PERMISSIONS = permissionsFor({ tabs: DEFAULT_TABS });
 const DEFAULT_USER_PERMS = ['home', 'executive', 'forecast', 'dataQuality', 'savedViews', 'reportStudio', 'followups', 'tagIssued', 'rangeReport', 'targets', 'dashboard', 'trend', 'stock', 'stockReport', 'performance', 'ffCommission', 'gvDashboard', 'gvTrend', 'gvStock', 'gvStockReport', 'gvPerformance', 'gvCommission', 'dualChannel', 'masterStock', 'compare', 'tv', 'teamMap',
-  'sheet:StockDataa', 'sheet:REPORT', 'sheet:GV Master', 'sheet:Tag Assignment', 'sheet:GV REPORT', 'charts', 'export', 'dispatchPlan', 'tlScorecard', 'voiceAssistant', 'arena', 'fame', 'warRoom', 'activity', 'network', 'radar', 'reportCards', 'directAgents', 'newAgents'];
+  'sheet:StockDataa', 'sheet:REPORT', 'sheet:GV Master', 'sheet:Tag Assignment', 'sheet:GV REPORT', 'charts', 'export', 'dispatchPlan', 'tlScorecard', 'voiceAssistant', 'arena', 'fame', 'warRoom', 'activity', 'network', 'radar', 'reportCards', 'directAgents', 'newAgents', 'sprints', 'stockRadar'];
 
 // Admin-controlled audience for automated notifications. `users` means all approved non-admin
 // users who have notification access; each user's own master/type preferences still apply.

@@ -46,7 +46,9 @@ window.FF = window.FF || {};
     { id: 'activity', icon: '📅', label: 'Activity Calendar', desc: 'GitHub-style heatmap · streak · poore saal ka pattern', perm: 'activity', group: 'Wow Zone' },
     { id: 'network', icon: '🕸️', label: 'Team Network', desc: 'TL centre · agents orbit — animated constellation', perm: 'network', group: 'Wow Zone' },
     { id: 'radar', icon: '🚨', label: 'Anomaly Radar', desc: 'Spike · crash · naya dhamaka · stale sheet auto-detect', perm: 'radar', group: 'Wow Zone' },
-    { id: 'reportCards', icon: '🧾', label: 'Agent Report Cards', desc: 'Monthly report card · grades · auto remarks · print/PDF', perm: 'reportCards', group: 'Wow Zone' }
+    { id: 'reportCards', icon: '🧾', label: 'Agent Report Cards', desc: 'Monthly report card · grades · auto remarks · print/PDF', perm: 'reportCards', group: 'Wow Zone' },
+    { id: 'sprints', icon: '⏰', label: 'Hourly Sprints', desc: 'Ghadi-ghadi ki race — is hour kaunsa TL/agent sabse tez? Live countdown + winner flash', perm: 'sprints', group: 'Wow Zone' },
+    { id: 'stockRadar', icon: '🗺️', label: 'Stock Radar', desc: 'TL bubbles — size = stock · colour = cover days · click → suggested qty (dono criteria)', perm: 'stockRadar', group: 'Cross Channel' }
   ];
   const GROUP_ICON = { 'Management': '🧭', 'First Forward': '🟦', 'GV Partner': '🟩', 'Cross Channel': '🔗', 'Workspace': '🗂️', 'Account': '👤', 'Wow Zone': '🎉' };
   const pageDef = (id) => PAGES.find((p) => p.id === id) || null;
@@ -76,7 +78,9 @@ window.FF = window.FF || {};
     settings: { label: 'सेटिंग्स' },
     newAgents: { label: 'नए एजेंट और TL बदलाव', desc: 'नए एजेंट · TL बदला / हटा — FF + GV अलग टेबल' },
     directAgents: { label: 'डायरेक्ट एजेंट और TL', desc: 'FF: TL Name APS · GV: TL ID + Name खाली — पूरी साइट पर एक ही नियम' },
-    fastagChampions: { label: 'फास्टैग चैंपियंस', desc: 'टॉप एजेंट/TL — VC4, कॉमर्शियल, चेसिस, रिप्लेसमेंट, रॉन्ग VRN · FF और GV' }
+    fastagChampions: { label: 'फास्टैग चैंपियंस', desc: 'टॉप एजेंट/TL — VC4, कॉमर्शियल, चेसिस, रिप्लेसमेंट, रॉन्ग VRN · FF और GV' },
+    sprints: { label: 'ओवर्ली स्प्रिंट', desc: 'हर घंटे की रेस — लाइव काउंटडाउन + विनर फ्लैश' },
+    stockRadar: { label: 'स्टॉक रडार', desc: 'टीएल बबल — साइज़ = स्टॉक · रंग = कवर दिन · क्लिक → सुझाई मात्रा (दोनों तरीके)' },
   };
   const HI_GROUPS = { 'Management': 'मैनेजमेंट', 'First Forward': 'फर्स्ट फॉरवर्ड', 'GV Partner': 'जीवी पार्टनर', 'Cross Channel': 'क्रॉस चैनल', 'Workspace': 'वर्कस्पेस', 'Account': 'अकाउंट', 'Sheets': 'शीट्स' };
   const EN_PAGES = {
@@ -832,6 +836,8 @@ window.FF = window.FF || {};
         .then(() => { if (FF.masterSearch) FF.masterSearch.mountTopbar(); })
         .catch(() => { if (FF.masterSearch) FF.masterSearch.mountTopbar(); });
     }
+    // 🔔 Office Bell — naya tag issue hua to "ting!" + floating ticker (features.officeBell)
+    if (FF.officeBell) FF.officeBell.mount();
     if (FF.wowzone) {
       if (!(FF.config.feat && FF.config.feat('themePacks') === false)) FF.wowzone.mountThemePicker();
       if (!(FF.config.feat && FF.config.feat('tabHeartbeat') === false)) {

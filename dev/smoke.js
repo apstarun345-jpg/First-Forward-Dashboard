@@ -499,6 +499,51 @@ await run('v3.11 · War Room detailed breakdown (VC4/VC20/VC5+ · chassis · rep
     if (!html.includes(label)) throw new Error(`War Room detail me "${label}" nahi mila`);
   }
 }, true);
+await run('v3.16 · Home GV aaj KPI cards (VC4/VC20/VC5+/Chassis/Replacement + Expected Today)', async () => {
+  const r = root(); await pages.home.render(r, {}, {}); await settle(250);
+  const html = [r.innerHTML, ...REG.values().map((e) => e.innerHTML), ...body.children.map((c) => c.innerHTML)].join('\n');
+  for (const label of ['GV · Aaj ka live', 'Aaj Total', 'VC4 tags', 'VC20 tags', 'VC5+ tags', 'Chassis tags', 'Replacement tags', 'Expected Today', 'Aaj ki Rate', 'home-morning-card']) {
+    if (!html.includes(label)) throw new Error(`Home GV aaj section me "${label}" nahi mila`);
+  }
+  // spec attribute me & HTML-escape hota hai (&amp;) — browser dataset par wapas & ban jata hai
+  if (!/data-kpi="src=gv&amp;scope=day&amp;date=\d{4}-\d{2}-\d{2}&amp;f=vc4"/.test(html)) throw new Error('VC4 card clickable data-kpi missing');
+  if (!/data-kpi="src=gv&amp;scope=day&amp;date=\d{4}-\d{2}-\d{2}&amp;f=chassis"/.test(html)) throw new Error('Chassis card clickable data-kpi missing');
+}, false);
+await run('v3.16 · Hourly Sprints (countdown + TL/agent leaderboard + winners)', async () => {
+  const r = root(); await pages.sprints.render(r, {}, {}); await settle(150);
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const label of ['Hourly Sprints', 'SPRINT CHALU HAI', 'spr-cd', 'TL Sprint Leaderboard', 'Agent Sprint Leaderboard', 'Sprint winners', 'spr-full']) {
+    if (!html.includes(label)) throw new Error(`Hourly Sprints me "${label}" nahi mila`);
+  }
+}, true);
+await run('v3.16 · Stock Radar (bubbles + cover rings + suggested dono criteria)', async () => {
+  const r = root(); await pages.stockRadar.render(r, { ch: 'ff' }, {}); await settle(150);
+  let html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const label of ['Stock Radar', 'radar-svg', 'radar-bub', 'Critical TLs', '🔴 <7 din', 'w/o stock']) {
+    if (!html.includes(label)) throw new Error(`Stock Radar (FF) me "${label}" nahi mila`);
+  }
+  const r2 = root(); await pages.stockRadar.render(r2, { ch: 'gv' }, {}); await settle(150);
+  html = r2.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  if (!html.includes('radar-svg') && !html.includes('Is channel ka TL stock data')) throw new Error('Stock Radar (GV) render nahi hua');
+}, true);
+await run('v3.16 · Good Morning card (yesterday + MTD + expected calculations)', async () => {
+  if (!FF.morningCard) throw new Error('FF.morningCard missing');
+  const y = FF.morningCard.yesterdayStats();
+  if (!Number.isFinite(y.yestTotal) || y.yestTotal < 0) throw new Error('yesterday total invalid');
+  const m = FF.morningCard.mtdStats();
+  if (!Number.isFinite(m.total) || m.daysElapsed < 1) throw new Error('mtd stats invalid');
+  const e = FF.morningCard.expectedToday();
+  if (e !== null && (!Number.isFinite(e) || e < 0)) throw new Error('expectedToday invalid');
+  log(`      yesterday ${y.yestTotal} · MTD ${m.total} · expected ${e}`);
+}, false);
+await run('v3.16 · Office Bell (module + lightweight live count query)', async () => {
+  if (!FF.officeBell || typeof FF.officeBell.mount !== 'function') throw new Error('FF.officeBell.mount missing');
+  const e = FF.config.eir;
+  const today = FF.util.dateKey(new Date());
+  const t = await FF.data.query(e.sheet, `select count(${e.tagId}) where ${e.date} = date '${today}'`, { timeoutMs: 20000, fresh: true });
+  if (!t || !t.rows) throw new Error('office bell live count query failed');
+  log(`      live count query ok (${t.rows.length} row)`);
+}, false);
 await run('v3.11 · Activity Calendar (heatmap + streak + sparkline board)', async () => {
   const r = root(); await pages.activity.render(r, {}, {});
   const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
