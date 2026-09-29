@@ -17,4 +17,4 @@
 * Bug: EHLO ki aakhri line (`250 STARTTLS`) drop ho jaati thi → AUTH STARTTLS se pehle → `530 Must issue a STARTTLS command first`. Fixed.
 * Render **free plan** outbound SMTP (25/465/587) block karta hai → HTTPS transport: Google Apps Script `MailApp` (Code.gs `mail`), Resend (`RESEND_API_KEY`), Brevo (`BREVO_API_KEY`); `MAIL_PROVIDER=auto|smtp|apps-script|resend|brevo`.
 * Settings → Email → **Diagnose** (DNS/port/TLS/AUTH step-by-step) + status; Gmail app-password ke spaces auto-strip.
-* Apps Script: naya `Code.gs` paste → `authorizeMail_` run + Allow → Deploy → Manage deployments → Edit → New version.
+* Apps Script: naya `Code.gs` paste → `authorizeMail` run + Allow → Deploy → Manage deployments → Edit → New version.

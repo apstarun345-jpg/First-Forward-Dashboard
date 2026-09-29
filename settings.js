@@ -1045,7 +1045,7 @@ FF.pages = FF.pages || {};
       <div class="save-bar"><button class="btn primary" data-save="feat-email">💾 Save</button><button class="btn" id="em-test">📧 Test email bhejo</button><button class="btn" id="em-diag">🩺 Diagnose</button><span class="dim small" id="save-msg-feat-email"></span></div>
       <div id="em-diag-out" class="mail-diag" hidden></div>
       <div class="mail-help">
-        <p class="dim small"><b>🟢 Sabse aasaan (Render free par bhi):</b> Google Apps Script relay. Storage wala hi script use hota hai — <code>google-apps-script/Code.gs</code> ka naya code paste karo → ▶ Run <code>authorizeMail_</code> (Allow) → Deploy → Manage deployments → Edit → <b>New version</b>. Provider = Auto/Apps Script, <b>To</b> bharo, Test dabao. Gmail limit ≈ 100 mail/din.</p>
+        <p class="dim small"><b>🟢 Sabse aasaan (Render free par bhi):</b> Google Apps Script relay. Storage wala hi script use hota hai — <code>google-apps-script/Code.gs</code> ka naya code paste karo → ▶ Run <code>authorizeMail</code> (Allow) → Deploy → Manage deployments → Edit → <b>New version</b>. Provider = Auto/Apps Script, <b>To</b> bharo, Test dabao. Gmail limit ≈ 100 mail/din.</p>
         <p class="dim small"><b>📮 SMTP:</b> Gmail → host <code>smtp.gmail.com</code>, port <b>587</b> + TLS unchecked, ya <b>465</b> + TLS checked; App Password (2-Step Verification ON). <b>Render free plan SMTP block karta hai (26 Sep 2025 se)</b> — Diagnose bata dega ki port khula hai ya nahi. “Test email” pehle durable save confirm karta hai, phir bhejta hai.</p>
       </div>`);
     const announceCard = section('📢 Announcement <span class="dim">(sab users ko ek message)</span>', `

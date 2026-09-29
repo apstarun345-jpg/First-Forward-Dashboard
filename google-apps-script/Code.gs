@@ -24,7 +24,7 @@ const CHUNK = 45000; // a Google Sheets cell holds max 50,000 characters
 const KINDS = ['users', 'sessions', 'settings', 'resets', 'notify'];
 
 /** Run this ONCE from the Apps Script editor (▶ Run) to grant the "send email" permission. */
-function authorizeMail_() { Logger.log('Mail quota left today: ' + MailApp.getRemainingDailyQuota()); }
+function authorizeMail() { Logger.log('Mail quota left today: ' + MailApp.getRemainingDailyQuota()); }
 
 function doGet() {
   return json_({ ok: true, service: 'apnapayment-storage', note: 'POST only. Storage is working if you can see this.' });
@@ -39,7 +39,7 @@ function doPost(e) {
 
   // 📧 Mail relay (HTTPS) — Render free blocks SMTP ports, so the dashboard can send its emails
   // (login OTP, daily digest, champion certificates, test mail) THROUGH this script via Gmail.
-  // First time: after pasting this code, run any function once (e.g. authorizeMail_) OR redeploy
+  // First time: after pasting this code, run any function once (e.g. authorizeMail) OR redeploy
   // as "New version" and click Allow when Google asks for the "send email" permission.
   if (body.action === 'mailping') {
     try { return json_({ ok: true, quota: MailApp.getRemainingDailyQuota(), account: Session.getEffectiveUser().getEmail() }); }
