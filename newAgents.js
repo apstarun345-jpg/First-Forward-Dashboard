@@ -134,7 +134,7 @@ FF.pages = FF.pages || {};
     const q = r.q;
     const mobile = !canContacts() ? '🔒' : (q && q.mobile) || '—';
     const stock = q ? U.fmt(q.stock.total) : '—';
-    const sug = !q ? '—' : q.tagRequired ? `<b class="sug-chip direct">🏷️ ${U.sugText ? U.sugText(q.dispatch.sugVc4 + q.dispatch.sugComm, (q.dispatch.sugVc4Gross || 0) + (q.dispatch.sugCommGross || 0)) : U.fmt(q.dispatch.sugVc4 + q.dispatch.sugComm)} tags</b>` : q.direct ? '<span class="dim">No dispatch</span>' : U.sugCell(q.dispatch.sugVc4, q.dispatch.sugVc4Gross || 0);
+    const sug = !q ? '—' : q.tagRequired ? `<b class="sug-chip direct">🏷️ ${U.sugText(q.calc.total.net, q.calc.total.gross)} tags</b>` : q.direct ? '<span class="dim">No dispatch</span>' : U.sugCell(q.calc.total.net, q.calc.total.gross);
     return { mobile, stock, sug, prio: q ? prioChip(q.priority) : '<span class="dim">—</span>', status: q && q.status ? esc(q.status) : '—' };
   }
   const rowAttrs = (r) => `class="clickable" data-na-open="${esc(r.ch)}|${esc(r.name)}|${esc(r.id)}"`;

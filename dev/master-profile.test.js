@@ -22,6 +22,7 @@ globalThis.document = {
 ['config', 'util', 'model', 'gv', 'store', 'charts'].forEach((f) => require(path.join(ROOT, `${f}.js`)));
 const FF = globalThis.FF;
 const U = FF.util;
+U.runRateDays = () => 15; // run-rate = issued ÷ (today − 1): test me fixed 15 din
 const ym = U.ymKey(new Date());
 const prev = U.prevMonthKey(ym);
 
@@ -87,7 +88,7 @@ test('Direct + High/Medium = TAG REQUIRED (FF and GV); Low = no dispatch', async
   assert.equal(ffLow.tagRequired, false); assert.match(MP.html(ffLow), /No dispatch/);
   const gvMed = await MP.build(person('gv-agent', 'GV Direct', 'G002'));
   assert.equal(gvMed.direct, true); assert.equal(gvMed.tagRequired, true);
-  assert.equal(gvMed.dispatch.sugVc4, 7, 'sheet Suggested Dispatch Qty wins');
+  assert.equal(gvMed.dispatch.sugVc4, 38, 'formula: 40 ÷ 15 × 15 − stock 2 (sheet qty ab use nahi hoti)');
   assert.equal(MP.suggest(4, 10), 50);
 });
 
@@ -106,7 +107,7 @@ test('TL profile: totals, class sums, TL-level vs agent-wise suggestion, agents 
 test('GV agent + GV TL profiles', async () => {
   const a = await MP.build(person('gv-agent', 'GV Ramesh', 'G001'));
   assert.equal(a.mobile, '9111111111'); assert.equal(a.tlStock.total, 30);
-  assert.equal(a.dispatch.sugVc4, Math.max(0, Math.ceil(10 * 15 - 5)));
+  assert.equal(a.dispatch.sugVc4, 95, 'run-rate 100/15 × 15 − stock 5');
   const c = a.classes.find((r) => r.cls === 'VC20'); assert.equal(c.cur, 1);
   const tl = await MP.build(person('gv-tl', 'GV TL'));
   assert.equal(tl.agentCount, 2); assert.equal(tl.totals.curTotal, 120);
@@ -120,4 +121,19 @@ test('quick snapshot + contacts gate + unsupported kinds', async () => {
   FF.auth.can = (k) => k !== 'contacts';
   assert.doesNotMatch(MP.html(await MP.build(person('gv-agent', 'GV Ramesh', 'G001'))), /9111111111/);
   assert.ok(!MP.csvRows(await MP.build(person('gv-agent', 'GV Ramesh', 'G001'))).some((r) => r[1] === '9111111111'));
+});
+
+test('dispatch calculation block: run-rate = issue ÷ (today−1), required, with / w/o stock, cover', async () => {
+  const pr = await MP.build(person('ff-agent', 'Ravi Kumar', 'R101'));
+  const t = pr.calc.total;
+  assert.equal(t.elapsed, 15); assert.equal(t.rate, 8);              // 120 ÷ 15
+  assert.equal(t.required, 120);                                     // 8 × 15 din
+  assert.equal(t.net, 106); assert.equal(t.gross, 120);              // 120 − stock 14
+  assert.ok(Math.abs(t.cover - 14 / 8) < 1e-9);
+  assert.equal(pr.calc.vc4.net, 80); assert.equal(pr.calc.comm.net, 26);
+  const html = MP.html(pr);
+  assert.match(html, /Dispatch calculation/); assert.match(html, /With stock dispatch/); assert.match(html, /W\/o stock dispatch/);
+  assert.match(MP.waText(pr), /Run-rate 8\/day/);
+  const tl = await MP.build(person('ff-tl', 'TL One'));
+  assert.equal(tl.calc.total.rate, 10); assert.equal(tl.calc.total.net, 80, 'TL: 150 ÷ 15 × 15 − TL stock 70');
 });

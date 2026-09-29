@@ -102,20 +102,18 @@ window.FF = window.FF || {};
   function ffAgentProfile(p, light) {
     const a = findFfAgent(p.name, p.sub);
     const P = perf();
-    const elapsed = safeCall(() => P && P.daysElapsed && P.daysElapsed(), null);
-    const out = { kind: 'ff-agent', channel: 'First Forward', ch: 'ff', name: p.name, id: (a && (a.agentId || a.id)) || p.sub || '', found: !!a };
+        const out = { kind: 'ff-agent', channel: 'First Forward', ch: 'ff', name: p.name, id: (a && (a.agentId || a.id)) || p.sub || '', found: !!a };
     const ac = rowsOf('agentClass'), agRows = rowsOf('agents'), stk = rowsOf('stockAgents');
     const n = norm(p.name);
     if (a) {
-      const avgVc4 = a.avgVc4 || (elapsed ? a.curVc4 / elapsed : 0) || 0;
-      const avgNvc4 = a.avgNvc4 || (elapsed ? a.curNvc4 / elapsed : 0) || 0;
+      const avgVc4 = U.runRate(a.curVc4), avgNvc4 = U.runRate(a.curNvc4);
       Object.assign(out, {
         mobile: mobileFor(a.name, a.agentId || a.id, a.mobile), tl: { name: a.tlName, id: a.tlId, mobile: a.tlMobile },
         status: a.agentStatus || '', lastActive: a.lastActive || '', priority: a.priority || '', growth: a.growth || '',
         direct: !!a.tlExcluded, directLabel: a.tlExcluded ? FF.config.directLabel(a, 'ff') : '',
         stock: { vc4: num(a.stockVc4), comm: num(a.stockNvc4), total: num(a.stockTotal) || num(a.stockVc4) + num(a.stockNvc4) },
         tlStock: { vc4: num(a.tlStockVc4), comm: num(a.tlStockNvc4), total: num(a.tlStockTotal), has: a.tlStockTotal != null || a.tlStockVc4 != null },
-        dispatch: { days: suggestDays(), avgVc4, avgComm: avgNvc4, cover: a.agentStockDays != null && a.agentStockDays !== '' && !Number.isNaN(Number(a.agentStockDays)) ? Number(a.agentStockDays) : null, sugVc4: suggest(avgVc4, a.stockVc4), sugComm: suggest(avgNvc4, a.stockNvc4), sugVc4Gross: suggestGro(avgVc4), sugCommGross: suggestGro(avgNvc4) },
+        dispatch: { days: suggestDays(), avgVc4, avgComm: avgNvc4, cover: avgVc4 > 0 ? num(a.stockVc4) / avgVc4 : null, sugVc4: suggest(avgVc4, a.stockVc4), sugComm: suggest(avgNvc4, a.stockNvc4), sugVc4Gross: suggestGro(avgVc4), sugCommGross: suggestGro(avgNvc4) },
         totals: { curVc4: num(a.curVc4), curComm: num(a.curNvc4), curTotal: num(a.curTotal), lastVc4: num(a.lastVc4), lastComm: num(a.lastNvc4), lastTotal: num(a.lastTotal) },
         week: a.week || [], weekLabels: safeCall(() => P.dayLabels && P.dayLabels(), []) || []
       });
@@ -138,16 +136,13 @@ window.FF = window.FF || {};
     const agents = ffAgents().filter((a) => !a.tlExcluded && norm(a.tlName) === n);
     const src = agents.find((a) => a.tlStockTotal != null) || agents[0] || null;
     const P = perf();
-    const elapsed = safeCall(() => P && P.daysElapsed && P.daysElapsed(), null);
-    const sumK = (k) => U.sum(agents, (a) => num(a[k]));
-    const avgVc4 = (src && src.tlAvgVc4) || (elapsed ? sumK('curVc4') / elapsed : 0) || 0;
-    const avgComm = (src && src.tlAvgNvc4) || (elapsed ? sumK('curNvc4') / elapsed : 0) || 0;
+        const sumK = (k) => U.sum(agents, (a) => num(a[k]));
+    const avgVc4 = U.runRate(sumK('curVc4')), avgComm = U.runRate(sumK('curNvc4'));
     const stock = src && src.tlStockTotal != null
       ? { vc4: num(src.tlStockVc4), comm: num(src.tlStockNvc4), total: num(src.tlStockTotal) }
       : { vc4: sumK('stockVc4'), comm: sumK('stockNvc4'), total: sumK('stockTotal') };
     const rowsA = agents.map((a) => {
-      const av = a.avgVc4 || (elapsed ? a.curVc4 / elapsed : 0) || 0;
-      const avc = a.avgNvc4 || (elapsed ? a.curNvc4 / elapsed : 0) || 0;
+      const av = U.runRate(a.curVc4), avc = U.runRate(a.curNvc4);
       return { name: a.name, id: a.agentId || a.id, mobile: mobileFor(a.name, a.agentId || a.id, a.mobile), priority: a.priority || '', stockVc4: num(a.stockVc4), stockComm: num(a.stockNvc4), stockTotal: num(a.stockTotal), cur: num(a.curTotal), last: num(a.lastTotal), curVc4: num(a.curVc4), curComm: num(a.curNvc4), sugVc4: suggest(av, a.stockVc4), sugComm: suggest(avc, a.stockNvc4), sugVc4Gross: suggestGro(av), sugCommGross: suggestGro(avc) };
     }).sort((x, y) => y.cur - x.cur);
     const out = {
@@ -155,7 +150,7 @@ window.FF = window.FF || {};
       mobile: (src && src.tlMobile && !/^na$/i.test(src.tlMobile)) ? src.tlMobile : '', tl: { name: p.name, id: (src && src.tlId) || '', mobile: (src && src.tlMobile) || '' },
       status: (src && src.tlStatus) || '', lastActive: (src && src.tlLastActive) || '', priority: (src && prioOf(src.tlPriority)) || '', commPriority: (src && prioOf(src.tlCommPriority)) || '',
       stock, tlStock: { ...stock, has: true },
-      dispatch: { days: suggestDays(), avgVc4, avgComm, cover: src && src.tlVc4Days != null ? Number(src.tlVc4Days) : null, sugVc4: suggest(avgVc4, stock.vc4), sugComm: suggest(avgComm, stock.comm), sugVc4Gross: suggestGro(avgVc4), sugCommGross: suggestGro(avgComm), sumAgentVc4: U.sum(rowsA, (r) => r.sugVc4), sumAgentComm: U.sum(rowsA, (r) => r.sugComm), sumAgentVc4Gross: U.sum(rowsA, (r) => r.sugVc4Gross), sumAgentCommGross: U.sum(rowsA, (r) => r.sugCommGross) },
+      dispatch: { days: suggestDays(), avgVc4, avgComm, cover: avgVc4 > 0 ? stock.vc4 / avgVc4 : null, sugVc4: suggest(avgVc4, stock.vc4), sugComm: suggest(avgComm, stock.comm), sugVc4Gross: suggestGro(avgVc4), sugCommGross: suggestGro(avgComm), sumAgentVc4: U.sum(rowsA, (r) => r.sugVc4), sumAgentComm: U.sum(rowsA, (r) => r.sugComm), sumAgentVc4Gross: U.sum(rowsA, (r) => r.sugVc4Gross), sumAgentCommGross: U.sum(rowsA, (r) => r.sugCommGross) },
       totals: { curVc4: sumK('curVc4'), curComm: sumK('curNvc4'), curTotal: sumK('curTotal'), lastVc4: sumK('lastVc4'), lastComm: sumK('lastNvc4'), lastTotal: sumK('lastTotal') },
       agents: rowsA, agentCount: agents.length
     };
@@ -173,7 +168,7 @@ window.FF = window.FF || {};
   }
   const prioOf = (t) => { const s = clean(t).replace(/[^\w\s]/g, '').toLowerCase(); if (/high|urgent|critical/.test(s)) return 'High'; if (/medium|slight/.test(s)) return 'Medium'; if (/low/.test(s)) return 'Low'; return clean(t); };
 
-  const gvDaily = (r, cur) => (r.curDays ? cur / Math.max(1, r.curDays) : 0);
+  const gvDaily = (r, cur) => U.runRate(cur);
   function gvClassRows(match, curYm, lastYm) {
     const master = safeCall(() => (FF.gv && FF.gv.rows ? FF.gv.rows() : []), []) || [];
     return master.filter(match).map((r) => ({ ym: r.ym, cls: r.cls, n: 1 }));
@@ -190,7 +185,7 @@ window.FF = window.FF || {};
         direct, directLabel: direct ? FF.config.directLabel(r, 'gv') : '',
         stock: { vc4: num(r.stockVc4), comm: num(r.stockComm), total: num(r.stockTotal) || num(r.stockVc4) + num(r.stockComm) },
         tlStock: { vc4: num(r.tlStockVc4), comm: num(r.tlStockComm), total: num(r.tlStockTotal), has: !direct && (r.tlStockTotal != null) },
-        dispatch: { days: suggestDays(), avgVc4, avgComm, cover: avgVc4 > 0 ? num(r.stockVc4) / avgVc4 : null, given, minRequired: num(r.minRequired), sugVc4: given > 0 ? given : suggest(avgVc4, r.stockVc4), sugComm: suggest(avgComm, r.stockComm), sugVc4Gross: suggestGro(avgVc4), sugCommGross: suggestGro(avgComm) },
+        dispatch: { days: suggestDays(), avgVc4, avgComm, cover: avgVc4 > 0 ? num(r.stockVc4) / avgVc4 : null, given, minRequired: num(r.minRequired), sugVc4: suggest(avgVc4, r.stockVc4), sugComm: suggest(avgComm, r.stockComm), sugVc4Gross: suggestGro(avgVc4), sugCommGross: suggestGro(avgComm) },
         totals: { curVc4: num(r.curVc4), curComm: num(r.curComm), curTotal: num(r.curTotal), lastVc4: num(r.lastVc4), lastComm: num(r.lastComm), lastTotal: num(r.lastTotal) }
       });
     } else {
@@ -215,12 +210,11 @@ window.FF = window.FF || {};
     const list = gvReport().filter((r) => norm(r.tlName) === n && !safeCall(() => FF.config.isDirectAgent(r, 'gv'), false));
     const src = list[0] || null;
     const sumK = (k) => U.sum(list, (r) => num(r[k]));
-    const days = Math.max(1, ...list.map((r) => num(r.curDays)), 1);
-    const avgVc4 = sumK('curVc4') / days, avgComm = sumK('curComm') / days;
+    const avgVc4 = U.runRate(sumK('curVc4')), avgComm = U.runRate(sumK('curComm'));
     const stock = src && src.tlStockTotal != null ? { vc4: num(src.tlStockVc4), comm: num(src.tlStockComm), total: num(src.tlStockTotal) } : { vc4: sumK('stockVc4'), comm: sumK('stockComm'), total: sumK('stockTotal') };
     const rowsA = list.map((r) => {
       const av = gvDaily(r, r.curVc4), avc = gvDaily(r, r.curComm);
-      return { name: r.agentName, id: r.agentId, mobile: mobileFor(r.agentName, r.agentId, r.mobile), priority: prioOf(r.priority), stockVc4: num(r.stockVc4), stockComm: num(r.stockComm), stockTotal: num(r.stockTotal), cur: num(r.curTotal), last: num(r.lastTotal), curVc4: num(r.curVc4), curComm: num(r.curComm), sugVc4: num(r.suggestedDispatch) > 0 ? num(r.suggestedDispatch) : suggest(av, r.stockVc4), sugComm: suggest(avc, r.stockComm), sugVc4Gross: suggestGro(av), sugCommGross: suggestGro(avc) };
+      return { name: r.agentName, id: r.agentId, mobile: mobileFor(r.agentName, r.agentId, r.mobile), priority: prioOf(r.priority), stockVc4: num(r.stockVc4), stockComm: num(r.stockComm), stockTotal: num(r.stockTotal), cur: num(r.curTotal), last: num(r.lastTotal), curVc4: num(r.curVc4), curComm: num(r.curComm), sugVc4: suggest(av, r.stockVc4), sugComm: suggest(avc, r.stockComm), sugVc4Gross: suggestGro(av), sugCommGross: suggestGro(avc) };
     }).sort((x, y) => y.cur - x.cur);
     const out = {
       kind: 'gv-tl', channel: 'GV Partner', ch: 'gv', name: p.name, id: (src && src.tlId) || p.sub || '', found: !!list.length,
@@ -243,7 +237,22 @@ window.FF = window.FF || {};
     return out;
   }
 
-  const BUILDERS = { 'ff-agent': ffAgentProfile, 'gv-agent': gvAgentProfile, 'ff-tl': ffTlProfile, 'gv-tl': gvTlProfile };
+  /** 🧮 Ek hi formula: run-rate = issued ÷ (today−1) · required = run-rate × din · with stock = required − stock · w/o stock = required · cover = stock ÷ run-rate. */
+  function withCalc(pr) {
+    if (!pr) return pr;
+    const t = pr.totals || {}, s = pr.stock || {};
+    const mk = (cur, last, stock) => U.dispatchCalc({ cur: num(cur), last: num(last), stock: num(stock) });
+    pr.calc = {
+      vc4: mk(t.curVc4, t.lastVc4, s.vc4),
+      comm: mk(t.curComm, t.lastComm, s.comm),
+      total: mk(t.curTotal, t.lastTotal, s.total)
+    };
+    return pr;
+  }
+  const BUILDERS = {
+    'ff-agent': (p, l) => withCalc(ffAgentProfile(p, l)), 'gv-agent': (p, l) => withCalc(gvAgentProfile(p, l)),
+    'ff-tl': (p, l) => withCalc(ffTlProfile(p, l)), 'gv-tl': (p, l) => withCalc(gvTlProfile(p, l))
+  };
   const supports = (person) => !!(person && BUILDERS[person.kind]);
   /** Sync (already-loaded data) — light snapshot for suggestion rows / kundli cards. */
   function quick(person) {
@@ -283,7 +292,19 @@ window.FF = window.FF || {};
       return { vc4: tagPair(d.sugVc4, d.sugVc4Gross || 0), comm: tagPair(d.sugComm, d.sugCommGross || 0), note: `🏷️ <b>TAG REQUIRED</b> — ${esc(pr.directLabel || 'Direct agent')} · stock box nahi jaata, par ${esc(pr.priority)} priority hai to tags chahiye. Suggested ${d.days} din ke run-rate par.` };
     }
     if (pr.direct) return { vc4: '<span class="dim">No dispatch</span>', comm: '<span class="dim">No dispatch</span>', note: `🚫 ${esc(pr.directLabel || 'Direct agent')} — priority ${esc(pr.priority || 'Low')}: abhi dispatch / tags ki zarurat nahi.` };
-    return { vc4: sugPairHtml(d.sugVc4, d.sugVc4Gross || 0), comm: sugPairHtml(d.sugComm, d.sugCommGross || 0), note: isTl ? `TL-level = TL avg/day × ${d.days} din − TL stock = <b>stock ke baad</b> · bina stock = avg/day × ${d.days} · agents ka jod: VC4 <b>${fmt(d.sumAgentVc4)}</b> (w/o ${fmt(d.sumAgentVc4Gross || 0)}) · Comm <b>${fmt(d.sumAgentComm)}</b> (w/o ${fmt(d.sumAgentCommGross || 0)})` : `Suggested = avg/day × ${d.days} din − stock = <b>stock ke baad</b> · bina stock ghataye = avg/day × ${d.days}${d.given ? ' (VC4: sheet ka Suggested Dispatch Qty)' : ''}` };
+    return { vc4: sugPairHtml(d.sugVc4, d.sugVc4Gross || 0), comm: sugPairHtml(d.sugComm, d.sugCommGross || 0), note: isTl ? `TL-level = TL avg/day × ${d.days} din − TL stock = <b>stock ke baad</b> · bina stock = avg/day × ${d.days} · agents ka jod: VC4 <b>${fmt(d.sumAgentVc4)}</b> (w/o ${fmt(d.sumAgentVc4Gross || 0)}) · Comm <b>${fmt(d.sumAgentComm)}</b> (w/o ${fmt(d.sumAgentCommGross || 0)})` : `Suggested = avg/day × ${d.days} din − stock = <b>stock ke baad</b> · bina stock ghataye = avg/day × ${d.days}` };
+  }
+
+  const coverBadge = (c) => (c == null ? '<span class="dim">—</span>' : `<span class="badge ${c < 7 ? 'red' : c < 15 ? 'amber' : 'green'}">${fmt(c, true)} din</span>`);
+  function calcHtml(pr) {
+    const c = pr.calc;
+    if (!c) return '';
+    const days = c.total.days, el = c.total.elapsed;
+    const row = (label, x, strong) => `<tr class="${strong ? 'row-strong' : ''}"><td><b>${label}</b></td><td class="num">${fmt(x.last)}</td><td class="num">${fmt(x.cur)}</td><td class="num">${fmt(x.rate, true)}</td><td class="num">${fmt(x.required)}</td><td class="num">${fmt(x.stock)}</td><td class="num"><b class="sug-chip">${fmt(x.net)}</b></td><td class="num"><b class="sug-chip wo">${fmt(x.gross)}</b></td><td class="num">${coverBadge(x.cover)}</td></tr>`;
+    const m = pr.months || {};
+    return `<section class="mp-sec mp-calc"><h4>🧮 Dispatch calculation · ${fmt(days)} din</h4>
+      <p class="dim small">Run-rate = is month ke issue ÷ <b>(aaj − 1) = ${fmt(el)} din</b> · Required = run-rate × <b>${fmt(days)}</b> din · <b>With stock</b> = Required − stock · <b>W/o stock</b> = Required · Cover = stock ÷ run-rate</p>
+      <div class="table-wrap"><table class="tbl compact"><thead><tr><th>Tag</th><th class="num">${esc(monthLabel(m.last) || 'Last month')}</th><th class="num">${esc(monthLabel(m.cur) || 'This month')}</th><th class="num">Run-rate / day</th><th class="num">× ${fmt(days)} din</th><th class="num">Stock</th><th class="num">With stock dispatch</th><th class="num">W/o stock dispatch</th><th class="num">Cover</th></tr></thead><tbody>${row('VC4', c.vc4)}${row('Commercial', c.comm)}</tbody><tfoot>${row('Total', c.total, true).replace('<tr class="row-strong">', '<tr class="row-total">')}</tfoot></table></div></section>`;
   }
 
   function chartsHtml(pr) {
@@ -332,7 +353,7 @@ window.FF = window.FF || {};
     const kpis = `<div class="mp-kpis">
       ${kpi(isTl ? 'TL stock (total)' : 'Agent stock', fmt(s.total), `VC4 ${fmt(s.vc4)} · Commercial ${fmt(s.comm)}`, 'k1')}
       ${isTl ? '' : kpi('TL stock', ts.has ? fmt(ts.total) : '—', ts.has ? `VC4 ${fmt(ts.vc4)} · Comm ${fmt(ts.comm)}` : (pr.direct ? 'Direct — koi TL nahi' : ''), 'k2')}
-      ${kpi('Dispatch priority', prioChip(pr.priority), d.cover != null ? `Cover ${fmt(d.cover, true)} din` : '', 'k3')}
+      ${kpi('Dispatch priority', prioChip(pr.priority), pr.calc && pr.calc.total.cover != null ? `Cover ${fmt(pr.calc.total.cover, true)} din (all tags)` : (d.cover != null ? `Cover ${fmt(d.cover, true)} din` : ''), 'k3')}
       ${kpi(pr.tagRequired ? `Tags required · VC4 · ${d.days} din` : `Suggested VC4 · ${d.days} din`, sg.vc4, `avg ${fmt(d.avgVc4, true)}/day × ${d.days} din${pr.tagRequired ? '' : ` · stock − ${fmt(s.vc4)}`}`, pr.tagRequired ? 'k7' : 'k4')}
       ${kpi(pr.tagRequired ? 'Tags required · Comm.' : 'Suggested Commercial', sg.comm, `avg ${fmt(d.avgComm, true)}/day${pr.tagRequired ? '' : ` · stock − ${fmt(s.comm)}`}`, pr.tagRequired ? 'k7' : 'k5')}
       ${kpi('Issued this month', fmt(t.curTotal), `VC4 ${fmt(t.curVc4)} · Comm ${fmt(t.curComm)}`, 'k6')}
@@ -351,6 +372,7 @@ window.FF = window.FF || {};
       </tbody><tfoot><tr class="row-total"><td colspan="3">TL total</td><td class="num">${fmt(U.sum(pr.agents, (a) => a.stockVc4))}</td><td class="num">${fmt(U.sum(pr.agents, (a) => a.stockComm))}</td><td class="num">${fmt(U.sum(pr.agents, (a) => a.last))}</td><td class="num">${fmt(U.sum(pr.agents, (a) => a.cur))}</td><td class="num">${U.sugCell(d.sumAgentVc4, d.sumAgentVc4Gross || 0)}</td><td class="num">${U.sugCell(d.sumAgentComm, d.sumAgentCommGross || 0)}</td></tr></tfoot></table></div></section>` : '';
     const actions = `<div class="mp-actions"><button class="btn small" data-mp-csv>⬇ CSV</button><button class="btn small" data-mp-wa>📲 WhatsApp</button>${isTl ? '' : `<button class="btn small" data-mp-a360="${esc(pr.name)}">👁 Agent 360</button>`}<a class="btn small" href="#/masterStock?q=${encodeURIComponent(pr.name)}">🗄️ Register / tags</a></div>`;
     return `<div class="mp">${noData}${head}${kpis}
+      ${calcHtml(pr)}
       <section class="mp-sec"><h4>🧾 Issuance summary${isTl ? ' — TL total' : ''}</h4>${summary}</section>
       <section class="mp-sec"><h4>🎯 Issuance class-wise · last month vs this month + stock</h4>${clsTable}</section>
       ${agentsTable}
@@ -364,8 +386,8 @@ window.FF = window.FF || {};
     const rows = [['Name', pr.name], ['Type', `${pr.channel} ${/tl$/.test(pr.kind) ? 'TL' : 'Agent'}`], ['ID', pr.id], ['Mobile', canContacts() ? pr.mobile : ''], ['TL', (pr.tl && pr.tl.name) || ''], ['TL ID', (pr.tl && pr.tl.id) || ''], ["TL's mobile", canContacts() ? (pr.tl && pr.tl.mobile) || '' : ''],
       ['Status', pr.status], ['Last active', pr.lastActive], ['Priority', pr.priority], ['Direct agent', pr.direct ? pr.directLabel : 'No'], ['Tag required', pr.tagRequired ? 'YES' : 'No'],
       ['Stock VC4', s.vc4], ['Stock Commercial', s.comm], ['Stock total', s.total], ['TL stock total', ts.has ? ts.total : ''],
-      ['Avg VC4/day', d.avgVc4], ['Suggested VC4' + (pr.tagRequired ? ' (tags)' : '') + ' · stock ke baad (net)', d.sugVc4], ['Suggested VC4 · bina stock (gross)', d.sugVc4Gross || 0], ['Suggested Commercial' + (pr.tagRequired ? ' (tags)' : '') + ' · stock ke baad (net)', d.sugComm], ['Suggested Commercial · bina stock (gross)', d.sugCommGross || 0],
-      ['Issued this month', t.curTotal], ['Issued last month', t.lastTotal], ['', ''], ['Class', `${(pr.months || {}).last || 'Last'} | ${(pr.months || {}).cur || 'This'} | Stock`]];
+      ['Run-rate basis', `issued ÷ (today−1) = ${(pr.calc && pr.calc.total.elapsed) || ''} din`], ['Avg VC4/day', d.avgVc4], ['Suggested VC4' + (pr.tagRequired ? ' (tags)' : '') + ' · stock ke baad (net)', d.sugVc4], ['Suggested VC4 · bina stock (gross)', d.sugVc4Gross || 0], ['Suggested Commercial' + (pr.tagRequired ? ' (tags)' : '') + ' · stock ke baad (net)', d.sugComm], ['Suggested Commercial · bina stock (gross)', d.sugCommGross || 0],
+      ['Total run-rate/day', pr.calc ? pr.calc.total.rate : ''], ['Total required (× days)', pr.calc ? pr.calc.total.required : ''], ['Total dispatch WITH stock', pr.calc ? pr.calc.total.net : ''], ['Total dispatch W/O stock', pr.calc ? pr.calc.total.gross : ''], ['Total cover (days)', pr.calc && pr.calc.total.cover != null ? pr.calc.total.cover : ''], ['Issued this month', t.curTotal], ['Issued last month', t.lastTotal], ['', ''], ['Class', `${(pr.months || {}).last || 'Last'} | ${(pr.months || {}).cur || 'This'} | Stock`]];
     (pr.classes || []).forEach((r) => rows.push([r.cls, r.last, r.cur, r.stock]));
     if (pr.agents && pr.agents.length) { rows.push(['', '']); rows.push(['Agent', 'ID', 'Mobile', 'Priority', 'VC4 stock', 'Comm stock', 'Last', 'This', 'Sug VC4 (stock −)', 'Sug VC4 (bina stock)', 'Sug Comm (stock −)', 'Sug Comm (bina stock)']); pr.agents.forEach((a) => rows.push([a.name, a.id, canContacts() ? a.mobile : '', a.priority, a.stockVc4, a.stockComm, a.last, a.cur, a.sugVc4, a.sugVc4Gross || 0, a.sugComm, a.sugCommGross || 0])); }
     return rows;
@@ -379,6 +401,7 @@ window.FF = window.FF || {};
     lines.push(`Stock: ${U.fmt(s.total)} (VC4 ${U.fmt(s.vc4)} · Comm ${U.fmt(s.comm)})`);
     lines.push(`${pr.tagRequired ? 'Tags needed' : 'Suggested dispatch'} (${d.days} din): VC4 ${U.fmt(d.sugVc4)} · Comm ${U.fmt(d.sugComm)} — stock ke baad`);
     lines.push(`Bina stock ghataye: VC4 ${U.fmt(d.sugVc4Gross || 0)} · Comm ${U.fmt(d.sugCommGross || 0)}`);
+    if (pr.calc) lines.push(`Run-rate ${U.fmt(pr.calc.total.rate, true)}/day (÷ ${pr.calc.total.elapsed} din) · All tags: with stock ${U.fmt(pr.calc.total.net)} · w/o stock ${U.fmt(pr.calc.total.gross)}${pr.calc.total.cover != null ? ` · cover ${U.fmt(pr.calc.total.cover, true)} din` : ''}`);
     lines.push(`Issued: this month ${U.fmt(t.curTotal)} · last month ${U.fmt(t.lastTotal)}`);
     (pr.classes || []).slice(0, 8).forEach((r) => lines.push(`• ${r.cls}: ${U.fmt(r.last)} → ${U.fmt(r.cur)} (stock ${U.fmt(r.stock)})`));
     return lines.join('\n');
@@ -419,7 +442,7 @@ window.FF = window.FF || {};
   /** Drawer — suggestion pick par. */
   async function open(person) {
     if (!supports(person) || !FF.app || !FF.app.openDrawer) return null;
-    const kicker = `🔎 Master search · ${person.kind.endsWith('tl') ? 'TL' : 'Agent'} profile`;
+    const kicker = person.kicker || `🔎 Master search · ${person.kind.endsWith('tl') ? 'TL' : 'Agent'} profile`;
     FF.app.openDrawer({ kicker, title: person.name, sub: esc(person.sub ? `ID ${person.sub}` : ''), body: `<div id="mp-drawer-slot">${loadingHtml(person.name)}</div>`, actions: '', wide: true });
     const slot = U.$('#mp-drawer-slot');
     try {

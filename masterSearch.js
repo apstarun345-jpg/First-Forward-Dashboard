@@ -249,7 +249,9 @@ FF.pages = FF.pages || {};
       const extra = q1 ? [
         q1.mobile && (!FF.auth || FF.auth.can('contacts')) ? `📞 ${q1.mobile}` : '',
         `📦 ${U.fmt(q1.stock.total)}${!isTlKind && q1.tlStock && q1.tlStock.has ? ` · TL ${U.fmt(q1.tlStock.total)}` : ''}`,
-        q1.tagRequired ? `🏷️ TAG ${U.sugText ? U.sugText(q1.dispatch.sugVc4 + q1.dispatch.sugComm, (q1.dispatch.sugVc4Gross || 0) + (q1.dispatch.sugCommGross || 0)) : U.fmt(q1.dispatch.sugVc4 + q1.dispatch.sugComm)}` : (!q1.direct && (q1.dispatch.sugVc4 || q1.dispatch.sugComm || q1.dispatch.sugVc4Gross || q1.dispatch.sugCommGross) ? `🎯 sug VC4 ${U.sugText(q1.dispatch.sugVc4, q1.dispatch.sugVc4Gross || 0)} · Comm ${U.sugText(q1.dispatch.sugComm, q1.dispatch.sugCommGross || 0)}` : '')
+        q1.tagRequired ? `🏷️ TAG ${U.sugText(q1.calc.total.net, q1.calc.total.gross)}` : (!q1.direct && q1.calc && (q1.calc.total.net || q1.calc.total.gross) ? `🎯 dispatch ${U.sugText(q1.calc.total.net, q1.calc.total.gross)}` : ''),
+        q1.calc && q1.calc.total.rate > 0 ? `⚡ ${U.fmt(q1.calc.total.rate, true)}/day` : '',
+        q1.calc && q1.calc.total.cover != null ? `⏳ cover ${U.fmt(q1.calc.total.cover, true)} din` : ''
       ].filter(Boolean) : [];
       items.push({
         kind: p.kind.startsWith('gv') ? 'gv' : 'ff',
@@ -309,8 +311,10 @@ FF.pages = FF.pages || {};
     } else if (q1.direct) {
       sugStats = '<div class="ms-sug-full"><small>Suggested dispatch</small><b class="dim">No dispatch</b></div>';
     } else {
+      const ct = q1.calc.total;
       sugStats = `<div><small>Sug. VC4 ${mode === 'both' ? '(stock − · w/o stock)' : mode === 'gross' ? '(bina stock)' : '(stock −)'}</small><b>${pair(d.sugVc4, d.sugVc4Gross || 0)}</b></div>
-      <div><small>Sug. Comm. ${mode === 'both' ? '(stock − · w/o stock)' : mode === 'gross' ? '(bina stock)' : '(stock −)'}</small><b>${pair(d.sugComm, d.sugCommGross || 0)}</b></div>`;
+      <div><small>Sug. Comm. ${mode === 'both' ? '(stock − · w/o stock)' : mode === 'gross' ? '(bina stock)' : '(stock −)'}</small><b>${pair(d.sugComm, d.sugCommGross || 0)}</b></div>
+      <div class="ms-sug-full"><small>🎯 Dispatch · all tags · ${U.fmt(ct.days)} din</small><b>${pair(ct.net, ct.gross)}</b></div>`;
     }
     return `<div class="ms-kundli-stats ms-prof">
       <div><small>${isTlKind ? 'TL mobile' : 'Mobile'}</small><b>${contacts ? (q1.mobile ? esc(q1.mobile) : '—') : '🔒'}</b></div>
@@ -318,6 +322,8 @@ FF.pages = FF.pages || {};
       <div><small>${isTlKind ? 'TL stock' : 'Agent stock'}</small><b>${U.fmt(q1.stock.total)}</b></div>
       ${isTlKind ? `<div><small>Agents</small><b>${U.fmt(q1.agentCount)}</b></div>` : `<div><small>TL stock</small><b>${q1.tlStock && q1.tlStock.has ? U.fmt(q1.tlStock.total) : '—'}</b></div>`}
       ${sugStats}
+      <div><small>Run-rate / day <em>(÷ ${U.fmt(q1.calc.total.elapsed)} din)</em></small><b>${U.fmt(q1.calc.total.rate, true)}</b></div>
+      <div><small>Cover</small><b>${q1.calc.total.cover != null ? `${U.fmt(q1.calc.total.cover, true)} din` : '—'}</b></div>
       <div><small>This month · last</small><b>${U.fmt(q1.totals.curTotal)} · ${U.fmt(q1.totals.lastTotal)}</b></div>
     </div>`;
   }
