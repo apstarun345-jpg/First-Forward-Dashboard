@@ -2790,3 +2790,34 @@ html[data-theme="dark"] .direct-chip { background: #431f12; color: #fdba74; bord
 html[data-theme="dark"] .direct-gv { background: #0f2e2b; color: #5eead4; border-color: #0d9488; }
 html[data-theme="dark"] .direct-ff { background: #262a4a; color: #c7d2fe; border-color: #4338ca; }
 @media (max-width: 700px) { .direct-rule-banner { align-items: flex-start; } }
+
+/* ---------- 🧾 MASTER PROFILE (v3.13) — poori report drawer / inline ---------- */
+.mp { display: grid; gap: 14px; }
+.mp-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.mp-id { min-width: 0; flex: 1; }
+.mp-id b { display: block; font-size: 18px; letter-spacing: -.2px; }
+.mp-id small { color: var(--muted); font-size: 12px; }
+.mp-prio { display: grid; justify-items: end; gap: 2px; }
+.mp-cells { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 8px 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 14px; background: color-mix(in srgb, var(--brand) 5%, var(--card)); }
+.mp-cells small, .mp-kpi small { display: block; font-size: 9.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 800; }
+.mp-cells b { font-size: 13px; word-break: break-word; }
+.mp-kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.mp-kpi { border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; background: var(--card); border-top: 3px solid var(--brand); }
+.mp-kpi b { display: block; font-size: 21px; font-weight: 900; margin: 2px 0; }
+.mp-kpi em { display: block; font-style: normal; font-size: 11px; color: var(--muted); }
+.mp-kpi.k1 { border-top-color: #6366f1; } .mp-kpi.k2 { border-top-color: #0ea5e9; } .mp-kpi.k3 { border-top-color: #f59e0b; }
+.mp-kpi.k4 { border-top-color: #10b981; } .mp-kpi.k5 { border-top-color: #14b8a6; } .mp-kpi.k6 { border-top-color: #8b5cf6; }
+.mp-kpi.k7 { border-top-color: #f97316; background: color-mix(in srgb, #f97316 8%, var(--card)); } .mp-kpi.k8 { border-top-color: #94a3b8; }
+.mp-note { margin: 0; font-size: 12px; color: var(--muted); }
+.mp-note.tag { color: #9a3412; background: #ffedd5; border: 1px solid color-mix(in srgb, #f97316 45%, transparent); border-radius: 10px; padding: 8px 11px; }
+html[data-theme="dark"] .mp-note.tag { color: #fed7aa; background: color-mix(in srgb, #f97316 20%, #1f2430); }
+.mp-sec h4 { margin: 0 0 8px; font-size: 13.5px; }
+.mp-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 12px; }
+.mp-chart { border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; background: var(--card); min-width: 0; }
+.mp-chart.wide { grid-column: 1 / -1; }
+.mp-chart h4 { margin: 0 0 8px; font-size: 12.5px; }
+.mp-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.mp-loading { padding: 26px 8px; text-align: center; color: var(--muted); }
+.ms-kundli-stats.ms-prof { grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 1px dashed var(--line); padding-top: 8px; }
+.ms-profile-inline { border: 2px solid color-mix(in srgb, var(--brand) 35%, var(--line)); border-radius: 18px; padding: 12px 14px; background: color-mix(in srgb, var(--brand) 4%, var(--card)); }
+.drawer .mp-chart .chart-shot { max-width: 100%; overflow: hidden; }

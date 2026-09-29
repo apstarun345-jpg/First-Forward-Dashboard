@@ -35,6 +35,7 @@ window.FF = window.FF || {};
     { id: 'dispatchPlan', icon: '🚚', label: 'Dispatch Planner', desc: 'Auto box plan · printable pick-list · WhatsApp', perm: 'dispatchPlan', group: 'Cross Channel' },
     { id: 'tlScorecard', icon: '🏅', label: 'TL Scorecard', desc: 'TL-wise score · target · commission · risk', perm: 'tlScorecard', group: 'Cross Channel' },
     { id: 'directAgents', icon: '🧍', label: 'Direct Agents & TLs', desc: 'FF: TL Name APS · GV: TL ID + Name blank — ek hi rule poore site par', perm: 'directAgents', group: 'Cross Channel' },
+    { id: 'newAgents', icon: '🆕', label: 'New Agents & TL Changes', desc: 'Naye agents · TL badla / hata — FF + GV alag table, click → poori profile', perm: 'newAgents', group: 'Cross Channel' },
     { id: 'savedViews', icon: '⭐', label: 'Saved Views', desc: 'Reusable filters · shareable links', perm: 'savedViews', group: 'Workspace' },
     { id: 'reportStudio', icon: '🗓️', label: 'Report Studio', desc: 'Scheduled email · CSV · PDF · share', perm: 'reportStudio', group: 'Workspace' },
     { id: 'followups', icon: '📝', label: 'Notes & Follow-ups', desc: 'Agent/TL timeline · owner · due date', perm: 'followups', group: 'Workspace' },
@@ -73,6 +74,7 @@ window.FF = window.FF || {};
     compare: { label: 'GV बनाम फर्स्ट फॉरवर्ड', desc: 'दोनों की तुलना' },
     charts: { label: 'चार्ट्स', desc: 'सिर्फ़ चार्ट · GV बनाम FF' },
     settings: { label: 'सेटिंग्स' },
+    newAgents: { label: 'नए एजेंट और TL बदलाव', desc: 'नए एजेंट · TL बदला / हटा — FF + GV अलग टेबल' },
     directAgents: { label: 'डायरेक्ट एजेंट और TL', desc: 'FF: TL Name APS · GV: TL ID + Name खाली — पूरी साइट पर एक ही नियम' },
     fastagChampions: { label: 'फास्टैग चैंपियंस', desc: 'टॉप एजेंट/TL — VC4, कॉमर्शियल, चेसिस, रिप्लेसमेंट, रॉन्ग VRN · FF और GV' }
   };

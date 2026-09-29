@@ -236,6 +236,47 @@ test('📧 email test endpoint mock SMTP par mail deliver karta hai (AUTH + DATA
   }
 });
 
+test('📧 email provider settings: validation, secrets redacted, status + diagnose (admin only)', async () => {
+  const smtp = await startSmtp();
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'apna-featmail2-'));
+  const upstream = http.createServer((req, res) => { res.end('google.visualization.Query.setResponse({\"status\":\"ok\",\"table\":{\"cols\":[{\"id\":\"A\",\"type\":\"number\"}],\"rows\":[]}});'); });
+  upstream.listen(0, '127.0.0.1');
+  await once(upstream, 'listening');
+  let server;
+  const call = async (route, method = 'GET', body, cookie = '') => {
+    const res = await fetch(server.base + route, { method, headers: { cookie, 'Content-Type': 'application/json', 'X-Forwarded-Proto': 'https' }, body: body ? JSON.stringify(body) : undefined });
+    return { res, json: await res.json().catch(() => ({})), setCookie: res.headers.get('set-cookie') };
+  };
+  try {
+    server = await startServer(dir, `http://127.0.0.1:${upstream.address().port}`);
+    const adminCookie = (await call('/api/auth/login', 'POST', { username: 'owner', password: 'initial-password' })).setCookie.split(';')[0];
+    const bad = await call('/api/settings', 'PUT', { settings: { email: { provider: 'pigeon' } } }, adminCookie);
+    assert.equal(bad.res.status, 400, 'unknown provider reject');
+    const ok = await call('/api/settings', 'PUT', { settings: { email: { provider: 'auto', host: '127.0.0.1', port: smtp.port, user: 'mailer', pass: 'secret-1', from: 'a@example.test', to: 'b@example.test', resendKey: 're_secret_key', brevoKey: 'xkeysib-secret' } } }, adminCookie);
+    assert.equal(ok.res.status, 200);
+    const status = await call('/api/notifications/email/status', 'GET', undefined, adminCookie);
+    assert.equal(status.res.status, 200);
+    assert.equal(status.json.providers.smtp, true); assert.equal(status.json.providers.resend, true); assert.equal(status.json.providers.brevo, true);
+    assert.equal(status.json.order[0], 'smtp');
+    const diag = await call('/api/notifications/email/diagnose', 'POST', {}, adminCookie);
+    assert.equal(diag.res.status, 200);
+    assert.ok(diag.json.checks.some((c) => /TCP 127\.0\.0\.1/.test(c.name) && c.ok), 'mock SMTP port reachable');
+    await call('/api/users', 'POST', { username: 'mailz', name: 'M', password: 'mail-pass-1', role: 'user' }, adminCookie);
+    const mc = (await call('/api/auth/login', 'POST', { username: 'mailz', password: 'mail-pass-1' })).setCookie.split(';')[0];
+    const member = await call('/api/settings', 'GET', undefined, mc);
+    assert.equal(member.json.settings.email.resendKey, '', 'Resend key member ko nahi');
+    assert.equal(member.json.settings.email.brevoKey, '', 'Brevo key member ko nahi');
+    assert.equal(member.json.settings.email.pass, '');
+    assert.ok((await call('/api/notifications/email/diagnose', 'POST', {}, mc)).res.status >= 400, 'non-admin diagnose nahi');
+    assert.ok((await call('/api/notifications/email/status', 'GET', undefined, mc)).res.status >= 400, 'non-admin status nahi');
+  } finally {
+    if (server) await server.stop();
+    await new Promise((r) => upstream.close(r));
+    await new Promise((r) => smtp.srv.close(r));
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 // ---------------------------------------------------------------------------------------------
 // Round 2: 🔐 OTP (2FA on new IP) — 428 flow + email code + audit + admin ON/OFF toggle
 // ---------------------------------------------------------------------------------------------

@@ -75,7 +75,9 @@ test('direct agent rule is wired site-wide (page, GV + FF dispatch filters, sett
   assert.match(gvpages, /FF\.direct \? FF\.direct\.ruleBanner\('gv'\)/, 'GV Stock Report shows the rule banner');
   assert.match(performance, /__direct__/, 'FF Performance TL filter gets a Direct Agents option');
   assert.match(performance, /directLabel\(a, 'ff'\)/, 'FF labels come from the shared classifier');
-  assert.match(cockpit, /Direct agents \(no dispatch\)/, 'Dispatch Planner has a direct pool');
+  assert.match(cockpit, /Direct agents · tag required/, 'Dispatch Planner has a direct pool');
+  assert.match(performance, /Direct · High\/Medium · Tag required/, 'FF dispatch has the tag-required option');
+  assert.match(gvpages, /Direct · High\/Medium · Tag required/, 'GV dispatch has the tag-required option');
   assert.match(insights, /isDirectAgent\(a, 'ff'\)/, 'forecast marks FF direct agents');
   assert.match(insights, /isDirectAgent\(a, 'gv'\)/, 'forecast marks GV direct agents');
   assert.match(gv, /directAgent: FF\.config\.isDirectAgent/, 'GV Master rows carry the flag');
@@ -90,7 +92,7 @@ test('GV Stock Report + alerts keep the Direct Agents · no dispatch control', a
     fs.readFile(new URL('../gvpages.js', import.meta.url), 'utf8'),
     fs.readFile(new URL('../settings.js', import.meta.url), 'utf8')
   ]);
-  assert.match(pages, /Direct Agents · no dispatch|Direct Agents — alag list/, 'direct/no-dispatch filter visible');
+  assert.match(pages, /Direct Agents · all|Other Direct Agents/, 'direct/no-dispatch filter visible');
   assert.match(pages, /FF\.pages\.gvStockReport/, 'GV Stock Report renderer exported');
   assert.match(settings, /notificationRoutes\.\$\{key\}/, 'Settings renders event audience matrix');
 });

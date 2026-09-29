@@ -1014,23 +1014,40 @@ FF.pages = FF.pages || {};
     const waCard = section('📤 WhatsApp share number', `
       <div class="form-grid">${field('Direct number (blank = WhatsApp share picker)', txt('features.waNumber', f.waNumber || '', 'placeholder="9198xxxxxxxx00 · country code ke saath" inputmode="tel"'))}</div>
       <p class="dim small">Number blank ho to WhatsApp apna contact picker kholta hai. Contacts tab ka team number fallback me use hota hai.</p>${saveBar('feat-wa')}`);
-    const emailCard = section('📧 Email digest <span class="dim">(SMTP — optional)</span>', `
+    const provOpt = (v, label) => `<option value="${v}" ${(em.provider || 'auto') === v ? 'selected' : ''}>${label}</option>`;
+    const emailCard = section('📧 Email <span class="dim">(OTP · digest · report · certificates)</span>', `
+      <div class="mail-status" id="em-status"><span class="dim small">Email status load ho raha hai…</span></div>
       <label class="check" style="margin-bottom:6px"><input type="checkbox" data-path="features.emailDigest" ${f.emailDigest ? 'checked' : ''}> <b>Digest email se bhi bhejo</b> <small class="dim">(push ke saath-saath subah ka summary email par)</small></label>
       <label class="check" style="margin-bottom:6px"><input type="checkbox" data-path="features.weeklyEmail" ${f.weeklyEmail === true ? 'checked' : ''}> <b>📬 Weekly auto-digest email (admin on/off)</b> <small class="dim">— har Monday, pichhle Mon–Sun ka FF/GV summary + stock. Hour → ⬇️ neeche</small></label>
       <label class="check" style="margin-bottom:6px"><input type="checkbox" data-path="features.emailReport" ${f.emailReport === true ? 'checked' : ''}> <b>📊 Roz ka scheduled report email (HTML + CSV)</b> <small class="dim">— last-14-din table, CSV attach. Hour → ⬇️ neeche</small></label>
       <div class="form-grid">
         ${field('Weekly email hour (IST)', numI('features.weeklyEmailHour', f.weeklyEmailHour ?? 9, 'min="0" max="23"'))}
         ${field('Report email hour (IST)', numI('features.emailReportHour', f.emailReportHour ?? 21, 'min="0" max="23"'))}
-        ${field('SMTP host', txt('email.host', em.host || '', 'placeholder="smtp.gmail.com"'))}
-        ${field('Port', numI('email.port', em.port || 587, 'min="1" max="65535"'))}
-        ${field('TLS (465 / implicit)', `<input type="checkbox" data-path="email.secure" ${em.secure ? 'checked' : ''}>`)}
-        ${field('User', txt('email.user', em.user || '', 'autocomplete="off"'))}
-        ${field('Password / app password', `<input class="input" type="password" data-path="email.pass" value="${esc(em.pass || '')}" autocomplete="new-password">`)}
-        ${field('From', txt('email.from', em.from || '', 'placeholder="alerts@yourdomain.com"'))}
-        ${field('To (comma-separated)', txt('email.to', em.to || '', 'placeholder="boss@x.com, team@x.com"'))}
+        ${field('To (comma-separated)', txt('email.to', em.to || '', 'placeholder="boss@x.com, team@x.com"'), 'Digest / report / certificate in emails par jayenge')}
+        ${field('From (name <email>)', txt('email.from', em.from || '', 'placeholder="Dashboard <alerts@yourdomain.com>"'), 'SMTP: Gmail me wahi Gmail · Resend/Brevo: verified sender · Apps Script: ignore (Gmail account se jata hai, sirf naam use hota hai)')}
+        ${field('Email provider', `<select class="input" data-path="email.provider" id="em-provider">${provOpt('auto', '🤖 Auto — jo configured hai sab try (recommended)')}${provOpt('appsscript', '🟢 Google Apps Script (Gmail) — HTTPS, free, Render par chalta hai')}${provOpt('smtp', '📮 SMTP (Gmail / Outlook / apna server)')}${provOpt('resend', '⚡ Resend API (HTTPS)')}${provOpt('brevo', '📨 Brevo API (HTTPS)')}</select>`, 'Render FREE par SMTP ports block hote hain — wahan Apps Script / Resend / Brevo chuno')}
       </div>
-      <div class="save-bar"><button class="btn primary" data-save="feat-email">💾 Save</button><button class="btn" id="em-test">📧 Test email bhejo</button><span class="dim small" id="save-msg-feat-email"></span></div>
-      <p class="dim small"><b>Gmail:</b> host <code>smtp.gmail.com</code>, port <b>587</b> + TLS unchecked (STARTTLS), ya port <b>465</b> + TLS checked. Normal password nahi chalta — Google Account → 2-Step Verification → <b>App passwords</b>. “Test email” pehle durable save confirm karta hai, phir SMTP test karta hai.</p>`);
+      <details class="mail-adv" ${em.host || ['smtp'].includes(em.provider) ? 'open' : ''}><summary><b>📮 SMTP settings</b> <small class="dim">(sirf tab jab SMTP use karna ho)</small></summary>
+        <div class="form-grid">
+          ${field('SMTP host', txt('email.host', em.host || '', 'placeholder="smtp.gmail.com"'))}
+          ${field('Port', numI('email.port', em.port || 587, 'min="1" max="65535"'), '587 = STARTTLS (TLS unchecked) · 465 = implicit TLS (checked)')}
+          ${field('TLS (465 / implicit)', `<input type="checkbox" data-path="email.secure" ${em.secure ? 'checked' : ''}>`)}
+          ${field('User', txt('email.user', em.user || '', 'autocomplete="off"'))}
+          ${field('Password / app password', `<input class="input" type="password" data-path="email.pass" value="${esc(em.pass || '')}" autocomplete="new-password">`, 'Gmail App Password — spaces ho to chalega')}
+        </div>
+      </details>
+      <details class="mail-adv" ${em.resendKey || em.brevoKey ? 'open' : ''}><summary><b>⚡ Resend / 📨 Brevo API keys</b> <small class="dim">(optional — env var RESEND_API_KEY / BREVO_API_KEY bhi chalta hai)</small></summary>
+        <div class="form-grid">
+          ${field('Resend API key', `<input class="input" type="password" data-path="email.resendKey" value="${esc(em.resendKey || '')}" autocomplete="new-password" placeholder="re_…">`, 'From = verified domain ka email')}
+          ${field('Brevo API key', `<input class="input" type="password" data-path="email.brevoKey" value="${esc(em.brevoKey || '')}" autocomplete="new-password" placeholder="xkeysib-…">`, 'From = Brevo me verified sender')}
+        </div>
+      </details>
+      <div class="save-bar"><button class="btn primary" data-save="feat-email">💾 Save</button><button class="btn" id="em-test">📧 Test email bhejo</button><button class="btn" id="em-diag">🩺 Diagnose</button><span class="dim small" id="save-msg-feat-email"></span></div>
+      <div id="em-diag-out" class="mail-diag" hidden></div>
+      <div class="mail-help">
+        <p class="dim small"><b>🟢 Sabse aasaan (Render free par bhi):</b> Google Apps Script relay. Storage wala hi script use hota hai — <code>google-apps-script/Code.gs</code> ka naya code paste karo → ▶ Run <code>authorizeMail_</code> (Allow) → Deploy → Manage deployments → Edit → <b>New version</b>. Provider = Auto/Apps Script, <b>To</b> bharo, Test dabao. Gmail limit ≈ 100 mail/din.</p>
+        <p class="dim small"><b>📮 SMTP:</b> Gmail → host <code>smtp.gmail.com</code>, port <b>587</b> + TLS unchecked, ya <b>465</b> + TLS checked; App Password (2-Step Verification ON). <b>Render free plan SMTP block karta hai (26 Sep 2025 se)</b> — Diagnose bata dega ki port khula hai ya nahi. “Test email” pehle durable save confirm karta hai, phir bhejta hai.</p>
+      </div>`);
     const announceCard = section('📢 Announcement <span class="dim">(sab users ko ek message)</span>', `
       <p class="dim small">Type karo aur bhejo — sab logged-in users ke bell panel me turant dikhega (jaise ek broadcast). Ye raha preview:</p>
       <textarea class="input" id="an-text" rows="3" maxlength="500" placeholder="e.g. Kal 11 AM sabka monthly meeting hai — attendance zaroori."></textarea>
@@ -1274,21 +1291,50 @@ FF.pages = FF.pages || {};
         const reload = ['data', 'eir', 'stock', 'stockMovement', 'ffPayout'].includes(btn.dataset.save);
         U.withButtonBusy(btn, () => save(patch, msg, { reload }), 'Saving…');
       }));
-      // 📧 Features → email: pehle save, phir SMTP par test mail
+      // 📧 Features → email: status chips, pehle save phir test mail, aur 🩺 diagnose
+      const emStatus = U.$('#em-status', body);
+      const PROV_LABEL = { smtp: '📮 SMTP', appsscript: '🟢 Apps Script (Gmail)', resend: '⚡ Resend', brevo: '📨 Brevo' };
+      const drawStatus = async () => {
+        if (!emStatus) return;
+        try {
+          const st = await A.api('/api/notifications/email/status');
+          const chips = Object.keys(PROV_LABEL).map((k) => `<span class="badge ${st.providers[k] ? 'green' : 'gray'}">${PROV_LABEL[k]} ${st.providers[k] ? '✓ ready' : '— not set'}</span>`).join(' ');
+          const first = (st.order || [])[0];
+          emStatus.innerHTML = `${chips}<div class="dim small" style="margin-top:6px">${first ? `Abhi mail is transport se jayegi: <b>${PROV_LABEL[first]}</b>${st.order.length > 1 ? ` (fallback: ${st.order.slice(1).map((k) => PROV_LABEL[k]).join(' → ')})` : ''}` : '⚠️ Koi email transport configured nahi — neeche se ek chuno. Render free par Apps Script sabse aasaan hai.'}</div>`;
+        } catch { emStatus.innerHTML = ''; }
+      };
+      drawStatus();
       const emTest = U.$('#em-test', body);
       if (emTest) emTest.addEventListener('click', async () => {
         const cardEl = emTest.closest('.card');
         await U.withButtonBusy(emTest, async () => {
-          // Save ko CONFIRM hone do; pehle test request race karke purani SMTP config use kar leti thi.
+          // Save ko CONFIRM hone do; pehle test request race karke purani config use kar leti thi.
           const saved = await save(collect(cardEl, {}), U.$('#save-msg-feat-email', body));
           if (!saved) return;
           try {
-            await A.api('/api/notifications/email/test', 'POST', {});
-            U.toast('📧 SMTP connected — test email bhej diya. Inbox/spam check karo.', 'ok');
+            const out = await A.api('/api/notifications/email/test', 'POST', {});
+            U.toast(`📧 Test email gaya (${PROV_LABEL[out.provider] || out.provider || 'email'}). Inbox/spam check karo.`, 'ok');
           } catch (err) {
             U.toast(err.message, 'err');
+            const box = U.$('#em-diag-out', body); if (box) { box.hidden = false; box.innerHTML = `<div class="mail-diag-err">❌ ${esc(err.message)}</div><div class="dim small">🩺 Diagnose dabao — pata chalega SMTP port block hai ya credentials galat.</div>`; }
           }
-        }, 'Saving + testing SMTP…');
+          drawStatus();
+        }, 'Saving + testing email…');
+      });
+      const emDiag = U.$('#em-diag', body);
+      if (emDiag) emDiag.addEventListener('click', async () => {
+        const cardEl = emDiag.closest('.card');
+        await U.withButtonBusy(emDiag, async () => {
+          const saved = await save(collect(cardEl, {}), U.$('#save-msg-feat-email', body));
+          if (!saved) return;
+          const box = U.$('#em-diag-out', body);
+          try {
+            const d = await A.api('/api/notifications/email/diagnose', 'POST', {});
+            box.hidden = false;
+            box.innerHTML = `<div class="mail-diag-list">${d.checks.map((c) => `<div class="${c.ok ? 'ok' : 'bad'}"><span>${c.ok ? '✅' : '❌'}</span><b>${esc(c.name)}</b><small>${esc(c.detail || '')}</small></div>`).join('')}</div>${d.advice.length ? `<div class="mail-diag-advice">${d.advice.map((t) => `<p>💡 ${esc(t)}</p>`).join('')}</div>` : ''}`;
+          } catch (err) { box.hidden = false; box.innerHTML = `<div class="mail-diag-err">❌ ${esc(err.message)}</div>`; }
+          drawStatus();
+        }, 'Diagnosing…');
       });
       // 📢 Announcement broadcast (featuresTab)
       const anSend = U.$('#an-send', body);
