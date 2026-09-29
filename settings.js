@@ -11,6 +11,15 @@ FF.pages = FF.pages || {};
   let storage = null;
   let settings = null, defaults = null, usersCache = null, permsCache = [];
 
+  // 🎙 Assistant voice prefs — assistant.js ke 🌐/⚙ changes ko bhi yahan sync rakho (ek hi baar register).
+  if (typeof window !== 'undefined' && !window.__ffVoiceSettingsSync) {
+    window.__ffVoiceSettingsSync = true;
+    window.addEventListener('ff-voice-prefs', (e) => {
+      const sel = document.querySelector('#voice-lang');
+      if (sel && e && e.detail) sel.value = e.detail.lang === 'en' ? 'en' : 'hi';
+    });
+  }
+
   const field = (label, input, hint) => `<label class="fld"><span>${label}</span>${input}${hint ? `<small class="dim">${hint}</small>` : ''}</label>`;
   const txt = (path, value, attrs) => `<input class="input" data-path="${esc(path)}" value="${esc(value ?? '')}" ${attrs || ''}>`;
   const numI = (path, value, attrs) => `<input class="input" type="number" data-path="${esc(path)}" value="${esc(value ?? '')}" ${attrs || ''}>`;
@@ -336,6 +345,70 @@ FF.pages = FF.pages || {};
     return html;
   }
 
+  // ---- 🎙 Assistant awaaz & bhasha (My account · per-user, localStorage) ----
+  const voiceScore = (v) => (/^hi[-_]/i.test(v.lang) ? 0 : /^en[-_]IN/i.test(v.lang) ? 1 : /^en/i.test(v.lang) ? 2 : 3);
+  function voiceOptions(p, key) {
+    const vs = (typeof window !== 'undefined' && 'speechSynthesis' in window) ? (window.speechSynthesis.getVoices() || []) : [];
+    const sorted = vs.slice().sort((a, b) => voiceScore(a) - voiceScore(b) || String(a.name).localeCompare(String(b.name)));
+    const cur = key === 'en' ? p.en : p.hi;
+    return `<option value="">🎲 Auto — browser default</option>${sorted.map((v) => `<option value="${esc(v.voiceURI)}" ${v.voiceURI === cur ? 'selected' : ''}>${esc(v.name)} · ${esc(v.lang)}${v.localService ? '' : ' · 🟣 online'}</option>`).join('')}`;
+  }
+  function voiceSection() {
+    const p = U.voicePrefs();
+    const langSel = `<label class="fld"><span>🌐 Assistant language</span><select class="input" id="voice-lang"><option value="hi" ${p.lang !== 'en' ? 'selected' : ''}>हिंदी / Hinglish (default)</option><option value="en" ${p.lang === 'en' ? 'selected' : ''}>English</option></select></label>`;
+    const voiceSel = (key, label) => `<label class="fld"><span>${label}</span><select class="input" id="voice-${key}" data-vkey="${key}">${voiceOptions(p, key)}</select></label>`;
+    const slider = (key, label, dflt) => { const v = Number(p[key]) > 0 ? Number(p[key]) : dflt; return `<label class="fld"><span>${label} <b data-vval="${key}">${v}</b></span><input type="range" id="voice-${key}" data-vkey="${key}" min="0.5" max="1.5" step="0.05" value="${v}"></label>`; };
+    return section('🎙 Assistant awaaz & bhasha', `<p class="dim small">Voice assistant ka jawab kis awaaz me bole — Hindi / English voice, speed aur pitch yahan se set karo. Har language ki apni voice choose hoti hai; assistant panel ke 🌐 button se language turant switch hoti hai (mic ki bhasha bhi saath me badalti hai — hi-IN ⇄ en-IN). Test karke sun lo, pasand aaye to bas.</p>
+      <div class="form-grid">${langSel}${voiceSel('hi', '🗣 Hindi / Hinglish awaaz')}${voiceSel('en', '🗣 English awaaz')}${slider('rate', '⚡ Speed', 1.02)}${slider('pitch', '🎵 Pitch', 1)}</div>
+      <div class="btn-row"><button class="btn small" id="voice-test-hi">🔊 Hindi test</button><button class="btn small" id="voice-test-en">🔊 English test</button><button class="btn small" id="voice-refresh">🔄 Voice list refresh</button><button class="btn small" id="voice-reset">↺ Default</button></div>
+      <p class="dim small" id="voice-count"></p>`, 'localStorage · sirf aapke browser me');
+  }
+  function bindVoiceTab(body) {
+    const countEl = U.$('#voice-count', body);
+    const refresh = () => {
+      ['hi', 'en'].forEach((key) => { const sel = U.$(`#voice-${key}`, body); if (sel) sel.innerHTML = voiceOptions(U.voicePrefs(), key); });
+      const vs = (typeof window !== 'undefined' && 'speechSynthesis' in window) ? (window.speechSynthesis.getVoices() || []) : [];
+      if (countEl) countEl.textContent = vs.length ? `${vs.length} voices mili — best quality ke liye 🟣 online "Microsoft … India" ya "Google हिन्दी" voice chuno.` : 'Browser ne abhi tak voice list nahi bheji — 🔄 refresh dabao (ya page kholte hi Chrome voices background me load hoti hain).';
+    };
+    refresh();
+    try { if (typeof window !== 'undefined' && 'speechSynthesis' in window) window.speechSynthesis.onvoiceschanged = refresh; } catch { /* optional */ }
+    const langSel = U.$('#voice-lang', body);
+    if (langSel) langSel.addEventListener('change', () => U.setVoicePrefs({ lang: langSel.value }));
+    U.$$('[data-vkey]', body).forEach((el) => {
+      el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', () => {
+        const key = el.dataset.vkey;
+        if (el.tagName === 'SELECT') U.setVoicePrefs({ [key]: el.value });
+        else { U.setVoicePrefs({ [key]: Number(el.value) }); const out = U.$(`[data-vval="${key}"]`, body); if (out) out.textContent = el.value; }
+      });
+    });
+    const speakSample = (langKey) => {
+      if (typeof window === 'undefined' || !('speechSynthesis' in window)) return U.toast('Is browser me speech synthesis support nahi hai — Chrome/Edge try karo.', 'warn');
+      try {
+        window.speechSynthesis.cancel();
+        const text = langKey === 'en' ? 'Hello! I am your First Forward dashboard assistant. Rahul issued forty tags today.' : 'Namaste! Main First Forward dashboard assistant hoon. Aaj Rahul ke chaalis tags lage.';
+        const p = U.voicePrefs();
+        const u = new SpeechSynthesisUtterance(text);
+        const vs = window.speechSynthesis.getVoices() || [];
+        const uri = langKey === 'en' ? p.en : p.hi;
+        u.voice = (uri && vs.find((v) => v.voiceURI === uri)) || vs.find((v) => (langKey === 'en' ? /^en[-_]IN/i.test(v.lang) : /^hi[-_]IN/i.test(v.lang))) || vs[0];
+        u.lang = (u.voice && u.voice.lang) || (langKey === 'en' ? 'en-IN' : 'hi-IN');
+        u.rate = Number(p.rate) > 0 ? Number(p.rate) : 1.02;
+        u.pitch = Number(p.pitch) > 0 ? Number(p.pitch) : 1;
+        window.speechSynthesis.speak(u);
+      } catch { /* optional */ }
+    };
+    const th = U.$('#voice-test-hi', body); if (th) th.addEventListener('click', () => speakSample('hi'));
+    const te = U.$('#voice-test-en', body); if (te) te.addEventListener('click', () => speakSample('en'));
+    const vr = U.$('#voice-refresh', body); if (vr) vr.addEventListener('click', refresh);
+    const vreset = U.$('#voice-reset', body);
+    if (vreset) vreset.addEventListener('click', () => {
+      U.setVoicePrefs({ lang: 'hi', hi: '', en: '', rate: 0, pitch: 0 });
+      const ls = U.$('#voice-lang', body); if (ls) ls.value = 'hi';
+      ['hi', 'en'].forEach((k) => { const sel = U.$(`#voice-${k}`, body); if (sel) sel.value = ''; });
+      [['rate', '1.02'], ['pitch', '1']].forEach(([k, v]) => { const el = U.$(`#voice-${k}`, body); if (el) el.value = v; const out = U.$(`[data-vval="${k}"]`, body); if (out) out.textContent = v; });
+      U.toast('🎙 Voice settings default par reset ✓', 'ok');
+    });
+  }
   function accountTab() {
     const u = A.user;
     const perms = A.permissions || [];
@@ -440,7 +513,7 @@ FF.pages = FF.pages || {};
     const groups = [...new Set(permsCache.map((p) => p.group))];
     const permBoxes = (u) => groups.map((g) => `<div class="perm-group"><small class="dim">${esc(g)}</small>${permsCache.filter((p) => p.group === g).map((p) => `<label class="check"><input type="checkbox" data-perm="${esc(p.key)}" ${u.role === 'admin' || u.permissions.includes(p.key) ? 'checked' : ''} ${u.role === 'admin' ? 'disabled' : ''}> ${esc(p.label)}</label>`).join('')}</div>`).join('');
     const rows = usersCache.map((u) => `<div class="user-card ${u.approved ? '' : 'pending'}" data-user="${esc(u.username)}">
-        <div class="user-head"><span class="user-avatar big">${esc((u.name || u.username).slice(0, 1).toUpperCase())}</span><div class="user-meta"><b>${esc(u.name)}</b> <code>${esc(u.username)}</code>${u.username === A.user.username ? ' <span class="tag">you</span>' : ''}<small class="dim">${esc(u.email || '')}${u.mobile ? ` · ${esc(u.mobile)}` : ''} · joined ${u.createdAt ? U.timeLabel(new Date(u.createdAt).getTime()) : '—'} · last login ${u.lastLoginAt ? U.timeLabel(new Date(u.lastLoginAt).getTime()) : 'never'}${u.lastLocation ? ` · <a href="https://www.google.com/maps?q=${encodeURIComponent(`${u.lastLocation.latitude},${u.lastLocation.longitude}`)}" target="_blank" rel="noopener">📍 last location</a>` : ''}</small></div>
+        <div class="user-head">${A.avatarHtml(u, 'lg')}<div class="user-meta"><b>${esc(u.name)}</b> <code>${esc(u.username)}</code>${u.username === A.user.username ? ' <span class="tag">you</span>' : ''}<small class="dim">${esc(u.email || '')}${u.mobile ? ` · ${esc(u.mobile || '')}` : ''} · joined ${u.createdAt ? U.timeLabel(new Date(u.createdAt).getTime()) : '—'} · last login ${u.lastLoginAt ? U.timeLabel(new Date(u.lastLoginAt).getTime()) : 'never'}${u.lastLocation ? ` · <a href="https://www.google.com/maps?q=${encodeURIComponent(`${u.lastLocation.latitude},${u.lastLocation.longitude}`)}" target="_blank" rel="noopener">📍 last location</a>` : ''}</small></div>
           <div class="user-controls"><label class="check"><input type="checkbox" data-field="approved" ${u.approved ? 'checked' : ''}> ${u.approved ? 'Active' : '<b class="pend">Pending approval</b>'}</label><select data-field="role"><option value="user" ${u.role === 'user' ? 'selected' : ''}>User</option><option value="admin" ${u.role === 'admin' ? 'selected' : ''}>Admin</option></select></div></div>
         <details class="user-perms" ${u.approved ? '' : 'open'}><summary>Permissions (${u.role === 'admin' ? 'all — admin' : `${u.permissions.length}/${permsCache.length}`})</summary><div class="perm-boxes">${permBoxes(u)}</div><div class="btn-row"><button class="btn small" data-perm-all>Select all</button><button class="btn small" data-perm-none>Clear</button><button class="btn small" data-perm-default>Default set</button></div></details>
         ${u.loginHistory && u.loginHistory.length ? `<details class="user-perms"><summary>🕘 Login history (${u.loginHistory.length})</summary><div class="table-wrap"><table class="tbl compact"><thead><tr><th>Kab</th><th>Login ID se</th><th>IP</th></tr></thead><tbody>${u.loginHistory.slice().reverse().map((l) => `<tr><td>${esc(U.timeLabel(new Date(l.at).getTime()))}</td><td>${esc(l.id || '—')}</td><td class="mono">${esc(l.ip || '—')}</td></tr>`).join('')}</tbody></table></div><p class="dim small" style="margin-top:4px">Last ${u.loginHistory.length} logins (max 20 store hote hain).</p></details>` : ''}
@@ -1000,6 +1073,8 @@ FF.pages = FF.pages || {};
       if (rangeDays) rangeDays.addEventListener('change', () => localStorage.setItem('ti_range_days', rangeDays.value));
       const chartLimit = U.$('#ti-chart-limit', body);
       if (chartLimit) chartLimit.addEventListener('change', () => localStorage.setItem('ti_chart_limit', chartLimit.value));
+      // 🎙 Assistant voice & language section (My account)
+      if (U.$('#voice-lang', body)) bindVoiceTab(body);
       const pfSave = U.$('#pf-save', body);
       if (pfSave) pfSave.addEventListener('click', () => U.withButtonBusy(pfSave, async () => { try { await A.api('/api/auth/profile', 'POST', { name: U.$('#pf-name', body).value, mobile: U.$('#pf-mobile', body).value, email: U.$('#pf-email', body).value }); U.toast('Profile saved ✓', 'ok'); const me = await A.api('/api/auth/me'); if (me.user) { Object.assign(A.user, me.user); FF.app.renderSidebar(); } } catch (err) { U.toast(err.message, 'err'); } }, 'Saving profile…'));
       const locationShare = U.$('#location-share', body);

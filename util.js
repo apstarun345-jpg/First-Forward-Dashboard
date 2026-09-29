@@ -571,6 +571,18 @@ window.FF = window.FF || {};
     }
   }
 
+  // ---- 🎙 Assistant voice preferences (Settings → My account ↔ assistant.js shared) ----
+  const VOICE_PREFS_KEY = 'ff-voice-prefs';
+  function voicePrefs() {
+    try { const p = JSON.parse(localStorage.getItem(VOICE_PREFS_KEY) || '{}'); return (p && typeof p === 'object') ? p : {}; } catch { return {}; }
+  }
+  function setVoicePrefs(patch) {
+    const p = { ...voicePrefs(), ...(patch || {}) };
+    try { localStorage.setItem(VOICE_PREFS_KEY, JSON.stringify(p)); } catch { /* storage full */ }
+    try { if (typeof CustomEvent === 'function' && typeof dispatchEvent === 'function') dispatchEvent(new CustomEvent('ff-voice-prefs', { detail: p })); } catch { /* non-browser */ }
+    return p;
+  }
+
   FF.util = {
     esc, clean, num, fmt, fmtShort, pctOf, growth, fmtPct, fmtSigned, deltaHtml,
     MONTHS, MONTHS_LONG, DAYS, pad2, parseDate, parseMonthKey, ymKey, dateKey, fromDateKey, ymParts, labelYM, labelDate, labelDateKey,
@@ -578,6 +590,6 @@ window.FF = window.FF || {};
     sum, groupSum, topEntries, sortBy, uniq,
     $, $$, h, debounce, setButtonBusy, withButtonBusy, toast, spinner, errorBox, downloadBlob, downloadCsv, tableToRows, slug, stamp, colLetter, colIndex, initTooltip,
     phoneDigits, waLink, mailLink, copyText, suggest,
-    parseDateTime, printReport, recentList, recentAdd, voiceInput
+    parseDateTime, printReport, recentList, recentAdd, voiceInput, voicePrefs, setVoicePrefs
   };
 })(window.FF);
