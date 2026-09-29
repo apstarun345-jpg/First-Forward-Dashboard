@@ -304,10 +304,10 @@ FF.pages = FF.pages || {};
     const d = q1.dispatch || {};
     const mode = U.suggestMode ? U.suggestMode() : 'both';
     // Dono criteria: stock ke baad (net) + bina stock ghataye (gross) — settings ka mode apply hota hai.
-    const pair = (net, gross) => mode === 'net' ? `<span class="sug-chip">${U.fmt(net)}</span>` : mode === 'gross' ? `<span class="sug-chip">${U.fmt(gross)}</span>` : `<span class="sug-chip">${U.fmt(net)}</span> <span class="sug-wo-inline">w/o ${U.fmt(gross)}</span>`;
+    const pair = (net, gross) => U.sugCell(net, gross);
     let sugStats = '';
     if (q1.tagRequired) {
-      sugStats = `<div class="ms-sug-full"><small>🏷️ Tags required · ${U.fmt(d.days)} din</small><b>${mode === 'both' ? `<span class="sug-chip direct">🏷️ ${U.fmt(d.sugVc4)} + ${U.fmt(d.sugComm)} tags</span><span class="sug-wo-inline">w/o stock ${U.fmt((d.sugVc4Gross || 0) + (d.sugCommGross || 0))}</span>` : `<span class="sug-chip direct">🏷️ ${U.fmt(mode === 'gross' ? (d.sugVc4Gross || 0) + (d.sugCommGross || 0) : d.sugVc4 + d.sugComm)} tags</span>`}</b></div>`;
+      sugStats = `<div class="ms-sug-full"><small>🏷️ Tags required · ${U.fmt(d.days)} din</small><b>${mode === 'both' ? `<span class="sug-pair"><span class="sug-result net"><small>Tag need · after stock</small><span class="sug-chip direct">🏷️ ${U.fmt(d.sugVc4)} + ${U.fmt(d.sugComm)} tags</span></span><span class="sug-result gross"><small>Tags · no stock deducted</small><span class="sug-chip wo">🏷️ ${U.fmt((d.sugVc4Gross || 0) + (d.sugCommGross || 0))} tags</span></span></span>` : `<span class="sug-chip direct">🏷️ ${U.fmt(mode === 'gross' ? (d.sugVc4Gross || 0) + (d.sugCommGross || 0) : d.sugVc4 + d.sugComm)} tags</span>`}</b></div>`;
     } else if (q1.direct) {
       sugStats = '<div class="ms-sug-full"><small>Suggested dispatch</small><b class="dim">No dispatch</b></div>';
     } else {

@@ -13,7 +13,9 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { sheetsStoreFromEnv } from './sheets-storage.js';
 import { appsScriptStoreFromEnv, AppsScriptStore } from './apps-script-storage.js';
-import { sendMail, mailConfigured, diagnoseMail, mailHint, availableProviders, resolveProviders, resetMailMemo, MAIL_PROVIDERS } from './mailer.js';
+import { sendMail, mailConfigured, diagnoseMail, mailHint, availableProviders, resolveProviders, resetMailMemo, MAIL_PROVIDERS, splitRecipients } from './mailer.js';
+import { DEFAULT_DISPATCH_EMAIL, normalizeDispatchEmail, buildDispatchPlan, dispatchEmailContent } from './dispatch-email.js';
+import { loadFfDispatchRows, loadGvDispatchRows } from './dispatch-report.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 8080);
@@ -150,6 +152,7 @@ const DEFAULT_SETTINGS = {
   ffPayout: { sheet: 'payout', gid: '', labelCol: '', classCol: '', rateCol: '', penaltyCol: '', noteCol: '' }, // FF sheet "payout" tab: per-class commission rate + penalty (blank = auto-detect)
   commissionAlerts: { enabled: true, outlierPct: 25, gvGapPct: 40, mismatchPct: 5, mismatchMin: 50, zeroEarnedMin: 1 }, // cockpit.js alert thresholds
   dispatch: { tagsPerBox: 25, horizon: 7, minNeed: 1, top: 40 }, // dispatch planner defaults
+  dispatchEmail: { ...DEFAULT_DISPATCH_EMAIL }, // 🚚 recurring, selectable Dispatch Planner email
   commissionSlabs: {
     enabled: false, model: 'agentTier',
     channels: {
@@ -334,6 +337,7 @@ function settingsFor(u) {
   if (s.email) s.email = { provider: s.email.provider || 'auto', host: s.email.host || '', port: s.email.port || '', secure: !!s.email.secure, user: '', pass: '', from: s.email.from || '', to: s.email.to || '', resendKey: '', brevoKey: '' };
   delete s.personalLinks; // 🔗 secret tokens sirf admin ko
   delete s.schedules;     // 🗓 admin ke custom reminders
+  delete s.dispatchEmail; // 🚚 selected recipients + delivery schedule sirf admin ko
   return s;
 }
 /** sw.js ka CACHE_NAME — app version (update-toast ke liye). */
@@ -1523,6 +1527,7 @@ function runScheduledChecks() {
     maybeWorkspaceFollowups(false),
     sendWeeklyEmail(false),
     sendReportEmail(false),
+    sendDispatchPlanEmail(false),
     refreshStockState(false)
   ]);
 }
@@ -1714,6 +1719,74 @@ async function sendReportEmail(force = false) {
   console.log(`scheduled report email sent (${dateKey})`);
   return { date: dateKey, days: rows.length };
 }
+
+// ---- 🚚 Dispatch Planner scheduled email --------------------------------------------------------
+async function dispatchReportTable(channel) {
+  const settings = db.settings;
+  const tabs = Array.isArray(settings.tabs) ? settings.tabs : DEFAULT_TABS;
+  const isGv = channel === 'gv';
+  const tab = tabs.find((t) => t && (isGv ? (t.id === 'GV REPORT' || t.tab === 'GV REPORT') : (t.id === 'REPORT' || t.tab === 'REPORT')));
+  const report = isGv ? (settings.gv && settings.gv.report) || {} : {};
+  const sheet = isGv ? (report.tab || (tab && tab.tab) || 'GV REPORT') : (tab && tab.tab) || 'REPORT';
+  const sheetId = isGv ? settings.gvSheetId : settings.sheetId;
+  const gid = isGv ? (report.gid || (tab && tab.gid) || '1284424234') : (tab && tab.gid) || settings.reportGid || '242489821';
+  const params = new URLSearchParams({ id: String(sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), gid, sheet });
+  if (isGv) params.set('range', `A${Number(report.headerRow) || 4}:${String(report.lastCol || 'BE').toUpperCase().replace(/[^A-Z]/g, '') || 'BE'}`);
+  const out = await fetchUpstream(upstreamUrl(params));
+  if (out.status < 200 || out.status >= 300) throw new Error(`${isGv ? 'GV REPORT' : 'FF REPORT'} sheet responded ${out.status}`);
+  return parseGvizServer(out.body);
+}
+async function loadDispatchAgents(channel) {
+  const jobs = [];
+  if (channel !== 'gv') jobs.push(dispatchReportTable('ff').then((table) => loadFfDispatchRows(table, db.settings)));
+  if (channel !== 'ff') jobs.push(dispatchReportTable('gv').then((table) => loadGvDispatchRows(table, db.settings)));
+  const sources = await Promise.all(jobs);
+  return sources.flat();
+}
+async function sendDispatchPlanEmail(force = false, input = null) {
+  const saved = db.settings.dispatchEmail || DEFAULT_DISPATCH_EMAIL;
+  let schedule;
+  try { schedule = normalizeDispatchEmail(input || saved, saved); }
+  catch (err) { if (force) throw err; console.warn('dispatch email schedule:', err.message); return null; }
+  if (!force && schedule.enabled !== true) return null;
+  const recipients = splitRecipients(schedule.recipients);
+  if (!recipients.length) { if (force) throw new Error('Dispatch email recipients add karo.'); return null; }
+  const emailCfg = db.settings.email || {};
+  const mailCfg = { ...emailCfg, to: recipients.join(',') };
+  if (!resolveProviders(mailCfg).length) { if (force) throw new Error('Email provider configure nahi — Settings → Features → Email me provider set karo.'); return null; }
+  const ist = istNow(), dateKey = dateKeyNow();
+  if (!force) {
+    if (ist.getUTCHours() < schedule.hour) return null;
+    if (schedule.kind === 'weekly' && ist.getUTCDay() !== schedule.weekday) return null;
+    if (schedule.kind === 'monthly' && Number(ist.getUTCDate()) !== schedule.day) return null;
+    const sent = Array.isArray(db.notify.watch.dispatchEmailFired) ? db.notify.watch.dispatchEmailFired : [];
+    const slot = schedule.kind === 'weekly'
+      ? (() => { const monday = new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate())); monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7)); return monday.toISOString().slice(0, 10); })()
+      : schedule.kind === 'monthly' ? dateKey.slice(0, 7) : dateKey;
+    const scheduleId = crypto.createHash('sha256').update(JSON.stringify(schedule)).digest('hex').slice(0, 16);
+    const sentKey = `${scheduleId}|${slot}`;
+    if (sent.includes(sentKey)) return null;
+  }
+  const sourceAgents = await loadDispatchAgents(schedule.channel);
+  if (!sourceAgents.length) throw new Error('Selected channel ke REPORT sheet me koi dispatch row nahi mili.');
+  const plan = buildDispatchPlan(sourceAgents, schedule, { settings: db.settings, days: Number(feats().suggestDays) || 15, now: ist });
+  if (!plan.summary.agents && !plan.summary.tls) throw new Error('Selected filters ke liye dispatch data nahi mila.');
+  const email = dispatchEmailContent(plan, schedule, db.settings.brand || 'Dashboard', dateKey);
+  const result = await sendMail(mailCfg, email.subject, email.text, { html: email.html, attachments: email.attachments });
+  if (!force) {
+    const sent = Array.isArray(db.notify.watch.dispatchEmailFired) ? db.notify.watch.dispatchEmailFired : [];
+    const slot = schedule.kind === 'weekly'
+      ? (() => { const monday = new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate())); monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7)); return monday.toISOString().slice(0, 10); })()
+      : schedule.kind === 'monthly' ? dateKey.slice(0, 7) : dateKey;
+    const scheduleId = crypto.createHash('sha256').update(JSON.stringify(schedule)).digest('hex').slice(0, 16);
+    db.notify.watch.dispatchEmailFired = [...sent, `${scheduleId}|${slot}`].slice(-240);
+    persist('notify').catch(() => {});
+  }
+  logAudit(null, 'dispatch_email_sent', { actor: force ? 'admin:test' : 'scheduler', target: recipients.join(','), note: `${plan.summary.agents} agents · ${schedule.sections.join('+')} · ${result.provider}` });
+  console.log(`dispatch email ${force ? 'test ' : ''}sent (${dateKey} · ${plan.summary.agents} agents · ${schedule.kind})`);
+  return { date: dateKey, recipients: recipients.length, agents: plan.summary.agents, tls: plan.summary.tls, provider: result.provider, attached: email.attachments.map((a) => a.name) };
+}
+
 // ---- 🔍 agent anomaly (raat 9 IST) — achanak 0 / bahut kam issuance wale agents -----------------
 async function maybeAgentAnomaly(force = false) {
   try {
@@ -2360,6 +2433,15 @@ async function handleApi(req, res, url) {
       return sendJson(res, 200, { ok: !!out, detail: out || 'no data' });
     } catch (err) { throw new HttpError(502, `Report email fail: ${err.message}`); }
   }
+  // 🚚 Send the current Dispatch Planner selection immediately (admin test / preview).
+  if (p === '/api/dispatch-email/test' && method === 'POST') {
+    requireAdmin(user);
+    const body = await readBody(req);
+    try {
+      const out = await sendDispatchPlanEmail(true, body.schedule || body);
+      return sendJson(res, 200, { ok: true, detail: out });
+    } catch (err) { throw new HttpError(502, `Dispatch email fail: ${err.message}`); }
+  }
   // 📢 Announcement — sab users ke liye bell broadcast (admin hi bhej sakta hai).
   if (p === '/api/announcements' && method === 'POST') {
     requireAdmin(user);
@@ -2931,6 +3013,10 @@ async function handleApi(req, res, url) {
       for (const key of ['resendKey', 'brevoKey']) if (patch.email[key] !== undefined) patch.email[key] = String(patch.email[key] || '').trim().slice(0, 200);
       if (patch.email.pass !== undefined) patch.email.pass = String(patch.email.pass || '').slice(0, 200);
       if (patch.email.host !== undefined) patch.email.host = String(patch.email.host || '').trim().slice(0, 200);
+    }
+    if (patch.dispatchEmail !== undefined) {
+      try { patch.dispatchEmail = normalizeDispatchEmail(patch.dispatchEmail, db.settings.dispatchEmail || DEFAULT_DISPATCH_EMAIL); }
+      catch (err) { throw new HttpError(400, err.message); }
     }
     if (patch.stockMovement !== undefined) {
       if (!patch.stockMovement || typeof patch.stockMovement !== 'object' || Array.isArray(patch.stockMovement)) throw new HttpError(400, 'stockMovement mapping object hona chahiye.');

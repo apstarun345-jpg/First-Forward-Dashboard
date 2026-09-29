@@ -29,7 +29,8 @@ const A = (o) => ({ week: [0, 0, 0, 0, 0, 0, 0], curVc4: 0, curNvc4: 0, curTotal
 const ffAgents = [
   A({ name: 'Ravi Kumar', agentId: 'R1', tlName: 'TL One', tlId: 'T1', priority: 'High', curVc4: 280, curNvc4: 0, curTotal: 280, lastVc4: 200, lastTotal: 200, stockVc4: 100, stockTotal: 100, tlStockVc4: 300, tlStockTotal: 300, tlPriority: 'Medium' }),
   A({ name: 'Sita Devi', agentId: 'R2', tlName: 'TL One', tlId: 'T1', priority: 'Low', curVc4: 56, curTotal: 56, lastVc4: 90, lastTotal: 90, stockVc4: 500, stockTotal: 500, tlStockVc4: 300, tlStockTotal: 300, tlPriority: 'Medium' }),
-  A({ name: 'Direct Dev', agentId: 'D1', tlName: 'APS', priority: 'Medium', tlExcluded: true, curVc4: 84, curTotal: 84, stockVc4: 10, stockTotal: 10 })
+  A({ name: 'Direct Dev', agentId: 'D1', tlName: 'APS', agentPriority: 'Medium', priority: 'Medium', tlExcluded: true, curVc4: 84, curTotal: 84, stockVc4: 10, stockTotal: 10 }),
+  A({ name: 'Source Review', agentId: 'D2', tlName: 'APS', agentPriority: 'Review soon', priority: 'High', tlExcluded: true, curVc4: 40, curTotal: 40 })
 ];
 const gvRows = [
   { agentId: 'G1', agentName: 'GV Ramesh', tlId: 'GT1', tlName: 'GV TL', priority: 'High', stockVc4: 0, stockComm: 0, stockTotal: 0, curVc4: 140, curComm: 28, curTotal: 168, lastVc4: 100, lastComm: 20, lastTotal: 120, agentStatus: 'Active' },
@@ -45,10 +46,11 @@ const rows = () => DP.collectAgents().map((r) => DP.withCalc(r, 'total'));
 
 test('agents from FF + GV in one shape, direct flag + priority normalised', () => {
   const list = DP.collectAgents();
-  assert.equal(list.length, 5);
-  assert.equal(list.filter((r) => r.ch === 'ff').length, 3); assert.equal(list.filter((r) => r.ch === 'gv').length, 2);
-  assert.equal(list.filter((r) => r.direct).length, 2, 'FF APS + GV no-TL');
+  assert.equal(list.length, 6);
+  assert.equal(list.filter((r) => r.ch === 'ff').length, 4); assert.equal(list.filter((r) => r.ch === 'gv').length, 2);
+  assert.equal(list.filter((r) => r.direct).length, 3, 'FF APS + GV no-TL');
   assert.equal(list.find((r) => r.name === 'GV Free').priority, 'Low');
+  assert.equal(list.find((r) => r.name === 'Source Review').priority, 'Review soon', 'unknown source label is preserved instead of being called Low');
 });
 
 test('run-rate = issued ÷ (today−1); required = rate × settings days; with / w/o stock; cover', () => {
@@ -74,6 +76,8 @@ test('direct agents: tags for High/Medium, none for Low', () => {
   assert.equal(d.direct, true); assert.equal(d.tagged, true); assert.match(d.action.t, /Tags/);
   const f = rows().find((x) => x.name === 'GV Free');
   assert.equal(f.tagged, false); assert.equal(f.action.t, 'No dispatch');
+  const raw = rows().find((x) => x.name === 'Source Review');
+  assert.equal(raw.priority, 'Review soon'); assert.equal(raw.tagged, false, 'unmapped source priority must not imply High/Medium tag need');
 });
 
 test('TL-wise rows: TL stock from sheet, direct group per channel, priority', () => {
@@ -85,7 +89,9 @@ test('TL-wise rows: TL stock from sheet, direct group per channel, priority', ()
   assert.equal(one.net, 0); assert.equal(one.required, 300);
   assert.equal(one.priority, 'Medium');
   assert.equal(tls.filter((t) => t.direct).length, 2, 'FF + GV direct groups');
-  assert.equal(tls.find((t) => t.ch === 'gv' && !t.direct).name, 'GV TL');
+  const gvTl = tls.find((t) => t.ch === 'gv' && !t.direct);
+  assert.equal(gvTl.name, 'GV TL');
+  assert.equal(gvTl.priority, '', 'GV TL priority is not present in the source report, so do not infer it from agents');
 });
 
 test('filters + sort + totals', () => {

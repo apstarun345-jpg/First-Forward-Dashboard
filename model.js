@@ -53,6 +53,41 @@ window.FF = window.FF || {};
     return rows;
   }
 
+  /** Today's agent × class × tag-type totals — supports daily leaderboards and profile drill-downs. */
+  async function loadAgentDailyClass(opts) {
+    const e = FF.config.eir;
+    const today = U.dateKey(new Date());
+    const fields = [e.agentId, e.agentName, e.gvId, e.gvName, e.date, e.cls, e.type, e.vrnType, e.masterId, e.tlId, e.tlName];
+    const tq = `select ${fields.join(', ')}, count(${e.tagId}) where ${e.date} = date '${today}' and ${e.tagId} is not null group by ${fields.join(', ')} order by ${e.agentName}`;
+    const t = await D.query(e.sheet, tq, opts);
+    const rows = [];
+    for (const r of t.rows) {
+      const date = D.cellDate(r[4]);
+      const n = D.cellNumber(r[11]);
+      if (!date || !n) continue;
+      const agentId = U.clean(D.cellText(r[0]));
+      const agentName = U.clean(D.cellText(r[1]));
+      const gvId = U.clean(D.cellText(r[2]));
+      const gvName = U.clean(D.cellText(r[3]));
+      const name = agentName || gvName || agentId || gvId;
+      if (!name) continue;
+      const tlId = U.clean(D.cellText(r[9]));
+      const rawTlName = U.clean(D.cellText(r[10]));
+      const masterId = U.clean(D.cellText(r[8]));
+      const cls = normClass(D.cellText(r[5]));
+      const channel = channelOf(masterId, rawTlName);
+      rows.push({
+        id: agentId || gvId, agentId: agentId || gvId, name, agentName: name,
+        gvId, gvName, key: `${channel}|${agentId || gvId}|${name}`,
+        channel, tlId, tlName: rawTlName || (tlId ? `TL ${tlId}` : 'Direct'),
+        date, dateKey: U.dateKey(date), cls, group: classGroup(cls),
+        type: U.clean(D.cellText(r[6])).toUpperCase() || 'ISSUANCE',
+        vrnType: U.clean(D.cellText(r[7])), n
+      });
+    }
+    return rows;
+  }
+
   /** Agents by month: [{ id, name, channel, tlId, tlName, gvId, gvName, ym, n }] */
   async function loadAgents(opts) {
     const e = FF.config.eir;
@@ -369,5 +404,5 @@ window.FF = window.FF || {};
     return map;
   }
 
-  FF.model = { classGroup, channelOf, loadDaily, loadAgents, loadStatus, loadStock, loadStockAgents, loadAgentClassMonthly, loadRangePeople, loadStockMovements, loadStockRows, loadStockAgentTypes, loadStockAging, months, latestDate, dailySeries, summary, byDim };
+  FF.model = { classGroup, channelOf, loadDaily, loadAgentDailyClass, loadAgents, loadStatus, loadStock, loadStockAgents, loadAgentClassMonthly, loadRangePeople, loadStockMovements, loadStockRows, loadStockAgentTypes, loadStockAging, months, latestDate, dailySeries, summary, byDim };
 })(window.FF);

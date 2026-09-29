@@ -9,6 +9,7 @@ window.FF = window.FF || {};
     daily: { label: 'EIR · daily issuance', load: (o) => M.loadDaily(null, o) },
     agents: { label: 'EIR · agents by month', load: (o) => M.loadAgents(o) },
     agentClass: { label: 'EIR · agent class split', load: (o) => M.loadAgentClassMonthly(o) },
+    agentDailyClass: { label: 'EIR · today agent class breakdown', load: (o) => M.loadAgentDailyClass(o) },
     status: { label: 'EIR · tag status', load: (o) => M.loadStatus(o) },
     stock: { label: 'StockDataa · class × TL', load: (o) => M.loadStock(o) },
     stockAgents: { label: 'StockDataa · agent × class', load: (o) => M.loadStockAgents(o) },
