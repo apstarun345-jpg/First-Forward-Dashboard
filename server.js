@@ -71,6 +71,7 @@ export const PAGE_PERMISSIONS = [
   { key: 'gvStock', label: 'GV Partner · Stock', group: 'GV Partner' },
   { key: 'gvCommission', label: 'GV Partner · Commission Intelligence', group: 'GV Partner' },
   { key: 'dualChannel', label: 'Cross-channel · Identity & combined analysis', group: 'Cross Channel' },
+  { key: 'fastagChampions', label: 'Cross-channel · FASTag Champions (top agents/TLs)', group: 'Cross Channel' },
   { key: 'dispatchPlan', label: 'Cross-channel · Dispatch planner (auto box plan)', group: 'Cross Channel' },
   { key: 'tlScorecard', label: 'Cross-channel · TL scorecard', group: 'Cross Channel' },
   { key: 'compare', label: 'GV vs First Forward (comparison)', group: 'Cross Channel' },

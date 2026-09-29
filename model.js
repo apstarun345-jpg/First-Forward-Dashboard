@@ -108,18 +108,20 @@ window.FF = window.FF || {};
   }
 
   /** Agent × TL × month × class group: [{ id, name, tlName, channel, ym, group, type, n }] — powers
-      the VC4 / VC20 / VC5+ last-vs-current comparison for any agent or TL without extra queries. */
+      the VC4 / VC20 / VC5+ last-vs-current comparison for any agent or TL without extra queries.
+      vrnType bhi group-by me hai taaki FASTag Champions per-agent Chassis / Wrong-VRN counts
+      bina extra query ke ban sakein. */
   async function loadAgentClassMonthly(opts) {
     const e = FF.config.eir;
-    const tq = `select ${e.agentName}, ${e.gvName}, ${e.tlName}, ${e.masterId}, year(${e.date}), month(${e.date}), ${e.cls}, ${e.type}, count(${e.tagId}) where ${e.date} is not null group by ${e.agentName}, ${e.gvName}, ${e.tlName}, ${e.masterId}, year(${e.date}), month(${e.date}), ${e.cls}, ${e.type}`;
+    const tq = `select ${e.agentName}, ${e.gvName}, ${e.tlName}, ${e.masterId}, year(${e.date}), month(${e.date}), ${e.cls}, ${e.type}, ${e.vrnType}, count(${e.tagId}) where ${e.date} is not null group by ${e.agentName}, ${e.gvName}, ${e.tlName}, ${e.masterId}, year(${e.date}), month(${e.date}), ${e.cls}, ${e.type}, ${e.vrnType}`;
     const t = await D.query(e.sheet, tq, opts);
     const rows = [];
     for (const r of t.rows) {
-      const y = D.cellNumber(r[4]), m = D.cellNumber(r[5]), n = D.cellNumber(r[8]);
+      const y = D.cellNumber(r[4]), m = D.cellNumber(r[5]), n = D.cellNumber(r[9]);
       if (y === null || m === null || !n) continue;
       const agentName = D.cellText(r[0]), gvName = D.cellText(r[1]), tlName = D.cellText(r[2]) || '—';
       const cls = normClass(D.cellText(r[6]));
-      rows.push({ name: agentName || gvName || 'Unknown', tlName, channel: channelOf(D.cellText(r[3]), tlName), ym: `${y}-${U.pad2(m + 1)}`, cls, group: classGroup(cls), type: D.cellText(r[7]).toUpperCase() || 'ISSUANCE', n });
+      rows.push({ name: agentName || gvName || 'Unknown', tlName, channel: channelOf(D.cellText(r[3]), tlName), ym: `${y}-${U.pad2(m + 1)}`, cls, group: classGroup(cls), type: D.cellText(r[7]).toUpperCase() || 'ISSUANCE', vrnType: D.cellText(r[8]), n });
     }
     return rows;
   }
