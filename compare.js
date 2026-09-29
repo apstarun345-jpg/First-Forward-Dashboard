@@ -180,7 +180,7 @@ FF.pages = FF.pages || {};
       insight.push(`GV Partner ka MTD share <b>${U.fmtPct(gvShare, 0)}</b> hai (GV ${U.fmt(gvCur.total)} vs FF ${U.fmt(ffCur.total)}).`);
       const ffG = U.growth(ffCur.total, ffLastMtd ? ffLastMtd.total : 0);
       const gvG = U.growth(gvCur.total, gvLastMtd ? gvLastMtd.total : 0);
-      if (ffG !== null && gvG !== null) insight.push(`Same period growth — First Forward <b>${U.fmtSigned(ffG, 0)}%</b>, GV Partner <b>${U.fmtSigned(gvG, 0)}%</b>.`);
+      if (ffG !== null && gvG !== null) insight.push(`Same period growth — First Forward ${U.pctHtml(ffG, { decimals: 0 })}, GV Partner ${U.pctHtml(gvG, { decimals: 0 })}.`);
       const ffVc4Share = U.pctOf(ffCur.vc4, ffCur.total), gvVc4Share = U.pctOf(gvCur.vc4, gvCur.total);
       insight.push(`VC4 mix — FF <b>${U.fmtPct(ffVc4Share, 0)}</b> vs GV <b>${U.fmtPct(gvVc4Share, 0)}</b> (${gvVc4Share > ffVc4Share ? 'GV ka payable mix behtar' : 'FF ka payable mix behtar'}).`);
       const ffCover = ffCur.avgPerDay ? ffStockTotal / ffCur.avgPerDay : 0;

@@ -347,8 +347,9 @@ window.FF = window.FF || {};
       const ff = (ym) => D.daily.filter((r) => r.ym === ym && r.channel === 'First Forward').reduce((n, r) => n + r.n, 0);
       const gv = (ym) => D.gvMaster.filter((r) => r.ym === ym).length;
       const pct = (a, b) => b ? `${a >= b ? '+' : ''}${(((a - b) / b) * 100).toFixed(1)}%` : '—';
-      return ans(`Growth — FF: ${fmt(ff(m))} is month vs ${fmt(ff(prev))} (${esc(U.labelYM(prev))}) → <b>${pct(ff(m), ff(prev))}</b> · GV: ${fmt(gv(m))} vs ${fmt(gv(prev))} → <b>${pct(gv(m), gv(prev))}</b>.`,
-        `Growth — FF: ${fmt(ff(m))} this month vs ${fmt(ff(prev))} (${esc(U.labelYM(prev))}) → <b>${pct(ff(m), ff(prev))}</b> · GV: ${fmt(gv(m))} vs ${fmt(gv(prev))} → <b>${pct(gv(m), gv(prev))}</b>.`,
+      const pctH = (a, b) => b ? U.pctHtml(((a - b) / b) * 100) : '—';
+      return ans(`Growth — FF: ${fmt(ff(m))} is month vs ${fmt(ff(prev))} (${esc(U.labelYM(prev))}) → ${pctH(ff(m), ff(prev))} · GV: ${fmt(gv(m))} vs ${fmt(gv(prev))} → ${pctH(gv(m), gv(prev))}.`,
+        `Growth — FF: ${fmt(ff(m))} this month vs ${fmt(ff(prev))} (${esc(U.labelYM(prev))}) → ${pct(ff(m), ff(prev))} · GV: ${fmt(gv(m))} vs ${fmt(gv(prev))} → ${pct(gv(m), gv(prev))}.`,
         [['aaj ka total issuance', 'Aaj ka total'], ['top agent kaun', 'Top agent']]);
     }
 

@@ -35,6 +35,11 @@ FF.pages = FF.pages || {};
     if (given != null) return given;
     return Math.max(0, Math.ceil((Number(o && o.daily) || 0) * days - (Number(o && o.stock) || 0)));
   }
+  /** Bina stock ghataye — pure run-rate requirement (avg VC4/day × target days). */
+  function suggestGrossQty(o) {
+    const days = Number(FF.config.features && FF.config.features.suggestDays) || 15;
+    return Math.max(0, Math.ceil((Number(o && o.daily) || 0) * days));
+  }
 
   /** Human label: "Direct Agent (APS)" / "Direct Agent (no TL)" / asli TL naam. */
   function label(row, channel) {
@@ -131,6 +136,7 @@ FF.pages = FF.pages || {};
           status: clean(a.agentStatus || ''), priority: clean(a.priority || a.agentPriority || ''),
           vc4Stock: Number(a.stockVc4 || 0),
           suggested: suggestQty({ daily: a.avgVc4 || ((FF.pages.performance.daysElapsed && FF.pages.performance.daysElapsed()) ? a.curVc4 / FF.pages.performance.daysElapsed() : 0), stock: a.stockVc4 }),
+          suggestedGross: suggestGrossQty({ daily: a.avgVc4 || ((FF.pages.performance.daysElapsed && FF.pages.performance.daysElapsed()) ? a.curVc4 / FF.pages.performance.daysElapsed() : 0) }),
           route: `#/performance?q=${encodeURIComponent(a.name || '')}`
         });
       });
@@ -155,6 +161,7 @@ FF.pages = FF.pages || {};
           status: clean(r.agentStatus || ''), priority: clean(r.priority || ''),
           vc4Stock: Number(r.stockVc4 || 0),
           suggested: suggestQty({ given: r.suggestedDispatch, daily: (r.curVc4 || 0) / Math.max(1, r.curDays || 0), stock: r.stockVc4 }),
+          suggestedGross: suggestGrossQty({ daily: (r.curVc4 || 0) / Math.max(1, r.curDays || 0) }),
           route: `#/gvPerformance?q=${encodeURIComponent(r.agentName || '')}`
         });
       });
@@ -194,7 +201,7 @@ FF.pages = FF.pages || {};
   }
 
   // ---- page -------------------------------------------------------------------------------------
-  const PAGE_HEADERS = ['Channel', 'Agent', 'Agent ID', 'Rule / reason', 'TL', 'Stock', 'MTD issued', 'Status', 'Priority', 'Tag required?', 'Suggested tags'];
+  const PAGE_HEADERS = ['Channel', 'Agent', 'Agent ID', 'Rule / reason', 'TL', 'Stock', 'MTD issued', 'Status', 'Priority', 'Tag required?', 'Suggested tags (stock − · w/o stock)'];
 
   async function render(root, params) {
     const p = params || {};
@@ -223,16 +230,16 @@ FF.pages = FF.pages || {};
         ${ruleCard('🟦', 'First Forward direct rule', `TL Name <b>${esc((d.ffTlNames || ['APS']).join(', '))}</b> (ya excluded TL naam)`, byCh.ff.length, 'Example: FF REPORT me TL Name “APS” — ye asli TL nahi, direct agent ka placeholder hai.')}
         <div class="direct-rule-card"><div class="direct-rule-head"><span>⚙️</span><b>Effective settings</b><small>live</small></div><p>Direct agents: <b>TL lists me nahi</b> · <b>stock dispatch ${d.dispatchExempt === false ? 'allowed' : 'exempt'}</b> · <b>High/Medium = 🏷️ tag required</b> · labels site-wide same</p><p class="dim small">Rule badalna ho to Settings → 🧍 Direct Agents. Iske baad har page (GV Stock Report dispatch, Dispatch Planner, Performance, Stock, Network, Search) wahi rule use karta hai.</p></div>
       </div>
-      <div class="metric-grid">${kpi('Direct agents', U.fmt(rows.length), `${U.fmt(byCh.gv.length)} GV · ${U.fmt(byCh.ff.length)} FF`, 'g7')}${kpi('GV direct (no TL)', U.fmt(byCh.gv.length), `${U.fmt(U.sum(byCh.gv, (r) => r.stock))} tags stock`, 'g9')}${kpi('FF direct (APS)', U.fmt(byCh.ff.length), `${U.fmt(U.sum(byCh.ff, (r) => r.issued))} MTD issued`, 'g1')}${kpi('🏷️ Tag required', U.fmt(tagRows.length), `High/Medium priority · ${U.fmt(tagRows.filter((r) => r.ch === 'gv').length)} GV · ${U.fmt(tagRows.filter((r) => r.ch === 'ff').length)} FF · ${U.fmt(U.sum(tagRows, (r) => r.suggested))} tags suggested`, 'g5')}</div>
+      <div class="metric-grid">${kpi('Direct agents', U.fmt(rows.length), `${U.fmt(byCh.gv.length)} GV · ${U.fmt(byCh.ff.length)} FF`, 'g7')}${kpi('GV direct (no TL)', U.fmt(byCh.gv.length), `${U.fmt(U.sum(byCh.gv, (r) => r.stock))} tags stock`, 'g9')}${kpi('FF direct (APS)', U.fmt(byCh.ff.length), `${U.fmt(U.sum(byCh.ff, (r) => r.issued))} MTD issued`, 'g1')}${kpi('🏷️ Tag required', U.fmt(tagRows.length), `High/Medium priority · ${U.fmt(tagRows.filter((r) => r.ch === 'gv').length)} GV · ${U.fmt(tagRows.filter((r) => r.ch === 'ff').length)} FF · <b>${U.fmt(U.sum(tagRows, (r) => r.suggested))}</b> tags (stock −) · w/o stock <b>${U.fmt(U.sum(tagRows, (r) => r.suggestedGross || 0))}</b>`, 'g5')}</div>
       <section class="card"><div class="card-head"><h3>🧍 Direct agent roster <span class="dim">${U.fmt(filtered.length)} / ${U.fmt(rows.length)}</span></h3><div class="card-right">${FF.auth.can('export') ? '<button class="btn small" id="da-csv2">⬇ CSV</button>' : ''}</div></div>
         <div class="card-body">
           <div class="dispatch-filter-bar"><span><b>Filter:</b> Direct agents ko stock dispatch nahi — par <b>High/Medium priority</b> waalon ko <b>TAG chahiye</b> (alag option)</span>${filterButtons({ current: scope, counts: cnt, attr: 'da-scope', gv: byCh.gv.length, ff: byCh.ff.length })}</div>
           <form id="da-search" class="ins-search" style="margin:10px 0"><input class="input" name="q" value="${esc(p.q || '')}" placeholder="Agent, ID, TL naam ya reason…"><button class="btn">Search</button></form>
-          <div class="table-wrap tall"><table class="tbl compact"><thead><tr>${PAGE_HEADERS.map((h, i) => `<th class="${(i >= 5 && i <= 6) || i === 10 ? 'num' : ''}">${h}</th>`).join('')}</tr></thead><tbody>${filtered.length ? filtered.map((r) => `<tr class="direct-row" data-link="${esc(r.route || '#/directAgents')}"><td><span class="tag ${r.ch === 'gv' ? 'ok' : 'info'}">${r.ch === 'gv' ? '🟩 GV' : '🟦 FF'}</span></td><td><b>${esc(r.name)}</b></td><td class="mono">${esc(r.id || '—')}</td><td><span class="direct-chip">🚫 ${esc(r.reason)}</span></td><td class="dim">no TL (direct)</td><td class="num">${U.fmt(r.stock)}</td><td class="num">${U.fmt(r.issued)}</td><td>${esc(r.status || '—')}</td><td>${esc(r.priority || '—')}</td><td>${isHighMedium(r.priority) ? '<span class="tag warn">🏷️ Tag required</span>' : '<span class="tag ok">No dispatch</span>'}</td><td class="num">${isHighMedium(r.priority) ? `<b class="sug-chip">${U.fmt(r.suggested)}</b>` : '<span class="dim">—</span>'}</td></tr>`).join('') : `<tr><td colspan="${PAGE_HEADERS.length}" class="dim">Koi direct agent nahi mila — filter badlo ya data load hone do.</td></tr>`}</tbody></table></div>
+          <div class="table-wrap tall"><table class="tbl compact"><thead><tr>${PAGE_HEADERS.map((h, i) => `<th class="${(i >= 5 && i <= 6) || i === 10 ? 'num' : ''}">${h}</th>`).join('')}</tr></thead><tbody>${filtered.length ? filtered.map((r) => `<tr class="direct-row" data-link="${esc(r.route || '#/directAgents')}"><td><span class="tag ${r.ch === 'gv' ? 'ok' : 'info'}">${r.ch === 'gv' ? '🟩 GV' : '🟦 FF'}</span></td><td><b>${esc(r.name)}</b></td><td class="mono">${esc(r.id || '—')}</td><td><span class="direct-chip">🚫 ${esc(r.reason)}</span></td><td class="dim">no TL (direct)</td><td class="num">${U.fmt(r.stock)}</td><td class="num">${U.fmt(r.issued)}</td><td>${esc(r.status || '—')}</td><td>${esc(r.priority || '—')}</td><td>${isHighMedium(r.priority) ? '<span class="tag warn">🏷️ Tag required</span>' : '<span class="tag ok">No dispatch</span>'}</td><td class="num">${isHighMedium(r.priority) ? U.sugCell(r.suggested, r.suggestedGross || 0, 'direct') : '<span class="dim">—</span>'}</td></tr>`).join('') : `<tr><td colspan="${PAGE_HEADERS.length}" class="dim">Koi direct agent nahi mila — filter badlo ya data load hone do.</td></tr>`}</tbody></table></div>
           <p class="dim small">🚫 Direct agents = jinke paas asli TL nahi. Ye TL ranking / TL table / network graph me kabhi nahi aate; inko stock dispatch bhi nahi jaata (GV Stock Report “Need stock” list se hat jate hain).</p>
         </div>
       </section>`;
-    const csv = () => U.downloadCsv(`direct-agents-${U.stamp()}.csv`, PAGE_HEADERS, filtered.map((r) => [r.channel, r.name, r.id, r.reason, 'Direct (no TL)', r.stock, r.issued, r.status, r.priority, isHighMedium(r.priority) ? 'Tag required' : 'No dispatch', isHighMedium(r.priority) ? r.suggested : '']));
+    const csv = () => U.downloadCsv(`direct-agents-${U.stamp()}.csv`, PAGE_HEADERS, filtered.map((r) => [r.channel, r.name, r.id, r.reason, 'Direct (no TL)', r.stock, r.issued, r.status, r.priority, isHighMedium(r.priority) ? 'Tag required' : 'No dispatch', isHighMedium(r.priority) ? `${r.suggested} (stock−) · ${r.suggestedGross || 0} (w/o stock)` : '']));
     const b1 = U.$('#da-csv', root), b2 = U.$('#da-csv2', root);
     if (b1) b1.addEventListener('click', csv);
     if (b2) b2.addEventListener('click', csv);
@@ -241,6 +248,6 @@ FF.pages = FF.pages || {};
     if (form) form.addEventListener('submit', (e) => { e.preventDefault(); FF.app.updateParams({ q: new FormData(form).get('q') || '' }); });
   }
 
-  FF.direct = { rules, channelOf, isDirect, isRealTl, isHighMedium, tagRequired, suggestQty, label, reason, filterButtons, counts, split, ruleBanner, roster, render, PAGE_HEADERS };
+  FF.direct = { rules, channelOf, isDirect, isRealTl, isHighMedium, tagRequired, suggestQty, suggestGrossQty, label, reason, filterButtons, counts, split, ruleBanner, roster, render, PAGE_HEADERS };
   FF.pages.directAgents = { title: 'Direct Agents & TLs', render };
 })(FF);

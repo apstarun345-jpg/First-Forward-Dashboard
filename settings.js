@@ -1008,9 +1008,20 @@ FF.pages = FF.pages || {};
         ${n('features.championTop', f.championTop ?? 3, '🥇 Kitne top champions (1-10)', 'min="1" max="10"')}
         ${n('features.followupDays', f.followupDays ?? 3, '⏰ Follow-up: kitne din silent = alert', 'min="1" max="30"')}
         ${n('features.followupHour', f.followupHour ?? 10, '⏰ Follow-up hour (IST)', 'min="0" max="23"')}
-        ${n('features.suggestDays', f.suggestDays ?? 15, '🎯 Suggested dispatch target cover (din)', 'min="3" max="90"')}
       </div>
-      <p class="dim small">Cover bands (🔴/🟠/🟡) aur “went quiet” days → <b>📐 Thresholds</b> tab. Digest ka ON/OFF type → 🔔 Notifications.</p>${saveBar('feat-mods')}`);
+      <p class="dim small">Cover bands (🔴/🟠/🟡) aur “went quiet” days → <b>📐 Thresholds</b> tab. Digest ka ON/OFF type → 🔔 Notifications. 🎯 Suggested dispatch/tags ke din aur style → upar <b>🎯 Suggested dispatch / tags</b> card.</p>${saveBar('feat-mods')}`);
+    const smode = f.suggestMode === 'net' || f.suggestMode === 'gross' ? f.suggestMode : 'both';
+    const suggestCard = section('🎯 Suggested dispatch / tags <span class="dim">(kitne din ka · kaise dikhaye)</span>', `
+      <p class="dim small">Har jagah — master search (TLS + agents), profile drawer, Performance, GV dispatch plan, Direct Agents — suggested qty <b>run-rate</b> (avg VC4/day) se nikalta hai. Do criteria milte hain: <b>Stock ke baad</b> = avg/day × din − current stock · <b>Bina stock ghataye</b> = avg/day × din.</p>
+      <div class="form-grid">
+        ${field('🗓️ Kitne din ka suggest kare (target cover)', numI('features.suggestDays', f.suggestDays ?? 15, 'min="3" max="90"'), 'Default 15 din · 30 karoge to 30 din ke run-rate par requirement dikhegi')}
+        ${field('👁️ Kaise dikhaye', `<select class="input" data-path="features.suggestMode">
+          <option value="both" ${smode === 'both' ? 'selected' : ''}>Dono dikhao — stock ke baad + bina stock (recommended)</option>
+          <option value="net" ${smode === 'net' ? 'selected' : ''}>Sirf stock ke baad (net = avg × din − stock)</option>
+          <option value="gross" ${smode === 'gross' ? 'selected' : ''}>Sirf bina stock ghataye (gross = avg × din)</option>
+        </select>`, '“Dono” chunne par har jagah net ke saath “w/o stock” figure bhi dikhega')}
+      </div>
+      <p class="dim small">Example: avg 10/day · stock 40 · target 30 din → <b>stock ke baad</b> = 10×30−40 = <b>260</b> · <b>bina stock</b> = 10×30 = <b>300</b>.</p>${saveBar('feat-suggest')}`);
     const waCard = section('📤 WhatsApp share number', `
       <div class="form-grid">${field('Direct number (blank = WhatsApp share picker)', txt('features.waNumber', f.waNumber || '', 'placeholder="9198xxxxxxxx00 · country code ke saath" inputmode="tel"'))}</div>
       <p class="dim small">Number blank ho to WhatsApp apna contact picker kholta hai. Contacts tab ka team number fallback me use hota hai.</p>${saveBar('feat-wa')}`);
@@ -1077,7 +1088,7 @@ FF.pages = FF.pages || {};
         <span class="dim small" id="save-msg-feat-sched"></span>
       </div>
       <p class="dim small">Champion email ko SMTP chahiye (upar 📧 Email card). Follow-up = jinka pichhla issuance N+ din purana ho gaya.</p>`);
-    return `${uiCard}${alertCard}${routesCard}${modsCard}${waCard}${emailCard}${announceCard}${mapCard}${schedCard}`;
+    return `${uiCard}${suggestCard}${alertCard}${routesCard}${modsCard}${waCard}${emailCard}${announceCard}${mapCard}${schedCard}`;
   }
 
   // ---- 🗓 schedule list (features tab) ---------------------------------------------------------

@@ -14,6 +14,13 @@ Koi database nahi, koi manual upload nahi — website Google Sheet se data padht
 (Google Visualization API / `gviz`) through a small Node server that also handles **login, users,
 permissions and settings**. Zero npm dependencies.
 
+## ✨ v3.15.0 — 🎯 Suggested dispatch: DONO criteria (stock − aur bina stock), har jagah
+- Har suggestion ab **do figures** dikhata hai — **stock ke baad** (avg/day × din − stock) aur **bina stock ghataye** (avg/day × din): master search (TLS + agents), profile drawer, Performance dispatch plan, GV dashboard + GV Stock Report, Direct Agents, New Agents.
+- ⚙️ Settings → Features me naya **🎯 Suggested dispatch / tags** card: kitne din ka suggest (`suggestDays`) + kaise dikhaye (`suggestMode`: dono / sirf net / sirf gross).
+- 🔎 Topbar search: **✕ Clear** button + **📅 From→To date-range** popover (Range Report kholta hai); suggestions me dono criteria.
+- 🎨 Site-wide **% rule**: − red, + green bold (KPI cards ke andar bhi) · panel/kundli text bold + bada · **War Room colourful** (dark background removed) · Dashboard ka hidden g13 KPI fix · Performance KPI cards click → full breakdown drawer.
+- Docs: [WHATS-NEW-v3.15.0.md](WHATS-NEW-v3.15.0.md)
+
 ## ✨ v3.14.0 — 🆕 New Agents & TL Changes
 - Naya page `#/newAgents` (Cross Channel): FF + GV ke **naye agents** aur **TL badla / TL hata / TL mila** ke alag tables, KPIs, 6-month chart, CSV. Row click → poori profile drawer.
 

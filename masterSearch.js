@@ -249,7 +249,7 @@ FF.pages = FF.pages || {};
       const extra = q1 ? [
         q1.mobile && (!FF.auth || FF.auth.can('contacts')) ? `📞 ${q1.mobile}` : '',
         `📦 ${U.fmt(q1.stock.total)}${!isTlKind && q1.tlStock && q1.tlStock.has ? ` · TL ${U.fmt(q1.tlStock.total)}` : ''}`,
-        q1.tagRequired ? `🏷️ TAG ${U.fmt(q1.dispatch.sugVc4 + q1.dispatch.sugComm)}` : (!q1.direct && (q1.dispatch.sugVc4 || q1.dispatch.sugComm) ? `🎯 sug ${U.fmt(q1.dispatch.sugVc4)}/${U.fmt(q1.dispatch.sugComm)}` : '')
+        q1.tagRequired ? `🏷️ TAG ${U.sugText ? U.sugText(q1.dispatch.sugVc4 + q1.dispatch.sugComm, (q1.dispatch.sugVc4Gross || 0) + (q1.dispatch.sugCommGross || 0)) : U.fmt(q1.dispatch.sugVc4 + q1.dispatch.sugComm)}` : (!q1.direct && (q1.dispatch.sugVc4 || q1.dispatch.sugComm || q1.dispatch.sugVc4Gross || q1.dispatch.sugCommGross) ? `🎯 sug VC4 ${U.sugText(q1.dispatch.sugVc4, q1.dispatch.sugVc4Gross || 0)} · Comm ${U.sugText(q1.dispatch.sugComm, q1.dispatch.sugCommGross || 0)}` : '')
       ].filter(Boolean) : [];
       items.push({
         kind: p.kind.startsWith('gv') ? 'gv' : 'ff',
@@ -299,13 +299,25 @@ FF.pages = FF.pages || {};
     if (!q1) return MP() && MP().supports(p) ? '<div class="ms-kundli-stats ms-prof"><div><small>Stock / priority</small><b class="dim">REPORT load ho raha hai…</b></div></div>' : '';
     const isTlKind = /tl$/.test(p.kind);
     const contacts = !FF.auth || FF.auth.can('contacts');
-    const sug = q1.tagRequired ? `<span class="sug-chip direct">🏷️ ${U.fmt(q1.dispatch.sugVc4)} + ${U.fmt(q1.dispatch.sugComm)} tags</span>` : q1.direct ? '<span class="dim">No dispatch</span>' : `<span class="sug-chip">${U.fmt(q1.dispatch.sugVc4)}</span> / <span class="sug-chip">${U.fmt(q1.dispatch.sugComm)}</span>`;
+    const d = q1.dispatch || {};
+    const mode = U.suggestMode ? U.suggestMode() : 'both';
+    // Dono criteria: stock ke baad (net) + bina stock ghataye (gross) — settings ka mode apply hota hai.
+    const pair = (net, gross) => mode === 'net' ? `<span class="sug-chip">${U.fmt(net)}</span>` : mode === 'gross' ? `<span class="sug-chip">${U.fmt(gross)}</span>` : `<span class="sug-chip">${U.fmt(net)}</span> <span class="sug-wo-inline">w/o ${U.fmt(gross)}</span>`;
+    let sugStats = '';
+    if (q1.tagRequired) {
+      sugStats = `<div class="ms-sug-full"><small>🏷️ Tags required · ${U.fmt(d.days)} din</small><b>${mode === 'both' ? `<span class="sug-chip direct">🏷️ ${U.fmt(d.sugVc4)} + ${U.fmt(d.sugComm)} tags</span><span class="sug-wo-inline">w/o stock ${U.fmt((d.sugVc4Gross || 0) + (d.sugCommGross || 0))}</span>` : `<span class="sug-chip direct">🏷️ ${U.fmt(mode === 'gross' ? (d.sugVc4Gross || 0) + (d.sugCommGross || 0) : d.sugVc4 + d.sugComm)} tags</span>`}</b></div>`;
+    } else if (q1.direct) {
+      sugStats = '<div class="ms-sug-full"><small>Suggested dispatch</small><b class="dim">No dispatch</b></div>';
+    } else {
+      sugStats = `<div><small>Sug. VC4 ${mode === 'both' ? '(stock − · w/o stock)' : mode === 'gross' ? '(bina stock)' : '(stock −)'}</small><b>${pair(d.sugVc4, d.sugVc4Gross || 0)}</b></div>
+      <div><small>Sug. Comm. ${mode === 'both' ? '(stock − · w/o stock)' : mode === 'gross' ? '(bina stock)' : '(stock −)'}</small><b>${pair(d.sugComm, d.sugCommGross || 0)}</b></div>`;
+    }
     return `<div class="ms-kundli-stats ms-prof">
       <div><small>${isTlKind ? 'TL mobile' : 'Mobile'}</small><b>${contacts ? (q1.mobile ? esc(q1.mobile) : '—') : '🔒'}</b></div>
       <div><small>Priority</small><b>${esc(q1.priority || '—')}</b></div>
       <div><small>${isTlKind ? 'TL stock' : 'Agent stock'}</small><b>${U.fmt(q1.stock.total)}</b></div>
       ${isTlKind ? `<div><small>Agents</small><b>${U.fmt(q1.agentCount)}</b></div>` : `<div><small>TL stock</small><b>${q1.tlStock && q1.tlStock.has ? U.fmt(q1.tlStock.total) : '—'}</b></div>`}
-      <div><small>Suggested VC4 / Comm.</small><b>${sug}</b></div>
+      ${sugStats}
       <div><small>This month · last</small><b>${U.fmt(q1.totals.curTotal)} · ${U.fmt(q1.totals.lastTotal)}</b></div>
     </div>`;
   }
@@ -450,11 +462,27 @@ FF.pages = FF.pages || {};
     if (!actions || mountedTopbar || /master-search/.test(String(actions.innerHTML || ''))) return false;
     mountedTopbar = true;
     const wrap = U.h(`<div class="master-search" id="master-search">
-      <div class="master-search-input">
-        <span class="ms-ico" aria-hidden="true">🔎</span>
-        <input id="master-search-input" class="input" type="search" placeholder="Search — naam, TL, ID, GV ID, barcode, tag ID…" autocomplete="off"
-          aria-label="Master search: agent, TL, ID, barcode or tag ID">
-        <kbd class="ms-kbd">/</kbd>
+      <div class="master-search-row">
+        <div class="master-search-input">
+          <span class="ms-ico" aria-hidden="true">🔎</span>
+          <input id="master-search-input" class="input" type="search" placeholder="Search — naam, TL, ID, GV ID, barcode, tag ID…" autocomplete="off"
+            aria-label="Master search: agent, TL, ID, barcode or tag ID">
+          <button class="ms-clear" id="master-search-clear" type="button" title="Search clear karo" aria-label="Search clear karo" hidden>✕</button>
+          <kbd class="ms-kbd">/</kbd>
+        </div>
+        <button class="ms-range-btn" id="master-search-range" type="button" title="📅 Date range (from → to) report kholo" aria-label="Date range search">📅</button>
+      </div>
+      <div class="ms-range-pop" id="ms-range-pop" hidden>
+        <b>📅 Range report — from se to tak</b>
+        <div class="ms-range-inputs">
+          <label>From <input class="input" type="date" id="ms-range-from"></label>
+          <label>To <input class="input" type="date" id="ms-range-to"></label>
+        </div>
+        <div class="ms-range-chips" id="ms-range-chips"></div>
+        <div class="ms-range-actions">
+          <button class="btn small primary" id="ms-range-go">📊 Report kholo</button>
+          <button class="btn small" id="ms-range-cancel">✕</button>
+        </div>
       </div>
       <div class="ms-hint" id="master-search-hint" hidden></div>
     </div>`);
@@ -477,6 +505,56 @@ FF.pages = FF.pages || {};
       },
       onEnter: (q) => { if (clean(q).length >= 2) openPanel(q); }
     });
+    // ✕ Clear button — input khali karo, suggestions band, wapas focus
+    const clearBtn = U.$('#master-search-clear', wrap);
+    const syncClear = () => { if (clearBtn) clearBtn.hidden = !input.value; };
+    input.addEventListener('input', syncClear);
+    if (clearBtn) clearBtn.addEventListener('click', () => {
+      input.value = '';
+      syncClear();
+      if (suggestApi && suggestApi.close) suggestApi.close();
+      input.focus();
+    });
+    syncClear();
+    // 📅 Date-range (from → to) popover — Range Report kholta hai
+    const rangeBtn = U.$('#master-search-range', wrap);
+    const pop = U.$('#ms-range-pop', wrap);
+    if (rangeBtn && pop) {
+      const dk = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const today = new Date();
+      const back = (days) => { const d = new Date(today); d.setDate(d.getDate() - days + 1); return dk(d); };
+      const presets = [
+        { label: 'Aaj', from: dk(today), to: dk(today) },
+        { label: 'Last 7 din', from: back(7), to: dk(today) },
+        { label: 'Is mahine', from: dk(new Date(today.getFullYear(), today.getMonth(), 1)), to: dk(today) },
+        { label: 'Pichla mahina', from: dk(new Date(today.getFullYear(), today.getMonth() - 1, 1)), to: dk(new Date(today.getFullYear(), today.getMonth(), 0)) },
+        { label: 'Last 30 din', from: back(30), to: dk(today) }
+      ];
+      const chipsBox = U.$('#ms-range-chips', pop);
+      const fromI = U.$('#ms-range-from', pop), toI = U.$('#ms-range-to', pop);
+      if (chipsBox) chipsBox.innerHTML = presets.map((p) => `<button class="chip" data-msr-from="${p.from}" data-msr-to="${p.to}">${p.label}</button>`).join('');
+      const openPop = () => {
+        if (!fromI.value) fromI.value = dk(new Date(today.getFullYear(), today.getMonth(), 1));
+        if (!toI.value) toI.value = dk(today);
+        pop.hidden = false;
+      };
+      rangeBtn.addEventListener('click', (e) => { e.stopPropagation(); if (pop.hidden) openPop(); else pop.hidden = true; });
+      pop.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const chip = e.target.closest('[data-msr-from]');
+        if (chip) { fromI.value = chip.dataset.msrFrom; toI.value = chip.dataset.msrTo; return; }
+        if (e.target.closest('#ms-range-go')) {
+          let f = fromI.value, t = toI.value;
+          if (!f || !t) { U.toast('From aur To dono dates chuno', 'warn'); return; }
+          if (f > t) { const x = f; f = t; t = x; }
+          pop.hidden = true;
+          if (FF.app && FF.app.navigate) FF.app.navigate('rangeReport', { from: f, to: t });
+          else location.hash = `#/rangeReport?from=${f}&to=${t}`;
+        }
+        if (e.target.closest('#ms-range-cancel')) pop.hidden = true;
+      });
+      document.addEventListener('click', (e) => { if (!pop.hidden && !pop.contains(e.target) && e.target !== rangeBtn) pop.hidden = true; });
+    }
     // '/' focuses the search bar (Google style) unless already typing in a field
     if (!mountTopbar.boundSlash) {
       mountTopbar.boundSlash = true;
@@ -505,6 +583,7 @@ FF.pages = FF.pages || {};
       </div>
       <div class="hms-input-wrap">
         <input id="home-master-input" class="input" type="search" value="${esc(q)}" placeholder="Type karo… jaise “Rahul”, “34161FA…”, “5845036”, “GV001”, tag ID…" autocomplete="off" aria-label="Master search">
+        <button class="btn" id="home-master-clear" title="Search clear karo">✕ Clear</button>
         <button class="btn primary" id="home-master-go">🔎 Kholo</button>
       </div>
       <div class="hms-chips"><span class="dim small">Try:</span>${['VC4', '5845036', 'ApnaPayment'].map((s) => `<button class="chip" data-hms="${esc(s)}">${esc(s)}</button>`).join('')}<span class="ms-register-state" id="hms-state"></span></div>
@@ -527,6 +606,8 @@ FF.pages = FF.pages || {};
       inlineSingle(results, res);
     };
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); run(input.value); } });
+    const hClear = U.$('#home-master-clear', container);
+    if (hClear) hClear.addEventListener('click', () => { input.value = ''; state.lastQuery = ''; results.innerHTML = ''; input.focus(); });
     U.$('#home-master-go', container).addEventListener('click', () => { const v = clean(input.value); if (v.length < 2) { U.toast('Kam se kam 2 letter / digit type karo', 'warn'); return; } openPanel(v); });
     container.addEventListener('click', (e) => {
       const chip = e.target.closest('[data-hms]');
