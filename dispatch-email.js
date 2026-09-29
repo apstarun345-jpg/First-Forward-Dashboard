@@ -21,6 +21,25 @@ const ALLOWED_PRIORITIES = new Set(['all', 'High', 'Medium', 'Low', 'other']);
 const ALLOWED_KINDS = new Set(['daily', 'weekly', 'monthly']);
 const EMAIL_RE = /^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/;
 
+/** Multiple-select field → canonical comma string. Array / 'ff+gv' / 'High, Medium' sab chalta hai. */
+function multiField(raw, allowed, allValue, message) {
+  const parts = (Array.isArray(raw) ? raw : String(raw === null || raw === undefined ? '' : raw).split(/[,+]/))
+    .map((x) => String(x).trim()).filter(Boolean);
+  const uniq = [...new Set(parts)];
+  if (!uniq.length || uniq.includes(allValue)) return allValue;
+  const bad = uniq.filter((x) => !allowed.has(x));
+  if (bad.length) throw new Error(message);
+  return uniq.join(',');
+}
+
+/** Canonical comma string → Set of values (khaali/'all' = sab). */
+export function multiValues(raw, allValue = 'all') {
+  const parts = (Array.isArray(raw) ? raw : String(raw === null || raw === undefined ? '' : raw).split(/[,+]/))
+    .map((x) => String(x).trim()).filter(Boolean);
+  const uniq = [...new Set(parts)].filter((x) => x !== allValue);
+  return new Set(uniq);
+}
+
 export function normalizeDispatchEmail(input, base = DEFAULT_DISPATCH_EMAIL) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Dispatch email settings object hona chahiye.');
   const value = { ...DEFAULT_DISPATCH_EMAIL, ...(base || {}), ...input };
@@ -31,9 +50,11 @@ export function normalizeDispatchEmail(input, base = DEFAULT_DISPATCH_EMAIL) {
   if (recipients.some((x) => !EMAIL_RE.test(x.replace(/^.*<([^<>]+)>.*$/, '$1')))) throw new Error('Recipients me valid email addresses comma ya semicolon se alag likho.');
   value.sections = [...new Set((Array.isArray(value.sections) ? value.sections : []).filter((x) => ALLOWED_SECTIONS.has(x)))];
   if (!value.sections.length) throw new Error('Email me kam se kam Summary, Agent-wise ya TL-wise data select karo.');
-  if (!ALLOWED_CHANNELS.has(value.channel)) throw new Error('Channel all, ff ya gv hona chahiye.');
+  // 🔠 v3.18 — MULTIPLE SELECTION: channel aur priority ab ek saath kai ho sakte hain
+  // ('ff,gv' / 'High,Medium' ya array). Khaali ya 'all' = koi restriction nahi.
+  value.channel = multiField(value.channel, ALLOWED_CHANNELS, 'all', 'Channel all, ff ya gv hona chahiye.');
   if (!ALLOWED_BASES.has(value.basis)) throw new Error('Tag basis total, vc4 ya comm hona chahiye.');
-  if (!ALLOWED_PRIORITIES.has(value.priority)) throw new Error('Priority filter all, High, Medium, Low ya other hona chahiye.');
+  value.priority = multiField(value.priority, ALLOWED_PRIORITIES, 'all', 'Priority filter all, High, Medium, Low ya other hona chahiye.');
   if (!ALLOWED_KINDS.has(value.kind)) throw new Error('Schedule daily, weekly ya monthly hona chahiye.');
   const integer = (raw, fallback, min, max, label) => {
     const n = Number(raw);
@@ -88,10 +109,13 @@ function calculate(row, basis, days, elapsed) {
 }
 
 function priorityMatches(row, selected) {
-  if (selected === 'all') return true;
+  // 🔠 multiple selection — selected 'High,Medium' jaisa canonical list ho sakta hai; koi bhi match kare to pass.
+  // Ek value ke liye behaviour bilkul pehle jaisa hai: TL ka combined "Medium / High" sheet-authentic
+  // rehta hai, isliye use 'other' hi maana jaata hai (High ya Medium nahi).
+  const chosen = multiValues(selected);
+  if (!chosen.size) return true;                                   // 'all' / khaali = koi filter nahi
   const value = row.kind === 'tl' ? String(row.priority || '').trim() : sourcePriority(row.priority);
-  if (selected === 'other') return !['High', 'Medium', 'Low'].includes(value);
-  return value === selected;
+  return [...chosen].some((c) => (c === 'other' ? !['High', 'Medium', 'Low'].includes(value) : value === c));
 }
 
 /** Calculate the same run-rate / required / stock-subtraction figures used by Dispatch Planner. */
@@ -102,13 +126,15 @@ export function buildDispatchPlan(sourceAgents, schedule, options = {}) {
   const days = Math.max(1, Number(options.days) || 15);
   const elapsed = Math.max(1, now.getUTCDate() - 1); // now is shifted to IST by the caller
   const chosenChannel = cfg.channel || 'all';
+  const channels = multiValues(chosenChannel);
+  const channelOk = (r) => !channels.size || channels.has(r.ch);
   const basis = cfg.basis || 'total';
-  const agents = (sourceAgents || []).filter((r) => chosenChannel === 'all' || r.ch === chosenChannel)
+  const agents = (sourceAgents || []).filter(channelOk)
     .map((r) => calculate(r, basis, days, elapsed))
     .filter((r) => priorityMatches(r, cfg.priority || 'all'));
 
   const groups = new Map();
-  for (const agent of (sourceAgents || []).filter((r) => chosenChannel === 'all' || r.ch === chosenChannel)) {
+  for (const agent of (sourceAgents || []).filter(channelOk)) {
     const key = agent.direct ? `${agent.ch}|__direct__` : `${agent.ch}|${normName(agent.tl) || '__unmapped__'}`;
     if (!groups.has(key)) groups.set(key, { ch: agent.ch, direct: !!agent.direct, name: agent.direct ? agent.directLabel || directTitle(agent.ch, settings) : (agent.tl || 'Unmapped (TL blank)'), members: [] });
     groups.get(key).members.push(agent);
@@ -191,10 +217,15 @@ function htmlEscape(value) {
 export function dispatchEmailContent(plan, schedule, brand = 'Dashboard', date = '') {
   const chosen = new Set(schedule.sections || []);
   const s = plan.summary;
-  const channel = plan.channel === 'all' ? 'First Forward + GV Partner' : plan.channel === 'gv' ? 'GV Partner' : 'First Forward';
+  // 🔠 multiple selection — "ff,gv" jaisa canonical value readable label ban jaata hai.
+  const CH_NAME = { ff: 'First Forward', gv: 'GV Partner' };
+  const chSet = multiValues(plan.channel);
+  const channel = !chSet.size || chSet.size > 1 ? 'First Forward + GV Partner' : (CH_NAME[[...chSet][0]] || 'First Forward');
   const basis = plan.basis === 'vc4' ? 'VC4' : plan.basis === 'comm' ? 'Commercial' : 'All tags';
-  const priority = plan.priority === 'all' ? 'All source priorities' : plan.priority === 'other' ? 'Other / source value' : `${plan.priority} priority`;
-  const subject = `Dispatch Planner · ${date}${plan.channel !== 'all' ? ` · ${channel}` : ''}`;
+  const prSet = multiValues(plan.priority);
+  const priority = !prSet.size ? 'All source priorities'
+    : [...prSet].map((p) => (p === 'other' ? 'Other / source value' : `${p} priority`)).join(' + ');
+  const subject = `Dispatch Planner · ${date}${chSet.size === 1 ? ` · ${channel}` : ''}`;
   const text = [
     `${brand} · Dispatch Planner · ${date}`,
     `${channel} · ${basis} · ${priority}`,

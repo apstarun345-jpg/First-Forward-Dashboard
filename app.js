@@ -694,6 +694,24 @@ window.FF = window.FF || {};
     window.addEventListener('offline', () => { updateStatus(); U.toast('📴 Offline ho — last loaded data dikhega', 'warn'); });
     U.$('#side-backdrop').addEventListener('click', closeSidebar);
     U.$('#top-refresh').addEventListener('click', refresh);
+    // 📱 Mobile: chhote screen par topbar ek line me fit ho — kam zaroori buttons "⋯" me chhup jaate hain.
+    const topActions = U.$('#top-actions');
+    const moreBtn = U.$('#top-more');
+    if (moreBtn && topActions) {
+      moreBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const open = topActions.classList.toggle('more-open');
+        moreBtn.textContent = open ? '✕' : '⋯';
+        moreBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+      document.addEventListener('click', (e) => {
+        if (!topActions.classList.contains('more-open')) return;
+        if (topActions.contains(e.target)) return;
+        topActions.classList.remove('more-open');
+        moreBtn.textContent = '⋯';
+        moreBtn.setAttribute('aria-expanded', 'false');
+      });
+    }
     const saveViewBtn = U.$('#save-view-btn');
     if (saveViewBtn) saveViewBtn.addEventListener('click', () => {
       if (FF.workspace && FF.workspace.openSave) FF.workspace.openSave();

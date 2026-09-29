@@ -1466,7 +1466,9 @@ html[data-theme="dark"] .ff-switch { background: #33415c; }
     font-size: 12.5px;
     -webkit-text-size-adjust: 100%;
   }
-  .top {
+  /* FIX (v3.18): ye block pehle `.top` ko target karta tha — app me header ka class `.topbar`
+     hai, isliye safe-area padding kabhi apply hi nahi hoti thi. */
+  .topbar {
     padding-top: max(8px, env(safe-area-inset-top));
     padding-left: max(10px, env(safe-area-inset-left));
     padding-right: max(10px, env(safe-area-inset-right));
@@ -3077,3 +3079,123 @@ html[data-theme="dark"] .dp2-hero { box-shadow: 0 14px 34px rgba(0, 0, 0, .45); 
   .dp-mail-grid .dp-mail-recipients { grid-column: auto; } .dp-mail-actions { align-items: flex-start; } .dp-mail-enable { width: 100%; }
 }
 @media print { .dp2-hero-actions, .dp2-panel, .dp2-more, .dp-mail-card { display: none !important; } .dp2-wrap { max-height: none; } }
+
+/* =====================================================================================
+   v3.18 — 🔠 multiple selection, ✅ row picks, 🔊 office-bell voice unlock,
+   🟣 full-circle profile photos, 📱 app/PWA view fixes.
+   ===================================================================================== */
+
+/* ---------- 🔠 multi-select popover (shared by Dispatch Planner + any filter) ---------- */
+.msel-btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: var(--card); color: var(--ink); padding: 6px 11px; border-radius: 999px; font-size: 12.5px; font-weight: 750; cursor: pointer; transition: background .12s, border-color .12s, box-shadow .12s; white-space: nowrap; }
+.msel-btn:hover { border-color: color-mix(in srgb, var(--brand) 45%, var(--line)); background: color-mix(in srgb, var(--brand) 7%, var(--card)); }
+.msel-btn.on { border-color: color-mix(in srgb, var(--brand) 55%, transparent); background: color-mix(in srgb, var(--brand) 12%, var(--card)); }
+.msel-btn .msel-ico { font-size: 13px; }
+.msel-btn .msel-label { max-width: 190px; overflow: hidden; text-overflow: ellipsis; }
+.msel-btn .msel-count { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; display: grid; place-items: center; background: var(--brand); color: #fff; font-size: 10.5px; font-weight: 900; line-height: 1; }
+.msel-btn .msel-chev { font-size: 10px; opacity: .6; }
+.msel-pop { position: fixed; z-index: 260; background: var(--card); border: 1px solid var(--line); border-radius: 15px; box-shadow: 0 22px 60px rgba(15, 23, 42, .28); display: flex; flex-direction: column; overflow: hidden; animation: menuIn .14s ease; }
+.msel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--line); background: linear-gradient(120deg, color-mix(in srgb, var(--brand) 10%, var(--card)), var(--card)); }
+.msel-head b { font-size: 12.5px; letter-spacing: .02em; }
+.msel-x { border: 0; background: color-mix(in srgb, var(--muted) 16%, transparent); width: 22px; height: 22px; border-radius: 50%; cursor: pointer; font-size: 11px; line-height: 1; }
+.msel-body { display: flex; flex-direction: column; min-height: 0; }
+.msel-q { margin: 9px 10px 6px; padding: 7px 10px; font-size: 12.5px; border-radius: 9px; }
+.msel-list { overflow: auto; padding: 2px 6px 8px; max-height: 260px; }
+.msel-item { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 9px; cursor: pointer; font-size: 12.5px; font-weight: 650; }
+.msel-item:hover { background: color-mix(in srgb, var(--brand) 8%, transparent); }
+.msel-item.on { background: color-mix(in srgb, var(--brand) 13%, transparent); }
+.msel-item input { width: 15px; height: 15px; accent-color: var(--brand); flex: none; cursor: pointer; }
+.msel-item .msel-txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msel-item .msel-n { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--brand) 12%, transparent); color: color-mix(in srgb, var(--brand) 85%, var(--ink)); }
+.msel-empty { padding: 18px 10px; text-align: center; color: var(--muted); font-size: 12px; }
+.msel-foot { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--bg) 55%, var(--card)); }
+.msel-mini { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 5px 9px; font-size: 11.5px; font-weight: 750; cursor: pointer; }
+.msel-mini:hover { border-color: var(--brand); }
+.msel-foot .btn { margin-left: auto; }
+html[data-theme="dark"] .msel-pop { border-color: #2b3a5e; }
+html[data-theme="dark"] .msel-btn { background: #121a2e; border-color: #2b3a5e; }
+@media (max-width: 560px) { .msel-btn { padding: 6px 9px; font-size: 12px; } .msel-btn .msel-label { max-width: 110px; } }
+
+/* ---------- 🚚 Dispatch Planner: multi-select pills + ✅ row picks + bulk bar ---------- */
+.dp2-lbl { display: flex; align-items: center; gap: 6px; }
+.dp2-multi { font-size: 10px; font-weight: 800; padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--brand) 15%, transparent); color: color-mix(in srgb, var(--brand) 85%, var(--ink)); }
+.dp2-pill[aria-pressed="true"] { box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand) 22%, transparent); }
+.dp2-search .msel-btn { flex: 0 0 auto; }
+.dp2-pick { width: 34px; text-align: center; }
+.dp2-pick input { width: 16px; height: 16px; accent-color: var(--brand); cursor: pointer; margin: 0; }
+.dp2-table thead th.dp2-pick { background: #e0e7ff; }
+.dp2-row.is-picked td { background: color-mix(in srgb, var(--brand) 8%, transparent); }
+.dp2-row.is-picked td:first-child { box-shadow: inset 3px 0 0 var(--brand); }
+.dp2-selbar { position: sticky; top: 58px; z-index: 12; display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 0 0 12px; padding: 9px 13px; border: 1px solid color-mix(in srgb, var(--brand) 35%, transparent); border-radius: 14px; background: linear-gradient(120deg, color-mix(in srgb, var(--brand) 13%, var(--card)), color-mix(in srgb, var(--brand-2) 9%, var(--card))); box-shadow: 0 8px 24px rgba(79, 70, 229, .16); }
+.dp2-selbar[hidden] { display: none; }
+.dp2-sel-count { font-size: 13px; font-weight: 850; }
+.dp2-sel-count b { font-size: 16px; color: color-mix(in srgb, var(--brand) 85%, var(--ink)); }
+.dp2-sel-sum { font-size: 12px; color: var(--muted); font-weight: 700; }
+.dp2-sel-sum b { color: var(--ink); }
+.dp2-sel-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+@media (max-width: 760px) { .dp2-selbar { top: 54px; } .dp2-sel-actions { margin-left: 0; width: 100%; } }
+@media print { .dp2-selbar, .dp2-pick { display: none !important; } }
+
+/* ---------- 🟣 profile photo: ALWAYS a full circle ---------- */
+:root { --avatar-radius: 50%; }
+.av, .av.sm, .av.top, .av.lg,
+.user-avatar, .user-avatar.big,
+.avatar-big, .ms-avatar, .brand-logo,
+.um-avatar-wrap .av.lg, .ucc-avatar .av.lg,
+.home-avatar, .auth-logo, .logo-chip, .agent-avatar, .tl-avatar { border-radius: var(--avatar-radius) !important; }
+.av img, .user-avatar img, .avatar-big img, .ms-avatar img, .home-avatar img, .um-avatar-wrap .av.lg img, .ucc-avatar .av.lg img { border-radius: inherit; object-fit: cover; }
+.um-avatar-wrap:hover .av.lg { transform: scale(1.05); }
+
+/* ---------- 🔊 Office Bell: voice-unlock nudge + history + mute ---------- */
+.bell-unlock { position: fixed; right: 16px; bottom: 88px; z-index: 90; display: flex; align-items: center; gap: 9px; max-width: min(360px, calc(100vw - 32px)); padding: 11px 13px; border: 1px solid color-mix(in srgb, var(--brand) 40%, transparent); border-radius: 15px; background: var(--card); box-shadow: 0 18px 44px rgba(15, 23, 42, .26); animation: slideUp .2s ease; }
+.bell-unlock b { display: block; font-size: 12.5px; }
+.bell-unlock small { display: block; color: var(--muted); font-size: 11px; line-height: 1.4; }
+.bell-unlock .btn { flex: none; }
+.bell-unlock .bell-unlock-x { border: 0; background: color-mix(in srgb, var(--muted) 16%, transparent); width: 22px; height: 22px; border-radius: 50%; cursor: pointer; flex: none; }
+.bell-menu { position: fixed; z-index: 240; width: min(330px, calc(100vw - 22px)); background: var(--card); border: 1px solid var(--line); border-radius: 15px; box-shadow: 0 22px 60px rgba(15, 23, 42, .28); overflow: hidden; animation: menuIn .14s ease; }
+.bell-menu h4 { margin: 0; padding: 10px 13px; font-size: 12.5px; background: linear-gradient(120deg, color-mix(in srgb, var(--brand) 10%, var(--card)), var(--card)); border-bottom: 1px solid var(--line); }
+.bell-menu .bell-opt { display: flex; align-items: center; gap: 9px; padding: 9px 13px; font-size: 12.5px; font-weight: 650; cursor: pointer; border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent); }
+.bell-menu .bell-opt:hover { background: color-mix(in srgb, var(--brand) 8%, transparent); }
+.bell-menu .bell-opt input { accent-color: var(--brand); width: 15px; height: 15px; }
+.bell-menu .bell-opt select, .bell-menu .bell-opt .input { margin-left: auto; padding: 4px 7px; font-size: 12px; }
+.bell-menu .bell-acts { display: flex; gap: 6px; padding: 9px 11px; flex-wrap: wrap; }
+.bell-log { max-height: 240px; overflow: auto; }
+.bell-log-row { display: grid; grid-template-columns: 46px 1fr; gap: 8px; padding: 7px 13px; border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent); font-size: 12px; }
+.bell-log-row time { color: var(--muted); font-size: 11px; font-weight: 700; }
+.bell-log-empty { padding: 18px 13px; text-align: center; color: var(--muted); font-size: 12px; }
+.bell-btn.muted { opacity: .55; }
+@media (max-width: 560px) { .bell-unlock { right: 10px; left: 10px; bottom: 78px; max-width: none; } }
+
+/* ---------- 📱 App / PWA view fixes: topbar fit, safe area, no overflow ----------
+   NOTE: `body` par overflow-x:hidden MAT lagao — usse body khud scroll container ban jaata hai
+   aur `.topbar` ka position:sticky toot jaata hai. Overflow `.content`/`.main` par rokte hain. */
+html, body { max-width: 100%; }
+.content { max-width: 100%; min-width: 0; }
+.topbar { flex-wrap: wrap; row-gap: 6px; padding-top: max(10px, env(safe-area-inset-top)); padding-left: max(22px, env(safe-area-inset-left)); padding-right: max(22px, env(safe-area-inset-right)); }
+.top-actions { flex-wrap: wrap; justify-content: flex-end; row-gap: 6px; }
+.top-actions .icon-btn, .top-actions .bell-btn { flex: none; }
+.icon-btn, .bell-btn { min-width: 36px; }
+.top-title { min-width: 0; }
+#top-actions #pwa-install { max-width: 132px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 1000px) {
+  .topbar { padding: 8px max(12px, env(safe-area-inset-right)) 8px max(12px, env(safe-area-inset-left)); gap: 8px; }
+  .top-actions { gap: 5px; }
+  .top-actions .icon-btn, .top-actions .bell-btn { width: 34px; height: 34px; min-width: 34px; font-size: 15px; border-radius: 10px; }
+  /* Kam zaroori buttons ek "⋯" menu me — phone par topbar ek line me fit ho */
+  .top-actions [data-top-secondary="1"] { display: none; }
+  .top-actions.more-open [data-top-secondary="1"] { display: inline-flex; }
+  #top-more { display: inline-grid; place-items: center; }
+  .top-title { flex: 1 1 120px; max-width: none; font-size: 14px; }
+}
+@media (min-width: 1001px) { #top-more { display: none; } }
+@media (max-width: 460px) {
+  .top-actions .icon-btn, .top-actions .bell-btn { width: 32px; height: 32px; min-width: 32px; font-size: 14px; }
+  .user-btn { padding: 3px 8px 3px 4px; }
+  .user-btn .chev { display: none; }
+}
+@media all and (display-mode: standalone) {
+  .topbar { padding-top: max(12px, env(safe-area-inset-top)); }
+  .main { padding-bottom: max(40px, env(safe-area-inset-bottom)); }
+  .drawer { padding-bottom: max(14px, env(safe-area-inset-bottom)); }
+  .ask-fab { bottom: max(20px, env(safe-area-inset-bottom)); }
+  .dp2-selbar { top: max(58px, calc(env(safe-area-inset-top) + 52px)); }
+}
