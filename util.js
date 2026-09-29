@@ -699,16 +699,129 @@ window.FF = window.FF || {};
   async function analyzeVoiceBlob(blob) {
     const AC = (typeof window !== 'undefined') && (window.AudioContext || window.webkitAudioContext);
     if (!AC) throw new Error('Audio decoding is browser me support nahi hai — Chrome/Edge try karo.');
+    if (!blob || !blob.size) throw new Error('Audio data khali hai — dobara record/upload karo.');
     const ctx = new AC();
     try {
+      // Kuch browsers gesture ke turant baad AudioContext suspended rakhte hain — decode se pehle resume.
+      if (ctx.state === 'suspended' && ctx.resume) { try { await ctx.resume(); } catch { /* optional */ } }
       const arr = await blob.arrayBuffer();
-      const audio = await ctx.decodeAudioData(arr);
+      let audio;
+      try { audio = await ctx.decodeAudioData(arr); }
+      catch (e1) {
+        // Purane Safari ka callback-style decode fallback.
+        audio = await new Promise((resolve, reject) => {
+          try { ctx.decodeAudioData(arr, resolve, reject); } catch (e2) { reject(e2); }
+        });
+      }
       const ch = audio.getChannelData(0);
       const target = 8000;
       const pcm = resamplePcm(ch, audio.sampleRate, target);
       const res = analyzePcm(pcm, target);
       return { ...res, duration: Math.round((audio.duration || 0) * 10) / 10 };
     } finally { try { if (ctx.close) ctx.close(); } catch { /* optional */ } }
+  }
+
+  /** 🎙 Robust voice capture — MediaRecorder (preview blob) ke SAATH raw PCM bhi capture hota hai
+   *  (WebAudio ScriptProcessor), taaki analysis ke liye browser ka audio decode pass na chahiye ho.
+   *  Pehle recording sirf blob → decodeAudioData se analyse hoti thi jo kuch browsers/formats me
+   *  chup-chaap fail ho jaata tha ("kuch kaam nahi kar raha"). Ab PCM direct analyse hota hai.
+   *  Returns: { stream, startedAt, stop() → Promise<{ blob, pcm, sampleRate, seconds }> } */
+  async function startVoiceCapture() {
+    const md = (typeof navigator !== 'undefined') ? navigator.mediaDevices : null;
+    if (!md || typeof md.getUserMedia !== 'function') {
+      throw new Error((typeof window !== 'undefined' && window.isSecureContext === false)
+        ? 'Mic ke liye HTTPS (secure connection) chahiye — site https par kholo.'
+        : 'Is browser me mic recording support nahi hai — latest Chrome/Edge try karo.');
+    }
+    if (typeof window === 'undefined' || typeof window.MediaRecorder !== 'function') throw new Error('MediaRecorder support nahi hai — latest Chrome/Edge/Firefox try karo.');
+    const stream = await md.getUserMedia({ audio: true });
+    const chunks = [];
+    const pcmParts = [];
+    let sampleRate = 0, ac = null, proc = null, srcNode = null;
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) {
+        ac = new AC();
+        if (ac.state === 'suspended' && ac.resume) { try { await ac.resume(); } catch { /* optional */ } }
+        sampleRate = ac.sampleRate;
+        srcNode = ac.createMediaStreamSource(stream);
+        proc = ac.createScriptProcessor(4096, 1, 1);
+        proc.onaudioprocess = (e) => { try { pcmParts.push(Float32Array.from(e.inputBuffer.getChannelData(0))); } catch { /* optional */ } };
+        srcNode.connect(proc); proc.connect(ac.destination);
+      }
+    } catch { /* PCM capture optional — blob decode fallback rahega */ }
+    const mr = new window.MediaRecorder(stream);
+    mr.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+    try { mr.start(); } catch { /* kuch browsers me timeslice chahiye */ try { mr.start(250); } catch { /* phir bhi nahi */ } }
+    const startedAt = Date.now();
+    return {
+      stream, startedAt,
+      state: () => mr.state,
+      stop() {
+        return new Promise((resolve) => {
+          const finish = (blob) => {
+            stream.getTracks().forEach((t) => { try { t.stop(); } catch { /* already */ } });
+            try { if (proc) { proc.onaudioprocess = null; proc.disconnect(); } if (srcNode) srcNode.disconnect(); } catch { /* optional */ }
+            try { if (ac && ac.close) ac.close(); } catch { /* optional */ }
+            let pcm = null;
+            if (pcmParts.length) {
+              const total = pcmParts.reduce((n, a) => n + a.length, 0);
+              pcm = new Float32Array(total);
+              let off = 0; pcmParts.forEach((a) => { pcm.set(a, off); off += a.length; });
+            }
+            resolve({ blob, pcm, sampleRate, seconds: Math.round((Date.now() - startedAt) / 100) / 10 });
+          };
+          mr.onstop = () => finish(chunks.length ? new Blob(chunks, { type: mr.mimeType || 'audio/webm' }) : null);
+          try { mr.stop(); } catch { finish(chunks.length ? new Blob(chunks, { type: 'audio/webm' }) : null); }
+          setTimeout(() => { if (mr.state !== 'inactive') finish(null); }, 4000); // safety net
+        });
+      }
+    };
+  }
+
+  /** Capture ka analysis — pehle direct PCM (recording), warna blob decode (upload). */
+  async function analyzeVoiceCapture(cap) {
+    if (cap && cap.pcm && cap.pcm.length && cap.sampleRate > 0) {
+      const target = 8000;
+      const res = analyzePcm(resamplePcm(cap.pcm, cap.sampleRate, target), target);
+      return { ...res, duration: cap.seconds || res.seconds || 0 };
+    }
+    if (cap && cap.blob) return analyzeVoiceBlob(cap.blob);
+    throw new Error('Recording ka audio data nahi mila — mic permission check kar ke dobara try karo.');
+  }
+
+  // ---- 👂 Wake word ("Hey Gems" style) — transcript me fuzzy match ------------------------------
+  /** Normalise: lowercase, punctuation hatao, whitespace collapse (Devanagari letters allowed). */
+  const wakeNorm = (s) => String(s || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
+  /** Chhota Levenshtein — ASR ke misheards ("hey gems" → "hey jems" / "age gems") tolerate karne ke liye. */
+  function wakeEditDist(a, b) {
+    if (a === b) return 0;
+    if (!a.length) return b.length; if (!b.length) return a.length;
+    if (Math.abs(a.length - b.length) > 2) return 99;
+    let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+    for (let i = 1; i <= a.length; i++) {
+      const cur = [i];
+      for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prev = cur;
+    }
+    return prev[b.length];
+  }
+  /** True jab transcript me wake word sunai de — exact substring YA token-wise fuzzy (≤ len/3 edits). */
+  function wakeWordMatch(transcript, wakeWord) {
+    const t = wakeNorm(transcript), w = wakeNorm(wakeWord);
+    if (!t || !w) return false;
+    if (t.includes(w)) return true;
+    const wt = w.split(' ').filter(Boolean), tt = t.split(' ').filter(Boolean);
+    if (!wt.length || tt.length < wt.length) return false;
+    for (let i = 0; i + wt.length <= tt.length; i++) {
+      let ok = true;
+      for (let j = 0; j < wt.length; j++) {
+        const tol = Math.max(1, Math.floor(wt[j].length / 3));
+        if (wakeEditDist(tt[i + j], wt[j]) > tol) { ok = false; break; }
+      }
+      if (ok) return true;
+    }
+    return false;
   }
 
   const VOICE_PROFILE_LIMIT = { minSeconds: 1.5, maxSeconds: 45 };
@@ -766,6 +879,7 @@ window.FF = window.FF || {};
     $, $$, h, debounce, setButtonBusy, withButtonBusy, toast, spinner, errorBox, downloadBlob, downloadCsv, tableToRows, slug, stamp, colLetter, colIndex, initTooltip,
     phoneDigits, waLink, mailLink, copyText, suggest,
     parseDateTime, printReport, recentList, recentAdd, voiceInput, voicePrefs, setVoicePrefs,
-    resamplePcm, analyzePcm, analyzeVoiceBlob, voiceProfile, setVoiceProfile, matchVoice, VOICE_PROFILE_LIMIT
+    resamplePcm, analyzePcm, analyzeVoiceBlob, startVoiceCapture, analyzeVoiceCapture, voiceProfile, setVoiceProfile, matchVoice, VOICE_PROFILE_LIMIT,
+    wakeNorm, wakeWordMatch
   };
 })(window.FF);

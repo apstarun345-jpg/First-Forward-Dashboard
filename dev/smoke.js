@@ -369,10 +369,21 @@ await run('stock forecasting · FF demand se GV rows (5845036) exclude', async (
   const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
   if (!/5845036 exclude/.test(html)) throw new Error('channel summary me GV-exclude note nahi');
 }, true);
-await run('executive cockpit · FF/GV combined me double count nahi', async () => {
+await run('executive cockpit · FF/GV combined me double count nahi + colourful clickable cards', async () => {
   const r = root(); await pages.executive.render(r, {}, {});
   const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
   if (!/5845036/.test(html) || !/double count nahi/.test(html)) throw new Error('executive me GV-exclude note nahi');
+  if (!/data-tone="g\d+"/.test(html)) throw new Error('executive KPI cards colourful (gradient tone) nahi hain');
+  if (!/ins-metric-icon/.test(html)) throw new Error('executive KPI cards me icons nahi hain');
+  if (!/Full data/.test(html)) throw new Error('executive KPI cards par click-hint (Full data) nahi hai');
+  // 📦 Field stock: GV master ID 5845036 wali StockDataa rows FF total se exclude honi chahiye.
+  const stockAgents = FF.store.get('stockAgents') || [];
+  const gvHeld = stockAgents.filter((x) => String(x.agentId || '').trim() === '5845036').reduce((n, x) => n + (x.n || 0), 0);
+  if (!(gvHeld > 0)) throw new Error('mock StockDataa me GV master ID wali rows hi nahi — exclusion test meaningless');
+  const ffClean = stockAgents.filter((x) => String(x.agentId || '').trim() !== '5845036').reduce((n, x) => n + (x.n || 0), 0);
+  const gvStock = (FF.gv.get('stockClass') || []).reduce((n, x) => n + (x.n || 0), 0);
+  const combined = FF.util.fmt(ffClean + gvStock);
+  if (!html.includes(`<b>${combined}</b>`)) throw new Error(`Combined field stock <b>${combined}</b> executive me nahi dikha — GV master ${FF.util.fmt(gvHeld)} exclude hua?`);
 }, true);
 await run('professional page verified dual-channel agents', async () => {
   const identity = await FF.insights.buildCross();

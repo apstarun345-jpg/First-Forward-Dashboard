@@ -14,6 +14,20 @@ Koi database nahi, koi manual upload nahi — website Google Sheet se data padht
 (Google Visualization API / `gviz`) through a small Node server that also handles **login, users,
 permissions and settings**. Zero npm dependencies.
 
+## ✨ v3.8.2 highlights
+
+- **🧭 Executive Cockpit** — colourful **clickable** KPI cards (click = poora backing data,
+  search + CSV). **Combined field stock fix**: FF stock me se GV master ID **5845036** exclude,
+  GV side = GV agents ke paas combined stock (Tag Assignment) — double count nahi.
+- **🎙 Voice Studio "Meri awaaz" fix** — record/upload ab sach me kaam karta hai
+  (file-dialog cancel bug + silent decode-fail fix; recording raw PCM se analyse hoti hai).
+- **👂 Wake word** — "Hey Gems" (apna word bhi set kar sakte ho) bolte hi assistant active.
+  Voice Studio me naya tab + Settings → My account me ON/OFF aur word control.
+- **🔐 Per-option admin access** — har sidebar option ka apna permission key
+  (`rangeReport`, `tv`, `teamMap`, `stockReport`, `gvStockReport`, `reportStudio`, `charts`,
+  `voiceAssistant`). Access matrix me checkbox; existing users ko restart par auto-migration.
+- Full notes: [WHATS-NEW-v3.8.2.md](WHATS-NEW-v3.8.2.md)
+
 ## Login & access
 
 * Site **login ke bina nahi khulti**. Pehli baar server start hote hi ek admin ban jaata hai:
