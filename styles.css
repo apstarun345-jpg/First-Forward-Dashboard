@@ -1953,6 +1953,8 @@ html[data-theme="dark"] .osm-pin > b { background: rgba(20,29,51,.94); color: #e
 .dispatch-filter-bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 12px; padding: 11px 14px; border: 1px solid #fed7aa; border-radius: 14px; background: linear-gradient(110deg, #fff7ed, #fffbeb 55%, #fff); color: #7c2d12; box-shadow: 0 5px 18px rgba(245,158,11,.09); }
 .dispatch-scope { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin-top: 10px; }
 .dispatch-filter-bar .dispatch-scope { margin-top: 0; }
+.dispatch-mini { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 10px; font-size: 12px; color: var(--muted); }
+.dispatch-mini b { color: var(--ink); font-size: 14px; margin-left: 6px; }
 .direct-filter { border-color: #f59e0b; background: #fff7ed; color: #9a3412; }
 .direct-filter.primary { color: #fff; background: linear-gradient(135deg, #f59e0b, #ea580c); }
 .tbl tr.dispatch-direct > td { background: color-mix(in srgb, #f59e0b 7%, var(--card)); }

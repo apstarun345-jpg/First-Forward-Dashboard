@@ -14,19 +14,19 @@ Koi database nahi, koi manual upload nahi — website Google Sheet se data padht
 (Google Visualization API / `gviz`) through a small Node server that also handles **login, users,
 permissions and settings**. Zero npm dependencies.
 
-## ✨ v3.8.2 highlights
+## ✨ v3.9.0 highlights
 
-- **🧭 Executive Cockpit** — colourful **clickable** KPI cards (click = poora backing data,
-  search + CSV). **Combined field stock fix**: FF stock me se GV master ID **5845036** exclude,
-  GV side = GV agents ke paas combined stock (Tag Assignment) — double count nahi.
-- **🎙 Voice Studio "Meri awaaz" fix** — record/upload ab sach me kaam karta hai
-  (file-dialog cancel bug + silent decode-fail fix; recording raw PCM se analyse hoti hai).
-- **👂 Wake word** — "Hey Gems" (apna word bhi set kar sakte ho) bolte hi assistant active.
-  Voice Studio me naya tab + Settings → My account me ON/OFF aur word control.
-- **🔐 Per-option admin access** — har sidebar option ka apna permission key
-  (`rangeReport`, `tv`, `teamMap`, `stockReport`, `gvStockReport`, `reportStudio`, `charts`,
-  `voiceAssistant`). Access matrix me checkbox; existing users ko restart par auto-migration.
-- Full notes: [WHATS-NEW-v3.8.2.md](WHATS-NEW-v3.8.2.md)
+- **🗄 Master Stock (naya page)** — barcode / agent / TL / GV name / GV TL search karo →
+  StockDataa ↔ Tag Assignment ki total information; kitne Tag Assignment barcodes StockDataa me
+  **missing** hain; overlap donut + class charts; ⏰ aged-stock alerts (30–60 / 60+ din).
+- **🔗 Dual-channel ghost rule** — barcode double-mapped sirf tab jab FF holder Apna Payment
+  (master 5845036) NA ho aur GV side not-assigned ke alawa asli ID ho.
+- **🎯 GV dispatch** — dispatch plan + **Direct agents ki alag list** (GV Stock Report → Dispatch tab).
+- **🌈 Clickable KPIs everywhere** — compare / charts / dispatch planner / TL scorecard / forecast /
+  data quality: har KPI colorful gradient + click → full data dialog (search + CSV).
+- **⚡ Commission pages instant open** + FF **Payout Excel** (gross / penalty / net, 5 sheets).
+- **🎙 Voice navigation** — "master stock kholo", "open data quality" — 19 pages, permission-aware.
+- Full notes: [WHATS-NEW-v3.9.0.md](WHATS-NEW-v3.9.0.md) · previous: [v3.8.2](WHATS-NEW-v3.8.2.md)
 
 ## Login & access
 

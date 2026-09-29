@@ -242,7 +242,7 @@ log(`      sample GV agent "${gvAgent}"`);
 await run('page gvStock tl filter', () => pages.gvStock.render(root(), { tl: (FF.gv.people().tls[0] || {}).name || '' }, {}), true);
 await run('gvStock explicit tab clears stale TL param', async () => { const r = root(); await pages.gvStock.render(r, { view: 'class', tl: 'stale-TL' }, {}); const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n'); if (!html.includes('Class × TL matrix')) throw new Error('explicit class tab stale TL se override hua'); }, true);
 await run('page gvStockReport agents', () => pages.gvStockReport.render(root(), { view: 'agents' }, {}), true);
-await run('page gvStockReport dispatch', async () => { const r = root(); await pages.gvStockReport.render(r, { view: 'dispatch' }, {}); const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n'); for (const s of ['Dispatch plan & Direct Agent status', 'Show Direct only', 'WhatsApp']) if (!html.includes(s)) throw new Error(`GV Stock Report me "${s}" nahi mila`); }, true);
+await run('page gvStockReport dispatch', async () => { const r = root(); await pages.gvStockReport.render(r, { view: 'dispatch' }, {}); const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n'); for (const s of ['GV Dispatch plan', 'Direct Agents — alag list', 'Direct filter', 'WhatsApp']) if (!html.includes(s)) throw new Error(`GV Stock Report me "${s}" nahi mila`); }, true);
 await run('page gvPerformance', async () => { const r = root(); await pages.gvPerformance.render(r, {}, {}); const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n'); for (const s of ['WhatsApp report', 'GV Stock Report', 'Overview', 'Agents', 'TLs', 'Alerts']) if (!html.includes(s)) throw new Error(`GV Performance me "${s}" nahi mila`); }, true);
 await run('page gvPerformance q=agent', () => pages.gvPerformance.render(root(), { q: gvAgent }, {}), true);
 await run('page compare', () => pages.compare.render(root(), {}, {}), true);
@@ -397,6 +397,44 @@ await run('professional page verified dual-channel agents', async () => {
   }
   const onlyDouble = root(); await pages.dualChannel.render(onlyDouble, { dup: 'double' }, {});
   if (!/Doubled|Double-mapped|double-mapped/i.test(onlyDouble.innerHTML)) throw new Error('double-mapped filter view missing');
+}, true);
+await run('dual-channel ghost holders (Apna Payment / not-assigned) double count nahi hote', async () => {
+  const r = root(); await pages.dualChannel.render(r, {}, {});
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const label of ['ghost-holder ignore', 'Exclude rule', 'Apna Payment']) {
+    if (!html.includes(label)) throw new Error(`dual-channel me ghost exclude note "${label}" nahi mila`);
+  }
+  // Double-mapped table me APNA PAYEMENT holder FF-side nahi aana chahiye
+  const doubleRows = [...r.querySelectorAll('table tbody tr')].map((tr) => tr.textContent || '');
+  if (doubleRows.some((t) => /APNA\s*PAYEMENT/i.test(t) && /alag agent|FF me ek se zyada/i.test(t))) throw new Error('Apna Payment row double-mapped me count ho gaya');
+}, true);
+await run('professional page Master Stock (search + StockDataa ↔ Tag Assignment reconciliation)', async () => {
+  const r = root(); await pages.masterStock.render(r, {}, {});
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const label of ['Master Stock', 'StockDataa unique barcodes', 'Tag Assignment NOT in StockDataa', 'Matched in both', 'Owner mismatch', 'Top GV-only holder', 'Aged stock · 60+ din', 'ins-metric-tap', 'Barcode overlap']) {
+    if (!html.includes(label)) throw new Error(`Master Stock me "${label}" nahi mila`);
+  }
+  // barcode prefix search — mock barcodes 34161FA82032… se shuru hote hain
+  const r2 = root(); await pages.masterStock.render(r2, { q: '34161FA820' }, {});
+  const html2 = r2.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  if (!html2.includes('Search:')) throw new Error('Master Stock search section render nahi hui');
+  if (!/tag · |tag matches/.test(html2)) throw new Error('barcode search results missing');
+}, true);
+await run('cross-channel KPI cards colorful + clickable (compare / charts / dispatch / TL)', async () => {
+  const cmp = root(); await pages.compare.render(cmp, {}, {});
+  const cmpHtml = cmp.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const label of ['ins-metric-tap', 'data-tone="g2"']) {
+    if (!cmpHtml.includes(label)) throw new Error(`compare page me "${label}" nahi mila`);
+  }
+  const cx = root(); await pages.charts.render(cx, {}, {});
+  const cxHtml = cx.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const label of ['Combined total', 'ins-metric-tap']) {
+    if (!cxHtml.includes(label)) throw new Error(`charts page me "${label}" nahi mila`);
+  }
+  const dp = root(); await pages.dispatchPlan.render(dp, {}, {});
+  if (!dp.innerHTML.includes('ins-metric-tap')) throw new Error('dispatch planner KPI cards clickable nahi');
+  const tl = root(); await pages.tlScorecard.render(tl, {}, {});
+  if (!tl.innerHTML.includes('ins-metric-tap')) throw new Error('TL scorecard KPI cards clickable nahi');
 }, true);
 await run('professional page FASTag Champions (vivid KPI + clickable full-data drill-down)', async () => {
   const r = root(); await pages.fastagChampions.render(r, {}, {});

@@ -109,6 +109,42 @@ window.FF = window.FF || {};
       );
     }
 
+    // ---- voice navigation (v3.8.3) — "X kholo / open X / X page" ----
+    if (has('KHOLO', 'KHOL DO', 'KHOLNA', 'OPEN', 'DIKHAO', 'SHOW ME', 'NAVIGATE', 'GO TO', 'CHALAO', 'PAGE')) {
+      const NAV_MAP = [
+        { keys: ['MASTER STOCK'], page: 'masterStock', label: 'Master Stock' },
+        { keys: ['EXECUTIVE', 'COCKPIT'], page: 'executive', label: 'Executive Cockpit' },
+        { keys: ['DUAL CHANNEL', 'DUAL AGENT'], page: 'dualChannel', label: 'Dual-channel Agents' },
+        { keys: ['DATA QUALITY'], page: 'dataQuality', label: 'Data Quality Center' },
+        { keys: ['FORECAST'], page: 'forecast', label: 'Stock Forecasting' },
+        { keys: ['GV COMMISSION'], page: 'gvCommission', label: 'GV Commission Intelligence' },
+        { keys: ['COMMISSION'], page: 'ffCommission', label: 'FF Commission Intelligence' },
+        { keys: ['DISPATCH'], page: 'dispatchPlan', label: 'Dispatch Planner' },
+        { keys: ['SCORECARD'], page: 'tlScorecard', label: 'TL Scorecard' },
+        { keys: ['CHAMPION'], page: 'fastagChampions', label: 'FASTag Champions' },
+        { keys: ['COMPARE'], page: 'compare', label: 'GV vs First Forward' },
+        { keys: ['GV DASHBOARD'], page: 'gvDashboard', label: 'GV Partner Dashboard' },
+        { keys: ['GV STOCK REPORT'], page: 'gvStockReport', label: 'GV Stock Report' },
+        { keys: ['GV STOCK'], page: 'gvStock', label: 'GV Stock' },
+        { keys: ['DASHBOARD'], page: 'dashboard', label: 'FF Dashboard' },
+        { keys: ['STOCK REPORT'], page: 'stockReport', label: 'FF Stock Report' },
+        { keys: ['STOCK'], page: 'stock', label: 'FF Stock' },
+        { keys: ['TREND'], page: 'trend', label: 'Trend' },
+        { keys: ['HOME'], page: 'home', label: 'Home' }
+      ];
+      const hit = NAV_MAP.find((n) => n.keys.some((k) => q.includes(k)));
+      if (hit) {
+        if (FF.auth && typeof FF.auth.can === 'function' && !FF.auth.can(hit.page)) {
+          return ans(`${hit.label} ka access aapke account me nahi hai 🔒 — admin se permission maango (Settings → Access matrix).`, `Your account does not have access to ${hit.label} 🔒 — ask an admin (Settings → Access matrix).`);
+        }
+        if (FF.app && typeof FF.app.navigate === 'function') {
+          FF.app.navigate(hit.page, {});
+          return ans(`${hit.label} khol diya ✅`, `Opened ${hit.label} ✅`, [['aaj ka total issuance', 'Aaj ka total'], ['help', 'Help']]);
+        }
+        return ans(`${hit.label} sidebar me hai — wahan se kholo.`, `${hit.label} is in the sidebar — open it from there.`);
+      }
+    }
+
     // ---- data freshness ----
     if (has('DATA KAB', 'FRESH', 'UPDATE HUA', 'LAST UPDATE', 'REFRESH HUA')) {
       const ffDates = D.daily.map((r) => r.key).filter(Boolean).sort();

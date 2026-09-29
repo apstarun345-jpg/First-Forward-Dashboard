@@ -122,7 +122,7 @@
 
   // ---- shared markup helpers -----------------------------------------------------------------------
   function metricCards(cards) {
-    return `<div class="ins-metrics">${cards.map((c) => `<div class="ins-metric" data-tone="${c.tone || 'g1'}"><span class="ins-metric-icon" aria-hidden="true">${c.icon || '•'}</span><small>${esc(c.label)}</small><b>${c.value}</b><span>${esc(c.foot || '')}</span></div>`).join('')}</div>`;
+    return `<div class="ins-metrics">${cards.map((c) => `<div class="ins-metric" data-tone="${c.tone || 'g1'}"><span class="ins-metric-icon" aria-hidden="true">${c.icon || '•'}</span><small>${esc(c.label)}</small><b>${c.value}</b><span>${esc(c.foot || '')}</span><span class="ins-metric-tap" aria-hidden="true">🔎 Full data ↗</span></div>`).join('')}</div>`;
   }
   const sevPill = (sev) => `<span class="sev-pill ${esc(sev)}">${esc(sev)}</span>`;
 
@@ -549,6 +549,15 @@
       const fd = new FormData(controls);
       FF.app.updateParams({ horizon: fd.get('horizon') || '', growth: fd.get('growth') || '', safety: fd.get('safety') || '', box: fd.get('box') || '', q: fd.get('q') || '' });
     });
+    // KPI cards clickable → full data dialog (v3.8.3)
+    if (UI.bindMetricDetails) UI.bindMetricDetails(root, `Dispatch plan · ${horizon} din`, D_HEADERS, rows.map(toArray), {
+      'Agents to dispatch': { title: `${U.fmt(t.agents)} agents ko stock chahiye`, headers: D_HEADERS, rows: rows.map(toArray) },
+      'Total boxes': { title: `${U.fmt(t.boxes)} boxes planned`, headers: D_HEADERS, rows: rows.map(toArray), stats: [`${U.fmt(t.tags)} tags · 1 box = ${U.fmt(perBox)}`] },
+      'Critical (stock-out)': { title: `${U.fmt(t.critical)} critical agents`, headers: D_HEADERS, rows: rows.filter((r) => r.risk === 'Critical').map(toArray), stats: [`${U.fmt(t.high)} high-risk agents bhi list me`] },
+      'Buffer tags': { title: 'Box rounding buffer', headers: D_HEADERS, rows: rows.filter((r) => r.extra > 0).map(toArray), stats: ['Boxes upar round hone se extra tags bante hain'] },
+      'Top need': { title: 'Sabse zyada need wale agents', headers: D_HEADERS, rows: [...rows].sort((a, b) => b.need - a.need).slice(0, 50).map(toArray) },
+      'TL groups': { title: `${U.fmt(tlGroups.size)} TL groups`, headers: ['TL', 'Agents', 'Boxes', 'Dispatch tags', 'Critical'], rows: [...tlGroups.entries()].map(([tl, list]) => [tl, list.length, sum(list, (r) => r.boxes), sum(list, (r) => r.dispatchTags), list.filter((r) => r.risk === 'Critical').length]) }
+    });
     const csv = () => U.downloadCsv(`dispatch-plan-${horizon}d-${U.stamp()}.csv`, D_HEADERS, rows.map(toArray));
     ['#dp-csv', '#dp-csv-2'].forEach((sel) => { const b = U.$(sel, root); if (b) b.addEventListener('click', csv); });
     const xlsx = U.$('#dp-xlsx', root);
@@ -700,6 +709,17 @@
           ${rows.map((r) => `<tr><td>${r.rank}</td><td><b>${esc(r.tl)}</b><small>${U.fmt(r.active)}/${U.fmt(r.agents)} active</small></td><td>${statusPillSafe(r.channel)}</td><td class="num">${U.fmt(r.agents)}</td><td class="num">${U.fmt(r.active)}${r.inactive ? `<small class="dim">${U.fmt(r.inactive)} off</small>` : ''}</td><td class="num"><b>${U.fmt(r.issuance)}</b></td><td class="num">${U.fmt(r.prev)}</td><td class="num">${r.target ? U.fmt(r.target) : '<span class="dim">—</span>'}</td><td class="num">${r.achievement === null ? '<span class="dim">—</span>' : `<span class="badge ${r.achievement >= 100 ? 'green' : r.achievement >= 60 ? 'amber' : 'red'}">${r.achievement.toFixed(0)}%</span>`}</td><td class="num">${U.fmt(r.stock)}</td><td class="num">${r.cover === null ? '—' : r.cover.toFixed(1)}</td><td class="num">${money(r.commission, 0)}</td><td class="num">${r.commissionPerTag ? r.commissionPerTag.toFixed(2) : '—'}</td><td class="num">${r.comp.commission.toFixed(0)}%</td><td class="num">${r.risk.Critical + r.risk.High || '<span class="dim">0</span>'}</td><td class="num">${r.dq || '<span class="dim">0</span>'}</td><td class="num"><b>${r.score.toFixed(1)}</b></td><td><span class="badge ${gradeTone(r.grade)}">${esc(r.grade)}</span></td><td class="small wrap">${esc(r.focus.slice(0, 2).join(' · ') || '—')}</td></tr>`).join('') || `<tr><td colspan="18">${empty('Koi TL nahi mila', 'Filter change karo ya data load hone do.')}</td></tr>`}
         </tbody>${rows.length ? `<tfoot><tr class="row-total"><td colspan="3">Total · ${U.fmt(rows.length)} TLs</td><td class="num">${U.fmt(t.agents)}</td><td class="num">${U.fmt(t.active)}</td><td class="num">${U.fmt(t.issuance)}</td><td colspan="2"></td><td class="num">${t.target ? U.fmt(t.target) : '—'}</td><td colspan="3"></td><td class="num">${money(t.commission, 0)}</td><td colspan="4"></td><td class="num">${t.avgScore.toFixed(1)} avg</td></tr></tfoot>` : ''}</table></div>
       </div>`;
+    // KPI cards clickable → TL-wise full data (v3.8.3)
+    const TL_HEADERS = ['Rank', 'TL', 'Channel', 'Agents', 'Active', 'Issuance', 'Prev', 'Target', 'Achv %', 'Stock', 'Cover', 'Commission', '₹/tag', 'Critical+High', 'DQ', 'Score', 'Grade'];
+    const tlRowArr = (r) => [r.rank, r.tl, r.channel, r.agents, r.active, r.issuance, r.prev, r.target || '', r.achievement === null ? '' : Number(r.achievement.toFixed(1)), r.stock, r.cover === null ? '' : Number(r.cover.toFixed(1)), Number(r.commission.toFixed(2)), Number(r.commissionPerTag.toFixed(2)), r.risk.Critical + r.risk.High, r.dq, Number(r.score.toFixed(1)), r.grade];
+    if (UI.bindMetricDetails) UI.bindMetricDetails(root, `TL scorecard · ${U.labelYM(data.month)}`, TL_HEADERS, rows.map(tlRowArr), {
+      'Average TL score': { title: `${U.fmt(t.tls)} TLs ranked`, headers: TL_HEADERS, rows: rows.map(tlRowArr) },
+      'Issuance MTD': { title: 'Issuance ke hisaab se TLs', headers: TL_HEADERS, rows: [...rows].sort((a, b) => b.issuance - a.issuance).map(tlRowArr) },
+      'Active agents': { title: 'Active agents ke hisaab se TLs', headers: TL_HEADERS, rows: [...rows].sort((a, b) => b.active - a.active).map(tlRowArr), stats: [`${U.fmt(t.inactive)} agents is month inactive`] },
+      'Commission (MTD)': { title: 'Commission ke hisaab se TLs', headers: TL_HEADERS, rows: [...rows].sort((a, b) => b.commission - a.commission).map(tlRowArr) },
+      'Stock risk agents': { title: 'Critical + High stock risk', headers: TL_HEADERS, rows: rows.filter((r) => r.risk.Critical + r.risk.High > 0).map(tlRowArr) },
+      'Data-quality records': { title: 'DQ findings wale TLs', headers: TL_HEADERS, rows: rows.filter((r) => r.dq > 0).map(tlRowArr) }
+    });
     const search = U.$('#tl-search', root);
     if (search) search.addEventListener('submit', (e) => { e.preventDefault(); FF.app.updateParams({ q: new FormData(search).get('q') || '' }); });
     const csv = U.$('#tl-csv', root);
