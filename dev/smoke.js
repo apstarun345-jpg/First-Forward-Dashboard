@@ -387,6 +387,17 @@ await run('professional page verified dual-channel agents', async () => {
   const onlyDouble = root(); await pages.dualChannel.render(onlyDouble, { dup: 'double' }, {});
   if (!/Doubled|Double-mapped|double-mapped/i.test(onlyDouble.innerHTML)) throw new Error('double-mapped filter view missing');
 }, true);
+await run('professional page FASTag Champions (vivid KPI + clickable full-data drill-down)', async () => {
+  const r = root(); await pages.fastagChampions.render(r, {}, {});
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const label of ['FASTag Champions', 'ins-metric', 'data-tone', 'ins-metric-tap', 'FF issuance (month)', 'GV issuance (month)', 'Chassis tags', 'Replacement tags', 'Wrong VRN tags', 'Champion boards', 'fastag-export-csv', 'cert-winners']) {
+    if (!html.includes(label)) throw new Error(`FASTag Champions me "${label}" nahi mila`);
+  }
+  if (!/data-tone="g[0-9]+"/.test(html)) throw new Error('KPI cards par data-tone gradient missing');
+  // month filter + search par bhi render hona chahiye
+  const r2 = root(); await pages.fastagChampions.render(r2, { scope: 'ff', top: '5' }, {});
+  if (!/Top Agents/.test(r2.innerHTML)) throw new Error('scope=ff board render nahi hua');
+}, true);
 await run('professional page stock forecast', async () => {
   const r = root(); await pages.forecast.render(r, { growth: '20', safety: '7' }, {});
   const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');

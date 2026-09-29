@@ -355,13 +355,23 @@ FF.pages = FF.pages || {};
   }
   function voiceSection() {
     const p = U.voicePrefs();
+    const prof = U.voiceProfile();
     const langSel = `<label class="fld"><span>🌐 Assistant language</span><select class="input" id="voice-lang"><option value="hi" ${p.lang !== 'en' ? 'selected' : ''}>हिंदी / Hinglish (default)</option><option value="en" ${p.lang === 'en' ? 'selected' : ''}>English</option></select></label>`;
     const voiceSel = (key, label) => `<label class="fld"><span>${label}</span><select class="input" id="voice-${key}" data-vkey="${key}">${voiceOptions(p, key)}</select></label>`;
     const slider = (key, label, dflt) => { const v = Number(p[key]) > 0 ? Number(p[key]) : dflt; return `<label class="fld"><span>${label} <b data-vval="${key}">${v}</b></span><input type="range" id="voice-${key}" data-vkey="${key}" min="0.5" max="1.5" step="0.05" value="${v}"></label>`; };
+    const profChip = prof
+      ? `<div class="btn-row"><span class="ins-pill hot">🎤 ${esc(prof.name)} active</span><span class="ins-pill">Pitch ~${esc(prof.hz)} Hz · ${esc(prof.gender === 'male' ? 'deep' : 'soft')}</span><span class="ins-pill">Speed ${Number(prof.rate).toFixed(2)}×</span><button class="btn small danger" id="voice-prof-clear">🗑 Profile hatao</button></div>`
+      : `<p class="dim small">Abhi koi personal voice profile nahi — default system voice chal rahi hai.</p>`;
     return section('🎙 Assistant awaaz & bhasha', `<p class="dim small">Voice assistant ka jawab kis awaaz me bole — Hindi / English voice, speed aur pitch yahan se set karo. Har language ki apni voice choose hoti hai; assistant panel ke 🌐 button se language turant switch hoti hai (mic ki bhasha bhi saath me badalti hai — hi-IN ⇄ en-IN). Test karke sun lo, pasand aaye to bas.</p>
       <div class="form-grid">${langSel}${voiceSel('hi', '🗣 Hindi / Hinglish awaaz')}${voiceSel('en', '🗣 English awaaz')}${slider('rate', '⚡ Speed', 1.02)}${slider('pitch', '🎵 Pitch', 1)}</div>
+      <div class="form-grid"><label class="check"><input type="checkbox" id="voice-greet" ${p.greet !== false ? 'checked' : ''}> 🌅 <b>Login par voice greeting</b> — "Good morning &lt;naam&gt;, kaise ho aap?" bol kar welcome</label><label class="check"><input type="checkbox" id="voice-conv" ${p.convMode === true ? 'checked' : ''}> 🎧 <b>Hands-free conversation mode</b> — har jawab ke baad khud sunta rahega (Alexa-style)</label></div>
       <div class="btn-row"><button class="btn small" id="voice-test-hi">🔊 Hindi test</button><button class="btn small" id="voice-test-en">🔊 English test</button><button class="btn small" id="voice-refresh">🔄 Voice list refresh</button><button class="btn small" id="voice-reset">↺ Default</button></div>
-      <p class="dim small" id="voice-count"></p>`, 'localStorage · sirf aapke browser me');
+      <p class="dim small" id="voice-count"></p>
+      <h4 class="drawer-section-title">🎤 Meri awaaz — sample upload / record</h4>
+      <p class="dim small">Apni voice ka 5–15 second ka sample do — assistant uski pitch, speed aur tone analyze kar ke <b>usi style me</b> bolne lagta hai (browser TTS tone-match). Audio sirf analyze hoti hai, save nahi hoti. Full Voice Studio (default voices + meri awaaz, ek jagah) assistant ke 🎛 button se bhi khul sakti hai.</p>
+      ${profChip}
+      <div class="btn-row"><label class="btn small" style="cursor:pointer">📁 Voice sample upload<input type="file" id="voice-file" accept="audio/*" hidden></label><button class="btn small" id="voice-rec">⏺ Record karo</button><span class="dim small" id="voice-rec-status"></span></div>
+      <div class="btn-row"><button class="btn small" id="voice-studio-open">🎛 Voice Studio kholein</button></div>`, 'localStorage · sirf aapke browser me');
   }
   function bindVoiceTab(body) {
     const countEl = U.$('#voice-count', body);
@@ -374,6 +384,16 @@ FF.pages = FF.pages || {};
     try { if (typeof window !== 'undefined' && 'speechSynthesis' in window) window.speechSynthesis.onvoiceschanged = refresh; } catch { /* optional */ }
     const langSel = U.$('#voice-lang', body);
     if (langSel) langSel.addEventListener('change', () => U.setVoicePrefs({ lang: langSel.value }));
+    const greetCb = U.$('#voice-greet', body);
+    if (greetCb) greetCb.addEventListener('change', () => {
+      U.setVoicePrefs({ greet: greetCb.checked });
+      U.toast(greetCb.checked ? '🌅 Login greeting ON — next login par assistant awaaz me bolega.' : '🔕 Login greeting OFF.', 'ok');
+    });
+    const convCb = U.$('#voice-conv', body);
+    if (convCb) convCb.addEventListener('change', () => {
+      U.setVoicePrefs({ convMode: convCb.checked });
+      U.toast(convCb.checked ? '🎧 Hands-free mode ON — assistant har jawab ke baad khud sunega.' : '🎧 Hands-free mode OFF.', 'ok');
+    });
     U.$$('[data-vkey]', body).forEach((el) => {
       el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', () => {
         const key = el.dataset.vkey;
@@ -389,9 +409,9 @@ FF.pages = FF.pages || {};
         const p = U.voicePrefs();
         const u = new SpeechSynthesisUtterance(text);
         const vs = window.speechSynthesis.getVoices() || [];
-        const uri = langKey === 'en' ? p.en : p.hi;
-        u.voice = (uri && vs.find((v) => v.voiceURI === uri)) || vs.find((v) => (langKey === 'en' ? /^en[-_]IN/i.test(v.lang) : /^hi[-_]IN/i.test(v.lang))) || vs[0];
-        u.lang = (u.voice && u.voice.lang) || (langKey === 'en' ? 'en-IN' : 'hi-IN');
+        const v = U.matchVoice(vs, langKey, U.voiceProfile());
+        if (v) u.voice = v;
+        u.lang = (v && v.lang) || (langKey === 'en' ? 'en-IN' : 'hi-IN');
         u.rate = Number(p.rate) > 0 ? Number(p.rate) : 1.02;
         u.pitch = Number(p.pitch) > 0 ? Number(p.pitch) : 1;
         window.speechSynthesis.speak(u);
@@ -402,11 +422,70 @@ FF.pages = FF.pages || {};
     const vr = U.$('#voice-refresh', body); if (vr) vr.addEventListener('click', refresh);
     const vreset = U.$('#voice-reset', body);
     if (vreset) vreset.addEventListener('click', () => {
+      U.setVoiceProfile(null);
       U.setVoicePrefs({ lang: 'hi', hi: '', en: '', rate: 0, pitch: 0 });
       const ls = U.$('#voice-lang', body); if (ls) ls.value = 'hi';
       ['hi', 'en'].forEach((k) => { const sel = U.$(`#voice-${k}`, body); if (sel) sel.value = ''; });
       [['rate', '1.02'], ['pitch', '1']].forEach(([k, v]) => { const el = U.$(`#voice-${k}`, body); if (el) el.value = v; const out = U.$(`[data-vval="${k}"]`, body); if (out) out.textContent = v; });
       U.toast('🎙 Voice settings default par reset ✓', 'ok');
+    });
+    // ---- 🎤 Meri awaaz — sample upload/record → analyze → apply (shared U helpers) ----
+    const applyVoiceSample = async (blob, name) => {
+      const status = U.$('#voice-rec-status', body);
+      if (!blob) return;
+      if (status) status.textContent = '🔍 Awaaz analyze ho rahi hai…';
+      try {
+        const res = await U.analyzeVoiceBlob(blob);
+        if (!res.ok) { if (status) status.textContent = `⚠️ ${res.reason}`; return; }
+        res.name = name || 'Meri awaaz';
+        U.setVoiceProfile(res);
+        if (status) status.textContent = `✓ ${res.name} apply ho gayi — ~${res.hz} Hz · ${res.gender === 'male' ? 'deep' : 'soft'} · ${res.rate}× speed`;
+        U.toast('✅ Meri awaaz lag gayi — assistant ab isi tone me bolega!', 'ok');
+      } catch (err) {
+        if (status) status.textContent = `⚠️ ${err.message || 'Decode nahi hua'}`;
+      }
+    };
+    const fileEl = U.$('#voice-file', body);
+    if (fileEl) fileEl.addEventListener('change', () => {
+      const f = fileEl.files && fileEl.files[0];
+      if (f) applyVoiceSample(f, f.name.replace(/\.[a-z0-9]+$/i, '').slice(0, 40) || 'Meri awaaz');
+    });
+    const recBtn = U.$('#voice-rec', body);
+    if (recBtn) recBtn.addEventListener('click', async () => {
+      const status = U.$('#voice-rec-status', body);
+      if (recBtn.dataset.recording === '1' && recBtn._mediaRec) {
+        recBtn._mediaRec.stop();
+        return;
+      }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const chunks = [];
+        const mr = new MediaRecorder(stream);
+        recBtn._mediaRec = mr;
+        mr.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+        mr.onstop = () => {
+          stream.getTracks().forEach((t) => t.stop());
+          recBtn.dataset.recording = '0';
+          recBtn.textContent = '⏺ Record karo';
+          applyVoiceSample(new Blob(chunks, { type: mr.mimeType || 'audio/webm' }), 'Meri awaaz');
+        };
+        mr.start();
+        recBtn.dataset.recording = '1';
+        recBtn.textContent = '⏹ Stop';
+        if (status) status.textContent = '⏺ Recording… bolo abhi (5–15 second)';
+      } catch {
+        U.toast('Mic permission chahiye — recording ke liye Allow karo.', 'err');
+      }
+    });
+    const profClear = U.$('#voice-prof-clear', body);
+    if (profClear) profClear.addEventListener('click', () => {
+      U.setVoiceProfile(null);
+      U.toast('🗑 Voice profile hata di — default voice wapas.', 'ok');
+    });
+    const studioOpen = U.$('#voice-studio-open', body);
+    if (studioOpen) studioOpen.addEventListener('click', () => {
+      if (FF.assistant && FF.assistant.openVoiceStudio) FF.assistant.openVoiceStudio();
+      else U.toast('Assistant abhi load nahi hua — page refresh karo.', 'warn');
     });
   }
   function accountTab() {

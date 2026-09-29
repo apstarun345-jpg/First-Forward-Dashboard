@@ -68,9 +68,10 @@ FF.pages = FF.pages || {};
   const sourceChip = (name, detail) => `<span class="source-chip" title="${esc(detail || '')}">✓ ${esc(name)}</span>`;
   // Colourful KPI card. `tone` = 'g1'…'g12' → vivid gradient (same palette as the main dashboard),
   // 'good' / 'bad' → compact coloured accent. `icon` optional emoji chip (only with gradient tones).
+  // Cards bindMetricDetails se clickable banti hain (has-detail class) → tap pill "Full data ↗".
   const metric = (label, value, foot, tone, icon) => {
     const vivid = /^g(?:[1-9]|1[0-2])$/.test(String(tone || ''));
-    return `<div class="ins-metric ${vivid ? '' : (tone || '')}"${vivid ? ` data-tone="${tone}"` : ''}>${vivid && icon ? `<span class="ins-metric-icon" aria-hidden="true">${icon}</span>` : ''}<small>${esc(label)}</small><b>${value}</b><span>${foot || '&nbsp;'}</span></div>`;
+    return `<div class="ins-metric ${vivid ? '' : (tone || '')}"${vivid ? ` data-tone="${tone}"` : ''}>${vivid && icon ? `<span class="ins-metric-icon" aria-hidden="true">${icon}</span>` : ''}<small>${esc(label)}</small><b>${value}</b><span>${foot || '&nbsp;'}</span><span class="ins-metric-tap" aria-hidden="true">🔎 Full data ↗</span></div>`;
   };
   // Vivid KPI row: takes [{ label, value, foot, tone, icon }] and renders colourful cards.
   const vividMetrics = (cards, extraClass) => `<div class="ins-metrics ${extraClass || ''}">${cards.map((c) => metric(c.label, c.value, c.foot, c.tone, c.icon)).join('')}</div>`;
@@ -80,15 +81,41 @@ FF.pages = FF.pages || {};
   const exportButtons = (base) => `${csvButton(`${base}-csv`, 'CSV')}<button class="btn" id="${base}-xlsx">⬇ Excel</button>`;
   const printButton = '<button class="btn" onclick="window.print()">🖨 PDF / Print</button>';
   function bindMetricDetails(root, title, headers, rows, detailSets) {
-    root.querySelectorAll('.ins-metrics .ins-metric').forEach((el) => { el.dataset.metricDetail = el.querySelector('small')?.textContent || 'Metric'; el.setAttribute('role', 'button'); el.setAttribute('tabindex', '0'); el.setAttribute('aria-label', `${el.dataset.metricDetail}; click to view rows`); const open = () => {
-      const old = root.querySelector('#metric-detail-dialog'); if (old) old.remove();
-      const chosen = detailSets && detailSets[el.dataset.metricDetail] || {};
-      const detailRows = chosen.rows || rows, detailHeaders = chosen.headers || headers, detailTitle = chosen.title || title;
-      const body = detailRows.slice(0, 500).map((r) => `<tr>${r.map((v) => `<td>${esc(v ?? '—')}</td>`).join('')}</tr>`).join('');
-      const dialog = document.createElement('dialog'); dialog.id = 'metric-detail-dialog'; dialog.className = 'ins-detail-dialog';
-      dialog.innerHTML = `<div class="card-head"><h3>${esc(el.dataset.metricDetail)} · ${esc(detailTitle)}</h3><button class="btn small" data-close>Close</button></div><p class="dim small">${U.fmt(detailRows.length)} matching rows${detailRows.length > 500 ? ' · first 500 shown' : ''}</p><div class="table-wrap"><table class="data-table ins-table"><thead><tr>${detailHeaders.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${body || `<tr><td colspan="${detailHeaders.length}">No detail rows available</td></tr>`}</tbody></table></div>`;
-      root.append(dialog); dialog.querySelector('[data-close]').onclick = () => dialog.close(); dialog.addEventListener('click', (e) => { if (e.target === dialog) dialog.close(); }); dialog.showModal();
-    }; el.addEventListener('click', open); el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } }); });
+    root.querySelectorAll('.ins-metrics .ins-metric').forEach((el) => {
+      el.dataset.metricDetail = el.querySelector('small')?.textContent || 'Metric';
+      el.classList.add('has-detail');
+      el.setAttribute('role', 'button');
+      el.setAttribute('tabindex', '0');
+      el.setAttribute('aria-label', `${el.dataset.metricDetail}; click to view full data`);
+      const open = () => {
+        const old = root.querySelector('#metric-detail-dialog'); if (old) old.remove();
+        const chosen = detailSets && detailSets[el.dataset.metricDetail] || {};
+        const detailRows = chosen.rows || rows, detailHeaders = chosen.headers || headers, detailTitle = chosen.title || title;
+        const stats = Array.isArray(chosen.stats) ? chosen.stats : [];
+        const bodyFor = (list) => list.slice(0, 500).map((r) => `<tr>${r.map((v) => `<td>${esc(v ?? '—')}</td>`).join('')}</tr>`).join('') || '';
+        const dialog = document.createElement('dialog'); dialog.id = 'metric-detail-dialog'; dialog.className = 'ins-detail-dialog';
+        dialog.innerHTML = `<div class="card-head"><h3>${esc(el.dataset.metricDetail)} · ${esc(detailTitle)}</h3><button class="btn small" data-close>Close</button></div>
+          <div class="detail-stats">${stats.map((s) => `<span class="ins-pill">${esc(s)}</span>`).join('')}<span class="ins-pill">${U.fmt(detailRows.length)} matching rows</span>${detailRows.length > 500 ? '<span class="ins-pill">first 500 shown</span>' : ''}</div>
+          <div class="detail-toolbar"><input type="search" data-filter placeholder="Is table me search karo — naam, ID, TL, number…"><button class="btn small" data-csv>⬇ CSV</button></div>
+          <div class="table-wrap"><table class="data-table ins-table"><thead><tr>${detailHeaders.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody data-body>${bodyFor(detailRows)}</tbody></table></div>
+          <div class="detail-empty" data-none hidden>Is search se koi row nahi mili — filter hata ke dekho.</div>`;
+        root.append(dialog);
+        const filter = dialog.querySelector('[data-filter]');
+        filter.addEventListener('input', () => {
+          const q = filter.value.trim().toLowerCase();
+          const list = q ? detailRows.filter((r) => (r || []).join(' ').toLowerCase().includes(q)) : detailRows;
+          dialog.querySelector('[data-body]').innerHTML = bodyFor(list) || `<tr><td colspan="${detailHeaders.length}">No rows</td></tr>`;
+          dialog.querySelector('[data-none]').hidden = list.length > 0;
+        });
+        dialog.querySelector('[data-csv]').addEventListener('click', () => U.downloadCsv(`${U.slug(el.dataset.metricDetail || 'metric')}-${U.stamp()}.csv`, detailHeaders, detailRows));
+        dialog.querySelector('[data-close]').onclick = () => dialog.close();
+        dialog.addEventListener('click', (e) => { if (e.target === dialog) dialog.close(); });
+        if (typeof dialog.showModal === 'function') dialog.showModal(); else dialog.setAttribute('open', '');
+        filter.focus();
+      };
+      el.addEventListener('click', open);
+      el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
+    });
   }
   /** Shared modal table (metric details, findings samples, heading maps…). */
   function openInsDialog(root, title, headers, rows, note) {
@@ -1908,6 +1935,25 @@ FF.pages = FF.pages || {};
     U.$('#cert-winners', root).addEventListener('click', () => printCerts(['ff|total', 'gv|total']));
     U.$$('[data-cert]', root).forEach((b) => b.addEventListener('click', () => printCerts(b.dataset.cert)));
     bindExports(root, 'fastag-export', `fastag-champions-${month}-${U.stamp()}`, 'FASTag Champions', ['Category', 'Rank', 'Name', 'ID', 'TL', 'Total', 'VC4', 'Commercial', 'Chassis', 'Replacement', 'Wrong VRN'], csvRows);
+    // 🖱 KPI cards clickable — click = us metric ka POORA data (top-N board nahi, saare agents).
+    const CH_HEADERS = ['Channel', 'Agent', 'ID', 'TL', 'Total', 'VC4', 'Commercial', 'Chassis', 'Replacement', 'Wrong VRN'];
+    const toChRows = (list, channel) => list.map((r) => [channel, r.name, r.id || '—', r.tlName || 'Direct', r.total, r.vc4, r.commercial, r.chassis, r.replacement, r.wrongVrn]);
+    const allAgg = (ch) => [...aggregate(scopeRows(ch), ch === 'ff' ? (r) => `FF|${clean(r.name)}` : (r) => `GV|${clean(r.agentId)}|${clean(r.agentName)}`, ch === 'ff' ? (r) => clean(r.name) : (r) => clean(r.agentName) || clean(r.agentId)).values()].sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
+    const ffAllAgg = allAgg('ff'), gvAllAgg = allAgg('gv');
+    const withMetric = (list, key) => list.filter((r) => r[key] > 0).sort((a, b) => b[key] - a[key] || b.total - a.total || a.name.localeCompare(b.name));
+    const catRows = (key) => [...toChRows(withMetric(ffAllAgg, key), 'First Forward'), ...toChRows(withMetric(gvAllAgg, key), 'GV Partner')];
+    const boardRows = [];
+    certStore.forEach((meta) => {
+      meta.rows.forEach((r, i) => boardRows.push([meta.category, meta.channel, meta.isTl ? 'TL' : 'Agent', i + 1, r.name, r.id || '—', r.tlName || 'Direct', U.fmt(r[meta.metric] ?? r.total), U.fmt(r.total)]));
+    });
+    bindMetricDetails(root, `FASTag Champions · ${U.labelYM(month)}`, CH_HEADERS, [...toChRows(ffAllAgg, 'First Forward'), ...toChRows(gvAllAgg, 'GV Partner')], {
+      'FF issuance (month)': { title: 'First Forward — saare agents', headers: CH_HEADERS, rows: toChRows(ffAllAgg, 'First Forward'), stats: [`${U.fmt(ffAllAgg.length)} agents · ${esc(U.labelYM(month))}`, `Scope: ${scope === 'all' ? 'FF + GV' : scope === 'ff' ? 'First Forward' : 'GV Partner'}`] },
+      'GV issuance (month)': { title: 'GV Partner — saare agents', headers: CH_HEADERS, rows: toChRows(gvAllAgg, 'GV Partner'), stats: [`${U.fmt(gvAllAgg.length)} agents · ${esc(U.labelYM(month))}`] },
+      'Chassis tags': { title: 'Agent-wise chassis tags (FF + GV)', headers: CH_HEADERS, rows: catRows('chassis'), stats: [`FF ${U.fmt(fb.chassis)} · GV ${U.fmt(gb.chassis)}`, 'VRN/Tag type me "chassis"'] },
+      'Replacement tags': { title: 'Agent-wise replacement tags (FF + GV)', headers: CH_HEADERS, rows: catRows('replacement'), stats: [`FF ${U.fmt(fb.repl)} · GV ${U.fmt(gb.repl)}`, 'type/status me "replacement"'] },
+      'Wrong VRN tags': { title: 'Agent-wise Wrong VRN tags', headers: CH_HEADERS, rows: catRows('wrongVrn'), stats: [`FF ${U.fmt(fb.wrong)} · GV ${U.fmt(gb.wrong)}`, 'FF VRN type me "wrong"'] },
+      'Champion boards': { title: 'Har board ka poora ranked data', headers: ['Board', 'Channel', 'Level', 'Rank', 'Name', 'ID', 'TL', 'Metric value', 'Total'], rows: boardRows, stats: [`${U.fmt(boards.length)} boards · top ${topN} deep`] }
+    });
   }
 
   function reset() { mem.details = null; mem.detailsPromise = null; mem.cross = null; mem.quality = null; mem.workspaceVersion++; mem.workspace = null; mem.workspacePromise = null; mem.forecastHistory = null; mem.forecastHistoryPromise = null; mem.payout = null; mem.payoutPromise = null; }
