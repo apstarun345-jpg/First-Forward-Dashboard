@@ -382,6 +382,35 @@ FF.pages = FF.pages || {};
     if (col.type === 'num') return `<b>${fmt(raw, /avg|\/ day/i.test(col.label) && !/days/i.test(col.label))}</b>`;
     return `<b>${esc(raw || '—')}</b>`;
   }
+  function dailyClassBreakdown(agent) {
+    const today = U.dateKey(new Date());
+    const rows = (S.get('agentDailyClass') || []).filter((r) => r.channel === 'First Forward' && r.dateKey === today
+      && ((agent.agentId && r.id === agent.agentId) || norm(r.name) === norm(agent.name)));
+    const byClass = new Map();
+    for (const r of rows) {
+      const cls = r.cls || 'Unknown class';
+      const n = Number(r.n) || 0;
+      const item = byClass.get(cls) || { total: 0, issuance: 0, replacement: 0, detail: new Map() };
+      item.total += n;
+      const kind = /replacement/i.test(r.type || '') ? 'replacement' : 'issuance';
+      item[kind] += n;
+      const detail = `${String(r.type || 'ISSUANCE').toUpperCase()} · ${r.vrnType || 'tag type not set'}`;
+      item.detail.set(detail, (item.detail.get(detail) || 0) + n);
+      byClass.set(cls, item);
+    }
+    if (!byClass.size) return `<div class="dsec"><h4>🏅 Today’s class-wise tags · ${esc(today)}</h4><p class="dim small">Aaj is agent ke liye EIR me koi tag row nahi mili.</p></div>`;
+    const rowsHtml = [...byClass.entries()].sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true })).map(([cls, v]) => `<tr><td><b>${esc(cls)}</b></td><td class="num"><b>${fmt(v.total)}</b></td><td class="num">${fmt(v.issuance)}</td><td class="num">${fmt(v.replacement)}</td><td>${[...v.detail.entries()].sort((a, b) => b[1] - a[1]).map(([label, n]) => `<span class="today-tag-detail">${esc(label)} · <b>${fmt(n)}</b></span>`).join(' ')}</td></tr>`).join('');
+    return `<div class="dsec"><h4>🏅 Today’s class-wise tags · ${esc(today)} <span class="count green">${fmt(U.sum([...byClass.values()], (r) => r.total))}</span></h4><div class="table-wrap"><table class="tbl compact"><thead><tr><th>Class</th><th class="num">Tags</th><th class="num">Issuance</th><th class="num">Replacement</th><th>Tag / VRN type</th></tr></thead><tbody>${rowsHtml}</tbody></table></div></div>`;
+  }
+  function performanceDispatchHtml(agent) {
+    if (FF.config.feat && FF.config.feat('dispatchPlan') === false) return '';
+    const days = U.suggestDays();
+    const vc4 = U.dispatchCalc({ cur: agent.curVc4, last: agent.lastVc4, stock: agent.stockVc4, days });
+    const comm = U.dispatchCalc({ cur: agent.curNvc4, last: agent.lastNvc4, stock: agent.stockNvc4, days });
+    const direct = !!agent.tlExcluded;
+    const row = (label, calc) => `<div class="pf-dispatch-row"><b>${label}</b><span class="pf-dispatch-after"><small>After stock</small><b class="sug-chip">${fmt(calc.net)}</b></span><span class="pf-dispatch-gross"><small>Without subtracting stock</small><b class="sug-chip wo">${fmt(calc.gross)}</b></span></div>`;
+    return `<div class="dsec pf-dispatch-card"><h4>🚚 ${direct ? 'Suggested tag quantity' : 'Suggested dispatch quantity'} · ${fmt(days)} days</h4><p class="dim small">Run-rate × ${fmt(days)} days${direct ? ' · Direct agent stock is not dispatched' : ' · two clear quantities are shown'}</p><div class="pf-dispatch-head"><span>Class</span><span>After stock</span><span class="pf-dispatch-gross-label">Without subtracting stock</span></div>${row('VC4', vc4)}${row('Commercial', comm)}</div>`;
+  }
   function openAgent(rowIndex) {
     const agent = state.agents.find((a) => a.__row === rowIndex);
     if (!agent) return;
@@ -396,7 +425,7 @@ FF.pages = FF.pages || {};
     const compare = cs
       ? vsCommercialCard(`⚖️ Class split · ${esc(cs.lastLabel)} → ${esc(cs.curLabel)} (till ${cs.day})`, { vc4: cs.curS.VC4, vc20: cs.curS.VC20, vc5p: cs.curS['VC5+'], comm: cs.curS.VC20 + cs.curS['VC5+'], total: cs.curS.total }, { vc4: cs.lastS.VC4, vc20: cs.lastS.VC20, vc5p: cs.lastS['VC5+'], comm: cs.lastS.VC20 + cs.lastS['VC5+'], total: cs.lastS.total }, { cur: cs.curLabel, last: cs.lastLabel }, `Replacement (EIR): ${esc(cs.curLabel)} <b>${fmt(cs.curS.repl)}</b> · ${esc(cs.lastLabel)} ${fmt(cs.lastS.repl)}`)
       : vsCommercialCard(`⚖️ VC4 vs Commercial · ${esc(state.months.last)} → ${esc(state.months.cur)}`, { vc4: agent.curVc4, comm: agent.curNvc4, total: agent.curTotal }, { vc4: agent.lastVc4, comm: agent.lastNvc4, total: agent.lastTotal });
-    const classCard = '';
+    const classCard = dailyClassBreakdown(agent);
     const stockClasses = ['stockVc4', 'stockC1', 'stockC2', 'stockC3', 'stockC4', 'stockC5'].map((k) => ({ label: state.columns[k].label, value: agent[k] || 0 })).filter((x) => x.value > 0);
     const stockCard = `<div class="dsec"><h4>📦 Stock in hand · ${fmt(agent.stockTotal)} <small class="dim">(VC4 ${fmt(agent.stockVc4)} · Commercial ${fmt(agent.stockNvc4)})</small></h4>${stockClasses.length ? C.bars({ labels: stockClasses.map((x) => x.label), height: 130, series: [{ name: 'Stock', values: stockClasses.map((x) => x.value), color: '#14b8a6' }] }) : '<div class="dim">No stock</div>'}<div class="dgrid" style="margin-top:8px">${row('Stock days (VC4)', `<b>${fmt(agent.agentStockDays)}</b>`)}${row('Priority', badge(agent.agentPriority))}${row('Daily avg', `<b>${fmt(agent.agentAvg, true)}</b>`)}</div></div>`;
     const sections = state.sections.filter((s) => !['profile', 'stock'].includes(s.key)).map((section) => {
@@ -406,7 +435,7 @@ FF.pages = FF.pages || {};
       return `<details class="dsec collapsible"><summary>${esc(section.title)}</summary><div class="dgrid">${section.cols.map((col) => row(col.label, valueHtml(col, agent), `Sheet column ${col.letter}`)).join('')}</div></details>`;
     }).join('');
     const text = agentText(agent);
-    FF.app.openDrawer({ kicker: agent.isMaster ? 'Master account' : 'Agent', title: agent.name || agent.agentId || '—', sub: `ID ${esc(agent.agentId || '—')} · TL ${esc(tlLabel(agent) || '—')}${mobileHtml(agent.tlMobile)}`, actions: `${shareButtons(text, `Agent report · ${agent.name}`, agent.tlMobile)}<a class="btn small" href="#/stock?agent=${encodeURIComponent(agent.name)}">📦 Stock</a><a class="btn small" href="#/trend?agent=${encodeURIComponent(agent.name)}">📈 Trend</a>`, body: summary + compare + classCard + stockCard + sections });
+    FF.app.openDrawer({ kicker: agent.isMaster ? 'Master account' : 'Agent', title: agent.name || agent.agentId || '—', sub: `ID ${esc(agent.agentId || '—')} · TL ${esc(tlLabel(agent) || '—')}${mobileHtml(agent.tlMobile)}`, actions: `${shareButtons(text, `Agent report · ${agent.name}`, agent.tlMobile)}<a class="btn small" href="#/stock?agent=${encodeURIComponent(agent.name)}">📦 Stock</a><a class="btn small" href="#/trend?agent=${encodeURIComponent(agent.name)}">📈 Trend</a>`, body: summary + compare + classCard + performanceDispatchHtml(agent) + stockCard + sections });
   }
   function openTl(tlKey) {
     const group = state.allTlGroups.find((g) => g.tlKey === tlKey || norm(g.tlName) === norm(tlKey)) || buildTlGroups(state.agents.filter((a) => a.tlKey === tlKey || norm(a.tlName) === norm(tlKey)), true)[0];
@@ -779,7 +808,7 @@ FF.pages = FF.pages || {};
     root.innerHTML = `<div class="page-head"><div><h1>🏆 Performance</h1><p class="sub" id="pf-sub">REPORT tab se agent & TL performance…</p></div>
       <div class="head-actions">${FF.auth.can('share') ? '<button class="btn" data-act="share">📲 WhatsApp summary</button><button class="btn" data-act="mail">✉️ Email summary</button>' : ''}<button class="btn primary" data-action="refresh">↻ Refresh</button>${FF.auth.can('sheet:REPORT') ? '<a class="btn" href="#/sheet/REPORT">Full REPORT sheet →</a>' : ''}</div></div>
       <div id="pf-body">${U.spinner('REPORT tab load ho raha hai…')}</div>`;
-    try { await ensureLoaded(); await Promise.allSettled([S.need('agentClass'), S.need('daily')]); } catch (err) { U.$('#pf-body', root).innerHTML = U.errorBox(err, 'data-action="refresh"'); return; }
+    try { await ensureLoaded(); await Promise.allSettled([S.need('agentClass'), S.need('daily'), S.need('agentDailyClass')]); } catch (err) { U.$('#pf-body', root).innerHTML = U.errorBox(err, 'data-action="refresh"'); return; }
     if (!root.isConnected) return;
     applyFilters();
     const body = U.$('#pf-body', root);

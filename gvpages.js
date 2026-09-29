@@ -505,7 +505,27 @@ FF.pages = FF.pages || {};
     });
   }
 
-  function agentDrawer(r) {
+  function gvTodayClassBreakdown(agent) {
+    const today = U.dateKey(new Date());
+    const rows = G.rows().filter((r) => r.date && U.dateKey(r.date) === today
+      && ((agent.agentId && r.agentId === agent.agentId) || norm(r.agentName) === norm(agent.agentName)));
+    const byClass = new Map();
+    for (const r of rows) {
+      const cls = r.cls || 'Unknown class';
+      const item = byClass.get(cls) || { total: 0, issuance: 0, replacement: 0, detail: new Map() };
+      item.total++;
+      const replacement = /replacement/i.test(r.status || '');
+      item[replacement ? 'replacement' : 'issuance']++;
+      const detail = `${replacement ? 'REPLACEMENT' : 'ISSUANCE'} · ${r.tagType || 'tag type not set'}`;
+      item.detail.set(detail, (item.detail.get(detail) || 0) + 1);
+      byClass.set(cls, item);
+    }
+    if (!byClass.size) return `<div class="dsec"><h4>🏅 Today’s class-wise tags · ${esc(today)}</h4><p class="dim small">Aaj is GV agent ke liye koi issuance row nahi mili.</p></div>`;
+    const rowsHtml = [...byClass.entries()].sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true })).map(([cls, v]) => `<tr><td><b>${esc(cls)}</b></td><td class="num"><b>${U.fmt(v.total)}</b></td><td class="num">${U.fmt(v.issuance)}</td><td class="num">${U.fmt(v.replacement)}</td><td>${[...v.detail.entries()].sort((a, b) => b[1] - a[1]).map(([label, n]) => `<span class="today-tag-detail">${esc(label)} · <b>${U.fmt(n)}</b></span>`).join(' ')}</td></tr>`).join('');
+    return `<div class="dsec"><h4>🏅 Today’s class-wise tags · ${esc(today)} <span class="count green">${U.fmt(rows.length)}</span></h4><div class="table-wrap"><table class="tbl compact"><thead><tr><th>Class</th><th class="num">Tags</th><th class="num">Issuance</th><th class="num">Replacement</th><th>Tag type</th></tr></thead><tbody>${rowsHtml}</tbody></table></div></div>`;
+  }
+  async function agentDrawer(r) {
+    await G.need('master').catch(() => []);
     const clsRows = Object.entries(r.curByClass).filter(([, v]) => v > 0);
     const stockRows = Object.entries(r.stockByClass).filter(([, v]) => v > 0);
     const body = `
@@ -515,6 +535,7 @@ FF.pages = FF.pages || {};
         <div>${card('🚗 MTD class split', clsRows.length ? C.bars({ labels: clsRows.map(([k]) => k), height: 180, series: [{ name: 'Issued', values: clsRows.map(([, v]) => v), color: '#0d9488' }], showValues: true }) : '<div class="empty">MTD data nahi</div>')}</div>
         <div>${card('📦 Stock by class', stockRows.length ? C.donut({ items: stockRows.map(([k, v]) => ({ label: k, value: v })), subtitle: 'stock' }) : '<div class="empty">Stock nahi</div>')}</div>
       </div>
+      ${gvTodayClassBreakdown(r)}
       ${card('📄 Full GV REPORT row', `<div class="table-wrap" style="max-height:340px"><table class="tbl compact"><thead><tr><th>#</th><th>Column</th><th>Value</th></tr></thead><tbody>${r.raw.map((v, i) => v === '' ? '' : `<tr><td class="dim">${U.colLetter(i)}</td><td>${esc((G.REPORT_COLS_LABELS && G.REPORT_COLS_LABELS[i]) || '')}</td><td>${esc(v)}</td></tr>`).join('')}</tbody></table></div>`)}
       <div class="btn-row" style="margin-top:10px">${shareBtn(`${r.agentName} (${r.tlName}) — GV stock ${U.fmt(r.stockTotal)} · MTD ${U.fmt(r.curTotal)} · last month ${U.fmt(r.lastTotal)} · growth ${r.growth === null ? '—' : `${r.growth}%`} · priority ${r.priority || '—'}`, `GV Partner report · ${r.agentName}`)}</div>`;
     FF.app.openDrawer({
@@ -679,6 +700,10 @@ FF.pages = FF.pages || {};
       const row = e.target.closest('tr[data-agent]');
       if (row) { const r = all.find((x) => x.agentName === row.dataset.agent); if (r) agentDrawer(r); }
     });
+    if (p.q) {
+      const hit = all.find((r) => norm(r.agentName) === norm(p.q)) || all.find((r) => norm(r.agentName).includes(norm(p.q)));
+      if (hit) setTimeout(() => { if (root.isConnected) agentDrawer(hit); }, 60);
+    }
   }
 
 

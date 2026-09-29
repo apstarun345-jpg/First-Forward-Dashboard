@@ -277,18 +277,15 @@ window.FF = window.FF || {};
   const kpi = (label, value, foot, tone) => `<div class="mp-kpi ${tone || ''}"><small>${esc(label)}</small><b>${value}</b>${foot ? `<em>${foot}</em>` : ''}</div>`;
   const cell = (label, value) => `<div><small>${esc(label)}</small><b>${value}</b></div>`;
 
-  /** Dono criteria — mode ke hisaab: net (stock −) / gross (bina stock) / dono. */
-  function sugPairHtml(net, gross) {
-    const mode = sugMode();
-    if (mode === 'net') return `<b class="sug-chip">${fmt(net)}</b>`;
-    if (mode === 'gross') return `<b class="sug-chip">${fmt(gross)}</b><span class="sug-wo">bina stock ghataye</span>`;
-    return `<b class="sug-chip">${fmt(net)}</b><span class="sug-wo" title="Bina stock ghataye — run-rate × din">w/o stock <b>${fmt(gross)}</b></span>`;
-  }
+  /** Net (after stock) and gross (without stock deduction), with gross visually emphasized. */
+  function sugPairHtml(net, gross) { return U.sugCell(net, gross); }
   function sugBlock(pr) {
     const d = pr.dispatch || {};
     const isTl = /tl$/.test(pr.kind);
     if (pr.tagRequired) {
-      const tagPair = (net, gross) => sugMode() === 'both' ? `${tagChip(net)}<span class="sug-wo" title="Bina stock ghataye — run-rate × din">w/o stock <b>${fmt(gross)}</b></span>` : tagChip(sugMode() === 'gross' ? gross : net);
+      const tagPair = (net, gross) => sugMode() === 'both'
+        ? `<span class="sug-pair"><span class="sug-result net"><small>Tag need · after stock</small>${tagChip(net)}</span><span class="sug-result gross"><small>Tags · no stock deducted</small><b class="sug-chip wo">🏷️ ${fmt(gross)} tags</b></span></span>`
+        : tagChip(sugMode() === 'gross' ? gross : net);
       return { vc4: tagPair(d.sugVc4, d.sugVc4Gross || 0), comm: tagPair(d.sugComm, d.sugCommGross || 0), note: `🏷️ <b>TAG REQUIRED</b> — ${esc(pr.directLabel || 'Direct agent')} · stock box nahi jaata, par ${esc(pr.priority)} priority hai to tags chahiye. Suggested ${d.days} din ke run-rate par.` };
     }
     if (pr.direct) return { vc4: '<span class="dim">No dispatch</span>', comm: '<span class="dim">No dispatch</span>', note: `🚫 ${esc(pr.directLabel || 'Direct agent')} — priority ${esc(pr.priority || 'Low')}: abhi dispatch / tags ki zarurat nahi.` };
@@ -303,8 +300,8 @@ window.FF = window.FF || {};
     const row = (label, x, strong) => `<tr class="${strong ? 'row-strong' : ''}"><td><b>${label}</b></td><td class="num">${fmt(x.last)}</td><td class="num">${fmt(x.cur)}</td><td class="num">${fmt(x.rate, true)}</td><td class="num">${fmt(x.required)}</td><td class="num">${fmt(x.stock)}</td><td class="num"><b class="sug-chip">${fmt(x.net)}</b></td><td class="num"><b class="sug-chip wo">${fmt(x.gross)}</b></td><td class="num">${coverBadge(x.cover)}</td></tr>`;
     const m = pr.months || {};
     return `<section class="mp-sec mp-calc"><h4>🧮 Dispatch calculation · ${fmt(days)} din</h4>
-      <p class="dim small">Run-rate = is month ke issue ÷ <b>(aaj − 1) = ${fmt(el)} din</b> · Required = run-rate × <b>${fmt(days)}</b> din · <b>With stock</b> = Required − stock · <b>W/o stock</b> = Required · Cover = stock ÷ run-rate</p>
-      <div class="table-wrap"><table class="tbl compact"><thead><tr><th>Tag</th><th class="num">${esc(monthLabel(m.last) || 'Last month')}</th><th class="num">${esc(monthLabel(m.cur) || 'This month')}</th><th class="num">Run-rate / day</th><th class="num">× ${fmt(days)} din</th><th class="num">Stock</th><th class="num">With stock dispatch</th><th class="num">W/o stock dispatch</th><th class="num">Cover</th></tr></thead><tbody>${row('VC4', c.vc4)}${row('Commercial', c.comm)}</tbody><tfoot>${row('Total', c.total, true).replace('<tr class="row-strong">', '<tr class="row-total">')}</tfoot></table></div></section>`;
+      <p class="dim small">Run-rate = is month ke issue ÷ <b>(aaj − 1) = ${fmt(el)} din</b> · Required = run-rate × <b>${fmt(days)}</b> din · <b>After stock</b> = Required − stock · <b>Without subtracting stock</b> = full Required · Cover = stock ÷ run-rate</p>
+      <div class="table-wrap"><table class="tbl compact"><thead><tr><th>Tag</th><th class="num">${esc(monthLabel(m.last) || 'Last month')}</th><th class="num">${esc(monthLabel(m.cur) || 'This month')}</th><th class="num">Run-rate / day</th><th class="num">× ${fmt(days)} din</th><th class="num">Stock</th><th class="num">With stock dispatch · after stock</th><th class="num">W/o stock dispatch · no stock deduction</th><th class="num">Cover</th></tr></thead><tbody>${row('VC4', c.vc4)}${row('Commercial', c.comm)}</tbody><tfoot>${row('Total', c.total, true).replace('<tr class="row-strong">', '<tr class="row-total">')}</tfoot></table></div></section>`;
   }
 
   function chartsHtml(pr) {

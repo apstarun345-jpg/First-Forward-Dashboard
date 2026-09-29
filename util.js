@@ -126,13 +126,15 @@ window.FF = window.FF || {};
     const days = suggestDays();
     return { days, mode: suggestMode(), net: suggestNet(avg, stock, days), gross: suggestGross(avg, days) };
   }
-  /** Inline table-cell HTML — mode ke hisaab se net / gross / dono. */
+  /** Inline dispatch quantities — gross is explicitly labelled and visually prominent. */
   function sugCell(net, gross, chipClass) {
     const mode = suggestMode();
-    const chip = (n) => `<b class="sug-chip${chipClass ? ` ${chipClass}` : ''}">${fmt(n)}</b>`;
-    if (mode === 'net') return chip(net);
-    if (mode === 'gross') return chip(gross);
-    return `${chip(net)}<span class="sug-wo" title="Bina stock ghataye — run-rate × din">w/o stock <b>${fmt(gross)}</b></span>`;
+    const chip = (n, cls) => `<b class="sug-chip${cls ? ` ${cls}` : ''}${chipClass ? ` ${chipClass}` : ''}">${fmt(n)}</b>`;
+    const grossBlock = `<span class="sug-result gross" title="Run-rate × target days; stock is not subtracted"><small>Without subtracting stock</small>${chip(gross, 'wo')}</span>`;
+    const netBlock = `<span class="sug-result net" title="Required quantity after subtracting stock"><small>After stock</small>${chip(net)}</span>`;
+    if (mode === 'net') return netBlock;
+    if (mode === 'gross') return grossBlock;
+    return `<span class="sug-pair">${netBlock}${grossBlock}</span>`;
   }
   /** Compact inline text (suggestions / kundli ke liye) — "net · w/o gross". */
   function sugText(net, gross) {

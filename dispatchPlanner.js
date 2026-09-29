@@ -21,13 +21,16 @@ FF.pages = FF.pages || {};
   const safe = async (fn) => { try { return await fn(); } catch { return null; } };
 
   const PRIO_RANK = { High: 0, Medium: 1, Low: 2 };
+  const KNOWN_PRIORITIES = new Set(['High', 'Medium', 'Low']);
+  // Normalize only the sheet's recognizable priority wording; keep every other source value intact.
   const prioOf = (t) => {
-    const s = clean(t).toLowerCase();
+    const raw = clean(t);
+    const s = raw.toLowerCase();
     if (/high|urgent|critical/.test(s)) return 'High';
     if (/medium|slight/.test(s)) return 'Medium';
-    return 'Low';
+    if (/\blow\b/.test(s)) return 'Low';
+    return raw;
   };
-  const worstPrio = (list) => (list.some((r) => r.priority === 'High') ? 'High' : list.some((r) => r.priority === 'Medium') ? 'Medium' : 'Low');
   const BASIS = { total: 'All tags', vc4: 'VC4', comm: 'Commercial' };
   const CH = { ff: { label: 'First Forward', short: 'FF', icon: '🟦' }, gv: { label: 'GV Partner', short: 'GV', icon: '🟩' } };
 
@@ -59,7 +62,7 @@ FF.pages = FF.pages || {};
       out.push({
         kind: 'agent', ch: 'ff', name: clean(a.name || a.agentId), id: clean(a.agentId || a.id),
         tl: direct ? '' : clean(a.tlName), tlId: clean(a.tlId), direct,
-        directLabel: direct ? FF.config.directLabel(a, 'ff') : '', priority: prioOf(a.priority || a.agentPriority),
+        directLabel: direct ? FF.config.directLabel(a, 'ff') : '', priority: prioOf(a.agentPriority || a.priority),
         status: clean(a.agentStatus),
         cur: trio(a.curVc4, a.curNvc4, a.curTotal), last: trio(a.lastVc4, a.lastNvc4, a.lastTotal), stock: trio(a.stockVc4, a.stockNvc4, a.stockTotal),
         tlStock: a.tlStockTotal != null || a.tlStockVc4 != null ? trio(a.tlStockVc4, a.tlStockNvc4, a.tlStockTotal) : null,
@@ -99,10 +102,11 @@ FF.pages = FF.pages || {};
       const cur = sumTrio(list, 'cur'), last = sumTrio(list, 'last'), agentStock = sumTrio(list, 'stock');
       const src = list.find((a) => a.tlStock);
       const stock = !g.direct && src ? src.tlStock : agentStock;          // TL stock: sheet ki value, warna agents ka jod (profile drawer jaisa)
-      const sheetPrio = !g.direct && list.find((a) => a.tlPriority) ? prioOf(list.find((a) => a.tlPriority).tlPriority) : '';
+      const sourceTlPrios = !g.direct ? U.uniq(list.map((a) => clean(a.tlPriority)).filter(Boolean)) : [];
+      const sheetPrio = sourceTlPrios.length === 1 ? prioOf(sourceTlPrios[0]) : sourceTlPrios.map(prioOf).join(' / ');
       out.push({
         kind: 'tl', ch: g.ch, name: g.name, id: (list.find((a) => a.tlId) || {}).tlId || '', tl: g.direct ? '' : g.name, direct: g.direct,
-        directLabel: g.direct ? g.name : '', priority: sheetPrio || worstPrio(list), status: '', agents: list.length, members: list,
+        directLabel: g.direct ? g.name : '', priority: sheetPrio, status: '', agents: list.length, members: list,
         cur, last, stock, tlStock: null
       });
     });
@@ -113,7 +117,7 @@ FF.pages = FF.pages || {};
   /** Row + calc (selected tag basis). */
   function withCalc(r, basis) {
     const c = U.dispatchCalc({ cur: r.cur[basis], last: r.last[basis], stock: r.stock[basis] });
-    const tagged = r.direct && r.priority !== 'Low';
+    const tagged = r.direct && (r.priority === 'High' || r.priority === 'Medium');
     let action;
     if (r.direct) action = tagged ? { t: '🏷️ Tags chahiye', cls: 'violet' } : { t: 'No dispatch', cls: 'gray' };
     else if (c.net > 0) action = { t: '🚚 Dispatch', cls: c.cover != null && c.cover < 7 ? 'red' : 'amber' };
@@ -125,7 +129,7 @@ FF.pages = FF.pages || {};
   const DIMS = {
     ch: (r, v) => v === 'all' || r.ch === v,
     type: (r, v) => v === 'all' || (v === 'direct' ? r.direct : !r.direct),
-    prio: (r, v) => v === 'all' || r.priority === v,
+    prio: (r, v) => v === 'all' || (v === 'other' ? !KNOWN_PRIORITIES.has(r.priority) : r.priority === v),
     need: (r, v) => v === 'all' || (v === 'need' ? !r.direct && r.net > 0 : v === 'low' ? r.cover != null && r.cover < 7 : v === 'zero' ? r.stockV <= 0 : true),
     tl: (r, v) => !v || (r.kind === 'tl' ? norm(r.name) === norm(v) : norm(r.tl) === norm(v)),
     q: (r, v) => { const q = clean(v).toLowerCase(); return !q || [r.name, r.id, r.tl, r.directLabel, r.ch === 'gv' ? 'gv' : 'ff first forward', r.priority].join(' ').toLowerCase().includes(q); }
@@ -160,7 +164,11 @@ FF.pages = FF.pages || {};
   }
 
   // ---- small html helpers -------------------------------------------------------------------------------
-  const prioBadge = (p) => `<span class="badge ${p === 'High' ? 'red' : p === 'Medium' ? 'amber' : 'green'}">${esc(p)}</span>`;
+  const prioBadge = (p) => {
+    const value = clean(p) || '—';
+    const tone = value === 'High' ? 'red' : value === 'Medium' ? 'amber' : value === 'Low' ? 'green' : 'gray';
+    return `<span class="badge ${tone}" title="Priority from source sheet">${esc(value)}</span>`;
+  };
   const chBadge = (ch) => `<span class="dp2-ch ${ch}">${CH[ch].icon} ${CH[ch].short}</span>`;
   const coverCell = (c) => {
     if (c == null) return '<span class="dim">—</span>';
@@ -243,7 +251,7 @@ FF.pages = FF.pages || {};
     return [
       grp('ch', 'Channel', [['all', '🌐 Both'], ['ff', '🟦 First Forward', 'ff'], ['gv', '🟩 GV Partner', 'gv']]),
       grp('type', 'Type', [['all', '👥 All'], ['managed', '🧑‍💼 TL-managed'], ['direct', '🚫 Direct agents', 'violet']]),
-      grp('prio', 'Priority', [['all', 'All'], ['High', '🔴 High', 'red'], ['Medium', '🟠 Medium', 'amber'], ['Low', '🟢 Low', 'green']]),
+      grp('prio', 'Priority', [['all', 'All'], ['High', '🔴 High', 'red'], ['Medium', '🟠 Medium', 'amber'], ['Low', '🟢 Low', 'green'], ['other', '📄 Other / source', 'gray']]),
       grp('basis', 'Tags', [['total', '🏷️ All tags'], ['vc4', '🚗 VC4'], ['comm', '🚛 Commercial']]),
       grp('need', 'Need', [['all', 'All'], ['need', '🚚 Dispatch chahiye'], ['low', '🚨 Cover < 7 din', 'red'], ['zero', '0 stock']])
     ].join('');
@@ -365,15 +373,97 @@ FF.pages = FF.pages || {};
     if (!['agents', 'tls'].includes(state.view)) state.view = 'agents';
     void legacy;
 
+    const canSchedule = !!(FF.auth && FF.auth.isAdmin && FF.auth.isAdmin());
+    const authSettings = (FF.auth && FF.auth.settings) || {};
+    const savedMail = authSettings.dispatchEmail || {};
+    const mailSections = Array.isArray(savedMail.sections) ? savedMail.sections : ['summary', 'agents'];
+    const mailHour = Number.isInteger(Number(savedMail.hour)) ? Number(savedMail.hour) : 9;
+    const mailWeekday = Number.isInteger(Number(savedMail.weekday)) ? Number(savedMail.weekday) : 1;
+    const mailDay = Number.isInteger(Number(savedMail.day)) ? Number(savedMail.day) : 1;
+    const opt = (value, label, selected) => `<option value="${value}" ${selected === value ? 'selected' : ''}>${label}</option>`;
+    const mailScheduleHtml = canSchedule ? `<section class="card dp-mail-card" id="dp2-mail-card">
+      <div class="card-head"><div><h3>📧 Schedule a dispatch plan email</h3><small class="dim">Choose the data, recipients and delivery time · server par save hota hai</small></div><span class="badge ${savedMail.enabled ? 'green' : 'gray'}">${savedMail.enabled ? 'SCHEDULE ON' : 'SCHEDULE OFF'}</span></div>
+      <div class="dp-mail-body">
+        <div class="dp-mail-grid">
+          <label class="fld dp-mail-recipients"><span>Recipients <small>(comma / semicolon separated)</small></span><input class="input" id="dp2-email-to" type="text" value="${esc(savedMail.recipients || authSettings.email?.to || '')}" maxlength="1200" placeholder="manager@example.com, ops@example.com"></label>
+          <label class="fld"><span>Delivery</span><select class="select" id="dp2-email-kind">${opt('daily', 'Every day', savedMail.kind || 'daily')}${opt('weekly', 'Weekly', savedMail.kind || 'daily')}${opt('monthly', 'Monthly', savedMail.kind || 'daily')}</select></label>
+          <label class="fld"><span>Hour (IST)</span><input class="input" id="dp2-email-hour" type="number" min="0" max="23" value="${mailHour}"></label>
+          <label class="fld dp-mail-weekday" data-dp-mail-weekday ${savedMail.kind === 'weekly' ? '' : 'hidden'}><span>Weekday</span><select class="select" id="dp2-email-weekday">${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((d, i) => opt(String(i), d, String(mailWeekday))).join('')}</select></label>
+          <label class="fld dp-mail-monthday" data-dp-mail-monthday ${savedMail.kind === 'monthly' ? '' : 'hidden'}><span>Day of month</span><select class="select" id="dp2-email-day">${Array.from({ length: 28 }, (_, i) => opt(String(i + 1), `${i + 1}`, String(mailDay))).join('')}</select></label>
+          <label class="fld"><span>Channel</span><select class="select" id="dp2-email-channel">${opt('all', 'First Forward + GV', savedMail.channel || 'all')}${opt('ff', 'First Forward only', savedMail.channel || 'all')}${opt('gv', 'GV Partner only', savedMail.channel || 'all')}</select></label>
+          <label class="fld"><span>Tag basis</span><select class="select" id="dp2-email-basis">${opt('total', 'All tags', savedMail.basis || 'total')}${opt('vc4', 'VC4', savedMail.basis || 'total')}${opt('comm', 'Commercial', savedMail.basis || 'total')}</select></label>
+          <label class="fld"><span>Priority filter</span><select class="select" id="dp2-email-priority">${opt('all', 'All priorities', savedMail.priority || 'all')}${opt('High', 'High', savedMail.priority || 'all')}${opt('Medium', 'Medium', savedMail.priority || 'all')}${opt('Low', 'Low', savedMail.priority || 'all')}${opt('other', 'Other / source value', savedMail.priority || 'all')}</select></label>
+          <label class="fld"><span>Maximum rows per CSV</span><select class="select" id="dp2-email-rows">${[50, 100, 250, 500].map((n) => opt(String(n), `${n} rows`, String(savedMail.maxRows || 250))).join('')}</select></label>
+        </div>
+        <div class="dp-mail-sections"><b>Data to send</b><label class="check"><input type="checkbox" data-dp-mail-section="summary" ${mailSections.includes('summary') ? 'checked' : ''}> Summary</label><label class="check"><input type="checkbox" data-dp-mail-section="agents" ${mailSections.includes('agents') ? 'checked' : ''}> Agent-wise CSV</label><label class="check"><input type="checkbox" data-dp-mail-section="tls" ${mailSections.includes('tls') ? 'checked' : ''}> TL-wise CSV</label></div>
+        <div class="dp-mail-actions"><label class="check dp-mail-enable"><input type="checkbox" id="dp2-email-enabled" ${savedMail.enabled === true ? 'checked' : ''}> Enable recurring email</label><button class="btn primary" id="dp2-email-save">💾 Save schedule</button><button class="btn" id="dp2-email-send">📨 Send this selection now</button><a class="btn" href="#/settings?tab=features">⚙️ Email provider settings</a></div>
+        <p class="dp-mail-note">Uses the existing dashboard email provider (SMTP / Apps Script / Resend / Brevo). Schedule runs on the server, even if this page is closed. Source-sheet priorities are preserved.</p><div class="dim small" id="dp2-email-status" aria-live="polite"></div>
+      </div>
+    </section>` : `<section class="card dp-mail-card" id="dp2-mail-card"><div class="card-head"><div><h3>📧 Dispatch plan email</h3><small class="dim">Admin can select report data, recipients and a recurring IST schedule.</small></div></div><p class="dp-mail-note">Email scheduling is managed by an administrator · existing provider settings are in Settings → Features.</p></section>`;
+
     root.innerHTML = `<div class="dp2">
       <section class="dp2-hero">
         <div class="dp2-hero-main"><span class="dp2-hero-ico">🚚</span><div><h1>Dispatch Planner</h1><p>GV + First Forward · agent &amp; TL-wise · ek formula, har jagah</p></div></div>
         <div class="dp2-formula" id="dp2-formula"></div>
-        <div class="dp2-hero-actions"><button class="btn small" id="dp2-csv">⬇ CSV</button><button class="btn small" id="dp2-xlsx">⬇ Excel</button><button class="btn small" id="dp2-wa">📲 WhatsApp</button><button class="btn small primary" data-action="refresh">↻ Refresh</button></div>
+        <div class="dp2-hero-actions">${canSchedule ? '<button class="btn small" id="dp2-mail-jump">📧 Mail schedule</button>' : ''}<button class="btn small" id="dp2-csv">⬇ CSV</button><button class="btn small" id="dp2-xlsx">⬇ Excel</button><button class="btn small" id="dp2-wa">📲 WhatsApp</button><button class="btn small primary" data-action="refresh">↻ Refresh</button></div>
       </section>
+      ${mailScheduleHtml}
       <div id="dp2-body">${U.spinner('GV + FF REPORT load ho raha hai…')}</div></div>`;
     await loadSources();
     if (!root.isConnected) return null;
+
+    const mailJump = U.$('#dp2-mail-jump', root);
+    if (mailJump) mailJump.addEventListener('click', () => U.$('#dp2-mail-card', root)?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+    if (canSchedule) {
+      const kindEl = U.$('#dp2-email-kind', root);
+      const updateMailFrequency = () => {
+        const kind = kindEl.value;
+        const weekday = U.$('[data-dp-mail-weekday]', root), monthday = U.$('[data-dp-mail-monthday]', root);
+        if (weekday) weekday.hidden = kind !== 'weekly';
+        if (monthday) monthday.hidden = kind !== 'monthly';
+      };
+      kindEl.addEventListener('change', updateMailFrequency);
+      updateMailFrequency();
+      const readMailForm = () => ({
+        enabled: U.$('#dp2-email-enabled', root).checked,
+        recipients: U.$('#dp2-email-to', root).value.trim(),
+        sections: U.$$('[data-dp-mail-section]:checked', root).map((el) => el.dataset.dpMailSection),
+        channel: U.$('#dp2-email-channel', root).value,
+        basis: U.$('#dp2-email-basis', root).value,
+        priority: U.$('#dp2-email-priority', root).value,
+        maxRows: Number(U.$('#dp2-email-rows', root).value),
+        kind: kindEl.value,
+        hour: Number(U.$('#dp2-email-hour', root).value),
+        weekday: Number(U.$('#dp2-email-weekday', root).value),
+        day: Number(U.$('#dp2-email-day', root).value)
+      });
+      const statusEl = U.$('#dp2-email-status', root);
+      const saveBtn = U.$('#dp2-email-save', root);
+      saveBtn.addEventListener('click', async () => {
+        U.setButtonBusy(saveBtn, true, 'Saving…');
+        try {
+          const out = await FF.auth.api('/api/settings', 'PUT', { settings: { dispatchEmail: readMailForm() } });
+          if (out.settings) FF.auth.applySettings(out.settings);
+          const enabled = U.$('#dp2-email-enabled', root).checked;
+          const badgeEl = U.$('.card-head .badge', U.$('#dp2-mail-card', root));
+          if (badgeEl) { badgeEl.className = `badge ${enabled ? 'green' : 'gray'}`; badgeEl.textContent = enabled ? 'SCHEDULE ON' : 'SCHEDULE OFF'; }
+          if (statusEl) statusEl.textContent = enabled ? 'Schedule saved · recurring delivery is ON.' : 'Schedule saved · recurring delivery is OFF.';
+          U.toast('📧 Dispatch email schedule saved ✓', 'ok');
+        } catch (err) { if (statusEl) statusEl.textContent = err.message; U.toast(err.message, 'err'); }
+        finally { U.setButtonBusy(saveBtn, false); }
+      });
+      const sendBtn = U.$('#dp2-email-send', root);
+      sendBtn.addEventListener('click', async () => {
+        U.setButtonBusy(sendBtn, true, 'Sending…');
+        try {
+          const out = await FF.auth.api('/api/dispatch-email/test', 'POST', { schedule: readMailForm() });
+          const detail = out.detail || {};
+          if (statusEl) statusEl.textContent = `Sent to ${detail.recipients || 0} recipient(s) · ${detail.agents || 0} agent(s) · ${detail.provider || 'email provider'}.`;
+          U.toast(`📨 Dispatch plan email sent · ${detail.provider || 'provider'} ✓`, 'ok');
+        } catch (err) { if (statusEl) statusEl.textContent = err.message; U.toast(err.message, 'err'); }
+        finally { U.setButtonBusy(sendBtn, false); }
+      });
+    }
 
     const agents = collectAgents();
     const allTls = collectTls(agents);

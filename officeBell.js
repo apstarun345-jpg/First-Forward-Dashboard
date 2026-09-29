@@ -43,29 +43,32 @@ window.FF = window.FF || {};
   }
 
   // ---- 🎙️ voice announce ------------------------------------------------------------------------
-  function announceText(movers, totalNew) {
+  function announceText(movers, totalNew, sourceDeltas) {
     const hi = !(FF.assistant && FF.assistant.getLang && FF.assistant.getLang() === 'en');
-    const top = [...movers].sort((a, b) => b.n - a.n);
-    const firstName = (m) => String(m.agent || '').split(/\s+/)[0] || 'Ek agent';
+    const top = [...(movers || [])].sort((a, b) => b.n - a.n);
+    const firstName = (m) => String((m && m.agent) || '').split(/\s+/)[0] || 'Ek agent';
+    const sourceName = (ch) => ch === 'GV' ? 'GV Partner' : 'First Forward';
     if (totalNew >= 40) {
-      return hi ? `Zabardast! Abhi ${totalNew} naye tags aa gaye — sab kaam par lage hain!`
+      if (sourceDeltas && sourceDeltas.ff > 0 && sourceDeltas.gv > 0) {
+        return hi ? `Zabardast! ${totalNew} naye tags — First Forward ${U.fmt(sourceDeltas.ff)}, GV Partner ${U.fmt(sourceDeltas.gv)}.`
+          : `Amazing! ${totalNew} new tags — First Forward ${U.fmt(sourceDeltas.ff)}, GV Partner ${U.fmt(sourceDeltas.gv)}.`;
+      }
+      return hi ? `Zabardast! ${totalNew} naye tags aa gaye — sab kaam par lage hain!`
         : `Amazing! ${totalNew} new tags just came in — everyone is firing!`;
     }
+    if (!top.length) return hi ? `${totalNew} naye tags update hue.` : `${totalNew} new tags were updated.`;
     if (top.length === 1) {
       const m = top[0];
-      return hi ? `${firstName(m)} ne ${m.n} ${m.ch === 'GV' ? 'GV ' : ''}naye tags issue kiye.`
-        : `${firstName(m)} issued ${m.n} new ${m.ch === 'GV' ? 'GV ' : ''}tags.`;
+      return hi ? `${firstName(m)} ne ${m.n} ${sourceName(m.ch)} ke naye tags issue kiye.`
+        : `${firstName(m)} issued ${m.n} new ${sourceName(m.ch)} tags.`;
     }
-    const second = top[1];
+    const first = top[0], second = top[1];
     const rest = top.length - 2, restN = top.slice(2).reduce((s, m) => s + m.n, 0);
-    if (hi) {
-      let t = `${firstName(top[0])} ne ${top[0].n}, ${firstName(second)} ne ${second.n} naye tags issue kiye.`;
-      if (rest > 0) t += ` Aur ${rest} aur agents ne mil kar ${restN} tags.`;
-      return t;
-    }
-    let t = `${firstName(top[0])} issued ${top[0].n}, ${firstName(second)} issued ${second.n} new tags.`;
-    if (rest > 0) t += ` Plus ${rest} more agents added ${restN}.`;
-    return t;
+    let text = hi
+      ? `${sourceName(first.ch)} me ${firstName(first)} ne ${first.n}, ${sourceName(second.ch)} me ${firstName(second)} ne ${second.n} naye tags issue kiye.`
+      : `${sourceName(first.ch)}: ${firstName(first)} issued ${first.n}; ${sourceName(second.ch)}: ${firstName(second)} issued ${second.n} new tags.`;
+    if (rest > 0) text += hi ? ` Aur ${rest} agents ne mil kar ${restN} tags.` : ` Plus ${rest} more agents added ${rest}.`;
+    return text;
   }
   function speakAnnounce(text) {
     if (FF.assistant && typeof FF.assistant.speak === 'function') {
@@ -97,34 +100,49 @@ window.FF = window.FF || {};
   }
 
   // ---- live agent-wise queries ------------------------------------------------------------------
-  /** { totals: {ff, gv}, agents: Map('FF|name' → n) } */
+  /** { ff, gv, agents: Map('FF|name' → count), ok: { ff, gv } }. Query rows are arrays from FF.data. */
   async function countsToday() {
     const today = U.dateKey(new Date());
     const D = FF.data;
-    const out = { ff: 0, gv: 0, agents: new Map() };
-    const read = (t, ch) => {
-      let total = 0;
-      for (const r of (t.rows || [])) {
-        const name = r.c && r.c[0] && r.c[0].v ? String(r.c[0].v).trim() : '';
-        const n = r.c && r.c[1] ? (Number(r.c[1].v) || 0) : 0;
-        if (!name || n <= 0) continue;
-        out.agents.set(`${ch}|${name}`, n);
-        total += n;
-      }
-      return total;
+    const out = { ff: 0, gv: 0, agents: new Map(), ok: { ff: false, gv: false } };
+    const cellText = (row, index) => U.clean(D.cellText ? D.cellText(row[index]) : (row[index] && row[index].v));
+    const cellNumber = (row, index) => Number(D.cellNumber ? D.cellNumber(row[index]) : row[index] && row[index].v) || 0;
+    const add = (ch, name, n) => {
+      if (!name || n <= 0) return;
+      const key = `${ch}|${name}`;
+      out.agents.set(key, (out.agents.get(key) || 0) + n);
+      out[ch.toLowerCase()] += n;
     };
-    try {
-      const e = FF.config.eir;
-      const t1 = await D.query(e.sheet, `select ${e.agentName}, count(${e.tagId}) where ${e.date} = date '${today}' group by ${e.agentName}`, { timeoutMs: 20000, fresh: true });
-      out.ff = read(t1, 'FF');
-    } catch { /* FF query fail — silent */ }
-    try {
-      const m = FF.config.gv.master;
-      if (FF.config.gvSheetId && m) {
-        const t2 = await D.query('GV Master', `select ${m.agentName}, count(${m.uniqueId}) where ${m.date} = date '${today}' group by ${m.agentName}`, { timeoutMs: 20000, fresh: true });
-        out.gv = read(t2, 'GV');
+    const e = FF.config.eir;
+    const m = FF.config.gv && FF.config.gv.master;
+    const jobs = [
+      D.query(e.sheet, `select ${e.agentName}, ${e.gvName}, ${e.masterId}, ${e.tlName}, count(${e.tagId}) where ${e.date} = date '${today}' group by ${e.agentName}, ${e.gvName}, ${e.masterId}, ${e.tlName}`, { timeoutMs: 20000, fresh: true }),
+      FF.config.gvSheetId && m
+        ? D.query('GV Master', `select ${m.agentName}, ${m.uniqueId}, count(${m.uniqueId}) where ${m.date} = date '${today}' group by ${m.agentName}, ${m.uniqueId}`, { timeoutMs: 20000, fresh: true })
+        : Promise.reject(new Error('GV Master is not configured'))
+    ];
+    const [eirResult, gvResult] = await Promise.allSettled(jobs);
+    if (eirResult.status === 'fulfilled') {
+      const table = eirResult.value;
+      for (const row of (table.rows || [])) {
+        const name = cellText(row, 0) || cellText(row, 1) || cellText(row, 2);
+        const masterId = cellText(row, 2), tlName = cellText(row, 3), n = cellNumber(row, 4);
+        const isGv = FF.model && FF.model.channelOf
+          ? FF.model.channelOf(masterId, tlName) === 'GV Partner'
+          : String(masterId).replace(/\.0+$/, '') === String(e.gvMasterId || '5845036') || U.clean(tlName).toLowerCase() === U.clean(e.gvChannelTl || 'ApnaPayment Pvt. Ltd.').toLowerCase();
+        // EIR contains both channels in some deployments. GV is announced from GV Master only;
+        // otherwise each new GV tag would be announced twice and falsely counted as FF.
+        if (!isGv) add('FF', name, n);
       }
-    } catch { /* GV off — silent */ }
+      out.ok.ff = true;
+    }
+    if (gvResult.status === 'fulfilled') {
+      for (const row of (gvResult.value.rows || [])) {
+        const name = cellText(row, 0) || cellText(row, 1);
+        add('GV', name, cellNumber(row, 2));
+      }
+      out.ok.gv = true;
+    }
     return out;
   }
 
@@ -135,16 +153,30 @@ window.FF = window.FF || {};
     try { c = await countsToday(); } catch { st.fails++; return; }
     st.fails = 0;
     if (!st.last) { st.last = c; return; } // pehla poll = baseline (chup-chaap)
-    const dFf = c.ff - st.last.ff, dGv = c.gv - st.last.gv;
-    // agent-wise movers — kis agent ke naye tags aaye
-    const movers = [];
-    if (c.agents.size) {
-      c.agents.forEach((n, key) => {
-        const prev = st.last.agents.get(key) || 0;
-        if (n > prev) { const [ch, agent] = key.split('|'); movers.push({ ch, agent, n: n - prev }); }
-      });
+    const previous = st.last;
+    const current = { ...c, agents: new Map(c.agents), ok: { ...c.ok } };
+    // Query failure ko zero mat samjho: preserve that source's last good reading so recovery doesn't
+    // erase its baseline or cause a duplicate burst on the following poll.
+    for (const ch of ['FF', 'GV']) {
+      const key = ch.toLowerCase();
+      if (!current.ok[key] && previous.ok[key]) {
+        current[key] = previous[key]; current.ok[key] = true;
+        for (const [agentKey, n] of previous.agents) if (agentKey.startsWith(`${ch}|`)) current.agents.set(agentKey, n);
+      }
     }
-    st.last = c;
+    const dFf = current.ok.ff && previous.ok.ff ? current.ff - previous.ff : 0;
+    const dGv = current.ok.gv && previous.ok.gv ? current.gv - previous.gv : 0;
+    // Agent-wise movers — channel ko safely split karo (agent name me bhi '|' ho sakta hai).
+    const movers = [];
+    current.agents.forEach((n, key) => {
+      const split = key.indexOf('|');
+      if (split < 0) return;
+      const ch = key.slice(0, split), channel = ch.toLowerCase();
+      if (!current.ok[channel] || !previous.ok[channel]) return;
+      const agent = key.slice(split + 1), old = previous.agents.get(key) || 0;
+      if (n > old) movers.push({ ch, agent, n: n - old });
+    });
+    st.last = current;
     const totalNew = Math.max(0, dFf) + Math.max(0, dGv);
     if (totalNew <= 0) return;
     const parts = [];
@@ -152,7 +184,7 @@ window.FF = window.FF || {};
     if (dGv > 0) parts.push(`+${U.fmt(dGv)} 🏷️ GV`);
     st.pings += 1;
     floatChip(parts.join(' · '), dFf > 0 && dGv > 0 ? 'both' : dFf > 0 ? 'ff' : 'gv');
-    if (voiceOn()) speakAnnounce(announceText(movers, totalNew));
+    if (voiceOn()) speakAnnounce(announceText(movers, totalNew, { ff: Math.max(0, dFf), gv: Math.max(0, dGv) }));
     else ting(parts.length > 1 ? totalNew + 5 : totalNew);
     updateBtn();
   }
@@ -201,5 +233,5 @@ window.FF = window.FF || {};
     setTimeout(poll, 4000); // baseline jaldi le lo
   }
 
-  FF.officeBell = { mount, announceText, get on() { return on(); }, get voiceOn() { return voiceOn(); }, get pings() { return st.pings; } };
+  FF.officeBell = { mount, announceText, countsToday, get on() { return on(); }, get voiceOn() { return voiceOn(); }, get pings() { return st.pings; } };
 })(window.FF);
