@@ -10,11 +10,10 @@ import fs from 'node:fs/promises';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import net from 'node:net';
-import tls from 'node:tls';
 import { fileURLToPath } from 'node:url';
 import { sheetsStoreFromEnv } from './sheets-storage.js';
 import { appsScriptStoreFromEnv, AppsScriptStore } from './apps-script-storage.js';
+import { sendMail, mailConfigured, diagnoseMail, mailHint, availableProviders, resolveProviders, resetMailMemo, MAIL_PROVIDERS } from './mailer.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 8080);
@@ -43,7 +42,7 @@ const MIME = {
   '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.ico': 'image/x-icon',
   '.txt': 'text/plain; charset=utf-8', '.md': 'text/plain; charset=utf-8'
 };
-const BLOCKED_FILES = new Set(['server.js', 'sheets-storage.js', 'apps-script-storage.js', 'DEPLOYMENT.md', 'SHEETS_STORAGE.md', 'STORAGE_SETUP.md', 'package.json', 'package-lock.json', 'render.yaml', 'README.md', '.env']);
+const BLOCKED_FILES = new Set(['server.js', 'sheets-storage.js', 'apps-script-storage.js', 'mailer.js', 'DEPLOYMENT.md', 'SHEETS_STORAGE.md', 'STORAGE_SETUP.md', 'package.json', 'package-lock.json', 'render.yaml', 'README.md', '.env']);
 const BLOCKED_DIRS = new Set(['data', 'dev', 'node_modules', '.git', 'google-apps-script']);
 
 // ---------------------------------------------------------------------------------------------
@@ -77,6 +76,7 @@ export const PAGE_PERMISSIONS = [
   { key: 'gvStockReport', label: 'GV Partner · GV Stock Report (GV REPORT-wise)', group: 'GV Partner' },
   { key: 'gvCommission', label: 'GV Partner · Commission Intelligence', group: 'GV Partner' },
   { key: 'directAgents', label: 'Cross-channel · Direct Agents & TLs (FF APS + GV no-TL rule)', group: 'Cross Channel' },
+  { key: 'newAgents', label: 'Cross-channel · New Agents & TL Changes (FF + GV)', group: 'Cross Channel' },
   { key: 'dualChannel', label: 'Cross-channel · Identity & combined analysis', group: 'Cross Channel' },
   { key: 'masterStock', label: 'Cross-channel · Master Stock (barcode/agent/TL/GV search)', group: 'Cross Channel' },
   { key: 'fastagChampions', label: 'Cross-channel · FASTag Champions (top agents/TLs)', group: 'Cross Channel' },
@@ -121,7 +121,7 @@ const allPermKeysNow = () => allPermKeys(db.settings);
 // Back-compat export (some tooling imported PERMISSIONS).
 export const PERMISSIONS = permissionsFor({ tabs: DEFAULT_TABS });
 const DEFAULT_USER_PERMS = ['home', 'executive', 'forecast', 'dataQuality', 'savedViews', 'reportStudio', 'followups', 'tagIssued', 'rangeReport', 'targets', 'dashboard', 'trend', 'stock', 'stockReport', 'performance', 'ffCommission', 'gvDashboard', 'gvTrend', 'gvStock', 'gvStockReport', 'gvPerformance', 'gvCommission', 'dualChannel', 'masterStock', 'compare', 'tv', 'teamMap',
-  'sheet:StockDataa', 'sheet:REPORT', 'sheet:GV Master', 'sheet:Tag Assignment', 'sheet:GV REPORT', 'charts', 'export', 'dispatchPlan', 'tlScorecard', 'voiceAssistant', 'arena', 'fame', 'warRoom', 'activity', 'network', 'radar', 'reportCards', 'directAgents'];
+  'sheet:StockDataa', 'sheet:REPORT', 'sheet:GV Master', 'sheet:Tag Assignment', 'sheet:GV REPORT', 'charts', 'export', 'dispatchPlan', 'tlScorecard', 'voiceAssistant', 'arena', 'fame', 'warRoom', 'activity', 'network', 'radar', 'reportCards', 'directAgents', 'newAgents'];
 
 // Admin-controlled audience for automated notifications. `users` means all approved non-admin
 // users who have notification access; each user's own master/type preferences still apply.
@@ -223,7 +223,7 @@ const DEFAULT_SETTINGS = {
   notificationRoutes: { ...DEFAULT_NOTIFICATION_ROUTES }, // 🔔 automated event → admin/users/both/off
   personalLinks: [],     // 🔗 { id, kind, name, token, enabled } — sirf admin (settingsFor non-admin ko strip karta hai)
   schedules: [],         // 🗓 { id, title, text, kind: daily|weekly|monthly, hour, weekday, day, target, enabled }
-  email: { host: '', port: 587, secure: false, user: '', pass: '', from: '', to: '' },
+  email: { provider: 'auto', host: '', port: 587, secure: false, user: '', pass: '', from: '', to: '', resendKey: '', brevoKey: '' }, // provider: auto | smtp | appsscript | resend | brevo (mailer.js)
   lastBackupAt: null,
   cacheSeconds: DEFAULT_CACHE_SECONDS,
   pageSize: 50,
@@ -328,7 +328,7 @@ function cleanColumnMapping(raw, key) {
 function settingsFor(u) {
   if (u && u.role === 'admin') return db.settings;
   const s = { ...db.settings };
-  if (s.email) s.email = { host: s.email.host || '', port: s.email.port || '', secure: !!s.email.secure, user: '', pass: '', from: s.email.from || '', to: s.email.to || '' };
+  if (s.email) s.email = { provider: s.email.provider || 'auto', host: s.email.host || '', port: s.email.port || '', secure: !!s.email.secure, user: '', pass: '', from: s.email.from || '', to: s.email.to || '', resendKey: '', brevoKey: '' };
   delete s.personalLinks; // 🔗 secret tokens sirf admin ko
   delete s.schedules;     // 🗓 admin ke custom reminders
   return s;
@@ -337,118 +337,7 @@ function settingsFor(u) {
 let SW_VERSION = '';
 try { SW_VERSION = (readFileSync(path.join(__dirname, 'sw.js'), 'utf8').match(/CACHE_NAME\s*=\s*['"]([^'"]+)['"]/) || [])[1] || ''; } catch { /* dev mode */ }
 
-/**
- * 📧 Minimal SMTP client (koi naya dependency nahi): EHLO → optional STARTTLS → optional AUTH LOGIN
- * → RCPT → DATA. cfg = { host, port, secure, user, pass, from, to } (Settings → 🎛 Features).
- * self-signed SMTP certs ke liye rejectUnauthorized false (internal mail relay chalte rahe).
- */
-function smtpSend(cfg, subject, text, opts = {}) {
-  return new Promise((resolve, reject) => {
-    const host = String(cfg.host || '').trim();
-    const port = Number(cfg.port) || 587;
-    const directTls = cfg.secure === true || port === 465;
-    const fromHeader = String(cfg.from || cfg.user || '').trim();
-    const rawRecipients = String(cfg.to || '').split(/[,;]/).map((s) => s.trim()).filter(Boolean);
-    const mailbox = (raw) => {
-      const clean = String(raw || '').replace(/[\r\n]/g, '').trim();
-      const angled = clean.match(/<([^<>]+)>/);
-      return (angled ? angled[1] : clean).trim();
-    };
-    const from = mailbox(fromHeader);
-    const toList = rawRecipients.map(mailbox).filter(Boolean);
-    if (!host) return reject(new Error('SMTP host set nahi hai'));
-    if (!from) return reject(new Error('"From" address set nahi hai'));
-    if (!toList.length) return reject(new Error('"To" address set nahi hai'));
-    if (!/^[^\s<>@]+@[^\s<>@]+$/.test(from)) return reject(new Error('"From" email valid nahi hai'));
-    if (toList.some((x) => !/^[^\s<>@]+@[^\s<>@]+$/.test(x))) return reject(new Error('"To" me ek email valid nahi hai'));
-    let sock = null, buf = '', step = 0, caps = '', done = false, rcptIdx = 0;
-    const timer = setTimeout(() => fail('SMTP timeout (15s)'), 15000);
-    const fail = (m) => { if (done) return; done = true; clearTimeout(timer); try { sock && sock.destroy(); } catch { /* ignore */ } reject(new Error(m)); };
-    const win = () => { if (done) return; done = true; clearTimeout(timer); try { sock && sock.end(); } catch { /* ignore */ } resolve(true); };
-    const w = (l) => sock.write(l + '\r\n');
-    const b64 = (s) => Buffer.from(String(s), 'utf8').toString('base64');
-    function bind(s) {
-      sock = s;
-      if (typeof sock.setEncoding === 'function') sock.setEncoding('utf8');
-      sock.setTimeout && sock.setTimeout(15000, () => fail('SMTP timeout (15s)'));
-      sock.on('error', (e) => fail(`SMTP: ${e.message || e}`));
-      sock.on('data', onData);
-    }
-    function onData(chunk) {
-      buf += chunk;
-      let i;
-      while (!done && (i = buf.search(/\r?\n/)) >= 0) {
-        const line = buf.slice(0, i).replace(/\r$/, '');
-        buf = buf.slice(i + (buf[i] === '\r' ? 2 : 1));
-        if (!line) continue;
-        const code = Number(line.slice(0, 3));
-        if (/^\d{3}-/.test(line)) { caps += line + '\n'; continue; } // multiline 250- caps
-        // DATA ke baad aaya 5xx bhi failure hai; rejected mail ko success kabhi mat dikhao.
-        if (code >= 400) return fail(`SMTP error: ${line}`);
-        handle(line, code);
-      }
-    }
-    function afterEhlo() {
-      if (String(cfg.user || '')) { step = 5; return w('AUTH LOGIN'); }
-      step = 6; return w(`MAIL FROM:<${from}>`);
-    }
-    function handle(line, code) {
-      if (step === 0) { step = 1; return w('EHLO localhost'); }
-      if (step === 1) { // pehla EHLO (plain par)
-        if (!directTls && !sock.authorized && /STARTTLS/i.test(caps)) { step = 2; return w('STARTTLS'); }
-        return afterEhlo();
-      }
-      if (step === 2) { // 220 TLS go — is socket par TLS wrapper lagao
-        const plain = sock;
-        plain.removeAllListeners('data'); plain.removeAllListeners('error'); plain.removeAllListeners('timeout');
-        const s2 = tls.connect({ socket: plain, servername: host, rejectUnauthorized: false }, () => {
-          caps = ''; step = 3; bind(s2); w('EHLO localhost');
-        });
-        s2.on('error', (e) => fail(`TLS: ${e.message || e}`));
-        return;
-      }
-      if (step === 3) return afterEhlo(); // TLS ke baad wapas EHLO
-      if (step === 5) { step = 51; return w(b64(String(cfg.user || ''))); } // 334 username
-      if (step === 51) { step = 52; return w(b64(String(cfg.pass || ''))); } // 334 password
-      if (step === 52) { step = 6; return w(`MAIL FROM:<${from}>`); }        // 235 auth ok
-      if (step === 6) { step = 7; return w(`RCPT TO:<${toList[rcptIdx]}>`); }
-      if (step === 7) {
-        rcptIdx++;
-        if (rcptIdx < toList.length) return w(`RCPT TO:<${toList[rcptIdx]}>`);
-        step = 8; return w('DATA');
-      }
-      if (step === 8) {
-        step = 9;
-        const b64w = (s) => Buffer.from(String(s), 'utf8').toString('base64').replace(/(.{76})/g, '$1\r\n');
-        const safeFromHeader = fromHeader.replace(/[\r\n]/g, '') || from;
-        const subjHdr = `From: ${safeFromHeader}\r\nTo: ${toList.join(', ')}\r\nSubject: =?UTF-8?B?${b64(subject)}?=\r\nMIME-Version: 1.0\r\n`;
-        let mime;
-        if (opts.attachments && opts.attachments.length) {
-          const boundary = `ff-b-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
-          const chunks = [`--${boundary}\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n${b64w(text)}`];
-          for (const a of opts.attachments) {
-            chunks.push(`--${boundary}\r\nContent-Type: text/csv; name="${String(a.name || 'report.csv').replace(/"/g, '')}"\r\nContent-Transfer-Encoding: base64\r\nContent-Disposition: attachment; filename="${String(a.name || 'report.csv').replace(/"/g, '')}"\r\n\r\n${b64w(a.content)}`);
-          }
-          chunks.push(`--${boundary}--\r\n`);
-          mime = `${subjHdr}Content-Type: multipart/mixed; boundary="${boundary}"\r\n\r\n${chunks.join('\r\n')}`;
-        } else if (opts.html) {
-          mime = `${subjHdr}Content-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n${b64w(opts.html)}`;
-        } else {
-          mime = `${subjHdr}Content-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n${b64w(text)}`;
-        }
-        // DATA terminator: last body line ke baad alag line par "." (warna mock/real SMTP kabhi 250 nahi bhejenge)
-        return w(`${mime.replace(/\r?\n+$/, '')}\r\n.\r\n`);
-      }
-      if (step === 9) { w('QUIT'); return win(); }
-      void code;
-    }
-    const conn = directTls
-      ? tls.connect({ host, port, servername: host, rejectUnauthorized: false }, () => { /* greeting aane ka wait */ })
-      : net.connect({ host, port });
-    conn.once('error', (e) => fail(`SMTP connect: ${e.message || e}`));
-    bind(conn);
-  });
-}
+// 📧 Mail transport (SMTP + HTTPS providers) — mailer.js
 
 // ---------------------------------------------------------------------------------------------
 // Passwords, sessions, users
@@ -1447,8 +1336,8 @@ async function maybeDailyDigest(force = false) {
     console.log(`daily digest sent for ${dateKey} (${parts.length} lines)`);
     // 📧 Email digest (admin Features tab me ON + SMTP configured ho to).
     const F = feats(), ecfg = db.settings.email || {};
-    if (F.emailDigest && ecfg.host && ecfg.to) {
-      smtpSend(ecfg, `🌅 Daily digest · ${dLabel(dateKey)}`, parts.join('\n'))
+    if (F.emailDigest && mailConfigured(ecfg) && ecfg.to) {
+      sendMail(ecfg, `🌅 Daily digest · ${dLabel(dateKey)}`, parts.join('\n'))
         .then(() => console.log('digest email sent'))
         .catch((e) => console.warn('digest email:', e.message));
     }
@@ -1713,8 +1602,8 @@ function maybeBackupReminder() {
 // ---- 📬 weekly auto-digest email (Monday) + 📧 roz scheduled report email (HTML + CSV) ----------
 function emailCfgOrThrow(force) {
   const cfg = db.settings.email || {};
-  if (!cfg.host || !cfg.to) {
-    if (force) throw new Error('SMTP host / to set nahi — Settings → 🎛 Features → Email configure karo');
+  if (!mailConfigured(cfg) || !cfg.to) {
+    if (force) throw new Error('Email provider / To set nahi — Settings → 🎛 Features → Email configure karo');
     return null;
   }
   return cfg;
@@ -1777,7 +1666,7 @@ async function sendWeeklyEmail(force = false) {
     '',
     `Dashboard: (is app me kholo)`
   ].filter((l) => l !== '').join('\n');
-  await smtpSend(cfg, subject, text);
+  await sendMail(cfg, subject, text);
   db.notify.watch.weeklyEmailKey = weekKey;
   persist('notify').catch(() => {});
   logAudit(null, 'weekly_email_sent', { actor: 'scheduler', note: `FF ${w.ff} · GV ${w.gv} · total ${w.ff + w.gv}` });
@@ -1815,7 +1704,7 @@ async function sendReportEmail(force = false) {
     </table>
     <p style="color:#64748b;font-size:12px">CSV attach hai — Excel me seedha khul jayega.</p></div>`;
   const text = `Daily report ${dateKey} · MTD FF ${ffMtd} + GV ${gvMtd} · last ${rows.length} din ka CSV attach.\n` + rows.map((r) => `${r.date}: ${r.ff + r.gv}`).join('\n');
-  await smtpSend(cfg, `📊 Daily report · ${dateKey} (MTD ${ffMtd + gvMtd})`, text, { html, attachments: [{ name: `report-${dateKey}.csv`, content: csv }] });
+  await sendMail(cfg, `📊 Daily report · ${dateKey} (MTD ${ffMtd + gvMtd})`, text, { html, attachments: [{ name: `report-${dateKey}.csv`, content: csv }] });
   db.notify.watch.reportEmailDate = dateKey;
   persist('notify').catch(() => {});
   logAudit(null, 'report_email_sent', { actor: 'scheduler', note: `${rows.length} days · MTD ${ffMtd + gvMtd}` });
@@ -2021,7 +1910,7 @@ async function maybeChampionEmail(force = false) {
     const F = feats();
     if (!force && F.championEmail !== true) return null;
     const cfg = db.settings.email || {};
-    if (!cfg.host || !cfg.to) { if (force) throw new Error('SMTP host/to set nahi — Features → Email configure karo'); return null; }
+    if (!mailConfigured(cfg) || !cfg.to) { if (force) throw new Error('Email provider/To set nahi — Features → Email configure karo'); return null; }
     if (!force) {
       const ist = istNow();
       if (ist.getUTCHours() < (Number(F.championHour) || 10)) return null;
@@ -2034,7 +1923,7 @@ async function maybeChampionEmail(force = false) {
     const monthLabel = U_labelYmSafe(month);
     const html = championHtml(monthLabel, list);
     const text = `🏆 ${monthLabel} champions — ` + list.map((c, i) => `${i + 1}. ${c.name} (${c.total})`).join(' · ');
-    await smtpSend(cfg, `🥇 ${monthLabel} Champions · ${db.settings.brand || 'Dashboard'}`, text, { html });
+    await sendMail(cfg, `🥇 ${monthLabel} Champions · ${db.settings.brand || 'Dashboard'}`, text, { html });
     db.notify.watch.championMonth = month;
     persist('notify').catch(() => {});
     recordNotification({
@@ -2220,14 +2109,14 @@ async function maybeRequireOtp(u, loginId, ip) {
     if (feats().otp2fa === false) return null;
     if (!u || !u.email) return null;
     const cfg = db.settings.email || {};
-    if (!cfg.host) return null;
+    if (!mailConfigured(cfg)) return null;
     const knownIps = new Set((Array.isArray(u.loginHistory) ? u.loginHistory : []).map((l) => l && l.ip).filter(Boolean));
     if (!ip || knownIps.size === 0 || knownIps.has(ip)) return null; // pehla login ya known IP → seedha andar
     const code = String(crypto.randomInt(100000, 1000000));
     const ticket = crypto.randomBytes(16).toString('hex');
     otps.set(ticket, { username: u.username, code, exp: Date.now() + 10 * 60e3, tries: 0, ip, loginId });
     if (otps.size > 50) { for (const [k, v] of otps) if (v.exp < Date.now()) otps.delete(k); }
-    await smtpSend({ ...cfg, to: u.email }, `🔐 Login OTP ${code} · ${db.settings.brand || 'Dashboard'}`,
+    await sendMail({ ...cfg, to: u.email }, `🔐 Login OTP ${code} · ${db.settings.brand || 'Dashboard'}`,
       `Aapka login code: ${code}\n\nYe code 10 min ke liye hai. login ID "${loginId}" · IP ${ip}.\nAgar ye aap nahi the to turant password badal do.`);
     logAudit(u, 'otp_sent', { target: loginId, ip, note: 'naye IP par OTP email bheja' });
     return { ticket, hint: `Code ${u.email} par bheja gaya (10 min valid)` };
@@ -2285,7 +2174,7 @@ async function handleApi(req, res, url) {
 
   if (p === '/api/health' && method === 'GET') {
     // pendingSignups sirf admin ko (sidebar badge ke liye) — public health me leak nahi.
-    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.12.0', storage: storageStatus(), push: pushHealth(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length } : {}) });
+    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.14.0', storage: storageStatus(), push: pushHealth(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length } : {}) });
   }
   if (p === '/api/public-config' && method === 'GET') return sendJson(res, 200, publicSettings());
   // App version (sw.js CACHE_NAME) — update-toast ke liye; logged-in se pehle bhi chahiye.
@@ -2432,20 +2321,25 @@ async function handleApi(req, res, url) {
   if (p === '/api/notifications/email/test' && method === 'POST') {
     requireAdmin(user);
     const cfg = db.settings.email || {};
-    if (feats().emailDigest === false) { /* ON nahi — phir bhi test karne do (config check) */ }
+    resetMailMemo(); // test hamesha taaza try kare (pehle ka "SMTP blocked" yaad na rakhe)
     try {
-      await smtpSend(cfg, `✅ Test email · ${db.settings.brand || 'Dashboard'}`, `Ye test email hai — SMTP configuration sahi chal rahi hai.\n\nDigest isi tarah subah (${feats().digestHour || 8} IST) push ke saath email par bhi aayega (features.emailDigest ON ho to).\n${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST`);
-      logAudit(user, 'email_test', { ip: clientIp(req), note: cfg.host });
-      return sendJson(res, 200, { ok: true });
+      const out = await sendMail(cfg, `✅ Test email · ${db.settings.brand || 'Dashboard'}`, `Ye test email hai — email configuration sahi chal rahi hai (transport: ${resolveProviders(cfg)[0] || '—'}).\n\nDigest isi tarah subah (${feats().digestHour || 8} IST) push ke saath email par bhi aayega (features.emailDigest ON ho to).\n${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST`);
+      logAudit(user, 'email_test', { ip: clientIp(req), note: `${out.provider}${cfg.host && out.provider === 'smtp' ? ` · ${cfg.host}` : ''}` });
+      return sendJson(res, 200, { ok: true, provider: out.provider, tried: out.tried });
     } catch (err) {
       const raw = String(err && err.message || err);
-      const hint = /535|534|authentication|credentials/i.test(raw)
-        ? ' Gmail ho to normal password nahi, 2-Step Verification ka App Password use karo.'
-        : /timeout|ECONN|ENETUNREACH|EHOSTUNREACH|connect/i.test(raw)
-          ? ' Host/port check karo: STARTTLS = 587 + TLS unchecked; implicit TLS = 465 + TLS checked.'
-          : '';
-      throw new HttpError(502, `SMTP test fail: ${raw}${hint}`);
+      throw new HttpError(502, `Email test fail: ${raw}${mailHint(raw)}`);
     }
+  }
+  // 🩺 Email diagnose — kya configured hai, SMTP port khula hai ya hosting ne block kiya, HTTPS relay ready hai ya nahi.
+  if ((p === '/api/notifications/email/diagnose' || p === '/api/notifications/email/status') && (method === 'POST' || method === 'GET')) {
+    requireAdmin(user);
+    const cfg = db.settings.email || {};
+    if (p.endsWith('/status')) {
+      const providers = availableProviders(cfg);
+      return sendJson(res, 200, { providers, order: resolveProviders(cfg), preference: cfg.provider || 'auto', envRelay: providers.appsscript });
+    }
+    return sendJson(res, 200, await diagnoseMail(cfg));
   }
   // 📬 Weekly auto-digest email — force (Settings button / test); schedule maybeWeeklyEmail chalta hai.
   if (p === '/api/notifications/weekly-email' && method === 'POST') {
@@ -3024,6 +2918,16 @@ async function handleApi(req, res, url) {
         clampNum(patch.dispatch, 'minNeed', 0, 100000, 'dispatch.minNeed');
         clampNum(patch.dispatch, 'top', 1, 500, 'dispatch.top');
       }
+    }
+    if (patch.email !== undefined) {
+      if (!patch.email || typeof patch.email !== 'object' || Array.isArray(patch.email)) throw new HttpError(400, 'email object hona chahiye.');
+      if (patch.email.provider !== undefined) {
+        patch.email.provider = String(patch.email.provider || 'auto').trim().toLowerCase();
+        if (!MAIL_PROVIDERS.includes(patch.email.provider)) throw new HttpError(400, `email.provider inme se ek ho: ${MAIL_PROVIDERS.join(' / ')}`);
+      }
+      for (const key of ['resendKey', 'brevoKey']) if (patch.email[key] !== undefined) patch.email[key] = String(patch.email[key] || '').trim().slice(0, 200);
+      if (patch.email.pass !== undefined) patch.email.pass = String(patch.email.pass || '').slice(0, 200);
+      if (patch.email.host !== undefined) patch.email.host = String(patch.email.host || '').trim().slice(0, 200);
     }
     if (patch.stockMovement !== undefined) {
       if (!patch.stockMovement || typeof patch.stockMovement !== 'object' || Array.isArray(patch.stockMovement)) throw new HttpError(400, 'stockMovement mapping object hona chahiye.');

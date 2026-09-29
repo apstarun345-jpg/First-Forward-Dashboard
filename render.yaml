@@ -38,6 +38,16 @@ services:
       # Optional: VAPID JWT ka contact claim (default mailto:admin@apnapayment.com). localhost/.local mat dena.
       # Optional: PUSH_AUTH_SCHEME=legacy — sirf agar koi push service RFC 8292 "vapid" scheme na samjhe
       #   (server khud automatic fallback karta hai, isliye normally iski zaroorat nahi).
+      # 📧 Email (OTP / digest / champion certificates). Render FREE blocks SMTP ports 25/465/587, so use ONE of:
+      #   • Google Apps Script relay — nothing to add here (uses APPS_SCRIPT_URL/SECRET above; paste the new Code.gs)
+      #   • RESEND_API_KEY  (resend.com, HTTPS)   • BREVO_API_KEY (brevo.com, HTTPS)
+      # MAIL_PROVIDER = auto | smtp | appsscript | resend | brevo   (default auto = try all that are configured)
+      - key: RESEND_API_KEY
+        sync: false
+      - key: BREVO_API_KEY
+        sync: false
+      - key: MAIL_PROVIDER
+        value: auto
       - key: PUSH_TTL_SECONDS
         value: "86400"
     disk:

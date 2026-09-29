@@ -184,7 +184,15 @@ FF.pages = FF.pages || {};
     return state.fullPromise;
   }
   /** Kick the heavy layer off in the background (non-blocking) — suggestions upgrade automatically. */
-  function warmFull() { if (!state.full && !state.fullPromise) buildFull().catch(() => {}); }
+  function warmFull() {
+    if (!state.full && !state.fullPromise) buildFull().catch(() => {});
+    // 🧾 profile data (REPORT + stock + class issuance) bhi background me — suggestions me stock/priority dikhane ke liye
+    if (FF.masterProfile && FF.masterProfile.warm) FF.masterProfile.warm().then(emit).catch(() => {});
+  }
+  const MP = () => (FF.masterProfile && FF.masterProfile.supports ? FF.masterProfile : null);
+  const allPeople = () => [...((state.full || state.light || {}).people || new Map()).values()];
+  const personByKey = (key) => ((state.full || state.light || {}).people || new Map()).get(key) || null;
+  const personKey = (p) => `${p.kind}|${normName(p.name)}`;
 
   // ---------------------------------------------------------------- query
   function search(q) {
@@ -236,12 +244,19 @@ FF.pages = FF.pages || {};
     const items = [];
     r.people.slice(0, 14).forEach((p) => {
       const tl = [...p.tlSet][0] || '';
+      const q1 = MP() ? MP().quick(p) : null;   // stock / priority / mobile (agar REPORT load ho chuka)
+      const isTlKind = /tl$/.test(p.kind);
+      const extra = q1 ? [
+        q1.mobile && (!FF.auth || FF.auth.can('contacts')) ? `📞 ${q1.mobile}` : '',
+        `📦 ${U.fmt(q1.stock.total)}${!isTlKind && q1.tlStock && q1.tlStock.has ? ` · TL ${U.fmt(q1.tlStock.total)}` : ''}`,
+        q1.tagRequired ? `🏷️ TAG ${U.fmt(q1.dispatch.sugVc4 + q1.dispatch.sugComm)}` : (!q1.direct && (q1.dispatch.sugVc4 || q1.dispatch.sugComm) ? `🎯 sug ${U.fmt(q1.dispatch.sugVc4)}/${U.fmt(q1.dispatch.sugComm)}` : '')
+      ].filter(Boolean) : [];
       items.push({
         kind: p.kind.startsWith('gv') ? 'gv' : 'ff',
         kindLabel: KIND_LABEL[p.kind] || p.kind,
         label: p.name,
-        sub: [p.sub ? `ID ${p.sub}` : '', tl ? `TL ${tl}` : '', p.bars.size ? `${U.fmt(p.bars.size)} tags` : ''].filter(Boolean).join(' · '),
-        badge: p.bars.size ? `${U.fmt(p.bars.size)}` : '',
+        sub: [p.sub ? `ID ${p.sub}` : '', tl ? `TL ${p.direct ? (p.directLabel || tl) : tl}` : '', ...extra, !q1 && p.bars.size ? `${U.fmt(p.bars.size)} tags` : ''].filter(Boolean).join(' · '),
+        badge: q1 && q1.priority ? q1.priority : (p.bars.size ? `${U.fmt(p.bars.size)}` : ''),
         keywords: `${p.sub} ${tl} ${[...p.classMap.keys()].join(' ')}`,
         value: p.name,
         person: p
@@ -278,6 +293,34 @@ FF.pages = FF.pages || {};
     return { t: 'FF only', tone: 'amber' };
   }
 
+  /** Kundli card ke andar quick stats — mobile · TL · stock · TL stock · priority · suggested (data load hone par). */
+  function kundliProfileStats(p) {
+    const q1 = MP() ? MP().quick(p) : null;
+    if (!q1) return MP() && MP().supports(p) ? '<div class="ms-kundli-stats ms-prof"><div><small>Stock / priority</small><b class="dim">REPORT load ho raha hai…</b></div></div>' : '';
+    const isTlKind = /tl$/.test(p.kind);
+    const contacts = !FF.auth || FF.auth.can('contacts');
+    const sug = q1.tagRequired ? `<span class="sug-chip direct">🏷️ ${U.fmt(q1.dispatch.sugVc4)} + ${U.fmt(q1.dispatch.sugComm)} tags</span>` : q1.direct ? '<span class="dim">No dispatch</span>' : `<span class="sug-chip">${U.fmt(q1.dispatch.sugVc4)}</span> / <span class="sug-chip">${U.fmt(q1.dispatch.sugComm)}</span>`;
+    return `<div class="ms-kundli-stats ms-prof">
+      <div><small>${isTlKind ? 'TL mobile' : 'Mobile'}</small><b>${contacts ? (q1.mobile ? esc(q1.mobile) : '—') : '🔒'}</b></div>
+      <div><small>Priority</small><b>${esc(q1.priority || '—')}</b></div>
+      <div><small>${isTlKind ? 'TL stock' : 'Agent stock'}</small><b>${U.fmt(q1.stock.total)}</b></div>
+      ${isTlKind ? `<div><small>Agents</small><b>${U.fmt(q1.agentCount)}</b></div>` : `<div><small>TL stock</small><b>${q1.tlStock && q1.tlStock.has ? U.fmt(q1.tlStock.total) : '—'}</b></div>`}
+      <div><small>Suggested VC4 / Comm.</small><b>${sug}</b></div>
+      <div><small>This month · last</small><b>${U.fmt(q1.totals.curTotal)} · ${U.fmt(q1.totals.lastTotal)}</b></div>
+    </div>`;
+  }
+  /** Sirf ek hi person match ho to uski poori profile inline khol do (async placeholder → data). */
+  function inlineSingle(container, res) {
+    try {
+      if (!container || !MP() || !res || res.tags.length || res.people.length !== 1 || !MP().supports(res.people[0])) return;
+      const first = container.querySelector && container.querySelector('.ms-section');
+      if (!first || !first.insertAdjacentHTML) return;
+      first.insertAdjacentHTML('beforebegin', '<section class="ms-section ms-profile-inline"><h3>📊 Poori report</h3><div class="ms-profile-slot"></div></section>');
+      const slot = container.querySelector('.ms-profile-inline .ms-profile-slot');
+      const person = res.people[0];
+      if (slot) MP().renderInto(slot, person);
+    } catch { /* ignore */ }
+  }
   function personKundli(p) {
     const tl = p.direct ? (p.directLabel || 'Direct Agent') : [...p.tlSet].slice(0, 4).map((n) => tlText(n, p.kind === 'gv-agent' ? 'gv' : 'ff')).join(', ');
     return `<article class="ms-kundli">
@@ -294,8 +337,10 @@ FF.pages = FF.pages || {};
         <div><small>TL</small><b>${p.direct ? `<span class="direct-chip">🚫 ${esc(tl)}</span>` : esc(tl || '—')}</b></div>
         <div><small>Last allocation</small><b>${esc(p.last || '—')}</b></div>
       </div>
+      ${kundliProfileStats(p)}
       <div class="ms-pill-row">${classPills(p.classMap)}</div>
       <div class="ms-kundli-actions">
+        ${MP() && MP().supports(p) ? `<button class="btn small primary" data-ms-profile="${esc(personKey(p))}">📊 Poori report</button>` : ''}
         <a class="btn small" href="#/masterStock?q=${encodeURIComponent(p.name)}">🗄️ Register</a>
         ${p.kind.includes('agent') ? `<button class="btn small" data-ms-agent360="${esc(p.name)}">👁 Agent 360</button>` : ''}
         <button class="btn small" data-ms-tags="${esc(p.name)}">🏷️ Tags</button>
@@ -357,9 +402,13 @@ FF.pages = FF.pages || {};
     </div>`);
     document.body.appendChild(wrap);
     document.body.classList.add('no-scroll');
+    inlineSingle(wrap.querySelector('.ms-panel-body'), res);
     const box = wrap.querySelector('.ms-panel-box');
     wrap.addEventListener('click', (e) => {
       if (e.target.closest('[data-ms-close]')) { closePanel(); return; }
+      if (e.target.closest('[data-mp-agent]')) { closePanel(); return; }
+      const prof = e.target.closest('[data-ms-profile]');
+      if (prof) { const person = personByKey(prof.dataset.msProfile); if (person && MP()) { closePanel(); MP().open(person); } return; }
       const a = e.target.closest('[data-ms-agent360]');
       if (a) { closePanel(); if (FF.cockpit && FF.cockpit.agent360) FF.cockpit.agent360({ name: a.dataset.msAgent360 }).catch(() => {}); return; }
       const t = e.target.closest('[data-ms-tags]');
@@ -422,6 +471,7 @@ FF.pages = FF.pages || {};
       onPick: (it) => {
         if (it.none) return;
         if (it.barcode) { openPanel(it.barcode); return; }
+        if (it.person && MP() && MP().supports(it.person)) { MP().open(it.person); return; }
         if (it.person) { const res = search(it.person.name); openPanel({ ...res, people: [it.person], ids: [], tags: [], matched: 1 + (it.person.bars.size || 0) }); return; }
         openPanel(it.label);
       },
@@ -474,12 +524,15 @@ FF.pages = FF.pages || {};
       const res = search(val);
       results.innerHTML = resultsHtml(res);
       results.dataset.q = val;
+      inlineSingle(results, res);
     };
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); run(input.value); } });
     U.$('#home-master-go', container).addEventListener('click', () => { const v = clean(input.value); if (v.length < 2) { U.toast('Kam se kam 2 letter / digit type karo', 'warn'); return; } openPanel(v); });
     container.addEventListener('click', (e) => {
       const chip = e.target.closest('[data-hms]');
       if (chip) { input.value = chip.dataset.hms; run(chip.dataset.hms); return; }
+      const prof = e.target.closest('[data-ms-profile]');
+      if (prof) { const person = personByKey(prof.dataset.msProfile); if (person && MP()) MP().open(person); return; }
       const a360 = e.target.closest('[data-ms-agent360]');
       if (a360) { if (FF.cockpit && FF.cockpit.agent360) FF.cockpit.agent360({ name: a360.dataset.msAgent360 }).catch(() => {}); return; }
       const tags = e.target.closest('[data-ms-tags]');
@@ -496,7 +549,7 @@ FF.pages = FF.pages || {};
 
   FF.masterSearch = {
     buildLight, buildFull, warmFull, search, suggestItems, resultsHtml, openPanel, closePanel,
-    mountTopbar, mountHome, onIndexReady,
+    mountTopbar, mountHome, onIndexReady, personByKey,
     get ready() { return !!(state.light); }, get heavyReady() { return !!(state.full && state.full.fullLoaded); },
     get topbarMounted() { return mountedTopbar; },
     label: KIND_LABEL

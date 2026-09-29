@@ -14,6 +14,16 @@ Koi database nahi, koi manual upload nahi — website Google Sheet se data padht
 (Google Visualization API / `gviz`) through a small Node server that also handles **login, users,
 permissions and settings**. Zero npm dependencies.
 
+## ✨ v3.14.0 — 🆕 New Agents & TL Changes
+- Naya page `#/newAgents` (Cross Channel): FF + GV ke **naye agents** aur **TL badla / TL hata / TL mila** ke alag tables, KPIs, 6-month chart, CSV. Row click → poori profile drawer.
+
+## ✨ v3.13.0 highlights — 🧾 Master profile · 🏷️ Direct tag-required · ✉️ SMTP fix
+
+- **Master search = poori kundli**: agent/TL par click → drawer me naam, mobile, TL (naam/ID/mobile), agent + TL stock, dispatch priority, suggested VC4/Commercial qty, class-wise issuance (last vs this month + stock), TL totals, agents table aur charts. Ek hi match ho to inline khulta hai. CSV + WhatsApp share.
+- **🏷️ Direct · High/Medium · Tag required**: FF + GV dispatch plan, GV Stock Report, Direct Agents page aur Dispatch Planner me alag option — direct agents ko stock nahi, par High/Medium priority ko tags dikhte hain ("No stock" nahi).
+- **✉️ Email/SMTP**: STARTTLS bug fix + Apps Script / Resend / Brevo HTTPS fallback + Settings → Email → Diagnose. Render free plan par SMTP ports blocked hote hain.
+- Docs: [WHATS-NEW-v3.13.0.md](WHATS-NEW-v3.13.0.md) · `dev/master-profile.test.js` · `dev/mail.test.js`.
+
 ## ✨ v3.12.0 highlights — 🧍 Direct Agents & TLs (ek hi rule, poori site par)
 
 - **Rule (configured, Settings → 🧍 Direct Agents):** GV direct = **TL ID + TL Name dono khaali** · FF direct = **TL Name APS**.

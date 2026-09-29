@@ -62,7 +62,8 @@ export class AppsScriptStore {
 
   async call(action, extra = {}) {
     let lastErr;
-    for (let attempt = 0; attempt < 4; attempt++) {
+    const maxAttempts = this.attempts || 4;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 30000);
       try {
@@ -79,13 +80,13 @@ export class AppsScriptStore {
             ? 'Apps Script returned an HTML page. Deploy it as Web app → Execute as: Me, Who has access: Anyone, and use the /exec URL.'
             : 'Apps Script returned an invalid response.');
         }
-        if (!json.ok) throw new Error(`Apps Script storage: ${json.error || 'request failed'}`);
+        if (!json.ok) throw new Error(`${this.label || 'Apps Script storage'}: ${json.error || 'request failed'}`);
         this.lastError = null;
         return json;
       } catch (err) {
-        lastErr = err.name === 'AbortError' ? Object.assign(new Error('Apps Script storage timeout'), { retry: true }) : err;
+        lastErr = err.name === 'AbortError' ? Object.assign(new Error(`${this.label || 'Apps Script storage'} timeout`), { retry: true }) : err;
         const retry = lastErr.retry || /fetch failed|ECONN|ENOTFOUND|EAI_AGAIN|socket/i.test(String(lastErr.message) + String(lastErr.cause || ''));
-        if (!retry || attempt === 3) break;
+        if (!retry || attempt === maxAttempts - 1) break;
         await this.wait(500 * 2 ** attempt + Math.floor(Math.random() * 200));
       } finally { clearTimeout(timer); }
     }

@@ -23,6 +23,9 @@ const TAB = 'APP_STORAGE';
 const CHUNK = 45000; // a Google Sheets cell holds max 50,000 characters
 const KINDS = ['users', 'sessions', 'settings', 'resets', 'notify'];
 
+/** Run this ONCE from the Apps Script editor (▶ Run) to grant the "send email" permission. */
+function authorizeMail() { Logger.log('Mail quota left today: ' + MailApp.getRemainingDailyQuota()); }
+
 function doGet() {
   return json_({ ok: true, service: 'apnapayment-storage', note: 'POST only. Storage is working if you can see this.' });
 }
@@ -33,6 +36,33 @@ function doPost(e) {
   catch (err) { return json_({ ok: false, error: 'invalid JSON' }); }
   if (!SECRET || SECRET.indexOf('PASTE_') === 0 || SECRET.length < 16) return json_({ ok: false, error: 'Set SECRET in Code.gs (min 16 chars) and redeploy.' });
   if (body.secret !== SECRET) return json_({ ok: false, error: 'unauthorized (secret mismatch)' });
+
+  // 📧 Mail relay (HTTPS) — Render free blocks SMTP ports, so the dashboard can send its emails
+  // (login OTP, daily digest, champion certificates, test mail) THROUGH this script via Gmail.
+  // First time: after pasting this code, run any function once (e.g. authorizeMail) OR redeploy
+  // as "New version" and click Allow when Google asks for the "send email" permission.
+  if (body.action === 'mailping') {
+    try { return json_({ ok: true, quota: MailApp.getRemainingDailyQuota(), account: Session.getEffectiveUser().getEmail() }); }
+    catch (err) { return json_({ ok: false, error: 'mail permission missing — Deploy → Manage deployments → Edit → New version, then Allow email permission (' + String(err && err.message || err) + ')' }); }
+  }
+  if (body.action === 'mail') {
+    try {
+      const m = body.mail || {};
+      const to = String(m.to || '').split(/[,;]/).map(function (x) { return x.trim(); }).filter(Boolean);
+      if (!to.length || to.length > 20) return json_({ ok: false, error: 'invalid recipients' });
+      if (!m.subject || String(m.subject).length > 300) return json_({ ok: false, error: 'invalid subject' });
+      const opts = { to: to.join(','), subject: String(m.subject), body: String(m.body || ' '), name: String(m.name || '') || 'Dashboard' };
+      if (m.htmlBody) opts.htmlBody = String(m.htmlBody);
+      const files = (m.attachments || []).slice(0, 5).map(function (a) {
+        return Utilities.newBlob(Utilities.base64Decode(String(a.content || '')), String(a.type || 'text/csv'), String(a.name || 'report.csv'));
+      });
+      if (files.length) opts.attachments = files;
+      MailApp.sendEmail(opts);
+      return json_({ ok: true, sent: to.length, quota: MailApp.getRemainingDailyQuota() });
+    } catch (err) {
+      return json_({ ok: false, error: String(err && err.message || err) });
+    }
+  }
 
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(25000)) return json_({ ok: false, error: 'busy, retry' });

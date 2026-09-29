@@ -213,7 +213,7 @@ await run('performance 4-way + suggested dispatch card', async () => {
   await pages.performance.render(r, { view: 'alerts' }, {});
   html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
   if (!html.includes('Suggested dispatch plan')) throw new Error('alerts view me 🎯 dispatch plan card nahi');
-  if (!html.includes('Direct Agents · no dispatch')) throw new Error('alerts view me Direct Agents filter nahi');
+  if (!html.includes('Direct Agents · all')) throw new Error('alerts view me Direct Agents filter nahi');
 }, true);
 // ---- GV Partner (second Google Sheet) ----
 await run('gv.preload (master + stock + report)', async () => {
@@ -245,7 +245,7 @@ await run('gvDashboard 4-way + suggested dispatch card', async () => {
   const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
   for (const s of ['VC20', 'VC5+', 'All Comm']) if (!html.includes(s)) throw new Error(`gvDashboard me "${s}" nahi mila`);
   if (!html.includes('Suggested dispatch plan')) throw new Error('gvDashboard me 🎯 dispatch plan card nahi');
-  if (!html.includes('Direct Agents · no dispatch')) throw new Error('gvDashboard me Direct Agents filter nahi');
+  if (!html.includes('Direct Agents · all')) throw new Error('gvDashboard me Direct Agents filter nahi');
 }, true);
 await run('page gvTrend daily', () => pages.gvTrend.render(root(), { mode: 'daily' }, {}), true);
 await run('page gvTrend weekly', () => pages.gvTrend.render(root(), { mode: 'weekly' }, {}), true);
@@ -257,7 +257,7 @@ log(`      sample GV agent "${gvAgent}"`);
 await run('page gvStock tl filter', () => pages.gvStock.render(root(), { tl: (FF.gv.people().tls[0] || {}).name || '' }, {}), true);
 await run('gvStock explicit tab clears stale TL param', async () => { const r = root(); await pages.gvStock.render(r, { view: 'class', tl: 'stale-TL' }, {}); const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n'); if (!html.includes('Class × TL matrix')) throw new Error('explicit class tab stale TL se override hua'); }, true);
 await run('page gvStockReport agents', () => pages.gvStockReport.render(root(), { view: 'agents' }, {}), true);
-await run('page gvStockReport dispatch', async () => { const r = root(); await pages.gvStockReport.render(r, { view: 'dispatch' }, {}); const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n'); for (const s of ['GV Dispatch plan', 'Direct Agents — alag list', 'Direct filter', 'WhatsApp']) if (!html.includes(s)) throw new Error(`GV Stock Report me "${s}" nahi mila`); }, true);
+await run('page gvStockReport dispatch', async () => { const r = root(); await pages.gvStockReport.render(r, { view: 'dispatch' }, {}); const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n'); for (const s of ['GV Dispatch plan', 'Other Direct Agents', 'Tag required', 'Direct filter', 'WhatsApp']) if (!html.includes(s)) throw new Error(`GV Stock Report me "${s}" nahi mila`); }, true);
 await run('page gvPerformance', async () => { const r = root(); await pages.gvPerformance.render(r, {}, {}); const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n'); for (const s of ['WhatsApp report', 'GV Stock Report', 'Overview', 'Agents', 'TLs', 'Alerts']) if (!html.includes(s)) throw new Error(`GV Performance me "${s}" nahi mila`); }, true);
 await run('page gvPerformance q=agent', () => pages.gvPerformance.render(root(), { q: gvAgent }, {}), true);
 await run('page compare', () => pages.compare.render(root(), {}, {}), true);
@@ -545,6 +545,32 @@ await run('v3.11 · Master search (naam / TL / ID index + suggestions + results 
   if (!/ms-section|ms-kundli/.test(html)) throw new Error('results markup missing');
   await FF.masterSearch.buildFull();
   log(`      light match ${res.people.length} people · suggestions ${items.length} · heavy ready ${FF.masterSearch.heavyReady}`);
+  // 🧾 v3.13 rich profile — real mock data se agent + TL + direct agent
+  await FF.masterProfile.load();
+  const person = FF.masterSearch.search(probe).people.find((p) => p.kind === 'ff-agent');
+  const pr = await FF.masterProfile.build(person);
+  const ph = FF.masterProfile.html(pr);
+  for (const label of ['mp-kpis', 'Issuance class-wise', 'Total issuance', 'Suggested', 'mp-charts']) if (!ph.includes(label)) throw new Error(`profile me \"${label}\" nahi mila`);
+  const tlName = (list.find((a) => !a.tlExcluded && a.tlName) || {}).tlName;
+  if (tlName) {
+    const tl = await FF.masterProfile.build({ kind: 'ff-tl', name: tlName, sub: '', tlSet: new Set(), classMap: new Map(), bars: new Set() });
+    if (!tl.agentCount || !/TL ke agents/.test(FF.masterProfile.html(tl))) throw new Error('TL profile me agents table nahi');
+  }
+  const dr = list.find((a) => a.tlExcluded);
+  if (dr) {
+    const dp = await FF.masterProfile.build({ kind: 'ff-agent', name: dr.name, sub: dr.agentId || '', tlSet: new Set(), classMap: new Map(), bars: new Set() });
+    if (!dp.direct) throw new Error('direct agent profile me direct flag nahi');
+    if (/High|Medium/.test(dp.priority) && !dp.tagRequired) throw new Error('direct High/Medium par tagRequired nahi');
+  }
+  log(`      profile ${pr.name} · stock ${pr.stock.total} · class rows ${pr.classes.length} · html ${ph.length} chars`);
+}, true);
+await run('v3.14 · New Agents & TL Changes page (FF + GV, dono table)', async () => {
+  const r = root(); await pages.newAgents.render(r, { months: '6' }, {});
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const label of ['New Agents &amp; TL Changes', 'Naye agents', 'TL changes', 'metric-grid']) if (!html.includes(label)) throw new Error(`New Agents page me "${label}" nahi mila`);
+  if (/undefined|NaN/.test(html)) throw new Error('New Agents page me undefined/NaN');
+  const c = await FF.newAgents.collect(6);
+  log(`      FF rows ${c.ff ? c.ff.rows.length : 0} (new ${c.ff ? c.ff.rows.filter((x) => x.isNew).length : 0}, TL events ${c.ff ? c.ff.rows.filter((x) => x.ev).length : 0}) · GV rows ${c.gv ? c.gv.rows.length : 0} (new ${c.gv ? c.gv.rows.filter((x) => x.isNew).length : 0}, TL events ${c.gv ? c.gv.rows.filter((x) => x.ev).length : 0})`);
 }, true);
 await run('v3.12 · Direct Agents rule (FF: TL Name APS · GV: TL ID + Name blank) — page + dono dispatch filters', async () => {
   // classifier contract (channel-specific)
@@ -564,11 +590,11 @@ await run('v3.12 · Direct Agents rule (FF: TL Name APS · GV: TL ID + Name blan
   if (!list.some((a) => a.tlExcluded)) throw new Error('FF REPORT me APS direct agents nahi mile');
   const r1 = root(); await pages.performance.render(r1, { view: 'alerts' }, {});
   let html = r1.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  if (!/Direct Agents · no dispatch/.test(html)) throw new Error('FF dispatch bar me Direct Agents filter nahi');
+  if (!/Direct Agents · all/.test(html)) throw new Error('FF dispatch bar me Direct Agents filter nahi');
   // GV Stock Report dispatch + TL filter
   const r2 = root(); await pages.gvStockReport.render(r2, { view: 'dispatch' }, {});
   html = r2.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  if (!/Direct Agents — alag list/.test(html)) throw new Error('GV dispatch me Direct Agents alag list nahi');
+  if (!/Other Direct Agents/.test(html) || !/Tag required/.test(html)) throw new Error('GV dispatch me Direct Agents alag list / tag-required option nahi');
   if (!/Direct Agent \(no TL\)|no TL/.test(html)) throw new Error('GV direct reason label nahi');
   if (!/direct-rule-banner/.test(html)) throw new Error('GV Stock Report par direct rule banner nahi');
   const r3 = root(); await pages.gvStockReport.render(r3, { view: 'agents', tl: '__direct__' }, {});

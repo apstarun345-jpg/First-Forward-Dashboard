@@ -6,6 +6,7 @@ export function startMockAppsScript({ secret, spreadsheet = 'Mock Sheet' } = {})
   const records = {};
   const results = new Map();
   const calls = [];
+  const mails = [];
   let seq = 0;
   let failNext = 0;
   const server = http.createServer((req, res) => {
@@ -28,6 +29,8 @@ export function startMockAppsScript({ secret, spreadsheet = 'Mock Sheet' } = {})
       else if (body.action === 'ping') out = { ok: true, tab: 'APP_STORAGE', spreadsheet };
       else if (body.action === 'read') out = { ok: true, records: structuredClone(records) };
       else if (body.action === 'write') { Object.assign(records, body.records || {}); out = { ok: true, savedAt: new Date().toISOString(), kinds: Object.keys(body.records || {}) }; }
+      else if (body.action === 'mailping') out = { ok: true, quota: 99, account: 'owner@example.test' };
+      else if (body.action === 'mail') { mails.push(body.mail); out = { ok: true, sent: String((body.mail || {}).to || '').split(',').length, quota: 98 }; }
       else out = { ok: false, error: 'unknown action' };
       const id = String(++seq);
       results.set(id, out);
@@ -37,6 +40,6 @@ export function startMockAppsScript({ secret, spreadsheet = 'Mock Sheet' } = {})
   });
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => {
     const { port } = server.address();
-    resolve({ url: `http://127.0.0.1:${port}/macros/s/mock/exec`, records, calls, failWrites(n) { failNext = n; }, close: () => new Promise((r) => server.close(r)) });
+    resolve({ url: `http://127.0.0.1:${port}/macros/s/mock/exec`, records, calls, mails, failWrites(n) { failNext = n; }, close: () => new Promise((r) => server.close(r)) });
   }));
 }
