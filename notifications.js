@@ -75,15 +75,29 @@ window.FF = window.FF || {};
   }
 
   // ---- 🔊 in-app sound (Web Audio beep — 880Hz, 200ms, works without asset file) -----------------
-  function beep(force) {
-    if (state.prefs.sound === false) return;
-    if (!force && state.prefs.enabled === false) return; // master switch OFF → koi sound nahi
+  // ⚠️ v3.25 CHROME FIX — pehle AudioContext sirf beep() ke andar (hamesha bina gesture ke, poll
+  //    callback me) banta tha. Chrome autoplay policy me aisa context "suspended" paida hota hai aur
+  //    bina gesture ke resume() KABHI succeed nahi hota — isliye installed app me sound aati thi
+  //    lekin Chrome website par hamesha silent. Ab:
+  //      1. AudioContext pehle user gesture (click/keypress/touch) ke ANDAR banta + resume hota hai,
+  //      2. gesture se pehle aaye beeps queue me jaate hain aur unlock hote hi baj uthte hain,
+  //      3. unlock har gesture par retry hota hai jab tak context "running" na ho jaaye.
+  let pendingBeeps = 0;
+  let audioUnlockBound = false;
+  function audioCtx() {
     try {
       const Ctx = window.AudioContext || window.webkitAudioContext;
-      if (!Ctx) return;
+      if (!Ctx) return null;
       if (!state.audioCtx) state.audioCtx = new Ctx();
-      const ctx = state.audioCtx;
-      if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+      return state.audioCtx;
+    } catch { return null; }
+  }
+  /** Sirf tab bajao jab context sach me running ho. Return: bajaya ya nahi. */
+  function beepNow() {
+    try {
+      const ctx = audioCtx();
+      if (!ctx) return false;
+      if (ctx.state !== 'running') return false;
       const o = ctx.createOscillator(), g = ctx.createGain();
       o.type = 'sine'; o.frequency.value = 880;
       g.gain.setValueAtTime(0.0001, ctx.currentTime);
@@ -93,14 +107,44 @@ window.FF = window.FF || {};
       o.start(ctx.currentTime); o.stop(ctx.currentTime + 0.24);
       // Mobile ke liye vibration bhi (jab tab foreground hai)
       if (navigator.vibrate) try { navigator.vibrate([80, 40, 80]); } catch {}
-    } catch { /* iOS/Safari may block without user gesture — silent fail */ }
+      return true;
+    } catch { return false; }
+  }
+  function flushPendingBeeps() {
+    if (!pendingBeeps) return;
+    const n = Math.min(pendingBeeps, 3);
+    pendingBeeps = 0;
+    for (let i = 0; i < n; i++) setTimeout(() => beepNow(), i * 260);
+  }
+  function beep(force) {
+    if (state.prefs.sound === false) return;
+    if (!force && state.prefs.enabled === false) return; // master switch OFF → koi sound nahi
+    const ctx = audioCtx();
+    if (ctx && ctx.state === 'suspended') { try { ctx.resume().then(flushPendingBeeps).catch(() => {}); } catch { /* ignore */ } }
+    if (beepNow()) return;
+    // Chrome ne autoplay roka — agle user gesture par khud baj jayega (queue).
+    pendingBeeps = Math.min(pendingBeeps + 1, 3);
+    bindAudioUnlock();
+  }
+  /** Gesture listeners — context gesture ke ANDAR banao/resume karo, phir pending beeps baja do. */
+  function bindAudioUnlock() {
+    if (audioUnlockBound || typeof document === 'undefined' || !document.addEventListener) return;
+    audioUnlockBound = true;
+    const attempt = () => {
+      const ctx = audioCtx(); // gesture ke andar create — Chrome isi ko allow karta hai
+      if (ctx && ctx.state === 'suspended' && ctx.resume) ctx.resume().catch(() => {});
+      if (ctx && ctx.state === 'running') flushPendingBeeps();
+    };
+    ['pointerdown', 'keydown', 'touchstart'].forEach((ev) => document.addEventListener(ev, attempt, { passive: true }));
   }
   function unlockAudio() {
-    // Pehle user gesture par AudioContext unlock (mobile Safari / Chrome requirement)
-    if (state.audioCtx && state.audioCtx.state === 'suspended') state.audioCtx.resume().catch(() => {});
-    document.removeEventListener('pointerdown', unlockAudio);
-    document.removeEventListener('keydown', unlockAudio);
+    // User gesture ke andar call hota hai — context yahin banao + resume karo (Chrome autoplay policy).
+    const ctx = audioCtx();
+    if (ctx && ctx.state === 'suspended' && ctx.resume) ctx.resume().then(flushPendingBeeps).catch(() => {});
+    if (ctx && ctx.state === 'running') flushPendingBeeps();
+    bindAudioUnlock();
   }
+  bindAudioUnlock(); // module load par hi lagao — login se pehle kiya gaya click bhi unlock kar de
 
   // ---- icon / helpers ----------------------------------------------------------------------------
   function icon(item) {
@@ -988,6 +1032,6 @@ window.FF = window.FF || {};
   }
   // Test sound button (for settings/test)
   function testSound() { unlockAudio(); beep(true); U.toast('🔊 Test beep', 'info'); } // force: master OFF ho tab bhi test chale
-  FF.notifications = { start, stop, poll, toggle, activity, logSearch, logClick, track, testSound, render, setupPush, disablePush, enableBrowser, setEnabled, maybeAskPermission, testPanel, testPush, refreshPushStatus, retryPush, browserAlert, localAlert, speakServerItem, countUnread, notifyTypes: NOTIFY_TYPES, get state() { return state; }, get prefs() { return state.prefs; } };
+  FF.notifications = { start, stop, poll, toggle, activity, logSearch, logClick, track, testSound, render, setupPush, disablePush, enableBrowser, setEnabled, maybeAskPermission, testPanel, testPush, refreshPushStatus, retryPush, browserAlert, localAlert, speakServerItem, countUnread, unlockAudio, beep, soundOn: () => state.prefs.sound !== false, notifyTypes: NOTIFY_TYPES, get state() { return state; }, get prefs() { return state.prefs; } };
   bind();
 })(window.FF);

@@ -7,6 +7,7 @@ export function startMockAppsScript({ secret, spreadsheet = 'Mock Sheet' } = {})
   const results = new Map();
   const calls = [];
   const mails = [];
+  const appends = []; // 📗 appendrows (tag request sheet sync) — { tab, header, rows, atRow }
   let seq = 0;
   let failNext = 0;
   const server = http.createServer((req, res) => {
@@ -26,11 +27,24 @@ export function startMockAppsScript({ secret, spreadsheet = 'Mock Sheet' } = {})
       calls.push({ action: body.action, kinds: body.records ? Object.keys(body.records) : [] });
       let out;
       if (body.secret !== secret) out = { ok: false, error: 'unauthorized (secret mismatch)' };
-      else if (body.action === 'ping') out = { ok: true, tab: 'APP_STORAGE', spreadsheet };
+      else if (body.action === 'ping') out = { ok: true, tab: 'APP_STORAGE', spreadsheet, url: 'https://docs.google.com/spreadsheets/d/mock/edit' };
       else if (body.action === 'read') out = { ok: true, records: structuredClone(records) };
       else if (body.action === 'write') { Object.assign(records, body.records || {}); out = { ok: true, savedAt: new Date().toISOString(), kinds: Object.keys(body.records || {}) }; }
       else if (body.action === 'mailping') out = { ok: true, quota: 99, account: 'owner@example.test' };
       else if (body.action === 'mail') { mails.push(body.mail); out = { ok: true, sent: String((body.mail || {}).to || '').split(',').length, quota: 98 }; }
+      else if (body.action === 'appendrows') {
+        const tab = String(body.tab || 'Tag Requests');
+        if (tab === 'APP_STORAGE') out = { ok: false, error: 'APP_STORAGE tab me likhna allowed nahi' };
+        else {
+          const rows = Array.isArray(body.rows) ? body.rows : [];
+          const tabState = appends.find((t) => t.tab === tab) || { tab, header: null, rows: [] };
+          if (!appends.includes(tabState)) appends.push(tabState);
+          if (!tabState.header && Array.isArray(body.header) && body.header.length) tabState.header = body.header.slice();
+          const atRow = tabState.rows.length + (tabState.header ? 2 : 1);
+          tabState.rows.push(...rows);
+          out = { ok: true, tab, added: rows.length, atRow, url: 'https://docs.google.com/spreadsheets/d/mock/edit' };
+        }
+      }
       else out = { ok: false, error: 'unknown action' };
       const id = String(++seq);
       results.set(id, out);
@@ -40,6 +54,6 @@ export function startMockAppsScript({ secret, spreadsheet = 'Mock Sheet' } = {})
   });
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => {
     const { port } = server.address();
-    resolve({ url: `http://127.0.0.1:${port}/macros/s/mock/exec`, records, calls, mails, failWrites(n) { failNext = n; }, close: () => new Promise((r) => server.close(r)) });
+    resolve({ url: `http://127.0.0.1:${port}/macros/s/mock/exec`, records, calls, mails, appends, failWrites(n) { failNext = n; }, close: () => new Promise((r) => server.close(r)) });
   }));
 }

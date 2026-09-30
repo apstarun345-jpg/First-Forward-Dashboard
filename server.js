@@ -2517,7 +2517,7 @@ function perfReport() {
   const hottest = [...HOT.entries()].sort((a, b) => b[1].hits - a[1].hits).slice(0, 10)
     .map(([url, h]) => ({ url: url.length > 160 ? `${url.slice(0, 160)}…` : url, hits: h.hits }));
   return {
-    version: '3.24.0', cacheEntries: cache.size, cacheEntriesMax: MAX_CACHE_ENTRIES,
+    version: '3.25.0', cacheEntries: cache.size, cacheEntriesMax: MAX_CACHE_ENTRIES,
     cacheSeconds: cacheMs() / 1000, warmedQueries: warmed, hotQueries: hottest,
     slowest: queries.filter((q) => q.upstream > 0).slice(0, 25),
     queries
@@ -2623,7 +2623,7 @@ async function handleApi(req, res, url) {
 
   if (p === '/api/health' && method === 'GET') {
     // pendingSignups sirf admin ko (sidebar badge ke liye) — public health me leak nahi.
-    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.24.0', storage: storageStatus(), push: pushHealth(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length } : {}) });
+    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.25.0', storage: storageStatus(), push: pushHealth(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length } : {}) });
   }
   // 📊 Admin-only: exact reason of slowness (Google query timings, cache hit rate, warm queries).
   if (p === '/api/perf' && method === 'GET') {
@@ -3290,6 +3290,115 @@ async function handleApi(req, res, url) {
     const list = user.role === 'admin' ? all : all.filter((r) => r.by === user.username);
     return list.slice(-200).reverse();
   };
+
+  // ---- 📗 Google Sheet sync (tag requests → connected sheet me direct entry) --------------------
+  // Admin config karta hai: kaunsa tab, kaunse columns, kaunsi rows (per class / per agent / per
+  // request) aur kab likhna hai (nayi request / status change). Likha Apps Script web app se jaata
+  // hai jo target sheet se hi bound hai — isliye entry SEEDHI us Google Sheet me padti hai.
+  const TAG_SHEET_FIELDS = {
+    event: 'Event', date: 'Date', time: 'Time', requestId: 'Request ID', by: 'By', status: 'Status',
+    agentId: 'Agent ID', agent: 'Agent', tl: 'TL', channel: 'Channel', cls: 'Tag Class',
+    last: 'Last month', cur: 'Current MTD', growth: 'Growth %', stock: 'Stock', cover: 'Cover (days)',
+    priority: 'Priority', sugNet: 'Suggested (stock −)', sugGross: 'Suggested (w/o stock)',
+    approved: 'Approved qty', remark: 'Remark', note: 'Note', adminNote: 'Admin note'
+  };
+  const tagSheetConfig = () => {
+    const w = workspaceStore();
+    if (!w.tagRequestSheet || typeof w.tagRequestSheet !== 'object') {
+      w.tagRequestSheet = {
+        enabled: false, tab: 'Tag Requests', sheetLink: '', onSubmit: true, onStatus: true,
+        rowMode: 'class', columns: ['date', 'time', 'by', 'agentId', 'agent', 'tl', 'channel', 'cls', 'stock', 'cur', 'priority', 'approved', 'remark', 'status']
+      };
+    }
+    return w.tagRequestSheet;
+  };
+  /** Apps Script store — storage backend se independent (files backend par bhi sheet sync chale). */
+  let tagSheetStore = null;
+  function sheetSyncStore() {
+    if (tagSheetStore) return tagSheetStore;
+    const url = (process.env.APPS_SCRIPT_URL || '').trim(), secret = (process.env.APPS_SCRIPT_SECRET || '').trim();
+    if (!url || !secret) return null;
+    try { tagSheetStore = new AppsScriptStore({ url, secret }); } catch { tagSheetStore = null; }
+    return tagSheetStore;
+  }
+  const tagSheetFieldValue = (field, x, req, event) => {
+    const d = new Date(req.at || Date.now());
+    const ch = x.channel === 'gv' ? 'GV Partner' : 'First Forward';
+    switch (field) {
+      case 'event': return event || '';
+      case 'date': return d.toISOString().slice(0, 10);
+      case 'time': return d.toISOString().slice(11, 16);
+      case 'requestId': return req.id || '';
+      case 'by': return req.byName || req.by || '';
+      case 'status': return req.status || '';
+      case 'agentId': return x.agentId || '';
+      case 'agent': return x.agentName || '';
+      case 'tl': return x.tl || '';
+      case 'channel': return ch;
+      case 'cls': return x.cls || '';
+      case 'last': return Number(x.last) || 0;
+      case 'cur': return Number(x.cur) || 0;
+      case 'growth': return x.growth === undefined || x.growth === null ? '' : Number(x.growth);
+      case 'stock': return Number(x.stock) || 0;
+      case 'cover': return x.cover === undefined || x.cover === null ? '' : Number(x.cover);
+      case 'priority': return x.priority || '';
+      case 'sugNet': return Number(x.sugNet) || 0;
+      case 'sugGross': return Number(x.sugGross) || 0;
+      case 'approved': return Number(x.approved) || 0;
+      case 'remark': return x.remark || '';
+      case 'note': return req.note || '';
+      case 'adminNote': return req.adminNote || '';
+      default: return '';
+    }
+  };
+  /** Request → sheet rows (rowMode ke hisaab se) + header. `event` = new / status / manual. */
+  function tagSheetRows(req, cfg, event) {
+    const cols = (cfg.columns || []).filter((c) => TAG_SHEET_FIELDS[c]);
+    const header = cols.map((c) => TAG_SHEET_FIELDS[c]);
+    const rowsIn = Array.isArray(req.rows) ? req.rows : [];
+    const mk = (x) => cols.map((c) => tagSheetFieldValue(c, x, req, event));
+    let data = [];
+    if (cfg.rowMode === 'agent') {
+      const byAgent = new Map();
+      rowsIn.forEach((x) => {
+        const key = `${x.agentId || ''}|${x.agentName || ''}`;
+        const a = byAgent.get(key) || { ...x, cls: '', approved: 0 };
+        a.cls = [a.cls, x.cls].filter(Boolean).join('+');
+        a.approved = (Number(a.approved) || 0) + (Number(x.approved) || 0);
+        byAgent.set(key, a);
+      });
+      data = [...byAgent.values()].map(mk);
+    } else if (cfg.rowMode === 'request') {
+      const sum = rowsIn.reduce((s, x) => s + (Number(x.approved) || 0), 0);
+      const agg = {
+        agentId: '', agentName: `${rowsIn.length} rows · ${new Set(rowsIn.map((x) => x.agentName)).size} agents`,
+        tl: [...new Set(rowsIn.map((x) => x.tl).filter(Boolean))].join(', '), channel: rowsIn[0] ? rowsIn[0].channel : 'ff',
+        cls: [...new Set(rowsIn.map((x) => x.cls).filter(Boolean))].join(', '),
+        last: rowsIn.reduce((s, x) => s + (Number(x.last) || 0), 0), cur: rowsIn.reduce((s, x) => s + (Number(x.cur) || 0), 0),
+        stock: rowsIn.reduce((s, x) => s + (Number(x.stock) || 0), 0), cover: null, priority: '',
+        sugNet: rowsIn.reduce((s, x) => s + (Number(x.sugNet) || 0), 0), sugGross: rowsIn.reduce((s, x) => s + (Number(x.sugGross) || 0), 0),
+        approved: sum, remark: ''
+      };
+      data = [mk(agg)];
+    } else {
+      data = rowsIn.map(mk); // 'class' — har agent × class ki alag row (default)
+    }
+    return { header, rows: data };
+  }
+  /** Request ko configured sheet me push karo. `throwOnFail` sirf manual/test push ke liye. */
+  async function pushTagRequestToSheet(req, event, throwOnFail) {
+    const cfg = tagSheetConfig();
+    const store = sheetSyncStore();
+    if (!cfg.enabled || !store) {
+      if (throwOnFail) throw new HttpError(400, !store ? 'Apps Script connect nahi hai — pehle Settings → Backup me APPS_SCRIPT_URL/SECRET configure karo (ya sheet storage setup).' : 'Sheet sync OFF hai — pehle Tag Request page par 📗 Google Sheet sync ON karo.');
+      return null;
+    }
+    const { header, rows } = tagSheetRows(req, cfg, event);
+    if (!rows.length) { if (throwOnFail) throw new HttpError(400, 'Sheet ke liye koi row nahi bani.'); return null; }
+    const out = await store.call('appendrows', { tab: String(cfg.tab || 'Tag Requests').slice(0, 80) || 'Tag Requests', header, rows });
+    req.sheetSync = { at: new Date().toISOString(), event, added: Number(out.added) || rows.length, tab: out.tab || cfg.tab };
+    return out;
+  }
   if (p === '/api/tag-requests' && method === 'GET') {
     if (user.role !== 'admin' && !(user.permissions || []).includes('tagRequest')) throw new HttpError(403, 'Tag Request access disabled.');
     return sendJson(res, 200, { ok: true, requests: visibleTagRequests(user), admin: user.role === 'admin' });
@@ -3311,6 +3420,14 @@ async function handleApi(req, res, url) {
     w.tagRequests.push(row);
     if (w.tagRequests.length > 120) w.tagRequests.splice(0, w.tagRequests.length - 120);
     await persist('notify');
+    // 📗 Google Sheet sync ON ho to entry direct configured sheet me chali jaati hai (fire & forget —
+    // sheet fail hone se request submit kabhi rukti nahi; status drawer me dikh jaata hai).
+    if (tagSheetConfig().enabled && tagSheetConfig().onSubmit) {
+      pushTagRequestToSheet(row, 'new').then(() => persist('notify').catch(() => {})).catch((err) => {
+        console.warn('tag-request sheet sync:', err.message);
+        row.sheetSync = { at: new Date().toISOString(), event: 'new', error: String(err.message || err).slice(0, 160) };
+      });
+    }
     // Admin ko notification (routed: Settings → notification routes se off ho sakta hai) + requester ko confirmation.
     try {
       recordNotification({
@@ -3345,6 +3462,7 @@ async function handleApi(req, res, url) {
         row.total = row.rows.reduce((s, r) => s + (Number(r.approved) || 0), 0);
       }
     }
+    const prevStatus = row.status;
     if (body.status !== undefined) {
       if (!['pending', 'approved', 'dispatched', 'rejected'].includes(body.status)) throw new HttpError(400, 'Status invalid hai.');
       row.status = body.status;
@@ -3353,6 +3471,13 @@ async function handleApi(req, res, url) {
     if (body.note !== undefined && row.status === 'pending') row.note = shortText(body.note, 300);
     row.updatedAt = new Date().toISOString(); row.updatedBy = user.username;
     await persist('notify');
+    // 📗 Status change (approved/dispatched/rejected) par bhi sheet me fresh entry — config ON ho to.
+    if (body.status && body.status !== prevStatus && tagSheetConfig().enabled && tagSheetConfig().onStatus) {
+      pushTagRequestToSheet(row, `status:${body.status}`).then(() => persist('notify').catch(() => {})).catch((err) => {
+        console.warn('tag-request sheet sync (status):', err.message);
+        row.sheetSync = { at: new Date().toISOString(), event: `status:${body.status}`, error: String(err.message || err).slice(0, 160) };
+      });
+    }
     // Requester ko status update ka notification (admin ne kuch badla to).
     if (user.role === 'admin' && row.by !== user.username) {
       try {
@@ -3376,6 +3501,57 @@ async function handleApi(req, res, url) {
     await persist('notify');
     logAudit(user, 'tag_request_deleted', { target: tagReqPath[1], ip: clientIp(req) });
     return sendJson(res, 200, { ok: true });
+  }
+
+  // ---- 📗 Tag Request → Google Sheet sync (admin config + test + manual push) --------------------
+  if (p === '/api/tag-request-sheet' && method === 'GET') {
+    requireAdmin(user);
+    const cfg = tagSheetConfig();
+    return sendJson(res, 200, {
+      ok: true, config: cfg, fields: TAG_SHEET_FIELDS,
+      connected: !!sheetSyncStore(), storageBackend: STORAGE_BACKEND,
+      hint: sheetSyncStore() ? '' : 'APPS_SCRIPT_URL + APPS_SCRIPT_SECRET (Render → Environment) configure karo — wala Apps Script usi Google Sheet se bind hona chahiye jisme entries chahiye. Setup: STORAGE_SETUP.md / Settings → Backup.'
+    });
+  }
+  if (p === '/api/tag-request-sheet' && method === 'PUT') {
+    requireAdmin(user);
+    const body = await readBody(req);
+    const cfg = tagSheetConfig();
+    const c = body.config || body;
+    if (c.enabled !== undefined) cfg.enabled = !!c.enabled;
+    if (c.tab !== undefined) cfg.tab = String(c.tab || '').trim().slice(0, 80) || 'Tag Requests';
+    if (c.sheetLink !== undefined) cfg.sheetLink = String(c.sheetLink || '').trim().slice(0, 500);
+    if (c.onSubmit !== undefined) cfg.onSubmit = !!c.onSubmit;
+    if (c.onStatus !== undefined) cfg.onStatus = !!c.onStatus;
+    if (c.rowMode !== undefined && ['class', 'agent', 'request'].includes(c.rowMode)) cfg.rowMode = c.rowMode;
+    if (Array.isArray(c.columns)) {
+      const cols = c.columns.map((x) => String(x)).filter((x) => TAG_SHEET_FIELDS[x]);
+      if (cols.length) cfg.columns = [...new Set(cols)];
+    }
+    cfg.updatedAt = new Date().toISOString(); cfg.updatedBy = user.username;
+    await persist('notify');
+    logAudit(user, 'tag_sheet_config', { note: `enabled ${cfg.enabled} · tab ${cfg.tab} · ${cfg.columns.length} cols · ${cfg.rowMode}`, ip: clientIp(req) });
+    return sendJson(res, 200, { ok: true, config: cfg, connected: !!sheetSyncStore() });
+  }
+  if (p === '/api/tag-request-sheet/test' && method === 'POST') {
+    requireAdmin(user);
+    const store = sheetSyncStore();
+    if (!store) throw new HttpError(400, 'Apps Script connect nahi hai — Render me APPS_SCRIPT_URL + APPS_SCRIPT_SECRET set karo (Storage setup guide: STORAGE_SETUP.md).');
+    let ping;
+    try { ping = await store.call('ping'); }
+    catch (err) { throw new HttpError(502, `Sheet ping fail: ${err.message}`); }
+    return sendJson(res, 200, { ok: true, tab: ping.tab || 'APP_STORAGE', spreadsheet: ping.spreadsheet || '', url: ping.url || '', note: 'Ping OK — appendrows action ke liye Apps Script ka naya Code.gs (v3.25) deploy karna zaroori hai.' });
+  }
+  if (p === '/api/tag-request-sheet/push' && method === 'POST') {
+    requireAdmin(user);
+    const body = await readBody(req);
+    const w = workspaceStore();
+    const row = (w.tagRequests || []).find((r) => r.id === String(body.id || ''));
+    if (!row) throw new HttpError(404, 'Tag request nahi mili.');
+    const out = await pushTagRequestToSheet(row, body.event === 'status' ? `status:${row.status}` : 'manual', true);
+    await persist('notify');
+    logAudit(user, 'tag_sheet_push', { target: row.id, note: `${out.added} rows → ${out.tab || ''}`, ip: clientIp(req) });
+    return sendJson(res, 200, { ok: true, added: out.added, tab: out.tab, atRow: out.atRow, url: out.url || '' });
   }
 
   // ---- gviz ----
