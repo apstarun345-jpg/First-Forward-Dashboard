@@ -1,4 +1,4 @@
-# First Forward Dashboard — First Forward + GV Partner (v3.11)
+# First Forward Dashboard — First Forward + GV Partner (v3.21)
 
 Colourful dashboard website built directly on top of **do Google Sheets**:
 
@@ -13,6 +13,17 @@ aur ek **⚖️ GV vs First Forward** page side-by-side comparison deta hai.
 Koi database nahi, koi manual upload nahi — website Google Sheet se data padhti hai
 (Google Visualization API / `gviz`) through a small Node server that also handles **login, users,
 permissions and settings**. Zero npm dependencies.
+
+## ✨ v3.21.0 — ⚡ Fast load · 🧭 filters jo sach me lagte hain · 🔁 FF T+1 (GV live) · 👥 agent drill · 🔊 voice · 🩺 diagnostics
+
+- **⚡ Speed:** server ab HTML/JS/CSS ko **brotli/gzip** me bhejta hai aur `?v=43` wale assets **1 saal immutable** cache hote hain (repeat visit par 45 scripts ek baar hi download). Gviz proxy **stale-while-revalidate** ho gaya — purana data turant, naya peeche se; jo queries sach me use hoti hain wo server cache me **warm** rakhi jaati hain. Preload ab 2 workers + jo tab pehle se load hai use dobara download nahi karta. Net asar: pehla load ~3.3 MB → ~1.5 MB (brotli), dobara visit ~0 network.
+- **🧭 Workspace filters ab poore site par:** naya `filters.js` (`FF.filters`) ek hi resolver deta hai — period / month / channel / TL / agent / class. Home par pehle bar ka **koi asar nahi** hota tha; ab hero chips, today-at-a-glance, GV aaj, FF/GV charts, champions, trend aur KPI drawer sab usi filter se bante hain. Same-hash filter badalne par page turant re-render hota hai (pehle chup-chaap kuch nahi hota tha) + bar me active chips / lag note / offline badge.
+- **🔁 FF T+1 rule (GV live):** First Forward ka issuance data ek din late aata hai, GV live. Isliye **TODAY view → GV ka live number, FF = 0** (saaf "kal aayega" note), **YESTERDAY → GV + FF dono**. Rule `FF.config.ffIssuanceLagDays` (default 1, `0` = off) se configurable hai aur Home, Tag Issued page, KPI drawer ke day-view aur raw tag list — sab par lagta hai. GV rows (EIR master ID `5845036`) kabhi lag se nahi hatti.
+- **👥 KPI drill-down "andar se andar tak":** har KPI card (GV/FF, Replacement, Chassis, VC4, VC20, VC5+, Commercial) par click → drawer me **"👥 Kisne lagaye"** — agent-wise list GV agent ya FF agent channel badge ke saath, TL-wise breakdown. Kisi bhi agent par click → uski day-wise / class-wise detail (rank + Performance / Master profile links), kisi bhi din par click → us din ka breakdown, chips se channel/class filter — aur tag-level raw rows (search + Excel/CSV).
+- **🔊 Voice announcer fix:** browser ka `interrupted`/`canceled` error ab **block nahi** maana jaata (sirf asli `not-allowed`), ek baar auto-retry hota hai, aur nudge/menu me **"🔊 Enable sound"** button hai jo click ke andar unlock + test bolta hai. Status pill "SOUND READY ✓ / EK TAP ME CHALU / BROWSER BLOCK" saaf batata hai. `dev/voice-unlock.test.js` + `dev/office-bell.test.js` cover karte hain.
+- **🩺 Diagnostics ab sach me fix karta hai:** safe fixes **site-wide persist** hote hain (localStorage `ff_diag_repairs` + inject ki gayi stylesheet) — page change / reload ke baad bhi lagu, aur "Clear all repairs" se hata sakte ho. Naya **🌐 Scan every page** button har permitted page ko render karke check karta hai (pehle sirf current page dekhta tha), aur scan me module contracts, FF lag config aur `data-kpi` spec validity bhi check hoti hai.
+- **🐞 Bug fixes:** GV Commission ke per-class boards aur Cockpit Agent 360 drawer me `ReferenceError: s is not defined` (crash) fix; Home GV aaj grid me "Aaj ki Rate" wapas; tagIssued par FF T+1 note.
+- **🧪 Tests:** naya `dev/filters.test.js` (lag + filter semantics), smoke me T+1, workspace-filter aur agent-drill checks. `npm test` = 217 pass.
 
 ## ✨ v3.15.0 — 🎯 Suggested dispatch: DONO criteria (stock − aur bina stock), har jagah
 - Har suggestion ab **do figures** dikhata hai — **stock ke baad** (avg/day × din − stock) aur **bina stock ghataye** (avg/day × din): master search (TLS + agents), profile drawer, Performance dispatch plan, GV dashboard + GV Stock Report, Direct Agents, New Agents.

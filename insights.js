@@ -655,6 +655,7 @@ FF.pages = FF.pages || {};
       const g = r.group || (G.classGroup ? G.classGroup(r.cls) : r.cls) || 'NA';
       const slot = ['VC4', 'VC20', 'VC5+'].includes(g) ? g : 'VC5+';
       mapAdd(map, key, () => ({ label: r.agentName || r.agentId || 'Unknown agent', id: r.agentId || '', tlName: r.tlName || '', VC4: blank(), VC20: blank(), 'VC5+': blank(), exact: {}, totalCommission: 0, totalPaid: 0, totalTags: 0, rate: null }), (o) => {
+        const s = o[slot];   // fix: pehle yahan bare `s` likha tha (ReferenceError) — ab class slot sahi se update hota hai
         const n = gvIssuanceN(r);
         s.tags += n; s.amount += r.amount || 0; s.commission += r.commission || 0;
         if (r.commissionHasValue === true) { s.paid++; o.totalPaid++; }

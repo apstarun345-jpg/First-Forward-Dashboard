@@ -124,6 +124,8 @@ await run('app.onLogin boot (sidebar/status)', async () => { await FF.app.onLogi
 await run('v3.11 · topbar master search bar mount (dropdown input ke neeche, overlap nahi)', async () => {
   // onLogin ke baad bar khud mount ho jaata hai; DOM shim HTML strings nahi rakhta,
   // isliye module ka mount-flag + light index readiness verify karte hain.
+  // mount async hota hai (agents + GV master ke aane par) — isliye thoda intezaar karo, warna test flaky.
+  for (let i = 0; i < 30 && !FF.masterSearch.topbarMounted; i++) await settle(100);
   if (!FF.masterSearch.topbarMounted) throw new Error('topbar me master search bar mount nahi hua');
   await FF.masterSearch.buildLight();
   if (!FF.masterSearch.ready) throw new Error('search index ready nahi hua');
@@ -1012,7 +1014,7 @@ await run('auth helpers (avatar/role)', async () => {
 });
 await run('sheet.render StockDataa', () => pages.sheet.render(root(), { name: 'StockDataa' }, {}), true);
 await run('sheet.render REPORT', () => pages.sheet.render(root(), { name: 'REPORT' }, {}), true);
-await run('settings.render (all tabs)', async () => { for (const tab of ['account', 'diagnostics', 'sound', 'brand', 'sources', 'access', 'data', 'rules', 'features', 'contacts', 'users', 'links', 'audit', 'backup']) { const r = root(); await pages.settings.render(r, { tab }, {}); await settle(20); if (tab === 'diagnostics' && !(r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('')).includes('Scan site now')) throw new Error('site diagnostics tab render nahi hua'); } });
+await run('settings.render (all tabs)', async () => { for (const tab of ['account', 'diagnostics', 'sound', 'brand', 'sources', 'access', 'data', 'rules', 'features', 'contacts', 'users', 'links', 'audit', 'backup']) { const r = root(); await pages.settings.render(r, { tab }, {}); await settle(20); if (tab === 'diagnostics') { const h = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join(''); if (!h.includes('id="diag-scan"') || !h.includes('id="diag-scan-all"') || !h.includes('diag-results')) throw new Error('site diagnostics tab render nahi hua (scan / scan-all / results missing)'); } } });
 await run('v3.16.1 · My access me sirf granted cards (locked ⛔ cards nahi)', async () => {
   const realCan = FF.auth.can;
   // member simulation: sirf Management ke 4 pages + ek sheet + ek action
@@ -1068,6 +1070,79 @@ await run('liveView.openNotification (report / settings / login)', async () => {
   if (!drawerHtml().includes('data-lv-watch')) throw new Error('live view button missing');
   FF.app.closeDrawer();
 });
+await run('🩺 diagnostics · safe fix site-wide persist hota hai (reload ke baad bhi)', async () => {
+  const dg = FF.pages.settings && FF.pages.settings.diagnostics;
+  if (!dg || typeof dg.applyFix !== 'function') throw new Error('diagnostics API missing');
+  dg.clearRepairs();
+  if (dg.repairs().length) throw new Error('clearRepairs ke baad bhi rules bache');
+  const el = new El('div'); el.classList.add('kpi'); el.style = {};
+  const ok = dg.applyFix({ safe: true, fixType: 'wrap', element: el, repairSelector: '.kd-tbl tr.clickable' });
+  if (!ok) throw new Error('safe fix apply nahi hua');
+  const rules = dg.repairs();
+  if (!rules.some((r) => r.selector === '.kd-tbl tr.clickable' && r.fixType === 'wrap')) throw new Error('repair rule localStorage me save nahi hui');
+  if (localStorage.getItem('ff_diag_repairs') === null) throw new Error('ff_diag_repairs persist nahi hua');
+  if (!dg.saved({ safe: true, fixType: 'wrap', repairSelector: '.kd-tbl tr.clickable' })) throw new Error('saved() rule ko nahi pehchanta — reload ke baad "fixed" nahi dikhega');
+  if (dg.saved({ safe: true, fixType: 'wrap', repairSelector: '.something-else' })) throw new Error('saved() galat selector par true');
+  // unsafe finding browser se fix nahi hona chahiye
+  if (dg.applyFix({ safe: false, fixType: 'wrap', element: el, repairSelector: '.x' })) throw new Error('unsafe finding fix ho gayi');
+  dg.clearRepairs();
+  if (dg.repairs().length) throw new Error('cleanup fail');
+});
+
+await run('🔁 FF T+1 lag · aaj FF 0 (kal aayega), GV live · kpiDetail bhi lag-aware', async () => {
+  const K = FF.filters;
+  if (!K || !K.ffLagOn || !K.ffLagOn()) throw new Error('filters lag API missing/off');
+  const daily = FF.store.get('daily') || [];
+  const ffToday = daily.filter((r) => r.channel !== 'GV Partner' && r.key === FF.util.dateKey(new Date()));
+  const kept = K.dropLaggedFf(ffToday);
+  if (kept.length) throw new Error('aaj ki FF rows lag ke bawajood count me aa rahi hain');
+  const gvToday = daily.filter((r) => r.channel === 'GV Partner' && r.key === FF.util.dateKey(new Date()));
+  if (K.dropLaggedFf(gvToday).length !== gvToday.length) throw new Error('GV rows lag se hat gayi — GV hamesha live hona chahiye');
+  // kpiDetail: aaj ka FF card 0 dikhaye, note ke saath
+  const d = FF.kpiDetail.specFrom({ dataset: { kpi: 'src=ff&scope=day&date=' + FF.util.dateKey(new Date()) }, getAttribute: () => 'FF aaj', querySelector: () => null, classList: { contains: () => false } });
+  await FF.kpiDetail.open(d);
+  const html = drawerHtml();
+  if (!/T\+1|kal aayega|0 tags/i.test(html)) throw new Error('aaj ke FF drawer me T+1 note nahi mila');
+  FF.app.closeDrawer();
+});
+
+await run('👥 KPI drill: agent drawer (kisne lagaye) + us agent ka day-wise detail', async () => {
+  const daily = FF.store.get('daily') || [];
+  const gv = daily.filter((r) => r.channel === 'GV Partner');
+  const pick = (rows) => rows.slice().sort((a, b) => (b.n || 0) - (a.n || 0))[0];
+  const gvAgent = pick(gv);
+  const ym = FF.util.ymKey(new Date());
+  await FF.kpiDetail.open({ src: 'both', scope: 'mtd', ym, title: 'KPI drill test' });
+  let html = drawerHtml();
+  if (!/Kisne lagaye/.test(html)) throw new Error('issuance drawer me agent-wise (kisne lagaye) section nahi mila');
+  if (!/data-kd-agent=/.test(html)) throw new Error('agent rows clickable nahi hain');
+  if (!/kd-badge (gv|ff)/.test(html)) throw new Error('GV/FF channel badge missing');
+  if (gvAgent) {
+    await FF.kpiDetail.open({ src: 'both', scope: 'mtd', ym, agent: gvAgent.agentName, channel: 'gv', title: `${gvAgent.agentName} · GV agent` });
+    html = drawerHtml();
+    if (!html.includes(encodeURIComponent(gvAgent.agentName))) throw new Error('agent drawer me agent ka naam/links nahi mile');
+    if (!/data-kd-agent-day=/.test(html)) throw new Error('agent drawer me day-wise drill rows nahi hain');
+    if (!/GV Partner agent/.test(html)) throw new Error('agent drawer me GV channel kicker nahi mila');
+  }
+  FF.app.closeDrawer();
+});
+
+await run('🧭 Home workspace filter asar karta hai + today view me FF 0 (T+1)', async () => {
+  const htmlOf = (r) => r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  // 1) filter bar ka period=today → FF aaj 0 + "kal aayega" note, GV live
+  const r1 = root(); await pages.home.render(r1, { period: 'today' }, {}); await settle(500);
+  const h1 = htmlOf(r1);
+  if (!/kal aayega/.test(h1)) throw new Error('today view me "FF kal aayega" note nahi mila');
+  if (!/GV aaj \(live\)/.test(h1.replace(/[▲▼]/g, ''))) throw new Error('today view me GV live chip nahi mila');
+  if (!/home-filter-banner/.test(h1)) throw new Error('home filter banner missing');
+  // 2) channel=gv → FF chips 0, GV number > 0 (mock me GV data hai)
+  const r2 = root(); await pages.home.render(r2, { channel: 'gv', period: 'month' }, {}); await settle(500);
+  const h2 = htmlOf(r2);
+  if (/🟦 FF MTD[^<]*<b>0<\/b>/.test(h2) === false && !/Filters:/.test(h2)) throw new Error('channel=gv par FF MTD zero nahi hua');
+  // 3) alag filters → alag output (bar "bilkul kaam nahi karta" nahi hona chahiye)
+  if (h1 === h2) throw new Error('filter badalne par Home ka output bilkul same reh gaya');
+});
+
 await run('logout', async () => { await FF.auth.api('/api/auth/logout', 'POST', {}); });
 
 log(failures.length ? `\n${failures.length} FAILED: ${failures.join(', ')}` : '\nALL OK');

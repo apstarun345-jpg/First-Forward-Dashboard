@@ -1336,8 +1336,64 @@ FF.pages = FF.pages || {};
     if (route === 'sheet') return true;
     return !!(FF.pages && FF.pages[route]);
   }
+  /** 🛠️ Persistent safe-repair layer: fixes browser me apply hote hi localStorage me rule ban jaate hain
+      aur ek global stylesheet se POORE SITE par (har page, har reload) lagu rehte hain — pehle fix
+      sirf current DOM par lagta tha aur page change/reload par gayab ho jaata tha. */
+  const LS_REPAIRS = 'ff_diag_repairs';
+  const REPAIR_CSS = {
+    wrap: 'min-width:0;max-width:100%;overflow-wrap:anywhere;word-break:break-word;white-space:normal',
+    control: 'max-width:100%;min-width:0;flex-shrink:1;white-space:normal',
+    kpi: 'min-width:0;max-width:100%'
+  };
+  function repairRules() { try { const v = JSON.parse(localStorage.getItem(LS_REPAIRS) || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } }
+  function applyRepairCss(rules) {
+    try {
+      if (typeof document === 'undefined') return;
+      const head = document.head || (document.querySelector && document.querySelector('head'));
+      if (!head) return;
+      const list = (rules || repairRules()).filter((r) => r && r.selector && REPAIR_CSS[r.fixType]);
+      let tag = document.getElementById('ff-diag-style');
+      if (!tag) { tag = document.createElement('style'); tag.id = 'ff-diag-style'; head.appendChild(tag); }
+      tag.textContent = list.map((r) => `${r.selector}{${REPAIR_CSS[r.fixType]}}`).join('\n');
+      document.documentElement.classList.toggle('ff-diag-repairs', list.length > 0);
+    } catch { /* CSS layer optional — element-level fix phir bhi laga rehta hai */ }
+  }
+  function writeRepairs(rules) {
+    try { localStorage.setItem(LS_REPAIRS, JSON.stringify(rules.slice(-150))); } catch { /* private mode */ }
+    applyRepairCss(rules);
+  }
+  function addRepair(f) {
+    const selector = f.repairSelector || diagStableSelector(f.element);
+    if (!selector || !REPAIR_CSS[f.fixType]) return false;
+    const rules = repairRules().filter((r) => r.selector !== selector);
+    rules.push({ selector, fixType: f.fixType, at: Date.now(), page: f.page || '' });
+    writeRepairs(rules);
+    f.repairSelector = selector;
+    return true;
+  }
+  /** Element ka stable selector (id → class → nth-of-type path) — persistent CSS rule ke liye. */
+  function diagStableSelector(el) {
+    if (!el || !el.tagName || typeof document === 'undefined') return '';
+    if (el.id) return `#${el.id}`;
+    const parts = [];
+    let node = el;
+    let depth = 0;
+    while (node && node.tagName && node !== document.body && depth < 4) {
+      let sel = String(node.tagName).toLowerCase();
+      if (node.classList && node.classList.length) sel += '.' + [...node.classList].slice(0, 2).join('.');
+      const parent = node.parentElement;
+      if (parent && parent.children) {
+        const sibs = [...parent.children].filter((x) => x.tagName === node.tagName);
+        if (sibs.length > 1) sel += `:nth-of-type(${sibs.indexOf(node) + 1})`;
+      }
+      parts.unshift(sel);
+      node = parent || node.parentNode;
+      depth++;
+    }
+    return parts.join(' > ');
+  }
   function diagFinding(out, f) {
-    out.push({ id: f.id || `diag-${out.length + 1}`, severity: f.severity || 'low', category: f.category || 'UI', safe: f.safe === true, page: f.page || diagPage(), selector: f.selector || 'document', context: f.context || '—', explanation: f.explanation || '', suggestion: f.suggestion || '', fixType: f.fixType || '', element: f.element || null, fixed: false });
+    out.push({ id: f.id || `diag-${out.length + 1}`, severity: f.severity || 'low', category: f.category || 'UI', safe: f.safe === true, page: f.page || diagPage(), selector: f.selector || 'document', context: f.context || '—', explanation: f.explanation || '', suggestion: f.suggestion || '', fixType: f.fixType || '', element: f.element || null, repairSelector: f.repairSelector || (f.element ? diagStableSelector(f.element) : ''), fixed: false });
   }
   function scanDomDiagnostics() {
     const out = [];
@@ -1390,37 +1446,80 @@ FF.pages = FF.pages || {};
       if (!def || !def.id || def.id === 'sheet') return;
       if (!FF.pages || !FF.pages[def.id] || typeof FF.pages[def.id].render !== 'function') diagFinding(out, { id: `route-missing-${def.id}`, category: 'Links / actions', severity: 'high', safe: false, page: 'Site routes', selector: `#/${def.id}`, context: `${def.label || def.id} route`, explanation: 'Registered navigation page ka render module missing hai.', suggestion: 'Page module/script registration restore karo; browser se safe fix nahi kiya ja sakta.' });
     });
+    // Core module contract — koi module missing ho to uspar nirbhar pages chup-chaap toot jaate hain.
+    [['util', 'FF.util'], ['model', 'FF.model'], ['store', 'FF.store'], ['gv', 'FF.gv'], ['charts', 'FF.charts'], ['filters', 'FF.filters'], ['kpiDetail', 'FF.kpiDetail']].forEach(([id, path]) => {
+      const obj = path.split('.').reduce((acc, k) => (acc == null ? acc : acc[k]), typeof window !== 'undefined' ? window : {});
+      if (!obj) diagFinding(out, { id: `module-${id}-missing`, category: 'Core modules', severity: 'high', safe: false, page: 'Site shell', selector: path, context: `${path} load nahi hua`, explanation: `Ye module missing hai — ${id} par nirbhar pages/KPI drill-down kaam nahi karenge.`, suggestion: 'index.html me script tag (aur cache version) check karo, phir hard reload karo.' });
+    });
+    // 🔁 FF T+1 lag config sanity
+    if (FF.filters && typeof FF.filters.ffLagDays === 'function') {
+      const lag = FF.filters.ffLagDays();
+      if (!Number.isFinite(lag) || lag < 0 || lag > 7) diagFinding(out, { id: 'config-ff-lag', category: 'Data source', severity: 'medium', safe: false, page: 'Site config', selector: 'FF.config.ffIssuanceLagDays', context: `ffIssuanceLagDays = ${String(lag)}`, explanation: 'FF issuance lag 0–7 din ke beech hona chahiye (default 1 = aaj ka data kal).', suggestion: 'Settings → Sheets & tabs / config me ffIssuanceLagDays sahi karo.' });
+    }
+    // KPI card contract: har data-kpi spec parse hona chahiye, warna click par galat drawer khulta hai.
+    const KNOWN_SRC = ['ff', 'gv', 'both'];
+    const KNOWN_SCOPE = ['day', 'mtd', 'month', 'range', 'stock', 'agents', 'status', 'stockreport'];
+    const KNOWN_F = ['vc4', 'comm', 'vc20', 'vc5p', 'repl', 'chassis', 'wrong', 'gv', 'ff'];
+    [...root.querySelectorAll('[data-kpi]')].forEach((el) => {
+      const raw = el.getAttribute('data-kpi');
+      if (!raw) return;
+      const p = new URLSearchParams(raw);
+      const bad = [];
+      if (p.get('src') && !KNOWN_SRC.includes(p.get('src'))) bad.push(`src=${p.get('src')}`);
+      if (p.get('scope') && !KNOWN_SCOPE.includes(p.get('scope'))) bad.push(`scope=${p.get('scope')}`);
+      String(p.get('f') || '').split(',').map((x) => x.trim()).filter(Boolean).forEach((x) => { if (!KNOWN_F.includes(x)) bad.push(`f=${x}`); });
+      if (bad.length) diagFinding(out, { id: `kpi-spec-${diagSelector(el)}-${out.length}`, category: 'KPI card consistency', severity: 'medium', safe: false, page: route, selector: diagSelector(el), context: `${diagText(el, 60) || 'KPI'} → data-kpi="${raw}"`, explanation: `KPI drill-down spec me unknown key: ${bad.join(', ')}. Click karne par drawer galat ya khali aa sakta hai.`, suggestion: `Allowed: src ${KNOWN_SRC.join('/')} · scope ${KNOWN_SCOPE.join('/')} · f ${KNOWN_F.join('/')}.` });
+    });
     return out;
   }
+  // Boot par saved repairs apply karo — fix har page/reload par pehle se lagi rehti hai.
+  try { if (typeof document !== 'undefined') { if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => applyRepairCss()); else applyRepairCss(); } } catch { /* ignore */ }
   function applyDiagnosticFix(f) {
     if (!f || !f.safe) return false;
     const el = f.element;
-    if (!el) return false;
-    if (f.fixType === 'wrap') { el.classList.add('ff-diagnostic-fixed'); el.style.minWidth = '0'; el.style.maxWidth = '100%'; el.style.overflowWrap = 'anywhere'; el.style.wordBreak = 'break-word'; el.style.whiteSpace = 'normal'; }
-    else if (f.fixType === 'control') { el.classList.add('ff-diagnostic-control-fixed'); el.style.maxWidth = '100%'; el.style.minWidth = '0'; el.style.flexShrink = '1'; el.style.whiteSpace = 'normal'; }
-    else if (f.fixType === 'kpi') { el.classList.add('ff-diagnostic-kpi-fixed'); el.style.minWidth = '0'; el.style.maxWidth = '100%'; }
-    else if (f.fixType === 'aria') el.setAttribute('aria-label', el.getAttribute('title') || 'Action');
-    else if (f.fixType === 'alt') el.setAttribute('alt', '');
-    else return false;
-    f.fixed = true;
+    if (f.fixType === 'aria') { if (!el) return false; el.setAttribute('aria-label', el.getAttribute('title') || 'Action'); f.fixed = true; return true; }
+    if (f.fixType === 'alt') { if (!el) return false; el.setAttribute('alt', ''); f.fixed = true; return true; }
+    if (!REPAIR_CSS[f.fixType]) return false;
+    // 1) Site-wide persistent CSS rule (page change / reload ke baad bhi lagu rehta hai)
+    const saved = addRepair(f);
+    // 2) Turant visible asar current element par
+    if (el && el.style) {
+      el.classList.add(f.fixType === 'wrap' ? 'ff-diagnostic-fixed' : f.fixType === 'control' ? 'ff-diagnostic-control-fixed' : 'ff-diagnostic-kpi-fixed');
+      Object.assign(el.style, f.fixType === 'wrap'
+        ? { minWidth: '0', maxWidth: '100%', overflowWrap: 'anywhere', wordBreak: 'break-word', whiteSpace: 'normal' }
+        : f.fixType === 'control'
+          ? { maxWidth: '100%', minWidth: '0', flexShrink: '1', whiteSpace: 'normal' }
+          : { minWidth: '0', maxWidth: '100%' });
+    }
+    // Element DOM me na ho (ya naya render ho) par rule hai to bhi fix ho chuka maana jayega.
+    f.fixed = saved || !!el;
     return true;
+  }
+  /** Kya is finding ka repair pehle se saved hai? (page reload ke baad bhi "Fixed" dikhe) */
+  function repairSaved(f) {
+    if (!f || !f.safe || !REPAIR_CSS[f.fixType]) return false;
+    const selector = f.repairSelector || diagStableSelector(f.element);
+    return !!selector && repairRules().some((r) => r.selector === selector && r.fixType === f.fixType);
   }
   function renderDiagnosticResults(body) {
     const box = U.$('#diag-results', body), status = U.$('#diag-status', body), fixAll = U.$('#diag-fix-all', body), scan = U.$('#diag-scan', body);
     if (!box) return;
-    const list = diagnosticState.findings || [];
+    const list = (diagnosticState.findings || []).map((f) => ({ ...f, fixed: f.fixed || repairSaved(f) }));
+    diagnosticState.findings = list;
     if (scan) scan.textContent = diagnosticState.scannedAt ? '↻ Rescan site' : '🩺 Scan site now';
     const safe = list.filter((f) => f.safe && !f.fixed);
+    const savedCount = repairRules().length;
     const counts = ['high', 'medium', 'low'].map((s) => `${s}: ${list.filter((f) => f.severity === s).length}`).join(' · ');
-    if (status) status.textContent = diagnosticState.running ? 'Scan chal raha hai…' : (diagnosticState.scannedAt ? `${list.length} findings · ${counts} · ${U.timeLabel(diagnosticState.scannedAt)}` : 'Abhi scan nahi hua');
+    if (status) status.textContent = diagnosticState.running ? 'Scan chal raha hai…' : (diagnosticState.scannedAt ? `${list.length} findings · ${counts}${savedCount ? ` · 🛠 ${savedCount} saved repair${savedCount > 1 ? 's' : ''} active` : ''} · ${U.timeLabel(diagnosticState.scannedAt)}` : 'Abhi scan nahi hua');
     if (fixAll) { fixAll.disabled = !safe.length; fixAll.textContent = safe.length ? `🛠 Fix all safe (${safe.length})` : '🛠 Fix all safe'; }
     if (!diagnosticState.scannedAt) { box.innerHTML = '<div class="diag-empty">🩺 Scan button dabao — current rendered pages, registered actions, KPI cards, accessibility aur available FF data consistency checks run honge.</div>'; return; }
-    if (!list.length) { box.innerHTML = '<div class="diag-ok">✅ Koi detectable issue nahi mila. Source snapshots aur responsive UI normal dikh rahe hain.</div>'; return; }
-    box.innerHTML = list.map((f) => `<article class="diag-finding ${esc(f.severity)} ${f.fixed ? 'fixed' : ''}">
+    if (!list.length) { box.innerHTML = `<div class="diag-ok">✅ Koi detectable issue nahi mila. Source snapshots, KPI cards, routes aur responsive UI normal dikh rahe hain.${savedCount ? `<br><small class="dim">🛠 ${savedCount} saved repair rule active — ye har page par lagu rehta hai.</small>` : ''}</div>`; return; }
+    box.innerHTML = `${savedCount ? `<div class="diag-saved"><b>🛠 ${savedCount} saved repair${savedCount > 1 ? 's' : ''}</b> poore site par lagu hain (page change / reload ke baad bhi). <button class="btn small" type="button" data-diag-clear-repairs>Clear all repairs</button></div>` : ''}
+    ${list.map((f) => `<article class="diag-finding ${esc(f.severity)} ${f.fixed ? 'fixed' : ''}">
       <div class="diag-finding-head"><span class="diag-severity">${f.severity === 'high' ? '⛔ High' : f.severity === 'medium' ? '⚠️ Medium' : 'ℹ️ Low'}</span><b>${esc(f.category)}</b><small>${esc(f.page)} · ${esc(f.selector)}</small></div>
       <p><b>${esc(f.context)}</b><br>${esc(f.explanation)}</p><p class="dim small"><b>Suggested fix:</b> ${esc(f.suggestion)}</p>
-      ${f.safe && !f.fixed ? `<button class="btn small primary" data-diagnostic-fix="${esc(f.id)}">🛠 Fix</button>` : f.fixed ? '<span class="diag-fixed">✅ Fixed — rescan recommended</span>' : '<span class="diag-source-note">🗂️ Source/config correction required — no unsafe browser fix applied</span>'}
-    </article>`).join('');
+      ${f.safe && !f.fixed ? `<button class="btn small primary" data-diagnostic-fix="${esc(f.id)}">🛠 Fix (site-wide)</button>` : f.fixed ? '<span class="diag-fixed">✅ Fixed &amp; saved — poore site par lagu (rescan recommended)</span>' : '<span class="diag-source-note">🗂️ Source/config correction required — no unsafe browser fix applied</span>'}
+    </article>`).join('')}`;
   }
   async function runSiteDiagnostics(body) {
     if (diagnosticState.running) return;
@@ -1444,8 +1543,30 @@ FF.pages = FF.pages || {};
     }
     diagnosticState.findings = findings; diagnosticState.scannedAt = Date.now(); diagnosticState.running = false; renderDiagnosticResults(body);
   }
+  /** 🌐 Poora site scan — har permitted page ko render karke uske DOM ko check karta hai.
+      (Pehle scan sirf current page + shell dekhta tha, isliye "diagnose kaam nahi karta" lagta tha.) */
+  async function scanEveryPage(onProgress) {
+    const app = FF.app;
+    if (!app) throw new Error('App shell abhi ready nahi hai');
+    const startPage = (app.current && app.current.page) || 'settings';
+    const pages = (app.PAGES || []).filter((d) => d && d.id && d.id !== 'settings' && FF.pages[d.id] && typeof FF.pages[d.id].render === 'function'
+      && !(d.adminOnly && !A.isAdmin()) && (!d.perm || A.can(d.perm)));
+    const found = []; const failed = [];
+    for (let i = 0; i < pages.length; i++) {
+      const def = pages[i];
+      if (onProgress) onProgress(i + 1, pages.length, def);
+      try {
+        app.navigate(def.id, {});
+        await new Promise((r) => setTimeout(r, 900));   // render + layout settle
+        found.push(...scanDomDiagnostics());
+      } catch (err) { failed.push({ page: def.id, label: def.label || def.id, error: err && err.message ? err.message : String(err) }); }
+    }
+    if (startPage) { app.navigate(startPage, startPage === 'settings' ? { tab: 'diagnostics' } : {}); await new Promise((r) => setTimeout(r, 700)); }
+    return { found, failed, pages: pages.length };
+  }
+
   function diagnosticsTab() {
-    return `${section('🩺 Site diagnostics & safe repair', '<p>Poore rendered dashboard surface par responsive overflow, clipped controls, KPI card structure, links/actions, accessibility aur available FF source totals check honge. UI/configuration issues ko per-finding <b>Fix</b> se safely repair kar sakte ho; EIR/REPORT mismatch ko browser me fake nahi kiya jayega.</p><div class="diag-scope"><span>🔎 UI: site shell + current page + open drawers</span><span>🗂️ Data: FF EIR daily/class vs REPORT reconciliation</span><span>♿ A11y: labels, alt text, hit areas</span></div><div class="btn-row"><button class="btn primary" id="diag-scan">🩺 Scan site now</button><button class="btn" id="diag-fix-all" disabled>🛠 Fix all safe</button><span class="dim small" id="diag-status">Abhi scan nahi hua</span></div><div id="diag-results" class="diag-results"></div>', 'Safe UI fixes apply hote hi rescan karo; source/data findings ko sheet mapping se repair karo.')}`;
+    return `${section('🩺 Site diagnostics & safe repair', '<p>Poore rendered dashboard surface par responsive overflow, clipped controls, KPI card structure, links/actions, accessibility aur available FF source totals check honge. UI/configuration issues ko per-finding <b>Fix</b> se safely repair kar sakte ho; EIR/REPORT mismatch ko browser me fake nahi kiya jayega.</p><div class="diag-scope"><span>🔎 UI: site shell + current page + open drawers</span><span>🗂️ Data: FF EIR daily/class vs REPORT reconciliation</span><span>♿ A11y: labels, alt text, hit areas</span></div><div class="btn-row"><button class="btn primary" id="diag-scan">🩺 Scan is page</button><button class="btn" id="diag-scan-all">🌐 Scan every page</button><button class="btn" id="diag-fix-all" disabled>🛠 Fix all safe</button><span class="dim small" id="diag-status">Abhi scan nahi hua</span></div><div id="diag-results" class="diag-results"></div>', 'Safe UI fixes apply hote hi rescan karo; source/data findings ko sheet mapping se repair karo.')}`;
   }
 
   // ---- page ------------------------------------------------------------------------------------
@@ -1487,6 +1608,30 @@ FF.pages = FF.pages || {};
       const diagScan = U.$('#diag-scan', body);
       const diagFixAll = U.$('#diag-fix-all', body);
       if (diagScan) diagScan.addEventListener('click', () => U.withButtonBusy(diagScan, () => runSiteDiagnostics(body), 'Scanning…'));
+      const diagAll = U.$('#diag-scan-all', body);
+      if (diagAll) diagAll.addEventListener('click', async () => {
+        const status = U.$('#diag-status', body);
+        diagAll.disabled = true;
+        try {
+          diagnosticState.running = true;
+          const out = await scanEveryPage((i, n, def) => { if (status) status.textContent = `🌐 ${i}/${n} scan ho raha hai · ${def.label || def.id}…`; });
+          // Har page ke findings merge karo (page label ke saath) + route errors bhi finding bana do.
+          const merged = out.found;
+          out.failed.forEach((f) => merged.push({ id: `route-error-${f.page}`, severity: 'high', category: 'Links / actions', safe: false, page: f.label, selector: `#/${f.page}`, context: `${f.label} render fail`, explanation: f.error, suggestion: 'Us page ka data/module check karo — render ke waqt exception aa raha hai.', fixed: false }));
+          diagnosticState.findings = merged;
+          diagnosticState.scannedAt = Date.now();
+          diagnosticState.running = false;
+          body.innerHTML = diagnosticsTab();
+          bindTab();
+          renderDiagnosticResults(body);
+          const after = U.$('#diag-status', body);
+          if (after) after.textContent = `${merged.length} findings · ${out.pages} pages scanned · ${U.timeLabel(diagnosticState.scannedAt)}`;
+          U.toast(`🌐 ${out.pages} pages scan ho gaye — ${merged.length} findings${out.failed.length ? ` · ${out.failed.length} page render fail` : ''}`, merged.length ? 'warn' : 'ok');
+        } catch (err) {
+          diagnosticState.running = false; diagAll.disabled = false;
+          U.toast(err.message || 'Site scan fail hua', 'err');
+        }
+      });
       if (diagFixAll) diagFixAll.addEventListener('click', () => {
         const safe = (diagnosticState.findings || []).filter((f) => f.safe && !f.fixed);
         safe.forEach(applyDiagnosticFix);
@@ -1495,8 +1640,15 @@ FF.pages = FF.pages || {};
       });
       U.$$('[data-diagnostic-fix]', body).forEach((btn) => btn.addEventListener('click', () => {
         const finding = (diagnosticState.findings || []).find((f) => f.id === btn.dataset.diagnosticFix);
-        if (applyDiagnosticFix(finding)) { renderDiagnosticResults(body); U.toast('Safe UI fix apply ho gaya — rescan ho raha hai ✓', 'ok'); void runSiteDiagnostics(body); }
+        if (applyDiagnosticFix(finding)) { renderDiagnosticResults(body); U.toast('🛠 Safe UI fix site-wide apply + save ho gaya ✓', 'ok'); void runSiteDiagnostics(body); }
+        else U.toast('Ye finding browser se safely fix nahi hoti — source/config theek karo', 'warn');
       }));
+      const clearRepairs = U.$('[data-diag-clear-repairs]', body);
+      if (clearRepairs) clearRepairs.addEventListener('click', () => {
+        writeRepairs([]);
+        U.toast('Saare saved repairs hata diye', 'warn');
+        renderDiagnosticResults(body);
+      });
       // account
       // 🛡️ My access cards — locked cards par toast + live data summary (sirf in-memory, no network).
       U.$$('[data-acc-locked]', body).forEach((b) => b.addEventListener('click', () => U.toast(`⛔ "${b.dataset.accLocked}" ke liye access chahiye — admin se Settings → Users me enable karwao.`, 'err')));
@@ -1889,5 +2041,12 @@ FF.pages = FF.pages || {};
     await draw();
   }
 
-  FF.pages.settings = { title: 'Settings', render, diagnostics: { scanDom: scanDomDiagnostics, state: diagnosticState } };
+  FF.pages.settings = {
+    title: 'Settings', render,
+    diagnostics: {
+      scanDom: scanDomDiagnostics, state: diagnosticState,
+      applyFix: applyDiagnosticFix, repairs: repairRules, clearRepairs: () => writeRepairs([]),
+      stableSelector: diagStableSelector, repairCss: REPAIR_CSS, saved: repairSaved
+    }
+  };
 })(window.FF);

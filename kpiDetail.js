@@ -89,8 +89,15 @@ window.FF = window.FF || {};
     if (!daily) { try { daily = await FF.store.need('daily'); } catch { daily = []; } }
     // The same EIR dataset powers FF, GV, and combined drill-downs. GV Master is not an
     // issuance source here; its operational fields are intentionally absent from the count path.
-    return (daily || []).filter((r) => src === 'both' || (src === 'gv' ? r.channel === 'GV Partner' : r.channel !== 'GV Partner'));
+    const rows = (daily || []).filter((r) => src === 'both' || (src === 'gv' ? r.channel === 'GV Partner' : r.channel !== 'GV Partner'));
+    // 🔁 FF issuance T+1 — jo FF date abhi reported nahi hai (aaj) wo FF/both counts me nahi.
+    //    GV rows live rehti hain, isliye lag sirf First Forward par lagta hai.
+    if (FF.filters && FF.filters.ffLagOn && FF.filters.ffLagOn()) return rows.filter((r) => FF.filters.ffVisible(r));
+    return rows;
   }
+  /** Kis date tak FF reported hai — note ke liye. */
+  const ffPendingNote = () => (FF.filters && FF.filters.ffLagOn && FF.filters.ffLagOn())
+    ? `<p class="dim small">🔁 <b>FF data T+1:</b> First Forward ka issuance kal aata hai, GV Partner live chalta hai — isliye aaj ki FF rows 0 hain (kal se dono).</p>` : '';
   function latestKey(rows) { return rows.reduce((m, r) => (r.key > m ? r.key : m), ''); }
   function period(spec, rows) {
     const latest = latestKey(rows);
@@ -145,6 +152,8 @@ window.FF = window.FF || {};
       ${rk.map((r) => { const vals = ck.map((c) => cell.get(`${r}\u0001${c}`) || 0); return `<tr><td><b>${esc(r)}</b></td>${vals.map((v) => `<td class="num">${v ? U.fmt(v) : '<span class="dim">0</span>'}</td>`).join('')}<td class="num"><b>${U.fmt(vals.reduce((a, b) => a + b, 0))}</b></td></tr>`; }).join('')}
       <tr class="kd-total"><td>Total</td>${colTot.map((v) => `<td class="num">${U.fmt(v)}</td>`).join('')}<td class="num">${U.fmt(colTot.reduce((a, b) => a + b, 0))}</td></tr></tbody></table></div></section>`;
   }
+  /** data-kd-spec ke liye safe JSON (single quote escape) — drawer ke andar se filter badalne ke liye. */
+  const specAttr = (obj) => esc(JSON.stringify(obj)).replace(/'/g, '&#39;');
   const stat = (label, value, sub, cls) => `<div class="kd-stat ${cls || ''}"><span>${esc(label)}</span><b>${value}</b>${sub ? `<small>${sub}</small>` : ''}</div>`;
 
   // ---- issuance drill-down ---------------------------------------------------------------------
@@ -171,13 +180,18 @@ window.FF = window.FF || {};
     const byVrn = tally(cur, (r) => vrnBucket(r.vrnType)), byVrnPrev = tally(prev, (r) => vrnBucket(r.vrnType));
     const byGroup = tally(cur, (r) => r.group), byGroupPrev = tally(prev, (r) => r.group);
     const dayTable = days.length > 1 ? `<section class="kd-sec"><h4>📅 Day-wise (${days.length} days)</h4><div class="table-wrap kd-scroll"><table class="tbl compact kd-tbl"><thead><tr><th>Date</th><th class="num">Total</th><th class="num">VC4</th><th class="num">Commercial</th><th class="num">First Forward</th><th class="num">GV</th><th class="num">Replacement</th><th class="num">Chassis</th></tr></thead><tbody>${days.slice().reverse().map((k) => { const rs = cur.filter((r) => r.key === k); const t = total(rs), v = total(rs.filter((r) => r.group === 'VC4')), g = total(rs.filter((r) => r.channel === 'GV Partner')); return `<tr class="clickable" data-kd-day="${k}"><td><b>${esc(U.labelDateKey(k))}</b> <small class="dim">${esc(U.weekday(U.fromDateKey(k)))}</small></td><td class="num"><b>${U.fmt(t)}</b></td><td class="num">${U.fmt(v)}</td><td class="num">${U.fmt(t - v)}</td><td class="num">${U.fmt(t - g)}</td><td class="num">${U.fmt(g)}</td><td class="num">${U.fmt(total(rs.filter((r) => r.type === 'REPLACEMENT')))}</td><td class="num">${U.fmt(total(rs.filter((r) => /chassis/i.test(r.vrnType))))}</td></tr>`; }).join('')}</tbody></table></div><p class="dim small">Kisi bhi din par click karo → us din ka poora breakdown.</p></section>` : '';
-    const gvPeople = spec.src !== 'ff' ? peopleFromGv(cur) : '';
     const body = `<div class="kd-hero"><div><span class="kd-kicker">${esc(srcLabel)}</span><div class="kd-big">${U.fmt(tot)} <small>tags</small></div><div class="kd-sub">${esc(periodLabel)}${filt ? ` · filter: <b>${esc(filt.label)}</b>` : ''}</div></div><div class="kd-vs">${U.deltaHtml(U.growth(tot, ptot), { decimals: 0 })}<small>vs ${esc(pp.label)}: <b>${U.fmt(ptot)}</b></small></div></div>
       <div class="kd-stats">${stat('VC4 (payable)', U.fmt(vc4), pct(vc4, tot), 'blue')}${stat('Commercial', U.fmt(comm), pct(comm, tot), 'violet')}${stat('First Forward', U.fmt(ff), pct(ff, tot), 'indigo')}${stat('GV Partner', U.fmt(gv), pct(gv, tot), 'teal')}${stat('New issuance', U.fmt(tot - repl), pct(tot - repl, tot), 'green')}${stat('Replacement', U.fmt(repl), pct(repl, tot), 'amber')}${stat('Chassis', U.fmt(chassis), pct(chassis, tot), 'orange')}${stat('New / VRN', U.fmt(Math.max(0, newVrn)), pct(Math.max(0, newVrn), tot), 'sky')}</div>
+      <div class="kd-chips">
+        ${[['both', 'FF + GV'], ['ff', '🟦 First Forward only'], ['gv', '🟩 GV Partner only']].map(([s, label]) => `<button class="kd-chip ${spec.src === s ? 'green' : ''}" data-kd-spec='${specAttr({ src: s, f: '', agent: '', channel: '', title: `${spec.title || 'Detail'} · ${label}` })}'>${label}</button>`).join('')}
+        ${[['vc4', 'VC4'], ['comm', 'Commercial'], ['vc20', 'VC20'], ['vc5p', 'VC5+'], ['repl', 'Replacement'], ['chassis', 'Chassis']].map(([fl, label]) => `<button class="kd-chip ${spec.f === fl ? 'green' : ''}" data-kd-spec='${specAttr({ f: fl, agent: '', channel: '', title: `${spec.title || 'Detail'} · ${label}` })}'>${label}</button>`).join('')}
+        ${(spec.f || spec.agent || spec.channel) ? `<button class="kd-chip" data-kd-spec='${specAttr({ f: '', agent: '', channel: '', src: spec.src, title: spec.title })}'>↺ Clear</button>` : ''}
+      </div>
       <div class="kd-grid">
         ${breakdownTable('🤝 Kis channel se — GV ya First Forward', byChannel, byChannelPrev, tot, { head: 'Channel', prevLabel: pp.label })}
         ${breakdownTable('🚗 Class group', byGroup, byGroupPrev, tot, { head: 'Group', prevLabel: pp.label, sortCls: true })}
       </div>
+      ${agentSection(cur, spec, tot)}
       ${breakdownTable('🏷️ Class-wise (har class kitne)', byClass, byClassPrev, tot, { head: 'Class', prevLabel: pp.label, sortCls: true })}
       <div class="kd-grid">
         ${breakdownTable('🔁 New issuance vs Replacement', byType, byTypePrev, tot, { head: 'Type', prevLabel: pp.label })}
@@ -187,19 +201,91 @@ window.FF = window.FF || {};
       ${matrix('🧮 Class × Chassis / VRN', cur, (r) => r.cls, (r) => vrnBucket(r.vrnType).replace(/^New \/ VRN.*/, 'New / VRN'), { head: 'Class', sortCls: true })}
       ${matrix('🧮 Class × Channel', cur, (r) => r.cls, (r) => r.channel, { head: 'Class', sortCls: true })}
       ${dayTable}
-      ${gvPeople}
+      ${ffPendingNote()}
       <section class="kd-sec" id="kd-raw"><h4>📄 Poora data — sab ${U.fmt(tot)} tags (tag-level list)</h4>
         <p class="dim small">Har tag ki row: Tag ID, VRN, class, type, VRN type, status, agent, TL, channel. ${spec.src === 'gv' ? '' : 'First Forward rows Google Sheet (EIR) se abhi on-demand aayengi.'}</p>
         <div class="btn-row"><button class="btn primary" data-kd-raw>📄 Load all ${U.fmt(tot)} rows</button></div><div id="kd-raw-body"></div></section>`;
     return { kicker: `KPI detail · ${spec.page || ''}`, title: spec.title || 'KPI detail', sub: `${esc(periodLabel)} · <b>${U.fmt(tot)}</b> tags${filt ? ` · ${esc(filt.label)}` : ''}`, body, exportable: true };
   }
-  function peopleFromGv(cur) {
-    const gvRows = cur.filter((r) => r.channel === 'GV Partner');
-    if (!gvRows.length) return '';
-    const byTl = tally(gvRows, (r) => r.tlName || 'Direct'), byAgent = tally(gvRows, (r) => r.agentName || r.agentId || 'Unknown');
-    const top = (m) => [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10);
-    const list = (entries) => `<table class="tbl compact kd-tbl"><tbody>${entries.map(([k, v], i) => `<tr><td class="dim">${i + 1}</td><td><b>${esc(k)}</b></td><td class="num"><b>${U.fmt(v)}</b></td></tr>`).join('')}</tbody></table>`;
-    return `<div class="kd-grid"><section class="kd-sec"><h4>👥 GV · top TLs</h4>${list(top(byTl))}</section><section class="kd-sec"><h4>🧑‍💼 GV · top agents</h4>${list(top(byAgent))}</section></div>`;
+  /** 👥 "Kisne lagaye" — agent-wise (GV agent ya FF agent), poori clickable list.
+      Har row par click → us agent ka poora detail (day-wise, class-wise, tags) usi drawer me. */
+  function agentSection(cur, spec, tot) {
+    if (!cur.length) return '';
+    const map = new Map();
+    cur.forEach((r) => {
+      const name = r.agentName || r.agentId || 'Unknown';
+      const key = `${r.channel}|${name}`;
+      const a = map.get(key) || { name, channel: r.channel, tl: r.tlName || '', id: r.agentId || '', n: 0, vc4: 0, comm: 0, repl: 0, chassis: 0, days: new Set() };
+      a.n += r.n; a.days.add(r.key);
+      if (r.group === 'VC4') a.vc4 += r.n;
+      if (r.group !== 'VC4') a.comm += r.n;
+      if (r.type === 'REPLACEMENT') a.repl += r.n;
+      if (/chassis/i.test(r.vrnType || '')) a.chassis += r.n;
+      if (!a.tl && r.tlName) a.tl = r.tlName;
+      if (!a.id && r.agentId) a.id = r.agentId;
+      map.set(key, a);
+    });
+    const all = [...map.values()].sort((a, b) => b.n - a.n);
+    const gv = all.filter((a) => a.channel === 'GV Partner');
+    const ff = all.filter((a) => a.channel !== 'GV Partner');
+    const top = all.slice(0, 60);
+    const rows = top.map((a, i) => `<tr class="clickable" data-kd-agent="${esc(a.name)}" data-kd-agent-channel="${a.channel === 'GV Partner' ? 'gv' : 'ff'}" title="Click → ${esc(a.name)} ka poora detail">
+      <td class="dim">${i + 1}</td>
+      <td><b>${esc(a.name)}</b>${a.id ? ` <small class="dim">${esc(a.id)}</small>` : ''}</td>
+      <td><span class="kd-badge ${a.channel === 'GV Partner' ? 'gv' : 'ff'}">${a.channel === 'GV Partner' ? '🟩 GV' : '🟦 FF'}</span></td>
+      <td>${esc(a.tl || (a.channel === 'GV Partner' ? 'Direct' : '—'))}</td>
+      <td class="num"><b>${U.fmt(a.n)}</b></td>
+      <td class="num">${pct(a.n, tot)}</td>
+      <td class="num">${U.fmt(a.vc4)}</td>
+      <td class="num">${U.fmt(a.comm)}</td>
+      <td class="num">${U.fmt(a.repl)}</td>
+      <td class="num">${U.fmt(a.chassis)}</td>
+      <td class="num">${U.fmt(a.days.size)}</td>
+    </tr>`).join('');
+    const tlTally = tally(cur, (r) => `${r.tlName || 'Direct'} · ${r.channel === 'GV Partner' ? 'GV' : 'FF'}`);
+    return `<section class="kd-sec"><h4>👥 Kisne lagaye — agent-wise (GV agent ya FF agent) <span class="dim small">· ${all.length} agents · ${gv.length} GV · ${ff.length} FF</span></h4>
+      <p class="dim small">Kisi bhi agent par click karo → uski day-wise, class-wise aur tag-level detail usi drawer me khulegi (andar tak click hota rahega).</p>
+      <div class="table-wrap kd-scroll tall"><table class="tbl compact kd-tbl"><thead><tr><th>#</th><th>Agent</th><th>Channel</th><th>TL</th><th class="num">Tags</th><th class="num">Share</th><th class="num">VC4</th><th class="num">Comm.</th><th class="num">Repl.</th><th class="num">Chassis</th><th class="num">Days</th></tr></thead><tbody>${rows}</tbody></table></div>
+      ${all.length > top.length ? `<p class="dim small">Top ${top.length} dikhaye — poore ${all.length} agents ka Excel "⬇ Breakdown Excel" se milta hai.</p>` : ''}
+      ${breakdownTable('🧑‍💼 TL-wise (channel ke saath)', tlTally, null, tot, { head: 'TL · channel' })}
+    </section>`;
+  }
+
+  /** Ek agent ka poora detail — drawer ke andar se dobara drawer (deep click-through). */
+  async function agentDetail(spec) {
+    const name = spec.agent;
+    const src = spec.src === 'ff' || spec.src === 'gv' ? spec.src : 'both';
+    const all = (await issuanceRows(src)).filter((r) => {
+      const nm = r.agentName || r.agentId || '';
+      if (!name || !(nm === name || String(nm).toUpperCase() === String(name).toUpperCase())) return false;
+      if (spec.channel === 'gv' && r.channel !== 'GV Partner') return false;
+      if (spec.channel === 'ff' && r.channel === 'GV Partner') return false;
+      return true;
+    });
+    const p = period(spec, all);
+    const inRange = all.filter((r) => inP(r, p));
+    const tot = total(inRange);
+    const channel = inRange.length ? inRange[0].channel : (spec.channel === 'gv' ? 'GV Partner' : 'First Forward');
+    const tl = inRange.reduce((t, r) => t || r.tlName, '');
+    const id = inRange.reduce((t, r) => t || r.agentId, '');
+    const byDay = tally(inRange, (r) => r.key);
+    const byCls = tally(inRange, (r) => r.cls);
+    const byGroup = tally(inRange, (r) => r.group);
+    const byType = tally(inRange, (r) => (r.type === 'REPLACEMENT' ? 'Replacement' : 'New issuance'));
+    const byVrn = tally(inRange, (r) => vrnBucket(r.vrnType));
+    const days = [...byDay.keys()].sort();
+    const periodLabel = p.from === p.to ? U.labelDateKey(p.from, true) : `${U.labelDateKey(p.from, true)} → ${U.labelDateKey(p.to, true)}`;
+    const otherRows = (await issuanceRows('both')).filter((r) => (r.agentName || '') !== name);
+    const rank = [...tally(otherRows.concat(inRange), (r) => r.agentName || r.agentId || '—').entries()].sort((a, b) => b[1] - a[1]).findIndex(([k]) => k === name) + 1;
+    state.rows = inRange; state.period = p; state.spec = spec; state.raw = null;
+    const body = `<div class="kd-hero"><div><span class="kd-kicker">${esc(channel === 'GV Partner' ? '🟩 GV Partner agent' : '🟦 First Forward agent')}</span><div class="kd-big">${U.fmt(tot)} <small>tags</small></div><div class="kd-sub">${esc(periodLabel)}${tl ? ` · TL <b>${esc(tl)}</b>` : ''}${id ? ` · ID ${esc(id)}` : ''}${rank > 0 ? ` · rank #${rank}` : ''}</div></div>
+      <div class="kd-acts"><a class="btn small" href="#/performance?agent=${encodeURIComponent(name)}">🏆 Performance →</a><a class="btn small" href="#/masterSearch?q=${encodeURIComponent(name)}">🔎 Master profile →</a></div></div>
+      <div class="kd-stats">${stat('VC4 (payable)', U.fmt(total(inRange.filter((r) => r.group === 'VC4'))), pct(total(inRange.filter((r) => r.group === 'VC4')), tot), 'blue')}${stat('Commercial', U.fmt(total(inRange.filter((r) => r.group !== 'VC4'))), pct(total(inRange.filter((r) => r.group !== 'VC4')), tot), 'violet')}${stat('Chassis', U.fmt(total(inRange.filter((r) => /chassis/i.test(r.vrnType)))), '', 'orange')}${stat('Replacement', U.fmt(total(inRange.filter((r) => r.type === 'REPLACEMENT'))), '', 'amber')}${stat('Active days', U.fmt(days.length), days.length ? `${U.fmt(Math.round(tot / days.length))}/day` : '', 'green')}</div>
+      <div class="kd-grid">${breakdownTable('🚗 Class group', byGroup, null, tot, { head: 'Group', sortCls: true })}${breakdownTable('🔁 Type', byType, null, tot, { head: 'Type' })}</div>
+      ${breakdownTable('🏷️ Class-wise', byCls, null, tot, { head: 'Class', sortCls: true })}
+      ${breakdownTable('🧩 VRN type', byVrn, null, tot, { head: 'VRN type' })}
+      <section class="kd-sec"><h4>📅 Day-wise (${days.length} din)</h4><div class="table-wrap kd-scroll"><table class="tbl compact kd-tbl"><thead><tr><th>Date</th><th class="num">Tags</th><th class="num">VC4</th><th class="num">Commercial</th></tr></thead><tbody>${days.slice().reverse().map((k) => { const rs = inRange.filter((r) => r.key === k); const t = total(rs), v = total(rs.filter((r) => r.group === 'VC4')); return `<tr class="clickable" data-kd-agent-day="${k}"><td><b>${esc(U.labelDateKey(k))}</b> <small class="dim">${esc(U.weekday(U.fromDateKey(k)))}</small></td><td class="num"><b>${U.fmt(t)}</b></td><td class="num">${U.fmt(v)}</td><td class="num">${U.fmt(t - v)}</td></tr>`; }).join('')}</tbody></table></div></section>`;
+    return { kicker: 'KPI detail · Agent', title: `${name} · ${channel === 'GV Partner' ? 'GV' : 'FF'} agent`, sub: `${esc(periodLabel)} · <b>${U.fmt(tot)}</b> tags`, body, exportable: true, agent: name, period: p, spec };
   }
 
   // ---- raw tag-level rows ---------------------------------------------------------------------
@@ -220,6 +306,15 @@ window.FF = window.FF || {};
         const channel = FF.model.channelOf(D.cellText(r[10]), D.cellText(r[9]));
         if (spec.src === 'ff' && channel === 'GV Partner') continue;
         if (spec.src === 'gv' && channel !== 'GV Partner') continue;
+        // 🔁 FF T+1: jo FF rows abhi reported nahi (aaj) wo FF/both list me bhi nahi aati.
+        if (channel !== 'GV Partner' && FF.filters && FF.filters.ffLagOn && FF.filters.ffLagOn() && !FF.filters.ffVisible({ key: d ? U.dateKey(d) : '', channel })) continue;
+        // 👤 agent view ke liye sirf usi agent ki rows.
+        if (spec.agent) {
+          const nm = D.cellText(r[7]) || D.cellText(r[11]);
+          if (String(nm).trim().toUpperCase() !== String(spec.agent).trim().toUpperCase()) continue;
+          if (spec.channel === 'gv' && channel !== 'GV Partner') continue;
+          if (spec.channel === 'ff' && channel === 'GV Partner') continue;
+        }
         const row = { key: d ? U.dateKey(d) : '', cls, group: FF.model.classGroup(cls), type: D.cellText(r[4]).toUpperCase() || 'ISSUANCE', vrnType: D.cellText(r[5]), channel, n: 1 };
         if (filt && !filt.fn(row)) continue;
         out.push([row.key, D.cellText(r[1]), D.cellText(r[2]), cls, row.type, row.vrnType, D.cellText(r[6]), D.cellText(r[7]) || D.cellText(r[11]), D.cellText(r[8]), D.cellText(r[9]), channel]);
@@ -332,11 +427,12 @@ window.FF = window.FF || {};
     FF.app.openDrawer({ kicker: 'KPI detail', title: spec.title || 'KPI detail', sub: 'Breakdown taiyaar ho raha hai…', body: U.spinner('Detail calculate ho rahi hai…'), wide: true });
     if (FF.notifications && FF.notifications.track) FF.notifications.track('kpi', `KPI opened: ${spec.title || spec.scope}`);
     try {
-      const view = spec.scope === 'stock' ? await stockDetail(spec)
-        : spec.scope === 'stockreport' ? await stockReportDetail(spec)
-          : spec.scope === 'agents' ? await agentsDetail(spec)
-            : spec.scope === 'status' ? await statusDetail(spec)
-              : await issuanceDetail(spec);
+      const view = spec.agent ? await agentDetail(spec)
+        : spec.scope === 'stock' ? await stockDetail(spec)
+          : spec.scope === 'stockreport' ? await stockReportDetail(spec)
+            : spec.scope === 'agents' ? await agentsDetail(spec)
+              : spec.scope === 'status' ? await statusDetail(spec)
+                : await issuanceDetail(spec);
       const cardInfo = spec.foot ? `<div class="kd-card-foot">Card: ${esc(spec.foot)}</div>` : '';
       FF.app.openDrawer({ kicker: view.kicker, title: view.title, sub: view.sub, body: cardInfo + view.body, wide: true, actions: view.exportable && FF.auth.can('export') ? '<button class="btn small" data-kd-summary-xlsx>⬇ Breakdown Excel</button>' : '' });
     } catch (err) {
@@ -365,7 +461,20 @@ window.FF = window.FF || {};
     if (e.target.closest('[data-kd-csv]') && state.raw) { U.downloadCsv(`kpi-tags-${state.period.from}_${state.period.to}.csv`, RAW_HEAD, state.raw); return; }
     if (e.target.closest('[data-kd-summary-xlsx]')) { summaryExport(); return; }
     const day = e.target.closest('[data-kd-day]');
-    if (day && state.spec) { open({ ...state.spec, scope: 'day', date: day.dataset.kdDay, title: `${state.spec.title} · ${U.labelDateKey(day.dataset.kdDay)}` }); }
+    if (day && state.spec) { open({ ...state.spec, scope: 'day', date: day.dataset.kdDay, title: `${state.spec.title} · ${U.labelDateKey(day.dataset.kdDay)}` }); return; }
+    // 👥 agent row par click → us agent ka poora detail (GV agent ya FF agent) usi drawer me.
+    const agentRow = e.target.closest('[data-kd-agent]');
+    if (agentRow) {
+      const base = state.spec || {};
+      const name = agentRow.dataset.kdAgent;
+      open({ ...base, agent: name, channel: agentRow.dataset.kdAgentChannel || '', scope: base.scope === 'day' ? 'day' : 'mtd', date: base.scope === 'day' ? base.date : '', title: `${name} · ${agentRow.dataset.kdAgentChannel === 'gv' ? 'GV' : 'FF'} agent` });
+      return;
+    }
+    const agentDay = e.target.closest('[data-kd-agent-day]');
+    if (agentDay && state.spec && state.spec.agent) { open({ ...state.spec, scope: 'day', date: agentDay.dataset.kdAgentDay, title: `${state.spec.agent} · ${U.labelDateKey(agentDay.dataset.kdAgentDay)}` }); return; }
+    // Quick spec chips (channel / class / type) — drawer ke andar se filter badlo, naya drawer khulta hai.
+    const chip = e.target.closest('[data-kd-spec]');
+    if (chip && state.spec) { open({ ...state.spec, ...JSON.parse(chip.dataset.kdSpec || '{}') }); return; }
   });
 
   FF.kpiDetail = { open, specFrom };
