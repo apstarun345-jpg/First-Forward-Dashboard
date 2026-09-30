@@ -68,7 +68,42 @@ function doPost(e) {
   if (!lock.tryLock(25000)) return json_({ ok: false, error: 'busy, retry' });
   try {
     const sheet = sheet_();
-    if (body.action === 'ping') return json_({ ok: true, tab: TAB, spreadsheet: SpreadsheetApp.getActive().getName() });
+    if (body.action === 'ping') return json_({ ok: true, tab: TAB, spreadsheet: SpreadsheetApp.getActive().getName(), url: SpreadsheetApp.getActive().getUrl() });
+    // 📗 Tag Request (v3.25) — dashboard se aayi rows ko kisi bhi NORMAL tab me direct append karo.
+    // body: { tab: 'Tag Requests', header: [...], rows: [[...], ...] }
+    // Tab na ho to ban jaata hai; tab khaali ho to pehle header row likhi jaati hai.
+    if (body.action === 'appendrows') {
+      var tabName = String(body.tab || 'Tag Requests').slice(0, 80);
+      if (tabName === TAB) return json_({ ok: false, error: 'APP_STORAGE tab me likhna allowed nahi — koi doosra tab naam do.' });
+      var ss = SpreadsheetApp.getActive();
+      var sh = ss.getSheetByName(tabName);
+      if (!sh) sh = ss.insertSheet(tabName);
+      var header = Array.isArray(body.header) ? body.header.map(function (h) { return String(h == null ? '' : h); }) : [];
+      var rows = Array.isArray(body.rows) ? body.rows.slice(0, 500) : [];
+      rows.forEach(function (r) { if (!Array.isArray(r)) throw new Error('rows must be arrays of values'); });
+      var startRow = sh.getLastRow() + 1;
+      if (startRow <= 1 && header.length) {
+        if (sh.getMaxColumns() < header.length) sh.insertColumnsAfter(sh.getMaxColumns(), header.length - sh.getMaxColumns());
+        sh.getRange(1, 1, 1, header.length).setValues([header]);
+        try { sh.getRange(1, 1, 1, header.length).setFontWeight('bold'); } catch (e) { /* cosmetic */ }
+        startRow = 2;
+      }
+      var added = 0;
+      if (rows.length) {
+        var width = header.length;
+        rows.forEach(function (r) { if (r.length > width) width = r.length; });
+        if (sh.getMaxColumns() < width) sh.insertColumnsAfter(sh.getMaxColumns(), width - sh.getMaxColumns());
+        var padded = rows.map(function (r) {
+          var c = r.slice(0, width).map(function (v) { return typeof v === 'object' && v !== null ? JSON.stringify(v) : v; });
+          while (c.length < width) c.push('');
+          return c;
+        });
+        sh.getRange(startRow, 1, padded.length, width).setValues(padded);
+        added = padded.length;
+      }
+      SpreadsheetApp.flush();
+      return json_({ ok: true, tab: tabName, added: added, atRow: startRow, url: ss.getUrl() });
+    }
     if (body.action === 'read') return json_({ ok: true, records: readAll_(sheet) });
     if (body.action === 'write') {
       const records = body.records || {};

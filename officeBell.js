@@ -89,6 +89,9 @@ window.FF = window.FF || {};
       if (!st.audio) { const AC = window.AudioContext || window.webkitAudioContext; if (AC) st.audio = new AC(); }
       if (st.audio && st.audio.state === 'suspended' && st.audio.resume) st.audio.resume();
     } catch { /* no WebAudio */ }
+    // 🔗 Notifications ka apna beep-context bhi isi gesture me unlock karo — dono alag AudioContext
+    //    hain, isliye ek ko unlock karna doosre ke liye kaafi nahi tha (Chrome website silent bug).
+    try { if (FF.notifications && FF.notifications.unlockAudio) FF.notifications.unlockAudio(); } catch { /* optional */ }
     try {
       if ('speechSynthesis' in window) {
         const u = new SpeechSynthesisUtterance(' ');
@@ -214,11 +217,25 @@ window.FF = window.FF || {};
   }
 
   // ---- 🔊 "awaaz chalu karo" nudge ---------------------------------------------------------------
+  // ⚠️ v3.25 — popup BAAR BAAR nahi aayega:
+  //   • ek baar "Enable sound" dabaya → kabhi dobara nahi (permanent flag),
+  //   • ✕ se dismiss kiya → 24 ghante tak koi popup nahi (pehle sirf 10 min tha),
+  //   • is session me awaaz ek baar bhi aa chuki ho, ya sound/voice khud OFF kiya ho → kabhi nahi.
+  const LS_NUDGE_OK = 'ff-office-bell-nudge-ok';
+  function soundPrefsOn() {
+    if (!voiceOn() && prefs().ting === false) return false;
+    try { if (FF.notifications && FF.notifications.soundOn && !FF.notifications.soundOn()) return false; } catch { /* optional */ }
+    return true;
+  }
   function showNudge() {
     if (typeof document === 'undefined' || !document.body) return;
+    if (typeof document.hidden === 'boolean' && document.hidden) return; // background tab par popup ka matlab nahi
+    if (!soundPrefsOn()) return;                                        // khud OFF kiya hai to pareshan mat karo
+    if (st.lastSpokeAt > 0) return;                                     // awaaz already kaam kar rahi hai
+    try { if (localStorage.getItem(LS_NUDGE_OK) === '1') return; } catch { /* ignore */ }
     let dismissed = 0;
     try { dismissed = Number(localStorage.getItem(LS_NUDGE) || 0); } catch { dismissed = 0; }
-    if (Date.now() - dismissed < 10 * 60 * 1000) return;   // 10 min me ek hi baar pareshan karo
+    if (Date.now() - dismissed < 24 * 60 * 60 * 1000) return; // dismiss ke baad 24h chup
     if (st.nudge) return;
     const el = U.h(`<div class="bell-unlock" role="status">
       <span aria-hidden="true">🔊</span>
@@ -227,6 +244,7 @@ window.FF = window.FF || {};
       <button class="bell-unlock-x" data-bell-nudge-x="1" type="button" aria-label="Dismiss">✕</button></div>`);
     el.addEventListener('click', (e) => {
       if (e.target.closest('[data-bell-unlock]')) {
+        try { localStorage.setItem(LS_NUDGE_OK, '1'); } catch { /* ignore */ }
         unlock('retry');
         const text = FF.assistant && FF.assistant.getLang && FF.assistant.getLang() === 'en'
           ? 'Voice announcer is on. I will announce every new tag.'

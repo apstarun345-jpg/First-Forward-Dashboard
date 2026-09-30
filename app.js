@@ -1231,6 +1231,7 @@ window.FF = window.FF || {};
     if (FF.lazy && FF.lazy.warm) Promise.resolve(FF.lazy.warm()).then(() => setTimeout(mountShellExtras, 400)).catch(() => {});
     registerServiceWorker(); // push notifications ke liye SW pehle ready ho
     if (FF.notifications) FF.notifications.start();
+    if (FF.liveAssist) FF.liveAssist.start(); // 🎙️ Live Assist — consent-based voice/video (v3.26)
     liveShareChip();
     // 🔎 Master search bar (har page par) + 🎨 theme packs + 🟢 live tab heartbeat
     if (!(FF.config.feat && FF.config.feat('masterSearch') === false)) {

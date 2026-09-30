@@ -377,7 +377,7 @@ function verifyPassword(password, stored) {
 const normUser = (u) => String(u || '').trim().toLowerCase().replace(/[^a-z0-9._@-]/g, '').slice(0, 60);
 // `enabled` = master switch (UI me ek hi "Notifications ON/OFF" button hai). OFF → koi in-app toast
 // nahi, koi browser alert nahi, koi mobile push nahi. Feed items phir bhi save hote hain (history).
-const DEFAULT_NOTIFY_PREFS = { enabled: true, login: true, signup: true, report: true, monthly: true, digest: true, alert: true, activity: true, click: true, search: true, settings: true, user: true, location: true, info: true, request: true, sound: true, push: true };
+const DEFAULT_NOTIFY_PREFS = { enabled: true, login: true, signup: true, report: true, monthly: true, digest: true, alert: true, activity: true, click: true, search: true, settings: true, user: true, location: true, info: true, request: true, assist: true, sound: true, push: true };
 function normalizeNotifyPrefs(p) {
   const out = { ...DEFAULT_NOTIFY_PREFS };
   if (p && typeof p === 'object') for (const k of Object.keys(DEFAULT_NOTIFY_PREFS)) if (p[k] !== undefined) out[k] = !!p[k];
@@ -2517,7 +2517,7 @@ function perfReport() {
   const hottest = [...HOT.entries()].sort((a, b) => b[1].hits - a[1].hits).slice(0, 10)
     .map(([url, h]) => ({ url: url.length > 160 ? `${url.slice(0, 160)}…` : url, hits: h.hits }));
   return {
-    version: '3.24.0', cacheEntries: cache.size, cacheEntriesMax: MAX_CACHE_ENTRIES,
+    version: '3.26.0', cacheEntries: cache.size, cacheEntriesMax: MAX_CACHE_ENTRIES,
     cacheSeconds: cacheMs() / 1000, warmedQueries: warmed, hotQueries: hottest,
     slowest: queries.filter((q) => q.upstream > 0).slice(0, 25),
     queries
@@ -2623,7 +2623,7 @@ async function handleApi(req, res, url) {
 
   if (p === '/api/health' && method === 'GET') {
     // pendingSignups sirf admin ko (sidebar badge ke liye) — public health me leak nahi.
-    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.24.0', storage: storageStatus(), push: pushHealth(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length } : {}) });
+    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.26.0', storage: storageStatus(), push: pushHealth(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length } : {}) });
   }
   // 📊 Admin-only: exact reason of slowness (Google query timings, cache hit rate, warm queries).
   if (p === '/api/perf' && method === 'GET') {
@@ -3290,6 +3290,115 @@ async function handleApi(req, res, url) {
     const list = user.role === 'admin' ? all : all.filter((r) => r.by === user.username);
     return list.slice(-200).reverse();
   };
+
+  // ---- 📗 Google Sheet sync (tag requests → connected sheet me direct entry) --------------------
+  // Admin config karta hai: kaunsa tab, kaunse columns, kaunsi rows (per class / per agent / per
+  // request) aur kab likhna hai (nayi request / status change). Likha Apps Script web app se jaata
+  // hai jo target sheet se hi bound hai — isliye entry SEEDHI us Google Sheet me padti hai.
+  const TAG_SHEET_FIELDS = {
+    event: 'Event', date: 'Date', time: 'Time', requestId: 'Request ID', by: 'By', status: 'Status',
+    agentId: 'Agent ID', agent: 'Agent', tl: 'TL', channel: 'Channel', cls: 'Tag Class',
+    last: 'Last month', cur: 'Current MTD', growth: 'Growth %', stock: 'Stock', cover: 'Cover (days)',
+    priority: 'Priority', sugNet: 'Suggested (stock −)', sugGross: 'Suggested (w/o stock)',
+    approved: 'Approved qty', remark: 'Remark', note: 'Note', adminNote: 'Admin note'
+  };
+  const tagSheetConfig = () => {
+    const w = workspaceStore();
+    if (!w.tagRequestSheet || typeof w.tagRequestSheet !== 'object') {
+      w.tagRequestSheet = {
+        enabled: false, tab: 'Tag Requests', sheetLink: '', onSubmit: true, onStatus: true,
+        rowMode: 'class', columns: ['date', 'time', 'by', 'agentId', 'agent', 'tl', 'channel', 'cls', 'stock', 'cur', 'priority', 'approved', 'remark', 'status']
+      };
+    }
+    return w.tagRequestSheet;
+  };
+  /** Apps Script store — storage backend se independent (files backend par bhi sheet sync chale). */
+  let tagSheetStore = null;
+  function sheetSyncStore() {
+    if (tagSheetStore) return tagSheetStore;
+    const url = (process.env.APPS_SCRIPT_URL || '').trim(), secret = (process.env.APPS_SCRIPT_SECRET || '').trim();
+    if (!url || !secret) return null;
+    try { tagSheetStore = new AppsScriptStore({ url, secret }); } catch { tagSheetStore = null; }
+    return tagSheetStore;
+  }
+  const tagSheetFieldValue = (field, x, req, event) => {
+    const d = new Date(req.at || Date.now());
+    const ch = x.channel === 'gv' ? 'GV Partner' : 'First Forward';
+    switch (field) {
+      case 'event': return event || '';
+      case 'date': return d.toISOString().slice(0, 10);
+      case 'time': return d.toISOString().slice(11, 16);
+      case 'requestId': return req.id || '';
+      case 'by': return req.byName || req.by || '';
+      case 'status': return req.status || '';
+      case 'agentId': return x.agentId || '';
+      case 'agent': return x.agentName || '';
+      case 'tl': return x.tl || '';
+      case 'channel': return ch;
+      case 'cls': return x.cls || '';
+      case 'last': return Number(x.last) || 0;
+      case 'cur': return Number(x.cur) || 0;
+      case 'growth': return x.growth === undefined || x.growth === null ? '' : Number(x.growth);
+      case 'stock': return Number(x.stock) || 0;
+      case 'cover': return x.cover === undefined || x.cover === null ? '' : Number(x.cover);
+      case 'priority': return x.priority || '';
+      case 'sugNet': return Number(x.sugNet) || 0;
+      case 'sugGross': return Number(x.sugGross) || 0;
+      case 'approved': return Number(x.approved) || 0;
+      case 'remark': return x.remark || '';
+      case 'note': return req.note || '';
+      case 'adminNote': return req.adminNote || '';
+      default: return '';
+    }
+  };
+  /** Request → sheet rows (rowMode ke hisaab se) + header. `event` = new / status / manual. */
+  function tagSheetRows(req, cfg, event) {
+    const cols = (cfg.columns || []).filter((c) => TAG_SHEET_FIELDS[c]);
+    const header = cols.map((c) => TAG_SHEET_FIELDS[c]);
+    const rowsIn = Array.isArray(req.rows) ? req.rows : [];
+    const mk = (x) => cols.map((c) => tagSheetFieldValue(c, x, req, event));
+    let data = [];
+    if (cfg.rowMode === 'agent') {
+      const byAgent = new Map();
+      rowsIn.forEach((x) => {
+        const key = `${x.agentId || ''}|${x.agentName || ''}`;
+        const a = byAgent.get(key) || { ...x, cls: '', approved: 0 };
+        a.cls = [a.cls, x.cls].filter(Boolean).join('+');
+        a.approved = (Number(a.approved) || 0) + (Number(x.approved) || 0);
+        byAgent.set(key, a);
+      });
+      data = [...byAgent.values()].map(mk);
+    } else if (cfg.rowMode === 'request') {
+      const sum = rowsIn.reduce((s, x) => s + (Number(x.approved) || 0), 0);
+      const agg = {
+        agentId: '', agentName: `${rowsIn.length} rows · ${new Set(rowsIn.map((x) => x.agentName)).size} agents`,
+        tl: [...new Set(rowsIn.map((x) => x.tl).filter(Boolean))].join(', '), channel: rowsIn[0] ? rowsIn[0].channel : 'ff',
+        cls: [...new Set(rowsIn.map((x) => x.cls).filter(Boolean))].join(', '),
+        last: rowsIn.reduce((s, x) => s + (Number(x.last) || 0), 0), cur: rowsIn.reduce((s, x) => s + (Number(x.cur) || 0), 0),
+        stock: rowsIn.reduce((s, x) => s + (Number(x.stock) || 0), 0), cover: null, priority: '',
+        sugNet: rowsIn.reduce((s, x) => s + (Number(x.sugNet) || 0), 0), sugGross: rowsIn.reduce((s, x) => s + (Number(x.sugGross) || 0), 0),
+        approved: sum, remark: ''
+      };
+      data = [mk(agg)];
+    } else {
+      data = rowsIn.map(mk); // 'class' — har agent × class ki alag row (default)
+    }
+    return { header, rows: data };
+  }
+  /** Request ko configured sheet me push karo. `throwOnFail` sirf manual/test push ke liye. */
+  async function pushTagRequestToSheet(req, event, throwOnFail) {
+    const cfg = tagSheetConfig();
+    const store = sheetSyncStore();
+    if (!cfg.enabled || !store) {
+      if (throwOnFail) throw new HttpError(400, !store ? 'Apps Script connect nahi hai — pehle Settings → Backup me APPS_SCRIPT_URL/SECRET configure karo (ya sheet storage setup).' : 'Sheet sync OFF hai — pehle Tag Request page par 📗 Google Sheet sync ON karo.');
+      return null;
+    }
+    const { header, rows } = tagSheetRows(req, cfg, event);
+    if (!rows.length) { if (throwOnFail) throw new HttpError(400, 'Sheet ke liye koi row nahi bani.'); return null; }
+    const out = await store.call('appendrows', { tab: String(cfg.tab || 'Tag Requests').slice(0, 80) || 'Tag Requests', header, rows });
+    req.sheetSync = { at: new Date().toISOString(), event, added: Number(out.added) || rows.length, tab: out.tab || cfg.tab };
+    return out;
+  }
   if (p === '/api/tag-requests' && method === 'GET') {
     if (user.role !== 'admin' && !(user.permissions || []).includes('tagRequest')) throw new HttpError(403, 'Tag Request access disabled.');
     return sendJson(res, 200, { ok: true, requests: visibleTagRequests(user), admin: user.role === 'admin' });
@@ -3311,6 +3420,14 @@ async function handleApi(req, res, url) {
     w.tagRequests.push(row);
     if (w.tagRequests.length > 120) w.tagRequests.splice(0, w.tagRequests.length - 120);
     await persist('notify');
+    // 📗 Google Sheet sync ON ho to entry direct configured sheet me chali jaati hai (fire & forget —
+    // sheet fail hone se request submit kabhi rukti nahi; status drawer me dikh jaata hai).
+    if (tagSheetConfig().enabled && tagSheetConfig().onSubmit) {
+      pushTagRequestToSheet(row, 'new').then(() => persist('notify').catch(() => {})).catch((err) => {
+        console.warn('tag-request sheet sync:', err.message);
+        row.sheetSync = { at: new Date().toISOString(), event: 'new', error: String(err.message || err).slice(0, 160) };
+      });
+    }
     // Admin ko notification (routed: Settings → notification routes se off ho sakta hai) + requester ko confirmation.
     try {
       recordNotification({
@@ -3345,6 +3462,7 @@ async function handleApi(req, res, url) {
         row.total = row.rows.reduce((s, r) => s + (Number(r.approved) || 0), 0);
       }
     }
+    const prevStatus = row.status;
     if (body.status !== undefined) {
       if (!['pending', 'approved', 'dispatched', 'rejected'].includes(body.status)) throw new HttpError(400, 'Status invalid hai.');
       row.status = body.status;
@@ -3353,6 +3471,13 @@ async function handleApi(req, res, url) {
     if (body.note !== undefined && row.status === 'pending') row.note = shortText(body.note, 300);
     row.updatedAt = new Date().toISOString(); row.updatedBy = user.username;
     await persist('notify');
+    // 📗 Status change (approved/dispatched/rejected) par bhi sheet me fresh entry — config ON ho to.
+    if (body.status && body.status !== prevStatus && tagSheetConfig().enabled && tagSheetConfig().onStatus) {
+      pushTagRequestToSheet(row, `status:${body.status}`).then(() => persist('notify').catch(() => {})).catch((err) => {
+        console.warn('tag-request sheet sync (status):', err.message);
+        row.sheetSync = { at: new Date().toISOString(), event: `status:${body.status}`, error: String(err.message || err).slice(0, 160) };
+      });
+    }
     // Requester ko status update ka notification (admin ne kuch badla to).
     if (user.role === 'admin' && row.by !== user.username) {
       try {
@@ -3376,6 +3501,217 @@ async function handleApi(req, res, url) {
     await persist('notify');
     logAudit(user, 'tag_request_deleted', { target: tagReqPath[1], ip: clientIp(req) });
     return sendJson(res, 200, { ok: true });
+  }
+
+  // ---- 📗 Tag Request → Google Sheet sync (admin config + test + manual push) --------------------
+  if (p === '/api/tag-request-sheet' && method === 'GET') {
+    requireAdmin(user);
+    const cfg = tagSheetConfig();
+    return sendJson(res, 200, {
+      ok: true, config: cfg, fields: TAG_SHEET_FIELDS,
+      connected: !!sheetSyncStore(), storageBackend: STORAGE_BACKEND,
+      hint: sheetSyncStore() ? '' : 'APPS_SCRIPT_URL + APPS_SCRIPT_SECRET (Render → Environment) configure karo — wala Apps Script usi Google Sheet se bind hona chahiye jisme entries chahiye. Setup: STORAGE_SETUP.md / Settings → Backup.'
+    });
+  }
+  if (p === '/api/tag-request-sheet' && method === 'PUT') {
+    requireAdmin(user);
+    const body = await readBody(req);
+    const cfg = tagSheetConfig();
+    const c = body.config || body;
+    if (c.enabled !== undefined) cfg.enabled = !!c.enabled;
+    if (c.tab !== undefined) cfg.tab = String(c.tab || '').trim().slice(0, 80) || 'Tag Requests';
+    if (c.sheetLink !== undefined) cfg.sheetLink = String(c.sheetLink || '').trim().slice(0, 500);
+    if (c.onSubmit !== undefined) cfg.onSubmit = !!c.onSubmit;
+    if (c.onStatus !== undefined) cfg.onStatus = !!c.onStatus;
+    if (c.rowMode !== undefined && ['class', 'agent', 'request'].includes(c.rowMode)) cfg.rowMode = c.rowMode;
+    if (Array.isArray(c.columns)) {
+      const cols = c.columns.map((x) => String(x)).filter((x) => TAG_SHEET_FIELDS[x]);
+      if (cols.length) cfg.columns = [...new Set(cols)];
+    }
+    cfg.updatedAt = new Date().toISOString(); cfg.updatedBy = user.username;
+    await persist('notify');
+    logAudit(user, 'tag_sheet_config', { note: `enabled ${cfg.enabled} · tab ${cfg.tab} · ${cfg.columns.length} cols · ${cfg.rowMode}`, ip: clientIp(req) });
+    return sendJson(res, 200, { ok: true, config: cfg, connected: !!sheetSyncStore() });
+  }
+  if (p === '/api/tag-request-sheet/test' && method === 'POST') {
+    requireAdmin(user);
+    const store = sheetSyncStore();
+    if (!store) throw new HttpError(400, 'Apps Script connect nahi hai — Render me APPS_SCRIPT_URL + APPS_SCRIPT_SECRET set karo (Storage setup guide: STORAGE_SETUP.md).');
+    let ping;
+    try { ping = await store.call('ping'); }
+    catch (err) { throw new HttpError(502, `Sheet ping fail: ${err.message}`); }
+    return sendJson(res, 200, { ok: true, tab: ping.tab || 'APP_STORAGE', spreadsheet: ping.spreadsheet || '', url: ping.url || '', note: 'Ping OK — appendrows action ke liye Apps Script ka naya Code.gs (v3.25) deploy karna zaroori hai.' });
+  }
+  if (p === '/api/tag-request-sheet/push' && method === 'POST') {
+    requireAdmin(user);
+    const body = await readBody(req);
+    const w = workspaceStore();
+    const row = (w.tagRequests || []).find((r) => r.id === String(body.id || ''));
+    if (!row) throw new HttpError(404, 'Tag request nahi mili.');
+    const out = await pushTagRequestToSheet(row, body.event === 'status' ? `status:${row.status}` : 'manual', true);
+    await persist('notify');
+    logAudit(user, 'tag_sheet_push', { target: row.id, note: `${out.added} rows → ${out.tab || ''}`, ip: clientIp(req) });
+    return sendJson(res, 200, { ok: true, added: out.added, tab: out.tab, atRow: out.atRow, url: out.url || '' });
+  }
+
+  // ---- 🎙️ LIVE ASSIST (v3.26) — admin user ki awaaz/video live sun/dekh sakta hai ---------------
+  // TRANSPARENCY BY DESIGN: ye feature SIRF user ki haan ke baad chalta hai —
+  //   1. user ko full-screen consent popup dikhta hai (Allow / Decline, 60s timeout),
+  //   2. accept karne par hi mic/camera khulta hai,
+  //   3. session ke dauran user ki screen par hamesha 🔴 LIVE pill dikhta hai (End button ke saath),
+  //   4. har request/accept/end audit log me darj hota hai.
+  // Media WebRTC se seedha browser↔browser jaata hai; server sirf signalling (SDP/ICE) relay karta
+  // hai aur sessions durable store me rakhta hai (notify kind — koi naya storage kind nahi).
+  const LIVE_ASSIST_REQUEST_TTL = 60e3;      // 60s me accept nahi → missed
+  const LIVE_ASSIST_MAX_ACTIVE = 60 * 60e3;  // ek session max 1 ghanta
+  const liveAssistStore = () => {
+    const w = workspaceStore();
+    if (!w.liveAssist || typeof w.liveAssist !== 'object') w.liveAssist = { sessions: [] };
+    if (!Array.isArray(w.liveAssist.sessions)) w.liveAssist.sessions = [];
+    return w.liveAssist;
+  };
+  const laIceServers = () => {
+    // Optional: LIVE_ASSIST_ICE_JSON env me extra STUN/TURN servers (JSON array) — strict NAT me TURN chahiye.
+    try {
+      const extra = process.env.LIVE_ASSIST_ICE_JSON;
+      if (extra) { const arr = JSON.parse(extra); if (Array.isArray(arr) && arr.length) return arr.slice(0, 5); }
+    } catch { /* env optional */ }
+    return [{ urls: 'stun:stun.l.google.com:19302' }];
+  };
+  const laPrune = () => {
+    const st = liveAssistStore();
+    const now = Date.now();
+    for (const s of st.sessions) {
+      if (s.status === 'requested' && now - new Date(s.requestedAt).getTime() > LIVE_ASSIST_REQUEST_TTL) {
+        s.status = 'missed'; s.endedAt = new Date().toISOString(); s.reason = 'timeout';
+      } else if (s.status === 'active' && now - new Date(s.acceptedAt || s.requestedAt).getTime() > LIVE_ASSIST_MAX_ACTIVE) {
+        s.status = 'ended'; s.endedAt = new Date().toISOString(); s.reason = 'max-time';
+      }
+    }
+    if (st.sessions.length > 120) st.sessions.splice(0, st.sessions.length - 120);
+  };
+  const laView = (s) => ({
+    id: s.id, admin: s.admin, adminName: s.adminName || s.admin, user: s.user, userName: s.userName || s.user,
+    mode: s.mode === 'video' ? 'video' : 'audio', status: s.status,
+    requestedAt: s.requestedAt, acceptedAt: s.acceptedAt || null, endedAt: s.endedAt || null,
+    reason: s.reason || '', ice: laIceServers()
+  });
+  const laFind = (id) => liveAssistStore().sessions.find((s) => s.id === id);
+  const laParty = (s, user) => (s.user === user.username ? 'user' : (user.role === 'admin' ? 'admin' : null));
+  // Signals bahut tezi se aate hain (ICE) — har signal par full sheet save mat karo; 5s throttle.
+  let laLastPersist = 0;
+  const laPersistSoon = () => {
+    if (Date.now() - laLastPersist < 5000) return;
+    laLastPersist = Date.now();
+    persist('notify').catch(() => {});
+  };
+  if (p === '/api/live-assist' && method === 'GET') {
+    requireAdmin(user);
+    laPrune();
+    return sendJson(res, 200, { ok: true, sessions: liveAssistStore().sessions.slice(-50).reverse().map(laView) });
+  }
+  if (p === '/api/live-assist/request' && method === 'POST') {
+    requireAdmin(user);
+    const body = await readBody(req);
+    const username = normUser(body.user);
+    const target = findUser(username);
+    if (!target) throw new HttpError(404, 'User nahi mila.');
+    const mode = body.mode === 'video' ? 'video' : 'audio';
+    laPrune();
+    const st = liveAssistStore();
+    const existing = st.sessions.find((s) => s.user === username && (s.status === 'requested' || s.status === 'active'));
+    if (existing) return sendJson(res, 200, { ok: true, existing: true, session: laView(existing) });
+    const s = {
+      id: workspaceId('assist'), admin: user.username, adminName: user.name || user.username,
+      user: username, userName: target.name || username, mode, status: 'requested',
+      requestedAt: new Date().toISOString(), signals: [], seq: 0
+    };
+    st.sessions.push(s);
+    await persist('notify');
+    try {
+      recordNotification({
+        type: 'assist', title: `🎙️ Live Assist request · ${s.adminName}`,
+        body: `Admin aapse live baat karna chahte hain — sirf aapki ${mode === 'video' ? 'awaaz + camera' : 'awaaz'} jayegi, aur sirf aap Allow karoge tabhi. Screen par request khuli hogi.`,
+        target: `user:${username}`, meta: { sessionId: s.id, mode }
+      });
+    } catch { /* notification optional */ }
+    logAudit(user, 'live_assist_request', { target: username, note: mode, ip: clientIp(req) });
+    return sendJson(res, 201, { ok: true, session: laView(s) });
+  }
+  if (p === '/api/live-assist/inbox' && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required');
+    laPrune();
+    const mine = liveAssistStore().sessions.filter((s) => s.user === user.username && (s.status === 'requested' || s.status === 'active'));
+    return sendJson(res, 200, { ok: true, sessions: mine.map(laView) });
+  }
+  const laSigPath = p.match(/^\/api\/live-assist\/([^/]+)\/signal$/);
+  if (laSigPath && method === 'POST') {
+    if (!user) throw new HttpError(401, 'Login required');
+    const s = laFind(laSigPath[1]);
+    if (!s) throw new HttpError(404, 'Session nahi mila.');
+    const side = laParty(s, user);
+    if (!side) throw new HttpError(403, 'Is session ke hissa nahi ho.');
+    if (s.status !== 'active') throw new HttpError(400, `Session "${s.status}" hai — signalling band.`);
+    const body = await readBody(req);
+    if (!['sdp', 'ice'].includes(body.kind) || !body.data || typeof body.data !== 'object') throw new HttpError(400, 'Signal invalid hai.');
+    if (JSON.stringify(body.data).length > 40000) throw new HttpError(400, 'Signal bahut bada hai.');
+    s.seq = Number(s.seq) + 1;
+    if (!Array.isArray(s.signals)) s.signals = [];
+    s.signals.push({ seq: s.seq, kind: body.kind, data: body.data, from: side, at: new Date().toISOString() });
+    if (s.signals.length > 250) s.signals.splice(0, s.signals.length - 250);
+    laPersistSoon();
+    return sendJson(res, 200, { ok: true, seq: s.seq });
+  }
+  if (laSigPath && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required');
+    const s = laFind(laSigPath[1]);
+    if (!s) throw new HttpError(404, 'Session nahi mila.');
+    const side = laParty(s, user);
+    if (!side) throw new HttpError(403, 'Is session ke hissa nahi ho.');
+    const since = Number(url.searchParams.get('since')) || 0;
+    const fresh = (s.signals || []).filter((m) => m.seq > since && m.from !== side)
+      .map((m) => ({ seq: m.seq, kind: m.kind, data: m.data, at: m.at }));
+    return sendJson(res, 200, { ok: true, status: s.status, seq: Number(s.seq) || 0, signals: fresh });
+  }
+  const laActPath = p.match(/^\/api\/live-assist\/([^/]+)\/(accept|decline|end)$/);
+  if (laActPath && method === 'POST') {
+    if (!user) throw new HttpError(401, 'Login required');
+    laPrune();
+    const s = laFind(laActPath[1]);
+    if (!s) throw new HttpError(404, 'Session nahi mila.');
+    const side = laParty(s, user);
+    if (!side) throw new HttpError(403, 'Is session ke hissa nahi ho.');
+    const action = laActPath[2];
+    const now = new Date().toISOString();
+    if (action === 'accept') {
+      if (side !== 'user') throw new HttpError(403, 'Sirf jiske liye request hai wahi allow kar sakta hai.');
+      if (s.status !== 'requested') throw new HttpError(400, `Session "${s.status}" hai — ab allow nahi ho sakta.`);
+      s.status = 'active'; s.acceptedAt = now;
+      try { recordNotification({ type: 'assist', title: '🎙️ Live Assist allowed', body: `${s.userName} ne allow kiya — live session chalu (${s.mode}).`, target: 'admin', meta: { sessionId: s.id } }); } catch { /* optional */ }
+      logAudit(user, 'live_assist_accept', { target: s.id, note: s.mode, ip: clientIp(req) });
+    } else if (action === 'decline') {
+      if (side !== 'user') throw new HttpError(403, 'Sirf jinke liye request hai wahi decline kar sakte hain.');
+      if (s.status !== 'requested') throw new HttpError(400, `Session "${s.status}" hai.`);
+      s.status = 'declined'; s.endedAt = now; s.reason = 'user-declined';
+      try { recordNotification({ type: 'assist', title: '🎙️ Live Assist declined', body: `${s.userName} ne request decline kar di.`, target: 'admin', meta: { sessionId: s.id } }); } catch { /* optional */ }
+      logAudit(user, 'live_assist_decline', { target: s.id, ip: clientIp(req) });
+    } else { // end — dono me se koi bhi band kar sakta hai
+      if (s.status === 'requested' || s.status === 'active') {
+        s.status = 'ended'; s.endedAt = now; s.reason = side === 'user' ? 'user-ended' : 'admin-ended';
+        logAudit(user, 'live_assist_end', { target: s.id, note: s.reason, ip: clientIp(req) });
+      }
+    }
+    await persist('notify');
+    return sendJson(res, 200, { ok: true, session: laView(s) });
+  }
+  const laOnePath = p.match(/^\/api\/live-assist\/([^/]+)$/);
+  if (laOnePath && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required');
+    laPrune();
+    const s = laFind(laOnePath[1]);
+    if (!s) throw new HttpError(404, 'Session nahi mila.');
+    if (!laParty(s, user)) throw new HttpError(403, 'Is session ke hissa nahi ho.');
+    return sendJson(res, 200, { ok: true, session: laView(s) });
   }
 
   // ---- gviz ----
