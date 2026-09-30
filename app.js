@@ -25,7 +25,7 @@ window.FF = window.FF || {};
     { id: 'gvPerformance', icon: '🏆', label: 'GV Performance', desc: 'GV agents & TLs (GV REPORT)', perm: 'gvPerformance', group: 'GV Partner' },
     { id: 'gvStock', icon: '📦', label: 'GV Stock', desc: 'Tag Assignment stock search', perm: 'gvStock', group: 'GV Partner' },
     { id: 'gvStockReport', icon: '📋', label: 'GV Stock Report', desc: 'GV REPORT · agent, TL, class & dispatch', perm: 'gvStockReport', group: 'GV Partner' },
-    { id: 'gvCommission', icon: '₹', label: 'Commission Intelligence', desc: 'Amount · issuance rate · commission by day/class', perm: 'gvCommission', group: 'GV Partner' },
+    { id: 'gvCommission', icon: '₹', label: 'Commission Intelligence', desc: 'Personal agent payout · class-wise rate · GV Master', perm: 'gvCommission', group: 'GV Partner' },
     { id: 'dualChannel', icon: '🔗', label: 'Dual-channel Agents', desc: 'Verified GV + FF overlap · separate & combined', perm: 'dualChannel', group: 'Cross Channel' },
     { id: 'masterStock', icon: '🗄️', label: 'Master Stock', desc: 'Barcode / agent / TL / GV search · StockDataa ↔ Tag Assignment reconciliation', perm: 'masterStock', group: 'Cross Channel' },
     { id: 'compare', icon: '⚖️', label: 'GV vs First Forward', desc: 'Dono ka side-by-side comparison', perm: 'compare', group: 'Cross Channel' },
@@ -53,6 +53,129 @@ window.FF = window.FF || {};
   const GROUP_ICON = { 'Management': '🧭', 'First Forward': '🟦', 'GV Partner': '🟩', 'Cross Channel': '🔗', 'Workspace': '🗂️', 'Account': '👤', 'Wow Zone': '🎉' };
   const pageDef = (id) => PAGES.find((p) => p.id === id) || null;
   let current = { page: '', params: {}, token: 0 };
+
+  // ---- shared workspace controls: universal filters, focus mode, accessibility -------------------
+  const FILTER_PAGES = new Set(['home', 'executive', 'tagIssued', 'rangeReport', 'dashboard', 'trend', 'performance', 'stock', 'stockReport', 'ffCommission', 'gvDashboard', 'gvTrend', 'gvPerformance', 'gvStock', 'gvStockReport', 'gvCommission', 'dualChannel', 'compare', 'charts', 'forecast', 'dataQuality', 'dispatchPlan', 'tlScorecard', 'masterStock', 'fastagChampions', 'stockRadar']);
+  const readLocalJson = (key, fallback) => { try { const v = JSON.parse(localStorage.getItem(key) || 'null'); return v && typeof v === 'object' ? v : fallback; } catch { return fallback; } };
+  const writeLocalJson = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* private mode */ } };
+  let globalFilters = readLocalJson('ff_global_filters', { period: 'month', channel: '', tl: '', agent: '', cls: '' });
+  function currentFilterValues() {
+    const period = current.params.period || globalFilters.period || 'month';
+    return { ...globalFilters, period, month: current.params.month || globalFilters.month || periodDates(period).month || '', ...Object.fromEntries(['channel', 'tl', 'agent', 'cls'].filter((k) => current.params[k] !== undefined).map((k) => [k, current.params[k]])) };
+  }
+  function syncGlobalFilterState(patch) { globalFilters = { ...globalFilters, ...patch }; writeLocalJson('ff_global_filters', globalFilters); }
+  function clearGlobalFilters() {
+    globalFilters = { period: 'month', channel: '', tl: '', agent: '', cls: '', month: '' };
+    writeLocalJson('ff_global_filters', globalFilters);
+    const patch = { period: '', channel: '', ch: '', tl: '', agent: '', cls: '', month: '' };
+    if (current.page === 'tagIssued' || current.page === 'rangeReport') Object.assign(patch, { from: '', to: '', date: '' });
+    updateParams(patch);
+  }
+  function periodDates(period) {
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const key = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    if (period === 'today') return { from: key(now), to: key(now) };
+    if (period === 'yesterday') { const d = new Date(now); d.setDate(d.getDate() - 1); return { from: key(d), to: key(d) }; }
+    if (period === 'week') { const d = new Date(now); d.setDate(d.getDate() - 6); return { from: key(d), to: key(now) }; }
+    if (period === 'lastMonth') { const d = new Date(now.getFullYear(), now.getMonth(), 0); return { month: `${d.getFullYear()}-${pad(d.getMonth() + 1)}` }; }
+    if (period === 'all') return {};
+    return { month: `${now.getFullYear()}-${pad(now.getMonth() + 1)}` };
+  }
+  function globalFilterPatch(field, value) {
+    const patch = {};
+    if (field === 'channel') {
+      syncGlobalFilterState({ channel: value });
+      if (current.page === 'trend' || current.page === 'gvTrend') patch.ch = value;
+      else patch.channel = value;
+    } else if (field === 'cls') { syncGlobalFilterState({ cls: value }); patch.cls = value; }
+    else if (field === 'tl' || field === 'agent') {
+      syncGlobalFilterState({ [field]: value, ...(field === 'tl' ? { agent: '' } : { tl: '' }) });
+      patch[field] = value; patch[field === 'tl' ? 'agent' : 'tl'] = '';
+    } else if (field === 'month') {
+      syncGlobalFilterState({ period: 'month', month: value });
+      Object.assign(patch, { from: '', to: '', date: '', month: value, period: 'month' });
+    } else if (field === 'period') {
+      syncGlobalFilterState({ period: value, month: periodDates(value).month || '' });
+      const dates = periodDates(value);
+      Object.assign(patch, { from: '', to: '', date: '', month: '', period: value }, dates);
+    }
+    return patch;
+  }
+  function renderGlobalFilters() {
+    const bar = U.$('#global-filter-bar');
+    if (!bar || !FF.auth.user) return;
+    if (!FILTER_PAGES.has(current.page) || (FF.config.feat && FF.config.feat('universalFilters') === false)) { bar.hidden = true; bar.innerHTML = ''; return; }
+    const f = currentFilterValues();
+    const period = f.period || 'month';
+    bar.hidden = false;
+    bar.innerHTML = `<div class="global-filter-label"><span>⌕</span><b>Workspace filters</b><small>saved across pages</small></div>
+      <label><span>Period</span><select data-global-filter="period" aria-label="Shared date period"><option value="today" ${period === 'today' ? 'selected' : ''}>Today</option><option value="yesterday" ${period === 'yesterday' ? 'selected' : ''}>Yesterday</option><option value="week" ${period === 'week' ? 'selected' : ''}>Last 7 days</option><option value="month" ${period === 'month' ? 'selected' : ''}>This month</option><option value="lastMonth" ${period === 'lastMonth' ? 'selected' : ''}>Last month</option><option value="all" ${period === 'all' ? 'selected' : ''}>All available</option></select></label>
+      <label><span>Month</span><input type="month" data-global-filter="month" aria-label="Shared month filter" value="${esc(f.month || '')}"></label>
+      <label><span>Channel</span><select data-global-filter="channel" aria-label="Shared channel filter"><option value="" ${!f.channel ? 'selected' : ''}>FF + GV</option><option value="ff" ${f.channel === 'ff' ? 'selected' : ''}>First Forward</option><option value="gv" ${f.channel === 'gv' ? 'selected' : ''}>GV Partner</option></select></label>
+      <label class="global-filter-search"><span>TL</span><input data-global-filter="tl" aria-label="Shared TL filter" placeholder="All TLs" value="${esc(f.tl || '')}"></label>
+      <label class="global-filter-search"><span>Agent</span><input data-global-filter="agent" aria-label="Shared agent filter" placeholder="All agents" value="${esc(f.agent || '')}"></label>
+      <label><span>Class</span><select data-global-filter="cls" aria-label="Shared class filter"><option value="" ${!f.cls ? 'selected' : ''}>All classes</option><option value="VC4" ${f.cls === 'VC4' ? 'selected' : ''}>VC4</option><option value="VC20" ${f.cls === 'VC20' ? 'selected' : ''}>VC20</option><option value="VC5+" ${f.cls === 'VC5+' ? 'selected' : ''}>VC5+</option></select></label>
+      <button type="button" class="btn small global-filter-clear" data-global-filter-clear aria-label="Clear shared filters">Reset</button>
+      <span class="global-filter-state" aria-live="polite">${navigator.onLine === false ? '📴 Offline snapshot' : '↻ Applies to compatible views'}</span>`;
+  }
+  function renderMobileNav() {
+    const nav = U.$('#mobile-nav');
+    if (!nav || !FF.auth.user) return;
+    const items = [
+      ['home', '⌂', 'Home'],
+      ['tagIssued', '▣', 'Issued'],
+      ['performance', '★', 'Team'],
+      ['stock', '▤', 'Stock'],
+      ['settings', '⚙', 'More']
+    ].filter(([id]) => id === 'settings' || allowed(id, {}));
+    nav.hidden = false;
+    nav.innerHTML = items.map(([id, icon, label]) => `<a href="#/${id}" class="mobile-nav-item ${current.page === id ? 'active' : ''}" aria-label="${esc(label)}"><span>${icon}</span><small>${esc(label)}</small></a>`).join('');
+  }
+  function updateFocusMode(on) {
+    const enabled = on === undefined ? document.documentElement.classList.toggle('focus-mode') : !!on;
+    if (on !== undefined) document.documentElement.classList.toggle('focus-mode', enabled);
+    try { localStorage.setItem('ff_focus_mode', enabled ? '1' : '0'); } catch {}
+    const btn = U.$('#focus-toggle');
+    if (btn) { btn.classList.toggle('active', enabled); btn.setAttribute('aria-pressed', String(enabled)); btn.title = enabled ? 'Exit focus mode' : 'Focus mode'; }
+    document.body.classList.toggle('focus-mode', enabled);
+    return enabled;
+  }
+  function renderA11yPanel() {
+    const old = U.$('#a11y-panel'); if (old) old.remove();
+    const state = readLocalJson('ff_a11y', { largeText: false, highContrast: false, reducedMotion: false });
+    const panel = U.h(`<div class="a11y-panel" id="a11y-panel" role="dialog" aria-label="Accessibility mode"><div class="a11y-head"><b>Accessibility mode</b><button class="icon-btn small" data-a11y-close aria-label="Close">✕</button></div><p class="dim small">Readable, keyboard-friendly controls — settings persist on this device.</p><label><input type="checkbox" data-a11y="largeText" ${state.largeText ? 'checked' : ''}> Larger text</label><label><input type="checkbox" data-a11y="highContrast" ${state.highContrast ? 'checked' : ''}> High contrast + stronger borders</label><label><input type="checkbox" data-a11y="reducedMotion" ${state.reducedMotion ? 'checked' : ''}> Reduce motion</label><button class="btn small" data-a11y-reset>Reset accessibility</button></div>`);
+    document.body.appendChild(panel);
+    const apply = (key, value) => { const next = { ...state, [key]: value }; writeLocalJson('ff_a11y', next); document.documentElement.classList.toggle(`a11y-${key.replace(/[A-Z]/g, (m) => '-' + m.toLowerCase())}`, value); };
+    panel.querySelectorAll('[data-a11y]').forEach((el) => el.addEventListener('change', () => apply(el.dataset.a11y, el.checked)));
+    panel.querySelector('[data-a11y-close]').addEventListener('click', () => panel.remove());
+    panel.querySelector('[data-a11y-reset]').addEventListener('click', () => { writeLocalJson('ff_a11y', { largeText: false, highContrast: false, reducedMotion: false }); ['large-text', 'high-contrast', 'reduced-motion'].forEach((c) => document.documentElement.classList.remove(`a11y-${c}`)); panel.remove(); });
+  }
+  function applyA11y() {
+    const state = readLocalJson('ff_a11y', {});
+    ['largeText', 'highContrast', 'reducedMotion'].forEach((key) => document.documentElement.classList.toggle(`a11y-${key.replace(/[A-Z]/g, (m) => '-' + m.toLowerCase())}`, !!state[key]));
+  }
+  function maybeOnboarding() {
+    if (!FF.auth.user || EMBED_LIVE) return;
+    try { if (localStorage.getItem('ff_onboarding_seen') === '1') return; localStorage.setItem('ff_onboarding_seen', '1'); } catch { return; }
+    setTimeout(() => {
+      if (U.$('#onboarding-tour') || !document.body.classList.contains('ready')) return;
+      const tour = U.h(`<div class="onboarding-backdrop" id="onboarding-tour" role="dialog" aria-modal="true" aria-labelledby="tour-title"><section class="onboarding-card"><div class="tour-kicker">FIRST FORWARD · QUICK TOUR</div><h2 id="tour-title">Your command center is ready</h2><p id="tour-copy">Use the sidebar for pages, the universal filters for shared date, channel, TL, agent and class context, and <kbd>Ctrl</kbd> <kbd>K</kbd> to search or run commands.</p><div class="tour-progress" id="tour-progress">1 / 4</div><div class="onboarding-actions"><button class="btn" data-tour-skip>Skip</button><button class="btn primary" data-tour-next>Next →</button></div></section></div>`);
+      document.body.appendChild(tour);
+      const steps = [
+        ['Navigation + filters', 'Sidebar groups your management, FF, GV and cross-channel work. The filter bar keeps a shared context across compatible pages.'],
+        ['Search + export', 'Press Ctrl / ⌘ + K for pages, agents, TLs, tags and calculations. Table toolbars provide density, columns and CSV export.'],
+        ['Notifications + offline', 'The bell shows unread alerts and actions. The status dot tells you when the last snapshot is available; offline mode keeps the last known data.'],
+        ['Personalise your workspace', 'Use 🎯 Focus mode for management screens, ♿ Accessibility mode for readable contrast and text, 🎨 theme packs, and Settings for profiles.']
+      ];
+      let i = 0;
+      const draw = () => { U.$('#tour-title', tour).textContent = steps[i][0]; U.$('#tour-copy', tour).textContent = steps[i][1]; U.$('#tour-progress', tour).textContent = `${i + 1} / ${steps.length}`; U.$('[data-tour-next]', tour).textContent = i === steps.length - 1 ? 'Done ✓' : 'Next →'; };
+      const close = () => tour.remove();
+      U.$('[data-tour-skip]', tour).addEventListener('click', close);
+      U.$('[data-tour-next]', tour).addEventListener('click', () => { if (i === steps.length - 1) close(); else { i++; draw(); } });
+      draw();
+    }, 1200);
+  }
 
   // ---- language (English / हिंदी) — navigation & titles -----------------------------------------
   const HI_PAGES = {
@@ -505,6 +628,8 @@ window.FF = window.FF || {};
     const { page, params } = parseHash();
     current = { page, params, token: current.token + 1 };
     const token = current.token;
+    renderGlobalFilters();
+    renderMobileNav();
     const pageGroup = currentNavGroup(page, params);
     if (openNavGroup !== pageGroup) selectNavGroup(pageGroup);
     markActive();
@@ -533,7 +658,7 @@ window.FF = window.FF || {};
       if (token === current.token) root.innerHTML = U.errorBox(err, 'data-action="refresh"');
     }
     clearTimeout(loaderTimer);
-    if (token === current.token) { main.setAttribute('aria-busy', 'false'); updateStatus(); enhanceCharts(root); translateDom(root); }
+    if (token === current.token) { main.setAttribute('aria-busy', 'false'); updateStatus(); enhanceCharts(root); enhanceTables(root); translateDom(root); }
   }
   function updateStatus(progress) {
     const el = U.$('#status');
@@ -541,6 +666,9 @@ window.FF = window.FF || {};
     const st = FF.store.state, gv = FF.gv ? FF.gv.state : null;
     const pre = FF.preloader ? FF.preloader.state : null;
     const loading = st.loading || (gv && gv.loading) || (pre && pre.running);
+    const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+    const offlineEl = U.$('#offline-state');
+    if (offlineEl) { offlineEl.hidden = !offline; offlineEl.textContent = offline ? '📴 Offline · last snapshot' : ''; offlineEl.className = `offline-state${offline ? ' is-offline' : ''}`; }
     if (loading) {
       const p = pre && pre.running ? pre.progress : (st.loading ? st.progress : gv.progress);
       const extra = pre && pre.running ? ` (preloading ${p.loaded}/${p.total})` : st.loading && gv && gv.loading ? ' (FF + GV)' : st.loading ? ' (FF)' : ' (GV)';
@@ -549,7 +677,6 @@ window.FF = window.FF || {};
     }
     const t = FF.store.loadedAt || (gv && gv.loadedAt);
     const errs = Object.keys(st.errors || {}).length + (gv ? Object.keys(gv.errors).length : 0);
-    const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
     el.innerHTML = offline
       ? '<span class="dot warn"></span> 📴 Offline — last loaded data dikh raha hai'
       : (t ? `<span class="dot ${errs ? 'warn' : 'live'}\"></span> Data ${U.timeLabel(t)}${errs ? ` · ${errs} failed` : ''}${pre && pre.done ? ' · all sheets ready ✓' : ''}` : '<span class="dot"></span> Ready');
@@ -593,6 +720,7 @@ window.FF = window.FF || {};
     U.$('#drawer-body').scrollTop = 0;
     if (FF.charts && FF.charts.mount) FF.charts.mount(U.$('#drawer-body'));
     enhanceCharts(U.$('#drawer-body'));
+    enhanceTables(U.$('#drawer-body'));
     translateDom(U.$('#drawer-body'));
   }
   function closeDrawer() {
@@ -685,6 +813,46 @@ window.FF = window.FF || {};
     modal.addEventListener('click', (e) => { if (e.target === modal || e.target.closest('.kpi-modal-close,.kpi-modal-done')) close(); });
   }
 
+  // ---- table experience: density, columns, sticky context and export ------------------------------
+  function tableDensity() { try { return localStorage.getItem('ff_table_density') || 'comfortable'; } catch { return 'comfortable'; } }
+  function setTableDensity(value) { try { localStorage.setItem('ff_table_density', value); } catch {} document.documentElement.dataset.tableDensity = value; }
+  function enhanceTables(root) {
+    if (!root || !root.querySelectorAll) return;
+    setTableDensity(tableDensity());
+    root.querySelectorAll('.table-wrap').forEach((wrap) => {
+      const table = wrap.querySelector('table');
+      if (!table || wrap.querySelector('.table-tools')) return;
+      const toolbar = document.createElement('div');
+      toolbar.className = 'table-tools';
+      toolbar.innerHTML = `<span class="table-tools-title">Table</span><span class="table-tools-note">${table.tBodies && table.tBodies[0] ? `${table.tBodies[0].rows.length} rows` : 'view'}</span><button type="button" class="btn small" data-table-density title="Toggle compact row density">${tableDensity() === 'compact' ? '↕ Comfortable' : '↕ Compact'}</button><button type="button" class="btn small" data-table-columns title="Choose visible columns">☷ Columns</button><button type="button" class="btn small" data-table-export title="Export this table">⬇ CSV</button>`;
+      const menu = document.createElement('div');
+      menu.className = 'table-columns-menu'; menu.hidden = true;
+      [...table.querySelectorAll('thead th')].forEach((th, i) => {
+        const label = (th.textContent || `Column ${i + 1}`).replace(/\s+/g, ' ').trim().slice(0, 60) || `Column ${i + 1}`;
+        const row = document.createElement('label');
+        row.innerHTML = `<input type="checkbox" data-table-col="${i}" checked> <span>${esc(label)}</span>`;
+        menu.appendChild(row);
+      });
+      wrap.insertBefore(toolbar, table);
+      wrap.appendChild(menu);
+      toolbar.querySelector('[data-table-density]').addEventListener('click', () => {
+        const next = tableDensity() === 'compact' ? 'comfortable' : 'compact';
+        setTableDensity(next); root.querySelectorAll('table').forEach((t) => t.classList.toggle('table-density-compact', next === 'compact'));
+        document.querySelectorAll('[data-table-density]').forEach((b) => { b.textContent = next === 'compact' ? '↕ Comfortable' : '↕ Compact'; });
+      });
+      toolbar.querySelector('[data-table-columns]').addEventListener('click', (e) => { e.stopPropagation(); menu.hidden = !menu.hidden; });
+      toolbar.querySelector('[data-table-export]').addEventListener('click', () => {
+        if (!FF.auth.can('export')) { U.toast('Download permission nahi hai', 'err'); return; }
+        const rows = U.tableToRows(table); U.downloadCsv(`${U.slug(current.page || 'table')}-${U.stamp()}.csv`, rows[0] || [], rows.slice(1)); U.toast('Table CSV downloaded ✓', 'ok');
+      });
+      menu.querySelectorAll('[data-table-col]').forEach((input) => input.addEventListener('change', () => {
+        const index = Number(input.dataset.tableCol); const hidden = !input.checked;
+        [...table.querySelectorAll('tr')].forEach((tr) => { const cell = tr.children[index]; if (cell) cell.hidden = hidden; });
+      }));
+      table.classList.toggle('table-density-compact', tableDensity() === 'compact');
+    });
+  }
+
   function bind() {
     // Sidebar stays fixed/visible on desktop — the old hover auto-hide mode is removed.
     document.body.classList.remove('sidebar-auto'); try { localStorage.removeItem('ff_sidebar_auto'); } catch { /* private mode */ }
@@ -700,7 +868,13 @@ window.FF = window.FF || {};
     }
     if (FF.i18n) FF.i18n.translateTitle();
     applyThemeMode();
-    window.addEventListener('online', () => { updateStatus(); U.toast('🌐 Internet wapas aa gaya — ↻ se fresh data lao', 'ok'); });
+    applyA11y();
+    try { updateFocusMode(localStorage.getItem('ff_focus_mode') === '1'); } catch { updateFocusMode(false); }
+    const focusBtn = U.$('#focus-toggle');
+    if (focusBtn) focusBtn.addEventListener('click', () => { const on = updateFocusMode(); U.toast(on ? '🎯 Focus mode ON — distraction-free view' : 'Focus mode OFF', 'ok'); });
+    const a11yBtn = U.$('#a11y-btn');
+    if (a11yBtn) a11yBtn.addEventListener('click', (e) => { e.stopPropagation(); renderA11yPanel(); });
+    window.addEventListener('online', () => { updateStatus(); renderGlobalFilters(); U.toast('🌐 Internet wapas aa gaya — ↻ se fresh data lao', 'ok'); });
     window.addEventListener('offline', () => { updateStatus(); U.toast('📴 Offline ho — last loaded data dikhega', 'warn'); });
     U.$('#side-backdrop').addEventListener('click', closeSidebar);
     U.$('#top-refresh').addEventListener('click', refresh);
@@ -735,6 +909,9 @@ window.FF = window.FF || {};
     U.$('#drawer-backdrop').addEventListener('click', closeDrawer);
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeDrawer(); closeSidebar(); toggleUserMenu(false); } });
     document.addEventListener('click', (e) => {
+      if (e.target.closest('[data-global-filter-clear]')) {
+        e.preventDefault(); clearGlobalFilters(); return;
+      }
       if (!e.target.closest('#user-menu') && !e.target.closest('#user-btn')) toggleUserMenu(false);
       if (e.target.closest('#user-menu a')) toggleUserMenu(false);
       const kpi = e.target.closest('.kpi');
@@ -754,6 +931,8 @@ window.FF = window.FF || {};
         if (a === 'refresh') refresh();
         else if (a === 'export') exportCard(act);
         else if (a === 'clear-filters') updateParams({ tl: '', agent: '' });
+        else if (a === 'focus-mode') updateFocusMode();
+        else if (a === 'notifications' && FF.notifications) FF.notifications.toggle(true);
         else if (a === 'close-drawer') closeDrawer();
         return;
       }
@@ -771,6 +950,13 @@ window.FF = window.FF || {};
       if (drawerLink) closeDrawer();
     });
     document.addEventListener('change', (e) => {
+      const global = e.target.closest('[data-global-filter]');
+      if (global) {
+        const field = global.dataset.globalFilter;
+        const patch = globalFilterPatch(field, global.value);
+        updateParams(patch);
+        return;
+      }
       const el = e.target.closest('select[data-param], input[data-param]');
       if (el) updateParams({ [el.dataset.param]: el.value, ...(el.dataset.param === 'tl' ? { agent: '' } : {}), ...(el.dataset.param === 'agent' ? { tl: '' } : {}) });
     });
@@ -854,6 +1040,7 @@ window.FF = window.FF || {};
     // Start one shared load BEFORE rendering; page requests join it.
     if (FF.preloader) FF.preloader.preloadAll(false).catch(console.warn);
     renderCurrent();
+    maybeOnboarding();
     if (FF.config.loginAnimation !== false) FF.auth.splash(FF.auth.user);
     registerServiceWorker(); // push notifications ke liye SW pehle ready ho
     if (FF.notifications) FF.notifications.start();
@@ -938,6 +1125,6 @@ window.FF = window.FF || {};
     setLang(next);
   }
 
-  FF.app = { storageBanner, pushBanner, liveShareChip, navigate, updateParams, refresh, openDrawer, closeDrawer, renderSidebar, renderCurrent, renderTopUser, updateStatus, onLogin, onBackgroundDataUpdated, promptInstall, enhanceCharts, themeMode, toggleThemeMode, lang, setLang, toggleLangMenu, PAGES, refreshPendingBadge, setPendingSignups, shareWhatsApp, checkVersion, exportCSV: () => exportCurrentCsv('csv'), exportXLSX: () => exportCurrentCsv('xlsx'), toggleTheme: toggleThemeMode, toggleLang: toggleLangQuick, get pendingSignups() { return pendingSignups; }, get current() { return current; } };
+  FF.app = { storageBanner, pushBanner, liveShareChip, navigate, updateParams, clearGlobalFilters, refresh, openDrawer, closeDrawer, renderSidebar, renderCurrent, renderTopUser, updateStatus, onLogin, onBackgroundDataUpdated, promptInstall, enhanceCharts, enhanceTables, themeMode, toggleThemeMode, lang, setLang, toggleLangMenu, renderGlobalFilters, renderMobileNav, focusMode: updateFocusMode, openAccessibility: renderA11yPanel, tableDensity, setTableDensity, PAGES, refreshPendingBadge, setPendingSignups, shareWhatsApp, checkVersion, exportCSV: () => exportCurrentCsv('csv'), exportXLSX: () => exportCurrentCsv('xlsx'), toggleTheme: toggleThemeMode, toggleLang: toggleLangQuick, get pendingSignups() { return pendingSignups; }, get current() { return current; }, get globalFilters() { return { ...globalFilters }; } };
   document.addEventListener('DOMContentLoaded', init);
 })(window.FF);

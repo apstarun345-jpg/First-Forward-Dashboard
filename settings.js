@@ -6,7 +6,7 @@ FF.pages = FF.pages || {};
   'use strict';
   const U = FF.util, A = FF.auth;
   const esc = U.esc;
-  const TABS = [['account', '👤 My account'], ['sound', '🔊 Sound & voice'], ['brand', '🎨 Branding & images'], ['sources', '🗂️ Sheets & tabs'], ['access', '🔐 Access matrix'], ['data', '🔌 Data source'], ['direct', '🧍 Direct agents'], ['rules', '📐 Thresholds'], ['features', '🎛 Features'], ['contacts', '📲 Contacts & sharing'], ['users', '👥 Users & access'], ['links', '🔗 Personal links'], ['audit', '📜 Audit log'], ['backup', '☁️ Storage & backup']];
+  const TABS = [['account', '👤 My account'], ['diagnostics', '🩺 Site diagnostics'], ['sound', '🔊 Sound & voice'], ['brand', '🎨 Branding & images'], ['sources', '🗂️ Sheets & tabs'], ['access', '🔐 Access matrix'], ['data', '🔌 Data source'], ['direct', '🧍 Direct agents'], ['rules', '📐 Thresholds'], ['features', '🎛 Features'], ['contacts', '📲 Contacts & sharing'], ['users', '👥 Users & access'], ['links', '🔗 Personal links'], ['audit', '📜 Audit log'], ['backup', '☁️ Storage & backup']];
   let tab = 'account';
   let storage = null;
   let settings = null, defaults = null, usersCache = null, permsCache = [];
@@ -547,6 +547,8 @@ FF.pages = FF.pages || {};
   }
   function dataTab() {
     const s = settings, fc = s.ffCommission || {}, sm = s.stockMovement || {}, cs = s.commissionSlabs || defaults.commissionSlabs || {};
+    const gvcr = s.gvCommissionRates || (defaults && defaults.gvCommissionRates) || {};
+    const gvPersonalClasses = ['VC4', 'VC20', 'VC5', 'VC6', 'VC7', 'VC12'];
     const standardSlabs = [{ min: 1, max: 50, rate: '' }, { min: 51, max: 100, rate: '' }, { min: 101, max: 150, rate: '' }, { min: 151, max: 250, rate: '' }, { min: 251, max: null, rate: '' }];
     const slabEditor = (channel, label) => { const slabs = (cs.channels && cs.channels[channel]) || standardSlabs; return `<div class="card compact-card"><div class="card-head"><h3>${label}</h3><span class="dim small">₹ per tag</span></div><div class="table-wrap"><table class="tbl compact"><thead><tr><th>Agent issuance slab</th><th>Commission per tag (₹)</th></tr></thead><tbody>${standardSlabs.map((band, i) => { const saved = slabs[i] || band; return `<tr><td><b>${band.max === null ? `${band.min}+` : `${band.min}–${band.max}`}</b></td><td><input class="input mono" inputmode="decimal" data-path="commissionSlabs.channels.${channel}.${i}.rate" value="${esc(saved.rate ?? '')}" placeholder="Set ₹ / tag"></td></tr>`; }).join('')}</tbody></table></div></div>`; };
     const letters = (obj, keys, prefix) => `<div class="letter-grid">${keys.map((k) => `<label><small>${k}</small><input class="input mono" data-path="${prefix}.${k}" value="${esc(obj[k] ?? '')}"></label>`).join('')}</div>`;
@@ -555,6 +557,7 @@ FF.pages = FF.pages || {};
         <h4 style="margin:14px 0 8px">₹ FF REPORT commission column settings <span class="dim small">(optional · admin configurable)</span></h4><p class="dim small">Yahan REPORT sheet ke commission source ka <b>column letter</b> (jaise <b>BZ</b>) <b>ya heading ka naam</b> (jaise <b>Commission Rate</b>) — dono chalte hain. Naam likhne par dashboard REPORT headings me wahi naam dhoondta hai (chhota-bada letter, extra space sab ignore hota hai). Save karne ke baad Commission Intelligence refresh karein.</p><div class="form-grid">${field('Commission rate column / heading', txt('ffCommission.rateCol', fc.rateCol || '', 'placeholder="e.g. BZ ya Commission Rate" maxlength="60"'), 'Rate / percentage / per-tag rate ka REPORT column — letter ya heading ka naam')}${field('Earned commission column / heading', txt('ffCommission.earnedCol', fc.earnedCol || '', 'placeholder="e.g. CA ya Earned Commission" maxlength="60"'), 'Actual earned / payout amount ka column — rate se alag (letter ya naam)')}${field('Agent category column / heading', txt('ffCommission.categoryCol', fc.categoryCol || '', 'placeholder="optional" maxlength="60"'), 'Direct/TL se extra sheet category ho to uska column')}${field('Commission date column / heading', txt('ffCommission.dateCol', fc.dateCol || '', 'placeholder="optional" maxlength="60"'), 'Date/period column, Today / 7 / 15 / 30 day filters ke liye')}</div><p class="dim small">Blank chhodne par headings auto-detect hoti hain (commission / comm. / payout / earning / incentive / ₹ jaisi heading milte hi dashboard khud utha leta hai). Jo bhi heading app use kar rahi hai wo <b>Commission Intelligence → 🔍 REPORT commission column finder</b> table me letter ke saath dikhti hai — wahan se ek click me bhi set kar sakte hain. Missing commission ko guessed rate se calculate nahi kiya jata.</p><div class="btn-row"><a class="btn small" href="#/ffCommission">₹ Open Commission Intelligence → column finder</a></div>`)}
       ${section('🧾 FF payout sheet · class rates + penalties', `<p class="dim small">FF Google Sheet ki <b>payout</b> tab jisme har class ka commission rate aur penalty likha hai (jaise VC4 kitna, VC20 kitna, VC5+ kitna, wrong VRN penalty kitni). Commission Intelligence page isi se <b>expected commission</b> calculate karti hai — class-wise counts × rate − penalties (koi average nahi). Tab ka naam/columns auto-detect hote hain; galat mile to yahan set karo.</p><div class="form-grid">${field('Payout tab name', txt('ffPayout.sheet', (s.ffPayout || {}).sheet ?? 'payout'), 'FF spreadsheet me exact tab naam (default: payout)')}${field('Payout tab gid (optional)', txt('ffPayout.gid', (s.ffPayout || {}).gid || ''))}${field('Particulars column (optional)', txt('ffPayout.labelCol', (s.ffPayout || {}).labelCol || '', 'placeholder="auto" maxlength="40"'))}${field('Class column (optional)', txt('ffPayout.classCol', (s.ffPayout || {}).classCol || '', 'placeholder="auto" maxlength="40"'))}${field('Commission rate column (optional)', txt('ffPayout.rateCol', (s.ffPayout || {}).rateCol || '', 'placeholder="auto" maxlength="40"'))}${field('Penalty column (optional)', txt('ffPayout.penaltyCol', (s.ffPayout || {}).penaltyCol || '', 'placeholder="auto" maxlength="40"'))}</div><div class="btn-row"><a class="btn small" href="#/ffCommission">🧾 Payout rates preview dekho →</a></div>${saveBar('ffPayout')}`)}
       ${section('💸 Commission slabs · FF + GV', `<p class="dim small">Har channel ke liye ₹ per tag set karein. Slab agent ke selected-period total issuance par apply hoga. <b>Agent tier</b>: total count jis slab me aaye, us rate ko period ke sab tags par lagaye. <b>Marginal</b>: har band ka rate sirf us band ke tags par apply hoga. Actual sheet commission ke saath difference dekhne ke liye rates set karke Enable karein.</p><label class="check"><input type="checkbox" data-path="commissionSlabs.enabled" ${cs.enabled === true ? 'checked' : ''}> <b>Enable slab expected-vs-actual comparison</b></label><div class="form-grid"><label class="fld"><span>Slab calculation model</span><select class="input" data-path="commissionSlabs.model"><option value="agentTier" ${(cs.model || 'agentTier') === 'agentTier' ? 'selected' : ''}>Agent tier · one rate × all tags</option><option value="marginal" ${cs.model === 'marginal' ? 'selected' : ''}>Marginal · rate per band</option></select></label></div><div class="split-cards">${slabEditor('ff', 'First Forward')}${slabEditor('gv', 'GV Partner')}</div><p class="dim small">Bands: 1–50 · 51–100 · 101–150 · 151–250 · 251+. ₹ rate blank ho to us slab ka expected payout nahi banega—dashboard guess nahi karega.</p>${saveBar('commissionSlabs')}`)}
+      ${section('👤 GV personal commission · class-wise rates', `<p class="dim small">GV Commission Intelligence me <b>agent ID + exact vehicle class</b> ke hisaab se personal commission dikhai jayega. <b>VC4 default = GV Master ke current month ke commission column ki exact rate</b>; koi average, cut ya extra amount nahi. Baaki classes ke official rates aap yahan set kar sakte ho. Blank manual rate par dashboard payout guess nahi karega.</p><label class="check"><input type="checkbox" data-path="gvCommissionRates.enabled" ${gvcr.enabled !== false ? 'checked' : ''}> <b>Personal commission table ON</b></label><p class="dim small">Source rule: <b>GV Master</b> select karne par row ke agent ID + class se commission value li jayegi. <b>Manual</b> select karke ₹/tag bharo to us class ke current-month tags × wahi rate hoga. Rate source har agent ke saamne dikhega.</p><div class="gv-rate-settings"><div class="gv-rate-settings-head"><span>Vehicle class</span><span>Rate source</span><span>Manual rate (₹ / tag)</span></div>${gvPersonalClasses.map((cls) => { const saved = (gvcr.classes && gvcr.classes[cls]) || {}; const source = saved.source === 'manual' ? 'manual' : (cls === 'VC4' ? 'master' : 'manual'); return `<div class="gv-rate-setting-row"><b>${cls}</b><select class="input" data-path="gvCommissionRates.classes.${cls}.source"><option value="master" ${source === 'master' ? 'selected' : ''}>GV Master · agent + class</option><option value="manual" ${source === 'manual' ? 'selected' : ''}>Manual setting</option></select><input class="input mono" type="number" min="0" step="0.0001" inputmode="decimal" data-path="gvCommissionRates.classes.${cls}.rate" value="${esc(saved.rate ?? '')}" placeholder="${source === 'master' ? 'Auto from GV Master' : 'Set ₹ / tag'}"><small class="dim">${cls === 'VC4' && source === 'master' ? 'Default: exact GV Master rate' : 'Aap official rate set karo'}</small></div>`; }).join('')}</div>${saveBar('gvCommissionRates')}`)}
       ${section('🚨 Commission alerts &amp; dispatch thresholds', `<p class="dim small">Commission alerts (FF Commission page) aur Dispatch Planner ke defaults. Alert na chahte ho to enable off kar do.</p><div class="form-grid">
         <label class="check"><input type="checkbox" data-path="commissionAlerts.enabled" ${(s.commissionAlerts || {}).enabled !== false ? 'checked' : ''}> <b>Commission alerts ON</b></label>
         ${field('Rate outlier vs peer median %', numI('commissionAlerts.outlierPct', (s.commissionAlerts || {}).outlierPct !== undefined ? s.commissionAlerts.outlierPct : 25), 'Isse zyada gap par alert')}
@@ -1300,13 +1303,159 @@ FF.pages = FF.pages || {};
     }));
   }
 
+  // ---- site diagnostics -------------------------------------------------------------------------
+  // This scanner is intentionally browser-safe: it can repair wrapping, sizing and accessible
+  // names in the rendered UI, but it never edits a displayed data total. Source discrepancies are
+  // surfaced with their page/selector/context and a clear "repair the source" explanation.
+  const diagnosticState = { findings: null, scannedAt: 0, running: false };
+  const diagPage = () => {
+    try { return (FF.app && FF.app.current && FF.app.current.page) || (location.hash.match(/^#\/?([^?/]*)/) || [])[1] || 'current page'; } catch { return 'current page'; }
+  };
+  const diagText = (el, limit = 120) => String(el && (el.innerText || el.textContent || '') || '').replace(/\s+/g, ' ').trim().slice(0, limit);
+  const diagVisible = (el) => {
+    if (!el || el.hidden || el.getAttribute && el.getAttribute('aria-hidden') === 'true') return false;
+    try {
+      const cs = window.getComputedStyle ? window.getComputedStyle(el) : null;
+      if (cs && (cs.display === 'none' || cs.visibility === 'hidden')) return false;
+      const r = el.getBoundingClientRect ? el.getBoundingClientRect() : null;
+      return !r || (r.width > 0 && r.height > 0);
+    } catch { return true; }
+  };
+  const diagStyle = (el) => { try { return window.getComputedStyle ? window.getComputedStyle(el) : {}; } catch { return {}; } };
+  function diagSelector(el) {
+    if (!el) return 'document';
+    if (el.id) return `#${el.id}`;
+    const tag = String(el.tagName || 'element').toLowerCase();
+    const classes = String(el.className && typeof el.className === 'string' ? el.className : '').split(/\s+/).filter((x) => /^[a-zA-Z][\w-]*$/.test(x)).slice(0, 2);
+    return `${tag}${classes.length ? `.${classes.join('.')}` : ''}`;
+  }
+  function diagKnownRoute(href) {
+    const m = String(href || '').match(/^#\/?([^?/#]+)/);
+    if (!m) return true;
+    const route = m[1];
+    if (route === 'sheet') return true;
+    return !!(FF.pages && FF.pages[route]);
+  }
+  function diagFinding(out, f) {
+    out.push({ id: f.id || `diag-${out.length + 1}`, severity: f.severity || 'low', category: f.category || 'UI', safe: f.safe === true, page: f.page || diagPage(), selector: f.selector || 'document', context: f.context || '—', explanation: f.explanation || '', suggestion: f.suggestion || '', fixType: f.fixType || '', element: f.element || null, fixed: false });
+  }
+  function scanDomDiagnostics() {
+    const out = [];
+    if (typeof document === 'undefined') return out;
+    // Scan the shell as well as the current route: sidebar/topbar/mobile nav contain site-wide
+    // actions that are otherwise outside #app. Hidden panels are filtered by diagVisible().
+    const root = document.body || document.querySelector('#app');
+    const all = root ? [...root.querySelectorAll('*')] : [];
+    const ignored = (el) => el.matches && (el.matches('script,style,noscript,svg,path,canvas,pre,code,.table-wrap,.heat-wrap,.kd-scroll,.suggest,[data-diagnostic-ignore]') || el.closest('.table-wrap,.heat-wrap,.kd-scroll,.suggest,[data-diagnostic-ignore]'));
+    const route = diagPage();
+    all.filter((el) => diagVisible(el) && !ignored(el)).forEach((el) => {
+      const r = el.getBoundingClientRect ? el.getBoundingClientRect() : null;
+      if (!r || r.width < 1 || r.height < 1) return;
+      const cs = diagStyle(el);
+      const overX = (el.scrollWidth || 0) > (el.clientWidth || r.width) + 3;
+      const overY = (el.scrollHeight || 0) > (el.clientHeight || r.height) + 3;
+      const clipped = /hidden|clip/.test(`${cs.overflow || ''} ${cs.overflowX || ''} ${cs.overflowY || ''}`) || cs.textOverflow === 'ellipsis' || cs.whiteSpace === 'nowrap';
+      if ((overX || overY) && clipped) {
+        const important = el.closest && el.closest('.drawer,.mp,.ms-kundli,.mp-kpi,.dkpi');
+        diagFinding(out, { id: `overflow-${diagSelector(el)}-${out.length}`, category: 'Text overflow / overlap', severity: important ? 'high' : 'medium', safe: true, fixType: 'wrap', element: el, page: route, selector: diagSelector(el), context: diagText(el) || 'Element content', explanation: `Content apne box se ${overX ? 'horizontal' : ''}${overX && overY ? ' aur ' : ''}${overY ? 'vertical' : ''} bahar ja raha hai; label, value ya badge overlap/clip ho sakta hai.`, suggestion: 'Box ko shrink hone do, text wrap karo aur badge ko available width ke andar rakho.' });
+      }
+    });
+    [...root.querySelectorAll('button,input,select,textarea,[role="button"]')].filter(diagVisible).forEach((el) => {
+      const r = el.getBoundingClientRect ? el.getBoundingClientRect() : null;
+      if (!r) return;
+      const outside = r.left < -2 || r.right > (window.innerWidth || document.documentElement.clientWidth || r.right) + 2;
+      if (outside || r.width < 24 || r.height < 24) diagFinding(out, { id: `control-${diagSelector(el)}-${out.length}`, category: 'Clipped controls', severity: 'medium', safe: true, fixType: 'control', element: el, page: route, selector: diagSelector(el), context: diagText(el) || el.getAttribute('aria-label') || el.getAttribute('title') || 'Control', explanation: outside ? 'Control viewport ke bahar nikal raha hai.' : 'Control ka hit-area bahut chhota hai; mobile/touch par clip ya tap miss ho sakta hai.', suggestion: 'Control ko max-width: 100% aur responsive wrapping ke saath accessible minimum size do.' });
+    });
+    const kpis = [...root.querySelectorAll('.kpi,.dkpi,.mp-kpi')].filter(diagVisible);
+    kpis.forEach((el) => {
+      const isKpi = el.matches('.kpi'), label = el.querySelector(isKpi ? '.kpi-title' : 'small'), value = el.querySelector(isKpi ? '.kpi-value' : 'b');
+      const r = el.getBoundingClientRect ? el.getBoundingClientRect() : null;
+      if (!label || !diagText(label) || !value || !diagText(value)) diagFinding(out, { id: `kpi-content-${diagSelector(el)}-${out.length}`, category: 'KPI card consistency', severity: 'medium', safe: true, fixType: 'kpi', element: el, page: route, selector: diagSelector(el), context: diagText(el) || 'KPI card', explanation: 'KPI card me label ya value missing/empty hai; cards ka content pattern inconsistent hai.', suggestion: 'Card ko shrink-safe banao aur label/value ko explicit rakho.' });
+      if (r && (r.width < 112 || r.height < 48)) diagFinding(out, { id: `kpi-size-${diagSelector(el)}-${out.length}`, category: 'KPI card consistency', severity: 'medium', safe: true, fixType: 'kpi', element: el, page: route, selector: diagSelector(el), context: diagText(el) || 'KPI card', explanation: 'KPI card responsive breakpoint par bahut chhota ho gaya hai.', suggestion: 'Grid item ko min-width: 0 do aur content ko wrap hone do.' });
+    });
+    [...root.querySelectorAll('a[href]')].filter(diagVisible).forEach((a) => {
+      const href = a.getAttribute('href');
+      if (!href || href === '#' || /^javascript:/i.test(href)) diagFinding(out, { id: `link-empty-${diagSelector(a)}-${out.length}`, category: 'Links / actions', severity: 'medium', safe: false, page: route, selector: diagSelector(a), context: diagText(a) || 'Unnamed link', explanation: 'Link ka destination missing hai; click karne par useful action nahi hota.', suggestion: 'Valid internal route ya explicit button action set karo.' });
+      else if (/^#\/?/.test(href) && !diagKnownRoute(href)) diagFinding(out, { id: `link-route-${href}-${out.length}`, category: 'Links / actions', severity: 'high', safe: false, page: route, selector: diagSelector(a), context: `${diagText(a) || 'Link'} → ${href}`, explanation: 'Internal link registered page/action se match nahi karta.', suggestion: 'Route name/permission check karo; browser me isse safely repair nahi kiya ja sakta.' });
+    });
+    [...root.querySelectorAll('button,[role="button"]')].filter(diagVisible).forEach((el) => {
+      const name = diagText(el) || el.getAttribute('aria-label') || el.getAttribute('title');
+      if (!name) diagFinding(out, { id: `a11y-button-${diagSelector(el)}-${out.length}`, category: 'Accessibility', severity: 'low', safe: true, fixType: 'aria', element: el, page: route, selector: diagSelector(el), context: 'Button without accessible name', explanation: 'Screen reader ko is action ka naam nahi mil raha.', suggestion: 'Visible action text ya aria-label provide karo.' });
+    });
+    [...root.querySelectorAll('img')].filter(diagVisible).forEach((el) => { if (!el.getAttribute('alt')) diagFinding(out, { id: `a11y-image-${diagSelector(el)}-${out.length}`, category: 'Accessibility', severity: 'low', safe: true, fixType: 'alt', element: el, page: route, selector: diagSelector(el), context: 'Image without alt text', explanation: 'Image ka alternative text missing hai.', suggestion: 'Decorative image ho to alt empty rakho; meaningful image ho to short description do.' }); });
+    // Route contract scan complements the rendered-DOM pass: every registered page/action module is
+    // checked even when that route is not currently open, while page-specific layout findings come
+    // from the current page and any open drawer without navigating the user away.
+    (FF.app && Array.isArray(FF.app.PAGES) ? FF.app.PAGES : []).forEach((def) => {
+      if (!def || !def.id || def.id === 'sheet') return;
+      if (!FF.pages || !FF.pages[def.id] || typeof FF.pages[def.id].render !== 'function') diagFinding(out, { id: `route-missing-${def.id}`, category: 'Links / actions', severity: 'high', safe: false, page: 'Site routes', selector: `#/${def.id}`, context: `${def.label || def.id} route`, explanation: 'Registered navigation page ka render module missing hai.', suggestion: 'Page module/script registration restore karo; browser se safe fix nahi kiya ja sakta.' });
+    });
+    return out;
+  }
+  function applyDiagnosticFix(f) {
+    if (!f || !f.safe) return false;
+    const el = f.element;
+    if (!el) return false;
+    if (f.fixType === 'wrap') { el.classList.add('ff-diagnostic-fixed'); el.style.minWidth = '0'; el.style.maxWidth = '100%'; el.style.overflowWrap = 'anywhere'; el.style.wordBreak = 'break-word'; el.style.whiteSpace = 'normal'; }
+    else if (f.fixType === 'control') { el.classList.add('ff-diagnostic-control-fixed'); el.style.maxWidth = '100%'; el.style.minWidth = '0'; el.style.flexShrink = '1'; el.style.whiteSpace = 'normal'; }
+    else if (f.fixType === 'kpi') { el.classList.add('ff-diagnostic-kpi-fixed'); el.style.minWidth = '0'; el.style.maxWidth = '100%'; }
+    else if (f.fixType === 'aria') el.setAttribute('aria-label', el.getAttribute('title') || 'Action');
+    else if (f.fixType === 'alt') el.setAttribute('alt', '');
+    else return false;
+    f.fixed = true;
+    return true;
+  }
+  function renderDiagnosticResults(body) {
+    const box = U.$('#diag-results', body), status = U.$('#diag-status', body), fixAll = U.$('#diag-fix-all', body), scan = U.$('#diag-scan', body);
+    if (!box) return;
+    const list = diagnosticState.findings || [];
+    if (scan) scan.textContent = diagnosticState.scannedAt ? '↻ Rescan site' : '🩺 Scan site now';
+    const safe = list.filter((f) => f.safe && !f.fixed);
+    const counts = ['high', 'medium', 'low'].map((s) => `${s}: ${list.filter((f) => f.severity === s).length}`).join(' · ');
+    if (status) status.textContent = diagnosticState.running ? 'Scan chal raha hai…' : (diagnosticState.scannedAt ? `${list.length} findings · ${counts} · ${U.timeLabel(diagnosticState.scannedAt)}` : 'Abhi scan nahi hua');
+    if (fixAll) { fixAll.disabled = !safe.length; fixAll.textContent = safe.length ? `🛠 Fix all safe (${safe.length})` : '🛠 Fix all safe'; }
+    if (!diagnosticState.scannedAt) { box.innerHTML = '<div class="diag-empty">🩺 Scan button dabao — current rendered pages, registered actions, KPI cards, accessibility aur available FF data consistency checks run honge.</div>'; return; }
+    if (!list.length) { box.innerHTML = '<div class="diag-ok">✅ Koi detectable issue nahi mila. Source snapshots aur responsive UI normal dikh rahe hain.</div>'; return; }
+    box.innerHTML = list.map((f) => `<article class="diag-finding ${esc(f.severity)} ${f.fixed ? 'fixed' : ''}">
+      <div class="diag-finding-head"><span class="diag-severity">${f.severity === 'high' ? '⛔ High' : f.severity === 'medium' ? '⚠️ Medium' : 'ℹ️ Low'}</span><b>${esc(f.category)}</b><small>${esc(f.page)} · ${esc(f.selector)}</small></div>
+      <p><b>${esc(f.context)}</b><br>${esc(f.explanation)}</p><p class="dim small"><b>Suggested fix:</b> ${esc(f.suggestion)}</p>
+      ${f.safe && !f.fixed ? `<button class="btn small primary" data-diagnostic-fix="${esc(f.id)}">🛠 Fix</button>` : f.fixed ? '<span class="diag-fixed">✅ Fixed — rescan recommended</span>' : '<span class="diag-source-note">🗂️ Source/config correction required — no unsafe browser fix applied</span>'}
+    </article>`).join('');
+  }
+  async function runSiteDiagnostics(body) {
+    if (diagnosticState.running) return;
+    diagnosticState.running = true; renderDiagnosticResults(body);
+    const findings = scanDomDiagnostics();
+    try {
+      // Keep the data-source pass behind the same permission gate as the Performance page. The
+      // site-wide UI scan is safe for every Settings user, but a member must not learn source
+      // totals or sheet diagnostics for a page they cannot open.
+      if ((A.isAdmin() || A.can('performance')) && FF.pages && FF.pages.performance && FF.pages.performance.diagnostics) {
+        const result = await FF.pages.performance.diagnostics();
+        (result.findings || []).forEach((f) => diagFinding(findings, { ...f, page: f.page || 'Performance', category: f.category || 'Data source' }));
+      }
+    } catch (err) {
+      diagFinding(findings, { id: 'diag-performance-scan', severity: 'medium', category: 'Data source', safe: false, page: 'Performance', selector: 'diagnostics()', context: 'Performance scan unavailable', explanation: err.message || String(err), suggestion: 'Performance page/data source ko refresh karke dobara scan karo.' });
+    }
+    const loadedAt = (FF.store && FF.store.loadedAt) || (FF.gv && FF.gv.loadedAt) || (FF.data && FF.data.lastLoadAt);
+    if (loadedAt) {
+      const age = Math.max(0, Date.now() - new Date(loadedAt).getTime());
+      if (age > 8 * 3600000) diagFinding(findings, { id: 'diag-site-snapshot-stale', severity: age > 24 * 3600000 ? 'high' : 'medium', category: 'Stale data', page: 'Site snapshot', selector: 'FF.store.loadedAt', context: `${U.timeLabel(loadedAt)} · snapshot purana hai`, explanation: 'Site ka in-memory snapshot recommended freshness window se purana hai.', suggestion: 'Topbar Refresh dabao aur source sync complete hone do.' });
+    }
+    diagnosticState.findings = findings; diagnosticState.scannedAt = Date.now(); diagnosticState.running = false; renderDiagnosticResults(body);
+  }
+  function diagnosticsTab() {
+    return `${section('🩺 Site diagnostics & safe repair', '<p>Poore rendered dashboard surface par responsive overflow, clipped controls, KPI card structure, links/actions, accessibility aur available FF source totals check honge. UI/configuration issues ko per-finding <b>Fix</b> se safely repair kar sakte ho; EIR/REPORT mismatch ko browser me fake nahi kiya jayega.</p><div class="diag-scope"><span>🔎 UI: site shell + current page + open drawers</span><span>🗂️ Data: FF EIR daily/class vs REPORT reconciliation</span><span>♿ A11y: labels, alt text, hit areas</span></div><div class="btn-row"><button class="btn primary" id="diag-scan">🩺 Scan site now</button><button class="btn" id="diag-fix-all" disabled>🛠 Fix all safe</button><span class="dim small" id="diag-status">Abhi scan nahi hua</span></div><div id="diag-results" class="diag-results"></div>', 'Safe UI fixes apply hote hi rescan karo; source/data findings ko sheet mapping se repair karo.')}`;
+  }
+
   // ---- page ------------------------------------------------------------------------------------
   async function render(root, params) {
     const admin = A.isAdmin();
     if (params.tab && TABS.some((t) => t[0] === params.tab)) tab = params.tab;
-    if (!admin) tab = 'account';
-    root.innerHTML = `<div class="page-head"><div><h1>⚙️ Settings</h1><p class="sub">${admin ? 'Har cheez yahin se modify karo — branding, images, colours, sheet mapping, thresholds, contacts, users & access' : 'Profile, password aur aapka access'}</p></div></div>
-      ${admin ? `<div class="card controls"><div class="seg" id="set-tabs">${TABS.map(([k, l]) => `<button class="seg-btn ${tab === k ? 'on' : ''}" data-tab="${k}">${l}</button>`).join('')}</div></div>` : ''}
+    if (!admin && !['account', 'diagnostics'].includes(tab)) tab = 'account';
+    const visibleTabs = admin ? TABS : TABS.filter(([k]) => ['account', 'diagnostics'].includes(k));
+    root.innerHTML = `<div class="page-head"><div><h1>⚙️ Settings</h1><p class="sub">${admin ? 'Har cheez yahin se modify karo — branding, images, colours, sheet mapping, thresholds, contacts, users & access' : 'Profile, site diagnostics, password aur aapka access'}</p></div></div>
+      <div class="card controls"><div class="seg" id="set-tabs">${visibleTabs.map(([k, l]) => `<button class="seg-btn ${tab === k ? 'on' : ''}" data-tab="${k}">${l}</button>`).join('')}</div></div>
       <div id="set-body">${U.spinner('Settings load ho rahi hain…')}</div>`;
     const body = U.$('#set-body', root);
     try { if (admin) await loadSettings(); } catch (err) { body.innerHTML = U.errorBox(err); return; }
@@ -1314,6 +1463,7 @@ FF.pages = FF.pages || {};
       U.$$('#set-tabs .seg-btn', root).forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
       history.replaceState(null, '', `#/settings?tab=${tab}`);
       if (tab === 'account') body.innerHTML = accountTab();
+      else if (tab === 'diagnostics') body.innerHTML = diagnosticsTab();
       else if (tab === 'sound') { body.innerHTML = soundTab(); bindSoundTab(body, draw); }
       else if (tab === 'brand') body.innerHTML = brandTab();
       else if (tab === 'sources') body.innerHTML = sourcesTab();
@@ -1333,6 +1483,20 @@ FF.pages = FF.pages || {};
       // 🔔 notification switches notifications.js ke delegated handler se chalte hain;
       // admin ki push diagnostics yahin async load hoti hai.
       if (FF.notifications) void bindNotifications(body);
+      // 🩺 Site diagnostics — delegated fix actions survive result re-renders.
+      const diagScan = U.$('#diag-scan', body);
+      const diagFixAll = U.$('#diag-fix-all', body);
+      if (diagScan) diagScan.addEventListener('click', () => U.withButtonBusy(diagScan, () => runSiteDiagnostics(body), 'Scanning…'));
+      if (diagFixAll) diagFixAll.addEventListener('click', () => {
+        const safe = (diagnosticState.findings || []).filter((f) => f.safe && !f.fixed);
+        safe.forEach(applyDiagnosticFix);
+        renderDiagnosticResults(body);
+        if (safe.length) { U.toast(`${safe.length} safe UI fixes apply ho gaye — rescan ho raha hai ✓`, 'ok'); void runSiteDiagnostics(body); }
+      });
+      U.$$('[data-diagnostic-fix]', body).forEach((btn) => btn.addEventListener('click', () => {
+        const finding = (diagnosticState.findings || []).find((f) => f.id === btn.dataset.diagnosticFix);
+        if (applyDiagnosticFix(finding)) { renderDiagnosticResults(body); U.toast('Safe UI fix apply ho gaya — rescan ho raha hai ✓', 'ok'); void runSiteDiagnostics(body); }
+      }));
       // account
       // 🛡️ My access cards — locked cards par toast + live data summary (sirf in-memory, no network).
       U.$$('[data-acc-locked]', body).forEach((b) => b.addEventListener('click', () => U.toast(`⛔ "${b.dataset.accLocked}" ke liye access chahiye — admin se Settings → Users me enable karwao.`, 'err')));
@@ -1373,7 +1537,7 @@ FF.pages = FF.pages || {};
         const card = btn.closest('.card');
         const patch = collect(card, {});
         const msg = U.$(`#save-msg-${btn.dataset.save}`, body);
-        const reload = ['data', 'eir', 'stock', 'stockMovement', 'ffPayout'].includes(btn.dataset.save);
+        const reload = ['data', 'eir', 'stock', 'stockMovement', 'ffPayout', 'gvCommissionRates'].includes(btn.dataset.save);
         U.withButtonBusy(btn, () => save(patch, msg, { reload }), 'Saving…');
       }));
       // 📧 Features → email: status chips, pehle save phir test mail, aur 🩺 diagnose
@@ -1725,5 +1889,5 @@ FF.pages = FF.pages || {};
     await draw();
   }
 
-  FF.pages.settings = { title: 'Settings', render };
+  FF.pages.settings = { title: 'Settings', render, diagnostics: { scanDom: scanDomDiagnostics, state: diagnosticState } };
 })(window.FF);

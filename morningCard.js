@@ -14,10 +14,10 @@ window.FF = window.FF || {};
   function ffDailyRows() { return (S.get('daily') || []).filter((r) => r.channel !== 'GV Partner'); }
   function gvDailyTotals() {
     const map = new Map();
-    for (const r of (G.rows ? G.rows() : [])) {
+    for (const r of (G.issuanceRows ? G.issuanceRows() : (G.rows ? G.rows() : []))) {
       if (!r.date) continue;
       const k = U.dateKey(r.date);
-      map.set(k, (map.get(k) || 0) + 1);
+      map.set(k, (map.get(k) || 0) + (Number(r.n) || 1));
     }
     return map;
   }
@@ -61,9 +61,10 @@ window.FF = window.FF || {};
     const now = new Date();
     const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     const gv = new Map();
-    for (const r of (G.rows ? G.rows() : [])) {
+    for (const r of (G.issuanceRows ? G.issuanceRows() : (G.rows ? G.rows() : []))) {
       if (!r.date || r.ym !== ym) continue;
-      gv.set(r.agentName, (gv.get(r.agentName) || 0) + 1);
+      const name = r.agentName || r.agentId || 'Unknown';
+      gv.set(name, (gv.get(name) || 0) + (Number(r.n) || 1));
     }
     gv.forEach((n, name) => out.push({ name, n, ch: 'GV' }));
     return out.sort((a, b) => b.n - a.n).slice(0, 3);
@@ -74,11 +75,11 @@ window.FF = window.FF || {};
     const tk = U.dateKey(now);
     const wd = now.getDay();
     const byDay = new Map();
-    for (const r of (G.rows ? G.rows() : [])) {
+    for (const r of (G.issuanceRows ? G.issuanceRows() : (G.rows ? G.rows() : []))) {
       if (!r.date || r.date.getDay() !== wd) continue;
       const k = U.dateKey(r.date);
       if (k === tk) continue;
-      byDay.set(k, (byDay.get(k) || 0) + 1);
+      byDay.set(k, (byDay.get(k) || 0) + (Number(r.n) || 1));
     }
     const last4 = [...byDay.values()].slice(-4);
     return last4.length ? Math.round(last4.reduce((a, b) => a + b, 0) / last4.length) : null;

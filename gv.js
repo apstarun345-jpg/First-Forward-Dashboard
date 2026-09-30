@@ -277,10 +277,10 @@ window.FF = window.FF || {};
 
   // ---- in-memory aggregations over GV Master ------------------------------------------------------
   const rows = () => state.data.master || [];
-  const months = () => U.uniq(rows().map((r) => r.ym).filter(Boolean)).sort();
-  const latestDate = () => rows().reduce((acc, r) => (!acc || (r.date && r.date > acc) ? r.date : acc), null);
+  const masterMonths = () => U.uniq(rows().map((r) => r.ym).filter(Boolean)).sort();
+  const masterLatestDate = () => rows().reduce((acc, r) => (!acc || (r.date && r.date > acc) ? r.date : acc), null);
 
-  function summary(ym, upToDay) {
+  function masterSummary(ym, upToDay) {
     const s = { ym, total: 0, vc4: 0, vc20: 0, vc5p: 0, comm: 0, issuance: 0, replacement: 0, vrn: 0, chassis: 0, agents: new Set(), tls: new Set(), directSet: new Set(), days: new Set(), lastDay: 0, amount: 0, commission: 0, commissionVc4: 0, commissionVc20: 0, commissionVc5p: 0, amountVc4: 0, amountVc20: 0, amountVc5p: 0 };
     for (const r of rows()) {
       if (ym && r.ym !== ym) continue;
@@ -308,7 +308,7 @@ window.FF = window.FF || {};
     s.projected = s.lastDay ? Math.round((s.total / s.lastDay) * s.daysInMonth) : 0;
     return s;
   }
-  function dailySeries(ym, dimFn) {
+  function masterDailySeries(ym, dimFn) {
     const { y, m } = U.ymParts(ym);
     const n = U.daysInMonth(ym);
     const totals = new Array(n).fill(0);
@@ -332,7 +332,7 @@ window.FF = window.FF || {};
     });
     return [...buckets.values()].sort((a, b) => a.start - b.start);
   }
-  function byDim(ym, dimFn, upToDay) {
+  function masterByDim(ym, dimFn, upToDay) {
     const map = new Map();
     for (const r of rows()) {
       if (ym && r.ym !== ym) continue;
@@ -343,7 +343,7 @@ window.FF = window.FF || {};
     return map;
   }
   /** Agent-wise rollup for a month (from GV Master). */
-  function agentRollup(ym) {
+  function masterAgentRollup(ym) {
     const map = new Map();
     for (const r of rows()) {
       if (ym && r.ym !== ym) continue;
@@ -359,7 +359,7 @@ window.FF = window.FF || {};
     }
     return [...map.values()].map((a) => ({ ...a, activeDays: a.days.size, avgPerDay: a.days.size ? a.total / a.days.size : 0 })).sort((a, b) => b.total - a.total);
   }
-  function tlRollup(ym) {
+  function masterTlRollup(ym) {
     const map = new Map();
     for (const r of rows()) {
       if (ym && r.ym !== ym) continue;
@@ -375,7 +375,7 @@ window.FF = window.FF || {};
     return [...map.values()].map((t) => ({ ...t, agentCount: t.agents.size })).sort((a, b) => b.total - a.total);
   }
   /** Direct agents ka rollup (GV Master se) — TL lists se alag rehta hai. */
-  function directRollup(ym) {
+  function masterDirectRollup(ym) {
     const map = new Map();
     for (const r of rows()) {
       if (ym && r.ym !== ym) continue;
@@ -390,6 +390,121 @@ window.FF = window.FF || {};
     }
     return [...map.values()].sort((a, b) => b.total - a.total);
   }
+  // ---- EIR-authoritative issuance views -----------------------------------------------------------
+  // GV Master remains available below for operational fields (commission, status, stock metadata),
+  // but it is never used as the issuance count source once the shared EIR daily ledger is loaded.
+  function eirDaily() {
+    return FF.store && typeof FF.store.get === 'function' && Array.isArray(FF.store.get('daily')) ? FF.store.get('daily') : null;
+  }
+  function eirReady() { return Array.isArray(eirDaily()); }
+  function eirAgents() {
+    return FF.store && typeof FF.store.get === 'function' && Array.isArray(FF.store.get('agents')) ? FF.store.get('agents') : [];
+  }
+  function eirAgentClass() {
+    return FF.store && typeof FF.store.get === 'function' && Array.isArray(FF.store.get('agentClass')) ? FF.store.get('agentClass') : [];
+  }
+  function eirAgentToday() {
+    return FF.store && typeof FF.store.get === 'function' && Array.isArray(FF.store.get('agentDailyClass')) ? FF.store.get('agentDailyClass') : [];
+  }
+  function eirDailyRows() {
+    return (eirDaily() || []).filter((r) => r.channel === 'GV Partner').map((r) => ({
+      date: r.d, d: r.d, ym: r.ym, day: r.day, cls: r.cls, group: r.group, type: r.type,
+      status: r.type, tagType: r.vrnType || '', vrnType: r.vrnType || '', channel: 'GV Partner',
+      agentId: r.agentId || '', agentName: r.agentName || '', tlId: r.tlId || '', tlName: r.tlName || '', n: r.n
+    }));
+  }
+  function operationalCommission(ym, upToDay) {
+    const s = masterSummary(ym, upToDay);
+    return {
+      amount: s.amount || 0, commission: s.commission || 0,
+      commissionVc4: s.commissionVc4 || 0, commissionVc20: s.commissionVc20 || 0, commissionVc5p: s.commissionVc5p || 0,
+      amountVc4: s.amountVc4 || 0, amountVc20: s.amountVc20 || 0, amountVc5p: s.amountVc5p || 0
+    };
+  }
+  function eirPeopleRollup(ym) {
+    const classes = eirAgentClass().filter((r) => r.channel === 'GV Partner' && (!ym || r.ym === ym));
+    const meta = new Map();
+    eirAgents().filter((r) => r.channel === 'GV Partner' && (!ym || r.ym === ym)).forEach((r) => {
+      const key = `${r.ym}|${U.clean(r.name).toUpperCase()}`;
+      if (!meta.has(key)) meta.set(key, r);
+    });
+    const commission = new Map();
+    for (const r of rows()) {
+      if (ym && r.ym !== ym) continue;
+      const k = `${r.ym}|${U.clean(r.agentName).toUpperCase()}`;
+      const v = commission.get(k) || { amount: 0, commission: 0 };
+      v.amount += Number(r.amount || 0); v.commission += Number(r.commission || 0); commission.set(k, v);
+    }
+    // Agent-class is monthly, so build active-day sets from the same EIR daily ledger rather
+    // than leaving every GV rollup at zero active days. This keeps avgPerDay meaningful.
+    const daySets = new Map();
+    for (const r of eirDailyRows()) {
+      if (ym && r.ym !== ym) continue;
+      const k = `${r.ym}|${U.clean(r.agentName).toUpperCase()}`;
+      if (!daySets.has(k)) daySets.set(k, new Set());
+      daySets.get(k).add(r.key || U.dateKey(r.date || r.d));
+    }
+    const map = new Map();
+    const put = (r, n, group, type) => {
+      const name = U.clean(r.name || r.agentName) || 'Unknown';
+      const key = `${r.ym}|${name.toUpperCase()}`;
+      const m = meta.get(key) || {};
+      const id = r.id || r.agentId || r.gvId || m.id || name;
+      const k = `${r.channel}|${id}|${name}`;
+      if (!map.has(k)) {
+        const op = commission.get(key) || { amount: 0, commission: 0 };
+        const tlName = U.clean(r.tlName) || 'Direct';
+        const direct = !tlName || /^(—|direct)$/i.test(tlName) || FF.config.isDirectAgent({ agentId: id, agentName: name, tlId: r.tlId, tlName, channel: 'GV Partner' }, 'gv');
+        map.set(k, { agentId: id, agentName: name, tlId: r.tlId || m.tlId || '', tlName, channel: 'GV Partner', directAgent: direct,
+          total: 0, vc4: 0, vc20: 0, vc5p: 0, comm: 0, replacement: 0, days: new Set(daySets.get(key) || []), byClass: {}, amount: op.amount, commission: op.commission });
+      }
+      const o = map.get(k); o.total += n;
+      const exactClass = normClass(r.cls || group || 'NA');
+      o.byClass[exactClass] = (o.byClass[exactClass] || 0) + n;
+      if (group === 'VC4') o.vc4 += n; else if (group === 'VC20') { o.vc20 += n; o.comm += n; } else { o.vc5p += n; o.comm += n; }
+      if (/replacement/i.test(type || '')) o.replacement += n;
+    };
+    if (classes.length) classes.forEach((r) => put(r, Number(r.n) || 0, r.group, r.type));
+    else eirAgents().filter((r) => r.channel === 'GV Partner' && (!ym || r.ym === ym)).forEach((r) => put({ ...r, agentName: r.name, group: 'VC5+' }, Number(r.n) || 0, 'VC5+', 'ISSUANCE'));
+    return [...map.values()].map((a) => ({ ...a, activeDays: a.days.size, avgPerDay: a.days.size ? a.total / a.days.size : 0 })).sort((a, b) => b.total - a.total);
+  }
+  function eirSummary(ym, upToDay) {
+    const s = FF.model.summary(eirDaily() || [], ym, upToDay, 'GV Partner');
+    const people = eirPeopleRollup(ym);
+    s.agents = new Set(people.map((a) => a.agentId));
+    s.tls = new Set(people.filter((a) => !a.directAgent).map((a) => a.tlName || 'Direct'));
+    s.directSet = new Set(people.filter((a) => a.directAgent).map((a) => a.agentId));
+    s.activeAgents = s.agents.size; s.activeTls = s.tls.size; s.directAgents = s.directSet.size;
+    Object.assign(s, operationalCommission(ym, upToDay));
+    return s;
+  }
+  function eirTlRollup(ym) {
+    const map = new Map();
+    for (const a of eirPeopleRollup(ym)) {
+      if (a.directAgent) continue;
+      const key = a.tlName || 'Direct';
+      if (!map.has(key)) map.set(key, { tlName: key, tlId: a.tlId, total: 0, vc4: 0, comm: 0, agents: new Set() });
+      const t = map.get(key); t.total += a.total; t.vc4 += a.vc4; t.comm += a.comm; t.agents.add(a.agentId);
+    }
+    return [...map.values()].map((t) => ({ ...t, agentCount: t.agents.size })).sort((a, b) => b.total - a.total);
+  }
+  function eirDirectRollup(ym) {
+    return eirPeopleRollup(ym).filter((a) => a.directAgent).map((a) => ({ ...a, reason: FF.direct ? FF.direct.reason(a, 'gv') : 'GV direct agent', last: null }));
+  }
+  function months() { return eirReady() ? FF.model.months(eirDaily()) : masterMonths(); }
+  function latestDate() { return eirReady() ? FF.model.latestDate(eirDailyRows()) : masterLatestDate(); }
+  function summary(ym, upToDay) { return eirReady() ? eirSummary(ym, upToDay) : masterSummary(ym, upToDay); }
+  function dailySeries(ym, dimFn) { return eirReady() ? FF.model.dailySeries(eirDailyRows(), ym, dimFn) : masterDailySeries(ym, dimFn); }
+  function byDim(ym, dimFn, upToDay) {
+    if (!eirReady()) return masterByDim(ym, dimFn, upToDay);
+    const source = eirDailyRows().filter((r) => !ym || r.ym === ym).filter((r) => !upToDay || r.day <= upToDay);
+    const map = new Map(); source.forEach((r) => { const k = dimFn(r); map.set(k, (map.get(k) || 0) + r.n); }); return map;
+  }
+  function agentRollup(ym) { return eirReady() ? eirPeopleRollup(ym) : masterAgentRollup(ym); }
+  function tlRollup(ym) { return eirReady() ? eirTlRollup(ym) : masterTlRollup(ym); }
+  function directRollup(ym) { return eirReady() ? eirDirectRollup(ym) : masterDirectRollup(ym); }
+  function issuanceRows() { return eirReady() ? eirDailyRows() : rows(); }
+
   /** Searchable people list (agents + TLs) for the suggestion dropdowns. */
   function people() {
     const map = new Map(), tls = new Map();
@@ -418,7 +533,7 @@ window.FF = window.FF || {};
   const GV = {
     DATASETS, preload, need, get, error, reset, enabled, wanted,
     normClass, classGroup, clsNum,
-    rows, months, latestDate, summary, dailySeries, weekly, byDim, agentRollup, tlRollup, directRollup, people,
+    rows, masterRows: rows, issuanceRows, eirDailyRows, months, latestDate, summary, dailySeries, weekly, byDim, agentRollup, tlRollup, directRollup, people,
     REPORT_COLS, REPORT_COLS_LABELS,
     get state() { return state; },
     get loadedAt() { return state.loadedAt; },

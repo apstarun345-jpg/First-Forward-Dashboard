@@ -30,7 +30,7 @@ window.FF = window.FF || {};
   // type ko false rakhne se wo permanently OFF save ho jaata tha (feed + mobile push dono band) —
   // isi wajah se admin ko sirf kuch types (sheet update) hi aati thi.
   const DEFAULT_PREFS = { enabled: true, login: true, signup: true, report: true, monthly: true, digest: true, alert: true, activity: true, click: true, search: true, settings: true, user: true, location: true, info: true, sound: true, push: true };
-  const state = { started: false, bound: false, timer: null, presenceTimer: null, fastTimer: null, lastAt: '', items: [], unread: 0, firstPoll: true, page: 'home', pointer: null, people: [], lastInteraction: Date.now(), pointerBound: false, events: [], dirty: false, lastSent: 0, lastScroll: -1, pushOn: false, pushDevices: 0, pushStatus: null, pushTriedAt: 0, pushError: '', prefs: { ...DEFAULT_PREFS }, audioCtx: null, expanded: null };
+  const state = { started: false, bound: false, timer: null, presenceTimer: null, fastTimer: null, lastAt: '', items: [], unread: 0, firstPoll: true, page: 'home', pointer: null, people: [], lastInteraction: Date.now(), pointerBound: false, events: [], dirty: false, lastSent: 0, lastScroll: -1, pushOn: false, pushDevices: 0, pushStatus: null, pushTriedAt: 0, pushError: '', prefs: { ...DEFAULT_PREFS }, audioCtx: null, expanded: null, filterType: 'all', filterUnread: false, seenAt: '' };
   const EMBED = new URLSearchParams(location.search).get('embed') === 'live';
   const sharing = () => localStorage.getItem('ff_presence_pointer') !== '0';
 
@@ -105,7 +105,7 @@ window.FF = window.FF || {};
     return ({ report: '📊', monthly: '📅', digest: '🌅', alert: '🔴', login: '🔐', activity: '👀', location: '📍', search: '🔍', click: '👆', settings: '⚙️', user: '👤', info: 'ℹ️' }[item.type] || '🔔');
   }
   // ---- 📂 notification ka data (panel me expand + redirect) --------------------------------------
-  const META_LABEL = { date: 'Date', ip: 'IP', loginId: 'Login ID', username: 'User', page: 'Page', band: 'Cover band', cover: 'Cover (din)', vc4: 'VC4 stock', avg: 'Avg / din', ffMtd: 'FF MTD', mtdDays: 'MTD days', achieved: 'Achieved', totalTarget: 'Target', day: 'Day', users: 'Users', ageDays: 'Age (din)', prevAvg: 'Pichhle avg', today: 'Aaj', source: 'Source', reset: 'Reset link', changes: 'Changes' };
+  const META_LABEL = { date: 'Date', ip: 'IP', loginId: 'Login ID', username: 'User', page: 'Page', band: 'Cover band', cover: 'Cover (din)', vc4: 'VC4 stock', avg: 'Avg / din', ffMtd: 'FF MTD', gvMtd: 'GV MTD', ff: 'FF', gv: 'GV', total: 'Combined total', mtdDays: 'Active days', activeDays: 'Active days', observedDays: 'Observed days', zeroDays: 'Zero days observed', ffDays: 'FF active days', gvDays: 'GV active days', achieved: 'Achieved', totalTarget: 'Target', day: 'Day', users: 'Users', ageDays: 'Age (din)', prevAvg: 'Pichhle avg', today: 'Aaj', source: 'Source', reset: 'Reset link', changes: 'Changes' };
   function fmtMeta(v) {
     if (v === null || v === undefined || v === '') return '';
     if (Array.isArray(v)) return v.length > 8 ? `${v.slice(0, 8).map((x) => (typeof x === 'object' ? JSON.stringify(x) : String(x))).join(', ')} …(+${v.length - 8})` : v.map((x) => (typeof x === 'object' ? JSON.stringify(x) : String(x))).join(', ');
@@ -195,6 +195,17 @@ window.FF = window.FF || {};
     document.title = state.unread > 0 ? `(${state.unread}) ${t}` : t;
   }
   function latestTime(items) { return (items || []).reduce((max, x) => !max || x.createdAt > max ? x.createdAt : max, ''); }
+  function itemUnread(item) {
+    const seen = state.seenAt || (FF.auth.user && FF.auth.user.notificationsSeenAt) || '';
+    return !seen || new Date(item.createdAt).getTime() > new Date(seen).getTime();
+  }
+  function markAllRead() {
+    const at = new Date().toISOString();
+    state.seenAt = at;
+    if (FF.auth.user) FF.auth.user.notificationsSeenAt = at;
+    FF.auth.api('/api/notifications/read', 'POST', {}).catch(() => {});
+    setCount(0); render();
+  }
 
   // ---- render ------------------------------------------------------------------------------------
   /* Bell panel JAAN-BOOJH kar minimal hai: sirf ek "Notifications ON/OFF" switch + monthly report
@@ -238,17 +249,21 @@ window.FF = window.FF || {};
       ${switchRow({ id: 'monthly', label: '📅 Monthly report', note: 'Har mahine ki 1–5 tarikh ko pichhle mahine ka FF vs GV compare', on: monthly, disabled: !on })}
     </div>`;
 
-    const rows = state.items.slice().reverse().slice(0, 60).map((item) => {
+    const typeOptions = [{ key: 'all', label: 'All types' }, ...NOTIFY_TYPES.filter((t) => t.admin || t.user).map((t) => ({ key: t.key, label: t.label }))];
+    const filtered = state.items.slice().reverse().filter((item) => (state.filterType === 'all' || item.type === state.filterType) && (!state.filterUnread || itemUnread(item)));
+    const rows = filtered.slice(0, 60).map((item) => {
       const open = state.expanded === item.id;
-      return `<div class="notif-wrap ${open ? 'open' : ''}"><button type="button" class="notification-item ${item.type || ''} ${open ? 'active' : ''}" data-notify-open="${U.esc(item.id)}" title="Click → data expand karo" aria-expanded="${open ? 'true' : 'false'}">
-      <span class="notification-icon">${icon(item)}</span><div><b>${U.esc(item.title)}</b><p>${U.esc(item.body)}</p><small>${U.esc(U.timeLabel(new Date(item.createdAt).getTime()))} · <u>${open ? 'band karo ↑' : 'data dekho ↓'}</u></small></div></button>${open ? detailHtml(item) : ''}</div>`;
+      const unread = itemUnread(item);
+      return `<div class="notif-wrap ${open ? 'open' : ''} ${unread ? 'is-unread' : 'is-read'}"><button type="button" class="notification-item ${item.type || ''} ${unread ? 'unread' : 'read'} ${open ? 'active' : ''}" data-notify-open="${U.esc(item.id)}" title="Click → data expand karo" aria-expanded="${open ? 'true' : 'false'}">
+      <span class="notification-icon">${icon(item)}</span><div><b>${U.esc(item.title)}</b><p>${U.esc(item.body)}</p><small>${unread ? '<strong>NEW</strong> · ' : ''}${U.esc(U.timeLabel(new Date(item.createdAt).getTime()))} · <u>${open ? 'band karo ↑' : 'data dekho ↓'}</u></small></div></button>${open ? detailHtml(item) : ''}</div>`;
     }).join('');
     const presence = isAdmin ? `<section class="presence-panel"><div class="presence-title">🟢 User activity <small>Admin only · live / last seen</small></div>${state.people.length ? state.people.map((p) => `<div class="presence-row"><span class="presence-dot ${p.active ? 'is-live' : ''}"></span><div><b>${U.esc(p.name || p.username)}</b><small>${p.active ? `Active now · ${U.esc(p.page)}` : `Last active ${U.esc(U.timeLabel(p.lastSeen))} · last page: ${U.esc(p.page)}`}</small>${p.lastEvent ? `<small>Last action: ${U.esc(p.lastEvent.label || p.lastEvent.kind)}</small>` : ''}</div><span class="presence-side"><span class="presence-state">${p.online && p.active ? 'LIVE' : p.online ? 'IDLE' : 'AWAY'}</span>${isAdmin ? `<button class="btn small" data-live-watch="${U.esc(p.username)}">👁 Live view</button>` : ''}</span></div>`).join('') : '<div class="notification-empty">Users seen after this server started will appear here.</div>'}</section>` : '';
-    pop.innerHTML = `<div class="notification-head"><div><b>Notifications</b><small>${state.unread ? `${state.unread} unread` : 'Sab updated hai'}</small></div><div style="display:flex;gap:6px"><button class="btn small" data-notify-read>✓ Mark read</button></div></div>
+    pop.innerHTML = `<div class="notification-head"><div><b>Notifications</b><small>${state.unread ? `${state.unread} unread` : 'Sab updated hai'} · ${filtered.length} shown</small></div><div style="display:flex;gap:6px"><button class="btn small" data-notify-read ${state.unread ? '' : 'disabled'}>✓ Mark all read</button></div></div>
+      <div class="notify-filter-bar"><label>Type <select data-notify-filter="type">${typeOptions.map((t) => `<option value="${U.esc(t.key)}" ${state.filterType === t.key ? 'selected' : ''}>${U.esc(t.label)}</option>`).join('')}</select></label><button type="button" class="btn small ${state.filterUnread ? 'primary' : ''}" data-notify-filter="unread">${state.filterUnread ? '✓ Unread only' : 'Unread only'}</button></div>
       ${presence}
       ${switches}
       ${hintLine()}
-      <div class="notification-list">${rows || '<div class="notification-empty">Abhi koi notification nahi. User login/page open, report update aur shared location yahan dikhegi.</div>'}</div>`;
+      <div class="notification-list">${rows || `<div class="notification-empty">${state.filterUnread ? 'No unread notifications in this view.' : 'Abhi koi notification nahi. User login/page open, report update aur shared location yahan dikhegi.'}</div>`}</div>`;
   }
 
   // ---- polling -----------------------------------------------------------------------------------
@@ -265,6 +280,7 @@ window.FF = window.FF || {};
       if (fresh.some((x) => x.type === 'signup') && FF.app && FF.app.refreshPendingBadge) FF.app.refreshPendingBadge();
       state.items = [...state.items, ...incoming].filter((x, i, a) => a.findIndex((y) => y.id === x.id) === i).slice(-100);
       state.lastAt = latestTime(state.items) || out.checkAt || state.lastAt;
+      state.seenAt = (FF.auth.user && FF.auth.user.notificationsSeenAt) || state.seenAt;
       setCount(out.unread);
       if (FF.auth.user && FF.auth.user.role === 'admin') {
         try { const live = await FF.auth.api('/api/presence'); state.people = Array.isArray(live.people) ? live.people : []; } catch { /* older server */ }
@@ -530,8 +546,9 @@ window.FF = window.FF || {};
     pop.hidden = !next;
     if (btn) { btn.setAttribute('aria-expanded', String(next)); btn.classList.toggle('open', next); }
     if (next) {
-      FF.auth.api('/api/notifications/read', 'POST', {}).catch(() => {});
-      setCount(0); render();
+      // Opening the bell must not erase unread state.  Users can filter NEW items and explicitly
+      // choose “Mark all read”, which keeps the badge trustworthy across devices.
+      render();
     }
   }
   function bind() {
@@ -645,8 +662,16 @@ window.FF = window.FF || {};
           .finally(() => { digTest.disabled = false; digTest.textContent = label; });
         return;
       }
+      const filter = e.target.closest('[data-notify-filter]');
+      if (filter && filter.dataset.notifyFilter === 'unread') {
+        e.preventDefault(); e.stopPropagation(); state.filterUnread = !state.filterUnread; render(); return;
+      }
       const read = e.target.closest('[data-notify-read]');
-      if (read) { e.preventDefault(); FF.auth.api('/api/notifications/read', 'POST', {}).catch(() => {}); setCount(0); render(); }
+      if (read) { e.preventDefault(); markAllRead(); }
+    });
+    document.addEventListener('change', (e) => {
+      const filter = e.target.closest && e.target.closest('[data-notify-filter="type"]');
+      if (filter) { state.filterType = filter.value || 'all'; render(); }
     });
   }
   function labelOf(el) {

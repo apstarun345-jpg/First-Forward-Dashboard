@@ -1,4 +1,5 @@
-/* Performance page: agent & TL performance from the REPORT tab (stock + last/current month issuance + status).
+/* Performance page: operational agent/TL fields from REPORT plus one EIR-authoritative issuance path
+   (stock + last/current month issuance + status).
    Quick-find (dropdown) → full agent / TL profile with charts, VC4 vs Commercial comparison, priority & status
    quick filters, WhatsApp / Email share. "APS" (direct agents) is never shown as a TL. */
 window.FF = window.FF || {};
@@ -36,7 +37,11 @@ FF.pages = FF.pages || {};
   const state = {
     agents: [], filtered: [], tlGroups: [], allTlGroups: [], columns: {}, sections: [], months: { last: 'Last Month', cur: 'Current Month' }, dayLabels: [], daysElapsed: null,
     view: 'overview', filters: EMPTY_FILTERS(), dispatchScope: 'eligible',
-    sort: { agents: { key: 'curTotal', dir: 'desc' }, tls: { key: 'tlCurTotal', dir: 'desc' }, stock: { key: 'stockTotal', dir: 'desc' }, stockTl: { key: 'tlStockTotal', dir: 'desc' } }, page: 1, pageSize: 50, loadedAt: 0, sourceTable: null
+    sort: { agents: { key: 'curTotal', dir: 'desc' }, tls: { key: 'tlCurTotal', dir: 'desc' }, stock: { key: 'stockTotal', dir: 'desc' }, stockTl: { key: 'tlStockTotal', dir: 'desc' } }, page: 1, pageSize: 50, loadedAt: 0, sourceTable: null,
+    // EIR is the authoritative issuance ledger. REPORT remains the source for operational
+    // fields (priority, stock, status), but its duplicated issuance columns are retained only
+    // for reconciliation/audit and are never used for the FF issuance KPIs after this index is ready.
+    authoritative: null, authoritativeAt: 0
   };
 
   // ---- helpers ------------------------------------------------------------------
@@ -76,6 +81,103 @@ FF.pages = FF.pages || {};
   const norm = (s) => clean(s).toUpperCase().replace(/\s+/g, ' ');
   const canContacts = () => FF.auth.can('contacts');
   const mobileHtml = (m) => (m && !/^na$/i.test(m) && canContacts() ? ` · <a href="tel:${esc(m)}">📞 ${esc(m)}</a>` : '');
+  const isFfEirRow = (r) => !r || !r.channel || /^first forward$/i.test(clean(r.channel));
+  const blankBins = () => ({ VC4: 0, VC20: 0, 'VC5+': 0, total: 0 });
+  const addBin = (slot, r) => {
+    if (!slot || !r || !r.group) return;
+    const n = Number(r.n) || 0;
+    slot[r.group] = (slot[r.group] || 0) + n;
+    slot.total += n;
+  };
+  /**
+   * One FF issuance index for every surface that currently used to disagree with the clicked
+   * EIR drill-down.  `agentClass` is grouped by month/class and is the same ledger used by the
+   * profile drawer; `daily` supplies the exact day totals for the overview's 7-day chart/KPI.
+   * GV rows are explicitly excluded so this cannot alter the commission channel or its mapping.
+   */
+  function authoritativeIndex(agentClassRows, dailyRows) {
+    const rows = agentClassRows || S.get('agentClass') || [];
+    const daily = dailyRows || S.get('daily') || [];
+    const ready = Array.isArray(dailyRows) || Array.isArray(S.get('daily'));
+    const latest = daily.length ? FF.model.latestDate(daily.filter(isFfEirRow)) : null;
+    const cur = latest ? U.ymKey(latest) : (/^\d{4}-\d{2}$/.test(String(state.months.cur)) ? state.months.cur : U.ymKey(new Date()));
+    const last = U.prevMonthKey(cur);
+    const byName = new Map(), byTl = new Map();
+    const ensure = (map, key) => {
+      const k = norm(key);
+      if (!k) return null;
+      if (!map.has(k)) map.set(k, { cur: blankBins(), last: blankBins() });
+      return map.get(k);
+    };
+    rows.filter(isFfEirRow).forEach((r) => {
+      if (r.ym !== cur && r.ym !== last) return;
+      const ymSlot = r.ym === cur ? 'cur' : 'last';
+      const byAgent = ensure(byName, r.name);
+      if (byAgent) addBin(byAgent[ymSlot], r);
+      if (clean(r.tlName) && FF.config.isRealTl(r.tlName)) {
+        const byLeader = ensure(byTl, r.tlName);
+        if (byLeader) addBin(byLeader[ymSlot], r);
+      }
+    });
+    return { cur, last, byName, byTl, daily: daily.filter(isFfEirRow), latest, ready };
+  }
+  function eirDays(index) {
+    if (!index || !index.latest) return null;
+    const latest = index.latest;
+    const values = [], labels = [], keys = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(latest.getTime()); d.setDate(d.getDate() - i);
+      const key = U.dateKey(d);
+      keys.push(key); labels.push(U.labelDate ? U.labelDate(d, true) : key);
+      values.push(U.sum(index.daily.filter((r) => r.key === key), (r) => r.n));
+    }
+    return { values, labels, keys };
+  }
+  function applyAuthoritativeAgent(a, idx) {
+    const match = idx && idx.byName.get(norm(a.name));
+    // Keep REPORT values only as explicitly labelled reconciliation metadata; every displayed
+    // issuance field below is reset from EIR, including a real zero or an unmatched REPORT row.
+    a.reportCurTotal = a.reportCurTotal === undefined ? a.curTotal : a.reportCurTotal;
+    a.reportCurVc4 = a.reportCurVc4 === undefined ? a.curVc4 : a.reportCurVc4;
+    a.reportCurNvc4 = a.reportCurNvc4 === undefined ? a.curNvc4 : a.reportCurNvc4;
+    a.reportLastTotal = a.reportLastTotal === undefined ? a.lastTotal : a.reportLastTotal;
+    a.reportLastVc4 = a.reportLastVc4 === undefined ? a.lastVc4 : a.reportLastVc4;
+    a.reportLastNvc4 = a.reportLastNvc4 === undefined ? a.lastNvc4 : a.reportLastNvc4;
+    const blank = { VC4: 0, VC20: 0, 'VC5+': 0, total: 0 };
+    const apply = (period, key) => {
+      const b = (match && match[period]) || blank;
+      a[key + 'Bins'] = b;
+      a[key + 'Vc4'] = b.VC4 || 0;
+      a[key + 'Nvc4'] = (b.VC20 || 0) + (b['VC5+'] || 0);
+      a[key + 'Total'] = b.total || 0;
+      return b.total > 0;
+    };
+    const cur = apply('cur', 'cur'), last = apply('last', 'last');
+    a.__eirCur = cur;
+    a.__eirLast = last;
+    a.hasIssuance = a.curTotal > 0;
+    const b = U.channelBasis ? U.channelBasis('ff', { force: true }) : null;
+    if (b) {
+      a.curProjected = U.projectMonthEnd(a.curTotal, b.days, idx.cur);
+      a.avgTotal = a.curTotal / b.days;
+      a.avgVc4 = a.curVc4 / b.days;
+      a.avgNvc4 = a.curNvc4 / b.days;
+    } else {
+      a.curProjected = 0; a.avgTotal = 0; a.avgVc4 = 0; a.avgNvc4 = 0;
+    }
+  }
+  function reconcileAuthoritative() {
+    const idx = authoritativeIndex();
+    if (!idx || !idx.ready) return null;
+    state.authoritative = idx;
+    state.agents.forEach((a) => applyAuthoritativeAgent(a, idx));
+    // Rebuild TL rollups from the corrected agents; buildTlGroups also applies the exact TL
+    // class aggregate below. This keeps tables, charts, drawers and exports on one path.
+    state.allTlGroups = buildTlGroups(state.agents, false);
+    state.authoritativeAt = Date.now();
+    return idx;
+  }
+  const canUseAuthoritative = () => !!(state.authoritative && state.authoritativeAt);
 
   // ---- ingest -------------------------------------------------------------------
   function resolveSchema(sectionRow, subRow) {
@@ -181,6 +283,16 @@ FF.pages = FF.pages || {};
       g.weekTotal = g.week.reduce((a, b) => a + b, 0);
       g.agentCurTotal = U.sum(g.agents, (a) => a.curTotal); g.agentCurVc4 = U.sum(g.agents, (a) => a.curVc4); g.agentCurNvc4 = U.sum(g.agents, (a) => a.curNvc4);
       g.agentLastTotal = U.sum(g.agents, (a) => a.lastTotal); g.agentLastVc4 = U.sum(g.agents, (a) => a.lastVc4); g.agentLastNvc4 = U.sum(g.agents, (a) => a.lastNvc4);
+      // REPORT has TL-level issuance columns too, but those are the same duplicated snapshot that
+      // caused 965 to appear while the EIR click-through showed 971. Prefer EIR TL aggregates,
+      // including explicit zero totals, and never touch the separate GV commission data.
+      const exact = state.authoritative && state.authoritative.byTl.get(norm(g.tlName));
+      const curExact = exact ? exact.cur : { VC4: g.agentCurVc4 || 0, VC20: 0, 'VC5+': Math.max(0, (g.agentCurNvc4 || 0) - 0), total: g.agentCurTotal || 0 };
+      const lastExact = exact ? exact.last : { VC4: g.agentLastVc4 || 0, VC20: 0, 'VC5+': Math.max(0, (g.agentLastNvc4 || 0) - 0), total: g.agentLastTotal || 0 };
+      g.tlCurVc4 = curExact.VC4 || 0; g.tlCurNvc4 = (curExact.VC20 || 0) + (curExact['VC5+'] || 0); g.tlCurTotal = curExact.total || 0;
+      g.tlAvgVc4 = g.tlCurVc4 / Math.max(1, state.daysElapsed || 1); g.tlAvgNvc4 = g.tlCurNvc4 / Math.max(1, state.daysElapsed || 1); g.tlAvgTotal = g.tlCurTotal / Math.max(1, state.daysElapsed || 1);
+      g.tlProjected = U.projectMonthEnd(g.tlCurTotal, Math.max(1, state.daysElapsed || 1), state.authoritative ? state.authoritative.cur : state.months.cur);
+      g.tlLastVc4 = lastExact.VC4 || 0; g.tlLastNvc4 = (lastExact.VC20 || 0) + (lastExact['VC5+'] || 0); g.tlLastTotal = lastExact.total || 0;
       g.priority = prio(g.tlPriority); g.commPriority = prio(g.tlCommPriority);
       g.searchText = [g.tlName, g.tlId, g.tlMobile].join(' ').toLowerCase();
       return g;
@@ -188,6 +300,10 @@ FF.pages = FF.pages || {};
   }
   async function ensureLoaded() {
     const table = await S.need('report');
+    // REPORT can load quickly, but the page must not expose its duplicated issuance columns until
+    // the canonical EIR daily ledger is available. Agent-class/day enrichments remain best effort.
+    await S.need('daily');
+    await Promise.allSettled([S.need('agentClass'), S.need('agentDailyClass')]);
     if (state.agents.length && state.sourceTable === table) return;
     const rows = D.textRows(table);
     if (table.cols && table.cols.some((c) => /agent profile/i.test(c.label))) {
@@ -206,7 +322,7 @@ FF.pages = FF.pages || {};
     state.sourceTable = table;
     state.loadedAt = Date.now();
   }
-  function reset() { state.agents = []; state.sourceTable = null; state.allTlGroups = []; }
+  function reset() { state.agents = []; state.sourceTable = null; state.allTlGroups = []; state.authoritative = null; state.authoritativeAt = 0; }
 
   // ---- filters / kpis -------------------------------------------------------------
   // 🔠 v3.18 — TL filter ab MULTIPLE SELECT hai: ek saath kai TL (ya "Direct agents") chune ja sakte hain.
@@ -227,13 +343,34 @@ FF.pages = FF.pages || {};
     const list = state.filtered;
     const k = { agents: list.length, active: list.filter((a) => a.hasIssuance).length, curTotal: U.sum(list, (a) => a.curTotal), curVc4: U.sum(list, (a) => a.curVc4), curNvc4: U.sum(list, (a) => a.curNvc4), lastTotal: U.sum(list, (a) => a.lastTotal), lastVc4: U.sum(list, (a) => a.lastVc4), lastNvc4: U.sum(list, (a) => a.lastNvc4), projected: U.sum(list, (a) => a.curProjected), stockTotal: U.sum(list, (a) => a.stockTotal), stockVc4: U.sum(list, (a) => a.stockVc4), stockNvc4: U.sum(list, (a) => a.stockNvc4), wrongVrn: U.sum(list, (a) => a.wrongVrn), week: [0, 0, 0, 0, 0, 0, 0] };
     list.forEach((a) => a.week.forEach((v, i) => { k.week[i] += v; }));
+    // With no people/status filter the daily EIR ledger is the exact source for the 7-day
+    // overview. This is the path that prevents a REPORT day total such as 965 from disagreeing
+    // with the 971 drill-down. Filtered agent views still use their row-level values.
+    const fullScope = canUseAuthoritative() && list.length === state.agents.length && !filtersActive();
+    if (fullScope) {
+      const exactWeek = eirDays(state.authoritative);
+      if (exactWeek) { k.week = exactWeek.values; }
+      // Keep REPORT's displayed/basis day label (FF is T-1) while replacing only the numbers
+      // with the exact EIR daily values; changing the label here would make run-rate count today.
+      const byMonth = (ym) => state.authoritative.daily.filter((r) => r.ym === ym);
+      const agg = (rows) => ({ total: U.sum(rows, (r) => r.n), vc4: U.sum(rows, (r) => r.group === 'VC4' ? r.n : 0), comm: U.sum(rows, (r) => r.group === 'VC4' ? 0 : r.n), vc20: U.sum(rows, (r) => r.group === 'VC20' ? r.n : 0), vc5p: U.sum(rows, (r) => r.group === 'VC5+' ? r.n : 0) });
+      const exactCur = agg(byMonth(state.authoritative.cur)), exactLast = agg(byMonth(state.authoritative.last));
+      // An explicit EIR zero is authoritative too; never let a REPORT snapshot reappear when
+      // the ledger has no rows for a month or an agent was not present in the EIR grouping.
+      k.curTotal = exactCur.total; k.curVc4 = exactCur.vc4; k.curNvc4 = exactCur.comm; k.curVc20 = exactCur.vc20; k.curVc5p = exactCur.vc5p;
+      k.projected = U.projectMonthEnd(k.curTotal, Math.max(1, state.daysElapsed || 1), state.authoritative.cur); k.exactSource = true;
+      k.lastTotal = exactLast.total; k.lastVc4 = exactLast.vc4; k.lastNvc4 = exactLast.comm;
+    }
     k.weekTotal = k.week.reduce((a, b) => a + b, 0); k.lastDay = k.week[6];
     k.growth = k.lastTotal > 0 ? (k.projected / k.lastTotal - 1) * 100 : null;
     k.dailyAvg = state.daysElapsed ? k.curTotal / state.daysElapsed : null;
-    // 🚗 EIR 4-way split (agentClass bins) — sab agents me se jo bins carry karte hain
-    k.curVc20 = U.sum(list, (a) => (a.curBins ? a.curBins.VC20 : 0));
-    k.curVc5p = U.sum(list, (a) => (a.curBins ? a.curBins['VC5+'] : 0));
-    k.hasBins = list.some((a) => a.curBins);
+    // 🚗 EIR 4-way split (agentClass bins) — filtered lists use their people rows; full-scope
+    // totals above are taken directly from the exact daily ledger.
+    if (!k.exactSource) {
+      k.curVc20 = U.sum(list, (a) => (a.curBins ? a.curBins.VC20 : 0));
+      k.curVc5p = U.sum(list, (a) => (a.curBins ? a.curBins['VC5+'] : 0));
+    }
+    k.hasBins = list.some((a) => a.curBins) || !!k.exactSource;
     return k;
   }
   const binsFoot = (k) => (k.hasBins && (k.curVc20 || k.curVc5p)) ? ` · VC20 <b>${fmt(k.curVc20)}</b> · VC5+ <b>${fmt(k.curVc5p)}</b>` : '';
@@ -254,11 +391,11 @@ FF.pages = FF.pages || {};
   function classSplit(nameOrTl, isTl) {
     const rows = S.get('agentClass') || [];
     const daily = S.get('daily') || [];
-    const latest = daily.length ? FF.model.latestDate(daily) : null;
+    const latest = daily.length ? FF.model.latestDate(daily.filter(isFfEirRow)) : null;
     if (!latest) return null;
     const cur = U.ymKey(latest), last = U.prevMonthKey(cur);
     const key = norm(nameOrTl);
-    const mine = rows.filter((r) => (isTl ? norm(r.tlName) === key : norm(r.name) === key));
+    const mine = rows.filter((r) => isFfEirRow(r) && (isTl ? norm(r.tlName) === key : norm(r.name) === key));
     if (!mine.length) return null;
     const agg = (ym) => { const o = { VC4: 0, VC20: 0, 'VC5+': 0, total: 0, repl: 0 }; mine.filter((r) => r.ym === ym).forEach((r) => { o[r.group] += r.n; o.total += r.n; if (r.type === 'REPLACEMENT') o.repl += r.n; }); return o; };
     return { cur, last, curS: agg(cur), lastS: agg(last), curLabel: U.labelYM(cur), lastLabel: U.labelYM(last), day: latest.getDate() };
@@ -280,12 +417,12 @@ FF.pages = FF.pages || {};
   function classBinsIndex() {
     const rows = S.get('agentClass') || [];
     const daily = S.get('daily') || [];
-    const latest = daily.length ? FF.model.latestDate(daily) : null;
+    const latest = daily.length ? FF.model.latestDate(daily.filter(isFfEirRow)) : null;
     const out = { cur: null, last: null, map: new Map() };
     if (!latest || !rows.length) return out;
     out.cur = U.ymKey(latest); out.last = U.prevMonthKey(out.cur);
     const blank = () => ({ VC4: 0, VC20: 0, 'VC5+': 0, total: 0 });
-    for (const r of rows) {
+    for (const r of rows.filter(isFfEirRow)) {
       const k = norm(r.name);
       if (!out.map.has(k)) out.map.set(k, { cur: blank(), last: blank() });
       const slot = r.ym === out.cur ? out.map.get(k).cur : r.ym === out.last ? out.map.get(k).last : null;
@@ -453,7 +590,7 @@ FF.pages = FF.pages || {};
   function monthKeyOf() {
     try {
       const daily = S.get('daily') || [];
-      const latest = daily.length ? FF.model.latestDate(daily) : null;
+      const latest = daily.length ? FF.model.latestDate(daily.filter(isFfEirRow)) : null;
       if (latest) return U.ymKey(latest);
     } catch { /* ignore */ }
     return U.ymKey(new Date());
@@ -559,8 +696,9 @@ FF.pages = FF.pages || {};
     const cs = classSplit(agent.name, false);
     const b = basis();
     const projT1 = U.projectMonthEnd(agent.curTotal, b.days, monthKeyOf());
-    // EIR (class split) live hai aur aaj tak ka data dikhata hai; REPORT kal ka deta hai — dono alag hain, isliye note.
-    const eirNote = `🚗 Class split <b>EIR</b> se aati hai (live, aaj tak ka data) — upar ke KPI / dispatch <b>REPORT</b> par hain (data till ${esc(b.shortLabel || b.label)}, kyunki aaj ka data kal aata hai).`;
+    // Issuance totals, class split and drill-down all share the EIR-authoritative aggregate now.
+    // REPORT is retained only for operational fields and its percentage/status metadata.
+    const eirNote = `🚗 Issuance total aur class split dono <b>EIR</b> ke same authoritative ledger se hain · operational run-rate basis ${esc(b.shortLabel || b.label)} tak hai.`;
     const summary = `<div class="dsec"><div class="dkpis">
         <div class="dkpi"><small>${esc(state.months.cur)} MTD</small><b>${fmt(agent.curTotal)}</b><span>VC4 ${fmt(agent.curVc4)} · Comm ${fmt(agent.curNvc4)} · till ${esc(b.shortLabel || b.label)}</span></div>
         <div class="dkpi"><small>${esc(state.months.last)}</small><b>${fmt(agent.lastTotal)}</b><span>VC4 ${fmt(agent.lastVc4)} · Comm ${fmt(agent.lastNvc4)}</span></div>
@@ -592,8 +730,9 @@ FF.pages = FF.pages || {};
     const cs = classSplit(group.tlName, true);
     const b = basis();
     const projT1 = U.projectMonthEnd(group.tlCurTotal, b.days, monthKeyOf());
-    // EIR (class split) live hai aur aaj tak ka data dikhata hai; REPORT kal ka deta hai — dono alag hain, isliye note.
-    const eirNote = `🚗 Class split <b>EIR</b> se aati hai (live, aaj tak ka data) — upar ke KPI / dispatch <b>REPORT</b> par hain (data till ${esc(b.shortLabel || b.label)}, kyunki aaj ka data kal aata hai).`;
+    // Issuance totals, class split and drill-down all share the EIR-authoritative aggregate now.
+    // REPORT is retained only for operational fields and its percentage/status metadata.
+    const eirNote = `🚗 Issuance total aur class split dono <b>EIR</b> ke same authoritative ledger se hain · operational run-rate basis ${esc(b.shortLabel || b.label)} tak hai.`;
     const growthKpi = `<div class="dkpi"><small>Growth</small><b>${trend(group.tlGrowth)}</b><span>till ${esc(b.shortLabel || b.label)} · aaj ka data kal aata hai</span></div>`;
     const body = `<div class="dsec"><div class="dkpis">
         <div class="dkpi"><small>${esc(state.months.cur)} MTD</small><b>${fmt(group.tlCurTotal)}</b><span>VC4 ${fmt(group.tlCurVc4)} · Comm ${fmt(group.tlCurNvc4)} · till ${esc(b.shortLabel || b.label)}</span></div>
@@ -742,14 +881,14 @@ FF.pages = FF.pages || {};
   function classAggFiltered() {
     const rows = S.get('agentClass') || [];
     const daily = S.get('daily') || [];
-    const latest = daily.length ? FF.model.latestDate(daily) : null;
+    const latest = daily.length ? FF.model.latestDate(daily.filter(isFfEirRow)) : null;
     if (!latest || !rows.length) return null;
     const names = new Set(state.filtered.map((a) => norm(a.name)));
     if (!names.size) return null;
     const cur = U.ymKey(latest), last = U.prevMonthKey(cur);
     const blank = () => ({ VC4: 0, VC20: 0, 'VC5+': 0, total: 0 });
     const c = blank(), l = blank();
-    for (const r of rows) {
+    for (const r of rows.filter(isFfEirRow)) {
       if (!names.has(norm(r.name))) continue;
       const slot = r.ym === cur ? c : r.ym === last ? l : null;
       if (!slot) continue;
@@ -962,14 +1101,21 @@ FF.pages = FF.pages || {};
     if (params.view && ['overview', 'agents', 'tls', 'stock', 'alerts'].includes(params.view)) state.view = params.view;
     if (params.tl !== undefined) state.filters.tl = params.tl;
     if (params.q !== undefined) state.filters.q = '';
-    root.innerHTML = `<div class="page-head"><div><h1>🏆 Performance</h1><p class="sub" id="pf-sub">REPORT tab se agent & TL performance…</p></div>
+    root.innerHTML = `<div class="page-head"><div><h1>🏆 Performance</h1><p class="sub" id="pf-sub">EIR issuance + REPORT operational fields load ho rahe hain…</p></div>
       <div class="head-actions">${FF.auth.can('share') ? '<button class="btn" data-act="share">📲 WhatsApp summary</button><button class="btn" data-act="mail">✉️ Email summary</button>' : ''}<button class="btn primary" data-action="refresh">↻ Refresh</button>${FF.auth.can('sheet:REPORT') ? '<a class="btn" href="#/sheet/REPORT">Full REPORT sheet →</a>' : ''}</div></div>
-      <div id="pf-body">${U.spinner('REPORT tab load ho raha hai…')}</div>`;
-    try { await ensureLoaded(); await Promise.allSettled([S.need('agentClass'), S.need('daily'), S.need('agentDailyClass')]); } catch (err) { U.$('#pf-body', root).innerHTML = U.errorBox(err, 'data-action="refresh"'); return; }
+      <div id="pf-body">${U.spinner('EIR + REPORT data load ho raha hai…')}</div>`;
+    try {
+      await ensureLoaded();
+      await Promise.allSettled([S.need('agentClass'), S.need('daily'), S.need('agentDailyClass')]);
+      // Do this after EIR datasets arrive because ensureLoaded() intentionally reads the fast
+      // REPORT snapshot first. All subsequent render paths now use the same authoritative index.
+      reconcileAuthoritative();
+      attachBins(state.agents, classBinsIndex());
+    } catch (err) { U.$('#pf-body', root).innerHTML = U.errorBox(err, 'data-action="refresh"'); return; }
     if (!root.isConnected) return;
     applyFilters();
     const body = U.$('#pf-body', root);
-    U.$('#pf-sub', root).textContent = `${state.months.cur} report · ${state.agents.length} agents · ${state.allTlGroups.length} TLs · loaded ${U.timeLabel(state.loadedAt)}`;
+    U.$('#pf-sub', root).textContent = `${state.months.cur} · EIR-authoritative issuance + REPORT operations · ${state.agents.length} agents · ${state.allTlGroups.length} TLs · loaded ${U.timeLabel(state.loadedAt)}`;
     const tlOpts = () => [...state.allTlGroups].sort((a, b) => (a.tlName || '').localeCompare(b.tlName || ''));
     const directAgentCount = state.agents.filter((a) => a.tlExcluded).length;
     body.innerHTML = `<div class="card controls finder"><div class="finder-row"><div class="finder-input"><span class="finder-ico">🔎</span><input class="input" id="pf-find" placeholder="Quick find: agent / TL naam type karo → click karte hi poora profile (charts, VC4 vs Commercial, last vs current)…"></div><span class="ctrl-note dim">Enter = pehla match · list se click karo</span></div></div>
@@ -1070,7 +1216,13 @@ FF.pages = FF.pages || {};
         if (!FF.auth.can('export')) return U.toast('Download permission nahi hai', 'err');
         const cols = state.sections.flatMap((s) => s.cols);
         const header = cols.map((c) => `${c.label}${c.unknown ? ` (${c.letter})` : ''}`);
-        const rows = (viewEl.__sorted || state.filtered).map((a) => cols.map((c) => { const v = clean(a.raw[c.index]); return c.type === 'num' && num(v) !== null ? num(v) : v; }));
+        const authoritativeExportKeys = new Set(['lastVc4', 'lastNvc4', 'lastTotal', 'curVc4', 'curNvc4', 'curTotal', 'curProjected', 'avgVc4', 'avgNvc4', 'avgTotal']);
+        const rows = (viewEl.__sorted || state.filtered).map((a) => cols.map((c) => {
+          // Keep the original report value for operational columns, but export the same exact
+          // EIR-backed issuance fields that the page/table/drill-down show.
+          if (authoritativeExportKeys.has(c.key) && (a.__eirCur || a.__eirLast)) return a[c.key] ?? '';
+          const v = clean(a.raw[c.index]); return c.type === 'num' && num(v) !== null ? num(v) : v;
+        }));
         if (act.dataset.act === 'export-agents') U.downloadCsv(`agents-report-${U.stamp()}.csv`, header, rows); else FF.xlsx.download(`agents-report-${U.stamp()}.xlsx`, [{ name: 'Agents', header, rows }, { name: 'TLs', header: TL_COLUMNS().map((c) => c.label), rows: state.tlGroups.map((g) => TL_COLUMNS().map((c) => { const v = c.sortValue(g); return v === null || v === undefined ? '' : v; })) }]);
         U.toast('Agents export ready', 'ok');
       }
@@ -1102,7 +1254,49 @@ FF.pages = FF.pages || {};
     U.toast('Summary copied — WhatsApp khul raha hai');
   }
 
-  FF.pages.performance = { title: 'Performance', render, openAgent, openTl, reset, ensureLoaded, agents: () => state.agents, daysElapsed: () => state.daysElapsed, dayLabels: () => state.dayLabels };
+  /** Settings diagnostics hook. Data mismatches are deliberately returned as source findings,
+      not as browser-fixable issues: changing CSS or a displayed number would hide a bad sheet. */
+  async function diagnostics() {
+    await ensureLoaded();
+    await Promise.allSettled([S.need('agentClass'), S.need('daily')]);
+    const idx = reconcileAuthoritative() || state.authoritative || authoritativeIndex();
+    const findings = [];
+    const daily = (idx && idx.daily) || [];
+    const exactTotal = idx ? U.sum(daily.filter((r) => r.ym === idx.cur), (r) => r.n) : 0;
+    const reportTotal = U.sum(state.agents.filter((a) => !a.isMaster), (a) => Number(a.reportCurTotal !== undefined ? a.reportCurTotal : a.curTotal) || 0);
+    const classTotal = idx ? U.sum([...idx.byName.values()], (x) => x.cur.total) : 0;
+    const latest = idx && idx.latest;
+    if (exactTotal > 0 && reportTotal !== exactTotal) {
+      findings.push({
+        id: 'ff-authoritative-issuance-mismatch', severity: 'high', category: 'Data source', safe: false,
+        page: 'Performance', selector: 'FF EIR daily + REPORT issuance totals',
+        context: `${idx.cur} · EIR ${fmt(exactTotal)} vs REPORT ${fmt(reportTotal)}`,
+        explanation: `Performance ke duplicated REPORT issuance columns ${fmt(reportTotal)} dikha rahe the, lekin EIR ke authoritative FF ledger me ${fmt(exactTotal)} tags hain.`,
+        suggestion: 'EIR daily/class aggregate ko source rakho; REPORT snapshot ya uski mapping refresh/repair karo. Browser me is finding ko Fix karna safe nahi hai.'
+      });
+    }
+    if (exactTotal > 0 && classTotal > 0 && classTotal !== exactTotal) {
+      findings.push({
+        id: 'ff-class-daily-mismatch', severity: 'high', category: 'Data source', safe: false,
+        page: 'Performance', selector: 'FF EIR agentClass vs daily', context: `${idx.cur} · class ${fmt(classTotal)} vs daily ${fmt(exactTotal)}`,
+        explanation: 'EIR ke do grouped views ek hi month ke liye alag total de rahe hain.',
+        suggestion: 'Google Sheet EIR query/mapping, duplicate tag IDs, ya date/type grouping ko source par investigate karo; UI-only fix nahi lagaya gaya.'
+      });
+    }
+    const errors = S.state && S.state.errors ? S.state.errors : {};
+    Object.entries(errors).filter(([, err]) => err).forEach(([key, err]) => findings.push({
+      id: `ff-dataset-${key}`, severity: 'high', category: 'Data source', safe: false, page: 'Data loading', selector: `FF.store.${key}`,
+      context: `${key} dataset`, explanation: `Dataset load nahi hua: ${err.message || err}`, suggestion: 'Refresh karke Google Sheet/proxy connection aur column mapping check karo.'
+    }));
+    if (!latest) findings.push({ id: 'ff-no-latest-date', severity: 'medium', category: 'Stale data', safe: false, page: 'Performance', selector: 'EIR date column', context: 'No valid FF EIR date', explanation: 'EIR me valid latest issuance date nahi mili.', suggestion: 'Settings → Sheets & tabs / Data source me EIR date column aur date values verify karo.' });
+    else {
+      const age = Math.max(0, Math.floor((Date.now() - latest.getTime()) / 86400000));
+      if (age > 2) findings.push({ id: 'ff-stale-snapshot', severity: age > 7 ? 'high' : 'medium', category: 'Stale data', safe: false, page: 'Performance', selector: 'FF EIR latest date', context: `${U.labelDate(latest, true)} · ${age} din purana`, explanation: 'Latest FF issuance snapshot expected freshness window se bahar hai.', suggestion: 'Refresh karo; agar date source me nayi entry hai to EIR date mapping check karo.' });
+    }
+    return { findings, authoritative: { ym: idx && idx.cur, exactTotal, reportTotal, classTotal, latest: latest ? U.dateKey(latest) : '' }, scannedAt: Date.now() };
+  }
+
+  FF.pages.performance = { title: 'Performance', render, openAgent, openTl, reset, ensureLoaded, diagnostics, authoritativeIndex, agents: () => { if (S.get('agentClass') || S.get('daily')) reconcileAuthoritative(); return state.agents; }, daysElapsed: () => state.daysElapsed, dayLabels: () => state.dayLabels };
   // Sidebar shortcut: First Forward → 📋 Stock Report opens the Performance page on the Stock Report view.
   FF.pages.stockReport = { title: 'Stock Report', render: (root, params) => { state.view = 'stock'; return render(root, { ...(params || {}), view: 'stock' }); } };
 })(window.FF);

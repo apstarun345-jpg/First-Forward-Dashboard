@@ -35,7 +35,7 @@ FF.pages = FF.pages || {};
       const from = fromEl.value || latestKey, to = toEl.value || latestKey;
       if (from > to) { output.innerHTML = '<div class="warn-box">From date, To date se pehle honi chahiye.</div>'; return; }
       const ffRows = daily.filter((r) => r.channel !== 'GV Partner' && dayKey(r) >= from && dayKey(r) <= to);
-      const gvRows = G.rows().filter((r) => { const key = r.date ? U.dateKey(r.date) : ''; return key >= from && key <= to; });
+      const gvRows = (G.issuanceRows ? G.issuanceRows() : G.rows()).filter((r) => { const key = r.date ? U.dateKey(r.date) : ''; return key >= from && key <= to; });
       const dates = [];
       for (let d = date(from), end = date(to); d <= end && dates.length < 181; d = addDays(d, 1)) dates.push(U.dateKey(d));
       const countFor = (rows, key) => rows.reduce((n, r) => n + (dayKey(r) === key ? (r.n === undefined ? 1 : r.n) : 0), 0);
@@ -67,8 +67,9 @@ FF.pages = FF.pages || {};
       gvRows.forEach((r) => {
         const name = r.agentName || r.agentId || 'Unknown';
         const a = people.get(name) || { total: 0, vc4: 0, commercial: 0 };
-        a.total++; if (r.group === 'VC4') a.vc4++; else a.commercial++; people.set(name,a);
-        const tl = FF.config.isRealTl(r.tlName) ? r.tlName : FF.config.directLabel({ tlName: r.tlName }, r.channel === 'GV Partner' ? 'gv' : 'ff'); teams.set(tl,(teams.get(tl)||0)+1);
+        const n = Number(r.n) || 1;
+        a.total += n; if (r.group === 'VC4') a.vc4 += n; else a.commercial += n; people.set(name,a);
+        const tl = FF.config.isRealTl(r.tlName) ? r.tlName : FF.config.directLabel({ tlName: r.tlName }, r.channel === 'GV Partner' ? 'gv' : 'ff'); teams.set(tl,(teams.get(tl)||0)+n);
       });
       const top = (key) => [...people].sort((a,b) => b[1][key]-a[1][key]).slice(0,12);
       const bars = (data, key, label) => C.hbars({ items: data.map(([name,a],i) => ({ label: name, value: typeof a === 'number' ? a : a[key], sub: typeof a === 'number' ? '' : `Total ${U.fmt(a.total)} · VC4 ${U.fmt(a.vc4)} · Commercial ${U.fmt(a.commercial)}`, color: C.PALETTE[i%C.PALETTE.length] })), valueLabel: label });

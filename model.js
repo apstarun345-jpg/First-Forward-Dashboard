@@ -4,6 +4,7 @@ window.FF = window.FF || {};
   'use strict';
   const U = FF.util;
   const D = FF.data;
+  const lit = (value) => typeof D.lit === 'function' ? D.lit(value) : `"${String(value ?? '').replace(/["\\]/g, '')}"`;
 
   // Normalise a class cell: EIR has "VC4", StockDataa has "4" → both become "VC4".
   const normClass = (raw) => { const c = U.clean(raw).toUpperCase(); if (!c) return 'NA'; return /^\d+$/.test(c) ? `VC${c}` : c; };
@@ -14,20 +15,33 @@ window.FF = window.FF || {};
     return 'VC5+';
   };
   const channelOf = (masterId, tlName) => {
-    const e = FF.config.eir;
+    const e = FF.config.eir || {};
+    // EIR is the bank-backed issuance ledger for both channels. The configured master ID is
+    // the authoritative GV discriminator; the legacy TL-name fallback is retained only for old
+    // rows where that EIR cell is blank. Never infer GV from an agent name or an averaged total.
     const gvId = U.clean(e.gvMasterId || '5845036').replace(/\.0+$/, '');
     const id = U.clean(masterId).replace(/\.0+$/, '');
-    if ((gvId && id === gvId) || U.clean(tlName).toLowerCase() === U.clean(e.gvChannelTl || 'ApnaPayment Pvt. Ltd.').toLowerCase()) return 'GV Partner';
-    return 'First Forward';
+    const gvTl = U.clean(e.gvChannelTl || 'ApnaPayment Pvt. Ltd.').toLowerCase();
+    // The configured master ID is authoritative. The TL-name rule is only a legacy bridge for
+    // rows whose master-ID cell is genuinely blank; a different populated ID remains FF.
+    return (gvId && id === gvId) || (!id && gvTl && U.clean(tlName).toLowerCase() === gvTl) ? 'GV Partner' : 'First Forward';
+  };
+  const channelName = (value) => /^gv|green/i.test(String(value || '').trim()) ? 'GV Partner' : /^ff|first/i.test(String(value || '').trim()) ? 'First Forward' : String(value || '').trim();
+  const channelRows = (rows, channel) => {
+    const wanted = channelName(channel);
+    return (rows || []).filter((r) => !wanted || channelName(r.channel) === wanted);
   };
 
   function whereClause(filter) {
     const e = FF.config.eir;
     const parts = [`${e.date} is not null`];
-    if (filter && filter.tl) parts.push(`${e.tlName} = ${D.lit(filter.tl)}`);
-    if (filter && filter.agent) parts.push(`(${e.agentName} = ${D.lit(filter.agent)} or ${e.gvName} = ${D.lit(filter.agent)})`);
-    if (filter && filter.channel === 'GV Partner') parts.push(`${e.masterId} is not null`);
-    if (filter && filter.channel === 'First Forward') parts.push(`${e.masterId} is null`);
+    if (filter && filter.tl) parts.push(`${e.tlName} = ${lit(filter.tl)}`);
+    if (filter && filter.agent) parts.push(`(${e.agentName} = ${lit(filter.agent)} or ${e.gvName} = ${lit(filter.agent)})`);
+    const gvId = U.clean(e.gvMasterId || '5845036').replace(/\.0+$/, '');
+    const gvTl = U.clean(e.gvChannelTl || 'ApnaPayment Pvt. Ltd.');
+    const gvWhere = `(${e.masterId} = ${lit(gvId)} or (${e.masterId} is null and ${e.tlName} = ${lit(gvTl)}))`;
+    if (filter && filter.channel === 'GV Partner') parts.push(gvWhere);
+    if (filter && filter.channel === 'First Forward') parts.push(`not ${gvWhere}`);
     return parts.join(' and ');
   }
 
@@ -36,7 +50,7 @@ window.FF = window.FF || {};
     const e = FF.config.eir;
     // TL name bhi select karo: kuch legacy GV rows me master ID blank hai, lekin GV channel TL
     // present hai. Sirf master ID dekhne se woh galat First Forward totals me jud jaate the.
-    const tq = `select ${e.date}, ${e.cls}, ${e.type}, ${e.vrnType}, ${e.masterId}, ${e.tlName}, count(${e.tagId}) where ${whereClause(filter)} group by ${e.date}, ${e.cls}, ${e.type}, ${e.vrnType}, ${e.masterId}, ${e.tlName} order by ${e.date}`;
+    const tq = `select ${e.date}, ${e.cls}, ${e.type}, ${e.vrnType}, ${e.masterId}, ${e.tlName}, count(${e.tagId}), ${e.agentId}, ${e.agentName}, ${e.gvId}, ${e.gvName}, ${e.tlId} where ${whereClause(filter)} group by ${e.date}, ${e.cls}, ${e.type}, ${e.vrnType}, ${e.masterId}, ${e.tlName}, ${e.agentId}, ${e.agentName}, ${e.gvId}, ${e.gvName}, ${e.tlId} order by ${e.date}`;
     const t = await D.query(e.sheet, tq, opts);
     const rows = [];
     for (const r of t.rows) {
@@ -44,10 +58,13 @@ window.FF = window.FF || {};
       const n = D.cellNumber(r[6]);
       if (!d || !n) continue;
       const cls = normClass(D.cellText(r[1]));
+      const channel = channelOf(D.cellText(r[4]), D.cellText(r[5]));
+      const agentId = U.clean(D.cellText(r[7])) || U.clean(D.cellText(r[9]));
+      const agentName = U.clean(channel === 'GV Partner' ? (D.cellText(r[10]) || D.cellText(r[8])) : (D.cellText(r[8]) || D.cellText(r[10])));
       rows.push({
-        key: U.dateKey(d), d, ym: U.ymKey(d), day: d.getDate(), cls, group: classGroup(cls),
+        key: U.dateKey(d), d, date: d, ym: U.ymKey(d), day: d.getDate(), cls, group: classGroup(cls),
         type: D.cellText(r[2]).toUpperCase() || 'ISSUANCE', vrnType: D.cellText(r[3]),
-        channel: channelOf(D.cellText(r[4]), D.cellText(r[5])), n
+        channel, agentId, agentName, tlId: U.clean(D.cellText(r[11])), tlName: U.clean(D.cellText(r[5])), n
       });
     }
     return rows;
@@ -241,10 +258,10 @@ window.FF = window.FF || {};
   async function loadStockRows(filter, opts) {
     const s = FF.config.stock;
     const parts = [`${s.tagId} is not null`];
-    if (filter.agent) parts.push(`${s.agentName} = ${D.lit(filter.agent)}`);
-    if (filter.agentId) parts.push(`${s.agentId} = ${D.lit(filter.agentId)}`);
-    if (filter.tl) parts.push(`${s.tlName} = ${D.lit(filter.tl)}`);
-    if (filter.cls) parts.push(`${s.cls} = ${D.lit(String(filter.cls).replace(/^VC/i, ''))}`);
+    if (filter.agent) parts.push(`${s.agentName} = ${lit(filter.agent)}`);
+    if (filter.agentId) parts.push(`${s.agentId} = ${lit(filter.agentId)}`);
+    if (filter.tl) parts.push(`${s.tlName} = ${lit(filter.tl)}`);
+    if (filter.cls) parts.push(`${s.cls} = ${lit(String(filter.cls).replace(/^VC/i, ''))}`);
     const tq = `select * where ${parts.join(' and ')}${filter.limit ? ` limit ${filter.limit}` : ''}`;
     const t = await D.query(s.sheet, tq, opts);
     // Friendly names for known StockDataa columns — ABSOLUTE sheet column letter (config ke

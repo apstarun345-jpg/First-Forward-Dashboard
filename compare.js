@@ -41,8 +41,8 @@ FF.pages = FF.pages || {};
     const ffStock = stockR.status === 'fulfilled' ? stockR.value : [];
     const report = reportR.status === 'fulfilled' ? reportR.value : [];
     const gvStockClass = gvStockR.status === 'fulfilled' ? gvStockR.value : [];
-    if (!daily && masterR.status !== 'fulfilled') {
-      body.innerHTML = U.errorBox(dailyR.reason || masterR.reason, 'data-action="refresh"');
+    if (!dailyR || dailyR.status !== 'fulfilled') {
+      body.innerHTML = U.errorBox(dailyR.reason || new Error('EIR issuance ledger could not be loaded.'), 'data-action="refresh"');
       return;
     }
 
@@ -80,7 +80,7 @@ FF.pages = FF.pages || {};
 
     const ffAgentsCur = new Set(ffAgents.filter((a) => a.ym === cur).map((a) => a.key)).size;
     const gvAgentsCur = gvCur ? gvCur.activeAgents : 0;
-    const gvToday = (() => { if (!isCurrent || !masterR.status || masterR.status !== 'fulfilled' || !latest) return null; return G.rows().filter((r) => r.day === latest.getDate() && r.ym === cur).length; })();
+    const gvToday = (() => { if (!isCurrent || !masterR.status || masterR.status !== 'fulfilled' || !latest) return null; const rs = G.issuanceRows ? G.issuanceRows() : G.rows(); return U.sum(rs.filter((r) => r.day === latest.getDate() && r.ym === cur), (r) => Number(r.n) || 1); })();
     const ffToday = isCurrent && ffDaily && latest ? (M.dailySeries(ffDaily, cur).totals[latest.getDate() - 1] || 0) : null;
 
     // ---------- KPIs -------------------------------------------------------------------------

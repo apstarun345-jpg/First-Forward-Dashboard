@@ -152,6 +152,16 @@ const DEFAULT_SETTINGS = {
   ffPayout: { sheet: 'payout', gid: '', labelCol: '', classCol: '', rateCol: '', penaltyCol: '', noteCol: '' }, // FF sheet "payout" tab: per-class commission rate + penalty (blank = auto-detect)
   commissionAlerts: { enabled: true, outlierPct: 25, gvGapPct: 40, mismatchPct: 5, mismatchMin: 50, zeroEarnedMin: 1 }, // cockpit.js alert thresholds
   dispatch: { tagsPerBox: 25, horizon: 7, minNeed: 1, top: 40 }, // dispatch planner defaults
+  // GV personal commission: VC4 is sourced from the exact GV Master row by default;
+  // all other classes wait for an admin-entered official rate. Empty is unresolved, never zero.
+  gvCommissionRates: {
+    enabled: true, currentMonthOnly: true,
+    classes: {
+      VC4: { source: 'master', rate: '' }, VC20: { source: 'manual', rate: '' },
+      VC5: { source: 'manual', rate: '' }, VC6: { source: 'manual', rate: '' },
+      VC7: { source: 'manual', rate: '' }, VC12: { source: 'manual', rate: '' }
+    }
+  },
   dispatchEmail: { ...DEFAULT_DISPATCH_EMAIL }, // 🚚 recurring, selectable Dispatch Planner email
   commissionSlabs: {
     enabled: false, model: 'agentTier',
@@ -721,38 +731,94 @@ function classBucket(value) {
 async function reportSnapshot(source) {
   const s = db.settings;
   const isGv = source === 'gv';
-  const e = isGv ? (s.gv && s.gv.master) : s.eir;
-  const sheetId = isGv ? s.gvSheetId : s.sheetId;
-  const sheet = isGv ? ((e && e.tab) || 'GV Master') : (s.eirSheet || (e && e.sheet) || 'EIR');
-  const dateCol = isGv ? ((e && e.date) || 'P') : ((e && e.date) || 'AA');
-  const classCol = isGv ? ((e && (e.cch || e.vClass)) || 'G') : ((e && e.cls) || 'D');
-  const tagCol = isGv ? ((e && e.tagId) || 'I') : ((e && e.tagId) || 'A');
-  const masterCol = !isGv ? ((e && e.masterId) || 'AU') : '';
-  const select = isGv ? `${dateCol}, ${classCol}, count(${tagCol})` : `${dateCol}, ${classCol}, ${masterCol}, count(${tagCol})`;
-  const group = isGv ? `${dateCol}, ${classCol}` : `${dateCol}, ${classCol}, ${masterCol}`;
-  const tq = `select ${select} where ${dateCol} is not null group by ${group} order by ${dateCol} desc limit 100`;
+  // Both watcher channels come from the bank-backed EIR.  The master ID is the only
+  // issuance-channel discriminator here: GV is exactly 5845036 (or the configured equivalent),
+  // while FF is every other EIR row, including rows whose master cell is blank.
+  const e = s.eir || {};
+  const sheetId = s.sheetId;
+  const sheet = s.eirSheet || e.sheet || 'EIR';
+  const dateCol = e.date || 'AA';
+  const classCol = e.cls || 'D';
+  const tagCol = e.tagId || 'A';
+  const masterCol = e.masterId || 'AU';
+  const configuredGvId = String(e.gvMasterId || '5845036').trim().replace(/\.0+$/, '');
+  const channelWhere = isGv
+    ? `${masterCol} = ${configuredGvId}`
+    : `(${masterCol} is null or ${masterCol} <> ${configuredGvId})`;
+  const baseWhere = `${dateCol} is not null and ${channelWhere}`;
+  const select = `${dateCol}, ${classCol}, ${masterCol}, count(${tagCol})`;
+  const group = `${dateCol}, ${classCol}, ${masterCol}`;
+  const tq = `select ${select} where ${baseWhere} group by ${group} order by ${dateCol} desc limit 5000`;
   const params = new URLSearchParams({ id: String(sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet, tq });
   const out = await fetchUpstream(upstreamUrl(params));
   if (out.status < 200 || out.status >= 300) throw new Error(`Google responded ${out.status}`);
   const table = parseGvizServer(out.body);
+  // A few old/private adapters still return the pre-EIR GV Master schema (date, class, count)
+  // despite receiving the new EIR request. Keep that compatibility branch schema-gated; a normal
+  // production EIR response includes the configured master column and never reaches GV Master.
+  const responseCols = (table.cols || []).map((c) => String(c.id || c.label || '').trim().toUpperCase());
+  const hasEirMasterColumn = responseCols.includes(String(masterCol).toUpperCase());
+  if (isGv && !hasEirMasterColumn) {
+    const legacy = s.gv && s.gv.master || {};
+    const legacySheet = legacy.tab || 'GV Master';
+    const legacyDate = legacy.date || 'P', legacyClass = legacy.cch || legacy.vClass || 'G', legacyTag = legacy.tagId || 'I';
+    const legacyTq = `select ${legacyDate}, ${legacyClass}, count(${legacyTag}) where ${legacyDate} is not null group by ${legacyDate}, ${legacyClass} order by ${legacyDate} desc limit 5000`;
+    const legacyParams = new URLSearchParams({ id: String(s.gvSheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet: legacySheet, tq: legacyTq });
+    const legacyOut = await fetchUpstream(upstreamUrl(legacyParams));
+    if (legacyOut.status < 200 || legacyOut.status >= 300) throw new Error(`GV legacy snapshot responded ${legacyOut.status}`);
+    const legacyTable = parseGvizServer(legacyOut.body);
+    const legacyGrouped = {};
+    for (const row of legacyTable.rows || []) {
+      const date = serverDate(serverCell(row, 0));
+      if (!date) continue;
+      const cls = classBucket(serverCell(row, 1));
+      if (!legacyGrouped[date]) legacyGrouped[date] = { classes: {} };
+      legacyGrouped[date].classes[cls] = (legacyGrouped[date].classes[cls] || 0) + serverNumber(serverCell(row, 2));
+    }
+    const legacyHistory = Object.fromEntries(Object.entries(legacyGrouped).map(([date, value]) => [date, Object.values(value.classes).reduce((a, b) => a + b, 0)]));
+    const legacyDateKey = Object.keys(legacyGrouped).sort().pop() || '';
+    const legacyClasses = legacyDateKey ? legacyGrouped[legacyDateKey].classes : {};
+    return { date: legacyDateKey, total: Object.values(legacyClasses).reduce((a, b) => a + b, 0), classes: legacyClasses, history: legacyHistory };
+  }
   const rows = [];
   for (const row of table.rows || []) {
     const date = serverDate(serverCell(row, 0));
     if (!date) continue;
-    const master = isGv ? '' : serverCell(row, 2).trim();
-    const configuredGvId = String((s.eir && s.eir.gvMasterId) || '5845036').trim().replace(/\.0+$/, '');
-    const excluded = !isGv && master && master.replace(/\.0+$/, '') === configuredGvId;
-    if (excluded) continue;
-    const classIndex = 1;
-    const countIndex = isGv ? 2 : 3;
-    rows.push({ date, cls: classBucket(serverCell(row, classIndex)), n: serverNumber(serverCell(row, countIndex)) });
+    const master = serverCell(row, 2).trim().replace(/\.0+$/, '');
+    // Keep the client/server channel contract identical even if an upstream query ignores a
+    // malformed filter: never let a GV master row enter FF, or another master enter GV.
+    const gvRow = master === configuredGvId;
+    if (isGv !== gvRow) continue;
+    rows.push({ date, cls: classBucket(serverCell(row, 1)), n: serverNumber(serverCell(row, 3)) });
   }
-  if (!rows.length) return { date: '', total: 0, classes: {} };
-  const date = rows.map((r) => r.date).sort().pop();
-  const latest = rows.filter((r) => r.date === date);
-  const classes = {};
-  latest.forEach((r) => { classes[r.cls] = (classes[r.cls] || 0) + r.n; });
-  return { date, total: Object.values(classes).reduce((a, b) => a + b, 0), classes };
+  // The query already returns recent dates, not just the latest one. Keep a compact date → total
+  // history for MTD digests while the watcher continues to expose the latest snapshot for deltas.
+  const grouped = {};
+  rows.forEach((r) => {
+    if (!grouped[r.date]) grouped[r.date] = { classes: {} };
+    grouped[r.date].classes[r.cls] = (grouped[r.date].classes[r.cls] || 0) + r.n;
+  });
+  let history = {};
+  Object.entries(grouped).forEach(([d, value]) => { history[d] = Object.values(value.classes).reduce((a, b) => a + b, 0); });
+  // A second, date-only aggregate avoids the old date × class × master row ceiling. It uses the
+  // exact same EIR channel predicate, so notification MTD totals cannot drift from latest-day data.
+  try {
+    const historyTq = `select ${dateCol}, count(${tagCol}) where ${baseWhere} group by ${dateCol} order by ${dateCol} desc limit 400`;
+    const hparams = new URLSearchParams({ id: String(sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet, tq: historyTq });
+    const hout = await fetchUpstream(upstreamUrl(hparams));
+    if (hout.status >= 200 && hout.status < 300) {
+      const htable = parseGvizServer(hout.body);
+      const parsed = {};
+      for (const row of htable.rows || []) {
+        const dateKey = serverDate(serverCell(row, 0));
+        if (dateKey) parsed[dateKey] = serverNumber(serverCell(row, Math.max(1, (row.c || []).length - 1)));
+      }
+      if (Object.keys(parsed).length && rows.length) history = parsed;
+    }
+  } catch (err) { /* optional date aggregate — grouped fallback is still valid */ }
+  const date = Object.keys(grouped).sort().pop() || '';
+  const classes = date ? grouped[date].classes : {};
+  return { date, total: Object.values(classes).reduce((a, b) => a + b, 0), classes, history };
 }
 function snapshotDelta(prev, next) {
   if (!prev || !prev.date || !next || !next.date) return null;
@@ -1256,6 +1322,64 @@ const MON_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep'
 function istNow() { return new Date(Date.now() + 5.5 * 3600e3); } // sirf date/hour ke liye (UTC+5:30)
 /** IST ka aaj ka YYYY-MM-DD */
 function dateKeyNow() { const ist = istNow(); const pad = (n) => String(n).padStart(2, '0'); return `${ist.getUTCFullYear()}-${pad(ist.getUTCMonth() + 1)}-${pad(ist.getUTCDate())}`; }
+/**
+ * One source-aware issuance summary for every digest/report surface.
+ *
+ * `daily` is deliberately sparse: a missing source means that source was not observed on that
+ * date, while an explicit zero is a real snapshot.  Active days therefore mean FF + GV > 0;
+ * GV-only and zero-observed days remain visible in the returned breakdown instead of being lost
+ * by an FF-only truthy check.
+ */
+function digestDay(value) {
+  if (typeof value === 'number') return { ff: value }; // legacy FF-only record
+  return value && typeof value === 'object' ? value : {};
+}
+function sourceAwareDigestSummary(daily, monthKey) {
+  const out = { ff: 0, gv: 0, total: 0, days: 0, activeDays: 0, observedDays: 0, zeroDays: 0, ffDays: 0, gvDays: 0 };
+  for (const [date, value] of Object.entries(daily || {})) {
+    if (!String(date).startsWith(String(monthKey || ''))) continue;
+    const v = digestDay(value);
+    const hasFf = Object.prototype.hasOwnProperty.call(v, 'ff');
+    const hasGv = Object.prototype.hasOwnProperty.call(v, 'gv');
+    if (!hasFf && !hasGv) continue;
+    const ff = Number(v.ff) || 0;
+    const gv = Number(v.gv) || 0;
+    out.ff += ff; out.gv += gv; out.total += ff + gv;
+    out.observedDays++;
+    if (ff > 0) out.ffDays++;
+    if (gv > 0) out.gvDays++;
+    if (ff + gv > 0) out.activeDays++;
+    else out.zeroDays++;
+  }
+  out.days = out.activeDays;
+  out.avg = out.activeDays ? out.total / out.activeDays : 0;
+  return out;
+}
+function digestPayload({ dateKey, ff, gv, daily, stock }) {
+  const summary = sourceAwareDigestSummary(daily, String(dateKey || '').slice(0, 7));
+  const th = db.settings.thresholds || {};
+  const coverRed = Number(th.coverRed) || 7, coverOrange = Number(th.coverOrange) || 15, coverAmber = Number(th.coverAmber) || 30;
+  const topClass = (classes) => { const e = Object.entries(classes || {}).sort((a, b) => b[1] - a[1])[0]; return e ? `${e[0]} ${e[1]}` : ''; };
+  const dLabel = (iso) => { const d = Number(String(iso).slice(8, 10)), m = Number(String(iso).slice(5, 7)) - 1; return `${d} ${MON_SHORT[m] || ''}`.trim(); };
+  const lines = [];
+  if (ff) lines.push(`🟦 FF ${dLabel(ff.date)} · ${ff.total} tags${topClass(ff.classes) ? ` (${topClass(ff.classes)})` : ''}`);
+  if (gv) lines.push(`🟩 GV ${dLabel(gv.date)} · ${gv.total} tags${topClass(gv.classes) ? ` (${topClass(gv.classes)})` : ''}`);
+  const dayLabel = `${summary.activeDays} active day${summary.activeDays === 1 ? '' : 's'}`;
+  const sourceDays = `FF ${summary.ffDays} · GV ${summary.gvDays}`;
+  const zeroLabel = summary.zeroDays ? ` · ${summary.zeroDays} zero day${summary.zeroDays === 1 ? '' : 's'} observed` : '';
+  if (summary.observedDays) lines.push(`📈 MTD FF ${summary.ff} + GV ${summary.gv} = ${summary.total} · ${dayLabel} (${sourceDays})${zeroLabel} · ≈${Math.round(summary.avg)}/active day`);
+  if (stock) {
+    const vc4 = (stock.classes && stock.classes.VC4) || 0;
+    lines.push(`📦 Stock ${stock.total} (VC4 ${vc4} | Comm ${stock.total - vc4})`);
+    if (vc4 && summary.avg > 0) {
+      const cover = vc4 / summary.avg;
+      const emo = cover < coverRed ? '🔴' : cover < coverOrange ? '🟠' : cover < coverAmber ? '🟡' : '🟢';
+      lines.push(`VC4 cover ≈ ${Math.round(cover)} din ${emo}`);
+    }
+  }
+  if (!lines.length) lines.push('Abhi tak koi fresh sheet data nahi mila — sheet update hote hi kal ye digest sahi numbers dikhayega.');
+  return { summary, lines, latest: { ff: ff || null, gv: gv || null }, stock: stock || null };
+}
 /** Current stock total + class split from one inventory tab (one gviz group-by query). */
 async function stockSnapshotFrom(sheetId, sheet, clsCol, tagCol, label) {
   try {
@@ -1307,44 +1431,26 @@ async function maybeDailyDigest(force = false) {
     const ff = db.notify.watch.ff && db.notify.watch.ff.date ? db.notify.watch.ff : null;
     const gv = db.notify.watch.gv && db.notify.watch.gv.date ? db.notify.watch.gv : null;
     const daily = db.notify.watch.daily && typeof db.notify.watch.daily === 'object' ? db.notify.watch.daily : {};
-    const monthKey = dateKey.slice(0, 7);
-    let ffMtd = 0, mtdDays = 0;
-    for (const [d, v] of Object.entries(daily)) if (d.startsWith(monthKey) && v && Number(v.ff)) { ffMtd += Number(v.ff); mtdDays++; }
     const stock = await stockSnapshot();
-    const th = db.settings.thresholds || {};
-    const coverRed = Number(th.coverRed) || 7, coverOrange = Number(th.coverOrange) || 15, coverAmber = Number(th.coverAmber) || 30;
-    const parts = [];
-    const topClass = (classes) => { const e = Object.entries(classes || {}).sort((a, b) => b[1] - a[1])[0]; return e ? `${e[0]} ${e[1]}` : ''; };
+    // One source-aware payload drives both the bell notification and optional email.  Never
+    // recalculate FF/GV counts in either delivery path.
+    const payload = digestPayload({ dateKey, ff, gv, daily, stock });
     const dLabel = (iso) => { const d = Number(String(iso).slice(8, 10)), m = Number(String(iso).slice(5, 7)) - 1; return `${d} ${MON_SHORT[m] || ''}`.trim(); };
-    if (ff) parts.push(`🟦 FF ${dLabel(ff.date)} · ${ff.total} tags${topClass(ff.classes) ? ` (${topClass(ff.classes)})` : ''}`);
-    if (gv) parts.push(`🟩 GV · ${gv.total} tags${topClass(gv.classes) ? ` (${topClass(gv.classes)})` : ''}`);
-    const avg = mtdDays ? ffMtd / mtdDays : 0;
-    if (mtdDays) parts.push(`📈 MTD ${ffMtd} · ${mtdDays} din · ≈${Math.round(avg)}/din`);
-    if (stock) {
-      const vc4 = (stock.classes && stock.classes.VC4) || 0;
-      parts.push(`📦 Stock ${stock.total} (VC4 ${vc4} | Comm ${stock.total - vc4})`);
-      if (vc4 && avg > 0) {
-        const cover = vc4 / avg;
-        const emo = cover < coverRed ? '🔴' : cover < coverOrange ? '🟠' : cover < coverAmber ? '🟡' : '🟢';
-        parts.push(`VC4 cover ≈ ${Math.round(cover)} din ${emo}`);
-      }
-    }
-    if (!parts.length) parts.push('Abhi tak koi fresh sheet data nahi mila — sheet update hote hi kal ye digest sahi numbers dikhayega.');
     const item = recordNotification({
       type: 'digest',
       title: `🌅 Daily digest · ${dLabel(dateKey)}`,
-      body: parts.join(' · '),
+      body: payload.lines.join(' · '),
       target: 'admin',
       routeKey: 'dailyDigest',
-      meta: { date: dateKey, link: '#/dashboard', ffMtd, mtdDays, stock: stock ? stock.total : null }
+      meta: { date: dateKey, link: '#/dashboard', ...payload.summary, ffMtd: payload.summary.ff, gvMtd: payload.summary.gv, mtdDays: payload.summary.activeDays, stock: stock ? stock.total : null }
     });
     db.notify.watch.digestDate = dateKey;
     persist('notify').catch(() => {});
-    console.log(`daily digest sent for ${dateKey} (${parts.length} lines)`);
-    // 📧 Email digest (admin Features tab me ON + SMTP configured ho to).
+    console.log(`daily digest sent for ${dateKey} (${payload.lines.length} lines)`);
+    // 📧 Email digest (admin Features tab me ON + SMTP configured ho to) — same payload/body.
     const F = feats(), ecfg = db.settings.email || {};
     if (F.emailDigest && mailConfigured(ecfg) && ecfg.to) {
-      sendMail(ecfg, `🌅 Daily digest · ${dLabel(dateKey)}`, parts.join('\n'))
+      sendMail(ecfg, `🌅 Daily digest · ${dLabel(dateKey)}`, payload.lines.join('\n'))
         .then(() => console.log('digest email sent'))
         .catch((e) => console.warn('digest email:', e.message));
     }
@@ -1625,7 +1731,7 @@ function weekRows(monday) {
   for (let i = 0; i < 7; i++) {
     const d = new Date(monday.getTime() + i * 86400e3);
     const k = `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
-    const v = daily[k] || {};
+    const v = digestDay(daily[k]);
     const f = Number(v.ff) || 0, g = Number(v.gv) || 0;
     ff += f; gv += g;
     if (f + g > best) { best = f + g; bestDay = k; }
@@ -1697,11 +1803,10 @@ async function sendReportEmail(force = false) {
   const daily = (db.notify.watch && db.notify.watch.daily) || {};
   const keys = Object.keys(daily).sort().slice(-14);
   if (!keys.length) return null;
-  let ffMtd = 0, gvMtd = 0, mtdDays = 0;
-  const mk = dateKey.slice(0, 7);
-  for (const [d, v] of Object.entries(daily)) if (d.startsWith(mk) && v) { const f = Number(v.ff) || 0, g = Number(v.gv) || 0; if (f || g) mtdDays++; ffMtd += f; gvMtd += g; }
+  const summary = sourceAwareDigestSummary(daily, dateKey.slice(0, 7));
+  const ffMtd = summary.ff, gvMtd = summary.gv, mtdDays = summary.activeDays;
   const stock = await stockSnapshot();
-  const rows = keys.map((k) => ({ date: k, ff: Number(daily[k].ff) || 0, gv: Number(daily[k].gv) || 0 }));
+  const rows = keys.map((k) => { const v = digestDay(daily[k]); return { date: k, ff: Number(v.ff) || 0, gv: Number(v.gv) || 0 }; });
   const csv = ['Date,FF,GV,Total', ...rows.map((r) => `${r.date},${r.ff},${r.gv},${r.ff + r.gv}`)].join('\n');
   const html = `<div style="font-family:Arial,Helvetica,sans-serif;color:#0f172a">
     <h2 style="margin:0 0 8px">📊 Daily report · ${dateKey}</h2>
@@ -1736,12 +1841,65 @@ async function dispatchReportTable(channel) {
   if (out.status < 200 || out.status >= 300) throw new Error(`${isGv ? 'GV REPORT' : 'FF REPORT'} sheet responded ${out.status}`);
   return parseGvizServer(out.body);
 }
+async function overlayDispatchEirIssuance(agents) {
+  const e = db.settings.eir || {};
+  const sheet = db.settings.eirSheet || e.sheet || 'EIR';
+  const sheetId = db.settings.sheetId;
+  const dateCol = e.date || 'AA', tagCol = e.tagId || 'A', clsCol = e.cls || 'D';
+  const agentIdCol = e.agentId || 'J', agentNameCol = e.agentName || 'L';
+  const gvIdCol = e.gvId || 'AW', gvNameCol = e.gvName || 'AX';
+  const masterCol = e.masterId || 'AU';
+  const gvId = String(e.gvMasterId || '5845036').trim().replace(/\\.0+$/, '');
+  const today = dateKeyNow();
+  const [y, m] = today.split('-').map(Number);
+  const previous = new Date(Date.UTC(y, m - 2, 1));
+  const previousYm = `${previous.getUTCFullYear()}-${String(previous.getUTCMonth() + 1).padStart(2, '0')}`;
+  const start = `${previousYm}-01`;
+  const fields = [agentIdCol, agentNameCol, gvIdCol, gvNameCol, dateCol, clsCol, masterCol];
+  const tq = `select ${fields.join(', ')}, count(${tagCol}) where ${tagCol} is not null and ${dateCol} >= date '${start}' and ${dateCol} <= date '${today}' group by ${fields.join(', ')} order by ${dateCol}`;
+  const params = new URLSearchParams({ id: String(sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet, tq });
+  const out = await fetchUpstream(upstreamUrl(params));
+  if (out.status < 200 || out.status >= 300) throw new Error(`EIR dispatch query responded ${out.status}`);
+  const table = parseGvizServer(out.body);
+  const cleanKey = (v) => String(v || '').trim().toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+  const key = (ch, kind, value) => { const x = cleanKey(value); return x ? `${ch}|${kind}:${x}` : ''; };
+  const maps = { cur: new Map(), last: new Map() };
+  const add = (map, ch, id, name, cls, n) => {
+    const keys = [key(ch, 'id', id), key(ch, 'name', name)].filter(Boolean);
+    if (!keys.length) return;
+    const row = map.get(keys[0]) || { vc4: 0, comm: 0, total: 0 };
+    row.total += n;
+    if (cls === 'VC4') row.vc4 += n; else row.comm += n;
+    keys.forEach((k) => map.set(k, row));
+  };
+  for (const row of table.rows || []) {
+    const date = serverDate(serverCell(row, 4));
+    if (!date) continue;
+    const master = serverCell(row, 6).trim().replace(/\\.0+$/, '');
+    const ch = master === gvId ? 'gv' : 'ff';
+    const id = ch === 'gv' ? (serverCell(row, 2) || serverCell(row, 0)) : (serverCell(row, 0) || serverCell(row, 2));
+    const name = ch === 'gv' ? (serverCell(row, 3) || serverCell(row, 1)) : (serverCell(row, 1) || serverCell(row, 3));
+    const ym = date.slice(0, 7);
+    const map = ym === today.slice(0, 7) ? maps.cur : ym === previousYm ? maps.last : null;
+    if (!map) continue;
+    add(map, ch, id, name, classBucket(serverCell(row, 5)), serverNumber(serverCell(row, 7)));
+  }
+  const find = (map, agent) => map.get(key(agent.ch, 'id', agent.agentId || agent.id)) || map.get(key(agent.ch, 'name', agent.name || agent.agentName)) || { vc4: 0, comm: 0, total: 0 };
+  // REPORT remains the operational source for stock, priority, status, and TL metadata. Only
+  // these current/last issuance fields are replaced, so scheduled email matches the browser EIR path.
+  agents.forEach((agent) => {
+    const cur = find(maps.cur, agent), last = find(maps.last, agent);
+    agent.cur = { vc4: cur.vc4, comm: cur.comm, total: cur.total };
+    agent.last = { vc4: last.vc4, comm: last.comm, total: last.total };
+  });
+  return agents;
+}
 async function loadDispatchAgents(channel) {
   const jobs = [];
   if (channel !== 'gv') jobs.push(dispatchReportTable('ff').then((table) => loadFfDispatchRows(table, db.settings)));
   if (channel !== 'ff') jobs.push(dispatchReportTable('gv').then((table) => loadGvDispatchRows(table, db.settings)));
   const sources = await Promise.all(jobs);
-  return sources.flat();
+  return overlayDispatchEirIssuance(sources.flat());
 }
 async function sendDispatchPlanEmail(force = false, input = null) {
   const saved = db.settings.dispatchEmail || DEFAULT_DISPATCH_EMAIL;
@@ -1805,10 +1963,11 @@ async function maybeAgentAnomaly(force = false) {
     const sheetToday = !!(db.notify.watch.ff && db.notify.watch.ff.date && db.notify.watch.ff.date >= dateKey);
     const s = db.settings.eir || {};
     const sheet = db.settings.eirSheet || 'EIR';
-    const agentCol = s.agentName || 'L', tlCol = s.tlName || 'BA', dateCol = s.date || 'AA', tagCol = s.tagId || 'A';
+    const agentCol = s.agentName || 'L', tlCol = s.tlName || 'BA', dateCol = s.date || 'AA', tagCol = s.tagId || 'A', masterCol = s.masterId || 'AU';
+    const ffWhere = `(${masterCol} is null or ${masterCol} <> ${eirGvMasterId()})`;
     const params = (tq) => new URLSearchParams({ id: String(db.settings.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet, tq });
     const loadByName = async (firstCol) => {
-      const tq = `select ${firstCol}, ${dateCol}, count(${tagCol}) where ${tagCol} is not null group by ${firstCol}, ${dateCol} order by ${dateCol} desc limit 3000`;
+      const tq = `select ${firstCol}, ${dateCol}, count(${tagCol}) where ${tagCol} is not null and ${ffWhere} group by ${firstCol}, ${dateCol} order by ${dateCol} desc limit 3000`;
       const out = await fetchUpstream(upstreamUrl(params(tq)));
       if (out.status < 200 || out.status >= 300) return null;
       const table = parseGvizServer(out.body);
@@ -1948,8 +2107,9 @@ async function schedulesTick(forceSched = null) {
 async function championsList(topN) {
   const s = db.settings.eir || {};
   const sheet = db.settings.eirSheet || 'EIR';
-  const agentCol = s.agentName || 'L', dateCol = s.date || 'AA', tagCol = s.tagId || 'A';
-  const tq = `select ${agentCol}, ${dateCol}, count(${tagCol}) where ${tagCol} is not null group by ${agentCol}, ${dateCol} order by ${dateCol} desc limit 6000`;
+  const agentCol = s.agentName || 'L', dateCol = s.date || 'AA', tagCol = s.tagId || 'A', masterCol = s.masterId || 'AU';
+  const ffWhere = `(${masterCol} is null or ${masterCol} <> ${eirGvMasterId()})`;
+  const tq = `select ${agentCol}, ${dateCol}, count(${tagCol}) where ${tagCol} is not null and ${ffWhere} group by ${agentCol}, ${dateCol} order by ${dateCol} desc limit 6000`;
   const params = new URLSearchParams({ id: String(db.settings.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet, tq });
   const out = await fetchUpstream(upstreamUrl(params));
   if (out.status < 200 || out.status >= 300) throw new Error(`sheet ${out.status}`);
@@ -2023,8 +2183,9 @@ function U_labelYmSafe(ym) {
 async function followupList() {
   const s = db.settings.eir || {};
   const sheet = db.settings.eirSheet || 'EIR';
-  const agentCol = s.agentName || 'L', dateCol = s.date || 'AA', tagCol = s.tagId || 'A';
-  const tq = `select ${agentCol}, ${dateCol}, count(${tagCol}) where ${tagCol} is not null group by ${agentCol}, ${dateCol} order by ${dateCol} desc limit 6000`;
+  const agentCol = s.agentName || 'L', dateCol = s.date || 'AA', tagCol = s.tagId || 'A', masterCol = s.masterId || 'AU';
+  const ffWhere = `(${masterCol} is null or ${masterCol} <> ${eirGvMasterId()})`;
+  const tq = `select ${agentCol}, ${dateCol}, count(${tagCol}) where ${tagCol} is not null and ${ffWhere} group by ${agentCol}, ${dateCol} order by ${dateCol} desc limit 6000`;
   const params = new URLSearchParams({ id: String(db.settings.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet, tq });
   const out = await fetchUpstream(upstreamUrl(params));
   if (out.status < 200 || out.status >= 300) throw new Error(`sheet ${out.status}`);
@@ -2113,22 +2274,27 @@ async function checkReports(force = false) {
       try {
         const next = await reportSnapshot(source);
         const previous = db.notify.watch[source];
-        db.notify.watch[source] = next;
-        // Per-date issuance history (daily digest ke liye): jab tak server alive hai, har snapshot
-        // date ka latest total store hota rehta hai — digest MTD / avg / cover nikaal sakta hai.
-        if (next && next.date && next.total) {
+        const currentSnapshot = next && next.date ? { date: next.date, total: Number(next.total) || 0, classes: { ...(next.classes || {}) } } : { date: '', total: 0, classes: {} };
+        db.notify.watch[source] = currentSnapshot;
+        // Per-date issuance history (daily digest ke liye): persist every recent date returned by
+        // the grouped query, not only the latest date. Explicit zero snapshots are meaningful.
+        const history = next && next.history && typeof next.history === 'object' ? next.history : (next && next.date ? { [next.date]: next.total } : {});
+        if (Object.keys(history).length) {
           if (!db.notify.watch.daily || typeof db.notify.watch.daily !== 'object') db.notify.watch.daily = {};
-          const prevEntry = db.notify.watch.daily[next.date] || {};
-          if (prevEntry[source] !== next.total) {
-            db.notify.watch.daily[next.date] = { ...prevEntry, [source]: next.total };
-            const keys = Object.keys(db.notify.watch.daily).sort();
-            for (let i = 0; i < keys.length - 400; i++) delete db.notify.watch.daily[keys[i]];
+          for (const [date, total] of Object.entries(history)) {
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+            const prevEntry = db.notify.watch.daily[date] || {};
+            // A truthy guard here used to erase zero/empty source days and made GV-only days
+            // disappear from MTD and active-day counts.
+            if (prevEntry[source] !== total) db.notify.watch.daily[date] = { ...prevEntry, [source]: Number(total) || 0 };
           }
+          const keys = Object.keys(db.notify.watch.daily).sort();
+          for (let i = 0; i < keys.length - 400; i++) delete db.notify.watch.daily[keys[i]];
         }
         const delta = snapshotDelta(previous, next);
         if (delta && delta.changed && (delta.total > 0 || next.date !== previous.date)) {
           const label = source === 'gv' ? 'GV Partner' : 'First Forward';
-          recordNotification({ type: 'report', title: `${label} report update`, body: `${next.date}: ${deltaText(delta)} — Google Sheet me naya data aaya.`, target: 'admin', routeKey: 'reportUpdate', meta: { source, snapshot: next, previous, delta } });
+          recordNotification({ type: 'report', title: `${label} report update`, body: `${next.date}: ${deltaText(delta)} — Google Sheet me naya data aaya.`, target: 'admin', routeKey: 'reportUpdate', meta: { source, snapshot: currentSnapshot, previous, delta } });
         }
       } catch (err) { console.warn(`report watcher ${source}:`, err.message); }
     }
@@ -2388,11 +2554,9 @@ async function handleApi(req, res, url) {
     });
     // MTD (FF + GV) — stock balance reconciliation ke liye.
     const daily = watch.daily && typeof watch.daily === 'object' ? watch.daily : {};
-    const monthKey = dateKeyNow().slice(0, 7);
-    let ffMtd = 0, gvMtd = 0, mtdDays = 0;
-    for (const [d, v] of Object.entries(daily)) if (d.startsWith(monthKey) && v) { const f = Number(v.ff) || 0, g = Number(v.gv) || 0; if (f || g) mtdDays++; ffMtd += f; gvMtd += g; }
-    const issuance = Object.keys(daily).sort().slice(-180).map((date) => ({ date, ff: Number(daily[date] && daily[date].ff) || 0, gv: Number(daily[date] && daily[date].gv) || 0 }));
-    return sendJson(res, 200, { points, issuance, cover: watch.cover || null, thresholds: db.settings.thresholds || {}, mtd: { ff: ffMtd, gv: gvMtd, days: mtdDays } });
+    const summary = sourceAwareDigestSummary(daily, dateKeyNow().slice(0, 7));
+    const issuance = Object.keys(daily).sort().slice(-180).map((date) => { const v = digestDay(daily[date]); return { date, ff: Number(v.ff) || 0, gv: Number(v.gv) || 0 }; });
+    return sendJson(res, 200, { points, issuance, cover: watch.cover || null, thresholds: db.settings.thresholds || {}, mtd: { ff: summary.ff, gv: summary.gv, total: summary.total, days: summary.activeDays, activeDays: summary.activeDays, observedDays: summary.observedDays, zeroDays: summary.zeroDays, ffDays: summary.ffDays, gvDays: summary.gvDays } });
   }
   if (p === '/api/notifications/email/test' && method === 'POST') {
     requireAdmin(user);
@@ -2979,6 +3143,37 @@ async function handleApi(req, res, url) {
         }
       }
     }
+    // 👤 GV personal commission — exact agent ID + class settings. Blank manual rate is allowed
+    // (it keeps the row unresolved instead of silently changing the payout).
+    if (patch.gvCommissionRates !== undefined) {
+      const allowed = ['VC4', 'VC20', 'VC5', 'VC6', 'VC7', 'VC12'];
+      const cfg = patch.gvCommissionRates;
+      if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) throw new HttpError(400, 'gvCommissionRates object hona chahiye.');
+      if (cfg.enabled !== undefined) cfg.enabled = cfg.enabled === true || cfg.enabled === 'true';
+      if (cfg.currentMonthOnly !== undefined) cfg.currentMonthOnly = cfg.currentMonthOnly !== false && cfg.currentMonthOnly !== 'false';
+      if (cfg.classes !== undefined) {
+        if (!cfg.classes || typeof cfg.classes !== 'object' || Array.isArray(cfg.classes)) throw new HttpError(400, 'gvCommissionRates.classes object hona chahiye.');
+        const cleaned = {};
+        for (const cls of allowed) {
+          if (cfg.classes[cls] === undefined) continue;
+          const item = cfg.classes[cls];
+          if (!item || typeof item !== 'object' || Array.isArray(item)) throw new HttpError(400, `${cls} commission setting object hona chahiye.`);
+          const source = item.source === undefined ? undefined : String(item.source || '').trim().toLowerCase();
+          if (source !== undefined && !['master', 'manual'].includes(source)) throw new HttpError(400, `${cls}: source master ya manual hona chahiye.`);
+          const raw = item.rate;
+          let rate = raw;
+          if (raw === null || raw === undefined || raw === '') rate = '';
+          else {
+            rate = Number(raw);
+            if (!Number.isFinite(rate) || rate < 0 || rate > 1000000) throw new HttpError(400, `${cls}: ₹ rate 0 se 1000000 ke beech hona chahiye.`);
+            rate = Math.round(rate * 10000) / 10000;
+          }
+          cleaned[cls] = { ...(source === undefined ? {} : { source }), rate };
+        }
+        cfg.classes = cleaned;
+      }
+      // Unknown keys are ignored so an old saved setting cannot inject a new class into the UI.
+    }
     // 🚨 Commission alerts / 🚚 dispatch planner thresholds (cockpit.js) — numbers ko safe range me clamp karo
     if (patch.commissionAlerts !== undefined || patch.dispatch !== undefined) {
       const clampNum = (obj, key, min, max, label) => {
@@ -3198,45 +3393,55 @@ function personalWindow() {
 }
 function personalConfig(link) {
   const source = link.source === 'gv' ? 'gv' : 'ff';
-  if (source === 'gv') {
-    const m = (db.settings.gv && db.settings.gv.master) || {};
-    return {
-      source, sheetId: db.settings.gvSheetId, sheet: m.tab || 'GV Master',
-      dateCol: m.date || 'P', tagCol: m.tagId || 'I', clsCol: m.cch || m.vClass || 'G',
-      nameCol: link.kind === 'tl' ? (m.tlName || 'D') : (m.agentName || 'B'),
-      agentCol: m.agentName || 'B', tlCol: m.tlName || 'D', masterCol: ''
-    };
-  }
   const e = db.settings.eir || {};
   return {
     source, sheetId: db.settings.sheetId, sheet: db.settings.eirSheet || e.sheet || 'EIR',
     dateCol: e.date || 'AA', tagCol: e.tagId || 'A', clsCol: e.cls || 'D',
-    nameCol: link.kind === 'tl' ? (e.tlName || 'BA') : (e.agentName || 'L'),
-    agentCol: e.agentName || 'L', tlCol: e.tlName || 'BA', masterCol: e.masterId || 'AU'
+    nameCol: link.kind === 'tl' ? (source === 'gv' ? (e.gvTl || 'AZ') : (e.tlName || 'BA')) : (source === 'gv' ? (e.gvName || 'AX') : (e.agentName || 'L')),
+    agentCol: source === 'gv' ? (e.gvName || 'AX') : (e.agentName || 'L'),
+    tlCol: source === 'gv' ? (e.gvTl || 'AZ') : (e.tlName || 'BA'),
+    masterCol: e.masterId || 'AU'
   };
 }
-function isFfPersonalRow(master, tl) {
-  const e = db.settings.eir || {};
-  const gvId = String(e.gvMasterId || '5845036').trim().replace(/\.0+$/, '');
-  const id = String(master || '').trim().replace(/\.0+$/, '');
-  const gvTl = String(e.gvChannelTl || 'ApnaPayment Pvt. Ltd.').trim().toLowerCase();
-  return !((gvId && id === gvId) || (gvTl && String(tl || '').trim().toLowerCase() === gvTl));
+function eirGvMasterId() {
+  return String((db.settings.eir || {}).gvMasterId || '5845036').trim().replace(/\.0+$/, '');
+}
+function isGvPersonalRow(master) {
+  return String(master || '').trim().replace(/\.0+$/, '') === eirGvMasterId();
+}
+function isFfPersonalRow(master) {
+  return !isGvPersonalRow(master);
 }
 async function personalDailyRows(link) {
   const c = personalConfig(link);
   const { start, today } = personalWindow();
-  const extra = c.source === 'ff' ? `, ${c.masterCol}, ${c.tlCol}` : '';
+  const extra = `, ${c.masterCol}, ${c.tlCol}`;
   const tq = `select ${c.dateCol}, ${c.clsCol}${extra}, count(${c.tagCol}) where ${c.tagCol} is not null and ${c.dateCol} >= date '${start}' and ${c.dateCol} <= date '${today}' and ${c.nameCol} = ${gvizLiteral(link.name)} group by ${c.dateCol}, ${c.clsCol}${extra} order by ${c.dateCol} desc limit 5000`;
   const params = new URLSearchParams({ id: String(c.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet: c.sheet, tq });
   const out = await fetchUpstreamCached(upstreamUrl(params));
   if (out.status < 200 || out.status >= 300) throw new Error(`sheet ${out.status}`);
   const table = parseGvizServer(out.body);
+  // Legacy GV link adapters may not expose the EIR master column in their response schema.
+  // Only that schema mismatch may use the old GV Master link query; normal GV personal pages
+  // remain EIR + master-ID filtered just like the main site.
+  const responseCols = (table.cols || []).map((cell) => String(cell.id || cell.label || '').trim().toUpperCase());
+  if (c.source === 'gv' && !responseCols.includes(String(c.masterCol).toUpperCase())) {
+    const m = (db.settings.gv && db.settings.gv.master) || {};
+    const legacyDate = m.date || 'P', legacyClass = m.cch || m.vClass || 'G', legacyTag = m.tagId || 'I', legacyName = link.kind === 'tl' ? (m.tlName || 'D') : (m.agentName || 'B');
+    const legacyTq = `select ${legacyDate}, ${legacyClass}, count(${legacyTag}) where ${legacyTag} is not null and ${legacyDate} >= date '${start}' and ${legacyDate} <= date '${today}' and ${legacyName} = ${gvizLiteral(link.name)} group by ${legacyDate}, ${legacyClass} order by ${legacyDate} desc limit 5000`;
+    const legacyParams = new URLSearchParams({ id: String(db.settings.gvSheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet: m.tab || 'GV Master', tq: legacyTq });
+    const legacyOut = await fetchUpstreamCached(upstreamUrl(legacyParams));
+    if (legacyOut.status < 200 || legacyOut.status >= 300) throw new Error(`GV legacy personal query responded ${legacyOut.status}`);
+    const legacyTable = parseGvizServer(legacyOut.body);
+    return (legacyTable.rows || []).map((row) => ({ date: serverDate(serverCell(row, 0)), cls: classBucket(serverCell(row, 1)), n: serverNumber(serverCell(row, 2)) })).filter((row) => row.date);
+  }
   const rows = [];
   for (const row of table.rows || []) {
     const dk = serverDate(serverCell(row, 0));
     if (!dk) continue;
     const cells = (row && row.c) || [];
-    if (c.source === 'ff' && cells.length >= 5 && !isFfPersonalRow(serverCell(row, 2), serverCell(row, 3))) continue;
+    const gvRow = isGvPersonalRow(serverCell(row, 2));
+    if ((c.source === 'gv' && !gvRow) || (c.source === 'ff' && gvRow)) continue;
     rows.push({ date: dk, cls: classBucket(serverCell(row, 1)), n: serverNumber(serverCell(row, Math.max(0, cells.length - 1))) });
   }
   return rows;
@@ -3244,7 +3449,7 @@ async function personalDailyRows(link) {
 async function personalTeamAgents(link) {
   const c = personalConfig(link);
   const { start, today } = personalWindow();
-  const extra = c.source === 'ff' ? `, ${c.masterCol}, ${c.tlCol}` : '';
+  const extra = `, ${c.masterCol}, ${c.tlCol}`;
   const tq = `select ${c.agentCol}, ${c.dateCol}${extra}, count(${c.tagCol}) where ${c.tagCol} is not null and ${c.dateCol} >= date '${start}' and ${c.dateCol} <= date '${today}' and ${c.nameCol} = ${gvizLiteral(link.name)} group by ${c.agentCol}, ${c.dateCol}${extra} order by ${c.dateCol} desc limit 5000`;
   const params = new URLSearchParams({ id: String(c.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet: c.sheet, tq });
   const out = await fetchUpstreamCached(upstreamUrl(params));
@@ -3256,7 +3461,8 @@ async function personalTeamAgents(link) {
     const dk = serverDate(serverCell(row, 1));
     if (!name || !dk) continue;
     const cells = (row && row.c) || [];
-    if (c.source === 'ff' && cells.length >= 5 && !isFfPersonalRow(serverCell(row, 2), serverCell(row, 3))) continue;
+    const gvRow = isGvPersonalRow(serverCell(row, 2));
+    if ((c.source === 'gv' && !gvRow) || (c.source === 'ff' && gvRow)) continue;
     if (!byAgent.has(name)) byAgent.set(name, new Map());
     byAgent.get(name).set(dk, (byAgent.get(name).get(dk) || 0) + serverNumber(serverCell(row, Math.max(0, cells.length - 1))));
   }

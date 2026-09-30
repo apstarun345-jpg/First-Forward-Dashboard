@@ -36,10 +36,13 @@
     <header class="topbar">
       <button class="icon-btn" id="menu-btn" aria-label="Menu">☰</button>
       <div class="top-title" id="top-title">Dashboard</div>
+      <div id="offline-state" class="offline-state" role="status" aria-live="polite" hidden></div>
       <div class="top-actions" id="top-actions">
         <button class="btn small primary" id="pwa-install" hidden title="Install app">⬇️ Install App</button>
         <button class="icon-btn" id="lang-toggle" title="Language · भाषा (English / हिंदी)" aria-label="Language" data-top-secondary="1">🌐</button>
         <button class="icon-btn" id="theme-toggle" title="Dark / light mode" aria-label="Theme" data-top-secondary="1">🌙</button>
+        <button class="icon-btn" id="a11y-btn" title="Accessibility mode" aria-label="Accessibility mode" data-top-secondary="1">♿</button>
+        <button class="icon-btn" id="focus-toggle" title="Focus mode" aria-label="Focus mode">🎯</button>
         <button class="icon-btn" id="top-refresh" title="Refresh data (Google Sheet se naya data)" aria-label="Refresh">↻</button>
         <button class="icon-btn" id="save-view-btn" title="Save current filtered view" aria-label="Save current view" data-top-secondary="1">☆</button>
         <button class="icon-btn" id="global-search-btn" title="Global search (Ctrl / ⌘ + K)" aria-label="Search" data-top-secondary="1">🔍</button>
@@ -54,8 +57,10 @@
         </div>
       </div>
     </header>
+    <div id="global-filter-bar" class="global-filter-bar" hidden></div>
     <main id="main" class="main"></main>
   </div>
+  <nav id="mobile-nav" class="mobile-nav" aria-label="Mobile navigation" hidden></nav>
 
   <div class="drawer-backdrop" id="drawer-backdrop" hidden></div>
   <aside class="drawer" id="drawer" aria-hidden="true">

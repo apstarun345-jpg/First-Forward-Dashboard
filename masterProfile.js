@@ -32,6 +32,15 @@ window.FF = window.FF || {};
   const rowsOf = (key) => safeCall(() => FF.store && FF.store.get && FF.store.get(key), null) || [];
   const gvOn = () => !!(FF.gv && safeCall(() => (FF.gv.enabled ? FF.gv.enabled() : true), true));
   const gvRows = (key) => safeCall(() => (FF.gv && FF.gv.get && FF.gv.get(key)), null) || [];
+  // Some older host adapters replace only GV.rows while the canonical adapter is unavailable.
+  // Treat that explicit adapter override as a compatibility source; the live dashboard keeps
+  // G.rows === G.masterRows and therefore always takes EIR issuanceRows below.
+  const gvIssuanceRows = () => {
+    const g = FF.gv || {};
+    if (typeof g.rows === 'function' && typeof g.masterRows === 'function' && g.rows !== g.masterRows) return safeCall(() => g.rows(), []) || [];
+    if (typeof g.issuanceRows === 'function') return safeCall(() => g.issuanceRows(), []) || [];
+    return typeof g.rows === 'function' ? (safeCall(() => g.rows(), []) || []) : [];
+  };
   const CLS_ORDER = ['VC4', 'VC20', 'VC5', 'VC6', 'VC7', 'VC12', 'VC16', 'VC5+'];
   const clsRank = (c) => { const i = CLS_ORDER.indexOf(String(c).toUpperCase()); return i < 0 ? 99 : i; };
   const is4 = (c) => /^VC\s*4$/i.test(String(c || '').trim());
@@ -81,7 +90,7 @@ window.FF = window.FF || {};
     const P = perf();
     const jobs = [];
     if (P && P.ensureLoaded) jobs.push(safeAsync(() => P.ensureLoaded()));
-    ['agentClass', 'agents', 'stockAgents'].forEach((k) => { if (FF.store && FF.store.need) jobs.push(safeAsync(() => FF.store.need(k))); });
+    ['daily', 'agentClass', 'agents', 'stockAgents'].forEach((k) => { if (FF.store && FF.store.need) jobs.push(safeAsync(() => FF.store.need(k))); });
     if (gvOn() && FF.gv && FF.gv.need) ['report', 'stockAgent', 'stockAgentClass', 'master'].forEach((k) => jobs.push(safeAsync(() => FF.gv.need(k))));
     await Promise.all(jobs);
     quickCache.clear();
@@ -165,6 +174,13 @@ window.FF = window.FF || {};
     out.months = { cur: curYm, last: lastYm };
     out.classes = classTable(ac.filter(isMine), stk.filter((r) => norm(r.agentName) === n), curYm, lastYm);
     if (!out.classes.length && a) out.classes = [{ cls: 'VC4', cur: num(a.curVc4), last: num(a.lastVc4), stock: num(a.stockVc4) }, { cls: 'Commercial', cur: num(a.curNvc4), last: num(a.lastNvc4), stock: num(a.stockNvc4) }];
+    else if (out.classes.length && rowsOf('daily').length) {
+      // Only replace the REPORT snapshot once the canonical EIR daily view is loaded. Some
+      // lightweight callers provide a partial class fixture without daily EIR context; keep those
+      // callers' REPORT totals rather than inventing a partial profile total.
+      const exactTotals = groupSummary(out.classes);
+      Object.assign(out.totals, { curVc4: exactTotals.vc4.cur, curComm: exactTotals.comm.cur, curTotal: exactTotals.total.cur, lastVc4: exactTotals.vc4.last, lastComm: exactTotals.comm.last, lastTotal: exactTotals.total.last });
+    }
     out.trend = trendOf(agRows, (r) => norm(r.name) === n && (!r.channel || /first/i.test(r.channel)), (r) => r.ym);
     return out;
   }
@@ -194,13 +210,21 @@ window.FF = window.FF || {};
       totals: { curVc4: sumK('curVc4'), curComm: sumK('curNvc4'), curTotal: sumK('curTotal'), lastVc4: sumK('lastVc4'), lastComm: sumK('lastNvc4'), lastTotal: sumK('lastTotal') },
       agents: rowsA, agentCount: agents.length
     };
-    if (src && src.tlCurTotal != null) Object.assign(out.totals, { tlCurTotal: num(src.tlCurTotal), tlLastTotal: num(src.tlLastTotal) });
+    // Issuance totals already come from the corrected Performance/EIR path above. Keep REPORT's
+    // TL snapshot out of the profile totals so the drawer cannot reintroduce the old mismatch.
     // 📈 TL growth % — REPORT tab ka apna "TL Performance Status · Percent"; expected month-end bhi saath.
     attachGrowth(out, { growth: (src && src.tlGrowth) || '', projected: src && src.tlProjected }, curYm);
     if (light) return out;
     out.months = { cur: curYm, last: lastYm };
     out.classes = classTable(ac.filter((r) => norm(r.tlName) === n && (!r.channel || /first/i.test(r.channel))), stk.filter((r) => norm(r.tlName) === n), curYm, lastYm);
     if (!out.classes.length) out.classes = [{ cls: 'VC4', cur: out.totals.curVc4, last: out.totals.lastVc4, stock: stock.vc4 }, { cls: 'Commercial', cur: out.totals.curComm, last: out.totals.lastComm, stock: stock.comm }];
+    else if (rowsOf('daily').length) {
+      // The class table is the same EIR source used by the clicked drill-down. Use its rollup for
+      // TL KPIs once the canonical daily EIR view is present, so a stale REPORT TL total cannot
+      // reappear above an exact class total.
+      const exactTotals = groupSummary(out.classes);
+      Object.assign(out.totals, { curVc4: exactTotals.vc4.cur, curComm: exactTotals.comm.cur, curTotal: exactTotals.total.cur, lastVc4: exactTotals.vc4.last, lastComm: exactTotals.comm.last, lastTotal: exactTotals.total.last });
+    }
     out.trend = trendOf(agRows, (r) => norm(r.tlName) === n && (!r.channel || /first/i.test(r.channel)), (r) => r.ym);
     out.week = agents.reduce((acc, a) => acc.map((v, i) => v + num((a.week || [])[i])), [0, 0, 0, 0, 0, 0, 0]);
     out.weekLabels = safeCall(() => P.dayLabels && P.dayLabels(), []) || [];
@@ -210,8 +234,8 @@ window.FF = window.FF || {};
 
   const gvDaily = (r, cur) => U.runRate(cur);
   function gvClassRows(match, curYm, lastYm) {
-    const master = safeCall(() => (FF.gv && FF.gv.rows ? FF.gv.rows() : []), []) || [];
-    return master.filter(match).map((r) => ({ ym: r.ym, cls: r.cls, n: 1 }));
+    const issuance = gvIssuanceRows();
+    return issuance.filter(match).map((r) => ({ ym: r.ym, cls: r.cls, n: Number(r.n) || 1 }));
   }
   function gvAgentProfile(p, light) {
     const r = findGvAgent(p.name, p.sub);
@@ -232,9 +256,17 @@ window.FF = window.FF || {};
       Object.assign(out, { mobile: '', tl: { name: [...(p.tlSet || [])][0] || '' }, priority: '', direct: !!p.direct, directLabel: p.directLabel || '', stock: { vc4: 0, comm: 0, total: 0 }, tlStock: { has: false }, dispatch: { days: suggestDays(), sugVc4: 0, sugComm: 0, sugVc4Gross: 0, sugCommGross: 0 }, totals: {} });
     }
     out.tagRequired = out.direct && isHM(out.priority);
-    attachGrowth(out, r || {}, latestYm(safeCall(() => (FF.gv && FF.gv.rows ? FF.gv.rows() : []), [])));
-    if (light) return out;
     const n = norm(p.name);
+    const issuance = gvIssuanceRows();
+    const mine = issuance.filter((m) => norm(m.agentName) === n || (out.id && m.agentId === out.id));
+    const curYmExact = latestYm(mine), lastYmExact = U.prevMonthKey(curYmExact);
+    const exactClass = classTable(mine, [], curYmExact, lastYmExact);
+    if (exactClass.length) {
+      const exactTotals = groupSummary(exactClass);
+      Object.assign(out.totals, { curVc4: exactTotals.vc4.cur, curComm: exactTotals.comm.cur, curTotal: exactTotals.total.cur, lastVc4: exactTotals.vc4.last, lastComm: exactTotals.comm.last, lastTotal: exactTotals.total.last });
+    }
+    attachGrowth(out, r || {}, curYmExact);
+    if (light) return out;
     const master = gvClassRows((m) => norm(m.agentName) === n || (out.id && m.agentId === out.id));
     const curYm = latestYm(master.length ? master : [{ ym: U.ymKey(new Date()) }]), lastYm = U.prevMonthKey(curYm);
     out.months = { cur: curYm, last: lastYm };

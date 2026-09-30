@@ -6,7 +6,7 @@ window.FF = window.FF || {};
 FF.pages = FF.pages || {};
 (function (FF) {
   'use strict';
-  const U = FF.util, D = FF.data, G = FF.gv, C = FF.charts;
+  const U = FF.util, D = FF.data, S = FF.store, G = FF.gv, C = FF.charts;
   const esc = U.esc;
 
   // ---- shared bits -------------------------------------------------------------------------------
@@ -32,10 +32,13 @@ FF.pages = FF.pages || {};
     root.innerHTML = head('🚀', 'GV Partner Dashboard', 'GV Master issuance · Tag Assignment stock · GV REPORT performance — alag GV section', `<a class="btn" href="#/compare">⚖️ GV vs First Forward</a>`)
       + `<div id="gvd-body">${U.spinner('GV data load ho raha hai… (GV Master + Tag Assignment + GV REPORT)')}</div>`;
     const body = U.$('#gvd-body', root);
-    const [masterR, reportR] = await Promise.allSettled([G.need('master'), G.need('report')]);
+    const [eirR, masterR, reportR, agentClassR] = await Promise.allSettled([S.need('daily'), G.need('master'), G.need('report'), S.need('agentClass')]);
     if (!root.isConnected) return;
     if (masterR.status !== 'fulfilled') { body.innerHTML = U.errorBox(masterR.reason, 'data-action="refresh"'); return; }
-    const report = reportR.status === 'fulfilled' ? reportR.value : [];
+    // GV REPORT remains the operational priority/stock source; every issuance field is overlaid
+    // from the canonical EIR rows once the daily ledger is ready.
+    const reportRaw = reportR.status === 'fulfilled' ? reportR.value : [];
+    const report = overlayGvReportWithEir(reportRaw);
     const stockClass = G.get('stockClass') || [], stockTl = G.get('stockTl') || [], stockAgent = G.get('stockAgent') || [];
 
     const latest = G.latestDate();
@@ -113,18 +116,20 @@ FF.pages = FF.pages || {};
 
     // recent 14 days
     const recent = [];
+    const issuance = G.issuanceRows ? G.issuanceRows() : G.rows();
+    const rowCount = (list, predicate) => U.sum(list.filter(predicate || (() => true)), (r) => Number(r.n) || 1);
     for (let i = 0; i < 14; i++) {
       const d = new Date(latest); d.setDate(d.getDate() - i);
       const ym = U.ymKey(d), day = d.getDate();
-      const dayRows = G.rows().filter((r) => r.ym === ym && r.day === day);
-      recent.push({ d, total: dayRows.length, vc4: dayRows.filter((r) => r.group === 'VC4').length, comm: dayRows.filter((r) => r.group !== 'VC4').length, repl: dayRows.filter((r) => /replacement/i.test(r.status)).length, agents: new Set(dayRows.map((r) => r.agentId)).size });
+      const dayRows = issuance.filter((r) => r.ym === ym && r.day === day);
+      recent.push({ d, total: rowCount(dayRows), vc4: rowCount(dayRows, (r) => r.group === 'VC4'), comm: rowCount(dayRows, (r) => r.group !== 'VC4'), repl: rowCount(dayRows, (r) => /replacement/i.test(r.status || r.type || '')), agents: new Set(dayRows.map((r) => r.agentId || r.agentName).filter(Boolean)).size });
     }
     const recentRows = recent.map((r, i) => `<tr><td>${U.labelDate(r.d)} <span class="dim">${U.weekday(r.d)}</span></td><td class="num"><b>${U.fmt(r.total)}</b></td><td class="num">${U.fmt(r.vc4)}</td><td class="num">${U.fmt(r.comm)}</td><td class="num">${U.fmt(r.repl)}</td><td class="num">${U.fmt(r.agents)}</td><td>${recent[i + 1] ? U.deltaHtml(U.growth(r.total, recent[i + 1].total), { decimals: 0 }) : '—'}</td></tr>`);
 
     // weekday pattern (last 8 weeks)
     const cutoff = new Date(latest); cutoff.setDate(cutoff.getDate() - 55);
     const wdSum = new Array(7).fill(0), wdDays = Array.from({ length: 7 }, () => new Set());
-    for (const r of G.rows()) { if (!r.date || r.date < cutoff) continue; wdSum[r.date.getDay()] += 1; wdDays[r.date.getDay()].add(U.dateKey(r.date)); }
+    for (const r of issuance) { if (!r.date || r.date < cutoff) continue; wdSum[r.date.getDay()] += Number(r.n) || 1; wdDays[r.date.getDay()].add(U.dateKey(r.date)); }
     const wdOrder = [1, 2, 3, 4, 5, 6, 0];
     const weekdayChart = C.bars({ labels: wdOrder.map((i) => U.DAYS[i]), height: 190, series: [{ name: 'Avg / day', values: wdOrder.map((i) => (wdDays[i].size ? Math.round(wdSum[i] / wdDays[i].size) : 0)), color: '#0d9488' }] });
 
@@ -182,10 +187,10 @@ FF.pages = FF.pages || {};
       </div>
       <div class="grid g-2">
         ${card('🕒 Last 14 Days', tableHtml(['Date', 'Total', 'VC4', 'Comm', 'Repl', 'Agents', 'vs prev'], recentRows, 1))}
-        ${card('🔺 Dispatch / Status Watch <span class="dim">(GV REPORT)</span>', tableHtml(['Agent', 'TL', 'Stock', 'MTD', 'Priority', 'Status'],
+        ${card('🔺 Dispatch / Status Watch <span class="dim">(priority from GV REPORT · issuance from EIR)</span>', tableHtml(['Agent', 'TL', 'Stock', 'MTD', 'Priority', 'Status'],
           report.slice().sort((a, b) => (b.suggestedDispatch || 0) - (a.suggestedDispatch || 0)).slice(0, 12).map((r) => `<tr data-link="#/gvPerformance?q=${encodeURIComponent(r.agentName)}"><td><b>${esc(r.agentName)}</b></td><td>${FF.config.isDirectAgent(r, 'gv') ? '<b>Direct Agent</b>' : esc(r.tlName)}</td><td class="num">${U.fmt(r.stockTotal)}</td><td class="num">${U.fmt(r.curTotal)}</td><td>${esc(r.priority || '—')}</td><td>${esc(r.agentStatus || '—')}</td></tr>`), 2))}
       </div>
-      <p class="foot-note">Source: GV Partner sheet — GV Master (issuance) · Tag Assignment (stock) · GV REPORT (performance) · ${stockAgent.length} agents in stock · Loaded ${U.timeLabel(G.loadedAt || D.lastLoadAt)} · Data sirf ↻ ya browser refresh par update hota hai</p>`;
+      <p class="foot-note">Source: issuance counts = EIR (GV rows classified by master ID ${esc(FF.config.eir.gvMasterId || '5845036')}) · Tag Assignment (stock) · GV REPORT (priority/status) · ${stockAgent.length} agents in stock · Loaded ${U.timeLabel(G.loadedAt || D.lastLoadAt)} · Data sirf ↻ ya browser refresh par update hota hai</p>`;
     C.mount(body);
   }
 
@@ -208,10 +213,10 @@ FF.pages = FF.pages || {};
     const dimKey = DIMS[p.dim] ? p.dim : (mode === 'compare' ? 'total' : 'class');
     root.innerHTML = head('📈', 'GV Trend', 'GV Master issuance — daily · weekly · monthly · last vs current', '') + `<div id="gvt-controls"></div><div id="gvt-body">${U.spinner('GV trend aggregate ho raha hai…')}</div>`;
     const body = U.$('#gvt-body', root), controls = U.$('#gvt-controls', root);
-    try { await G.need('master'); } catch (err) { body.innerHTML = U.errorBox(err, 'data-action="refresh"'); return; }
+    try { await Promise.all([S.need('daily'), S.need('agentClass'), G.need('master')]); } catch (err) { body.innerHTML = U.errorBox(err, 'data-action="refresh"'); return; }
     if (!root.isConnected) return;
 
-    let rows = G.rows();
+    let rows = G.issuanceRows ? G.issuanceRows() : G.rows();
     const tl = p.tl || '', agent = p.agent || '';
     if (tl) rows = rows.filter((r) => norm(r.tlName) === norm(tl));
     if (agent) rows = rows.filter((r) => norm(r.agentName) === norm(agent));
@@ -244,9 +249,9 @@ FF.pages = FF.pages || {};
 
     const dimKeys = (list) => {
       const present = U.uniq(list.map(dim.fn));
-      if (dimKey === 'agent' || dimKey === 'tl') return U.topEntries(U.groupSum(list, dim.fn, () => 1), 10).map((e) => e[0]);
+      if (dimKey === 'agent' || dimKey === 'tl') return U.topEntries(U.groupSum(list, dim.fn, (r) => Number(r.n) || 1), 10).map((e) => e[0]);
       if (dim.order) return dim.order.filter((k) => present.includes(k)).concat(present.filter((k) => !dim.order.includes(k)));
-      return U.topEntries(U.groupSum(list, dim.fn, () => 1), 8).map((e) => e[0]);
+      return U.topEntries(U.groupSum(list, dim.fn, (r) => Number(r.n) || 1), 8).map((e) => e[0]);
     };
     const keys = dimKeys(rows);
     const bucketize = (list, keyFn) => {
@@ -255,7 +260,7 @@ FF.pages = FF.pages || {};
         const b = keyFn(r);
         if (!map.has(b)) map.set(b, new Map());
         const inner = map.get(b); const k = dim.fn(r);
-        inner.set(k, (inner.get(k) || 0) + 1);
+        inner.set(k, (inner.get(k) || 0) + (Number(r.n) || 1));
       }
       return map;
     };
@@ -290,7 +295,7 @@ FF.pages = FF.pages || {};
       const curMap = G.byDim(cur, dim.fn), lastMap = G.byDim(lastKey, dim.fn);
       const cmpKeys = U.uniq([...curMap.keys(), ...lastMap.keys()]);
       const daysInLast = Math.max(1, rows.filter((r) => r.ym === lastKey).reduce((m, r) => Math.max(m, r.day || 0), 0));
-      const lastUpTo = rows.filter((r) => r.ym === lastKey && (r.day || 0) <= (curS.lastDay || 31)).length;
+      const lastUpTo = U.sum(rows.filter((r) => r.ym === lastKey && (r.day || 0) <= (curS.lastDay || 31)), (r) => Number(r.n) || 1);
       html += card(`⚖️ Last vs Current · ${U.labelYM(cur, true)} <span class="dim">${esc(dim.label)}</span>`, C.bars({ labels: cmpKeys, height: 240, series: [{ name: U.labelYM(lastKey, true), values: cmpKeys.map((k) => lastMap.get(k) || 0), color: '#99f6e4' }, { name: U.labelYM(cur, true), values: cmpKeys.map((k) => curMap.get(k) || 0), color: '#0d9488' }], legendAlways: true }), { right: exportBtn('gv-trend-compare') })
         + card('🔢 Comparison table', tableHtml(['Breakdown', `${U.labelYM(lastKey, true)} (full)`, `${U.labelYM(lastKey, true)} (day 1-${curS.lastDay || 31})`, `${U.labelYM(cur, true)} MTD`, 'Growth'], cmpKeys.map((k) => {
           const prevFull = lastMap.get(k) || 0;
@@ -324,7 +329,7 @@ FF.pages = FF.pages || {};
     root.innerHTML = head('📦', 'GV Stock', 'Tag Assignment sheet — GV partner ka stock in field (VC4 vs Commercial)', `<a class="btn" href="#/gvPerformance">🏆 GV performance →</a>`)
       + `<div id="gvs-controls"></div><div id="gvs-body">${U.spinner('GV stock load ho raha hai…')}</div>`;
     const body = U.$('#gvs-body', root), controls = U.$('#gvs-controls', root);
-    try { await Promise.all(['stockClass', 'stockTl', 'stockTlClass', 'stockAgent', 'stockAgentClass'].map((key) => G.need(key))); } catch (err) { body.innerHTML = U.errorBox(err, 'data-action="refresh"'); return; }
+    try { await Promise.all(['stockClass', 'stockTl', 'stockTlClass', 'stockAgent', 'stockAgentClass'].map((key) => G.need(key)).concat([S.need('daily'), S.need('agents'), S.need('agentClass'), G.need('report')])); } catch (err) { body.innerHTML = U.errorBox(err, 'data-action="refresh"'); return; }
     if (!root.isConnected) return;
     const byClass = G.get('stockClass') || [], byTl = G.get('stockTl') || [], byTlClass = G.get('stockTlClass') || [], byAgent = G.get('stockAgent') || [], byAgentClass = G.get('stockAgentClass') || [];
     const total = U.sum(byClass, (r) => r.n), vc4 = U.sum(byClass.filter((r) => r.group === 'VC4'), (r) => r.n), comm = total - vc4;
@@ -406,9 +411,9 @@ FF.pages = FF.pages || {};
       viewHtml = list.slice(0, 40).map((a) => {
         const cls = byAgentClass.filter((r) => norm(r.agentName) === norm(a.agentName));
         const aVc4 = U.sum(cls.filter((r) => r.group === 'VC4'), (r) => r.n);
-        const rep = (G.get('report') || []).find((r) => norm(r.agentName) === norm(a.agentName));
+        const rep = overlayGvReportWithEir(G.get('report') || []).find((r) => norm(r.agentName) === norm(a.agentName));
         return card(`🧑‍💼 ${esc(a.agentName)} <span class="dim">${esc(a.agentId)} · ${esc(a.tlName || '—')}</span>`, `
-          <div class="grid g-4" style="margin-bottom:10px">${miniKpi('Stock', U.fmt(a.n))}${miniKpi('VC4', U.fmt(aVc4))}${miniKpi('Commercial', U.fmt(a.n - aVc4))}${rep ? miniKpi('MTD issuance (GV REPORT)', U.fmt(rep.curTotal)) : miniKpi('MTD issuance', '—')}</div>
+          <div class="grid g-4" style="margin-bottom:10px">${miniKpi('Stock', U.fmt(a.n))}${miniKpi('VC4', U.fmt(aVc4))}${miniKpi('Commercial', U.fmt(a.n - aVc4))}${rep ? miniKpi('MTD issuance (EIR)', U.fmt(rep.curTotal)) : miniKpi('MTD issuance', '—')}</div>
           ${C.bars({ labels: classes, height: 180, series: [{ name: 'Stock', values: classes.map((c) => U.sum(cls.filter((r) => r.cls === c), (r) => r.n)), color: '#0d9488' }], showValues: true })}
           ${rep ? `<div class="grid g-3">${miniKpi('Last month', U.fmt(rep.lastTotal))}${miniKpi('MTD', U.fmt(rep.curTotal))}${miniKpi('Growth', U.deltaHtml(rep.growth, { decimals: 0 }))}</div>` : ''}
           <div class="btn-row" style="margin-top:8px">${FF.auth.can('export') ? `<button class="btn small" data-gv-rows="agent" data-name="${esc(a.agentName)}">⬇ In-stock tags (CSV)</button>` : ''}${FF.auth.can('export') ? `<button class="btn small" data-gv-rows="agent-xlsx" data-name="${esc(a.agentName)}">⬇ Excel</button>` : ''}${FF.auth.can('performance') || FF.auth.can('gvPerformance') ? `<a class="btn small" href="#/gvPerformance?q=${encodeURIComponent(a.agentName)}">🏆 GV profile →</a>` : ''}</div>`, { cls: 'gv-card' });
@@ -430,7 +435,7 @@ FF.pages = FF.pages || {};
     }
 
     body.innerHTML = `<div class="kpi-grid">${kpis.join('')}</div>${viewHtml}
-      <p class="foot-note">Source: GV Partner sheet → <b>Tag Assignment</b> tab (${U.fmt(total)} tags in stock) · Aggregates Google se group-by queries me aate hain · Loaded ${U.timeLabel(G.loadedAt || D.lastLoadAt)}</p>`;
+      <p class="foot-note">Issuance KPIs = EIR; stock source: GV Partner sheet → <b>Tag Assignment</b> tab (${U.fmt(total)} tags in stock) · Aggregates Google se group-by queries me aate hain · Loaded ${U.timeLabel(G.loadedAt || D.lastLoadAt)}</p>`;
     C.mount(body);
 
     // raw in-stock rows export (agent / TL) — on demand, Google se page-wise
@@ -460,7 +465,7 @@ FF.pages = FF.pages || {};
   // ================================================================================================
   // 🏆 GV Performance (GV REPORT)
   // ================================================================================================
-  const perf = { view: 'overview', q: '', priority: '', status: '', growth: '', stock: '', tl: '', sort: { key: 'curTotal', dir: 'desc' }, page: 1 };
+  const perf = { view: 'overview', q: '', priority: '', status: '', growth: '', stock: '', tl: '', sourceRows: null, sort: { key: 'curTotal', dir: 'desc' }, page: 1 };
   const PERF_COLS = [
     { key: 'agentName', label: 'Agent', num: false }, { key: 'tlName', label: 'TL', num: false },
     { key: 'stockTotal', label: 'Stock', num: true }, { key: 'stockVc4', label: 'Stock VC4', num: true }, { key: 'stockComm', label: 'Stock Comm', num: true },
@@ -481,9 +486,62 @@ FF.pages = FF.pages || {};
   }
   const badge = (text) => { const t = U.clean(text); return t ? `<span class="badge ${tone(t)}">${esc(t.replace(/^[\p{Extended_Pictographic}\u{FE0F}\u{200D}\s]+/u, '') || t)}</span>` : '<span class="dim">—</span>'; };
 
+  function overlayGvReportWithEir(report) {
+    const latest = G.latestDate && G.latestDate();
+    if (!latest || !G.issuanceRows) return report;
+    const currentYm = U.ymKey(latest), previousYm = U.prevMonthKey(currentYm);
+    const issuance = G.issuanceRows();
+    const current = G.agentRollup(currentYm) || [], previous = G.agentRollup(previousYm) || [];
+    const byKey = (list) => {
+      const map = new Map();
+      list.forEach((a) => {
+        [a.agentId, a.agentName].filter(Boolean).forEach((key) => map.set(norm(key), a));
+      });
+      return map;
+    };
+    const curMap = byKey(current), prevMap = byKey(previous);
+    const tlMap = (list) => new Map((list || []).map((t) => [norm(t.tlName), t]));
+    const curTl = tlMap(G.tlRollup(currentYm)), prevTl = tlMap(G.tlRollup(previousYm));
+    const match = (r) => curMap.get(norm(r.agentId)) || curMap.get(norm(r.agentName));
+    const matchPrev = (r) => prevMap.get(norm(r.agentId)) || prevMap.get(norm(r.agentName));
+    const rowsFor = (r, ym) => issuance.filter((x) => x.ym === ym && ((r.agentId && x.agentId && norm(x.agentId) === norm(r.agentId)) || (r.agentName && norm(x.agentName) === norm(r.agentName))));
+    const dayRowsFor = (r, dateKey) => issuance.filter((x) => U.dateKey(x.date || x.d) === dateKey && ((r.agentId && x.agentId && norm(x.agentId) === norm(r.agentId)) || (r.agentName && norm(x.agentName) === norm(r.agentName))));
+    const count = (list, fn) => U.sum(list.filter(fn || (() => true)), (x) => Number(x.n) || 1);
+    const monthSummary = G.summary(currentYm);
+    const lastDay = monthSummary.lastDay || latest.getDate();
+    const expected = (n) => lastDay ? Math.max(n, Math.round((n / lastDay) * U.daysInMonth(currentYm))) : n;
+    const todayKey = U.dateKey(latest);
+    return report.map((r) => {
+      const cur = match(r) || { total: 0, vc4: 0, vc20: 0, vc5p: 0, comm: 0, byClass: {}, replacement: 0 };
+      const prev = matchPrev(r) || { total: 0, vc4: 0, vc20: 0, vc5p: 0, comm: 0, byClass: {} };
+      const currentRows = rowsFor(r, currentYm), lastRows = rowsFor(r, previousYm), todayRows = dayRowsFor(r, todayKey);
+      const curDays = new Set(currentRows.map((x) => U.dateKey(x.date || x.d)).filter(Boolean)).size;
+      const lastDays = new Set(lastRows.map((x) => U.dateKey(x.date || x.d)).filter(Boolean)).size;
+      const curChassis = count(currentRows, (x) => /chassis/i.test(x.tagType || x.vrnType || ''));
+      const curReplace = count(currentRows, (x) => /replacement/i.test(x.status || x.type || ''));
+      const tlName = r.tlName || 'Direct';
+      const tlCur = curTl.get(norm(tlName)) || {};
+      const tlPrev = prevTl.get(norm(tlName)) || {};
+      const curByClass = { ...(r.curByClass || {}) };
+      Object.entries(cur.byClass || {}).forEach(([cls, n]) => { curByClass[cls] = n; });
+      const lastByClass = { ...(r.lastByClass || {}) };
+      Object.entries(prev.byClass || {}).forEach(([cls, n]) => { lastByClass[cls] = n; });
+      return { ...r,
+        lastDays, lastVc4: prev.vc4 || 0, lastComm: prev.comm || 0, lastTotal: prev.total || 0, lastByClass,
+        curDays, replace: curReplace, chassis: curChassis, curVc4: cur.vc4 || 0, curComm: cur.comm || 0, curTotal: cur.total || 0, curByClass,
+        todayIssued: count(todayRows), expected: expected(cur.total || 0),
+        runrateVc4: lastDay ? (cur.vc4 || 0) / lastDay : 0, runrateComm: lastDay ? (cur.comm || 0) / lastDay : 0,
+        runrate: lastDay ? (cur.total || 0) / lastDay : 0, growth: U.growth(cur.total || 0, prev.total || 0),
+        tlLastVc4: tlPrev.vc4 || 0, tlLastComm: tlPrev.comm || 0, tlLastTotal: tlPrev.total || 0,
+        tlCurVc4: tlCur.vc4 || 0, tlCurComm: tlCur.comm || 0, tlCurTotal: tlCur.total || 0,
+        eirIssuance: true
+      };
+    });
+  }
+
   function filteredReport() {
     const q = norm(perf.q);
-    return (G.get('report') || []).filter((r) => {
+    return (perf.sourceRows || G.get('report') || []).filter((r) => {
       if (q && !(norm(r.agentName).includes(q) || norm(r.agentId).includes(q) || norm(r.tlName).includes(q))) return false;
       if (perf.priority && !new RegExp(perf.priority, 'i').test(r.priority)) return false;
       if (perf.status === 'active' && /inactive/i.test(r.agentStatus)) return false;
@@ -506,23 +564,27 @@ FF.pages = FF.pages || {};
   }
 
   function gvTodayClassBreakdown(agent) {
-    const today = U.dateKey(new Date());
-    const rows = G.rows().filter((r) => r.date && U.dateKey(r.date) === today
-      && ((agent.agentId && r.agentId === agent.agentId) || norm(r.agentName) === norm(agent.agentName)));
+    const latest = G.latestDate && G.latestDate();
+    const today = U.dateKey(latest || new Date());
+    const source = G.issuanceRows ? G.issuanceRows() : [];
+    const rows = source.filter((r) => r.date && U.dateKey(r.date) === today
+      && ((agent.agentId && r.agentId && norm(r.agentId) === norm(agent.agentId)) || norm(r.agentName) === norm(agent.agentName)));
     const byClass = new Map();
     for (const r of rows) {
       const cls = r.cls || 'Unknown class';
+      const n = Number(r.n) || 1;
       const item = byClass.get(cls) || { total: 0, issuance: 0, replacement: 0, detail: new Map() };
-      item.total++;
-      const replacement = /replacement/i.test(r.status || '');
-      item[replacement ? 'replacement' : 'issuance']++;
-      const detail = `${replacement ? 'REPLACEMENT' : 'ISSUANCE'} · ${r.tagType || 'tag type not set'}`;
-      item.detail.set(detail, (item.detail.get(detail) || 0) + 1);
+      item.total += n;
+      const replacement = /replacement/i.test(r.status || r.type || '');
+      item[replacement ? 'replacement' : 'issuance'] += n;
+      const detail = `${replacement ? 'REPLACEMENT' : 'ISSUANCE'} · ${r.tagType || r.vrnType || 'tag type not set'}`;
+      item.detail.set(detail, (item.detail.get(detail) || 0) + n);
       byClass.set(cls, item);
     }
-    if (!byClass.size) return `<div class="dsec"><h4>🏅 Today’s class-wise tags · ${esc(today)}</h4><p class="dim small">Aaj is GV agent ke liye koi issuance row nahi mili.</p></div>`;
+    const total = [...byClass.values()].reduce((n, v) => n + v.total, 0);
+    if (!byClass.size) return `<div class="dsec"><h4>🏅 EIR source-date class-wise tags · ${esc(today)}</h4><p class="dim small">EIR me is GV agent ke liye source date par koi issuance row nahi mili.</p></div>`;
     const rowsHtml = [...byClass.entries()].sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true })).map(([cls, v]) => `<tr><td><b>${esc(cls)}</b></td><td class="num"><b>${U.fmt(v.total)}</b></td><td class="num">${U.fmt(v.issuance)}</td><td class="num">${U.fmt(v.replacement)}</td><td>${[...v.detail.entries()].sort((a, b) => b[1] - a[1]).map(([label, n]) => `<span class="today-tag-detail">${esc(label)} · <b>${U.fmt(n)}</b></span>`).join(' ')}</td></tr>`).join('');
-    return `<div class="dsec"><h4>🏅 Today’s class-wise tags · ${esc(today)} <span class="count green">${U.fmt(rows.length)}</span></h4><div class="table-wrap"><table class="tbl compact"><thead><tr><th>Class</th><th class="num">Tags</th><th class="num">Issuance</th><th class="num">Replacement</th><th>Tag type</th></tr></thead><tbody>${rowsHtml}</tbody></table></div></div>`;
+    return `<div class="dsec"><h4>🏅 EIR source-date class-wise tags · ${esc(today)} <span class="count green">${U.fmt(total)}</span></h4><div class="table-wrap"><table class="tbl compact"><thead><tr><th>Class</th><th class="num">Tags</th><th class="num">Issuance</th><th class="num">Replacement</th><th>Tag type</th></tr></thead><tbody>${rowsHtml}</tbody></table></div></div>`;
   }
   async function agentDrawer(r) {
     await G.need('master').catch(() => []);
@@ -558,9 +620,10 @@ FF.pages = FF.pages || {};
     root.innerHTML = head('🏆', 'GV Performance', 'GV REPORT — GV partner agents & TLs (stock · last month · current month · runrate)', reportActions)
       + `<div id="gvp-body">${U.spinner('GV REPORT load ho raha hai…')}</div>`;
     const body = U.$('#gvp-body', root);
-    try { await G.need('report'); } catch (err) { body.innerHTML = U.errorBox(err, 'data-action="refresh"'); return; }
+    try { await Promise.all([G.need('report'), S.need('daily'), S.need('agents'), S.need('agentClass'), S.need('agentDailyClass')]); } catch (err) { body.innerHTML = U.errorBox(err, 'data-action="refresh"'); return; }
     if (!root.isConnected) return;
-    const all = G.get('report') || [];
+    const all = overlayGvReportWithEir(G.get('report') || []);
+    perf.sourceRows = all;
     // Re-render from local filter state. Reusing the original URL params here used to restore stale
     // q/tl values immediately after Clear or after choosing another suggestion.
     const rerender = () => renderPerformance(root, { view: perf.view });

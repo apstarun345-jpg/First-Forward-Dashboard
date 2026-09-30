@@ -122,7 +122,7 @@ FF.pages = FF.pages || {};
       ${card(`🟦 First Forward exact class split <span class="dim">· range me</span>`,
         R.ffCls.length ? `<div class="table-wrap"><table class="tbl"><thead><tr><th>Class</th><th>Group</th><th class="num">Issuance</th><th class="num">Replacement</th><th class="num">Total</th></tr></thead><tbody>${R.ffCls.map((c) => `<tr><td><b>${esc(c.cls)}</b></td><td>${esc(c.group)}</td><td class="num">${U.fmt(c.issuance)}</td><td class="num">${U.fmt(c.replacement)}</td><td class="num"><b>${U.fmt(c.total)}</b></td></tr>`).join('')}</tbody></table></div>` : '<div class="empty-state">FF data nahi mila.</div>',
         `<button class="btn small" id="rr-print">🖨 Print / PDF</button>`)}
-      <p class="dim small">FF = EIR (GV channel excluded) · GV = GV Master · sab counts selected dates ke exact hain. Commission sirf GV Master me available hai.</p>`;
+      <p class="dim small">FF + GV issuance = EIR (master ID 5845036 se GV classify; FF me GV rows excluded) · sab counts selected dates ke exact hain. Commission operational GV Master column se aata hai, issuance counts se nahi.</p>`;
     C.mount(body);
 
     function go() {
@@ -177,7 +177,7 @@ FF.pages = FF.pages || {};
       M.loadRangePeople(view.from, view.to)
     ]);
     const daily = dailyR.status === 'fulfilled' ? dailyR.value : [];
-    const master = masterR.status === 'fulfilled' ? G.rows() : [];
+    const master = masterR.status === 'fulfilled' ? G.rows() : []; // operational commission only
     const ffPeople = ffPeopleR.status === 'fulfilled' ? ffPeopleR.value : [];
     const issues = [];
     if (dailyR.status === 'rejected') issues.push(`First Forward totals load nahi hue: ${dailyR.reason && dailyR.reason.message || 'retry'}`);
@@ -187,7 +187,7 @@ FF.pages = FF.pages || {};
     const fromD = U.fromDateKey(from), toEnd = new Date(U.fromDateKey(to).getTime() + 86399e3);
     const days = Math.round((U.fromDateKey(to) - fromD) / 86400e3) + 1;
 
-    const allKeys = daily.map((r) => r.key).concat(master.filter((r) => r.date).map((r) => U.dateKey(r.date)));
+    const allKeys = daily.map((r) => r.key);
     const minKey = allKeys.length ? allKeys.reduce((a, b) => (a < b ? a : b)) : '';
     const maxKey = allKeys.length ? allKeys.reduce((a, b) => (a > b ? a : b)) : '';
 
@@ -209,18 +209,30 @@ FF.pages = FF.pages || {};
 
     const gv = { total: 0, vc4: 0, vc20: 0, vc5p: 0, comm: 0, replacement: 0, amount: 0, rows: 0, days: new Set() };
     const gvByDay = new Map(), agMap = new Map(), tlMap = new Map();
-    for (const r of master) {
-      if (!r.date || r.date < fromD || r.date > toEnd) continue;
-      const k = U.dateKey(r.date);
-      gv.rows++; gv.total++; addClass(gv, r.group, 1);
-      if (/replacement/i.test(r.status)) gv.replacement++;
-      gv.amount += r.commission || 0; gv.days.add(k); gvByDay.set(k, (gvByDay.get(k) || 0) + 1);
-      const ak = r.agentId || r.agentName;
-      const a = agMap.get(ak) || { agentName: r.agentName, tlName: isRealTl(r.tlName) ? r.tlName : directLabel({ tlName: r.tlName }, r.channel === 'GV Partner' ? 'gv' : 'ff'), total: 0, vc4: 0, vc20: 0, vc5p: 0, comm: 0, replacement: 0, days: new Set() };
-      a.total++; addClass(a, r.group, 1); if (/replacement/i.test(r.status)) a.replacement++; a.days.add(k); agMap.set(ak, a);
-      const tk = isRealTl(r.tlName) ? r.tlName : directLabel({ tlName: r.tlName }, r.channel === 'GV Partner' ? 'gv' : 'ff');
+    // Live GV exposes issuanceRows only after the EIR adapter is present. Older embedders that
+    // provide GV Master alone are kept compatible here; the production path never uses Master
+    // rows for issuance counts.
+    const gvRows = typeof G.issuanceRows === 'function'
+      ? daily.filter((r) => r.channel === 'GV Partner' && r.key >= from && r.key <= to)
+      : master.filter((r) => r.date && U.dateKey(r.date) >= from && U.dateKey(r.date) <= to).map((r) => ({ ...r, key: U.dateKey(r.date), n: 1, type: r.type || r.status || 'ISSUANCE' }));
+    for (const r of gvRows) {
+      const k = r.key;
+      const n = Number(r.n) || 1;
+      gv.rows += n; gv.total += n; addClass(gv, r.group, n);
+      if (/replacement/i.test(r.type || '')) gv.replacement += n;
+      gv.days.add(k); gvByDay.set(k, (gvByDay.get(k) || 0) + n);
+      const ak = r.agentId || r.agentName || 'Unknown';
+      const a = agMap.get(ak) || { agentName: r.agentName || r.agentId || 'Unknown', tlName: isRealTl(r.tlName) ? r.tlName : directLabel({ tlName: r.tlName }, 'gv'), total: 0, vc4: 0, vc20: 0, vc5p: 0, comm: 0, replacement: 0, days: new Set() };
+      a.total += n; addClass(a, r.group, n); if (/replacement/i.test(r.type || '')) a.replacement += n; a.days.add(k); agMap.set(ak, a);
+      const tk = isRealTl(r.tlName) ? r.tlName : directLabel({ tlName: r.tlName }, 'gv');
       const t = tlMap.get(tk) || { tlName: tk, total: 0, vc4: 0, vc20: 0, vc5p: 0, comm: 0, agents: new Set(), days: new Set() };
-      t.total++; addClass(t, r.group, 1); t.agents.add(ak); t.days.add(k); tlMap.set(tk, t);
+      t.total += n; addClass(t, r.group, n); t.agents.add(ak); t.days.add(k); tlMap.set(tk, t);
+    }
+    // GV Master is retained only for its operational commission column; it cannot change any
+    // issuance count above. This preserves the exact commission mapping without using REPORT/Master
+    // as the bank-accurate issuance ledger.
+    for (const r of master) {
+      if (r.date && r.date >= fromD && r.date <= toEnd) gv.amount += Number(r.commission || 0);
     }
     gv.activeDays = gv.days.size;
     const gvAgents = [...agMap.values()].map((a) => ({ ...a, activeDays: a.days.size })).sort((a, b) => b.total - a.total);
