@@ -28,7 +28,8 @@ window.FF = window.FF || {};
   const LS_NUDGE = 'ff-office-bell-nudge';
   const st = {
     mounted: false, timer: null, last: null, fails: 0, pings: 0, audio: null,
-    unlocked: false, unlockBound: false, pending: [], lastErr: '', nudge: null, menu: null
+    unlocked: false, unlockBound: false, pending: [], lastErr: '', nudge: null, menu: null,
+    lastSpokeAt: 0     // 🔊 aakhri baar SACH ME bola kab tha (notifications.js duplicate-suppression ise padhta hai)
   };
 
   // ---- prefs (localStorage) -----------------------------------------------------------------------
@@ -152,7 +153,7 @@ window.FF = window.FF || {};
     return new Promise((resolve) => {
       let settled = false;
       let retried = false;
-      const ok = () => { if (!settled) { settled = true; st.unlocked = true; st.lastErr = ''; hideNudge(); resolve(true); } };
+      const ok = () => { if (!settled) { settled = true; st.unlocked = true; st.lastErr = ''; st.lastSpokeAt = Date.now(); hideNudge(); resolve(true); } };
       const speakDirect = () => {
         try {
           const u = new SpeechSynthesisUtterance(String(text));
@@ -260,25 +261,32 @@ window.FF = window.FF || {};
   }
 
   // ---- live agent-wise queries ------------------------------------------------------------------
-  /** { ff, gv, agents: Map('FF|name' → count), ok: { ff, gv } }. Query rows are arrays from FF.data. */
+  /** { ff, gv, agents: Map('FF|name' → count), classes: {FF:{VC4:n},GV:{}}, ok: { ff, gv } }.
+   *  Query rows are arrays from FF.data. Class letter bhi select/group-by me hai — isse
+   *  notification ke drawer me "class-wise kitna update hua" (chassis / replace / wrong VRN
+   *  ke saath) bilkul wahi number dikhata hai jo announcement bolti hai. */
   async function countsToday() {
     const today = U.dateKey(new Date());
     const D = FF.data;
-    const out = { ff: 0, gv: 0, agents: new Map(), ok: { ff: false, gv: false } };
+    const out = { ff: 0, gv: 0, agents: new Map(), classes: { FF: {}, GV: {} }, ok: { ff: false, gv: false } };
     const cellText = (row, index) => U.clean(D.cellText ? D.cellText(row[index]) : (row[index] && row[index].v));
     const cellNumber = (row, index) => Number(D.cellNumber ? D.cellNumber(row[index]) : row[index] && row[index].v) || 0;
-    const add = (ch, name, n) => {
-      if (!name || n <= 0) return;
-      const key = `${ch}|${name}`;
-      out.agents.set(key, (out.agents.get(key) || 0) + n);
+    // model.normClass ke saath same normalisation — '4' → 'VC4' (EIR/REPORT me dono shapes aate hain).
+    const clsOf = (raw) => { const t = U.clean(raw).toUpperCase(); return !t ? 'NA' : (/^\d+$/.test(t) ? `VC${t}` : t); };
+    const add = (ch, name, n, cls) => {
+      if (n <= 0) return;
+      if (name) { const key = `${ch}|${name}`; out.agents.set(key, (out.agents.get(key) || 0) + n); }
       out[ch.toLowerCase()] += n;
+      const c = clsOf(cls);
+      const bucket = out.classes[ch] || (out.classes[ch] = {});
+      bucket[c] = (bucket[c] || 0) + n;
     };
     const e = FF.config.eir;
     const m = FF.config.gv && FF.config.gv.master;
     const jobs = [
-      D.query(e.sheet, `select ${e.agentName}, ${e.gvName}, ${e.masterId}, ${e.tlName}, count(${e.tagId}) where ${e.date} = date '${today}' group by ${e.agentName}, ${e.gvName}, ${e.masterId}, ${e.tlName}`, { timeoutMs: 20000, fresh: true }),
+      D.query(e.sheet, `select ${e.agentName}, ${e.gvName}, ${e.masterId}, ${e.tlName}, ${e.cls}, count(${e.tagId}) where ${e.date} = date '${today}' group by ${e.agentName}, ${e.gvName}, ${e.masterId}, ${e.tlName}, ${e.cls}`, { timeoutMs: 20000, fresh: true }),
       FF.config.gvSheetId && m
-        ? D.query('GV Master', `select ${m.agentName}, ${m.uniqueId}, count(${m.uniqueId}) where ${m.date} = date '${today}' group by ${m.agentName}, ${m.uniqueId}`, { timeoutMs: 20000, fresh: true })
+        ? D.query('GV Master', `select ${m.agentName}, ${m.uniqueId}, ${m.vClass}, count(${m.uniqueId}) where ${m.date} = date '${today}' group by ${m.agentName}, ${m.uniqueId}, ${m.vClass}`, { timeoutMs: 20000, fresh: true })
         : Promise.reject(new Error('GV Master is not configured'))
     ];
     const [eirResult, gvResult] = await Promise.allSettled(jobs);
@@ -286,25 +294,39 @@ window.FF = window.FF || {};
       const table = eirResult.value;
       for (const row of (table.rows || [])) {
         const name = cellText(row, 0) || cellText(row, 1) || cellText(row, 2);
-        const masterId = cellText(row, 2), tlName = cellText(row, 3), n = cellNumber(row, 4);
+        const masterId = cellText(row, 2), tlName = cellText(row, 3), cls = cellText(row, 4), n = cellNumber(row, 5);
         const isGv = FF.model && FF.model.channelOf
           ? FF.model.channelOf(masterId, tlName) === 'GV Partner'
           : String(masterId).replace(/\.0+$/, '') === String(e.gvMasterId || '5845036') || U.clean(tlName).toLowerCase() === U.clean(e.gvChannelTl || 'ApnaPayment Pvt. Ltd.').toLowerCase();
         // EIR contains both channels in some deployments. GV is announced from GV Master only;
         // otherwise each new GV tag would be announced twice and falsely counted as FF.
-        if (!isGv) add('FF', name, n);
+        if (!isGv) add('FF', name, n, cls);
       }
       out.ok.ff = true;
     }
     if (gvResult.status === 'fulfilled') {
       for (const row of (gvResult.value.rows || [])) {
         const name = cellText(row, 0) || cellText(row, 1);
-        add('GV', name, cellNumber(row, 2));
+        add('GV', name, cellNumber(row, 3), cellText(row, 2));
       }
       out.ok.gv = true;
     }
     return out;
   }
+  /** Do class-map ka positive diff — sirf wahi classes jinme is poll me naya tag aaya. */
+  function classDelta(prev, cur) {
+    const out = {};
+    Object.entries(cur || {}).forEach(([cls, n]) => {
+      const d = Number(n) - Number((prev || {})[cls] || 0);
+      if (d > 0) out[cls] = d;
+    });
+    return out;
+  }
+  const classMerge = (...maps) => {
+    const out = {};
+    maps.forEach((map) => Object.entries(map || {}).forEach(([cls, n]) => { out[cls] = (out[cls] || 0) + (Number(n) || 0); }));
+    return out;
+  };
 
   async function poll() {
     if (!on() || !featOn()) return;
@@ -355,13 +377,35 @@ window.FF = window.FF || {};
     if (!hidden) floatChip(parts.join(' · '), keptFf > 0 && keptGv > 0 ? 'both' : keptFf > 0 ? 'ff' : 'gv');
     // 🔔 "Data update ki notification" — bell feed + toast + phone panel (voice neeche alag se).
     //    Mute ho tab bhi notification aani chahiye — sirf awaaz band hoti hai.
+    //    📊 meta me snapshot / previous / delta + class-wise maps isliye jaate hain ki notification
+    //    par click karte hi drawer me "kya badla" poora dikhe — class-wise naye tags, aaj ka total
+    //    aur (async) EIR se type-wise detail: chassis · replacement · wrong VRN. Ye numbers wahi
+    //    hain jo announcement bolti hai (same live query).
+    const today = U.dateKey(new Date());
+    //    (jo channel prefs me OFF hai uske naye tags announcement me bhi nahi hain — class
+    //    delta bhi wahi dikhaye, warna number aur table aapas me match nahi karenge.)
+    const ffClasses = ffOn ? classDelta(previous.classes && previous.classes.FF, current.classes && current.classes.FF) : {};
+    const gvClasses = gvOn ? classDelta(previous.classes && previous.classes.GV, current.classes && current.classes.GV) : {};
+    const deltaClasses = classMerge(ffClasses, gvClasses);
+    const nowClasses = classMerge(current.classes && current.classes.FF, current.classes && current.classes.GV);
+    const prevClasses = classMerge(previous.classes && previous.classes.FF, previous.classes && previous.classes.GV);
     if (FF.notifications && FF.notifications.localAlert) {
       try {
         FF.notifications.localAlert({
           type: 'report',
           title: `📊 Sheet update — +${U.fmt(totalNew)} tags`,
           body: `${parts.join(' · ')}${keptMovers.length ? ` · ${keptMovers.slice(0, 3).map((m) => `${m.agent} (${m.n})`).join(', ')}` : ''}`,
-          meta: { link: '#/tagIssued' }
+          meta: {
+            link: '#/tagIssued',
+            date: today,
+            source: keptFf > 0 && keptGv > 0 ? '' : keptFf > 0 ? 'ff' : 'gv',
+            ff: keptFf, gv: keptGv,
+            channels: { ff: keptFf, gv: keptGv },
+            ffClasses, gvClasses,
+            delta: { total: totalNew, classes: deltaClasses },
+            snapshot: { date: today, total: (current.ok.ff ? current.ff : 0) + (current.ok.gv ? current.gv : 0), classes: nowClasses },
+            previous: { date: today, total: (previous.ok.ff ? previous.ff : 0) + (previous.ok.gv ? previous.gv : 0), classes: prevClasses }
+          }
         });
       } catch { /* notification optional */ }
     }
@@ -507,8 +551,10 @@ window.FF = window.FF || {};
   }
 
   FF.officeBell = {
-    mount, announceText, countsToday, unlock, speakAnnounce, queueAnnounce, flushPending, prefs, setPrefs, logList, logAdd, openMenu, closeMenu,
+    mount, announceText, countsToday, unlock, speakAnnounce, queueAnnounce, flushPending, prefs, setPrefs, logList, logAdd, openMenu, closeMenu, poll,
+    /** 🔊 Voice ON hai? (function form — notifications.js isi ko call karta hai; `voiceOn` getter bhi hai) */
+    isVoiceOn: () => voiceOn(),
     get on() { return on(); }, get voiceOn() { return voiceOn(); }, get pings() { return st.pings; },
-    get unlocked() { return st.unlocked; }, get lastError() { return st.lastErr; }, get pending() { return st.pending.length; }
+    get unlocked() { return st.unlocked; }, get lastError() { return st.lastErr; }, get lastSpokeAt() { return st.lastSpokeAt; }, get pending() { return st.pending.length; }
   };
 })(window.FF);

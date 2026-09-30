@@ -21,13 +21,14 @@ window.FF = window.FF || {};
     try {
       const tag = document.querySelector('script[src*="config.js?v="]') || document.querySelector('script[src*="app.js?v="]');
       const m = tag && /[?&]v=([\w.]+)/.exec(tag.getAttribute('src') || '');
-      return m ? m[1] : '46';
-    } catch { return '45'; }
+      return m ? m[1] : '47';
+    } catch { return '47'; }
   })();
 
   // Page id → uske liye zaroori modules (order matter karta hai: dependency pehle).
   const GROUPS = {
     executive: ['insights', 'cockpit'],
+    tagRequest: ['tagRequest'],
     tagIssued: ['tagIssued'],
     targets: ['targets'],
     rangeReport: ['rangeReport'],
@@ -71,7 +72,7 @@ window.FF = window.FF || {};
 
   // Background warm order (login ke baad idle me) — jo pages sabse zyada khulte hain wo pehle.
   // Bhaari module (insights 330 KB+) sabse aakhir me, taaki pehle paint par asar na pade.
-  const WARM = ['tagIssued', 'stock', 'dashboard', 'trend', 'gvpages', 'wowzone', 'targets', 'settings', 'cockpit', 'insights'];
+  const WARM = ['tagIssued', 'stock', 'dashboard', 'trend', 'gvpages', 'wowzone', 'targets', 'settings', 'tagRequest', 'cockpit', 'insights'];
 
   const loaded = new Map();   // name → promise
   const failed = new Set();

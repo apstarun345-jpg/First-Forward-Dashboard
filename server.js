@@ -65,6 +65,7 @@ export const PAGE_PERMISSIONS = [
   { key: 'reportStudio', label: 'Workspace · Report Studio (scheduled emails, share)', group: 'Professional Insights' },
   { key: 'followups', label: 'Workspace · Agent/TL notes & follow-ups', group: 'Professional Insights' },
   { key: 'tagIssued', label: 'GV & FF Tag Issued (date-wise)', group: 'Pages' },
+  { key: 'tagRequest', label: 'Management · Tag Request (IDFC agents · class-wise stock/tag request form)', group: 'Management' },
   { key: 'targets', label: 'Targets · agent-wise monthly targets', group: 'Pages' },
   { key: 'dashboard', label: 'First Forward · Dashboard', group: 'First Forward' },
   { key: 'trend', label: 'First Forward · Trend', group: 'First Forward' },
@@ -133,7 +134,8 @@ const DEFAULT_USER_PERMS = ['home', 'executive', 'forecast', 'dataQuality', 'sav
 const DEFAULT_NOTIFICATION_ROUTES = Object.freeze({
   dailyDigest: 'admin', monthlyReport: 'both', lowStock: 'admin', midMonth: 'admin',
   zeroDay: 'admin', agentAnomaly: 'admin', tlAnomaly: 'admin', followup: 'both',
-  champion: 'both', reportUpdate: 'both', inactiveUsers: 'admin', backupReminder: 'admin'
+  champion: 'both', reportUpdate: 'both', inactiveUsers: 'admin', backupReminder: 'admin',
+  tagRequest: 'admin'   // 🏷️ IDFC Agents Tag Request → admin ke paas
 });
 const NOTIFICATION_AUDIENCES = new Set(['admin', 'users', 'both', 'off']);
 
@@ -375,7 +377,7 @@ function verifyPassword(password, stored) {
 const normUser = (u) => String(u || '').trim().toLowerCase().replace(/[^a-z0-9._@-]/g, '').slice(0, 60);
 // `enabled` = master switch (UI me ek hi "Notifications ON/OFF" button hai). OFF → koi in-app toast
 // nahi, koi browser alert nahi, koi mobile push nahi. Feed items phir bhi save hote hain (history).
-const DEFAULT_NOTIFY_PREFS = { enabled: true, login: true, signup: true, report: true, monthly: true, digest: true, alert: true, activity: true, click: true, search: true, settings: true, user: true, location: true, info: true, sound: true, push: true };
+const DEFAULT_NOTIFY_PREFS = { enabled: true, login: true, signup: true, report: true, monthly: true, digest: true, alert: true, activity: true, click: true, search: true, settings: true, user: true, location: true, info: true, request: true, sound: true, push: true };
 function normalizeNotifyPrefs(p) {
   const out = { ...DEFAULT_NOTIFY_PREFS };
   if (p && typeof p === 'object') for (const k of Object.keys(DEFAULT_NOTIFY_PREFS)) if (p[k] !== undefined) out[k] = !!p[k];
@@ -521,7 +523,7 @@ function permissionDiff(before, after) {
 }
 const activityLast = new Map();
 // Client routes (app.js PAGES) — notification tap par seedha usi page par le jao.
-const CLIENT_PAGES = new Set(['home', 'tagIssued', 'targets', 'rangeReport', 'dashboard', 'trend', 'performance', 'stock', 'stockReport', 'gvDashboard', 'gvTrend', 'gvPerformance', 'gvStock', 'gvStockReport', 'compare', 'charts', 'dispatchPlan', 'tlScorecard']);
+const CLIENT_PAGES = new Set(['home', 'tagIssued', 'tagRequest', 'targets', 'rangeReport', 'dashboard', 'trend', 'performance', 'stock', 'stockReport', 'gvDashboard', 'gvTrend', 'gvPerformance', 'gvStock', 'gvStockReport', 'compare', 'charts', 'dispatchPlan', 'tlScorecard']);
 /** Search/click ki "option" se client route banao (deep link — mobile push tap → seedha page). */
 function pageLinkFor(option, query) {
   const t = String(option || '').trim();
@@ -1194,6 +1196,8 @@ function workspaceStore() {
   const w = db.notify.workspace;
   if (!Array.isArray(w.views)) w.views = [];
   if (!Array.isArray(w.notes)) w.notes = [];
+  // 🏷️ IDFC Agents Tag Request (v3.24) — notify kind ke andar hi durable (naya storage kind nahi).
+  if (!Array.isArray(w.tagRequests)) w.tagRequests = [];
   return w;
 }
 const workspaceId = (prefix) => `${prefix}_${Date.now().toString(36)}_${crypto.randomBytes(5).toString('hex')}`;
@@ -2513,7 +2517,7 @@ function perfReport() {
   const hottest = [...HOT.entries()].sort((a, b) => b[1].hits - a[1].hits).slice(0, 10)
     .map(([url, h]) => ({ url: url.length > 160 ? `${url.slice(0, 160)}…` : url, hits: h.hits }));
   return {
-    version: '3.23.0', cacheEntries: cache.size, cacheEntriesMax: MAX_CACHE_ENTRIES,
+    version: '3.24.0', cacheEntries: cache.size, cacheEntriesMax: MAX_CACHE_ENTRIES,
     cacheSeconds: cacheMs() / 1000, warmedQueries: warmed, hotQueries: hottest,
     slowest: queries.filter((q) => q.upstream > 0).slice(0, 25),
     queries
@@ -2619,7 +2623,7 @@ async function handleApi(req, res, url) {
 
   if (p === '/api/health' && method === 'GET') {
     // pendingSignups sirf admin ko (sidebar badge ke liye) — public health me leak nahi.
-    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.23.0', storage: storageStatus(), push: pushHealth(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length } : {}) });
+    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.24.0', storage: storageStatus(), push: pushHealth(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length } : {}) });
   }
   // 📊 Admin-only: exact reason of slowness (Google query timings, cache hit rate, warm queries).
   if (p === '/api/perf' && method === 'GET') {
@@ -3257,6 +3261,120 @@ async function handleApi(req, res, url) {
     if (w.notes[i].createdBy !== user.username && user.role !== 'admin') throw new HttpError(403, 'Sirf creator is note ko delete kar sakta hai.');
     w.notes.splice(i, 1);
     await persist('notify');
+    return sendJson(res, 200, { ok: true });
+  }
+
+  // ---- 🏷️ IDFC Agents Tag Request (v3.24) ------------------------------------------------------
+  // User form bharta hai → system check (client-side, sheet se stock/issuance/suggestion) → ye
+  // endpoints request ko durable store me rakhte hain taaki admin "Tag Request" section me
+  // dekh/edit kar sake. Storage: db.notify.workspace.tagRequests (notify kind ke saath hi durable
+  // hai — koi naya storage kind / Apps Script redeploy nahi chahiye).
+  // rows ≤150 / requests ≤120 — notify blob (jo har notification par save hota hai) halka rahe.
+  const tagRequestRows = (rows) => (Array.isArray(rows) ? rows : []).slice(0, 150).map((r) => ({
+    agentId: shortText(r.agentId, 40), agentName: shortText(r.agentName, 120), tl: shortText(r.tl, 120),
+    channel: r.channel === 'gv' ? 'gv' : 'ff', cls: shortText(r.cls, 12).toUpperCase(),
+    last: Number(r.last) || 0, cur: Number(r.cur) || 0, stock: Number(r.stock) || 0,
+    cover: r.cover === null || r.cover === undefined || r.cover === '' ? null : Number(r.cover) || 0,
+    priority: shortText(r.priority, 20), growth: Number(r.growth) || 0,
+    sugNet: Number(r.sugNet) || 0, sugGross: Number(r.sugGross) || 0,
+    approved: Math.max(0, Math.round(Number(r.approved) || 0)), remark: shortText(r.remark, 160)
+  }));
+  const tagRequestTls = (tls) => (Array.isArray(tls) ? tls : []).slice(0, 100).map((t) => ({
+    name: shortText(t.name, 120), channel: t.channel === 'gv' ? 'gv' : 'ff',
+    stockVc4: Number(t.stockVc4) || 0, curVc4: Number(t.curVc4) || 0, lastVc4: Number(t.lastVc4) || 0,
+    priority: shortText(t.priority, 20), reqApproved: Number(t.reqApproved) || 0, agents: Number(t.agents) || 0,
+    sugNet: Number(t.sugNet) || 0, sugGross: Number(t.sugGross) || 0, cover: t.cover === undefined || t.cover === null ? null : Number(t.cover) || 0
+  }));
+  const visibleTagRequests = (user) => {
+    const all = workspaceStore().tagRequests || [];
+    const list = user.role === 'admin' ? all : all.filter((r) => r.by === user.username);
+    return list.slice(-200).reverse();
+  };
+  if (p === '/api/tag-requests' && method === 'GET') {
+    if (user.role !== 'admin' && !(user.permissions || []).includes('tagRequest')) throw new HttpError(403, 'Tag Request access disabled.');
+    return sendJson(res, 200, { ok: true, requests: visibleTagRequests(user), admin: user.role === 'admin' });
+  }
+  if (p === '/api/tag-requests' && method === 'POST') {
+    if (user.role !== 'admin' && !(user.permissions || []).includes('tagRequest')) throw new HttpError(403, 'Tag Request access disabled.');
+    const body = await readBody(req);
+    const rows = tagRequestRows(body.rows);
+    if (!rows.length) throw new HttpError(400, 'Kam se kam ek row chahiye (agent + tag class).');
+    const total = rows.reduce((s, r) => s + r.approved, 0);
+    if (!total) throw new HttpError(400, 'Approved qty 0 hai — kuch quantity daalo.');
+    const w = workspaceStore();
+    const now = new Date().toISOString();
+    const row = {
+      id: workspaceId('tagreq'), at: now, by: user.username, byName: user.name || user.username,
+      status: 'pending', note: shortText(body.note, 300), adminNote: '',
+      rows, tls: tagRequestTls(body.tls), total, updatedAt: now, updatedBy: user.username
+    };
+    w.tagRequests.push(row);
+    if (w.tagRequests.length > 120) w.tagRequests.splice(0, w.tagRequests.length - 120);
+    await persist('notify');
+    // Admin ko notification (routed: Settings → notification routes se off ho sakta hai) + requester ko confirmation.
+    try {
+      recordNotification({
+        type: 'request', title: `🏷️ Tag request · ${row.byName}`,
+        body: `${rows.length} rows · ${new Set(rows.map((r) => r.agentName)).size} agents · ${total} tags${row.note ? ` · ${row.note}` : ''}`,
+        target: 'admin', routeKey: 'tagRequest',
+        meta: { requestId: row.id, rows: rows.length, total, classes: rows.reduce((a, r) => { a[r.cls] = (a[r.cls] || 0) + r.approved; return a; }, {}), username: user.username, link: '#/tagRequest?view=requests' }
+      });
+      recordNotification({
+        type: 'request', title: '✅ Tag request bhej di gayi',
+        body: `${rows.length} rows · ${total} tags — admin ke paas pahunch gayi. Status Tag Request page par dikhega.`,
+        target: `user:${user.username}`, meta: { requestId: row.id, link: '#/tagRequest?view=requests' }
+      });
+    } catch { /* notification optional */ }
+    logAudit(user, 'tag_request_created', { target: row.id, note: `${rows.length} rows · ${total} tags`, ip: clientIp(req) });
+    return sendJson(res, 201, { ok: true, request: row });
+  }
+  const tagReqPath = p.match(/^\/api\/tag-requests\/([^/]+)$/);
+  if (tagReqPath && method === 'PUT') {
+    if (user.role !== 'admin' && !(user.permissions || []).includes('tagRequest')) throw new HttpError(403, 'Tag Request access disabled.');
+    const w = workspaceStore();
+    const row = (w.tagRequests || []).find((r) => r.id === tagReqPath[1]);
+    if (!row) throw new HttpError(404, 'Tag request nahi mili.');
+    const owner = row.by === user.username;
+    if (user.role !== 'admin' && !(owner && row.status === 'pending')) throw new HttpError(403, 'Sirf admin (ya pending request ka owner) ise update kar sakta hai.');
+    const body = await readBody(req);
+    if (body.rows !== undefined) {
+      const next = tagRequestRows(body.rows);
+      if (next.length) {
+        // Admin qty/remark edit karta hai — requester ka original data preserve rehta hai.
+        row.rows = row.rows.map((r, i) => ({ ...r, approved: next[i] ? next[i].approved : r.approved, remark: next[i] ? next[i].remark : r.remark }));
+        row.total = row.rows.reduce((s, r) => s + (Number(r.approved) || 0), 0);
+      }
+    }
+    if (body.status !== undefined) {
+      if (!['pending', 'approved', 'dispatched', 'rejected'].includes(body.status)) throw new HttpError(400, 'Status invalid hai.');
+      row.status = body.status;
+    }
+    if (body.adminNote !== undefined) row.adminNote = shortText(body.adminNote, 300);
+    if (body.note !== undefined && row.status === 'pending') row.note = shortText(body.note, 300);
+    row.updatedAt = new Date().toISOString(); row.updatedBy = user.username;
+    await persist('notify');
+    // Requester ko status update ka notification (admin ne kuch badla to).
+    if (user.role === 'admin' && row.by !== user.username) {
+      try {
+        recordNotification({
+          type: 'request', title: `🏷️ Tag request ${body.status ? '· ' + body.status : 'update'}`,
+          body: `Aapki request (${row.rows.length} rows · ${row.total} tags) update hui${body.adminNote ? ` — ${row.adminNote}` : ''}.`,
+          target: `user:${row.by}`, meta: { requestId: row.id, link: '#/tagRequest?view=requests' }
+        });
+      } catch { /* optional */ }
+    }
+    logAudit(user, 'tag_request_updated', { target: row.id, note: `${row.status} · ${row.total} tags`, ip: clientIp(req) });
+    return sendJson(res, 200, { ok: true, request: row });
+  }
+  if (tagReqPath && method === 'DELETE') {
+    if (user.role !== 'admin' && !(user.permissions || []).includes('tagRequest')) throw new HttpError(403, 'Tag Request access disabled.');
+    const w = workspaceStore();
+    const i = (w.tagRequests || []).findIndex((r) => r.id === tagReqPath[1]);
+    if (i < 0) throw new HttpError(404, 'Tag request nahi mili.');
+    if (user.role !== 'admin' && w.tagRequests[i].by !== user.username) throw new HttpError(403, 'Sirf apni request delete kar sakte ho.');
+    w.tagRequests.splice(i, 1);
+    await persist('notify');
+    logAudit(user, 'tag_request_deleted', { target: tagReqPath[1], ip: clientIp(req) });
     return sendJson(res, 200, { ok: true });
   }
 
