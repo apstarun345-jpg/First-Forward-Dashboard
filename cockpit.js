@@ -389,7 +389,7 @@
     const sec = (title, inner, sub) => `<div class="dsec"><h4>${esc(title)}${sub ? ` <small class="dim">${esc(sub)}</small>` : ''}</h4>${inner}</div>`;
     const table = (headers, rows) => `<div class="table-wrap"><table class="data-table ins-table"><thead><tr>${headers.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${headers.length}">No rows</td></tr>`}</tbody></table></div>`;
 
-    const body = `
+    const overviewPane = `
       <div class="dkpis">
         ${kv('FF tags · MTD', U.fmt(ffAgent ? ffAgent.curTotal : 0), ffAgent ? `VC4 ${U.fmt(ffAgent.curVc4)} · Comm ${U.fmt(ffAgent.curNvc4)}` : 'REPORT me nahi mila')}
         ${kv('FF stock', U.fmt(ffStockTotal || (ffAgent ? ffAgent.stockTotal : 0)), `${ffStock.length} class rows`)}
@@ -398,18 +398,28 @@
         ${kv('Commission', comm && valid(comm.earned) ? money(comm.earned, 2) : comm && valid(comm.computed) ? money(comm.computed, 2) : gvRow ? money(gvRow.commission, 2) : '—', comm && valid(comm.rateValue) ? `rate ${comm.rateRaw || comm.rateValue}` : gvRow ? `GV ₹/tag ${gvRow.perTag.toFixed(2)}` : 'rate missing')}
         ${kv('Stock risk', risk ? `${esc(risk.risk)}` : '—', risk ? `cover ${Number.isFinite(risk.stockDays) ? risk.stockDays.toFixed(1) : '—'} din · need7 ${U.fmt(risk.need7)}` : 'forecast me nahi mila')}
       </div>
-      ${blocks.length ? `<div class="mapping-state warn"><div class="mapping-icon">⛔</div><div><h3>${U.fmt(blocks.length)} blocker(s)</h3>${blocks.map((b) => `<p>${esc(b)}</p>`).join('')}<small>Ye points pehle theek karo — inke bina payout / dispatch safe nahi.</small></div></div>` : `<div class="mapping-state"><div class="mapping-icon">✅</div><div><b>Koi blocker nahi mila</b><span>Rate, stock aur cross-channel sab theek dikh raha hai.</span></div></div>`}
-      ${sec('📈 Issuance trend · FF (EIR) + GV', table(['Month', 'FF tags', 'GV tags', 'Total'], monthly.map((m) => [esc(m.ym), U.fmt(m.ff), U.fmt(m.gv), `<b>${U.fmt(m.ff + m.gv)}</b>`])), 'EIR months × channel')}
-      ${gvMonths.length ? sec('🟩 GV monthly · tags / amount / commission', table(['Month', 'Tags', 'Amount', 'Commission', '₹ / tag'], gvMonths.map((m) => [esc(m.ym), U.fmt(m.tags), money(m.amount, 0), money(m.commission, 2), m.tags ? (m.commission / m.tags).toFixed(2) : '—']))) : ''}
-      ${sec('🚗 Class split (stock)', table(['Source', 'Class', 'Tags'], [
+      <div class="a360-targets"><b>🎯 Target & stock outlook</b><span>${risk && Number.isFinite(risk.need7) ? `Need ${U.fmt(risk.need7)} tags for 7 days` : 'Target data unavailable'}</span><span>${risk && Number.isFinite(risk.stockDays) ? `Cover ${risk.stockDays.toFixed(1)} days` : 'Cover —'}</span><span>${ffAgent && ffAgent.tlName ? `TL ${esc(ffAgent.tlName)}` : 'Direct / channel-only'}</span></div>
+      ${blocks.length ? `<div class="mapping-state warn a360-alerts"><div class="mapping-icon">⛔</div><div><h3>${U.fmt(blocks.length)} alert${blocks.length === 1 ? '' : 's'}</h3>${blocks.map((b) => `<p>${esc(b)}</p>`).join('')}<small>Review before payout or dispatch.</small></div></div>` : `<div class="mapping-state a360-alerts"><div class="mapping-icon">✅</div><div><b>No active blocker</b><span>Rate, stock and cross-channel checks are clear.</span></div></div>`}
+      <div class="a360-overview-note"><span>Overview combines FF + GV where the source has a verified agent ID or exact name match.</span><span class="dim">Last calculated ${esc(new Date().toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }))}</span></div>`;
+    const issuancePane = `${sec('📈 Issuance trend · FF (EIR) + GV', table(['Month', 'FF tags', 'GV tags', 'Total'], monthly.map((m) => [esc(m.ym), U.fmt(m.ff), U.fmt(m.gv), `<b>${U.fmt(m.ff + m.gv)}</b>`])), 'EIR months × channel')}
+      ${gvMonths.length ? sec('🟩 GV monthly · tags / amount / commission', table(['Month', 'Tags', 'Amount', 'Commission', '₹ / tag'], gvMonths.map((m) => [esc(m.ym), U.fmt(m.tags), money(m.amount, 0), money(m.commission, 2), m.tags ? (m.commission / m.tags).toFixed(2) : '—']))) : '<p class="dim small">GV monthly history unavailable.</p>'}`;
+    const stockPane = `${sec('🚗 Class split (stock)', table(['Source', 'Class', 'Tags'], [
         ...classesOf(ffStock, 'group').map(([cls, n]) => [statusPillSafe('FF stock'), esc(cls), U.fmt(n)]),
         ...classesOf(gvStockClass, 'group').map(([cls, n]) => [statusPillSafe('GV stock'), esc(cls), U.fmt(n)])
       ]))}
-      ${gvRow && gvRow.classes.length ? sec('🟩 GV class mix · current month', table(['Class', 'Tags', 'Commission', '₹ / tag', 'Class median', 'Gap'], gvRow.classes.map((c) => { const med = gv.classMedians.get(c.cls) || 0; const gap = med ? ((c.perTag - med) / med) * 100 : null; return [esc(c.cls), U.fmt(c.tags), money(c.commission, 2), c.perTag.toFixed(2), med ? med.toFixed(2) : '—', gap === null ? '—' : `<span class="badge ${gap < -20 ? 'red' : gap < 0 ? 'amber' : 'green'}">${gap.toFixed(0)}%</span>`]; }))) : ''}
-      ${sec('🧪 Data quality', quality.issues.length ? `<div class="finding-mini">${quality.issues.map((f) => `<div>${sevPill(f.severity)} <b>${esc(f.title)}</b> <span class="dim small">${esc(f.category)} · ${esc(f.source)}</span> <small>${U.fmt(f.count)} record(s)</small></div>`).join('')}</div>` : `<p class="dim small">Is agent ke naam par koi DQ finding nahi mili (${quality.summary ? `${U.fmt(quality.summary.checksRun)} checks run hue` : 'checks available nahi'}).</p>`)}
+      ${gvRow && gvRow.classes.length ? sec('🟩 GV class mix · current month', table(['Class', 'Tags', 'Commission', '₹ / tag', 'Class median', 'Gap'], gvRow.classes.map((c) => { const med = gv.classMedians.get(c.cls) || 0; const gap = med ? ((c.perTag - med) / med) * 100 : null; return [esc(c.cls), U.fmt(c.tags), money(c.commission, 2), c.perTag.toFixed(2), med ? med.toFixed(2) : '—', gap === null ? '—' : `<span class="badge ${gap < -20 ? 'red' : gap < 0 ? 'amber' : 'green'}">${gap.toFixed(0)}%</span>`]; }))) : ''}`;
+    const historyPane = `${sec('🧪 Data quality', quality.issues.length ? `<div class="finding-mini">${quality.issues.map((f) => `<div>${sevPill(f.severity)} <b>${esc(f.title)}</b> <span class="dim small">${esc(f.category)} · ${esc(f.source)}</span> <small>${U.fmt(f.count)} record(s)</small></div>`).join('')}</div>` : `<p class="dim small">Is agent ke naam par koi DQ finding nahi mili (${quality.summary ? `${U.fmt(quality.summary.checksRun)} checks run hue` : 'checks available nahi'}).</p>`)}
       ${crossRow ? sec('🔗 Cross-channel match', table(['FF agent', 'FF TL', 'GV agent', 'GV TL', 'Shared barcodes', 'Evidence', 'Flags'], [[esc(crossRow.ff.name || crossRow.ff.id), esc(crossRow.ff.tlName || '—'), esc(crossRow.gv.name || crossRow.gv.id), esc(crossRow.gv.tlName || '—'), U.fmt(crossRow.barcodeCount), esc(crossRow.methods.join(' + ')), crossRow.ffDup || crossRow.gvDup || crossRow.crossOwner ? statusPillSafe('Double-mapped') : statusPillSafe('Clean')]])) : sec('🔗 Cross-channel match', `<p class="dim small">Is agent ka doosre channel me verified match nahi mila (naam se guess nahi kiya jaata).</p>`)}
-      ${sec('📝 Notes & follow-ups', notes.length ? `<div class="note-history">${notes.slice(0, 12).map((n) => `<div><i></i><p><b>${esc(n.status)} · ${esc(n.priority || 'normal')}</b><span>${esc(n.createdByUser ? (n.createdByUser.name || n.createdByUser.username) : n.createdBy || '')} · ${esc(n.dueAt ? String(n.dueAt).slice(0, 10) : '')}</span><small>${esc(n.text).slice(0, 240)}</small></p></div>`).join('')}</div>` : `<p class="dim small">Koi note nahi. <a href="#/followups">Notes & Follow-ups</a> me is agent ke liye note add karo.</p>`)}
-    `;
+`;
+    const notesPane = sec('📝 Notes & follow-ups', notes.length ? `<div class="note-history">${notes.slice(0, 12).map((n) => `<div><i></i><p><b>${esc(n.status)} · ${esc(n.priority || 'normal')}</b><span>${esc(n.createdByUser ? (n.createdByUser.name || n.createdByUser.username) : n.createdBy || '')} · ${esc(n.dueAt ? String(n.dueAt).slice(0, 10) : '')}</span><small>${esc(n.text).slice(0, 240)}</small></p></div>`).join('')}</div>` : `<p class="dim small">Koi note nahi. <a href="#/followups">Notes & Follow-ups</a> me is agent ke liye note add karo.</p>`);
+    const gvCandidates = gv && gv.byId ? [...gv.byId.values()].filter((a) => a && (a.agentName || a.name)).map((a) => ({ name: a.agentName || a.name, agentId: a.agentId || a.id, tlName: a.tlName })) : [];
+    const candidateAgents = [...new Map([...ffAgents, ...gvCandidates].filter((a) => a && a.name).map((a) => [normId(a.agentId || a.id) || `name:${normName(a.name)}`, a])).values()].sort((a, b) => normName(a.name).localeCompare(normName(b.name)));
+    const currentIndex = candidateAgents.findIndex((a) => (id && normId(a.agentId || a.id) === normId(id)) || normName(a.name) === normName(displayName));
+    const previousAgent = currentIndex > 0 ? candidateAgents[currentIndex - 1] : null;
+    const nextAgent = currentIndex >= 0 && currentIndex < candidateAgents.length - 1 ? candidateAgents[currentIndex + 1] : null;
+    const nav = `<div class="a360-nav"><button class="btn small" data-a360-nav="prev" ${previousAgent ? '' : 'disabled'}>← Previous</button><span>${currentIndex >= 0 ? `${currentIndex + 1} / ${candidateAgents.length}` : 'Profile'}</span><button class="btn small" data-a360-nav="next" ${nextAgent ? '' : 'disabled'}>Next →</button></div>`;
+    const tab = (key, label, content, active) => `<section class="a360-pane ${active ? 'active' : ''}" data-a360-pane="${key}">${content}</section>`;
+    const body = `<div class="a360"><div class="a360-profile-head"><div class="a360-avatar">${esc(displayName.slice(0, 1).toUpperCase())}</div><div class="a360-identity"><span class="a360-kicker">AGENT 360 · ${crossRow ? 'DUAL-CHANNEL' : 'SOURCE PROFILE'}</span><h2>${esc(displayName)}</h2><p>${esc([ffAgent && ffAgent.tlName ? `TL ${ffAgent.tlName}` : 'Direct / unassigned', ffAgent && (ffAgent.agentId || ffAgent.id) ? `ID ${ffAgent.agentId || ffAgent.id}` : id, ffAgent && ffAgent.agentStatus ? ffAgent.agentStatus : ''].filter(Boolean).join(' · '))}</p></div><div class="a360-head-side">${risk ? `<span class="a360-risk ${String(risk.risk || '').toLowerCase()}">${esc(risk.risk || 'Risk')} · ${Number.isFinite(risk.stockDays) ? `${risk.stockDays.toFixed(1)}d cover` : '—'}</span>` : '<span class="a360-risk neutral">No forecast</span>'}${nav}</div></div><div class="a360-tabs" role="tablist"><button class="a360-tab active" data-a360-tab="overview" role="tab">Overview</button><button class="a360-tab" data-a360-tab="issuance" role="tab">Issuance</button><button class="a360-tab" data-a360-tab="stock" role="tab">Stock</button><button class="a360-tab" data-a360-tab="history" role="tab">History & alerts</button><button class="a360-tab" data-a360-tab="notes" role="tab">Notes</button></div>${tab('overview', 'Overview', overviewPane, true)}${tab('issuance', 'Issuance', issuancePane, false)}${tab('stock', 'Stock', stockPane, false)}${tab('history', 'History & alerts', historyPane, false)}${tab('notes', 'Notes', notesPane, false)}</div>`;
     const csvRows = [
       ['Identity', 'Agent', displayName], ['Identity', 'Agent ID', (ffAgent && (ffAgent.agentId || ffAgent.id)) || id || ''],
       ['Identity', 'TL', (ffAgent && ffAgent.tlName) || (gvRow && gvRow.tlName) || '—'],
@@ -426,9 +436,26 @@
     FF.app.openDrawer({
       kicker: 'Agent 360', title: displayName, sub: [ffAgent ? 'First Forward' : '', gvRow ? 'GV Partner' : '', crossRow ? 'Dual-channel' : ''].filter(Boolean).join(' · ') || 'Channel: unknown',
       wide: true,
-      actions: `<button class="btn small" id="a360-csv">⬇ Agent CSV</button><button class="btn small" id="a360-wa">📲 WhatsApp</button><button class="btn small" id="a360-link">🔗 Copy link</button><a class="btn small" href="#/followups">📝 Add note</a>`,
+      actions: `<button class="btn small" id="a360-csv">⬇ Agent CSV</button><button class="btn small" id="a360-wa">📲 WhatsApp</button><button class="btn small" id="a360-link">🔗 Copy link</button><button class="btn small" id="a360-print">🖨 Print</button><a class="btn small" href="#/followups">📝 Add note</a>`,
       body
     });
+    const drawerBody = U.$('#drawer-body', document);
+    if (drawerBody) drawerBody.addEventListener('click', (e) => {
+      const tabBtn = e.target.closest('[data-a360-tab]');
+      if (tabBtn) {
+        const key = tabBtn.dataset.a360Tab;
+        drawerBody.querySelectorAll('[data-a360-tab]').forEach((b) => { const on = b === tabBtn; b.classList.toggle('active', on); b.setAttribute('aria-selected', String(on)); });
+        drawerBody.querySelectorAll('[data-a360-pane]').forEach((pane) => pane.classList.toggle('active', pane.dataset.a360Pane === key));
+        return;
+      }
+      const navBtn = e.target.closest('[data-a360-nav]');
+      if (navBtn && !navBtn.disabled) {
+        const target = navBtn.dataset.a360Nav === 'prev' ? previousAgent : nextAgent;
+        if (target) { FF.app.closeDrawer(); agent360({ name: target.name, id: target.agentId || target.id || '' }).catch((err) => U.toast(err.message || 'Profile load nahi hua', 'err')); }
+      }
+    });
+    const printBtn = U.$('#a360-print', document);
+    if (printBtn) printBtn.addEventListener('click', () => { document.body.classList.add('print-a360'); window.print(); setTimeout(() => document.body.classList.remove('print-a360'), 500); });
     const csvBtn = U.$('#a360-csv', document);
     if (csvBtn) csvBtn.addEventListener('click', () => U.downloadCsv(`agent-360-${(displayName || 'agent').replace(/[^\w]+/g, '-').toLowerCase()}-${U.stamp()}.csv`, ['Section', 'Field', 'Value'], csvRows));
     const waBtn = U.$('#a360-wa', document);

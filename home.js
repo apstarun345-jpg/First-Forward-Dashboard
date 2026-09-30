@@ -54,6 +54,7 @@ FF.pages = FF.pages || {};
         </div>
       </div>
       <div id="home-search"></div>
+      <div id="today-glance" class="today-glance" aria-live="polite"></div>
       <div id="home-body">${U.spinner('Highlights load ho rahe hain — GV & FF charts…')}</div>`;
 
     const body = U.$('#home-body', root);
@@ -98,6 +99,41 @@ FF.pages = FF.pages || {};
       if (ffStockTotal!==null) items.push(`<span class="chip">📦 FF Stock <b>${U.fmt(ffStockTotal)}</b></span>`);
       if (gvStockTotal!==null) items.push(`<span class="chip">📦 GV Stock <b>${U.fmt(gvStockTotal)}</b></span>`);
       quick.innerHTML = `<div class="chip-row">${items.join('')}</div>`;
+    }
+
+    // Dashboard 2.0: one decision surface before the long-form charts. It is intentionally
+    // source-labelled so management can see what is live, what needs action, and when it was loaded.
+    const glance = U.$('#today-glance', root);
+    if (glance) {
+      const ffRows = ffDaily || [];
+      const ffDay = ffLatest ? U.dateKey(ffLatest) : '';
+      const gvDay = gvLatest ? U.dateKey(gvLatest) : '';
+      const ffToday = ffDay ? U.sum(ffRows.filter((r) => r.key === ffDay && r.channel !== 'GV Partner'), (r) => r.n) : 0;
+      const gvToday = gvDay && G.rows ? G.rows().filter((r) => r.date && U.dateKey(r.date) === gvDay).length : 0;
+      const pulseTotal = ffToday + gvToday;
+      const monthKey = U.ymKey(ffLatest || gvLatest || new Date());
+      const agentRows = agentsR.status === 'fulfilled' ? agentsR.value.filter((r) => r.ym === monthKey) : [];
+      const activeAgents = new Set(agentRows.filter((r) => Number(r.n) > 0).map((r) => r.name)).size;
+      const directAgents = new Set(agentRows.filter((r) => Number(r.n) > 0 && FF.config.isExcludedTl(r.tlName)).map((r) => r.name)).size;
+      const sourceDate = [ffLatest, gvLatest].filter(Boolean).sort((a, b) => b - a)[0];
+      const loadedAt = S.loadedAt || G.loadedAt || FF.data.lastLoadAt;
+      const age = loadedAt ? Math.max(0, Date.now() - new Date(loadedAt).getTime()) : Infinity;
+      const freshness = age < 2 * 3600e3 ? 'fresh' : age < 8 * 3600e3 ? 'aging' : 'stale';
+      const freshnessText = loadedAt ? `${U.timeLabel(loadedAt)} · ${freshness === 'fresh' ? 'fresh snapshot' : freshness === 'aging' ? 'refresh recommended' : 'stale — refresh now'}` : 'No snapshot yet';
+      const issues = [];
+      if (FF.preloader && FF.preloader.state && FF.preloader.state.errors.length) issues.push({ icon: '⚠️', label: `${FF.preloader.state.errors.length} sheet(s) need retry`, href: '#/settings?tab=data' });
+      if (!pulseTotal) issues.push({ icon: '🟡', label: 'No issuance in the latest source date', href: '#/tagIssued' });
+      if (ffStockTotal === 0 || gvStockTotal === 0) issues.push({ icon: '📦', label: 'Stock snapshot is empty or unavailable', href: '#/stock' });
+      if (!issues.length) issues.push({ icon: '✅', label: 'No immediate blocker in the loaded snapshot', href: '#/performance' });
+      const topMap = new Map();
+      agentRows.forEach((r) => topMap.set(r.name, (topMap.get(r.name) || 0) + (Number(r.n) || 0)));
+      const top = [...topMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
+      glance.innerHTML = `<section class="card glance-card"><div class="card-head"><div><h2>Today at a glance</h2><p class="sub">Aaj ka pulse · action-required items · performance highlights</p></div><div class="glance-fresh ${freshness}" title="Last successful data load">◉ ${esc(freshnessText)}</div></div><div class="glance-grid">
+        <div class="glance-pulse"><span class="glance-eyebrow">LATEST SOURCE DATE · ${esc(sourceDate ? U.labelDate(sourceDate, true) : '—')}</span><strong>${U.fmt(pulseTotal)}</strong><span>tags across today’s FF + GV pulse</span><div class="glance-breakdown"><b>🟦 FF ${U.fmt(ffToday)}</b><b>🟩 GV ${U.fmt(gvToday)}</b></div></div>
+        <div class="glance-kpis"><div><small>Active agents</small><b>${U.fmt(activeAgents)}</b><span>${U.fmt(directAgents)} direct · distinguishable</span></div><div><small>MTD context</small><b>${U.fmt((ffCur ? ffCur.total : 0) + (gvCur ? gvCur.total : 0))}</b><span>FF + GV · ${esc(U.labelYM(monthKey, true))}</span></div><div><small>Data freshness</small><b>${loadedAt ? U.timeLabel(loadedAt) : '—'}</b><span>↻ refresh to verify</span></div></div>
+        <div class="glance-actions"><h3>Action required <span>${issues.length}</span></h3>${issues.map((x) => `<a href="${x.href}"><span>${x.icon}</span><b>${esc(x.label)}</b><span>→</span></a>`).join('')}</div>
+        <div class="glance-highlights"><h3>Performance highlights</h3>${top.length ? top.map(([name, n], i) => `<a href="#/performance?agent=${encodeURIComponent(name)}"><span class="rank">${i + 1}</span><b>${esc(name)}</b><strong>${U.fmt(n)}</strong></a>`).join('') : '<p class="dim small">Agent performance data abhi load ho raha hai.</p>'}</div>
+      </div><div class="glance-footer"><span>Source-aware pulse · direct agents stay separate from TL-managed agents.</span><button class="btn small" data-action="focus-mode">🎯 Focus mode</button><button class="btn small" data-action="notifications">🔔 Notifications</button></div></section>`;
     }
 
     const cards = [];

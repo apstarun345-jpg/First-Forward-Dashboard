@@ -165,6 +165,13 @@ window.FF = window.FF || {};
     out.months = { cur: curYm, last: lastYm };
     out.classes = classTable(ac.filter(isMine), stk.filter((r) => norm(r.agentName) === n), curYm, lastYm);
     if (!out.classes.length && a) out.classes = [{ cls: 'VC4', cur: num(a.curVc4), last: num(a.lastVc4), stock: num(a.stockVc4) }, { cls: 'Commercial', cur: num(a.curNvc4), last: num(a.lastNvc4), stock: num(a.stockNvc4) }];
+    else if (out.classes.length && rowsOf('daily').length) {
+      // Only replace the REPORT snapshot once the canonical EIR daily view is loaded. Some
+      // lightweight callers provide a partial class fixture without daily EIR context; keep those
+      // callers' REPORT totals rather than inventing a partial profile total.
+      const exactTotals = groupSummary(out.classes);
+      Object.assign(out.totals, { curVc4: exactTotals.vc4.cur, curComm: exactTotals.comm.cur, curTotal: exactTotals.total.cur, lastVc4: exactTotals.vc4.last, lastComm: exactTotals.comm.last, lastTotal: exactTotals.total.last });
+    }
     out.trend = trendOf(agRows, (r) => norm(r.name) === n && (!r.channel || /first/i.test(r.channel)), (r) => r.ym);
     return out;
   }
@@ -194,13 +201,21 @@ window.FF = window.FF || {};
       totals: { curVc4: sumK('curVc4'), curComm: sumK('curNvc4'), curTotal: sumK('curTotal'), lastVc4: sumK('lastVc4'), lastComm: sumK('lastNvc4'), lastTotal: sumK('lastTotal') },
       agents: rowsA, agentCount: agents.length
     };
-    if (src && src.tlCurTotal != null) Object.assign(out.totals, { tlCurTotal: num(src.tlCurTotal), tlLastTotal: num(src.tlLastTotal) });
+    // Issuance totals already come from the corrected Performance/EIR path above. Keep REPORT's
+    // TL snapshot out of the profile totals so the drawer cannot reintroduce the old mismatch.
     // 📈 TL growth % — REPORT tab ka apna "TL Performance Status · Percent"; expected month-end bhi saath.
     attachGrowth(out, { growth: (src && src.tlGrowth) || '', projected: src && src.tlProjected }, curYm);
     if (light) return out;
     out.months = { cur: curYm, last: lastYm };
     out.classes = classTable(ac.filter((r) => norm(r.tlName) === n && (!r.channel || /first/i.test(r.channel))), stk.filter((r) => norm(r.tlName) === n), curYm, lastYm);
     if (!out.classes.length) out.classes = [{ cls: 'VC4', cur: out.totals.curVc4, last: out.totals.lastVc4, stock: stock.vc4 }, { cls: 'Commercial', cur: out.totals.curComm, last: out.totals.lastComm, stock: stock.comm }];
+    else if (rowsOf('daily').length) {
+      // The class table is the same EIR source used by the clicked drill-down. Use its rollup for
+      // TL KPIs once the canonical daily EIR view is present, so a stale REPORT TL total cannot
+      // reappear above an exact class total.
+      const exactTotals = groupSummary(out.classes);
+      Object.assign(out.totals, { curVc4: exactTotals.vc4.cur, curComm: exactTotals.comm.cur, curTotal: exactTotals.total.cur, lastVc4: exactTotals.vc4.last, lastComm: exactTotals.comm.last, lastTotal: exactTotals.total.last });
+    }
     out.trend = trendOf(agRows, (r) => norm(r.tlName) === n && (!r.channel || /first/i.test(r.channel)), (r) => r.ym);
     out.week = agents.reduce((acc, a) => acc.map((v, i) => v + num((a.week || [])[i])), [0, 0, 0, 0, 0, 0, 0]);
     out.weekLabels = safeCall(() => P.dayLabels && P.dayLabels(), []) || [];
