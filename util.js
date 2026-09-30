@@ -104,13 +104,54 @@ window.FF = window.FF || {};
   function runRate(issued, now) {
     return (Number(issued) || 0) / ((FF.util && FF.util.runRateDays) || runRateDays)(now);
   }
+  /** 📅 T-1 BASIS — FF ka REPORT kal ka data laata hai, isliye saare run-rate / dispatch / growth
+      calculations usi "jis din tak ka data aaya hai" (report day) par ginne chahiye.
+      Report day REPORT tab ke "Performance In 7 Days" header se padha jaata hai (performance.daysElapsed),
+      aur usse KABHI aaj se bada nahi maana jaata (aaj ka adhoora data kabhi count nahi hona chahiye).
+      REPORT load nahi hua ya header nahi mila to site-wide default = aaj − 1.
+      Return: { day, back, date, key, label, sheetLabel, days, fromReport } — `days` = divisor (min 1). */
+  let basisCache = null;
+  function reportBasis(opts) {
+    const o = opts || {};
+    if (!o.force && basisCache && Date.now() - basisCache.at < 30000) return basisCache.value;
+    const now = new Date();
+    const P = (typeof FF !== 'undefined' && FF.pages && FF.pages.performance) || null;
+    let sheetDay = 0, sheetLabel = '';
+    try { sheetDay = Number(P && P.daysElapsed && P.daysElapsed()) || 0; } catch { sheetDay = 0; }
+    try {
+      const labels = (P && P.dayLabels && P.dayLabels()) || [];
+      sheetLabel = clean(labels[labels.length - 1]);
+    } catch { sheetLabel = ''; }
+    const cap = runRateDays(now);                                   // kabhi aaj tak ka data count nahi
+    const day = sheetDay > 0 && sheetDay <= 31 ? Math.min(sheetDay, cap) : cap;
+    // Day-of-month se report ki actual date nikaalte hain (month rollover safe).
+    const back = Math.max(0, now.getDate() - day);
+    const date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - back);
+    const value = {
+      day, back, date, key: dateKey(date), sheetLabel, capped: day < sheetDay,
+      label: `${dateKey(date)} (${weekday(date)})`,
+      shortLabel: labelDate(date), days: Math.max(1, day), fromReport: sheetDay > 0
+    };
+    // REPORT load hone se pehle ka fallback cache mat karo — baad me real day mil sakta hai.
+    if (value.fromReport || !basisCache || basisCache.value.fromReport) basisCache = { at: Date.now(), value };
+    return value;
+  }
+  /** 🔮 Month-end projection T-1 basis par: (issued ÷ report day) × is month ke din. */
+  function projectMonthEnd(issued, elapsed, ym) {
+    const n = Number(issued) || 0;
+    if (n <= 0) return 0;
+    const days = Number(elapsed) > 0 ? Number(elapsed) : reportBasis().days;
+    const total = ym ? daysInMonth(ym) : 30;
+    return Math.round((n / days) * total);
+  }
   /** 🚚 Dispatch calculation ek jagah: rate = cur ÷ (today−1) · required = rate × suggestDays ·
-      net (WITH stock) = required − stock · gross (W/O stock) = required · cover = stock ÷ rate din. */
+      net (WITH stock) = required − stock · gross (W/O stock) = required · cover = stock ÷ rate din.
+      `elapsed` diya ho to usi T-1 report-day basis par ginna hai (warna aaj−1). */
   function dispatchCalc(o) {
     o = o || {};
     const days = o.days || suggestDays();
     const cur = Number(o.cur) || 0, last = Number(o.last) || 0, stock = Number(o.stock) || 0;
-    const elapsed = ((FF.util && FF.util.runRateDays) || runRateDays)();
+    const elapsed = Number(o.elapsed) > 0 ? Number(o.elapsed) : (((FF.util && FF.util.runRateDays) || runRateDays)());
     const rate = cur / elapsed;
     const required = Math.max(0, Math.ceil(rate * days));
     return {
@@ -1105,7 +1146,7 @@ window.FF = window.FF || {};
 
   FF.util = {
     esc, clean, num, fmt, fmtShort, pctOf, growth, fmtPct, fmtSigned, deltaHtml, pctHtml,
-    suggestDays, suggestMode, runRateDays, runRate, dispatchCalc, suggestNet, suggestGross, suggestPair, sugCell, sugText,
+    suggestDays, suggestMode, runRateDays, runRate, reportBasis, projectMonthEnd, dispatchCalc, suggestNet, suggestGross, suggestPair, sugCell, sugText,
     MONTHS, MONTHS_LONG, DAYS, pad2, parseDate, parseMonthKey, ymKey, dateKey, fromDateKey, ymParts, labelYM, labelDate, labelDateKey,
     weekday, daysInMonth, prevMonthKey, nextMonthKey, weekStart, timeLabel,
     sum, groupSum, topEntries, sortBy, uniq,

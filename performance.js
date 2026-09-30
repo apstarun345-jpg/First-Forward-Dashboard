@@ -408,28 +408,74 @@ FF.pages = FF.pages || {};
     const rowsHtml = [...byClass.entries()].sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true })).map(([cls, v]) => `<tr><td><b>${esc(cls)}</b></td><td class="num"><b>${fmt(v.total)}</b></td><td class="num">${fmt(v.issuance)}</td><td class="num">${fmt(v.replacement)}</td><td>${[...v.detail.entries()].sort((a, b) => b[1] - a[1]).map(([label, n]) => `<span class="today-tag-detail">${esc(label)} · <b>${fmt(n)}</b></span>`).join(' ')}</td></tr>`).join('');
     return `<div class="dsec"><h4>🏅 Today’s class-wise tags · ${esc(today)} <span class="count green">${fmt(U.sum([...byClass.values()], (r) => r.total))}</span></h4><div class="table-wrap"><table class="tbl compact"><thead><tr><th>Class</th><th class="num">Tags</th><th class="num">Issuance</th><th class="num">Replacement</th><th>Tag / VRN type</th></tr></thead><tbody>${rowsHtml}</tbody></table></div></div>`;
   }
+  /** 📅 T-1 basis — FF ka REPORT kal ka data laata hai. Run-rate / dispatch / projection sab isi
+      "jis din tak ka data aaya hai" par ginne chahiye, na ki aaj ke din. */
+  function basis() { return (U.reportBasis ? U.reportBasis() : { day: U.runRateDays(), days: U.runRateDays(), label: '', shortLabel: '', back: 1 }); }
   function performanceDispatchHtml(agent) {
     if (FF.config.feat && FF.config.feat('dispatchPlan') === false) return '';
     const days = U.suggestDays();
-    const vc4 = U.dispatchCalc({ cur: agent.curVc4, last: agent.lastVc4, stock: agent.stockVc4, days });
-    const comm = U.dispatchCalc({ cur: agent.curNvc4, last: agent.lastNvc4, stock: agent.stockNvc4, days });
+    const b = basis(), ym = monthKeyOf();
+    const vc4 = U.dispatchCalc({ cur: agent.curVc4, last: agent.lastVc4, stock: agent.stockVc4, days, elapsed: b.days });
+    const comm = U.dispatchCalc({ cur: agent.curNvc4, last: agent.lastNvc4, stock: agent.stockNvc4, days, elapsed: b.days });
+    const all = U.dispatchCalc({ cur: agent.curTotal, last: agent.lastTotal, stock: agent.stockTotal, days, elapsed: b.days });
     const direct = !!agent.tlExcluded;
+    const projVc4 = U.projectMonthEnd(agent.curVc4, b.days, ym), projComm = U.projectMonthEnd(agent.curNvc4, b.days, ym);
     const row = (label, calc) => `<div class="pf-dispatch-row"><b>${label}</b><span class="pf-dispatch-after"><small>After stock</small><b class="sug-chip">${fmt(calc.net)}</b></span><span class="pf-dispatch-gross"><small>Without subtracting stock</small><b class="sug-chip wo">${fmt(calc.gross)}</b></span></div>`;
-    return `<div class="dsec pf-dispatch-card"><h4>🚚 ${direct ? 'Suggested tag quantity' : 'Suggested dispatch quantity'} · ${fmt(days)} days</h4><p class="dim small">Run-rate × ${fmt(days)} days${direct ? ' · Direct agent stock is not dispatched' : ' · two clear quantities are shown'}</p><div class="pf-dispatch-head"><span>Class</span><span>After stock</span><span class="pf-dispatch-gross-label">Without subtracting stock</span></div>${row('VC4', vc4)}${row('Commercial', comm)}</div>`;
+    return `<div class="dsec pf-dispatch-card"><h4>🚚 ${direct ? 'Suggested tag quantity' : 'Suggested dispatch quantity'} · ${fmt(days)} days</h4><p class="dim small">📅 <b>T-1 basis</b> — REPORT tab ${esc(b.label || 'kal ka data')} tak ka data deta hai, isliye run-rate = issue ÷ <b>${fmt(b.days)} din</b> × ${fmt(days)} din${direct ? ' · Direct agent stock is not dispatched' : ''}</p><div class="pf-dispatch-head"><span>Class</span><span>After stock</span><span class="pf-dispatch-gross-label">Without subtracting stock</span></div>${row('VC4', vc4)}${row('Commercial', comm)}
+      <div class="dgrid" style="margin-top:8px">
+        <div class="drow"><span>Run-rate VC4 / Comm (÷ ${fmt(b.days)} din)</span><b>${fmt(vc4.rate, true)} · ${fmt(comm.rate, true)}/day</b></div>
+        <div class="drow"><span>Month-end projection (T-1)</span><b>VC4 ${fmt(projVc4)} · Comm ${fmt(projComm)}${agent.curProjected ? ` <small class="dim">(sheet ${fmt(agent.curProjected)})</small>` : ''}</b></div>
+        <div class="drow"><span>Cover (all tags)</span><b>${all.cover != null ? `${fmt(all.cover, true)} din` : '—'}</b></div>
+      </div></div>`;
+  }
+  /** 👥 TL drawer ka suggested dispatch — TL stock + TL run-rate par, T-1 basis (REPORT kal ka data). */
+  function tlDispatchHtml(group) {
+    if (FF.config.feat && FF.config.feat('dispatchPlan') === false) return '';
+    const days = U.suggestDays(), b = basis();
+    const curVc4 = group.tlCurVc4 || 0, curComm = group.tlCurNvc4 || 0, curTotal = group.tlCurTotal || 0;
+    const stockTotal = group.tlStockTotal != null ? group.tlStockTotal : U.sum(group.agents, (a) => a.stockTotal);
+    const vc4 = U.dispatchCalc({ cur: curVc4, last: group.tlLastVc4, stock: group.tlStockVc4, days, elapsed: b.days });
+    const comm = U.dispatchCalc({ cur: curComm, last: group.tlLastNvc4, stock: group.tlStockNvc4, days, elapsed: b.days });
+    const all = U.dispatchCalc({ cur: curTotal, last: group.tlLastTotal, stock: stockTotal, days, elapsed: b.days });
+    const ym = monthKeyOf();
+    const row = (label, calc, strong) => `<div class="pf-dispatch-row ${strong ? 'pf-dispatch-row-total' : ''}"><b>${label}</b><span class="pf-dispatch-after"><small>After stock</small><b class="sug-chip">${fmt(calc.net)}</b></span><span class="pf-dispatch-gross"><small>Without subtracting stock</small><b class="sug-chip wo">${fmt(calc.gross)}</b></span></div>`;
+    const agentSum = U.sum(group.agents, (a) => Math.max(0, Math.ceil((a.curVc4 / b.days) * days - a.stockVc4)));
+    const agentSumComm = U.sum(group.agents, (a) => Math.max(0, Math.ceil((a.curNvc4 / b.days) * days - a.stockNvc4)));
+    return `<div class="dsec pf-dispatch-card"><h4>🚚 Suggested dispatch quantity · TL level · ${fmt(days)} days</h4><p class="dim small">📅 <b>T-1 basis</b> — REPORT tab ${esc(b.label || 'kal ka data')} tak ka data deta hai, isliye TL run-rate = TL issue ÷ <b>${fmt(b.days)} din</b> × ${fmt(days)} din. TL stock ghata kar "After stock", bina ghate "Without subtracting stock".</p><div class="pf-dispatch-head"><span>Class</span><span>After stock</span><span class="pf-dispatch-gross-label">Without subtracting stock</span></div>${row('VC4', vc4)}${row('Commercial', comm)}${row('All tags', all, true)}
+      <div class="dgrid" style="margin-top:8px">
+        <div class="drow"><span>Run-rate VC4 · Comm · Total (÷ ${fmt(b.days)} din)</span><b>${fmt(vc4.rate, true)} · ${fmt(comm.rate, true)} · ${fmt(all.rate, true)}/day</b></div>
+        <div class="drow"><span>Month-end projection (T-1)</span><b>${fmt(U.projectMonthEnd(curTotal, b.days, ym))}${group.tlProjected ? ` <small class="dim">(sheet ${fmt(group.tlProjected)})</small>` : ''}</b></div>
+        <div class="drow"><span>Agents ka jod (VC4 · Comm)</span><b>${fmt(agentSum)} · ${fmt(agentSumComm)} <small class="dim">agent stock ke baad</small></b></div>
+        <div class="drow"><span>Cover (all tags)</span><b>${all.cover != null ? `${fmt(all.cover, true)} din` : '—'}</b></div>
+      </div></div>`;
+  }
+  /** Current month key (state.months.cur ek label hai, asli ym EIR se). */
+  function monthKeyOf() {
+    try {
+      const daily = S.get('daily') || [];
+      const latest = daily.length ? FF.model.latestDate(daily) : null;
+      if (latest) return U.ymKey(latest);
+    } catch { /* ignore */ }
+    return U.ymKey(new Date());
   }
   function openAgent(rowIndex) {
     const agent = state.agents.find((a) => a.__row === rowIndex);
     if (!agent) return;
     const row = (label, html, title) => `<div class="drow"><span title="${esc(title || '')}">${esc(label)}</span>${html}</div>`;
     const cs = classSplit(agent.name, false);
+    const b = basis();
+    const projT1 = U.projectMonthEnd(agent.curTotal, b.days, monthKeyOf());
+    // EIR (class split) live hai aur aaj tak ka data dikhata hai; REPORT T-1 hai — dono alag hain, isliye note.
+    const eirNote = `🚗 Class split <b>EIR</b> se aati hai (live, aaj tak ka data) — upar ke KPI / dispatch <b>REPORT</b> T-1 basis (${esc(b.shortLabel || b.label)}) par hain.`;
     const summary = `<div class="dsec"><div class="dkpis">
-        <div class="dkpi"><small>${esc(state.months.cur)} MTD</small><b>${fmt(agent.curTotal)}</b><span>VC4 ${fmt(agent.curVc4)} · Comm ${fmt(agent.curNvc4)}</span></div>
+        <div class="dkpi"><small>${esc(state.months.cur)} MTD</small><b>${fmt(agent.curTotal)}</b><span>VC4 ${fmt(agent.curVc4)} · Comm ${fmt(agent.curNvc4)} · till ${esc(b.shortLabel || b.label)}</span></div>
         <div class="dkpi"><small>${esc(state.months.last)}</small><b>${fmt(agent.lastTotal)}</b><span>VC4 ${fmt(agent.lastVc4)} · Comm ${fmt(agent.lastNvc4)}</span></div>
-        <div class="dkpi"><small>Growth</small><b>${trend(agent.growth)}</b><span>Projected ${fmt(agent.curProjected)}</span></div>
+        <div class="dkpi"><small>Growth · T-1</small><b>${trend(agent.growth)}</b><span>till ${esc(b.shortLabel || b.label)} · REPORT T-1</span></div>
+        <div class="dkpi"><small>Projected month-end · T-1</small><b>${fmt(projT1)}</b><span>sheet ${fmt(agent.curProjected)} · ${fmt(agent.avgTotal, true)}/day (÷ ${fmt(b.days)} din)</span></div>
         <div class="dkpi"><small>Stock</small><b>${fmt(agent.stockTotal)}</b><span>VC4 ${fmt(agent.stockVc4)} · ${fmt(agent.agentStockDays)} days</span></div>
       </div><div class="badge-row">${badge(agent.agentStatus)}${badge(agent.lastActive)}${agent.agentPriority ? `<span class="dim small">Priority</span>${badge(agent.agentPriority)}` : ''}${agent.biometric ? `<span class="dim small">Device</span>${badge(agent.biometric)}` : ''}</div></div>`;
     const compare = cs
-      ? vsCommercialCard(`⚖️ Class split · ${esc(cs.lastLabel)} → ${esc(cs.curLabel)} (till ${cs.day})`, { vc4: cs.curS.VC4, vc20: cs.curS.VC20, vc5p: cs.curS['VC5+'], comm: cs.curS.VC20 + cs.curS['VC5+'], total: cs.curS.total }, { vc4: cs.lastS.VC4, vc20: cs.lastS.VC20, vc5p: cs.lastS['VC5+'], comm: cs.lastS.VC20 + cs.lastS['VC5+'], total: cs.lastS.total }, { cur: cs.curLabel, last: cs.lastLabel }, `Replacement (EIR): ${esc(cs.curLabel)} <b>${fmt(cs.curS.repl)}</b> · ${esc(cs.lastLabel)} ${fmt(cs.lastS.repl)}`)
+      ? vsCommercialCard(`⚖️ Class split · ${esc(cs.lastLabel)} → ${esc(cs.curLabel)} (till ${cs.day})`, { vc4: cs.curS.VC4, vc20: cs.curS.VC20, vc5p: cs.curS['VC5+'], comm: cs.curS.VC20 + cs.curS['VC5+'], total: cs.curS.total }, { vc4: cs.lastS.VC4, vc20: cs.lastS.VC20, vc5p: cs.lastS['VC5+'], comm: cs.lastS.VC20 + cs.lastS['VC5+'], total: cs.lastS.total }, { cur: cs.curLabel, last: cs.lastLabel }, `Replacement (EIR): ${esc(cs.curLabel)} <b>${fmt(cs.curS.repl)}</b> · ${esc(cs.lastLabel)} ${fmt(cs.lastS.repl)}<br>${eirNote}`)
       : vsCommercialCard(`⚖️ VC4 vs Commercial · ${esc(state.months.last)} → ${esc(state.months.cur)}`, { vc4: agent.curVc4, comm: agent.curNvc4, total: agent.curTotal }, { vc4: agent.lastVc4, comm: agent.lastNvc4, total: agent.lastTotal });
     const classCard = dailyClassBreakdown(agent);
     const stockClasses = ['stockVc4', 'stockC1', 'stockC2', 'stockC3', 'stockC4', 'stockC5'].map((k) => ({ label: state.columns[k].label, value: agent[k] || 0 })).filter((x) => x.value > 0);
@@ -449,14 +495,21 @@ FF.pages = FF.pages || {};
     const row = (label, html) => `<div class="drow"><span>${label}</span>${html}</div>`;
     const agents = [...group.agents].sort((a, b) => b.curTotal - a.curTotal);
     const cs = classSplit(group.tlName, true);
+    const b = basis();
+    const projT1 = U.projectMonthEnd(group.tlCurTotal, b.days, monthKeyOf());
+    // EIR (class split) live hai aur aaj tak ka data dikhata hai; REPORT T-1 hai — dono alag hain, isliye note.
+    const eirNote = `🚗 Class split <b>EIR</b> se aati hai (live, aaj tak ka data) — upar ke KPI / dispatch <b>REPORT</b> T-1 basis (${esc(b.shortLabel || b.label)}) par hain.`;
+    const growthKpi = `<div class="dkpi"><small>Growth · T-1</small><b>${trend(group.tlGrowth)}</b><span>till ${esc(b.shortLabel || b.label)} · REPORT T-1</span></div>`;
     const body = `<div class="dsec"><div class="dkpis">
-        <div class="dkpi"><small>${esc(state.months.cur)} MTD</small><b>${fmt(group.tlCurTotal)}</b><span>VC4 ${fmt(group.tlCurVc4)} · Comm ${fmt(group.tlCurNvc4)}</span></div>
+        <div class="dkpi"><small>${esc(state.months.cur)} MTD</small><b>${fmt(group.tlCurTotal)}</b><span>VC4 ${fmt(group.tlCurVc4)} · Comm ${fmt(group.tlCurNvc4)} · till ${esc(b.shortLabel || b.label)}</span></div>
         <div class="dkpi"><small>${esc(state.months.last)}</small><b>${fmt(group.tlLastTotal)}</b><span>VC4 ${fmt(group.tlLastVc4)} · Comm ${fmt(group.tlLastNvc4)}</span></div>
-        <div class="dkpi"><small>Growth</small><b>${trend(group.tlGrowth)}</b><span>Projected ${fmt(group.tlProjected)} · ${fmt(group.tlAvgTotal, true)}/day</span></div>
+        ${growthKpi}
+        <div class="dkpi"><small>Projected month-end · T-1</small><b>${fmt(projT1)}</b><span>sheet ${fmt(group.tlProjected)} · ${fmt(group.tlAvgTotal, true)}/day (÷ ${fmt(b.days)} din)</span></div>
         <div class="dkpi"><small>Agents</small><b>${group.agentCount}</b><span>${group.activeCount} active · ${group.agentCount - group.activeCount} inactive</span></div>
       </div><div class="badge-row">${badge(group.tlStatus)}${badge(group.tlLastActive)}<span class="dim small">VC4</span>${badge(group.tlPriority)}${badge(group.tlStockAlert)}<span class="dim small">Comm</span>${badge(group.tlCommPriority)}${badge(group.tlCommAlert)}</div></div>
+      ${tlDispatchHtml(group)}
       ${cs
-        ? vsCommercialCard(`⚖️ Class split · ${esc(cs.lastLabel)} → ${esc(cs.curLabel)} (till ${cs.day})`, { vc4: cs.curS.VC4, vc20: cs.curS.VC20, vc5p: cs.curS['VC5+'], comm: cs.curS.VC20 + cs.curS['VC5+'], total: cs.curS.total }, { vc4: cs.lastS.VC4, vc20: cs.lastS.VC20, vc5p: cs.lastS['VC5+'], comm: cs.lastS.VC20 + cs.lastS['VC5+'], total: cs.lastS.total }, { cur: cs.curLabel, last: cs.lastLabel }, `Replacement (EIR): ${esc(cs.curLabel)} <b>${fmt(cs.curS.repl)}</b> · ${esc(cs.lastLabel)} ${fmt(cs.lastS.repl)}`)
+        ? vsCommercialCard(`⚖️ Class split · ${esc(cs.lastLabel)} → ${esc(cs.curLabel)} (till ${cs.day})`, { vc4: cs.curS.VC4, vc20: cs.curS.VC20, vc5p: cs.curS['VC5+'], comm: cs.curS.VC20 + cs.curS['VC5+'], total: cs.curS.total }, { vc4: cs.lastS.VC4, vc20: cs.lastS.VC20, vc5p: cs.lastS['VC5+'], comm: cs.lastS.VC20 + cs.lastS['VC5+'], total: cs.lastS.total }, { cur: cs.curLabel, last: cs.lastLabel }, `Replacement (EIR): ${esc(cs.curLabel)} <b>${fmt(cs.curS.repl)}</b> · ${esc(cs.lastLabel)} ${fmt(cs.lastS.repl)}<br>${eirNote}`)
         : vsCommercialCard(`⚖️ VC4 vs Commercial · ${esc(state.months.last)} → ${esc(state.months.cur)}`, { vc4: group.tlCurVc4 || 0, comm: group.tlCurNvc4 || 0, total: group.tlCurTotal || 0 }, { vc4: group.tlLastVc4 || 0, comm: group.tlLastNvc4 || 0, total: group.tlLastTotal || 0 })}
       <div class="dsec"><h4>📅 Last 7 days (agents) · ${fmt(group.weekTotal)}</h4>${C.bars({ labels: state.dayLabels, height: 130, series: [{ name: 'Issued', values: group.week, color: '#ec4899' }] })}</div>
       <div class="dsec"><h4>📦 Stock & dispatch</h4><div class="dgrid">${row('Stock VC4', `<b>${fmt(group.tlStockVc4)}</b>`)}${row('Stock Commercial', `<b>${fmt(group.tlStockNvc4)}</b>`)}${row('Stock total', `<b>${fmt(group.tlStockTotal)}</b>`)}${row('VC4 stock days', `<b>${fmt(group.tlVc4Days)}</b>`)}${row('Alert (VC4)', badge(group.tlStockAlert))}${row('Priority (VC4)', badge(group.tlPriority))}${row('Comm stock days', `<b>${fmt(group.tlNvc4Days)}</b>`)}${row('Alert (Comm)', badge(group.tlCommAlert))}${row('Priority (Comm)', badge(group.tlCommPriority))}</div></div>

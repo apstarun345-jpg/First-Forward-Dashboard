@@ -302,6 +302,7 @@ FF.pages = FF.pages || {};
     const isTlKind = /tl$/.test(p.kind);
     const contacts = !FF.auth || FF.auth.can('contacts');
     const d = q1.dispatch || {};
+    const p1 = q1.projT1 || null;   // 📈 growth % + T-1 month-end projection
     const mode = U.suggestMode ? U.suggestMode() : 'both';
     // Dono criteria: stock ke baad (net) + bina stock ghataye (gross) — settings ka mode apply hota hai.
     const pair = (net, gross) => U.sugCell(net, gross);
@@ -324,7 +325,9 @@ FF.pages = FF.pages || {};
       ${sugStats}
       <div><small>Run-rate / day <em>(÷ ${U.fmt(q1.calc.total.elapsed)} din)</em></small><b>${U.fmt(q1.calc.total.rate, true)}</b></div>
       <div><small>Cover</small><b>${q1.calc.total.cover != null ? `${U.fmt(q1.calc.total.cover, true)} din` : '—'}</b></div>
+      <div class="ms-growth"><small>Growth % <em>${p1 && p1.basis && p1.basis.shortLabel ? `till ${esc(p1.basis.shortLabel)} · T-1` : 'T-1'}</em></small><b>${p1 && p1.num !== null && p1.num !== undefined && Number.isFinite(p1.num) ? U.pctHtml(p1.num, { decimals: 0 }) : `<span class="dim">—</span>`}</b></div>
       <div><small>This month · last</small><b>${U.fmt(q1.totals.curTotal)} · ${U.fmt(q1.totals.lastTotal)}</b></div>
+      <div><small>Projected month-end <em>T-1 basis</em></small><b>${p1 ? U.fmt(p1.total) : '—'}</b></div>
     </div>`;
   }
   /** Sirf ek hi person match ho to uski poori profile inline khol do (async placeholder → data). */

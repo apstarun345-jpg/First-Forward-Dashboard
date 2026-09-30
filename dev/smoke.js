@@ -617,14 +617,50 @@ await run('v3.11 · Master search (naam / TL / ID index + suggestions + results 
   if (tlName) {
     const tl = await FF.masterProfile.build({ kind: 'ff-tl', name: tlName, sub: '', tlSet: new Set(), classMap: new Map(), bars: new Set() });
     if (!tl.agentCount || !/TL ke agents/.test(FF.masterProfile.html(tl))) throw new Error('TL profile me agents table nahi');
-  }
-  const dr = list.find((a) => a.tlExcluded);
+  }  const dr = list.find((a) => a.tlExcluded);
   if (dr) {
     const dp = await FF.masterProfile.build({ kind: 'ff-agent', name: dr.name, sub: dr.agentId || '', tlSet: new Set(), classMap: new Map(), bars: new Set() });
     if (!dp.direct) throw new Error('direct agent profile me direct flag nahi');
     if (/High|Medium/.test(dp.priority) && !dp.tagRequired) throw new Error('direct High/Medium par tagRequired nahi');
   }
   log(`      profile ${pr.name} · stock ${pr.stock.total} · class rows ${pr.classes.length} · html ${ph.length} chars`);
+}, true);
+await run('T-1 basis · growth % + suggested dispatch (master search + performance drawer)', async () => {
+  const list = pages.performance.agents();
+  const basis = FF.util.reportBasis();
+  if (!(basis.days > 0) || !basis.label) throw new Error('report basis nahi bana');
+  // 1) Master search drawer: TL growth % + "till <date>" + T-1 projection
+  const tlName = (list.find((a) => !a.tlExcluded && a.tlName) || {}).tlName;
+  if (tlName) {
+    const tl = await FF.masterProfile.build({ kind: 'ff-tl', name: tlName, sub: '', tlSet: new Set(), classMap: new Map(), bars: new Set() });
+    if (tl.growthNum === null || tl.growthNum === undefined) throw new Error('TL growth % missing in master search drawer');
+    if (!tl.projT1 || !tl.projT1.basis || tl.projT1.days !== basis.days) throw new Error('TL T-1 projection basis mismatch');
+    const th = FF.masterProfile.html(tl);
+    for (const label of ['Growth % &amp; month-end projection', 'T-1 basis', 'Projected month-end', 'Report day', 'pct pos', 'pct neg']) {
+      if (!th.includes(label)) throw new Error(`TL profile drawer me "${label}" nahi mila`);
+    }
+    // Quick (kundli) snapshot me bhi growth dikhna chahiye
+    const quick = FF.masterProfile.quick({ kind: 'ff-tl', name: tlName, sub: '' });
+    if (!quick || quick.projT1 === undefined) throw new Error('kundli snapshot me growth/projection missing');
+  }
+  // 2) Performance drawers: agent + TL dono me suggested dispatch, T-1 divisor
+  const ag = list.find((a) => !a.tlExcluded) || list[0];
+  pages.performance.openAgent(ag.__row);
+  let dh = (REG.get('drawer-body') || {}).innerHTML || '';
+  for (const label of ['Suggested dispatch quantity', 'T-1 basis', 'Month-end projection (T-1)', 'Run-rate VC4 / Comm']) {
+    if (!dh.includes(label)) throw new Error(`agent drawer me "${label}" nahi mila`);
+  }
+  if (/undefined|NaN/.test(dh)) throw new Error('agent drawer me undefined/NaN');
+  const tlg = list.find((a) => !a.tlExcluded && a.tlName);
+  if (tlg) {
+    pages.performance.openTl(tlg.tlName);
+    dh = (REG.get('drawer-body') || {}).innerHTML || '';
+    for (const label of ['Suggested dispatch quantity · TL level', 'Agents ka jod', 'Projected month-end · T-1', 'Growth · T-1']) {
+      if (!dh.includes(label)) throw new Error(`TL drawer me "${label}" nahi mila`);
+    }
+    if (/undefined|NaN/.test(dh)) throw new Error('TL drawer me undefined/NaN');
+  }
+  log(`      report day ${basis.label} (${basis.days} din${basis.fromReport ? ' · sheet header' : ' · fallback'})`);
 }, true);
 await run('v3.14 · New Agents & TL Changes page (FF + GV, dono table)', async () => {
   const r = root(); await pages.newAgents.render(r, { months: '6' }, {});
