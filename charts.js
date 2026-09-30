@@ -88,11 +88,11 @@ window.FF = window.FF || {};
     const segs = items.map((it, i) => {
       const frac = total ? it.value / total : 0;
       const len = frac * circ;
-      const seg = `<circle r="${r}" cx="${cx}" cy="${cy}" fill="none" stroke="${it.color || color(it.label, i)}" stroke-width="14" stroke-dasharray="${len.toFixed(2)} ${(circ - len).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}" data-tip="${esc(`<b>${it.label}</b><br>${fmtVal(it.value, opts.format)} · ${U.fmtPct(frac * 100)}`)}"></circle>`;
+      const seg = `<circle r="${r}" cx="${cx}" cy="${cy}" fill="none" stroke="${it.color || color(it.label, i)}" stroke-width="14" stroke-dasharray="${len.toFixed(2)} ${(circ - len).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}" data-tip="${esc(`<b>${it.label}</b><br>${fmtVal(it.value, opts.format)} · ${U.fmtPct(frac * 100)}`)}" ${it.attr || ''}></circle>`;
       offset += len;
       return seg;
     }).join('');
-    const legendHtml = items.map((it, i) => `<div class="donut-leg"><i style="background:${it.color || color(it.label, i)}"></i><span class="donut-leg-label">${esc(it.label)}</span><b>${fmtVal(it.value, opts.format)}</b><span class="donut-leg-pct">${U.fmtPct(total ? (it.value / total) * 100 : 0)}</span></div>`).join('');
+    const legendHtml = items.map((it, i) => `<div class="donut-leg" ${it.attr || ''}><i style="background:${it.color || color(it.label, i)}"></i><span class="donut-leg-label">${esc(it.label)}</span><b>${fmtVal(it.value, opts.format)}</b><span class="donut-leg-pct">${U.fmtPct(total ? (it.value / total) * 100 : 0)}</span></div>`).join('');
     const cid = `ch${++seq}`;
     specs.set(cid, { kind: 'donut', opts: { ...opts, items, total } });
     return `<div class="chart-shot" data-cid="${cid}"><div class="donut"><div class="donut-ring" style="width:${size}px;height:${size}px"><svg viewBox="0 0 100 100" width="${size}" height="${size}" style="transform:rotate(-90deg)"><circle r="${r}" cx="${cx}" cy="${cy}" fill="none" stroke="#eef0f6" stroke-width="14"></circle>${segs}</svg>

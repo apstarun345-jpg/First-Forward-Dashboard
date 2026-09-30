@@ -90,6 +90,18 @@ test('channel / class / TL / agent filters sach me rows hataate hain', () => {
   assert.equal(FF.filters.issuance(rows, { filters: { ...base, agent: 'meena' } }).length, 1, 'agent (case-insensitive)');
 });
 
+test('legacy saved workspace filters no longer affect a page without URL filters', () => {
+  localStorage.setItem('ff_global_filters', JSON.stringify({ period: 'today', channel: 'gv', tl: 'stale TL', agent: 'stale agent', cls: 'VC4' }));
+  FF.app = { current: { page: 'home', params: {} } };
+  const filters = FF.filters.current();
+  assert.equal(filters.period, 'month', 'page default remains current month');
+  assert.equal(filters.channel, '', 'old saved channel is ignored');
+  assert.equal(filters.tl, '', 'old saved TL is ignored');
+  assert.equal(filters.agent, '', 'old saved agent is ignored');
+  assert.equal(filters.cls, '', 'old saved class is ignored');
+  localStorage.removeItem('ff_global_filters');
+});
+
 test('period bounds: today / yesterday / week / month / all', () => {
   assert.deepEqual(FF.filters.bounds({ period: 'today', month: '' }), { from: TODAY, to: TODAY });
   assert.deepEqual(FF.filters.bounds({ period: 'yesterday', month: '' }), { from: YESTERDAY, to: YESTERDAY });

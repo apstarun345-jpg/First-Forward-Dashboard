@@ -157,14 +157,17 @@ for (const ds of FF.store.DATASETS ? Object.keys(FF.store.DATASETS) : ['daily', 
 await run('store.suggestions', async () => { const s = FF.store.suggestions({ agents: true, tls: true }); if (!s.length) throw new Error('no suggestions'); if (s.some((x) => /^APS$/i.test(x.label) && x.kind === 'tl')) throw new Error('APS leaked into TL suggestions'); log(`      ${s.length} suggestions, e.g. ${s.slice(0, 3).map((x) => `${x.kind}:${x.label}`).join(', ')}`); });
 
 const pages = FF.pages;
-await run('all permitted sheets preload before navigation (zero extra network requests on click)', async () => {
-  await FF.preloader.preloadAll(false);
+await run('raw sheets stay lazy and load only when their tab opens', async () => {
   const before = sheetNetworkRequests;
-  for (const tab of FF.config.allTabs(true).filter(t => FF.auth.can('sheet:' + t.id))) {
+  await FF.preloader.preloadAll(false);
+  if (sheetNetworkRequests !== before) throw new Error('aggregate preload unexpectedly queried raw sheets');
+  const tabs = FF.config.allTabs(true).filter(t => FF.auth.can('sheet:' + t.id));
+  for (const tab of tabs) {
+    const beforeTab = sheetNetworkRequests;
     await pages.sheet.render(root(), { name: tab.id }, {});
+    if (sheetNetworkRequests <= beforeTab) throw new Error(`${tab.id} did not load on demand`);
   }
-  if (sheetNetworkRequests !== before) throw new Error(`${sheetNetworkRequests - before} unexpected query requests after preload`);
-  log('      sheet navigation: 0 new Google/proxy requests');
+  log(`      aggregate preload: 0 raw-sheet requests · ${tabs.length} tabs queried only on open`);
 });
 await run('dashboard.render', () => pages.dashboard.render(root(), {}, {}), true);
 await run('trend.render daily', () => pages.trend.render(root(), { mode: 'daily' }, {}), true);
@@ -1127,20 +1130,38 @@ await run('👥 KPI drill: agent drawer (kisne lagaye) + us agent ka day-wise de
   FF.app.closeDrawer();
 });
 
-await run('🧭 Home workspace filter asar karta hai + today view me FF 0 (T+1)', async () => {
+await run('🧩 GV agent issuance/class and stock drawers drill progressively', async () => {
+  const gvRows = FF.gv.issuanceRows();
+  const stockRows = FF.gv.get('stockAgentClass') || [];
+  const profile = gvRows.find((r) => r.agentName && r.n > 0);
+  const stockProfile = stockRows.find((r) => r.agentName && r.n > 0);
+  if (!profile || !stockProfile) throw new Error('GV agent / stock fixtures unavailable');
+  const ym = FF.util.ymKey(new Date());
+  await FF.kpiDetail.open({ src: 'gv', scope: 'mtd', ym, agent: profile.agentName, agentId: profile.agentId, channel: 'gv', title: `${profile.agentName} · GV agent` });
+  let html = drawerHtml();
+  if (!html.includes('data-kd-spec=') || !html.includes('Class-wise')) throw new Error('GV agent class rows are not clickable');
+  await FF.kpiDetail.open({ src: 'gv', scope: 'stock', agent: stockProfile.agentName, channel: 'gv', title: `${stockProfile.agentName} · stock` });
+  html = drawerHtml();
+  if (!html.includes('Agent stock by class') || !html.includes('data-kd-spec=')) throw new Error(`GV agent stock class breakdown is not clickable: ${html.slice(0, 240)}`);
+  const className = stockProfile.cls;
+  if (className) {
+    await FF.kpiDetail.open({ src: 'gv', scope: 'stock', agent: stockProfile.agentName, channel: 'gv', cls: className, title: `${stockProfile.agentName} · ${className} stock` });
+    html = drawerHtml();
+    if (!html.includes('Tag Assignment source')) throw new Error('class click did not open Tag Assignment rows');
+  }
+  FF.app.closeDrawer();
+});
+
+await run('🧭 Removed workspace filter UI + GV live and FF T+1 behavior', async () => {
   const htmlOf = (r) => r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  // 1) filter bar ka period=today → FF aaj 0 + "kal aayega" note, GV live
-  const r1 = root(); await pages.home.render(r1, { period: 'today' }, {}); await settle(500);
+  // URL-level today view → FF aaj 0 + "kal aayega" note, GV live; no saved workspace UI.
+  const r1 = root(); await pages.home.render(r1, {}, {}); await settle(500);
   const h1 = htmlOf(r1);
   if (!/kal aayega/.test(h1)) throw new Error('today view me "FF kal aayega" note nahi mila');
   if (!/GV aaj \(live\)/.test(h1.replace(/[▲▼]/g, ''))) throw new Error('today view me GV live chip nahi mila');
-  if (!/home-filter-banner/.test(h1)) throw new Error('home filter banner missing');
+  if (/home-filter-banner|Workspace filters|Saved workspace filters/i.test(h1)) throw new Error('removed workspace filter UI is still rendered');
   // 2) channel=gv → FF chips 0, GV number > 0 (mock me GV data hai)
-  const r2 = root(); await pages.home.render(r2, { channel: 'gv', period: 'month' }, {}); await settle(500);
-  const h2 = htmlOf(r2);
-  if (/🟦 FF MTD[^<]*<b>0<\/b>/.test(h2) === false && !/Filters:/.test(h2)) throw new Error('channel=gv par FF MTD zero nahi hua');
-  // 3) alag filters → alag output (bar "bilkul kaam nahi karta" nahi hona chahiye)
-  if (h1 === h2) throw new Error('filter badalne par Home ka output bilkul same reh gaya');
+  if (!/🟦 FF MTD[^<]*<b>0<\/b>/.test(h1) && !/FF issuance T\+1/.test(h1)) throw new Error('Home view me FF T+1 state nahi mili');
 });
 
 await run('logout', async () => { await FF.auth.api('/api/auth/logout', 'POST', {}); });
