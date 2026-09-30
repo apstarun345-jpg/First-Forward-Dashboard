@@ -35,6 +35,41 @@ window.FF = window.FF || {};
   const hasMedia = () => !!(typeof navigator !== 'undefined' && navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
   const hasRTC = () => typeof RTCPeerConnection !== 'undefined';
 
+  // ---- 🎙️ One-time mic permission -------------------------------------------------------------
+  // Site khulte hi EK BAAR browser ka mic prompt dikhta hai (pehle user gesture par). Grant hote
+  // hi Chrome permission ko origin ke liye HAMESHA ke liye yaad rakhta hai — phir kabhi prompt
+  // nahi aata, har Live Assist session turant connect hota hai. Deny kiya to bhi dobara kabhi
+  // nahi poochte (flag localStorage me) — user khud site settings se allow kar sakta hai.
+  const MIC_ASKED_KEY = 'ff_mic_permission_asked';
+  const micAsked = () => { try { return localStorage.getItem(MIC_ASKED_KEY) === '1'; } catch { return true; } };
+  const markMicAsked = () => { try { localStorage.setItem(MIC_ASKED_KEY, '1'); } catch { /* private mode */ } };
+  async function micPermissionState() {
+    try {
+      if (navigator.permissions && navigator.permissions.query) {
+        const p = await navigator.permissions.query({ name: 'microphone' });
+        return p.state; // 'granted' | 'denied' | 'prompt'
+      }
+    } catch { /* firefox etc. — fallback below */ }
+    return '';
+  }
+  /** Ek baar mic permission le lo. Return: true = granted (ya pehle se), false = denied/unsupported. */
+  async function ensureMicPermission() {
+    if (!hasMedia()) return false;
+    const known = await micPermissionState();
+    if (known === 'granted') { markMicAsked(); return true; }
+    if (known === 'denied') { markMicAsked(); return false; }
+    if (micAsked()) return false; // pooch chuke hain — dobara kabhi nahi
+    markMicAsked(); // prompt se PEHLE flag — doosre tabs ya double-call par prompt repeat na ho
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((t) => { try { t.stop(); } catch { /* ignore */ } }); // turant chhodo — sirf permission chahiye thi
+      toast('🎙️ Mic ready — Live Assist ab bina kisi prompt ke turant chalega', 'ok');
+      return true;
+    } catch {
+      return false; // denied/unsupported — chup-chaap; dobara kabhi nahi poochenge
+    }
+  }
+
   function teardownMedia() {
     if (st.localStream) { try { st.localStream.getTracks().forEach((t) => t.stop()); } catch { /* ignore */ } st.localStream = null; }
     if (st.pc) { try { st.pc.ontrack = null; st.pc.onicecandidate = null; st.pc.onconnectionstatechange = null; st.pc.close(); } catch { /* ignore */ } st.pc = null; }
@@ -128,7 +163,7 @@ window.FF = window.FF || {};
         video: s.mode === 'video' ? { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } } : false
       });
     } catch (err) {
-      toast('Mic/camera permission nahi mili — browser ki site settings me allow karke dobara try karo. Session end kiya.', 'err');
+      toast('Mic/camera permission nahi mili — address bar ke 🔒 lock icon → Site settings → Microphone/Camera Allow karo, phir dobara Allow dabao. Session end kiya.', 'err');
       api(`/api/live-assist/${encodeURIComponent(s.id)}/end`, 'POST', {}).catch(() => {});
       st.session = null;
       return;
@@ -410,6 +445,20 @@ window.FF = window.FF || {};
       pollInbox();
     }, 3000);
     setTimeout(pollInbox, 1200);
+    // 🎙️ Mic permission — site khulne par pehle user gesture par EK HI BAAR (baad me kabhi nahi).
+    if (typeof document !== 'undefined' && document.addEventListener && hasMedia()) {
+      const onceGesture = () => {
+        document.removeEventListener('pointerdown', onceGesture);
+        document.removeEventListener('keydown', onceGesture);
+        document.removeEventListener('touchstart', onceGesture);
+        if (micAsked()) return;
+        if (document && document.visibilityState === 'hidden') return;
+        ensureMicPermission();
+      };
+      ['pointerdown', 'keydown', 'touchstart'].forEach((ev) => document.addEventListener(ev, onceGesture, { passive: true }));
+      // Agar permission pehle se granted hai to gesture ka wait hi mat karo — flag set kar do.
+      micPermissionState().then((s) => { if (s === 'granted' || s === 'denied') markMicAsked(); });
+    }
   }
   function stop() {
     if (st.inboxTimer) { clearInterval(st.inboxTimer); st.inboxTimer = null; }
@@ -425,6 +474,7 @@ window.FF = window.FF || {};
     start, stop,
     adminRequest,
     endUserSession,
+    ensureMicPermission,
     get session() { return st.session ? { ...st.session } : null; },
     get supported() { return hasMedia() && hasRTC(); }
   };

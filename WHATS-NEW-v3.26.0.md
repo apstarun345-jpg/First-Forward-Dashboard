@@ -39,6 +39,14 @@ WebRTC se seedha stream hoti hai. Ye feature **transparency-first** hai — chup
 - Tests: `dev/live-assist.test.js` — consent lifecycle, privacy guards, signalling echo-filter,
   durability. **Total 256 tests pass.**
 
+## 🎙️ One-time mic permission (site khulte hi ek baar)
+- Login ke baad pehle click/keypress par **ek hi baar** browser ka mic prompt dikhta hai.
+- Grant hote hi Chrome permission ko origin ke liye yaad rakhta hai — **phir kabhi prompt nahi**,
+  har Live Assist session bina ruke turant connect hota hai.
+- Deny kiya ya kisi aur browser me flag set hai → dobara kabhi nahi poocha jaata (localStorage
+  `ff_mic_permission_asked`); user ko chahiye to 🔒 lock icon → Site settings se allow karna hota hai.
+- Permission-test ke turant baad mic track stop kar diya jaata hai — is step me koi audio capture nahi.
+
 ## Baaki
-- Version bumps: app shell `?v=49`, service worker cache `apnapayment-v55`, package `3.26.0`.
+- Version bumps: app shell `?v=50`, service worker cache `apnapayment-v56`, package `3.26.0`.
 - `package.json check` me liveAssist.js syntax gate add.
