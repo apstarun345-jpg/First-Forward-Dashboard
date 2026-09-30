@@ -49,7 +49,7 @@ test('shared Direct Agent classifier: channel-specific rules (FF = APS, GV = no 
 });
 
 test('direct agent rule is wired site-wide (page, GV + FF dispatch filters, settings tab)', async () => {
-  const [config, app, gvpages, performance, cockpit, insights, gv, settings, direct, index, server, pkg] = await Promise.all([
+  const [config, app, gvpages, performance, cockpit, insights, gv, settings, direct, index, lazy, server, pkg] = await Promise.all([
     fs.readFile(new URL('../config.js', import.meta.url), 'utf8'),
     fs.readFile(new URL('../app.js', import.meta.url), 'utf8'),
     fs.readFile(new URL('../gvpages.js', import.meta.url), 'utf8'),
@@ -60,15 +60,17 @@ test('direct agent rule is wired site-wide (page, GV + FF dispatch filters, sett
     fs.readFile(new URL('../settings.js', import.meta.url), 'utf8'),
     fs.readFile(new URL('../directAgents.js', import.meta.url), 'utf8'),
     fs.readFile(new URL('../index.html', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../lazy.js', import.meta.url), 'utf8'),
     fs.readFile(new URL('../server.js', import.meta.url), 'utf8'),
     fs.readFile(new URL('../package.json', import.meta.url), 'utf8')
   ]);
   assert.match(config, /direct:\s*\{/, 'config has the direct rules block');
   assert.match(config, /ffTlNames: \['APS'\]/, 'FF rule default = APS');
   assert.match(app, /id: 'directAgents'/, 'sidebar route exists');
-  assert.match(index, /directAgents\.js/, 'directAgents.js is loaded');
+  // ⚡ directAgents ab lazy module hai — index.html (eager core) ya lazy.js ke page group me hona chahiye.
+  assert.match(index + lazy, /directAgents\.js|['"]directAgents['"]/, 'directAgents.js eager ya lazy rollup me loaded hai');
   assert.match(server, /key: 'directAgents'/, 'permission registered');
-  assert.match(pkg, /wowzone masterSearch directAgents/, 'syntax check covers directAgents.js');
+  assert.match(pkg, /wowzone/, 'syntax check list me wowzone'); assert.match(pkg, /masterSearch/, 'syntax check list me masterSearch'); assert.match(pkg, /directAgents/, 'syntax check covers directAgents.js');
   assert.match(direct, /FF\.pages\.directAgents = /, 'page exported');
   assert.match(direct, /ruleBanner/, 'shared rule banner exported');
   assert.match(gvpages, /__direct__/, 'GV TL filters get a Direct Agents option');

@@ -42,14 +42,30 @@ window.FF = window.FF || {};
     jobs.set(key, p);
     return p;
   }
+  // ⚡ Boot order: pehle wo datasets jo Home/first paint ke liye chahiye, phir baaki.
+  //    Sab ek saath (9 queries) bhejne par Google gviz ki ek hi sheet serialise karti hai aur
+  //    pehla page late paint hota tha — isliye 3 workers me limited queue.
+  const PRIORITY = ['daily', 'agents', 'agentClass', 'report', 'stock', 'stockAgents', 'status', 'agentDailyClass', 'stockTypes'];
+  const LOAD_WORKERS = 3;
+  async function runQueue(keys, fresh) {
+    const queue = keys.slice();
+    const workers = Array.from({ length: Math.max(1, Math.min(LOAD_WORKERS, queue.length)) }, async () => {
+      while (queue.length) {
+        const key = queue.shift();
+        await loadKey(key, !!fresh).catch(() => {});
+      }
+    });
+    await Promise.all(workers);
+  }
   function preload(fresh) {
     if (state.loading) return state.promise;
     if (state.promise && !fresh && !Object.keys(state.errors).length) return state.promise;
-    const keys = Object.keys(DATASETS);
+    const all = Object.keys(DATASETS);
+    const keys = [...PRIORITY.filter((k) => all.includes(k)), ...all.filter((k) => !PRIORITY.includes(k))];
     const version = generation;
     state.loading = true; state.errors = {}; state.progress = { done: 0, total: keys.length };
     emit('start');
-    state.promise = Promise.allSettled(keys.map((key) => loadKey(key, !!fresh))).then(() => {
+    state.promise = runQueue(keys, fresh).then(() => {
       if (version === generation) {
         state.loading = false; state.loadedAt = Date.now();
         emit('done');
@@ -65,6 +81,15 @@ window.FF = window.FF || {};
     if (state.data[key] !== undefined) return state.data[key];
     if (!state.promise) preload(false);
     return loadKey(key, false);
+  }
+  /** ⚡ Sirf chune hue datasets ko fresh dobara load karo (auto-sync ke liye — poora preload nahi). */
+  async function refresh(keys) {
+    const list = ((keys && keys.length) ? keys : ['daily', 'report']).filter((k) => DATASETS[k]);
+    state.errors = state.errors || {};
+    await runQueue(list, true);
+    state.loadedAt = Date.now();
+    emit('refresh');
+    return state;
   }
   function reset() {
     generation++; jobs.clear(); state.loading = false; state.promise = null;
@@ -92,5 +117,5 @@ window.FF = window.FF || {};
     return items;
   }
 
-  FF.store = { preload, get, error, need, reset, on, people, suggestions, DATASETS, get state() { return state; }, get loadedAt() { return state.loadedAt; }, get loading() { return state.loading; } };
+  FF.store = { preload, refresh, get, error, need, reset, on, people, suggestions, DATASETS, get state() { return state; }, get loadedAt() { return state.loadedAt; }, get loading() { return state.loading; } };
 })(window.FF);

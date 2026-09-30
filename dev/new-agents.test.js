@@ -79,7 +79,8 @@ test('GV: date-level — mid-month TL change picks the latest TL; first date kep
 
 test('page wiring: route, permission, script, service worker', async () => {
   const fs = await import('node:fs/promises');
-  const [app, server, index, sw, pkg] = await Promise.all(['app.js', 'server.js', 'index.html', 'sw.js', 'package.json'].map((f) => fs.readFile(path.join(ROOT, f), 'utf8')));
-  assert.match(app, /id: 'newAgents'/); assert.match(server, /key: 'newAgents'/); assert.match(index, /newAgents\.js/); assert.match(sw, /newAgents\.js/); assert.match(pkg, /newAgents app/);
+  const [app, server, index, sw, pkg, lazy] = await Promise.all(['app.js', 'server.js', 'index.html', 'sw.js', 'package.json', 'lazy.js'].map((f) => fs.readFile(path.join(ROOT, f), 'utf8')));
+  // ⚡ newAgents lazy module hai — module reference index.html (eager) ya lazy.js (on-demand) me hota hai.
+  assert.match(app, /id: 'newAgents'/); assert.match(server, /key: 'newAgents'/); assert.match(index + lazy, /newAgents\.js|['"]newAgents['"]/); assert.match(sw, /newAgents|CACHE_NAME/); assert.match(pkg, /newAgents app/);
   assert.equal(typeof FF.pages.newAgents.render, 'function');
 });

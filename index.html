@@ -10,7 +10,7 @@
   <link id="site-favicon" rel="icon" type="image/svg+xml" href="favicon.svg?v=5">
   <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png?v=5">
   <link rel="apple-touch-icon" href="icon-192.png?v=5">
-  <link rel="stylesheet" href="styles.css?v=43">
+  <link rel="stylesheet" href="styles.css?v=45">
   <script>try { if (localStorage.getItem('ff_theme') === 'dark') document.documentElement.dataset.theme = 'dark'; } catch (e) {}</script>
 </head>
 <body>
@@ -70,52 +70,34 @@
     <div class="drawer-body" id="drawer-body"></div>
   </aside>
 
-  <script defer src="config.js?v=43"></script>
-  <script defer src="util.js?v=43"></script>
-  <script defer src="i18n.js?v=43"></script>
-  <script defer src="xlsx.js?v=43"></script>
-  <script defer src="data.js?v=43"></script>
-  <script defer src="charts.js?v=43"></script>
-  <script defer src="model.js?v=43"></script>
-  <script defer src="filters.js?v=43"></script>
-  <script defer src="store.js?v=43"></script>
-  <script defer src="gv.js?v=43"></script>
-  <script defer src="directAgents.js?v=43"></script>
-  <script defer src="masterProfile.js?v=43"></script>
-  <script defer src="newAgents.js?v=43"></script>
-  <script defer src="preload.js?v=43"></script>
-  <script defer src="auth.js?v=43"></script>
-  <script defer src="notifications.js?v=43"></script>
-  <script defer src="sheets.js?v=43"></script>
-  <script defer src="dashboard.js?v=43"></script>
-  <script defer src="trend.js?v=43"></script>
-  <script defer src="stock.js?v=43"></script>
-  <script defer src="performance.js?v=43"></script>
-  <script defer src="home.js?v=43"></script>
-  <script defer src="gvpages.js?v=43"></script>
-  <script defer src="compare.js?v=43"></script>
-  <script defer src="tagIssued.js?v=43"></script>
-  <script defer src="chartExplorer.js?v=43"></script>
-  <script defer src="kpiDetail.js?v=43"></script>
-  <script defer src="liveView.js?v=43"></script>
-  <script defer src="settings.js?v=43"></script>
-  <script defer src="targets.js?v=43"></script>
-  <script defer src="tv.js?v=43"></script>
-  <script defer src="map.js?v=43"></script>
-  <script defer src="rangeReport.js?v=43"></script>
-  <script defer src="certificates.js?v=43"></script>
-  <script defer src="insights.js?v=43"></script>
-  <script defer src="cockpit.js?v=43"></script>
-  <script defer src="dispatchPlanner.js?v=43"></script>
-  <script defer src="wow.js?v=43"></script>
-  <script defer src="wowzone.js?v=43"></script>
-  <script defer src="masterSearch.js?v=43"></script>
-  <script defer src="assistant.js?v=43"></script>
-  <script defer src="morningCard.js?v=43"></script>
-  <script defer src="officeBell.js?v=43"></script>
-  <script defer src="sprints.js?v=43"></script>
-  <script defer src="stockRadar.js?v=43"></script>
-  <script defer src="app.js?v=43"></script>
-  <script defer src="palette.js?v=43"></script>
+  <!-- ⚡ Eager core: shell + Home + search + KPI drawer. Baaki page modules (insights, settings,
+       gvpages, cockpit, wow*, stock, trend, dashboard, targets, dispatch… ~1.5 MB) ab lazy.js
+       us page ko kholne par load karta hai, aur login ke baad idle me background warm karta hai. -->
+  <script defer src="config.js?v=45"></script>
+  <script defer src="util.js?v=45"></script>
+  <script defer src="i18n.js?v=45"></script>
+  <script defer src="xlsx.js?v=45"></script>
+  <script defer src="data.js?v=45"></script>
+  <script defer src="charts.js?v=45"></script>
+  <script defer src="model.js?v=45"></script>
+  <script defer src="filters.js?v=45"></script>
+  <script defer src="store.js?v=45"></script>
+  <script defer src="gv.js?v=45"></script>
+  <script defer src="preload.js?v=45"></script>
+  <script defer src="auth.js?v=45"></script>
+  <script defer src="notifications.js?v=45"></script>
+  <script defer src="sheets.js?v=45"></script>
+  <script defer src="liveView.js?v=45"></script>
+  <script defer src="kpiDetail.js?v=45"></script>
+  <script defer src="home.js?v=45"></script>
+  <script defer src="performance.js?v=45"></script>
+  <script defer src="masterProfile.js?v=45"></script>
+  <script defer src="masterSearch.js?v=45"></script>
+  <script defer src="palette.js?v=45"></script>
+  <script defer src="assistant.js?v=45"></script>
+  <script defer src="officeBell.js?v=45"></script>
+  <script defer src="morningCard.js?v=45"></script>
+  <script defer src="lazy.js?v=45"></script>
+  <script defer src="app.js?v=45"></script>
 </body>
 </html>

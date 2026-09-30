@@ -289,6 +289,8 @@ function parseWhere(tokens) {
   let i = 0;
   const peek = () => (tokens[i] || '').toLowerCase();
   function primary() {
+    // `not ( … )` — gviz ise support karta hai (app FF/GV channel separation me use karta hai).
+    if (peek() === 'not') { i++; const inner = primary(); return (r) => !inner(r); }
     if (peek() === '(') { i++; const e = orExpr(); i++; return e; }
     let fn = null, col = tokens[i++];
     if (/^(lower|upper|todate)$/i.test(col)) { fn = col.toLowerCase(); i++; col = tokens[i++]; i++; }

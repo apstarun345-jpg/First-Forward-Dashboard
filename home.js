@@ -76,6 +76,16 @@ FF.pages = FF.pages || {};
     const quick = U.$('#home-quick', root);
 
     // ---- data (parallel, har section apne data par khud paint hota hai — blank screen nahi) ------
+    // ⚡ Pehla paint: chhota /api/today feed (server par cached) — bade datasets ka intezaar nahi.
+    const feedP = (canFf || canGv) ? FF.data.today().catch(() => null) : Promise.resolve(null);
+    feedP.then((feed) => {
+      if (feed) FF.homeFeed = feed;   // FF aaj ka live EIR count (T+1 note ke saath dikhane ke liye)
+      if (!feed || !root.isConnected || !quick || quick.dataset.final === '1' || quick.innerHTML) return;
+      const gvN = feed.gv ? feed.gv.total : 0, ffN = feed.ff ? feed.ff.total : 0;
+      const ffNote = feed.ff && (feed.ff.throughYesterday || !ffN) ? ' <small>· T+1 (kal)</small>' : '';
+      quick.innerHTML = `<div class="chip-row"><span class="chip on" title="GV Master sheet se live">🟩 GV aaj (GV Master · live) <b>${U.fmt(gvN)}</b></span><span class="chip" title="EIR sheet">🟦 FF aaj (EIR) <b>${U.fmt(ffN)}</b>${ffNote}</span><span class="chip dim">⚡ live feed ${feed.gv && feed.gv.cached ? '(cached)' : ''}</span></div>`;
+      if (quick.parentNode) quick.parentNode.dataset.feed = '1';
+    }).catch(() => {});
     const dailyP = (canFf || canGv) ? S.need('daily').catch(() => null) : Promise.resolve(null);
     const stockP = canFf ? S.need('stock').catch(() => null) : Promise.resolve(null);
     const gvStockP = canGv ? G.need('stockClass').catch(() => null) : Promise.resolve(null);
@@ -98,16 +108,22 @@ FF.pages = FF.pages || {};
     const gvPrev = M.summary(st.gv, U.prevMonthKey(curKey), gvSum.lastDay || undefined);
     const todayK = U.dateKey(new Date());
     const ffToday = U.sum(st.ff.filter((r) => r.key === todayK), (r) => r.n);
-    const gvToday = U.sum(st.gv.filter((r) => r.key === todayK), (r) => r.n);
+    // 🟩 GV aaj = GV MASTER sheet (live). EIR se nahi — kyunki GV ka aaj ka data wahi live hota hai.
+    const gvLive = (G && typeof G.gvToday === 'function') ? G.gvToday() : null;
+    const gvMasterReady = !!(gvLive && gvLive.loaded);
+    const gvToday = gvMasterReady ? gvLive.total : U.sum(st.gv.filter((r) => r.key === todayK), (r) => r.n);
+    const gvTodayRows = gvMasterReady ? gvLive.rows : st.gv.filter((r) => r.key === todayK);
     const ffPendingToday = FF.filters ? FF.filters.isFfPending(todayK) : false;
 
     // ---- quick chips (filters ke saath) ----------------------------------------------------------
     if (quick) {
+      quick.dataset.final = '1';
       const items = [];
       items.push(`<span class="chip ${ffPendingToday ? '' : 'on'}">🟦 FF ${esc(U.labelYM(curKey, true))} <b>${U.fmt(ffSum.total)}</b> ${U.deltaHtml(U.growth(ffSum.total, ffPrev.total))}</span>`);
       items.push(`<span class="chip on">🟩 GV ${esc(U.labelYM(curKey, true))} <b>${U.fmt(gvSum.total)}</b> ${U.deltaHtml(U.growth(gvSum.total, gvPrev.total))}</span>`);
-      items.push(`<span class="chip on">🟩 GV aaj (live) <b>${U.fmt(gvToday)}</b></span>`);
-      items.push(`<span class="chip ${ffPendingToday ? '' : 'on'}">🟦 FF aaj <b>${U.fmt(ffToday)}</b>${ffPendingToday ? ' <small>· kal aayega</small>' : ''}</span>`);
+      items.push(`<span class="chip on" title="GV Master sheet se live">🟩 GV aaj (GV Master · live) <b>${U.fmt(gvToday)}</b></span>`);
+      const ffLiveNote = ffPendingToday && FF.homeFeed && FF.homeFeed.ff && FF.homeFeed.ff.total > 0 ? ` <small>· EIR me abhi ${U.fmt(FF.homeFeed.ff.total)}</small>` : '';
+      items.push(`<span class="chip ${ffPendingToday ? '' : 'on'}" title="First Forward aaj = EIR sheet (T+1)">🟦 FF aaj <b>${U.fmt(ffToday)}</b>${ffPendingToday ? ' <small>· kal aayega</small>' : ''}${ffLiveNote}</span>`);
       if (f.active.length) items.push(`<span class="chip">🧭 ${esc(f.active.map((a) => a.label).join(' · '))}</span>`);
       quick.innerHTML = `<div class="chip-row">${items.join('')}</div>`;
     }
@@ -125,13 +141,14 @@ FF.pages = FF.pages || {};
       if (FF.preloader && FF.preloader.state && FF.preloader.state.errors.length) issues.push({ icon: '⚠️', label: `${FF.preloader.state.errors.length} sheet(s) need retry`, href: '#/settings?tab=data' });
       if (!pulseTotal) issues.push({ icon: '🟡', label: 'No issuance in the latest source date', href: '#/tagIssued' });
       if (!issues.length) issues.push({ icon: '✅', label: 'No immediate blocker in the loaded snapshot', href: '#/performance' });
-      const ffNote = ffPendingToday ? `<span class="home-ff-pending">(T+1 — kal aayega)</span>` : '';
+      const ffLiveTotal = (FF.homeFeed && FF.homeFeed.ff && FF.homeFeed.ff.total) || 0;
+      const ffNote = ffPendingToday ? `<span class="home-ff-pending">(T+1 — kal aayega${ffLiveTotal ? ` · EIR me abhi ${U.fmt(ffLiveTotal)} rows` : ''})</span>` : '';
       glance.innerHTML = `<section class="card glance-card"><div class="card-head"><div><h2>Today at a glance</h2><p class="sub">Aaj ka pulse · ${esc(f.isDefault ? 'poora data' : f.active.map((a) => a.label).join(' · '))} · action-required items</p></div><div class="glance-fresh ${freshness}" title="Last successful data load">◉ ${esc(freshnessText)}</div></div><div class="glance-grid">
         <div class="glance-pulse" data-kpi="src=both&scope=day&date=${esc(todayK)}" data-kpi-title="Aaj ka pulse">
           <span class="glance-eyebrow">AAJ · ${esc(U.labelDate(new Date(), true))}</span>
           <strong>${U.fmt(pulseTotal)}</strong>
-          <span>tags aaj (GV live + FF ${ffPendingToday ? '0 — kal aayega' : U.fmt(ffToday)})</span>
-          <div class="glance-breakdown"><b>🟩 GV ${U.fmt(gvToday)} <small>live</small></b><b>🟦 FF ${U.fmt(ffToday)} ${ffNote}</b></div>
+          <span>tags aaj (GV Master live + FF ${ffPendingToday ? '0 — kal aayega' : U.fmt(ffToday)})</span>
+          <div class="glance-breakdown"><b>🟩 GV ${U.fmt(gvToday)} <small>GV Master · live</small></b><b>🟦 FF ${U.fmt(ffToday)} ${ffNote}</b></div>
         </div>
         <div class="glance-kpis">
           <div data-kpi="src=ff&scope=mtd&ym=${esc(curKey)}" data-kpi-title="FF MTD"><small>🟦 FF MTD</small><b>${U.fmt(ffSum.total)}</b><span>${U.deltaHtml(U.growth(ffSum.total, ffPrev.total))} vs last same · ${esc(U.labelYM(curKey, true))}</span></div>
@@ -140,7 +157,7 @@ FF.pages = FF.pages || {};
         </div>
         <div class="glance-actions"><h3>Action required <span>${issues.length}</span></h3>${issues.map((x) => `<a href="${x.href}"><span>${x.icon}</span><b>${esc(x.label)}</b><span>→</span></a>`).join('')}</div>
         <div class="glance-highlights"><h3>Top issuing agents · ${esc(U.labelYM(curKey, true))}</h3><div id="home-top-agents">${U.spinner('Agents…')}</div></div>
-      </div><div class="glance-footer"><span>${esc(sourceDate ? `Source latest date ${U.labelDate(sourceDate, true)}` : '')} · GV live (EIR master ID ${esc(FF.config.eir.gvMasterId || '5845036')}) · FF T+1</span><button class="btn small" data-action="focus-mode">🎯 Focus mode</button><button class="btn small" data-action="notifications">🔔 Notifications</button></div></section>`;
+      </div><div class="glance-footer"><span>${esc(sourceDate ? `Source latest date ${U.labelDate(sourceDate, true)}` : '')} · 🟩 GV aaj <b>GV Master sheet</b> se (live${gvMasterReady ? '' : ' · load ho raha hai'}) · 🟦 FF aaj <b>EIR</b> se (T+1)</span><button class="btn small" data-action="focus-mode">🎯 Focus mode</button><button class="btn small" data-action="notifications">🔔 Notifications</button></div></section>`;
       const topMount = U.$('#home-top-agents', glance);
       if (topMount) {
         const byAgent = new Map();
@@ -153,11 +170,12 @@ FF.pages = FF.pages || {};
     }
 
     // ---- 🟩 GV · AAJ KA LIVE (fast path) ---------------------------------------------------------
-    const gvLive = U.$('#home-gv-live', root);
-    if (gvLive) {
+    const gvLiveCard = U.$('#home-gv-live', root);
+    if (gvLiveCard) {
       const gvRows = st.gv;
       const tk = todayK;
-      const todayRows = gvRows.filter((r) => r.key === tk);
+      // Aaj ki rows = GV Master sheet (jab load ho chuki ho), warna EIR fallback.
+      const todayRows = gvTodayRows;
       const sum = (fn) => U.sum(todayRows.filter(fn), (r) => Number(r.n) || 1);
       const gvAajTotal = U.sum(todayRows, (r) => Number(r.n) || 1);
       const wd = new Date().getDay();
@@ -167,7 +185,7 @@ FF.pages = FF.pages || {};
       const runRate = last4.length ? Math.round(last4.reduce((n, [, v]) => n + v, 0) / last4.length) : null;
       const hoursGone = Math.max(1, (Date.now() - new Date().setHours(0, 0, 0, 0)) / 3600000);
       const paceProj = gvAajTotal > 0 ? Math.round((gvAajTotal / hoursGone) * 24) : null;
-      gvLive.innerHTML = `<section class="card gv-aaj"><div class="card-head"><h3>🟩 GV · Aaj ka live <span class="dim">· ${esc(new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' }))}</span></h3>
+      gvLiveCard.innerHTML = `<section class="card gv-aaj"><div class="card-head"><h3>🟩 GV · Aaj ka live <span class="dim">· ${esc(new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' }))} · GV Master sheet se</span></h3>
         <div class="card-right dim">kisi bhi card par click karo → agent-wise poora detail khulega</div></div><div class="card-body">
         <div class="kpi-grid mini gv-aaj-grid">${[
           kpi('g11', 'Aaj Total (GV live)', '🏷️', U.fmt(gvAajTotal), runRate != null ? `expected ${U.fmt(runRate)} · pace ${paceProj != null ? U.fmt(paceProj) : '—'}` : 'aaj ka GV total', `src=gv&scope=day&date=${tk}`),
@@ -180,7 +198,7 @@ FF.pages = FF.pages || {};
           kpi('g1', 'Aaj ki Rate', '⚡', paceProj != null ? U.fmt(paceProj) : U.fmt(gvAajTotal), paceProj != null ? `${U.fmt(gvAajTotal)} ab tak · ${Math.round(hoursGone)}h ke pace par day-end` : 'aaj ka GV rate', `src=gv&scope=day&date=${tk}`),
           kpi('g2', 'Expected Today', '🎯', runRate != null ? U.fmt(runRate) : '—', runRate != null ? `pichhle ${last4.length} same-weekday avg` : 'history kam hai', `src=gv&scope=day&date=${tk}`)
         ].join('')}</div>
-        <p class="dim small">🟩 GV live chalta hai · 🟦 FF ka data T+1 aata hai (aaj ka kal) — isliye FF aaj <b>0</b> ginega, kal se dono. Expected = pichhle 4 same-weekday ka run-rate · kisi bhi card par click → kis agent ne lagaye, GV ya FF.</p>
+        <p class="dim small">🟩 <b>GV aaj ka number GV Master sheet se</b> (live, ${esc(U.timeLabel(S.loadedAt || G.loadedAt) || 'abhi')}) · 🟦 FF ka data <b>EIR</b> se T+1 aata hai (aaj ka kal) — isliye FF aaj <b>0</b> ginega, kal se dono. Expected = pichhle 4 same-weekday ka run-rate · kisi bhi card par click → kis agent ne lagaye, GV ya FF.</p>
       </div></section>`;
     }
 
@@ -371,7 +389,7 @@ FF.pages = FF.pages || {};
     if (!cards.length) {
       body.innerHTML = `<div class="empty-state">Is filter me koi data nahi mila — 🧭 filter reset karo ya ↻ Refresh dabao.</div>`;
     } else {
-      body.innerHTML = `${cards.join('')}<p class="foot-note">Highlights — GV &amp; FF charts ke dwara · ${esc(f.label)} · Data ${U.timeLabel(S.loadedAt || G.loadedAt || Date.now())} · 🔁 FF T+1 (aaj FF kal), GV live · Background me saare sheets preload ho rahe hain</p>`;
+      body.innerHTML = `${cards.join('')}<p class="foot-note">Highlights — GV &amp; FF charts ke dwara · ${esc(f.label)} · Data ${U.timeLabel(S.loadedAt || G.loadedAt || Date.now())} · 🟩 GV aaj = GV Master sheet (live) · 🟦 FF aaj = EIR (T+1) · Background me saare sheets preload ho rahe hain</p>`;
     }
     C.mount(body);
 

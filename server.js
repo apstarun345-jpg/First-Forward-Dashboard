@@ -729,6 +729,108 @@ function classBucket(value) {
   if (c === '20' || c === 'VC20') return 'VC20';
   return 'VC5+';
 }
+/** gviz table → [{ date, cls, n }] (col indexes 0/1/2). */
+function countByDateClass(table) {
+  const rows = [];
+  for (const row of (table && table.rows) || []) {
+    const date = serverDate(serverCell(row, 0));
+    if (!date) continue;
+    const cls = classBucket(serverCell(row, 1));
+    const n = serverNumber(serverCell(row, 2));
+    if (!n) continue;
+    rows.push({ date, cls, n });
+  }
+  return rows;
+}
+
+/**
+ * 🛡️ Grouped daily-count query — live sheet me date column kabhi date-typed hota hai, kabhi text.
+ * Isliye 3 koshish, pehli jo chale wahi: (1) seedha compare, (2) toDate(), (3) poora tab (chhota tab).
+ */
+async function gvizDailyClassCounts(cfg) {
+  const { sheetId, tab, dateCol, classCol, countCol, extraWhere, from30 } = cfg;
+  const select = `select ${dateCol}, ${classCol}, count(${countCol})`;
+  const group = `group by ${dateCol}, ${classCol} order by ${dateCol} desc`;
+  const where = (d) => [extraWhere ? `(${extraWhere})` : '', d ? `${d} >= date '${from30}'` : ''].filter(Boolean).join(' and ');
+  const attempts = [
+    { tq: `${select} where ${where(dateCol)} ${group} limit 500`, kind: 'date' },
+    { tq: `${select} where ${where(`toDate(${dateCol})`)} ${group} limit 500`, kind: 'toDate' },
+    { tq: `${select}${extraWhere ? ` where ${extraWhere}` : ''} ${group} limit 2000`, kind: 'full-tab' }
+  ];
+  let lastErr = null;
+  for (const attempt of attempts) {
+    try {
+      const params = new URLSearchParams({ id: String(sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet: tab, tq: attempt.tq });
+      const out = await fetchUpstreamCached(upstreamUrl(params));
+      return { rows: countByDateClass(parseGvizServer(out.body)), cached: !!out.cached, via: attempt.kind };
+    } catch (err) { lastErr = err; }
+  }
+  throw lastErr || new Error('gviz grouped count failed');
+}
+
+/**
+ * ⚡ /api/today — "aaj" ka live feed (chhota aur cached).
+ *   • GV  = GV Partner sheet ka **GV Master** tab (live)  → P(date) × G(class) count
+ *   • FF  = First Forward sheet ka **EIR** tab (T+1 ledger) → AA(date) × D(class) count
+ * Grouped-by-date queries Google par sasti hain, isliye Home pehle paint yahi se le leta hai.
+ */
+const todayFeedCache = { at: 0, body: null, promise: null };
+async function todayFeed(force) {
+  const ttl = 45e3; // 45s — "live" rehne ke liye chhota TTL, aur Google par load bhi kam
+  if (!force && todayFeedCache.body && Date.now() - todayFeedCache.at < ttl) return { ...todayFeedCache.body, cached: true };
+  if (todayFeedCache.promise) return todayFeedCache.promise;
+  todayFeedCache.promise = (async () => {
+    const settings = db.settings || {};
+    const day = dateKeyNow();
+    const [y, m, d] = day.split('-').map(Number);
+    const dayStart30 = new Date(Date.UTC(y, m - 1, d - 29));
+    const from30 = `${dayStart30.getUTCFullYear()}-${pad2(dayStart30.getUTCMonth() + 1)}-${pad2(dayStart30.getUTCDate())}`;
+    const sum = (rows, filter) => rows.reduce((a, r) => a + (!filter || filter(r) ? r.n : 0), 0);
+    const result = { ok: true, date: day, at: new Date().toISOString(), gv: null, ff: null };
+
+    // ---- 🟩 GV · GV Master tab (live) ----
+    try {
+      const gv = settings.gv && settings.gv.master || {};
+      const tab = gv.tab || 'GV Master';
+      const dateCol = gv.date || 'P', classCol = gv.cch || gv.vClass || 'G', tagCol = gv.tagId || 'I';
+      const out = await gvizDailyClassCounts({ sheetId: settings.gvSheetId, tab, dateCol, classCol, countCol: tagCol, from30 });
+      const rows = out.rows;
+      const today = rows.filter((r) => r.date === day);
+      result.gv = {
+        source: 'GV Master', live: true, total: sum(today),
+        classes: today.reduce((acc, r) => { acc[r.cls] = (acc[r.cls] || 0) + r.n; return acc; }, {}),
+        series: rows.filter((r) => r.date >= from30).reduce((acc, r) => { acc[r.date] = (acc[r.date] || 0) + r.n; return acc; }, {}),
+        cached: !!out.cached, query: out.via
+      };
+    } catch (err) { result.gvError = err.message; }
+
+    // ---- 🟦 FF · EIR tab (GV master ID ki rows FF me count nahi hoti) ----
+    try {
+      const e = settings.eir || {};
+      const sheet = settings.eirSheet || e.sheet || 'EIR';
+      const dateCol = e.date || 'AA', classCol = e.cls || 'D', tagCol = e.tagId || 'A', masterCol = e.masterId || 'AU', tlCol = e.tlName || 'BA';
+      const gvId = String(e.gvMasterId || '5845036').trim().replace(/\.0+$/, '');
+      const gvTl = String(e.gvChannelTl || 'ApnaPayment Pvt. Ltd.').replace(/'/g, '');
+      // GV channel = master ID 5845036 (ya legacy: master blank + GV channel TL) — model.channelOf jaisa hi.
+      const extraWhere = `not (${masterCol} = '${gvId}' or (${masterCol} is null and ${tlCol} = '${gvTl}'))`;
+      const out = await gvizDailyClassCounts({ sheetId: settings.sheetId, tab: sheet, dateCol, classCol, countCol: tagCol, extraWhere, from30 });
+      const rows = out.rows;
+      const today = rows.filter((r) => r.date === day);
+      const latest = rows.reduce((acc, r) => (r.date > acc ? r.date : acc), '');
+      result.ff = {
+        source: 'EIR', total: sum(today), latest, throughYesterday: latest ? latest < day : false,
+        classes: today.reduce((acc, r) => { acc[r.cls] = (acc[r.cls] || 0) + r.n; return acc; }, {}),
+        series: rows.reduce((acc, r) => { acc[r.date] = (acc[r.date] || 0) + r.n; return acc; }, {}),
+        cached: !!out.cached, query: out.via
+      };
+    } catch (err) { result.ffError = err.message; }
+
+    todayFeedCache.body = result; todayFeedCache.at = Date.now();
+    return result;
+  })().finally(() => { todayFeedCache.promise = null; });
+  return todayFeedCache.promise;
+}
+
 async function reportSnapshot(source) {
   const s = db.settings;
   const isGv = source === 'gv';
@@ -2303,9 +2405,26 @@ async function checkReports(force = false) {
   })().finally(() => { reportCheckPromise = null; });
   return reportCheckPromise;
 }
+const etagCache = new Map();   // body-key → etag (chhota LRU, sirf header banane ke liye)
+function bodyEtag(body) {
+  const key = `${body.length}:${body.slice(0, 64)}:${body.slice(-64)}`;
+  if (etagCache.has(key)) return etagCache.get(key);
+  const h = crypto.createHash('sha1').update(body).digest('base64url').slice(0, 20);
+  const tag = `W/"${h}"`;
+  if (etagCache.size > 500) etagCache.delete(etagCache.keys().next().value);
+  etagCache.set(key, tag);
+  return tag;
+}
 function sendCached(req, res, entry, tag) {
+  // 🏷️ ETag: same query dobara aaye to 304 (sirf header) — payload dobara transfer nahi hota.
+  const etag = bodyEtag(entry.body);
+  const inm = String(req.headers['if-none-match'] || '');
+  if (inm && inm.split(',').map((x) => x.trim()).includes(etag)) {
+    res.writeHead(304, headers({ ETag: etag, 'X-Cache': tag, 'X-FF-Source': 'proxy', 'X-FF-Age': String(Math.round((Date.now() - entry.at) / 1000)) }));
+    return res.end();
+  }
   return sendMaybeCompressed(req, res, 200, 'text/plain; charset=utf-8', entry.body, {
-    'Cache-Control': 'no-store', 'X-Cache': tag, 'X-FF-Source': 'proxy', 'X-FF-Age': String(Math.round((Date.now() - entry.at) / 1000))
+    'Cache-Control': 'no-store', ETag: etag, 'X-Cache': tag, 'X-FF-Source': 'proxy', 'X-FF-Age': String(Math.round((Date.now() - entry.at) / 1000))
   });
 }
 const HOT = new Map();                 // url → { hits, at } — jo queries sach me use hoti hain
@@ -2337,27 +2456,64 @@ async function refreshCache(url) {
   } catch { /* upstream down — purana cache hi serve hota rahega */ }
   return null;
 }
+// 📊 Query diagnostics — "site slow kyun hai" ka exact jawab: kaunsi query kitni baar kitna time le rahi hai.
+const PERF = new Map();               // key (sheet + short query) → { n, hits, misses, ms, maxMs, lastAt }
+const PERF_LIMIT = 120;
+function perfKey(params) {
+  const sheet = params.get('gid') ? `gid:${params.get('gid')}` : (params.get('sheet') || 'sheet');
+  const tq = String(params.get('tq') || '(full tab)').replace(/\s+/g, ' ').trim();
+  return `${sheet} · ${tq.length > 110 ? `${tq.slice(0, 110)}…` : tq}`;
+}
+function perfNote(params, cacheTag, ms) {
+  const key = perfKey(params);
+  const p = PERF.get(key) || { n: 0, hits: 0, misses: 0, ms: 0, maxMs: 0, lastAt: 0 };
+  p.n++; p.lastAt = Date.now();
+  if (cacheTag === 'HIT' || cacheTag === 'STALE') p.hits++; else { p.misses++; p.ms += ms; if (ms > p.maxMs) p.maxMs = ms; }
+  PERF.set(key, p);
+  if (PERF.size > PERF_LIMIT) PERF.delete(PERF.keys().next().value);
+}
 async function handleGviz(req, res, params) {
   const fresh = params.get('fresh') === '1';
   const url = upstreamUrl(params);
+  const started = Date.now();
   const hit = cache.get(url);
   markHot(url);
   if (hit && !fresh) {
-    if (Date.now() - hit.at < cacheMs()) return sendCached(req, res, hit, 'HIT');
+    if (Date.now() - hit.at < cacheMs()) { perfNote(params, 'HIT', 0); return sendCached(req, res, hit, 'HIT'); }
     // ⚡ Stale-while-revalidate: expired entry turant serve karo, naya data peeche se aa jayega.
     void refreshCache(url);
+    perfNote(params, 'STALE', 0);
     return sendCached(req, res, hit, 'STALE');
   }
   try {
     const { status, body } = await upstreamOnce(url);
-    if (status >= 200 && status < 300 && goodGvizBody(body)) return sendCached(req, res, remember(url, body, status), 'MISS');
-    if (hit) return sendCached(req, res, hit, 'STALE');
-    if (!(status >= 200 && status < 300)) return sendJson(res, 502, { error: `Google Sheets responded ${status}. Sheet public ("Anyone with the link") hai?` });
+    const ms = Date.now() - started;
+    if (status >= 200 && status < 300 && goodGvizBody(body)) { perfNote(params, 'MISS', ms); return sendCached(req, res, remember(url, body, status), 'MISS'); }
+    if (hit) { perfNote(params, 'STALE', ms); return sendCached(req, res, hit, 'STALE'); }
+    if (!(status >= 200 && status < 300)) { perfNote(params, 'MISS', ms); return sendJson(res, 502, { error: `Google Sheets responded ${status}. Sheet public ("Anyone with the link") hai?` }); }
+    perfNote(params, 'MISS', ms);
     return sendMaybeCompressed(req, res, 200, 'text/plain; charset=utf-8', body, { 'Cache-Control': 'no-store', 'X-Cache': 'MISS', 'X-FF-Source': 'proxy' });
   } catch (error) {
+    perfNote(params, 'MISS', Date.now() - started);
     if (hit) return sendCached(req, res, hit, 'STALE');
     return sendJson(res, 502, { error: `Google Sheet se data nahi mila: ${error.name === 'AbortError' ? 'timeout' : error.message}` });
   }
+}
+/** 📊 Admin diagnostics: kaunsi Google query slow hai, cache me kitna hit ho raha hai, kya warm hai. */
+function perfReport() {
+  const queries = [...PERF.entries()].map(([key, v]) => ({
+    key, calls: v.n, cacheHits: v.hits, upstream: v.misses,
+    avgMs: v.misses ? Math.round(v.ms / v.misses) : 0, maxMs: v.maxMs, lastAt: new Date(v.lastAt).toISOString()
+  })).sort((a, b) => b.avgMs - a.avgMs || b.calls - a.calls);
+  const warmed = [...HOT.entries()].filter(([, h]) => h.hits >= WARM_MIN_HITS && h.at > Date.now() - 15 * 60e3).length;
+  const hottest = [...HOT.entries()].sort((a, b) => b[1].hits - a[1].hits).slice(0, 10)
+    .map(([url, h]) => ({ url: url.length > 160 ? `${url.slice(0, 160)}…` : url, hits: h.hits }));
+  return {
+    version: '3.22.0', cacheEntries: cache.size, cacheEntriesMax: MAX_CACHE_ENTRIES,
+    cacheSeconds: cacheMs() / 1000, warmedQueries: warmed, hotQueries: hottest,
+    slowest: queries.filter((q) => q.upstream > 0).slice(0, 25),
+    queries
+  };
 }
 // ⚡ Hot queries ko cache me warm rakho — pehla user bhi instant data dekhta hai (Google ka wait nahi).
 const WARM_MIN_HITS = 3;
@@ -2459,7 +2615,24 @@ async function handleApi(req, res, url) {
 
   if (p === '/api/health' && method === 'GET') {
     // pendingSignups sirf admin ko (sidebar badge ke liye) — public health me leak nahi.
-    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.21.0', storage: storageStatus(), push: pushHealth(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length } : {}) });
+    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.22.0', storage: storageStatus(), push: pushHealth(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length } : {}) });
+  }
+  // 📊 Admin-only: exact reason of slowness (Google query timings, cache hit rate, warm queries).
+  if (p === '/api/perf' && method === 'GET') {
+    requireAdmin(user);
+    return sendJson(res, 200, { ok: true, perf: perfReport() });
+  }
+  // ⚡ Aaj ka live feed — chhoti grouped queries (server cache se turant). GV = GV Master tab, FF = EIR.
+  if (p === '/api/today' && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required');
+    const force = url.searchParams.get('fresh') === '1' && user.role === 'admin';
+    try {
+      const feed = await todayFeed(force);
+      return sendJson(res, 200, feed);
+    } catch (err) {
+      if (process.env.DEBUG_TODAY) console.error('[api/today]', err.stack);
+      return sendJson(res, 200, { ok: false, error: err.message, gv: null, ff: null });
+    }
   }
   if (p === '/api/public-config' && method === 'GET') return sendJson(res, 200, publicSettings());
   // App version (sw.js CACHE_NAME) — update-toast ke liye; logged-in se pehle bhi chahiye.
@@ -3411,14 +3584,21 @@ async function serveStatic(req, res, pathname, search) {
     try {
       const stat = await fs.stat(candidate);
       if (!stat.isFile()) continue;
-      const content = await fs.readFile(candidate);
       const ext = path.extname(candidate).toLowerCase();
       const isShell = ext === '.html' || ext === '.webmanifest';
-      // `?v=42` wala asset immutable ho gaya (index.html har deploy par bump karta hai) → repeat visits
-      // par 45 scripts ek baar hi download hote hain, phir 0 requests. HTML/manifest no-cache rehta hai.
+      // `?v=45` wala asset immutable ho gaya (index.html har deploy par bump karta hai) → repeat visits
+      // par scripts ek baar hi download hote hain, phir 0 requests. HTML/manifest no-cache rehta hai.
       const cache = isShell ? 'no-cache' : versioned ? 'public, max-age=31536000, immutable' : 'public, max-age=600';
+      // 🏷️ ETag: HTML/no-cache assets har baar revalidate hote hain — 304 me sirf headers jaate hain
+      // (poore page ka HTML dobara transfer nahi hota), isliye repeat load noticeable fast ho jata hai.
+      const etag = `W/"${stat.size.toString(36)}-${Math.round(Number(stat.mtimeMs)).toString(36)}"`;
+      if (String(req.headers['if-none-match'] || '').split(',').map((x) => x.trim()).includes(etag)) {
+        res.writeHead(304, headers({ ETag: etag, 'Cache-Control': cache, 'X-FF-Cache': 'not-modified' }));
+        return res.end();
+      }
+      const content = await fs.readFile(candidate);
       const type = MIME[ext] || 'application/octet-stream';
-      return sendMaybeCompressed(req, res, 200, type, content, { 'Cache-Control': cache, 'X-FF-Cache': versioned && !isShell ? 'immutable' : 'revalidate' });
+      return sendMaybeCompressed(req, res, 200, type, content, { 'Cache-Control': cache, ETag: etag, 'X-FF-Cache': versioned && !isShell ? 'immutable' : 'revalidate' });
     } catch { /* try next */ }
   }
   if (!path.extname(requested)) return serveStatic(req, res, '/index.html', search); // pretty URLs → app shell

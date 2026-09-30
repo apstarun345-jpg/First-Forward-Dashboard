@@ -161,7 +161,12 @@ FF.pages = FF.pages || {};
   async function buildFull() {
     if (state.full) return state.full;
     if (state.fullPromise) return state.fullPromise;
-    if (!FF.insights || !FF.insights.loadDetails) return null;
+    // ⚡ insights.js ab lazy module hai — barcode register ke liye usko on-demand load karo.
+    if (!FF.insights || !FF.insights.loadDetails) {
+      if (!FF.lazy || !FF.lazy.inject) return null;
+      await FF.lazy.inject('insights');
+      if (!FF.insights || !FF.insights.loadDetails) return null;
+    }
     state.fullPromise = (async () => {
       const idx = state.light || await buildLight();
       const details = await FF.insights.loadDetails();
@@ -204,9 +209,11 @@ FF.pages = FF.pages || {};
   }
   /** Kick the heavy layer off in the background (non-blocking) — suggestions upgrade automatically. */
   function warmFull() {
-    if (!state.full && !state.fullPromise) buildFull().catch(() => {});
-    // 🧾 profile data (REPORT + stock + class issuance) bhi background me — suggestions me stock/priority dikhane ke liye
-    if (FF.masterProfile && FF.masterProfile.warm) FF.masterProfile.warm().then(emit).catch(() => {});
+    // 🏷️ Barcode register ke liye insights.js chahiye — wo ab lazy module hai, isliye pehle background
+    // me load karo (topbar search khulte hi register bhi taiyaar ho jata hai).
+    const ready = (name) => (typeof FF[name] !== 'undefined' ? Promise.resolve() : (FF.lazy && FF.lazy.inject ? FF.lazy.inject(name) : Promise.resolve()));
+    ready('masterProfile').then(() => { if (FF.masterProfile && FF.masterProfile.warm) return FF.masterProfile.warm(); }).then(emit).catch(() => {});
+    ready('insights').then(() => { state.fullPromise = null; if (!state.full && !state.fullPromise) return buildFull(); }).catch(() => {});
   }
   const MP = () => (FF.masterProfile && FF.masterProfile.supports ? FF.masterProfile : null);
   const allPeople = () => [...((state.full || state.light || {}).people || new Map()).values()];
@@ -291,7 +298,7 @@ FF.pages = FF.pages || {};
       const f = t.ff[0], g = t.gv[0];
       items.push({
         kind: 'cls', kindLabel: 'Barcode',
-        label: t.key,
+        label: U.barcode(t.key),
         sub: [f ? `FF ${f.agentName}` : '', g ? `GV ${g.agentName}` : '', (f && f.cls) || (g && g.cls) || ''].filter(Boolean).join(' · '),
         value: t.key, barcode: t.key
       });
@@ -401,7 +408,7 @@ FF.pages = FF.pages || {};
         ${res.tags.slice(0, 60).map((t) => {
         const f = t.ff[0] || {}, g = t.gv[0] || {};
         const st = tagStatus(t);
-        return `<tr><td><b>${esc(t.key)}</b></td><td>${esc((f.tagId || g.tagId) || '—')}</td>
+        return `<tr><td><b>${esc(U.barcode(t.key))}</b></td><td>${esc((f.tagId || g.tagId) || '—')}</td>
             <td>${esc(f.agentName || '—')}${f.agentId ? `<small>${esc(f.agentId)}</small>` : ''}</td><td>${esc(tlText(f.tlName, 'ff') || '—')}</td>
             <td>${esc(g.agentName || '—')}${g.agentId ? `<small>${esc(g.agentId)}</small>` : ''}</td><td>${esc(tlText(g.tlName, 'gv') || '—')}</td>
             <td>${esc(g.gvName || '—')}${g.gvId ? `<small>${esc(g.gvId)}</small>` : ''}</td><td>${esc(f.cls || g.cls || '—')}</td>
@@ -442,6 +449,7 @@ FF.pages = FF.pages || {};
     </div>`);
     document.body.appendChild(wrap);
     document.body.classList.add('no-scroll');
+    if (FF.app && FF.app.enhanceTables) FF.app.enhanceTables(wrap);
     inlineSingle(wrap.querySelector('.ms-panel-body'), res);
     const box = wrap.querySelector('.ms-panel-box');
     wrap.addEventListener('click', (e) => {
@@ -458,7 +466,7 @@ FF.pages = FF.pages || {};
       const csv = e.target.closest('[data-ms-csv]');
       if (csv) {
         const rows = [];
-        res.tags.forEach((tt) => { const f = tt.ff[0] || {}, g = tt.gv[0] || {}; const st = tagStatus(tt); rows.push(['Tag', tt.key, f.agentName || '', f.tlName || '', g.agentName || '', g.tlName || '', g.gvName || '', f.cls || g.cls || '', st.t, f.allocated || g.allocated || '', '']); });
+        res.tags.forEach((tt) => { const f = tt.ff[0] || {}, g = tt.gv[0] || {}; const st = tagStatus(tt); rows.push(['Tag', U.barcode(tt.key), f.agentName || '', f.tlName || '', g.agentName || '', g.tlName || '', g.gvName || '', f.cls || g.cls || '', st.t, f.allocated || g.allocated || '', '']); });
         res.people.forEach((p) => rows.push(['Person', p.name, KIND_LABEL[p.kind] || p.kind, [...p.tlSet].join(' / '), p.sub || '', '', '', [...p.classMap.keys()].join(' '), '', p.last || '', p.bars.size || p.n]));
         res.ids.forEach((v) => rows.push(['ID', v.id, v.name || '', KIND_LABEL[v.kind] || v.kind, v.tl || '', '', '', '', '', '', '']));
         U.downloadCsv(`master-search-${U.slug(res.q || 'results')}-${U.stamp()}.csv`,

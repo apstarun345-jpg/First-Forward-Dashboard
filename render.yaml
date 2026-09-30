@@ -13,8 +13,11 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "20"
+      # gviz proxy cache (seconds). Live service 600s par chalta hai — isi se repeat queries Google par
+      # dobara nahi jaati (site slow hone ka sabse bada karan). Kam karne par data fresh lagega,
+      # lekin Google Sheets rate-limit + Render CPU dono badhega. 300-900 ke beech rakho.
       - key: CACHE_SECONDS
-        value: "300"
+        value: "600"
       - key: ADMIN_USER
         sync: false
       - key: ADMIN_PASSWORD

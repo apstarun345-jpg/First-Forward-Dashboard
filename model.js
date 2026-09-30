@@ -72,7 +72,30 @@ window.FF = window.FF || {};
         channel, agentId, agentName, tlId: U.clean(D.cellText(r[11])), tlName: U.clean(D.cellText(r[5])), n
       });
     }
-    return rows;
+    return applyGvLiveToday(rows);
+  }
+
+  /**
+   * 🟩 GV AAJ = GV Master sheet (live) — user rule.
+   * First Forward ka aaj ka issuance EIR se aata hai, lekin GV Partner ka aaj ka number GV ke apne
+   * "GV Master" tab se hi liya jaata hai (EIR me GV ka aaj ka data late/partial ho sakta hai).
+   * Ye *replace* hai, add nahi — isliye ek tag do baar kabhi nahi ginta.
+   */
+  async function applyGvLiveToday(rows) {
+    const G = FF.gv;
+    if (!G || typeof G.masterTodayRows !== 'function') return rows;
+    if (typeof G.enabled === 'function' && G.enabled() === false) return rows;
+    if (typeof G.get === 'function' && !Array.isArray(G.get('master')) && typeof G.need === 'function') {
+      // GV Master background me load ho raha hai to uska intezaar (max 10s) — warna aaj ka GV
+      // number ek adhoori EIR row se ban jaata.
+      await Promise.race([G.need('master').catch(() => {}), new Promise((resolve) => setTimeout(resolve, 10000))]);
+    }
+    if (typeof G.get !== 'function' || !Array.isArray(G.get('master'))) return rows;
+    const tk = U.dateKey(new Date());
+    const live = G.masterTodayRows();
+    const kept = rows.filter((r) => !(r.channel === 'GV Partner' && r.key === tk));
+    for (const r of live) kept.push(r);
+    return kept;
   }
 
   /** Today's agent × class × tag-type totals — supports daily leaderboards and profile drill-downs. */

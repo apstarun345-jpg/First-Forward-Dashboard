@@ -29,6 +29,15 @@ window.FF = window.FF || {};
     });
     return state.promise;
   }
+  /** ⚡ Halka refresh — sirf wo datasets jo "aaj live" numbers banate hain (bhaari tab-scan nahi).
+      Auto-sync ke liye: 16 queries ki jagah 3 (daily + GV master + REPORT). */
+  async function lightSync(fresh = true) {
+    const jobs = [FF.store.refresh(['daily', 'report']).catch(() => {})];
+    if (FF.gv && FF.gv.enabled && FF.gv.enabled()) jobs.push(FF.gv.refresh(['master']).catch(() => {}));
+    if (FF.data && FF.data.today) jobs.push(FF.data.today({ fresh: !!fresh }).catch(() => {}));
+    await Promise.all(jobs);
+    return state;
+  }
   async function fastSync(fresh = true) {
     if (state.running) await state.promise;
     // Keep the displayed data while the data stores refresh; sheet view pages remain lazy.
@@ -36,5 +45,5 @@ window.FF = window.FF || {};
     return preloadAll(fresh);
   }
   function reset() { generation++; state.running = false; state.done = false; state.promise = null; state.errors = []; }
-  FF.preloader = { preloadAll, fastSync, reset, get state() { return state; }, get running() { return state.running; }, get done() { return state.done; } };
+  FF.preloader = { preloadAll, fastSync, lightSync, reset, get state() { return state; }, get running() { return state.running; }, get done() { return state.done; } };
 })(window.FF);

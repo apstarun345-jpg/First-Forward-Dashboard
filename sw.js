@@ -1,12 +1,14 @@
 // Versioned app shell + offline data cache.
 // Auth login/logout/password endpoints are NEVER cached. Sheet data (gviz), /api/auth/me and
 // /api/settings are network-first with a cached fallback — internet na ho to last loaded data se app khulta hai.
-const CACHE_NAME = 'apnapayment-v49';
-const DATA_CACHE = 'ff-data-v4';
+const CACHE_NAME = 'apnapayment-v51';
+const DATA_CACHE = 'ff-data-v5';
 const STASH_CACHE = 'ff-push-stash-v1'; // pushsubscriptionchange ke waqt bani subscription yahan rakho
-const ASSETS = ['./', './index.html', './styles.css?v=43', './config.js?v=43', './util.js?v=43', './app.js?v=43', './home.js?v=43', './notifications.js?v=43', './palette.js?v=43', './i18n.js?v=43', './assistant.js?v=43', './masterSearch.js?v=43', './directAgents.js?v=43', './masterProfile.js?v=43', './newAgents.js?v=43', './wowzone.js?v=43', './favicon.svg?v=5', './icon-192.png?v=5', './icon-512.png?v=5'];
+// ⚡ Sirf eager core precache hota hai (pehla paint fast). Baaki page modules (lazy rollup)
+//    pehli use par runtime-cache ho jaate hain — install par 2 MB extra download nahi hota.
+const ASSETS = ['./', './index.html', './styles.css?v=45', './config.js?v=45', './util.js?v=45', './i18n.js?v=45', './xlsx.js?v=45', './data.js?v=45', './charts.js?v=45', './model.js?v=45', './filters.js?v=45', './store.js?v=45', './gv.js?v=45', './preload.js?v=45', './auth.js?v=45', './notifications.js?v=45', './sheets.js?v=45', './liveView.js?v=45', './kpiDetail.js?v=45', './home.js?v=45', './performance.js?v=45', './masterProfile.js?v=45', './masterSearch.js?v=45', './palette.js?v=45', './assistant.js?v=45', './officeBell.js?v=45', './morningCard.js?v=45', './lazy.js?v=45', './app.js?v=45', './logos/apna-payment.png', './favicon.svg?v=5', './icon-192.png?v=5', './icon-512.png?v=5'];
 // Network-first snapshots survive a temporary connection loss; auth/actions remain live-only.
-const OFFLINE_API = (path) => path === '/api/gviz' || path === '/api/auth/me' || path === '/api/settings' || path === '/api/stock-history';
+const OFFLINE_API = (path) => path === '/api/gviz' || path === '/api/today' || path === '/api/auth/me' || path === '/api/settings' || path === '/api/stock-history';
 
 // ---- 🔊 Short notification beep (generated with Web Audio on push, no external asset needed) ----
 // Base64-encoded silent fallback + a simple beep tone via AudioContext doesn't work from SW global scope
