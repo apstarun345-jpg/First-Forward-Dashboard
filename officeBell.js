@@ -353,6 +353,20 @@ window.FF = window.FF || {};
     const text = announceText(keptMovers, totalNew, { ff: keptFf, gv: keptGv });
     const hidden = typeof document !== 'undefined' && document.hidden;
     if (!hidden) floatChip(parts.join(' · '), keptFf > 0 && keptGv > 0 ? 'both' : keptFf > 0 ? 'ff' : 'gv');
+    // 🔔 "Data update ki notification" — bell feed + toast + phone panel (voice neeche alag se).
+    //    Mute ho tab bhi notification aani chahiye — sirf awaaz band hoti hai.
+    if (FF.notifications && FF.notifications.localAlert) {
+      try {
+        FF.notifications.localAlert({
+          type: 'report',
+          title: `📊 Sheet update — +${U.fmt(totalNew)} tags`,
+          body: `${parts.join(' · ')}${keptMovers.length ? ` · ${keptMovers.slice(0, 3).map((m) => `${m.agent} (${m.n})`).join(', ')}` : ''}`,
+          meta: { link: '#/tagIssued' }
+        });
+      } catch { /* notification optional */ }
+    }
+    // ⚡ Page ke numbers bhi turant taaza — light sync (throttled) + current page re-render.
+    if (FF.app && FF.app.syncNow) { try { FF.app.syncNow({ auto: true }).catch(() => {}); } catch { /* optional */ } }
     if (muted()) { updateBtn(); return; }
     if (!voiceOn()) { if (!hidden) ting(parts.length > 1 ? totalNew + 5 : totalNew); updateBtn(); return; }
     if (hidden || !st.unlocked) queueAnnounce(text, totalNew);

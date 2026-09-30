@@ -279,6 +279,25 @@ window.FF = window.FF || {};
   // se month hi tha). Us case me location.hash event nahi aata aur page purana hi rehta tha — isliye
   // jab hash same ho to ye override memory me rakha jaata hai aur page khud dobara render hota hai.
   let paramOverride = null;
+  // ⚡ v3.23 — page id resolve kabhi bhi FF.pages registry par depend NAHI karega. Lazy modules
+  // (settings, wow, insights, gvpages …) apna FF.pages[name] tab register karte hain jab wo load
+  // hon — isliye purana `if (!FF.pages[page]) → firstAllowedPage()` har lazy page ko pehle click
+  // par chup-chaap Home par bhej deta tha, aur uske baad wahi link dobara click karne par hash
+  // same hone se kuch hota hi nahi tha ("panel ke option khulte hi nahi"). Ab PAGES registry
+  // (app.js ka pageDef) bhi valid maana jaata hai — module aage se load ho jayega (lazy.ensure).
+  const PAGE_ALIAS = { gvPartner: 'gvDashboard', comparison: 'compare', gvd: 'gvDashboard', 'gv-ff': 'tagIssued' };
+  function pageKnown(id) {
+    if (!id) return false;
+    if (id === 'sheet' || id === 'settings') return true;
+    if (pageDef(id)) return true;                 // app registry — module load hone se PEHLE bhi valid
+    return !!(FF.pages && FF.pages[id]);          // dynamically registered pages (tests/legacy)
+  }
+  /** Hash ke page id ko valid page me resolve karo (alias map + unknown fallback). */
+  function resolvePage(id) {
+    if (!id) return firstAllowedPage();
+    if (PAGE_ALIAS[id]) return PAGE_ALIAS[id];
+    return pageKnown(id) ? id : firstAllowedPage();
+  }
   function parseHash() {
     const raw = location.hash.replace(/^#\/?/, '');
     const [pathPart, queryPart] = raw.split('?');
@@ -287,7 +306,7 @@ window.FF = window.FF || {};
     new URLSearchParams(queryPart || '').forEach((v, k) => { params[k] = v; });
     let page = segs[0] || firstAllowedPage();
     if (page === 'sheet') { params.name = segs.slice(1).join('/'); }
-    if (!FF.pages[page]) { const alias = { gvPartner: 'gvDashboard', comparison: 'compare', gvd: 'gvDashboard', tagIssued: 'tagIssued', 'gv-ff': 'tagIssued' }; page = alias[page] || firstAllowedPage(); }
+    page = resolvePage(page);
     if (paramOverride && paramOverride.hash === location.hash && paramOverride.page === page) {
       Object.assign(params, paramOverride.params);
     }
@@ -697,6 +716,7 @@ window.FF = window.FF || {};
     } catch (err) { console.error(err); }
     refreshing = false;
     await renderCurrent();
+    await checkFeedChange(true).catch(() => {}); // naya data ho to notification + voice announcement
     const errors = FF.preloader ? FF.preloader.state.errors : [];
     U.toast(errors.length ? 'Some sheets could not update. Retry refresh.' : 'Data updated ✓', errors.length ? 'warn' : 'ok');
   }
@@ -905,6 +925,17 @@ window.FF = window.FF || {};
     window.addEventListener('offline', () => { updateStatus(); U.toast('📴 Offline ho — last loaded data dikhega', 'warn'); });
     U.$('#side-backdrop').addEventListener('click', closeSidebar);
     U.$('#top-refresh').addEventListener('click', refresh);
+    // ⚡ Panel links instant: hover/tap karte hi us page ka lazy module prefetch ho jaata hai
+    //    (pehla click bina ruke khulta hai), aur ACTIVE link dobara click karne par page refresh
+    //    hota hai — pehle hash same hone par kuch nahi hota tha ("click par khulta hi nahi").
+    const prefetchFrom = (el) => {
+      const a = el && el.closest && el.closest('a[href^="#/"]');
+      if (!a || !FF.lazy || !FF.lazy.ensure) return;
+      const id = decodeURIComponent((a.getAttribute('href') || '').replace(/^#\/?/, '').split('?')[0].split('/')[0] || '');
+      if (id && id !== 'sheet') FF.lazy.ensure(id).catch(() => {});
+    };
+    document.addEventListener('mouseover', (e) => prefetchFrom(e.target), { passive: true });
+    document.addEventListener('pointerdown', (e) => prefetchFrom(e.target), { passive: true, capture: true });
     // 📱 Mobile: chhote screen par topbar ek line me fit ho — kam zaroori buttons "⋯" me chhup jaate hain.
     const topActions = U.$('#top-actions');
     const moreBtn = U.$('#top-more');
@@ -936,6 +967,14 @@ window.FF = window.FF || {};
     U.$('#drawer-backdrop').addEventListener('click', closeDrawer);
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeDrawer(); closeSidebar(); toggleUserMenu(false); } });
     document.addEventListener('click', (e) => {
+      // 🔗 Current page ka link dobara click → page re-render (hashchange nahi aata tha → dead click).
+      const sameLink = e.target.closest && e.target.closest('a[href^="#"]');
+      if (sameLink && (sameLink.getAttribute('href') || '') === location.hash) {
+        e.preventDefault();
+        toggleUserMenu(false);
+        renderCurrent();
+        return;
+      }
       if (e.target.closest('[data-global-filter-clear]')) {
         e.preventDefault(); clearGlobalFilters(); return;
       }
@@ -992,6 +1031,103 @@ window.FF = window.FF || {};
       renderCurrent({ bgUpdated: true });
     }
   }
+
+  // ---- 📊🔄 Instant data sync + "data update" notification/voice ---------------------------------
+  // Google Sheet me naya data: office bell (30s poll) ya 5-min light sync detect karta hai →
+  // page numbers turant refresh + bell notification + (voice ON ho to) bol kar announce.
+  const FEED_SIG_KEY = 'ff_feed_sig';
+  let lastSyncAt = 0, syncingNow = null, syncLockUntil = 0;
+  function feedSig(feed) {
+    if (!feed || feed.ok === false) return null;
+    const series = (s) => Object.entries(s || {}).sort().slice(-3).map(([d, n]) => `${d}:${n}`).join(',');
+    const f = feed.ff || {}, g = feed.gv || {};
+    return { ff: Number(f.total) || 0, gv: Number(g.total) || 0, s: `${series(f.series)}|${series(g.series)}` };
+  }
+  function loadFeedSig() {
+    try { const v = JSON.parse(localStorage.getItem(FEED_SIG_KEY) || 'null'); return v && typeof v === 'object' ? v : null; } catch { return null; }
+  }
+  function saveFeedSig(sig) {
+    try { if (sig) localStorage.setItem(FEED_SIG_KEY, JSON.stringify({ ...sig, at: Date.now() })); } catch { /* private mode */ }
+  }
+  /** Pichhle snapshot se badlaav → notification + voice announcement. */
+  function announceDataUpdate(before, after) {
+    const dFf = (after.ff || 0) - (before ? before.ff || 0 : 0);
+    const dGv = (after.gv || 0) - (before ? before.gv || 0 : 0);
+    const total = (after.ff || 0) + (after.gv || 0);
+    const delta = dFf + dGv;
+    const hi = !(FF.assistant && FF.assistant.getLang && FF.assistant.getLang() === 'en');
+    const signed = (n) => `${n >= 0 ? '+' : ''}${U.fmt(n)}`;
+    const body = hi
+      ? `Aaj ka total ${U.fmt(total)} tags ho gaya (${signed(delta)} · FF ${signed(dFf)}, GV ${signed(dGv)}) — Google Sheet se fresh data aa gaya.`
+      : `Today's total is now ${U.fmt(total)} tags (${signed(delta)} · FF ${signed(dFf)}, GV ${signed(dGv)}) — fresh data loaded from Google Sheet.`;
+    const voiceText = hi
+      ? `Data update! Aaj ke ${U.fmt(total)} tags ho gaye — ${signed(delta)} naye.`
+      : `Data update! Today's total is now ${U.fmt(total)} tags — ${signed(delta)} new.`;
+    if (FF.notifications && FF.notifications.localAlert) {
+      FF.notifications.localAlert({
+        type: 'report',
+        title: `📊 Data update — ${U.fmt(total)} tags`,
+        body,
+        meta: { link: '#/tagIssued', ff: after.ff, gv: after.gv, delta },
+        voiceText
+      });
+    }
+  }
+  /** Aaj ka feed totals le kar pichhle snapshot se compare — change ho to announce + sig save. */
+  async function checkFeedChange(announce) {
+    let feed = null;
+    try { feed = await FF.data.today({ fresh: true }); } catch { return null; }
+    const after = feedSig(feed);
+    if (!after) return null;
+    const before = loadFeedSig();
+    saveFeedSig(after);
+    if (announce !== false && before && (before.ff !== after.ff || before.gv !== after.gv || before.s !== after.s)) {
+      announceDataUpdate(before, after);
+    }
+    return after;
+  }
+  /**
+   * ⚡ syncNow — halka refresh (daily + report + GV master + today feed) + change detect.
+   * opts.auto  → throttled (2.5 min min gap) + page auto re-render;
+   * opts.full  → poora preload (manual ↻ path se).
+   */
+  async function syncNow(opts) {
+    const o = opts || {};
+    if (!FF.auth.user) return null;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return null;
+    const conn = (typeof navigator !== 'undefined' && navigator.connection) || null;
+    if (conn && (conn.saveData || /^(slow-)?2g$/.test(String(conn.effectiveType || '')))) return null;
+    if (FF.preloader && FF.preloader.running) return null;
+    if (refreshing) return null;
+    const now = Date.now();
+    if (o.auto && now < syncLockUntil) return null;
+    if (o.auto) syncLockUntil = now + 150e3; // auto callers (office bell / interval) ke liye throttle
+    if (syncingNow) return syncingNow;
+    syncingNow = (async () => {
+      const before = loadFeedSig();
+      try {
+        if (o.full && FF.preloader && FF.preloader.fastSync) await FF.preloader.fastSync(true);
+        else if (FF.preloader && FF.preloader.lightSync) await FF.preloader.lightSync(true);
+        else await FF.store.refresh(['daily', 'report']).catch(() => {});
+      } catch (err) { console.warn('syncNow', err && err.message); }
+      lastSyncAt = Date.now();
+      let after = null;
+      try { after = feedSig(await FF.data.today({ fresh: true })); } catch { /* offline */ }
+      if (after) {
+        saveFeedSig(after);
+        if (before && (before.ff !== after.ff || before.gv !== after.gv || before.s !== after.s)) {
+          announceDataUpdate(before, after);
+        }
+      }
+      if (FF.auth.user && !['settings', 'sheet'].includes(current.page)) onBackgroundDataUpdated();
+      return after;
+    })().finally(() => { syncingNow = null; });
+    return syncingNow;
+  }
+  const onVisibleSync = () => {
+    if (document.visibilityState !== 'visible' || !FF.auth.user) return;
+    if (Date.now() - lastSyncAt > 90e3) syncNow({ auto: true }).catch(() => {});
+  };
 
   let syncTimer = null;
   const appHeartbeat = { timer: null, instance: null };
@@ -1100,19 +1236,22 @@ window.FF = window.FF || {};
     // Location prompt + PWA
     setTimeout(requestLocationOnOpen, 2000);
     updateInstallBtn();
-    // ⚡ Auto background sync — 15 min, sirf halka refresh (daily + GV Master + aaj ka feed).
-    //    Pehle har 5 min me *saare* 16 datasets fresh load hote the (StockDataa/EIR/REPORT full scans) —
-    //    wahi site ki lag ki sabse badi wajah tha: Google Sheets rate limit + poora bandwidth.
+    // ⚡ Auto background sync — ab har 5 min (pehle 15 min tha) + turant jab:
+    //    • tab wapas visible ho (user lautaa),  • office bell ko naye tags dikhein (30s poll),
+    //    • manual ↻. syncNow() feed totals compare karke naya data aane par notification + voice
+    //      announcement bhi karta hai ("data update ki notification / voice se batao").
     clearInterval(syncTimer);
     syncTimer = setInterval(() => {
       if (!FF.auth.user || document.visibilityState !== 'visible') return;
       if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
       const conn = (typeof navigator !== 'undefined' && navigator.connection) || null;
       if (conn && (conn.saveData || /^(slow-)?2g$/.test(String(conn.effectiveType || '')))) return; // data-saver/2G par auto-sync band
-      if (FF.preloader && FF.preloader.running) return;
-      const light = FF.preloader && FF.preloader.lightSync ? FF.preloader.lightSync(true) : FF.preloader.preloadAll(true);
-      light.then(() => { if (FF.auth.user && !['settings', 'sheet'].includes(current.page)) onBackgroundDataUpdated(); }).catch(() => {});
-    }, 15 * 60 * 1000);
+      syncNow({ auto: true });
+    }, 5 * 60 * 1000);
+    // 🔄 Tab wapas kholte hi (90s se purana data ho to) instant light sync — "sheet ka data
+    //    turant update nahi hota" wali complaint ka fix. Background me chalta hai, page re-render hota hai.
+    document.removeEventListener('visibilitychange', onVisibleSync);
+    document.addEventListener('visibilitychange', onVisibleSync);
   }
 
   async function init() {
@@ -1144,6 +1283,6 @@ window.FF = window.FF || {};
     setLang(next);
   }
 
-  FF.app = { storageBanner, pushBanner, liveShareChip, navigate, updateParams, clearGlobalFilters, refresh, openDrawer, closeDrawer, renderSidebar, renderCurrent, renderTopUser, updateStatus, onLogin, onBackgroundDataUpdated, promptInstall, enhanceCharts, enhanceTables, themeMode, toggleThemeMode, lang, setLang, toggleLangMenu, renderGlobalFilters, renderMobileNav, focusMode: updateFocusMode, openAccessibility: renderA11yPanel, tableDensity, setTableDensity, PAGES, refreshPendingBadge, setPendingSignups, shareWhatsApp, checkVersion, exportCSV: () => exportCurrentCsv('csv'), exportXLSX: () => exportCurrentCsv('xlsx'), toggleTheme: toggleThemeMode, toggleLang: toggleLangQuick, get pendingSignups() { return pendingSignups; }, get current() { return current; }, currentFilters: () => (FF.filters ? FF.filters.current() : currentFilterValues()) };
+  FF.app = { storageBanner, pushBanner, liveShareChip, navigate, updateParams, clearGlobalFilters, refresh, syncNow, checkFeedChange, announceDataUpdate, parseHash, resolvePage, pageKnown, openDrawer, closeDrawer, renderSidebar, renderCurrent, renderTopUser, updateStatus, onLogin, onBackgroundDataUpdated, promptInstall, enhanceCharts, enhanceTables, themeMode, toggleThemeMode, lang, setLang, toggleLangMenu, renderGlobalFilters, renderMobileNav, focusMode: updateFocusMode, openAccessibility: renderA11yPanel, tableDensity, setTableDensity, PAGES, refreshPendingBadge, setPendingSignups, shareWhatsApp, checkVersion, exportCSV: () => exportCurrentCsv('csv'), exportXLSX: () => exportCurrentCsv('xlsx'), toggleTheme: toggleThemeMode, toggleLang: toggleLangQuick, get pendingSignups() { return pendingSignups; }, get current() { return current; }, currentFilters: () => (FF.filters ? FF.filters.current() : currentFilterValues()) };
   document.addEventListener('DOMContentLoaded', init);
 })(window.FF);

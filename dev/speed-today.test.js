@@ -134,11 +134,16 @@ test('server: /api/today (GV Master + EIR), /api/perf diagnostics, ETag/304', as
   assert.match(data, /function today\(/, 'FF.data.today() client API');
 });
 
-test('app.js: auto-sync 15 min + sirf halka refresh (16 heavy queries nahi)', async () => {
+test('app.js: auto-sync 5 min + turant sync triggers (16 heavy queries nahi)', async () => {
   const src = await read('app.js');
-  assert.match(src, /15 \* 60 \* 1000/, 'auto-sync interval 15 min');
-  assert.match(src, /lightSync/, 'halka refresh use hota hai');
+  assert.match(src, /5 \* 60 \* 1000/, 'auto-sync interval 5 min (v3.23 — pehle 15 min tha)');
+  assert.match(src, /function lightSync\(|lightSync/, 'halka refresh use hota hai');
   assert.match(src, /saveData|effectiveType/, 'data-saver / 2G par auto-sync band');
+  assert.match(src, /visibilitychange', onVisibleSync/, 'tab wapas visible ho to turant sync');
+  assert.match(src, /function syncNow\(/, 'syncNow — office bell / interval / manual sab isi se sync karte hain');
+  assert.match(src, /function checkFeedChange\(/, 'feed snapshot compare — naya data aane par notification');
+  assert.match(src, /localAlert/, 'data update ki notification (bell + toast + browser)');
+  assert.match(src, /voiceText/, 'data update voice announcement');
   const pre = await read('preload.js');
   assert.match(pre, /function lightSync\(/, 'lightSync sirf daily + GV master + today feed refresh karta hai');
   assert.match(pre, /FF\.store\.refresh\(\['daily', 'report'\]\)/, 'sirf halke datasets');

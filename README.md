@@ -1,4 +1,4 @@
-# First Forward Dashboard — First Forward + GV Partner (v3.21)
+# First Forward Dashboard — First Forward + GV Partner (v3.23)
 
 Colourful dashboard website built directly on top of **do Google Sheets**:
 
@@ -13,6 +13,29 @@ aur ek **⚖️ GV vs First Forward** page side-by-side comparison deta hai.
 Koi database nahi, koi manual upload nahi — website Google Sheet se data padhti hai
 (Google Visualization API / `gviz`) through a small Node server that also handles **login, users,
 permissions and settings**. Zero npm dependencies.
+
+## ✨ v3.23.0 — 🧭 panel clicks FIXED · 📊 data-update notification + 🔊 voice · ⚡ instant sheet sync · 🎤 Meri awaaz fix
+
+- **🧭 Panel ke options ab hamesha khulte hain (CRITICAL FIX):** lazy pages (Settings, War Room, GV/FF
+  commission…) ka module load hone se pehle hash router unhe Home par redirect kar deta tha — isliye
+  click par page khulta hi nahi tha, aur same link dobara click dead tha. Ab PAGES registry se resolve +
+  hover/tap par **module prefetch** + same-link click par refresh.
+- **📊 Data update ki notification:** client-side alerts (office bell 30s poll + 5-min sync) — bell
+  notification + toast + phone panel; server watcher 2.5 min (corrections bhi); `reportUpdate: 'both'`
+  (admin + users); notification click → `#/tagIssued` deep link.
+- **⚡ Instant sheet updates:** auto light-sync 5 min (pehle 15), tab visible par turant sync, naye tags
+  detect hote hi page re-render.
+- **🔊 Data update voice:** naya data aate hi bol kar announce ("Data update! Aaj ke N tags ho gaye…")
+  — Hinglish/English, office bell voice toggle + mute respect, dedupe (double awaaz nahi).
+- **🎤 "Meri awaaz" record fix:** Stop par `handle.stop()` se asli audio analyze hoti hai (pehle handle
+  hi analyze ko jaata tha — record flow hamesha fail), dialog close par mic band, async voices refill.
+- **🧪 Tests:** 247 pass (19 naye: `dev/panel-nav.test.js`, `dev/data-update-alerts.test.js`).
+- Docs: [WHATS-NEW-v3.23.0.md](WHATS-NEW-v3.23.0.md)
+
+## ✨ v3.22.0 highlights — GV aaj = GV Master sheet, FF aaj = EIR, lazy+fast load
+
+- GV ka "aaj" ab GV Master tab se (live), FF ka "aaj" EIR se (T+1); lazy page modules + fast first load;
+  dashed barcodes; sheet rows at the last drill level.
 
 ## ✨ v3.21.0 — ⚡ Fast load · 🧭 page-local filters · 🔁 FF T+1 (GV live) · 👥 nested agent drill · 🔊 voice · 🩺 diagnostics
 

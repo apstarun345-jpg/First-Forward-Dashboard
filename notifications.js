@@ -16,7 +16,7 @@ window.FF = window.FF || {};
     { key: 'info',     label: 'ℹ️ Info / updates',         user: true,  admin: true },
     // Admin-only activity types (sab users ki activity admin ko hi milti hai):
     { key: 'signup',   label: '🆕 New account signup',     user: false, admin: true },
-    { key: 'report',   label: '📊 Report data update',     user: false, admin: true },
+    { key: 'report',   label: '📊 Report data update',     user: true,  admin: true },
     { key: 'digest',   label: '🌅 Daily digest (subah · issuance + stock + cover)', user: false, admin: true },
     { key: 'alert',    label: '🔴 Critical alerts (low cover · mid-month target miss)', user: false, admin: true },
     { key: 'activity', label: '👀 User page opens',        user: false, admin: true },
@@ -30,7 +30,7 @@ window.FF = window.FF || {};
   // type ko false rakhne se wo permanently OFF save ho jaata tha (feed + mobile push dono band) —
   // isi wajah se admin ko sirf kuch types (sheet update) hi aati thi.
   const DEFAULT_PREFS = { enabled: true, login: true, signup: true, report: true, monthly: true, digest: true, alert: true, activity: true, click: true, search: true, settings: true, user: true, location: true, info: true, sound: true, push: true };
-  const state = { started: false, bound: false, timer: null, presenceTimer: null, fastTimer: null, lastAt: '', items: [], unread: 0, firstPoll: true, page: 'home', pointer: null, people: [], lastInteraction: Date.now(), pointerBound: false, events: [], dirty: false, lastSent: 0, lastScroll: -1, pushOn: false, pushDevices: 0, pushStatus: null, pushTriedAt: 0, pushError: '', prefs: { ...DEFAULT_PREFS }, audioCtx: null, expanded: null, filterType: 'all', filterUnread: false, seenAt: '' };
+  const state = { started: false, bound: false, timer: null, presenceTimer: null, fastTimer: null, lastAt: '', items: [], unread: 0, serverUnread: 0, firstPoll: true, page: 'home', pointer: null, people: [], lastInteraction: Date.now(), pointerBound: false, events: [], dirty: false, lastSent: 0, lastScroll: -1, pushOn: false, pushDevices: 0, pushStatus: null, pushTriedAt: 0, pushError: '', prefs: { ...DEFAULT_PREFS }, audioCtx: null, expanded: null, filterType: 'all', filterUnread: false, seenAt: '' };
   const EMBED = new URLSearchParams(location.search).get('embed') === 'live';
   const sharing = () => localStorage.getItem('ff_presence_pointer') !== '0';
 
@@ -204,7 +204,64 @@ window.FF = window.FF || {};
     state.seenAt = at;
     if (FF.auth.user) FF.auth.user.notificationsSeenAt = at;
     FF.auth.api('/api/notifications/read', 'POST', {}).catch(() => {});
+    state.serverUnread = 0;
     setCount(0); render();
+  }
+
+  // ---- 📊 Client-side "data update" alerts — sheet se naya data detect hote hi bell + toast + voice ----
+  // Server watcher (checkReports) ke alawa client khud bhi detect karta hai (office bell 30s poll +
+  // 5-min light sync). Tab visible ho to toast + beep, background ho to phone/desktop panel; aur
+  // voiceText ho + Office Bell voice ON ho to bol kar bhi announce (browser autoplay unlock ke saath).
+  function countUnread() {
+    const localUnread = state.items.filter((x) => x.local && itemUnread(x)).length;
+    return (state.serverUnread || 0) + localUnread;
+  }
+  function localAlert(opts) {
+    const o = opts || {};
+    const type = o.type || 'report';
+    if (state.prefs.enabled === false) return null;
+    if (state.prefs[type] === false) return null;
+    const now = Date.now();
+    // 60s ke andar same type ki local alert dobara na aaye — body merge kar do (spam nahi).
+    const last = state.items.slice().reverse().find((x) => x.local && x.type === type);
+    let item;
+    if (last && now - new Date(last.createdAt).getTime() < 60e3) {
+      last.title = String(o.title || last.title).slice(0, 120);
+      last.body = String(o.body || last.body).slice(0, 800);
+      last.meta = { ...(last.meta || {}), ...(o.meta || {}) };
+      last.createdAt = new Date(now).toISOString();
+      item = last;
+    } else {
+      item = {
+        id: `local-${now.toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+        type, title: String(o.title || 'Update').slice(0, 120),
+        body: String(o.body || '').slice(0, 800), meta: o.meta || {},
+        local: true, createdAt: new Date(now).toISOString()
+      };
+      state.items.push(item);
+      if (state.items.length > 100) state.items = state.items.slice(-100);
+      state.expanded = state.expanded || null;
+    }
+    setCount(countUnread());
+    browserAlert(item);
+    // 🔊 Voice announcement — office bell ke speaker path se (autoplay unlock + queue wala).
+    if (o.voiceText) {
+      const bell = FF.officeBell;
+      const spokenRecently = bell && bell.logList && (() => { const l = bell.logList(); return l.length && now - Number(l[0].at || 0) < 75e3; })();
+      const bellVoice = bell && bell.voiceOn ? bell.voiceOn() : true;
+      const muted = bell && bell.prefs && Number(bell.prefs().muteUntil || 0) > now;
+      if (bell && bellVoice && !muted && !spokenRecently) {
+        try {
+          if ((typeof document !== 'undefined' && document.hidden) || !bell.unlocked) {
+            if (bell.queueAnnounce) bell.queueAnnounce(o.voiceText, 3);
+          } else if (bell.speakAnnounce) {
+            bell.speakAnnounce(o.voiceText, 3);
+          }
+        } catch { /* voice optional */ }
+      }
+    }
+    render();
+    return item;
   }
 
   // ---- render ------------------------------------------------------------------------------------
@@ -281,7 +338,8 @@ window.FF = window.FF || {};
       state.items = [...state.items, ...incoming].filter((x, i, a) => a.findIndex((y) => y.id === x.id) === i).slice(-100);
       state.lastAt = latestTime(state.items) || out.checkAt || state.lastAt;
       state.seenAt = (FF.auth.user && FF.auth.user.notificationsSeenAt) || state.seenAt;
-      setCount(out.unread);
+      state.serverUnread = Number(out.unread) || 0;
+      setCount(countUnread());
       if (FF.auth.user && FF.auth.user.role === 'admin') {
         try { const live = await FF.auth.api('/api/presence'); state.people = Array.isArray(live.people) ? live.people : []; } catch { /* older server */ }
       }
@@ -814,6 +872,6 @@ window.FF = window.FF || {};
   }
   // Test sound button (for settings/test)
   function testSound() { unlockAudio(); beep(true); U.toast('🔊 Test beep', 'info'); } // force: master OFF ho tab bhi test chale
-  FF.notifications = { start, stop, poll, toggle, activity, logSearch, logClick, track, testSound, render, setupPush, disablePush, enableBrowser, setEnabled, maybeAskPermission, testPanel, testPush, refreshPushStatus, retryPush, browserAlert, notifyTypes: NOTIFY_TYPES, get state() { return state; }, get prefs() { return state.prefs; } };
+  FF.notifications = { start, stop, poll, toggle, activity, logSearch, logClick, track, testSound, render, setupPush, disablePush, enableBrowser, setEnabled, maybeAskPermission, testPanel, testPush, refreshPushStatus, retryPush, browserAlert, localAlert, countUnread, notifyTypes: NOTIFY_TYPES, get state() { return state; }, get prefs() { return state.prefs; } };
   bind();
 })(window.FF);

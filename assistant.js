@@ -902,7 +902,19 @@ window.FF = window.FF || {};
     studio = dialog;
 
     // ---- common ----
-    const close = () => { try { dialog.close(); } catch { /* open nahi */ } dialog.remove(); studio = null; };
+    // 🎙 Recording handle yahan rehta hai — dialog band hone par bhi mic stream zaroor ruko,
+    // warna browser me mic indicator jalata rehta tha.
+    let capture = null;
+    const stopCapture = async () => {
+      if (!capture) return null;
+      const handle = capture; capture = null;
+      try { return await handle.stop(); } catch { return null; }
+    };
+    const close = () => {
+      stopCapture().catch(() => {});
+      try { dialog.close(); } catch { /* open nahi */ }
+      dialog.remove(); studio = null;
+    };
     dialog.querySelector('[data-close]').addEventListener('click', close);
     dialog.addEventListener('click', (e) => { if (e.target === dialog) close(); });
     // tabs
@@ -999,13 +1011,22 @@ window.FF = window.FF || {};
     });
     // 🎙 Recording — U.startVoiceCapture: blob ke saath RAW PCM bhi capture hota hai, isliye
     // analysis browser audio-decode par depend nahi karti (pehle kai browsers me silently fail hota tha).
-    let capture = null;
+    // ⚠️ v3.23 fix: Stop par `handle.stop()` se ASLI audio result (blob + PCM) lena zaroori hai —
+    // pehle handle hi analyze ko de diya jaata tha jisme .pcm/.blob hote hi nahi the, isliye
+    // "Meri awaaz" record flow hamesha "Recording ka audio data nahi mila" par fail hota tha.
     recBtn.addEventListener('click', async () => {
       if (capture) {
-        const cap = capture; capture = null;
+        recBtn.disabled = true;
+        recBtn.textContent = '⏹ Ruk raha hai…';
+        recStatus.textContent = 'Recording complete ✓ analyze ho raha hai…';
+        const cap = await stopCapture();
+        recBtn.disabled = false;
         recBtn.textContent = '⏺ Record karo';
         recBtn.classList.remove('danger');
-        recStatus.textContent = 'Recording complete ✓ analyze ho raha hai…';
+        if (!cap || (!cap.pcm && !cap.blob)) {
+          recStatus.textContent = '⚠️ Recording ka audio nahi mila — mic permission check karke dobara record karo.';
+          return;
+        }
         try {
           const res = await U.analyzeVoiceCapture(cap);
           if (!res.ok) { analysisEl.innerHTML = `<span class="ins-pill">⚠️ ${esc(res.reason)}</span>`; recStatus.textContent = '⚠️ ' + res.reason; return; }
@@ -1025,6 +1046,7 @@ window.FF = window.FF || {};
         recBtn.classList.add('danger');
         recStatus.textContent = '⏺ Recording… bolo abhi (5–15 second)';
       } catch (err) {
+        capture = null;
         U.toast(err.message || 'Mic permission chahiye — recording ke liye Allow karo.', 'err');
         recStatus.textContent = `⚠️ ${err.message || 'Mic permission chahiye — Allow karo'}`;
       }
@@ -1094,6 +1116,21 @@ window.FF = window.FF || {};
       U.toast(`🧪 Sun raha hoon — abhi "${cfg.word}" bolo…`, 'info');
       setTimeout(() => finish('⏱ 10 second ho gaye — word nahi suna. Dobara try karo.', 'warn'), 10000);
     });
+
+    // 🗣 Chrome voices list async load hoti hai — dialog ke baad aane par dropdown bhar do,
+    // warna "Meri awaaz"/default voices me sirf "Auto" dikhta tha (voice choose hi nahi ho paati thi).
+    try {
+      if ('speechSynthesis' in window) {
+        const refillVoices = () => {
+          ['hi', 'en'].forEach((k) => {
+            const sel = dialog.querySelector(`select[data-vkey="${k}"]`);
+            if (sel && sel.options && sel.options.length <= 1) sel.innerHTML = voiceOptionsHtml(U.voicePrefs(), k);
+          });
+        };
+        if (window.speechSynthesis.addEventListener) window.speechSynthesis.addEventListener('voiceschanged', refillVoices, { once: true });
+        setTimeout(refillVoices, 500);
+      }
+    } catch { /* optional */ }
 
     if (typeof dialog.showModal === 'function') dialog.showModal(); else dialog.setAttribute('open', '');
   }
