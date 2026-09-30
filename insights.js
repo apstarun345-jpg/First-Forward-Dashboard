@@ -688,7 +688,10 @@ FF.pages = FF.pages || {};
       const current = person.classes[cls] || { cls, tags: 0, paidRows: 0, sheetCommission: 0, rateValues: new Map(), sourceRows: 0 };
       current.tags += 1; current.sourceRows += 1;
       const rawCommission = r.commission;
-      const hasValue = r.commissionHasValue === true || (rawCommission !== null && rawCommission !== undefined && rawCommission !== '' && Number.isFinite(Number(rawCommission)));
+      // gv.js preserves an explicit commissionHasValue=false when the source cell is blank;
+      // do not reinterpret its normalized zero as a real rate. Test fixtures without the flag
+      // remain backward-compatible and are treated as numeric source values.
+      const hasValue = gvRowHasCommission(r);
       if (hasValue) {
         const value = Number(rawCommission) || 0;
         current.paidRows += 1; current.sheetCommission += value;
@@ -716,7 +719,7 @@ FF.pages = FF.pages || {};
           // row sum and label it mixed rather than replacing it with an average.
           if (sheetAmount !== null) { amount = sheetAmount; hasPersonal = true; }
           rate = masterRate;
-          source = mixed ? 'GV Master · mixed rows' : 'GV Master · exact row rate';
+          source = mixed ? 'GV Master · mixed rows' : sheetAmount !== null ? 'GV Master · exact row rate' : 'GV Master · commission blank';
           status = !raw.tags ? 'No tags' : !raw.paidRows ? 'Commission blank in GV Master' : mixed ? 'Mixed rates · exact sum' : 'Matched agent ID + class';
         } else if (settings.enabled !== false && setting.source === 'manual' && Number.isFinite(Number(setting.rate)) && setting.rate !== '') {
           rate = Number(setting.rate); amount = raw.tags * rate; hasPersonal = true;
@@ -744,7 +747,75 @@ FF.pages = FF.pages || {};
     agents.forEach((a) => GV_PERSONAL_CLASSES.forEach((cls) => { const c = a.classes[cls]; totals.tags += c.tags; totals.configuredClasses[cls].tags += c.tags; if (c.personalCommission !== null) { totals.personalCommission += c.personalCommission; totals.configuredClasses[cls].personalCommission += c.personalCommission; } if (c.sheetCommission !== null) { totals.sheetCommission += c.sheetCommission; totals.configuredClasses[cls].sheetCommission += c.sheetCommission; } if (c.tags && c.personalCommission === null) totals.missingRates += 1; }));
     return { month, settings, agents, byId, totals, source: 'GV Master' };
   }
+  const gvRowHasCommission = (row) => row && (row.commissionHasValue === true || (row.commissionHasValue === undefined && row.commission !== null && row.commission !== undefined && row.commission !== '' && Number.isFinite(Number(row.commission))));
+  const gvPersonalRowValue = (row, settings) => {
+    const cls = gvPersonalClassOf(row);
+    if (!cls || !settings || settings.enabled === false) return { cls, amount: null, source: 'Personal table off' };
+    const setting = settings.classes[cls] || {};
+    if (setting.source === 'master') return { cls, amount: gvRowHasCommission(row) ? (Number(row.commission) || 0) : null, source: 'GV Master' };
+    if (setting.source === 'manual' && setting.rate !== '' && Number.isFinite(Number(setting.rate))) return { cls, amount: Number(setting.rate), source: 'Manual setting' };
+    return { cls, amount: null, source: 'Rate not set' };
+  };
   async function gvPersonalCommission(monthOverride) { return buildGvPersonalCommission(await G.need('master'), monthOverride); }
+
+  // Add-on analytics for the current personal payout view. They intentionally keep two values
+  // visible: GV Master exact commission and the configured personal amount. Manual rates must never
+  // overwrite the source amount silently, so unresolved rows stay null and are counted.
+  function gvCommissionDailyTrend(rows, settings) {
+    const map = new Map();
+    (rows || []).forEach((row) => {
+      const date = row && row.date instanceof Date ? row.date : (U.parseDate ? U.parseDate(row && row.date) : null);
+      if (!date || !Number.isFinite(date.getTime())) return;
+      const key = U.dateKey(date);
+      if (!map.has(key)) map.set(key, { key, date, tags: 0, agents: new Set(), sheetCommission: 0, personalCommission: 0, personalRows: 0, unresolvedRows: 0, classes: {} });
+      const day = map.get(key);
+      day.tags += 1; day.agents.add(normId(row.agentId) || normName(row.agentName) || 'UNKNOWN');
+      const cls = gvPersonalClassOf(row) || row.cls || 'NA'; day.classes[cls] = (day.classes[cls] || 0) + 1;
+      if (gvRowHasCommission(row)) day.sheetCommission += Number(row.commission) || 0;
+      const personal = gvPersonalRowValue(row, settings || gvPersonalSettings());
+      if (personal.amount === null) day.unresolvedRows += 1;
+      else { day.personalRows += 1; day.personalCommission += personal.amount; }
+    });
+    const out = [...map.values()].sort((a, b) => a.date - b.date).map((day) => ({ ...day, agents: day.agents.size, personalCommission: day.personalRows ? day.personalCommission : null, classMix: classMix(day.classes) }));
+    return { days: out, totals: { days: out.length, tags: sum(out, (r) => r.tags), agents: new Set((rows || []).map((r) => normId(r.agentId) || normName(r.agentName)).filter(Boolean)).size, sheetCommission: sum(out, (r) => r.sheetCommission), personalCommission: sum(out, (r) => r.personalCommission), unresolvedRows: sum(out, (r) => r.unresolvedRows) } };
+  }
+  function gvCommissionTlSummary(agents) {
+    const map = new Map();
+    (agents || []).forEach((agent) => {
+      const direct = !!agent.directAgent;
+      const label = direct ? 'Direct Agents' : (clean(agent.tlName) || (clean(agent.tlId) ? `TL ${clean(agent.tlId)}` : 'Direct / Unmapped'));
+      const key = direct ? 'DIRECT' : (normId(agent.tlId) ? `ID:${normId(agent.tlId)}` : `NAME:${normName(label) || 'UNMAPPED'}`);
+      if (!map.has(key)) map.set(key, { key, label, agents: 0, tags: 0, pricedTags: 0, personalCommission: 0, hasPersonal: false, sheetCommission: 0, hasSheet: false, missingAgents: 0, classes: {}, topAgent: null });
+      const group = map.get(key); group.agents += 1;
+      const personal = agent.personalCommission === null || agent.personalCommission === undefined ? null : Number(agent.personalCommission);
+      const sheet = agent.sheetCommission === null || agent.sheetCommission === undefined ? null : Number(agent.sheetCommission);
+      if (personal !== null && Number.isFinite(personal)) { group.personalCommission += personal; group.hasPersonal = true; }
+      if (sheet !== null && Number.isFinite(sheet)) { group.sheetCommission += sheet; group.hasSheet = true; }
+      if (agent.missingClasses && agent.missingClasses.length) group.missingAgents += 1;
+      GV_PERSONAL_CLASSES.forEach((cls) => { const cell = agent.classes && agent.classes[cls]; const tags = Number(cell && cell.tags) || 0; group.tags += tags; group.classes[cls] = (group.classes[cls] || 0) + tags; const priced = cell && String(cell.source || '').startsWith('GV Master') ? Math.min(tags, Number(cell.paidRows) || 0) : (tags && cell && cell.personalCommission !== null && cell.personalCommission !== undefined ? tags : 0); group.pricedTags += priced; });
+      if (personal !== null && Number.isFinite(personal) && (!group.topAgent || personal > group.topAgent.amount)) group.topAgent = { name: agent.agentName || agent.agentId || 'Unknown agent', id: agent.agentId || '', amount: personal };
+    });
+    return [...map.values()].map((group) => ({ ...group, personalCommission: group.hasPersonal ? group.personalCommission : null, sheetCommission: group.hasSheet ? group.sheetCommission : null, coveragePct: group.tags ? (group.pricedTags / group.tags) * 100 : 0, difference: group.hasPersonal && group.hasSheet ? group.personalCommission - group.sheetCommission : null, classMix: classMix(group.classes) })).sort((a, b) => (Number(b.personalCommission) || 0) - (Number(a.personalCommission) || 0) || (Number(b.sheetCommission) || 0) - (Number(a.sheetCommission) || 0) || b.tags - a.tags || a.label.localeCompare(b.label));
+  }
+  function gvCommissionAgentRanking(agents) {
+    const rows = (agents || []).map((agent) => {
+      let tags = 0, pricedTags = 0, classCount = 0;
+      GV_PERSONAL_CLASSES.forEach((cls) => { const cell = agent.classes && agent.classes[cls]; const n = Number(cell && cell.tags) || 0; tags += n; if (n) classCount += 1; const priced = cell && String(cell.source || '').startsWith('GV Master') ? Math.min(n, Number(cell.paidRows) || 0) : (n && cell && cell.personalCommission !== null && cell.personalCommission !== undefined ? n : 0); pricedTags += priced; });
+      const personal = agent.personalCommission === null || agent.personalCommission === undefined ? null : Number(agent.personalCommission);
+      const sheet = agent.sheetCommission === null || agent.sheetCommission === undefined ? null : Number(agent.sheetCommission);
+      const coveragePct = tags ? (pricedTags / tags) * 100 : 0;
+      return { agentId: agent.agentId || '', agentName: agent.agentName || agent.agentId || 'Unknown agent', tlName: agent.directAgent ? 'Direct Agents' : (agent.tlName || 'Direct / Unmapped'), directAgent: !!agent.directAgent, tags, classCount, pricedTags, personalCommission: personal, sheetCommission: sheet, coveragePct, personalRate: personal !== null && pricedTags ? personal / pricedTags : null, exactRate: sheet !== null && tags ? sheet / tags : null, missingClasses: agent.missingClasses || [], status: agent.missingClasses && agent.missingClasses.length ? `Partial · ${agent.missingClasses.join(', ')}` : coveragePct < 100 ? `Partial · ${coveragePct.toFixed(0)}% source coverage` : 'Complete' };
+    }).sort((a, b) => (a.personalCommission === null) - (b.personalCommission === null) || (Number(b.personalCommission) || 0) - (Number(a.personalCommission) || 0) || b.tags - a.tags || a.agentName.localeCompare(b.agentName));
+    let payoutRank = 0;
+    return rows.map((row, index) => ({ ...row, rank: index + 1, payoutRank: row.personalCommission === null ? null : ++payoutRank }));
+  }
+
+  const GV_DAILY_HEADERS = ['Date', 'Agents', 'Tags', 'GV Master exact commission', 'Personal configured commission', 'Unresolved rows', 'Class mix'];
+  const gvDailyExportRows = (rows) => (rows || []).map((r) => [r.key, r.agents, r.tags, r.sheetCommission, r.personalCommission === null ? '' : r.personalCommission, r.unresolvedRows, r.classMix]);
+  const GV_TL_HEADERS = ['TL / Direct', 'Agents', 'Tags', 'Personal configured commission', 'GV Master exact commission', 'Difference', 'Rate coverage %', 'Missing-rate agents', 'Top agent', 'Class mix'];
+  const gvTlExportRows = (rows) => (rows || []).map((r) => [r.label, r.agents, r.tags, r.personalCommission === null ? '' : r.personalCommission, r.sheetCommission === null ? '' : r.sheetCommission, r.difference === null ? '' : r.difference, r.coveragePct, r.missingAgents, r.topAgent ? r.topAgent.name : '', r.classMix]);
+  const GV_RANK_HEADERS = ['Rank', 'Agent ID', 'Agent', 'TL / Direct', 'Tags', 'Classes', 'Personal configured commission', 'GV Master exact commission', 'Configured ₹ / priced tag', 'Exact ₹ / tag', 'Rate coverage %', 'Status'];
+  const gvRankingExportRows = (rows) => (rows || []).map((r) => [r.rank, r.agentId, r.agentName, r.tlName, r.tags, r.classCount, r.personalCommission === null ? '' : r.personalCommission, r.sheetCommission === null ? '' : r.sheetCommission, r.personalRate === null ? '' : r.personalRate, r.exactRate === null ? '' : r.exactRate, r.coveragePct, r.status]);
 
   // ---- GV commission · separate board per vehicle class (VC4 / VC20 / VC5+) ----------------------
   // Class group GV Master ke `group` field se aata hai (VC4 · VC20 · VC5+), isliye VC5/VC12/VC16
@@ -812,6 +883,25 @@ FF.pages = FF.pages || {};
     const base = master.filter((r) => period === 'month' ? r.ym === month : period === 'custom' ? (r.date && customFrom && customTo && r.date >= customFrom && r.date <= customTo) : (r.date && r.date >= from && r.date <= today));
     const filtered = base.filter((r) => (segment === 'direct' ? directAgent(r) : segment === 'managed' ? !directAgent(r) : true) && (!q || [r.agentId, r.agentName, r.tlId, r.tlName, r.cls, r.tagId].join(' ').toLowerCase().includes(q)));
     const personalRows = personal.agents.filter((a) => (segment === 'direct' ? a.directAgent : segment === 'managed' ? !a.directAgent : true) && (!q || [a.agentId, a.agentName, a.tlId, a.tlName].join(' ').toLowerCase().includes(q)));
+    // Add-ons 7/8/9: daily exact-source trend, current-month TL summary and payout ranking.
+    const dailyTrend = gvCommissionDailyTrend(filtered, personal.settings);
+    const tlSummary = gvCommissionTlSummary(personalRows);
+    const agentRanking = gvCommissionAgentRanking(personalRows);
+    const rankingKnown = agentRanking.filter((r) => r.personalCommission !== null);
+    const trendTitle = period === 'month' ? U.labelYM(month) : period === 'custom' ? 'Custom range' : period === 'today' ? 'Today' : `Last ${period} days`;
+    const dailyChart = dailyTrend.days.length && C && C.lines ? C.lines({
+      labels: dailyTrend.days.map((r) => dateText(r.date).replace(/,?\s*\d{4}$/, '')),
+      tipLabels: dailyTrend.days.map((r) => `${dateText(r.date)} · ${U.fmt(r.tags)} tags`),
+      series: [
+        { name: 'GV Master exact', values: dailyTrend.days.map((r) => r.sheetCommission), color: '#0ea5e9', area: true },
+        { name: 'Personal configured', values: dailyTrend.days.map((r) => r.personalCommission), color: '#10b981', dash: true, area: false }
+      ],
+      height: 220, format: (v) => money(v, 0)
+    }) : empty('Daily trend unavailable', 'Selected period me valid dated GV Master rows nahi mile.');
+    const rankingChart = rankingKnown.length && C && C.hbars ? C.hbars({
+      items: rankingKnown.slice(0, 5).map((r) => ({ label: r.agentName, sub: `${U.fmt(r.tags)} tags · ${r.coveragePct.toFixed(0)}% coverage`, value: r.personalCommission })),
+      format: (v) => money(v, 0), valueLabel: 'Personal payout'
+    }) : empty('Ranking unavailable', 'Personal rate configured rows aane par ranking yahan dikhegi.');
     
     // Memoize aggregateGv calls on the same filtered data to avoid recomputation
     const aggCache = new Map();
@@ -882,6 +972,23 @@ FF.pages = FF.pages || {};
           ${personalRows.map((a) => `<tr><td><code>${esc(a.agentId || '—')}</code></td><td><b class="agent-link" data-agent360="${esc(a.agentName || a.agentId)}" data-agent360-id="${esc(a.agentId || '')}" title="Agent 360 kholo">${esc(a.agentName || a.agentId)}</b></td><td>${esc(a.directAgent ? 'Direct' : (a.tlName || '—'))}</td>${GV_PERSONAL_CLASSES.map((cls) => `<td>${gvPersonalClassCell(a.classes[cls] || { tags: 0, rate: null, personalCommission: null, source: 'No tags' })}</td>`).join('')}<td class="num personal-total"><b>${personalMoney(a.personalCommission)}</b></td><td class="num">${personalMoney(a.sheetCommission)}</td><td>${a.missingClasses.length ? statusPill(`Rate missing: ${a.missingClasses.join(', ')}`, 'amber') : statusPill('Complete', 'green')}</td></tr>`).join('') || `<tr><td colspan="${3 + GV_PERSONAL_CLASSES.length + 3}">${empty(`Current month ${U.labelYM(currentMonth)} me personal rows nahi`, personal.currentMonthOnly ? 'GV Master me current month ka data aane par yahan agent-wise commission dikhega.' : 'GV Master se matching rows nahi mili.')}</td></tr>`}
         </tbody>${personalRows.length ? `<tfoot><tr class="row-total"><td colspan="3">Current month total · ${U.fmt(personalRows.length)} agents</td>${GV_PERSONAL_CLASSES.map((cls) => { const c = personal.totals.configuredClasses[cls]; return `<td class="num"><b>${U.fmt(c.tags)} tags</b><small>${personalMoney(c.personalCommission)}</small></td>`; }).join('')}<td class="num"><b>${personalMoney(personal.totals.personalCommission)}</b></td><td class="num">${personalMoney(personal.totals.sheetCommission)}</td><td>${personal.totals.missingRates ? statusPill(`${personal.totals.missingRates} class rates missing`, 'amber') : statusPill('All configured', 'green')}</td></tr></tfoot>` : ''}</table></div>
       </div>
+      <div class="commission-addon-grid">
+        <div class="card card-primary commission-trend-card span2"><div class="card-head"><h3>📈 Daily commission trend · ${esc(trendTitle)}</h3><span class="dim small">${U.fmt(dailyTrend.days.length)} active days · exact source + configured payout</span><button class="btn small" id="gvc-daily-csv">⬇ Daily trend CSV</button></div>
+          <p class="dim small">Blue line = <b>GV Master exact commission</b>. Green dashed line = configured personal commission; manual rate missing ho to day unresolved count me dikhega, koi rate guess nahi hota.</p>
+          ${dailyChart}
+          <div class="table-wrap"><table class="data-table ins-table"><thead><tr><th class="tone-blue">Date</th><th class="tone-blue num">Agents</th><th class="tone-blue num">Tags</th><th class="tone-blue num">GV Master exact</th><th class="tone-blue num">Personal configured</th><th class="tone-blue num">Unresolved</th><th class="tone-blue">Class mix</th></tr></thead><tbody>${dailyTrend.days.map((r) => `<tr><td><b>${esc(dateText(r.date))}</b></td><td class="num">${U.fmt(r.agents)}</td><td class="num">${U.fmt(r.tags)}</td><td class="num"><b>${money(r.sheetCommission, 2)}</b></td><td class="num">${personalMoney(r.personalCommission)}</td><td class="num">${r.unresolvedRows ? statusPill(U.fmt(r.unresolvedRows), 'amber') : statusPill('0', 'green')}</td><td class="small">${esc(r.classMix)}</td></tr>`).join('') || `<tr><td colspan="7">${empty('No dated commission rows', 'Selected period me daily trend ke liye valid date nahi mili.')}</td></tr>`}</tbody></table></div>
+        </div>
+        <div class="card card-info commission-addon-card"><div class="card-head"><h3>👥 TL-wise personal payout summary</h3><span class="dim small">Current month · ${U.fmt(tlSummary.length)} groups</span><button class="btn small" id="gvc-tl-csv">⬇ TL CSV</button></div>
+          <p class="dim small">Personal configured payout aur GV Master exact source ko alag rakha gaya hai. Coverage batata hai kitne tags ka rate configured hai.</p>
+          <div class="table-wrap"><table class="data-table ins-table"><thead><tr><th class="tone-violet">TL / Direct</th><th class="tone-violet num">Agents</th><th class="tone-violet num">Tags</th><th class="tone-violet num">Personal payout</th><th class="tone-violet num">GV Master exact</th><th class="tone-violet num">Difference</th><th class="tone-violet num">Coverage</th><th class="tone-violet num">Missing agents</th><th class="tone-violet">Top agent</th></tr></thead><tbody>${tlSummary.map((r) => `<tr><td><b>${esc(r.label)}</b><small>${esc(r.classMix)}</small></td><td class="num">${U.fmt(r.agents)}</td><td class="num">${U.fmt(r.tags)}</td><td class="num"><b>${personalMoney(r.personalCommission)}</b></td><td class="num">${personalMoney(r.sheetCommission)}</td><td class="num">${r.difference === null ? '—' : `${r.difference > 0 ? '+' : ''}${money(r.difference, 2)}`}</td><td class="num">${statusPill(`${r.coveragePct.toFixed(0)}%`, r.coveragePct >= 100 ? 'green' : 'amber')}</td><td class="num">${r.missingAgents ? statusPill(U.fmt(r.missingAgents), 'amber') : statusPill('0', 'green')}</td><td>${r.topAgent ? `<b>${esc(r.topAgent.name)}</b><small>${esc(r.topAgent.id)} · ${money(r.topAgent.amount, 2)}</small>` : '—'}</td></tr>`).join('') || `<tr><td colspan="9">${empty('No TL summary', 'Current month ke personal rows available nahi hain.')}</td></tr>`}</tbody></table></div>
+        </div>
+        <div class="card card-warning commission-addon-card"><div class="card-head"><h3>🏅 Agent performance ranking</h3><span class="dim small">Personal payout rank · top ${Math.min(20, agentRanking.length)} of ${U.fmt(agentRanking.length)}</span><button class="btn small" id="gvc-ranking-csv">⬇ Ranking CSV</button></div>
+          <p class="dim small">Ranking pehle configured personal payout par, phir tags par hai. Partial rows ko status aur rate coverage ke saath dikhaya gaya hai.</p>
+          ${rankingChart}
+          <div class="table-wrap"><table class="data-table ins-table"><thead><tr><th class="tone-amber num">Rank</th><th class="tone-amber">Agent</th><th class="tone-amber">TL / Direct</th><th class="tone-amber num">Tags</th><th class="tone-amber num">Personal payout</th><th class="tone-amber num">GV Master exact</th><th class="tone-amber num">₹ / priced tag</th><th class="tone-amber num">Coverage</th><th class="tone-amber">Status</th></tr></thead><tbody>${agentRanking.slice(0, 20).map((r) => `<tr><td class="num"><b>${r.payoutRank || '—'}</b></td><td><b class="agent-link" data-agent360="${esc(r.agentName)}" data-agent360-id="${esc(r.agentId)}" title="Agent 360 kholo">${esc(r.agentName)}</b><small>${esc(r.agentId || '')}</small></td><td>${esc(r.tlName)}</td><td class="num">${U.fmt(r.tags)}</td><td class="num"><b>${personalMoney(r.personalCommission)}</b></td><td class="num">${personalMoney(r.sheetCommission)}</td><td class="num">${r.personalRate === null ? '—' : money(r.personalRate, 2)}</td><td class="num">${statusPill(`${r.coveragePct.toFixed(0)}%`, r.coveragePct >= 100 ? 'green' : 'amber')}</td><td>${statusPill(r.status, r.coveragePct >= 100 ? 'green' : 'amber')}</td></tr>`).join('') || `<tr><td colspan="9">${empty('No agent ranking', 'Current month ke personal rows available nahi hain.')}</td></tr>`}</tbody></table></div>
+          ${agentRanking.length > 20 ? `<p class="dim small">Top 20 yahan dikh rahe hain; <b>Ranking CSV</b> me poore ${U.fmt(agentRanking.length)} agents hain.</p>` : ''}
+        </div>
+      </div>
       <div class="card card-primary"><div class="card-head"><h3>🧮 Agent × class commission · VC4 / VC20 / VC5+ alag</h3><span class="dim small">Commission = sheet ka exact sum · <b>₹/tag rate = GV Master commission column se</b> (class-wise)${gvUniqueTotal && gvUniqueTotal !== filtered.length ? ` · ${U.fmt(filtered.length)} rows me ${U.fmt(gvUniqueTotal)} unique tags` : ''}</span><button class="btn small" id="gvc-matrix-csv">⬇ Matrix CSV</button></div>
         <div class="table-wrap"><table class="data-table ins-table"><thead><tr><th class="tone-violet">Agent</th><th class="tone-violet">TL / Direct</th><th class="tone-violet num">VC4 tags</th><th class="tone-violet num">VC4 commission · rate</th><th class="tone-violet num">VC20 tags</th><th class="tone-violet num">VC20 commission · rate</th><th class="tone-violet num">VC5+ tags</th><th class="tone-violet num">VC5+ commission · rate</th><th class="tone-violet">VC5+ · exact class split</th><th class="tone-violet num">Total commission</th></tr></thead><tbody>
         ${matrix.map((m) => {
@@ -903,6 +1010,7 @@ FF.pages = FF.pages || {};
         <div class="table-wrap"><table class="data-table ins-table" id="gvc-table"><thead><tr>${group === 'agentClass' ? '<th>Agent</th><th>Vehicle class</th>' : `<th>${group === 'agent' ? 'Agent' : group === 'tl' ? 'TL / Direct' : group === 'class' ? 'Class' : group === 'weekday' ? 'Weekday' : 'Date'}</th>`}<th>Issuance</th><th>Amount</th><th>Commission</th><th>Commission / tag</th><th>Effective rate</th>${group === 'agentClass' ? '' : '<th>Class mix</th>'}</tr></thead><tbody>
         ${grouped.map((r) => `<tr>${group === 'agentClass' ? `<td><b class="agent-link" data-agent360="${esc(r.agentLabel)}" data-agent360-id="${esc(r.id || '')}" title="Agent 360 kholo">${esc(r.agentLabel)}</b><small>${esc(r.id || '')}</small></td><td><b>${esc(r.classLabel)}</b></td>` : `<td><b>${esc(group === 'day' ? dateText(`${r.label}T00:00:00`) : r.label)}</b>${r.id ? `<small>${esc(r.id)}</small>` : ''}</td>`}<td>${U.fmt(r.issuances)}</td><td>${money(r.amount, 2)}</td><td><b>${money(r.commission, 2)}</b></td><td>${money(r.perTag, 2)}</td><td>${r.effectiveRate.toFixed(2)}%</td>${group === 'agentClass' ? '' : `<td class="small">${esc(classMix(r.classes))}</td>`}</tr>`).join('') || `<tr><td colspan="${group === 'agentClass' ? 6 : 7}">${empty('No matching rows', 'Filters change karke dekhein.')}</td></tr>`}
         </tbody></table></div></div>`;
+    if (C && C.mount) C.mount(root);
     U.$('#gvc-search', root).addEventListener('submit', (e) => { e.preventDefault(); FF.app.updateParams({ q: new FormData(e.currentTarget).get('q') || '' }); });
     const gvClassRows = (list) => agg(list, 'agent').map((r, i) => [i + 1, r.agentLabel || r.label, r.id || '', tlLabelOf(r, 'gv'), r.issuances, r.amount, r.commission, r.perTag, r.effectiveRate, sum(list, (x) => x.commission) ? (r.commission / sum(list, (x) => x.commission)) * 100 : 0]);
     boards.forEach(({ def, rows: list }) => {
@@ -910,8 +1018,14 @@ FF.pages = FF.pages || {};
       if (btn) btn.addEventListener('click', () => U.downloadCsv(`gv-${def.key.replace(/\+/g, 'plus')}-commission-agents-${U.stamp()}.csv`, GV_CLASS_HEADERS, gvClassRows(list)));
     });
     const rangeForm = U.$('#gvc-date-range', root); if (rangeForm) rangeForm.addEventListener('submit', (e) => { e.preventDefault(); const f = new FormData(rangeForm); FF.app.updateParams({ period:'custom', from:f.get('from')||'', to:f.get('to')||'' }); });
+    const dailyCsv = U.$('#gvc-daily-csv', root); if (dailyCsv) dailyCsv.addEventListener('click', () => U.downloadCsv(`gv-daily-commission-${U.stamp()}.csv`, GV_DAILY_HEADERS, gvDailyExportRows(dailyTrend.days)));
+    const tlCsv = U.$('#gvc-tl-csv', root); if (tlCsv) tlCsv.addEventListener('click', () => U.downloadCsv(`gv-tl-commission-summary-${personal.month}-${U.stamp()}.csv`, GV_TL_HEADERS, gvTlExportRows(tlSummary)));
+    const rankingCsv = U.$('#gvc-ranking-csv', root); if (rankingCsv) rankingCsv.addEventListener('click', () => U.downloadCsv(`gv-agent-performance-ranking-${personal.month}-${U.stamp()}.csv`, GV_RANK_HEADERS, gvRankingExportRows(agentRanking)));
     bindExports(root, 'gvc-export', `gv-commission-${month}-${U.stamp()}`, 'GV Commission', ['Group','Agent','Agent ID','Vehicle class','Issuance','Amount','Commission','Commission per tag','Effective rate %','Class mix'], grouped.map((r) => [group,r.agentLabel,r.id,r.classLabel,r.issuances,r.amount,r.commission,r.perTag,r.effectiveRate,classMix(r.classes)]), [
       { name: 'Personal Commission', header: GV_PERSONAL_HEADERS, rows: gvPersonalExportRows(personalRows) },
+      { name: 'Daily Commission Trend', header: GV_DAILY_HEADERS, rows: gvDailyExportRows(dailyTrend.days) },
+      { name: 'TL Commission Summary', header: GV_TL_HEADERS, rows: gvTlExportRows(tlSummary) },
+      { name: 'Agent Performance Ranking', header: GV_RANK_HEADERS, rows: gvRankingExportRows(agentRanking) },
       { name: 'Class Summary', header: ['Vehicle class','Board','Tags','Agents','Amount','Commission','Commission per tag','Effective rate %','Top agent'], rows: classList.map((c) => [c.cls, c.group, c.tags, c.agents, c.amount, c.commission, c.tags ? c.commission / c.tags : 0, ratePct(c.commission, c.amount), c.top]) },
       ...boards.filter((b) => b.rows.length).map(({ def, rows: list }) => ({ name: `GV ${def.key} agents`.slice(0, 31), header: GV_CLASS_HEADERS, rows: gvClassRows(list) })),
       { name: 'Class Variance Review', header: ['Agent','Agent ID','TL','Class','Tags','Observed commission/tag','Class median/tag','Deviation %','Peer variance amount'], rows: commissionAnomalies.map((r) => [r.agentLabel,r.id,r.tlName,r.classLabel,r.issuances,r.perTag,r.benchmark,r.deviationPct,r.varianceAmount]) }
@@ -2425,5 +2539,5 @@ FF.pages = FF.pages || {};
   FF.workspace = { openSave, load: workspace, reset };
   // Page chrome helpers shared with cockpit.js (v3.8) so naye pages bilkul same look rakhein.
   const UI_KIT = { head, sourceChip, printButton, exportButtons, bindExports, vividMetrics, metric, statusPill, empty, money, validValue, clean, sum, normId, normName, segmentOf, bindMetricDetails, openInsDialog };
-  FF.insights = { reset, loadDetails, buildCross, ffCommissionData, ffPayoutRates: loadPayoutRates, payoutExpected: payoutBreakdown, gvPersonalCommission, gvPersonalCommissionFromRows: buildGvPersonalCommission, qualityIssues, forecastAccuracy, stockBalanceReconciliation, commissionSlabExpected: slabExpected, openInsDialog, forecastRows, slabVariance: slabVarianceRows, ui: UI_KIT };
+  FF.insights = { reset, loadDetails, buildCross, ffCommissionData, ffPayoutRates: loadPayoutRates, payoutExpected: payoutBreakdown, gvPersonalCommission, gvPersonalCommissionFromRows: buildGvPersonalCommission, gvCommissionDailyTrend, gvCommissionTlSummary, gvCommissionAgentRanking, qualityIssues, forecastAccuracy, stockBalanceReconciliation, commissionSlabExpected: slabExpected, openInsDialog, forecastRows, slabVariance: slabVarianceRows, ui: UI_KIT };
 })(window.FF);

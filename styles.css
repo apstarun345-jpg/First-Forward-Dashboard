@@ -593,6 +593,15 @@ html[data-theme="dark"] .class-defs { background: #17233e; border-color: #29456f
 .gv-personal-table .personal-class-cell .pc-rate { color: var(--teal, #0f766e); font-weight: 750; }
 .gv-personal-table .personal-class-cell .pc-source { font-size: 9.5px; }
 .gv-personal-table .personal-total { font-weight: 900; color: var(--brand); }
+.commission-addon-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 0 0 14px; }
+.commission-addon-grid > .span2 { grid-column: 1 / -1; }
+.commission-addon-card { min-width: 0; }
+.commission-addon-card .table-wrap, .commission-trend-card .table-wrap { max-height: 430px; overflow: auto; }
+.commission-trend-card .chart-line { min-height: 248px; margin: 2px 0 8px; }
+.commission-trend-card .linesvg { max-width: 100%; height: auto; }
+.commission-addon-grid .hbars { margin: 2px 0 10px; }
+.commission-addon-grid .card-head { gap: 8px; flex-wrap: wrap; }
+.commission-addon-grid .card-head > .dim { margin-left: auto; }
 html[data-theme="dark"] .gv-rate-setting-row { background: #151b2d; }
 html[data-theme="dark"] .gv-personal-table .personal-class-cell .pc-rate { color: #5eead4; }
 @media (max-width: 680px) {
@@ -600,6 +609,12 @@ html[data-theme="dark"] .gv-personal-table .personal-class-cell .pc-rate { color
   .gv-rate-setting-row { grid-template-columns: 74px 1fr; }
   .gv-rate-setting-row input { grid-column: 2; }
   .gv-rate-setting-row small { grid-column: 2; }
+}
+@media (max-width: 760px) {
+  .commission-addon-grid { grid-template-columns: 1fr; }
+  .commission-addon-grid > .span2 { grid-column: auto; }
+  .commission-addon-card .table-wrap, .commission-trend-card .table-wrap { max-height: 360px; }
+  .commission-trend-card .chart-line { min-height: 225px; overflow-x: auto; }
 }
 
 html[data-theme="dark"] .rate-line { color: #5eead4; }
