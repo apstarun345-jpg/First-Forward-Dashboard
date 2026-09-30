@@ -349,6 +349,7 @@ window.FF = window.FF || {};
     state.user = null;
     try { localStorage.removeItem('ff_user'); } catch { /* ignore */ }
     if (FF.notifications && FF.notifications.stop) FF.notifications.stop();
+    if (FF.liveAssist && FF.liveAssist.stop) FF.liveAssist.stop();
     U.toast('Logged out ✓', 'ok');
     location.hash = '';
     // Fire-and-forget server logout + reload immediately (instant feel, cookie cleared on next load).

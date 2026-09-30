@@ -25,13 +25,15 @@ window.FF = window.FF || {};
     { key: 'settings', label: '⚙️ Settings changes',     user: false, admin: true },
     { key: 'location', label: '📍 Location shares',        user: false, admin: true },
     // 🏷️ IDFC Agents Tag Request — requester ko confirmation + admin ko nayi request (v3.24)
-    { key: 'request',  label: '🏷️ Tag Request (nayi request + status)', user: true, admin: true }
+    { key: 'request',  label: '🏷️ Tag Request (nayi request + status)', user: true, admin: true },
+    // 🎙️ Live Assist — consent-based voice/video session (v3.26)
+    { key: 'assist',   label: '🎙️ Live Assist (voice/video session)', user: true, admin: true }
   ];
   // `enabled` = master switch. UI me sirf ek "Notifications ON/OFF" button hai (Settings me baaki fine-tuning).
   // ⚠️ Sab keys TRUE rakho — savePrefs PURA object server par PUT karta hai, isliye yahan kisi
   // type ko false rakhne se wo permanently OFF save ho jaata tha (feed + mobile push dono band) —
   // isi wajah se admin ko sirf kuch types (sheet update) hi aati thi.
-  const DEFAULT_PREFS = { enabled: true, login: true, signup: true, report: true, monthly: true, digest: true, alert: true, activity: true, click: true, search: true, settings: true, user: true, location: true, info: true, request: true, sound: true, push: true };
+  const DEFAULT_PREFS = { enabled: true, login: true, signup: true, report: true, monthly: true, digest: true, alert: true, activity: true, click: true, search: true, settings: true, user: true, location: true, info: true, request: true, assist: true, sound: true, push: true };
   const state = { started: false, bound: false, timer: null, presenceTimer: null, fastTimer: null, lastAt: '', items: [], unread: 0, serverUnread: 0, firstPoll: true, page: 'home', pointer: null, people: [], lastInteraction: Date.now(), pointerBound: false, events: [], dirty: false, lastSent: 0, lastScroll: -1, pushOn: false, pushDevices: 0, pushStatus: null, pushTriedAt: 0, pushError: '', prefs: { ...DEFAULT_PREFS }, audioCtx: null, expanded: null, filterType: 'all', filterUnread: false, seenAt: '', voiceAt: {} };
   const EMBED = new URLSearchParams(location.search).get('embed') === 'live';
   const sharing = () => localStorage.getItem('ff_presence_pointer') !== '0';
@@ -148,7 +150,7 @@ window.FF = window.FF || {};
 
   // ---- icon / helpers ----------------------------------------------------------------------------
   function icon(item) {
-    return ({ report: '📊', monthly: '📅', digest: '🌅', alert: '🔴', login: '🔐', activity: '👀', location: '📍', search: '🔍', click: '👆', settings: '⚙️', user: '👤', info: 'ℹ️', request: '🏷️' }[item.type] || '🔔');
+    return ({ report: '📊', monthly: '📅', digest: '🌅', alert: '🔴', login: '🔐', activity: '👀', location: '📍', search: '🔍', click: '👆', settings: '⚙️', user: '👤', info: 'ℹ️', request: '🏷️', assist: '🎙️' }[item.type] || '🔔');
   }
   // ---- 📂 notification ka data (panel me expand + redirect) --------------------------------------
   const META_LABEL = { date: 'Date', ip: 'IP', loginId: 'Login ID', username: 'User', page: 'Page', band: 'Cover band', cover: 'Cover (din)', vc4: 'VC4 stock', avg: 'Avg / din', ffMtd: 'FF MTD', gvMtd: 'GV MTD', ff: 'FF', gv: 'GV', total: 'Combined total', mtdDays: 'Active days', activeDays: 'Active days', observedDays: 'Observed days', zeroDays: 'Zero days observed', ffDays: 'FF active days', gvDays: 'GV active days', achieved: 'Achieved', totalTarget: 'Target', day: 'Day', users: 'Users', ageDays: 'Age (din)', prevAvg: 'Pichhle avg', today: 'Aaj', source: 'Source', reset: 'Reset link', changes: 'Changes', rows: 'Rows', classes: 'Class-wise', tl: 'TL', priority: 'Priority', requestId: 'Request ID' };
@@ -473,7 +475,7 @@ window.FF = window.FF || {};
       return `<div class="notif-wrap ${open ? 'open' : ''} ${unread ? 'is-unread' : 'is-read'}"><button type="button" class="notification-item ${item.type || ''} ${unread ? 'unread' : 'read'} ${open ? 'active' : ''}" data-notify-open="${U.esc(item.id)}" title="Click → data expand karo" aria-expanded="${open ? 'true' : 'false'}">
       <span class="notification-icon">${icon(item)}</span><div><b>${U.esc(item.title)}</b><p>${U.esc(item.body)}</p><small>${unread ? '<strong>NEW</strong> · ' : ''}${U.esc(U.timeLabel(new Date(item.createdAt).getTime()))} · <u>${open ? 'band karo ↑' : 'data dekho ↓'}</u></small></div></button>${open ? detailHtml(item) : ''}</div>`;
     }).join('');
-    const presence = isAdmin ? `<section class="presence-panel"><div class="presence-title">🟢 User activity <small>Admin only · live / last seen</small></div>${state.people.length ? state.people.map((p) => `<div class="presence-row"><span class="presence-dot ${p.active ? 'is-live' : ''}"></span><div><b>${U.esc(p.name || p.username)}</b><small>${p.active ? `Active now · ${U.esc(p.page)}` : `Last active ${U.esc(U.timeLabel(p.lastSeen))} · last page: ${U.esc(p.page)}`}</small>${p.lastEvent ? `<small>Last action: ${U.esc(p.lastEvent.label || p.lastEvent.kind)}</small>` : ''}</div><span class="presence-side"><span class="presence-state">${p.online && p.active ? 'LIVE' : p.online ? 'IDLE' : 'AWAY'}</span>${isAdmin ? `<button class="btn small" data-live-watch="${U.esc(p.username)}">👁 Live view</button>` : ''}</span></div>`).join('') : '<div class="notification-empty">Users seen after this server started will appear here.</div>'}</section>` : '';
+    const presence = isAdmin ? `<section class="presence-panel"><div class="presence-title">🟢 User activity <small>Admin only · live / last seen</small></div>${state.people.length ? state.people.map((p) => `<div class="presence-row"><span class="presence-dot ${p.active ? 'is-live' : ''}"></span><div><b>${U.esc(p.name || p.username)}</b><small>${p.active ? `Active now · ${U.esc(p.page)}` : `Last active ${U.esc(U.timeLabel(p.lastSeen))} · last page: ${U.esc(p.page)}`}</small>${p.lastEvent ? `<small>Last action: ${U.esc(p.lastEvent.label || p.lastEvent.kind)}</small>` : ''}</div><span class="presence-side"><span class="presence-state">${p.online && p.active ? 'LIVE' : p.online ? 'IDLE' : 'AWAY'}</span>${isAdmin ? `<button class="btn small" data-live-watch="${U.esc(p.username)}">👁 Live view</button> <button class="btn small" data-la-request="${U.esc(p.username)}" title="User ki marzi se live awaaz/video session shuru karo">🎙 Assist</button>` : ''}</span></div>`).join('') : '<div class="notification-empty">Users seen after this server started will appear here.</div>'}</section>` : '';
     pop.innerHTML = `<div class="notification-head"><div><b>Notifications</b><small>${state.unread ? `${state.unread} unread` : 'Sab updated hai'} · ${filtered.length} shown</small></div><div style="display:flex;gap:6px"><button class="btn small" data-notify-read ${state.unread ? '' : 'disabled'}>✓ Mark all read</button></div></div>
       <div class="notify-filter-bar"><label>Type <select data-notify-filter="type">${typeOptions.map((t) => `<option value="${U.esc(t.key)}" ${state.filterType === t.key ? 'selected' : ''}>${U.esc(t.label)}</option>`).join('')}</select></label><button type="button" class="btn small ${state.filterUnread ? 'primary' : ''}" data-notify-filter="unread">${state.filterUnread ? '✓ Unread only' : 'Unread only'}</button></div>
       ${presence}
@@ -860,6 +862,30 @@ window.FF = window.FF || {};
       }
       const watchBtn = e.target.closest('[data-live-watch]');
       if (watchBtn) { e.preventDefault(); toggle(false); if (FF.liveView) FF.liveView.watch(watchBtn.dataset.liveWatch); return; }
+      // 🎙️ Live Assist (v3.26) — pehle mode chuno (voice / video), phir consent request jaati hai.
+      const laBtn = e.target.closest('[data-la-request]');
+      if (laBtn) {
+        e.preventDefault(); toggle(false);
+        const username = laBtn.dataset.laRequest;
+        if (!FF.liveAssist) { U.toast('Live Assist module load nahi hua', 'err'); return; }
+        if (!FF.liveAssist.supported) { U.toast('Is browser me mic/WebRTC support nahi hai — Chrome/Edge use karo', 'err'); return; }
+        if (FF.app && FF.app.openDrawer) {
+          FF.app.openDrawer({
+            kicker: '🎙️ Live Assist', title: `${username} se live baat`,
+            sub: 'User ko consent popup dikhega — uski haan ke bina kuch nahi chalega',
+            body: `<div class="kd-sec">
+              <p class="dim small">Kaunsa session chahiye? User ke screen par request khulegi — wo <b>Allow</b> karega tabhi awaaz/video aayegi. Session ke dauran user ko hamesha 🔴 LIVE indicator dikhta hai.</p>
+              <div class="btn-row" style="margin-top:8px">
+                <button class="btn primary" id="la-mode-audio">🎙️ Sirf awaaz (voice)</button>
+                <button class="btn" id="la-mode-video">🎥 Awaaz + video</button>
+              </div></div>`
+          });
+          const av = U.$('#la-mode-audio'), vv = U.$('#la-mode-video');
+          if (av) av.addEventListener('click', () => { FF.app.closeDrawer(); FF.liveAssist.adminRequest(username, 'audio'); });
+          if (vv) vv.addEventListener('click', () => { FF.app.closeDrawer(); FF.liveAssist.adminRequest(username, 'video'); });
+        } else FF.liveAssist.adminRequest(username, 'audio');
+        return;
+      }
       const test = e.target.closest('[data-notify-test]');
       if (test) { e.preventDefault(); testSound(); return; }
       const panelTest = e.target.closest('[data-notify-panel-test]');

@@ -377,7 +377,7 @@ function verifyPassword(password, stored) {
 const normUser = (u) => String(u || '').trim().toLowerCase().replace(/[^a-z0-9._@-]/g, '').slice(0, 60);
 // `enabled` = master switch (UI me ek hi "Notifications ON/OFF" button hai). OFF → koi in-app toast
 // nahi, koi browser alert nahi, koi mobile push nahi. Feed items phir bhi save hote hain (history).
-const DEFAULT_NOTIFY_PREFS = { enabled: true, login: true, signup: true, report: true, monthly: true, digest: true, alert: true, activity: true, click: true, search: true, settings: true, user: true, location: true, info: true, request: true, sound: true, push: true };
+const DEFAULT_NOTIFY_PREFS = { enabled: true, login: true, signup: true, report: true, monthly: true, digest: true, alert: true, activity: true, click: true, search: true, settings: true, user: true, location: true, info: true, request: true, assist: true, sound: true, push: true };
 function normalizeNotifyPrefs(p) {
   const out = { ...DEFAULT_NOTIFY_PREFS };
   if (p && typeof p === 'object') for (const k of Object.keys(DEFAULT_NOTIFY_PREFS)) if (p[k] !== undefined) out[k] = !!p[k];
@@ -2517,7 +2517,7 @@ function perfReport() {
   const hottest = [...HOT.entries()].sort((a, b) => b[1].hits - a[1].hits).slice(0, 10)
     .map(([url, h]) => ({ url: url.length > 160 ? `${url.slice(0, 160)}…` : url, hits: h.hits }));
   return {
-    version: '3.25.0', cacheEntries: cache.size, cacheEntriesMax: MAX_CACHE_ENTRIES,
+    version: '3.26.0', cacheEntries: cache.size, cacheEntriesMax: MAX_CACHE_ENTRIES,
     cacheSeconds: cacheMs() / 1000, warmedQueries: warmed, hotQueries: hottest,
     slowest: queries.filter((q) => q.upstream > 0).slice(0, 25),
     queries
@@ -2623,7 +2623,7 @@ async function handleApi(req, res, url) {
 
   if (p === '/api/health' && method === 'GET') {
     // pendingSignups sirf admin ko (sidebar badge ke liye) — public health me leak nahi.
-    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.25.0', storage: storageStatus(), push: pushHealth(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length } : {}) });
+    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.26.0', storage: storageStatus(), push: pushHealth(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length } : {}) });
   }
   // 📊 Admin-only: exact reason of slowness (Google query timings, cache hit rate, warm queries).
   if (p === '/api/perf' && method === 'GET') {
@@ -3552,6 +3552,166 @@ async function handleApi(req, res, url) {
     await persist('notify');
     logAudit(user, 'tag_sheet_push', { target: row.id, note: `${out.added} rows → ${out.tab || ''}`, ip: clientIp(req) });
     return sendJson(res, 200, { ok: true, added: out.added, tab: out.tab, atRow: out.atRow, url: out.url || '' });
+  }
+
+  // ---- 🎙️ LIVE ASSIST (v3.26) — admin user ki awaaz/video live sun/dekh sakta hai ---------------
+  // TRANSPARENCY BY DESIGN: ye feature SIRF user ki haan ke baad chalta hai —
+  //   1. user ko full-screen consent popup dikhta hai (Allow / Decline, 60s timeout),
+  //   2. accept karne par hi mic/camera khulta hai,
+  //   3. session ke dauran user ki screen par hamesha 🔴 LIVE pill dikhta hai (End button ke saath),
+  //   4. har request/accept/end audit log me darj hota hai.
+  // Media WebRTC se seedha browser↔browser jaata hai; server sirf signalling (SDP/ICE) relay karta
+  // hai aur sessions durable store me rakhta hai (notify kind — koi naya storage kind nahi).
+  const LIVE_ASSIST_REQUEST_TTL = 60e3;      // 60s me accept nahi → missed
+  const LIVE_ASSIST_MAX_ACTIVE = 60 * 60e3;  // ek session max 1 ghanta
+  const liveAssistStore = () => {
+    const w = workspaceStore();
+    if (!w.liveAssist || typeof w.liveAssist !== 'object') w.liveAssist = { sessions: [] };
+    if (!Array.isArray(w.liveAssist.sessions)) w.liveAssist.sessions = [];
+    return w.liveAssist;
+  };
+  const laIceServers = () => {
+    // Optional: LIVE_ASSIST_ICE_JSON env me extra STUN/TURN servers (JSON array) — strict NAT me TURN chahiye.
+    try {
+      const extra = process.env.LIVE_ASSIST_ICE_JSON;
+      if (extra) { const arr = JSON.parse(extra); if (Array.isArray(arr) && arr.length) return arr.slice(0, 5); }
+    } catch { /* env optional */ }
+    return [{ urls: 'stun:stun.l.google.com:19302' }];
+  };
+  const laPrune = () => {
+    const st = liveAssistStore();
+    const now = Date.now();
+    for (const s of st.sessions) {
+      if (s.status === 'requested' && now - new Date(s.requestedAt).getTime() > LIVE_ASSIST_REQUEST_TTL) {
+        s.status = 'missed'; s.endedAt = new Date().toISOString(); s.reason = 'timeout';
+      } else if (s.status === 'active' && now - new Date(s.acceptedAt || s.requestedAt).getTime() > LIVE_ASSIST_MAX_ACTIVE) {
+        s.status = 'ended'; s.endedAt = new Date().toISOString(); s.reason = 'max-time';
+      }
+    }
+    if (st.sessions.length > 120) st.sessions.splice(0, st.sessions.length - 120);
+  };
+  const laView = (s) => ({
+    id: s.id, admin: s.admin, adminName: s.adminName || s.admin, user: s.user, userName: s.userName || s.user,
+    mode: s.mode === 'video' ? 'video' : 'audio', status: s.status,
+    requestedAt: s.requestedAt, acceptedAt: s.acceptedAt || null, endedAt: s.endedAt || null,
+    reason: s.reason || '', ice: laIceServers()
+  });
+  const laFind = (id) => liveAssistStore().sessions.find((s) => s.id === id);
+  const laParty = (s, user) => (s.user === user.username ? 'user' : (user.role === 'admin' ? 'admin' : null));
+  // Signals bahut tezi se aate hain (ICE) — har signal par full sheet save mat karo; 5s throttle.
+  let laLastPersist = 0;
+  const laPersistSoon = () => {
+    if (Date.now() - laLastPersist < 5000) return;
+    laLastPersist = Date.now();
+    persist('notify').catch(() => {});
+  };
+  if (p === '/api/live-assist' && method === 'GET') {
+    requireAdmin(user);
+    laPrune();
+    return sendJson(res, 200, { ok: true, sessions: liveAssistStore().sessions.slice(-50).reverse().map(laView) });
+  }
+  if (p === '/api/live-assist/request' && method === 'POST') {
+    requireAdmin(user);
+    const body = await readBody(req);
+    const username = normUser(body.user);
+    const target = findUser(username);
+    if (!target) throw new HttpError(404, 'User nahi mila.');
+    const mode = body.mode === 'video' ? 'video' : 'audio';
+    laPrune();
+    const st = liveAssistStore();
+    const existing = st.sessions.find((s) => s.user === username && (s.status === 'requested' || s.status === 'active'));
+    if (existing) return sendJson(res, 200, { ok: true, existing: true, session: laView(existing) });
+    const s = {
+      id: workspaceId('assist'), admin: user.username, adminName: user.name || user.username,
+      user: username, userName: target.name || username, mode, status: 'requested',
+      requestedAt: new Date().toISOString(), signals: [], seq: 0
+    };
+    st.sessions.push(s);
+    await persist('notify');
+    try {
+      recordNotification({
+        type: 'assist', title: `🎙️ Live Assist request · ${s.adminName}`,
+        body: `Admin aapse live baat karna chahte hain — sirf aapki ${mode === 'video' ? 'awaaz + camera' : 'awaaz'} jayegi, aur sirf aap Allow karoge tabhi. Screen par request khuli hogi.`,
+        target: `user:${username}`, meta: { sessionId: s.id, mode }
+      });
+    } catch { /* notification optional */ }
+    logAudit(user, 'live_assist_request', { target: username, note: mode, ip: clientIp(req) });
+    return sendJson(res, 201, { ok: true, session: laView(s) });
+  }
+  if (p === '/api/live-assist/inbox' && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required');
+    laPrune();
+    const mine = liveAssistStore().sessions.filter((s) => s.user === user.username && (s.status === 'requested' || s.status === 'active'));
+    return sendJson(res, 200, { ok: true, sessions: mine.map(laView) });
+  }
+  const laSigPath = p.match(/^\/api\/live-assist\/([^/]+)\/signal$/);
+  if (laSigPath && method === 'POST') {
+    if (!user) throw new HttpError(401, 'Login required');
+    const s = laFind(laSigPath[1]);
+    if (!s) throw new HttpError(404, 'Session nahi mila.');
+    const side = laParty(s, user);
+    if (!side) throw new HttpError(403, 'Is session ke hissa nahi ho.');
+    if (s.status !== 'active') throw new HttpError(400, `Session "${s.status}" hai — signalling band.`);
+    const body = await readBody(req);
+    if (!['sdp', 'ice'].includes(body.kind) || !body.data || typeof body.data !== 'object') throw new HttpError(400, 'Signal invalid hai.');
+    if (JSON.stringify(body.data).length > 40000) throw new HttpError(400, 'Signal bahut bada hai.');
+    s.seq = Number(s.seq) + 1;
+    if (!Array.isArray(s.signals)) s.signals = [];
+    s.signals.push({ seq: s.seq, kind: body.kind, data: body.data, from: side, at: new Date().toISOString() });
+    if (s.signals.length > 250) s.signals.splice(0, s.signals.length - 250);
+    laPersistSoon();
+    return sendJson(res, 200, { ok: true, seq: s.seq });
+  }
+  if (laSigPath && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required');
+    const s = laFind(laSigPath[1]);
+    if (!s) throw new HttpError(404, 'Session nahi mila.');
+    const side = laParty(s, user);
+    if (!side) throw new HttpError(403, 'Is session ke hissa nahi ho.');
+    const since = Number(url.searchParams.get('since')) || 0;
+    const fresh = (s.signals || []).filter((m) => m.seq > since && m.from !== side)
+      .map((m) => ({ seq: m.seq, kind: m.kind, data: m.data, at: m.at }));
+    return sendJson(res, 200, { ok: true, status: s.status, seq: Number(s.seq) || 0, signals: fresh });
+  }
+  const laActPath = p.match(/^\/api\/live-assist\/([^/]+)\/(accept|decline|end)$/);
+  if (laActPath && method === 'POST') {
+    if (!user) throw new HttpError(401, 'Login required');
+    laPrune();
+    const s = laFind(laActPath[1]);
+    if (!s) throw new HttpError(404, 'Session nahi mila.');
+    const side = laParty(s, user);
+    if (!side) throw new HttpError(403, 'Is session ke hissa nahi ho.');
+    const action = laActPath[2];
+    const now = new Date().toISOString();
+    if (action === 'accept') {
+      if (side !== 'user') throw new HttpError(403, 'Sirf jiske liye request hai wahi allow kar sakta hai.');
+      if (s.status !== 'requested') throw new HttpError(400, `Session "${s.status}" hai — ab allow nahi ho sakta.`);
+      s.status = 'active'; s.acceptedAt = now;
+      try { recordNotification({ type: 'assist', title: '🎙️ Live Assist allowed', body: `${s.userName} ne allow kiya — live session chalu (${s.mode}).`, target: 'admin', meta: { sessionId: s.id } }); } catch { /* optional */ }
+      logAudit(user, 'live_assist_accept', { target: s.id, note: s.mode, ip: clientIp(req) });
+    } else if (action === 'decline') {
+      if (side !== 'user') throw new HttpError(403, 'Sirf jinke liye request hai wahi decline kar sakte hain.');
+      if (s.status !== 'requested') throw new HttpError(400, `Session "${s.status}" hai.`);
+      s.status = 'declined'; s.endedAt = now; s.reason = 'user-declined';
+      try { recordNotification({ type: 'assist', title: '🎙️ Live Assist declined', body: `${s.userName} ne request decline kar di.`, target: 'admin', meta: { sessionId: s.id } }); } catch { /* optional */ }
+      logAudit(user, 'live_assist_decline', { target: s.id, ip: clientIp(req) });
+    } else { // end — dono me se koi bhi band kar sakta hai
+      if (s.status === 'requested' || s.status === 'active') {
+        s.status = 'ended'; s.endedAt = now; s.reason = side === 'user' ? 'user-ended' : 'admin-ended';
+        logAudit(user, 'live_assist_end', { target: s.id, note: s.reason, ip: clientIp(req) });
+      }
+    }
+    await persist('notify');
+    return sendJson(res, 200, { ok: true, session: laView(s) });
+  }
+  const laOnePath = p.match(/^\/api\/live-assist\/([^/]+)$/);
+  if (laOnePath && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required');
+    laPrune();
+    const s = laFind(laOnePath[1]);
+    if (!s) throw new HttpError(404, 'Session nahi mila.');
+    if (!laParty(s, user)) throw new HttpError(403, 'Is session ke hissa nahi ho.');
+    return sendJson(res, 200, { ok: true, session: laView(s) });
   }
 
   // ---- gviz ----
