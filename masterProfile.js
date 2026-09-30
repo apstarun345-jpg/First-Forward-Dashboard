@@ -37,6 +37,43 @@ window.FF = window.FF || {};
   const is4 = (c) => /^VC\s*4$/i.test(String(c || '').trim());
   const monthLabel = (ym) => { try { return U.labelYM(ym); } catch { return String(ym || ''); } };
   const num = (v) => Number(v) || 0;
+  /** Sheet ka "▲ +12.5%" / "▼ 8%" text → number (sign included). */
+  function pctText(value) {
+    if (value === null || value === undefined || value === '') return null;
+    const m = String(value).match(/[-+]?\d+(?:\.\d+)?/);
+    if (!m) return null;
+    let n = Number(m[0]);
+    if (/▼/.test(String(value)) && n > 0) n = -n;
+    return Number.isFinite(n) ? n : null;
+  }
+  /** 📅 Channel basis — FF: data kal aata hai (aaj−1 din) · GV: live aaj. Isi par run-rate / projection. */
+  const basis = (ch) => (U.channelBasis
+    ? U.channelBasis(ch, { force: true })
+    : (U.reportBasis ? U.reportBasis({ force: true }) : { day: U.runRateDays(), days: U.runRateDays(), label: '', back: 1, shortLabel: '' }));
+  /** Growth % (sheet ka apna, warna totals se) + month-end projection us channel ke basis par. */
+  function growthBlock(o, totals, ym, ch) {
+    const b = basis(ch);
+    const t = totals || {};
+    const sheet = pctText(o.growth);
+    const g = sheet !== null ? sheet : U.growth(num(t.curTotal), num(t.lastTotal));
+    const proj = (k) => U.projectMonthEnd(t[k], b.days, ym);
+    return {
+      text: o.growth || (g === null ? '' : `${g >= 0 ? '▲ +' : '▼ '}${Math.abs(g).toFixed(1)}%`),
+      num: g, basis: b,
+      cur: num(t.curTotal), last: num(t.lastTotal),
+      projected: proj('curTotal'), projectedVc4: proj('curVc4'), projectedComm: proj('curComm'),
+      // Sheet ka apna projected (REPORT) — hamare recompute se compare karne ke liye rakhte hain.
+      sheetProjected: num(o.projected) || num(o.curProjected) || num(o.tlProjected)
+    };
+  }
+  /** out par growth + month-end projection lagao (agent aur TL, dono channels). */
+  function attachGrowth(out, src, ym) {
+    const gi = growthBlock(src || {}, out.totals, ym, out.ch);
+    out.growth = gi.text;
+    out.growthNum = gi.num;
+    out.projT1 = { num: gi.num, total: gi.projected, vc4: gi.projectedVc4, comm: gi.projectedComm, sheet: gi.sheetProjected, days: gi.basis.days, basis: gi.basis };
+    return gi;
+  }
 
   // ------------------------------------------------------------------ loading
   let warmPromise = null;
@@ -121,6 +158,7 @@ window.FF = window.FF || {};
       Object.assign(out, { mobile: mobileFor(p.name, p.sub, ''), tl: { name: [...(p.tlSet || [])][0] || '' }, priority: '', direct: !!p.direct, directLabel: p.directLabel || '', stock: { vc4: 0, comm: 0, total: 0 }, tlStock: { has: false }, dispatch: { days: suggestDays(), sugVc4: 0, sugComm: 0, sugVc4Gross: 0, sugCommGross: 0 }, totals: {} });
     }
     out.tagRequired = out.direct && isHM(out.priority);
+    attachGrowth(out, a || {}, latestYm(ac.length ? ac : agRows));
     if (light) return out;
     const curYm = latestYm(ac.length ? ac : agRows), lastYm = U.prevMonthKey(curYm);
     const isMine = (r) => norm(r.name) === n && (!r.channel || /first/i.test(r.channel));
@@ -145,6 +183,8 @@ window.FF = window.FF || {};
       const av = U.runRate(a.curVc4), avc = U.runRate(a.curNvc4);
       return { name: a.name, id: a.agentId || a.id, mobile: mobileFor(a.name, a.agentId || a.id, a.mobile), priority: a.priority || '', stockVc4: num(a.stockVc4), stockComm: num(a.stockNvc4), stockTotal: num(a.stockTotal), cur: num(a.curTotal), last: num(a.lastTotal), curVc4: num(a.curVc4), curComm: num(a.curNvc4), sugVc4: suggest(av, a.stockVc4), sugComm: suggest(avc, a.stockNvc4), sugVc4Gross: suggestGro(av), sugCommGross: suggestGro(avc) };
     }).sort((x, y) => y.cur - x.cur);
+    const ac = rowsOf('agentClass'), agRows = rowsOf('agents'), stk = rowsOf('stockAgents');
+    const curYm = latestYm(ac.length ? ac : agRows), lastYm = U.prevMonthKey(curYm);
     const out = {
       kind: 'ff-tl', channel: 'First Forward', ch: 'ff', name: p.name, id: (src && src.tlId) || p.sub || '', found: !!agents.length,
       mobile: (src && src.tlMobile && !/^na$/i.test(src.tlMobile)) ? src.tlMobile : '', tl: { name: p.name, id: (src && src.tlId) || '', mobile: (src && src.tlMobile) || '' },
@@ -155,9 +195,9 @@ window.FF = window.FF || {};
       agents: rowsA, agentCount: agents.length
     };
     if (src && src.tlCurTotal != null) Object.assign(out.totals, { tlCurTotal: num(src.tlCurTotal), tlLastTotal: num(src.tlLastTotal) });
+    // 📈 TL growth % — REPORT tab ka apna "TL Performance Status · Percent"; expected month-end bhi saath.
+    attachGrowth(out, { growth: (src && src.tlGrowth) || '', projected: src && src.tlProjected }, curYm);
     if (light) return out;
-    const ac = rowsOf('agentClass'), agRows = rowsOf('agents'), stk = rowsOf('stockAgents');
-    const curYm = latestYm(ac.length ? ac : agRows), lastYm = U.prevMonthKey(curYm);
     out.months = { cur: curYm, last: lastYm };
     out.classes = classTable(ac.filter((r) => norm(r.tlName) === n && (!r.channel || /first/i.test(r.channel))), stk.filter((r) => norm(r.tlName) === n), curYm, lastYm);
     if (!out.classes.length) out.classes = [{ cls: 'VC4', cur: out.totals.curVc4, last: out.totals.lastVc4, stock: stock.vc4 }, { cls: 'Commercial', cur: out.totals.curComm, last: out.totals.lastComm, stock: stock.comm }];
@@ -192,6 +232,7 @@ window.FF = window.FF || {};
       Object.assign(out, { mobile: '', tl: { name: [...(p.tlSet || [])][0] || '' }, priority: '', direct: !!p.direct, directLabel: p.directLabel || '', stock: { vc4: 0, comm: 0, total: 0 }, tlStock: { has: false }, dispatch: { days: suggestDays(), sugVc4: 0, sugComm: 0, sugVc4Gross: 0, sugCommGross: 0 }, totals: {} });
     }
     out.tagRequired = out.direct && isHM(out.priority);
+    attachGrowth(out, r || {}, latestYm(safeCall(() => (FF.gv && FF.gv.rows ? FF.gv.rows() : []), [])));
     if (light) return out;
     const n = norm(p.name);
     const master = gvClassRows((m) => norm(m.agentName) === n || (out.id && m.agentId === out.id));
@@ -225,6 +266,8 @@ window.FF = window.FF || {};
     };
     // TL priority = sabse high agent priority
     out.priority = rowsA.some((r) => r.priority === 'High') ? 'High' : rowsA.some((r) => r.priority === 'Medium') ? 'Medium' : rowsA.length ? 'Low' : '';
+    // 📈 GV TL growth — GV sheet TL-level value nahi deta, isliye agents ke totals se.
+    attachGrowth(out, {}, latestYm(safeCall(() => (FF.gv && FF.gv.rows ? FF.gv.rows() : []), [])));
     if (light) return out;
     const master = gvClassRows((m) => norm(m.tlName) === n);
     const curYm = latestYm(master.length ? master : [{ ym: U.ymKey(new Date()) }]), lastYm = U.prevMonthKey(curYm);
@@ -237,11 +280,14 @@ window.FF = window.FF || {};
     return out;
   }
 
-  /** 🧮 Ek hi formula: run-rate = issued ÷ (today−1) · required = run-rate × din · with stock = required − stock · w/o stock = required · cover = stock ÷ run-rate. */
+  /** 🧮 Ek hi formula: run-rate = issued ÷ (channel ke basis ka din) · required = run-rate × din ·
+      with stock = required − stock · w/o stock = required · cover = stock ÷ run-rate.
+      FF ka data kal aata hai (aaj−1 din) · GV live hai (aaj ka din). */
   function withCalc(pr) {
     if (!pr) return pr;
     const t = pr.totals || {}, s = pr.stock || {};
-    const mk = (cur, last, stock) => U.dispatchCalc({ cur: num(cur), last: num(last), stock: num(stock) });
+    const elapsed = (pr.projT1 && pr.projT1.days) || U.runRateDays();
+    const mk = (cur, last, stock) => U.dispatchCalc({ cur: num(cur), last: num(last), stock: num(stock), elapsed });
     pr.calc = {
       vc4: mk(t.curVc4, t.lastVc4, s.vc4),
       comm: mk(t.curComm, t.lastComm, s.comm),
@@ -293,14 +339,51 @@ window.FF = window.FF || {};
   }
 
   const coverBadge = (c) => (c == null ? '<span class="dim">—</span>' : `<span class="badge ${c < 7 ? 'red' : c < 15 ? 'amber' : 'green'}">${fmt(c, true)} din</span>`);
+  /** 📈 Growth cell — sheet ka % + "data till <date>" + month-end projection. */
+  function growthCell(pr) {
+    const g = pr.growthNum, p = pr.projT1 || null, b = p && p.basis;
+    const main = (g === null || g === undefined || !Number.isFinite(g)) ? '<span class="dim">—</span>' : U.pctHtml(g, { decimals: 1 });
+    const foot = [];
+    if (b && b.shortLabel) foot.push(`till ${esc(b.shortLabel)}`);
+    if (p && p.total) foot.push(`proj ${fmt(p.total)}`);
+    return `<div class="mp-growth"><small>Growth</small><b>${main}</b>${foot.length ? `<em>${foot.join(' · ')}</em>` : ''}</div>`;
+  }
+  /** 📈 Growth + month-end projection — run-rate basis ke hisaab se (FF: kal tak · GV: live aaj). */
+  function growthHtml(pr) {
+    const p = pr.projT1;
+    if (!p || !pr.found) return '';
+    const t = pr.totals || {}, m = pr.months || {}, b = p.basis || {};
+    const last = monthLabel(m.last) || 'Last month', cur = monthLabel(m.cur) || 'This month';
+    const curHead = b.shortLabel ? `${cur} · till ${b.shortLabel}` : cur;
+    const g = (a, c) => U.pctHtml(U.growth(num(a), num(c)), { decimals: 0 });
+    const row = (label, a, c, proj) => `<tr><td><b>${label}</b></td><td class="num">${fmt(c)}</td><td class="num"><b>${fmt(a)}</b></td><td class="num">${g(a, c)}</td><td class="num"><b>${fmt(proj)}</b></td></tr>`;
+    const gTotal = p.num === null || p.num === undefined ? U.growth(t.curTotal, t.lastTotal) : p.num;
+    const days = b.days || p.days || 0;
+    const rate = days ? num(t.curTotal) / days : 0;
+    const monthDays = m.cur ? U.daysInMonth(m.cur) : 30;
+    const left = m.cur ? Math.max(0, monthDays - days) : 0;
+    return `<section class="mp-sec mp-growth-sec"><h4>📈 Growth % &amp; month-end expected</h4>
+      <p class="dim small">📅 ${esc(U.basisText(pr.ch, b))} · Expected = run-rate (${fmt(rate, true)}/day) × is month ke ${fmt(monthDays)} din${left ? ` · aage <b>${fmt(left)} din</b> bache hain` : ''}.</p>
+      <div class="table-wrap"><table class="tbl compact"><thead><tr><th>Tag</th><th class="num">${esc(last)}</th><th class="num">${esc(curHead)}</th><th class="num">Growth</th><th class="num">Expected month-end</th></tr></thead><tbody>
+        ${row('VC4', t.curVc4, t.lastVc4, p.vc4)}${row('Commercial', t.curComm, t.lastComm, p.comm)}
+      </tbody><tfoot><tr class="row-total"><td>Total</td><td class="num">${fmt(t.lastTotal)}</td><td class="num">${fmt(t.curTotal)}</td><td class="num">${U.pctHtml(gTotal, { decimals: 0 })}</td><td class="num">${fmt(p.total)}</td></tr></tfoot></table></div>
+      <div class="dgrid" style="margin-top:8px">
+        <div class="drow"><span>Run-rate / day</span><b>${fmt(rate, true)} · ${fmt(days)} din ka hisaab</b></div>
+        <div class="drow"><span>Data till</span><b>${esc(b.label || `${fmt(days)} din`)}</b></div>
+        <div class="drow"><span>Aage kitne din bache</span><b>${fmt(left)} din · <small class="dim">expected ${fmt(Math.round(rate * left))} aur tags</small></b></div>
+        <div class="drow"><span>Sheet ka expected</span><b>${p.sheet ? `${fmt(p.sheet)} <small class="dim">(purana basis)</small>` : '—'}</b></div>
+        <div class="drow"><span>Growth % kahan se</span><b>${pr.growth ? `${esc(pr.growth)} <small class="dim">REPORT tab</small>` : '<small class="dim">totals se calculate</small>'}</b></div>
+      </div></section>`;
+  }
   function calcHtml(pr) {
     const c = pr.calc;
     if (!c) return '';
     const days = c.total.days, el = c.total.elapsed;
     const row = (label, x, strong) => `<tr class="${strong ? 'row-strong' : ''}"><td><b>${label}</b></td><td class="num">${fmt(x.last)}</td><td class="num">${fmt(x.cur)}</td><td class="num">${fmt(x.rate, true)}</td><td class="num">${fmt(x.required)}</td><td class="num">${fmt(x.stock)}</td><td class="num"><b class="sug-chip">${fmt(x.net)}</b></td><td class="num"><b class="sug-chip wo">${fmt(x.gross)}</b></td><td class="num">${coverBadge(x.cover)}</td></tr>`;
     const m = pr.months || {};
+    const b = (pr.projT1 && pr.projT1.basis) || {};
     return `<section class="mp-sec mp-calc"><h4>🧮 Dispatch calculation · ${fmt(days)} din</h4>
-      <p class="dim small">Run-rate = is month ke issue ÷ <b>(aaj − 1) = ${fmt(el)} din</b> · Required = run-rate × <b>${fmt(days)}</b> din · <b>After stock</b> = Required − stock · <b>Without subtracting stock</b> = full Required · Cover = stock ÷ run-rate</p>
+      <p class="dim small">📅 ${esc(U.basisText(pr.ch, b))} — isliye run-rate = is month ka issue ÷ <b>${fmt(el)} din</b> · Required = run-rate × <b>${fmt(days)}</b> din · <b>After stock</b> = Required − stock · <b>Without subtracting stock</b> = full Required · Cover = stock ÷ run-rate</p>
       <div class="table-wrap"><table class="tbl compact"><thead><tr><th>Tag</th><th class="num">${esc(monthLabel(m.last) || 'Last month')}</th><th class="num">${esc(monthLabel(m.cur) || 'This month')}</th><th class="num">Run-rate / day</th><th class="num">× ${fmt(days)} din</th><th class="num">Stock</th><th class="num">With stock dispatch · after stock</th><th class="num">W/o stock dispatch · no stock deduction</th><th class="num">Cover</th></tr></thead><tbody>${row('VC4', c.vc4)}${row('Commercial', c.comm)}</tbody><tfoot>${row('Total', c.total, true).replace('<tr class="row-strong">', '<tr class="row-total">')}</tfoot></table></div></section>`;
   }
 
@@ -345,7 +428,7 @@ window.FF = window.FF || {};
       ${isTl ? '' : cell("TL's mobile", mobileCell(pr.tl && pr.tl.mobile))}
       ${cell('Status', esc(pr.status || '—'))}
       ${cell('Last active', esc(pr.lastActive || '—'))}
-      ${cell('Growth', esc(pr.growth || '—'))}
+      ${growthCell(pr)}
     </div>`;
     const kpis = `<div class="mp-kpis">
       ${kpi(isTl ? 'TL stock (total)' : 'Agent stock', fmt(s.total), `VC4 ${fmt(s.vc4)} · Commercial ${fmt(s.comm)}`, 'k1')}
@@ -370,6 +453,7 @@ window.FF = window.FF || {};
     const actions = `<div class="mp-actions"><button class="btn small" data-mp-csv>⬇ CSV</button><button class="btn small" data-mp-wa>📲 WhatsApp</button>${isTl ? '' : `<button class="btn small" data-mp-a360="${esc(pr.name)}">👁 Agent 360</button>`}<a class="btn small" href="#/masterStock?q=${encodeURIComponent(pr.name)}">🗄️ Register / tags</a></div>`;
     return `<div class="mp">${noData}${head}${kpis}
       ${calcHtml(pr)}
+      ${growthHtml(pr)}
       <section class="mp-sec"><h4>🧾 Issuance summary${isTl ? ' — TL total' : ''}</h4>${summary}</section>
       <section class="mp-sec"><h4>🎯 Issuance class-wise · last month vs this month + stock</h4>${clsTable}</section>
       ${agentsTable}
@@ -379,27 +463,30 @@ window.FF = window.FF || {};
 
   // ------------------------------------------------------------------ export / share
   function csvRows(pr) {
-    const d = pr.dispatch || {}, s = pr.stock || {}, t = pr.totals || {}, ts = pr.tlStock || {};
+    const d = pr.dispatch || {}, s = pr.stock || {}, t = pr.totals || {}, ts = pr.tlStock || {}, p = pr.projT1 || {}, b = p.basis || {};
     const rows = [['Name', pr.name], ['Type', `${pr.channel} ${/tl$/.test(pr.kind) ? 'TL' : 'Agent'}`], ['ID', pr.id], ['Mobile', canContacts() ? pr.mobile : ''], ['TL', (pr.tl && pr.tl.name) || ''], ['TL ID', (pr.tl && pr.tl.id) || ''], ["TL's mobile", canContacts() ? (pr.tl && pr.tl.mobile) || '' : ''],
       ['Status', pr.status], ['Last active', pr.lastActive], ['Priority', pr.priority], ['Direct agent', pr.direct ? pr.directLabel : 'No'], ['Tag required', pr.tagRequired ? 'YES' : 'No'],
+      ['Growth % (REPORT)', pr.growthNum === null || pr.growthNum === undefined ? '' : Number(pr.growthNum.toFixed(1))], ['Data till (run-rate basis)', b.label || ''],
+      ['Expected month-end', p.total || ''], ['Expected month-end · sheet', p.sheet || ''],
       ['Stock VC4', s.vc4], ['Stock Commercial', s.comm], ['Stock total', s.total], ['TL stock total', ts.has ? ts.total : ''],
-      ['Run-rate basis', `issued ÷ (today−1) = ${(pr.calc && pr.calc.total.elapsed) || ''} din`], ['Avg VC4/day', d.avgVc4], ['Suggested VC4' + (pr.tagRequired ? ' (tags)' : '') + ' · stock ke baad (net)', d.sugVc4], ['Suggested VC4 · bina stock (gross)', d.sugVc4Gross || 0], ['Suggested Commercial' + (pr.tagRequired ? ' (tags)' : '') + ' · stock ke baad (net)', d.sugComm], ['Suggested Commercial · bina stock (gross)', d.sugCommGross || 0],
+      ['Run-rate basis', `issued ÷ ${(pr.calc && pr.calc.total.elapsed) || ''} din (${U.basisText(pr.ch, b)})`], ['Avg VC4/day', d.avgVc4], ['Suggested VC4' + (pr.tagRequired ? ' (tags)' : '') + ' · stock ke baad (net)', d.sugVc4], ['Suggested VC4 · bina stock (gross)', d.sugVc4Gross || 0], ['Suggested Commercial' + (pr.tagRequired ? ' (tags)' : '') + ' · stock ke baad (net)', d.sugComm], ['Suggested Commercial · bina stock (gross)', d.sugCommGross || 0],
       ['Total run-rate/day', pr.calc ? pr.calc.total.rate : ''], ['Total required (× days)', pr.calc ? pr.calc.total.required : ''], ['Total dispatch WITH stock', pr.calc ? pr.calc.total.net : ''], ['Total dispatch W/O stock', pr.calc ? pr.calc.total.gross : ''], ['Total cover (days)', pr.calc && pr.calc.total.cover != null ? pr.calc.total.cover : ''], ['Issued this month', t.curTotal], ['Issued last month', t.lastTotal], ['', ''], ['Class', `${(pr.months || {}).last || 'Last'} | ${(pr.months || {}).cur || 'This'} | Stock`]];
     (pr.classes || []).forEach((r) => rows.push([r.cls, r.last, r.cur, r.stock]));
     if (pr.agents && pr.agents.length) { rows.push(['', '']); rows.push(['Agent', 'ID', 'Mobile', 'Priority', 'VC4 stock', 'Comm stock', 'Last', 'This', 'Sug VC4 (stock −)', 'Sug VC4 (bina stock)', 'Sug Comm (stock −)', 'Sug Comm (bina stock)']); pr.agents.forEach((a) => rows.push([a.name, a.id, canContacts() ? a.mobile : '', a.priority, a.stockVc4, a.stockComm, a.last, a.cur, a.sugVc4, a.sugVc4Gross || 0, a.sugComm, a.sugCommGross || 0])); }
     return rows;
   }
   function waText(pr) {
-    const d = pr.dispatch || {}, s = pr.stock || {}, t = pr.totals || {};
+    const d = pr.dispatch || {}, s = pr.stock || {}, t = pr.totals || {}, p = pr.projT1 || {}, b = p.basis || {};
     const lines = [`*${pr.name}* (${pr.channel} ${/tl$/.test(pr.kind) ? 'TL' : 'Agent'}${pr.id ? ` · ${pr.id}` : ''})`];
     if (canContacts() && pr.mobile) lines.push(`📞 ${pr.mobile}`);
     if (!/tl$/.test(pr.kind) && pr.tl && pr.tl.name && !pr.direct) lines.push(`TL: ${pr.tl.name}`);
     lines.push(`Priority: ${pr.priority || '—'}${pr.tagRequired ? ' · 🏷️ TAG REQUIRED' : ''}`);
     lines.push(`Stock: ${U.fmt(s.total)} (VC4 ${U.fmt(s.vc4)} · Comm ${U.fmt(s.comm)})`);
+    if (pr.growthNum !== null && pr.growthNum !== undefined) lines.push(`📈 Growth: ${pr.growthNum >= 0 ? '+' : ''}${pr.growthNum.toFixed(1)}%${b.shortLabel ? ` (till ${b.shortLabel})` : ''} · expected month-end ${U.fmt(p.total)}`);
     lines.push(`${pr.tagRequired ? 'Tags needed' : 'Suggested dispatch'} (${d.days} din): VC4 ${U.fmt(d.sugVc4)} · Comm ${U.fmt(d.sugComm)} — stock ke baad`);
     lines.push(`Bina stock ghataye: VC4 ${U.fmt(d.sugVc4Gross || 0)} · Comm ${U.fmt(d.sugCommGross || 0)}`);
     if (pr.calc) lines.push(`Run-rate ${U.fmt(pr.calc.total.rate, true)}/day (÷ ${pr.calc.total.elapsed} din) · All tags: with stock ${U.fmt(pr.calc.total.net)} · w/o stock ${U.fmt(pr.calc.total.gross)}${pr.calc.total.cover != null ? ` · cover ${U.fmt(pr.calc.total.cover, true)} din` : ''}`);
-    lines.push(`Issued: this month ${U.fmt(t.curTotal)} · last month ${U.fmt(t.lastTotal)}`);
+    lines.push(`Issued: this month ${U.fmt(t.curTotal)}${b.shortLabel ? ` (till ${b.shortLabel})` : ''} · last month ${U.fmt(t.lastTotal)}`);
     (pr.classes || []).slice(0, 8).forEach((r) => lines.push(`• ${r.cls}: ${U.fmt(r.last)} → ${U.fmt(r.cur)} (stock ${U.fmt(r.stock)})`));
     return lines.join('\n');
   }

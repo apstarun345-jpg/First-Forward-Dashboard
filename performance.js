@@ -408,30 +408,171 @@ FF.pages = FF.pages || {};
     const rowsHtml = [...byClass.entries()].sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true })).map(([cls, v]) => `<tr><td><b>${esc(cls)}</b></td><td class="num"><b>${fmt(v.total)}</b></td><td class="num">${fmt(v.issuance)}</td><td class="num">${fmt(v.replacement)}</td><td>${[...v.detail.entries()].sort((a, b) => b[1] - a[1]).map(([label, n]) => `<span class="today-tag-detail">${esc(label)} · <b>${fmt(n)}</b></span>`).join(' ')}</td></tr>`).join('');
     return `<div class="dsec"><h4>🏅 Today’s class-wise tags · ${esc(today)} <span class="count green">${fmt(U.sum([...byClass.values()], (r) => r.total))}</span></h4><div class="table-wrap"><table class="tbl compact"><thead><tr><th>Class</th><th class="num">Tags</th><th class="num">Issuance</th><th class="num">Replacement</th><th>Tag / VRN type</th></tr></thead><tbody>${rowsHtml}</tbody></table></div></div>`;
   }
+  /** 📅 Run-rate basis — FF ka data kal aata hai (aaj−1 din par ginna) · GV live hai (aaj ka din). */
+  function basis(ch) { return (U.channelBasis ? U.channelBasis(ch || 'ff') : (U.reportBasis ? U.reportBasis() : { day: U.runRateDays(), days: U.runRateDays(), label: '', shortLabel: '', back: 1 })); }
+  const basisLine = (ch, b) => (U.basisText ? U.basisText(ch, b) : 'Data till kal');
   function performanceDispatchHtml(agent) {
     if (FF.config.feat && FF.config.feat('dispatchPlan') === false) return '';
     const days = U.suggestDays();
-    const vc4 = U.dispatchCalc({ cur: agent.curVc4, last: agent.lastVc4, stock: agent.stockVc4, days });
-    const comm = U.dispatchCalc({ cur: agent.curNvc4, last: agent.lastNvc4, stock: agent.stockNvc4, days });
+    const b = basis(), ym = monthKeyOf();
+    const vc4 = U.dispatchCalc({ cur: agent.curVc4, last: agent.lastVc4, stock: agent.stockVc4, days, elapsed: b.days });
+    const comm = U.dispatchCalc({ cur: agent.curNvc4, last: agent.lastNvc4, stock: agent.stockNvc4, days, elapsed: b.days });
+    const all = U.dispatchCalc({ cur: agent.curTotal, last: agent.lastTotal, stock: agent.stockTotal, days, elapsed: b.days });
     const direct = !!agent.tlExcluded;
+    const projVc4 = U.projectMonthEnd(agent.curVc4, b.days, ym), projComm = U.projectMonthEnd(agent.curNvc4, b.days, ym);
     const row = (label, calc) => `<div class="pf-dispatch-row"><b>${label}</b><span class="pf-dispatch-after"><small>After stock</small><b class="sug-chip">${fmt(calc.net)}</b></span><span class="pf-dispatch-gross"><small>Without subtracting stock</small><b class="sug-chip wo">${fmt(calc.gross)}</b></span></div>`;
-    return `<div class="dsec pf-dispatch-card"><h4>🚚 ${direct ? 'Suggested tag quantity' : 'Suggested dispatch quantity'} · ${fmt(days)} days</h4><p class="dim small">Run-rate × ${fmt(days)} days${direct ? ' · Direct agent stock is not dispatched' : ' · two clear quantities are shown'}</p><div class="pf-dispatch-head"><span>Class</span><span>After stock</span><span class="pf-dispatch-gross-label">Without subtracting stock</span></div>${row('VC4', vc4)}${row('Commercial', comm)}</div>`;
+    return `<div class="dsec pf-dispatch-card"><h4>🚚 ${direct ? 'Suggested tag quantity' : 'Suggested dispatch quantity'} · ${fmt(days)} days</h4><p class="dim small">📅 ${esc(basisLine('ff', b))} — isliye run-rate = issue ÷ <b>${fmt(b.days)} din</b> × ${fmt(days)} din${direct ? ' · Direct agent stock is not dispatched' : ''}</p><div class="pf-dispatch-head"><span>Class</span><span>After stock</span><span class="pf-dispatch-gross-label">Without subtracting stock</span></div>${row('VC4', vc4)}${row('Commercial', comm)}
+      <div class="dgrid" style="margin-top:8px">
+        <div class="drow"><span>Run-rate VC4 / Comm (÷ ${fmt(b.days)} din)</span><b>${fmt(vc4.rate, true)} · ${fmt(comm.rate, true)}/day</b></div>
+        <div class="drow"><span>Expected month-end</span><b>VC4 ${fmt(projVc4)} · Comm ${fmt(projComm)}${agent.curProjected ? ` <small class="dim">(sheet ${fmt(agent.curProjected)})</small>` : ''}</b></div>
+        <div class="drow"><span>Cover (all tags)</span><b>${all.cover != null ? `${fmt(all.cover, true)} din` : '—'}</b></div>
+      </div></div>`;
+  }
+  /** 👥 TL drawer ka suggested dispatch — TL stock + TL run-rate par (data till kal). */
+  function tlDispatchHtml(group) {
+    if (FF.config.feat && FF.config.feat('dispatchPlan') === false) return '';
+    const days = U.suggestDays(), b = basis();
+    const curVc4 = group.tlCurVc4 || 0, curComm = group.tlCurNvc4 || 0, curTotal = group.tlCurTotal || 0;
+    const stockTotal = group.tlStockTotal != null ? group.tlStockTotal : U.sum(group.agents, (a) => a.stockTotal);
+    const vc4 = U.dispatchCalc({ cur: curVc4, last: group.tlLastVc4, stock: group.tlStockVc4, days, elapsed: b.days });
+    const comm = U.dispatchCalc({ cur: curComm, last: group.tlLastNvc4, stock: group.tlStockNvc4, days, elapsed: b.days });
+    const all = U.dispatchCalc({ cur: curTotal, last: group.tlLastTotal, stock: stockTotal, days, elapsed: b.days });
+    const ym = monthKeyOf();
+    const row = (label, calc, strong) => `<div class="pf-dispatch-row ${strong ? 'pf-dispatch-row-total' : ''}"><b>${label}</b><span class="pf-dispatch-after"><small>After stock</small><b class="sug-chip">${fmt(calc.net)}</b></span><span class="pf-dispatch-gross"><small>Without subtracting stock</small><b class="sug-chip wo">${fmt(calc.gross)}</b></span></div>`;
+    const agentSum = U.sum(group.agents, (a) => Math.max(0, Math.ceil((a.curVc4 / b.days) * days - a.stockVc4)));
+    const agentSumComm = U.sum(group.agents, (a) => Math.max(0, Math.ceil((a.curNvc4 / b.days) * days - a.stockNvc4)));
+    return `<div class="dsec pf-dispatch-card"><h4>🚚 Suggested dispatch quantity · TL level · ${fmt(days)} days</h4><p class="dim small">📅 ${esc(basisLine('ff', b))} — isliye TL run-rate = TL issue ÷ <b>${fmt(b.days)} din</b> × ${fmt(days)} din. TL stock ghata kar "After stock", bina ghate "Without subtracting stock".</p><div class="pf-dispatch-head"><span>Class</span><span>After stock</span><span class="pf-dispatch-gross-label">Without subtracting stock</span></div>${row('VC4', vc4)}${row('Commercial', comm)}${row('All tags', all, true)}
+      <div class="dgrid" style="margin-top:8px">
+        <div class="drow"><span>Run-rate VC4 · Comm · Total (÷ ${fmt(b.days)} din)</span><b>${fmt(vc4.rate, true)} · ${fmt(comm.rate, true)} · ${fmt(all.rate, true)}/day</b></div>
+        <div class="drow"><span>Expected month-end</span><b>${fmt(U.projectMonthEnd(curTotal, b.days, ym))}${group.tlProjected ? ` <small class="dim">(sheet ${fmt(group.tlProjected)})</small>` : ''}</b></div>
+        <div class="drow"><span>Agents ka jod (VC4 · Comm)</span><b>${fmt(agentSum)} · ${fmt(agentSumComm)} <small class="dim">agent stock ke baad</small></b></div>
+        <div class="drow"><span>Cover (all tags)</span><b>${all.cover != null ? `${fmt(all.cover, true)} din` : '—'}</b></div>
+      </div></div>`;
+  }
+  /** Current month key (state.months.cur ek label hai, asli ym EIR se). */
+  function monthKeyOf() {
+    try {
+      const daily = S.get('daily') || [];
+      const latest = daily.length ? FF.model.latestDate(daily) : null;
+      if (latest) return U.ymKey(latest);
+    } catch { /* ignore */ }
+    return U.ymKey(new Date());
+  }
+  /** 📦 Cover kab khatam hoga — stock ÷ run-rate = din, aaj se us din ka date. */
+  function stockOutDate(stock, rate) {
+    if (!(rate > 0) || !(stock > 0)) return null;
+    const days = stock / rate;
+    if (!Number.isFinite(days) || days > 400) return null;             // 400 din+ = "kitne mahine", date bekaar
+    const d = new Date(); d.setDate(d.getDate() + Math.floor(days));
+    return { days, date: d, key: U.dateKey(d), label: `${U.dateKey(d)} (${U.weekday(d)})`, far: days > 60 };
+  }
+  /** 📉 "Growth kahan se aa raha hai" — VC4 vs Commercial vs Total + aage kitna aur. */
+  function growthBreakdownHtml(rows, title) {
+    if (!rows || !rows.length) return '';
+    const body = rows.map((r) => `<tr><td><b>${esc(r.label)}</b></td><td class="num">${fmt(r.last)}</td><td class="num"><b>${fmt(r.cur)}</b></td><td class="num">${U.pctHtml(U.growth(r.cur, r.last), { decimals: 0 })}</td><td class="num">${r.growth === null || r.growth === undefined ? '<span class="dim">—</span>' : U.pctHtml(r.growth, { decimals: 0 })}</td><td class="num"><b>${fmt(r.expected)}</b></td><td class="num">${r.share === null || r.share === undefined ? '—' : U.fmtPct(r.share, 0)}</td></tr>`).join('');
+    return `<section class="dsec"><h4>📈 ${esc(title)}</h4><p class="dim small">"Calculated" = totals se nikal kar (data till ${esc((rows[0] || {}).till || '')}) · "Sheet" = REPORT tab ka apna % · "Expected" = run-rate × month ke din.</p>
+      <div class="table-wrap"><table class="tbl compact"><thead><tr><th></th><th class="num">${esc(state.months.last)}</th><th class="num">${esc(state.months.cur)}</th><th class="num">Calculated</th><th class="num">Sheet</th><th class="num">Expected month-end</th><th class="num">Share</th></tr></thead><tbody>${body}</tbody></table></div></section>`;
+  }
+  /** Agent ke liye growth rows (VC4 / Commercial / Total). */
+  function agentGrowthRows(agent, b) {
+    const ym = monthKeyOf(), mk = (label, cur, last, sheet) => ({ label, cur, last, expected: U.projectMonthEnd(cur, b.days, ym), growth: sheet === null || sheet === undefined ? null : pct(sheet), share: U.pctOf(cur, agent.curTotal) });
+    return [mk('VC4', agent.curVc4 || 0, agent.lastVc4 || 0, null), mk('Commercial', agent.curNvc4 || 0, agent.lastNvc4 || 0, null), mk('Total', agent.curTotal || 0, agent.lastTotal || 0, pct(agent.growth))]
+      .map((r) => ({ ...r, till: b.shortLabel }));
+  }
+  /** TL ke liye growth rows — TL row se (agents ka jod fallback). */
+  function tlGrowthRows(group, b) {
+    const ym = monthKeyOf();
+    const sumA = (k) => U.sum(group.agents, (a) => a[k]);
+    const pick = (k) => (group[k] != null ? group[k] : sumA(k));
+    const mk = (label, cur, last, sheet) => ({ label, cur, last, expected: U.projectMonthEnd(cur, b.days, ym), growth: sheet === null || sheet === undefined ? null : pct(sheet), share: U.pctOf(cur, pick('tlCurTotal')), till: b.shortLabel });
+    return [mk('VC4', pick('tlCurVc4') || 0, pick('tlLastVc4') || 0, null), mk('Commercial', pick('tlCurNvc4') || 0, pick('tlLastNvc4') || 0, null), mk('Total', pick('tlCurTotal') || 0, pick('tlLastTotal') || 0, pct(group.tlGrowth))];
+  }
+  /** 📤 Dispatch-ready ka WhatsApp text (TL ke sabhi agents ka sug qty + stock + cover). */
+  function dispatchReadyText(group) {
+    const days = U.suggestDays(), b = basis();
+    const rows = [...group.agents].map((a) => {
+      const sv = Math.max(0, Math.ceil((a.curVc4 / b.days) * days - a.stockVc4));
+      const sc = Math.max(0, Math.ceil((a.curNvc4 / b.days) * days - a.stockNvc4));
+      const so = stockOutDate(a.stockTotal, (a.curTotal || 0) / b.days);
+      return { a, sv, sc, so };
+    }).sort((x, y) => (y.sv + y.sc) - (x.sv + x.sc));
+    const totV = U.sum(rows, (r) => r.sv), totC = U.sum(rows, (r) => r.sc);
+    const need = rows.filter((r) => r.sv + r.sc > 0);
+    const out = [`*🚚 ${group.tlName || group.tlKey} — dispatch ready (${fmt(days)} din)*`, `Data till ${b.shortLabel} · run-rate = issue ÷ ${b.days} din (aaj ka data kal aata hai)`, ''];
+    out.push('Agent | VC4 sug | Comm sug | Total | Stock | Stock khatam');
+    need.forEach((r) => out.push(`${r.a.name} | ${fmt(r.sv)} | ${fmt(r.sc)} | ${fmt(r.sv + r.sc)} | ${fmt(r.a.stockTotal)} | ${r.so ? r.so.key : '—'}`));
+    out.push('', `*TL total: VC4 ${fmt(totV)} · Comm ${fmt(totC)} · All ${fmt(totV + totC)}*`, `${fmt(need.length)} of ${fmt(rows.length)} agents ko dispatch chahiye`);
+    return out.join('\n');
+  }
+  /** 🚚📦 Dispatch-ready — TL ke har agent ka sug qty + stock + cover + stock-khatam date. */
+  function dispatchReadyHtml(group) {
+    const days = U.suggestDays(), b = basis();
+    const rows = [...group.agents].map((a) => {
+      const rateV = a.curVc4 / b.days, rateC = a.curNvc4 / b.days;
+      const sugV = Math.max(0, Math.ceil(rateV * days - a.stockVc4));
+      const sugC = Math.max(0, Math.ceil(rateC * days - a.stockNvc4));
+      const so = stockOutDate(a.stockTotal, (a.curTotal || 0) / b.days);
+      return { a, sugV, sugC, sug: sugV + sugC, rateV, rateC, so, daysLeft: so ? so.days : null };
+    }).sort((x, y) => (y.sug - x.sug) || (x.daysLeft === null ? 1e9 : x.daysLeft) - (y.daysLeft === null ? 1e9 : y.daysLeft));
+    const totV = U.sum(rows, (r) => r.sugV), totC = U.sum(rows, (r) => r.sugC);
+    const needy = rows.filter((r) => r.sug > 0);
+    const line = (r) => `<tr class="clickable" data-agent="${r.a.__row}"><td>${cellMain(r.a.name, r.a.agentId)}${r.a.isMaster ? '<span class="tag">Master</span>' : ''}</td>
+      <td>${r.a.stockVc4 ? badge(r.a.agentPriority) : '<span class="dim">—</span>'}</td>
+      <td class="num">${fmt(r.rateV, true)}</td><td class="num">${fmt(r.rateC, true)}</td>
+      <td class="num">${fmt(r.a.stockVc4)}</td><td class="num">${fmt(r.a.stockNvc4)}</td>
+      <td class="num"><b class="sug-chip">${fmt(r.sugV)}</b></td><td class="num"><b class="sug-chip">${fmt(r.sugC)}</b></td>
+      <td class="num"><b>${fmt(r.sug)}</b></td>
+      <td class="num">${r.so ? `<span class="badge ${r.so.far ? 'amber' : r.so.days < 7 ? 'red' : 'green'}">${r.so.far ? `${fmt(r.so.days / 30, true)} mahine` : esc(r.so.label)}</span>` : '<span class="dim">—</span>'}</td></tr>`;
+    const txt = [`*🚚 ${esc(group.tlName || group.tlKey)} — dispatch ready (${fmt(days)} din)*`, `Basis: data till ${b.shortLabel} · run-rate = issue ÷ ${b.days} din (aaj ka data kal aata hai)`, '', `Agent | VC4 sug | Comm sug | Total | Stock | Cover-out`];
+    rows.filter((r) => r.sug > 0).forEach((r) => txt.push(`${r.a.name} | ${fmt(r.sugV)} | ${fmt(r.sugC)} | ${fmt(r.sug)} | ${fmt(r.a.stockTotal)} | ${r.so ? r.so.key : '—'}`));
+    txt.push('', `TL total: VC4 ${fmt(totV)} · Comm ${fmt(totC)} · All ${fmt(totV + totC)}`);
+    return `<div class="dsec"><h4>🚚📦 Dispatch ready · ${fmt(days)} din <span class="count green">${fmt(needy.length)}/${fmt(rows.length)} agents ko chahiye</span></h4>
+      <p class="dim small">Har agent ka apna stock minus karke nikalte hain. "Stock khatam" = us agent ka cover khatam hone ki date.</p>
+      <div class="table-wrap"><table class="tbl compact"><thead><tr><th>Agent</th><th>Priority</th><th class="num">VC4/day</th><th class="num">Comm/day</th><th class="num">VC4 stock</th><th class="num">Comm stock</th><th class="num">Sug. VC4</th><th class="num">Sug. Comm</th><th class="num">Total</th><th class="num">Stock khatam</th></tr></thead><tbody>${rows.map(line).join('')}</tbody><tfoot><tr class="row-total"><td colspan="6">TL total</td><td class="num">${fmt(totV)}</td><td class="num">${fmt(totC)}</td><td class="num">${fmt(totV + totC)}</td><td></td></tr></tfoot></table></div>
+      <div class="dgrid" style="margin-top:8px">
+        <div class="drow"><span>Turant bhejo (Cover &lt; 7 din)</span><b>${fmt(rows.filter((r) => r.daysLeft !== null && r.daysLeft < 7).length)} agents</b></div>
+        <div class="drow"><span>Cover 7–15 din</span><b>${fmt(rows.filter((r) => r.daysLeft !== null && r.daysLeft >= 7 && r.daysLeft < 15).length)} agents</b></div>
+        <div class="drow"><span>Total dispatch (net)</span><b>${fmt(totV + totC)} tags</b></div>
+      </div>
+      <div class="btn-row" style="margin-top:8px"><button class="btn small" data-pf-share-wa="${esc(group.tlName || group.tlKey)}">📲 WhatsApp</button><button class="btn small" data-pf-share-csv="${esc(group.tlName || group.tlKey)}">⬇ CSV</button></div></div>`;
+  }
+  /** 📉 TL de-growth list — jinka expected month-end pichle month se peeche gir raha ho. */
+  function deGrowthListHtml(b) {
+    const ym = monthKeyOf();
+    const list = state.tlGroups.map((g) => {
+      const exp = U.projectMonthEnd(g.tlCurTotal, b.days, ym);
+      const gGrowth = U.growth(exp, g.tlLastTotal);
+      return { g, exp, gGrowth, gap: (g.tlLastTotal || 0) - exp };
+    }).filter((x) => x.gGrowth !== null && x.gGrowth < 0)
+      .sort((a, c) => a.gGrowth - c.gGrowth)
+      .slice(0, 12);
+    if (!list.length) return '<div class="dsec"><h4>📉 De-growth TLs</h4><p class="dim small">Kisi bhi TL ka expected month-end pichle month se peeche nahi gir raha 🎉</p></div>';
+    return `<div class="dsec"><h4>📉 De-growth TLs <span class="count red">${fmt(list.length)}</span></h4><p class="dim small">Expected month-end (data till ${esc(b.shortLabel)}) vs ${esc(state.months.last)}.</p>
+      <div class="table-wrap"><table class="tbl compact"><thead><tr><th>TL</th><th class="num">${esc(state.months.last)}</th><th class="num">${esc(state.months.cur)} MTD</th><th class="num">Expected</th><th class="num">Growth</th><th class="num">Gap</th><th class="num">Stock</th><th></th></tr></thead><tbody>
+      ${list.map((x) => `<tr class="clickable" data-tl="${esc(x.g.tlKey)}"><td><b>${esc(x.g.tlName || x.g.tlKey)}</b><small class="cell-sub">${fmt(x.g.agentCount)} agents</small></td><td class="num">${fmt(x.g.tlLastTotal)}</td><td class="num">${fmt(x.g.tlCurTotal)}</td><td class="num"><b>${fmt(x.exp)}</b></td><td class="num">${U.pctHtml(x.gGrowth, { decimals: 0 })}</td><td class="num">${U.deltaHtml(-x.gap, { decimals: 0 })}</td><td class="num">${fmt(x.g.tlStockTotal)}</td><td><button class="btn tiny" data-tl="${esc(x.g.tlKey)}">🔎</button></td></tr>`).join('')}
+      </tbody></table></div></div>`;
   }
   function openAgent(rowIndex) {
     const agent = state.agents.find((a) => a.__row === rowIndex);
     if (!agent) return;
     const row = (label, html, title) => `<div class="drow"><span title="${esc(title || '')}">${esc(label)}</span>${html}</div>`;
     const cs = classSplit(agent.name, false);
+    const b = basis();
+    const projT1 = U.projectMonthEnd(agent.curTotal, b.days, monthKeyOf());
+    // EIR (class split) live hai aur aaj tak ka data dikhata hai; REPORT kal ka deta hai — dono alag hain, isliye note.
+    const eirNote = `🚗 Class split <b>EIR</b> se aati hai (live, aaj tak ka data) — upar ke KPI / dispatch <b>REPORT</b> par hain (data till ${esc(b.shortLabel || b.label)}, kyunki aaj ka data kal aata hai).`;
     const summary = `<div class="dsec"><div class="dkpis">
-        <div class="dkpi"><small>${esc(state.months.cur)} MTD</small><b>${fmt(agent.curTotal)}</b><span>VC4 ${fmt(agent.curVc4)} · Comm ${fmt(agent.curNvc4)}</span></div>
+        <div class="dkpi"><small>${esc(state.months.cur)} MTD</small><b>${fmt(agent.curTotal)}</b><span>VC4 ${fmt(agent.curVc4)} · Comm ${fmt(agent.curNvc4)} · till ${esc(b.shortLabel || b.label)}</span></div>
         <div class="dkpi"><small>${esc(state.months.last)}</small><b>${fmt(agent.lastTotal)}</b><span>VC4 ${fmt(agent.lastVc4)} · Comm ${fmt(agent.lastNvc4)}</span></div>
-        <div class="dkpi"><small>Growth</small><b>${trend(agent.growth)}</b><span>Projected ${fmt(agent.curProjected)}</span></div>
+        <div class="dkpi"><small>Growth</small><b>${trend(agent.growth)}</b><span>till ${esc(b.shortLabel || b.label)} · aaj ka data kal aata hai</span></div>
+        <div class="dkpi"><small>Expected month-end</small><b>${fmt(projT1)}</b><span>sheet ${fmt(agent.curProjected)} · ${fmt(agent.avgTotal, true)}/day (÷ ${fmt(b.days)} din)</span></div>
         <div class="dkpi"><small>Stock</small><b>${fmt(agent.stockTotal)}</b><span>VC4 ${fmt(agent.stockVc4)} · ${fmt(agent.agentStockDays)} days</span></div>
       </div><div class="badge-row">${badge(agent.agentStatus)}${badge(agent.lastActive)}${agent.agentPriority ? `<span class="dim small">Priority</span>${badge(agent.agentPriority)}` : ''}${agent.biometric ? `<span class="dim small">Device</span>${badge(agent.biometric)}` : ''}</div></div>`;
     const compare = cs
-      ? vsCommercialCard(`⚖️ Class split · ${esc(cs.lastLabel)} → ${esc(cs.curLabel)} (till ${cs.day})`, { vc4: cs.curS.VC4, vc20: cs.curS.VC20, vc5p: cs.curS['VC5+'], comm: cs.curS.VC20 + cs.curS['VC5+'], total: cs.curS.total }, { vc4: cs.lastS.VC4, vc20: cs.lastS.VC20, vc5p: cs.lastS['VC5+'], comm: cs.lastS.VC20 + cs.lastS['VC5+'], total: cs.lastS.total }, { cur: cs.curLabel, last: cs.lastLabel }, `Replacement (EIR): ${esc(cs.curLabel)} <b>${fmt(cs.curS.repl)}</b> · ${esc(cs.lastLabel)} ${fmt(cs.lastS.repl)}`)
+      ? vsCommercialCard(`⚖️ Class split · ${esc(cs.lastLabel)} → ${esc(cs.curLabel)} (till ${cs.day})`, { vc4: cs.curS.VC4, vc20: cs.curS.VC20, vc5p: cs.curS['VC5+'], comm: cs.curS.VC20 + cs.curS['VC5+'], total: cs.curS.total }, { vc4: cs.lastS.VC4, vc20: cs.lastS.VC20, vc5p: cs.lastS['VC5+'], comm: cs.lastS.VC20 + cs.lastS['VC5+'], total: cs.lastS.total }, { cur: cs.curLabel, last: cs.lastLabel }, `Replacement (EIR): ${esc(cs.curLabel)} <b>${fmt(cs.curS.repl)}</b> · ${esc(cs.lastLabel)} ${fmt(cs.lastS.repl)}<br>${eirNote}`)
       : vsCommercialCard(`⚖️ VC4 vs Commercial · ${esc(state.months.last)} → ${esc(state.months.cur)}`, { vc4: agent.curVc4, comm: agent.curNvc4, total: agent.curTotal }, { vc4: agent.lastVc4, comm: agent.lastNvc4, total: agent.lastTotal });
     const classCard = dailyClassBreakdown(agent);
+    const growthCard = growthBreakdownHtml(agentGrowthRows(agent, b), `Growth kahan se aa raha hai · ${agent.name}`);
     const stockClasses = ['stockVc4', 'stockC1', 'stockC2', 'stockC3', 'stockC4', 'stockC5'].map((k) => ({ label: state.columns[k].label, value: agent[k] || 0 })).filter((x) => x.value > 0);
     const stockCard = `<div class="dsec"><h4>📦 Stock in hand · ${fmt(agent.stockTotal)} <small class="dim">(VC4 ${fmt(agent.stockVc4)} · Commercial ${fmt(agent.stockNvc4)})</small></h4>${stockClasses.length ? C.bars({ labels: stockClasses.map((x) => x.label), height: 130, series: [{ name: 'Stock', values: stockClasses.map((x) => x.value), color: '#14b8a6' }] }) : '<div class="dim">No stock</div>'}<div class="dgrid" style="margin-top:8px">${row('Stock days (VC4)', `<b>${fmt(agent.agentStockDays)}</b>`)}${row('Priority', badge(agent.agentPriority))}${row('Daily avg', `<b>${fmt(agent.agentAvg, true)}</b>`)}</div></div>`;
     const sections = state.sections.filter((s) => !['profile', 'stock'].includes(s.key)).map((section) => {
@@ -441,7 +582,7 @@ FF.pages = FF.pages || {};
       return `<details class="dsec collapsible"><summary>${esc(section.title)}</summary><div class="dgrid">${section.cols.map((col) => row(col.label, valueHtml(col, agent), `Sheet column ${col.letter}`)).join('')}</div></details>`;
     }).join('');
     const text = agentText(agent);
-    FF.app.openDrawer({ kicker: agent.isMaster ? 'Master account' : 'Agent', title: agent.name || agent.agentId || '—', sub: `ID ${esc(agent.agentId || '—')} · TL ${esc(tlLabel(agent) || '—')}${mobileHtml(agent.tlMobile)}`, actions: `${shareButtons(text, `Agent report · ${agent.name}`, agent.tlMobile)}<a class="btn small" href="#/stock?agent=${encodeURIComponent(agent.name)}">📦 Stock</a><a class="btn small" href="#/trend?agent=${encodeURIComponent(agent.name)}">📈 Trend</a>`, body: summary + compare + classCard + performanceDispatchHtml(agent) + stockCard + sections });
+    FF.app.openDrawer({ kicker: agent.isMaster ? 'Master account' : 'Agent', title: agent.name || agent.agentId || '—', sub: `ID ${esc(agent.agentId || '—')} · TL ${esc(tlLabel(agent) || '—')}${mobileHtml(agent.tlMobile)}`, actions: `${shareButtons(text, `Agent report · ${agent.name}`, agent.tlMobile)}<a class="btn small" href="#/stock?agent=${encodeURIComponent(agent.name)}">📦 Stock</a><a class="btn small" href="#/trend?agent=${encodeURIComponent(agent.name)}">📈 Trend</a>`, body: summary + growthCard + compare + classCard + performanceDispatchHtml(agent) + stockCard + sections });
   }
   function openTl(tlKey) {
     const group = state.allTlGroups.find((g) => g.tlKey === tlKey || norm(g.tlName) === norm(tlKey)) || buildTlGroups(state.agents.filter((a) => a.tlKey === tlKey || norm(a.tlName) === norm(tlKey)), true)[0];
@@ -449,15 +590,24 @@ FF.pages = FF.pages || {};
     const row = (label, html) => `<div class="drow"><span>${label}</span>${html}</div>`;
     const agents = [...group.agents].sort((a, b) => b.curTotal - a.curTotal);
     const cs = classSplit(group.tlName, true);
+    const b = basis();
+    const projT1 = U.projectMonthEnd(group.tlCurTotal, b.days, monthKeyOf());
+    // EIR (class split) live hai aur aaj tak ka data dikhata hai; REPORT kal ka deta hai — dono alag hain, isliye note.
+    const eirNote = `🚗 Class split <b>EIR</b> se aati hai (live, aaj tak ka data) — upar ke KPI / dispatch <b>REPORT</b> par hain (data till ${esc(b.shortLabel || b.label)}, kyunki aaj ka data kal aata hai).`;
+    const growthKpi = `<div class="dkpi"><small>Growth</small><b>${trend(group.tlGrowth)}</b><span>till ${esc(b.shortLabel || b.label)} · aaj ka data kal aata hai</span></div>`;
     const body = `<div class="dsec"><div class="dkpis">
-        <div class="dkpi"><small>${esc(state.months.cur)} MTD</small><b>${fmt(group.tlCurTotal)}</b><span>VC4 ${fmt(group.tlCurVc4)} · Comm ${fmt(group.tlCurNvc4)}</span></div>
+        <div class="dkpi"><small>${esc(state.months.cur)} MTD</small><b>${fmt(group.tlCurTotal)}</b><span>VC4 ${fmt(group.tlCurVc4)} · Comm ${fmt(group.tlCurNvc4)} · till ${esc(b.shortLabel || b.label)}</span></div>
         <div class="dkpi"><small>${esc(state.months.last)}</small><b>${fmt(group.tlLastTotal)}</b><span>VC4 ${fmt(group.tlLastVc4)} · Comm ${fmt(group.tlLastNvc4)}</span></div>
-        <div class="dkpi"><small>Growth</small><b>${trend(group.tlGrowth)}</b><span>Projected ${fmt(group.tlProjected)} · ${fmt(group.tlAvgTotal, true)}/day</span></div>
+        ${growthKpi}
+        <div class="dkpi"><small>Expected month-end</small><b>${fmt(projT1)}</b><span>sheet ${fmt(group.tlProjected)} · ${fmt(group.tlAvgTotal, true)}/day (÷ ${fmt(b.days)} din)</span></div>
         <div class="dkpi"><small>Agents</small><b>${group.agentCount}</b><span>${group.activeCount} active · ${group.agentCount - group.activeCount} inactive</span></div>
       </div><div class="badge-row">${badge(group.tlStatus)}${badge(group.tlLastActive)}<span class="dim small">VC4</span>${badge(group.tlPriority)}${badge(group.tlStockAlert)}<span class="dim small">Comm</span>${badge(group.tlCommPriority)}${badge(group.tlCommAlert)}</div></div>
+      ${tlDispatchHtml(group)}
       ${cs
-        ? vsCommercialCard(`⚖️ Class split · ${esc(cs.lastLabel)} → ${esc(cs.curLabel)} (till ${cs.day})`, { vc4: cs.curS.VC4, vc20: cs.curS.VC20, vc5p: cs.curS['VC5+'], comm: cs.curS.VC20 + cs.curS['VC5+'], total: cs.curS.total }, { vc4: cs.lastS.VC4, vc20: cs.lastS.VC20, vc5p: cs.lastS['VC5+'], comm: cs.lastS.VC20 + cs.lastS['VC5+'], total: cs.lastS.total }, { cur: cs.curLabel, last: cs.lastLabel }, `Replacement (EIR): ${esc(cs.curLabel)} <b>${fmt(cs.curS.repl)}</b> · ${esc(cs.lastLabel)} ${fmt(cs.lastS.repl)}`)
+        ? vsCommercialCard(`⚖️ Class split · ${esc(cs.lastLabel)} → ${esc(cs.curLabel)} (till ${cs.day})`, { vc4: cs.curS.VC4, vc20: cs.curS.VC20, vc5p: cs.curS['VC5+'], comm: cs.curS.VC20 + cs.curS['VC5+'], total: cs.curS.total }, { vc4: cs.lastS.VC4, vc20: cs.lastS.VC20, vc5p: cs.lastS['VC5+'], comm: cs.lastS.VC20 + cs.lastS['VC5+'], total: cs.lastS.total }, { cur: cs.curLabel, last: cs.lastLabel }, `Replacement (EIR): ${esc(cs.curLabel)} <b>${fmt(cs.curS.repl)}</b> · ${esc(cs.lastLabel)} ${fmt(cs.lastS.repl)}<br>${eirNote}`)
         : vsCommercialCard(`⚖️ VC4 vs Commercial · ${esc(state.months.last)} → ${esc(state.months.cur)}`, { vc4: group.tlCurVc4 || 0, comm: group.tlCurNvc4 || 0, total: group.tlCurTotal || 0 }, { vc4: group.tlLastVc4 || 0, comm: group.tlLastNvc4 || 0, total: group.tlLastTotal || 0 })}
+      ${growthBreakdownHtml(tlGrowthRows(group, b), `Growth kahan se aa raha hai · ${group.tlName || group.tlKey}`)}
+      ${dispatchReadyHtml(group)}
       <div class="dsec"><h4>📅 Last 7 days (agents) · ${fmt(group.weekTotal)}</h4>${C.bars({ labels: state.dayLabels, height: 130, series: [{ name: 'Issued', values: group.week, color: '#ec4899' }] })}</div>
       <div class="dsec"><h4>📦 Stock & dispatch</h4><div class="dgrid">${row('Stock VC4', `<b>${fmt(group.tlStockVc4)}</b>`)}${row('Stock Commercial', `<b>${fmt(group.tlStockNvc4)}</b>`)}${row('Stock total', `<b>${fmt(group.tlStockTotal)}</b>`)}${row('VC4 stock days', `<b>${fmt(group.tlVc4Days)}</b>`)}${row('Alert (VC4)', badge(group.tlStockAlert))}${row('Priority (VC4)', badge(group.tlPriority))}${row('Comm stock days', `<b>${fmt(group.tlNvc4Days)}</b>`)}${row('Alert (Comm)', badge(group.tlCommAlert))}${row('Priority (Comm)', badge(group.tlCommPriority))}</div></div>
       <div class="dsec"><h4>🧑‍💼 Agents (${agents.length})</h4><div class="table-wrap"><table class="tbl compact"><thead><tr><th>Agent</th><th class="num">${esc(state.months.cur.slice(0, 3))}</th><th class="num">VC4</th><th class="num">Comm · V20/V5+</th><th class="num">7d</th><th>Last active</th><th>Status</th><th>Priority</th></tr></thead><tbody>${agents.map((a) => `<tr data-agent="${a.__row}" class="clickable"><td>${cellMain(a.name, a.agentId)}</td><td class="num"><b>${fmt(a.curTotal)}</b></td><td class="num">${fmt(a.curVc4)}</td><td class="num">${fmt(a.curNvc4)}${binSub(a.curBins)}</td><td class="num">${fmt(a.weekTotal)}</td><td>${badge(a.lastActive)}</td><td>${badge(a.agentStatus)}</td><td>${badge(a.agentPriority)}</td></tr>`).join('')}</tbody></table></div></div>`;
@@ -791,7 +941,7 @@ FF.pages = FF.pages || {};
     const dp = dispatchPlanRows();
     const coverTd = (c) => (c == null ? '<span class="dim">—</span>' : `<span class="count ${c < 7 ? 'red' : c < 15 ? 'amber' : ''}">${fmt(c)}</span>`);
     const dispatchCard = dp.enabled
-      ? `<div class="dispatch-filter-bar"><span><b>Dispatch eligibility:</b> FF direct rule — TL Name <b>${esc((FF.config.directRules().ffTlNames || ['APS']).join(', '))}</b> = Direct Agent · stock dispatch nahi, par <b>High/Medium priority ko 🏷️ TAG chahiye</b> (alag option) · <a href="#/directAgents">rule dekho</a></span><div class="dispatch-scope" role="group" aria-label="Dispatch eligibility filter"><button class="btn small ${state.dispatchScope === 'eligible' ? 'primary' : ''}" data-dispatch-scope="eligible">📦 Need stock <b>${fmt(dp.counts.eligible)}</b></button><button class="btn small direct-filter ${state.dispatchScope === 'tag' ? 'primary' : ''}" data-dispatch-scope="tag" title="Direct (APS) agents jinki priority High/Medium hai — unhe tags chahiye">🏷️ Direct · High/Medium · Tag required <b>${fmt(dp.counts.tag)}</b></button><button class="btn small direct-filter ${state.dispatchScope === 'direct' ? 'primary' : ''}" data-dispatch-scope="direct">🚫 Direct Agents · all <b>${fmt(dp.counts.direct)}</b></button><button class="btn small ${state.dispatchScope === 'all' ? 'primary' : ''}" data-dispatch-scope="all">All priority <b>${fmt(dp.counts.all)}</b></button></div></div><section class="card dispatch-plan"><div class="card-head"><h3>🎯 Suggested dispatch plan · High + Medium priority <span class="count amber">${fmt(dp.rows.length)}</span></h3><div class="card-right dim">target cover ${dp.days} din · <b>stock ke baad</b> = run-rate × ${dp.days} − stock · <b>bina stock</b> = avg × ${dp.days}${FF.auth.can('export') ? ` <button class="btn small" data-action="export" data-name="suggested-dispatch-${state.dispatchScope}">⬇ CSV</button>` : ''}</div></div>${dp.rows.length ? `<div class="table-wrap tall"><table class="tbl"><thead><tr><th>Agent</th><th>TL / class</th><th>Priority</th><th>Dispatch status</th><th class="num">Last month VC4</th><th class="num">This month VC4</th><th class="num">VC4 stock</th><th class="num">Run-rate VC4/day<br><small class="dim">÷ (today − 1)</small></th><th class="num">Cover (din)</th><th class="num">Suggested qty 🎯<br><small class="dim">stock − · w/o stock</small></th></tr></thead><tbody>${dp.rows.map(({ a, sug, gross, cover, daily, direct }) => `<tr data-agent="${a.__row}" class="clickable ${direct ? 'dispatch-direct' : ''}"><td>${cellMain(a.name, a.agentId)}</td><td>${cellMain(direct ? FF.config.directLabel(a, 'ff') : tlLabel(a), direct ? 'TL Name APS · direct · tags only' : '')}</td><td>${badge(a.agentPriority)}</td><td>${direct ? '<span class="tag warn">🏷️ Tag required</span>' : '<span class="tag warn">Dispatch required</span>'}</td><td class="num">${fmt(a.lastVc4)}</td><td class="num">${fmt(a.curVc4)}</td><td class="num">${fmt(a.stockVc4)}</td><td class="num">${fmt(daily, true)}</td><td class="num">${coverTd(cover)}</td><td class="num">${direct ? `<b class="sug-chip direct">🏷️ ${fmt(sug)} tags</b>${U.suggestMode() === 'both' ? `<span class="sug-wo">w/o stock <b>${fmt(gross)}</b></span>` : ''}` : U.sugCell(sug, gross)}</td></tr>`).join('')}</tbody></table></div>` : `<div class="card-body empty">${state.dispatchScope === 'direct' || state.dispatchScope === 'tag' ? 'Is filter me koi High/Medium Direct Agent nahi hai.' : 'Current filters me kisi priority agent ko dispatch stock ki zarurat nahi.'}</div>`}<div class="card-body dim small">🏷️ Direct/APS agents ko stock dispatch nahi, par High/Medium priority ho to <b>tags chahiye</b> (suggested tags dikhte hain). 🎯 <b>Stock ke baad</b> = run-rate × ${dp.days} din − stock (run-rate = issue ÷ (aaj − 1) din) · <b>Bina stock ghataye</b> = run-rate × ${dp.days} din · cover = VC4 stock ÷ run-rate · 🔴 cover &lt; 7 · 🟠 &lt; 15 din · Kitne din / kaise dikhana hai → <a href="#/settings">⚙️ Settings</a></div></section>`
+      ? `<div class="dispatch-filter-bar"><span><b>Dispatch eligibility:</b> FF direct rule — TL Name <b>${esc((FF.config.directRules().ffTlNames || ['APS']).join(', '))}</b> = Direct Agent · stock dispatch nahi, par <b>High/Medium priority ko 🏷️ TAG chahiye</b> (alag option) · <a href="#/directAgents">rule dekho</a></span><div class="dispatch-scope" role="group" aria-label="Dispatch eligibility filter"><button class="btn small ${state.dispatchScope === 'eligible' ? 'primary' : ''}" data-dispatch-scope="eligible">📦 Need stock <b>${fmt(dp.counts.eligible)}</b></button><button class="btn small direct-filter ${state.dispatchScope === 'tag' ? 'primary' : ''}" data-dispatch-scope="tag" title="Direct (APS) agents jinki priority High/Medium hai — unhe tags chahiye">🏷️ Direct · High/Medium · Tag required <b>${fmt(dp.counts.tag)}</b></button><button class="btn small direct-filter ${state.dispatchScope === 'direct' ? 'primary' : ''}" data-dispatch-scope="direct">🚫 Direct Agents · all <b>${fmt(dp.counts.direct)}</b></button><button class="btn small ${state.dispatchScope === 'all' ? 'primary' : ''}" data-dispatch-scope="all">All priority <b>${fmt(dp.counts.all)}</b></button></div></div><section class="card dispatch-plan"><div class="card-head"><h3>🎯 Suggested dispatch plan · High + Medium priority <span class="count amber">${fmt(dp.rows.length)}</span></h3><div class="card-right dim">target cover ${dp.days} din · <b>stock ke baad</b> = run-rate × ${dp.days} − stock · <b>bina stock</b> = avg × ${dp.days}${FF.auth.can('export') ? ` <button class="btn small" data-action="export" data-name="suggested-dispatch-${state.dispatchScope}">⬇ CSV</button>` : ''}</div></div>${dp.rows.length ? `<div class="table-wrap tall"><table class="tbl"><thead><tr><th>Agent</th><th>TL / class</th><th>Priority</th><th>Dispatch status</th><th class="num">Last month VC4</th><th class="num">This month VC4</th><th class="num">VC4 stock</th><th class="num">Run-rate VC4/day<br><small class="dim">÷ (aaj − 1) din</small></th><th class="num">Cover (din)</th><th class="num">Suggested qty 🎯<br><small class="dim">stock − · w/o stock</small></th></tr></thead><tbody>${dp.rows.map(({ a, sug, gross, cover, daily, direct }) => `<tr data-agent="${a.__row}" class="clickable ${direct ? 'dispatch-direct' : ''}"><td>${cellMain(a.name, a.agentId)}</td><td>${cellMain(direct ? FF.config.directLabel(a, 'ff') : tlLabel(a), direct ? 'TL Name APS · direct · tags only' : '')}</td><td>${badge(a.agentPriority)}</td><td>${direct ? '<span class="tag warn">🏷️ Tag required</span>' : '<span class="tag warn">Dispatch required</span>'}</td><td class="num">${fmt(a.lastVc4)}</td><td class="num">${fmt(a.curVc4)}</td><td class="num">${fmt(a.stockVc4)}</td><td class="num">${fmt(daily, true)}</td><td class="num">${coverTd(cover)}</td><td class="num">${direct ? `<b class="sug-chip direct">🏷️ ${fmt(sug)} tags</b>${U.suggestMode() === 'both' ? `<span class="sug-wo">w/o stock <b>${fmt(gross)}</b></span>` : ''}` : U.sugCell(sug, gross)}</td></tr>`).join('')}</tbody></table></div>` : `<div class="card-body empty">${state.dispatchScope === 'direct' || state.dispatchScope === 'tag' ? 'Is filter me koi High/Medium Direct Agent nahi hai.' : 'Current filters me kisi priority agent ko dispatch stock ki zarurat nahi.'}</div>`}<div class="card-body dim small">🏷️ Direct/APS agents ko stock dispatch nahi, par High/Medium priority ho to <b>tags chahiye</b> (suggested tags dikhte hain). 🎯 <b>Stock ke baad</b> = run-rate × ${dp.days} din − stock (run-rate = issue ÷ (aaj − 1) din — aaj ka data kal aata hai) · <b>Bina stock ghataye</b> = run-rate × ${dp.days} din · cover = VC4 stock ÷ run-rate · 🔴 cover &lt; 7 · 🟠 &lt; 15 din · Kitne din / kaise dikhana hai → <a href="#/settings">⚙️ Settings</a></div></section>`
       : '';
     const tlRows = (list, extra) => list.slice(0, cap).map((g) => `<tr data-tl="${esc(g.tlKey)}" class="clickable"><td>${cellMain(g.tlName || g.tlKey, g.tlId)}</td><td class="num">${fmt(g.tlStockVc4)} <small class="dim">/ ${fmt(g.tlStockNvc4)}</small></td><td class="num">${fmt(g.tlAvgTotal, true)}</td><td class="num"><b>${fmt(g.tlVc4Days)}</b></td><td class="num">${fmt(g.tlNvc4Days)}</td><td>${badge(g.tlStockAlert)}</td><td>${badge(g.tlCommAlert)}</td><td>${badge(extra(g))}</td></tr>`).join('');
     const agentRows = (list, valueFn) => list.slice(0, cap).map((a) => `<tr data-agent="${a.__row}" class="clickable"><td>${cellMain(a.name, a.agentId)}</td><td>${cellMain(tlLabel(a), a.tlMobile && !/^na$/i.test(a.tlMobile) && canContacts() ? a.tlMobile : '')}</td><td class="num">${fmt(a.lastTotal)}</td><td class="num">${fmt(a.curTotal)}</td><td class="num"><b>${valueFn(a)}</b></td><td>${badge(a.lastActive)}</td><td>${badge(a.agentStatus)}</td></tr>`).join('');
@@ -803,7 +953,8 @@ FF.pages = FF.pages || {};
       ${card('🧊 Over-stocked TLs', b.overStock.length, 'amber', `<table class="tbl">${tlHead('TL status')}<tbody>${tlRows(b.overStock, (g) => g.tlStatus)}</tbody></table>`, 'Stock zaroorat se zyada — dispatch hold', 'tl-over-stock')}
       ${card('📉 De-growth agents', b.deGrowth.length, 'red', `<table class="tbl">${agentHead('Projected')}<tbody>${agentRows(b.deGrowth, (a) => fmt(a.curProjected))}</tbody></table>`, `Status "De-Growth" · sorted by biggest drop vs ${esc(state.months.last)}`, 'de-growth-agents')}
       ${card(`😶 Went quiet · ${esc(state.months.last)} me issue kiya, ab ${FF.config.thresholds.inactiveDays || 3}+ din inactive`, b.dropped.length, 'amber', `<table class="tbl">${agentHead('Inactive days')}<tbody>${agentRows(b.dropped, (a) => (a.inactiveDays >= 99 ? 'Month' : String(a.inactiveDays)))}</tbody></table>`, 'TL follow-up list', 'went-quiet-agents')}
-      ${card('🔖 Wrong VRN entries', b.wrongVrn.length, 'amber', `<table class="tbl">${agentHead('Wrong VRN')}<tbody>${agentRows(b.wrongVrn, (a) => fmt(a.wrongVrn))}</tbody></table>`, 'Is month wrong vehicle numbers wale agents', 'wrong-vrn-agents')}`;
+      ${card('🔖 Wrong VRN entries', b.wrongVrn.length, 'amber', `<table class="tbl">${agentHead('Wrong VRN')}<tbody>${agentRows(b.wrongVrn, (a) => fmt(a.wrongVrn))}</tbody></table>`, 'Is month wrong vehicle numbers wale agents', 'wrong-vrn-agents')}
+      ${deGrowthListHtml(basis())}`;
   }
 
   // ---- page ------------------------------------------------------------------------------
@@ -876,6 +1027,24 @@ FF.pages = FF.pages || {};
     body.addEventListener('click', (e) => {
       const tab = e.target.closest('#pf-tabs .seg-btn');
       if (tab) { state.view = tab.dataset.view; history.replaceState(null, '', `#/performance?view=${state.view}`); draw(); return; }
+      const shareWa = e.target.closest('[data-pf-share-wa]');
+      if (shareWa) { const g = state.allTlGroups.find((x) => (x.tlName || x.tlKey) === shareWa.dataset.pfShareWa); if (g) { const t = dispatchReadyText(g); const link = U.waLink(t, FF.config.contacts.teamWhatsapp); if (link) window.open(link, '_blank', 'noopener'); U.toast('WhatsApp khul raha hai'); } return; }
+      const shareCsv = e.target.closest('[data-pf-share-csv]');
+      if (shareCsv) {
+        if (!FF.auth.can('export')) return U.toast('Download permission nahi hai', 'err');
+        const g = state.allTlGroups.find((x) => (x.tlName || x.tlKey) === shareCsv.dataset.pfShareCsv);
+        if (!g) return;
+        const bs = basis(), days = U.suggestDays();
+        const rows = [...g.agents].map((a) => {
+          const sv = Math.max(0, Math.ceil((a.curVc4 / bs.days) * days - a.stockVc4));
+          const sc = Math.max(0, Math.ceil((a.curNvc4 / bs.days) * days - a.stockNvc4));
+          const so = stockOutDate(a.stockTotal, (a.curTotal || 0) / bs.days);
+          return [a.name, a.agentId, a.agentPriority, a.curVc4, a.curNvc4, a.stockVc4, a.stockNvc4, a.stockTotal, sv, sc, sv + sc, so ? so.key : ''];
+        });
+        U.downloadCsv(`dispatch-ready-${U.slug(g.tlName || g.tlKey)}-${U.stamp()}.csv`, ['Agent', 'ID', 'Priority', 'VC4 MTD', 'Comm MTD', 'VC4 stock', 'Comm stock', 'Stock total', 'Sug VC4', 'Sug Comm', 'Sug total', 'Stock khatam'], rows);
+        U.toast('Dispatch-ready CSV downloaded ✓');
+        return;
+      }
       const rcEl = e.target.closest('[data-rc]');
       if (rcEl) { if (!FF.auth.can('export')) return U.toast('Download permission nahi hai', 'err'); shareRankCard(Number(rcEl.dataset.rc), rcEl.dataset.rcKind || 'agent'); return; }
       const dispatchScope = e.target.closest('[data-dispatch-scope]');
