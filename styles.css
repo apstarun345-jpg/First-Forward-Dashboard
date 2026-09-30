@@ -3538,3 +3538,8 @@ html.ff-diag-repairs .kpi-value, html.ff-diag-repairs .kpi-title, html.ff-diag-r
 
 /* v3.21 · diagnostics saved repairs banner */
 .diag-saved { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 10px; padding: 8px 12px; border-radius: 12px; font-size: 12px; background: rgba(16, 185, 129, .12); border: 1px solid rgba(16, 185, 129, .3); }
+
+/* Interactive GV profile drill-downs */
+.mini-kpi[data-kpi], .vcol[data-kpi], .donut-leg[data-kpi], [data-kd-spec], [data-kd-tag] { cursor: pointer; }
+.vcol[data-kpi]:hover .vcol-stack, .donut-leg[data-kpi]:hover { filter: brightness(1.08); }
+.donut circle[data-kpi] { cursor: pointer; }

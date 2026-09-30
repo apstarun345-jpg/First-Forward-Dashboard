@@ -33,7 +33,7 @@ window.FF = window.FF || {};
     if (!list.length) return null;
     return { label: list.map((x) => FILTERS[x].label).join(' + '), fn: (r) => list.every((x) => FILTERS[x].fn(r)) };
   }
-  const state = { spec: null, rows: null, raw: null, rawQuery: '' };
+  const state = { spec: null, rows: null, raw: null, rawQuery: '', history: [] };
 
   // ---- spec -----------------------------------------------------------------------------------
   function currentPage() { const m = location.hash.replace(/^#\/?/, '').split(/[/?]/)[0]; return m || 'home'; }
@@ -122,6 +122,21 @@ window.FF = window.FF || {};
     return { from: U.dateKey(pa), to: U.dateKey(pb), label: days === 1 ? `previous day (${U.labelDate(pa)})` : `previous ${days} days` };
   }
   const inP = (r, p) => r.key >= p.from && r.key <= p.to;
+  const classKey = (value) => { const text = String(value || '').toUpperCase().replace(/\s+/g, ''); return /^\d+$/.test(text) ? `VC${text}` : text; };
+  const personKey = (value) => String(value || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  function rowMatchesSpec(r, spec) {
+    const groupFilter = filterOf(spec.f);
+    if (groupFilter && !groupFilter.fn(r)) return false;
+    if (spec.tagId && String(r.tagId || '').trim().toUpperCase() !== String(spec.tagId).trim().toUpperCase()) return false;
+    if (spec.cls && classKey(r.cls) !== classKey(spec.cls)) return false;
+    if (spec.type === 'REPLACEMENT' && r.type !== 'REPLACEMENT') return false;
+    if (spec.type === 'NOT_REPLACEMENT' && r.type === 'REPLACEMENT') return false;
+    if (spec.vrnBucket && vrnBucket(r.vrnType) !== spec.vrnBucket) return false;
+    if (spec.tl && String(r.tlName || '').trim().toUpperCase() !== String(spec.tl).trim().toUpperCase()) return false;
+    if (spec.channel === 'gv' && r.channel !== 'GV Partner') return false;
+    if (spec.channel === 'ff' && r.channel === 'GV Partner') return false;
+    return true;
+  }
   function tally(rows, keyFn) {
     const m = new Map();
     rows.forEach((r) => { const k = keyFn(r) || '—'; m.set(k, (m.get(k) || 0) + r.n); });
@@ -138,7 +153,7 @@ window.FF = window.FF || {};
     if (!sorted.length) return '';
     const max = Math.max(1, ...sorted.map((k) => cur.get(k) || 0));
     return `<section class="kd-sec"><h4>${title}</h4><table class="tbl compact kd-tbl"><thead><tr><th>${esc(opts.head || 'Item')}</th><th class="num">Count</th><th class="num">Share</th>${prev ? `<th class="num">${esc(opts.prevLabel || 'Previous')}</th><th class="num">Change</th>` : ''}<th class="kd-bar-col"></th></tr></thead><tbody>
-      ${sorted.map((k) => { const v = cur.get(k) || 0, pv = prev ? (prev.get(k) || 0) : null; return `<tr><td><b>${esc(k)}</b></td><td class="num"><b>${U.fmt(v)}</b></td><td class="num">${pct(v, totalCur)}</td>${prev ? `<td class="num">${U.fmt(pv)}</td><td class="num">${U.deltaHtml(U.growth(v, pv), { decimals: 0 })}</td>` : ''}<td class="kd-bar-col"><span class="kd-bar" style="width:${(v / max) * 100}%"></span></td></tr>`; }).join('')}
+      ${sorted.map((k) => { const v = cur.get(k) || 0, pv = prev ? (prev.get(k) || 0) : null; const drill = opts.drill && opts.drill(k); return `<tr${drill ? ` class="clickable" data-kd-spec='${specAttr(drill)}' title="Click to open ${esc(k)} details"` : ''}><td><b>${esc(k)}</b></td><td class="num"><b>${U.fmt(v)}</b></td><td class="num">${pct(v, totalCur)}</td>${prev ? `<td class="num">${U.fmt(pv)}</td><td class="num">${U.deltaHtml(U.growth(v, pv), { decimals: 0 })}</td>` : ''}<td class="kd-bar-col"><span class="kd-bar" style="width:${(v / max) * 100}%"></span></td></tr>`; }).join('')}
       <tr class="kd-total"><td>Total</td><td class="num">${U.fmt(totalCur)}</td><td class="num">100%</td>${prev ? `<td class="num">${U.fmt([...prev.values()].reduce((a, b) => a + b, 0))}</td><td></td>` : ''}<td></td></tr></tbody></table></section>`;
   }
   function matrix(title, rows, rowFn, colFn, opts = {}) {
@@ -149,7 +164,7 @@ window.FF = window.FF || {};
     rows.forEach((r) => { const k = `${rowFn(r)}\u0001${colFn(r)}`; cell.set(k, (cell.get(k) || 0) + r.n); });
     const colTot = ck.map((c) => rows.filter((r) => colFn(r) === c).reduce((a, r) => a + r.n, 0));
     return `<section class="kd-sec"><h4>${title}</h4><div class="table-wrap"><table class="tbl compact kd-tbl"><thead><tr><th>${esc(opts.head || '')}</th>${ck.map((c) => `<th class="num">${esc(c)}</th>`).join('')}<th class="num">Total</th></tr></thead><tbody>
-      ${rk.map((r) => { const vals = ck.map((c) => cell.get(`${r}\u0001${c}`) || 0); return `<tr><td><b>${esc(r)}</b></td>${vals.map((v) => `<td class="num">${v ? U.fmt(v) : '<span class="dim">0</span>'}</td>`).join('')}<td class="num"><b>${U.fmt(vals.reduce((a, b) => a + b, 0))}</b></td></tr>`; }).join('')}
+      ${rk.map((r) => { const vals = ck.map((c) => cell.get(`${r}\u0001${c}`) || 0); const drill = opts.drillRow && opts.drillRow(r); return `<tr${drill ? ` class="clickable" data-kd-spec='${specAttr(drill)}' title="Click to open ${esc(r)} details"` : ''}><td><b>${esc(r)}</b></td>${vals.map((v, i) => { const cellDrill = opts.drillCell && opts.drillCell(r, ck[i]); return `<td class="num"${cellDrill ? ` data-kd-spec='${specAttr(cellDrill)}' title="Click to open this breakdown"` : ''}>${v ? U.fmt(v) : '<span class="dim">0</span>'}</td>`; }).join('')}<td class="num"><b>${U.fmt(vals.reduce((a, b) => a + b, 0))}</b></td></tr>`; }).join('')}
       <tr class="kd-total"><td>Total</td>${colTot.map((v) => `<td class="num">${U.fmt(v)}</td>`).join('')}<td class="num">${U.fmt(colTot.reduce((a, b) => a + b, 0))}</td></tr></tbody></table></div></section>`;
   }
   /** data-kd-spec ke liye safe JSON (single quote escape) — drawer ke andar se filter badalne ke liye. */
@@ -162,7 +177,7 @@ window.FF = window.FF || {};
     const p = period(spec, all);
     const pp = previousPeriod(p);
     const filt = filterOf(spec.f);
-    const pick = (per) => all.filter((r) => inP(r, per) && (!filt || filt.fn(r)));
+    const pick = (per) => all.filter((r) => inP(r, per) && (!filt || filt.fn(r)) && rowMatchesSpec(r, spec));
     const cur = pick(p), prev = pick(pp);
     state.rows = cur; state.period = p; state.spec = spec; state.raw = null;
     const tot = total(cur), ptot = total(prev);
@@ -188,18 +203,18 @@ window.FF = window.FF || {};
         ${(spec.f || spec.agent || spec.channel) ? `<button class="kd-chip" data-kd-spec='${specAttr({ f: '', agent: '', channel: '', src: spec.src, title: spec.title })}'>↺ Clear</button>` : ''}
       </div>
       <div class="kd-grid">
-        ${breakdownTable('🤝 Kis channel se — GV ya First Forward', byChannel, byChannelPrev, tot, { head: 'Channel', prevLabel: pp.label })}
-        ${breakdownTable('🚗 Class group', byGroup, byGroupPrev, tot, { head: 'Group', prevLabel: pp.label, sortCls: true })}
+        ${breakdownTable('🤝 Kis channel se — GV ya First Forward', byChannel, byChannelPrev, tot, { head: 'Channel', prevLabel: pp.label, drill: (key) => ({ src: /GV Partner/i.test(key) ? 'gv' : 'ff', channel: '', f: '', cls: '', type: '', vrnBucket: '', agent: '', agentId: '', title: `${spec.title || 'Detail'} · ${key}` }) })}
+        ${breakdownTable('🚗 Class group', byGroup, byGroupPrev, tot, { head: 'Group', prevLabel: pp.label, sortCls: true, drill: (key) => ({ f: key === 'VC4' ? 'vc4' : key === 'VC20' ? 'vc20' : 'vc5p', cls: '', type: '', vrnBucket: '', title: `${spec.title || 'Detail'} · ${key}` }) })}
       </div>
       ${agentSection(cur, spec, tot)}
-      ${breakdownTable('🏷️ Class-wise (har class kitne)', byClass, byClassPrev, tot, { head: 'Class', prevLabel: pp.label, sortCls: true })}
+      ${breakdownTable('🏷️ Class-wise (har class kitne)', byClass, byClassPrev, tot, { head: 'Class', prevLabel: pp.label, sortCls: true, drill: (key) => ({ cls: key, f: '', type: '', vrnBucket: '', title: `${spec.title || 'Detail'} · ${key}` }) })}
       <div class="kd-grid">
-        ${breakdownTable('🔁 New issuance vs Replacement', byType, byTypePrev, tot, { head: 'Type', prevLabel: pp.label })}
-        ${breakdownTable('🧩 Chassis / New VRN / Wrong VRN', byVrn, byVrnPrev, tot, { head: 'VRN type', prevLabel: pp.label })}
+        ${breakdownTable('🔁 New issuance vs Replacement', byType, byTypePrev, tot, { head: 'Type', prevLabel: pp.label, drill: (key) => ({ type: key === 'Replacement' ? 'REPLACEMENT' : 'NOT_REPLACEMENT', cls: '', f: '', vrnBucket: '', title: `${spec.title || 'Detail'} · ${key}` }) })}
+        ${breakdownTable('🧩 Chassis / New VRN / Wrong VRN', byVrn, byVrnPrev, tot, { head: 'VRN type', prevLabel: pp.label, drill: (key) => ({ vrnBucket: key, cls: '', f: '', type: '', title: `${spec.title || 'Detail'} · ${key}` }) })}
       </div>
-      ${matrix('🧮 Class × Issuance / Replacement', cur, (r) => r.cls, (r) => (r.type === 'REPLACEMENT' ? 'Replacement' : 'Issuance'), { head: 'Class', sortCls: true })}
-      ${matrix('🧮 Class × Chassis / VRN', cur, (r) => r.cls, (r) => vrnBucket(r.vrnType).replace(/^New \/ VRN.*/, 'New / VRN'), { head: 'Class', sortCls: true })}
-      ${matrix('🧮 Class × Channel', cur, (r) => r.cls, (r) => r.channel, { head: 'Class', sortCls: true })}
+      ${matrix('🧮 Class × Issuance / Replacement', cur, (r) => r.cls, (r) => (r.type === 'REPLACEMENT' ? 'Replacement' : 'Issuance'), { head: 'Class', sortCls: true, drillRow: (key) => ({ cls: key, f: '', type: '', vrnBucket: '' }), drillCell: (cls, type) => ({ cls, f: '', type: type === 'Replacement' ? 'REPLACEMENT' : 'NOT_REPLACEMENT', vrnBucket: '' }) })}
+      ${matrix('🧮 Class × Chassis / VRN', cur, (r) => r.cls, (r) => vrnBucket(r.vrnType).replace(/^New \/ VRN.*/, 'New / VRN'), { head: 'Class', sortCls: true, drillRow: (key) => ({ cls: key, f: '', type: '', vrnBucket: '' }), drillCell: (cls, bucket) => ({ cls, f: '', type: '', vrnBucket: bucket }) })}
+      ${matrix('🧮 Class × Channel', cur, (r) => r.cls, (r) => r.channel, { head: 'Class', sortCls: true, drillRow: (key) => ({ cls: key, f: '', type: '', vrnBucket: '' }), drillCell: (cls, channel) => ({ cls, src: /GV Partner/i.test(channel) ? 'gv' : 'ff', channel: '', f: '', type: '', vrnBucket: '' }) })}
       ${dayTable}
       ${ffPendingNote()}
       <section class="kd-sec" id="kd-raw"><h4>📄 Poora data — sab ${U.fmt(tot)} tags (tag-level list)</h4>
@@ -229,7 +244,7 @@ window.FF = window.FF || {};
     const gv = all.filter((a) => a.channel === 'GV Partner');
     const ff = all.filter((a) => a.channel !== 'GV Partner');
     const top = all.slice(0, 60);
-    const rows = top.map((a, i) => `<tr class="clickable" data-kd-agent="${esc(a.name)}" data-kd-agent-channel="${a.channel === 'GV Partner' ? 'gv' : 'ff'}" title="Click → ${esc(a.name)} ka poora detail">
+    const rows = top.map((a, i) => `<tr class="clickable" data-kd-agent="${esc(a.name)}" data-kd-agent-id="${esc(a.id || '')}" data-kd-agent-channel="${a.channel === 'GV Partner' ? 'gv' : 'ff'}" title="Click → ${esc(a.name)} ka poora detail">
       <td class="dim">${i + 1}</td>
       <td><b>${esc(a.name)}</b>${a.id ? ` <small class="dim">${esc(a.id)}</small>` : ''}</td>
       <td><span class="kd-badge ${a.channel === 'GV Partner' ? 'gv' : 'ff'}">${a.channel === 'GV Partner' ? '🟩 GV' : '🟦 FF'}</span></td>
@@ -255,12 +270,10 @@ window.FF = window.FF || {};
   async function agentDetail(spec) {
     const name = spec.agent;
     const src = spec.src === 'ff' || spec.src === 'gv' ? spec.src : 'both';
+    const wanted = [spec.agent, spec.agentId].map(personKey).filter(Boolean);
     const all = (await issuanceRows(src)).filter((r) => {
-      const nm = r.agentName || r.agentId || '';
-      if (!name || !(nm === name || String(nm).toUpperCase() === String(name).toUpperCase())) return false;
-      if (spec.channel === 'gv' && r.channel !== 'GV Partner') return false;
-      if (spec.channel === 'ff' && r.channel === 'GV Partner') return false;
-      return true;
+      if (!wanted.length || ![r.agentName, r.agentId].map(personKey).some((key) => wanted.includes(key))) return false;
+      return rowMatchesSpec(r, spec);
     });
     const p = period(spec, all);
     const inRange = all.filter((r) => inP(r, p));
@@ -281,9 +294,9 @@ window.FF = window.FF || {};
     const body = `<div class="kd-hero"><div><span class="kd-kicker">${esc(channel === 'GV Partner' ? '🟩 GV Partner agent' : '🟦 First Forward agent')}</span><div class="kd-big">${U.fmt(tot)} <small>tags</small></div><div class="kd-sub">${esc(periodLabel)}${tl ? ` · TL <b>${esc(tl)}</b>` : ''}${id ? ` · ID ${esc(id)}` : ''}${rank > 0 ? ` · rank #${rank}` : ''}</div></div>
       <div class="kd-acts"><a class="btn small" href="#/performance?agent=${encodeURIComponent(name)}">🏆 Performance →</a><a class="btn small" href="#/masterSearch?q=${encodeURIComponent(name)}">🔎 Master profile →</a></div></div>
       <div class="kd-stats">${stat('VC4 (payable)', U.fmt(total(inRange.filter((r) => r.group === 'VC4'))), pct(total(inRange.filter((r) => r.group === 'VC4')), tot), 'blue')}${stat('Commercial', U.fmt(total(inRange.filter((r) => r.group !== 'VC4'))), pct(total(inRange.filter((r) => r.group !== 'VC4')), tot), 'violet')}${stat('Chassis', U.fmt(total(inRange.filter((r) => /chassis/i.test(r.vrnType)))), '', 'orange')}${stat('Replacement', U.fmt(total(inRange.filter((r) => r.type === 'REPLACEMENT'))), '', 'amber')}${stat('Active days', U.fmt(days.length), days.length ? `${U.fmt(Math.round(tot / days.length))}/day` : '', 'green')}</div>
-      <div class="kd-grid">${breakdownTable('🚗 Class group', byGroup, null, tot, { head: 'Group', sortCls: true })}${breakdownTable('🔁 Type', byType, null, tot, { head: 'Type' })}</div>
-      ${breakdownTable('🏷️ Class-wise', byCls, null, tot, { head: 'Class', sortCls: true })}
-      ${breakdownTable('🧩 VRN type', byVrn, null, tot, { head: 'VRN type' })}
+      <div class="kd-grid">${breakdownTable('🚗 Class group', byGroup, null, tot, { head: 'Group', sortCls: true, drill: (key) => ({ f: key === 'VC4' ? 'vc4' : key === 'VC20' ? 'vc20' : 'vc5p', cls: '', type: '', vrnBucket: '' }) })}${breakdownTable('🔁 Type', byType, null, tot, { head: 'Type', drill: (key) => ({ type: key === 'Replacement' ? 'REPLACEMENT' : 'NOT_REPLACEMENT', cls: '', f: '', vrnBucket: '' }) })}</div>
+      ${breakdownTable('🏷️ Class-wise', byCls, null, tot, { head: 'Class', sortCls: true, drill: (key) => ({ cls: key, f: '', type: '', vrnBucket: '' }) })}
+      ${breakdownTable('🧩 VRN type', byVrn, null, tot, { head: 'VRN type', drill: (key) => ({ vrnBucket: key, cls: '', f: '', type: '' }) })}
       <section class="kd-sec"><h4>📅 Day-wise (${days.length} din)</h4><div class="table-wrap kd-scroll"><table class="tbl compact kd-tbl"><thead><tr><th>Date</th><th class="num">Tags</th><th class="num">VC4</th><th class="num">Commercial</th></tr></thead><tbody>${days.slice().reverse().map((k) => { const rs = inRange.filter((r) => r.key === k); const t = total(rs), v = total(rs.filter((r) => r.group === 'VC4')); return `<tr class="clickable" data-kd-agent-day="${k}"><td><b>${esc(U.labelDateKey(k))}</b> <small class="dim">${esc(U.weekday(U.fromDateKey(k)))}</small></td><td class="num"><b>${U.fmt(t)}</b></td><td class="num">${U.fmt(v)}</td><td class="num">${U.fmt(t - v)}</td></tr>`; }).join('')}</tbody></table></div></section>`;
     return { kicker: 'KPI detail · Agent', title: `${name} · ${channel === 'GV Partner' ? 'GV' : 'FF'} agent`, sub: `${esc(periodLabel)} · <b>${U.fmt(tot)}</b> tags`, body, exportable: true, agent: name, period: p, spec };
   }
@@ -296,7 +309,7 @@ window.FF = window.FF || {};
     const filt = filterOf(spec.f);
     if (spec.src === 'ff' || spec.src === 'gv' || spec.src === 'both') {
       const e = FF.config.eir;
-      const cols = [e.date, e.tagId, e.vrn, e.cls, e.type, e.vrnType, e.status, e.agentName, e.agentId, e.tlName, e.masterId, e.gvName];
+      const cols = [e.date, e.tagId, e.vrn, e.cls, e.type, e.vrnType, e.status, e.agentName, e.agentId, e.tlName, e.masterId, e.gvName, e.gvId];
       const tq = `select ${cols.join(', ')} where toDate(${e.date}) >= date '${p.from}' and toDate(${e.date}) <= date '${p.to}' order by ${e.date} desc limit 60000`;
       const t = await FF.data.query(e.sheet, tq, {});
       const D = FF.data;
@@ -308,16 +321,14 @@ window.FF = window.FF || {};
         if (spec.src === 'gv' && channel !== 'GV Partner') continue;
         // 🔁 FF T+1: jo FF rows abhi reported nahi (aaj) wo FF/both list me bhi nahi aati.
         if (channel !== 'GV Partner' && FF.filters && FF.filters.ffLagOn && FF.filters.ffLagOn() && !FF.filters.ffVisible({ key: d ? U.dateKey(d) : '', channel })) continue;
-        // 👤 agent view ke liye sirf usi agent ki rows.
-        if (spec.agent) {
-          const nm = D.cellText(r[7]) || D.cellText(r[11]);
-          if (String(nm).trim().toUpperCase() !== String(spec.agent).trim().toUpperCase()) continue;
-          if (spec.channel === 'gv' && channel !== 'GV Partner') continue;
-          if (spec.channel === 'ff' && channel === 'GV Partner') continue;
-        }
-        const row = { key: d ? U.dateKey(d) : '', cls, group: FF.model.classGroup(cls), type: D.cellText(r[4]).toUpperCase() || 'ISSUANCE', vrnType: D.cellText(r[5]), channel, n: 1 };
+        const agentName = channel === 'GV Partner' ? (D.cellText(r[11]) || D.cellText(r[7])) : (D.cellText(r[7]) || D.cellText(r[11]));
+        const agentId = channel === 'GV Partner' ? (D.cellText(r[12]) || D.cellText(r[8])) : (D.cellText(r[8]) || D.cellText(r[12]));
+        const wanted = [spec.agent, spec.agentId].map(personKey).filter(Boolean);
+        if (wanted.length && ![agentName, agentId].map(personKey).some((key) => wanted.includes(key))) continue;
+        const row = { key: d ? U.dateKey(d) : '', tagId: D.cellText(r[1]), cls, group: FF.model.classGroup(cls), type: D.cellText(r[4]).toUpperCase() || 'ISSUANCE', vrnType: D.cellText(r[5]), channel, agentName, agentId, tlName: D.cellText(r[9]), n: 1 };
         if (filt && !filt.fn(row)) continue;
-        out.push([row.key, D.cellText(r[1]), D.cellText(r[2]), cls, row.type, row.vrnType, D.cellText(r[6]), D.cellText(r[7]) || D.cellText(r[11]), D.cellText(r[8]), D.cellText(r[9]), channel]);
+        if (!rowMatchesSpec(row, spec)) continue;
+        out.push([row.key, D.cellText(r[1]), D.cellText(r[2]), cls, row.type, row.vrnType, D.cellText(r[6]), agentName, agentId, D.cellText(r[9]), channel]);
       }
     }
     out.sort((a, b) => (a[0] < b[0] ? 1 : a[0] > b[0] ? -1 : 0));
@@ -336,7 +347,7 @@ window.FF = window.FF || {};
     el.innerHTML = `<div class="kd-raw-tools"><input class="input" id="kd-raw-q" placeholder="Search: tag / VRN / agent / TL / class…" value="${esc(filter || '')}">${FF.auth.can('export') ? '<button class="btn small" data-kd-xlsx>⬇ Excel (all rows)</button><button class="btn small" data-kd-csv>⬇ CSV</button>' : ''}</div>
       <div class="kd-chips"><span class="dim small">Top TLs:</span>${top(byTl)}</div><div class="kd-chips"><span class="dim small">Top agents:</span>${top(byAgent)}</div>
       <p class="dim small">${U.fmt(rows.length)} rows${q ? ` (search "${esc(q)}")` : ''}${rows.length > show.length ? ` · pehli ${show.length} dikh rahi hain — sab ke liye Excel download karo` : ''}.</p>
-      <div class="table-wrap kd-scroll tall"><table class="tbl compact kd-tbl"><thead><tr>${RAW_HEAD.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${show.map((r) => `<tr>${r.map((v, i) => `<td${i === 0 ? ' class="nowrap"' : ''}>${esc(v || '')}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${RAW_HEAD.length}" class="empty">Koi row nahi mili.</td></tr>`}</tbody></table></div>`;
+      <div class="table-wrap kd-scroll tall"><table class="tbl compact kd-tbl"><thead><tr>${RAW_HEAD.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${show.map((r) => `<tr class="clickable" data-kd-tag="${esc(r[1] || '')}" data-kd-tag-date="${esc(r[0] || '')}" title="Click for this tag’s details">${r.map((v, i) => `<td${i === 0 ? ' class="nowrap"' : ''}>${esc(v || '')}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${RAW_HEAD.length}" class="empty">Koi row nahi mili.</td></tr>`}</tbody></table></div>`;
     const input = U.$('#kd-raw-q');
     if (input) { input.addEventListener('input', U.debounce(() => { renderRaw(input.value); const again = U.$('#kd-raw-q'); if (again) { again.focus(); again.setSelectionRange(again.value.length, again.value.length); } }, 300)); }
   }
@@ -419,24 +430,77 @@ window.FF = window.FF || {};
     return { kicker: 'KPI detail · Tag status', title: spec.title || 'Tag status', sub: `${esc(U.labelYM(ym))} · <b>${U.fmt(total(cur))}</b> tags`, body: breakdownTable('Status-wise', m, pm, total(cur), { head: 'Status', prevLabel: U.labelYM(U.prevMonthKey(ym)) }) };
   }
 
+  // ---- GV agent stock drill-down ----------------------------------------------------------------
+  async function agentStockDetail(spec) {
+    const G = FF.gv, agent = String(spec.agent || '');
+    let rows = G.get('stockAgentClass');
+    if (!rows) { try { rows = await G.need('stockAgentClass'); } catch { rows = []; } }
+    let matches = (rows || []).filter((r) => personKey(r.agentName) === personKey(agent));
+    if (!matches.length && spec.agentId) {
+      try {
+        const a = (FF.config.gv || {}).assignment || {};
+        const q = `select ${a.agentId || 'E'}, ${a.cls || 'A'}, count(${a.tagId || 'B'}) where ${a.agentId || 'E'} = ${FF.data.lit(spec.agentId)} group by ${a.agentId || 'E'}, ${a.cls || 'A'}`;
+        const table = await FF.data.query('Tag Assignment', q, {});
+        matches = table.rows.map((r) => ({ agentName: agent, cls: classKey(FF.data.cellText(r[1])), n: FF.data.cellNumber(r[2]) || 0 })).filter((r) => r.n > 0);
+      } catch { /* fall back to the name-based summary */ }
+    }
+    const selected = matches.filter((r) => !spec.cls || classKey(r.cls) === classKey(spec.cls));
+    const n = U.sum(selected, (r) => Number(r.n) || 0);
+    let content;
+    if (!spec.cls) {
+      const byClass = new Map(matches.map((r) => [r.cls, Number(r.n) || 0]));
+      content = breakdownTable('Agent stock by class', byClass, null, n, { head: 'Class', sortCls: true, drill: (cls) => ({ ...spec, cls, title: `${agent} · ${cls} stock` }) });
+    } else {
+      const a = (FF.config.gv || {}).assignment || {};
+      const tagId = a.tagId || 'B', serial = a.serial || 'C', status = a.status || 'D', agentId = a.agentId || 'E', agentName = a.agentName || 'F', tlName = a.tlName || 'H';
+      const whoCol = spec.agentId && a.agentId ? a.agentId : agentName;
+      const whoValue = spec.agentId && a.agentId ? spec.agentId : agent;
+      const query = `select ${a.cls || 'A'}, ${tagId}, ${serial}, ${status}, ${agentId}, ${agentName}, ${tlName} where ${whoCol} = ${FF.data.lit(whoValue)} limit 5000`;
+      try {
+        const table = await FF.data.query('Tag Assignment', query, {});
+        const columns = table.cols.map((col) => col.label || col.id), dataRows = FF.data.textRows(table).filter((r) => classKey(r[0]) === classKey(spec.cls));
+        content = `<p class="dim small">Tag Assignment source · ${dataRows.length} ${esc(spec.cls)} rows (agent query limited to 5,000).</p><div class="table-wrap kd-scroll tall"><table class="tbl compact kd-tbl"><thead><tr>${columns.map((col) => `<th>${esc(col)}</th>`).join('')}</tr></thead><tbody>${dataRows.map((r) => `<tr>${r.map((v) => `<td>${esc(v)}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${columns.length}" class="empty">${esc(agent)} ke ${esc(spec.cls)} stock ki row nahi mili.</td></tr>`}</tbody></table></div>`;
+      } catch (err) { content = U.errorBox(err); }
+    }
+    state.spec = spec; state.rows = null; state.raw = null;
+    return { kicker: 'KPI detail · GV agent stock', title: `${agent} · stock`, sub: `${spec.cls ? `${esc(spec.cls)} · ` : ''}<b>${U.fmt(n)}</b> tags in Tag Assignment`, body: content || '<div class="empty">Is agent ka stock data nahi mila.</div>' };
+  }
+  async function tagDetail(spec) {
+    const available = await issuanceRows(spec.src || 'both');
+    state.spec = spec; state.period = period(spec, available); state.rows = null; state.raw = null;
+    const matches = await loadRaw();
+    const row = matches[0];
+    const body = row ? `<p class="dim small">Source: ${esc(row[10] || '')} · click back to return to the full list.</p><div class="table-wrap"><table class="tbl compact kd-tbl"><tbody>${RAW_HEAD.map((label, i) => `<tr><th>${esc(label)}</th><td>${esc(row[i] || '')}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">Is Tag ID ke liye source row nahi mili.</div>';
+    return { kicker: 'KPI detail · Tag record', title: `Tag ${spec.tagId}`, sub: `${esc(spec.date || '')} · ${esc(spec.agent || '')}`, body };
+  }
+
   // ---- open ------------------------------------------------------------------------------------
-  async function open(cardOrSpec) {
+  async function open(cardOrSpec, opts = {}) {
     const spec = cardOrSpec && cardOrSpec.nodeType ? specFrom(cardOrSpec) : { ...(cardOrSpec || {}) };
+    const drawerOpen = !!(U.$('#drawer') && U.$('#drawer').classList.contains('open'));
+    const nested = opts.nested !== undefined ? opts.nested : (drawerOpen && !!state.spec);
+    if (nested && state.spec && !opts.fromHistory) state.history.push({ ...state.spec });
+    else if (!nested && !opts.fromHistory) state.history = [];
     if (!spec.src) spec.src = PAGE_SRC[currentPage()] || 'both';
     if (!spec.scope) spec.scope = 'mtd';
     FF.app.openDrawer({ kicker: 'KPI detail', title: spec.title || 'KPI detail', sub: 'Breakdown taiyaar ho raha hai…', body: U.spinner('Detail calculate ho rahi hai…'), wide: true });
     if (FF.notifications && FF.notifications.track) FF.notifications.track('kpi', `KPI opened: ${spec.title || spec.scope}`);
     try {
-      const view = spec.agent ? await agentDetail(spec)
-        : spec.scope === 'stock' ? await stockDetail(spec)
+      const view = spec.tagId ? await tagDetail(spec)
+        : spec.agent && spec.scope === 'stock' ? await agentStockDetail(spec)
+          : spec.agent ? await agentDetail(spec)
+          : spec.scope === 'stock' ? await stockDetail(spec)
           : spec.scope === 'stockreport' ? await stockReportDetail(spec)
             : spec.scope === 'agents' ? await agentsDetail(spec)
               : spec.scope === 'status' ? await statusDetail(spec)
                 : await issuanceDetail(spec);
       const cardInfo = spec.foot ? `<div class="kd-card-foot">Card: ${esc(spec.foot)}</div>` : '';
-      FF.app.openDrawer({ kicker: view.kicker, title: view.title, sub: view.sub, body: cardInfo + view.body, wide: true, actions: view.exportable && FF.auth.can('export') ? '<button class="btn small" data-kd-summary-xlsx>⬇ Breakdown Excel</button>' : '' });
+      const back = nested && state.history.length ? '<button class="btn small" data-kd-back>← Back</button>' : '';
+      const exportBtn = view.exportable && FF.auth.can('export') ? '<button class="btn small" data-kd-summary-xlsx>⬇ Breakdown Excel</button>' : '';
+      FF.app.openDrawer({ kicker: view.kicker, title: view.title, sub: view.sub, body: cardInfo + view.body, wide: true, actions: back + exportBtn });
     } catch (err) {
-      FF.app.openDrawer({ kicker: 'KPI detail', title: spec.title || 'KPI detail', body: U.errorBox(err), wide: true });
+      const back = nested && state.history.length ? '<button class="btn small" data-kd-back>← Back</button>' : '';
+      FF.app.openDrawer({ kicker: 'KPI detail', title: spec.title || 'KPI detail', body: U.errorBox(err), wide: true, actions: back });
     }
   }
   function summaryExport() {
@@ -450,6 +514,12 @@ window.FF = window.FF || {};
   }
 
   document.addEventListener('click', async (e) => {
+    const back = e.target.closest('[data-kd-back]');
+    if (back) {
+      const previous = state.history.pop();
+      if (previous) open(previous, { nested: state.history.length > 0, fromHistory: true });
+      return;
+    }
     if (e.target.closest('[data-kd-raw]')) {
       const btn = e.target.closest('[data-kd-raw]');
       btn.disabled = true; btn.textContent = 'Loading…';
@@ -460,6 +530,8 @@ window.FF = window.FF || {};
     if (e.target.closest('[data-kd-xlsx]') && state.raw) { FF.xlsx.download(`kpi-tags-${state.period.from}_${state.period.to}.xlsx`, [{ name: 'Tags', header: RAW_HEAD, rows: state.raw }]); return; }
     if (e.target.closest('[data-kd-csv]') && state.raw) { U.downloadCsv(`kpi-tags-${state.period.from}_${state.period.to}.csv`, RAW_HEAD, state.raw); return; }
     if (e.target.closest('[data-kd-summary-xlsx]')) { summaryExport(); return; }
+    const tagRow = e.target.closest('[data-kd-tag]');
+    if (tagRow && state.spec) { open({ ...state.spec, tagId: tagRow.dataset.kdTag, scope: 'day', date: tagRow.dataset.kdTagDate, title: `Tag ${tagRow.dataset.kdTag}` }); return; }
     const day = e.target.closest('[data-kd-day]');
     if (day && state.spec) { open({ ...state.spec, scope: 'day', date: day.dataset.kdDay, title: `${state.spec.title} · ${U.labelDateKey(day.dataset.kdDay)}` }); return; }
     // 👥 agent row par click → us agent ka poora detail (GV agent ya FF agent) usi drawer me.
@@ -467,7 +539,7 @@ window.FF = window.FF || {};
     if (agentRow) {
       const base = state.spec || {};
       const name = agentRow.dataset.kdAgent;
-      open({ ...base, agent: name, channel: agentRow.dataset.kdAgentChannel || '', scope: base.scope === 'day' ? 'day' : 'mtd', date: base.scope === 'day' ? base.date : '', title: `${name} · ${agentRow.dataset.kdAgentChannel === 'gv' ? 'GV' : 'FF'} agent` });
+      open({ ...base, agent: name, agentId: agentRow.dataset.kdAgentId || '', channel: agentRow.dataset.kdAgentChannel || '', scope: base.scope === 'day' ? 'day' : 'mtd', date: base.scope === 'day' ? base.date : '', title: `${name} · ${agentRow.dataset.kdAgentChannel === 'gv' ? 'GV' : 'FF'} agent` });
       return;
     }
     const agentDay = e.target.closest('[data-kd-agent-day]');

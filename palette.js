@@ -159,7 +159,7 @@ window.FF = window.FF || {};
       { group: 'Commands', icon: '🎨', label: 'Open theme packs', sub: 'Readable presets with saved preference', command: 'themes' },
       { group: 'Commands', icon: '↻', label: 'Refresh data', sub: 'Sync the latest available snapshot', command: 'refresh' },
       { group: 'Commands', icon: '⬇️', label: 'Install / add to home screen', sub: 'Use the PWA install prompt', command: 'install' },
-      { group: 'Commands', icon: '⌕', label: 'Reset workspace filters', sub: 'Clear shared date, channel, TL, agent and class', command: 'clearFilters' }
+      { group: 'Commands', icon: '⌕', label: 'Reset current report filters', sub: 'Clear this page’s date, channel, TL, agent and class filters', command: 'clearFilters' }
     );
     // Pages (jiske paas permission hai wahi)
     (FF.app && FF.app.PAGES ? FF.app.PAGES : []).forEach((p) => {
@@ -297,7 +297,7 @@ window.FF = window.FF || {};
       else if (it.command === 'themes') { const b = U.$('#theme-pack-btn'); if (b) b.click(); else U.toast('Theme packs topbar me available hain', 'info'); }
       else if (it.command === 'refresh') { if (FF.app && FF.app.refresh) FF.app.refresh(); }
       else if (it.command === 'install') { if (FF.app && FF.app.promptInstall) FF.app.promptInstall(); }
-      else if (it.command === 'clearFilters') { if (FF.app && FF.app.clearGlobalFilters) FF.app.clearGlobalFilters(); else if (FF.app && FF.app.updateParams) FF.app.updateParams({ period: '', channel: '', ch: '', tl: '', agent: '', cls: '' }); U.toast('Workspace filters reset', 'ok'); }
+      else if (it.command === 'clearFilters') { if (FF.app && FF.app.clearGlobalFilters) FF.app.clearGlobalFilters(); else if (FF.app && FF.app.updateParams) FF.app.updateParams({ period: '', channel: '', ch: '', tl: '', agent: '', cls: '' }); U.toast('Current report filters reset', 'ok'); }
       return;
     }
     if (location.hash === it.href) { FF.app.renderCurrent && FF.app.renderCurrent(); } else location.hash = it.href;

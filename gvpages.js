@@ -13,7 +13,13 @@ FF.pages = FF.pages || {};
   const kpi = (cls, title, icon, value, foot, tip) => `<div class="kpi ${cls}" ${tip ? `data-tip="${esc(tip)}"` : ''}><div class="kpi-top"><span class="kpi-title">${esc(title)}</span><span class="kpi-icon">${icon}</span></div><div class="kpi-value">${value}</div><div class="kpi-foot">${foot || ''}</div></div>`;
   const card = (title, body, opts) => `<section class="card ${(opts && opts.cls) || ''}"><div class="card-head"><h3>${title}</h3>${opts && opts.right ? `<div class="card-right">${opts.right}</div>` : ''}</div><div class="card-body">${body}</div></section>`;
   const head = (icon, title, sub, actions) => `<div class="page-head"><div><h1>${icon} ${esc(title)}</h1><p class="sub">${sub}</p></div><div class="head-actions">${actions || ''}<button class="btn primary" data-action="refresh">↻ Refresh</button></div></div>`;
-  const miniKpi = (label, value, foot, cls) => `<div class="mini-kpi ${cls || ''}"><span class="mini-label">${esc(label)}</span><span class="mini-value">${value}</span>${foot ? `<span class="mini-foot">${foot}</span>` : ''}</div>`;
+  const drillAttr = (spec) => `data-kpi="${esc(new URLSearchParams(Object.entries(spec).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => [k, String(v)])).toString())}" title="Click to open detail"`;
+  const miniKpi = (label, value, foot, cls, drill) => {
+    const scope = (drill && drill.scope) || (/stock|inventory/i.test(label) ? 'stock' : /agents?/i.test(label) ? 'agents' : /today/i.test(label) ? 'day' : 'mtd');
+    const params = new URLSearchParams({ src: 'gv', scope });
+    Object.entries(drill || {}).forEach(([key, val]) => { if (key !== 'scope' && val !== undefined && val !== '') params.set(key, val); });
+    return `<div class="mini-kpi ${cls || ''}" data-kpi="${esc(params.toString())}" data-kpi-title="${esc(label)}" title="Click to open ${esc(label)} breakdown"><span class="mini-label">${esc(label)}</span><span class="mini-value">${value}</span>${foot ? `<span class="mini-foot">${foot}</span>` : ''}</div>`;
+  };
   const tableHtml = (header, rows, numericFrom) => `<div class="table-wrap"><table class="tbl compact"><thead><tr>${header.map((h, i) => `<th class="${i >= numericFrom ? 'num' : ''}">${h}</th>`).join('')}</tr></thead><tbody>${rows.join('') || `<tr><td colspan="${header.length}" class="empty">No data</td></tr>`}</tbody></table></div>`;
   const norm = (s) => U.clean(s).toUpperCase().replace(/\s+/g, ' ');
   const gvName = () => (FF.config.brand && /first forward/i.test(FF.config.brand) ? 'GV Partner' : 'GV Partner');
@@ -43,12 +49,13 @@ FF.pages = FF.pages || {};
 
     const latest = G.latestDate();
     if (!latest) { body.innerHTML = `<div class="empty-state">😶 GV Master me koi date nahi mili.<br><small class="dim">Settings → Data source me GV tab/column mapping check karo.</small></div>`; return; }
-    const cur = U.ymKey(latest);
+    const todayDate = new Date();
+    const cur = U.ymKey(todayDate);
     const last = U.prevMonthKey(cur);
-    const curS = G.summary(cur), lastS = G.summary(last), lastMtd = G.summary(last, latest.getDate());
+    const curS = G.summary(cur), lastS = G.summary(last), lastMtd = G.summary(last, todayDate.getDate());
     const curSeries = G.dailySeries(cur), lastSeries = G.dailySeries(last);
-    const today = curSeries.totals[latest.getDate() - 1] || 0;
-    const prevDay = latest.getDate() > 1 ? curSeries.totals[latest.getDate() - 2] : 0;
+    const today = curSeries.totals[todayDate.getDate() - 1] || 0;
+    const prevDay = todayDate.getDate() > 1 ? curSeries.totals[todayDate.getDate() - 2] : 0;
     const monthsList = G.months();
 
     // stock (Tag Assignment)
@@ -66,7 +73,7 @@ FF.pages = FF.pages || {};
 
     const lm = U.labelYM(last), cm = U.labelYM(cur);
     const kpis = [
-      kpi('g1', `Today · ${U.labelDate(latest)} (${U.weekday(latest)})`, '⚡', U.fmt(today), `${U.deltaHtml(U.growth(today, prevDay), { decimals: 0 })} vs previous day (${U.fmt(prevDay)})`),
+      kpi('g1', `Today · ${U.labelDate(todayDate)} (${U.weekday(todayDate)})`, '⚡', U.fmt(today), `${U.deltaHtml(U.growth(today, prevDay), { decimals: 0 })} vs previous day (${U.fmt(prevDay)})`),
       kpi('g2', `MTD Issuance · ${cm}`, '🏷️', U.fmt(curS.total), `${U.deltaHtml(U.growth(curS.total, lastMtd.total))} vs ${lm} same period (${U.fmt(lastMtd.total)})`),
       kpi('g3', 'VC4 (Payable) · MTD', '🚗', U.fmt(curS.vc4), `${U.fmtPct(U.pctOf(curS.vc4, curS.total), 0)} share · ${U.deltaHtml(U.growth(curS.vc4, lastMtd.vc4))} vs ${lm}`),
       kpi('g4', 'Commercial (NVC4) · MTD', '🚚', U.fmt(curS.comm), `VC20 <b>${U.fmt(curS.vc20)}</b> · VC5+ <b>${U.fmt(curS.vc5p)}</b> · ${U.deltaHtml(U.growth(curS.comm, lastMtd.comm))}`),
@@ -81,14 +88,14 @@ FF.pages = FF.pages || {};
     ];
 
     {
-      const latestK = U.dateKey(latest);
+      const latestK = U.dateKey(todayDate);
       const specs = [`src=gv&scope=day&date=${latestK}`, `src=gv&scope=mtd&ym=${cur}`, `src=gv&scope=mtd&ym=${cur}&f=vc4`, `src=gv&scope=mtd&ym=${cur}&f=comm`, `src=gv&scope=mtd&ym=${cur}`, `src=gv&scope=mtd&ym=${cur}`, `src=gv&scope=mtd&ym=${cur}&f=repl`, `src=gv&scope=agents&ym=${cur}`, 'src=gv&scope=stock', 'src=gv&scope=stock', `src=gv&scope=mtd&ym=${cur}`, 'src=gv&scope=stock'];
       kpis.forEach((html, i) => { if (specs[i]) kpis[i] = html.replace('<div class="kpi ', `<div data-kpi="${esc(specs[i])}" class="kpi `); });
     }
     const dayLabels = curSeries.days.map(String);
     const lineChart = C.lines({
       labels: dayLabels, tipLabels: curSeries.days.map((d) => `Day ${d}`), height: 250, series: [
-        { name: cm, values: curSeries.totals.map((v, i) => (i < latest.getDate() ? v : null)), color: C.COLORS.current },
+        { name: cm, values: curSeries.totals.map((v, i) => (i < todayDate.getDate() ? v : null)), color: C.COLORS.current },
         { name: lm, values: lastSeries.totals.slice(0, curSeries.days.length), color: C.COLORS.last, dash: true, area: false }
       ]
     });
@@ -119,7 +126,7 @@ FF.pages = FF.pages || {};
     const issuance = G.issuanceRows ? G.issuanceRows() : G.rows();
     const rowCount = (list, predicate) => U.sum(list.filter(predicate || (() => true)), (r) => Number(r.n) || 1);
     for (let i = 0; i < 14; i++) {
-      const d = new Date(latest); d.setDate(d.getDate() - i);
+      const d = new Date(todayDate); d.setDate(d.getDate() - i);
       const ym = U.ymKey(d), day = d.getDate();
       const dayRows = issuance.filter((r) => r.ym === ym && r.day === day);
       recent.push({ d, total: rowCount(dayRows), vc4: rowCount(dayRows, (r) => r.group === 'VC4'), comm: rowCount(dayRows, (r) => r.group !== 'VC4'), repl: rowCount(dayRows, (r) => /replacement/i.test(r.status || r.type || '')), agents: new Set(dayRows.map((r) => r.agentId || r.agentName).filter(Boolean)).size });
@@ -127,7 +134,7 @@ FF.pages = FF.pages || {};
     const recentRows = recent.map((r, i) => `<tr><td>${U.labelDate(r.d)} <span class="dim">${U.weekday(r.d)}</span></td><td class="num"><b>${U.fmt(r.total)}</b></td><td class="num">${U.fmt(r.vc4)}</td><td class="num">${U.fmt(r.comm)}</td><td class="num">${U.fmt(r.repl)}</td><td class="num">${U.fmt(r.agents)}</td><td>${recent[i + 1] ? U.deltaHtml(U.growth(r.total, recent[i + 1].total), { decimals: 0 }) : '—'}</td></tr>`);
 
     // weekday pattern (last 8 weeks)
-    const cutoff = new Date(latest); cutoff.setDate(cutoff.getDate() - 55);
+    const cutoff = new Date(todayDate); cutoff.setDate(cutoff.getDate() - 55);
     const wdSum = new Array(7).fill(0), wdDays = Array.from({ length: 7 }, () => new Set());
     for (const r of issuance) { if (!r.date || r.date < cutoff) continue; wdSum[r.date.getDay()] += Number(r.n) || 1; wdDays[r.date.getDay()].add(U.dateKey(r.date)); }
     const wdOrder = [1, 2, 3, 4, 5, 6, 0];
@@ -489,32 +496,62 @@ FF.pages = FF.pages || {};
   function overlayGvReportWithEir(report) {
     const latest = G.latestDate && G.latestDate();
     if (!latest || !G.issuanceRows) return report;
-    const currentYm = U.ymKey(latest), previousYm = U.prevMonthKey(currentYm);
+    // Report totals must use the current calendar day, not the last date found in the sheet.
+    // Otherwise a delayed/empty day silently makes the previous source day appear as "Today".
+    const now = new Date();
+    const currentYm = U.ymKey(now), previousYm = U.prevMonthKey(currentYm);
     const issuance = G.issuanceRows();
     const current = G.agentRollup(currentYm) || [], previous = G.agentRollup(previousYm) || [];
     const byKey = (list) => {
       const map = new Map();
-      list.forEach((a) => {
-        [a.agentId, a.agentName].filter(Boolean).forEach((key) => map.set(norm(key), a));
-      });
+      list.forEach((a) => [a.agentId, a.agentName].filter(Boolean).forEach((key) => map.set(norm(key), a)));
       return map;
     };
     const curMap = byKey(current), prevMap = byKey(previous);
     const tlMap = (list) => new Map((list || []).map((t) => [norm(t.tlName), t]));
     const curTl = tlMap(G.tlRollup(currentYm)), prevTl = tlMap(G.tlRollup(previousYm));
-    const match = (r) => curMap.get(norm(r.agentId)) || curMap.get(norm(r.agentName));
-    const matchPrev = (r) => prevMap.get(norm(r.agentId)) || prevMap.get(norm(r.agentName));
-    const rowsFor = (r, ym) => issuance.filter((x) => x.ym === ym && ((r.agentId && x.agentId && norm(x.agentId) === norm(r.agentId)) || (r.agentName && norm(x.agentName) === norm(r.agentName))));
-    const dayRowsFor = (r, dateKey) => issuance.filter((x) => U.dateKey(x.date || x.d) === dateKey && ((r.agentId && x.agentId && norm(x.agentId) === norm(r.agentId)) || (r.agentName && norm(x.agentName) === norm(r.agentName))));
-    const count = (list, fn) => U.sum(list.filter(fn || (() => true)), (x) => Number(x.n) || 1);
+    const match = (map, r) => map.get(norm(r.agentId)) || map.get(norm(r.agentName));
+
+    // Index once rather than scanning every daily aggregate for every report agent. This cuts the
+    // overlay from O(agents × EIR rows) to O(agents + EIR rows), and union-by-object avoids counting
+    // one aggregate twice when both the ID and name match.
+    const index = (keyFn) => {
+      const out = new Map();
+      for (const row of issuance) {
+        const bucket = keyFn(row);
+        if (!bucket) continue;
+        let people = out.get(bucket);
+        if (!people) out.set(bucket, people = new Map());
+        for (const key of [row.agentId, row.agentName].filter(Boolean)) {
+          const id = norm(key);
+          if (!people.has(id)) people.set(id, []);
+          people.get(id).push(row);
+        }
+      }
+      return out;
+    };
+    const monthIndex = index((r) => r.ym);
+    const dayIndex = index((r) => U.dateKey(r.date || r.d));
+    const rowsFor = (idx, bucket, r) => {
+      const people = idx.get(bucket);
+      if (!people) return [];
+      const found = new Set();
+      for (const key of [r.agentId, r.agentName].filter(Boolean)) (people.get(norm(key)) || []).forEach((row) => found.add(row));
+      return [...found];
+    };
+    const count = (list, fn) => U.sum((fn ? list.filter(fn) : list), (x) => Number(x.n) || 1);
     const monthSummary = G.summary(currentYm);
-    const lastDay = monthSummary.lastDay || latest.getDate();
+    const lastDay = monthSummary.lastDay || now.getDate();
     const expected = (n) => lastDay ? Math.max(n, Math.round((n / lastDay) * U.daysInMonth(currentYm))) : n;
-    const todayKey = U.dateKey(latest);
+    const todayKey = U.dateKey(now);
     return report.map((r) => {
-      const cur = match(r) || { total: 0, vc4: 0, vc20: 0, vc5p: 0, comm: 0, byClass: {}, replacement: 0 };
-      const prev = matchPrev(r) || { total: 0, vc4: 0, vc20: 0, vc5p: 0, comm: 0, byClass: {} };
-      const currentRows = rowsFor(r, currentYm), lastRows = rowsFor(r, previousYm), todayRows = dayRowsFor(r, todayKey);
+      const cur = match(curMap, r) || { total: 0, vc4: 0, vc20: 0, vc5p: 0, comm: 0, byClass: {}, replacement: 0 };
+      const prev = match(prevMap, r) || { total: 0, vc4: 0, vc20: 0, vc5p: 0, comm: 0, byClass: {} };
+      const currentRows = rowsFor(monthIndex, currentYm, r), lastRows = rowsFor(monthIndex, previousYm, r), todayRows = rowsFor(dayIndex, todayKey, r);
+      const eirToday = count(todayRows);
+      // GV REPORT's own Today Issued is a recovery source when EIR has not yet exposed that
+      // agent's live day row; EIR stays authoritative whenever its count is present.
+      const todayIssued = eirToday || Number(r.todayIssued) || 0;
       const curDays = new Set(currentRows.map((x) => U.dateKey(x.date || x.d)).filter(Boolean)).size;
       const lastDays = new Set(lastRows.map((x) => U.dateKey(x.date || x.d)).filter(Boolean)).size;
       const curChassis = count(currentRows, (x) => /chassis/i.test(x.tagType || x.vrnType || ''));
@@ -529,7 +566,7 @@ FF.pages = FF.pages || {};
       return { ...r,
         lastDays, lastVc4: prev.vc4 || 0, lastComm: prev.comm || 0, lastTotal: prev.total || 0, lastByClass,
         curDays, replace: curReplace, chassis: curChassis, curVc4: cur.vc4 || 0, curComm: cur.comm || 0, curTotal: cur.total || 0, curByClass,
-        todayIssued: count(todayRows), expected: expected(cur.total || 0),
+        todayIssued, todayIssuedSource: eirToday ? 'EIR' : (todayIssued ? 'GV REPORT' : 'EIR + GV REPORT'), expected: expected(cur.total || 0),
         runrateVc4: lastDay ? (cur.vc4 || 0) / lastDay : 0, runrateComm: lastDay ? (cur.comm || 0) / lastDay : 0,
         runrate: lastDay ? (cur.total || 0) / lastDay : 0, growth: U.growth(cur.total || 0, prev.total || 0),
         tlLastVc4: tlPrev.vc4 || 0, tlLastComm: tlPrev.comm || 0, tlLastTotal: tlPrev.total || 0,
@@ -564,8 +601,7 @@ FF.pages = FF.pages || {};
   }
 
   function gvTodayClassBreakdown(agent) {
-    const latest = G.latestDate && G.latestDate();
-    const today = U.dateKey(latest || new Date());
+    const today = U.dateKey(new Date());
     const source = G.issuanceRows ? G.issuanceRows() : [];
     const rows = source.filter((r) => r.date && U.dateKey(r.date) === today
       && ((agent.agentId && r.agentId && norm(r.agentId) === norm(agent.agentId)) || norm(r.agentName) === norm(agent.agentName)));
@@ -583,19 +619,21 @@ FF.pages = FF.pages || {};
     }
     const total = [...byClass.values()].reduce((n, v) => n + v.total, 0);
     if (!byClass.size) return `<div class="dsec"><h4>🏅 EIR source-date class-wise tags · ${esc(today)}</h4><p class="dim small">EIR me is GV agent ke liye source date par koi issuance row nahi mili.</p></div>`;
-    const rowsHtml = [...byClass.entries()].sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true })).map(([cls, v]) => `<tr><td><b>${esc(cls)}</b></td><td class="num"><b>${U.fmt(v.total)}</b></td><td class="num">${U.fmt(v.issuance)}</td><td class="num">${U.fmt(v.replacement)}</td><td>${[...v.detail.entries()].sort((a, b) => b[1] - a[1]).map(([label, n]) => `<span class="today-tag-detail">${esc(label)} · <b>${U.fmt(n)}</b></span>`).join(' ')}</td></tr>`).join('');
+    const rowsHtml = [...byClass.entries()].sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true })).map(([cls, v]) => `<tr class="clickable" ${drillAttr({ src: 'gv', scope: 'day', date: today, agent: agent.agentName, agentId: agent.agentId || '', channel: 'gv', cls })}><td><b>${esc(cls)}</b></td><td class="num"><b>${U.fmt(v.total)}</b></td><td class="num">${U.fmt(v.issuance)}</td><td class="num">${U.fmt(v.replacement)}</td><td>${[...v.detail.entries()].sort((a, b) => b[1] - a[1]).map(([label, n]) => `<span class="today-tag-detail">${esc(label)} · <b>${U.fmt(n)}</b></span>`).join(' ')}</td></tr>`).join('');
     return `<div class="dsec"><h4>🏅 EIR source-date class-wise tags · ${esc(today)} <span class="count green">${U.fmt(total)}</span></h4><div class="table-wrap"><table class="tbl compact"><thead><tr><th>Class</th><th class="num">Tags</th><th class="num">Issuance</th><th class="num">Replacement</th><th>Tag type</th></tr></thead><tbody>${rowsHtml}</tbody></table></div></div>`;
   }
   async function agentDrawer(r) {
     await G.need('master').catch(() => []);
+    const currentYm = U.ymKey(new Date()), previousYm = U.prevMonthKey(currentYm);
+    const profileDrill = (scope, ym) => ({ scope, ym: ym || '', agent: r.agentName, agentId: r.agentId || '', channel: 'gv' });
     const clsRows = Object.entries(r.curByClass).filter(([, v]) => v > 0);
     const stockRows = Object.entries(r.stockByClass).filter(([, v]) => v > 0);
     const body = `
-      <div class="grid g-3">${miniKpi('Stock (total)', U.fmt(r.stockTotal), `VC4 ${U.fmt(r.stockVc4)} · Comm ${U.fmt(r.stockComm)}`)}${miniKpi('MTD issuance', U.fmt(r.curTotal), `VC4 ${U.fmt(r.curVc4)} · Comm ${U.fmt(r.curComm)}`, 'g3')}${miniKpi('Last month', U.fmt(r.lastTotal), `VC4 ${U.fmt(r.lastVc4)} · Comm ${U.fmt(r.lastComm)}`)}</div>
-      <div class="grid g-3" style="margin-top:10px">${miniKpi('Growth', U.deltaHtml(r.growth, { decimals: 0 }), `Today: ${U.fmt(r.todayIssued)}`)}${miniKpi('Active days (MTD)', U.fmt(r.curDays), `Last month: ${U.fmt(r.lastDays)}`)}${miniKpi('Runrate', U.fmt(r.runrate), `VC4 ${U.fmt(r.runrateVc4)} · Comm ${U.fmt(r.runrateComm)}`)}</div>
+      <div class="grid g-3">${miniKpi('Stock (total)', U.fmt(r.stockTotal), `VC4 ${U.fmt(r.stockVc4)} · Comm ${U.fmt(r.stockComm)}`, '', { scope: 'stock', agent: r.agentName, agentId: r.agentId || '', channel: 'gv' })}${miniKpi('MTD issuance', U.fmt(r.curTotal), `VC4 ${U.fmt(r.curVc4)} · Comm ${U.fmt(r.curComm)}`, 'g3', profileDrill('mtd', currentYm))}${miniKpi('Last month', U.fmt(r.lastTotal), `VC4 ${U.fmt(r.lastVc4)} · Comm ${U.fmt(r.lastComm)}`, '', profileDrill('month', previousYm))}</div>
+      <div class="grid g-3" style="margin-top:10px">${miniKpi('Growth', U.deltaHtml(r.growth, { decimals: 0 }), `Today: ${U.fmt(r.todayIssued)}`, '', profileDrill('mtd', currentYm))}${miniKpi('Active days (MTD)', U.fmt(r.curDays), `Last month: ${U.fmt(r.lastDays)}`, '', profileDrill('mtd', currentYm))}${miniKpi('Runrate', U.fmt(r.runrate), `VC4 ${U.fmt(r.runrateVc4)} · Comm ${U.fmt(r.runrateComm)}`, '', profileDrill('mtd', currentYm))}</div>
       <div class="grid g-2" style="margin-top:12px">
-        <div>${card('🚗 MTD class split', clsRows.length ? C.bars({ labels: clsRows.map(([k]) => k), height: 180, series: [{ name: 'Issued', values: clsRows.map(([, v]) => v), color: '#0d9488' }], showValues: true }) : '<div class="empty">MTD data nahi</div>')}</div>
-        <div>${card('📦 Stock by class', stockRows.length ? C.donut({ items: stockRows.map(([k, v]) => ({ label: k, value: v })), subtitle: 'stock' }) : '<div class="empty">Stock nahi</div>')}</div>
+        <div>${card('🚗 MTD class split', clsRows.length ? C.bars({ labels: clsRows.map(([k]) => k), height: 180, series: [{ name: 'Issued', values: clsRows.map(([, v]) => v), color: '#0d9488' }], showValues: true, onClickAttr: (i) => drillAttr({ src: 'gv', scope: 'mtd', ym: currentYm, agent: r.agentName, agentId: r.agentId || '', channel: 'gv', cls: clsRows[i][0] }) }) : '<div class="empty">MTD data nahi</div>')}</div>
+        <div>${card('📦 Stock by class', stockRows.length ? C.donut({ items: stockRows.map(([k, v]) => ({ label: k, value: v, attr: drillAttr({ src: 'gv', scope: 'stock', agent: r.agentName, agentId: r.agentId || '', channel: 'gv', cls: k }) })), subtitle: 'stock' }) : '<div class="empty">Stock nahi</div>')}</div>
       </div>
       ${gvTodayClassBreakdown(r)}
       ${card('📄 Full GV REPORT row', `<div class="table-wrap" style="max-height:340px"><table class="tbl compact"><thead><tr><th>#</th><th>Column</th><th>Value</th></tr></thead><tbody>${r.raw.map((v, i) => v === '' ? '' : `<tr><td class="dim">${U.colLetter(i)}</td><td>${esc((G.REPORT_COLS_LABELS && G.REPORT_COLS_LABELS[i]) || '')}</td><td>${esc(v)}</td></tr>`).join('')}</tbody></table></div>`)}
@@ -665,7 +703,7 @@ FF.pages = FF.pages || {};
       <td>${FF.config.isDirectAgent(r, 'gv') ? `<b class="direct-chip">🚫 ${esc(FF.config.directLabel(r, 'gv'))}</b>` : esc(r.tlName)}</td>
       <td class="num">${U.fmt(r.stockTotal)}</td><td class="num">${U.fmt(r.stockVc4)}</td><td class="num">${U.fmt(r.stockComm)}</td>
       <td class="num">${U.fmt(r.lastTotal)}</td><td class="num"><b>${U.fmt(r.curTotal)}</b></td><td class="num">${U.fmt(r.curVc4)}</td>
-      <td class="num">${U.deltaHtml(r.growth, { decimals: 0 })}</td><td class="num">${U.fmt(r.todayIssued)}</td><td class="num">${U.fmt(r.curDays)}</td>
+      <td class="num">${U.deltaHtml(r.growth, { decimals: 0 })}</td><td class="num" title="Today count source: ${esc(r.todayIssuedSource || 'GV REPORT / EIR')}">${U.fmt(r.todayIssued)}</td><td class="num">${U.fmt(r.curDays)}</td>
       <td class="num">${U.fmt(r.expected)}</td><td class="num">${U.fmt(r.runrate)}</td><td>${badge(r.priority)}</td><td>${badge(r.agentStatus)}</td></tr>`).join('');
     const alertList = list.filter((r) => /high|medium/i.test(r.priority || '') || /inactive/i.test(r.agentStatus || '') || Number(r.stockTotal) === 0 || Number(r.growth) < 0);
     const directCount = list.filter((r) => FF.config.isDirectAgent(r, 'gv')).length;

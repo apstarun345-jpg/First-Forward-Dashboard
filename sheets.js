@@ -173,15 +173,18 @@ FF.pages = FF.pages || {};
     }
     async function load() {
       try {
-        const [countT, firstT] = await Promise.all([
-          D.query(sheetTab, 'select count(A)', { fresh, range }).catch(() => null),
-          D.query(sheetTab, `select * limit ${state.pageSize}`, { fresh, range })
-        ]);
+        // Paint a real first page before waiting on Google's potentially slow full-sheet count.
+        const firstT = await D.query(sheetTab, `select * limit ${state.pageSize}`, { fresh, range });
         if (!root.isConnected) return;
         checkFallback(firstT);
+        state.probeCols = firstT.cols;
+        if (firstT.headers === 0) state.headerRows = detectHeaderRows(firstT.rows, firstT.cols);
+        renderTable(firstT, state.headerRows ? firstT.rows.slice(state.headerRows.length) : firstT.rows, firstT.rows.length);
+        modeEl.textContent = 'First page ready · sheet size check ho raha hai…';
+        const countT = await D.query(sheetTab, 'select count(A)', { fresh, range }).catch(() => null);
+        if (!root.isConnected) return;
         const total = countT && countT.rows[0] ? D.cellNumber(countT.rows[0][0]) : null;
         state.total = total;
-        state.probeCols = firstT.cols;
         if ((total !== null && total > FULL_LIMIT) || (total === null && firstT.rows.length >= state.pageSize)) {
           state.mode = 'paged';
           if (firstT.headers === 0) state.headerRows = detectHeaderRows(firstT.rows, firstT.cols);

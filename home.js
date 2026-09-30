@@ -1,10 +1,6 @@
-/* Home page v3 — workspace filters + FF T+1 lag (GV live) + progressive paint.
-   ---------------------------------------------------------------------------------------------
-   • Workspace filter bar (period / month / channel / TL / agent / class) ka asar yahan POORA hota hai
-     (pehle Home par bilkul nahi hota tha — bar badalne par page waisa hi rehta tha).
-   • FF (EIR) issuance T+1 hai → aaj GV ka live count dikhta hai aur FF = 0 with a clear note.
-     Kal (yesterday) par GV + FF dono.
-   • Koi bhi card/KPI click → FF.kpiDetail wide drawer (agent-wise "kisne lagaye", GV ya FF). */
+/* Home page — source-aware FF T+1 (GV live) summaries + progressive paint.
+   • GV issuance stays live; First Forward EIR issuance is reported T+1.
+   • KPI click opens the complete agent/class/tag drill-down. */
 window.FF = window.FF || {};
 FF.pages = FF.pages || {};
 (function (FF) {
@@ -22,7 +18,7 @@ FF.pages = FF.pages || {};
   const kpi = (cls, title, icon, value, foot, spec) => `<div class="kpi ${cls}"${spec ? ` data-kpi="${esc(spec)}"` : ''} data-kpi-title="${esc(title)}"><div class="kpi-top"><span class="kpi-title">${esc(title)}</span><span class="kpi-icon">${icon}</span></div><div class="kpi-value">${value}</div><div class="kpi-foot">${foot || ''}</div></div>`;
   const card = (title, body, right) => `<section class="card"><div class="card-head"><h3>${title}</h3>${right ? `<div class="card-right">${right}</div>` : ''}</div><div class="card-body">${body}</section>`;
 
-  /** Filter selectors — workspace filters ka resolved version (app.js bar ke saath ek hi source). */
+  /** Read this page's own URL filters; no cross-page saved filter state is applied. */
   function fx() { return (FF.filters ? FF.filters.current() : { period: 'month', from: '', to: '', channel: '', tl: '', agent: '', cls: '', active: [], isDefault: true, label: '', month: '' }); }
   /** daily rows → filter-aware streams. */
   function streams(daily) {
@@ -71,7 +67,6 @@ FF.pages = FF.pages || {};
           <a class="btn" href="#/tagIssued">🏷️ Tag Issued →</a>
         </div>
       </div>
-      <div class="lf-banner" id="home-filter-banner"><b>🧭 Filters:</b>${FF.filters ? FF.filters.chips(f) : ''}${f.isDefault ? '<span class="dim small">Workspace filter bar se period / channel / TL / agent chuno — poora Home usi hisaab se banega.</span>' : '<a class="btn small" href="#/home" data-global-filter-clear>↺ Reset filters</a>'}</div>
       <div id="home-search"></div>
       <div id="today-glance" class="today-glance" aria-live="polite"></div>
       <div id="home-gv-live"></div>
@@ -353,7 +348,7 @@ FF.pages = FF.pages || {};
         ffVals.push(U.sum(st.ff.filter((r) => r.key === key), (r) => r.n));
         gvVals.push(U.sum(st.gv.filter((r) => r.key === key), (r) => r.n));
       }
-      cards.push(card('📈 Last 14 Days Trend <span class="dim">FF (T+1) vs GV (live) · workspace filters ke saath</span>', C.lines({
+      cards.push(card('📈 Last 14 Days Trend <span class="dim">FF (T+1) vs GV (live) · current month</span>', C.lines({
         labels: days,
         height: 230,
         series: [

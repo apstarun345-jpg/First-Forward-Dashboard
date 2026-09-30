@@ -54,74 +54,26 @@ window.FF = window.FF || {};
   const pageDef = (id) => PAGES.find((p) => p.id === id) || null;
   let current = { page: '', params: {}, token: 0 };
 
-  // ---- shared workspace controls: universal filters, focus mode, accessibility -------------------
-  const FILTER_PAGES = new Set(['home', 'executive', 'tagIssued', 'rangeReport', 'dashboard', 'trend', 'performance', 'stock', 'stockReport', 'ffCommission', 'gvDashboard', 'gvTrend', 'gvPerformance', 'gvStock', 'gvStockReport', 'gvCommission', 'dualChannel', 'compare', 'charts', 'forecast', 'dataQuality', 'dispatchPlan', 'tlScorecard', 'masterStock', 'fastagChampions', 'stockRadar']);
+  // ---- shared shell state -------------------------------------------------------------------------
   const readLocalJson = (key, fallback) => { try { const v = JSON.parse(localStorage.getItem(key) || 'null'); return v && typeof v === 'object' ? v : fallback; } catch { return fallback; } };
   const writeLocalJson = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* private mode */ } };
-  let globalFilters = readLocalJson('ff_global_filters', { period: 'month', channel: '', tl: '', agent: '', cls: '' });
+  // Shared cross-page workspace filters were removed: each report now owns its own filters.
+  // Clear any old saved filter snapshot so it cannot silently constrain data after an upgrade.
   function currentFilterValues() {
-    const period = current.params.period || globalFilters.period || 'month';
-    return { ...globalFilters, period, month: current.params.month || globalFilters.month || periodDates(period).month || '', ...Object.fromEntries(['channel', 'tl', 'agent', 'cls'].filter((k) => current.params[k] !== undefined).map((k) => [k, current.params[k]])) };
+    const params = current.params || {};
+    return {
+      period: params.period || 'month', month: params.month || '',
+      channel: params.channel || params.ch || '', tl: params.tl || '', agent: params.agent || '', cls: params.cls || ''
+    };
   }
-  function syncGlobalFilterState(patch) { globalFilters = { ...globalFilters, ...patch }; writeLocalJson('ff_global_filters', globalFilters); }
   function clearGlobalFilters() {
-    globalFilters = { period: 'month', channel: '', tl: '', agent: '', cls: '', month: '' };
-    writeLocalJson('ff_global_filters', globalFilters);
-    // Reset har page par saaf kare — from/to/date bhi, warna pichhli page ka date chipka reh jaata tha.
-    const patch = { period: '', channel: '', ch: '', tl: '', agent: '', cls: '', month: '', from: '', to: '', date: '' };
-    updateParams(patch);
-  }
-  function periodDates(period) {
-    const now = new Date();
-    const pad = (n) => String(n).padStart(2, '0');
-    const key = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-    if (period === 'today') return { from: key(now), to: key(now) };
-    if (period === 'yesterday') { const d = new Date(now); d.setDate(d.getDate() - 1); return { from: key(d), to: key(d) }; }
-    if (period === 'week') { const d = new Date(now); d.setDate(d.getDate() - 6); return { from: key(d), to: key(now) }; }
-    if (period === 'lastMonth') { const d = new Date(now.getFullYear(), now.getMonth(), 0); return { month: `${d.getFullYear()}-${pad(d.getMonth() + 1)}` }; }
-    if (period === 'all') return {};
-    return { month: `${now.getFullYear()}-${pad(now.getMonth() + 1)}` };
-  }
-  function globalFilterPatch(field, value) {
-    const patch = {};
-    if (field === 'channel') {
-      syncGlobalFilterState({ channel: value });
-      if (current.page === 'trend' || current.page === 'gvTrend') patch.ch = value;
-      else patch.channel = value;
-    } else if (field === 'cls') { syncGlobalFilterState({ cls: value }); patch.cls = value; }
-    else if (field === 'tl' || field === 'agent') {
-      syncGlobalFilterState({ [field]: value, ...(field === 'tl' ? { agent: '' } : { tl: '' }) });
-      patch[field] = value; patch[field === 'tl' ? 'agent' : 'tl'] = '';
-    } else if (field === 'month') {
-      syncGlobalFilterState({ period: 'month', month: value });
-      Object.assign(patch, { from: '', to: '', date: '', month: value, period: 'month' });
-    } else if (field === 'period') {
-      syncGlobalFilterState({ period: value, month: periodDates(value).month || '' });
-      const dates = periodDates(value);
-      Object.assign(patch, { from: '', to: '', date: '', month: '', period: value }, dates);
-    }
-    return patch;
+    try { localStorage.removeItem('ff_global_filters'); } catch { /* private mode */ }
+    updateParams({ period: '', channel: '', ch: '', tl: '', agent: '', cls: '', month: '', from: '', to: '', date: '' });
   }
   function renderGlobalFilters() {
     const bar = U.$('#global-filter-bar');
-    if (!bar || !FF.auth.user) return;
-    if (!FILTER_PAGES.has(current.page) || (FF.config.feat && FF.config.feat('universalFilters') === false)) { bar.hidden = true; bar.innerHTML = ''; return; }
-    const f = (FF.filters ? FF.filters.current() : currentFilterValues());
-    const period = f.period || 'month';
-    bar.hidden = false;
-    bar.innerHTML = `<div class="global-filter-label"><span>⌕</span><b>Workspace filters</b><small>${f.isDefault ? 'saved across pages' : `${f.active.length} active`}</small></div>
-      <label><span>Period</span><select data-global-filter="period" aria-label="Shared date period"><option value="today" ${period === 'today' ? 'selected' : ''}>Today</option><option value="yesterday" ${period === 'yesterday' ? 'selected' : ''}>Yesterday</option><option value="week" ${period === 'week' ? 'selected' : ''}>Last 7 days</option><option value="month" ${period === 'month' ? 'selected' : ''}>This month</option><option value="lastMonth" ${period === 'lastMonth' ? 'selected' : ''}>Last month</option><option value="all" ${period === 'all' ? 'selected' : ''}>All available</option></select></label>
-      <label><span>Month</span><input type="month" data-global-filter="month" aria-label="Shared month filter" value="${esc(f.month || '')}"></label>
-      <label><span>Channel</span><select data-global-filter="channel" aria-label="Shared channel filter"><option value="" ${!f.channel ? 'selected' : ''}>FF + GV</option><option value="ff" ${f.channel === 'ff' ? 'selected' : ''}>First Forward</option><option value="gv" ${f.channel === 'gv' ? 'selected' : ''}>GV Partner</option></select></label>
-      <label class="global-filter-search"><span>TL</span><input data-global-filter="tl" data-global-live="1" aria-label="Shared TL filter" placeholder="All TLs" value="${esc(f.tl || '')}"></label>
-      <label class="global-filter-search"><span>Agent</span><input data-global-filter="agent" data-global-live="1" aria-label="Shared agent filter" placeholder="All agents" value="${esc(f.agent || '')}"></label>
-      <label><span>Class</span><select data-global-filter="cls" aria-label="Shared class filter"><option value="" ${!f.cls ? 'selected' : ''}>All classes</option><option value="VC4" ${f.cls === 'VC4' ? 'selected' : ''}>VC4</option><option value="VC20" ${f.cls === 'VC20' ? 'selected' : ''}>VC20</option><option value="VC5+" ${f.cls === 'VC5+' ? 'selected' : ''}>VC5+</option></select></label>
-      <div class="global-filter-acts"><button type="button" class="btn small" data-global-filter-set="today">Aaj</button><button type="button" class="btn small" data-global-filter-set="yesterday">Kal</button><button type="button" class="btn small global-filter-clear" data-global-filter-clear aria-label="Clear shared filters">Reset</button></div>
-      <div class="global-filter-state" aria-live="polite">
-        <div class="lf-chips">${FF.filters ? FF.filters.chips(f) : ''}</div>
-        ${FF.filters ? FF.filters.lagNote(f) : ''}
-        ${navigator.onLine === false ? '<span class="lf-offline">📴 Offline snapshot</span>' : ''}
-      </div>`;
+    if (bar) { bar.hidden = true; bar.replaceChildren(); }
+    try { localStorage.removeItem('ff_global_filters'); } catch { /* private mode */ }
   }
   function renderMobileNav() {
     const nav = U.$('#mobile-nav');
@@ -164,10 +116,10 @@ window.FF = window.FF || {};
     try { if (localStorage.getItem('ff_onboarding_seen') === '1') return; localStorage.setItem('ff_onboarding_seen', '1'); } catch { return; }
     setTimeout(() => {
       if (U.$('#onboarding-tour') || !document.body.classList.contains('ready')) return;
-      const tour = U.h(`<div class="onboarding-backdrop" id="onboarding-tour" role="dialog" aria-modal="true" aria-labelledby="tour-title"><section class="onboarding-card"><div class="tour-kicker">FIRST FORWARD · QUICK TOUR</div><h2 id="tour-title">Your command center is ready</h2><p id="tour-copy">Use the sidebar for pages, the universal filters for shared date, channel, TL, agent and class context, and <kbd>Ctrl</kbd> <kbd>K</kbd> to search or run commands.</p><div class="tour-progress" id="tour-progress">1 / 4</div><div class="onboarding-actions"><button class="btn" data-tour-skip>Skip</button><button class="btn primary" data-tour-next>Next →</button></div></section></div>`);
+      const tour = U.h(`<div class="onboarding-backdrop" id="onboarding-tour" role="dialog" aria-modal="true" aria-labelledby="tour-title"><section class="onboarding-card"><div class="tour-kicker">FIRST FORWARD · QUICK TOUR</div><h2 id="tour-title">Your command center is ready</h2><p id="tour-copy">Use the sidebar for pages, each report’s own filters for its data, and <kbd>Ctrl</kbd> <kbd>K</kbd> to search or run commands.</p><div class="tour-progress" id="tour-progress">1 / 4</div><div class="onboarding-actions"><button class="btn" data-tour-skip>Skip</button><button class="btn primary" data-tour-next>Next →</button></div></section></div>`);
       document.body.appendChild(tour);
       const steps = [
-        ['Navigation + filters', 'Sidebar groups your management, FF, GV and cross-channel work. The filter bar keeps a shared context across compatible pages.'],
+        ['Navigation + reports', 'Sidebar groups your management, FF, GV and cross-channel work. Report filters stay local to the report you are viewing.'],
         ['Search + export', 'Press Ctrl / ⌘ + K for pages, agents, TLs, tags and calculations. Table toolbars provide density, columns and CSV export.'],
         ['Notifications + offline', 'The bell shows unread alerts and actions. The status dot tells you when the last snapshot is available; offline mode keeps the last known data.'],
         ['Personalise your workspace', 'Use 🎯 Focus mode for management screens, ♿ Accessibility mode for readable contrast and text, 🎨 theme packs, and Settings for profiles.']
@@ -938,7 +890,7 @@ window.FF = window.FF || {};
       if (e.target.closest('#user-menu a')) toggleUserMenu(false);
       // `.kpi` ya `[data-kpi]` — dono clickable hain (Home ke glance tiles bhi data-kpi use karte hain).
       const kpi = e.target.closest('.kpi, [data-kpi]');
-      if (kpi && !e.target.closest('a,button:not(.kpi)') && !kpi.closest('#drawer')) {
+      if (kpi && !e.target.closest('a,button:not(.kpi)')) {
         if (FF.kpiDetail) { FF.kpiDetail.open(kpi); return; }
         const title = kpi.dataset.kpiTitle || U.$('.kpi-title', kpi)?.textContent || 'KPI summary';
         const value = kpi.dataset.kpiValue || U.$('.kpi-value', kpi)?.innerText || '—';
@@ -973,39 +925,8 @@ window.FF = window.FF || {};
       if (drawerLink) closeDrawer();
     });
     document.addEventListener('change', (e) => {
-      const global = e.target.closest('[data-global-filter]');
-      if (global) {
-        const field = global.dataset.globalFilter;
-        const patch = globalFilterPatch(field, global.value);
-        updateParams(patch);
-        return;
-      }
       const el = e.target.closest('select[data-param], input[data-param]');
       if (el) updateParams({ [el.dataset.param]: el.value, ...(el.dataset.param === 'tl' ? { agent: '' } : {}), ...(el.dataset.param === 'agent' ? { tl: '' } : {}) });
-    });
-    // TL / Agent search boxes par type karte hi (debounced) filter apply ho — blur ka intezaar nahi.
-    const liveFilter = U.debounce((el) => {
-      if (!el || !el.isConnected) return;
-      const stored = (FF.app.globalFilters || {})[el.dataset.globalFilter] || '';
-      if (String(el.value || '') === String(stored || '')) return;
-      updateParams(globalFilterPatch(el.dataset.globalFilter, el.value));
-    }, 550);
-    document.addEventListener('input', (e) => {
-      const el = e.target.closest('[data-global-live]');
-      if (el) liveFilter(el);
-    });
-    // Aaj / Kal quick buttons — workspace filter bar ke shortcuts.
-    document.addEventListener('click', (e) => {
-      const quick = e.target.closest('[data-global-filter-set]');
-      if (quick) {
-        e.preventDefault();
-        const value = quick.dataset.globalFilterSet;
-        const patch = globalFilterPatch('period', value);
-        updateParams(patch);
-        U.toast(value === 'today'
-          ? '🟩 Aaj — GV live, FF kal aayega (T+1)'
-          : '📅 Kal — GV + FF dono', 'ok');
-      }
     });
     FF.store.on((ev, detail) => { if (ev === 'progress' || ev === 'start' || ev === 'done') updateStatus(detail); });
     // periodic install btn check
@@ -1172,6 +1093,6 @@ window.FF = window.FF || {};
     setLang(next);
   }
 
-  FF.app = { storageBanner, pushBanner, liveShareChip, navigate, updateParams, clearGlobalFilters, refresh, openDrawer, closeDrawer, renderSidebar, renderCurrent, renderTopUser, updateStatus, onLogin, onBackgroundDataUpdated, promptInstall, enhanceCharts, enhanceTables, themeMode, toggleThemeMode, lang, setLang, toggleLangMenu, renderGlobalFilters, renderMobileNav, focusMode: updateFocusMode, openAccessibility: renderA11yPanel, tableDensity, setTableDensity, PAGES, refreshPendingBadge, setPendingSignups, shareWhatsApp, checkVersion, exportCSV: () => exportCurrentCsv('csv'), exportXLSX: () => exportCurrentCsv('xlsx'), toggleTheme: toggleThemeMode, toggleLang: toggleLangQuick, get pendingSignups() { return pendingSignups; }, get current() { return current; }, get globalFilters() { return { ...globalFilters }; }, currentFilters: () => (FF.filters ? FF.filters.current() : currentFilterValues()) };
+  FF.app = { storageBanner, pushBanner, liveShareChip, navigate, updateParams, clearGlobalFilters, refresh, openDrawer, closeDrawer, renderSidebar, renderCurrent, renderTopUser, updateStatus, onLogin, onBackgroundDataUpdated, promptInstall, enhanceCharts, enhanceTables, themeMode, toggleThemeMode, lang, setLang, toggleLangMenu, renderGlobalFilters, renderMobileNav, focusMode: updateFocusMode, openAccessibility: renderA11yPanel, tableDensity, setTableDensity, PAGES, refreshPendingBadge, setPendingSignups, shareWhatsApp, checkVersion, exportCSV: () => exportCurrentCsv('csv'), exportXLSX: () => exportCurrentCsv('xlsx'), toggleTheme: toggleThemeMode, toggleLang: toggleLangQuick, get pendingSignups() { return pendingSignups; }, get current() { return current; }, currentFilters: () => (FF.filters ? FF.filters.current() : currentFilterValues()) };
   document.addEventListener('DOMContentLoaded', init);
 })(window.FF);

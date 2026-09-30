@@ -142,7 +142,7 @@ test('dataset need resolves without unrelated slow queries, fresh sync is single
   assert.equal(store.get('stock'), undefined, 'late response cannot repopulate reset store');
 });
 
-test('permitted sheets warm immediately alongside core data; large/failed counts do not trigger unbounded download', async () => {
+test('raw sheets stay lazy so login does not spend requests warming every permitted tab', async () => {
   const core = deferred(); const calls = []; let clears = 0;
   const context = vm.createContext({ window: { FF: {
     config: { allTabs: () => [{ id: 'large' }, { id: 'small' }, { id: 'unknown' }, { id: 'denied' }] },
@@ -158,12 +158,9 @@ test('permitted sheets warm immediately alongside core data; large/failed counts
   const pre = context.window.FF.preloader;
   const ready = pre.preloadAll();
   await tick();
-  assert.ok(calls.some(c => c.sheet === 'large'));
-  assert.equal(pre.running, true, 'core still pending but sheets already loading');
-  assert.ok(calls.some(c => c.sheet === 'small' && c.tq === ''));
-  assert.ok(!calls.some(c => ['large', 'unknown'].includes(c.sheet) && c.tq === ''));
-  assert.ok(!calls.some(c => c.sheet === 'denied'));
-  assert.ok(calls.every(c => c.opts.fresh === false));
+  assert.equal(calls.length, 0, 'raw tabs are loaded only when opened');
+  assert.equal(pre.running, true, 'core aggregate preload is still pending');
+  assert.equal(pre.state.progress.total, 1, 'only the core data store is scheduled');
   core.resolve(); await ready;
   assert.equal(pre.done, true); assert.equal(clears, 0);
 });

@@ -59,7 +59,12 @@ window.FF = window.FF || {};
       if (!d || !n) continue;
       const cls = normClass(D.cellText(r[1]));
       const channel = channelOf(D.cellText(r[4]), D.cellText(r[5]));
-      const agentId = U.clean(D.cellText(r[7])) || U.clean(D.cellText(r[9]));
+      const ffAgentId = U.clean(D.cellText(r[7]));
+      const gvAgentId = U.clean(D.cellText(r[9]));
+      // GV REPORT's AGENT_ID is the GV-specific ID (EIR GV_ID / AW), not necessarily the
+      // First Forward agent ID (J). Use the channel's canonical ID first so GV daily issuance
+      // joins correctly to GV REPORT, stock and drawer rows even when both IDs are populated.
+      const agentId = channel === 'GV Partner' ? (gvAgentId || ffAgentId) : (ffAgentId || gvAgentId);
       const agentName = U.clean(channel === 'GV Partner' ? (D.cellText(r[10]) || D.cellText(r[8])) : (D.cellText(r[8]) || D.cellText(r[10])));
       rows.push({
         key: U.dateKey(d), d, date: d, ym: U.ymKey(d), day: d.getDate(), cls, group: classGroup(cls),
@@ -82,19 +87,20 @@ window.FF = window.FF || {};
       const date = D.cellDate(r[4]);
       const n = D.cellNumber(r[11]);
       if (!date || !n) continue;
-      const agentId = U.clean(D.cellText(r[0]));
-      const agentName = U.clean(D.cellText(r[1]));
+      const ffAgentId = U.clean(D.cellText(r[0]));
+      const ffAgentName = U.clean(D.cellText(r[1]));
       const gvId = U.clean(D.cellText(r[2]));
       const gvName = U.clean(D.cellText(r[3]));
-      const name = agentName || gvName || agentId || gvId;
-      if (!name) continue;
       const tlId = U.clean(D.cellText(r[9]));
       const rawTlName = U.clean(D.cellText(r[10]));
       const masterId = U.clean(D.cellText(r[8]));
-      const cls = normClass(D.cellText(r[5]));
       const channel = channelOf(masterId, rawTlName);
+      const agentId = channel === 'GV Partner' ? (gvId || ffAgentId) : (ffAgentId || gvId);
+      const name = channel === 'GV Partner' ? (gvName || ffAgentName || agentId) : (ffAgentName || gvName || agentId);
+      if (!name) continue;
+      const cls = normClass(D.cellText(r[5]));
       rows.push({
-        id: agentId || gvId, agentId: agentId || gvId, name, agentName: name,
+        id: agentId, agentId, name, agentName: name,
         gvId, gvName, key: `${channel}|${agentId || gvId}|${name}`,
         channel, tlId, tlName: rawTlName || (tlId ? `TL ${tlId}` : 'Direct'),
         date, dateKey: U.dateKey(date), cls, group: classGroup(cls),
@@ -114,12 +120,12 @@ window.FF = window.FF || {};
     for (const r of t.rows) {
       const y = D.cellNumber(r[7]), m = D.cellNumber(r[8]), n = D.cellNumber(r[9]);
       if (y === null || m === null || !n) continue;
-      const agentId = D.cellText(r[0]), agentName = D.cellText(r[1]);
-      const gvId = D.cellText(r[2]), gvName = D.cellText(r[3]);
+      const agentId = U.clean(D.cellText(r[0])), agentName = U.clean(D.cellText(r[1]));
+      const gvId = U.clean(D.cellText(r[2])), gvName = U.clean(D.cellText(r[3]));
       const tlName = D.cellText(r[5]);
       const channel = channelOf(D.cellText(r[6]), tlName);
-      const id = agentId || gvId;
-      const name = agentName || gvName || (id ? `Agent ${id}` : 'Unknown');
+      const id = channel === 'GV Partner' ? (gvId || agentId) : (agentId || gvId);
+      const name = channel === 'GV Partner' ? (gvName || agentName || (id ? `Agent ${id}` : 'Unknown')) : (agentName || gvName || (id ? `Agent ${id}` : 'Unknown'));
       rows.push({ id, name, key: `${channel}|${id}|${name}`, channel, tlId: D.cellText(r[4]), tlName: tlName || '—', gvId, gvName, ym: `${y}-${U.pad2(m + 1)}`, n });
     }
     return rows;

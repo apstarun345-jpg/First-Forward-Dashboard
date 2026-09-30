@@ -1,23 +1,11 @@
-/* 🧭 Workspace filters + 🔁 FF issuance lag (GV live) — ONE shared resolver for every page.
-   ---------------------------------------------------------------------------------------------
-   Do cheezein yahan centralise hoti hain:
-
-   1) Workspace filter bar (app.js) → period / month / channel / TL / agent / class.
-      Pehle ye sirf URL params likhta tha aur bahut si pages unhe padhti hi nahi thi (Home par to
-      bilkul hi asar nahi hota tha). Ab har page `FF.filters` se wahi filters uthata hai — isliye
-      bar ka asar har jagah ek jaisa hai.
-
-   2) FF (First Forward, EIR) issuance T+1 hai — aaj ka data kal aata hai. GV Partner (EIR me
-      master ID 5845036 wali rows) live chalta hai. Isliye:
-        • TODAY  → GV live count, FF = 0 (aur saaf note "FF data T+1 · kal aayega")
-        • YESTERDAY → GV + FF dono
-      Lag configurable hai: FF.config.ffIssuanceLagDays (default 1, 0 = purana behaviour).
-      GV rows kabhi lag se nahi hatti — wo live hi rehti hain. */
+/* 🔁 FF issuance lag (GV live) + page-local date filters.
+   First Forward (EIR) issuance is T+1; GV Partner rows (master ID 5845036) stay live.
+   Date/channel/TL/agent/class constraints are read only from the current page URL, never from
+   persisted cross-page workspace state. */
 window.FF = window.FF || {};
 (function (FF) {
   'use strict';
   const U = FF.util;
-  const SS_KEY = 'ff_global_filters';
   const DEFAULTS = { period: 'month', channel: '', tl: '', agent: '', cls: '', month: '' };
   const PERIODS = ['today', 'yesterday', 'week', 'month', 'lastMonth', 'all'];
 
@@ -52,11 +40,7 @@ window.FF = window.FF || {};
   /** Kya ye date FF ke liye abhi reported nahi hai? */
   const isFfPending = (key) => ffLagOn() && !!key && String(key) > ffReportedThrough();
 
-  // ---- 🧭 workspace filter resolution -----------------------------------------------------------
-  function readStored() {
-    try { const v = JSON.parse(localStorage.getItem(SS_KEY) || 'null'); return v && typeof v === 'object' ? v : {}; }
-    catch { return {}; }
-  }
+  // ---- page-local filter resolution ---------------------------------------------------------------
   function periodDates(period) {
     const now = new Date();
     const key = (d) => U.dateKey(d);
@@ -67,16 +51,15 @@ window.FF = window.FF || {};
     if (period === 'all') return {};
     return { month: `${now.getFullYear()}-${U.pad2(now.getMonth() + 1)}` };
   }
-  /** Resolved filter set: URL params jeette hain, warna localStorage wale workspace filters. */
+  /** Only explicit page/link URL params are accepted; old localStorage filter state is ignored. */
   function current() {
-    const stored = { ...DEFAULTS, ...readStored() };
     const params = (FF.app && FF.app.current && FF.app.current.params) || {};
-    const period = PERIODS.includes(String(params.period)) ? String(params.period) : (stored.period || 'month');
-    const month = params.month || stored.month || periodDates(period).month || '';
-    const pick = (k) => (params[k] !== undefined ? params[k] : (stored[k] || ''));
+    const period = PERIODS.includes(String(params.period)) ? String(params.period) : DEFAULTS.period;
+    const month = params.month || periodDates(period).month || '';
+    const pick = (k) => (params[k] !== undefined ? params[k] : '');
     const f = {
       period, month,
-      channel: pick('channel') || '',
+      channel: pick('channel') || pick('ch') || '',
       tl: pick('tl') || '',
       agent: pick('agent') || '',
       cls: pick('cls') || '',
@@ -141,20 +124,20 @@ window.FF = window.FF || {};
     if (src === 'ff' && gv) return false;
     if (src === 'gv' && !gv) return false;
     if (!inRange(rowKey(r), f)) return false;
-    if (!gv && !ffVisible(r)) return false;                 // 🔁 FF T+1 — GV par kabhi lag nahi
+    if (!gv && !ffVisible(r)) return false;
     if (!classHit(r, f.cls)) return false;
     if (f.tl && !nameHit(r.tlName || r.tl || '', f.tl)) return false;
     if (f.agent && !(nameHit(r.agentName || r.name || '', f.agent) || nameHit(r.agentId || r.id || '', f.agent))) return false;
     return true;
   }
-  /** Issuance (EIR daily) rows filtered by the workspace filters. opts.src = 'ff' | 'gv' | 'both'. */
+  /** Issuance rows filtered only by explicit page/link filters. opts.src = 'ff' | 'gv' | 'both'. */
   function issuance(rows, opts) {
     const o = opts || {};
     const f = o.filters || current();
     const src = o.src || (f.channel === 'ff' ? 'ff' : f.channel === 'gv' ? 'gv' : 'both');
     return (rows || []).filter((r) => rowHit(r, f, src));
   }
-  /** Stock rows (StockDataa / Tag Assignment) — date range lagta nahi, baaki sab lagta hai. */
+  /** Stock rows — date range lagta nahi, explicit channel/class/TL/agent filters lagte hain. */
   function stock(rows, opts) {
     const o = opts || {};
     const f = o.filters || current();
@@ -185,24 +168,10 @@ window.FF = window.FF || {};
     if (!fc.active.length) return '<span class="lf-chip dim">No filters — poora data</span>';
     return fc.active.map((a) => `<span class="lf-chip">${U.esc(a.label)}</span>`).join('');
   }
-  /** Dataset ko filter-aware summary (group/sum) — pages ke liye ready helper. */
-  function totals(rows) {
-    const t = { total: 0, vc4: 0, vc20: 0, vc5p: 0, comm: 0, gv: 0, ff: 0, replacement: 0, chassis: 0 };
-    (rows || []).forEach((r) => {
-      const n = Number(r.n) || 0;
-      t.total += n;
-      if (r.group === 'VC4') t.vc4 += n; else if (r.group === 'VC20') t.vc20 += n; else t.vc5p += n;
-      if (r.type === 'REPLACEMENT') t.replacement += n;
-      if (/chassis/i.test(r.vrnType || r.tagType || '')) t.chassis += n;
-      if (isGv(r)) t.gv += n; else t.ff += n;
-    });
-    t.comm = t.vc20 + t.vc5p;
-    return t;
-  }
 
   FF.filters = {
-    DEFAULTS, PERIODS, periodDates, current, bounds, label, activeList,
-    ffLagDays, ffLagOn, ffReportedThrough, ffVisible, dropLaggedFf, isFfPending,
-    issuance, stock, sum, totals, rowHit, lagNote, chips, isGv, rowKey, nameHit
+    DEFAULTS, PERIODS, ffLagDays, ffLagOn, ffReportedThrough, ffVisible, dropLaggedFf, isFfPending,
+    current, bounds, activeList, issuance, stock, sum, lagNote, chips,
+    rowHit, isGv, rowKey, nameHit
   };
 })(window.FF);
