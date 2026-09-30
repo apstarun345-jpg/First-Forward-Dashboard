@@ -641,12 +641,12 @@ FF.pages = FF.pages || {};
   // 🎨 THEME PACKS
   // ==========================================================================
   const PACKS = {
-    default: { name: 'Default (brand colours)', swatch: 'default', vars: {} },
-    neon: { name: '🌃 Neon', swatch: 'neon', vars: { '--bg': '#0a0a12', '--card': '#13131f', '--ink': '#eef0ff', '--muted': '#7c85a8', '--line': '#2a2a44', '--brand': '#00e5ff', '--brand-2': '#ff2bd6', '--green': '#00ff9c', '--red': '#ff3b6b', '--amber': '#ffd60a' } },
-    glass: { name: '🧊 Glass', swatch: 'glass', vars: { '--bg': '#eef1f9', '--card': '#ffffff', '--ink': '#111a2e', '--muted': '#5b6785', '--line': '#dbe3f2', '--brand': '#4f46e5', '--brand-2': '#06b6d4' } },
-    diwali: { name: '🪔 Diwali festive', swatch: 'diwali', vars: { '--bg': '#180d05', '--card': '#2a170a', '--ink': '#fff6e2', '--muted': '#d0a982', '--line': '#4a2c12', '--brand': '#ff8c00', '--brand-2': '#ffd000', '--green': '#4ade80', '--red': '#f87171', '--amber': '#ffb703' } },
-    gold: { name: '🥇 Gold corporate', swatch: 'gold', vars: { '--bg': '#f7f5ef', '--card': '#fffdf7', '--ink': '#2a2416', '--muted': '#7a7052', '--line': '#e7dfc8', '--brand': '#b45309', '--brand-2': '#d97706' } },
-    mono: { name: '🖤 Mono', swatch: 'mono', vars: { '--bg': '#f4f5f7', '--card': '#ffffff', '--ink': '#111827', '--muted': '#6b7280', '--line': '#e5e7eb', '--brand': '#334155', '--brand-2': '#64748b' } }
+    default: { name: 'Default (brand colours)', description: 'Balanced everyday dashboard', contrast: 'Readable baseline', swatch: 'default', vars: {} },
+    neon: { name: '🌃 Neon', description: 'Dark, high-energy TV mode', contrast: 'Bright status accents', swatch: 'neon', vars: { '--bg': '#0a0a12', '--card': '#13131f', '--ink': '#eef0ff', '--muted': '#7c85a8', '--line': '#2a2a44', '--brand': '#00e5ff', '--brand-2': '#ff2bd6', '--green': '#00ff9c', '--red': '#ff3b6b', '--amber': '#ffd60a' } },
+    glass: { name: '🧊 Glass', description: 'Light, calm management workspace', contrast: 'Soft borders · clear type', swatch: 'glass', vars: { '--bg': '#eef1f9', '--card': '#ffffff', '--ink': '#111a2e', '--muted': '#5b6785', '--line': '#dbe3f2', '--brand': '#4f46e5', '--brand-2': '#06b6d4' } },
+    diwali: { name: '🪔 Diwali festive', description: 'Warm festive celebrations', contrast: 'Light text on dark cards', swatch: 'diwali', vars: { '--bg': '#180d05', '--card': '#2a170a', '--ink': '#fff6e2', '--muted': '#d0a982', '--line': '#4a2c12', '--brand': '#ff8c00', '--brand-2': '#ffd000', '--green': '#4ade80', '--red': '#f87171', '--amber': '#ffb703' } },
+    gold: { name: '🥇 Gold corporate', description: 'Warm executive reporting', contrast: 'High-ink light canvas', swatch: 'gold', vars: { '--bg': '#f7f5ef', '--card': '#fffdf7', '--ink': '#2a2416', '--muted': '#7a7052', '--line': '#e7dfc8', '--brand': '#b45309', '--brand-2': '#d97706' } },
+    mono: { name: '🖤 Mono', description: 'Minimal print-friendly view', contrast: 'Neutral status palette', swatch: 'mono', vars: { '--bg': '#f4f5f7', '--card': '#ffffff', '--ink': '#111827', '--muted': '#6b7280', '--line': '#e5e7eb', '--brand': '#334155', '--brand-2': '#64748b' } }
   };
   function applyThemePack(name) {
     const pack = PACKS[name] ? name : 'default';
@@ -676,8 +676,9 @@ FF.pages = FF.pages || {};
       const old = U.$('#theme-pop');
       if (old) { old.remove(); return; }
       const cur = currentPack();
-      const pop = U.h(`<div class="theme-pop" id="theme-pop"><b>Theme pack</b>${Object.entries(PACKS).map(([k, p]) => `<button type="button" class="theme-opt ${k === cur ? 'on' : ''}" data-pack="${k}"><span class="theme-swatch ${esc(p.swatch)}"></span>${esc(p.name)}${k === cur ? ' ✓' : ''}</button>`).join('')}
-        <button type="button" class="theme-opt" data-pack-custom><span class="theme-swatch default"></span>⚙️ Custom (Settings → Branding)</button></div>`);
+      const currentMeta = PACKS[cur] || PACKS.default;
+      const pop = U.h(`<div class="theme-pop" id="theme-pop" role="dialog" aria-label="Theme packs"><div class="theme-pop-head"><b>Theme pack</b><small>${esc(currentMeta.description)} · ${esc(currentMeta.contrast)}</small></div>${Object.entries(PACKS).map(([k, p]) => `<button type="button" class="theme-opt ${k === cur ? 'on' : ''}" data-pack="${k}" aria-pressed="${k === cur ? 'true' : 'false'}" title="${esc(`${p.description} · ${p.contrast}`)}"><span class="theme-swatch ${esc(p.swatch)}"></span><span><b>${esc(p.name)}${k === cur ? ' ✓' : ''}</b><small>${esc(p.description)}</small></span></button>`).join('')}
+        <button type="button" class="theme-opt" data-pack-custom><span class="theme-swatch default"></span><span><b>⚙️ Custom</b><small>Settings → Branding</small></span></button></div>`);
       wrap.appendChild(pop);
       pop.addEventListener('click', (ev) => {
         const opt = ev.target.closest('[data-pack]');

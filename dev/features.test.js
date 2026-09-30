@@ -356,8 +356,10 @@ test('📢 announcement broadcast, 📜 audit log, 📬 weekly digest + 📊 rep
   const dcell = (d) => `Date(${d.getFullYear()},${d.getMonth()},${d.getDate()})`;
   const today = new Date();
   const yest = new Date(Date.now() - 86400e3);
-  const rowsFF = [{ c: [{ v: dcell(today) }, { v: '1' }, { v: '999' }, { v: 40 }] }, { c: [{ v: dcell(yest) }, { v: '1' }, { v: '999' }, { v: 35 }] }];
-  const rowsGV = [{ c: [{ v: dcell(today) }, { v: '1' }, { v: 12 }] }, { c: [{ v: dcell(yest) }, { v: '1' }, { v: 9 }] }];
+  const beforeYest = new Date(Date.now() - 2 * 86400e3);
+  const beforeThat = new Date(Date.now() - 3 * 86400e3);
+  const rowsFF = [{ c: [{ v: dcell(today) }, { v: '1' }, { v: '999' }, { v: 40 }] }, { c: [{ v: dcell(yest) }, { v: '1' }, { v: '999' }, { v: 35 }] }, { c: [{ v: dcell(beforeYest) }, { v: '1' }, { v: '999' }, { v: 0 }] }, { c: [{ v: dcell(beforeThat) }, { v: '1' }, { v: '999' }, { v: 0 }] }];
+  const rowsGV = [{ c: [{ v: dcell(today) }, { v: '1' }, { v: 12 }] }, { c: [{ v: dcell(yest) }, { v: '1' }, { v: 9 }] }, { c: [{ v: dcell(beforeYest) }, { v: '1' }, { v: 5 }] }, { c: [{ v: dcell(beforeThat) }, { v: '1' }, { v: 0 }] }];
   const upstream = http.createServer((req, res) => {
     const tq = new URL(req.url, 'http://x').searchParams.get('tq') || '';
     let rows = [];
@@ -399,6 +401,15 @@ test('📢 announcement broadcast, 📜 audit log, 📬 weekly digest + 📊 rep
 
     // SMTP on + forces
     await call('/api/settings', 'PUT', { settings: { email: { host: '127.0.0.1', port: smtp.port, secure: false, user: 'mailer', pass: 'secret-1', from: 'alerts@example.test', to: 'boss@example.test' } } }, adminCookie);
+    const digest = await call('/api/notifications/digest', 'POST', {}, adminCookie);
+    assert.equal(digest.res.status, 200, `digest force — ${JSON.stringify(digest.json).slice(0, 220)}`);
+    assert.equal(digest.json.ok, true, `digest bell payload bana — ${JSON.stringify(digest.json).slice(0, 260)}`);
+    const digestItem = digest.json.item || {};
+    assert.match(digestItem.body || '', /MTD FF 75 \+ GV 26 = 101/, 'digest me FF + GV combined MTD sahi hai');
+    assert.equal(digestItem.meta && digestItem.meta.ffMtd, 75, 'digest meta FF MTD source snapshot se aaya');
+    assert.equal(digestItem.meta && digestItem.meta.gvMtd, 26, 'digest meta GV MTD source snapshot se aaya');
+    assert.equal(digestItem.meta && digestItem.meta.mtdDays, 3, 'GV-only/FF-only ko active days me saath count karta hai');
+    assert.equal(digestItem.meta && digestItem.meta.zeroDays, 1, 'explicit zero snapshot ko zero day ke roop me rakhta hai');
     const wk = await call('/api/notifications/weekly-email', 'POST', {}, adminCookie);
     assert.equal(wk.res.status, 200, `weekly force — ${JSON.stringify(wk.json).slice(0, 200)}`);
     assert.equal(wk.json.ok, true, `weekly email bheji — ${JSON.stringify(wk.json)}`);

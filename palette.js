@@ -149,6 +149,18 @@ window.FF = window.FF || {};
 
   function pool() {
     const items = [];
+    // Common commands are searchable alongside pages and people — Ctrl/⌘+K is a command center,
+    // not only a navigation list.
+    items.push(
+      { group: 'Commands', icon: '🎯', label: 'Toggle Focus mode', sub: 'Distraction-free KPI / management view', command: 'focus' },
+      { group: 'Commands', icon: '♿', label: 'Accessibility mode', sub: 'Large text · high contrast · reduced motion', command: 'a11y' },
+      { group: 'Commands', icon: '↕', label: 'Toggle table density', sub: 'Compact or comfortable rows', command: 'density' },
+      { group: 'Commands', icon: '🔔', label: 'Open notification center', sub: 'Unread alerts, actions and preferences', command: 'notifications' },
+      { group: 'Commands', icon: '🎨', label: 'Open theme packs', sub: 'Readable presets with saved preference', command: 'themes' },
+      { group: 'Commands', icon: '↻', label: 'Refresh data', sub: 'Sync the latest available snapshot', command: 'refresh' },
+      { group: 'Commands', icon: '⬇️', label: 'Install / add to home screen', sub: 'Use the PWA install prompt', command: 'install' },
+      { group: 'Commands', icon: '⌕', label: 'Reset workspace filters', sub: 'Clear shared date, channel, TL, agent and class', command: 'clearFilters' }
+    );
     // Pages (jiske paas permission hai wahi)
     (FF.app && FF.app.PAGES ? FF.app.PAGES : []).forEach((p) => {
       const adminOk = !p.adminOnly || (FF.auth.user && FF.auth.user.role === 'admin');
@@ -215,7 +227,7 @@ window.FF = window.FF || {};
     const askItem = nq ? askItems(nq) : [];
     // Group-wise cap: q khali ho to har group se top; warna total top 24.
     if (!nq) {
-      const caps = { Pages: 8, Sheets: 6, Agents: 8, TLs: 6, Dates: 6, Recent: 6 };
+      const caps = { Commands: 10, Pages: 8, Sheets: 6, Agents: 8, TLs: 6, Dates: 6, Recent: 6 };
       const seen = {};
       return scored.map((x) => x.it).filter((it) => { seen[it.group] = (seen[it.group] || 0) + 1; return seen[it.group] <= (caps[it.group] || 6); });
     }
@@ -277,6 +289,17 @@ window.FF = window.FF || {};
     if (it.answer) { U.copyText(String(it.answer)).then(() => U.toast('📋 Jawab copy ho gaya', 'ok')).catch(() => {}); return; }
     if (it.notif) { if (FF.liveView && FF.liveView.openNotification) FF.liveView.openNotification(it.notif); return; }
     if (it.master !== undefined) { if (FF.masterSearch) FF.masterSearch.openPanel(it.master); return; }
+    if (it.command) {
+      if (it.command === 'focus') { const on = FF.app && FF.app.focusMode ? FF.app.focusMode() : false; U.toast(on ? '🎯 Focus mode ON' : 'Focus mode OFF', 'ok'); }
+      else if (it.command === 'a11y') { if (FF.app && FF.app.openAccessibility) FF.app.openAccessibility(); }
+      else if (it.command === 'density') { const next = FF.app && FF.app.tableDensity && FF.app.tableDensity() === 'compact' ? 'comfortable' : 'compact'; if (FF.app && FF.app.setTableDensity) FF.app.setTableDensity(next); FF.app.renderCurrent && FF.app.renderCurrent(); U.toast(`Table density: ${next}`, 'ok'); }
+      else if (it.command === 'notifications') { if (FF.notifications) FF.notifications.toggle(true); }
+      else if (it.command === 'themes') { const b = U.$('#theme-pack-btn'); if (b) b.click(); else U.toast('Theme packs topbar me available hain', 'info'); }
+      else if (it.command === 'refresh') { if (FF.app && FF.app.refresh) FF.app.refresh(); }
+      else if (it.command === 'install') { if (FF.app && FF.app.promptInstall) FF.app.promptInstall(); }
+      else if (it.command === 'clearFilters') { if (FF.app && FF.app.clearGlobalFilters) FF.app.clearGlobalFilters(); else if (FF.app && FF.app.updateParams) FF.app.updateParams({ period: '', channel: '', ch: '', tl: '', agent: '', cls: '' }); U.toast('Workspace filters reset', 'ok'); }
+      return;
+    }
     if (location.hash === it.href) { FF.app.renderCurrent && FF.app.renderCurrent(); } else location.hash = it.href;
   }
 
