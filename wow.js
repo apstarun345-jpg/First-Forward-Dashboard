@@ -98,11 +98,12 @@ FF.pages = FF.pages || {};
     (gvRows || []).forEach((r) => {
       const s = get(r.agentName || r.agentId, r.tlName);
       if (!s) return;
-      s.gvTotal += 1;
-      if (r.ym === ym) { s.gvCur += 1; if (r.date) s.activeDays.add(U.dateKey(r.date)); }
-      if (r.ym === prevYm) s.gvPrev += 1;
+      const n = Number(r.n) || 1;
+      s.gvTotal += n;
+      if (r.ym === ym) { s.gvCur += n; if (r.date) s.activeDays.add(U.dateKey(r.date)); }
+      if (r.ym === prevYm) s.gvPrev += n;
       if (r.ym) s.months.add(r.ym);
-      if (r.date) { const dk = U.dateKey(r.date); s.dayCounts.set(dk, (s.dayCounts.get(dk) || 0) + 1); }
+      if (r.date) { const dk = U.dateKey(r.date); s.dayCounts.set(dk, (s.dayCounts.get(dk) || 0) + n); }
     });
     const out = [];
     map.forEach((s) => {
@@ -139,8 +140,8 @@ FF.pages = FF.pages || {};
   async function loadWow(ym) {
     const month = ym || U.ymKey(new Date());
     const [agents, agentClass] = await Promise.all([S.need('agents'), S.need('agentClass')]);
-    await G.need('master').catch(() => []);
-    const gvRows = typeof G.rows === 'function' ? G.rows() : [];
+    await Promise.all([S.need('daily').catch(() => []), G.need('master').catch(() => [])]);
+    const gvRows = typeof G.issuanceRows === 'function' ? G.issuanceRows() : (typeof G.rows === 'function' ? G.rows() : []);
     return { month, stats: buildStats(agents || [], agentClass || [], gvRows || [], month) };
   }
 
@@ -458,10 +459,10 @@ FF.pages = FF.pages || {};
         if (!root.isConnected) return;
         const today = U.dateKey(new Date());
         const ffToday = (daily || []).filter((r) => r.key === today && r.channel !== 'GV Partner').reduce((n, r) => n + (Number(r.n) || 0), 0);
-        const gvRows = typeof G.rows === 'function' ? G.rows() : [];
-        const gvToday = gvRows.filter((r) => r.date && U.dateKey(r.date) === today).length;
+        const gvRows = typeof G.issuanceRows === 'function' ? G.issuanceRows() : (typeof G.rows === 'function' ? G.rows() : []);
+        const gvToday = U.sum(gvRows.filter((r) => r.date && U.dateKey(r.date) === today), (r) => Number(r.n) || 1);
         const ffM = (daily || []).filter((r) => r.ym === ym && r.channel !== 'GV Partner').reduce((n, r) => n + (Number(r.n) || 0), 0);
-        const gvM = gvRows.filter((r) => r.ym === ym).length;
+        const gvM = U.sum(gvRows.filter((r) => r.ym === ym), (r) => Number(r.n) || 1);
         const ffSum = (daily || []).filter((r) => r.channel !== 'GV Partner' && r.ym === ym).length ? M.summary((daily || []).filter((r) => r.channel !== 'GV Partner'), ym) : null;
         const gvSum = typeof G.summary === 'function' ? G.summary(ym) : null;
         const ffProj = ffSum ? ffSum.projected : ffM, gvProj = gvSum ? gvSum.projected : gvM;
@@ -471,13 +472,14 @@ FF.pages = FF.pages || {};
         // ---- 📊 Detailed breakdown: VC4 / VC20 / VC5+ · chassis · replacement · wrong VRN (FF + GV) ----
         const ffTodayRows = (daily || []).filter((r) => r.key === today && r.channel !== 'GV Partner');
         const gvTodayRows = gvRows.filter((r) => r.date && U.dateKey(r.date) === today);
-        const vc4Today = U.sum(ffTodayRows.filter((r) => r.group === 'VC4'), (r) => r.n) + gvTodayRows.filter((r) => r.group === 'VC4').length;
-        const vc20Today = U.sum(ffTodayRows.filter((r) => r.group === 'VC20'), (r) => r.n) + gvTodayRows.filter((r) => r.group === 'VC20').length;
-        const vc5Today = U.sum(ffTodayRows.filter((r) => r.group && r.group !== 'VC4' && r.group !== 'VC20'), (r) => r.n) + gvTodayRows.filter((r) => r.group && r.group !== 'VC4' && r.group !== 'VC20').length;
-        const replToday = U.sum(ffTodayRows.filter((r) => /replacement/i.test(r.type || '')), (r) => r.n) + gvTodayRows.filter((r) => /replacement/i.test(r.status || '')).length;
-        const chassisToday = U.sum(ffTodayRows.filter((r) => /chassis/i.test(r.type || '')), (r) => r.n) + gvTodayRows.filter((r) => /chassis/i.test(r.tagType || '')).length;
+        const countRows = (rs, fn) => U.sum(rs.filter(fn || (() => true)), (r) => Number(r.n) || 1);
+        const vc4Today = U.sum(ffTodayRows.filter((r) => r.group === 'VC4'), (r) => r.n) + countRows(gvTodayRows, (r) => r.group === 'VC4');
+        const vc20Today = U.sum(ffTodayRows.filter((r) => r.group === 'VC20'), (r) => r.n) + countRows(gvTodayRows, (r) => r.group === 'VC20');
+        const vc5Today = U.sum(ffTodayRows.filter((r) => r.group && r.group !== 'VC4' && r.group !== 'VC20'), (r) => r.n) + countRows(gvTodayRows, (r) => r.group && r.group !== 'VC4' && r.group !== 'VC20');
+        const replToday = U.sum(ffTodayRows.filter((r) => /replacement/i.test(r.type || '')), (r) => r.n) + countRows(gvTodayRows, (r) => /replacement/i.test(r.type || r.status || ''));
+        const chassisToday = U.sum(ffTodayRows.filter((r) => /chassis/i.test(r.vrnType || r.type || '')), (r) => r.n) + countRows(gvTodayRows, (r) => /chassis/i.test(r.vrnType || r.tagType || ''));
         const wrongToday = U.sum(ffTodayRows.filter((r) => /wrong/i.test(r.vrnType || '')), (r) => r.n);
-        const agentsToday = new Set([...ffTodayRows.map((r) => r.name), ...gvTodayRows.map((r) => r.agentName)]).size;
+        const agentsToday = new Set([...ffTodayRows.map((r) => r.agentName || r.name || r.agentId), ...gvTodayRows.map((r) => r.agentName || r.agentId)].filter(Boolean)).size;
         // per-TL breakdown (today)
         const tlToday = new Map();
         const bump = (tl, ch, r) => {
@@ -486,7 +488,7 @@ FF.pages = FF.pages || {};
           const key = direct ? FF.config.directLabel(r, ch === 'gv' ? 'gv' : 'ff') : (FF.config.isRealTl(tl) ? tl : 'Unassigned');
           const o = tlToday.get(key) || { tl: key, ff: 0, gv: 0, vc4: 0, comm: 0, repl: 0, chassis: 0 };
           if (ch === 'ff') { o.ff += r.n || 0; if (r.group === 'VC4') o.vc4 += r.n || 0; else o.comm += r.n || 0; if (/replacement/i.test(r.type || '')) o.repl += r.n || 0; if (/chassis/i.test(r.type || '')) o.chassis += r.n || 0; }
-          else { o.gv += 1; if (r.group === 'VC4') o.vc4 += 1; else o.comm += 1; if (/replacement/i.test(r.status || '')) o.repl += 1; if (/chassis/i.test(r.tagType || '')) o.chassis += 1; }
+          else { const n = Number(r.n) || 1; o.gv += n; if (r.group === 'VC4') o.vc4 += n; else o.comm += n; if (/replacement/i.test(r.type || r.status || '')) o.repl += n; if (/chassis/i.test(r.vrnType || r.tagType || '')) o.chassis += n; }
           tlToday.set(key, o);
         };
         ffTodayRows.forEach((r) => bump(r.tlName, 'ff', r));
@@ -496,11 +498,11 @@ FF.pages = FF.pages || {};
         const ffMonthRows = (daily || []).filter((r) => r.ym === ym && r.channel !== 'GV Partner');
         const gvMonthRows = gvRows.filter((r) => r.ym === ym);
         const mtd = {
-          vc4: U.sum(ffMonthRows.filter((r) => r.group === 'VC4'), (r) => r.n) + gvMonthRows.filter((r) => r.group === 'VC4').length,
-          vc20: U.sum(ffMonthRows.filter((r) => r.group === 'VC20'), (r) => r.n) + gvMonthRows.filter((r) => r.group === 'VC20').length,
-          vc5p: U.sum(ffMonthRows.filter((r) => r.group && r.group !== 'VC4' && r.group !== 'VC20'), (r) => r.n) + gvMonthRows.filter((r) => r.group && r.group !== 'VC4' && r.group !== 'VC20').length,
-          repl: U.sum(ffMonthRows.filter((r) => /replacement/i.test(r.type || '')), (r) => r.n) + gvMonthRows.filter((r) => /replacement/i.test(r.status || '')).length,
-          chassis: U.sum(ffMonthRows.filter((r) => /chassis/i.test(r.type || '')), (r) => r.n) + gvMonthRows.filter((r) => /chassis/i.test(r.tagType || '')).length,
+          vc4: U.sum(ffMonthRows.filter((r) => r.group === 'VC4'), (r) => r.n) + countRows(gvMonthRows, (r) => r.group === 'VC4'),
+          vc20: U.sum(ffMonthRows.filter((r) => r.group === 'VC20'), (r) => r.n) + countRows(gvMonthRows, (r) => r.group === 'VC20'),
+          vc5p: U.sum(ffMonthRows.filter((r) => r.group && r.group !== 'VC4' && r.group !== 'VC20'), (r) => r.n) + countRows(gvMonthRows, (r) => r.group && r.group !== 'VC4' && r.group !== 'VC20'),
+          repl: U.sum(ffMonthRows.filter((r) => /replacement/i.test(r.type || '')), (r) => r.n) + countRows(gvMonthRows, (r) => /replacement/i.test(r.type || r.status || '')),
+          chassis: U.sum(ffMonthRows.filter((r) => /chassis/i.test(r.vrnType || r.type || '')), (r) => r.n) + countRows(gvMonthRows, (r) => /chassis/i.test(r.vrnType || r.tagType || '')),
           wrong: U.sum(ffMonthRows.filter((r) => /wrong/i.test(r.vrnType || '')), (r) => r.n)
         };
         const liveStamp = new Date().toLocaleTimeString('en-IN', { hour12: false });

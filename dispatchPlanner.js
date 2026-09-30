@@ -78,11 +78,46 @@ FF.pages = FF.pages || {};
   async function loadSources() {
     const jobs = [];
     if (FF.pages.performance && FF.pages.performance.ensureLoaded) jobs.push(safe(() => FF.pages.performance.ensureLoaded()));
+    if (FF.store && FF.store.need) {
+      jobs.push(safe(() => FF.store.need('daily')));
+      jobs.push(safe(() => FF.store.need('agentClass')));
+    }
     if (gvOn() && FF.gv.need) jobs.push(safe(() => FF.gv.need('report')));
     await Promise.all(jobs);
   }
 
-  /** Sab agents (FF REPORT + GV REPORT) ek hi shape me. */
+  /** EIR GV rollup used by dispatch; GV REPORT contributes stock/priority only. */
+  function gvEirRollups() {
+    const G = FF.gv;
+    const empty = { cur: new Map(), last: new Map(), ready: false };
+    if (!G || typeof G.issuanceRows !== 'function') return empty;
+    const daily = FF.store && FF.store.get ? FF.store.get('daily') : undefined;
+    const ready = Array.isArray(daily);
+    const rows = G.issuanceRows() || [];
+    if (!ready) return { ...empty, ready: false };
+    const latest = typeof G.latestDate === 'function' ? G.latestDate() : null;
+    const curYm = latest ? U.ymKey(latest) : U.ymKey(new Date());
+    const lastYm = U.prevMonthKey(curYm);
+    const make = () => new Map();
+    const cur = make(), last = make();
+    const add = (map, r) => {
+      const key = clean(r.agentId) ? `id:${norm(r.agentId)}` : `name:${norm(r.agentName)}`;
+      if (!key) return;
+      const a = map.get(key) || { total: 0, vc4: 0, comm: 0, vc20: 0, vc5p: 0 };
+      const n = Number(r.n) || 1;
+      a.total += n;
+      if (r.group === 'VC4') a.vc4 += n;
+      else { a.comm += n; if (r.group === 'VC20') a.vc20 += n; else a.vc5p += n; }
+      map.set(key, a);
+      const nameKey = `name:${norm(r.agentName)}`;
+      if (nameKey !== key) map.set(nameKey, a);
+    };
+    rows.forEach((r) => { if (r.ym === curYm) add(cur, r); else if (r.ym === lastYm) add(last, r); });
+    return { cur, last, ready: true };
+  }
+  const gvEirKey = (r) => clean(r.agentId) ? `id:${norm(r.agentId)}` : `name:${norm(r.agentName)}`;
+
+  /** Sab agents (FF EIR + GV REPORT operational fields) ek hi shape me. */
   function collectAgents() {
     const out = [];
     const ff = (FF.pages.performance && FF.pages.performance.agents && FF.pages.performance.agents()) || [];
@@ -101,13 +136,20 @@ FF.pages = FF.pages || {};
     });
     if (gvOn()) {
       const gv = (FF.gv.get && FF.gv.get('report')) || [];
+      const eir = gvEirRollups();
+      const findEir = (map, r) => map.get(gvEirKey(r)) || map.get(`name:${norm(r.agentName)}`) || null;
       gv.forEach((r) => {
         const direct = !!FF.config.isDirectAgent(r, 'gv');
+        const current = findEir(eir.cur, r), previous = findEir(eir.last, r);
+        // In a real load, an empty EIR result is a real zero—not permission to resurrect REPORT
+        // issuance. The fallback is only for isolated legacy adapters/tests that never loaded daily.
+        const cur = eir.ready ? trio(current?.vc4, current?.comm, current?.total) : trio(r.curVc4, r.curComm, r.curTotal);
+        const last = eir.ready ? trio(previous?.vc4, previous?.comm, previous?.total) : trio(r.lastVc4, r.lastComm, r.lastTotal);
         out.push({
           kind: 'agent', ch: 'gv', name: clean(r.agentName || r.agentId), id: clean(r.agentId),
           tl: direct ? '' : clean(r.tlName), tlId: clean(r.tlId), direct,
           directLabel: direct ? FF.config.directLabel(r, 'gv') : '', priority: prioOf(r.priority), status: clean(r.agentStatus),
-          cur: trio(r.curVc4, r.curComm, r.curTotal), last: trio(r.lastVc4, r.lastComm, r.lastTotal), stock: trio(r.stockVc4, r.stockComm, r.stockTotal),
+          cur, last, stock: trio(r.stockVc4, r.stockComm, r.stockTotal),
           tlStock: r.tlStockTotal != null ? trio(r.tlStockVc4, r.tlStockComm, r.tlStockTotal) : null, tlPriority: ''
         });
       });

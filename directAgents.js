@@ -141,7 +141,16 @@ FF.pages = FF.pages || {};
         });
       });
     } catch (err) { /* FF data optional */ }
-    // ---- GV Partner (GV REPORT + Tag Assignment + GV Master) ----
+    // ---- GV Partner (GV REPORT + Tag Assignment + EIR issuance) ----
+    // GV REPORT supplies operational priority/status/stock only. The issuance rollup is built
+    // from the shared EIR ledger so Direct Agents cannot revive report snapshot totals.
+    await FF.store.need('daily').catch(() => []);
+    const gvLatest = FF.gv.latestDate && FF.gv.latestDate();
+    const gvCurrent = gvLatest ? FF.gv.agentRollup(FF.util.ymKey(gvLatest)) : [];
+    const gvEirBy = new Map();
+    gvCurrent.forEach((a) => {
+      [a.agentId, a.agentName].filter(Boolean).forEach((v) => gvEirBy.set(clean(v).toUpperCase(), a));
+    });
     const gvMap = new Map();
     const pushGv = (id, name, extra) => {
       const key = clean(id) || `name:${clean(name).toUpperCase()}`;
@@ -155,13 +164,14 @@ FF.pages = FF.pages || {};
       const report = await FF.gv.need('report');
       (report || []).forEach((r) => {
         if (!isDirect(r, 'gv')) return;
+        const eir = gvEirBy.get(clean(r.agentId || '').toUpperCase()) || gvEirBy.get(clean(r.agentName || '').toUpperCase()) || { total: 0, vc4: 0 };
         pushGv(r.agentId, r.agentName, {
           tlName: tlNameOf(r), tlId: tlIdOf(r), reason: reason(r, 'gv'),
-          stock: Number(r.stockTotal || 0), issued: Number(r.curTotal || 0),
+          stock: Number(r.stockTotal || 0), issued: Number(eir.total || 0),
           status: clean(r.agentStatus || ''), priority: clean(r.priority || ''),
           vc4Stock: Number(r.stockVc4 || 0),
-          suggested: suggestQty({ daily: U.runRate(r.curVc4 || 0), stock: r.stockVc4 }),
-          suggestedGross: suggestGrossQty({ daily: U.runRate(r.curVc4 || 0) }),
+          suggested: suggestQty({ daily: U.runRate(eir.vc4 || 0), stock: r.stockVc4 }),
+          suggestedGross: suggestGrossQty({ daily: U.runRate(eir.vc4 || 0) }),
           route: `#/gvPerformance?q=${encodeURIComponent(r.agentName || '')}`
         });
       });
@@ -176,22 +186,31 @@ FF.pages = FF.pages || {};
       });
     } catch (err) { /* Tag Assignment optional */ }
     try {
-      const master = (FF.gv.rows && FF.gv.rows()) || [];
+      await FF.store.need('daily').catch(() => []);
+      const issuance = (FF.gv.issuanceRows && FF.gv.issuanceRows()) || (FF.gv.rows && FF.gv.rows()) || [];
       const agg = new Map();
-      master.forEach((r) => {
+      issuance.forEach((r) => {
         if (!isDirect(r, 'gv')) return;
         const key = clean(r.agentId) || `name:${clean(r.agentName).toUpperCase()}`;
-        const o = agg.get(key) || { issued: 0, last: null, commission: 0 };
-        o.issued++; if (!o.last || (r.date && r.date > o.last)) o.last = r.date; o.commission += Number(r.commission || 0);
+        const o = agg.get(key) || { issued: 0, vc4: 0, last: null };
+        const n = Number(r.n) || 1;
+        o.issued += n; if (r.group === 'VC4') o.vc4 += n;
+        if (!o.last || (r.date && r.date > o.last)) o.last = r.date;
         agg.set(key, o);
       });
       agg.forEach((o, key) => {
-        const existing = gvMap.get(key);
-        if (existing) { existing.issued = Math.max(existing.issued, o.issued); return; }
-        const source = master.find((r) => (clean(r.agentId) || `name:${clean(r.agentName).toUpperCase()}`) === key) || {};
+        const existing = gvMap.get(key) || gvMap.get(`name:${clean((issuance.find((r) => (clean(r.agentId) || `name:${clean(r.agentName).toUpperCase()}`) === key) || {}).agentName).toUpperCase()}`);
+        if (existing) {
+          existing.issued = o.issued;
+          existing.vc4Issued = o.vc4;
+          existing.suggested = suggestQty({ daily: U.runRate(o.vc4), stock: existing.vc4Stock });
+          existing.suggestedGross = suggestGrossQty({ daily: U.runRate(o.vc4) });
+          return;
+        }
+        const source = issuance.find((r) => (clean(r.agentId) || `name:${clean(r.agentName).toUpperCase()}`) === key) || {};
         pushGv(source.agentId, source.agentName, {
           tlName: tlNameOf(source), tlId: tlIdOf(source), reason: reason(source, 'gv'),
-          issued: o.issued, route: `#/gvTrend?agent=${encodeURIComponent(source.agentName || '')}`
+          issued: o.issued, vc4Issued: o.vc4, route: `#/gvTrend?agent=${encodeURIComponent(source.agentName || '')}`
         });
       });
     } catch (err) { /* GV Master optional */ }

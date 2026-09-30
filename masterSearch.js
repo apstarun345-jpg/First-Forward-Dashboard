@@ -70,8 +70,9 @@ FF.pages = FF.pages || {};
     if (state.lightPromise) return state.lightPromise;
     state.lightPromise = (async () => {
       const idx = newIndex();
-      const [agents, stockAgents, gvMaster, gvReport, gvStockAgent, gvStockTl] = await Promise.allSettled([
+      const [agents, stockAgents, gvMaster, gvIssuance, gvReport, gvStockAgent, gvStockTl] = await Promise.allSettled([
         FF.store.need('agents'), FF.store.need('stockAgents'), FF.gv.need('master'),
+        FF.store.need('daily').then(() => (FF.gv.issuanceRows ? FF.gv.issuanceRows() : [])),
         FF.gv.need('report'), FF.gv.need('stockAgent'), FF.gv.need('stockTl')
       ]);
       // FF agents (EIR) — id + name + TL + ids
@@ -98,8 +99,8 @@ FF.pages = FF.pages || {};
       // GV Master — agent id / name / TL id / TL name / GV unique id + name
       if (gvMaster.status === 'fulfilled') {
         for (const r of gvMaster.value || []) {
-          const p = person(idx, 'gv-agent', r.agentName || r.agentId, r.tlName, r.cls, r.agentId);
-          if (p) p.n += 1;
+          const p = person(idx, 'gv-agent', r.agentName || r.agentId, r.tlName, '', r.agentId);
+          // GV Master supplies identity / unique-ID metadata only; issuance quantity is EIR below.
           if (clean(r.agentId)) idx.ids.set(normId(r.agentId), { name: clean(r.agentName || r.agentId), kind: 'gv-agent', tl: clean(r.tlName) });
           if (clean(r.tlId)) idx.ids.set(normId(r.tlId), { name: clean(r.tlName || r.tlId), kind: 'gv-tl' });
           if (clean(r.tlName)) person(idx, 'gv-tl', r.tlName, '', r.cls, r.tlId);
@@ -107,6 +108,24 @@ FF.pages = FF.pages || {};
             const g = person(idx, 'gv-id', r.gvUniqueName || r.gvUniqueId, r.tlName, r.cls, r.gvUniqueId);
             if (g) g.n += 1;
             if (clean(r.gvUniqueId)) idx.ids.set(normId(r.gvUniqueId), { name: clean(r.gvUniqueName || r.gvUniqueId), kind: 'gv-id', tl: clean(r.tlName) });
+          }
+        }
+      }
+      // GV issuance quantities are EIR-authoritative. Keep GV Master above only for identity and
+      // unique-ID metadata; aggregated EIR rows supply the search counts and class quantities.
+      if (gvIssuance.status === 'fulfilled') {
+        for (const r of gvIssuance.value || []) {
+          const n = Number(r.n) || 1;
+          const p = person(idx, 'gv-agent', r.agentName || r.agentId, r.tlName, '', r.agentId);
+          if (p) {
+            p.n += n;
+            const cls = clean(r.cls);
+            if (cls) p.classMap.set(cls, (p.classMap.get(cls) || 0) + n);
+          }
+          if (clean(r.agentId)) idx.ids.set(normId(r.agentId), { name: clean(r.agentName || r.agentId), kind: 'gv-agent', tl: clean(r.tlName) });
+          if (clean(r.tlName)) {
+            const t = person(idx, 'gv-tl', r.tlName, '', r.cls, r.tlId);
+            if (t) t.n += n;
           }
         }
       }

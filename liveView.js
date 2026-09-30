@@ -242,8 +242,8 @@
       const today = U.dateKey(new Date());
       const daily = (FF.store && FF.store.get && FF.store.get('daily')) || [];
       const ffToday = daily.filter((r) => r.key === today && r.channel !== 'GV Partner').reduce((n, r) => n + (Number(r.n) || 0), 0);
-      const gvRows = (FF.gv && FF.gv.rows && FF.gv.rows()) || [];
-      const gvToday = gvRows.filter((r) => r.date && U.dateKey(r.date) === today).length;
+      const gvRows = daily.filter((r) => r.channel === 'GV Partner' && r.key === today);
+      const gvToday = gvRows.reduce((n, r) => n + (Number(r.n) || 0), 0);
       clockBox.innerHTML = `<div class="notify-line muted" style="border-radius:10px;margin-top:10px">
         <b style="color:#e2e8f0">Live data clock</b><br>
         FF sheet load <span class="live-instant">${esc(ffLoad)}</span> · GV sheet load <span class="live-instant">${esc(gvLoad)}</span><br>

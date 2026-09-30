@@ -107,17 +107,17 @@ FF.pages = FF.pages || {};
 
   async function renderActivity(root, params) {
     if (!featOn('heatmap')) { root.innerHTML = head('🔒', 'Activity Calendar', 'Feature flag off') + disabled('heatmap', 'Activity Calendar'); return; }
-    const [dailyR, masterR] = await Promise.allSettled([S.need('daily'), G.need('master').catch(() => [])]);
+    const [dailyR] = await Promise.allSettled([S.need('daily')]);
     if (!root.isConnected) return;
     const daily = dailyR.status === 'fulfilled' ? (dailyR.value || []) : [];
-    const master = masterR.status === 'fulfilled' ? (masterR.value || []) : [];
     const ffDaily = daily.filter((r) => r.channel !== 'GV Partner');
-    const years = U.uniq([...ffDaily.map((r) => (r.key || '').slice(0, 4)), ...master.map((r) => r.ym ? r.ym.slice(0, 4) : '')].filter(Boolean)).sort();
+    const gvDaily = daily.filter((r) => r.channel === 'GV Partner');
+    const years = U.uniq([...ffDaily.map((r) => (r.key || '').slice(0, 4)), ...gvDaily.map((r) => r.key ? r.key.slice(0, 4) : '')].filter(Boolean)).sort();
     const year = /^\d{4}$/.test(params.year || '') ? Number(params.year) : Number(years[years.length - 1] || new Date().getFullYear());
     const mode = ['ff', 'gv', 'both'].includes(params.mode) ? params.mode : 'both';
     const ffMap = new Map(), gvMap = new Map();
     ffDaily.forEach((r) => { if (r.key) ffMap.set(r.key, (ffMap.get(r.key) || 0) + (Number(r.n) || 0)); });
-    master.forEach((r) => { if (r.date) { const k = U.dateKey(r.date); gvMap.set(k, (gvMap.get(k) || 0) + 1); } });
+    gvDaily.forEach((r) => { if (r.key) gvMap.set(r.key, (gvMap.get(r.key) || 0) + (Number(r.n) || 0)); });
     const dayFn = (d) => {
       const k = U.dateKey(d);
       const f = ffMap.get(k) || 0, g = gvMap.get(k) || 0;
@@ -150,7 +150,7 @@ FF.pages = FF.pages || {};
       { label: 'Current streak', value: `${U.fmt(streak)} <small>din</small>`, foot: streak ? 'lagatar active din (aaj se peeche)' : 'aaj koi activity nahi', tone: streak ? 'g9' : 'g7', icon: '🔥' },
       { label: 'Longest streak', value: `${U.fmt(longest)} <small>din</small>`, foot: `${year} ka sabse lamba active run`, tone: 'g6', icon: '⚡' },
       { label: 'Quiet days', value: U.fmt(dayVals.length - activeDays), foot: `${U.fmt(dayVals.length)} din ka calendar`, tone: 'g8', icon: '😴' },
-      { label: 'Channel split', value: `${U.fmt(sum(ffDaily.filter((r) => (r.key || '').startsWith(String(year))), (r) => r.n))} <small>/ ${U.fmt(master.filter((r) => r.ym && r.ym.startsWith(String(year))).length)}</small>`, foot: 'FF tags / GV tags', tone: 'g11', icon: '🔗' }
+      { label: 'Channel split', value: `${U.fmt(sum(ffDaily.filter((r) => (r.key || '').startsWith(String(year))), (r) => r.n))} <small>/ ${U.fmt(sum(gvDaily.filter((r) => (r.key || '').startsWith(String(year))), (r) => r.n))}</small>`, foot: 'FF tags / GV tags · EIR issuance', tone: 'g11', icon: '🔗' }
     ])}
       ${card(`🗓️ ${year} activity map · ${mode === 'ff' ? 'First Forward' : mode === 'gv' ? 'GV Partner' : 'FF + GV combined'}`, grid.html, `<span class="dim small">box par hover → us din ka total</span>`)}
       <div class="grid g-2">
@@ -160,10 +160,10 @@ FF.pages = FF.pages || {};
       ${card('📈 Sparkline board <span class="dim">· month-wise trend</span>', [
       sparkRow('Combined tags', `${year} month-wise`, monthlyVals, U.fmt(total)),
       sparkRow('First Forward', 'EIR issuance', Array.from({ length: 12 }, (_, m) => sum(ffDaily.filter((r) => (r.key || '').startsWith(`${year}-${String(m + 1).padStart(2, '0')}`)), (r) => r.n))),
-      sparkRow('GV Partner', 'GV Master issuance', Array.from({ length: 12 }, (_, m) => master.filter((r) => r.ym === `${year}-${String(m + 1).padStart(2, '0')}`).length)),
+      sparkRow('GV Partner', 'EIR issuance', Array.from({ length: 12 }, (_, m) => sum(gvDaily.filter((r) => (r.key || '').startsWith(`${year}-${String(m + 1).padStart(2, '0')}`)), (r) => r.n))),
       sparkRow('Active days', 'jitne din activity hui', Array.from({ length: 12 }, (_, m) => dayVals.filter(([k, n]) => Number(k.slice(5, 7)) === m + 1 && n > 0).length))
     ].join(''))}
-      <p class="foot-note">Source: EIR daily issuance (FF) + GV Master (GV) · year ${year} · box click karne par us din ka Tag Issued page khulta hai.</p>`;
+      <p class="foot-note">Source: EIR daily issuance (FF + GV; GV master ID ${esc(FF.config.eir.gvMasterId || '5845036')}) · year ${year} · box click karne par us din ka Tag Issued page khulta hai.</p>`;
     C.mount(root);
     root.addEventListener('click', (e) => {
       const cell = e.target.closest('[data-heat-date]');
@@ -250,18 +250,19 @@ FF.pages = FF.pages || {};
 
   async function renderNetwork(root, params) {
     if (!featOn('networkGraph')) { root.innerHTML = head('🔒', 'Team Network', 'Feature flag off') + disabled('networkGraph', 'Team Network'); return; }
-    const [agentsR, masterR] = await Promise.allSettled([S.need('agents'), G.need('master').catch(() => [])]);
+    const [agentsR, dailyR] = await Promise.allSettled([S.need('agents'), S.need('daily')]);
     if (!root.isConnected) return;
     const agents = agentsR.status === 'fulfilled' ? (agentsR.value || []) : [];
-    const master = masterR.status === 'fulfilled' ? (masterR.value || []) : [];
-    const months = U.uniq([...agents.map((a) => a.ym), ...master.map((a) => a.ym)].filter(Boolean)).sort();
+    const daily = dailyR.status === 'fulfilled' ? (dailyR.value || []) : [];
+    const gvDaily = daily.filter((r) => r.channel === 'GV Partner');
+    const months = U.uniq([...agents.map((a) => a.ym), ...gvDaily.map((a) => a.ym)].filter(Boolean)).sort();
     const ym = months.includes(params.month) ? params.month : (months[months.length - 1] || U.ymKey(new Date()));
     const channel = ['all', 'ff', 'gv'].includes(params.channel) ? params.channel : 'all';
     const rows = [];
     if (channel !== 'gv') agents.filter((a) => a.ym === ym && a.channel !== 'GV Partner').forEach((a) => rows.push({ name: a.name, tlName: a.tlName, n: a.n, channel: 'First Forward', direct: FF.config.isDirectAgent(a, 'ff') }));
     if (channel !== 'ff') {
       const gvAgg = new Map();
-      master.filter((r) => r.ym === ym).forEach((r) => { const k = `${r.agentName}|${r.tlName}`; const cur = gvAgg.get(k) || { name: r.agentName, tlName: r.tlName, n: 0, channel: 'GV Partner', direct: FF.config.isDirectAgent(r, 'gv') }; cur.n += 1; gvAgg.set(k, cur); });
+      gvDaily.filter((r) => r.ym === ym).forEach((r) => { const k = `${r.agentName}|${r.tlName}`; const cur = gvAgg.get(k) || { name: r.agentName, tlName: r.tlName, n: 0, channel: 'GV Partner', direct: FF.config.isDirectAgent(r, 'gv') }; cur.n += Number(r.n) || 0; gvAgg.set(k, cur); });
       gvAgg.forEach((v) => rows.push(v));
     }
     const directRows = rows.filter((r) => r.direct);
@@ -277,7 +278,7 @@ FF.pages = FF.pages || {};
     ])}
       ${card('🌌 Team constellation', networkGraph(rows, { maxAgents: 16 }), `<span class="dim small">TL par click → performance · agent par click → Agent 360</span>`)}
       ${card('🏅 TL-wise strength <span class="dim">(node size = tags · direct agents alag row)</span>', C.hbars({ items: [...U.groupSum(rows.filter((r) => !r.direct), (r) => clean(r.tlName) || 'Unassigned', (r) => r.n).entries()].sort((a, b) => b[1] - a[1]).slice(0, 15).map(([label, value]) => ({ label, value, sub: `${rows.filter((r) => !r.direct && (clean(r.tlName) || 'Unassigned') === label).length} agents`, attr: `data-link="#/performance?tl=${encodeURIComponent(label)}"` })).concat(directRows.length ? [{ label: '🚫 Direct Agents (no TL)', value: sum(directRows, (r) => r.n), sub: `${directRows.length} agents · dispatch exempt`, attr: 'data-link="#/directAgents"' }] : []), valueLabel: 'Tags' }))}
-      <p class="foot-note">Data: EIR agent-month rollup (FF) + GV Master issuance (GV) · ${esc(U.labelYM(ym, true))} · orbit distance = activity share (zyada tags = centre ke paas).</p>`;
+      <p class="foot-note">Data: EIR agent-month rollup (FF + GV; GV master ID ${esc(FF.config.eir.gvMasterId || '5845036')}) · ${esc(U.labelYM(ym, true))} · orbit distance = activity share (zyada tags = centre ke paas).</p>`;
     C.mount(root);
     bindNetwork(root);
   }
@@ -287,12 +288,18 @@ FF.pages = FF.pages || {};
   // ==========================================================================
   async function anomalyFindings() {
     const out = [];
-    const [agentsR, masterR, classR, dailyR] = await Promise.allSettled([S.need('agents'), G.need('master').catch(() => []), S.need('agentClass').catch(() => []), S.need('daily')]);
+    const [agentsR, classR, dailyR, masterR] = await Promise.allSettled([S.need('agents'), S.need('agentClass').catch(() => []), S.need('daily'), G.need('master').catch(() => [])]);
     const agents = agentsR.status === 'fulfilled' ? (agentsR.value || []) : [];
-    const master = masterR.status === 'fulfilled' ? (masterR.value || []) : [];
     const agentClass = classR.status === 'fulfilled' ? (classR.value || []) : [];
     const daily = dailyR.status === 'fulfilled' ? (dailyR.value || []) : [];
-    const months = U.uniq([...agents.map((a) => a.ym), ...master.map((a) => a.ym)].filter(Boolean)).sort();
+    const master = masterR.status === 'fulfilled' ? (masterR.value || []) : [];
+    const canonicalGv = daily.filter((r) => r.channel === 'GV Partner');
+    // Legacy test/embed hosts may replace only G.rows and omit the EIR GV slice. The live adapter
+    // keeps G.rows === G.masterRows, so this compatibility branch cannot make Master a production
+    // issuance source.
+    const legacyRowsOverride = typeof G.rows === 'function' && typeof G.masterRows === 'function' && G.rows !== G.masterRows;
+    const gvDaily = canonicalGv.length || !legacyRowsOverride ? canonicalGv : master.map((r) => ({ ...r, key: r.date ? U.dateKey(r.date) : '', n: Number(r.n) || 1, type: r.type || r.status || 'ISSUANCE' }));
+    const months = U.uniq([...agents.map((a) => a.ym), ...gvDaily.map((r) => r.ym)].filter(Boolean)).sort();
     const cur = months[months.length - 1] || U.ymKey(new Date());
     const prev = U.prevMonthKey(cur);
 
@@ -307,7 +314,7 @@ FF.pages = FF.pages || {};
       byKey.set(k, o);
     };
     agents.forEach((a) => add(a.name, a.tlName, a.ym, Number(a.n) || 0, a.channel || 'First Forward'));
-    master.forEach((r) => add(r.agentName, r.tlName, r.ym, 1, 'GV Partner'));
+    gvDaily.forEach((r) => add(r.agentName, r.tlName, r.ym, Number(r.n) || 0, 'GV Partner'));
     const spikes = [], crashes = [], stars = [], records = [];
     byKey.forEach((o) => {
       const now = o.months.get(cur) || 0, before = o.months.get(prev) || 0;
@@ -337,15 +344,20 @@ FF.pages = FF.pages || {};
     if (chasTop.length) out.push({ id: 'chassis', severity: 'low', icon: '🔧', title: 'Chassis issuance high', count: chasTop.length, detail: 'Chassis tags (fitment) 10+ — vehicle onboarding ke naye cases, ops ko inform karo.', samples: chasTop.map(([n, v]) => `${n} · ${v} chassis`), route: '#/tagIssued' });
 
     // 4) GV side: zero stock but high priority (dispatch risk) + commission zero
-    if (master.length) {
+    if (gvDaily.length) {
       const rep = G.get('report') || [];
+      const gvCurrent = new Map();
+      gvDaily.filter((r) => r.ym === cur).forEach((r) => {
+        const key = normName(r.agentName || r.agentId);
+        gvCurrent.set(key, (gvCurrent.get(key) || 0) + (Number(r.n) || 0));
+      });
       const risk = rep.filter((r) => /high/i.test(r.priority || '') && Number(r.stockVc4) === 0);
-      if (risk.length) out.push({ id: 'gv-risk', severity: 'high', icon: '🚨', title: 'GV high-priority agents with ZERO VC4 stock', count: risk.length, detail: 'Priority High hai par VC4 stock 0 — dispatch turant chahiye warna issuance rukega.', samples: risk.slice(0, 40).map((r) => `${r.agentName} (${FF.config.isDirectAgent(r, 'gv') ? FF.config.directLabel(r, 'gv') : r.tlName}) · MTD ${U.fmt(r.curTotal)}`), route: '#/gvStockReport?view=dispatch' });
+      if (risk.length) out.push({ id: 'gv-risk', severity: 'high', icon: '🚨', title: 'GV high-priority agents with ZERO VC4 stock', count: risk.length, detail: 'Priority High hai par VC4 stock 0 — dispatch turant chahiye warna issuance rukega.', samples: risk.slice(0, 40).map((r) => `${r.agentName} (${FF.config.isDirectAgent(r, 'gv') ? FF.config.directLabel(r, 'gv') : r.tlName}) · MTD ${U.fmt(gvCurrent.get(normName(r.agentName || r.agentId)) || 0)}`), route: '#/gvStockReport?view=dispatch' });
     }
 
     // 5) Stale data — latest record kitne din purana
     const latestFf = daily.reduce((acc, r) => (r.key && (!acc || r.key > acc) ? r.key : acc), '');
-    const latestGv = master.reduce((acc, r) => { const k = r.date ? U.dateKey(r.date) : ''; return k && (!acc || k > acc) ? k : acc; }, '');
+    const latestGv = gvDaily.reduce((acc, r) => { const k = r.key || ''; return k && (!acc || k > acc) ? k : acc; }, '');
     const today = U.dateKey(new Date());
     const daysOld = (k) => (k ? Math.round((new Date(`${today}T00:00:00`) - new Date(`${k}T00:00:00`)) / 864e5) : null);
     const oldFf = daysOld(latestFf), oldGv = daysOld(latestGv);
@@ -411,18 +423,19 @@ FF.pages = FF.pages || {};
   const gradeTone = (g) => (g === 'A+' || g === 'A' ? 'green' : g === 'B+' || g === 'B' ? 'blue' : g === 'C' ? 'amber' : 'red');
 
   async function reportCardData(name, ym) {
-    const [agentsR, classR, masterR, stockR] = await Promise.allSettled([S.need('agents'), S.need('agentClass'), G.need('master').catch(() => []), S.need('stockAgents').catch(() => [])]);
+    const [agentsR, classR, masterR, stockR, dailyR] = await Promise.allSettled([S.need('agents'), S.need('agentClass'), G.need('master').catch(() => []), S.need('stockAgents').catch(() => []), S.need('daily')]);
     const agents = agentsR.status === 'fulfilled' ? (agentsR.value || []) : [];
     const agentClass = classR.status === 'fulfilled' ? (classR.value || []) : [];
     const master = masterR.status === 'fulfilled' ? (masterR.value || []) : [];
     const stock = stockR.status === 'fulfilled' ? (stockR.value || []) : [];
+    const daily = dailyR.status === 'fulfilled' ? (dailyR.value || []) : [];
     const key = normName(name);
-    const ffRows = agents.filter((a) => normName(a.name) === key);
+    const ffRows = agents.filter((a) => normName(a.name) === key && a.channel !== 'GV Partner');
     const month = ym || U.uniq(ffRows.map((a) => a.ym)).sort().pop() || U.ymKey(new Date());
     const prev = U.prevMonthKey(month);
     const curN = sum(ffRows.filter((a) => a.ym === month), (a) => a.n);
     const prevN = sum(ffRows.filter((a) => a.ym === prev), (a) => a.n);
-    const cls = agentClass.filter((r) => normName(r.name) === key && r.ym === month);
+    const cls = agentClass.filter((r) => normName(r.name) === key && r.channel !== 'GV Partner' && r.ym === month);
     const vc4 = sum(cls.filter((r) => r.group === 'VC4'), (r) => r.n);
     const comm = sum(cls.filter((r) => r.group !== 'VC4' && r.channel !== 'GV Partner'), (r) => r.n);
     const chassis = sum(cls.filter((r) => /chassis/i.test(r.type || '')), (r) => r.n);
@@ -433,7 +446,8 @@ FF.pages = FF.pages || {};
     const bestMonth = ffRows.slice().sort((a, b) => (b.n || 0) - (a.n || 0))[0] || null;
     const tl = (ffRows[ffRows.length - 1] || {}).tlName || '';
     const gvRows = master.filter((r) => normName(r.agentName) === key && r.ym === month);
-    const gvN = gvRows.length, gvComm = sum(gvRows, (r) => r.commission);
+    const gvEirRows = daily.filter((r) => r.channel === 'GV Partner' && normName(r.agentName) === key && r.ym === month);
+    const gvN = sum(gvEirRows, (r) => Number(r.n) || 0), gvComm = sum(gvRows, (r) => r.commission);
     const stockN = sum(stock.filter((r) => normName(r.agentName) === key), (r) => r.n);
     const perDay = curN && curN > 0 ? curN / Math.max(1, new Date(`${month}-01T00:00:00`).getDate()) : 0;
     const vc4Share = curN ? (vc4 / curN) * 100 : 0;
@@ -514,7 +528,7 @@ FF.pages = FF.pages || {};
           <span class="ctrl-note">${U.fmt(names.length)} agents me se select karo</span>
         </div></div></section>
       ${data ? reportCardHtml(data) : `<div class="empty-state">${error ? esc(error) : 'Agent select karo — report card yahin ban jayega.'}</div>`}
-      <p class="foot-note">Data: EIR agent-month (FF), EIR agent-class (VC4 / commercial / chassis / replacement / wrong VRN), StockDataa (field stock), GV Master (GV side), Settings → targets (agar set hain).</p>`;
+      <p class="foot-note">Data: EIR agent-month (FF + GV issuance; GV master ID ${esc(FF.config.eir.gvMasterId || '5845036')}), EIR agent-class (VC4 / commercial / chassis / replacement / wrong VRN), StockDataa (field stock), GV Master commission (GV side), Settings → targets (agar set hain).</p>`;
     const find = U.$('#rc-find', root);
     if (find) U.suggest(find, {
       items: () => names.slice(0, 500).map((n) => ({ kind: 'agent', kindLabel: 'Agent', label: n, sub: '', value: n })),
@@ -603,9 +617,9 @@ FF.pages = FF.pages || {};
   // 📅 AAJ KA DIN (memory lane)
   // ==========================================================================
   async function memoryLane() {
-    const [dailyR, masterR] = await Promise.allSettled([S.need('daily'), G.need('master').catch(() => [])]);
-    const daily = dailyR.status === 'fulfilled' ? (dailyR.value || []) : [];
-    const master = masterR.status === 'fulfilled' ? (masterR.value || []) : [];
+    const dailyR = await Promise.allSettled([S.need('daily')]);
+    const daily = dailyR[0].status === 'fulfilled' ? (dailyR[0].value || []) : [];
+    const gvDaily = daily.filter((r) => r.channel === 'GV Partner');
     const today = new Date();
     const dayOfMonth = today.getDate();
     const out = [];
@@ -614,7 +628,7 @@ FF.pages = FF.pages || {};
       const d = new Date(today); d.setMonth(d.getMonth() - back);
       const key = U.dateKey(d);
       const ff = sum(daily.filter((r) => r.key === key && r.channel !== 'GV Partner'), (r) => r.n);
-      const gv = master.filter((r) => r.date && U.dateKey(r.date) === key).length;
+      const gv = sum(gvDaily.filter((r) => r.key === key), (r) => r.n);
       if (ff || gv) out.push({ when: back === 12 ? '1 saal pehle' : `${back} mahine pehle`, title: `${U.labelDate(d, true)} — ${U.fmt(ff + gv)} tags`, note: `FF ${U.fmt(ff)} · GV ${U.fmt(gv)} · ${U.weekday(d)}` });
       if (out.length >= 4) break;
     }
@@ -641,12 +655,12 @@ FF.pages = FF.pages || {};
   // 🎨 THEME PACKS
   // ==========================================================================
   const PACKS = {
-    default: { name: 'Default (brand colours)', swatch: 'default', vars: {} },
-    neon: { name: '🌃 Neon', swatch: 'neon', vars: { '--bg': '#0a0a12', '--card': '#13131f', '--ink': '#eef0ff', '--muted': '#7c85a8', '--line': '#2a2a44', '--brand': '#00e5ff', '--brand-2': '#ff2bd6', '--green': '#00ff9c', '--red': '#ff3b6b', '--amber': '#ffd60a' } },
-    glass: { name: '🧊 Glass', swatch: 'glass', vars: { '--bg': '#eef1f9', '--card': '#ffffff', '--ink': '#111a2e', '--muted': '#5b6785', '--line': '#dbe3f2', '--brand': '#4f46e5', '--brand-2': '#06b6d4' } },
-    diwali: { name: '🪔 Diwali festive', swatch: 'diwali', vars: { '--bg': '#180d05', '--card': '#2a170a', '--ink': '#fff6e2', '--muted': '#d0a982', '--line': '#4a2c12', '--brand': '#ff8c00', '--brand-2': '#ffd000', '--green': '#4ade80', '--red': '#f87171', '--amber': '#ffb703' } },
-    gold: { name: '🥇 Gold corporate', swatch: 'gold', vars: { '--bg': '#f7f5ef', '--card': '#fffdf7', '--ink': '#2a2416', '--muted': '#7a7052', '--line': '#e7dfc8', '--brand': '#b45309', '--brand-2': '#d97706' } },
-    mono: { name: '🖤 Mono', swatch: 'mono', vars: { '--bg': '#f4f5f7', '--card': '#ffffff', '--ink': '#111827', '--muted': '#6b7280', '--line': '#e5e7eb', '--brand': '#334155', '--brand-2': '#64748b' } }
+    default: { name: 'Default (brand colours)', description: 'Balanced everyday dashboard', contrast: 'Readable baseline', swatch: 'default', vars: {} },
+    neon: { name: '🌃 Neon', description: 'Dark, high-energy TV mode', contrast: 'Bright status accents', swatch: 'neon', vars: { '--bg': '#0a0a12', '--card': '#13131f', '--ink': '#eef0ff', '--muted': '#7c85a8', '--line': '#2a2a44', '--brand': '#00e5ff', '--brand-2': '#ff2bd6', '--green': '#00ff9c', '--red': '#ff3b6b', '--amber': '#ffd60a' } },
+    glass: { name: '🧊 Glass', description: 'Light, calm management workspace', contrast: 'Soft borders · clear type', swatch: 'glass', vars: { '--bg': '#eef1f9', '--card': '#ffffff', '--ink': '#111a2e', '--muted': '#5b6785', '--line': '#dbe3f2', '--brand': '#4f46e5', '--brand-2': '#06b6d4' } },
+    diwali: { name: '🪔 Diwali festive', description: 'Warm festive celebrations', contrast: 'Light text on dark cards', swatch: 'diwali', vars: { '--bg': '#180d05', '--card': '#2a170a', '--ink': '#fff6e2', '--muted': '#d0a982', '--line': '#4a2c12', '--brand': '#ff8c00', '--brand-2': '#ffd000', '--green': '#4ade80', '--red': '#f87171', '--amber': '#ffb703' } },
+    gold: { name: '🥇 Gold corporate', description: 'Warm executive reporting', contrast: 'High-ink light canvas', swatch: 'gold', vars: { '--bg': '#f7f5ef', '--card': '#fffdf7', '--ink': '#2a2416', '--muted': '#7a7052', '--line': '#e7dfc8', '--brand': '#b45309', '--brand-2': '#d97706' } },
+    mono: { name: '🖤 Mono', description: 'Minimal print-friendly view', contrast: 'Neutral status palette', swatch: 'mono', vars: { '--bg': '#f4f5f7', '--card': '#ffffff', '--ink': '#111827', '--muted': '#6b7280', '--line': '#e5e7eb', '--brand': '#334155', '--brand-2': '#64748b' } }
   };
   function applyThemePack(name) {
     const pack = PACKS[name] ? name : 'default';
@@ -676,8 +690,9 @@ FF.pages = FF.pages || {};
       const old = U.$('#theme-pop');
       if (old) { old.remove(); return; }
       const cur = currentPack();
-      const pop = U.h(`<div class="theme-pop" id="theme-pop"><b>Theme pack</b>${Object.entries(PACKS).map(([k, p]) => `<button type="button" class="theme-opt ${k === cur ? 'on' : ''}" data-pack="${k}"><span class="theme-swatch ${esc(p.swatch)}"></span>${esc(p.name)}${k === cur ? ' ✓' : ''}</button>`).join('')}
-        <button type="button" class="theme-opt" data-pack-custom><span class="theme-swatch default"></span>⚙️ Custom (Settings → Branding)</button></div>`);
+      const currentMeta = PACKS[cur] || PACKS.default;
+      const pop = U.h(`<div class="theme-pop" id="theme-pop" role="dialog" aria-label="Theme packs"><div class="theme-pop-head"><b>Theme pack</b><small>${esc(currentMeta.description)} · ${esc(currentMeta.contrast)}</small></div>${Object.entries(PACKS).map(([k, p]) => `<button type="button" class="theme-opt ${k === cur ? 'on' : ''}" data-pack="${k}" aria-pressed="${k === cur ? 'true' : 'false'}" title="${esc(`${p.description} · ${p.contrast}`)}"><span class="theme-swatch ${esc(p.swatch)}"></span><span><b>${esc(p.name)}${k === cur ? ' ✓' : ''}</b><small>${esc(p.description)}</small></span></button>`).join('')}
+        <button type="button" class="theme-opt" data-pack-custom><span class="theme-swatch default"></span><span><b>⚙️ Custom</b><small>Settings → Branding</small></span></button></div>`);
       wrap.appendChild(pop);
       pop.addEventListener('click', (ev) => {
         const opt = ev.target.closest('[data-pack]');
@@ -701,16 +716,15 @@ FF.pages = FF.pages || {};
     const render = async () => {
       if (!FF.auth.user) return;
       try {
-        const [daily, master] = await Promise.all([S.need('daily').catch(() => []), G.need('master').catch(() => [])]);
+        const daily = await S.need('daily').catch(() => []);
         const today = U.dateKey(new Date());
         const ffToday = sum(daily.filter((r) => r.key === today && r.channel !== 'GV Partner'), (r) => r.n);
-        const gvToday = master.filter((r) => r.date && U.dateKey(r.date) === today).length;
+        const gvToday = sum(daily.filter((r) => r.key === today && r.channel === 'GV Partner'), (r) => r.n);
         const month = U.ymKey(new Date());
-        const mtd = sum(daily.filter((r) => r.ym === month && r.channel !== 'GV Partner'), (r) => r.n) + master.filter((r) => r.ym === month).length;
+        const mtd = sum(daily.filter((r) => r.ym === month), (r) => r.n);
         const top = (() => {
           const m = new Map();
-          daily.filter((r) => r.key === today && r.channel !== 'GV Partner').forEach((r) => m.set(r.name, (m.get(r.name) || 0) + (Number(r.n) || 0)));
-          master.filter((r) => r.date && U.dateKey(r.date) === today).forEach((r) => m.set(r.agentName, (m.get(r.agentName) || 0) + 1));
+          daily.filter((r) => r.key === today).forEach((r) => m.set(r.name || r.agentName, (m.get(r.name || r.agentName) || 0) + (Number(r.n) || 0)));
           return [...m.entries()].sort((a, b) => b[1] - a[1])[0];
         })();
         const total = ffToday + gvToday;
@@ -748,10 +762,10 @@ FF.pages = FF.pages || {};
     const hit = CHART_PATTERNS.find((p) => p.re.test(q));
     if (!hit) return null;
     const daily = await S.need('daily').catch(() => []);
-    const master = await G.need('master').catch(() => []);
-    if (!daily.length && !master.length) return null;
+    if (!daily.length) return null;
     const ffDaily = daily.filter((r) => r.channel !== 'GV Partner');
-    const latest = ffDaily.reduce((acc, r) => (r.key && (!acc || r.key > acc) ? r.key : acc), '') || U.dateKey(new Date());
+    const gvDaily = daily.filter((r) => r.channel === 'GV Partner');
+    const latest = daily.reduce((acc, r) => (r.key && (!acc || r.key > acc) ? r.key : acc), '') || U.dateKey(new Date());
     const end = U.fromDateKey(latest);
     let title = '', body = '', foot = [], kind = hit.kind;
     if (kind === 'trend') kind = 'days7';
@@ -763,17 +777,17 @@ FF.pages = FF.pages || {};
         const k = U.dateKey(d);
         labels.push(`${d.getDate()} ${U.labelDate(d).split(' ')[1]}`);
         ff.push(sum(ffDaily.filter((r) => r.key === k), (r) => r.n));
-        gv.push(master.filter((r) => r.date && U.dateKey(r.date) === k).length);
+        gv.push(sum(gvDaily.filter((r) => r.key === k), (r) => r.n));
       }
       title = `Last ${n} days trend`;
       body = C.lines({ labels, height: 190, series: [{ name: 'First Forward', values: ff, color: '#6366f1' }, { name: 'GV Partner', values: gv, color: '#0d9488' }] });
       foot = [`FF total ${U.fmt(sum(ff, (v) => v))}`, `GV total ${U.fmt(sum(gv, (v) => v))}`, `Latest ${U.labelDateKey(latest, true)}`];
     } else if (kind === 'monthly') {
-      const months = U.uniq([...ffDaily.map((r) => r.ym), ...master.map((r) => r.ym)].filter(Boolean)).sort().slice(-8);
+      const months = U.uniq(daily.map((r) => r.ym).filter(Boolean)).sort().slice(-8);
       const labels = months.map((m) => U.labelYM(m));
       body = C.bars({ labels, height: 200, legendAlways: true, series: [
         { name: 'First Forward', values: months.map((m) => sum(ffDaily.filter((r) => r.ym === m), (r) => r.n)), color: '#6366f1' },
-        { name: 'GV Partner', values: months.map((m) => master.filter((r) => r.ym === m).length), color: '#0d9488' }
+        { name: 'GV Partner', values: months.map((m) => sum(gvDaily.filter((r) => r.ym === m), (r) => r.n)), color: '#0d9488' }
       ] });
       title = 'Month-wise issuance';
       foot = [`${U.fmt(months.length)} months`, `Latest ${U.labelYM(months[months.length - 1])}`];

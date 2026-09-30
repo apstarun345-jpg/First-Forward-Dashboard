@@ -106,9 +106,9 @@ FF.pages = FF.pages || {};
     } catch (err) { out.errors.push(`First Forward: ${err.message || err}`); }
     try {
       if (FF.gv && (!FF.gv.enabled || FF.gv.enabled()) && FF.gv.need) {
-        await FF.gv.need('master');
-        const master = FF.gv.rows ? FF.gv.rows() : [];
-        const gvItems = master.map((r) => ({ id: r.agentId, name: r.agentName, ym: r.ym, n: 1, tlName: r.tlName, tlId: r.tlId, date: r.date }));
+        await Promise.all([FF.gv.need('master'), FF.store.need('daily').catch(() => [])]);
+        const issuance = FF.gv.issuanceRows ? FF.gv.issuanceRows() : (FF.gv.rows ? FF.gv.rows() : []);
+        const gvItems = issuance.map((r) => ({ id: r.agentId, name: r.agentName, ym: r.ym, n: Number(r.n) || 1, tlName: r.tlName, tlId: r.tlId, date: r.date }));
         out.gv = analyze(gvItems, { ch: 'gv', months });
       }
     } catch (err) { out.errors.push(`GV: ${err.message || err}`); }

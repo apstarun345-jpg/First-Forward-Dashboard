@@ -62,14 +62,15 @@ FF.pages = FF.pages || {};
   function getGvForDate(dateObj) {
     const ym = U.ymKey(dateObj);
     const day = dateObj.getDate();
-    const all = G.rows().filter(r => r.ym === ym && r.day === day);
-    const total = all.length;
-    const vc4 = all.filter(r => r.group === 'VC4').length;
-    const vc20 = all.filter(r => r.group === 'VC20').length;
-    const vc5p = all.filter(r => r.group === 'VC5+').length;
+    const all = (S.get('daily') || []).filter(r => r.channel === 'GV Partner' && r.ym === ym && r.day === day);
+    const count = (rows) => U.sum(rows, r => Number(r.n) || 1);
+    const total = count(all);
+    const vc4 = count(all.filter(r => r.group === 'VC4'));
+    const vc20 = count(all.filter(r => r.group === 'VC20'));
+    const vc5p = count(all.filter(r => r.group === 'VC5+'));
     const comm = vc20 + vc5p;
     const byClass = {};
-    all.forEach(r => { byClass[r.cls] = (byClass[r.cls]||0)+1; });
+    all.forEach(r => { byClass[r.cls] = (byClass[r.cls]||0)+(Number(r.n) || 1); });
     return { date: dateObj, ym, day, total, vc4, vc20, vc5p, comm, byClass, rows: all };
   }
 
@@ -135,7 +136,7 @@ FF.pages = FF.pages || {};
       // Date interval analytics (daily EIR aggregates + row-level GV Master).
       const dailyRows = S.get('daily') || [];
       const ffRangeRows = dailyRows.filter((r) => r.channel !== 'GV Partner' && inRange(r, fromVal, val));
-      const gvRangeRows = G.rows().filter((r) => inRange({ date: r.date }, fromVal, val)).map((r) => ({ ...r, type: r.status, vrnType: '', n: 1 }));
+      const gvRangeRows = dailyRows.filter((r) => r.channel === 'GV Partner' && inRange(r, fromVal, val));
       const ffRange = rangeSummary(ffRangeRows);
       const gvRange = rangeSummary(gvRangeRows);
       const combined = ffRange.total + gvRange.total;
@@ -150,7 +151,7 @@ FF.pages = FF.pages || {};
       ], legendAlways: true });
       const rankCount = Math.max(5, Math.min(20, Number(localStorage.getItem('ti_chart_limit')) || 10));
       const gvAgentMap = new Map(), gvTlMap = new Map();
-      gvRangeRows.forEach((r) => { const k = r.agentName || r.agentId || 'Unknown'; const o = gvAgentMap.get(k) || { total: 0, vc4: 0, comm: 0 }; o.total++; if (r.group === 'VC4') o.vc4++; else o.comm++; gvAgentMap.set(k, o); const tl = FF.config.isDirectAgent(r, 'gv') ? FF.config.directLabel(r, 'gv') : (r.tlName || 'Unassigned'); gvTlMap.set(tl, (gvTlMap.get(tl) || 0) + 1); });
+      gvRangeRows.forEach((r) => { const n = Number(r.n) || 1; const k = r.agentName || r.agentId || 'Unknown'; const o = gvAgentMap.get(k) || { total: 0, vc4: 0, comm: 0 }; o.total += n; if (r.group === 'VC4') o.vc4 += n; else o.comm += n; gvAgentMap.set(k, o); const tl = FF.config.isDirectAgent(r, 'gv') ? FF.config.directLabel(r, 'gv') : (r.tlName || 'Unassigned'); gvTlMap.set(tl, (gvTlMap.get(tl) || 0) + n); });
       const gvTopRows = [...gvAgentMap].sort((a,b)=>b[1].total-a[1].total).slice(0,rankCount);
       const gvTopVc4 = [...gvAgentMap].sort((a,b)=>b[1].vc4-a[1].vc4).slice(0,rankCount);
       const gvTopCommercial = [...gvAgentMap].sort((a,b)=>b[1].comm-a[1].comm).slice(0,rankCount);

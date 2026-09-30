@@ -1012,7 +1012,7 @@ await run('auth helpers (avatar/role)', async () => {
 });
 await run('sheet.render StockDataa', () => pages.sheet.render(root(), { name: 'StockDataa' }, {}), true);
 await run('sheet.render REPORT', () => pages.sheet.render(root(), { name: 'REPORT' }, {}), true);
-await run('settings.render (all tabs)', async () => { for (const tab of ['account', 'sound', 'brand', 'sources', 'access', 'data', 'rules', 'features', 'contacts', 'users', 'links', 'audit', 'backup']) { await pages.settings.render(root(), { tab }, {}); await settle(20); } });
+await run('settings.render (all tabs)', async () => { for (const tab of ['account', 'diagnostics', 'sound', 'brand', 'sources', 'access', 'data', 'rules', 'features', 'contacts', 'users', 'links', 'audit', 'backup']) { const r = root(); await pages.settings.render(r, { tab }, {}); await settle(20); if (tab === 'diagnostics' && !(r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('')).includes('Scan site now')) throw new Error('site diagnostics tab render nahi hua'); } });
 await run('v3.16.1 · My access me sirf granted cards (locked ⛔ cards nahi)', async () => {
   const realCan = FF.auth.can;
   // member simulation: sirf Management ke 4 pages + ek sheet + ek action

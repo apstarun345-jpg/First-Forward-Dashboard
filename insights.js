@@ -588,6 +588,30 @@ FF.pages = FF.pages || {};
   }
 
   // ---- GV commission intelligence ---------------------------------------------------------------
+  // GV Master remains the operational/commission register. Issuance quantities are attached from
+  // the canonical EIR daily ledger so every tag count on this page is EIR-authoritative without
+  // changing the exact sheet commission sums.
+  const gvIssuanceN = (row) => Object.prototype.hasOwnProperty.call(row || {}, 'issuanceN')
+    ? Math.max(0, Number(row.issuanceN) || 0)
+    : Math.max(0, Number(row && row.n) || 1);
+  const gvIssuanceKey = (row) => {
+    const date = row && row.date ? U.dateKey(row.date) : (row && row.key ? row.key : `${row && row.ym || ''}-${String(row && row.day || '').padStart(2, '0')}`);
+    const agent = normId(row && row.agentId) || normName(row && row.agentName);
+    const cls = G.normClass ? G.normClass(row && row.cls) : clean(row && row.cls).toUpperCase().replace(/\s+/g, '');
+    return `${date}|${agent}|${cls || clean(row && row.group)}`;
+  };
+  function attachGvIssuanceCounts(operationalRows, issuanceRows) {
+    const counts = new Map();
+    (issuanceRows || []).forEach((row) => counts.set(gvIssuanceKey(row), (counts.get(gvIssuanceKey(row)) || 0) + Math.max(0, Number(row.n) || 1)));
+    const seen = new Map();
+    return (operationalRows || []).map((row) => {
+      const key = gvIssuanceKey(row), index = seen.get(key) || 0;
+      seen.set(key, index + 1);
+      return { ...row, issuanceN: index === 0 ? (counts.get(key) || 0) : 0 };
+    });
+  }
+  const gvIssuanceTotal = (rows) => sum(rows || [], (row) => gvIssuanceN(row));
+
   function aggregateGv(rows, group) {
     const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     const keyFn = {
@@ -602,8 +626,11 @@ FF.pages = FF.pages || {};
     rows.forEach((r) => {
       const key = keyFn(r);
       mapAdd(map, key, () => ({ key, label: key.includes('|') ? key.split('|')[1] || key.split('|')[0] : key, id: key.includes('|') ? key.split('|')[0] : '', agentLabel: r.agentName || r.agentId || 'Unknown agent', tlName: r.tlName || '', classLabel: r.cls || 'NA', issuances: 0, uniqueTags: 0, tagSet: new Set(), amount: 0, commission: 0, commissionRows: 0, commissionPopulatedRows: 0, agents: new Set(), classes: {}, direct: 0, managed: 0 }), (o) => {
-        o.issuances++; o.amount += r.amount || 0; o.commission += r.commission || 0; o.commissionRows++; if (r.commissionHasValue === true) o.commissionPopulatedRows++; o.agents.add(r.agentId || r.agentName); o.tagSet.add(normBarcode(r.tagId || r.serial || '') || `#${o.issuances}`);
-        o.classes[r.cls || 'NA'] = (o.classes[r.cls || 'NA'] || 0) + 1;
+        const n = gvIssuanceN(r);
+        o.issuances += n; o.amount += r.amount || 0; o.commission += r.commission || 0; o.commissionRows++; if (r.commissionHasValue === true) o.commissionPopulatedRows++; o.agents.add(r.agentId || r.agentName);
+        const tag = normBarcode(r.tagId || r.serial || '');
+        if (tag) o.tagSet.add(tag); else for (let i = 0; i < n; i++) o.tagSet.add(`${o.key}#${o.issuances - n + i + 1}`);
+        o.classes[r.cls || 'NA'] = (o.classes[r.cls || 'NA'] || 0) + n;
         if (directAgent(r)) o.direct++; else o.managed++;
       });
     });
@@ -628,14 +655,15 @@ FF.pages = FF.pages || {};
       const g = r.group || (G.classGroup ? G.classGroup(r.cls) : r.cls) || 'NA';
       const slot = ['VC4', 'VC20', 'VC5+'].includes(g) ? g : 'VC5+';
       mapAdd(map, key, () => ({ label: r.agentName || r.agentId || 'Unknown agent', id: r.agentId || '', tlName: r.tlName || '', VC4: blank(), VC20: blank(), 'VC5+': blank(), exact: {}, totalCommission: 0, totalPaid: 0, totalTags: 0, rate: null }), (o) => {
-        const s = o[slot];
-        s.tags++; s.amount += r.amount || 0; s.commission += r.commission || 0;
+        const n = gvIssuanceN(r);
+        s.tags += n; s.amount += r.amount || 0; s.commission += r.commission || 0;
         if (r.commissionHasValue === true) { s.paid++; o.totalPaid++; }
-        s.tagSet.add(normBarcode(r.tagId || r.serial || '') || `#${s.tags}`);
-        o.totalCommission += r.commission || 0; o.totalTags++;
+        const tag = normBarcode(r.tagId || r.serial || '');
+        if (tag) s.tagSet.add(tag); else for (let i = 0; i < n; i++) s.tagSet.add(`${key}#${s.tags - n + i + 1}`);
+        o.totalCommission += r.commission || 0; o.totalTags += n;
         const cls = r.cls || 'NA';
         const e = o.exact[cls] || (o.exact[cls] = { tags: 0, paid: 0, commission: 0, rate: null });
-        e.tags++; e.commission += r.commission || 0;
+        e.tags += n; e.commission += r.commission || 0;
         if (r.commissionHasValue === true) e.paid++;
       });
     });
@@ -648,6 +676,201 @@ FF.pages = FF.pages || {};
     }).sort((a, b) => b.totalCommission - a.totalCommission || b.totalTags - a.totalTags);
   }
 
+  // ---- GV personal commission · exact agent ID + exact vehicle class -------------------------------
+  // This is intentionally separate from the existing VC4 / VC20 / VC5+ boards. The boards are
+  // descriptive rollups; this table is the payout view requested by the user. VC4 defaults to
+  // the exact current-month GV Master commission value for the same agent ID + VC4 row. No
+  // cross-agent median, blended average, cut, or uplift is used.
+  const GV_PERSONAL_CLASSES = ['VC4', 'VC20', 'VC5', 'VC6', 'VC7', 'VC12'];
+  const gvPersonalSettings = () => {
+    const saved = FF.config.gvCommissionRates || {};
+    const defaults = { VC4: { source: 'master', rate: '' }, VC20: { source: 'manual', rate: '' }, VC5: { source: 'manual', rate: '' }, VC6: { source: 'manual', rate: '' }, VC7: { source: 'manual', rate: '' }, VC12: { source: 'manual', rate: '' } };
+    const classes = {};
+    GV_PERSONAL_CLASSES.forEach((cls) => {
+      const item = { ...(defaults[cls] || {}), ...((saved.classes && saved.classes[cls]) || {}) };
+      classes[cls] = { source: item.source === 'manual' ? 'manual' : (cls === 'VC4' ? 'master' : (item.source === 'master' ? 'master' : 'manual')), rate: item.rate === '' || item.rate === null || item.rate === undefined ? '' : Number(item.rate) };
+    });
+    return { enabled: saved.enabled !== false, currentMonthOnly: saved.currentMonthOnly !== false, classes };
+  };
+  const gvPersonalClassOf = (row) => {
+    const cls = G.normClass ? G.normClass(row && row.cls) : clean(row && row.cls).toUpperCase().replace(/\s+/g, '');
+    return GV_PERSONAL_CLASSES.includes(cls) ? cls : '';
+  };
+  function buildGvPersonalCommission(masterRows, monthOverride, issuanceRows) {
+    const month = clean(monthOverride) || U.ymKey(new Date());
+    const settings = gvPersonalSettings();
+    const scoped = (masterRows || []).filter((r) => !month || r.ym === month);
+    // The public helper is also used by lightweight integrations that predate the EIR adapter.
+    // An omitted third argument means "no canonical adapter supplied"; the live page always
+    // passes an array from G.issuanceRows(), including an intentionally empty EIR result.
+    const canonical = Array.isArray(issuanceRows) ? issuanceRows.filter((r) => !month || r.ym === month) : scoped;
+    const people = new Map();
+    const ensurePerson = (r) => {
+      const agentId = clean(r.agentId), agentName = clean(r.agentName) || agentId;
+      const key = normId(agentId) || `N:${normName(agentName)}`;
+      if (!key) return null;
+      if (!people.has(key)) people.set(key, { agentId, agentName, tlName: clean(r.tlName) || 'Direct', tlId: clean(r.tlId), directAgent: false, classes: {} });
+      const person = people.get(key);
+      if (!person.agentId && agentId) person.agentId = agentId;
+      if (!person.agentName && agentName) person.agentName = agentName;
+      if (!person.tlName && r.tlName) person.tlName = clean(r.tlName);
+      return person;
+    };
+    scoped.forEach((r) => {
+      const cls = gvPersonalClassOf(r);
+      if (!cls) return;
+      // Agent ID is the primary key by design. Name is only a safe fallback for malformed rows
+      // that have no ID; it can never merge two different IDs.
+      const person = ensurePerson(r);
+      if (!person) return;
+      const current = person.classes[cls] || { cls, tags: 0, paidRows: 0, sheetCommission: 0, rateValues: new Map(), sourceRows: 0 };
+      current.sourceRows += 1;
+      const rawCommission = r.commission;
+      // gv.js preserves an explicit commissionHasValue=false when the source cell is blank;
+      // do not reinterpret its normalized zero as a real rate. Test fixtures without the flag
+      // remain backward-compatible and are treated as numeric source values.
+      const hasValue = gvRowHasCommission(r);
+      if (hasValue) {
+        const value = Number(rawCommission) || 0;
+        current.paidRows += 1; current.sheetCommission += value;
+        const rateKey = value.toFixed(8);
+        current.rateValues.set(rateKey, (current.rateValues.get(rateKey) || 0) + 1);
+      }
+      person.classes[cls] = current;
+      person.directAgent = person.directAgent || !!r.directAgent || directAgent(r);
+    });
+    // Tags come only from EIR. GV Master rows above contribute commission/operational fields,
+    // while this pass supplies quantity-aware class counts (including aggregated EIR rows).
+    canonical.forEach((r) => {
+      const cls = gvPersonalClassOf(r);
+      if (!cls) return;
+      const person = ensurePerson(r);
+      if (!person) return;
+      const current = person.classes[cls] || { cls, tags: 0, paidRows: 0, sheetCommission: 0, rateValues: new Map(), sourceRows: 0 };
+      current.tags += Math.max(0, Number(r.n) || 1);
+      person.classes[cls] = current;
+      person.directAgent = person.directAgent || !!r.directAgent || directAgent(r);
+    });
+    const agents = [...people.values()].map((person) => {
+      const classes = {};
+      let personalCommission = 0, sheetCommission = 0, hasPersonal = false, hasSheet = false;
+      const missing = [];
+      GV_PERSONAL_CLASSES.forEach((cls) => {
+        const raw = person.classes[cls] || { cls, tags: 0, paidRows: 0, sheetCommission: 0, rateValues: new Map(), sourceRows: 0 };
+        const setting = settings.classes[cls];
+        const rateList = [...raw.rateValues.keys()].map(Number);
+        const mixed = rateList.length > 1;
+        const masterRate = rateList.length === 1 ? rateList[0] : null;
+        let amount = null, rate = null, source = 'Not configured', status = raw.tags ? 'Rate missing' : 'No tags';
+        const sheetAmount = raw.paidRows ? raw.sheetCommission : null;
+        if (sheetAmount !== null) { sheetCommission += sheetAmount; hasSheet = true; }
+        if (settings.enabled !== false && setting.source === 'master') {
+          // Master mode is a row-faithful source. If a class has mixed rates, show the exact
+          // row sum and label it mixed rather than replacing it with an average.
+          if (sheetAmount !== null) { amount = sheetAmount; hasPersonal = true; }
+          rate = masterRate;
+          source = mixed ? 'GV Master · mixed rows' : sheetAmount !== null ? 'GV Master · exact row rate' : 'GV Master · commission blank';
+          status = !raw.tags ? 'No tags' : !raw.paidRows ? 'Commission blank in GV Master' : mixed ? 'Mixed rates · exact sum' : 'Matched agent ID + class';
+        } else if (settings.enabled !== false && setting.source === 'manual' && Number.isFinite(Number(setting.rate)) && setting.rate !== '') {
+          rate = Number(setting.rate); amount = raw.tags * rate; hasPersonal = true;
+          source = 'Manual setting'; status = raw.tags ? 'Configured' : 'No tags';
+        } else if (settings.enabled === false) {
+          status = raw.tags ? 'Personal table off' : 'No tags';
+        }
+        if (raw.tags && amount === null) missing.push(cls);
+        if (amount !== null) personalCommission += amount;
+        classes[cls] = {
+          cls, tags: raw.tags, paidRows: raw.paidRows, sheetCommission: sheetAmount, rate, masterRate,
+          personalCommission: amount, source, status, mixed, complete: raw.tags === 0 || (raw.paidRows === raw.tags && amount !== null)
+        };
+      });
+      const directRow = { agentId: person.agentId, agentName: person.agentName, tlId: person.tlId, tlName: person.tlName, channel: 'GV Partner' };
+      return {
+        agentId: person.agentId, agentName: person.agentName, tlId: person.tlId, tlName: person.directAgent ? 'Direct' : person.tlName,
+        directAgent: person.directAgent || directAgent(directRow), classes, personalCommission: hasPersonal ? personalCommission : null,
+        sheetCommission: hasSheet ? sheetCommission : null, missingClasses: missing, complete: missing.length === 0, month
+      };
+    }).sort((a, b) => (Number(b.personalCommission) || 0) - (Number(a.personalCommission) || 0) || (Number(b.sheetCommission) || 0) - (Number(a.sheetCommission) || 0) || String(a.agentName).localeCompare(String(b.agentName)));
+    const byId = new Map(); agents.forEach((a) => { if (a.agentId) byId.set(normId(a.agentId), a); });
+    const totals = { agents: agents.length, tags: 0, personalCommission: 0, sheetCommission: 0, configuredClasses: {}, missingRates: 0 };
+    GV_PERSONAL_CLASSES.forEach((cls) => { totals.configuredClasses[cls] = { tags: 0, personalCommission: 0, sheetCommission: 0, rateSource: settings.classes[cls].source }; });
+    agents.forEach((a) => GV_PERSONAL_CLASSES.forEach((cls) => { const c = a.classes[cls]; totals.tags += c.tags; totals.configuredClasses[cls].tags += c.tags; if (c.personalCommission !== null) { totals.personalCommission += c.personalCommission; totals.configuredClasses[cls].personalCommission += c.personalCommission; } if (c.sheetCommission !== null) { totals.sheetCommission += c.sheetCommission; totals.configuredClasses[cls].sheetCommission += c.sheetCommission; } if (c.tags && c.personalCommission === null) totals.missingRates += 1; }));
+    return { month, settings, agents, byId, totals, source: 'GV Master' };
+  }
+  const gvRowHasCommission = (row) => row && (row.commissionHasValue === true || (row.commissionHasValue === undefined && row.commission !== null && row.commission !== undefined && row.commission !== '' && Number.isFinite(Number(row.commission))));
+  const gvPersonalRowValue = (row, settings) => {
+    const cls = gvPersonalClassOf(row);
+    if (!cls || !settings || settings.enabled === false) return { cls, amount: null, source: 'Personal table off' };
+    const setting = settings.classes[cls] || {};
+    if (setting.source === 'master') return { cls, amount: gvRowHasCommission(row) ? (Number(row.commission) || 0) : null, source: 'GV Master' };
+    if (setting.source === 'manual' && setting.rate !== '' && Number.isFinite(Number(setting.rate))) return { cls, amount: Number(setting.rate), source: 'Manual setting' };
+    return { cls, amount: null, source: 'Rate not set' };
+  };
+  async function gvPersonalCommission(monthOverride) {
+    const [master] = await Promise.all([G.need('master'), S.need('daily').catch(() => [])]);
+    return buildGvPersonalCommission(master, monthOverride, G.issuanceRows ? G.issuanceRows() : undefined);
+  }
+
+  // Add-on analytics for the current personal payout view. They intentionally keep two values
+  // visible: GV Master exact commission and the configured personal amount. Manual rates must never
+  // overwrite the source amount silently, so unresolved rows stay null and are counted.
+  function gvCommissionDailyTrend(rows, settings) {
+    const map = new Map();
+    (rows || []).forEach((row) => {
+      const date = row && row.date instanceof Date ? row.date : (U.parseDate ? U.parseDate(row && row.date) : null);
+      if (!date || !Number.isFinite(date.getTime())) return;
+      const key = U.dateKey(date);
+      if (!map.has(key)) map.set(key, { key, date, tags: 0, agents: new Set(), sheetCommission: 0, personalCommission: 0, personalRows: 0, unresolvedRows: 0, classes: {} });
+      const day = map.get(key);
+      const n = gvIssuanceN(row);
+      day.tags += n; day.agents.add(normId(row.agentId) || normName(row.agentName) || 'UNKNOWN');
+      const cls = gvPersonalClassOf(row) || row.cls || 'NA'; day.classes[cls] = (day.classes[cls] || 0) + n;
+      if (gvRowHasCommission(row)) day.sheetCommission += Number(row.commission) || 0;
+      const personal = gvPersonalRowValue(row, settings || gvPersonalSettings());
+      if (personal.amount === null) day.unresolvedRows += 1;
+      else { day.personalRows += 1; day.personalCommission += personal.amount; }
+    });
+    const out = [...map.values()].sort((a, b) => a.date - b.date).map((day) => ({ ...day, agents: day.agents.size, personalCommission: day.personalRows ? day.personalCommission : null, classMix: classMix(day.classes) }));
+    return { days: out, totals: { days: out.length, tags: sum(out, (r) => r.tags), agents: new Set((rows || []).map((r) => normId(r.agentId) || normName(r.agentName)).filter(Boolean)).size, sheetCommission: sum(out, (r) => r.sheetCommission), personalCommission: sum(out, (r) => r.personalCommission), unresolvedRows: sum(out, (r) => r.unresolvedRows) } };
+  }
+  function gvCommissionTlSummary(agents) {
+    const map = new Map();
+    (agents || []).forEach((agent) => {
+      const direct = !!agent.directAgent;
+      const label = direct ? 'Direct Agents' : (clean(agent.tlName) || (clean(agent.tlId) ? `TL ${clean(agent.tlId)}` : 'Direct / Unmapped'));
+      const key = direct ? 'DIRECT' : (normId(agent.tlId) ? `ID:${normId(agent.tlId)}` : `NAME:${normName(label) || 'UNMAPPED'}`);
+      if (!map.has(key)) map.set(key, { key, label, agents: 0, tags: 0, pricedTags: 0, personalCommission: 0, hasPersonal: false, sheetCommission: 0, hasSheet: false, missingAgents: 0, classes: {}, topAgent: null });
+      const group = map.get(key); group.agents += 1;
+      const personal = agent.personalCommission === null || agent.personalCommission === undefined ? null : Number(agent.personalCommission);
+      const sheet = agent.sheetCommission === null || agent.sheetCommission === undefined ? null : Number(agent.sheetCommission);
+      if (personal !== null && Number.isFinite(personal)) { group.personalCommission += personal; group.hasPersonal = true; }
+      if (sheet !== null && Number.isFinite(sheet)) { group.sheetCommission += sheet; group.hasSheet = true; }
+      if (agent.missingClasses && agent.missingClasses.length) group.missingAgents += 1;
+      GV_PERSONAL_CLASSES.forEach((cls) => { const cell = agent.classes && agent.classes[cls]; const tags = Number(cell && cell.tags) || 0; group.tags += tags; group.classes[cls] = (group.classes[cls] || 0) + tags; const priced = cell && String(cell.source || '').startsWith('GV Master') ? Math.min(tags, Number(cell.paidRows) || 0) : (tags && cell && cell.personalCommission !== null && cell.personalCommission !== undefined ? tags : 0); group.pricedTags += priced; });
+      if (personal !== null && Number.isFinite(personal) && (!group.topAgent || personal > group.topAgent.amount)) group.topAgent = { name: agent.agentName || agent.agentId || 'Unknown agent', id: agent.agentId || '', amount: personal };
+    });
+    return [...map.values()].map((group) => ({ ...group, personalCommission: group.hasPersonal ? group.personalCommission : null, sheetCommission: group.hasSheet ? group.sheetCommission : null, coveragePct: group.tags ? (group.pricedTags / group.tags) * 100 : 0, difference: group.hasPersonal && group.hasSheet ? group.personalCommission - group.sheetCommission : null, classMix: classMix(group.classes) })).sort((a, b) => (Number(b.personalCommission) || 0) - (Number(a.personalCommission) || 0) || (Number(b.sheetCommission) || 0) - (Number(a.sheetCommission) || 0) || b.tags - a.tags || a.label.localeCompare(b.label));
+  }
+  function gvCommissionAgentRanking(agents) {
+    const rows = (agents || []).map((agent) => {
+      let tags = 0, pricedTags = 0, classCount = 0;
+      GV_PERSONAL_CLASSES.forEach((cls) => { const cell = agent.classes && agent.classes[cls]; const n = Number(cell && cell.tags) || 0; tags += n; if (n) classCount += 1; const priced = cell && String(cell.source || '').startsWith('GV Master') ? Math.min(n, Number(cell.paidRows) || 0) : (n && cell && cell.personalCommission !== null && cell.personalCommission !== undefined ? n : 0); pricedTags += priced; });
+      const personal = agent.personalCommission === null || agent.personalCommission === undefined ? null : Number(agent.personalCommission);
+      const sheet = agent.sheetCommission === null || agent.sheetCommission === undefined ? null : Number(agent.sheetCommission);
+      const coveragePct = tags ? (pricedTags / tags) * 100 : 0;
+      return { agentId: agent.agentId || '', agentName: agent.agentName || agent.agentId || 'Unknown agent', tlName: agent.directAgent ? 'Direct Agents' : (agent.tlName || 'Direct / Unmapped'), directAgent: !!agent.directAgent, tags, classCount, pricedTags, personalCommission: personal, sheetCommission: sheet, coveragePct, personalRate: personal !== null && pricedTags ? personal / pricedTags : null, exactRate: sheet !== null && tags ? sheet / tags : null, missingClasses: agent.missingClasses || [], status: agent.missingClasses && agent.missingClasses.length ? `Partial · ${agent.missingClasses.join(', ')}` : coveragePct < 100 ? `Partial · ${coveragePct.toFixed(0)}% source coverage` : 'Complete' };
+    }).sort((a, b) => (a.personalCommission === null) - (b.personalCommission === null) || (Number(b.personalCommission) || 0) - (Number(a.personalCommission) || 0) || b.tags - a.tags || a.agentName.localeCompare(b.agentName));
+    let payoutRank = 0;
+    return rows.map((row, index) => ({ ...row, rank: index + 1, payoutRank: row.personalCommission === null ? null : ++payoutRank }));
+  }
+
+  const GV_DAILY_HEADERS = ['Date', 'Agents', 'Tags', 'GV Master exact commission', 'Personal configured commission', 'Unresolved rows', 'Class mix'];
+  const gvDailyExportRows = (rows) => (rows || []).map((r) => [r.key, r.agents, r.tags, r.sheetCommission, r.personalCommission === null ? '' : r.personalCommission, r.unresolvedRows, r.classMix]);
+  const GV_TL_HEADERS = ['TL / Direct', 'Agents', 'Tags', 'Personal configured commission', 'GV Master exact commission', 'Difference', 'Rate coverage %', 'Missing-rate agents', 'Top agent', 'Class mix'];
+  const gvTlExportRows = (rows) => (rows || []).map((r) => [r.label, r.agents, r.tags, r.personalCommission === null ? '' : r.personalCommission, r.sheetCommission === null ? '' : r.sheetCommission, r.difference === null ? '' : r.difference, r.coveragePct, r.missingAgents, r.topAgent ? r.topAgent.name : '', r.classMix]);
+  const GV_RANK_HEADERS = ['Rank', 'Agent ID', 'Agent', 'TL / Direct', 'Tags', 'Classes', 'Personal configured commission', 'GV Master exact commission', 'Configured ₹ / priced tag', 'Exact ₹ / tag', 'Rate coverage %', 'Status'];
+  const gvRankingExportRows = (rows) => (rows || []).map((r) => [r.rank, r.agentId, r.agentName, r.tlName, r.tags, r.classCount, r.personalCommission === null ? '' : r.personalCommission, r.sheetCommission === null ? '' : r.sheetCommission, r.personalRate === null ? '' : r.personalRate, r.exactRate === null ? '' : r.exactRate, r.coveragePct, r.status]);
+
   // ---- GV commission · separate board per vehicle class (VC4 / VC20 / VC5+) ----------------------
   // Class group GV Master ke `group` field se aata hai (VC4 · VC20 · VC5+), isliye VC5/VC12/VC16
   // sab "VC5+" board me aate hain aur exact class breakdown board ke andar dikhta hai.
@@ -658,19 +881,25 @@ FF.pages = FF.pages || {};
   ];
   const classBoardId = (key) => `gvc-class-${String(key).replace(/[^A-Za-z0-9]/g, '').toLowerCase()}`;
   const GV_CLASS_HEADERS = ['#', 'Agent', 'Agent ID', 'TL / Direct', 'Tags', 'Amount', 'Commission', 'Commission / tag', 'Effective rate %', 'Share of class %'];
+  const GV_PERSONAL_HEADERS = ['Agent ID', 'Agent', 'TL / Direct', ...GV_PERSONAL_CLASSES.flatMap((cls) => [`${cls} tags`, `${cls} rate (₹/tag)`, `${cls} personal commission`, `${cls} GV Master commission`]), 'Personal commission total', 'GV Master exact total', 'Missing / status'];
+  const personalMoney = (value) => value === null || value === undefined ? '—' : money(value, 2);
+  const personalRate = (value) => value === null || value === undefined ? '—' : money(value, 4);
+  const gvPersonalExportRows = (agents) => (agents || []).map((a) => [a.agentId || '', a.agentName || '', a.directAgent ? 'Direct' : (a.tlName || '—'), ...GV_PERSONAL_CLASSES.flatMap((cls) => { const c = a.classes[cls] || {}; return [c.tags || 0, c.rate === null || c.rate === undefined ? '' : c.rate, c.personalCommission === null || c.personalCommission === undefined ? '' : c.personalCommission, c.sheetCommission === null || c.sheetCommission === undefined ? '' : c.sheetCommission]; }), a.personalCommission === null || a.personalCommission === undefined ? '' : a.personalCommission, a.sheetCommission === null || a.sheetCommission === undefined ? '' : a.sheetCommission, a.missingClasses && a.missingClasses.length ? `Missing rate: ${a.missingClasses.join(', ')}` : 'Complete']);
+  const gvPersonalClassCell = (c) => `<div class="personal-class-cell"><b>${c.tags ? U.fmt(c.tags) : '—'} tags · ${personalMoney(c.personalCommission)}</b><small class="pc-rate">${c.rate === null || c.rate === undefined ? (c.mixed ? 'Mixed rates' : 'Rate not set') : `${personalRate(c.rate)} / tag`}</small><small class="pc-source">${esc(c.source || '')}${c.sheetCommission !== null && c.sheetCommission !== undefined && c.personalCommission !== c.sheetCommission ? ` · sheet ${personalMoney(c.sheetCommission)}` : ''}</small></div>`;
 
   function gvClassBoard(def, rows, totals, aggFn) {
     const agents = (aggFn || aggregateGv)(rows, 'agent');
     const amount = sum(rows, (r) => r.amount);
     const commission = sum(rows, (r) => r.commission);
     const populated = rows.filter((r) => r.commissionHasValue === true).length;
+    const issuances = gvIssuanceTotal(rows);
     const share = totals.commission ? (commission / totals.commission) * 100 : 0;
-    const perTag = rows.length ? commission / rows.length : 0;
+    const perTag = populated ? commission / populated : 0;
     const exact = [...new Set(rows.map((r) => r.cls).filter(Boolean))].sort();
-    const uniqueAll = new Set(rows.map((r) => normBarcode(r.tagId || r.serial || '')).filter(Boolean)).size || rows.length;
+    const uniqueAll = issuances;
     const csvId = classBoardId(def.key);
     const head = `<div class="board-head"><span class="board-icon">${def.icon}</span><div><h3>${esc(def.title)}</h3><div class="board-sub">${esc(def.note)}${exact.length ? ` · sheet classes: ${esc(exact.join(', '))}` : ''}</div></div><div class="board-stats">
-      <div><small>Tags (unique)</small><b>${U.fmt(rows.length)}${uniqueAll !== rows.length ? ` <small class="dim">/ ${U.fmt(uniqueAll)}</small>` : ''}</b></div>
+      <div><small>Tags (unique)</small><b>${U.fmt(issuances)}</b></div>
       <div><small>Agents</small><b>${U.fmt(agents.length)}</b></div>
       <div><small>Commission (sum)</small><b>${money(commission, 2)}</b></div>
       <div><small>₹ / tag (avg)</small><b>${money(perTag, 2)}</b></div>
@@ -681,7 +910,7 @@ FF.pages = FF.pages || {};
       const rowClass = r.issuances >= 3 && r.perTag <= 0 ? ' class="dup-row"' : '';
       return `<tr${rowClass}><td>${i + 1}</td><td><b class="agent-link" data-agent360="${esc(r.agentLabel || r.label)}" data-agent360-id="${esc(r.id || '')}" title="Agent 360 kholo">${esc(r.agentLabel || r.label)}</b>${directAgent(r) ? `<small>Direct agent</small>` : ''}</td><td>${esc(r.id || '—')}</td><td>${esc(tlLabelOf(r, 'gv'))}</td><td class="num"><span class="tag-count">${U.fmt(r.issuances)}</span></td><td class="num">${money(r.amount, 2)}</td><td class="num"><b>${money(r.commission, 2)}</b></td><td class="num">${money(r.perTag, 2)}</td><td class="num">${r.effectiveRate.toFixed(2)}%</td><td class="num">${commission ? ((r.commission / commission) * 100).toFixed(1) : '0.0'}%</td></tr>`;
     }).join('');
-    const foot = `<tr class="row-total"><td colspan="4">Class total · ${esc(def.key)}</td><td class="num">${U.fmt(rows.length)}</td><td class="num">${money(amount, 2)}</td><td class="num">${money(commission, 2)}</td><td class="num">${money(perTag, 2)}</td><td class="num">${ratePct(commission, amount).toFixed(2)}%</td><td class="num">100.0%</td></tr>`;
+    const foot = `<tr class="row-total"><td colspan="4">Class total · ${esc(def.key)}</td><td class="num">${U.fmt(issuances)}</td><td class="num">${money(amount, 2)}</td><td class="num">${money(commission, 2)}</td><td class="num">${money(perTag, 2)}</td><td class="num">${ratePct(commission, amount).toFixed(2)}%</td><td class="num">100.0%</td></tr>`;
     return `<div class="class-board tone-${def.tone}">${head}<div class="board-body">
       <div class="board-actions"><button class="btn small" id="${csvId}-csv">⬇ ${esc(def.key)} agent CSV</button><span class="dim small">${U.fmt(populated)}/${U.fmt(rows.length)} rows me sheet commission value present hai${populated < rows.length ? ' · baki rows blank (dashboard koi rate guess nahi karta)' : ''}</span></div>
       <div class="table-wrap"><table class="data-table ins-table" id="${csvId}-table"><thead><tr>${GV_CLASS_HEADERS.map((h, i) => `<th${i > 3 ? ' class="num"' : ''}>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody><tfoot>${foot}</tfoot></table></div>
@@ -691,10 +920,12 @@ FF.pages = FF.pages || {};
   async function renderGvCommission(root, params) {
     // v3.8.3: instant-open — blank screen ki jagah header turant dikhta hai.
     root.innerHTML = head('₹', 'GV Commission Intelligence', 'GV commission intelligence khul rahi hai…');
-    const master = await G.need('master');
+    const [master] = await Promise.all([G.need('master'), S.need('daily').catch(() => [])]);
+    const issuance = G.issuanceRows ? G.issuanceRows() : [];
     if (!root.isConnected) return;
-    const months = G.months ? G.months() : [...new Set(master.map((r) => r.ym))].sort();
-    const month = months.includes(params.month) ? params.month : (months.at(-1) || U.ymKey(new Date()));
+    const months = G.months ? G.months() : [...new Set(issuance.map((r) => r.ym))].sort();
+    const currentMonth = U.ymKey(new Date());
+    const month = months.includes(params.month) ? params.month : (months.includes(currentMonth) ? currentMonth : (months.at(-1) || currentMonth));
     const period = ['today', '7', '15', '30', 'month', 'custom'].includes(String(params.period)) ? String(params.period) : 'month';
     const group = ['agent', 'tl', 'class', 'weekday', 'day', 'agentClass'].includes(params.group) ? params.group : 'agentClass';
     const segment = ['all', 'direct', 'managed'].includes(params.segment) ? params.segment : 'all';
@@ -702,8 +933,35 @@ FF.pages = FF.pages || {};
     const today = new Date(); today.setHours(23, 59, 59, 999);
     const from = new Date(today); from.setHours(0, 0, 0, 0); if (['7','15','30'].includes(period)) from.setDate(from.getDate() - (Number(period) - 1));
     const customFrom = params.from ? U.parseDate(params.from) : null, customTo = params.to ? U.parseDate(params.to) : null; if (customTo) customTo.setHours(23,59,59,999);
-    const base = master.filter((r) => period === 'month' ? r.ym === month : period === 'custom' ? (r.date && customFrom && customTo && r.date >= customFrom && r.date <= customTo) : (r.date && r.date >= from && r.date <= today));
-    const filtered = base.filter((r) => (segment === 'direct' ? directAgent(r) : segment === 'managed' ? !directAgent(r) : true) && (!q || [r.agentId, r.agentName, r.tlId, r.tlName, r.cls, r.tagId].join(' ').toLowerCase().includes(q)));
+    const inPeriod = (r) => period === 'month' ? r.ym === month : period === 'custom' ? (r.date && customFrom && customTo && r.date >= customFrom && r.date <= customTo) : (r.date && r.date >= from && r.date <= today);
+    const base = master.filter(inPeriod);
+    const issuanceBase = issuance.filter(inPeriod);
+    const matches = (r) => (segment === 'direct' ? directAgent(r) : segment === 'managed' ? !directAgent(r) : true) && (!q || [r.agentId, r.agentName, r.tlId, r.tlName, r.cls, r.tagId].join(' ').toLowerCase().includes(q));
+    const filteredIssuance = issuanceBase.filter(matches);
+    // Commission/amount remain row-faithful to GV Master; issuanceN is the EIR quantity for
+    // each matching date × agent × class bucket. No report or GV row length is used as tags.
+    const filtered = attachGvIssuanceCounts(base.filter(matches), filteredIssuance);
+    const personal = buildGvPersonalCommission(master, currentMonth, issuance);
+    const personalRows = personal.agents.filter((a) => (segment === 'direct' ? a.directAgent : segment === 'managed' ? !a.directAgent : true) && (!q || [a.agentId, a.agentName, a.tlId, a.tlName].join(' ').toLowerCase().includes(q)));
+    // Add-ons 7/8/9: daily exact-source trend, current-month TL summary and payout ranking.
+    const dailyTrend = gvCommissionDailyTrend(filtered, personal.settings);
+    const tlSummary = gvCommissionTlSummary(personalRows);
+    const agentRanking = gvCommissionAgentRanking(personalRows);
+    const rankingKnown = agentRanking.filter((r) => r.personalCommission !== null);
+    const trendTitle = period === 'month' ? U.labelYM(month) : period === 'custom' ? 'Custom range' : period === 'today' ? 'Today' : `Last ${period} days`;
+    const dailyChart = dailyTrend.days.length && C && C.lines ? C.lines({
+      labels: dailyTrend.days.map((r) => dateText(r.date).replace(/,?\s*\d{4}$/, '')),
+      tipLabels: dailyTrend.days.map((r) => `${dateText(r.date)} · ${U.fmt(r.tags)} tags`),
+      series: [
+        { name: 'GV Master exact', values: dailyTrend.days.map((r) => r.sheetCommission), color: '#0ea5e9', area: true },
+        { name: 'Personal configured', values: dailyTrend.days.map((r) => r.personalCommission), color: '#10b981', dash: true, area: false }
+      ],
+      height: 220, format: (v) => money(v, 0)
+    }) : empty('Daily trend unavailable', 'Selected period me valid dated GV Master rows nahi mile.');
+    const rankingChart = rankingKnown.length && C && C.hbars ? C.hbars({
+      items: rankingKnown.slice(0, 5).map((r) => ({ label: r.agentName, sub: `${U.fmt(r.tags)} tags · ${r.coveragePct.toFixed(0)}% coverage`, value: r.personalCommission })),
+      format: (v) => money(v, 0), valueLabel: 'Personal payout'
+    }) : empty('Ranking unavailable', 'Personal rate configured rows aane par ranking yahan dikhegi.');
     
     // Memoize aggregateGv calls on the same filtered data to avoid recomputation
     const aggCache = new Map();
@@ -729,12 +987,12 @@ FF.pages = FF.pages || {};
     const totalAmount = sum(filtered, (r) => r.amount), totalCommission = sum(filtered, (r) => r.commission);
     const activeDays = new Set(filtered.filter((r) => r.date).map((r) => U.dateKey(r.date))).size;
     const direct = filtered.filter(directAgent), managed = filtered.filter((r) => !directAgent(r));
-    const classTotals = { amount: totalAmount, commission: totalCommission, count: filtered.length };
+    const classTotals = { amount: totalAmount, commission: totalCommission, count: gvIssuanceTotal(filtered) };
     const boards = GV_CLASS_BOARDS.map((def) => ({ def, rows: filtered.filter((r) => (r.group || (G.classGroup ? G.classGroup(r.cls) : r.cls)) === def.key) }));
     const boardRowsFor = (def) => boards.find((b) => b.def.key === def.key) || { def, rows: [] };
     const matrix = gvClassMatrix(filtered);
     const gvGroupCommission = { VC4: sum(filtered.filter((r) => (r.group || (G.classGroup ? G.classGroup(r.cls) : r.cls)) === 'VC4'), (r) => r.commission), VC20: sum(filtered.filter((r) => (r.group || (G.classGroup ? G.classGroup(r.cls) : r.cls)) === 'VC20'), (r) => r.commission), 'VC5+': sum(filtered.filter((r) => !['VC4', 'VC20'].includes(r.group || (G.classGroup ? G.classGroup(r.cls) : r.cls))), (r) => r.commission) };
-    const gvUniqueTotal = new Set(filtered.map((r) => normBarcode(r.tagId || r.serial || '')).filter(Boolean)).size;
+    const gvUniqueTotal = gvIssuanceTotal(filtered);
     // Class-wise ₹/tag rate — GV Master commission column se (sum ÷ rows jisme value hai).
     const gvClassGroupOf = (r) => r.group || (G.classGroup ? G.classGroup(r.cls) : r.cls);
     const gvRateFor = (key) => {
@@ -746,7 +1004,7 @@ FF.pages = FF.pages || {};
     const classList = [...new Set(filtered.map((r) => r.cls || 'NA'))].map((cls) => {
       const list = filtered.filter((r) => (r.cls || 'NA') === cls);
       const top = agg(list, 'agent')[0];
-      return { cls, group: G.classGroup ? G.classGroup(cls) : cls, tags: list.length, amount: sum(list, (r) => r.amount), commission: sum(list, (r) => r.commission), agents: new Set(list.map((r) => r.agentId)).size, top: top ? top.agentLabel : '—' };
+      return { cls, group: G.classGroup ? G.classGroup(cls) : cls, tags: gvIssuanceTotal(list), amount: sum(list, (r) => r.amount), commission: sum(list, (r) => r.commission), agents: new Set(list.map((r) => r.agentId)).size, top: top ? top.agentLabel : '—' };
     }).sort((a, b) => b.commission - a.commission || b.tags - a.tags);
     const actions = `${exportButtons('gvc-export')} ${printButton}`;
     root.innerHTML = head('₹', 'GV Commission Intelligence', 'GV Master se exact amount, issuance aur commission · VC4 / VC20 / VC5+ har class ka alag board, agent, TL/direct, date aur weekday analysis', actions) + `
@@ -760,13 +1018,37 @@ FF.pages = FF.pages || {};
         <form id="gvc-search" class="ins-search"><input class="input" name="q" value="${esc(params.q || '')}" placeholder="Agent, TL, ID, class…"><button class="btn">Search</button></form>
       </div>
       ${vividMetrics([
-        { label: 'Tag issuances', value: U.fmt(filtered.length), foot: `${U.fmt(new Set(filtered.map((r) => r.agentId)).size)} agents · ${activeDays ? (filtered.length / activeDays).toFixed(1) : '0'} / active day`, tone: 'g1', icon: '🏷️' },
-        { label: 'Transaction amount', value: money(totalAmount), foot: `${money(filtered.length ? totalAmount / filtered.length : 0, 2)} / tag`, tone: 'g3', icon: '💳' },
+        { label: 'Tag issuances', value: U.fmt(gvIssuanceTotal(filtered)), foot: `${U.fmt(new Set(filtered.map((r) => r.agentId)).size)} agents · ${activeDays ? (gvIssuanceTotal(filtered) / activeDays).toFixed(1) : '0'} / active day · EIR`, tone: 'g1', icon: '🏷️' },
+        { label: 'Transaction amount', value: money(totalAmount), foot: `${money(gvIssuanceTotal(filtered) ? totalAmount / gvIssuanceTotal(filtered) : 0, 2)} / EIR tag`, tone: 'g3', icon: '💳' },
         { label: 'Earned commission (exact sum)', value: money(totalCommission, 2), foot: `VC4 ${money(gvGroupCommission.VC4, 2)} · VC20 ${money(gvGroupCommission.VC20, 2)} · VC5+ ${money(gvGroupCommission['VC5+'], 2)} — koi average nahi`, tone: 'g5', icon: '💰' },
         { label: 'Effective commission rate', value: `${ratePct(totalCommission, totalAmount).toFixed(2)}%`, foot: 'Commission ÷ amount · descriptive, not an assumed tariff', tone: 'g8', icon: '📈' },
-        { label: 'Class commission (VC4 / VC20 / VC5+)', value: `${money(gvGroupCommission.VC4, 0)} <small>/ ${money(gvGroupCommission.VC20, 0)} / ${money(gvGroupCommission['VC5+'], 0)}</small>`, foot: boards.map((b) => `${b.def.key} ${U.fmt(b.rows.length)} tags${(() => { const u = new Set(b.rows.map((r) => normBarcode(r.tagId || r.serial || '')).filter(Boolean)).size; return u && u !== b.rows.length ? ` (${U.fmt(u)} unique)` : ''; })()}`).join(' · '), tone: 'g6', icon: '🚗' },
+        { label: 'Class commission (VC4 / VC20 / VC5+)', value: `${money(gvGroupCommission.VC4, 0)} <small>/ ${money(gvGroupCommission.VC20, 0)} / ${money(gvGroupCommission['VC5+'], 0)}</small>`, foot: boards.map((b) => `${b.def.key} ${U.fmt(gvIssuanceTotal(b.rows))} EIR tags`).join(' · '), tone: 'g6', icon: '🚗' },
         { label: 'Class commission variance flags', value: U.fmt(commissionAnomalies.length), foot: '±30% vs class median · min 3 tags per agent', tone: commissionAnomalies.length ? 'g7' : 'g9', icon: '🚨' }
       ])}
+      <div class="card card-primary gv-personal-commission"><div class="card-head"><h3>👤 Personal agent commission · current month ${esc(U.labelYM(currentMonth))}</h3><span class="dim small">${U.fmt(personalRows.length)} agents · ${personal.settings.enabled ? 'personal payout ON' : 'personal payout OFF'}</span><button class="btn small" id="gvc-personal-csv">⬇ Personal commission CSV</button></div>
+        <p class="dim small">Exact match: <b>Agent ID → class → rate</b>. VC4 ka default source <b>GV Master commission column</b> hai — current month ke same agent ID + VC4 rows se jo rate/value hai wahi dikh raha hai. <b>Na kuch ghata hai, na badha hai, na average banaya hai.</b> Manual class rate blank ho to “Rate not set” rahega.</p>
+        <div class="gv-personal-config-summary">${GV_PERSONAL_CLASSES.map((cls) => { const c = personal.settings.classes[cls]; return `<span class="source-chip">${cls} · ${c.source === 'master' ? 'GV Master auto' : (c.rate === '' ? 'Manual: not set' : `Manual ${personalRate(Number(c.rate))}/tag`)}</span>`; }).join('')}</div>
+        <div class="table-wrap"><table class="data-table ins-table gv-personal-table"><thead><tr><th class="tone-blue">Agent ID</th><th class="tone-blue">Agent</th><th class="tone-blue">TL / Direct</th>${GV_PERSONAL_CLASSES.map((cls) => `<th class="tone-blue">${cls}<br><small>tags · personal ₹ · rate</small></th>`).join('')}<th class="tone-blue num">Personal total</th><th class="tone-blue num">GV Master exact</th><th class="tone-blue">Status</th></tr></thead><tbody>
+          ${personalRows.map((a) => `<tr><td><code>${esc(a.agentId || '—')}</code></td><td><b class="agent-link" data-agent360="${esc(a.agentName || a.agentId)}" data-agent360-id="${esc(a.agentId || '')}" title="Agent 360 kholo">${esc(a.agentName || a.agentId)}</b></td><td>${esc(a.directAgent ? 'Direct' : (a.tlName || '—'))}</td>${GV_PERSONAL_CLASSES.map((cls) => `<td>${gvPersonalClassCell(a.classes[cls] || { tags: 0, rate: null, personalCommission: null, source: 'No tags' })}</td>`).join('')}<td class="num personal-total"><b>${personalMoney(a.personalCommission)}</b></td><td class="num">${personalMoney(a.sheetCommission)}</td><td>${a.missingClasses.length ? statusPill(`Rate missing: ${a.missingClasses.join(', ')}`, 'amber') : statusPill('Complete', 'green')}</td></tr>`).join('') || `<tr><td colspan="${3 + GV_PERSONAL_CLASSES.length + 3}">${empty(`Current month ${U.labelYM(currentMonth)} me personal rows nahi`, personal.currentMonthOnly ? 'GV Master me current month ka data aane par yahan agent-wise commission dikhega.' : 'GV Master se matching rows nahi mili.')}</td></tr>`}
+        </tbody>${personalRows.length ? `<tfoot><tr class="row-total"><td colspan="3">Current month total · ${U.fmt(personalRows.length)} agents</td>${GV_PERSONAL_CLASSES.map((cls) => { const c = personal.totals.configuredClasses[cls]; return `<td class="num"><b>${U.fmt(c.tags)} tags</b><small>${personalMoney(c.personalCommission)}</small></td>`; }).join('')}<td class="num"><b>${personalMoney(personal.totals.personalCommission)}</b></td><td class="num">${personalMoney(personal.totals.sheetCommission)}</td><td>${personal.totals.missingRates ? statusPill(`${personal.totals.missingRates} class rates missing`, 'amber') : statusPill('All configured', 'green')}</td></tr></tfoot>` : ''}</table></div>
+      </div>
+      <div class="commission-addon-grid">
+        <div class="card card-primary commission-trend-card span2"><div class="card-head"><h3>📈 Daily commission trend · ${esc(trendTitle)}</h3><span class="dim small">${U.fmt(dailyTrend.days.length)} active days · exact source + configured payout</span><button class="btn small" id="gvc-daily-csv">⬇ Daily trend CSV</button></div>
+          <p class="dim small">Blue line = <b>GV Master exact commission</b>. Green dashed line = configured personal commission; manual rate missing ho to day unresolved count me dikhega, koi rate guess nahi hota.</p>
+          ${dailyChart}
+          <div class="table-wrap"><table class="data-table ins-table"><thead><tr><th class="tone-blue">Date</th><th class="tone-blue num">Agents</th><th class="tone-blue num">Tags</th><th class="tone-blue num">GV Master exact</th><th class="tone-blue num">Personal configured</th><th class="tone-blue num">Unresolved</th><th class="tone-blue">Class mix</th></tr></thead><tbody>${dailyTrend.days.map((r) => `<tr><td><b>${esc(dateText(r.date))}</b></td><td class="num">${U.fmt(r.agents)}</td><td class="num">${U.fmt(r.tags)}</td><td class="num"><b>${money(r.sheetCommission, 2)}</b></td><td class="num">${personalMoney(r.personalCommission)}</td><td class="num">${r.unresolvedRows ? statusPill(U.fmt(r.unresolvedRows), 'amber') : statusPill('0', 'green')}</td><td class="small">${esc(r.classMix)}</td></tr>`).join('') || `<tr><td colspan="7">${empty('No dated commission rows', 'Selected period me daily trend ke liye valid date nahi mili.')}</td></tr>`}</tbody></table></div>
+        </div>
+        <div class="card card-info commission-addon-card"><div class="card-head"><h3>👥 TL-wise personal payout summary</h3><span class="dim small">Current month · ${U.fmt(tlSummary.length)} groups</span><button class="btn small" id="gvc-tl-csv">⬇ TL CSV</button></div>
+          <p class="dim small">Personal configured payout aur GV Master exact source ko alag rakha gaya hai. Coverage batata hai kitne tags ka rate configured hai.</p>
+          <div class="table-wrap"><table class="data-table ins-table"><thead><tr><th class="tone-violet">TL / Direct</th><th class="tone-violet num">Agents</th><th class="tone-violet num">Tags</th><th class="tone-violet num">Personal payout</th><th class="tone-violet num">GV Master exact</th><th class="tone-violet num">Difference</th><th class="tone-violet num">Coverage</th><th class="tone-violet num">Missing agents</th><th class="tone-violet">Top agent</th></tr></thead><tbody>${tlSummary.map((r) => `<tr><td><b>${esc(r.label)}</b><small>${esc(r.classMix)}</small></td><td class="num">${U.fmt(r.agents)}</td><td class="num">${U.fmt(r.tags)}</td><td class="num"><b>${personalMoney(r.personalCommission)}</b></td><td class="num">${personalMoney(r.sheetCommission)}</td><td class="num">${r.difference === null ? '—' : `${r.difference > 0 ? '+' : ''}${money(r.difference, 2)}`}</td><td class="num">${statusPill(`${r.coveragePct.toFixed(0)}%`, r.coveragePct >= 100 ? 'green' : 'amber')}</td><td class="num">${r.missingAgents ? statusPill(U.fmt(r.missingAgents), 'amber') : statusPill('0', 'green')}</td><td>${r.topAgent ? `<b>${esc(r.topAgent.name)}</b><small>${esc(r.topAgent.id)} · ${money(r.topAgent.amount, 2)}</small>` : '—'}</td></tr>`).join('') || `<tr><td colspan="9">${empty('No TL summary', 'Current month ke personal rows available nahi hain.')}</td></tr>`}</tbody></table></div>
+        </div>
+        <div class="card card-warning commission-addon-card"><div class="card-head"><h3>🏅 Agent performance ranking</h3><span class="dim small">Personal payout rank · top ${Math.min(20, agentRanking.length)} of ${U.fmt(agentRanking.length)}</span><button class="btn small" id="gvc-ranking-csv">⬇ Ranking CSV</button></div>
+          <p class="dim small">Ranking pehle configured personal payout par, phir tags par hai. Partial rows ko status aur rate coverage ke saath dikhaya gaya hai.</p>
+          ${rankingChart}
+          <div class="table-wrap"><table class="data-table ins-table"><thead><tr><th class="tone-amber num">Rank</th><th class="tone-amber">Agent</th><th class="tone-amber">TL / Direct</th><th class="tone-amber num">Tags</th><th class="tone-amber num">Personal payout</th><th class="tone-amber num">GV Master exact</th><th class="tone-amber num">₹ / priced tag</th><th class="tone-amber num">Coverage</th><th class="tone-amber">Status</th></tr></thead><tbody>${agentRanking.slice(0, 20).map((r) => `<tr><td class="num"><b>${r.payoutRank || '—'}</b></td><td><b class="agent-link" data-agent360="${esc(r.agentName)}" data-agent360-id="${esc(r.agentId)}" title="Agent 360 kholo">${esc(r.agentName)}</b><small>${esc(r.agentId || '')}</small></td><td>${esc(r.tlName)}</td><td class="num">${U.fmt(r.tags)}</td><td class="num"><b>${personalMoney(r.personalCommission)}</b></td><td class="num">${personalMoney(r.sheetCommission)}</td><td class="num">${r.personalRate === null ? '—' : money(r.personalRate, 2)}</td><td class="num">${statusPill(`${r.coveragePct.toFixed(0)}%`, r.coveragePct >= 100 ? 'green' : 'amber')}</td><td>${statusPill(r.status, r.coveragePct >= 100 ? 'green' : 'amber')}</td></tr>`).join('') || `<tr><td colspan="9">${empty('No agent ranking', 'Current month ke personal rows available nahi hain.')}</td></tr>`}</tbody></table></div>
+          ${agentRanking.length > 20 ? `<p class="dim small">Top 20 yahan dikh rahe hain; <b>Ranking CSV</b> me poore ${U.fmt(agentRanking.length)} agents hain.</p>` : ''}
+        </div>
+      </div>
       <div class="card card-primary"><div class="card-head"><h3>🧮 Agent × class commission · VC4 / VC20 / VC5+ alag</h3><span class="dim small">Commission = sheet ka exact sum · <b>₹/tag rate = GV Master commission column se</b> (class-wise)${gvUniqueTotal && gvUniqueTotal !== filtered.length ? ` · ${U.fmt(filtered.length)} rows me ${U.fmt(gvUniqueTotal)} unique tags` : ''}</span><button class="btn small" id="gvc-matrix-csv">⬇ Matrix CSV</button></div>
         <div class="table-wrap"><table class="data-table ins-table"><thead><tr><th class="tone-violet">Agent</th><th class="tone-violet">TL / Direct</th><th class="tone-violet num">VC4 tags</th><th class="tone-violet num">VC4 commission · rate</th><th class="tone-violet num">VC20 tags</th><th class="tone-violet num">VC20 commission · rate</th><th class="tone-violet num">VC5+ tags</th><th class="tone-violet num">VC5+ commission · rate</th><th class="tone-violet">VC5+ · exact class split</th><th class="tone-violet num">Total commission</th></tr></thead><tbody>
         ${matrix.map((m) => {
@@ -788,6 +1070,7 @@ FF.pages = FF.pages || {};
         <div class="table-wrap"><table class="data-table ins-table" id="gvc-table"><thead><tr>${group === 'agentClass' ? '<th>Agent</th><th>Vehicle class</th>' : `<th>${group === 'agent' ? 'Agent' : group === 'tl' ? 'TL / Direct' : group === 'class' ? 'Class' : group === 'weekday' ? 'Weekday' : 'Date'}</th>`}<th>Issuance</th><th>Amount</th><th>Commission</th><th>Commission / tag</th><th>Effective rate</th>${group === 'agentClass' ? '' : '<th>Class mix</th>'}</tr></thead><tbody>
         ${grouped.map((r) => `<tr>${group === 'agentClass' ? `<td><b class="agent-link" data-agent360="${esc(r.agentLabel)}" data-agent360-id="${esc(r.id || '')}" title="Agent 360 kholo">${esc(r.agentLabel)}</b><small>${esc(r.id || '')}</small></td><td><b>${esc(r.classLabel)}</b></td>` : `<td><b>${esc(group === 'day' ? dateText(`${r.label}T00:00:00`) : r.label)}</b>${r.id ? `<small>${esc(r.id)}</small>` : ''}</td>`}<td>${U.fmt(r.issuances)}</td><td>${money(r.amount, 2)}</td><td><b>${money(r.commission, 2)}</b></td><td>${money(r.perTag, 2)}</td><td>${r.effectiveRate.toFixed(2)}%</td>${group === 'agentClass' ? '' : `<td class="small">${esc(classMix(r.classes))}</td>`}</tr>`).join('') || `<tr><td colspan="${group === 'agentClass' ? 6 : 7}">${empty('No matching rows', 'Filters change karke dekhein.')}</td></tr>`}
         </tbody></table></div></div>`;
+    if (C && C.mount) C.mount(root);
     U.$('#gvc-search', root).addEventListener('submit', (e) => { e.preventDefault(); FF.app.updateParams({ q: new FormData(e.currentTarget).get('q') || '' }); });
     const gvClassRows = (list) => agg(list, 'agent').map((r, i) => [i + 1, r.agentLabel || r.label, r.id || '', tlLabelOf(r, 'gv'), r.issuances, r.amount, r.commission, r.perTag, r.effectiveRate, sum(list, (x) => x.commission) ? (r.commission / sum(list, (x) => x.commission)) * 100 : 0]);
     boards.forEach(({ def, rows: list }) => {
@@ -795,7 +1078,14 @@ FF.pages = FF.pages || {};
       if (btn) btn.addEventListener('click', () => U.downloadCsv(`gv-${def.key.replace(/\+/g, 'plus')}-commission-agents-${U.stamp()}.csv`, GV_CLASS_HEADERS, gvClassRows(list)));
     });
     const rangeForm = U.$('#gvc-date-range', root); if (rangeForm) rangeForm.addEventListener('submit', (e) => { e.preventDefault(); const f = new FormData(rangeForm); FF.app.updateParams({ period:'custom', from:f.get('from')||'', to:f.get('to')||'' }); });
+    const dailyCsv = U.$('#gvc-daily-csv', root); if (dailyCsv) dailyCsv.addEventListener('click', () => U.downloadCsv(`gv-daily-commission-${U.stamp()}.csv`, GV_DAILY_HEADERS, gvDailyExportRows(dailyTrend.days)));
+    const tlCsv = U.$('#gvc-tl-csv', root); if (tlCsv) tlCsv.addEventListener('click', () => U.downloadCsv(`gv-tl-commission-summary-${personal.month}-${U.stamp()}.csv`, GV_TL_HEADERS, gvTlExportRows(tlSummary)));
+    const rankingCsv = U.$('#gvc-ranking-csv', root); if (rankingCsv) rankingCsv.addEventListener('click', () => U.downloadCsv(`gv-agent-performance-ranking-${personal.month}-${U.stamp()}.csv`, GV_RANK_HEADERS, gvRankingExportRows(agentRanking)));
     bindExports(root, 'gvc-export', `gv-commission-${month}-${U.stamp()}`, 'GV Commission', ['Group','Agent','Agent ID','Vehicle class','Issuance','Amount','Commission','Commission per tag','Effective rate %','Class mix'], grouped.map((r) => [group,r.agentLabel,r.id,r.classLabel,r.issuances,r.amount,r.commission,r.perTag,r.effectiveRate,classMix(r.classes)]), [
+      { name: 'Personal Commission', header: GV_PERSONAL_HEADERS, rows: gvPersonalExportRows(personalRows) },
+      { name: 'Daily Commission Trend', header: GV_DAILY_HEADERS, rows: gvDailyExportRows(dailyTrend.days) },
+      { name: 'TL Commission Summary', header: GV_TL_HEADERS, rows: gvTlExportRows(tlSummary) },
+      { name: 'Agent Performance Ranking', header: GV_RANK_HEADERS, rows: gvRankingExportRows(agentRanking) },
       { name: 'Class Summary', header: ['Vehicle class','Board','Tags','Agents','Amount','Commission','Commission per tag','Effective rate %','Top agent'], rows: classList.map((c) => [c.cls, c.group, c.tags, c.agents, c.amount, c.commission, c.tags ? c.commission / c.tags : 0, ratePct(c.commission, c.amount), c.top]) },
       ...boards.filter((b) => b.rows.length).map(({ def, rows: list }) => ({ name: `GV ${def.key} agents`.slice(0, 31), header: GV_CLASS_HEADERS, rows: gvClassRows(list) })),
       { name: 'Class Variance Review', header: ['Agent','Agent ID','TL','Class','Tags','Observed commission/tag','Class median/tag','Deviation %','Peer variance amount'], rows: commissionAnomalies.map((r) => [r.agentLabel,r.id,r.tlName,r.classLabel,r.issuances,r.perTag,r.benchmark,r.deviationPct,r.varianceAmount]) }
@@ -804,6 +1094,7 @@ FF.pages = FF.pages || {};
     if (matrixCsv) matrixCsv.addEventListener('click', () => U.downloadCsv(`gv-agent-class-commission-${U.stamp()}.csv`,
       ['Agent', 'Agent ID', 'TL / Direct', 'VC4 tags', 'VC4 unique tags', 'VC4 commission', 'VC4 rate (₹/tag)', 'VC20 tags', 'VC20 unique tags', 'VC20 commission', 'VC20 rate (₹/tag)', 'VC5+ tags', 'VC5+ unique tags', 'VC5+ commission', 'VC5+ rate (₹/tag)', 'VC5+ exact classes', 'Total commission', 'Overall rate (₹/tag)'],
       matrix.map((m) => [m.label, m.id || '', tlLabelOf(m, 'gv'), m.VC4.tags, m.VC4.unique, m.VC4.commission, m.VC4.rate ?? '', m.VC20.tags, m.VC20.unique, m.VC20.commission, m.VC20.rate ?? '', m['VC5+'].tags, m['VC5+'].unique, m['VC5+'].commission, m['VC5+'].rate ?? '', m.vc5Exact.map(([cls, v]) => `${cls}: ${v.tags} tags / ${v.commission}${v.rate !== null && v.rate !== undefined ? ` (${v.rate}/tag)` : ''}`).join(' | '), m.totalCommission, m.rate ?? ''])));
+    const personalCsv = U.$('#gvc-personal-csv', root); if (personalCsv) personalCsv.addEventListener('click', () => U.downloadCsv(`gv-personal-commission-${personal.month}-${U.stamp()}.csv`, GV_PERSONAL_HEADERS, gvPersonalExportRows(personalRows)));
     const varianceCsv = U.$('#gvc-variance-csv', root); if (varianceCsv) varianceCsv.addEventListener('click', () => U.downloadCsv(`gv-class-commission-review-${U.stamp()}.csv`, ['Agent','Agent ID','TL','Class','Tags','Observed commission/tag','Class median/tag','Deviation %','Peer variance amount'], commissionAnomalies.map((r) => [r.agentLabel,r.id,r.tlName,r.classLabel,r.issuances,r.perTag,r.benchmark,r.deviationPct,r.varianceAmount])));
     const gvSlabHeaders = ['Agent','Agent ID','TL','Tags','Slab','Model','Expected payout','Actual payout','Actual minus expected','Status'];
     const gvSlabExportRows = gvSlabResults.map((r) => [r.name,r.id,r.tl,r.count,r.tier,r.model,r.expected,r.actual,r.variance,r.status]);
@@ -1018,7 +1309,9 @@ FF.pages = FF.pages || {};
   // ---- verified dual-channel identity ------------------------------------------------------------
   async function buildCross() {
     if (mem.cross) return mem.cross;
-    const [details, master, gvStock, ffStock] = await Promise.all([loadDetails(false), G.need('master'), G.need('stockAgent'), S.need('stockAgents')]);
+    const [details, master] = await Promise.all([loadDetails(false), G.need('master'), S.need('daily').catch(() => [])]);
+    const issuance = G.issuanceRows ? G.issuanceRows() : [];
+    const [gvStock, ffStock] = await Promise.all([G.need('stockAgent'), S.need('stockAgents')]);
     await FF.pages.performance.ensureLoaded();
     const ffReport = FF.pages.performance.agents();
     const ffPeople = new Map(), gvPeople = new Map();
@@ -1072,10 +1365,13 @@ FF.pages = FF.pages || {};
       }
     });
 
-    const month = latestMonth(master);
-    const gvMonth = master.filter((r) => r.ym === month);
+    const month = latestMonth(issuance);
+    const gvMonth = issuance.filter((r) => r.ym === month);
+    const gvOperationalMonth = master.filter((r) => r.ym === month);
     const gvAgg = new Map();
-    gvMonth.forEach((r) => mapAdd(gvAgg, gvKey(r.agentId, r.agentName), () => ({ issuance: 0, amount: 0, commission: 0, classes: {} }), (o) => { o.issuance++; o.amount += r.amount || 0; o.commission += r.commission || 0; o.classes[r.cls || 'NA'] = (o.classes[r.cls || 'NA'] || 0) + 1; }));
+    gvMonth.forEach((r) => mapAdd(gvAgg, gvKey(r.agentId, r.agentName), () => ({ issuance: 0, amount: 0, commission: 0, classes: {} }), (o) => { const n = Math.max(0, Number(r.n) || 1); o.issuance += n; o.classes[r.cls || 'NA'] = (o.classes[r.cls || 'NA'] || 0) + n; }));
+    // Exact transaction amount/commission stays on GV Master; it is not used for issuance count.
+    gvOperationalMonth.forEach((r) => mapAdd(gvAgg, gvKey(r.agentId, r.agentName), () => ({ issuance: 0, amount: 0, commission: 0, classes: {} }), (o) => { o.amount += r.amount || 0; o.commission += r.commission || 0; }));
     const gvStockAgg = new Map();
     details.assignment.forEach((r) => mapAdd(gvStockAgg, gvKey(r.agentId, r.agentName), () => ({ n: 0, classes: {} }), (o) => { o.n++; o.classes[r.cls || 'NA'] = (o.classes[r.cls || 'NA'] || 0) + 1; }));
     (gvStock || []).forEach((r) => { const k = gvKey(r.agentId, r.agentName); if (!gvStockAgg.has(k)) gvStockAgg.set(k, { n: r.n || 0, classes: {} }); });
@@ -1243,7 +1539,7 @@ FF.pages = FF.pages || {};
       if (dailyResult.status === 'rejected') sourceErrors.push({ source: 'FF EIR', message: dailyResult.reason && dailyResult.reason.message || 'Daily source failed' });
       if (masterResult.status === 'rejected') sourceErrors.push({ source: 'GV Master', message: masterResult.reason && masterResult.reason.message || 'GV source failed' });
       if (dailyResult.status === 'rejected' && masterResult.status === 'rejected') throw new Error('FF EIR aur GV Master history load nahi ho saki.');
-      const latestFf = M.latestDate(daily), latestGv = master.length ? (G.latestDate ? G.latestDate() : master.reduce((d, r) => r.date && (!d || r.date > d) ? r.date : d, null)) : null;
+      const latestFf = M.latestDate(daily.filter((r) => r.channel !== 'GV Partner')), latestGv = G.latestDate ? G.latestDate() : M.latestDate(daily.filter((r) => r.channel === 'GV Partner'));
       const historyDays = 120;
       let ff = [];
       if (latestFf) {
@@ -1256,9 +1552,9 @@ FF.pages = FF.pages || {};
         } catch (err) { sourceErrors.push({ source: 'FF historical range', message: err.message || 'Range query failed' }); }
       }
       const gvFrom = latestGv ? shiftDay(latestGv, -(historyDays - 1)) : null;
-      const gv = master.filter((r) => r.date && (!gvFrom || r.date >= gvFrom) && (!latestGv || r.date <= latestGv)).map((r) => ({
+      const gv = daily.filter((r) => r.channel === 'GV Partner' && r.date && (!gvFrom || r.date >= gvFrom) && (!latestGv || r.date <= latestGv)).map((r) => ({
         channel: 'GV Partner', id: r.agentId, name: r.agentName, tlName: r.tlName, dateKey: U.dateKey(r.date),
-        date: dayDate(r.date), cls: r.cls || 'NA', group: r.group || '', n: 1
+        date: dayDate(r.date), cls: r.cls || 'NA', group: r.group || '', n: Number(r.n) || 1
       }));
       const earliest = (rows) => rows.reduce((d, r) => !d || r.date < d ? r.date : d, null);
       mem.forecastHistory = { ff, gv, latestFf, latestGv, earliestFf: earliest(ff), earliestGv: earliest(gv), historyDays, sourceErrors };
@@ -1630,7 +1926,7 @@ FF.pages = FF.pages || {};
     const coverageSources = current ? (current.sources || [current]) : [];
     const trendChronological = trend.slice().reverse();
     root.innerHTML = head('🎯', 'Forecast Accuracy', 'Rolling historical backtest: predicted stock consumption vs actual tag issuance/replacement · no saved prediction history required', `${exportButtons('accuracy-export')} ${printButton}`) + forecastTabs('accuracy') + `
-      <div class="source-row">${sourceChip('FF EIR', `${U.fmt(data.history.ff.length)} exact daily agent groups`)}${sourceChip('GV Master', `${U.fmt(data.history.gv.length)} issuance rows`)}${data.history.sourceErrors.map((e)=>statusPill(`${e.source} unavailable`,'red')).join('')}<span class="dim small">Consumption proxy = tags issued/replaced; stock transfers are not treated as consumption.</span></div>
+      <div class="source-row">${sourceChip('FF EIR', `${U.fmt(data.history.ff.length)} exact daily agent groups`)}${sourceChip('GV EIR', `${U.fmt(data.history.gv.length)} exact daily agent groups`)}${data.history.sourceErrors.map((e)=>statusPill(`${e.source} unavailable`,'red')).join('')}<span class="dim small">Consumption proxy = EIR tags issued/replaced; stock transfers are not treated as consumption.</span></div>
       <div class="ins-filters"><label>Test horizon<select class="select" data-param="horizon">${[7,15,30].map((v) => `<option value="${v}" ${v === horizon ? 'selected' : ''}>${v} days</option>`).join('')}</select></label><label>Training window<select class="select" data-param="lookback"><option value="14" ${lookback === 14 ? 'selected' : ''}>Previous 14 days</option><option value="28" ${lookback === 28 ? 'selected' : ''}>Previous 28 days</option></select></label><label>Channel<select class="select" data-param="channel"><option value="all">Both channels</option><option value="ff" ${channel === 'ff' ? 'selected' : ''}>First Forward</option><option value="gv" ${channel === 'gv' ? 'selected' : ''}>GV Partner</option></select></label><form id="accuracy-search" class="ins-search"><input class="input" name="q" value="${esc(params.q || '')}" placeholder="Agent, ID or TL…"><button class="btn">Search</button></form></div>
       ${current ? `<div class="ins-metrics">${metric('Forecast accuracy', `${current.accuracy.toFixed(1)}%`, `WAPE ${current.wape.toFixed(1)}% · ${horizon}-day holdout`, current.accuracy >= 80 ? 'good' : current.accuracy < 60 ? 'bad' : '')}${metric('Predicted consumption', U.fmt(current.predicted, 1), `${lookback}-day baseline`)}${metric('Actual consumption', U.fmt(current.actual), `${dateText(current.actualStart)} → ${dateText(current.end)}`)}${metric('Forecast bias', biasText, biasFoot, current.bias !== null && Math.abs(current.bias) <= 10 ? 'good' : '')}</div><div class="accuracy-coverage"><div><small>Evaluated sample</small><b>${U.fmt(current.agents)} agents</b><span>${U.fmt(current.absoluteError,1)} total absolute error · ${current.mae.toFixed(1)} MAE/agent</span></div><div><small>Training coverage</small><b>${current.fullTraining ? 'Complete' : 'Partial'} · ${current.observedDays}/${lookback} days</b><span>${coverageSources.map((s)=>`${s.channel}: ${dateText(s.trainingStart)}–${dateText(s.trainingEnd)}`).join(' · ')}</span></div><div><small>Tracking depth</small><b>${U.fmt(trend.length)} completed windows</b><span>Up to 120 source days · zero-history agents score 0%, never 100%</span></div></div>` : `<div class="mapping-state warn"><div class="mapping-icon">⌛</div><div><h3>${data.history.sourceErrors.length ? 'Historical source poori tarah available nahi hai' : 'Backtest ke liye enough history nahi hai'}</h3><p>${esc(data.history.sourceErrors.length ? data.history.sourceErrors.map((e)=>`${e.source}: ${e.message}`).join(' · ') : `Selected ${lookback}-day training + ${horizon}-day actual window source data me complete nahi mila. Chhota horizon/lookback try karein.`)}</p></div></div>`}
       ${horizonCards.length ? `<div class="accuracy-horizons">${horizonCards.map((r) => `<a class="${r.horizon === horizon ? 'active' : ''}" href="#/forecast?view=accuracy&horizon=${r.horizon}&lookback=${lookback}&channel=${channel}"><small>${r.horizon}-day model</small><b>${r.accuracy.toFixed(1)}%</b><span>${U.fmt(r.predicted,1)} predicted · ${U.fmt(r.actual)} actual</span></a>`).join('')}</div>` : ''}
@@ -1645,6 +1941,18 @@ FF.pages = FF.pages || {};
   async function forecastRows(growthPct, safetyDays) {
     await FF.pages.performance.ensureLoaded();
     const [gvReport, eirAgents] = await Promise.all([G.need('report'), S.need('agents')]);
+    await S.need('daily').catch(() => []);
+    const gvIssuance = G.issuanceRows ? G.issuanceRows() : [];
+    const latestGv = G.latestDate && G.latestDate();
+    const gvMonth = latestGv ? U.ymKey(latestGv) : U.ymKey(new Date());
+    const gvEir = new Map();
+    gvIssuance.forEach((r) => {
+      if (!r.ym || r.ym !== gvMonth) return;
+      const key = normId(r.agentId) || `N:${normName(r.agentName)}`;
+      const row = gvEir.get(key) || { total: 0, days: new Set() };
+      row.total += Number(r.n) || 1; if (r.date) row.days.add(U.dateKey(r.date));
+      gvEir.set(key, row);
+    });
     const multiplier = 1 + (growthPct / 100);
     const make = (channel, id, name, tlName, stock, baseRate, extra) => {
       const rate = Math.max(0, Number(baseRate) || 0) * multiplier;
@@ -1679,9 +1987,14 @@ FF.pages = FF.pages || {};
       return make('First Forward', a.agentId || a.id, a.name, a.tlName, a.stockTotal || 0, all > 0 ? base * (ffN / all) : base, { direct, directReason: direct ? (FF.direct ? FF.direct.reason(a, 'ff') : 'FF direct agent') : '' });
     });
     // 🧍 Direct agents (GV: TL ID + TL Name blank) — forecast me dikhte hain, dispatch-exempt hote hain.
+    // GV REPORT contributes stock/priority identity only; demand rate is always the current-month
+    // EIR total divided by its EIR active days. An agent present only in REPORT therefore has 0 rate.
     const gv = gvReport.map((a) => {
       const direct = FF.config.isDirectAgent(a, 'gv');
-      return make('GV Partner', a.agentId, a.agentName, a.tlName, a.stockTotal || 0, a.runrate || (a.curDays ? a.curTotal / a.curDays : 0), { direct, directReason: direct ? (FF.direct ? FF.direct.reason(a, 'gv') : 'GV direct agent') : '' });
+      const key = normId(a.agentId) || `N:${normName(a.agentName)}`;
+      const eir = gvEir.get(key) || { total: 0, days: new Set() };
+      const baseRate = eir.days.size ? eir.total / eir.days.size : 0;
+      return make('GV Partner', a.agentId, a.agentName, a.tlName, a.stockTotal || 0, baseRate, { direct, directReason: direct ? (FF.direct ? FF.direct.reason(a, 'gv') : 'GV direct agent') : '' });
     });
     return [...ff, ...gv].sort((a, b) => a.stockDays - b.stockDays || b.rate - a.rate);
   }
@@ -1926,6 +2239,7 @@ FF.pages = FF.pages || {};
   // ---- executive cockpit -----------------------------------------------------------------------
   async function renderExecutive(root) {
     const [daily, stockAgents, gvMaster, gvStockClass, gvReport, gvStockAgents] = await Promise.all([S.need('daily'), S.need('stockAgents'), G.need('master'), G.need('stockClass'), G.need('report'), G.need('stockAgent').catch(() => [])]);
+    const gvIssuance = G.issuanceRows ? G.issuanceRows() : [];
     await FF.pages.performance.ensureLoaded();
     const ffMonths = M.months(daily), ffMonth = ffMonths.at(-1) || U.ymKey(new Date()), gvMonth = latestMonth(gvMaster);
     // FF side = sirf First Forward channel. EIR me GV Partner ke rows master ID 5845036 (configurable)
@@ -1954,7 +2268,7 @@ FF.pages = FF.pages || {};
     const ffStock = sum(ffStockRows, (r) => r.n), gvStock = sum(gvStockClass, (r) => r.n);
     const ffAgents = FF.pages.performance.agents(), lowFf = ffAgents.filter((a) => (a.stockTotal || 0) > 0 && (a.avgTotal || 0) > 0 && (a.stockTotal / a.avgTotal) <= 7).length;
     const lowGv = gvReport.filter((a) => (a.stockTotal || 0) > 0 && (a.runrate || 0) > 0 && (a.stockTotal / a.runrate) <= 7).length;
-    const gvRows = gvMaster.filter((r) => r.ym === gvMonth), commission = sum(gvRows, (r) => r.commission), amount = sum(gvRows, (r) => r.amount);
+    const gvRows = gvMaster.filter((r) => r.ym === gvMonth), gvEirRows = gvIssuance.filter((r) => r.ym === gvMonth), commission = sum(gvRows, (r) => r.commission), amount = sum(gvRows, (r) => r.amount);
     // FF commission: pehle sheet earned amount; column na ho to REPORT rate × current issuance se
     // calculate karo (rate hai to "Unavailable" dikhana galat hai).
     let ffCommission = null, ffCommissionSrc = 'Rate/earned heading REPORT me nahi mili — Settings → FF REPORT commission column', ffCommAgents = [];
@@ -1977,14 +2291,15 @@ FF.pages = FF.pages || {};
     } catch { /* source optional */ }
     const today = new Date(); today.setHours(0,0,0,0); const start = new Date(today); start.setDate(start.getDate() - 13);
     const labels = [], ffVals = [], gvVals = [];
-    for (let i = 0; i < 14; i++) { const d = new Date(start); d.setDate(start.getDate() + i); const k = U.dateKey(d); labels.push(d.toLocaleDateString('en-IN',{day:'2-digit',month:'short'})); ffVals.push(sum(daily.filter((r) => r.key === k && r.channel === 'First Forward'), (r) => r.n)); gvVals.push(gvMaster.filter((r) => r.date && U.dateKey(r.date) === k).length); }
-    const gvCommAll = aggregateGv(gvRows, 'agent'), top = gvCommAll.slice(0, 7);
+    for (let i = 0; i < 14; i++) { const d = new Date(start); d.setDate(start.getDate() + i); const k = U.dateKey(d); labels.push(d.toLocaleDateString('en-IN',{day:'2-digit',month:'short'})); ffVals.push(sum(daily.filter((r) => r.key === k && r.channel === 'First Forward'), (r) => r.n)); gvVals.push(sum(gvIssuance.filter((r) => r.date && U.dateKey(r.date) === k), (r) => r.n)); }
+    const gvCommissionSourceRows = attachGvIssuanceCounts(gvRows, gvEirRows);
+    const gvCommAll = aggregateGv(gvCommissionSourceRows, 'agent'), top = gvCommAll.slice(0, 7);
     root.innerHTML = head('🧭','Management Executive Cockpit','One-screen business pulse · issuance, growth, stock cover, earnings and management exceptions', `${exportButtons('exec-export')} ${printButton}`) + `
       <div class="cockpit-banner"><div><small>Combined month-to-date issuance</small><strong>${U.fmt(ff.total + gv.total)}</strong><span>${esc(U.labelYM(ffMonth))} FF + ${esc(U.labelYM(gvMonth))} GV · FF se GV rows (ID ${esc(FF.config.eir.gvMasterId || '5845036')}) exclude — ${U.fmt(gvRowsInEir)} EIR rows double count nahi</span></div><div class="cockpit-split"><span>First Forward <b>${U.fmt(ff.total)}</b> ${U.deltaHtml(U.growth(ff.total,ffLast.total),{decimals:0})}</span><span>GV Partner <b>${U.fmt(gv.total)}</b> ${U.deltaHtml(U.growth(gv.total,gvLast.total),{decimals:0})}</span></div></div>
       ${vividMetrics([
         { label: 'Projected month-end', value: U.fmt(ff.projected + gv.projected), foot: `FF ${U.fmt(ff.projected)} · GV ${U.fmt(gv.projected)}`, tone: 'g3', icon: '🔭' },
         { label: 'Combined field stock', value: U.fmt(ffStock + gvStock), foot: `FF ${U.fmt(ffStock)} (GV-parked ${U.fmt(ffStockExcluded)} tags excluded${ffStockExcludedHolders ? ` · ${esc(ffStockExcludedHolders)}` : ''}) + GV ${U.fmt(gvStock)} · GV rows alag register se`, tone: 'g4', icon: '📦' },
-        { label: 'GV earned commission', value: money(commission, 2), foot: `${money(amount)} transaction amount · ${U.fmt(gvRows.length)} tags`, tone: 'g5', icon: '💰' },
+        { label: 'GV earned commission', value: money(commission, 2), foot: `${money(amount)} transaction amount · ${U.fmt(sum(gvEirRows, (r) => r.n))} EIR tags`, tone: 'g5', icon: '💰' },
         { label: 'FF commission', value: ffCommission === null ? 'Unavailable' : money(ffCommission, 2), foot: esc(ffCommissionSrc), tone: ffCommission === null ? 'g7' : 'g1', icon: '💸' }
       ])}
       <div class="cockpit-grid"><div class="card card-primary span2"><div class="card-head"><h3>14-day channel pulse</h3><span class="dim small">Sheet-recorded issuances</span></div>${C.bars({labels,series:[{name:'First Forward',values:ffVals},{name:'GV Partner',values:gvVals}],height:230,showValues:false})}</div><div class="card card-warning"><div class="card-head"><h3>Management focus</h3></div><a class="focus-row ${lowFf+lowGv?'risk':''}" href="#/forecast?risk=High"><span>Stock cover ≤ 7 days</span><b>${U.fmt(lowFf+lowGv)}</b><small>FF ${lowFf} · GV ${lowGv}</small></a><a class="focus-row" href="#/dataQuality"><span>Run data quality checks</span><b>Open</b><small>Six source families</small></a><a class="focus-row" href="#/dualChannel"><span>Verified dual-channel agents</span><b>Review</b><small>Barcode + unique-ID evidence</small></a><a class="focus-row" href="#/followups?status=open"><span>Agent/TL follow-ups</span><b>Open</b><small>Owner and due-date timeline</small></a></div></div>
@@ -2120,8 +2435,10 @@ FF.pages = FF.pages || {};
   //        GV rows / master-ID 5845036 yahin se exclude hote hain — double count nahi)
   //   GV → G.need('master') GV Master rows (cls/group + tagType chassis + status replacement)
   async function renderFastagChampions(root, params) {
-    const [agentClass, master, ffAgentsRaw] = await Promise.all([S.need('agentClass'), G.need('master'), S.need('agents')]);
-    const months = [...new Set([...(agentClass || []).map((r) => r.ym), ...master.map((r) => r.ym)].filter(Boolean))].sort();
+    const [agentClass, ffAgentsRaw] = await Promise.all([S.need('agentClass'), S.need('agents')]);
+    await S.need('daily').catch(() => []);
+    const issuance = G.issuanceRows ? G.issuanceRows() : [];
+    const months = [...new Set([...(agentClass || []).map((r) => r.ym), ...issuance.map((r) => r.ym)].filter(Boolean))].sort();
     const month = months.includes(params.month) ? params.month : (months.at(-1) || U.ymKey(new Date()));
     const scope = ['all', 'ff', 'gv'].includes(params.scope) ? params.scope : 'all';
     const topN = Math.max(1, Math.min(50, Number(params.top) || 10));
@@ -2130,7 +2447,7 @@ FF.pages = FF.pages || {};
     // FF agent-class rows me agentId nahi hota — REPORT/EIR agents store se naam→ID map banao.
     const ffIdByName = new Map((ffAgentsRaw || []).filter((r) => r.channel === 'First Forward').map((r) => [normName(r.name), r.id || r.name]));
     const ffRows = (agentClass || []).filter((r) => r.ym === month && r.channel === 'First Forward').map((r) => ({ ...r, agentId: ffIdByName.get(normName(r.name)) || '' }));
-    const gvRows = master.filter((r) => r.ym === month);
+    const gvRows = issuance.filter((r) => r.ym === month);
 
     // ---- classification helpers (FF = EIR vrnType/type; GV = tagType/status) ----
     const isChassis = (r) => /chassis/i.test(r.vrnType || r.tagType || '');
@@ -2241,7 +2558,7 @@ FF.pages = FF.pages || {};
     };
     const actions = `${exportButtons('fastag-export')} ${printButton} <button class="btn" id="cert-winners" title="FF + GV total-issuance ke top-3 certificates">🏅 Winners PDF</button>`;
     root.innerHTML = head('🏆', 'FASTag Champions', 'Top agents & TLs — VC4, Commercial, Chassis, Replacement, Wrong VRN · FF + GV · month-wise hall of fame', actions) + `
-      <div class="source-row">${sourceChip('FF EIR agent-class', `${U.fmt(ffRows.length)} agent rows`)}${sourceChip('GV Master', `${U.fmt(gvRows.length)} issuance rows`)}<span class="dim small">FF me GV rows (master ID ${esc(FF.config.eir.gvMasterId || '5845036')}) exclude · Chassis = VRN/Tag type "chassis" · Wrong VRN = FF VRN type "wrong"</span></div>
+      <div class="source-row">${sourceChip('FF EIR agent-class', `${U.fmt(ffRows.length)} agent rows`)}${sourceChip('GV EIR issuance', `${U.fmt(sum(gvRows, (r) => r.n))} quantity units · master ID ${esc(FF.config.eir.gvMasterId || '5845036')}`)}<span class="dim small">All issuance counts EIR se · Chassis = VRN/Tag type "chassis" · Wrong VRN = FF VRN type "wrong"</span></div>
       <div class="ins-filters">
         <label>Month<select class="select" data-param="month">${months.slice().reverse().map((m) => `<option value="${m}" ${m === month ? 'selected' : ''}>${esc(U.labelYM(m))}</option>`).join('')}</select></label>
         <label>Channel<select class="select" data-param="scope"><option value="all" ${scope === 'all' ? 'selected' : ''}>FF + GV</option><option value="ff" ${scope === 'ff' ? 'selected' : ''}>First Forward</option><option value="gv" ${scope === 'gv' ? 'selected' : ''}>GV Partner</option></select></label>
@@ -2308,5 +2625,5 @@ FF.pages = FF.pages || {};
   FF.workspace = { openSave, load: workspace, reset };
   // Page chrome helpers shared with cockpit.js (v3.8) so naye pages bilkul same look rakhein.
   const UI_KIT = { head, sourceChip, printButton, exportButtons, bindExports, vividMetrics, metric, statusPill, empty, money, validValue, clean, sum, normId, normName, segmentOf, bindMetricDetails, openInsDialog };
-  FF.insights = { reset, loadDetails, buildCross, ffCommissionData, ffPayoutRates: loadPayoutRates, payoutExpected: payoutBreakdown, qualityIssues, forecastAccuracy, stockBalanceReconciliation, commissionSlabExpected: slabExpected, openInsDialog, forecastRows, slabVariance: slabVarianceRows, ui: UI_KIT };
+  FF.insights = { reset, loadDetails, buildCross, ffCommissionData, ffPayoutRates: loadPayoutRates, payoutExpected: payoutBreakdown, gvPersonalCommission, gvPersonalCommissionFromRows: buildGvPersonalCommission, gvCommissionDailyTrend, gvCommissionTlSummary, gvCommissionAgentRanking, qualityIssues, forecastAccuracy, stockBalanceReconciliation, commissionSlabExpected: slabExpected, openInsDialog, forecastRows, slabVariance: slabVarianceRows, ui: UI_KIT };
 })(window.FF);

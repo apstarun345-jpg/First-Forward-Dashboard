@@ -81,21 +81,15 @@ window.FF = window.FF || {};
   // ---- data -----------------------------------------------------------------------------------
   function gvIssuanceRows() {
     const G = FF.gv;
-    if (!G || !G.rows) return [];
-    return G.rows().filter((r) => r.date).map((r) => ({ key: U.dateKey(r.date), d: r.date, ym: r.ym, day: r.day, cls: r.cls, group: r.group, type: /replace/i.test(r.status) ? 'REPLACEMENT' : 'ISSUANCE', vrnType: r.tagType || '', channel: 'GV Partner', n: 1, raw: r }));
+    if (!G || !G.issuanceRows) return [];
+    return G.issuanceRows().map((r) => ({ ...r, raw: null }));
   }
   async function issuanceRows(src) {
-    const out = [];
-    if (src === 'ff' || src === 'both') {
-      let daily = FF.store.get('daily');
-      if (!daily) { try { daily = await FF.store.need('daily'); } catch { daily = []; } }
-      (daily || []).forEach((r) => { if (src === 'both' && r.channel === 'GV Partner') return; out.push(r); });
-    }
-    if (src === 'gv' || src === 'both') {
-      if (FF.gv && FF.gv.need) { try { await FF.gv.need('master'); } catch { /* shown as empty */ } }
-      out.push(...gvIssuanceRows());
-    }
-    return out;
+    let daily = FF.store.get('daily');
+    if (!daily) { try { daily = await FF.store.need('daily'); } catch { daily = []; } }
+    // The same EIR dataset powers FF, GV, and combined drill-downs. GV Master is not an
+    // issuance source here; its operational fields are intentionally absent from the count path.
+    return (daily || []).filter((r) => src === 'both' || (src === 'gv' ? r.channel === 'GV Partner' : r.channel !== 'GV Partner'));
   }
   function latestKey(rows) { return rows.reduce((m, r) => (r.key > m ? r.key : m), ''); }
   function period(spec, rows) {
@@ -170,7 +164,7 @@ window.FF = window.FF || {};
     const newVrn = tot - chassis - total(cur.filter((r) => /wrong/i.test(r.vrnType)));
     const days = [...new Set(cur.map((r) => r.key))].sort();
     const periodLabel = p.from === p.to ? `${U.labelDateKey(p.from, true)} (${U.weekday(U.fromDateKey(p.from))})` : `${U.labelDateKey(p.from, true)} → ${U.labelDateKey(p.to, true)}`;
-    const srcLabel = spec.src === 'gv' ? 'GV Partner (GV Master)' : spec.src === 'ff' ? 'First Forward sheet (EIR — FF + GV channel)' : 'First Forward (EIR, GV ID excluded) + GV Partner (GV Master)';
+    const srcLabel = spec.src === 'gv' ? 'GV Partner (EIR · master ID 5845036)' : spec.src === 'ff' ? 'First Forward issuance (EIR · GV rows excluded)' : 'First Forward + GV Partner (EIR · master ID 5845036 classifies GV)';
     const byClass = tally(cur, (r) => r.cls), byClassPrev = tally(prev, (r) => r.cls);
     const byChannel = tally(cur, (r) => r.channel), byChannelPrev = tally(prev, (r) => r.channel);
     const byType = tally(cur, (r) => (r.type === 'REPLACEMENT' ? 'Replacement' : 'New issuance')), byTypePrev = tally(prev, (r) => (r.type === 'REPLACEMENT' ? 'Replacement' : 'New issuance'));
@@ -200,9 +194,9 @@ window.FF = window.FF || {};
     return { kicker: `KPI detail · ${spec.page || ''}`, title: spec.title || 'KPI detail', sub: `${esc(periodLabel)} · <b>${U.fmt(tot)}</b> tags${filt ? ` · ${esc(filt.label)}` : ''}`, body, exportable: true };
   }
   function peopleFromGv(cur) {
-    const gvRows = cur.filter((r) => r.raw);
+    const gvRows = cur.filter((r) => r.channel === 'GV Partner');
     if (!gvRows.length) return '';
-    const byTl = tally(gvRows, (r) => r.raw.tlName), byAgent = tally(gvRows, (r) => r.raw.agentName);
+    const byTl = tally(gvRows, (r) => r.tlName || 'Direct'), byAgent = tally(gvRows, (r) => r.agentName || r.agentId || 'Unknown');
     const top = (m) => [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10);
     const list = (entries) => `<table class="tbl compact kd-tbl"><tbody>${entries.map(([k, v], i) => `<tr><td class="dim">${i + 1}</td><td><b>${esc(k)}</b></td><td class="num"><b>${U.fmt(v)}</b></td></tr>`).join('')}</tbody></table>`;
     return `<div class="kd-grid"><section class="kd-sec"><h4>👥 GV · top TLs</h4>${list(top(byTl))}</section><section class="kd-sec"><h4>🧑‍💼 GV · top agents</h4>${list(top(byAgent))}</section></div>`;
@@ -214,7 +208,7 @@ window.FF = window.FF || {};
     const spec = state.spec, p = state.period;
     const out = [];
     const filt = filterOf(spec.f);
-    if (spec.src === 'ff' || spec.src === 'both') {
+    if (spec.src === 'ff' || spec.src === 'gv' || spec.src === 'both') {
       const e = FF.config.eir;
       const cols = [e.date, e.tagId, e.vrn, e.cls, e.type, e.vrnType, e.status, e.agentName, e.agentId, e.tlName, e.masterId, e.gvName];
       const tq = `select ${cols.join(', ')} where toDate(${e.date}) >= date '${p.from}' and toDate(${e.date}) <= date '${p.to}' order by ${e.date} desc limit 60000`;
@@ -224,16 +218,11 @@ window.FF = window.FF || {};
         const d = D.cellDate(r[0]);
         const cls = (() => { const c = D.cellText(r[3]).toUpperCase().trim(); return /^\d+$/.test(c) ? `VC${c}` : c || 'NA'; })();
         const channel = FF.model.channelOf(D.cellText(r[10]), D.cellText(r[9]));
-        if (spec.src === 'both' && channel === 'GV Partner') continue;
+        if (spec.src === 'ff' && channel === 'GV Partner') continue;
+        if (spec.src === 'gv' && channel !== 'GV Partner') continue;
         const row = { key: d ? U.dateKey(d) : '', cls, group: FF.model.classGroup(cls), type: D.cellText(r[4]).toUpperCase() || 'ISSUANCE', vrnType: D.cellText(r[5]), channel, n: 1 };
         if (filt && !filt.fn(row)) continue;
         out.push([row.key, D.cellText(r[1]), D.cellText(r[2]), cls, row.type, row.vrnType, D.cellText(r[6]), D.cellText(r[7]) || D.cellText(r[11]), D.cellText(r[8]), D.cellText(r[9]), channel]);
-      }
-    }
-    if (spec.src === 'gv' || spec.src === 'both') {
-      for (const r of state.rows.filter((x) => x.raw)) {
-        const g = r.raw;
-        out.push([r.key, g.tagId, g.vrn, g.cls, r.type, g.tagType, g.status, g.agentName, g.agentId, g.tlName, 'GV Partner']);
       }
     }
     out.sort((a, b) => (a[0] < b[0] ? 1 : a[0] > b[0] ? -1 : 0));
@@ -320,7 +309,7 @@ window.FF = window.FF || {};
       const rows = gvIssuanceRows();
       const gym = ym || (latestKey(rows) || U.dateKey(new Date())).slice(0, 7);
       const cur = rows.filter((r) => r.ym === gym);
-      const per = new Map(); cur.forEach((r) => { const k = r.raw.agentId; const x = per.get(k) || { name: r.raw.agentName, tl: r.raw.tlName, n: 0 }; x.n += 1; per.set(k, x); });
+      const per = new Map(); cur.forEach((r) => { const k = r.agentId || r.agentName; const x = per.get(k) || { name: r.agentName || r.agentId, tl: r.tlName || 'Direct', n: 0 }; x.n += Number(r.n) || 1; per.set(k, x); });
       const list = [...per.values()].sort((a, b) => b.n - a.n);
       out.push(`<h3 class="kd-h">🟩 GV Partner · active agents ${esc(U.labelYM(gym))}: <b>${U.fmt(list.length)}</b></h3><section class="kd-sec"><div class="table-wrap kd-scroll tall"><table class="tbl compact kd-tbl"><thead><tr><th>#</th><th>Agent</th><th>TL</th><th class="num">Tags</th></tr></thead><tbody>${list.map((a, i) => `<tr><td class="dim">${i + 1}</td><td><b>${esc(a.name)}</b></td><td>${esc(a.tl)}</td><td class="num"><b>${U.fmt(a.n)}</b></td></tr>`).join('')}</tbody></table></div></section>`);
     }

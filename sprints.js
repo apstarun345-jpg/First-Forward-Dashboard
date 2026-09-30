@@ -49,7 +49,7 @@ FF.pages = FF.pages || {};
 
   function sprintData() {
     const today = todayKey();
-    const rows = (G.rows ? G.rows() : []).filter((r) => r.date && U.dateKey(r.date) === today);
+    const rows = (G.issuanceRows ? G.issuanceRows() : (G.rows ? G.rows() : [])).filter((r) => r.date && U.dateKey(r.date) === today);
     const ffTodayRows = (S.get('agentDailyClass') || []).filter((r) => r.dateKey === today && r.channel === 'First Forward');
     const nowH = new Date().getHours();
     const byHour = new Array(24).fill(0);
@@ -60,16 +60,17 @@ FF.pages = FF.pages || {};
       const h = hourOf(r.time);
       if (h === null) continue;
       withTime++;
-      byHour[h]++;
+      const n = Number(r.n) || 1;
+      byHour[h] += n;
       const direct = FF.config.isDirectAgent(r, 'gv');
       const tl = direct ? FF.config.directLabel(r, 'gv') : (U.clean(r.tlName) || 'Unassigned');
       let tm = hourTl.get(h); if (!tm) { tm = new Map(); hourTl.set(h, tm); }
-      const t = tm.get(tl) || { n: 0, agents: new Set() }; t.n++; t.agents.add(r.agentName); tm.set(tl, t);
+      const t = tm.get(tl) || { n: 0, agents: new Set() }; t.n += n; t.agents.add(r.agentName || r.agentId); tm.set(tl, t);
       let am = hourAgent.get(h); if (!am) { am = new Map(); hourAgent.set(h, am); }
       const agentName = U.clean(r.agentName || r.agentId || 'Unknown agent');
       const agentId = U.clean(r.agentId || r.id || '');
       const aKey = agentKey(agentId, agentName);
-      const a = am.get(aKey) || { agentId, agentName, n: 0, tl }; a.n++; am.set(aKey, a);
+      const a = am.get(aKey) || { agentId, agentName, n: 0, tl }; a.n += n; am.set(aKey, a);
     }
     const leaders = (map) => [...map.entries()].sort((a, b) => b[1].n - a[1].n).slice(0, 12);
     const past = [];
@@ -79,10 +80,10 @@ FF.pages = FF.pages || {};
       past.push({ h, n: byHour[h], winner: tl ? tl[0] : '—', wn: tl ? tl[1].n : 0 });
     }
     return {
-      rows, today, nowH, byHour, hourTl, hourAgent, withTime, past,
+      rows, today, nowH, byHour, hourTl, hourAgent, withTime, hasTime: withTime > 0, past,
       tlNow: leaders(hourTl.get(nowH) || new Map()), agentNow: leaders(hourAgent.get(nowH) || new Map()),
       todayGvTop: topAgentsForToday(rows), todayFfTop: topAgentsForToday(ffTodayRows),
-      totalToday: rows.length, hourTotal: byHour[nowH] || 0
+      totalToday: rows.reduce((n, r) => n + (Number(r.n) || 1), 0), hourTotal: byHour[nowH] || 0
     };
   }
 
@@ -102,18 +103,18 @@ FF.pages = FF.pages || {};
       return String(r.agentName || r.name || '').trim().toLowerCase() === String(agentName || '').trim().toLowerCase();
     };
     const rows = channel === 'gv'
-      ? (G.rows ? G.rows() : []).filter((r) => r.date && U.dateKey(r.date) === today && match(r))
+      ? (G.issuanceRows ? G.issuanceRows() : (G.rows ? G.rows() : [])).filter((r) => r.date && U.dateKey(r.date) === today && match(r))
       : (S.get('agentDailyClass') || []).filter((r) => r.dateKey === today && r.channel === 'First Forward' && match(r));
     const byClass = new Map();
     for (const r of rows) {
       const cls = U.clean(r.cls) || 'Unknown class';
       const n = Number(r.n) > 0 ? Number(r.n) : 1;
       const item = byClass.get(cls) || { total: 0, issuance: 0, replacement: 0, detail: new Map() };
-      const type = U.clean(channel === 'gv' ? r.status : r.type).toUpperCase() || 'ISSUANCE';
+      const type = U.clean(channel === 'gv' ? (r.type || r.status) : r.type).toUpperCase() || 'ISSUANCE';
       const replacement = /replacement/i.test(type);
       item.total += n;
       item[replacement ? 'replacement' : 'issuance'] += n;
-      const tagType = U.clean(channel === 'gv' ? r.tagType : r.vrnType) || (channel === 'gv' ? 'Other' : 'Tag type not set');
+      const tagType = U.clean(channel === 'gv' ? (r.tagType || r.vrnType) : r.vrnType) || (channel === 'gv' ? 'Other' : 'Tag type not set');
       const label = `${type} · ${tagType}`;
       item.detail.set(label, (item.detail.get(label) || 0) + n);
       byClass.set(cls, item);
@@ -148,14 +149,14 @@ FF.pages = FF.pages || {};
     const medals = ['🥇', '🥈', '🥉'];
     const pastBars = C ? C.bars({ labels: d.past.map((p) => `${p.h}:00`), height: 170, series: [{ name: 'Tags', values: d.past.map((p) => p.n), color: '#f59e0b' }], showValues: true }) : '';
     root.innerHTML = `
-      <div class="page-head"><div><h1>⏰ Hourly Sprints</h1><p class="sub">Har ghanta ek race — is hour kaun sabse tez? (GV time-stamps se live)</p></div>
+      <div class="page-head"><div><h1>⏰ Hourly Sprints</h1><p class="sub">Har ghanta ek race — ${d.hasTime ? 'is hour kaun sabse tez? (EIR-compatible time source se live)' : 'hourly race unavailable: canonical EIR me time-of-day nahi hai'}</p></div>
         <div class="head-actions"><button class="btn" id="spr-full">⛶ Fullscreen</button><button class="btn primary" data-action="refresh">↻ Fresh data</button></div></div>
       <section class="card spr-hero">
         <div class="spr-hero-in">
-          <div class="spr-count"><span class="war-live-dot"></span><b>${nowH}:00 – ${nowH + 1}:00</b><small>SPRINT CHALU HAI · khatam hone me <em id="spr-cd">${countdown()}</em></small>${barHtml}</div>
+          <div class="spr-count"><span class="war-live-dot"></span><b>${d.hasTime ? `${nowH}:00 – ${nowH + 1}:00` : 'Hourly timestamp unavailable'}</b><small>${d.hasTime ? `SPRINT CHALU HAI · khatam hone me <em id="spr-cd">${countdown()}</em>` : 'Canonical EIR daily rows date-level hain; hour-wise ranking/count intentionally unavailable.'}</small>${d.hasTime ? barHtml : ''}</div>
           <div class="spr-kpis">
-            <div class="kpi g4" data-kpi="src=gv&scope=day&date=${d.today}"><div class="kpi-top"><span class="kpi-title">Is hour · GV</span><span class="kpi-icon">⚡</span></div><div class="kpi-value">${fmt(d.hourTotal)}</div><div class="kpi-foot">tags is ghante</div></div>
-            <div class="kpi g2" data-kpi="src=gv&scope=day&date=${d.today}"><div class="kpi-top"><span class="kpi-title">Aaj · GV</span><span class="kpi-icon">🟩</span></div><div class="kpi-value">${fmt(d.totalToday)}</div><div class="kpi-foot">${fmt(d.withTime)} with time-stamp</div></div>
+            <div class="kpi g4" data-kpi="src=gv&scope=day&date=${d.today}"><div class="kpi-top"><span class="kpi-title">${d.hasTime ? 'Is hour · GV' : 'Hourly GV count'}</span><span class="kpi-icon">⚡</span></div><div class="kpi-value">${d.hasTime ? fmt(d.hourTotal) : '—'}</div><div class="kpi-foot">${d.hasTime ? 'tags is ghante' : 'EIR me time-of-day mapped nahi'}</div></div>
+            <div class="kpi g2" data-kpi="src=gv&scope=day&date=${d.today}"><div class="kpi-top"><span class="kpi-title">Aaj · GV</span><span class="kpi-icon">🟩</span></div><div class="kpi-value">${fmt(d.totalToday)}</div><div class="kpi-foot">${d.hasTime ? `${fmt(d.withTime)} with time-stamp` : 'date-level EIR total · no hourly split'}</div></div>
             <div class="kpi g1" data-kpi="src=ff&scope=day&date=${d.today}"><div class="kpi-top"><span class="kpi-title">Aaj · FF</span><span class="kpi-icon">🟦</span></div><div class="kpi-value">${fmt(ffTodayTotal())}</div><div class="kpi-foot">EIR me time nahi — sirf total</div></div>
             <div class="kpi g6"><div class="kpi-top"><span class="kpi-title">Active agents</span><span class="kpi-icon">🧑‍💼</span></div><div class="kpi-value">${fmt(d.agentNow.length ? new Set(d.agentNow.map(([n]) => n)).size : 0)}</div><div class="kpi-foot">is hour me issue kiya</div></div>
           </div>
@@ -168,20 +169,20 @@ FF.pages = FF.pages || {};
           <div class="card-body">${d.todayFfTop.length ? d.todayFfTop.map((x, i) => leadRow([x.key, x], i, medals, 'ff', d.todayFfTop[0].n)).join('') : '<div class="empty">No First Forward issuance found in today’s EIR data.</div>'}</div></section>
       </div>
       <div class="grid g-2">
-        <section class="card"><div class="card-head"><h3>🏆 TL Sprint Leaderboard <span class="dim">· ${nowH}:00–${nowH + 1}:00</span></h3></div>
-          <div class="card-body">${d.tlNow.length ? d.tlNow.map((x, i) => leadRow(x, i, medals, '', d.tlNow[0][1].n)).join('') : '<div class="card-body empty">Is hour abhi koi GV issuance nahi aayi. ⏳</div>'}</div></section>
-        <section class="card"><div class="card-head"><h3>🧑‍💼 Agent Sprint Leaderboard <span class="dim">· ${nowH}:00–${nowH + 1}:00</span></h3></div>
-          <div class="card-body">${d.agentNow.length ? d.agentNow.map((x, i) => leadRow(x, i, medals, 'gv', d.agentNow[0][1].n)).join('') : '<div class="card-body empty">Is hour abhi koi agent active nahi. ⏳</div>'}</div></section>
+        <section class="card"><div class="card-head"><h3>🏆 TL Sprint Leaderboard <span class="dim">${d.hasTime ? `· ${nowH}:00–${nowH + 1}:00` : '· unavailable without time-of-day'}</span></h3></div>
+          <div class="card-body">${d.hasTime && d.tlNow.length ? d.tlNow.map((x, i) => leadRow(x, i, medals, '', d.tlNow[0][1].n)).join('') : '<div class="card-body empty">Canonical EIR daily source me time-of-day nahi hai; hourly TL leaderboard intentionally hidden.</div>'}</div></section>
+        <section class="card"><div class="card-head"><h3>🧑‍💼 Agent Sprint Leaderboard <span class="dim">${d.hasTime ? `· ${nowH}:00–${nowH + 1}:00` : '· unavailable without time-of-day'}</span></h3></div>
+          <div class="card-body">${d.hasTime && d.agentNow.length ? d.agentNow.map((x, i) => leadRow(x, i, medals, 'gv', d.agentNow[0][1].n)).join('') : '<div class="card-body empty">Canonical EIR daily source me time-of-day nahi hai; hourly agent leaderboard intentionally hidden.</div>'}</div></section>
       </div>
       <div class="grid g-2-1">
-        <section class="card"><div class="card-head"><h3>📊 Aaj ke sprints · hour-wise</h3></div><div class="card-body">${d.past.length ? pastBars : '<div class="empty-state compact">Aaj abhi koi poora sprint nahi beeta.</div>'}</div></section>
+        <section class="card"><div class="card-head"><h3>📊 Aaj ke sprints · hour-wise</h3></div><div class="card-body">${d.hasTime && d.past.length ? pastBars : '<div class="empty-state compact">Canonical EIR me time-of-day nahi hai; hourly history available nahi.</div>'}</div></section>
         <section class="card"><div class="card-head"><h3>🥇 Sprint winners · aaj</h3></div><div class="card-body">
-          ${d.past.length ? `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Sprint</th><th class="num">Tags</th><th>Winner TL</th><th class="num">Winner tags</th></tr></thead><tbody>
+          ${d.hasTime && d.past.length ? `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Sprint</th><th class="num">Tags</th><th>Winner TL</th><th class="num">Winner tags</th></tr></thead><tbody>
             ${d.past.map((p) => `<tr><td><b>${p.h}:00–${p.h + 1}:00</b></td><td class="num">${fmt(p.n)}</td><td>${p.winner === '—' ? '<span class="dim">—</span>' : `<b>${esc(p.winner)}</b>`}</td><td class="num">${fmt(p.wn)}</td></tr>`).join('')}
-          </tbody></table></div>` : '<div class="empty-state compact">Pehla sprint abhi chal raha hai…</div>'}
+          </tbody></table></div>` : '<div class="empty-state compact">Hourly winner unavailable without a compliant timestamp source.</div>'}
         </div></section>
       </div>
-      <p class="foot-note">Race GV Master ke <b>time-stamps</b> se banti hai (real-time) · FF EIR sheet me time nahi milta, isliye FF sirf total dikhata hai · data ↻ se fresh hota hai</p>`;
+      <p class="foot-note">Issuance totals EIR quantity se aate hain. Hourly race sirf tab render hoti hai jab canonical issuance rows me compliant time-of-day mile; current EIR daily ledger date-only ho to UI hourly values ko blank rakhti hai, fabricate nahi karti · data ↻ se fresh hota hai</p>`;
     if (C && C.mount) C.mount(root);
     const fs = root.querySelector('#spr-full');
     if (fs) fs.addEventListener('click', () => { try { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen(); } catch { /* n/a */ } });
@@ -232,13 +233,13 @@ FF.pages = FF.pages || {};
 
   /** Pichhle sprint ka winner nikalo (celebration ke liye). */
   function sprintDataAt(dateKey, hour) {
-    const rows = (G.rows ? G.rows() : []).filter((r) => r.date && U.dateKey(r.date) === dateKey && hourOf(r.time) === hour);
+    const rows = (G.issuanceRows ? G.issuanceRows() : (G.rows ? G.rows() : [])).filter((r) => r.date && U.dateKey(r.date) === dateKey && hourOf(r.time) === hour);
     if (!rows.length) return null;
     const tl = new Map();
     for (const r of rows) {
       const direct = FF.config.isDirectAgent(r, 'gv');
       const name = direct ? FF.config.directLabel(r, 'gv') : (U.clean(r.tlName) || 'Unassigned');
-      tl.set(name, (tl.get(name) || 0) + 1);
+      tl.set(name, (tl.get(name) || 0) + (Number(r.n) || 1));
     }
     const top = [...tl.entries()].sort((a, b) => b[1] - a[1])[0];
     return { winner: top[0], wn: top[1] };

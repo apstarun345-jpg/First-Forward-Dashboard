@@ -61,13 +61,23 @@ window.FF = window.FF || {};
   const getLang = () => lang;
 
   async function loadAll() {
-    const [daily, agents, stockAgents, gvMaster, gvStock, agentClass] = await Promise.all([
-      safe(S.need('daily'), []), safe(S.need('agents'), []), safe(S.need('stockAgents'), []),
-      safe(G.need('master'), []), safe(G.need('stockAgent'), []), safe(S.need('agentClass'), [])
+    // EIR readiness comes first: G.issuanceRows() has a legacy pre-readiness fallback for old
+    // embeds, but production assistant answers must never observe that fallback as issuance.
+    let daily = [], eirReady = true;
+    try { daily = await S.need('daily') || []; } catch { eirReady = false; }
+    const [agents, stockAgents, gvOperational, gvStock, agentClass] = await Promise.all([
+      safe(S.need('agents'), []), safe(S.need('stockAgents'), []), safe(G.need('master'), []),
+      safe(G.need('stockAgent'), []), safe(S.need('agentClass'), [])
     ]);
-    return { daily, agents: agents || [], stockAgents: stockAgents || [], gvMaster: gvMaster || [], gvStock: gvStock || [], agentClass: agentClass || [] };
+    // Production G.issuanceRows() is the EIR-authoritative view. The fallback keeps the
+    // assistant usable for older embed/test adapters that expose only GV Master through need(),
+    // but a failed/empty EIR load is never replaced with a Master issuance snapshot.
+    const gvMaster = eirReady ? (G.issuanceRows ? G.issuanceRows() : (G.rows ? G.rows() : (gvOperational || []))) : [];
+    return { daily, agents: agents || [], stockAgents: stockAgents || [], gvMaster, gvOperational: gvOperational || [], gvStock: gvStock || [], agentClass: agentClass || [] };
   }
 
+  const gvCount = (rows, predicate) => (rows || []).reduce((n, r) => (!predicate || predicate(r) ? n + (Number(r.n) || 1) : n), 0);
+  const gvOperational = (D) => D.gvOperational || [];
   const STOP = /KA|KI|KE|HAI|KYA|BATAO|KITNE|KITNA|AAJ|TODAY|MONTH|MAHINE|STOCK|ISSUANCE|COMMISSION|CHASSIS|TAG|TAGS|SHOW|TOTAL|WRONG|VRN|REPLACEMENT|VC4|VC20|TOP|CHAMPION|NAAM|THE|AND|WHAT|WHATS|WHO|HOW|MANY|MUCH|IS|ARE|ME|TELL|GIVE|DOES|DID/;
   /** Fuzzy agent find: name tokens FF agents + GV master me. Returns { name, id, key } */
   function findAgent(D, text) {
@@ -161,8 +171,8 @@ window.FF = window.FF || {};
       const gvDates = D.gvMaster.map((r) => (r.date ? U.dateKey(r.date) : '')).filter(Boolean).sort();
       const ffLast = ffDates.at(-1) || '—', gvLast = gvDates.at(-1) || '—';
       return ans(
-        `Data freshness — FF EIR daily me sabse naya din: <b>${esc(ffLast)}</b> · GV Master me: <b>${esc(gvLast)}</b>. Dashboard top bar ke ↩ Refresh se sheet se naya data pull hota hai.`,
-        `Data freshness — latest day in FF EIR daily: <b>${esc(ffLast)}</b> · GV Master: <b>${esc(gvLast)}</b>. Use the ↩ Refresh button in the top bar to pull fresh sheet data.`,
+        `Data freshness — FF EIR daily me sabse naya din: <b>${esc(ffLast)}</b> · GV EIR me: <b>${esc(gvLast)}</b>. Dashboard top bar ke ↩ Refresh se sheet se naya data pull hota hai.`,
+        `Data freshness — latest day in FF EIR daily: <b>${esc(ffLast)}</b> · GV EIR: <b>${esc(gvLast)}</b>. Use the ↩ Refresh button in the top bar to pull fresh sheet data.`,
         [['aaj ka total issuance', 'Aaj ka total'], ['stock kya hai', 'Stock status']]
       );
     }
@@ -242,17 +252,17 @@ window.FF = window.FF || {};
       const yTotal = D.daily.filter((r) => r.key === yKey).reduce((n, r) => n + (Number(r.n) || 0), 0);
       const today = todayKey();
       const tTotal = D.daily.filter((r) => r.key === today).reduce((n, r) => n + (Number(r.n) || 0), 0);
-      const gvToday = D.gvMaster.filter((r) => r.date && U.dateKey(r.date) === today).length;
+      const gvToday = gvCount(D.gvMaster, (r) => r.date && U.dateKey(r.date) === today);
       const ffM = D.daily.filter((r) => r.ym === m && r.channel === 'First Forward').reduce((n, r) => n + r.n, 0);
-      const gvM = D.gvMaster.filter((r) => r.ym === m).length;
+      const gvM = gvCount(D.gvMaster, (r) => r.ym === m);
       const ffS = D.stockAgents.reduce((n, r) => n + r.n, 0), gvS = D.gvStock.reduce((n, r) => n + r.n, 0);
       const wrong = D.daily.filter((r) => r.ym === m && /wrong/i.test(r.vrnType || '')).reduce((n, r) => n + (r.channel === 'First Forward' ? r.n : 0), 0);
       const ffAgg = new Map();
       D.agents.filter((a) => a.ym === m && a.channel === 'First Forward').forEach((a) => ffAgg.set(a.name, (ffAgg.get(a.name) || 0) + a.n));
       const topEntry = [...ffAgg.entries()].sort((a, b) => b[1] - a[1])[0];
       return ans(
-        `☀️ ${esc(greetingWord())} briefing — kal total ${fmt(yTotal)} tags · aaj ab tak ${fmt(tTotal + gvToday)} (FF ${fmt(tTotal)} + GV ${fmt(gvToday)}) · is month FF ${fmt(ffM)} + GV ${fmt(gvM)} · stock FF ${fmt(ffS)} + GV ${fmt(gvS)} · wrong VRN ${fmt(wrong)} · top agent: ${topEntry ? `${esc(topEntry[0])} (${fmt(topEntry[1])})` : '—'}. Aur detail batau?`,
-        `☀️ ${esc(greetingWord())} briefing — yesterday total ${fmt(yTotal)} tags · today so far ${fmt(tTotal + gvToday)} (FF ${fmt(tTotal)} + GV ${fmt(gvToday)}) · this month FF ${fmt(ffM)} + GV ${fmt(gvM)} · stock FF ${fmt(ffS)} + GV ${fmt(gvS)} · wrong VRN ${fmt(wrong)} · top agent: ${topEntry ? `${esc(topEntry[0])} (${fmt(topEntry[1])})` : '—'}. Want more detail?`,
+        `☀️ ${esc(greetingWord())} briefing — kal total ${fmt(yTotal)} tags · aaj ab tak ${fmt(tTotal)} (combined EIR; GV ${fmt(gvToday)}) · is month FF ${fmt(ffM)} + GV ${fmt(gvM)} · stock FF ${fmt(ffS)} + GV ${fmt(gvS)} · wrong VRN ${fmt(wrong)} · top agent: ${topEntry ? `${esc(topEntry[0])} (${fmt(topEntry[1])})` : '—'}. Aur detail batau?`,
+        `☀️ ${esc(greetingWord())} briefing — yesterday total ${fmt(yTotal)} tags · today so far ${fmt(tTotal)} (combined EIR; GV ${fmt(gvToday)}) · this month FF ${fmt(ffM)} + GV ${fmt(gvM)} · stock FF ${fmt(ffS)} + GV ${fmt(gvS)} · wrong VRN ${fmt(wrong)} · top agent: ${topEntry ? `${esc(topEntry[0])} (${fmt(topEntry[1])})` : '—'}. Want more detail?`,
         SUGGEST_CHIPS()
       );
     }
@@ -293,9 +303,9 @@ window.FF = window.FF || {};
           const hit = metric === 'total' ? true
             : metric === 'vc4' ? isVc4
             : metric === 'commercial' ? !isVc4
-            : metric === 'chassis' ? /chassis/i.test(r.tagType || '')
-            : /replacement/i.test(r.status || '');
-          if (hit) gvAgg.set(r.agentName, (gvAgg.get(r.agentName) || 0) + 1);
+            : metric === 'chassis' ? /chassis/i.test(r.vrnType || r.tagType || '')
+            : /replacement/i.test(r.type || r.status || '');
+          if (hit) gvAgg.set(r.agentName, (gvAgg.get(r.agentName) || 0) + (Number(r.n) || 1));
         });
       }
       const top = (mp) => [...mp.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([n, v], i) => `${['🥇', '🥈', '🥉'][i]} ${n} — ${fmt(v)}`).join(' · ');
@@ -316,7 +326,7 @@ window.FF = window.FF || {};
     if (hasW('KAL', 'YESTERDAY') && !has('CHASSIS', 'WRONG', 'REPLACEMENT', 'COMMISSION')) {
       const key = dayOffsetKey(-1);
       const ffT = D.daily.filter((r) => r.key === key && r.channel === 'First Forward').reduce((n, r) => n + r.n, 0);
-      const gvT = D.gvMaster.filter((r) => r.date && U.dateKey(r.date) === key).length;
+      const gvT = gvCount(D.gvMaster, (r) => r.date && U.dateKey(r.date) === key);
       return ans(`Kal (${esc(key)}): FF ${fmt(ffT)} + GV ${fmt(gvT)} = <b>${fmt(ffT + gvT)}</b> tags.`,
         `Yesterday (${esc(key)}): FF ${fmt(ffT)} + GV ${fmt(gvT)} = <b>${fmt(ffT + gvT)}</b> tags.`,
         [['aaj ka total issuance', 'Aaj ka total'], ['week ka total', 'Is hafte ka total']]);
@@ -324,7 +334,7 @@ window.FF = window.FF || {};
     if (hasW('HAFTA', 'HAFTE', 'HAFTEY', 'WEEK') || has('LAST 7', '7 DIN', 'SEVEN DAY')) {
       const keys = new Set([0, -1, -2, -3, -4, -5, -6].map(dayOffsetKey));
       const ffW = D.daily.filter((r) => keys.has(r.key) && r.channel === 'First Forward').reduce((n, r) => n + r.n, 0);
-      const gvW = D.gvMaster.filter((r) => r.date && keys.has(U.dateKey(r.date))).length;
+      const gvW = gvCount(D.gvMaster, (r) => r.date && keys.has(U.dateKey(r.date)));
       return ans(`Pichhle 7 din: FF ${fmt(ffW)} + GV ${fmt(gvW)} = <b>${fmt(ffW + gvW)}</b> tags.`,
         `Last 7 days: FF ${fmt(ffW)} + GV ${fmt(gvW)} = <b>${fmt(ffW + gvW)}</b> tags.`,
         [['aaj ka total issuance', 'Aaj ka total'], ['kal ka total', 'Kal ka total']]);
@@ -334,8 +344,8 @@ window.FF = window.FF || {};
     if ((hasW('VC4', 'VC20', 'VC5') && !has('CHASSIS', 'STOCK')) || has('CLASS MIX', 'SPLIT') || (has('COMMERCIAL') && has('KITNE', 'SPLIT', 'MIX', 'VERSUS', 'VS'))) {
       const ffVc4 = D.agentClass.filter((r) => r.ym === m && r.channel === 'First Forward' && (r.group || '') === 'VC4').reduce((n, r) => n + r.n, 0);
       const ffAll = D.agentClass.filter((r) => r.ym === m && r.channel === 'First Forward').reduce((n, r) => n + r.n, 0);
-      const gvVc4 = D.gvMaster.filter((r) => r.ym === m && ((r.group || r.cls || '') + '').toUpperCase().includes('VC4')).length;
-      const gvAll = D.gvMaster.filter((r) => r.ym === m).length;
+      const gvVc4 = gvCount(D.gvMaster, (r) => r.ym === m && ((r.group || r.cls || '') + '').toUpperCase().includes('VC4'));
+      const gvAll = gvCount(D.gvMaster, (r) => r.ym === m);
       return ans(`Is month class mix — FF: VC4 ${fmt(ffVc4)} vs commercial ${fmt(Math.max(0, ffAll - ffVc4))} (total ${fmt(ffAll)}) · GV: VC4 ${fmt(gvVc4)} vs commercial ${fmt(Math.max(0, gvAll - gvVc4))} (total ${fmt(gvAll)}).`,
         `This month's class mix — FF: VC4 ${fmt(ffVc4)} vs commercial ${fmt(Math.max(0, ffAll - ffVc4))} (total ${fmt(ffAll)}) · GV: VC4 ${fmt(gvVc4)} vs commercial ${fmt(Math.max(0, gvAll - gvVc4))} (total ${fmt(gvAll)}).`,
         [['chassis ke kitne', 'Chassis?'], ['replacement kitne', 'Replacement?']]);
@@ -345,7 +355,7 @@ window.FF = window.FF || {};
     if (has('GROWTH', 'PICHLE MONTH', 'LAST MONTH', 'PREVIOUS MONTH', 'MONTH COMPARE')) {
       const prev = U.prevMonthKey ? U.prevMonthKey(m) : (() => { const d = new Date(); d.setMonth(d.getMonth() - 1); return U.ymKey(d); })();
       const ff = (ym) => D.daily.filter((r) => r.ym === ym && r.channel === 'First Forward').reduce((n, r) => n + r.n, 0);
-      const gv = (ym) => D.gvMaster.filter((r) => r.ym === ym).length;
+      const gv = (ym) => gvCount(D.gvMaster, (r) => r.ym === ym);
       const pct = (a, b) => b ? `${a >= b ? '+' : ''}${(((a - b) / b) * 100).toFixed(1)}%` : '—';
       const pctH = (a, b) => b ? U.pctHtml(((a - b) / b) * 100) : '—';
       return ans(`Growth — FF: ${fmt(ff(m))} is month vs ${fmt(ff(prev))} (${esc(U.labelYM(prev))}) → ${pctH(ff(m), ff(prev))} · GV: ${fmt(gv(m))} vs ${fmt(gv(prev))} → ${pctH(gv(m), gv(prev))}.`,
@@ -357,13 +367,13 @@ window.FF = window.FF || {};
     if (has('CHASSIS')) {
       if (agent) {
         const ffC = D.agentClass.filter((r) => r.ym === m && r.channel === 'First Forward' && norm(r.name) === agent.key && /chassis/i.test(r.vrnType || '')).reduce((n, r) => n + r.n, 0);
-        const gvC = D.gvMaster.filter((r) => r.ym === m && norm(r.agentName) === agent.key && /chassis/i.test(r.tagType || '')).length;
+        const gvC = gvCount(D.gvMaster, (r) => r.ym === m && norm(r.agentName) === agent.key && /chassis/i.test(r.vrnType || r.tagType || ''));
         return ans(`${agent.name} ke chassis tags (is month): FF ${fmt(ffC)} · GV ${fmt(gvC)} — total ${fmt(ffC + gvC)}.`,
           `${agent.name}'s chassis tags (this month): FF ${fmt(ffC)} · GV ${fmt(gvC)} — total ${fmt(ffC + gvC)}.`,
           [[`${agent.name} ka stock`, 'Iska stock'], [`${agent.name} ka full summary`, 'Full summary']]);
       }
       const ffC = D.daily.filter((r) => r.ym === m && /chassis/i.test(r.vrnType || '')).reduce((n, r) => n + (r.channel === 'First Forward' ? r.n : 0), 0);
-      const gvC = D.gvMaster.filter((r) => r.ym === m && /chassis/i.test(r.tagType || '')).length;
+      const gvC = gvCount(D.gvMaster, (r) => r.ym === m && /chassis/i.test(r.vrnType || r.tagType || ''));
       return ans(`Is month chassis tags — FF ${fmt(ffC)} · GV ${fmt(gvC)}, total ${fmt(ffC + gvC)}.`,
         `Chassis tags this month — FF ${fmt(ffC)} · GV ${fmt(gvC)}, total ${fmt(ffC + gvC)}.`,
         [['replacement kitne', 'Replacement?'], ['wrong VRN kitne', 'Wrong VRN?']]);
@@ -376,20 +386,20 @@ window.FF = window.FF || {};
           [[`${agent.name} ka full summary`, 'Full summary']]);
       }
       const ffW = D.daily.filter((r) => r.ym === m && /wrong/i.test(r.vrnType || '')).reduce((n, r) => n + (r.channel === 'First Forward' ? r.n : 0), 0);
-      return ans(`Is month Wrong VRN tags (FF EIR): ${fmt(ffW)}. GV Master me wrong-VRN flag alag track nahi hota.`,
-        `Wrong-VRN tags this month (FF EIR): ${fmt(ffW)}. The GV Master does not track a wrong-VRN flag separately.`,
+      return ans(`Is month Wrong VRN tags (FF EIR): ${fmt(ffW)}. GV EIR me wrong-VRN flag alag track nahi hota.`,
+        `Wrong-VRN tags this month (FF EIR): ${fmt(ffW)}. The GV EIR does not track a wrong-VRN flag separately.`,
         [['chassis ke kitne', 'Chassis?']]);
     }
     if (has('REPLACEMENT', 'REPLACE')) {
       if (agent) {
         const ffR = D.agentClass.filter((r) => r.ym === m && r.channel === 'First Forward' && norm(r.name) === agent.key && /replacement/i.test(r.type || r.status || '')).reduce((n, r) => n + r.n, 0);
-        const gvR = D.gvMaster.filter((r) => r.ym === m && norm(r.agentName) === agent.key && /replacement/i.test(r.status || '')).length;
+        const gvR = gvCount(D.gvMaster, (r) => r.ym === m && norm(r.agentName) === agent.key && /replacement/i.test(r.type || r.status || ''));
         return ans(`${agent.name} ke replacement tags (is month): FF ${fmt(ffR)} · GV ${fmt(gvR)} — total ${fmt(ffR + gvR)}.`,
           `${agent.name}'s replacement tags (this month): FF ${fmt(ffR)} · GV ${fmt(gvR)} — total ${fmt(ffR + gvR)}.`,
           [[`${agent.name} ka stock`, 'Iska stock']]);
       }
       const ffR = D.daily.filter((r) => r.ym === m && r.type === 'REPLACEMENT' && r.channel === 'First Forward').reduce((n, r) => n + r.n, 0);
-      const gvR = D.gvMaster.filter((r) => r.ym === m && /replacement/i.test(r.status || '')).length;
+      const gvR = gvCount(D.gvMaster, (r) => r.ym === m && /replacement/i.test(r.type || r.status || ''));
       return ans(`Is month replacement tags — FF ${fmt(ffR)} · GV ${fmt(gvR)}, total ${fmt(ffR + gvR)}.`,
         `Replacement tags this month — FF ${fmt(ffR)} · GV ${fmt(gvR)}, total ${fmt(ffR + gvR)}.`,
         [['chassis ke kitne', 'Chassis?'], ['wrong VRN kitne', 'Wrong VRN?']]);
@@ -414,13 +424,13 @@ window.FF = window.FF || {};
     // ---- commission ----
     if (has('COMMISSION', 'KAMAI', 'PAYOUT')) {
       if (agent) {
-        const gvC = D.gvMaster.filter((r) => r.ym === m && norm(r.agentName) === agent.key).reduce((n, r) => n + (r.commission || 0), 0);
-        const gvN = D.gvMaster.filter((r) => r.ym === m && norm(r.agentName) === agent.key).length;
+        const gvC = gvOperational(D).filter((r) => r.ym === m && norm(r.agentName) === agent.key).reduce((n, r) => n + (r.commission || 0), 0);
+        const gvN = gvCount(D.gvMaster, (r) => r.ym === m && norm(r.agentName) === agent.key);
         return ans(`${agent.name} ki GV commission (is month): ${money(gvC)} · ${fmt(gvN)} tags. FF commission REPORT sheet se aata hai — FF Commission page par dekho.`,
           `${agent.name}'s GV commission (this month): ${money(gvC)} · ${fmt(gvN)} tags. FF commission comes from the REPORT sheet — see the FF Commission page.`,
           [[`${agent.name} ka stock`, 'Iska stock']]);
       }
-      const gvC = D.gvMaster.filter((r) => r.ym === m).reduce((n, r) => n + (r.commission || 0), 0);
+      const gvC = gvOperational(D).filter((r) => r.ym === m).reduce((n, r) => n + (r.commission || 0), 0);
       return ans(`GV Partner ki total commission (is month): ${money(gvC)}. FF ki exact earned ke liye FF Commission page kholo.`,
         `GV Partner total commission (this month): ${money(gvC)}. Open the FF Commission page for FF's exact earned figure.`,
         [['top agent kaun', 'Top agent']]);
@@ -430,12 +440,12 @@ window.FF = window.FF || {};
     if (agent && has('FULL', 'SAB KUCH', 'SUMMARY', 'PROFILE', '360', 'REPORT')) {
       const today = todayKey();
       const ffMonth = D.agents.filter((a) => a.ym === m && a.channel === 'First Forward' && norm(a.name) === agent.key).reduce((n, a) => n + a.n, 0);
-      const gvMonth = D.gvMaster.filter((r) => r.ym === m && norm(r.agentName) === agent.key).length;
+      const gvMonth = gvCount(D.gvMaster, (r) => r.ym === m && norm(r.agentName) === agent.key);
       const ffS = D.stockAgents.filter((r) => norm(r.agentName) === agent.key).reduce((n, r) => n + r.n, 0);
       const gvS = D.gvStock.filter((r) => norm(r.agentName) === agent.key).reduce((n, r) => n + r.n, 0);
-      const gvC = D.gvMaster.filter((r) => r.ym === m && norm(r.agentName) === agent.key).reduce((n, r) => n + (r.commission || 0), 0);
+      const gvC = gvOperational(D).filter((r) => r.ym === m && norm(r.agentName) === agent.key).reduce((n, r) => n + (r.commission || 0), 0);
       const chassis = D.agentClass.filter((r) => r.ym === m && r.channel === 'First Forward' && norm(r.name) === agent.key && /chassis/i.test(r.vrnType || '')).reduce((n, r) => n + r.n, 0)
-        + D.gvMaster.filter((r) => r.ym === m && norm(r.agentName) === agent.key && /chassis/i.test(r.tagType || '')).length;
+        + gvCount(D.gvMaster, (r) => r.ym === m && norm(r.agentName) === agent.key && /chassis/i.test(r.vrnType || r.tagType || ''));
       return ans(`📊 <b>${esc(agent.name)}</b> (${esc(agent.id || 'ID blank')}) — full summary:<br>· Issuance (is month): FF ${fmt(ffMonth)} + GV ${fmt(gvMonth)} = <b>${fmt(ffMonth + gvMonth)}</b> tags<br>· Stock: FF ${fmt(ffS)} + GV ${fmt(gvS)} = <b>${fmt(ffS + gvS)}</b> tags<br>· GV commission: ${money(gvC)}<br>· Chassis tags: ${fmt(chassis)}`,
         `📊 <b>${esc(agent.name)}</b> (${esc(agent.id || 'ID blank')}) — full summary:<br>· Issuance (this month): FF ${fmt(ffMonth)} + GV ${fmt(gvMonth)} = <b>${fmt(ffMonth + gvMonth)}</b> tags<br>· Stock: FF ${fmt(ffS)} + GV ${fmt(gvS)} = <b>${fmt(ffS + gvS)}</b> tags<br>· GV commission: ${money(gvC)}<br>· Chassis tags: ${fmt(chassis)}`,
         [[`${agent.name} ka stock`, 'Stock detail'], [`${agent.name} ki commission`, 'Commission detail']]);
@@ -444,8 +454,8 @@ window.FF = window.FF || {};
     // ---- agent-wise issuance (aaj / month) ----
     if (agent && has('ISSUANCE', 'TAG', 'KITNE', 'KITNA', 'LAGAYE', 'LAGE', 'KAAM')) {
       const today = todayKey();
-      const gvToday = D.gvMaster.filter((r) => norm(r.agentName) === agent.key && r.date && U.dateKey(r.date) === today).length;
-      const gvMonth = D.gvMaster.filter((r) => norm(r.agentName) === agent.key && r.ym === m).length;
+      const gvToday = gvCount(D.gvMaster, (r) => norm(r.agentName) === agent.key && r.date && U.dateKey(r.date) === today);
+      const gvMonth = gvCount(D.gvMaster, (r) => norm(r.agentName) === agent.key && r.ym === m);
       const ffMonth = D.agents.filter((a) => a.ym === m && a.channel === 'First Forward' && norm(a.name) === agent.key).reduce((n, a) => n + a.n, 0);
       if (has('AAJ', 'TODAY')) {
         const ffToday = D.daily.filter((r) => r.key === today && r.channel === 'First Forward').reduce((n, r) => n + r.n, 0);
@@ -461,10 +471,10 @@ window.FF = window.FF || {};
     // ---- totals ----
     if (has('TOTAL', 'ISSUANCE', 'KITNE TAG', 'BUSINESS')) {
       const ffM = D.daily.filter((r) => r.ym === m && r.channel === 'First Forward').reduce((n, r) => n + r.n, 0);
-      const gvM = D.gvMaster.filter((r) => r.ym === m).length;
+      const gvM = gvCount(D.gvMaster, (r) => r.ym === m);
       const today = todayKey();
       const ffT = D.daily.filter((r) => r.key === today && r.channel === 'First Forward').reduce((n, r) => n + r.n, 0);
-      const gvT = D.gvMaster.filter((r) => r.date && U.dateKey(r.date) === today).length;
+      const gvT = gvCount(D.gvMaster, (r) => r.date && U.dateKey(r.date) === today);
       return ans(`Aaj: FF ${fmt(ffT)} + GV ${fmt(gvT)} = ${fmt(ffT + gvT)} tags. Is month: FF ${fmt(ffM)} + GV ${fmt(gvM)} = ${fmt(ffM + gvM)} tags.`,
         `Today: FF ${fmt(ffT)} + GV ${fmt(gvT)} = ${fmt(ffT + gvT)} tags. This month: FF ${fmt(ffM)} + GV ${fmt(gvM)} = ${fmt(ffM + gvM)} tags.`,
         [['kal ka total', 'Kal ka total'], ['growth vs last month', 'Growth?'], ['top agent kaun', 'Top agent']]);
@@ -475,7 +485,7 @@ window.FF = window.FF || {};
       const ffAgg = new Map();
       D.agents.filter((a) => a.ym === m && a.channel === 'First Forward').forEach((a) => ffAgg.set(a.name, (ffAgg.get(a.name) || 0) + a.n));
       const gvAgg = new Map();
-      D.gvMaster.filter((r) => r.ym === m).forEach((r) => gvAgg.set(r.agentName, (gvAgg.get(r.agentName) || 0) + 1));
+      D.gvMaster.filter((r) => r.ym === m).forEach((r) => gvAgg.set(r.agentName, (gvAgg.get(r.agentName) || 0) + (Number(r.n) || 1)));
       const topList = (mp, n) => [...mp.entries()].sort((a, b) => b[1] - a[1]).slice(0, n).map(([name, v]) => `${esc(name)} (${fmt(v)})`).join(', ') || '—';
       return ans(`Top agents (is month) — FF: ${topList(ffAgg, 5)} · GV: ${topList(gvAgg, 5)}. Poora leaderboard FASTag Champions page par hai.`,
         `Top agents (this month) — FF: ${topList(ffAgg, 5)} · GV: ${topList(gvAgg, 5)}. The full leaderboard is on the FASTag Champions page.`,

@@ -54,6 +54,7 @@ FF.pages = FF.pages || {};
         </div>
       </div>
       <div id="home-search"></div>
+      <div id="today-glance" class="today-glance" aria-live="polite"></div>
       <div id="home-body">${U.spinner('Highlights load ho rahe hain — GV & FF charts…')}</div>`;
 
     const body = U.$('#home-body', root);
@@ -61,7 +62,7 @@ FF.pages = FF.pages || {};
 
     // Background: ensure data
     const [dailyR, stockR, gvMasterR, gvStockR, agentsR, agentClassR] = await Promise.allSettled([
-      canFf ? S.need('daily') : Promise.reject(new Error('skip')),
+      (canFf || canGv) ? S.need('daily') : Promise.reject(new Error('skip')),
       canFf ? S.need('stock') : Promise.reject(new Error('skip')),
       canGv ? G.need('master') : Promise.reject(new Error('skip')),
       canGv ? G.need('stockClass') : Promise.reject(new Error('skip')),
@@ -100,25 +101,81 @@ FF.pages = FF.pages || {};
       quick.innerHTML = `<div class="chip-row">${items.join('')}</div>`;
     }
 
+    // Dashboard 2.0: one decision surface before the long-form charts. It is intentionally
+    // source-labelled so management can see what is live, what needs action, and when it was loaded.
+    const glance = U.$('#today-glance', root);
+    if (glance) {
+      const ffRows = ffDaily || [];
+      const ffDay = ffLatest ? U.dateKey(ffLatest) : '';
+      const gvDay = gvLatest ? U.dateKey(gvLatest) : '';
+      const ffToday = ffDay ? U.sum(ffRows.filter((r) => r.key === ffDay && r.channel !== 'GV Partner'), (r) => r.n) : 0;
+      const gvRows = G.issuanceRows ? G.issuanceRows() : (G.rows ? G.rows() : []);
+      const gvToday = gvDay ? U.sum(gvRows.filter((r) => r.date && U.dateKey(r.date) === gvDay), (r) => Number(r.n) || 1) : 0;
+      const pulseTotal = ffToday + gvToday;
+      const monthKey = U.ymKey(ffLatest || gvLatest || new Date());
+      const agentRows = agentsR.status === 'fulfilled' ? agentsR.value.filter((r) => r.ym === monthKey) : [];
+      const activeAgents = new Set(agentRows.filter((r) => Number(r.n) > 0).map((r) => r.name)).size;
+      const directAgents = new Set(agentRows.filter((r) => Number(r.n) > 0 && FF.config.isExcludedTl(r.tlName)).map((r) => r.name)).size;
+      const sourceDate = [ffLatest, gvLatest].filter(Boolean).sort((a, b) => b - a)[0];
+      const loadedAt = S.loadedAt || G.loadedAt || FF.data.lastLoadAt;
+      const age = loadedAt ? Math.max(0, Date.now() - new Date(loadedAt).getTime()) : Infinity;
+      const freshness = age < 2 * 3600e3 ? 'fresh' : age < 8 * 3600e3 ? 'aging' : 'stale';
+      const freshnessText = loadedAt ? `${U.timeLabel(loadedAt)} · ${freshness === 'fresh' ? 'fresh snapshot' : freshness === 'aging' ? 'refresh recommended' : 'stale — refresh now'}` : 'No snapshot yet';
+      const issues = [];
+      if (FF.preloader && FF.preloader.state && FF.preloader.state.errors.length) issues.push({ icon: '⚠️', label: `${FF.preloader.state.errors.length} sheet(s) need retry`, href: '#/settings?tab=data' });
+      if (!pulseTotal) issues.push({ icon: '🟡', label: 'No issuance in the latest source date', href: '#/tagIssued' });
+      if (ffStockTotal === 0 || gvStockTotal === 0) issues.push({ icon: '📦', label: 'Stock snapshot is empty or unavailable', href: '#/stock' });
+      if (!issues.length) issues.push({ icon: '✅', label: 'No immediate blocker in the loaded snapshot', href: '#/performance' });
+      const topMap = new Map();
+      agentRows.forEach((r) => topMap.set(r.name, (topMap.get(r.name) || 0) + (Number(r.n) || 0)));
+      const top = [...topMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
+      glance.innerHTML = `<section class="card glance-card"><div class="card-head"><div><h2>Today at a glance</h2><p class="sub">Aaj ka pulse · action-required items · performance highlights</p></div><div class="glance-fresh ${freshness}" title="Last successful data load">◉ ${esc(freshnessText)}</div></div><div class="glance-grid">
+        <div class="glance-pulse"><span class="glance-eyebrow">LATEST SOURCE DATE · ${esc(sourceDate ? U.labelDate(sourceDate, true) : '—')}</span><strong>${U.fmt(pulseTotal)}</strong><span>tags across today’s FF + GV pulse</span><div class="glance-breakdown"><b>🟦 FF ${U.fmt(ffToday)}</b><b>🟩 GV ${U.fmt(gvToday)}</b></div></div>
+        <div class="glance-kpis"><div><small>Active agents</small><b>${U.fmt(activeAgents)}</b><span>${U.fmt(directAgents)} direct · distinguishable</span></div><div><small>MTD context</small><b>${U.fmt((ffCur ? ffCur.total : 0) + (gvCur ? gvCur.total : 0))}</b><span>FF + GV · ${esc(U.labelYM(monthKey, true))}</span></div><div><small>Data freshness</small><b>${loadedAt ? U.timeLabel(loadedAt) : '—'}</b><span>↻ refresh to verify</span></div></div>
+        <div class="glance-actions"><h3>Action required <span>${issues.length}</span></h3>${issues.map((x) => `<a href="${x.href}"><span>${x.icon}</span><b>${esc(x.label)}</b><span>→</span></a>`).join('')}</div>
+        <div class="glance-highlights"><h3>Performance highlights</h3>${top.length ? top.map(([name, n], i) => `<a href="#/performance?agent=${encodeURIComponent(name)}"><span class="rank">${i + 1}</span><b>${esc(name)}</b><strong>${U.fmt(n)}</strong></a>`).join('') : '<p class="dim small">Agent performance data abhi load ho raha hai.</p>'}</div>
+      </div><div class="glance-footer"><span>Source-aware pulse · direct agents stay separate from TL-managed agents.</span><button class="btn small" data-action="focus-mode">🎯 Focus mode</button><button class="btn small" data-action="notifications">🔔 Notifications</button></div></section>`;
+    }
+
     const cards = [];
+
+    // 📅 EIR-authoritative month-end expectations. One shared current-month summary powers all
+    // four cards; expected values are calculated from observed EIR days, never hardcoded.
+    if (ffDaily && (ffLatest || gvLatest)) {
+      const homeLatest = [ffLatest, gvLatest].filter(Boolean).sort((a, b) => b - a)[0];
+      const homeMonth = U.ymKey(homeLatest);
+      const homeS = M.summary(ffDaily, homeMonth);
+      const observedDay = homeS.lastDay || homeLatest.getDate();
+      const monthDays = U.daysInMonth(homeMonth);
+      const expected = (actual) => observedDay > 0 ? Math.max(actual, Math.round((actual / observedDay) * monthDays)) : actual;
+      const expectation = (label, value) => `${U.fmt(value)} <small class="kpi-expect">/ ${U.fmt(expected(value))}</small>`;
+      cards.push(`<section class="card home-expected"><div class="card-head"><div><h3>📅 This month · EIR issuance pace</h3><p class="sub">Actual so far / expected month-end · FF + GV combined from EIR</p></div><div class="card-right dim">${esc(U.labelYM(homeMonth, true))} · through day ${observedDay}</div></div><div class="card-body"><div class="kpi-grid mini expected-kpi-grid">
+        ${kpi('g3', 'VC4 · Actual / Expected', '🚗', expectation('VC4', homeS.vc4), `EIR actual ${U.fmt(homeS.vc4)} · expected month-end ${U.fmt(expected(homeS.vc4))}`, `src=both&scope=mtd&f=vc4`)}
+        ${kpi('g8', 'VC20 · Actual / Expected', '🛻', expectation('VC20', homeS.vc20), `EIR actual ${U.fmt(homeS.vc20)} · expected month-end ${U.fmt(expected(homeS.vc20))}`, `src=both&scope=mtd&f=vc20`)}
+        ${kpi('g6', 'VC5+ · Actual / Expected', '🚚', expectation('VC5+', homeS.vc5p), `EIR actual ${U.fmt(homeS.vc5p)} · expected month-end ${U.fmt(expected(homeS.vc5p))}`, `src=both&scope=mtd&f=vc5p`)}
+        ${kpi('g4', 'All Commercial · Actual / Expected', '💼', expectation('Commercial', homeS.comm), `EIR actual ${U.fmt(homeS.comm)} · expected month-end ${U.fmt(expected(homeS.comm))}`, `src=both&scope=mtd&f=commercial`)}
+      </div></div></section>`);
+    }
 
     // 🟩 GV · AAJ KA LIVE — class/type-wise KPI cards + Expected Today (run-rate) — click → full detail
     if (gvMasterR.status === 'fulfilled' && G.rows) {
-      const gvAll = G.rows();
-      const now = new Date();
-      const tk = U.dateKey(now);
+      const gvAll = G.issuanceRows ? G.issuanceRows() : G.rows();
+      const sourceNow = gvLatest || new Date();
+      const now = sourceNow;
+      const tk = U.dateKey(sourceNow);
       const todayRows = gvAll.filter((r) => r.date && U.dateKey(r.date) === tk);
-      const sum = (fn) => todayRows.filter(fn).length;
-      const gvAajTotal = todayRows.length;
+      const countRows = (list, fn) => U.sum(list.filter(fn), (r) => Number(r.n) || 1);
+      const sum = (fn) => countRows(todayRows, fn);
+      const gvAajTotal = U.sum(todayRows, (r) => Number(r.n) || 1);
       const gvAajVc4 = sum((r) => r.group === 'VC4');
       const gvAajVc20 = sum((r) => r.group === 'VC20');
       const gvAajVc5p = sum((r) => r.group === 'VC5+');
-      const gvAajChassis = sum((r) => /chassis/i.test(r.tagType || ''));
-      const gvAajRepl = sum((r) => /replacement/i.test(r.status || ''));
-      // Pichhle same 4 week-days ki run-rate (isi weekday ka average) → Expected today
-      const wd = now.getDay();
+      const gvAajChassis = sum((r) => /chassis/i.test(r.tagType || r.vrnType || ''));
+      const gvAajRepl = sum((r) => /replacement/i.test(r.status || r.type || ''));
+      // Pichhle same 4 week-days ki EIR run-rate (isi weekday ka average) → Expected today
+      const wd = sourceNow.getDay();
       const byDay = new Map();
-      for (const r of gvAll) { if (!r.date || r.date.getDay() !== wd) continue; const k = U.dateKey(r.date); if (k === tk) continue; byDay.set(k, (byDay.get(k) || 0) + 1); }
+      for (const r of gvAll) { if (!r.date || r.date.getDay() !== wd) continue; const k = U.dateKey(r.date); if (k === tk) continue; byDay.set(k, (byDay.get(k) || 0) + (Number(r.n) || 1)); }
       const last4 = [...byDay.entries()].sort((a, b) => b[0].localeCompare(a[0])).slice(0, 4);
       const runRate = last4.length ? Math.round(last4.reduce((n, [, v]) => n + v, 0) / last4.length) : null;
       // Aaj ki rate (pace) se projection — abhi tak jitna hua, din ke bache hue hisaab se
@@ -308,7 +365,8 @@ FF.pages = FF.pages || {};
         days.push(U.labelDate(d));
         ffVals.push(U.sum(f.filter(r=>r.channel!=='GV Partner'), r=>r.n));
         if (gvLatest) {
-          gvVals.push(G.rows().filter(r=>r.ym===ym && r.day===day).length);
+          const gvDayRows = (G.issuanceRows ? G.issuanceRows() : G.rows()).filter(r=>r.ym===ym && r.day===day);
+          gvVals.push(U.sum(gvDayRows, r => Number(r.n) || 1));
         }
       }
       cards.push(card(`📈 Last 14 Days Trend <span class="dim">FF vs GV</span>`, C.lines({
