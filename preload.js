@@ -18,11 +18,26 @@ window.FF = window.FF || {};
       await FF.data.query(name, '', opts);
     }
   }
+  /** Jin tabs ka data pehle se memory me hai unhe dobara network par nahi bhejte (EIR → store 'daily' etc.).
+      ⚡ v3.21 — tha: 3 workers × 2 queries = 6 parallel requests, jo page ke apne critical queries ko
+      connection-pool me peeche dhakel dete the. Ab 2 workers + already-loaded tabs skip. */
+  function alreadyLoaded(tab) {
+    try {
+      const kind = tab.kind || '';
+      if (kind === 'issuance' && FF.store && FF.store.get && FF.store.get('daily')) return true;
+      if (kind === 'report' && FF.store && FF.store.get && FF.store.get('report')) return true;
+      if (/^gv-/.test(kind) && FF.gv && FF.gv.enabled && FF.gv.enabled()) {
+        const key = kind === 'gv-issuance' ? 'master' : kind === 'gv-stock' ? 'stockClass' : 'report';
+        if (FF.gv.get && FF.gv.get(key)) return true;
+      }
+    } catch { /* optional optimisation — fail ho to warm kar do */ }
+    return false;
+  }
   function preloadAll(fresh = false) {
     if (state.running) return state.promise;
     const version = generation;
     state.running = true; state.done = false; state.errors = [];
-    const tabs = FF.config.allTabs(true).filter(t => FF.auth.can(`sheet:${t.id}`));
+    const tabs = FF.config.allTabs(true).filter(t => FF.auth.can(`sheet:${t.id}`) && (fresh || !alreadyLoaded(t)));
     const tasks = [() => FF.store.preload(fresh)];
     if (FF.gv && FF.gv.enabled()) tasks.push(() => FF.gv.preload(fresh));
     state.progress = { total: tasks.length + tabs.length, loaded: 0 };
@@ -39,7 +54,7 @@ window.FF = window.FF || {};
         await run(() => warmTab(tab, fresh));
       }
     };
-    state.promise = Promise.all([...tasks.map(run), ...Array.from({ length: Math.min(3, tabs.length) }, () => Promise.resolve().then(worker))])
+    state.promise = Promise.all([...tasks.map(run), ...Array.from({ length: Math.min(2, tabs.length) }, () => Promise.resolve().then(worker))])
       .then(() => {
         if (version !== generation) return state;
         state.errors.push(...Object.values(FF.store.state.errors));

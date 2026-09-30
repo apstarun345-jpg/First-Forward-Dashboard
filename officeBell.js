@@ -139,32 +139,57 @@ window.FF = window.FF || {};
     return text;
   }
 
+  /** 🔇 Chrome kabhi kabhi pehli utterance ko 'interrupted'/'canceled' bol kar band kar deta hai
+      (jaise jab pehle se kuch bol raha ho ya silent unlock utterance cancel ho). Ye policy block
+      NAHI hai — isse pehle hum galat me "BLOCKED" dikha dete the. Sirf asli policy error block hai. */
+  const POLICY_ERRORS = ['not-allowed', 'not-allowed-error', 'NotAllowedError'];
+  const BENIGN_ERRORS = ['interrupted', 'canceled', 'cancelled', 'audio-busy', 'audio-hardware', 'network', 'synthesis-unavailable', 'aborted', 'no-voice'];
+  const isPolicyError = (reason) => POLICY_ERRORS.some((x) => String(reason || '').toLowerCase().includes(String(x).toLowerCase()));
+  const isBenignError = (reason) => BENIGN_ERRORS.some((x) => String(reason || '').toLowerCase().includes(String(x).toLowerCase()));
+
   /** Bol kar sunao. Fail ho (autoplay block / koi voice nahi) to ting + nudge. Promise<boolean>. */
   function speakAnnounce(text, fallbackDelta) {
     return new Promise((resolve) => {
       let settled = false;
-      const ok = () => { if (!settled) { settled = true; st.unlocked = true; hideNudge(); resolve(true); } };
-      const bad = (reason) => {
+      let retried = false;
+      const ok = () => { if (!settled) { settled = true; st.unlocked = true; st.lastErr = ''; hideNudge(); resolve(true); } };
+      const speakDirect = () => {
+        try {
+          const u = new SpeechSynthesisUtterance(String(text));
+          u.lang = 'hi-IN'; u.rate = 1.02;
+          u.onend = ok;
+          u.onerror = (ev) => bad((ev && ev.error) || 'error', true);
+          window.speechSynthesis.speak(u);
+        } catch (err) { bad(err && err.message ? err.message : 'exception', true); }
+      };
+      const bad = (reason, viaDirect) => {
         if (settled) return;
+        // 🔁 interrupted/canceled = browser ne pehle wali awaaz kaati — dobara try karo, block mat kaho.
+        if (isBenignError(reason) && !retried) {
+          retried = true;
+          setTimeout(() => { if (!settled) { try { window.speechSynthesis.cancel(); } catch { /* ignore */ } speakDirect(); } }, 160);
+          return;
+        }
         settled = true;
         st.lastErr = String(reason || 'error');
-        st.unlocked = false;
+        // Policy block sirf tab jab browser ne sach me mana kiya ho; warna unlock state waisi hi rehne do.
+        if (isPolicyError(reason) || reason === 'unsupported') st.unlocked = false;
         ting(fallbackDelta || 3);
         showNudge();
         resolve(false);
       };
       try {
         if (!('speechSynthesis' in window)) { bad('unsupported'); return; }
+        // Assistant ka voice path pehle (wo "Meri awaaz" profile + voice prefs use karta hai).
         if (FF.assistant && typeof FF.assistant.speak === 'function') {
-          FF.assistant.speak(text, { force: true, onEnd: ok, onError: bad });
+          let called = false;
+          FF.assistant.speak(text, { force: true, onEnd: () => { called = true; ok(); }, onError: (reason) => { called = true; bad(reason); } });
+          // Assistant chup-chaap kuch na kare (edge cases) → 900ms baad seedha khud bol do.
+          setTimeout(() => { if (!settled && !called) speakDirect(); }, 900);
           return;
         }
-        const u = new SpeechSynthesisUtterance(String(text));
-        u.lang = 'hi-IN'; u.rate = 1.02;
-        u.onend = ok;
-        u.onerror = (ev) => bad((ev && ev.error) || 'error');
-        window.speechSynthesis.speak(u);
-      } catch (err) { bad(err && err.message ? err.message : 'exception'); }
+        speakDirect();
+      } catch (err) { bad(err && err.message ? err.message : 'exception', true); }
     });
   }
 
@@ -342,9 +367,12 @@ window.FF = window.FF || {};
     const log = logList().slice(0, 12);
     const clock = (t) => { try { return new Date(t).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
     const status = st.unlocked
-      ? `<span class="badge green">SOUND UNLOCKED ✓</span>`
-      : `<span class="badge ${st.lastErr ? 'red' : 'amber'}">${st.lastErr ? `BLOCKED (${U.esc(st.lastErr)})` : 'TAP TO UNLOCK'}</span>`;
-    return `<h4>🔊 Office Bell · voice ${status}</h4>
+      ? `<span class="badge green">SOUND READY ✓</span>`
+      : isPolicyError(st.lastErr)
+        ? `<span class="badge red">BROWSER BLOCK (${U.esc(st.lastErr)})</span>`
+        : `<span class="badge amber">${st.lastErr ? `RETRY (${U.esc(st.lastErr)})` : 'EK TAP ME CHALU'}</span>`;
+    return `<h4>🔊 Office Bell · voice ${status} ${voiceOn() ? '' : '<span class="badge red">OFF</span>'}</h4>
+      ${!st.unlocked || isPolicyError(st.lastErr) ? `<div class="bell-acts"><button class="btn small primary" type="button" data-bell-act="enable">🔊 Enable sound (ek baar)</button></div><p class="dim small" style="margin:4px 0 8px">Browser pehli awaaz ke liye ek click maangta hai. Ye button dabate hi sound unlock ho jaata hai — phir har naya tag bol kar sunayi dega.</p>` : ''}
       <label class="bell-opt"><input type="checkbox" data-bell-opt="voice" ${voiceOn() ? 'checked' : ''}> 🎙️ Voice announcer (bol kar sunao)</label>
       <label class="bell-opt"><input type="checkbox" data-bell-opt="ting" ${p.ting !== false ? 'checked' : ''}> 🔔 Ting sound</label>
       <label class="bell-opt"><input type="checkbox" data-bell-opt="ff" ${p.ff !== false ? 'checked' : ''}> 🟦 First Forward tags</label>
@@ -377,7 +405,15 @@ window.FF = window.FF || {};
     el.addEventListener('change', (e) => {
       const k = e.target.dataset && e.target.dataset.bellOpt;
       if (!k) return;
-      if (k === 'voice') { setVoice(e.target.checked); if (e.target.checked) { unlock('retry'); U.toast('🎙️ Voice Announcer ON', 'ok'); } }
+      if (k === 'voice') {
+        setVoice(e.target.checked);
+        if (e.target.checked) {
+          unlock('retry');
+          const hi = !(FF.assistant && FF.assistant.getLang && FF.assistant.getLang() === 'en');
+          speakAnnounce(hi ? 'Voice announcer chalu ho gaya.' : 'Voice announcer is on.', 3)
+            .then((ok) => U.toast(ok ? '🎙️ Voice Announcer ON · sound ready ✓' : `🎙️ ON, par browser ne awaaz roki (${st.lastErr || 'tap needed'}) — "Enable sound" dabao`, ok ? 'ok' : 'warn'));
+        } else U.toast('🔇 Voice Announcer OFF — sirf ting bajega', 'warn');
+      }
       else if (k === 'min') setPrefs({ minTags: Number(e.target.value) || 1 });
       else setPrefs({ [k]: e.target.checked });
       refreshMenu(); updateBtn();
@@ -386,6 +422,14 @@ window.FF = window.FF || {};
       const act = e.target.closest('[data-bell-act]');
       if (!act) return;
       const a = act.dataset.bellAct;
+      if (a === 'enable') {
+        if (!voiceOn()) setVoice(true);
+        unlock('retry');
+        setPrefs({ muteUntil: 0 });
+        const hi = !(FF.assistant && FF.assistant.getLang && FF.assistant.getLang() === 'en');
+        speakAnnounce(hi ? 'Awaaz chalu ho gayi — ab har naya tag bol kar sunaunga.' : 'Sound is on — I will announce every new tag.', 3)
+          .then((okk) => { U.toast(okk ? '🔊 Sound unlocked ✓ — ab har naya tag bolega' : `⚠️ Browser ne roka (${st.lastErr || 'unknown'}) — page par ek baar click karke dobara try karo`, okk ? 'ok' : 'err'); refreshMenu(); updateBtn(); });
+      }
       if (a === 'test') {
         unlock('retry');
         const hi = !(FF.assistant && FF.assistant.getLang && FF.assistant.getLang() === 'en');

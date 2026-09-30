@@ -67,8 +67,8 @@ window.FF = window.FF || {};
   function clearGlobalFilters() {
     globalFilters = { period: 'month', channel: '', tl: '', agent: '', cls: '', month: '' };
     writeLocalJson('ff_global_filters', globalFilters);
-    const patch = { period: '', channel: '', ch: '', tl: '', agent: '', cls: '', month: '' };
-    if (current.page === 'tagIssued' || current.page === 'rangeReport') Object.assign(patch, { from: '', to: '', date: '' });
+    // Reset har page par saaf kare — from/to/date bhi, warna pichhli page ka date chipka reh jaata tha.
+    const patch = { period: '', channel: '', ch: '', tl: '', agent: '', cls: '', month: '', from: '', to: '', date: '' };
     updateParams(patch);
   }
   function periodDates(period) {
@@ -106,18 +106,22 @@ window.FF = window.FF || {};
     const bar = U.$('#global-filter-bar');
     if (!bar || !FF.auth.user) return;
     if (!FILTER_PAGES.has(current.page) || (FF.config.feat && FF.config.feat('universalFilters') === false)) { bar.hidden = true; bar.innerHTML = ''; return; }
-    const f = currentFilterValues();
+    const f = (FF.filters ? FF.filters.current() : currentFilterValues());
     const period = f.period || 'month';
     bar.hidden = false;
-    bar.innerHTML = `<div class="global-filter-label"><span>⌕</span><b>Workspace filters</b><small>saved across pages</small></div>
+    bar.innerHTML = `<div class="global-filter-label"><span>⌕</span><b>Workspace filters</b><small>${f.isDefault ? 'saved across pages' : `${f.active.length} active`}</small></div>
       <label><span>Period</span><select data-global-filter="period" aria-label="Shared date period"><option value="today" ${period === 'today' ? 'selected' : ''}>Today</option><option value="yesterday" ${period === 'yesterday' ? 'selected' : ''}>Yesterday</option><option value="week" ${period === 'week' ? 'selected' : ''}>Last 7 days</option><option value="month" ${period === 'month' ? 'selected' : ''}>This month</option><option value="lastMonth" ${period === 'lastMonth' ? 'selected' : ''}>Last month</option><option value="all" ${period === 'all' ? 'selected' : ''}>All available</option></select></label>
       <label><span>Month</span><input type="month" data-global-filter="month" aria-label="Shared month filter" value="${esc(f.month || '')}"></label>
       <label><span>Channel</span><select data-global-filter="channel" aria-label="Shared channel filter"><option value="" ${!f.channel ? 'selected' : ''}>FF + GV</option><option value="ff" ${f.channel === 'ff' ? 'selected' : ''}>First Forward</option><option value="gv" ${f.channel === 'gv' ? 'selected' : ''}>GV Partner</option></select></label>
-      <label class="global-filter-search"><span>TL</span><input data-global-filter="tl" aria-label="Shared TL filter" placeholder="All TLs" value="${esc(f.tl || '')}"></label>
-      <label class="global-filter-search"><span>Agent</span><input data-global-filter="agent" aria-label="Shared agent filter" placeholder="All agents" value="${esc(f.agent || '')}"></label>
+      <label class="global-filter-search"><span>TL</span><input data-global-filter="tl" data-global-live="1" aria-label="Shared TL filter" placeholder="All TLs" value="${esc(f.tl || '')}"></label>
+      <label class="global-filter-search"><span>Agent</span><input data-global-filter="agent" data-global-live="1" aria-label="Shared agent filter" placeholder="All agents" value="${esc(f.agent || '')}"></label>
       <label><span>Class</span><select data-global-filter="cls" aria-label="Shared class filter"><option value="" ${!f.cls ? 'selected' : ''}>All classes</option><option value="VC4" ${f.cls === 'VC4' ? 'selected' : ''}>VC4</option><option value="VC20" ${f.cls === 'VC20' ? 'selected' : ''}>VC20</option><option value="VC5+" ${f.cls === 'VC5+' ? 'selected' : ''}>VC5+</option></select></label>
-      <button type="button" class="btn small global-filter-clear" data-global-filter-clear aria-label="Clear shared filters">Reset</button>
-      <span class="global-filter-state" aria-live="polite">${navigator.onLine === false ? '📴 Offline snapshot' : '↻ Applies to compatible views'}</span>`;
+      <div class="global-filter-acts"><button type="button" class="btn small" data-global-filter-set="today">Aaj</button><button type="button" class="btn small" data-global-filter-set="yesterday">Kal</button><button type="button" class="btn small global-filter-clear" data-global-filter-clear aria-label="Clear shared filters">Reset</button></div>
+      <div class="global-filter-state" aria-live="polite">
+        <div class="lf-chips">${FF.filters ? FF.filters.chips(f) : ''}</div>
+        ${FF.filters ? FF.filters.lagNote(f) : ''}
+        ${navigator.onLine === false ? '<span class="lf-offline">📴 Offline snapshot</span>' : ''}
+      </div>`;
   }
   function renderMobileNav() {
     const nav = U.$('#mobile-nav');
@@ -319,6 +323,10 @@ window.FF = window.FF || {};
   }
   try { document.documentElement.dataset.theme = themeMode(); } catch {}
 
+  // Filter badalne par kabhi kabhi nayi hash purani jaisi hi hoti hai (jaise "This month" jab pehle
+  // se month hi tha). Us case me location.hash event nahi aata aur page purana hi rehta tha — isliye
+  // jab hash same ho to ye override memory me rakha jaata hai aur page khud dobara render hota hai.
+  let paramOverride = null;
   function parseHash() {
     const raw = location.hash.replace(/^#\/?/, '');
     const [pathPart, queryPart] = raw.split('?');
@@ -328,6 +336,9 @@ window.FF = window.FF || {};
     let page = segs[0] || firstAllowedPage();
     if (page === 'sheet') { params.name = segs.slice(1).join('/'); }
     if (!FF.pages[page]) { const alias = { gvPartner: 'gvDashboard', comparison: 'compare', gvd: 'gvDashboard', tagIssued: 'tagIssued', 'gv-ff': 'tagIssued' }; page = alias[page] || firstAllowedPage(); }
+    if (paramOverride && paramOverride.hash === location.hash && paramOverride.page === page) {
+      Object.assign(params, paramOverride.params);
+    }
     return { page, params };
   }
   function buildHash(page, params) {
@@ -339,7 +350,18 @@ window.FF = window.FF || {};
     const qs = q.toString();
     return qs ? `${path}?${qs}` : path;
   }
-  function navigate(page, params) { location.hash = buildHash(page, params || {}); }
+  function navigate(page, params) {
+    const next = buildHash(page, params || {});
+    if (location.hash === next) {
+      // Same URL — hashchange nahi aayega. Params memory me rakh kar page ko khud refresh karo,
+      // warna filter badalne par kuch hota hi nahi dikhta (purana bug).
+      paramOverride = { hash: next, page, params: { ...(params || {}) } };
+      renderCurrent();
+      return;
+    }
+    paramOverride = null;
+    location.hash = next;
+  }
   function updateParams(patch) { navigate(current.page, { ...current.params, ...patch }); }
   function pagePerm(page, params) {
     if (page === 'sheet') return `sheet:${(params && params.name) || ''}`;
@@ -856,7 +878,7 @@ window.FF = window.FF || {};
   function bind() {
     // Sidebar stays fixed/visible on desktop — the old hover auto-hide mode is removed.
     document.body.classList.remove('sidebar-auto'); try { localStorage.removeItem('ff_sidebar_auto'); } catch { /* private mode */ }
-    window.addEventListener('hashchange', () => { renderCurrent(); toggleUserMenu(false); });
+    window.addEventListener('hashchange', () => { paramOverride = null; renderCurrent(); toggleUserMenu(false); });
     U.$('#menu-btn').addEventListener('click', () => document.body.classList.toggle('side-open'));
     const themeBtn = U.$('#theme-toggle'); if (themeBtn) themeBtn.addEventListener('click', toggleThemeMode);
     const langBtn = U.$('#lang-toggle');
@@ -914,7 +936,8 @@ window.FF = window.FF || {};
       }
       if (!e.target.closest('#user-menu') && !e.target.closest('#user-btn')) toggleUserMenu(false);
       if (e.target.closest('#user-menu a')) toggleUserMenu(false);
-      const kpi = e.target.closest('.kpi');
+      // `.kpi` ya `[data-kpi]` — dono clickable hain (Home ke glance tiles bhi data-kpi use karte hain).
+      const kpi = e.target.closest('.kpi, [data-kpi]');
       if (kpi && !e.target.closest('a,button:not(.kpi)') && !kpi.closest('#drawer')) {
         if (FF.kpiDetail) { FF.kpiDetail.open(kpi); return; }
         const title = kpi.dataset.kpiTitle || U.$('.kpi-title', kpi)?.textContent || 'KPI summary';
@@ -959,6 +982,30 @@ window.FF = window.FF || {};
       }
       const el = e.target.closest('select[data-param], input[data-param]');
       if (el) updateParams({ [el.dataset.param]: el.value, ...(el.dataset.param === 'tl' ? { agent: '' } : {}), ...(el.dataset.param === 'agent' ? { tl: '' } : {}) });
+    });
+    // TL / Agent search boxes par type karte hi (debounced) filter apply ho — blur ka intezaar nahi.
+    const liveFilter = U.debounce((el) => {
+      if (!el || !el.isConnected) return;
+      const stored = (FF.app.globalFilters || {})[el.dataset.globalFilter] || '';
+      if (String(el.value || '') === String(stored || '')) return;
+      updateParams(globalFilterPatch(el.dataset.globalFilter, el.value));
+    }, 550);
+    document.addEventListener('input', (e) => {
+      const el = e.target.closest('[data-global-live]');
+      if (el) liveFilter(el);
+    });
+    // Aaj / Kal quick buttons — workspace filter bar ke shortcuts.
+    document.addEventListener('click', (e) => {
+      const quick = e.target.closest('[data-global-filter-set]');
+      if (quick) {
+        e.preventDefault();
+        const value = quick.dataset.globalFilterSet;
+        const patch = globalFilterPatch('period', value);
+        updateParams(patch);
+        U.toast(value === 'today'
+          ? '🟩 Aaj — GV live, FF kal aayega (T+1)'
+          : '📅 Kal — GV + FF dono', 'ok');
+      }
     });
     FF.store.on((ev, detail) => { if (ev === 'progress' || ev === 'start' || ev === 'done') updateStatus(detail); });
     // periodic install btn check
@@ -1125,6 +1172,6 @@ window.FF = window.FF || {};
     setLang(next);
   }
 
-  FF.app = { storageBanner, pushBanner, liveShareChip, navigate, updateParams, clearGlobalFilters, refresh, openDrawer, closeDrawer, renderSidebar, renderCurrent, renderTopUser, updateStatus, onLogin, onBackgroundDataUpdated, promptInstall, enhanceCharts, enhanceTables, themeMode, toggleThemeMode, lang, setLang, toggleLangMenu, renderGlobalFilters, renderMobileNav, focusMode: updateFocusMode, openAccessibility: renderA11yPanel, tableDensity, setTableDensity, PAGES, refreshPendingBadge, setPendingSignups, shareWhatsApp, checkVersion, exportCSV: () => exportCurrentCsv('csv'), exportXLSX: () => exportCurrentCsv('xlsx'), toggleTheme: toggleThemeMode, toggleLang: toggleLangQuick, get pendingSignups() { return pendingSignups; }, get current() { return current; }, get globalFilters() { return { ...globalFilters }; } };
+  FF.app = { storageBanner, pushBanner, liveShareChip, navigate, updateParams, clearGlobalFilters, refresh, openDrawer, closeDrawer, renderSidebar, renderCurrent, renderTopUser, updateStatus, onLogin, onBackgroundDataUpdated, promptInstall, enhanceCharts, enhanceTables, themeMode, toggleThemeMode, lang, setLang, toggleLangMenu, renderGlobalFilters, renderMobileNav, focusMode: updateFocusMode, openAccessibility: renderA11yPanel, tableDensity, setTableDensity, PAGES, refreshPendingBadge, setPendingSignups, shareWhatsApp, checkVersion, exportCSV: () => exportCurrentCsv('csv'), exportXLSX: () => exportCurrentCsv('xlsx'), toggleTheme: toggleThemeMode, toggleLang: toggleLangQuick, get pendingSignups() { return pendingSignups; }, get current() { return current; }, get globalFilters() { return { ...globalFilters }; }, currentFilters: () => (FF.filters ? FF.filters.current() : currentFilterValues()) };
   document.addEventListener('DOMContentLoaded', init);
 })(window.FF);

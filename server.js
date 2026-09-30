@@ -6,6 +6,7 @@
 // Durable storage: local JSON files OR encrypted APP_STORAGE tab in the same Google spreadsheet.
 // Run locally:  npm start   (PORT defaults to 8080; Render sets PORT automatically)
 import http from 'node:http';
+import zlib from 'node:zlib';
 import fs from 'node:fs/promises';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -2302,35 +2303,77 @@ async function checkReports(force = false) {
   })().finally(() => { reportCheckPromise = null; });
   return reportCheckPromise;
 }
-function sendCached(res, entry, tag) {
-  res.writeHead(200, headers({ 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', 'X-Cache': tag, 'X-FF-Source': 'proxy', 'X-FF-Age': String(Math.round((Date.now() - entry.at) / 1000)) }));
-  res.end(entry.body);
+function sendCached(req, res, entry, tag) {
+  return sendMaybeCompressed(req, res, 200, 'text/plain; charset=utf-8', entry.body, {
+    'Cache-Control': 'no-store', 'X-Cache': tag, 'X-FF-Source': 'proxy', 'X-FF-Age': String(Math.round((Date.now() - entry.at) / 1000))
+  });
 }
-async function handleGviz(res, params) {
+const HOT = new Map();                 // url → { hits, at } — jo queries sach me use hoti hain
+const HOT_LIMIT = 300;
+function markHot(url) {
+  const h = HOT.get(url) || { hits: 0, at: 0 };
+  h.hits++; h.at = Date.now();
+  HOT.set(url, h);
+  if (HOT.size > HOT_LIMIT) HOT.delete(HOT.keys().next().value);
+}
+const goodGvizBody = (body) => typeof body === 'string' && body.includes('setResponse') && !/"status"\s*:\s*"error"/.test(body);
+async function upstreamOnce(url) {
+  let p = inflight.get(url);
+  if (!p) { p = fetchUpstream(url).finally(() => inflight.delete(url)); inflight.set(url, p); }
+  return p;
+}
+/** Cache me daalo (dedupe + cap ke saath). */
+function remember(url, body, status) {
+  const entry = { at: Date.now(), body, status };
+  cache.set(url, entry);
+  if (cache.size > MAX_CACHE_ENTRIES) cache.delete(cache.keys().next().value);
+  return entry;
+}
+/** Background refresh — user ko kabhi Google ke intezaar me nahi rakhta. */
+async function refreshCache(url) {
+  try {
+    const { status, body } = await upstreamOnce(url);
+    if (status >= 200 && status < 300 && goodGvizBody(body)) return remember(url, body, status);
+  } catch { /* upstream down — purana cache hi serve hota rahega */ }
+  return null;
+}
+async function handleGviz(req, res, params) {
   const fresh = params.get('fresh') === '1';
   const url = upstreamUrl(params);
   const hit = cache.get(url);
-  if (hit && !fresh && Date.now() - hit.at < cacheMs()) return sendCached(res, hit, 'HIT');
+  markHot(url);
+  if (hit && !fresh) {
+    if (Date.now() - hit.at < cacheMs()) return sendCached(req, res, hit, 'HIT');
+    // ⚡ Stale-while-revalidate: expired entry turant serve karo, naya data peeche se aa jayega.
+    void refreshCache(url);
+    return sendCached(req, res, hit, 'STALE');
+  }
   try {
-    let p = inflight.get(url);
-    if (!p) { p = fetchUpstream(url).finally(() => inflight.delete(url)); inflight.set(url, p); }
-    const { status, body } = await p;
-    const okBody = body.includes('setResponse') && !/"status"\s*:\s*"error"/.test(body);
-    if (status >= 200 && status < 300 && okBody) {
-      const entry = { at: Date.now(), body, status };
-      cache.set(url, entry);
-      if (cache.size > MAX_CACHE_ENTRIES) cache.delete(cache.keys().next().value);
-      return sendCached(res, entry, 'MISS');
-    }
-    if (hit) return sendCached(res, hit, 'STALE');
+    const { status, body } = await upstreamOnce(url);
+    if (status >= 200 && status < 300 && goodGvizBody(body)) return sendCached(req, res, remember(url, body, status), 'MISS');
+    if (hit) return sendCached(req, res, hit, 'STALE');
     if (!(status >= 200 && status < 300)) return sendJson(res, 502, { error: `Google Sheets responded ${status}. Sheet public ("Anyone with the link") hai?` });
-    res.writeHead(200, headers({ 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', 'X-Cache': 'MISS', 'X-FF-Source': 'proxy' }));
-    return res.end(body);
+    return sendMaybeCompressed(req, res, 200, 'text/plain; charset=utf-8', body, { 'Cache-Control': 'no-store', 'X-Cache': 'MISS', 'X-FF-Source': 'proxy' });
   } catch (error) {
-    if (hit) return sendCached(res, hit, 'STALE');
+    if (hit) return sendCached(req, res, hit, 'STALE');
     return sendJson(res, 502, { error: `Google Sheet se data nahi mila: ${error.name === 'AbortError' ? 'timeout' : error.message}` });
   }
 }
+// ⚡ Hot queries ko cache me warm rakho — pehla user bhi instant data dekhta hai (Google ka wait nahi).
+const WARM_MIN_HITS = 3;
+setInterval(() => {
+  const cutoff = Date.now() - 15 * 60e3;
+  const hot = [...HOT.entries()].filter(([, h]) => h.at > cutoff && h.hits >= WARM_MIN_HITS)
+    .sort((a, b) => b[1].hits - a[1].hits).slice(0, 8);
+  if (!hot.length) return;
+  (async () => {
+    for (const [url] of hot) {
+      const entry = cache.get(url);
+      if (entry && Date.now() - entry.at < cacheMs() * 0.7) continue;
+      await refreshCache(url);
+    }
+  })().catch(() => {});
+}, 60_000).unref?.();
 
 // ---------------------------------------------------------------------------------------------
 // API routes
@@ -2416,7 +2459,7 @@ async function handleApi(req, res, url) {
 
   if (p === '/api/health' && method === 'GET') {
     // pendingSignups sirf admin ko (sidebar badge ke liye) — public health me leak nahi.
-    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.20.0', storage: storageStatus(), push: pushHealth(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length } : {}) });
+    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.21.0', storage: storageStatus(), push: pushHealth(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length } : {}) });
   }
   if (p === '/api/public-config' && method === 'GET') return sendJson(res, 200, publicSettings());
   // App version (sw.js CACHE_NAME) — update-toast ke liye; logged-in se pehle bhi chahiye.
@@ -3042,7 +3085,7 @@ async function handleApi(req, res, url) {
 
   // ---- gviz ----
   if (p === '/api/gviz' && method === 'GET') {
-    return handleGviz(res, url.searchParams);
+    return handleGviz(req, res, url.searchParams);
   }
 
   // ---- Google Sheet storage setup helpers (admin) --------------------------------------------
@@ -3353,9 +3396,10 @@ async function handleApi(req, res, url) {
 // ---------------------------------------------------------------------------------------------
 // Static files
 // ---------------------------------------------------------------------------------------------
-async function serveStatic(res, pathname) {
+async function serveStatic(req, res, pathname, search) {
   let requested = decodeURIComponent(pathname);
   if (requested === '/' || requested === '') requested = '/index.html';
+  const versioned = /[?&]v=/.test(String(search || ''));
   const candidates = [path.normalize(path.join(__dirname, requested))];
   if (requested.startsWith('/js/')) candidates.push(path.normalize(path.join(__dirname, path.basename(requested))));
   for (const candidate of candidates) {
@@ -3369,11 +3413,15 @@ async function serveStatic(res, pathname) {
       if (!stat.isFile()) continue;
       const content = await fs.readFile(candidate);
       const ext = path.extname(candidate).toLowerCase();
-      res.writeHead(200, headers({ 'Content-Type': MIME[ext] || 'application/octet-stream', 'Content-Length': content.length, 'Cache-Control': ['.html', '.js', '.css', '.webmanifest'].includes(ext) ? 'no-cache' : 'public, max-age=600' }));
-      return res.end(content);
+      const isShell = ext === '.html' || ext === '.webmanifest';
+      // `?v=42` wala asset immutable ho gaya (index.html har deploy par bump karta hai) → repeat visits
+      // par 45 scripts ek baar hi download hote hain, phir 0 requests. HTML/manifest no-cache rehta hai.
+      const cache = isShell ? 'no-cache' : versioned ? 'public, max-age=31536000, immutable' : 'public, max-age=600';
+      const type = MIME[ext] || 'application/octet-stream';
+      return sendMaybeCompressed(req, res, 200, type, content, { 'Cache-Control': cache, 'X-FF-Cache': versioned && !isShell ? 'immutable' : 'revalidate' });
     } catch { /* try next */ }
   }
-  if (!path.extname(requested)) return serveStatic(res, '/index.html'); // pretty URLs → app shell
+  if (!path.extname(requested)) return serveStatic(req, res, '/index.html', search); // pretty URLs → app shell
   return sendText(res, 404, 'Not found');
 }
 
@@ -3608,6 +3656,41 @@ function sendHtml(res, status, html, extra = {}) {
   res.writeHead(status, headers({ 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': Buffer.byteLength(html), ...extra }));
   res.end(html);
 }
+
+// ---------------------------------------------------------------------------------------------
+// ⚡ Compression + caching — poora app (≈2.4 MB JS/CSS) bina gzip ke bhejne par phone/hotel wifi par
+// pehla load bahut slow lagta tha. Ab text assets gzip/brotli me jaate hain aur `?v=` wale URLs
+// browser me 1 saal cache rehte hain (file badalne par index.html me version bump hota hai).
+// ---------------------------------------------------------------------------------------------
+const COMPRESSIBLE = /^(text\/|application\/(javascript|json|manifest\+json|xml)|image\/svg\+xml)/i;
+function accepts(req, enc) {
+  const h = String((req && req.headers && req.headers['accept-encoding']) || '').toLowerCase();
+  return h.includes(enc);
+}
+/** Buffer/string ko best available encoding me bhejo (brotli → gzip → plain). */
+function sendMaybeCompressed(req, res, status, contentType, body, extra = {}) {
+  let buf = Buffer.isBuffer(body) ? body : Buffer.from(String(body));
+  const base = { 'Content-Type': contentType, ...extra };
+  const canZip = buf.length > 1024 && COMPRESSIBLE.test(contentType);
+  if (!canZip) {
+    res.writeHead(status, headers({ ...base, 'Content-Length': buf.length }));
+    return res.end(buf);
+  }
+  const headersOut = { ...base, Vary: 'Accept-Encoding' };
+  let encoded = buf;
+  let encoding = '';
+  try {
+    if (accepts(req, 'br')) { encoded = zlib.brotliCompressSync(buf, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 5 } }); encoding = 'br'; }
+    else if (accepts(req, 'gzip')) { encoded = zlib.gzipSync(buf, { level: 6 }); encoding = 'gzip'; }
+  } catch { encoded = buf; encoding = ''; }
+  // Sirf tab compress bhejo jab sach me fayda ho.
+  if (!encoding || encoded.length >= buf.length) {
+    res.writeHead(status, headers({ ...base, 'Content-Length': buf.length }));
+    return res.end(buf);
+  }
+  res.writeHead(status, headers({ ...headersOut, 'Content-Encoding': encoding, 'Content-Length': encoded.length }));
+  return res.end(encoded);
+}
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
@@ -3622,7 +3705,7 @@ const server = http.createServer(async (req, res) => {
       try { return await servePersonalPage(req, res, url.pathname.slice(3)); } catch (err) { console.error(err); return sendText(res, 500, 'Server error'); }
     }
     if (req.method !== 'GET' && req.method !== 'HEAD') return sendText(res, 405, 'Method not allowed');
-    return await serveStatic(res, url.pathname);
+    return await serveStatic(req, res, url.pathname, url.search);
   } catch (error) {
     console.error(error);
     return sendText(res, 500, 'Unexpected server error');

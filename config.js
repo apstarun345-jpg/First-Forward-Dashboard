@@ -45,6 +45,13 @@ FF.config = {
   // Legacy view of the First Forward sheet tabs (kept in sync with `tabs` by refreshViews()).
   sheets: [],
 
+  // 🔁 FF issuance lag (server settings → yahan merge hota hai). First Forward (EIR) ka issuance data
+  //    T+1 aata hai — aaj ka data kal. GV Partner (master ID 5845036 ki EIR rows) LIVE chalta hai.
+  //      • 1 (default) → TODAY view: GV live, FF = 0 with "kal aayega" note; YESTERDAY: dono.
+  //      • 0 → purana behaviour (lag off, aaj ki FF rows bhi gini jayengi).
+  //    Resolver: filters.js (FF.filters.ffLagOn / ffVisible / isFfPending).
+  ffIssuanceLagDays: 1,
+
   // 🎛 Feature switches — server (Settings → 🎛 Features) se overwrite hote hain. Admin yahin se
   //    on/off/modify karta hai; defaults sab ON (alerts ke saath).
   features: {

@@ -134,7 +134,11 @@ FF.pages = FF.pages || {};
       if (fromVal > val) { rangeRoot.innerHTML = '<div class="warn-box">From date, To date se baad nahi ho sakti.</div>'; return; }
 
       // Date interval analytics (daily EIR aggregates + row-level GV Master).
-      const dailyRows = S.get('daily') || [];
+      // 🔁 FF (EIR) T+1 hai — aaj ka FF data kal aata hai; GV live. Isliye lagged FF rows yahan bhi drop.
+      const rawDaily = S.get('daily') || [];
+      const dailyRows = FF.filters ? FF.filters.dropLaggedFf(rawDaily) : rawDaily;
+      const ffPending = !!(FF.filters && FF.filters.isFfPending(val));
+      const ffLagBadge = ffPending ? `<span class="badge amber" title="First Forward ka issuance data T+1 aata hai — ${esc(val)} ka FF kal aayega, isliye FF abhi 0 dikh raha hai. GV live hai.">🟦 FF T+1 · kal aayega</span>` : '';
       const ffRangeRows = dailyRows.filter((r) => r.channel !== 'GV Partner' && inRange(r, fromVal, val));
       const gvRangeRows = dailyRows.filter((r) => r.channel === 'GV Partner' && inRange(r, fromVal, val));
       const ffRange = rangeSummary(ffRangeRows);
@@ -161,7 +165,7 @@ FF.pages = FF.pages || {};
       const topFfAgents = U.topEntries(ffAgentTotals, rankCount);
       const classMetrics = [['Total', 'total'], ['VC4', 'vc4'], ['VC20', 'vc20'], ['VC5+', 'vc5p'], ['Commercial', 'comm'], ['Issuance', 'issuance'], ['Replacement', 'replacement'], ['Chassis', 'chassis'], ['Wrong VRN', 'wrongVrn']];
       const compareRows = classMetrics.map(([label,key]) => `<tr><td>${esc(label)}</td><td class="num">${U.fmt(ffRange[key])}</td><td class="num">${U.fmt(gvRange[key])}</td><td class="num"><b>${U.fmt(ffRange[key] + gvRange[key])}</b></td></tr>`).join('');
-      rangeRoot.innerHTML = `<section class="range-summary card"><div class="card-head"><h3>📊 GV vs First Forward · ${esc(rangeLabel)}</h3><span class="badge indigo">${U.fmt(combined)} tags total</span></div>
+      rangeRoot.innerHTML = `<section class="range-summary card"><div class="card-head"><h3>📊 GV vs First Forward · ${esc(rangeLabel)}</h3><div class="card-right">${ffLagBadge}<span class="badge indigo">${U.fmt(combined)} tags total</span></div></div>
         <div class="range-total-row"><div><small>First Forward</small><b>${U.fmt(ffRange.total)}</b></div><div><small>GV Partner</small><b>${U.fmt(gvRange.total)}</b></div><div><small>Combined total</small><b>${U.fmt(combined)}</b></div></div>
         <div class="grid g-2">${card('🏷️ Tag class comparison · VC4 / VC20 / VC5+', cmpChart)}${card('🔧 Issuance, replacement & exceptions', opsChart)}</div>
         <div class="grid g-2">${card('🏆 Top GV agents · selected date range', C.hbars({items:gvTopRows.map(([name,o],i)=>({label:name,sub:`VC4 ${U.fmt(o.vc4)} · Commercial ${U.fmt(o.comm)}`,value:o.total,color:C.PALETTE[i%C.PALETTE.length]})),valueLabel:'Tags'}))}${card('⭐ Top First Forward agents · available month summaries', `${C.hbars({items:topFfAgents.map(([name,n],i)=>({label:name,value:n,color:C.PALETTE[i%C.PALETTE.length]})),valueLabel:'Tags'})}<small class="dim">Agent source is month-level, so partial-month selections include the full selected month(s).</small>`)}</div>
@@ -174,7 +178,7 @@ FF.pages = FF.pages || {};
       const newHash = `#/tagIssued?from=${fromVal}&to=${val}&date=${val}`;
       if (location.hash !== newHash) history.replaceState(null, '', newHash);
 
-      const daily = S.get('daily') || [];
+      const daily = FF.filters ? FF.filters.dropLaggedFf(S.get('daily') || []) : (S.get('daily') || []);
       const ffData = getDailyForDate(daily.filter(r => r.channel !== 'GV Partner'), dateObj);
       const allData = getDailyForDate(daily, dateObj);
       const gvData = getGvForDate(dateObj);
@@ -195,7 +199,7 @@ FF.pages = FF.pages || {};
 
       const dk = U.dateKey(dateObj);
       const kpis = [
-        kpi('g2', `Total Issued · ${U.labelDate(dateObj,true)}`, '🏷️', U.fmt(total), `${growthBadge(total, totalPrev)} vs prev day (${U.fmt(totalPrev)}) · FF <b>${U.fmt(ffData.total)}</b> · GV <b>${U.fmt(gvData.total)}</b>`, `src=both&scope=day&date=${dk}`),
+        kpi('g2', `Total Issued · ${U.labelDate(dateObj,true)}`, '🏷️', U.fmt(total), `${growthBadge(total, totalPrev)} vs prev day (${U.fmt(totalPrev)}) · FF <b>${U.fmt(ffData.total)}</b>${ffPending ? ' <small>(kal aayega)</small>' : ''} · GV <b>${U.fmt(gvData.total)}</b>`, `src=both&scope=day&date=${dk}`),
         kpi('g3', 'FF · VC4', '🚗', U.fmt(ffData.vc4), `${growthBadge(ffData.vc4, ffPrev.vc4)} vs prev · Commercial <b>${U.fmt(ffData.comm)}</b> · share ${U.fmtPct(U.pctOf(ffData.vc4, ffData.total),0)}`, `src=both&scope=day&date=${dk}&f=ff,vc4`),
         kpi('g5', 'GV · VC4', '🚀', U.fmt(gvData.vc4), `${growthBadge(gvData.vc4, gvPrev.vc4)} vs prev · Commercial <b>${U.fmt(gvData.comm)}</b> · share ${U.fmtPct(U.pctOf(gvData.vc4, gvData.total),0)}`, `src=gv&scope=day&date=${dk}&f=vc4`),
         kpi('g4', 'Commercial Total', '🚚', U.fmt(ffData.comm + gvData.comm), `FF ${U.fmt(ffData.comm)} (VC20 ${U.fmt(ffData.vc20)} + VC5+ ${U.fmt(ffData.vc5p)}) · GV ${U.fmt(gvData.comm)}`, `src=both&scope=day&date=${dk}&f=comm`),
@@ -252,7 +256,7 @@ FF.pages = FF.pages || {};
       body.innerHTML = `
         <div class="kpi-grid">${kpis.join('')}</div>
         <div class="grid g-2">
-          ${card(`🟦 First Forward · ${U.labelDate(dateObj,true)} <span class="dim">vs ${U.labelDate(prevDate,true)}</span>`, ffChart, `<span class="badge indigo">${U.fmt(ffData.total)} tags</span>`)}
+          ${card(`🟦 First Forward · ${U.labelDate(dateObj,true)} <span class="dim">vs ${U.labelDate(prevDate,true)}</span>`, ffPending ? `<div class="warn-box">🟦 First Forward ka data T+1 aata hai — <b>${esc(U.labelDate(dateObj,true))}</b> ka FF issuance kal aayega, isliye aaj <b>0</b> dikh raha hai. GV Partner live hai (upar ka card).</div>${ffChart}` : ffChart, `<span class="badge indigo">${U.fmt(ffData.total)} tags</span>`)}
           ${card(`🟩 GV Partner · ${U.labelDate(dateObj,true)} <span class="dim">vs ${U.labelDate(prevDate,true)}</span>`, gvChart, `<span class="badge teal">${U.fmt(gvData.total)} tags</span>`)}
         </div>
         ${card(`📋 Class-wise Detailed · ${U.labelDate(dateObj,true)}`, `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Class</th><th class="num">FF Today</th><th class="num">FF Prev</th><th>FF Growth</th><th class="num">GV Today</th><th class="num">GV Prev</th><th>GV Growth</th><th class="num">Total Today</th><th class="num">Total Prev</th><th>Total Growth</th></tr></thead><tbody>${classRows || '<tr><td colspan="10" class="empty">Is date par koi data nahi</td></tr>'}</tbody></table></div>`, `<button class="btn small" data-action="export" data-name="tag-issued-${val}">⬇ CSV</button>`)}

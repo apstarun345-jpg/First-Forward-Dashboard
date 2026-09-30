@@ -1,10 +1,10 @@
 // Versioned app shell + offline data cache.
 // Auth login/logout/password endpoints are NEVER cached. Sheet data (gviz), /api/auth/me and
 // /api/settings are network-first with a cached fallback — internet na ho to last loaded data se app khulta hai.
-const CACHE_NAME = 'apnapayment-v48';
+const CACHE_NAME = 'apnapayment-v49';
 const DATA_CACHE = 'ff-data-v4';
 const STASH_CACHE = 'ff-push-stash-v1'; // pushsubscriptionchange ke waqt bani subscription yahan rakho
-const ASSETS = ['./', './index.html', './styles.css?v=41', './config.js?v=41', './util.js?v=41', './app.js?v=41', './home.js?v=41', './notifications.js?v=41', './palette.js?v=41', './i18n.js?v=41', './assistant.js?v=41', './masterSearch.js?v=41', './directAgents.js?v=41', './masterProfile.js?v=41', './newAgents.js?v=41', './wowzone.js?v=41', './favicon.svg?v=5', './icon-192.png?v=5', './icon-512.png?v=5'];
+const ASSETS = ['./', './index.html', './styles.css?v=43', './config.js?v=43', './util.js?v=43', './app.js?v=43', './home.js?v=43', './notifications.js?v=43', './palette.js?v=43', './i18n.js?v=43', './assistant.js?v=43', './masterSearch.js?v=43', './directAgents.js?v=43', './masterProfile.js?v=43', './newAgents.js?v=43', './wowzone.js?v=43', './favicon.svg?v=5', './icon-192.png?v=5', './icon-512.png?v=5'];
 // Network-first snapshots survive a temporary connection loss; auth/actions remain live-only.
 const OFFLINE_API = (path) => path === '/api/gviz' || path === '/api/auth/me' || path === '/api/settings' || path === '/api/stock-history';
 
