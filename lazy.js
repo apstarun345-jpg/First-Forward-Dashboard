@@ -21,7 +21,7 @@ window.FF = window.FF || {};
     try {
       const tag = document.querySelector('script[src*="config.js?v="]') || document.querySelector('script[src*="app.js?v="]');
       const m = tag && /[?&]v=([\w.]+)/.exec(tag.getAttribute('src') || '');
-      return m ? m[1] : '45';
+      return m ? m[1] : '46';
     } catch { return '45'; }
   })();
 

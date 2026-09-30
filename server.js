@@ -133,7 +133,7 @@ const DEFAULT_USER_PERMS = ['home', 'executive', 'forecast', 'dataQuality', 'sav
 const DEFAULT_NOTIFICATION_ROUTES = Object.freeze({
   dailyDigest: 'admin', monthlyReport: 'both', lowStock: 'admin', midMonth: 'admin',
   zeroDay: 'admin', agentAnomaly: 'admin', tlAnomaly: 'admin', followup: 'both',
-  champion: 'both', reportUpdate: 'admin', inactiveUsers: 'admin', backupReminder: 'admin'
+  champion: 'both', reportUpdate: 'both', inactiveUsers: 'admin', backupReminder: 'admin'
 });
 const NOTIFICATION_AUDIENCES = new Set(['admin', 'users', 'both', 'off']);
 
@@ -929,7 +929,9 @@ function snapshotDelta(prev, next) {
   const classes = {};
   for (const key of keys) { const d = (next.classes[key] || 0) - (prev.classes[key] || 0); if (d) classes[key] = d; }
   const total = (next.total || 0) - (prev.total || 0);
-  return { total, classes, changed: next.date !== prev.date || total !== 0 };
+  // Class-wise corrections (total same, andar ka badlaav) bhi "changed" hain — warna backdated
+  // edits par koi notification nahi aata tha.
+  return { total, classes, changed: next.date !== prev.date || total !== 0 || Object.keys(classes).length > 0 };
 }
 function deltaText(delta) {
   const pieces = Object.entries(delta.classes || {}).map(([k, v]) => `${k} ${v > 0 ? '+' : ''}${v}`);
@@ -2370,7 +2372,9 @@ async function maybeWorkspaceFollowups(force = false) {
 }
 async function checkReports(force = false) {
   if (reportCheckPromise) return reportCheckPromise;
-  if (!force && Date.now() - reportCheckAt < 5 * 60e3) return;
+  // 2.5 min throttle — "data update ki notification late aati hai" ka fix (pehle 5 min tha).
+  // Client notification polls (har 5s) isi ko trigger karti hain — cadence effectively 2.5 min.
+  if (!force && Date.now() - reportCheckAt < 150e3) return;
   reportCheckAt = Date.now();
   reportCheckPromise = (async () => {
     for (const source of ['ff', 'gv']) {
@@ -2395,9 +2399,9 @@ async function checkReports(force = false) {
           for (let i = 0; i < keys.length - 400; i++) delete db.notify.watch.daily[keys[i]];
         }
         const delta = snapshotDelta(previous, next);
-        if (delta && delta.changed && (delta.total > 0 || next.date !== previous.date)) {
+        if (delta && delta.changed) {
           const label = source === 'gv' ? 'GV Partner' : 'First Forward';
-          recordNotification({ type: 'report', title: `${label} report update`, body: `${next.date}: ${deltaText(delta)} — Google Sheet me naya data aaya.`, target: 'admin', routeKey: 'reportUpdate', meta: { source, snapshot: currentSnapshot, previous, delta } });
+          recordNotification({ type: 'report', title: `${label} report update`, body: `${next.date}: ${deltaText(delta)} — Google Sheet me naya data aaya.`, target: 'admin', routeKey: 'reportUpdate', meta: { source, snapshot: currentSnapshot, previous, delta, link: '#/tagIssued' } });
         }
       } catch (err) { console.warn(`report watcher ${source}:`, err.message); }
     }
@@ -2509,7 +2513,7 @@ function perfReport() {
   const hottest = [...HOT.entries()].sort((a, b) => b[1].hits - a[1].hits).slice(0, 10)
     .map(([url, h]) => ({ url: url.length > 160 ? `${url.slice(0, 160)}…` : url, hits: h.hits }));
   return {
-    version: '3.22.0', cacheEntries: cache.size, cacheEntriesMax: MAX_CACHE_ENTRIES,
+    version: '3.23.0', cacheEntries: cache.size, cacheEntriesMax: MAX_CACHE_ENTRIES,
     cacheSeconds: cacheMs() / 1000, warmedQueries: warmed, hotQueries: hottest,
     slowest: queries.filter((q) => q.upstream > 0).slice(0, 25),
     queries
@@ -2615,7 +2619,7 @@ async function handleApi(req, res, url) {
 
   if (p === '/api/health' && method === 'GET') {
     // pendingSignups sirf admin ko (sidebar badge ke liye) — public health me leak nahi.
-    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.22.0', storage: storageStatus(), push: pushHealth(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length } : {}) });
+    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.23.0', storage: storageStatus(), push: pushHealth(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length } : {}) });
   }
   // 📊 Admin-only: exact reason of slowness (Google query timings, cache hit rate, warm queries).
   if (p === '/api/perf' && method === 'GET') {
@@ -4012,7 +4016,7 @@ async function start() {
     console.log(`First Forward Dashboard → http://0.0.0.0:${server.address().port}`);
     console.log(`Sheet ${db.settings.sheetId} · cache ${cacheMs() / 1000}s · storage ${sheetsStore ? `Google Sheets / encrypted APP_STORAGE (${STORAGE_BACKEND})` : DATA_DIR} · users ${db.users.length} · push ${vapidKeys ? `${pushSubs().length} device(s), VAPID from ${vapidSource}, TTL ${PUSH_TTL}s` : 'DISABLED (no VAPID key)'}${GVIZ_BASE !== 'https://docs.google.com' ? ` · upstream ${GVIZ_BASE}` : ''}`);
     setTimeout(() => checkReports(true).catch(() => {}), 5000);
-    setInterval(() => checkReports(false).catch(() => {}), 5 * 60e3).unref();
+    setInterval(() => checkReports(false).catch(() => {}), 3 * 60e3).unref();
     setTimeout(() => maybeMonthlyReport(), 8000);
     setInterval(() => maybeMonthlyReport(), 60 * 60e3).unref();
     // 🌅 Scheduled checks: daily digest (subah 8 IST ke baad roz ek baar) + mid-month target +

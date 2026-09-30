@@ -1112,8 +1112,11 @@ window.FF = window.FF || {};
     };
   }
 
-  /** Capture ka analysis — pehle direct PCM (recording), warna blob decode (upload). */
+  /** Capture ka analysis — pehle direct PCM (recording), warna blob decode (upload).
+   *  Dono forms accept karta hai: startVoiceCapture() ka HANDLE (stop() khud call hota hai) ya
+   *  stop() ka RESULT ({ blob, pcm, sampleRate, seconds }) — "Meri awaaz" record flow robust rahe. */
   async function analyzeVoiceCapture(cap) {
+    if (cap && typeof cap.stop === 'function') cap = await cap.stop();
     if (cap && cap.pcm && cap.pcm.length && cap.sampleRate > 0) {
       const target = 8000;
       const res = analyzePcm(resamplePcm(cap.pcm, cap.sampleRate, target), target);
