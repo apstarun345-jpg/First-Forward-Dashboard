@@ -122,9 +122,14 @@ window.FF = window.FF || {};
   function lang() { try { const v = localStorage.getItem('ff_lang'); return v === 'hi' || v === 'en' ? v : 'hinglish'; } catch { return 'hinglish'; } }
   function setLang(v) {
     try { localStorage.setItem('ff_lang', v); } catch {}
+    if (FF.i18n) FF.i18n.set(v);
     renderSidebar();
-    U.toast(v === 'hi' ? 'भाषा: हिंदी ✓' : v === 'en' ? 'Language: English ✓' : 'Language: Hinglish ✓', 'ok');
-    renderCurrent();
+    renderTopUser();
+    applyThemeMode();
+    const msg = v === 'hi' ? 'भाषा बदल गई — पूरी साइट हिंदी में है ✓' : v === 'en' ? 'Language changed — whole site is now in English ✓' : 'Language changed — poori site Hinglish me hai ✓';
+    U.toast(msg, 'ok');
+    renderCurrent();                                  // page dobara render (source Hinglish se)
+    if (FF.i18n) FF.i18n.translateTitle(v);
   }
   function toggleLangMenu() {
     const old = U.$('#lang-pop'); if (old) { old.remove(); return; }
@@ -148,16 +153,14 @@ window.FF = window.FF || {};
     return p;
   }
   const groupLabel = (g) => (lang() === 'hi' && HI_GROUPS[g] ? HI_GROUPS[g] : g);
-  /** DOM auto-translation: page heads, buttons, seg tabs (exact textContent match only). */
+  /** 🌐 Site-wide language: poori DOM walk hoti hai — text nodes + title/placeholder/aria-label.
+      Tables, KPI cards, badges, drawers, notifications, dynamic messages — sab translate. */
   function translateDom(root) {
     const mode = lang();
     if (mode === 'hinglish') return;
-    const dict = TEXT[mode]; if (!dict) return;
-    U.$$('.page-head h1, .page-head .sub, .btn, .seg-btn', root || document).forEach((el) => {
-      if (!el || (el.querySelector && el.querySelector('input,select,img,svg')) || el.childElementCount > 0) return;
-      const key = (el.textContent || '').trim();
-      if (dict[key] !== undefined) el.textContent = dict[key];
-    });
+    const el = root || document.body;
+    if (!el) return;
+    if (FF.i18n) FF.i18n.translateTree(el, mode);
   }
 
   // ---- theme (light / dark) ---------------------------------------------------------------------
@@ -688,7 +691,14 @@ window.FF = window.FF || {};
     window.addEventListener('hashchange', () => { renderCurrent(); toggleUserMenu(false); });
     U.$('#menu-btn').addEventListener('click', () => document.body.classList.toggle('side-open'));
     const themeBtn = U.$('#theme-toggle'); if (themeBtn) themeBtn.addEventListener('click', toggleThemeMode);
-    const langBtn = U.$('#lang-toggle'); if (langBtn) langBtn.addEventListener('click', toggleLangMenu);
+    const langBtn = U.$('#lang-toggle');
+    if (langBtn) {
+      langBtn.addEventListener('click', toggleLangMenu);
+      const l = lang();
+      langBtn.title = l === 'hi' ? 'भाषा' : l === 'en' ? 'Language' : 'भाषा · Language';
+      langBtn.setAttribute('aria-label', langBtn.title);
+    }
+    if (FF.i18n) FF.i18n.translateTitle();
     applyThemeMode();
     window.addEventListener('online', () => { updateStatus(); U.toast('🌐 Internet wapas aa gaya — ↻ se fresh data lao', 'ok'); });
     window.addEventListener('offline', () => { updateStatus(); U.toast('📴 Offline ho — last loaded data dikhega', 'warn'); });

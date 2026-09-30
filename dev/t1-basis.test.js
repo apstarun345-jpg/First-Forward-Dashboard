@@ -1,4 +1,4 @@
-/* 📅 T-1 BASIS (v3.19) — FF ka REPORT kal ka data laata hai, isliye run-rate / suggested dispatch /
+/* 📅 T-1 BASIS (v3.20) — FF ka REPORT kal ka data laata hai, isliye run-rate / suggested dispatch /
    growth % / month-end projection sab "jis din tak ka data aaya hai" (report day) par ginne chahiye.
 
    Covered: U.reportBasis · U.projectMonthEnd · U.dispatchCalc(elapsed) ·
@@ -60,7 +60,7 @@ test('reportBasis: REPORT ke last day ko divisor banata hai + date/label deta ha
   assert.equal(b.sheetLabel, `${DAY}/Sep`, 'sheet ka raw header bhi rakha (debug/label ke liye)');
 });
 
-test('reportBasis: aaj ka adhoora data kabhi count nahi hota (sheet T-1 se aage na jaaye)', () => {
+test('reportBasis: aaj ka adhoora data kabhi count nahi hota (sheet aaj se aage na jaaye)', () => {
   const today = new Date().getDate();
   if (today <= DAY) return;                       // sheet pehle hi T-1 hai — cap ka koi case nahi
   FF.pages.performance.daysElapsed = () => today;  // sheet me aaj aa gaya
@@ -102,34 +102,58 @@ test('dispatchCalc: explicit elapsed (T-1) se rate/required/net/gross', () => {
   assert.equal(d.elapsed, U.runRateDays());
 });
 
-test('TL profile: growth % REPORT se + T-1 projection + basis', async () => {
+test('TL profile: growth % REPORT se + month-end expected + basis', async () => {
   const pr = await MP.build(person('ff-tl', 'TL One'));
   assert.equal(pr.found, true);
   // 📈 sheet ka apna TL growth % (▼ -4%) — sign sahi parse hona chahiye
   assert.equal(pr.growthNum, -4, '▼ prefix se negative');
   assert.equal(pr.growth, '▼ -4%');
   assert.ok(pr.projT1, 'projT1 missing');
-  assert.equal(pr.projT1.days, DAY, 'T-1 basis');
+  assert.equal(pr.projT1.days, DAY, 'FF basis = kal tak ka din');
   assert.equal(pr.projT1.num, -4);
   // totals = 2 agents × (cur 120 + 30) = 300; projection = round(300 / DAY × monthDays)
   assert.equal(pr.totals.curTotal, 150);
   assert.equal(pr.projT1.total, U.projectMonthEnd(150, DAY, ym));
-  // run-rate/dispatch bhi T-1 divisor par
-  assert.equal(pr.calc.total.elapsed, DAY, 'dispatch calc T-1 par');
+  // run-rate/dispatch bhi usi divisor par
+  assert.equal(pr.calc.total.elapsed, DAY, 'dispatch calc bhi same basis par');
 });
 
-test('TL profile drawer HTML: growth %, till-date, projection section', async () => {
+test('TL profile drawer HTML: growth %, till-date, expected section', async () => {
   const pr = await MP.build(person('ff-tl', 'TL One'));
   const h = MP.html(pr);
-  assert.match(h, /Growth % &amp; month-end projection/);
-  assert.match(h, /T-1 basis/);
-  assert.match(h, /Projected month-end/);
-  assert.match(h, /Report day/);
+  assert.match(h, /Growth % &amp; month-end expected/);
+  assert.match(h, /Expected month-end/);
+  assert.match(h, /Data till/);
+  assert.match(h, /Aage kitne din bache/);
+  assert.match(h, /aaj ka data kal aata hai/, 'simple bhasha me basis');
   assert.match(h, /pct neg/, 'negative growth laal dikhna chahiye');
   assert.ok(!/undefined|NaN/.test(h), 'undefined/NaN nahi aana chahiye');
+  assert.ok(!/T-1/.test(h), 'UI me "T-1" jaisa technical shabd nahi hona chahiye');
 });
 
-test('agent profile: growth % + projection + T-1 dispatch', async () => {
+test('channelBasis: FF = kal tak ka data · GV = live aaj', () => {
+  const ff = U.channelBasis('ff', { force: true });
+  assert.equal(ff.live, false, 'FF live nahi');
+  assert.equal(ff.days, Math.min(DAY, U.runRateDays()));
+  const gv = U.channelBasis('gv', { force: true });
+  assert.equal(gv.live, true, 'GV live hai');
+  assert.equal(gv.days, new Date().getDate(), 'GV aaj ka din gin-ta hai');
+  assert.equal(gv.back, 0);
+  // GV profile bhi live basis use kare
+  const gvP = MP.quick({ kind: 'gv-agent', name: 'Koi', sub: '' });
+  assert.equal(gvP, null, 'GV data fixture me nahi hai — skip');
+});
+
+test('basisText: dono channels ke liye simple bhasha (technical shabd nahi)', () => {
+  const ff = U.basisText('ff', U.channelBasis('ff', { force: true }));
+  const gv = U.basisText('gv', U.channelBasis('gv', { force: true }));
+  assert.match(ff, /Data till/);
+  assert.match(ff, /aaj ka data kal aata hai/);
+  assert.match(gv, /Live data/);
+  assert.ok(!/T-1/.test(ff) && !/T-1/.test(gv), '"T-1" shabd na aaye');
+});
+
+test('agent profile: growth % + expected month-end + dispatch basis', async () => {
   const pr = await MP.build(person('ff-agent', 'Ravi Kumar', 'R101'));
   assert.equal(pr.growthNum, 15, '▲ +15% → 15');
   assert.equal(pr.projT1.days, DAY);
@@ -139,7 +163,8 @@ test('agent profile: growth % + projection + T-1 dispatch', async () => {
   assert.equal(pr.projT1.sheet, 360, 'sheet ka projected as-is');
   assert.notEqual(pr.projT1.total, pr.projT1.sheet, 'T-1 projection sheet se alag hai');
   const h = MP.html(pr);
-  assert.ok(h.includes('Projected month-end · T-1') || h.includes('T-1 basis'));
+  assert.ok(h.includes('Expected month-end'), 'expected month-end section');
+  assert.ok(!/T-1/.test(h), 'UI me "T-1" shabd nahi');
 });
 
 test('master search quick snapshot (kundli) me growth + projection aa jata hai', () => {
@@ -156,10 +181,11 @@ test('WhatsApp / CSV export me growth + basis + projection shamil', async () => 
   const wa = MP.waText(pr);
   assert.match(wa, /Growth:/);
   assert.match(wa, /-4\.0%/);
-  assert.match(wa, /projection/);
+  assert.match(wa, /expected month-end/);
+  assert.ok(!/T-1/.test(wa), 'WhatsApp text me "T-1" nahi');
   const csv = MP.csvRows(pr);
   const flat = csv.map((r) => r.join('|')).join('\n');
   assert.match(flat, /Growth % \(REPORT\)/);
-  assert.match(flat, /Report day \(T-1 basis\)/);
-  assert.match(flat, /Projected month-end · T-1/);
+  assert.match(flat, /Data till \(run-rate basis\)/);
+  assert.match(flat, /Expected month-end/);
 });

@@ -12,7 +12,39 @@ FF.pages = FF.pages || {};
     channel: { label: 'First Forward vs GV Partner', fn: (r) => r.channel, order: ['First Forward', 'GV Partner'] },
     vrn: { label: 'VRN Type', fn: (r) => r.vrnType || 'Other' }
   };
-  const MODES = [['daily', '📅 Daily'], ['weekly', '🗓️ Weekly'], ['monthly', '📆 Monthly'], ['compare', '⚖️ Last vs Current']];
+  const MODES = [['daily', '📅 Daily'], ['weekly', '🗓️ Weekly'], ['monthly', '📆 Monthly'], ['compare', '⚖️ Last vs Current'], ['expected', '🎯 Expected this month']];
+  /** 🎯 Expected this month — run-rate × month ke din, class-wise + replacement ke bina.
+      Data basis: FF = kal tak ka data (aaj ka data kal aata hai) · GV = live aaj. */
+  function expectedRows(rows, ym, ch) {
+    const b = (U.channelBasis ? U.channelBasis(ch || 'ff', { force: true }) : (U.reportBasis ? U.reportBasis() : { days: U.runRateDays(), shortLabel: '' }));
+    const cur = rows.filter((r) => r.ym === ym);
+    const days = Math.max(1, b.days);
+    const monthDays = U.daysInMonth(ym);
+    const left = Math.max(0, monthDays - days);
+    const sum = (list, fn) => U.sum(list, fn);
+    const mk = (label, list) => {
+      const curN = sum(list, (r) => r.n);
+      const rate = curN / days;
+      return {
+        label, cur: curN, rate,
+        expected: Math.round(rate * monthDays),
+        pending: Math.round(rate * left),
+        vrnDays: left ? Math.round((left / days) * curN) : 0
+      };
+    };
+    const byGroup = (g) => cur.filter((r) => r.group === g);
+    const noRepl = (list) => list.filter((r) => r.type !== 'REPLACEMENT');
+    const v4 = mk('VC4 (payable)', byGroup('VC4'));
+    const v20 = mk('VC20', byGroup('VC20'));
+    const v5p = mk('VC5+', byGroup('VC5+'));
+    const comm = mk('All Commercial (VC20 + VC5+)', [...byGroup('VC20'), ...byGroup('VC5+')]);
+    const repl = mk('Replacement', cur.filter((r) => r.type === 'REPLACEMENT'));
+    const commNoRepl = mk('Commercial · bina replacement', noRepl([...byGroup('VC20'), ...byGroup('VC5+')]));
+    const v4NoRepl = mk('VC4 · bina replacement', noRepl(byGroup('VC4')));
+    const total = mk('Total (all tags)', cur);
+    const totalNoRepl = mk('Total · bina replacement', noRepl(cur));
+    return { basis: b, days, monthDays, left, rows: [v4, v20, v5p, comm, v4NoRepl, commNoRepl, repl, total, totalNoRepl] };
+  }
 
   function dimKeys(rows, dim) {
     const present = U.uniq(rows.map(dim.fn));
@@ -31,14 +63,14 @@ FF.pages = FF.pages || {};
     const fresh = !!(ctx && ctx.fresh);
     const p = params || {};
     const mode = MODES.some((m) => m[0] === p.mode) ? p.mode : 'daily';
-    const dimKey = DIMS[p.dim] ? p.dim : (mode === 'compare' ? 'total' : 'class');
+    const dimKey = DIMS[p.dim] ? p.dim : (mode === 'compare' || mode === 'expected' ? 'total' : 'class');
     const filter = { tl: p.tl || '', agent: p.agent || '' };
     const ffDirectNames = (FF.config.directRules().ffTlNames || ['APS']).filter(Boolean);
     const isDirectTlFilter = !!filter.tl && ffDirectNames.some((n) => n.toUpperCase() === String(filter.tl).toUpperCase());
     const filterLabel = filter.agent ? `Agent: ${filter.agent}` : isDirectTlFilter ? `🚫 Direct Agents (${filter.tl}) — TL-managed nahi` : filter.tl ? `TL: ${filter.tl}` : 'All agents';
 
     const shareOn = !FF.config.feat || FF.config.feat('share') !== false;
-    root.innerHTML = `<div class="page-head"><div><h1>📈 Trend</h1><p class="sub">Daily · Weekly · Monthly · Last vs Current — EIR issuance log</p></div>
+    root.innerHTML = `<div class="page-head"><div><h1>📈 Trend</h1><p class="sub">Daily · Weekly · Monthly · Last vs Current · Expected this month — EIR issuance log</p></div>
       <div class="head-actions">${shareOn ? '<button class="btn" id="tr-wa" title="Trend summary WhatsApp par bhejo">📤 WhatsApp</button>' : ''}<button class="btn primary" data-action="refresh">↻ Refresh</button></div></div>
       <div id="tr-controls"></div><div id="tr-body">${U.spinner('Trend data aggregate ho raha hai…')}</div>`;
 
@@ -152,6 +184,35 @@ FF.pages = FF.pages || {};
         return [`<b>${U.labelYM(s.ym, true)}</b>`, ...keys.map((k) => U.fmt(buckets.get(s.ym).get(k) || 0)), `<b>${U.fmt(s.total)}</b>`, `${s.activeDays}`, U.fmt(s.avgPerDay), U.fmt(s.replacement), U.fmt(s.chassis), prev ? U.deltaHtml(U.growth(s.total, prev.total)) : '—', prev ? U.deltaHtml(U.growth(s.avgPerDay, prev.avgPerDay)) : '—'];
       }).reverse();
       html += `<section class="card"><div class="card-head"><h3>Month-wise table</h3><div class="card-right"><button class="btn small" data-action="export" data-name="trend-monthly">⬇ CSV</button></div></div><div class="card-body">${tableHtml(['Month', ...keys, 'Total', 'Active days', 'Avg / day', 'Replacement', 'Chassis', 'MoM total', 'MoM avg/day'], rows, 1)}</div></section>`;
+    } else if (mode === 'expected') {
+      // 🎯 Expected this month — run-rate ke hisaab se, class-wise + replacement ke bina.
+      // Data basis alag hai: FF = kal tak (aaj ka data kal aata hai) · GV = live aaj.
+      const curYm = latest ? U.ymKey(latest) : monthsList[monthsList.length - 1];
+      const lastYm = U.prevMonthKey(curYm);
+      const chOpts = [['', '🔵 Both channels'], ['ff', '🟦 First Forward'], ['gv', '🟩 GV Partner']];
+      html += `<div class="card controls"><div class="ctrl-row"><label>Channel <select data-param="ch">${chOpts.map(([v, l]) => `<option value="${v}" ${v === (p.ch || '') ? 'selected' : ''}>${l}</option>`).join('')}</select></label><span class="ctrl-note">${esc(filterLabel)}</span></div></div>`;
+      const wanted = (p.ch || '') === 'ff' ? ['First Forward'] : (p.ch || '') === 'gv' ? ['GV Partner'] : ['First Forward', 'GV Partner'];
+      for (const chName of wanted) {
+        const key = chName === 'GV Partner' ? 'gv' : 'ff';
+        const ex = expectedRows(allDaily.filter((r) => r.channel === chName), curYm, key);
+        const lastRows = allDaily.filter((r) => r.channel === chName && r.ym === lastYm);
+        const lastSum = M.summary(lastRows, lastYm);
+        const t = ex.rows[ex.rows.length - 1];
+        const comm = ex.rows.find((r) => r.label.indexOf('All Commercial') === 0) || { cur: 0, expected: 0 };
+        html += `<div class="mini-grid">
+          ${kpiMini(`${chName} · expected month-end`, U.fmt(t.expected), `${U.fmt(t.rate, true)}/day × ${ex.monthDays} din`, 'c1')}
+          ${kpiMini('Issued ab tak', U.fmt(t.cur), `${ex.left} din bache hain`, 'c2')}
+          ${kpiMini('Aage aur kitna', U.fmt(t.pending), `run-rate ${U.fmt(t.rate, true)}/day`, 'c3')}
+          ${kpiMini('Expected vs last month', U.deltaHtml(U.growth(t.expected, lastSum.total), { decimals: 0 }), `${U.labelYM(lastYm)} full: ${U.fmt(lastSum.total)}`, 'c4')}
+        </div>
+        <section class="card"><div class="card-head"><h3>🎯 Expected this month · ${esc(chName)}</h3><div class="card-right dim">${esc(U.basisText(key, ex.basis))} · ${ex.days}/${ex.monthDays} din</div></div>
+        <div class="card-body">${C.bars({ labels: ex.rows.filter((r) => r.label.indexOf('bina replacement') === -1).map((r) => r.label), height: 230, showValues: true, series: [{ name: 'Issued ab tak', values: ex.rows.filter((r) => r.label.indexOf('bina replacement') === -1).map((r) => r.cur), color: '#c7d2fe' }, { name: 'Expected month-end', values: ex.rows.filter((r) => r.label.indexOf('bina replacement') === -1).map((r) => r.expected), color: '#6366f1' }], legendAlways: true })}</div></section>
+        <section class="card"><div class="card-head"><h3>Class-wise expected · ${esc(U.labelYM(curYm, true))}</h3><div class="card-right"><button class="btn small" data-action="export" data-name="expected-${key}-${curYm}">⬇ CSV</button></div></div>
+        <div class="card-body">${tableHtml(['Class', 'Issued ab tak', 'Run-rate / day', `Expected month-end`, 'Aage aur kitna', 'Share'], ex.rows.map((r) => [`<b>${esc(r.label)}</b>`, U.fmt(r.cur), U.fmt(r.rate, true), `<b>${U.fmt(r.expected)}</b>`, U.fmt(r.pending), U.pctOf(r.cur, t.cur) === null ? '—' : U.fmtPct(U.pctOf(r.cur, t.cur), 0)]), 1)}</div></section>
+        <section class="card"><div class="card-head"><h3>🧾 Replacement ke bina (clean commercial)</h3><div class="card-right dim">Replacement tags minus karke</div></div>
+        <div class="card-body">${tableHtml(['Class', 'Issued ab tak', 'Run-rate / day', 'Expected month-end', 'Replacement alag'], ex.rows.filter((r) => r.label.indexOf('bina replacement') !== -1).map((r) => [`<b>${esc(r.label)}</b>`, U.fmt(r.cur), U.fmt(r.rate, true), `<b>${U.fmt(r.expected)}</b>`, r.label.indexOf('Commercial') === 0 ? U.fmt((ex.rows.find((x) => x.label === 'Replacement') || {}).cur || 0) : '—']), 1)}</div></section>`;
+      }
+      html += `<section class="card"><div class="card-body dim small">📅 <b>Data basis</b> — First Forward ka report <b>kal ka data</b> laata hai, isliye uska run-rate ${U.fmt(U.channelBasis('ff', { force: true }).days)} din par hai. GV ka data <b>live</b> chalta hai (aaj ka), isliye uska run-rate aaj ke ${U.fmt(U.channelBasis('gv', { force: true }).days)} din par. Expected = run-rate × is month ke ${U.fmt(U.daysInMonth(curYm))} din.</div></section>`;
     } else {
       // compare: last vs current month
       const cur = latest ? U.ymKey(latest) : monthsList[monthsList.length - 1];
@@ -189,6 +250,22 @@ FF.pages = FF.pages || {};
       </div>`;
     }
     body.innerHTML = html + `<p class="foot-note">Filter: ${esc(filterLabel)} · Rows aggregated by Google (gviz) · Loaded ${U.timeLabel(S.loadedAt || FF.data.lastLoadAt)}</p>`;
+    if (mode === 'expected') {
+      const want = new Set((p.ch || '') === 'ff' ? ['ff'] : (p.ch || '') === 'gv' ? ['gv'] : ['ff', 'gv']);
+      const exRows = [];
+      for (const chName of ['First Forward', 'GV Partner']) {
+        const key = chName === 'GV Partner' ? 'gv' : 'ff';
+        if (!want.has(key)) continue;
+        const ex = expectedRows(allDaily.filter((r) => r.channel === chName), latest ? U.ymKey(latest) : monthsList[monthsList.length - 1], key);
+        for (const r of ex.rows) exRows.push([chName, U.basisText(key, ex.basis), r.label, r.cur, Number(r.rate.toFixed(2)), r.expected, r.pending]);
+      }
+      body.__expected = exRows;
+      controls.addEventListener('click', (e) => {
+        const b = e.target.closest('[data-action="export"]');
+        if (!b || !b.dataset.name || b.dataset.name.indexOf('expected-') !== 0) return;
+        U.downloadCsv(`${b.dataset.name}-${U.stamp()}.csv`, ['Channel', 'Data basis', 'Class', 'Issued ab tak', 'Run-rate / day', 'Expected month-end', 'Aage aur kitna'], exRows);
+      });
+    }
     C.mount(body);
   }
 

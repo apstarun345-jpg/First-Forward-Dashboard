@@ -636,7 +636,7 @@ await run('T-1 basis · growth % + suggested dispatch (master search + performan
     if (tl.growthNum === null || tl.growthNum === undefined) throw new Error('TL growth % missing in master search drawer');
     if (!tl.projT1 || !tl.projT1.basis || tl.projT1.days !== basis.days) throw new Error('TL T-1 projection basis mismatch');
     const th = FF.masterProfile.html(tl);
-    for (const label of ['Growth % &amp; month-end projection', 'T-1 basis', 'Projected month-end', 'Report day', 'pct pos', 'pct neg']) {
+    for (const label of ['Growth % &amp; month-end expected', 'Expected month-end', 'Data till', 'Aage kitne din bache', 'aaj ka data kal aata hai', 'pct pos', 'pct neg']) {
       if (!th.includes(label)) throw new Error(`TL profile drawer me "${label}" nahi mila`);
     }
     // Quick (kundli) snapshot me bhi growth dikhna chahiye
@@ -647,7 +647,7 @@ await run('T-1 basis · growth % + suggested dispatch (master search + performan
   const ag = list.find((a) => !a.tlExcluded) || list[0];
   pages.performance.openAgent(ag.__row);
   let dh = (REG.get('drawer-body') || {}).innerHTML || '';
-  for (const label of ['Suggested dispatch quantity', 'T-1 basis', 'Month-end projection (T-1)', 'Run-rate VC4 / Comm']) {
+  for (const label of ['Suggested dispatch quantity', 'aaj ka data kal aata hai', 'Expected month-end', 'Run-rate VC4 / Comm']) {
     if (!dh.includes(label)) throw new Error(`agent drawer me "${label}" nahi mila`);
   }
   if (/undefined|NaN/.test(dh)) throw new Error('agent drawer me undefined/NaN');
@@ -655,12 +655,79 @@ await run('T-1 basis · growth % + suggested dispatch (master search + performan
   if (tlg) {
     pages.performance.openTl(tlg.tlName);
     dh = (REG.get('drawer-body') || {}).innerHTML || '';
-    for (const label of ['Suggested dispatch quantity · TL level', 'Agents ka jod', 'Projected month-end · T-1', 'Growth · T-1']) {
+    for (const label of ['Suggested dispatch quantity · TL level', 'Agents ka jod', 'Expected month-end', 'aaj ka data kal aata hai']) {
       if (!dh.includes(label)) throw new Error(`TL drawer me "${label}" nahi mila`);
     }
     if (/undefined|NaN/.test(dh)) throw new Error('TL drawer me undefined/NaN');
   }
   log(`      report day ${basis.label} (${basis.days} din${basis.fromReport ? ' · sheet header' : ' · fallback'})`);
+}, true);
+await run('v3.20 · expected-this-month (trend) + dispatch-ready + de-growth + cover forecast', async () => {
+  // 1) Trend · Expected this month — dono channels, class-wise + bina replacement
+  const rr = root();
+  await pages.trend.render(rr, { mode: 'expected' }, {});
+  let h = rr.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const label of ['Expected this month', 'Expected month-end', 'Aage aur kitna', 'VC20', 'VC5+', 'All Commercial', 'bina replacement', 'Replacement', 'Run-rate / day']) {
+    if (!h.includes(label)) throw new Error(`Trend expected me "${label}" nahi mila`);
+  }
+  if (!/First Forward/.test(h) || !/GV Partner/.test(h)) throw new Error('expected view me dono channels nahi dikhe');
+  if (!/aaj ka data kal aata hai/.test(h)) throw new Error('FF data-basis ka explanation missing');
+  if (!/Live data/.test(h)) throw new Error('GV live basis ka explanation missing');
+  const ffOnly = root();
+  await pages.trend.render(ffOnly, { mode: 'expected', ch: 'ff' }, {});
+  h = ffOnly.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  if (!/First Forward/.test(h) || /GV Partner · expected/.test(h)) throw new Error('FF-only filter kaam nahi kar raha');
+  // 2) Performance TL drawer — dispatch ready + cover/stock-out + growth breakdown
+  const list = pages.performance.agents();
+  const tlg = list.find((a) => !a.tlExcluded && a.tlName);
+  pages.performance.openTl(tlg.tlName);
+  h = (REG.get('drawer-body') || {}).innerHTML || '';
+  for (const label of ['Dispatch ready', 'Stock khatam', 'agents ko chahiye', 'Turant bhejo', 'data-pf-share-wa', 'data-pf-share-csv', 'Growth kahan se aa raha hai', 'Expected month-end', 'Calculated', 'Share']) {
+    if (!h.includes(label)) throw new Error(`TL drawer me "${label}" nahi mila`);
+  }
+  if (/undefined|NaN/.test(h)) throw new Error('TL drawer me undefined/NaN');
+  // 3) Alerts view me TL de-growth list
+  const ar = root();
+  await pages.performance.render(ar, { view: 'alerts' }, {});
+  h = ar.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  if (!h.includes('De-growth TLs')) throw new Error('TL de-growth list nahi mili');
+  if (/undefined|NaN/.test(h)) throw new Error('alerts view me undefined/NaN');
+  // 4) UI me "T-1" jaisa technical shabd nahi rehna chahiye
+  const all = [...REG.values()].map((e) => e.innerHTML).join('\n');
+  if (/\bT-1\b/.test(all)) throw new Error('UI me "T-1" shabd aa gaya');
+  log('      expected + dispatch-ready + de-growth ok');
+}, true);
+await run('v3.20 · site-wide language: English + Hindi poori site par', async () => {
+  if (!FF.i18n) throw new Error('FF.i18n load nahi hua');
+  if (FF.i18n.size() < 500) throw new Error(`dictionary bahut chhoti: ${FF.i18n.size()}`);
+  // Har shabd jo UI par dikhta hai, teeno bhasha me check hona chahiye.
+  const MUST = [
+    'Performance', 'Trend', 'Stock', 'Total', 'Stock Report', 'Data Quality Center', 'Dispatch Planner',
+    'Expected month-end', 'Dispatch ready', 'Stock khatam', 'Turant bhejo', 'Growth kahan se aa raha hai',
+    'De-growth TLs', 'Data till', 'aaj ka data kal aata hai', 'Suggested dispatch quantity', 'Total tags',
+    'Run-rate', 'Cover', 'Monthly', 'Last vs Current', 'Class', 'Agent', 'Direct agents', 'Search', 'Refresh'
+  ];
+  for (const w of MUST) {
+    if (FF.i18n.t(w, 'hinglish') !== w) throw new Error(`"${w}" Hinglish source me badal gaya`);
+    if (!FF.i18n.has(w, 'en')) throw new Error(`"${w}" English me translate nahi hota`);
+    if (!FF.i18n.has(w, 'hi')) throw new Error(`"${w}" Hindi me translate nahi hota`);
+    const hi = FF.i18n.t(w, 'hi');
+    if (!/[\u0900-\u097F]/.test(hi) && !/^(VC4|VC20|VC5\+|TL|FF|GV|REPORT|Total|Performance|Trend|Stock|Class|Agent|Search|Refresh)$/.test(w)) {
+      throw new Error(`"${w}" ka Hindi Devanagari me nahi mila: ${hi}`);
+    }
+  }
+  // Mutein numbers / company ke naam nahi badalne chahiye
+  for (const keep of ['VC4', '2026-09-29', 'AJAY SINGH', 'TO2 Corporation', 'ApnaPayment Pvt. Ltd.']) {
+    if (FF.i18n.t(keep, 'en') !== keep || FF.i18n.t(keep, 'hi') !== keep) throw new Error(`"${keep}" galat translate hua`);
+  }
+  // Hinglish = default
+  if (FF.i18n.current() !== 'hinglish') throw new Error('default language Hinglish hona chahiye');
+  // Mहीने ke नाम bhi bhasha ke hisaab se
+  localStorage.setItem('ff_lang', 'hi');
+  if (!/[\u0900-\u097F]/.test(FF.util.labelYM('2026-09', true))) throw new Error('labelYM Hindi me month nahi dikha');
+  localStorage.setItem('ff_lang', 'hinglish');
+  if (!/September/.test(FF.util.labelYM('2026-09', true))) throw new Error('labelYM Hinglish me English month hona chahiye');
+  log(`      ${MUST.length} core words × 3 languages · ${FF.i18n.size()} dictionary entries`);
 }, true);
 await run('v3.14 · New Agents & TL Changes page (FF + GV, dono table)', async () => {
   const r = root(); await pages.newAgents.render(r, { months: '6' }, {});

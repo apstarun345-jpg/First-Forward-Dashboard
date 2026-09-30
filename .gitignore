@@ -10,3 +10,7 @@ service-account*.json
 credentials*.json
 *.pem
 *.key
+
+# generated i18n harvest/coverage artifacts (rebuild: node dev/i18n-coverage.js)
+dev/i18n-words.json
+dev/i18n-coverage.json

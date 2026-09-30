@@ -104,12 +104,12 @@ window.FF = window.FF || {};
   function runRate(issued, now) {
     return (Number(issued) || 0) / ((FF.util && FF.util.runRateDays) || runRateDays)(now);
   }
-  /** 📅 T-1 BASIS — FF ka REPORT kal ka data laata hai, isliye saare run-rate / dispatch / growth
-      calculations usi "jis din tak ka data aaya hai" (report day) par ginne chahiye.
-      Report day REPORT tab ke "Performance In 7 Days" header se padha jaata hai (performance.daysElapsed),
-      aur usse KABHI aaj se bada nahi maana jaata (aaj ka adhoora data kabhi count nahi hona chahiye).
-      REPORT load nahi hua ya header nahi mila to site-wide default = aaj − 1.
-      Return: { day, back, date, key, label, sheetLabel, days, fromReport } — `days` = divisor (min 1). */
+  /** 📅 FF ka data kal aata hai — isliye FF ke run-rate / dispatch / growth "kal tak ke din" par
+      ginne chahiye, aaj ke din par nahi. Divisor REPORT tab ke "Performance In 7 Days" header se
+      aata hai (performance.daysElapsed), aur usse KABHI aaj se bada nahi maana jaata — aaj ka
+      adhoora data count nahi hona chahiye. REPORT load nahi hua to default = aaj − 1.
+      GV ka data LIVE hai (aaj ka chal raha hai), isliye uske liye channelBasis() use karo.
+      Return: { day, back, date, key, label, shortLabel, sheetLabel, days, fromReport, live }. */
   let basisCache = null;
   function reportBasis(opts) {
     const o = opts || {};
@@ -124,19 +124,36 @@ window.FF = window.FF || {};
     } catch { sheetLabel = ''; }
     const cap = runRateDays(now);                                   // kabhi aaj tak ka data count nahi
     const day = sheetDay > 0 && sheetDay <= 31 ? Math.min(sheetDay, cap) : cap;
-    // Day-of-month se report ki actual date nikaalte hain (month rollover safe).
-    const back = Math.max(0, now.getDate() - day);
-    const date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - back);
-    const value = {
-      day, back, date, key: dateKey(date), sheetLabel, capped: day < sheetDay,
-      label: `${dateKey(date)} (${weekday(date)})`,
-      shortLabel: labelDate(date), days: Math.max(1, day), fromReport: sheetDay > 0
-    };
+    const value = dayBasis(now, day, { sheetLabel, fromReport: sheetDay > 0, capped: day < sheetDay });
     // REPORT load hone se pehle ka fallback cache mat karo — baad me real day mil sakta hai.
     if (value.fromReport || !basisCache || basisCache.value.fromReport) basisCache = { at: Date.now(), value };
     return value;
   }
-  /** 🔮 Month-end projection T-1 basis par: (issued ÷ report day) × is month ke din. */
+  /** Day-of-month se basis object (month rollover safe). */
+  function dayBasis(now, day, extra) {
+    const back = Math.max(0, now.getDate() - day);
+    const date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - back);
+    return {
+      day, back, date, key: dateKey(date), days: Math.max(1, day), live: false,
+      sheetLabel: '', fromReport: false, capped: false, ...(extra || {}),
+      label: `${dateKey(date)} (${weekday(date)})`, shortLabel: labelDate(date)
+    };
+  }
+  /** 📅 Channel-wise basis — 'gv' (ya 'GV Partner') = LIVE aaj · baaki sab (FF) = kal tak ka data.
+      Basis object me `live` flag set hota hai taaki UI apna text chun sake. */
+  function channelBasis(ch, opts) {
+    if (!/^gv/i.test(String(ch || '').trim())) return reportBasis(opts);
+    const now = new Date();
+    return { ...dayBasis(now, Math.max(1, now.getDate()), {}), live: true, fromReport: false };
+  }
+  /** 🗣️ Basis ki line — simple bhasha me, "T-1" jaisa technical shabd nahi. */
+  function basisText(ch, b) {
+    const live = b ? !!b.live : /^gv/i.test(String(ch || ''));
+    return live
+      ? `Live data — aaj tak ka data (${esc(b ? b.shortLabel : labelDate(new Date()))})`
+      : `Data till ${esc(b ? b.shortLabel : '')} — aaj ka data kal aata hai, isliye run-rate ${b ? b.days : runRateDays()} din ka`;
+  }
+  /** 🔮 Month-end projection: (issued ÷ basis din) × is month ke din. */
   function projectMonthEnd(issued, elapsed, ym) {
     const n = Number(issued) || 0;
     if (n <= 0) return 0;
@@ -146,7 +163,7 @@ window.FF = window.FF || {};
   }
   /** 🚚 Dispatch calculation ek jagah: rate = cur ÷ (today−1) · required = rate × suggestDays ·
       net (WITH stock) = required − stock · gross (W/O stock) = required · cover = stock ÷ rate din.
-      `elapsed` diya ho to usi T-1 report-day basis par ginna hai (warna aaj−1). */
+      `elapsed` diya ho to usi report-day basis par ginna hai (warna aaj−1). */
   function dispatchCalc(o) {
     o = o || {};
     const days = o.days || suggestDays();
@@ -235,17 +252,30 @@ window.FF = window.FF || {};
   function dateKey(d) { return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; }
   function fromDateKey(key) { const [y, m, d] = key.split('-').map(Number); return new Date(y, m - 1, d); }
   function ymParts(key) { const [y, m] = key.split('-').map(Number); return { y, m }; }
+  // 🌐 महीने / दिन के नाम भी भाषा के हिसाब से (Hinglish = source, English / हिंदी local)
+  const MONTHS_HI = ['जन', 'फ़र', 'मार्च', 'अप्रै', 'मई', 'जून', 'जुल', 'अग', 'सित', 'अक्तू', 'नव', 'दिस'];
+  const MONTHS_LONG_HI = ['जनवरी', 'फ़रवरी', 'मार्च', 'अप्रैल', 'मई', 'जून', 'जुलाई', 'अगस्त', 'सितंबर', 'अक्तूबर', 'नवंबर', 'दिसंबर'];
+  const DAYS_HI = ['रवि', 'सोम', 'मंगल', 'बुध', 'गुरु', 'शुक्र', 'शनि'];
+  const monthList = (long) => (uiLang() === 'hi' ? (long ? MONTHS_LONG_HI : MONTHS_HI) : (long ? MONTHS_LONG : MONTHS));
+  const dayList = () => (uiLang() === 'hi' ? DAYS_HI : DAYS);
+  /** फ़िल्टर/चार्ट की भाषा पकड़ो ताकि नया label सही भाषा में बने. */
+  function uiLang() {
+    try {
+      const l = localStorage.getItem('ff_lang');
+      return l === 'hi' || l === 'en' ? l : 'hinglish';
+    } catch { return 'hinglish'; }
+  }
   function labelYM(key, long) {
     if (!key) return '—';
     const { y, m } = ymParts(key);
-    return `${(long ? MONTHS_LONG : MONTHS)[m - 1]} ${y}`;
+    return `${monthList(long)[m - 1]} ${y}`;
   }
   function labelDate(d, withYear) {
     if (!d) return '—';
-    return `${pad2(d.getDate())} ${MONTHS[d.getMonth()]}${withYear ? ' ' + d.getFullYear() : ''}`;
+    return `${pad2(d.getDate())} ${monthList(false)[d.getMonth()]}${withYear ? ' ' + d.getFullYear() : ''}`;
   }
   function labelDateKey(key, withYear) { return labelDate(fromDateKey(key), withYear); }
-  function weekday(d) { return DAYS[d.getDay()]; }
+  function weekday(d) { return dayList()[d.getDay()]; }
   function daysInMonth(key) { const { y, m } = ymParts(key); return new Date(y, m, 0).getDate(); }
   function prevMonthKey(key) { const { y, m } = ymParts(key); return m === 1 ? `${y - 1}-12` : `${y}-${pad2(m - 1)}`; }
   function nextMonthKey(key) { const { y, m } = ymParts(key); return m === 12 ? `${y + 1}-01` : `${y}-${pad2(m + 1)}`; }
@@ -1146,7 +1176,7 @@ window.FF = window.FF || {};
 
   FF.util = {
     esc, clean, num, fmt, fmtShort, pctOf, growth, fmtPct, fmtSigned, deltaHtml, pctHtml,
-    suggestDays, suggestMode, runRateDays, runRate, reportBasis, projectMonthEnd, dispatchCalc, suggestNet, suggestGross, suggestPair, sugCell, sugText,
+    suggestDays, suggestMode, runRateDays, runRate, reportBasis, channelBasis, basisText, projectMonthEnd, dispatchCalc, suggestNet, suggestGross, suggestPair, sugCell, sugText,
     MONTHS, MONTHS_LONG, DAYS, pad2, parseDate, parseMonthKey, ymKey, dateKey, fromDateKey, ymParts, labelYM, labelDate, labelDateKey,
     weekday, daysInMonth, prevMonthKey, nextMonthKey, weekStart, timeLabel,
     sum, groupSum, topEntries, sortBy, uniq,
