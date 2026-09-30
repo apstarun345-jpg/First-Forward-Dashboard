@@ -1342,7 +1342,9 @@ FF.pages = FF.pages || {};
   function scanDomDiagnostics() {
     const out = [];
     if (typeof document === 'undefined') return out;
-    const root = document.querySelector('#app') || document.body;
+    // Scan the shell as well as the current route: sidebar/topbar/mobile nav contain site-wide
+    // actions that are otherwise outside #app. Hidden panels are filtered by diagVisible().
+    const root = document.body || document.querySelector('#app');
     const all = root ? [...root.querySelectorAll('*')] : [];
     const ignored = (el) => el.matches && (el.matches('script,style,noscript,svg,path,canvas,pre,code,.table-wrap,.heat-wrap,.kd-scroll,.suggest,[data-diagnostic-ignore]') || el.closest('.table-wrap,.heat-wrap,.kd-scroll,.suggest,[data-diagnostic-ignore]'));
     const route = diagPage();
@@ -1443,7 +1445,7 @@ FF.pages = FF.pages || {};
     diagnosticState.findings = findings; diagnosticState.scannedAt = Date.now(); diagnosticState.running = false; renderDiagnosticResults(body);
   }
   function diagnosticsTab() {
-    return `${section('🩺 Site diagnostics & safe repair', '<p>Poore rendered dashboard surface par responsive overflow, clipped controls, KPI card structure, links/actions, accessibility aur available FF source totals check honge. UI/configuration issues ko per-finding <b>Fix</b> se safely repair kar sakte ho; EIR/REPORT mismatch ko browser me fake nahi kiya jayega.</p><div class="diag-scope"><span>🔎 UI: current page + open drawer surfaces</span><span>🗂️ Data: FF EIR daily/class vs REPORT reconciliation</span><span>♿ A11y: labels, alt text, hit areas</span></div><div class="btn-row"><button class="btn primary" id="diag-scan">🩺 Scan site now</button><button class="btn" id="diag-fix-all" disabled>🛠 Fix all safe</button><span class="dim small" id="diag-status">Abhi scan nahi hua</span></div><div id="diag-results" class="diag-results"></div>', 'Safe UI fixes apply hote hi rescan karo; source/data findings ko sheet mapping se repair karo.')}`;
+    return `${section('🩺 Site diagnostics & safe repair', '<p>Poore rendered dashboard surface par responsive overflow, clipped controls, KPI card structure, links/actions, accessibility aur available FF source totals check honge. UI/configuration issues ko per-finding <b>Fix</b> se safely repair kar sakte ho; EIR/REPORT mismatch ko browser me fake nahi kiya jayega.</p><div class="diag-scope"><span>🔎 UI: site shell + current page + open drawers</span><span>🗂️ Data: FF EIR daily/class vs REPORT reconciliation</span><span>♿ A11y: labels, alt text, hit areas</span></div><div class="btn-row"><button class="btn primary" id="diag-scan">🩺 Scan site now</button><button class="btn" id="diag-fix-all" disabled>🛠 Fix all safe</button><span class="dim small" id="diag-status">Abhi scan nahi hua</span></div><div id="diag-results" class="diag-results"></div>', 'Safe UI fixes apply hote hi rescan karo; source/data findings ko sheet mapping se repair karo.')}`;
   }
 
   // ---- page ------------------------------------------------------------------------------------
