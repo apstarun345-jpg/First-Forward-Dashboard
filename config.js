@@ -118,6 +118,17 @@ FF.config = {
   // Cockpit (cockpit.js) ke thresholds — Settings se server par bhi save ho sakte hain.
   commissionAlerts: { enabled: true, outlierPct: 25, gvGapPct: 40, mismatchPct: 5, mismatchMin: 50, zeroEarnedMin: 1 },
   dispatch: { tagsPerBox: 25, horizon: 7, minNeed: 1, top: 40 },
+  // GV personal commission: exact agent-ID + vehicle-class mapping. VC4 defaults to the
+  // GV Master commission column; the remaining classes are deliberately manual until admin
+  // enters the official rate. Blank never means zero or a guessed rate.
+  gvCommissionRates: {
+    enabled: true, currentMonthOnly: true,
+    classes: {
+      VC4: { source: 'master', rate: '' }, VC20: { source: 'manual', rate: '' },
+      VC5: { source: 'manual', rate: '' }, VC6: { source: 'manual', rate: '' },
+      VC7: { source: 'manual', rate: '' }, VC12: { source: 'manual', rate: '' }
+    }
+  },
   commissionSlabs: {
     enabled: false, model: 'agentTier',
     channels: {
@@ -306,7 +317,11 @@ FF.config = {
     }
     if (s.gv) this.gv = { master: { ...this.gv.master, ...(s.gv.master || {}) }, assignment: { ...this.gv.assignment, ...(s.gv.assignment || {}) }, report: { ...this.gv.report, ...(s.gv.report || {}) } }
     if (s.commissionAlerts) this.commissionAlerts = { ...this.commissionAlerts, ...s.commissionAlerts };
-    if (s.dispatch) this.dispatch = { ...this.dispatch, ...s.dispatch };;
+    if (s.dispatch) this.dispatch = { ...this.dispatch, ...s.dispatch };
+    if (s.gvCommissionRates) this.gvCommissionRates = {
+      ...this.gvCommissionRates, ...s.gvCommissionRates,
+      classes: { ...(this.gvCommissionRates && this.gvCommissionRates.classes), ...(s.gvCommissionRates.classes || {}) }
+    };
     if (s.ffCommission) this.ffCommission = { ...this.ffCommission, ...s.ffCommission };
     if (s.ffPayout) this.ffPayout = { ...this.ffPayout, ...s.ffPayout };
     if (s.commissionSlabs) this.commissionSlabs = { ...this.commissionSlabs, ...s.commissionSlabs, channels: { ...this.commissionSlabs.channels, ...(s.commissionSlabs.channels || {}) } };

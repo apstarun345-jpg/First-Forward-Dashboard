@@ -580,6 +580,28 @@ html[data-theme="dark"] .class-defs { background: #17233e; border-color: #29456f
 .acc-card.t-pages { background: linear-gradient(135deg, #6366f1, #a855f7); }
 /* GV/FF commission cells — class-wise ₹ per tag (sheet commission se) */
 .rate-line { display: block; font-size: 10.5px; font-weight: 800; color: #0f766e; margin-top: 2px; letter-spacing: .01em; }
+.gv-rate-settings { display: grid; gap: 8px; margin: 12px 0 4px; }
+.gv-rate-settings-head, .gv-rate-setting-row { display: grid; grid-template-columns: 110px minmax(180px, 1fr) minmax(150px, 1fr); gap: 10px; align-items: center; }
+.gv-rate-settings-head { padding: 0 10px; color: var(--muted); font-size: 10px; font-weight: 850; letter-spacing: .05em; text-transform: uppercase; }
+.gv-rate-setting-row { padding: 10px; border: 1px solid var(--line); border-radius: 11px; background: var(--bg); }
+.gv-rate-setting-row small { grid-column: 2 / -1; margin-top: -6px; }
+.gv-rate-setting-row b { color: var(--brand); }
+.gv-personal-table td { min-width: 112px; }
+.gv-personal-table .personal-class-cell { display: grid; gap: 2px; white-space: nowrap; }
+.gv-personal-table .personal-class-cell b { font-size: 12.5px; }
+.gv-personal-table .personal-class-cell small { max-width: none; }
+.gv-personal-table .personal-class-cell .pc-rate { color: var(--teal, #0f766e); font-weight: 750; }
+.gv-personal-table .personal-class-cell .pc-source { font-size: 9.5px; }
+.gv-personal-table .personal-total { font-weight: 900; color: var(--brand); }
+html[data-theme="dark"] .gv-rate-setting-row { background: #151b2d; }
+html[data-theme="dark"] .gv-personal-table .personal-class-cell .pc-rate { color: #5eead4; }
+@media (max-width: 680px) {
+  .gv-rate-settings-head { display: none; }
+  .gv-rate-setting-row { grid-template-columns: 74px 1fr; }
+  .gv-rate-setting-row input { grid-column: 2; }
+  .gv-rate-setting-row small { grid-column: 2; }
+}
+
 html[data-theme="dark"] .rate-line { color: #5eead4; }
 html[data-theme="dark"] .acc-panel { background: #131c36; border-color: #2b3a5e; }
 html[data-theme="dark"] .acc-panel-ico { background: #1b2540; }

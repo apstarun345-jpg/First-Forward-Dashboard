@@ -152,6 +152,16 @@ const DEFAULT_SETTINGS = {
   ffPayout: { sheet: 'payout', gid: '', labelCol: '', classCol: '', rateCol: '', penaltyCol: '', noteCol: '' }, // FF sheet "payout" tab: per-class commission rate + penalty (blank = auto-detect)
   commissionAlerts: { enabled: true, outlierPct: 25, gvGapPct: 40, mismatchPct: 5, mismatchMin: 50, zeroEarnedMin: 1 }, // cockpit.js alert thresholds
   dispatch: { tagsPerBox: 25, horizon: 7, minNeed: 1, top: 40 }, // dispatch planner defaults
+  // GV personal commission: VC4 is sourced from the exact GV Master row by default;
+  // all other classes wait for an admin-entered official rate. Empty is unresolved, never zero.
+  gvCommissionRates: {
+    enabled: true, currentMonthOnly: true,
+    classes: {
+      VC4: { source: 'master', rate: '' }, VC20: { source: 'manual', rate: '' },
+      VC5: { source: 'manual', rate: '' }, VC6: { source: 'manual', rate: '' },
+      VC7: { source: 'manual', rate: '' }, VC12: { source: 'manual', rate: '' }
+    }
+  },
   dispatchEmail: { ...DEFAULT_DISPATCH_EMAIL }, // 🚚 recurring, selectable Dispatch Planner email
   commissionSlabs: {
     enabled: false, model: 'agentTier',
@@ -2978,6 +2988,37 @@ async function handleApi(req, res, url) {
           });
         }
       }
+    }
+    // 👤 GV personal commission — exact agent ID + class settings. Blank manual rate is allowed
+    // (it keeps the row unresolved instead of silently changing the payout).
+    if (patch.gvCommissionRates !== undefined) {
+      const allowed = ['VC4', 'VC20', 'VC5', 'VC6', 'VC7', 'VC12'];
+      const cfg = patch.gvCommissionRates;
+      if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) throw new HttpError(400, 'gvCommissionRates object hona chahiye.');
+      if (cfg.enabled !== undefined) cfg.enabled = cfg.enabled === true || cfg.enabled === 'true';
+      if (cfg.currentMonthOnly !== undefined) cfg.currentMonthOnly = cfg.currentMonthOnly !== false && cfg.currentMonthOnly !== 'false';
+      if (cfg.classes !== undefined) {
+        if (!cfg.classes || typeof cfg.classes !== 'object' || Array.isArray(cfg.classes)) throw new HttpError(400, 'gvCommissionRates.classes object hona chahiye.');
+        const cleaned = {};
+        for (const cls of allowed) {
+          if (cfg.classes[cls] === undefined) continue;
+          const item = cfg.classes[cls];
+          if (!item || typeof item !== 'object' || Array.isArray(item)) throw new HttpError(400, `${cls} commission setting object hona chahiye.`);
+          const source = item.source === undefined ? undefined : String(item.source || '').trim().toLowerCase();
+          if (source !== undefined && !['master', 'manual'].includes(source)) throw new HttpError(400, `${cls}: source master ya manual hona chahiye.`);
+          const raw = item.rate;
+          let rate = raw;
+          if (raw === null || raw === undefined || raw === '') rate = '';
+          else {
+            rate = Number(raw);
+            if (!Number.isFinite(rate) || rate < 0 || rate > 1000000) throw new HttpError(400, `${cls}: ₹ rate 0 se 1000000 ke beech hona chahiye.`);
+            rate = Math.round(rate * 10000) / 10000;
+          }
+          cleaned[cls] = { ...(source === undefined ? {} : { source }), rate };
+        }
+        cfg.classes = cleaned;
+      }
+      // Unknown keys are ignored so an old saved setting cannot inject a new class into the UI.
     }
     // 🚨 Commission alerts / 🚚 dispatch planner thresholds (cockpit.js) — numbers ko safe range me clamp karo
     if (patch.commissionAlerts !== undefined || patch.dispatch !== undefined) {
