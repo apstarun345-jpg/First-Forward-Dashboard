@@ -22,15 +22,17 @@ window.FF = window.FF || {};
     { key: 'activity', label: '👀 User page opens',        user: false, admin: true },
     { key: 'click',    label: '👆 Button / option use',    user: false, admin: true },
     { key: 'search',   label: '🔍 Searches',               user: false, admin: true },
-    { key: 'settings', label: '⚙️ Settings changes',       user: false, admin: true },
-    { key: 'location', label: '📍 Location shares',        user: false, admin: true }
+    { key: 'settings', label: '⚙️ Settings changes',     user: false, admin: true },
+    { key: 'location', label: '📍 Location shares',        user: false, admin: true },
+    // 🏷️ IDFC Agents Tag Request — requester ko confirmation + admin ko nayi request (v3.24)
+    { key: 'request',  label: '🏷️ Tag Request (nayi request + status)', user: true, admin: true }
   ];
   // `enabled` = master switch. UI me sirf ek "Notifications ON/OFF" button hai (Settings me baaki fine-tuning).
   // ⚠️ Sab keys TRUE rakho — savePrefs PURA object server par PUT karta hai, isliye yahan kisi
   // type ko false rakhne se wo permanently OFF save ho jaata tha (feed + mobile push dono band) —
   // isi wajah se admin ko sirf kuch types (sheet update) hi aati thi.
-  const DEFAULT_PREFS = { enabled: true, login: true, signup: true, report: true, monthly: true, digest: true, alert: true, activity: true, click: true, search: true, settings: true, user: true, location: true, info: true, sound: true, push: true };
-  const state = { started: false, bound: false, timer: null, presenceTimer: null, fastTimer: null, lastAt: '', items: [], unread: 0, serverUnread: 0, firstPoll: true, page: 'home', pointer: null, people: [], lastInteraction: Date.now(), pointerBound: false, events: [], dirty: false, lastSent: 0, lastScroll: -1, pushOn: false, pushDevices: 0, pushStatus: null, pushTriedAt: 0, pushError: '', prefs: { ...DEFAULT_PREFS }, audioCtx: null, expanded: null, filterType: 'all', filterUnread: false, seenAt: '' };
+  const DEFAULT_PREFS = { enabled: true, login: true, signup: true, report: true, monthly: true, digest: true, alert: true, activity: true, click: true, search: true, settings: true, user: true, location: true, info: true, request: true, sound: true, push: true };
+  const state = { started: false, bound: false, timer: null, presenceTimer: null, fastTimer: null, lastAt: '', items: [], unread: 0, serverUnread: 0, firstPoll: true, page: 'home', pointer: null, people: [], lastInteraction: Date.now(), pointerBound: false, events: [], dirty: false, lastSent: 0, lastScroll: -1, pushOn: false, pushDevices: 0, pushStatus: null, pushTriedAt: 0, pushError: '', prefs: { ...DEFAULT_PREFS }, audioCtx: null, expanded: null, filterType: 'all', filterUnread: false, seenAt: '', voiceAt: {} };
   const EMBED = new URLSearchParams(location.search).get('embed') === 'live';
   const sharing = () => localStorage.getItem('ff_presence_pointer') !== '0';
 
@@ -102,10 +104,16 @@ window.FF = window.FF || {};
 
   // ---- icon / helpers ----------------------------------------------------------------------------
   function icon(item) {
-    return ({ report: '📊', monthly: '📅', digest: '🌅', alert: '🔴', login: '🔐', activity: '👀', location: '📍', search: '🔍', click: '👆', settings: '⚙️', user: '👤', info: 'ℹ️' }[item.type] || '🔔');
+    return ({ report: '📊', monthly: '📅', digest: '🌅', alert: '🔴', login: '🔐', activity: '👀', location: '📍', search: '🔍', click: '👆', settings: '⚙️', user: '👤', info: 'ℹ️', request: '🏷️' }[item.type] || '🔔');
   }
   // ---- 📂 notification ka data (panel me expand + redirect) --------------------------------------
-  const META_LABEL = { date: 'Date', ip: 'IP', loginId: 'Login ID', username: 'User', page: 'Page', band: 'Cover band', cover: 'Cover (din)', vc4: 'VC4 stock', avg: 'Avg / din', ffMtd: 'FF MTD', gvMtd: 'GV MTD', ff: 'FF', gv: 'GV', total: 'Combined total', mtdDays: 'Active days', activeDays: 'Active days', observedDays: 'Observed days', zeroDays: 'Zero days observed', ffDays: 'FF active days', gvDays: 'GV active days', achieved: 'Achieved', totalTarget: 'Target', day: 'Day', users: 'Users', ageDays: 'Age (din)', prevAvg: 'Pichhle avg', today: 'Aaj', source: 'Source', reset: 'Reset link', changes: 'Changes' };
+  const META_LABEL = { date: 'Date', ip: 'IP', loginId: 'Login ID', username: 'User', page: 'Page', band: 'Cover band', cover: 'Cover (din)', vc4: 'VC4 stock', avg: 'Avg / din', ffMtd: 'FF MTD', gvMtd: 'GV MTD', ff: 'FF', gv: 'GV', total: 'Combined total', mtdDays: 'Active days', activeDays: 'Active days', observedDays: 'Observed days', zeroDays: 'Zero days observed', ffDays: 'FF active days', gvDays: 'GV active days', achieved: 'Achieved', totalTarget: 'Target', day: 'Day', users: 'Users', ageDays: 'Age (din)', prevAvg: 'Pichhle avg', today: 'Aaj', source: 'Source', reset: 'Reset link', changes: 'Changes', rows: 'Rows', classes: 'Class-wise', tl: 'TL', priority: 'Priority', requestId: 'Request ID' };
+  /** Class-wise / type-wise snapshot ko chhote table me — notification ke andar data dikhane ke liye. */
+  function classTable(classes) {
+    const entries = Object.entries(classes && typeof classes === 'object' ? classes : {}).filter(([, v]) => Number(v) !== 0);
+    if (!entries.length) return '';
+    return `<table class="kd-tbl" style="margin-top:4px"><thead><tr><th>Class</th><th class="num">Tags</th></tr></thead><tbody>${entries.map(([k, v]) => `<tr><td>${U.esc(k)}</td><td class="num"><b>${U.esc(String(v))}</b></td></tr>`).join('')}</tbody></table>`;
+  }
   function fmtMeta(v) {
     if (v === null || v === undefined || v === '') return '';
     if (Array.isArray(v)) return v.length > 8 ? `${v.slice(0, 8).map((x) => (typeof x === 'object' ? JSON.stringify(x) : String(x))).join(', ')} …(+${v.length - 8})` : v.map((x) => (typeof x === 'object' ? JSON.stringify(x) : String(x))).join(', ');
@@ -122,20 +130,34 @@ window.FF = window.FF || {};
       return pageId === 'settings' ? 'Settings' : (pageId || 'Page');
     } catch { return 'Page'; }
   }
-  /** Item ke andar click karne par khulne wala data block — meta ke key/values + page link. */
+  /** Item ke andar click karne par khulne wala data block — meta ke key/values + class-wise + page link. */
   function detailHtml(item) {
     const m = item.meta || {};
+    // Structured blocks (class-wise / channel-wise) generic key-value list se alag dikhte hain.
+    const STRUCTURED = new Set(['link', 'changes', 'classes', 'ffClasses', 'gvClasses', 'channels', 'snapshot', 'previous', 'delta']);
     const rows = [];
     Object.entries(m).forEach(([k, v]) => {
-      if (k === 'link' || k === 'changes') return;
+      if (STRUCTURED.has(k)) return;
       const s = fmtMeta(v);
       if (!s) return;
       rows.push(`<tr><td>${U.esc(META_LABEL[k] || k)}</td><td><b>${U.esc(s)}</b></td></tr>`);
     });
+    const blocks = [];
+    const pushClasses = (label, classes) => {
+      const t = classTable(classes);
+      if (t) blocks.push(`<div class="dim small" style="margin-top:6px">${label}</div>${t}`);
+    };
+    pushClasses('🟦 First Forward · class-wise', m.ffClasses || (m.classes && !m.gvClasses ? m.classes : null));
+    pushClasses('🟩 GV Partner · class-wise', m.gvClasses);
+    if (m.snapshot && m.snapshot.classes) {
+      const src = m.source === 'gv' ? '🟩 GV Partner' : '🟦 First Forward';
+      pushClasses(`${src} · ${U.esc(m.snapshot.date || '')} class-wise${m.previous && m.previous.date === m.snapshot.date && m.previous.total !== undefined ? ` (pehle ${U.esc(String(m.previous.total))} → ab <b>${U.esc(String(m.snapshot.total || 0))}</b>)` : ''}`, m.snapshot.classes);
+    }
     const chg = Array.isArray(m.changes) && m.changes.length
       ? `<table class="kd-tbl" style="margin-top:4px"><tbody>${m.changes.slice(0, 10).map((c) => `<tr><td>${U.esc(String(c.field || ''))}</td><td>${U.esc(fmtMeta(c.before))} → <b>${U.esc(fmtMeta(c.after))}</b></td></tr>`).join('')}</tbody></table>` : '';
     return `<div class="notif-detail">
       ${rows.length ? `<table class="kd-tbl"><tbody>${rows.join('')}</tbody></table>` : ''}
+      ${blocks.join('')}
       ${chg}
       <div class="notif-detail-actions">
         ${m.link ? `<button type="button" class="btn small primary" data-notify-goto="${U.esc(item.id)}">➡️ ${U.esc(linkPageLabel(m.link))} par jao</button>` : ''}
@@ -216,6 +238,38 @@ window.FF = window.FF || {};
     const localUnread = state.items.filter((x) => x.local && itemUnread(x)).length;
     return (state.serverUnread || 0) + localUnread;
   }
+  /**
+   * 🔊 Kya Office Bell ki voice ON hai?
+   *
+   * ⚠️ v3.24 BUG FIX — `FF.officeBell.voiceOn` ek GETTER hai (boolean deta hai), function nahi.
+   * Purana code `bell.voiceOn ? bell.voiceOn() : true` chalta tha → "bell.voiceOn is not a function"
+   * TypeError aata tha, wo poore localAlert ko maar deta tha aur **koi bhi voice announcement**
+   * kabhi nahi hoti thi (notification aati thi, awaaz nahi). Ab dono shapes support karte hain —
+   * getter (boolean), function (test stubs) aur `isVoiceOn()` helper.
+   */
+  function bellVoiceOn(bell) {
+    const b = bell || FF.officeBell;
+    if (!b) return true;
+    try {
+      if (typeof b.isVoiceOn === 'function') return !!b.isVoiceOn();
+      if (typeof b.voiceOn === 'function') return !!b.voiceOn();
+      if (typeof b.voiceOn === 'boolean') return b.voiceOn;
+    } catch { /* voice prefs optional */ }
+    return true;
+  }
+  /** Bell ne pichhle 75s me SACH ME bola? (sirf log entry nahi — warna duplicate-suppression galat lagti hai.) */
+  function bellSpokeRecently(bell, now) {
+    const b = bell || FF.officeBell;
+    if (!b) return false;
+    try {
+      const at = Number(b.lastSpokeAt || 0);
+      if (at > 0) return now - at < 75e3;
+    } catch { /* ignore */ }
+    try {
+      const l = b.logList ? b.logList() : [];
+      return !!(l.length && now - Number(l[0].at || 0) < 75e3);
+    } catch { return false; }
+  }
   function localAlert(opts) {
     const o = opts || {};
     const type = o.type || 'report';
@@ -243,25 +297,86 @@ window.FF = window.FF || {};
       state.expanded = state.expanded || null;
     }
     setCount(countUnread());
-    browserAlert(item);
+    try { browserAlert(item); } catch { /* alerts optional — UI kabhi block na ho */ }
     // 🔊 Voice announcement — office bell ke speaker path se (autoplay unlock + queue wala).
+    //    UI/bell update PEHLE ho chuke hain, isliye voice me koi bhi dikkat notification ko
+    //    rok nahi sakti (purana bug: voiceOn() throw karta tha aur render() tak nahi pahunchta tha).
     if (o.voiceText) {
-      const bell = FF.officeBell;
-      const spokenRecently = bell && bell.logList && (() => { const l = bell.logList(); return l.length && now - Number(l[0].at || 0) < 75e3; })();
-      const bellVoice = bell && bell.voiceOn ? bell.voiceOn() : true;
-      const muted = bell && bell.prefs && Number(bell.prefs().muteUntil || 0) > now;
-      if (bell && bellVoice && !muted && !spokenRecently) {
-        try {
+      try {
+        const bell = FF.officeBell;
+        const bellVoice = bellVoiceOn(bell);
+        const muted = bell && bell.prefs && Number(bell.prefs().muteUntil || 0) > now;
+        if (bell && bellVoice && !muted && !bellSpokeRecently(bell, now)) {
           if ((typeof document !== 'undefined' && document.hidden) || !bell.unlocked) {
             if (bell.queueAnnounce) bell.queueAnnounce(o.voiceText, 3);
           } else if (bell.speakAnnounce) {
             bell.speakAnnounce(o.voiceText, 3);
           }
-        } catch { /* voice optional */ }
+          state.voiceAt = { ...state.voiceAt, any: now, [type]: now };
+        }
+      } catch (err) {
+        console.warn('voice announce skipped:', (err && err.message) || err);
       }
     }
     render();
     return item;
+  }
+
+  // ---- 🔊 Server se aayi notification par bhi awaaz ----------------------------------------------
+  // Ye raasta pehle bilkul nahi tha: server (sheet watcher / alerts / digest) se aayi notification
+  // par sirf toast + panel alert hota tha, **koi voice nahi**. Ab office bell ke speaker path se
+  // bol kar sunate hain — same autoplay-unlock + queue + mute rules ke saath.
+  const VOICE_TYPES = new Set(['report', 'alert', 'digest', 'request']);
+  /** Notification ka bolne-layak text (emoji/symbol hata kar, chhota aur saaf). */
+  function voiceLineFor(item) {
+    if (!item) return '';
+    const hi = !(FF.assistant && FF.assistant.getLang && FF.assistant.getLang() === 'en');
+    const clean = (s) => String(s || '').replace(/<[^>]+>/g, ' ').replace(/[^\p{L}\p{N}\s+.,:%\-–—]/gu, ' ').replace(/\s+/g, ' ').trim();
+    const m = item.meta || {};
+    if (item.type === 'report') {
+      const delta = m.delta && typeof m.delta === 'object' ? m.delta : null;
+      const dTotal = delta && Number.isFinite(Number(delta.total)) ? Number(delta.total) : null;
+      const parts = delta && delta.classes ? Object.entries(delta.classes).slice(0, 4).map(([k, v]) => `${k} ${Number(v) > 0 ? '+' : ''}${Number(v)}`) : [];
+      if (dTotal !== null && dTotal !== 0) {
+        const line = `${dTotal > 0 ? '+' : ''}${U.fmt(dTotal)} tags${parts.length ? ` (${parts.join(', ')})` : ''}`;
+        return hi ? `Data update! ${line}` : `Data update! ${line}`;
+      }
+      const total = Number(m.snapshot && m.snapshot.total) || 0;
+      if (total) return hi ? `Data update! Aaj ke ${U.fmt(total)} tags ho gaye.` : `Data update! Today's total is now ${U.fmt(total)} tags.`;
+    }
+    const title = clean(item.title);
+    const body = clean(item.body);
+    const text = [title, body].filter(Boolean).join('. ');
+    return text.slice(0, 180);
+  }
+  /**
+   * Server notification ko bolo. Guards: master + type pref ON, sound ON, office bell voice ON,
+   * mute nahi, aur haal hi me kuch bola na ho (data update par 5 min — warna sheet watcher aur
+   * office bell dono ek hi news do baar sunate hain).
+   */
+  function speakServerItem(item) {
+    if (!item || !VOICE_TYPES.has(item.type)) return false;
+    if (state.prefs.enabled === false || state.prefs[item.type] === false || state.prefs.sound === false) return false;
+    const bell = FF.officeBell;
+    if (!bell || !bellVoiceOn(bell)) return false;
+    try { if (Number((bell.prefs && bell.prefs().muteUntil) || 0) > Date.now()) return false; } catch { /* ignore */ }
+    const now = Date.now();
+    if (state.voiceAt.any && now - state.voiceAt.any < 75e3) return false;
+    if (item.type === 'report' && state.voiceAt.report && now - state.voiceAt.report < 5 * 60e3) return false;
+    const text = voiceLineFor(item);
+    if (!text) return false;
+    try {
+      if ((typeof document !== 'undefined' && document.hidden) || !bell.unlocked) {
+        if (bell.queueAnnounce) bell.queueAnnounce(text, 3);
+      } else if (bell.speakAnnounce) {
+        bell.speakAnnounce(text, 3);
+      }
+      state.voiceAt = { ...state.voiceAt, any: now, [item.type]: now };
+      return true;
+    } catch (err) {
+      console.warn('server voice skipped:', (err && err.message) || err);
+      return false;
+    }
   }
 
   // ---- render ------------------------------------------------------------------------------------
@@ -332,7 +447,8 @@ window.FF = window.FF || {};
       const incoming = Array.isArray(out.items) ? out.items : [];
       const known = new Set(state.items.map((x) => x.id));
       const fresh = incoming.filter((x) => !known.has(x.id) && state.prefs[x.type] !== false);
-      if (!initial) fresh.forEach(browserAlert);
+      // Naya item: visible tab par toast + beep, aur (voice ON ho to) bol kar bhi announce.
+      if (!initial) fresh.forEach((x) => { browserAlert(x); speakServerItem(x); });
       // Naya signup aaya → sidebar ke pending-approvals badge ko turant update karo.
       if (fresh.some((x) => x.type === 'signup') && FF.app && FF.app.refreshPendingBadge) FF.app.refreshPendingBadge();
       state.items = [...state.items, ...incoming].filter((x, i, a) => a.findIndex((y) => y.id === x.id) === i).slice(-100);
@@ -872,6 +988,6 @@ window.FF = window.FF || {};
   }
   // Test sound button (for settings/test)
   function testSound() { unlockAudio(); beep(true); U.toast('🔊 Test beep', 'info'); } // force: master OFF ho tab bhi test chale
-  FF.notifications = { start, stop, poll, toggle, activity, logSearch, logClick, track, testSound, render, setupPush, disablePush, enableBrowser, setEnabled, maybeAskPermission, testPanel, testPush, refreshPushStatus, retryPush, browserAlert, localAlert, countUnread, notifyTypes: NOTIFY_TYPES, get state() { return state; }, get prefs() { return state.prefs; } };
+  FF.notifications = { start, stop, poll, toggle, activity, logSearch, logClick, track, testSound, render, setupPush, disablePush, enableBrowser, setEnabled, maybeAskPermission, testPanel, testPush, refreshPushStatus, retryPush, browserAlert, localAlert, speakServerItem, countUnread, notifyTypes: NOTIFY_TYPES, get state() { return state; }, get prefs() { return state.prefs; } };
   bind();
 })(window.FF);

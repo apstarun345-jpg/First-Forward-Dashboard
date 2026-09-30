@@ -161,3 +161,71 @@ test('server.js — reportUpdate route users ko bhi, deep link, corrections par 
   assert.match(src, /Object\.keys\(classes\)\.length > 0/, 'class-wise corrections bhi "changed"');
   assert.match(src, /Date\.now\(\) - reportCheckAt < 150e3/, 'watcher 2.5 min throttle (fast notifications)');
 });
+
+test('localAlert — office bell ka voiceOn BOOLEAN GETTER ho to bhi voice chalti hai (v3.24 fix)', () => {
+  // 🐞 Asli bug: officeBell.js me `get voiceOn()` boolean deta hai, function nahi. notifications.js
+  // purana code `bell.voiceOn ? bell.voiceOn() : true` chalta tha → "bell.voiceOn is not a function"
+  // TypeError poore localAlert ko maar deta tha — notification aati thi par **koi voice nahi** aati
+  // thi (UI render tak nahi pahunchta tha). Ab teeno shapes chalti hain.
+  spoken.length = 0; queued.length = 0;
+  const real = FF.officeBell;
+  const getterBell = {
+    unlocked: true,
+    get voiceOn() { return true; },            // ← asli officeBell.js jaisa
+    isVoiceOn: () => true,
+    get lastSpokeAt() { return 0; },
+    prefs: () => ({ muteUntil: 0 }),
+    logList: () => [],
+    speakAnnounce: (text) => { spoken.push(text); return Promise.resolve(true); },
+    queueAnnounce: (text) => { queued.push(text); }
+  };
+  FF.officeBell = getterBell;
+  const last = N.state.items[N.state.items.length - 1];
+  if (last) last.createdAt = new Date(Date.now() - 120e3).toISOString();
+  const item = N.localAlert({ type: 'report', title: '📊 Data update', body: 'total badha', voiceText: 'Data update! 30 tags ho gaye.' });
+  assert.ok(item && item.local, 'voiceOn getter ke bawajood alert bani (throw nahi hua)');
+  assert.deepEqual(spoken, ['Data update! 30 tags ho gaye.'], 'getter bell par bhi bola');
+  // voiceOn() call nahi hona chahiye — getter/boolean aur function dono kaam karein
+  FF.officeBell = { ...real, voiceOn: () => true };     // function shape (test stubs / purane builds)
+  spoken.length = 0;
+  const l2 = N.state.items[N.state.items.length - 1];
+  if (l2) l2.createdAt = new Date(Date.now() - 120e3).toISOString();
+  N.localAlert({ type: 'report', title: '📊 Data update', body: 'x', voiceText: 'function shape bhi' });
+  assert.deepEqual(spoken, ['function shape bhi'], 'function shape bhi chalti hai');
+  FF.officeBell = { ...real, voiceOn: false };          // boolean property
+  spoken.length = 0; queued.length = 0;
+  const l3 = N.state.items[N.state.items.length - 1];
+  if (l3) l3.createdAt = new Date(Date.now() - 120e3).toISOString();
+  N.localAlert({ type: 'report', title: '📊 Data update', body: 'x', voiceText: 'voice OFF' });
+  assert.deepEqual(spoken, [], 'voice OFF par nahi bolta');
+  assert.deepEqual(queued, [], 'voice OFF par queue bhi nahi');
+  FF.officeBell = real;
+});
+
+test('localAlert — speak me error aaye to bhi notification alive rehti hai (voice UI ko na maare)', () => {
+  spoken.length = 0;
+  const real = FF.officeBell;
+  FF.officeBell = {
+    unlocked: true, voiceOn: () => true, prefs: () => ({ muteUntil: 0 }), logList: () => [],
+    speakAnnounce: () => { throw new Error('speech boom'); },
+    queueAnnounce: () => { throw new Error('queue boom'); }
+  };
+  const before = N.state.items.length;
+  const last = N.state.items[N.state.items.length - 1];
+  if (last) last.createdAt = new Date(Date.now() - 120e3).toISOString();
+  const item = N.localAlert({ type: 'report', title: '📊 Data update', body: 'x', voiceText: 'yeh fail hoga' });
+  assert.ok(item && item.local, 'throw ke bawajood item bana');
+  assert.equal(N.state.items.length, before + 1, 'item list me add hua');
+  assert.ok(toasts.some((t) => /Data update/.test(t.msg)), 'toast phir bhi aaya');
+  FF.officeBell = real;
+});
+
+test('officeBell poll ke notification meta me class-wise snapshot/delta (drawer data)', async () => {
+  const src = await fs.readFile(path.join(ROOT, 'officeBell.js'), 'utf8');
+  assert.match(src, /ffClasses/, 'FF class-wise map notification me jaata hai');
+  assert.match(src, /gvClasses/, 'GV class-wise map notification me jaata hai');
+  assert.match(src, /delta: \{ total: totalNew, classes: deltaClasses \}/, 'delta object shape');
+  assert.match(src, /snapshot: \{ date: today/, 'aaj ka snapshot');
+  assert.match(src, /previous: \{ date: today/, 'pichhla snapshot (pehle → ab)');
+  assert.match(src, /select [^`]*\$\{e\.cls\}/, 'EIR query me class column');
+});

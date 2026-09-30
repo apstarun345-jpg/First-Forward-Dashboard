@@ -1074,6 +1074,54 @@ await run('kpiDetail raw EIR toDate range query', async () => {
   if (!t.rows.length) throw new Error('no raw rows for latest day');
   log(`      raw rows ${t.rows.length} · daily total ${expect}`);
 });
+await run('🏷️ Tag Request — form + system check (class-wise stock / issuance / priority / suggestion)', async () => {
+  // panel/sidebar me option dikhna chahiye (lazy page ka link)
+  const navHtml = (REG.get('nav') || {}).innerHTML || '';
+  if (navHtml && !/Tag Request/.test(navHtml)) throw new Error('sidebar (panel) me Tag Request option nahi mila');
+  const r = root();
+  await pages.tagRequest.render(r, {}, {});
+  await settle(400);
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const s of ['IDFC Agents Tag Request Form', 'System check karo', 'Ek aur agent', 'Agent ID / Naam']) {
+    if (!html.includes(s)) throw new Error(`Tag Request form me "${s}" nahi mila`);
+  }
+  for (const c of ['VC4', 'VC5', 'VC6', 'VC7', 'VC12', 'VC16']) {
+    if (!html.includes(`data-tr-cls="${c}"`)) throw new Error(`Tag class chip ${c} missing`);
+  }
+  // 🔍 system check (headless) — real agent par class-wise numbers + suggestion aana chahiye
+  const perfAgents = pages.performance.agents() || [];
+  const testAgent = (perfAgents.find((a) => a.name && a.name !== someAgent && !a.tlExcluded) || perfAgents[0] || {}).name;
+  if (!testAgent) throw new Error('performance.agents() khali — test agent nahi mila');
+  const res = await pages.tagRequest.preview([{ name: testAgent, classes: ['VC4', 'VC6'] }]);
+  const info = pages.tagRequest.indexInfo ? pages.tagRequest.indexInfo() : {};
+  if (!res || !res.rows || !res.rows.length) throw new Error(`system check ne koi row nahi di (agent=${testAgent} · index=${JSON.stringify(info)})`);
+  const row = res.rows[0];
+  for (const k of ['agentName', 'cls', 'last', 'cur', 'stock', 'priority', 'sugNet', 'sugGross', 'approved', 'cover', 'growth']) {
+    if (row[k] === undefined) throw new Error(`result row me ${k} missing — ${JSON.stringify(row)}`);
+  }
+  if (!['High', 'Medium', 'Low'].includes(row.priority)) throw new Error('priority band galat: ' + row.priority);
+  if (Number(row.sugNet) < 0 && Number(row.sugNet) === 0) throw new Error('suggestion NaN lag raha hai');
+  if (row.cls !== 'VC4') throw new Error('pehli row VC4 honi chahiye');
+  // qty diya to approve me wahi aana chahiye (editable default = system suggestion)
+  const forced = await pages.tagRequest.preview([{ name: testAgent, cls: 'VC4', qty: 7 }]);
+  if (Number(forced.rows[0].approved) !== 7) throw new Error('user qty approve me reflect nahi hui');
+  log(`      ${res.rows.length} class-rows · ${row.agentName} · ${row.cls} stock ${row.stock} · ${row.priority} · sug ${row.sugNet}/${row.sugGross}`);
+  // 📊 result view — analysis ke baad wahi rows editable table me + share/download buttons
+  const r2 = root();
+  await pages.tagRequest.render(r2, { view: 'result' }, {});
+  await settle(200);
+  const h2 = r2.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const s of ['System check · agent × class', 'Admin ko submit karo', 'CSV', 'Copy', 'Approved']) {
+    if (!h2.includes(s)) throw new Error(`result view me "${s}" nahi mila`);
+  }
+  if (!/data-tr-appr=/.test(h2)) throw new Error('result rows editable nahi hain (approved input missing)');
+  // 📥 requests view — admin list (server API) render ho, error na de
+  const r3 = root();
+  await pages.tagRequest.render(r3, { view: 'requests' }, {});
+  await settle(600);
+  const h3 = r3.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  if (!/Tag Requests|koi tag request nahi/.test(h3)) throw new Error('requests view render nahi hua');
+}, false);
 await run('liveView.openNotification (report / settings / login)', async () => {
   FF.liveView.openNotification({ id: 'a', type: 'report', title: 'First Forward report update', body: 'x', createdAt: new Date().toISOString(), meta: { source: 'ff', snapshot: { date: '2026-09-26', total: 120, classes: { VC4: 100, VC5: 20 } }, previous: { date: '2026-09-26', total: 90, classes: { VC4: 80, VC5: 10 } }, delta: { total: 30, classes: { VC4: 20, VC5: 10 } } } });
   if (!drawerHtml().includes('+30')) throw new Error('report delta missing');

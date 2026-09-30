@@ -16,6 +16,90 @@
     return `<td class="num"><span class="delta ${n > 0 ? 'up' : n < 0 ? 'down' : ''}">${n > 0 ? '+' : ''}${fmt(n)}</span></td>`;
   }
 
+  // ---- 📊 Class × type breakdown (kitna update hua — chassis / replace / wrong VRN) --------------
+  // Notification ke drawer me sirf class totals hi nahi, type-wise bhi dikhna chahiye. Ye detail
+  // EIR ke "daily" dataset se aati hai — wo boot par pehle hi load ho jaata hai (store me cached),
+  // isliye drawer khulne par extra Google query nahi jaati.
+  const breakdownCache = new Map();
+  const CLASS_ORDER_ALL = [...CLASS_ORDER];
+  const classRank = (c) => { const i = CLASS_ORDER_ALL.indexOf(String(c).toUpperCase()); return i < 0 ? 99 : i + 1; };
+  /** Ek din + channel ke rows → { classes: {cls:{tags,issuance,repl,chassis,wrong}}, agents: [...] } */
+  function breakdownOf(rows, dateKey, channel) {
+    const key = `${dateKey}|${channel}`;
+    if (breakdownCache.has(key)) return breakdownCache.get(key);
+    const wanted = (rows || []).filter((r) => {
+      const d = r.dateKey || (r.date instanceof Date ? U.dateKey(r.date) : String(r.date || '').slice(0, 10));
+      return d === dateKey && (!channel || r.channel === channel);
+    });
+    const classes = {};
+    const agents = new Map();
+    for (const r of wanted) {
+      const cls = String(r.cls || 'NA').toUpperCase();
+      const c = classes[cls] || (classes[cls] = { cls, tags: 0, issuance: 0, repl: 0, chassis: 0, wrong: 0, agents: new Set() });
+      const n = Number(r.n) || 0;
+      c.tags += n;
+      const isRepl = String(r.type || '').toUpperCase() === 'REPLACEMENT';
+      const isChassis = /chassis/i.test(r.vrnType || '');
+      const isWrong = /wrong|galat/i.test(r.vrnType || '');
+      if (isRepl) c.repl += n; else c.issuance += n;
+      if (isChassis) c.chassis += n;
+      if (isWrong) c.wrong += n;
+      if (r.agentName) c.agents.add(String(r.agentName).trim().toUpperCase());
+      const aKey = String(r.agentName || r.agentId || '').trim();
+      if (aKey) {
+        const a = agents.get(aKey) || { name: aKey, tags: 0, cls: new Map() };
+        a.tags += n;
+        a.cls.set(cls, (a.cls.get(cls) || 0) + n);
+        agents.set(aKey, a);
+      }
+    }
+    const out = {
+      dateKey, channel, classes,
+      total: Object.values(classes).reduce((s, c) => s + c.tags, 0),
+      agents: [...agents.values()].sort((a, b) => b.tags - a.tags).slice(0, 10)
+    };
+    breakdownCache.set(key, out);
+    if (breakdownCache.size > 24) breakdownCache.delete(breakdownCache.keys().next().value);
+    return out;
+  }
+  function breakdownHtml(list) {
+    if (!list.length) return '<p class="dim small">Type-wise detail is din ke liye nahi mili.</p>';
+    const head = '<tr><th>Class</th><th class="num">Tags</th><th class="num">Naye issue</th><th class="num">Replace</th><th class="num">Chassis</th><th class="num">Wrong VRN</th><th class="num">Agents</th></tr>';
+    return list.map(({ label, data }) => {
+      const rows = Object.values(data.classes).sort((a, b) => classRank(a.cls) - classRank(b.cls) || a.cls.localeCompare(b.cls));
+      const sum = (k) => rows.reduce((s, r) => s + r[k], 0);
+      const tot = rows.reduce((s, r) => ({ tags: s.tags + r.tags, issuance: s.issuance + r.issuance, repl: s.repl + r.repl, chassis: s.chassis + r.chassis, wrong: s.wrong + r.wrong }), { tags: 0, issuance: 0, repl: 0, chassis: 0, wrong: 0 });
+      const agents = new Set(); rows.forEach((r) => r.agents.forEach((a) => agents.add(a)));
+      return `<div class="kd-sec"><h4 class="kd-h">${esc(label)} · class × tag type</h4>
+        <div class="kd-scroll"><table class="kd-tbl"><thead>${head}</thead><tbody>
+          ${rows.map((r) => `<tr><td><b>${esc(r.cls)}</b></td><td class="num"><b>${fmt(r.tags)}</b></td><td class="num">${fmt(r.issuance)}</td><td class="num">${r.repl ? `<span class="delta up">${fmt(r.repl)}</span>` : '—'}</td><td class="num">${r.chassis ? `<span class="delta down">${fmt(r.chassis)}</span>` : '—'}</td><td class="num">${r.wrong ? `<span class="delta down">${fmt(r.wrong)}</span>` : '—'}</td><td class="num">${fmt(r.agents.size)}</td></tr>`).join('')}
+        </tbody><tfoot><tr class="kd-total"><td>Total</td><td class="num">${fmt(sum('tags'))}</td><td class="num">${fmt(tot.issuance)}</td><td class="num">${fmt(tot.repl)}</td><td class="num">${fmt(tot.chassis)}</td><td class="num">${fmt(tot.wrong)}</td><td class="num">${fmt(agents.size)}</td></tr></tfoot></table></div>
+        ${data.agents.length ? `<div class="dim small" style="margin-top:6px">🏆 Sabse zyada issue: ${data.agents.slice(0, 6).map((a) => `${esc(a.name)} <b>${fmt(a.tags)}</b>`).join(' · ')}</div>` : ''}
+      </div>`;
+    }).join('');
+  }
+  /**
+   * Notification drawer ke andar type-wise breakdown (async). Placeholder turant dikhta hai,
+   * data aate hi replace ho jaata hai — drawer kabhi khali nahi rehta.
+   */
+  async function fillBreakdown(item) {
+    const host = document.querySelector('#drawer-body [data-lv-breakdown]');
+    if (!host) return;
+    const m = item.meta || {};
+    const dateKey = String((m.snapshot && m.snapshot.date) || m.date || '').slice(0, 10);
+    const sources = m.source === 'gv' ? ['GV Partner'] : m.source === 'ff' ? ['First Forward'] : ['First Forward', 'GV Partner'];
+    if (!dateKey) { host.innerHTML = '<p class="dim small">Is notification me date nahi hai — type-wise detail skip.</p>'; return; }
+    let rows = [];
+    try { rows = (await FF.store.need('daily')) || []; } catch { /* offline / query fail */ }
+    if (!host.isConnected) return;
+    const list = sources
+      .map((channel) => ({ label: channel === 'GV Partner' ? '🟩 GV Partner' : '🟦 First Forward', data: breakdownOf(rows, dateKey, channel) }))
+      .filter((x) => x.data.total > 0);
+    host.innerHTML = list.length
+      ? `${breakdownHtml(list)}<p class="dim small">Source: EIR ledger (${esc(U.labelDateKey ? U.labelDateKey(dateKey) : dateKey)}) · chassis = VRN type CHASSIS · wrong = WRONG VRN.</p>`
+      : '<p class="dim small">Is din ka row-level detail nahi mila (EIR me is date ka data nahi hai) — upar class-wise snapshot dekh lo.</p>';
+  }
+
   // ---- report notification: class-wise before → after ------------------------------------------
   function reportView(item) {
     const m = item.meta || {};
@@ -40,6 +124,7 @@
         <tbody>${rows || '<tr><td colspan="4" class="dim">Class detail available nahi hai.</td></tr>'}</tbody>
         <tfoot><tr class="kd-total"><td>Total</td><td class="num">${sameDay ? fmt(prev.total) : '—'}</td><td class="num">${fmt(now.total)}</td>${deltaCell(newTags)}</tr></tfoot></table></div></div>
       ${delta && delta.classes && Object.keys(delta.classes).length ? `<div class="kd-chips">${Object.entries(delta.classes).map(([k, v]) => `<span class="kd-chip ${v > 0 ? 'green' : 'red'}">${esc(k)} ${v > 0 ? '+' : ''}${fmt(v)}</span>`).join('')}</div>` : ''}
+      <div class="kd-sec" data-lv-breakdown="1"><h4 class="kd-h">🔎 Class × tag type (chassis · replace · wrong VRN)</h4><p class="dim small">Detail load ho rahi hai…</p></div>
       <div class="btn-row" style="margin-top:14px">
         ${now.date ? `<button class="btn primary" data-lv-kpi="${esc(now.date)}" data-lv-src="${m.source === 'gv' ? 'gv' : 'ff'}">📊 Us din ki poori detail (class, channel, sab tags)</button>
         <a class="btn" href="#/tagIssued?date=${esc(now.date)}" data-lv-close>📅 Tag Issued page kholo</a>` : ''}
@@ -90,6 +175,8 @@
     const view = item.type === 'report' ? reportView(item)
       : (item.type === 'settings' || item.type === 'user') ? changesView(item)
         : activityView(item);
+    // 📊 Type-wise breakdown async — drawer turant khulta hai, detail aate hi apne aap bhar jaati hai.
+    const needsBreakdown = /data-lv-breakdown/.test(view.body || '');
     // Data drawer me expand + (link ho to) us data page par redirect button — dono options.
     const m = item.meta || {};
     if (m.link) {
@@ -97,6 +184,7 @@
       view.body += `<p style="margin:10px 0 2px"><a class="btn small primary" href="${esc(m.link)}" data-lv-close>➡️ ${esc(lbl)} par jao</a> <span class="dim small">notification ke data par redirect</span></p>`;
     }
     FF.app.openDrawer({ ...view, wide: item.type === 'report' || item.type === 'settings' || item.type === 'user' });
+    if (needsBreakdown) fillBreakdown(item).catch(() => { /* detail optional */ });
   }
 
   // ---- 👁 Live view ------------------------------------------------------------------------------

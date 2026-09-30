@@ -11,6 +11,7 @@ window.FF = window.FF || {};
     { id: 'executive', icon: '🧭', label: 'Executive Cockpit', desc: 'Management KPIs · outlook · exceptions', perm: 'executive', group: 'Management' },
     { id: 'tagIssued', icon: '🏷️', label: 'GV & FF Tag Issued', desc: 'Date-wise detailed issuance · VC4 vs Commercial', perm: 'tagIssued', group: 'Management' },
     { id: 'targets', icon: '🎯', label: 'Agent Targets', desc: 'Shortlist · target · progress · Excel', perm: 'targets', group: 'Management' },
+    { id: 'tagRequest', icon: '🏷️', label: 'Tag Request', desc: 'IDFC agents · agent + tag class chuno → system check → suggested dispatch qty (editable) → admin', perm: 'tagRequest', group: 'Management' },
     { id: 'rangeReport', icon: '📅', label: 'Range Report', desc: 'Custom from→to report · FF + GV · Excel', perm: 'rangeReport', group: 'Management' },
     { id: 'tv', icon: '📺', label: 'TV Mode', desc: 'Big-screen rotation · fullscreen', perm: 'tv', group: 'Management', feat: 'tvMode' },
     { id: 'teamMap', icon: '🗺️', label: 'Team map', desc: 'Location + office distance (admin)', perm: 'teamMap', group: 'Management', feat: 'teamMap', adminOnly: true },
@@ -138,6 +139,7 @@ window.FF = window.FF || {};
     home: { label: 'होम', desc: 'हाइलाइट्स · GV और FF चार्ट' },
     tagIssued: { label: 'GV और FF टैग जारी', desc: 'तारीख़ अनुसार विस्तृत जारी · VC4 बनाम कॉमर्शियल' },
     targets: { label: 'एजेंट टार्गेट', desc: 'शॉर्टलिस्ट · टार्गेट · प्रोग्रेस · उपलब्धि इतिहास · TL रोलअप' },
+    tagRequest: { label: 'टैग रिक्वेस्ट', desc: 'IDFC एजेंट · एजेंट + टैग क्लास चुनो → सिस्टम चेक → सुझाई डिस्पैच मात्रा (एडिट कर सकते हैं) → एडमिन' },
     rangeReport: { label: 'रेंज रिपोर्ट', desc: 'मनचाही तारीख़ रेंज · FF + GV संयुक्त · एक्सेल' },
     tv: { label: 'टीवी मोड', desc: 'बड़ी स्क्रीन रोटेशन · फुलस्क्रीन' },
     dashboard: { label: 'डैशबोर्ड', desc: 'KPI और चार्ट (EIR)' },
@@ -166,6 +168,7 @@ window.FF = window.FF || {};
     home: { desc: 'Highlights · GV & FF charts' },
     tagIssued: { desc: 'Date-wise detailed issuance · VC4 vs Commercial' },
     targets: { desc: 'Shortlist agents · set targets · track progress · Excel' },
+    tagRequest: { desc: 'IDFC agents · pick agent + tag class → system check → suggested dispatch qty (editable) → admin' },
     rangeReport: { desc: 'Pick any from→to dates · FF + GV combined · Excel' },
     tv: { desc: 'Big-screen rotation · auto slides · fullscreen' },
     compare: { desc: 'Side-by-side comparison of both channels' },
@@ -1041,7 +1044,13 @@ window.FF = window.FF || {};
     if (!feed || feed.ok === false) return null;
     const series = (s) => Object.entries(s || {}).sort().slice(-3).map(([d, n]) => `${d}:${n}`).join(',');
     const f = feed.ff || {}, g = feed.gv || {};
-    return { ff: Number(f.total) || 0, gv: Number(g.total) || 0, s: `${series(f.series)}|${series(g.series)}` };
+    // `classes` bhi saath rakho — notification ke drawer me class-wise breakdown dikhane ke liye
+    // (sirf totals rakhne se "kitna update hua class wise" pata nahi chalta tha).
+    const classesOf = (v) => (v && typeof v.classes === 'object' && v.classes) ? { ...v.classes } : {};
+    return {
+      ff: Number(f.total) || 0, gv: Number(g.total) || 0, s: `${series(f.series)}|${series(g.series)}`,
+      date: feed.date || '', ffClasses: classesOf(f), gvClasses: classesOf(g)
+    };
   }
   function loadFeedSig() {
     try { const v = JSON.parse(localStorage.getItem(FEED_SIG_KEY) || 'null'); return v && typeof v === 'object' ? v : null; } catch { return null; }
@@ -1049,12 +1058,21 @@ window.FF = window.FF || {};
   function saveFeedSig(sig) {
     try { if (sig) localStorage.setItem(FEED_SIG_KEY, JSON.stringify({ ...sig, at: Date.now() })); } catch { /* private mode */ }
   }
-  /** Pichhle snapshot se badlaav → notification + voice announcement. */
+  /** Pichhle snapshot se badlaav → notification + voice announcement (class-wise breakdown ke saath). */
   function announceDataUpdate(before, after) {
     const dFf = (after.ff || 0) - (before ? before.ff || 0 : 0);
     const dGv = (after.gv || 0) - (before ? before.gv || 0 : 0);
     const total = (after.ff || 0) + (after.gv || 0);
     const delta = dFf + dGv;
+    // 📊 class-wise: "kitna update hua class wise" — drawer + bell expansion dono isi se bante hain.
+    const mergeClasses = (...maps) => { const out = {}; maps.forEach((m) => Object.entries(m || {}).forEach(([k, v]) => { out[k] = (out[k] || 0) + (Number(v) || 0); })); return out; };
+    const classDelta = (b, a) => { const out = {}; new Set([...Object.keys(b || {}), ...Object.keys(a || {})]).forEach((k) => { const d = Number((a || {})[k] || 0) - Number((b || {})[k] || 0); if (d) out[k] = d; }); return out; };
+    const sigClasses = (sig) => mergeClasses(sig && sig.ffClasses, sig && sig.gvClasses);
+    const snapOf = (sig) => (sig ? { date: sig.date || '', total: (sig.ff || 0) + (sig.gv || 0), classes: sigClasses(sig) } : null);
+    const deltaClasses = mergeClasses(
+      before && before.ff !== after.ff ? classDelta(before.ffClasses, after.ffClasses) : {},
+      before && before.gv !== after.gv ? classDelta(before.gvClasses, after.gvClasses) : {}
+    );
     const hi = !(FF.assistant && FF.assistant.getLang && FF.assistant.getLang() === 'en');
     const signed = (n) => `${n >= 0 ? '+' : ''}${U.fmt(n)}`;
     const body = hi
@@ -1068,7 +1086,16 @@ window.FF = window.FF || {};
         type: 'report',
         title: `📊 Data update — ${U.fmt(total)} tags`,
         body,
-        meta: { link: '#/tagIssued', ff: after.ff, gv: after.gv, delta },
+        // 📊 class-wise snapshot: bell ke andar expand + drawer me "kitna update hua class wise,
+        //    chassis / replace / wrong" — sab isi meta se banta hai (liveView.reportView).
+        meta: {
+          link: '#/tagIssued', ff: after.ff, gv: after.gv,
+          date: after.date || '',
+          ffClasses: after.ffClasses || {}, gvClasses: after.gvClasses || {},
+          delta: { total: delta, classes: deltaClasses },
+          snapshot: snapOf(after),
+          previous: snapOf(before)
+        },
         voiceText
       });
     }
