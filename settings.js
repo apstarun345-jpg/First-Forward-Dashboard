@@ -1566,7 +1566,47 @@ FF.pages = FF.pages || {};
   }
 
   function diagnosticsTab() {
-    return `${section('🩺 Site diagnostics & safe repair', '<p>Poore rendered dashboard surface par responsive overflow, clipped controls, KPI card structure, links/actions, accessibility aur available FF source totals check honge. UI/configuration issues ko per-finding <b>Fix</b> se safely repair kar sakte ho; EIR/REPORT mismatch ko browser me fake nahi kiya jayega.</p><div class="diag-scope"><span>🔎 UI: site shell + current page + open drawers</span><span>🗂️ Data: FF EIR daily/class vs REPORT reconciliation</span><span>♿ A11y: labels, alt text, hit areas</span></div><div class="btn-row"><button class="btn primary" id="diag-scan">🩺 Scan is page</button><button class="btn" id="diag-scan-all">🌐 Scan every page</button><button class="btn" id="diag-fix-all" disabled>🛠 Fix all safe</button><span class="dim small" id="diag-status">Abhi scan nahi hua</span></div><div id="diag-results" class="diag-results"></div>', 'Safe UI fixes apply hote hi rescan karo; source/data findings ko sheet mapping se repair karo.')}`;
+    return `${section('🩺 Site diagnostics & safe repair', '<p>Poore rendered dashboard surface par responsive overflow, clipped controls, KPI card structure, links/actions, accessibility aur available FF source totals check honge. UI/configuration issues ko per-finding <b>Fix</b> se safely repair kar sakte ho; EIR/REPORT mismatch ko browser me fake nahi kiya jayega.</p><div class="diag-scope"><span>🔎 UI: site shell + current page + open drawers</span><span>🗂️ Data: FF EIR daily/class vs REPORT reconciliation</span><span>♿ A11y: labels, alt text, hit areas</span></div><div class="btn-row"><button class="btn primary" id="diag-scan">🩺 Scan is page</button><button class="btn" id="diag-scan-all">🌐 Scan every page</button><button class="btn" id="diag-fix-all" disabled>🛠 Fix all safe</button><span class="dim small" id="diag-status">Abhi scan nahi hua</span></div><div id="diag-results" class="diag-results"></div>', 'Safe UI fixes apply hote hi rescan karo; source/data findings ko sheet mapping se repair karo.')}`
+    + speedCard();
+  }
+
+  // ---- ⚡ Speed / "site slow kyun hai" — exact reason (server query timings) ----------------------
+  function speedCard() {
+    return section('⚡ Speed · site slow kyun hai (exact reason)', `
+      <p>Yahan <b>server ke Google Sheets queries</b> ka asli time dikhta hai: kaunsi query kitni baar chali, cache se kitni baar mili
+      aur Google se aane me kitne ms lage. Sabse upar wali slow query hi aapki site ko slow karti hai.</p>
+      <div class="btn-row"><button class="btn primary" id="speed-load">⚡ Abhi check karo</button>
+      <button class="btn" id="speed-fresh">↻ Queries fresh karo (cache bypass)</button>
+      <span class="dim small" id="speed-note">Login ke baad Home khulte hi ye numbers bhar jaate hain.</span></div>
+      <div id="speed-out"><p class="dim small">Check karo → slowest Google queries, cache hit rate aur warm queries.</p></div>`);
+  }
+  async function loadSpeedCard(body) {
+    const out = U.$('#speed-out', body); if (!out) return;
+    const note = U.$('#speed-note', body);
+    out.innerHTML = U.spinner('Server se query timings aa rahi hain…');
+    try {
+      const res = await A.api('/api/perf');
+      const perf = res.perf || {};
+      const slow = (perf.slowest || []).slice(0, 12);
+      const hitPct = (() => {
+        const q = perf.queries || [];
+        const calls = q.reduce((a, x) => a + x.calls, 0), hits = q.reduce((a, x) => a + x.cacheHits, 0);
+        return calls ? Math.round((hits / calls) * 100) : 0;
+      })();
+      out.innerHTML = `<div class="diag-scope"><span>🗄️ Cache: <b>${U.fmt(perf.cacheEntries || 0)}</b>/${U.fmt(perf.cacheEntriesMax || 0)} entries · TTL ${esc(String(perf.cacheSeconds || 0))}s</span><span>⚡ Cache hit rate: <b>${hitPct}%</b></span><span>🔥 Warm queries: <b>${U.fmt(perf.warmedQueries || 0)}</b></span></div>
+        ${slow.length ? `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Google query (sheet · query)</th><th class="num">Calls</th><th class="num">Cache hits</th><th class="num">Google (upstream)</th><th class="num">Avg ms</th><th class="num">Max ms</th></tr></thead><tbody>${slow.map((q) => `<tr><td><code class="wrap">${esc(q.key)}</code></td><td class="num">${U.fmt(q.calls)}</td><td class="num">${U.fmt(q.cacheHits)}</td><td class="num">${U.fmt(q.upstream)}</td><td class="num"><b>${U.fmt(q.avgMs)}</b></td><td class="num">${U.fmt(q.maxMs)}</td></tr>`).join('')}</tbody></table></div>
+        <p class="dim small">Sabse upar wali row sabse slow query hai — <b>avg ms</b> zyada = wahin bottleneck. Ye aam taur par badi tab (EIR / StockDataa) par naya column, formula ya poori-tab scan wali query hoti hai.</p>`
+        : '<p class="dim small">Abhi tak koi Google query record nahi hui — Home/Trend kholo, phir dobara check karo.</p>'}
+        ${(perf.hotQueries || []).length ? `<details><summary class="dim small">🔥 Sabse zyada hit hone wali queries (${perf.hotQueries.length})</summary><div class="table-wrap"><table class="tbl compact"><tbody>${perf.hotQueries.map((h) => `<tr><td>${U.fmt(h.hits)}×</td><td><code class="wrap">${esc(h.url)}</code></td></tr>`).join('')}</tbody></table></div></details>` : ''}`;
+      if (note) note.textContent = `Last check ${U.timeLabel(Date.now())} · version ${perf.version || ''}`;
+    } catch (err) {
+      out.innerHTML = U.errorBox(err);
+    }
+  }
+  function bindSpeedCard(body) {
+    const btn = U.$('#speed-load', body); if (btn) btn.addEventListener('click', () => U.withButtonBusy(btn, () => loadSpeedCard(body), 'Checking…'));
+    const fresh = U.$('#speed-fresh', body);
+    if (fresh) fresh.addEventListener('click', () => U.withButtonBusy(fresh, () => loadSpeedCard(body), 'Fresh…'));
   }
 
   // ---- page ------------------------------------------------------------------------------------
@@ -1604,6 +1644,8 @@ FF.pages = FF.pages || {};
       // 🔔 notification switches notifications.js ke delegated handler se chalte hain;
       // admin ki push diagnostics yahin async load hoti hai.
       if (FF.notifications) void bindNotifications(body);
+      // ⚡ Speed card (admin) — exact slow-query reason.
+      if (U.$('#speed-load', body)) { bindSpeedCard(body); void loadSpeedCard(body); }
       // 🩺 Site diagnostics — delegated fix actions survive result re-renders.
       const diagScan = U.$('#diag-scan', body);
       const diagFixAll = U.$('#diag-fix-all', body);

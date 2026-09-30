@@ -23,6 +23,8 @@ FF.config = {
   // Server proxy (server.js) — caches Google responses. No auto refresh: data is loaded once when the site
   // opens and again only on the ↻ button or a browser reload.
   proxyPath: '/api/gviz',
+  // ⚡ Chhota "aaj ka live" feed (GV = GV Master tab se, FF = EIR se) — Home ka pehla paint isse hota hai.
+  todayPath: '/api/today',
   // Data only flows through the login-protected proxy (no direct browser→Google fallback), so access rules hold.
   directFallback: false,
   autoRefreshMs: 0,

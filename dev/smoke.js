@@ -92,6 +92,16 @@ const scripts = [...html.matchAll(/<script[^>]+src="([^"]+)"/g)].map((m) => m[1]
 log('scripts:', scripts.join(' '));
 for (const s of scripts) vm.runInContext(fs.readFileSync(path.join(ROOT, s), 'utf8'), ctx, { filename: s });
 const FF = win.FF;
+// ⚡ Lazy rollup: smoke test me saare page modules pehle se load kar do (warna pages.<x> undefined rehta
+// hai) — aur FF.lazy.inject ko resolve-only bana do, kyunki fake DOM me <script> load nahi ho sakta.
+try {
+  const lazySrc = fs.readFileSync(path.join(ROOT, 'lazy.js'), 'utf8');
+  const names = [...new Set([...lazySrc.matchAll(/'([A-Za-z][A-Za-z0-9-]*)'/g)].map((m) => m[1]))];
+  const lazyFiles = names.filter((n) => fs.existsSync(path.join(ROOT, `${n}.js`)) && !scripts.includes(`${n}.js`));
+  for (const n of lazyFiles) vm.runInContext(fs.readFileSync(path.join(ROOT, `${n}.js`), 'utf8'), ctx, { filename: `${n}.js` });
+  if (FF.lazy) FF.lazy.inject = (n) => Promise.resolve(n);
+  log('lazy modules (smoke me pre-loaded):', lazyFiles.length, lazyFiles.join(' '));
+} catch (err) { log('  ! lazy preload:', err.message); }
 process.on('unhandledRejection', (e) => { log('  ! unhandled rejection:', e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e); });
 process.on('uncaughtException', (e) => { log('  ! uncaught:', e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e); });
 
@@ -1158,7 +1168,7 @@ await run('🧭 Removed workspace filter UI + GV live and FF T+1 behavior', asyn
   const r1 = root(); await pages.home.render(r1, {}, {}); await settle(500);
   const h1 = htmlOf(r1);
   if (!/kal aayega/.test(h1)) throw new Error('today view me "FF kal aayega" note nahi mila');
-  if (!/GV aaj \(live\)/.test(h1.replace(/[▲▼]/g, ''))) throw new Error('today view me GV live chip nahi mila');
+  if (!/GV aaj \((GV Master · )?live\)/.test(h1.replace(/[▲▼]/g, ''))) throw new Error('today view me GV live chip nahi mila');
   if (/home-filter-banner|Workspace filters|Saved workspace filters/i.test(h1)) throw new Error('removed workspace filter UI is still rendered');
   // 2) channel=gv → FF chips 0, GV number > 0 (mock me GV data hai)
   if (!/🟦 FF MTD[^<]*<b>0<\/b>/.test(h1) && !/FF issuance T\+1/.test(h1)) throw new Error('Home view me FF T+1 state nahi mili');

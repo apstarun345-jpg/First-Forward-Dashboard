@@ -82,14 +82,25 @@ window.FF = window.FF || {};
     jobs.set(key, p);
     return p;
   }
+  // ⚡ Pehle GV Master (aaj ka live number usi se aata hai), phir baaki GV datasets — 3 workers.
+  const PRIORITY = ['master', 'report', 'stockClass', 'stockAgent', 'stockTl', 'stockTlClass', 'stockAgentClass'];
+  const LOAD_WORKERS = 3;
+  async function runQueue(keys, fresh) {
+    const queue = keys.slice();
+    const workers = Array.from({ length: Math.max(1, Math.min(LOAD_WORKERS, queue.length)) }, async () => {
+      while (queue.length) { const key = queue.shift(); await loadKey(key, !!fresh).catch(() => {}); }
+    });
+    await Promise.all(workers);
+  }
   function preload(fresh, only) {
     if (state.loading) return state.promise;
     if (state.promise && !fresh && !Object.keys(state.errors).length) return state.promise;
-    const keys = (only && only.length ? only : wanted()).filter((k) => DATASETS[k]);
+    const all = (only && only.length ? only : wanted()).filter((k) => DATASETS[k]);
+    const keys = [...PRIORITY.filter((k) => all.includes(k)), ...all.filter((k) => !PRIORITY.includes(k))];
     const version = generation;
     state.loading = true; state.errors = {}; state.progress = { done: 0, total: keys.length };
 
-    state.promise = Promise.allSettled(keys.map((key) => loadKey(key, !!fresh))).then(() => {
+    state.promise = runQueue(keys, fresh).then(() => {
       if (version === generation) {
         state.loading = false; state.loadedAt = Date.now();
 
@@ -105,6 +116,13 @@ window.FF = window.FF || {};
     if (state.data[key] !== undefined) return state.data[key];
     if (!state.promise) preload(false);
     return loadKey(key, false);
+  }
+  /** ⚡ Sirf chune hue GV datasets fresh load karo (aaj ka number = master). */
+  async function refresh(keys) {
+    const list = ((keys && keys.length) ? keys : ['master']).filter((k) => DATASETS[k]);
+    await runQueue(list, true);
+    state.loadedAt = Date.now();
+    return state;
   }
   function reset() {
     generation++; jobs.clear(); state.loading = false; state.promise = null;
@@ -390,9 +408,72 @@ window.FF = window.FF || {};
     }
     return [...map.values()].sort((a, b) => b.total - a.total);
   }
-  // ---- EIR-authoritative issuance views -----------------------------------------------------------
-  // GV Master remains available below for operational fields (commission, status, stock metadata),
-  // but it is never used as the issuance count source once the shared EIR daily ledger is loaded.
+  // ---- 🟩 GV AAJ = GV Master sheet (live) ----------------------------------------------------------
+  // Rule (user-confirmed): First Forward ka *aaj* ka issuance EIR se, aur GV Partner ka *aaj* ka
+  // issuance sirf GV Master tab se aata hai — kyunki GV live chalta hai aur EIR me uska aaj ka data
+  // late/partial ho sakta hai. Kal se pichhle dinon ke liye EIR hi authoritative ledger rehta hai.
+  //
+  // Isliye: EIR ki daily GV series me se sirf AAJ ki rows hata kar GV Master ki aaj ki rows lagate hain
+  // (add nahi — "replace", taaki ek hi tag do baar na gine).
+  function todayKey() { return U.dateKey(new Date()); }
+  const masterTodayReady = () => Array.isArray(state.data.master);
+  /** Aaj ke GV Master rows — EIR daily row jaisa hi shape (downstream sab isi shape par chalta hai). */
+  function masterTodayRows() {
+    if (!masterTodayReady()) return [];
+    const tk = todayKey();
+    const out = [];
+    for (const r of rows()) {
+      if (!r.date || U.dateKey(r.date) !== tk) continue;
+      const replacement = /replacement/i.test(r.status || '');
+      out.push({
+        date: r.date, d: r.date, key: tk, ym: r.ym, day: r.day,
+        cls: r.cls, group: r.group,
+        type: replacement ? 'REPLACEMENT' : 'ISSUANCE', status: r.status,
+        tagType: r.tagType, vrnType: r.tagType || '',
+        channel: 'GV Partner',
+        agentId: r.agentId || '', agentName: r.agentName || '', tlId: r.tlId || '', tlName: r.tlName || '',
+        tagId: r.tagId || '', serial: r.serial || '', vrn: r.vrn || '',
+        customer: r.customer || '', amount: Number(r.amount) || 0, commission: Number(r.commission) || 0,
+        live: true, source: 'gv-master', n: 1
+      });
+    }
+    return out;
+  }
+  /** 🟩 Aaj ka GV snapshot (GV Master se) — Home card, chips aur drawers isi ko dikhate hain. */
+  function gvToday() {
+    const tk = todayKey();
+    const rs = masterTodayRows();
+    const count = (fn) => rs.reduce((n, r) => n + (fn(r) ? 1 : 0), 0);
+    const byClass = {};
+    const byAgent = new Map();
+    for (const r of rs) {
+      byClass[r.cls] = (byClass[r.cls] || 0) + 1;
+      const k = r.agentId || r.agentName || '—';
+      const a = byAgent.get(k) || { agentId: r.agentId, agentName: r.agentName, tlName: r.tlName, n: 0, vc4: 0, comm: 0 };
+      a.n += 1; if (r.group === 'VC4') a.vc4 += 1; else a.comm += 1;
+      byAgent.set(k, a);
+    }
+    return {
+      date: tk, live: true, source: 'GV Master', loaded: masterTodayReady(),
+      rows: rs, byClass, agents: [...byAgent.values()].sort((a, b) => b.n - a.n),
+      total: rs.length, vc4: count((r) => r.group === 'VC4'), vc20: count((r) => r.group === 'VC20'),
+      vc5p: count((r) => r.group === 'VC5+'), comm: count((r) => r.group !== 'VC4'),
+      replacement: count((r) => r.type === 'REPLACEMENT'),
+      chassis: count((r) => /chassis/i.test(r.vrnType || r.tagType || ''))
+    };
+  }
+  /** GV daily series: EIR history + AAJ ki rows GV Master se (master load hone par). */
+  function liveDailyRows() {
+    const eir = eirDailyRows();
+    if (!masterTodayReady()) return eir;
+    const tk = todayKey();
+    const live = masterTodayRows();
+    const rest = eir.filter((r) => U.dateKey(r.date || r.d || new Date(0)) !== tk);
+    return rest.concat(live).sort((a, b) => (a.d && b.d ? a.d - b.d : 0));
+  }
+
+  // ---- EIR-authoritative issuance views (kal se pichhle din) --------------------------------------
+  // GV Master remains available below for operational fields (commission, status, stock metadata).
   function eirDaily() {
     return FF.store && typeof FF.store.get === 'function' && Array.isArray(FF.store.get('daily')) ? FF.store.get('daily') : null;
   }
@@ -438,7 +519,7 @@ window.FF = window.FF || {};
     // Agent-class is monthly, so build active-day sets from the same EIR daily ledger rather
     // than leaving every GV rollup at zero active days. This keeps avgPerDay meaningful.
     const daySets = new Map();
-    for (const r of eirDailyRows()) {
+    for (const r of liveDailyRows()) {
       if (ym && r.ym !== ym) continue;
       const k = `${r.ym}|${U.clean(r.agentName).toUpperCase()}`;
       if (!daySets.has(k)) daySets.set(k, new Set());
@@ -469,7 +550,7 @@ window.FF = window.FF || {};
     return [...map.values()].map((a) => ({ ...a, activeDays: a.days.size, avgPerDay: a.days.size ? a.total / a.days.size : 0 })).sort((a, b) => b.total - a.total);
   }
   function eirSummary(ym, upToDay) {
-    const s = FF.model.summary(eirDaily() || [], ym, upToDay, 'GV Partner');
+    const s = FF.model.summary(liveDailyRows(), ym, upToDay, 'GV Partner');
     const people = eirPeopleRollup(ym);
     s.agents = new Set(people.map((a) => a.agentId));
     s.tls = new Set(people.filter((a) => !a.directAgent).map((a) => a.tlName || 'Direct'));
@@ -491,19 +572,20 @@ window.FF = window.FF || {};
   function eirDirectRollup(ym) {
     return eirPeopleRollup(ym).filter((a) => a.directAgent).map((a) => ({ ...a, reason: FF.direct ? FF.direct.reason(a, 'gv') : 'GV direct agent', last: null }));
   }
-  function months() { return eirReady() ? FF.model.months(eirDaily()) : masterMonths(); }
-  function latestDate() { return eirReady() ? FF.model.latestDate(eirDailyRows()) : masterLatestDate(); }
+  function months() { return eirReady() ? FF.model.months(liveDailyRows()) : masterMonths(); }
+  function latestDate() { return eirReady() ? FF.model.latestDate(liveDailyRows()) : masterLatestDate(); }
   function summary(ym, upToDay) { return eirReady() ? eirSummary(ym, upToDay) : masterSummary(ym, upToDay); }
-  function dailySeries(ym, dimFn) { return eirReady() ? FF.model.dailySeries(eirDailyRows(), ym, dimFn) : masterDailySeries(ym, dimFn); }
+  function dailySeries(ym, dimFn) { return eirReady() ? FF.model.dailySeries(liveDailyRows(), ym, dimFn) : masterDailySeries(ym, dimFn); }
   function byDim(ym, dimFn, upToDay) {
     if (!eirReady()) return masterByDim(ym, dimFn, upToDay);
-    const source = eirDailyRows().filter((r) => !ym || r.ym === ym).filter((r) => !upToDay || r.day <= upToDay);
+    const source = liveDailyRows().filter((r) => !ym || r.ym === ym).filter((r) => !upToDay || r.day <= upToDay);
     const map = new Map(); source.forEach((r) => { const k = dimFn(r); map.set(k, (map.get(k) || 0) + r.n); }); return map;
   }
   function agentRollup(ym) { return eirReady() ? eirPeopleRollup(ym) : masterAgentRollup(ym); }
   function tlRollup(ym) { return eirReady() ? eirTlRollup(ym) : masterTlRollup(ym); }
   function directRollup(ym) { return eirReady() ? eirDirectRollup(ym) : masterDirectRollup(ym); }
-  function issuanceRows() { return eirReady() ? eirDailyRows() : rows(); }
+  // GV issuance rows = EIR history + GV Master ka aaj (live). GV pages/sprint/tag-issued sab yahi use karte hain.
+  function issuanceRows() { return eirReady() ? liveDailyRows() : rows(); }
 
   /** Searchable people list (agents + TLs) for the suggestion dropdowns. */
   function people() {
@@ -531,9 +613,9 @@ window.FF = window.FF || {};
   }
 
   const GV = {
-    DATASETS, preload, need, get, error, reset, enabled, wanted,
+    DATASETS, preload, refresh, need, get, error, reset, enabled, wanted,
     normClass, classGroup, clsNum,
-    rows, masterRows: rows, issuanceRows, eirDailyRows, months, latestDate, summary, dailySeries, weekly, byDim, agentRollup, tlRollup, directRollup, people,
+    rows, masterRows: rows, issuanceRows, eirDailyRows, liveDailyRows, gvToday, masterTodayRows, todayKey, months, latestDate, summary, dailySeries, weekly, byDim, agentRollup, tlRollup, directRollup, people,
     REPORT_COLS, REPORT_COLS_LABELS,
     get state() { return state; },
     get loadedAt() { return state.loadedAt; },

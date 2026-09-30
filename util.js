@@ -291,6 +291,36 @@ window.FF = window.FF || {};
     return new Date(ts).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
   }
 
+  // ---- 🏷️ Barcode / serial (dash symbol ke saath) ------------------------------------------------
+  // Sheet me barcode ek 16-digit number hota hai (6000000110000000 jaisa). Field me padhne,
+  // bolne aur scan karne me aasaani ke liye use hamesha 6-3-7 me dikhate hain:
+  //   608116-011-0558601
+  // Search hamesha dono format me chalti hai (clean() dash hata deta hai), sirf display format hai.
+  const digitsOnly = (v) => String(v ?? '').replace(/\D/g, '');
+  /** 16-digit barcode ko 6-3-7 me dikhao (608116-011-0558601). Baaki values waise hi rehti hain. */
+  function barcode(v) {
+    const raw = clean(v);
+    if (!raw) return '';
+    // Sheet me kabhi number, kabhi text — dono handle karo:
+    //   • 6081160110558601      → 608116-011-0558601
+    //   • 608116-011-0558601    → wahi (normalise ho kar)
+    //   • 6.08116E+15 (number format) → exact digits
+    //   • "BC123" / tag ID jaise alphanumeric → chhoo mat
+    let text = raw;
+    const sci = /^-?\d(?:\.\d+)?e\+?\d+$/i.test(text);
+    if (sci) { const n = Number(text); if (Number.isFinite(n)) text = BigInt(Math.round(n)).toString(); }
+    if (!/^[\d\s.-]+$/.test(text)) return raw;
+    const d = digitsOnly(text.replace(/\.\d+$/, '')); // trailing .0 hata do
+    if (!d) return raw;
+    const grouped = (x) => `${x.slice(0, 6)}-${x.slice(6, 9)}-${x.slice(9)}`;
+    if (d.length === 16) return grouped(d);
+    // 17-20 digit bhi 6-3-rest group me — sheet me kabhi kabhi extra digit hota hai.
+    if (d.length >= 17 && d.length <= 20) return grouped(d);
+    return raw;
+  }
+  /** Barcode ko comparison/search ke liye normalize karo — sirf digits/alnum (dash, space hata do). */
+  const barcodeKey = (v) => clean(v).toUpperCase().replace(/[^A-Z0-9]/g, '');
+
   // ---- collections -----------------------------------------------------------
   function sum(list, getter) {
     let total = 0;
@@ -1179,6 +1209,7 @@ window.FF = window.FF || {};
     suggestDays, suggestMode, runRateDays, runRate, reportBasis, channelBasis, basisText, projectMonthEnd, dispatchCalc, suggestNet, suggestGross, suggestPair, sugCell, sugText,
     MONTHS, MONTHS_LONG, DAYS, pad2, parseDate, parseMonthKey, ymKey, dateKey, fromDateKey, ymParts, labelYM, labelDate, labelDateKey,
     weekday, daysInMonth, prevMonthKey, nextMonthKey, weekStart, timeLabel,
+    barcode, barcodeKey,
     sum, groupSum, topEntries, sortBy, uniq,
     $, $$, h, debounce, setButtonBusy, withButtonBusy, toast, spinner, errorBox, downloadBlob, downloadCsv, tableToRows, slug, stamp, colLetter, colIndex, initTooltip,
     phoneDigits, waLink, mailLink, copyText, suggest,

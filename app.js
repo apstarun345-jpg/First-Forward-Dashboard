@@ -572,12 +572,29 @@ window.FF = window.FF || {};
     if (btn) btn.classList.toggle('open', show);
   }
 
+  /** Theme picker + office bell — modules lazy ho sakte hain, isliye mount idempotent rakhna hai. */
+  function mountShellExtras() {
+    try {
+      if (FF.officeBell && FF.officeBell.mount) FF.officeBell.mount();
+      if (FF.wowzone) {
+        if (!(FF.config.feat && FF.config.feat('themePacks') === false)) FF.wowzone.mountThemePicker();
+        if (!(FF.config.feat && FF.config.feat('tabHeartbeat') === false)) {
+          clearInterval(appHeartbeat.timer);
+          if (appHeartbeat.instance) appHeartbeat.instance.stop();
+          appHeartbeat.instance = FF.wowzone.startHeartbeat({ interval: 45000 });
+        }
+      }
+    } catch (err) { console.warn('shell extras', err && err.message); }
+  }
+
   function markActive() {
     U.$$('#nav .nav-item').forEach((a) => {
       const on = a.dataset.page === current.page && (current.page !== 'sheet' || a.dataset.name === current.params.name);
       a.classList.toggle('active', on);
     });
-    let title = current.page === 'sheet' ? (current.params.name || 'Sheet') : (FF.pages[current.page] && FF.pages[current.page].title) || '';
+    // Lazy loading: page module abhi load nahi hua ho to bhi title sidebar registry se aa jaye.
+    const def = pageDef(current.page);
+    let title = current.page === 'sheet' ? (current.params.name || 'Sheet') : (FF.pages[current.page] && FF.pages[current.page].title) || (def && def.label) || '';
     const mode = lang();
     if (mode === 'hi') {
       const HI_TITLES = { Home: 'होम', Dashboard: 'डैशबोर्ड', Trend: 'ट्रेंड', Performance: 'परफ़ॉर्मेंस', Stock: 'स्टॉक', 'Stock Report': 'स्टॉक रिपोर्ट', Targets: 'टार्गेट', Settings: 'सेटिंग्स', 'GV vs First Forward': 'GV बनाम फर्स्ट फॉरवर्ड', Compare: 'तुलना' };
@@ -626,6 +643,10 @@ window.FF = window.FF || {};
     }
     if (FF.notifications) FF.notifications.activity(page === 'sheet' ? `Sheet · ${params.name || ''}` : page);
     try {
+      // ⚡ Page ka module sirf tab download hota hai jab us page ko khola jaye (pehla load halka rehta hai).
+      if (FF.lazy && FF.lazy.ensure) await FF.lazy.ensure(page);
+      if (!FF.pages[page] && FF.lazy && FF.lazy.ensureAll) await FF.lazy.ensureAll();
+      if (!FF.pages[page]) throw new Error(`Page module load nahi hua (${page}). Internet check karke ↻ dabaiye.`);
       await FF.pages[page].render(root, params, ctx || {});
     } catch (err) {
       console.error(err);
@@ -790,8 +811,40 @@ window.FF = window.FF || {};
   // ---- table experience: density, columns, sticky context and export ------------------------------
   function tableDensity() { try { return localStorage.getItem('ff_table_density') || 'comfortable'; } catch { return 'comfortable'; } }
   function setTableDensity(value) { try { localStorage.setItem('ff_table_density', value); } catch {} document.documentElement.dataset.tableDensity = value; }
+  /** 🏷️ Barcode / serial columns → dash wala format (608116-011-0558601) har table me. */
+  const BARCODE_HEAD_RE = /barcode|serial|serial\s*number|bc\b/i;
+  function barcodeColumnIndexes(table) {
+    const heads = [...table.querySelectorAll('thead th')];
+    const out = [];
+    heads.forEach((th, i) => { if (BARCODE_HEAD_RE.test(th.textContent || '')) out.push(i); });
+    return out;
+  }
+  /** Table ke barcode cells ko display format me badlo (value + data-full attribute me original). */
+  function polishBarcodes(root) {
+    if (!root || !root.querySelectorAll) return;
+    root.querySelectorAll('table').forEach((table) => {
+      const cols = barcodeColumnIndexes(table);
+      if (!cols.length) return;
+      table.querySelectorAll('tbody tr').forEach((tr) => {
+        cols.forEach((i) => {
+          const td = tr.children[i];
+          if (!td || td.dataset.bcDone === '1') return;
+          const full = (td.textContent || '').trim();
+          const pretty = U.barcode(full);
+          if (pretty && pretty !== full) {
+            td.dataset.bcDone = '1';
+            td.dataset.bcFull = full;
+            td.textContent = pretty;
+            td.title = `${full} · barcode`;
+          }
+        });
+      });
+    });
+  }
+
   function enhanceTables(root) {
     if (!root || !root.querySelectorAll) return;
+    polishBarcodes(root);
     setTableDensity(tableDensity());
     root.querySelectorAll('.table-wrap').forEach((wrap) => {
       const table = wrap.querySelector('table');
@@ -1010,6 +1063,9 @@ window.FF = window.FF || {};
     renderCurrent();
     maybeOnboarding();
     if (FF.config.loginAnimation !== false) FF.auth.splash(FF.auth.user);
+    // ⚡ Baaki page modules background me (idle) load ho jaate hain — pehla load fast, navigation instant.
+    //    (wowzone jaise modules lazy hain → warm ke baad shell extras dobara mount karne padte hain.)
+    if (FF.lazy && FF.lazy.warm) Promise.resolve(FF.lazy.warm()).then(() => setTimeout(mountShellExtras, 400)).catch(() => {});
     registerServiceWorker(); // push notifications ke liye SW pehle ready ho
     if (FF.notifications) FF.notifications.start();
     liveShareChip();
@@ -1019,16 +1075,7 @@ window.FF = window.FF || {};
         .then(() => { if (FF.masterSearch) FF.masterSearch.mountTopbar(); })
         .catch(() => { if (FF.masterSearch) FF.masterSearch.mountTopbar(); });
     }
-    // 🔔 Office Bell — naya tag issue hua to "ting!" + floating ticker (features.officeBell)
-    if (FF.officeBell) FF.officeBell.mount();
-    if (FF.wowzone) {
-      if (!(FF.config.feat && FF.config.feat('themePacks') === false)) FF.wowzone.mountThemePicker();
-      if (!(FF.config.feat && FF.config.feat('tabHeartbeat') === false)) {
-        clearInterval(appHeartbeat.timer);
-        if (appHeartbeat.instance) appHeartbeat.instance.stop();
-        appHeartbeat.instance = FF.wowzone.startHeartbeat({ interval: 45000 });
-      }
-    }
+    mountShellExtras();
     // 🔍 Global search button — features.search OFF ho to hide
     const gsBtn = U.$('#global-search-btn');
     if (gsBtn) {
@@ -1053,15 +1100,19 @@ window.FF = window.FF || {};
     // Location prompt + PWA
     setTimeout(requestLocationOnOpen, 2000);
     updateInstallBtn();
-    // Auto background sync every 5 minutes when tab is open
+    // ⚡ Auto background sync — 15 min, sirf halka refresh (daily + GV Master + aaj ka feed).
+    //    Pehle har 5 min me *saare* 16 datasets fresh load hote the (StockDataa/EIR/REPORT full scans) —
+    //    wahi site ki lag ki sabse badi wajah tha: Google Sheets rate limit + poora bandwidth.
     clearInterval(syncTimer);
     syncTimer = setInterval(() => {
-      if (FF.auth.user && document.visibilityState === 'visible' && FF.preloader && !FF.preloader.running) {
-        FF.preloader.preloadAll(true).then(() => {
-          if (FF.auth.user && !['settings', 'sheet'].includes(current.page)) onBackgroundDataUpdated();
-        }).catch(() => {});
-      }
-    }, 5 * 60 * 1000);
+      if (!FF.auth.user || document.visibilityState !== 'visible') return;
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+      const conn = (typeof navigator !== 'undefined' && navigator.connection) || null;
+      if (conn && (conn.saveData || /^(slow-)?2g$/.test(String(conn.effectiveType || '')))) return; // data-saver/2G par auto-sync band
+      if (FF.preloader && FF.preloader.running) return;
+      const light = FF.preloader && FF.preloader.lightSync ? FF.preloader.lightSync(true) : FF.preloader.preloadAll(true);
+      light.then(() => { if (FF.auth.user && !['settings', 'sheet'].includes(current.page)) onBackgroundDataUpdated(); }).catch(() => {});
+    }, 15 * 60 * 1000);
   }
 
   async function init() {

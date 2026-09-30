@@ -53,6 +53,14 @@ window.FF = window.FF || {};
 
   function cellText(cell, col) {
     if (!cell || cell.v === null || cell.v === undefined) return '';
+    // 🔢 Barcode/16-digit serial: sheet ka "formatted" text (6.08E+15) dikhta tha — us se digits hi
+    // gum ho jaate the. Bade integer ke liye exact value do, display format util.barcode() banata hai.
+    const v0 = cell.v;
+    if (typeof v0 === 'number' && Number.isInteger(v0) && Math.abs(v0) >= 1e15) return String(v0);
+    if (typeof v0 === 'string' && /^-?\d(?:\.\d+)?e\+?\d+$/i.test(v0.trim())) {
+      const num = Number(v0);
+      if (Number.isFinite(num)) return BigInt(Math.round(num)).toString();
+    }
     if (cell.f !== null && cell.f !== undefined) return String(cell.f);
     const v = cell.v;
     if (typeof v === 'string' && /^Date\(/.test(v)) {
@@ -146,9 +154,19 @@ window.FF = window.FF || {};
 
   function clearCache() { cache.clear(); }
 
+  /** ⚡ Aaj ka live feed (chhoti server query): GV = GV Master sheet, FF = EIR. */
+  function today(opts) {
+    const o = opts || {};
+    const base = FF.config.todayPath || '/api/today';
+    const url = `${base}${o.fresh ? '?fresh=1' : ''}`;
+    return fetch(url, { credentials: 'same-origin', cache: 'no-store', headers: { 'X-Requested-With': 'FF-Dashboard' } })
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`today feed HTTP ${res.status}`))))
+      .then((json) => { if (json && json.ok === false) throw new Error(json.error || 'today feed unavailable'); return json; });
+  }
+
   // Escape a literal for the gviz query language (double-quoted string).
   function lit(value) { return `"${String(value).replace(/["\\]/g, '')}"`; }
 
-  FF.data = { query, clearCache, parseGviz, cellText, cellNumber, cellDate, textRows, looksLikeEIR, lit, QueryError,
+  FF.data = { query, today, clearCache, parseGviz, cellText, cellNumber, cellDate, textRows, looksLikeEIR, lit, QueryError,
     get lastLoadAt() { return lastLoadAt; }, get lastSource() { return lastSource; } };
 })(window.FF);

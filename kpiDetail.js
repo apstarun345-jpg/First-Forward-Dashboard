@@ -87,8 +87,8 @@ window.FF = window.FF || {};
   async function issuanceRows(src) {
     let daily = FF.store.get('daily');
     if (!daily) { try { daily = await FF.store.need('daily'); } catch { daily = []; } }
-    // The same EIR dataset powers FF, GV, and combined drill-downs. GV Master is not an
-    // issuance source here; its operational fields are intentionally absent from the count path.
+    // 🟩 GV ka aaj ka data GV Master se aata hai (model/gv layer ise already splice karta hai),
+    // 🟦 FF ka data EIR se. Isliye yahan sirf channel split aur T+1 lag filter hota hai.
     const rows = (daily || []).filter((r) => src === 'both' || (src === 'gv' ? r.channel === 'GV Partner' : r.channel !== 'GV Partner'));
     // 🔁 FF issuance T+1 — jo FF date abhi reported nahi hai (aaj) wo FF/both counts me nahi.
     //    GV rows live rehti hain, isliye lag sirf First Forward par lagta hai.
@@ -97,7 +97,7 @@ window.FF = window.FF || {};
   }
   /** Kis date tak FF reported hai — note ke liye. */
   const ffPendingNote = () => (FF.filters && FF.filters.ffLagOn && FF.filters.ffLagOn())
-    ? `<p class="dim small">🔁 <b>FF data T+1:</b> First Forward ka issuance kal aata hai, GV Partner live chalta hai — isliye aaj ki FF rows 0 hain (kal se dono).</p>` : '';
+    ? `<p class="dim small">🔁 <b>Sources:</b> First Forward ka aaj ka issuance <b>EIR</b> se (T+1 — kal aata hai), GV Partner ka aaj ka issuance <b>GV Master</b> sheet se (live). Purane dinon ka ledger EIR hai.</p>` : '';
   function latestKey(rows) { return rows.reduce((m, r) => (r.key > m ? r.key : m), ''); }
   function period(spec, rows) {
     const latest = latestKey(rows);
@@ -188,7 +188,8 @@ window.FF = window.FF || {};
     const newVrn = tot - chassis - total(cur.filter((r) => /wrong/i.test(r.vrnType)));
     const days = [...new Set(cur.map((r) => r.key))].sort();
     const periodLabel = p.from === p.to ? `${U.labelDateKey(p.from, true)} (${U.weekday(U.fromDateKey(p.from))})` : `${U.labelDateKey(p.from, true)} → ${U.labelDateKey(p.to, true)}`;
-    const srcLabel = spec.src === 'gv' ? 'GV Partner (EIR · master ID 5845036)' : spec.src === 'ff' ? 'First Forward issuance (EIR · GV rows excluded)' : 'First Forward + GV Partner (EIR · master ID 5845036 classifies GV)';
+    // 🟩 GV aaj = GV Master sheet (live) · 🟦 FF = EIR (T+1). Purane dinon ke liye EIR ledger.
+    const srcLabel = spec.src === 'gv' ? 'GV Partner · GV Master sheet (live)' : spec.src === 'ff' ? 'First Forward issuance · EIR sheet (T+1)' : 'First Forward (EIR) + GV Partner (GV Master)';
     const byClass = tally(cur, (r) => r.cls), byClassPrev = tally(prev, (r) => r.cls);
     const byChannel = tally(cur, (r) => r.channel), byChannelPrev = tally(prev, (r) => r.channel);
     const byType = tally(cur, (r) => (r.type === 'REPLACEMENT' ? 'Replacement' : 'New issuance')), byTypePrev = tally(prev, (r) => (r.type === 'REPLACEMENT' ? 'Replacement' : 'New issuance'));
@@ -302,37 +303,74 @@ window.FF = window.FF || {};
   }
 
   // ---- raw tag-level rows ---------------------------------------------------------------------
-  const RAW_HEAD = ['Date', 'Tag ID', 'VRN', 'Class', 'Type', 'VRN type', 'Status', 'Agent', 'Agent ID', 'TL', 'Channel'];
+  // 📄 Last level = sheet ki asli rows. GV rows GV Master tab se (serial/barcode ke saath),
+  //    FF rows EIR tab se — dono LIVE sheet se nikalkar dikhaye jaate hain.
+  const RAW_HEAD = ['Date', 'Tag ID', 'VRN', 'Class', 'Type', 'VRN type', 'Status', 'Agent', 'Agent ID', 'TL', 'Channel', 'Barcode / serial'];
+  /** 🟩 GV Master sheet ki live rows (date range + spec filter) — asli sheet data, koi extra query nahi. */
+  function gvMasterRawRows(spec, p) {
+    const G = FF.gv;
+    if (!G || typeof G.rows !== 'function') return [];
+    const filt = filterOf(spec.f);
+    const wanted = [spec.agent, spec.agentId].map(personKey).filter(Boolean);
+    const out = [];
+    for (const r of G.rows()) {
+      const key = r.date ? U.dateKey(r.date) : '';
+      if (!key || key < p.from || key > p.to) continue;
+      const type = /replacement/i.test(r.status || '') ? 'REPLACEMENT' : 'ISSUANCE';
+      const row = {
+        key, tagId: r.tagId || '', vrn: r.vrn || '', cls: r.cls, group: r.group, type,
+        vrnType: r.tagType || '', status: r.status || '', channel: 'GV Partner',
+        agentName: r.agentName || '', agentId: r.agentId || '', tlName: r.tlName || '',
+        barcode: r.serial || '', amount: Number(r.amount) || 0, commission: Number(r.commission) || 0, n: 1
+      };
+      if (filt && !filt.fn(row)) continue;
+      if (wanted.length && ![row.agentName, row.agentId].map(personKey).some((k) => wanted.includes(k))) continue;
+      if (!rowMatchesSpec(row, spec)) continue;
+      out.push([row.key, row.tagId, row.vrn, row.cls, row.type, row.vrnType, row.status, row.agentName, row.agentId, row.tlName, row.channel, row.barcode]);
+    }
+    return out;
+  }
+
   async function loadRaw() {
     const spec = state.spec, p = state.period;
     const out = [];
-    const filt = filterOf(spec.f);
-    if (spec.src === 'ff' || spec.src === 'gv' || spec.src === 'both') {
+    const wantGv = spec.src === 'gv' || spec.src === 'both';
+    const wantFf = spec.src === 'ff' || spec.src === 'both';
+    // 🟩 GV side — GV Master tab se (live). Master load ho chuka hai to Google par dobara query nahi.
+    const gvRows = wantGv ? gvMasterRawRows(spec, p) : [];
+    const gvFromMaster = !!(FF.gv && typeof FF.gv.get === 'function' && Array.isArray(FF.gv.get('master')));
+    out.push(...gvRows);
+    // 🟦 FF side (aur GV ka fallback jab GV Master load na hua ho) — EIR tab se.
+    const needsEir = wantFf || (wantGv && !gvFromMaster);
+    if (needsEir) {
       const e = FF.config.eir;
       const cols = [e.date, e.tagId, e.vrn, e.cls, e.type, e.vrnType, e.status, e.agentName, e.agentId, e.tlName, e.masterId, e.gvName, e.gvId];
       const tq = `select ${cols.join(', ')} where toDate(${e.date}) >= date '${p.from}' and toDate(${e.date}) <= date '${p.to}' order by ${e.date} desc limit 60000`;
       const t = await FF.data.query(e.sheet, tq, {});
       const D = FF.data;
+      const filt = filterOf(spec.f);
       for (const r of t.rows) {
         const d = D.cellDate(r[0]);
         const cls = (() => { const c = D.cellText(r[3]).toUpperCase().trim(); return /^\d+$/.test(c) ? `VC${c}` : c || 'NA'; })();
         const channel = FF.model.channelOf(D.cellText(r[10]), D.cellText(r[9]));
-        if (spec.src === 'ff' && channel === 'GV Partner') continue;
-        if (spec.src === 'gv' && channel !== 'GV Partner') continue;
+        // GV rows sirf tab jab master available na ho (warna GV Master hi authority hai).
+        if (channel === 'GV Partner' ? !wantGv || gvFromMaster : !wantFf) continue;
         // 🔁 FF T+1: jo FF rows abhi reported nahi (aaj) wo FF/both list me bhi nahi aati.
         if (channel !== 'GV Partner' && FF.filters && FF.filters.ffLagOn && FF.filters.ffLagOn() && !FF.filters.ffVisible({ key: d ? U.dateKey(d) : '', channel })) continue;
         const agentName = channel === 'GV Partner' ? (D.cellText(r[11]) || D.cellText(r[7])) : (D.cellText(r[7]) || D.cellText(r[11]));
         const agentId = channel === 'GV Partner' ? (D.cellText(r[12]) || D.cellText(r[8])) : (D.cellText(r[8]) || D.cellText(r[12]));
         const wanted = [spec.agent, spec.agentId].map(personKey).filter(Boolean);
         if (wanted.length && ![agentName, agentId].map(personKey).some((key) => wanted.includes(key))) continue;
-        const row = { key: d ? U.dateKey(d) : '', tagId: D.cellText(r[1]), cls, group: FF.model.classGroup(cls), type: D.cellText(r[4]).toUpperCase() || 'ISSUANCE', vrnType: D.cellText(r[5]), channel, agentName, agentId, tlName: D.cellText(r[9]), n: 1 };
+        const row = { key: d ? U.dateKey(d) : '', tagId: D.cellText(r[1]), cls, group: FF.model.classGroup(cls), type: D.cellText(r[4]).toUpperCase() || 'ISSUANCE', vrnType: D.cellText(r[5]), channel, agentName, agentId, tlName: D.cellText(r[9]), n: 1, barcode: '' };
         if (filt && !filt.fn(row)) continue;
         if (!rowMatchesSpec(row, spec)) continue;
-        out.push([row.key, D.cellText(r[1]), D.cellText(r[2]), cls, row.type, row.vrnType, D.cellText(r[6]), agentName, agentId, D.cellText(r[9]), channel]);
+        out.push([row.key, D.cellText(r[1]), D.cellText(r[2]), cls, row.type, row.vrnType, D.cellText(r[6]), agentName, agentId, D.cellText(r[9]), channel, '']);
       }
     }
     out.sort((a, b) => (a[0] < b[0] ? 1 : a[0] > b[0] ? -1 : 0));
     state.raw = out;
+    state.rawGv = gvRows.length;
+    state.rawSrc = gvFromMaster && wantGv ? (wantFf ? 'EIR (FF) + GV Master (GV)' : 'GV Master') : (wantGv && wantFf ? 'EIR (FF + GV)' : wantFf ? 'EIR' : 'EIR');
     return out;
   }
   function renderRaw(filter) {
@@ -344,10 +382,10 @@ window.FF = window.FF || {};
     const byAgent = new Map(), byTl = new Map();
     rows.forEach((r) => { byAgent.set(r[7] || '—', (byAgent.get(r[7] || '—') || 0) + 1); byTl.set(r[9] || '—', (byTl.get(r[9] || '—') || 0) + 1); });
     const top = (m) => [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, v]) => `<span class="kd-chip">${esc(k)} <b>${U.fmt(v)}</b></span>`).join('');
-    el.innerHTML = `<div class="kd-raw-tools"><input class="input" id="kd-raw-q" placeholder="Search: tag / VRN / agent / TL / class…" value="${esc(filter || '')}">${FF.auth.can('export') ? '<button class="btn small" data-kd-xlsx>⬇ Excel (all rows)</button><button class="btn small" data-kd-csv>⬇ CSV</button>' : ''}</div>
+    el.innerHTML = `<div class="kd-raw-tools"><input class="input" id="kd-raw-q" placeholder="Search: tag / VRN / barcode / agent / TL / class…" value="${esc(filter || '')}">${FF.auth.can('export') ? '<button class="btn small" data-kd-xlsx>⬇ Excel (all rows)</button><button class="btn small" data-kd-csv>⬇ CSV</button>' : ''}</div>
       <div class="kd-chips"><span class="dim small">Top TLs:</span>${top(byTl)}</div><div class="kd-chips"><span class="dim small">Top agents:</span>${top(byAgent)}</div>
-      <p class="dim small">${U.fmt(rows.length)} rows${q ? ` (search "${esc(q)}")` : ''}${rows.length > show.length ? ` · pehli ${show.length} dikh rahi hain — sab ke liye Excel download karo` : ''}.</p>
-      <div class="table-wrap kd-scroll tall"><table class="tbl compact kd-tbl"><thead><tr>${RAW_HEAD.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${show.map((r) => `<tr class="clickable" data-kd-tag="${esc(r[1] || '')}" data-kd-tag-date="${esc(r[0] || '')}" title="Click for this tag’s details">${r.map((v, i) => `<td${i === 0 ? ' class="nowrap"' : ''}>${esc(v || '')}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${RAW_HEAD.length}" class="empty">Koi row nahi mili.</td></tr>`}</tbody></table></div>`;
+      <p class="dim small">${U.fmt(rows.length)} rows${q ? ` (search "${esc(q)}")` : ''}${rows.length > show.length ? ` · pehli ${show.length} dikh rahi hain — sab ke liye Excel download karo` : ''} · Source: <b>${esc(state.rawSrc || 'sheet')}</b> (ye rows seedha Google Sheet se aayi hain).</p>
+      <div class="table-wrap kd-scroll tall"><table class="tbl compact kd-tbl"><thead><tr>${RAW_HEAD.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${show.map((r) => `<tr class="clickable" data-kd-tag="${esc(r[1] || '')}" data-kd-tag-date="${esc(r[0] || '')}" title="Click for this tag’s details">${r.map((v, i) => `<td${i === 0 ? ' class="nowrap"' : ''}>${esc(i === 11 ? U.barcode(v) : (v || ''))}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${RAW_HEAD.length}" class="empty">Koi row nahi mili.</td></tr>`}</tbody></table></div>`;
     const input = U.$('#kd-raw-q');
     if (input) { input.addEventListener('input', U.debounce(() => { renderRaw(input.value); const again = U.$('#kd-raw-q'); if (again) { again.focus(); again.setSelectionRange(again.value.length, again.value.length); } }, 300)); }
   }
@@ -381,8 +419,61 @@ window.FF = window.FF || {};
         <div class="kd-grid">${breakdownTable('Class-wise', tally(cls || [], (r) => r.cls), null, tot, { head: 'Class', sortCls: true })}${breakdownTable('TL-wise', tally(tls || [], (r) => (r.directAgent === true || !FF.config.isRealTl(r.tlName) ? FF.config.directLabel({ tlName: r.tlName, channel: 'GV Partner' }, 'gv') : r.tlName)), null, total(tls || []), { head: 'TL' })}</div>
         ${breakdownTable('Top 30 agents (stock)', new Map((agents || []).slice(0, 30).map((a) => [`${a.agentName} · ${a.tlName || '—'}`, a.n])), null, tot, { head: 'Agent · TL' })}`);
     }
+    const btn = (kind, label) => `<button class="btn primary" data-kd-sheetrows="${kind}">📄 ${label}</button>`;
+    const rawBtns = [];
+    if (spec.src === 'ff' || spec.src === 'both') rawBtns.push(btn('ff-stock', 'StockDataa rows load karo'));
+    if (spec.src === 'gv' || spec.src === 'both') rawBtns.push(btn('gv-stock', 'Tag Assignment rows load karo'));
+    if (rawBtns.length) {
+      parts.push(`<section class="kd-sec"><h4>📄 Poora data — sheet ki tag-level rows</h4>
+        <p class="dim small">Last level: yahan se seedha us sheet tab ki asli rows (barcode/serial ke saath) load hongi${spec.agent ? ` · filter: <b>${esc(spec.agent)}</b>` : ''}.</p>
+        <div class="btn-row">${rawBtns.join('')}</div><div id="kd-rows"><div class="empty">Abhi load nahi hua.</div></div></section>`);
+    }
     return { kicker: 'KPI detail · Stock', title: spec.title || 'Stock in field', sub: `Total <b>${U.fmt(grand)}</b> tags in field`, body: parts.join('') || '<div class="empty">Stock data nahi mila.</div>' };
   }
+  // ---- 🗂️ Sheet rows (leaf level): stock tabs ki asli tag-level rows --------------------------------
+  //  Har stock KPI drawer ke aakhir me "sheet ki asli rows" — StockDataa (FF) ya Tag Assignment (GV).
+  //  Barcode/serial display format me (608116-011-0558601) aur Excel/CSV download bhi.
+  function sheetRowsHtml(title, header, rows, note) {
+    const bcCols = [];
+    header.forEach((h, i) => { if (/barcode|serial/i.test(String(h || ''))) bcCols.push(i); });
+    const show = rows.slice(0, 800);
+    const cell = (v, i) => esc(bcCols.includes(i) ? U.barcode(v) : (v || ''));
+    return `<section class="kd-sec"><h4>📄 ${esc(title)} — <span class="dim">${U.fmt(rows.length)} rows (${esc(note)})</span></h4>
+      <div class="btn-row">${FF.auth.can('export') ? '<button class="btn small" data-kd-sheetrows-xlsx>⬇ Excel (all rows)</button><button class="btn small" data-kd-sheetrows-csv>⬇ CSV</button>' : ''}<span class="dim small">Ye rows seedha sheet tab se aayi hain${rows.length > show.length ? ` · pehli ${U.fmt(show.length)} dikh rahi hain` : ''}.</span></div>
+      <div class="table-wrap kd-scroll tall"><table class="tbl compact kd-tbl"><thead><tr>${header.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead>
+      <tbody>${show.map((r) => `<tr>${r.map((v, i) => `<td>${cell(v, i)}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${header.length}" class="empty">Koi row nahi mili.</td></tr>`}</tbody></table></div></section>`;
+  }
+  /** FF StockDataa / GV Tag Assignment ki tag-level rows (spec ke agent/tl/cls filter ke saath). */
+  async function loadStockSheetRows(kind, spec) {
+    const D = FF.data;
+    const A = FF.config.gv.assignment || {};
+    const S = FF.config.stock;
+    const agent = U.clean(spec.agent);
+    if (kind === 'gv-stock') {
+      const cols = [...new Set([A.cls, A.tagId, A.serial, A.status, A.agentId, A.agentName, A.tlId, A.tlName, A.gvUniqueId, A.gvUniqueName].filter(Boolean))];
+      const where = agent ? ` where lower(${A.agentName}) = ${D.lit(agent.toLowerCase())}` : '';
+      const t = await D.query(A.tab || 'Tag Assignment', `select ${cols.join(', ')}${where} limit 50000`, {});
+      return { header: t.cols.map((c) => c.label || c.id), rows: D.textRows(t), title: `${A.tab || 'Tag Assignment'} (GV stock)` };
+    }
+    const cols = [...new Set([S.tagId, S.barcode, S.cls, S.tagType, S.agentId, S.agentName, S.tlName, S.bcAllocatedAt, S.agentAllocatedAt].filter(Boolean))];
+    const where = [];
+    if (agent) where.push(`lower(${S.agentName}) = ${D.lit(agent.toLowerCase())}`);
+    if (spec.cls) where.push(`${S.cls} = ${D.lit(String(spec.cls).replace(/^VC/i, ''))}`);
+    const t = await D.query(S.sheet || 'StockDataa', `select ${cols.join(', ')}${where.length ? ` where ${where.join(' and ')}` : ''} limit 50000`, {});
+    return { header: t.cols.map((c) => c.label || c.id), rows: D.textRows(t), title: `${S.sheet || 'StockDataa'} (FF stock)` };
+  }
+  async function stockSheetRowsSection(host, kind, spec) {
+    if (!host) return;
+    host.innerHTML = U.spinner('Google Sheet se tag-level rows aa rahi hain…');
+    try {
+      const out = await loadStockSheetRows(kind, spec);
+      state.sheetRows = out;
+      host.innerHTML = sheetRowsHtml(out.title, out.header, out.rows, 'Google Sheet se live');
+    } catch (err) {
+      host.innerHTML = U.errorBox(err);
+    }
+  }
+
   async function stockReportDetail(spec) {
     if (FF.pages.performance && FF.pages.performance.ensureLoaded) { try { await FF.pages.performance.ensureLoaded(); } catch (err) { console.warn('stock report', err); } }
     const agents = (FF.pages.performance && FF.pages.performance.agents ? FF.pages.performance.agents() : []).filter((a) => !a.isMaster);
@@ -470,8 +561,19 @@ window.FF = window.FF || {};
     state.spec = spec; state.period = period(spec, available); state.rows = null; state.raw = null;
     const matches = await loadRaw();
     const row = matches[0];
-    const body = row ? `<p class="dim small">Source: ${esc(row[10] || '')} · click back to return to the full list.</p><div class="table-wrap"><table class="tbl compact kd-tbl"><tbody>${RAW_HEAD.map((label, i) => `<tr><th>${esc(label)}</th><td>${esc(row[i] || '')}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">Is Tag ID ke liye source row nahi mili.</div>';
-    return { kicker: 'KPI detail · Tag record', title: `Tag ${spec.tagId}`, sub: `${esc(spec.date || '')} · ${esc(spec.agent || '')}`, body };
+    // 🏷️ Barcode yahin visibly dashed format me dikhta hai (sheet me 16 digit number ho to bhi).
+    const cells = RAW_HEAD.map((label, i) => `<tr><th>${esc(label)}</th><td>${esc(i === 11 ? U.barcode(row[i]) : (row[i] || ''))}</td></tr>`);
+    if (row && FF.gv && typeof FF.gv.rows === 'function') {
+      const hit = FF.gv.rows().find((g) => U.clean(g.tagId) === U.clean(spec.tagId) && (!spec.date || !g.date || U.dateKey(g.date) === spec.date));
+      if (hit) {
+        cells.push(`<tr><th>GV unique ID</th><td>${esc(hit.gvUniqueId || '—')}</td></tr>`);
+        cells.push(`<tr><th>Amount</th><td>${esc(U.money ? U.money(hit.amount) : hit.amount)}</td></tr>`);
+        cells.push(`<tr><th>Commission</th><td>${esc(U.money ? U.money(hit.commission) : hit.commission)}</td></tr>`);
+      }
+    }
+    const body = row ? `<p class="dim small">Source: ${esc(state.rawSrc || row[10] || '')} · sheet ki asli row · click back to return to the full list.</p><div class="table-wrap"><table class="tbl compact kd-tbl"><tbody>${cells.join('')}</tbody></table></div>` : '<div class="empty">Is Tag ID ke liye source row nahi mili.</div>';
+    const bar = row ? U.barcode(row[11]) : '';
+    return { kicker: 'KPI detail · Tag record', title: `Tag ${spec.tagId}`, sub: `${bar ? `🏷️ ${esc(bar)} · ` : ''}${esc(spec.date || '')} · ${esc(spec.agent || '')}`, body };
   }
 
   // ---- open ------------------------------------------------------------------------------------
@@ -518,6 +620,19 @@ window.FF = window.FF || {};
     if (back) {
       const previous = state.history.pop();
       if (previous) open(previous, { nested: state.history.length > 0, fromHistory: true });
+      return;
+    }
+    if (e.target.closest('[data-kd-sheetrows]')) {
+      const btn = e.target.closest('[data-kd-sheetrows]');
+      const host = U.$('#kd-rows');
+      if (host) { U.setButtonBusy(btn, true, 'Loading…'); stockSheetRowsSection(host, btn.dataset.kdSheetrows, state.spec || {}).finally(() => U.setButtonBusy(btn, false)); }
+      return;
+    }
+    if (e.target.closest('[data-kd-sheetrows-csv]') || e.target.closest('[data-kd-sheetrows-xlsx]')) {
+      const out = state.sheetRows;
+      if (!out) return;
+      if (e.target.closest('[data-kd-sheetrows-xlsx]')) FF.xlsx.download(`sheet-rows-${U.stamp()}.xlsx`, [{ name: 'Sheet rows', header: out.header, rows: out.rows.map((r) => r.map((v) => (/^-?\d+(\.\d+)?$/.test(v) && v.length < 15 ? Number(v) : v))) }]);
+      else U.downloadCsv(`sheet-rows-${U.stamp()}.csv`, out.header, out.rows);
       return;
     }
     if (e.target.closest('[data-kd-raw]')) {
