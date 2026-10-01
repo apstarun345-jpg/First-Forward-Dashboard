@@ -33,7 +33,8 @@ FF.pages = FF.pages || {};
     return {
       people: new Map(),   // `${kind}|${normName(name)}` → { kind, name, sub, tlSet, classMap, bars, last, n }
       bars: new Map(),     // normBar(barcode) → { key, ff: [], gv: [] }
-      ids: new Map()       // normId(id) → { name, kind, tl }
+      ids: new Map(),      // normId(id) → { name, kind, tl }
+      mobiles: new Map()   // 10-digit mobile → { name, kind, tl } (agent + TL mobile search)
     };
   }
   /** TL naam → site-wide label (direct placeholder ko "Direct Agent (APS)/(no TL)" banao). */
@@ -70,11 +71,30 @@ FF.pages = FF.pages || {};
     if (state.lightPromise) return state.lightPromise;
     state.lightPromise = (async () => {
       const idx = newIndex();
-      const [agents, stockAgents, gvMaster, gvIssuance, gvReport, gvStockAgent, gvStockTl] = await Promise.allSettled([
+      const [agents, stockAgents, gvMaster, gvIssuance, gvReport, gvStockAgent, gvStockTl, ffReport] = await Promise.allSettled([
         FF.store.need('agents'), FF.store.need('stockAgents'), FF.gv.need('master'),
         FF.store.need('daily').then(() => (FF.gv.issuanceRows ? FF.gv.issuanceRows() : [])),
-        FF.gv.need('report'), FF.gv.need('stockAgent'), FF.gv.need('stockTl')
+        FF.gv.need('report'), FF.gv.need('stockAgent'), FF.gv.need('stockTl'),
+        // 🔎 FF REPORT: old/alt agent ID (ID column) · TL ID · TL mobile — search me bhi aayenge
+        (FF.pages.performance && FF.pages.performance.ensureLoaded ? FF.pages.performance.ensureLoaded().then(() => FF.pages.performance.agents()) : Promise.resolve([]))
       ]);
+      const canMob = (() => { try { return !FF.auth || FF.auth.can('contacts'); } catch { return true; } })();
+      const addAlias = (p, ...vals) => { if (!p) return; p.alias = p.alias || new Set(); vals.forEach((v) => { const t = clean(v); if (t && !/^na$/i.test(t)) p.alias.add(t); }); };
+      const addMobile = (m, name, kind, tl) => { if (!canMob) return; const d = String(m || '').replace(/\D/g, '').slice(-10); if (d.length === 10) idx.mobiles.set(`${d}|${kind}|${normName(name)}`, { mobile: d, name: clean(name), kind, tl: clean(tl) }); };
+      if (ffReport.status === 'fulfilled') {
+        for (const a of ffReport.value || []) {
+          const ap = person(idx, 'ff-agent', a.name || a.agentId, a.tlName, '', a.agentId || a.id);
+          addAlias(ap, a.agentId, a.id, a.gvIdFound);
+          [a.agentId, a.id].forEach((v) => { if (clean(v) && !/^na$/i.test(clean(v))) idx.ids.set(normId(v), { name: clean(a.name || v), kind: 'ff-agent', tl: clean(a.tlName) }); });
+          addMobile(a.mobile || (/^\d{10}$/.test(clean(a.agentId)) ? a.agentId : ''), a.name, 'ff-agent', a.tlName);
+          if (clean(a.tlName) && FF.config.isRealTl(clean(a.tlName))) {
+            const tp = person(idx, 'ff-tl', a.tlName, '', '', a.tlId);
+            addAlias(tp, a.tlId, canMob ? a.tlMobile : '');
+            if (clean(a.tlId) && !/^na$/i.test(clean(a.tlId))) idx.ids.set(`${normId(a.tlId)}:tl`, { name: clean(a.tlName), kind: 'ff-tl' });
+            addMobile(a.tlMobile, a.tlName, 'ff-tl', '');
+          }
+        }
+      }
       // FF agents (EIR) — id + name + TL + ids
       if (agents.status === 'fulfilled') {
         for (const a of agents.value || []) {
@@ -136,6 +156,10 @@ FF.pages = FF.pages || {};
           if (clean(r.agentId)) idx.ids.set(normId(r.agentId), { name: clean(r.agentName || r.agentId), kind: 'gv-agent', tl: clean(r.tlName) });
           if (clean(r.tlId)) idx.ids.set(normId(r.tlId), { name: clean(r.tlName || r.tlId), kind: 'gv-tl' });
           if (clean(r.tlName)) person(idx, 'gv-tl', r.tlName, '', '', clean(r.tlId));
+          addAlias(person(idx, 'gv-agent', r.agentName || r.agentId, r.tlName, '', r.agentId), r.agentId, canMob ? r.mobile : '');
+          addMobile(r.mobile, r.agentName || r.agentId, 'gv-agent', r.tlName);
+          if (clean(r.tlName) && FF.config.isRealTl(clean(r.tlName))) addAlias(person(idx, 'gv-tl', r.tlName, '', '', r.tlId), r.tlId, canMob ? r.tlMobile : '');
+          if (r.tlMobile) addMobile(r.tlMobile, r.tlName, 'gv-tl', '');
         }
       }
       // GV stock (Tag Assignment aggregates)
@@ -234,7 +258,7 @@ FF.pages = FF.pages || {};
     // people by name / TL / id / gv id
     if (nn.length >= 2) {
       idx.people.forEach((p) => {
-        const hay = `${normName(p.name)} ${normName(p.sub)} ${[...p.tlSet].map(normName).join(' ')}`;
+        const hay = `${normName(p.name)} ${normName(p.sub)} ${[...p.tlSet].map(normName).join(' ')} ${p.alias ? [...p.alias].map(normName).join(' ') : ''}`;
         if (hay.includes(nn)) out.people.push(p);
       });
       out.people.sort((a, b) => (b.bars.size - a.bars.size) || (b.n - a.n));
@@ -244,6 +268,13 @@ FF.pages = FF.pages || {};
     if (ni.length >= 4) {
       idx.ids.forEach((v, k) => { if (k === ni || k.startsWith(ni)) out.ids.push({ id: k, ...v }); });
       out.ids.sort((a, b) => a.id.length - b.id.length);
+      if (out.ids.length > 40) out.ids.length = 40;
+    }
+    // 📞 mobile number (agent + TL) — poora ya aakhri digits
+    const dq = query.replace(/\D/g, '');
+    if (dq.length >= 5 && dq.length <= 13 && !/[a-z]/i.test(query) && idx.mobiles) {
+      const want = dq.slice(-10);
+      idx.mobiles.forEach((v) => { if (v.mobile === want || v.mobile.includes(want) || want.includes(v.mobile)) out.ids.push({ id: v.mobile, name: v.name, kind: v.kind, tl: v.tl, via: 'Mobile' }); });
       if (out.ids.length > 40) out.ids.length = 40;
     }
     // barcode / tag / serial
@@ -423,7 +454,7 @@ FF.pages = FF.pages || {};
     if (res.ids.length) {
       parts.push(`<section class="ms-section"><h3>🆔 ID matches <span class="dim small">${U.fmt(res.ids.length)}</span></h3>
         <div class="table-wrap"><table class="tbl compact"><thead><tr><th>ID</th><th>Naam</th><th>Role</th><th>TL</th><th></th></tr></thead><tbody>
-        ${res.ids.slice(0, 40).map((v) => `<tr><td><b>${esc(v.id)}</b></td><td>${esc(v.name || '—')}</td><td>${esc(KIND_LABEL[v.kind] || v.kind)}</td><td>${esc(tlText(v.tl, v.kind && v.kind.startsWith('gv') ? 'gv' : 'ff') || '—')}</td><td><button class="btn tiny" data-ms-again="${esc(v.name || v.id)}">🔎 Kholo</button></td></tr>`).join('')}
+        ${res.ids.slice(0, 40).map((v) => `<tr><td><b>${esc(v.id)}</b></td><td>${esc(v.name || '—')}</td><td>${esc(KIND_LABEL[v.kind] || v.kind)}${v.via ? ` <small class="dim">· ${esc(v.via)}</small>` : ''}</td><td>${esc(tlText(v.tl, v.kind && v.kind.startsWith('gv') ? 'gv' : 'ff') || '—')}</td><td><button class="btn tiny" data-ms-again="${esc(v.name || v.id)}">🔎 Kholo</button></td></tr>`).join('')}
         </tbody></table></div></section>`);
     }
     return parts.join('');

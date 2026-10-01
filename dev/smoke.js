@@ -1251,7 +1251,7 @@ await run('🖨️ Dispatch label — A4 print me FROM+TO left·right repeat + t
   if (!/FROM:/.test(html)) throw new Error('FROM block nahi mila (company address — Settings me set karo)');
   if (!html.includes('font-size: 12pt')) throw new Error('text size 12pt set nahi hua');
   if (!/data-sz="14"/.test(html)) throw new Error('text size chhota/bada buttons nahi mile (print view me)');
-  if (!/Print \/ 📄 Save as PDF/.test(html)) throw new Error('Print/PDF toolbar button nahi mila');
+  if (!/Download PDF/.test(html) || !/id="pdfbtn"/.test(html)) throw new Error("Print/PDF toolbar button nahi mila");
   if (!html.includes('35 tags') && !html.includes('🏷️ 35')) throw new Error('request summary (total tags) nahi mili');
   const txt = pages.tagRequest.labelText(r);
   for (const snip of ['FROM:', 'TO: Ramesh Yadav', '302019', 'tagreq_smoke_1234', '35 tags']) if (!txt.includes(snip)) throw new Error(`label text me "${snip}" nahi mila`);

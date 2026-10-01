@@ -153,6 +153,26 @@ export function summaryOf(index, opts = {}) {
   return out;
 }
 
+/** 🔗 Personal link: ek agent / TL ka stock (VC4+VC20 · VC5+) + ageing, aur TL ke saare agents ka stock.
+ *  → { t:[core,comm], c, o, agents:[packNode…] } ya null (index me nahi mila). */
+export function personalStock(index, ch, kind, name) {
+  const c = index && index[ch === 'gv' ? 'gv' : 'ff'];
+  if (!c || !str(name)) return null;
+  const isTl = kind === 'tl';
+  const map = isTl ? c.tls : c.agents;
+  const keys = [...resolveKeys(c, ch === 'gv' ? 'gv' : 'ff', isTl ? 'tl' : 'agent', [name])];
+  if (!keys.length) return null;
+  const nodes = keys.map((k) => map.get(k)).filter(Boolean);
+  const out = { t: [0, 0], c: [[0, 0, 0, 0], [0, 0, 0, 0]], o: [0, 0], agents: [] };
+  nodes.forEach((n) => { for (let g = 0; g < 2; g++) { out.t[g] += n.t[g]; out.o[g] = Math.max(out.o[g], n.o[g]); for (let i = 0; i < 4; i++) out.c[g][i] += n.c[g][i]; } });
+  if (isTl) {
+    const want = normName(name);
+    c.agents.forEach((n) => { if (normName(n.tl) === want) out.agents.push(packNode(n)); });
+    out.agents.sort((a, b) => (b.t[0] + b.t[1]) - (a.t[0] + a.t[1]));
+  }
+  return out;
+}
+
 /** Agent key resolution: digits / ID / naam — client jo bhi bheje. */
 function resolveKeys(chIndex, ch, kind, keyList) {
   const map = kind === 'tl' ? chIndex.tls : chIndex.agents;

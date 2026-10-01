@@ -103,12 +103,34 @@ window.FF = window.FF || {};
     state.promise = runQueue(keys, fresh).then(() => {
       if (version === generation) {
         state.loading = false; state.loadedAt = Date.now();
-
+        scheduleRetry(version, 0);
       }
       return state.data;
     });
     return state.promise;
   }
+  // 🔁 Auto-retry (v3.32) — GV ki fail hui sheets background me khud dobara load (4s · 10s · 20s · 40s · 75s).
+  const RETRY_DELAYS = [4000, 10000, 20000, 40000, 75000];
+  let retryTimer = null;
+  function scheduleRetry(version, round) {
+    clearTimeout(retryTimer);
+    const failed = Object.keys(state.errors).filter((k) => DATASETS[k]);
+    if (!failed.length || round >= RETRY_DELAYS.length || version !== generation) { state.retrying = false; return; }
+    state.retrying = true;
+    retryTimer = setTimeout(async () => {
+      if (version !== generation) return;
+      const list = Object.keys(state.errors).filter((k) => DATASETS[k]);
+      list.forEach((k) => { delete state.errors[k]; });
+      await runQueue(list, true);
+      if (version !== generation) return;
+      state.loadedAt = Date.now();
+      if (!Object.keys(state.errors).length) {
+        state.retrying = false;
+        try { if (FF.app && FF.app.renderCurrent) FF.app.renderCurrent(); if (FF.app && FF.app.updateStatus) FF.app.updateStatus(); } catch { /* ignore */ }
+      } else scheduleRetry(version, round + 1);
+    }, RETRY_DELAYS[round]);
+  }
+  function retryNow() { scheduleRetry(generation, 0); }
   function get(key) { return state.data[key]; }
   function error(key) { return state.errors[key]; }
   async function need(key) {
@@ -624,7 +646,7 @@ window.FF = window.FF || {};
   }
 
   const GV = {
-    DATASETS, preload, refresh, need, get, error, reset, enabled, wanted,
+    DATASETS, preload, refresh, need, get, error, reset, enabled, wanted, retryNow,
     normClass, classGroup, clsNum,
     rows, masterRows: rows, issuanceRows, eirDailyRows, liveDailyRows, gvToday, masterTodayRows, todayKey, months, latestDate, summary, dailySeries, weekly, byDim, agentRollup, tlRollup, directRollup, people,
     REPORT_COLS, REPORT_COLS_LABELS,

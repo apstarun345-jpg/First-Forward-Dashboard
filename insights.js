@@ -101,22 +101,33 @@ FF.pages = FF.pages || {};
         const chosen = detailSets && detailSets[el.dataset.metricDetail] || {};
         const detailRows = chosen.rows || rows, detailHeaders = chosen.headers || headers, detailTitle = chosen.title || title;
         const stats = Array.isArray(chosen.stats) ? chosen.stats : [];
-        const bodyFor = (list) => list.slice(0, 500).map((r) => `<tr>${r.map((v) => `<td>${esc(v ?? '—')}</td>`).join('')}</tr>`).join('') || '';
+        const PAGE = 500;
+        let shown = PAGE, current = detailRows;
+        const bodyFor = (list, n) => list.slice(0, n || PAGE).map((r) => `<tr>${r.map((v) => `<td>${esc(v ?? '—')}</td>`).join('')}</tr>`).join('') || '';
         const dialog = document.createElement('dialog'); dialog.id = 'metric-detail-dialog'; dialog.className = 'ins-detail-dialog';
         dialog.innerHTML = `<div class="card-head"><h3>${esc(el.dataset.metricDetail)} · ${esc(detailTitle)}</h3><button class="btn small" data-close>Close</button></div>
-          <div class="detail-stats">${stats.map((s) => `<span class="ins-pill">${esc(s)}</span>`).join('')}<span class="ins-pill">${U.fmt(detailRows.length)} matching rows</span>${detailRows.length > 500 ? '<span class="ins-pill">first 500 shown</span>' : ''}</div>
+          <div class="detail-stats">${stats.map((s) => `<span class="ins-pill">${esc(s)}</span>`).join('')}<span class="ins-pill">${U.fmt(detailRows.length)} total rows</span><span class="ins-pill" data-shown-pill></span></div>
           <div class="detail-toolbar"><input type="search" data-filter placeholder="Is table me search karo — naam, ID, TL, number…"><button class="btn small" data-csv>⬇ CSV</button></div>
           <div class="table-wrap"><table class="data-table ins-table"><thead><tr>${detailHeaders.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody data-body>${bodyFor(detailRows)}</tbody></table></div>
+          <div class="detail-more" data-more hidden><button class="btn small" data-more-btn>⬇ Aur 500 dikhao</button> <button class="btn small" data-all-btn>Sab dikhao</button></div>
           <div class="detail-empty" data-none hidden>Is search se koi row nahi mili — filter hata ke dekho.</div>`;
         root.append(dialog);
         const filter = dialog.querySelector('[data-filter]');
+        const paint = () => {
+          dialog.querySelector('[data-body]').innerHTML = bodyFor(current, shown) || `<tr><td colspan="${detailHeaders.length}">No rows</td></tr>`;
+          dialog.querySelector('[data-none]').hidden = current.length > 0;
+          dialog.querySelector('[data-more]').hidden = current.length <= shown;
+          dialog.querySelector('[data-shown-pill]').textContent = `${U.fmt(Math.min(shown, current.length))} / ${U.fmt(current.length)} dikh rahi`;
+        };
+        paint();
         filter.addEventListener('input', () => {
           const q = filter.value.trim().toLowerCase();
-          const list = q ? detailRows.filter((r) => (r || []).join(' ').toLowerCase().includes(q)) : detailRows;
-          dialog.querySelector('[data-body]').innerHTML = bodyFor(list) || `<tr><td colspan="${detailHeaders.length}">No rows</td></tr>`;
-          dialog.querySelector('[data-none]').hidden = list.length > 0;
+          current = q ? detailRows.filter((r) => (r || []).join(' ').toLowerCase().includes(q)) : detailRows;
+          shown = PAGE; paint();
         });
-        dialog.querySelector('[data-csv]').addEventListener('click', () => U.downloadCsv(`${U.slug(el.dataset.metricDetail || 'metric')}-${U.stamp()}.csv`, detailHeaders, detailRows));
+        dialog.querySelector('[data-more-btn]').addEventListener('click', () => { shown += PAGE; paint(); });
+        dialog.querySelector('[data-all-btn]').addEventListener('click', () => { shown = current.length; paint(); });
+        dialog.querySelector('[data-csv]').addEventListener('click', () => U.downloadCsv(`${U.slug(el.dataset.metricDetail || 'metric')}-${U.stamp()}.csv`, detailHeaders, current));
         dialog.querySelector('[data-close]').onclick = () => dialog.close();
         dialog.addEventListener('click', (e) => { if (e.target === dialog) dialog.close(); });
         if (typeof dialog.showModal === 'function') dialog.showModal(); else dialog.setAttribute('open', '');
@@ -1824,6 +1835,11 @@ FF.pages = FF.pages || {};
     const mismatchCsv = idx.mismatch.map((r) => [r.barcode, r.ff, r.gv, r.cls]);
     const inCls = (c) => clsFilter === 'all' || c === clsFilter;
 
+    const holderRows = (kind) => [...idx.people.values()].filter((p) => p.kind === kind && p.bars.size).sort((a, b) => b.bars.size - a.bars.size);
+    const holderTable = (kind) => holderRows(kind).map((p) => [p.name, [...p.tlNames].slice(0, 3).join(', ') || '—', p.bars.size, [...p.classes.entries()].map(([c, n]) => `${c}: ${n}`).join(' · '), p.last || '—']);
+    let ageSum = 0, ageKnown = 0;
+    idx.stock.forEach((r) => { const d = U.parseDate(r.agentAllocatedAt || r.bcAllocatedAt || ''); if (d) { ageSum += Math.max(0, Math.floor((Date.now() - d.getTime()) / 864e5)); ageKnown++; } });
+    const avgAge = ageKnown ? Math.round(ageSum / ageKnown) : 0;
     const metrics = [
       { label: 'StockDataa unique barcodes', value: U.fmt(idx.ffSet.size), foot: `${U.fmt(idx.stock.length)} FF rows loaded`, tone: 'g2', icon: '📦' },
       { label: 'Tag Assignment unique serials', value: U.fmt(idx.gvSet.size), foot: `${U.fmt(idx.assignment.length)} GV rows loaded`, tone: 'g6', icon: '📋' },
@@ -1834,9 +1850,15 @@ FF.pages = FF.pages || {};
       { label: 'Top GV-only holder', value: esc(gvOnlyTop[0] ? gvOnlyTop[0][0] : '—'), foot: gvOnlyTop[0] ? `${U.fmt(gvOnlyTop[0][1])} GV-only tags · sabse zyada missing stock isi ke paas` : 'koi GV-only tag nahi', tone: 'g11', icon: '👤' },
       { label: 'Aged stock · 60+ din', value: U.fmt(idx.aged60.length), foot: idx.aged60.length ? `sabse purana ${idx.aged60[0].age} din · ${idx.aged60[0].agent}` : 'koi 60+ din purana stock nahi', tone: idx.aged60.length ? 'g7' : 'g9', icon: '⏰' },
       { label: 'Aged stock · 30–60 din', value: U.fmt(idx.aged30.length), foot: 'aging watch — dispatch/return review karo', tone: idx.aged30.length ? 'g8' : 'g9', icon: '🕒' },
+      { label: 'FF agents holding stock', value: U.fmt(holderRows('ff-agent').length), foot: `${U.fmt(holderRows('ff-tl').length)} FF TLs · click → agent-wise stock`, tone: 'g1', icon: '🟦' },
+      { label: 'GV agents holding stock', value: U.fmt(holderRows('gv-agent').length), foot: `${U.fmt(holderRows('gv-tl').length)} GV TLs · click → agent-wise stock`, tone: 'g3', icon: '🟩' },
+      { label: 'Match rate', value: U.fmtPct(idx.gvSet.size ? (idx.bothSet.size / idx.gvSet.size) * 100 : 0), foot: `${U.fmt(idx.bothSet.size - idx.mismatch.length)} barcodes me holder bhi same`, tone: 'g10', icon: '🎯' },
+      { label: 'Avg FF stock age', value: `${U.fmt(avgAge)} <small>din</small>`, foot: `${U.fmt(ageKnown)} tags ki allocation date mili`, tone: avgAge >= 45 ? 'g7' : 'g4', icon: '⏳' },
     ];
 
     root.innerHTML = head('🗄️', 'Master Stock', 'Barcode, agent, TL, GV name ya GV TL type karo — FF StockDataa + GV Tag Assignment dono ki total information ek saath. Ghost holders (Apna Payment / not-assigned) normal flow maane jaate hain.') + `
+      <section class="ms-hero"><span class="ms-hero-ico">🗄️</span><div><h2>Master Stock — poora register ek jagah</h2><p>Kisi bhi rang-birange card par click karo → poora data (search + CSV + sab rows) khulega.</p></div>
+        <div class="ms-hero-stats"><span><b>${U.fmt(idx.ffSet.size)}</b>FF barcodes</span><span><b>${U.fmt(idx.gvSet.size)}</b>GV serials</span><span><b>${U.fmt(idx.gvOnly.length)}</b>GV-only</span></div></section>
       <section class="card">
         <form id="ms-form" style="display:flex;gap:10px;flex-wrap:wrap">
           <input name="q" class="input" style="flex:1;min-width:220px" value="${esc(q)}" placeholder="🔍 Barcode / agent / TL / GV name / GV TL..." autocomplete="off">
@@ -1897,6 +1919,10 @@ FF.pages = FF.pages || {};
       'Owner mismatch (both)': { title: `${U.fmt(idx.mismatch.length)} holder mismatch`, headers: ['Barcode', 'FF holder', 'GV holder', 'Class'], rows: mismatchCsv, stats: ['Ghost holders (Apna Payment / not-assigned) mismatch me count nahi hote'] },
       'Top GV-only holder': { title: 'GV-only tags ke top holders', headers: ['Holder', 'GV-only tags'], rows: gvOnlyTop.map(([label, value]) => [label, value]) },
       'Aged stock · 60+ din': { title: `${U.fmt(idx.aged60.length)} tags 60+ din se parked`, headers: ['Barcode', 'Agent', 'TL', 'Class', 'Allocated', 'Age (din)'], rows: idx.aged60.map((r) => [r.barcode, r.agent, r.tl, r.cls, r.allocated, r.age]), stats: ['Allocation date StockDataa ke agent/bc allocated columns se', 'Inka dispatch ya return review karo'] },
+      'FF agents holding stock': { title: 'FF agent-wise stock (StockDataa)', headers: ['Agent', 'TL', 'Tags', 'Class split', 'Last allocation'], rows: holderTable('ff-agent'), stats: [`${U.fmt(holderRows('ff-agent').length)} agents`, `${U.fmt(U.sum(holderRows('ff-agent'), (p) => p.bars.size))} tags`] },
+      'GV agents holding stock': { title: 'GV agent-wise stock (Tag Assignment)', headers: ['Agent', 'TL', 'Tags', 'Class split', 'Last allocation'], rows: holderTable('gv-agent'), stats: [`${U.fmt(holderRows('gv-agent').length)} agents`, `${U.fmt(U.sum(holderRows('gv-agent'), (p) => p.bars.size))} tags`] },
+      'Match rate': { title: 'Tag Assignment barcodes jo StockDataa me bhi hain', headers: ['Barcode', 'FF holder', 'GV holder', 'Class', 'Status'], rows: bothCsv, stats: [`${U.fmt(idx.bothSet.size)} matched`, `${U.fmt(idx.gvOnly.length)} GV-only`] },
+      'Avg FF stock age': { title: 'Sabse purana FF stock', headers: ['Barcode', 'Agent', 'TL', 'Class', 'Allocated', 'Age (din)'], rows: [...idx.aged60, ...idx.aged30].map((r) => [r.barcode, r.agent, r.tl, r.cls, r.allocated, r.age]), stats: [`Average ${U.fmt(avgAge)} din`, '30+ din purane tags'] },
       'Aged stock · 30–60 din': { title: `${U.fmt(idx.aged30.length)} tags 30–60 din se parked`, headers: ['Barcode', 'Agent', 'TL', 'Class', 'Allocated', 'Age (din)'], rows: idx.aged30.map((r) => [r.barcode, r.agent, r.tl, r.cls, r.allocated, r.age]) },
     });
 

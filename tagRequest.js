@@ -63,7 +63,7 @@ FF.pages = FF.pages || {};
   };
   const rid = () => Math.random().toString(36).slice(2, 9);
   const emptyQty = () => { const q = {}; CLASS_LIST.forEach((c) => { q[c] = ''; }); return q; };
-  function newRow(patch) { return { id: rid(), agentId: '', name: '', tl: '', channel: '', tlFilter: '', q: emptyQty(), mobile: '', address: '', pincode: '', ...(patch || {}) }; }
+  function newRow(patch) { return { id: rid(), agentId: '', name: '', tl: '', channel: '', tlFilter: '', isTl: false, dispatchName: '', q: emptyQty(), mobile: '', address: '', pincode: '', ...(patch || {}) }; }
   if (!state.rows.length) state.rows = [newRow()];
 
   const norm = (v) => String(v == null ? '' : v).trim().toUpperCase().replace(/\s+/g, ' ');
@@ -204,7 +204,7 @@ FF.pages = FF.pages || {};
         const t = String(tlName || '').trim();
         if (!t || !FF.config.isRealTl(t)) return null;
         const key = `${channel}|${norm(t)}`;
-        const g = tls.get(key) || { key, name: t, channel, stock: {}, cur: {}, last: {}, agents: new Set(), priority: '' };
+        const g = tls.get(key) || { key, name: t, channel, stock: {}, cur: {}, last: {}, agents: new Set(), priority: '', grp: emptyGroups() };
         tls.set(key, g);
         return g;
       };
@@ -275,6 +275,7 @@ FF.pages = FF.pages || {};
             g.cur[cls] = num(g.cur[cls]) + num(rec.cur[cls]);
             g.last[cls] = num(g.last[cls]) + num(rec.last[cls]);
           });
+          ['core', 'comm'].forEach((k) => ['stock', 'last', 'cur'].forEach((f) => { g.grp[k][f] += num(rec.grp && rec.grp[k] && rec.grp[k][f]); }));
         }
       });
       // Search list (form ke dropdown + lookup ke liye).
@@ -338,6 +339,7 @@ FF.pages = FF.pages || {};
   function exactAgent(row) {
     const idx = state.index;
     if (!idx || !row) return null;
+    if (row.isTl) return tlRecord(row.channel, row.name);
     const pick = (list) => { if (!list.length) return null; const hit = (row.channel && list.find((a) => a.channel === row.channel)) || list[0]; return idx.byKey.get(hit.key) || null; };
     const id = digits(row.agentId);
     if (id.length >= 3) { const r = pick(idx.list.filter((a) => a.agentId && a.agentId === id)); if (r) return r; }
@@ -347,11 +349,29 @@ FF.pages = FF.pages || {};
     if (d.length >= 4 && d.length === text.replace(/[\s#-]/g, '').length) { const r = pick(idx.list.filter((a) => a.agentId === d)); if (r) return r; }
     return pick(idx.list.filter((a) => norm(a.name) === norm(text)));
   }
+  /** 👥 TL ko ek "record" ki tarah (stock / cur / last / grp) — TL ke naam par bhi request ban sake. */
+  function tlRecord(channel, name) {
+    const idx = state.index;
+    if (!idx) return null;
+    const g = idx.tls.get(`${channel === 'gv' ? 'gv' : 'ff'}|${norm(name)}`);
+    if (!g) return null;
+    if (!g.rec) g.rec = { ...g, agentId: '', tlName: g.name, isTl: true };
+    return g.rec;
+  }
+  /** TL ke saare agents (stock / last / cur ke saath) — TL pick karte hi poora data dikhane ke liye. */
+  function tlAgents(g) {
+    const idx = state.index;
+    if (!idx || !g) return [];
+    return [...(g.agents || [])].map((k) => idx.byKey.get(k)).filter(Boolean)
+      .map((r) => { const m = groupMetrics(r); return { key: `${r.channel}|${norm(r.name)}`, name: r.name, agentId: r.agentId, channel: r.channel, stock: num(m.core.stock) + num(m.comm.stock), last: num(m.core.last) + num(m.comm.last), cur: num(m.core.cur) + num(m.comm.cur), priority: r.priority }; })
+      .sort((a, b) => b.cur - a.cur || b.stock - a.stock);
+  }
   /** Saved request ke agent ka live record (admin table) — ID ya exact naam, channel same. */
   function lookupAgent(a) {
     const idx = state.index;
     if (!idx || !a) return null;
     const ch = a.channel === 'gv' ? 'gv' : 'ff';
+    if (a.kind === 'tl') return tlRecord(ch, a.name);
     const id = digits(a.agentId);
     let hit = id ? idx.list.find((x) => x.agentId === id && x.channel === ch) : null;
     if (!hit && a.name) hit = idx.list.find((x) => x.channel === ch && norm(x.name) === norm(a.name)) || idx.list.find((x) => norm(x.name) === norm(a.name));
@@ -501,7 +521,7 @@ FF.pages = FF.pages || {};
   /** Delivery kiske paas: v3.30 = agent ka contact; purani request = employee ka. */
   function contactOf(r) {
     const a = r.agent || {};
-    if (a.mobile || a.address || a.pincode) return { who: 'agent', name: a.name || '', mobile: a.mobile || '', address: a.address || '', pincode: a.pincode || '' };
+    if (a.mobile || a.address || a.pincode) return { who: 'agent', name: a.dispatchName || a.name || '', dispatchName: a.dispatchName || '', mobile: a.mobile || '', address: a.address || '', pincode: a.pincode || '' };
     const e = r.employee || {};
     return { who: 'employee', name: e.name || r.byName || '', mobile: e.mobile || '', address: e.address || '', pincode: e.pincode || '' };
   }
@@ -519,8 +539,15 @@ FF.pages = FF.pages || {};
       classes, total: classes.reduce((s, x) => s + x.qty, 0),
       employee: (r.employee && r.employee.name) || r.byName || r.by || '',
       agentName, agentId: (r.agent && r.agent.agentId) || (rows[0] && rows[0].agentId) || '',
-      agents: agents.length, tl: (r.agent && r.agent.tl) || (rows[0] && rows[0].tl !== '—' ? rows[0].tl : '') || ''
+      agents: agents.length, forTl: !!(r.agent && r.agent.kind === 'tl'), tl: (r.agent && r.agent.tl) || (rows[0] && rows[0].tl !== '—' ? rows[0].tl : '') || ''
     };
+  }
+  /** Label par agent / TL ka reference line (dispatch name alag ho ya purani employee request ho tab). */
+  function agentRef(it) {
+    const t = it.to || {};
+    if (t.who === 'employee' && it.agentName) return `Agent: ${it.agentName}${it.agents > 1 ? ` +${it.agents - 1}` : ''}`;
+    if (t.dispatchName && it.agentName && t.dispatchName.trim().toLowerCase() !== it.agentName.trim().toLowerCase()) return `${it.forTl ? 'TL' : 'Agent'}: ${it.agentName}`;
+    return '';
   }
   /** Plain-text label — copy / WhatsApp share ke liye. */
   function labelText(r) {
@@ -534,7 +561,7 @@ FF.pages = FF.pages || {};
       t.mobile ? `Mob: ${t.mobile}` : '',
       t.address ? `Address: ${t.address}` : '',
       t.pincode ? `Pincode: ${t.pincode}` : '',
-      t.who === 'employee' && it.agentName ? `Agent: ${it.agentName}${it.agents > 1 ? ` +${it.agents - 1}` : ''}` : '',
+      ...(agentRef(it) ? [agentRef(it)] : []),
       '',
       `Request: ${it.id} · ${it.date} · ${it.total} tags${it.classes.length ? ` (${it.classes.map((c) => `${c.cls}×${c.qty}`).join(', ')})` : ''}`
     ].filter((x) => x !== '' && x !== undefined).join('\n');
@@ -552,7 +579,7 @@ FF.pages = FF.pages || {};
     const cells = list.map((it) => {
       const t = it.to || {};
       const cls = it.classes.length ? it.classes.map((c) => `${esc(c.cls)} × ${fmt(c.qty)}`).join(' · ') : '—';
-      const agentLine = t.who === 'employee' && it.agentName ? `<div class="to-agent">Agent: ${esc(it.agentName)}${it.agents > 1 ? ` +${it.agents - 1}` : ''}</div>` : '';
+      const agentLine = agentRef(it) ? `<div class="to-agent">${esc(agentRef(it))}</div>` : '';
       const meta = `Req ${esc(it.id.slice(-10))} · ${esc(it.date)}${it.employee ? ` · Emp: ${esc(it.employee)}` : ''}${it.tl ? ` · TL ${esc(it.tl)}` : ''}${it.agentId && t.who === 'agent' ? ` · ID ${esc(it.agentId)}` : ''}`;
       return `<div class="lbl">${fromLine}<div class="to"><span class="tag">TO</span><b class="to-name">${esc(t.name || '')}</b>${t.mobile ? `<div class="to-mob">☏ ${esc(t.mobile)}</div>` : ''}${t.address ? `<div class="to-addr">${esc(t.address)}</div>` : ''}${t.pincode ? `<div class="to-pin">PIN: ${esc(t.pincode)}</div>` : ''}${agentLine}</div><div class="cls">🏷️ ${cls} = <b>${fmt(it.total)} tags</b></div><div class="meta">${meta}</div></div>`;
     }).join('');
@@ -587,21 +614,99 @@ body { font-family: Arial, "Segoe UI", sans-serif; color: #111; margin: 0; }
 @media print { .bar { display: none; } body { margin: 0; } }
 </style></head><body>
 <div class="bar"><b>🖨️ Dispatch labels — ${list.length} request${list.length === 1 ? '' : 's'} · ${fmt(totalTags)} tags (har label ek hi baar)</b>
-  <button id="pbtn" style="font-weight:700">🖨️ Print / 📄 Save as PDF</button>
+  <button id="pbtn" style="font-weight:700">🖨️ Print</button>
+  <button id="pdfbtn" style="font-weight:700;background:#16a34a;color:#fff;border-color:#16a34a">📄 Download PDF</button>
   <span>Text size: <span class="grp"><button class="sz" data-sz="9">A−</button><button class="sz" data-sz="10.5">A</button><button class="sz" data-sz="12">A+</button><button class="sz" data-sz="14">A++</button></span></span>
   <span>Per page: <span class="grp"><button class="rp" data-rows="4">8</button><button class="rp" data-rows="5">10</button><button class="rp" data-rows="6">12</button></span></span>
-  <span style="color:#666;font-size:12px">Print dialog me "Save as PDF" chuno = PDF ban jayegi, dispatch team ko bhejo.</span></div>
+  <span style="color:#666;font-size:12px">📄 Download PDF = seedha PDF file (same label format) — dispatch team ko bhejo.</span></div>
 <div class="grid">${cells || '<div class="empty">Koi request select nahi hui.</div>'}</div>
-<script>(function(){
-  var H={3:'${hOf(3)}mm',4:'${hOf(4)}mm',5:'${hOf(5)}mm',6:'${hOf(6)}mm'};
-  var each=function(sel,fn){Array.prototype.forEach.call(document.querySelectorAll(sel),fn)};
-  var mark=function(sel,attr,v){each(sel,function(b){b.classList.toggle('on',b.getAttribute(attr)===String(v))})};
-  mark('.sz','data-sz','${pt}'); mark('.rp','data-rows','${rowsPerPage}');
-  each('.sz',function(b){b.addEventListener('click',function(){var v=b.getAttribute('data-sz');each('.lbl',function(l){l.style.fontSize=v+'pt'});mark('.sz','data-sz',v)})});
-  each('.rp',function(b){b.addEventListener('click',function(){var v=b.getAttribute('data-rows');each('.lbl',function(l){l.style.height=H[v]});mark('.rp','data-rows',v)})});
-  document.getElementById('pbtn').addEventListener('click',function(){window.print()});
-})();</script>
 </body></html>`;
+  }
+  /** 📄 Labels → PDF (direct download) — print wale label ka hi format: FROM · TO (naam/mobile/address/PIN) · class qty. */
+  function labelsPdf(items, opts) {
+    const o = opts || {};
+    const list = (Array.isArray(items) ? items : []).filter(Boolean);
+    if (!FF.pdf || !list.length) return null;
+    const f = dispatchFrom();
+    const pt = [9, 10.5, 12, 14].includes(Number(o.size)) ? Number(o.size) : 10.5;
+    const rowsPerPage = [3, 4, 5, 6].includes(Number(o.rows)) ? Number(o.rows) : 5;
+    const MMPT = 25.4 / 72;
+    const W = 210, H = 297, MG = 6, GAP = 2.5;
+    const lw = (W - 2 * MG - GAP) / 2, lh = (283 - (rowsPerPage - 1) * 2.5) / rowsPerPage;
+    const perPage = rowsPerPage * 2;
+    const FONT = FF.pdf.FONT;
+    const canvases = [];
+    for (let start = 0; start < list.length; start += perPage) {
+      const pg = FF.pdf.page(W, H);
+      const { ctx, px } = pg;
+      list.slice(start, start + perPage).forEach((it, n) => {
+        const col = n % 2, rowI = Math.floor(n / 2);
+        const x0 = MG + col * (lw + GAP), y0 = MG + rowI * (lh + GAP);
+        const t = it.to || {};
+        const fnt = (pct, w) => { ctx.font = `${w || 400} ${px(pt * MMPT * pct)}px ${FONT}`; };
+        const line = (xa, ya, xb, dash) => { ctx.save(); ctx.strokeStyle = dash ? '#888' : '#111'; ctx.lineWidth = px(0.25); ctx.setLineDash(dash ? [px(0.5), px(0.7)] : []); ctx.beginPath(); ctx.moveTo(px(xa), px(ya)); ctx.lineTo(px(xb), px(ya)); ctx.stroke(); ctx.restore(); };
+        // dashed border
+        ctx.save(); ctx.strokeStyle = '#111'; ctx.lineWidth = px(0.35); ctx.setLineDash([px(1.6), px(1.1)]);
+        ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(px(x0), px(y0), px(lw), px(lh), px(2)); else ctx.rect(px(x0), px(y0), px(lw), px(lh)); ctx.stroke(); ctx.restore();
+        const ix = x0 + 3, iw = lw - 6;
+        let y = y0 + 2.5;
+        const text = (str, pct, w, color, gapAfter) => {
+          fnt(pct, w); ctx.fillStyle = color || '#111';
+          const lines = FF.pdf.wrap(ctx, str, px(iw));
+          const step = pt * MMPT * pct * 1.28;
+          lines.forEach((l) => { y += step; ctx.fillText(l, px(ix), px(y - step * 0.22)); });
+          y += gapAfter || 0;
+        };
+        // FROM
+        text(`FROM: ${f.name}${f.address ? `, ${f.address}` : ''}${f.phone ? `  ☏ ${f.phone}` : ''}`, 0.66, 500, '#333', 1);
+        line(ix, y, ix + iw, true); y += 1.6;
+        // TO
+        fnt(0.64, 700); ctx.fillStyle = '#111';
+        const tagW = ctx.measureText('TO').width / pg.k + 2.4;
+        ctx.save(); ctx.strokeStyle = '#111'; ctx.lineWidth = px(0.25); ctx.strokeRect(px(ix), px(y + 0.3), px(tagW), px(pt * MMPT * 0.64 * 1.25)); ctx.restore();
+        ctx.fillText('TO', px(ix + 1.2), px(y + 0.3 + pt * MMPT * 0.64 * 1.0));
+        fnt(1.17, 800); ctx.fillStyle = '#111';
+        const nameLines = FF.pdf.wrap(ctx, t.name || '', px(iw - tagW - 1.5));
+        const nstep = pt * MMPT * 1.17 * 1.28;
+        nameLines.forEach((l, i) => { y += i === 0 ? nstep * 0.95 : nstep; ctx.fillText(l, px(ix + tagW + 1.5), px(y)); });
+        y += 0.6;
+        if (t.mobile) text(`☏ ${t.mobile}`, 1, 700);
+        if (t.address) text(t.address, 1, 400);
+        if (t.pincode) text(`PIN: ${t.pincode}`, 1.5, 900, '#111', 0.4);
+        const aref = agentRef(it);
+        if (aref) text(aref, 0.8, 400);
+        // bottom: classes + meta (label ke neeche anchor)
+        const cls = it.classes.length ? it.classes.map((c) => `${c.cls} × ${fmt(c.qty)}`).join(' · ') : '—';
+        const meta = `Req ${String(it.id).slice(-10)} · ${it.date}${it.employee ? ` · Emp: ${it.employee}` : ''}${it.tl ? ` · TL ${it.tl}` : ''}${it.agentId && t.who === 'agent' ? ` · ID ${it.agentId}` : ''}`;
+        fnt(0.6, 400);
+        const metaLines = FF.pdf.wrap(ctx, meta, px(iw)).slice(0, 2);
+        fnt(0.82, 400);
+        const clsLines = FF.pdf.wrap(ctx, `${cls} = ${fmt(it.total)} tags`, px(iw)).slice(0, 2);
+        const hMeta = metaLines.length * pt * MMPT * 0.6 * 1.28, hCls = clsLines.length * pt * MMPT * 0.82 * 1.28;
+        let yb = y0 + lh - 2.2 - hMeta - hCls - 1.6;
+        line(ix, yb, ix + iw, true); yb += 0.6;
+        fnt(0.82, 700); ctx.fillStyle = '#111';
+        clsLines.forEach((l) => { yb += pt * MMPT * 0.82 * 1.28; ctx.fillText(l, px(ix), px(yb - 0.6)); });
+        fnt(0.6, 400); ctx.fillStyle = '#444';
+        metaLines.forEach((l) => { yb += pt * MMPT * 0.6 * 1.28; ctx.fillText(l, px(ix), px(yb - 0.4)); });
+      });
+      canvases.push(pg.canvas);
+    }
+    return FF.pdf.build(canvases);
+  }
+  /** Chuni requests → PDF download (print popup ki zaroorat nahi). */
+  async function downloadPdf(requests, opts) {
+    const items = uniqueRequests(requests).map(labelItem);
+    if (!items.length) { U.toast('Pehle ☑ requests select karo', 'warn'); return false; }
+    try { if (FF.lazy && FF.lazy.need) await FF.lazy.need('pdf'); } catch { /* ignore */ }
+    if (!FF.pdf) { U.toast('PDF module load nahi hua — page refresh karo', 'err'); return false; }
+    const blob = labelsPdf(items, opts || { size: 10.5, rows: 5 });
+    if (!blob) { U.toast('PDF nahi bana', 'err'); return false; }
+    const name = items.length === 1 ? `dispatch-label-${items[0].id.slice(-8)}.pdf` : `dispatch-labels-${items.length}-${new Date().toISOString().slice(0, 10)}.pdf`;
+    FF.pdf.download(blob, name);
+    U.toast(`📄 PDF download ho gayi — ${items.length} label${items.length === 1 ? '' : 's'}`, 'ok');
+    if (!dispatchFrom().has && isAdmin()) U.toast('ℹ️ FROM address Settings → 📲 Contacts me bharo — label par wahi aata hai', 'info');
+    return true;
   }
   /** Ek request ka label HTML (purana export — smoke/tests isi ko use karte hain). Ab 1 request = 1 label. */
   function dispatchLabelHtml(r, opts) {
@@ -612,13 +717,31 @@ body { font-family: Arial, "Segoe UI", sans-serif; color: #111; margin: 0; }
     const seen = new Set();
     return (Array.isArray(requests) ? requests : []).filter((r) => r && r.id && !seen.has(r.id) && seen.add(r.id));
   }
+  /** Print window ke buttons opener se bind karo — popup ke andar inline <script> site ki CSP se block hota hai
+   *  (isi wajah se pehle Print / size / per-page buttons kaam nahi karte the). */
+  function wireLabelWindow(w, requests) {
+    const doc = w.document;
+    const H = {}; [3, 4, 5, 6].forEach((n) => { H[n] = `${((283 - (n - 1) * 2.5) / n).toFixed(1)}mm`; });
+    const st = { size: 10.5, rows: 5 };
+    const each = (sel, fn) => Array.prototype.forEach.call(doc.querySelectorAll(sel), fn);
+    const mark = (sel, attr, v) => each(sel, (b) => b.classList.toggle('on', b.getAttribute(attr) === String(v)));
+    mark('.sz', 'data-sz', st.size); mark('.rp', 'data-rows', st.rows);
+    each('.sz', (b) => b.addEventListener('click', () => { st.size = Number(b.getAttribute('data-sz')); each('.lbl', (l) => { l.style.fontSize = `${st.size}pt`; }); mark('.sz', 'data-sz', st.size); }));
+    each('.rp', (b) => b.addEventListener('click', () => { st.rows = Number(b.getAttribute('data-rows')); each('.lbl', (l) => { l.style.height = H[st.rows]; }); mark('.rp', 'data-rows', st.rows); }));
+    const pb = doc.getElementById('pbtn');
+    if (pb) pb.addEventListener('click', () => { try { w.focus(); w.print(); } catch { /* ignore */ } });
+    const pdfb = doc.getElementById('pdfbtn');
+    if (pdfb) pdfb.addEventListener('click', () => { downloadPdf(requests, { size: st.size, rows: st.rows }); });
+  }
   /** Print window kholo — har request ek hi baar. */
   function openPrint(requests) {
-    const items = uniqueRequests(requests).map(labelItem);
+    const uniq = uniqueRequests(requests);
+    const items = uniq.map(labelItem);
     if (!items.length) { U.toast('Pehle ☑ requests select karo', 'warn'); return; }
     const w = window.open('', '_blank', 'width=1000,height=800');
-    if (!w || !w.document) { U.toast('Popup block ho gaya — browser me "popups allow" karo phir dobara dabao', 'warn'); return; }
+    if (!w || !w.document) { U.toast('Popup block ho gaya — 📄 PDF download button use karo ya browser me popups allow karo', 'warn'); return; }
     w.document.open(); w.document.write(labelsHtml(items, { size: 10.5, rows: 5 })); w.document.close();
+    wireLabelWindow(w, uniq);
     try { w.focus(); } catch { /* ignore */ }
     if (!dispatchFrom().has && isAdmin()) U.toast('ℹ️ FROM address Settings → 📲 Contacts me bharo — label par wahi aata hai', 'info');
   }
@@ -761,7 +884,7 @@ body { font-family: Arial, "Segoe UI", sans-serif; color: #111; margin: 0; }
         <p class="dim small" style="margin:8px 0 0">🧑 Agent ne aapse tag maange? Neeche <b>har agent</b> ka naam, mobile, full address, pincode aur class-wise qty bharo — "➕ Add new agent" se aur agents jodo.</p>
       </div></section>`;
   }
-  /** Search dropdown ke liye items — AGENTS + TL dono, query se match karke. */
+  /** Search dropdown ke liye items — TL + AGENTS dono (TL pehle, taaki sirf agent hi na dikhein). */
   function suggestItems(query, row) {
     const idx = state.index;
     if (!idx) return [];
@@ -772,20 +895,22 @@ body { font-family: Arial, "Segoe UI", sans-serif; color: #111; margin: 0; }
       if (!q) return true;
       return norm(a.name).includes(q) || (dq && digits(a.agentId).includes(dq)) || norm(a.tlName).includes(q);
     }).slice(0, 24).map((a) => ({ kind: 'agent', name: a.name, agentId: a.agentId, tlName: a.tlName, channel: a.channel }));
-    const tls = row.tlFilter ? [] : [...idx.tls.values()].filter((t) => !q || norm(t.name).includes(q)).slice(0, 8)
+    const tls = row.tlFilter ? [] : [...idx.tls.values()].filter((t) => !q || norm(t.name).includes(q))
+      .sort((a, b) => (norm(a.name).startsWith(q) ? 0 : 1) - (norm(b.name).startsWith(q) ? 0 : 1) || norm(a.name).localeCompare(norm(b.name))).slice(0, 10)
       .map((t) => ({ kind: 'tl', name: t.name, channel: t.channel, agents: t.agents ? t.agents.size : 0 }));
-    return [...agents, ...tls];
+    return [...tls, ...agents];
   }
   function suggestHtml(items) {
     if (!items.length) return `<div class="tr-suggest-empty">${state.index ? 'Koi match nahi mila — naya agent hai to naam likh kar aage badho' : 'Agent list load ho rahi hai…'}</div>`;
     return items.map((it, i) => it.kind === 'tl'
-      ? `<button type="button" class="tr-suggest-item tl ${i === 0 ? 'hot' : ''}" data-tr-pick="tl:${esc(norm(it.channel) + '|' + norm(it.name))}"><span class="tr-suggest-name">🧑‍💼 ${esc(it.name)}</span><small class="dim">TL · ${esc(it.agents)} agents · ${it.channel === 'gv' ? 'GV' : 'FF'} — is TL ke agents dekho</small></button>`
+      ? `<button type="button" class="tr-suggest-item tl ${i === 0 ? 'hot' : ''}" data-tr-pick="tl:${esc(norm(it.channel) + '|' + norm(it.name))}"><span class="tr-suggest-name">🧑‍💼 ${esc(it.name)}</span><small class="dim">TL · ${esc(it.agents)} agents · ${it.channel === 'gv' ? 'GV' : 'FF'} — TL select karo → poora data dikhega</small></button>`
       : `<button type="button" class="tr-suggest-item ${i === 0 ? 'hot' : ''}" data-tr-pick="agent:${esc(it.channel)}:${esc(it.agentId || '')}:${esc(norm(it.name))}"><span class="tr-suggest-name">${esc(it.name)}${it.agentId ? ` <small class="dim">#${esc(it.agentId)}</small>` : ''}</span><small class="dim">${it.tlName ? `TL ${esc(it.tlName)} · ` : ''}${it.channel === 'gv' ? '🟩 GV' : '🟦 FF'}</small></button>`).join('');
   }
   /** Agent ke neeche ka status line — pakka match / "kya ye hai?" / naya agent. */
   function agentMetaHtml(row) {
     const rec = exactAgent(row);
     const filter = row.tlFilter ? ` <button type="button" class="chip on tr-filter-clear" title="TL filter hatao">TL: ${esc(row.tlFilter)} ✕</button>` : '';
+    if (rec && rec.isTl) return `<span class="badge purple">👥 TL</span> <span class="badge green">${rec.channel === 'gv' ? '🟩 GV' : '🟦 FF'}</span> <b>${esc(rec.name)}</b> · ${fmt(rec.agents ? rec.agents.size : 0)} agents <small class="dim">— TL ke naam par request · dispatch name neeche bharo</small>`;
     if (rec) return `<span class="badge green">${rec.channel === 'gv' ? '🟩 GV' : '🟦 FF'}</span> <b>${esc(rec.name)}</b>${rec.agentId ? ` · ID <b>${esc(rec.agentId)}</b>` : ''}${rec.tlName ? ` · TL <b>${esc(rec.tlName)}</b>` : ''}${filter}`;
     const q = String(row.name || row.agentId || '').trim();
     if (!q) return (state.index ? '<span class="dim small">Naam / ID likhna shuru karo — agents + TL dropdown me aayenge; chunte hi ID + TL bhar jayega</span>' : '<span class="dim small">⏳ agent list load ho rahi hai…</span>') + filter;
@@ -800,6 +925,19 @@ body { font-family: Arial, "Segoe UI", sans-serif; color: #111; margin: 0; }
     const d = classData(rec, c);
     if (!d.stock && !d.cur && !d.last && !d.sugNet) return '';
     return `stock ${fmt(d.stock)} · MTD ${fmt(d.cur)}${d.sugNet > 0 ? ` · 💡 ${fmt(d.sugNet)}` : ''}`;
+  }
+  /** 👥 TL select hote hi uska poora data — stock · last · current (🚗/🚚) + TL ke saare agents. */
+  function tlPanelHtml(row) {
+    const rec = row.isTl ? exactAgent(row) : null;
+    if (!rec) return '';
+    const m = metricNumbers(groupMetrics(rec));
+    const list = tlAgents(rec);
+    const cell = (label, g) => `<div class="tr-tlk"><small>${label}</small><b>${fmt(g.stock)}</b><span class="dim small">stock · last ${fmt(g.last)} · MTD ${fmt(g.cur)}</span></div>`;
+    return `<div class="tr-tl-panel">
+      <div class="tr-tl-kpis">${cell('🚗 VC4+VC20', m.core)}${cell('🚚 VC5+', m.comm)}${cell('Total', m.total)}<div class="tr-tlk"><small>Agents</small><b>${fmt(list.length)}</b><span class="dim small">TL ${esc(rec.priority || '—')}</span></div></div>
+      <details class="tr-tl-agents"><summary>👥 ${esc(rec.name)} ke agents (${fmt(list.length)}) — click karke agent chuno</summary>
+        <div class="table-wrap"><table class="tbl compact"><thead><tr><th>Agent</th><th>Stock</th><th>Last</th><th>MTD</th></tr></thead><tbody>${list.map((a) => `<tr class="tr-tl-agent" data-tr-tlagent="agent:${esc(a.channel)}:${esc(a.agentId || '')}:${esc(norm(a.name))}" style="cursor:pointer"><td><b>${esc(a.name)}</b>${a.agentId ? ` <small class="dim">#${esc(a.agentId)}</small>` : ''}</td><td class="num">${fmt(a.stock)}</td><td class="num">${fmt(a.last)}</td><td class="num">${fmt(a.cur)}</td></tr>`).join('') || '<tr><td colspan="4" class="dim">Agents nahi mile</td></tr>'}</tbody></table></div>
+      </details></div>`;
   }
   function agentCardHtml(row, i) {
     const cfg = formCfg();
@@ -826,7 +964,10 @@ body { font-family: Arial, "Segoe UI", sans-serif; color: #111; margin: 0; }
               <div class="tr-suggest" data-tr-suggest hidden></div>
             </div></label>
           <div class="tr-row-meta">${agentMetaHtml(row)}</div>
+          <div class="tr-tl-slot">${tlPanelHtml(row)}</div>
           <div class="tr-contact-grid">
+            <label class="field tr-span-all"><span class="dim small">🚚 Dispatch name${row.isTl ? ' *' : ''} <small class="dim">(label par jis naam se tag jayega — agent ka naam alag ho sakta hai${row.isTl ? ' · TL ko dispatch nahi hota, isliye zaroori' : ''})</small></span>
+              <input class="input${badCls(row.id, 'dispatchName')}" data-tr-a="dispatchName" maxlength="120" placeholder="Jis naam par dispatch karna hai (khaali = agent ka naam)" autocomplete="off" value="${esc(row.dispatchName)}"></label>
             <label class="field"><span class="dim small">📱 Agent mobile number${askMobile ? ' *' : ''}</span>
               <input class="input${badCls(row.id, 'mobile')}" data-tr-a="mobile" inputmode="tel" maxlength="16" placeholder="10 digit mobile" autocomplete="off" value="${esc(row.mobile)}"></label>
             <label class="field"><span class="dim small">📮 Pincode${askAddress ? ' *' : ''}</span>
@@ -914,12 +1055,16 @@ body { font-family: Arial, "Segoe UI", sans-serif; color: #111; margin: 0; }
     }
   }
   /** Agent chuna → row bharo + (isi device par) pichla contact auto-fill. */
+  function idx_tl(ch, nameKey) {
+    const idx = state.index;
+    return idx ? idx.tls.get(`${String(ch).toLowerCase() === 'gv' ? 'gv' : 'ff'}|${nameKey}`) || null : null;
+  }
   function applyPick(row, val) {
     const [, channel, , nameKey] = String(val).split(':');
     const idx = state.index;
     const rec = idx && idx.byKey.get(`${channel}|${nameKey}`);
     if (!rec) return false;
-    row.agentId = rec.agentId || ''; row.name = rec.name; row.tl = rec.tlName; row.channel = rec.channel; row.tlFilter = '';
+    row.agentId = rec.agentId || ''; row.name = rec.name; row.tl = rec.tlName; row.channel = rec.channel; row.tlFilter = ''; row.isTl = false;
     if (!digits(row.mobile) && !clean(row.address)) {
       const saved = agentBook()[`${rec.channel}|${norm(rec.name)}`];
       if (saved) { row.mobile = saved.mobile || ''; row.address = saved.address || ''; row.pincode = saved.pincode || ''; row.fromBook = true; }
@@ -952,11 +1097,14 @@ body { font-family: Arial, "Segoe UI", sans-serif; color: #111; margin: 0; }
       const markHot = () => { box.querySelectorAll('.tr-suggest-item').forEach((el, i) => el.classList.toggle('hot', i === hot)); };
       const pick = (val) => {
         if (val.startsWith('tl:')) {
-          const [ch, name] = val.slice(3).split('|');
-          row.tlFilter = name.replace(/\s+/g, ' ').trim();
-          row.agentId = ''; row.name = ''; row.channel = ch === 'gv' ? 'gv' : 'ff';
-          rerenderCard('.tr-agent');
-          U.toast(`🧑‍💼 TL ${row.tlFilter} ke agents list me hain — agent chuno`, 'info');
+          const [ch, nameKey] = val.slice(3).split('|');
+          const g = idx_tl(ch, nameKey);
+          close();
+          if (!g) { U.toast('TL data nahi mila', 'warn'); return; }
+          row.isTl = true; row.tlFilter = ''; row.agentId = ''; row.name = g.name; row.tl = g.name; row.channel = g.channel;
+          if (state.errs[row.id]) delete state.errs[row.id].agent;
+          rerenderCard('[data-tr-a="dispatchName"]');
+          U.toast(`👥 TL ${g.name} ka poora data neeche hai — dispatch name bharo ya uska koi agent chuno`, 'info');
           return;
         }
         close();
@@ -974,6 +1122,7 @@ body { font-family: Arial, "Segoe UI", sans-serif; color: #111; margin: 0; }
       inp.addEventListener('input', () => {
         // Live typing — naam raw rakho; pura number likha to ID maan lo (exact match se resolve hoga).
         row.name = inp.value.trim();
+        if (row.isTl) { row.isTl = false; const slot = card.querySelector('.tr-tl-slot'); if (slot) slot.innerHTML = ''; }
         const d = digits(inp.value);
         row.agentId = d.length >= 3 && !/[a-z]/i.test(inp.value) ? d : '';
         row.fromBook = false;
@@ -999,6 +1148,8 @@ body { font-family: Arial, "Segoe UI", sans-serif; color: #111; margin: 0; }
     card.addEventListener('click', (e) => {
       const guess = e.target.closest ? e.target.closest('[data-tr-guess]') : null;
       if (guess) { if (applyPick(row, guess.dataset.trGuess)) rerenderCard(digits(row.mobile) ? '.tr-qty' : '[data-tr-a="mobile"]'); return; }
+      const tla = e.target.closest ? e.target.closest('[data-tr-tlagent]') : null;
+      if (tla) { if (applyPick(row, tla.dataset.trTlagent)) rerenderCard(digits(row.mobile) ? '.tr-qty' : '[data-tr-a="mobile"]'); return; }
       const clr = e.target.closest ? e.target.closest('.tr-filter-clear') : null;
       if (clr) { row.tlFilter = ''; rerenderCard('.tr-agent'); }
     });
@@ -1009,7 +1160,7 @@ body { font-family: Arial, "Segoe UI", sans-serif; color: #111; margin: 0; }
       if (key === 'mobile') { const c = v.replace(/[^\d+\s-]/g, ''); if (c !== v) el.value = c; v = c.replace(/[\s-]/g, ''); }
       if (key === 'pincode') { const c = v.replace(/\D/g, '').slice(0, 6); if (c !== v) el.value = c; v = c; }
       row[key] = v;
-      const ok = key === 'mobile' ? digits(v).length >= 10 : key === 'pincode' ? /^\d{6}$/.test(v) : clean(v).length >= 8;
+      const ok = key === 'mobile' ? digits(v).length >= 10 : key === 'pincode' ? /^\d{6}$/.test(v) : key === 'dispatchName' ? clean(v).length >= 2 : clean(v).length >= 8;
       if (ok) clearErr(card, row.id, key);
       updateTotals(null, null);
     }));
@@ -1107,6 +1258,7 @@ body { font-family: Arial, "Segoe UI", sans-serif; color: #111; margin: 0; }
     filled.forEach((row) => {
       const n = state.rows.indexOf(row) + 1;
       if (String(row.name || row.agentId || '').trim().length < 2) mark(row.id, 'agent', 'Agent ka naam / ID likho (dropdown se chuno)');
+      if (row.isTl && clean(row.dispatchName).length < 2) mark(row.id, 'dispatchName', 'TL ke naam par request hai — Dispatch name (jisko tag bhejna hai) zaroori hai');
       const mob = digits(row.mobile);
       if ((cfg.askMobile !== false || mob) && (mob.length < 10 || mob.length > 13)) mark(row.id, 'mobile', 'Agent ka 10 digit mobile number daalo');
       if (cfg.askAddress !== false) {
@@ -1144,6 +1296,7 @@ body { font-family: Arial, "Segoe UI", sans-serif; color: #111; margin: 0; }
       return {
         agentId: rec ? rec.agentId || '' : (/^\d{3,}$/.test(String(row.agentId || '')) ? String(row.agentId) : ''),
         agentName: rec ? rec.name : clean(row.name || row.agentId),
+        dispatchName: clean(row.dispatchName), kind: row.isTl ? 'tl' : 'agent',
         tl: rec ? rec.tlName || '' : '', channel,
         mobile: String(row.mobile || '').replace(/[^\d+]/g, ''), address: clean(row.address), pincode: digits(row.pincode).slice(0, 6),
         unmatched: !rec, metrics: rec ? groupMetrics(rec) : null, rows
@@ -1348,7 +1501,7 @@ body { font-family: Arial, "Segoe UI", sans-serif; color: #111; margin: 0; }
           key: `${r.id}::${k}`, agentKey: siblings > 1 ? g.agentKey : '', req: r, rows, siblings,
           agent: {
             name: a.name || first.agentName || '—', agentId: a.agentId || first.agentId || '',
-            tl: a.tl || (first.tl && first.tl !== '—' ? first.tl : ''), channel: (a.channel || first.channel) === 'gv' ? 'gv' : 'ff', unmatched: !!a.unmatched
+            tl: a.tl || (first.tl && first.tl !== '—' ? first.tl : ''), channel: (a.channel || first.channel) === 'gv' ? 'gv' : 'ff', unmatched: !!a.unmatched, kind: a.kind || 'agent', dispatchName: a.dispatchName || ''
           },
           contact: contactOf(r),
           total: rows.reduce((s, x) => s + num(x.approved), 0),
@@ -1454,6 +1607,7 @@ body { font-family: Arial, "Segoe UI", sans-serif; color: #111; margin: 0; }
     return `<div class="tr-acts">
       ${canEditReq(r) ? `<button class="btn small" data-tr-op="edit" data-key="${k}" title="Class-wise qty badlo">✏️ Edit</button>` : ''}
       <button class="btn small" data-tr-op="print1" data-key="${k}" title="Sirf is request ka label print">🖨️</button>
+      <button class="btn small" data-tr-op="pdf1" data-key="${k}" title="Is request ka label PDF download">📄</button>
       <button class="btn small" data-tr-op="copy" data-key="${k}" title="Label text copy (WhatsApp ke liye)">📋</button>
       ${isAdmin() ? `<button class="btn small" data-tr-op="push" data-key="${k}" title="Google Sheet me entry">📗</button>` : ''}
       ${canDeleteReq(r) ? `<button class="btn small" data-tr-op="del" data-key="${k}" title="Request delete">🗑</button>` : ''}
@@ -1472,7 +1626,7 @@ body { font-family: Arial, "Segoe UI", sans-serif; color: #111; margin: 0; }
       <td class="tr-c-sel"><input type="checkbox" data-tr-sel="${esc(dr.key)}" ${sel ? 'checked' : ''} aria-label="Select"></td>
       <td class="tr-c-date"><b>${esc(dateLabel(r.at))}</b><small class="dim">${esc(timeLabelShort(r.at))}</small><small class="mono dim" title="${esc(r.id)}">#${esc(String(r.id || '').slice(-6))}</small></td>
       <td class="tr-c-emp"><b>${esc(empName)}</b>${e.office ? `<small class="dim">${esc(e.office)}</small>` : ''}${entryBy}${r.source === 'public-link' ? '<span class="badge" title="Employee link se aayi (bina login)">🌐 link</span>' : ''}</td>
-      <td class="tr-c-agent"><b>${esc(dr.agent.name)}</b><small class="dim">${dr.agent.agentId ? `#${esc(dr.agent.agentId)}` : ''}${dr.agent.tl ? `${dr.agent.agentId ? ' · ' : ''}TL ${esc(dr.agent.tl)}` : ''}</small>
+      <td class="tr-c-agent"><b>${esc(dr.agent.name)}</b>${dr.agent.kind === 'tl' ? ' <span class="badge purple">TL</span>' : ''}${dr.agent.dispatchName ? `<small class="dim"> 🚚 ${esc(dr.agent.dispatchName)}</small>` : ''}<small class="dim">${dr.agent.agentId ? `#${esc(dr.agent.agentId)}` : ''}${dr.agent.tl ? `${dr.agent.agentId ? ' · ' : ''}TL ${esc(dr.agent.tl)}` : ''}</small>
         <span class="tr-tags"><span class="badge ${dr.agent.channel === 'gv' ? 'green' : 'blue'}">${dr.agent.channel === 'gv' ? '🟩 GV' : '🟦 FF'}</span>${dr.agent.unmatched ? '<span class="badge amber" title="Sheet data me nahi mila — naya agent?">🆕 verify</span>' : ''}${dr.siblings > 1 ? `<span class="badge gray" title="Purani request — ek request me ${dr.siblings} agents">🔗 ${dr.siblings} agents</span>` : ''}</span></td>
       <td class="tr-c-addr">${c.who === 'employee' && (c.mobile || c.address) ? '<small class="dim">employee ka address:</small>' : ''}${c.mobile ? `<a class="tr-mob" href="tel:${esc(String(c.mobile).replace(/[^\d+]/g, ''))}">☏ ${esc(c.mobile)}</a>` : ''}${c.address ? `<div class="tr-addr">${esc(c.address)}</div>` : ''}${c.pincode ? `<b class="tr-pin">📮 ${esc(c.pincode)}</b>` : ''}${!c.mobile && !c.address && !c.pincode ? '<span class="dim small">—</span>' : ''}</td>
       ${metricCellsHtml(dr)}
@@ -1499,6 +1653,7 @@ body { font-family: Arial, "Segoe UI", sans-serif; color: #111; margin: 0; }
           <label class="tr-selall"><input type="checkbox" data-tr-selall aria-label="Saari dikhti rows select"> <span>Select all</span></label>
           <span class="tr-selcount" data-tr-selcount>0 selected</span>
           <button type="button" class="btn primary" data-tr-bulk="print" disabled>🖨️ Print selected</button>
+          <button type="button" class="btn" data-tr-bulk="pdf" disabled title="Selected requests ke labels ki PDF file (address ka same format) — seedha download">📄 Download PDF</button>
           ${isAdmin() ? '<button type="button" class="btn" data-tr-bulk="approve" disabled>✅ Approve selected</button>' : ''}
           <button type="button" class="btn" data-tr-bulk="csv" title="Selected (ya saari dikhti) rows ka CSV">⬇ CSV</button>
           <button type="button" class="btn small" data-tr-bulk="none" hidden>✕ Selection hatao</button>
@@ -1603,6 +1758,8 @@ body { font-family: Arial, "Segoe UI", sans-serif; color: #111; margin: 0; }
     if (all) { all.checked = !!visible.length && visSel === visible.length; all.indeterminate = visSel > 0 && visSel < visible.length; }
     const pr = card.querySelector('[data-tr-bulk="print"]');
     if (pr) { pr.disabled = !n; pr.textContent = n ? `🖨️ Print selected (${fmt(selectedRequests().length)})` : '🖨️ Print selected'; }
+    const pf = card.querySelector('[data-tr-bulk="pdf"]');
+    if (pf) { pf.disabled = !n; pf.textContent = n ? `📄 Download PDF (${fmt(selectedRequests().length)})` : '📄 Download PDF'; }
     const ap = card.querySelector('[data-tr-bulk="approve"]');
     if (ap) { const p = selectedRequests().filter((r) => (r.status || 'pending') === 'pending').length; ap.disabled = !p; ap.textContent = p ? `✅ Approve selected (${fmt(p)})` : '✅ Approve selected'; }
     const none = card.querySelector('[data-tr-bulk="none"]');
@@ -1714,6 +1871,7 @@ body { font-family: Arial, "Segoe UI", sans-serif; color: #111; margin: 0; }
       if (bulk) {
         const op = bulk.dataset.trBulk;
         if (op === 'print') openPrint(selectedRequests());
+        else if (op === 'pdf') downloadPdf(selectedRequests());
         else if (op === 'approve') bulkApprove();
         else if (op === 'csv') exportCsv();
         else if (op === 'none') { state.sel.clear(); updateSelUi(); card.querySelectorAll('[data-tr-sel]').forEach((x) => { x.checked = false; }); }
@@ -1734,6 +1892,7 @@ body { font-family: Arial, "Segoe UI", sans-serif; color: #111; margin: 0; }
       else if (op === 'cancel') { state.edit = null; renderReqTable(); }
       else if (op === 'save') saveEdit();
       else if (op === 'print1') openPrint([dr.req]);
+      else if (op === 'pdf1') downloadPdf([dr.req]);
       else if (op === 'copy') U.copyText(labelText(dr.req)).then((ok) => U.toast(ok ? '📋 Label text copy ho gaya' : 'Copy nahi hua', ok ? 'ok' : 'warn'));
       else if (op === 'push') {
         opEl.disabled = true;
@@ -2052,7 +2211,7 @@ body { font-family: Arial, "Segoe UI", sans-serif; color: #111; margin: 0; }
     preview,
     shareLink,
     // 🖨️ Dispatch labels — pure HTML generators (smoke/tests): 1 request = 1 label, multi = har ek EK baar.
-    dispatchLabelHtml, labelsHtml: (requests, opts) => labelsHtml(uniqueRequests(requests).map(labelItem), opts), labelText, dispatchFrom,
+    dispatchLabelHtml, labelsPdf, downloadPdf, tlRecord, labelsHtml: (requests, opts) => labelsHtml(uniqueRequests(requests).map(labelItem), opts), labelText, dispatchFrom,
     // 🔁 Diagnostics (smoke): duplicate warning card ka wahi HTML jo employee dekhta hai.
     dupWarning: (list, name) => {
       const saved = { dup: state.dup, emp: state.employee };
