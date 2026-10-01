@@ -6,6 +6,21 @@ window.FF = window.FF || {};
 FF.pages = FF.pages || {};
 (function (FF) {
   'use strict';
+  let lastTargetRows = { rows: [], withT: [], achievedRows: [], ym: '' };
+  function registerTargetLists() {
+    if (!FF.kpiDetail || !FF.kpiDetail.registerList || registerTargetLists.done) return;
+    registerTargetLists.done = true;
+    const U = FF.util, e = (v) => U.esc(v);
+    const tgt = (r) => (typeof targetDrafts !== 'undefined' && targetDrafts.get ? targetDrafts.get(r.key) || 0 : 0);
+    const cols = [['Agent / TL', (r) => `<b>${e(r.name || r.key)}</b>`], ['Source', (r) => e(r.source || r.ch || '—')], ['Last month', (r) => U.fmt(r.last || 0), 1], ['Issuance', (r) => `<b>${U.fmt(r.cur || 0)}</b>`, 1], ['Target', (r) => U.fmt(tgt(r)), 1], ['Achievement', (r) => (tgt(r) ? `${Math.round(((r.cur || 0) / tgt(r)) * 100)}%` : '—'), 1]];
+    const make = (name, pick, kicker) => FF.kpiDetail.registerList(name, () => {
+      const rows = [...pick()].sort((a, b) => (b.cur || 0) - (a.cur || 0));
+      return { kicker, unit: 'rows', rows, columns: cols, agent: (r) => (r.kind === 'tl' ? null : { name: r.name, id: r.id || '', ch: r.ch || (/gv/i.test(r.source || '') ? 'gv' : 'ff') }), sub: `Issuance <b>${U.fmt(U.sum(rows, (r) => r.cur || 0))}</b> · target <b>${U.fmt(U.sum(rows, (r) => tgt(r)))}</b> · ${e(U.labelYM(lastTargetRows.ym || U.ymKey(new Date())))}` };
+    });
+    make('tg.rows', () => lastTargetRows.rows, 'Targets · agents (filter)');
+    make('tg.with', () => lastTargetRows.withT, 'Targets · target set');
+    make('tg.achieved', () => lastTargetRows.achievedRows, 'Targets · achieved');
+  }
   const U = FF.util, M = FF.model, S = FF.store, G = FF.gv, C = FF.charts;
   const esc = U.esc;
   const norm = (s) => U.clean(s).toUpperCase().replace(/\s+/g, ' ');
@@ -229,11 +244,14 @@ FF.pages = FF.pages || {};
       const totalTarget = U.sum(withT, (r) => targetDrafts.get(r.key) || 0);
       const totalCur = U.sum(withT, (r) => r.cur);
       const achieved = withT.filter((r) => r.cur >= (targetDrafts.get(r.key) || 0)).length;
+      // 📋 v3.31 — KPI par click = wahi rows (filter + target ke saath)
+      lastTargetRows = { rows, withT, achievedRows: withT.filter((r) => r.cur >= (targetDrafts.get(r.key) || 0)), ym: view.ym };
+      registerTargetLists();
       const kpis = `<div class="kpi-grid">
-        <div class="kpi g9"><div class="kpi-top"><span class="kpi-title">Agents (filter me)</span><span class="kpi-icon">🧑‍💼</span></div><div class="kpi-value">${U.fmt(rows.length)}</div><div class="kpi-foot">${esc(srcLbl)} · ${esc(U.labelYM(view.ym))}</div></div>
-        <div class="kpi g1"><div class="kpi-top"><span class="kpi-title">Targets set</span><span class="kpi-icon">🎯</span></div><div class="kpi-value">${U.fmt(withT.length)}</div><div class="kpi-foot">Total target <b>${U.fmt(totalTarget)}</b> tags</div></div>
-        <div class="kpi g6"><div class="kpi-top"><span class="kpi-title">Issuance (with target)</span><span class="kpi-icon">🏷️</span></div><div class="kpi-value">${U.fmt(totalCur)}</div><div class="kpi-foot">${totalTarget ? `<b>${U.fmtPct((totalCur / totalTarget) * 100, 0)}</b> of target · ${isCurMonth ? 'MTD' : 'full month'}` : 'Target set karo'}</div></div>
-        <div class="kpi g5"><div class="kpi-top"><span class="kpi-title">Achieved</span><span class="kpi-icon">✅</span></div><div class="kpi-value">${U.fmt(achieved)}</div><div class="kpi-foot">${withT.length ? `${U.fmtPct(U.pctOf(achieved, withT.length), 0)} of targets` : '—'}</div></div>
+        <div class="kpi g9" data-kpi="scope=list&list=tg.rows&src=both"><div class="kpi-top"><span class="kpi-title">Agents (filter me)</span><span class="kpi-icon">🧑‍💼</span></div><div class="kpi-value">${U.fmt(rows.length)}</div><div class="kpi-foot">${esc(srcLbl)} · ${esc(U.labelYM(view.ym))}</div></div>
+        <div class="kpi g1" data-kpi="scope=list&list=tg.with&src=both"><div class="kpi-top"><span class="kpi-title">Targets set</span><span class="kpi-icon">🎯</span></div><div class="kpi-value">${U.fmt(withT.length)}</div><div class="kpi-foot">Total target <b>${U.fmt(totalTarget)}</b> tags</div></div>
+        <div class="kpi g6" data-kpi="scope=list&list=tg.with&src=both"><div class="kpi-top"><span class="kpi-title">Issuance (with target)</span><span class="kpi-icon">🏷️</span></div><div class="kpi-value">${U.fmt(totalCur)}</div><div class="kpi-foot">${totalTarget ? `<b>${U.fmtPct((totalCur / totalTarget) * 100, 0)}</b> of target · ${isCurMonth ? 'MTD' : 'full month'}` : 'Target set karo'}</div></div>
+        <div class="kpi g5" data-kpi="scope=list&list=tg.achieved&src=both"><div class="kpi-top"><span class="kpi-title">Achieved</span><span class="kpi-icon">✅</span></div><div class="kpi-value">${U.fmt(achieved)}</div><div class="kpi-foot">${withT.length ? `${U.fmtPct(U.pctOf(achieved, withT.length), 0)} of targets` : '—'}</div></div>
       </div>`;
       const rowHtml = (r) => {
         const t = targetDrafts.get(r.key) || 0;
@@ -380,7 +398,7 @@ FF.pages = FF.pages || {};
 
     body.innerHTML = `<div class="kpi-grid">
         <div class="kpi g9"><div class="kpi-top"><span class="kpi-title">Months covered</span><span class="kpi-icon">📅</span></div><div class="kpi-value">${U.fmt(yms.length)}</div><div class="kpi-foot">${U.fmt(rows.length)} targets total</div></div>
-        <div class="kpi g5"><div class="kpi-top"><span class="kpi-title">Achieved</span><span class="kpi-icon">✅</span></div><div class="kpi-value">${U.fmt(achieved.length)}</div><div class="kpi-foot">${rows.length ? U.fmtPct((achieved.length / rows.length) * 100, 0) : '0%'} of all targets</div></div>
+        <div class="kpi g5" data-kpi="scope=list&list=tg.achieved&src=both"><div class="kpi-top"><span class="kpi-title">Achieved</span><span class="kpi-icon">✅</span></div><div class="kpi-value">${U.fmt(achieved.length)}</div><div class="kpi-foot">${rows.length ? U.fmtPct((achieved.length / rows.length) * 100, 0) : '0%'} of all targets</div></div>
         <div class="kpi g6"><div class="kpi-top"><span class="kpi-title">Overall attainment</span><span class="kpi-icon">🏷️</span></div><div class="kpi-value">${totTarget ? U.fmtPct((totActual / totTarget) * 100, 0) : '—'}</div><div class="kpi-foot">${U.fmt(totActual)} / ${U.fmt(totTarget)} tags</div></div>
         <div class="kpi g1"><div class="kpi-top"><span class="kpi-title">Best month</span><span class="kpi-icon">🏆</span></div><div class="kpi-value">${(() => { const best = yms.map((ym) => { const mr = rows.filter((r) => r.ym === ym); return { ym, got: mr.filter((r) => r.p >= 100).length, n: mr.length }; }).filter((x) => x.n).sort((a, b) => (b.got / b.n) - (a.got / a.n))[0]; return best ? esc(U.labelYM(best.ym)) : '—'; })()}</div><div class="kpi-foot">Achievement rate ke hisaab se</div></div>
       </div>

@@ -101,16 +101,28 @@ window.FF = window.FF || {};
   function renderA11yPanel() {
     const old = U.$('#a11y-panel'); if (old) old.remove();
     const state = readLocalJson('ff_a11y', { largeText: false, highContrast: false, reducedMotion: false });
-    const panel = U.h(`<div class="a11y-panel" id="a11y-panel" role="dialog" aria-label="Accessibility mode"><div class="a11y-head"><b>Accessibility mode</b><button class="icon-btn small" data-a11y-close aria-label="Close">✕</button></div><p class="dim small">Readable, keyboard-friendly controls — settings persist on this device.</p><label><input type="checkbox" data-a11y="largeText" ${state.largeText ? 'checked' : ''}> Larger text</label><label><input type="checkbox" data-a11y="highContrast" ${state.highContrast ? 'checked' : ''}> High contrast + stronger borders</label><label><input type="checkbox" data-a11y="reducedMotion" ${state.reducedMotion ? 'checked' : ''}> Reduce motion</label><button class="btn small" data-a11y-reset>Reset accessibility</button></div>`);
+    const pref = U.loaderPref ? U.loaderPref() : 'mix';
+    const styles = ['mix', ...(U.LOADER_STYLES || [])];
+    const loaderPick = U.loader ? `<div class="a11y-loader"><label>🌀 Loader style <select class="select small" data-a11y-loader>${styles.map((k) => `<option value="${k}" ${k === pref ? 'selected' : ''}>${esc((U.LOADER_LABELS || {})[k] || k)}</option>`).join('')}</select></label><div class="a11y-loader-preview" data-a11y-loader-preview>${pref === 'mix' ? U.LOADER_STYLES.map((k) => U.loader(k, { size: 'md' })).join('') : U.loader(pref, { size: 'lg' })}</div><small class="dim">Loader hamesha chalta hai — Mac/Windows me "Reduce motion" ON ho tab bhi, taaki pata chale data aa raha hai (atka nahi hai).</small></div>` : '';
+    const panel = U.h(`<div class="a11y-panel" id="a11y-panel" role="dialog" aria-label="Accessibility mode"><div class="a11y-head"><b>Accessibility mode</b><button class="icon-btn small" data-a11y-close aria-label="Close">✕</button></div><p class="dim small">Readable, keyboard-friendly controls — settings persist on this device.</p><label><input type="checkbox" data-a11y="largeText" ${state.largeText ? 'checked' : ''}> Larger text</label><label><input type="checkbox" data-a11y="highContrast" ${state.highContrast ? 'checked' : ''}> High contrast + stronger borders</label><label><input type="checkbox" data-a11y="reducedMotion" ${state.reducedMotion ? 'checked' : ''}> Reduce motion (decorations band · loader chalta rahega)</label>${loaderPick}<button class="btn small" data-a11y-reset>Reset accessibility</button></div>`);
     document.body.appendChild(panel);
-    const apply = (key, value) => { const next = { ...state, [key]: value }; writeLocalJson('ff_a11y', next); document.documentElement.classList.toggle(`a11y-${key.replace(/[A-Z]/g, (m) => '-' + m.toLowerCase())}`, value); };
+    const apply = (key, value) => { state[key] = value; writeLocalJson('ff_a11y', { ...state }); document.documentElement.classList.toggle(A11Y_CLASS[key], value); };
     panel.querySelectorAll('[data-a11y]').forEach((el) => el.addEventListener('change', () => apply(el.dataset.a11y, el.checked)));
+    const pick = panel.querySelector('[data-a11y-loader]');
+    if (pick) pick.addEventListener('change', () => {
+      try { localStorage.setItem('ff_loader_style', pick.value); } catch { /* private mode */ }
+      const box = panel.querySelector('[data-a11y-loader-preview]');
+      if (box) box.innerHTML = pick.value === 'mix' ? U.LOADER_STYLES.map((k) => U.loader(k, { size: 'md' })).join('') : U.loader(pick.value, { size: 'lg' });
+      U.toast(pick.value === 'mix' ? '🌀 Loader: har baar naya style' : `🌀 Loader style: ${(U.LOADER_LABELS || {})[pick.value] || pick.value}`, 'ok');
+    });
     panel.querySelector('[data-a11y-close]').addEventListener('click', () => panel.remove());
-    panel.querySelector('[data-a11y-reset]').addEventListener('click', () => { writeLocalJson('ff_a11y', { largeText: false, highContrast: false, reducedMotion: false }); ['large-text', 'high-contrast', 'reduced-motion'].forEach((c) => document.documentElement.classList.remove(`a11y-${c}`)); panel.remove(); });
+    panel.querySelector('[data-a11y-reset]').addEventListener('click', () => { writeLocalJson('ff_a11y', { largeText: false, highContrast: false, reducedMotion: false }); Object.values(A11Y_CLASS).forEach((c) => document.documentElement.classList.remove(c)); try { localStorage.removeItem('ff_loader_style'); } catch { /* */ } panel.remove(); });
   }
+  // CSS classes (styles.css): a11y-large · a11y-contrast · a11y-motion — pehle JS galat naam lagata tha, toggles kaam nahi karte the.
+  const A11Y_CLASS = { largeText: 'a11y-large', highContrast: 'a11y-contrast', reducedMotion: 'a11y-motion' };
   function applyA11y() {
     const state = readLocalJson('ff_a11y', {});
-    ['largeText', 'highContrast', 'reducedMotion'].forEach((key) => document.documentElement.classList.toggle(`a11y-${key.replace(/[A-Z]/g, (m) => '-' + m.toLowerCase())}`, !!state[key]));
+    Object.keys(A11Y_CLASS).forEach((key) => document.documentElement.classList.toggle(A11Y_CLASS[key], !!state[key]));
   }
   function maybeOnboarding() {
     if (!FF.auth.user || EMBED_LIVE) return;
@@ -629,7 +641,7 @@ window.FF = window.FF || {};
   /** Animated page skeleton — data await ke dauraan hang ki jagah buffering dikhta hai. */
   function pageLoaderHtml(label) {
     return `<div class="page-loader" role="status" aria-live="polite">
-      <div class="page-loader-head"><span class="page-loader-spin" aria-hidden="true"></span><b>${esc(String(label || 'Page'))}</b><small>data load ho raha hai<span class="dots">…</span></small></div>
+      <div class="page-loader-head">${U.loader ? U.loader('', { size: 'md' }) : '<span class="page-loader-spin" aria-hidden="true"></span>'}<b>${esc(String(label || 'Page'))}</b><small>data load ho raha hai${U.ellipsis ? U.ellipsis() : '<span class="dots">…</span>'}</small></div>
       <div class="page-loader-grid">${'<div class="skel skel-card"></div>'.repeat(6)}</div>
       <div class="skel skel-line w80"></div><div class="skel skel-line w60"></div>
       <div class="skel skel-block"></div>
@@ -651,6 +663,7 @@ window.FF = window.FF || {};
     const root = document.createElement('div');
     root.className = `page page-${page}`;
     main.setAttribute('aria-busy', 'true');
+    routeProgress(true, token);
     main.replaceChildren(root);
     main.scrollTop = 0; window.scrollTo(0, 0);
     // Slow page render ho to blank screen ("hang") ki jagah animated skeleton — page ka apna content
@@ -661,6 +674,7 @@ window.FF = window.FF || {};
     if (!allowed(page, params)) {
       root.innerHTML = `<div class="empty-state">🔒 Is page ka access aapke account me nahi hai.<br><small class="dim">Admin se "${esc(pagePerm(page, params) || page)}" permission maango (Settings → Access matrix).</small></div>`;
       main.setAttribute('aria-busy', 'false');
+      routeProgress(false, token);
       return;
     }
     if (FF.notifications) FF.notifications.activity(page === 'sheet' ? `Sheet · ${params.name || ''}` : page);
@@ -675,7 +689,19 @@ window.FF = window.FF || {};
       if (token === current.token) root.innerHTML = U.errorBox(err, 'data-action="refresh"');
     }
     clearTimeout(loaderTimer);
+    routeProgress(false, token);
     if (token === current.token) { main.setAttribute('aria-busy', 'false'); updateStatus(); enhanceCharts(root); enhanceTables(root); translateDom(root); }
+  }
+  /** 🚦 v3.31 — kisi bhi option/page par click → upar patli chalti progress line (Reduce motion me bhi chalti hai).
+      Sirf tab dikhti hai jab render 150ms se lamba ho (fast pages par flash nahi). */
+  let routeTimer = 0, routeToken = 0;
+  function routeProgress(on, token) {
+    let el = document.getElementById('route-progress');
+    if (!el && on) { el = U.h('<div id="route-progress" class="route-progress" role="progressbar" aria-label="Loading" hidden><i></i></div>'); document.body.appendChild(el); }
+    clearTimeout(routeTimer);
+    if (on) { routeToken = token || 0; routeTimer = setTimeout(() => { if (el && routeToken === current.token) el.hidden = false; }, 150); return; }
+    if (token && token !== routeToken) return;
+    if (el) el.hidden = true;
   }
   function updateStatus(progress) {
     const el = U.$('#status');
@@ -725,13 +751,14 @@ window.FF = window.FF || {};
   }
 
   // ---- drawer ----
-  function openDrawer({ kicker, title, sub, body, actions, wide }) {
+  function openDrawer({ kicker, title, sub, body, actions, wide, age }) {
     U.$('#drawer').classList.toggle('wide', !!wide);
     U.$('#drawer-kicker').textContent = kicker || '';
     U.$('#drawer-title').textContent = title || '';
     U.$('#drawer-sub').innerHTML = sub || '';
     U.$('#drawer-actions').innerHTML = actions || '';
-    U.$('#drawer-body').innerHTML = body || '';
+    const ageHtml = drawerAgeHtml({ kicker, title, body, age });
+    U.$('#drawer-body').innerHTML = (body || '') + ageHtml;
     U.$('#drawer').classList.add('open');
     U.$('#drawer-backdrop').hidden = false;
     document.body.classList.add('no-scroll');
@@ -740,6 +767,34 @@ window.FF = window.FF || {};
     enhanceCharts(U.$('#drawer-body'));
     enhanceTables(U.$('#drawer-body'));
     translateDom(U.$('#drawer-body'));
+    if (ageHtml && FF.stockAge && FF.stockAge.decorate) FF.stockAge.decorate(U.$('#drawer-body')).catch(() => {});
+  }
+  /** 🧓 v3.31 — HAR drawer me stock ageing. Drawer khud `age: { kind: 'agent'|'tl'|'agents'|'all', key, ch, keys, tls, title }`
+      bata sakta hai (`age: false` = nahi chahiye); na bataye to kicker/title se andaza: agent / TL / poora network.
+      Forms (note, saved view) aur sirf-loader wale pehle frame me nahi lagta; pehle se ageing ho to dobara nahi. */
+  function drawerAgeScope({ kicker, title, body, age }) {
+    if (age === false || !FF.stockAge || !FF.stockAge.sectionHtml) return null;
+    if (FF.auth && FF.auth.can && FF.auth.can('stock') === false && FF.auth.can('gvStock') === false) return null;
+    const html = String(body || '');
+    if (/data-age-host|data-drawer-age/.test(html)) return null;
+    if (age && typeof age === 'object') return age;
+    if (/<form[\s>]/i.test(html)) return null;
+    if (/class="loading"/.test(html) && html.length < 900) return null;
+    const k = String(kicker || ''), t = String(title || '').trim();
+    const both = `${k} ${t}`;
+    const ch = /\bGV\b|GV Partner/i.test(both) ? 'gv' : /\bFF\b|First Forward/i.test(both) ? 'ff' : '';
+    const clean = (x) => x.replace(/^[^\p{L}\p{N}]+/u, '').replace(/\s*·\s*(FF|GV)\s*agent$/i, '').replace(/\s*·\s*stock$/i, '').trim();
+    if (/team leader|\bTL\b/i.test(k) && t) return { kind: 'tl', key: clean(t), ch, title: clean(t) };
+    if (/\bagent\b/i.test(k) && !/\bagents\b/i.test(k) && t) return { kind: 'agent', key: clean(t), ch, title: clean(t) };
+    return { kind: 'all', key: 'all', ch };
+  }
+  function drawerAgeHtml(o) {
+    try {
+      const scope = drawerAgeScope(o);
+      if (!scope) return '';
+      const open = scope.open !== undefined ? !!scope.open : scope.kind !== 'all';
+      return FF.stockAge.sectionHtml(scope, { open, title: scope.title || scope.key });
+    } catch (err) { console.warn('drawer ageing', err && err.message); return ''; }
   }
   function closeDrawer() {
     U.$('#drawer').classList.remove('open');
@@ -968,7 +1023,11 @@ window.FF = window.FF || {};
     if (ub) ub.addEventListener('click', (e) => { e.stopPropagation(); toggleUserMenu(); });
     U.$('#drawer-close').addEventListener('click', closeDrawer);
     U.$('#drawer-backdrop').addEventListener('click', closeDrawer);
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeDrawer(); closeSidebar(); toggleUserMenu(false); } });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { closeDrawer(); closeSidebar(); toggleUserMenu(false); }
+      // ⌨️ v3.31 — [data-kpi] role=button tiles (Home ke top agents) keyboard se bhi khulein
+      if ((e.key === 'Enter' || e.key === ' ') && e.target && e.target.matches && e.target.matches('[data-kpi][role="button"]')) { e.preventDefault(); e.target.click(); }
+    });
     document.addEventListener('click', (e) => {
       // 🔗 Current page ka link dobara click → page re-render (hashchange nahi aata tha → dead click).
       const sameLink = e.target.closest && e.target.closest('a[href^="#"]');

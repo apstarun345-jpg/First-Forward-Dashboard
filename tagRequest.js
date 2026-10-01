@@ -160,16 +160,26 @@ FF.pages = FF.pages || {};
     if (name && (!rec.name || rec.name === key)) rec.name = name;
     if (tl && !rec.tlName) rec.tlName = tl;
     const ym = row.ym, cls = String(row.cls || '').toUpperCase();
+    // v3.31: channel ka DATA month (FF kal tak · GV live) — 1 tareekh ko FF ka "current" = pichhla month.
+    const mo = monthsFor(channel);
     // Group (VC20 bhi) — class list se pehle, warna VC20 chhoot jaata
     const g = groupOf(cls, row.group);
     rec.eirG = rec.eirG || { cur: { core: 0, comm: 0 }, last: { core: 0, comm: 0 }, hasCur: false, hasLast: false };
-    if (ym === ymNow()) { rec.eirG.cur[g] += num(row.n); rec.eirG.hasCur = true; }
-    if (ym === ymLast()) { rec.eirG.last[g] += num(row.n); rec.eirG.hasLast = true; }
+    if (ym === mo.cur) { rec.eirG.cur[g] += num(row.n); rec.eirG.hasCur = true; }
+    if (ym === mo.last) { rec.eirG.last[g] += num(row.n); rec.eirG.hasLast = true; }
     map.set(key, rec);
     if (!CLASS_LIST.includes(cls)) return rec;
-    if (ym === ymNow()) rec.eirCur[cls] = num(rec.eirCur[cls]) + num(row.n);
-    if (ym === ymLast()) rec.eirLast[cls] = num(rec.eirLast[cls]) + num(row.n);
+    if (ym === mo.cur) rec.eirCur[cls] = num(rec.eirCur[cls]) + num(row.n);
+    if (ym === mo.last) rec.eirLast[cls] = num(rec.eirLast[cls]) + num(row.n);
     return rec;
+  }
+  /** Channel ka data month + uska pichhla month (index build ke waqt ek baar). */
+  let idxMonths = null;
+  function monthsFor(channel) {
+    const ch = channel === 'gv' ? 'gv' : 'ff';
+    if (idxMonths && idxMonths[ch]) return idxMonths[ch];
+    const cur = basisYm(ch);
+    return { cur, last: U.prevMonthKey(cur) };
   }
   /** Poora index — REPORT (FF) + GV REPORT (GV) + EIR class-month. Ek baar banta hai, 60s cache. */
   async function buildIndex(force) {
@@ -186,6 +196,8 @@ FF.pages = FF.pages || {};
       FF.gv && FF.gv.need ? FF.gv.need('report').then(() => (FF.gv.get('report') || [])).catch(() => []) : Promise.resolve([])
     ];
     state.indexPromise = Promise.all(jobs).then(([eirRows, ffAgents, gvRows]) => {
+      idxMonths = null;
+      idxMonths = { ff: monthsFor('ff'), gv: monthsFor('gv') };
       const byKey = new Map();
       const tls = new Map();
       const tlOf = (channel, tlName) => {
@@ -269,7 +281,7 @@ FF.pages = FF.pages || {};
       const list = [...byKey.values()].map((r) => ({
         key: `${r.channel}|${norm(r.name)}`, channel: r.channel, name: r.name, agentId: r.agentId, tlName: r.tlName, priority: r.priority
       }));
-      state.index = { at: Date.now(), byKey, tls, list, cur: ymNow(), last: ymLast() };
+      state.index = { at: Date.now(), byKey, tls, list, cur: idxMonths.ff.cur, last: idxMonths.ff.last, months: idxMonths };
       return state.index;
     }).catch((err) => {
       console.warn('tagRequest index:', err && err.message);
@@ -354,6 +366,8 @@ FF.pages = FF.pages || {};
     } catch { return U.runRateDays(); }
   };
   const perDay = (issued, channel) => num(issued) / basisDays(channel);
+  /** Data month (YYYY-MM) — FF kal tak ka data (1 tareekh = pichhla month), GV live. Expected isi month ke din se. */
+  const basisYm = (channel) => { try { const b = U.channelBasis && U.channelBasis(channel === 'gv' ? 'gv' : 'ff'); return (b && b.ym) || ymNow(); } catch { return ymNow(); } };
   const priorityFor = (cover, fallback) => {
     // Sheet me priority emoji ke saath aati hai ("🟢 Low", "🟡 Medium"…) — clean label banao.
     const raw = String(fallback || '').replace(/[^\p{L}]+/gu, ' ').trim();
@@ -378,7 +392,7 @@ FF.pages = FF.pages || {};
     return {
       core: { stock: exact ? exact.core : num(g.core.stock), last: num(g.core.last), cur: num(g.core.cur) },
       comm: { stock: exact ? exact.comm : num(g.comm.stock), last: num(g.comm.last), cur: num(g.comm.cur) },
-      days: basisDays(rec.channel), ym: ymNow(), exactStock: !!exact
+      days: basisDays(rec.channel), ym: basisYm(rec.channel), exactStock: !!exact
     };
   }
   /** Snapshot → dikhane wale numbers: run rate = MTD ÷ din · expected = month-end projection ·

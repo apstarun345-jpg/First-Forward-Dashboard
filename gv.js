@@ -555,6 +555,17 @@ window.FF = window.FF || {};
     s.agents = new Set(people.map((a) => a.agentId));
     s.tls = new Set(people.filter((a) => !a.directAgent).map((a) => a.tlName || 'Direct'));
     s.directSet = new Set(people.filter((a) => a.directAgent).map((a) => a.agentId));
+    // v3.31: aaj ke LIVE GV Master rows ke agents bhi (EIR rollup kal tak hi hota hai) — warna 1 tareekh ko
+    // MTD 34 tags par "Active agents 0" dikhta tha aur drill-down me 20 agents.
+    const known = new Set([...s.agents].map((x) => U.clean(x).toUpperCase()));
+    for (const r of liveDailyRows()) {
+      if (r.ym !== ym || (upToDay && r.day > upToDay)) continue;
+      const id = U.clean(r.agentId) || U.clean(r.agentName);
+      if (!id || known.has(id.toUpperCase())) continue;
+      known.add(id.toUpperCase()); s.agents.add(id);
+      const direct = FF.config.isDirectAgent ? FF.config.isDirectAgent({ ...r, channel: 'GV Partner' }, 'gv') : !U.clean(r.tlName);
+      if (direct) s.directSet.add(id); else s.tls.add(r.tlName || 'Direct');
+    }
     s.activeAgents = s.agents.size; s.activeTls = s.tls.size; s.directAgents = s.directSet.size;
     Object.assign(s, operationalCommission(ym, upToDay));
     return s;

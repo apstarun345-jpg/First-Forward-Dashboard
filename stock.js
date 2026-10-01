@@ -49,14 +49,19 @@ FF.pages = FF.pages || {};
     const stock = S.get('stock') || [];
     const stockAgents = S.get('stockAgents') || [];
     const stockTypes = S.get('stockTypes') || [];
-    const daily = S.get('daily') || [];
-    const issued = S.get('agents') || [];
-    const latest = M.latestDate(daily);
-    const cur = latest ? U.ymKey(latest) : null;
-    const elapsed = latest ? latest.getDate() : 0;
+    // v3.31: FF Stock page = FF ka issuance (StockDataa FF stock hai). Pehle `daily` me GV live rows bhi thi →
+    // 1 tareekh ko "Oct MTD 34" (GV ke aaj ke tags) aur cover 1 din par. Ab FF rows + FF data basis
+    // (kal tak · 1 tareekh = pichhle month ke poore din), user ki sheet jaisa.
+    const isFfRow = (r) => r && r.channel !== 'GV Partner' && (!FF.filters || typeof FF.filters.ffVisible !== 'function' || FF.filters.ffVisible(r));
+    const daily = (S.get('daily') || []).filter(isFfRow);
+    const issued = (S.get('agents') || []).filter((a) => a.channel !== 'GV Partner');
+    const fb = U.channelBasis ? U.channelBasis('ff') : null;
+    const latest = M.latestDate(daily) || (fb ? fb.date : null);
+    const cur = fb ? fb.ym : (latest ? U.ymKey(latest) : null);
+    const elapsed = fb ? fb.days : (latest ? latest.getDate() : 0);
     const classes = U.uniq(stock.map((r) => r.cls)).sort((a, b) => clsNum(a) - clsNum(b));
     const tlIssued = new Map(), agIssued = new Map(), agIssuedVc4 = new Map();
-    const agentClass = S.get('agentClass') || [];
+    const agentClass = (S.get('agentClass') || []).filter((a) => a.channel !== 'GV Partner');
     for (const a of issued) { if (a.ym !== cur) continue; tlIssued.set(norm(a.tlName), (tlIssued.get(norm(a.tlName)) || 0) + a.n); agIssued.set(norm(a.name), (agIssued.get(norm(a.name)) || 0) + a.n); }
     for (const a of agentClass) { if (a.ym !== cur || a.group !== 'VC4') continue; agIssuedVc4.set(norm(a.name), (agIssuedVc4.get(norm(a.name)) || 0) + a.n); }
     // 🚗 MTD issued ka 4-way bins (VC4 / VC20 / VC5+) — agent + TL dono ke liye
@@ -271,12 +276,13 @@ FF.pages = FF.pages || {};
     // 🧓 Aged stock (features.agedStock) — stock row ki allocation date se buckets (alag query, fail-safe)
     // 🧓 v3.28 — primary: Agent Allocated At se mahine-wise ageing (VC4+VC20 / VC5+ groups + CSV)
     if (agedBox && FF.stockAge) {
-      agedBox.innerHTML = FF.stockAge.hostHtml({ kind: 'all', key: 'all' }, { title: 'Poora network' }) + '<div id="st-aged-bc" class="dim small"></div>';
+      agedBox.innerHTML = FF.stockAge.hostHtml({ kind: 'all', key: 'all', ch: 'ff' }, { title: 'Poora network' }) + '<div id="st-aged-bc" class="dim small"></div>';
       FF.stockAge.decorate(agedBox);
       FF.stockAge.ready().then((idx) => {
         const note = U.$('#st-aged-note', body);
-        if (!note || !idx) return;
-        note.textContent = `total ${U.fmt(idx.total)} tags${idx.unknown ? ` · ${U.fmt(idx.unknown)} rows me date nahi` : ''}`;
+        const ff = idx && idx.data && idx.data.ff;
+        if (!note || !ff) return;
+        note.textContent = `total ${U.fmt(ff.total)} tags${ff.unknown ? ` · ${U.fmt(ff.unknown)} rows me date nahi` : ''}`;
       });
     }
     const bcBox = U.$('#st-aged-bc', body);

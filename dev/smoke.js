@@ -162,7 +162,12 @@ await run('autocomplete dropdown stays outside/below search input', async () => 
 });
 await run('store.preload', async () => { await FF.store.preload(false); const st = FF.store.state; const errs = Object.entries(st.errors || {}).filter(([, e]) => e); if (errs.length) throw new Error('dataset errors: ' + errs.map(([k, e]) => `${k}: ${e.message || e}`).join(' | ')); });
 for (const ds of FF.store.DATASETS ? Object.keys(FF.store.DATASETS) : ['daily', 'agents', 'agentClass', 'status', 'stock', 'stockAgents', 'stockTypes', 'report']) {
-  await run(`dataset ${ds}`, async () => { const v = await FF.store.need(ds); const n = Array.isArray(v) ? v.length : v && v.rows ? v.rows.length : -1; if (n <= 0) throw new Error(`empty (${n})`); log(`      ${ds}: ${n} rows`); });
+  await run(`dataset ${ds}`, async () => {
+    const v = await FF.store.need(ds); const n = Array.isArray(v) ? v.length : v && v.rows ? v.rows.length : -1;
+    // agentDailyClass = AAJ ka EIR agent × class — FF data T+1 hai (asli sheet jaisa mock), isliye aaj khaali ho sakta hai
+    if (n <= 0 && !(n === 0 && ds === 'agentDailyClass' && FF.filters && FF.filters.ffLagOn && FF.filters.ffLagOn())) throw new Error(`empty (${n})`);
+    log(`      ${ds}: ${n} rows${n === 0 ? ' (FF T+1 — aaj ka EIR kal aayega)' : ''}`);
+  });
 }
 await run('store.suggestions', async () => { const s = FF.store.suggestions({ agents: true, tls: true }); if (!s.length) throw new Error('no suggestions'); if (s.some((x) => /^APS$/i.test(x.label) && x.kind === 'tl')) throw new Error('APS leaked into TL suggestions'); log(`      ${s.length} suggestions, e.g. ${s.slice(0, 3).map((x) => `${x.kind}:${x.label}`).join(', ')}`); });
 
@@ -247,7 +252,14 @@ await run('gv aggregations + people', async () => {
   if (!series.totals.some((n) => n > 0)) throw new Error('dailySeries empty');
   log(`      months ${months.join(', ')} · latest ${FF.util.ymKey(FF.gv.latestDate())} total ${s.total} · week buckets ${weekly.length} · agents ${agents.length} · tls ${tls.length} · people ${ppl.agents.length}/${ppl.tls.length}`);
 });
-await run('page home', async () => { const r = root(); await pages.home.render(r, {}, {}); await settle(150); const all = [r.innerHTML, ...REG.values().map((e) => e.innerHTML), ...body.children.map((c) => c.innerHTML)].join('\n'); if (!/Champions of/.test(all)) throw new Error('gamification champions card missing from home'); }, true);
+await run('page home', async () => {
+  const r = root(); await pages.home.render(r, {}, {}); await settle(150);
+  const all = [r.innerHTML, ...REG.values().map((e) => e.innerHTML), ...body.children.map((c) => c.innerHTML)].join('\n');
+  // Champions card is mahine ke EIR rollup se — mahine ki 1 tareekh ko (FF T+1, GV EIR kal tak) abhi koi champion nahi hota
+  const ym = FF.util.ymKey(new Date());
+  const hasMonthData = (FF.store.get('agents') || []).some((a) => a.ym === ym) || (FF.gv.agentRollup ? FF.gv.agentRollup(ym).length > 0 : false);
+  if (!/Champions of/.test(all) && hasMonthData) throw new Error('gamification champions card missing from home');
+}, true);
 await run('v3.11 · Home me master search panel + "Aaj ka din" memories', async () => {
   const r = root(); await pages.home.render(r, {}, {}); await settle(400);
   const html = [r.innerHTML, ...REG.values().map((e) => e.innerHTML)].join('\n');
@@ -408,9 +420,11 @@ await run('executive cockpit · FF/GV combined me double count nahi + colourful 
   if (!/Full data/.test(html)) throw new Error('executive KPI cards par click-hint (Full data) nahi hai');
   // 📦 Field stock: GV master ID 5845036 wali StockDataa rows FF total se exclude honi chahiye.
   const stockAgents = FF.store.get('stockAgents') || [];
-  const gvHeld = stockAgents.filter((x) => String(x.agentId || '').trim() === '5845036').reduce((n, x) => n + (x.n || 0), 0);
+  // GV parked = master ID 5845036 ke naam, ya TL "ApnaPayment Pvt. Ltd." (asli sheet me agent khaali master rows)
+  const parked = (x) => String(x.agentId || '').trim() === '5845036' || /^apnapayment pvt\.? ltd\.?$/i.test(String(x.tlName || '').trim());
+  const gvHeld = stockAgents.filter(parked).reduce((n, x) => n + (x.n || 0), 0);
   if (!(gvHeld > 0)) throw new Error('mock StockDataa me GV master ID wali rows hi nahi — exclusion test meaningless');
-  const ffClean = stockAgents.filter((x) => String(x.agentId || '').trim() !== '5845036').reduce((n, x) => n + (x.n || 0), 0);
+  const ffClean = stockAgents.filter((x) => !parked(x)).reduce((n, x) => n + (x.n || 0), 0);
   const gvStock = (FF.gv.get('stockClass') || []).reduce((n, x) => n + (x.n || 0), 0);
   const combined = FF.util.fmt(ffClean + gvStock);
   if (!html.includes(`<b>${combined}</b>`)) throw new Error(`Combined field stock <b>${combined}</b> executive me nahi dikha — GV master ${FF.util.fmt(gvHeld)} exclude hua?`);
@@ -557,7 +571,8 @@ await run('v3.16.1 · Office Bell + Voice Announcer (agent-wise query + announce
   const e = FF.config.eir;
   const today = FF.util.dateKey(new Date());
   const t = await FF.data.query(e.sheet, `select ${e.agentName}, count(${e.tagId}) where ${e.date} = date '${today}' group by ${e.agentName}`, { timeoutMs: 20000, fresh: true });
-  if (!t || !t.rows || !t.rows.length) throw new Error('agent-wise live query returned no rows');
+  // FF EIR T+1 hai — aaj ki FF rows kal aati hain (asli sheet jaisa mock); tab query khaali hona sahi hai
+  if ((!t || !t.rows || !t.rows.length) && !(FF.filters && FF.filters.ffLagOn && FF.filters.ffLagOn())) throw new Error('agent-wise live query returned no rows');
   const single = FF.officeBell.announceText([{ ch: 'FF', agent: 'Rahul Sharma', n: 5 }], 5);
   if (!/Rahul/.test(single) || !/5/.test(single)) throw new Error('single-agent announce text galat: ' + single);
   const multi = FF.officeBell.announceText([{ ch: 'FF', agent: 'Rahul', n: 5 }, { ch: 'GV', agent: 'Priya', n: 3 }, { ch: 'FF', agent: 'Amit', n: 2 }], 10);
@@ -1066,7 +1081,7 @@ for (const spec of kpiSpecs) {
 }
 await run('kpiDetail raw EIR toDate range query', async () => {
   const e = FF.config.eir;
-  const daily = FF.store.get('daily') || [];
+  const daily = (FF.store.get('daily') || []).filter((r) => r.channel !== 'GV Partner');   // EIR = FF ledger (GV live rows GV Master se)
   const last = FF.model.latestDate(daily);
   const key = FF.util.dateKey(last);
   const t = await FF.data.query(e.sheet, `select ${e.date}, ${e.tagId}, ${e.cls} where toDate(${e.date}) >= date '${key}' and toDate(${e.date}) <= date '${key}' order by ${e.date} desc limit 60000`, {});
@@ -1179,8 +1194,11 @@ await run('🧓 Stock ageing — Agent Allocated At se 1/3/5/6+ mahine · VC4+VC
   if (!FF.stockAge) throw new Error('stockAge module load nahi hua (index.html/sw.js me hai?)');
   const idx = await FF.stockAge.ready();
   if (!idx) throw new Error('stock ageing index nahi bana — ' + (FF.stockAge.error || 'unknown'));
-  if (!idx.total) throw new Error('StockDataa se koi dated row nahi mili');
+  if (!idx.data || !idx.data.ff || !idx.data.ff.total) throw new Error('StockDataa se koi dated row nahi mili');
+  if (!idx.data.gv || !idx.data.gv.total) throw new Error('v3.31: GV (Tag Assignment) ageing nahi bani');
+  if (!(idx.data.gv.matched > 0)) throw new Error('GV tags StockDataa se match nahi hue (tag ID / serial)');
   const allHtml = FF.stockAge.html({ kind: 'all', key: 'all' });
+  if ((allHtml.match(/data-age-block=/g) || []).length !== 2) throw new Error('network ageing me FF + GV dono blocks chahiye');
   if (!/VC4 \+ VC20/.test(allHtml)) throw new Error('VC4+VC20 group row nahi mili');
   if (!/VC5\+ \(commercial\)/.test(allHtml)) throw new Error('VC5+ group row nahi mili');
   for (const s of ['≥ 1 mahina', '≥ 3 mahine', '≥ 5 mahine', '≥ 6 mahine']) if (!allHtml.includes(s)) throw new Error(`bucket column nahi mila: ${s}`);
@@ -1190,16 +1208,21 @@ await run('🧓 Stock ageing — Agent Allocated At se 1/3/5/6+ mahine · VC4+VC
   const list = (FF.pages.performance && FF.pages.performance.agents ? FF.pages.performance.agents() : []).filter((a) => !a.isMaster && (a.stockTotal || 0) > 0);
   if (!list.length) throw new Error('stock wala koi agent nahi mila');
   const a = list[0];
-  const scope = { kind: 'agent', key: a.id || a.name };
-  const node = FF.stockAge.forAgent(scope.key);
+  const scope = { kind: 'agent', key: a.id || a.name, keys: [a.agentId, a.name], ch: 'ff' };
+  const node = FF.stockAge.forAgent([a.id, a.agentId, a.name], 'ff');
   if (!node) throw new Error('agent ka ageing node nahi mila: ' + scope.key);
-  const older6 = FF.stockAge.tagsOlder(node, 6);
-  if (!older6.length) throw new Error('6 mahine se purane tags nahi mile');
-  const csvN = FF.stockAge.csv(scope, 6);
-  if (csvN !== older6.length) throw new Error(`CSV count mismatch: ${csvN} vs ${older6.length}`);
+  const n6 = (node.counts.core[6] || 0) + (node.counts.comm[6] || 0);
+  const older6 = await FF.stockAge.fetchTags(scope, 6, '', 5000);
+  if (!older6.total || older6.total !== n6) throw new Error(`6 mahine se purane tags: list ${older6.total} vs bucket ${n6}`);
+  const csvN = await FF.stockAge.csv(scope, 6);
+  if (csvN !== older6.total) throw new Error(`CSV count mismatch: ${csvN} vs ${older6.total}`);
   if (!FF.stockAge.chipText(scope)) throw new Error('agent chip text khaali hai');
   if (FF.stockAge.groupOf('VC4') !== 'core' || FF.stockAge.groupOf('VC20') !== 'core' || FF.stockAge.groupOf('VC5') !== 'comm' || FF.stockAge.groupOf('VC16') !== 'comm') throw new Error('class grouping galat (VC4/VC20 → core, VC5+ → comm)');
-  log(`      ageing: ${FF.util.fmt(idx.total)} dated tags · ${older6.length} tags ≥6M (${a.name}) · CSV ok`);
+  // 🧓 v3.31 — har drawer me ageing: performance agent drawer kholo → section aana chahiye
+  pages.performance.openAgent(a.__row);
+  const dh = (REG.get('drawer-body') || {}).innerHTML || '';
+  if (!/data-drawer-age/.test(dh)) throw new Error('agent drawer me stock ageing section nahi');
+  log(`      ageing: FF ${FF.util.fmt(idx.data.ff.total)} · GV ${FF.util.fmt(idx.data.gv.total)} (${FF.util.fmt(idx.data.gv.matched)} matched) · ${older6.total} tags ≥6M (${a.name}) · CSV ok · drawer ok`);
 });
 await run('🖨️ Dispatch label — A4 print me FROM+TO left·right repeat + text size + share/copy', async () => {
   const r = {
@@ -1281,10 +1304,11 @@ await run('🔁 FF T+1 lag · aaj FF 0 (kal aayega), GV live · kpiDetail bhi la
 
 await run('👥 KPI drill: agent drawer (kisne lagaye) + us agent ka day-wise detail', async () => {
   const daily = FF.store.get('daily') || [];
-  const gv = daily.filter((r) => r.channel === 'GV Partner');
+  const ym = FF.util.ymKey(new Date());
+  // is mahine ka GV agent (mahine ki 1 tareekh ko sirf aaj ke live rows hote hain — purane month ka agent drill khaali deta)
+  const gv = daily.filter((r) => r.channel === 'GV Partner' && r.ym === ym);
   const pick = (rows) => rows.slice().sort((a, b) => (b.n || 0) - (a.n || 0))[0];
   const gvAgent = pick(gv);
-  const ym = FF.util.ymKey(new Date());
   await FF.kpiDetail.open({ src: 'both', scope: 'mtd', ym, title: 'KPI drill test' });
   let html = drawerHtml();
   if (!/Kisne lagaye/.test(html)) throw new Error('issuance drawer me agent-wise (kisne lagaye) section nahi mila');
@@ -1303,7 +1327,8 @@ await run('👥 KPI drill: agent drawer (kisne lagaye) + us agent ka day-wise de
 await run('🧩 GV agent issuance/class and stock drawers drill progressively', async () => {
   const gvRows = FF.gv.issuanceRows();
   const stockRows = FF.gv.get('stockAgentClass') || [];
-  const profile = gvRows.find((r) => r.agentName && r.n > 0);
+  const ymNow = FF.util.ymKey(new Date());
+  const profile = gvRows.find((r) => r.agentName && r.n > 0 && r.ym === ymNow) || gvRows.find((r) => r.agentName && r.n > 0);
   const stockProfile = stockRows.find((r) => r.agentName && r.n > 0);
   if (!profile || !stockProfile) throw new Error('GV agent / stock fixtures unavailable');
   const ym = FF.util.ymKey(new Date());

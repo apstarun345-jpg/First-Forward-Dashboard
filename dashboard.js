@@ -217,7 +217,9 @@ FF.pages = FF.pages || {};
 
     // KPI drill-down specs (click any card → full breakdown, see kpiDetail.js)
     const latestK = U.dateKey(latest);
-    const specs = [`src=ff&scope=day&date=${latestK}`, `src=ff&scope=mtd&ym=${cur}`, `src=ff&scope=mtd&ym=${cur}&f=vc4`, `src=ff&scope=mtd&ym=${cur}&f=comm`, `src=ff&scope=mtd&ym=${cur}`, `src=ff&scope=mtd&ym=${cur}`, `src=ff&scope=mtd&ym=${cur}&f=repl`, `src=ff&scope=mtd&ym=${cur}&f=chassis`, 'src=ff&scope=stock', `src=ff&scope=agents&ym=${cur}`, `src=ff&scope=mtd&ym=${cur}`, `src=ff&scope=status&ym=${cur}`];
+    // v3.31: ye dashboard EIR ki SAARI rows (FF + GV channel + GV live aaj) se banta hai — isliye drill bhi
+    // src=both (pehle src=ff tha → card 34 dikhata, drawer 0). Stock card FF StockDataa ka hi hai.
+    const specs = [`src=both&scope=day&date=${latestK}`, `src=both&scope=mtd&ym=${cur}`, `src=both&scope=mtd&ym=${cur}&f=vc4`, `src=both&scope=mtd&ym=${cur}&f=comm`, `src=both&scope=mtd&ym=${cur}`, `src=both&scope=mtd&ym=${cur}`, `src=both&scope=mtd&ym=${cur}&f=repl`, `src=both&scope=mtd&ym=${cur}&f=chassis`, 'src=ff&scope=stock', `src=both&scope=agents&ym=${cur}`, `src=both&scope=mtd&ym=${cur}`, `src=both&scope=status&ym=${cur}`, `src=both&scope=day&date=${latestK}`];
     kpis.forEach((html, i) => { if (specs[i]) kpis[i] = html.replace('<div class="kpi ', `<div data-kpi="${esc(specs[i])}" class="kpi `); });
 
     // charts data

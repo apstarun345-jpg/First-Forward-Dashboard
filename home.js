@@ -160,11 +160,13 @@ FF.pages = FF.pages || {};
       </div><div class="glance-footer"><span>${esc(sourceDate ? `Source latest date ${U.labelDate(sourceDate, true)}` : '')} · 🟩 GV aaj <b>GV Master sheet</b> se (live${gvMasterReady ? '' : ' · load ho raha hai'}) · 🟦 FF aaj <b>EIR</b> se (T+1)</span><button class="btn small" data-action="focus-mode">🎯 Focus mode</button><button class="btn small" data-action="notifications">🔔 Notifications</button></div></section>`;
       const topMount = U.$('#home-top-agents', glance);
       if (topMount) {
+        // v3.31: channel + agent dono se key (ek naam dono channel me ho to alag) · click = usi agent ka
+        // usi month ka drill (pehle poore GV / FF ka MTD khulta tha, ya galat channel ka Performance page).
         const byAgent = new Map();
-        st.rows.forEach((r) => { const k = r.agentName || r.agentId || '—'; const cur = byAgent.get(k) || { n: 0, gv: false }; cur.n += r.n; cur.gv = cur.gv || r.channel === 'GV Partner'; byAgent.set(k, cur); });
-        const top = [...byAgent.entries()].sort((a, b) => b[1].n - a[1].n).slice(0, 5);
+        st.rows.forEach((r) => { const gv = r.channel === 'GV Partner'; const name = r.agentName || r.agentId || '—'; const k = `${gv ? 'gv' : 'ff'}|${name}`; const cur = byAgent.get(k) || { n: 0, gv, name, id: r.agentId || '' }; cur.n += r.n; if (!cur.id && r.agentId) cur.id = r.agentId; byAgent.set(k, cur); });
+        const top = [...byAgent.values()].sort((a, b) => b.n - a.n).slice(0, 5);
         topMount.innerHTML = top.length
-          ? top.map(([name, v], i) => `<a href="#/performance?agent=${encodeURIComponent(name)}" class="glance-agent" data-kpi="src=${v.gv ? 'gv' : 'ff'}&scope=mtd&ym=${esc(curKey)}&f=${v.gv ? 'gv' : 'ff'}" data-kpi-title="${esc(name)}"><span class="rank">${i + 1}</span><b>${esc(name)}</b><span class="tag ${v.gv ? 'gv' : 'ff'}">${v.gv ? 'GV' : 'FF'}</span><strong>${U.fmt(v.n)}</strong></a>`).join('')
+          ? top.map((v, i) => { const ch = v.gv ? 'gv' : 'ff'; const spec = `src=${ch}&scope=mtd&ym=${curKey}&agent=${encodeURIComponent(v.name)}&agentId=${encodeURIComponent(v.id)}&channel=${ch}`; return `<div role="button" tabindex="0" class="glance-agent" data-kpi="${esc(spec)}" data-kpi-title="${esc(`${v.name} · ${v.gv ? 'GV' : 'FF'} agent`)}" data-kpi-value="${esc(U.fmt(v.n))}" title="Click → ${esc(v.name)} ka ${esc(U.labelYM(curKey, true))} detail"><span class="rank">${i + 1}</span><b>${esc(v.name)}</b><span class="tag ${ch}">${v.gv ? 'GV' : 'FF'}</span><strong>${U.fmt(v.n)}</strong></div>`; }).join('')
           : '<p class="dim small">Is filter me koi issuance nahi mili.</p>';
       }
     }

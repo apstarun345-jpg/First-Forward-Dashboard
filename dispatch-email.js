@@ -124,13 +124,25 @@ export function buildDispatchPlan(sourceAgents, schedule, options = {}) {
   const settings = options.settings || {};
   const now = options.now instanceof Date ? options.now : new Date();
   const days = Math.max(1, Number(options.days) || 15);
-  const elapsed = Math.max(1, now.getUTCDate() - 1); // now is shifted to IST by the caller
+  // 📐 v3.31 — run-rate ÷ (aaj − 1) jaisa sheet karti hai, par DATE ke hisaab se: 1 tareekh ko (aaj − 1) =
+  // pichhle month ka aakhri din (30 Sep → 30 din), 1 nahi. Server EIR overlay har channel ka asli data month
+  // + din `options.elapsed = { ff, gv }` me bhejta hai; na mile to (now − 1 din).getDate().
+  const yesterday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1)); // now is shifted to IST by the caller
+  const fallback = Math.max(1, yesterday.getUTCDate());
+  const given = options.elapsed;
+  const elapsedOf = (ch) => {
+    if (given && typeof given === 'object' && Number(given[ch]) > 0) return Number(given[ch]);
+    if (Number(given) > 0) return Number(given);
+    return fallback;
+  };
+  const elapsedFf = elapsedOf('ff'), elapsedGv = elapsedOf('gv');
+  const elapsed = elapsedFf === elapsedGv ? elapsedFf : { ff: elapsedFf, gv: elapsedGv };
   const chosenChannel = cfg.channel || 'all';
   const channels = multiValues(chosenChannel);
   const channelOk = (r) => !channels.size || channels.has(r.ch);
   const basis = cfg.basis || 'total';
   const agents = (sourceAgents || []).filter(channelOk)
-    .map((r) => calculate(r, basis, days, elapsed))
+    .map((r) => calculate(r, basis, days, elapsedOf(r.ch)))
     .filter((r) => priorityMatches(r, cfg.priority || 'all'));
 
   const groups = new Map();
@@ -171,7 +183,7 @@ export function buildDispatchPlan(sourceAgents, schedule, options = {}) {
     tlRow.last = components('last');
     if (sourceStock) tlRow.stock = sourceStock.tlStock;
     else tlRow.stock = components('stock');
-    const calc = calculate(tlRow, basis, days, elapsed);
+    const calc = calculate(tlRow, basis, days, elapsedOf(group.ch));
     calc.priority = priority; // TL priority is the sheet TL value; keep a combined "High / Medium" unchanged.
     if (priorityMatches(calc, cfg.priority || 'all')) tls.push(calc);
   }
@@ -195,7 +207,7 @@ export function buildDispatchPlan(sourceAgents, schedule, options = {}) {
   const sort = (a, b) => b.net - a.net || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
   agents.sort(sort); tls.sort(sort);
   const cap = Math.max(1, Number(cfg.maxRows) || 250);
-  return { agents: agents.slice(0, cap), tls: tls.slice(0, cap), summary, days, elapsed, basis, channel: chosenChannel, priority: cfg.priority || 'all' };
+  return { agents: agents.slice(0, cap), tls: tls.slice(0, cap), summary, days, elapsed, months: options.months || null, basis, channel: chosenChannel, priority: cfg.priority || 'all' };
 }
 
 const csvCell = (value) => `"${String(value === null || value === undefined ? '' : value).replace(/"/g, '""')}"`;
@@ -214,6 +226,15 @@ function htmlEscape(value) {
   return String(value === null || value === undefined ? '' : value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+/** "28" ya "FF 30 (2026-09) · GV 1 (2026-10)" — per-channel divisor readable text. */
+function elapsedText(plan) {
+  const e = plan.elapsed;
+  const m = plan.months || {};
+  if (e && typeof e === 'object') return ['ff', 'gv'].filter((c) => e[c]).map((c) => `${c === 'gv' ? 'GV' : 'FF'} ${e[c]}${m[c] ? ` (${m[c]})` : ''}`).join(' · ');
+  const months = [...new Set(Object.values(m).filter(Boolean))];
+  return `${e}${months.length === 1 ? ` (${months[0]})` : ''}`;
+}
+
 export function dispatchEmailContent(plan, schedule, brand = 'Dashboard', date = '') {
   const chosen = new Set(schedule.sections || []);
   const s = plan.summary;
@@ -229,7 +250,7 @@ export function dispatchEmailContent(plan, schedule, brand = 'Dashboard', date =
   const text = [
     `${brand} · Dispatch Planner · ${date}`,
     `${channel} · ${basis} · ${priority}`,
-    `Run-rate uses ${plan.elapsed} elapsed day(s); required horizon ${plan.days} day(s).`,
+    `Run-rate uses ${elapsedText(plan)} elapsed day(s) — issuance ÷ (today − 1); required horizon ${plan.days} day(s).`,
     chosen.has('summary') ? `Summary: ${s.agents} agents · current ${s.current} · last month ${s.last} · run-rate ${s.rate.toFixed(2)}/day · required ${s.required} · stock ${s.stock} · dispatch with stock ${s.net} · without subtracting stock ${s.gross}.` : '',
     chosen.has('summary') ? `Source priority rows: High ${s.high} · Medium ${s.medium} · Low ${s.low} · Other / unchanged source value ${s.source}.` : '',
     chosen.has('agents') ? `Agent-wise CSV: ${plan.agents.length} row(s) attached (maximum ${schedule.maxRows}).` : '',
@@ -243,6 +264,6 @@ export function dispatchEmailContent(plan, schedule, brand = 'Dashboard', date =
   const summaryHtml = chosen.has('summary') ? `<table cellpadding="7" cellspacing="0" border="1" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:13px"><tbody>${[
     ['Agents', s.agents], ['Current', s.current], ['Last month', s.last], ['Run-rate / day', s.rate.toFixed(2)], ['Required', s.required], ['Stock', s.stock], ['Dispatch with stock', s.net], ['Dispatch without subtracting stock', s.gross], ['High priority (source)', s.high], ['Medium priority (source)', s.medium], ['Low priority (source)', s.low], ['Other / source value', s.source]
   ].map(([k, v]) => `<tr><th align="left">${htmlEscape(k)}</th><td>${htmlEscape(v)}</td></tr>`).join('')}</tbody></table>` : '<p>See attached dispatch data.</p>';
-  const html = `<div style="font-family:Arial,Helvetica,sans-serif;color:#0f172a"><h2>${htmlEscape(brand)} · Dispatch Planner · ${htmlEscape(date)}</h2><p>${htmlEscape(channel)} · ${htmlEscape(basis)} · ${htmlEscape(priority)}</p><p>Run-rate = issuance ÷ ${plan.elapsed} elapsed day(s) · Required horizon = ${plan.days} day(s).</p>${summaryHtml}<p style="color:#64748b;font-size:12px">Priority values are from the source reports. Unknown / blank values were left unchanged.</p></div>`;
+  const html = `<div style="font-family:Arial,Helvetica,sans-serif;color:#0f172a"><h2>${htmlEscape(brand)} · Dispatch Planner · ${htmlEscape(date)}</h2><p>${htmlEscape(channel)} · ${htmlEscape(basis)} · ${htmlEscape(priority)}</p><p>Run-rate = issuance ÷ ${htmlEscape(elapsedText(plan))} elapsed day(s) (today − 1) · Required horizon = ${plan.days} day(s).</p>${summaryHtml}<p style="color:#64748b;font-size:12px">Priority values are from the source reports. Unknown / blank values were left unchanged.</p></div>`;
   return { subject, text, html, attachments };
 }

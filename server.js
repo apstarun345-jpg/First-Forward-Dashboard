@@ -16,6 +16,7 @@ import { sheetsStoreFromEnv } from './sheets-storage.js';
 import { appsScriptStoreFromEnv, AppsScriptStore } from './apps-script-storage.js';
 import { sendMail, mailConfigured, diagnoseMail, mailHint, availableProviders, resolveProviders, resetMailMemo, MAIL_PROVIDERS, splitRecipients } from './mailer.js';
 import { DEFAULT_DISPATCH_EMAIL, normalizeDispatchEmail, buildDispatchPlan, dispatchEmailContent } from './dispatch-email.js';
+import { buildStockAgeIndex, summaryOf as stockAgeSummary, tagsFor as stockAgeTags } from './stock-age.js';
 import { loadFfDispatchRows, loadGvDispatchRows } from './dispatch-report.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -45,7 +46,7 @@ const MIME = {
   '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.ico': 'image/x-icon',
   '.txt': 'text/plain; charset=utf-8', '.md': 'text/plain; charset=utf-8'
 };
-const BLOCKED_FILES = new Set(['server.js', 'sheets-storage.js', 'apps-script-storage.js', 'mailer.js', 'DEPLOYMENT.md', 'SHEETS_STORAGE.md', 'STORAGE_SETUP.md', 'package.json', 'package-lock.json', 'render.yaml', 'README.md', '.env']);
+const BLOCKED_FILES = new Set(['server.js', 'sheets-storage.js', 'apps-script-storage.js', 'mailer.js', 'stock-age.js', 'DEPLOYMENT.md', 'SHEETS_STORAGE.md', 'STORAGE_SETUP.md', 'package.json', 'package-lock.json', 'render.yaml', 'README.md', '.env']);
 const BLOCKED_DIRS = new Set(['data', 'dev', 'node_modules', '.git', 'google-apps-script']);
 
 // ---------------------------------------------------------------------------------------------
@@ -1551,6 +1552,66 @@ async function stockSnapshotFrom(sheetId, sheet, clsCol, tagCol, label) {
     return total ? { total, classes } : null;
   } catch (err) { console.warn(`${label || 'stock'} snapshot:`, err.message); return null; }
 }
+// ---------------------------------------------------------------------------------------------
+// 🧓 Stock ageing (v3.31) — StockDataa + Tag Assignment ek baar padh kar compact index (10 min cache).
+// Browser ab 1 lakh rows download nahi karta; har drawer / page sirf agent-TL ke bucket counts leta hai.
+// ---------------------------------------------------------------------------------------------
+const STOCK_AGE_TTL = 10 * 60e3;
+const stockAgeState = { at: 0, index: null, promise: null, key: '' };
+const colLetter = (v, fallback) => { const c = String(v || fallback || '').trim().toUpperCase(); return /^[A-Z]{1,3}$/.test(c) ? c : ''; };
+async function gvizRowsServer(sheetId, sheet, letters, where) {
+  const cols = letters.filter(Boolean);
+  const tq = `select ${cols.join(', ')}${where ? ` where ${where}` : ''}`;
+  const params = new URLSearchParams({ id: String(sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet, tq });
+  const out = await fetchUpstreamCached(upstreamUrl(params));
+  if (out.status < 200 || out.status >= 300) throw new Error(`${sheet}: Google responded ${out.status}`);
+  const table = parseGvizServer(out.body);
+  // gviz column id (letter) se index — label row ki galti se order na bigde.
+  const ids = (table.cols || []).map((c) => String(c.id || '').toUpperCase());
+  const at = (L) => { const i = ids.indexOf(L); return i >= 0 ? i : cols.indexOf(L); };
+  return { rows: table.rows || [], at };
+}
+async function loadStockAgeIndex() {
+  const s = db.settings || {};
+  const st = s.stock || {};
+  const A = (s.gv && s.gv.assignment) || {};
+  const errors = {};
+  const ffL = { id: colLetter(st.id, 'A'), tagId: colLetter(st.tagId, 'C'), barcode: colLetter(st.barcode, 'D'), cls: colLetter(st.cls, 'E'), bcDate: colLetter(st.bcAllocatedAt, 'G'), agentId: colLetter(st.agentId, 'H'), agentName: colLetter(st.agentName, 'I'), agentDate: colLetter(st.agentAllocatedAt, 'J'), tl: colLetter(st.tlName, 'K') };
+  const gvL = { cls: colLetter(A.cls, 'A'), tagId: colLetter(A.tagId, 'B'), serial: colLetter(A.serial, 'C'), status: colLetter(A.status, 'D'), agentId: colLetter(A.agentId, 'E'), agentName: colLetter(A.agentName, 'F'), tlId: colLetter(A.tlId, 'G'), tlName: colLetter(A.tlName, 'H'), date: colLetter(A.allocatedAt, '') };
+  const pick = (row, idx) => (idx >= 0 ? serverCell(row, idx) : '');
+  const ffJob = (async () => {
+    const letters = [...new Set(Object.values(ffL).filter(Boolean))];
+    const { rows, at } = await gvizRowsServer(s.sheetId, s.stockSheet || 'StockDataa', letters, `${ffL.tagId} is not null`);
+    const ix = Object.fromEntries(Object.entries(ffL).map(([k, L]) => [k, L ? at(L) : -1]));
+    return rows.map((row) => ({ id: pick(row, ix.id), tagId: pick(row, ix.tagId), barcode: pick(row, ix.barcode), cls: pick(row, ix.cls), bcDate: pick(row, ix.bcDate), agentId: pick(row, ix.agentId), agentName: pick(row, ix.agentName), agentDate: pick(row, ix.agentDate), tl: pick(row, ix.tl) }));
+  })().catch((err) => { errors.ff = err.message; return []; });
+  const gvJob = (async () => {
+    if (!s.gvSheetId) return [];
+    const letters = [...new Set(Object.values(gvL).filter(Boolean))];
+    const { rows, at } = await gvizRowsServer(s.gvSheetId, A.tab || 'Tag Assignment', letters, `${gvL.tagId} is not null`);
+    const ix = Object.fromEntries(Object.entries(gvL).map(([k, L]) => [k, L ? at(L) : -1]));
+    return rows.map((row) => ({ cls: pick(row, ix.cls), tagId: pick(row, ix.tagId), serial: pick(row, ix.serial), status: pick(row, ix.status), agentId: pick(row, ix.agentId), agentName: pick(row, ix.agentName), tlId: pick(row, ix.tlId), tlName: pick(row, ix.tlName), date: pick(row, ix.date) }));
+  })().catch((err) => { errors.gv = err.message; return []; });
+  const [ffRows, gvRows] = await Promise.all([ffJob, gvJob]);
+  const [y, m, d] = dateKeyNow().split('-').map(Number);
+  const index = buildStockAgeIndex({ ffRows, gvRows, todayDay: Date.UTC(y, m - 1, d) / 86400e3, masterId: (s.eir && s.eir.gvMasterId) || '5845036', parkedTl: (s.eir && s.eir.gvChannelTl) || 'ApnaPayment Pvt. Ltd.' });
+  if (Object.keys(errors).length) index.errors = errors;
+  return index;
+}
+async function stockAgeIndex(fresh) {
+  const key = JSON.stringify([db.settings.sheetId, db.settings.gvSheetId, db.settings.stockSheet, db.settings.stock, db.settings.gv && db.settings.gv.assignment]);
+  if (!fresh && stockAgeState.index && stockAgeState.key === key && Date.now() - stockAgeState.at < STOCK_AGE_TTL) return stockAgeState.index;
+  if (stockAgeState.promise && stockAgeState.key === key) return stockAgeState.promise;
+  stockAgeState.key = key;
+  stockAgeState.promise = loadStockAgeIndex().then((index) => {
+    // Dono sources fail hue aur purana index hai → purana hi rakho (Google blip par blank mat karo).
+    if (index.errors && index.errors.ff && (index.errors.gv || !db.settings.gvSheetId) && stockAgeState.index) return stockAgeState.index;
+    stockAgeState.index = index; stockAgeState.at = Date.now();
+    return index;
+  }).finally(() => { stockAgeState.promise = null; });
+  return stockAgeState.promise;
+}
+
 /** StockDataa (First Forward) current stock. */
 async function stockSnapshot() {
   const s = db.settings, cfg = s.stock || {};
@@ -2003,10 +2064,13 @@ async function overlayDispatchEirIssuance(agents) {
   const masterCol = e.masterId || 'AU';
   const gvId = String(e.gvMasterId || '5845036').trim().replace(/\\.0+$/, '');
   const today = dateKeyNow();
-  const [y, m] = today.split('-').map(Number);
-  const previous = new Date(Date.UTC(y, m - 2, 1));
-  const previousYm = `${previous.getUTCFullYear()}-${String(previous.getUTCMonth() + 1).padStart(2, '0')}`;
-  const start = `${previousYm}-01`;
+  const [y, m, d] = today.split('-').map(Number);
+  const ymOf = (dt) => `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}`;
+  const previousYm = ymOf(new Date(Date.UTC(y, m - 2, 1)));
+  // 📐 v3.31 — 1 tareekh ko FF ka data month pichhla month hota hai (data kal tak), uska "last month"
+  // usse bhi pehle — isliye 2 mahine peeche se padho.
+  const start = `${ymOf(new Date(Date.UTC(y, m - 3, 1)))}-01`;
+  const yesterdayKey = new Date(Date.UTC(y, m - 1, d - 1)).toISOString().slice(0, 10);
   const fields = [agentIdCol, agentNameCol, gvIdCol, gvNameCol, dateCol, clsCol, masterCol];
   const tq = `select ${fields.join(', ')}, count(${tagCol}) where ${tagCol} is not null and ${dateCol} >= date '${start}' and ${dateCol} <= date '${today}' group by ${fields.join(', ')} order by ${dateCol}`;
   const params = new URLSearchParams({ id: String(sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet, tq });
@@ -2016,6 +2080,8 @@ async function overlayDispatchEirIssuance(agents) {
   const cleanKey = (v) => String(v || '').trim().toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
   const key = (ch, kind, value) => { const x = cleanKey(value); return x ? `${ch}|${kind}:${x}` : ''; };
   const maps = { cur: new Map(), last: new Map() };
+  const parsed = [];
+  const latest = { ff: '', gv: '' };
   const add = (map, ch, id, name, cls, n) => {
     const keys = [key(ch, 'id', id), key(ch, 'name', name)].filter(Boolean);
     if (!keys.length) return;
@@ -2031,11 +2097,29 @@ async function overlayDispatchEirIssuance(agents) {
     const ch = master === gvId ? 'gv' : 'ff';
     const id = ch === 'gv' ? (serverCell(row, 2) || serverCell(row, 0)) : (serverCell(row, 0) || serverCell(row, 2));
     const name = ch === 'gv' ? (serverCell(row, 3) || serverCell(row, 1)) : (serverCell(row, 1) || serverCell(row, 3));
-    const ym = date.slice(0, 7);
-    const map = ym === today.slice(0, 7) ? maps.cur : ym === previousYm ? maps.last : null;
-    if (!map) continue;
-    add(map, ch, id, name, classBucket(serverCell(row, 5)), serverNumber(serverCell(row, 7)));
+    // FF ka data T+1 — aaj ki FF row (agar aa bhi jaye) count nahi; GV aaj tak.
+    if (date > (ch === 'ff' ? yesterdayKey : today)) continue;
+    if (date > latest[ch]) latest[ch] = date;
+    parsed.push({ ch, id, name, date, cls: classBucket(serverCell(row, 5)), n: serverNumber(serverCell(row, 7)) });
   }
+  // Har channel ka data month = uske latest din ka month; divisor = sheet jaisa (aaj − 1), month-aware.
+  const basis = {};
+  for (const ch of ['ff', 'gv']) {
+    const last = latest[ch] || (ch === 'ff' ? yesterdayKey : today);
+    const curYm = last.slice(0, 7);
+    const [ly, lm] = curYm.split('-').map(Number);
+    const lastYm = ymOf(new Date(Date.UTC(ly, lm - 2, 1)));
+    const sameMonth = curYm === today.slice(0, 7);
+    const days = ch === 'gv' && sameMonth ? Math.max(1, d - 1) : Math.max(1, Number(last.slice(8, 10)) || 1);
+    basis[ch] = { curYm, lastYm, days, latest: last };
+  }
+  for (const r of parsed) {
+    const b = basis[r.ch];
+    const ym = r.date.slice(0, 7);
+    const map = ym === b.curYm ? maps.cur : ym === b.lastYm ? maps.last : null;
+    if (map) add(map, r.ch, r.id, r.name, r.cls, r.n);
+  }
+  void previousYm;
   const find = (map, agent) => map.get(key(agent.ch, 'id', agent.agentId || agent.id)) || map.get(key(agent.ch, 'name', agent.name || agent.agentName)) || { vc4: 0, comm: 0, total: 0 };
   // REPORT remains the operational source for stock, priority, status, and TL metadata. Only
   // these current/last issuance fields are replaced, so scheduled email matches the browser EIR path.
@@ -2044,6 +2128,7 @@ async function overlayDispatchEirIssuance(agents) {
     agent.cur = { vc4: cur.vc4, comm: cur.comm, total: cur.total };
     agent.last = { vc4: last.vc4, comm: last.comm, total: last.total };
   });
+  Object.defineProperty(agents, 'basis', { value: basis, enumerable: false });
   return agents;
 }
 async function loadDispatchAgents(channel) {
@@ -2052,6 +2137,12 @@ async function loadDispatchAgents(channel) {
   if (channel !== 'ff') jobs.push(dispatchReportTable('gv').then((table) => loadGvDispatchRows(table, db.settings)));
   const sources = await Promise.all(jobs);
   return overlayDispatchEirIssuance(sources.flat());
+}
+/** buildDispatchPlan ke liye per-channel divisor + data month (overlay ka basis). */
+function dispatchBasisOptions(agents) {
+  const b = agents && agents.basis;
+  if (!b) return {};
+  return { elapsed: { ff: b.ff && b.ff.days, gv: b.gv && b.gv.days }, months: { ff: b.ff && b.ff.curYm, gv: b.gv && b.gv.curYm } };
 }
 async function sendDispatchPlanEmail(force = false, input = null) {
   const saved = db.settings.dispatchEmail || DEFAULT_DISPATCH_EMAIL;
@@ -2079,7 +2170,7 @@ async function sendDispatchPlanEmail(force = false, input = null) {
   }
   const sourceAgents = await loadDispatchAgents(schedule.channel);
   if (!sourceAgents.length) throw new Error('Selected channel ke REPORT sheet me koi dispatch row nahi mili.');
-  const plan = buildDispatchPlan(sourceAgents, schedule, { settings: db.settings, days: Number(feats().suggestDays) || 15, now: ist });
+  const plan = buildDispatchPlan(sourceAgents, schedule, { settings: db.settings, days: Number(feats().suggestDays) || 15, now: ist, ...dispatchBasisOptions(sourceAgents) });
   if (!plan.summary.agents && !plan.summary.tls) throw new Error('Selected filters ke liye dispatch data nahi mila.');
   const email = dispatchEmailContent(plan, schedule, db.settings.brand || 'Dashboard', dateKey);
   const result = await sendMail(mailCfg, email.subject, email.text, { html: email.html, attachments: email.attachments });
@@ -2835,6 +2926,21 @@ async function handleApi(req, res, url) {
     user.notificationsSeenAt = new Date().toISOString();
     await persist('users');
     return sendJson(res, 200, { ok: true, at: user.notificationsSeenAt });
+  }
+  // 🧓 v3.31 stock ageing — summary (agent / TL / network bucket counts, FF + GV) aur tag-level list.
+  if (p === '/api/stock-age' && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required');
+    const index = await stockAgeIndex(url.searchParams.get('fresh') === '1');
+    const body = JSON.stringify(stockAgeSummary(index));
+    return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', body, { 'Cache-Control': 'no-store' });
+  }
+  if (p === '/api/stock-age/tags' && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required');
+    const q = url.searchParams;
+    const split = (v) => String(v || '').split('|').map((x) => x.trim()).filter(Boolean);
+    const index = await stockAgeIndex(false);
+    const out = stockAgeTags(index, { ch: q.get('ch'), kind: q.get('kind'), key: q.get('key') || '', keys: split(q.get('keys')), tls: split(q.get('tls')), months: Number(q.get('months')) || 0, group: q.get('group') || '', unknown: q.get('unknown') === '1', limit: Number(q.get('limit')) || 2000 });
+    return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, ...out }), { 'Cache-Control': 'no-store' });
   }
   // ---- notification preferences (per user: which types show, sound on/off, mobile push) ----
   if (p === '/api/stock-history' && method === 'GET') {
@@ -4806,6 +4912,29 @@ async function personalTeamAgents(link) {
     byAgent.get(name).set(dk, (byAgent.get(name).get(dk) || 0) + serverNumber(serverCell(row, Math.max(0, cells.length - 1))));
   }
   return byAgent;
+}
+
+/** 🧑‍💼 Agent personal link par uska TL (EIR ke recent rows me sabse zyada wala TL naam).
+    v3.31 fix: ye function call ho raha tha par define nahi tha → har agent /p/ link 500 deta tha. */
+async function personalAgentTl(link) {
+  try {
+    const c = personalConfig(link);
+    const { start, today } = personalWindow();
+    const tq = `select ${c.tlCol}, ${c.masterCol}, count(${c.tagCol}) where ${c.tagCol} is not null and ${c.dateCol} >= date '${start}' and ${c.dateCol} <= date '${today}' and ${c.nameCol} = ${gvizLiteral(link.name)} group by ${c.tlCol}, ${c.masterCol}`;
+    const params = new URLSearchParams({ id: String(c.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet: c.sheet, tq });
+    const out = await fetchUpstreamCached(upstreamUrl(params));
+    if (out.status < 200 || out.status >= 300) return '';
+    const table = parseGvizServer(out.body);
+    let best = '', bestN = -1;
+    for (const row of table.rows || []) {
+      const tl = serverCell(row, 0).trim();
+      const gvRow = isGvPersonalRow(serverCell(row, 1));
+      if (!tl || (c.source === 'gv' && !gvRow) || (c.source === 'ff' && gvRow)) continue;
+      const n = serverNumber(serverCell(row, 2));
+      if (n > bestN) { best = tl; bestN = n; }
+    }
+    return best;
+  } catch { return ''; }
 }
 
 function personalStats(rows) {

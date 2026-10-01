@@ -122,6 +122,7 @@ FF.pages = FF.pages || {};
     const total = [...byClass.values()].reduce((n, x) => n + x.total, 0);
     const breakdown = byClass.size ? `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Class</th><th class="num">Tags</th><th class="num">Issuance</th><th class="num">Replacement</th><th>Tag / EIR type</th></tr></thead><tbody>${[...byClass.entries()].sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true })).map(([cls, v]) => `<tr><td><b>${esc(cls)}</b></td><td class="num"><b>${fmt(v.total)}</b></td><td class="num">${fmt(v.issuance)}</td><td class="num">${fmt(v.replacement)}</td><td>${[...v.detail.entries()].sort((a, b) => b[1] - a[1]).map(([label, n]) => `<span class="today-tag-detail">${esc(label)} · <b>${fmt(n)}</b></span>`).join(' ')}</td></tr>`).join('')}</tbody><tfoot><tr><th>Total</th><th class="num">${fmt(total)}</th><th class="num">${fmt([...byClass.values()].reduce((n, x) => n + x.issuance, 0))}</th><th class="num">${fmt([...byClass.values()].reduce((n, x) => n + x.replacement, 0))}</th><th></th></tr></tfoot></table></div>` : `<div class="empty">Aaj is agent ki issuance rows nahi mili.</div>`;
     FF.app.openDrawer({
+      age: { kind: 'agent', key: agentName, ch: channel === 'gv' ? 'gv' : 'ff', title: agentName },
       kicker: channel === 'gv' ? 'GV PARTNER · TODAY' : 'FIRST FORWARD · TODAY',
       title: agentName,
       sub: `Class-wise tag breakdown · ${today} · ${fmt(total)} total tags`,

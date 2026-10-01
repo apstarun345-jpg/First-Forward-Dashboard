@@ -456,6 +456,7 @@
       ...notes.map((n) => ['Note', `${n.status} · ${String(n.createdAt || '').slice(0, 10)}`, String(n.text || '').slice(0, 200)])
     ];
     FF.app.openDrawer({
+      age: { kind: 'agent', key: (ffAgent && (ffAgent.id || ffAgent.agentId)) || (gvRow && gvRow.agentId) || displayName, keys: [displayName, ffAgent && ffAgent.agentId, gvRow && gvRow.agentId].filter(Boolean), ch: ffAgent && gvRow ? '' : gvRow ? 'gv' : 'ff', title: displayName },
       kicker: 'Agent 360', title: displayName, sub: [ffAgent ? 'First Forward' : '', gvRow ? 'GV Partner' : '', crossRow ? 'Dual-channel' : ''].filter(Boolean).join(' · ') || 'Channel: unknown',
       wide: true,
       actions: `<button class="btn small" id="a360-csv">⬇ Agent CSV</button><button class="btn small" id="a360-wa">📲 WhatsApp</button><button class="btn small" id="a360-link">🔗 Copy link</button><button class="btn small" id="a360-print">🖨 Print</button><a class="btn small" href="#/followups">📝 Add note</a>`,

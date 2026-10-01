@@ -95,80 +95,191 @@ window.FF = window.FF || {};
     const d = days || suggestDays();
     return Math.max(0, Math.ceil((Number(avg) || 0) * d));
   }
-  /** 📐 RUN-RATE (poori site ka ek hi formula): jitne issue kiye ÷ (aaj ki date − 1).
-      Aaj ki poori entry abhi nahi aayi hoti, isliye kal tak ke din count hote hain (min 1). */
-  function runRateDays(now) {
-    const d = now instanceof Date ? now : new Date();
-    return Math.max(1, d.getDate() - 1);
+  /** 📐 RUN-RATE (poori site ka ek hi formula) — user ki FF + GV Google Sheet jaisa:
+        run-rate = (data wale) month ka total issue ÷ (aaj ki date − 1)
+      ⚠️ v3.31 fix: "aaj − 1" ab ek DATE hai, sirf din ka number nahi. Pehle `max(1, aaj.getDate() − 1)` tha —
+      1 tareekh ko 1 − 1 = 0 → 1 din, jabki FF sheet (kal = 30 Sep tak ka data) pura September ÷ 30 karti hai.
+      Isliye 1 tareekh ko run-rate, Required, WITH / W/O stock dispatch sab ~30× bade aate the.
+        FF (T+1 data) → din = jis din tak FF ka data aaya (EIR latest / REPORT ka 7-day header), kabhi
+                        (aaj − 1) se aage nahi. 1 Oct → 30 Sep → 30 din, data month = September.
+        GV (live)     → data month = is month → max(1, aaj − 1) (GV sheet jaisa) · aaj abhi GV data nahi aaya
+                        aur pichhla month hi latest hai (1 tareekh subah) → us month ke poore din.
+      runRateDays(now?, ch?) · runRate(issued, ch?) — ch: 'ff' (default) | 'gv'. */
+  const DAY_MS = 86400e3;
+  const sod = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+  const isGvCh = (ch) => /^gv/i.test(String(ch || '').trim());
+  function ffLagCfg() {
+    const raw = typeof FF !== 'undefined' && FF.config ? FF.config.ffIssuanceLagDays : undefined;
+    const n = Number(raw);
+    return raw === undefined || raw === null || raw === '' || !Number.isFinite(n) || n < 0 ? 1 : Math.floor(n);
   }
-  function runRate(issued, now) {
-    return (Number(issued) || 0) / ((FF.util && FF.util.runRateDays) || runRateDays)(now);
+  /** FF ka data kis din tak ho sakta hai: aaj − lag (kam se kam 1 — sheet bhi DAY(TODAY()−1) se ginti hai). */
+  function ffCapDate(now) { return addDays(sod(now instanceof Date ? now : new Date()), -Math.max(1, ffLagCfg())); }
+  /** REPORT "Performance In 7 Days" header (e.g. "30/Sep", "30-Sep-2026", "Sep 30", "30/09", Date(2026,8,30))
+      → Date. Saal na ho to sabse naya saal jisme date `ref` se aage na jaaye (1 Jan ko "31/Dec" = pichhla saal). */
+  function parseDayLabel(label, ref) {
+    const t = clean(label);
+    if (!t) return null;
+    let mt = t.match(/Date\((\d{4}),(\d{1,2}),(\d{1,2})/);
+    if (mt) return new Date(+mt[1], +mt[2], +mt[3]);
+    mt = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (mt) return new Date(+mt[1], +mt[2] - 1, +mt[3]);
+    let d = 0, m = -1, y = null;
+    if ((mt = t.match(/(\d{1,2})[\s/.\-]*([A-Za-z]{3,})\.?(?:[\s/.\-,]+(\d{2,4}))?/))) { d = +mt[1]; m = monthIndex(mt[2]); y = mt[3] ? +mt[3] : null; }
+    else if ((mt = t.match(/([A-Za-z]{3,})\.?[\s/.\-]*(\d{1,2})(?:[\s/.\-,]+(\d{2,4}))?/))) { m = monthIndex(mt[1]); d = +mt[2]; y = mt[3] ? +mt[3] : null; }
+    else if ((mt = t.match(/^(\d{1,2})[/.\-](\d{1,2})(?:[/.\-](\d{2,4}))?$/))) { d = +mt[1]; m = +mt[2] - 1; y = mt[3] ? +mt[3] : null; }
+    if (!(d >= 1 && d <= 31) || !(m >= 0 && m <= 11)) return null;
+    if (y !== null && y < 100) y += 2000;
+    const base = ref instanceof Date ? ref : new Date();
+    if (y === null) { y = base.getFullYear(); if (new Date(y, m, d) > addDays(sod(base), 1)) y -= 1; }
+    const out = new Date(y, m, d);
+    return out.getMonth() === m ? out : null;
   }
-  /** 📅 FF ka data kal aata hai — isliye FF ke run-rate / dispatch / growth "kal tak ke din" par
-      ginne chahiye, aaj ke din par nahi. Divisor REPORT tab ke "Performance In 7 Days" header se
-      aata hai (performance.daysElapsed), aur usse KABHI aaj se bada nahi maana jaata — aaj ka
-      adhoora data count nahi hona chahiye. REPORT load nahi hua to default = aaj − 1.
-      GV ka data LIVE hai (aaj ka chal raha hai), isliye uske liye channelBasis() use karo.
-      Return: { day, back, date, key, label, shortLabel, sheetLabel, days, fromReport, live }. */
-  let basisCache = null;
-  function reportBasis(opts) {
-    const o = opts || {};
-    if (!o.force && basisCache && Date.now() - basisCache.at < 30000) return basisCache.value;
-    const now = new Date();
-    const P = (typeof FF !== 'undefined' && FF.pages && FF.pages.performance) || null;
-    let sheetDay = 0, sheetLabel = '';
-    try { sheetDay = Number(P && P.daysElapsed && P.daysElapsed()) || 0; } catch { sheetDay = 0; }
-    try {
-      const labels = (P && P.dayLabels && P.dayLabels()) || [];
-      sheetLabel = clean(labels[labels.length - 1]);
-    } catch { sheetLabel = ''; }
-    const cap = runRateDays(now);                                   // kabhi aaj tak ka data count nahi
-    const day = sheetDay > 0 && sheetDay <= 31 ? Math.min(sheetDay, cap) : cap;
-    const value = dayBasis(now, day, { sheetLabel, fromReport: sheetDay > 0, capped: day < sheetDay });
-    // REPORT load hone se pehle ka fallback cache mat karo — baad me real day mil sakta hai.
-    if (value.fromReport || !basisCache || basisCache.value.fromReport) basisCache = { at: Date.now(), value };
-    return value;
+  /** Sirf din ka number (label me month nahi) → `cap` ke month me; cap se aage ho to pichhle month me. */
+  function dayOnOrBefore(cap, day) {
+    let d = new Date(cap.getFullYear(), cap.getMonth(), day);
+    if (d > cap || d.getMonth() !== cap.getMonth()) {
+      const pm = new Date(cap.getFullYear(), cap.getMonth() - 1, 1);
+      d = new Date(pm.getFullYear(), pm.getMonth(), Math.min(day, new Date(pm.getFullYear(), pm.getMonth() + 1, 0).getDate()));
+    }
+    return d;
   }
-  /** Day-of-month se basis object (month rollover safe). */
-  function dayBasis(now, day, extra) {
-    const back = Math.max(0, now.getDate() - day);
-    const date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - back);
+  /** FF EIR (authoritative ledger) ka latest din ≤ cap — performance isi se current month chunta hai. */
+  const eirLatestCache = { ref: null, len: -1, cap: '', value: null };
+  function ffEirLatest(cap) {
+    const S = typeof FF !== 'undefined' ? FF.store : null;
+    if (!S || typeof S.get !== 'function') return null;
+    let daily = null;
+    try { daily = S.get('daily'); } catch { daily = null; }
+    if (!Array.isArray(daily) || !daily.length) return null;
+    const capKey = cap ? dateKey(cap) : '9999-12-31';
+    const c = eirLatestCache;
+    if (c.ref === daily && c.len === daily.length && c.cap === capKey) return c.value;
+    let best = '';
+    for (const r of daily) {
+      if (!r || r.channel === 'GV Partner') continue;
+      const k = r.key || (r.d instanceof Date ? dateKey(r.d) : '');
+      if (k && k > best && k <= capKey) best = k;
+    }
+    c.ref = daily; c.len = daily.length; c.cap = capKey; c.value = best ? fromDateKey(best) : null;
+    return c.value;
+  }
+  /** GV data ka latest din (live GV Master / EIR) — 15s cache (har agent par dobara scan na ho). */
+  const gvLatestCache = { at: 0, value: null };
+  function gvLatest(force) {
+    if (!force && Date.now() - gvLatestCache.at < 15000) return gvLatestCache.value;
+    let v = null;
+    try { const G = typeof FF !== 'undefined' ? FF.gv : null; v = G && typeof G.latestDate === 'function' ? G.latestDate() : null; } catch { v = null; }
+    gvLatestCache.at = Date.now(); gvLatestCache.value = v instanceof Date && !isNaN(v) ? sod(v) : null;
+    return gvLatestCache.value;
+  }
+  /** Basis object — { ch, day, days, date, key, ym, monthDays, back, label, shortLabel, live, fromReport, fromEir, fromData, capped, sheetLabel }. */
+  function mkBasis(now, date, extra) {
+    const e = extra || {};
+    const days = Math.max(1, Number(e.days) || date.getDate());
+    const back = Math.max(0, Math.round((sod(now) - sod(date)) / DAY_MS));
     return {
-      day, back, date, key: dateKey(date), days: Math.max(1, day), live: false,
-      sheetLabel: '', fromReport: false, capped: false, ...(extra || {}),
+      live: false, sheetLabel: '', fromReport: false, fromEir: false, fromData: false, capped: false, ...e,
+      day: date.getDate(), days, back, date, key: dateKey(date), ym: ymKey(date), monthDays: daysInMonth(ymKey(date)),
       label: `${dateKey(date)} (${weekday(date)})`, shortLabel: labelDate(date)
     };
   }
-  /** 📅 Channel-wise basis — 'gv' (ya 'GV Partner') = LIVE aaj · baaki sab (FF) = kal tak ka data.
-      Basis object me `live` flag set hota hai taaki UI apna text chun sake. */
+  function ffBasis(now) {
+    const cap = ffCapDate(now);
+    const P = (typeof FF !== 'undefined' && FF.pages && FF.pages.performance) || null;
+    let sheetLabel = '', sheetDay = 0;
+    try { const labels = (P && P.dayLabels && P.dayLabels()) || []; sheetLabel = clean(labels[labels.length - 1]); } catch { sheetLabel = ''; }
+    try { sheetDay = Number(P && P.daysElapsed && P.daysElapsed()) || 0; } catch { sheetDay = 0; }
+    let date = null, src = '';
+    const eir = ffEirLatest(cap);
+    if (eir) { date = eir; src = 'eir'; }
+    if (!date) { const d = parseDayLabel(sheetLabel, cap); if (d) { date = d; src = 'report'; } }
+    if (!date && sheetDay >= 1 && sheetDay <= 31) { date = dayOnOrBefore(cap, sheetDay); src = 'report'; }
+    const fromData = !!date;
+    if (!date) date = cap;
+    let capped = false;
+    if (date > cap) { date = cap; capped = true; }                    // aaj ka adhoora data kabhi count nahi
+    return mkBasis(now, sod(date), { ch: 'ff', live: false, sheetLabel, fromReport: src === 'report', fromEir: src === 'eir', fromData, capped, days: date.getDate() });
+  }
+  function gvBasis(now, force) {
+    const today = sod(now);
+    const latest = gvLatest(force);
+    const date = latest && latest <= today ? latest : today;
+    const sameMonth = date.getFullYear() === today.getFullYear() && date.getMonth() === today.getMonth();
+    const days = sameMonth ? Math.max(1, today.getDate() - 1) : date.getDate();
+    return mkBasis(now, sameMonth ? today : date, { ch: 'gv', live: true, fromData: !!latest, days });
+  }
+  const basisCache = { ff: null, gv: null };
+  function basisSig(gv) {
+    if (gv) return `gv|${(gvLatest() || '').toString()}`;
+    const P = (typeof FF !== 'undefined' && FF.pages && FF.pages.performance) || null;
+    let lab = '', day = '', len = 0;
+    try { const l = (P && P.dayLabels && P.dayLabels()) || []; lab = l[l.length - 1] || ''; day = String((P && P.daysElapsed && P.daysElapsed()) || ''); } catch { /* */ }
+    try { const d = FF.store && FF.store.get && FF.store.get('daily'); len = Array.isArray(d) ? d.length : 0; } catch { len = 0; }
+    return `ff|${lab}|${day}|${len}`;
+  }
+  /** 📅 Channel-wise data basis (ek hi jagah) — opts: { now: Date, force: true }. */
+  function dataBasis(ch, opts) {
+    const o = opts || {};
+    const gv = isGvCh(ch);
+    const k = gv ? 'gv' : 'ff';
+    const custom = o.now instanceof Date;
+    const now = custom ? o.now : new Date();
+    const sig = custom ? '' : basisSig(gv);
+    const c = basisCache[k];
+    if (!o.force && !custom && c && Date.now() - c.at < 30000 && c.sig === sig && c.day === dateKey(now)) return c.value;
+    const value = gv ? gvBasis(now, custom || !!o.force) : ffBasis(now);
+    if (!custom) basisCache[k] = { at: Date.now(), sig, day: dateKey(now), value };
+    return value;
+  }
+  function runRateDays(now, ch) {
+    if (typeof now === 'string' && ch === undefined) { ch = now; now = undefined; }
+    return dataBasis(ch, { now: now instanceof Date ? now : undefined }).days;
+  }
+  /** runRate(issued) · runRate(issued, 'gv') · runRate(issued, date) · runRate(issued, date, 'gv') */
+  function runRate(issued, a, b) {
+    let now, ch;
+    if (typeof a === 'string') ch = a; else { now = a; ch = b; }
+    const days = Number(((FF.util && FF.util.runRateDays) || runRateDays)(now, ch)) || 1;
+    return (Number(issued) || 0) / Math.max(1, days);
+  }
+  /** 📅 FF basis (REPORT / EIR) — purana naam; ab month-aware. */
+  function reportBasis(opts) { return channelBasis('ff', opts); }
+  /** 📅 Channel-wise basis — 'gv' (ya 'GV Partner') = LIVE · baaki sab (FF) = kal tak ka data. */
   function channelBasis(ch, opts) {
-    if (!/^gv/i.test(String(ch || '').trim())) return reportBasis(opts);
-    const now = new Date();
-    return { ...dayBasis(now, Math.max(1, now.getDate()), {}), live: true, fromReport: false };
+    const o = opts || {};
+    const b = dataBasis(ch, o);
+    // Tests / special pages `U.runRateDays` ko stub karte hain — tab bhi sab jagah ek hi divisor rahe.
+    const fn = typeof FF !== 'undefined' && FF.util && FF.util.runRateDays;
+    if (fn && fn !== runRateDays) { const d = Number(fn(o.now, isGvCh(ch) ? 'gv' : 'ff')); if (d > 0 && d !== b.days) return { ...b, days: d }; }
+    return b;
   }
   /** 🗣️ Basis ki line — simple bhasha me, "T-1" jaisa technical shabd nahi. */
   function basisText(ch, b) {
-    const live = b ? !!b.live : /^gv/i.test(String(ch || ''));
+    const live = b ? !!b.live : isGvCh(ch);
+    const bb = b || channelBasis(live ? 'gv' : 'ff');
+    const thisMonth = bb.ym === ymKey(new Date());
     return live
-      ? `Live data — aaj tak ka data (${esc(b ? b.shortLabel : labelDate(new Date()))})`
-      : `Data till ${esc(b ? b.shortLabel : '')} — aaj ka data kal aata hai, isliye run-rate ${b ? b.days : runRateDays()} din ka`;
+      ? `Live data — aaj tak ka data (${esc(bb.shortLabel)}) · run-rate ÷ ${bb.days} din (aaj − 1)${thisMonth ? '' : ` · ${esc(labelYM(bb.ym))} ka poora data`}`
+      : `Data till ${esc(bb.shortLabel)} — aaj ka data kal aata hai, isliye run-rate ${bb.days} din ka${thisMonth ? '' : ` (${esc(labelYM(bb.ym))} ka poora mahina)`}`;
   }
-  /** 🔮 Month-end projection: (issued ÷ basis din) × is month ke din. */
+  /** 🔮 Month-end projection: (issued ÷ basis din) × us month ke din. */
   function projectMonthEnd(issued, elapsed, ym) {
     const n = Number(issued) || 0;
     if (n <= 0) return 0;
     const days = Number(elapsed) > 0 ? Number(elapsed) : reportBasis().days;
-    const total = ym ? daysInMonth(ym) : 30;
+    const total = ym && /^\d{4}-\d{2}$/.test(String(ym)) ? daysInMonth(ym) : 30;
     return Math.round((n / days) * total);
   }
   /** 🚚 Dispatch calculation ek jagah: rate = cur ÷ (today−1) · required = rate × suggestDays ·
       net (WITH stock) = required − stock · gross (W/O stock) = required · cover = stock ÷ rate din.
-      `elapsed` diya ho to usi report-day basis par ginna hai (warna aaj−1). */
+      `elapsed` diya ho to usi basis par; warna `ch` ('ff' | 'gv') ka basis (runRateDays). */
   function dispatchCalc(o) {
     o = o || {};
     const days = o.days || suggestDays();
     const cur = Number(o.cur) || 0, last = Number(o.last) || 0, stock = Number(o.stock) || 0;
-    const elapsed = Number(o.elapsed) > 0 ? Number(o.elapsed) : (((FF.util && FF.util.runRateDays) || runRateDays)());
+    const elapsed = Number(o.elapsed) > 0 ? Number(o.elapsed) : (((FF.util && FF.util.runRateDays) || runRateDays)(undefined, o.ch));
     const rate = cur / elapsed;
     const required = Math.max(0, Math.ceil(rate * days));
     return {
@@ -396,8 +507,41 @@ window.FF = window.FF || {};
     clearTimeout(toast.timer);
     toast.timer = setTimeout(() => { el.hidden = true; }, 3000);
   }
-  function spinner(text) {
-    return `<div class="loading"><div class="spin"></div><div>${esc(text || 'Loading data from Google Sheet…')}</div></div>`;
+  // ---- 🌀 loaders (v3.31) — alag-alag style, hamesha animate (Reduce motion me bhi; CSS dekho) ----------
+  const LOADER_STYLES = ['ring', 'dots', 'bars', 'pulse', 'tag', 'orbit'];
+  const LOADER_LABELS = { mix: 'Mix — har baar naya style', ring: 'Ring (do ghoomte arcs)', dots: 'Dots (uchhalte)', bars: 'Bars (equalizer)', pulse: 'Pulse (radar)', tag: 'FASTag scan', orbit: 'Orbit (satellites)' };
+  const LOADER_INNER = {
+    ring: '<i></i><i></i>',
+    dots: '<i></i><i></i><i></i>',
+    bars: '<i></i><i></i><i></i><i></i><i></i>',
+    pulse: '<i></i><i></i><b></b>',
+    tag: '<span><b></b><em></em></span><i></i>',
+    orbit: '<b></b><i></i><i></i>'
+  };
+  let loaderTurn = Math.floor(Math.random() * LOADER_STYLES.length);
+  /** User ki pasand (♿ Accessibility panel) — 'mix' (default) = har loader par agla style. */
+  function loaderPref() {
+    try { const v = localStorage.getItem('ff_loader_style'); return v && (v === 'mix' || LOADER_STYLES.includes(v)) ? v : 'mix'; } catch { return 'mix'; }
+  }
+  function loaderStyle(style) {
+    const want = style && (style === 'mix' || LOADER_STYLES.includes(style)) ? style : loaderPref();
+    if (want !== 'mix') return want;
+    loaderTurn = (loaderTurn + 1) % LOADER_STYLES.length;
+    return LOADER_STYLES[loaderTurn];
+  }
+  /** Sirf animation (inline) — size: 'sm' | 'md' | 'lg'. */
+  function loader(style, opts) {
+    const o = opts || {};
+    const s = loaderStyle(style);
+    const size = o.size === 'sm' || o.size === 'md' || o.size === 'lg' ? ` ffl-${o.size}` : '';
+    return `<span class="ffl ffl-${s}${size}" data-ffl="${s}" aria-hidden="true">${LOADER_INNER[s]}</span>`;
+  }
+  /** Blinking "…" (3 dots) — loading text ke saath. */
+  const ellipsis = () => '<span class="ffl-ell" aria-hidden="true"><i>.</i><i>.</i><i>.</i></span>';
+  function spinner(text, opts) {
+    const o = opts || {};
+    const t = String(text || 'Loading data from Google Sheet…').replace(/(\.\.\.|…)\s*$/, '');
+    return `<div class="loading" role="status" aria-live="polite">${loader(o.style, { size: o.size || 'lg' })}<div class="loading-text">${esc(t)}${ellipsis()}</div>${o.hint ? `<div class="loading-hint">${esc(o.hint)}</div>` : ''}</div>`;
   }
   function errorBox(err, retryAttr) {
     const msg = err && err.message ? err.message : String(err);
@@ -1209,12 +1353,12 @@ window.FF = window.FF || {};
 
   FF.util = {
     esc, clean, num, fmt, fmtShort, pctOf, growth, fmtPct, fmtSigned, deltaHtml, pctHtml,
-    suggestDays, suggestMode, runRateDays, runRate, reportBasis, channelBasis, basisText, projectMonthEnd, dispatchCalc, suggestNet, suggestGross, suggestPair, sugCell, sugText,
+    suggestDays, suggestMode, runRateDays, runRate, reportBasis, channelBasis, dataBasis, parseDayLabel, ffCapDate, basisText, projectMonthEnd, dispatchCalc, suggestNet, suggestGross, suggestPair, sugCell, sugText,
     MONTHS, MONTHS_LONG, DAYS, pad2, parseDate, parseMonthKey, ymKey, dateKey, fromDateKey, ymParts, labelYM, labelDate, labelDateKey,
     weekday, daysInMonth, prevMonthKey, nextMonthKey, weekStart, timeLabel,
     barcode, barcodeKey,
     sum, groupSum, topEntries, sortBy, uniq,
-    $, $$, h, debounce, setButtonBusy, withButtonBusy, toast, spinner, errorBox, downloadBlob, downloadCsv, tableToRows, slug, stamp, colLetter, colIndex, initTooltip,
+    $, $$, h, debounce, setButtonBusy, withButtonBusy, toast, spinner, loader, loaderStyle, loaderPref, ellipsis, LOADER_STYLES, LOADER_LABELS, errorBox, downloadBlob, downloadCsv, tableToRows, slug, stamp, colLetter, colIndex, initTooltip,
     phoneDigits, waLink, mailLink, copyText, suggest,
     parseDateTime, printReport, recentList, recentAdd, voiceInput, voicePrefs, setVoicePrefs,
     multiSelect, asValueSet, valueSetLabel,

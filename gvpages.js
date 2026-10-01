@@ -10,6 +10,9 @@ FF.pages = FF.pages || {};
   const esc = U.esc;
 
   // ---- shared bits -------------------------------------------------------------------------------
+  let gvsrLast = [];   // GV Stock Report ki abhi dikh rahi (filtered) rows — tiles ke drill-down ke liye
+  /** KPI card + exact drill spec (v3.31) — number par click = wahi data. */
+  const kpiS = (cls, title, icon, value, foot, spec) => kpi(cls, title, icon, value, foot).replace('<div class="kpi ', `<div data-kpi="${esc(spec)}" class="kpi `);
   const kpi = (cls, title, icon, value, foot, tip) => `<div class="kpi ${cls}" ${tip ? `data-tip="${esc(tip)}"` : ''}><div class="kpi-top"><span class="kpi-title">${esc(title)}</span><span class="kpi-icon">${icon}</span></div><div class="kpi-value">${value}</div><div class="kpi-foot">${foot || ''}</div></div>`;
   const card = (title, body, opts) => `<section class="card ${(opts && opts.cls) || ''}"><div class="card-head"><h3>${title}</h3>${opts && opts.right ? `<div class="card-right">${opts.right}</div>` : ''}</div><div class="card-body">${body}</div></section>`;
   const head = (icon, title, sub, actions) => `<div class="page-head"><div><h1>${icon} ${esc(title)}</h1><p class="sub">${sub}</p></div><div class="head-actions">${actions || ''}<button class="btn primary" data-action="refresh">↻ Refresh</button></div></div>`;
@@ -89,7 +92,8 @@ FF.pages = FF.pages || {};
 
     {
       const latestK = U.dateKey(todayDate);
-      const specs = [`src=gv&scope=day&date=${latestK}`, `src=gv&scope=mtd&ym=${cur}`, `src=gv&scope=mtd&ym=${cur}&f=vc4`, `src=gv&scope=mtd&ym=${cur}&f=comm`, `src=gv&scope=mtd&ym=${cur}`, `src=gv&scope=mtd&ym=${cur}`, `src=gv&scope=mtd&ym=${cur}&f=repl`, `src=gv&scope=agents&ym=${cur}`, 'src=gv&scope=stock', 'src=gv&scope=stock', `src=gv&scope=mtd&ym=${cur}`, 'src=gv&scope=stock'];
+      // v3.31: High priority → wahi agents ki list · REPORT stock → REPORT agents (stock ka jod = card)
+      const specs = [`src=gv&scope=day&date=${latestK}`, `src=gv&scope=mtd&ym=${cur}`, `src=gv&scope=mtd&ym=${cur}&f=vc4`, `src=gv&scope=mtd&ym=${cur}&f=comm`, `src=gv&scope=mtd&ym=${cur}`, `src=gv&scope=mtd&ym=${cur}`, `src=gv&scope=mtd&ym=${cur}&f=repl`, `src=gv&scope=agents&ym=${cur}`, 'src=gv&scope=stock', 'src=gv&scope=people&level=High', `src=gv&scope=mtd&ym=${cur}`, 'src=gv&scope=people&sort=stock'];
       kpis.forEach((html, i) => { if (specs[i]) kpis[i] = html.replace('<div class="kpi ', `<div data-kpi="${esc(specs[i])}" class="kpi `); });
     }
     const dayLabels = curSeries.days.map(String);
@@ -153,7 +157,7 @@ FF.pages = FF.pages || {};
       const all = report
         .filter((r) => /high/i.test(r.priority || '') || /medium/i.test(r.priority || ''))
         .map((r) => {
-          const daily = U.runRate(r.curVc4 || 0); // run-rate = issued ÷ (today − 1)
+          const daily = U.runRate(r.curVc4 || 0, 'gv'); // run-rate = issued ÷ (aaj − 1) — GV sheet jaisa
           const cover = daily > 0 && r.stockVc4 != null ? r.stockVc4 / daily : null;
           const direct = FF.config.isDirectAgent(r, 'gv');
           const calculated = Math.max(0, Math.ceil(daily * days - (r.stockVc4 || 0)));
@@ -541,14 +545,23 @@ FF.pages = FF.pages || {};
       return [...found];
     };
     const count = (list, fn) => U.sum((fn ? list.filter(fn) : list), (x) => Number(x.n) || 1);
-    const monthSummary = G.summary(currentYm);
-    const lastDay = monthSummary.lastDay || now.getDate();
+    // 📐 v3.31 — GV run-rate sheet jaisa: is month ka issue ÷ (aaj − 1), min 1 (U.runRateDays 'gv').
+    const lastDay = Math.max(1, Number(U.runRateDays(undefined, 'gv')) || now.getDate());
     const expected = (n) => lastDay ? Math.max(n, Math.round((n / lastDay) * U.daysInMonth(currentYm))) : n;
     const todayKey = U.dateKey(now);
+    /** Rows (EIR history + GV Master ka LIVE aaj) se totals — drill-down bhi yahi rows padhta hai. Pehle
+        MTD EIR rollup (kal tak) se aata tha → 1 tareekh ko "MTD 0" par "Today 34". */
+    const fromRows = (rows) => {
+      const o = { total: 0, vc4: 0, vc20: 0, vc5p: 0, comm: 0, byClass: {} };
+      rows.forEach((x) => { const n = Number(x.n) || 1; o.total += n; if (x.group === 'VC4') o.vc4 += n; else { o.comm += n; if (x.group === 'VC20') o.vc20 += n; else o.vc5p += n; } if (x.cls) o.byClass[x.cls] = (o.byClass[x.cls] || 0) + n; });
+      return o;
+    };
     return report.map((r) => {
-      const cur = match(curMap, r) || { total: 0, vc4: 0, vc20: 0, vc5p: 0, comm: 0, byClass: {}, replacement: 0 };
-      const prev = match(prevMap, r) || { total: 0, vc4: 0, vc20: 0, vc5p: 0, comm: 0, byClass: {} };
       const currentRows = rowsFor(monthIndex, currentYm, r), lastRows = rowsFor(monthIndex, previousYm, r), todayRows = rowsFor(dayIndex, todayKey, r);
+      const curRoll = match(curMap, r), prevRoll = match(prevMap, r);
+      const curLive = fromRows(currentRows), prevLive = fromRows(lastRows);
+      const cur = curLive.total || !curRoll ? curLive : curRoll;
+      const prev = prevLive.total || !prevRoll ? prevLive : prevRoll;
       const eirToday = count(todayRows);
       // GV REPORT's own Today Issued is a recovery source when EIR has not yet exposed that
       // agent's live day row; EIR stays authoritative whenever its count is present.
@@ -642,7 +655,8 @@ FF.pages = FF.pages || {};
     FF.app.openDrawer({
       kicker: 'GV Partner · GV REPORT', title: r.agentName,
       sub: `<span class="dim">${esc(r.agentId)} · ${esc(FF.config.isDirectAgent(r, 'gv') ? FF.config.directLabel(r, 'gv') : r.tlName)}${r.mobile && FF.auth.can('contacts') ? ` · 📞 <a href="tel:${esc(r.mobile)}">${esc(r.mobile)}</a>` : ''}</span>`,
-      body, actions: `<a class="btn small" href="#/gvStock?agent=${encodeURIComponent(r.agentName)}&view=agent">📦 GV stock →</a>`
+      body, actions: `<a class="btn small" href="#/gvStock?agent=${encodeURIComponent(r.agentName)}&view=agent">📦 GV stock →</a>`,
+      age: { kind: 'agent', key: r.agentId || r.agentName, keys: [r.agentName], ch: 'gv', title: r.agentName }
     });
   }
 
@@ -712,12 +726,12 @@ FF.pages = FF.pages || {};
 
     body.innerHTML = `
       <div class="kpi-grid">
-        ${kpi('g8', 'GV Agents (REPORT)', '🧑‍💼', U.fmt(totals.agents), `${tls.length} TLs · ${U.fmt(gvDirectCount)} direct (no TL) · ${U.fmt(totals.growing)} growing`)}
-        ${kpi('g9', 'GV Stock (REPORT)', '📦', U.fmt(totals.stock), `VC4 <b>${U.fmt(totals.stockVc4)}</b> · Comm <b>${U.fmt(totals.stock - totals.stockVc4)}</b>`)}
-        ${kpi('g3', 'MTD Issuance', '🏷️', U.fmt(totals.cur), `VC4 <b>${U.fmt(totals.curVc4)}</b> · ${U.deltaHtml(U.growth(totals.cur, totals.last), { decimals: 0 })} vs last month (${U.fmt(totals.last)})`)}
-        ${kpi('g1', 'Today Issued', '⚡', U.fmt(totals.today), 'GV REPORT ka "Today Issued" column')}
-        ${kpi('g10', 'High Priority', '🔺', U.fmt(totals.high), `Inactive agents: <b>${U.fmt(totals.inactive)}</b>`)}
-        ${kpi('g11', 'Avg Stock / Agent', '🏬', U.fmt(totals.agents ? totals.stock / totals.agents : 0), 'GV REPORT stock column')}
+        ${kpiS('g8', 'GV Agents (REPORT)', '🧑‍💼', U.fmt(totals.agents), `${tls.length} TLs · ${U.fmt(gvDirectCount)} direct (no TL) · ${U.fmt(totals.growing)} growing`, 'src=gv&scope=list&list=gvp.all')}
+        ${kpiS('g9', 'GV Stock (REPORT)', '📦', U.fmt(totals.stock), `VC4 <b>${U.fmt(totals.stockVc4)}</b> · Comm <b>${U.fmt(totals.stock - totals.stockVc4)}</b>`, 'src=gv&scope=list&list=gvp.stock')}
+        ${kpiS('g3', 'MTD Issuance', '🏷️', U.fmt(totals.cur), `VC4 <b>${U.fmt(totals.curVc4)}</b> · ${U.deltaHtml(U.growth(totals.cur, totals.last), { decimals: 0 })} vs last month (${U.fmt(totals.last)})`, `src=gv&scope=mtd&ym=${U.ymKey(new Date())}`)}
+        ${kpiS('g1', 'Today Issued', '⚡', U.fmt(totals.today), 'GV Master (live) / GV REPORT "Today Issued"', `src=gv&scope=day&date=${U.dateKey(new Date())}`)}
+        ${kpiS('g10', 'High Priority', '🔺', U.fmt(totals.high), `Inactive agents: <b>${U.fmt(totals.inactive)}</b>`, 'src=gv&scope=list&list=gvp.high')}
+        ${kpiS('g11', 'Avg Stock / Agent', '🏬', U.fmt(totals.agents ? totals.stock / totals.agents : 0), 'GV REPORT stock column', 'src=gv&scope=list&list=gvp.stock')}
       </div>
       <div class="card controls">
         <div class="seg" id="gvp-tabs">${[['overview', '🏠 Overview'], ['agents', '🧑‍💼 Agents'], ['tls', '👥 TLs'], ['alerts', '🚨 Alerts']].map(([k, l]) => `<button class="seg-btn ${perf.view === k ? 'on' : ''}" data-gvp-view="${k}">${l}</button>`).join('')}</div>
@@ -740,7 +754,7 @@ FF.pages = FF.pages || {};
         <div class="pager"><button class="btn small" data-gvp-pg="prev" ${perf.page <= 1 ? 'disabled' : ''}>‹ Prev</button><span>Page ${perf.page} / ${U.fmt(pages)}</span><button class="btn small" data-gvp-pg="next" ${perf.page >= pages ? 'disabled' : ''}>Next ›</button></div>`, { right: `${FF.auth.can('share') ? `<button class="btn small" data-share="wa" data-text="${esc(`GV Partner MTD ${U.fmt(totals.cur)} tags · stock ${U.fmt(totals.stock)} · ${tls.length} TLs`)}">🟢 Share</button>` : ''}` })}</div>
       <div class="gvp-view" ${perf.view !== 'tls' ? 'hidden' : ''}>${card('👥 GV TL-wise summary', tableHtml(['#', 'TL', 'Agents', 'Stock', 'Stock VC4', 'Last month', 'MTD', 'MTD VC4', 'High prio', 'Inactive'], tls.map((t, i) => `<tr data-link="${t.tlId === '__direct__' ? '#/directAgents' : `#/gvPerformance?tl=${encodeURIComponent(t.tlName)}`}"><td class="dim">${i + 1}</td><td><b>${esc(t.tlName)}</b></td><td class="num">${U.fmt(t.agents)}</td><td class="num">${U.fmt(t.stock)}</td><td class="num">${U.fmt(t.stockVc4)}</td><td class="num">${U.fmt(t.last)}</td><td class="num"><b>${U.fmt(t.cur)}</b></td><td class="num">${U.fmt(t.curVc4)}</td><td class="num">${U.fmt(t.high)}</td><td class="num">${U.fmt(t.inactive)}</td></tr>`), 2), { right: exportBtn('gv-tl-summary') })}</div>
       <div class="gvp-view" ${perf.view !== 'alerts' ? 'hidden' : ''}>
-        <div class="mini-grid">${miniKpi('Attention list', U.fmt(alertList.length), 'priority / inactive / zero-stock / de-growth', 'c4')}${miniKpi('High priority', U.fmt(list.filter((r) => /high/i.test(r.priority || '')).length), 'dispatch review', 'c6')}${miniKpi('Inactive', U.fmt(list.filter((r) => /inactive/i.test(r.agentStatus || '')).length), 'follow-up', 'c2')}${miniKpi('Direct agents', U.fmt(directCount), 'stock dispatch not required', 'c3')}</div>
+        <div class="mini-grid">${miniKpi('Attention list', U.fmt(alertList.length), 'priority / inactive / zero-stock / de-growth', 'c4', { scope: 'list', list: 'gvp.f.attention' })}${miniKpi('High priority', U.fmt(list.filter((r) => /high/i.test(r.priority || '')).length), 'dispatch review', 'c6', { scope: 'list', list: 'gvp.f.high' })}${miniKpi('Inactive', U.fmt(list.filter((r) => /inactive/i.test(r.agentStatus || '')).length), 'follow-up', 'c2', { scope: 'list', list: 'gvp.f.inactive' })}${miniKpi('Direct agents', U.fmt(directCount), 'stock dispatch not required', 'c3', { scope: 'list', list: 'gvp.f.direct' })}</div>
         ${card('🚨 GV attention & dispatch watch', `<div class="table-wrap tall"><table class="tbl compact"><thead><tr><th>Agent</th><th>TL / class</th><th>Priority</th><th>Status</th><th class="num">Stock</th><th class="num">Growth</th><th>Action</th></tr></thead><tbody>${attentionRows || '<tr><td colspan="7" class="empty">Current filters me koi alert nahi.</td></tr>'}</tbody></table></div>`, { right: `<span class="dim">${U.fmt(alertList.length)} rows</span>` })}
       </div>
       <p class="foot-note">Source: GV Partner sheet → <b>GV REPORT</b> tab (agent-wise) · ${U.fmt(all.length)} agents · Loaded ${U.timeLabel(G.loadedAt || D.lastLoadAt)}</p>`;
@@ -862,7 +876,7 @@ FF.pages = FF.pages || {};
     const classes = classNames.map((name) => ({ name, stock: U.sum(filtered, (r) => Number((r.stockByClass || {})[name] || 0)) })).filter((r) => r.stock > 0);
     const days = Number(FF.config.features && FF.config.features.suggestDays) || 15;
     const dispatch = filtered.filter((r) => /high|medium/i.test(r.priority || '') || FF.config.isDirectAgent(r, 'gv')).map((r) => {
-      const direct = FF.config.isDirectAgent(r, 'gv'), daily = U.runRate(r.curVc4);
+      const direct = FF.config.isDirectAgent(r, 'gv'), daily = U.runRate(r.curVc4, 'gv');
       const calculated = Math.max(0, Math.ceil(daily * days - r.stockVc4));
       const gross = Math.max(0, Math.ceil(daily * days)); // bina stock ghataye
       return { r, direct, daily, suggested: calculated, gross, cover: daily > 0 ? r.stockVc4 / daily : null, tag: direct && /high|medium/i.test(r.priority || '') };
@@ -900,7 +914,8 @@ FF.pages = FF.pages || {};
       ${card('🏷️ Direct Agents · High/Medium — TAG required', `<div class="dispatch-mini"><span>Direct agents needing tags <b>${U.fmt(directTagList.length)}</b></span><span>Suggested tags <b>${U.fmt(U.sum(directTagList, (d) => d.suggested))}</b></span><span>Target cover <b>${days} din</b></span></div><div class="table-wrap tall"><table class="tbl compact"><thead><tr><th>Agent</th><th>Type</th><th>Priority</th><th class="num">VC4 stock</th><th class="num">Run-rate VC4/day</th><th class="num">Cover</th><th>Tag dispatch 🏷️</th></tr></thead><tbody>${directTagRows || '<tr><td colspan="7" class="empty">Current filters me koi High/Medium Direct agent nahi.</td></tr>'}</tbody></table></div><p class="dim small">Direct (no TL) agents ko stock box nahi jaata, par jinki priority <b>High/Medium</b> hai unhe <b>tags chahiye</b> — suggested tags = run-rate × ${days} − stock (run-rate = issue ÷ (aaj − 1) din).</p>`)}
       </div>
       ${card('🚫 Other Direct Agents — no dispatch', `<div class="dispatch-mini"><span>Direct agents (Low / no priority) <b>${U.fmt(directOther.length)}</b></span><span>Inka stock <b>${U.fmt(U.sum(directOther, (r) => r.stockTotal))}</b></span><span>MTD VC4 <b>${U.fmt(U.sum(directOther, (r) => r.curVc4))}</b></span></div><div class="table-wrap tall"><table class="tbl compact"><thead><tr><th>Agent</th><th>Type</th><th>Priority</th><th>Status</th><th class="num">Total stock</th><th class="num">MTD VC4</th><th>Dispatch</th></tr></thead><tbody>${directRowsHtml || '<tr><td colspan="7" class="empty">Current filters me aur koi Direct agent nahi.</td></tr>'}</tbody></table></div><p class="dim small">Low priority direct agents ko abhi kuch dispatch nahi hota — sirf visibility ke liye alag rakha hai.</p>`)}`;
-    body.innerHTML = `${FF.direct ? FF.direct.ruleBanner('gv') : ''}<div class="kpi-grid six">${kpi('g9', 'GV REPORT Stock', '📦', U.fmt(totals.stock), `${U.fmt(filtered.length)} filtered agents`)}${kpi('g3', 'VC4 Stock', '🚗', U.fmt(totals.vc4), `${U.fmtPct(U.pctOf(totals.vc4, totals.stock), 0)} of report stock`)}${kpi('g8', 'Commercial Stock', '🏷️', U.fmt(totals.comm), `${U.fmtPct(U.pctOf(totals.comm, totals.stock), 0)} of report stock`)}${kpi('g12', 'Tag Assignment', '🔗', U.fmt(assignmentTotal), `source difference ${discrepancy > 0 ? '+' : ''}${U.fmt(discrepancy)}`)}${kpi('g10', 'Dispatch Review', '🎯', U.fmt(totals.need), 'High + Medium, Direct excluded')}${kpi('g5', 'Direct Agents (no TL)', '🚫', U.fmt(totals.direct), `${U.fmt(totals.directTag)} High/Medium need 🏷️ tags · rest no dispatch`)}</div>${controls}<div class="gvsr-view">${stockReportState.view === 'agents' ? agentTable : stockReportState.view === 'tls' ? tlTable : stockReportState.view === 'classes' ? classView : dispatchView}</div><p class="foot-note">Sources: <b>GV REPORT</b> + <b>Tag Assignment</b> · Report agents ${U.fmt(all.length)} · Loaded ${U.timeLabel(G.loadedAt || D.lastLoadAt)}</p>`;
+    gvsrLast = filtered; // 📋 v3.31 — tiles ke drill-down isi filtered list se (card = list)
+    body.innerHTML = `${FF.direct ? FF.direct.ruleBanner('gv') : ''}<div class="kpi-grid six">${kpiS('g9', 'GV REPORT Stock', '📦', U.fmt(totals.stock), `${U.fmt(filtered.length)} filtered agents`, 'src=gv&scope=list&list=gvsr.stock')}${kpiS('g3', 'VC4 Stock', '🚗', U.fmt(totals.vc4), `${U.fmtPct(U.pctOf(totals.vc4, totals.stock), 0)} of report stock`, 'src=gv&scope=list&list=gvsr.vc4')}${kpiS('g8', 'Commercial Stock', '🏷️', U.fmt(totals.comm), `${U.fmtPct(U.pctOf(totals.comm, totals.stock), 0)} of report stock`, 'src=gv&scope=list&list=gvsr.comm')}${kpiS('g12', 'Tag Assignment', '🔗', U.fmt(assignmentTotal), `source difference ${discrepancy > 0 ? '+' : ''}${U.fmt(discrepancy)}`, 'src=gv&scope=stock')}${kpiS('g10', 'Dispatch Review', '🎯', U.fmt(totals.need), 'High + Medium, Direct excluded', 'src=gv&scope=list&list=gvsr.need')}${kpiS('g5', 'Direct Agents (no TL)', '🚫', U.fmt(totals.direct), `${U.fmt(totals.directTag)} High/Medium need 🏷️ tags · rest no dispatch`, 'src=gv&scope=list&list=gvsr.direct')}</div>${controls}<div class="gvsr-view">${stockReportState.view === 'agents' ? agentTable : stockReportState.view === 'tls' ? tlTable : stockReportState.view === 'classes' ? classView : dispatchView}</div><p class="foot-note">Sources: <b>GV REPORT</b> + <b>Tag Assignment</b> · Report agents ${U.fmt(all.length)} · Loaded ${U.timeLabel(G.loadedAt || D.lastLoadAt)}</p>`;
     C.mount(body);
     const summary = () => [`*GV Stock Report*`, `Agents: ${U.fmt(filtered.length)} / ${U.fmt(all.length)}`, `GV REPORT stock: *${U.fmt(totals.stock)}* (VC4 ${U.fmt(totals.vc4)} · Commercial ${U.fmt(totals.comm)})`, `Tag Assignment stock: ${U.fmt(assignmentTotal)} · Difference ${discrepancy > 0 ? '+' : ''}${U.fmt(discrepancy)}`, `Dispatch review: ${U.fmt(totals.need)} · Direct/no-dispatch: ${U.fmt(totals.direct)}`, '', ...tls.slice(0, 5).map((t, i) => `${i + 1}. ${t.name} — ${U.fmt(t.stock)} stock`), '', 'Generated by First Forward & GV Partner Dashboard'].join('\n');
     U.$$('[data-gvsr-action]', root).forEach((button) => button.addEventListener('click', async () => {
@@ -929,5 +944,37 @@ FF.pages = FF.pages || {};
   FF.pages.gvTrend = { title: 'GV Trend', render: renderTrend };
   FF.pages.gvStock = { title: 'GV Stock', render: renderStock };
   FF.pages.gvStockReport = { title: 'GV Stock Report', render: renderStockReport };
-  FF.pages.gvPerformance = { title: 'GV Performance', render: renderPerformance };
+  // 📋 v3.31 — GV Performance ke numbers ki exact lists (kpiDetail.registerList)
+  if (FF.kpiDetail && FF.kpiDetail.registerList) {
+    const pname = (v) => esc(String(v || '').replace(/^[^\p{L}\p{N}]+/u, '') || '—');
+    const cols = () => [['Agent', (r) => `<b>${esc(r.agentName)}</b> <small class="dim">${esc(r.agentId || '')}</small>`], ['TL', (r) => (FF.config.isDirectAgent(r, 'gv') ? `🚫 ${esc(FF.config.directLabel(r, 'gv'))}` : esc(r.tlName || '—'))], ['Priority', (r) => pname(r.priority)], ['Status', (r) => pname(r.agentStatus)], ['Last month', (r) => U.fmt(r.lastTotal), 1], ['MTD', (r) => `<b>${U.fmt(r.curTotal)}</b>`, 1], ['Today', (r) => U.fmt(r.todayIssued), 1], ['Stock', (r) => U.fmt(r.stockTotal), 1]];
+    const all = () => (perf.sourceRows && perf.sourceRows.length ? perf.sourceRows : overlayGvReportWithEir(G.get('report') || []));
+    const filtered = () => (perf.sourceRows && perf.sourceRows.length ? filteredReport() : all());
+    const make = (name, rowsFn, kicker, sortKey) => FF.kpiDetail.registerList(name, () => {
+      const rows = [...rowsFn()].sort((a, b) => (Number(b[sortKey || 'curTotal']) || 0) - (Number(a[sortKey || 'curTotal']) || 0));
+      return { kicker, unit: 'agents', rows, columns: cols(), agent: (r) => ({ name: r.agentName, id: r.agentId, ch: 'gv' }),
+        headline: sortKey === 'stockTotal' ? { value: U.sum(rows, (r) => r.stockTotal), unit: 'tags stock' } : null,
+        sub: `MTD <b>${U.fmt(U.sum(rows, (r) => r.curTotal))}</b> · last month <b>${U.fmt(U.sum(rows, (r) => r.lastTotal))}</b> · stock <b>${U.fmt(U.sum(rows, (r) => r.stockTotal))}</b> (VC4 ${U.fmt(U.sum(rows, (r) => r.stockVc4))})`,
+        subShort: `stock ${U.fmt(U.sum(rows, (r) => r.stockTotal))}` };
+    });
+    const srMake = (name, filt, kicker, field) => FF.kpiDetail.registerList(name, () => {
+      const rows = (gvsrLast || []).filter(filt).sort((a, b) => (Number(b[field || 'stockTotal']) || 0) - (Number(a[field || 'stockTotal']) || 0));
+      return { kicker, unit: 'agents', rows, columns: cols(), agent: (r) => ({ name: r.agentName, id: r.agentId, ch: 'gv' }),
+        headline: field ? { value: U.sum(rows, (r) => Number(r[field]) || 0), unit: field === 'stockVc4' ? 'tags VC4 stock' : field === 'stockComm' ? 'tags commercial stock' : 'tags stock' } : null,
+        sub: `Stock <b>${U.fmt(U.sum(rows, (r) => r.stockTotal))}</b> · VC4 <b>${U.fmt(U.sum(rows, (r) => r.stockVc4))}</b> · Commercial <b>${U.fmt(U.sum(rows, (r) => r.stockComm))}</b>` };
+    });
+    srMake('gvsr.stock', () => true, 'GV Stock Report · REPORT stock', 'stockTotal');
+    srMake('gvsr.vc4', (r) => Number(r.stockVc4) > 0, 'GV Stock Report · VC4 stock', 'stockVc4');
+    srMake('gvsr.comm', (r) => Number(r.stockComm) > 0, 'GV Stock Report · Commercial stock', 'stockComm');
+    srMake('gvsr.need', (r) => !FF.config.isDirectAgent(r, 'gv') && /high|medium/i.test(r.priority || ''), 'GV Stock Report · dispatch review');
+    srMake('gvsr.direct', (r) => FF.config.isDirectAgent(r, 'gv'), 'GV Stock Report · direct agents');
+    make('gvp.all', all, 'GV REPORT · all agents');
+    make('gvp.stock', all, 'GV REPORT · stock', 'stockTotal');
+    make('gvp.high', () => all().filter((r) => /high/i.test(r.priority || '')), 'GV REPORT · High priority');
+    make('gvp.f.attention', () => filtered().filter((r) => /high|medium/i.test(r.priority || '') || /inactive/i.test(r.agentStatus || '') || Number(r.stockTotal) === 0 || Number(r.growth) < 0), 'GV · attention list');
+    make('gvp.f.high', () => filtered().filter((r) => /high/i.test(r.priority || '')), 'GV · High priority (filtered)');
+    make('gvp.f.inactive', () => filtered().filter((r) => /inactive/i.test(r.agentStatus || '')), 'GV · Inactive (filtered)');
+    make('gvp.f.direct', () => filtered().filter((r) => FF.config.isDirectAgent(r, 'gv')), 'GV · Direct agents (filtered)');
+  }
+  FF.pages.gvPerformance = { title: 'GV Performance', render: renderPerformance, sourceRows: () => perf.sourceRows || null };
 })(window.FF);

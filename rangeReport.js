@@ -90,7 +90,9 @@ FF.pages = FF.pages || {};
     if (R.minKey) { fromIn.min = R.minKey; toIn.min = R.minKey; }
     if (R.maxKey) { fromIn.max = R.maxKey; toIn.max = R.maxKey; }
 
-    const kpi = (cls, title, value, icon, foot) => `<div class="kpi ${cls}"><div class="kpi-top"><span class="kpi-title">${title}</span><span class="kpi-icon">${icon}</span></div><div class="kpi-value">${value}</div><div class="kpi-foot">${foot || ''}</div></div>`;
+    // v3.31 — har card ka drill = ISI range ka data (pehle title se andaza lagta tha → is month / aaj khul jaata tha)
+    const RANGE_SPEC = { 'First Forward tags': 'src=ff', 'GV tags': 'src=gv', Combined: 'src=both', 'VC4 · combined': 'src=both&f=vc4', 'VC20 · combined': 'src=both&f=vc20', 'VC5+ · combined': 'src=both&f=vc5p', 'All Commercial': 'src=both&f=comm', 'GV commission': 'src=gv' };
+    const kpi = (cls, title, value, icon, foot) => `<div class="kpi ${cls}"${RANGE_SPEC[title] ? ` data-kpi="${esc(`${RANGE_SPEC[title]}&scope=range&from=${view.from}&to=${view.to}`)}"` : ''}><div class="kpi-top"><span class="kpi-title">${title}</span><span class="kpi-icon">${icon}</span></div><div class="kpi-value">${value}</div><div class="kpi-foot">${foot || ''}</div></div>`;
     const ff = R.ff, gv = R.gv;
     const issueWarning = R.issues.length ? `<div class="warn-box">⚠️ ${R.issues.map(esc).join('<br>')}</div>` : '';
     body.innerHTML = `<p class="dim small">Range: <b>${esc(U.labelDateKey(view.from, true))}</b> → <b>${esc(U.labelDateKey(view.to, true))}</b> · ${U.fmt(days)} din${view.weekly ? ' · weekly chart (range lambi hai)' : ''}</p>

@@ -405,11 +405,14 @@ test('📢 announcement broadcast, 📜 audit log, 📬 weekly digest + 📊 rep
     assert.equal(digest.res.status, 200, `digest force — ${JSON.stringify(digest.json).slice(0, 220)}`);
     assert.equal(digest.json.ok, true, `digest bell payload bana — ${JSON.stringify(digest.json).slice(0, 260)}`);
     const digestItem = digest.json.item || {};
-    assert.match(digestItem.body || '', /MTD FF 75 \+ GV 26 = 101/, 'digest me FF + GV combined MTD sahi hai');
-    assert.equal(digestItem.meta && digestItem.meta.ffMtd, 75, 'digest meta FF MTD source snapshot se aaya');
-    assert.equal(digestItem.meta && digestItem.meta.gvMtd, 26, 'digest meta GV MTD source snapshot se aaya');
-    assert.equal(digestItem.meta && digestItem.meta.mtdDays, 3, 'GV-only/FF-only ko active days me saath count karta hai');
-    assert.equal(digestItem.meta && digestItem.meta.zeroDays, 1, 'explicit zero snapshot ko zero day ke roop me rakhta hai');
+    // Mahine ki 1 tareekh ko kal (pichhla mahina) MTD me nahi aata — calendar MTD sirf aaj ka hota hai.
+    const istDay = Number(new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(8, 10));
+    assert.match(digestItem.body || '', istDay === 1 ? /MTD FF 40 \+ GV 12 = 52/ : /MTD FF 75 \+ GV 26 = 101/, 'digest me FF + GV combined MTD sahi hai');
+    const firstOfMonth = istDay === 1;
+    assert.equal(digestItem.meta && digestItem.meta.ffMtd, firstOfMonth ? 40 : 75, 'digest meta FF MTD source snapshot se aaya');
+    assert.equal(digestItem.meta && digestItem.meta.gvMtd, firstOfMonth ? 12 : 26, 'digest meta GV MTD source snapshot se aaya');
+    assert.equal(digestItem.meta && digestItem.meta.mtdDays, firstOfMonth ? 1 : 3, 'GV-only/FF-only ko active days me saath count karta hai');
+    if (!firstOfMonth) assert.equal(digestItem.meta && digestItem.meta.zeroDays, 1, 'explicit zero snapshot ko zero day ke roop me rakhta hai');
     const wk = await call('/api/notifications/weekly-email', 'POST', {}, adminCookie);
     assert.equal(wk.res.status, 200, `weekly force — ${JSON.stringify(wk.json).slice(0, 200)}`);
     assert.equal(wk.json.ok, true, `weekly email bheji — ${JSON.stringify(wk.json)}`);
@@ -481,7 +484,7 @@ test('🔗 personal links (agent+TL) /p/ pages, 🗺 team location, 🏆 anomaly
     const tq = new URL(req.url, 'http://x').searchParams.get('tq') || '';
     let rows = [];
     if (/group by AA, D, AU/.test(tq)) rows = snapRows;
-    else if (/group by L, AA/.test(tq) && /where BA/.test(tq)) rows = teamRows;      // personal TL team
+    else if (/group by L, AA/.test(tq) && /(where|and) BA = /.test(tq)) rows = teamRows;      // personal TL team
     else if (/group by L, AA/.test(tq)) rows = agentRows;                            // agent anomaly
     else if (/group by BA, AA/.test(tq)) rows = tlRows;                              // TL anomaly
     else if (/group by AA, D/.test(tq)) rows = personalRows;                         // personal daily

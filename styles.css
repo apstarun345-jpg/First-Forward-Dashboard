@@ -1670,7 +1670,7 @@ html[data-theme="dark"] .ff-switch { background: #33415c; }
 @keyframes greeting-wave { 25% { transform: rotate(18deg); } 75% { transform: rotate(-12deg); } }
 @keyframes boot-slide { to { transform: translateX(125%); } }
 @media (max-width: 600px) { .welcome-greeting { top: calc(80px + env(safe-area-inset-top)); bottom: auto; left: 14px; right: 14px; padding: 16px; gap: 12px; } .welcome-greeting h2 { font-size: 17px; } }
-@media (prefers-reduced-motion: reduce) { .app-boot *, .welcome-greeting, .greeting-wave, .home-hero.v2 { animation: none !important; } .boot-progress::after { animation: none; width: 100%; } }
+@media (prefers-reduced-motion: reduce) { .app-boot img, .welcome-greeting, .greeting-wave, .home-hero.v2 { animation: none !important; } html .boot-progress::after { animation-duration: 1.2s !important; animation-iteration-count: infinite !important; } } /* v3.31: boot progress = loader, chalta rahe */
 
 @media (max-width: 600px) { .loc-banner { left: 12px; right: 12px; bottom: 12px; transform: none; max-width: none; flex-wrap: wrap; } .loc-banner > span { flex: 1 1 170px; } }
 
@@ -2474,8 +2474,7 @@ html[data-theme='dark'] .skel::after { background: linear-gradient(100deg, trans
 .boot-progress { width: 190px; height: 4px; }
 @keyframes bootBreathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.03); } }
 @media (prefers-reduced-motion: reduce) {
-  .page, .page-loader .dots, .page-loader-spin, .skel::after, .app-boot img { animation: none !important; }
-  .skel::after { display: none; }
+  .page, .app-boot img { animation: none !important; } /* v3.31: loader / skeleton ab yahan band nahi hote */
 }
 
 /* ---------- FASTag Champions (hall of fame) ---------- */
@@ -3848,3 +3847,133 @@ html[data-theme="dark"] .badge.blue { background: rgba(37, 99, 235, .22); color:
   .tr-req-toolbar, .tr-c-sel, .tr-c-act, .tr-submit-bar { display: none !important; }
 }
 .tr-m-none { color: var(--muted); }
+
+/* =====================================================================================================
+   🌀 v3.31 — LOADERS: alag-alag style + HAMESHA animate (Mac/Windows "Reduce motion" ON ho tab bhi).
+   Pehle global reduced-motion rule (animation-duration .01ms · iteration 1) har spinner ko pehle hi
+   frame par rok deta tha — isliye "buffering wala gol" atka hua dikhta tha. Loader zaroori feedback hai
+   (data aa raha hai), decoration nahi — isliye ye rules usse zyada specific + !important hain.
+   Sab animations sirf transform / opacity par hain → GPU compositor par chalti hain, JS busy ho tab bhi.
+   Styles: ring · dots · bars · pulse · tag (FASTag scan) · orbit — "mix" = har baar agla style.
+   ===================================================================================================== */
+.ffl { --ffl-size: 34px; --ffl-c1: var(--brand, #4f46e5); --ffl-c2: var(--brand-2, #ec4899); --ffl-c3: #f59e0b; position: relative; display: inline-block; width: var(--ffl-size); height: var(--ffl-size); flex: 0 0 auto; vertical-align: middle; }
+.ffl.ffl-sm { --ffl-size: 16px; }
+.ffl.ffl-md { --ffl-size: 26px; }
+.ffl.ffl-lg { --ffl-size: 46px; }
+.ffl > i, .ffl > b, .ffl > em, .ffl > span, .ffl > span > b, .ffl > span > em { position: absolute; display: block; will-change: transform, opacity; }
+/* 1 · ring — do ulte ghoomte arcs */
+.ffl-ring > i { inset: 0; border-radius: 50%; border: max(2px, calc(var(--ffl-size) * .1)) solid transparent; border-top-color: var(--ffl-c1); border-right-color: var(--ffl-c1); --ffl-dur: .9s; animation: ffl-rot .9s cubic-bezier(.55, .15, .45, .85) infinite; }
+.ffl-ring > i:nth-child(2) { inset: 24%; border-top-color: transparent; border-right-color: transparent; border-bottom-color: var(--ffl-c2); border-left-color: var(--ffl-c2); --ffl-dur: .65s; animation-duration: .65s; animation-direction: reverse; }
+/* 2 · dots — teen uchhalte dots */
+.ffl-dots { width: calc(var(--ffl-size) * 1.7); }
+.ffl-dots > i { top: 36%; width: 28%; height: calc(var(--ffl-size) * .28); width: calc(var(--ffl-size) * .28); border-radius: 50%; background: var(--ffl-c1); --ffl-dur: .9s; animation: ffl-bounce .9s ease-in-out infinite; }
+.ffl-dots > i:nth-child(1) { left: 6%; }
+.ffl-dots > i:nth-child(2) { left: 41%; background: var(--ffl-c2); animation-delay: .15s; }
+.ffl-dots > i:nth-child(3) { left: 76%; background: var(--ffl-c3); animation-delay: .3s; }
+/* 3 · bars — equalizer */
+.ffl-bars { width: calc(var(--ffl-size) * 1.2); }
+.ffl-bars > i { bottom: 8%; height: 84%; width: 13%; border-radius: 3px; background: linear-gradient(180deg, var(--ffl-c2), var(--ffl-c1)); transform-origin: 50% 100%; --ffl-dur: 1s; animation: ffl-eq 1s ease-in-out infinite; }
+.ffl-bars > i:nth-child(1) { left: 2%; }
+.ffl-bars > i:nth-child(2) { left: 22%; animation-delay: -.8s; }
+.ffl-bars > i:nth-child(3) { left: 42%; animation-delay: -.6s; }
+.ffl-bars > i:nth-child(4) { left: 62%; animation-delay: -.4s; }
+.ffl-bars > i:nth-child(5) { left: 82%; animation-delay: -.2s; }
+/* 4 · pulse — radar ripple */
+.ffl-pulse > i { inset: 0; border-radius: 50%; border: max(2px, calc(var(--ffl-size) * .07)) solid var(--ffl-c1); opacity: 0; --ffl-dur: 1.5s; animation: ffl-ripple 1.5s cubic-bezier(.2, .6, .35, 1) infinite; }
+.ffl-pulse > i:nth-child(2) { border-color: var(--ffl-c2); animation-delay: .75s; }
+.ffl-pulse > b { inset: 34%; border-radius: 50%; background: var(--ffl-c1); --ffl-dur: 1.5s; animation: ffl-heart 1.5s ease-in-out infinite; }
+/* 5 · tag — FASTag card par scanning beam */
+.ffl-tag { width: calc(var(--ffl-size) * 1.45); }
+.ffl-tag > span { inset: 16% 4%; border-radius: max(3px, calc(var(--ffl-size) * .12)); background: linear-gradient(135deg, var(--ffl-c1), var(--ffl-c2)); overflow: hidden; box-shadow: 0 3px 10px color-mix(in srgb, var(--ffl-c1) 35%, transparent); --ffl-dur: 1.6s; animation: ffl-float 1.6s ease-in-out infinite; }
+.ffl-tag > span > b { left: 10%; top: 22%; width: 22%; height: 30%; border-radius: 2px; background: #fde68a; }
+.ffl-tag > span > em { left: 40%; right: 10%; bottom: 20%; height: 22%; background: repeating-linear-gradient(90deg, rgba(255, 255, 255, .95) 0 2px, transparent 2px 4px); opacity: .9; }
+.ffl-tag > i { top: 6%; bottom: 6%; left: 0; width: 18%; background: linear-gradient(90deg, transparent, rgba(34, 211, 238, .95), transparent); border-radius: 4px; mix-blend-mode: screen; --ffl-dur: 1.2s; animation: ffl-scan 1.2s ease-in-out infinite alternate; }
+/* 6 · orbit — beech me grah, bahar do satellite */
+.ffl-orbit > b { inset: 36%; border-radius: 50%; background: var(--ffl-c1); box-shadow: 0 0 0 max(2px, calc(var(--ffl-size) * .06)) color-mix(in srgb, var(--ffl-c1) 22%, transparent); }
+.ffl-orbit > i { inset: 0; border-radius: 50%; --ffl-dur: 1.1s; animation: ffl-rot 1.1s linear infinite; }
+.ffl-orbit > i::before { content: ''; position: absolute; top: 0; left: 50%; width: 22%; height: 22%; margin-left: -11%; border-radius: 50%; background: var(--ffl-c2); }
+.ffl-orbit > i:nth-of-type(2) { inset: 14%; --ffl-dur: .75s; animation-duration: .75s; animation-direction: reverse; }
+.ffl-orbit > i:nth-of-type(2)::before { background: var(--ffl-c3); width: 26%; height: 26%; margin-left: -13%; }
+@keyframes ffl-rot { to { transform: rotate(360deg); } }
+@keyframes ffl-bounce { 0%, 80%, 100% { transform: translateY(0) scale(.75); opacity: .55; } 40% { transform: translateY(-70%) scale(1); opacity: 1; } }
+@keyframes ffl-eq { 0%, 100% { transform: scaleY(.25); } 50% { transform: scaleY(1); } }
+@keyframes ffl-ripple { 0% { transform: scale(.2); opacity: .95; } 100% { transform: scale(1.15); opacity: 0; } }
+@keyframes ffl-heart { 0%, 100% { transform: scale(.8); } 50% { transform: scale(1.1); } }
+@keyframes ffl-float { 0%, 100% { transform: translateY(0) rotate(-3deg); } 50% { transform: translateY(-8%) rotate(3deg); } }
+@keyframes ffl-scan { from { transform: translateX(-30%); } to { transform: translateX(560%); } }
+/* "Loading…" ke 3 dots — ek-ek karke chamakte hain */
+.ffl-ell { display: inline-flex; gap: 1px; margin-left: 2px; }
+.ffl-ell > i { font-style: normal; --ffl-dur: 1.2s; animation: ffl-blink 1.2s ease-in-out infinite; }
+.ffl-ell > i:nth-child(2) { animation-delay: .2s; }
+.ffl-ell > i:nth-child(3) { animation-delay: .4s; }
+@keyframes ffl-blink { 0%, 100% { opacity: .15; } 40% { opacity: 1; } }
+.loading .ffl { margin-bottom: 2px; }
+.loading-text { font-weight: 700; }
+.loading-hint { font-size: 11.5px; color: var(--muted); font-weight: 600; opacity: .85; }
+.mp-loading { display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; }
+/* Page loader (v3.9 skeleton) ab naye loader ke saath */
+.page-loader-head .ffl { --ffl-size: 22px; }
+/* 🚦 Top route progress — kisi bhi option/page par click karte hi upar patli chalti line */
+.route-progress { position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 10000; overflow: hidden; pointer-events: none; background: color-mix(in srgb, var(--brand, #4f46e5) 14%, transparent); }
+.route-progress[hidden] { display: none; }
+.route-progress > i { position: absolute; top: 0; bottom: 0; left: 0; width: 38%; border-radius: 3px; background: linear-gradient(90deg, var(--brand, #4f46e5), var(--brand-2, #ec4899), #f59e0b); will-change: transform; --ffl-dur: 1.1s; animation: ffl-route 1.1s cubic-bezier(.45, .05, .55, .95) infinite; }
+@keyframes ffl-route { 0% { transform: translateX(-105%); } 100% { transform: translateX(270%); } }
+/* Accessibility panel — loader style picker */
+.a11y-loader { display: grid; gap: 6px; margin: 8px 0 10px; padding: 9px; border-radius: 12px; border: 1px dashed var(--line, #e2e8f0); }
+.a11y-loader select { width: 100%; }
+.a11y-loader-preview { display: flex; align-items: center; gap: 14px; min-height: 40px; justify-content: center; flex-wrap: wrap; }
+/* ♿ Reduce motion (OS ya app ka a11y toggle): decorative animations band, LOADERS chalte rahenge */
+@media (prefers-reduced-motion: reduce) {
+  html .ffl > i, html .ffl > b, html .ffl > span, html .ffl-ell > i, html .route-progress > i, html .ffl-orbit > i::before,
+  html .spin, html .page-loader-spin, html .la-spinner, html .icon-btn.spin, html .skel::after, html .dot.busy {
+    animation-duration: var(--ffl-dur, 1.2s) !important; animation-iteration-count: infinite !important;
+  }
+  html .skel::after { display: block !important; animation-name: skelSweep !important; }
+}
+html.a11y-motion .ffl > i, html.a11y-motion .ffl > b, html.a11y-motion .ffl > span, html.a11y-motion .ffl-ell > i,
+html.a11y-motion .route-progress > i, html.a11y-motion .spin, html.a11y-motion .page-loader-spin, html.a11y-motion .la-spinner,
+html.a11y-motion .icon-btn.spin, html.a11y-motion .skel::after, html.a11y-motion .btn.is-busy::before, html.a11y-motion .btn.is-busy::after {
+  animation-duration: var(--ffl-dur, 1.2s) !important; animation-iteration-count: infinite !important;
+}
+.spin { --ffl-dur: .8s; } .page-loader-spin { --ffl-dur: .7s; } .la-spinner { --ffl-dur: .8s; } .icon-btn.spin { --ffl-dur: 1s; } .skel::after { --ffl-dur: 1.4s; }
+.btn.is-busy::before, .btn.is-busy::after { --ffl-dur: 1.8s; }
+
+/* =====================================================================================================
+   🧓 v3.31 — Stock ageing har drawer me (FF + GV) · age-mix bar · drawer section
+   ===================================================================================================== */
+.drawer-age { margin-top: 16px; border: 1px solid var(--line, #e2e8f0); border-radius: 14px; background: color-mix(in srgb, var(--brand, #4f46e5) 3%, var(--card, #fff)); overflow: hidden; }
+.drawer-age > details > summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 10px 14px; font-weight: 750; }
+.drawer-age > details > summary::-webkit-details-marker { display: none; }
+.drawer-age > details > summary::after { content: '▾'; color: var(--muted); font-size: 12px; transition: transform .15s; }
+.drawer-age > details:not([open]) > summary::after { transform: rotate(-90deg); }
+.drawer-age > details > .age-host { padding: 0 14px 12px; }
+.drawer-age-title { font-size: 13.5px; }
+.age-sum { font-size: 12px; font-weight: 600; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+.age-sum b { color: var(--ink, #0f172a); }
+.age-sum b.age-red, .age-red { color: #dc2626 !important; }
+.age-loading { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12.5px; font-weight: 650; }
+.age-block + .age-block { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--line, #e2e8f0); }
+.age-ch { margin: 2px 0 6px; font-size: 13px; display: flex; gap: 8px; align-items: baseline; }
+.age-parked { margin: 6px 0 0; padding: 6px 9px; border-radius: 9px; background: color-mix(in srgb, #f59e0b 9%, transparent); }
+.age-mix { display: flex; height: 10px; border-radius: 99px; overflow: hidden; margin: 4px 0 6px; background: color-mix(in srgb, var(--muted, #64748b) 14%, transparent); }
+.age-mix > span { display: block; height: 100%; }
+.age-mix-fresh { background: #10b981; } .age-mix-ok { background: #84cc16; } .age-mix-warn { background: #f59e0b; }
+.age-mix-old { background: #f97316; } .age-mix-bad { background: #ef4444; } .age-mix-unk { background: #94a3b8; }
+.age-mix-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+.age-mix-legend span { display: inline-flex; align-items: center; gap: 4px; }
+.age-mix-legend i { width: 9px; height: 9px; border-radius: 3px; display: inline-block; }
+.age-tbl .age-n.gray { background: #f1f5f9; color: #475569; }
+html[data-theme='dark'] .drawer-age { background: rgba(99, 102, 241, .06); border-color: #22304f; }
+html[data-theme='dark'] .age-tbl .age-n, html[data-theme='dark'] .age-chip { background: rgba(99, 102, 241, .18); border-color: #334155; color: #c7d2fe; }
+html[data-theme='dark'] .age-tbl .age-csv { background: #111827; border-color: #334155; }
+html[data-theme='dark'] .age-tbl tr.age-total td { background: rgba(255, 255, 255, .03); }
+@media print { .drawer-age > details:not([open]) { display: none; } }
+/* v3.31 · drill-down — card banner + formula + clickable glance agent */
+.kd-card-foot { margin: 0 0 10px; padding: 8px 12px; border-radius: 10px; background: color-mix(in srgb, var(--brand, #4f46e5) 7%, transparent); font-size: 12.5px; }
+.kd-card-foot .kd-card-val { font-size: 14px; color: var(--brand, #4f46e5); }
+.kd-formula { margin-top: 6px; font-size: 12px; color: var(--muted); }
+.kd-formula b { color: var(--ink, #0f172a); }
+.glance-agent { cursor: pointer; }
+.glance-agent:focus-visible { outline: 2px solid var(--brand, #4f46e5); outline-offset: 1px; }
+.dp2-basis { display: inline-flex; align-items: baseline; gap: 4px; }
+.dp2-basis.ff em { color: #2563eb; } .dp2-basis.gv em { color: #059669; }
