@@ -430,8 +430,57 @@ window.FF = window.FF || {};
     if (!list.length) return emptyHtml(scope);
     return list.map((e) => blockHtml(e, scope, list.length > 1)).join('');
   }
+  /** 📄 Agent/TL Summary page ke liye compact shape: buckets + byClass breakdown.
+   *  Server se tag list lekar locally counts banata hai (summary endpoint me per-person class breakdown nahi hai). */
+  async function compute(scope) {
+    const s = scope || {};
+    const ch = s.ch === 'gv' ? 'gv' : 'ff';
+    if (s.kind !== 'agent' && s.kind !== 'tl') return null;
+    await ready();
+    const params = new URLSearchParams({ ch, kind: s.kind, limit: '20000' });
+    if (s.key) params.set('key', s.key);
+    if (Array.isArray(s.keys) && s.keys.length) params.set('keys', s.keys.slice(0, 400).join('|'));
+    let data;
+    try { data = await FF.auth.api(`/api/stock-age/tags?${params.toString()}`); } catch { return null; }
+    const rows = (data && data.rows) || [];
+    const buckets = [
+      { key: 'b1', label: '0–30d', n: 0 },
+      { key: 'b30', label: '30+d', n: 0 },
+      { key: 'b90', label: '90+d', n: 0 },
+      { key: 'b150', label: '150+d', n: 0 },
+      { key: 'b180', label: '180+d', n: 0 }
+    ];
+    const byClassMap = new Map();
+    const slot = (cls) => {
+      const k = String(cls || '—').toUpperCase();
+      if (!byClassMap.has(k)) byClassMap.set(k, { cls: k, b1: 0, b30: 0, b90: 0, b150: 0, b180: 0, total: 0, old30: 0, old60: 0 });
+      return byClassMap.get(k);
+    };
+    let total = 0, old30 = 0, old60 = 0;
+    rows.forEach((r) => {
+      const age = Number(r.age);
+      const known = Number.isFinite(age) && age >= 0;
+      const c = slot(r.cls || 'NA');
+      c.total++; total++;
+      if (!known) return;
+      if (age >= 30) { c.b30++; buckets[1].n++; old30++; } else { c.b1++; buckets[0].n++; }
+      if (age >= 60) { /* 60+d critical KPI = 90+d bucket (3 mahine) se match karta hai */ }
+      if (age >= 90) { c.b90++; buckets[2].n++; }
+      if (age >= 150) { c.b150++; buckets[3].n++; }
+      if (age >= 180) { c.b180++; buckets[4].n++; }
+      // KPI "60+d critical" = 90+ (≥3 mahine) — baaki UI 30/90/150/180 cumulative use karta hai.
+      if (age >= 90) { c.old60++; old60++; }
+    });
+    byClassMap.forEach((c) => { c.old30 = c.b30 + c.b90 + c.b150 + c.b180; c.old60 = c.b90 + c.b150 + c.b180; });
+    buckets[1].n = old30;
+    buckets[2].n = old60;
+    const out = { total, old30, old60, buckets, byClass: [...byClassMap.values()].sort((a, b) => b.total - a.total) };
+    out[ch] = out;
+    return out;
+  }
+
   FF.stockAge = {
-    ready, forAgent, forTl, nodesFor, nodeFor, hostHtml, sectionHtml, html, decorate, csv, fetchTags, chipHtml, chipText, summaryText, tagsOlder, mixOf,
+    ready, forAgent, forTl, nodesFor, nodeFor, hostHtml, sectionHtml, html, decorate, csv, fetchTags, compute, chipHtml, chipText, summaryText, tagsOlder, mixOf,
     thresholds: THRESH, groupOf, bucketName, mergeNodes,
     get index() { return state.index; }, get error() { return state.error; },
     _setIndexForTest(data) { state.index = { at: Date.now(), data, today: data.today, ff: buildMaps('ff', data.ff), gv: buildMaps('gv', data.gv), total: 0, unknown: 0 }; state.at = Date.now(); state.error = ''; }
