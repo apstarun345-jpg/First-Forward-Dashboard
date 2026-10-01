@@ -35,8 +35,43 @@ test('unusual: flags high wrong-VRN / replacement / chassis agents, leaves norma
 test('unusual: single-day spike needs >= 10 tags and 3x own average', () => {
   const rows = ['01', '02', '03', '04', '05'].map((k) => d(`2026-09-${k}`, 'S', 2));
   rows.push(d('2026-09-06', 'S', 30));
-  const out = FF.unusual.analyze(rows, { period: 'last30' });
+  const out = FF.unusual.analyze(rows, { period: 'last30', today: '2026-10-01' });
   assert.ok(out.rows[0].flags.includes('spike'));
+});
+
+test('unusual presets use calendar dates, not latest available data', () => {
+  const today = '2026-10-01';
+  const row = d('2026-09-28', 'A', 1);
+  assert.deepEqual(FF.unusual.resolveRange([row], { period: 'today', today }), { from: today, to: today, label: 'Today (01 Oct 2026)' });
+  assert.equal(FF.unusual.resolveRange([row], { period: 'yesterday', today }).from, '2026-09-30');
+  assert.deepEqual([FF.unusual.resolveRange([row], { period: 'last', today }).from, FF.unusual.resolveRange([row], { period: 'last', today }).to], ['2026-09-01', '2026-09-30']);
+  assert.deepEqual([FF.unusual.resolveRange([], { period: 'last7', today }).from, FF.unusual.resolveRange([], { period: 'last7', today }).to], ['2026-09-25', today]);
+  assert.deepEqual([FF.unusual.resolveRange([], { period: 'last30', today }).from, FF.unusual.resolveRange([], { period: 'last30', today }).to], ['2026-09-02', today]);
+});
+
+test('unusual flags malformed VRNs and duplicate VRNs with channel peer thresholds and exact counts', () => {
+  const rows = [];
+  const days = ['05', '06', '07', '08'];
+  for (const agent of ['N1', 'N2', 'N3', 'N4', 'BAD', 'DUP']) {
+    days.forEach((day) => rows.push(d(`2026-09-${day}`, agent, 10)));
+  }
+  const vrnRecords = [];
+  for (let i = 1; i <= 5; i++) vrnRecords.push({ ch: 'ff', key: '2026-09-06', vrn: 'AB', tagId: `BAD-${i}`, cls: 'VC4', vrnType: 'New', agentId: 'BAD', agentName: 'BAD', tlName: 'TL1' });
+  vrnRecords.push(
+    { ch: 'ff', key: '2026-09-05', vrn: 'RJ14CA1234', tagId: 'DUP-1', cls: 'VC4', vrnType: 'New', agentId: 'DUP', agentName: 'DUP', tlName: 'TL1' },
+    { ch: 'ff', key: '2026-09-06', vrn: 'RJ14CA1234', tagId: 'DUP-2', cls: 'VC4', vrnType: 'New', agentId: 'DUP', agentName: 'DUP', tlName: 'TL1' }
+  );
+  const model = FF.unusual.analyze(rows, { period: 'last30', mult: 2, min: 3, today: '2026-10-01', vrnRecords });
+  const bad = model.rows.find((r) => r.id === 'BAD');
+  const dup = model.rows.find((r) => r.id === 'DUP');
+  assert.ok(bad.flags.includes('wrong'), `malformed VRNs should flag: ${bad.flags}`);
+  assert.equal(bad.invalidVrn, 5);
+  assert.equal(bad.wrong, 5, 'Wrong/invalid count is a union; malformed records are not discarded as too short');
+  assert.equal(bad.invalidList.length, 5);
+  assert.ok(dup.flags.includes('double'));
+  assert.equal(dup.doubleVrn, 2);
+  assert.equal(model.duplicateVrns.length, 1);
+  assert.equal(model.tagSums.wrong, 5, 'KPI tag total only includes agents flagged in that category');
 });
 
 test('pdf: build() makes a valid multi-object PDF container from canvases', () => {

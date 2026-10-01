@@ -285,9 +285,13 @@ test('a subscription signed with a rotated key is reported and dropped so the ph
     assert.equal(status.lastError.status, 403, 'the failure must be visible for diagnostics instead of failing silently');
     assert.match(server.log(), /push delivery failed/i, 'failed deliveries must be logged');
 
-    // Self-test endpoint: reports per-device delivery results instead of guessing.
-    await call('/api/push/subscribe', 'POST', { subscription: { endpoint: push.url('device-3'), keys: { p256dh: ua.publicKey.toString('base64url'), auth: ua.authSecret.toString('base64url') } } });
+    // Restore the service's expected key BEFORE the new subscription is visible. Background
+    // notifications may fan out immediately after subscribe, so setting it afterwards races them.
     push.state.expectedKey = (await call('/api/push/vapid')).json.publicKey;
+    const reSub = await call('/api/push/subscribe', 'POST', { subscription: { endpoint: push.url('device-3'), keys: { p256dh: ua.publicKey.toString('base64url'), auth: ua.authSecret.toString('base64url') } } });
+    assert.equal(reSub.res.status, 200, `re-subscribe accepted — ${JSON.stringify(reSub.json)}`);
+    // Let any in-flight background delivery finish before measuring the explicit self-test.
+    await sleep(100);
     push.state.deliveries.length = 0;
     const out = await call('/api/push/test', 'POST', {});
     assert.equal(out.res.status, 200);

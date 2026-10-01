@@ -137,3 +137,59 @@ test('dispatch calculation block: run-rate = issue ÷ (today−1), required, wit
   const tl = await MP.build(person('ff-tl', 'TL One'));
   assert.equal(tl.calc.total.rate, 10); assert.equal(tl.calc.total.net, 80, 'TL: 150 ÷ 15 × 15 − TL stock 70');
 });
+
+test('GV EIR month totals replace stale REPORT snapshots in agent, TL, light summary and class detail', async () => {
+  const priorRows = FF.gv.rows;
+  const priorIssuance = FF.gv.issuanceRows;
+  const eirRows = [
+    { ym, agentId: 'G001', agentName: 'GV Ramesh', tlName: 'GV TL', cls: 'VC4', n: 12 },
+    { ym, agentId: 'G001', agentName: 'GV Ramesh', tlName: 'GV TL', cls: 'VC20', n: 3 },
+    { ym, agentId: 'G003', agentName: 'GV Low', tlName: 'GV TL', cls: 'VC4', n: 2 },
+    { ym: prev, agentId: 'G001', agentName: 'GV Ramesh', tlName: 'GV TL', cls: 'VC4', n: 8 },
+    { ym: prev, agentId: 'G001', agentName: 'GV Ramesh', tlName: 'GV TL', cls: 'VC20', n: 2 },
+    { ym: prev, agentId: 'G003', agentName: 'GV Low', tlName: 'GV TL', cls: 'VC4', n: 1 }
+  ];
+  FF.gv.rows = FF.gv.masterRows;
+  FF.gv.issuanceRows = () => eirRows;
+  try {
+    const a = await MP.build(person('gv-agent', 'GV Ramesh', 'G001'));
+    assert.deepEqual([a.totals.curVc4, a.totals.curComm, a.totals.curTotal], [12, 3, 15]);
+    assert.deepEqual([a.totals.lastVc4, a.totals.lastComm, a.totals.lastTotal], [8, 2, 10]);
+    assert.deepEqual([a.classes.find((r) => r.cls === 'VC4').cur, a.classes.find((r) => r.cls === 'VC20').cur], [12, 3]);
+
+    const tl = await MP.build(person('gv-tl', 'GV TL'));
+    assert.deepEqual([tl.totals.curVc4, tl.totals.curComm, tl.totals.curTotal], [14, 3, 17]);
+    assert.deepEqual([tl.totals.lastVc4, tl.totals.lastComm, tl.totals.lastTotal], [9, 2, 11]);
+    assert.equal(tl.agents.reduce((sum, r) => sum + r.cur, 0), 17, 'agent rows and TL summary use the same EIR snapshot');
+    assert.equal(tl.classes.reduce((sum, r) => sum + r.cur, 0), 17, 'class details and TL summary use the same EIR snapshot');
+    assert.equal(MP.quick(person('gv-tl', 'GV TL')).totals.curTotal, 17, 'search suggestion snapshot must be corrected too');
+  } finally {
+    FF.gv.rows = priorRows;
+    FF.gv.issuanceRows = priorIssuance;
+  }
+});
+
+test('GV keeps calendar-month labels and surfaces the full previous-month issuance when current month has no EIR rows', async () => {
+  const priorRows = FF.gv.rows;
+  const priorIssuance = FF.gv.issuanceRows;
+  const eirRows = [
+    { ym: prev, agentId: 'G001', agentName: 'GV Ramesh', tlName: 'GV TL', cls: 'VC4', n: 8 },
+    { ym: prev, agentId: 'G001', agentName: 'GV Ramesh', tlName: 'GV TL', cls: 'VC20', n: 2 },
+    { ym: prev, agentId: 'G003', agentName: 'GV Low', tlName: 'GV TL', cls: 'VC4', n: 1 }
+  ];
+  FF.gv.rows = FF.gv.masterRows;
+  FF.gv.issuanceRows = () => eirRows;
+  try {
+    const agent = await MP.build(person('gv-agent', 'GV Ramesh', 'G001'));
+    assert.deepEqual([agent.months.cur, agent.months.last], [ym, prev], 'GV follows the calendar month even before its first row arrives');
+    assert.deepEqual([agent.totals.lastVc4, agent.totals.lastComm, agent.totals.lastTotal], [8, 2, 10]);
+    assert.equal(agent.classes.find((r) => r.cls === 'VC4').last, 8);
+    const tl = await MP.build(person('gv-tl', 'GV TL'));
+    assert.deepEqual([tl.months.cur, tl.months.last], [ym, prev]);
+    assert.deepEqual([tl.totals.lastVc4, tl.totals.lastComm, tl.totals.lastTotal], [9, 2, 11]);
+    assert.equal(tl.agents.reduce((sum, row) => sum + row.last, 0), 11, 'previous-month totals match the TL agent rows');
+  } finally {
+    FF.gv.rows = priorRows;
+    FF.gv.issuanceRows = priorIssuance;
+  }
+});

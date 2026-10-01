@@ -15,6 +15,11 @@ window.FF = window.FF || {};
   const U = FF.util;
   const esc = U.esc;
   const PAGE_SRC = { dashboard: 'ff', trend: 'ff', stock: 'ff', performance: 'ff', stockReport: 'ff', gvDashboard: 'gv', gvTrend: 'gv', gvStock: 'gv', gvStockReport: 'gv', gvPerformance: 'gv', home: 'both', tagIssued: 'both', compare: 'both', charts: 'both' };
+  const malformedVrn = (r) => {
+    if (/chassis/i.test(String(r && r.vrnType || ''))) return false;
+    const value = String(r && r.vrn || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    return !value || value.length < 6 || value.length > 13 || /^(0+|1+|9+|TEST|NA|NULL|NONE|UNKNOWN|UNAVAILABLE|XXXX|AAAA)/.test(value) || /(\d)\1{4,}/.test(value);
+  };
   const FILTERS = {
     vc4: { label: 'VC4', fn: (r) => r.group === 'VC4' },
     comm: { label: 'Commercial (NVC4)', fn: (r) => r.group !== 'VC4' },
@@ -22,7 +27,7 @@ window.FF = window.FF || {};
     vc5p: { label: 'VC5+', fn: (r) => r.group === 'VC5+' },
     repl: { label: 'Replacement', fn: (r) => r.type === 'REPLACEMENT' },
     chassis: { label: 'Chassis', fn: (r) => /chassis/i.test(r.vrnType) },
-    wrong: { label: 'Wrong VRN', fn: (r) => /wrong/i.test(r.vrnType) },
+    wrong: { label: 'Wrong / Invalid VRN', fn: (r) => /wrong/i.test(r.vrnType) || malformedVrn(r) },
     gv: { label: 'GV Partner', fn: (r) => r.channel === 'GV Partner' },
     ff: { label: 'First Forward', fn: (r) => r.channel !== 'GV Partner' }
   };
@@ -192,6 +197,10 @@ window.FF = window.FF || {};
     const groupFilter = filterOf(spec.f);
     if (groupFilter && !groupFilter.fn(r)) return false;
     if (spec.tagId && String(r.tagId || '').trim().toUpperCase() !== String(spec.tagId).trim().toUpperCase()) return false;
+    if (spec.vrn && String(r.vrn || '').toUpperCase().replace(/[^A-Z0-9]/g, '') !== String(spec.vrn).toUpperCase().replace(/[^A-Z0-9]/g, '')) return false;
+    const wantedGroup = String(spec.group || '').trim().toUpperCase();
+    if (wantedGroup === 'VC4' && r.group !== 'VC4') return false;
+    if (/^(COMM|COMMERCIAL|NVC4)$/.test(wantedGroup) && r.group === 'VC4') return false;
     if (spec.cls && classKey(r.cls) !== classKey(spec.cls)) return false;
     if (spec.type === 'REPLACEMENT' && r.type !== 'REPLACEMENT') return false;
     if (spec.type === 'NOT_REPLACEMENT' && r.type === 'REPLACEMENT') return false;
@@ -909,5 +918,5 @@ window.FF = window.FF || {};
     if (chip && state.spec) { open({ ...state.spec, ...JSON.parse(chip.dataset.kdSpec || '{}') }); return; }
   });
 
-  FF.kpiDetail = { open, specFrom, registerList, normYm, resetHistory, _infer: inferSpec };
+  FF.kpiDetail = { open, specFrom, registerList, normYm, resetHistory, _infer: inferSpec, _rowMatchesSpec: rowMatchesSpec };
 })(window.FF);

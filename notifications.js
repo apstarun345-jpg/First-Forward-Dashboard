@@ -33,8 +33,21 @@ window.FF = window.FF || {};
   // ⚠️ Sab keys TRUE rakho — savePrefs PURA object server par PUT karta hai, isliye yahan kisi
   // type ko false rakhne se wo permanently OFF save ho jaata tha (feed + mobile push dono band) —
   // isi wajah se admin ko sirf kuch types (sheet update) hi aati thi.
-  const DEFAULT_PREFS = { enabled: true, login: true, signup: true, report: true, monthly: true, digest: true, alert: true, activity: true, click: true, search: true, settings: true, user: true, location: true, info: true, request: true, assist: true, sound: true, push: true };
+  const TONE_OPTIONS = [
+    { id: 'classic', label: 'Classic · single clear beep' },
+    { id: 'soft', label: 'Soft · gentle low tone' },
+    { id: 'double', label: 'Double · two quick notes' },
+    { id: 'chime', label: 'Chime · three rising notes' },
+    { id: 'alert', label: 'Alert · alternating urgent notes' }
+  ];
+  const VALID_TONES = new Set(TONE_OPTIONS.map((x) => x.id));
+  const DEFAULT_PREFS = { enabled: true, login: true, signup: true, report: true, monthly: true, digest: true, alert: true, activity: true, click: true, search: true, settings: true, user: true, location: true, info: true, request: true, assist: true, sound: true, tone: 'classic', push: true };
   const state = { started: false, bound: false, timer: null, presenceTimer: null, fastTimer: null, lastAt: '', items: [], unread: 0, serverUnread: 0, firstPoll: true, page: 'home', pointer: null, people: [], lastInteraction: Date.now(), pointerBound: false, events: [], dirty: false, lastSent: 0, lastScroll: -1, pushOn: false, pushDevices: 0, pushStatus: null, pushTriedAt: 0, pushError: '', prefs: { ...DEFAULT_PREFS }, audioCtx: null, expanded: null, filterType: 'all', filterUnread: false, seenAt: '', voiceAt: {} };
+  const normalizePrefs = (p) => {
+    const out = { ...DEFAULT_PREFS, ...(p && typeof p === 'object' ? p : {}) };
+    if (!VALID_TONES.has(String(out.tone))) out.tone = DEFAULT_PREFS.tone;
+    return out;
+  };
   const EMBED = new URLSearchParams(location.search).get('embed') === 'live';
   const sharing = () => localStorage.getItem('ff_presence_pointer') !== '0';
 
@@ -51,7 +64,7 @@ window.FF = window.FF || {};
   function loadPrefsLocal() {
     try {
       const raw = localStorage.getItem('ff_notify_prefs');
-      if (raw) { const p = JSON.parse(raw); state.prefs = { ...DEFAULT_PREFS, ...p }; return; }
+      if (raw) { const p = JSON.parse(raw); state.prefs = normalizePrefs(p); return; }
     } catch { /* ignore */ }
     // Fall back from legacy sound key
     const oldSound = localStorage.getItem('ff_notify_sound');
@@ -64,19 +77,27 @@ window.FF = window.FF || {};
     if (!hasAccess()) return;
     try {
       const out = await FF.auth.api('/api/notifications/prefs');
-      if (out && out.prefs) state.prefs = { ...DEFAULT_PREFS, ...out.prefs };
+      if (out && out.prefs) state.prefs = normalizePrefs(out.prefs);
       savePrefsLocal();
     } catch { /* pre-login ya offline: local prefs hi kaam karenge */ }
   }
   async function savePrefs(patch, silent) {
-    state.prefs = { ...state.prefs, ...patch };
+    state.prefs = normalizePrefs({ ...state.prefs, ...patch });
     savePrefsLocal();
     try { await FF.auth.api('/api/notifications/prefs', 'PUT', { prefs: state.prefs }); } catch { /* retry next poll */ }
     if (!silent) U.toast('Notification preferences saved ✓', 'ok');
     render();
   }
 
-  // ---- 🔊 in-app sound (Web Audio beep — 880Hz, 200ms, works without asset file) -----------------
+  // ---- 🔊 In-app/update tones (Web Audio; the selected pattern is persisted per user) -------------
+  const TONE_NOTES = {
+    classic: [{ hz: 880, at: 0, duration: 0.2 }],
+    soft: [{ hz: 523.25, at: 0, duration: 0.28, gain: 0.09 }],
+    double: [{ hz: 740, at: 0, duration: 0.12 }, { hz: 988, at: 0.18, duration: 0.17 }],
+    chime: [{ hz: 659.25, at: 0, duration: 0.16 }, { hz: 880, at: 0.16, duration: 0.16 }, { hz: 1174.66, at: 0.32, duration: 0.24 }],
+    alert: [{ hz: 1046.5, at: 0, duration: 0.13 }, { hz: 784, at: 0.17, duration: 0.13 }, { hz: 1046.5, at: 0.34, duration: 0.2 }]
+  };
+  const TONE_VIBRATION = { classic: [80, 40, 80], soft: [60], double: [60, 80, 60], chime: [50, 60, 50, 60, 90], alert: [180, 60, 180] };
   // ⚠️ v3.25 CHROME FIX — pehle AudioContext sirf beep() ke andar (hamesha bina gesture ke, poll
   //    callback me) banta tha. Chrome autoplay policy me aisa context "suspended" paida hota hai aur
   //    bina gesture ke resume() KABHI succeed nahi hota — isliye installed app me sound aati thi
@@ -98,17 +119,22 @@ window.FF = window.FF || {};
   function beepNow() {
     try {
       const ctx = audioCtx();
-      if (!ctx) return false;
-      if (ctx.state !== 'running') return false;
-      const o = ctx.createOscillator(), g = ctx.createGain();
-      o.type = 'sine'; o.frequency.value = 880;
-      g.gain.setValueAtTime(0.0001, ctx.currentTime);
-      g.gain.exponentialRampToValueAtTime(0.15, ctx.currentTime + 0.01);
-      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.22);
-      o.connect(g); g.connect(ctx.destination);
-      o.start(ctx.currentTime); o.stop(ctx.currentTime + 0.24);
-      // Mobile ke liye vibration bhi (jab tab foreground hai)
-      if (navigator.vibrate) try { navigator.vibrate([80, 40, 80]); } catch {}
+      if (!ctx || ctx.state !== 'running') return false;
+      const notes = TONE_NOTES[state.prefs.tone] || TONE_NOTES.classic;
+      const start = ctx.currentTime;
+      notes.forEach((note) => {
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        const at = start + note.at, duration = note.duration;
+        o.type = state.prefs.tone === 'alert' ? 'triangle' : 'sine';
+        o.frequency.value = note.hz;
+        g.gain.setValueAtTime(0.0001, at);
+        g.gain.exponentialRampToValueAtTime(note.gain || 0.13, at + 0.012);
+        g.gain.exponentialRampToValueAtTime(0.0001, at + duration);
+        o.connect(g); g.connect(ctx.destination);
+        o.start(at); o.stop(at + duration + 0.01);
+      });
+      // Mobile vibration bhi selected tone ke rhythm ke saath.
+      if (navigator.vibrate) try { navigator.vibrate(TONE_VIBRATION[state.prefs.tone] || TONE_VIBRATION.classic); } catch {}
       return true;
     } catch { return false; }
   }
@@ -235,7 +261,7 @@ window.FF = window.FF || {};
       badge: 'icon-192.png',
       tag: item.type || 'ff-notification',
       renotify: true,
-      vibrate: state.prefs.sound !== false ? [200, 100, 200] : undefined,
+      vibrate: state.prefs.sound !== false ? (TONE_VIBRATION[state.prefs.tone] || TONE_VIBRATION.classic) : undefined,
       data: { link: (item.meta && item.meta.link) || '' }
     };
     // iOS Safari/PWA me `new Notification()` allowed nahi hai — service worker se dikhao.
@@ -244,14 +270,14 @@ window.FF = window.FF || {};
       const reg = 'serviceWorker' in navigator ? await navigator.serviceWorker.getRegistration() : null;
       if (reg && reg.showNotification) {
         await reg.showNotification(title, options);
-        if (state.prefs.sound !== false && navigator.vibrate) try { navigator.vibrate([200, 100, 200]); } catch {}
+        if (state.prefs.sound !== false && navigator.vibrate) try { navigator.vibrate(TONE_VIBRATION[state.prefs.tone] || TONE_VIBRATION.classic); } catch {}
         return;
       }
     } catch { /* fall through to the page-level constructor */ }
     try {
       const n = new Notification(title, options);
       n.onclick = () => { window.focus(); n.close(); };
-      if (state.prefs.sound !== false && navigator.vibrate) try { navigator.vibrate([200, 100, 200]); } catch {}
+      if (state.prefs.sound !== false && navigator.vibrate) try { navigator.vibrate(TONE_VIBRATION[state.prefs.tone] || TONE_VIBRATION.classic); } catch {}
     } catch { /* private mode / unsupported */ }
   }
   function setCount(n) {
@@ -1057,7 +1083,14 @@ window.FF = window.FF || {};
       .catch(() => {});
   }
   // Test sound button (for settings/test)
+  function setTone(tone) {
+    const selected = VALID_TONES.has(String(tone)) ? String(tone) : DEFAULT_PREFS.tone;
+    unlockAudio();
+    void savePrefs({ tone: selected }, true);
+    beep(true);
+    return selected;
+  }
   function testSound() { unlockAudio(); beep(true); U.toast('🔊 Test beep', 'info'); } // force: master OFF ho tab bhi test chale
-  FF.notifications = { start, stop, poll, toggle, activity, logSearch, logClick, track, testSound, render, setupPush, disablePush, enableBrowser, setEnabled, maybeAskPermission, testPanel, testPush, refreshPushStatus, retryPush, browserAlert, localAlert, speakServerItem, countUnread, unlockAudio, beep, soundOn: () => state.prefs.sound !== false, notifyTypes: NOTIFY_TYPES, get state() { return state; }, get prefs() { return state.prefs; } };
+  FF.notifications = { start, stop, poll, toggle, activity, logSearch, logClick, track, testSound, setTone, toneOptions: TONE_OPTIONS, render, setupPush, disablePush, enableBrowser, setEnabled, maybeAskPermission, testPanel, testPush, refreshPushStatus, retryPush, browserAlert, localAlert, speakServerItem, countUnread, unlockAudio, beep, soundOn: () => state.prefs.sound !== false, notifyTypes: NOTIFY_TYPES, get state() { return state; }, get prefs() { return state.prefs; } };
   bind();
 })(window.FF);

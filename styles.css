@@ -4022,8 +4022,10 @@ html[data-theme='dark'] .age-tbl tr.age-total td { background: rgba(255, 255, 25
 .ms-hero .ms-hero-stats span { background: rgba(255, 255, 255, .2); border-radius: 12px; padding: 6px 12px; font-size: .78rem; } .ms-hero .ms-hero-stats b { display: block; font-size: 1.15rem; }
 
 /* ===== v3.32 — Agent / TL Summary ===== */
-.as-search { position: relative; max-width: 720px; width: 100%; }
-.as-search .input { width: 100%; font-size: 1.02rem; padding: 12px 14px; border: 2px solid #c7d2fe; border-radius: 12px; }
+.as-search-bar { display: flex; width: 100%; align-items: stretch; }
+.as-search { position: relative; display: flex; align-items: stretch; gap: 8px; max-width: 720px; width: 100%; }
+.as-search .input { flex: 1 1 auto; min-width: 0; width: auto; font-size: 1.02rem; padding: 12px 14px; border: 2px solid #c7d2fe; border-radius: 12px; }
+.as-search > .btn { flex: 0 0 auto; align-self: stretch; white-space: nowrap; }
 .as-drop { position: absolute; z-index: 30; left: 0; right: 0; top: 100%; margin-top: 4px; background: #fff; color: #0f172a; border: 1px solid #c7d2fe; border-radius: 12px; box-shadow: 0 14px 34px rgba(30, 27, 75, .25); max-height: 360px; overflow: auto; }
 .as-opt { display: flex; justify-content: space-between; align-items: center; gap: 10px; width: 100%; text-align: left; background: none; border: 0; border-bottom: 1px solid #eef2f7; padding: 9px 12px; cursor: pointer; color: #0f172a; font: inherit; }
 .as-opt:hover { background: #eef2ff; }
@@ -4035,8 +4037,12 @@ html[data-theme='dark'] .age-tbl tr.age-total td { background: rgba(255, 255, 25
 .as-actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
 .as-actions .btn { background: #fff; color: #3730a3; border: 0; font-weight: 700; } .as-actions .btn.primary { background: #16a34a; color: #fff; }
 .as-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 14px; }
-.as-top-suggest { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--line, #e2e8f0); }
-.as-top-suggest-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.as-quick-wrap { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line, #e2e8f0); }
+.as-quick-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.as-top-suggest { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.as-sug-chip { display: inline-flex; align-items: center; justify-content: flex-start; flex-wrap: wrap; gap: 5px; max-width: 100%; min-width: 0; padding: 7px 10px; text-align: left; line-height: 1.25; white-space: normal; }
+.as-sug-chip b, .as-sug-chip small { overflow-wrap: anywhere; }
+.as-sug-chip .badge { flex: 0 0 auto; }
 .as-top-group { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
 .as-top-label { font-size: 11.5px; font-weight: 800; color: var(--muted, #64748b); min-width: 72px; }
 .as-top-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
@@ -4046,7 +4052,8 @@ html[data-theme='dark'] .age-tbl tr.age-total td { background: rgba(255, 255, 25
 .as-charts-grid .mp-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
 .as-age-card { cursor: pointer; transition: transform .15s, box-shadow .15s; }
 .as-age-card:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(79, 70, 229, .15); }
-@media (max-width: 800px) { .as-two { grid-template-columns: 1fr; } .as-actions { margin-left: 0; } }
+@media (max-width: 800px) { .as-two { grid-template-columns: minmax(0, 1fr); } .as-actions { margin-left: 0; } }
+@media (max-width: 520px) { .as-search { flex-wrap: wrap; } .as-search .input { flex: 1 1 100%; } .as-search > .btn { flex: 1 1 100%; } .as-sug-chip { width: 100%; } .as-top-suggest { align-items: stretch; } }
 
 /* ===== v3.33 — Unusual Activity Forensic Command Center ===== */
 .ua-head { background: linear-gradient(125deg, #0f172a 0%, #1e1b4b 55%, #311042 100%); color: #fff; padding: 18px 20px; border-radius: 18px; margin-bottom: 14px; box-shadow: 0 12px 28px rgba(15, 23, 42, .24); }
@@ -4077,7 +4084,15 @@ html[data-theme='dark'] .age-tbl tr.age-total td { background: rgba(255, 255, 25
 .ua-row-flagged td:first-child { border-left: 3px solid #ef4444; }
 
 /* ===== v3.33 — Global Text Alignment, Centering & Overflow Prevention ===== */
-.kpi, .dkpi, .kd-stat, .ms-kpi, .tr-tlk, .ua-kpi {
+html, body { max-width: 100%; overflow-x: clip; }
+img, picture, video, canvas, svg { max-width: 100%; }
+input, select, textarea { max-width: 100%; }
+pre, code, .mono { max-width: 100%; overflow-wrap: anywhere; word-break: break-word; }
+.main, .page, .card, .card-head, .card-body, .page-head, .drawer-head, .drawer-body, .kd-sec { min-width: 0; }
+.page-head > *, .card-head > *, .drawer-head > * { min-width: 0; max-width: 100%; }
+.page-head h1, .page-head h2, .page-head .sub, .card-head h3, .drawer-head h2, .drawer-sub,
+.drawer-body p, .drawer-body h3, .drawer-body h4 { overflow-wrap: anywhere; word-break: break-word; }
+.kpi, .dkpi, .kd-stat, .ms-kpi, .mp-kpi, .tr-tlk, .ua-kpi {
   min-width: 0;
   max-width: 100%;
   overflow-wrap: anywhere;
@@ -4088,6 +4103,7 @@ html[data-theme='dark'] .age-tbl tr.age-total td { background: rgba(255, 255, 25
 }
 .kpi .kpi-head, .kpi .kpi-label, .kpi .kpi-val, .kpi .kpi-sub,
 .dkpi small, .dkpi b, .dkpi span,
+.mp-kpi small, .mp-kpi b, .mp-kpi em,
 .kd-stat small, .kd-stat b, .kd-stat span {
   text-align: center;
   justify-content: center;
@@ -4104,10 +4120,10 @@ html[data-theme='dark'] .age-tbl tr.age-total td { background: rgba(255, 255, 25
   justify-content: center;
   vertical-align: middle;
 }
-.tbl th, .tbl td, .data-table th, .data-table td {
-  vertical-align: middle;
-  overflow-wrap: break-word;
-}
+.table-wrap { min-width: 0; max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; }
+.tbl th, .data-table th { vertical-align: middle; white-space: nowrap; overflow-wrap: normal; }
+.tbl td:not(.num), .data-table td:not(.num) { vertical-align: middle; white-space: normal; overflow-wrap: anywhere; word-break: normal; }
+.tbl td.num, .data-table td.num { vertical-align: middle; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .tbl tfoot tr.row-total td,
 .tbl tr.kd-total td,
 .tbl tfoot td {
@@ -4118,3 +4134,132 @@ html[data-theme='dark'] .age-tbl tr.age-total td { background: rgba(255, 255, 25
 .kd-stat-click { cursor: pointer; transition: transform .12s, box-shadow .12s; }
 .kd-stat-click:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(79, 70, 229, .16); }
 
+
+/* ===== Unusual Activity · Command Center polish (markup-matched selectors) ===== */
+.ua-head {
+  align-items: center;
+  padding: 20px 22px;
+  gap: 14px;
+  min-height: 124px;
+  border: 1px solid rgba(129, 140, 248, .28);
+}
+.ua-head-copy { min-width: 0; flex: 1 1 520px; }
+.ua-head .head-actions { align-self: center; }
+.ua-head h1 { line-height: 1.18; overflow-wrap: anywhere; }
+.ua-head .sub { line-height: 1.6; }
+.ua-kicker { letter-spacing: .09em; }
+.ua-filter-command { overflow: visible; border-color: color-mix(in srgb, var(--brand) 18%, var(--line)); }
+.ua-period-bar { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px 14px; align-items: center; }
+.ua-bar-label { color: var(--ink); font-size: 12px; font-weight: 850; white-space: nowrap; }
+.ua-period-pills { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.ua-period-pill {
+  appearance: none; border: 1px solid var(--line); border-radius: 999px; background: var(--card); color: var(--ink);
+  padding: 7px 11px; font: inherit; font-size: 11.5px; font-weight: 750; line-height: 1.2; cursor: pointer;
+  transition: background .15s, color .15s, border-color .15s, transform .15s;
+}
+.ua-period-pill:hover { transform: translateY(-1px); border-color: var(--brand); }
+.ua-period-pill.active { background: var(--brand); color: #fff; border-color: var(--brand); box-shadow: 0 4px 12px color-mix(in srgb, var(--brand) 22%, transparent); }
+.ua-period-pill:focus-visible, .ua-kpi-card:focus-visible, .ua-suspect-card:focus-visible { outline: 3px solid #fbbf24; outline-offset: 2px; }
+.ua-custom-dates { grid-column: 1 / -1; width: 100%; }
+.ua-custom-dates label { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 11.5px; font-weight: 800; }
+.ua-custom-dates .input { min-height: 36px; }
+.ua-control-row { margin-top: 10px; padding-top: 12px; border-top: 1px solid var(--line); gap: 9px 12px; }
+.ua-control-row .seg { margin-right: auto; }
+.ua-control-row > label:not(.check) { color: var(--muted); font-size: 11.5px; font-weight: 800; }
+.ua-control-row select { min-height: 36px; }
+.ua-control-row #ua-q { flex: 1 1 210px; min-height: 36px; }
+.ua-data-note { margin-top: 9px; padding: 8px 10px; border-radius: 9px; background: color-mix(in srgb, #3b82f6 7%, var(--card)); color: var(--muted); font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
+.ua-data-note.warning { color: #92400e; background: color-mix(in srgb, #f59e0b 15%, var(--card)); border: 1px solid color-mix(in srgb, #f59e0b 34%, var(--line)); }
+.ua-kpi-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 205px), 1fr)); gap: 11px; }
+.ua-kpi-card {
+  --ua-accent: #4f46e5;
+  min-height: 142px; padding: 14px 15px 13px; border: 1px solid color-mix(in srgb, var(--ua-accent) 22%, var(--line));
+  border-top: 4px solid var(--ua-accent); border-radius: 15px; color: var(--ink);
+  background: linear-gradient(145deg, color-mix(in srgb, var(--ua-accent) 8%, var(--card)), var(--card) 70%);
+  box-shadow: 0 6px 16px rgba(15, 23, 42, .07); text-align: left;
+}
+.ua-kpi-card.red { --ua-accent: #e11d48; }
+.ua-kpi-card.amber { --ua-accent: #d97706; }
+.ua-kpi-card.blue { --ua-accent: #2563eb; }
+.ua-kpi-card .kpi-top { align-items: flex-start; }
+.ua-kpi-card .kpi-title { color: var(--muted); font-size: 10.5px; line-height: 1.35; letter-spacing: .055em; }
+.ua-kpi-card .kpi-icon { color: var(--ua-accent); background: color-mix(in srgb, var(--ua-accent) 12%, var(--card)); }
+.ua-kpi-card .kpi-value { color: var(--ink); margin: 9px 0 5px; font-size: clamp(23px, 2.1vw, 29px); letter-spacing: -.035em; }
+.ua-kpi-card .kpi-value small { color: var(--muted); font-size: 11px !important; }
+.ua-kpi-card .kpi-foot { color: var(--ink); font-size: 10.5px; line-height: 1.4; }
+.ua-kpi-card .kpi-foot b { color: var(--ua-accent); font-size: 12px; }
+.ua-kpi-cta { color: var(--muted); }
+.ua-kpi-card:hover { border-color: var(--ua-accent); box-shadow: 0 12px 24px color-mix(in srgb, var(--ua-accent) 15%, transparent); }
+.ua-kpi-card.ua-kpi-active { outline: 2px solid var(--ua-accent); outline-offset: 2px; }
+.ua-watchlist-card { border-color: color-mix(in srgb, #e11d48 16%, var(--line)); }
+.ua-watch-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 285px), 1fr)); }
+.ua-suspect-card {
+  --ua-suspect: #d97706;
+  min-width: 0; border: 1px solid color-mix(in srgb, var(--ua-suspect) 30%, var(--line)); border-left: 4px solid var(--ua-suspect);
+  border-radius: 14px; padding: 13px; background: linear-gradient(145deg, color-mix(in srgb, var(--ua-suspect) 7%, var(--card)), var(--card) 62%);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, .055); display: flex; flex-direction: column; gap: 10px; cursor: pointer;
+  transition: transform .16s, box-shadow .16s, border-color .16s;
+}
+.ua-suspect-card.critical { --ua-suspect: #e11d48; }
+.ua-suspect-card:hover { transform: translateY(-2px); border-color: var(--ua-suspect); box-shadow: 0 10px 24px color-mix(in srgb, var(--ua-suspect) 15%, transparent); }
+.ua-sc-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; min-width: 0; }
+.ua-sc-head > div:first-child { min-width: 0; }
+.ua-sc-rank { color: var(--muted); font-size: 10.5px; font-weight: 850; letter-spacing: .05em; text-transform: uppercase; }
+.ua-sc-name { margin: 3px 0; color: var(--ink); font-size: 15px; overflow-wrap: anywhere; }
+.ua-sc-name small { color: var(--muted); font-size: 10.5px; font-weight: 600; }
+.ua-sc-tl { color: var(--muted); font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
+.ua-sc-score { flex: none; display: grid; justify-items: center; min-width: 52px; padding: 6px 8px; border-radius: 11px; background: color-mix(in srgb, var(--ua-suspect) 12%, var(--card)); color: var(--ua-suspect); }
+.ua-sc-score b { font-size: 19px; line-height: 1.05; }
+.ua-sc-score small { margin-top: 2px; font-size: 9px; font-weight: 850; text-transform: uppercase; }
+.ua-sc-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; padding: 7px; border-radius: 10px; background: color-mix(in srgb, var(--brand) 5%, var(--card)); }
+.ua-sc-metrics > div { min-width: 0; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 2px; }
+.ua-sc-metrics span { color: var(--muted); font-size: 9px; font-weight: 750; line-height: 1.2; }
+.ua-sc-metrics b { color: var(--ink); font-size: 12px; overflow-wrap: anywhere; }
+.ua-sc-metrics b.red { color: #dc2626; }
+.ua-sc-metrics small { font-size: 9px; font-weight: 650; }
+.ua-sc-reasons { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 5px; }
+.ua-reason-chip { max-width: 100%; padding: 4px 7px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); background: var(--card); font-size: 10px; line-height: 1.35; overflow-wrap: anywhere; }
+.ua-hit { background: color-mix(in srgb, #ef4444 8%, var(--card)); }
+.ua-hit b { color: #b91c1c; }
+.ua-row-flagged td:first-child { border-left: 3px solid #ef4444; }
+.ua-filter-command .card-body, .ua-filter-command .ctrl-row, .ua-filter-command .ua-period-bar { min-width: 0; }
+.ua-filter-command .seg { display: flex; flex-wrap: wrap; gap: 5px; }
+.ua-filter-command .seg-btn { white-space: nowrap; }
+.ua-filter-command .table-wrap, .ua-watchlist-card .table-wrap { max-width: 100%; }
+html[data-theme="dark"] .ua-filter-command { border-color: #30405f; background: var(--card); }
+html[data-theme="dark"] .ua-period-pill { background: #141e33; border-color: #33415e; color: #dbeafe; }
+html[data-theme="dark"] .ua-period-pill.active { background: #4f46e5; border-color: #6366f1; color: #fff; }
+html[data-theme="dark"] .ua-data-note { color: #b8c5db; background: rgba(59,130,246,.12); }
+html[data-theme="dark"] .ua-data-note.warning { color: #fde68a; background: rgba(245,158,11,.13); border-color: rgba(245,158,11,.4); }
+html[data-theme="dark"] .ua-kpi-card { border-color: color-mix(in srgb, var(--ua-accent) 38%, #26344d); background: linear-gradient(145deg, color-mix(in srgb, var(--ua-accent) 14%, #111b2d), #111b2d 70%); }
+html[data-theme="dark"] .ua-kpi-card .kpi-title, html[data-theme="dark"] .ua-kpi-cta { color: #aab8cf; }
+html[data-theme="dark"] .ua-kpi-card .kpi-value, html[data-theme="dark"] .ua-kpi-card .kpi-foot { color: #eef4ff; }
+html[data-theme="dark"] .ua-kpi-card .kpi-value small { color: #aab8cf; }
+html[data-theme="dark"] .ua-suspect-card { background: linear-gradient(145deg, color-mix(in srgb, var(--ua-suspect) 13%, #111b2d), #111b2d 65%); }
+html[data-theme="dark"] .ua-sc-name { color: #f1f5f9; }
+html[data-theme="dark"] .ua-sc-metrics { background: rgba(96, 122, 168, .12); }
+html[data-theme="dark"] .ua-sc-metrics b { color: #e2e8f0; }
+html[data-theme="dark"] .ua-reason-chip { color: #cbd5e1; background: #131e32; border-color: #30405f; }
+html[data-theme="dark"] .ua-hit { background: rgba(239,68,68,.12); }
+html[data-theme="dark"] .ua-hit b { color: #fca5a5; }
+@media (max-width: 900px) {
+  .ua-period-bar { grid-template-columns: 1fr; }
+  .ua-custom-dates { grid-column: 1; }
+  .ua-control-row .seg { width: 100%; margin-right: 0; }
+  .ua-control-row .seg-btn { flex: 1 1 auto; }
+  .ua-kpi-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); }
+}
+@media (max-width: 560px) {
+  .ua-head { padding: 15px; }
+  .ua-head .head-actions { width: 100%; }
+  .ua-head .head-actions .btn { flex: 1 1 auto; }
+  .ua-custom-dates { align-items: stretch; }
+  .ua-custom-dates label { flex: 1 1 145px; align-items: stretch; flex-direction: column; }
+  .ua-custom-dates .btn { flex: 1 1 100%; }
+  .ua-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .ua-kpi-card { min-height: 134px; padding: 11px; }
+  .ua-kpi-card .kpi-title { font-size: 9px; }
+  .ua-kpi-card .kpi-value { font-size: 22px; }
+  .ua-kpi-card .kpi-foot { font-size: 9.5px; }
+  .ua-sc-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
