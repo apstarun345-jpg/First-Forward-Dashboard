@@ -1082,9 +1082,13 @@ await run('🏷️ Tag Request — form + system check (class-wise stock / issua
   await pages.tagRequest.render(r, {}, {});
   await settle(400);
   const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  for (const s of ['IDFC Agents Tag Request Form', 'System check karo', 'Ek aur agent', 'Agent ID / Naam']) {
+  // v3.30 — upar employee, neeche har agent ka block (mobile · address · pincode · vertical class qty)
+  for (const s of ['Employee name *', 'Add new agent', 'Agent ID / Naam', 'Agent mobile number', 'Full address', 'Pincode', 'Request submit karo']) {
     if (!html.includes(s)) throw new Error(`Tag Request form me "${s}" nahi mila`);
   }
+  for (const a of ['mobile', 'address', 'pincode']) if (!html.includes(`data-tr-a="${a}"`)) throw new Error(`agent ${a} field missing`);
+  if (!/data-tr-view="settings"/.test(html)) throw new Error('admin ko ⚙️ Link & Sheet tab nahi mila');
+  if (/data-tr-view="result"/.test(html)) throw new Error('Result tab ab nahi hona chahiye');
   for (const c of ['VC4', 'VC5', 'VC6', 'VC7', 'VC12', 'VC16']) {
     if (!html.includes(`data-tr-cls="${c}"`)) throw new Error(`Tag class chip ${c} missing`);
   }
@@ -1106,21 +1110,28 @@ await run('🏷️ Tag Request — form + system check (class-wise stock / issua
   const forced = await pages.tagRequest.preview([{ name: testAgent, cls: 'VC4', qty: 7 }]);
   if (Number(forced.rows[0].approved) !== 7) throw new Error('user qty approve me reflect nahi hui');
   log(`      ${res.rows.length} class-rows · ${row.agentName} · ${row.cls} stock ${row.stock} · ${row.priority} · sug ${row.sugNet}/${row.sugGross}`);
-  // 📊 result view — analysis ke baad wahi rows editable table me + share/download buttons
+  // 📊 purana ?view=result deep link — ab form hi khulta hai (system check submit ke saath hota hai)
   const r2 = root();
   await pages.tagRequest.render(r2, { view: 'result' }, {});
   await settle(200);
   const h2 = r2.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  for (const s of ['System check · agent × class', 'Admin ko submit karo', 'CSV', 'Copy', 'Approved']) {
-    if (!h2.includes(s)) throw new Error(`result view me "${s}" nahi mila`);
-  }
-  if (!/data-tr-appr=/.test(h2)) throw new Error('result rows editable nahi hain (approved input missing)');
-  // 📥 requests view — admin list (server API) render ho, error na de
+  if (!h2.includes('Add new agent')) throw new Error('view=result par form nahi khula');
+  // 📥 requests view — har request ek row, upar ☑ select → 🖨️ print / ✅ approve / ⬇ CSV
   const r3 = root();
   await pages.tagRequest.render(r3, { view: 'requests' }, {});
   await settle(600);
   const h3 = r3.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
   if (!/Tag Requests|koi tag request nahi/.test(h3)) throw new Error('requests view render nahi hua');
+  for (const s of ['Select all', 'Print selected', 'Approve selected', 'CSV', '🚗 VC4/VC20', '🚚 VC5+', 'Run rate', 'Expected', 'Growth', 'Requested (class-wise)']) {
+    if (!h3.includes(s)) throw new Error(`requests table me "${s}" nahi mila`);
+  }
+  if (/Kholo/.test(h3)) throw new Error('requests table me "Kholo" button nahi hona chahiye (sab ek row me)');
+  // ⚙️ Link & Sheet tab — public link + sheet sync cards (requests tab me ab nahi)
+  const r4 = root();
+  await pages.tagRequest.render(r4, { view: 'settings' }, {});
+  await settle(400);
+  const h4 = r4.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  if (!/tr-public-card/.test(h4) || !/tr-sheet-card/.test(h4)) throw new Error('settings tab me link/sheet cards nahi');
 }, false);
 await run('🌐 Public employee link — bina login form (naam mandatory) + status view', async () => {
   // share link /tag-request par jaata hai (login nahi)
@@ -1131,34 +1142,29 @@ await run('🌐 Public employee link — bina login form (naam mandatory) + stat
   await pages.tagRequest.render(r, { view: 'form', public: '1' }, { publicConfig: pubCfg });
   await settle(400);
   const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  for (const s of ['Aapki details', 'Employee name *', 'Full address', 'Pincode *', 'IDFC Agents Tag Request', 'System check karo']) {
+  for (const s of ['Employee details', 'Employee name *', 'Agent mobile number', 'Full address', 'Pincode *', 'IDFC Agents Tag Request', 'Add new agent', 'Request submit karo']) {
     if (!html.includes(s)) throw new Error(`public form me "${s}" nahi mila`);
   }
   if (!/data-tr-emp="name"/.test(html)) throw new Error('employee name input missing');
-  if (!/data-tr-emp="mobile"/.test(html)) throw new Error('mobile field nahi mila (ab mandatory hai)');
-  if (!/data-tr-emp="address"/.test(html)) throw new Error('full address field nahi mila (mandatory)');
-  if (!/data-tr-emp="pincode"/.test(html)) throw new Error('pincode field nahi mila (mandatory)');
-  if (!/Full address/.test(html)) throw new Error('address label nahi mila');
+  for (const a of ['mobile', 'address', 'pincode']) if (!html.includes(`data-tr-a="${a}"`)) throw new Error(`agent ${a} field nahi mila (mandatory)`);
+  for (const c of ['VC4', 'VC5', 'VC6', 'VC7', 'VC12', 'VC16']) if (!html.includes(`data-tr-cls="${c}"`)) throw new Error(`class ${c} qty input missing`);
+  if (!/class="tr-qty-list/.test(html)) throw new Error('class qty vertical list nahi mili');
   if (!/data-tr-view="status"/.test(html)) throw new Error('public mode me status tab missing');
-  // 📊 public result view — login wale submit button ke bajaye "Request submit karo"
-  const perfAgents = pages.performance.agents() || [];
-  const who = (perfAgents.find((a) => a.name && !a.tlExcluded) || perfAgents[0] || {}).name;
-  if (who) {
-    await pages.tagRequest.preview([{ name: who, cls: 'VC4', qty: 3 }]);
-    const r2 = root();
-    await pages.tagRequest.render(r2, { view: 'result', public: '1' }, { publicConfig: pubCfg });
-    await settle(250);
-    const h2 = r2.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-    if (!h2.includes('Request submit karo')) throw new Error('public result view me submit button nahi mila');
-    if (!/data-tr-appr=/.test(h2)) throw new Error('public result rows editable nahi hain');
-    if (h2.includes('Admin ko submit karo')) throw new Error('public form me admin wala submit label dikh raha hai');
-  }
+  if (/data-tr-view="result"|data-tr-view="requests"/.test(html)) throw new Error('public link par sirf Form + Status tab hone chahiye');
+  // 📊 purana ?view=result public link — ab form hi
+  const r2 = root();
+  await pages.tagRequest.render(r2, { view: 'result', public: '1' }, { publicConfig: pubCfg });
+  await settle(150);
+  const h2 = r2.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  if (!h2.includes('Request submit karo')) throw new Error('public view=result par form nahi khula');
+  if (h2.includes('Admin ko submit karo')) throw new Error('public form me admin wala submit label dikh raha hai');
   // 🔎 status view (Request ID daal kar status dekhne ka raasta)
   const r3 = root();
   await pages.tagRequest.render(r3, { view: 'status', public: '1' }, { publicConfig: pubCfg });
   await settle(150);
   const h3 = r3.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
   if (!/Request status/.test(h3) || !/tr-status-id/.test(h3)) throw new Error('public status view render nahi hua');
+  if (!/Agent mobile/.test(h3)) throw new Error('status view me agent mobile se search ka option nahi');
   // 🔁 duplicate warning card — "already pending" wala block (same agent×class dobara bhejne par)
   const dupHtml = pages.tagRequest.dupWarning([{ id: 'tagreq_test_1', status: 'pending', total: 33, rows: 2, at: new Date().toISOString(), matched: ['1001 · VC4'] }], 'Suresh Yadav');
   if (!/Ye entry pehle se hai/.test(dupHtml)) throw new Error('duplicate warning heading nahi mili');
@@ -1209,13 +1215,16 @@ await run('🖨️ Dispatch label — A4 print me FROM+TO left·right repeat + t
   if (typeof pages.tagRequest.labelText !== 'function') throw new Error('labelText export nahi mila');
   const html = pages.tagRequest.dispatchLabelHtml(r, { size: 12, rows: 4 });
   if (!/A4/.test(html) || !html.includes('@page')) throw new Error('A4 print CSS nahi mili');
-  const copies = 4 * 2; // rows × 2 columns (left + right)
+  // v3.30 — har request ka label sirf EK baar (pehle wahi label 8/10/12 baar repeat hota tha)
   const lblCount = (html.match(/class="lbl"/g) || []).length;
-  if (lblCount !== copies) throw new Error(`labels count mismatch: ${lblCount} vs ${copies}`);
+  if (lblCount !== 1) throw new Error(`labels count mismatch: ${lblCount} vs 1 — label repeat nahi hona chahiye`);
   const pinCount = (html.match(/302019/g) || []).length;
-  if (pinCount !== copies) throw new Error(`pincode repeat mismatch: ${pinCount} vs ${copies} — har label me TO address nahi repeat hua`);
-  const nameCount = (html.match(/Ramesh Yadav/g) || []).length;
-  if (nameCount < copies) throw new Error('employee naam har label me repeat nahi hua');
+  if (pinCount !== 1) throw new Error(`pincode count mismatch: ${pinCount} vs 1`);
+  if (!html.includes('Ramesh Yadav')) throw new Error('TO naam label par nahi');
+  const r2 = { ...r, id: 'tagreq_smoke_5678', employee: undefined, agent: { name: 'Neha Gupta', agentId: '3003', channel: 'ff', mobile: '9811100003', address: '7, Station Road, Ajmer', pincode: '305001' } };
+  const multi = pages.tagRequest.labelsHtml([r, r2, r], { size: 10.5, rows: 5 });
+  if ((multi.match(/class="lbl"/g) || []).length !== 2) throw new Error('print selected me har request ek hi baar aani chahiye');
+  if (!multi.includes('305001') || !multi.includes('Neha Gupta')) throw new Error('agent wali request ka TO = agent ka address nahi');
   if (!/FROM:/.test(html)) throw new Error('FROM block nahi mila (company address — Settings me set karo)');
   if (!html.includes('font-size: 12pt')) throw new Error('text size 12pt set nahi hua');
   if (!/data-sz="14"/.test(html)) throw new Error('text size chhota/bada buttons nahi mile (print view me)');
@@ -1223,7 +1232,7 @@ await run('🖨️ Dispatch label — A4 print me FROM+TO left·right repeat + t
   if (!html.includes('35 tags') && !html.includes('🏷️ 35')) throw new Error('request summary (total tags) nahi mili');
   const txt = pages.tagRequest.labelText(r);
   for (const snip of ['FROM:', 'TO: Ramesh Yadav', '302019', 'tagreq_smoke_1234', '35 tags']) if (!txt.includes(snip)) throw new Error(`label text me "${snip}" nahi mila`);
-  log('      label: 8 labels/page · pincode ×8 · FROM · meta ok · text: ' + txt.split('\n').length + ' lines');
+  log('      label: 1 label/request · print selected unique · FROM · meta ok · text: ' + txt.split('\n').length + ' lines');
 });
 await run('liveView.openNotification (report / settings / login)', async () => {
   FF.liveView.openNotification({ id: 'a', type: 'report', title: 'First Forward report update', body: 'x', createdAt: new Date().toISOString(), meta: { source: 'ff', snapshot: { date: '2026-09-26', total: 120, classes: { VC4: 100, VC5: 20 } }, previous: { date: '2026-09-26', total: 90, classes: { VC4: 80, VC5: 10 } }, delta: { total: 30, classes: { VC4: 20, VC5: 10 } } } });
