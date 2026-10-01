@@ -864,20 +864,25 @@ window.FF = window.FF || {};
     if (!FF.auth.can('export')) { U.toast('Download permission nahi hai', 'err'); return; }
     try {
       if (!FF.pdf && FF.lazy && FF.lazy.loadScript) await FF.lazy.loadScript('pdf.js');
-      if (!FF.pdf) { U.toast('PDF module load nahi hua', 'err'); return; }
+      if (!FF.pdf || !FF.pdf.doc) { U.toast('PDF module load nahi hua', 'err'); return; }
       if (btn) U.setButtonBusy(btn, true, 'PDF…');
       const d = extractDrawerData();
-      const kpiHtml = d.kpis.length
-        ? `<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">${d.kpis.slice(0, 12).map((k) => `<div style="border:1px solid #cbd5e1;border-radius:8px;padding:8px 10px;background:#f8fafc"><div style="font-size:10px;color:#64748b;font-weight:700;text-transform:uppercase">${esc(k.label)}</div><div style="font-size:16px;font-weight:800;color:#0f172a;margin-top:2px">${esc(k.value)}</div>${k.sub ? `<div style="font-size:10px;color:#475569;margin-top:2px">${esc(k.sub)}</div>` : ''}</div>`).join('')}</div>`
-        : '';
-      const tblHtml = d.tables.map((t) => `<div style="margin-top:12px"><h4 style="margin:0 0 6px;font-size:12px;color:#0f172a">${esc(t.title)}</h4><table style="width:100%;border-collapse:collapse;font-size:10.5px"><thead><tr style="background:#f1f5f9">${t.head.map((h) => `<th style="border:1px solid #cbd5e1;padding:5px 6px;text-align:left">${esc(h)}</th>`).join('')}</tr></thead><tbody>${t.rows.slice(0, 120).map((r) => { const isTot = /^(total|grand total|tl total)\b/i.test(String(r[0] || '').trim()); return `<tr style="${isTot ? 'background:#eef2ff;font-weight:800' : ''}">${r.map((c) => `<td style="border:1px solid #e2e8f0;padding:4px 6px">${esc(c)}</td>`).join('')}</tr>`; }).join('')}</tbody></table></div>`).join('');
-      const page = FF.pdf.doc({
-        title: d.title,
-        sub: `${d.kicker ? `${d.kicker} · ` : ''}${d.sub}`,
-        meta: `Generated ${new Date().toLocaleString('en-IN')}`,
-        body: kpiHtml + (tblHtml || '<p>Summary details exported.</p>')
+      // v3.34 — structured API (kpis + table) se multi-page PDF; finish() ab Blob deta hai.
+      const doc = FF.pdf.doc({
+        title: d.title || 'Drawer Report',
+        subtitle: [d.kicker, d.sub].filter(Boolean).join(' · '),
+        right: `Generated ${new Date().toLocaleString('en-IN')}`
       });
-      await FF.pdf.download([page], `${U.slug(d.title || 'drawer')}-${U.stamp()}.pdf`);
+      if (d.kpis.length) doc.kpis(d.kpis.slice(0, 12).map((k) => ({ label: k.label, value: k.value, sub: k.sub })), 4);
+      let used = d.kpis.length > 0;
+      (d.tables || []).forEach((t) => {
+        if (!t || !t.head || !t.rows || !t.rows.length) return;
+        doc.section(t.title || 'Table', `${t.rows.length} rows`);
+        doc.table({ headers: t.head, align: t.head.map((h, i) => (i === 0 ? 'left' : 'right')), rows: t.rows.slice(0, 400) });
+        used = true;
+      });
+      if (!used) doc.text('Summary details exported.');
+      FF.pdf.download(doc.finish(), `${U.slug(d.title || 'drawer')}-${U.stamp()}.pdf`);
       U.toast('Drawer PDF downloaded ✓', 'ok');
     } catch (err) {
       U.toast((err && err.message) || 'PDF export failed', 'err');

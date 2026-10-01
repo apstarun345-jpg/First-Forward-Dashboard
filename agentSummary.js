@@ -105,6 +105,83 @@ FF.pages = FF.pages || {};
     return [...map.values()].map((p) => ({ ...p, altIds: [...(p.altIds || [])] })).sort((a, b) => (b.cur + b.stock) - (a.cur + a.stock));
   }
 
+  // ---- v3.34 speed: caches (stale-while-revalidate) ------------------------------------------------
+  // Pehle har page-open par loadPeople() poori master + performance + stock data series ko dobara
+  // await karta tha → page lag karta tha. Ab list 3 min tak cache hoti hai; TTL ke baad purani list
+  // turant dikhti hai aur naya data background me aa jata hai (agle open par).
+  const peopleCache = { ff: null, gv: null }; // channel → { at, list }
+  const PEOPLE_TTL = 3 * 60 * 1000;
+  function loadPeopleCached(channel) {
+    const slot = peopleCache[channel];
+    if (slot && slot.list && Date.now() - slot.at < PEOPLE_TTL) return slot.list;
+    const p = loadPeople(channel).then((list) => { peopleCache[channel] = { at: Date.now(), list }; return list; });
+    if (slot && slot.list) { p.catch(() => {}); return slot.list; } // stale abhi, refresh background me
+    return p;
+  }
+
+  // Report bhi 2 min cache — aage-peeche agent switch karne par summary turant khulti hai.
+  const reportCache = new Map(); // `${kind}|${name}|${id}` → { at, report }
+  const REPORT_TTL = 2 * 60 * 1000;
+  function buildReportCached(person, opts) {
+    const key = `${person.kind}|${norm(person.name)}|${person.id || ''}`;
+    const hit = reportCache.get(key);
+    if (hit && Date.now() - hit.at < REPORT_TTL && !(opts && opts.fresh)) return hit.report;
+    return buildReport(person).then((rep) => {
+      reportCache.set(key, { at: Date.now(), report: rep });
+      while (reportCache.size > 24) reportCache.delete(reportCache.keys().next().value);
+      return rep;
+    });
+  }
+  function clearCaches() { peopleCache.ff = null; peopleCache.gv = null; reportCache.clear(); }
+
+  // ---- v3.34 add-ons: 6-month trend · alerts · team pack -------------------------------------------
+  function ymBack(ym, k) {
+    const seg = String(ym || '').match(/^(\d{4})-(\d{1,2})$/);
+    const y = seg ? Number(seg[1]) : new Date().getFullYear();
+    const m = seg ? Number(seg[2]) : new Date().getMonth() + 1;
+    const d = new Date(y, m - 1 - k, 1);
+    return `${d.getFullYear()}-${U.pad2(d.getMonth() + 1)}`;
+  }
+  const monthLbl = (ym) => { const seg = String(ym || '').match(/^(\d{4})-(\d{1,2})$/); return seg ? new Date(Number(seg[1]), Number(seg[2]) - 1, 1).toLocaleString('en-IN', { month: 'short' }) : String(ym || ''); };
+
+  /** Pichhle 6 mahine ka issuance (EIR agentClass ledger — FF + GV dono, koi extra query nahi). */
+  function monthlyTrend(person, ch, isTl, curYm) {
+    const rows = (FF.store && FF.store.get && FF.store.get('agentClass')) || [];
+    if (!rows.length) return null;
+    const nm = norm(person.name);
+    const wantGv = ch === 'gv';
+    const mine = rows.filter((r) => {
+      if (wantGv !== /gv/i.test(r.channel || '')) return false;
+      return norm(isTl ? r.tlName : r.name) === nm;
+    });
+    if (!mine.length) return null;
+    const byYm = new Map();
+    mine.forEach((r) => byYm.set(r.ym, (byYm.get(r.ym) || 0) + (Number(r.n) || 0)));
+    const base = /^\d{4}-\d{2}$/.test(curYm) ? curYm : U.ymKey(new Date());
+    return Array.from({ length: 6 }, (_, i) => {
+      const ym = ymBack(base, 5 - i);
+      return { ym, lbl: monthLbl(ym), n: byYm.get(ym) || 0 };
+    });
+  }
+
+  /** TL: girne wale / chamakte / idle agents. Agent: khud ka drop/star flag. */
+  function agentAlerts(p, isTl) {
+    const ags = (p.agents || []).filter((a) => a && a.name);
+    if (!isTl) {
+      const t = p.totals || {};
+      return {
+        drop: (t.growth != null && t.growth <= -50 && (t.lastTotal || 0) >= 20) ? [p] : [],
+        stars: (t.growth != null && t.growth >= 50 && (t.curTotal || 0) >= 10) ? [p] : [],
+        idle: []
+      };
+    }
+    return {
+      drop: ags.filter((a) => a.growth != null && a.growth <= -50 && a.lastTotal >= 20).sort((a, b) => a.growth - b.growth).slice(0, 8),
+      stars: ags.filter((a) => a.growth != null && a.growth >= 50 && a.curTotal >= 10).sort((a, b) => b.curTotal - a.curTotal).slice(0, 8),
+      idle: ags.filter((a) => !a.curTotal && a.stockTotal > 0).sort((a, b) => b.stockTotal - a.stockTotal).slice(0, 8)
+    };
+  }
+
   function matchPeople(list, q) {
     const raw = clean(q);
     if (!raw) return list.slice(0, 30);
@@ -184,7 +261,8 @@ FF.pages = FF.pages || {};
       const res = await FF.stockAge.compute(scope).catch(() => null);
       age = res && (res[ch] || res.ff || res.gv) || null;
     }
-    return { person, p, age, ch, isTl };
+    const trend = monthlyTrend(person, ch, isTl, m.cur || '');
+    return { person, p, age, ch, isTl, trend, generatedAt: Date.now() };
   }
 
   function reportText(r) {
@@ -250,6 +328,75 @@ FF.pages = FF.pages || {};
     rows.push([]);
     rows.push(['FINAL GRAND TOTAL SUMMARY', `Last Month: ${t.lastTotal}`, `Current MTD: ${t.curTotal}`, `Expected: ${p.expected}`, `Stock Total: ${t.stockTotal}`, age ? `30+d Old: ${age.old30}` : '']);
     return rows;
+  }
+
+  /** v3.34 — multi-sheet Excel workbook: Summary / Class-wise / Stock Ageing / Team Agents. */
+  function reportXlsx(r) {
+    const p = r.p, t = p.totals || {}, age = r.age;
+    const chLabel = r.ch === 'gv' ? 'GV Partner' : 'First Forward';
+    const sheets = [];
+    sheets.push({
+      name: 'Summary',
+      header: ['Field', 'Value'],
+      rows: [
+        ['Report', `${chLabel} · ${r.isTl ? 'Team Leader' : 'Agent'} Summary`],
+        ['Name', p.name], ['ID', p.id || ''], ['Mobile', p.mobile || ''],
+        ...(r.isTl ? [] : [['TL', p.tlName || ''], ['TL ID', p.tlId || '']]),
+        ['Priority', p.priority || ''],
+        ['Current Month', p.curYm || ''],
+        [`Issuance ${p.curYm || '(MTD)'}`, t.curTotal],
+        ['VC4 (MTD)', t.curVc4], ['Comm (MTD)', t.curComm],
+        ['Last Month', p.lastYm || ''],
+        [`Issuance ${p.lastYm || '(Last)'}`, t.lastTotal],
+        ['VC4 (Last)', t.lastVc4], ['Comm (Last)', t.lastComm],
+        ['Growth %', t.growth == null ? '' : Number(t.growth.toFixed(1))],
+        ['Expected Month-End', p.expected], ['Run-rate / day', p.runRate],
+        ['Stock in Hand', t.stockTotal], ['VC4 Stock', t.stockVc4], ['Comm Stock', t.stockComm],
+        ['30+d Old Stock', age ? age.old30 : ''],
+        ['60+d Critical Stock', age ? age.old60 : ''],
+        ['Generated', new Date().toLocaleString('en-IN')]
+      ]
+    });
+    sheets.push({
+      name: 'Class-wise',
+      header: ['Class', p.lastYm || 'Last Month', p.curYm || 'Current (MTD)', 'Growth %', 'Stock in Hand'],
+      rows: (p.classTable || []).map((c) => [c.cls, c.last, c.cur, c.growth == null ? '' : Number(c.growth.toFixed(1)), c.stock])
+        .concat([['GRAND TOTAL', t.lastTotal, t.curTotal, t.growth == null ? '' : Number(t.growth.toFixed(1)), t.stockTotal]])
+    });
+    if (age && age.total) {
+      sheets.push({
+        name: 'Stock Ageing',
+        header: ['Class', ...age.buckets.map((b) => b.label), '30+d Old', '60+d Critical', 'Total Stock'],
+        rows: (age.byClass || []).map((c) => [c.cls, ...age.buckets.map((b) => c[b.key] || 0), c.old30, c.old60, c.total])
+          .concat([['STOCK AGEING GRAND TOTAL', ...age.buckets.map((b) => b.n || 0), age.old30, age.old60, age.total]])
+      });
+    }
+    if (r.isTl && (p.agents || []).length) {
+      sheets.push({
+        name: 'Team Agents',
+        header: ['Agent Name', 'ID', p.lastYm || 'Last Month', p.curYm || 'Current (MTD)', 'VC4', 'Comm', 'Growth %', 'Stock'],
+        rows: p.agents.map((a) => [a.name, a.id || '', a.lastTotal, a.curTotal, a.curVc4, a.curComm, a.growth == null ? '' : Number(a.growth.toFixed(1)), a.stockTotal])
+          .concat([['GRAND TOTAL', `${p.agents.length} Agents`, U.sum(p.agents, (a) => a.lastTotal), U.sum(p.agents, (a) => a.curTotal), U.sum(p.agents, (a) => a.curVc4), U.sum(p.agents, (a) => a.curComm), '', U.sum(p.agents, (a) => a.stockTotal)]])
+      });
+    }
+    return sheets;
+  }
+
+  /** v3.34 — structured JSON backup (API / automation ke liye). */
+  function reportJson(r) {
+    const p = r.p, t = p.totals || {};
+    return JSON.stringify({
+      generatedAt: new Date().toISOString(),
+      channel: r.ch === 'gv' ? 'gv' : 'ff',
+      person: { kind: r.isTl ? 'tl' : 'agent', name: p.name, id: p.id || '', mobile: p.mobile || '', tlName: p.tlName || '', tlId: p.tlId || '' },
+      months: { current: p.curYm || '', last: p.lastYm || '' },
+      totals: t,
+      expectedMonthEnd: p.expected, runRatePerDay: p.runRate,
+      classWise: (p.classTable || []).map((c) => ({ cls: c.cls, last: c.last, current: c.cur, growthPct: c.growth, stock: c.stock })),
+      stockAgeing: r.age ? { total: r.age.total, old30: r.age.old30, old60: r.age.old60, buckets: r.age.buckets, byClass: r.age.byClass } : null,
+      teamAgents: r.isTl ? (p.agents || []) : undefined,
+      grandTotalText: reportText(r)
+    }, null, 2);
   }
 
   function makePdf(r) {
@@ -393,6 +540,120 @@ FF.pages = FF.pages || {};
     });
   }
 
+  function sparklineHtml(trend) {
+    if (!trend) return '';
+    const max = Math.max(...trend.map((t) => t.n), 1);
+    const cols = trend.map((t, i) => `<div class="as-tr-col" title="${esc(t.ym)} · ${fmt(t.n)} tags"><span class="as-tr-val">${t.n ? fmt(t.n) : '·'}</span><div class="as-tr-bar ${i === trend.length - 1 ? 'now' : ''}" style="height:${Math.max(3, Math.round((t.n / max) * 52))}px"></div><span class="as-tr-lbl">${esc(t.lbl)}</span></div>`).join('');
+    const cur = trend[trend.length - 1] || { n: 0 };
+    const prev = trend.length > 1 ? trend[trend.length - 2].n : 0;
+    const arrow = prev ? (cur.n >= prev ? '📈' : '📉') : '📊';
+    return `<div class="card as-trend-card"><div class="card-head"><h3>${arrow} 6-Month Trend</h3><span class="dim small">6 mahine: <b>${fmt(U.sum(trend, (t) => t.n))}</b> · MTD: <b>${fmt(cur.n)}</b> · Last: <b>${fmt(prev)}</b></span></div><div class="as-trend">${cols}</div></div>`;
+  }
+
+  function alertsHtml(r) {
+    const al = agentAlerts(r.p, r.isTl);
+    if (!r.isTl) {
+      const t = r.p.totals || {};
+      if (al.drop.length) return `<div class="as-strip bad">⚠️ <b>MTD drop warning:</b> is mahine <b>${fmt(t.curTotal)}</b> vs last month <b>${fmt(t.lastTotal)}</b> (${t.growth.toFixed(0)}%) — TL se baat karein 📞</div>`;
+      if (al.stars.length) return `<div class="as-strip good">🌟 <b>Shandaar performance!</b> MTD <b>${fmt(t.curTotal)}</b> — last month se <b>+${t.growth.toFixed(0)}%</b> up 🎉</div>`;
+      return '';
+    }
+    const chip = (a, icon) => `<button type="button" class="chip as-sug-chip" data-as-pick="${esc(`${r.ch}-agent|${a.name}`)}">${icon} <b>${esc(a.name)}</b> <small class="dim">MTD ${fmt(a.curTotal)} · Last ${fmt(a.lastTotal)}</small></button>`;
+    const rows = [];
+    if (al.drop.length) rows.push(`<div class="as-chip-row"><span class="badge red">🔻 MTD drop −50%+</span>${al.drop.map((a) => chip(a, '🔻')).join('')}</div>`);
+    if (al.stars.length) rows.push(`<div class="as-chip-row"><span class="badge green">🌟 Stars +50%+</span>${al.stars.map((a) => chip(a, '🌟')).join('')}</div>`);
+    if (al.idle.length) rows.push(`<div class="as-chip-row"><span class="badge amber">🐌 Zero issuance · stock held</span>${al.idle.map((a) => chip(a, '🐌')).join('')}</div>`);
+    return rows.length ? `<div class="card as-alert-card"><div class="card-head"><h3>🚨 Alerts &amp; 🌟 Top movers</h3><span class="dim small">Chip par click → agent ka poora summary</span></div><div class="card-body">${rows.join('')}</div></div>` : '';
+  }
+
+  // ---- v3.34 Team Pack — TL ke poore team ki ek combined PDF / Excel -------------------------------
+  const PACK_CAP = 50;
+  async function buildTeamPack(r, onProgress) {
+    const agents = (r.p.agents || []).slice(0, PACK_CAP);
+    const pack = [];
+    for (let i = 0; i < agents.length; i++) {
+      const a = agents[i];
+      if (onProgress) onProgress(i + 1, agents.length, a.name);
+      let rep = null;
+      try { rep = await buildReportCached({ kind: `${r.ch}-agent`, name: a.name, id: a.id || '', tl: r.p.name }); }
+      catch (err) { console.warn('[agentSummary] team pack skip:', a.name, err); }
+      pack.push({ agent: a, rep });
+    }
+    return pack;
+  }
+
+  function teamPackPdf(r, pack) {
+    const p = r.p, t = p.totals || {}, age = r.age;
+    const chLabel = r.ch === 'gv' ? 'GV Partner' : 'First Forward';
+    const ok = pack.filter((x) => x.rep).length;
+    const doc = FF.pdf.doc({ title: `${chLabel} · Team Pack — ${p.name}`, subtitle: `${ok}/${(p.agents || []).length} agents · TL summary + har agent ka apna page`, right: `${new Date().toLocaleDateString('en-IN')}` });
+    doc.kpis([
+      { label: `Team MTD (${p.curYm || ''})`, value: fmt(t.curTotal), sub: `VC4 ${fmt(t.curVc4)} · Comm ${fmt(t.curComm)}`, color: '#2563eb' },
+      { label: 'Last Month', value: fmt(t.lastTotal), sub: `${fmt(p.agents.length)} agents`, color: '#7c3aed' },
+      { label: 'Growth', value: t.growth == null ? '—' : `${t.growth >= 0 ? '+' : ''}${t.growth.toFixed(0)}%`, sub: `Expected ${fmt(p.expected)}`, color: (t.growth || 0) >= 0 ? '#16a34a' : '#dc2626' },
+      { label: 'Stock in Hand', value: fmt(t.stockTotal), sub: age ? `30+d ${fmt(age.old30)} · 60+d ${fmt(age.old60)}` : '', color: '#0891b2' }
+    ]);
+    const clsRows = (p.classTable || []).filter((x) => x.cur || x.last || x.stock);
+    if (clsRows.length) {
+      doc.section(`Class-wise Issuance (${p.lastYm || 'Last'} vs ${p.curYm || 'MTD'}) & Stock`);
+      doc.table({
+        headers: ['Class', p.lastYm || 'Last', p.curYm || 'MTD', 'Growth %', 'Stock'],
+        align: ['left', 'right', 'right', 'right', 'right'],
+        rows: clsRows.map((x) => [x.cls, fmt(x.last), fmt(x.cur), x.growth == null ? '—' : `${x.growth >= 0 ? '+' : ''}${x.growth.toFixed(0)}%`, fmt(x.stock)]),
+        foot: ['GRAND TOTAL', fmt(t.lastTotal), fmt(t.curTotal), t.growth == null ? '—' : `${t.growth >= 0 ? '+' : ''}${t.growth.toFixed(0)}%`, fmt(t.stockTotal)]
+      });
+    }
+    pack.forEach(({ agent, rep }) => {
+      if (!rep) return;
+      const ap = rep.p, at = ap.totals || {};
+      doc.section(`${agent.name}${agent.id ? ` · ID ${agent.id}` : ''}`);
+      doc.kpis([
+        { label: 'MTD', value: fmt(at.curTotal), sub: `VC4 ${fmt(at.curVc4)} · Comm ${fmt(at.curComm)}`, color: '#2563eb' },
+        { label: 'Last Month', value: fmt(at.lastTotal), color: '#7c3aed' },
+        { label: 'Growth', value: at.growth == null ? '—' : `${at.growth >= 0 ? '+' : ''}${at.growth.toFixed(0)}%`, color: (at.growth || 0) >= 0 ? '#16a34a' : '#dc2626' },
+        { label: 'Stock', value: fmt(at.stockTotal), color: '#0891b2' }
+      ]);
+      const rows2 = (ap.classTable || []).filter((x) => x.cur || x.last || x.stock);
+      if (rows2.length) doc.table({ headers: ['Class', 'Last', 'MTD', 'Stock'], align: ['left', 'right', 'right', 'right'], rows: rows2.map((x) => [x.cls, fmt(x.last), fmt(x.cur), fmt(x.stock)]) });
+    });
+    doc.footer(`${FF.config.brand || 'ApnaPayment'} · ${chLabel} Team Pack · ${p.name} · ${new Date().toLocaleDateString('en-IN')}`);
+    return doc.finish();
+  }
+
+  function teamPackXlsx(r, pack) {
+    const p = r.p, t = p.totals || {};
+    const sheets = [{
+      name: 'Team Summary',
+      header: ['Agent', 'ID', p.lastYm || 'Last Month', p.curYm || 'Current (MTD)', 'VC4', 'Comm', 'Growth %', 'Stock'],
+      rows: (p.agents || []).map((a) => [a.name, a.id || '', a.lastTotal, a.curTotal, a.curVc4, a.curComm, a.growth == null ? '' : Number(a.growth.toFixed(1)), a.stockTotal])
+        .concat([['GRAND TOTAL', `${p.agents.length} Agents`, U.sum(p.agents, (a) => a.lastTotal), U.sum(p.agents, (a) => a.curTotal), U.sum(p.agents, (a) => a.curVc4), U.sum(p.agents, (a) => a.curComm), '', U.sum(p.agents, (a) => a.stockTotal)]])
+    }];
+    if (r.age && r.age.total) {
+      sheets.push({
+        name: 'Stock Ageing',
+        header: ['Class', ...r.age.buckets.map((b) => b.label), '30+d Old', '60+d Critical', 'Total'],
+        rows: (r.age.byClass || []).map((c) => [c.cls, ...r.age.buckets.map((b) => c[b.key] || 0), c.old30, c.old60, c.total])
+          .concat([['GRAND TOTAL', ...r.age.buckets.map((b) => b.n || 0), r.age.old30, r.age.old60, r.age.total]])
+      });
+    }
+    pack.forEach(({ agent, rep }) => {
+      if (!rep) return;
+      const ap = rep.p, at = ap.totals || {};
+      sheets.push({
+        name: String(agent.name).slice(0, 28),
+        header: ['Class', ap.lastYm || 'Last', ap.curYm || 'MTD', 'Growth %', 'Stock'],
+        rows: (ap.classTable || []).filter((x) => x.cur || x.last || x.stock).map((x) => [x.cls, x.last, x.cur, x.growth == null ? '' : Number(x.growth.toFixed(1)), x.stock])
+          .concat([['GRAND TOTAL', at.lastTotal, at.curTotal, at.growth == null ? '' : Number(at.growth.toFixed(1)), at.stockTotal]])
+      });
+    });
+    return sheets;
+  }
+
+  function agentWaText(r, a) {
+    const chLabel = r.ch === 'gv' ? 'GV Partner' : 'First Forward';
+    return `*🧑‍💼 ${a.name}* (${chLabel} · Agent${a.id ? ` · ID: ${a.id}` : ''})\n• MTD: *${fmt(a.curTotal)}* (Last: ${fmt(a.lastTotal)} · ${a.growth == null ? '—' : `${a.growth >= 0 ? '+' : ''}${a.growth.toFixed(0)}%`})\n• Stock: *${fmt(a.stockTotal)}*\n👥 TL: ${r.p.name}\n— ${FF.config.brand || 'ApnaPayment'} 📊`;
+  }
+
   function reportHtml(r) {
     const p = r.p, t = p.totals || {}, age = r.age;
     const chLabel = r.ch === 'gv' ? 'GV Partner' : 'First Forward';
@@ -418,10 +679,12 @@ FF.pages = FF.pages || {};
           <p class="dim">${p.id ? `ID: <b>${esc(p.id)}</b> · ` : ''}${p.tlName && !r.isTl ? `TL: <b>${esc(p.tlName)}</b>${p.tlId ? ` (${esc(p.tlId)})` : ''} · ` : ''}${p.mobile ? `📞 <a href="tel:${esc(p.mobile)}">${esc(p.mobile)}</a>` : ''}</p>
         </div>
         <div class="as-actions">
-          <button class="btn primary" data-as-act="pdf">📄 Download PDF</button>
-          <button class="btn" data-as-act="share">📲 Share PDF / WhatsApp</button>
-          <button class="btn" data-as-act="wa">💬 WhatsApp Text</button>
+          <button class="btn primary" data-as-act="pdf">📄 PDF</button>
+          <button class="btn" data-as-act="excel">📊 Excel</button>
           <button class="btn" data-as-act="csv">⬇ CSV</button>
+          <button class="btn" data-as-act="json">🧾 JSON</button>
+          <button class="btn" data-as-act="share">📲 Share / WhatsApp</button>
+          <button class="btn" data-as-act="wa">💬 WA Text</button>
           <button class="btn" data-as-act="copy">📋 Copy</button>
         </div>
       </div>
@@ -436,6 +699,8 @@ FF.pages = FF.pages || {};
       </div>
 
       ${chartsSectionHtml(r)}
+      ${sparklineHtml(r.trend)}
+      ${alertsHtml(r)}
 
       <div class="as-two">
         <div class="card">
@@ -457,11 +722,11 @@ FF.pages = FF.pages || {};
       </div>
 
       ${r.isTl && (p.agents || []).length ? `<div class="card" style="margin-top:14px">
-        <div class="card-head"><h3>🧑‍💼 Team Agents (${fmt(p.agents.length)}) — click any agent to open their summary</h3></div>
+        <div class="card-head"><h3>🧑‍💼 Team Agents (${fmt(p.agents.length)}) — click any agent to open their summary</h3><span class="as-pack-btns"><button class="btn small" data-as-pack="xlsx" title="Poore team ki ek Excel workbook (Summary + har agent ki sheet)">👥 Team Pack Excel</button><button class="btn small primary" data-as-pack="pdf" title="Poore team ki ek combined PDF (TL + har agent ka page)">👥 Team Pack PDF</button></span></div>
         <div class="table-wrap"><table class="tbl compact">
-          <thead><tr><th>Agent</th><th>ID</th><th class="num">${esc(p.lastYm || 'Last')}</th><th class="num">${esc(p.curYm || 'MTD')}</th><th class="num">VC4</th><th class="num">Comm</th><th class="num">Growth</th><th class="num">Stock</th></tr></thead>
-          <tbody>${p.agents.map((a) => `<tr class="clickable" data-as-pick="${esc(`${r.ch}-agent|${a.name}`)}"><td><b>${esc(a.name)}</b></td><td class="mono">${esc(a.id || '—')}</td><td class="num">${fmt(a.lastTotal)}</td><td class="num"><b>${fmt(a.curTotal)}</b></td><td class="num">${fmt(a.curVc4)}</td><td class="num">${fmt(a.curComm)}</td><td class="num">${U.pctHtml(a.growth)}</td><td class="num">${fmt(a.stockTotal)}</td></tr>`).join('')}</tbody>
-          <tfoot><tr class="row-total"><td colspan="2"><b>Grand Total (${fmt(p.agents.length)} Agents)</b></td><td class="num"><b>${fmt(sumAgentsLast)}</b></td><td class="num"><b>${fmt(sumAgentsCur)}</b></td><td class="num"><b>${fmt(sumAgentsVc4)}</b></td><td class="num"><b>${fmt(sumAgentsComm)}</b></td><td class="num">${U.pctHtml(teamGrowth)}</td><td class="num"><b>${fmt(sumAgentsStock)}</b></td></tr></tfoot>
+          <thead><tr><th>Agent</th><th>ID</th><th class="num">${esc(p.lastYm || 'Last')}</th><th class="num">${esc(p.curYm || 'MTD')}</th><th class="num">VC4</th><th class="num">Comm</th><th class="num">Growth</th><th class="num">Stock</th><th></th></tr></thead>
+          <tbody>${p.agents.map((a) => `<tr class="clickable" data-as-pick="${esc(`${r.ch}-agent|${a.name}`)}"><td><b>${esc(a.name)}</b></td><td class="mono">${esc(a.id || '—')}</td><td class="num">${fmt(a.lastTotal)}</td><td class="num"><b>${fmt(a.curTotal)}</b></td><td class="num">${fmt(a.curVc4)}</td><td class="num">${fmt(a.curComm)}</td><td class="num">${U.pctHtml(a.growth)}</td><td class="num">${fmt(a.stockTotal)}</td><td><button class="btn tiny" data-as-wa="${esc([a.name, a.id || '', a.curTotal, a.lastTotal, a.stockTotal].join('|'))}" title="WhatsApp par is agent ka summary bhejein">📲</button></td></tr>`).join('')}</tbody>
+          <tfoot><tr class="row-total"><td colspan="2"><b>Grand Total (${fmt(p.agents.length)} Agents)</b></td><td class="num"><b>${fmt(sumAgentsLast)}</b></td><td class="num"><b>${fmt(sumAgentsCur)}</b></td><td class="num"><b>${fmt(sumAgentsVc4)}</b></td><td class="num"><b>${fmt(sumAgentsComm)}</b></td><td class="num">${U.pctHtml(teamGrowth)}</td><td class="num"><b>${fmt(sumAgentsStock)}</b></td><td></td></tr></tfoot>
         </table></div>
       </div>` : ''}
     </div>`;
@@ -473,12 +738,13 @@ FF.pages = FF.pages || {};
     async function render(root, params) {
       const chLabel = isGv ? 'GV Partner' : 'First Forward';
       root.innerHTML = `<div class="page">
-        <div class="page-head"><div><h1>${isGv ? '🟩' : '🟦'} ${chLabel} · Agent / TL Summary</h1><p class="sub">Search by <b>Name · Agent Name · TL Name · Agent ID · TL ID · Mobile Number</b> — poora summary + charts + ageing + Grand Total PDF / WhatsApp / CSV</p></div></div>
+        <div class="page-head"><div><h1>${isGv ? '🟩' : '🟦'} ${chLabel} · Agent / TL Summary</h1><p class="sub">Search by <b>Name · Agent Name · TL Name · Agent ID · TL ID · Mobile Number</b> — poora summary + charts + ageing + Grand Total PDF / Excel / CSV / JSON / WhatsApp</p></div></div>
         <div class="card card-primary"><div class="card-body">
           <div class="as-search-bar">
             <div class="as-search">
               <input id="as-q" class="input" type="search" placeholder="🔎 Search Agent Name, TL Name, Agent ID, TL ID, ya 10-digit Mobile Number…" value="${esc((params && params.q) || state.q || '')}" autocomplete="off">
               <button class="btn primary" id="as-search-btn" type="button">🔎 Search</button>
+              <button class="btn" id="as-refresh-btn" type="button" title="Data refresh — cache clear karke dobara load">🔄</button>
               <div id="as-drop" class="as-drop" hidden></div>
             </div>
           </div>
@@ -536,7 +802,7 @@ FF.pages = FF.pages || {};
         drop.hidden = false;
       };
 
-      const pick = async (person) => {
+      const pick = async (person, opts) => {
         if (!person) return;
         drop.hidden = true;
         state.picked = person;
@@ -544,7 +810,7 @@ FF.pages = FF.pages || {};
         qEl.value = person.name;
         renderTopChips('');
         body.innerHTML = U.spinner(`${person.name} ka poora summary ban raha hai…`);
-        state.report = await buildReport(person);
+        state.report = await buildReportCached(person, opts);
         body.innerHTML = reportHtml(state.report);
         if (FF.charts && FF.charts.mount) FF.charts.mount(body);
         if (FF.app && FF.app.enhanceTables) FF.app.enhanceTables(body);
@@ -553,10 +819,11 @@ FF.pages = FF.pages || {};
       renderTopChips(qEl.value);
 
       qEl.addEventListener('focus', () => showDrop(qEl.value));
+      let qTimer = 0;
       qEl.addEventListener('input', () => {
         state.q = qEl.value;
-        showDrop(qEl.value);
-        renderTopChips(qEl.value);
+        clearTimeout(qTimer);
+        qTimer = setTimeout(() => { showDrop(qEl.value); renderTopChips(qEl.value); }, 120); // v3.34 debounce — fast typing par render storm nahi
       });
       qEl.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
@@ -570,13 +837,69 @@ FF.pages = FF.pages || {};
       if (searchBtn) {
         searchBtn.addEventListener('click', () => {
           const hits = matchPeople(state.list, qEl.value);
-          if (hits[0]) pick(hits[0]);
+          if (hits[0]) pick(hits[0], { fresh: true }); // Search = fresh report (cache bypass)
           else U.toast('Koi matching Agent ya TL nahi mila', 'warn');
+        });
+      }
+      const refreshBtn = U.$('#as-refresh-btn', root);
+      if (refreshBtn) {
+        refreshBtn.addEventListener('click', async () => {
+          refreshBtn.disabled = true;
+          try {
+            clearCaches();
+            state.list = await loadPeople(channel);
+            renderTopChips(qEl.value);
+            const target = (state.picked && matchPeople(state.list, state.picked.name)[0]) || (qEl.value && matchPeople(state.list, qEl.value)[0]);
+            if (target) await pick(target, { fresh: true });
+            U.toast('Data refresh ho gaya ✓', 'ok');
+          } catch (err) {
+            U.toast((err && err.message) || 'Refresh fail hua', 'err');
+          } finally {
+            refreshBtn.disabled = false;
+          }
         });
       }
 
       if (root.__asSummaryClick) root.removeEventListener('click', root.__asSummaryClick);
       root.__asSummaryClick = async (e) => {
+        const waBtn = e.target.closest('[data-as-wa]');
+        if (waBtn && state.report) {
+          const [wName, wId, wCur, wLast, wStock] = (waBtn.dataset.asWa || '').split('|');
+          const a = { name: wName, id: wId, curTotal: Number(wCur) || 0, lastTotal: Number(wLast) || 0, stockTotal: Number(wStock) || 0, growth: U.growth(Number(wCur) || 0, Number(wLast) || 0) };
+          const mob = MP() && MP().mobileFor ? MP().mobileFor(wName, wId, '') : '';
+          const txt = agentWaText(state.report, a);
+          const link = mob && mob10(mob).length === 10 ? `https://wa.me/91${mob10(mob)}?text=${encodeURIComponent(txt)}` : U.waLink(txt);
+          window.open(link, '_blank', 'noopener');
+          return;
+        }
+        const packBtn = e.target.closest('[data-as-pack]');
+        if (packBtn && state.report && state.report.isTl) {
+          if (packBtn.disabled) return;
+          const kind = packBtn.dataset.asPack;
+          packBtn.disabled = true;
+          const orig = packBtn.textContent;
+          try {
+            if (kind === 'pdf' && !FF.pdf && FF.lazy && FF.lazy.loadScript) await FF.lazy.loadScript('pdf.js').catch(() => {});
+            const pack = await buildTeamPack(state.report, (done, total, name) => { packBtn.textContent = `⏳ ${done}/${total}…`; packBtn.title = name; });
+            const okCount = pack.filter((x) => x.rep).length;
+            const fname = `${state.report.ch}-team-pack-${U.slug(state.report.p.name)}-${U.stamp()}`;
+            if (kind === 'pdf') {
+              if (!FF.pdf || !FF.pdf.doc) throw new Error('PDF module load nahi hua — page refresh karo');
+              FF.pdf.download(teamPackPdf(state.report, pack), `${fname}.pdf`);
+              U.toast(`Team Pack PDF ✓ (${okCount} agents, 1 combined file)`, 'ok');
+            } else {
+              FF.xlsx.download(`${fname}.xlsx`, teamPackXlsx(state.report, pack));
+              U.toast(`Team Pack Excel ✓ (${okCount} agents, alag-alag sheet)`, 'ok');
+            }
+          } catch (err) {
+            console.error('[agentSummary] team pack failed:', err);
+            U.toast((err && err.message) || 'Team Pack fail hua', 'err');
+          } finally {
+            packBtn.disabled = false;
+            packBtn.textContent = orig;
+          }
+          return;
+        }
         const opt = e.target.closest('[data-as-opt],[data-as-pick]');
         if (opt) {
           const [kind, name] = (opt.dataset.asOpt || opt.dataset.asPick).split('|');
@@ -598,17 +921,34 @@ FF.pages = FF.pages || {};
         if (act && state.report) {
           const r = state.report, fname = `${r.ch}-${r.isTl ? 'tl' : 'agent'}-${U.slug(r.p.name)}-${U.stamp()}`;
           const k = act.dataset.asAct;
-          if (k === 'pdf' || k === 'share') {
-            const bytes = makePdf(r);
-            if (k === 'share') await FF.pdf.share(bytes, `${fname}.pdf`, `${r.p.name} — Summary`, reportText(r));
-            else FF.pdf.download(bytes, `${fname}.pdf`);
-            U.toast('PDF ready ✓', 'ok');
-          } else if (k === 'wa') window.open(U.waLink(reportText(r)), '_blank', 'noopener');
-          else if (k === 'copy') { await U.copyText(reportText(r)); U.toast('Summary copied (with Grand Total) ✓', 'ok'); }
-          else if (k === 'csv') {
-            const rows = reportCsv(r);
-            U.downloadCsv(`${fname}.csv`, rows[0] || ['Field', 'Value'], rows.slice(1));
-            U.toast('CSV downloaded (with Grand Total) ✓', 'ok');
+          act.disabled = true;
+          try {
+            await new Promise((res) => setTimeout(res, 30)); // busy paint
+            if (k === 'pdf' || k === 'share') {
+              if (!FF.pdf && FF.lazy && FF.lazy.loadScript) await FF.lazy.loadScript('pdf.js').catch(() => {});
+              if (!FF.pdf || !FF.pdf.doc) throw new Error('PDF module load nahi hua — page refresh karo');
+              const bytes = makePdf(r);
+              if (k === 'share') await FF.pdf.share(bytes, `${fname}.pdf`, `${r.p.name} — Summary`, reportText(r));
+              else FF.pdf.download(bytes, `${fname}.pdf`);
+              U.toast(k === 'share' ? 'Share ready ✓' : 'PDF downloaded ✓', 'ok');
+            } else if (k === 'wa') window.open(U.waLink(reportText(r)), '_blank', 'noopener');
+            else if (k === 'copy') { await U.copyText(reportText(r)); U.toast('Summary copied (with Grand Total) ✓', 'ok'); }
+            else if (k === 'csv') {
+              const rows = reportCsv(r);
+              U.downloadCsv(`${fname}.csv`, rows[0] || ['Field', 'Value'], rows.slice(1));
+              U.toast('CSV downloaded (with Grand Total) ✓', 'ok');
+            } else if (k === 'excel') {
+              FF.xlsx.download(`${fname}.xlsx`, reportXlsx(r));
+              U.toast('Excel downloaded (multi-sheet, Grand Total) ✓', 'ok');
+            } else if (k === 'json') {
+              U.downloadBlob(`${fname}.json`, new Blob([reportJson(r)], { type: 'application/json' }));
+              U.toast('JSON downloaded ✓', 'ok');
+            }
+          } catch (err) {
+            console.error('[agentSummary] export failed:', err);
+            U.toast(`${(err && err.message) || 'Export fail hua'}`, 'err');
+          } finally {
+            act.disabled = false;
           }
           return;
         }
@@ -631,5 +971,5 @@ FF.pages = FF.pages || {};
 
   FF.pages.ffAgentSummary = makePage('ff');
   FF.pages.gvAgentSummary = makePage('gv');
-  FF.agentSummary = { loadPeople, matchPeople, topSuggestions, buildReport, makePdf, reportText, reportCsv };
+  FF.agentSummary = { loadPeople, matchPeople, topSuggestions, buildReport, makePdf, reportText, reportCsv, reportXlsx, reportJson, monthlyTrend, agentAlerts, buildTeamPack, teamPackPdf, teamPackXlsx, agentWaText, clearCaches };
 })(window.FF);
