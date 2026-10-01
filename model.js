@@ -200,9 +200,11 @@ window.FF = window.FF || {};
     for (const r of t.rows) {
       const y = D.cellNumber(r[4]), m = D.cellNumber(r[5]), n = D.cellNumber(r[9]);
       if (y === null || m === null || !n) continue;
-      const agentName = D.cellText(r[0]), gvName = D.cellText(r[1]), tlName = D.cellText(r[2]) || '—';
+      const agentName = U.clean(D.cellText(r[0])), gvName = U.clean(D.cellText(r[1])), tlName = U.clean(D.cellText(r[2])) || '—';
       const cls = normClass(D.cellText(r[6]));
-      rows.push({ name: agentName || gvName || 'Unknown', tlName, channel: channelOf(D.cellText(r[3]), tlName), ym: `${y}-${U.pad2(m + 1)}`, cls, group: classGroup(cls), type: D.cellText(r[7]).toUpperCase() || 'ISSUANCE', vrnType: D.cellText(r[8]), n });
+      const channel = channelOf(D.cellText(r[3]), tlName);
+      const name = channel === 'GV Partner' ? (gvName || agentName || 'Unknown') : (agentName || gvName || 'Unknown');
+      rows.push({ name, gvName, agentName, tlName, channel, ym: `${y}-${U.pad2(m + 1)}`, cls, group: classGroup(cls), type: D.cellText(r[7]).toUpperCase() || 'ISSUANCE', vrnType: D.cellText(r[8]), n });
     }
     return rows;
   }

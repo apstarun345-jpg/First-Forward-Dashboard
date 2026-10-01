@@ -153,8 +153,8 @@ export function summaryOf(index, opts = {}) {
   return out;
 }
 
-/** 🔗 Personal link: ek agent / TL ka stock (VC4+VC20 · VC5+) + ageing, aur TL ke saare agents ka stock.
- *  → { t:[core,comm], c, o, agents:[packNode…] } ya null (index me nahi mila). */
+/** 🔗 Personal link: ek agent / TL ka stock (VC4+VC20 · VC5+) + ageing + class-wise stock, aur TL ke saare agents ka stock.
+ *  → { t:[core,comm], c, o, agents:[packNode…], byCls:{VC4:{t,c,o}}, personId } ya null (index me nahi mila). */
 export function personalStock(index, ch, kind, name) {
   const c = index && index[ch === 'gv' ? 'gv' : 'ff'];
   if (!c || !str(name)) return null;
@@ -162,9 +162,26 @@ export function personalStock(index, ch, kind, name) {
   const map = isTl ? c.tls : c.agents;
   const keys = [...resolveKeys(c, ch === 'gv' ? 'gv' : 'ff', isTl ? 'tl' : 'agent', [name])];
   if (!keys.length) return null;
+  const keySet = new Set(keys);
   const nodes = keys.map((k) => map.get(k)).filter(Boolean);
-  const out = { t: [0, 0], c: [[0, 0, 0, 0], [0, 0, 0, 0]], o: [0, 0], agents: [] };
-  nodes.forEach((n) => { for (let g = 0; g < 2; g++) { out.t[g] += n.t[g]; out.o[g] = Math.max(out.o[g], n.o[g]); for (let i = 0; i < 4; i++) out.c[g][i] += n.c[g][i]; } });
+  const out = { t: [0, 0], c: [[0, 0, 0, 0], [0, 0, 0, 0]], o: [0, 0], agents: [], byCls: {}, personId: '' };
+  nodes.forEach((n) => {
+    if (!out.personId && n.id) out.personId = n.id;
+    for (let g = 0; g < 2; g++) { out.t[g] += n.t[g]; out.o[g] = Math.max(out.o[g], n.o[g]); for (let i = 0; i < 4; i++) out.c[g][i] += n.c[g][i]; }
+  });
+  for (const r of c.raw || []) {
+    const matchKey = isTl ? r[9] : r[8];
+    if (!keySet.has(matchKey)) continue;
+    const cls = r[2] || 'VC4';
+    const age = r[7];
+    if (!out.personId && !isTl && r[5]) out.personId = String(r[5]).trim();
+    const ce = out.byCls[cls] || (out.byCls[cls] = { t: 0, c: [0, 0, 0, 0], o: 0 });
+    ce.t++;
+    if (age !== null && age !== undefined && age >= 0) {
+      if (age > ce.o) ce.o = age;
+      for (let i = 0; i < AGE_THRESH.length; i++) if (age >= AGE_THRESH[i]) ce.c[i]++;
+    }
+  }
   if (isTl) {
     const want = normName(name);
     c.agents.forEach((n) => { if (normName(n.tl) === want) out.agents.push(packNode(n)); });

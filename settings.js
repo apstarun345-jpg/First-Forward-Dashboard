@@ -1212,74 +1212,142 @@ FF.pages = FF.pages || {};
     });
   }
 
-  // ---- 🔗 Personal links (admin) — agent/TL ka secret read-only URL --------------------------
+  // ---- 🔗 Personal links (admin) — agent/TL ka secret read-only URL + Access Control + Auth ----
+  const PL_SECTIONS_META = [
+    { key: 'overview', icon: '📊', label: 'Overview & KPIs' },
+    { key: 'stock', icon: '📦', label: 'Class-wise Stock' },
+    { key: 'issuance', icon: '📅', label: 'Date & Agent Issuance' },
+    { key: 'performance', icon: '🏆', label: 'Performance & Growth' },
+    { key: 'ageing', icon: '⏳', label: 'Stock Ageing' },
+    { key: 'export', icon: '⬇', label: 'CSV & PDF Download' }
+  ];
   async function linksTab(body) {
     let links = [];
-    try { links = (await A.api('/api/personal-links')).links || []; } catch (err) { body.innerHTML = U.errorBox(err); return; }
+    let plDef = { requireAuth: true, sections: PL_SECTIONS_META.map((s) => s.key) };
+    try {
+      const res = await A.api('/api/personal-links');
+      links = res.links || [];
+      if (res.defaults) plDef = res.defaults;
+    } catch (err) { body.innerHTML = U.errorBox(err); return; }
     const on = !settings || !settings.features || settings.features.personalLinks !== false;
     const origin = location.origin;
     const offBanner = on ? '' : '<p class="check" style="background:#fef3c7;border:1px solid #fcd34d;border-radius:10px;padding:8px 12px;margin-bottom:10px">⏸️ Feature <b>band</b> hai — sabhi links ab 404 denge. <a href="#/settings?tab=features">🎛 Features → Personal links ON karo</a>.</p>';
+    const defSecs = Array.isArray(plDef.sections) && plDef.sections.length ? plDef.sections : PL_SECTIONS_META.map((s) => s.key);
+    const secCheckboxes = (prefix, activeList) => PL_SECTIONS_META.map((s) => `<label class="chip ${activeList.includes(s.key) ? 'on' : ''}" style="cursor:pointer;display:inline-flex;align-items:center;gap:5px"><input type="checkbox" data-${prefix}-sec="${s.key}" ${activeList.includes(s.key) ? 'checked' : ''}> ${s.icon} ${esc(s.label)}</label>`).join('');
+
     body.innerHTML = `<div class="card">
-      <div class="page-head" style="margin-bottom:8px"><div><h2>🔗 Personal links <span class="dim small">(read-only · bina login)</span></h2>
-      <p class="sub">First Forward ya GV agent/TL ka secret URL — exact naam suggestion se choose karo. Link me sirf uska live performance, class mix aur target/team dikhta hai.</p></div></div>
+      <div class="page-head" style="margin-bottom:8px"><div><h2>🔗 Personal links <span class="dim small">(read-only · ID + Mobile Auth · Custom Access)</span></h2>
+      <p class="sub">First Forward ya GV agent/TL ka personal portal URL — Class-wise Stock, Date &amp; Agent Issuance, Performance, Stock Ageing tabs + CSV/PDF download. Jab TL/Agent link kholega to <b>TL/Agent ID + Mobile Number</b> se verify hokar khulega.</p></div></div>
       ${offBanner}
-      <div class="finder-row" style="margin-bottom:10px">
-        <select class="input" id="pl-source" style="width:auto"><option value="ff">🟦 First Forward</option><option value="gv">🟩 GV Partner</option></select>
-        <select class="input" id="pl-kind" style="width:auto"><option value="agent">🧑‍💼 Agent</option><option value="tl">👥 TL</option></select>
-        <div class="finder-input" style="min-width:280px"><span class="finder-ico">🔎</span><input class="input" id="pl-name" placeholder="Naam type karke suggestion choose karo" maxlength="80"></div>
-        <button class="btn primary" id="pl-create">🔗 Naya link banao</button>
-        <span class="dim small" id="pl-msg"></span>
+      <div class="card compact-card" style="margin-bottom:12px;background:var(--bg-subtle,#f8fafc)">
+        <div class="card-head"><h3>➕ Naya Personal Link Banao</h3><span class="dim small">Naam choose karein → ID, Mobile aur Sections select karein</span></div>
+        <div class="finder-row" style="margin-bottom:10px;flex-wrap:wrap;gap:8px">
+          <select class="input" id="pl-source" style="width:auto"><option value="ff">🟦 First Forward</option><option value="gv">🟩 GV Partner</option></select>
+          <select class="input" id="pl-kind" style="width:auto"><option value="agent">🧑‍💼 Agent</option><option value="tl">👥 TL</option></select>
+          <div class="finder-input" style="min-width:240px;flex:1"><span class="finder-ico">🔎</span><input class="input" id="pl-name" placeholder="Naam type karke suggestion choose karo" maxlength="80"></div>
+          <input class="input" id="pl-person-id" placeholder="🪪 TL / Agent ID (Auth ke liye)" style="width:190px" maxlength="40">
+          <input class="input" id="pl-mobile" type="tel" inputmode="numeric" placeholder="📱 10-digit Mobile" style="width:170px" maxlength="14">
+          <button class="btn primary" id="pl-create">🔗 Naya link banao</button>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:6px">
+          <span class="dim small"><b>🎛️ Link Access Sections:</b></span>
+          ${secCheckboxes('new', defSecs)}
+          <label class="chip ${plDef.requireAuth !== false ? 'on' : ''}" style="cursor:pointer;margin-left:auto"><input type="checkbox" id="pl-req-auth" ${plDef.requireAuth !== false ? 'checked' : ''}> 🔐 Require ID + Mobile Auth</label>
+        </div>
+        <span class="dim small" id="pl-msg" style="display:block;margin-top:6px"></span>
       </div>
-      ${links.length ? `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Source</th><th>Kind</th><th>Naam</th><th>Link</th><th>Bana</th><th>Status</th><th></th></tr></thead><tbody>
-      ${links.map((l) => `<tr>
+
+      <div class="card compact-card" style="margin-bottom:12px">
+        <div class="card-head"><h3>🛡️ Admin Global Default Access Control</h3><span class="dim small">Naye links aur existing links ke liye default tabs &amp; security</span></div>
+        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px">
+          ${secCheckboxes('def', defSecs)}
+          <label class="chip ${plDef.requireAuth !== false ? 'on' : ''}" style="cursor:pointer"><input type="checkbox" id="pl-def-auth" ${plDef.requireAuth !== false ? 'checked' : ''}> 🔐 ID + Mobile Auth Gate</label>
+          <button class="btn small primary" id="pl-save-def" style="margin-left:auto">💾 Save Default &amp; Apply to All Links</button>
+        </div>
+      </div>
+
+      ${links.length ? `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Source</th><th>Kind</th><th>Naam</th><th>🔐 Auth (ID · Mobile)</th><th>🎛️ Allowed Sections</th><th>Link</th><th>Status</th><th>Actions</th></tr></thead><tbody>
+      ${links.map((l) => {
+        const secs = Array.isArray(l.sections) && l.sections.length ? l.sections : defSecs;
+        const secBadges = PL_SECTIONS_META.filter((s) => secs.includes(s.key)).map((s) => `<span class="badge" title="${esc(s.label)}">${s.icon} ${esc(s.label.split(' ')[0])}</span>`).join(' ');
+        const authBadge = l.requireAuth !== false
+          ? `<span class="badge blue" title="TL/Agent ID + Mobile Required">🔐 ${esc(l.personId || 'Auto ID')} · 📱 ${esc(l.mobile || 'Auto')}</span>`
+          : '<span class="badge">🔓 Direct Open</span>';
+        return `<tr>
         <td>${l.source === 'gv' ? '🟩 GV' : '🟦 FF'}</td>
         <td>${l.kind === 'tl' ? '👥 TL' : '🧑‍💼 Agent'}</td>
-        <td><b>${esc(l.name)}</b></td>
+        <td><b>${esc(l.name)}</b><div class="dim small">${esc(String(l.createdAt || '').slice(0, 10))}</div></td>
+        <td>${authBadge}</td>
+        <td><div style="display:flex;flex-wrap:wrap;gap:3px;justify-content:center">${secBadges}</div></td>
         <td class="mono small"><a href="/p/${esc(l.token)}" target="_blank" rel="noopener">${esc(origin)}/p/${esc(String(l.token).slice(0, 10))}…</a></td>
-        <td class="small dim">${esc(String(l.createdAt || '').slice(0, 10))} · ${esc(l.by || '')}</td>
-        <td>${l.enabled !== false ? '<span class="badge">✅ ON</span>' : '<span class="badge red">⛔ OFF</span>'}</td>
+        <td>${l.enabled !== false ? '<span class="badge green">✅ ON</span>' : '<span class="badge red">⛔ OFF</span>'}</td>
         <td class="num" style="white-space:nowrap">
+          <button class="btn small pl-edit" data-id="${esc(l.id)}" title="Access sections aur ID/Mobile Auth edit karo">⚙️ Access</button>
           <button class="btn small pl-copy" data-token="${esc(l.token)}" title="Poora URL copy karo">📋</button>
+          <button class="btn small pl-wa" data-token="${esc(l.token)}" data-name="${esc(l.name)}" data-id="${esc(l.personId || '')}" title="WhatsApp par bhejo">💬</button>
           <button class="btn small pl-toggle" data-id="${esc(l.id)}" data-on="${l.enabled === false ? '1' : ''}">${l.enabled !== false ? '⏸️' : '▶️'}</button>
           <button class="btn small pl-del" data-id="${esc(l.id)}" title="Delete">🗑</button>
-        </td></tr>`).join('')}
+        </td></tr>`;
+      }).join('')}
       </tbody></table></div>` : '<p class="dim">Abhi koi link nahi — source + exact naam choose karke pehla banao.</p>'}
-      <p class="dim small" style="margin-top:10px">⚡ Personal page current + previous month ka bounded query use karti hai aur short server cache se jaldi khulti hai. Token random hai; ⏸️ ya 🗑 se turant revoke kar sakte ho.</p>
+      <p class="dim small" style="margin-top:10px">⚡ Har Personal Link me <b>📊 Overview · 📦 Class-wise Stock · 📅 Date &amp; Agent Issuance · 🏆 Performance · ⏳ Stock Ageing</b> tabs aur <b>⬇ CSV / 📄 PDF</b> download options hain. Admin <b>⚙️ Access</b> button se kisi bhi link ke sections ya Auth ID/Mobile badal sakta hai.</p>
     </div>`;
     const msg = U.$('#pl-msg', body), create = U.$('#pl-create', body);
     const sourceEl = U.$('#pl-source', body), kindEl = U.$('#pl-kind', body), nameEl = U.$('#pl-name', body);
+    const pidEl = U.$('#pl-person-id', body), mobEl = U.$('#pl-mobile', body), reqAuthEl = U.$('#pl-req-auth', body);
+
+    body.querySelectorAll('input[type="checkbox"][data-new-sec], input[type="checkbox"][data-def-sec], #pl-req-auth, #pl-def-auth').forEach((cb) => {
+      cb.addEventListener('change', () => {
+        const lbl = cb.closest('.chip');
+        if (lbl && lbl.classList) lbl.classList.toggle('on', cb.checked);
+      });
+    });
+
     const suggestionItems = () => {
       let people;
       if (sourceEl.value === 'gv' && FF.gv && FF.gv.people) people = FF.gv.people();
       else {
-        // EIR me GV rows bhi hain; FF selector me unke naam dobara dikhana source mismatch
-        // kar raha tha. Source-labelled agent dataset se sirf First Forward suggestions banao.
         const agents = new Map(), tls = new Map();
         const rows = FF.store && FF.store.get ? (FF.store.get('agents') || []) : [];
         rows.filter((a) => a.channel === 'First Forward').forEach((a) => {
           const name = String(a.name || '').trim(), tl = String(a.tlName || '').trim();
           if (name) {
-            const old = agents.get(name) || { name, tl, id: a.id || '', n: 0 };
-            old.n += Number(a.n) || 0; old.tl = old.tl || tl; old.id = old.id || a.id || ''; agents.set(name, old);
+            const old = agents.get(name) || { name, tl, id: a.id || '', mobile: a.mobile || '', n: 0 };
+            old.n += Number(a.n) || 0; old.tl = old.tl || tl; old.id = old.id || a.id || ''; old.mobile = old.mobile || a.mobile || '';
+            agents.set(name, old);
           }
           if (tl && !FF.config.isExcludedTl(tl)) tls.set(tl, (tls.get(tl) || 0) + (Number(a.n) || 0));
         });
         people = { agents: [...agents.values()], tls: [...tls.entries()].map(([name, n]) => ({ name, n })) };
       }
-      if (kindEl.value === 'tl') return (people.tls || []).map((t) => ({ kind: 'tl', kindLabel: 'TL', label: t.name, sub: t.n ? `${U.fmtShort(t.n)} tags` : '', value: t.name }));
-      return (people.agents || []).map((a) => ({ kind: 'agent', kindLabel: 'Agent', label: a.name, sub: a.tl || (a.id ? `ID ${a.id}` : ''), keywords: a.id || '', value: a.name }));
+      if (kindEl.value === 'tl') return (people.tls || []).map((t) => ({ kind: 'tl', kindLabel: 'TL', label: t.name, id: t.id || t.tlId || '', mobile: t.mobile || '', sub: t.n ? `${U.fmtShort(t.n)} tags` : '', value: t.name }));
+      return (people.agents || []).map((a) => ({ kind: 'agent', kindLabel: 'Agent', label: a.name, id: a.id || a.agentId || '', mobile: a.mobile || '', sub: a.tl || (a.id ? `ID ${a.id}` : ''), keywords: a.id || '', value: a.name }));
     };
-    U.suggest(nameEl, { min: 1, items: suggestionItems, onPick: (it) => { nameEl.value = it.value || it.label; }, onEnter: (q) => { nameEl.value = q; } });
-    [sourceEl, kindEl].forEach((el) => el.addEventListener('change', () => { nameEl.value = ''; nameEl.focus(); }));
+    U.suggest(nameEl, {
+      min: 1,
+      items: suggestionItems,
+      onPick: (it) => {
+        nameEl.value = it.value || it.label;
+        if (pidEl && it.id && !pidEl.value) pidEl.value = it.id;
+        if (mobEl && it.mobile && !mobEl.value) mobEl.value = String(it.mobile).replace(/\D/g, '').slice(-10);
+      },
+      onEnter: (q) => { nameEl.value = q; }
+    });
+    [sourceEl, kindEl].forEach((el) => el.addEventListener('change', () => { nameEl.value = ''; if (pidEl) pidEl.value = ''; if (mobEl) mobEl.value = ''; nameEl.focus(); }));
+
     create.addEventListener('click', async () => {
       const source = sourceEl.value === 'gv' ? 'gv' : 'ff';
       const kind = kindEl.value === 'tl' ? 'tl' : 'agent';
       const name = (nameEl.value || '').trim();
       if (!name) return U.toast('Pehle exact naam choose karo', 'err');
+      const personId = (pidEl && pidEl.value || '').trim();
+      const mobile = (mobEl && mobEl.value || '').replace(/\D/g, '').slice(-10);
+      const requireAuth = !!(reqAuthEl && reqAuthEl.checked);
+      const sections = [...body.querySelectorAll('[data-new-sec]:checked')].map((x) => x.dataset.newSec);
       msg.textContent = 'Google Sheet storage me link save ho raha hai…';
       await U.withButtonBusy(create, async () => {
         try {
-          const out = await A.api('/api/personal-links', 'POST', { source, kind, name });
+          const out = await A.api('/api/personal-links', 'POST', { source, kind, name, personId, mobile, requireAuth, sections });
           const url = `${origin}/p/${out.link.token}`;
           await U.copyText(url).catch(() => false);
           U.toast('🔗 Link ban gaya aur copy ho gaya ✓', 'ok');
@@ -1287,9 +1355,70 @@ FF.pages = FF.pages || {};
         } catch (err) { U.toast(err.message, 'err'); if (msg) msg.textContent = err.message; }
       }, 'Link save ho raha hai…');
     });
+
+    const saveDefBtn = U.$('#pl-save-def', body);
+    if (saveDefBtn) saveDefBtn.addEventListener('click', () => U.withButtonBusy(saveDefBtn, async () => {
+      const sections = [...body.querySelectorAll('[data-def-sec]:checked')].map((x) => x.dataset.defSec);
+      const requireAuth = !!(U.$('#pl-def-auth', body) && U.$('#pl-def-auth', body).checked);
+      await A.api('/api/personal-links/defaults', 'POST', { sections, requireAuth, applyToAll: true });
+      U.toast('🛡️ Global default access sabhi Personal Links par apply ho gaya ✓', 'ok');
+      await draw();
+    }, 'Saving…'));
+
+    U.$$('.pl-edit', body).forEach((b) => b.addEventListener('click', () => {
+      const link = links.find((x) => x.id === b.dataset.id);
+      if (!link || !FF.app || !FF.app.openDrawer) return;
+      const curSecs = Array.isArray(link.sections) && link.sections.length ? link.sections : defSecs;
+      FF.app.openDrawer({
+        kicker: `🔗 Personal Link Access · ${link.source === 'gv' ? 'GV Partner' : 'First Forward'}`,
+        title: `${link.kind === 'tl' ? '👥' : '🧑‍💼'} ${link.name}`,
+        sub: 'Choose allowed sections/tabs and TL/Agent ID + Mobile authentication',
+        body: `<div class="kd-sec">
+          <div class="form-grid">
+            <label class="fld"><span>🪪 ${link.kind === 'tl' ? 'TL ID' : 'Agent ID'} (Auth ke liye)</span>
+              <input class="input" id="ple-id" value="${esc(link.personId || '')}" placeholder="e.g. 1001 ya TL-01"></label>
+            <label class="fld"><span>📱 Registered Mobile Number (10 digit)</span>
+              <input class="input" id="ple-mob" type="tel" inputmode="numeric" value="${esc(link.mobile || '')}" placeholder="e.g. 9876543210" maxlength="14"></label>
+          </div>
+          <label class="check" style="margin-top:8px"><input type="checkbox" id="ple-auth" ${link.requireAuth !== false ? 'checked' : ''}> 🔐 <b>Require ID + Mobile Number verification</b> before opening Personal Link</label>
+          <h4 class="drawer-section-title" style="margin-top:14px">🎛️ Allowed Tabs &amp; Features</h4>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
+            ${PL_SECTIONS_META.map((s) => `<label class="chip ${curSecs.includes(s.key) ? 'on' : ''}" style="cursor:pointer"><input type="checkbox" data-ple-sec="${s.key}" ${curSecs.includes(s.key) ? 'checked' : ''}> ${s.icon} ${esc(s.label)}</label>`).join('')}
+          </div>
+          <div class="btn-row" style="margin-top:16px">
+            <button class="btn primary" id="ple-save">💾 Save Access &amp; Auth</button>
+          </div>
+        </div>`
+      });
+      const dBody = document.getElementById('drawer-body');
+      if (!dBody) return;
+      dBody.querySelectorAll('input[data-ple-sec]').forEach((cb) => cb.addEventListener('change', () => {
+        const chip = cb.closest('.chip');
+        if (chip) chip.classList.toggle('on', cb.checked);
+      }));
+      const saveBtn = dBody.querySelector('#ple-save');
+      if (saveBtn) saveBtn.addEventListener('click', () => U.withButtonBusy(saveBtn, async () => {
+        const personId = (dBody.querySelector('#ple-id') && dBody.querySelector('#ple-id').value || '').trim();
+        const mobile = (dBody.querySelector('#ple-mob') && dBody.querySelector('#ple-mob').value || '').replace(/\D/g, '').slice(-10);
+        const requireAuth = !!(dBody.querySelector('#ple-auth') && dBody.querySelector('#ple-auth').checked);
+        const sections = [...dBody.querySelectorAll('[data-ple-sec]:checked')].map((x) => x.dataset.pleSec);
+        await A.api(`/api/personal-links/${encodeURIComponent(link.id)}`, 'PUT', { personId, mobile, requireAuth, sections });
+        U.toast(`✅ ${link.name} ka Personal Link access update ho gaya`, 'ok');
+        if (FF.app.closeDrawer) FF.app.closeDrawer();
+        await draw();
+      }, 'Saving…'));
+    }));
+
     U.$$('.pl-copy', body).forEach((b) => b.addEventListener('click', () => {
       const url = `${origin}/p/${b.dataset.token}`;
       U.copyText(url).then(() => U.toast('📋 Link copy ho gaya', 'ok')).catch(() => { window.prompt('Copy karo:', url); });
+    }));
+    U.$$('.pl-wa', body).forEach((b) => b.addEventListener('click', () => {
+      const url = `${origin}/p/${b.dataset.token}`;
+      const idHint = b.dataset.id ? `\n🪪 ID: ${b.dataset.id}` : '';
+      const text = `🔗 *${b.dataset.name}* — Personal Performance & Stock Link:${idHint}\n📱 Apni ID aur Mobile Number daal kar open karein:\n${url}`;
+      if (FF.app && FF.app.shareWhatsApp) FF.app.shareWhatsApp(text);
+      else window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
     }));
     U.$$('.pl-toggle', body).forEach((b) => b.addEventListener('click', () => U.withButtonBusy(b, async () => {
       try { await A.api(`/api/personal-links/${encodeURIComponent(b.dataset.id)}/enable`, 'POST', { enabled: b.dataset.on === '1' }); await draw(); }

@@ -110,7 +110,7 @@ test('public employee tag request — bina login submit, status, admin visibilit
     }, '', '10.0.0.9');
     assert.equal(created.res.status, 201, JSON.stringify(created.json));
     const id = created.json.request.id;
-    assert.ok(id && id.startsWith('tagreq'), 'request id mila');
+    assert.ok(id && /^\d{4}$/.test(id), '4-digit numeric request id mila');
     assert.equal(created.json.request.total, 31, '25 + 6');
     assert.equal(created.json.request.byName, 'Suresh Kumar');
 

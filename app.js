@@ -754,12 +754,40 @@ window.FF = window.FF || {};
   }
 
   // ---- drawer ----
-  function openDrawer({ kicker, title, sub, body, actions, wide, age }) {
+  let drawerStack = [];
+  let activeDrawerSnap = null;
+  function currentDrawerSnapshot() {
+    return activeDrawerSnap ? { ...activeDrawerSnap } : null;
+  }
+  function restoreDrawerSnapshot(snap) {
+    if (!snap) return;
+    openDrawer({ ...snap, fromBack: true });
+  }
+  function openDrawer({ kicker, title, sub, body, actions, wide, age, loading, replace, fromBack }) {
+    const isOpen = !!(U.$('#drawer') && U.$('#drawer').classList.contains('open'));
+    const htmlStr = String(body || '');
+    const isLoader = !!loading || (/class="loading"/.test(htmlStr) && htmlStr.length < 900);
+    if (isOpen && activeDrawerSnap && !activeDrawerSnap.loading && !replace && !fromBack && !isLoader) {
+      drawerStack.push({ ...activeDrawerSnap });
+    }
+    let finalActions = actions || '';
+    if (!isLoader && !/<form[\s>]/i.test(htmlStr)) {
+      if (drawerStack.length && !/data-kd-back|data-drawer-back|data-mp-back/.test(finalActions)) {
+        finalActions = `<button class="btn small" data-drawer-back>← Back</button>${finalActions}`;
+      }
+      if (FF.auth && FF.auth.can && FF.auth.can('export')) {
+        if (!/data-drawer-csv/.test(finalActions)) finalActions += '<button class="btn small" data-drawer-csv title="Download Drawer CSV">⬇ CSV</button>';
+        if (!/data-drawer-pdf/.test(finalActions)) finalActions += '<button class="btn small" data-drawer-pdf title="Download Drawer PDF">📄 PDF</button>';
+      }
+    }
+    if (!isLoader) {
+      activeDrawerSnap = { kicker, title, sub, body, actions, wide, age, loading: false };
+    }
     U.$('#drawer').classList.toggle('wide', !!wide);
     U.$('#drawer-kicker').textContent = kicker || '';
     U.$('#drawer-title').textContent = title || '';
     U.$('#drawer-sub').innerHTML = sub || '';
-    U.$('#drawer-actions').innerHTML = actions || '';
+    U.$('#drawer-actions').innerHTML = finalActions;
     const ageHtml = drawerAgeHtml({ kicker, title, body, age });
     U.$('#drawer-body').innerHTML = (body || '') + ageHtml;
     U.$('#drawer').classList.add('open');
@@ -771,6 +799,87 @@ window.FF = window.FF || {};
     enhanceTables(U.$('#drawer-body'));
     translateDom(U.$('#drawer-body'));
     if (ageHtml && FF.stockAge && FF.stockAge.decorate) FF.stockAge.decorate(U.$('#drawer-body')).catch(() => {});
+  }
+  function extractDrawerData() {
+    const bodyEl = U.$('#drawer-body');
+    const title = (U.$('#drawer-title') && U.$('#drawer-title').textContent || 'Drawer Report').trim();
+    const kicker = (U.$('#drawer-kicker') && U.$('#drawer-kicker').textContent || '').trim();
+    const sub = (U.$('#drawer-sub') && U.$('#drawer-sub').textContent || '').replace(/\s+/g, ' ').trim();
+    const kpis = [];
+    if (bodyEl) {
+      bodyEl.querySelectorAll('.dkpi, .kd-stat, .mp-kpi, .mini-kpi').forEach((el) => {
+        const lbl = (el.querySelector('small, span, .mini-label') || {}).textContent || '';
+        const val = (el.querySelector('b, strong, .mini-value') || {}).textContent || '';
+        const spans = [...el.querySelectorAll('span, small')].map((s) => (s.textContent || '').trim()).filter((t) => t && t !== lbl.trim() && t !== val.trim());
+        if (lbl.trim() || val.trim()) kpis.push({ label: lbl.trim(), value: val.trim(), sub: spans.join(' · ') });
+      });
+    }
+    const tables = [];
+    if (bodyEl) {
+      bodyEl.querySelectorAll('table').forEach((tbl, idx) => {
+        const sec = tbl.closest('section, .dsec, .mp-sec, details');
+        const headingEl = sec ? sec.querySelector('h4, h3, summary') : null;
+        const tTitle = (headingEl ? headingEl.textContent : `Table ${idx + 1}`).replace(/\s+/g, ' ').trim();
+        const rawRows = U.tableToRows(tbl).filter((r) => r.some((c) => String(c || '').trim() !== ''));
+        if (!rawRows.length) return;
+        const head = rawRows[0];
+        const rows = rawRows.slice(1);
+        const hasTotal = rows.some((r) => /^(total|grand total|tl total)\b/i.test(String(r[0] || '').trim()));
+        if (!hasTotal && rows.length > 1 && head.length > 1) {
+          const totRow = head.map((_, ci) => {
+            if (ci === 0) return 'Grand Total';
+            let sum = 0, numCount = 0;
+            rows.forEach((r) => {
+              const raw = String(r[ci] || '').replace(/,/g, '').trim();
+              if (/^-?\d+(\.\d+)?$/.test(raw)) { sum += Number(raw); numCount++; }
+            });
+            return numCount === rows.length && numCount > 0 ? U.fmt(sum) : '';
+          });
+          if (totRow.slice(1).some(Boolean)) rows.push(totRow);
+        }
+        tables.push({ title: tTitle, head, rows });
+      });
+    }
+    return { title, kicker, sub, kpis, tables };
+  }
+  function exportDrawerCsv() {
+    if (!FF.auth.can('export')) { U.toast('Download permission nahi hai', 'err'); return; }
+    const d = extractDrawerData();
+    const out = [[d.title, d.kicker, d.sub]];
+    if (d.kpis.length) {
+      out.push([], ['KPI Metric', 'Value', 'Details']);
+      d.kpis.forEach((k) => out.push([k.label, k.value, k.sub]));
+    }
+    d.tables.forEach((t) => {
+      out.push([], [t.title], t.head, ...t.rows);
+    });
+    U.downloadCsv(`${U.slug(d.title || 'drawer')}-${U.stamp()}.csv`, ['Section / Field', 'Value / Col 2', 'Col 3', 'Col 4', 'Col 5', 'Col 6', 'Col 7', 'Col 8'], out);
+    U.toast('Drawer CSV downloaded ✓', 'ok');
+  }
+  async function exportDrawerPdf(btn) {
+    if (!FF.auth.can('export')) { U.toast('Download permission nahi hai', 'err'); return; }
+    try {
+      if (!FF.pdf && FF.lazy && FF.lazy.loadScript) await FF.lazy.loadScript('pdf.js');
+      if (!FF.pdf) { U.toast('PDF module load nahi hua', 'err'); return; }
+      if (btn) U.setButtonBusy(btn, true, 'PDF…');
+      const d = extractDrawerData();
+      const kpiHtml = d.kpis.length
+        ? `<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">${d.kpis.slice(0, 12).map((k) => `<div style="border:1px solid #cbd5e1;border-radius:8px;padding:8px 10px;background:#f8fafc"><div style="font-size:10px;color:#64748b;font-weight:700;text-transform:uppercase">${esc(k.label)}</div><div style="font-size:16px;font-weight:800;color:#0f172a;margin-top:2px">${esc(k.value)}</div>${k.sub ? `<div style="font-size:10px;color:#475569;margin-top:2px">${esc(k.sub)}</div>` : ''}</div>`).join('')}</div>`
+        : '';
+      const tblHtml = d.tables.map((t) => `<div style="margin-top:12px"><h4 style="margin:0 0 6px;font-size:12px;color:#0f172a">${esc(t.title)}</h4><table style="width:100%;border-collapse:collapse;font-size:10.5px"><thead><tr style="background:#f1f5f9">${t.head.map((h) => `<th style="border:1px solid #cbd5e1;padding:5px 6px;text-align:left">${esc(h)}</th>`).join('')}</tr></thead><tbody>${t.rows.slice(0, 120).map((r) => { const isTot = /^(total|grand total|tl total)\b/i.test(String(r[0] || '').trim()); return `<tr style="${isTot ? 'background:#eef2ff;font-weight:800' : ''}">${r.map((c) => `<td style="border:1px solid #e2e8f0;padding:4px 6px">${esc(c)}</td>`).join('')}</tr>`; }).join('')}</tbody></table></div>`).join('');
+      const page = FF.pdf.doc({
+        title: d.title,
+        sub: `${d.kicker ? `${d.kicker} · ` : ''}${d.sub}`,
+        meta: `Generated ${new Date().toLocaleString('en-IN')}`,
+        body: kpiHtml + (tblHtml || '<p>Summary details exported.</p>')
+      });
+      await FF.pdf.download([page], `${U.slug(d.title || 'drawer')}-${U.stamp()}.pdf`);
+      U.toast('Drawer PDF downloaded ✓', 'ok');
+    } catch (err) {
+      U.toast((err && err.message) || 'PDF export failed', 'err');
+    } finally {
+      if (btn) U.setButtonBusy(btn, false);
+    }
   }
   /** 🧓 v3.31 — HAR drawer me stock ageing. Drawer khud `age: { kind: 'agent'|'tl'|'agents'|'all', key, ch, keys, tls, title }`
       bata sakta hai (`age: false` = nahi chahiye); na bataye to kicker/title se andaza: agent / TL / poora network.
@@ -803,6 +912,9 @@ window.FF = window.FF || {};
     U.$('#drawer').classList.remove('open');
     U.$('#drawer-backdrop').hidden = true;
     document.body.classList.remove('no-scroll');
+    drawerStack = [];
+    activeDrawerSnap = null;
+    if (FF.kpiDetail && FF.kpiDetail.resetHistory) FF.kpiDetail.resetHistory();
   }
   function closeSidebar() { document.body.classList.remove('side-open'); }
 
@@ -1045,6 +1157,16 @@ window.FF = window.FF || {};
       }
       if (!e.target.closest('#user-menu') && !e.target.closest('#user-btn')) toggleUserMenu(false);
       if (e.target.closest('#user-menu a')) toggleUserMenu(false);
+      const drawerBack = e.target.closest('[data-drawer-back]');
+      if (drawerBack) {
+        const prev = drawerStack.pop();
+        if (prev) restoreDrawerSnapshot(prev);
+        return;
+      }
+      const drawerCsv = e.target.closest('[data-drawer-csv]');
+      if (drawerCsv) { exportDrawerCsv(); return; }
+      const drawerPdf = e.target.closest('[data-drawer-pdf]');
+      if (drawerPdf) { exportDrawerPdf(drawerPdf); return; }
       // `.kpi` ya `[data-kpi]` — dono clickable hain (Home ke glance tiles bhi data-kpi use karte hain).
       const kpi = e.target.closest('.kpi, [data-kpi]');
       if (kpi && !e.target.closest('a,button:not(.kpi)')) {
@@ -1376,6 +1498,6 @@ window.FF = window.FF || {};
     setLang(next);
   }
 
-  FF.app = { storageBanner, pushBanner, liveShareChip, navigate, updateParams, clearGlobalFilters, refresh, syncNow, checkFeedChange, announceDataUpdate, parseHash, resolvePage, pageKnown, openDrawer, closeDrawer, renderSidebar, renderCurrent, renderTopUser, updateStatus, onLogin, onBackgroundDataUpdated, promptInstall, enhanceCharts, enhanceTables, themeMode, toggleThemeMode, lang, setLang, toggleLangMenu, renderGlobalFilters, renderMobileNav, focusMode: updateFocusMode, openAccessibility: renderA11yPanel, tableDensity, setTableDensity, PAGES, refreshPendingBadge, setPendingSignups, shareWhatsApp, checkVersion, exportCSV: () => exportCurrentCsv('csv'), exportXLSX: () => exportCurrentCsv('xlsx'), toggleTheme: toggleThemeMode, toggleLang: toggleLangQuick, get pendingSignups() { return pendingSignups; }, get current() { return current; }, currentFilters: () => (FF.filters ? FF.filters.current() : currentFilterValues()) };
+  FF.app = { storageBanner, pushBanner, liveShareChip, navigate, updateParams, clearGlobalFilters, refresh, syncNow, checkFeedChange, announceDataUpdate, parseHash, resolvePage, pageKnown, openDrawer, closeDrawer, currentDrawerSnapshot, restoreDrawerSnapshot, exportDrawerCsv, exportDrawerPdf, renderSidebar, renderCurrent, renderTopUser, updateStatus, onLogin, onBackgroundDataUpdated, promptInstall, enhanceCharts, enhanceTables, themeMode, toggleThemeMode, lang, setLang, toggleLangMenu, renderGlobalFilters, renderMobileNav, focusMode: updateFocusMode, openAccessibility: renderA11yPanel, tableDensity, setTableDensity, PAGES, refreshPendingBadge, setPendingSignups, shareWhatsApp, checkVersion, exportCSV: () => exportCurrentCsv('csv'), exportXLSX: () => exportCurrentCsv('xlsx'), toggleTheme: toggleThemeMode, toggleLang: toggleLangQuick, get pendingSignups() { return pendingSignups; }, get current() { return current; }, currentFilters: () => (FF.filters ? FF.filters.current() : currentFilterValues()) };
   document.addEventListener('DOMContentLoaded', init);
 })(window.FF);

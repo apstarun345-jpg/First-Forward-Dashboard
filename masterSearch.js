@@ -472,6 +472,7 @@ FF.pages = FF.pages || {};
             <small class="dim">${U.fmt(res.matched)} match · ${res.heavy ? 'barcode register ready ✓' : 'barcode register loading…'}</small></div>
           <div class="btn-row">
             <button class="btn small" data-ms-csv>⬇ CSV</button>
+            <button class="btn small" data-ms-pdf>📄 PDF</button>
             <button class="btn small" data-ms-close>✕ Close</button>
           </div>
         </div>
@@ -483,9 +484,10 @@ FF.pages = FF.pages || {};
     if (FF.app && FF.app.enhanceTables) FF.app.enhanceTables(wrap);
     inlineSingle(wrap.querySelector('.ms-panel-body'), res);
     const box = wrap.querySelector('.ms-panel-box');
-    wrap.addEventListener('click', (e) => {
+    wrap.addEventListener('click', async (e) => {
       if (e.target.closest('[data-ms-close]')) { closePanel(); return; }
       if (e.target.closest('[data-mp-agent]')) { closePanel(); return; }
+      if (e.target.closest('[data-kpi]')) { closePanel(); return; }
       const prof = e.target.closest('[data-ms-profile]');
       if (prof) { const person = personByKey(prof.dataset.msProfile); if (person && MP()) { closePanel(); MP().open(person); } return; }
       const a = e.target.closest('[data-ms-agent360]');
@@ -497,11 +499,33 @@ FF.pages = FF.pages || {};
       const csv = e.target.closest('[data-ms-csv]');
       if (csv) {
         const rows = [];
-        res.tags.forEach((tt) => { const f = tt.ff[0] || {}, g = tt.gv[0] || {}; const st = tagStatus(tt); rows.push(['Tag', U.barcode(tt.key), f.agentName || '', f.tlName || '', g.agentName || '', g.tlName || '', g.gvName || '', f.cls || g.cls || '', st.t, f.allocated || g.allocated || '', '']); });
-        res.people.forEach((p) => rows.push(['Person', p.name, KIND_LABEL[p.kind] || p.kind, [...p.tlSet].join(' / '), p.sub || '', '', '', [...p.classMap.keys()].join(' '), '', p.last || '', p.bars.size || p.n]));
-        res.ids.forEach((v) => rows.push(['ID', v.id, v.name || '', KIND_LABEL[v.kind] || v.kind, v.tl || '', '', '', '', '', '', '']));
+        res.tags.forEach((tt) => { const f = tt.ff[0] || {}, g = tt.gv[0] || {}; const st = tagStatus(tt); rows.push(['Tag', U.barcode(tt.key), f.agentName || '', f.tlName || '', g.agentName || '', g.tlName || '', g.gvName || '', f.cls || g.cls || '', st.t, f.allocated || g.allocated || '', 1]); });
+        res.people.forEach((p) => rows.push(['Person', p.name, KIND_LABEL[p.kind] || p.kind, [...p.tlSet].join(' / '), p.sub || '', '', '', [...p.classMap.keys()].join(' '), '', p.last || '', p.bars.size || p.n || 0]));
+        res.ids.forEach((v) => rows.push(['ID', v.id, v.name || '', KIND_LABEL[v.kind] || v.kind, v.tl || '', '', '', '', '', '', 1]));
+        const totCount = U.sum(rows, (r) => Number(r[10]) || 0);
+        rows.push(['Grand Total', `${rows.length} matches`, '', '', '', '', '', '', '', '', totCount]);
         U.downloadCsv(`master-search-${U.slug(res.q || 'results')}-${U.stamp()}.csv`,
           ['Type', 'Key / Name', 'FF or Agent', 'TL / Role', 'GV holder / ID', 'GV TL', 'GV unique', 'Class', 'Status', 'Allocated / Last', 'Count'], rows);
+        return;
+      }
+      const pdfBtn = e.target.closest('[data-ms-pdf]');
+      if (pdfBtn) {
+        try {
+          if (!FF.pdf && FF.lazy && FF.lazy.loadScript) await FF.lazy.loadScript('pdf.js');
+          if (!FF.pdf) return;
+          U.setButtonBusy(pdfBtn, true, 'PDF…');
+          const rows = [];
+          res.tags.forEach((tt) => { const f = tt.ff[0] || {}, g = tt.gv[0] || {}; const st = tagStatus(tt); rows.push(['Tag', U.barcode(tt.key), f.agentName || g.agentName || '', f.tlName || g.tlName || '', f.cls || g.cls || '', st.t, 1]); });
+          res.people.forEach((p) => rows.push(['Person', p.name, KIND_LABEL[p.kind] || p.kind, [...p.tlSet].join(' / '), [...p.classMap.keys()].join(' '), p.last || '', p.bars.size || p.n || 0]));
+          res.ids.forEach((v) => rows.push(['ID', v.id, v.name || '', KIND_LABEL[v.kind] || v.kind, v.tl || '', '', 1]));
+          const totCount = U.sum(rows, (r) => Number(r[6]) || 0);
+          const tblHtml = `<table style="width:100%;border-collapse:collapse;font-size:10.5px"><thead><tr style="background:#f1f5f9"><th style="border:1px solid #cbd5e1;padding:5px">Type</th><th style="border:1px solid #cbd5e1;padding:5px">Key / Name</th><th style="border:1px solid #cbd5e1;padding:5px">Role / Holder</th><th style="border:1px solid #cbd5e1;padding:5px">TL</th><th style="border:1px solid #cbd5e1;padding:5px">Class</th><th style="border:1px solid #cbd5e1;padding:5px">Status / Last</th><th style="border:1px solid #cbd5e1;padding:5px;text-align:right">Count</th></tr></thead><tbody>${rows.slice(0, 120).map((r) => `<tr>${r.map((c, i) => `<td style="border:1px solid #e2e8f0;padding:4px 6px;${i === 6 ? 'text-align:right;font-weight:700' : ''}">${esc(c)}</td>`).join('')}</tr>`).join('')}<tr style="background:#eef2ff;font-weight:800"><td colspan="6" style="border:1px solid #cbd5e1;padding:5px 6px">Grand Total (${rows.length} matches)</td><td style="border:1px solid #cbd5e1;padding:5px 6px;text-align:right">${U.fmt(totCount)}</td></tr></tbody></table>`;
+          const page = FF.pdf.doc({ title: `Master Search · ${res.q || 'Results'}`, sub: `${U.fmt(res.matched)} matches`, meta: new Date().toLocaleString('en-IN'), body: tblHtml });
+          await FF.pdf.download([page], `master-search-${U.slug(res.q || 'results')}-${U.stamp()}.pdf`);
+          U.toast('Master search PDF downloaded ✓', 'ok');
+        } finally {
+          U.setButtonBusy(pdfBtn, false);
+        }
         return;
       }
       if (!e.target.closest('.ms-panel-box')) closePanel();

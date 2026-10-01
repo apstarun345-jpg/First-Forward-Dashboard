@@ -233,9 +233,46 @@ window.FF = window.FF || {};
   const prioOf = (t) => { const s = clean(t).replace(/[^\w\s]/g, '').toLowerCase(); if (/high|urgent|critical/.test(s)) return 'High'; if (/medium|slight/.test(s)) return 'Medium'; if (/low/.test(s)) return 'Low'; return clean(t); };
 
   const gvDaily = (r, cur) => U.runRate(cur, 'gv');
-  function gvClassRows(match, curYm, lastYm) {
+  function gvClassRows(match) {
     const issuance = gvIssuanceRows();
-    return issuance.filter(match).map((r) => ({ ym: r.ym, cls: r.cls, n: Number(r.n) || 1 }));
+    const out = issuance.filter(match).map((r) => ({ ym: r.ym, cls: r.cls, n: Number(r.n) || 1 }));
+    const yms = new Set(out.map((r) => r.ym).filter(Boolean));
+    for (const r of rowsOf('agentClass')) {
+      if (!/gv|green/i.test(r.channel || '') || !r.ym || yms.has(r.ym)) continue;
+      if (match({ agentName: r.name || r.gvName || r.agentName, agentId: r.id || r.agentId || '', tlName: r.tlName || '' })) {
+        out.push({ ym: r.ym, cls: r.cls, n: Number(r.n) || 0 });
+      }
+    }
+    return out;
+  }
+  function enrichClassesWithTotals(classes, totals, stock) {
+    const list = Array.isArray(classes) ? classes.map((x) => ({ ...x })) : [];
+    const t = totals || {}, s = stock || {};
+    const sumVc4Last = list.filter((x) => x.cls === 'VC4').reduce((acc, x) => acc + num(x.last), 0);
+    const sumCommLast = list.filter((x) => x.cls !== 'VC4').reduce((acc, x) => acc + num(x.last), 0);
+    const sumVc4Cur = list.filter((x) => x.cls === 'VC4').reduce((acc, x) => acc + num(x.cur), 0);
+    const sumCommCur = list.filter((x) => x.cls !== 'VC4').reduce((acc, x) => acc + num(x.cur), 0);
+    if (!sumVc4Last && num(t.lastVc4) > 0) {
+      let vc4Row = list.find((x) => x.cls === 'VC4');
+      if (!vc4Row) { vc4Row = { cls: 'VC4', cur: 0, last: 0, stock: num(s.vc4) }; list.unshift(vc4Row); }
+      vc4Row.last = num(t.lastVc4);
+    }
+    if (!sumVc4Cur && num(t.curVc4) > 0) {
+      let vc4Row = list.find((x) => x.cls === 'VC4');
+      if (!vc4Row) { vc4Row = { cls: 'VC4', cur: 0, last: 0, stock: num(s.vc4) }; list.unshift(vc4Row); }
+      vc4Row.cur = num(t.curVc4);
+    }
+    if (!sumCommLast && num(t.lastComm) > 0) {
+      let commRow = list.find((x) => x.cls !== 'VC4');
+      if (!commRow) { commRow = { cls: 'Commercial', cur: 0, last: 0, stock: num(s.comm) }; list.push(commRow); }
+      commRow.last = num(t.lastComm);
+    }
+    if (!sumCommCur && num(t.curComm) > 0) {
+      let commRow = list.find((x) => x.cls !== 'VC4');
+      if (!commRow) { commRow = { cls: 'Commercial', cur: 0, last: 0, stock: num(s.comm) }; list.push(commRow); }
+      commRow.cur = num(t.curComm);
+    }
+    return list;
   }
   function gvAgentProfile(p, light) {
     const r = findGvAgent(p.name, p.sub);
@@ -258,23 +295,33 @@ window.FF = window.FF || {};
     out.tagRequired = out.direct && isHM(out.priority);
     const n = norm(p.name);
     const issuance = gvIssuanceRows();
+    const globalCurYm = latestYm(issuance.length ? issuance : [{ ym: U.ymKey(new Date()) }]) || U.ymKey(new Date());
+    const globalLastYm = U.prevMonthKey(globalCurYm);
     const mine = issuance.filter((m) => norm(m.agentName) === n || (out.id && m.agentId === out.id));
-    const curYmExact = latestYm(mine), lastYmExact = U.prevMonthKey(curYmExact);
+    const curYmExact = globalCurYm, lastYmExact = globalLastYm;
     const exactClass = classTable(mine, [], curYmExact, lastYmExact);
     if (exactClass.length) {
       const exactTotals = groupSummary(exactClass);
-      Object.assign(out.totals, { curVc4: exactTotals.vc4.cur, curComm: exactTotals.comm.cur, curTotal: exactTotals.total.cur, lastVc4: exactTotals.vc4.last, lastComm: exactTotals.comm.last, lastTotal: exactTotals.total.last });
+      Object.assign(out.totals, {
+        curVc4: Math.max(num(out.totals.curVc4), exactTotals.vc4.cur),
+        curComm: Math.max(num(out.totals.curComm), exactTotals.comm.cur),
+        curTotal: Math.max(num(out.totals.curTotal), exactTotals.total.cur),
+        lastVc4: Math.max(num(out.totals.lastVc4), exactTotals.vc4.last),
+        lastComm: Math.max(num(out.totals.lastComm), exactTotals.comm.last),
+        lastTotal: Math.max(num(out.totals.lastTotal), exactTotals.total.last)
+      });
     }
     attachGrowth(out, r || {}, curYmExact);
     if (light) return out;
     const master = gvClassRows((m) => norm(m.agentName) === n || (out.id && m.agentId === out.id));
-    const curYm = latestYm(master.length ? master : [{ ym: U.ymKey(new Date()) }]), lastYm = U.prevMonthKey(curYm);
+    const curYm = globalCurYm, lastYm = globalLastYm;
     out.months = { cur: curYm, last: lastYm };
     const stockRows = r ? Object.entries(r.stockByClass || {}).filter(([, v]) => v).map(([cls, v]) => ({ cls, n: v })) : [];
     const stockComm = r ? Math.max(0, num(r.stockComm)) : 0;
     out.classes = classTable(master, stockRows, curYm, lastYm);
-    if (!out.classes.length && r) out.classes = Object.entries(r.curByClass || {}).map(([cls, cur]) => ({ cls, cur: num(cur), last: 0, stock: num((r.stockByClass || {})[cls]) })).filter((x) => x.cur || x.stock);
+    if (!out.classes.length && r) out.classes = Object.entries(r.curByClass || {}).map(([cls, cur]) => ({ cls, cur: num(cur), last: num((r.lastByClass || {})[cls]), stock: num((r.stockByClass || {})[cls]) })).filter((x) => x.cur || x.last || x.stock);
     if (!out.classes.length && r) out.classes = [{ cls: 'VC4', cur: num(r.curVc4), last: num(r.lastVc4), stock: num(r.stockVc4) }, { cls: 'Commercial', cur: num(r.curComm), last: num(r.lastComm), stock: stockComm }];
+    out.classes = enrichClassesWithTotals(out.classes, out.totals, out.stock);
     out.trend = trendOf(master, () => true, (m) => m.ym);
     return out;
   }
@@ -291,23 +338,29 @@ window.FF = window.FF || {};
     }).sort((x, y) => y.cur - x.cur);
     const out = {
       kind: 'gv-tl', channel: 'GV Partner', ch: 'gv', name: p.name, id: (src && src.tlId) || p.sub || '', found: !!list.length,
-      mobile: '', tl: { name: p.name, id: (src && src.tlId) || '' }, status: '', lastActive: '', priority: '', stock, tlStock: { ...stock, has: true },
+      mobile: (src && src.tlMobile) || '', tl: { name: p.name, id: (src && src.tlId) || '' }, status: '', lastActive: '', priority: '', stock, tlStock: { ...stock, has: true },
       dispatch: { days: suggestDays(), avgVc4, avgComm, cover: avgVc4 > 0 ? stock.vc4 / avgVc4 : null, sugVc4: suggest(avgVc4, stock.vc4), sugComm: suggest(avgComm, stock.comm), sugVc4Gross: suggestGro(avgVc4), sugCommGross: suggestGro(avgComm), sumAgentVc4: U.sum(rowsA, (r) => r.sugVc4), sumAgentComm: U.sum(rowsA, (r) => r.sugComm), sumAgentVc4Gross: U.sum(rowsA, (r) => r.sugVc4Gross), sumAgentCommGross: U.sum(rowsA, (r) => r.sugCommGross) },
       totals: { curVc4: sumK('curVc4'), curComm: sumK('curComm'), curTotal: sumK('curTotal'), lastVc4: sumK('lastVc4'), lastComm: sumK('lastComm'), lastTotal: sumK('lastTotal') },
       agents: rowsA, agentCount: list.length
     };
     // TL priority = sabse high agent priority
     out.priority = rowsA.some((r) => r.priority === 'High') ? 'High' : rowsA.some((r) => r.priority === 'Medium') ? 'Medium' : rowsA.length ? 'Low' : '';
+    const issuance = gvIssuanceRows();
+    const globalCurYm = latestYm(issuance.length ? issuance : [{ ym: U.ymKey(new Date()) }]) || U.ymKey(new Date());
+    const globalLastYm = U.prevMonthKey(globalCurYm);
     // 📈 GV TL growth — GV sheet TL-level value nahi deta, isliye agents ke totals se.
-    attachGrowth(out, {}, latestYm(safeCall(() => (FF.gv && FF.gv.rows ? FF.gv.rows() : []), [])));
+    attachGrowth(out, {}, globalCurYm);
     if (light) return out;
-    const master = gvClassRows((m) => norm(m.tlName) === n);
-    const curYm = latestYm(master.length ? master : [{ ym: U.ymKey(new Date()) }]), lastYm = U.prevMonthKey(curYm);
+    const agentNames = new Set(list.map((r) => norm(r.agentName)));
+    const agentIds = new Set(list.map((r) => r.agentId).filter(Boolean));
+    const master = gvClassRows((m) => norm(m.tlName) === n || agentNames.has(norm(m.agentName)) || (m.agentId && agentIds.has(m.agentId)));
+    const curYm = globalCurYm, lastYm = globalLastYm;
     out.months = { cur: curYm, last: lastYm };
     const stockRows = [];
     list.forEach((r) => Object.entries(r.stockByClass || {}).forEach(([cls, v]) => { if (v) stockRows.push({ cls, n: v }); }));
     out.classes = classTable(master, stockRows, curYm, lastYm);
     if (!out.classes.length) out.classes = [{ cls: 'VC4', cur: out.totals.curVc4, last: out.totals.lastVc4, stock: stock.vc4 }, { cls: 'Commercial', cur: out.totals.curComm, last: out.totals.lastComm, stock: stock.comm }];
+    out.classes = enrichClassesWithTotals(out.classes, out.totals, stock);
     out.trend = trendOf(master, () => true, (m) => m.ym);
     return out;
   }
@@ -352,7 +405,7 @@ window.FF = window.FF || {};
   const prioChip = (p) => (p ? `<span class="badge ${/high/i.test(p) ? 'red' : /medium/i.test(p) ? 'amber' : 'green'}">${esc(p)}</span>` : '<span class="dim">—</span>');
   const tagChip = (n) => `<b class="sug-chip direct">🏷️ ${fmt(n)} tags</b>`;
   const mobileCell = (m) => (!canContacts() ? '<span class="dim">🔒</span>' : m ? `<a href="tel:${esc(m)}">📞 ${esc(m)}</a>` : '<span class="dim">—</span>');
-  const kpi = (label, value, foot, tone) => `<div class="mp-kpi ${tone || ''}"><small>${esc(label)}</small><b>${value}</b>${foot ? `<em>${foot}</em>` : ''}</div>`;
+  const kpi = (label, value, foot, tone, kpiSpec) => `<div class="mp-kpi ${tone || ''}${kpiSpec ? ' kpi-clickable' : ''}"${kpiSpec ? ` data-kpi="${esc(kpiSpec)}" role="button" tabindex="0"` : ''}><small>${esc(label)}</small><b>${value}</b>${foot ? `<em>${foot}</em>` : ''}</div>`;
   const cell = (label, value) => `<div><small>${esc(label)}</small><b>${value}</b></div>`;
 
   /** Net (after stock) and gross (without stock deduction), with gross visually emphasized. */
@@ -462,27 +515,32 @@ window.FF = window.FF || {};
       ${cell('Last active', esc(pr.lastActive || '—'))}
       ${growthCell(pr)}
     </div>`;
+    const scopeParam = isTl ? `tl=${encodeURIComponent(pr.name)}` : `agent=${encodeURIComponent(pr.name)}${pr.id ? `&agentId=${encodeURIComponent(pr.id)}` : ''}`;
+    const stockSpec = `src=${pr.ch}&scope=stock&${scopeParam}`;
+    const tlStockSpec = !isTl && pr.tl && pr.tl.name ? `src=${pr.ch}&scope=stock&tl=${encodeURIComponent(pr.tl.name)}` : '';
+    const curSpec = `src=${pr.ch}&scope=mtd&ym=${encodeURIComponent(m.cur || '')}&${scopeParam}`;
+    const lastSpec = `src=${pr.ch}&scope=month&ym=${encodeURIComponent(m.last || '')}&${scopeParam}`;
     const kpis = `<div class="mp-kpis">
-      ${kpi(isTl ? 'TL stock (total)' : 'Agent stock', fmt(s.total), `VC4 ${fmt(s.vc4)} · Commercial ${fmt(s.comm)}`, 'k1')}
-      ${isTl ? '' : kpi('TL stock', ts.has ? fmt(ts.total) : '—', ts.has ? `VC4 ${fmt(ts.vc4)} · Comm ${fmt(ts.comm)}` : (pr.direct ? 'Direct — koi TL nahi' : ''), 'k2')}
-      ${kpi('Dispatch priority', prioChip(pr.priority), pr.calc && pr.calc.total.cover != null ? `Cover ${fmt(pr.calc.total.cover, true)} din (all tags)` : (d.cover != null ? `Cover ${fmt(d.cover, true)} din` : ''), 'k3')}
-      ${kpi(pr.tagRequired ? `Tags required · VC4 · ${d.days} din` : `Suggested VC4 · ${d.days} din`, sg.vc4, `avg ${fmt(d.avgVc4, true)}/day × ${d.days} din${pr.tagRequired ? '' : ` · stock − ${fmt(s.vc4)}`}`, pr.tagRequired ? 'k7' : 'k4')}
-      ${kpi(pr.tagRequired ? 'Tags required · Comm.' : 'Suggested Commercial', sg.comm, `avg ${fmt(d.avgComm, true)}/day${pr.tagRequired ? '' : ` · stock − ${fmt(s.comm)}`}`, pr.tagRequired ? 'k7' : 'k5')}
-      ${kpi('Issued this month', fmt(t.curTotal), `VC4 ${fmt(t.curVc4)} · Comm ${fmt(t.curComm)}`, 'k6')}
-      ${kpi('Issued last month', fmt(t.lastTotal), `VC4 ${fmt(t.lastVc4)} · Comm ${fmt(t.lastComm)}`, 'k8')}
+      ${kpi(isTl ? 'TL stock (total)' : 'Agent stock', fmt(s.total), `VC4 ${fmt(s.vc4)} · Commercial ${fmt(s.comm)}`, 'k1', stockSpec)}
+      ${isTl ? '' : kpi('TL stock', ts.has ? fmt(ts.total) : '—', ts.has ? `VC4 ${fmt(ts.vc4)} · Comm ${fmt(ts.comm)}` : (pr.direct ? 'Direct — koi TL nahi' : ''), 'k2', tlStockSpec)}
+      ${kpi('Dispatch priority', prioChip(pr.priority), pr.calc && pr.calc.total.cover != null ? `Cover ${fmt(pr.calc.total.cover, true)} din (all tags)` : (d.cover != null ? `Cover ${fmt(d.cover, true)} din` : ''), 'k3', stockSpec)}
+      ${kpi(pr.tagRequired ? `Tags required · VC4 · ${d.days} din` : `Suggested VC4 · ${d.days} din`, sg.vc4, `avg ${fmt(d.avgVc4, true)}/day × ${d.days} din${pr.tagRequired ? '' : ` · stock − ${fmt(s.vc4)}`}`, pr.tagRequired ? 'k7' : 'k4', `${curSpec}&group=VC4`)}
+      ${kpi(pr.tagRequired ? 'Tags required · Comm.' : 'Suggested Commercial', sg.comm, `avg ${fmt(d.avgComm, true)}/day${pr.tagRequired ? '' : ` · stock − ${fmt(s.comm)}`}`, pr.tagRequired ? 'k7' : 'k5', `${curSpec}&group=COMM`)}
+      ${kpi('Issued this month', fmt(t.curTotal), `VC4 ${fmt(t.curVc4)} · Comm ${fmt(t.curComm)}`, 'k6', curSpec)}
+      ${kpi('Issued last month', fmt(t.lastTotal), `VC4 ${fmt(t.lastVc4)} · Comm ${fmt(t.lastComm)}`, 'k8', lastSpec)}
     </div>
     <p class="mp-note ${pr.tagRequired ? 'tag' : ''}">${sg.note}</p>`;
     const summary = `<table class="tbl compact mp-summary"><thead><tr><th></th><th class="num">${esc(monthLabel(m.last) || 'Last month')}</th><th class="num">${esc(monthLabel(m.cur) || 'This month')}</th><th class="num">Stock</th></tr></thead><tbody>
-      <tr><td><b>VC4</b></td><td class="num">${fmt(g.vc4.last)}</td><td class="num">${fmt(g.vc4.cur)}</td><td class="num">${fmt(g.vc4.stock)}</td></tr>
-      <tr><td><b>Commercial</b><small class="cell-sub">VC20 · VC5+ …</small></td><td class="num">${fmt(g.comm.last)}</td><td class="num">${fmt(g.comm.cur)}</td><td class="num">${fmt(g.comm.stock)}</td></tr>
+      <tr class="clickable" data-kpi="${esc(`${curSpec}&group=VC4`)}"><td><b>VC4</b></td><td class="num">${fmt(g.vc4.last)}</td><td class="num">${fmt(g.vc4.cur)}</td><td class="num">${fmt(g.vc4.stock)}</td></tr>
+      <tr class="clickable" data-kpi="${esc(`${curSpec}&group=COMM`)}"><td><b>Commercial</b><small class="cell-sub">VC20 · VC5+ …</small></td><td class="num">${fmt(g.comm.last)}</td><td class="num">${fmt(g.comm.cur)}</td><td class="num">${fmt(g.comm.stock)}</td></tr>
       </tbody><tfoot><tr class="row-total"><td>Total issuance</td><td class="num">${fmt(g.total.last)}</td><td class="num">${fmt(g.total.cur)}</td><td class="num">${fmt(g.total.stock)}</td></tr></tfoot></table>`;
     const clsTable = cls.length ? `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Class</th><th class="num">${esc(monthLabel(m.last) || 'Last month')}</th><th class="num">${esc(monthLabel(m.cur) || 'This month')}</th><th class="num">Growth</th><th class="num">Stock</th></tr></thead><tbody>
-      ${cls.map((r) => `<tr><td><b>${esc(r.cls)}</b></td><td class="num">${fmt(r.last)}</td><td class="num">${fmt(r.cur)}</td><td class="num">${r.last ? U.pctHtml(((r.cur - r.last) / r.last) * 100) : '—'}</td><td class="num">${fmt(r.stock)}</td></tr>`).join('')}
-      </tbody><tfoot><tr class="row-total"><td>Total</td><td class="num">${fmt(g.total.last)}</td><td class="num">${fmt(g.total.cur)}</td><td></td><td class="num">${fmt(g.total.stock)}</td></tr></tfoot></table></div>` : '<p class="dim small">Class-wise data abhi load nahi hua.</p>';
+      ${cls.map((r) => `<tr class="clickable" data-kpi="${esc(`${r.cur > 0 ? curSpec : lastSpec}&cls=${encodeURIComponent(r.cls)}`)}"><td><b>${esc(r.cls)}</b></td><td class="num">${fmt(r.last)}</td><td class="num">${fmt(r.cur)}</td><td class="num">${r.last ? U.pctHtml(((r.cur - r.last) / r.last) * 100) : '—'}</td><td class="num">${fmt(r.stock)}</td></tr>`).join('')}
+      </tbody><tfoot><tr class="row-total"><td>Total</td><td class="num">${fmt(g.total.last)}</td><td class="num">${fmt(g.total.cur)}</td><td class="num">${g.total.last ? U.pctHtml(((g.total.cur - g.total.last) / g.total.last) * 100) : '—'}</td><td class="num">${fmt(g.total.stock)}</td></tr></tfoot></table></div>` : '<p class="dim small">Class-wise data abhi load nahi hua.</p>';
     const agentsTable = isTl && pr.agents && pr.agents.length ? `<section class="mp-sec"><h4>🧑‍💼 TL ke agents · ${fmt(pr.agents.length)}</h4><p class="dim small">Sug. = avg/day × ${d.days} din · <b>stock ke baad</b> (net)${sugMode() === 'both' ? ' · <span class="sug-wo-inline">w/o stock = bina stock ghataye (gross)</span>' : ''}</p><div class="table-wrap tall"><table class="tbl compact"><thead><tr><th>Agent</th><th>Mobile</th><th>Priority</th><th class="num">VC4 stock</th><th class="num">Comm stock</th><th class="num">Last</th><th class="num">This month</th><th class="num">Sug. VC4</th><th class="num">Sug. Comm</th></tr></thead><tbody>
       ${pr.agents.slice(0, 200).map((a) => `<tr class="clickable" data-mp-agent="${esc(a.name)}" data-mp-kind="${pr.ch}-agent" data-mp-id="${esc(a.id || '')}"><td><b>${esc(a.name)}</b><small class="cell-sub">${esc(a.id || '')}</small></td><td>${mobileCell(a.mobile)}</td><td>${prioChip(a.priority)}</td><td class="num">${fmt(a.stockVc4)}</td><td class="num">${fmt(a.stockComm)}</td><td class="num">${fmt(a.last)}</td><td class="num">${fmt(a.cur)}</td><td class="num">${U.sugCell(a.sugVc4, a.sugVc4Gross || 0)}</td><td class="num">${U.sugCell(a.sugComm, a.sugCommGross || 0)}</td></tr>`).join('')}
       </tbody><tfoot><tr class="row-total"><td colspan="3">TL total</td><td class="num">${fmt(U.sum(pr.agents, (a) => a.stockVc4))}</td><td class="num">${fmt(U.sum(pr.agents, (a) => a.stockComm))}</td><td class="num">${fmt(U.sum(pr.agents, (a) => a.last))}</td><td class="num">${fmt(U.sum(pr.agents, (a) => a.cur))}</td><td class="num">${U.sugCell(d.sumAgentVc4, d.sumAgentVc4Gross || 0)}</td><td class="num">${U.sugCell(d.sumAgentComm, d.sumAgentCommGross || 0)}</td></tr></tfoot></table></div></section>` : '';
-    const actions = `<div class="mp-actions"><button class="btn small" data-mp-csv>⬇ CSV</button><button class="btn small" data-mp-wa>📲 WhatsApp</button>${isTl ? '' : `<button class="btn small" data-mp-a360="${esc(pr.name)}">👁 Agent 360</button>`}<a class="btn small" href="#/masterStock?q=${encodeURIComponent(pr.name)}">🗄️ Register / tags</a></div>`;
+    const actions = `<div class="mp-actions"><button class="btn small primary" data-mp-pdf>📄 PDF</button><button class="btn small" data-mp-csv>⬇ CSV</button><button class="btn small" data-mp-copy>📋 Copy</button><button class="btn small" data-mp-wa>📲 WhatsApp</button>${isTl ? '' : `<button class="btn small" data-mp-a360="${esc(pr.name)}">👁 Agent 360</button>`}<a class="btn small" href="#/masterStock?q=${encodeURIComponent(pr.name)}">🗄️ Register / tags</a></div>`;
     return `<div class="mp">${noData}${head}${kpis}
       ${calcHtml(pr)}
       ${growthHtml(pr)}
@@ -496,6 +554,7 @@ window.FF = window.FF || {};
   // ------------------------------------------------------------------ export / share
   function csvRows(pr) {
     const d = pr.dispatch || {}, s = pr.stock || {}, t = pr.totals || {}, ts = pr.tlStock || {}, p = pr.projT1 || {}, b = p.basis || {};
+    const g = groupSummary(pr.classes || []);
     const rows = [['Name', pr.name], ['Type', `${pr.channel} ${/tl$/.test(pr.kind) ? 'TL' : 'Agent'}`], ['ID', pr.id], ['Mobile', canContacts() ? pr.mobile : ''], ['TL', (pr.tl && pr.tl.name) || ''], ['TL ID', (pr.tl && pr.tl.id) || ''], ["TL's mobile", canContacts() ? (pr.tl && pr.tl.mobile) || '' : ''],
       ['Status', pr.status], ['Last active', pr.lastActive], ['Priority', pr.priority], ['Direct agent', pr.direct ? pr.directLabel : 'No'], ['Tag required', pr.tagRequired ? 'YES' : 'No'],
       ['Growth % (REPORT)', pr.growthNum === null || pr.growthNum === undefined ? '' : Number(pr.growthNum.toFixed(1))], ['Data till (run-rate basis)', b.label || ''],
@@ -504,11 +563,18 @@ window.FF = window.FF || {};
       ['Run-rate basis', `issued ÷ ${(pr.calc && pr.calc.total.elapsed) || ''} din (${U.basisText(pr.ch, b)})`], ['Avg VC4/day', d.avgVc4], ['Suggested VC4' + (pr.tagRequired ? ' (tags)' : '') + ' · stock ke baad (net)', d.sugVc4], ['Suggested VC4 · bina stock (gross)', d.sugVc4Gross || 0], ['Suggested Commercial' + (pr.tagRequired ? ' (tags)' : '') + ' · stock ke baad (net)', d.sugComm], ['Suggested Commercial · bina stock (gross)', d.sugCommGross || 0],
       ['Total run-rate/day', pr.calc ? pr.calc.total.rate : ''], ['Total required (× days)', pr.calc ? pr.calc.total.required : ''], ['Total dispatch WITH stock', pr.calc ? pr.calc.total.net : ''], ['Total dispatch W/O stock', pr.calc ? pr.calc.total.gross : ''], ['Total cover (days)', pr.calc && pr.calc.total.cover != null ? pr.calc.total.cover : ''], ['Issued this month', t.curTotal], ['Issued last month', t.lastTotal], ['', ''], ['Class', `${(pr.months || {}).last || 'Last'} | ${(pr.months || {}).cur || 'This'} | Stock`]];
     (pr.classes || []).forEach((r) => rows.push([r.cls, r.last, r.cur, r.stock]));
-    if (pr.agents && pr.agents.length) { rows.push(['', '']); rows.push(['Agent', 'ID', 'Mobile', 'Priority', 'VC4 stock', 'Comm stock', 'Last', 'This', 'Sug VC4 (stock −)', 'Sug VC4 (bina stock)', 'Sug Comm (stock −)', 'Sug Comm (bina stock)']); pr.agents.forEach((a) => rows.push([a.name, a.id, canContacts() ? a.mobile : '', a.priority, a.stockVc4, a.stockComm, a.last, a.cur, a.sugVc4, a.sugVc4Gross || 0, a.sugComm, a.sugCommGross || 0])); }
+    rows.push(['GRAND TOTAL', g.total.last || t.lastTotal || 0, g.total.cur || t.curTotal || 0, g.total.stock || s.total || 0]);
+    if (pr.agents && pr.agents.length) {
+      rows.push(['', '']);
+      rows.push(['Agent', 'ID', 'Mobile', 'Priority', 'VC4 stock', 'Comm stock', 'Last', 'This', 'Sug VC4 (stock −)', 'Sug VC4 (bina stock)', 'Sug Comm (stock −)', 'Sug Comm (bina stock)']);
+      pr.agents.forEach((a) => rows.push([a.name, a.id, canContacts() ? a.mobile : '', a.priority, a.stockVc4, a.stockComm, a.last, a.cur, a.sugVc4, a.sugVc4Gross || 0, a.sugComm, a.sugCommGross || 0]));
+      rows.push(['TEAM GRAND TOTAL', `${pr.agents.length} Agents`, '', '', U.sum(pr.agents, (a) => a.stockVc4), U.sum(pr.agents, (a) => a.stockComm), U.sum(pr.agents, (a) => a.last), U.sum(pr.agents, (a) => a.cur), d.sumAgentVc4 || 0, d.sumAgentVc4Gross || 0, d.sumAgentComm || 0, d.sumAgentCommGross || 0]);
+    }
     return rows;
   }
   function waText(pr) {
     const d = pr.dispatch || {}, s = pr.stock || {}, t = pr.totals || {}, p = pr.projT1 || {}, b = p.basis || {};
+    const g = groupSummary(pr.classes || []);
     const lines = [`*${pr.name}* (${pr.channel} ${/tl$/.test(pr.kind) ? 'TL' : 'Agent'}${pr.id ? ` · ${pr.id}` : ''})`];
     if (canContacts() && pr.mobile) lines.push(`📞 ${pr.mobile}`);
     if (!/tl$/.test(pr.kind) && pr.tl && pr.tl.name && !pr.direct) lines.push(`TL: ${pr.tl.name}`);
@@ -519,8 +585,48 @@ window.FF = window.FF || {};
     lines.push(`Bina stock ghataye: VC4 ${U.fmt(d.sugVc4Gross || 0)} · Comm ${U.fmt(d.sugCommGross || 0)}`);
     if (pr.calc) lines.push(`Run-rate ${U.fmt(pr.calc.total.rate, true)}/day (÷ ${pr.calc.total.elapsed} din) · All tags: with stock ${U.fmt(pr.calc.total.net)} · w/o stock ${U.fmt(pr.calc.total.gross)}${pr.calc.total.cover != null ? ` · cover ${U.fmt(pr.calc.total.cover, true)} din` : ''}`);
     lines.push(`Issued: this month ${U.fmt(t.curTotal)}${b.shortLabel ? ` (till ${b.shortLabel})` : ''} · last month ${U.fmt(t.lastTotal)}`);
-    (pr.classes || []).slice(0, 8).forEach((r) => lines.push(`• ${r.cls}: ${U.fmt(r.last)} → ${U.fmt(r.cur)} (stock ${U.fmt(r.stock)})`));
+    (pr.classes || []).slice(0, 12).forEach((r) => lines.push(`• ${r.cls}: ${U.fmt(r.last)} → ${U.fmt(r.cur)} (stock ${U.fmt(r.stock)})`));
+    lines.push(`*Total Class-wise: Last ${U.fmt(g.total.last || t.lastTotal)} → MTD ${U.fmt(g.total.cur || t.curTotal)} (Stock ${U.fmt(g.total.stock || s.total)})*`);
+    if (pr.agents && pr.agents.length) {
+      lines.push('', `*Team Agents (${U.fmt(pr.agents.length)}):*`);
+      pr.agents.slice(0, 20).forEach((a) => lines.push(`• ${a.name}: Last ${U.fmt(a.last)} · MTD ${U.fmt(a.cur)} · Stock ${U.fmt(a.stockTotal)}`));
+      lines.push(`*Team Grand Total: Last ${U.fmt(U.sum(pr.agents, (a) => a.last))} · MTD ${U.fmt(U.sum(pr.agents, (a) => a.cur))} · Stock ${U.fmt(U.sum(pr.agents, (a) => a.stockTotal))}*`);
+    }
     return lines.join('\n');
+  }
+  function makePdf(pr) {
+    if (!FF.pdf || !FF.pdf.doc) return null;
+    const d = pr.dispatch || {}, s = pr.stock || {}, t = pr.totals || {}, p = pr.projT1 || {}, m = pr.months || {};
+    const g = groupSummary(pr.classes || []);
+    const doc = FF.pdf.doc({
+      title: `${pr.channel} · ${/tl$/.test(pr.kind) ? 'Team Leader' : 'Agent'} Profile`,
+      subtitle: `${pr.name}${pr.id ? ` (ID: ${pr.id})` : ''}${pr.mobile && canContacts() ? ` · ${pr.mobile}` : ''}`,
+      right: `${new Date().toLocaleDateString('en-IN')}`
+    });
+    doc.kpis([
+      { label: 'This Month (MTD)', value: fmt(t.curTotal), sub: `VC4 ${fmt(t.curVc4)} · Comm ${fmt(t.curComm)}`, color: '#2563eb' },
+      { label: 'Last Month', value: fmt(t.lastTotal), sub: `VC4 ${fmt(t.lastVc4)} · Comm ${fmt(t.lastComm)}`, color: '#7c3aed' },
+      { label: 'Expected', value: fmt(p.total || 0), sub: `Growth ${pr.growthNum != null ? `${pr.growthNum.toFixed(1)}%` : '—'}`, color: '#059669' },
+      { label: 'Stock in Hand', value: fmt(s.total), sub: `VC4 ${fmt(s.vc4)} · Comm ${fmt(s.comm)}`, color: '#d97706' }
+    ]);
+    doc.section(`Class-wise Issuance (${m.last || 'Last'} vs ${m.cur || 'MTD'}) & Stock`);
+    doc.table({
+      headers: ['Class', m.last || 'Last Month', m.cur || 'Current (MTD)', 'Growth %', 'Stock in Hand'],
+      align: ['left', 'right', 'right', 'right', 'right'],
+      rows: (pr.classes || []).map((c) => [c.cls, fmt(c.last), fmt(c.cur), c.last ? `${(((c.cur - c.last) / c.last) * 100).toFixed(0)}%` : '—', fmt(c.stock)]),
+      foot: ['GRAND TOTAL', fmt(g.total.last || t.lastTotal), fmt(g.total.cur || t.curTotal), (g.total.last || t.lastTotal) ? `${((((g.total.cur || t.curTotal) - (g.total.last || t.lastTotal)) / (g.total.last || t.lastTotal)) * 100).toFixed(0)}%` : '—', fmt(g.total.stock || s.total)]
+    });
+    if (pr.agents && pr.agents.length) {
+      doc.section(`Team Agents (${fmt(pr.agents.length)})`);
+      doc.table({
+        headers: ['Agent', 'ID', 'Priority', 'Last Month', 'Current (MTD)', 'VC4 Stock', 'Comm Stock', 'Total Stock'],
+        align: ['left', 'left', 'left', 'right', 'right', 'right', 'right', 'right'],
+        rows: pr.agents.map((a) => [a.name, a.id || '—', a.priority || '—', fmt(a.last), fmt(a.cur), fmt(a.stockVc4), fmt(a.stockComm), fmt(a.stockTotal)]),
+        foot: ['GRAND TOTAL', `${fmt(pr.agents.length)} Agents`, '', fmt(U.sum(pr.agents, (a) => a.last)), fmt(U.sum(pr.agents, (a) => a.cur)), fmt(U.sum(pr.agents, (a) => a.stockVc4)), fmt(U.sum(pr.agents, (a) => a.stockComm)), fmt(U.sum(pr.agents, (a) => a.stockTotal))]
+      });
+    }
+    doc.footer(`${FF.config.brand || 'ApnaPayment'} · ${pr.channel} Profile Report`);
+    return doc.finish();
   }
 
   // ------------------------------------------------------------------ mount helpers
@@ -531,7 +637,13 @@ window.FF = window.FF || {};
     el.addEventListener('click', (e) => {
       const cur = el.__mpProfile;
       if (!cur) return;
+      if (e.target.closest('[data-mp-pdf]')) {
+        const bytes = makePdf(cur);
+        if (bytes && FF.pdf) { FF.pdf.download(bytes, `profile-${U.slug(cur.name)}-${U.stamp()}.pdf`); U.toast('PDF downloaded ✓', 'ok'); }
+        return;
+      }
       if (e.target.closest('[data-mp-csv]')) { U.downloadCsv(`profile-${U.slug(cur.name)}-${U.stamp()}.csv`, ['Field', 'Value / Last', 'This', 'Stock'], csvRows(cur).map((r) => [r[0], r[1], r[2] ?? '', r[3] ?? ''])); return; }
+      if (e.target.closest('[data-mp-copy]')) { U.copyText(waText(cur)); U.toast('Summary copied ✓', 'ok'); return; }
       if (e.target.closest('[data-mp-wa]')) { const link = U.waLink ? U.waLink(waText(cur)) : ''; if (link) window.open(link, '_blank', 'noopener'); return; }
       const a360 = e.target.closest('[data-mp-a360]');
       if (a360) { if (FF.cockpit && FF.cockpit.agent360) FF.cockpit.agent360({ name: a360.dataset.mpA360 }).catch(() => {}); return; }

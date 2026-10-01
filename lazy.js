@@ -58,7 +58,7 @@ window.FF = window.FF || {};
     tlScorecard: ['insights', 'cockpit'],
     directAgents: ['directAgents'],
     newAgents: ['newAgents'],
-    unusual: ['unusual'],
+    unusual: ['pdf', 'unusual'],
     ffAgentSummary: ['pdf', 'agentSummary'],
     gvAgentSummary: ['pdf', 'agentSummary'],
     arena: ['wow'],
@@ -75,7 +75,7 @@ window.FF = window.FF || {};
 
   // Background warm order (login ke baad idle me) — jo pages sabse zyada khulte hain wo pehle.
   // Bhaari module (insights 330 KB+) sabse aakhir me, taaki pehle paint par asar na pade.
-  const WARM = ['tagIssued', 'stock', 'dashboard', 'trend', 'gvpages', 'wowzone', 'targets', 'settings', 'tagRequest', 'cockpit', 'insights'];
+  const WARM = ['pdf', 'tagIssued', 'stock', 'dashboard', 'trend', 'gvpages', 'wowzone', 'targets', 'settings', 'tagRequest', 'cockpit', 'insights'];
 
   const loaded = new Map();   // name → promise
   const failed = new Set();
