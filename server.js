@@ -3623,6 +3623,39 @@ async function handleApi(req, res, url) {
     };
   };
   const publicTagFind = (id) => (workspaceStore().tagRequests || []).find((r) => r.id === id && r.source === 'public-link');
+  // 🔁 Duplicate detector (v3.27.1) — employee ke naam se 30 din ke andar ki active requests dhoondta hai
+  // jisme koi same agent × class row ho. Employee ko submit se pehle warning dikhti hai ("already pending"),
+  // aur admin ke notification/request me bhi 🔁 mark ho jaata hai — dobara bhejne par pata rahe.
+  const publicTagDupes = (name, rows) => {
+    const who = normUser(name);
+    if (!who) return [];
+    const wanted = new Set();
+    (rows || []).forEach((r) => {
+      const key = `${String(r && (r.agentId || r.agentName) || '').trim().toLowerCase()}|${String(r && r.cls || '').trim().toUpperCase()}`;
+      if (key !== '|') wanted.add(key);
+    });
+    const nowMs = Date.now();
+    const out = [];
+    for (const r of (workspaceStore().tagRequests || [])) {
+      if (!r || r.source !== 'public-link' || r.by !== `public:${who}`) continue;
+      const t = new Date(r.at || r.updatedAt || 0).getTime();
+      if (t && nowMs - t > 30 * 24 * 3600e3) continue;                 // 30 din se purani = duplicate nahi
+      const status = String(r.status || 'pending').toLowerCase();
+      if (status === 'rejected' || status === 'cancelled') continue;    // reject hui request dobara maang sakta hai
+      const matched = [];
+      for (const x of (r.rows || [])) {
+        const key = `${String(x && (x.agentId || x.agentName) || '').trim().toLowerCase()}|${String(x && x.cls || '').trim().toUpperCase()}`;
+        if (wanted.has(key) && !matched.includes(key)) matched.push(key);
+      }
+      if (wanted.size && !matched.length) continue;
+      out.push({
+        id: r.id, at: r.at || '', status: r.status || 'pending',
+        total: Number(r.total) || 0, rows: (r.rows || []).length,
+        matched: matched.map((k) => k.split('|').join(' · ')).slice(0, 8)
+      });
+    }
+    return out.slice(-6).reverse();
+  };
   if (p === '/api/public/tag-request' && method === 'GET') {
     return sendJson(res, 200, { ok: true, config: publicTagView() });
   }
@@ -3643,6 +3676,8 @@ async function handleApi(req, res, url) {
     if (total > 100000) throw new HttpError(400, 'Quantity bahut zyada hai — dobara check karo.');
     const ip = clientIp(req);
     if (!publicRateOk(`tag:${ip}`, 15, 60 * 60e3)) throw new HttpError(429, 'Is device se bahut requests aa gayi hain — kuch der baad try karo.');
+    // 🔁 Duplicate: same employee ki active request me same agent × class pehle se hai?
+    const dupes = publicTagDupes(employeeName, rows);
     const now = new Date().toISOString();
     const row = {
       id: workspaceId('tagreq'), at: now,
@@ -3650,7 +3685,8 @@ async function handleApi(req, res, url) {
       employee: { name: employeeName, mobile, office },
       source: 'public-link', ip: String(ip || '').slice(0, 45),
       status: 'pending', note: shortText(body.note, 300), adminNote: '',
-      rows, tls: tagRequestTls(body.tls), total, updatedAt: now, updatedBy: 'public-link'
+      rows, tls: tagRequestTls(body.tls), total, updatedAt: now, updatedBy: 'public-link',
+      ...(dupes.length ? { dupOf: dupes.map((d) => d.id), dupCount: dupes.length } : {})
     };
     const w = workspaceStore();
     w.tagRequests.push(row);
@@ -3665,14 +3701,37 @@ async function handleApi(req, res, url) {
     }
     try {
       recordNotification({
-        type: 'request', title: `🏷️ Tag request (employee link) · ${employeeName}`,
-        body: `${rows.length} rows · ${new Set(rows.map((r) => r.agentName)).size} agents · ${total} tags${office ? ` · ${office}` : ''}${mobile ? ` · ${mobile}` : ''}`,
+        type: 'request', title: `🏷️ Tag request (employee link)${dupes.length ? ' 🔁 duplicate' : ''} · ${employeeName}`,
+        body: `${rows.length} rows · ${new Set(rows.map((r) => r.agentName)).size} agents · ${total} tags${office ? ` · ${office}` : ''}${mobile ? ` · ${mobile}` : ''}${dupes.length ? ` · 🔁 pehle se ${dupes.length} active request (${dupes.map((d) => d.id).join(', ')})` : ''}`,
         target: 'admin', routeKey: 'tagRequest',
-        meta: { requestId: row.id, rows: rows.length, total, publicLink: true, note: row.note, link: '#/tagRequest?view=requests' }
+        meta: { requestId: row.id, rows: rows.length, total, publicLink: true, note: row.note, duplicates: dupes.length, dupOf: dupes.map((d) => d.id), link: '#/tagRequest?view=requests' }
       });
     } catch { /* notification optional */ }
-    logAudit({ username: 'public-link', role: 'public', name: employeeName }, 'tag_request_public_created', { target: row.id, note: `${rows.length} rows · ${total} tags · ${employeeName}`, ip });
-    return sendJson(res, 201, { ok: true, request: { id: row.id, at: row.at, status: row.status, total: row.total, rows: rows.length, byName: employeeName, sheetSync: !!row.sheetSync } });
+    logAudit({ username: 'public-link', role: 'public', name: employeeName }, 'tag_request_public_created', { target: row.id, note: `${rows.length} rows · ${total} tags · ${employeeName}${dupes.length ? ` · 🔁 duplicate of ${dupes.map((d) => d.id).join(',')}` : ''}`, ip });
+    return sendJson(res, 201, {
+      ok: true,
+      request: {
+        id: row.id, at: row.at, status: row.status, total: row.total, rows: rows.length,
+        byName: employeeName, sheetSync: !!row.sheetSync, duplicates: dupes.length
+      },
+      warnings: dupes.length ? [{
+        code: 'duplicate', count: dupes.length,
+        message: `Aapke naam se ${dupes.length} request already active hai (same agent + class) — admin ko 🔁 mark ke saath dikhegi.`,
+        requests: dupes.map((d) => ({ id: d.id, status: d.status, at: d.at, total: d.total, matched: d.matched }))
+      }] : []
+    });
+  }
+  // 🔁 Public duplicate check — form submit se PEHLE employee ko warning dikhane ke liye.
+  if (p === '/api/public/tag-request/check' && method === 'POST') {
+    const body = await readBody(req);
+    const emp = body.employee && typeof body.employee === 'object' ? body.employee : body;
+    const employeeName = shortText(emp.name || emp.employeeName || body.name, 80);
+    if (employeeName.length < 2) throw new HttpError(400, 'Naam likho (kam se kam 2 characters) — phir purani request check karenge.');
+    const ip = clientIp(req);
+    if (!publicRateOk(`tagcheck:${ip}`, 90, 10 * 60e3)) throw new HttpError(429, 'Bahut zyada checks — thodi der baad try karo.');
+    const rows = Array.isArray(body.rows) ? body.rows.slice(0, 150) : [];
+    const dupes = publicTagDupes(employeeName, rows);
+    return sendJson(res, 200, { ok: true, name: employeeName, checked: rows.length, duplicates: dupes });
   }
   if (p === '/api/public/tag-request/status' && method === 'GET') {
     const id = shortText(url.searchParams.get('id'), 60);

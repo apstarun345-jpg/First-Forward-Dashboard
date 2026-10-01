@@ -26,6 +26,9 @@ permissions and settings**. Zero npm dependencies.
   sheet detection + purane Code.gs ki warning deta hai.
 - **Admin control:** link ON/OFF, title/message, mobile/branch fields, "system check dikhao" toggle;
   per-IP throttle + validation se spam control. Public link par bhi Google Sheet sync chalti hai.
+- **🔁 Duplicate warning (employee):** same naam + same agent × class ki request pehle se pending/approved ho
+  to submit se pehle amber warning — *"Ye entry pehle se hai"* + 🔎 status · 🔁 phir bhi bhejo · ✏️ edit.
+  Aise bheji gayi request admin list/notification me **🔁 duplicate** mark ho jaati hai.
 - **Perf:** public form sirf 4 chhoti aggregate queries karta hai (login wala poora preload nahi).
 - Docs: [WHATS-NEW-v3.27.0.md](WHATS-NEW-v3.27.0.md) · ideas: [FEATURE-IDEAS.md](FEATURE-IDEAS.md)
 

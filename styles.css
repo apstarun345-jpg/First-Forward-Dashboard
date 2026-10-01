@@ -3651,6 +3651,12 @@ span.tr-public-logo { display: inline-flex; align-items: center; justify-content
 .tr-status-row .input { flex: 1; min-width: 220px; }
 .tr-status-out { margin-top: 12px; padding: 12px; border-radius: 12px; background: #f6f8ff; border: 1px solid #e2e8f7; }
 .tr-status-line { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; flex-wrap: wrap; }
+/* 🔁 duplicate warning (public employee form) — submit se pehle "already pending" block */
+.tr-dup-warn { border-left: 4px solid #f59e0b; background: #fffbeb; }
+.tr-dup-warn h3 { color: #92400e; }
+.tr-dup-list { margin: 0; padding-left: 18px; display: grid; gap: 6px; }
+.tr-dup-list li { line-height: 1.45; }
+.tr-dup-list .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
 .tr-public-link-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .tr-public-link-row .input { flex: 1; min-width: 220px; }
 /* Admin ne "system check dikhao" OFF kiya → stock/issuance/suggestion columns chhup jaate hain */

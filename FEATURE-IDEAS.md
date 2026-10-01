@@ -51,6 +51,64 @@
 
 ---
 
+## 2.5️⃣ 🔥 Site ke asli data par based smart add-ons (issuance · stock · agents)
+
+> Har idea ke saath likha hai wo **kaunse tab/column** se banega — isliye ye seedhe aapki sheets par
+> lag sakta hai (EIR · StockDataa · REPORT · GV Master · Tag Assignment · GV REPORT · Stock Movements · Payout).
+
+### 📈 A. Issuance (EIR `TAG_ID/VRN/TAG_CLASS/STATUS/ISSUE_DATE/AGENT_ID/TL_NAME/VRN_TYPE`, GV Master `unique_id/agent/supervisor/vrn/class`)
+
+| # | Idea | Data se kaise | Effort |
+| --- | --- | --- | --- |
+| 51 | **VRN duplicate detector** — ek hi VRN par do tag issue (asli leakage) | EIR ka `VRN` (B) par group → count > 1 wale rows + agent/TL naam | 🟢 |
+| 52 | **Issuance Pulse strip (Home)** — aaj ka issuance vs last 7 din ka same-time average + "kitne peeche ho" | EIR `ISSUE_DATE` (AA) hourly/daily bucket | 🟢 |
+| 53 | **Naya vs repeat VRN ratio (agent-wise)** — asli naya business kisne laaya | EIR `VRN_TYPE` (BC) / pehli baar dikhne wala VRN | 🟡 |
+| 54 | **Silent agent (3+ din issuance nahi)** — TL ki call list | EIR me agent ka last `ISSUE_DATE` → aaj se gap | 🟢 |
+| 55 | **Class mix shift** — VC4:VC5:VC6 ka 3-mahine trend, stock planning ke liye | EIR `TAG_CLASS` (D) monthly group | 🟢 |
+| 56 | **Issuance vs stock deduction mismatch** — issue hua par stock kam nahi hua (ya ulta) | EIR `TAG_ID` ↔ StockDataa `TAG_ID/BARCODE` daily diff | 🟡 |
+| 57 | **TL activation %** — TL ke kitne % agents ne is mahine issue kiya | EIR `TL_NAME` (BA) distinct agents ÷ StockDataa me us TL ke agents | 🟢 |
+| 58 | **Month-end projection per class** — "VC4 is mahine ~xxx hoga, last month se +/− y" | run-rate × bache din; last month EIR | 🟢 |
+| 59 | **GV ↔ FF cross-issuance audit** — same VRN par GV ne bhi tag diya? | EIR ke `GV_ID/GV_NAME/GV_TL` (AW/AX/AZ) + GV Master | 🟡 |
+| 60 | **Hour-of-day issuance heat** — sprint/visit timing optimize karne ke liye | EIR `ISSUE_DATE` time part | 🟢 |
+
+### 📦 B. Stock (StockDataa `TAG_ID/BARCODE/TAG_CLASS/AGENT_ID/AGENT_ALLOCATED_AT/TL`, Tag Assignment `serial/status/agent/tl`, Stock Movements)
+
+| # | Idea | Data se kaise | Effort |
+| --- | --- | --- | --- |
+| 61 | **Aged / dead stock (30-60-90 din)** — kis agent ke paas kitna purana tag pada hai | StockDataa `AGENT_ALLOCATED_AT` (J) → aaj se din | 🟢 |
+| 62 | **Transfer suggestion** — high-issuance/low-stock agent ko dead stock wale se transfer | cover days (issuance ÷ stock) + aging ek saath | 🟢 |
+| 63 | **Barcode traceability search** — ek barcode daalo → kahan hai, kisne kab liya, issue hua ya nahi | StockDataa `BARCODE` ↔ Tag Assignment `serial` ↔ EIR `TAG_ID` | 🟡 |
+| 64 | **Daily stock reconciliation report (auto)** — expected vs actual, difference rows CSV + alert | teeno tabs ka daily diff (Data Quality center ka daily version) | 🟡 |
+| 65 | **Network cover dashboard (TL × class)** — "kal kis TL ko kitne tag chahiye" | stock ÷ run-rate per TL/class (tagRequest ka full-network version) | 🟢 |
+| 66 | **Box / weight dispatch plan** — tags-per-box (Settings me hai) se kis TL ke kitne box + pick list print | dispatch planner + approved requests merge | 🟡 |
+| 67 | **Stock transfer ledger (app entry)** — agent↔agent, TL↔agent, office return + approval | naya `Stock Movements` tab me likho (mock me tab already hai) | 🟡 |
+| 68 | **Missing tag detector** — issue hua, stock se ghata nahi, wapas bhi nahi aaya → 7 din baad list | EIR vs StockDataa vs Movement | 🟡 |
+| 69 | **Reorder draft** — low cover + high priority agents ke liye ek click me tag request draft | cover days + tag request (v3.27 flow) | 🟢 |
+
+### 👥 C. Agents / TL (REPORT per-agent issuance, GV REPORT, EIR `AGENT_ID/TL_ID/MASTER_ID`)
+
+| # | Idea | Data se kaise | Effort |
+| --- | --- | --- | --- |
+| 70 | **Agent 360 card** — 12 mahine issuance, class/VRN mix, stock, cover, commission, requests, notes ek jagah | EIR + StockDataa + REPORT + tag requests | 🟡 |
+| 71 | **Churn risk score** — trend gira + stock pada + request nahi → TL ki call list | EIR monthly trend + aging + request history | 🟡 |
+| 72 | **New agent 30/60/90 din curve** — pehle 30 din me kaisa ramp-up, training need | EIR first `ISSUE_DATE` se cohort | 🟡 |
+| 73 | **TL Scorecard v2** — activation %, avg issuance, dead-stock %, request response time, rank movement | EIR + StockDataa + tag requests | 🟢 |
+| 74 | **Rank movement badges** — is mahine ka rank vs last month (+5 / −3) | REPORT/EIR monthly | 🟢 |
+| 75 | **Auto-draft requests for silent-but-due agents** — priority High, stock low, request nahi aayi → list + one click | cover days + requests | 🟢 |
+| 76 | **Duplicate agent ID / naam merge** — ek hi naam ke do ID, ya 30 din se 0 issuance | StockDataa `AGENT_NAME/ID` + EIR | 🟢 |
+| 77 | **Commission slip per agent** — REPORT rate × issuance, `Payout` tab ka penalty bhi, PDF/WhatsApp | REPORT + `Payout` tab | 🟡 |
+| 78 | **TL coaching pack** — TL ke underperformers + suggested action (call/visit/transfer) | EIR trend + aging + targets | 🟢 |
+
+### 🧩 D. Roz ka kaam aasan
+
+| # | Idea | Kaise | Effort |
+| --- | --- | --- | --- |
+| 79 | **"Aaj kya karna hai" action board** — pending requests, low cover, dead stock, mismatches, unapproved dispatch — sab ek list me, har item par jump link | sab tabs ka rules engine | 🟡 |
+| 80 | **Sheet change webhook** — Google Sheet me entry hote hi app refresh + alert | Apps Script `onChange` → dashboard endpoint | 🟡 |
+| 81 | **Daily 3-number digest** — aaj issuance · stock · 3 sabse bada alert (WhatsApp/email) | digest + alerts | 🟢 |
+
+---
+
 ## 3️⃣ Stock, dispatch aur operations
 
 | # | Idea | Kya hoga | Effort |

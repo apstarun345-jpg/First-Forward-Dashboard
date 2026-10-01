@@ -94,3 +94,40 @@ Extra:
   link ON/OFF · per-IP throttle · alag sheet me entry) + smoke test me public form/result/status render.
 
 Poore site ke liye **kya-kya naya add ho sakta hai** — dekho [FEATURE-IDEAS.md](FEATURE-IDEAS.md).
+
+---
+
+## 🔔 v3.27.1 — admin notification + 🔁 duplicate warning (employee ko)
+
+**1) Form submit hote hi admin ko notification** — pehle se hi aata tha (bell + toast + phone push), ab
+verify + upgrade bhi ho gaya:
+
+- Bell list me item: **🏷️ Tag request (employee link) · <naam>** — body me rows, agents, tags, mobile/branch.
+- Notification par click → seedha **Tag Request → 📥 Tag Requests** (`#/tagRequest?view=requests`).
+- 📱 Phone push bhi jaata hai (agar admin ne push ON kiya ho: 🔔 → "Mobile push ON").
+- Android/Chrome me alerts ke liye: 🔔 Bell → **Mobile push ON** karo (ek baar).
+- Purani requests ke liye bell me "request" type ON hona chahiye (Settings → Notifications me default ON hai).
+
+**2) 🔁 Duplicate entry par employee ko warning (aur admin ko mark)** — naya:
+
+- Employee "Request submit karo" dabata hai → app pehle **check** karta hai: isi naam se 30 din me koi
+  **active (pending/approved/dispatched)** request hai jisme **same agent + class** ho?
+- Mili to submit ruk jaata hai aur upar amber warning card aata hai:
+  *"🔁 Ye entry pehle se hai"* — purani request ka **Request ID, status, total, kitne din purani** + same
+  row ka detail. Saath me 3 button:
+  - **🔎 Status dekho** → usi Request ID ka status view khul jaata hai,
+  - **🔁 Phir bhi bhejo** → aapki marzi, nayi request fir bhi jaati hai (admin ko 🔁 mark ke saath dikhegi),
+  - **✏️ Form me wapas** → rows badal lo.
+- Warning me **rejected/cancelled** requests count nahi hoti (dobara maangna sahi hai) aur 30 din purani
+  requests bhi ignore hoti hain.
+- Naam case/space se compare hota hai (`Ramesh yadav` = `Ramesh Yadav`), aur IP limit 90 checks / 10 min.
+- Phir bhi bheji gayi request par admin ke bell notification ka title **🔁 duplicate** ho jaata hai, aur
+  📥 Tag Requests list/folder me **🔁 duplicate** badge + *"Duplicate mark: milti-julti active request pehle
+  se thi — tagreq_…"* line dikhti hai (taki admin usko merge/ignore kar sake).
+
+**Naya endpoint:** `POST /api/public/tag-request/check` → `{ employee, rows }` →
+`{ ok, duplicates: [{ id, at, status, total, rows, matched }] }` (bina login, throttled).
+POST `/api/public/tag-request` ki response me bhi ab `warnings: [{ code:'duplicate', ... }]` aata hai.
+
+Aage kya-kya ban sakta hai (issuance · stock · agents ke asli columns ke hisab se) — dekho
+[FEATURE-IDEAS.md](FEATURE-IDEAS.md) ka naya section **2.5️⃣**.

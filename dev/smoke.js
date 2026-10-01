@@ -1155,7 +1155,15 @@ await run('🌐 Public employee link — bina login form (naam mandatory) + stat
   await settle(150);
   const h3 = r3.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
   if (!/Request status/.test(h3) || !/tr-status-id/.test(h3)) throw new Error('public status view render nahi hua');
-  log(`      employee link ${link} · public form + result + status render ok`);
+  // 🔁 duplicate warning card — "already pending" wala block (same agent×class dobara bhejne par)
+  const dupHtml = pages.tagRequest.dupWarning([{ id: 'tagreq_test_1', status: 'pending', total: 33, rows: 2, at: new Date().toISOString(), matched: ['1001 · VC4'] }], 'Suresh Yadav');
+  if (!/Ye entry pehle se hai/.test(dupHtml)) throw new Error('duplicate warning heading nahi mili');
+  if (!/Phir bhi bhejo/.test(dupHtml) || !/Status dekho/.test(dupHtml)) throw new Error('duplicate card ke buttons nahi mile');
+  if (!/tagreq_test_1/.test(dupHtml) || !/Suresh Yadav/.test(dupHtml)) throw new Error('duplicate card me request ID/naam nahi');
+  if (/undefined|NaN/.test(dupHtml)) throw new Error('duplicate card me undefined/NaN leak');
+  const dupNone = pages.tagRequest.dupWarning([], 'Suresh Yadav');
+  if (dupHtml.length < 100 || dupNone !== '') throw new Error('duplicate card empty case galat');
+  log(`      employee link ${link} · public form + result + status + 🔁 duplicate warning render ok`);
 });
 await run('liveView.openNotification (report / settings / login)', async () => {
   FF.liveView.openNotification({ id: 'a', type: 'report', title: 'First Forward report update', body: 'x', createdAt: new Date().toISOString(), meta: { source: 'ff', snapshot: { date: '2026-09-26', total: 120, classes: { VC4: 100, VC5: 20 } }, previous: { date: '2026-09-26', total: 90, classes: { VC4: 80, VC5: 10 } }, delta: { total: 30, classes: { VC4: 20, VC5: 10 } } } });

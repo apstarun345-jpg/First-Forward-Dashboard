@@ -102,6 +102,25 @@ test('public employee tag request — bina login submit, status, admin visibilit
     assert.equal(created.json.request.total, 31, '25 + 6');
     assert.equal(created.json.request.byName, 'Suresh Kumar');
 
+    // 5b) 🔁 duplicate check — same naam + same agent×class par warning, alag row par nahi
+    const mid = await jsonCall(server.base, '/api/public/tag-request/check', 'POST', { employee: { name: 'Suresh Kumar' }, rows: rows() }, '', '10.0.0.9');
+    assert.equal(mid.res.status, 200, JSON.stringify(mid.json));
+    assert.equal(mid.json.duplicates.length, 1, 'same naam + same rows par duplicate mila');
+    assert.equal(mid.json.duplicates[0].id, id);
+    assert.equal(mid.json.duplicates[0].status, 'pending');
+    const noDup = await jsonCall(server.base, '/api/public/tag-request/check', 'POST', { employee: { name: 'Koi Naya Banda' }, rows: rows() }, '', '10.0.0.10');
+    assert.equal(noDup.json.duplicates.length, 0, 'naya naam → koi duplicate nahi');
+    const otherRows = await jsonCall(server.base, '/api/public/tag-request/check', 'POST', { employee: { name: 'Suresh Kumar' }, rows: [{ agentId: '9999', cls: 'VC16', approved: 5 }] }, '', '10.0.0.9');
+    assert.equal(otherRows.json.duplicates.length, 0, 'alag agent/class → duplicate nahi');
+    // "Phir bhi bhejo" (force) → 201 + warnings + admin list me 🔁 mark
+    const again = await jsonCall(server.base, '/api/public/tag-request', 'POST', { employee: { name: 'Suresh Kumar' }, rows: rows(), note: 'dobara bheji' }, '', '10.0.0.9');
+    assert.equal(again.res.status, 201, JSON.stringify(again.json));
+    assert.equal(again.json.request.duplicates, 1);
+    assert.ok(Array.isArray(again.json.warnings) && again.json.warnings[0].code === 'duplicate');
+    const listDup = await jsonCall(server.base, '/api/tag-requests', 'GET', undefined, admin);
+    const dupRow = listDup.json.requests.find((r) => r.id === again.json.request.id);
+    assert.ok(dupRow && dupRow.dupOf && dupRow.dupOf.includes(id), 'admin list me dupOf mark');
+
     // 6) employee apna status ID se dekh sakta hai (koi login nahi)
     const status = await jsonCall(server.base, `/api/public/tag-request/status?id=${encodeURIComponent(id)}`);
     assert.equal(status.res.status, 200, JSON.stringify(status.json));
@@ -120,6 +139,15 @@ test('public employee tag request — bina login submit, status, admin visibilit
     assert.equal(found.employee.mobile, '9876543210');
     assert.equal(found.employee.office, 'Jaipur');
     assert.equal(found.rows[0].approved, 25);
+
+    // 7b) 🔔 admin ko notification milti hai (bell list + push fanout dono ka source)
+    const notes = await jsonCall(server.base, '/api/notifications', 'GET', undefined, admin);
+    const item = ((notes.json && notes.json.items) || []).find((n) => n.type === 'request' && n.meta && n.meta.requestId === id);
+    assert.ok(item, 'admin ke bell me tag request notification aayi');
+    assert.equal(item.audience, 'admin');
+    assert.equal(item.routeKey, 'tagRequest');
+    const dupNote = ((notes.json && notes.json.items) || []).find((n) => n.meta && n.meta.requestId === again.json.request.id);
+    assert.ok(dupNote && /🔁/.test(dupNote.title) && dupNote.meta.duplicates === 1, 'duplicate notification 🔁 mark ke saath');
 
     // 8) admin status badalta hai → employee ko naya status dikhta hai
     const upd = await jsonCall(server.base, `/api/tag-requests/${encodeURIComponent(id)}`, 'PUT', { status: 'approved', adminNote: 'kal dispatch' }, admin);

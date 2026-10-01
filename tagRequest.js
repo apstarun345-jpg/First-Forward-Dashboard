@@ -52,7 +52,9 @@ FF.pages = FF.pages || {};
     groupBy: 'tl', // requests/drawer me grouping: 'tl' ya 'agent'
     sheet: { loaded: false, busy: false, config: null, fields: null, connected: false, hint: '', publicForm: null },
     // 🌐 v3.27 — public (bina login) employee form ka state
-    publicMode: false, publicCfg: null, employee: { name: '', mobile: '', office: '' }, done: null, status: null, statusId: ''
+    publicMode: false, publicCfg: null, employee: { name: '', mobile: '', office: '' }, done: null, status: null, statusId: '',
+    // 🔁 v3.27.1 — submit se pehle duplicate check (same naam + same agent×class pehle se active?)
+    dup: { list: [], force: false, busy: false }
   };
   const rid = () => Math.random().toString(36).slice(2, 9);
   const emptyQty = () => { const q = {}; CLASS_LIST.forEach((c) => { q[c] = ''; }); return q; };
@@ -434,6 +436,41 @@ FF.pages = FF.pages || {};
       }))
     };
   }
+  /** Public form ka actual POST — duplicate confirm ke baad ya seedha. */
+  function submitPublic() {
+    saveEmployee();
+    publicApi('/api/public/tag-request', 'POST', { employee: state.employee, ...submitPayload() }).then((out) => {
+      state.done = (out && out.request) || { id: '—', total: 0, rows: 0 };
+      state.done.warnings = (out && out.warnings) || [];
+      state.view = 'done';
+      state.result = null; state.rows = [newRow()];
+      state.dup = { list: [], force: false, busy: false };
+      U.toast('📤 Request bhej di gayi — ID sambhal ke rakho', 'ok');
+      renderRoot();
+    }).catch((err) => {
+      U.toast('Request nahi gayi: ' + ((err && err.message) || ''), 'err');
+    }).finally(() => { state.busy = ''; state.dup.busy = false; });
+  }
+  /** 🔁 Submit se pehle purani active request check — mili to warning card dikhta hai (force ke bina submit nahi). */
+  function checkDupesThenSubmit() {
+    if (state.dup.busy) return;
+    state.dup.busy = true;
+    const btn = U.$('[data-tr-act="send"]');
+    if (btn) { btn.disabled = true; btn.textContent = '🔁 Purani request check ho rahi hai…'; }
+    publicApi('/api/public/tag-request/check', 'POST', { employee: state.employee, rows: submitPayload().rows })
+      .then((out) => {
+        const list = (out && out.duplicates) || [];
+        state.dup.busy = false;
+        if (!list.length) { state.dup.list = []; state.busy = 'send'; return submitPublic(); }
+        state.dup.list = list;
+        state.busy = '';
+        U.toast('🔁 Aapke naam se pehle se ek request active hai — ek baar dekh lo', 'warn');
+        renderRoot();
+        const card = rootEl.querySelector('#tr-dup-card');
+        if (card && card.scrollIntoView) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      })
+      .catch(() => { state.dup.busy = false; state.busy = 'send'; submitPublic(); }); // check fail ho to submit na ruke
+  }
   function submit() {
     if (!state.result) { U.toast('Pehle 🔍 system check chalao', 'warn'); return; }
     if (!isPublic() && !FF.auth.can('tagRequest')) { U.toast('Is page ka access nahi hai', 'err'); return; }
@@ -449,21 +486,14 @@ FF.pages = FF.pages || {};
     }
     const total = state.result.rows.reduce((s, x) => s + num(x.approved), 0);
     if (!total) { U.toast('Approved qty 0 hai — kuch qty daalo', 'warn'); return; }
+    if (isPublic()) {
+      // 🔁 Pehli baar: duplicate check → warning; "Phir bhi bhejo" ke baad hi POST.
+      if (state.dup.force) { state.dup.force = false; state.busy = 'send'; return submitPublic(); }
+      return checkDupesThenSubmit();
+    }
     state.busy = 'send';
     const btn = U.$('[data-tr-act="send"]');
     if (btn) { btn.disabled = true; btn.textContent = '⏳ Bhej rahe hain…'; }
-    if (isPublic()) {
-      saveEmployee();
-      publicApi('/api/public/tag-request', 'POST', { employee: state.employee, ...submitPayload() }).then((out) => {
-        state.done = (out && out.request) || { id: '—', total, rows: state.result.rows.length };
-        state.view = 'done';
-        state.result = null; state.rows = [newRow()];
-        U.toast('📤 Request bhej di gayi — ID sambhal ke rakho', 'ok');
-        renderRoot();
-      }).catch((err) => U.toast('Request nahi gayi: ' + ((err && err.message) || ''), 'err'))
-        .finally(() => { state.busy = ''; });
-      return;
-    }
     FF.auth.api('/api/tag-requests', 'POST', submitPayload()).then((out) => {
       U.toast(out && out.ok ? '📤 Tag request admin ko chali gayi — status wahin dikhega' : 'Request save ho gayi', 'ok');
       state.requestsAt = 0;
@@ -474,6 +504,26 @@ FF.pages = FF.pages || {};
   }
 
   // ---- 🌐 public: done + status views ------------------------------------------------------------
+  /** 🔁 Duplicate warning card — result view me, submit button ke upar. */
+  function dupWarningHtml() {
+    const list = (isPublic() && state.dup && state.dup.list) || [];
+    if (!list.length) return '';
+    const rows = list.map((d) => {
+      const v = STATUS[d.status] || STATUS.pending;
+      const same = (d.matched || []).slice(0, 4).join(', ');
+      return `<li><b class="mono">${esc(d.id)}</b> <span class="badge ${v.tone}">${v.label}</span>
+        <small class="dim"> · ${fmt(d.total)} tags · ${fmt(d.rows)} rows · ${esc(U.timeLabel(new Date(d.at).getTime()))}${same ? ` · same: ${esc(same)}${(d.matched || []).length > 4 ? '…' : ''}` : ''}</small></li>`;
+    }).join('');
+    return `<section class="card tr-dup-warn" id="tr-dup-card"><div class="card-body">
+      <h3 style="margin:0 0 6px">🔁 Ye entry pehle se hai</h3>
+      <p style="margin:0 0 8px">Aapke naam <b>${esc(state.employee.name || '')}</b> se <b>${fmt(list.length)} request already active</b> hai aur usme wahi agent × class mila hai. Status dekh lo — dobara bhejne ki zaroorat nahi. Phir bhi nayi request chahiye to <b>"🔁 Phir bhi bhejo"</b> dabao.</p>
+      <ul class="tr-dup-list">${rows}</ul>
+      <div class="btn-row" style="margin-top:8px">
+        <button class="btn primary" data-tr-act="dup-status" data-id="${esc(list[0].id || '')}">🔎 Status dekho</button>
+        <button class="btn" data-tr-act="dup-force">🔁 Phir bhi bhejo</button>
+        <button class="btn" data-tr-act="dup-edit">✏️ Form me wapas</button>
+      </div></div></section>`;
+  }
   function renderDone() {
     const d = state.done || {};
     const body = rootEl.querySelector('#tr-body');
@@ -487,6 +537,10 @@ FF.pages = FF.pages || {};
         <button class="btn primary" data-tr-act="again">➕ Naya request banao</button>
         <button class="btn" data-tr-act="check-status" data-id="${esc(d.id || '')}">🔎 Status dekho</button>
       </div>
+      ${(() => {
+        const dup = ((state.done && state.done.warnings) || []).find((x) => x && x.code === 'duplicate');
+        return dup ? `<div class="notice amber" style="margin-top:10px">🔁 Note: aapke naam se pehle se <b>${fmt(dup.count || 0)}</b> active request thi (${esc((dup.requests || []).map((r) => r.id).slice(0, 3).join(', '))}) — admin ko ye bhi dikhaya gaya hai, taaki duplicate na maane jaayein.</div>` : '';
+      })()}
       <p class="dim small" style="margin-top:10px">Status ke 4 stage: ⏳ Pending → ✅ Approved → 🚚 Dispatched (ya ⛔ Rejected). Admin status badalte hi aapko yahin pata chal jaayega.</p>
     </div></section>`;
     const act = (name, fn) => { const b = rootEl.querySelector(`[data-tr-act="${name}"]`); if (b) b.addEventListener('click', fn); };
@@ -853,6 +907,7 @@ FF.pages = FF.pages || {};
       ${res.tls.length ? `<section class="card tr-check-col"><div class="card-head"><h3>🧑‍💼 TL rollup (TL stock · issuance · priority · suggested)</h3><div class="card-right dim">TL ke poore agents ka stock/issuance + is request ka total</div></div>
         <div class="table-wrap"><table class="tbl compact"><thead><tr><th>TL</th><th>Channel</th><th class="num">Agents</th><th class="num">VC4 stock</th><th class="num">${esc(U.labelYM(ymNow()))} VC4</th><th class="num">Cover</th><th>Priority</th><th class="num">🎯 is request ka total</th></tr></thead>
         <tbody>${res.tls.map((t) => `<tr><td><b>${esc(t.name)}</b></td><td>${t.channel === 'gv' ? '🟩 GV' : '🟦 FF'}</td><td class="num">${fmt(t.agentsCount)}${t.reqAgentCount ? ` <small class="dim">(${fmt(t.reqAgentCount)} requested)</small>` : ''}</td><td class="num"><b>${fmt(t.stock.VC4)}</b></td><td class="num">${fmt(t.cur.VC4)}</td><td class="num">${t.cover == null ? '<span class="dim">∞</span>' : `<span class="badge ${t.cover < 7 ? 'red' : t.cover < 15 ? 'amber' : 'green'}">${fmt(t.cover, true)}</span>`}</td><td><span class="badge ${toneFor(t.priority)}">${esc(t.priority)}</span></td><td class="num"><b>${fmt(t.reqApproved)}</b> <small class="dim">/ sug ${fmt(t.reqNet)}</small></td></tr>`).join('')}</tbody></table></div></section>` : ''}
+      ${isPublic() ? dupWarningHtml() : ''}
       ${state.problems.length ? `<section class="card"><div class="card-body"><b>⚠️ Kuch rows skip hui:</b><ul>${state.problems.map((p) => `<li>${esc(p)}</li>`).join('')}</ul></div></section>` : ''}
       <section class="card"><div class="card-body">
         ${isPublic() ? `<p class="dim small" style="margin:0 0 8px">👤 Request <b>${esc(state.employee.name || '—')}</b> ke naam se jaayegi${state.employee.mobile ? ` · ${esc(state.employee.mobile)}` : ''}${state.employee.office ? ` · ${esc(state.employee.office)}` : ''}.</p>` : ''}
@@ -884,6 +939,12 @@ FF.pages = FF.pages || {};
     if (note) note.addEventListener('input', () => { state.note = note.value; res.note = note.value; });
     const act = (name, fn) => { const b = rootEl.querySelector(`[data-tr-act="${name}"]`); if (b) b.addEventListener('click', fn); };
     act('send', submit);
+    // 🔁 duplicate warning card ke buttons
+    act('dup-force', () => { state.dup.force = true; submit(); });
+    act('dup-status', (e) => { state.statusId = String((e && e.currentTarget && e.currentTarget.dataset.id) || ''); state.status = null; state.view = 'status'; renderRoot(); });
+    act('dup-edit', () => { state.dup = { list: [], force: false, busy: false }; state.view = 'form'; renderRoot(); });
+    const sendBtn = rootEl.querySelector('[data-tr-act="send"]');
+    if (sendBtn && isPublic() && (state.dup.list || []).length) { sendBtn.textContent = '🔁 Phir bhi bhejo'; sendBtn.disabled = false; }
     act('csv', () => download('csv'));
     act('xlsx', () => download('xlsx'));
     act('copy', () => U.copyText(resultText()).then((ok) => U.toast(ok ? '📋 Copy ho gaya' : 'Copy nahi hua', ok ? 'ok' : 'warn')));
@@ -918,7 +979,7 @@ FF.pages = FF.pages || {};
         <div class="table-wrap tall"><table class="tbl"><thead><tr><th>Kab</th><th>Kisne</th><th class="num">Rows</th><th class="num">Agents</th><th class="num">Total qty</th><th>Status</th><th>Note</th><th></th></tr></thead>
         <tbody>${state.requests.map((r) => `<tr data-tr-req="${esc(r.id)}">
           <td>${esc(U.timeLabel(new Date(r.at).getTime()))}</td>
-          <td><b>${esc(r.byName || r.by)}</b>${r.source === 'public-link' ? ' <span class="badge" title="Employee link se aayi (bina login)">🌐 employee link</span>' : ''}${r.employee && r.employee.mobile ? `<small class="dim"> ${esc(r.employee.mobile)}</small>` : ''}</td>
+          <td><b>${esc(r.byName || r.by)}</b>${r.source === 'public-link' ? ' <span class="badge" title="Employee link se aayi (bina login)">🌐 employee link</span>' : ''}${r.dupCount || (r.dupOf || []).length ? ` <span class="badge amber" title="Employee ne phir bhi bheji — pehle se ${(r.dupOf || []).length} active request: ${esc((r.dupOf || []).join(', '))}">🔁 duplicate</span>` : ''}${r.employee && r.employee.mobile ? `<small class="dim"> ${esc(r.employee.mobile)}</small>` : ''}</td>
           <td class="num">${fmt((r.rows || []).length)}</td>
           <td class="num">${fmt(new Set((r.rows || []).map((x) => x.agentName)).size)}</td>
           <td class="num"><b>${fmt((r.rows || []).reduce((s, x) => s + num(x.approved), 0))}</b></td>
@@ -1168,6 +1229,7 @@ FF.pages = FF.pages || {};
         <div class="kd-stat violet"><span>Total qty</span><b>${fmt(tot)}</b></div>
       </div>
       ${r.source === 'public-link' ? `<p class="dim small">🌐 <b>Employee link</b> se aayi (bina login)${r.employee && r.employee.mobile ? ` · 📱 ${esc(r.employee.mobile)}` : ''}${r.employee && r.employee.office ? ` · 🏢 ${esc(r.employee.office)}` : ''}${r.ip ? ` · IP ${esc(r.ip)}` : ''}</p>` : ''}
+      ${(r.dupOf || []).length ? `<p class="dim small">🔁 <b>Duplicate mark:</b> milti-julti active request pehle se thi — ${esc((r.dupOf || []).join(', '))}</p>` : ''}
       <p class="dim small">${esc(U.timeLabel(new Date(r.at).getTime()))}${r.note ? ` · 📝 ${esc(r.note)}` : ''} ${syncBadge}</p>
       <div class="kd-sec"><div class="kd-h-row"><h4 class="kd-h">Rows (${fmt((r.rows || []).length)})</h4>
         <div class="seg small"><button type="button" class="seg-btn ${state.groupBy === 'tl' ? 'on' : ''}" data-tr-group="tl">TL-wise</button><button type="button" class="seg-btn ${state.groupBy === 'agent' ? 'on' : ''}" data-tr-group="agent">Agent-wise</button></div></div>
@@ -1301,6 +1363,16 @@ FF.pages = FF.pages || {};
     render,
     preview,
     shareLink,
+    // 🔁 Diagnostics (Settings → support / smoke): duplicate warning card ka wahi HTML jo employee dekhta hai.
+    dupWarning: (list, name) => {
+      const saved = { mode: state.publicMode, dup: state.dup, emp: state.employee };
+      state.publicMode = true;
+      state.dup = { list: Array.isArray(list) ? list : [], force: false, busy: false };
+      state.employee = { ...(saved.emp || {}), name: name || (saved.emp && saved.emp.name) || 'Employee' };
+      const html = dupWarningHtml();
+      state.publicMode = saved.mode; state.dup = saved.dup; state.employee = saved.emp;
+      return html;
+    },
     // Diagnostics (Settings → support / smoke): index kitna bana, koi error?
     indexInfo: () => ({
       agents: state.index ? state.index.list.length : 0,
