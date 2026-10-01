@@ -67,7 +67,8 @@ test('🖨️ print selected — har request ka label sirf EK baar, TO = agent k
   assert.ok(html.includes('@page { size: A4'));
   for (const n of [4, 5, 6]) assert.ok(html.includes(`data-rows="${n}"`), `per page ${n * 2} button`);
   assert.ok(html.includes('data-sz="14"'));
-  assert.ok(html.includes('Print / 📄 Save as PDF'));
+  assert.ok(html.includes('🖨️ Print') && html.includes('id="pdfbtn"') && html.includes('Download PDF'), 'print + direct PDF buttons');
+  assert.ok(!/<script>/.test(html), 'inline script CSP se block hota hai — buttons opener se bind');
   assert.match(html, /3 requests · 42 tags/, 'toolbar: kitni requests + tags');
   assert.ok(!/undefined|NaN/.test(html));
   const one = TR.dispatchLabelHtml(priya, { size: 10.5, rows: 5 });

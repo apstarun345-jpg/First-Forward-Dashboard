@@ -28,7 +28,7 @@ window.FF = window.FF || {};
   // Page id → uske liye zaroori modules (order matter karta hai: dependency pehle).
   const GROUPS = {
     executive: ['insights', 'cockpit'],
-    tagRequest: ['tagRequest'],
+    tagRequest: ['pdf', 'tagRequest'],
     tagIssued: ['tagIssued'],
     targets: ['targets'],
     rangeReport: ['rangeReport'],
@@ -58,6 +58,9 @@ window.FF = window.FF || {};
     tlScorecard: ['insights', 'cockpit'],
     directAgents: ['directAgents'],
     newAgents: ['newAgents'],
+    unusual: ['unusual'],
+    ffAgentSummary: ['pdf', 'agentSummary'],
+    gvAgentSummary: ['pdf', 'agentSummary'],
     arena: ['wow'],
     fame: ['wow'],
     warRoom: ['wow'],

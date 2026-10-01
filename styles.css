@@ -3977,3 +3977,60 @@ html[data-theme='dark'] .age-tbl tr.age-total td { background: rgba(255, 255, 25
 .glance-agent:focus-visible { outline: 2px solid var(--brand, #4f46e5); outline-offset: 1px; }
 .dp2-basis { display: inline-flex; align-items: baseline; gap: 4px; }
 .dp2-basis.ff em { color: #2563eb; } .dp2-basis.gv em { color: #059669; }
+
+/* ===== v3.32 — Tag Request: TL panel + dispatch name ===== */
+.badge.purple { background: #ede9fe; color: #5b21b6; }
+.tr-tl-panel { margin: 8px 0; padding: 10px; border-radius: 12px; background: linear-gradient(135deg, #eef2ff, #f5f3ff); border: 1px solid #c7d2fe; }
+.tr-tl-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
+.tr-tlk { background: #fff; border-radius: 10px; padding: 8px 10px; border-left: 4px solid #6366f1; display: flex; flex-direction: column; gap: 1px; color: #0f172a; }
+.tr-tlk:nth-child(2) { border-left-color: #f59e0b; } .tr-tlk:nth-child(3) { border-left-color: #10b981; } .tr-tlk:nth-child(4) { border-left-color: #ec4899; }
+.tr-tlk small { color: #475569; font-weight: 600; } .tr-tlk b { font-size: 1.35rem; }
+.tr-tl-agents { margin-top: 8px; } .tr-tl-agents summary { cursor: pointer; font-weight: 700; color: #3730a3; }
+.tr-tl-agents .table-wrap { max-height: 260px; overflow: auto; margin-top: 6px; background: #fff; border-radius: 8px; color: #0f172a; }
+.tr-tl-agent:hover td { background: #e0e7ff; }
+
+/* ===== v3.32 — KPI detail dialog (Master Stock + insights): readable, colourful, light =====
+   Pehle dialog dark tha aur app.js ka sticky-first column white + safed text de deta tha → pehla column (barcode)
+   "hide" dikhta tha. Ab dialog light card hai, har cell ka text / background explicit. */
+.ins-detail-dialog { padding: 0 !important; background: #fff !important; color: #0f172a !important; border: 0 !important; border-radius: 18px !important; box-shadow: 0 30px 80px rgba(30, 27, 75, .45); overflow: hidden !important; display: none; flex-direction: column; }
+.ins-detail-dialog[open] { display: flex; }
+.ins-detail-dialog::backdrop { background: rgba(30, 27, 75, .55) !important; backdrop-filter: blur(3px); }
+.ins-detail-dialog > .card-head { background: linear-gradient(120deg, #4f46e5, #7c3aed 55%, #db2777) !important; color: #fff !important; padding: 14px 18px !important; position: static !important; margin: 0 !important; border: 0 !important; }
+.ins-detail-dialog > .card-head h3 { color: #fff !important; margin: 0; font-size: 1.05rem; }
+.ins-detail-dialog > .card-head .btn { background: #fff !important; color: #4f46e5 !important; border: 0 !important; font-weight: 700; }
+.ins-detail-dialog > .dim, .ins-detail-dialog > p { color: #475569 !important; padding: 8px 18px 0; margin: 0; }
+.ins-detail-dialog .detail-stats { padding: 12px 18px 0; margin: 0 !important; }
+.ins-detail-dialog .detail-stats .ins-pill { background: #eef2ff !important; color: #3730a3 !important; border: 1px solid #c7d2fe !important; font-weight: 700; }
+.ins-detail-dialog .detail-toolbar { position: static !important; background: #fff !important; padding: 10px 18px !important; }
+.ins-detail-dialog .detail-toolbar input { background: #f8fafc !important; color: #0f172a !important; border: 1.5px solid #c7d2fe !important; }
+.ins-detail-dialog .detail-toolbar .btn { background: #16a34a !important; color: #fff !important; border: 0 !important; font-weight: 700; }
+.ins-detail-dialog .table-wrap { flex: 1; min-height: 120px; max-height: none; overflow: auto; margin: 0 18px 12px; border: 1px solid #e2e8f0; border-radius: 12px; background: #fff !important; }
+.ins-detail-dialog .ins-table, .ins-detail-dialog .data-table { width: 100%; border-collapse: separate; border-spacing: 0; background: #fff !important; }
+.ins-detail-dialog .ins-table th { position: sticky; top: 0; z-index: 3; background: #1e1b4b !important; color: #fff !important; border: 0 !important; padding: 9px 10px; text-align: left; white-space: nowrap; }
+.ins-detail-dialog .ins-table td, .ins-detail-dialog .ins-table td:first-child { background: #fff !important; color: #0f172a !important; border-bottom: 1px solid #eef2f7 !important; padding: 8px 10px; position: static !important; box-shadow: none !important; }
+.ins-detail-dialog .ins-table tbody tr:nth-child(even) td { background: #f5f7ff !important; }
+.ins-detail-dialog .ins-table tbody tr:hover td { background: #e0e7ff !important; }
+.ins-detail-dialog .ins-table td:first-child { font-weight: 700; color: #4338ca !important; }
+.ins-detail-dialog .detail-more { text-align: center; padding: 0 18px 14px; }
+.ins-detail-dialog .detail-empty { color: #64748b !important; }
+
+/* Master Stock hero + colourful KPI row */
+.ms-hero { border-radius: 18px; padding: 18px 20px; margin-bottom: 14px; color: #fff; background: linear-gradient(120deg, #2563eb, #7c3aed 50%, #ec4899); box-shadow: 0 10px 28px rgba(79, 70, 229, .28); display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+.ms-hero h2 { margin: 0; font-size: 1.35rem; } .ms-hero p { margin: 2px 0 0; opacity: .92; font-size: .88rem; max-width: 760px; }
+.ms-hero .ms-hero-ico { font-size: 2.2rem; background: rgba(255, 255, 255, .2); border-radius: 14px; padding: 8px 12px; }
+.ms-hero .ms-hero-stats { margin-left: auto; display: flex; gap: 10px; flex-wrap: wrap; }
+.ms-hero .ms-hero-stats span { background: rgba(255, 255, 255, .2); border-radius: 12px; padding: 6px 12px; font-size: .78rem; } .ms-hero .ms-hero-stats b { display: block; font-size: 1.15rem; }
+
+/* ===== v3.32 — Agent / TL Summary ===== */
+.as-search { position: relative; max-width: 640px; }
+.as-search .input { width: 100%; font-size: 1.05rem; padding: 12px 14px; border: 2px solid #c7d2fe; border-radius: 12px; }
+.as-drop { position: absolute; z-index: 30; left: 0; right: 0; top: 100%; margin-top: 4px; background: #fff; color: #0f172a; border: 1px solid #c7d2fe; border-radius: 12px; box-shadow: 0 14px 34px rgba(30, 27, 75, .25); max-height: 340px; overflow: auto; }
+.as-opt { display: flex; justify-content: space-between; gap: 10px; width: 100%; text-align: left; background: none; border: 0; border-bottom: 1px solid #eef2f7; padding: 9px 12px; cursor: pointer; color: #0f172a; font: inherit; }
+.as-opt:hover { background: #eef2ff; }
+.as-head { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; padding: 16px 18px; border-radius: 18px; color: #fff; background: linear-gradient(120deg, #2563eb, #7c3aed 55%, #ec4899); margin-bottom: 14px; box-shadow: 0 10px 26px rgba(79, 70, 229, .25); }
+.as-ava { font-size: 2.2rem; background: rgba(255, 255, 255, .2); border-radius: 16px; padding: 8px 12px; }
+.as-who h2 { margin: 0; font-size: 1.4rem; } .as-who p { margin: 3px 0 0; opacity: .95; } .as-who a { color: #fff; }
+.as-actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+.as-actions .btn { background: #fff; color: #3730a3; border: 0; font-weight: 700; } .as-actions .btn.primary { background: #16a34a; color: #fff; }
+.as-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 14px; }
+@media (max-width: 800px) { .as-two { grid-template-columns: 1fr; } .as-actions { margin-left: 0; } }

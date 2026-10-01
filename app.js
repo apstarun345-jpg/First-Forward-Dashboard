@@ -37,6 +37,9 @@ window.FF = window.FF || {};
     { id: 'tlScorecard', icon: '🏅', label: 'TL Scorecard', desc: 'TL-wise score · target · commission · risk', perm: 'tlScorecard', group: 'Cross Channel' },
     { id: 'directAgents', icon: '🧍', label: 'Direct Agents & TLs', desc: 'FF: TL Name APS · GV: TL ID + Name blank — ek hi rule poore site par', perm: 'directAgents', group: 'Cross Channel' },
     { id: 'newAgents', icon: '🆕', label: 'New Agents & TL Changes', desc: 'Naye agents · TL badla / hata — FF + GV alag table, click → poori profile', perm: 'newAgents', group: 'Cross Channel' },
+    { id: 'unusual', icon: '🚨', label: 'Unusual Activity', desc: 'High Wrong VRN · Replacement · Chassis · single-day spike — agent-wise flags (FF + GV)', perm: 'unusual', group: 'Cross Channel' },
+    { id: 'ffAgentSummary', icon: '📄', label: 'Agent / TL Summary', desc: 'Agent ya TL search karo → stock · issuance (last + current) · ageing report · Share / PDF', perm: 'agentSummary', group: 'First Forward' },
+    { id: 'gvAgentSummary', icon: '📄', label: 'Agent / TL Summary', desc: 'GV agent ya TL search karo → stock · issuance (last + current) · ageing report · Share / PDF', perm: 'agentSummary', group: 'GV Partner' },
     { id: 'savedViews', icon: '⭐', label: 'Saved Views', desc: 'Reusable filters · shareable links', perm: 'savedViews', group: 'Workspace' },
     { id: 'reportStudio', icon: '🗓️', label: 'Report Studio', desc: 'Scheduled email · CSV · PDF · share', perm: 'reportStudio', group: 'Workspace' },
     { id: 'followups', icon: '📝', label: 'Notes & Follow-ups', desc: 'Agent/TL timeline · owner · due date', perm: 'followups', group: 'Workspace' },
@@ -722,7 +725,7 @@ window.FF = window.FF || {};
     const errs = Object.keys(st.errors || {}).length + (gv ? Object.keys(gv.errors).length : 0);
     el.innerHTML = offline
       ? '<span class="dot warn"></span> 📴 Offline — last loaded data dikh raha hai'
-      : (t ? `<span class="dot ${errs ? 'warn' : 'live'}\"></span> Data ${U.timeLabel(t)}${errs ? ` · ${errs} failed` : ''}${pre && pre.done ? ' · all sheets ready ✓' : ''}` : '<span class="dot"></span> Ready');
+      : (t ? `<span class="dot ${errs ? 'warn' : 'live'}\"></span> Data ${U.timeLabel(t)}${errs ? ` · ${errs} failed${(st.retrying || (gv && gv.retrying)) ? ' — 🔁 auto-retry chal raha hai…' : ''}` : ''}${pre && pre.done ? ' · all sheets ready ✓' : ''}` : '<span class="dot"></span> Ready');
     const btn = U.$('#top-refresh'); if (btn) btn.classList.remove('spin');
   }
   let refreshing = false;
@@ -1082,7 +1085,7 @@ window.FF = window.FF || {};
       const el = e.target.closest('select[data-param], input[data-param]');
       if (el) updateParams({ [el.dataset.param]: el.value, ...(el.dataset.param === 'tl' ? { agent: '' } : {}), ...(el.dataset.param === 'agent' ? { tl: '' } : {}) });
     });
-    FF.store.on((ev, detail) => { if (ev === 'progress' || ev === 'start' || ev === 'done') updateStatus(detail); });
+    FF.store.on((ev, detail) => { if (ev === 'progress' || ev === 'start' || ev === 'done' || ev === 'retry' || ev === 'refresh') updateStatus(detail); });
     // periodic install btn check
     setInterval(updateInstallBtn, 3000);
   }

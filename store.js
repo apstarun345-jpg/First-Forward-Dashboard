@@ -16,7 +16,7 @@ window.FF = window.FF || {};
     stockTypes: { label: 'StockDataa · agent × type', load: (o) => M.loadStockAgentTypes(o) },
     report: { label: 'REPORT sheet', load: (o) => D.query(FF.config.report.sheet, '', { ...o, gid: FF.config.report.gid }) }
   };
-  const state = { data: {}, errors: {}, loading: false, loadedAt: null, progress: { done: 0, total: 0 }, promise: null, listeners: new Set() };
+  const state = { data: {}, errors: {}, retrying: false, loading: false, loadedAt: null, progress: { done: 0, total: 0 }, promise: null, listeners: new Set() };
 
   function emit(event, detail) { state.listeners.forEach((fn) => { try { fn(event, detail); } catch (e) { console.error(e); } }); }
   function on(fn) { state.listeners.add(fn); return () => state.listeners.delete(fn); }
@@ -69,11 +69,40 @@ window.FF = window.FF || {};
       if (version === generation) {
         state.loading = false; state.loadedAt = Date.now();
         emit('done');
+        scheduleRetry(version, 0);
       }
       return state.data;
     });
     return state.promise;
   }
+  // 🔁 Auto-retry (v3.32): jo sheet fail hui ("2 sheet fail") unhe background me khud dobara load karo —
+  //    backoff 4s · 10s · 20s · 40s · 75s. Sab theek hote hi status ✓ ho jata hai aur open page refresh hota hai.
+  const RETRY_DELAYS = [4000, 10000, 20000, 40000, 75000];
+  let retryTimer = null;
+  function scheduleRetry(version, round) {
+    clearTimeout(retryTimer);
+    const failed = Object.keys(state.errors).filter((k) => DATASETS[k]);
+    if (!failed.length || round >= RETRY_DELAYS.length || version !== generation) { state.retrying = false; return; }
+    state.retrying = true; state.retryRound = round + 1;
+    emit('retry', { keys: failed, round: round + 1 });
+    retryTimer = setTimeout(async () => {
+      if (version !== generation) return;
+      const list = Object.keys(state.errors).filter((k) => DATASETS[k]);
+      list.forEach((k) => { delete state.errors[k]; });
+      await runQueue(list, true);
+      if (version !== generation) return;
+      const left = Object.keys(state.errors).length;
+      state.loadedAt = Date.now();
+      if (!left) {
+        state.retrying = false;
+        emit('refresh', { healed: list });
+        try { if (FF.app && FF.app.renderCurrent) FF.app.renderCurrent(); if (FF.util && FF.util.toast) FF.util.toast('✅ Fail hui sheets auto-retry se load ho gayi', 'ok'); } catch { /* ignore */ }
+        emit('done');
+      } else scheduleRetry(version, round + 1);
+    }, RETRY_DELAYS[round]);
+  }
+  /** Fail hui sheets abhi turant dobara try (status bar par click). */
+  function retryNow() { scheduleRetry(generation, 0); }
   function get(key) { return state.data[key]; }
   function error(key) { return state.errors[key]; }
   async function need(key, opts) {
@@ -119,5 +148,5 @@ window.FF = window.FF || {};
     return items;
   }
 
-  FF.store = { preload, refresh, get, error, need, reset, on, people, suggestions, DATASETS, get state() { return state; }, get loadedAt() { return state.loadedAt; }, get loading() { return state.loading; } };
+  FF.store = { preload, refresh, retryNow, get, error, need, reset, on, people, suggestions, DATASETS, get state() { return state; }, get loadedAt() { return state.loadedAt; }, get loading() { return state.loading; } };
 })(window.FF);

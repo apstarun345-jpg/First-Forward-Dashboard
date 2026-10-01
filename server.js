@@ -16,7 +16,7 @@ import { sheetsStoreFromEnv } from './sheets-storage.js';
 import { appsScriptStoreFromEnv, AppsScriptStore } from './apps-script-storage.js';
 import { sendMail, mailConfigured, diagnoseMail, mailHint, availableProviders, resolveProviders, resetMailMemo, MAIL_PROVIDERS, splitRecipients } from './mailer.js';
 import { DEFAULT_DISPATCH_EMAIL, normalizeDispatchEmail, buildDispatchPlan, dispatchEmailContent } from './dispatch-email.js';
-import { buildStockAgeIndex, summaryOf as stockAgeSummary, tagsFor as stockAgeTags } from './stock-age.js';
+import { buildStockAgeIndex, summaryOf as stockAgeSummary, tagsFor as stockAgeTags, personalStock } from './stock-age.js';
 import { loadFfDispatchRows, loadGvDispatchRows } from './dispatch-report.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -82,6 +82,8 @@ export const PAGE_PERMISSIONS = [
   { key: 'gvCommission', label: 'GV Partner · Commission Intelligence', group: 'GV Partner' },
   { key: 'directAgents', label: 'Cross-channel · Direct Agents & TLs (FF APS + GV no-TL rule)', group: 'Cross Channel' },
   { key: 'newAgents', label: 'Cross-channel · New Agents & TL Changes (FF + GV)', group: 'Cross Channel' },
+  { key: 'unusual', label: 'Cross-channel · Unusual Agent Activity (wrong VRN / replacement / chassis)', group: 'Cross Channel' },
+  { key: 'agentSummary', label: 'FF + GV · Agent / TL Summary report (share / PDF)', group: 'Cross Channel' },
   { key: 'dualChannel', label: 'Cross-channel · Identity & combined analysis', group: 'Cross Channel' },
   { key: 'masterStock', label: 'Cross-channel · Master Stock (barcode/agent/TL/GV search)', group: 'Cross Channel' },
   { key: 'fastagChampions', label: 'Cross-channel · FASTag Champions (top agents/TLs)', group: 'Cross Channel' },
@@ -128,7 +130,7 @@ const allPermKeysNow = () => allPermKeys(db.settings);
 // Back-compat export (some tooling imported PERMISSIONS).
 export const PERMISSIONS = permissionsFor({ tabs: DEFAULT_TABS });
 const DEFAULT_USER_PERMS = ['home', 'executive', 'forecast', 'dataQuality', 'savedViews', 'reportStudio', 'followups', 'tagIssued', 'rangeReport', 'targets', 'dashboard', 'trend', 'stock', 'stockReport', 'performance', 'ffCommission', 'gvDashboard', 'gvTrend', 'gvStock', 'gvStockReport', 'gvPerformance', 'gvCommission', 'dualChannel', 'masterStock', 'compare', 'tv', 'teamMap',
-  'sheet:StockDataa', 'sheet:REPORT', 'sheet:GV Master', 'sheet:Tag Assignment', 'sheet:GV REPORT', 'charts', 'export', 'dispatchPlan', 'tlScorecard', 'voiceAssistant', 'arena', 'fame', 'warRoom', 'activity', 'network', 'radar', 'reportCards', 'directAgents', 'newAgents', 'sprints', 'stockRadar'];
+  'sheet:StockDataa', 'sheet:REPORT', 'sheet:GV Master', 'sheet:Tag Assignment', 'sheet:GV REPORT', 'charts', 'export', 'dispatchPlan', 'tlScorecard', 'voiceAssistant', 'arena', 'fame', 'warRoom', 'activity', 'network', 'radar', 'reportCards', 'directAgents', 'newAgents', 'unusual', 'agentSummary', 'sprints', 'stockRadar'];
 
 // Admin-controlled audience for automated notifications. `users` means all approved non-admin
 // users who have notification access; each user's own master/type preferences still apply.
@@ -3491,6 +3493,8 @@ async function handleApi(req, res, url) {
   const tagRequestAgent = (a) => ({
     name: shortText(a.agentName || a.name, 120), agentId: shortText(a.agentId, 40), tl: shortText(a.tl || a.tlName, 120),
     channel: a.channel === 'gv' ? 'gv' : 'ff',
+    ...(String(a.dispatchName || '').trim() ? { dispatchName: shortText(String(a.dispatchName).replace(/\s+/g, ' '), 120) } : {}),
+    ...(a.kind === 'tl' ? { kind: 'tl' } : {}),
     mobile: String(a.mobile || a.phone || '').replace(/[^\d+]/g, '').slice(0, 16),
     address: shortText(String(a.address || a.fullAddress || '').replace(/\s+/g, ' '), 300),
     pincode: tagDigits(a.pincode || a.pin).slice(0, 6),
@@ -5003,6 +5007,35 @@ async function servePersonalPage(req, res, rawToken) {
     const goalHtml = goal ? `<div class="pb-goal"><div class="pb-goal-top"><span>🎯 TL goal ${escHtml(ym)}</span><b>${st.mtd} / ${Number(goal.target) || 0} (${pct(st.mtd, Number(goal.target))}%)</b></div><div class="pb-track"><div class="pb-fill" style="width:${Math.min(100, pct(st.mtd, Number(goal.target)))}%"></div></div></div>` : '';
     const targetHtml = target ? `<div class="pb-kv"><span>🎯 Your target ${escHtml(ym)}</span><b>${st.mtd} / ${Number(target.target) || 0} (${pct(st.mtd, Number(target.target))}%)</b></div>` : '';
     const teamHtml = team.length ? `<section class="pb-card"><h3>👥 Team (is mahine)</h3>${team.map((t, i) => `<div class="pb-rank"><span class="pb-pos">${i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1}</span><span class="pb-name">${escHtml(t.name)}</span><b>${t.mtd}</b></div>`).join('')}</section>` : '';
+    // 📦 v3.32 — stock (VC4+VC20 / VC5+) + ageing + last month; TL link par agent-wise table (stock · last · MTD)
+    const prevYm = (() => { const dd = new Date(`${dateKeyNow()}T00:00:00Z`); dd.setUTCDate(1); dd.setUTCMonth(dd.getUTCMonth() - 1); return `${dd.getUTCFullYear()}-${pad2(dd.getUTCMonth() + 1)}`; })();
+    const lastMonthTotal = rows.reduce((a, r) => a + (String(r.date).startsWith(prevYm) ? r.n : 0), 0);
+    let stockInfo = null;
+    try {
+      const sidx = await Promise.race([stockAgeIndex(false), new Promise((_, rej) => setTimeout(() => rej(new Error('stock timeout')), 25000))]);
+      stockInfo = personalStock(sidx, link.source, link.kind === 'tl' ? 'tl' : 'agent', link.name);
+    } catch (err) { console.warn('personal stock:', err.message); }
+    const nf = (n) => Number(n || 0).toLocaleString('en-IN');
+    const stCore = stockInfo ? stockInfo.t[0] : 0, stComm = stockInfo ? stockInfo.t[1] : 0;
+    const ageHtml = stockInfo ? `<section class="pb-card"><h3>🧓 Stock ageing</h3><div class="pb-scroll"><table class="pb-tbl"><thead><tr><th>Group</th><th>Total</th><th>≥1M</th><th>≥3M</th><th>≥5M</th><th>≥6M</th><th>Oldest</th></tr></thead><tbody>${[['🚗 VC4+VC20', 0], ['🚚 VC5+', 1]].map(([lbl, g]) => `<tr><td>${lbl}</td><td>${nf(stockInfo.t[g])}</td>${stockInfo.c[g].map((x, i) => `<td class="${i >= 2 && x ? 'pb-hot' : i === 1 && x ? 'pb-warn' : ''}">${nf(x)}</td>`).join('')}<td>${stockInfo.o[g] ? `${nf(stockInfo.o[g])}d` : '—'}</td></tr>`).join('')}</tbody></table></div></section>` : '';
+    let teamTable = '';
+    if (link.kind === 'tl') {
+      const agentRows = new Map();
+      const normKey = (v) => String(v || '').trim().toUpperCase().replace(/\s+/g, ' ');
+      for (const [name, m] of await personalTeamAgents(link)) {
+        let mtdA = 0, lastA = 0;
+        for (const [d, n] of m) { if (d.startsWith(ym)) mtdA += n; else if (d.startsWith(prevYm)) lastA += n; }
+        agentRows.set(normKey(name), { name, mtd: mtdA, last: lastA, core: 0, comm: 0 });
+      }
+      if (stockInfo) stockInfo.agents.forEach((a) => {
+        const k = normKey(a.n); const r = agentRows.get(k) || { name: a.n, mtd: 0, last: 0, core: 0, comm: 0 };
+        r.core = a.t[0]; r.comm = a.t[1]; agentRows.set(k, r);
+      });
+      const list = [...agentRows.values()].filter((r) => r.mtd || r.last || r.core || r.comm).sort((a, b) => b.mtd - a.mtd || (b.core + b.comm) - (a.core + a.comm)).slice(0, 80);
+      const sum = (k) => list.reduce((a, r) => a + r[k], 0);
+      teamTable = list.length ? `<section class="pb-card"><h3>👥 Team (is mahine) · agent-wise stock + issuance (${list.length} agents)</h3><div class="pb-scroll"><table class="pb-tbl"><thead><tr><th>Agent</th><th>Stock 🚗</th><th>Stock 🚚</th><th>Last</th><th>MTD</th></tr></thead><tbody>${list.map((r) => `<tr><td>${escHtml(r.name)}</td><td>${nf(r.core)}</td><td>${nf(r.comm)}</td><td>${nf(r.last)}</td><td><b>${nf(r.mtd)}</b></td></tr>`).join('')}</tbody><tfoot><tr><td>Total</td><td>${nf(sum('core'))}</td><td>${nf(sum('comm'))}</td><td>${nf(sum('last'))}</td><td>${nf(sum('mtd'))}</td></tr></tfoot></table></div></section>` : '';
+    }
+    const stockKpis = `<section class="pb-kpis"><div class="pb-kpi stock"><small>📦 Stock (total)</small><b>${stockInfo ? nf(stCore + stComm) : '—'}</b><span>${stockInfo ? `🚗 ${nf(stCore)} · 🚚 ${nf(stComm)}` : 'stock data abhi nahi mila'}</span></div><div class="pb-kpi last"><small>Last month total</small><b>${nf(lastMonthTotal)}</b><span>${escHtml(prevYm)}</span></div></section>`;
     const diff = st.mtd - st.prevSame;
     // 🧑‍💼 Agent ke link par TL ka naam bhi dikhao (pehle sirf agent naam aata tha)
     const tlName = link.kind === 'tl' ? '' : (await personalAgentTl(link));
@@ -5012,6 +5045,7 @@ async function servePersonalPage(req, res, rawToken) {
       sub: `${link.source === 'gv' ? 'GV Partner' : 'First Forward'} · ${link.kind === 'tl' ? 'Team Leader' : 'Agent'}${tlName ? ` · ${link.kind === 'tl' ? '' : 'TL '}<b>${escHtml(tlName)}</b>` : ''} · personal view · read-only`,
       body: `
       ${goalHtml || targetHtml ? `<section class="pb-card pb-goalcard">${goalHtml}${targetHtml}</section>` : ''}
+      ${stockKpis}
       <section class="pb-kpis">
         <div class="pb-kpi"><small>MTD issued</small><b>${st.mtd}</b><span>${escHtml(ym)}</span></div>
         <div class="pb-kpi"><small>Pichhle mahine same period</small><b>${st.prevSame}</b><span class="${diff >= 0 ? 'up' : 'down'}">${diff >= 0 ? '▲' : '▼'} ${Math.abs(diff)}</span></div>
@@ -5027,7 +5061,8 @@ async function servePersonalPage(req, res, rawToken) {
           <div class="pb-kv"><span>Total rows (14 din chart)</span><b>${st.last14.reduce((a, b) => a + b.n, 0)}</b></div>
         </div>
       </section>
-      ${teamHtml}
+      ${ageHtml}
+      ${teamTable || teamHtml}
       <p class="pb-foot">Read-only link · data live sheet se · ${escHtml(db.settings.brand || 'Dashboard')}</p>`
     });
     return sendHtml(res, 200, html, { 'Cache-Control': 'no-store' });
@@ -5044,7 +5079,7 @@ function personalShell({ title, heading, sub, body }) {
 :root{--a:${escHtml(accent)}}
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#f4f6fb;color:#0f172a;padding:18px;line-height:1.45}
-.pb-wrap{max-width:640px;margin:0 auto}
+.pb-wrap{max-width:760px;margin:0 auto}
 .pb-head{display:flex;align-items:center;gap:12px;margin-bottom:14px}
 .pb-logo{width:44px;height:44px;border-radius:12px;background:var(--a);color:#fff;display:grid;place-items:center;font-weight:800;font-size:17px}
 .pb-head h1{font-size:20px}.pb-head p{font-size:12.5px;color:#64748b}
@@ -5067,6 +5102,10 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background
 .pb-track{height:10px;background:#eef0f8;border-radius:99px;overflow:hidden}.pb-fill{height:100%;background:var(--a);border-radius:99px}
 .pb-foot{text-align:center;color:#94a3b8;font-size:11.5px;margin-top:16px}
 .dim{color:#94a3b8}
+.pb-tbl{width:100%;border-collapse:collapse;font-size:12.5px}.pb-tbl th{background:#1e1b4b;color:#fff;text-align:right;padding:7px 6px;font-weight:600;white-space:nowrap}.pb-tbl th:first-child,.pb-tbl td:first-child{text-align:left}
+.pb-tbl td{padding:7px 6px;border-bottom:1px solid #eef2f9;text-align:right}.pb-tbl td:first-child{font-weight:600;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pb-tbl tbody tr:nth-child(even) td{background:#f7f8ff}.pb-tbl tfoot td{font-weight:800;background:#eef2ff}
+.pb-scroll{overflow:auto;margin:0 -4px}.pb-hot{color:#dc2626;font-weight:700}.pb-warn{color:#d97706;font-weight:700}
+.pb-kpi.stock{background:linear-gradient(135deg,#eef2ff,#f5f3ff);border-color:#c7d2fe}.pb-kpi.last{background:linear-gradient(135deg,#fdf4ff,#fff);border-color:#f0abfc}
 @media(max-width:480px){.pb-grid2{grid-template-columns:1fr}}
 </style></head><body><div class="pb-wrap">
 <header class="pb-head"><div class="pb-logo">${escHtml(String(db.settings.brand || 'FF').split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase())}</div>

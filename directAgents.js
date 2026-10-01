@@ -206,18 +206,24 @@ FF.pages = FF.pages || {};
       await FF.store.need('daily').catch(() => []);
       const issuance = (FF.gv.issuanceRows && FF.gv.issuanceRows()) || (FF.gv.rows && FF.gv.rows()) || [];
       const agg = new Map();
+      const directMemo = new Map();
       issuance.forEach((r) => {
-        if (!isDirect(r, 'gv')) return;
         const key = clean(r.agentId) || `name:${clean(r.agentName).toUpperCase()}`;
-        const o = agg.get(key) || { issued: 0, vc4: 0, last: null };
+        let dm = directMemo.get(key);
+        if (dm === undefined) { dm = !!isDirect(r, 'gv'); directMemo.set(key, dm); }
+        if (!dm) return;
+        const o = agg.get(key) || { issued: 0, vc4: 0, last: null, src: r };
         const n = Number(r.n) || 1;
         // v3.31: issued / run-rate sirf GV data month ka (pehle poori history jud jaati thi → qty bahut badi).
         if (!gvYm || (r.ym || (r.date ? FF.util.ymKey(r.date) : '')) === gvYm) { o.issued += n; if (r.group === 'VC4') o.vc4 += n; }
         if (!o.last || (r.date && r.date > o.last)) o.last = r.date;
         agg.set(key, o);
       });
+      // ⚡ v3.32: pehle har key par issuance.find() (lakh rows × keys) chal raha tha → Direct Agents KPI click par page hang.
+      //    Ab pehli row loop me hi (o.src) yaad rakhte hain — O(n).
       agg.forEach((o, key) => {
-        const existing = gvMap.get(key) || gvMap.get(`name:${clean((issuance.find((r) => (clean(r.agentId) || `name:${clean(r.agentName).toUpperCase()}`) === key) || {}).agentName).toUpperCase()}`);
+        const source = o.src || {};
+        const existing = gvMap.get(key) || gvMap.get(`name:${clean(source.agentName).toUpperCase()}`);
         if (existing) {
           existing.issued = o.issued;
           existing.vc4Issued = o.vc4;
@@ -225,7 +231,6 @@ FF.pages = FF.pages || {};
           existing.suggestedGross = suggestGrossQty({ daily: U.runRate(o.vc4, 'gv') });
           return;
         }
-        const source = issuance.find((r) => (clean(r.agentId) || `name:${clean(r.agentName).toUpperCase()}`) === key) || {};
         pushGv(source.agentId, source.agentName, {
           tlName: tlNameOf(source), tlId: tlIdOf(source), reason: reason(source, 'gv'),
           issued: o.issued, vc4Issued: o.vc4, route: `#/gvTrend?agent=${encodeURIComponent(source.agentName || '')}`
@@ -247,7 +252,9 @@ FF.pages = FF.pages || {};
     const q = clean(p.q || '').toLowerCase();
     root.innerHTML = U.spinner('Direct agents ka rule + roster bana rahe hain…');
     let rows = [];
-    try { rows = await roster(); } catch (err) { root.innerHTML = U.errorBox(err); return; }
+    try {
+      rows = await Promise.race([roster(), new Promise((_, rej) => setTimeout(() => rej(new Error('Direct agents data load hone me der lag rahi hai — sheets abhi load ho rahi hain (auto-retry chalta hai). Thodi der baad ↻ dabao.')), 45000))]);
+    } catch (err) { root.innerHTML = U.errorBox(err); return; }
     const cnt = counts(rows, '');
     const byCh = { gv: rows.filter((r) => r.ch === 'gv'), ff: rows.filter((r) => r.ch === 'ff') };
     const tagRows = rows.filter((r) => isHighMedium(r.priority));

@@ -128,20 +128,28 @@ window.FF = window.FF || {};
 
     const promise = (async () => {
       let lastErr = null;
-      for (const url of attempts) {
-        try {
-          const { text, source } = await fetchText(url, o.timeoutMs);
-          const table = parseGviz(text);
-          table.source = source;
-          table.sheet = sheetName;
-          lastLoadAt = Date.now();
-          lastSource = source;
-          return table;
-        } catch (err) {
-          lastErr = err;
-          if (err instanceof QueryError) break; // same query would fail directly too
-          if (err.name === 'AuthError') { if (FF.auth && FF.auth.onExpired) FF.auth.onExpired(); break; }
+      // 🔁 Auto-retry (v3.32): network hiccup / Google 429-5xx / timeout par chup-chaap 3 try (backoff 0.7s, 1.8s).
+      //    QueryError (galat query) aur login-expiry par retry nahi — wo dobara bhi fail hote.
+      const delays = o.retries === 0 ? [] : [700, 1800];
+      for (let round = 0; round <= delays.length; round++) {
+        let fatal = false;
+        for (const url of attempts) {
+          try {
+            const { text, source } = await fetchText(url, o.timeoutMs);
+            const table = parseGviz(text);
+            table.source = source;
+            table.sheet = sheetName;
+            lastLoadAt = Date.now();
+            lastSource = source;
+            return table;
+          } catch (err) {
+            lastErr = err;
+            if (err instanceof QueryError) { fatal = true; break; } // same query would fail directly too
+            if (err.name === 'AuthError') { if (FF.auth && FF.auth.onExpired) FF.auth.onExpired(); fatal = true; break; }
+          }
         }
+        if (fatal || round >= delays.length) break;
+        await new Promise((r) => setTimeout(r, delays[round]));
       }
       throw lastErr || new Error('Fetch failed');
     })();
