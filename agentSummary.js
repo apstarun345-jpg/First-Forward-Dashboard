@@ -134,6 +134,54 @@ FF.pages = FF.pages || {};
   }
   function clearCaches() { peopleCache.ff = null; peopleCache.gv = null; reportCache.clear(); }
 
+  // ---- v3.34 add-ons: 6-month trend · alerts · team pack -------------------------------------------
+  function ymBack(ym, k) {
+    const seg = String(ym || '').match(/^(\d{4})-(\d{1,2})$/);
+    const y = seg ? Number(seg[1]) : new Date().getFullYear();
+    const m = seg ? Number(seg[2]) : new Date().getMonth() + 1;
+    const d = new Date(y, m - 1 - k, 1);
+    return `${d.getFullYear()}-${U.pad2(d.getMonth() + 1)}`;
+  }
+  const monthLbl = (ym) => { const seg = String(ym || '').match(/^(\d{4})-(\d{1,2})$/); return seg ? new Date(Number(seg[1]), Number(seg[2]) - 1, 1).toLocaleString('en-IN', { month: 'short' }) : String(ym || ''); };
+
+  /** Pichhle 6 mahine ka issuance (EIR agentClass ledger — FF + GV dono, koi extra query nahi). */
+  function monthlyTrend(person, ch, isTl, curYm) {
+    const rows = (FF.store && FF.store.get && FF.store.get('agentClass')) || [];
+    if (!rows.length) return null;
+    const nm = norm(person.name);
+    const wantGv = ch === 'gv';
+    const mine = rows.filter((r) => {
+      if (wantGv !== /gv/i.test(r.channel || '')) return false;
+      return norm(isTl ? r.tlName : r.name) === nm;
+    });
+    if (!mine.length) return null;
+    const byYm = new Map();
+    mine.forEach((r) => byYm.set(r.ym, (byYm.get(r.ym) || 0) + (Number(r.n) || 0)));
+    const base = /^\d{4}-\d{2}$/.test(curYm) ? curYm : U.ymKey(new Date());
+    return Array.from({ length: 6 }, (_, i) => {
+      const ym = ymBack(base, 5 - i);
+      return { ym, lbl: monthLbl(ym), n: byYm.get(ym) || 0 };
+    });
+  }
+
+  /** TL: girne wale / chamakte / idle agents. Agent: khud ka drop/star flag. */
+  function agentAlerts(p, isTl) {
+    const ags = (p.agents || []).filter((a) => a && a.name);
+    if (!isTl) {
+      const t = p.totals || {};
+      return {
+        drop: (t.growth != null && t.growth <= -50 && (t.lastTotal || 0) >= 20) ? [p] : [],
+        stars: (t.growth != null && t.growth >= 50 && (t.curTotal || 0) >= 10) ? [p] : [],
+        idle: []
+      };
+    }
+    return {
+      drop: ags.filter((a) => a.growth != null && a.growth <= -50 && a.lastTotal >= 20).sort((a, b) => a.growth - b.growth).slice(0, 8),
+      stars: ags.filter((a) => a.growth != null && a.growth >= 50 && a.curTotal >= 10).sort((a, b) => b.curTotal - a.curTotal).slice(0, 8),
+      idle: ags.filter((a) => !a.curTotal && a.stockTotal > 0).sort((a, b) => b.stockTotal - a.stockTotal).slice(0, 8)
+    };
+  }
+
   function matchPeople(list, q) {
     const raw = clean(q);
     if (!raw) return list.slice(0, 30);
@@ -213,7 +261,8 @@ FF.pages = FF.pages || {};
       const res = await FF.stockAge.compute(scope).catch(() => null);
       age = res && (res[ch] || res.ff || res.gv) || null;
     }
-    return { person, p, age, ch, isTl };
+    const trend = monthlyTrend(person, ch, isTl, m.cur || '');
+    return { person, p, age, ch, isTl, trend, generatedAt: Date.now() };
   }
 
   function reportText(r) {
@@ -491,6 +540,120 @@ FF.pages = FF.pages || {};
     });
   }
 
+  function sparklineHtml(trend) {
+    if (!trend) return '';
+    const max = Math.max(...trend.map((t) => t.n), 1);
+    const cols = trend.map((t, i) => `<div class="as-tr-col" title="${esc(t.ym)} · ${fmt(t.n)} tags"><span class="as-tr-val">${t.n ? fmt(t.n) : '·'}</span><div class="as-tr-bar ${i === trend.length - 1 ? 'now' : ''}" style="height:${Math.max(3, Math.round((t.n / max) * 52))}px"></div><span class="as-tr-lbl">${esc(t.lbl)}</span></div>`).join('');
+    const cur = trend[trend.length - 1] || { n: 0 };
+    const prev = trend.length > 1 ? trend[trend.length - 2].n : 0;
+    const arrow = prev ? (cur.n >= prev ? '📈' : '📉') : '📊';
+    return `<div class="card as-trend-card"><div class="card-head"><h3>${arrow} 6-Month Trend</h3><span class="dim small">6 mahine: <b>${fmt(U.sum(trend, (t) => t.n))}</b> · MTD: <b>${fmt(cur.n)}</b> · Last: <b>${fmt(prev)}</b></span></div><div class="as-trend">${cols}</div></div>`;
+  }
+
+  function alertsHtml(r) {
+    const al = agentAlerts(r.p, r.isTl);
+    if (!r.isTl) {
+      const t = r.p.totals || {};
+      if (al.drop.length) return `<div class="as-strip bad">⚠️ <b>MTD drop warning:</b> is mahine <b>${fmt(t.curTotal)}</b> vs last month <b>${fmt(t.lastTotal)}</b> (${t.growth.toFixed(0)}%) — TL se baat karein 📞</div>`;
+      if (al.stars.length) return `<div class="as-strip good">🌟 <b>Shandaar performance!</b> MTD <b>${fmt(t.curTotal)}</b> — last month se <b>+${t.growth.toFixed(0)}%</b> up 🎉</div>`;
+      return '';
+    }
+    const chip = (a, icon) => `<button type="button" class="chip as-sug-chip" data-as-pick="${esc(`${r.ch}-agent|${a.name}`)}">${icon} <b>${esc(a.name)}</b> <small class="dim">MTD ${fmt(a.curTotal)} · Last ${fmt(a.lastTotal)}</small></button>`;
+    const rows = [];
+    if (al.drop.length) rows.push(`<div class="as-chip-row"><span class="badge red">🔻 MTD drop −50%+</span>${al.drop.map((a) => chip(a, '🔻')).join('')}</div>`);
+    if (al.stars.length) rows.push(`<div class="as-chip-row"><span class="badge green">🌟 Stars +50%+</span>${al.stars.map((a) => chip(a, '🌟')).join('')}</div>`);
+    if (al.idle.length) rows.push(`<div class="as-chip-row"><span class="badge amber">🐌 Zero issuance · stock held</span>${al.idle.map((a) => chip(a, '🐌')).join('')}</div>`);
+    return rows.length ? `<div class="card as-alert-card"><div class="card-head"><h3>🚨 Alerts &amp; 🌟 Top movers</h3><span class="dim small">Chip par click → agent ka poora summary</span></div><div class="card-body">${rows.join('')}</div></div>` : '';
+  }
+
+  // ---- v3.34 Team Pack — TL ke poore team ki ek combined PDF / Excel -------------------------------
+  const PACK_CAP = 50;
+  async function buildTeamPack(r, onProgress) {
+    const agents = (r.p.agents || []).slice(0, PACK_CAP);
+    const pack = [];
+    for (let i = 0; i < agents.length; i++) {
+      const a = agents[i];
+      if (onProgress) onProgress(i + 1, agents.length, a.name);
+      let rep = null;
+      try { rep = await buildReportCached({ kind: `${r.ch}-agent`, name: a.name, id: a.id || '', tl: r.p.name }); }
+      catch (err) { console.warn('[agentSummary] team pack skip:', a.name, err); }
+      pack.push({ agent: a, rep });
+    }
+    return pack;
+  }
+
+  function teamPackPdf(r, pack) {
+    const p = r.p, t = p.totals || {}, age = r.age;
+    const chLabel = r.ch === 'gv' ? 'GV Partner' : 'First Forward';
+    const ok = pack.filter((x) => x.rep).length;
+    const doc = FF.pdf.doc({ title: `${chLabel} · Team Pack — ${p.name}`, subtitle: `${ok}/${(p.agents || []).length} agents · TL summary + har agent ka apna page`, right: `${new Date().toLocaleDateString('en-IN')}` });
+    doc.kpis([
+      { label: `Team MTD (${p.curYm || ''})`, value: fmt(t.curTotal), sub: `VC4 ${fmt(t.curVc4)} · Comm ${fmt(t.curComm)}`, color: '#2563eb' },
+      { label: 'Last Month', value: fmt(t.lastTotal), sub: `${fmt(p.agents.length)} agents`, color: '#7c3aed' },
+      { label: 'Growth', value: t.growth == null ? '—' : `${t.growth >= 0 ? '+' : ''}${t.growth.toFixed(0)}%`, sub: `Expected ${fmt(p.expected)}`, color: (t.growth || 0) >= 0 ? '#16a34a' : '#dc2626' },
+      { label: 'Stock in Hand', value: fmt(t.stockTotal), sub: age ? `30+d ${fmt(age.old30)} · 60+d ${fmt(age.old60)}` : '', color: '#0891b2' }
+    ]);
+    const clsRows = (p.classTable || []).filter((x) => x.cur || x.last || x.stock);
+    if (clsRows.length) {
+      doc.section(`Class-wise Issuance (${p.lastYm || 'Last'} vs ${p.curYm || 'MTD'}) & Stock`);
+      doc.table({
+        headers: ['Class', p.lastYm || 'Last', p.curYm || 'MTD', 'Growth %', 'Stock'],
+        align: ['left', 'right', 'right', 'right', 'right'],
+        rows: clsRows.map((x) => [x.cls, fmt(x.last), fmt(x.cur), x.growth == null ? '—' : `${x.growth >= 0 ? '+' : ''}${x.growth.toFixed(0)}%`, fmt(x.stock)]),
+        foot: ['GRAND TOTAL', fmt(t.lastTotal), fmt(t.curTotal), t.growth == null ? '—' : `${t.growth >= 0 ? '+' : ''}${t.growth.toFixed(0)}%`, fmt(t.stockTotal)]
+      });
+    }
+    pack.forEach(({ agent, rep }) => {
+      if (!rep) return;
+      const ap = rep.p, at = ap.totals || {};
+      doc.section(`${agent.name}${agent.id ? ` · ID ${agent.id}` : ''}`);
+      doc.kpis([
+        { label: 'MTD', value: fmt(at.curTotal), sub: `VC4 ${fmt(at.curVc4)} · Comm ${fmt(at.curComm)}`, color: '#2563eb' },
+        { label: 'Last Month', value: fmt(at.lastTotal), color: '#7c3aed' },
+        { label: 'Growth', value: at.growth == null ? '—' : `${at.growth >= 0 ? '+' : ''}${at.growth.toFixed(0)}%`, color: (at.growth || 0) >= 0 ? '#16a34a' : '#dc2626' },
+        { label: 'Stock', value: fmt(at.stockTotal), color: '#0891b2' }
+      ]);
+      const rows2 = (ap.classTable || []).filter((x) => x.cur || x.last || x.stock);
+      if (rows2.length) doc.table({ headers: ['Class', 'Last', 'MTD', 'Stock'], align: ['left', 'right', 'right', 'right'], rows: rows2.map((x) => [x.cls, fmt(x.last), fmt(x.cur), fmt(x.stock)]) });
+    });
+    doc.footer(`${FF.config.brand || 'ApnaPayment'} · ${chLabel} Team Pack · ${p.name} · ${new Date().toLocaleDateString('en-IN')}`);
+    return doc.finish();
+  }
+
+  function teamPackXlsx(r, pack) {
+    const p = r.p, t = p.totals || {};
+    const sheets = [{
+      name: 'Team Summary',
+      header: ['Agent', 'ID', p.lastYm || 'Last Month', p.curYm || 'Current (MTD)', 'VC4', 'Comm', 'Growth %', 'Stock'],
+      rows: (p.agents || []).map((a) => [a.name, a.id || '', a.lastTotal, a.curTotal, a.curVc4, a.curComm, a.growth == null ? '' : Number(a.growth.toFixed(1)), a.stockTotal])
+        .concat([['GRAND TOTAL', `${p.agents.length} Agents`, U.sum(p.agents, (a) => a.lastTotal), U.sum(p.agents, (a) => a.curTotal), U.sum(p.agents, (a) => a.curVc4), U.sum(p.agents, (a) => a.curComm), '', U.sum(p.agents, (a) => a.stockTotal)]])
+    }];
+    if (r.age && r.age.total) {
+      sheets.push({
+        name: 'Stock Ageing',
+        header: ['Class', ...r.age.buckets.map((b) => b.label), '30+d Old', '60+d Critical', 'Total'],
+        rows: (r.age.byClass || []).map((c) => [c.cls, ...r.age.buckets.map((b) => c[b.key] || 0), c.old30, c.old60, c.total])
+          .concat([['GRAND TOTAL', ...r.age.buckets.map((b) => b.n || 0), r.age.old30, r.age.old60, r.age.total]])
+      });
+    }
+    pack.forEach(({ agent, rep }) => {
+      if (!rep) return;
+      const ap = rep.p, at = ap.totals || {};
+      sheets.push({
+        name: String(agent.name).slice(0, 28),
+        header: ['Class', ap.lastYm || 'Last', ap.curYm || 'MTD', 'Growth %', 'Stock'],
+        rows: (ap.classTable || []).filter((x) => x.cur || x.last || x.stock).map((x) => [x.cls, x.last, x.cur, x.growth == null ? '' : Number(x.growth.toFixed(1)), x.stock])
+          .concat([['GRAND TOTAL', at.lastTotal, at.curTotal, at.growth == null ? '' : Number(at.growth.toFixed(1)), at.stockTotal]])
+      });
+    });
+    return sheets;
+  }
+
+  function agentWaText(r, a) {
+    const chLabel = r.ch === 'gv' ? 'GV Partner' : 'First Forward';
+    return `*🧑‍💼 ${a.name}* (${chLabel} · Agent${a.id ? ` · ID: ${a.id}` : ''})\n• MTD: *${fmt(a.curTotal)}* (Last: ${fmt(a.lastTotal)} · ${a.growth == null ? '—' : `${a.growth >= 0 ? '+' : ''}${a.growth.toFixed(0)}%`})\n• Stock: *${fmt(a.stockTotal)}*\n👥 TL: ${r.p.name}\n— ${FF.config.brand || 'ApnaPayment'} 📊`;
+  }
+
   function reportHtml(r) {
     const p = r.p, t = p.totals || {}, age = r.age;
     const chLabel = r.ch === 'gv' ? 'GV Partner' : 'First Forward';
@@ -536,6 +699,8 @@ FF.pages = FF.pages || {};
       </div>
 
       ${chartsSectionHtml(r)}
+      ${sparklineHtml(r.trend)}
+      ${alertsHtml(r)}
 
       <div class="as-two">
         <div class="card">
@@ -557,11 +722,11 @@ FF.pages = FF.pages || {};
       </div>
 
       ${r.isTl && (p.agents || []).length ? `<div class="card" style="margin-top:14px">
-        <div class="card-head"><h3>🧑‍💼 Team Agents (${fmt(p.agents.length)}) — click any agent to open their summary</h3></div>
+        <div class="card-head"><h3>🧑‍💼 Team Agents (${fmt(p.agents.length)}) — click any agent to open their summary</h3><span class="as-pack-btns"><button class="btn small" data-as-pack="xlsx" title="Poore team ki ek Excel workbook (Summary + har agent ki sheet)">👥 Team Pack Excel</button><button class="btn small primary" data-as-pack="pdf" title="Poore team ki ek combined PDF (TL + har agent ka page)">👥 Team Pack PDF</button></span></div>
         <div class="table-wrap"><table class="tbl compact">
-          <thead><tr><th>Agent</th><th>ID</th><th class="num">${esc(p.lastYm || 'Last')}</th><th class="num">${esc(p.curYm || 'MTD')}</th><th class="num">VC4</th><th class="num">Comm</th><th class="num">Growth</th><th class="num">Stock</th></tr></thead>
-          <tbody>${p.agents.map((a) => `<tr class="clickable" data-as-pick="${esc(`${r.ch}-agent|${a.name}`)}"><td><b>${esc(a.name)}</b></td><td class="mono">${esc(a.id || '—')}</td><td class="num">${fmt(a.lastTotal)}</td><td class="num"><b>${fmt(a.curTotal)}</b></td><td class="num">${fmt(a.curVc4)}</td><td class="num">${fmt(a.curComm)}</td><td class="num">${U.pctHtml(a.growth)}</td><td class="num">${fmt(a.stockTotal)}</td></tr>`).join('')}</tbody>
-          <tfoot><tr class="row-total"><td colspan="2"><b>Grand Total (${fmt(p.agents.length)} Agents)</b></td><td class="num"><b>${fmt(sumAgentsLast)}</b></td><td class="num"><b>${fmt(sumAgentsCur)}</b></td><td class="num"><b>${fmt(sumAgentsVc4)}</b></td><td class="num"><b>${fmt(sumAgentsComm)}</b></td><td class="num">${U.pctHtml(teamGrowth)}</td><td class="num"><b>${fmt(sumAgentsStock)}</b></td></tr></tfoot>
+          <thead><tr><th>Agent</th><th>ID</th><th class="num">${esc(p.lastYm || 'Last')}</th><th class="num">${esc(p.curYm || 'MTD')}</th><th class="num">VC4</th><th class="num">Comm</th><th class="num">Growth</th><th class="num">Stock</th><th></th></tr></thead>
+          <tbody>${p.agents.map((a) => `<tr class="clickable" data-as-pick="${esc(`${r.ch}-agent|${a.name}`)}"><td><b>${esc(a.name)}</b></td><td class="mono">${esc(a.id || '—')}</td><td class="num">${fmt(a.lastTotal)}</td><td class="num"><b>${fmt(a.curTotal)}</b></td><td class="num">${fmt(a.curVc4)}</td><td class="num">${fmt(a.curComm)}</td><td class="num">${U.pctHtml(a.growth)}</td><td class="num">${fmt(a.stockTotal)}</td><td><button class="btn tiny" data-as-wa="${esc([a.name, a.id || '', a.curTotal, a.lastTotal, a.stockTotal].join('|'))}" title="WhatsApp par is agent ka summary bhejein">📲</button></td></tr>`).join('')}</tbody>
+          <tfoot><tr class="row-total"><td colspan="2"><b>Grand Total (${fmt(p.agents.length)} Agents)</b></td><td class="num"><b>${fmt(sumAgentsLast)}</b></td><td class="num"><b>${fmt(sumAgentsCur)}</b></td><td class="num"><b>${fmt(sumAgentsVc4)}</b></td><td class="num"><b>${fmt(sumAgentsComm)}</b></td><td class="num">${U.pctHtml(teamGrowth)}</td><td class="num"><b>${fmt(sumAgentsStock)}</b></td><td></td></tr></tfoot>
         </table></div>
       </div>` : ''}
     </div>`;
@@ -697,6 +862,44 @@ FF.pages = FF.pages || {};
 
       if (root.__asSummaryClick) root.removeEventListener('click', root.__asSummaryClick);
       root.__asSummaryClick = async (e) => {
+        const waBtn = e.target.closest('[data-as-wa]');
+        if (waBtn && state.report) {
+          const [wName, wId, wCur, wLast, wStock] = (waBtn.dataset.asWa || '').split('|');
+          const a = { name: wName, id: wId, curTotal: Number(wCur) || 0, lastTotal: Number(wLast) || 0, stockTotal: Number(wStock) || 0, growth: U.growth(Number(wCur) || 0, Number(wLast) || 0) };
+          const mob = MP() && MP().mobileFor ? MP().mobileFor(wName, wId, '') : '';
+          const txt = agentWaText(state.report, a);
+          const link = mob && mob10(mob).length === 10 ? `https://wa.me/91${mob10(mob)}?text=${encodeURIComponent(txt)}` : U.waLink(txt);
+          window.open(link, '_blank', 'noopener');
+          return;
+        }
+        const packBtn = e.target.closest('[data-as-pack]');
+        if (packBtn && state.report && state.report.isTl) {
+          if (packBtn.disabled) return;
+          const kind = packBtn.dataset.asPack;
+          packBtn.disabled = true;
+          const orig = packBtn.textContent;
+          try {
+            if (kind === 'pdf' && !FF.pdf && FF.lazy && FF.lazy.loadScript) await FF.lazy.loadScript('pdf.js').catch(() => {});
+            const pack = await buildTeamPack(state.report, (done, total, name) => { packBtn.textContent = `⏳ ${done}/${total}…`; packBtn.title = name; });
+            const okCount = pack.filter((x) => x.rep).length;
+            const fname = `${state.report.ch}-team-pack-${U.slug(state.report.p.name)}-${U.stamp()}`;
+            if (kind === 'pdf') {
+              if (!FF.pdf || !FF.pdf.doc) throw new Error('PDF module load nahi hua — page refresh karo');
+              FF.pdf.download(teamPackPdf(state.report, pack), `${fname}.pdf`);
+              U.toast(`Team Pack PDF ✓ (${okCount} agents, 1 combined file)`, 'ok');
+            } else {
+              FF.xlsx.download(`${fname}.xlsx`, teamPackXlsx(state.report, pack));
+              U.toast(`Team Pack Excel ✓ (${okCount} agents, alag-alag sheet)`, 'ok');
+            }
+          } catch (err) {
+            console.error('[agentSummary] team pack failed:', err);
+            U.toast((err && err.message) || 'Team Pack fail hua', 'err');
+          } finally {
+            packBtn.disabled = false;
+            packBtn.textContent = orig;
+          }
+          return;
+        }
         const opt = e.target.closest('[data-as-opt],[data-as-pick]');
         if (opt) {
           const [kind, name] = (opt.dataset.asOpt || opt.dataset.asPick).split('|');
@@ -768,5 +971,5 @@ FF.pages = FF.pages || {};
 
   FF.pages.ffAgentSummary = makePage('ff');
   FF.pages.gvAgentSummary = makePage('gv');
-  FF.agentSummary = { loadPeople, matchPeople, topSuggestions, buildReport, makePdf, reportText, reportCsv, reportXlsx, reportJson, clearCaches };
+  FF.agentSummary = { loadPeople, matchPeople, topSuggestions, buildReport, makePdf, reportText, reportCsv, reportXlsx, reportJson, monthlyTrend, agentAlerts, buildTeamPack, teamPackPdf, teamPackXlsx, agentWaText, clearCaches };
 })(window.FF);

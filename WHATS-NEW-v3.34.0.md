@@ -38,6 +38,27 @@ Saath me export buttons par busy-state + error toast laga diya — ab kabhi "kuc
 - **🔄 Refresh button** — search bar me naya button: cache clear karke list + current report fresh
   laata hai (Search button bhi ab fresh report deta hai).
 
+## 🚀 Add-ons — Agent / TL Summary me naye features
+
+### 📈 6-Month Trend (har agent + TL)
+- Summary me naya card — pichhle 6 mahine ka month-wise issuance bars (EIR agentClass ledger se, **koi extra Google query nahi**), current month highlight + 📈/📉 direction.
+- Agar trend data available nahi → card apne aap chhup jaata hai.
+
+### 🚨 Alerts & 🌟 Top movers (TL view) / MTD-drop warning (agent view)
+- **TL ke liye** — clickable chips: 🔻 *MTD drop −50%+* (last month ke muqable aadhe se kam), 🌟 *Stars +50%+*, 🐌 *Zero issuance par stock held*. Chip click → us agent ka poora summary.
+- **Agent ke liye** — khud ke growth par red/green strip (⚠️ drop warning / 🌟 shandaar performance).
+
+### 👥 Team Pack (TL view) — poora team ek hi file me
+- **👥 Team Pack PDF** — TL ka summary + har agent ka apna page (KPI cards + class table) — ek combined multi-page PDF, progress ⏳ 12/30… dikhta hai.
+- **👥 Team Pack Excel** — Team Summary sheet + Stock Ageing sheet + **har agent ki apni sheet** (sabme Grand Total).
+- Cap 50 agents, fail hone par agent skip + toast (silent fail nahi).
+
+### 📲 Per-agent WhatsApp quick-share (TL team table)
+- Har agent row me 📲 button — agent ka MTD/Last/Stock/TL one-tap WhatsApp message; mobile number milne par seedha `wa.me/91<number>` par khulta hai.
+
+### 🕘 Generated-at stamp
+- Report header me "🕘 HH:MM" — data kis waqt ka hai hamesha dikhta hai (cache ke saath honest).
+
 ## 🧾 Drawer PDF
 
 - Drawer export ab structured builder se multi-page PDF banata hai (KPI cards + har table, Grand
@@ -45,7 +66,6 @@ Saath me export buttons par busy-state + error toast laga diya — ab kabhi "kuc
 
 ## 🧪 Tests + versioning
 
-- Naya `dev/v334-report-formats.test.js` — legacy + naya PDF API, reportXlsx sheets, JSON payload,
-  xlsx Blob (4 tests). Poora suite **303/303 pass**.
+- Naye tests — `dev/v334-report-formats.test.js` (PDF legacy+naya API, reportXlsx, JSON) + `dev/v334-addons.test.js` (trend month-walk, channel split, TL rollup, alerts, team pack xlsx, WA text) — **10 naye tests, poora suite 309/309 pass**.
 - Cache-busting `?v=57 → v=58` (index.html + sw.js + service-worker cache `apnapayment-v65`) —
   warna browsers 1 saal purani JS dikhatе.

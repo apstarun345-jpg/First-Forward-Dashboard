@@ -4263,3 +4263,25 @@ html[data-theme="dark"] .ua-hit b { color: #fca5a5; }
   .ua-kpi-card .kpi-foot { font-size: 9.5px; }
   .ua-sc-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* ── v3.34 — Agent / TL Summary add-ons: trend · alerts · team pack ─────────────────────────-- */
+.as-trend { display: flex; gap: 12px; align-items: flex-end; overflow-x: auto; padding: 10px 4px 4px; }
+.as-tr-col { display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 52px; flex: 1; }
+.as-tr-val { font-size: 11px; font-weight: 800; color: #0f172a; line-height: 1; }
+.as-tr-bar { width: 68%; max-width: 36px; min-height: 3px; border-radius: 6px 6px 2px 2px; background: linear-gradient(180deg, #93c5fd, #bfdbfe); }
+.as-tr-bar.now { background: linear-gradient(180deg, #2563eb, #60a5fa); box-shadow: 0 2px 8px rgba(37, 99, 235, 0.35); }
+.as-tr-lbl { font-size: 10px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.03em; }
+.as-alert-card { margin-top: 14px; }
+.as-chip-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 5px 0; }
+.as-chip-row .badge { flex: 0 0 auto; min-width: 130px; text-align: center; }
+.as-strip { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 12px; padding: 10px 14px; border-radius: 10px; font-size: 13.5px; border: 1px solid; }
+.as-strip.bad { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
+.as-strip.good { background: #f0fdf4; border-color: #bbf7d0; color: #166534; }
+.as-gen { margin-left: auto; align-self: center; white-space: nowrap; }
+.as-pack-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+.btn.tiny { padding: 2px 7px; font-size: 12px; line-height: 1.4; border-radius: 7px; }
+@media (max-width: 720px) {
+  .as-gen { margin-left: 0; width: 100%; }
+  .as-pack-btns { width: 100%; }
+  .as-pack-btns .btn { flex: 1; }
+}
