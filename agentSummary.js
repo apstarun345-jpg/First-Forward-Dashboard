@@ -10,7 +10,7 @@ FF.pages = FF.pages || {};
   'use strict';
   const U = FF.util;
   const esc = U.esc, clean = U.clean, fmt = U.fmt;
-  const norm = (s) => clean(s).toLowerCase().replace(/\s+/g, ' ');
+  const norm = (s) => clean(s).normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
   const digits = (s) => String(s || '').replace(/\D/g, '');
   const mob10 = (s) => { const d = digits(s); return d.length >= 10 ? d.slice(-10) : d; };
   const MP = () => FF.masterProfile;
@@ -152,7 +152,7 @@ FF.pages = FF.pages || {};
     const isTl = /tl$/.test(person.kind);
     const t = raw.totals || {}, s = raw.stock || {}, m = raw.months || {};
     const p = {
-      ...raw, kind: isTl ? 'tl' : 'agent', rawKind: person.kind, channel: ch,
+      ...raw, kind: isTl ? 'tl' : 'agent', rawKind: person.kind, channel: raw.channel || (ch === 'gv' ? 'GV Partner' : 'First Forward'),
       tlName: (raw.tl && raw.tl.name) || person.tl || '',
       tlId: (raw.tl && raw.tl.id) || person.tlId || '',
       tlMobile: (raw.tl && raw.tl.mobile) || person.tlMobile || '',
@@ -481,7 +481,7 @@ FF.pages = FF.pages || {};
               <div id="as-drop" class="as-drop" hidden></div>
             </div>
           </div>
-          <div class="as-Quick-wrap" style="margin-top:10px">
+          <div class="as-quick-wrap" style="margin-top:10px">
             <div class="as-quick-head"><span class="dim small">⚡ <b>Suggested TLs &amp; Agents</b> (click to open):</span></div>
             <div id="as-top-suggest" class="as-top-suggest"></div>
           </div>
@@ -574,7 +574,8 @@ FF.pages = FF.pages || {};
         });
       }
 
-      root.addEventListener('click', async (e) => {
+      if (root.__asSummaryClick) root.removeEventListener('click', root.__asSummaryClick);
+      root.__asSummaryClick = async (e) => {
         const opt = e.target.closest('[data-as-opt],[data-as-pick]');
         if (opt) {
           const [kind, name] = (opt.dataset.asOpt || opt.dataset.asPick).split('|');
@@ -611,7 +612,8 @@ FF.pages = FF.pages || {};
           return;
         }
         if (!e.target.closest('.as-search')) drop.hidden = true;
-      });
+      };
+      root.addEventListener('click', root.__asSummaryClick);
 
       const initial = (params && params.name && matchPeople(state.list, params.name)[0])
         || (params && params.q && matchPeople(state.list, params.q)[0])

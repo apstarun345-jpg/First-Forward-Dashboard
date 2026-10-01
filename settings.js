@@ -172,7 +172,10 @@ FF.pages = FF.pages || {};
   function notificationsSection() {
     const prefs = notifyPrefsNow();
     const on = prefs.enabled !== false;
-    const types = ((FF.notifications || {}).notifyTypes || []).filter((t) => (A.isAdmin() ? t.admin : t.user));
+    const notificationApi = FF.notifications || {};
+    const types = (notificationApi.notifyTypes || []).filter((t) => (A.isAdmin() ? t.admin : t.user));
+    const toneOptions = (notificationApi.toneOptions || [{ id: 'classic', label: 'Classic · single clear beep' }]);
+    const tone = toneOptions.some((x) => x.id === prefs.tone) ? prefs.tone : 'classic';
     return section('🔔 Notifications <span class="dim">(app + mobile)</span>', `
       <p class="dim small">Har notification <b>app ke andar (bell)</b> aur <b>mobile / desktop ke notification panel</b> dono par aati hai — app band hone par bhi Web Push se phone par alert chala jaata hai. Neeche decide karo kaunsi notifications aani chahiye.</p>
       <div class="notify-switches" style="background:transparent;padding:0;border:0">
@@ -180,6 +183,13 @@ FF.pages = FF.pages || {};
         ${switchRow('sound', '🔊 Sound / vibration', 'Alert ke saath short beep + mobile vibration', prefs.sound !== false, !on)}
         ${switchRow('monthly', '📅 Monthly report', 'Har mahine ki 1–5 tarikh ko pichhle mahine ka FF vs GV compare', prefs.monthly !== false, !on)}
       </div>
+      <div class="notify-tone-row" style="display:flex;align-items:end;gap:8px;flex-wrap:wrap;margin:10px 0">
+        <label class="fld" style="min-width:250px;flex:1"><span>🔔 Notification / update beep tone</span>
+          <select class="input" id="notify-tone" ${!on ? 'disabled' : ''}>${toneOptions.map((x) => `<option value="${esc(x.id)}" ${tone === x.id ? 'selected' : ''}>${esc(x.label)}</option>`).join('')}</select>
+        </label>
+        <button type="button" class="btn small" id="notify-tone-test">▶ Preview tone</button>
+      </div>
+      <p class="dim small">Selected sound is used for in-app alerts and report updates. Background phone/desktop pushes use the device's native notification sound; supported devices also get a tone-matched vibration pattern.</p>
       <details class="notify-prefs" open style="border:0;margin-top:6px"><summary>Kaunsi notifications aayengi? (type-wise on/off — in-app + mobile dono par apply)</summary>
         <div class="notify-pref-grid">${types.map((t) => `<span class="check small">${ffSwitch(t.key, prefs[t.key] !== false, !on)} ${t.label}</span>`).join('')}</div>
         <p class="dim small" style="margin:6px 2px 0">${A.isAdmin() ? '👑 Admin ko sab users ki activity aati hai — naya signup, login, search, button click, page open, settings change, report/sheet update, location — sab. Upar se type ke hisaab se ON/OFF karo.' : 'Apne liye kaunsi alerts chahiye wo upar choose karo — ye in-app + phone panel dono par lagta hai.'}</p>
@@ -215,6 +225,15 @@ FF.pages = FF.pages || {};
       <p class="dim small" style="margin-top:6px">applicationServerKey (65-byte raw point): <code>${esc(String(st.publicKey || '').slice(0, 60))}…</code></p>`;
   }
   async function bindNotifications(body) {
+    const N = FF.notifications;
+    const toneEl = U.$('#notify-tone', body);
+    if (toneEl && N && N.setTone) toneEl.addEventListener('change', () => {
+      const selected = N.setTone(toneEl.value);
+      toneEl.value = selected;
+      U.toast('🔔 Notification tone saved and previewed ✓', 'ok');
+    });
+    const toneTest = U.$('#notify-tone-test', body);
+    if (toneTest && N && N.testSound) toneTest.addEventListener('click', () => N.testSound());
     const slot = U.$('#push-diag-slot', body);
     if (!slot) return;
     const drawDiag = async () => {
@@ -667,7 +686,9 @@ FF.pages = FF.pages || {};
   /** Naye tags ki awaaz yahan se test / configure hoti hai (topbar 🔊 menu ka hi doosra darwaza). */
   function soundTab() {
     const B = FF.officeBell;
-    const p = B ? B.prefs() : { minTags: 1, ff: true, gv: true, ting: true, muteUntil: 0 };
+    const p = B ? B.prefs() : { minTags: 1, ff: true, gv: true, ting: true, tone: 'classic', muteUntil: 0 };
+    const toneOptions = (B && B.toneOptions) || [{ id: 'classic', label: 'Classic · rising with update size' }];
+    const tone = toneOptions.some((x) => x.id === p.tone) ? p.tone : 'classic';
     const unlocked = !!(B && B.unlocked);
     const badge = unlocked ? '<span class="badge green">SOUND UNLOCKED ✓</span>'
       : `<span class="badge ${B && B.lastError ? 'red' : 'amber'}">${B && B.lastError ? `BLOCKED · ${esc(B.lastError)}` : 'TAP TO UNLOCK'}</span>`;
@@ -679,6 +700,7 @@ FF.pages = FF.pages || {};
       <div class="form-grid">
         ${field('🎙️ Voice announcer', `<label class="check"><input type="checkbox" data-snd="voice" ${B && B.voiceOn ? 'checked' : ''}> Naye tags bol kar sunao</label>`, 'Off karne par sirf ting bajega')}
         ${field('🔔 Ting sound', `<label class="check"><input type="checkbox" data-snd="ting" ${p.ting !== false ? 'checked' : ''}> WebAudio ting bajao</label>`)}
+        ${field('🎵 New-tag update beep tone', `<select id="snd-tone" data-snd="tone">${toneOptions.map((x) => `<option value="${esc(x.id)}" ${tone === x.id ? 'selected' : ''}>${esc(x.label)}</option>`).join('')}</select>`, 'Classic is the default; the selected pattern is saved on this device')}
         ${field('🟦 First Forward tags', `<label class="check"><input type="checkbox" data-snd="ff" ${p.ff !== false ? 'checked' : ''}> FF ke naye tags announce karo</label>`)}
         ${field('🟩 GV Partner tags', `<label class="check"><input type="checkbox" data-snd="gv" ${p.gv !== false ? 'checked' : ''}> GV ke naye tags announce karo</label>`)}
         ${field('🏷️ Kam se kam kitne tags par bolo', `<select id="snd-min">${[1, 2, 5, 10, 25].map((n) => `<option value="${n}" ${Number(p.minTags) === n ? 'selected' : ''}>${n} tag${n > 1 ? 's' : ''}</option>`).join('')}</select>`, 'Chhote bursts par chup rehna ho to badhao')}
@@ -687,6 +709,7 @@ FF.pages = FF.pages || {};
       <div class="save-bar">
         <button class="btn primary" id="snd-unlock">🔊 Enable sound</button>
         <button class="btn" id="snd-test">🎙️ Test voice</button>
+        <button class="btn" id="snd-tone-test">🔔 Preview selected beep</button>
         <button class="btn" id="snd-mute">${B && Number(p.muteUntil) > Date.now() ? '🔔 Unmute' : '🔕 Mute 30 min'}</button>
         <button class="btn" id="snd-check">↻ Check now</button>
         <span class="dim small" id="snd-msg"></span>
@@ -707,6 +730,7 @@ FF.pages = FF.pages || {};
     U.$$('[data-snd]', body).forEach((el) => el.addEventListener('change', () => {
       const k = el.dataset.snd;
       if (k === 'voice') { try { localStorage.setItem('ff-office-bell-voice', el.checked ? '1' : '0'); } catch { /* ignore */ } if (el.checked) B.unlock('retry'); }
+      else if (k === 'tone') { B.setPrefs({ tone: el.value }); B.testTing(); say('Tone saved and previewed ✓'); return; }
       else B.setPrefs({ [k]: el.checked });
       say('Saved ✓');
     }));
@@ -724,6 +748,8 @@ FF.pages = FF.pages || {};
       B.speakAnnounce('Ye ek test hai — Rahul ne paanch naye tags issue kiye.', 5)
         .then((ok) => { say(ok ? 'Test bol diya ✓' : `Block hai: ${B.lastError || 'browser'}`); });
     });
+    const toneTest = U.$('#snd-tone-test', body);
+    if (toneTest) toneTest.addEventListener('click', () => { B.testTing(); say('Selected update tone previewed ✓'); });
     const muteBtn = U.$('#snd-mute', body);
     if (muteBtn) muteBtn.addEventListener('click', () => {
       const isMuted = Number(B.prefs().muteUntil || 0) > Date.now();
@@ -1232,15 +1258,40 @@ FF.pages = FF.pages || {};
     const on = !settings || !settings.features || settings.features.personalLinks !== false;
     const origin = location.origin;
     const offBanner = on ? '' : '<p class="check" style="background:#fef3c7;border:1px solid #fcd34d;border-radius:10px;padding:8px 12px;margin-bottom:10px">⏸️ Feature <b>band</b> hai — sabhi links ab 404 denge. <a href="#/settings?tab=features">🎛 Features → Personal links ON karo</a>.</p>';
-    const defSecs = Array.isArray(plDef.sections) && plDef.sections.length ? plDef.sections : PL_SECTIONS_META.map((s) => s.key);
+    const defSecs = Array.isArray(plDef.sections) ? plDef.sections : PL_SECTIONS_META.map((s) => s.key);
     const secCheckboxes = (prefix, activeList) => PL_SECTIONS_META.map((s) => `<label class="chip ${activeList.includes(s.key) ? 'on' : ''}" style="cursor:pointer;display:inline-flex;align-items:center;gap:5px"><input type="checkbox" data-${prefix}-sec="${s.key}" ${activeList.includes(s.key) ? 'checked' : ''}> ${s.icon} ${esc(s.label)}</label>`).join('');
+    const wireSectionGroup = (host, selector, dataKey) => {
+      const boxes = [...host.querySelectorAll(selector)];
+      const exportBox = boxes.find((cb) => cb.dataset[dataKey] === 'export');
+      const hasView = () => boxes.some((cb) => cb.dataset[dataKey] !== 'export' && cb.checked);
+      const sync = (changed) => {
+        if (changed && changed === exportBox && changed.checked && !hasView()) {
+          changed.checked = false;
+          U.toast('Exports ke liye pehle kam-se-kam ek report section allow karein.', 'warn');
+        }
+        if (!hasView() && exportBox) {
+          if (exportBox.checked) {
+            exportBox.checked = false;
+            U.toast('Last report section hatane par exports bhi band ho gaye.', 'info');
+          }
+          exportBox.disabled = true;
+          if (exportBox.closest('.chip')) exportBox.closest('.chip').title = 'Enable at least one report section before allowing exports';
+        } else if (exportBox) {
+          exportBox.disabled = false;
+          if (exportBox.closest('.chip')) exportBox.closest('.chip').title = 'Download access for the report sections allowed above';
+        }
+        boxes.forEach((cb) => { const chip = cb.closest('.chip'); if (chip) chip.classList.toggle('on', cb.checked); });
+      };
+      boxes.forEach((cb) => cb.addEventListener('change', () => sync(cb)));
+      sync(null);
+    };
 
     body.innerHTML = `<div class="card">
       <div class="page-head" style="margin-bottom:8px"><div><h2>🔗 Personal links <span class="dim small">(read-only · ID + Mobile Auth · Custom Access)</span></h2>
       <p class="sub">First Forward ya GV agent/TL ka personal portal URL — Class-wise Stock, Date &amp; Agent Issuance, Performance, Stock Ageing tabs + CSV/PDF download. Jab TL/Agent link kholega to <b>TL/Agent ID + Mobile Number</b> se verify hokar khulega.</p></div></div>
       ${offBanner}
       <div class="card compact-card" style="margin-bottom:12px;background:var(--bg-subtle,#f8fafc)">
-        <div class="card-head"><h3>➕ Naya Personal Link Banao</h3><span class="dim small">Naam choose karein → ID, Mobile aur Sections select karein</span></div>
+        <div class="card-head"><h3>➕ Naya Personal Link Banao</h3><span class="dim small">Naam choose karein → registered ID, mobile aur allowed sections set karein</span></div>
         <div class="finder-row" style="margin-bottom:10px;flex-wrap:wrap;gap:8px">
           <select class="input" id="pl-source" style="width:auto"><option value="ff">🟦 First Forward</option><option value="gv">🟩 GV Partner</option></select>
           <select class="input" id="pl-kind" style="width:auto"><option value="agent">🧑‍💼 Agent</option><option value="tl">👥 TL</option></select>
@@ -1252,27 +1303,27 @@ FF.pages = FF.pages || {};
         <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:6px">
           <span class="dim small"><b>🎛️ Link Access Sections:</b></span>
           ${secCheckboxes('new', defSecs)}
-          <label class="chip ${plDef.requireAuth !== false ? 'on' : ''}" style="cursor:pointer;margin-left:auto"><input type="checkbox" id="pl-req-auth" ${plDef.requireAuth !== false ? 'checked' : ''}> 🔐 Require ID + Mobile Auth</label>
+          <span class="badge blue" title="Server-side check is mandatory">🔐 ID + registered mobile verification is always required</span>
         </div>
         <span class="dim small" id="pl-msg" style="display:block;margin-top:6px"></span>
       </div>
 
       <div class="card compact-card" style="margin-bottom:12px">
-        <div class="card-head"><h3>🛡️ Admin Global Default Access Control</h3><span class="dim small">Naye links aur existing links ke liye default tabs &amp; security</span></div>
+        <div class="card-head"><h3>🛡️ Admin Global Default Access Control</h3><span class="dim small">Naye links aur existing links ke liye default tabs · identity verification always stays on</span></div>
         <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px">
           ${secCheckboxes('def', defSecs)}
-          <label class="chip ${plDef.requireAuth !== false ? 'on' : ''}" style="cursor:pointer"><input type="checkbox" id="pl-def-auth" ${plDef.requireAuth !== false ? 'checked' : ''}> 🔐 ID + Mobile Auth Gate</label>
+          <span class="badge blue">🔐 ID + mobile verification cannot be disabled</span>
           <button class="btn small primary" id="pl-save-def" style="margin-left:auto">💾 Save Default &amp; Apply to All Links</button>
         </div>
       </div>
 
       ${links.length ? `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Source</th><th>Kind</th><th>Naam</th><th>🔐 Auth (ID · Mobile)</th><th>🎛️ Allowed Sections</th><th>Link</th><th>Status</th><th>Actions</th></tr></thead><tbody>
       ${links.map((l) => {
-        const secs = Array.isArray(l.sections) && l.sections.length ? l.sections : defSecs;
-        const secBadges = PL_SECTIONS_META.filter((s) => secs.includes(s.key)).map((s) => `<span class="badge" title="${esc(s.label)}">${s.icon} ${esc(s.label.split(' ')[0])}</span>`).join(' ');
-        const authBadge = l.requireAuth !== false
-          ? `<span class="badge blue" title="TL/Agent ID + Mobile Required">🔐 ${esc(l.personId || 'Auto ID')} · 📱 ${esc(l.mobile || 'Auto')}</span>`
-          : '<span class="badge">🔓 Direct Open</span>';
+        const secs = Array.isArray(l.sections) ? l.sections : defSecs;
+        const secBadges = PL_SECTIONS_META.filter((s) => secs.includes(s.key)).map((s) => `<span class="badge" title="${esc(s.label)}">${s.icon} ${esc(s.label.split(' ')[0])}</span>`).join(' ') || '<span class="badge red" title="No report sections are enabled">🔒 No sections</span>';
+        const authBadge = l.personId && String(l.mobile || '').replace(/\D/g, '').length === 10
+          ? `<span class="badge blue" title="Exact TL/Agent ID + registered mobile are checked server-side">🔐 ${esc(l.personId)} · 📱 ••••${esc(String(l.mobile).slice(-4))}</span>`
+          : '<span class="badge red" title="Report stays locked until both credentials are configured">⚠️ Setup needed</span>';
         return `<tr>
         <td>${l.source === 'gv' ? '🟩 GV' : '🟦 FF'}</td>
         <td>${l.kind === 'tl' ? '👥 TL' : '🧑‍💼 Agent'}</td>
@@ -1294,14 +1345,10 @@ FF.pages = FF.pages || {};
     </div>`;
     const msg = U.$('#pl-msg', body), create = U.$('#pl-create', body);
     const sourceEl = U.$('#pl-source', body), kindEl = U.$('#pl-kind', body), nameEl = U.$('#pl-name', body);
-    const pidEl = U.$('#pl-person-id', body), mobEl = U.$('#pl-mobile', body), reqAuthEl = U.$('#pl-req-auth', body);
+    const pidEl = U.$('#pl-person-id', body), mobEl = U.$('#pl-mobile', body);
 
-    body.querySelectorAll('input[type="checkbox"][data-new-sec], input[type="checkbox"][data-def-sec], #pl-req-auth, #pl-def-auth').forEach((cb) => {
-      cb.addEventListener('change', () => {
-        const lbl = cb.closest('.chip');
-        if (lbl && lbl.classList) lbl.classList.toggle('on', cb.checked);
-      });
-    });
+    wireSectionGroup(body, 'input[type="checkbox"][data-new-sec]', 'newSec');
+    wireSectionGroup(body, 'input[type="checkbox"][data-def-sec]', 'defSec');
 
     const suggestionItems = () => {
       let people;
@@ -1342,12 +1389,13 @@ FF.pages = FF.pages || {};
       if (!name) return U.toast('Pehle exact naam choose karo', 'err');
       const personId = (pidEl && pidEl.value || '').trim();
       const mobile = (mobEl && mobEl.value || '').replace(/\D/g, '').slice(-10);
-      const requireAuth = !!(reqAuthEl && reqAuthEl.checked);
+      if (personId.length < 2) return U.toast(`Exact ${kind === 'tl' ? 'TL ID' : 'Agent ID'} zaroori hai`, 'err');
+      if (mobile.length !== 10) return U.toast('Registered 10-digit mobile number zaroori hai', 'err');
       const sections = [...body.querySelectorAll('[data-new-sec]:checked')].map((x) => x.dataset.newSec);
       msg.textContent = 'Google Sheet storage me link save ho raha hai…';
       await U.withButtonBusy(create, async () => {
         try {
-          const out = await A.api('/api/personal-links', 'POST', { source, kind, name, personId, mobile, requireAuth, sections });
+          const out = await A.api('/api/personal-links', 'POST', { source, kind, name, personId, mobile, sections });
           const url = `${origin}/p/${out.link.token}`;
           await U.copyText(url).catch(() => false);
           U.toast('🔗 Link ban gaya aur copy ho gaya ✓', 'ok');
@@ -1359,8 +1407,7 @@ FF.pages = FF.pages || {};
     const saveDefBtn = U.$('#pl-save-def', body);
     if (saveDefBtn) saveDefBtn.addEventListener('click', () => U.withButtonBusy(saveDefBtn, async () => {
       const sections = [...body.querySelectorAll('[data-def-sec]:checked')].map((x) => x.dataset.defSec);
-      const requireAuth = !!(U.$('#pl-def-auth', body) && U.$('#pl-def-auth', body).checked);
-      await A.api('/api/personal-links/defaults', 'POST', { sections, requireAuth, applyToAll: true });
+      await A.api('/api/personal-links/defaults', 'POST', { sections, applyToAll: true });
       U.toast('🛡️ Global default access sabhi Personal Links par apply ho gaya ✓', 'ok');
       await draw();
     }, 'Saving…'));
@@ -1368,11 +1415,11 @@ FF.pages = FF.pages || {};
     U.$$('.pl-edit', body).forEach((b) => b.addEventListener('click', () => {
       const link = links.find((x) => x.id === b.dataset.id);
       if (!link || !FF.app || !FF.app.openDrawer) return;
-      const curSecs = Array.isArray(link.sections) && link.sections.length ? link.sections : defSecs;
+      const curSecs = Array.isArray(link.sections) ? link.sections : defSecs;
       FF.app.openDrawer({
         kicker: `🔗 Personal Link Access · ${link.source === 'gv' ? 'GV Partner' : 'First Forward'}`,
         title: `${link.kind === 'tl' ? '👥' : '🧑‍💼'} ${link.name}`,
-        sub: 'Choose allowed sections/tabs and TL/Agent ID + Mobile authentication',
+        sub: 'Set the exact registered ID/mobile and control which report sections this link may return',
         body: `<div class="kd-sec">
           <div class="form-grid">
             <label class="fld"><span>🪪 ${link.kind === 'tl' ? 'TL ID' : 'Agent ID'} (Auth ke liye)</span>
@@ -1380,7 +1427,7 @@ FF.pages = FF.pages || {};
             <label class="fld"><span>📱 Registered Mobile Number (10 digit)</span>
               <input class="input" id="ple-mob" type="tel" inputmode="numeric" value="${esc(link.mobile || '')}" placeholder="e.g. 9876543210" maxlength="14"></label>
           </div>
-          <label class="check" style="margin-top:8px"><input type="checkbox" id="ple-auth" ${link.requireAuth !== false ? 'checked' : ''}> 🔐 <b>Require ID + Mobile Number verification</b> before opening Personal Link</label>
+          <p class="check" style="margin-top:8px">🔐 <b>ID + exact registered mobile verification is mandatory.</b> No personal report HTML/data is returned until both match.</p>
           <h4 class="drawer-section-title" style="margin-top:14px">🎛️ Allowed Tabs &amp; Features</h4>
           <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
             ${PL_SECTIONS_META.map((s) => `<label class="chip ${curSecs.includes(s.key) ? 'on' : ''}" style="cursor:pointer"><input type="checkbox" data-ple-sec="${s.key}" ${curSecs.includes(s.key) ? 'checked' : ''}> ${s.icon} ${esc(s.label)}</label>`).join('')}
@@ -1392,17 +1439,15 @@ FF.pages = FF.pages || {};
       });
       const dBody = document.getElementById('drawer-body');
       if (!dBody) return;
-      dBody.querySelectorAll('input[data-ple-sec]').forEach((cb) => cb.addEventListener('change', () => {
-        const chip = cb.closest('.chip');
-        if (chip) chip.classList.toggle('on', cb.checked);
-      }));
+      wireSectionGroup(dBody, 'input[data-ple-sec]', 'pleSec');
       const saveBtn = dBody.querySelector('#ple-save');
       if (saveBtn) saveBtn.addEventListener('click', () => U.withButtonBusy(saveBtn, async () => {
         const personId = (dBody.querySelector('#ple-id') && dBody.querySelector('#ple-id').value || '').trim();
         const mobile = (dBody.querySelector('#ple-mob') && dBody.querySelector('#ple-mob').value || '').replace(/\D/g, '').slice(-10);
-        const requireAuth = !!(dBody.querySelector('#ple-auth') && dBody.querySelector('#ple-auth').checked);
         const sections = [...dBody.querySelectorAll('[data-ple-sec]:checked')].map((x) => x.dataset.pleSec);
-        await A.api(`/api/personal-links/${encodeURIComponent(link.id)}`, 'PUT', { personId, mobile, requireAuth, sections });
+        if (personId.length < 2) return U.toast(`Exact ${link.kind === 'tl' ? 'TL ID' : 'Agent ID'} zaroori hai`, 'err');
+        if (mobile.length !== 10) return U.toast('Registered 10-digit mobile number zaroori hai', 'err');
+        await A.api(`/api/personal-links/${encodeURIComponent(link.id)}`, 'PUT', { personId, mobile, sections });
         U.toast(`✅ ${link.name} ka Personal Link access update ho gaya`, 'ok');
         if (FF.app.closeDrawer) FF.app.closeDrawer();
         await draw();
@@ -1415,8 +1460,7 @@ FF.pages = FF.pages || {};
     }));
     U.$$('.pl-wa', body).forEach((b) => b.addEventListener('click', () => {
       const url = `${origin}/p/${b.dataset.token}`;
-      const idHint = b.dataset.id ? `\n🪪 ID: ${b.dataset.id}` : '';
-      const text = `🔗 *${b.dataset.name}* — Personal Performance & Stock Link:${idHint}\n📱 Apni ID aur Mobile Number daal kar open karein:\n${url}`;
+      const text = `🔗 *${b.dataset.name}* — Personal Performance & Stock Link:\n🪪 Apni registered ID aur 📱 10-digit mobile verify karke report kholein.\n${url}`;
       if (FF.app && FF.app.shareWhatsApp) FF.app.shareWhatsApp(text);
       else window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
     }));

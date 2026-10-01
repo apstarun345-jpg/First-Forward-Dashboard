@@ -102,6 +102,12 @@ test('features flags: defaults, admin modify (deep-merge), member se 4xx, SMTP s
     const adminCookie = (await call('/api/auth/login', 'POST', { username: 'owner', password: 'initial-password' })).setCookie.split(';')[0];
     await call('/api/users', 'POST', { username: 'staff', name: 'Staff', password: 'staff-pass-1', role: 'user' }, adminCookie);
     const memberCookie = (await call('/api/auth/login', 'POST', { username: 'staff', password: 'staff-pass-1' })).setCookie.split(';')[0];
+    const notifyDefaults = await call('/api/notifications/prefs', 'GET', null, memberCookie);
+    assert.equal(notifyDefaults.json.prefs.tone, 'classic', 'notification/update tone defaults to Classic');
+    const toneSaved = await call('/api/notifications/prefs', 'PUT', { prefs: { tone: 'chime' } }, memberCookie);
+    assert.equal(toneSaved.json.prefs.tone, 'chime', 'selected beep tone persists per user');
+    const invalidTone = await call('/api/notifications/prefs', 'PUT', { prefs: { tone: 'made-up-tone' } }, memberCookie);
+    assert.equal(invalidTone.json.prefs.tone, 'chime', 'invalid tone cannot overwrite a valid preference');
 
     // 1) Bina login settings nahi (global gate) — member ko features milte hain, par email secrets redacted.
     const unauth = await call('/api/settings');
@@ -511,35 +517,83 @@ test('🔗 personal links (agent+TL) /p/ pages, 🗺 team location, 🏆 anomaly
     await call('/api/users', 'POST', { username: 'r3user', name: 'R3 User', password: 'r3-pass-1', role: 'user' }, adminCookie);
     const memberCookie = (await call('/api/auth/login', 'POST', { username: 'r3user', password: 'r3-pass-1' })).setCookie.split(';')[0];
 
-    // ---- 🔗 agent link ----
-    const ca = await call('/api/personal-links', 'POST', { kind: 'agent', name: 'Rahul Dravid' }, adminCookie);
+    // ---- 🔗 agent link: admin credentials are mandatory and the initial HTML is data-free ----
+    const missingCredentials = await call('/api/personal-links', 'POST', { kind: 'agent', name: 'Rahul Dravid' }, adminCookie);
+    assert.equal(missingCredentials.res.status, 400, 'link ko admin-configured ID + mobile ke bina create nahi kar sakte');
+    const ca = await call('/api/personal-links', 'POST', { kind: 'agent', name: 'Rahul Dravid', personId: 'AG-1001', mobile: '9876543210' }, adminCookie);
     assert.equal(ca.res.status, 200, `agent link create — ${JSON.stringify(ca.json).slice(0, 180)}`);
     const agentToken = ca.json.link.token;
     const pageA = await fetch(`${server.base}/p/${agentToken}`);
-    assert.equal(pageA.status, 200, `agent /p/ page 200 — ${pageA.status}`);
-    const htmlA = await pageA.text();
-    assert.ok(htmlA.includes('Rahul Dravid'), 'page me agent naam');
-    assert.ok(htmlA.includes('MTD issued'), 'MTD KPI card hai');
-    assert.ok(htmlA.includes('Last'), 'last-14-din chart section hai');
-    assert.ok(!/personalLinks|password/i.test(htmlA), 'page me koi secret nahi');
+    assert.equal(pageA.status, 200, `agent verification page 200 — ${pageA.status}`);
+    const gateA = await pageA.text();
+    assert.ok(gateA.includes('Verification Required') && gateA.includes('pl-auth-form'), 'unauthenticated link shows a verification form');
+    assert.doesNotMatch(gateA, /Rahul Dravid|MTD issued|Class-wise Stock|Performance &amp; Growth|data-pl-csv/, 'no person name, report data, or exports are sent before verification');
+    const wrongAgentId = await call('/api/public/personal-link/verify', 'POST', { token: agentToken, personId: 'Rahul Dravid', mobile: '9876543210' });
+    assert.equal(wrongAgentId.res.status, 403, 'a name/partial ID is not accepted as the configured Agent ID');
+    assert.equal(wrongAgentId.setCookie, null, 'failed verification cannot create a session');
+    const wrongAgentMobile = await call('/api/public/personal-link/verify', 'POST', { token: agentToken, personId: 'AG-1001', mobile: '9876543211' });
+    assert.equal(wrongAgentMobile.res.status, 403, 'registered mobile must match exactly');
+    const verifiedA = await call('/api/public/personal-link/verify', 'POST', { token: agentToken, personId: ' ag 1001 ', mobile: '987-654-3210' });
+    assert.equal(verifiedA.res.status, 200, 'normalized exact ID and 10-digit mobile verify');
+    assert.equal(verifiedA.json.name, undefined, 'verify endpoint returns no report or identity data');
+    assert.match(verifiedA.setCookie || '', /HttpOnly/, 'verification grants an HttpOnly session cookie');
+    const agentCookie = (verifiedA.setCookie || '').split(';')[0];
+    const pageAAuth = await fetch(`${server.base}/p/${agentToken}`, { headers: { cookie: agentCookie } });
+    assert.equal(pageAAuth.status, 200, `verified agent report 200 — ${pageAAuth.status}`);
+    const htmlA = await pageAAuth.text();
+    assert.ok(htmlA.includes('Rahul Dravid'), 'verified page contains agent name');
+    assert.ok(htmlA.includes('MTD issued') && htmlA.includes('Last'), 'overview KPI and 14-day chart render');
+    assert.ok(htmlA.includes('Class-wise Stock') && htmlA.includes('Date-wise Issuance') && htmlA.includes('Performance &amp; Growth'), 'all allowed report sections are included');
+    assert.ok(htmlA.includes('data-pl-csv') && htmlA.includes('data-pl-pdf') && htmlA.includes('pl-exp-all-pdf'), 'section and full CSV/PDF export actions are available');
+    assert.ok(!/personalLinks|password/i.test(htmlA), 'page me koi server secret nahi');
+    const denyAll = await call(`/api/personal-links/${ca.json.link.id}`, 'PUT', { personId: 'AG-1001', mobile: '9876543210', sections: ['export'] }, adminCookie);
+    assert.equal(denyAll.res.status, 200, 'admin can revoke every report section');
+    assert.deepEqual(denyAll.json.link.sections, [], 'server will not grant exports without at least one visible report section');
+    const sectionRevoked = await fetch(`${server.base}/p/${agentToken}`, { headers: { cookie: agentCookie } });
+    const sectionGateHtml = await sectionRevoked.text();
+    assert.ok(sectionGateHtml.includes('Verification Required') && !sectionGateHtml.includes('Rahul Dravid'), 'changing section permissions revokes existing personal-link sessions');
+    const verifyEmpty = await call('/api/public/personal-link/verify', 'POST', { token: agentToken, personId: 'AG-1001', mobile: '9876543210' });
+    assert.equal(verifyEmpty.res.status, 200);
+    const emptySectionsPage = await fetch(`${server.base}/p/${agentToken}`, { headers: { cookie: verifyEmpty.setCookie.split(';')[0] } });
+    const emptySectionsHtml = await emptySectionsPage.text();
+    assert.ok(emptySectionsHtml.includes('No report sections enabled'), 'empty allow-list renders a locked/empty portal, not the global defaults');
+    assert.doesNotMatch(emptySectionsHtml, /MTD issued|Class-wise Stock|Date-wise Issuance|Performance &amp; Growth|data-pl-csv|data-pl-pdf|pl-exp-all-pdf/, 'no report values or exports leak when every section is revoked');
+    const logoutA = await call('/api/public/personal-link/logout', 'POST', { token: agentToken }, verifyEmpty.setCookie.split(';')[0]);
+    assert.equal(logoutA.res.status, 200);
+    const lockedAgain = await fetch(`${server.base}/p/${agentToken}`);
+    const lockedHtml = await lockedAgain.text();
+    assert.ok(lockedHtml.includes('Verification Required') && !lockedHtml.includes('Rahul Dravid'), 'logout removes the server session and report HTML');
 
     // ---- 🔗 TL link (team + goal section) ----
-    const ct = await call('/api/personal-links', 'POST', { kind: 'tl', name: 'Zoya Khan' }, adminCookie);
+    const ct = await call('/api/personal-links', 'POST', { kind: 'tl', name: 'Zoya Khan', personId: 'TL-220', mobile: '9123456780' }, adminCookie);
     assert.equal(ct.res.status, 200, `TL link create — ${JSON.stringify(ct.json).slice(0, 180)}`);
     const pageT = await fetch(`${server.base}/p/${ct.json.link.token}`);
-    assert.equal(pageT.status, 200, `TL /p/ page 200`);
-    const htmlT = await pageT.text();
-    assert.ok(htmlT.includes('Zoya Khan'), 'TL naam page par');
-    assert.ok(htmlT.includes('Team (is mahine)'), 'TL team list section');
+    const gateT = await pageT.text();
+    assert.ok(gateT.includes('Verification Required') && !gateT.includes('Zoya Khan'), 'TL report is not rendered before verification either');
+    const verifyT = await call('/api/public/personal-link/verify', 'POST', { token: ct.json.link.token, personId: 'TL220', mobile: '9123456780' });
+    assert.equal(verifyT.res.status, 200);
+    const pageTAuth = await fetch(`${server.base}/p/${ct.json.link.token}`, { headers: { cookie: verifyT.setCookie.split(';')[0] } });
+    assert.equal(pageTAuth.status, 200, 'verified TL report 200');
+    const htmlT = await pageTAuth.text();
+    assert.ok(htmlT.includes('Zoya Khan'), 'verified TL name appears');
+    assert.ok(htmlT.includes('Team · agent-wise issuance'), 'TL agent-wise issuance is included');
+    assert.ok(htmlT.includes('Team (is mahine)'), 'TL team performance list included');
 
-    // ---- 🟩 GV source link: GV Master columns/query + source badge ----
-    const cg = await call('/api/personal-links', 'POST', { source: 'gv', kind: 'agent', name: 'GV Agent One' }, adminCookie);
+    // ---- 🟩 GV source + restrictive sections: only server-emitted stock section, no issuance/export ----
+    const cg = await call('/api/personal-links', 'POST', { source: 'gv', kind: 'agent', name: 'GV Agent One', personId: 'GV-77', mobile: '9012345678', sections: ['stock'] }, adminCookie);
     assert.equal(cg.res.status, 200, `GV link create — ${JSON.stringify(cg.json).slice(0, 180)}`);
     assert.equal(cg.json.link.source, 'gv', 'link source durable payload me GV');
     const pageG = await fetch(`${server.base}/p/${cg.json.link.token}`);
-    assert.equal(pageG.status, 200, 'GV personal page 200');
-    const htmlG = await pageG.text();
-    assert.ok(htmlG.includes('GV Agent One') && htmlG.includes('GV Partner'), 'GV naam + source personal page par');
+    const gateG = await pageG.text();
+    assert.ok(gateG.includes('Verification Required') && !gateG.includes('GV Agent One'), 'restricted link still returns only the auth gate first');
+    const verifyG = await call('/api/public/personal-link/verify', 'POST', { token: cg.json.link.token, personId: 'GV-77', mobile: '9012345678' });
+    assert.equal(verifyG.res.status, 200);
+    const pageGAuth = await fetch(`${server.base}/p/${cg.json.link.token}`, { headers: { cookie: verifyG.setCookie.split(';')[0] } });
+    assert.equal(pageGAuth.status, 200, 'verified GV stock-only page 200');
+    const htmlG = await pageGAuth.text();
+    assert.ok(htmlG.includes('GV Agent One') && htmlG.includes('GV Partner'), 'GV name + source badge in verified stock section');
+    assert.ok(htmlG.includes('Class-wise Stock'), 'admin-granted stock section is available');
+    assert.doesNotMatch(htmlG, /MTD issued|Date-wise Issuance|Performance &amp; Growth|Stock ageing|data-pl-csv|data-pl-pdf|pl-exp-all-pdf/, 'forbidden issuance, performance, ageing, and export markup is not emitted');
     const linkList = await call('/api/personal-links', 'GET', undefined, adminCookie);
     assert.equal((linkList.json.links || []).find((l) => l.id === cg.json.link.id).source, 'gv', 'GET list source preserve karta hai');
 

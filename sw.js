@@ -28,6 +28,10 @@ self.addEventListener('push', e => {
   try { data = e.data ? e.data.json() : {}; } catch { data = { title: 'Dashboard update', body: '' }; }
   const title = data.title || 'First Forward Dashboard';
   const sound = data.sound !== false;
+  const tone = ['classic', 'soft', 'double', 'chime', 'alert'].includes(data.tone) ? data.tone : 'classic';
+  // Web Push cannot select a platform's native notification sound; the selected tone drives
+  // in-app Web Audio, while these distinct vibration patterns carry into supported Android PWAs.
+  const vibration = { classic: [200, 100, 200], soft: [70], double: [70, 80, 70], chime: [50, 60, 50, 60, 100], alert: [250, 70, 250] }[tone];
   const options = {
     body: data.body || 'Naya update aaya hai — app khol ke dekho.',
     icon: 'icon-192.png',
@@ -35,9 +39,8 @@ self.addEventListener('push', e => {
     tag: data.tag || 'ff',
     renotify: true,
     requireInteraction: !!data.persist,
-    // Mobile vibration pattern (Android Chrome): 200ms vibrate, 100ms gap, 200ms vibrate
-    vibrate: sound ? [200, 100, 200] : undefined,
-    data: { link: data.link || '', sound }
+    vibrate: sound ? vibration : undefined,
+    data: { link: data.link || '', sound, tone }
   };
   // Chrome ka rule: har push event par ek notification dikhani hi padti hai, warna
   // "notification not shown" error aata hai aur future push band ho sakte hain.

@@ -33,14 +33,25 @@ window.FF = window.FF || {};
   };
 
   // ---- prefs (localStorage) -----------------------------------------------------------------------
-  const DEFAULTS = { minTags: 1, ff: true, gv: true, ting: true, muteUntil: 0 };
+  const TONE_OPTIONS = [
+    { id: 'classic', label: 'Classic · rising with update size' },
+    { id: 'soft', label: 'Soft · gentle single note' },
+    { id: 'double', label: 'Double · two quick notes' },
+    { id: 'chime', label: 'Chime · three rising notes' },
+    { id: 'alert', label: 'Alert · alternating notes' }
+  ];
+  const VALID_TONES = new Set(TONE_OPTIONS.map((x) => x.id));
+  const DEFAULTS = { minTags: 1, ff: true, gv: true, ting: true, tone: 'classic', muteUntil: 0 };
   function prefs() {
     let p = {};
     try { p = JSON.parse(localStorage.getItem(LS_PREFS) || '{}') || {}; } catch { p = {}; }
-    return { ...DEFAULTS, ...p };
+    const out = { ...DEFAULTS, ...p };
+    if (!VALID_TONES.has(String(out.tone))) out.tone = DEFAULTS.tone;
+    return out;
   }
   function setPrefs(patch) {
     const next = { ...prefs(), ...(patch || {}) };
+    if (!VALID_TONES.has(String(next.tone))) next.tone = DEFAULTS.tone;
     try { localStorage.setItem(LS_PREFS, JSON.stringify(next)); } catch { /* private mode */ }
     return next;
   }
@@ -67,18 +78,26 @@ window.FF = window.FF || {};
       const ctx = st.audio;
       if (ctx.state === 'suspended') ctx.resume();
       const t0 = ctx.currentTime;
-      const notes = delta >= 25 ? [880, 1108.7, 1318.5] : delta >= 10 ? [783.99, 987.77] : [659.25];
+      const tone = prefs().tone;
+      const notes = tone === 'soft' ? [523.25]
+        : tone === 'double' ? [659.25, 880]
+          : tone === 'chime' ? [659.25, 880, 1174.66]
+            : tone === 'alert' ? [1046.5, 784, 1046.5]
+              : (delta >= 25 ? [880, 1108.7, 1318.5] : delta >= 10 ? [783.99, 987.77] : [659.25]);
       notes.forEach((f, i) => {
         const o = ctx.createOscillator(), g = ctx.createGain();
-        o.type = 'sine'; o.frequency.value = f * (1 + Math.min(delta, 50) / 400);
-        g.gain.setValueAtTime(0.0001, t0 + i * 0.09);
-        g.gain.exponentialRampToValueAtTime(0.12, t0 + i * 0.09 + 0.02);
-        g.gain.exponentialRampToValueAtTime(0.0001, t0 + i * 0.09 + 0.6);
+        const at = t0 + i * (tone === 'soft' ? 0 : 0.11);
+        const duration = tone === 'soft' ? 0.34 : 0.19;
+        o.type = tone === 'alert' ? 'triangle' : 'sine'; o.frequency.value = f * (tone === 'classic' ? 1 + Math.min(delta, 50) / 400 : 1);
+        g.gain.setValueAtTime(0.0001, at);
+        g.gain.exponentialRampToValueAtTime(tone === 'soft' ? 0.07 : 0.12, at + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, at + duration);
         o.connect(g); g.connect(ctx.destination);
-        o.start(t0 + i * 0.09); o.stop(t0 + i * 0.09 + 0.7);
+        o.start(at); o.stop(at + duration + 0.02);
       });
     } catch { /* sound blocked — ignore */ }
   }
+  function testTing() { unlock('retry'); ting(1); }
 
   // ---- 🔊 audio unlock (autoplay policy) --------------------------------------------------------
   /** Browser sirf user gesture ke andar audio kholne deta hai. Pehle click/keypress par ek baar
@@ -451,6 +470,7 @@ window.FF = window.FF || {};
       ${!st.unlocked || isPolicyError(st.lastErr) ? `<div class="bell-acts"><button class="btn small primary" type="button" data-bell-act="enable">🔊 Enable sound (ek baar)</button></div><p class="dim small" style="margin:4px 0 8px">Browser pehli awaaz ke liye ek click maangta hai. Ye button dabate hi sound unlock ho jaata hai — phir har naya tag bol kar sunayi dega.</p>` : ''}
       <label class="bell-opt"><input type="checkbox" data-bell-opt="voice" ${voiceOn() ? 'checked' : ''}> 🎙️ Voice announcer (bol kar sunao)</label>
       <label class="bell-opt"><input type="checkbox" data-bell-opt="ting" ${p.ting !== false ? 'checked' : ''}> 🔔 Ting sound</label>
+      <label class="bell-opt">🎵 New-tag update tone <select data-bell-opt="tone">${TONE_OPTIONS.map((x) => `<option value="${x.id}" ${p.tone === x.id ? 'selected' : ''}>${U.esc(x.label)}</option>`).join('')}</select></label>
       <label class="bell-opt"><input type="checkbox" data-bell-opt="ff" ${p.ff !== false ? 'checked' : ''}> 🟦 First Forward tags</label>
       <label class="bell-opt"><input type="checkbox" data-bell-opt="gv" ${p.gv !== false ? 'checked' : ''}> 🟩 GV Partner tags</label>
       <label class="bell-opt">🏷️ Kam se kam <select data-bell-opt="min">
@@ -491,6 +511,7 @@ window.FF = window.FF || {};
         } else U.toast('🔇 Voice Announcer OFF — sirf ting bajega', 'warn');
       }
       else if (k === 'min') setPrefs({ minTags: Number(e.target.value) || 1 });
+      else if (k === 'tone') { setPrefs({ tone: e.target.value }); ting(1); }
       else setPrefs({ [k]: e.target.checked });
       refreshMenu(); updateBtn();
     });
@@ -569,7 +590,7 @@ window.FF = window.FF || {};
   }
 
   FF.officeBell = {
-    mount, announceText, countsToday, unlock, speakAnnounce, queueAnnounce, flushPending, prefs, setPrefs, logList, logAdd, openMenu, closeMenu, poll,
+    mount, announceText, countsToday, unlock, speakAnnounce, queueAnnounce, flushPending, prefs, setPrefs, testTing, toneOptions: TONE_OPTIONS, logList, logAdd, openMenu, closeMenu, poll,
     /** 🔊 Voice ON hai? (function form — notifications.js isi ko call karta hai; `voiceOn` getter bhi hai) */
     isVoiceOn: () => voiceOn(),
     get on() { return on(); }, get voiceOn() { return voiceOn(); }, get pings() { return st.pings; },

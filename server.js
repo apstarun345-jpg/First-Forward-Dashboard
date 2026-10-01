@@ -262,6 +262,9 @@ const FILES = { users: path.join(DATA_DIR, 'users.json'), sessions: path.join(DA
 // refresh. `watch` stores the last Google Sheet snapshot used by the lightweight report watcher.
 const db = { users: [], sessions: {}, settings: { ...DEFAULT_SETTINGS }, resets: [], notify: { items: [], watch: {} } };
 const writeQueue = new Map();
+// Personal-link verification grants short-lived, per-link server sessions. Never trust a
+// client-side hidden section or sessionStorage flag for private report data.
+const personalLinkSessions = new Map();
 
 const storageFailures = new Map();
 const durableSnapshots = new Map();
@@ -380,10 +383,14 @@ function verifyPassword(password, stored) {
 const normUser = (u) => String(u || '').trim().toLowerCase().replace(/[^a-z0-9._@-]/g, '').slice(0, 60);
 // `enabled` = master switch (UI me ek hi "Notifications ON/OFF" button hai). OFF → koi in-app toast
 // nahi, koi browser alert nahi, koi mobile push nahi. Feed items phir bhi save hote hain (history).
-const DEFAULT_NOTIFY_PREFS = { enabled: true, login: true, signup: true, report: true, monthly: true, digest: true, alert: true, activity: true, click: true, search: true, settings: true, user: true, location: true, info: true, request: true, assist: true, sound: true, push: true };
+const NOTIFY_TONES = new Set(['classic', 'soft', 'double', 'chime', 'alert']);
+const DEFAULT_NOTIFY_PREFS = { enabled: true, login: true, signup: true, report: true, monthly: true, digest: true, alert: true, activity: true, click: true, search: true, settings: true, user: true, location: true, info: true, request: true, assist: true, sound: true, tone: 'classic', push: true };
 function normalizeNotifyPrefs(p) {
   const out = { ...DEFAULT_NOTIFY_PREFS };
-  if (p && typeof p === 'object') for (const k of Object.keys(DEFAULT_NOTIFY_PREFS)) if (p[k] !== undefined) out[k] = !!p[k];
+  if (p && typeof p === 'object') for (const k of Object.keys(DEFAULT_NOTIFY_PREFS)) {
+    if (p[k] === undefined) continue;
+    out[k] = k === 'tone' ? (NOTIFY_TONES.has(String(p[k])) ? String(p[k]) : DEFAULT_NOTIFY_PREFS.tone) : !!p[k];
+  }
   return out;
 }
 function publicUser(u) {
@@ -572,8 +579,39 @@ function pruneSessions() {
 }
 function parseCookies(req) {
   const out = {};
-  (req.headers.cookie || '').split(';').forEach((part) => { const i = part.indexOf('='); if (i > 0) out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim()); });
+  (req.headers.cookie || '').split(';').forEach((part) => { const i = part.indexOf('='); if (i > 0) { try { out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim()); } catch { /* malformed cookie */ } } });
   return out;
+}
+const PERSONAL_LINK_SESSION_PREFIX = 'ff_pl_';
+const PERSONAL_LINK_SESSION_TTL_MS = 6 * 60 * 60e3;
+function personalLinkCookieName(token) { return `${PERSONAL_LINK_SESSION_PREFIX}${sha(String(token || '')).slice(0, 16)}`; }
+function prunePersonalLinkSessions() {
+  const now = Date.now();
+  for (const [key, session] of personalLinkSessions) if (!session || session.expiresAt <= now) personalLinkSessions.delete(key);
+  while (personalLinkSessions.size > 5000) personalLinkSessions.delete(personalLinkSessions.keys().next().value);
+}
+function personalLinkSession(req, link) {
+  const value = parseCookies(req)[personalLinkCookieName(link && link.token)];
+  if (!value) return false;
+  const key = sha(value);
+  const session = personalLinkSessions.get(key);
+  if (!session || session.expiresAt <= Date.now()) { personalLinkSessions.delete(key); return false; }
+  return session.linkId === link.id && session.tokenHash === sha(String(link.token || ''));
+}
+function createPersonalLinkSession(req, link) {
+  prunePersonalLinkSessions();
+  const value = crypto.randomBytes(32).toString('base64url');
+  const expiresAt = Date.now() + PERSONAL_LINK_SESSION_TTL_MS;
+  personalLinkSessions.set(sha(value), { linkId: link.id, tokenHash: sha(String(link.token || '')), expiresAt });
+  const maxAge = Math.floor(PERSONAL_LINK_SESSION_TTL_MS / 1000);
+  const cookie = `${personalLinkCookieName(link.token)}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${isSecure(req) ? '; Secure' : ''}`;
+  return { cookie, value };
+}
+function revokePersonalLinkSessions(linkId) {
+  for (const [key, session] of personalLinkSessions) if (session && session.linkId === linkId) personalLinkSessions.delete(key);
+}
+function clearPersonalLinkCookie(req, link) {
+  return `${personalLinkCookieName(link && link.token)}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${isSecure(req) ? '; Secure' : ''}`;
 }
 function sessionUser(req) {
   const token = parseCookies(req).ff_sid;
@@ -1443,6 +1481,7 @@ function pushFanout(item) {
       tag: item.type || 'ff',
       link: (item.meta && item.meta.link) || '',
       sound: prefs.sound !== false,
+      tone: prefs.tone,
       persist: item.type === 'signup' || item.type === 'report' || item.type === 'user' // important types don't auto-dismiss
     };
     handlePushResult(s, await deliverPush(s, data), { type: item.type });
@@ -3056,15 +3095,14 @@ async function handleApi(req, res, url) {
   const PL_ALL_SECTIONS = ['overview', 'stock', 'issuance', 'performance', 'ageing', 'export'];
   const normPlSections = (arr) => {
     if (!Array.isArray(arr)) return [...PL_ALL_SECTIONS];
-    const clean = arr.map((x) => String(x || '').trim()).filter((x) => PL_ALL_SECTIONS.includes(x));
-    return clean.length ? clean : ['overview'];
+    // An explicitly empty allow-list is an intentional lock-down. Export is only a capability
+    // attached to a visible report section, never a stand-alone grant.
+    const clean = [...new Set(arr.map((x) => String(x || '').trim()).filter((x) => PL_ALL_SECTIONS.includes(x)))];
+    return clean.some((key) => key !== 'export') ? clean : clean.filter((key) => key !== 'export');
   };
   const plDefaults = () => {
     const d = (db.settings && db.settings.personalLinkDefaults) || {};
-    return {
-      requireAuth: d.requireAuth !== false,
-      sections: normPlSections(d.sections)
-    };
+    return { requireAuth: true, sections: normPlSections(d.sections) };
   };
   const normPlLink = (l) => {
     const def = plDefaults();
@@ -3073,7 +3111,7 @@ async function handleApi(req, res, url) {
       source: l.source === 'gv' ? 'gv' : 'ff',
       personId: String(l.personId || '').trim().slice(0, 40),
       mobile: String(l.mobile || '').replace(/\D/g, '').slice(-10),
-      requireAuth: l.requireAuth !== undefined ? !!l.requireAuth : def.requireAuth,
+      requireAuth: true,
       sections: Array.isArray(l.sections) ? normPlSections(l.sections) : def.sections
     };
   };
@@ -3085,14 +3123,12 @@ async function handleApi(req, res, url) {
   if (p === '/api/personal-links/defaults' && method === 'POST') {
     requireAdmin(user);
     const body = await readBody(req);
-    db.settings.personalLinkDefaults = {
-      requireAuth: body.requireAuth !== false,
-      sections: normPlSections(body.sections)
-    };
+    db.settings.personalLinkDefaults = { requireAuth: true, sections: normPlSections(body.sections) };
     if (body.applyToAll && Array.isArray(db.settings.personalLinks)) {
       db.settings.personalLinks.forEach((l) => {
-        l.requireAuth = db.settings.personalLinkDefaults.requireAuth;
+        l.requireAuth = true;
         l.sections = [...db.settings.personalLinkDefaults.sections];
+        revokePersonalLinkSessions(l.id);
       });
     }
     await persist('settings');
@@ -3108,15 +3144,18 @@ async function handleApi(req, res, url) {
     if (feats().personalLinks === false) throw new HttpError(403, 'Personal links feature band hai — Features tab se ON karo.');
     const personId = String(body.personId || '').trim().replace(/[\u0000-\u001f<>]/g, '').slice(0, 40);
     const mobile = String(body.mobile || '').replace(/\D/g, '').slice(-10);
+    if (personId.length < 2) throw new HttpError(400, `Admin ko pehle exact ${kind === 'tl' ? 'TL ID' : 'Agent ID'} configure karni hogi.`);
+    if (mobile.length !== 10) throw new HttpError(400, 'Personal link ke liye registered 10-digit mobile configure karo.');
     const def = plDefaults();
-    const requireAuth = body.requireAuth !== undefined ? !!body.requireAuth : def.requireAuth;
     const sections = Array.isArray(body.sections) ? normPlSections(body.sections) : def.sections;
     const duplicate = (db.settings.personalLinks || []).find((l) => (l.source === 'gv' ? 'gv' : 'ff') === source && l.kind === kind && String(l.name).toLowerCase() === name.toLowerCase() && l.enabled !== false);
     if (duplicate) {
-      if (personId) duplicate.personId = personId;
-      if (mobile) duplicate.mobile = mobile;
-      if (body.requireAuth !== undefined) duplicate.requireAuth = requireAuth;
+      const credentialsChanged = String(duplicate.personId || '') !== personId || String(duplicate.mobile || '').replace(/\D/g, '').slice(-10) !== mobile;
+      duplicate.personId = personId;
+      duplicate.mobile = mobile;
+      duplicate.requireAuth = true;
       if (Array.isArray(body.sections)) duplicate.sections = sections;
+      if (credentialsChanged || Array.isArray(body.sections)) revokePersonalLinkSessions(duplicate.id);
       await persist('settings');
       void personalDailyRows({ ...duplicate, source }).catch(() => {});
       if (kind === 'tl') void personalTeamAgents({ ...duplicate, source }).catch(() => {});
@@ -3124,7 +3163,7 @@ async function handleApi(req, res, url) {
     }
     const link = {
       id: `pl_${crypto.randomBytes(6).toString('hex')}`, source, kind, name,
-      personId, mobile, requireAuth, sections,
+      personId, mobile, requireAuth: true, sections,
       token: crypto.randomBytes(18).toString('hex'), enabled: true, by: user.username, createdAt: new Date().toISOString()
     };
     if (!Array.isArray(db.settings.personalLinks)) db.settings.personalLinks = [];
@@ -3143,11 +3182,21 @@ async function handleApi(req, res, url) {
     const link = (db.settings.personalLinks || []).find((l) => l.id === id);
     if (!link) throw new HttpError(404, 'Link nahi mila.');
     const body = await readBody(req);
-    if (body.personId !== undefined) link.personId = String(body.personId || '').trim().replace(/[\u0000-\u001f<>]/g, '').slice(0, 40);
-    if (body.mobile !== undefined) link.mobile = String(body.mobile || '').replace(/\D/g, '').slice(-10);
-    if (body.requireAuth !== undefined) link.requireAuth = !!body.requireAuth;
+    const personId = body.personId !== undefined
+      ? String(body.personId || '').trim().replace(/[\u0000-\u001f<>]/g, '').slice(0, 40)
+      : String(link.personId || '').trim();
+    const mobile = body.mobile !== undefined
+      ? String(body.mobile || '').replace(/\D/g, '').slice(-10)
+      : String(link.mobile || '').replace(/\D/g, '').slice(-10);
+    if (personId.length < 2) throw new HttpError(400, `Exact ${link.kind === 'tl' ? 'TL ID' : 'Agent ID'} zaroori hai.`);
+    if (mobile.length !== 10) throw new HttpError(400, 'Registered mobile number 10 digit ka hona chahiye.');
+    const credentialsChanged = String(link.personId || '') !== personId || String(link.mobile || '').replace(/\D/g, '').slice(-10) !== mobile;
+    link.personId = personId;
+    link.mobile = mobile;
+    link.requireAuth = true;
     if (Array.isArray(body.sections)) link.sections = normPlSections(body.sections);
     if (body.enabled !== undefined) link.enabled = body.enabled !== false;
+    if (credentialsChanged || Array.isArray(body.sections) || link.enabled === false) revokePersonalLinkSessions(link.id);
     await persist('settings');
     logAudit(user, 'link_update', { target: `${link.kind}:${link.name}`, ip: clientIp(req) });
     return sendJson(res, 200, { ok: true, link: normPlLink(link) });
@@ -3156,8 +3205,10 @@ async function handleApi(req, res, url) {
     requireAdmin(user);
     const id = decodeURIComponent(plItem[1]);
     const before = (db.settings.personalLinks || []).length;
+    const target = (db.settings.personalLinks || []).find((l) => l.id === id);
     db.settings.personalLinks = (db.settings.personalLinks || []).filter((l) => l.id !== id);
     if (db.settings.personalLinks.length === before) throw new HttpError(404, 'Link nahi mila.');
+    revokePersonalLinkSessions(target.id);
     await persist('settings');
     logAudit(user, 'link_revoke', { target: id, ip: clientIp(req) });
     return sendJson(res, 200, { ok: true });
@@ -3170,6 +3221,7 @@ async function handleApi(req, res, url) {
     if (!link) throw new HttpError(404, 'Link nahi mila.');
     const body = await readBody(req);
     link.enabled = body.enabled !== false;
+    if (!link.enabled) revokePersonalLinkSessions(link.id);
     await persist('settings');
     logAudit(user, 'link_toggle', { target: `${link.kind}:${link.name}`, note: link.enabled ? 'ON' : 'OFF' });
     return sendJson(res, 200, { ok: true, link: normPlLink(link) });
@@ -3220,7 +3272,12 @@ async function handleApi(req, res, url) {
     const patch = body.prefs || {};
     const before = normalizeNotifyPrefs(user.notifyPrefs);
     const next = { ...before };
-    for (const k of Object.keys(DEFAULT_NOTIFY_PREFS)) if (patch[k] !== undefined) next[k] = !!patch[k];
+    for (const k of Object.keys(DEFAULT_NOTIFY_PREFS)) {
+      if (patch[k] === undefined) continue;
+      next[k] = k === 'tone'
+        ? (NOTIFY_TONES.has(String(patch[k])) ? String(patch[k]) : before.tone)
+        : !!patch[k];
+    }
     user.notifyPrefs = next;
     persist('users').catch(() => {}); // don't block
     return sendJson(res, 200, { ok: true, prefs: next });
@@ -3249,7 +3306,7 @@ async function handleApi(req, res, url) {
       const result = await deliverPush(s, {
         title: '🔔 Test push notification',
         body: `${user.name || user.username} — ye test alert hai. Phone ke notification panel me dikhna chahiye (app band ho tab bhi).`,
-        tag: 'ff-test', link: '#/home', sound: true, persist: false
+        tag: 'ff-test', link: '#/home', sound: true, tone: normalizeNotifyPrefs(user.notifyPrefs).tone, persist: false
       });
       handlePushResult(s, result, { type: 'test' });
       return { host: hostOf(s), status: result.status, ok: result.ok, error: result.error || '' };
@@ -4278,7 +4335,8 @@ async function handleApi(req, res, url) {
       }
     });
   }
-  // 🔐 Public Personal Link Auth Verification — TL ID / Agent ID + 10-digit Mobile Number
+  // 🔐 Public Personal Link Auth Verification — credentials must be configured by an admin.
+  // A successful check creates an HttpOnly server-side session; the page never trusts DOM hiding.
   if (p === '/api/public/personal-link/verify' && method === 'POST') {
     const ip = clientIp(req);
     if (!publicRateOk(`plauth:${ip}`, 40, 10 * 60e3)) throw new HttpError(429, 'Bahut zyada attempts — thodi der baad try karo.');
@@ -4287,31 +4345,31 @@ async function handleApi(req, res, url) {
     const rawId = String(body.personId || '').trim();
     const rawMob = String(body.mobile || '').replace(/\D/g, '').slice(-10);
     const savedLink = (Array.isArray(db.settings.personalLinks) ? db.settings.personalLinks : []).find((l) => l.token === token);
-    if (!savedLink || !savedLink.enabled) throw new HttpError(404, 'Link invalid ya band hai.');
+    if (!savedLink || savedLink.enabled === false) throw new HttpError(404, 'Link invalid ya band hai.');
+    const cfgId = String(savedLink.personId || '').trim();
+    const cfgMob = String(savedLink.mobile || '').replace(/\D/g, '').slice(-10);
+    if (cfgId.length < 2 || cfgMob.length !== 10) throw new HttpError(409, 'Admin ne is link ke liye ID aur registered 10-digit mobile abhi configure nahi kiya hai.');
     if (rawId.length < 2) throw new HttpError(400, `${savedLink.kind === 'tl' ? 'TL ID' : 'Agent ID'} daalo.`);
     if (rawMob.length !== 10) throw new HttpError(400, '10 digit mobile number daalo.');
 
-    // Check against configured personId / mobile if Admin set them on the link
-    const cfgId = String(savedLink.personId || '').trim();
-    const cfgMob = String(savedLink.mobile || '').replace(/\D/g, '').slice(-10);
+    // Exact normalized ID + exact registered mobile; no name-as-ID or partial-ID fallback.
     const normId = (s) => String(s || '').trim().toUpperCase().replace(/[\s#-]+/g, '');
-    const digitsOnly = (s) => String(s || '').replace(/\D/g, '');
+    if (normId(cfgId) !== normId(rawId)) throw new HttpError(403, `${savedLink.kind === 'tl' ? 'TL ID' : 'Agent ID'} match nahi hua — sahi ID daalo.`);
+    if (cfgMob !== rawMob) throw new HttpError(403, 'Mobile number match nahi hua — registered 10-digit mobile number daalo.');
 
-    if (cfgId) {
-      const a = normId(cfgId), b = normId(rawId);
-      const da = digitsOnly(cfgId), db2 = digitsOnly(rawId);
-      const idMatch = a === b || (da.length >= 4 && db2.length >= 4 && (da.endsWith(db2) || db2.endsWith(da))) || normId(savedLink.name) === b;
-      if (!idMatch) throw new HttpError(403, `${savedLink.kind === 'tl' ? 'TL ID' : 'Agent ID'} match nahi hua — sahi ID daalo.`);
+    const session = createPersonalLinkSession(req, savedLink);
+    return sendJson(res, 200, { ok: true }, { 'Set-Cookie': session.cookie, 'Cache-Control': 'no-store' });
+  }
+  if (p === '/api/public/personal-link/logout' && method === 'POST') {
+    const body = await readBody(req);
+    const token = String(body.token || '').trim();
+    const savedLink = (Array.isArray(db.settings.personalLinks) ? db.settings.personalLinks : []).find((l) => l.token === token);
+    if (savedLink) {
+      const value = parseCookies(req)[personalLinkCookieName(savedLink.token)];
+      if (value) personalLinkSessions.delete(sha(value));
+      return sendJson(res, 200, { ok: true }, { 'Set-Cookie': clearPersonalLinkCookie(req, savedLink), 'Cache-Control': 'no-store' });
     }
-    if (cfgMob && cfgMob.length === 10 && cfgMob !== rawMob) {
-      throw new HttpError(403, 'Mobile number match nahi hua — registered 10-digit mobile number daalo.');
-    }
-    // Save auto-learned ID/mobile if link didn't have one yet so future opens stay bound
-    if (!cfgId && rawId.length >= 2) savedLink.personId = rawId.slice(0, 40);
-    if (!cfgMob && rawMob.length === 10) savedLink.mobile = rawMob;
-    savedLink.lastVerifiedAt = new Date().toISOString();
-    void persist('settings').catch(() => {});
-    return sendJson(res, 200, { ok: true, name: savedLink.name, kind: savedLink.kind });
+    return sendJson(res, 200, { ok: true });
   }
   // 🌐 Public form config (admin) — link ON/OFF + kaunse fields dikhein.
   if (p === '/api/public-tag-form' && method === 'PUT') {
@@ -5094,31 +5152,54 @@ function personalStats(rows) {
 
 async function servePersonalPage(req, res, rawToken) {
   const token = String(rawToken || '').split(/[/?#]/)[0].trim();
-  const fail = (code, msg) => sendHtml(res, code, personalShell({ title: 'Link unavailable', heading: '🔒 Link kaam nahi kar raha', body: `<p>${escHtml(msg)}</p>` }));
+  const noStore = { 'Cache-Control': 'private, no-store', 'X-Robots-Tag': 'noindex, nofollow' };
+  const fail = (code, msg) => sendHtml(res, code, personalShell({ title: 'Link unavailable', heading: '🔒 Link unavailable', body: `<p>${escHtml(msg)}</p>` }), noStore);
   if (feats().personalLinks === false) return fail(404, 'Ye feature admin ne band kar rakha hai.');
   const savedLink = (Array.isArray(db.settings.personalLinks) ? db.settings.personalLinks : []).find((l) => l.token === token);
   if (!savedLink) return fail(404, 'Ye link ya to khatam ho gaya ya galat hai. Admin se naya maango.');
-  if (!savedLink.enabled) return fail(403, 'Admin ne ye link band kar diya hai.');
+  if (savedLink.enabled === false) return fail(403, 'Admin ne ye link band kar diya hai.');
+  const hasSession = personalLinkSession(req, savedLink);
+  if (!hasSession) {
+    const idLabel = savedLink.kind === 'tl' ? 'TL ID' : 'Agent ID';
+    const credentialsReady = String(savedLink.personId || '').trim().length >= 2 && String(savedLink.mobile || '').replace(/\D/g, '').length === 10;
+    const gate = `<section class="pb-card pb-auth-card" id="pl-auth-gate">
+      <div class="pb-auth-ico">🔐</div>
+      <h2>Personal Report · Verification Required</h2>
+      <p class="dim">Assigned <b>${idLabel}</b> aur registered <b>10-digit mobile number</b> verify karke hi report khulegi.</p>
+      ${credentialsReady ? `<form class="pb-auth-form" id="pl-auth-form" autocomplete="off">
+        <label class="pb-fld"><span>🪪 ${idLabel} *</span><input class="pb-inp" id="pl-inp-id" required placeholder="Enter your ${idLabel}" maxlength="40" autocomplete="off"></label>
+        <label class="pb-fld"><span>📱 Registered Mobile Number *</span><input class="pb-inp" id="pl-inp-mob" type="tel" inputmode="numeric" required placeholder="10-digit mobile" maxlength="14" autocomplete="off"></label>
+        <div class="pb-auth-err" id="pl-auth-err" hidden></div>
+        <button type="submit" class="pb-auth-btn" id="pl-auth-btn">🔓 Verify &amp; Open Report</button>
+      </form>` : '<p class="pb-auth-err">Admin setup pending. No report data is available until the ID and mobile are configured.</p>'}
+      <p class="dim" style="font-size:11.5px;margin-top:10px">🔒 Your identity is checked securely before any report data is sent.</p>
+    </section>`;
+    const html = personalShell({ title: 'Personal Report Verification', heading: '🔐 Personal Report', sub: 'Identity verification required · read-only access', token, requireAuth: true, authorized: false, body: gate });
+    return sendHtml(res, 200, html, noStore);
+  }
   const def = (db.settings && db.settings.personalLinkDefaults) || {};
-  const allowedSecs = Array.isArray(savedLink.sections) && savedLink.sections.length
-    ? savedLink.sections
-    : (Array.isArray(def.sections) && def.sections.length ? def.sections : ['overview', 'stock', 'issuance', 'performance', 'ageing', 'export']);
+  const allSections = ['overview', 'stock', 'issuance', 'performance', 'ageing', 'export'];
+  const allowedSecs = Array.isArray(savedLink.sections)
+    ? savedLink.sections.filter((key) => allSections.includes(key))
+    : (Array.isArray(def.sections) ? def.sections.filter((key) => allSections.includes(key)) : allSections);
   const hasSec = (k) => allowedSecs.includes(k);
-  const canExport = hasSec('export');
-  const requireAuth = savedLink.requireAuth !== undefined ? !!savedLink.requireAuth : (def.requireAuth !== false);
+  const hasVisibleSection = allowedSecs.some((key) => key !== 'export');
+  const canExport = hasVisibleSection && hasSec('export');
+  const requireAuth = true;
   const link = { ...savedLink, source: savedLink.source === 'gv' ? 'gv' : 'ff' };
   try {
-    const rows = await personalDailyRows(link);
-    if (!rows.length) return fail(404, `"${link.name}" ka data abhi sheet me nahi mila (ya naam alag hai).`);
+    const needsIssuance = hasSec('overview') || hasSec('issuance') || hasSec('performance');
+    const rows = needsIssuance ? await personalDailyRows(link) : [];
+    if (needsIssuance && !rows.length) return fail(404, `"${link.name}" ka data abhi sheet me nahi mila (ya naam alag hai).`);
     const st = personalStats(rows);
     let team = [];
     let goal = null, target = null;
     const ym = dateKeyNow().slice(0, 7);
     const normPerson = (v) => String(v || '').trim().toUpperCase().replace(/\s+/g, ' ');
     let byAgentMap = new Map();
-    if (link.kind === 'tl') {
+    if (link.kind === 'tl' && (hasSec('overview') || hasSec('issuance') || hasSec('performance'))) {
       goal = ((Array.isArray(db.settings.tlTargets) ? db.settings.tlTargets : []).find((t) => t && t.ym === ym && normPerson(t.tl) === normPerson(link.name)) || null);
-      byAgentMap = await personalTeamAgents(link);
+      if (hasSec('issuance') || hasSec('performance')) byAgentMap = await personalTeamAgents(link);
       for (const [name, m] of byAgentMap) {
         let mtdA = 0;
         for (const [d, n] of m) if (d.startsWith(ym)) mtdA += n;
@@ -5126,7 +5207,7 @@ async function servePersonalPage(req, res, rawToken) {
       }
       team.sort((a, b) => b.mtd - a.mtd);
       team = team.slice(0, 15);
-    } else {
+    } else if (link.kind !== 'tl' && (hasSec('overview') || hasSec('performance'))) {
       target = ((Array.isArray(db.settings.targets) ? db.settings.targets : []).find((t) => t && t.ym === ym && (t.source || 'ff') === link.source && normPerson(t.agent) === normPerson(link.name)) || null);
     }
     const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
@@ -5138,32 +5219,38 @@ async function servePersonalPage(req, res, rawToken) {
     const prevYm = (() => { const dd = new Date(`${dateKeyNow()}T00:00:00Z`); dd.setUTCDate(1); dd.setUTCMonth(dd.getUTCMonth() - 1); return `${dd.getUTCFullYear()}-${pad2(dd.getUTCMonth() + 1)}`; })();
     const lastMonthTotal = rows.reduce((a, r) => a + (String(r.date).startsWith(prevYm) ? r.n : 0), 0);
     let stockInfo = null;
-    try {
-      const sidx = await Promise.race([stockAgeIndex(false), new Promise((_, rej) => setTimeout(() => rej(new Error('stock timeout')), 25000))]);
-      stockInfo = personalStock(sidx, link.source, link.kind === 'tl' ? 'tl' : 'agent', link.name);
-      if (!savedLink.personId && stockInfo && stockInfo.personId) savedLink.personId = stockInfo.personId;
-    } catch (err) { console.warn('personal stock:', err.message); }
+    if (hasSec('stock') || hasSec('ageing')) {
+      try {
+        const sidx = await Promise.race([stockAgeIndex(false), new Promise((_, rej) => setTimeout(() => rej(new Error('stock timeout')), 25000))]);
+        stockInfo = personalStock(sidx, link.source, link.kind === 'tl' ? 'tl' : 'agent', link.name);
+      } catch (err) { console.warn('personal stock:', err.message); }
+    }
     const nf = (n) => Number(n || 0).toLocaleString('en-IN');
     const stCore = stockInfo ? stockInfo.t[0] : 0, stComm = stockInfo ? stockInfo.t[1] : 0;
     const stTotal = stCore + stComm;
     const expBtns = (tblId, label) => canExport ? `<div class="pb-card-acts"><button type="button" class="pb-btn" data-pl-csv="${escHtml(tblId)}" data-pl-title="${escHtml(label)}">⬇ CSV</button><button type="button" class="pb-btn pb-btn-pdf" data-pl-pdf="${escHtml(tblId)}" data-pl-title="${escHtml(label)}">📄 PDF</button></div>` : '';
 
-    // 1. 📦 Class-wise Stock + Issuance Table
+    // 1. 📦 Class-wise stock — stock access never implicitly grants issuance details.
     const ALL_CLS = ['VC4', 'VC20', 'VC5', 'VC6', 'VC7', 'VC12', 'VC15', 'VC16'];
     const prevCls = {};
     rows.forEach((r) => { if (String(r.date).startsWith(prevYm)) prevCls[r.cls] = (prevCls[r.cls] || 0) + r.n; });
-    const clsList = [...new Set([...ALL_CLS, ...Object.keys(st.cls), ...Object.keys(prevCls), ...(stockInfo && stockInfo.byCls ? Object.keys(stockInfo.byCls) : [])])];
+    const clsList = [...new Set([...ALL_CLS, ...(stockInfo && stockInfo.byCls ? Object.keys(stockInfo.byCls) : [])])];
     let totClsStock = 0, totClsLast = 0, totClsMtd = 0, totCls1m = 0, totCls3m = 0;
     const classStockRowsHtml = clsList.map((c) => {
       const sc = (stockInfo && stockInfo.byCls && stockInfo.byCls[c]) || { t: 0, c: [0, 0, 0, 0], o: 0 };
-      const lVal = prevCls[c] || 0;
-      const mVal = st.cls[c] || 0;
-      if (!sc.t && !lVal && !mVal && !['VC4', 'VC20', 'VC5', 'VC6', 'VC7', 'VC12'].includes(c)) return '';
-      totClsStock += sc.t; totClsLast += lVal; totClsMtd += mVal; totCls1m += sc.c[0]; totCls3m += sc.c[1];
+      if (!sc.t && !['VC4', 'VC20', 'VC5', 'VC6', 'VC7', 'VC12'].includes(c)) return '';
+      totClsStock += sc.t; totCls1m += sc.c[0]; totCls3m += sc.c[1];
       const grp = c === 'VC4' || c === 'VC20' ? '🚗 Core' : '🚚 Comm';
-      return `<tr><td><b>${escHtml(c)}</b></td><td>${grp}</td><td><b>${nf(sc.t)}</b></td><td>${nf(sc.c[0])}</td><td class="${sc.c[1] ? 'pb-warn' : ''}">${nf(sc.c[1])}</td><td>${nf(lVal)}</td><td><b>${nf(mVal)}</b></td><td>${pct(mVal, st.clsTotal)}%</td></tr>`;
+      return `<tr><td><b>${escHtml(c)}</b></td><td>${grp}</td><td><b>${nf(sc.t)}</b></td><td>${nf(sc.c[0])}</td><td class="${sc.c[1] ? 'pb-warn' : ''}">${nf(sc.c[1])}</td></tr>`;
     }).filter(Boolean).join('');
-    const classStockCardHtml = `<section class="pb-card"><div class="pb-card-head"><h3>📦 Class-wise Stock &amp; Issuance</h3>${expBtns('pl-tbl-cls-stock', `${link.name} - Class-wise Stock & Issuance`)}</div><div class="pb-scroll"><table class="pb-tbl" id="pl-tbl-cls-stock"><thead><tr><th>Tag Class</th><th>Category</th><th>In Stock</th><th>Stock ≥1M</th><th>Stock ≥3M</th><th>Last (${escHtml(prevYm)})</th><th>MTD (${escHtml(ym)})</th><th>MTD Share</th></tr></thead><tbody>${classStockRowsHtml}</tbody><tfoot><tr><td>Grand Total</td><td>All Classes</td><td>${nf(totClsStock || stTotal)}</td><td>${nf(totCls1m)}</td><td>${nf(totCls3m)}</td><td>${nf(totClsLast)}</td><td>${nf(totClsMtd)}</td><td>100%</td></tr></tfoot></table></div></section>`;
+    const classStockCardHtml = `<section class="pb-card"><div class="pb-card-head"><h3>📦 Class-wise Stock</h3>${expBtns('pl-tbl-cls-stock', `${link.name} - Class-wise Stock`)}</div><div class="pb-scroll"><table class="pb-tbl" id="pl-tbl-cls-stock"><thead><tr><th>Tag Class</th><th>Category</th><th>In Stock</th><th>Stock ≥1M</th><th>Stock ≥3M</th></tr></thead><tbody>${classStockRowsHtml}</tbody><tfoot><tr><td>Grand Total</td><td>All Classes</td><td>${nf(totClsStock || stTotal)}</td><td>${nf(totCls1m)}</td><td>${nf(totCls3m)}</td></tr></tfoot></table></div></section>`;
+    const classIssuanceRowsHtml = [...new Set([...ALL_CLS, ...Object.keys(st.cls), ...Object.keys(prevCls)])].map((c) => {
+      const last = prevCls[c] || 0, mtd = st.cls[c] || 0;
+      if (!last && !mtd && !['VC4', 'VC20', 'VC5', 'VC6', 'VC7', 'VC12'].includes(c)) return '';
+      totClsLast += last; totClsMtd += mtd;
+      return `<tr><td><b>${escHtml(c)}</b></td><td>${nf(last)}</td><td><b>${nf(mtd)}</b></td><td>${pct(mtd, st.clsTotal)}%</td></tr>`;
+    }).filter(Boolean).join('');
+    const classIssuanceHtml = `<section class="pb-card"><div class="pb-card-head"><h3>🏷️ Class-wise Issuance</h3>${expBtns('pl-tbl-cls-issue', `${link.name} - Class-wise Issuance`)}</div><div class="pb-scroll"><table class="pb-tbl" id="pl-tbl-cls-issue"><thead><tr><th>Tag Class</th><th>Last Month (${escHtml(prevYm)})</th><th>MTD (${escHtml(ym)})</th><th>MTD Share</th></tr></thead><tbody>${classIssuanceRowsHtml}</tbody><tfoot><tr><td>Grand Total</td><td>${nf(totClsLast)}</td><td>${nf(totClsMtd)}</td><td>100%</td></tr></tfoot></table></div></section>`;
 
     // 2. 📅 Date-wise Issuance Table
     const byDateMap = new Map();
@@ -5195,23 +5282,18 @@ async function servePersonalPage(req, res, rawToken) {
       agentAgeTable = `<section class="pb-card"><div class="pb-card-head"><h3>👥 Agent-wise Stock Ageing (${agList.length} agents)</h3>${expBtns('pl-tbl-ag-age', `${link.name} - Agent Stock Ageing`)}</div><div class="pb-scroll"><table class="pb-tbl" id="pl-tbl-ag-age"><thead><tr><th>Agent</th><th>Total Stock</th><th>🚗 Core</th><th>🚚 Comm</th><th>≥1M</th><th>≥3M</th><th>≥5M</th><th>≥6M</th></tr></thead><tbody>${agList.map((a) => `<tr><td>${escHtml(a.n)}</td><td><b>${nf(a.t[0] + a.t[1])}</b></td><td>${nf(a.t[0])}</td><td>${nf(a.t[1])}</td><td>${nf(a.c[0][0] + a.c[1][0])}</td><td class="${a.c[0][1] + a.c[1][1] ? 'pb-warn' : ''}">${nf(a.c[0][1] + a.c[1][1])}</td><td class="${a.c[0][2] + a.c[1][2] ? 'pb-hot' : ''}">${nf(a.c[0][2] + a.c[1][2])}</td><td class="${a.c[0][3] + a.c[1][3] ? 'pb-hot' : ''}">${nf(a.c[0][3] + a.c[1][3])}</td></tr>`).join('')}</tbody><tfoot><tr><td>Grand Total</td><td>${nf(agTot)}</td><td>${nf(agList.reduce((a, x) => a + x.t[0], 0))}</td><td>${nf(agList.reduce((a, x) => a + x.t[1], 0))}</td><td>${nf(ag1m)}</td><td>${nf(ag3m)}</td><td>${nf(ag5m)}</td><td>${nf(ag6m)}</td></tr></tfoot></table></div></section>`;
     }
 
-    // 4. 👥 TL Agent-wise Stock + Issuance Table
+    // 4. 👥 TL Agent-wise Issuance — inventory fields live only in the stock section.
     let teamTable = '';
-    if (link.kind === 'tl') {
-      const agentRows = new Map();
-      const normKey = (v) => String(v || '').trim().toUpperCase().replace(/\s+/g, ' ');
+    if (link.kind === 'tl' && hasSec('issuance')) {
+      const agentRows = [];
       for (const [name, m] of byAgentMap) {
         let mtdA = 0, lastA = 0;
         for (const [d, n] of m) { if (d.startsWith(ym)) mtdA += n; else if (d.startsWith(prevYm)) lastA += n; }
-        agentRows.set(normKey(name), { name, mtd: mtdA, last: lastA, core: 0, comm: 0 });
+        if (mtdA || lastA) agentRows.push({ name, mtd: mtdA, last: lastA, total: mtdA + lastA });
       }
-      if (stockInfo) stockInfo.agents.forEach((a) => {
-        const k = normKey(a.n); const r = agentRows.get(k) || { name: a.n, mtd: 0, last: 0, core: 0, comm: 0 };
-        r.core = a.t[0]; r.comm = a.t[1]; agentRows.set(k, r);
-      });
-      const list = [...agentRows.values()].filter((r) => r.mtd || r.last || r.core || r.comm).sort((a, b) => b.mtd - a.mtd || (b.core + b.comm) - (a.core + a.comm)).slice(0, 80);
+      const list = agentRows.sort((a, b) => b.mtd - a.mtd || b.last - a.last).slice(0, 80);
       const sum = (k) => list.reduce((a, r) => a + r[k], 0);
-      teamTable = list.length ? `<section class="pb-card"><div class="pb-card-head"><h3>👥 Team (is mahine) · agent-wise stock + issuance (${list.length} agents)</h3>${expBtns('pl-tbl-team', `${link.name} - Team Agent-wise`)}</div><div class="pb-scroll"><table class="pb-tbl" id="pl-tbl-team"><thead><tr><th>Agent</th><th>Stock 🚗</th><th>Stock 🚚</th><th>Total Stock</th><th>Last</th><th>MTD</th></tr></thead><tbody>${list.map((r) => `<tr><td>${escHtml(r.name)}</td><td>${nf(r.core)}</td><td>${nf(r.comm)}</td><td>${nf(r.core + r.comm)}</td><td>${nf(r.last)}</td><td><b>${nf(r.mtd)}</b></td></tr>`).join('')}</tbody><tfoot><tr><td>Grand Total</td><td>${nf(sum('core'))}</td><td>${nf(sum('comm'))}</td><td>${nf(sum('core') + sum('comm'))}</td><td>${nf(sum('last'))}</td><td>${nf(sum('mtd'))}</td></tr></tfoot></table></div></section>` : '';
+      teamTable = list.length ? `<section class="pb-card"><div class="pb-card-head"><h3>👥 Team · agent-wise issuance (${list.length} agents)</h3>${expBtns('pl-tbl-team', `${link.name} - Team Agent-wise Issuance`)}</div><div class="pb-scroll"><table class="pb-tbl" id="pl-tbl-team"><thead><tr><th>Agent</th><th>Last Month Issued</th><th>MTD Issued</th><th>Combined</th></tr></thead><tbody>${list.map((r) => `<tr><td>${escHtml(r.name)}</td><td>${nf(r.last)}</td><td><b>${nf(r.mtd)}</b></td><td>${nf(r.total)}</td></tr>`).join('')}</tbody><tfoot><tr><td>Grand Total</td><td>${nf(sum('last'))}</td><td>${nf(sum('mtd'))}</td><td>${nf(sum('total'))}</td></tr></tfoot></table></div></section>` : '';
     }
     const teamHtml = team.length ? `<section class="pb-card"><h3>👥 Team (is mahine)</h3>${team.map((t, i) => `<div class="pb-rank"><span class="pb-pos">${i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1}</span><span class="pb-name">${escHtml(t.name)}</span><b>${t.mtd}</b></div>`).join('')}</section>` : '';
 
@@ -5221,43 +5303,31 @@ async function servePersonalPage(req, res, rawToken) {
     const projected = Math.round((st.mtd / dayNow) * 30);
     const diff = st.mtd - st.prevSame;
     const growthPct = st.prevSame > 0 ? `${diff >= 0 ? '+' : ''}${Math.round((diff / st.prevSame) * 100)}%` : 'New';
+    const perfStockRow = hasSec('stock') ? `<tr><td><b>Current Stock in Hand</b></td><td><b>${nf(stTotal)} tags</b></td><td>🚗 Core: ${nf(stCore)} · 🚚 Comm: ${nf(stComm)}</td><td>≥3M Old: ${nf(totAgeC[1])} tags</td></tr>` : '';
+    const perfStockTotal = hasSec('stock') ? `<td>Stock: ${nf(stTotal)}</td>` : '<td>Performance details</td>';
     const perfCardHtml = `<section class="pb-card"><div class="pb-card-head"><h3>🏆 Performance &amp; Growth Scorecard</h3>${expBtns('pl-tbl-perf', `${link.name} - Performance Scorecard`)}</div><div class="pb-scroll"><table class="pb-tbl" id="pl-tbl-perf"><thead><tr><th>Metric</th><th>Current Value</th><th>Benchmark / Reference</th><th>Status / Delta</th></tr></thead><tbody>
       <tr><td><b>MTD Issued (${escHtml(ym)})</b></td><td><b>${nf(st.mtd)}</b></td><td>Same period (${escHtml(prevYm)}): ${nf(st.prevSame)}</td><td class="${diff >= 0 ? 'pb-up' : 'pb-hot'}">${diff >= 0 ? '▲ +' : '▼ '}${nf(Math.abs(diff))} (${escHtml(growthPct)})</td></tr>
       <tr><td><b>Last Month Total (${escHtml(prevYm)})</b></td><td><b>${nf(lastMonthTotal)}</b></td><td>Projected Month-End: ${nf(projected)}</td><td>Run Rate: ${runRate} / day</td></tr>
       <tr><td><b>Active Days (MTD)</b></td><td><b>${nf(st.mtdActiveDays)} days</b></td><td>Avg / Active Day: ${st.mtdActiveDays ? (st.mtd / st.mtdActiveDays).toFixed(1) : '0'}</td><td>Streak: ${nf(st.streak)} days 🔥</td></tr>
       <tr><td><b>Best Single Day (MTD)</b></td><td><b>${nf(st.best.n)} tags</b></td><td>Date: ${escHtml(st.best.date || '—')}</td><td>Last 14d Active: ${nf(st.activeDays)}/14d</td></tr>
-      <tr><td><b>Current Stock in Hand</b></td><td><b>${nf(stTotal)} tags</b></td><td>🚗 Core: ${nf(stCore)} · 🚚 Comm: ${nf(stComm)}</td><td>≥3M Old: ${nf(totAgeC[1])} tags</td></tr>
-    </tbody><tfoot><tr><td>Summary Total</td><td>MTD: ${nf(st.mtd)}</td><td>Last Month: ${nf(lastMonthTotal)}</td><td>Stock: ${nf(stTotal)}</td></tr></tfoot></table></div></section>`;
+      ${perfStockRow}
+    </tbody><tfoot><tr><td>Summary Total</td><td>MTD: ${nf(st.mtd)}</td><td>Last Month: ${nf(lastMonthTotal)}</td>${perfStockTotal}</tr></tfoot></table></div></section>`;
 
-    const stockKpis = `<section class="pb-kpis"><div class="pb-kpi stock"><small>📦 Stock (total)</small><b>${stockInfo ? nf(stTotal) : '—'}</b><span>${stockInfo ? `🚗 ${nf(stCore)} · 🚚 ${nf(stComm)}` : 'stock data abhi nahi mila'}</span></div><div class="pb-kpi last"><small>Last month total</small><b>${nf(lastMonthTotal)}</b><span>${escHtml(prevYm)}</span></div></section>`;
-    const tlName = link.kind === 'tl' ? '' : (await personalAgentTl(link));
+    const stockKpis = hasSec('stock') ? `<section class="pb-kpis"><div class="pb-kpi stock"><small>📦 Stock (total)</small><b>${stockInfo ? nf(stTotal) : '—'}</b><span>${stockInfo ? `🚗 ${nf(stCore)} · 🚚 ${nf(stComm)}` : 'stock data abhi nahi mila'}</span></div></section>` : '';
+    const tlName = link.kind === 'tl' || !hasVisibleSection ? '' : (await personalAgentTl(link));
 
-    // Build Navigation Tabs according to Admin's allowed sections
+    // Build only tabs that the admin granted; an "All" view can expose only emitted sections.
     const tabDefs = [
       { id: 'overview', label: '📊 Overview', show: hasSec('overview') },
       { id: 'stock', label: '📦 Class-wise Stock', show: hasSec('stock') },
       { id: 'issuance', label: `📅 Date${link.kind === 'tl' ? ' & Agent' : ''} Issuance`, show: hasSec('issuance') },
       { id: 'performance', label: '🏆 Performance', show: hasSec('performance') },
-      { id: 'ageing', label: '⏳ Stock Ageing', show: hasSec('ageing') },
-      { id: 'all', label: '🌐 All Sections', show: true }
+      { id: 'ageing', label: '⏳ Stock Ageing', show: hasSec('ageing') }
     ].filter((t) => t.show);
+    if (tabDefs.length > 1) tabDefs.push({ id: 'all', label: '🌐 All Allowed Sections', show: true });
     const firstTab = (tabDefs[0] && tabDefs[0].id) || 'overview';
-    const tabsBarHtml = `<div class="pb-tabs-bar"><div class="pb-tabs" id="pl-tabs">${tabDefs.map((t) => `<button type="button" class="pb-tab ${t.id === firstTab ? 'on' : ''}" data-pl-tab="${t.id}">${t.label}</button>`).join('')}</div>${canExport ? `<div class="pb-global-exp"><button type="button" class="pb-btn" id="pl-exp-all-csv">⬇ Full CSV</button><button type="button" class="pb-btn pb-btn-pdf" id="pl-exp-all-pdf">📄 Full PDF</button></div>` : ''}</div>`;
-
-    // Identity Verification Gate (TL ID / Agent ID + Mobile Number)
-    const idLabel = link.kind === 'tl' ? 'TL ID (ya Naam)' : 'Agent ID (POS / BC ID)';
-    const authGateHtml = `<section class="pb-card pb-auth-card" id="pl-auth-gate" ${requireAuth ? '' : 'hidden'}>
-      <div class="pb-auth-ico">🔐</div>
-      <h2>Identity Verification</h2>
-      <p class="dim">Apna <b>${escHtml(idLabel)}</b> aur <b>10-digit Mobile Number</b> daal kar apna personal dashboard kholein.</p>
-      <form class="pb-auth-form" id="pl-auth-form" autocomplete="off">
-        <label class="pb-fld"><span>🪪 ${escHtml(idLabel)} *</span><input class="pb-inp" id="pl-inp-id" required placeholder="e.g. ${escHtml(savedLink.personId || (link.kind === 'tl' ? 'TL ID' : '1001'))}" maxlength="40"></label>
-        <label class="pb-fld"><span>📱 Mobile Number (10 digit) *</span><input class="pb-inp" id="pl-inp-mob" type="tel" inputmode="numeric" required placeholder="10-digit registered mobile" maxlength="14"></label>
-        <div class="pb-auth-err" id="pl-auth-err" hidden></div>
-        <button type="submit" class="pb-auth-btn" id="pl-auth-btn">🔓 Verify &amp; Open Dashboard</button>
-      </form>
-      <p class="dim" style="font-size:11.5px;margin-top:10px">🛡️ Protected Personal Link · ${escHtml(link.name)} (${link.source === 'gv' ? 'GV Partner' : 'First Forward'})</p>
-    </section>`;
+    const tabsBarHtml = tabDefs.length ? `<div class="pb-tabs-bar"><div class="pb-tabs" id="pl-tabs">${tabDefs.map((t) => `<button type="button" class="pb-tab ${t.id === firstTab ? 'on' : ''}" data-pl-tab="${t.id}">${t.label}</button>`).join('')}</div>${canExport ? `<div class="pb-global-exp"><button type="button" class="pb-btn" id="pl-exp-all-csv">⬇ Full CSV</button><button type="button" class="pb-btn pb-btn-pdf" id="pl-exp-all-pdf">📄 Full PDF</button></div>` : ''}</div>` : '';
+    const noSectionsHtml = tabDefs.length ? '' : '<section class="pb-card pb-no-sections"><h3>🔒 No report sections enabled</h3><p class="dim">The administrator has not granted any report sections for this link. Contact them to request access.</p></section>';
 
     const html = personalShell({
       title: `${link.name} · Performance`,
@@ -5265,12 +5335,13 @@ async function servePersonalPage(req, res, rawToken) {
       sub: `${link.source === 'gv' ? 'GV Partner' : 'First Forward'} · ${link.kind === 'tl' ? 'Team Leader' : 'Agent'}${tlName ? ` · ${link.kind === 'tl' ? '' : 'TL '}<b>${escHtml(tlName)}</b>` : ''} · personal view · read-only`,
       token,
       requireAuth,
+      authorized: true,
       personName: link.name,
       body: `
-      ${authGateHtml}
-      <div id="pl-portal-content" ${requireAuth ? 'class="pb-locked"' : ''}>
+      <div id="pl-portal-content">
         ${tabsBarHtml}
-        <div class="pl-pane" data-pl-pane="overview">
+        ${noSectionsHtml}
+        ${hasSec('overview') ? `<div class="pl-pane" data-pl-pane="overview">
           ${goalHtml || targetHtml ? `<section class="pb-card pb-goalcard">${goalHtml}${targetHtml}</section>` : ''}
           ${stockKpis}
           <section class="pb-kpis">
@@ -5288,21 +5359,21 @@ async function servePersonalPage(req, res, rawToken) {
               <div class="pb-kv"><span>Total rows (14 din chart)</span><b>${st.last14.reduce((a, b) => a + b.n, 0)}</b></div>
             </div>
           </section>
-        </div>
+        </div>` : ''}
         ${hasSec('stock') ? `<div class="pl-pane" data-pl-pane="stock" hidden>${classStockCardHtml}</div>` : ''}
-        ${hasSec('issuance') ? `<div class="pl-pane" data-pl-pane="issuance" hidden>${teamTable}${dateTableHtml}</div>` : ''}
+        ${hasSec('issuance') ? `<div class="pl-pane" data-pl-pane="issuance" hidden>${classIssuanceHtml}${teamTable}${dateTableHtml}</div>` : ''}
         ${hasSec('performance') ? `<div class="pl-pane" data-pl-pane="performance" hidden>${perfCardHtml}${teamHtml}</div>` : ''}
         ${hasSec('ageing') ? `<div class="pl-pane" data-pl-pane="ageing" hidden>${ageHtml}${agentAgeTable}</div>` : ''}
         <p class="pb-foot">Read-only link · data live sheet se · ${escHtml(db.settings.brand || 'Dashboard')}</p>
       </div>`
     });
-    return sendHtml(res, 200, html, { 'Cache-Control': 'no-store' });
+    return sendHtml(res, 200, html, noStore);
   } catch (err) {
     console.warn('personal page:', err.message);
     return fail(500, 'Data load nahi hua — thodi der baad try karo.');
   }
 }
-function personalShell({ title, heading, sub, body, token = '', requireAuth = false, personName = '' }) {
+function personalShell({ title, heading, sub, body, token = '', requireAuth = false, authorized = false, personName = '' }) {
   const accent = (db.settings.theme && db.settings.theme.accent) || '#2563eb';
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow"><title>${escHtml(title)}</title>
@@ -5357,11 +5428,12 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background
 .pb-inp:focus{border-color:var(--a);box-shadow:0 0 0 3px rgba(37,99,235,.15)}
 .pb-auth-btn{background:var(--a);color:#fff;border:0;border-radius:10px;padding:11px 16px;font-size:14px;font-weight:800;cursor:pointer;margin-top:4px}
 .pb-auth-err{background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;padding:8px 10px;border-radius:8px;font-size:12.5px;font-weight:600}
-@media(max-width:560px){.pb-grid2{grid-template-columns:1fr}}
-</style></head><body><div class="pb-wrap" id="pl-root" data-token="${escHtml(token)}" data-require-auth="${requireAuth ? '1' : '0'}" data-person="${escHtml(personName)}">
+.pb-no-sections{text-align:center;border:1px dashed #cbd5e1;background:#f8fafc}.pb-no-sections p{margin-top:6px;font-size:13px}
+@media(max-width:560px){body{padding:10px}.pb-head{padding:12px}.pb-grid2{grid-template-columns:1fr}.pb-tabs-bar{align-items:flex-start}.pb-tbl{min-width:620px}}
+</style></head><body><div class="pb-wrap" id="pl-root" data-token="${escHtml(token)}" data-require-auth="${requireAuth ? '1' : '0'}" data-authorized="${authorized ? '1' : '0'}" data-person="${escHtml(personName)}">
 <header class="pb-head"><div class="pb-head-left"><div class="pb-logo">${escHtml(String(db.settings.brand || 'FF').split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase())}</div>
 <div><h1>${heading || escHtml(title || '')}</h1>${sub ? `<p>${sub}</p>` : ''}</div></div>
-${requireAuth ? '<button type="button" class="pb-btn" id="pl-lock-btn" hidden title="Lock Personal Link">🔒 Lock</button>' : ''}</header>
+${requireAuth ? `<button type="button" class="pb-btn" id="pl-lock-btn" ${authorized ? '' : 'hidden'} title="Lock Personal Link">🔒 Lock</button>` : ''}</header>
 ${body || ''}
 </div>
 ${token ? '<script src="/pdf.js"></script><script src="/p-portal.js"></script>' : ''}
@@ -5410,34 +5482,18 @@ const PERSONAL_PORTAL_JS = `(function () {
   var root = document.getElementById('pl-root');
   if (!root) return;
   var token = root.getAttribute('data-token') || '';
-  var reqAuth = root.getAttribute('data-require-auth') === '1';
   var person = root.getAttribute('data-person') || 'Partner';
-  var gate = document.getElementById('pl-auth-gate');
-  var content = document.getElementById('pl-portal-content');
   var lockBtn = document.getElementById('pl-lock-btn');
-  var sKey = 'pl_verified_' + token;
-
-  function unlock() {
-    if (gate) gate.hidden = true;
-    if (content) content.classList.remove('pb-locked');
-    if (lockBtn) lockBtn.hidden = false;
-  }
-  function lock() {
-    try { sessionStorage.removeItem(sKey); } catch (e) {}
-    if (gate) gate.hidden = false;
-    if (content) content.classList.add('pb-locked');
-    if (lockBtn) lockBtn.hidden = true;
-  }
-  if (reqAuth) {
-    var already = false;
-    try { already = sessionStorage.getItem(sKey) === '1'; } catch (e) {}
-    if (already) unlock();
-  } else {
-    unlock();
-  }
-  if (lockBtn) lockBtn.addEventListener('click', lock);
-
   var form = document.getElementById('pl-auth-form');
+
+  if (lockBtn) lockBtn.addEventListener('click', function () {
+    lockBtn.disabled = true;
+    fetch('/api/public/personal-link/logout', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: token })
+    }).finally(function () { window.location.reload(); });
+  });
+
   if (form) {
     form.addEventListener('submit', function (e) {
       e.preventDefault();
@@ -5450,19 +5506,18 @@ const PERSONAL_PORTAL_JS = `(function () {
       if (errEl) errEl.hidden = true;
       if (btn) { btn.disabled = true; btn.textContent = '⏳ Verifying…'; }
       fetch('/api/public/personal-link/verify', {
-        method: 'POST',
+        method: 'POST', credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token: token, personId: pid, mobile: mob })
       }).then(function (r) {
         return r.json().then(function (j) { return { ok: r.ok, json: j }; });
       }).then(function (out) {
         if (!out.ok) throw new Error((out.json && out.json.error) || 'Verification failed');
-        try { sessionStorage.setItem(sKey, '1'); } catch (e) {}
-        unlock();
+        // The next GET is checked again at the server boundary and only then returns report HTML.
+        window.location.reload();
       }).catch(function (err) {
         if (errEl) { errEl.textContent = '⚠️ ' + (err.message || 'Verification failed'); errEl.hidden = false; }
-      }).finally(function () {
-        if (btn) { btn.disabled = false; btn.textContent = '🔓 Verify & Open Dashboard'; }
+        if (btn) { btn.disabled = false; btn.textContent = '🔓 Verify & Open Report'; }
       });
     });
   }

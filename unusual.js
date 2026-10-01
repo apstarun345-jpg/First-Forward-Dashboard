@@ -49,8 +49,13 @@ FF.pages = FF.pages || {};
     onlyFlagged: true,
     viewMode: 'forensic', // 'forensic' | 'table' | 'duplicates'
     vrnCacheKey: '',
-    vrnRecords: []
+    vrnRecords: [],
+    vrnFetchInfo: null
   };
+  const VRN_PAGE_SIZE = 25000;
+  const VRN_MAX_PAGES = 20;
+  let activeModel = null;
+  let uaDrawerWired = false;
 
   const isWrong = (v) => /wrong/i.test(String(v || ''));
   const isChassis = (v) => /chassis/i.test(String(v || ''));
@@ -59,19 +64,17 @@ FF.pages = FF.pages || {};
   const isInvalidVrnFormat = (vrn, vrnType) => {
     if (isChassis(vrnType)) return false;
     const c = cleanVrn(vrn);
-    if (!c) return false;
+    if (!c) return true; // empty VRN is invalid unless the row is explicitly a chassis tag
     if (c.length < 6 || c.length > 13) return true;
-    if (/^(0+|1+|9+|TEST|NA|NULL|NONE|XXXX|AAAA)/.test(c)) return true;
+    if (/^(0+|1+|9+|TEST|NA|NULL|NONE|UNKNOWN|UNAVAILABLE|XXXX|AAAA)/.test(c)) return true;
     if (/(\d)\1{4,}/.test(c)) return true; // e.g. 00000, 11111
     return false;
   };
 
   function resolveRange(all, opts) {
     const o = opts || state;
-    const latest = all.reduce((m, r) => (r.key > m ? r.key : m), '') || U.dateKey(new Date());
-    const today = U.dateKey(new Date());
-    const refDay = latest > today ? latest : today;
-    const curYm = latest.slice(0, 7);
+    const today = /^\d{4}-\d{2}-\d{2}$/.test(String(o.today || '')) ? String(o.today) : U.dateKey(new Date());
+    const curYm = today.slice(0, 7);
     const prevYm = U.prevMonthKey(curYm);
     const shiftDays = (key, delta) => {
       const dt = U.fromDateKey(key) || new Date();
@@ -79,24 +82,23 @@ FF.pages = FF.pages || {};
       return U.dateKey(dt);
     };
     if (o.period === 'today') {
-      const d = all.some((r) => r.key === today) ? today : latest;
-      return { from: d, to: d, label: `Today (${U.labelDateKey(d, true)})` };
+      return { from: today, to: today, label: `Today (${U.labelDateKey(today, true)})` };
     }
     if (o.period === 'yesterday') {
-      const y = shiftDays(refDay, -1);
+      const y = shiftDays(today, -1);
       return { from: y, to: y, label: `Yesterday (${U.labelDateKey(y, true)})` };
     }
     if (o.period === 'last7') {
-      const f = shiftDays(latest, -6);
-      return { from: f, to: latest, label: `Last 7 Days (${f} → ${latest})` };
+      const f = shiftDays(today, -6);
+      return { from: f, to: today, label: `Last 7 Days (${f} → ${today})` };
     }
     if (o.period === 'last') {
       const f = `${prevYm}-01`, t = `${prevYm}-${U.pad2(U.daysInMonth(prevYm))}`;
       return { from: f, to: t, label: `Last Month (${U.labelYM(prevYm, true)})` };
     }
     if (o.period === 'last30') {
-      const f = shiftDays(latest, -29);
-      return { from: f, to: latest, label: `Last 30 Days (${f} → ${latest})` };
+      const f = shiftDays(today, -29);
+      return { from: f, to: today, label: `Last 30 Days (${f} → ${today})` };
     }
     if (o.period === 'custom' && (o.from || o.to)) {
       const f = o.from || o.to, t = o.to || o.from;
@@ -104,7 +106,7 @@ FF.pages = FF.pages || {};
       return { from: a, to: b, label: `Custom (${a} → ${b})` };
     }
     const f = `${curYm}-01`;
-    return { from: f, to: latest, label: `This Month MTD (${U.labelYM(curYm, true)})` };
+    return { from: f, to: today, label: `This Month MTD (${U.labelYM(curYm, true)})` };
   }
 
   /** Pure analyzer — exposed as FF.unusual.analyze(dailyRows, opts) for tests and callers. */
@@ -114,7 +116,7 @@ FF.pages = FF.pages || {};
     const range = resolveRange(all, o);
     const rows = all.filter((r) => r.key >= range.from && r.key <= range.to);
 
-    let tot = 0, wrongTot = 0, replTot = 0, chasTot = 0, vc4Tot = 0;
+    let tot = 0, wrongTot = 0, invalidTot = 0, replTot = 0, chasTot = 0, vc4Tot = 0;
     const byAgent = new Map();
     const ensureAgent = (ch, id, name, tl) => {
       const k = `${ch}|${ U.clean(id || name).toUpperCase() }`;
@@ -123,8 +125,8 @@ FF.pages = FF.pages || {};
       if (!a) {
         a = {
           key: k, channel: ch, id: U.clean(id), name: U.clean(name || id), tl: U.clean(tl),
-          total: 0, vc4: 0, comm: 0, wrong: 0, replace: 0, chassis: 0,
-          doubleVrn: 0, invalidVrn: 0, doubleList: [],
+          total: 0, vc4: 0, comm: 0, wrong: 0, wrongType: 0, replace: 0, chassis: 0,
+          doubleVrn: 0, invalidVrn: 0, wrongTagIds: new Set(), invalidTagIds: new Set(), invalidList: [], doubleList: [],
           byDay: new Map(), byClass: new Map()
         };
         byAgent.set(k, a);
@@ -144,7 +146,7 @@ FF.pages = FF.pages || {};
       if (!a) continue;
       a.total += n; tot += n;
       if (r.group === 'VC4' || String(r.cls || '').toUpperCase() === 'VC4') { a.vc4 += n; vc4Tot += n; } else a.comm += n;
-      if (isWrong(r.vrnType)) { a.wrong += n; wrongTot += n; }
+      if (isWrong(r.vrnType)) a.wrongType += n;
       if (isChassis(r.vrnType)) { a.chassis += n; chasTot += n; }
       if (isRepl(r.type, r.status)) { a.replace += n; replTot += n; }
       if (r.doubleVrn) a.doubleVrn += Number(r.doubleVrn) || 0;
@@ -156,17 +158,30 @@ FF.pages = FF.pages || {};
     // Tag-level VRN inspection (Duplicate / Double VRN & Invalid VRN format)
     const vrnRecords = Array.isArray(o.vrnRecords) ? o.vrnRecords.filter((x) => x && x.key >= range.from && x.key <= range.to && (o.ch === 'all' || x.ch === o.ch)) : [];
     const vrnMap = new Map();
+    const vrnOccurrenceKey = (rec, v) => rec.tagId
+      ? `${rec.ch || 'ff'}|tag:${U.clean(rec.tagId).toUpperCase()}`
+      : `${rec.ch || 'ff'}|${rec.key}|${v}|${U.clean(rec.agentId || rec.agentName).toUpperCase()}`;
     for (const rec of vrnRecords) {
       if (isChassis(rec.vrnType)) continue;
       const v = cleanVrn(rec.vrn);
-      if (!v || v.length < 4) continue;
+      const invalid = isInvalidVrnFormat(rec.vrn, rec.vrnType);
+      if (isWrong(rec.vrnType) || invalid) {
+        const a = ensureAgent(rec.ch || 'ff', rec.agentId, rec.agentName, rec.tlName);
+        if (a) {
+          const occurrence = vrnOccurrenceKey(rec, v);
+          if (isWrong(rec.vrnType)) a.wrongTagIds.add(occurrence);
+          if (invalid && !a.invalidTagIds.has(occurrence)) {
+            a.invalidTagIds.add(occurrence);
+            a.invalidList.push({ vrn: U.clean(rec.vrn), tagId: U.clean(rec.tagId), key: rec.key, vrnType: U.clean(rec.vrnType) });
+          }
+        }
+      }
+      // Short/malformed values still count as invalid, but placeholders should not generate
+      // meaningless duplicate-vehicle alarms.
+      if (!v || v.length < 6 || invalid || /^(NA|NULL|NONE|UNKNOWN|UNAVAILABLE|TEST|XXXX|AAAA)$/.test(v)) continue;
       const list = vrnMap.get(v) || [];
       list.push(rec);
       vrnMap.set(v, list);
-      if (isInvalidVrnFormat(rec.vrn, rec.vrnType)) {
-        const a = ensureAgent(rec.ch || 'ff', rec.agentId, rec.agentName, rec.tlName);
-        if (a) a.invalidVrn += 1;
-      }
     }
 
     const duplicateVrns = [];
@@ -199,14 +214,41 @@ FF.pages = FF.pages || {};
     }
     duplicateVrns.sort((a, b) => b.count - a.count || a.vrn.localeCompare(b.vrn));
 
-    const peer = {
-      wrongPct: tot ? (wrongTot / tot) * 100 : 0,
-      replacePct: tot ? (replTot / tot) * 100 : 0,
-      chassisPct: tot ? (chasTot / tot) * 100 : 0
-    };
-    const wrongCut = Math.max(8, peer.wrongPct * o.mult);
-    const replCut = Math.max(12, peer.replacePct * o.mult);
-    const chasCut = Math.max(15, peer.chassisPct * o.mult);
+    // Daily EIR aggregates provide exact typed counts; raw VRN rows add malformed/wrong records.
+    // Merge by tag ID where possible, so a tag marked both "Wrong" and malformed is not counted twice.
+    for (const a of byAgent.values()) {
+      const wrongIds = new Set([...a.wrongTagIds, ...a.invalidTagIds]);
+      a.invalidVrn = a.invalidTagIds.size;
+      a.wrong = Math.max(a.wrongType, wrongIds.size);
+      wrongTot += a.wrong;
+      invalidTot += a.invalidVrn;
+    }
+    const channelStats = { ff: { total: 0, wrong: 0, invalid: 0, replace: 0, chassis: 0 }, gv: { total: 0, wrong: 0, invalid: 0, replace: 0, chassis: 0 } };
+    for (const a of byAgent.values()) {
+      const c = channelStats[a.channel] || channelStats.ff;
+      c.total += a.total; c.wrong += a.wrong; c.invalid += a.invalidVrn; c.replace += a.replace; c.chassis += a.chassis;
+    }
+    const peerFor = (s) => ({
+      wrongPct: s.total ? (s.wrong / s.total) * 100 : 0,
+      invalidPct: s.total ? (s.invalid / s.total) * 100 : 0,
+      replacePct: s.total ? (s.replace / s.total) * 100 : 0,
+      chassisPct: s.total ? (s.chassis / s.total) * 100 : 0
+    });
+    const overallStats = Object.values(channelStats).reduce((a, c) => ({
+      total: a.total + c.total, wrong: a.wrong + c.wrong, invalid: a.invalid + c.invalid,
+      replace: a.replace + c.replace, chassis: a.chassis + c.chassis
+    }), { total: 0, wrong: 0, invalid: 0, replace: 0, chassis: 0 });
+    const peer = peerFor(overallStats);
+    const peerByChannel = { ff: peerFor(channelStats.ff), gv: peerFor(channelStats.gv) };
+    const cutsFor = (p) => ({
+      wrongCut: Math.max(8, p.wrongPct * o.mult),
+      invalidCut: Math.max(3, p.invalidPct * o.mult),
+      replCut: Math.max(12, p.replacePct * o.mult),
+      chasCut: Math.max(15, p.chassisPct * o.mult)
+    });
+    const wrongCut = cutsFor(peer).wrongCut;
+    const replCut = cutsFor(peer).replCut;
+    const chasCut = cutsFor(peer).chasCut;
 
     const out = [];
     let doubleTot = 0;
@@ -220,11 +262,16 @@ FF.pages = FF.pages || {};
       a.maxDay = maxDay;
       a.maxDate = maxDate;
       a.spikeRatio = avg > 0 ? maxDay / avg : 0;
-      a.wrongPct = a.total ? (a.wrong / a.total) * 100 : 0;
+      a.wrongPct = a.total ? (a.wrong / a.total) * 100 : (a.wrong ? 100 : 0);
+      a.invalidPct = a.total ? (a.invalidVrn / a.total) * 100 : (a.invalidVrn ? 100 : 0);
       a.replacePct = a.total ? (a.replace / a.total) * 100 : 0;
       a.chassisPct = a.total ? (a.chassis / a.total) * 100 : 0;
       a.doublePct = a.total ? (a.doubleVrn / a.total) * 100 : 0;
       doubleTot += a.doubleVrn;
+      const aPeer = peerByChannel[a.channel] || peer;
+      const aCuts = cutsFor(aPeer);
+      a.peer = aPeer;
+      a.cuts = aCuts;
 
       const flags = [];
       const reasons = [];
@@ -232,30 +279,30 @@ FF.pages = FF.pages || {};
         flags.push('double');
         reasons.push(`♊ ${U.fmt(a.doubleVrn)} duplicate VRN tags (${a.doubleList.length} VRNs repeated)`);
       }
-      if ((a.wrong >= o.min && a.wrongPct >= wrongCut) || a.invalidVrn >= o.min) {
+      if ((a.wrong >= o.min && a.wrongPct >= aCuts.wrongCut) || (a.invalidVrn >= o.min && a.invalidPct >= aCuts.invalidCut)) {
         flags.push('wrong');
-        reasons.push(`🚫 ${U.fmt(a.wrong)} Wrong VRN (${a.wrongPct.toFixed(1)}% vs peer ${peer.wrongPct.toFixed(1)}%)`);
+        reasons.push(`🚫 ${U.fmt(a.wrong)} Wrong / invalid VRN · wrong ${a.wrongPct.toFixed(1)}% vs ${a.channel.toUpperCase()} peer ${aPeer.wrongPct.toFixed(1)}% (alert ≥ ${aCuts.wrongCut.toFixed(1)}%) · malformed ${U.fmt(a.invalidVrn)} (${a.invalidPct.toFixed(1)}% vs ${aPeer.invalidPct.toFixed(1)}%, alert ≥ ${aCuts.invalidCut.toFixed(1)}%)`);
       }
-      if (a.replace >= o.min && a.replacePct >= replCut) {
+      if (a.replace >= o.min && a.replacePct >= aCuts.replCut) {
         flags.push('replace');
-        reasons.push(`🔁 ${U.fmt(a.replace)} Replacements (${a.replacePct.toFixed(1)}% vs peer ${peer.replacePct.toFixed(1)}%)`);
+        reasons.push(`🔁 ${U.fmt(a.replace)} Replacements (${a.replacePct.toFixed(1)}% vs ${a.channel.toUpperCase()} peer ${aPeer.replacePct.toFixed(1)}%; alert ≥ ${aCuts.replCut.toFixed(1)}%)`);
       }
-      if (a.chassis >= o.min && a.chassisPct >= chasCut) {
+      if (a.chassis >= o.min && a.chassisPct >= aCuts.chasCut) {
         flags.push('chassis');
-        reasons.push(`🔩 ${U.fmt(a.chassis)} Chassis tags (${a.chassisPct.toFixed(1)}% vs peer ${peer.chassisPct.toFixed(1)}%)`);
+        reasons.push(`🔩 ${U.fmt(a.chassis)} Chassis tags (${a.chassisPct.toFixed(1)}% vs ${a.channel.toUpperCase()} peer ${aPeer.chassisPct.toFixed(1)}%; alert ≥ ${aCuts.chasCut.toFixed(1)}%)`);
       }
       if (days >= 2 && maxDay >= Math.max(10, o.min * 2) && a.spikeRatio >= 3) {
         flags.push('spike');
-        reasons.push(`⚡ ${U.fmt(maxDay)} tags on ${maxDate} (${a.spikeRatio.toFixed(1)}× avg ${avg.toFixed(1)}/day)`);
+        reasons.push(`⚡ ${U.fmt(maxDay)} tags on ${maxDate} (${a.spikeRatio.toFixed(1)}× avg ${avg.toFixed(1)}/day; alert ≥ ${Math.max(10, o.min * 2)} tags and ≥ 3×)`);
       }
       if (flags.length >= 2) flags.unshift('multi');
 
       a.flags = flags;
       a.reasons = reasons;
       const rawScore = (flags.includes('double') ? a.doubleVrn * 12 + 25 : 0)
-        + (flags.includes('wrong') ? (a.wrongPct / Math.max(1, wrongCut)) * 28 : 0)
-        + (flags.includes('replace') ? (a.replacePct / Math.max(1, replCut)) * 22 : 0)
-        + (flags.includes('chassis') ? (a.chassisPct / Math.max(1, chasCut)) * 18 : 0)
+        + (flags.includes('wrong') ? (a.wrongPct / Math.max(1, aCuts.wrongCut)) * 28 : 0)
+        + (flags.includes('replace') ? (a.replacePct / Math.max(1, aCuts.replCut)) * 22 : 0)
+        + (flags.includes('chassis') ? (a.chassisPct / Math.max(1, aCuts.chasCut)) * 18 : 0)
         + (flags.includes('spike') ? a.spikeRatio * 7 : 0)
         + (flags.includes('multi') ? 20 : 0);
       a.score = Math.min(100, Math.round(rawScore));
@@ -264,25 +311,27 @@ FF.pages = FF.pages || {};
     }
     out.sort((a, b) => (b.flags.length - a.flags.length) || (b.score - a.score) || (b.doubleVrn - a.doubleVrn) || (b.wrong - a.wrong) || (b.total - a.total));
     const counts = { all: 0, multi: 0, double: 0, wrong: 0, replace: 0, chassis: 0, spike: 0 };
-    const tagSums = { all: 0, multi: 0, double: doubleTot, wrong: wrongTot, replace: replTot, chassis: chasTot, spike: 0 };
+    const tagSums = { all: 0, multi: 0, double: 0, wrong: 0, replace: 0, chassis: 0, spike: 0 };
     for (const a of out) {
-      if (a.flags.length) {
-        counts.all++;
-        tagSums.all += a.total;
-      }
+      if (a.flags.length) { counts.all++; tagSums.all += a.total; }
       for (const f of a.flags) {
         counts[f] = (counts[f] || 0) + 1;
         if (f === 'multi') tagSums.multi += a.total;
+        if (f === 'double') tagSums.double += a.doubleVrn;
+        if (f === 'wrong') tagSums.wrong += a.wrong;
+        if (f === 'replace') tagSums.replace += a.replace;
+        if (f === 'chassis') tagSums.chassis += a.chassis;
         if (f === 'spike') tagSums.spike += a.maxDay;
       }
     }
     return {
       rows: out,
       peer,
-      cuts: { wrongCut, replCut, chasCut },
+      cuts: { wrongCut, replCut, chasCut, byChannel: { ff: cutsFor(peerByChannel.ff), gv: cutsFor(peerByChannel.gv) } },
+      peerByChannel,
       counts,
       tagSums,
-      totals: { tot, vc4Tot, commTot: tot - vc4Tot, wrongTot, replTot, chasTot, doubleTot },
+      totals: { tot, vc4Tot, commTot: tot - vc4Tot, wrongTot, invalidTot, replTot, chasTot, doubleTot },
       duplicateVrns,
       from: range.from,
       to: range.to,
@@ -290,14 +339,31 @@ FF.pages = FF.pages || {};
     };
   }
 
-  /** Collect VRN-level records from GV Master (in memory) + EIR (lightweight query for the period). */
+  /** Stable tag identity lets GV Master today's live rows and EIR history coexist without duplication. */
+  function vrnRecordKey(rec) {
+    const ch = rec && rec.ch === 'gv' ? 'gv' : 'ff';
+    const tagId = U.clean(rec && rec.tagId).toUpperCase();
+    if (tagId) return `${ch}|tag:${tagId}`;
+    return `${ch}|${rec && rec.key || ''}|${cleanVrn(rec && rec.vrn)}|${U.clean(rec && (rec.agentId || rec.agentName)).toUpperCase()}`;
+  }
+  function uniqueVrnRecords(records) {
+    const map = new Map();
+    for (const rec of records || []) {
+      if (!rec || !rec.key || rec.vrn === null || rec.vrn === undefined) continue;
+      const key = vrnRecordKey(rec);
+      if (!map.has(key)) map.set(key, rec);
+      else map.set(key, { ...map.get(key), ...Object.fromEntries(Object.entries(rec).filter(([, v]) => v !== '' && v !== null && v !== undefined)) });
+    }
+    return [...map.values()];
+  }
+
+  /** Collect tag-level VRNs in a range using bounded, offset-based EIR pages. */
   async function loadVrnRecords(from, to) {
     const recs = [];
     if (G && typeof G.rows === 'function') {
       for (const r of G.rows() || []) {
         const key = r.date ? U.dateKey(r.date) : '';
         if (!key || key < from || key > to) continue;
-        if (!r.vrn) continue;
         recs.push({
           ch: 'gv', key, vrn: r.vrn, tagId: r.tagId || r.serial || '', cls: r.cls || 'VC4',
           vrnType: r.tagType || '', agentId: r.agentId || '', agentName: r.agentName || '', tlName: r.tlName || ''
@@ -305,57 +371,107 @@ FF.pages = FF.pages || {};
       }
     }
     const cacheKey = `${from}_${to}`;
-    if (state.vrnCacheKey === cacheKey && state.vrnRecords.length) {
-      return recs.concat(state.vrnRecords);
+    if (state.vrnCacheKey === cacheKey) {
+      return uniqueVrnRecords(recs.concat(state.vrnRecords));
     }
+    const info = { pageSize: VRN_PAGE_SIZE, maxPages: VRN_MAX_PAGES, pages: 0, rowsRead: 0, capHit: false, offsetIssue: false, offsetVerified: false, source: 'GV Master fallback' };
     if (FF.data && typeof FF.data.query === 'function' && FF.config && FF.config.eir) {
       try {
         const e = FF.config.eir;
-        const q = `select ${e.date}, ${e.tagId}, ${e.vrn}, ${e.cls}, ${e.vrnType}, ${e.agentName}, ${e.agentId}, ${e.tlName}, ${e.masterId}, ${e.gvName}, ${e.gvId} where toDate(${e.date}) >= date '${from}' and toDate(${e.date}) <= date '${to}' and ${e.vrn} is not null limit 25000`;
-        const t = await FF.data.query(e.sheet || 'EIR', q, {});
-        const D = FF.data;
-        const gvFromMaster = recs.length > 0;
-        const eirRecs = [];
-        for (const r of t.rows || []) {
-          const d = D.cellDate(r[0]);
-          const key = d ? U.dateKey(d) : '';
-          if (!key) continue;
-          const channel = FF.model && FF.model.channelOf ? FF.model.channelOf(D.cellText(r[8]), D.cellText(r[7])) : 'First Forward';
-          if (channel === 'GV Partner' && gvFromMaster) continue;
-          const ch = channel === 'GV Partner' ? 'gv' : 'ff';
-          const agentName = ch === 'gv' ? (D.cellText(r[9]) || D.cellText(r[5])) : (D.cellText(r[5]) || D.cellText(r[9]));
-          const agentId = ch === 'gv' ? (D.cellText(r[10]) || D.cellText(r[6])) : (D.cellText(r[6]) || D.cellText(r[10]));
-          eirRecs.push({
-            ch, key, tagId: D.cellText(r[1]), vrn: D.cellText(r[2]), cls: D.cellText(r[3]) || 'VC4',
-            vrnType: D.cellText(r[4]), agentName, agentId, tlName: D.cellText(r[7])
-          });
+        const fields = [e.date, e.tagId, e.vrn, e.cls, e.vrnType, e.agentName, e.agentId, e.tlName, e.masterId, e.gvName, e.gvId];
+        const D = FF.data, eirRecs = [], seenEir = new Set();
+        const base = `select ${fields.join(', ')} where toDate(${e.date}) >= date '${from}' and toDate(${e.date}) <= date '${to}' order by ${e.date} asc, ${e.tagId} asc`;
+        let lastPageLength = 0;
+        info.source = 'EIR';
+        for (let page = 0; page < VRN_MAX_PAGES; page++) {
+          const offset = page * VRN_PAGE_SIZE;
+          const t = await FF.data.query(e.sheet || 'EIR', `${base} limit ${VRN_PAGE_SIZE} offset ${offset}`, {});
+          const pageRows = t.rows || [];
+          let pageUnique = 0;
+          info.pages++;
+          info.rowsRead += pageRows.length;
+          lastPageLength = pageRows.length;
+          for (const r of pageRows) {
+            const d = D.cellDate(r[0]);
+            const key = d ? U.dateKey(d) : '';
+            if (!key) continue;
+            const channel = FF.model && FF.model.channelOf ? FF.model.channelOf(D.cellText(r[8]), D.cellText(r[7])) : 'First Forward';
+            const ch = channel === 'GV Partner' ? 'gv' : 'ff';
+            const agentName = ch === 'gv' ? (D.cellText(r[9]) || D.cellText(r[5])) : (D.cellText(r[5]) || D.cellText(r[9]));
+            const agentId = ch === 'gv' ? (D.cellText(r[10]) || D.cellText(r[6])) : (D.cellText(r[6]) || D.cellText(r[10]));
+            const rec = {
+              ch, key, tagId: D.cellText(r[1]), vrn: D.cellText(r[2]), cls: D.cellText(r[3]) || 'VC4',
+              vrnType: D.cellText(r[4]), agentName, agentId, tlName: D.cellText(r[7])
+            };
+            const identity = vrnRecordKey(rec);
+            if (!seenEir.has(identity)) { pageUnique++; seenEir.add(identity); }
+            eirRecs.push(rec);
+          }
+          if (page > 0 && pageRows.length && pageUnique === 0) {
+            info.offsetIssue = true;
+            break;
+          }
+          if (page > 0 && pageUnique > 0) info.offsetVerified = true;
+          if (pageRows.length < VRN_PAGE_SIZE) break;
         }
+        // If all 20 pages filled, probe the next offset (one row only) to distinguish an exact fit
+        // from data beyond the declared 500,000-row safety cap.
+        if (!info.offsetIssue && info.pages === VRN_MAX_PAGES && lastPageLength === VRN_PAGE_SIZE) {
+          try {
+            const probe = await FF.data.query(e.sheet || 'EIR', `${base} limit 1 offset ${VRN_PAGE_SIZE * VRN_MAX_PAGES}`, {});
+            info.capHit = (probe.rows || []).length > 0;
+            info.offsetVerified = info.offsetVerified || info.capHit;
+          } catch { info.probeFailed = true; }
+        }
+        info.complete = !info.capHit && !info.offsetIssue && !info.probeFailed;
+        const merged = uniqueVrnRecords(recs.concat(eirRecs));
         state.vrnCacheKey = cacheKey;
-        state.vrnRecords = eirRecs;
-        return recs.concat(eirRecs);
-      } catch {
-        /* fallback to GV Master + aggregate EIR daily */
+        state.vrnRecords = merged;
+        state.vrnFetchInfo = info;
+        return merged;
+      } catch (err) {
+        info.source = 'GV Master fallback';
+        info.error = true;
+        info.message = U.clean(err && err.message) || 'EIR query failed';
+        info.complete = false;
+        state.vrnFetchInfo = info;
+        /* fallback to available GV Master rows; daily EIR aggregates still support ratio analysis */
       }
     }
-    return recs;
+    if (!state.vrnFetchInfo || state.vrnCacheKey !== cacheKey) state.vrnFetchInfo = { ...info, complete: false };
+    return uniqueVrnRecords(recs);
   }
 
-  function filteredRows(model) {
+  function matchesSearch(r, query) {
+    if (!query) return true;
+    const vrns = [...(r.doubleList || []).map((x) => x.vrn), ...(r.invalidList || []).map((x) => x.vrn)];
+    return `${r.name} ${r.id} ${r.tl} ${r.reasons.join(' ')} ${vrns.join(' ')}`.toLowerCase().includes(query);
+  }
+  function scopedRows(model) {
     const q = U.clean(state.q).toLowerCase();
-    return model.rows.filter((r) => {
+    return model.rows.filter((r) => (!state.tl || r.tl === state.tl) && matchesSearch(r, q));
+  }
+  function rowsForFlag(model, flagKey) {
+    return scopedRows(model).filter((r) => flagKey === 'all' ? r.flags.length > 0 : r.flags.includes(flagKey));
+  }
+  function filteredRows(model) {
+    return scopedRows(model).filter((r) => {
       if (state.onlyFlagged && !r.flags.length) return false;
       if (state.flag !== 'all' && !r.flags.includes(state.flag)) return false;
-      if (state.tl && r.tl !== state.tl) return false;
-      if (q && !`${r.name} ${r.id} ${r.tl} ${r.reasons.join(' ')}`.toLowerCase().includes(q)) return false;
       return true;
     });
   }
+  function duplicateRowsForView(model) {
+    const visibleKeys = new Set(scopedRows(model).map((r) => r.key));
+    const visibleVrns = new Set(model.rows.filter((r) => visibleKeys.has(r.key)).flatMap((r) => (r.doubleList || []).map((d) => d.vrn)));
+    return model.duplicateVrns.filter((d) => visibleVrns.has(d.vrn));
+  }
 
   function exportCsvData(rows, model, titleSuffix) {
-    const head = ['Channel', 'Agent Name', 'Agent ID', 'TL Name', 'Risk Score', 'Severity', 'Total Issued', 'VC4', 'Commercial', 'Double VRN', 'Wrong VRN', 'Wrong %', 'Replacement', 'Replace %', 'Chassis', 'Chassis %', 'Active Days', 'Avg/Day', 'Max Day', 'Max Day Date', 'Spike ×', 'Flags', 'Forensic Reasons'];
+    const head = ['Channel', 'Agent Name', 'Agent ID', 'TL Name', 'Risk Score', 'Severity', 'Total Issued', 'VC4', 'Commercial', 'Double VRN', 'Wrong / Invalid VRN', 'Malformed VRN', 'Wrong %', 'Replacement', 'Replace %', 'Chassis', 'Chassis %', 'Active Days', 'Avg/Day', 'Max Day', 'Max Day Date', 'Spike ×', 'Flags', 'Forensic Reasons'];
     const body = rows.map((r) => [
       r.channel.toUpperCase(), r.name, r.id, r.tl, r.score, r.severity,
-      r.total, r.vc4, r.comm, r.doubleVrn, r.wrong, r.wrongPct.toFixed(1),
+      r.total, r.vc4, r.comm, r.doubleVrn, r.wrong, r.invalidVrn, r.wrongPct.toFixed(1),
       r.replace, r.replacePct.toFixed(1), r.chassis, r.chassisPct.toFixed(1),
       r.days, r.avg.toFixed(1), r.maxDay, r.maxDate, r.spikeRatio.toFixed(1),
       r.flags.map((f) => FLAGS[f]?.short || f).join(' + '),
@@ -366,12 +482,13 @@ FF.pages = FF.pages || {};
     const totComm = U.sum(rows, (r) => r.comm);
     const totDbl = U.sum(rows, (r) => r.doubleVrn);
     const totWrong = U.sum(rows, (r) => r.wrong);
+    const totInvalid = U.sum(rows, (r) => r.invalidVrn);
     const totRepl = U.sum(rows, (r) => r.replace);
     const totChas = U.sum(rows, (r) => r.chassis);
     body.push([
       'GRAND TOTAL', `${rows.length} Agents`, '', '', '', '',
       totIssued, totVc4, totComm, totDbl,
-      totWrong, totIssued ? ((totWrong / totIssued) * 100).toFixed(1) : '0.0',
+      totWrong, totInvalid, totIssued ? ((totWrong / totIssued) * 100).toFixed(1) : '0.0',
       totRepl, totIssued ? ((totRepl / totIssued) * 100).toFixed(1) : '0.0',
       totChas, totIssued ? ((totChas / totIssued) * 100).toFixed(1) : '0.0',
       '', '', '', '', '', '', `${model.from} to ${model.to}`
@@ -387,6 +504,7 @@ FF.pages = FF.pages || {};
       const totIssued = U.sum(rows, (r) => r.total);
       const totDbl = U.sum(rows, (r) => r.doubleVrn);
       const totWrong = U.sum(rows, (r) => r.wrong);
+      const totInvalid = U.sum(rows, (r) => r.invalidVrn);
       const totRepl = U.sum(rows, (r) => r.replace);
       const totChas = U.sum(rows, (r) => r.chassis);
       const kpiHtml = `<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:14px">
@@ -394,7 +512,7 @@ FF.pages = FF.pages || {};
           ['Flagged Agents', U.fmt(rows.length), `${model.rangeLabel}`],
           ['Issued Tags', U.fmt(totIssued), `VC4 ${U.fmt(U.sum(rows, (r) => r.vc4))}`],
           ['Double VRN', U.fmt(totDbl), `${U.fmt(model.counts.double)} agents`],
-          ['Wrong VRN', U.fmt(totWrong), `Peer ${model.peer.wrongPct.toFixed(1)}%`],
+          ['Wrong / Invalid VRN', U.fmt(totWrong), `${U.fmt(totInvalid)} malformed · peer ${model.peer.wrongPct.toFixed(1)}%`],
           ['Replacements', U.fmt(totRepl), `Peer ${model.peer.replacePct.toFixed(1)}%`],
           ['Chassis Tags', U.fmt(totChas), `Peer ${model.peer.chassisPct.toFixed(1)}%`]
         ].map(([l, v, s]) => `<div style="border:1px solid #cbd5e1;border-radius:8px;padding:8px;background:#f8fafc;text-align:center"><div style="font-size:9.5px;color:#64748b;font-weight:700;text-transform:uppercase">${esc(l)}</div><div style="font-size:15px;font-weight:800;color:#0f172a;margin:2px 0">${esc(v)}</div><div style="font-size:9.5px;color:#475569">${esc(s)}</div></div>`).join('')}
@@ -407,7 +525,8 @@ FF.pages = FF.pages || {};
           <th style="padding:5px;text-align:right">Risk</th>
           <th style="padding:5px;text-align:right">Issued</th>
           <th style="padding:5px;text-align:right">Double VRN</th>
-          <th style="padding:5px;text-align:right">Wrong VRN</th>
+          <th style="padding:5px;text-align:right">Wrong / Invalid</th>
+          <th style="padding:5px;text-align:right">Malformed</th>
           <th style="padding:5px;text-align:right">Replace</th>
           <th style="padding:5px;text-align:right">Chassis</th>
           <th style="padding:5px;text-align:right">Peak Day</th>
@@ -422,6 +541,7 @@ FF.pages = FF.pages || {};
             <td style="padding:4px 5px;text-align:right;font-weight:700">${U.fmt(r.total)}</td>
             <td style="padding:4px 5px;text-align:right;color:${r.doubleVrn ? '#dc2626;font-weight:800' : '#64748b'}">${U.fmt(r.doubleVrn)}</td>
             <td style="padding:4px 5px;text-align:right">${U.fmt(r.wrong)} (${r.wrongPct.toFixed(0)}%)</td>
+            <td style="padding:4px 5px;text-align:right">${U.fmt(r.invalidVrn)}</td>
             <td style="padding:4px 5px;text-align:right">${U.fmt(r.replace)} (${r.replacePct.toFixed(0)}%)</td>
             <td style="padding:4px 5px;text-align:right">${U.fmt(r.chassis)} (${r.chassisPct.toFixed(0)}%)</td>
             <td style="padding:4px 5px;text-align:right">${U.fmt(r.maxDay)} (${r.spikeRatio.toFixed(1)}×)</td>
@@ -432,6 +552,7 @@ FF.pages = FF.pages || {};
             <td style="padding:6px 5px;text-align:right">${U.fmt(totIssued)}</td>
             <td style="padding:6px 5px;text-align:right">${U.fmt(totDbl)}</td>
             <td style="padding:6px 5px;text-align:right">${U.fmt(totWrong)}</td>
+            <td style="padding:6px 5px;text-align:right">${U.fmt(totInvalid)}</td>
             <td style="padding:6px 5px;text-align:right">${U.fmt(totRepl)}</td>
             <td style="padding:6px 5px;text-align:right">${U.fmt(totChas)}</td>
             <td colspan="2" style="padding:6px 5px">Period: ${esc(model.from)} → ${esc(model.to)}</td>
@@ -456,27 +577,30 @@ FF.pages = FF.pages || {};
   /** Clicking any KPI card on Unusual Activity opens a dedicated drawer with that exact anomaly's data + CSV/PDF. */
   function openFlagDrawer(flagKey, model) {
     const fMeta = FLAGS[flagKey] || FLAGS.all;
-    const rows = model.rows.filter((r) => (flagKey === 'all' ? r.flags.length > 0 : r.flags.includes(flagKey)));
+    const rows = rowsForFlag(model, flagKey);
+    const rowVrns = new Set(rows.flatMap((r) => (r.doubleList || []).map((d) => d.vrn)));
     const totIssued = U.sum(rows, (r) => r.total);
     const totDbl = U.sum(rows, (r) => r.doubleVrn);
     const totWrong = U.sum(rows, (r) => r.wrong);
+    const totInvalid = U.sum(rows, (r) => r.invalidVrn);
     const totRepl = U.sum(rows, (r) => r.replace);
     const totChas = U.sum(rows, (r) => r.chassis);
+    const duplicateRows = flagKey === 'double' ? model.duplicateVrns.filter((d) => rowVrns.has(d.vrn)) : [];
 
     const kpisHtml = `<div class="dkpis" style="margin-bottom:12px">
       <div class="dkpi"><small>Flagged Agents</small><b>${U.fmt(rows.length)}</b><span>${esc(fMeta.short)}</span></div>
       <div class="dkpi"><small>Total Issued</small><b>${U.fmt(totIssued)}</b><span>VC4 ${U.fmt(U.sum(rows, (r) => r.vc4))} · Comm ${U.fmt(U.sum(rows, (r) => r.comm))}</span></div>
       <div class="dkpi"><small>Double VRN</small><b>${U.fmt(totDbl)}</b><span>Duplicate vehicle numbers</span></div>
-      <div class="dkpi"><small>Wrong VRN</small><b>${U.fmt(totWrong)}</b><span>Peer avg ${model.peer.wrongPct.toFixed(1)}%</span></div>
+      <div class="dkpi"><small>Wrong / Invalid VRN</small><b>${U.fmt(totWrong)}</b><span>${U.fmt(totInvalid)} malformed · peer ${model.peer.wrongPct.toFixed(1)}%</span></div>
       <div class="dkpi"><small>Replacement / Chassis</small><b>${U.fmt(totRepl)} / ${U.fmt(totChas)}</b><span>Repl ${model.peer.replacePct.toFixed(1)}% · Chas ${model.peer.chassisPct.toFixed(1)}%</span></div>
     </div>`;
 
-    const dupSection = flagKey === 'double' && model.duplicateVrns.length
-      ? `<section class="dsec"><h4>♊ Duplicate VRN Register (${U.fmt(model.duplicateVrns.length)} Vehicles)</h4>
+    const dupSection = flagKey === 'double' && duplicateRows.length
+      ? `<section class="dsec"><h4>♊ Duplicate VRN Register (${U.fmt(duplicateRows.length)} Vehicles)</h4>
           <div class="table-wrap"><table class="tbl compact">
             <thead><tr><th>#</th><th>VRN (Vehicle No.)</th><th class="num">Times Issued</th><th>Agents Involved</th><th>TL</th><th>Classes</th><th>Dates</th></tr></thead>
             <tbody>
-              ${model.duplicateVrns.slice(0, 100).map((d, i) => `<tr>
+              ${duplicateRows.slice(0, 100).map((d, i) => `<tr>
                 <td class="dim">${i + 1}</td>
                 <td><b class="code-chip">${esc(d.vrn)}</b></td>
                 <td class="num"><b class="count red">${U.fmt(d.count)}×</b></td>
@@ -485,7 +609,7 @@ FF.pages = FF.pages || {};
                 <td>${esc(d.classes.join(', ') || '—')}</td>
                 <td class="dim small">${esc(d.dates.join(', '))}</td>
               </tr>`).join('')}
-              <tr class="row-total"><td colspan="2"><b>Grand Total (${model.duplicateVrns.length} VRNs)</b></td><td class="num"><b>${U.fmt(U.sum(model.duplicateVrns, (d) => d.count))}</b></td><td colspan="4"></td></tr>
+              <tr class="row-total"><td colspan="2"><b>Grand Total (${duplicateRows.length} VRNs)</b></td><td class="num"><b>${U.fmt(U.sum(duplicateRows, (d) => d.count))}</b></td><td colspan="4"></td></tr>
             </tbody>
           </table></div></section>`
       : '';
@@ -496,7 +620,7 @@ FF.pages = FF.pages || {};
         <thead><tr>
           <th>#</th><th>Ch</th><th>Agent</th><th>TL</th>
           <th class="num">Risk Score</th><th class="num">Issued</th>
-          <th class="num">Double VRN</th><th class="num">Wrong VRN</th>
+          <th class="num">Double VRN</th><th class="num">Wrong / Invalid</th><th class="num">Malformed</th>
           <th class="num">Replace</th><th class="num">Chassis</th>
           <th class="num">Peak Day</th><th>Forensic Evidence</th>
         </tr></thead>
@@ -510,17 +634,19 @@ FF.pages = FF.pages || {};
             <td class="num"><b>${U.fmt(r.total)}</b></td>
             <td class="num">${r.doubleVrn ? `<b class="count red">${U.fmt(r.doubleVrn)}</b>` : '<span class="dim">0</span>'}</td>
             <td class="num">${U.fmt(r.wrong)} <small class="dim">(${r.wrongPct.toFixed(0)}%)</small></td>
+            <td class="num">${U.fmt(r.invalidVrn)}</td>
             <td class="num">${U.fmt(r.replace)} <small class="dim">(${r.replacePct.toFixed(0)}%)</small></td>
             <td class="num">${U.fmt(r.chassis)} <small class="dim">(${r.chassisPct.toFixed(0)}%)</small></td>
             <td class="num">${U.fmt(r.maxDay)} <small class="dim">(${r.spikeRatio.toFixed(1)}×)</small></td>
             <td class="small">${esc(r.reasons.join(' · ') || '—')}</td>
-          </tr>`).join('') || '<tr><td colspan="12" class="empty">Is anomaly category me koi agent nahi mila.</td></tr>'}
+          </tr>`).join('') || '<tr><td colspan="13" class="empty">Is anomaly category me koi agent nahi mila.</td></tr>'}
         </tbody>
         ${rows.length ? `<tfoot><tr class="row-total">
           <td colspan="5"><b>Grand Total (${rows.length} Agents)</b></td>
           <td class="num"><b>${U.fmt(totIssued)}</b></td>
           <td class="num"><b>${U.fmt(totDbl)}</b></td>
           <td class="num"><b>${U.fmt(totWrong)}</b></td>
+          <td class="num"><b>${U.fmt(totInvalid)}</b></td>
           <td class="num"><b>${U.fmt(totRepl)}</b></td>
           <td class="num"><b>${U.fmt(totChas)}</b></td>
           <td colspan="2"></td>
@@ -547,9 +673,9 @@ FF.pages = FF.pages || {};
 
     const topKpis = `<div class="dkpis" style="margin-bottom:12px">
       <div class="dkpi kpi-clickable" data-kpi="${esc(`${kpiSpecBase}&title=${encodeURIComponent(`${r.name} · Total Issued`)}`)}" title="Click to open tag-level issuance breakdown"><small>Total Issued</small><b>${U.fmt(r.total)}</b><span>VC4 ${U.fmt(r.vc4)} · Comm ${U.fmt(r.comm)}</span></div>
-      <div class="dkpi kpi-clickable" data-kpi="${esc(`${kpiSpecBase}&f=wrong&title=${encodeURIComponent(`${r.name} · Wrong VRN`)}`)}" title="Click to open Wrong VRN tags"><small>Wrong VRN</small><b>${U.fmt(r.wrong)}</b><span>${r.wrongPct.toFixed(1)}% vs peer ${model.peer.wrongPct.toFixed(1)}%</span></div>
-      <div class="dkpi kpi-clickable" data-kpi="${esc(`${kpiSpecBase}&f=repl&title=${encodeURIComponent(`${r.name} · Replacements`)}`)}" title="Click to open Replacement tags"><small>Replacements</small><b>${U.fmt(r.replace)}</b><span>${r.replacePct.toFixed(1)}% vs peer ${model.peer.replacePct.toFixed(1)}%</span></div>
-      <div class="dkpi kpi-clickable" data-kpi="${esc(`${kpiSpecBase}&f=chassis&title=${encodeURIComponent(`${r.name} · Chassis Tags`)}`)}" title="Click to open Chassis tags"><small>Chassis Tags</small><b>${U.fmt(r.chassis)}</b><span>${r.chassisPct.toFixed(1)}% vs peer ${model.peer.chassisPct.toFixed(1)}%</span></div>
+      <div class="dkpi kpi-clickable" data-kpi="${esc(`${kpiSpecBase}&f=wrong&title=${encodeURIComponent(`${r.name} · Wrong / Invalid VRN`)}`)}" title="Click to open wrong and invalid VRN tags"><small>Wrong / Invalid VRN</small><b>${U.fmt(r.wrong)}</b><span>${U.fmt(r.invalidVrn)} malformed · ${r.wrongPct.toFixed(1)}% vs ${r.channel.toUpperCase()} peer ${r.peer.wrongPct.toFixed(1)}%</span></div>
+      <div class="dkpi kpi-clickable" data-kpi="${esc(`${kpiSpecBase}&f=repl&title=${encodeURIComponent(`${r.name} · Replacements`)}`)}" title="Click to open Replacement tags"><small>Replacements</small><b>${U.fmt(r.replace)}</b><span>${r.replacePct.toFixed(1)}% vs peer ${r.peer.replacePct.toFixed(1)}%</span></div>
+      <div class="dkpi kpi-clickable" data-kpi="${esc(`${kpiSpecBase}&f=chassis&title=${encodeURIComponent(`${r.name} · Chassis Tags`)}`)}" title="Click to open Chassis tags"><small>Chassis Tags</small><b>${U.fmt(r.chassis)}</b><span>${r.chassisPct.toFixed(1)}% vs peer ${r.peer.chassisPct.toFixed(1)}%</span></div>
       <div class="dkpi"><small>Double VRN / Peak</small><b>${U.fmt(r.doubleVrn)} / ${U.fmt(r.maxDay)}</b><span>Peak ${esc(r.maxDate || '—')} (${r.spikeRatio.toFixed(1)}× avg)</span></div>
     </div>`;
 
@@ -564,6 +690,17 @@ FF.pages = FF.pages || {};
             <tbody>${r.doubleList.map((d, i) => `<tr><td class="dim">${i + 1}</td><td><b class="code-chip">${esc(d.vrn)}</b></td><td class="num"><b class="count red">${U.fmt(d.count)}×</b></td><td class="num"><b>${U.fmt(d.agentCount)}</b></td><td>${esc(d.classes.join(', '))}</td><td class="dim small">${esc(d.dates.join(', '))}</td><td class="dim small">${esc(d.tagIds.slice(0, 4).join(', '))}</td></tr>`).join('')}
             <tr class="row-total"><td colspan="2"><b>Grand Total</b></td><td class="num"><b>${U.fmt(U.sum(r.doubleList, (d) => d.count))}</b></td><td class="num"><b>${U.fmt(U.sum(r.doubleList, (d) => d.agentCount))}</b></td><td colspan="3"></td></tr></tbody>
           </table></div></section>`
+      : '';
+
+    const invalidHtml = r.invalidList && r.invalidList.length
+      ? `<section class="dsec"><h4>🧾 Malformed / Invalid VRN Samples (${U.fmt(r.invalidList.length)})</h4>
+          <p class="dim small">Repeated placeholder values are excluded from duplicate-VRN counts. Tag ID par click karo to exact source row khulegi.</p>
+          <div class="table-wrap"><table class="tbl compact"><thead><tr><th>#</th><th>Date</th><th>VRN entered</th><th>Type</th><th>Tag ID</th></tr></thead>
+          <tbody>${r.invalidList.slice(0, 100).map((item, i) => {
+            const tagSpec = item.tagId ? `src=${r.channel}&scope=range&from=${encodeURIComponent(model.from)}&to=${encodeURIComponent(model.to)}&agent=${encodeURIComponent(r.name)}&agentId=${encodeURIComponent(r.id || '')}&channel=${r.channel}&tagId=${encodeURIComponent(item.tagId)}&date=${encodeURIComponent(item.key)}&title=${encodeURIComponent(`${r.name} · Tag ${item.tagId}`)}` : '';
+            return `<tr${tagSpec ? ` class="clickable" role="button" tabindex="0" data-kpi="${esc(tagSpec)}"` : ''}><td class="dim">${i + 1}</td><td>${esc(item.key || '—')}</td><td><b class="code-chip">${esc(item.vrn || '(blank)')}</b></td><td>${esc(item.vrnType || '—')}</td><td>${esc(item.tagId || '—')}</td></tr>`;
+          }).join('')}</tbody></table></div>
+          ${r.invalidList.length > 100 ? `<p class="dim small">Showing first 100 of ${U.fmt(r.invalidList.length)} malformed rows.</p>` : ''}</section>`
       : '';
 
     const clsHtml = `<section class="dsec"><h4>🏷️ Class-wise Breakdown</h4>
@@ -586,23 +723,45 @@ FF.pages = FF.pages || {};
       sub: `TL: <b>${esc(r.tl || 'Direct')}</b> · Period: ${esc(model.from)} → ${esc(model.to)} · Risk Score <b>${r.score}/100</b>`,
       wide: true,
       actions: `<button class="btn small" data-kpi="${esc(`${kpiSpecBase}&title=${encodeURIComponent(`${r.name} · All Tags`)}`)}">📄 Tag-Level Rows</button><a class="btn small" href="#/${r.channel === 'gv' ? 'gvAgentSummary' : 'ffAgentSummary'}?q=${encodeURIComponent(r.name)}">🧑‍💼 Agent Summary →</a>`,
-      body: topKpis + reasonsHtml + dupHtml + `<div class="grid g-2">${clsHtml}${dayHtml}</div>`,
+      body: topKpis + reasonsHtml + dupHtml + invalidHtml + `<div class="grid g-2">${clsHtml}${dayHtml}</div>`,
       age: { kind: 'agent', key: r.id || r.name, keys: [r.id, r.name].filter(Boolean), ch: r.channel, title: r.name }
     });
   }
 
   function renderBody(root, model) {
+    const scoped = scopedRows(model);
     const tls = [...new Set(model.rows.map((r) => r.tl).filter(Boolean))].sort();
     const rows = filteredRows(model);
     const topFlagged = rows.filter((r) => r.flags.length > 0).slice(0, 6);
+    const visibleDuplicateRows = duplicateRowsForView(model);
+    const kpiData = Object.fromEntries(Object.keys(FLAGS).map((key) => {
+      const subset = key === 'all' ? scoped.filter((r) => r.flags.length) : scoped.filter((r) => r.flags.includes(key));
+      const value = key === 'all' || key === 'multi' ? U.sum(subset, (r) => r.total)
+        : key === 'double' ? U.sum(subset, (r) => r.doubleVrn)
+          : key === 'wrong' ? U.sum(subset, (r) => r.wrong)
+            : key === 'replace' ? U.sum(subset, (r) => r.replace)
+              : key === 'chassis' ? U.sum(subset, (r) => r.chassis)
+                : U.sum(subset, (r) => r.maxDay);
+      return [key, { count: subset.length, tagSum: value }];
+    }));
 
     const periodPills = PERIODS.map(([k, label]) =>
       `<button type="button" class="ua-period-pill ${state.period === k ? 'active' : ''}" data-ua-period="${k}">${label}</button>`
     ).join('');
+    const fetchInfo = model.vrnFetchInfo || {};
+    const pagingNote = fetchInfo.offsetIssue
+      ? `⚠ EIR offset paging returned a repeated page after ${U.fmt(fetchInfo.rowsRead)} rows. Tag-level VRN details may be incomplete; narrow the date range or use the EIR report to verify.`
+      : fetchInfo.capHit
+        ? `⚠ Safety cap reached: ${VRN_MAX_PAGES} × ${U.fmt(VRN_PAGE_SIZE)} = ${U.fmt(VRN_MAX_PAGES * VRN_PAGE_SIZE)} EIR rows. More records exist beyond the cap; duplicate/malformed-VRN counts may be incomplete. Narrow the date range.`
+        : fetchInfo.probeFailed
+          ? `⚠ Read ${U.fmt(fetchInfo.rowsRead)} EIR rows (${fetchInfo.pages}/${VRN_MAX_PAGES} pages); the safety-cap probe failed, so completeness could not be confirmed.`
+          : fetchInfo.source === 'EIR'
+            ? `EIR tag-level scan: ${U.fmt(fetchInfo.rowsRead)} rows across ${fetchInfo.pages} page(s). Limit: ${VRN_MAX_PAGES} pages × ${U.fmt(VRN_PAGE_SIZE)} rows (${U.fmt(VRN_MAX_PAGES * VRN_PAGE_SIZE)} max); offset ${fetchInfo.offsetVerified ? 'verified across pages' : 'not verifiable from this range'}. `
+            : '⚠ EIR tag-level VRN query is unavailable; duplicate/malformed checks use available GV Master rows only. Aggregate ratio analysis remains active.';
 
     const kpiCards = Object.entries(FLAGS).map(([k, f]) => {
-      const count = model.counts[k] || 0;
-      const tagSum = model.tagSums[k] || 0;
+      const count = kpiData[k].count;
+      const tagSum = kpiData[k].tagSum;
       const active = state.flag === k;
       return `<div class="kpi ua-kpi-card ${f.tone} ${active ? 'ua-kpi-active' : ''}" data-ua-flag="${k}" role="button" tabindex="0" title="Click to filter & open ${esc(f.label)} breakdown with CSV/PDF">
         <div class="kpi-top"><span class="kpi-title">${esc(f.label)}</span><span class="kpi-icon">${f.icon}</span></div>
@@ -633,7 +792,7 @@ FF.pages = FF.pages || {};
             </div>
             <div class="ua-sc-metrics">
               <div><span>Double VRN</span><b class="${r.doubleVrn ? 'red' : ''}">${U.fmt(r.doubleVrn)}</b></div>
-              <div><span>Wrong VRN</span><b class="${r.wrong ? 'red' : ''}">${U.fmt(r.wrong)} <small>(${r.wrongPct.toFixed(0)}%)</small></b></div>
+              <div><span>Wrong / Invalid</span><b class="${r.wrong ? 'red' : ''}">${U.fmt(r.wrong)} <small>(${r.wrongPct.toFixed(0)}%)</small></b><small>${U.fmt(r.invalidVrn)} malformed</small></div>
               <div><span>Replace</span><b>${U.fmt(r.replace)} <small>(${r.replacePct.toFixed(0)}%)</small></b></div>
               <div><span>Chassis</span><b>${U.fmt(r.chassis)} <small>(${r.chassisPct.toFixed(0)}%)</small></b></div>
             </div>
@@ -646,9 +805,9 @@ FF.pages = FF.pages || {};
     </section>` : '';
 
     // Duplicate VRN Register Card
-    const dupCardHtml = model.duplicateVrns.length ? `<section class="card">
+    const dupCardHtml = visibleDuplicateRows.length ? `<section class="card">
       <div class="card-head">
-        <h3>♊ Double / Duplicate VRN Radar — ${U.fmt(model.duplicateVrns.length)} Vehicles Issued Multiple Times</h3>
+        <h3>♊ Double / Duplicate VRN Radar — ${U.fmt(visibleDuplicateRows.length)} Vehicles Issued Multiple Times</h3>
         <div class="card-right">
           <button class="btn small" id="ua-dup-csv">⬇ Duplicate VRN CSV</button>
         </div>
@@ -657,7 +816,7 @@ FF.pages = FF.pages || {};
         <div class="table-wrap"><table class="tbl compact">
           <thead><tr><th>#</th><th>VRN (Vehicle Number)</th><th class="num">Times Issued</th><th>Agents Involved</th><th>TL</th><th>Channel</th><th>Classes</th><th>Dates</th></tr></thead>
           <tbody>
-            ${model.duplicateVrns.slice(0, 30).map((d, i) => `<tr>
+            ${visibleDuplicateRows.slice(0, 30).map((d, i) => `<tr>
               <td class="dim">${i + 1}</td>
               <td><b class="code-chip">${esc(d.vrn)}</b></td>
               <td class="num"><b class="count red">${U.fmt(d.count)}×</b></td>
@@ -668,7 +827,7 @@ FF.pages = FF.pages || {};
               <td class="dim small">${esc(d.dates.join(', '))}</td>
             </tr>`).join('')}
           </tbody>
-          <tfoot><tr class="row-total"><td colspan="2"><b>Grand Total (${model.duplicateVrns.length} duplicate VRNs)</b></td><td class="num"><b>${U.fmt(U.sum(model.duplicateVrns, (d) => d.count))}</b></td><td colspan="5"></td></tr></tfoot>
+          <tfoot><tr class="row-total"><td colspan="2"><b>Grand Total (${visibleDuplicateRows.length} duplicate VRNs)</b></td><td class="num"><b>${U.fmt(U.sum(visibleDuplicateRows, (d) => d.count))}</b></td><td colspan="5"></td></tr></tfoot>
         </table></div>
       </div>
     </section>` : '';
@@ -678,14 +837,16 @@ FF.pages = FF.pages || {};
     const totComm = U.sum(rows, (r) => r.comm);
     const totDbl = U.sum(rows, (r) => r.doubleVrn);
     const totWrong = U.sum(rows, (r) => r.wrong);
+    const totInvalid = U.sum(rows, (r) => r.invalidVrn);
     const totRepl = U.sum(rows, (r) => r.replace);
     const totChas = U.sum(rows, (r) => r.chassis);
 
     root.innerHTML = `
-      <div class="page-head">
-        <div>
+      <div class="page-head ua-head">
+        <div class="ua-head-copy">
+          <span class="ua-kicker">Cross-channel · forensic signal center</span>
           <h1>🚨 Unusual Agent Activity & Fraud Radar</h1>
-          <p class="sub">${esc(model.rangeLabel)} · <b>${U.fmt(model.counts.all)}</b> agents flagged out of ${U.fmt(model.rows.length)} · Peer benchmark: Wrong VRN <b>${model.peer.wrongPct.toFixed(1)}%</b> · Replace <b>${model.peer.replacePct.toFixed(1)}%</b> · Chassis <b>${model.peer.chassisPct.toFixed(1)}%</b></p>
+          <p class="sub">${esc(model.rangeLabel)} · <b>${U.fmt(kpiData.all.count)}</b> agents flagged in this view (${U.fmt(scoped.length)} agents) · Peer benchmark: Wrong / Invalid VRN <b>${model.peer.wrongPct.toFixed(1)}%</b> · Replace <b>${model.peer.replacePct.toFixed(1)}%</b> · Chassis <b>${model.peer.chassisPct.toFixed(1)}%</b></p>
         </div>
         <div class="head-actions">
           <button class="btn" id="ua-csv">⬇ CSV (${U.fmt(rows.length)})</button>
@@ -704,7 +865,7 @@ FF.pages = FF.pages || {};
             <button type="button" class="btn small primary" id="ua-apply-dates">Apply Dates</button>
           </div>
         </div>
-        <div class="ctrl-row" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
+        <div class="ctrl-row ua-control-row">
           <div class="seg" id="ua-ch">${[['all', '🌐 All Channels'], ['ff', '🟦 First Forward'], ['gv', '🟩 GV Partner']].map(([k, l]) => `<button type="button" class="seg-btn ${state.ch === k ? 'on' : ''}" data-ch="${k}">${l}</button>`).join('')}</div>
           <label>TL <select id="ua-tl"><option value="">All TLs (${tls.length})</option>${tls.map((t) => `<option value="${esc(t)}" ${t === state.tl ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>
           <label>Sensitivity <select id="ua-mult">${[[1.5, '1.5× Peer (Strict)'], [2, '2× Peer (Standard)'], [3, '3× Peer (Relaxed)']].map(([v, l]) => `<option value="${v}" ${Number(state.mult) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
@@ -712,6 +873,7 @@ FF.pages = FF.pages || {};
           <input class="input" id="ua-q" placeholder="Search agent, ID, TL, VRN…" value="${esc(state.q)}" style="min-width:200px">
           <label class="check"><input type="checkbox" id="ua-only" ${state.onlyFlagged ? 'checked' : ''}> Flagged Only</label>
         </div>
+        <div class="ua-data-note ${fetchInfo.capHit || fetchInfo.offsetIssue || fetchInfo.probeFailed || fetchInfo.source !== 'EIR' ? 'warning' : ''}" role="status" aria-live="polite">ℹ️ Date presets use calendar dates (not the latest data date). First Forward EIR can arrive with a one-day reporting delay; GV includes live Master rows. ${esc(pagingNote)}</div>
       </section>
 
       <div class="kpi-grid ua-kpi-grid">${kpiCards}</div>
@@ -732,7 +894,7 @@ FF.pages = FF.pages || {};
               <th>#</th><th>Ch</th><th>Agent</th><th>TL</th>
               <th class="num">Risk Score</th><th class="num">Total Issued</th>
               <th class="num">VC4 / Comm</th><th class="num">♊ Double VRN</th>
-              <th class="num">🚫 Wrong VRN</th><th class="num">🔁 Replace</th>
+              <th class="num">🚫 Wrong / Invalid</th><th class="num">Malformed</th><th class="num">🔁 Replace</th>
               <th class="num">🔩 Chassis</th><th class="num">⚡ Peak Day</th>
               <th>Detected Anomalies & Threshold Proof</th>
             </tr></thead>
@@ -747,13 +909,14 @@ FF.pages = FF.pages || {};
                 <td class="num">${U.fmt(r.vc4)} <small class="dim">/ ${U.fmt(r.comm)}</small></td>
                 <td class="num ${r.flags.includes('double') ? 'ua-hit' : ''}">${r.doubleVrn ? `<b class="count red">${U.fmt(r.doubleVrn)}</b>` : '<span class="dim">0</span>'}</td>
                 <td class="num ${r.flags.includes('wrong') ? 'ua-hit' : ''}"><b>${U.fmt(r.wrong)}</b> <small class="dim">(${r.wrongPct.toFixed(1)}%)</small></td>
+                <td class="num">${U.fmt(r.invalidVrn)}</td>
                 <td class="num ${r.flags.includes('replace') ? 'ua-hit' : ''}"><b>${U.fmt(r.replace)}</b> <small class="dim">(${r.replacePct.toFixed(1)}%)</small></td>
                 <td class="num ${r.flags.includes('chassis') ? 'ua-hit' : ''}"><b>${U.fmt(r.chassis)}</b> <small class="dim">(${r.chassisPct.toFixed(1)}%)</small></td>
                 <td class="num ${r.flags.includes('spike') ? 'ua-hit' : ''}"><b>${U.fmt(r.maxDay)}</b> <small class="dim">${r.maxDate ? `${r.maxDate.slice(5)} (${r.spikeRatio.toFixed(1)}×)` : ''}</small></td>
                 <td>${r.flags.filter((f) => f !== 'multi').map((f) => `<span class="badge ${FLAGS[f].tone}" style="margin:1px">${FLAGS[f].icon} ${esc(FLAGS[f].short)}</span>`).join(' ') || '<span class="dim">Normal</span>'}
                   ${r.reasons.length ? `<div class="dim small" style="margin-top:2px">${esc(r.reasons.join(' · '))}</div>` : ''}
                 </td>
-              </tr>`).join('') || `<tr><td colspan="13" class="empty">🎉 Selected filters aur period me koi unusual activity nahi mili.</td></tr>`}
+              </tr>`).join('') || `<tr><td colspan="14" class="empty">🎉 Selected filters aur period me koi unusual activity nahi mili.</td></tr>`}
             </tbody>
             ${rows.length ? `<tfoot><tr class="row-total">
               <td colspan="5"><b>Grand Total (${U.fmt(rows.length)} Agents)</b></td>
@@ -761,6 +924,7 @@ FF.pages = FF.pages || {};
               <td class="num"><b>${U.fmt(totVc4)} / ${U.fmt(totComm)}</b></td>
               <td class="num"><b>${U.fmt(totDbl)}</b></td>
               <td class="num"><b>${U.fmt(totWrong)} (${totIssued ? ((totWrong / totIssued) * 100).toFixed(1) : '0.0'}%)</b></td>
+              <td class="num"><b>${U.fmt(totInvalid)}</b></td>
               <td class="num"><b>${U.fmt(totRepl)} (${totIssued ? ((totRepl / totIssued) * 100).toFixed(1) : '0.0'}%)</b></td>
               <td class="num"><b>${U.fmt(totChas)} (${totIssued ? ((totChas / totIssued) * 100).toFixed(1) : '0.0'}%)</b></td>
               <td colspan="2">Period: ${esc(model.from)} → ${esc(model.to)}</td>
@@ -786,7 +950,9 @@ FF.pages = FF.pages || {};
       const prelim = resolveRange(daily, state);
       const vrnRecords = await loadVrnRecords(prelim.from, prelim.to);
       currentModel = analyze(daily, { ...state, vrnRecords });
+      currentModel.vrnFetchInfo = state.vrnFetchInfo || null;
       if (!root.isConnected) return;
+      activeModel = currentModel;
       renderBody(root, currentModel);
       wireEvents();
     };
@@ -849,38 +1015,46 @@ FF.pages = FF.pages || {};
       if (pdfBtn) pdfBtn.addEventListener('click', () => exportPdfData(filteredRows(currentModel), currentModel, pdfBtn));
       const dupCsvBtn = U.$('#ua-dup-csv', root);
       if (dupCsvBtn) dupCsvBtn.addEventListener('click', () => {
-        const dRows = currentModel.duplicateVrns.map((d, i) => [i + 1, d.vrn, d.count, d.agents.join(' | '), d.tls.join(' | '), d.channels.join(' | '), d.classes.join(' | '), d.dates.join(' | '), d.tagIds.join(' | ')]);
-        dRows.push(['Grand Total', `${currentModel.duplicateVrns.length} VRNs`, U.sum(currentModel.duplicateVrns, (d) => d.count), '', '', '', '', '', '']);
+        const dups = duplicateRowsForView(currentModel);
+        const dRows = dups.map((d, i) => [i + 1, d.vrn, d.count, d.agents.join(' | '), d.tls.join(' | '), d.channels.join(' | '), d.classes.join(' | '), d.dates.join(' | '), d.tagIds.join(' | ')]);
+        dRows.push(['Grand Total', `${dups.length} VRNs`, U.sum(dups, (d) => d.count), '', '', '', '', '', '']);
         U.downloadCsv(`duplicate-vrns-${currentModel.from}_${currentModel.to}.csv`, ['#', 'VRN', 'Times Issued', 'Agents', 'TLs', 'Channels', 'Classes', 'Dates', 'Tag IDs'], dRows);
       });
-      root.querySelectorAll('[data-ua-agent-key]').forEach((el) => el.addEventListener('click', () => {
-        const hit = currentModel.rows.find((r) => r.key === el.dataset.uaAgentKey);
-        if (hit) openAgentForensicDrawer(hit, currentModel);
+      root.querySelectorAll('[data-ua-agent-key]').forEach((el) => {
+        const open = () => {
+          const hit = currentModel.rows.find((r) => r.key === el.dataset.uaAgentKey);
+          if (hit) openAgentForensicDrawer(hit, currentModel);
+        };
+        el.addEventListener('click', open);
+        el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
+      });
+      root.querySelectorAll('[data-ua-flag]').forEach((el) => el.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el.click(); }
       }));
     };
 
-    if (!document.__uaDrawerWired) {
-      document.__uaDrawerWired = true;
+    if (!uaDrawerWired) {
+      uaDrawerWired = true;
       document.addEventListener('click', (e) => {
-        if (!currentModel) return;
-        const mCsv = e.target.closest('[data-ua-modal-csv]');
+        const model = activeModel;
+        const target = e.target && e.target.closest ? e.target : e.target && e.target.parentElement;
+        if (!model || !target || !target.closest) return;
+        const mCsv = target.closest('[data-ua-modal-csv]');
         if (mCsv) {
           const fk = mCsv.dataset.uaModalCsv;
-          const subRows = currentModel.rows.filter((r) => (fk === 'all' ? r.flags.length > 0 : r.flags.includes(fk)));
-          exportCsvData(subRows, currentModel, FLAGS[fk]?.short || fk);
+          exportCsvData(rowsForFlag(model, fk), model, FLAGS[fk]?.short || fk);
           return;
         }
-        const mPdf = e.target.closest('[data-ua-modal-pdf]');
+        const mPdf = target.closest('[data-ua-modal-pdf]');
         if (mPdf) {
           const fk = mPdf.dataset.uaModalPdf;
-          const subRows = currentModel.rows.filter((r) => (fk === 'all' ? r.flags.length > 0 : r.flags.includes(fk)));
-          exportPdfData(subRows, currentModel, mPdf, `Unusual Activity · ${FLAGS[fk]?.label || fk}`);
+          exportPdfData(rowsForFlag(model, fk), model, mPdf, `Unusual Activity · ${FLAGS[fk]?.label || fk}`);
           return;
         }
-        const dAg = e.target.closest('[data-ua-drawer-agent]');
+        const dAg = target.closest('[data-ua-drawer-agent]');
         if (dAg) {
-          const hit = currentModel.rows.find((r) => r.key === dAg.dataset.uaDrawerAgent);
-          if (hit) openAgentForensicDrawer(hit, currentModel);
+          const hit = model.rows.find((r) => r.key === dAg.dataset.uaDrawerAgent);
+          if (hit) openAgentForensicDrawer(hit, model);
         }
       });
     }
@@ -888,6 +1062,6 @@ FF.pages = FF.pages || {};
     await runAnalysis();
   }
 
-  FF.unusual = { analyze, FLAGS, PERIODS };
+  FF.unusual = { analyze, resolveRange, loadVrnRecords, get vrnFetchInfo() { return state.vrnFetchInfo; }, FLAGS, PERIODS };
   FF.pages.unusual = { title: 'Unusual Activity', render };
 })(window.FF);

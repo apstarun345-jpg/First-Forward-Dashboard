@@ -35,11 +35,23 @@ window.FF = window.FF || {};
   // Some older host adapters replace only GV.rows while the canonical adapter is unavailable.
   // Treat that explicit adapter override as a compatibility source; the live dashboard keeps
   // G.rows === G.masterRows and therefore always takes EIR issuanceRows below.
+  const gvHasRowsAdapterOverride = () => {
+    const g = FF.gv || {};
+    return typeof g.rows === 'function' && typeof g.masterRows === 'function' && g.rows !== g.masterRows;
+  };
   const gvIssuanceRows = () => {
     const g = FF.gv || {};
-    if (typeof g.rows === 'function' && typeof g.masterRows === 'function' && g.rows !== g.masterRows) return safeCall(() => g.rows(), []) || [];
+    if (gvHasRowsAdapterOverride()) return safeCall(() => g.rows(), []) || [];
     if (typeof g.issuanceRows === 'function') return safeCall(() => g.issuanceRows(), []) || [];
     return typeof g.rows === 'function' ? (safeCall(() => g.rows(), []) || []) : [];
+  };
+  // The real GV adapter's issuanceRows() is EIR-authoritative (with today's live GV Master rows).
+  // Older test/host adapters that replace only rows() expose a compatibility snapshot, not exact
+  // per-month issuance, so do not let that partial view overwrite GV REPORT summary totals.
+  const gvCanonicalIssuanceRows = () => {
+    const g = FF.gv || {};
+    if (gvHasRowsAdapterOverride() || typeof g.issuanceRows !== 'function') return [];
+    return safeCall(() => g.issuanceRows(), []) || [];
   };
   const CLS_ORDER = ['VC4', 'VC20', 'VC5', 'VC6', 'VC7', 'VC12', 'VC16', 'VC5+'];
   const clsRank = (c) => { const i = CLS_ORDER.indexOf(String(c).toUpperCase()); return i < 0 ? 99 : i; };
@@ -137,6 +149,51 @@ window.FF = window.FF || {};
     table.forEach((r) => { const t = is4(r.cls) ? g.vc4 : g.comm; ['cur', 'last', 'stock'].forEach((k) => { t[k] += r[k]; g.total[k] += r[k]; }); });
     return g;
   };
+  /** Exact GV month totals are only authoritative for months with actual issuance rows. */
+  function exactGvMonth(rows, ym) {
+    if (!ym) return null;
+    const monthRows = (rows || []).filter((r) => r && r.ym === ym);
+    if (!monthRows.length) return null;
+    const out = { vc4: 0, comm: 0, total: 0 };
+    monthRows.forEach((r) => {
+      const raw = r.n;
+      const qty = raw === '' || raw === null || raw === undefined ? 1 : Math.max(0, num(raw));
+      if (is4(r.cls)) out.vc4 += qty;
+      else out.comm += qty;
+      out.total += qty;
+    });
+    return out;
+  }
+  function setExactGvMonth(totals, rows, ym, prefix) {
+    const exact = exactGvMonth(rows, ym);
+    if (!exact) return false;
+    totals[`${prefix}Vc4`] = exact.vc4;
+    totals[`${prefix}Comm`] = exact.comm;
+    totals[`${prefix}Total`] = exact.total;
+    return true;
+  }
+  const sameGvAgent = (row, agent) => {
+    const rowId = clean(row && (row.agentId || row.id)).toUpperCase();
+    const agentId = clean(agent && (agent.agentId || agent.id)).toUpperCase();
+    if (rowId && agentId) return rowId === agentId;
+    return norm(row && (row.agentName || row.name)) === norm(agent && (agent.agentName || agent.name));
+  };
+  function applyExactGvAgentMonths(agentRows, issuanceRows, curYm, lastYm) {
+    const curExists = !!exactGvMonth(issuanceRows, curYm);
+    const lastExists = !!exactGvMonth(issuanceRows, lastYm);
+    if (!curExists && !lastExists) return;
+    agentRows.forEach((agent) => {
+      const issued = issuanceRows.filter((r) => sameGvAgent(r, agent));
+      if (curExists) {
+        const x = exactGvMonth(issued, curYm) || { vc4: 0, comm: 0, total: 0 };
+        Object.assign(agent, { curVc4: x.vc4, curComm: x.comm, curTotal: x.total });
+      }
+      if (lastExists) {
+        const x = exactGvMonth(issued, lastYm) || { vc4: 0, comm: 0, total: 0 };
+        Object.assign(agent, { lastVc4: x.vc4, lastComm: x.comm, lastTotal: x.total });
+      }
+    });
+  }
   const trendOf = (rows, pick, ymOf) => {
     const map = new Map();
     rows.forEach((r) => { if (!pick(r)) return; const y = ymOf(r); if (!y) return; map.set(y, (map.get(y) || 0) + num(r.n)); });
@@ -235,7 +292,7 @@ window.FF = window.FF || {};
   const gvDaily = (r, cur) => U.runRate(cur, 'gv');
   function gvClassRows(match) {
     const issuance = gvIssuanceRows();
-    const out = issuance.filter(match).map((r) => ({ ym: r.ym, cls: r.cls, n: Number(r.n) || 1 }));
+    const out = issuance.filter(match).map((r) => ({ ym: r.ym, cls: r.cls, n: r.n === '' || r.n === null || r.n === undefined ? 1 : Math.max(0, Number(r.n) || 0) }));
     const yms = new Set(out.map((r) => r.ym).filter(Boolean));
     for (const r of rowsOf('agentClass')) {
       if (!/gv|green/i.test(r.channel || '') || !r.ym || yms.has(r.ym)) continue;
@@ -295,23 +352,28 @@ window.FF = window.FF || {};
     out.tagRequired = out.direct && isHM(out.priority);
     const n = norm(p.name);
     const issuance = gvIssuanceRows();
-    const globalCurYm = latestYm(issuance.length ? issuance : [{ ym: U.ymKey(new Date()) }]) || U.ymKey(new Date());
+    // GV REPORT is a live calendar-month report: keep the actual current month even when its
+    // first issuance row has not arrived yet, so the full prior month remains visible.
+    const globalCurYm = U.ymKey(new Date());
     const globalLastYm = U.prevMonthKey(globalCurYm);
     const mine = issuance.filter((m) => norm(m.agentName) === n || (out.id && m.agentId === out.id));
-    const curYmExact = globalCurYm, lastYmExact = globalLastYm;
-    const exactClass = classTable(mine, [], curYmExact, lastYmExact);
-    if (exactClass.length) {
-      const exactTotals = groupSummary(exactClass);
-      Object.assign(out.totals, {
-        curVc4: Math.max(num(out.totals.curVc4), exactTotals.vc4.cur),
-        curComm: Math.max(num(out.totals.curComm), exactTotals.comm.cur),
-        curTotal: Math.max(num(out.totals.curTotal), exactTotals.total.cur),
-        lastVc4: Math.max(num(out.totals.lastVc4), exactTotals.vc4.last),
-        lastComm: Math.max(num(out.totals.lastComm), exactTotals.comm.last),
-        lastTotal: Math.max(num(out.totals.lastTotal), exactTotals.total.last)
-      });
+    const exactMine = gvCanonicalIssuanceRows().filter((m) => norm(m.agentName) === n || (out.id && m.agentId === out.id));
+    // Use exact EIR month totals rather than Math.max(REPORT, EIR): Math.max left stale REPORT
+    // numbers on top of smaller, authoritative class details, so the KPI and its drill-down disagreed.
+    const exactCurrent = exactGvMonth(exactMine, globalCurYm);
+    const exactPrevious = exactGvMonth(exactMine, globalLastYm);
+    if (exactCurrent) {
+      setExactGvMonth(out.totals, exactMine, globalCurYm, 'cur');
+      out.dispatch.avgVc4 = U.runRate(out.totals.curVc4, 'gv');
+      out.dispatch.avgComm = U.runRate(out.totals.curComm, 'gv');
+      out.dispatch.cover = out.dispatch.avgVc4 > 0 ? out.stock.vc4 / out.dispatch.avgVc4 : null;
+      out.dispatch.sugVc4 = suggest(out.dispatch.avgVc4, out.stock.vc4);
+      out.dispatch.sugComm = suggest(out.dispatch.avgComm, out.stock.comm);
+      out.dispatch.sugVc4Gross = suggestGro(out.dispatch.avgVc4);
+      out.dispatch.sugCommGross = suggestGro(out.dispatch.avgComm);
     }
-    attachGrowth(out, r || {}, curYmExact);
+    if (exactPrevious) setExactGvMonth(out.totals, exactMine, globalLastYm, 'last');
+    attachGrowth(out, r || {}, globalCurYm);
     if (light) return out;
     const master = gvClassRows((m) => norm(m.agentName) === n || (out.id && m.agentId === out.id));
     const curYm = globalCurYm, lastYm = globalLastYm;
@@ -327,7 +389,7 @@ window.FF = window.FF || {};
   }
   function gvTlProfile(p, light) {
     const n = norm(p.name);
-    const list = gvReport().filter((r) => norm(r.tlName) === n && !safeCall(() => FF.config.isDirectAgent(r, 'gv'), false));
+    const list = gvReport().filter((r) => norm(r.tlName) === n && !safeCall(() => FF.config.isDirectAgent(r, 'gv'), false)).map((r) => ({ ...r }));
     const src = list[0] || null;
     const sumK = (k) => U.sum(list, (r) => num(r[k]));
     const avgVc4 = U.runRate(sumK('curVc4'), 'gv'), avgComm = U.runRate(sumK('curComm'), 'gv');
@@ -345,21 +407,63 @@ window.FF = window.FF || {};
     };
     // TL priority = sabse high agent priority
     out.priority = rowsA.some((r) => r.priority === 'High') ? 'High' : rowsA.some((r) => r.priority === 'Medium') ? 'Medium' : rowsA.length ? 'Low' : '';
-    const issuance = gvIssuanceRows();
-    const globalCurYm = latestYm(issuance.length ? issuance : [{ ym: U.ymKey(new Date()) }]) || U.ymKey(new Date());
+    const globalCurYm = U.ymKey(new Date());
     const globalLastYm = U.prevMonthKey(globalCurYm);
+    const agentNames = new Set(list.map((r) => norm(r.agentName)));
+    const agentIds = new Set(list.map((r) => clean(r.agentId).toUpperCase()).filter(Boolean));
+    const isTeamAgent = (m) => list.some((a) => sameGvAgent(m, a));
+    const exactTeamIssuance = gvCanonicalIssuanceRows().filter(isTeamAgent);
+    // Canonical EIR totals feed both the TL roll-up and each listed agent row. When a month has
+    // exact team issuance data, absent agents are explicitly zeroed so their sum stays exact.
+    applyExactGvAgentMonths(list, exactTeamIssuance, globalCurYm, globalLastYm);
+    list.forEach((agent) => {
+      const row = rowsA.find((candidate) => sameGvAgent(candidate, agent));
+      if (!row) return;
+      Object.assign(row, {
+        cur: num(agent.curTotal), last: num(agent.lastTotal),
+        curVc4: num(agent.curVc4), curComm: num(agent.curComm)
+      });
+      const av = gvDaily(agent, agent.curVc4), avc = gvDaily(agent, agent.curComm);
+      Object.assign(row, {
+        sugVc4: suggest(av, agent.stockVc4), sugComm: suggest(avc, agent.stockComm),
+        sugVc4Gross: suggestGro(av), sugCommGross: suggestGro(avc)
+      });
+    });
+    rowsA.sort((a, b) => b.cur - a.cur);
+    const sumList = (k) => U.sum(list, (r) => num(r[k]));
+    Object.assign(out.totals, {
+      curVc4: sumList('curVc4'), curComm: sumList('curComm'), curTotal: sumList('curTotal'),
+      lastVc4: sumList('lastVc4'), lastComm: sumList('lastComm'), lastTotal: sumList('lastTotal')
+    });
+    const exactCur = exactGvMonth(exactTeamIssuance, globalCurYm);
+    const exactLast = exactGvMonth(exactTeamIssuance, globalLastYm);
+    if (exactCur) Object.assign(out.totals, { curVc4: exactCur.vc4, curComm: exactCur.comm, curTotal: exactCur.total });
+    if (exactLast) Object.assign(out.totals, { lastVc4: exactLast.vc4, lastComm: exactLast.comm, lastTotal: exactLast.total });
+    // Rebuild TL run-rates/dispatch from the corrected issuance rows as well.
+    out.dispatch.avgVc4 = U.runRate(out.totals.curVc4, 'gv');
+    out.dispatch.avgComm = U.runRate(out.totals.curComm, 'gv');
+    out.dispatch.cover = out.dispatch.avgVc4 > 0 ? stock.vc4 / out.dispatch.avgVc4 : null;
+    out.dispatch.sugVc4 = suggest(out.dispatch.avgVc4, stock.vc4);
+    out.dispatch.sugComm = suggest(out.dispatch.avgComm, stock.comm);
+    out.dispatch.sugVc4Gross = suggestGro(out.dispatch.avgVc4);
+    out.dispatch.sugCommGross = suggestGro(out.dispatch.avgComm);
+    out.dispatch.sumAgentVc4 = U.sum(rowsA, (r) => r.sugVc4);
+    out.dispatch.sumAgentComm = U.sum(rowsA, (r) => r.sugComm);
+    out.dispatch.sumAgentVc4Gross = U.sum(rowsA, (r) => r.sugVc4Gross);
+    out.dispatch.sumAgentCommGross = U.sum(rowsA, (r) => r.sugCommGross);
     // 📈 GV TL growth — GV sheet TL-level value nahi deta, isliye agents ke totals se.
     attachGrowth(out, {}, globalCurYm);
     if (light) return out;
-    const agentNames = new Set(list.map((r) => norm(r.agentName)));
-    const agentIds = new Set(list.map((r) => r.agentId).filter(Boolean));
-    const master = gvClassRows((m) => norm(m.tlName) === n || agentNames.has(norm(m.agentName)) || (m.agentId && agentIds.has(m.agentId)));
+    const master = gvClassRows((m) => agentNames.has(norm(m.agentName)) || (m.agentId && agentIds.has(clean(m.agentId).toUpperCase())));
     const curYm = globalCurYm, lastYm = globalLastYm;
     out.months = { cur: curYm, last: lastYm };
     const stockRows = [];
     list.forEach((r) => Object.entries(r.stockByClass || {}).forEach(([cls, v]) => { if (v) stockRows.push({ cls, n: v }); }));
     out.classes = classTable(master, stockRows, curYm, lastYm);
     if (!out.classes.length) out.classes = [{ cls: 'VC4', cur: out.totals.curVc4, last: out.totals.lastVc4, stock: stock.vc4 }, { cls: 'Commercial', cur: out.totals.curComm, last: out.totals.lastComm, stock: stock.comm }];
+    // Align summary KPIs with the exact rows shown in the class table for each available month.
+    if (exactCur) Object.assign(out.totals, { curVc4: exactCur.vc4, curComm: exactCur.comm, curTotal: exactCur.total });
+    if (exactLast) Object.assign(out.totals, { lastVc4: exactLast.vc4, lastComm: exactLast.comm, lastTotal: exactLast.total });
     out.classes = enrichClassesWithTotals(out.classes, out.totals, stock);
     out.trend = trendOf(master, () => true, (m) => m.ym);
     return out;
