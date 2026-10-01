@@ -3615,3 +3615,48 @@ html[data-theme="dark"] .la-consent-card, html[data-theme="dark"] .la-admin-card
   .la-pill { font-size: 12px; padding: 6px 6px 6px 12px; gap: 8px; }
   .la-consent-card, .la-admin-card { padding: 16px 14px; }
 }
+
+/* =============================================================================
+   🌐 v3.27 — PUBLIC (bina login) employee Tag Request form  →  /tag-request
+   Sidebar/topbar chhupe rehte hain; form hi poora page hai. Login-protected app
+   par iska koi asar nahi (sab rules body.public-form ke andar band hain).
+   ============================================================================= */
+body.public-form .sidebar,
+body.public-form .side-backdrop,
+body.public-form .topbar,
+body.public-form #mobile-nav,
+body.public-form #drawer,
+body.public-form #drawer-backdrop,
+body.public-form .global-filter-bar,
+body.public-form .live-share-chip { display: none !important; }
+body.public-form .content { margin-left: 0; }
+body.public-form .main { padding: 14px 14px 56px; }
+.tr-public-wrap { max-width: 760px; margin: 26px auto; }
+.tr-public-page { max-width: 1240px; margin: 0 auto; }
+.tr-public-head { flex-wrap: wrap; gap: 10px; }
+.tr-public-brand { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.tr-public-brand small { display: block; }
+.tr-public-logo { width: 40px; height: 40px; border-radius: 11px; object-fit: cover; }
+span.tr-public-logo { display: inline-flex; align-items: center; justify-content: center; background: var(--a, #6366f1); color: #fff; font-weight: 700; letter-spacing: .5px; }
+.tr-employee { border-left: 4px solid var(--a, #6366f1); }
+.tr-employee-todo { border-left-color: #ef4444; }
+.tr-employee-todo [data-tr-emp="name"] { border-color: #ef4444; box-shadow: 0 0 0 3px rgba(239, 68, 68, .08); }
+.tr-emp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.tr-public-msg { max-width: 620px; margin: 40px auto; text-align: center; }
+.tr-done { max-width: 720px; margin: 0 auto; text-align: center; }
+.tr-done-icon { font-size: 42px; line-height: 1; }
+.tr-done-id { display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; background: #f1f5ff; border: 1px dashed #c7d2fe; border-radius: 12px; padding: 10px 14px; margin: 10px auto; }
+.tr-done-id b { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 16px; }
+.tr-status-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.tr-status-row .input { flex: 1; min-width: 220px; }
+.tr-status-out { margin-top: 12px; padding: 12px; border-radius: 12px; background: #f6f8ff; border: 1px solid #e2e8f7; }
+.tr-status-line { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; flex-wrap: wrap; }
+.tr-public-link-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.tr-public-link-row .input { flex: 1; min-width: 220px; }
+/* Admin ne "system check dikhao" OFF kiya → stock/issuance/suggestion columns chhup jaate hain */
+.tr-no-check .tr-check-col { display: none !important; }
+@media (max-width: 720px) {
+  .tr-public-wrap { margin: 14px auto; }
+  .tr-public-head h1 { font-size: 21px; }
+  body.public-form .main { padding: 10px 8px 48px; }
+}

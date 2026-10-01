@@ -50,7 +50,9 @@ FF.pages = FF.pages || {};
     view: 'form', rows: [], note: '', result: null, requests: [], requestsAt: 0,
     index: null, indexPromise: null, resolved: new Map(), busy: '', problems: [],
     groupBy: 'tl', // requests/drawer me grouping: 'tl' ya 'agent'
-    sheet: { loaded: false, busy: false, config: null, fields: null, connected: false, hint: '' }
+    sheet: { loaded: false, busy: false, config: null, fields: null, connected: false, hint: '', publicForm: null },
+    // 🌐 v3.27 — public (bina login) employee form ka state
+    publicMode: false, publicCfg: null, employee: { name: '', mobile: '', office: '' }, done: null, status: null, statusId: ''
   };
   const rid = () => Math.random().toString(36).slice(2, 9);
   const emptyQty = () => { const q = {}; CLASS_LIST.forEach((c) => { q[c] = ''; }); return q; };
@@ -62,10 +64,57 @@ FF.pages = FF.pages || {};
   const ymNow = () => U.ymKey(new Date());
   const ymLast = () => U.prevMonthKey(ymNow());
   const isAdmin = () => !!(FF.auth && FF.auth.user && FF.auth.user.role === 'admin');
-  /** Employees ko bhejne wala seedha form link. */
+  const isPublic = () => !!state.publicMode;
+  /** Employees ko bhejne wala seedha form link — v3.27 se ye BINA LOGIN khulta hai. */
   function shareLink() {
-    try { return `${location.origin}${location.pathname}#/tagRequest?view=form`; }
-    catch { return '#/tagRequest?view=form'; }
+    try { return `${location.origin}/tag-request`; }
+    catch { return '/tag-request'; }
+  }
+  /** Google Sheet link → ID (target sheet preview ke liye; asli parsing server par hoti hai). */
+  const sheetIdOfLink = (link) => { const m = /\/spreadsheets\/d\/([A-Za-z0-9_-]{10,})/.exec(String(link || '')); return m ? m[1] : ''; };
+  // ---- 🌐 public (bina login) mode ke helpers ---------------------------------------------------
+  const PUB_EMPLOYEE_KEY = 'ff_public_employee';
+  /** Employee ka naam/mobile yaad rakho (agli baar prefilled — dobara type nahi karna padta). */
+  function loadEmployee() {
+    try {
+      const raw = localStorage.getItem(PUB_EMPLOYEE_KEY);
+      if (!raw) return;
+      const o = JSON.parse(raw) || {};
+      state.employee = { name: String(o.name || '').slice(0, 80), mobile: String(o.mobile || '').slice(0, 16), office: String(o.office || '').slice(0, 80) };
+    } catch { /* private mode / bad JSON */ }
+  }
+  function saveEmployee() {
+    try { localStorage.setItem(PUB_EMPLOYEE_KEY, JSON.stringify({ name: state.employee.name, mobile: state.employee.mobile, office: state.employee.office })); } catch { /* ignore */ }
+  }
+  /** Public endpoints (koi cookie/session nahi) — login wale FF.auth.api ki jagah. */
+  function publicApi(path, method, body) {
+    if (FF.publicForm && FF.publicForm.api) return FF.publicForm.api(path, method, body);
+    return fetch(path, { method: method || 'GET', body: body ? JSON.stringify(body) : undefined, headers: body ? { 'Content-Type': 'application/json' } : undefined }).then(async (res) => {
+      const json = await res.json().catch(() => null);
+      if (!res.ok) throw new Error((json && json.error) || `HTTP ${res.status}`);
+      return json || {};
+    });
+  }
+  const employeeOk = () => String(state.employee.name || '').trim().length >= 2;
+  /** Employee card — sirf public mode me (naam mandatory, baaki Settings se optional). */
+  function employeeCardHtml() {
+    const cfg = state.publicCfg || {};
+    const e = state.employee || {};
+    const missing = !employeeOk();
+    return `<section class="card tr-employee ${missing ? 'tr-employee-todo' : ''}" id="tr-employee-card">
+      <div class="card-head"><h3>👤 Aapka naam <span class="badge red">zaroori</span></h3>
+        <div class="card-right dim">Isi naam se request admin ke paas jayegi</div></div>
+      <div class="card-body">
+        <div class="tr-emp-grid">
+          <label class="field"><span class="dim small">Employee name *</span>
+            <input class="input" data-tr-emp="name" value="${esc(e.name || '')}" placeholder="Poora naam likho (e.g. Ramesh Yadav)" autocomplete="name" maxlength="80"></label>
+          ${cfg.askMobile === false ? '' : `<label class="field"><span class="dim small">Mobile (optional)</span>
+            <input class="input" data-tr-emp="mobile" inputmode="tel" value="${esc(e.mobile || '')}" placeholder="10 digit mobile" maxlength="16" autocomplete="tel"></label>`}
+          ${cfg.askOffice ? `<label class="field"><span class="dim small">Branch / Office (optional)</span>
+            <input class="input" data-tr-emp="office" value="${esc(e.office || '')}" placeholder="e.g. Jaipur office" maxlength="80"></label>` : ''}
+        </div>
+        ${missing ? '<p class="dim small" style="margin:8px 0 0">☝️ Naam bharo — phir niche agent chuno aur qty likho.</p>' : ''}
+      </div></section>`;
   }
 
   // ---- 📚 index: agent → stock / issuance / TL / priority -----------------------------------------
@@ -92,9 +141,13 @@ FF.pages = FF.pages || {};
     if (state.indexPromise) return state.indexPromise;
     const S = FF.store;
     const perf = FF.pages.performance;
+    // 🌐 Public form: sirf zaroori datasets (`only`) + light performance load — Google par kam load,
+    // mobile par kam data, aur result bilkul same (report + daily + agentClass → wahi suggestions).
+    const light = isPublic();
+    const only = light ? { only: true } : undefined;
     const jobs = [
-      S && S.need ? S.need('agentClass').catch(() => []) : Promise.resolve([]),
-      perf && perf.ensureLoaded ? perf.ensureLoaded().then(() => (perf.agents ? perf.agents() : [])).catch(() => []) : Promise.resolve([]),
+      S && S.need ? S.need('agentClass', only).catch(() => []) : Promise.resolve([]),
+      perf && perf.ensureLoaded ? perf.ensureLoaded(light ? { light: true } : undefined).then(() => (perf.agents ? perf.agents() : [])).catch(() => []) : Promise.resolve([]),
       FF.gv && FF.gv.need ? FF.gv.need('report').then(() => (FF.gv.get('report') || [])).catch(() => []) : Promise.resolve([])
     ];
     state.indexPromise = Promise.all(jobs).then(([eirRows, ffAgents, gvRows]) => {
@@ -364,16 +417,9 @@ FF.pages = FF.pages || {};
     U.downloadCsv(`tag-request-${U.stamp()}.csv`, header, rows.concat([[], ['TL ROLLUP'], ...tls]));
     U.toast('CSV downloaded ✓');
   }
-  function submit() {
-    if (!state.result) { U.toast('Pehle 🔍 system check chalao', 'warn'); return; }
-    if (!FF.auth.can('tagRequest')) { U.toast('Is page ka access nahi hai', 'err'); return; }
-    if (!state.result.rows.length) { U.toast('Koi row nahi — agent + class chuno', 'warn'); return; }
-    const total = state.result.rows.reduce((s, x) => s + num(x.approved), 0);
-    if (!total) { U.toast('Approved qty 0 hai — kuch qty daalo', 'warn'); return; }
-    state.busy = 'send';
-    const btn = U.$('[data-tr-act="send"]');
-    if (btn) { btn.disabled = true; btn.textContent = '⏳ Bhej rahe hain…'; }
-    FF.auth.api('/api/tag-requests', 'POST', {
+  /** Submit payload — dono raaston (login / public) ke liye ek hi shape. */
+  function submitPayload() {
+    return {
       note: state.note,
       rows: state.result.rows.map((x) => ({
         agentId: x.agentId, agentName: x.agentName, tl: x.tl, channel: x.channel, cls: x.cls,
@@ -386,7 +432,39 @@ FF.pages = FF.pages || {};
         priority: t.priority, reqApproved: num(t.reqApproved), agents: t.reqAgentCount,
         sugNet: num(t.reqNet), sugGross: num(t.reqGross), cover: t.cover == null ? null : Number(t.cover.toFixed(1))
       }))
-    }).then((out) => {
+    };
+  }
+  function submit() {
+    if (!state.result) { U.toast('Pehle 🔍 system check chalao', 'warn'); return; }
+    if (!isPublic() && !FF.auth.can('tagRequest')) { U.toast('Is page ka access nahi hai', 'err'); return; }
+    if (!state.result.rows.length) { U.toast('Koi row nahi — agent + class chuno', 'warn'); return; }
+    // 🌐 Public form: employee name mandatory (upar wala card).
+    if (isPublic() && !employeeOk()) {
+      U.toast('👤 Employee name likhna zaroori hai', 'err');
+      const card = rootEl.querySelector('#tr-employee-card');
+      if (card && card.scrollIntoView) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const inp = rootEl.querySelector('[data-tr-emp="name"]');
+      if (inp && inp.focus) inp.focus();
+      return;
+    }
+    const total = state.result.rows.reduce((s, x) => s + num(x.approved), 0);
+    if (!total) { U.toast('Approved qty 0 hai — kuch qty daalo', 'warn'); return; }
+    state.busy = 'send';
+    const btn = U.$('[data-tr-act="send"]');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Bhej rahe hain…'; }
+    if (isPublic()) {
+      saveEmployee();
+      publicApi('/api/public/tag-request', 'POST', { employee: state.employee, ...submitPayload() }).then((out) => {
+        state.done = (out && out.request) || { id: '—', total, rows: state.result.rows.length };
+        state.view = 'done';
+        state.result = null; state.rows = [newRow()];
+        U.toast('📤 Request bhej di gayi — ID sambhal ke rakho', 'ok');
+        renderRoot();
+      }).catch((err) => U.toast('Request nahi gayi: ' + ((err && err.message) || ''), 'err'))
+        .finally(() => { state.busy = ''; });
+      return;
+    }
+    FF.auth.api('/api/tag-requests', 'POST', submitPayload()).then((out) => {
       U.toast(out && out.ok ? '📤 Tag request admin ko chali gayi — status wahin dikhega' : 'Request save ho gayi', 'ok');
       state.requestsAt = 0;
       state.view = 'requests';
@@ -395,21 +473,94 @@ FF.pages = FF.pages || {};
       .finally(() => { state.busy = ''; });
   }
 
+  // ---- 🌐 public: done + status views ------------------------------------------------------------
+  function renderDone() {
+    const d = state.done || {};
+    const body = rootEl.querySelector('#tr-body');
+    body.innerHTML = `<section class="card tr-done"><div class="card-body">
+      <div class="tr-done-icon">✅</div>
+      <h2 style="margin:6px 0">Request bhej di gayi!</h2>
+      <p class="dim" style="margin:0 0 12px">${esc(state.employee.name || '')} — aapki request (${fmt(d.rows || 0)} rows · ${fmt(d.total || 0)} tags) admin ke paas pahunch gayi hai. Neeche wala <b>Request ID</b> sambhal ke rakho — isse kabhi bhi status check kar sakte ho.</p>
+      <div class="tr-done-id"><span class="dim small">Request ID</span><b id="tr-done-id">${esc(d.id || '—')}</b>
+        <button class="btn small" data-tr-act="copy-id">📋 Copy</button></div>
+      <div class="btn-row" style="margin-top:12px">
+        <button class="btn primary" data-tr-act="again">➕ Naya request banao</button>
+        <button class="btn" data-tr-act="check-status" data-id="${esc(d.id || '')}">🔎 Status dekho</button>
+      </div>
+      <p class="dim small" style="margin-top:10px">Status ke 4 stage: ⏳ Pending → ✅ Approved → 🚚 Dispatched (ya ⛔ Rejected). Admin status badalte hi aapko yahin pata chal jaayega.</p>
+    </div></section>`;
+    const act = (name, fn) => { const b = rootEl.querySelector(`[data-tr-act="${name}"]`); if (b) b.addEventListener('click', fn); };
+    act('copy-id', () => U.copyText(String(d.id || '')).then((ok) => U.toast(ok ? '📋 Request ID copy ho gayi' : 'Copy nahi hua', ok ? 'ok' : 'warn')));
+    act('again', () => { state.done = null; state.view = 'form'; state.result = null; renderRoot(); });
+    act('check-status', () => { state.status = null; state.statusId = String(d.id || ''); state.view = 'status'; renderRoot(); });
+  }
+  function renderStatus() {
+    const body = rootEl.querySelector('#tr-body');
+    const s = state.status;
+    const v = STATUS[s && s.status] || STATUS.pending;
+    body.innerHTML = `<section class="card"><div class="card-head"><h3>🔎 Request status</h3>
+        <div class="card-right dim">Submit ke baad mila Request ID yahan daalo</div></div>
+      <div class="card-body">
+        <div class="tr-status-row">
+          <input class="input" id="tr-status-id" placeholder="e.g. tagreq_m2k9x_ab12cd34" value="${esc(state.statusId || '')}">
+          <button class="btn primary" data-tr-act="find">🔎 Status dekho</button>
+        </div>
+        ${s ? `<div class="tr-status-out">
+          <div class="tr-status-line"><span class="badge ${v.tone}">${v.label}</span>
+            <b>${fmt(s.total || 0)} tags</b> · ${fmt(s.rows || 0)} rows · ${fmt(s.agents || 0)} agents</div>
+          <div class="dim small">👤 ${esc(s.byName || '')} · bheji gayi ${esc(U.timeLabel(new Date(s.at).getTime()))}${s.sheetSynced ? ' · 📗 Google Sheet me entry ho gayi' : ''}</div>
+          ${s.adminNote ? `<div class="notice green" style="margin-top:8px">Admin note: ${esc(s.adminNote)}</div>` : ''}
+          ${/pending/i.test(s.status || '') ? '<p class="dim small" style="margin:8px 0 0">Abhi admin review kar raha hai — status badalte hi yahan naya stage dikhega.</p>' : ''}
+        </div>` : ''}
+      </div></section>`;
+    const find = () => {
+      const inp = rootEl.querySelector('#tr-status-id');
+      const id = String((inp && inp.value) || '').trim();
+      if (!id) { U.toast('Request ID daalo', 'warn'); return; }
+      state.statusId = id;
+      publicApi(`/api/public/tag-request/status?id=${encodeURIComponent(id)}`).then((out) => {
+        state.status = out.request || null; renderStatus();
+      }).catch((err) => { state.status = null; U.toast((err && err.message) || 'Status nahi mila', 'err'); renderStatus(); });
+    };
+    const act = (name, fn) => { const b = rootEl.querySelector(`[data-tr-act="${name}"]`); if (b) b.addEventListener('click', fn); };
+    act('find', find);
+    const inp = rootEl.querySelector('#tr-status-id');
+    if (inp) inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') find(); });
+  }
+
   // ---- 🖼️ views ---------------------------------------------------------------------------------
   let rootEl = null;
   function renderRoot() {
     if (!rootEl) return;
+    if (isPublic()) {
+      if (state.view === 'done' && state.done) return renderDone();
+      if (state.view === 'status') return renderStatus();
+      if (state.view === 'result' && state.result) return renderResult();
+      return renderForm();
+    }
     if (state.view === 'requests') renderRequests();
     else if (state.view === 'result' && state.result) renderResult();
     else renderForm();
   }
   const tabsHtml = () => {
     const tab = (id, label) => `<button class="seg-btn ${state.view === id ? 'on' : ''}" data-tr-view="${id}">${label}</button>`;
+    if (isPublic()) return `<div class="seg" id="tr-tabs">${tab('form', '📝 Form')}${tab('result', '📊 Result')}${tab('status', '🔎 Status')}</div>`;
     return `<div class="seg" id="tr-tabs">${tab('form', '📝 Form')}${tab('result', '📊 Result')}${tab('requests', isAdmin() ? '📥 Tag Requests (admin)' : '📥 Meri requests')}</div>`;
   };
   function headHtml() {
+    if (isPublic()) {
+      const cfg = state.publicCfg || {};
+      const brand = cfg.brand || 'First Forward';
+      const logo = cfg.logo ? `<img class="tr-public-logo" src="${esc(cfg.logo)}" alt="${esc(brand)}">` : `<span class="tr-public-logo mono">${esc(String(brand).split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase())}</span>`;
+      return `<div class="page-head tr-public-head"><div>
+          <div class="tr-public-brand">${logo}<div><b>${esc(brand)}</b><small class="dim">${esc(cfg.tagline || 'Dashboard')}</small></div></div>
+          <h1>🏷️ ${esc(cfg.title || 'IDFC Agents Tag Request')}</h1>
+          <p class="sub">${esc(cfg.intro || 'Employee form — login ki zaroorat nahi. Upar apna naam likho, agent chuno, class-wise qty daalo aur submit kar do. Admin ko request turant mil jaayegi.')}</p>
+        </div>
+        <div class="head-actions">${tabsHtml()}<button class="btn" data-tr-act="reload">↻ Data refresh</button></div></div>`;
+    }
     return `<div class="page-head"><div><h1>🏷️ Tag Request</h1><p class="sub">IDFC Agents Tag Request — naam search karo (agents + TL dropdown) → class-wise qty bharo (VC4/VC5/VC6/VC7/VC12/VC16, 0 bhi chalega) → 🔍 system check → 📤 admin ko submit. Ek saath kai agents ki request lagti hai.</p></div>
-      <div class="head-actions">${tabsHtml()}<button class="btn" data-tr-act="share" title="Employees ko bhejne wala form link copy karo">🔗 Employee link</button><button class="btn" data-tr-act="reload">↻ Data refresh</button></div></div>`;
+      <div class="head-actions">${tabsHtml()}<button class="btn" data-tr-act="share" title="Employees ko bhejne wala form link copy karo (bina login khulta hai)">🔗 Employee link</button><button class="btn" data-tr-act="reload">↻ Data refresh</button></div></div>`;
   }
   function bindCommon(body) {
     body.querySelectorAll('[data-tr-view]').forEach((b) => b.addEventListener('click', () => { state.view = b.dataset.trView; renderRoot(); }));
@@ -418,19 +569,20 @@ FF.pages = FF.pages || {};
     const share = body.querySelector('[data-tr-act="share"]');
     if (share) share.addEventListener('click', () => {
       const link = shareLink();
-      const msg = `🏷️ Tag Request form — yahan se tag request lagao (login karna zaroori hai):\n${link}`;
+      const msg = `🏷️ Tag Request form — yahan se tag request lagao (naam likho, bas):\n${link}`;
       const done = () => {
         U.toast('🔗 Link copy ho gaya — employees ko WhatsApp / message me bhej do', 'ok');
         if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(link).catch(() => {});
       };
       if (FF.app && FF.app.openDrawer) {
         FF.app.openDrawer({
-          kicker: '🔗 Employee link', title: 'Tag Request form link',
-          sub: 'Ye link employees ko bhejo — kholte hi form khul jayega (login + Tag Request permission chahiye)',
+          kicker: '🔗 Employee link', title: 'Tag Request form link (bina login)',
+          sub: 'Ye link employees ko bhejo — kholte hi form khul jayega. Login/signup ki zaroorat NAHI, bas apna naam likhna hai.',
           body: `<div class="kd-sec">
             <label class="field" style="display:block"><span class="dim small">Link (copy karke bhejo)</span>
               <input class="input" id="tr-share-link" readonly style="width:100%" value="${esc(link)}"></label>
-            <p class="dim small">Permission kaise dein: <b>Settings → Users & Access → employee → "Management · Tag Request"</b> ON karo. Link me <code>?view=form</code> laga hai, isliye seedha form khulta hai.</p>
+            <p class="dim small">✅ Koi account nahi chahiye — employee <b>naam</b> likhkar, agent + class qty daal kar submit karta hai. Request aapke <b>🏷️ Tag Request → 📥 Tag Requests</b> me "employee link" badge ke saath aati hai (WhatsApp/notification ke saath).<br>
+            📗 Google Sheet sync ON ho to us sheet me bhi entry auto hoti hai. Form band karna ho ya mobile/branch field badalna ho → Tag Request page ke admin card / <a href="#/tagRequest?view=requests">📥 Tag Requests</a> tab se.</p>
             <div class="btn-row" style="margin-top:8px">
               <button class="btn primary" id="tr-share-copy">📋 Copy link</button>
               <button class="btn" id="tr-share-wa">💬 WhatsApp se bhejo</button>
@@ -497,6 +649,7 @@ FF.pages = FF.pages || {};
     const body = rootEl.querySelector('#tr-body');
     const total = state.rows.reduce((s, r) => s + CLASS_LIST.reduce((a, c) => a + (num(r.q[c]) || 0), 0), 0);
     body.innerHTML = `
+      ${isPublic() ? employeeCardHtml() : ''}
       ${state.problems.length ? `<div class="card"><div class="card-body"><b>⚠️ Pichhle check me dikkat:</b><ul>${state.problems.map((p) => `<li>${esc(p)}</li>`).join('')}</ul></div></div>` : ''}
       <section class="card"><div class="card-head"><h3>📝 IDFC Agents Tag Request Form <span class="count">${fmt(state.rows.length)} agents</span></h3>
         <div class="card-right dim">Class ke aage qty likho (0 bhi chalega) · total <b>${fmt(total)}</b> tags</div></div>
@@ -505,7 +658,7 @@ FF.pages = FF.pages || {};
           <div class="btn-row" style="margin-top:10px">
             <button class="btn" data-tr-act="add">➕ Ek aur agent</button>
             <button class="btn" data-tr-act="clear">🧹 Clear</button>
-            <button class="btn primary" data-tr-act="check">🔍 System check karo → Result</button>
+            <button class="btn primary" data-tr-act="check">${isPublic() && state.publicCfg && state.publicCfg.showCheck === false ? '➡️ Aage badho (qty check)' : '🔍 System check karo → Result'}</button>
           </div>
           <label class="field" style="display:block;margin-top:12px"><span class="dim small">Note (optional — admin ke liye)</span>
             <input class="input" data-tr-field="note" value="${esc(state.note)}" placeholder="e.g. urgent — kal dispatch chahiye" style="width:100%"></label>
@@ -615,10 +768,26 @@ FF.pages = FF.pages || {};
     const bodyEl = rootEl;
     const note = bodyEl.querySelector('[data-tr-field="note"]');
     if (note) note.addEventListener('input', () => { state.note = note.value; });
+    // 🌐 Public form: employee name/mobile/branch (naam mandatory) — typing par state + localStorage.
+    bodyEl.querySelectorAll('[data-tr-emp]').forEach((inp) => inp.addEventListener('input', () => {
+      const key = inp.dataset.trEmp;
+      state.employee[key] = inp.value;
+      if (key === 'mobile') { const clean = inp.value.replace(/[^\d+]/g, ''); if (clean !== inp.value) inp.value = clean; state.employee.mobile = clean; }
+      const card = bodyEl.querySelector('#tr-employee-card');
+      if (card) card.classList.toggle('tr-employee-todo', !employeeOk());
+      saveEmployee();
+    }));
     const act = (name, fn) => { const b = bodyEl.querySelector(`[data-tr-act="${name}"]`); if (b) b.addEventListener('click', fn); };
     act('add', () => { state.rows.push(newRow()); renderForm(); const inputs = rootEl.querySelectorAll('.tr-agent'); const last = inputs[inputs.length - 1]; if (last) last.focus(); });
     act('clear', () => { state.rows = [newRow()]; state.note = ''; state.result = null; state.problems = []; renderForm(); });
     act('check', async () => {
+      // Naam pehle — warna result bhar kar submit par pata chalega (public form me mandatory).
+      if (isPublic() && !employeeOk()) {
+        U.toast('👤 Pehle apna naam likho (upar wale card me)', 'warn');
+        const inp = bodyEl.querySelector('[data-tr-emp="name"]');
+        if (inp && inp.focus) inp.focus();
+        return;
+      }
       const btn = bodyEl.querySelector('[data-tr-act="check"]');
       if (btn) { btn.disabled = true; btn.textContent = '⏳ Data check ho raha hai…'; }
       try { await buildIndex(); } catch { /* index fallback */ }
@@ -635,6 +804,10 @@ FF.pages = FF.pages || {};
     const res = state.result;
     const body = rootEl.querySelector('#tr-body');
     if (!res) { state.view = 'form'; renderForm(); return; }
+    // 🌐 Public form + admin ne "system check dikhao" OFF kiya → stock/issuance/suggestion columns
+    // chhupa do (qty edit wala simple table rehta hai).
+    const noCheck = isPublic() && state.publicCfg && state.publicCfg.showCheck === false;
+    if (rootEl) rootEl.classList.toggle('tr-no-check', !!noCheck);
     const total = res.rows.reduce((s, x) => s + num(x.approved), 0);
     const totalRef = res.rows.reduce((s, x) => s + num(x.sugNet), 0);
     const totalGross = res.rows.reduce((s, x) => s + num(x.sugGross), 0);
@@ -649,16 +822,16 @@ FF.pages = FF.pages || {};
       }
       return `${sep}<tr data-tr-res="${x.id}">
           <td><b>${esc(x.agentName)}</b> <small class="dim">${esc(x.agentId || '')}</small> <span class="badge ${x.channel === 'gv' ? 'green' : ''}">${x.channel === 'gv' ? '🟩 GV' : '🟦 FF'}</span></td>
-          <td>${esc(x.tl)}</td>
+          <td class="tr-check-col">${esc(x.tl)}</td>
           <td><b>${esc(x.cls)}</b></td>
-          <td class="num">${fmt(x.last)}</td>
-          <td class="num"><b>${fmt(x.cur)}</b> <small class="dim">· ${fmt(x.avg, true)}/din${x.channel === 'gv' ? ' (live)' : ''}</small></td>
-          <td class="num">${growthCell(x.growth)}</td>
-          <td class="num"><b>${fmt(x.stock)}</b></td>
-          <td class="num">${x.cover == null ? '<span class="dim">∞</span>' : `<span class="badge ${x.cover < 7 ? 'red' : x.cover < 15 ? 'amber' : 'green'}">${fmt(x.cover, true)}</span>`}</td>
-          <td><span class="badge ${toneFor(x.priority)}">${esc(x.priority)}</span></td>
-          <td class="num"><b class="sug-chip">${fmt(x.sugNet)}</b></td>
-          <td class="num dim">${fmt(x.sugGross)}</td>
+          <td class="num tr-check-col">${fmt(x.last)}</td>
+          <td class="num tr-check-col"><b>${fmt(x.cur)}</b> <small class="dim">· ${fmt(x.avg, true)}/din${x.channel === 'gv' ? ' (live)' : ''}</small></td>
+          <td class="num tr-check-col">${growthCell(x.growth)}</td>
+          <td class="num tr-check-col"><b>${fmt(x.stock)}</b></td>
+          <td class="num tr-check-col">${x.cover == null ? '<span class="dim">∞</span>' : `<span class="badge ${x.cover < 7 ? 'red' : x.cover < 15 ? 'amber' : 'green'}">${fmt(x.cover, true)}</span>`}</td>
+          <td class="tr-check-col"><span class="badge ${toneFor(x.priority)}">${esc(x.priority)}</span></td>
+          <td class="num tr-check-col"><b class="sug-chip">${fmt(x.sugNet)}</b></td>
+          <td class="num dim tr-check-col">${fmt(x.sugGross)}</td>
           <td class="num"><input class="input tr-appr" style="width:78px" data-tr-appr="${x.id}" inputmode="numeric" value="${num(x.approved)}"></td>
           <td><input class="input tr-remark" style="width:160px" data-tr-remark="${x.id}" value="${esc(x.remark)}" placeholder="remark"></td>
         </tr>`;
@@ -666,25 +839,26 @@ FF.pages = FF.pages || {};
     body.innerHTML = `
       <div class="kpi-grid">
         <div class="kpi g2"><div class="kpi-top"><span class="kpi-title">📝 Request rows</span></div><div class="kpi-value">${fmt(res.rows.length)}</div><div class="kpi-foot">${fmt(agents.size)} agents · ${fmt(new Set(res.rows.map((x) => x.cls)).size)} classes</div></div>
-        <div class="kpi g9"><div class="kpi-top"><span class="kpi-title">🎯 Suggested (stock −)</span></div><div class="kpi-value">${fmt(totalRef)}</div><div class="kpi-foot">w/o stock ${fmt(totalGross)} · ${res.days} din ka target</div></div>
+        <div class="kpi g9 tr-check-col"><div class="kpi-top"><span class="kpi-title">🎯 Suggested (stock −)</span></div><div class="kpi-value">${fmt(totalRef)}</div><div class="kpi-foot">w/o stock ${fmt(totalGross)} · ${res.days} din ka target</div></div>
         <div class="kpi g6"><div class="kpi-top"><span class="kpi-title">✅ Approved (editable)</span></div><div class="kpi-value" id="tr-total">${fmt(total)}</div><div class="kpi-foot">admin ko yahi jayega</div></div>
-        <div class="kpi g4"><div class="kpi-top"><span class="kpi-title">🚦 High priority</span></div><div class="kpi-value">${fmt(res.rows.filter((x) => /high/i.test(x.priority)).length)}</div><div class="kpi-foot">cover &lt; 7 din</div></div>
+        <div class="kpi g4 tr-check-col"><div class="kpi-top"><span class="kpi-title">🚦 High priority</span></div><div class="kpi-value">${fmt(res.rows.filter((x) => /high/i.test(x.priority)).length)}</div><div class="kpi-foot">cover &lt; 7 din</div></div>
       </div>
       <section class="card"><div class="card-head"><h3>📊 System check · agent × class</h3>
         <div class="card-right dim">TL-wise grouped · qty / remark badal sakte ho — totals apne aap update hote hain</div></div>
         <div class="table-wrap tall"><table class="tbl"><thead><tr>
-          <th>Agent</th><th>TL</th><th>Class</th><th class="num">${esc(U.labelYM(ymLast()))}</th><th class="num">${esc(U.labelYM(ymNow()))} MTD</th><th class="num">Growth</th><th class="num">Stock</th><th class="num">Cover</th><th>Priority</th>
-          <th class="num">🎯 stock −</th><th class="num">🎯 w/o stock</th><th class="num">✅ Approved</th><th>Remark</th></tr></thead>
+          <th>Agent</th><th class="tr-check-col">TL</th><th>Class</th><th class="num tr-check-col">${esc(U.labelYM(ymLast()))}</th><th class="num tr-check-col">${esc(U.labelYM(ymNow()))} MTD</th><th class="num tr-check-col">Growth</th><th class="num tr-check-col">Stock</th><th class="num tr-check-col">Cover</th><th class="tr-check-col">Priority</th>
+          <th class="num tr-check-col">🎯 stock −</th><th class="num tr-check-col">🎯 w/o stock</th><th class="num">✅ Approved</th><th>Remark</th></tr></thead>
         <tbody>${rowsHtml}</tbody></table></div>
       </section>
-      ${res.tls.length ? `<section class="card"><div class="card-head"><h3>🧑‍💼 TL rollup (TL stock · issuance · priority · suggested)</h3><div class="card-right dim">TL ke poore agents ka stock/issuance + is request ka total</div></div>
+      ${res.tls.length ? `<section class="card tr-check-col"><div class="card-head"><h3>🧑‍💼 TL rollup (TL stock · issuance · priority · suggested)</h3><div class="card-right dim">TL ke poore agents ka stock/issuance + is request ka total</div></div>
         <div class="table-wrap"><table class="tbl compact"><thead><tr><th>TL</th><th>Channel</th><th class="num">Agents</th><th class="num">VC4 stock</th><th class="num">${esc(U.labelYM(ymNow()))} VC4</th><th class="num">Cover</th><th>Priority</th><th class="num">🎯 is request ka total</th></tr></thead>
         <tbody>${res.tls.map((t) => `<tr><td><b>${esc(t.name)}</b></td><td>${t.channel === 'gv' ? '🟩 GV' : '🟦 FF'}</td><td class="num">${fmt(t.agentsCount)}${t.reqAgentCount ? ` <small class="dim">(${fmt(t.reqAgentCount)} requested)</small>` : ''}</td><td class="num"><b>${fmt(t.stock.VC4)}</b></td><td class="num">${fmt(t.cur.VC4)}</td><td class="num">${t.cover == null ? '<span class="dim">∞</span>' : `<span class="badge ${t.cover < 7 ? 'red' : t.cover < 15 ? 'amber' : 'green'}">${fmt(t.cover, true)}</span>`}</td><td><span class="badge ${toneFor(t.priority)}">${esc(t.priority)}</span></td><td class="num"><b>${fmt(t.reqApproved)}</b> <small class="dim">/ sug ${fmt(t.reqNet)}</small></td></tr>`).join('')}</tbody></table></div></section>` : ''}
       ${state.problems.length ? `<section class="card"><div class="card-body"><b>⚠️ Kuch rows skip hui:</b><ul>${state.problems.map((p) => `<li>${esc(p)}</li>`).join('')}</ul></div></section>` : ''}
       <section class="card"><div class="card-body">
+        ${isPublic() ? `<p class="dim small" style="margin:0 0 8px">👤 Request <b>${esc(state.employee.name || '—')}</b> ke naam se jaayegi${state.employee.mobile ? ` · ${esc(state.employee.mobile)}` : ''}${state.employee.office ? ` · ${esc(state.employee.office)}` : ''}.</p>` : ''}
         <label class="field" style="display:block"><span class="dim small">Note (admin ko dikhega)</span><input class="input" id="tr-res-note" style="width:100%" value="${esc(res.note || state.note)}" placeholder="e.g. urgent"></label>
         <div class="btn-row" style="margin-top:10px">
-          ${FF.auth.can('tagRequest') ? '<button class="btn primary" data-tr-act="send">📤 Admin ko submit karo</button>' : ''}
+          ${(isPublic() || FF.auth.can('tagRequest')) ? `<button class="btn primary" data-tr-act="send">${isPublic() ? '📤 Request submit karo' : '📤 Admin ko submit karo'}</button>` : ''}
           ${FF.auth.can('export') ? '<button class="btn" data-tr-act="csv">⬇ CSV</button><button class="btn" data-tr-act="xlsx">⬇ Excel</button>' : ''}
           <button class="btn" data-tr-act="copy">📋 Copy</button>
           ${FF.auth.can('share') ? '<button class="btn" data-tr-act="wa">💬 WhatsApp</button>' : ''}
@@ -734,9 +908,9 @@ FF.pages = FF.pages || {};
     loadRequests(true).then(() => {
       if (state.view !== 'requests') return;
       if (!state.requests.length) {
-        body.innerHTML = '<section class="card"><div class="card-body empty">Abhi koi tag request nahi hai. 📝 Form bharo → 🔍 system check → 📤 submit.</div></section>';
-        if (isAdmin()) body.insertAdjacentHTML('beforeend', sheetCardHtml());
-        bindSheetCard();
+        body.innerHTML = '<section class="card"><div class="card-body empty">Abhi koi tag request nahi hai. 📝 Form bharo → 🔍 system check → 📤 submit.<br><small class="dim">Employee link se aayi requests bhi yahin dikhengi (🌐 badge ke saath).</small></div></section>';
+        if (isAdmin()) body.insertAdjacentHTML('beforeend', publicCardHtml() + sheetCardHtml());
+        bindPublicCard(); bindSheetCard();
         return;
       }
       body.innerHTML = `<section class="card"><div class="card-head"><h3>📥 Tag Requests <span class="count">${fmt(state.requests.length)}</span></h3>
@@ -744,7 +918,7 @@ FF.pages = FF.pages || {};
         <div class="table-wrap tall"><table class="tbl"><thead><tr><th>Kab</th><th>Kisne</th><th class="num">Rows</th><th class="num">Agents</th><th class="num">Total qty</th><th>Status</th><th>Note</th><th></th></tr></thead>
         <tbody>${state.requests.map((r) => `<tr data-tr-req="${esc(r.id)}">
           <td>${esc(U.timeLabel(new Date(r.at).getTime()))}</td>
-          <td><b>${esc(r.byName || r.by)}</b></td>
+          <td><b>${esc(r.byName || r.by)}</b>${r.source === 'public-link' ? ' <span class="badge" title="Employee link se aayi (bina login)">🌐 employee link</span>' : ''}${r.employee && r.employee.mobile ? `<small class="dim"> ${esc(r.employee.mobile)}</small>` : ''}</td>
           <td class="num">${fmt((r.rows || []).length)}</td>
           <td class="num">${fmt(new Set((r.rows || []).map((x) => x.agentName)).size)}</td>
           <td class="num"><b>${fmt((r.rows || []).reduce((s, x) => s + num(x.approved), 0))}</b></td>
@@ -761,8 +935,8 @@ FF.pages = FF.pages || {};
         FF.auth.api(`/api/tag-requests/${encodeURIComponent(r.id)}`, 'DELETE').then(() => { U.toast('🗑 Request delete ho gayi', 'ok'); renderRequests(); }).catch((err) => U.toast('Delete fail: ' + ((err && err.message) || ''), 'err'));
       }));
       if (isAdmin()) {
-        body.insertAdjacentHTML('beforeend', sheetCardHtml());
-        bindSheetCard();
+        body.insertAdjacentHTML('beforeend', publicCardHtml() + sheetCardHtml());
+        bindPublicCard(); bindSheetCard();
       }
     });
   }
@@ -777,6 +951,7 @@ FF.pages = FF.pages || {};
       state.sheet.fields = out.fields || {};
       state.sheet.connected = !!out.connected;
       state.sheet.hint = out.hint || '';
+      state.sheet.publicForm = out.publicForm || null;
       return state.sheet.config;
     }).catch((err) => { state.sheet.hint = (err && err.message) || 'Config load nahi hui'; return null; });
   }
@@ -786,12 +961,14 @@ FF.pages = FF.pages || {};
     if (!cfg) return '<section class="card" id="tr-sheet-card"><div class="card-body dim small">📗 Google Sheet sync load ho raha hai…</div></section>';
     const fields = s.fields || {};
     const colBox = Object.entries(fields).map(([k, label]) => `<label class="tr-col-opt"><input type="checkbox" data-tr-col="${esc(k)}" ${cfg.columns.includes(k) ? 'checked' : ''}> ${esc(label)}</label>`).join('');
+    const pub = state.sheet.publicForm || {};
+    const targetId = sheetIdOfLink(cfg.sheetLink) || cfg.spreadsheetId || '';
     return `<section class="card" id="tr-sheet-card"><div class="card-head"><h3>📗 Google Sheet me direct entry <span class="badge ${cfg.enabled ? 'green' : ''}">${cfg.enabled ? 'ON' : 'OFF'}</span></h3>
       <div class="card-right dim">Admin — tag requests ko seedha apni Google Sheet me likho</div></div>
       <div class="card-body">
         ${s.connected ? '' : `<div class="notice amber" style="margin-bottom:10px">⚠️ ${esc(s.hint || 'Apps Script connect nahi hai — pehle sheet storage setup karo.')}</div>`}
         <div class="tr-sheet-grid">
-          <label class="field"><span class="dim small">Google Sheet link (reference ke liye)</span>
+          <label class="field"><span class="dim small">Alag Google Sheet ka link (khaali = jis sheet me Apps Script hai usi me entry)</span>
             <input class="input" data-tr-sheet="sheetLink" value="${esc(cfg.sheetLink || '')}" placeholder="https://docs.google.com/spreadsheets/d/…"></label>
           <label class="field"><span class="dim small">Sheet ke andar ka tab (naam)</span>
             <input class="input" data-tr-sheet="tab" value="${esc(cfg.tab || 'Tag Requests')}" placeholder="Tag Requests"></label>
@@ -812,11 +989,92 @@ FF.pages = FF.pages || {};
         <div class="btn-row" style="margin-top:10px">
           <button class="btn primary" data-tr-sheet-act="save">💾 Save settings</button>
           <button class="btn" data-tr-sheet-act="toggle">${cfg.enabled ? '⏸ Sync OFF karo' : '▶️ Sync ON karo'}</button>
-          <button class="btn" data-tr-sheet-act="test">🔌 Connection test</button>
+          <button class="btn" data-tr-sheet-act="test">🔌 Sheet check karo</button>
           ${cfg.sheetLink ? `<a class="btn" href="${esc(cfg.sheetLink)}" target="_blank" rel="noopener">↗ Sheet kholo</a>` : ''}
         </div>
-        <p class="dim small" style="margin-top:8px">Entries connected Apps Script wali sheet me hoti hain (Settings → Backup wala). Tab na ho to ban jaata hai; pehli entry par header row apne aap likhi jaati hai. Har request drawer me <b>📗 Sheet me push</b> button se manual entry bhi kar sakte ho.</p>
+        <p class="dim small" style="margin-top:8px">${targetId ? `🎯 Entries <b>is sheet</b> me jaayengi (ID …${esc(String(targetId).slice(-8))} · tab <b>${esc(cfg.tab || '')}</b>). Us sheet par Apps Script wale Google account ka <b>Editor</b> access hona chahiye — Sheet → Share.` : `Entries is waqt usi sheet me hoti hain jisme Apps Script bana hai (Settings → Backup). Kahin aur bhejna ho to upar <b>alag sheet ka link</b> paste karo.`} Tab na ho to ban jaata hai; pehli entry par header row apne aap likhi jaati hai. Har request drawer me <b>📗 Sheet me push</b> button se manual entry bhi kar sakte ho.</p>
       </div></section>`;
+  }
+
+  // ---- 🌐 public employee-link card (admin) -------------------------------------------------------
+  /** Employee link (bina login) ka admin control: ON/OFF, fields, title, link copy. */
+  function publicCardHtml() {
+    const pub = state.sheet.publicForm;
+    if (!pub) return '<section class="card" id="tr-public-card"><div class="card-body dim small">🌐 Employee link settings load ho rahi hain…</div></section>';
+    const link = shareLink();
+    const open = pub.enabled !== false;
+    return `<section class="card" id="tr-public-card"><div class="card-head"><h3>🌐 Employee link (bina login) <span class="badge ${open ? 'green' : ''}">${open ? 'ON' : 'OFF'}</span></h3>
+      <div class="card-right dim">Ye link koi bhi khol sakta hai — login/signup nahi, bas naam</div></div>
+      <div class="card-body">
+        <div class="tr-public-link-row">
+          <input class="input" id="tr-public-link" readonly value="${esc(link)}">
+          <button class="btn primary" data-tr-pub-act="copy" data-link="${esc(link)}">📋 Copy link</button>
+          <button class="btn" data-tr-pub-act="wa" data-link="${esc(link)}">💬 WhatsApp</button>
+        </div>
+        <div class="tr-sheet-grid" style="margin-top:10px">
+          <label class="field"><span class="dim small">Form ka title (employee ko dikhta hai)</span>
+            <input class="input" data-tr-pub="title" value="${esc(pub.title || '')}" placeholder="IDFC Agents Tag Request"></label>
+          <label class="field"><span class="dim small">Upar ka message (optional)</span>
+            <input class="input" data-tr-pub="intro" value="${esc(pub.intro || '')}" placeholder="Naam likho → agent chuno → qty daalo → submit"></label>
+          <label class="field"><span class="dim small">Fields aur check</span>
+            <span class="tr-check-row">
+              <label class="tr-col-opt"><input type="checkbox" data-tr-pub="askMobile" ${pub.askMobile !== false ? 'checked' : ''}> Mobile (optional)</label>
+              <label class="tr-col-opt"><input type="checkbox" data-tr-pub="askOffice" ${pub.askOffice ? 'checked' : ''}> Branch/Office (optional)</label>
+              <label class="tr-col-opt"><input type="checkbox" data-tr-pub="showCheck" ${pub.showCheck !== false ? 'checked' : ''}> System check (stock/suggestion) dikhao</label>
+            </span></label>
+        </div>
+        <div class="btn-row" style="margin-top:10px">
+          <button class="btn primary" data-tr-pub-act="save">💾 Save</button>
+          <button class="btn" data-tr-pub-act="toggle">${open ? '⏸ Link OFF karo' : '▶️ Link ON karo'}</button>
+        </div>
+        <p class="dim small" style="margin-top:8px">🔐 Employee ko sirf yehi form dikhta hai — dashboard ka koi doosra page nahi. Data server par scoped public endpoint se aata hai (sirf aggregated issuance + agent summary). Har request <b>employee link</b> badge se aapki list me aati hai — 📱 device/IP aur naam ke saath. Employee apna status <b>Request ID</b> se dekh sakta hai.</p>
+      </div></section>`;
+  }
+  function replaceCard(id, html) {
+    const card = rootEl && rootEl.querySelector ? rootEl.querySelector(id) : null;
+    if (!card || !card.replaceWith) return null;
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    const fresh = tmp.firstElementChild;
+    if (!fresh) return null;
+    card.replaceWith(fresh);
+    return fresh;
+  }
+  function bindPublicCard() {
+    if (!isAdmin()) return;
+    loadSheetConfig().then(() => {
+      if (state.sheet.publicForm && replaceCard('#tr-public-card', publicCardHtml())) attach();
+      else if (!state.sheet.publicForm) { /* public config aayi hi nahi */ }
+    });
+    function attach() {
+      const card = rootEl.querySelector('#tr-public-card');
+      if (!card) return;
+      const act = (name, fn) => { const b = card.querySelector(`[data-tr-pub-act="${name}"]`); if (b) b.addEventListener('click', fn); };
+      const collect = () => ({
+        title: (card.querySelector('[data-tr-pub="title"]') || {}).value || '',
+        intro: (card.querySelector('[data-tr-pub="intro"]') || {}).value || '',
+        askMobile: !!(card.querySelector('[data-tr-pub="askMobile"]') || {}).checked,
+        askOffice: !!(card.querySelector('[data-tr-pub="askOffice"]') || {}).checked,
+        showCheck: !!(card.querySelector('[data-tr-pub="showCheck"]') || {}).checked
+      });
+      const save = (patch, msg) => {
+        const btn = card.querySelector('[data-tr-pub-act="save"]');
+        if (btn) { btn.disabled = true; btn.textContent = '⏳ Save…'; }
+        FF.auth.api('/api/public-tag-form', 'PUT', { config: { ...collect(), ...(patch || {}) } })
+          .then((out) => { state.sheet.publicForm = out.config; U.toast(msg || '💾 Employee link settings save ho gayi', 'ok'); if (replaceCard('#tr-public-card', publicCardHtml())) attach(); })
+          .catch((err) => U.toast('Save fail: ' + ((err && err.message) || ''), 'err'))
+          .finally(() => { const b = rootEl.querySelector('#tr-public-card [data-tr-pub-act="save"]'); if (b) { b.disabled = false; b.textContent = '💾 Save'; } });
+      };
+      act('save', () => save(null));
+      act('toggle', () => {
+        const next = !(state.sheet.publicForm && state.sheet.publicForm.enabled !== false);
+        save({ enabled: next }, next ? '▶️ Employee link ON — employees ko link bhej sakte ho' : '⏸ Employee link OFF — ab link kholne par "band hai" dikhega');
+      });
+      act('copy', (e) => U.copyText(e.target.dataset.link || shareLink()).then((ok) => U.toast(ok ? '📋 Employee link copy ho gaya' : 'Copy nahi hua', ok ? 'ok' : 'warn')));
+      act('wa', (e) => { const l = e.target.dataset.link || shareLink(); const msg = `🏷️ Tag Request form — yahan se tag request lagao (naam likho, bas):\n${l}`; if (FF.app && FF.app.shareWhatsApp) FF.app.shareWhatsApp(msg); else window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank'); });
+      const inp = card.querySelector('#tr-public-link');
+      if (inp) inp.addEventListener('click', () => { try { inp.select(); } catch { /* ignore */ } });
+    }
   }
   /** Card ko naye HTML se badlo (outerHTML setter har fake/real DOM me safe nahi — replaceWith use karo). */
   function replaceSheetCard() {
@@ -866,11 +1124,15 @@ FF.pages = FF.pages || {};
       });
       act('test', () => {
         const btn = card.querySelector('[data-tr-sheet-act="test"]');
-        if (btn) { btn.disabled = true; btn.textContent = '⏳ Test…'; }
-        FF.auth.api('/api/tag-request-sheet/test', 'POST', {})
-          .then((out) => U.toast(`🔌 Connected ✓ — sheet "${out.spreadsheet || ''}" (tab ${out.tab})${out.url ? '' : ''}`, 'ok'))
-          .catch((err) => U.toast('Test fail: ' + ((err && err.message) || ''), 'err'))
-          .finally(() => { if (btn) { btn.disabled = false; btn.textContent = '🔌 Connection test'; } });
+        if (btn) { btn.disabled = true; btn.textContent = '⏳ Check…'; }
+        const cfgNow = collect();
+        FF.auth.api('/api/tag-request-sheet/test', 'POST', { sheetLink: cfgNow.sheetLink, tab: cfgNow.tab })
+          .then((out) => {
+            const where = out.spreadsheet ? `sheet "${out.spreadsheet}" (tab ${out.tab})` : `tab ${out.tab}`;
+            U.toast(`🔌 Connected ✓ — ${where}${out.note ? ' · ' + out.note : ''}`, out.targetExists === false ? 'warn' : 'ok');
+          })
+          .catch((err) => U.toast('Sheet check fail: ' + ((err && err.message) || ''), 'err'))
+          .finally(() => { if (btn) { btn.disabled = false; btn.textContent = '🔌 Sheet check karo'; } });
       });
     }
   }
@@ -905,6 +1167,7 @@ FF.pages = FF.pages || {};
         <div class="kd-stat amber"><span>Status</span><b>${statusOf(r).label}</b></div>
         <div class="kd-stat violet"><span>Total qty</span><b>${fmt(tot)}</b></div>
       </div>
+      ${r.source === 'public-link' ? `<p class="dim small">🌐 <b>Employee link</b> se aayi (bina login)${r.employee && r.employee.mobile ? ` · 📱 ${esc(r.employee.mobile)}` : ''}${r.employee && r.employee.office ? ` · 🏢 ${esc(r.employee.office)}` : ''}${r.ip ? ` · IP ${esc(r.ip)}` : ''}</p>` : ''}
       <p class="dim small">${esc(U.timeLabel(new Date(r.at).getTime()))}${r.note ? ` · 📝 ${esc(r.note)}` : ''} ${syncBadge}</p>
       <div class="kd-sec"><div class="kd-h-row"><h4 class="kd-h">Rows (${fmt((r.rows || []).length)})</h4>
         <div class="seg small"><button type="button" class="seg-btn ${state.groupBy === 'tl' ? 'on' : ''}" data-tr-group="tl">TL-wise</button><button type="button" class="seg-btn ${state.groupBy === 'agent' ? 'on' : ''}" data-tr-group="agent">Agent-wise</button></div></div>
@@ -965,13 +1228,34 @@ FF.pages = FF.pages || {};
   }
 
   // ---- render -----------------------------------------------------------------------------------
-  async function render(root, params) {
+  async function render(root, params, ctx) {
     rootEl = root;
-    if (params && params.view && ['form', 'result', 'requests'].includes(params.view)) state.view = params.view;
+    // 🌐 Public mode: /tag-request (ya ?public=1) — bina login, sirf employee name mandatory.
+    state.publicMode = !!(params && params.public) || !!isPublic();
+    if (params && ctx && ctx.publicConfig) state.publicCfg = ctx.publicConfig;
+    if (state.publicMode) {
+      loadEmployee();
+      if (!state.publicCfg && FF.publicForm && FF.publicForm.config) state.publicCfg = FF.publicForm.config;
+    }
+    if (params && params.view) {
+      const views = state.publicMode ? ['form', 'result', 'status', 'done'] : ['form', 'result', 'requests'];
+      if (views.includes(params.view)) state.view = params.view;
+    }
+    if (state.publicMode && state.view === 'requests') state.view = 'form';
     root.innerHTML = `${headHtml()}<div id="tr-body">${U.spinner('Tag request workspace khul raha hai…')}</div>`;
     bindCommon(root);
     const qp = (params && params.agent) ? String(params.agent) : '';
     if (qp && !state.rows.some((r) => r.name || r.agentId)) state.rows = [newRow({ agentId: /^\d+$/.test(qp) ? qp : '', name: /^\d+$/.test(qp) ? '' : qp })];
+    if (state.publicMode) {
+      // Public link par sirf 4 view: form → result → done / status.
+      if (state.view === 'done' && state.done) { renderDone(); return; }
+      if (state.view === 'result' && state.result) { renderResult(); return; }
+      if (state.view === 'status') { renderStatus(); return; }
+      if (state.done && state.view === 'form') state.done = null;
+      renderForm();
+      buildIndex().then(() => { if (state.view === 'form' && root.isConnected) renderForm(); }).catch(() => {});
+      return;
+    }
     if (state.view === 'requests') { renderRequests(); return; }
     if (state.view === 'result' && state.result) { renderResult(); return; }
     // Pehle form turant dikhao, phir index background me (page kabhi block na ho).

@@ -1285,6 +1285,9 @@ window.FF = window.FF || {};
   async function init() {
     U.initTooltip();
     bind();
+    // 🌐 Public employee link (/tag-request) — yahan login ka koi chakkar nahi: seedha form khulta
+    //    hai, sirf employee name mandatory. Baaki poora app pehle jaisa login-protected rehta hai.
+    if (FF.publicForm && FF.publicForm.active()) { await FF.publicForm.boot(); return; }
     const ok = await FF.auth.init();
     if (ok) onLogin();
   }

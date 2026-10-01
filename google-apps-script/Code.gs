@@ -5,6 +5,12 @@
  * tab "APP_STORAGE" of the spreadsheet this script is attached to. Data arrives ALREADY ENCRYPTED
  * by the dashboard server, so the cells only contain unreadable text. Do not edit that tab by hand.
  *
+ * v3.27 — tag requests ab kisi BHI Google Sheet me ja sakti hain: dashboard sheet ka link/ID bhejta
+ * hai aur ye script SpreadsheetApp.openById() se usi sheet me rows append karta hai (us sheet par
+ * is Google account ka edit access hona chahiye). Purane deployments me sirf 'ping'/'appendrows'
+ * the — naye 'sheettest' action + openById ke liye ye code dobara paste karke
+ * Deploy → Manage deployments → Edit → Version: "New version" → Deploy karo.
+ *
  * SETUP (one time, ~5 minutes) — see STORAGE_SETUP.md in the repository:
  *  1. Open the Google Sheet (a new private sheet is best) → Extensions → Apps Script.
  *  2. Delete the sample code, paste this whole file, and set SECRET below to a long random value
@@ -69,13 +75,20 @@ function doPost(e) {
   try {
     const sheet = sheet_();
     if (body.action === 'ping') return json_({ ok: true, tab: TAB, spreadsheet: SpreadsheetApp.getActive().getName(), url: SpreadsheetApp.getActive().getUrl() });
-    // 📗 Tag Request (v3.25) — dashboard se aayi rows ko kisi bhi NORMAL tab me direct append karo.
-    // body: { tab: 'Tag Requests', header: [...], rows: [[...], ...] }
+    // 📗 Tag Request (v3.27) — dashboard se aayi rows ko kisi bhi NORMAL tab me direct append karo.
+    // body: { tab: 'Tag Requests', header: [...], rows: [[...], ...], spreadsheetId?: '<alag sheet ka ID>' }
     // Tab na ho to ban jaata hai; tab khaali ho to pehle header row likhi jaati hai.
+    // spreadsheetId diya ho to entry US sheet me hoti hai (us sheet par is Google account ka edit access
+    // hona chahiye — Sheet → Share). Nahi diya to script jis sheet se bandha hai usi me.
+    if (body.action === 'sheettest') {
+      var ssT = target_(body.spreadsheetId);
+      var tabT = String(body.tab || 'Tag Requests').slice(0, 80);
+      return json_({ ok: true, spreadsheet: ssT.getName(), spreadsheetId: ssT.getId(), url: ssT.getUrl(), tab: tabT, exists: !!ssT.getSheetByName(tabT) });
+    }
     if (body.action === 'appendrows') {
       var tabName = String(body.tab || 'Tag Requests').slice(0, 80);
-      if (tabName === TAB) return json_({ ok: false, error: 'APP_STORAGE tab me likhna allowed nahi — koi doosra tab naam do.' });
-      var ss = SpreadsheetApp.getActive();
+      if (tabName === TAB && !body.spreadsheetId) return json_({ ok: false, error: 'APP_STORAGE tab me likhna allowed nahi — koi doosra tab naam do.' });
+      var ss = target_(body.spreadsheetId);
       var sh = ss.getSheetByName(tabName);
       if (!sh) sh = ss.insertSheet(tabName);
       var header = Array.isArray(body.header) ? body.header.map(function (h) { return String(h == null ? '' : h); }) : [];
@@ -102,7 +115,7 @@ function doPost(e) {
         added = padded.length;
       }
       SpreadsheetApp.flush();
-      return json_({ ok: true, tab: tabName, added: added, atRow: startRow, url: ss.getUrl() });
+      return json_({ ok: true, tab: tabName, added: added, atRow: startRow, spreadsheet: ss.getName(), spreadsheetId: ss.getId(), url: ss.getUrl() });
     }
     if (body.action === 'read') return json_({ ok: true, records: readAll_(sheet) });
     if (body.action === 'write') {
@@ -119,6 +132,17 @@ function doPost(e) {
     return json_({ ok: false, error: String(err && err.message || err) });
   } finally {
     lock.releaseLock();
+  }
+}
+
+/** Entry kis sheet me jaani hai — ID diya ho to wahi (alag sheet), warna wahi sheet jisme ye
+ *  script bana hai. Alag sheet par is Google account ka EDIT access hona chahiye. */
+function target_(ssId) {
+  var id = String(ssId || '').trim();
+  if (!id) return SpreadsheetApp.getActive();
+  try { return SpreadsheetApp.openById(id); }
+  catch (err) {
+    throw new Error('Sheet ID ' + id + ' nahi khuli — us sheet ko is Google account (jo Apps Script chala raha hai) ke saath Share → Editor karke add karo. (' + String(err && err.message || err) + ')');
   }
 }
 

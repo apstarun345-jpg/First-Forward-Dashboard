@@ -1122,6 +1122,41 @@ await run('🏷️ Tag Request — form + system check (class-wise stock / issua
   const h3 = r3.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
   if (!/Tag Requests|koi tag request nahi/.test(h3)) throw new Error('requests view render nahi hua');
 }, false);
+await run('🌐 Public employee link — bina login form (naam mandatory) + status view', async () => {
+  // share link /tag-request par jaata hai (login nahi)
+  const link = pages.tagRequest.shareLink();
+  if (!/\/tag-request$/.test(link)) throw new Error('employee share link /tag-request nahi hai: ' + link);
+  const pubCfg = { enabled: true, showCheck: true, askMobile: true, askOffice: false, askNote: true, title: 'IDFC Agents Tag Request', brand: 'First Forward', requireEmployeeName: true };
+  const r = root();
+  await pages.tagRequest.render(r, { view: 'form', public: '1' }, { publicConfig: pubCfg });
+  await settle(400);
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const s of ['Aapka naam', 'Employee name *', 'IDFC Agents Tag Request', 'System check karo']) {
+    if (!html.includes(s)) throw new Error(`public form me "${s}" nahi mila`);
+  }
+  if (!/data-tr-emp="name"/.test(html)) throw new Error('employee name input missing');
+  if (!/data-tr-view="status"/.test(html)) throw new Error('public mode me status tab missing');
+  // 📊 public result view — login wale submit button ke bajaye "Request submit karo"
+  const perfAgents = pages.performance.agents() || [];
+  const who = (perfAgents.find((a) => a.name && !a.tlExcluded) || perfAgents[0] || {}).name;
+  if (who) {
+    await pages.tagRequest.preview([{ name: who, cls: 'VC4', qty: 3 }]);
+    const r2 = root();
+    await pages.tagRequest.render(r2, { view: 'result', public: '1' }, { publicConfig: pubCfg });
+    await settle(250);
+    const h2 = r2.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+    if (!h2.includes('Request submit karo')) throw new Error('public result view me submit button nahi mila');
+    if (!/data-tr-appr=/.test(h2)) throw new Error('public result rows editable nahi hain');
+    if (h2.includes('Admin ko submit karo')) throw new Error('public form me admin wala submit label dikh raha hai');
+  }
+  // 🔎 status view (Request ID daal kar status dekhne ka raasta)
+  const r3 = root();
+  await pages.tagRequest.render(r3, { view: 'status', public: '1' }, { publicConfig: pubCfg });
+  await settle(150);
+  const h3 = r3.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  if (!/Request status/.test(h3) || !/tr-status-id/.test(h3)) throw new Error('public status view render nahi hua');
+  log(`      employee link ${link} · public form + result + status render ok`);
+});
 await run('liveView.openNotification (report / settings / login)', async () => {
   FF.liveView.openNotification({ id: 'a', type: 'report', title: 'First Forward report update', body: 'x', createdAt: new Date().toISOString(), meta: { source: 'ff', snapshot: { date: '2026-09-26', total: 120, classes: { VC4: 100, VC5: 20 } }, previous: { date: '2026-09-26', total: 90, classes: { VC4: 80, VC5: 10 } }, delta: { total: 30, classes: { VC4: 20, VC5: 10 } } } });
   if (!drawerHtml().includes('+30')) throw new Error('report delta missing');

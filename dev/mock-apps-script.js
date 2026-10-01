@@ -32,17 +32,24 @@ export function startMockAppsScript({ secret, spreadsheet = 'Mock Sheet' } = {})
       else if (body.action === 'write') { Object.assign(records, body.records || {}); out = { ok: true, savedAt: new Date().toISOString(), kinds: Object.keys(body.records || {}) }; }
       else if (body.action === 'mailping') out = { ok: true, quota: 99, account: 'owner@example.test' };
       else if (body.action === 'mail') { mails.push(body.mail); out = { ok: true, sent: String((body.mail || {}).to || '').split(',').length, quota: 98 }; }
+      else if (body.action === 'sheettest') {
+        const tab = String(body.tab || 'Tag Requests');
+        const id = String(body.spreadsheetId || 'mock-own-sheet-id');
+        out = { ok: true, spreadsheet, spreadsheetId: id, url: `https://docs.google.com/spreadsheets/d/${id}/edit`, tab, exists: false };
+      }
       else if (body.action === 'appendrows') {
         const tab = String(body.tab || 'Tag Requests');
-        if (tab === 'APP_STORAGE') out = { ok: false, error: 'APP_STORAGE tab me likhna allowed nahi' };
+        const targetId = String(body.spreadsheetId || 'mock-own-sheet-id');
+        if (tab === 'APP_STORAGE' && !body.spreadsheetId) out = { ok: false, error: 'APP_STORAGE tab me likhna allowed nahi' };
         else {
           const rows = Array.isArray(body.rows) ? body.rows : [];
-          const tabState = appends.find((t) => t.tab === tab) || { tab, header: null, rows: [] };
+          const key = `${targetId}|${tab}`;
+          const tabState = appends.find((t) => t.key === key) || { key, tab, spreadsheetId: body.spreadsheetId || '', header: null, rows: [] };
           if (!appends.includes(tabState)) appends.push(tabState);
           if (!tabState.header && Array.isArray(body.header) && body.header.length) tabState.header = body.header.slice();
           const atRow = tabState.rows.length + (tabState.header ? 2 : 1);
           tabState.rows.push(...rows);
-          out = { ok: true, tab, added: rows.length, atRow, url: 'https://docs.google.com/spreadsheets/d/mock/edit' };
+          out = { ok: true, tab, added: rows.length, atRow, spreadsheet, spreadsheetId: targetId, url: `https://docs.google.com/spreadsheets/d/${targetId}/edit` };
         }
       }
       else out = { ok: false, error: 'unknown action' };
