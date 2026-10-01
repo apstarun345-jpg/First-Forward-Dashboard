@@ -470,7 +470,7 @@ FF.pages = FF.pages || {};
   function makePage(channel) {
     const isGv = channel === 'gv';
     const state = { list: [], picked: null, report: null, q: '' };
-    return async function render(root, params) {
+    async function render(root, params) {
       const chLabel = isGv ? 'GV Partner' : 'First Forward';
       root.innerHTML = `<div class="page">
         <div class="page-head"><div><h1>${isGv ? '🟩' : '🟦'} ${chLabel} · Agent / TL Summary</h1><p class="sub">Search by <b>Name · Agent Name · TL Name · Agent ID · TL ID · Mobile Number</b> — poora summary + charts + ageing + Grand Total PDF / WhatsApp / CSV</p></div></div>
@@ -623,7 +623,10 @@ FF.pages = FF.pages || {};
         || state.list[0];
       if (initial) await pick(initial);
       else body.innerHTML = '<div class="card"><div class="card-body empty">Koi agent / TL data nahi mila.</div></div>';
-    };
+    }
+    // ⚠️ Shell har page ko { title, render } object ke roop me call karta hai (app.js → FF.pages[page].render).
+    // Pehle yahan bare function return ho raha tha → "FF.pages[page].render is not a function" crash.
+    return { title: 'Agent / TL Summary', render };
   }
 
   FF.pages.ffAgentSummary = makePage('ff');

@@ -686,7 +686,11 @@ window.FF = window.FF || {};
       if (FF.lazy && FF.lazy.ensure) await FF.lazy.ensure(page);
       if (!FF.pages[page] && FF.lazy && FF.lazy.ensureAll) await FF.lazy.ensureAll();
       if (!FF.pages[page]) throw new Error(`Page module load nahi hua (${page}). Internet check karke ↻ dabaiye.`);
-      await FF.pages[page].render(root, params, ctx || {});
+      // Fallback: agar kisi module ne galti se bare function register kiya ho (bina .render ke) to bhi chala lo.
+      const mod = FF.pages[page];
+      if (typeof mod.render === 'function') await mod.render(root, params, ctx || {});
+      else if (typeof mod === 'function') await mod(root, params, ctx || {});
+      else throw new Error(`Page render nahi ho paya (${page}).`);
     } catch (err) {
       console.error(err);
       if (token === current.token) root.innerHTML = U.errorBox(err, 'data-action="refresh"');
