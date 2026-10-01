@@ -33,6 +33,30 @@ FF.pages = FF.pages || {};
   };
   const BASIS = { total: 'All tags', vc4: 'VC4', comm: 'Commercial' };
   const CH = { ff: { label: 'First Forward', short: 'FF', icon: '🟦' }, gv: { label: 'GV Partner', short: 'GV', icon: '🟩' } };
+  /** 📐 Channel ka run-rate divisor (U.runRateDays — user ki sheet jaisa "aaj − 1", month-aware). */
+  const chDays = (ch) => Math.max(1, Number(U.runRateDays(undefined, ch === 'gv' ? 'gv' : 'ff')) || 1);
+  const chBasis = (ch) => (U.channelBasis ? U.channelBasis(ch === 'gv' ? 'gv' : 'ff') : { days: chDays(ch), ym: U.ymKey(new Date()), live: ch === 'gv' });
+  /** Divisor ka label — list me jo channels hain unke din (FF aur GV alag ho sakte hain). */
+  function elText(list) {
+    const present = new Set((list || []).map((r) => r.ch));
+    const sel = U.asValueSet(state.ch);
+    const chs = present.size ? [...present] : (sel.size ? [...sel] : ['ff', 'gv']);
+    const ds = chs.filter((c) => CH[c]).map((c) => [c, chDays(c)]);
+    if (!ds.length) return `${fmt(chDays('ff'))} din`;
+    if (ds.length === 1 || ds.every(([, d]) => d === ds[0][1])) return `${fmt(ds[0][1])} din`;
+    return `${ds.map(([c, d]) => `${CH[c].short} ${fmt(d)}`).join(' · ')} din`;
+  }
+  let lastList = [];                 // table me abhi dikh rahi rows (divisor label isi se)
+  /** Rows ka channel scope — stock ageing drawer section ke liye. */
+  const chScope = (list) => { const set = new Set((list || []).map((r) => r.ch)); return set.size === 1 ? [...set][0] : 'both'; };
+  /** Formula note: FF / GV ka data month + din. */
+  function formulaMonths() {
+    const parts = [['ff', chBasis('ff')]];
+    if (gvOn()) parts.push(['gv', chBasis('gv')]);
+    return `<small class="dim">(${parts.map(([c, b]) => `${CH[c].short}: ${esc(U.labelYM(b.ym))} · ${fmt(b.days)} din${c === 'ff' ? ' · kal tak' : ' · live'}`).join(' | ')})</small>`;
+  }
+  /** Data month (FF kal tak · GV live) — 1 tareekh ko FF ka "is month" = pichhla mahina hota hai. */
+  function monthText(ch) { const b = chBasis(ch); return b && b.ym ? U.labelYM(b.ym) : ''; }
 
   // ---- state (page se bahar jaake wapas aane par filters yaad rehte hain) -------------------------------
   // v3.18 — MULTIPLE SELECTION: ch / type / prio / need ab Sets hain. Khaali set = "All" (koi rok nahi),
@@ -188,7 +212,9 @@ FF.pages = FF.pages || {};
 
   /** Row + calc (selected tag basis). */
   function withCalc(r, basis) {
-    const c = U.dispatchCalc({ cur: r.cur[basis], last: r.last[basis], stock: r.stock[basis] });
+    // v3.31: har row apne channel ke din se — FF = kal tak ka data (1 tareekh = pichhle month ke poore din),
+    // GV = live (aaj − 1). Pehle dono ke liye max(1, aaj − 1) = 1 din lagta tha (1 tareekh par ~30× galat).
+    const c = U.dispatchCalc({ cur: r.cur[basis], last: r.last[basis], stock: r.stock[basis], ch: r.ch, elapsed: chDays(r.ch) });
     const tagged = r.direct && (r.priority === 'High' || r.priority === 'Medium');
     let action;
     if (r.direct) action = tagged ? { t: '🏷️ Tags chahiye', cls: 'violet' } : { t: 'No dispatch', cls: 'gray' };
@@ -261,14 +287,14 @@ FF.pages = FF.pages || {};
 
   // ---- table --------------------------------------------------------------------------------------------
   function columns(view) {
-    const days = U.suggestDays(), el = U.runRateDays();
+    const days = U.suggestDays(), el = elText(lastList);
     const c = [
       { k: 'name', t: view === 'tls' ? 'TL' : 'Agent' },
       ...(view === 'tls' ? [{ k: 'agents', t: 'Agents', num: 1 }] : [{ k: 'tl', t: 'TL' }]),
       { k: 'prio', t: 'Priority' },
       { k: 'last', t: 'Last month', num: 1, sub: 'issuance' },
       { k: 'cur', t: 'This month', num: 1, sub: 'issuance' },
-      { k: 'rate', t: 'Run-rate', num: 1, sub: `/day · ÷ ${el} din` },
+      { k: 'rate', t: 'Run-rate', num: 1, sub: `/day · ÷ ${el}` },
       { k: 'required', t: 'Required', num: 1, sub: `rate × ${days} din` },
       { k: 'stock', t: 'Stock', num: 1, sub: 'in field' },
       { k: 'net', t: 'Dispatch', num: 1, sub: 'WITH stock', hot: 1 },
@@ -307,12 +333,12 @@ FF.pages = FF.pages || {};
 
   // ---- KPI cards ----------------------------------------------------------------------------------------
   function kpiHtml(t, view) {
-    const days = U.suggestDays(), el = U.runRateDays();
+    const days = U.suggestDays(), el = elText(lastList);
     const card = (key, tone, icon, title, value, foot) => `<button class="dp2-kpi ${tone}" data-dp-kpi="${key}" title="Click → summary drawer"><span class="dp2-kpi-top"><em>${title}</em><i>${icon}</i></span><b>${value}</b><small>${foot}</small></button>`;
     return [
       card('count', 'k1', view === 'tls' ? '👥' : '🧑‍💼', view === 'tls' ? 'TLs in view' : 'Agents in view', fmt(t.count), `${fmt(t.ff)} FF · ${fmt(t.gv)} GV · ${fmt(t.direct)} direct`),
       card('issued', 'k2', '🏷️', 'Issued this month', fmt(t.cur), `last month ${fmt(t.last)} ${t.growth == null ? '' : growthChip(t.growth)}`),
-      card('rate', 'k3', '⚡', 'Run-rate / day', fmt(t.rate, true), `issue ÷ ${fmt(el)} din (aaj − 1)`),
+      card('rate', 'k3', '⚡', 'Run-rate / day', fmt(t.rate, true), `issue ÷ ${el} (aaj − 1)`),
       card('required', 'k4', '🎯', `Required · ${fmt(days)} din`, fmt(t.required), `run-rate × ${fmt(days)} · stock ${fmt(t.stock)}`),
       card('net', 'k5', '🚚', 'Dispatch WITH stock', fmt(t.net), `Required − stock · ${fmt(t.needy)} ko chahiye`),
       card('gross', 'k6', '📦', 'Dispatch W/O stock', fmt(t.gross), `bina stock ghataye · ${fmt(t.tagged)} direct ko tags`),
@@ -368,7 +394,7 @@ FF.pages = FF.pages || {};
     const t = agg(list);
     const lines = [`*🚚 Dispatch plan · ${U.suggestDays()} din* (${new Date().toLocaleDateString('en-IN')})`,
       `${channelLabel()} · ${BASIS[state.basis]} · ${fmt(t.count)} ${view === 'tls' ? 'TLs' : 'agents'}`,
-      `Run-rate ${fmt(t.rate, true)}/day (÷ ${U.runRateDays()} din) · Required ${fmt(t.required)}`,
+      `Run-rate ${fmt(t.rate, true)}/day (÷ ${elText(list)}) · Required ${fmt(t.required)}`,
       `WITH stock *${fmt(t.net)}* · W/O stock *${fmt(t.gross)}*`, ''];
     [...list].filter((r) => r.net > 0).sort((a, b) => b.net - a.net).slice(0, 15).forEach((r, i) => lines.push(`${i + 1}. ${r.name} (${CH[r.ch].short}${r.direct ? ' · direct' : r.tl && view !== 'tls' ? ` · ${r.tl}` : ''}) — ${fmt(r.net)} · w/o ${fmt(r.gross)} · cover ${r.cover == null ? '—' : fmt(r.cover, true)} din`));
     return lines.join('\n');
@@ -387,7 +413,7 @@ FF.pages = FF.pages || {};
   }
 
   function summaryDrawer(key, ctx) {
-    const list = ctx.list, view = ctx.view, days = U.suggestDays(), el = U.runRateDays();
+    const list = ctx.list, view = ctx.view, days = U.suggestDays(), el = elText(list);
     const t = agg(list);
     const meta = {
       count: ['👥', `${fmt(t.count)} ${view === 'tls' ? 'TLs' : 'agents'} in view`, 'cur', [['This month', (r) => fmt(r.curV)], ['WITH stock', (r) => fmt(r.net)], ['Cover', (r) => coverCell(r.cover)]]],
@@ -404,19 +430,19 @@ FF.pages = FF.pages || {};
     if (key === 'low') top = list.filter((r) => r.cover != null && r.cover < 7);
     if (key === 'net') top = list.filter((r) => r.net > 0);
     top = sortRows(top, { key: sortKey, dir: asc ? 'asc' : 'desc' }).slice(0, 25);
-    const body = openDrawer({ kicker: `🚚 Dispatch Planner · ${view === 'tls' ? 'TL-wise' : 'Agent-wise'} summary`, title: `${icon} ${title}`, sub: esc(`${channelLabel()} · ${BASIS[state.basis]} · run-rate = issue ÷ ${el} din · required = run-rate × ${days} din`), body: '<div id="dp2-drawer-slot"></div>', actions: '' });
+    const body = openDrawer({ kicker: `🚚 Dispatch Planner · ${view === 'tls' ? 'TL-wise' : 'Agent-wise'} summary`, title: `${icon} ${title}`, sub: esc(`${channelLabel()} · ${BASIS[state.basis]} · run-rate = issue ÷ ${el} · required = run-rate × ${days} din`), body: '<div id="dp2-drawer-slot"></div>', actions: '', age: { kind: 'all', key: 'all', ch: chScope(list) } });
     if (!body) return;
     const slot = U.$('#dp2-drawer-slot', body) || body;
     slot.innerHTML = `<div class="mp">
       <div class="mp-kpis">
         <div class="mp-kpi k1"><small>${view === 'tls' ? 'TLs' : 'Agents'}</small><b>${fmt(t.count)}</b><em>${fmt(t.ff)} FF · ${fmt(t.gv)} GV</em></div>
         <div class="mp-kpi k2"><small>This month · last</small><b>${fmt(t.cur)}</b><em>last ${fmt(t.last)} ${t.growth == null ? '' : U.pctHtml(t.growth)}</em></div>
-        <div class="mp-kpi k3"><small>Run-rate / day</small><b>${fmt(t.rate, true)}</b><em>÷ ${fmt(el)} din</em></div>
+        <div class="mp-kpi k3"><small>Run-rate / day</small><b>${fmt(t.rate, true)}</b><em>÷ ${el}</em></div>
         <div class="mp-kpi k4"><small>Required · ${fmt(days)} din</small><b>${fmt(t.required)}</b><em>stock ${fmt(t.stock)}</em></div>
         <div class="mp-kpi k5"><small>WITH stock</small><b>${fmt(t.net)}</b><em>${fmt(t.needy)} ko dispatch</em></div>
         <div class="mp-kpi k6"><small>W/O stock</small><b>${fmt(t.gross)}</b><em>cover ${t.cover == null ? '—' : `${fmt(t.cover, true)} din`}</em></div>
       </div>
-      <p class="mp-note">Run-rate = is month ke issue ÷ <b>(aaj − 1) = ${fmt(el)} din</b> · Required = run-rate × <b>${fmt(days)}</b> din · <b>WITH stock</b> = Required − stock · <b>W/O stock</b> = Required · Cover = stock ÷ run-rate</p>
+      <p class="mp-note">Run-rate = data month ke issue ÷ <b>(aaj − 1) = ${el}</b> ${formulaMonths()} · Required = run-rate × <b>${fmt(days)}</b> din · <b>WITH stock</b> = Required − stock · <b>W/O stock</b> = Required · Cover = stock ÷ run-rate</p>
       ${aggTable('🌐 Channel-wise', [['🟦 First Forward', list.filter((r) => r.ch === 'ff')], ['🟩 GV Partner', list.filter((r) => r.ch === 'gv')], ['Total', list]])}
       ${aggTable('🎚️ Priority-wise', [['🔴 High', list.filter((r) => r.priority === 'High')], ['🟠 Medium', list.filter((r) => r.priority === 'Medium')], ['🟢 Low', list.filter((r) => r.priority === 'Low')]])}
       ${aggTable('🧑‍💼 TL-managed vs 🚫 Direct', [['TL-managed', list.filter((r) => !r.direct)], ['Direct agents (tags only)', list.filter((r) => r.direct)]])}
@@ -428,13 +454,13 @@ FF.pages = FF.pages || {};
   function groupDrawer(r, ctx) {
     const members = ctx.calc(r.members);
     const t = agg(members);
-    const body = openDrawer({ kicker: '🚚 Dispatch Planner · Direct group', title: `🚫 ${r.name}`, sub: esc(`${CH[r.ch].label} · ${fmt(members.length)} agents · TL nahi — stock dispatch exempt, High/Medium ko tags`), body: '<div id="dp2-drawer-slot"></div>', actions: '' });
+    const body = openDrawer({ kicker: '🚚 Dispatch Planner · Direct group', title: `🚫 ${r.name}`, sub: esc(`${CH[r.ch].label} · ${fmt(members.length)} agents · TL nahi — stock dispatch exempt, High/Medium ko tags`), body: '<div id="dp2-drawer-slot"></div>', actions: '', age: { kind: 'agents', keys: members.map((m) => m.id || m.name), ch: r.ch, title: r.name } });
     if (!body) return;
     const slot = U.$('#dp2-drawer-slot', body) || body;
     slot.innerHTML = `<div class="mp"><div class="mp-kpis">
       <div class="mp-kpi k1"><small>Agents</small><b>${fmt(t.count)}</b><em>${fmt(t.tagged)} High/Medium</em></div>
       <div class="mp-kpi k2"><small>This month</small><b>${fmt(t.cur)}</b><em>last ${fmt(t.last)}</em></div>
-      <div class="mp-kpi k3"><small>Run-rate / day</small><b>${fmt(t.rate, true)}</b><em>÷ ${fmt(U.runRateDays())} din</em></div>
+      <div class="mp-kpi k3"><small>Run-rate / day</small><b>${fmt(t.rate, true)}</b><em>÷ ${elText(members)}</em></div>
       <div class="mp-kpi k5"><small>Tags WITH stock</small><b>${fmt(t.net)}</b><em>Required − stock</em></div>
       <div class="mp-kpi k6"><small>Tags W/O stock</small><b>${fmt(t.gross)}</b><em>cover ${t.cover == null ? '—' : `${fmt(t.cover, true)} din`}</em></div></div>
       ${topTable('🧑‍💼 Agents', sortRows(members, { key: 'net', dir: 'desc' }).slice(0, 200), [['This month', (x) => fmt(x.curV)], ['Run-rate', (x) => fmt(x.rate, true)], ['Stock', (x) => fmt(x.stockV)], ['WITH stock', (x) => `<b class="sug-chip">${fmt(x.net)}</b>`], ['W/O stock', (x) => fmt(x.gross)], ['Cover', (x) => coverCell(x.cover)]])}</div>`;
@@ -452,12 +478,13 @@ FF.pages = FF.pages || {};
   function selectionDrawer(rows, ctx) {
     if (!rows || !rows.length) return;
     const t = agg(rows);
-    const days = U.suggestDays(), el = U.runRateDays();
+    const days = U.suggestDays(), el = elText(rows);
     const boxes = Math.ceil(t.net / Math.max(1, Number((FF.config.dispatch || {}).tagsPerBox) || 25));
     const body = openDrawer({
       kicker: '🚚 Dispatch Planner · selected rows', title: `✅ ${fmt(rows.length)} selected`,
-      sub: esc(`${channelLabel()} · ${BASIS[state.basis]} · run-rate = issue ÷ ${el} din · required = run-rate × ${days} din`),
-      body: '<div id="dp2-drawer-slot"></div>', actions: ''
+      sub: esc(`${channelLabel()} · ${BASIS[state.basis]} · run-rate = issue ÷ ${el} · required = run-rate × ${days} din`),
+      body: '<div id="dp2-drawer-slot"></div>', actions: '',
+      age: { kind: 'agents', keys: rows.filter((r) => r.kind === 'agent').map((r) => r.id || r.name), tls: rows.filter((r) => r.kind === 'tl' && !r.direct).map((r) => r.name), ch: chScope(rows), title: `${rows.length} selected` }
     });
     if (!body) return;
     const slot = U.$('#dp2-drawer-slot', body) || body;
@@ -465,7 +492,7 @@ FF.pages = FF.pages || {};
     slot.innerHTML = `<div class="mp"><div class="mp-kpis">
       <div class="mp-kpi k1"><small>Rows selected</small><b>${fmt(t.count)}</b><em>${fmt(t.ff)} FF · ${fmt(t.gv)} GV</em></div>
       <div class="mp-kpi k2"><small>This month</small><b>${fmt(t.cur)}</b><em>last ${fmt(t.last)} ${t.growth == null ? '' : U.pctHtml(t.growth)}</em></div>
-      <div class="mp-kpi k3"><small>Run-rate / day</small><b>${fmt(t.rate, true)}</b><em>÷ ${fmt(el)} din</em></div>
+      <div class="mp-kpi k3"><small>Run-rate / day</small><b>${fmt(t.rate, true)}</b><em>÷ ${el}</em></div>
       <div class="mp-kpi k4"><small>Required · ${fmt(days)} din</small><b>${fmt(t.required)}</b><em>stock ${fmt(t.stock)}</em></div>
       <div class="mp-kpi k5"><small>WITH stock</small><b>${fmt(t.net)}</b><em>≈ ${fmt(boxes)} box</em></div>
       <div class="mp-kpi k6"><small>W/O stock</small><b>${fmt(t.gross)}</b><em>cover ${t.cover == null ? '—' : `${fmt(t.cover, true)} din`}</em></div></div>
@@ -619,8 +646,10 @@ FF.pages = FF.pages || {};
 
     const agents = collectAgents();
     const allTls = collectTls(agents);
-    const days = U.suggestDays(), el = U.runRateDays();
-    U.$('#dp2-formula', root).innerHTML = `<span><b>Run-rate</b> = issue ÷ (aaj − 1) = <em>${fmt(el)} din</em></span><span><b>Required</b> = run-rate × <em>${fmt(days)} din</em></span><span><b>WITH stock</b> = Required − stock</span><span><b>W/O stock</b> = Required</span><a href="#/settings" title="Kitne din — Settings → Alert modify">⚙️ ${fmt(days)} din</a>`;
+    const days = U.suggestDays();
+    const ffB = chBasis('ff'), gvB = chBasis('gv');
+    const chLine = (c, b) => `<span class="dp2-basis ${c}" title="${esc(c === 'ff' ? `First Forward ka data kal aata hai — ${b.shortLabel || ''} tak ka data, isliye ${monthText(c)} ke ${b.days} din` : `GV live hai — sheet jaisa (aaj − 1) = ${b.days} din`)}">${CH[c].icon} <b>${CH[c].short}</b> ${esc(monthText(c))} ÷ <em>${fmt(b.days)} din</em></span>`;
+    U.$('#dp2-formula', root).innerHTML = `<span><b>Run-rate</b> = data month ka issue ÷ (aaj − 1)</span>${chLine('ff', ffB)}${gvOn() ? chLine('gv', gvB) : ''}<span><b>Required</b> = run-rate × <em>${fmt(days)} din</em></span><span><b>WITH stock</b> = Required − stock</span><span><b>W/O stock</b> = Required</span><a href="#/settings" title="Kitne din — Settings → Alert modify">⚙️ ${fmt(days)} din</a>`;
 
     const tlNames = () => {
       const chSet = U.asValueSet(state.ch);       // live padho — channel filter multi-select hai
@@ -732,6 +761,7 @@ FF.pages = FF.pages || {};
       const filtered = all.filter((r) => passes(r));
       const sorted = sortRows(filtered, state.sort[state.view]);
       ctx.list = sorted;
+      lastList = sorted;
       const t = agg(sorted);
       U.$('#dp2-kpis', root).innerHTML = kpiHtml(t, state.view);
       U.$('#dp2-title', root).textContent = state.view === 'tls' ? '👥 TL-wise dispatch' : '🧑‍💼 Agent-wise dispatch';

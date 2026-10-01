@@ -11,6 +11,22 @@ window.FF = window.FF || {};
 FF.pages = FF.pages || {};
 (function (FF) {
   'use strict';
+  let lastNa = [];   // New Agents page ki rows (KPI drill lists)
+  const naKpi = (html, list) => html.replace('<div class="kpi ', `<div data-kpi="scope=list&list=${list}&src=both" class="kpi `);
+  function registerNaLists() {
+    if (!FF.kpiDetail || !FF.kpiDetail.registerList || registerNaLists.done) return;
+    registerNaLists.done = true;
+    const U = FF.util, e = (v) => U.esc(v);
+    const cols = [['Ch', (r) => (r.ch === 'gv' ? '🟩 GV' : '🟦 FF')], ['Agent', (r) => `<b>${e(r.name)}</b> <small class="dim">${e(r.id || '')}</small>`], ['TL', (r) => e(r.curTl || '—')], ['Pehli issuance', (r) => e(r.firstYm || '—')], ['Badlav', (r) => (r.ev ? e(`${r.ev.from || 'Direct'} → ${r.ev.to || 'Direct'} (${r.ev.ym})`) : '—')], ['Is month', (r) => U.fmt(r.curN || 0), 1], ['Total', (r) => U.fmt(r.totalN || 0), 1]];
+    const make = (name, filt, kicker) => FF.kpiDetail.registerList(name, () => {
+      const rows = lastNa.filter(filt);
+      return { kicker, unit: 'agents', rows, columns: cols, agent: (r) => ({ name: r.name, id: r.id, ch: r.ch }), sub: `${U.fmt(rows.filter((r) => r.ch === 'ff').length)} FF · ${U.fmt(rows.filter((r) => r.ch === 'gv').length)} GV` };
+    });
+    make('na.new', (r) => r.isNew, 'New agents');
+    make('na.changed', (r) => r.ev && r.ev.kind === 'changed', 'TL badla');
+    make('na.removed', (r) => r.ev && r.ev.kind === 'removed', 'TL hata (ab Direct)');
+    make('na.added', (r) => r.ev && r.ev.kind === 'added', 'TL mila');
+  }
   const U = FF.util;
   const esc = U.esc, clean = U.clean;
   const norm = (s) => clean(s).toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
@@ -180,6 +196,7 @@ FF.pages = FF.pages || {};
     const cnt = (ch, fn) => all.filter((r) => r.ch === ch && fn(r)).length;
     const nNewFf = all.filter((r) => r.ch === 'ff' && r.isNew).length, nNewGv = all.filter((r) => r.ch === 'gv' && r.isNew).length;
     const kind = (k) => all.filter((r) => r.ev && r.ev.kind === k).length;
+    lastNa = all; registerNaLists(); // 📋 v3.31 — KPI drill = wahi list
     const curYm = (data.ff && data.ff.curYm) || (data.gv && data.gv.curYm) || U.ymKey(new Date());
     const cutoff = shiftYm(curYm, months - 1);
     // chart: last 6 months me naye agents (FF + GV alag)
@@ -193,10 +210,10 @@ FF.pages = FF.pages || {};
       <div class="head-actions"><button class="btn small" id="na-refresh">↻ Refresh</button></div></div>
       ${data.errors.length ? `<div class="alert warn">${data.errors.map(esc).join(' · ')}</div>` : ''}
       <div class="metric-grid">
-        ${kpi('🆕 Naye agents', U.fmt(nNewFf + nNewGv), `${U.fmt(nNewFf)} FF · ${U.fmt(nNewGv)} GV · ${esc(monthLabel(cutoff))} se`, 'g9', '🆕')}
-        ${kpi('🔀 TL badla', U.fmt(kind('changed')), `${U.fmt(cnt('ff', (r) => r.ev && r.ev.kind === 'changed'))} FF · ${U.fmt(cnt('gv', (r) => r.ev && r.ev.kind === 'changed'))} GV`, 'g4', '🔀')}
-        ${kpi('❌ TL hata (ab Direct)', U.fmt(kind('removed')), 'Pehle TL tha, ab koi TL nahi', 'g7', '❌')}
-        ${kpi('➕ TL mila', U.fmt(kind('added')), 'Pehle Direct tha, ab TL ke saath', 'g3', '➕')}
+        ${naKpi(kpi('🆕 Naye agents', U.fmt(nNewFf + nNewGv), `${U.fmt(nNewFf)} FF · ${U.fmt(nNewGv)} GV · ${esc(monthLabel(cutoff))} se`, 'g9', '🆕'), 'na.new')}
+        ${naKpi(kpi('🔀 TL badla', U.fmt(kind('changed')), `${U.fmt(cnt('ff', (r) => r.ev && r.ev.kind === 'changed'))} FF · ${U.fmt(cnt('gv', (r) => r.ev && r.ev.kind === 'changed'))} GV`, 'g4', '🔀'), 'na.changed')}
+        ${naKpi(kpi('❌ TL hata (ab Direct)', U.fmt(kind('removed')), 'Pehle TL tha, ab koi TL nahi', 'g7', '❌'), 'na.removed')}
+        ${naKpi(kpi('➕ TL mila', U.fmt(kind('added')), 'Pehle Direct tha, ab TL ke saath', 'g3', '➕'), 'na.added')}
       </div>
       <section class="card"><div class="card-head"><h3>📈 Naye agents · pichhle 6 mahine</h3></div><div class="card-body">${chart}<p class="dim small">Har agent ka pehla issuance-month. Data-start month ke agents count nahi hote (unki pehle ki history available nahi).</p></div></section>
       <section class="card"><div class="card-body">

@@ -31,6 +31,12 @@ for (let i = 0; i < 60; i++) {
 const CLASSES = ['4', '4', '4', '4', '4', '4', '20', '5', '6', '7', '12', '16'];
 const TYPES = { '4': 'CAR/JEEP/VAN', '20': 'LCV', '5': 'BUS 2 AXLE', '6': 'TRUCK 3 AXLE', '7': 'TRUCK 4-6 AXLE', '12': 'TRUCK 7+ AXLE', '16': 'HCM/EME' };
 const today = new Date(); today.setHours(0, 0, 0, 0);
+// 🔁 Asli sheet jaisa: FF (EIR + REPORT) ka data T+1 — aaj ka data kal aata hai. 1 tareekh ko REPORT ka
+// "current month" pichhla month hota hai (user ki FF sheet: 1 Oct → "Agent Performance In - September",
+// 7-day header 24/Sep…30/Sep, Runrate = total ÷ 30). MOCK_FF_LAG=0 → purana (live) behaviour.
+const FF_LAG = Math.max(0, Number(process.env.MOCK_FF_LAG ?? 1) || 0);
+const ffAsOf = new Date(today); ffAsOf.setDate(ffAsOf.getDate() - FF_LAG);
+const ffDays = Math.max(1, ffAsOf.getDate());
 const dstr = (d) => `Date(${d.getFullYear()},${d.getMonth()},${d.getDate()})`;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -41,7 +47,7 @@ const EIR_LABELS = { A: 'TAG_ID', B: 'VRN', D: 'TAG_CLASS', P: 'TAG_TYPE', Z: 'S
 const EIR = { cols: new Array(78).fill(0).map((_, i) => ({ id: L(i), label: EIR_LABELS[L(i)] || '', type: L(i) === 'AA' ? 'date' : 'string' })), rows: [] };
 const eirRow = (vals) => { const r = new Array(EIR.cols.length).fill(''); Object.entries(vals).forEach(([k, v]) => { if (EIR_AT[k]) r[letterIdx(EIR_AT[k])] = v; }); return r; };
 let tagSeq = 100000;
-for (let back = 75; back >= 0; back--) {
+for (let back = 75; back >= FF_LAG; back--) {
   const d = new Date(today); d.setDate(d.getDate() - back);
   for (const a of AGENTS) {
     const n = Math.max(0, Math.round(a.rate * (0.5 + rnd()) * (d.getDay() === 0 ? 0.4 : 1) * (back < 30 ? 1.15 : 1)));
@@ -59,11 +65,18 @@ for (let back = 75; back >= 0; back--) {
 }
 // ---- StockDataa: A ID, B Name, C TAG_ID, D BARCODE, E TAG_CLASS, F TAG_TYPE, G BC_ALLOCATED_AT, H AGENT_ID, I AGENT_NAME, J AGENT_ALLOCATED_AT, K TL Name, L ID, M Name
 const STOCK = { cols: ['ID', 'Name', 'TAG_ID', 'BARCODE', 'TAG_CLASS', 'TAG_TYPE', 'BC_ALLOCATED_AT', 'AGENT_ID', 'AGENT_NAME', 'AGENT_ALLOCATED_AT', 'TL Name', 'ID', 'Name'].map((l, i) => ({ id: L(i), label: l, type: 'string' })), rows: [] };
+const p2 = (n) => String(n).padStart(2, '0');
+/** StockDataa date text — asli sheet jaisa "DD-MM-YYYY HH:MM:SS IST". */
+const ddmmyyyy = (d) => `${p2(d.getDate())}-${p2(d.getMonth() + 1)}-${d.getFullYear()} 10:${p2(Math.floor(rnd() * 59))}:00 IST`;
+const daysAgo = (n) => { const d = new Date(today); d.setDate(d.getDate() - n); return d; };
 for (const a of AGENTS) {
   const n = 20 + Math.floor(rnd() * 120);
   for (let k = 0; k < n; k++) {
     const cls = pick(CLASSES);
-    STOCK.rows.push(['5845036', 'APNA PAYEMENT', `34161FA82032${tagSeq++}`, `BC${tagSeq}`, cls, TYPES[cls], '11-07-2025 18:38:03 IST', a.id, a.name, '12-07-2025 10:00:00 IST', a.tlName, a.tlId, a.tlName]);
+    // 🧓 Ageing ke liye realistic spread: zyada naya stock, kuch 3-6+ mahine purana; kuch rows me agent date khaali (BC fallback)
+    const age = Math.floor(Math.pow(rnd(), 1.7) * 320);
+    const agentDate = k % 17 === 5 ? '' : ddmmyyyy(daysAgo(age));
+    STOCK.rows.push(['5845036', 'APNA PAYEMENT', `34161FA82032${tagSeq++}`, `608116-011-0${String(tagSeq).padStart(6, '0')}`, cls, TYPES[cls], ddmmyyyy(daysAgo(age + 3)), a.id, a.name, agentDate, a.tlName, a.tlId, a.tlName]);
   }
 }
 // GV channel ka stock jo FF StockDataa me GV master ID 5845036 (agent) ke naam parked hai —
@@ -73,7 +86,7 @@ for (let k = 0; k < 500; k++) {
   STOCK.rows.push(['5845036', 'APNA PAYEMENT', `34161FA82032${tagSeq++}`, `BC${tagSeq}`, cls, TYPES[cls], '11-07-2025 18:38:03 IST', '5845036', 'APNA PAYEMENT', '12-07-2025 10:00:00 IST', 'ApnaPayment Pvt. Ltd.', 'TLGV', 'ApnaPayment Pvt. Ltd.']);
 }
 // ---- REPORT (gid 242489821): 2 header rows + data ---------------------------------------------
-const curM = MONTHS[today.getMonth()], lastM = MONTHS[(today.getMonth() + 11) % 12];
+const curM = MONTHS[ffAsOf.getMonth()], lastM = MONTHS[(ffAsOf.getMonth() + 11) % 12];
 const R1 = new Array(80).fill(''); const R2 = new Array(80).fill('');
 const sec = (i, title, labels) => { R1[i] = title; labels.forEach((l, k) => { R2[i + k] = l; }); };
 sec(0, 'Agent Profile Details', ['Agent ID', 'ID', 'Name']);
@@ -84,7 +97,7 @@ sec(19, "TL's Stock Details", ['VC4', 'NVC4', 'Total']);
 sec(22, `Performance In - ${lastM}`, ['Active Days', 'VC4', 'NVC4', 'Total']);
 sec(26, `Performance In - ${curM}`, ['Wrong VRN', 'X', 'VC4', 'VC5', 'VC6', 'VC7', 'VC12', 'VC16', 'NVC4', 'Total', 'Projected', 'Avg VC4', 'Avg NVC4', 'Avg Total']);
 sec(40, 'Agents Performance Status', ['Last vs Current', 'Last Active', 'Agent Status']);
-const dayLabels = []; for (let i = 6; i >= 0; i--) { const d = new Date(today); d.setDate(d.getDate() - i); dayLabels.push(`${d.getDate()}/${MONTHS[d.getMonth()]}`); }
+const dayLabels = []; for (let i = 6; i >= 0; i--) { const d = new Date(ffAsOf); d.setDate(d.getDate() - i); dayLabels.push(`${d.getDate()}/${MONTHS[d.getMonth()]}`); }
 sec(43, 'Performance In 7 Days', ['Active Days', ...dayLabels]);
 sec(51, "TL's Last Month Issued", ['VC4', 'NVC4', 'Total', 'Daily Avg']);
 sec(55, "TL's Current Month Issuance", ['VC4', 'NVC4', 'Total', 'Avg VC4', 'Avg NVC4', 'Avg Total']);
@@ -101,7 +114,9 @@ const PRIO = ['🔴 High', '🟡 Medium', '🟢 Low'];
 const STATUS = ['🚀 High Growth', '🟢 Growth', '🟡 Slight Low', '🔻 High De-Growth', '🔴 Inactive In Current Month'];
 const REPORT = { cols: new Array(80).fill(0).map((_, i) => ({ id: L(i), label: '', type: 'string' })), rows: [R1, R2] };
 const monthKey = (d) => `${d.getFullYear()}-${d.getMonth()}`;
-const curKey = monthKey(today), lastKey = monthKey(new Date(today.getFullYear(), today.getMonth() - 1, 1));
+const curKey = monthKey(ffAsOf), lastKey = monthKey(new Date(ffAsOf.getFullYear(), ffAsOf.getMonth() - 1, 1));
+// GV live hai — GV REPORT ka current month = aaj ka month
+const gvCurKey = monthKey(today), gvLastKey = monthKey(new Date(today.getFullYear(), today.getMonth() - 1, 1));
 const tlAgg = new Map();
 const agentRows = AGENTS.map((a) => {
   // EIR me agent ID column J (index 9) aur issue date column AA (index 26) hai — isse hi REPORT ka
@@ -112,13 +127,13 @@ const agentRows = AGENTS.map((a) => {
   const vc4 = (rows) => rows.filter((r) => r[2] === '4').length;
   const st = STOCK.rows.filter((r) => r[7] === a.id);
   const sc = (c) => st.filter((r) => r[4] === c).length;
-  const week = dayLabels.map((lab, i) => { const d = new Date(today); d.setDate(d.getDate() - (6 - i)); return mine.filter((r) => dt(r).getTime() === d.getTime()).length; });
+  const week = dayLabels.map((lab, i) => { const d = new Date(ffAsOf); d.setDate(d.getDate() - (6 - i)); return mine.filter((r) => dt(r).getTime() === d.getTime()).length; });
   const g = last.length ? Math.round(((cur.length - last.length) / last.length) * 100) : 0;
   const row = new Array(80).fill('');
   row[0] = a.id; row[1] = a.id; row[2] = a.name; row[3] = a.gv ? 'APS09129' : 'NOT FOUND'; row[4] = a.tlId; row[5] = a.tlMobile; row[6] = a.tlName;
   row[7] = sc('4'); row[8] = sc('5'); row[9] = sc('6'); row[10] = sc('7'); row[11] = sc('12'); row[12] = sc('16'); row[13] = st.length; row[14] = st.length - sc('4');
   row[22] = new Set(last.map((r) => dt(r).getTime())).size; row[23] = vc4(last); row[24] = last.length - vc4(last); row[25] = last.length;
-  row[26] = Math.floor(rnd() * 3); row[27] = ''; row[28] = vc4(cur); row[29] = cur.filter((r) => r[2] === '5').length; row[30] = cur.filter((r) => r[2] === '6').length; row[31] = cur.filter((r) => r[2] === '7').length; row[32] = cur.filter((r) => r[2] === '12').length; row[33] = cur.filter((r) => r[2] === '16').length; row[34] = cur.length - vc4(cur); row[35] = cur.length; row[36] = Math.round(cur.length * 30 / Math.max(1, today.getDate())); row[37] = (vc4(cur) / Math.max(1, today.getDate())).toFixed(1); row[38] = ((cur.length - vc4(cur)) / Math.max(1, today.getDate())).toFixed(1); row[39] = (cur.length / Math.max(1, today.getDate())).toFixed(1);
+  row[26] = Math.floor(rnd() * 3); row[27] = ''; row[28] = vc4(cur); row[29] = cur.filter((r) => r[2] === '5').length; row[30] = cur.filter((r) => r[2] === '6').length; row[31] = cur.filter((r) => r[2] === '7').length; row[32] = cur.filter((r) => r[2] === '12').length; row[33] = cur.filter((r) => r[2] === '16').length; row[34] = cur.length - vc4(cur); row[35] = cur.length; row[36] = Math.round(cur.length * 30 / ffDays); row[37] = (vc4(cur) / ffDays).toFixed(1); row[38] = ((cur.length - vc4(cur)) / ffDays).toFixed(1); row[39] = (cur.length / ffDays).toFixed(1);
   row[40] = `${g >= 0 ? '▲ +' : '▼ '}${g}%`; row[41] = week[6] ? '🟢 Active' : `🔴 ${1 + Math.floor(rnd() * 6)} days inactive`; row[42] = cur.length === 0 ? STATUS[4] : g > 20 ? STATUS[0] : g >= 0 ? STATUS[1] : g > -20 ? STATUS[2] : STATUS[3];
   row[43] = new Set(cur.map((r) => dt(r).getTime())).size; week.forEach((v, i) => { row[44 + i] = v; });
   row[65] = row[39]; row[66] = Math.round(sc('4') / Math.max(0.1, Number(row[37]))); row[67] = row[66] < 10 ? PRIO[0] : row[66] < 25 ? PRIO[1] : PRIO[2];
@@ -142,7 +157,7 @@ const agentRows = AGENTS.map((a) => {
   });
 }
 for (const row of agentRows) {
-  const t = tlAgg.get(row[4]); const days = Math.max(1, today.getDate());
+  const t = tlAgg.get(row[4]); const days = ffDays;
   const vc4Days = Math.round(t.sVc4 / Math.max(0.1, t.curVc4 / days)), nDays = Math.round(t.sN / Math.max(0.1, (t.curN - t.curVc4) / days));
   row[15] = vc4Days; row[16] = Math.round(t.curVc4 * 30 / days); row[17] = vc4Days < 10 ? PRIO[0] : vc4Days < 25 ? PRIO[1] : PRIO[2]; row[18] = vc4Days > 50 ? '🔴 Over Stocked (>50 days)' : vc4Days < 10 ? '🔴 Risk' : '🟢 Stock OK';
   row[19] = t.sVc4; row[20] = t.sN; row[21] = t.sVc4 + t.sN;
@@ -182,6 +197,7 @@ for (let back = 60; back >= 0; back--) {
   }
 }
 // Tag Assignment: stock — A class, B tag id, C serial, D status, E agent id, F agent name, G tl id, H tl name, L/M gv ids
+const GV_MASTER_STOCK = [];
 const GVA_COLS = ['VEHICLE_CLASS', 'TAG_ID', 'SERIAL_NUMBER', 'TAG_STATUS', 'AGENT_ID', 'AGENT_NAME', 'SUPERVISOR_ID', 'SUPERVISOR_NAME', 'x1', 'x2', 'x3', 'GV Unique ID', 'GV Unique Name', 'x4'];
 const GV_ASSIGN = { cols: GVA_COLS.map((l, i) => ({ id: L(i), label: l, type: 'string' })), rows: [] };
 for (const a of AGENTS) {
@@ -193,7 +209,11 @@ for (const a of AGENTS) {
     // Tag Assignment serial ↔ StockDataa barcode, plus REPORT "GV ID Found" ↔ GV Unique ID.
     const ffBarcode = a.gv && k === 0 ? ((STOCK.rows.find((r) => r[7] === a.id) || [])[3] || '') : '';
     const noTl = !!a.gv && k % 6 === 4;
-    GV_ASSIGN.rows.push([cls, `34161FA82GVS${gvSeq++}`, ffBarcode || `608116-037-0${gvSeq % 999999}`, 'In Stock', a.id, a.name, noTl ? '' : (superA ? superA.id : ''), noTl ? '' : (superA ? superA.name : ''), '', '', '', a.gv ? 'APS09129' : '', a.gv ? 'Akash Mansingh Thakur' : '', '']);
+    const gvTag = `34161FA82GVS${gvSeq++}`, gvSerial = ffBarcode || `608116-037-0${String(gvSeq % 999999).padStart(6, '0')}`;
+    GV_ASSIGN.rows.push([cls, gvTag, gvSerial, 'In Stock', a.id, a.name, noTl ? '' : (superA ? superA.id : ''), noTl ? '' : (superA ? superA.name : ''), '', '', '', a.gv ? 'APS09129' : '', a.gv ? 'Akash Mansingh Thakur' : '', '']);
+    // Asli sheet jaisa: GV ka tag FF StockDataa me master (5845036) ke naam, agent khaali, sirf BC date ke saath.
+    // 🧓 GV ageing isi BC date se (tag ID / serial match). Har 9th tag ka match nahi (date-nahi wala case).
+    if (!ffBarcode && k % 9 !== 7) GV_MASTER_STOCK.push(['5845036', 'APNA PAYEMENT', gvTag, gvSerial, cls, TYPES[cls], ddmmyyyy(daysAgo(Math.floor(Math.pow(rnd(), 1.5) * 260))), '', '', '', 'ApnaPayment Pvt. Ltd.', '', '']);
   }
 }
 // GV REPORT: header row 4 (A…BE), data from row 5 — same shape as the live sheet
@@ -205,12 +225,12 @@ for (const a of AGENTS) {
   const mine = GV_MASTER.rows.filter((r) => r[0] === a.id);
   if (!mine.length) continue;
   const dt = (r) => { const m = String(r[15]).match(/Date\((\d+),(\d+),(\d+)/); return m ? new Date(+m[1], +m[2], +m[3]) : null; };
-  const cur = mine.filter((r) => dt(r) && gvMonthKey(dt(r)) === curKey), last = mine.filter((r) => dt(r) && gvMonthKey(dt(r)) === lastKey);
+  const cur = mine.filter((r) => dt(r) && gvMonthKey(dt(r)) === gvCurKey), last = mine.filter((r) => dt(r) && gvMonthKey(dt(r)) === gvLastKey);
   const vc4 = (rows) => rows.filter((r) => r[5] === '4').length;
   const st = GV_ASSIGN.rows.filter((r) => r[4] === a.id);
   const sc = (c) => st.filter((r) => r[0] === c).length;
   const g = last.length ? Math.round(((cur.length - last.length) / last.length) * 100) : 0;
-  const days = Math.max(1, today.getDate());
+  const days = Math.max(1, today.getDate() - 1); // GV sheet: Total ÷ (aaj − 1)
   const row = new Array(GVR_COLS.length).fill('');
   row[0] = `98${10000000 + GV_REPORT.rows.length}`; row[1] = a.id; row[2] = a.name;
   const gvDirect = !!a.gv && GV_MASTER.rows.some((r) => r[0] === a.id && !r[2] && !r[3]);
@@ -259,6 +279,7 @@ const PAYOUT = {
     ['Replacement charges', '', '', 25, 'per replacement']
   ]
 };
+STOCK.rows.push(...GV_MASTER_STOCK);
 const SHEETS = { EIR, StockDataa: STOCK, REPORT, 'GV Master': GV_MASTER, 'Tag Assignment': GV_ASSIGN, 'GV REPORT': GV_REPORT, 'Stock Movements': STOCK_MOVEMENTS, Payout: PAYOUT, payout: PAYOUT };
 const GIDS = { '242489821': 'REPORT', '0': 'EIR', '1284424234': 'GV REPORT' };
 

@@ -162,7 +162,12 @@ await run('autocomplete dropdown stays outside/below search input', async () => 
 });
 await run('store.preload', async () => { await FF.store.preload(false); const st = FF.store.state; const errs = Object.entries(st.errors || {}).filter(([, e]) => e); if (errs.length) throw new Error('dataset errors: ' + errs.map(([k, e]) => `${k}: ${e.message || e}`).join(' | ')); });
 for (const ds of FF.store.DATASETS ? Object.keys(FF.store.DATASETS) : ['daily', 'agents', 'agentClass', 'status', 'stock', 'stockAgents', 'stockTypes', 'report']) {
-  await run(`dataset ${ds}`, async () => { const v = await FF.store.need(ds); const n = Array.isArray(v) ? v.length : v && v.rows ? v.rows.length : -1; if (n <= 0) throw new Error(`empty (${n})`); log(`      ${ds}: ${n} rows`); });
+  await run(`dataset ${ds}`, async () => {
+    const v = await FF.store.need(ds); const n = Array.isArray(v) ? v.length : v && v.rows ? v.rows.length : -1;
+    // agentDailyClass = AAJ ka EIR agent × class — FF data T+1 hai (asli sheet jaisa mock), isliye aaj khaali ho sakta hai
+    if (n <= 0 && !(n === 0 && ds === 'agentDailyClass' && FF.filters && FF.filters.ffLagOn && FF.filters.ffLagOn())) throw new Error(`empty (${n})`);
+    log(`      ${ds}: ${n} rows${n === 0 ? ' (FF T+1 — aaj ka EIR kal aayega)' : ''}`);
+  });
 }
 await run('store.suggestions', async () => { const s = FF.store.suggestions({ agents: true, tls: true }); if (!s.length) throw new Error('no suggestions'); if (s.some((x) => /^APS$/i.test(x.label) && x.kind === 'tl')) throw new Error('APS leaked into TL suggestions'); log(`      ${s.length} suggestions, e.g. ${s.slice(0, 3).map((x) => `${x.kind}:${x.label}`).join(', ')}`); });
 
@@ -247,7 +252,14 @@ await run('gv aggregations + people', async () => {
   if (!series.totals.some((n) => n > 0)) throw new Error('dailySeries empty');
   log(`      months ${months.join(', ')} · latest ${FF.util.ymKey(FF.gv.latestDate())} total ${s.total} · week buckets ${weekly.length} · agents ${agents.length} · tls ${tls.length} · people ${ppl.agents.length}/${ppl.tls.length}`);
 });
-await run('page home', async () => { const r = root(); await pages.home.render(r, {}, {}); await settle(150); const all = [r.innerHTML, ...REG.values().map((e) => e.innerHTML), ...body.children.map((c) => c.innerHTML)].join('\n'); if (!/Champions of/.test(all)) throw new Error('gamification champions card missing from home'); }, true);
+await run('page home', async () => {
+  const r = root(); await pages.home.render(r, {}, {}); await settle(150);
+  const all = [r.innerHTML, ...REG.values().map((e) => e.innerHTML), ...body.children.map((c) => c.innerHTML)].join('\n');
+  // Champions card is mahine ke EIR rollup se — mahine ki 1 tareekh ko (FF T+1, GV EIR kal tak) abhi koi champion nahi hota
+  const ym = FF.util.ymKey(new Date());
+  const hasMonthData = (FF.store.get('agents') || []).some((a) => a.ym === ym) || (FF.gv.agentRollup ? FF.gv.agentRollup(ym).length > 0 : false);
+  if (!/Champions of/.test(all) && hasMonthData) throw new Error('gamification champions card missing from home');
+}, true);
 await run('v3.11 · Home me master search panel + "Aaj ka din" memories', async () => {
   const r = root(); await pages.home.render(r, {}, {}); await settle(400);
   const html = [r.innerHTML, ...REG.values().map((e) => e.innerHTML)].join('\n');
@@ -408,9 +420,11 @@ await run('executive cockpit · FF/GV combined me double count nahi + colourful 
   if (!/Full data/.test(html)) throw new Error('executive KPI cards par click-hint (Full data) nahi hai');
   // 📦 Field stock: GV master ID 5845036 wali StockDataa rows FF total se exclude honi chahiye.
   const stockAgents = FF.store.get('stockAgents') || [];
-  const gvHeld = stockAgents.filter((x) => String(x.agentId || '').trim() === '5845036').reduce((n, x) => n + (x.n || 0), 0);
+  // GV parked = master ID 5845036 ke naam, ya TL "ApnaPayment Pvt. Ltd." (asli sheet me agent khaali master rows)
+  const parked = (x) => String(x.agentId || '').trim() === '5845036' || /^apnapayment pvt\.? ltd\.?$/i.test(String(x.tlName || '').trim());
+  const gvHeld = stockAgents.filter(parked).reduce((n, x) => n + (x.n || 0), 0);
   if (!(gvHeld > 0)) throw new Error('mock StockDataa me GV master ID wali rows hi nahi — exclusion test meaningless');
-  const ffClean = stockAgents.filter((x) => String(x.agentId || '').trim() !== '5845036').reduce((n, x) => n + (x.n || 0), 0);
+  const ffClean = stockAgents.filter((x) => !parked(x)).reduce((n, x) => n + (x.n || 0), 0);
   const gvStock = (FF.gv.get('stockClass') || []).reduce((n, x) => n + (x.n || 0), 0);
   const combined = FF.util.fmt(ffClean + gvStock);
   if (!html.includes(`<b>${combined}</b>`)) throw new Error(`Combined field stock <b>${combined}</b> executive me nahi dikha — GV master ${FF.util.fmt(gvHeld)} exclude hua?`);
@@ -557,7 +571,8 @@ await run('v3.16.1 · Office Bell + Voice Announcer (agent-wise query + announce
   const e = FF.config.eir;
   const today = FF.util.dateKey(new Date());
   const t = await FF.data.query(e.sheet, `select ${e.agentName}, count(${e.tagId}) where ${e.date} = date '${today}' group by ${e.agentName}`, { timeoutMs: 20000, fresh: true });
-  if (!t || !t.rows || !t.rows.length) throw new Error('agent-wise live query returned no rows');
+  // FF EIR T+1 hai — aaj ki FF rows kal aati hain (asli sheet jaisa mock); tab query khaali hona sahi hai
+  if ((!t || !t.rows || !t.rows.length) && !(FF.filters && FF.filters.ffLagOn && FF.filters.ffLagOn())) throw new Error('agent-wise live query returned no rows');
   const single = FF.officeBell.announceText([{ ch: 'FF', agent: 'Rahul Sharma', n: 5 }], 5);
   if (!/Rahul/.test(single) || !/5/.test(single)) throw new Error('single-agent announce text galat: ' + single);
   const multi = FF.officeBell.announceText([{ ch: 'FF', agent: 'Rahul', n: 5 }, { ch: 'GV', agent: 'Priya', n: 3 }, { ch: 'FF', agent: 'Amit', n: 2 }], 10);
@@ -1066,7 +1081,7 @@ for (const spec of kpiSpecs) {
 }
 await run('kpiDetail raw EIR toDate range query', async () => {
   const e = FF.config.eir;
-  const daily = FF.store.get('daily') || [];
+  const daily = (FF.store.get('daily') || []).filter((r) => r.channel !== 'GV Partner');   // EIR = FF ledger (GV live rows GV Master se)
   const last = FF.model.latestDate(daily);
   const key = FF.util.dateKey(last);
   const t = await FF.data.query(e.sheet, `select ${e.date}, ${e.tagId}, ${e.cls} where toDate(${e.date}) >= date '${key}' and toDate(${e.date}) <= date '${key}' order by ${e.date} desc limit 60000`, {});
@@ -1082,9 +1097,13 @@ await run('🏷️ Tag Request — form + system check (class-wise stock / issua
   await pages.tagRequest.render(r, {}, {});
   await settle(400);
   const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  for (const s of ['IDFC Agents Tag Request Form', 'System check karo', 'Ek aur agent', 'Agent ID / Naam']) {
+  // v3.30 — upar employee, neeche har agent ka block (mobile · address · pincode · vertical class qty)
+  for (const s of ['Employee name *', 'Add new agent', 'Agent ID / Naam', 'Agent mobile number', 'Full address', 'Pincode', 'Request submit karo']) {
     if (!html.includes(s)) throw new Error(`Tag Request form me "${s}" nahi mila`);
   }
+  for (const a of ['mobile', 'address', 'pincode']) if (!html.includes(`data-tr-a="${a}"`)) throw new Error(`agent ${a} field missing`);
+  if (!/data-tr-view="settings"/.test(html)) throw new Error('admin ko ⚙️ Link & Sheet tab nahi mila');
+  if (/data-tr-view="result"/.test(html)) throw new Error('Result tab ab nahi hona chahiye');
   for (const c of ['VC4', 'VC5', 'VC6', 'VC7', 'VC12', 'VC16']) {
     if (!html.includes(`data-tr-cls="${c}"`)) throw new Error(`Tag class chip ${c} missing`);
   }
@@ -1106,21 +1125,28 @@ await run('🏷️ Tag Request — form + system check (class-wise stock / issua
   const forced = await pages.tagRequest.preview([{ name: testAgent, cls: 'VC4', qty: 7 }]);
   if (Number(forced.rows[0].approved) !== 7) throw new Error('user qty approve me reflect nahi hui');
   log(`      ${res.rows.length} class-rows · ${row.agentName} · ${row.cls} stock ${row.stock} · ${row.priority} · sug ${row.sugNet}/${row.sugGross}`);
-  // 📊 result view — analysis ke baad wahi rows editable table me + share/download buttons
+  // 📊 purana ?view=result deep link — ab form hi khulta hai (system check submit ke saath hota hai)
   const r2 = root();
   await pages.tagRequest.render(r2, { view: 'result' }, {});
   await settle(200);
   const h2 = r2.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  for (const s of ['System check · agent × class', 'Admin ko submit karo', 'CSV', 'Copy', 'Approved']) {
-    if (!h2.includes(s)) throw new Error(`result view me "${s}" nahi mila`);
-  }
-  if (!/data-tr-appr=/.test(h2)) throw new Error('result rows editable nahi hain (approved input missing)');
-  // 📥 requests view — admin list (server API) render ho, error na de
+  if (!h2.includes('Add new agent')) throw new Error('view=result par form nahi khula');
+  // 📥 requests view — har request ek row, upar ☑ select → 🖨️ print / ✅ approve / ⬇ CSV
   const r3 = root();
   await pages.tagRequest.render(r3, { view: 'requests' }, {});
   await settle(600);
   const h3 = r3.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
   if (!/Tag Requests|koi tag request nahi/.test(h3)) throw new Error('requests view render nahi hua');
+  for (const s of ['Select all', 'Print selected', 'Approve selected', 'CSV', '🚗 VC4/VC20', '🚚 VC5+', 'Run rate', 'Expected', 'Growth', 'Requested (class-wise)']) {
+    if (!h3.includes(s)) throw new Error(`requests table me "${s}" nahi mila`);
+  }
+  if (/Kholo/.test(h3)) throw new Error('requests table me "Kholo" button nahi hona chahiye (sab ek row me)');
+  // ⚙️ Link & Sheet tab — public link + sheet sync cards (requests tab me ab nahi)
+  const r4 = root();
+  await pages.tagRequest.render(r4, { view: 'settings' }, {});
+  await settle(400);
+  const h4 = r4.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  if (!/tr-public-card/.test(h4) || !/tr-sheet-card/.test(h4)) throw new Error('settings tab me link/sheet cards nahi');
 }, false);
 await run('🌐 Public employee link — bina login form (naam mandatory) + status view', async () => {
   // share link /tag-request par jaata hai (login nahi)
@@ -1131,34 +1157,29 @@ await run('🌐 Public employee link — bina login form (naam mandatory) + stat
   await pages.tagRequest.render(r, { view: 'form', public: '1' }, { publicConfig: pubCfg });
   await settle(400);
   const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  for (const s of ['Aapki details', 'Employee name *', 'Full address', 'Pincode *', 'IDFC Agents Tag Request', 'System check karo']) {
+  for (const s of ['Employee details', 'Employee name *', 'Agent mobile number', 'Full address', 'Pincode *', 'IDFC Agents Tag Request', 'Add new agent', 'Request submit karo']) {
     if (!html.includes(s)) throw new Error(`public form me "${s}" nahi mila`);
   }
   if (!/data-tr-emp="name"/.test(html)) throw new Error('employee name input missing');
-  if (!/data-tr-emp="mobile"/.test(html)) throw new Error('mobile field nahi mila (ab mandatory hai)');
-  if (!/data-tr-emp="address"/.test(html)) throw new Error('full address field nahi mila (mandatory)');
-  if (!/data-tr-emp="pincode"/.test(html)) throw new Error('pincode field nahi mila (mandatory)');
-  if (!/Full address/.test(html)) throw new Error('address label nahi mila');
+  for (const a of ['mobile', 'address', 'pincode']) if (!html.includes(`data-tr-a="${a}"`)) throw new Error(`agent ${a} field nahi mila (mandatory)`);
+  for (const c of ['VC4', 'VC5', 'VC6', 'VC7', 'VC12', 'VC16']) if (!html.includes(`data-tr-cls="${c}"`)) throw new Error(`class ${c} qty input missing`);
+  if (!/class="tr-qty-list/.test(html)) throw new Error('class qty vertical list nahi mili');
   if (!/data-tr-view="status"/.test(html)) throw new Error('public mode me status tab missing');
-  // 📊 public result view — login wale submit button ke bajaye "Request submit karo"
-  const perfAgents = pages.performance.agents() || [];
-  const who = (perfAgents.find((a) => a.name && !a.tlExcluded) || perfAgents[0] || {}).name;
-  if (who) {
-    await pages.tagRequest.preview([{ name: who, cls: 'VC4', qty: 3 }]);
-    const r2 = root();
-    await pages.tagRequest.render(r2, { view: 'result', public: '1' }, { publicConfig: pubCfg });
-    await settle(250);
-    const h2 = r2.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-    if (!h2.includes('Request submit karo')) throw new Error('public result view me submit button nahi mila');
-    if (!/data-tr-appr=/.test(h2)) throw new Error('public result rows editable nahi hain');
-    if (h2.includes('Admin ko submit karo')) throw new Error('public form me admin wala submit label dikh raha hai');
-  }
+  if (/data-tr-view="result"|data-tr-view="requests"/.test(html)) throw new Error('public link par sirf Form + Status tab hone chahiye');
+  // 📊 purana ?view=result public link — ab form hi
+  const r2 = root();
+  await pages.tagRequest.render(r2, { view: 'result', public: '1' }, { publicConfig: pubCfg });
+  await settle(150);
+  const h2 = r2.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  if (!h2.includes('Request submit karo')) throw new Error('public view=result par form nahi khula');
+  if (h2.includes('Admin ko submit karo')) throw new Error('public form me admin wala submit label dikh raha hai');
   // 🔎 status view (Request ID daal kar status dekhne ka raasta)
   const r3 = root();
   await pages.tagRequest.render(r3, { view: 'status', public: '1' }, { publicConfig: pubCfg });
   await settle(150);
   const h3 = r3.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
   if (!/Request status/.test(h3) || !/tr-status-id/.test(h3)) throw new Error('public status view render nahi hua');
+  if (!/Agent mobile/.test(h3)) throw new Error('status view me agent mobile se search ka option nahi');
   // 🔁 duplicate warning card — "already pending" wala block (same agent×class dobara bhejne par)
   const dupHtml = pages.tagRequest.dupWarning([{ id: 'tagreq_test_1', status: 'pending', total: 33, rows: 2, at: new Date().toISOString(), matched: ['1001 · VC4'] }], 'Suresh Yadav');
   if (!/Ye entry pehle se hai/.test(dupHtml)) throw new Error('duplicate warning heading nahi mili');
@@ -1173,8 +1194,11 @@ await run('🧓 Stock ageing — Agent Allocated At se 1/3/5/6+ mahine · VC4+VC
   if (!FF.stockAge) throw new Error('stockAge module load nahi hua (index.html/sw.js me hai?)');
   const idx = await FF.stockAge.ready();
   if (!idx) throw new Error('stock ageing index nahi bana — ' + (FF.stockAge.error || 'unknown'));
-  if (!idx.total) throw new Error('StockDataa se koi dated row nahi mili');
+  if (!idx.data || !idx.data.ff || !idx.data.ff.total) throw new Error('StockDataa se koi dated row nahi mili');
+  if (!idx.data.gv || !idx.data.gv.total) throw new Error('v3.31: GV (Tag Assignment) ageing nahi bani');
+  if (!(idx.data.gv.matched > 0)) throw new Error('GV tags StockDataa se match nahi hue (tag ID / serial)');
   const allHtml = FF.stockAge.html({ kind: 'all', key: 'all' });
+  if ((allHtml.match(/data-age-block=/g) || []).length !== 2) throw new Error('network ageing me FF + GV dono blocks chahiye');
   if (!/VC4 \+ VC20/.test(allHtml)) throw new Error('VC4+VC20 group row nahi mili');
   if (!/VC5\+ \(commercial\)/.test(allHtml)) throw new Error('VC5+ group row nahi mili');
   for (const s of ['≥ 1 mahina', '≥ 3 mahine', '≥ 5 mahine', '≥ 6 mahine']) if (!allHtml.includes(s)) throw new Error(`bucket column nahi mila: ${s}`);
@@ -1184,16 +1208,21 @@ await run('🧓 Stock ageing — Agent Allocated At se 1/3/5/6+ mahine · VC4+VC
   const list = (FF.pages.performance && FF.pages.performance.agents ? FF.pages.performance.agents() : []).filter((a) => !a.isMaster && (a.stockTotal || 0) > 0);
   if (!list.length) throw new Error('stock wala koi agent nahi mila');
   const a = list[0];
-  const scope = { kind: 'agent', key: a.id || a.name };
-  const node = FF.stockAge.forAgent(scope.key);
+  const scope = { kind: 'agent', key: a.id || a.name, keys: [a.agentId, a.name], ch: 'ff' };
+  const node = FF.stockAge.forAgent([a.id, a.agentId, a.name], 'ff');
   if (!node) throw new Error('agent ka ageing node nahi mila: ' + scope.key);
-  const older6 = FF.stockAge.tagsOlder(node, 6);
-  if (!older6.length) throw new Error('6 mahine se purane tags nahi mile');
-  const csvN = FF.stockAge.csv(scope, 6);
-  if (csvN !== older6.length) throw new Error(`CSV count mismatch: ${csvN} vs ${older6.length}`);
+  const n6 = (node.counts.core[6] || 0) + (node.counts.comm[6] || 0);
+  const older6 = await FF.stockAge.fetchTags(scope, 6, '', 5000);
+  if (!older6.total || older6.total !== n6) throw new Error(`6 mahine se purane tags: list ${older6.total} vs bucket ${n6}`);
+  const csvN = await FF.stockAge.csv(scope, 6);
+  if (csvN !== older6.total) throw new Error(`CSV count mismatch: ${csvN} vs ${older6.total}`);
   if (!FF.stockAge.chipText(scope)) throw new Error('agent chip text khaali hai');
   if (FF.stockAge.groupOf('VC4') !== 'core' || FF.stockAge.groupOf('VC20') !== 'core' || FF.stockAge.groupOf('VC5') !== 'comm' || FF.stockAge.groupOf('VC16') !== 'comm') throw new Error('class grouping galat (VC4/VC20 → core, VC5+ → comm)');
-  log(`      ageing: ${FF.util.fmt(idx.total)} dated tags · ${older6.length} tags ≥6M (${a.name}) · CSV ok`);
+  // 🧓 v3.31 — har drawer me ageing: performance agent drawer kholo → section aana chahiye
+  pages.performance.openAgent(a.__row);
+  const dh = (REG.get('drawer-body') || {}).innerHTML || '';
+  if (!/data-drawer-age/.test(dh)) throw new Error('agent drawer me stock ageing section nahi');
+  log(`      ageing: FF ${FF.util.fmt(idx.data.ff.total)} · GV ${FF.util.fmt(idx.data.gv.total)} (${FF.util.fmt(idx.data.gv.matched)} matched) · ${older6.total} tags ≥6M (${a.name}) · CSV ok · drawer ok`);
 });
 await run('🖨️ Dispatch label — A4 print me FROM+TO left·right repeat + text size + share/copy', async () => {
   const r = {
@@ -1209,13 +1238,16 @@ await run('🖨️ Dispatch label — A4 print me FROM+TO left·right repeat + t
   if (typeof pages.tagRequest.labelText !== 'function') throw new Error('labelText export nahi mila');
   const html = pages.tagRequest.dispatchLabelHtml(r, { size: 12, rows: 4 });
   if (!/A4/.test(html) || !html.includes('@page')) throw new Error('A4 print CSS nahi mili');
-  const copies = 4 * 2; // rows × 2 columns (left + right)
+  // v3.30 — har request ka label sirf EK baar (pehle wahi label 8/10/12 baar repeat hota tha)
   const lblCount = (html.match(/class="lbl"/g) || []).length;
-  if (lblCount !== copies) throw new Error(`labels count mismatch: ${lblCount} vs ${copies}`);
+  if (lblCount !== 1) throw new Error(`labels count mismatch: ${lblCount} vs 1 — label repeat nahi hona chahiye`);
   const pinCount = (html.match(/302019/g) || []).length;
-  if (pinCount !== copies) throw new Error(`pincode repeat mismatch: ${pinCount} vs ${copies} — har label me TO address nahi repeat hua`);
-  const nameCount = (html.match(/Ramesh Yadav/g) || []).length;
-  if (nameCount < copies) throw new Error('employee naam har label me repeat nahi hua');
+  if (pinCount !== 1) throw new Error(`pincode count mismatch: ${pinCount} vs 1`);
+  if (!html.includes('Ramesh Yadav')) throw new Error('TO naam label par nahi');
+  const r2 = { ...r, id: 'tagreq_smoke_5678', employee: undefined, agent: { name: 'Neha Gupta', agentId: '3003', channel: 'ff', mobile: '9811100003', address: '7, Station Road, Ajmer', pincode: '305001' } };
+  const multi = pages.tagRequest.labelsHtml([r, r2, r], { size: 10.5, rows: 5 });
+  if ((multi.match(/class="lbl"/g) || []).length !== 2) throw new Error('print selected me har request ek hi baar aani chahiye');
+  if (!multi.includes('305001') || !multi.includes('Neha Gupta')) throw new Error('agent wali request ka TO = agent ka address nahi');
   if (!/FROM:/.test(html)) throw new Error('FROM block nahi mila (company address — Settings me set karo)');
   if (!html.includes('font-size: 12pt')) throw new Error('text size 12pt set nahi hua');
   if (!/data-sz="14"/.test(html)) throw new Error('text size chhota/bada buttons nahi mile (print view me)');
@@ -1223,7 +1255,7 @@ await run('🖨️ Dispatch label — A4 print me FROM+TO left·right repeat + t
   if (!html.includes('35 tags') && !html.includes('🏷️ 35')) throw new Error('request summary (total tags) nahi mili');
   const txt = pages.tagRequest.labelText(r);
   for (const snip of ['FROM:', 'TO: Ramesh Yadav', '302019', 'tagreq_smoke_1234', '35 tags']) if (!txt.includes(snip)) throw new Error(`label text me "${snip}" nahi mila`);
-  log('      label: 8 labels/page · pincode ×8 · FROM · meta ok · text: ' + txt.split('\n').length + ' lines');
+  log('      label: 1 label/request · print selected unique · FROM · meta ok · text: ' + txt.split('\n').length + ' lines');
 });
 await run('liveView.openNotification (report / settings / login)', async () => {
   FF.liveView.openNotification({ id: 'a', type: 'report', title: 'First Forward report update', body: 'x', createdAt: new Date().toISOString(), meta: { source: 'ff', snapshot: { date: '2026-09-26', total: 120, classes: { VC4: 100, VC5: 20 } }, previous: { date: '2026-09-26', total: 90, classes: { VC4: 80, VC5: 10 } }, delta: { total: 30, classes: { VC4: 20, VC5: 10 } } } });
@@ -1272,10 +1304,11 @@ await run('🔁 FF T+1 lag · aaj FF 0 (kal aayega), GV live · kpiDetail bhi la
 
 await run('👥 KPI drill: agent drawer (kisne lagaye) + us agent ka day-wise detail', async () => {
   const daily = FF.store.get('daily') || [];
-  const gv = daily.filter((r) => r.channel === 'GV Partner');
+  const ym = FF.util.ymKey(new Date());
+  // is mahine ka GV agent (mahine ki 1 tareekh ko sirf aaj ke live rows hote hain — purane month ka agent drill khaali deta)
+  const gv = daily.filter((r) => r.channel === 'GV Partner' && r.ym === ym);
   const pick = (rows) => rows.slice().sort((a, b) => (b.n || 0) - (a.n || 0))[0];
   const gvAgent = pick(gv);
-  const ym = FF.util.ymKey(new Date());
   await FF.kpiDetail.open({ src: 'both', scope: 'mtd', ym, title: 'KPI drill test' });
   let html = drawerHtml();
   if (!/Kisne lagaye/.test(html)) throw new Error('issuance drawer me agent-wise (kisne lagaye) section nahi mila');
@@ -1294,7 +1327,8 @@ await run('👥 KPI drill: agent drawer (kisne lagaye) + us agent ka day-wise de
 await run('🧩 GV agent issuance/class and stock drawers drill progressively', async () => {
   const gvRows = FF.gv.issuanceRows();
   const stockRows = FF.gv.get('stockAgentClass') || [];
-  const profile = gvRows.find((r) => r.agentName && r.n > 0);
+  const ymNow = FF.util.ymKey(new Date());
+  const profile = gvRows.find((r) => r.agentName && r.n > 0 && r.ym === ymNow) || gvRows.find((r) => r.agentName && r.n > 0);
   const stockProfile = stockRows.find((r) => r.agentName && r.n > 0);
   if (!profile || !stockProfile) throw new Error('GV agent / stock fixtures unavailable');
   const ym = FF.util.ymKey(new Date());

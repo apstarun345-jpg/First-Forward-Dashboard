@@ -16,6 +16,7 @@ import { sheetsStoreFromEnv } from './sheets-storage.js';
 import { appsScriptStoreFromEnv, AppsScriptStore } from './apps-script-storage.js';
 import { sendMail, mailConfigured, diagnoseMail, mailHint, availableProviders, resolveProviders, resetMailMemo, MAIL_PROVIDERS, splitRecipients } from './mailer.js';
 import { DEFAULT_DISPATCH_EMAIL, normalizeDispatchEmail, buildDispatchPlan, dispatchEmailContent } from './dispatch-email.js';
+import { buildStockAgeIndex, summaryOf as stockAgeSummary, tagsFor as stockAgeTags } from './stock-age.js';
 import { loadFfDispatchRows, loadGvDispatchRows } from './dispatch-report.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -45,7 +46,7 @@ const MIME = {
   '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.ico': 'image/x-icon',
   '.txt': 'text/plain; charset=utf-8', '.md': 'text/plain; charset=utf-8'
 };
-const BLOCKED_FILES = new Set(['server.js', 'sheets-storage.js', 'apps-script-storage.js', 'mailer.js', 'DEPLOYMENT.md', 'SHEETS_STORAGE.md', 'STORAGE_SETUP.md', 'package.json', 'package-lock.json', 'render.yaml', 'README.md', '.env']);
+const BLOCKED_FILES = new Set(['server.js', 'sheets-storage.js', 'apps-script-storage.js', 'mailer.js', 'stock-age.js', 'DEPLOYMENT.md', 'SHEETS_STORAGE.md', 'STORAGE_SETUP.md', 'package.json', 'package-lock.json', 'render.yaml', 'README.md', '.env']);
 const BLOCKED_DIRS = new Set(['data', 'dev', 'node_modules', '.git', 'google-apps-script']);
 
 // ---------------------------------------------------------------------------------------------
@@ -1551,6 +1552,66 @@ async function stockSnapshotFrom(sheetId, sheet, clsCol, tagCol, label) {
     return total ? { total, classes } : null;
   } catch (err) { console.warn(`${label || 'stock'} snapshot:`, err.message); return null; }
 }
+// ---------------------------------------------------------------------------------------------
+// 🧓 Stock ageing (v3.31) — StockDataa + Tag Assignment ek baar padh kar compact index (10 min cache).
+// Browser ab 1 lakh rows download nahi karta; har drawer / page sirf agent-TL ke bucket counts leta hai.
+// ---------------------------------------------------------------------------------------------
+const STOCK_AGE_TTL = 10 * 60e3;
+const stockAgeState = { at: 0, index: null, promise: null, key: '' };
+const colLetter = (v, fallback) => { const c = String(v || fallback || '').trim().toUpperCase(); return /^[A-Z]{1,3}$/.test(c) ? c : ''; };
+async function gvizRowsServer(sheetId, sheet, letters, where) {
+  const cols = letters.filter(Boolean);
+  const tq = `select ${cols.join(', ')}${where ? ` where ${where}` : ''}`;
+  const params = new URLSearchParams({ id: String(sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet, tq });
+  const out = await fetchUpstreamCached(upstreamUrl(params));
+  if (out.status < 200 || out.status >= 300) throw new Error(`${sheet}: Google responded ${out.status}`);
+  const table = parseGvizServer(out.body);
+  // gviz column id (letter) se index — label row ki galti se order na bigde.
+  const ids = (table.cols || []).map((c) => String(c.id || '').toUpperCase());
+  const at = (L) => { const i = ids.indexOf(L); return i >= 0 ? i : cols.indexOf(L); };
+  return { rows: table.rows || [], at };
+}
+async function loadStockAgeIndex() {
+  const s = db.settings || {};
+  const st = s.stock || {};
+  const A = (s.gv && s.gv.assignment) || {};
+  const errors = {};
+  const ffL = { id: colLetter(st.id, 'A'), tagId: colLetter(st.tagId, 'C'), barcode: colLetter(st.barcode, 'D'), cls: colLetter(st.cls, 'E'), bcDate: colLetter(st.bcAllocatedAt, 'G'), agentId: colLetter(st.agentId, 'H'), agentName: colLetter(st.agentName, 'I'), agentDate: colLetter(st.agentAllocatedAt, 'J'), tl: colLetter(st.tlName, 'K') };
+  const gvL = { cls: colLetter(A.cls, 'A'), tagId: colLetter(A.tagId, 'B'), serial: colLetter(A.serial, 'C'), status: colLetter(A.status, 'D'), agentId: colLetter(A.agentId, 'E'), agentName: colLetter(A.agentName, 'F'), tlId: colLetter(A.tlId, 'G'), tlName: colLetter(A.tlName, 'H'), date: colLetter(A.allocatedAt, '') };
+  const pick = (row, idx) => (idx >= 0 ? serverCell(row, idx) : '');
+  const ffJob = (async () => {
+    const letters = [...new Set(Object.values(ffL).filter(Boolean))];
+    const { rows, at } = await gvizRowsServer(s.sheetId, s.stockSheet || 'StockDataa', letters, `${ffL.tagId} is not null`);
+    const ix = Object.fromEntries(Object.entries(ffL).map(([k, L]) => [k, L ? at(L) : -1]));
+    return rows.map((row) => ({ id: pick(row, ix.id), tagId: pick(row, ix.tagId), barcode: pick(row, ix.barcode), cls: pick(row, ix.cls), bcDate: pick(row, ix.bcDate), agentId: pick(row, ix.agentId), agentName: pick(row, ix.agentName), agentDate: pick(row, ix.agentDate), tl: pick(row, ix.tl) }));
+  })().catch((err) => { errors.ff = err.message; return []; });
+  const gvJob = (async () => {
+    if (!s.gvSheetId) return [];
+    const letters = [...new Set(Object.values(gvL).filter(Boolean))];
+    const { rows, at } = await gvizRowsServer(s.gvSheetId, A.tab || 'Tag Assignment', letters, `${gvL.tagId} is not null`);
+    const ix = Object.fromEntries(Object.entries(gvL).map(([k, L]) => [k, L ? at(L) : -1]));
+    return rows.map((row) => ({ cls: pick(row, ix.cls), tagId: pick(row, ix.tagId), serial: pick(row, ix.serial), status: pick(row, ix.status), agentId: pick(row, ix.agentId), agentName: pick(row, ix.agentName), tlId: pick(row, ix.tlId), tlName: pick(row, ix.tlName), date: pick(row, ix.date) }));
+  })().catch((err) => { errors.gv = err.message; return []; });
+  const [ffRows, gvRows] = await Promise.all([ffJob, gvJob]);
+  const [y, m, d] = dateKeyNow().split('-').map(Number);
+  const index = buildStockAgeIndex({ ffRows, gvRows, todayDay: Date.UTC(y, m - 1, d) / 86400e3, masterId: (s.eir && s.eir.gvMasterId) || '5845036', parkedTl: (s.eir && s.eir.gvChannelTl) || 'ApnaPayment Pvt. Ltd.' });
+  if (Object.keys(errors).length) index.errors = errors;
+  return index;
+}
+async function stockAgeIndex(fresh) {
+  const key = JSON.stringify([db.settings.sheetId, db.settings.gvSheetId, db.settings.stockSheet, db.settings.stock, db.settings.gv && db.settings.gv.assignment]);
+  if (!fresh && stockAgeState.index && stockAgeState.key === key && Date.now() - stockAgeState.at < STOCK_AGE_TTL) return stockAgeState.index;
+  if (stockAgeState.promise && stockAgeState.key === key) return stockAgeState.promise;
+  stockAgeState.key = key;
+  stockAgeState.promise = loadStockAgeIndex().then((index) => {
+    // Dono sources fail hue aur purana index hai → purana hi rakho (Google blip par blank mat karo).
+    if (index.errors && index.errors.ff && (index.errors.gv || !db.settings.gvSheetId) && stockAgeState.index) return stockAgeState.index;
+    stockAgeState.index = index; stockAgeState.at = Date.now();
+    return index;
+  }).finally(() => { stockAgeState.promise = null; });
+  return stockAgeState.promise;
+}
+
 /** StockDataa (First Forward) current stock. */
 async function stockSnapshot() {
   const s = db.settings, cfg = s.stock || {};
@@ -2003,10 +2064,13 @@ async function overlayDispatchEirIssuance(agents) {
   const masterCol = e.masterId || 'AU';
   const gvId = String(e.gvMasterId || '5845036').trim().replace(/\\.0+$/, '');
   const today = dateKeyNow();
-  const [y, m] = today.split('-').map(Number);
-  const previous = new Date(Date.UTC(y, m - 2, 1));
-  const previousYm = `${previous.getUTCFullYear()}-${String(previous.getUTCMonth() + 1).padStart(2, '0')}`;
-  const start = `${previousYm}-01`;
+  const [y, m, d] = today.split('-').map(Number);
+  const ymOf = (dt) => `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}`;
+  const previousYm = ymOf(new Date(Date.UTC(y, m - 2, 1)));
+  // 📐 v3.31 — 1 tareekh ko FF ka data month pichhla month hota hai (data kal tak), uska "last month"
+  // usse bhi pehle — isliye 2 mahine peeche se padho.
+  const start = `${ymOf(new Date(Date.UTC(y, m - 3, 1)))}-01`;
+  const yesterdayKey = new Date(Date.UTC(y, m - 1, d - 1)).toISOString().slice(0, 10);
   const fields = [agentIdCol, agentNameCol, gvIdCol, gvNameCol, dateCol, clsCol, masterCol];
   const tq = `select ${fields.join(', ')}, count(${tagCol}) where ${tagCol} is not null and ${dateCol} >= date '${start}' and ${dateCol} <= date '${today}' group by ${fields.join(', ')} order by ${dateCol}`;
   const params = new URLSearchParams({ id: String(sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet, tq });
@@ -2016,6 +2080,8 @@ async function overlayDispatchEirIssuance(agents) {
   const cleanKey = (v) => String(v || '').trim().toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
   const key = (ch, kind, value) => { const x = cleanKey(value); return x ? `${ch}|${kind}:${x}` : ''; };
   const maps = { cur: new Map(), last: new Map() };
+  const parsed = [];
+  const latest = { ff: '', gv: '' };
   const add = (map, ch, id, name, cls, n) => {
     const keys = [key(ch, 'id', id), key(ch, 'name', name)].filter(Boolean);
     if (!keys.length) return;
@@ -2031,11 +2097,29 @@ async function overlayDispatchEirIssuance(agents) {
     const ch = master === gvId ? 'gv' : 'ff';
     const id = ch === 'gv' ? (serverCell(row, 2) || serverCell(row, 0)) : (serverCell(row, 0) || serverCell(row, 2));
     const name = ch === 'gv' ? (serverCell(row, 3) || serverCell(row, 1)) : (serverCell(row, 1) || serverCell(row, 3));
-    const ym = date.slice(0, 7);
-    const map = ym === today.slice(0, 7) ? maps.cur : ym === previousYm ? maps.last : null;
-    if (!map) continue;
-    add(map, ch, id, name, classBucket(serverCell(row, 5)), serverNumber(serverCell(row, 7)));
+    // FF ka data T+1 — aaj ki FF row (agar aa bhi jaye) count nahi; GV aaj tak.
+    if (date > (ch === 'ff' ? yesterdayKey : today)) continue;
+    if (date > latest[ch]) latest[ch] = date;
+    parsed.push({ ch, id, name, date, cls: classBucket(serverCell(row, 5)), n: serverNumber(serverCell(row, 7)) });
   }
+  // Har channel ka data month = uske latest din ka month; divisor = sheet jaisa (aaj − 1), month-aware.
+  const basis = {};
+  for (const ch of ['ff', 'gv']) {
+    const last = latest[ch] || (ch === 'ff' ? yesterdayKey : today);
+    const curYm = last.slice(0, 7);
+    const [ly, lm] = curYm.split('-').map(Number);
+    const lastYm = ymOf(new Date(Date.UTC(ly, lm - 2, 1)));
+    const sameMonth = curYm === today.slice(0, 7);
+    const days = ch === 'gv' && sameMonth ? Math.max(1, d - 1) : Math.max(1, Number(last.slice(8, 10)) || 1);
+    basis[ch] = { curYm, lastYm, days, latest: last };
+  }
+  for (const r of parsed) {
+    const b = basis[r.ch];
+    const ym = r.date.slice(0, 7);
+    const map = ym === b.curYm ? maps.cur : ym === b.lastYm ? maps.last : null;
+    if (map) add(map, r.ch, r.id, r.name, r.cls, r.n);
+  }
+  void previousYm;
   const find = (map, agent) => map.get(key(agent.ch, 'id', agent.agentId || agent.id)) || map.get(key(agent.ch, 'name', agent.name || agent.agentName)) || { vc4: 0, comm: 0, total: 0 };
   // REPORT remains the operational source for stock, priority, status, and TL metadata. Only
   // these current/last issuance fields are replaced, so scheduled email matches the browser EIR path.
@@ -2044,6 +2128,7 @@ async function overlayDispatchEirIssuance(agents) {
     agent.cur = { vc4: cur.vc4, comm: cur.comm, total: cur.total };
     agent.last = { vc4: last.vc4, comm: last.comm, total: last.total };
   });
+  Object.defineProperty(agents, 'basis', { value: basis, enumerable: false });
   return agents;
 }
 async function loadDispatchAgents(channel) {
@@ -2052,6 +2137,12 @@ async function loadDispatchAgents(channel) {
   if (channel !== 'ff') jobs.push(dispatchReportTable('gv').then((table) => loadGvDispatchRows(table, db.settings)));
   const sources = await Promise.all(jobs);
   return overlayDispatchEirIssuance(sources.flat());
+}
+/** buildDispatchPlan ke liye per-channel divisor + data month (overlay ka basis). */
+function dispatchBasisOptions(agents) {
+  const b = agents && agents.basis;
+  if (!b) return {};
+  return { elapsed: { ff: b.ff && b.ff.days, gv: b.gv && b.gv.days }, months: { ff: b.ff && b.ff.curYm, gv: b.gv && b.gv.curYm } };
 }
 async function sendDispatchPlanEmail(force = false, input = null) {
   const saved = db.settings.dispatchEmail || DEFAULT_DISPATCH_EMAIL;
@@ -2079,7 +2170,7 @@ async function sendDispatchPlanEmail(force = false, input = null) {
   }
   const sourceAgents = await loadDispatchAgents(schedule.channel);
   if (!sourceAgents.length) throw new Error('Selected channel ke REPORT sheet me koi dispatch row nahi mili.');
-  const plan = buildDispatchPlan(sourceAgents, schedule, { settings: db.settings, days: Number(feats().suggestDays) || 15, now: ist });
+  const plan = buildDispatchPlan(sourceAgents, schedule, { settings: db.settings, days: Number(feats().suggestDays) || 15, now: ist, ...dispatchBasisOptions(sourceAgents) });
   if (!plan.summary.agents && !plan.summary.tls) throw new Error('Selected filters ke liye dispatch data nahi mila.');
   const email = dispatchEmailContent(plan, schedule, db.settings.brand || 'Dashboard', dateKey);
   const result = await sendMail(mailCfg, email.subject, email.text, { html: email.html, attachments: email.attachments });
@@ -2836,6 +2927,21 @@ async function handleApi(req, res, url) {
     await persist('users');
     return sendJson(res, 200, { ok: true, at: user.notificationsSeenAt });
   }
+  // 🧓 v3.31 stock ageing — summary (agent / TL / network bucket counts, FF + GV) aur tag-level list.
+  if (p === '/api/stock-age' && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required');
+    const index = await stockAgeIndex(url.searchParams.get('fresh') === '1');
+    const body = JSON.stringify(stockAgeSummary(index));
+    return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', body, { 'Cache-Control': 'no-store' });
+  }
+  if (p === '/api/stock-age/tags' && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required');
+    const q = url.searchParams;
+    const split = (v) => String(v || '').split('|').map((x) => x.trim()).filter(Boolean);
+    const index = await stockAgeIndex(false);
+    const out = stockAgeTags(index, { ch: q.get('ch'), kind: q.get('kind'), key: q.get('key') || '', keys: split(q.get('keys')), tls: split(q.get('tls')), months: Number(q.get('months')) || 0, group: q.get('group') || '', unknown: q.get('unknown') === '1', limit: Number(q.get('limit')) || 2000 });
+    return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, ...out }), { 'Cache-Control': 'no-store' });
+  }
   // ---- notification preferences (per user: which types show, sound on/off, mobile push) ----
   if (p === '/api/stock-history' && method === 'GET') {
     if (!user) throw new HttpError(401, 'Login required');
@@ -3356,7 +3462,9 @@ async function handleApi(req, res, url) {
     cover: r.cover === null || r.cover === undefined || r.cover === '' ? null : Number(r.cover) || 0,
     priority: shortText(r.priority, 20), growth: Number(r.growth) || 0,
     sugNet: Number(r.sugNet) || 0, sugGross: Number(r.sugGross) || 0,
-    approved: Math.max(0, Math.round(Number(r.approved) || 0)), remark: shortText(r.remark, 160)
+    approved: Math.max(0, Math.round(Number(r.approved) || 0)), remark: shortText(r.remark, 160),
+    // v3.30 — agent ne jo maanga tha (admin qty badle tab bhi original dikhe: "50 → 40").
+    ...(r.requested !== undefined && r.requested !== null && r.requested !== '' ? { requested: Math.max(0, Math.round(Number(r.requested) || 0)) } : {})
   }));
   const tagRequestTls = (tls) => (Array.isArray(tls) ? tls : []).slice(0, 100).map((t) => ({
     name: shortText(t.name, 120), channel: t.channel === 'gv' ? 'gv' : 'ff',
@@ -3367,8 +3475,168 @@ async function handleApi(req, res, url) {
   const visibleTagRequests = (user) => {
     const all = workspaceStore().tagRequests || [];
     const list = user.role === 'admin' ? all : all.filter((r) => r.by === user.username);
-    return list.slice(-200).reverse();
+    return list.slice(-TAG_REQUEST_CAP).reverse();
   };
+
+  // ---- 🧑‍🤝‍🧑 v3.30 — har AGENT ki alag request (agent ka mobile · full address · pincode ke saath) ----
+  // Naya form: upar EMPLOYEE (office wala jo request laga raha hai) + neeche har agent ka block (naam ·
+  // mobile · address · pincode · class-wise qty, "➕ Add new agent"). Server har agent ki ALAG request
+  // banata hai — apna ID / status / edit / print label; ek submit ke saare agents `batch` ID se jude.
+  // Purana `rows[]` payload (purane cached client) bilkul pehle jaisa EK request banata hai.
+  const TAG_REQUEST_CAP = 500; // per-agent requests chhoti hoti hain — notify blob ab bhi halka rehta hai
+  const tagDigits = (v) => String(v ?? '').replace(/\D/g, '');
+  const tagNameKey = (v) => String(v ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+  /** Agent key — client (tagRequest.js → agentKeyOf) bilkul yahi banata hai (inline class edit isi se). */
+  const tagAgentKeyOf = (x) => `${x && x.channel === 'gv' ? 'gv' : 'ff'}|${String((x && x.agentId) || '').trim() ? `id:${String(x.agentId).trim()}` : `n:${tagNameKey(x && x.agentName)}`}`;
+  const tagRequestAgent = (a) => ({
+    name: shortText(a.agentName || a.name, 120), agentId: shortText(a.agentId, 40), tl: shortText(a.tl || a.tlName, 120),
+    channel: a.channel === 'gv' ? 'gv' : 'ff',
+    mobile: String(a.mobile || a.phone || '').replace(/[^\d+]/g, '').slice(0, 16),
+    address: shortText(String(a.address || a.fullAddress || '').replace(/\s+/g, ' '), 300),
+    pincode: tagDigits(a.pincode || a.pin).slice(0, 6),
+    ...(a.unmatched === true || a.matched === false ? { unmatched: true } : {}) // sheet data me nahi mila (naya agent?)
+  });
+  const tagMetricNum = (v) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? Math.round(n * 10) / 10 : 0; };
+  /** Submit ke waqt ka data snapshot (🚗 VC4+VC20 · 🚚 VC5+) — admin ko live data na mile to yahi dikhe. */
+  const tagRequestMetrics = (m) => {
+    if (!m || typeof m !== 'object') return null;
+    const g = (x) => ({ stock: tagMetricNum(x && x.stock), last: tagMetricNum(x && x.last), cur: tagMetricNum(x && x.cur) });
+    return { core: g(m.core), comm: g(m.comm), days: Math.max(0, Math.min(31, Math.round(Number(m.days) || 0))), ym: /^\d{4}-\d{2}$/.test(String(m.ym || '')) ? String(m.ym) : '' };
+  };
+  /** `agents[]` payload → validated per-agent drafts. `rules` = { askMobile, askAddress } (form config). */
+  function tagAgentDrafts(list, rules) {
+    const rl = rules || {};
+    const drafts = [];
+    (Array.isArray(list) ? list.slice(0, 40) : []).forEach((a, i) => {
+      if (!a || typeof a !== 'object') return;
+      const agent = tagRequestAgent(a);
+      const label = agent.name || agent.agentId || `Agent ${i + 1}`;
+      const rowsIn = (Array.isArray(a.rows) ? a.rows : []).slice(0, 20);
+      const hasQty = rowsIn.some((x) => Math.round(Number(x && x.approved) || 0) > 0);
+      if (!agent.name && !agent.agentId && !agent.mobile && !hasQty) return; // poora khaali block — chhod do
+      if (agent.name.length < 2 && !agent.agentId) throw new HttpError(400, `Agent ${i + 1}: agent ka naam / ID zaroori hai.`);
+      const mob = tagDigits(agent.mobile);
+      if ((rl.askMobile || mob) && (mob.length < 10 || mob.length > 13)) throw new HttpError(400, `${label}: agent ka mobile number zaroori hai (10 digit).`);
+      if (rl.askAddress) {
+        if (agent.address.length < 8) throw new HttpError(400, `${label}: agent ka full address zaroori hai (kam se kam 8 characters — house/street/area).`);
+        if (!/^\d{6}$/.test(agent.pincode)) throw new HttpError(400, `${label}: pincode zaroori hai (6 digit).`);
+      } else if (agent.pincode && !/^\d{6}$/.test(agent.pincode)) throw new HttpError(400, `${label}: pincode 6 digit ka hona chahiye.`);
+      const byCls = new Map();
+      tagRequestRows(rowsIn.map((x) => ({ ...(x || {}), agentId: agent.agentId, agentName: agent.name, tl: agent.tl, channel: agent.channel }))).forEach((x) => {
+        if (!/^VC\d{1,2}$/.test(x.cls) || x.approved <= 0) return;
+        const asked = x.requested === undefined ? x.approved : x.requested;
+        const prev = byCls.get(x.cls);
+        if (prev) { prev.approved += x.approved; prev.requested += asked; return; }
+        byCls.set(x.cls, { ...x, requested: asked });
+      });
+      const rows = [...byCls.values()];
+      if (!rows.length) throw new HttpError(400, `${label}: kam se kam ek class me qty daalo.`);
+      const total = rows.reduce((s, x) => s + x.approved, 0);
+      if (total > 100000) throw new HttpError(400, `${label}: quantity bahut zyada hai — dobara check karo.`);
+      drafts.push({ agent, rows, total, metrics: tagRequestMetrics(a.metrics) });
+    });
+    return drafts;
+  }
+  /** Store me daalo + cap: pehle sabse purani dispatched/rejected hatao, phir approved, phir koi bhi. */
+  function storeTagRequests(list) {
+    const w = workspaceStore();
+    w.tagRequests.push(...list);
+    let extra = w.tagRequests.length - TAG_REQUEST_CAP;
+    for (const drop of [['dispatched', 'rejected'], ['approved'], null]) {
+      if (extra <= 0) break;
+      for (let i = 0; i < w.tagRequests.length && extra > 0;) {
+        if (!drop || drop.includes(w.tagRequests[i].status)) { w.tagRequests.splice(i, 1); extra--; } else i++;
+      }
+    }
+    return w;
+  }
+  /** 🔁 v3.30 agent-wise duplicate — KISI BHI employee ki 30 din ke andar ki active (pending/approved)
+   *  request jisme wahi agent (ID / naam / mobile) + wahi class ho. Do employees ek hi agent ki request
+   *  dobara daalein to bhi pakda jaata hai. Dispatched/rejected = nayi demand, duplicate nahi. */
+  function tagAgentDupes(agents) {
+    const wanted = (Array.isArray(agents) ? agents : []).slice(0, 40).map((a) => {
+      const ag = tagRequestAgent(a || {});
+      const classes = new Set((Array.isArray(a && a.rows) ? a.rows : []).filter((x) => Math.round(Number(x && x.approved) || 0) > 0).map((x) => shortText(x.cls, 12).toUpperCase()));
+      return { id: ag.agentId, name: tagNameKey(ag.name), mobile: tagDigits(ag.mobile).slice(-10), classes, label: ag.name || ag.agentId };
+    }).filter((x) => (x.id || x.name || x.mobile.length === 10) && x.classes.size);
+    if (!wanted.length) return [];
+    const nowMs = Date.now();
+    const out = [];
+    for (const r of (workspaceStore().tagRequests || [])) {
+      if (!r) continue;
+      const status = String(r.status || 'pending').toLowerCase();
+      if (status !== 'pending' && status !== 'approved') continue;
+      const t = new Date(r.at || r.updatedAt || 0).getTime();
+      if (t && nowMs - t > 30 * 24 * 3600e3) continue;
+      const rMob = tagDigits(r.agent && r.agent.mobile).slice(-10);
+      const matched = [];
+      for (const want of wanted) {
+        for (const x of (r.rows || [])) {
+          const cls = String((x && x.cls) || '').toUpperCase();
+          if (!want.classes.has(cls) || !(Number(x.approved) > 0)) continue;
+          const same = (want.id && String(x.agentId || '').trim() === want.id) || (want.name && tagNameKey(x.agentName) === want.name) || (want.mobile.length === 10 && rMob === want.mobile);
+          const label = `${x.agentName || want.label} · ${cls}`;
+          if (same && !matched.includes(label)) matched.push(label);
+        }
+      }
+      if (!matched.length) continue;
+      out.push({
+        id: r.id, at: r.at || '', status: r.status || 'pending', total: Number(r.total) || 0, rows: (r.rows || []).length,
+        byName: r.byName || '', agentName: (r.agent && r.agent.name) || ((r.rows || [])[0] || {}).agentName || '', matched: matched.slice(0, 8)
+      });
+    }
+    return out.slice(-8).reverse();
+  }
+  /** Public status card — sirf zaroori fields (address / IP kabhi nahi). */
+  const tagStatusView = (r) => {
+    const rows = r.rows || [];
+    const names = [...new Set(rows.map((x) => x.agentName).filter(Boolean))];
+    return {
+      id: r.id, at: r.at, status: r.status || 'pending', total: Number(r.total) || 0, byName: r.byName || '', batch: r.batch || '',
+      agentName: (r.agent && r.agent.name) || names[0] || '', agentId: (r.agent && r.agent.agentId) || (rows[0] && rows[0].agentId) || '',
+      rows: rows.length, agents: Math.max(1, names.length),
+      classes: rows.map((x) => ({ cls: x.cls, requested: x.requested === undefined ? Number(x.approved) || 0 : Number(x.requested) || 0, approved: Number(x.approved) || 0, ...(names.length > 1 ? { agent: x.agentName || '' } : {}) })),
+      adminNote: r.adminNote || '', note: r.note || '', updatedAt: r.updatedAt || r.at,
+      sheetSynced: !!r.sheetSync && !r.sheetSync.error
+    };
+  };
+  /** Submit response me har agent ki chhoti summary (done screen par Request ID list). */
+  const tagBatchSummary = (r) => ({
+    id: r.id, at: r.at, status: r.status, total: r.total, rows: (r.rows || []).length, byName: r.byName,
+    agentName: (r.agent && r.agent.name) || '', agentId: (r.agent && r.agent.agentId) || '', mobile: (r.agent && r.agent.mobile) || '',
+    pincode: (r.agent && r.agent.pincode) || '', classes: (r.rows || []).map((x) => ({ cls: x.cls, qty: x.approved })),
+    duplicates: r.dupCount || 0, sheetSync: !!r.sheetSync
+  });
+  /** Drafts → requests (ek batch): store + persist + 📗 sheet (EK appendrows call, order bana rahe). */
+  async function createTagBatch(drafts, ctx) {
+    const now = new Date().toISOString();
+    const batch = workspaceId('tagbatch');
+    const created = drafts.map((d) => ({
+      id: workspaceId('tagreq'), at: now, batch, by: ctx.by, byName: ctx.byName,
+      employee: ctx.employee, agent: d.agent,
+      ...(ctx.source ? { source: ctx.source, ip: ctx.ip } : {}),
+      status: 'pending', note: ctx.note || '', adminNote: '',
+      rows: d.rows, total: d.total, ...(d.metrics ? { metrics: d.metrics } : {}),
+      updatedAt: now, updatedBy: ctx.updatedBy,
+      ...(d.dupes && d.dupes.length ? { dupOf: d.dupes.map((x) => x.id), dupCount: d.dupes.length } : {})
+    }));
+    storeTagRequests(created);
+    await persist('notify');
+    if (tagSheetConfig().enabled && tagSheetConfig().onSubmit) {
+      pushTagRequestsToSheet(created, 'new').then(() => persist('notify').catch(() => {})).catch((err) => {
+        console.warn('tag-request sheet sync:', err.message);
+        const at = new Date().toISOString();
+        created.forEach((r) => { r.sheetSync = { at, event: 'new', error: String(err.message || err).slice(0, 160) }; });
+      });
+    }
+    return {
+      batch, created,
+      total: created.reduce((s, r) => s + r.total, 0),
+      rows: created.reduce((s, r) => s + r.rows.length, 0),
+      dupCount: created.filter((r) => r.dupCount).length
+    };
+  }
+  const tagBatchLine = (created) => created.slice(0, 4).map((r) => `${r.agent.name || r.agent.agentId} ${r.total}${r.agent.pincode ? ` (📮${r.agent.pincode})` : ''}`).join(', ') + (created.length > 4 ? ` +${created.length - 4}` : '');
 
   // ---- 📗 Google Sheet sync (tag requests → connected sheet me direct entry) --------------------
   // Admin config karta hai: kaunsa tab, kaunse columns, kaunsi rows (per class / per agent / per
@@ -3380,14 +3648,16 @@ async function handleApi(req, res, url) {
     last: 'Last month', cur: 'Current MTD', growth: 'Growth %', stock: 'Stock', cover: 'Cover (days)',
     priority: 'Priority', sugNet: 'Suggested (stock −)', sugGross: 'Suggested (w/o stock)',
     approved: 'Approved qty', remark: 'Remark', note: 'Note', adminNote: 'Admin note',
-    empName: 'Employee', empMobile: 'Employee mobile', empAddress: 'Employee address', empPincode: 'Pincode'
+    empName: 'Employee', empMobile: 'Employee mobile', empAddress: 'Employee address', empPincode: 'Pincode',
+    // v3.30 — delivery ab AGENT ke address par (employee form me agent ka mobile/address/pincode bharta hai)
+    agentMobile: 'Agent mobile', agentAddress: 'Agent address', agentPincode: 'Agent pincode', requested: 'Requested qty'
   };
   const tagSheetConfig = () => {
     const w = workspaceStore();
     if (!w.tagRequestSheet || typeof w.tagRequestSheet !== 'object') {
       w.tagRequestSheet = {
         enabled: false, tab: 'Tag Requests', sheetLink: '', spreadsheetId: '', onSubmit: true, onStatus: true,
-        rowMode: 'class', columns: ['date', 'time', 'by', 'agentId', 'agent', 'tl', 'channel', 'cls', 'stock', 'cur', 'priority', 'approved', 'remark', 'status']
+        rowMode: 'class', columns: ['date', 'time', 'by', 'agentId', 'agent', 'agentMobile', 'agentAddress', 'agentPincode', 'tl', 'channel', 'cls', 'stock', 'cur', 'priority', 'approved', 'remark', 'status']
       };
     }
     // v3.27 — link me sheet ka ID ho to wahi (alag sheet) target banta hai.
@@ -3416,6 +3686,10 @@ async function handleApi(req, res, url) {
       case 'empMobile': return (req.employee && req.employee.mobile) || '';
       case 'empAddress': return (req.employee && req.employee.address) || '';
       case 'empPincode': return (req.employee && req.employee.pincode) || '';
+      case 'agentMobile': return (req.agent && req.agent.mobile) || '';
+      case 'agentAddress': return (req.agent && req.agent.address) || '';
+      case 'agentPincode': return (req.agent && req.agent.pincode) || '';
+      case 'requested': return x.requested === undefined || x.requested === null ? Number(x.approved) || 0 : Number(x.requested) || 0;
       case 'status': return req.status || '';
       case 'agentId': return x.agentId || '';
       case 'agent': return x.agentName || '';
@@ -3448,16 +3722,21 @@ async function handleApi(req, res, url) {
       const byAgent = new Map();
       rowsIn.forEach((x) => {
         const key = `${x.agentId || ''}|${x.agentName || ''}`;
-        const a = byAgent.get(key) || { ...x, cls: '', approved: 0 };
+        const a = byAgent.get(key) || { ...x, cls: '', approved: 0, requested: 0 };
         a.cls = [a.cls, x.cls].filter(Boolean).join('+');
         a.approved = (Number(a.approved) || 0) + (Number(x.approved) || 0);
+        a.requested = (Number(a.requested) || 0) + (x.requested === undefined || x.requested === null ? Number(x.approved) || 0 : Number(x.requested) || 0);
         byAgent.set(key, a);
       });
       data = [...byAgent.values()].map(mk);
     } else if (cfg.rowMode === 'request') {
       const sum = rowsIn.reduce((s, x) => s + (Number(x.approved) || 0), 0);
+      const oneAgent = new Set(rowsIn.map((x) => `${x.agentId || ''}|${x.agentName || ''}`)).size === 1;
       const agg = {
-        agentId: '', agentName: `${rowsIn.length} rows · ${new Set(rowsIn.map((x) => x.agentName)).size} agents`,
+        // v3.30 per-agent request = ek hi agent → uska naam/ID (warna purana "N rows · M agents")
+        agentId: oneAgent && rowsIn[0] ? rowsIn[0].agentId || '' : '',
+        agentName: oneAgent && rowsIn[0] ? rowsIn[0].agentName || '' : `${rowsIn.length} rows · ${new Set(rowsIn.map((x) => x.agentName)).size} agents`,
+        requested: rowsIn.reduce((s, x) => s + (x.requested === undefined || x.requested === null ? Number(x.approved) || 0 : Number(x.requested) || 0), 0),
         tl: [...new Set(rowsIn.map((x) => x.tl).filter(Boolean))].join(', '), channel: rowsIn[0] ? rowsIn[0].channel : 'ff',
         cls: [...new Set(rowsIn.map((x) => x.cls).filter(Boolean))].join(', '),
         last: rowsIn.reduce((s, x) => s + (Number(x.last) || 0), 0), cur: rowsIn.reduce((s, x) => s + (Number(x.cur) || 0), 0),
@@ -3471,15 +3750,19 @@ async function handleApi(req, res, url) {
     }
     return { header, rows: data };
   }
-  /** Request ko configured sheet me push karo. `throwOnFail` sirf manual/test push ke liye. */
-  async function pushTagRequestToSheet(req, event, throwOnFail) {
+  /** Ek ya kai requests (ek submit ka batch) ek hi appendrows call me — rows ka order bana rehta hai aur
+   *  Apps Script par kam calls. `throwOnFail` sirf manual/test push ke liye. */
+  async function pushTagRequestsToSheet(list, event, throwOnFail) {
+    const reqs = (Array.isArray(list) ? list : [list]).filter(Boolean);
     const cfg = tagSheetConfig();
     const store = sheetSyncStore();
     if (!cfg.enabled || !store) {
       if (throwOnFail) throw new HttpError(400, !store ? 'Apps Script connect nahi hai — pehle Settings → Backup me APPS_SCRIPT_URL/SECRET configure karo (ya sheet storage setup).' : 'Sheet sync OFF hai — pehle Tag Request page par 📗 Google Sheet sync ON karo.');
       return null;
     }
-    const { header, rows } = tagSheetRows(req, cfg, event);
+    let header = [];
+    const rows = [];
+    const counts = reqs.map((r) => { const out = tagSheetRows(r, cfg, event); header = out.header; rows.push(...out.rows); return out.rows.length; });
     if (!rows.length) { if (throwOnFail) throw new HttpError(400, 'Sheet ke liye koi row nahi bani.'); return null; }
     const tabName = String(cfg.tab || 'Tag Requests').slice(0, 80) || 'Tag Requests';
     // v3.27 — sheetLink me ID diya ho to entry US ALAG SHEET me jaati hai (Apps Script openById
@@ -3490,15 +3773,23 @@ async function handleApi(req, res, url) {
     // wali sheet me likh deta. Isliye response ke URL se verify karo ki entry SAHI sheet me gayi.
     if (targetId && out && out.url && !String(out.url).includes(targetId)) {
       const msg = `Entry galat sheet me gayi (${out.spreadsheet || 'Apps Script wali sheet'}) — Render par naya google-apps-script/Code.gs (v3.27) deploy karo, phir dobara bhejo.`;
-      req.sheetSync = { at: new Date().toISOString(), event, error: msg.slice(0, 160), tab: tabName };
+      const at = new Date().toISOString();
+      reqs.forEach((r) => { r.sheetSync = { at, event, error: msg.slice(0, 160), tab: tabName }; });
       if (throwOnFail) throw new HttpError(502, msg);
       throw new Error(msg);
     }
-    req.sheetSync = {
-      at: new Date().toISOString(), event, added: Number(out.added) || rows.length, tab: out.tab || tabName,
-      spreadsheet: out.spreadsheet || '', url: out.url || '', targetId
-    };
+    const at = new Date().toISOString();
+    reqs.forEach((r, i) => {
+      r.sheetSync = {
+        at, event, added: reqs.length === 1 ? (Number(out.added) || counts[i]) : counts[i], tab: out.tab || tabName,
+        spreadsheet: out.spreadsheet || '', url: out.url || '', targetId
+      };
+    });
     return out;
+  }
+  /** Request ko configured sheet me push karo (single). */
+  async function pushTagRequestToSheet(req, event, throwOnFail) {
+    return pushTagRequestsToSheet([req], event, throwOnFail);
   }
   if (p === '/api/tag-requests' && method === 'GET') {
     if (user.role !== 'admin' && !(user.permissions || []).includes('tagRequest')) throw new HttpError(403, 'Tag Request access disabled.');
@@ -3507,19 +3798,43 @@ async function handleApi(req, res, url) {
   if (p === '/api/tag-requests' && method === 'POST') {
     if (user.role !== 'admin' && !(user.permissions || []).includes('tagRequest')) throw new HttpError(403, 'Tag Request access disabled.');
     const body = await readBody(req);
+    // 🧑‍🤝‍🧑 v3.30 — naya form: employee + har agent ka block → har agent ki ALAG request (batch).
+    if (Array.isArray(body.agents) && body.agents.length) {
+      const pcfg = publicTagFormConfig(); // wahi mandatory fields jo employee link par hain (ek jaisa form)
+      const drafts = tagAgentDrafts(body.agents, { askMobile: pcfg.askMobile !== false, askAddress: pcfg.askAddress !== false });
+      if (!drafts.length) throw new HttpError(400, 'Kam se kam ek agent chahiye (naam + class qty).');
+      const emp = body.employee && typeof body.employee === 'object' ? body.employee : {};
+      const employee = { name: shortText(emp.name, 80) || user.name || user.username, ...(shortText(emp.office || emp.branch, 80) ? { office: shortText(emp.office || emp.branch, 80) } : {}) };
+      drafts.forEach((d) => { d.dupes = tagAgentDupes([{ ...d.agent, rows: d.rows }]); });
+      const out = await createTagBatch(drafts, { by: user.username, byName: user.name || user.username, employee, note: shortText(body.note, 300), updatedBy: user.username });
+      const n = out.created.length;
+      try {
+        recordNotification({
+          type: 'request', title: `🏷️ Tag request${out.dupCount ? ' 🔁 duplicate' : ''} · ${employee.name}`,
+          body: `${n} agent${n > 1 ? 's' : ''} · ${out.total} tags — ${tagBatchLine(out.created)}${body.note ? ` · ${shortText(body.note, 80)}` : ''}`,
+          target: 'admin', routeKey: 'tagRequest',
+          meta: { requestId: out.created[0].id, requestIds: out.created.map((r) => r.id), batch: out.batch, rows: out.rows, agents: n, total: out.total, duplicates: out.dupCount, username: user.username, link: '#/tagRequest?view=requests' }
+        });
+        recordNotification({
+          type: 'request', title: '✅ Tag request bhej di gayi',
+          body: `${n} agent${n > 1 ? 's' : ''} · ${out.total} tags — admin ke paas pahunch gayi. Status Tag Request page par dikhega.`,
+          target: `user:${user.username}`, meta: { requestId: out.created[0].id, link: '#/tagRequest?view=requests' }
+        });
+      } catch { /* notification optional */ }
+      logAudit(user, 'tag_request_created', { target: out.batch, note: `${n} agents · ${out.total} tags · ${out.created.map((r) => r.id).join(',')}`.slice(0, 300), ip: clientIp(req) });
+      return sendJson(res, 201, { ok: true, request: out.created[0], requests: out.created, batch: { id: out.batch, total: out.total, agents: n, rows: out.rows } });
+    }
     const rows = tagRequestRows(body.rows);
     if (!rows.length) throw new HttpError(400, 'Kam se kam ek row chahiye (agent + tag class).');
     const total = rows.reduce((s, r) => s + r.approved, 0);
     if (!total) throw new HttpError(400, 'Approved qty 0 hai — kuch quantity daalo.');
-    const w = workspaceStore();
     const now = new Date().toISOString();
     const row = {
       id: workspaceId('tagreq'), at: now, by: user.username, byName: user.name || user.username,
       status: 'pending', note: shortText(body.note, 300), adminNote: '',
       rows, tls: tagRequestTls(body.tls), total, updatedAt: now, updatedBy: user.username
     };
-    w.tagRequests.push(row);
-    if (w.tagRequests.length > 120) w.tagRequests.splice(0, w.tagRequests.length - 120);
+    storeTagRequests([row]);
     await persist('notify');
     // 📗 Google Sheet sync ON ho to entry direct configured sheet me chali jaati hai (fire & forget —
     // sheet fail hone se request submit kabhi rukti nahi; status drawer me dikh jaata hai).
@@ -3555,6 +3870,9 @@ async function handleApi(req, res, url) {
     const owner = row.by === user.username;
     if (user.role !== 'admin' && !(owner && row.status === 'pending')) throw new HttpError(403, 'Sirf admin (ya pending request ka owner) ise update kar sakta hai.');
     const body = await readBody(req);
+    // Pehle validate, phir badlo — invalid status par aadhi-adhuri edit memory me na reh jaaye.
+    if (body.status !== undefined && !['pending', 'approved', 'dispatched', 'rejected'].includes(body.status)) throw new HttpError(400, 'Status invalid hai.');
+    if (body.status !== undefined && body.status !== row.status && user.role !== 'admin') throw new HttpError(403, 'Status sirf admin badal sakta hai.');
     if (body.rows !== undefined) {
       const next = tagRequestRows(body.rows);
       if (next.length) {
@@ -3562,6 +3880,40 @@ async function handleApi(req, res, url) {
         row.rows = row.rows.map((r, i) => ({ ...r, approved: next[i] ? next[i].approved : r.approved, remark: next[i] ? next[i].remark : r.remark }));
         row.total = row.rows.reduce((s, r) => s + (Number(r.approved) || 0), 0);
       }
+    }
+    // ✏️ v3.30 — table row me hi class-wise edit: { classQty: { VC4: 40, VC5: 10 }, agentKey?, classData? }.
+    // Agent ka original maanga hua qty `requested` me safe rehta hai ("50 → 40"); nayi class admin jod
+    // sakta hai (classData = us class ka live stock/issuance snapshot). agentKey sirf purani multi-agent
+    // request ke liye — us agent ki rows hi badalti hain.
+    if (body.classQty && typeof body.classQty === 'object' && !Array.isArray(body.classQty)) {
+      const agentKey = shortText(body.agentKey, 200);
+      const inScope = (x) => !agentKey || tagAgentKeyOf(x) === agentKey;
+      const next = row.rows.map((x) => ({ ...x })); // clone — validation fail ho to asli request na badle
+      const tpl = next.find(inScope) || next[0] || {};
+      const extra = body.classData && typeof body.classData === 'object' ? body.classData : {};
+      for (const [clsRaw, qtyRaw] of Object.entries(body.classQty).slice(0, 16)) {
+        const cls = shortText(clsRaw, 12).toUpperCase();
+        if (!/^VC\d{1,2}$/.test(cls)) continue;
+        const qty = Math.max(0, Math.min(100000, Math.round(Number(qtyRaw) || 0)));
+        const hit = next.find((x) => inScope(x) && String(x.cls).toUpperCase() === cls);
+        if (hit) {
+          if (hit.requested === undefined) hit.requested = Number(hit.approved) || 0;
+          hit.approved = qty;
+        } else if (qty > 0 && next.length < 150) {
+          const d = extra[cls] && typeof extra[cls] === 'object' ? extra[cls] : {};
+          const ag = row.agent || {};
+          next.push({
+            agentId: tpl.agentId || ag.agentId || '', agentName: tpl.agentName || ag.name || '', tl: tpl.tl || ag.tl || '',
+            channel: (tpl.channel || ag.channel) === 'gv' ? 'gv' : 'ff', cls,
+            last: Number(d.last) || 0, cur: Number(d.cur) || 0, stock: Number(d.stock) || 0, cover: null, priority: '',
+            growth: 0, sugNet: 0, sugGross: 0, requested: 0, approved: qty, remark: `admin ne joda (${user.name || user.username})`.slice(0, 160)
+          });
+        }
+      }
+      const nextTotal = next.reduce((s, r) => s + (Number(r.approved) || 0), 0);
+      if (nextTotal > 100000) throw new HttpError(400, 'Quantity bahut zyada hai — dobara check karo.');
+      row.rows = next;
+      row.total = nextTotal;
     }
     const prevStatus = row.status;
     if (body.status !== undefined) {
@@ -3629,7 +3981,8 @@ async function handleApi(req, res, url) {
       hasSheetSync: !!sheet.enabled
     };
   };
-  const publicTagFind = (id) => (workspaceStore().tagRequests || []).find((r) => r.id === id && r.source === 'public-link');
+  // v3.30 — naye format (agent block wali) requests bhi ID se mil jaati hain, chahe login form se bani hon.
+  const publicTagFind = (id) => (workspaceStore().tagRequests || []).find((r) => r.id === id && (r.source === 'public-link' || (r.agent && typeof r.agent === 'object')));
   // 🔁 Duplicate detector (v3.27.1) — employee ke naam se 30 din ke andar ki active requests dhoondta hai
   // jisme koi same agent × class row ho. Employee ko submit se pehle warning dikhti hai ("already pending"),
   // aur admin ke notification/request me bhi 🔁 mark ho jaata hai — dobara bhejne par pata rahe.
@@ -3673,6 +4026,52 @@ async function handleApi(req, res, url) {
     const emp = body.employee && typeof body.employee === 'object' ? body.employee : body;
     const employeeName = shortText(emp.name || emp.employeeName || body.employeeName, 80);
     if (employeeName.length < 2) throw new HttpError(400, 'Employee name zaroori hai (kam se kam 2 characters).');
+    // 🧑‍🤝‍🧑 v3.30 — naya form: upar sirf employee ka naam (office wala), neeche har AGENT ka block
+    // (naam · mobile · full address · pincode · class-wise qty). Har agent = alag request (ek batch).
+    if (Array.isArray(body.agents) && body.agents.length) {
+      const office = shortText(emp.office || emp.branch, 80);
+      const drafts = tagAgentDrafts(body.agents, { askMobile: cfg.askMobile !== false, askAddress: cfg.askAddress !== false });
+      if (!drafts.length) throw new HttpError(400, 'Kam se kam ek agent chahiye (naam + mobile + class qty).');
+      const maxRows = Math.min(150, Math.max(5, Number(cfg.maxRows) || 60));
+      const rowCount = drafts.reduce((s, d) => s + d.rows.length, 0);
+      if (rowCount > maxRows) throw new HttpError(400, `Ek baar me max ${maxRows} class-rows allowed hain — kuch agents agli request me bhejo.`);
+      const grand = drafts.reduce((s, d) => s + d.total, 0);
+      if (grand > 100000) throw new HttpError(400, 'Quantity bahut zyada hai — dobara check karo.');
+      const ip = clientIp(req);
+      if (!publicRateOk(`tag:${ip}`, 15, 60 * 60e3)) throw new HttpError(429, 'Is device se bahut requests aa gayi hain — kuch der baad try karo.');
+      drafts.forEach((d) => { d.dupes = tagAgentDupes([{ ...d.agent, rows: d.rows }]); });
+      const note = shortText(body.note, 300);
+      const out = await createTagBatch(drafts, {
+        by: `public:${normUser(employeeName) || 'employee'}`, byName: employeeName,
+        employee: { name: employeeName, ...(office ? { office } : {}) },
+        source: 'public-link', ip: String(ip || '').slice(0, 45), note, updatedBy: 'public-link'
+      });
+      const n = out.created.length;
+      const dupIds = [...new Set(out.created.flatMap((r) => r.dupOf || []))];
+      try {
+        recordNotification({
+          type: 'request', title: `🏷️ Tag request (employee link)${out.dupCount ? ' 🔁 duplicate' : ''} · ${employeeName}`,
+          body: `${n} agent${n > 1 ? 's' : ''} · ${out.total} tags — ${tagBatchLine(out.created)}${office ? ` · ${office}` : ''}${note ? ` · ${note.slice(0, 80)}` : ''}${out.dupCount ? ` · 🔁 ${out.dupCount} agent ki request pehle se active (${dupIds.slice(0, 3).join(', ')})` : ''}`,
+          target: 'admin', routeKey: 'tagRequest',
+          meta: { requestId: out.created[0].id, requestIds: out.created.map((r) => r.id), batch: out.batch, rows: out.rows, agents: n, total: out.total, publicLink: true, note, duplicates: out.dupCount, dupOf: dupIds, link: '#/tagRequest?view=requests' }
+        });
+      } catch { /* notification optional */ }
+      logAudit({ username: 'public-link', role: 'public', name: employeeName }, 'tag_request_public_created', {
+        target: out.batch, note: `${n} agents · ${out.total} tags · ${employeeName} · ${out.created.map((r) => `${r.id}${r.agent.mobile ? ` 📱${r.agent.mobile}` : ''}`).join(', ')}${out.dupCount ? ` · 🔁 ${dupIds.join(',')}` : ''}`.slice(0, 400), ip
+      });
+      const dupReqs = out.created.filter((r) => r.dupCount);
+      return sendJson(res, 201, {
+        ok: true,
+        batch: { id: out.batch, total: out.total, agents: n, rows: out.rows },
+        request: tagBatchSummary(out.created[0]),
+        requests: out.created.map(tagBatchSummary),
+        warnings: dupReqs.length ? [{
+          code: 'duplicate', count: dupReqs.length,
+          message: `${dupReqs.length} agent ki request pehle se active hai (same agent + class) — admin ko 🔁 mark ke saath dikhegi.`,
+          requests: dupIds.map((id) => ({ id }))
+        }] : []
+      });
+    }
     const mobile = String(emp.mobile || emp.phone || '').replace(/[^\d+]/g, '').slice(0, 16);
     const office = shortText(emp.office || emp.branch, 80);
     // 🏠 address + 📮 pincode — employee link par mandatory (admin chahe to Settings se band kar sakta hai).
@@ -3704,9 +4103,7 @@ async function handleApi(req, res, url) {
       rows, tls: tagRequestTls(body.tls), total, updatedAt: now, updatedBy: 'public-link',
       ...(dupes.length ? { dupOf: dupes.map((d) => d.id), dupCount: dupes.length } : {})
     };
-    const w = workspaceStore();
-    w.tagRequests.push(row);
-    if (w.tagRequests.length > 200) w.tagRequests.splice(0, w.tagRequests.length - 200);
+    storeTagRequests([row]);
     await persist('notify');
     // 📗 Sheet sync ON ho to public request bhi seedha usi Google Sheet me entry banati hai.
     if (tagSheetConfig().enabled && tagSheetConfig().onSubmit) {
@@ -3742,6 +4139,12 @@ async function handleApi(req, res, url) {
     const body = await readBody(req);
     const emp = body.employee && typeof body.employee === 'object' ? body.employee : body;
     const employeeName = shortText(emp.name || emp.employeeName || body.name, 80);
+    // v3.30 — naya form: agent-wise (kisi bhi employee ne wahi agent + class daala ho to warning).
+    if (Array.isArray(body.agents) && body.agents.length) {
+      const ip = clientIp(req);
+      if (!publicRateOk(`tagcheck:${ip}`, 90, 10 * 60e3)) throw new HttpError(429, 'Bahut zyada checks — thodi der baad try karo.');
+      return sendJson(res, 200, { ok: true, mode: 'agent', name: employeeName, checked: Math.min(40, body.agents.length), duplicates: tagAgentDupes(body.agents) });
+    }
     if (employeeName.length < 2) throw new HttpError(400, 'Naam likho (kam se kam 2 characters) — phir purani request check karenge.');
     const ip = clientIp(req);
     if (!publicRateOk(`tagcheck:${ip}`, 90, 10 * 60e3)) throw new HttpError(429, 'Bahut zyada checks — thodi der baad try karo.');
@@ -3750,10 +4153,28 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { ok: true, name: employeeName, checked: rows.length, duplicates: dupes });
   }
   if (p === '/api/public/tag-request/status' && method === 'GET') {
+    // 📱 v3.30 — agent ke mobile number se saari requests (jo request lagate waqt diya tha). Minimum
+    // fields hi jaate hain (status · classes · qty · admin note) — address / IP kabhi nahi.
+    const mobileRaw = String(url.searchParams.get('mobile') || '').trim();
+    if (mobileRaw) {
+      const m = tagDigits(mobileRaw);
+      if (m.length < 10 || m.length > 13) throw new HttpError(400, 'Agent ka 10 digit mobile number daalo (jo request lagate waqt diya tha).');
+      const ip = clientIp(req);
+      if (!publicRateOk(`tagstatus:${ip}`, 60, 10 * 60e3)) throw new HttpError(429, 'Bahut zyada search — thodi der baad try karo.');
+      const last10 = m.slice(-10);
+      const list = (workspaceStore().tagRequests || []).filter((r) => {
+        if (!r) return false;
+        const am = tagDigits(r.agent && r.agent.mobile).slice(-10);
+        if (am) return am === last10;
+        return r.source === 'public-link' && tagDigits(r.employee && r.employee.mobile).slice(-10) === last10; // purani (v3.27) requests
+      }).slice(-25).reverse().map(tagStatusView);
+      return sendJson(res, 200, { ok: true, mobile: `••••••${last10.slice(-4)}`, count: list.length, requests: list });
+    }
     const id = shortText(url.searchParams.get('id'), 60);
-    if (!id) throw new HttpError(400, 'Request ID daalo (submit ke baad mila tha).');
+    if (!id) throw new HttpError(400, 'Agent ka mobile number ya Request ID daalo.');
     const row = publicTagFind(id);
     if (!row) throw new HttpError(404, 'Is ID ki koi request nahi mili — ID check karo.');
+    const view = tagStatusView(row);
     return sendJson(res, 200, {
       ok: true,
       request: {
@@ -3761,6 +4182,7 @@ async function handleApi(req, res, url) {
         rows: (row.rows || []).length, agents: new Set((row.rows || []).map((x) => x.agentName)).size,
         adminNote: row.adminNote || '', note: row.note || '',
         employee: row.employee ? { name: row.employee.name || '', mobile: row.employee.mobile || '', address: row.employee.address || '', pincode: row.employee.pincode || '' } : null,
+        agentName: view.agentName, agentId: view.agentId, classes: view.classes, batch: view.batch,
         sheetSynced: !!row.sheetSync && !row.sheetSync.error,
         updatedAt: row.updatedAt || row.at
       }
@@ -4490,6 +4912,29 @@ async function personalTeamAgents(link) {
     byAgent.get(name).set(dk, (byAgent.get(name).get(dk) || 0) + serverNumber(serverCell(row, Math.max(0, cells.length - 1))));
   }
   return byAgent;
+}
+
+/** 🧑‍💼 Agent personal link par uska TL (EIR ke recent rows me sabse zyada wala TL naam).
+    v3.31 fix: ye function call ho raha tha par define nahi tha → har agent /p/ link 500 deta tha. */
+async function personalAgentTl(link) {
+  try {
+    const c = personalConfig(link);
+    const { start, today } = personalWindow();
+    const tq = `select ${c.tlCol}, ${c.masterCol}, count(${c.tagCol}) where ${c.tagCol} is not null and ${c.dateCol} >= date '${start}' and ${c.dateCol} <= date '${today}' and ${c.nameCol} = ${gvizLiteral(link.name)} group by ${c.tlCol}, ${c.masterCol}`;
+    const params = new URLSearchParams({ id: String(c.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet: c.sheet, tq });
+    const out = await fetchUpstreamCached(upstreamUrl(params));
+    if (out.status < 200 || out.status >= 300) return '';
+    const table = parseGvizServer(out.body);
+    let best = '', bestN = -1;
+    for (const row of table.rows || []) {
+      const tl = serverCell(row, 0).trim();
+      const gvRow = isGvPersonalRow(serverCell(row, 1));
+      if (!tl || (c.source === 'gv' && !gvRow) || (c.source === 'ff' && gvRow)) continue;
+      const n = serverNumber(serverCell(row, 2));
+      if (n > bestN) { best = tl; bestN = n; }
+    }
+    return best;
+  } catch { return ''; }
 }
 
 function personalStats(rows) {

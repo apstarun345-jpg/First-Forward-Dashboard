@@ -9,6 +9,22 @@ window.FF = window.FF || {};
 FF.pages = FF.pages || {};
 (function (FF) {
   'use strict';
+  let lastRoster = [];   // Direct Agents page ka abhi wala roster (KPI drill lists)
+  function registerDirectLists() {
+    if (!FF.kpiDetail || !FF.kpiDetail.registerList || registerDirectLists.done) return;
+    registerDirectLists.done = true;
+    const e = (v) => FF.util.esc(v);
+    const cols = [['Ch', (r) => (r.ch === 'gv' ? '🟩 GV' : '🟦 FF')], ['Agent', (r) => `<b>${e(r.name)}</b> <small class="dim">${e(r.id || '')}</small>`], ['Reason', (r) => e(r.reason || '—')], ['Priority', (r) => e(String(r.priority || '').replace(/^[^\p{L}]+/u, '') || '—')], ['Stock', (r) => FF.util.fmt(r.stock), 1], ['MTD issued', (r) => FF.util.fmt(r.issued), 1], ['🏷️ Suggested', (r) => FF.util.fmt(r.suggested || 0), 1]];
+    const hm = (p) => /high|medium/i.test(String(p || ''));
+    const make = (name, filt, kicker) => FF.kpiDetail.registerList(name, () => {
+      const rows = lastRoster.filter(filt).sort((a, b) => (b.issued || 0) - (a.issued || 0) || (b.stock || 0) - (a.stock || 0));
+      return { kicker, unit: 'direct agents', rows, columns: cols, agent: (r) => ({ name: r.name, id: r.id, ch: r.ch }), sub: `Stock <b>${FF.util.fmt(FF.util.sum(rows, (r) => r.stock))}</b> · MTD <b>${FF.util.fmt(FF.util.sum(rows, (r) => r.issued))}</b> · suggested tags <b>${FF.util.fmt(FF.util.sum(rows, (r) => r.suggested || 0))}</b>` };
+    });
+    make('direct.all', () => true, 'Direct agents · all');
+    make('direct.gv', (r) => r.ch === 'gv', 'Direct agents · GV (no TL)');
+    make('direct.ff', (r) => r.ch === 'ff', 'Direct agents · FF (APS)');
+    make('direct.tag', (r) => hm(r.priority), 'Direct agents · tag required (High/Medium)');
+  }
   const U = FF.util;
   const esc = U.esc, clean = U.clean;
 
@@ -135,8 +151,8 @@ FF.pages = FF.pages || {};
           stock: Number(a.stockTotal || 0), issued: Number(a.curTotal || 0),
           status: clean(a.agentStatus || ''), priority: clean(a.priority || a.agentPriority || ''),
           vc4Stock: Number(a.stockVc4 || 0),
-          suggested: suggestQty({ daily: U.runRate(a.curVc4 || 0), stock: a.stockVc4 }),
-          suggestedGross: suggestGrossQty({ daily: U.runRate(a.curVc4 || 0) }),
+          suggested: suggestQty({ daily: U.runRate(a.curVc4 || 0, 'ff'), stock: a.stockVc4 }),
+          suggestedGross: suggestGrossQty({ daily: U.runRate(a.curVc4 || 0, 'ff') }),
           route: `#/performance?q=${encodeURIComponent(a.name || '')}`
         });
       });
@@ -146,7 +162,8 @@ FF.pages = FF.pages || {};
     // from the shared EIR ledger so Direct Agents cannot revive report snapshot totals.
     await FF.store.need('daily').catch(() => []);
     const gvLatest = FF.gv.latestDate && FF.gv.latestDate();
-    const gvCurrent = gvLatest ? FF.gv.agentRollup(FF.util.ymKey(gvLatest)) : [];
+    const gvYm = gvLatest ? FF.util.ymKey(gvLatest) : '';
+    const gvCurrent = gvLatest ? FF.gv.agentRollup(gvYm) : [];
     const gvEirBy = new Map();
     gvCurrent.forEach((a) => {
       [a.agentId, a.agentName].filter(Boolean).forEach((v) => gvEirBy.set(clean(v).toUpperCase(), a));
@@ -170,8 +187,8 @@ FF.pages = FF.pages || {};
           stock: Number(r.stockTotal || 0), issued: Number(eir.total || 0),
           status: clean(r.agentStatus || ''), priority: clean(r.priority || ''),
           vc4Stock: Number(r.stockVc4 || 0),
-          suggested: suggestQty({ daily: U.runRate(eir.vc4 || 0), stock: r.stockVc4 }),
-          suggestedGross: suggestGrossQty({ daily: U.runRate(eir.vc4 || 0) }),
+          suggested: suggestQty({ daily: U.runRate(eir.vc4 || 0, 'gv'), stock: r.stockVc4 }),
+          suggestedGross: suggestGrossQty({ daily: U.runRate(eir.vc4 || 0, 'gv') }),
           route: `#/gvPerformance?q=${encodeURIComponent(r.agentName || '')}`
         });
       });
@@ -194,7 +211,8 @@ FF.pages = FF.pages || {};
         const key = clean(r.agentId) || `name:${clean(r.agentName).toUpperCase()}`;
         const o = agg.get(key) || { issued: 0, vc4: 0, last: null };
         const n = Number(r.n) || 1;
-        o.issued += n; if (r.group === 'VC4') o.vc4 += n;
+        // v3.31: issued / run-rate sirf GV data month ka (pehle poori history jud jaati thi → qty bahut badi).
+        if (!gvYm || (r.ym || (r.date ? FF.util.ymKey(r.date) : '')) === gvYm) { o.issued += n; if (r.group === 'VC4') o.vc4 += n; }
         if (!o.last || (r.date && r.date > o.last)) o.last = r.date;
         agg.set(key, o);
       });
@@ -203,8 +221,8 @@ FF.pages = FF.pages || {};
         if (existing) {
           existing.issued = o.issued;
           existing.vc4Issued = o.vc4;
-          existing.suggested = suggestQty({ daily: U.runRate(o.vc4), stock: existing.vc4Stock });
-          existing.suggestedGross = suggestGrossQty({ daily: U.runRate(o.vc4) });
+          existing.suggested = suggestQty({ daily: U.runRate(o.vc4, 'gv'), stock: existing.vc4Stock });
+          existing.suggestedGross = suggestGrossQty({ daily: U.runRate(o.vc4, 'gv') });
           return;
         }
         const source = issuance.find((r) => (clean(r.agentId) || `name:${clean(r.agentName).toUpperCase()}`) === key) || {};
@@ -223,6 +241,7 @@ FF.pages = FF.pages || {};
   const PAGE_HEADERS = ['Channel', 'Agent', 'Agent ID', 'Rule / reason', 'TL', 'Stock', 'MTD issued', 'Status', 'Priority', 'Tag required?', 'Suggested tags (stock − · w/o stock)'];
 
   async function render(root, params) {
+    registerDirectLists();
     const p = params || {};
     const scope = ['all', 'direct', 'gv-direct', 'ff-direct', 'managed', 'tag'].includes(p.direct) ? p.direct : 'all';
     const q = clean(p.q || '').toLowerCase();
@@ -241,7 +260,9 @@ FF.pages = FF.pages || {};
     });
     const d = rules();
     const ruleCard = (icon, title, rule, count, note) => `<div class="direct-rule-card"><div class="direct-rule-head"><span>${icon}</span><b>${title}</b><small>${U.fmt(count)} direct agents</small></div><p>${rule}</p><p class="dim small">${note}</p></div>`;
-    const kpi = (label, value, foot, tone) => `<div class="kpi ${tone || 'g4'}"><div class="kpi-top"><span class="kpi-title">${label}</span><span class="kpi-icon">🧍</span></div><div class="kpi-value">${value}</div><div class="kpi-foot">${foot}</div></div>`;
+    lastRoster = rows; // 📋 v3.31 — KPI drill lists isi roster se (card = list)
+    const KPI_LIST = { 'Direct agents': 'direct.all', 'GV direct (no TL)': 'direct.gv', 'FF direct (APS)': 'direct.ff', '🏷️ Tag required': 'direct.tag' };
+    const kpi = (label, value, foot, tone) => `<div class="kpi ${tone || 'g4'}"${KPI_LIST[label] ? ` data-kpi="scope=list&list=${KPI_LIST[label]}&src=both"` : ''}><div class="kpi-top"><span class="kpi-title">${label}</span><span class="kpi-icon">🧍</span></div><div class="kpi-value">${value}</div><div class="kpi-foot">${foot}</div></div>`;
     root.innerHTML = `<div class="page-head"><div><h1>🧍 Direct Agents &amp; TLs</h1><p class="sub">Ek hi rule poore site par — <b>GV</b>: TL ID + TL Name dono khaali = Direct Agent · <b>FF</b>: TL Name “${esc((d.ffTlNames || ['APS']).join(', '))}” = Direct Agent. Ye agents kisi TL list / ranking me nahi aate aur dispatch-exempt hain.</p></div>
       <div class="head-actions"><a class="btn small" href="#/settings?tab=direct">⚙️ Rule edit karo</a>${FF.auth.can('export') ? '<button class="btn small" id="da-csv">⬇ CSV</button>' : ''}</div></div>
       <div class="direct-rule-grid">

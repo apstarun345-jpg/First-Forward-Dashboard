@@ -61,15 +61,70 @@ test('reportBasis: REPORT ke last day ko divisor banata hai + date/label deta ha
 });
 
 test('reportBasis: aaj ka adhoora data kabhi count nahi hota (sheet aaj se aage na jaaye)', () => {
-  const today = new Date().getDate();
-  if (today <= DAY) return;                       // sheet pehle hi T-1 hai — cap ka koi case nahi
-  FF.pages.performance.daysElapsed = () => today;  // sheet me aaj aa gaya
-  const b = U.reportBasis({ force: true });
-  assert.equal(b.day, U.runRateDays(), 'aaj se cap ho gaya');
-  assert.equal(b.days, U.runRateDays());
+  // v3.31 — date-independent: "aaj" explicit diya hai, aur sheet ka 7-day header aaj tak aa gaya hai.
+  const saved = FF.pages.performance;
+  const now = new Date(2026, 9, 15, 11);                          // 15 Oct 2026
+  const mk = (d) => `${d}/Oct`;
+  FF.pages.performance = { ...saved, daysElapsed: () => 15, dayLabels: () => [9, 10, 11, 12, 13, 14, 15].map(mk) };
+  const b = U.dataBasis('ff', { now });
+  assert.equal(b.days, 14, 'aaj (15) cap → kal tak = 14 din');
+  assert.equal(b.key, '2026-10-14');
   assert.equal(b.capped, true);
-  FF.pages.performance.daysElapsed = () => DAY;
-  assert.equal(U.reportBasis({ force: true }).days, DAY);
+  FF.pages.performance = { ...saved, daysElapsed: () => 14, dayLabels: () => [8, 9, 10, 11, 12, 13, 14].map(mk) };
+  const ok = U.dataBasis('ff', { now });
+  assert.equal(ok.days, 14); assert.equal(ok.capped, false); assert.equal(ok.fromReport, true);
+  FF.pages.performance = saved;
+});
+
+test('v3.31 · 1 tareekh: FF run-rate = pichhle poore month ÷ uske din (sheet: total ÷ DAY(aaj − 1))', () => {
+  // User ki FF REPORT sheet (1 Oct 2026): "Agent Performance In - September", 7-day header 24/Sep…30/Sep,
+  // Runrate = 14739 ÷ 30 = 491.3 — pehle dashboard 14739 ÷ max(1, 1 − 1) = 14739/day dikhata tha.
+  const saved = FF.pages.performance;
+  const now = new Date(2026, 9, 1, 10);
+  FF.pages.performance = { ...saved, daysElapsed: () => 30, dayLabels: () => ['24/Sep', '25/Sep', '26/Sep', '27/Sep', '28/Sep', '29/Sep', '30/Sep'] };
+  const b = U.dataBasis('ff', { now });
+  assert.equal(b.days, 30);
+  assert.equal(b.ym, '2026-09', 'data month = September');
+  assert.equal(b.key, '2026-09-30');
+  assert.equal(b.capped, false);
+  assert.equal(Math.round((14739 / b.days) * 10) / 10, 491.3, 'sheet ka Runrate (AN) match');
+  assert.equal(U.projectMonthEnd(14739, b.days, b.ym), 14739, 'poora month ho chuka → expected = actual');
+  // REPORT na mile to bhi (aaj − 1) DATE = 30 Sep
+  FF.pages.performance = { ...saved, daysElapsed: () => null, dayLabels: () => [] };
+  const f = U.dataBasis('ff', { now });
+  assert.equal(f.days, 30); assert.equal(f.ym, '2026-09'); assert.equal(f.fromData, false);
+  assert.equal(U.dataBasis('ff', { now: new Date(2027, 0, 1, 9) }).days, 31, '1 Jan → 31 Dec');
+  assert.equal(U.dataBasis('ff', { now: new Date(2027, 0, 1, 9) }).ym, '2026-12');
+  assert.equal(U.dataBasis('ff', { now: new Date(2026, 2, 1, 9) }).days, 28, '1 Mar → 28 Feb');
+  FF.pages.performance = saved;
+});
+
+test('v3.31 · GV live: run-rate ÷ max(1, aaj − 1) (GV sheet jaisa) · month khatam ho to us month ke din', () => {
+  const savedLatest = FF.gv.latestDate;
+  FF.gv.latestDate = () => new Date(2026, 9, 1);                  // aaj ka GV data aa chuka (live)
+  let g = U.dataBasis('gv', { now: new Date(2026, 9, 1, 15) });
+  assert.equal(g.days, 1); assert.equal(g.ym, '2026-10'); assert.equal(g.live, true);
+  FF.gv.latestDate = () => new Date(2026, 9, 15);
+  g = U.dataBasis('gv', { now: new Date(2026, 9, 15, 15) });
+  assert.equal(g.days, 14, '15 Oct → aaj − 1 = 14');
+  FF.gv.latestDate = () => new Date(2026, 8, 30);                  // 1 Oct subah — abhi October ki koi GV row nahi
+  g = U.dataBasis('gv', { now: new Date(2026, 9, 1, 8) });
+  assert.equal(g.days, 30); assert.equal(g.ym, '2026-09');
+  FF.gv.latestDate = savedLatest;
+});
+
+test('v3.31 · runRate / dispatchCalc channel ke basis par', () => {
+  const saved = FF.pages.performance;
+  const realDays = U.runRateDays;
+  FF.pages.performance = { ...saved, daysElapsed: () => 30, dayLabels: () => ['24/Sep', '25/Sep', '26/Sep', '27/Sep', '28/Sep', '29/Sep', '30/Sep'] };
+  U.runRateDays = (now, ch) => realDays(now instanceof Date ? now : new Date(2026, 9, 1, 10), ch);
+  const savedLatest = FF.gv.latestDate;
+  FF.gv.latestDate = () => new Date(2026, 9, 1);
+  assert.equal(U.runRate(300, 'ff'), 10, '300 ÷ 30');
+  assert.equal(U.runRate(3, 'gv'), 3, '3 ÷ 1');
+  const c = U.dispatchCalc({ cur: 300, stock: 50, days: 15, ch: 'ff' });
+  assert.equal(c.elapsed, 30); assert.equal(c.rate, 10); assert.equal(c.required, 150); assert.equal(c.net, 100); assert.equal(c.gross, 150);
+  U.runRateDays = realDays; FF.gv.latestDate = savedLatest; FF.pages.performance = saved;
 });
 
 test('reportBasis: REPORT load nahi hua to site default (aaj − 1)', () => {
@@ -137,7 +192,7 @@ test('channelBasis: FF = kal tak ka data · GV = live aaj', () => {
   assert.equal(ff.days, Math.min(DAY, U.runRateDays()));
   const gv = U.channelBasis('gv', { force: true });
   assert.equal(gv.live, true, 'GV live hai');
-  assert.equal(gv.days, new Date().getDate(), 'GV aaj ka din gin-ta hai');
+  assert.equal(gv.days, Math.max(1, new Date().getDate() - 1), 'GV sheet jaisa: aaj − 1 (min 1)');
   assert.equal(gv.back, 0);
   // GV profile bhi live basis use kare
   const gvP = MP.quick({ kind: 'gv-agent', name: 'Koi', sub: '' });

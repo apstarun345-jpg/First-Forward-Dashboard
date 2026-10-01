@@ -152,7 +152,7 @@ window.FF = window.FF || {};
     const ac = rowsOf('agentClass'), agRows = rowsOf('agents'), stk = rowsOf('stockAgents');
     const n = norm(p.name);
     if (a) {
-      const avgVc4 = U.runRate(a.curVc4), avgNvc4 = U.runRate(a.curNvc4);
+      const avgVc4 = U.runRate(a.curVc4, 'ff'), avgNvc4 = U.runRate(a.curNvc4, 'ff');
       Object.assign(out, {
         mobile: mobileFor(a.name, a.agentId || a.id, a.mobile), tl: { name: a.tlName, id: a.tlId, mobile: a.tlMobile },
         status: a.agentStatus || '', lastActive: a.lastActive || '', priority: a.priority || '', growth: a.growth || '',
@@ -191,12 +191,12 @@ window.FF = window.FF || {};
     const src = agents.find((a) => a.tlStockTotal != null) || agents[0] || null;
     const P = perf();
         const sumK = (k) => U.sum(agents, (a) => num(a[k]));
-    const avgVc4 = U.runRate(sumK('curVc4')), avgComm = U.runRate(sumK('curNvc4'));
+    const avgVc4 = U.runRate(sumK('curVc4'), 'ff'), avgComm = U.runRate(sumK('curNvc4'), 'ff');
     const stock = src && src.tlStockTotal != null
       ? { vc4: num(src.tlStockVc4), comm: num(src.tlStockNvc4), total: num(src.tlStockTotal) }
       : { vc4: sumK('stockVc4'), comm: sumK('stockNvc4'), total: sumK('stockTotal') };
     const rowsA = agents.map((a) => {
-      const av = U.runRate(a.curVc4), avc = U.runRate(a.curNvc4);
+      const av = U.runRate(a.curVc4, 'ff'), avc = U.runRate(a.curNvc4, 'ff');
       return { name: a.name, id: a.agentId || a.id, mobile: mobileFor(a.name, a.agentId || a.id, a.mobile), priority: a.priority || '', stockVc4: num(a.stockVc4), stockComm: num(a.stockNvc4), stockTotal: num(a.stockTotal), cur: num(a.curTotal), last: num(a.lastTotal), curVc4: num(a.curVc4), curComm: num(a.curNvc4), sugVc4: suggest(av, a.stockVc4), sugComm: suggest(avc, a.stockNvc4), sugVc4Gross: suggestGro(av), sugCommGross: suggestGro(avc) };
     }).sort((x, y) => y.cur - x.cur);
     const ac = rowsOf('agentClass'), agRows = rowsOf('agents'), stk = rowsOf('stockAgents');
@@ -232,7 +232,7 @@ window.FF = window.FF || {};
   }
   const prioOf = (t) => { const s = clean(t).replace(/[^\w\s]/g, '').toLowerCase(); if (/high|urgent|critical/.test(s)) return 'High'; if (/medium|slight/.test(s)) return 'Medium'; if (/low/.test(s)) return 'Low'; return clean(t); };
 
-  const gvDaily = (r, cur) => U.runRate(cur);
+  const gvDaily = (r, cur) => U.runRate(cur, 'gv');
   function gvClassRows(match, curYm, lastYm) {
     const issuance = gvIssuanceRows();
     return issuance.filter(match).map((r) => ({ ym: r.ym, cls: r.cls, n: Number(r.n) || 1 }));
@@ -283,7 +283,7 @@ window.FF = window.FF || {};
     const list = gvReport().filter((r) => norm(r.tlName) === n && !safeCall(() => FF.config.isDirectAgent(r, 'gv'), false));
     const src = list[0] || null;
     const sumK = (k) => U.sum(list, (r) => num(r[k]));
-    const avgVc4 = U.runRate(sumK('curVc4')), avgComm = U.runRate(sumK('curComm'));
+    const avgVc4 = U.runRate(sumK('curVc4'), 'gv'), avgComm = U.runRate(sumK('curComm'), 'gv');
     const stock = src && src.tlStockTotal != null ? { vc4: num(src.tlStockVc4), comm: num(src.tlStockComm), total: num(src.tlStockTotal) } : { vc4: sumK('stockVc4'), comm: sumK('stockComm'), total: sumK('stockTotal') };
     const rowsA = list.map((r) => {
       const av = gvDaily(r, r.curVc4), avc = gvDaily(r, r.curComm);
@@ -318,7 +318,7 @@ window.FF = window.FF || {};
   function withCalc(pr) {
     if (!pr) return pr;
     const t = pr.totals || {}, s = pr.stock || {};
-    const elapsed = (pr.projT1 && pr.projT1.days) || U.runRateDays();
+    const elapsed = (pr.projT1 && pr.projT1.days) || U.runRateDays(undefined, pr.ch === 'gv' || /^gv/.test(pr.kind || '') ? 'gv' : 'ff');
     const mk = (cur, last, stock) => U.dispatchCalc({ cur: num(cur), last: num(last), stock: num(stock), elapsed });
     pr.calc = {
       vc4: mk(t.curVc4, t.lastVc4, s.vc4),
@@ -539,7 +539,7 @@ window.FF = window.FF || {};
       if (row) { open({ kind: row.dataset.mpKind, name: row.dataset.mpAgent, sub: row.dataset.mpId, tlSet: new Set(), classMap: new Map(), bars: new Set() }); }
     });
   }
-  const loadingHtml = (name) => `<div class="mp-loading"><span class="spinner"></span> <b>${esc(name)}</b> ki poori report ban rahi hai… (REPORT + stock + issuance load ho raha hai)</div>`;
+  const loadingHtml = (name) => `<div class="mp-loading" role="status" aria-live="polite">${U.loader ? U.loader('', { size: 'md' }) : ''} <span><b>${esc(name)}</b> ki poori report ban rahi hai${U.ellipsis ? U.ellipsis() : '…'} <small class="dim">(REPORT + stock + issuance load ho raha hai)</small></span></div>`;
   /** Inline (home / panel) — placeholder pehle, data aane par full profile. */
   async function renderInto(el, person) {
     if (!el || !supports(person)) return null;
@@ -559,13 +559,19 @@ window.FF = window.FF || {};
   async function open(person) {
     if (!supports(person) || !FF.app || !FF.app.openDrawer) return null;
     const kicker = person.kicker || `🔎 Master search · ${person.kind.endsWith('tl') ? 'TL' : 'Agent'} profile`;
-    FF.app.openDrawer({ kicker, title: person.name, sub: esc(person.sub ? `ID ${person.sub}` : ''), body: `<div id="mp-drawer-slot">${loadingHtml(person.name)}</div>`, actions: '', wide: true });
+    const isTl = person.kind.endsWith('tl');
+    const ch = /^gv/.test(person.kind) ? 'gv' : 'ff';
+    // 🧓 v3.31 — profile drawer ke neeche us agent / TL ka stock ageing (FF ya GV channel)
+    const age = isTl ? { kind: 'tl', key: person.name, ch, title: person.name } : { kind: 'agent', key: person.sub || person.name, keys: [person.name], ch, title: person.name };
+    FF.app.openDrawer({ kicker, title: person.name, sub: esc(person.sub ? `ID ${person.sub}` : ''), body: `<div id="mp-drawer-slot">${loadingHtml(person.name)}</div>`, actions: '', wide: true, age });
     const slot = U.$('#mp-drawer-slot');
     try {
       const pr = await build(person);
       const body = U.$('#drawer-body');
       if (!body) return pr;
-      body.innerHTML = html(pr);
+      // Slot hi bharo (neeche ka ageing section bacha rahe) · user dusra drawer khol chuka ho to overwrite mat karo.
+      if (!slot || !slot.isConnected) return pr;
+      slot.innerHTML = html(pr);
       if (FF.charts && FF.charts.mount) FF.charts.mount(body);
       bind(body, pr);
       return pr;

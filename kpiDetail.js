@@ -35,6 +35,49 @@ window.FF = window.FF || {};
   }
   const state = { spec: null, rows: null, raw: null, rawQuery: '', history: [] };
 
+  // ---- 📅 month helpers (v3.31) -------------------------------------------------------------
+  /** "Sep" · "September" · "Sep 2026" · "September-26" · "2026-09" · "2026-09-30" → "YYYY-MM".
+      Saal na ho to sabse naya saal jisme month aaj se aage na ho. Pehle Performance card ym=September bhejta
+      tha → drawer me "NaN undefined NaN" + 0 tags dikhte the. */
+  function normYm(value) {
+    const t = String(value || '').trim();
+    if (!t) return '';
+    let m = t.match(/^(\d{4})-(\d{1,2})/);
+    if (m) return `${m[1]}-${U.pad2(+m[2])}`;
+    const viaUtil = U.parseMonthKey ? U.parseMonthKey(t) : null;
+    if (viaUtil && /^\d{4}-\d{2}$/.test(viaUtil)) return viaUtil;
+    m = t.match(/^([A-Za-z]{3,9})\.?$/);
+    if (m) {
+      const mi = U.MONTHS.findIndex((x) => x.toLowerCase() === m[1].slice(0, 3).toLowerCase());
+      if (mi < 0) return '';
+      const now = new Date();
+      let y = now.getFullYear();
+      if (mi > now.getMonth()) y -= 1;
+      return `${y}-${U.pad2(mi + 1)}`;
+    }
+    return '';
+  }
+  /** Channel ka DATA month (FF kal tak ka data · GV live) — "is month" / "last month" isi se. */
+  function dataYm(src) {
+    try {
+      const ff = U.channelBasis ? U.channelBasis('ff').ym : U.ymKey(new Date());
+      const gv = U.channelBasis ? U.channelBasis('gv').ym : U.ymKey(new Date());
+      return src === 'ff' ? ff : src === 'gv' ? gv : (ff > gv ? ff : gv);
+    } catch { return U.ymKey(new Date()); }
+  }
+  const LAST_MONTH_RE = /\b(last|prev(ious)?|pichh?l[ae]|pichhle)\s+(full\s+)?(month|mahin[ae])\b|\blast\s+full\b|\bLM\b/i;
+  /** Title me month ka naam (shuru me, ya "<month> issued / total / MTD") → YYYY-MM. "vs Aug" jaisa comparison nahi. */
+  function monthFromTitle(title) {
+    const t = String(title || '');
+    const names = 'jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?';
+    const m = t.match(new RegExp(`^\\s*(?:[^\\w\\s]+\\s*)?(${names})\\b[\\s'-]*(\\d{4})?`, 'i'))
+      || t.match(new RegExp(`(?<!vs\\.?\\s)\\b(${names})\\b[\\s'-]*(\\d{4})?\\s+(?:issued|issuance|total|mtd|tags)\\b`, 'i'));
+    if (!m) return '';
+    return normYm(m[2] ? `${m[1].slice(0, 3)} ${m[2]}` : m[1]);
+  }
+  const todayKey = () => U.dateKey(new Date());
+  const yesterdayKey = () => { const d = new Date(); d.setDate(d.getDate() - 1); return U.dateKey(d); };
+
   // ---- spec -----------------------------------------------------------------------------------
   function currentPage() { const m = location.hash.replace(/^#\/?/, '').split(/[/?]/)[0]; return m || 'home'; }
   function inferSpec(card) {
@@ -45,10 +88,27 @@ window.FF = window.FF || {};
     const spec = { src: PAGE_SRC[page] || 'both', title, page };
     if (/\bGV\b/i.test(title) && !/vs|share|compare/i.test(title) && spec.src === 'both') spec.src = 'gv';
     if (/\bFF\b|first forward/i.test(title) && !/vs|share|compare/i.test(title) && spec.src === 'both') spec.src = 'ff';
-    if (/stock|inventory|cover/i.test(t)) spec.scope = page === 'stockReport' || page === 'performance' ? 'stockreport' : 'stock';
+    const stockPage = /^(stock|gvStock|stockReport|gvStockReport)$/.test(page);
+    const issuanceWord = /issued|issuance|\bmtd\b|today|aaj|tags issued|activation/i.test(t);
+    const monthHit = monthFromTitle(title);
+    if (/stock|inventory|cover/i.test(t) || (stockPage && !issuanceWord && /class|tl|agent|stock|cover|days/i.test(t))) {
+      spec.scope = page === 'stockReport' || page === 'performance' ? 'stockreport' : 'stock';
+      // "Agents with Stock" / "TLs with Stock" → ginti = itne holders · list wahi
+      if (/agents?\s+(with|holding)\s+stock|agents?\s+holding/i.test(t)) { spec.scope = 'stock'; spec.holders = 'agents'; }
+      else if (/\btls?\s+(with|holding)\s+stock/i.test(t)) { spec.scope = 'stock'; spec.holders = 'tls'; }
+    } else if (/\b(high|medium|low)\b[^·]*priority|priority\s*(high|level)?\b/i.test(t)) {
+      spec.scope = 'people'; const lv = t.match(/\b(high|medium|low)\b/i); spec.level = lv ? lv[1][0].toUpperCase() + lv[1].slice(1).toLowerCase() : 'High';
+    } else if (/\binactive\b/i.test(t)) { spec.scope = 'people'; spec.state = 'inactive'; }
+    else if (/\bdirect\b/i.test(t) && /agent/i.test(t)) { spec.scope = 'people'; spec.state = 'direct'; }
+    else if (/agents?\s*\((gv\s+)?report\)|report\)\s*$/i.test(t) && /agent/i.test(t)) { spec.scope = 'people'; }
+    else if (LAST_MONTH_RE.test(t) && !/\bvs\b|growth|compare|same period/i.test(title)) { spec.scope = 'month'; spec.ym = U.prevMonthKey(dataYm(spec.src)); }
+    else if (monthHit) { spec.ym = monthHit; spec.scope = monthHit === dataYm(spec.src) ? 'mtd' : 'month'; }
     else if (/agents?/i.test(t) && !/top agent/i.test(t)) spec.scope = 'agents';
     else if (/activated|hotlist|status/i.test(t)) spec.scope = 'status';
-    else if (/latest|today|last day|yesterday|kal|selected day|\b\d{1,2}\s?(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b/i.test(t)) spec.scope = 'day';
+    else if (/\byesterday\b|\bkal\b/i.test(t)) { spec.scope = 'day'; spec.date = yesterdayKey(); }
+    else if (/\btoday\b|\baaj\b/i.test(t)) { spec.scope = 'day'; spec.date = todayKey(); }
+    else if (/\b(mon|tue|wed|thu|fri|sat|sun)\w*\s+vs\s+last\s+week/i.test(t)) spec.scope = 'day';
+    else if (/latest|last day|selected day|\b\d{1,2}\s?(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b/i.test(t)) spec.scope = 'day';
     else spec.scope = 'mtd';
     const dm = t.match(/(\d{1,2})\s?(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s?(\d{4})?/i);
     if (spec.scope === 'day' && dm) {
@@ -71,6 +131,10 @@ window.FF = window.FF || {};
       const p = new URLSearchParams(card.dataset.kpi);
       p.forEach((v, k) => { base[k] = v; });
     }
+    if (base.ym) base.ym = normYm(base.ym) || base.ym;
+    // 📌 card ki apni value — drawer ke top par wahi number dikhta hai (derived numbers ke liye bhi)
+    const valueEl = U.$('.kpi-value', card) || card.querySelector('strong, b');
+    base.cardValue = (card.dataset.kpiValue || (valueEl ? valueEl.textContent : '') || '').replace(/\s+/g, ' ').trim().slice(0, 60);
     if (FF.pages.tagIssued && currentPage() === 'tagIssued' && FF.pages.tagIssued.selection) {
       const sel = FF.pages.tagIssued.selection();
       if (sel && !card.dataset.kpi) { if (sel.from && sel.to && sel.from !== sel.to) { base.scope = base.scope === 'day' || base.scope === 'mtd' ? 'range' : base.scope; base.from = sel.from; base.to = sel.to; } else if (sel.date) { if (base.scope === 'mtd' || base.scope === 'day') base.scope = 'day'; base.date = sel.date; } }
@@ -196,7 +260,17 @@ window.FF = window.FF || {};
     const byVrn = tally(cur, (r) => vrnBucket(r.vrnType)), byVrnPrev = tally(prev, (r) => vrnBucket(r.vrnType));
     const byGroup = tally(cur, (r) => r.group), byGroupPrev = tally(prev, (r) => r.group);
     const dayTable = days.length > 1 ? `<section class="kd-sec"><h4>📅 Day-wise (${days.length} days)</h4><div class="table-wrap kd-scroll"><table class="tbl compact kd-tbl"><thead><tr><th>Date</th><th class="num">Total</th><th class="num">VC4</th><th class="num">Commercial</th><th class="num">First Forward</th><th class="num">GV</th><th class="num">Replacement</th><th class="num">Chassis</th></tr></thead><tbody>${days.slice().reverse().map((k) => { const rs = cur.filter((r) => r.key === k); const t = total(rs), v = total(rs.filter((r) => r.group === 'VC4')), g = total(rs.filter((r) => r.channel === 'GV Partner')); return `<tr class="clickable" data-kd-day="${k}"><td><b>${esc(U.labelDateKey(k))}</b> <small class="dim">${esc(U.weekday(U.fromDateKey(k)))}</small></td><td class="num"><b>${U.fmt(t)}</b></td><td class="num">${U.fmt(v)}</td><td class="num">${U.fmt(t - v)}</td><td class="num">${U.fmt(t - g)}</td><td class="num">${U.fmt(g)}</td><td class="num">${U.fmt(total(rs.filter((r) => r.type === 'REPLACEMENT')))}</td><td class="num">${U.fmt(total(rs.filter((r) => /chassis/i.test(r.vrnType))))}</td></tr>`; }).join('')}</tbody></table></div><p class="dim small">Kisi bhi din par click karo → us din ka poora breakdown.</p></section>` : '';
-    const body = `<div class="kd-hero"><div><span class="kd-kicker">${esc(srcLabel)}</span><div class="kd-big">${U.fmt(tot)} <small>tags</small></div><div class="kd-sub">${esc(periodLabel)}${filt ? ` · filter: <b>${esc(filt.label)}</b>` : ''}</div></div><div class="kd-vs">${U.deltaHtml(U.growth(tot, ptot), { decimals: 0 })}<small>vs ${esc(pp.label)}: <b>${U.fmt(ptot)}</b></small></div></div>
+    // 📐 Projection / expected card → wahi formula (aaj − 1 basis) jisse card ka number bana
+    let formula = '';
+    if (/projected|expected|month-?end/i.test(`${spec.title || ''}`) && p.from.endsWith('-01')) {
+      const ym = p.from.slice(0, 7), md = U.daysInMonth(ym);
+      const b = U.channelBasis ? U.channelBasis(spec.src === 'ff' ? 'ff' : 'gv') : null;
+      const fb = U.channelBasis ? U.channelBasis('ff') : null;
+      const bb = spec.src === 'both' && fb && b && fb.ym === ym && b.ym !== ym ? fb : b;
+      const projDays = bb && bb.ym === ym ? bb.days : Math.round((U.fromDateKey(p.to) - U.fromDateKey(p.from)) / 86400e3) + 1;
+      formula = `<div class="kd-formula">📐 Month-end projection = ${U.fmt(tot)} ÷ ${U.fmt(projDays)} din (aaj − 1) × ${U.fmt(md)} din = <b>${U.fmt(U.projectMonthEnd(tot, projDays, ym))}</b></div>`;
+    }
+    const body = `<div class="kd-hero"><div><span class="kd-kicker">${esc(srcLabel)}</span><div class="kd-big">${U.fmt(tot)} <small>tags</small></div><div class="kd-sub">${esc(periodLabel)}${filt ? ` · filter: <b>${esc(filt.label)}</b>` : ''}</div>${formula}</div><div class="kd-vs">${U.deltaHtml(U.growth(tot, ptot), { decimals: 0 })}<small>vs ${esc(pp.label)}: <b>${U.fmt(ptot)}</b></small></div></div>
       <div class="kd-stats">${stat('VC4 (payable)', U.fmt(vc4), pct(vc4, tot), 'blue')}${stat('Commercial', U.fmt(comm), pct(comm, tot), 'violet')}${stat('First Forward', U.fmt(ff), pct(ff, tot), 'indigo')}${stat('GV Partner', U.fmt(gv), pct(gv, tot), 'teal')}${stat('New issuance', U.fmt(tot - repl), pct(tot - repl, tot), 'green')}${stat('Replacement', U.fmt(repl), pct(repl, tot), 'amber')}${stat('Chassis', U.fmt(chassis), pct(chassis, tot), 'orange')}${stat('New / VRN', U.fmt(Math.max(0, newVrn)), pct(Math.max(0, newVrn), tot), 'sky')}</div>
       <div class="kd-chips">
         ${[['both', 'FF + GV'], ['ff', '🟦 First Forward only'], ['gv', '🟩 GV Partner only']].map(([s, label]) => `<button class="kd-chip ${spec.src === s ? 'green' : ''}" data-kd-spec='${specAttr({ src: s, f: '', agent: '', channel: '', title: `${spec.title || 'Detail'} · ${label}` })}'>${label}</button>`).join('')}
@@ -400,33 +474,85 @@ window.FF = window.FF || {};
   }
 
   // ---- stock / agents / status drill-downs ------------------------------------------------------
+  /** Stock rows ka class filter (card "VC4 stock" / "Commercial stock" / class chip) — total wahi jo card par. */
+  function stockClassFn(spec) {
+    const f = String(spec.f || '').split(',').map((x) => x.trim()).find((x) => ['vc4', 'comm', 'vc20', 'vc5p'].includes(x));
+    const cls = spec.cls ? classKey(spec.cls) : '';
+    if (!f && !cls) return null;
+    const groupOf = (r) => r.group || FF.model.classGroup(classKey(r.cls));
+    return {
+      label: cls || { vc4: 'VC4', comm: 'Commercial (NVC4)', vc20: 'VC20', vc5p: 'VC5+' }[f],
+      fn: (r) => (cls ? classKey(r.cls) === cls : true) && (!f || (f === 'vc4' ? groupOf(r) === 'VC4' : f === 'comm' ? groupOf(r) !== 'VC4' : f === 'vc20' ? groupOf(r) === 'VC20' : groupOf(r) === 'VC5+'))
+    };
+  }
   async function stockDetail(spec) {
     const parts = [];
-    let grand = 0;
+    let grand = 0, holdersN = null;
+    const cf = stockClassFn(spec);
+    const keep = (r) => !cf || cf.fn(r);
+    const tlWanted = U.clean(spec.tl || spec.tlName).toUpperCase();
+    const agentWanted = [spec.agent, spec.agentId].map(personKey).filter(Boolean);
+    const agentOk = (r) => !agentWanted.length || [r.agentName, r.agentId].map(personKey).some((k) => agentWanted.includes(k));
+    const tlOk = (r) => !tlWanted || U.clean(r.tlName).toUpperCase() === tlWanted;
+    const holdersTable = (title, map, unit) => {
+      const list = [...map.entries()].sort((a, b) => b[1].n - a[1].n);
+      holdersN = (holdersN || 0) + list.length;
+      return `<section class="kd-sec"><h4>${title} · <b>${U.fmt(list.length)}</b></h4><div class="table-wrap kd-scroll tall"><table class="tbl compact kd-tbl"><thead><tr><th>#</th><th>${esc(unit)}</th><th>TL / channel</th><th class="num">Stock</th><th class="num">VC4</th><th class="num">Commercial</th></tr></thead><tbody>${list.map(([k, v], i) => `<tr${v.agent ? ` class="clickable" data-kd-agent="${esc(v.agent)}" data-kd-agent-id="${esc(v.id || '')}" data-kd-agent-channel="${v.ch}"` : ''}><td class="dim">${i + 1}</td><td><b>${esc(v.name || k)}</b>${v.id ? ` <small class="dim">${esc(v.id)}</small>` : ''}</td><td class="dim">${esc(v.tl || '—')}</td><td class="num"><b>${U.fmt(v.n)}</b></td><td class="num">${U.fmt(v.vc4)}</td><td class="num">${U.fmt(v.n - v.vc4)}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">Koi nahi</td></tr>'}</tbody></table></div></section>`;
+    };
     if (spec.src === 'ff' || spec.src === 'both') {
       let stock = FF.store.get('stock'), agents = FF.store.get('stockAgents'), types = FF.store.get('stockTypes');
       try { stock = stock || await FF.store.need('stock'); } catch { stock = []; }
       try { agents = agents || await FF.store.need('stockAgents'); } catch { agents = []; }
       try { types = types || await FF.store.need('stockTypes'); } catch { types = []; }
-      const rows = (stock || []).map((r) => ({ ...r, n: r.n }));
+      const agentRows = (agents || []).filter((r) => keep(r) && agentOk(r) && tlOk(r));
+      // agent / TL filter ho to class-wise bhi agent rows se (stock store TL × class hai, agent nahi)
+      const rows = agentWanted.length || tlWanted ? agentRows.map((r) => ({ cls: r.cls, group: r.group, tlName: r.tlName, n: r.n })) : (stock || []).filter(keep).map((r) => ({ ...r, n: r.n }));
       const tot = total(rows); grand += tot;
-      const byType = new Map(); (types || []).forEach((r) => byType.set(r.tagType || '—', (byType.get(r.tagType || '—') || 0) + r.n));
-      const byAgent = new Map(); (agents || []).forEach((r) => byAgent.set(`${r.agentName} · ${r.tlName}`, (byAgent.get(`${r.agentName} · ${r.tlName}`) || 0) + r.n));
-      parts.push(`<h3 class="kd-h">🟦 First Forward stock (StockDataa) · <b>${U.fmt(tot)}</b></h3>
-        <div class="kd-grid">${breakdownTable('Class-wise', tally(rows, (r) => r.cls), null, tot, { head: 'Class', sortCls: true })}${breakdownTable('Tag type', byType, null, total([...byType.values()].map((n) => ({ n }))), { head: 'Tag type' })}</div>
+      const byType = new Map(); (types || []).filter((r) => !cf || cf.fn(r)).forEach((r) => byType.set(r.tagType || '—', (byType.get(r.tagType || '—') || 0) + r.n));
+      const byAgent = new Map(); agentRows.forEach((r) => byAgent.set(`${r.agentName} · ${r.tlName}`, (byAgent.get(`${r.agentName} · ${r.tlName}`) || 0) + r.n));
+      let holders = '';
+      if (spec.holders === 'agents' || spec.holders === 'tls') {
+        const map = new Map();
+        agentRows.forEach((r) => {
+          const key = spec.holders === 'tls' ? (U.clean(r.tlName) || '—') : (U.clean(r.agentId) || U.clean(r.agentName) || '—');
+          const v = map.get(key) || { name: spec.holders === 'tls' ? r.tlName : r.agentName, id: spec.holders === 'tls' ? '' : r.agentId, tl: spec.holders === 'tls' ? 'First Forward' : r.tlName, agent: spec.holders === 'tls' ? '' : r.agentName, ch: 'ff', n: 0, vc4: 0 };
+          v.n += r.n; if (r.group === 'VC4') v.vc4 += r.n; map.set(key, v);
+        });
+        holders = holdersTable(spec.holders === 'tls' ? '👥 TLs jinke paas stock hai' : '🧑‍💼 Agents jinke paas stock hai', map, spec.holders === 'tls' ? 'TL' : 'Agent');
+      }
+      parts.push(`<h3 class="kd-h">🟦 First Forward stock (StockDataa)${cf ? ` · ${esc(cf.label)}` : ''}${spec.agent ? ` · ${esc(spec.agent)}` : tlWanted ? ` · TL ${esc(spec.tl || spec.tlName)}` : ''} · <b>${U.fmt(tot)}</b></h3>${holders}
+        <div class="kd-grid">${breakdownTable('Class-wise', tally(rows, (r) => r.cls), null, tot, { head: 'Class', sortCls: true, drill: (key) => ({ cls: key, f: '', title: `${spec.title || 'Stock'} · ${key}` }) })}${byType.size && !agentWanted.length && !tlWanted ? breakdownTable('Tag type', byType, null, total([...byType.values()].map((n) => ({ n }))), { head: 'Tag type' }) : ''}</div>
         ${breakdownTable('TL-wise stock', tally(rows, (r) => (FF.config.isDirectAgent(r, 'gv') ? FF.config.directLabel(r, 'gv') : r.tlName)), null, tot, { head: 'TL' })}
-        ${matrix('TL × class', rows, (r) => (FF.config.isDirectAgent(r, 'gv') ? FF.config.directLabel(r, 'gv') : r.tlName), (r) => r.cls, { head: 'TL' })}
+        ${agentWanted.length ? '' : matrix('TL × class', rows, (r) => (FF.config.isDirectAgent(r, 'gv') ? FF.config.directLabel(r, 'gv') : r.tlName), (r) => r.cls, { head: 'TL' })}
         ${breakdownTable('Top 30 agents (stock)', new Map([...byAgent.entries()].sort((a, b) => b[1] - a[1]).slice(0, 30)), null, tot, { head: 'Agent · TL' })}`);
     }
     if (spec.src === 'gv' || spec.src === 'both') {
-      const G = FF.gv; let cls = [], tls = [], agents = [];
+      const G = FF.gv; let cls = [], tls = [], agents = [], agentCls = [];
       try { cls = await G.need('stockClass'); } catch { /* */ }
       try { tls = await G.need('stockTl'); } catch { /* */ }
       try { agents = await G.need('stockAgent'); } catch { /* */ }
-      const tot = total(cls || []); grand += tot;
-      parts.push(`<h3 class="kd-h">🟩 GV Partner stock (Tag Assignment) · <b>${U.fmt(tot)}</b></h3>
-        <div class="kd-grid">${breakdownTable('Class-wise', tally(cls || [], (r) => r.cls), null, tot, { head: 'Class', sortCls: true })}${breakdownTable('TL-wise', tally(tls || [], (r) => (r.directAgent === true || !FF.config.isRealTl(r.tlName) ? FF.config.directLabel({ tlName: r.tlName, channel: 'GV Partner' }, 'gv') : r.tlName)), null, total(tls || []), { head: 'TL' })}</div>
-        ${breakdownTable('Top 30 agents (stock)', new Map((agents || []).slice(0, 30).map((a) => [`${a.agentName} · ${a.tlName || '—'}`, a.n])), null, tot, { head: 'Agent · TL' })}`);
+      try { agentCls = await G.need('stockAgentClass'); } catch { agentCls = []; }
+      const filteredAgentCls = (agentCls || []).filter((r) => keep(r) && agentOk(r) && tlOk(r));
+      const useAgentRows = !!(cf || agentWanted.length || tlWanted) && filteredAgentCls.length;
+      const clsRows = useAgentRows ? filteredAgentCls : (cls || []).filter(keep);
+      const tot = total(clsRows); grand += tot;
+      const agentTotals = new Map();
+      (useAgentRows ? filteredAgentCls : (agents || [])).forEach((a) => {
+        // Card "Agents with Stock" Tag Assignment ki (agent, TL) rows ginta hai — list bhi usi granularity par
+        const key = useAgentRows ? (U.clean(a.agentId) || U.clean(a.agentName)) : [a.agentId, a.agentName, a.tlId, a.tlName].map((x) => U.clean(x)).join('|');
+        const v = agentTotals.get(key) || { name: a.agentName, id: a.agentId, tl: a.tlName || '—', agent: a.agentName, ch: 'gv', n: 0, vc4: 0 };
+        const n = Number(a.n) || 0; v.n += n; if (useAgentRows ? classKey(a.cls) === 'VC4' : false) v.vc4 += n; agentTotals.set(key, v);
+      });
+      let holders = '';
+      if (spec.holders === 'agents') holders = holdersTable('🧑‍💼 GV agents jinke paas stock hai', agentTotals, 'Agent');
+      else if (spec.holders === 'tls') {
+        const map = new Map();
+        (tls || []).filter((t) => FF.config.isRealTl(t.tlName) && t.directAgent !== true).forEach((t) => map.set(t.tlName, { name: t.tlName, tl: 'GV Partner', ch: 'gv', n: Number(t.n) || 0, vc4: 0 }));
+        holders = holdersTable('👥 GV TLs jinke paas stock hai', map, 'TL');
+      }
+      parts.push(`<h3 class="kd-h">🟩 GV Partner stock (Tag Assignment)${cf ? ` · ${esc(cf.label)}` : ''}${spec.agent ? ` · ${esc(spec.agent)}` : ''} · <b>${U.fmt(tot)}</b></h3>${holders}
+        <div class="kd-grid">${breakdownTable('Class-wise', tally(clsRows, (r) => r.cls), null, tot, { head: 'Class', sortCls: true, drill: (key) => ({ cls: key, f: '', title: `${spec.title || 'Stock'} · ${key}` }) })}${useAgentRows ? '' : breakdownTable('TL-wise', tally(tls || [], (r) => (r.directAgent === true || !FF.config.isRealTl(r.tlName) ? FF.config.directLabel({ tlName: r.tlName, channel: 'GV Partner' }, 'gv') : r.tlName)), null, total(tls || []), { head: 'TL' })}</div>
+        ${breakdownTable('Top 30 agents (stock)', new Map([...agentTotals.values()].sort((a, b) => b.n - a.n).slice(0, 30).map((a) => [`${a.name} · ${a.tl || '—'}`, a.n])), null, tot, { head: 'Agent · TL' })}`);
     }
     const btn = (kind, label) => `<button class="btn primary" data-kd-sheetrows="${kind}">📄 ${label}</button>`;
     const rawBtns = [];
@@ -434,14 +560,13 @@ window.FF = window.FF || {};
     if (spec.src === 'gv' || spec.src === 'both') rawBtns.push(btn('gv-stock', 'Tag Assignment rows load karo'));
     if (rawBtns.length) {
       parts.push(`<section class="kd-sec"><h4>📄 Poora data — sheet ki tag-level rows</h4>
-        <p class="dim small">Last level: yahan se seedha us sheet tab ki asli rows (barcode/serial ke saath) load hongi${spec.agent ? ` · filter: <b>${esc(spec.agent)}</b>` : ''}.</p>
+        <p class="dim small">Last level: yahan se seedha us sheet tab ki asli rows (barcode/serial ke saath) load hongi${spec.agent ? ` · filter: <b>${esc(spec.agent)}</b>` : ''}${cf ? ` · class: <b>${esc(cf.label)}</b>` : ''}.</p>
         <div class="btn-row">${rawBtns.join('')}</div><div id="kd-rows"><div class="empty">Abhi load nahi hua.</div></div></section>`);
     }
-    return { kicker: 'KPI detail · Stock', title: spec.title || 'Stock in field', sub: `Total <b>${U.fmt(grand)}</b> tags in field`, body: parts.join('') || '<div class="empty">Stock data nahi mila.</div>' };
+    state.spec = spec; state.rows = null; state.raw = null;
+    const headline = holdersN !== null ? `<b>${U.fmt(holdersN)}</b> ${spec.holders === 'tls' ? 'TLs' : 'agents'} · ${U.fmt(grand)} tags` : `Total <b>${U.fmt(grand)}</b> tags in field${cf ? ` · ${esc(cf.label)}` : ''}`;
+    return { kicker: 'KPI detail · Stock', title: spec.title || 'Stock in field', sub: headline, body: parts.join('') || '<div class="empty">Stock data nahi mila.</div>' };
   }
-  // ---- 🗂️ Sheet rows (leaf level): stock tabs ki asli tag-level rows --------------------------------
-  //  Har stock KPI drawer ke aakhir me "sheet ki asli rows" — StockDataa (FF) ya Tag Assignment (GV).
-  //  Barcode/serial display format me (608116-011-0558601) aur Excel/CSV download bhi.
   function sheetRowsHtml(title, header, rows, note) {
     const bcCols = [];
     header.forEach((h, i) => { if (/barcode|serial/i.test(String(h || ''))) bcCols.push(i); });
@@ -497,37 +622,98 @@ window.FF = window.FF || {};
     return { kicker: 'KPI detail · Stock Report', title: spec.title || 'Stock Report', sub: `REPORT → Agent Inventory Summary · <b>${U.fmt(tot)}</b> tags · ${agents.length} agents`, body: `<div class="kd-grid">${breakdownTable('Class-wise stock', cls, null, tot, { head: 'Class', sortCls: true })}${breakdownTable('Dispatch priority (agents)', prio, null, agents.length, { head: 'Priority' })}</div>${breakdownTable('TL stock alert (agents)', alerts, null, agents.length, { head: 'Alert' })}${breakdownTable('TL-wise stock', byTl, null, tot, { head: 'TL' })}${breakdownTable('Top 30 agents by stock', topAgents, null, tot, { head: 'Agent · TL' })}` };
   }
   async function agentsDetail(spec) {
+    if (spec.list === 'report') return peopleDetail(spec);
     const out = [];
-    let ym = spec.ym;
+    let ffCount = null, gvCount = null;
+    // v3.31: har channel apne DATA month par (FF kal tak · GV live) — pehle 'both' ka latest (aaj, GV) FF par
+    // lagta tha → 1 tareekh ko FF active agents 0 dikhte the jabki card September ka number dikhata tha.
+    const ffYm = spec.ym || dataYm('ff'), gvYm = spec.ym || dataYm('gv');
     if (spec.src === 'ff' || spec.src === 'both') {
       let agents = FF.store.get('agents'); try { agents = agents || await FF.store.need('agents'); } catch { agents = []; }
-      const daily = FF.store.get('daily') || [];
-      ym = ym || (FF.model.latestDate(daily) ? U.ymKey(FF.model.latestDate(daily)) : U.ymKey(new Date()));
-      const cur = (agents || []).filter((a) => a.ym === ym && (spec.src === 'ff' || a.channel !== 'GV Partner'));
+      const ym = ffYm;
+      const cur = (agents || []).filter((a) => a.ym === ym && (spec.src === 'ff' ? a.channel !== 'GV Partner' : true));
       const per = new Map(); cur.forEach((a) => { const k = a.key; const x = per.get(k) || { name: a.name, tl: a.tlName, channel: a.channel, n: 0 }; x.n += a.n; per.set(k, x); });
       const list = [...per.values()].sort((a, b) => b.n - a.n);
+      ffCount = list.length;
       const byCh = new Map(); list.forEach((a) => byCh.set(a.channel, (byCh.get(a.channel) || 0) + 1));
       const byTl = new Map(); list.forEach((a) => byTl.set(a.tl, (byTl.get(a.tl) || 0) + 1));
-      out.push(`<h3 class="kd-h">🟦 First Forward · active agents ${esc(U.labelYM(ym))}: <b>${U.fmt(list.length)}</b></h3><div class="kd-grid">${breakdownTable('Channel', byCh, null, list.length, { head: 'Channel' })}${breakdownTable('Agents per TL', new Map([...byTl.entries()].sort((a, b) => b[1] - a[1]).slice(0, 25)), null, list.length, { head: 'TL' })}</div>
-        <section class="kd-sec"><h4>All active agents (${list.length})</h4><div class="table-wrap kd-scroll tall"><table class="tbl compact kd-tbl"><thead><tr><th>#</th><th>Agent</th><th>TL</th><th>Channel</th><th class="num">Tags</th></tr></thead><tbody>${list.map((a, i) => `<tr><td class="dim">${i + 1}</td><td><b>${esc(a.name)}</b></td><td>${esc(a.tl)}</td><td>${esc(a.channel)}</td><td class="num"><b>${U.fmt(a.n)}</b></td></tr>`).join('')}</tbody></table></div></section>`);
+      out.push(`<h3 class="kd-h">${spec.src === 'ff' ? '🟦 First Forward' : '🟦 EIR (FF + GV)'} · active agents ${esc(U.labelYM(ym))}: <b>${U.fmt(list.length)}</b></h3><div class="kd-grid">${breakdownTable('Channel', byCh, null, list.length, { head: 'Channel' })}${breakdownTable('Agents per TL', new Map([...byTl.entries()].sort((a, b) => b[1] - a[1]).slice(0, 25)), null, list.length, { head: 'TL' })}</div>
+        <section class="kd-sec"><h4>All active agents (${list.length})</h4><div class="table-wrap kd-scroll tall"><table class="tbl compact kd-tbl"><thead><tr><th>#</th><th>Agent</th><th>TL</th><th>Channel</th><th class="num">Tags</th></tr></thead><tbody>${list.map((a, i) => `<tr class="clickable" data-kd-agent="${esc(a.name)}" data-kd-agent-channel="${a.channel === 'GV Partner' ? 'gv' : 'ff'}"><td class="dim">${i + 1}</td><td><b>${esc(a.name)}</b></td><td>${esc(a.tl)}</td><td>${esc(a.channel)}</td><td class="num"><b>${U.fmt(a.n)}</b></td></tr>`).join('')}</tbody></table></div></section>`);
     }
-    if (spec.src === 'gv' || spec.src === 'both') {
+    if (spec.src === 'gv') {
       const rows = gvIssuanceRows();
-      const gym = ym || (latestKey(rows) || U.dateKey(new Date())).slice(0, 7);
+      const gym = gvYm;
       const cur = rows.filter((r) => r.ym === gym);
-      const per = new Map(); cur.forEach((r) => { const k = r.agentId || r.agentName; const x = per.get(k) || { name: r.agentName || r.agentId, tl: r.tlName || 'Direct', n: 0 }; x.n += Number(r.n) || 1; per.set(k, x); });
+      const per = new Map(); cur.forEach((r) => { const k = r.agentId || r.agentName; const x = per.get(k) || { name: r.agentName || r.agentId, id: r.agentId || '', tl: r.tlName || 'Direct', n: 0 }; x.n += Number(r.n) || 1; per.set(k, x); });
       const list = [...per.values()].sort((a, b) => b.n - a.n);
-      out.push(`<h3 class="kd-h">🟩 GV Partner · active agents ${esc(U.labelYM(gym))}: <b>${U.fmt(list.length)}</b></h3><section class="kd-sec"><div class="table-wrap kd-scroll tall"><table class="tbl compact kd-tbl"><thead><tr><th>#</th><th>Agent</th><th>TL</th><th class="num">Tags</th></tr></thead><tbody>${list.map((a, i) => `<tr><td class="dim">${i + 1}</td><td><b>${esc(a.name)}</b></td><td>${esc(a.tl)}</td><td class="num"><b>${U.fmt(a.n)}</b></td></tr>`).join('')}</tbody></table></div></section>`);
+      gvCount = list.length;
+      out.push(`<h3 class="kd-h">🟩 GV Partner · active agents ${esc(U.labelYM(gym))}: <b>${U.fmt(list.length)}</b></h3><section class="kd-sec"><div class="table-wrap kd-scroll tall"><table class="tbl compact kd-tbl"><thead><tr><th>#</th><th>Agent</th><th>TL</th><th class="num">Tags</th></tr></thead><tbody>${list.map((a, i) => `<tr class="clickable" data-kd-agent="${esc(a.name)}" data-kd-agent-id="${esc(a.id)}" data-kd-agent-channel="gv"><td class="dim">${i + 1}</td><td><b>${esc(a.name)}</b></td><td>${esc(a.tl)}</td><td class="num"><b>${U.fmt(a.n)}</b></td></tr>`).join('')}</tbody></table></div></section>`);
     }
-    return { kicker: 'KPI detail · Agents', title: spec.title || 'Active agents', sub: 'Month-to-date active agents (kam se kam 1 tag issue kiya)', body: out.join('') };
+    state.spec = { ...spec, scope: spec.scope, ym: spec.ym || (spec.src === 'gv' ? gvYm : ffYm) };
+    const n = (ffCount || 0) + (gvCount || 0);
+    return { kicker: 'KPI detail · Agents', title: spec.title || 'Active agents', sub: `<b>${U.fmt(n)}</b> active agents · ${esc(U.labelYM(spec.src === 'gv' ? gvYm : ffYm))} (kam se kam 1 tag issue kiya) · agent par click = uska detail`, body: out.join('') };
   }
   async function statusDetail(spec) {
     let status = FF.store.get('status'); try { status = status || await FF.store.need('status'); } catch { status = []; }
-    const daily = FF.store.get('daily') || [];
-    const ym = spec.ym || (FF.model.latestDate(daily) ? U.ymKey(FF.model.latestDate(daily)) : U.ymKey(new Date()));
+    const ym = spec.ym || dataYm('ff');
     const cur = (status || []).filter((s) => s.ym === ym), prev = (status || []).filter((s) => s.ym === U.prevMonthKey(ym));
     const m = tally(cur, (s) => s.status), pm = tally(prev, (s) => s.status);
     return { kicker: 'KPI detail · Tag status', title: spec.title || 'Tag status', sub: `${esc(U.labelYM(ym))} · <b>${U.fmt(total(cur))}</b> tags`, body: breakdownTable('Status-wise', m, pm, total(cur), { head: 'Status', prevLabel: U.labelYM(U.prevMonthKey(ym)) }) };
+  }
+
+  // ---- 👥 people lists (v3.31) — "GV Agents (REPORT) 60", "High Priority 12", "Inactive", "Direct agents" ----
+  // Card ki ginti = list ki ginti. Har row par click → us agent ka issuance detail (same period).
+  function reportPeople(src) {
+    const out = [];
+    if (src === 'ff' || src === 'both') {
+      const list = (FF.pages.performance && FF.pages.performance.agents ? FF.pages.performance.agents() : []).filter((a) => !a.isMaster);
+      list.forEach((a) => out.push({ ch: 'ff', name: a.name, id: a.agentId || a.id || '', tl: a.tlExcluded ? FF.config.directLabel(a, 'ff') : a.tlName, direct: !!a.tlExcluded, priority: a.priority || '', status: U.clean(a.agentStatus || ''), active: a.hasIssuance, cur: a.curTotal || 0, last: a.lastTotal || 0, stock: a.stockTotal || 0 }));
+    }
+    if (src === 'gv' || src === 'both') {
+      const gvp = FF.pages.gvPerformance;
+      const rows = (gvp && gvp.sourceRows && gvp.sourceRows()) || (FF.gv && FF.gv.get ? FF.gv.get('report') || [] : []);
+      rows.forEach((r) => out.push({ ch: 'gv', name: r.agentName, id: r.agentId || '', tl: FF.config.isDirectAgent(r, 'gv') ? FF.config.directLabel(r, 'gv') : r.tlName, direct: !!FF.config.isDirectAgent(r, 'gv'), priority: r.priority || '', status: U.clean(r.agentStatus || ''), active: (Number(r.curTotal) || 0) > 0, cur: Number(r.curTotal) || 0, last: Number(r.lastTotal) || 0, stock: Number(r.stockTotal) || 0 }));
+    }
+    return out;
+  }
+  async function peopleDetail(spec) {
+    const src = spec.src === 'gv' || spec.src === 'ff' ? spec.src : 'both';
+    if ((src === 'ff' || src === 'both') && FF.pages.performance && FF.pages.performance.ensureLoaded) { try { await FF.pages.performance.ensureLoaded(); } catch { /* */ } }
+    if ((src === 'gv' || src === 'both') && FF.gv && FF.gv.need) { try { await FF.gv.need('report'); } catch { /* */ } }
+    let list = reportPeople(src);
+    const lvl = String(spec.level || '');
+    if (lvl) list = list.filter((p) => new RegExp(`\\b${lvl}\\b`, 'i').test(p.priority));
+    if (spec.state === 'inactive') list = list.filter((p) => /inactive/i.test(p.status));
+    if (spec.state === 'direct') list = list.filter((p) => p.direct);
+    if (spec.state === 'active') list = list.filter((p) => p.active);
+    if (spec.sort === 'stock') list.sort((a, b) => b.stock - a.stock || b.cur - a.cur);
+    else list.sort((a, b) => b.cur - a.cur || b.stock - a.stock);
+    const label = lvl ? `${lvl} priority` : spec.state === 'inactive' ? 'Inactive' : spec.state === 'direct' ? 'Direct (no TL)' : 'All agents (REPORT)';
+    const byTl = tally(list.map((p) => ({ n: 1, tl: p.tl })), (r) => r.tl || '—');
+    state.spec = spec; state.rows = null; state.raw = null;
+    const stockSum = U.sum(list, (p) => p.stock), curSum = U.sum(list, (p) => p.cur);
+    const big = spec.sort === 'stock' ? `${U.fmt(stockSum)} <small>tags stock · ${U.fmt(list.length)} agents</small>` : `${U.fmt(list.length)} <small>agents</small>`;
+    const body = `<div class="kd-hero"><div><span class="kd-kicker">${src === 'gv' ? '🟩 GV REPORT' : src === 'ff' ? '🟦 FF REPORT' : 'REPORT (FF + GV)'}</span><div class="kd-big">${big}</div><div class="kd-sub">${esc(label)} · current ${U.fmt(curSum)} · stock ${U.fmt(stockSum)}</div></div></div>
+      ${breakdownTable('👥 TL-wise', new Map([...byTl.entries()].sort((a, b) => b[1] - a[1]).slice(0, 30)), null, list.length, { head: 'TL' })}
+      <section class="kd-sec"><h4>🧑‍💼 ${esc(label)} · ${U.fmt(list.length)}</h4><div class="table-wrap kd-scroll tall"><table class="tbl compact kd-tbl"><thead><tr><th>#</th><th>Agent</th><th>Ch</th><th>TL</th><th>Priority</th><th>Status</th><th class="num">Last month</th><th class="num">This month</th><th class="num">Stock</th></tr></thead><tbody>${list.map((p, i) => `<tr class="clickable" data-kd-agent="${esc(p.name)}" data-kd-agent-id="${esc(p.id)}" data-kd-agent-channel="${p.ch}"><td class="dim">${i + 1}</td><td><b>${esc(p.name)}</b>${p.id ? ` <small class="dim">${esc(p.id)}</small>` : ''}</td><td>${p.ch === 'gv' ? '🟩 GV' : '🟦 FF'}</td><td>${esc(p.tl || '—')}</td><td>${esc(String(p.priority).replace(/^[^\w]+/u, '') || '—')}</td><td class="dim">${esc(String(p.status).replace(/^[^\w]+/u, '') || '—')}</td><td class="num">${U.fmt(p.last)}</td><td class="num"><b>${U.fmt(p.cur)}</b></td><td class="num">${U.fmt(p.stock)}</td></tr>`).join('') || '<tr><td colspan="9" class="empty">Koi agent nahi</td></tr>'}</tbody></table></div></section>`;
+    return { kicker: 'KPI detail · Agents list', title: spec.title || label, sub: spec.sort === 'stock' ? `<b>${U.fmt(stockSum)}</b> tags stock · ${U.fmt(list.length)} agents` : `<b>${U.fmt(list.length)}</b> agents · ${esc(label)}`, body };
+  }
+  // ---- 📋 page-registered lists — kisi bhi page ka number usi page ki exact rows kholta hai -----------
+  const LISTS = new Map();
+  /** FF.kpiDetail.registerList(name, (spec) => ({ title, sub, unit, columns: [[label, (row) => html, num?]], rows, agent: (row) => ({ name, id, ch }) })) */
+  function registerList(name, fn) { if (name && typeof fn === 'function') LISTS.set(String(name), fn); }
+  async function listDetail(spec) {
+    const fn = LISTS.get(String(spec.list || ''));
+    if (!fn) return peopleDetail(spec);
+    const out = (await fn(spec)) || {};
+    const rows = out.rows || [], cols = out.columns || [];
+    state.spec = spec; state.rows = null; state.raw = null;
+    const agentOf = out.agent || (() => null);
+    const tlOf = out.tl || (() => null);
+    const head = out.headline ? `${U.fmt(out.headline.value)} <small>${esc(out.headline.unit || '')} · ${U.fmt(rows.length)} ${esc(out.unit || 'rows')}</small>` : `${U.fmt(rows.length)} <small>${esc(out.unit || 'rows')}</small>`;
+    const body = `<div class="kd-hero"><div><span class="kd-kicker">${esc(out.kicker || 'List')}</span><div class="kd-big">${head}</div><div class="kd-sub">${out.sub || ''}</div></div></div>
+      ${out.top || ''}<section class="kd-sec"><div class="table-wrap kd-scroll tall"><table class="tbl compact kd-tbl"><thead><tr><th>#</th>${cols.map((c) => `<th class="${c[2] ? 'num' : ''}">${esc(c[0])}</th>`).join('')}</tr></thead><tbody>${rows.map((r, i) => { const a = agentOf(r), t = a ? null : tlOf(r); return `<tr${a ? ` class="clickable" data-kd-agent="${esc(a.name)}" data-kd-agent-id="${esc(a.id || '')}" data-kd-agent-channel="${esc(a.ch || '')}"` : t ? ` class="clickable" data-kd-tl="${esc(t.name)}" data-kd-tl-channel="${esc(t.ch || '')}"` : ''}><td class="dim">${i + 1}</td>${cols.map((c) => `<td class="${c[2] ? 'num' : ''}">${c[1](r)}</td>`).join('')}</tr>`; }).join('') || `<tr><td colspan="${cols.length + 1}" class="empty">Koi row nahi</td></tr>`}</tbody></table></div></section>${out.note ? `<p class="dim small">${out.note}</p>` : ''}`;
+    return { kicker: `KPI detail · ${out.kicker || 'List'}`, title: spec.title || out.title || 'List', sub: out.headline ? `<b>${U.fmt(out.headline.value)}</b> ${esc(out.headline.unit || '')} · ${U.fmt(rows.length)} ${esc(out.unit || 'rows')}` : `<b>${U.fmt(rows.length)}</b> ${esc(out.unit || 'rows')}${out.subShort ? ` · ${out.subShort}` : ''}`, body };
   }
 
   // ---- GV agent stock drill-down ----------------------------------------------------------------
@@ -585,6 +771,14 @@ window.FF = window.FF || {};
     return { kicker: 'KPI detail · Tag record', title: `Tag ${spec.tagId}`, sub: `${bar ? `🏷️ ${esc(bar)} · ` : ''}${esc(spec.date || '')} · ${esc(spec.agent || '')}`, body };
   }
 
+  /** 🧓 Drawer ka stock-ageing scope — jo number khola usi agent / TL / channel ka. */
+  function ageScopeOf(spec) {
+    const ch = spec.channel === 'gv' || spec.src === 'gv' ? 'gv' : spec.channel === 'ff' || spec.src === 'ff' ? 'ff' : '';
+    if (spec.agent) return { kind: 'agent', key: spec.agentId || spec.agent, keys: [spec.agent].filter(Boolean), ch, title: spec.agent };
+    if (spec.tl || spec.tlName) return { kind: 'tl', key: spec.tl || spec.tlName, ch, title: spec.tl || spec.tlName };
+    return { kind: 'all', key: 'all', ch, open: spec.scope === 'stock' || spec.scope === 'stockreport' };
+  }
+
   // ---- open ------------------------------------------------------------------------------------
   async function open(cardOrSpec, opts = {}) {
     const spec = cardOrSpec && cardOrSpec.nodeType ? specFrom(cardOrSpec) : { ...(cardOrSpec || {}) };
@@ -594,31 +788,26 @@ window.FF = window.FF || {};
     else if (!nested && !opts.fromHistory) state.history = [];
     if (!spec.src) spec.src = PAGE_SRC[currentPage()] || 'both';
     if (!spec.scope) spec.scope = 'mtd';
+    if (spec.ym) spec.ym = normYm(spec.ym) || spec.ym;
     FF.app.openDrawer({ kicker: 'KPI detail', title: spec.title || 'KPI detail', sub: 'Breakdown taiyaar ho raha hai…', body: U.spinner('Detail calculate ho rahi hai…'), wide: true });
     if (FF.notifications && FF.notifications.track) FF.notifications.track('kpi', `KPI opened: ${spec.title || spec.scope}`);
     try {
       const view = spec.tagId ? await tagDetail(spec)
-        : spec.agent && spec.scope === 'stock' ? await agentStockDetail(spec)
-          : spec.agent ? await agentDetail(spec)
+        : spec.agent && spec.scope === 'stock' && (spec.channel === 'gv' || spec.src === 'gv') ? await agentStockDetail(spec)
           : spec.scope === 'stock' ? await stockDetail(spec)
+          : spec.agent ? await agentDetail(spec)
           : spec.scope === 'stockreport' ? await stockReportDetail(spec)
+            : spec.scope === 'list' ? await listDetail(spec)
+            : spec.scope === 'people' ? await peopleDetail(spec)
             : spec.scope === 'agents' ? await agentsDetail(spec)
               : spec.scope === 'status' ? await statusDetail(spec)
                 : await issuanceDetail(spec);
-      const cardInfo = spec.foot ? `<div class="kd-card-foot">Card: ${esc(spec.foot)}</div>` : '';
-      // 🧓 v3.28 — stock ageing section (Agent Allocated At se): agent drawer me us agent ka, TL drawer me
-      // us poore TL ka (VC4+VC20 alag, VC5+ alag, 1/3/5/6+ mahine, har month ke saath ⬇ CSV).
-      const ageScope = FF.stockAge ? (spec.agent ? { kind: 'agent', key: spec.agentId || spec.agent }
-        : (spec.tl || spec.tlName) ? { kind: 'tl', key: spec.tl || spec.tlName } : null) : null;
-      if (ageScope) {
-        const who = ageScope.kind === 'agent' ? `Agent <b>${esc(spec.agent || ageScope.key)}</b>` : `TL <b>${esc(ageScope.key)}</b>`;
-        view.body += `<section class="kd-sec"><h4 class="kd-h">🧓 Stock ageing — ${who} ke paas kitna purana stock</h4>`
-          + FF.stockAge.hostHtml(ageScope, { title: ageScope.key }) + '</section>';
-      }
+      const cardInfo = (spec.cardValue || spec.foot) ? `<div class="kd-card-foot">📌 <b>${esc(spec.title || 'Card')}</b>${spec.cardValue ? ` = <b class="kd-card-val">${esc(spec.cardValue)}</b>` : ''}${spec.foot ? ` · <span class="dim">${esc(spec.foot.replace(/\s+/g, ' ').trim())}</span>` : ''}</div>` : '';
+      // 🧓 v3.31 — har KPI drawer me stock ageing (app.js openDrawer lagata hai): agent → us agent ka,
+      // TL → us TL ka, baaki → us channel ka poora network (VC4+VC20 / VC5+, 1/3/5/6+ mahine, ⬇ CSV).
       const back = nested && state.history.length ? '<button class="btn small" data-kd-back>← Back</button>' : '';
       const exportBtn = view.exportable && FF.auth.can('export') ? '<button class="btn small" data-kd-summary-xlsx>⬇ Breakdown Excel</button>' : '';
-      FF.app.openDrawer({ kicker: view.kicker, title: view.title, sub: view.sub, body: cardInfo + view.body, wide: true, actions: back + exportBtn });
-      if (ageScope) FF.stockAge.decorate(U.$('#drawer') || document);
+      FF.app.openDrawer({ kicker: view.kicker, title: view.title, sub: view.sub, body: cardInfo + view.body, wide: true, actions: back + exportBtn, age: ageScopeOf(spec) });
     } catch (err) {
       const back = nested && state.history.length ? '<button class="btn small" data-kd-back>← Back</button>' : '';
       FF.app.openDrawer({ kicker: 'KPI detail', title: spec.title || 'KPI detail', body: U.errorBox(err), wide: true, actions: back });
@@ -673,7 +862,20 @@ window.FF = window.FF || {};
     if (agentRow) {
       const base = state.spec || {};
       const name = agentRow.dataset.kdAgent;
-      open({ ...base, agent: name, agentId: agentRow.dataset.kdAgentId || '', channel: agentRow.dataset.kdAgentChannel || '', scope: base.scope === 'day' ? 'day' : 'mtd', date: base.scope === 'day' ? base.date : '', title: `${name} · ${agentRow.dataset.kdAgentChannel === 'gv' ? 'GV' : 'FF'} agent` });
+      // v3.31: jis period ka number tha (din / mahina / range / last month) usi period ka agent detail —
+      // pehle month / range se click par 'mtd' (is mahine) ho jaata tha.
+      const keep = ['day', 'month', 'range', 'mtd'].includes(base.scope) ? base.scope : 'mtd';
+      const ch = agentRow.dataset.kdAgentChannel || '';
+      open({ ...base, agent: name, agentId: agentRow.dataset.kdAgentId || '', channel: ch, src: ch === 'gv' ? 'gv' : ch === 'ff' ? 'ff' : (base.src || 'both'), scope: keep, date: keep === 'day' ? base.date : '', list: '', level: '', state: '', holders: '', cardValue: '', foot: '', title: `${name} · ${ch === 'gv' ? 'GV' : 'FF'} agent` });
+      return;
+    }
+    // 👥 TL row → us TL ka issuance detail (usi period ka)
+    const tlRow = e.target.closest('[data-kd-tl]');
+    if (tlRow) {
+      const base = state.spec || {};
+      const ch = tlRow.dataset.kdTlChannel || '';
+      const keep = ['day', 'month', 'range', 'mtd'].includes(base.scope) ? base.scope : 'mtd';
+      open({ ...base, tl: tlRow.dataset.kdTl, agent: '', agentId: '', src: ch === 'gv' ? 'gv' : ch === 'ff' ? 'ff' : (base.src || 'both'), scope: keep, list: '', level: '', state: '', holders: '', cardValue: '', foot: '', title: `TL ${tlRow.dataset.kdTl}` });
       return;
     }
     const agentDay = e.target.closest('[data-kd-agent-day]');
@@ -683,5 +885,5 @@ window.FF = window.FF || {};
     if (chip && state.spec) { open({ ...state.spec, ...JSON.parse(chip.dataset.kdSpec || '{}') }); return; }
   });
 
-  FF.kpiDetail = { open, specFrom };
+  FF.kpiDetail = { open, specFrom, registerList, normYm, _infer: inferSpec };
 })(window.FF);

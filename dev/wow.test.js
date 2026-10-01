@@ -53,7 +53,8 @@ test('buildStats — badges, streak, challenges, GV channel rows ignore', () => 
   const priya = stats.find((s) => s.name === 'Priya');
   assert.ok(ravi && priya);
   assert.equal(ravi.ffCur, 60);
-  assert.ok(ravi.gvCur >= 6, `gvCur ${ravi.gvCur} — month boundary par 6+`);
+  const gvInMonth = gv.filter((r) => r.ym === ym).length;   // 1 tareekh ko 7 me se sirf 1 din is mahine ka
+  assert.ok(ravi.gvCur >= Math.min(6, gvInMonth), `gvCur ${ravi.gvCur} — is mahine ke ${gvInMonth} GV din`);
   assert.equal(ravi.cur, ravi.ffCur + ravi.gvCur);
   assert.ok(ravi.streakDays >= 7, `streak ${ravi.streakDays} >= 7 chahiye`);
   assert.ok(ravi.badges.some((b) => b.id === 'streak'), 'Streak Master badge missing');
