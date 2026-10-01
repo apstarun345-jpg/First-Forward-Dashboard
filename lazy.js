@@ -60,7 +60,7 @@ window.FF = window.FF || {};
     newAgents: ['newAgents'],
     unusual: ['pdf', 'unusual'],
     ffAgentSummary: ['pdf', 'agentSummary'],
-    gvAgentSummary: ['pdf', 'agentSummary'],
+    gvAgentSummary: ['gvpages', 'pdf', 'agentSummary'],
     arena: ['wow'],
     fame: ['wow'],
     warRoom: ['wow'],

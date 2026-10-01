@@ -49,7 +49,8 @@ FF.pages = FF.pages || {};
     };
 
     if (isGv) {
-      const rep = (FF.pages.gvPerformance && FF.pages.gvPerformance.rows && FF.pages.gvPerformance.rows()) || (FF.gv && FF.gv.get('report')) || [];
+      const gvP = FF.pages && FF.pages.gvPerformance;
+      const rep = (gvP && gvP.sourceRows && gvP.sourceRows()) || (gvP && gvP.rows && gvP.rows()) || (FF.gv && FF.gv.get('report')) || [];
       const tlSum = new Map();
       for (const r of rep) {
         add('gv-agent', r.agentName, r.agentId, r.tlName, r.mobile, r.curTotal, r.stockTotal, { tlId: r.tlId, tlMobile: r.tlMobile, last: r.lastTotal, altId: r.supervisorId });
