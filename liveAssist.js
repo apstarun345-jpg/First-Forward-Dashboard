@@ -291,7 +291,8 @@ window.FF = window.FF || {};
   // 🧑‍💼 ADMIN SIDE — request bhejo, wait karo, LIVE player chalao
   // =====================================================================================
   async function adminRequest(username, mode) {
-    if (!FF.auth || !FF.auth.user || FF.auth.user.role !== 'admin') { toast('Admin access chahiye', 'err'); return; }
+    const adminOk = FF.auth && FF.auth.user && (FF.auth.isAdmin ? FF.auth.isAdmin() : FF.auth.user.role === 'admin'); // 👁 preview-aware
+    if (!adminOk) { toast('Admin access chahiye', 'err'); return; }
     if (!hasRTC()) { toast('Is browser me WebRTC nahi hai — Chrome/Edge use karo.', 'err'); return; }
     let out;
     try {

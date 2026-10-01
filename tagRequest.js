@@ -72,7 +72,7 @@ FF.pages = FF.pages || {};
   const round1 = (v) => Math.round(num(v) * 10) / 10;
   const ymNow = () => U.ymKey(new Date());
   const ymLast = () => U.prevMonthKey(ymNow());
-  const isAdmin = () => !!(FF.auth && FF.auth.user && FF.auth.user.role === 'admin');
+  const isAdmin = () => !!(FF.auth && FF.auth.user && (FF.auth.isAdmin ? FF.auth.isAdmin() : FF.auth.user.role === 'admin')); // 👁 preview-aware
   const isPublic = () => !!state.publicMode;
   const me = () => (FF.auth && FF.auth.user && FF.auth.user.username) || '';
   /** Employees ko bhejne wala seedha form link — v3.27 se ye BINA LOGIN khulta hai. */

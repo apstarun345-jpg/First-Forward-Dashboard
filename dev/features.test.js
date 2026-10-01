@@ -359,13 +359,25 @@ test('📢 announcement broadcast, 📜 audit log, 📬 weekly digest + 📊 rep
   const smtp = await startSmtp();
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'apna-feat-round2-'));
   const pad = (n) => String(n).padStart(2, '0');
-  const dcell = (d) => `Date(${d.getFullYear()},${d.getMonth()},${d.getDate()})`;
-  const today = new Date();
-  const yest = new Date(Date.now() - 86400e3);
-  const beforeYest = new Date(Date.now() - 2 * 86400e3);
-  const beforeThat = new Date(Date.now() - 3 * 86400e3);
-  const rowsFF = [{ c: [{ v: dcell(today) }, { v: '1' }, { v: '999' }, { v: 40 }] }, { c: [{ v: dcell(yest) }, { v: '1' }, { v: '999' }, { v: 35 }] }, { c: [{ v: dcell(beforeYest) }, { v: '1' }, { v: '999' }, { v: 0 }] }, { c: [{ v: dcell(beforeThat) }, { v: '1' }, { v: '999' }, { v: 0 }] }];
-  const rowsGV = [{ c: [{ v: dcell(today) }, { v: '1' }, { v: 12 }] }, { c: [{ v: dcell(yest) }, { v: '1' }, { v: 9 }] }, { c: [{ v: dcell(beforeYest) }, { v: '1' }, { v: 5 }] }, { c: [{ v: dcell(beforeThat) }, { v: '1' }, { v: 0 }] }];
+  // 🔧 FIX: server IST (UTC+5:30) calendar par chalta hai (istNow/dateKeyNow) — fixtures bhi usi
+  // basis par banao. UTC dates se 18:30–24:00 UTC (IST 00:00–05:30) window aur month-boundary
+  // (1–3 tareekh) par MTD expectations toot jaati thin.
+  const istNow = new Date(Date.now() + 5.5 * 3600e3);
+  const dcell = (d) => `Date(${d.getUTCFullYear()},${d.getUTCMonth()},${d.getUTCDate()})`;
+  const istDayBack = (i) => new Date(istNow.getTime() - i * 86400e3);
+  const rowsFF = [{ c: [{ v: dcell(istDayBack(0)) }, { v: '1' }, { v: '999' }, { v: 40 }] }, { c: [{ v: dcell(istDayBack(1)) }, { v: '1' }, { v: '999' }, { v: 35 }] }, { c: [{ v: dcell(istDayBack(2)) }, { v: '1' }, { v: '999' }, { v: 0 }] }, { c: [{ v: dcell(istDayBack(3)) }, { v: '1' }, { v: '999' }, { v: 0 }] }];
+  const rowsGV = [{ c: [{ v: dcell(istDayBack(0)) }, { v: '1' }, { v: 12 }] }, { c: [{ v: dcell(istDayBack(1)) }, { v: '1' }, { v: 9 }] }, { c: [{ v: dcell(istDayBack(2)) }, { v: '1' }, { v: 5 }] }, { c: [{ v: dcell(istDayBack(3)) }, { v: '1' }, { v: 0 }] }];
+  // Expected MTD: server ke sourceAwareDigestSummary ko hi mirror karo — IST current month me
+  // jo rows aati hain utni hi (month boundary par bhi sahi).
+  const ymIst = `${istNow.getUTCFullYear()}-${pad(istNow.getUTCMonth() + 1)}`;
+  const ffVals = [40, 35, 0, 0], gvVals = [12, 9, 5, 0];
+  let expFf = 0, expGv = 0, expActive = 0, expZero = 0;
+  for (let i = 0; i < 4; i++) {
+    const d = istDayBack(i);
+    if (`${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}` !== ymIst) continue;
+    expFf += ffVals[i]; expGv += gvVals[i];
+    if (ffVals[i] + gvVals[i] > 0) expActive++; else expZero++;
+  }
   const upstream = http.createServer((req, res) => {
     const tq = new URL(req.url, 'http://x').searchParams.get('tq') || '';
     let rows = [];
@@ -411,14 +423,14 @@ test('📢 announcement broadcast, 📜 audit log, 📬 weekly digest + 📊 rep
     assert.equal(digest.res.status, 200, `digest force — ${JSON.stringify(digest.json).slice(0, 220)}`);
     assert.equal(digest.json.ok, true, `digest bell payload bana — ${JSON.stringify(digest.json).slice(0, 260)}`);
     const digestItem = digest.json.item || {};
-    // Mahine ki 1 tareekh ko kal (pichhla mahina) MTD me nahi aata — calendar MTD sirf aaj ka hota hai.
-    const istDay = Number(new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(8, 10));
-    assert.match(digestItem.body || '', istDay === 1 ? /MTD FF 40 \+ GV 12 = 52/ : /MTD FF 75 \+ GV 26 = 101/, 'digest me FF + GV combined MTD sahi hai');
-    const firstOfMonth = istDay === 1;
-    assert.equal(digestItem.meta && digestItem.meta.ffMtd, firstOfMonth ? 40 : 75, 'digest meta FF MTD source snapshot se aaya');
-    assert.equal(digestItem.meta && digestItem.meta.gvMtd, firstOfMonth ? 12 : 26, 'digest meta GV MTD source snapshot se aaya');
-    assert.equal(digestItem.meta && digestItem.meta.mtdDays, firstOfMonth ? 1 : 3, 'GV-only/FF-only ko active days me saath count karta hai');
-    if (!firstOfMonth) assert.equal(digestItem.meta && digestItem.meta.zeroDays, 1, 'explicit zero snapshot ko zero day ke roop me rakhta hai');
+    // Mahine ki 1-3 tareekh par pichhle mahine ki rows month boundary ke bahar hoti hain, aur
+    // IST-UTC midnight window me din alag padta tha — expectation IST month membership se ginna.
+    const expTotal = expFf + expGv;
+    assert.match(digestItem.body || '', new RegExp(`MTD FF ${expFf} \\+ GV ${expGv} = ${expTotal}`), 'digest me FF + GV combined MTD sahi hai');
+    assert.equal(digestItem.meta && digestItem.meta.ffMtd, expFf, 'digest meta FF MTD source snapshot se aaya');
+    assert.equal(digestItem.meta && digestItem.meta.gvMtd, expGv, 'digest meta GV MTD source snapshot se aaya');
+    assert.equal(digestItem.meta && digestItem.meta.mtdDays, expActive, 'GV-only/FF-only ko active days me saath count karta hai');
+    assert.equal(digestItem.meta && digestItem.meta.zeroDays, expZero, 'explicit zero snapshot ko zero day ke roop me rakhta hai');
     const wk = await call('/api/notifications/weekly-email', 'POST', {}, adminCookie);
     assert.equal(wk.res.status, 200, `weekly force — ${JSON.stringify(wk.json).slice(0, 200)}`);
     assert.equal(wk.json.ok, true, `weekly email bheji — ${JSON.stringify(wk.json)}`);
@@ -468,13 +480,15 @@ test('📢 announcement broadcast, 📜 audit log, 📬 weekly digest + 📊 rep
 test('🔗 personal links (agent+TL) /p/ pages, 🗺 team location, 🏆 anomaly force (agent+TL)', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'apna-feat-r3-'));
   const pad = (n) => String(n).padStart(2, '0');
-  const dcell = (d) => `Date(${d.getFullYear()},${d.getMonth()},${d.getDate()})`;
-  const dayBack = (i) => new Date(Date.now() - i * 86400e3);
+  // 🔧 FIX: server IST calendar (dateKeyNow) par chalta hai — fixture dates bhi usi basis par,
+  // warna 18:30–24:00 UTC me snapshot "aaj" nahi lagta tha → sheetToday false → anomaly skip.
+  const dcell = (d) => `Date(${d.getUTCFullYear()},${d.getUTCMonth()},${d.getUTCDate()})`;
+  const dayBack = (i) => new Date(Date.now() + 5.5 * 3600e3 - i * 86400e3);
   // personal daily rows: aaj se 12 din (7,7,…) + pichhle mahine ke 5 din
   const personalRows = [];
   for (let i = 0; i < 12; i++) personalRows.push({ c: [{ v: dcell(dayBack(i)) }, { v: '1' }, { v: 7 }] });
-  const pm = new Date(); pm.setMonth(pm.getMonth() - 1);
-  for (let d = 1; d <= 5; d++) personalRows.push({ c: [{ v: dcell(new Date(pm.getFullYear(), pm.getMonth(), d)) }, { v: '1' }, { v: 5 }] });
+  const pm = new Date(Date.now() + 5.5 * 3600e3); pm.setUTCMonth(pm.getUTCMonth() - 1);
+  for (let d = 1; d <= 5; d++) personalRows.push({ c: [{ v: dcell(new Date(Date.UTC(pm.getUTCFullYear(), pm.getUTCMonth(), d))) }, { v: '1' }, { v: 5 }] });
   // anomaly rows: prev7 full, aaj ZERO (row hi nahi)
   const agentRows = [];
   for (let i = 1; i <= 7; i++) agentRows.push({ c: [{ v: 'Rahul Dravid' }, { v: dcell(dayBack(i)) }, { v: 10 }] });
@@ -484,8 +498,8 @@ test('🔗 personal links (agent+TL) /p/ pages, 🗺 team location, 🏆 anomaly
   const teamRows = [];
   for (let i = 1; i <= 7; i++) teamRows.push({ c: [{ v: 'Team Member One' }, { v: dcell(dayBack(i)) }, { v: 9 }] });
   teamRows.push({ c: [{ v: 'Team Member One' }, { v: dcell(dayBack(0)) }, { v: 6 }] });
-  const snapRows = [{ c: [{ v: dcell(new Date()) }, { v: '1' }, { v: '999' }, { v: 40 }] }, { c: [{ v: dcell(dayBack(1)) }, { v: '1' }, { v: '999' }, { v: 35 }] }];
-  const gvRows = [{ c: [{ v: dcell(new Date()) }, { v: '1' }, { v: 12 }] }];
+  const snapRows = [{ c: [{ v: dcell(dayBack(0)) }, { v: '1' }, { v: '999' }, { v: 40 }] }, { c: [{ v: dcell(dayBack(1)) }, { v: '1' }, { v: '999' }, { v: 35 }] }];
+  const gvRows = [{ c: [{ v: dcell(dayBack(0)) }, { v: '1' }, { v: 12 }] }];
   const upstream = http.createServer((req, res) => {
     const tq = new URL(req.url, 'http://x').searchParams.get('tq') || '';
     let rows = [];

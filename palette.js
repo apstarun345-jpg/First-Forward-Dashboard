@@ -163,7 +163,7 @@ window.FF = window.FF || {};
     );
     // Pages (jiske paas permission hai wahi)
     (FF.app && FF.app.PAGES ? FF.app.PAGES : []).forEach((p) => {
-      const adminOk = !p.adminOnly || (FF.auth.user && FF.auth.user.role === 'admin');
+      const adminOk = !p.adminOnly || (FF.auth.isAdmin ? FF.auth.isAdmin() : (FF.auth.user && FF.auth.user.role === 'admin')); // 👁 preview-aware
       const featOk = !p.feat || !FF.config.features || FF.config.features[p.feat] !== false;
       if (FF.auth.can(p.perm) && adminOk && featOk) items.push({ group: 'Pages', icon: p.icon || '📄', label: p.label, sub: p.desc || '', href: `#/${p.id}` });
     });

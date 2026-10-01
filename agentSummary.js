@@ -14,6 +14,10 @@ FF.pages = FF.pages || {};
   const digits = (s) => String(s || '').replace(/\D/g, '');
   const mob10 = (s) => { const d = digits(s); return d.length >= 10 ? d.slice(-10) : d; };
   const MP = () => FF.masterProfile;
+  // 🔐 v3.35 — har option admin ke control me (Settings → Users / Access matrix).
+  // FF.auth missing ho to default allow (tests/legacy) — masterProfile.js jaisa pattern.
+  const can = (perm) => { try { return !FF.auth || FF.auth.can(perm); } catch { return true; } };
+  const canContacts = () => can('contacts');
 
   async function loadPeople(channel) {
     const isGv = channel === 'gv';
@@ -270,7 +274,7 @@ FF.pages = FF.pages || {};
     const chLabel = r.ch === 'gv' ? 'GV Partner' : 'First Forward';
     const lines = [
       `*📋 ${p.name}* (${chLabel} · ${r.isTl ? 'Team Leader' : 'Agent'}${p.id ? ` · ID: ${p.id}` : ''})`,
-      `${p.mobile ? `📞 Mobile: ${p.mobile}` : ''}${!r.isTl && p.tlName ? ` · 👥 TL: ${p.tlName}${p.tlId ? ` (${p.tlId})` : ''}` : ''}`.replace(/^ · /, ''),
+      `${p.mobile && canContacts() ? `📞 Mobile: ${p.mobile}` : ''}${!r.isTl && p.tlName ? ` · 👥 TL: ${p.tlName}${p.tlId ? ` (${p.tlId})` : ''}` : ''}`.replace(/^ · /, ''),
       `Priority: ${p.priority || '—'}${p.status ? ` · Status: ${p.status}` : ''}`,
       '',
       `*📊 KPI Summary:*`,
@@ -340,7 +344,7 @@ FF.pages = FF.pages || {};
       header: ['Field', 'Value'],
       rows: [
         ['Report', `${chLabel} · ${r.isTl ? 'Team Leader' : 'Agent'} Summary`],
-        ['Name', p.name], ['ID', p.id || ''], ['Mobile', p.mobile || ''],
+        ['Name', p.name], ['ID', p.id || ''], ['Mobile', canContacts() ? (p.mobile || '') : ''],
         ...(r.isTl ? [] : [['TL', p.tlName || ''], ['TL ID', p.tlId || '']]),
         ['Priority', p.priority || ''],
         ['Current Month', p.curYm || ''],
@@ -388,7 +392,7 @@ FF.pages = FF.pages || {};
     return JSON.stringify({
       generatedAt: new Date().toISOString(),
       channel: r.ch === 'gv' ? 'gv' : 'ff',
-      person: { kind: r.isTl ? 'tl' : 'agent', name: p.name, id: p.id || '', mobile: p.mobile || '', tlName: p.tlName || '', tlId: p.tlId || '' },
+      person: { kind: r.isTl ? 'tl' : 'agent', name: p.name, id: p.id || '', mobile: canContacts() ? (p.mobile || '') : '', tlName: p.tlName || '', tlId: p.tlId || '' },
       months: { current: p.curYm || '', last: p.lastYm || '' },
       totals: t,
       expectedMonthEnd: p.expected, runRatePerDay: p.runRate,
@@ -404,7 +408,7 @@ FF.pages = FF.pages || {};
     const chLabel = r.ch === 'gv' ? 'GV Partner' : 'First Forward';
     const doc = FF.pdf.doc({
       title: `${chLabel} · ${r.isTl ? 'Team Leader' : 'Agent'} Summary`,
-      subtitle: `${p.name}${p.id ? ` (ID: ${p.id})` : ''}${p.tlName && !r.isTl ? ` · TL: ${p.tlName}` : ''}${p.mobile ? ` · ${p.mobile}` : ''}`,
+      subtitle: `${p.name}${p.id ? ` (ID: ${p.id})` : ''}${p.tlName && !r.isTl ? ` · TL: ${p.tlName}` : ''}${p.mobile && canContacts() ? ` · ${p.mobile}` : ''}`,
       right: `${new Date().toLocaleDateString('en-IN')} · ${p.curYm || ''}`
     });
     doc.kpis([
@@ -533,7 +537,7 @@ FF.pages = FF.pages || {};
       kicker: `⏳ ${chLabel} · Stock Ageing Drill-down`,
       title,
       sub: esc(`${r.isTl ? 'Team Leader' : 'Agent'}${p.id ? ` · ID ${p.id}` : ''} — kisi bhi class row par click karke tag/barcode details dekhein`),
-      actions: `<button class="btn small" data-drawer-csv="${esc(title)}">⬇ CSV</button><button class="btn small primary" data-drawer-pdf="${esc(title)}">📄 PDF</button>`,
+      actions: can('export') ? `<button class="btn small" data-drawer-csv="${esc(title)}">⬇ CSV</button><button class="btn small primary" data-drawer-pdf="${esc(title)}">📄 PDF</button>` : '',
       body,
       wide: true,
       age: false
@@ -670,23 +674,23 @@ FF.pages = FF.pages || {};
     const sumAgentsStock = r.isTl ? U.sum(p.agents || [], (a) => a.stockTotal) : 0;
     const teamGrowth = r.isTl ? U.growth(sumAgentsCur, sumAgentsLast) : null;
 
+    // 🔐 v3.35 — export buttons sirf `export` permission par, share/copy sirf `share` par (admin decides).
+    const expBtns = can('export') ? `<button class="btn primary" data-as-act="pdf">📄 PDF</button>
+          <button class="btn" data-as-act="excel">📊 Excel</button>
+          <button class="btn" data-as-act="csv">⬇ CSV</button>
+          <button class="btn" data-as-act="json">🧾 JSON</button>` : '';
+    const shBtns = can('share') ? `<button class="btn" data-as-act="share">📲 Share / WhatsApp</button>
+          <button class="btn" data-as-act="wa">💬 WA Text</button>
+          <button class="btn" data-as-act="copy">📋 Copy</button>` : '';
     return `<div class="as-report">
       <div class="as-head">
         <div class="as-ava">${r.isTl ? '👥' : '🧑‍💼'}</div>
         <div class="as-who">
           <div class="badge-row"><span class="badge ${r.ch === 'gv' ? 'green' : 'blue'}">${chLabel}</span><span class="badge purple">${r.isTl ? 'Team Leader' : 'Agent'}</span>${p.priority ? `<span class="badge ${/high/i.test(p.priority) ? 'red' : /med/i.test(p.priority) ? 'amber' : 'green'}">${esc(p.priority)}</span>` : ''}</div>
           <h2>${esc(p.name)}</h2>
-          <p class="dim">${p.id ? `ID: <b>${esc(p.id)}</b> · ` : ''}${p.tlName && !r.isTl ? `TL: <b>${esc(p.tlName)}</b>${p.tlId ? ` (${esc(p.tlId)})` : ''} · ` : ''}${p.mobile ? `📞 <a href="tel:${esc(p.mobile)}">${esc(p.mobile)}</a>` : ''}</p>
+          <p class="dim">${p.id ? `ID: <b>${esc(p.id)}</b> · ` : ''}${p.tlName && !r.isTl ? `TL: <b>${esc(p.tlName)}</b>${p.tlId ? ` (${esc(p.tlId)})` : ''} · ` : ''}${p.mobile && canContacts() ? `📞 <a href="tel:${esc(p.mobile)}">${esc(p.mobile)}</a>` : ''}</p>
         </div>
-        <div class="as-actions">
-          <button class="btn primary" data-as-act="pdf">📄 PDF</button>
-          <button class="btn" data-as-act="excel">📊 Excel</button>
-          <button class="btn" data-as-act="csv">⬇ CSV</button>
-          <button class="btn" data-as-act="json">🧾 JSON</button>
-          <button class="btn" data-as-act="share">📲 Share / WhatsApp</button>
-          <button class="btn" data-as-act="wa">💬 WA Text</button>
-          <button class="btn" data-as-act="copy">📋 Copy</button>
-        </div>
+        ${expBtns || shBtns ? `<div class="as-actions">${expBtns}${shBtns}</div>` : ''}
       </div>
 
       <div class="kpi-grid six">
@@ -722,10 +726,10 @@ FF.pages = FF.pages || {};
       </div>
 
       ${r.isTl && (p.agents || []).length ? `<div class="card" style="margin-top:14px">
-        <div class="card-head"><h3>🧑‍💼 Team Agents (${fmt(p.agents.length)}) — click any agent to open their summary</h3><span class="as-pack-btns"><button class="btn small" data-as-pack="xlsx" title="Poore team ki ek Excel workbook (Summary + har agent ki sheet)">👥 Team Pack Excel</button><button class="btn small primary" data-as-pack="pdf" title="Poore team ki ek combined PDF (TL + har agent ka page)">👥 Team Pack PDF</button></span></div>
+        <div class="card-head"><h3>🧑‍💼 Team Agents (${fmt(p.agents.length)}) — click any agent to open their summary</h3>${can('export') ? `<span class="as-pack-btns"><button class="btn small" data-as-pack="xlsx" title="Poore team ki ek Excel workbook (Summary + har agent ki sheet)">👥 Team Pack Excel</button><button class="btn small primary" data-as-pack="pdf" title="Poore team ki ek combined PDF (TL + har agent ka page)">👥 Team Pack PDF</button></span>` : ''}</div>
         <div class="table-wrap"><table class="tbl compact">
           <thead><tr><th>Agent</th><th>ID</th><th class="num">${esc(p.lastYm || 'Last')}</th><th class="num">${esc(p.curYm || 'MTD')}</th><th class="num">VC4</th><th class="num">Comm</th><th class="num">Growth</th><th class="num">Stock</th><th></th></tr></thead>
-          <tbody>${p.agents.map((a) => `<tr class="clickable" data-as-pick="${esc(`${r.ch}-agent|${a.name}`)}"><td><b>${esc(a.name)}</b></td><td class="mono">${esc(a.id || '—')}</td><td class="num">${fmt(a.lastTotal)}</td><td class="num"><b>${fmt(a.curTotal)}</b></td><td class="num">${fmt(a.curVc4)}</td><td class="num">${fmt(a.curComm)}</td><td class="num">${U.pctHtml(a.growth)}</td><td class="num">${fmt(a.stockTotal)}</td><td><button class="btn tiny" data-as-wa="${esc([a.name, a.id || '', a.curTotal, a.lastTotal, a.stockTotal].join('|'))}" title="WhatsApp par is agent ka summary bhejein">📲</button></td></tr>`).join('')}</tbody>
+          <tbody>${p.agents.map((a) => `<tr class="clickable" data-as-pick="${esc(`${r.ch}-agent|${a.name}`)}"><td><b>${esc(a.name)}</b></td><td class="mono">${esc(a.id || '—')}</td><td class="num">${fmt(a.lastTotal)}</td><td class="num"><b>${fmt(a.curTotal)}</b></td><td class="num">${fmt(a.curVc4)}</td><td class="num">${fmt(a.curComm)}</td><td class="num">${U.pctHtml(a.growth)}</td><td class="num">${fmt(a.stockTotal)}</td><td>${can('share') ? `<button class="btn tiny" data-as-wa="${esc([a.name, a.id || '', a.curTotal, a.lastTotal, a.stockTotal].join('|'))}" title="WhatsApp par is agent ka summary bhejein">📲</button>` : ''}</td></tr>`).join('')}</tbody>
           <tfoot><tr class="row-total"><td colspan="2"><b>Grand Total (${fmt(p.agents.length)} Agents)</b></td><td class="num"><b>${fmt(sumAgentsLast)}</b></td><td class="num"><b>${fmt(sumAgentsCur)}</b></td><td class="num"><b>${fmt(sumAgentsVc4)}</b></td><td class="num"><b>${fmt(sumAgentsComm)}</b></td><td class="num">${U.pctHtml(teamGrowth)}</td><td class="num"><b>${fmt(sumAgentsStock)}</b></td><td></td></tr></tfoot>
         </table></div>
       </div>` : ''}
@@ -744,7 +748,7 @@ FF.pages = FF.pages || {};
             <div class="as-search">
               <input id="as-q" class="input" type="search" placeholder="🔎 Search Agent Name, TL Name, Agent ID, TL ID, ya 10-digit Mobile Number…" value="${esc((params && params.q) || state.q || '')}" autocomplete="off">
               <button class="btn primary" id="as-search-btn" type="button">🔎 Search</button>
-              <button class="btn" id="as-refresh-btn" type="button" title="Data refresh — cache clear karke dobara load">🔄</button>
+              ${can('refresh') ? `<button class="btn" id="as-refresh-btn" type="button" title="Data refresh — cache clear karke dobara load">🔄</button>` : ''}
               <div id="as-drop" class="as-drop" hidden></div>
             </div>
           </div>
@@ -773,7 +777,7 @@ FF.pages = FF.pages || {};
             <span class="badge ${isTl ? 'purple' : 'blue'}">${isTl ? 'TL' : 'Agent'}</span>
             <b>${esc(p.name)}</b>
             ${p.id ? `<small class="mono">(${esc(p.id)})</small>` : ''}
-            ${p.mobile ? `<small class="dim">📞${esc(mob10(p.mobile))}</small>` : ''}
+            ${p.mobile && canContacts() ? `<small class="dim">📞${esc(mob10(p.mobile))}</small>` : ''}
             <small class="dim">· MTD ${fmt(p.cur)}</small>
           </button>`;
         }).join('');
@@ -794,7 +798,7 @@ FF.pages = FF.pages || {};
               <b>${esc(p.name)}</b>
               ${p.id ? `<small class="mono">· ID ${esc(p.id)}</small>` : ''}
               ${!isTl && p.tl ? `<small class="dim">· TL ${esc(p.tl)}${p.tlId ? ` (${esc(p.tlId)})` : ''}</small>` : ''}
-              ${p.mobile ? `<small class="dim">· 📞 ${esc(mob10(p.mobile))}</small>` : ''}
+              ${p.mobile && canContacts() ? `<small class="dim">· 📞 ${esc(mob10(p.mobile))}</small>` : ''}
             </span>
             <span class="dim small">MTD <b>${fmt(p.cur)}</b> · Stock <b>${fmt(p.stock)}</b></span>
           </button>`;
@@ -864,9 +868,10 @@ FF.pages = FF.pages || {};
       root.__asSummaryClick = async (e) => {
         const waBtn = e.target.closest('[data-as-wa]');
         if (waBtn && state.report) {
+          if (!can('share')) { U.toast('Share permission nahi hai', 'err'); return; }
           const [wName, wId, wCur, wLast, wStock] = (waBtn.dataset.asWa || '').split('|');
           const a = { name: wName, id: wId, curTotal: Number(wCur) || 0, lastTotal: Number(wLast) || 0, stockTotal: Number(wStock) || 0, growth: U.growth(Number(wCur) || 0, Number(wLast) || 0) };
-          const mob = MP() && MP().mobileFor ? MP().mobileFor(wName, wId, '') : '';
+          const mob = canContacts() && MP() && MP().mobileFor ? MP().mobileFor(wName, wId, '') : '';
           const txt = agentWaText(state.report, a);
           const link = mob && mob10(mob).length === 10 ? `https://wa.me/91${mob10(mob)}?text=${encodeURIComponent(txt)}` : U.waLink(txt);
           window.open(link, '_blank', 'noopener');
@@ -874,6 +879,7 @@ FF.pages = FF.pages || {};
         }
         const packBtn = e.target.closest('[data-as-pack]');
         if (packBtn && state.report && state.report.isTl) {
+          if (!can('export')) { U.toast('Download permission nahi hai', 'err'); return; }
           if (packBtn.disabled) return;
           const kind = packBtn.dataset.asPack;
           packBtn.disabled = true;
@@ -921,6 +927,9 @@ FF.pages = FF.pages || {};
         if (act && state.report) {
           const r = state.report, fname = `${r.ch}-${r.isTl ? 'tl' : 'agent'}-${U.slug(r.p.name)}-${U.stamp()}`;
           const k = act.dataset.asAct;
+          // 🔐 v3.35 — render-time hide ke baad bhi yahan check (defense in depth, same toast strings)
+          if (['pdf', 'excel', 'csv', 'json'].includes(k) && !can('export')) { U.toast('Download permission nahi hai', 'err'); return; }
+          if (['share', 'wa', 'copy'].includes(k) && !can('share')) { U.toast('Share permission nahi hai', 'err'); return; }
           act.disabled = true;
           try {
             await new Promise((res) => setTimeout(res, 30)); // busy paint
@@ -971,5 +980,5 @@ FF.pages = FF.pages || {};
 
   FF.pages.ffAgentSummary = makePage('ff');
   FF.pages.gvAgentSummary = makePage('gv');
-  FF.agentSummary = { loadPeople, matchPeople, topSuggestions, buildReport, makePdf, reportText, reportCsv, reportXlsx, reportJson, monthlyTrend, agentAlerts, buildTeamPack, teamPackPdf, teamPackXlsx, agentWaText, clearCaches };
+  FF.agentSummary = { loadPeople, matchPeople, topSuggestions, buildReport, makePdf, reportText, reportCsv, reportXlsx, reportJson, reportHtml, monthlyTrend, agentAlerts, buildTeamPack, teamPackPdf, teamPackXlsx, agentWaText, clearCaches };
 })(window.FF);
