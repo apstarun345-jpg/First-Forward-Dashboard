@@ -1218,6 +1218,7 @@ function publicWorkspaceUser(username) {
 // waise hi pahunchti hai (source: 'public-link') aur Google Sheet sync bhi chalti hai.
 const PUBLIC_TAG_DEFAULTS = {
   enabled: true, showCheck: true, askMobile: true, askOffice: false, askNote: true,
+  askAddress: true,          // 🏠 full address + 📮 pincode — dono mandatory (dispatch/delivery ke liye)
   title: 'IDFC Agents Tag Request', intro: '', maxRows: 60
 };
 function publicTagFormConfig() {
@@ -3378,7 +3379,8 @@ async function handleApi(req, res, url) {
     agentId: 'Agent ID', agent: 'Agent', tl: 'TL', channel: 'Channel', cls: 'Tag Class',
     last: 'Last month', cur: 'Current MTD', growth: 'Growth %', stock: 'Stock', cover: 'Cover (days)',
     priority: 'Priority', sugNet: 'Suggested (stock −)', sugGross: 'Suggested (w/o stock)',
-    approved: 'Approved qty', remark: 'Remark', note: 'Note', adminNote: 'Admin note'
+    approved: 'Approved qty', remark: 'Remark', note: 'Note', adminNote: 'Admin note',
+    empName: 'Employee', empMobile: 'Employee mobile', empAddress: 'Employee address', empPincode: 'Pincode'
   };
   const tagSheetConfig = () => {
     const w = workspaceStore();
@@ -3410,6 +3412,10 @@ async function handleApi(req, res, url) {
       case 'time': return d.toISOString().slice(11, 16);
       case 'requestId': return req.id || '';
       case 'by': return req.byName || req.by || '';
+      case 'empName': return (req.employee && req.employee.name) || req.byName || '';
+      case 'empMobile': return (req.employee && req.employee.mobile) || '';
+      case 'empAddress': return (req.employee && req.employee.address) || '';
+      case 'empPincode': return (req.employee && req.employee.pincode) || '';
       case 'status': return req.status || '';
       case 'agentId': return x.agentId || '';
       case 'agent': return x.agentName || '';
@@ -3611,6 +3617,7 @@ async function handleApi(req, res, url) {
       askMobile: !!cfg.askMobile,
       askOffice: !!cfg.askOffice,
       askNote: cfg.askNote !== false,
+      askAddress: cfg.askAddress !== false,
       maxRows: Math.min(150, Math.max(5, Number(cfg.maxRows) || 60)),
       title: shortText(cfg.title, 120) || 'IDFC Agents Tag Request',
       intro: shortText(cfg.intro, 400),
@@ -3668,6 +3675,15 @@ async function handleApi(req, res, url) {
     if (employeeName.length < 2) throw new HttpError(400, 'Employee name zaroori hai (kam se kam 2 characters).');
     const mobile = String(emp.mobile || emp.phone || '').replace(/[^\d+]/g, '').slice(0, 16);
     const office = shortText(emp.office || emp.branch, 80);
+    // 🏠 address + 📮 pincode — employee link par mandatory (admin chahe to Settings se band kar sakta hai).
+    const address = shortText(emp.address || emp.fullAddress || body.address, 300);
+    const pincode = String(emp.pincode || emp.pin || body.pincode || '').replace(/[^\d]/g, '').slice(0, 6);
+    const city = shortText(emp.city, 60);
+    if (cfg.askMobile !== false && String(mobile).replace(/\D/g, '').length < 10) throw new HttpError(400, 'Mobile number zaroori hai (10 digit).');
+    if (cfg.askAddress !== false) {
+      if (address.replace(/\s+/g, ' ').trim().length < 8) throw new HttpError(400, 'Full address zaroori hai (kam se kam 8 characters — house/street/area).');
+      if (!/^\d{6}$/.test(pincode)) throw new HttpError(400, 'Pincode zaroori hai (6 digit).');
+    }
     const rows = tagRequestRows(body.rows);
     if (!rows.length) throw new HttpError(400, 'Kam se kam ek row chahiye (agent + tag class + qty).');
     if (rows.length > Math.min(150, Math.max(5, Number(cfg.maxRows) || 60))) throw new HttpError(400, `Ek request me max ${Math.min(150, Math.max(5, Number(cfg.maxRows) || 60))} rows allowed hain.`);
@@ -3682,7 +3698,7 @@ async function handleApi(req, res, url) {
     const row = {
       id: workspaceId('tagreq'), at: now,
       by: `public:${normUser(employeeName) || 'employee'}`, byName: employeeName,
-      employee: { name: employeeName, mobile, office },
+      employee: { name: employeeName, mobile, office, address, pincode, ...(city ? { city } : {}) },
       source: 'public-link', ip: String(ip || '').slice(0, 45),
       status: 'pending', note: shortText(body.note, 300), adminNote: '',
       rows, tls: tagRequestTls(body.tls), total, updatedAt: now, updatedBy: 'public-link',
@@ -3702,12 +3718,12 @@ async function handleApi(req, res, url) {
     try {
       recordNotification({
         type: 'request', title: `🏷️ Tag request (employee link)${dupes.length ? ' 🔁 duplicate' : ''} · ${employeeName}`,
-        body: `${rows.length} rows · ${new Set(rows.map((r) => r.agentName)).size} agents · ${total} tags${office ? ` · ${office}` : ''}${mobile ? ` · ${mobile}` : ''}${dupes.length ? ` · 🔁 pehle se ${dupes.length} active request (${dupes.map((d) => d.id).join(', ')})` : ''}`,
+        body: `${rows.length} rows · ${new Set(rows.map((r) => r.agentName)).size} agents · ${total} tags${office ? ` · ${office}` : ''}${mobile ? ` · 📱 ${mobile}` : ''}${pincode ? ` · 📮 ${pincode}` : ''}${address ? ` · 🏠 ${address.slice(0, 60)}${address.length > 60 ? '…' : ''}` : ''}${dupes.length ? ` · 🔁 pehle se ${dupes.length} active request (${dupes.map((d) => d.id).join(', ')})` : ''}`,
         target: 'admin', routeKey: 'tagRequest',
         meta: { requestId: row.id, rows: rows.length, total, publicLink: true, note: row.note, duplicates: dupes.length, dupOf: dupes.map((d) => d.id), link: '#/tagRequest?view=requests' }
       });
     } catch { /* notification optional */ }
-    logAudit({ username: 'public-link', role: 'public', name: employeeName }, 'tag_request_public_created', { target: row.id, note: `${rows.length} rows · ${total} tags · ${employeeName}${dupes.length ? ` · 🔁 duplicate of ${dupes.map((d) => d.id).join(',')}` : ''}`, ip });
+    logAudit({ username: 'public-link', role: 'public', name: employeeName }, 'tag_request_public_created', { target: row.id, note: `${rows.length} rows · ${total} tags · ${employeeName}${mobile ? ` · ${mobile}` : ''}${pincode ? ` · 📮${pincode}` : ''}${dupes.length ? ` · 🔁 duplicate of ${dupes.map((d) => d.id).join(',')}` : ''}`, ip });
     return sendJson(res, 201, {
       ok: true,
       request: {
@@ -3744,6 +3760,7 @@ async function handleApi(req, res, url) {
         id: row.id, at: row.at, status: row.status, total: row.total, byName: row.byName,
         rows: (row.rows || []).length, agents: new Set((row.rows || []).map((x) => x.agentName)).size,
         adminNote: row.adminNote || '', note: row.note || '',
+        employee: row.employee ? { name: row.employee.name || '', mobile: row.employee.mobile || '', address: row.employee.address || '', pincode: row.employee.pincode || '' } : null,
         sheetSynced: !!row.sheetSync && !row.sheetSync.error,
         updatedAt: row.updatedAt || row.at
       }
@@ -3760,6 +3777,7 @@ async function handleApi(req, res, url) {
     if (c.askMobile !== undefined) cfg.askMobile = !!c.askMobile;
     if (c.askOffice !== undefined) cfg.askOffice = !!c.askOffice;
     if (c.askNote !== undefined) cfg.askNote = !!c.askNote;
+    if (c.askAddress !== undefined) cfg.askAddress = !!c.askAddress;
     if (c.title !== undefined) cfg.title = shortText(c.title, 120);
     if (c.intro !== undefined) cfg.intro = shortText(c.intro, 400);
     if (c.maxRows !== undefined) cfg.maxRows = Math.min(150, Math.max(5, Number(c.maxRows) || 60));
@@ -4541,10 +4559,12 @@ async function servePersonalPage(req, res, rawToken) {
     const targetHtml = target ? `<div class="pb-kv"><span>🎯 Your target ${escHtml(ym)}</span><b>${st.mtd} / ${Number(target.target) || 0} (${pct(st.mtd, Number(target.target))}%)</b></div>` : '';
     const teamHtml = team.length ? `<section class="pb-card"><h3>👥 Team (is mahine)</h3>${team.map((t, i) => `<div class="pb-rank"><span class="pb-pos">${i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1}</span><span class="pb-name">${escHtml(t.name)}</span><b>${t.mtd}</b></div>`).join('')}</section>` : '';
     const diff = st.mtd - st.prevSame;
+    // 🧑‍💼 Agent ke link par TL ka naam bhi dikhao (pehle sirf agent naam aata tha)
+    const tlName = link.kind === 'tl' ? '' : (await personalAgentTl(link));
     const html = personalShell({
       title: `${link.name} · Performance`,
       heading: `${link.kind === 'tl' ? '👥' : '🧑‍💼'} ${escHtml(link.name)}`,
-      sub: `${link.source === 'gv' ? 'GV Partner' : 'First Forward'} · ${link.kind === 'tl' ? 'Team Leader' : 'Agent'} · personal view · read-only`,
+      sub: `${link.source === 'gv' ? 'GV Partner' : 'First Forward'} · ${link.kind === 'tl' ? 'Team Leader' : 'Agent'}${tlName ? ` · ${link.kind === 'tl' ? '' : 'TL '}<b>${escHtml(tlName)}</b>` : ''} · personal view · read-only`,
       body: `
       ${goalHtml || targetHtml ? `<section class="pb-card pb-goalcard">${goalHtml}${targetHtml}</section>` : ''}
       <section class="pb-kpis">

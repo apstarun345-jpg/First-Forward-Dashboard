@@ -82,11 +82,18 @@ FF.pages = FF.pages || {};
       const raw = localStorage.getItem(PUB_EMPLOYEE_KEY);
       if (!raw) return;
       const o = JSON.parse(raw) || {};
-      state.employee = { name: String(o.name || '').slice(0, 80), mobile: String(o.mobile || '').slice(0, 16), office: String(o.office || '').slice(0, 80) };
+      state.employee = {
+        name: String(o.name || '').slice(0, 80), mobile: String(o.mobile || '').slice(0, 16),
+        office: String(o.office || '').slice(0, 80), address: String(o.address || '').slice(0, 300),
+        pincode: String(o.pincode || '').slice(0, 6)
+      };
     } catch { /* private mode / bad JSON */ }
   }
   function saveEmployee() {
-    try { localStorage.setItem(PUB_EMPLOYEE_KEY, JSON.stringify({ name: state.employee.name, mobile: state.employee.mobile, office: state.employee.office })); } catch { /* ignore */ }
+    try { localStorage.setItem(PUB_EMPLOYEE_KEY, JSON.stringify({
+      name: state.employee.name, mobile: state.employee.mobile, office: state.employee.office,
+      address: state.employee.address, pincode: state.employee.pincode
+    })); } catch { /* ignore */ }
   }
   /** Public endpoints (koi cookie/session nahi) — login wale FF.auth.api ki jagah. */
   function publicApi(path, method, body) {
@@ -98,24 +105,44 @@ FF.pages = FF.pages || {};
     });
   }
   const employeeOk = () => String(state.employee.name || '').trim().length >= 2;
+  /** 🏠 Employee link par jo jo mandatory hai (name · mobile · address · pincode) — pehla adhoora field. */
+  function employeeMissing() {
+    const e = state.employee || {};
+    const cfg = state.publicCfg || {};
+    if (String(e.name || '').trim().length < 2) return 'name';
+    if (cfg.askMobile !== false && String(e.mobile || '').replace(/\D/g, '').length < 10) return 'mobile';
+    if (cfg.askAddress !== false) {
+      if (String(e.address || '').replace(/\s+/g, ' ').trim().length < 8) return 'address';
+      if (!/^\d{6}$/.test(String(e.pincode || '').replace(/\D/g, ''))) return 'pincode';
+    }
+    return '';
+  }
+  const EMP_LABEL = { name: '👤 Employee name', mobile: '📱 Mobile number', address: '🏠 Full address', pincode: '📮 Pincode' };
   /** Employee card — sirf public mode me (naam mandatory, baaki Settings se optional). */
   function employeeCardHtml() {
     const cfg = state.publicCfg || {};
     const e = state.employee || {};
-    const missing = !employeeOk();
-    return `<section class="card tr-employee ${missing ? 'tr-employee-todo' : ''}" id="tr-employee-card">
-      <div class="card-head"><h3>👤 Aapka naam <span class="badge red">zaroori</span></h3>
-        <div class="card-right dim">Isi naam se request admin ke paas jayegi</div></div>
+    const miss = employeeMissing();
+    const askAddr = cfg.askAddress !== false;
+    const star = '<span class="badge red">zaroori</span>';
+    return `<section class="card tr-employee ${miss ? 'tr-employee-todo' : ''}" id="tr-employee-card">
+      <div class="card-head"><h3>👤 Aapki details ${star}</h3>
+        <div class="card-right dim">Inhi details se request admin ke paas jayegi (dispatch ke liye)</div></div>
       <div class="card-body">
         <div class="tr-emp-grid">
           <label class="field"><span class="dim small">Employee name *</span>
             <input class="input" data-tr-emp="name" value="${esc(e.name || '')}" placeholder="Poora naam likho (e.g. Ramesh Yadav)" autocomplete="name" maxlength="80"></label>
-          ${cfg.askMobile === false ? '' : `<label class="field"><span class="dim small">Mobile (optional)</span>
+          ${cfg.askMobile === false ? '' : `<label class="field"><span class="dim small">Mobile number *</span>
             <input class="input" data-tr-emp="mobile" inputmode="tel" value="${esc(e.mobile || '')}" placeholder="10 digit mobile" maxlength="16" autocomplete="tel"></label>`}
-          ${cfg.askOffice ? `<label class="field"><span class="dim small">Branch / Office (optional)</span>
+          ${cfg.askOffice ? `<label class="field"><span class="dim small">Branch / Office</span>
             <input class="input" data-tr-emp="office" value="${esc(e.office || '')}" placeholder="e.g. Jaipur office" maxlength="80"></label>` : ''}
+          ${askAddr ? `<label class="field tr-emp-addr"><span class="dim small">Full address * <small class="dim">(house / street / area / city)</small></span>
+            <textarea class="input" data-tr-emp="address" rows="2" placeholder="e.g. 24, Shanti Nagar, Sodala, Jaipur" maxlength="300">${esc(e.address || '')}</textarea></label>
+          <label class="field"><span class="dim small">Pincode *</span>
+            <input class="input" data-tr-emp="pincode" inputmode="numeric" value="${esc(e.pincode || '')}" placeholder="6 digit pincode" maxlength="6" autocomplete="postal-code"></label>` : ''}
         </div>
-        ${missing ? '<p class="dim small" style="margin:8px 0 0">☝️ Naam bharo — phir niche agent chuno aur qty likho.</p>' : ''}
+        ${miss ? `<p class="dim small" style="margin:8px 0 0">☝️ <b>${esc(EMP_LABEL[miss] || 'Details')}</b> bharna zaroori hai — phir niche agent chuno aur qty likho.</p>`
+          : '<p class="dim small" style="margin:8px 0 0">✅ Details poori hain — ab agent chuno aur qty likho.</p>'}
       </div></section>`;
   }
 
@@ -475,14 +502,17 @@ FF.pages = FF.pages || {};
     if (!state.result) { U.toast('Pehle 🔍 system check chalao', 'warn'); return; }
     if (!isPublic() && !FF.auth.can('tagRequest')) { U.toast('Is page ka access nahi hai', 'err'); return; }
     if (!state.result.rows.length) { U.toast('Koi row nahi — agent + class chuno', 'warn'); return; }
-    // 🌐 Public form: employee name mandatory (upar wala card).
-    if (isPublic() && !employeeOk()) {
-      U.toast('👤 Employee name likhna zaroori hai', 'err');
-      const card = rootEl.querySelector('#tr-employee-card');
-      if (card && card.scrollIntoView) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      const inp = rootEl.querySelector('[data-tr-emp="name"]');
-      if (inp && inp.focus) inp.focus();
-      return;
+    // 🌐 Public form: name + mobile + full address + pincode — sab mandatory (jab tak bhare na ho, request nahi lagti).
+    if (isPublic()) {
+      const miss = employeeMissing();
+      if (miss) {
+        U.toast(`${EMP_LABEL[miss] || 'Details'} bharna zaroori hai — tabhi request lagegi`, 'err');
+        const card = rootEl.querySelector('#tr-employee-card');
+        if (card && card.scrollIntoView) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const inp = rootEl.querySelector(`[data-tr-emp="${miss}"]`);
+        if (inp && inp.focus) inp.focus();
+        return;
+      }
     }
     const total = state.result.rows.reduce((s, x) => s + num(x.approved), 0);
     if (!total) { U.toast('Approved qty 0 hai — kuch qty daalo', 'warn'); return; }
@@ -827,20 +857,26 @@ FF.pages = FF.pages || {};
       const key = inp.dataset.trEmp;
       state.employee[key] = inp.value;
       if (key === 'mobile') { const clean = inp.value.replace(/[^\d+]/g, ''); if (clean !== inp.value) inp.value = clean; state.employee.mobile = clean; }
+      if (key === 'pincode') { const clean = inp.value.replace(/\D/g, '').slice(0, 6); if (clean !== inp.value) inp.value = clean; state.employee.pincode = clean; }
       const card = bodyEl.querySelector('#tr-employee-card');
-      if (card) card.classList.toggle('tr-employee-todo', !employeeOk());
+      if (card) card.classList.toggle('tr-employee-todo', !!employeeMissing());
       saveEmployee();
     }));
     const act = (name, fn) => { const b = bodyEl.querySelector(`[data-tr-act="${name}"]`); if (b) b.addEventListener('click', fn); };
     act('add', () => { state.rows.push(newRow()); renderForm(); const inputs = rootEl.querySelectorAll('.tr-agent'); const last = inputs[inputs.length - 1]; if (last) last.focus(); });
     act('clear', () => { state.rows = [newRow()]; state.note = ''; state.result = null; state.problems = []; renderForm(); });
     act('check', async () => {
-      // Naam pehle — warna result bhar kar submit par pata chalega (public form me mandatory).
-      if (isPublic() && !employeeOk()) {
-        U.toast('👤 Pehle apna naam likho (upar wale card me)', 'warn');
-        const inp = bodyEl.querySelector('[data-tr-emp="name"]');
-        if (inp && inp.focus) inp.focus();
-        return;
+      // Details pehle — warna result bhar kar submit par pata chalega (public form me mandatory).
+      if (isPublic()) {
+        const miss = employeeMissing();
+        if (miss) {
+          U.toast(`${EMP_LABEL[miss] || 'Details'} bharna zaroori hai (upar wale card me)`, 'warn');
+          const inp = bodyEl.querySelector(`[data-tr-emp="${miss}"]`);
+          if (inp && inp.focus) inp.focus();
+          const card = bodyEl.querySelector('#tr-employee-card');
+          if (card && card.scrollIntoView) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          return;
+        }
       }
       const btn = bodyEl.querySelector('[data-tr-act="check"]');
       if (btn) { btn.disabled = true; btn.textContent = '⏳ Data check ho raha hai…'; }
@@ -872,11 +908,11 @@ FF.pages = FF.pages || {};
       let sep = '';
       if (tlSortKey(x.tl) !== lastTl) {
         lastTl = tlSortKey(x.tl);
-        sep = `<tr class="tr-group-row"><td colspan="13">${x.tl === '—' ? '👤 Agent-wise (koi TL nahi)' : `🧑‍💼 TL: ${esc(x.tl)}`}</td></tr>`;
+        sep = `<tr class="tr-group-row"><td colspan="${isPublic() ? 13 : 14}">${x.tl === '—' ? '👤 Agent-wise (koi TL nahi)' : `🧑‍💼 TL: ${esc(x.tl)}`}</td></tr>`;
       }
       return `${sep}<tr data-tr-res="${x.id}">
-          <td><b>${esc(x.agentName)}</b> <small class="dim">${esc(x.agentId || '')}</small> <span class="badge ${x.channel === 'gv' ? 'green' : ''}">${x.channel === 'gv' ? '🟩 GV' : '🟦 FF'}</span></td>
-          <td class="tr-check-col">${esc(x.tl)}</td>
+          <td><b>${esc(x.agentName)}</b> <small class="dim">${esc(x.agentId || '')}</small> <span class="badge ${x.channel === 'gv' ? 'green' : ''}">${x.channel === 'gv' ? '🟩 GV' : '🟦 FF'}</span>${x.tl && x.tl !== '—' ? `<br><small class="dim">TL: <b>${esc(x.tl)}</b></small>` : ''}</td>
+          <td class="tr-tl-col">${esc(x.tl)}</td>
           <td><b>${esc(x.cls)}</b></td>
           <td class="num tr-check-col">${fmt(x.last)}</td>
           <td class="num tr-check-col"><b>${fmt(x.cur)}</b> <small class="dim">· ${fmt(x.avg, true)}/din${x.channel === 'gv' ? ' (live)' : ''}</small></td>
@@ -886,6 +922,7 @@ FF.pages = FF.pages || {};
           <td class="tr-check-col"><span class="badge ${toneFor(x.priority)}">${esc(x.priority)}</span></td>
           <td class="num tr-check-col"><b class="sug-chip">${fmt(x.sugNet)}</b></td>
           <td class="num dim tr-check-col">${fmt(x.sugGross)}</td>
+          ${isPublic() ? '' : `<td class="age-cell" data-age-chip="${esc(x.agentId || x.agentName)}" data-age-kind="agent" title="Us agent ke paas pada purana stock (Agent Allocated At se) — ≥3M / 6M+, VC4+VC20 + VC5+">🧓 …</td>`}
           <td class="num"><input class="input tr-appr" style="width:78px" data-tr-appr="${x.id}" inputmode="numeric" value="${num(x.approved)}"></td>
           <td><input class="input tr-remark" style="width:160px" data-tr-remark="${x.id}" value="${esc(x.remark)}" placeholder="remark"></td>
         </tr>`;
@@ -900,8 +937,8 @@ FF.pages = FF.pages || {};
       <section class="card"><div class="card-head"><h3>📊 System check · agent × class</h3>
         <div class="card-right dim">TL-wise grouped · qty / remark badal sakte ho — totals apne aap update hote hain</div></div>
         <div class="table-wrap tall"><table class="tbl"><thead><tr>
-          <th>Agent</th><th class="tr-check-col">TL</th><th>Class</th><th class="num tr-check-col">${esc(U.labelYM(ymLast()))}</th><th class="num tr-check-col">${esc(U.labelYM(ymNow()))} MTD</th><th class="num tr-check-col">Growth</th><th class="num tr-check-col">Stock</th><th class="num tr-check-col">Cover</th><th class="tr-check-col">Priority</th>
-          <th class="num tr-check-col">🎯 stock −</th><th class="num tr-check-col">🎯 w/o stock</th><th class="num">✅ Approved</th><th>Remark</th></tr></thead>
+          <th>Agent</th><th class="tr-tl-col">TL</th><th>Class</th><th class="num tr-check-col">${esc(U.labelYM(ymLast()))}</th><th class="num tr-check-col">${esc(U.labelYM(ymNow()))} MTD</th><th class="num tr-check-col">Growth</th><th class="num tr-check-col">Stock</th><th class="num tr-check-col">Cover</th><th class="tr-check-col">Priority</th>
+          <th class="num tr-check-col">🎯 stock −</th><th class="num tr-check-col">🎯 w/o stock</th>${isPublic() ? '' : '<th>🧓 Purana stock</th>'}<th class="num">✅ Approved</th><th>Remark</th></tr></thead>
         <tbody>${rowsHtml}</tbody></table></div>
       </section>
       ${res.tls.length ? `<section class="card tr-check-col"><div class="card-head"><h3>🧑‍💼 TL rollup (TL stock · issuance · priority · suggested)</h3><div class="card-right dim">TL ke poore agents ka stock/issuance + is request ka total</div></div>
@@ -951,6 +988,7 @@ FF.pages = FF.pages || {};
     act('wa', () => { if (FF.app && FF.app.shareWhatsApp) FF.app.shareWhatsApp(resultText(null, true)); else U.toast('Share available nahi', 'warn'); });
     act('print', () => { try { window.print(); } catch { U.toast('Print support nahi', 'warn'); } });
     act('back', () => { state.view = 'form'; renderRoot(); });
+    if (FF.stockAge) FF.stockAge.decorate(rootEl); // 🧓 har row ka purana-stock chip (Agent Allocated At se)
   }
 
   // ---- 📥 requests (admin / apni) ----------------------------------------------------------------
@@ -979,7 +1017,7 @@ FF.pages = FF.pages || {};
         <div class="table-wrap tall"><table class="tbl"><thead><tr><th>Kab</th><th>Kisne</th><th class="num">Rows</th><th class="num">Agents</th><th class="num">Total qty</th><th>Status</th><th>Note</th><th></th></tr></thead>
         <tbody>${state.requests.map((r) => `<tr data-tr-req="${esc(r.id)}">
           <td>${esc(U.timeLabel(new Date(r.at).getTime()))}</td>
-          <td><b>${esc(r.byName || r.by)}</b>${r.source === 'public-link' ? ' <span class="badge" title="Employee link se aayi (bina login)">🌐 employee link</span>' : ''}${r.dupCount || (r.dupOf || []).length ? ` <span class="badge amber" title="Employee ne phir bhi bheji — pehle se ${(r.dupOf || []).length} active request: ${esc((r.dupOf || []).join(', '))}">🔁 duplicate</span>` : ''}${r.employee && r.employee.mobile ? `<small class="dim"> ${esc(r.employee.mobile)}</small>` : ''}</td>
+          <td><b>${esc(r.byName || r.by)}</b>${r.source === 'public-link' ? ' <span class="badge" title="Employee link se aayi (bina login)">🌐 employee link</span>' : ''}${r.dupCount || (r.dupOf || []).length ? ` <span class="badge amber" title="Employee ne phir bhi bheji — pehle se ${(r.dupOf || []).length} active request: ${esc((r.dupOf || []).join(', '))}">🔁 duplicate</span>` : ''}${r.employee && r.employee.mobile ? `<small class="dim"> ${esc(r.employee.mobile)}</small>` : ''}${r.employee && r.employee.pincode ? `<small class="dim"> · 📮 ${esc(r.employee.pincode)}</small>` : ''}</td>
           <td class="num">${fmt((r.rows || []).length)}</td>
           <td class="num">${fmt(new Set((r.rows || []).map((x) => x.agentName)).size)}</td>
           <td class="num"><b>${fmt((r.rows || []).reduce((s, x) => s + num(x.approved), 0))}</b></td>
@@ -1065,7 +1103,7 @@ FF.pages = FF.pages || {};
     const link = shareLink();
     const open = pub.enabled !== false;
     return `<section class="card" id="tr-public-card"><div class="card-head"><h3>🌐 Employee link (bina login) <span class="badge ${open ? 'green' : ''}">${open ? 'ON' : 'OFF'}</span></h3>
-      <div class="card-right dim">Ye link koi bhi khol sakta hai — login/signup nahi, bas naam</div></div>
+      <div class="card-right dim">Ye link koi bhi khol sakta hai — login/signup nahi · naam + mobile + address + pincode zaroori</div></div>
       <div class="card-body">
         <div class="tr-public-link-row">
           <input class="input" id="tr-public-link" readonly value="${esc(link)}">
@@ -1079,7 +1117,8 @@ FF.pages = FF.pages || {};
             <input class="input" data-tr-pub="intro" value="${esc(pub.intro || '')}" placeholder="Naam likho → agent chuno → qty daalo → submit"></label>
           <label class="field"><span class="dim small">Fields aur check</span>
             <span class="tr-check-row">
-              <label class="tr-col-opt"><input type="checkbox" data-tr-pub="askMobile" ${pub.askMobile !== false ? 'checked' : ''}> Mobile (optional)</label>
+              <label class="tr-col-opt"><input type="checkbox" data-tr-pub="askMobile" ${pub.askMobile !== false ? 'checked' : ''}> Mobile number (zaroori)</label>
+              <label class="tr-col-opt"><input type="checkbox" data-tr-pub="askAddress" ${pub.askAddress !== false ? 'checked' : ''}> Full address + pincode (zaroori)</label>
               <label class="tr-col-opt"><input type="checkbox" data-tr-pub="askOffice" ${pub.askOffice ? 'checked' : ''}> Branch/Office (optional)</label>
               <label class="tr-col-opt"><input type="checkbox" data-tr-pub="showCheck" ${pub.showCheck !== false ? 'checked' : ''}> System check (stock/suggestion) dikhao</label>
             </span></label>
@@ -1088,7 +1127,7 @@ FF.pages = FF.pages || {};
           <button class="btn primary" data-tr-pub-act="save">💾 Save</button>
           <button class="btn" data-tr-pub-act="toggle">${open ? '⏸ Link OFF karo' : '▶️ Link ON karo'}</button>
         </div>
-        <p class="dim small" style="margin-top:8px">🔐 Employee ko sirf yehi form dikhta hai — dashboard ka koi doosra page nahi. Data server par scoped public endpoint se aata hai (sirf aggregated issuance + agent summary). Har request <b>employee link</b> badge se aapki list me aati hai — 📱 device/IP aur naam ke saath. Employee apna status <b>Request ID</b> se dekh sakta hai.</p>
+        <p class="dim small" style="margin-top:8px">🔐 Employee ko sirf yehi form dikhta hai — dashboard ka koi doosra page nahi. Data server par scoped public endpoint se aata hai (sirf aggregated issuance + agent summary). Har request <b>employee link</b> badge se aapki list me aati hai — 👤 naam · 📱 mobile · 🏠 address · 📮 pincode · IP ke saath (drawer me poora address, dispatch ke liye). Employee apna status <b>Request ID</b> se dekh sakta hai.</p>
       </div></section>`;
   }
   function replaceCard(id, html) {
@@ -1115,6 +1154,7 @@ FF.pages = FF.pages || {};
         title: (card.querySelector('[data-tr-pub="title"]') || {}).value || '',
         intro: (card.querySelector('[data-tr-pub="intro"]') || {}).value || '',
         askMobile: !!(card.querySelector('[data-tr-pub="askMobile"]') || {}).checked,
+        askAddress: !!(card.querySelector('[data-tr-pub="askAddress"]') || {}).checked,
         askOffice: !!(card.querySelector('[data-tr-pub="askOffice"]') || {}).checked,
         showCheck: !!(card.querySelector('[data-tr-pub="showCheck"]') || {}).checked
       });
@@ -1132,7 +1172,7 @@ FF.pages = FF.pages || {};
         save({ enabled: next }, next ? '▶️ Employee link ON — employees ko link bhej sakte ho' : '⏸ Employee link OFF — ab link kholne par "band hai" dikhega');
       });
       act('copy', (e) => U.copyText(e.target.dataset.link || shareLink()).then((ok) => U.toast(ok ? '📋 Employee link copy ho gaya' : 'Copy nahi hua', ok ? 'ok' : 'warn')));
-      act('wa', (e) => { const l = e.target.dataset.link || shareLink(); const msg = `🏷️ Tag Request form — yahan se tag request lagao (naam likho, bas):\n${l}`; if (FF.app && FF.app.shareWhatsApp) FF.app.shareWhatsApp(msg); else window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank'); });
+      act('wa', (e) => { const l = e.target.dataset.link || shareLink(); const msg = `🏷️ Tag Request form — yahan se tag request lagao (naam, mobile, address aur pincode bharo):\n${l}`; if (FF.app && FF.app.shareWhatsApp) FF.app.shareWhatsApp(msg); else window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank'); });
       const inp = card.querySelector('#tr-public-link');
       if (inp) inp.addEventListener('click', () => { try { inp.select(); } catch { /* ignore */ } });
     }
@@ -1229,12 +1269,19 @@ FF.pages = FF.pages || {};
         <div class="kd-stat violet"><span>Total qty</span><b>${fmt(tot)}</b></div>
       </div>
       ${r.source === 'public-link' ? `<p class="dim small">🌐 <b>Employee link</b> se aayi (bina login)${r.employee && r.employee.mobile ? ` · 📱 ${esc(r.employee.mobile)}` : ''}${r.employee && r.employee.office ? ` · 🏢 ${esc(r.employee.office)}` : ''}${r.ip ? ` · IP ${esc(r.ip)}` : ''}</p>` : ''}
+      ${r.employee && (r.employee.address || r.employee.pincode) ? `<p class="dim small">🏠 <b>Delivery address:</b> ${esc(r.employee.address || '—')}${r.employee.pincode ? ` · 📮 <b>${esc(r.employee.pincode)}</b>` : ''}${(r.employee.address || r.employee.pincode) && FF.auth.can('export') ? ' <button class="btn small" id="tr-req-addr-copy">📋 Address copy</button>' : ''}</p>` : ''}
       ${(r.dupOf || []).length ? `<p class="dim small">🔁 <b>Duplicate mark:</b> milti-julti active request pehle se thi — ${esc((r.dupOf || []).join(', '))}</p>` : ''}
       <p class="dim small">${esc(U.timeLabel(new Date(r.at).getTime()))}${r.note ? ` · 📝 ${esc(r.note)}` : ''} ${syncBadge}</p>
       <div class="kd-sec"><div class="kd-h-row"><h4 class="kd-h">Rows (${fmt((r.rows || []).length)})</h4>
         <div class="seg small"><button type="button" class="seg-btn ${state.groupBy === 'tl' ? 'on' : ''}" data-tr-group="tl">TL-wise</button><button type="button" class="seg-btn ${state.groupBy === 'agent' ? 'on' : ''}" data-tr-group="agent">Agent-wise</button></div></div>
         <div class="kd-scroll tall"><table class="kd-tbl"><thead><tr><th>Agent</th><th>TL</th><th>Class</th><th class="num">Last</th><th class="num">MTD</th><th class="num">Growth</th><th class="num">Stock</th><th class="num">Cover</th><th>Priority</th><th class="num">Sug. (stock −)</th><th class="num">Sug. w/o stock</th><th class="num">Approved</th><th>Remark</th></tr></thead><tbody>${rowsHtml}</tbody></table></div></div>
       ${(r.tls || []).length ? `<div class="kd-sec"><h4 class="kd-h">TL rollup (TL stock · issuance · priority · suggested)</h4><div class="kd-scroll"><table class="kd-tbl"><thead><tr><th>TL</th><th class="num">VC4 stock</th><th class="num">MTD VC4</th><th class="num">Cover</th><th>Priority</th><th class="num">Suggested</th><th class="num">Request total</th></tr></thead><tbody>${r.tls.map((t) => `<tr><td>${esc(t.name)}</td><td class="num">${fmt(t.stockVc4)}</td><td class="num">${fmt(t.curVc4)}</td><td class="num">${t.cover === undefined || t.cover === null ? '—' : fmt(t.cover, true)}</td><td>${esc(t.priority || '')}</td><td class="num">${fmt(t.sugNet)} <small class="dim">/ ${fmt(t.sugGross)}</small></td><td class="num"><b>${fmt(t.reqApproved)}</b></td></tr>`).join('')}</tbody></table></div></div>` : ''}
+      <div class="kd-sec"><h4 class="kd-h">🧓 Stock ageing — in agents ke paas kitna purana stock</h4>
+        ${(FF.stockAge ? [...new Set((r.rows || []).map((x) => x.agentId || x.agentName))].slice(0, 8).map((k) => {
+          const row = (r.rows || []).find((x) => (x.agentId || x.agentName) === k) || {};
+          return `<div style="margin-bottom:10px"><b>${esc(row.agentName || k)}</b> <small class="dim">${row.tl && row.tl !== '—' ? `· TL ${esc(row.tl)}` : ''} ${row.agentId ? `· ID ${esc(row.agentId)}` : ''}</small>${FF.stockAge.hostHtml({ kind: 'agent', key: row.agentId || k }, { title: row.agentName || k })}</div>`;
+        }).join('') : '')}
+        ${(r.rows || []).length > 8 ? `<p class="dim small">Pehle 8 agents dikha rahe hain — baaki ke liye Stock page ya KPI drawer kholo.</p>` : ''}</div>
       ${canEdit ? `<div class="kd-sec"><h4 class="kd-h">Admin action</h4>
         <label class="field"><span class="dim small">Status</span><select class="input" id="tr-req-status">${Object.entries(STATUS).map(([k, v]) => `<option value="${k}" ${r.status === k ? 'selected' : ''}>${v.label}</option>`).join('')}</select></label>
         <label class="field" style="display:block;margin-top:6px"><span class="dim small">Admin note</span><input class="input" id="tr-req-note" style="width:100%" value="${esc(r.adminNote || '')}" placeholder="e.g. kal 2 box dispatch"></label>
@@ -1254,7 +1301,14 @@ FF.pages = FF.pages || {};
     const bind = (sel, fn) => { const el = U.$(sel); if (el) el.addEventListener('click', fn); };
     bind('#tr-req-csv', () => downloadRequest(r, 'csv'));
     bind('#tr-req-xlsx', () => downloadRequest(r, 'xlsx'));
+    if (FF.stockAge) FF.stockAge.decorate(U.$('#drawer') || document); // 🧓 drawer ka ageing section
     bind('#tr-req-copy', () => U.copyText(requestText(r)).then((ok) => U.toast(ok ? '📋 Copy ho gaya' : 'Copy nahi hua', ok ? 'ok' : 'warn')));
+    // 🏠 Dispatch ke liye poora address ek click me copy (courier/transportar ko bhejne ke liye).
+    bind('#tr-req-addr-copy', () => {
+      const e = r.employee || {};
+      const txt = [e.name, e.mobile, e.address, e.pincode ? `Pincode: ${e.pincode}` : ''].filter(Boolean).join('\n');
+      U.copyText(txt).then((ok) => U.toast(ok ? '📋 Address copy ho gaya (WhatsApp par paste karo)' : 'Copy nahi hua', ok ? 'ok' : 'warn'));
+    });
     bind('#tr-req-wa', () => { if (FF.app && FF.app.shareWhatsApp) FF.app.shareWhatsApp(requestText(r)); else U.toast('Share available nahi', 'warn'); });
     // 🔀 TL-wise / Agent-wise grouping toggle — drawer dobara kholo naye order me.
     document.querySelectorAll('[data-tr-group]').forEach((b) => b.addEventListener('click', () => {

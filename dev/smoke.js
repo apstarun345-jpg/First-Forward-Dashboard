@@ -1131,10 +1131,14 @@ await run('🌐 Public employee link — bina login form (naam mandatory) + stat
   await pages.tagRequest.render(r, { view: 'form', public: '1' }, { publicConfig: pubCfg });
   await settle(400);
   const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  for (const s of ['Aapka naam', 'Employee name *', 'IDFC Agents Tag Request', 'System check karo']) {
+  for (const s of ['Aapki details', 'Employee name *', 'Full address', 'Pincode *', 'IDFC Agents Tag Request', 'System check karo']) {
     if (!html.includes(s)) throw new Error(`public form me "${s}" nahi mila`);
   }
   if (!/data-tr-emp="name"/.test(html)) throw new Error('employee name input missing');
+  if (!/data-tr-emp="mobile"/.test(html)) throw new Error('mobile field nahi mila (ab mandatory hai)');
+  if (!/data-tr-emp="address"/.test(html)) throw new Error('full address field nahi mila (mandatory)');
+  if (!/data-tr-emp="pincode"/.test(html)) throw new Error('pincode field nahi mila (mandatory)');
+  if (!/Full address/.test(html)) throw new Error('address label nahi mila');
   if (!/data-tr-view="status"/.test(html)) throw new Error('public mode me status tab missing');
   // 📊 public result view — login wale submit button ke bajaye "Request submit karo"
   const perfAgents = pages.performance.agents() || [];
@@ -1164,6 +1168,32 @@ await run('🌐 Public employee link — bina login form (naam mandatory) + stat
   const dupNone = pages.tagRequest.dupWarning([], 'Suresh Yadav');
   if (dupHtml.length < 100 || dupNone !== '') throw new Error('duplicate card empty case galat');
   log(`      employee link ${link} · public form + result + status + 🔁 duplicate warning render ok`);
+});
+await run('🧓 Stock ageing — Agent Allocated At se 1/3/5/6+ mahine · VC4+VC20 alag, VC5+ alag · CSV', async () => {
+  if (!FF.stockAge) throw new Error('stockAge module load nahi hua (index.html/sw.js me hai?)');
+  const idx = await FF.stockAge.ready();
+  if (!idx) throw new Error('stock ageing index nahi bana — ' + (FF.stockAge.error || 'unknown'));
+  if (!idx.total) throw new Error('StockDataa se koi dated row nahi mili');
+  const allHtml = FF.stockAge.html({ kind: 'all', key: 'all' });
+  if (!/VC4 \+ VC20/.test(allHtml)) throw new Error('VC4+VC20 group row nahi mili');
+  if (!/VC5\+ \(commercial\)/.test(allHtml)) throw new Error('VC5+ group row nahi mili');
+  for (const s of ['≥ 1 mahina', '≥ 3 mahine', '≥ 5 mahine', '≥ 6 mahine']) if (!allHtml.includes(s)) throw new Error(`bucket column nahi mila: ${s}`);
+  for (const m of [1, 3, 5, 6]) if (!allHtml.includes(`data-age-csv="${m}"`)) throw new Error(`month ${m} ke saath CSV button nahi mila`);
+  if (!/data-age-open=/.test(allHtml)) throw new Error('count click (tag list) button nahi mila');
+  // Agent level: pehla FF agent — chip + CSV count match hone chahiye
+  const list = (FF.pages.performance && FF.pages.performance.agents ? FF.pages.performance.agents() : []).filter((a) => !a.isMaster && (a.stockTotal || 0) > 0);
+  if (!list.length) throw new Error('stock wala koi agent nahi mila');
+  const a = list[0];
+  const scope = { kind: 'agent', key: a.id || a.name };
+  const node = FF.stockAge.forAgent(scope.key);
+  if (!node) throw new Error('agent ka ageing node nahi mila: ' + scope.key);
+  const older6 = FF.stockAge.tagsOlder(node, 6);
+  if (!older6.length) throw new Error('6 mahine se purane tags nahi mile');
+  const csvN = FF.stockAge.csv(scope, 6);
+  if (csvN !== older6.length) throw new Error(`CSV count mismatch: ${csvN} vs ${older6.length}`);
+  if (!FF.stockAge.chipText(scope)) throw new Error('agent chip text khaali hai');
+  if (FF.stockAge.groupOf('VC4') !== 'core' || FF.stockAge.groupOf('VC20') !== 'core' || FF.stockAge.groupOf('VC5') !== 'comm' || FF.stockAge.groupOf('VC16') !== 'comm') throw new Error('class grouping galat (VC4/VC20 → core, VC5+ → comm)');
+  log(`      ageing: ${FF.util.fmt(idx.total)} dated tags · ${older6.length} tags ≥6M (${a.name}) · CSV ok`);
 });
 await run('liveView.openNotification (report / settings / login)', async () => {
   FF.liveView.openNotification({ id: 'a', type: 'report', title: 'First Forward report update', body: 'x', createdAt: new Date().toISOString(), meta: { source: 'ff', snapshot: { date: '2026-09-26', total: 120, classes: { VC4: 100, VC5: 20 } }, previous: { date: '2026-09-26', total: 90, classes: { VC4: 80, VC5: 10 } }, delta: { total: 30, classes: { VC4: 20, VC5: 10 } } } });

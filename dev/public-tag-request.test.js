@@ -73,6 +73,7 @@ test('public employee tag request — bina login submit, status, admin visibilit
     assert.equal(cfg.res.status, 200, JSON.stringify(cfg.json));
     assert.equal(cfg.json.config.enabled, true);
     assert.equal(cfg.json.config.requireEmployeeName, true);
+    assert.equal(cfg.json.config.askAddress, true, 'address/pincode by default maange jaate hain');
     assert.equal(cfg.json.config.showCheck, true);
 
     // 2) login-protected endpoints bina cookie band rehte hain (public whitelist sirf /api/public/* hai)
@@ -90,9 +91,20 @@ test('public employee tag request — bina login submit, status, admin visibilit
     const noRows = await jsonCall(server.base, '/api/public/tag-request', 'POST', { employee: { name: 'Suresh Kumar' }, rows: [] }, '', '10.0.0.9');
     assert.equal(noRows.res.status, 400);
 
+    // 4b) 🏠 address / 📮 pincode mandatory — ek bhi khaali ho to request nahi lagti
+    const noAddr = await jsonCall(server.base, '/api/public/tag-request', 'POST', { employee: { name: 'Suresh Kumar', mobile: '9876543210' }, rows: rows() }, '', '10.0.0.9');
+    assert.equal(noAddr.res.status, 400);
+    assert.match(noAddr.json.error, /address/i);
+    const badPin = await jsonCall(server.base, '/api/public/tag-request', 'POST', { employee: { name: 'Suresh Kumar', mobile: '9876543210', address: '24, Shanti Nagar, Sodala, Jaipur', pincode: '3020' }, rows: rows() }, '', '10.0.0.9');
+    assert.equal(badPin.res.status, 400);
+    assert.match(badPin.json.error, /pincode/i);
+    const noMobile = await jsonCall(server.base, '/api/public/tag-request', 'POST', { employee: { name: 'Suresh Kumar', address: '24, Shanti Nagar, Sodala, Jaipur', pincode: '302019' }, rows: rows() }, '', '10.0.0.9');
+    assert.equal(noMobile.res.status, 400);
+    assert.match(noMobile.json.error, /mobile/i);
+
     // 5) valid submit (bina login) → 201 + request ID
     const created = await jsonCall(server.base, '/api/public/tag-request', 'POST', {
-      employee: { name: 'Suresh Kumar', mobile: '9876543210', office: 'Jaipur' },
+      employee: { name: 'Suresh Kumar', mobile: '9876543210', office: 'Jaipur', address: '24, Shanti Nagar, Sodala, Jaipur', pincode: '302019' },
       note: 'kal dispatch chahiye', rows: rows(),
       tls: [{ name: 'TL One', channel: 'ff', stockVc4: 12, curVc4: 60, lastVc4: 80, priority: 'High', reqApproved: 25, agents: 1, sugNet: 22, sugGross: 25, cover: 1.4 }]
     }, '', '10.0.0.9');
@@ -113,7 +125,7 @@ test('public employee tag request — bina login submit, status, admin visibilit
     const otherRows = await jsonCall(server.base, '/api/public/tag-request/check', 'POST', { employee: { name: 'Suresh Kumar' }, rows: [{ agentId: '9999', cls: 'VC16', approved: 5 }] }, '', '10.0.0.9');
     assert.equal(otherRows.json.duplicates.length, 0, 'alag agent/class → duplicate nahi');
     // "Phir bhi bhejo" (force) → 201 + warnings + admin list me 🔁 mark
-    const again = await jsonCall(server.base, '/api/public/tag-request', 'POST', { employee: { name: 'Suresh Kumar' }, rows: rows(), note: 'dobara bheji' }, '', '10.0.0.9');
+    const again = await jsonCall(server.base, '/api/public/tag-request', 'POST', { employee: { name: 'Suresh Kumar', mobile: '9876543210', address: '24, Shanti Nagar, Sodala, Jaipur', pincode: '302019' }, rows: rows(), note: 'dobara bheji' }, '', '10.0.0.9');
     assert.equal(again.res.status, 201, JSON.stringify(again.json));
     assert.equal(again.json.request.duplicates, 1);
     assert.ok(Array.isArray(again.json.warnings) && again.json.warnings[0].code === 'duplicate');
@@ -126,6 +138,7 @@ test('public employee tag request — bina login submit, status, admin visibilit
     assert.equal(status.res.status, 200, JSON.stringify(status.json));
     assert.equal(status.json.request.status, 'pending');
     assert.equal(status.json.request.byName, 'Suresh Kumar');
+    assert.equal(status.json.request.employee.pincode, '302019', 'status me employee ka pincode');
     const badId = await jsonCall(server.base, '/api/public/tag-request/status?id=nope');
     assert.equal(badId.res.status, 404);
 
@@ -138,6 +151,8 @@ test('public employee tag request — bina login submit, status, admin visibilit
     assert.equal(found.byName, 'Suresh Kumar');
     assert.equal(found.employee.mobile, '9876543210');
     assert.equal(found.employee.office, 'Jaipur');
+    assert.equal(found.employee.address, '24, Shanti Nagar, Sodala, Jaipur', 'full address save hua');
+    assert.equal(found.employee.pincode, '302019', 'pincode save hua');
     assert.equal(found.rows[0].approved, 25);
 
     // 7b) 🔔 admin ko notification milti hai (bell list + push fanout dono ka source)
@@ -158,7 +173,7 @@ test('public employee tag request — bina login submit, status, admin visibilit
 
     // 9) sheet sync — ALAG sheet ka link diya → entry usi sheet me (spreadsheetId) jaati hai
     const put = await jsonCall(server.base, '/api/tag-request-sheet', 'PUT', {
-      config: { enabled: true, tab: 'Tag Dispatch', sheetLink: OTHER_LINK, onSubmit: true, onStatus: false, rowMode: 'class', columns: ['date', 'by', 'agent', 'cls', 'approved'] }
+      config: { enabled: true, tab: 'Tag Dispatch', sheetLink: OTHER_LINK, onSubmit: true, onStatus: false, rowMode: 'class', columns: ['date', 'by', 'empName', 'empMobile', 'empAddress', 'empPincode', 'agent', 'cls', 'approved'] }
     }, admin);
     assert.equal(put.res.status, 200, JSON.stringify(put.json));
     assert.equal(put.json.targetId, OTHER_SHEET, 'link se sheet ID nikal aayi');
@@ -172,15 +187,18 @@ test('public employee tag request — bina login submit, status, admin visibilit
     assert.equal(test.json.targetSpreadsheetId, OTHER_SHEET);
     assert.equal(test.json.codeVersion, 'v3.27', 'naya Code.gs (sheettest) detect hua');
 
-    const created2 = await jsonCall(server.base, '/api/public/tag-request', 'POST', { employee: { name: 'Neha Gupta' }, rows: rows() }, '', '10.0.0.11');
+    const created2 = await jsonCall(server.base, '/api/public/tag-request', 'POST', { employee: { name: 'Neha Gupta', mobile: '9812300011', address: '5, MG Road, Jaipur', pincode: '302001' }, rows: rows() }, '', '10.0.0.11');
     assert.equal(created2.res.status, 201, JSON.stringify(created2.json));
     await sleep(1500);
     const appended = mock.appends.find((t) => t.tab === 'Tag Dispatch');
     assert.ok(appended, `sheet append hua — got ${JSON.stringify(mock.appends.map((t) => t.tab))}`);
     assert.equal(appended.spreadsheetId, OTHER_SHEET, 'entry alag sheet (link wale ID) me gayi');
-    assert.deepEqual(appended.header, ['Date', 'By', 'Agent', 'Tag Class', 'Approved qty']);
+    assert.deepEqual(appended.header, ['Date', 'By', 'Employee', 'Employee mobile', 'Employee address', 'Pincode', 'Agent', 'Tag Class', 'Approved qty'], 'employee ki delivery details bhi sheet me jaati hain');
     assert.equal(appended.rows.length, 2);
     assert.equal(appended.rows[0][1], 'Neha Gupta', 'sheet me employee ka naam');
+    assert.equal(appended.rows[0][3], '9812300011', 'sheet me employee ka mobile');
+    assert.equal(appended.rows[0][4], '5, MG Road, Jaipur', 'sheet me employee ka address');
+    assert.equal(appended.rows[0][5], '302001', 'sheet me pincode');
 
     // 10) public gviz — sirf scoped queries (login wale /api/gviz par koi asar nahi)
     const eirRaw = await jsonCall(server.base, '/api/public/gviz?sheet=EIR&tq=select%20A%2C%20B');
@@ -197,11 +215,16 @@ test('public employee tag request — bina login submit, status, admin visibilit
     assert.equal(gvizLoginStillGated.res.status, 401, 'login wala gviz bina login band hi hai');
 
     // 11) admin public form config → link OFF karne par submit band
+    const addrOff = await jsonCall(server.base, '/api/public-tag-form', 'PUT', { config: { askAddress: false } }, admin);
+    assert.equal(addrOff.json.config.askAddress, false, 'admin address/pincode off kar sakta hai');
+    const noAddrNow = await jsonCall(server.base, '/api/public/tag-request', 'POST', { employee: { name: 'Bina Address', mobile: '9876500000' }, rows: rows() }, '', '10.0.0.13');
+    assert.equal(noAddrNow.res.status, 201, 'askAddress OFF → address ke bina bhi request lag jaati hai');
+    await jsonCall(server.base, '/api/public-tag-form', 'PUT', { config: { askAddress: true } }, admin);
     const pubOff = await jsonCall(server.base, '/api/public-tag-form', 'PUT', { config: { enabled: false, askOffice: true } }, admin);
     assert.equal(pubOff.res.status, 200, JSON.stringify(pubOff.json));
     assert.equal(pubOff.json.config.enabled, false);
     assert.equal(pubOff.json.config.askOffice, true);
-    const blocked = await jsonCall(server.base, '/api/public/tag-request', 'POST', { employee: { name: 'Test User' }, rows: rows() }, '', '10.0.0.12');
+    const blocked = await jsonCall(server.base, '/api/public/tag-request', 'POST', { employee: { name: 'Test User', mobile: '9800000001', address: '2, Test Street, Bikaner', pincode: '334001' }, rows: rows() }, '', '10.0.0.12');
     assert.equal(blocked.res.status, 403);
     const cfgOff = await jsonCall(server.base, '/api/public/tag-request');
     assert.equal(cfgOff.json.config.enabled, false);
@@ -210,7 +233,7 @@ test('public employee tag request — bina login submit, status, admin visibilit
     await jsonCall(server.base, '/api/public-tag-form', 'PUT', { config: { enabled: true } }, admin);
     let last = null;
     for (let i = 0; i < 18; i++) {
-      last = await jsonCall(server.base, '/api/public/tag-request', 'POST', { employee: { name: `Bulk ${i}` }, rows: rows() }, '', '10.9.9.9');
+      last = await jsonCall(server.base, '/api/public/tag-request', 'POST', { employee: { name: `Bulk ${i}`, mobile: '9800000000', address: '1, Test Street, Bikaner', pincode: '334001' }, rows: rows() }, '', '10.9.9.9');
       if (last.res.status === 429) break;
     }
     assert.equal(last.res.status, 429, 'ek hi IP se bahut requests par throttle');

@@ -3666,3 +3666,25 @@ span.tr-public-logo { display: inline-flex; align-items: center; justify-content
   .tr-public-head h1 { font-size: 21px; }
   body.public-form .main { padding: 10px 8px 48px; }
 }
+
+/* 🧓 v3.28 — stock ageing (Agent Allocated At se · 1/3/5/6+ mahine · VC4+VC20 vs VC5+ · CSV per month) */
+.age-host { margin-top: 4px; }
+.age-tbl th.age-th { white-space: nowrap; }
+.age-tbl .age-csv { margin-left: 6px; border: 1px solid var(--border, #dbe2f0); background: #fff; border-radius: 999px; padding: 1px 7px; font-size: 10.5px; cursor: pointer; color: inherit; }
+.age-tbl .age-csv:hover { background: #eef2ff; }
+.age-tbl .age-n { border: 0; background: #f1f5ff; border-radius: 999px; padding: 2px 9px; font-weight: 700; cursor: pointer; font-size: 12px; }
+.age-tbl .age-n:hover { background: #e0e7ff; }
+.age-tbl .age-n.amber { background: #fef3c7; }
+.age-tbl .age-n.orange { background: #ffedd5; }
+.age-tbl .age-n.red { background: #fee2e2; color: #b91c1c; }
+.age-tbl tr.age-total td { border-top: 1px solid var(--border, #e5e9f5); background: #fafbff; }
+.age-out { margin-top: 10px; border-top: 1px dashed var(--border, #e5e9f5); padding-top: 8px; }
+.age-list-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+.age-note { margin: 6px 0 0; }
+.age-cell { font-size: 12px; white-space: nowrap; }
+.age-chip { display: inline-block; background: #f1f5ff; border: 1px solid #dbe4ff; border-radius: 999px; padding: 1px 8px; font-size: 11.5px; white-space: nowrap; }
+.age-loading { padding: 4px 0; }
+/* Public employee form — full address + pincode */
+.tr-emp-addr { grid-column: 1 / -1; }
+.tr-emp-addr textarea.input { width: 100%; min-height: 46px; resize: vertical; font: inherit; padding: 8px 10px; }
+.tr-emp-grid textarea.input { border: 1px solid var(--border, #dbe2f0); border-radius: 10px; background: #fff; }
