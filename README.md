@@ -29,6 +29,9 @@ permissions and settings**. Zero npm dependencies.
 - **🧓 Stock ageing:** stockDataa ke **Agent Allocated At** se har agent/TL ka stock **1 / 3 / 5 / 6+ mahine**
   purana kitna hai — **🚗 VC4+VC20 alag, 🚚 VC5+ alag** — har month ke saath **⬇ CSV** (sab dated tags ki
   list). Stock page, KPI drawer, request drawer, tag-request result — sab jagah.
+- **🖨️ Dispatch label Print/PDF/Share:** employee link wali (address wali) request me drawer se A4 label
+  print — same address **left + right dono taraf poori page pe** (8/10/12 copies) · FROM company (Settings →
+  Contacts me set karo) · TO employee (PIN bada) · text size chhota/bada · 📋 copy + 📤 WhatsApp share.
 - **🔁 Duplicate warning (employee):** same naam + same agent × class ki request pehle se pending/approved ho
   to submit se pehle amber warning — *"Ye entry pehle se hai"* + 🔎 status · 🔁 phir bhi bhejo · ✏️ edit.
   Aise bheji gayi request admin list/notification me **🔁 duplicate** mark ho jaati hai.

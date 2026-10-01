@@ -215,6 +215,15 @@ test('public employee tag request — bina login submit, status, admin visibilit
     assert.equal(gvizLoginStillGated.res.status, 401, 'login wala gviz bina login band hi hai');
 
     // 11) admin public form config → link OFF karne par submit band
+    // 8) 🖨️ Dispatch label ka FROM (company address) — Settings me save/reload hota hai
+    const fromSet = await jsonCall(server.base, '/api/settings', 'PUT', { settings: { contacts: { fromName: 'Apna Payment Pvt Ltd', fromAddress: 'Plot 12, RIICO Industrial Area, Jaipur, Rajasthan — 302006', fromPhone: '+91 141 400 0000' } } }, admin);
+    assert.equal(fromSet.res.status, 200, JSON.stringify(fromSet.json));
+    const setGet = await jsonCall(server.base, '/api/settings', 'GET', undefined, admin);
+    const cont = (setGet.json.settings && setGet.json.settings.contacts) || {};
+    assert.equal(cont.fromName, 'Apna Payment Pvt Ltd', 'FROM company naam save nahi hua');
+    assert.match(cont.fromAddress || '', /RIICO Industrial Area/);
+    assert.equal(cont.fromPhone, '+91 141 400 0000');
+
     const addrOff = await jsonCall(server.base, '/api/public-tag-form', 'PUT', { config: { askAddress: false } }, admin);
     assert.equal(addrOff.json.config.askAddress, false, 'admin address/pincode off kar sakta hai');
     const noAddrNow = await jsonCall(server.base, '/api/public/tag-request', 'POST', { employee: { name: 'Bina Address', mobile: '9876500000' }, rows: rows() }, '', '10.0.0.13');

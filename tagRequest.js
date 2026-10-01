@@ -417,6 +417,138 @@ FF.pages = FF.pages || {};
     const tot = (r.rows || []).reduce((s, x) => s + num(x.approved), 0);
     return `*🏷️ IDFC Agents Tag Request* (${statusOf(r).label})\n${esc(r.byName || r.by)} · ${new Date(r.at).toLocaleString('en-IN')}${r.note ? `\nNote: ${r.note}` : ''}\n\n${rows.join('\n')}\n\n*Total: ${tot} tags*`;
   }
+  /* ---- 🖨️ Dispatch label (A4 print — same address left·right poori page pe repeat) ------------
+   * Employee link ki request par admin approve karte hi wahi drawer me ye section dikh jata hai:
+   * 🖨️ Print / 📄 PDF (popup page: A4, 2 columns × rows, text-size buttons), 📤 Share (WhatsApp),
+   * 📋 Copy label. FROM = Settings → 📲 Contacts (contacts.fromName/fromAddress/fromPhone);
+   * TO = request ke employee.address/pincode. PDF = print dialog me "Save as PDF".
+   */
+  function dispatchFrom() {
+    const st = (FF.auth && FF.auth.settings) || {};
+    const c = st.contacts || {};
+    const brand = st.brand || FF.config.brand || 'First Forward';
+    return {
+      name: String(c.fromName || '').trim() || brand,
+      address: String(c.fromAddress || '').trim(),
+      phone: String(c.fromPhone || '').trim(),
+      has: !!(String(c.fromName || '').trim() || String(c.fromAddress || '').trim() || String(c.fromPhone || '').trim())
+    };
+  }
+  function dispatchMeta(r) {
+    const rows = r.rows || [];
+    return {
+      total: rows.reduce((s, x) => s + num(x.approved), 0),
+      classes: [...new Set(rows.map((x) => x.cls).filter(Boolean))].join(', '),
+      agents: new Set(rows.map((x) => x.agentName)).size,
+      date: new Date(r.at || Date.now()).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+    };
+  }
+  /** Plain-text label — copy / WhatsApp share ke liye. */
+  function labelText(r) {
+    const e = r.employee || {};
+    const f = dispatchFrom();
+    const m = dispatchMeta(r);
+    return [
+      `FROM: ${f.name}${f.address ? `, ${f.address}` : ''}${f.phone ? ` · Ph: ${f.phone}` : ''}`,
+      '',
+      `TO: ${e.name || ''}`,
+      e.mobile ? `Mob: ${e.mobile}` : '',
+      e.address ? `Address: ${e.address}` : '',
+      e.pincode ? `Pincode: ${e.pincode}` : '',
+      '',
+      `Request: ${r.id} · ${m.date} · ${m.total} tags${m.classes ? ` (${m.classes})` : ''}`
+    ].filter((x) => x !== '' && x !== undefined).join('\n');
+  }
+  /** Poora printable HTML document — A4, FROM+TO ki grid poori page pe (2 columns × rows). */
+  function dispatchLabelHtml(r, opts) {
+    const o = opts || {};
+    const e = r.employee || {};
+    const f = dispatchFrom();
+    const m = dispatchMeta(r);
+    const pt = [9, 10.5, 12, 14].includes(Number(o.size)) ? Number(o.size) : 10.5;
+    const rowsPerPage = [3, 4, 5, 6].includes(Number(o.rows)) ? Number(o.rows) : 5;
+    const copies = rowsPerPage * 2;
+    const lh = ((283 - (rowsPerPage - 1) * 2.5) / rowsPerPage).toFixed(1); // label height (mm)
+    const fromLine = `<div class="from"><b>FROM:</b> ${esc(f.name)}${f.address ? `<br>${esc(f.address)}` : ''}${f.phone ? `<br>☏ ${esc(f.phone)}` : ''}</div>`;
+    const meta = `Req: ${esc(String(r.id).slice(0, 18))} · ${m.date} · 🏷️ ${m.total} tags${m.classes ? ` (${esc(m.classes)})` : ''}${m.agents > 1 ? ` · ${m.agents} agents` : ''}`;
+    const cell = `<div class="lbl">${fromLine}<div class="to"><span class="tag">TO</span><b class="to-name">${esc(e.name || '')}</b>${e.mobile ? `<div class="to-mob">☏ ${esc(e.mobile)}</div>` : ''}<div class="to-addr">${esc(e.address || '')}</div><div class="to-pin">PIN: ${esc(e.pincode || '')}</div></div><div class="meta">${meta}</div></div>`;
+    const grid = new Array(copies).fill(cell).join('');
+    return `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow"><title>Dispatch label · ${esc(r.id)}</title>
+<style>
+@page { size: A4; margin: 6mm; }
+* { box-sizing: border-box; }
+body { font-family: Arial, "Segoe UI", sans-serif; color: #111; margin: 0; }
+.bar { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; background: #fff; border-bottom: 1px solid #bbb; padding: 6px 8px; font-size: 13px; }
+.bar button { border: 1px solid #999; background: #fff; border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 13px; }
+.bar .sz { border-radius: 6px 0 0 6px; margin-right: -5px; }
+.bar .sz:last-of-type { border-radius: 0 6px 6px 0; margin-right: 0; }
+.bar .sz.on { background: #2563eb; color: #fff; border-color: #2563eb; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2.5mm; padding: 2mm 0; }
+.lbl { border: 1.4px dashed #111; border-radius: 2mm; padding: 2.5mm 3mm; height: ${lh}mm; overflow: hidden; page-break-inside: avoid; font-size: ${pt}pt; line-height: 1.32; display: flex; flex-direction: column; }
+.from { font-size: 68%; color: #333; border-bottom: 1px dotted #999; padding-bottom: 1.2mm; margin-bottom: 1.6mm; }
+.to { flex: 1; }
+.to .tag { font-size: 64%; font-weight: 700; border: 1px solid #111; padding: 0 3px; border-radius: 2px; }
+.to-name { font-size: 117%; margin-top: 1mm; font-weight: 800; }
+.to-mob { font-weight: 600; }
+.to-addr { margin-top: 0.6mm; }
+.to-pin { font-size: 150%; font-weight: 900; letter-spacing: 0.5px; margin-top: 1mm; }
+.meta { font-size: 62%; color: #444; border-top: 1px dotted #999; margin-top: 1.4mm; padding-top: 1mm; }
+@media print { .bar { display: none; } body { margin: 0; } }
+</style></head><body>
+<div class="bar"><b>🖨️ Dispatch label — copies: ${copies} · ${esc(r.byName || r.by)} · ${m.date}</b>
+  <button id="pbtn" style="font-weight:700">🖨️ Print / 📄 Save as PDF</button>
+  <span>Text size:
+    <button class="sz" data-sz="9">A−</button><button class="sz" data-sz="10.5">A</button><button class="sz" data-sz="12">A+</button><button class="sz" data-sz="14">A++</button>
+  </span>
+  <span style="color:#666;font-size:12px">Print dialog me "Save as PDF" chuno = PDF ban jayegi, dispatch team ko bhejo — wo dobara print karegi.</span></div>
+<div class="grid">${grid}</div>
+<script>(function(){
+  var btns=document.querySelectorAll('.sz');
+  var mark=function(v){btns.forEach(function(b){b.classList.toggle('on',b.dataset.sz===v)})};
+  mark('${pt}');
+  btns.forEach(function(b){b.addEventListener('click',function(){
+    document.querySelectorAll('.lbl').forEach(function(l){l.style.fontSize=b.dataset.sz+'pt'});
+    mark(b.dataset.sz);
+  })});
+  document.getElementById('pbtn').addEventListener('click',function(){window.print()});
+})();</script>
+</body></html>`;
+  }
+  /** Print window kholo — size + per-page count drawer ke selects se. */
+  function openLabelPrint(r) {
+    const size = parseFloat((U.$('#tr-lbl-size') || {}).value) || 10.5;
+    const rows = parseInt((U.$('#tr-lbl-rows') || {}).value, 10) || 5;
+    const w = window.open('', '_blank', 'width=900,height=760');
+    if (!w || !w.document) { U.toast('Popup block ho gaya — browser me "popups allow" karo phir dobara dabao', 'warn'); return; }
+    w.document.open(); w.document.write(dispatchLabelHtml(r, { size, rows })); w.document.close();
+    try { w.focus(); } catch { /* ignore */ }
+  }
+  /** Admin drawer ka label section — sirf jab request me delivery address ho (employee link). */
+  function labelSectionHtml(r) {
+    const e = r.employee || {};
+    const hasAddr = !!(String(e.address || '').replace(/\s+/g, ' ').trim() && /^\d{6}$/.test(String(e.pincode || '')));
+    if (!hasAddr) return '';
+    const f = dispatchFrom();
+    const dir = r.status === 'approved' || r.status === 'dispatched'
+      ? '<span class="badge green">✅ approved — ab print karo aur dispatch team ko do</span>'
+      : '<span class="badge amber">pehle ⏳ pending → ✅ approved karo, phir dispatch team ko do</span>';
+    return `<div class="kd-sec" id="tr-label-sec"><h4 class="kd-h">🖨️ Dispatch label — A4 print (same address left·right poori page pe repeat)</h4>
+      ${dir}
+      ${f.has ? '' : `<div class="notice amber" style="margin:6px 0">⚠️ <b>FROM</b> (company) address Settings → 📲 Contacts me bharo — label par FROM block wahi se aayega.</div>`}
+      <p class="dim small" style="margin:4px 0 8px">TO: <b>${esc(e.name)}</b> · ☏ ${esc(e.mobile || '—')} · ${esc(e.address)} · PIN ${esc(e.pincode)}</p>
+      <div class="btn-row" style="align-items:center;gap:8px">
+        <label class="dim small" style="display:flex;align-items:center;gap:4px">Text <select class="input" id="tr-lbl-size" style="width:76px;padding:4px">
+          <option value="9">9pt</option><option value="10.5" selected>10.5pt</option><option value="12">12pt</option><option value="14">14pt</option></select></label>
+        <label class="dim small" style="display:flex;align-items:center;gap:4px">Per page <select class="input" id="tr-lbl-rows" style="width:96px;padding:4px">
+          <option value="4">8 copies</option><option value="5" selected>10 copies</option><option value="6">12 copies</option></select></label>
+        <button class="btn primary" id="tr-req-label-print">🖨️ Print / 📄 PDF</button>
+        <button class="btn" id="tr-req-label-share">📤 Share</button>
+        <button class="btn" id="tr-req-label-copy">📋 Copy label</button>
+      </div>
+      <p class="dim small" style="margin:6px 0 0">A4 page par ek hi address <b>left + right dono taraf</b> aayega (2 columns × rows) — 1 page = 8/10/12 copies. Print dialog me <b>"Save as PDF"</b> se PDF ban jaati hai (dispatch team ko bhejo, wo apne aap dobara print kar legi). Print view me bhi text size badhay..ghataye ja sakte hain.</p></div>`;
+  }
   function downloadRequest(r, kind) {
     if (!r) return;
     if (!FF.auth.can('export')) { U.toast('Download permission nahi hai', 'err'); return; }
@@ -1286,6 +1418,7 @@ FF.pages = FF.pages || {};
         <label class="field"><span class="dim small">Status</span><select class="input" id="tr-req-status">${Object.entries(STATUS).map(([k, v]) => `<option value="${k}" ${r.status === k ? 'selected' : ''}>${v.label}</option>`).join('')}</select></label>
         <label class="field" style="display:block;margin-top:6px"><span class="dim small">Admin note</span><input class="input" id="tr-req-note" style="width:100%" value="${esc(r.adminNote || '')}" placeholder="e.g. kal 2 box dispatch"></label>
         <div class="btn-row" style="margin-top:8px"><button class="btn primary" id="tr-req-save">💾 Save</button></div></div>` : ''}
+      ${labelSectionHtml(r)}
       <div class="btn-row" style="margin-top:10px">
         ${isAdmin() ? '<button class="btn" id="tr-req-sheet">📗 Sheet me push</button>' : ''}
         ${FF.auth.can('export') ? '<button class="btn" id="tr-req-csv">⬇ CSV</button><button class="btn" id="tr-req-xlsx">⬇ Excel</button>' : ''}
@@ -1309,6 +1442,14 @@ FF.pages = FF.pages || {};
       const txt = [e.name, e.mobile, e.address, e.pincode ? `Pincode: ${e.pincode}` : ''].filter(Boolean).join('\n');
       U.copyText(txt).then((ok) => U.toast(ok ? '📋 Address copy ho gaya (WhatsApp par paste karo)' : 'Copy nahi hua', ok ? 'ok' : 'warn'));
     });
+    // 🖨️ Dispatch label — print/PDF popup · WhatsApp share · copy (approve ke baad dispatch team ko
+    // dete time use karo; print page par text size buttons bhi hain).
+    bind('#tr-req-label-print', () => openLabelPrint(r));
+    bind('#tr-req-label-share', () => {
+      const msg = `🖨️ *Dispatch label* (${statusOf(r).label})\n${labelText(r)}`;
+      if (FF.app && FF.app.shareWhatsApp) FF.app.shareWhatsApp(msg); else U.copyText(msg);
+    });
+    bind('#tr-req-label-copy', () => U.copyText(labelText(r)).then((ok) => U.toast(ok ? '📋 Label text copy ho gaya' : 'Copy nahi hua', ok ? 'ok' : 'warn')));
     bind('#tr-req-wa', () => { if (FF.app && FF.app.shareWhatsApp) FF.app.shareWhatsApp(requestText(r)); else U.toast('Share available nahi', 'warn'); });
     // 🔀 TL-wise / Agent-wise grouping toggle — drawer dobara kholo naye order me.
     document.querySelectorAll('[data-tr-group]').forEach((b) => b.addEventListener('click', () => {
@@ -1417,6 +1558,8 @@ FF.pages = FF.pages || {};
     render,
     preview,
     shareLink,
+    // 🖨️ Dispatch label — smoke/tests ke liye pure HTML generator + helpers.
+    dispatchLabelHtml, labelText, dispatchFrom,
     // 🔁 Diagnostics (Settings → support / smoke): duplicate warning card ka wahi HTML jo employee dekhta hai.
     dupWarning: (list, name) => {
       const saved = { mode: state.publicMode, dup: state.dup, emp: state.employee };

@@ -1195,6 +1195,36 @@ await run('🧓 Stock ageing — Agent Allocated At se 1/3/5/6+ mahine · VC4+VC
   if (FF.stockAge.groupOf('VC4') !== 'core' || FF.stockAge.groupOf('VC20') !== 'core' || FF.stockAge.groupOf('VC5') !== 'comm' || FF.stockAge.groupOf('VC16') !== 'comm') throw new Error('class grouping galat (VC4/VC20 → core, VC5+ → comm)');
   log(`      ageing: ${FF.util.fmt(idx.total)} dated tags · ${older6.length} tags ≥6M (${a.name}) · CSV ok`);
 });
+await run('🖨️ Dispatch label — A4 print me FROM+TO left·right repeat + text size + share/copy', async () => {
+  const r = {
+    id: 'tagreq_smoke_1234', at: '2026-10-01T04:00:00.000Z', status: 'approved',
+    byName: 'Ramesh Yadav',
+    employee: { name: 'Ramesh Yadav', mobile: '9812345678', address: '24, Shanti Nagar, Sodala, Jaipur', pincode: '302019' },
+    rows: [
+      { agentId: '1001', agentName: 'APNA PAYEMENT', cls: 'VC4', approved: 25 },
+      { agentId: '1001', agentName: 'APNA PAYEMENT', cls: 'VC5', approved: 10 }
+    ]
+  };
+  if (!pages.tagRequest.dispatchLabelHtml) throw new Error('dispatchLabelHtml export nahi mila');
+  if (typeof pages.tagRequest.labelText !== 'function') throw new Error('labelText export nahi mila');
+  const html = pages.tagRequest.dispatchLabelHtml(r, { size: 12, rows: 4 });
+  if (!/A4/.test(html) || !html.includes('@page')) throw new Error('A4 print CSS nahi mili');
+  const copies = 4 * 2; // rows × 2 columns (left + right)
+  const lblCount = (html.match(/class="lbl"/g) || []).length;
+  if (lblCount !== copies) throw new Error(`labels count mismatch: ${lblCount} vs ${copies}`);
+  const pinCount = (html.match(/302019/g) || []).length;
+  if (pinCount !== copies) throw new Error(`pincode repeat mismatch: ${pinCount} vs ${copies} — har label me TO address nahi repeat hua`);
+  const nameCount = (html.match(/Ramesh Yadav/g) || []).length;
+  if (nameCount < copies) throw new Error('employee naam har label me repeat nahi hua');
+  if (!/FROM:/.test(html)) throw new Error('FROM block nahi mila (company address — Settings me set karo)');
+  if (!html.includes('font-size: 12pt')) throw new Error('text size 12pt set nahi hua');
+  if (!/data-sz="14"/.test(html)) throw new Error('text size chhota/bada buttons nahi mile (print view me)');
+  if (!/Print \/ 📄 Save as PDF/.test(html)) throw new Error('Print/PDF toolbar button nahi mila');
+  if (!html.includes('35 tags') && !html.includes('🏷️ 35')) throw new Error('request summary (total tags) nahi mili');
+  const txt = pages.tagRequest.labelText(r);
+  for (const snip of ['FROM:', 'TO: Ramesh Yadav', '302019', 'tagreq_smoke_1234', '35 tags']) if (!txt.includes(snip)) throw new Error(`label text me "${snip}" nahi mila`);
+  log('      label: 8 labels/page · pincode ×8 · FROM · meta ok · text: ' + txt.split('\n').length + ' lines');
+});
 await run('liveView.openNotification (report / settings / login)', async () => {
   FF.liveView.openNotification({ id: 'a', type: 'report', title: 'First Forward report update', body: 'x', createdAt: new Date().toISOString(), meta: { source: 'ff', snapshot: { date: '2026-09-26', total: 120, classes: { VC4: 100, VC5: 20 } }, previous: { date: '2026-09-26', total: 90, classes: { VC4: 80, VC5: 10 } }, delta: { total: 30, classes: { VC4: 20, VC5: 10 } } } });
   if (!drawerHtml().includes('+30')) throw new Error('report delta missing');
