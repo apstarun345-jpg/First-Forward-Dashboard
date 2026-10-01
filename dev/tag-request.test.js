@@ -77,7 +77,7 @@ test('tag request — submit, admin feed, edit, permissions aur restart ke baad 
     const created = await jsonCall(server.base, '/api/tag-requests', 'POST', requestBody(), admin);
     assert.equal(created.res.status, 201, JSON.stringify(created.json));
     const req = created.json.request;
-    assert.match(req.id, /^tagreq_/);
+    assert.match(req.id, /^\d{4}$/);
     assert.equal(req.status, 'pending');
     assert.equal(req.total, 29, 'total = approved qty ka sum');
     assert.equal(req.rows.length, 2);

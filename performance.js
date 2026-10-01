@@ -710,16 +710,18 @@ FF.pages = FF.pages || {};
     const row = (label, html, title) => `<div class="drow"><span title="${esc(title || '')}">${esc(label)}</span>${html}</div>`;
     const cs = classSplit(agent.name, false);
     const b = basis();
-    const projT1 = U.projectMonthEnd(agent.curTotal, b.days, monthKeyOf());
+    const ymCur = monthKeyOf(), ymLast = U.prevMonthKey(ymCur);
+    const projT1 = U.projectMonthEnd(agent.curTotal, b.days, ymCur);
+    const agSpec = `agent=${encodeURIComponent(agent.name)}&agentId=${encodeURIComponent(agent.agentId || '')}`;
     // Issuance totals, class split and drill-down all share the EIR-authoritative aggregate now.
     // REPORT is retained only for operational fields and its percentage/status metadata.
     const eirNote = `🚗 Issuance total aur class split dono <b>EIR</b> ke same authoritative ledger se hain · operational run-rate basis ${esc(b.shortLabel || b.label)} tak hai.`;
     const summary = `<div class="dsec"><div class="dkpis">
-        <div class="dkpi"><small>${esc(state.months.cur)} MTD</small><b>${fmt(agent.curTotal)}</b><span>VC4 ${fmt(agent.curVc4)} · Comm ${fmt(agent.curNvc4)} · till ${esc(b.shortLabel || b.label)}</span></div>
-        <div class="dkpi"><small>${esc(state.months.last)}</small><b>${fmt(agent.lastTotal)}</b><span>VC4 ${fmt(agent.lastVc4)} · Comm ${fmt(agent.lastNvc4)}</span></div>
-        <div class="dkpi"><small>Growth</small><b>${trend(agent.growth)}</b><span>till ${esc(b.shortLabel || b.label)} · aaj ka data kal aata hai</span></div>
-        <div class="dkpi"><small>Expected month-end</small><b>${fmt(projT1)}</b><span>sheet ${fmt(agent.curProjected)} · ${fmt(agent.avgTotal, true)}/day (÷ ${fmt(b.days)} din)</span></div>
-        <div class="dkpi"><small>Stock</small><b>${fmt(agent.stockTotal)}</b><span>VC4 ${fmt(agent.stockVc4)} · ${fmt(agent.agentStockDays)} days</span></div>
+        <div class="dkpi kpi-clickable" data-kpi="src=ff&scope=mtd&ym=${esc(ymCur)}&${agSpec}&title=${encodeURIComponent(`${agent.name} · ${state.months.cur} MTD`)}" title="Click to drill down into ${esc(agent.name)} ${esc(state.months.cur)} MTD"><small>${esc(state.months.cur)} MTD</small><b>${fmt(agent.curTotal)}</b><span>VC4 ${fmt(agent.curVc4)} · Comm ${fmt(agent.curNvc4)} · till ${esc(b.shortLabel || b.label)}</span></div>
+        <div class="dkpi kpi-clickable" data-kpi="src=ff&scope=month&ym=${esc(ymLast)}&${agSpec}&title=${encodeURIComponent(`${agent.name} · ${state.months.last}`)}" title="Click to drill down into ${esc(agent.name)} ${esc(state.months.last)}"><small>${esc(state.months.last)}</small><b>${fmt(agent.lastTotal)}</b><span>VC4 ${fmt(agent.lastVc4)} · Comm ${fmt(agent.lastNvc4)}</span></div>
+        <div class="dkpi kpi-clickable" data-kpi="src=ff&scope=mtd&ym=${esc(ymCur)}&${agSpec}&title=${encodeURIComponent(`${agent.name} · Growth`)}" title="Click to drill down into ${esc(agent.name)} Growth"><small>Growth</small><b>${trend(agent.growth)}</b><span>till ${esc(b.shortLabel || b.label)} · aaj ka data kal aata hai</span></div>
+        <div class="dkpi kpi-clickable" data-kpi="src=ff&scope=mtd&ym=${esc(ymCur)}&${agSpec}&title=${encodeURIComponent(`${agent.name} · Expected month-end`)}" title="Click to drill down into ${esc(agent.name)} Expected month-end"><small>Expected month-end</small><b>${fmt(projT1)}</b><span>sheet ${fmt(agent.curProjected)} · ${fmt(agent.avgTotal, true)}/day (÷ ${fmt(b.days)} din)</span></div>
+        <div class="dkpi kpi-clickable" data-kpi="src=ff&scope=stock&${agSpec}&title=${encodeURIComponent(`${agent.name} · Stock`)}" title="Click to drill down into ${esc(agent.name)} Stock"><small>Stock</small><b>${fmt(agent.stockTotal)}</b><span>VC4 ${fmt(agent.stockVc4)} · ${fmt(agent.agentStockDays)} days</span></div>
       </div><div class="badge-row">${badge(agent.agentStatus)}${badge(agent.lastActive)}${agent.agentPriority ? `<span class="dim small">Priority</span>${badge(agent.agentPriority)}` : ''}${agent.biometric ? `<span class="dim small">Device</span>${badge(agent.biometric)}` : ''}</div></div>`;
     const compare = cs
       ? vsCommercialCard(`⚖️ Class split · ${esc(cs.lastLabel)} → ${esc(cs.curLabel)} (till ${cs.day})`, { vc4: cs.curS.VC4, vc20: cs.curS.VC20, vc5p: cs.curS['VC5+'], comm: cs.curS.VC20 + cs.curS['VC5+'], total: cs.curS.total }, { vc4: cs.lastS.VC4, vc20: cs.lastS.VC20, vc5p: cs.lastS['VC5+'], comm: cs.lastS.VC20 + cs.lastS['VC5+'], total: cs.lastS.total }, { cur: cs.curLabel, last: cs.lastLabel }, `Replacement (EIR): ${esc(cs.curLabel)} <b>${fmt(cs.curS.repl)}</b> · ${esc(cs.lastLabel)} ${fmt(cs.lastS.repl)}<br>${eirNote}`)
@@ -735,7 +737,8 @@ FF.pages = FF.pages || {};
       return `<details class="dsec collapsible"><summary>${esc(section.title)}</summary><div class="dgrid">${section.cols.map((col) => row(col.label, valueHtml(col, agent), `Sheet column ${col.letter}`)).join('')}</div></details>`;
     }).join('');
     const text = agentText(agent);
-    FF.app.openDrawer({ kicker: agent.isMaster ? 'Master account' : 'Agent', title: agent.name || agent.agentId || '—', sub: `ID ${esc(agent.agentId || '—')} · TL ${esc(tlLabel(agent) || '—')}${mobileHtml(agent.tlMobile)}`, actions: `${shareButtons(text, `Agent report · ${agent.name}`, agent.tlMobile)}<a class="btn small" href="#/stock?agent=${encodeURIComponent(agent.name)}">📦 Stock</a><a class="btn small" href="#/trend?agent=${encodeURIComponent(agent.name)}">📈 Trend</a>`, body: summary + growthCard + compare + classCard + performanceDispatchHtml(agent) + stockCard + sections, age: { kind: 'agent', key: agent.id || agent.agentId || agent.name, keys: [agent.agentId, agent.name].filter(Boolean), ch: 'ff', title: agent.name } });
+    const dlBtns = FF.auth.can('export') ? `<button class="btn small" data-drawer-csv>⬇ CSV</button><button class="btn small" data-drawer-pdf>📄 PDF</button>` : '';
+    FF.app.openDrawer({ kicker: agent.isMaster ? 'Master account' : 'Agent', title: agent.name || agent.agentId || '—', sub: `ID ${esc(agent.agentId || '—')} · TL ${esc(tlLabel(agent) || '—')}${mobileHtml(agent.tlMobile)}`, actions: `${dlBtns}${shareButtons(text, `Agent report · ${agent.name}`, agent.tlMobile)}<a class="btn small" href="#/stock?agent=${encodeURIComponent(agent.name)}">📦 Stock</a><a class="btn small" href="#/trend?agent=${encodeURIComponent(agent.name)}">📈 Trend</a>`, body: summary + growthCard + compare + classCard + performanceDispatchHtml(agent) + stockCard + sections, age: { kind: 'agent', key: agent.id || agent.agentId || agent.name, keys: [agent.agentId, agent.name].filter(Boolean), ch: 'ff', title: agent.name } });
   }
   function openTl(tlKey) {
     const group = state.allTlGroups.find((g) => g.tlKey === tlKey || norm(g.tlName) === norm(tlKey)) || buildTlGroups(state.agents.filter((a) => a.tlKey === tlKey || norm(a.tlName) === norm(tlKey)), true)[0];
@@ -744,17 +747,20 @@ FF.pages = FF.pages || {};
     const agents = [...group.agents].sort((a, b) => b.curTotal - a.curTotal);
     const cs = classSplit(group.tlName, true);
     const b = basis();
-    const projT1 = U.projectMonthEnd(group.tlCurTotal, b.days, monthKeyOf());
+    const ymCur = monthKeyOf(), ymLast = U.prevMonthKey(ymCur);
+    const projT1 = U.projectMonthEnd(group.tlCurTotal, b.days, ymCur);
+    const tlNameVal = group.tlName || group.tlKey;
+    const tlSpec = `tl=${encodeURIComponent(tlNameVal)}`;
     // Issuance totals, class split and drill-down all share the EIR-authoritative aggregate now.
     // REPORT is retained only for operational fields and its percentage/status metadata.
     const eirNote = `🚗 Issuance total aur class split dono <b>EIR</b> ke same authoritative ledger se hain · operational run-rate basis ${esc(b.shortLabel || b.label)} tak hai.`;
-    const growthKpi = `<div class="dkpi"><small>Growth</small><b>${trend(group.tlGrowth)}</b><span>till ${esc(b.shortLabel || b.label)} · aaj ka data kal aata hai</span></div>`;
+    const growthKpi = `<div class="dkpi kpi-clickable" data-kpi="src=ff&scope=mtd&ym=${esc(ymCur)}&${tlSpec}&title=${encodeURIComponent(`TL ${tlNameVal} · Growth`)}" title="Click to drill down into TL ${esc(tlNameVal)} Growth"><small>Growth</small><b>${trend(group.tlGrowth)}</b><span>till ${esc(b.shortLabel || b.label)} · aaj ka data kal aata hai</span></div>`;
     const body = `<div class="dsec"><div class="dkpis">
-        <div class="dkpi"><small>${esc(state.months.cur)} MTD</small><b>${fmt(group.tlCurTotal)}</b><span>VC4 ${fmt(group.tlCurVc4)} · Comm ${fmt(group.tlCurNvc4)} · till ${esc(b.shortLabel || b.label)}</span></div>
-        <div class="dkpi"><small>${esc(state.months.last)}</small><b>${fmt(group.tlLastTotal)}</b><span>VC4 ${fmt(group.tlLastVc4)} · Comm ${fmt(group.tlLastNvc4)}</span></div>
+        <div class="dkpi kpi-clickable" data-kpi="src=ff&scope=mtd&ym=${esc(ymCur)}&${tlSpec}&title=${encodeURIComponent(`TL ${tlNameVal} · ${state.months.cur} MTD`)}" title="Click to drill down into TL ${esc(tlNameVal)} ${esc(state.months.cur)} MTD"><small>${esc(state.months.cur)} MTD</small><b>${fmt(group.tlCurTotal)}</b><span>VC4 ${fmt(group.tlCurVc4)} · Comm ${fmt(group.tlCurNvc4)} · till ${esc(b.shortLabel || b.label)}</span></div>
+        <div class="dkpi kpi-clickable" data-kpi="src=ff&scope=month&ym=${esc(ymLast)}&${tlSpec}&title=${encodeURIComponent(`TL ${tlNameVal} · ${state.months.last}`)}" title="Click to drill down into TL ${esc(tlNameVal)} ${esc(state.months.last)}"><small>${esc(state.months.last)}</small><b>${fmt(group.tlLastTotal)}</b><span>VC4 ${fmt(group.tlLastVc4)} · Comm ${fmt(group.tlLastNvc4)}</span></div>
         ${growthKpi}
-        <div class="dkpi"><small>Expected month-end</small><b>${fmt(projT1)}</b><span>sheet ${fmt(group.tlProjected)} · ${fmt(group.tlAvgTotal, true)}/day (÷ ${fmt(b.days)} din)</span></div>
-        <div class="dkpi"><small>Agents</small><b>${group.agentCount}</b><span>${group.activeCount} active · ${group.agentCount - group.activeCount} inactive</span></div>
+        <div class="dkpi kpi-clickable" data-kpi="src=ff&scope=mtd&ym=${esc(ymCur)}&${tlSpec}&title=${encodeURIComponent(`TL ${tlNameVal} · Expected month-end`)}" title="Click to drill down into TL ${esc(tlNameVal)} Expected month-end"><small>Expected month-end</small><b>${fmt(projT1)}</b><span>sheet ${fmt(group.tlProjected)} · ${fmt(group.tlAvgTotal, true)}/day (÷ ${fmt(b.days)} din)</span></div>
+        <div class="dkpi kpi-clickable" data-kpi="src=ff&scope=people&${tlSpec}&title=${encodeURIComponent(`TL ${tlNameVal} · Agents`)}" title="Click to drill down into TL ${esc(tlNameVal)} Agents"><small>Agents</small><b>${group.agentCount}</b><span>${group.activeCount} active · ${group.agentCount - group.activeCount} inactive</span></div>
       </div><div class="badge-row">${badge(group.tlStatus)}${badge(group.tlLastActive)}<span class="dim small">VC4</span>${badge(group.tlPriority)}${badge(group.tlStockAlert)}<span class="dim small">Comm</span>${badge(group.tlCommPriority)}${badge(group.tlCommAlert)}</div></div>
       ${tlDispatchHtml(group)}
       ${cs
@@ -764,9 +770,10 @@ FF.pages = FF.pages || {};
       ${dispatchReadyHtml(group)}
       <div class="dsec"><h4>📅 Last 7 days (agents) · ${fmt(group.weekTotal)}</h4>${C.bars({ labels: state.dayLabels, height: 130, series: [{ name: 'Issued', values: group.week, color: '#ec4899' }] })}</div>
       <div class="dsec"><h4>📦 Stock & dispatch</h4><div class="dgrid">${row('Stock VC4', `<b>${fmt(group.tlStockVc4)}</b>`)}${row('Stock Commercial', `<b>${fmt(group.tlStockNvc4)}</b>`)}${row('Stock total', `<b>${fmt(group.tlStockTotal)}</b>`)}${row('VC4 stock days', `<b>${fmt(group.tlVc4Days)}</b>`)}${row('Alert (VC4)', badge(group.tlStockAlert))}${row('Priority (VC4)', badge(group.tlPriority))}${row('Comm stock days', `<b>${fmt(group.tlNvc4Days)}</b>`)}${row('Alert (Comm)', badge(group.tlCommAlert))}${row('Priority (Comm)', badge(group.tlCommPriority))}</div></div>
-      <div class="dsec"><h4>🧑‍💼 Agents (${agents.length})</h4><div class="table-wrap"><table class="tbl compact"><thead><tr><th>Agent</th><th class="num">${esc(state.months.cur.slice(0, 3))}</th><th class="num">VC4</th><th class="num">Comm · V20/V5+</th><th class="num">7d</th><th>Last active</th><th>Status</th><th>Priority</th></tr></thead><tbody>${agents.map((a) => `<tr data-agent="${a.__row}" class="clickable"><td>${cellMain(a.name, a.agentId)}</td><td class="num"><b>${fmt(a.curTotal)}</b></td><td class="num">${fmt(a.curVc4)}</td><td class="num">${fmt(a.curNvc4)}${binSub(a.curBins)}</td><td class="num">${fmt(a.weekTotal)}</td><td>${badge(a.lastActive)}</td><td>${badge(a.agentStatus)}</td><td>${badge(a.agentPriority)}</td></tr>`).join('')}</tbody></table></div></div>`;
+      <div class="dsec"><h4>🧑‍💼 Agents (${agents.length})</h4><div class="table-wrap"><table class="tbl compact"><thead><tr><th>Agent</th><th class="num">${esc(state.months.cur.slice(0, 3))}</th><th class="num">VC4</th><th class="num">Comm · V20/V5+</th><th class="num">7d</th><th>Last active</th><th>Status</th><th>Priority</th></tr></thead><tbody>${agents.map((a) => `<tr data-agent="${a.__row}" class="clickable"><td>${cellMain(a.name, a.agentId)}</td><td class="num"><b>${fmt(a.curTotal)}</b></td><td class="num">${fmt(a.curVc4)}</td><td class="num">${fmt(a.curNvc4)}${binSub(a.curBins)}</td><td class="num">${fmt(a.weekTotal)}</td><td>${badge(a.lastActive)}</td><td>${badge(a.agentStatus)}</td><td>${badge(a.agentPriority)}</td></tr>`).join('')}</tbody><tfoot><tr class="row-total"><td><b>Grand Total (${agents.length})</b></td><td class="num"><b>${fmt(U.sum(agents, (a) => a.curTotal))}</b></td><td class="num"><b>${fmt(U.sum(agents, (a) => a.curVc4))}</b></td><td class="num"><b>${fmt(U.sum(agents, (a) => a.curNvc4))}</b></td><td class="num"><b>${fmt(U.sum(agents, (a) => a.weekTotal))}</b></td><td colspan="3"></td></tr></tfoot></table></div></div>`;
     const text = tlText(group);
-    FF.app.openDrawer({ kicker: 'Team Leader', title: group.tlName || group.tlKey, sub: `ID ${esc(group.tlId || group.tlKey)}${mobileHtml(group.tlMobile)} · ${group.agentCount} agents · ${group.activeCount} active`, actions: `${shareButtons(text, `TL report · ${group.tlName || group.tlKey}`, group.tlMobile)}<a class="btn small" href="#/stock?tl=${encodeURIComponent(group.tlName || '')}">📦 Stock</a><a class="btn small" href="#/trend?tl=${encodeURIComponent(group.tlName || '')}">📈 Trend</a>`, body, age: { kind: 'tl', key: group.tlName || group.tlKey, ch: 'ff', title: group.tlName || group.tlKey } });
+    const dlBtns = FF.auth.can('export') ? `<button class="btn small" data-drawer-csv>⬇ CSV</button><button class="btn small" data-drawer-pdf>📄 PDF</button>` : '';
+    FF.app.openDrawer({ kicker: 'Team Leader', title: group.tlName || group.tlKey, sub: `ID ${esc(group.tlId || group.tlKey)}${mobileHtml(group.tlMobile)} · ${group.agentCount} agents · ${group.activeCount} active`, actions: `${dlBtns}${shareButtons(text, `TL report · ${group.tlName || group.tlKey}`, group.tlMobile)}<a class="btn small" href="#/stock?tl=${encodeURIComponent(group.tlName || '')}">📦 Stock</a><a class="btn small" href="#/trend?tl=${encodeURIComponent(group.tlName || '')}">📈 Trend</a>`, body, age: { kind: 'tl', key: group.tlName || group.tlKey, ch: 'ff', title: group.tlName || group.tlKey } });
   }
 
   // ---- views ----------------------------------------------------------------------------
@@ -1358,6 +1365,33 @@ FF.pages = FF.pages || {};
       return { kicker: 'FF Performance · needs attention', unit: 'items', rows, agent: (r) => (r.agent ? { name: r.agent.name, id: r.agent.agentId, ch: 'ff' } : null),
         columns: [['Type', (r) => esc(r.type)], ['Agent / TL', (r) => `<b>${esc(r.name)}</b>`], ['Detail', (r) => esc(r.note || '—')], ['This month', (r) => fmt(r.cur), 1], ['Stock', (r) => fmt(r.stock), 1]],
         sub: `TL stock <b>${fmt(al.lowStock.length + al.overStock.length)}</b> · De-growth <b>${fmt(al.deGrowth.length)}</b> · Wrong VRN <b>${fmt(al.wrongVrn.length)}</b>` };
+    });
+  }
+  if (typeof document !== 'undefined' && document.addEventListener) {
+    document.addEventListener('click', (e) => {
+      if (!e.target || !e.target.closest || !e.target.closest('#drawer')) return;
+      const shareWa = e.target.closest('[data-pf-share-wa]');
+      if (shareWa) { const g = state.allTlGroups.find((x) => (x.tlName || x.tlKey) === shareWa.dataset.pfShareWa); if (g) { const t = dispatchReadyText(g); const link = U.waLink(t, FF.config.contacts.teamWhatsapp); if (link) window.open(link, '_blank', 'noopener'); U.toast('WhatsApp khul raha hai'); } return; }
+      const shareCsv = e.target.closest('[data-pf-share-csv]');
+      if (shareCsv) {
+        if (!FF.auth.can('export')) return U.toast('Download permission nahi hai', 'err');
+        const g = state.allTlGroups.find((x) => (x.tlName || x.tlKey) === shareCsv.dataset.pfShareCsv);
+        if (!g) return;
+        const bs = basis(), days = U.suggestDays();
+        const rows = [...g.agents].map((a) => {
+          const sv = Math.max(0, Math.ceil((a.curVc4 / bs.days) * days - a.stockVc4));
+          const sc = Math.max(0, Math.ceil((a.curNvc4 / bs.days) * days - a.stockNvc4));
+          const so = stockOutDate(a.stockTotal, (a.curTotal || 0) / bs.days);
+          return [a.name, a.agentId, a.agentPriority, a.curVc4, a.curNvc4, a.stockVc4, a.stockNvc4, a.stockTotal, sv, sc, sv + sc, so ? so.key : ''];
+        });
+        U.downloadCsv(`dispatch-ready-${U.slug(g.tlName || g.tlKey)}-${U.stamp()}.csv`, ['Agent', 'ID', 'Priority', 'VC4 MTD', 'Comm MTD', 'VC4 stock', 'Comm stock', 'Stock total', 'Sug VC4', 'Sug Comm', 'Sug total', 'Stock khatam'], rows);
+        U.toast('Dispatch-ready CSV downloaded ✓');
+        return;
+      }
+      const agentEl = e.target.closest('[data-agent]');
+      if (agentEl) { openAgent(Number(agentEl.dataset.agent)); return; }
+      const tlEl = e.target.closest('[data-tl]');
+      if (tlEl) { openTl(tlEl.dataset.tl); return; }
     });
   }
   FF.pages.performance = { title: 'Performance', render, openAgent, openTl, reset, ensureLoaded, diagnostics, authoritativeIndex, agents: () => { if (S.get('agentClass') || S.get('daily')) reconcileAuthoritative(); return state.agents; }, daysElapsed: () => state.daysElapsed, dayLabels: () => state.dayLabels };

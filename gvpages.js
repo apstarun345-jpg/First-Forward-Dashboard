@@ -224,14 +224,14 @@ FF.pages = FF.pages || {};
     const dimKey = DIMS[p.dim] ? p.dim : (mode === 'compare' ? 'total' : 'class');
     root.innerHTML = head('📈', 'GV Trend', 'GV Master issuance — daily · weekly · monthly · last vs current', '') + `<div id="gvt-controls"></div><div id="gvt-body">${U.spinner('GV trend aggregate ho raha hai…')}</div>`;
     const body = U.$('#gvt-body', root), controls = U.$('#gvt-controls', root);
-    try { await Promise.all([S.need('daily'), S.need('agentClass'), G.need('master')]); } catch (err) { body.innerHTML = U.errorBox(err, 'data-action="refresh"'); return; }
+    try { await Promise.all([S.need('daily'), S.need('agentClass'), G.need('master'), G.need('report').catch(() => [])]); } catch (err) { body.innerHTML = U.errorBox(err, 'data-action="refresh"'); return; }
     if (!root.isConnected) return;
 
     let rows = G.issuanceRows ? G.issuanceRows() : G.rows();
     const tl = p.tl || '', agent = p.agent || '';
     if (tl) rows = rows.filter((r) => norm(r.tlName) === norm(tl));
     if (agent) rows = rows.filter((r) => norm(r.agentName) === norm(agent));
-    const monthsList = U.uniq(rows.map((r) => r.ym).filter(Boolean)).sort();
+    const monthsList = U.uniq([...rows.map((r) => r.ym), ...(!tl && !agent && G.months ? G.months() : [])].filter(Boolean)).sort();
     const latest = rows.reduce((acc, r) => (!acc || (r.date && r.date > acc) ? r.date : acc), null);
     const cur = monthsList.includes(p.month) ? p.month : (latest ? U.ymKey(latest) : monthsList[monthsList.length - 1]);
     const dim = DIMS[dimKey];
@@ -256,10 +256,13 @@ FF.pages = FF.pages || {};
       onEnter: (q) => { if (!q) { FF.app.updateParams({ agent: '', tl: '' }); return; } if (q && FF.notifications && FF.notifications.logSearch) FF.notifications.logSearch('GV Trend Find', q); const hit = people.agents.find((a) => norm(a.name).includes(norm(q))); if (hit) FF.app.updateParams({ agent: hit.name, tl: '' }); else U.toast('Koi GV agent match nahi hua', 'err'); }
     });
 
-    if (!rows.length) { body.innerHTML = `<div class="empty-state">😶 Is filter ke liye GV issuance data nahi mila.<br><button class="btn" data-action="clear-filters">Clear filters</button></div>`; return; }
+    if (!rows.length && !monthsList.length) { body.innerHTML = `<div class="empty-state">😶 Is filter ke liye GV issuance data nahi mila.<br><button class="btn" data-action="clear-filters">Clear filters</button></div>`; return; }
 
     const dimKeys = (list) => {
-      const present = U.uniq(list.map(dim.fn));
+      const present = U.uniq([
+        ...list.map(dim.fn),
+        ...(!tl && !agent ? monthsList.flatMap((m) => [...G.byDim(m, dim.fn).keys()]) : [])
+      ]);
       if (dimKey === 'agent' || dimKey === 'tl') return U.topEntries(U.groupSum(list, dim.fn, (r) => Number(r.n) || 1), 10).map((e) => e[0]);
       if (dim.order) return dim.order.filter((k) => present.includes(k)).concat(present.filter((k) => !dim.order.includes(k)));
       return U.topEntries(U.groupSum(list, dim.fn, (r) => Number(r.n) || 1), 8).map((e) => e[0]);
@@ -296,17 +299,18 @@ FF.pages = FF.pages || {};
       html += card(`🗓️ Weekly · ${U.labelYM(cur, true)} <span class="dim">${esc(dim.label)}</span>`, C.bars({ labels: weeks.map((w) => U.labelDate(w.start)), series, height: 240 }), { right: exportBtn('gv-trend-weekly') })
         + card('🔢 Weekly table', tableHtml(['Week starting', 'Total', ...keys], weeks.map((w) => { const k = U.dateKey(w.start); const tot = U.sum(series, (s) => s.values[buckets.indexOf(k)] || 0); return `<tr><td>${U.labelDate(w.start, true)}</td><td class="num"><b>${U.fmt(tot)}</b></td>${keys.map((kk) => `<td class="num">${U.fmt((map.get(k) && map.get(k).get(kk)) || 0)}</td>`).join('')}</tr>`; }), 1));
     } else if (mode === 'monthly') {
-      const map = bucketize(rows, (r) => r.ym);
+      const map = !tl && !agent ? new Map(monthsList.map((m) => [m, G.byDim(m, dim.fn)])) : bucketize(rows, (r) => r.ym);
       const series = seriesFor(map, monthsList);
-      html += card(`📆 Monthly (all months in GV Master) <span class="dim">${esc(dim.label)}</span>`, C.bars({ labels: monthsList.map((m) => U.labelYM(m)), series, height: 260, legendAlways: true }), { right: exportBtn('gv-trend-monthly') })
+      html += card(`📆 Monthly (all months in GV Master & Report) <span class="dim">${esc(dim.label)}</span>`, C.bars({ labels: monthsList.map((m) => U.labelYM(m)), series, height: 260, legendAlways: true }), { right: exportBtn('gv-trend-monthly') })
         + card('🔢 Monthly table', tableHtml(['Month', 'Total', ...keys, 'Avg / day'], monthsList.map((m) => { const tot = U.sum(series, (s) => s.values[monthsList.indexOf(m)] || 0); const daysIn = U.daysInMonth(m); return `<tr><td>${U.labelYM(m, true)}</td><td class="num"><b>${U.fmt(tot)}</b></td>${keys.map((k) => `<td class="num">${U.fmt((map.get(m) && map.get(m).get(k)) || 0)}</td>`).join('')}<td class="num">${U.fmt(tot / daysIn)}</td></tr>`; }), 1));
     } else {
       const lastKey = U.prevMonthKey(cur);
       const curS = G.summary(cur), lastS = G.summary(lastKey);
       const curMap = G.byDim(cur, dim.fn), lastMap = G.byDim(lastKey, dim.fn);
       const cmpKeys = U.uniq([...curMap.keys(), ...lastMap.keys()]);
-      const daysInLast = Math.max(1, rows.filter((r) => r.ym === lastKey).reduce((m, r) => Math.max(m, r.day || 0), 0));
-      const lastUpTo = U.sum(rows.filter((r) => r.ym === lastKey && (r.day || 0) <= (curS.lastDay || 31)), (r) => Number(r.n) || 1);
+      const daysInLast = Math.max(1, rows.filter((r) => r.ym === lastKey).reduce((m, r) => Math.max(m, r.day || 0), 0) || U.daysInMonth(lastKey));
+      const lastRowsUpTo = U.sum(rows.filter((r) => r.ym === lastKey && (r.day || 0) <= (curS.lastDay || 31)), (r) => Number(r.n) || 1);
+      const lastUpTo = lastRowsUpTo || Math.round(lastS.total * (Math.min(curS.lastDay || 31, daysInLast) / daysInLast));
       html += card(`⚖️ Last vs Current · ${U.labelYM(cur, true)} <span class="dim">${esc(dim.label)}</span>`, C.bars({ labels: cmpKeys, height: 240, series: [{ name: U.labelYM(lastKey, true), values: cmpKeys.map((k) => lastMap.get(k) || 0), color: '#99f6e4' }, { name: U.labelYM(cur, true), values: cmpKeys.map((k) => curMap.get(k) || 0), color: '#0d9488' }], legendAlways: true }), { right: exportBtn('gv-trend-compare') })
         + card('🔢 Comparison table', tableHtml(['Breakdown', `${U.labelYM(lastKey, true)} (full)`, `${U.labelYM(lastKey, true)} (day 1-${curS.lastDay || 31})`, `${U.labelYM(cur, true)} MTD`, 'Growth'], cmpKeys.map((k) => {
           const prevFull = lastMap.get(k) || 0;
@@ -566,25 +570,39 @@ FF.pages = FF.pages || {};
       // GV REPORT's own Today Issued is a recovery source when EIR has not yet exposed that
       // agent's live day row; EIR stays authoritative whenever its count is present.
       const todayIssued = eirToday || Number(r.todayIssued) || 0;
-      const curDays = new Set(currentRows.map((x) => U.dateKey(x.date || x.d)).filter(Boolean)).size;
-      const lastDays = new Set(lastRows.map((x) => U.dateKey(x.date || x.d)).filter(Boolean)).size;
-      const curChassis = count(currentRows, (x) => /chassis/i.test(x.tagType || x.vrnType || ''));
-      const curReplace = count(currentRows, (x) => /replacement/i.test(x.status || x.type || ''));
+      const curDays = Math.max(Number(r.curDays) || 0, new Set(currentRows.map((x) => U.dateKey(x.date || x.d)).filter(Boolean)).size);
+      const lastDays = Math.max(Number(r.lastDays) || 0, new Set(lastRows.map((x) => U.dateKey(x.date || x.d)).filter(Boolean)).size);
+      const curChassis = count(currentRows, (x) => /chassis/i.test(x.tagType || x.vrnType || '')) || Number(r.chassis) || 0;
+      const curReplace = count(currentRows, (x) => /replacement/i.test(x.status || x.type || '')) || Number(r.replace) || 0;
       const tlName = r.tlName || 'Direct';
       const tlCur = curTl.get(norm(tlName)) || {};
       const tlPrev = prevTl.get(norm(tlName)) || {};
+      const curVc4 = Math.max(Number(r.curVc4) || 0, cur.vc4 || 0);
+      const curComm = Math.max(Number(r.curComm) || 0, cur.comm || 0);
+      const curTotal = Math.max(Number(r.curTotal) || 0, cur.total || 0, curVc4 + curComm);
+      const lastVc4 = Math.max(Number(r.lastVc4) || 0, prev.vc4 || 0);
+      const lastComm = Math.max(Number(r.lastComm) || 0, prev.comm || 0);
+      const lastTotal = Math.max(Number(r.lastTotal) || 0, prev.total || 0, lastVc4 + lastComm);
       const curByClass = { ...(r.curByClass || {}) };
-      Object.entries(cur.byClass || {}).forEach(([cls, n]) => { curByClass[cls] = n; });
+      Object.entries(cur.byClass || {}).forEach(([cls, n]) => { curByClass[cls] = Math.max(curByClass[cls] || 0, n); });
       const lastByClass = { ...(r.lastByClass || {}) };
-      Object.entries(prev.byClass || {}).forEach(([cls, n]) => { lastByClass[cls] = n; });
+      Object.entries(prev.byClass || {}).forEach(([cls, n]) => { lastByClass[cls] = Math.max(lastByClass[cls] || 0, n); });
+      if (lastVc4 > (lastByClass.VC4 || 0)) lastByClass.VC4 = lastVc4;
+      const sumLastCommByClass = Object.entries(lastByClass).filter(([k]) => k !== 'VC4').reduce((s, [, n]) => s + (Number(n) || 0), 0);
+      if (lastComm > sumLastCommByClass) lastByClass['VC5+'] = (lastByClass['VC5+'] || 0) + (lastComm - sumLastCommByClass);
+      const finalGrowth = U.growth(curTotal, lastTotal);
       return { ...r,
-        lastDays, lastVc4: prev.vc4 || 0, lastComm: prev.comm || 0, lastTotal: prev.total || 0, lastByClass,
-        curDays, replace: curReplace, chassis: curChassis, curVc4: cur.vc4 || 0, curComm: cur.comm || 0, curTotal: cur.total || 0, curByClass,
-        todayIssued, todayIssuedSource: eirToday ? 'EIR' : (todayIssued ? 'GV REPORT' : 'EIR + GV REPORT'), expected: expected(cur.total || 0),
-        runrateVc4: lastDay ? (cur.vc4 || 0) / lastDay : 0, runrateComm: lastDay ? (cur.comm || 0) / lastDay : 0,
-        runrate: lastDay ? (cur.total || 0) / lastDay : 0, growth: U.growth(cur.total || 0, prev.total || 0),
-        tlLastVc4: tlPrev.vc4 || 0, tlLastComm: tlPrev.comm || 0, tlLastTotal: tlPrev.total || 0,
-        tlCurVc4: tlCur.vc4 || 0, tlCurComm: tlCur.comm || 0, tlCurTotal: tlCur.total || 0,
+        lastDays, lastVc4, lastComm, lastTotal, lastByClass,
+        curDays, replace: curReplace, chassis: curChassis, curVc4, curComm, curTotal, curByClass,
+        todayIssued, todayIssuedSource: eirToday ? 'EIR' : (todayIssued ? 'GV REPORT' : 'EIR + GV REPORT'), expected: expected(curTotal),
+        runrateVc4: lastDay ? curVc4 / lastDay : 0, runrateComm: lastDay ? curComm / lastDay : 0,
+        runrate: lastDay ? curTotal / lastDay : 0, growth: finalGrowth !== null ? finalGrowth : r.growth,
+        tlLastVc4: Math.max(Number(r.tlLastVc4) || 0, tlPrev.vc4 || 0),
+        tlLastComm: Math.max(Number(r.tlLastComm) || 0, tlPrev.comm || 0),
+        tlLastTotal: Math.max(Number(r.tlLastTotal) || 0, tlPrev.total || 0),
+        tlCurVc4: Math.max(Number(r.tlCurVc4) || 0, tlCur.vc4 || 0),
+        tlCurComm: Math.max(Number(r.tlCurComm) || 0, tlCur.comm || 0),
+        tlCurTotal: Math.max(Number(r.tlCurTotal) || 0, tlCur.total || 0),
         eirIssuance: true
       };
     });
@@ -640,13 +658,31 @@ FF.pages = FF.pages || {};
     await G.need('master').catch(() => []);
     const currentYm = U.ymKey(new Date()), previousYm = U.prevMonthKey(currentYm);
     const profileDrill = (scope, ym) => ({ scope, ym: ym || '', agent: r.agentName, agentId: r.agentId || '', channel: 'gv' });
-    const clsRows = Object.entries(r.curByClass).filter(([, v]) => v > 0);
-    const stockRows = Object.entries(r.stockByClass).filter(([, v]) => v > 0);
+    const clsRows = Object.entries(r.curByClass || {}).filter(([, v]) => v > 0);
+    const lastClsRows = Object.entries(r.lastByClass || {}).filter(([, v]) => v > 0);
+    if (!lastClsRows.length && (r.lastVc4 > 0 || r.lastComm > 0)) {
+      if (r.lastVc4 > 0) lastClsRows.push(['VC4', r.lastVc4]);
+      if (r.lastComm > 0) lastClsRows.push(['Commercial (VC5+)', r.lastComm]);
+    }
+    const stockRows = Object.entries(r.stockByClass || {}).filter(([, v]) => v > 0);
+    const allClsKeys = [...new Set([...clsRows.map(([k]) => k), ...lastClsRows.map(([k]) => k), ...stockRows.map(([k]) => k)])];
+    const cmpTable = allClsKeys.length ? `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Class</th><th class="num">Last (${esc(previousYm)})</th><th class="num">MTD (${esc(currentYm)})</th><th class="num">Stock</th></tr></thead><tbody>
+      ${allClsKeys.map((k) => {
+        const lVal = (r.lastByClass && r.lastByClass[k]) || (k === 'VC4' ? r.lastVc4 : 0) || 0;
+        const cVal = (r.curByClass && r.curByClass[k]) || 0;
+        const sVal = (r.stockByClass && r.stockByClass[k]) || 0;
+        return `<tr class="clickable" ${drillAttr({ src: 'gv', scope: cVal > 0 ? 'mtd' : 'month', ym: cVal > 0 ? currentYm : previousYm, agent: r.agentName, agentId: r.agentId || '', channel: 'gv', cls: k })}><td><b>${esc(k)}</b></td><td class="num">${U.fmt(lVal)}</td><td class="num"><b>${U.fmt(cVal)}</b></td><td class="num">${U.fmt(sVal)}</td></tr>`;
+      }).join('')}
+      </tbody><tfoot><tr class="row-total"><td>Grand Total</td><td class="num">${U.fmt(r.lastTotal)}</td><td class="num">${U.fmt(r.curTotal)}</td><td class="num">${U.fmt(r.stockTotal)}</td></tr></tfoot></table></div>` : '<div class="empty">Class-wise data nahi</div>';
     const body = `
       <div class="grid g-3">${miniKpi('Stock (total)', U.fmt(r.stockTotal), `VC4 ${U.fmt(r.stockVc4)} · Comm ${U.fmt(r.stockComm)}`, '', { scope: 'stock', agent: r.agentName, agentId: r.agentId || '', channel: 'gv' })}${miniKpi('MTD issuance', U.fmt(r.curTotal), `VC4 ${U.fmt(r.curVc4)} · Comm ${U.fmt(r.curComm)}`, 'g3', profileDrill('mtd', currentYm))}${miniKpi('Last month', U.fmt(r.lastTotal), `VC4 ${U.fmt(r.lastVc4)} · Comm ${U.fmt(r.lastComm)}`, '', profileDrill('month', previousYm))}</div>
       <div class="grid g-3" style="margin-top:10px">${miniKpi('Growth', U.deltaHtml(r.growth, { decimals: 0 }), `Today: ${U.fmt(r.todayIssued)}`, '', profileDrill('mtd', currentYm))}${miniKpi('Active days (MTD)', U.fmt(r.curDays), `Last month: ${U.fmt(r.lastDays)}`, '', profileDrill('mtd', currentYm))}${miniKpi('Runrate', U.fmt(r.runrate), `VC4 ${U.fmt(r.runrateVc4)} · Comm ${U.fmt(r.runrateComm)}`, '', profileDrill('mtd', currentYm))}</div>
       <div class="grid g-2" style="margin-top:12px">
         <div>${card('🚗 MTD class split', clsRows.length ? C.bars({ labels: clsRows.map(([k]) => k), height: 180, series: [{ name: 'Issued', values: clsRows.map(([, v]) => v), color: '#0d9488' }], showValues: true, onClickAttr: (i) => drillAttr({ src: 'gv', scope: 'mtd', ym: currentYm, agent: r.agentName, agentId: r.agentId || '', channel: 'gv', cls: clsRows[i][0] }) }) : '<div class="empty">MTD data nahi</div>')}</div>
+        <div>${card(`📅 Last month (${esc(previousYm)}) class split`, lastClsRows.length ? C.bars({ labels: lastClsRows.map(([k]) => k), height: 180, series: [{ name: 'Last month', values: lastClsRows.map(([, v]) => v), color: '#6366f1' }], showValues: true, onClickAttr: (i) => drillAttr({ src: 'gv', scope: 'month', ym: previousYm, agent: r.agentName, agentId: r.agentId || '', channel: 'gv', cls: lastClsRows[i][0] }) }) : '<div class="empty">Last month data nahi</div>')}</div>
+      </div>
+      <div class="grid g-2" style="margin-top:12px">
+        <div>${card('📊 Class-wise Last vs MTD & Stock', cmpTable)}</div>
         <div>${card('📦 Stock by class', stockRows.length ? C.donut({ items: stockRows.map(([k, v]) => ({ label: k, value: v, attr: drillAttr({ src: 'gv', scope: 'stock', agent: r.agentName, agentId: r.agentId || '', channel: 'gv', cls: k }) })), subtitle: 'stock' }) : '<div class="empty">Stock nahi</div>')}</div>
       </div>
       ${gvTodayClassBreakdown(r)}
@@ -655,7 +691,7 @@ FF.pages = FF.pages || {};
     FF.app.openDrawer({
       kicker: 'GV Partner · GV REPORT', title: r.agentName,
       sub: `<span class="dim">${esc(r.agentId)} · ${esc(FF.config.isDirectAgent(r, 'gv') ? FF.config.directLabel(r, 'gv') : r.tlName)}${r.mobile && FF.auth.can('contacts') ? ` · 📞 <a href="tel:${esc(r.mobile)}">${esc(r.mobile)}</a>` : ''}</span>`,
-      body, actions: `<a class="btn small" href="#/gvStock?agent=${encodeURIComponent(r.agentName)}&view=agent">📦 GV stock →</a>`,
+      body, actions: `<button class="btn small" data-drawer-csv="${esc(r.agentName)}">⬇ CSV</button><button class="btn small primary" data-drawer-pdf="${esc(r.agentName)}">📄 PDF</button><a class="btn small" href="#/gvStock?agent=${encodeURIComponent(r.agentName)}&view=agent">📦 GV stock →</a>`,
       age: { kind: 'agent', key: r.agentId || r.agentName, keys: [r.agentName], ch: 'gv', title: r.agentName }
     });
   }

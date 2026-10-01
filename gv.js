@@ -509,12 +509,84 @@ window.FF = window.FF || {};
   function eirAgentToday() {
     return FF.store && typeof FF.store.get === 'function' && Array.isArray(FF.store.get('agentDailyClass')) ? FF.store.get('agentDailyClass') : [];
   }
+  const prevCalendarYm = (ym) => {
+    const m = /^(\d{4})-(\d{2})$/.exec(String(ym || ''));
+    if (!m) return '';
+    let y = Number(m[1]), mo = Number(m[2]) - 1;
+    if (mo < 1) { mo = 12; y -= 1; }
+    return `${y}-${String(mo).padStart(2, '0')}`;
+  };
+  function gvPersonLookup() {
+    const byId = new Map(), byName = new Map();
+    const isChannelTl = (t) => {
+      const c = U.clean(t).toLowerCase();
+      const gvCh = U.clean((FF.config.eir && FF.config.eir.gvChannelTl) || 'ApnaPayment Pvt. Ltd.').toLowerCase();
+      return !c || c === '—' || c === gvCh || /^apna\s*payment/i.test(c);
+    };
+    const add = (agentId, agentName, tlId, tlName) => {
+      const id = U.clean(agentId), name = U.clean(agentName);
+      const tId = U.clean(tlId), tName = isChannelTl(tlName) ? '' : U.clean(tlName);
+      const rec = { agentId: id, agentName: name, tlId: tId, tlName: tName };
+      if (id) {
+        const k = id.toUpperCase();
+        const prev = byId.get(k) || {};
+        byId.set(k, { agentId: id || prev.agentId || '', agentName: name || prev.agentName || '', tlId: tId || prev.tlId || '', tlName: tName || prev.tlName || '' });
+      }
+      if (name && !isChannelTl(name)) {
+        const k = name.toUpperCase();
+        const prev = byName.get(k) || {};
+        byName.set(k, { agentId: id || prev.agentId || '', agentName: name || prev.agentName || '', tlId: tId || prev.tlId || '', tlName: tName || prev.tlName || '' });
+      }
+    };
+    for (const r of state.data.stockAgent || []) add(r.agentId, r.agentName, r.tlId, r.tlName);
+    for (const r of state.data.report || []) add(r.agentId, r.agentName, r.tlId, r.tlName);
+    for (const r of state.data.master || []) add(r.agentId, r.agentName, r.tlId, r.tlName);
+    return {
+      isChannelTl,
+      resolve(agentId, agentName, tlId, tlName) {
+        const id = U.clean(agentId), name = U.clean(agentName);
+        const hit = (id && byId.get(id.toUpperCase())) || (name && byName.get(name.toUpperCase())) || {};
+        const finalId = id || hit.agentId || '';
+        const finalName = (!isChannelTl(name) && name) || hit.agentName || name || finalId || '';
+        const finalTlId = U.clean(tlId) || hit.tlId || '';
+        const rawTl = !isChannelTl(tlName) ? U.clean(tlName) : '';
+        const finalTlName = rawTl || hit.tlName || (finalTlId ? `TL ${finalTlId}` : 'Direct');
+        return { agentId: finalId, agentName: finalName, tlId: finalTlId, tlName: finalTlName };
+      }
+    };
+  }
+  function reportPrevYm() {
+    const eirM = FF.model && eirDaily() ? FF.model.months(eirDaily().filter((r) => r.channel === 'GV Partner')) : [];
+    const masM = masterMonths();
+    const all = [...new Set([...eirM, ...masM])].filter(Boolean).sort();
+    const cur = all[all.length - 1] || U.ymKey(new Date());
+    return prevCalendarYm(cur);
+  }
   function eirDailyRows() {
-    return (eirDaily() || []).filter((r) => r.channel === 'GV Partner').map((r) => ({
-      date: r.d, d: r.d, ym: r.ym, day: r.day, cls: r.cls, group: r.group, type: r.type,
-      status: r.type, tagType: r.vrnType || '', vrnType: r.vrnType || '', channel: 'GV Partner',
-      agentId: r.agentId || '', agentName: r.agentName || '', tlId: r.tlId || '', tlName: r.tlName || '', n: r.n
-    }));
+    const lk = gvPersonLookup();
+    const fromEir = (eirDaily() || []).filter((r) => r.channel === 'GV Partner').map((r) => {
+      const p = lk.resolve(r.agentId, r.agentName, r.tlId, r.tlName);
+      return {
+        date: r.d, d: r.d, key: r.key || (r.d ? U.dateKey(r.d) : ''), ym: r.ym, day: r.day, cls: r.cls, group: r.group, type: r.type,
+        status: r.type, tagType: r.vrnType || '', vrnType: r.vrnType || '', channel: 'GV Partner',
+        agentId: p.agentId, agentName: p.agentName, tlId: p.tlId, tlName: p.tlName, n: r.n
+      };
+    });
+    // Supplement any historical month present in GV Master that has 0 rows in EIR daily
+    const eirYms = new Set(fromEir.map((r) => r.ym).filter(Boolean));
+    const tk = todayKey();
+    for (const r of rows()) {
+      const k = r.date ? U.dateKey(r.date) : '';
+      if (!r.ym || k === tk || eirYms.has(r.ym)) continue;
+      const p = lk.resolve(r.agentId, r.agentName, r.tlId, r.tlName);
+      fromEir.push({
+        date: r.date, d: r.date, key: k, ym: r.ym, day: r.day, cls: r.cls, group: r.group,
+        type: /replace/i.test(`${r.status || ''} ${r.tagType || ''}`) ? 'REPLACEMENT' : 'ISSUANCE',
+        status: r.status || 'Issuance', tagType: r.tagType || '', vrnType: r.tagType || '', channel: 'GV Partner',
+        agentId: p.agentId, agentName: p.agentName, tlId: p.tlId, tlName: p.tlName, n: 1
+      });
+    }
+    return fromEir;
   }
   function operationalCommission(ym, upToDay) {
     const s = masterSummary(ym, upToDay);
@@ -525,6 +597,7 @@ window.FF = window.FF || {};
     };
   }
   function eirPeopleRollup(ym) {
+    const lk = gvPersonLookup();
     const classes = eirAgentClass().filter((r) => r.channel === 'GV Partner' && (!ym || r.ym === ym));
     const meta = new Map();
     eirAgents().filter((r) => r.channel === 'GV Partner' && (!ym || r.ym === ym)).forEach((r) => {
@@ -541,25 +614,27 @@ window.FF = window.FF || {};
     // Agent-class is monthly, so build active-day sets from the same EIR daily ledger rather
     // than leaving every GV rollup at zero active days. This keeps avgPerDay meaningful.
     const daySets = new Map();
-    for (const r of liveDailyRows()) {
-      if (ym && r.ym !== ym) continue;
+    const dailyRowsForYm = liveDailyRows().filter((r) => !ym || r.ym === ym);
+    for (const r of dailyRowsForYm) {
       const k = `${r.ym}|${U.clean(r.agentName).toUpperCase()}`;
       if (!daySets.has(k)) daySets.set(k, new Set());
       daySets.get(k).add(r.key || U.dateKey(r.date || r.d));
     }
     const map = new Map();
     const put = (r, n, group, type) => {
-      const name = U.clean(r.name || r.agentName) || 'Unknown';
-      const key = `${r.ym}|${name.toUpperCase()}`;
+      const rawName = U.clean(r.gvName || r.name || r.agentName) || 'Unknown';
+      const key = `${r.ym || ym || ''}|${rawName.toUpperCase()}`;
       const m = meta.get(key) || {};
-      const id = r.id || r.agentId || r.gvId || m.id || name;
-      const k = `${r.channel}|${id}|${name}`;
+      const resolved = lk.resolve(r.id || r.agentId || r.gvId || m.id, rawName, r.tlId || m.tlId, r.tlName || m.tlName);
+      const name = resolved.agentName || rawName;
+      const id = resolved.agentId || name;
+      const k = (id || name).toUpperCase();
       if (!map.has(k)) {
-        const op = commission.get(key) || { amount: 0, commission: 0 };
-        const tlName = U.clean(r.tlName) || 'Direct';
-        const direct = !tlName || /^(—|direct)$/i.test(tlName) || FF.config.isDirectAgent({ agentId: id, agentName: name, tlId: r.tlId, tlName, channel: 'GV Partner' }, 'gv');
-        map.set(k, { agentId: id, agentName: name, tlId: r.tlId || m.tlId || '', tlName, channel: 'GV Partner', directAgent: direct,
-          total: 0, vc4: 0, vc20: 0, vc5p: 0, comm: 0, replacement: 0, days: new Set(daySets.get(key) || []), byClass: {}, amount: op.amount, commission: op.commission });
+        const op = commission.get(`${r.ym || ym || ''}|${name.toUpperCase()}`) || commission.get(key) || { amount: 0, commission: 0 };
+        const tlName = resolved.tlName || 'Direct';
+        const direct = !tlName || /^(—|direct)$/i.test(tlName) || FF.config.isDirectAgent({ agentId: id, agentName: name, tlId: resolved.tlId, tlName, channel: 'GV Partner' }, 'gv');
+        map.set(k, { agentId: id, agentName: name, tlId: resolved.tlId || '', tlName, channel: 'GV Partner', directAgent: direct,
+          total: 0, vc4: 0, vc20: 0, vc5p: 0, comm: 0, replacement: 0, reportDays: 0, days: new Set(daySets.get(`${r.ym || ym || ''}|${name.toUpperCase()}`) || daySets.get(key) || []), byClass: {}, amount: op.amount, commission: op.commission });
       }
       const o = map.get(k); o.total += n;
       const exactClass = normClass(r.cls || group || 'NA');
@@ -567,16 +642,97 @@ window.FF = window.FF || {};
       if (group === 'VC4') o.vc4 += n; else if (group === 'VC20') { o.vc20 += n; o.comm += n; } else { o.vc5p += n; o.comm += n; }
       if (/replacement/i.test(type || '')) o.replacement += n;
     };
-    if (classes.length) classes.forEach((r) => put(r, Number(r.n) || 0, r.group, r.type));
+    const usableClasses = classes.filter((r) => !lk.isChannelTl(r.name));
+    if (usableClasses.length) usableClasses.forEach((r) => put(r, Number(r.n) || 0, r.group, r.type));
+    else if (dailyRowsForYm.length) dailyRowsForYm.forEach((r) => put(r, Number(r.n) || 1, r.group, r.type));
     else eirAgents().filter((r) => r.channel === 'GV Partner' && (!ym || r.ym === ym)).forEach((r) => put({ ...r, agentName: r.name, group: 'VC5+' }, Number(r.n) || 0, 'VC5+', 'ISSUANCE'));
-    return [...map.values()].map((a) => ({ ...a, activeDays: a.days.size, avgPerDay: a.days.size ? a.total / a.days.size : 0 })).sort((a, b) => b.total - a.total);
+
+    // Ensure any agent present in liveDailyRows (e.g. today's GV Master rows or daily rows not in monthly class) is included
+    if (usableClasses.length && dailyRowsForYm.length) {
+      const byDayAgent = new Map();
+      for (const r of dailyRowsForYm) {
+        const res = lk.resolve(r.agentId, r.agentName, r.tlId, r.tlName);
+        const k = (res.agentId || res.agentName).toUpperCase();
+        if (!k) continue;
+        const list = byDayAgent.get(k) || [];
+        list.push(r);
+        byDayAgent.set(k, list);
+      }
+      for (const [k, rs] of byDayAgent.entries()) {
+        if (!map.has(k)) rs.forEach((r) => put(r, Number(r.n) || 1, r.group, r.type));
+      }
+    }
+
+    // Fallback/enrich from GV REPORT Last Month (e.g. September 2026-09) when viewing previous month
+    const prevYm = reportPrevYm();
+    if (ym && ym === prevYm && Array.isArray(state.data.report)) {
+      for (const rep of state.data.report) {
+        const lastVc4 = Number(rep.lastVc4) || 0;
+        const lastComm = Number(rep.lastComm) || 0;
+        const lastTot = Math.max(Number(rep.lastTotal) || 0, lastVc4 + lastComm);
+        if (lastTot <= 0) continue;
+        const res = lk.resolve(rep.agentId, rep.agentName, rep.tlId, rep.tlName);
+        const id = res.agentId || rep.agentId || res.agentName;
+        const name = res.agentName || rep.agentName || id;
+        const k = (id || name).toUpperCase();
+        let o = map.get(k);
+        if (!o) {
+          // Check if matched by name key
+          for (const [, v] of map.entries()) {
+            if (U.clean(v.agentName).toUpperCase() === U.clean(name).toUpperCase()) { o = v; break; }
+          }
+        }
+        if (!o) {
+          const tlName = res.tlName || 'Direct';
+          const direct = !tlName || /^(—|direct)$/i.test(tlName) || FF.config.isDirectAgent({ agentId: id, agentName: name, tlId: res.tlId, tlName, channel: 'GV Partner' }, 'gv');
+          o = { agentId: id, agentName: name, tlId: res.tlId || '', tlName, channel: 'GV Partner', directAgent: direct,
+            total: 0, vc4: 0, vc20: 0, vc5p: 0, comm: 0, replacement: 0, reportDays: Number(rep.lastDays) || 0, days: new Set(), byClass: {}, amount: 0, commission: 0 };
+          map.set(k, o);
+        }
+        if (rep.lastDays && !o.reportDays) o.reportDays = Number(rep.lastDays) || 0;
+        if (lastVc4 > o.vc4) {
+          const diff = lastVc4 - o.vc4;
+          o.vc4 = lastVc4;
+          o.byClass.VC4 = (o.byClass.VC4 || 0) + diff;
+        }
+        if (lastComm > o.comm) {
+          const diff = lastComm - o.comm;
+          o.comm = lastComm;
+          o.vc5p += diff;
+          o.byClass['VC5+'] = (o.byClass['VC5+'] || 0) + diff;
+        }
+        o.total = Math.max(o.total, o.vc4 + o.comm, lastTot);
+      }
+    }
+
+    return [...map.values()].map((a) => {
+      const actDays = a.days.size || a.reportDays || 0;
+      return { ...a, activeDays: actDays, avgPerDay: actDays ? a.total / actDays : 0 };
+    }).sort((a, b) => b.total - a.total);
   }
   function eirSummary(ym, upToDay) {
     const s = FF.model.summary(liveDailyRows(), ym, upToDay, 'GV Partner');
     const people = eirPeopleRollup(ym);
-    s.agents = new Set(people.map((a) => a.agentId));
-    s.tls = new Set(people.filter((a) => !a.directAgent).map((a) => a.tlName || 'Direct'));
-    s.directSet = new Set(people.filter((a) => a.directAgent).map((a) => a.agentId));
+    if (!upToDay && people.length) {
+      const pTotal = people.reduce((acc, a) => acc + (a.total || 0), 0);
+      const pVc4 = people.reduce((acc, a) => acc + (a.vc4 || 0), 0);
+      const pVc20 = people.reduce((acc, a) => acc + (a.vc20 || 0), 0);
+      const pVc5p = people.reduce((acc, a) => acc + (a.vc5p || 0), 0);
+      const pComm = people.reduce((acc, a) => acc + (a.comm || 0), 0);
+      const pRepl = people.reduce((acc, a) => acc + (a.replacement || 0), 0);
+      if (pTotal > s.total) {
+        s.total = pTotal;
+        s.vc4 = Math.max(s.vc4 || 0, pVc4);
+        s.vc20 = Math.max(s.vc20 || 0, pVc20);
+        s.vc5p = Math.max(s.vc5p || 0, pVc5p);
+        s.comm = Math.max(s.comm || 0, pComm);
+        s.replacement = Math.max(s.replacement || 0, pRepl);
+        s.newIssuance = Math.max(0, s.total - s.replacement);
+      }
+    }
+    s.agents = new Set(people.filter((a) => a.total > 0).map((a) => a.agentId));
+    s.tls = new Set(people.filter((a) => a.total > 0 && !a.directAgent).map((a) => a.tlName || 'Direct'));
+    s.directSet = new Set(people.filter((a) => a.total > 0 && a.directAgent).map((a) => a.agentId));
     // v3.31: aaj ke LIVE GV Master rows ke agents bhi (EIR rollup kal tak hi hota hai) — warna 1 tareekh ko
     // MTD 34 tags par "Active agents 0" dikhta tha aur drill-down me 20 agents.
     const known = new Set([...s.agents].map((x) => U.clean(x).toUpperCase()));
@@ -605,14 +761,39 @@ window.FF = window.FF || {};
   function eirDirectRollup(ym) {
     return eirPeopleRollup(ym).filter((a) => a.directAgent).map((a) => ({ ...a, reason: FF.direct ? FF.direct.reason(a, 'gv') : 'GV direct agent', last: null }));
   }
-  function months() { return eirReady() ? FF.model.months(liveDailyRows()) : masterMonths(); }
+  function months() {
+    const base = eirReady() ? FF.model.months(liveDailyRows()) : masterMonths();
+    const set = new Set([...base, ...masterMonths()]);
+    if (Array.isArray(state.data.report) && state.data.report.some((r) => (Number(r.lastTotal) || Number(r.lastVc4) || Number(r.lastComm)) > 0)) {
+      const prev = reportPrevYm();
+      if (prev) set.add(prev);
+    }
+    return [...set].filter(Boolean).sort();
+  }
   function latestDate() { return eirReady() ? FF.model.latestDate(liveDailyRows()) : masterLatestDate(); }
   function summary(ym, upToDay) { return eirReady() ? eirSummary(ym, upToDay) : masterSummary(ym, upToDay); }
   function dailySeries(ym, dimFn) { return eirReady() ? FF.model.dailySeries(liveDailyRows(), ym, dimFn) : masterDailySeries(ym, dimFn); }
   function byDim(ym, dimFn, upToDay) {
     if (!eirReady()) return masterByDim(ym, dimFn, upToDay);
     const source = liveDailyRows().filter((r) => !ym || r.ym === ym).filter((r) => !upToDay || r.day <= upToDay);
-    const map = new Map(); source.forEach((r) => { const k = dimFn(r); map.set(k, (map.get(k) || 0) + r.n); }); return map;
+    const map = new Map();
+    if (source.length) {
+      source.forEach((r) => { const k = dimFn(r); map.set(k, (map.get(k) || 0) + r.n); });
+      return map;
+    }
+    if (!upToDay && ym) {
+      for (const a of eirPeopleRollup(ym)) {
+        const classes = Object.entries(a.byClass || {});
+        if (classes.length) {
+          for (const [cls, n] of classes) {
+            const fakeRow = { ym, cls, group: classGroup(cls), type: 'ISSUANCE', status: 'ISSUANCE', tagType: 'VRN', vrnType: 'VRN', channel: 'GV Partner', agentId: a.agentId, agentName: a.agentName, tlId: a.tlId, tlName: a.tlName, n };
+            const k = dimFn(fakeRow);
+            map.set(k, (map.get(k) || 0) + n);
+          }
+        }
+      }
+    }
+    return map;
   }
   function agentRollup(ym) { return eirReady() ? eirPeopleRollup(ym) : masterAgentRollup(ym); }
   function tlRollup(ym) { return eirReady() ? eirTlRollup(ym) : masterTlRollup(ym); }

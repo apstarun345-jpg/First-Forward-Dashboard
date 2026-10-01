@@ -549,39 +549,44 @@ FF.pages = FF.pages || {};
     if (t.dispatchName && it.agentName && t.dispatchName.trim().toLowerCase() !== it.agentName.trim().toLowerCase()) return `${it.forTl ? 'TL' : 'Agent'}: ${it.agentName}`;
     return '';
   }
-  /** Plain-text label — copy / WhatsApp share ke liye. */
+  /** Plain-text label — copy / WhatsApp share ke liye (TO upar, FROM neeche). */
   function labelText(r) {
     const f = dispatchFrom();
     const it = labelItem(r);
     const t = it.to;
     return [
-      `FROM: ${f.name}${f.address ? `, ${f.address}` : ''}${f.phone ? ` · Ph: ${f.phone}` : ''}`,
-      '',
+      `📬 DELIVER TO (RECEIVER) · Req #${it.id}`,
       `TO: ${t.name || ''}`,
-      t.mobile ? `Mob: ${t.mobile}` : '',
-      t.address ? `Address: ${t.address}` : '',
-      t.pincode ? `Pincode: ${t.pincode}` : '',
+      `Name - ${t.name || '—'}`,
+      t.mobile ? `Mobile Number - ${t.mobile} (Mob: ${t.mobile})` : '',
+      t.address ? `Address - ${t.address} (Address: ${t.address})` : '',
+      t.pincode ? `PIN Code - ${t.pincode} (Pincode: ${t.pincode})` : '',
       ...(agentRef(it) ? [agentRef(it)] : []),
       '',
-      `Request: ${it.id} · ${it.date} · ${it.total} tags${it.classes.length ? ` (${it.classes.map((c) => `${c.cls}×${c.qty}`).join(', ')})` : ''}`
+      `🏷️ FASTags: ${it.total} tags${it.classes.length ? ` (${it.classes.map((c) => `${c.cls}×${c.qty}`).join(', ')})` : ''} · Date: ${it.date}`,
+      '',
+      `📤 FROM (SENDER):`,
+      `FROM: ${f.name}${f.address ? `, ${f.address}` : ''}${f.phone ? ` · Ph: ${f.phone}` : ''}`,
+      `Name - ${f.name}${f.phone ? ` | Mobile Number - ${f.phone}` : ''}`
     ].filter((x) => x !== '' && x !== undefined).join('\n');
   }
-  /** Poora printable HTML — har item ka EK label (dobara repeat nahi). `rows` = A4 par label rows
-   *  (4/5/6 → 8/10/12 labels per page), `size` = text pt. */
+  /** Poora printable HTML — har item ka EK label (dobara repeat nahi).
+   *  TO (Receiver) UPAR aur FROM (Sender) NEECHE · Structured professional format + Colorful Label option. */
   function labelsHtml(items, opts) {
     const o = opts || {};
     const list = (Array.isArray(items) ? items : []).filter(Boolean);
     const f = dispatchFrom();
     const pt = [9, 10.5, 12, 14].includes(Number(o.size)) ? Number(o.size) : 10.5;
     const rowsPerPage = [3, 4, 5, 6].includes(Number(o.rows)) ? Number(o.rows) : 5;
+    const colorful = o.colorful !== false;
     const hOf = (n) => ((283 - (n - 1) * 2.5) / n).toFixed(1); // label height (mm)
-    const fromLine = `<div class="from"><b>FROM:</b> ${esc(f.name)}${f.address ? `<br>${esc(f.address)}` : ''}${f.phone ? `<br>☏ ${esc(f.phone)}` : ''}</div>`;
+    const fromLine = `<div class="from"><div class="from-hdr"><span class="from-badge">📤 FROM (SENDER)</span><span class="from-req">FASTag Dispatch</span></div><div class="from-body"><span class="lbl-k">Name - </span><b>FROM:</b> ${esc(f.name)}${f.phone ? ` <span class="from-sep">·</span> <span class="lbl-k">Mobile Number - </span><b>☏ ${esc(f.phone)}</b>` : ''}${f.address ? `<div class="from-addr"><span class="lbl-k">Address - </span>${esc(f.address)}</div>` : ''}</div></div>`;
     const cells = list.map((it) => {
       const t = it.to || {};
       const cls = it.classes.length ? it.classes.map((c) => `${esc(c.cls)} × ${fmt(c.qty)}`).join(' · ') : '—';
       const agentLine = agentRef(it) ? `<div class="to-agent">${esc(agentRef(it))}</div>` : '';
-      const meta = `Req ${esc(it.id.slice(-10))} · ${esc(it.date)}${it.employee ? ` · Emp: ${esc(it.employee)}` : ''}${it.tl ? ` · TL ${esc(it.tl)}` : ''}${it.agentId && t.who === 'agent' ? ` · ID ${esc(it.agentId)}` : ''}`;
-      return `<div class="lbl">${fromLine}<div class="to"><span class="tag">TO</span><b class="to-name">${esc(t.name || '')}</b>${t.mobile ? `<div class="to-mob">☏ ${esc(t.mobile)}</div>` : ''}${t.address ? `<div class="to-addr">${esc(t.address)}</div>` : ''}${t.pincode ? `<div class="to-pin">PIN: ${esc(t.pincode)}</div>` : ''}${agentLine}</div><div class="cls">🏷️ ${cls} = <b>${fmt(it.total)} tags</b></div><div class="meta">${meta}</div></div>`;
+      const meta = `Req #${esc(it.id.slice(-10))} · ${esc(it.date)}${it.employee ? ` · Emp: ${esc(it.employee)}` : ''}${it.tl ? ` · TL ${esc(it.tl)}` : ''}${it.agentId && t.who === 'agent' ? ` · ID ${esc(it.agentId)}` : ''}`;
+      return `<div class="lbl"><div class="lbl-top-bar"><span class="tag">TO</span><span class="to-hdr-title">📬 DELIVER TO (RECEIVER)</span><span class="lbl-id">#${esc(it.id.slice(-10))}</span></div><div class="to"><div class="to-row"><span class="lbl-k">Name - </span><b class="to-name">${esc(t.name || '')}</b>${t.mobile ? `<div class="to-mob">☏ ${esc(t.mobile)}</div>` : ''}</div>${t.address ? `<div class="to-addr"><span class="lbl-k">Address - </span>${esc(t.address)}</div>` : ''}${t.pincode ? `<div class="to-pin"><span class="lbl-k">PIN Code - </span>PIN: ${esc(t.pincode)}</div>` : ''}${agentLine}</div><div class="cls">🏷️ ${cls} = <b>${fmt(it.total)} tags</b></div>${fromLine}<div class="meta">${meta}</div></div>`;
     }).join('');
     const totalTags = list.reduce((s, it) => s + num(it.total), 0);
     return `<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -589,40 +594,62 @@ FF.pages = FF.pages || {};
 <meta name="robots" content="noindex,nofollow"><title>Dispatch labels · ${list.length}</title>
 <style>
 @page { size: A4; margin: 6mm; }
-* { box-sizing: border-box; }
-body { font-family: Arial, "Segoe UI", sans-serif; color: #111; margin: 0; }
-.bar { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; background: #fff; border-bottom: 1px solid #bbb; padding: 6px 8px; font-size: 13px; }
-.bar button { border: 1px solid #999; background: #fff; border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 13px; }
+* { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+body { font-family: "Inter", Arial, "Segoe UI", sans-serif; color: #0f172a; margin: 0; background: #f8fafc; }
+.bar { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; background: #fff; border-bottom: 1px solid #cbd5e1; padding: 8px 12px; font-size: 13px; box-shadow: 0 2px 8px rgba(15,23,42,0.06); }
+.bar button { border: 1px solid #94a3b8; background: #fff; border-radius: 6px; padding: 5px 11px; cursor: pointer; font-size: 12.5px; font-weight: 600; color: #1e293b; }
 .bar .grp { display: inline-flex; gap: 0; align-items: center; }
 .bar .grp button { border-radius: 0; margin-left: -1px; }
 .bar .grp button:first-of-type { border-radius: 6px 0 0 6px; }
 .bar .grp button:last-of-type { border-radius: 0 6px 6px 0; }
 .bar button.on { background: #2563eb; color: #fff; border-color: #2563eb; }
-.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2.5mm; padding: 2mm 0; }
-.lbl { border: 1.4px dashed #111; border-radius: 2mm; padding: 2.5mm 3mm; height: ${hOf(rowsPerPage)}mm; overflow: hidden; page-break-inside: avoid; break-inside: avoid; font-size: ${pt}pt; line-height: 1.3; display: flex; flex-direction: column; }
-.from { font-size: 66%; color: #333; border-bottom: 1px dotted #999; padding-bottom: 1.2mm; margin-bottom: 1.4mm; }
-.to { flex: 1; min-height: 0; overflow: hidden; }
-.to .tag { font-size: 64%; font-weight: 700; border: 1px solid #111; padding: 0 3px; border-radius: 2px; margin-right: 4px; }
-.to-name { font-size: 117%; font-weight: 800; }
-.to-mob { font-weight: 700; margin-top: 0.6mm; }
-.to-addr { margin-top: 0.6mm; }
-.to-pin { font-size: 150%; font-weight: 900; letter-spacing: 0.5px; margin-top: 0.8mm; }
-.to-agent { font-size: 80%; margin-top: 0.6mm; }
-.cls { font-size: 82%; border-top: 1px dotted #999; margin-top: 1.2mm; padding-top: 0.9mm; }
-.meta { font-size: 60%; color: #444; margin-top: 0.6mm; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2.5mm; padding: 2mm 4mm; background: #fff; }
+.lbl { border: 1.6px solid #1e293b; border-radius: 2.2mm; padding: 2mm 2.8mm; height: ${hOf(rowsPerPage)}mm; overflow: hidden; page-break-inside: avoid; break-inside: avoid; font-size: ${pt}pt; line-height: 1.26; display: flex; flex-direction: column; justify-content: space-between; background: #fff; }
+.lbl-top-bar { display: flex; align-items: center; justify-content: space-between; gap: 4px; border-bottom: 1.2px solid #1e293b; padding-bottom: 0.8mm; margin-bottom: 1mm; font-size: 72%; font-weight: 800; letter-spacing: 0.3px; }
+.lbl-top-bar .tag { background: #111; color: #fff; padding: 0.2mm 1.4mm; border-radius: 1mm; font-size: 95%; font-weight: 900; }
+.lbl-top-bar .to-hdr-title { flex: 1; font-weight: 800; text-transform: uppercase; }
+.lbl-top-bar .lbl-id { font-family: monospace; font-weight: 800; font-size: 105%; background: #f1f5f9; padding: 0.1mm 1.2mm; border-radius: 1mm; border: 1px solid #94a3b8; }
+.lbl-k { font-weight: 700; color: #475569; font-size: 86%; }
+.to { flex: 1; min-height: 0; overflow: hidden; padding: 0.6mm 1.2mm; border-left: 2.5px solid #1e293b; background: #f8fafc; border-radius: 1mm; }
+.to-row { display: block; }
+.to-name { font-size: 115%; font-weight: 900; color: #0f172a; }
+.to-mob { font-weight: 800; margin-top: 0.5mm; color: #0f172a; font-size: 98%; }
+.to-mob::before { content: "Mobile Number - "; font-weight: 700; color: #475569; font-size: 86%; }
+.to-addr { margin-top: 0.5mm; font-size: 90%; color: #1e293b; line-height: 1.22; }
+.to-pin { font-size: 118%; font-weight: 900; letter-spacing: 0.4px; margin-top: 0.6mm; color: #0f172a; }
+.to-agent { font-size: 78%; font-weight: 700; margin-top: 0.4mm; color: #334155; }
+.cls { font-size: 80%; font-weight: 700; border: 1px solid #cbd5e1; background: #f1f5f9; border-radius: 1mm; margin-top: 0.9mm; padding: 0.6mm 1.4mm; color: #0f172a; }
+.from { font-size: 68%; color: #1e293b; border-top: 1.2px dashed #64748b; padding-top: 0.8mm; margin-top: 0.9mm; line-height: 1.24; }
+.from-hdr { display: flex; align-items: center; justify-content: space-between; font-weight: 800; font-size: 92%; margin-bottom: 0.3mm; color: #334155; }
+.from-badge { text-transform: uppercase; letter-spacing: 0.3px; }
+.from-addr { color: #334155; margin-top: 0.2mm; }
+.meta { font-size: 56%; color: #475569; margin-top: 0.4mm; text-align: right; }
+/* 🎨 Colorful Courier Label Theme */
+body.colorful .lbl { border: 1.8px solid #2563eb; background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%); box-shadow: inset 0 0 0 0.4mm #dbeafe; }
+body.colorful .lbl-top-bar { background: linear-gradient(90deg, #1e40af 0%, #2563eb 65%, #0284c7 100%); color: #fff; margin: -2mm -2.8mm 1.1mm -2.8mm; padding: 1.1mm 2.6mm; border-bottom: none; }
+body.colorful .lbl-top-bar .tag { background: #facc15; color: #0f172a; }
+body.colorful .lbl-top-bar .lbl-id { background: rgba(255,255,255,0.2); color: #fff; border-color: rgba(255,255,255,0.4); }
+body.colorful .to { background: #eff6ff; border-left: 3px solid #2563eb; }
+body.colorful .to-name { color: #1e3a8a; }
+body.colorful .to-mob { color: #15803d; }
+body.colorful .to-pin { color: #b91c1c; background: #fee2e2; display: inline-block; padding: 0.1mm 1.5mm; border-radius: 1mm; border: 1px solid #fca5a5; }
+body.colorful .cls { background: linear-gradient(90deg, #fef3c7, #fde68a); border-color: #f59e0b; color: #78350f; }
+body.colorful .from { background: #f0fdf4; border: 1px solid #86efac; border-radius: 1mm; padding: 0.8mm 1.4mm; margin-top: 0.8mm; }
+body.colorful .from-hdr { color: #166534; }
 .empty { padding: 30px; text-align: center; color: #666; }
-@media print { .bar { display: none; } body { margin: 0; } }
-</style></head><body>
+@media print { .bar { display: none; } body { margin: 0; background: #fff; } .grid { padding: 0; } }
+</style></head><body class="${colorful ? 'colorful' : ''}">
 <div class="bar"><b>🖨️ Dispatch labels — ${list.length} request${list.length === 1 ? '' : 's'} · ${fmt(totalTags)} tags (har label ek hi baar)</b>
   <button id="pbtn" style="font-weight:700">🖨️ Print</button>
   <button id="pdfbtn" style="font-weight:700;background:#16a34a;color:#fff;border-color:#16a34a">📄 Download PDF</button>
+  <span>Style: <span class="grp"><button class="th ${colorful ? 'on' : ''}" data-colorful="1">🎨 Colorful Label</button><button class="th ${!colorful ? 'on' : ''}" data-colorful="0">🖨️ Standard B&W</button></span></span>
   <span>Text size: <span class="grp"><button class="sz" data-sz="9">A−</button><button class="sz" data-sz="10.5">A</button><button class="sz" data-sz="12">A+</button><button class="sz" data-sz="14">A++</button></span></span>
   <span>Per page: <span class="grp"><button class="rp" data-rows="4">8</button><button class="rp" data-rows="5">10</button><button class="rp" data-rows="6">12</button></span></span>
-  <span style="color:#666;font-size:12px">📄 Download PDF = seedha PDF file (same label format) — dispatch team ko bhejo.</span></div>
+  <span style="color:#666;font-size:12px">📬 TO (Receiver) upar · 📤 FROM (Sender) neeche · 📄 Download PDF = seedha PDF file.</span></div>
 <div class="grid">${cells || '<div class="empty">Koi request select nahi hui.</div>'}</div>
 </body></html>`;
   }
-  /** 📄 Labels → PDF (direct download) — print wale label ka hi format: FROM · TO (naam/mobile/address/PIN) · class qty. */
+  /** 📄 Labels → PDF (direct download) — TO (Receiver) UPAR · Class qty · FROM (Sender) NEECHE + Colorful option. */
   function labelsPdf(items, opts) {
     const o = opts || {};
     const list = (Array.isArray(items) ? items : []).filter(Boolean);
@@ -630,6 +657,7 @@ body { font-family: Arial, "Segoe UI", sans-serif; color: #111; margin: 0; }
     const f = dispatchFrom();
     const pt = [9, 10.5, 12, 14].includes(Number(o.size)) ? Number(o.size) : 10.5;
     const rowsPerPage = [3, 4, 5, 6].includes(Number(o.rows)) ? Number(o.rows) : 5;
+    const colorful = o.colorful !== false;
     const MMPT = 25.4 / 72;
     const W = 210, H = 297, MG = 6, GAP = 2.5;
     const lw = (W - 2 * MG - GAP) / 2, lh = (283 - (rowsPerPage - 1) * 2.5) / rowsPerPage;
@@ -644,51 +672,92 @@ body { font-family: Arial, "Segoe UI", sans-serif; color: #111; margin: 0; }
         const x0 = MG + col * (lw + GAP), y0 = MG + rowI * (lh + GAP);
         const t = it.to || {};
         const fnt = (pct, w) => { ctx.font = `${w || 400} ${px(pt * MMPT * pct)}px ${FONT}`; };
-        const line = (xa, ya, xb, dash) => { ctx.save(); ctx.strokeStyle = dash ? '#888' : '#111'; ctx.lineWidth = px(0.25); ctx.setLineDash(dash ? [px(0.5), px(0.7)] : []); ctx.beginPath(); ctx.moveTo(px(xa), px(ya)); ctx.lineTo(px(xb), px(ya)); ctx.stroke(); ctx.restore(); };
-        // dashed border
-        ctx.save(); ctx.strokeStyle = '#111'; ctx.lineWidth = px(0.35); ctx.setLineDash([px(1.6), px(1.1)]);
-        ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(px(x0), px(y0), px(lw), px(lh), px(2)); else ctx.rect(px(x0), px(y0), px(lw), px(lh)); ctx.stroke(); ctx.restore();
-        const ix = x0 + 3, iw = lw - 6;
-        let y = y0 + 2.5;
+        const line = (xa, ya, xb, dash, colStr) => { ctx.save(); ctx.strokeStyle = colStr || (dash ? '#64748b' : '#111'); ctx.lineWidth = px(0.28); ctx.setLineDash(dash ? [px(0.8), px(0.8)] : []); ctx.beginPath(); ctx.moveTo(px(xa), px(ya)); ctx.lineTo(px(xb), px(ya)); ctx.stroke(); ctx.restore(); };
+        // Outer card border & background
+        ctx.save();
+        if (colorful) {
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(px(x0), px(y0), px(lw), px(lh));
+          ctx.fillStyle = '#1e40af';
+          ctx.fillRect(px(x0), px(y0), px(lw), px(5.4));
+          ctx.strokeStyle = '#2563eb';
+          ctx.lineWidth = px(0.45);
+        } else {
+          ctx.strokeStyle = '#111';
+          ctx.lineWidth = px(0.4);
+          ctx.setLineDash([px(1.6), px(1.1)]);
+        }
+        ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(px(x0), px(y0), px(lw), px(lh), px(1.8)); else ctx.rect(px(x0), px(y0), px(lw), px(lh)); ctx.stroke(); ctx.restore();
+
+        const ix = x0 + 2.8, iw = lw - 5.6;
+        // Top header bar: TO DELIVER TO (RECEIVER) + #ID
+        fnt(0.68, 800);
+        ctx.fillStyle = colorful ? '#ffffff' : '#111111';
+        ctx.fillText('TO · DELIVER TO (RECEIVER)', px(ix), px(y0 + 3.8));
+        const reqStr = `#${String(it.id).slice(-10)}`;
+        const reqW = ctx.measureText(reqStr).width / pg.k;
+        ctx.fillText(reqStr, px(ix + iw - reqW), px(y0 + 3.8));
+        if (!colorful) line(ix, y0 + 5.2, ix + iw, false);
+
+        let y = y0 + 6.2;
         const text = (str, pct, w, color, gapAfter) => {
-          fnt(pct, w); ctx.fillStyle = color || '#111';
+          fnt(pct, w); ctx.fillStyle = color || '#0f172a';
           const lines = FF.pdf.wrap(ctx, str, px(iw));
-          const step = pt * MMPT * pct * 1.28;
-          lines.forEach((l) => { y += step; ctx.fillText(l, px(ix), px(y - step * 0.22)); });
+          const step = pt * MMPT * pct * 1.24;
+          lines.forEach((l) => { y += step; ctx.fillText(l, px(ix), px(y - step * 0.2)); });
           y += gapAfter || 0;
         };
-        // FROM
-        text(`FROM: ${f.name}${f.address ? `, ${f.address}` : ''}${f.phone ? `  ☏ ${f.phone}` : ''}`, 0.66, 500, '#333', 1);
-        line(ix, y, ix + iw, true); y += 1.6;
-        // TO
-        fnt(0.64, 700); ctx.fillStyle = '#111';
-        const tagW = ctx.measureText('TO').width / pg.k + 2.4;
-        ctx.save(); ctx.strokeStyle = '#111'; ctx.lineWidth = px(0.25); ctx.strokeRect(px(ix), px(y + 0.3), px(tagW), px(pt * MMPT * 0.64 * 1.25)); ctx.restore();
-        ctx.fillText('TO', px(ix + 1.2), px(y + 0.3 + pt * MMPT * 0.64 * 1.0));
-        fnt(1.17, 800); ctx.fillStyle = '#111';
-        const nameLines = FF.pdf.wrap(ctx, t.name || '', px(iw - tagW - 1.5));
-        const nstep = pt * MMPT * 1.17 * 1.28;
-        nameLines.forEach((l, i) => { y += i === 0 ? nstep * 0.95 : nstep; ctx.fillText(l, px(ix + tagW + 1.5), px(y)); });
-        y += 0.6;
-        if (t.mobile) text(`☏ ${t.mobile}`, 1, 700);
-        if (t.address) text(t.address, 1, 400);
-        if (t.pincode) text(`PIN: ${t.pincode}`, 1.5, 900, '#111', 0.4);
+
+        // 1. TO (RECEIVER) AT THE TOP
+        text(`Name - ${t.name || '—'}`, 1.08, 800, colorful ? '#1e3a8a' : '#111', 0.3);
+        if (t.mobile) text(`Mobile Number - ${t.mobile}`, 0.92, 700, colorful ? '#15803d' : '#111', 0.2);
+        if (t.address) text(`Address - ${t.address}`, 0.84, 500, '#1e293b', 0.2);
+        if (t.pincode) text(`PIN Code - ${t.pincode}`, 1.15, 900, colorful ? '#b91c1c' : '#111', 0.3);
         const aref = agentRef(it);
-        if (aref) text(aref, 0.8, 400);
-        // bottom: classes + meta (label ke neeche anchor)
+        if (aref) text(aref, 0.74, 600, '#334155', 0.2);
+
+        // 2. BOTTOM ANCHOR: Class summary + FROM (SENDER) AT THE BOTTOM
         const cls = it.classes.length ? it.classes.map((c) => `${c.cls} × ${fmt(c.qty)}`).join(' · ') : '—';
-        const meta = `Req ${String(it.id).slice(-10)} · ${it.date}${it.employee ? ` · Emp: ${it.employee}` : ''}${it.tl ? ` · TL ${it.tl}` : ''}${it.agentId && t.who === 'agent' ? ` · ID ${it.agentId}` : ''}`;
-        fnt(0.6, 400);
-        const metaLines = FF.pdf.wrap(ctx, meta, px(iw)).slice(0, 2);
-        fnt(0.82, 400);
-        const clsLines = FF.pdf.wrap(ctx, `${cls} = ${fmt(it.total)} tags`, px(iw)).slice(0, 2);
-        const hMeta = metaLines.length * pt * MMPT * 0.6 * 1.28, hCls = clsLines.length * pt * MMPT * 0.82 * 1.28;
-        let yb = y0 + lh - 2.2 - hMeta - hCls - 1.6;
-        line(ix, yb, ix + iw, true); yb += 0.6;
-        fnt(0.82, 700); ctx.fillStyle = '#111';
-        clsLines.forEach((l) => { yb += pt * MMPT * 0.82 * 1.28; ctx.fillText(l, px(ix), px(yb - 0.6)); });
-        fnt(0.6, 400); ctx.fillStyle = '#444';
-        metaLines.forEach((l) => { yb += pt * MMPT * 0.6 * 1.28; ctx.fillText(l, px(ix), px(yb - 0.4)); });
+        const fromStr1 = `FROM (SENDER): Name - ${f.name}${f.phone ? ` · Mobile - ${f.phone}` : ''}`;
+        const fromStr2 = f.address ? `Address - ${f.address}` : '';
+        const meta = `Req #${String(it.id).slice(-10)} · ${it.date}${it.employee ? ` · Emp: ${it.employee}` : ''}${it.tl ? ` · TL ${it.tl}` : ''}`;
+
+        fnt(0.76, 700);
+        const clsLines = FF.pdf.wrap(ctx, `FASTags: ${cls} = ${fmt(it.total)} tags`, px(iw)).slice(0, 2);
+        fnt(0.64, 700);
+        const fromLines1 = FF.pdf.wrap(ctx, fromStr1, px(iw)).slice(0, 2);
+        fnt(0.60, 500);
+        const fromLines2 = fromStr2 ? FF.pdf.wrap(ctx, fromStr2, px(iw)).slice(0, 2) : [];
+        fnt(0.54, 400);
+        const metaLines = FF.pdf.wrap(ctx, meta, px(iw)).slice(0, 1);
+
+        const sCls = pt * MMPT * 0.76 * 1.22;
+        const sFr1 = pt * MMPT * 0.64 * 1.22;
+        const sFr2 = pt * MMPT * 0.60 * 1.20;
+        const sMet = pt * MMPT * 0.54 * 1.18;
+        const bottomH = clsLines.length * sCls + fromLines1.length * sFr1 + fromLines2.length * sFr2 + metaLines.length * sMet + 3.2;
+
+        let yb = Math.max(y + 0.8, y0 + lh - bottomH - 1.4);
+        if (colorful) {
+          ctx.save();
+          ctx.fillStyle = '#fef3c7';
+          ctx.fillRect(px(ix), px(yb), px(iw), px(clsLines.length * sCls + 1.0));
+          ctx.restore();
+        } else {
+          line(ix, yb, ix + iw, true);
+        }
+        yb += 0.4;
+        fnt(0.76, 700); ctx.fillStyle = colorful ? '#78350f' : '#111';
+        clsLines.forEach((l) => { yb += sCls; ctx.fillText(l, px(ix + 0.8), px(yb - 0.4)); });
+        yb += 0.8;
+        line(ix, yb, ix + iw, true, colorful ? '#16a34a' : '#64748b');
+        yb += 0.5;
+        fnt(0.64, 700); ctx.fillStyle = colorful ? '#166534' : '#1e293b';
+        fromLines1.forEach((l) => { yb += sFr1; ctx.fillText(l, px(ix), px(yb - 0.3)); });
+        fnt(0.60, 500); ctx.fillStyle = '#334155';
+        fromLines2.forEach((l) => { yb += sFr2; ctx.fillText(l, px(ix), px(yb - 0.3)); });
+        fnt(0.54, 400); ctx.fillStyle = '#64748b';
+        metaLines.forEach((l) => { yb += sMet; ctx.fillText(l, px(ix), px(yb - 0.2)); });
       });
       canvases.push(pg.canvas);
     }
@@ -719,29 +788,35 @@ body { font-family: Arial, "Segoe UI", sans-serif; color: #111; margin: 0; }
   }
   /** Print window ke buttons opener se bind karo — popup ke andar inline <script> site ki CSP se block hota hai
    *  (isi wajah se pehle Print / size / per-page buttons kaam nahi karte the). */
-  function wireLabelWindow(w, requests) {
+  function wireLabelWindow(w, requests, initOpts) {
     const doc = w.document;
     const H = {}; [3, 4, 5, 6].forEach((n) => { H[n] = `${((283 - (n - 1) * 2.5) / n).toFixed(1)}mm`; });
-    const st = { size: 10.5, rows: 5 };
+    const st = { size: (initOpts && initOpts.size) || 10.5, rows: (initOpts && initOpts.rows) || 5, colorful: !initOpts || initOpts.colorful !== false };
     const each = (sel, fn) => Array.prototype.forEach.call(doc.querySelectorAll(sel), fn);
     const mark = (sel, attr, v) => each(sel, (b) => b.classList.toggle('on', b.getAttribute(attr) === String(v)));
-    mark('.sz', 'data-sz', st.size); mark('.rp', 'data-rows', st.rows);
+    mark('.sz', 'data-sz', st.size); mark('.rp', 'data-rows', st.rows); mark('.th', 'data-colorful', st.colorful ? '1' : '0');
     each('.sz', (b) => b.addEventListener('click', () => { st.size = Number(b.getAttribute('data-sz')); each('.lbl', (l) => { l.style.fontSize = `${st.size}pt`; }); mark('.sz', 'data-sz', st.size); }));
     each('.rp', (b) => b.addEventListener('click', () => { st.rows = Number(b.getAttribute('data-rows')); each('.lbl', (l) => { l.style.height = H[st.rows]; }); mark('.rp', 'data-rows', st.rows); }));
+    each('.th', (b) => b.addEventListener('click', () => {
+      st.colorful = b.getAttribute('data-colorful') === '1';
+      if (doc.body && doc.body.classList) doc.body.classList.toggle('colorful', st.colorful);
+      mark('.th', 'data-colorful', st.colorful ? '1' : '0');
+    }));
     const pb = doc.getElementById('pbtn');
     if (pb) pb.addEventListener('click', () => { try { w.focus(); w.print(); } catch { /* ignore */ } });
     const pdfb = doc.getElementById('pdfbtn');
-    if (pdfb) pdfb.addEventListener('click', () => { downloadPdf(requests, { size: st.size, rows: st.rows }); });
+    if (pdfb) pdfb.addEventListener('click', () => { downloadPdf(requests, { size: st.size, rows: st.rows, colorful: st.colorful }); });
   }
   /** Print window kholo — har request ek hi baar. */
-  function openPrint(requests) {
+  function openPrint(requests, opts) {
     const uniq = uniqueRequests(requests);
     const items = uniq.map(labelItem);
     if (!items.length) { U.toast('Pehle ☑ requests select karo', 'warn'); return; }
     const w = window.open('', '_blank', 'width=1000,height=800');
     if (!w || !w.document) { U.toast('Popup block ho gaya — 📄 PDF download button use karo ya browser me popups allow karo', 'warn'); return; }
-    w.document.open(); w.document.write(labelsHtml(items, { size: 10.5, rows: 5 })); w.document.close();
-    wireLabelWindow(w, uniq);
+    const cfg = { size: 10.5, rows: 5, colorful: true, ...(opts || {}) };
+    w.document.open(); w.document.write(labelsHtml(items, cfg)); w.document.close();
+    wireLabelWindow(w, uniq, cfg);
     try { w.focus(); } catch { /* ignore */ }
     if (!dispatchFrom().has && isAdmin()) U.toast('ℹ️ FROM address Settings → 📲 Contacts me bharo — label par wahi aata hai', 'info');
   }
@@ -1450,10 +1525,11 @@ body { font-family: Arial, "Segoe UI", sans-serif; color: #111; margin: 0; }
       const q = String((inp && inp.value) || '').trim();
       st.q = q;
       const d = digits(q);
+      const cleanId = q.replace(/^#/, '').trim();
       let path = '';
       if (d.length >= 10 && d.length <= 13 && /^[\d+\s-]+$/.test(q)) path = `/api/public/tag-request/status?mobile=${encodeURIComponent(d)}`;
-      else if (/^tagreq/i.test(q) || q.length >= 12) path = `/api/public/tag-request/status?id=${encodeURIComponent(q)}`;
-      if (!path) { st.err = 'Agent ka 10 digit mobile number ya poori Request ID daalo.'; st.list = null; renderStatus(); return; }
+      else if (/^\d{4}$/.test(d) || /^tagreq/i.test(cleanId) || cleanId.length >= 4) path = `/api/public/tag-request/status?id=${encodeURIComponent(cleanId)}`;
+      if (!path) { st.err = 'Agent ka 10 digit mobile number ya 4-digit Request ID daalo.'; st.list = null; renderStatus(); return; }
       st.busy = true; st.err = ''; renderStatus();
       publicApi(path).then((out) => {
         st.list = out && Array.isArray(out.requests) ? out.requests : (out && out.request ? [out.request] : []);
@@ -1606,7 +1682,8 @@ body { font-family: Arial, "Segoe UI", sans-serif; color: #111; margin: 0; }
     }
     return `<div class="tr-acts">
       ${canEditReq(r) ? `<button class="btn small" data-tr-op="edit" data-key="${k}" title="Class-wise qty badlo">✏️ Edit</button>` : ''}
-      <button class="btn small" data-tr-op="print1" data-key="${k}" title="Sirf is request ka label print">🖨️</button>
+      <button class="btn small" data-tr-op="print1" data-key="${k}" title="Sirf is request ka label print (Colorful / B&W)">🖨️</button>
+      <button class="btn small" data-tr-op="color1" data-key="${k}" title="Colorful Label Print / PDF">🎨</button>
       <button class="btn small" data-tr-op="pdf1" data-key="${k}" title="Is request ka label PDF download">📄</button>
       <button class="btn small" data-tr-op="copy" data-key="${k}" title="Label text copy (WhatsApp ke liye)">📋</button>
       ${isAdmin() ? `<button class="btn small" data-tr-op="push" data-key="${k}" title="Google Sheet me entry">📗</button>` : ''}
@@ -1653,6 +1730,7 @@ body { font-family: Arial, "Segoe UI", sans-serif; color: #111; margin: 0; }
           <label class="tr-selall"><input type="checkbox" data-tr-selall aria-label="Saari dikhti rows select"> <span>Select all</span></label>
           <span class="tr-selcount" data-tr-selcount>0 selected</span>
           <button type="button" class="btn primary" data-tr-bulk="print" disabled>🖨️ Print selected</button>
+          <button type="button" class="btn" data-tr-bulk="color-print" disabled title="Selected requests ke Colorful Courier Labels print / preview">🎨 Colorful Label</button>
           <button type="button" class="btn" data-tr-bulk="pdf" disabled title="Selected requests ke labels ki PDF file (address ka same format) — seedha download">📄 Download PDF</button>
           ${isAdmin() ? '<button type="button" class="btn" data-tr-bulk="approve" disabled>✅ Approve selected</button>' : ''}
           <button type="button" class="btn" data-tr-bulk="csv" title="Selected (ya saari dikhti) rows ka CSV">⬇ CSV</button>
@@ -1758,6 +1836,8 @@ body { font-family: Arial, "Segoe UI", sans-serif; color: #111; margin: 0; }
     if (all) { all.checked = !!visible.length && visSel === visible.length; all.indeterminate = visSel > 0 && visSel < visible.length; }
     const pr = card.querySelector('[data-tr-bulk="print"]');
     if (pr) { pr.disabled = !n; pr.textContent = n ? `🖨️ Print selected (${fmt(selectedRequests().length)})` : '🖨️ Print selected'; }
+    const cp = card.querySelector('[data-tr-bulk="color-print"]');
+    if (cp) { cp.disabled = !n; cp.textContent = n ? `🎨 Colorful Label (${fmt(selectedRequests().length)})` : '🎨 Colorful Label'; }
     const pf = card.querySelector('[data-tr-bulk="pdf"]');
     if (pf) { pf.disabled = !n; pf.textContent = n ? `📄 Download PDF (${fmt(selectedRequests().length)})` : '📄 Download PDF'; }
     const ap = card.querySelector('[data-tr-bulk="approve"]');
@@ -1870,8 +1950,9 @@ body { font-family: Arial, "Segoe UI", sans-serif; color: #111; margin: 0; }
       const bulk = t.closest && t.closest('[data-tr-bulk]');
       if (bulk) {
         const op = bulk.dataset.trBulk;
-        if (op === 'print') openPrint(selectedRequests());
-        else if (op === 'pdf') downloadPdf(selectedRequests());
+        if (op === 'print') openPrint(selectedRequests(), { colorful: false });
+        else if (op === 'color-print') openPrint(selectedRequests(), { colorful: true });
+        else if (op === 'pdf') downloadPdf(selectedRequests(), { colorful: true });
         else if (op === 'approve') bulkApprove();
         else if (op === 'csv') exportCsv();
         else if (op === 'none') { state.sel.clear(); updateSelUi(); card.querySelectorAll('[data-tr-sel]').forEach((x) => { x.checked = false; }); }
@@ -1891,8 +1972,9 @@ body { font-family: Arial, "Segoe UI", sans-serif; color: #111; margin: 0; }
       else if (op === 'edit') startEdit(dr);
       else if (op === 'cancel') { state.edit = null; renderReqTable(); }
       else if (op === 'save') saveEdit();
-      else if (op === 'print1') openPrint([dr.req]);
-      else if (op === 'pdf1') downloadPdf([dr.req]);
+      else if (op === 'print1') openPrint([dr.req], { colorful: false });
+      else if (op === 'color1') openPrint([dr.req], { colorful: true });
+      else if (op === 'pdf1') downloadPdf([dr.req], { colorful: true });
       else if (op === 'copy') U.copyText(labelText(dr.req)).then((ok) => U.toast(ok ? '📋 Label text copy ho gaya' : 'Copy nahi hua', ok ? 'ok' : 'warn'));
       else if (op === 'push') {
         opEl.disabled = true;
