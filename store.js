@@ -76,10 +76,12 @@ window.FF = window.FF || {};
   }
   function get(key) { return state.data[key]; }
   function error(key) { return state.errors[key]; }
-  async function need(key) {
+  async function need(key, opts) {
     // A slow unrelated stock/report query must not block this page.
     if (state.data[key] !== undefined) return state.data[key];
-    if (!state.promise) preload(false);
+    // `{ only: true }` — sirf yehi dataset load karo. Public (bina login) employee form isi ko use
+    // karta hai: poora preload wahan bekaar hai aur Google par extra load daalta hai.
+    if (!(opts && opts.only) && !state.promise) preload(false);
     return loadKey(key, false);
   }
   /** ⚡ Sirf chune hue datasets ko fresh dobara load karo (auto-sync ke liye — poora preload nahi). */

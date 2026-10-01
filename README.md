@@ -1,4 +1,4 @@
-# First Forward Dashboard — First Forward + GV Partner (v3.23)
+# First Forward Dashboard — First Forward + GV Partner (v3.27)
 
 Colourful dashboard website built directly on top of **do Google Sheets**:
 
@@ -13,6 +13,33 @@ aur ek **⚖️ GV vs First Forward** page side-by-side comparison deta hai.
 Koi database nahi, koi manual upload nahi — website Google Sheet se data padhti hai
 (Google Visualization API / `gviz`) through a small Node server that also handles **login, users,
 permissions and settings**. Zero npm dependencies.
+
+## ✨ v3.27.0 — 🌐 Employee link (bina login) · 📗 tag request kisi bhi sheet me
+
+- **🌐 `/tag-request` (employee link) — login/signup ki zaroorat nahi:** employees ke liye ek clean
+  public link. Kholte hi form — upar **Employee name mandatory**, phir agent search → class-wise qty →
+  system check → submit. Request admin ke Tag Request section me **employee link** badge + naam/mobile/IP
+  ke saath aati hai; employee **Request ID** se apna status dekh sakta hai. Dashboard ka koi doosra page
+  public link se nahi khulta (scoped + throttled `/api/public/gviz`).
+- **📗 Sheet sync ab kisi bhi sheet me:** Tag Request page par **alag sheet ka link + tab naam** do →
+  entries usi sheet me (`SpreadsheetApp.openById`, naya Code.gs v3.27). **🔌 Sheet check karo** galat
+  sheet detection + purane Code.gs ki warning deta hai.
+- **Admin control:** link ON/OFF, title/message, mobile/branch fields, "system check dikhao" toggle;
+  per-IP throttle + validation se spam control. Public link par bhi Google Sheet sync chalti hai.
+- **🧓 Stock ageing:** stockDataa ke **Agent Allocated At** se har agent/TL ka stock **1 / 3 / 5 / 6+ mahine**
+  purana kitna hai — **🚗 VC4+VC20 alag, 🚚 VC5+ alag** — har month ke saath **⬇ CSV** (sab dated tags ki
+  list). Stock page, KPI drawer, request drawer, tag-request result — sab jagah.
+- **🖨️ Dispatch label Print/PDF/Share:** employee link wali (address wali) request me drawer se A4 label
+  print — same address **left + right dono taraf poori page pe** (8/10/12 copies) · FROM company (Settings →
+  Contacts me set karo) · TO employee (PIN bada) · text size chhota/bada · 📋 copy + 📤 WhatsApp share.
+- **🔁 Duplicate warning (employee):** same naam + same agent × class ki request pehle se pending/approved ho
+  to submit se pehle amber warning — *"Ye entry pehle se hai"* + 🔎 status · 🔁 phir bhi bhejo · ✏️ edit.
+  Aise bheji gayi request admin list/notification me **🔁 duplicate** mark ho jaati hai.
+- **🏠 Employee form me poora address (mandatory):** name + mobile + full address + pincode — ek bhi adhoora ho
+  to request submit hi nahi hoti. Admin ko request me pincode, notification/delivery copy aur Google Sheet sync
+  ke columns (Employee / mobile / address / Pincode) me poori delivery details milti hain.
+- **Perf:** public form sirf 4 chhoti aggregate queries karta hai (login wala poora preload nahi).
+- Docs: [WHATS-NEW-v3.27.0.md](WHATS-NEW-v3.27.0.md) · ideas: [FEATURE-IDEAS.md](FEATURE-IDEAS.md)
 
 ## ✨ v3.23.0 — 🧭 panel clicks FIXED · 📊 data-update notification + 🔊 voice · ⚡ instant sheet sync · 🎤 Meri awaaz fix
 
@@ -139,6 +166,45 @@ permissions and settings**. Zero npm dependencies.
   `sheet:<Tab id>` banta hai jo Access matrix me checkbox ban jaata hai.
 * Top-right corner me user menu: **photo upload/change**, naam, email, role (👑 Admin / User), last login, aur **logout**.
 * Sign up band karna ho: Settings → Thresholds → "Sign up allow karo" untick.
+
+### 🌐 Employee link — Tag Request **bina login** (v3.27)
+
+Poore dashboard ke liye login zaroori hai, **sirf ek cheez ke liye nahi**: employee tag-request form.
+
+* Admin Tag Request page par **🔗 Employee link** button dabata hai → link milta hai **`https://<site>/tag-request`**.
+  (Purana `#/tagRequest?public=1` bhi chalta hai.)
+* Employee link kholta hai → **koi login, koi signup nahi** → upar **Employee name (mandatory)** likhna hai
+  (mobile optional; branch/office optional — admin Settings se on/off) → agent search → class-wise qty →
+  🔍 system check (stock / issuance / priority / suggestion) → 📤 submit.
+* Request admin ke **🏷️ Tag Request → 📥 Tag Requests** me **🌐 employee link** badge ke saath aati hai —
+  naam, mobile, IP, rows, agents, total ke saath. Admin wahin se qty/status edit karta hai.
+* Employee apna **Request ID** (submit ke baad milta hai) daal ke **🔎 Status** tab se status dekh sakta hai
+  (⏳ Pending → ✅ Approved → 🚚 Dispatched / ⛔ Rejected + admin note) — isi ke liye usko login ki zaroorat nahi.
+* Employee ko **dashboard ka koi doosra page nahi dikhta** — public link par sirf yehi form khulta hai.
+* Data usi sheet se aata hai, par server ke **scoped public endpoint** `/api/public/gviz` se — sirf
+  form ke kaam ke tabs (EIR · REPORT · GV REPORT), EIR par **sirf aggregated (group-by) queries**,
+  aur per-IP throttle. Baaki `/api/gviz` (poora dashboard data) pehle jaisa login-protected hai.
+* Admin control (Tag Request page ka **🌐 Employee link** card): link **ON/OFF**, form title, upar ka
+  message, mobile/branch field, aur "system check dikhao" toggle (OFF = form me sirf qty table).
+* Spam protection: per-IP throttle (15 requests/hour), row limits, naamo ka validation. Har submit
+  admin ko notification bhi bhejta hai.
+
+### 📗 Tag requests → Google Sheet (kisi bhi sheet me, v3.27)
+
+* Tag Request page (admin) → **📗 Google Sheet me direct entry** card: **alag sheet ka link** paste karo
+  + **tab ka naam** → us sheet ke us tab me har request ki entry chali jaati hai (tab na ho to ban jaata hai;
+  pehli entry par header row khud likhi jaati hai).
+* Kaunsi rows jaayein (per class / per agent / per request), kaunse columns, aur kab (nayi request /
+  status change) — sab wahin choose hota hai. **🔌 Sheet check karo** button bata deta hai ki entry usi
+  sheet me ja rahi hai ya nahi (galat sheet me chup-chaap likhne se bachne ke liye).
+* Zaroori: (1) us alag sheet par Apps Script wale Google account ka **Editor** access ho (Sheet → Share),
+  (2) Apps Script me **naya `google-apps-script/Code.gs` (v3.27)** paste karke
+  **Deploy → Manage deployments → Edit → New version** karo (isi me openById + `sheettest` action hai).
+  Link khaali chhodo to purana behaviour — jis sheet me Apps Script hai usi me entry.
+* Har request me bubble: 📗 entry ho gayi / 📗! fail (reason ke saath). Drawer me **📗 Sheet me push**
+  se manual dobara bhej sakte ho.
+
+Docs: [WHATS-NEW-v3.27.0.md](WHATS-NEW-v3.27.0.md) · feature ideas: [FEATURE-IDEAS.md](FEATURE-IDEAS.md)
 
 ## Pages
 

@@ -1122,6 +1122,109 @@ await run('🏷️ Tag Request — form + system check (class-wise stock / issua
   const h3 = r3.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
   if (!/Tag Requests|koi tag request nahi/.test(h3)) throw new Error('requests view render nahi hua');
 }, false);
+await run('🌐 Public employee link — bina login form (naam mandatory) + status view', async () => {
+  // share link /tag-request par jaata hai (login nahi)
+  const link = pages.tagRequest.shareLink();
+  if (!/\/tag-request$/.test(link)) throw new Error('employee share link /tag-request nahi hai: ' + link);
+  const pubCfg = { enabled: true, showCheck: true, askMobile: true, askOffice: false, askNote: true, title: 'IDFC Agents Tag Request', brand: 'First Forward', requireEmployeeName: true };
+  const r = root();
+  await pages.tagRequest.render(r, { view: 'form', public: '1' }, { publicConfig: pubCfg });
+  await settle(400);
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const s of ['Aapki details', 'Employee name *', 'Full address', 'Pincode *', 'IDFC Agents Tag Request', 'System check karo']) {
+    if (!html.includes(s)) throw new Error(`public form me "${s}" nahi mila`);
+  }
+  if (!/data-tr-emp="name"/.test(html)) throw new Error('employee name input missing');
+  if (!/data-tr-emp="mobile"/.test(html)) throw new Error('mobile field nahi mila (ab mandatory hai)');
+  if (!/data-tr-emp="address"/.test(html)) throw new Error('full address field nahi mila (mandatory)');
+  if (!/data-tr-emp="pincode"/.test(html)) throw new Error('pincode field nahi mila (mandatory)');
+  if (!/Full address/.test(html)) throw new Error('address label nahi mila');
+  if (!/data-tr-view="status"/.test(html)) throw new Error('public mode me status tab missing');
+  // 📊 public result view — login wale submit button ke bajaye "Request submit karo"
+  const perfAgents = pages.performance.agents() || [];
+  const who = (perfAgents.find((a) => a.name && !a.tlExcluded) || perfAgents[0] || {}).name;
+  if (who) {
+    await pages.tagRequest.preview([{ name: who, cls: 'VC4', qty: 3 }]);
+    const r2 = root();
+    await pages.tagRequest.render(r2, { view: 'result', public: '1' }, { publicConfig: pubCfg });
+    await settle(250);
+    const h2 = r2.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+    if (!h2.includes('Request submit karo')) throw new Error('public result view me submit button nahi mila');
+    if (!/data-tr-appr=/.test(h2)) throw new Error('public result rows editable nahi hain');
+    if (h2.includes('Admin ko submit karo')) throw new Error('public form me admin wala submit label dikh raha hai');
+  }
+  // 🔎 status view (Request ID daal kar status dekhne ka raasta)
+  const r3 = root();
+  await pages.tagRequest.render(r3, { view: 'status', public: '1' }, { publicConfig: pubCfg });
+  await settle(150);
+  const h3 = r3.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  if (!/Request status/.test(h3) || !/tr-status-id/.test(h3)) throw new Error('public status view render nahi hua');
+  // 🔁 duplicate warning card — "already pending" wala block (same agent×class dobara bhejne par)
+  const dupHtml = pages.tagRequest.dupWarning([{ id: 'tagreq_test_1', status: 'pending', total: 33, rows: 2, at: new Date().toISOString(), matched: ['1001 · VC4'] }], 'Suresh Yadav');
+  if (!/Ye entry pehle se hai/.test(dupHtml)) throw new Error('duplicate warning heading nahi mili');
+  if (!/Phir bhi bhejo/.test(dupHtml) || !/Status dekho/.test(dupHtml)) throw new Error('duplicate card ke buttons nahi mile');
+  if (!/tagreq_test_1/.test(dupHtml) || !/Suresh Yadav/.test(dupHtml)) throw new Error('duplicate card me request ID/naam nahi');
+  if (/undefined|NaN/.test(dupHtml)) throw new Error('duplicate card me undefined/NaN leak');
+  const dupNone = pages.tagRequest.dupWarning([], 'Suresh Yadav');
+  if (dupHtml.length < 100 || dupNone !== '') throw new Error('duplicate card empty case galat');
+  log(`      employee link ${link} · public form + result + status + 🔁 duplicate warning render ok`);
+});
+await run('🧓 Stock ageing — Agent Allocated At se 1/3/5/6+ mahine · VC4+VC20 alag, VC5+ alag · CSV', async () => {
+  if (!FF.stockAge) throw new Error('stockAge module load nahi hua (index.html/sw.js me hai?)');
+  const idx = await FF.stockAge.ready();
+  if (!idx) throw new Error('stock ageing index nahi bana — ' + (FF.stockAge.error || 'unknown'));
+  if (!idx.total) throw new Error('StockDataa se koi dated row nahi mili');
+  const allHtml = FF.stockAge.html({ kind: 'all', key: 'all' });
+  if (!/VC4 \+ VC20/.test(allHtml)) throw new Error('VC4+VC20 group row nahi mili');
+  if (!/VC5\+ \(commercial\)/.test(allHtml)) throw new Error('VC5+ group row nahi mili');
+  for (const s of ['≥ 1 mahina', '≥ 3 mahine', '≥ 5 mahine', '≥ 6 mahine']) if (!allHtml.includes(s)) throw new Error(`bucket column nahi mila: ${s}`);
+  for (const m of [1, 3, 5, 6]) if (!allHtml.includes(`data-age-csv="${m}"`)) throw new Error(`month ${m} ke saath CSV button nahi mila`);
+  if (!/data-age-open=/.test(allHtml)) throw new Error('count click (tag list) button nahi mila');
+  // Agent level: pehla FF agent — chip + CSV count match hone chahiye
+  const list = (FF.pages.performance && FF.pages.performance.agents ? FF.pages.performance.agents() : []).filter((a) => !a.isMaster && (a.stockTotal || 0) > 0);
+  if (!list.length) throw new Error('stock wala koi agent nahi mila');
+  const a = list[0];
+  const scope = { kind: 'agent', key: a.id || a.name };
+  const node = FF.stockAge.forAgent(scope.key);
+  if (!node) throw new Error('agent ka ageing node nahi mila: ' + scope.key);
+  const older6 = FF.stockAge.tagsOlder(node, 6);
+  if (!older6.length) throw new Error('6 mahine se purane tags nahi mile');
+  const csvN = FF.stockAge.csv(scope, 6);
+  if (csvN !== older6.length) throw new Error(`CSV count mismatch: ${csvN} vs ${older6.length}`);
+  if (!FF.stockAge.chipText(scope)) throw new Error('agent chip text khaali hai');
+  if (FF.stockAge.groupOf('VC4') !== 'core' || FF.stockAge.groupOf('VC20') !== 'core' || FF.stockAge.groupOf('VC5') !== 'comm' || FF.stockAge.groupOf('VC16') !== 'comm') throw new Error('class grouping galat (VC4/VC20 → core, VC5+ → comm)');
+  log(`      ageing: ${FF.util.fmt(idx.total)} dated tags · ${older6.length} tags ≥6M (${a.name}) · CSV ok`);
+});
+await run('🖨️ Dispatch label — A4 print me FROM+TO left·right repeat + text size + share/copy', async () => {
+  const r = {
+    id: 'tagreq_smoke_1234', at: '2026-10-01T04:00:00.000Z', status: 'approved',
+    byName: 'Ramesh Yadav',
+    employee: { name: 'Ramesh Yadav', mobile: '9812345678', address: '24, Shanti Nagar, Sodala, Jaipur', pincode: '302019' },
+    rows: [
+      { agentId: '1001', agentName: 'APNA PAYEMENT', cls: 'VC4', approved: 25 },
+      { agentId: '1001', agentName: 'APNA PAYEMENT', cls: 'VC5', approved: 10 }
+    ]
+  };
+  if (!pages.tagRequest.dispatchLabelHtml) throw new Error('dispatchLabelHtml export nahi mila');
+  if (typeof pages.tagRequest.labelText !== 'function') throw new Error('labelText export nahi mila');
+  const html = pages.tagRequest.dispatchLabelHtml(r, { size: 12, rows: 4 });
+  if (!/A4/.test(html) || !html.includes('@page')) throw new Error('A4 print CSS nahi mili');
+  const copies = 4 * 2; // rows × 2 columns (left + right)
+  const lblCount = (html.match(/class="lbl"/g) || []).length;
+  if (lblCount !== copies) throw new Error(`labels count mismatch: ${lblCount} vs ${copies}`);
+  const pinCount = (html.match(/302019/g) || []).length;
+  if (pinCount !== copies) throw new Error(`pincode repeat mismatch: ${pinCount} vs ${copies} — har label me TO address nahi repeat hua`);
+  const nameCount = (html.match(/Ramesh Yadav/g) || []).length;
+  if (nameCount < copies) throw new Error('employee naam har label me repeat nahi hua');
+  if (!/FROM:/.test(html)) throw new Error('FROM block nahi mila (company address — Settings me set karo)');
+  if (!html.includes('font-size: 12pt')) throw new Error('text size 12pt set nahi hua');
+  if (!/data-sz="14"/.test(html)) throw new Error('text size chhota/bada buttons nahi mile (print view me)');
+  if (!/Print \/ 📄 Save as PDF/.test(html)) throw new Error('Print/PDF toolbar button nahi mila');
+  if (!html.includes('35 tags') && !html.includes('🏷️ 35')) throw new Error('request summary (total tags) nahi mili');
+  const txt = pages.tagRequest.labelText(r);
+  for (const snip of ['FROM:', 'TO: Ramesh Yadav', '302019', 'tagreq_smoke_1234', '35 tags']) if (!txt.includes(snip)) throw new Error(`label text me "${snip}" nahi mila`);
+  log('      label: 8 labels/page · pincode ×8 · FROM · meta ok · text: ' + txt.split('\n').length + ' lines');
+});
 await run('liveView.openNotification (report / settings / login)', async () => {
   FF.liveView.openNotification({ id: 'a', type: 'report', title: 'First Forward report update', body: 'x', createdAt: new Date().toISOString(), meta: { source: 'ff', snapshot: { date: '2026-09-26', total: 120, classes: { VC4: 100, VC5: 20 } }, previous: { date: '2026-09-26', total: 90, classes: { VC4: 80, VC5: 10 } }, delta: { total: 30, classes: { VC4: 20, VC5: 10 } } } });
   if (!drawerHtml().includes('+30')) throw new Error('report delta missing');

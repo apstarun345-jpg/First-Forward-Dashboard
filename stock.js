@@ -236,7 +236,7 @@ FF.pages = FF.pages || {};
     const perDayVc4 = P.elapsed ? curVc4 / P.elapsed : 0, perDayComm = P.elapsed ? curComm / P.elapsed : 0;
     const topTls = tls.slice(0, FF.config.thresholds.topN || 10).map((t, i) => ({ label: t.name, value: t.total, sub: `VC4 ${U.fmt(t.vc4)} · Comm ${U.fmt(t.comm)} · ${t.agents} agents`, color: C.PALETTE[(i + 3) % C.PALETTE.length], attr: `data-pick-tl="${esc(t.name)}"` }));
     const tlTable = `<div class="table-wrap tall"><table class="tbl sticky-first"><thead><tr><th>TL</th><th class="num">Agents</th>${P.classes.map((c) => `<th class="num">${esc(c)}</th>`).join('')}<th class="num">VC4</th><th class="num">Commercial</th><th class="num">Total</th><th class="num">MTD issued</th><th>VC4 cover</th></tr></thead><tbody>${tls.map((t) => `<tr data-pick-tl="${esc(t.name)}" class="clickable"><td><b>${esc(t.name)}</b></td><td class="num">${t.agents}</td>${P.classes.map((c) => `<td class="num">${t.byClass.get(c) ? U.fmt(t.byClass.get(c)) : '<span class="dim">·</span>'}</td>`).join('')}<td class="num">${U.fmt(t.vc4)}</td><td class="num">${U.fmt(t.comm)}</td><td class="num"><b>${U.fmt(t.total)}</b></td><td class="num">${U.fmt(t.iss)}</td><td>${coverBadge(t.cover)}</td></tr>`).join('')}</tbody><tfoot><tr><td><b>TL total</b></td><td class="num">${U.sum(tls, (t) => t.agents)}</td>${P.classes.map((c) => `<td class="num"><b>${U.fmt(U.sum(tls, (t) => t.byClass.get(c) || 0))}</b></td>`).join('')}<td class="num"><b>${U.fmt(U.sum(tls, (t) => t.vc4))}</b></td><td class="num"><b>${U.fmt(U.sum(tls, (t) => t.comm))}</b></td><td class="num"><b>${U.fmt(U.sum(tls, (t) => t.total))}</b></td><td class="num"><b>${U.fmt(U.sum(tls, (t) => t.iss))}</b></td><td></td></tr>${direct.length ? `<tr class="dim"><td>Direct agents (${esc(direct.map((d) => d.name).join(', '))}) — not a TL</td><td class="num">${U.sum(direct, (t) => t.agents)}</td>${P.classes.map((c) => `<td class="num">${U.fmt(U.sum(direct, (t) => t.byClass.get(c) || 0))}</td>`).join('')}<td class="num">${U.fmt(U.sum(direct, (t) => t.vc4))}</td><td class="num">${U.fmt(U.sum(direct, (t) => t.comm))}</td><td class="num">${U.fmt(directTotal)}</td><td class="num">${U.fmt(U.sum(direct, (t) => t.iss))}</td><td></td></tr>` : ''}</tfoot></table></div>`;
-    const agentRow = (a) => `<tr data-pick-agent="${esc(a.name)}" class="clickable"><td class="mono">${esc(a.id)}</td><td><b>${esc(a.name)}</b></td><td>${esc(FF.config.isExcludedTl(a.tl) ? FF.config.directLabel({ tlName: a.tl, channel: 'First Forward' }, 'ff') : a.tl)}</td><td class="num">${U.fmt(a.vc4)}</td><td class="num">${U.fmt(a.comm)}</td><td class="num"><b>${U.fmt(a.total)}</b></td><td class="num">${U.fmt(a.iss)}</td><td>${coverBadge(a.cover)}</td></tr>`;
+    const agentRow = (a) => `<tr data-pick-agent="${esc(a.name)}" class="clickable"><td class="mono">${esc(a.id)}</td><td><b>${esc(a.name)}</b></td><td>${esc(FF.config.isExcludedTl(a.tl) ? FF.config.directLabel({ tlName: a.tl, channel: 'First Forward' }, 'ff') : a.tl)}</td><td class="num">${U.fmt(a.vc4)}</td><td class="num">${U.fmt(a.comm)}</td><td class="num"><b>${U.fmt(a.total)}</b></td><td class="num">${U.fmt(a.iss)}</td><td>${coverBadge(a.cover)}</td><td class="age-cell" data-age-chip="${esc(a.id || a.name)}" data-age-kind="agent" title="Purana stock — 3 mahine / 6 mahine se purane tags (VC4+VC20 + VC5+) · row kholo poora aging table + CSV ke liye">🧓 …</td></tr>`;
     // 🚫 Direct agents (TL Name APS / excluded) — TL-wise table se alag, demand par filterable.
     const directAgents = P.agents.filter((a) => FF.config.isExcludedTl(a.tl));
     const filtered = view.direct ? directAgents : view.cls ? P.agents.filter((a) => (view.cls === 'VC4' ? a.vc4 : view.cls === 'COMM' ? a.comm : a.byClass.get(view.cls) || 0) > 0) : P.agents;
@@ -253,13 +253,13 @@ FF.pages = FF.pages || {};
       </div>
       ${!FF.config.feat || FF.config.feat('stockTrend') !== false ? `<div id="st-trend-card">${card('📉 Stock trend <span class="dim">(server snapshots · last 30 din)</span>', `<div id="st-trend"><div class="dim small">History load ho rahi hai…</div></div>`, `<span class="dim small" id="st-trend-cover"></span>`)}</div>` : ''}
       ${!FF.config.feat || FF.config.feat('recon') !== false ? `<div id="st-recon-card">${card('🧾 FF stock balance <span class="dim">(is mahine · implied movement)</span>', `<div id="st-recon"><div class="dim small">Reconciliation load ho raha hai…</div></div>`, '<a class="btn small" href="#/forecast?view=balance">Full stock balance →</a>')}</div>` : ''}
-      ${!FF.config.feat || FF.config.feat('agedStock') !== false ? `<div id="st-aged-card">${card('🧓 Aged stock <span class="dim">(bcAllocatedAt ke hisaab se · 0-15 / 16-30 / 31-60 / 60+ din)</span>', `<div id="st-aged"><div class="dim small">Aging load ho raha hai…</div></div>`, `<span class="dim small" id="st-aged-note"></span>`)}</div>` : ''}
+      ${!FF.config.feat || FF.config.feat('agedStock') !== false ? `<div id="st-aged-card">${card('🧓 Stock ageing · kitna stock kitna purana <span class="dim">(StockDataa <b>Agent Allocated At</b> se · 1 / 3 / 5 / 6+ mahine · 🚗 VC4+VC20 alag, 🚚 VC5+ alag · month ke saath ⬇ CSV)</span>', `<div id="st-aged"><div class="dim small">Stock ageing load ho rahi hai…</div></div>`, `<span class="dim small" id="st-aged-note"></span>`)}</div>` : ''}
       ${!FF.config.feat || FF.config.feat('tlCover') !== false ? card(`📈 TL-wise cover <span class="dim">(sabse kam cover upar · VC4 stock ÷ avg daily issuance MTD)</span>`, `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>TL</th><th class="num">VC4 stock</th><th class="num">MTD issued</th><th class="num">Avg / din</th><th>Cover</th></tr></thead><tbody>${(() => {
         const sorted = [...tls].sort((a, b) => (a.cover === null ? 1 : b.cover === null ? -1 : a.cover - b.cover)).slice(0, 14);
         return sorted.map((t) => `<tr data-pick-tl="${esc(t.name)}" class="clickable"><td><b>${esc(t.name)}</b></td><td class="num">${U.fmt(t.vc4)}</td><td class="num">${U.fmt(t.iss)}</td><td class="num">${P.elapsed ? U.fmt(t.iss / P.elapsed, 1) : '—'}</td><td>${coverBadge(t.cover)}</td></tr>`).join('');
       })()}</tbody></table></div>`) : ''}
       ${card('🧮 TL × Class stock matrix <span class="dim">(click TL → pivot + Excel · VC4 cover = VC4 stock ÷ avg daily issuance MTD)</span>', tlTable, `<button class="btn small" data-action="export" data-name="stock-by-tl">⬇ CSV</button>`)}
-      ${card(`🧑‍💼 Agent-wise stock <span class="dim">(${U.fmt(filtered.length)} agents${view.cls ? ` · ${esc(view.cls === 'COMM' ? 'Commercial' : view.cls)} only` : ''})</span>`, `<div class="table-wrap tall"><table class="tbl" id="st-agent-table"><thead><tr><th>Agent ID</th><th>Agent</th><th>TL</th><th class="num">VC4</th><th class="num">Commercial</th><th class="num">Total</th><th class="num">MTD issued</th><th>VC4 cover</th></tr></thead><tbody id="st-agent-body">${filtered.slice(0, 200).map(agentRow).join('')}</tbody></table></div><div class="dim small" id="st-agent-note">${view.direct ? '🚫 Direct agents (FF rule: TL Name APS) — inko stock dispatch nahi hota · ' : ''}${filtered.length > 200 ? 'Top 200 dikh rahe hain — upar search karo.' : `${U.fmt(filtered.length)} agents`}</div>`, `<select id="st-cls"><option value="">All classes</option><option value="VC4" ${view.cls === 'VC4' ? 'selected' : ''}>VC4 only</option><option value="COMM" ${view.cls === 'COMM' ? 'selected' : ''}>Commercial only</option>${P.classes.map((c) => `<option value="${esc(c)}" ${view.cls === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select><button class="btn small" data-action="export" data-name="stock-by-agent">⬇ CSV</button>`)}`;
+      ${card(`🧑‍💼 Agent-wise stock <span class="dim">(${U.fmt(filtered.length)} agents${view.cls ? ` · ${esc(view.cls === 'COMM' ? 'Commercial' : view.cls)} only` : ''})</span>`, `<div class="table-wrap tall"><table class="tbl" id="st-agent-table"><thead><tr><th>Agent ID</th><th>Agent</th><th>TL</th><th class="num">VC4</th><th class="num">Commercial</th><th class="num">Total</th><th class="num">MTD issued</th><th>VC4 cover</th><th title="Purana stock (Agent Allocated At se) — ≥3 mahine / ≥6 mahine, VC4+VC20 aur VC5+">🧓 Purana stock</th></tr></thead><tbody id="st-agent-body">${filtered.slice(0, 200).map(agentRow).join('')}</tbody></table></div><div class="dim small" id="st-agent-note">${view.direct ? '🚫 Direct agents (FF rule: TL Name APS) — inko stock dispatch nahi hota · ' : ''}${filtered.length > 200 ? 'Top 200 dikh rahe hain — upar search karo.' : `${U.fmt(filtered.length)} agents`}</div>`, `<select id="st-cls"><option value="">All classes</option><option value="VC4" ${view.cls === 'VC4' ? 'selected' : ''}>VC4 only</option><option value="COMM" ${view.cls === 'COMM' ? 'selected' : ''}>Commercial only</option>${P.classes.map((c) => `<option value="${esc(c)}" ${view.cls === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select><button class="btn small" data-action="export" data-name="stock-by-agent">⬇ CSV</button>`)}`;
   }
 
   // ---- 📉 stock trend + 🧾 in-vs-issued (server ke snapshots, ek hi fetch) ------------------------
@@ -269,12 +269,23 @@ FF.pages = FF.pages || {};
     const agedBox = U.$('#st-aged', body);
     if ((!box && !reconBox && !agedBox) || !FF.auth || !FF.auth.api) return;
     // 🧓 Aged stock (features.agedStock) — stock row ki allocation date se buckets (alag query, fail-safe)
-    if (agedBox && FF.model && FF.model.loadStockAging) {
+    // 🧓 v3.28 — primary: Agent Allocated At se mahine-wise ageing (VC4+VC20 / VC5+ groups + CSV)
+    if (agedBox && FF.stockAge) {
+      agedBox.innerHTML = FF.stockAge.hostHtml({ kind: 'all', key: 'all' }, { title: 'Poora network' }) + '<div id="st-aged-bc" class="dim small"></div>';
+      FF.stockAge.decorate(agedBox);
+      FF.stockAge.ready().then((idx) => {
+        const note = U.$('#st-aged-note', body);
+        if (!note || !idx) return;
+        note.textContent = `total ${U.fmt(idx.total)} tags${idx.unknown ? ` · ${U.fmt(idx.unknown)} rows me date nahi` : ''}`;
+      });
+    }
+    const bcBox = U.$('#st-aged-bc', body);
+    if (bcBox && FF.model && FF.model.loadStockAging) {
       const agedNote = U.$('#st-aged-note', body);
       FF.model.loadStockAging().then((res) => {
-        if (!agedBox.isConnected) return;
-        if (res.error) { agedBox.innerHTML = `<div class="dim small">⚠️ ${esc(res.error)}</div>`; return; }
-        if (!res.total) { agedBox.innerHTML = '<div class="dim small">Stock rows nahi mile.</div>'; return; }
+        if (!bcBox.isConnected) return;
+        if (res.error) { bcBox.innerHTML = `<div class="dim small">⚠️ BC-allocated buckets: ${esc(res.error)}</div>`; return; }
+        if (!res.total) { bcBox.innerHTML = '<div class="dim small">Stock rows nahi mile.</div>'; return; }
         const items = [
           ['🌱 0-15 din', res.buckets['0-15'], '#10b981'],
           ['🟡 16-30 din', res.buckets['16-30'], '#f59e0b'],
@@ -283,9 +294,9 @@ FF.pages = FF.pages || {};
           ['❔ Unknown date', res.unknown, '#94a3b8']
         ];
         const max = Math.max(1, ...items.map((i) => i[1]));
-        agedBox.innerHTML = `<div class="feat-grid">${items.map(([label, n, col]) => `<div class="aged-row"><div class="aged-head"><span>${label}</span><b>${U.fmt(n)}</b> <span class="dim small">${U.fmtPct(U.pctOf(n, res.total), 0)}</span></div><div class="tgt-track"><div class="tgt-fill" style="width:${Math.max(2, (n / max) * 100)}%;background:${col}"></div></div></div>`).join('')}</div>`;
-        if (agedNote) agedNote.textContent = res.oldest ? `sabse purana: ${res.oldest} din` : '';
-      }).catch((err) => { if (agedBox.isConnected) agedBox.innerHTML = `<div class="dim small">⚠️ Aging load nahi hui — ${esc(err.message || 'error')}. Refresh karke dekho.</div>`; });
+        bcBox.innerHTML = `<p class="dim small" style="margin-top:10px">BC-allocation (warehouse) buckets: ${items.map(([label, n]) => `${label} <b>${U.fmt(n)}</b>`).join(' · ')}</p>`;
+        if (agedNote) agedNote.textContent = `${res.oldest ? `sabse purana: ${res.oldest} din · ` : ''}total ${U.fmt(res.total)} tags`;
+      }).catch((err) => { if (bcBox.isConnected) bcBox.innerHTML = `<p class="dim small">⚠️ BC buckets load nahi hui — ${esc(err.message || 'error')}</p>`; });
     }
     FF.auth.api('/api/stock-history').then((out) => {
       // 📉 Trend chart (features.stockTrend)
@@ -368,6 +379,7 @@ FF.pages = FF.pages || {};
     if (view.scope) pivot = selectionView(P, body); else overview(P, body);
     C.mount(body);
     if (!view.scope) loadStockExtras(body); // overview par trend chart + in-vs-issued (ek fetch)
+    if (FF.stockAge) FF.stockAge.decorate(root); // 🧓 agent table ka 'purana stock' column (index ready hone par bhar jaata hai)
 
     // search
     const input = U.$('#st-q', root), scopeSel = U.$('#st-scope', root);

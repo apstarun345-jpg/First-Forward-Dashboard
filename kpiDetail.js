@@ -280,8 +280,17 @@ window.FF = window.FF || {};
     const inRange = all.filter((r) => inP(r, p));
     const tot = total(inRange);
     const channel = inRange.length ? inRange[0].channel : (spec.channel === 'gv' ? 'GV Partner' : 'First Forward');
-    const tl = inRange.reduce((t, r) => t || r.tlName, '');
+    // TL naam — issuance rows se; na mile to stock ageing index / performance list se (v3.28: drawer me TL hamesha dikhe).
+    let tl = inRange.reduce((t, r) => t || r.tlName, '');
     const id = inRange.reduce((t, r) => t || r.agentId, '');
+    if (!tl) {
+      const node = FF.stockAge && FF.stockAge.forAgent(spec.agentId || name);
+      if (node && node.tl) tl = node.tl;
+      if (!tl && FF.pages.performance && FF.pages.performance.agents) {
+        const a = (FF.pages.performance.agents() || []).find((x) => personKey(x.name) === personKey(name) || (spec.agentId && String(x.id) === String(spec.agentId)));
+        if (a && a.tlName) tl = a.tlName;
+      }
+    }
     const byDay = tally(inRange, (r) => r.key);
     const byCls = tally(inRange, (r) => r.cls);
     const byGroup = tally(inRange, (r) => r.group);
@@ -292,7 +301,7 @@ window.FF = window.FF || {};
     const otherRows = (await issuanceRows('both')).filter((r) => (r.agentName || '') !== name);
     const rank = [...tally(otherRows.concat(inRange), (r) => r.agentName || r.agentId || '—').entries()].sort((a, b) => b[1] - a[1]).findIndex(([k]) => k === name) + 1;
     state.rows = inRange; state.period = p; state.spec = spec; state.raw = null;
-    const body = `<div class="kd-hero"><div><span class="kd-kicker">${esc(channel === 'GV Partner' ? '🟩 GV Partner agent' : '🟦 First Forward agent')}</span><div class="kd-big">${U.fmt(tot)} <small>tags</small></div><div class="kd-sub">${esc(periodLabel)}${tl ? ` · TL <b>${esc(tl)}</b>` : ''}${id ? ` · ID ${esc(id)}` : ''}${rank > 0 ? ` · rank #${rank}` : ''}</div></div>
+    const body = `<div class="kd-hero"><div><span class="kd-kicker">${esc(channel === 'GV Partner' ? '🟩 GV Partner agent' : '🟦 First Forward agent')}</span><div class="kd-big">${U.fmt(tot)} <small>tags</small></div><div class="kd-sub">${esc(periodLabel)} · TL <b>${esc(tl || '—')}</b>${id ? ` · ID ${esc(id)}` : ''}${rank > 0 ? ` · rank #${rank}` : ''}</div></div>
       <div class="kd-acts"><a class="btn small" href="#/performance?agent=${encodeURIComponent(name)}">🏆 Performance →</a><a class="btn small" href="#/masterSearch?q=${encodeURIComponent(name)}">🔎 Master profile →</a></div></div>
       <div class="kd-stats">${stat('VC4 (payable)', U.fmt(total(inRange.filter((r) => r.group === 'VC4'))), pct(total(inRange.filter((r) => r.group === 'VC4')), tot), 'blue')}${stat('Commercial', U.fmt(total(inRange.filter((r) => r.group !== 'VC4'))), pct(total(inRange.filter((r) => r.group !== 'VC4')), tot), 'violet')}${stat('Chassis', U.fmt(total(inRange.filter((r) => /chassis/i.test(r.vrnType)))), '', 'orange')}${stat('Replacement', U.fmt(total(inRange.filter((r) => r.type === 'REPLACEMENT'))), '', 'amber')}${stat('Active days', U.fmt(days.length), days.length ? `${U.fmt(Math.round(tot / days.length))}/day` : '', 'green')}</div>
       <div class="kd-grid">${breakdownTable('🚗 Class group', byGroup, null, tot, { head: 'Group', sortCls: true, drill: (key) => ({ f: key === 'VC4' ? 'vc4' : key === 'VC20' ? 'vc20' : 'vc5p', cls: '', type: '', vrnBucket: '' }) })}${breakdownTable('🔁 Type', byType, null, tot, { head: 'Type', drill: (key) => ({ type: key === 'Replacement' ? 'REPLACEMENT' : 'NOT_REPLACEMENT', cls: '', f: '', vrnBucket: '' }) })}</div>
@@ -597,9 +606,19 @@ window.FF = window.FF || {};
               : spec.scope === 'status' ? await statusDetail(spec)
                 : await issuanceDetail(spec);
       const cardInfo = spec.foot ? `<div class="kd-card-foot">Card: ${esc(spec.foot)}</div>` : '';
+      // 🧓 v3.28 — stock ageing section (Agent Allocated At se): agent drawer me us agent ka, TL drawer me
+      // us poore TL ka (VC4+VC20 alag, VC5+ alag, 1/3/5/6+ mahine, har month ke saath ⬇ CSV).
+      const ageScope = FF.stockAge ? (spec.agent ? { kind: 'agent', key: spec.agentId || spec.agent }
+        : (spec.tl || spec.tlName) ? { kind: 'tl', key: spec.tl || spec.tlName } : null) : null;
+      if (ageScope) {
+        const who = ageScope.kind === 'agent' ? `Agent <b>${esc(spec.agent || ageScope.key)}</b>` : `TL <b>${esc(ageScope.key)}</b>`;
+        view.body += `<section class="kd-sec"><h4 class="kd-h">🧓 Stock ageing — ${who} ke paas kitna purana stock</h4>`
+          + FF.stockAge.hostHtml(ageScope, { title: ageScope.key }) + '</section>';
+      }
       const back = nested && state.history.length ? '<button class="btn small" data-kd-back>← Back</button>' : '';
       const exportBtn = view.exportable && FF.auth.can('export') ? '<button class="btn small" data-kd-summary-xlsx>⬇ Breakdown Excel</button>' : '';
       FF.app.openDrawer({ kicker: view.kicker, title: view.title, sub: view.sub, body: cardInfo + view.body, wide: true, actions: back + exportBtn });
+      if (ageScope) FF.stockAge.decorate(U.$('#drawer') || document);
     } catch (err) {
       const back = nested && state.history.length ? '<button class="btn small" data-kd-back>← Back</button>' : '';
       FF.app.openDrawer({ kicker: 'KPI detail', title: spec.title || 'KPI detail', body: U.errorBox(err), wide: true, actions: back });

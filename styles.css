@@ -3615,3 +3615,76 @@ html[data-theme="dark"] .la-consent-card, html[data-theme="dark"] .la-admin-card
   .la-pill { font-size: 12px; padding: 6px 6px 6px 12px; gap: 8px; }
   .la-consent-card, .la-admin-card { padding: 16px 14px; }
 }
+
+/* =============================================================================
+   🌐 v3.27 — PUBLIC (bina login) employee Tag Request form  →  /tag-request
+   Sidebar/topbar chhupe rehte hain; form hi poora page hai. Login-protected app
+   par iska koi asar nahi (sab rules body.public-form ke andar band hain).
+   ============================================================================= */
+body.public-form .sidebar,
+body.public-form .side-backdrop,
+body.public-form .topbar,
+body.public-form #mobile-nav,
+body.public-form #drawer,
+body.public-form #drawer-backdrop,
+body.public-form .global-filter-bar,
+body.public-form .live-share-chip { display: none !important; }
+body.public-form .content { margin-left: 0; }
+body.public-form .main { padding: 14px 14px 56px; }
+.tr-public-wrap { max-width: 760px; margin: 26px auto; }
+.tr-public-page { max-width: 1240px; margin: 0 auto; }
+.tr-public-head { flex-wrap: wrap; gap: 10px; }
+.tr-public-brand { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.tr-public-brand small { display: block; }
+.tr-public-logo { width: 40px; height: 40px; border-radius: 11px; object-fit: cover; }
+span.tr-public-logo { display: inline-flex; align-items: center; justify-content: center; background: var(--a, #6366f1); color: #fff; font-weight: 700; letter-spacing: .5px; }
+.tr-employee { border-left: 4px solid var(--a, #6366f1); }
+.tr-employee-todo { border-left-color: #ef4444; }
+.tr-employee-todo [data-tr-emp="name"] { border-color: #ef4444; box-shadow: 0 0 0 3px rgba(239, 68, 68, .08); }
+.tr-emp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.tr-public-msg { max-width: 620px; margin: 40px auto; text-align: center; }
+.tr-done { max-width: 720px; margin: 0 auto; text-align: center; }
+.tr-done-icon { font-size: 42px; line-height: 1; }
+.tr-done-id { display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; background: #f1f5ff; border: 1px dashed #c7d2fe; border-radius: 12px; padding: 10px 14px; margin: 10px auto; }
+.tr-done-id b { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 16px; }
+.tr-status-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.tr-status-row .input { flex: 1; min-width: 220px; }
+.tr-status-out { margin-top: 12px; padding: 12px; border-radius: 12px; background: #f6f8ff; border: 1px solid #e2e8f7; }
+.tr-status-line { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; flex-wrap: wrap; }
+/* 🔁 duplicate warning (public employee form) — submit se pehle "already pending" block */
+.tr-dup-warn { border-left: 4px solid #f59e0b; background: #fffbeb; }
+.tr-dup-warn h3 { color: #92400e; }
+.tr-dup-list { margin: 0; padding-left: 18px; display: grid; gap: 6px; }
+.tr-dup-list li { line-height: 1.45; }
+.tr-dup-list .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+.tr-public-link-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.tr-public-link-row .input { flex: 1; min-width: 220px; }
+/* Admin ne "system check dikhao" OFF kiya → stock/issuance/suggestion columns chhup jaate hain */
+.tr-no-check .tr-check-col { display: none !important; }
+@media (max-width: 720px) {
+  .tr-public-wrap { margin: 14px auto; }
+  .tr-public-head h1 { font-size: 21px; }
+  body.public-form .main { padding: 10px 8px 48px; }
+}
+
+/* 🧓 v3.28 — stock ageing (Agent Allocated At se · 1/3/5/6+ mahine · VC4+VC20 vs VC5+ · CSV per month) */
+.age-host { margin-top: 4px; }
+.age-tbl th.age-th { white-space: nowrap; }
+.age-tbl .age-csv { margin-left: 6px; border: 1px solid var(--border, #dbe2f0); background: #fff; border-radius: 999px; padding: 1px 7px; font-size: 10.5px; cursor: pointer; color: inherit; }
+.age-tbl .age-csv:hover { background: #eef2ff; }
+.age-tbl .age-n { border: 0; background: #f1f5ff; border-radius: 999px; padding: 2px 9px; font-weight: 700; cursor: pointer; font-size: 12px; }
+.age-tbl .age-n:hover { background: #e0e7ff; }
+.age-tbl .age-n.amber { background: #fef3c7; }
+.age-tbl .age-n.orange { background: #ffedd5; }
+.age-tbl .age-n.red { background: #fee2e2; color: #b91c1c; }
+.age-tbl tr.age-total td { border-top: 1px solid var(--border, #e5e9f5); background: #fafbff; }
+.age-out { margin-top: 10px; border-top: 1px dashed var(--border, #e5e9f5); padding-top: 8px; }
+.age-list-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+.age-note { margin: 6px 0 0; }
+.age-cell { font-size: 12px; white-space: nowrap; }
+.age-chip { display: inline-block; background: #f1f5ff; border: 1px solid #dbe4ff; border-radius: 999px; padding: 1px 8px; font-size: 11.5px; white-space: nowrap; }
+.age-loading { padding: 4px 0; }
+/* Public employee form — full address + pincode */
+.tr-emp-addr { grid-column: 1 / -1; }
+.tr-emp-addr textarea.input { width: 100%; min-height: 46px; resize: vertical; font: inherit; padding: 8px 10px; }
+.tr-emp-grid textarea.input { border: 1px solid var(--border, #dbe2f0); border-radius: 10px; background: #fff; }

@@ -47,6 +47,11 @@ Check: `https://<site>/api/health` → `storage.backend: "appsscript"`, `durable
 * **Secret kabhi mat badlo.** Badla to purana data decrypt nahi hoga — app start hi nahi hogi
   (defaults se overwrite kabhi nahi karti). Secret ko password manager me save rakho.
 * Code.gs badla ho to **Deploy → Manage deployments → Edit → New version** karo (URL same rehta hai).
+* **v3.27 (tag request → alag sheet):** naye Code.gs me `openById` + `sheettest` action hai. Agar aap
+  tag requests kisi **doosri Google Sheet** me bhejna chahte ho (Tag Request page → 📗 card → sheet ka
+  link), to ye naya Code.gs paste karke "New version" deploy karna zaroori hai — aur us alag sheet par
+  is Google account ko **Editor** access dena hoga (Sheet → Share). Link khaali chhodo to entry pehle
+  jaisi isi sheet me hoti hai.
 * Sheet me `APP_STORAGE` tab ko delete / edit mat karo. Usme encrypted rows hain.
 * Agar sheet me pehle se data hai to wizard **overwrite nahi** karta (409). Overwrite sirf confirm
   karne par hota hai.

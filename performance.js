@@ -298,12 +298,20 @@ FF.pages = FF.pages || {};
       return g;
     });
   }
-  async function ensureLoaded() {
-    const table = await S.need('report');
-    // REPORT can load quickly, but the page must not expose its duplicated issuance columns until
-    // the canonical EIR daily ledger is available. Agent-class/day enrichments remain best effort.
-    await S.need('daily');
-    await Promise.allSettled([S.need('agentClass'), S.need('agentDailyClass')]);
+  async function ensureLoaded(opts) {
+    // `{ light: true }` = public (bina login) employee Tag Request form ka raasta: sirf wahi 3
+    // datasets jo agent ka naam/ID/TL/stock/issuance dete hain. Heavy `agentDailyClass` (agent ×
+    // date × class) skip hota hai — uske bina bhi suggestions bilkul same aati hain.
+    const light = !!(opts && opts.light);
+    const table = await S.need('report', light ? { only: true } : undefined);
+    if (light) {
+      await Promise.allSettled([S.need('daily', { only: true }), S.need('agentClass', { only: true })]);
+    } else {
+      // REPORT can load quickly, but the page must not expose its duplicated issuance columns until
+      // the canonical EIR daily ledger is available. Agent-class/day enrichments remain best effort.
+      await S.need('daily');
+      await Promise.allSettled([S.need('agentClass'), S.need('agentDailyClass')]);
+    }
     if (state.agents.length && state.sourceTable === table) return;
     const rows = D.textRows(table);
     if (table.cols && table.cols.some((c) => /agent profile/i.test(c.label))) {

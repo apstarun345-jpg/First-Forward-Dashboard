@@ -1209,6 +1209,49 @@ function publicWorkspaceUser(username) {
   const u = findUser(username);
   return u ? { username: u.username, name: u.name || u.username } : { username, name: username };
 }
+
+// ---------------------------------------------------------------------------------------------
+// 🌐 PUBLIC (bina login) employee Tag Request — v3.27
+// ---------------------------------------------------------------------------------------------
+// Employee link: /tag-request  → koi login/signup nahi, sirf **employee name mandatory**,
+// phir wahi form (agent search + class qty + system check) → submit. Request admin ke paas
+// waise hi pahunchti hai (source: 'public-link') aur Google Sheet sync bhi chalti hai.
+const PUBLIC_TAG_DEFAULTS = {
+  enabled: true, showCheck: true, askMobile: true, askOffice: false, askNote: true,
+  askAddress: true,          // 🏠 full address + 📮 pincode — dono mandatory (dispatch/delivery ke liye)
+  title: 'IDFC Agents Tag Request', intro: '', maxRows: 60
+};
+function publicTagFormConfig() {
+  const w = workspaceStore();
+  if (!w.publicTagForm || typeof w.publicTagForm !== 'object') w.publicTagForm = { ...PUBLIC_TAG_DEFAULTS };
+  const cfg = w.publicTagForm;
+  for (const k of Object.keys(PUBLIC_TAG_DEFAULTS)) if (cfg[k] === undefined) cfg[k] = PUBLIC_TAG_DEFAULTS[k];
+  return cfg;
+}
+/** Google Sheet link (…/spreadsheets/d/<ID>/edit) ya seedha ID → spreadsheet ID. */
+function sheetIdFromLink(link) {
+  const text = String(link || '').trim();
+  const m = /\/spreadsheets\/d\/([A-Za-z0-9_-]{10,})/.exec(text);
+  if (m) return m[1];
+  return /^[A-Za-z0-9_-]{20,}$/.test(text) ? text : '';
+}
+/** Public link par simple per-IP throttle (in-memory; server restart par reset ho jaata hai). */
+const publicRate = new Map();
+function publicRateOk(ip, limit, windowMs) {
+  const key = String(ip || 'unknown');
+  const now = Date.now();
+  const win = windowMs || 3600e3;
+  const stamps = (publicRate.get(key) || []).filter((t) => now - t < win);
+  if (stamps.length >= (limit || 15)) return false;
+  stamps.push(now);
+  publicRate.set(key, stamps);
+  if (publicRate.size > 5000) for (const [k, v] of publicRate) if (!v.length || now - v[v.length - 1] > 6 * 3600e3) publicRate.delete(k);
+  return true;
+}
+/** Public form ko chahiye sirf 3 tarah ke tabs — baaki kuch bhi public gviz se nahi khulta. */
+const PUBLIC_GVIZ_KINDS = new Set(['issuance', 'report', 'gv-report']);
+/** EIR (customer-level ledger: VRN/tag ID) public link se sirf AGGREGATED (group by) khulega. */
+const isAggregateQuery = (tq) => /\bgroup\s+by\b/i.test(String(tq || '')) && /\b(count|sum|avg|min|max)\s*\(/i.test(String(tq || ''));
 function pushLog() {
   if (!db.notify || typeof db.notify !== 'object') db.notify = { items: [], watch: {}, push: [] };
   if (!Array.isArray(db.notify.pushLog)) db.notify.pushLog = [];
@@ -2507,6 +2550,39 @@ async function handleGviz(req, res, params) {
     return sendJson(res, 502, { error: `Google Sheet se data nahi mila: ${error.name === 'AbortError' ? 'timeout' : error.message}` });
   }
 }
+/**
+ * 🌐 PUBLIC gviz (v3.27) — bina login wale employee Tag Request form ke liye.
+ * Ye ek hi kaam karta hai: form ko agent/stock/issuance ka wahi data deta hai jo logged-in
+ * dashboard ko milta hai — par bahut tange scope me:
+ *   • sirf woh tabs jo public form ko chahiye (EIR · REPORT · GV REPORT — configuration registry se),
+ *   • sheet ID sirf app ki apni do configured sheets,
+ *   • EIR (customer-level VRN ledger) par SIRF group-by/count queries — poori row dump kabhi nahi,
+ *   • per-IP throttle (10 min me 120 queries).
+ */
+async function handlePublicGviz(req, res, params) {
+  const ip = clientIp(req);
+  if (!publicRateOk(`gviz:${ip}`, 120, 10 * 60e3)) return sendJson(res, 429, { error: 'Bahut zyada requests — thodi der baad try karo.' });
+  const tabs = (db.settings && Array.isArray(db.settings.tabs) && db.settings.tabs.length) ? db.settings.tabs : DEFAULT_TABS;
+  const sheet = String(params.get('sheet') || '');
+  const gid = String(params.get('gid') || '');
+  const tab = tabs.find((t) => (sheet && (t.tab === sheet || t.id === sheet)) || (gid && String(t.gid || '') === gid));
+  if (!tab || !PUBLIC_GVIZ_KINDS.has(tab.kind)) return sendJson(res, 403, { error: 'Ye query public form ke liye allowed nahi hai.' });
+  const tq = String(params.get('tq') || '');
+  if (tab.kind === 'issuance' && !isAggregateQuery(tq)) {
+    return sendJson(res, 403, { error: 'Public link se issuance ka sirf aggregated (group by) data milta hai.' });
+  }
+  const id = String(params.get('id') || '').trim();
+  if (id && ![db.settings.sheetId, db.settings.gvSheetId].filter(Boolean).includes(id)) return sendJson(res, 403, { error: 'Ye sheet public form ke liye allowed nahi hai.' });
+  const clean = new URLSearchParams();
+  for (const k of ['sheet', 'gid', 'tq', 'range', 'limit', 'offset', 'headers']) {
+    const v = params.get(k);
+    if (v !== null && v !== '') clean.set(k, v);
+  }
+  if (!clean.get('sheet') && !clean.get('gid')) clean.set('sheet', tab.tab);
+  if (id) clean.set('id', id);
+  return handleGviz(req, res, clean);
+}
+
 /** 📊 Admin diagnostics: kaunsi Google query slow hai, cache me kitna hit ho raha hai, kya warm hai. */
 function perfReport() {
   const queries = [...PERF.entries()].map(([key, v]) => ({
@@ -2517,7 +2593,7 @@ function perfReport() {
   const hottest = [...HOT.entries()].sort((a, b) => b[1].hits - a[1].hits).slice(0, 10)
     .map(([url, h]) => ({ url: url.length > 160 ? `${url.slice(0, 160)}…` : url, hits: h.hits }));
   return {
-    version: '3.26.0', cacheEntries: cache.size, cacheEntriesMax: MAX_CACHE_ENTRIES,
+    version: '3.27.0', cacheEntries: cache.size, cacheEntriesMax: MAX_CACHE_ENTRIES,
     cacheSeconds: cacheMs() / 1000, warmedQueries: warmed, hotQueries: hottest,
     slowest: queries.filter((q) => q.upstream > 0).slice(0, 25),
     queries
@@ -2623,7 +2699,7 @@ async function handleApi(req, res, url) {
 
   if (p === '/api/health' && method === 'GET') {
     // pendingSignups sirf admin ko (sidebar badge ke liye) — public health me leak nahi.
-    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.26.0', storage: storageStatus(), push: pushHealth(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length } : {}) });
+    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.27.0', storage: storageStatus(), push: pushHealth(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length } : {}) });
   }
   // 📊 Admin-only: exact reason of slowness (Google query timings, cache hit rate, warm queries).
   if (p === '/api/perf' && method === 'GET') {
@@ -3128,7 +3204,10 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { ok: true }, { 'Set-Cookie': cookieHeader(req, '', 0) });
   }
 
-  if (!user) throw new HttpError(401, 'Login required');
+  // 🌐 Public (bina login) endpoints — employee Tag Request link inhi par chalta hai.
+  //    /api/public/* aur branding/version waale endpoints login ke bina khule rehte hain; baaki
+  //    sab pehle jaisa protected hai.
+  if (!user && !/^\/api\/(public-config|version|public\/)/.test(p)) throw new HttpError(401, 'Login required');
 
   if (p === '/api/auth/password' && method === 'POST') {
     const body = await readBody(req);
@@ -3300,16 +3379,19 @@ async function handleApi(req, res, url) {
     agentId: 'Agent ID', agent: 'Agent', tl: 'TL', channel: 'Channel', cls: 'Tag Class',
     last: 'Last month', cur: 'Current MTD', growth: 'Growth %', stock: 'Stock', cover: 'Cover (days)',
     priority: 'Priority', sugNet: 'Suggested (stock −)', sugGross: 'Suggested (w/o stock)',
-    approved: 'Approved qty', remark: 'Remark', note: 'Note', adminNote: 'Admin note'
+    approved: 'Approved qty', remark: 'Remark', note: 'Note', adminNote: 'Admin note',
+    empName: 'Employee', empMobile: 'Employee mobile', empAddress: 'Employee address', empPincode: 'Pincode'
   };
   const tagSheetConfig = () => {
     const w = workspaceStore();
     if (!w.tagRequestSheet || typeof w.tagRequestSheet !== 'object') {
       w.tagRequestSheet = {
-        enabled: false, tab: 'Tag Requests', sheetLink: '', onSubmit: true, onStatus: true,
+        enabled: false, tab: 'Tag Requests', sheetLink: '', spreadsheetId: '', onSubmit: true, onStatus: true,
         rowMode: 'class', columns: ['date', 'time', 'by', 'agentId', 'agent', 'tl', 'channel', 'cls', 'stock', 'cur', 'priority', 'approved', 'remark', 'status']
       };
     }
+    // v3.27 — link me sheet ka ID ho to wahi (alag sheet) target banta hai.
+    if (w.tagRequestSheet.spreadsheetId === undefined) w.tagRequestSheet.spreadsheetId = sheetIdFromLink(w.tagRequestSheet.sheetLink) || '';
     return w.tagRequestSheet;
   };
   /** Apps Script store — storage backend se independent (files backend par bhi sheet sync chale). */
@@ -3330,6 +3412,10 @@ async function handleApi(req, res, url) {
       case 'time': return d.toISOString().slice(11, 16);
       case 'requestId': return req.id || '';
       case 'by': return req.byName || req.by || '';
+      case 'empName': return (req.employee && req.employee.name) || req.byName || '';
+      case 'empMobile': return (req.employee && req.employee.mobile) || '';
+      case 'empAddress': return (req.employee && req.employee.address) || '';
+      case 'empPincode': return (req.employee && req.employee.pincode) || '';
       case 'status': return req.status || '';
       case 'agentId': return x.agentId || '';
       case 'agent': return x.agentName || '';
@@ -3395,8 +3481,23 @@ async function handleApi(req, res, url) {
     }
     const { header, rows } = tagSheetRows(req, cfg, event);
     if (!rows.length) { if (throwOnFail) throw new HttpError(400, 'Sheet ke liye koi row nahi bani.'); return null; }
-    const out = await store.call('appendrows', { tab: String(cfg.tab || 'Tag Requests').slice(0, 80) || 'Tag Requests', header, rows });
-    req.sheetSync = { at: new Date().toISOString(), event, added: Number(out.added) || rows.length, tab: out.tab || cfg.tab };
+    const tabName = String(cfg.tab || 'Tag Requests').slice(0, 80) || 'Tag Requests';
+    // v3.27 — sheetLink me ID diya ho to entry US ALAG SHEET me jaati hai (Apps Script openById
+    // karta hai). Link khaali ho to purana behaviour: script jis sheet se bandha hai usi me.
+    const targetId = sheetIdFromLink(cfg.sheetLink) || String(cfg.spreadsheetId || '').trim() || '';
+    const out = await store.call('appendrows', { tab: tabName, header, rows, ...(targetId ? { spreadsheetId: targetId } : {}) });
+    // Purana Code.gs deploy (v3.25) spreadsheetId ignore karta hai — tab wo chup-chaap APP_STORAGE
+    // wali sheet me likh deta. Isliye response ke URL se verify karo ki entry SAHI sheet me gayi.
+    if (targetId && out && out.url && !String(out.url).includes(targetId)) {
+      const msg = `Entry galat sheet me gayi (${out.spreadsheet || 'Apps Script wali sheet'}) — Render par naya google-apps-script/Code.gs (v3.27) deploy karo, phir dobara bhejo.`;
+      req.sheetSync = { at: new Date().toISOString(), event, error: msg.slice(0, 160), tab: tabName };
+      if (throwOnFail) throw new HttpError(502, msg);
+      throw new Error(msg);
+    }
+    req.sheetSync = {
+      at: new Date().toISOString(), event, added: Number(out.added) || rows.length, tab: out.tab || tabName,
+      spreadsheet: out.spreadsheet || '', url: out.url || '', targetId
+    };
     return out;
   }
   if (p === '/api/tag-requests' && method === 'GET') {
@@ -3503,6 +3604,189 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { ok: true });
   }
 
+  // ---- 🌐 PUBLIC (bina login) employee Tag Request — v3.27 ---------------------------------------
+  // Link: <origin>/tag-request  (ya #/tagRequest?public=1). Employee login/signup ki zaroorat nahi —
+  // sirf **naam mandatory**, phir form → system check → submit. Admin ke Tag Request list me yahi
+  // request 'public-link' source ke saath aati hai, WhatsApp/notification + Google Sheet sync same.
+  const publicTagView = () => {
+    const cfg = publicTagFormConfig();
+    const sheet = tagSheetConfig();
+    return {
+      enabled: cfg.enabled !== false,
+      showCheck: cfg.showCheck !== false,
+      askMobile: !!cfg.askMobile,
+      askOffice: !!cfg.askOffice,
+      askNote: cfg.askNote !== false,
+      askAddress: cfg.askAddress !== false,
+      maxRows: Math.min(150, Math.max(5, Number(cfg.maxRows) || 60)),
+      title: shortText(cfg.title, 120) || 'IDFC Agents Tag Request',
+      intro: shortText(cfg.intro, 400),
+      brand: db.settings.brand || 'First Forward',
+      appName: db.settings.appName || '',
+      tagline: db.settings.tagline || 'Dashboard',
+      logo: db.settings.logo || '',
+      requireEmployeeName: true,
+      hasSheetSync: !!sheet.enabled
+    };
+  };
+  const publicTagFind = (id) => (workspaceStore().tagRequests || []).find((r) => r.id === id && r.source === 'public-link');
+  // 🔁 Duplicate detector (v3.27.1) — employee ke naam se 30 din ke andar ki active requests dhoondta hai
+  // jisme koi same agent × class row ho. Employee ko submit se pehle warning dikhti hai ("already pending"),
+  // aur admin ke notification/request me bhi 🔁 mark ho jaata hai — dobara bhejne par pata rahe.
+  const publicTagDupes = (name, rows) => {
+    const who = normUser(name);
+    if (!who) return [];
+    const wanted = new Set();
+    (rows || []).forEach((r) => {
+      const key = `${String(r && (r.agentId || r.agentName) || '').trim().toLowerCase()}|${String(r && r.cls || '').trim().toUpperCase()}`;
+      if (key !== '|') wanted.add(key);
+    });
+    const nowMs = Date.now();
+    const out = [];
+    for (const r of (workspaceStore().tagRequests || [])) {
+      if (!r || r.source !== 'public-link' || r.by !== `public:${who}`) continue;
+      const t = new Date(r.at || r.updatedAt || 0).getTime();
+      if (t && nowMs - t > 30 * 24 * 3600e3) continue;                 // 30 din se purani = duplicate nahi
+      const status = String(r.status || 'pending').toLowerCase();
+      if (status === 'rejected' || status === 'cancelled') continue;    // reject hui request dobara maang sakta hai
+      const matched = [];
+      for (const x of (r.rows || [])) {
+        const key = `${String(x && (x.agentId || x.agentName) || '').trim().toLowerCase()}|${String(x && x.cls || '').trim().toUpperCase()}`;
+        if (wanted.has(key) && !matched.includes(key)) matched.push(key);
+      }
+      if (wanted.size && !matched.length) continue;
+      out.push({
+        id: r.id, at: r.at || '', status: r.status || 'pending',
+        total: Number(r.total) || 0, rows: (r.rows || []).length,
+        matched: matched.map((k) => k.split('|').join(' · ')).slice(0, 8)
+      });
+    }
+    return out.slice(-6).reverse();
+  };
+  if (p === '/api/public/tag-request' && method === 'GET') {
+    return sendJson(res, 200, { ok: true, config: publicTagView() });
+  }
+  if (p === '/api/public/tag-request' && method === 'POST') {
+    const cfg = publicTagFormConfig();
+    if (cfg.enabled === false) throw new HttpError(403, 'Ye form abhi band hai — apne manager se naya link maango.');
+    const body = await readBody(req);
+    const emp = body.employee && typeof body.employee === 'object' ? body.employee : body;
+    const employeeName = shortText(emp.name || emp.employeeName || body.employeeName, 80);
+    if (employeeName.length < 2) throw new HttpError(400, 'Employee name zaroori hai (kam se kam 2 characters).');
+    const mobile = String(emp.mobile || emp.phone || '').replace(/[^\d+]/g, '').slice(0, 16);
+    const office = shortText(emp.office || emp.branch, 80);
+    // 🏠 address + 📮 pincode — employee link par mandatory (admin chahe to Settings se band kar sakta hai).
+    const address = shortText(emp.address || emp.fullAddress || body.address, 300);
+    const pincode = String(emp.pincode || emp.pin || body.pincode || '').replace(/[^\d]/g, '').slice(0, 6);
+    const city = shortText(emp.city, 60);
+    if (cfg.askMobile !== false && String(mobile).replace(/\D/g, '').length < 10) throw new HttpError(400, 'Mobile number zaroori hai (10 digit).');
+    if (cfg.askAddress !== false) {
+      if (address.replace(/\s+/g, ' ').trim().length < 8) throw new HttpError(400, 'Full address zaroori hai (kam se kam 8 characters — house/street/area).');
+      if (!/^\d{6}$/.test(pincode)) throw new HttpError(400, 'Pincode zaroori hai (6 digit).');
+    }
+    const rows = tagRequestRows(body.rows);
+    if (!rows.length) throw new HttpError(400, 'Kam se kam ek row chahiye (agent + tag class + qty).');
+    if (rows.length > Math.min(150, Math.max(5, Number(cfg.maxRows) || 60))) throw new HttpError(400, `Ek request me max ${Math.min(150, Math.max(5, Number(cfg.maxRows) || 60))} rows allowed hain.`);
+    const total = rows.reduce((s, x) => s + x.approved, 0);
+    if (!total) throw new HttpError(400, 'Quantity 0 hai — kisi class me qty daalo.');
+    if (total > 100000) throw new HttpError(400, 'Quantity bahut zyada hai — dobara check karo.');
+    const ip = clientIp(req);
+    if (!publicRateOk(`tag:${ip}`, 15, 60 * 60e3)) throw new HttpError(429, 'Is device se bahut requests aa gayi hain — kuch der baad try karo.');
+    // 🔁 Duplicate: same employee ki active request me same agent × class pehle se hai?
+    const dupes = publicTagDupes(employeeName, rows);
+    const now = new Date().toISOString();
+    const row = {
+      id: workspaceId('tagreq'), at: now,
+      by: `public:${normUser(employeeName) || 'employee'}`, byName: employeeName,
+      employee: { name: employeeName, mobile, office, address, pincode, ...(city ? { city } : {}) },
+      source: 'public-link', ip: String(ip || '').slice(0, 45),
+      status: 'pending', note: shortText(body.note, 300), adminNote: '',
+      rows, tls: tagRequestTls(body.tls), total, updatedAt: now, updatedBy: 'public-link',
+      ...(dupes.length ? { dupOf: dupes.map((d) => d.id), dupCount: dupes.length } : {})
+    };
+    const w = workspaceStore();
+    w.tagRequests.push(row);
+    if (w.tagRequests.length > 200) w.tagRequests.splice(0, w.tagRequests.length - 200);
+    await persist('notify');
+    // 📗 Sheet sync ON ho to public request bhi seedha usi Google Sheet me entry banati hai.
+    if (tagSheetConfig().enabled && tagSheetConfig().onSubmit) {
+      pushTagRequestToSheet(row, 'new').then(() => persist('notify').catch(() => {})).catch((err) => {
+        console.warn('public tag-request sheet sync:', err.message);
+        row.sheetSync = { at: new Date().toISOString(), event: 'new', error: String(err.message || err).slice(0, 160) };
+      });
+    }
+    try {
+      recordNotification({
+        type: 'request', title: `🏷️ Tag request (employee link)${dupes.length ? ' 🔁 duplicate' : ''} · ${employeeName}`,
+        body: `${rows.length} rows · ${new Set(rows.map((r) => r.agentName)).size} agents · ${total} tags${office ? ` · ${office}` : ''}${mobile ? ` · 📱 ${mobile}` : ''}${pincode ? ` · 📮 ${pincode}` : ''}${address ? ` · 🏠 ${address.slice(0, 60)}${address.length > 60 ? '…' : ''}` : ''}${dupes.length ? ` · 🔁 pehle se ${dupes.length} active request (${dupes.map((d) => d.id).join(', ')})` : ''}`,
+        target: 'admin', routeKey: 'tagRequest',
+        meta: { requestId: row.id, rows: rows.length, total, publicLink: true, note: row.note, duplicates: dupes.length, dupOf: dupes.map((d) => d.id), link: '#/tagRequest?view=requests' }
+      });
+    } catch { /* notification optional */ }
+    logAudit({ username: 'public-link', role: 'public', name: employeeName }, 'tag_request_public_created', { target: row.id, note: `${rows.length} rows · ${total} tags · ${employeeName}${mobile ? ` · ${mobile}` : ''}${pincode ? ` · 📮${pincode}` : ''}${dupes.length ? ` · 🔁 duplicate of ${dupes.map((d) => d.id).join(',')}` : ''}`, ip });
+    return sendJson(res, 201, {
+      ok: true,
+      request: {
+        id: row.id, at: row.at, status: row.status, total: row.total, rows: rows.length,
+        byName: employeeName, sheetSync: !!row.sheetSync, duplicates: dupes.length
+      },
+      warnings: dupes.length ? [{
+        code: 'duplicate', count: dupes.length,
+        message: `Aapke naam se ${dupes.length} request already active hai (same agent + class) — admin ko 🔁 mark ke saath dikhegi.`,
+        requests: dupes.map((d) => ({ id: d.id, status: d.status, at: d.at, total: d.total, matched: d.matched }))
+      }] : []
+    });
+  }
+  // 🔁 Public duplicate check — form submit se PEHLE employee ko warning dikhane ke liye.
+  if (p === '/api/public/tag-request/check' && method === 'POST') {
+    const body = await readBody(req);
+    const emp = body.employee && typeof body.employee === 'object' ? body.employee : body;
+    const employeeName = shortText(emp.name || emp.employeeName || body.name, 80);
+    if (employeeName.length < 2) throw new HttpError(400, 'Naam likho (kam se kam 2 characters) — phir purani request check karenge.');
+    const ip = clientIp(req);
+    if (!publicRateOk(`tagcheck:${ip}`, 90, 10 * 60e3)) throw new HttpError(429, 'Bahut zyada checks — thodi der baad try karo.');
+    const rows = Array.isArray(body.rows) ? body.rows.slice(0, 150) : [];
+    const dupes = publicTagDupes(employeeName, rows);
+    return sendJson(res, 200, { ok: true, name: employeeName, checked: rows.length, duplicates: dupes });
+  }
+  if (p === '/api/public/tag-request/status' && method === 'GET') {
+    const id = shortText(url.searchParams.get('id'), 60);
+    if (!id) throw new HttpError(400, 'Request ID daalo (submit ke baad mila tha).');
+    const row = publicTagFind(id);
+    if (!row) throw new HttpError(404, 'Is ID ki koi request nahi mili — ID check karo.');
+    return sendJson(res, 200, {
+      ok: true,
+      request: {
+        id: row.id, at: row.at, status: row.status, total: row.total, byName: row.byName,
+        rows: (row.rows || []).length, agents: new Set((row.rows || []).map((x) => x.agentName)).size,
+        adminNote: row.adminNote || '', note: row.note || '',
+        employee: row.employee ? { name: row.employee.name || '', mobile: row.employee.mobile || '', address: row.employee.address || '', pincode: row.employee.pincode || '' } : null,
+        sheetSynced: !!row.sheetSync && !row.sheetSync.error,
+        updatedAt: row.updatedAt || row.at
+      }
+    });
+  }
+  // 🌐 Public form config (admin) — link ON/OFF + kaunse fields dikhein.
+  if (p === '/api/public-tag-form' && method === 'PUT') {
+    requireAdmin(user);
+    const body = await readBody(req);
+    const c = body.config || body;
+    const cfg = publicTagFormConfig();
+    if (c.enabled !== undefined) cfg.enabled = !!c.enabled;
+    if (c.showCheck !== undefined) cfg.showCheck = !!c.showCheck;
+    if (c.askMobile !== undefined) cfg.askMobile = !!c.askMobile;
+    if (c.askOffice !== undefined) cfg.askOffice = !!c.askOffice;
+    if (c.askNote !== undefined) cfg.askNote = !!c.askNote;
+    if (c.askAddress !== undefined) cfg.askAddress = !!c.askAddress;
+    if (c.title !== undefined) cfg.title = shortText(c.title, 120);
+    if (c.intro !== undefined) cfg.intro = shortText(c.intro, 400);
+    if (c.maxRows !== undefined) cfg.maxRows = Math.min(150, Math.max(5, Number(c.maxRows) || 60));
+    cfg.updatedAt = new Date().toISOString(); cfg.updatedBy = user.username;
+    await persist('notify');
+    logAudit(user, 'public_tag_form_config', { note: `enabled ${cfg.enabled} · check ${cfg.showCheck}`, ip: clientIp(req) });
+    return sendJson(res, 200, { ok: true, config: publicTagView() });
+  }
+
   // ---- 📗 Tag Request → Google Sheet sync (admin config + test + manual push) --------------------
   if (p === '/api/tag-request-sheet' && method === 'GET') {
     requireAdmin(user);
@@ -3510,7 +3794,8 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, {
       ok: true, config: cfg, fields: TAG_SHEET_FIELDS,
       connected: !!sheetSyncStore(), storageBackend: STORAGE_BACKEND,
-      hint: sheetSyncStore() ? '' : 'APPS_SCRIPT_URL + APPS_SCRIPT_SECRET (Render → Environment) configure karo — wala Apps Script usi Google Sheet se bind hona chahiye jisme entries chahiye. Setup: STORAGE_SETUP.md / Settings → Backup.'
+      publicForm: publicTagView(), publicPath: '/tag-request', targetId: sheetIdFromLink(cfg.sheetLink) || cfg.spreadsheetId || '',
+      hint: sheetSyncStore() ? '' : 'APPS_SCRIPT_URL + APPS_SCRIPT_SECRET (Render → Environment) configure karo — Apps Script se hi sheet me entry hoti hai. Setup: STORAGE_SETUP.md / Settings → Backup.'
     });
   }
   if (p === '/api/tag-request-sheet' && method === 'PUT') {
@@ -3520,7 +3805,16 @@ async function handleApi(req, res, url) {
     const c = body.config || body;
     if (c.enabled !== undefined) cfg.enabled = !!c.enabled;
     if (c.tab !== undefined) cfg.tab = String(c.tab || '').trim().slice(0, 80) || 'Tag Requests';
-    if (c.sheetLink !== undefined) cfg.sheetLink = String(c.sheetLink || '').trim().slice(0, 500);
+    if (c.sheetLink !== undefined) {
+      cfg.sheetLink = String(c.sheetLink || '').trim().slice(0, 500);
+      if (!cfg.sheetLink) cfg.spreadsheetId = '';
+      else {
+        const id = sheetIdFromLink(cfg.sheetLink);
+        if (!id) throw new HttpError(400, 'Sheet link samajh nahi aaya — poora link (https://docs.google.com/spreadsheets/d/…) ya sheet ID paste karo.');
+        cfg.spreadsheetId = id;
+      }
+    }
+    if (typeof c.spreadsheetId === 'string') cfg.spreadsheetId = sheetIdFromLink(c.spreadsheetId);
     if (c.onSubmit !== undefined) cfg.onSubmit = !!c.onSubmit;
     if (c.onStatus !== undefined) cfg.onStatus = !!c.onStatus;
     if (c.rowMode !== undefined && ['class', 'agent', 'request'].includes(c.rowMode)) cfg.rowMode = c.rowMode;
@@ -3528,19 +3822,58 @@ async function handleApi(req, res, url) {
       const cols = c.columns.map((x) => String(x)).filter((x) => TAG_SHEET_FIELDS[x]);
       if (cols.length) cfg.columns = [...new Set(cols)];
     }
+    if (c.publicForm && typeof c.publicForm === 'object') {
+      const pcfg = publicTagFormConfig();
+      const pc = c.publicForm;
+      if (pc.enabled !== undefined) pcfg.enabled = !!pc.enabled;
+      if (pc.showCheck !== undefined) pcfg.showCheck = !!pc.showCheck;
+      if (pc.askMobile !== undefined) pcfg.askMobile = !!pc.askMobile;
+      if (pc.askOffice !== undefined) pcfg.askOffice = !!pc.askOffice;
+      if (pc.askNote !== undefined) pcfg.askNote = !!pc.askNote;
+      if (pc.title !== undefined) pcfg.title = shortText(pc.title, 120);
+      if (pc.intro !== undefined) pcfg.intro = shortText(pc.intro, 400);
+      if (pc.maxRows !== undefined) pcfg.maxRows = Math.min(150, Math.max(5, Number(pc.maxRows) || 60));
+    }
     cfg.updatedAt = new Date().toISOString(); cfg.updatedBy = user.username;
     await persist('notify');
-    logAudit(user, 'tag_sheet_config', { note: `enabled ${cfg.enabled} · tab ${cfg.tab} · ${cfg.columns.length} cols · ${cfg.rowMode}`, ip: clientIp(req) });
-    return sendJson(res, 200, { ok: true, config: cfg, connected: !!sheetSyncStore() });
+    logAudit(user, 'tag_sheet_config', { note: `enabled ${cfg.enabled} · tab ${cfg.tab} · target ${cfg.spreadsheetId || 'script-sheet'} · ${cfg.columns.length} cols · ${cfg.rowMode}`, ip: clientIp(req) });
+    return sendJson(res, 200, { ok: true, config: cfg, connected: !!sheetSyncStore(), publicForm: publicTagView(), targetId: cfg.spreadsheetId || '' });
   }
   if (p === '/api/tag-request-sheet/test' && method === 'POST') {
     requireAdmin(user);
     const store = sheetSyncStore();
     if (!store) throw new HttpError(400, 'Apps Script connect nahi hai — Render me APPS_SCRIPT_URL + APPS_SCRIPT_SECRET set karo (Storage setup guide: STORAGE_SETUP.md).');
+    const body = await readBody(req);
+    const cfg = tagSheetConfig();
+    const link = body.sheetLink !== undefined ? String(body.sheetLink || '').trim() : cfg.sheetLink;
+    const targetId = sheetIdFromLink(link) || (body.spreadsheetId ? sheetIdFromLink(body.spreadsheetId) : '') || cfg.spreadsheetId || '';
+    const tab = String(body.tab || cfg.tab || 'Tag Requests').trim().slice(0, 80) || 'Tag Requests';
+    if (link && !targetId) throw new HttpError(400, 'Sheet link samajh nahi aaya — poora Google Sheet link ya sheet ID paste karo.');
+    // 1) Script zinda hai? (ping)  → 2) target sheet + tab reachable hai? ('sheettest' action)
     let ping;
     try { ping = await store.call('ping'); }
-    catch (err) { throw new HttpError(502, `Sheet ping fail: ${err.message}`); }
-    return sendJson(res, 200, { ok: true, tab: ping.tab || 'APP_STORAGE', spreadsheet: ping.spreadsheet || '', url: ping.url || '', note: 'Ping OK — appendrows action ke liye Apps Script ka naya Code.gs (v3.25) deploy karna zaroori hai.' });
+    catch (err) { throw new HttpError(502, `Apps Script ping fail: ${err.message}`); }
+    let target = null, codeVersion = 'v3.25';
+    try {
+      const out = await store.call('sheettest', { spreadsheetId: targetId, tab });
+      target = out;
+      codeVersion = 'v3.27';
+    } catch (err) {
+      if (!/unknown action/i.test(String(err.message))) throw new HttpError(502, `Sheet check fail: ${err.message}`);
+    }
+    const notes = [];
+    if (!target) notes.push('Apps Script me purana Code.gs deploy hai — alag sheet me entry ke liye naya google-apps-script/Code.gs (v3.27) paste karke "New version" deploy karo.');
+    else if (targetId && target.spreadsheetId && target.spreadsheetId !== targetId) notes.push('Apps Script ne kisi doosri sheet ka jawab diya — sheet ka ID check karo.');
+    if (target && targetId && !target.exists) notes.push(`Target sheet me "${tab}" tab abhi nahi hai — pehli entry par apne aap ban jayega.`);
+    if (targetId) notes.push('Dhyan rakho: us sheet par Apps Script wale Google account ka edit access hona chahiye (Sheet → Share).');
+    return sendJson(res, 200, {
+      ok: true, connected: true, codeVersion,
+      tab: target ? target.tab || tab : (ping.tab || 'APP_STORAGE'),
+      spreadsheet: target ? target.spreadsheet || '' : (ping.spreadsheet || ''),
+      url: target ? target.url || '' : (ping.url || ''),
+      targetSpreadsheetId: targetId, targetExists: target ? !!target.exists : null,
+      note: notes.join(' ')
+    });
   }
   if (p === '/api/tag-request-sheet/push' && method === 'POST') {
     requireAdmin(user);
@@ -3717,6 +4050,10 @@ async function handleApi(req, res, url) {
   // ---- gviz ----
   if (p === '/api/gviz' && method === 'GET') {
     return handleGviz(req, res, url.searchParams);
+  }
+  // 🌐 Public form ka data (koi login nahi, par scoped + throttled — upar ka comment dekho).
+  if (p === '/api/public/gviz' && method === 'GET') {
+    return handlePublicGviz(req, res, url.searchParams);
   }
 
   // ---- Google Sheet storage setup helpers (admin) --------------------------------------------
@@ -4222,10 +4559,12 @@ async function servePersonalPage(req, res, rawToken) {
     const targetHtml = target ? `<div class="pb-kv"><span>🎯 Your target ${escHtml(ym)}</span><b>${st.mtd} / ${Number(target.target) || 0} (${pct(st.mtd, Number(target.target))}%)</b></div>` : '';
     const teamHtml = team.length ? `<section class="pb-card"><h3>👥 Team (is mahine)</h3>${team.map((t, i) => `<div class="pb-rank"><span class="pb-pos">${i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1}</span><span class="pb-name">${escHtml(t.name)}</span><b>${t.mtd}</b></div>`).join('')}</section>` : '';
     const diff = st.mtd - st.prevSame;
+    // 🧑‍💼 Agent ke link par TL ka naam bhi dikhao (pehle sirf agent naam aata tha)
+    const tlName = link.kind === 'tl' ? '' : (await personalAgentTl(link));
     const html = personalShell({
       title: `${link.name} · Performance`,
       heading: `${link.kind === 'tl' ? '👥' : '🧑‍💼'} ${escHtml(link.name)}`,
-      sub: `${link.source === 'gv' ? 'GV Partner' : 'First Forward'} · ${link.kind === 'tl' ? 'Team Leader' : 'Agent'} · personal view · read-only`,
+      sub: `${link.source === 'gv' ? 'GV Partner' : 'First Forward'} · ${link.kind === 'tl' ? 'Team Leader' : 'Agent'}${tlName ? ` · ${link.kind === 'tl' ? '' : 'TL '}<b>${escHtml(tlName)}</b>` : ''} · personal view · read-only`,
       body: `
       ${goalHtml || targetHtml ? `<section class="pb-card pb-goalcard">${goalHtml}${targetHtml}</section>` : ''}
       <section class="pb-kpis">
