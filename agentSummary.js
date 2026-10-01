@@ -105,6 +105,35 @@ FF.pages = FF.pages || {};
     return [...map.values()].map((p) => ({ ...p, altIds: [...(p.altIds || [])] })).sort((a, b) => (b.cur + b.stock) - (a.cur + a.stock));
   }
 
+  // ---- v3.34 speed: caches (stale-while-revalidate) ------------------------------------------------
+  // Pehle har page-open par loadPeople() poori master + performance + stock data series ko dobara
+  // await karta tha → page lag karta tha. Ab list 3 min tak cache hoti hai; TTL ke baad purani list
+  // turant dikhti hai aur naya data background me aa jata hai (agle open par).
+  const peopleCache = { ff: null, gv: null }; // channel → { at, list }
+  const PEOPLE_TTL = 3 * 60 * 1000;
+  function loadPeopleCached(channel) {
+    const slot = peopleCache[channel];
+    if (slot && slot.list && Date.now() - slot.at < PEOPLE_TTL) return slot.list;
+    const p = loadPeople(channel).then((list) => { peopleCache[channel] = { at: Date.now(), list }; return list; });
+    if (slot && slot.list) { p.catch(() => {}); return slot.list; } // stale abhi, refresh background me
+    return p;
+  }
+
+  // Report bhi 2 min cache — aage-peeche agent switch karne par summary turant khulti hai.
+  const reportCache = new Map(); // `${kind}|${name}|${id}` → { at, report }
+  const REPORT_TTL = 2 * 60 * 1000;
+  function buildReportCached(person, opts) {
+    const key = `${person.kind}|${norm(person.name)}|${person.id || ''}`;
+    const hit = reportCache.get(key);
+    if (hit && Date.now() - hit.at < REPORT_TTL && !(opts && opts.fresh)) return hit.report;
+    return buildReport(person).then((rep) => {
+      reportCache.set(key, { at: Date.now(), report: rep });
+      while (reportCache.size > 24) reportCache.delete(reportCache.keys().next().value);
+      return rep;
+    });
+  }
+  function clearCaches() { peopleCache.ff = null; peopleCache.gv = null; reportCache.clear(); }
+
   function matchPeople(list, q) {
     const raw = clean(q);
     if (!raw) return list.slice(0, 30);
@@ -250,6 +279,75 @@ FF.pages = FF.pages || {};
     rows.push([]);
     rows.push(['FINAL GRAND TOTAL SUMMARY', `Last Month: ${t.lastTotal}`, `Current MTD: ${t.curTotal}`, `Expected: ${p.expected}`, `Stock Total: ${t.stockTotal}`, age ? `30+d Old: ${age.old30}` : '']);
     return rows;
+  }
+
+  /** v3.34 — multi-sheet Excel workbook: Summary / Class-wise / Stock Ageing / Team Agents. */
+  function reportXlsx(r) {
+    const p = r.p, t = p.totals || {}, age = r.age;
+    const chLabel = r.ch === 'gv' ? 'GV Partner' : 'First Forward';
+    const sheets = [];
+    sheets.push({
+      name: 'Summary',
+      header: ['Field', 'Value'],
+      rows: [
+        ['Report', `${chLabel} · ${r.isTl ? 'Team Leader' : 'Agent'} Summary`],
+        ['Name', p.name], ['ID', p.id || ''], ['Mobile', p.mobile || ''],
+        ...(r.isTl ? [] : [['TL', p.tlName || ''], ['TL ID', p.tlId || '']]),
+        ['Priority', p.priority || ''],
+        ['Current Month', p.curYm || ''],
+        [`Issuance ${p.curYm || '(MTD)'}`, t.curTotal],
+        ['VC4 (MTD)', t.curVc4], ['Comm (MTD)', t.curComm],
+        ['Last Month', p.lastYm || ''],
+        [`Issuance ${p.lastYm || '(Last)'}`, t.lastTotal],
+        ['VC4 (Last)', t.lastVc4], ['Comm (Last)', t.lastComm],
+        ['Growth %', t.growth == null ? '' : Number(t.growth.toFixed(1))],
+        ['Expected Month-End', p.expected], ['Run-rate / day', p.runRate],
+        ['Stock in Hand', t.stockTotal], ['VC4 Stock', t.stockVc4], ['Comm Stock', t.stockComm],
+        ['30+d Old Stock', age ? age.old30 : ''],
+        ['60+d Critical Stock', age ? age.old60 : ''],
+        ['Generated', new Date().toLocaleString('en-IN')]
+      ]
+    });
+    sheets.push({
+      name: 'Class-wise',
+      header: ['Class', p.lastYm || 'Last Month', p.curYm || 'Current (MTD)', 'Growth %', 'Stock in Hand'],
+      rows: (p.classTable || []).map((c) => [c.cls, c.last, c.cur, c.growth == null ? '' : Number(c.growth.toFixed(1)), c.stock])
+        .concat([['GRAND TOTAL', t.lastTotal, t.curTotal, t.growth == null ? '' : Number(t.growth.toFixed(1)), t.stockTotal]])
+    });
+    if (age && age.total) {
+      sheets.push({
+        name: 'Stock Ageing',
+        header: ['Class', ...age.buckets.map((b) => b.label), '30+d Old', '60+d Critical', 'Total Stock'],
+        rows: (age.byClass || []).map((c) => [c.cls, ...age.buckets.map((b) => c[b.key] || 0), c.old30, c.old60, c.total])
+          .concat([['STOCK AGEING GRAND TOTAL', ...age.buckets.map((b) => b.n || 0), age.old30, age.old60, age.total]])
+      });
+    }
+    if (r.isTl && (p.agents || []).length) {
+      sheets.push({
+        name: 'Team Agents',
+        header: ['Agent Name', 'ID', p.lastYm || 'Last Month', p.curYm || 'Current (MTD)', 'VC4', 'Comm', 'Growth %', 'Stock'],
+        rows: p.agents.map((a) => [a.name, a.id || '', a.lastTotal, a.curTotal, a.curVc4, a.curComm, a.growth == null ? '' : Number(a.growth.toFixed(1)), a.stockTotal])
+          .concat([['GRAND TOTAL', `${p.agents.length} Agents`, U.sum(p.agents, (a) => a.lastTotal), U.sum(p.agents, (a) => a.curTotal), U.sum(p.agents, (a) => a.curVc4), U.sum(p.agents, (a) => a.curComm), '', U.sum(p.agents, (a) => a.stockTotal)]])
+      });
+    }
+    return sheets;
+  }
+
+  /** v3.34 — structured JSON backup (API / automation ke liye). */
+  function reportJson(r) {
+    const p = r.p, t = p.totals || {};
+    return JSON.stringify({
+      generatedAt: new Date().toISOString(),
+      channel: r.ch === 'gv' ? 'gv' : 'ff',
+      person: { kind: r.isTl ? 'tl' : 'agent', name: p.name, id: p.id || '', mobile: p.mobile || '', tlName: p.tlName || '', tlId: p.tlId || '' },
+      months: { current: p.curYm || '', last: p.lastYm || '' },
+      totals: t,
+      expectedMonthEnd: p.expected, runRatePerDay: p.runRate,
+      classWise: (p.classTable || []).map((c) => ({ cls: c.cls, last: c.last, current: c.cur, growthPct: c.growth, stock: c.stock })),
+      stockAgeing: r.age ? { total: r.age.total, old30: r.age.old30, old60: r.age.old60, buckets: r.age.buckets, byClass: r.age.byClass } : null,
+      teamAgents: r.isTl ? (p.agents || []) : undefined,
+      grandTotalText: reportText(r)
+    }, null, 2);
   }
 
   function makePdf(r) {
@@ -418,10 +516,12 @@ FF.pages = FF.pages || {};
           <p class="dim">${p.id ? `ID: <b>${esc(p.id)}</b> · ` : ''}${p.tlName && !r.isTl ? `TL: <b>${esc(p.tlName)}</b>${p.tlId ? ` (${esc(p.tlId)})` : ''} · ` : ''}${p.mobile ? `📞 <a href="tel:${esc(p.mobile)}">${esc(p.mobile)}</a>` : ''}</p>
         </div>
         <div class="as-actions">
-          <button class="btn primary" data-as-act="pdf">📄 Download PDF</button>
-          <button class="btn" data-as-act="share">📲 Share PDF / WhatsApp</button>
-          <button class="btn" data-as-act="wa">💬 WhatsApp Text</button>
+          <button class="btn primary" data-as-act="pdf">📄 PDF</button>
+          <button class="btn" data-as-act="excel">📊 Excel</button>
           <button class="btn" data-as-act="csv">⬇ CSV</button>
+          <button class="btn" data-as-act="json">🧾 JSON</button>
+          <button class="btn" data-as-act="share">📲 Share / WhatsApp</button>
+          <button class="btn" data-as-act="wa">💬 WA Text</button>
           <button class="btn" data-as-act="copy">📋 Copy</button>
         </div>
       </div>
@@ -473,12 +573,13 @@ FF.pages = FF.pages || {};
     async function render(root, params) {
       const chLabel = isGv ? 'GV Partner' : 'First Forward';
       root.innerHTML = `<div class="page">
-        <div class="page-head"><div><h1>${isGv ? '🟩' : '🟦'} ${chLabel} · Agent / TL Summary</h1><p class="sub">Search by <b>Name · Agent Name · TL Name · Agent ID · TL ID · Mobile Number</b> — poora summary + charts + ageing + Grand Total PDF / WhatsApp / CSV</p></div></div>
+        <div class="page-head"><div><h1>${isGv ? '🟩' : '🟦'} ${chLabel} · Agent / TL Summary</h1><p class="sub">Search by <b>Name · Agent Name · TL Name · Agent ID · TL ID · Mobile Number</b> — poora summary + charts + ageing + Grand Total PDF / Excel / CSV / JSON / WhatsApp</p></div></div>
         <div class="card card-primary"><div class="card-body">
           <div class="as-search-bar">
             <div class="as-search">
               <input id="as-q" class="input" type="search" placeholder="🔎 Search Agent Name, TL Name, Agent ID, TL ID, ya 10-digit Mobile Number…" value="${esc((params && params.q) || state.q || '')}" autocomplete="off">
               <button class="btn primary" id="as-search-btn" type="button">🔎 Search</button>
+              <button class="btn" id="as-refresh-btn" type="button" title="Data refresh — cache clear karke dobara load">🔄</button>
               <div id="as-drop" class="as-drop" hidden></div>
             </div>
           </div>
@@ -536,7 +637,7 @@ FF.pages = FF.pages || {};
         drop.hidden = false;
       };
 
-      const pick = async (person) => {
+      const pick = async (person, opts) => {
         if (!person) return;
         drop.hidden = true;
         state.picked = person;
@@ -544,7 +645,7 @@ FF.pages = FF.pages || {};
         qEl.value = person.name;
         renderTopChips('');
         body.innerHTML = U.spinner(`${person.name} ka poora summary ban raha hai…`);
-        state.report = await buildReport(person);
+        state.report = await buildReportCached(person, opts);
         body.innerHTML = reportHtml(state.report);
         if (FF.charts && FF.charts.mount) FF.charts.mount(body);
         if (FF.app && FF.app.enhanceTables) FF.app.enhanceTables(body);
@@ -553,10 +654,11 @@ FF.pages = FF.pages || {};
       renderTopChips(qEl.value);
 
       qEl.addEventListener('focus', () => showDrop(qEl.value));
+      let qTimer = 0;
       qEl.addEventListener('input', () => {
         state.q = qEl.value;
-        showDrop(qEl.value);
-        renderTopChips(qEl.value);
+        clearTimeout(qTimer);
+        qTimer = setTimeout(() => { showDrop(qEl.value); renderTopChips(qEl.value); }, 120); // v3.34 debounce — fast typing par render storm nahi
       });
       qEl.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
@@ -570,8 +672,26 @@ FF.pages = FF.pages || {};
       if (searchBtn) {
         searchBtn.addEventListener('click', () => {
           const hits = matchPeople(state.list, qEl.value);
-          if (hits[0]) pick(hits[0]);
+          if (hits[0]) pick(hits[0], { fresh: true }); // Search = fresh report (cache bypass)
           else U.toast('Koi matching Agent ya TL nahi mila', 'warn');
+        });
+      }
+      const refreshBtn = U.$('#as-refresh-btn', root);
+      if (refreshBtn) {
+        refreshBtn.addEventListener('click', async () => {
+          refreshBtn.disabled = true;
+          try {
+            clearCaches();
+            state.list = await loadPeople(channel);
+            renderTopChips(qEl.value);
+            const target = (state.picked && matchPeople(state.list, state.picked.name)[0]) || (qEl.value && matchPeople(state.list, qEl.value)[0]);
+            if (target) await pick(target, { fresh: true });
+            U.toast('Data refresh ho gaya ✓', 'ok');
+          } catch (err) {
+            U.toast((err && err.message) || 'Refresh fail hua', 'err');
+          } finally {
+            refreshBtn.disabled = false;
+          }
         });
       }
 
@@ -598,17 +718,34 @@ FF.pages = FF.pages || {};
         if (act && state.report) {
           const r = state.report, fname = `${r.ch}-${r.isTl ? 'tl' : 'agent'}-${U.slug(r.p.name)}-${U.stamp()}`;
           const k = act.dataset.asAct;
-          if (k === 'pdf' || k === 'share') {
-            const bytes = makePdf(r);
-            if (k === 'share') await FF.pdf.share(bytes, `${fname}.pdf`, `${r.p.name} — Summary`, reportText(r));
-            else FF.pdf.download(bytes, `${fname}.pdf`);
-            U.toast('PDF ready ✓', 'ok');
-          } else if (k === 'wa') window.open(U.waLink(reportText(r)), '_blank', 'noopener');
-          else if (k === 'copy') { await U.copyText(reportText(r)); U.toast('Summary copied (with Grand Total) ✓', 'ok'); }
-          else if (k === 'csv') {
-            const rows = reportCsv(r);
-            U.downloadCsv(`${fname}.csv`, rows[0] || ['Field', 'Value'], rows.slice(1));
-            U.toast('CSV downloaded (with Grand Total) ✓', 'ok');
+          act.disabled = true;
+          try {
+            await new Promise((res) => setTimeout(res, 30)); // busy paint
+            if (k === 'pdf' || k === 'share') {
+              if (!FF.pdf && FF.lazy && FF.lazy.loadScript) await FF.lazy.loadScript('pdf.js').catch(() => {});
+              if (!FF.pdf || !FF.pdf.doc) throw new Error('PDF module load nahi hua — page refresh karo');
+              const bytes = makePdf(r);
+              if (k === 'share') await FF.pdf.share(bytes, `${fname}.pdf`, `${r.p.name} — Summary`, reportText(r));
+              else FF.pdf.download(bytes, `${fname}.pdf`);
+              U.toast(k === 'share' ? 'Share ready ✓' : 'PDF downloaded ✓', 'ok');
+            } else if (k === 'wa') window.open(U.waLink(reportText(r)), '_blank', 'noopener');
+            else if (k === 'copy') { await U.copyText(reportText(r)); U.toast('Summary copied (with Grand Total) ✓', 'ok'); }
+            else if (k === 'csv') {
+              const rows = reportCsv(r);
+              U.downloadCsv(`${fname}.csv`, rows[0] || ['Field', 'Value'], rows.slice(1));
+              U.toast('CSV downloaded (with Grand Total) ✓', 'ok');
+            } else if (k === 'excel') {
+              FF.xlsx.download(`${fname}.xlsx`, reportXlsx(r));
+              U.toast('Excel downloaded (multi-sheet, Grand Total) ✓', 'ok');
+            } else if (k === 'json') {
+              U.downloadBlob(`${fname}.json`, new Blob([reportJson(r)], { type: 'application/json' }));
+              U.toast('JSON downloaded ✓', 'ok');
+            }
+          } catch (err) {
+            console.error('[agentSummary] export failed:', err);
+            U.toast(`${(err && err.message) || 'Export fail hua'}`, 'err');
+          } finally {
+            act.disabled = false;
           }
           return;
         }
@@ -631,5 +768,5 @@ FF.pages = FF.pages || {};
 
   FF.pages.ffAgentSummary = makePage('ff');
   FF.pages.gvAgentSummary = makePage('gv');
-  FF.agentSummary = { loadPeople, matchPeople, topSuggestions, buildReport, makePdf, reportText, reportCsv };
+  FF.agentSummary = { loadPeople, matchPeople, topSuggestions, buildReport, makePdf, reportText, reportCsv, reportXlsx, reportJson, clearCaches };
 })(window.FF);

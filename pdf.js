@@ -10,7 +10,11 @@
  *     FF.pdf.share(blob, filename, text)      → Web Share (file) → na ho to download + WhatsApp text link
  *     FF.pdf.page(wMm, hMm, dpi)              → { canvas, ctx, px(mm) }  (mm coordinates)
  *     FF.pdf.wrap(ctx, text, maxW)            → lines[]
- *     FF.pdf.doc(opts)                        → report layout builder (heading / kv / kpis / table / text → pages)
+ *     FF.pdf.doc(opts)                        → report layout builder (title/heading/section/kpis/table/text → finish() = PDF Blob)
+ *       · v3.34 compat: doc({ title, subtitle, right, meta }) khud page-1 header banata hai,
+ *         section(text, sub) + footer(text) legacy names chalte hain, aur table() dono form leta hai —
+ *         table(columns, rows, topt)  YA  table({ headers, align, rows, foot }).
+ *       · finish(footerText) ab **Blob** return karta hai → FF.pdf.download(doc.finish(), name) seedha chalega.
  */
 window.FF = window.FF || {};
 (function (FF) {
@@ -112,6 +116,7 @@ window.FF = window.FF || {};
     const W = 210, H = 297, M = 11;
     const pages = [];
     let cur = null, y = 0;
+    let storedFooter = '';
     const brand = o.brand || 'First Forward';
     const newPage = () => {
       cur = page(W, H); pages.push(cur); y = M;
@@ -138,6 +143,18 @@ window.FF = window.FF || {};
         font(4.4, 800); ctx.fillText(text, px(M + 3), px(y + 4.8));
         y += 8.5; return api;
       },
+      /** v3.34 — legacy alias: section(title, sub) = heading + chhoti grey sub-line. */
+      section(text, sub) {
+        api.heading(text);
+        if (sub != null && sub !== '') {
+          need(6);
+          const { ctx, px } = cur;
+          ctx.fillStyle = '#64748b'; font(2.8, 500);
+          ctx.fillText(String(sub).slice(0, 90), px(M + 3), px(y + 0.2));
+          y += 4;
+        }
+        return api;
+      },
       text(text, optsT) {
         const t = optsT || {};
         const { ctx, px } = cur || (newPage(), cur);
@@ -163,8 +180,17 @@ window.FF = window.FF || {};
         }
         return api;
       },
-      /** columns: [{ h, w (relative), align }] · rows: string[][] */
+      /** columns: [{ h, w (relative), align }] · rows: string[][]
+       *  v3.34 — legacy form bhi chalega: table({ headers: [], align: [], rows: [[]], foot: [] }) */
       table(columns, rows, topt) {
+        if (columns && !Array.isArray(columns) && Array.isArray(columns.headers)) {
+          const legacy = columns;
+          const align = Array.isArray(legacy.align) ? legacy.align : [];
+          const cols = legacy.headers.map((h, i) => ({ h, align: align[i] === 'right' ? 'right' : 'left', bold: i === 0 && !!legacy.boldFirst }));
+          const lrows = (legacy.rows || []).map((r) => (Array.isArray(r) ? r : [r]));
+          if (legacy.foot && legacy.foot.length) { const footRow = legacy.foot.map((v) => (v == null ? '' : v)); footRow.bold = true; lrows.push(footRow); }
+          return api.table(cols, lrows, { headColor: legacy.headColor, boldLast: false });
+        }
         const t = topt || {};
         const avail = W - 2 * M, tot = columns.reduce((s, c) => s + (c.w || 1), 0);
         const xs = []; let acc = M;
@@ -198,17 +224,27 @@ window.FF = window.FF || {};
         y += 3; return api;
       },
       gap(mm) { y += mm || 3; return api; },
+      /** v3.34 — legacy alias: footer(text) finish() ke footer me chala jata hai. */
+      footer(text) { storedFooter = String(text || ''); return api; },
       finish(footer) {
         if (!pages.length) newPage();
+        const foot = footer || storedFooter || brand;
         pages.forEach((p, i) => {
           const { ctx, px } = p;
           ctx.fillStyle = '#94a3b8'; ctx.font = `400 ${px(2.7)}px ${FONT}`;
-          ctx.fillText(`${footer || brand} · page ${i + 1}/${pages.length}`, px(M), px(H - 6));
+          ctx.fillText(`${foot} · page ${i + 1}/${pages.length}`, px(M), px(H - 6));
         });
-        return pages.map((p) => p.canvas);
+        // v3.34 — Blob seedha return (pehle canvases array aata tha; purane callers FF.pdf.download(doc.finish()) karte hain)
+        return build(pages.map((p) => p.canvas));
       }
     };
     newPage();
+    // v3.34 — opts me title/subtitle/right/meta diye hain to page 1 par khud render karo
+    // (legacy callers doc({ title, subtitle, right }) dete hain aur title() method khud nahi call karte).
+    if (o.title) {
+      const subBits = [o.subtitle, o.meta, o.right].filter(Boolean).map(String);
+      api.title(String(o.title), subBits.join(' · '));
+    }
     return api;
   }
 
