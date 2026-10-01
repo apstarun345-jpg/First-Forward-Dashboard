@@ -7,6 +7,28 @@ window.FF = window.FF || {};
   const esc = U.esc;
   const state = { user: null, permissions: [], settings: null, ready: false };
 
+  // 👁 v3.35 — view-as preview: admin khud ko kisi user ke rights me temporarily dekh sakta hai.
+  // Sirf VIEW overlay hai — session/data real admin ka rehta hai. sessionStorage me rehta hai
+  // (tab refresh par preview bana rahe), lekin init() me validate hota hai: real admin hi preview
+  // me reh sakta hai; logout par clear.
+  const VIEWAS_KEY = 'ff_viewas';
+  let viewAs = null; // { username, name, role, permissions: [], mobile?, email?, avatar? }
+  function viewAsRestore() {
+    try {
+      const raw = sessionStorage.getItem(VIEWAS_KEY);
+      if (!raw) return;
+      const v = JSON.parse(raw);
+      if (v && v.username && Array.isArray(v.permissions)) viewAs = v;
+    } catch { /* corrupt/absent — ignore */ }
+  }
+  function viewAsPersist() {
+    try {
+      if (viewAs) sessionStorage.setItem(VIEWAS_KEY, JSON.stringify(viewAs));
+      else sessionStorage.removeItem(VIEWAS_KEY);
+    } catch { /* ignore */ }
+  }
+  viewAsRestore();
+
   async function api(path, method, body) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 60000);
@@ -19,12 +41,39 @@ window.FF = window.FF || {};
   }
 
   function can(perm) {
+    // 👁 preview on hai to sirf target user ke permissions lagte hain (admin bypass nahi).
+    if (viewAs) return viewAs.role === 'admin' || (viewAs.permissions || []).includes(perm);
     const u = state.user;
     if (!u) return false;
     if (u.role === 'admin') return true;
     return (u.permissions || []).includes(perm);
   }
-  function isAdmin() { return !!(state.user && state.user.role === 'admin'); }
+  function isAdmin() {
+    if (viewAs) return viewAs.role === 'admin';
+    return !!(state.user && state.user.role === 'admin');
+  }
+  /** 👁 Preview mode me target user ka pseudo-user (display ke liye) — off ho to null. */
+  function viewingAs() { return viewAs; }
+  function startViewAs(user) {
+    // Sirf REAL admin account se shuru ho sakta hai (preview mode me nahi — wahan tab tak
+    // Users tab bhi khula nahi hota, phir bhi guard hai).
+    if (!state.user || state.user.role !== 'admin' || !user || !user.username) return false;
+    viewAs = {
+      username: String(user.username),
+      name: String(user.name || user.username),
+      role: user.role === 'admin' ? 'admin' : 'user',
+      permissions: Array.isArray(user.permissions) ? user.permissions.slice() : [],
+      mobile: user.mobile || '', email: user.email || '', avatar: user.avatar || ''
+    };
+    viewAsPersist();
+    return true;
+  }
+  function stopViewAs() {
+    if (!viewAs) return false;
+    viewAs = null;
+    viewAsPersist();
+    return true;
+  }
   function avatarHtml(user, cls) {
     const u = user || state.user || {};
     const name = String(u.name || u.username || 'U').trim();
@@ -335,6 +384,8 @@ window.FF = window.FF || {};
       const me = await api('/api/auth/me');
       state.permissions = me.permissions || [];
       applySettings(me.settings);
+      // 👁 stored preview tab hi chale jab logged-in account real admin ho (warna clear).
+      if (viewAs && (!me.user || me.user.role !== 'admin')) stopViewAs();
       if (me.user) { state.user = me.user; state.ready = true; const boot = U.$('#app-boot'); if (boot) boot.remove(); return true; }
     } catch (err) {
       console.error(err);
@@ -347,6 +398,7 @@ window.FF = window.FF || {};
   async function logout() {
     // ⚡ Instant UI — don't wait for the network round-trip before clearing state.
     state.user = null;
+    stopViewAs(); // 👁 preview session ke saath chala jaye
     try { localStorage.removeItem('ff_user'); } catch { /* ignore */ }
     if (FF.notifications && FF.notifications.stop) FF.notifications.stop();
     if (FF.liveAssist && FF.liveAssist.stop) FF.liveAssist.stop();
@@ -374,6 +426,8 @@ window.FF = window.FF || {};
 
   FF.auth = {
     init, can, isAdmin, logout, api, showLogin, showForgot, onExpired, applySettings, applyTheme, avatarHtml, roleLabel, refreshUser, splash,
-    get user() { return state.user; }, get permissions() { return state.permissions; }, get settings() { return state.settings; }
+    startViewAs, stopViewAs, viewingAs,
+    get user() { return state.user; }, get permissions() { return state.permissions; }, get settings() { return state.settings; },
+    get viewAsUser() { return viewAs ? { username: viewAs.username, name: viewAs.name, role: viewAs.role, mobile: viewAs.mobile || '', email: viewAs.email || '', avatar: viewAs.avatar || '', permissions: viewAs.permissions } : null; }
   };
 })(window.FF);

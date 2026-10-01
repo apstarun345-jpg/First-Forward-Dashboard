@@ -359,7 +359,7 @@ window.FF = window.FF || {};
     return p ? p.perm : null;
   }
   function featOk(p) {
-    if (p.adminOnly && !(FF.auth.user && FF.auth.user.role === 'admin')) return false;
+    if (p.adminOnly && !FF.auth.isAdmin()) return false; // 👁 preview me target ke hisaab se
     return !p.feat || !FF.config.features || FF.config.features[p.feat] !== false;
   }
   function allowed(page, params) { const perm = pagePerm(page, params); const p = pageDef(page); if (p && !featOk(p)) return false; return !perm || FF.auth.can(perm); }
@@ -462,7 +462,7 @@ window.FF = window.FF || {};
     }
     const accountOpen = openNavGroup === 'Account';
     html += `<button type="button" class="nav-sec nav-sec-toggle ${accountOpen ? 'open' : ''}" data-nav-group="Account" aria-expanded="${accountOpen}" aria-controls="nav-group-account"><span>${GROUP_ICON.Account} ${groupLabel('Account')}</span><span class="nav-chevron" aria-hidden="true">›</span></button><div class="nav-group-body" id="nav-group-account" ${accountOpen ? '' : 'hidden'}>`
-      + navItem('settings', '⚙️', pageLabel({ id: 'settings', label: 'Settings' }).label, u && u.role === 'admin' ? 'Branding · data · users · access' : 'My account', current.page === 'settings', '#/settings', u && u.role === 'admin' && pendingSignups > 0 ? ` <span class="nav-count" title="${pendingSignups} account approval pending — Settings → Users">${pendingSignups} pending ⏳</span>` : '') + '</div>';
+      + navItem('settings', '⚙️', pageLabel({ id: 'settings', label: 'Settings' }).label, FF.auth.isAdmin() ? 'Branding · data · users · access' : 'My account', current.page === 'settings', '#/settings', FF.auth.isAdmin() && pendingSignups > 0 ? ` <span class="nav-count" title="${pendingSignups} account approval pending — Settings → Users">${pendingSignups} pending ⏳</span>` : '') + '</div>';
     nav.innerHTML = html;
     nav.querySelectorAll('[data-nav-group]').forEach((btn) => btn.addEventListener('click', () => selectNavGroup(btn.dataset.navGroup)));
 
@@ -512,7 +512,7 @@ window.FF = window.FF || {};
 
   // ---- top-right user menu ----
   function renderTopUser() {
-    const u = FF.auth.user;
+    const u = FF.auth.viewAsUser || FF.auth.user; // 👁 preview me target user dikhao
     const btn = U.$('#user-btn');
     if (!btn || !u) return;
     btn.innerHTML = `${FF.auth.avatarHtml(u, 'top')}<span class="user-btn-text"><b>${esc(u.name || u.username)}</b><small>${FF.auth.roleLabel(u)}</small></span><span class="chev">▾</span>`;
@@ -651,8 +651,34 @@ window.FF = window.FF || {};
     </div>`;
   }
 
+  // 👁 v3.35 — view-as preview strip: har page par dikhe, Exit se wapas real admin par.
+  let viewAsLast = null;
+  function viewAsBanner() {
+    if (EMBED_LIVE) return;
+    const v = FF.auth.viewingAs ? FF.auth.viewingAs() : null;
+    const key = v ? v.username : null;
+    const changed = key !== viewAsLast;
+    viewAsLast = key;
+    const old = U.$('#viewas-banner');
+    if (!v) { if (old) old.remove(); }
+    else if (!old) {
+      const el = U.h(`<div class="viewas-banner" id="viewas-banner" role="alert"><span>👁 <b>Preview mode</b> — <b>${esc(v.name)}</b> (@${esc(v.username)}) ke rights se dekh rahe ho · ye sirf view hai, data aapke admin session se aayega</span><button class="btn small primary" id="viewas-exit">↩️ Exit preview</button></div>`);
+      document.body.appendChild(el);
+      U.$('#viewas-exit', el).addEventListener('click', () => {
+        if (FF.auth.stopViewAs) FF.auth.stopViewAs();
+        el.remove();
+        U.toast('Preview mode off ✓', 'ok');
+        if (location.hash !== '#/home') location.hash = '#/home';
+        else renderCurrent();
+      });
+    }
+    // Preview on/off par sidebar + top-user card target ke hisaab se refresh.
+    if (changed) { renderSidebar(); renderTopUser(); }
+  }
+
   async function renderCurrent(ctx) {
     if (!FF.auth.user) return;
+    viewAsBanner();
     const { page, params } = parseHash();
     current = { page, params, token: current.token + 1 };
     const token = current.token;
@@ -1397,7 +1423,7 @@ window.FF = window.FF || {};
     const foot = U.$('.side-foot'); if (!foot) return;
     let chip = U.$('#live-share-chip');
     const u = FF.auth.user;
-    const on = u && u.role !== 'admin' && localStorage.getItem('ff_presence_pointer') !== '0';
+    const on = u && !FF.auth.isAdmin() && localStorage.getItem('ff_presence_pointer') !== '0'; // 👁 preview: target ke hisaab se
     if (!on) { if (chip) chip.remove(); return; }
     if (!chip) { chip = U.h('<a class="live-share-chip" id="live-share-chip" href="#/settings?tab=account" title="Admin aapka page, cursor aur clicks live dekh sakta hai. Settings → My account me band kar sakte ho.">👁 Admin live view on</a>'); foot.insertBefore(chip, foot.firstChild); }
   }

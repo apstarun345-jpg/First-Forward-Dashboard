@@ -782,7 +782,7 @@ FF.pages = FF.pages || {};
         <div class="user-notify-prefs">
           <label class="check"><input type="checkbox" data-field="notifyAccess" ${u.role === 'admin' || u.notifyAccess !== false ? 'checked' : ''} ${u.role === 'admin' ? 'disabled' : ''}> 🔔 Notifications access <small class="dim">(in-app bell, browser alerts, mobile push — sab band ho jayega off karne par)</small></label>
         </div>
-        <div class="btn-row user-actions"><button class="btn small primary" data-user-save>💾 Save</button><button class="btn small" data-user-pw>🔑 Reset password</button>${u.username !== A.user.username ? '<button class="btn small danger" data-user-del>🗑 Delete</button>' : ''}<span class="dim small" data-user-msg></span></div>
+        <div class="btn-row user-actions"><button class="btn small primary" data-user-save>💾 Save</button><button class="btn small" data-user-pw>🔑 Reset password</button>${u.username !== A.user.username ? `<button class="btn small" data-user-viewas title="Is user ke rights se poora dashboard dekho — sirf view preview, kuch save nahi hoga">👁 Preview</button><button class="btn small danger" data-user-del>🗑 Delete</button>` : ''}<span class="dim small" data-user-msg></span></div>
       </div>`).join('');
     root.innerHTML = `${section(`🔐 Users <span class="dim">(${usersCache.length} · ${usersCache.filter((u) => !u.approved).length} pending)</span>`, `<p class="dim small">Naya user sign up karta hai → yahan "Pending" dikhega → Active tick karo, permissions choose karo, Save. Admin ke paas sab access hota hai. <b>🔔 Notifications access</b> off karne se user ko koi notification nahi dikhega / nahi milega — saari activity admin ko hi aayegi.</p><div class="user-list">${rows}</div>`)}
       ${section('➕ Add user directly', `<div class="form-grid"><label class="fld"><span>Username</span><input class="input" id="nu-username" autocapitalize="none"></label><label class="fld"><span>Full name</span><input class="input" id="nu-name"></label><label class="fld"><span>Password</span><input class="input" id="nu-password" type="text" value="${Math.random().toString(36).slice(2, 10)}"></label><label class="fld"><span>Role</span><select id="nu-role"><option value="user">User</option><option value="admin">Admin</option></select></label><label class="fld"><span>Mobile</span><input class="input" id="nu-mobile"></label><label class="fld"><span>Email</span><input class="input" id="nu-email"></label></div><div class="save-bar"><button class="btn primary" id="nu-add">➕ Create user</button><span class="dim small">Default permissions milengi; baad me edit karo. Password user ko bata do (pehle login par badalne ko kaha jaayega).</span></div>`)}`;
@@ -809,6 +809,14 @@ FF.pages = FF.pages || {};
       });
       const del = card.querySelector('[data-user-del]');
       if (del) del.addEventListener('click', async () => { if (!confirm(`Delete user "${username}"?`)) return; try { await A.api(`/api/users/${encodeURIComponent(username)}`, 'DELETE'); U.toast('Deleted', 'ok'); usersTab(root); if (FF.app && FF.app.refreshPendingBadge) FF.app.refreshPendingBadge(); } catch (err) { U.toast(err.message, 'err'); } });
+      // 👁 v3.35 — view-as preview: admin is user ban kar poora dashboard dekh sake (sirf view).
+      const viewBtn = card.querySelector('[data-user-viewas]');
+      if (viewBtn) viewBtn.addEventListener('click', () => {
+        if (!A.startViewAs(u)) { U.toast('Preview shuru nahi hua', 'err'); return; }
+        U.toast(`👁 Preview ON — ${u.name || u.username} ke rights. Upar ke banner se Exit karo.`, 'ok');
+        if (location.hash !== '#/home') location.hash = '#/home';
+        else if (FF.app && FF.app.renderCurrent) FF.app.renderCurrent();
+      });
     });
     const addUser = U.$('#nu-add', root);
     addUser.addEventListener('click', () => U.withButtonBusy(addUser, async () => {

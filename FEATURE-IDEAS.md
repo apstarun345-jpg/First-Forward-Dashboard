@@ -219,3 +219,24 @@
   escalation reminder, stock aging alert, reorder → draft request, agent-wise commission slip,
   target gap-per-day, session management, audit CSV, offline draft, voice input — inme se koi bhi
   1-2 din ka kaam hai aur koi naya external service nahi chahiye. Bas batao kaunsa pehle karna hai. 🚀
+
+---
+
+## 1️⃣1️⃣ v3.35 ke baad — naye ideas (v3.34 shipped cheezein aur upar ki #1–81 exclude karke)
+
+> Access-control ka kaam (v3.35) ho gaya — ab wo ideas jo uske baad naturally aage badhte hain.
+
+| # | Idea | Kaise | Effort |
+|---|---|---|---|
+| 82 | ✅ **SHIPPED v3.35** — **👁 View-as-user (admin preview)** — admin kisi bhi user jaisa dashboard dekh sake (kaunse buttons/pages chhup hain) | Settings → Users → 👁 Preview; permission overlay + exit banner | ✅ |
+| 83 | **Export watermark** — non-admin ke PDF/Excel me chhupa `username · timestamp` footer/ghost-text | pdf.js / xlsx writer me optional footer; leak trace banta hai | 🟢 |
+| 84 | **Access-change history** — "Rahul ko kab export mila, kab gaya" user card me timeline | permission save par diff log (audit-log ka hi extension) + Users card me read-only list | 🟢 |
+| 85 | **Agent-vs-agent side-by-side compare** — do agents ki MTD/growth/stock/ageing ek table me | summary page par "Compare" picker → naya drawer (channel-compare ka agent version) | 🟡 |
+| 86 | **Pin favourite agents/TLs** — search bar ke upar apne 5-6 regular log hamesha chips me | localStorage me pinnned list; `topSuggestions` se pehle dikhao | 🟢 |
+| 87 | **Stale-data indicator** — card/head par "⏱ 8 min purana" badge + auto-refresh interval option | `generatedAt`/store timestamp se age; 10-min par soft nudge (refresh perm wale ko auto) | 🟢 |
+| 88 | **Bulk multi-select WhatsApp** — TL team table me checkboxes → ek WA message me sab agents ka snapshot | row selection state + team-pack jaisa combined text; share permission par gated | 🟡 |
+| 89 | **Report QR code** — summary drawer/PDF me QR jo live report khol de (office me print ke liye) | QR gen (tiny inline ya CDN-free lib) → `#`-link wala canvas draw | 🟡 |
+| 90 | **Role-aware home / landing** — user sirf uske permissions wale widgets dekhe, baaki placeholders | home.js render par `FF.auth.can()` filters; naye user ko uske hisaab ka dashboard | 🟢 |
+| 91 | **Exports ki apni language** — report text/PDF/WhatsApp template Hindi/English toggle | reportText/reportHtml me 2 template dicts + user pref (i18n system ka extension) | 🟡 |
+
+Quick-win jo abhi bina kisi naye service ke ho sakte hain: **83, 84, 86, 87, 90**.

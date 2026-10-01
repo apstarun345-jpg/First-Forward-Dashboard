@@ -1766,6 +1766,11 @@ button.notification-item small u { color: var(--brand); text-decoration: none; f
 /* ---------- storage warning banner + live-share chip ---------- */
 .storage-banner { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 12px 22px 0; padding: 10px 14px; border-radius: 14px; background: #fffbeb; border: 1px solid #fcd34d; color: #92400e; font-size: 13px; }
 .storage-banner span { flex: 1 1 320px; }
+/* 👁 v3.35 — view-as preview strip (Settings → Users → 👁 Preview): hamesha dikhe, Exit se wapas. */
+.viewas-banner { position: fixed; top: 0; left: 0; right: 0; z-index: 130; display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap; padding: 8px 14px; background: #4f46e5; color: #fff; font-size: 13px; box-shadow: 0 6px 18px rgba(49, 46, 229, .35); border-bottom: 1px solid rgba(255, 255, 255, .25); }
+.viewas-banner span { flex: 1 1 380px; text-align: center; }
+.viewas-banner .btn { background: #fff; color: #3730a3; border: 0; font-weight: 700; white-space: nowrap; }
+@media (max-width: 600px) { .viewas-banner { justify-content: space-between; } .viewas-banner span { text-align: left; flex: 1 1 180px; } }
 .live-share-chip { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; padding: 3px 10px; border-radius: 999px; background: rgba(255,255,255,.14); color: var(--side-ink); font-size: 11px; font-weight: 700; text-decoration: none; }
 .live-share-chip:hover { background: rgba(255,255,255,.24); text-decoration: none; }
 
@@ -4029,11 +4034,17 @@ html[data-theme='dark'] .age-tbl tr.age-total td { background: rgba(255, 255, 25
 .as-drop { position: absolute; z-index: 30; left: 0; right: 0; top: 100%; margin-top: 4px; background: #fff; color: #0f172a; border: 1px solid #c7d2fe; border-radius: 12px; box-shadow: 0 14px 34px rgba(30, 27, 75, .25); max-height: 360px; overflow: auto; }
 .as-opt { display: flex; justify-content: space-between; align-items: center; gap: 10px; width: 100%; text-align: left; background: none; border: 0; border-bottom: 1px solid #eef2f7; padding: 9px 12px; cursor: pointer; color: #0f172a; font: inherit; }
 .as-opt:hover { background: #eef2ff; }
+/* v3.35 — dropdown har theme/pack me white hai: .dim ko hardcoded rakho, warna dark/pack
+   --muted (#93a3bc / #d0a982 jaise) white popup par ~2:1 → TL-ID line gayab. */
+.as-drop .dim { color: #475569; }
 .as-opt-main { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
 .as-head { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; padding: 16px 18px; border-radius: 18px; color: #fff; background: linear-gradient(120deg, #2563eb, #7c3aed 55%, #ec4899); margin-bottom: 14px; box-shadow: 0 10px 26px rgba(79, 70, 229, .25); }
 .as-ava { font-size: 2.2rem; background: rgba(255, 255, 255, .2); border-radius: 16px; padding: 8px 12px; }
 .as-who { min-width: 0; flex: 1; }
 .as-who h2 { margin: 0; font-size: 1.4rem; overflow-wrap: anywhere; } .as-who p { margin: 3px 0 0; opacity: .95; overflow-wrap: anywhere; } .as-who a { color: #fff; }
+/* v3.35 — ID / TL ID line me `.dim` = --muted (slate) jo gradient ke blue/purple par ~1.1:1
+   luminance tha → text background me ghul jaata tha. Header ke andar hamesha white (pack-proof). */
+.as-head .dim { color: rgba(255, 255, 255, .9); }
 .as-actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
 .as-actions .btn { background: #fff; color: #3730a3; border: 0; font-weight: 700; } .as-actions .btn.primary { background: #16a34a; color: #fff; }
 .as-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 14px; }
