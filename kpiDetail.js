@@ -288,6 +288,16 @@ window.FF = window.FF || {};
     const periodLabel = p.from === p.to ? `${U.labelDateKey(p.from, true)} (${U.weekday(U.fromDateKey(p.from))})` : `${U.labelDateKey(p.from, true)} → ${U.labelDateKey(p.to, true)}`;
     // 🟩 GV aaj = GV Master sheet (live) · 🟦 FF = EIR (T+1). Purane dinon ke liye EIR ledger.
     const srcLabel = spec.src === 'gv' ? 'GV Partner · GV Master sheet (live)' : spec.src === 'ff' ? 'First Forward issuance · EIR sheet (T+1)' : 'First Forward (EIR) + GV Partner (GV Master)';
+    let reconciliationNote = '';
+    if (spec.src === 'gv' && spec.tl && !filt && FF.masterProfile && FF.masterProfile.gvTlSnapshot) {
+      const ym = p.from.slice(0, 7), nowYm = U.ymKey(new Date());
+      const snapshots = FF.masterProfile.gvTlSnapshot(spec.tl, spec.tlId);
+      const report = ym === nowYm ? snapshots.cur : ym === U.prevMonthKey(nowYm) ? snapshots.last : null;
+      if (report) {
+        const difference = tot - report.total;
+        reconciliationNote = `<div class="kd-reconciliation"><b>GV REPORT ↔ tag-ledger reconciliation</b><span>GV REPORT TL snapshot: <b>${U.fmt(report.total)}</b> · GV Master / EIR detail: <b>${U.fmt(tot)}</b> · Difference: <b>${difference > 0 ? '+' : ''}${U.fmt(difference)}</b>.</span><small>${difference ? 'The headline TL card uses the dedicated GV REPORT TL value; class and tag details show the live issuance ledger. A refresh or source-coverage gap can explain the difference.' : 'TL snapshot and tag-level detail currently reconcile.'}</small></div>`;
+      }
+    }
     const byClass = tally(cur, (r) => r.cls), byClassPrev = tally(prev, (r) => r.cls);
     const byChannel = tally(cur, (r) => r.channel), byChannelPrev = tally(prev, (r) => r.channel);
     const byType = tally(cur, (r) => (r.type === 'REPLACEMENT' ? 'Replacement' : 'New issuance')), byTypePrev = tally(prev, (r) => (r.type === 'REPLACEMENT' ? 'Replacement' : 'New issuance'));
@@ -305,6 +315,7 @@ window.FF = window.FF || {};
       formula = `<div class="kd-formula">📐 Month-end projection = ${U.fmt(tot)} ÷ ${U.fmt(projDays)} din (aaj − 1) × ${U.fmt(md)} din = <b>${U.fmt(U.projectMonthEnd(tot, projDays, ym))}</b></div>`;
     }
     const body = `<div class="kd-hero"><div><span class="kd-kicker">${esc(srcLabel)}</span><div class="kd-big">${U.fmt(tot)} <small>tags</small></div><div class="kd-sub">${esc(periodLabel)}${filt ? ` · filter: <b>${esc(filt.label)}</b>` : ''}</div>${formula}</div><div class="kd-vs">${U.deltaHtml(U.growth(tot, ptot), { decimals: 0 })}<small>vs ${esc(pp.label)}: <b>${U.fmt(ptot)}</b></small></div></div>
+      ${reconciliationNote}
       <div class="kd-stats">${stat('VC4 (payable)', U.fmt(vc4), pct(vc4, tot), 'blue', { f: 'vc4', cls: '', title: `${spec.title || 'Detail'} · VC4` })}${stat('Commercial', U.fmt(comm), pct(comm, tot), 'violet', { f: 'comm', cls: '', title: `${spec.title || 'Detail'} · Commercial` })}${stat('First Forward', U.fmt(ff), pct(ff, tot), 'indigo', { src: 'ff', channel: '', title: `${spec.title || 'Detail'} · First Forward` })}${stat('GV Partner', U.fmt(gv), pct(gv, tot), 'teal', { src: 'gv', channel: '', title: `${spec.title || 'Detail'} · GV Partner` })}${stat('New issuance', U.fmt(tot - repl), pct(tot - repl, tot), 'green', { type: 'NOT_REPLACEMENT', title: `${spec.title || 'Detail'} · New issuance` })}${stat('Replacement', U.fmt(repl), pct(repl, tot), 'amber', { type: 'REPLACEMENT', title: `${spec.title || 'Detail'} · Replacement` })}${stat('Chassis', U.fmt(chassis), pct(chassis, tot), 'orange', { f: 'chassis', title: `${spec.title || 'Detail'} · Chassis` })}${stat('New / VRN', U.fmt(Math.max(0, newVrn)), pct(Math.max(0, newVrn), tot), 'sky', { vrnBucket: 'New / VRN (New)', title: `${spec.title || 'Detail'} · New / VRN` })}</div>
       <div class="kd-chips">
         ${[['both', 'FF + GV'], ['ff', '🟦 First Forward only'], ['gv', '🟩 GV Partner only']].map(([s, label]) => `<button class="kd-chip ${spec.src === s ? 'green' : ''}" data-kd-spec='${specAttr({ src: s, f: '', agent: '', channel: '', title: `${spec.title || 'Detail'} · ${label}` })}'>${label}</button>`).join('')}
@@ -1000,5 +1011,5 @@ window.FF = window.FF || {};
     if (chip && state.spec) { open({ ...state.spec, ...JSON.parse(chip.dataset.kdSpec || '{}') }); return; }
   });
 
-  FF.kpiDetail = { open, specFrom, registerList, normYm, resetHistory, _infer: inferSpec, _rowMatchesSpec: rowMatchesSpec, _stockDetail: stockDetail, _peopleDetail: peopleDetail, _limits: SOFT };
+  FF.kpiDetail = { open, specFrom, registerList, normYm, resetHistory, _infer: inferSpec, _rowMatchesSpec: rowMatchesSpec, _stockDetail: stockDetail, _peopleDetail: peopleDetail, _issuanceDetail: issuanceDetail, _limits: SOFT };
 })(window.FF);

@@ -4715,3 +4715,50 @@ html[data-theme="dark"] .hms-brand.ff { color: #93c5fd; } html[data-theme="dark"
 html[data-theme="dark"] .mppt-bar { background: color-mix(in srgb, var(--brand) 10%, var(--card)); }
 html[data-theme="dark"] .mp-people-table thead th { background: color-mix(in srgb, var(--brand) 16%, var(--card)); }
 html[data-theme="dark"] .ms-data-strip .dcell b { color: var(--ink); }
+
+/* --- 🎯 Home search issuance board: last month · MTD · VC4 · VC20 · VC5+ --- */
+.ms-issuance-board { margin: 2px 0 12px; padding: 10px; border: 1px solid color-mix(in srgb, var(--brand) 18%, var(--line)); border-radius: 16px; background: linear-gradient(145deg, color-mix(in srgb, var(--brand) 4%, var(--card)), var(--card) 70%); }
+.ms-issuance-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 1px 9px; }
+.ms-issuance-title > div { min-width: 0; }
+.ms-issuance-title > div > b { display: block; font-size: 12px; letter-spacing: .01em; }
+.ms-issuance-title > div > small { display: block; margin-top: 1px; color: var(--muted); font-size: 10px; line-height: 1.35; }
+.ms-issuance-pill { flex: none; padding: 4px 8px; border-radius: 999px; background: color-mix(in srgb, var(--brand) 10%, var(--card)); color: var(--brand); font-size: 9px; font-weight: 850; white-space: nowrap; }
+.ms-issuance-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 7px; }
+.ms-issuance-card { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 96px; padding: 8px 9px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--muted) 15%, var(--line)); border-radius: 13px; background: var(--card); box-shadow: 0 3px 10px rgba(15, 23, 42, .045); }
+.ms-issuance-card.is-drill { cursor: pointer; transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease; }
+.ms-issuance-card.is-drill:hover, .ms-issuance-card.is-drill:focus-visible { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(15, 23, 42, .12); outline: none; }
+.ms-issuance-card.last, .ms-issuance-card.current { grid-column: span 3; }
+.ms-issuance-card.class-vc4, .ms-issuance-card.class-vc20, .ms-issuance-card.class-vc5p { grid-column: span 2; }
+.ms-issuance-card-head { display: flex; align-items: center; justify-content: space-between; gap: 5px; color: var(--muted); font-size: 9px; font-weight: 850; letter-spacing: .035em; text-transform: uppercase; line-height: 1.2; }
+.ms-issuance-icon { font-size: 13px; line-height: 1; }
+.ms-issuance-value { display: block; margin: 5px 0 2px; color: var(--ink); font-size: clamp(18px, 2.2vw, 25px); line-height: 1.05; font-weight: 950; letter-spacing: -.025em; font-variant-numeric: tabular-nums; }
+.ms-issuance-sub { display: block; color: var(--muted); font-size: 9px; line-height: 1.35; overflow-wrap: anywhere; }
+.ms-issuance-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 8px; margin-top: auto; padding-top: 5px; color: var(--muted); font-size: 8.5px; line-height: 1.3; overflow-wrap: anywhere; }
+.ms-issuance-foot b { color: var(--ink); font-weight: 850; }
+.ms-issuance-expected { color: #4f46e5; }
+.ms-issuance-card.last { background: linear-gradient(150deg, color-mix(in srgb, #0ea5e9 12%, var(--card)), var(--card) 72%); border-color: color-mix(in srgb, #0ea5e9 36%, var(--line)); }
+.ms-issuance-card.current { background: linear-gradient(150deg, color-mix(in srgb, #8b5cf6 12%, var(--card)), var(--card) 72%); border-color: color-mix(in srgb, #8b5cf6 38%, var(--line)); }
+.ms-issuance-card.class-vc4 { background: linear-gradient(150deg, color-mix(in srgb, #10b981 11%, var(--card)), var(--card) 72%); border-color: color-mix(in srgb, #10b981 35%, var(--line)); }
+.ms-issuance-card.class-vc20 { background: linear-gradient(150deg, color-mix(in srgb, #f59e0b 13%, var(--card)), var(--card) 72%); border-color: color-mix(in srgb, #f59e0b 38%, var(--line)); }
+.ms-issuance-card.class-vc5p { background: linear-gradient(150deg, color-mix(in srgb, #ec4899 11%, var(--card)), var(--card) 72%); border-color: color-mix(in srgb, #ec4899 34%, var(--line)); }
+.ms-issuance-source { margin: 7px 2px 0; color: var(--muted); font-size: 8.5px; line-height: 1.35; }
+.ms-issuance-source b { color: var(--ink); }
+.ms-issuance-recon { display: inline-block; margin: 3px 0 0; padding: 2px 6px; border-radius: 7px; background: color-mix(in srgb, #f59e0b 12%, var(--card)); color: #92400e; font-weight: 800; }
+.kd-reconciliation { display: grid; gap: 3px; margin: 0 0 13px; padding: 11px 13px; border: 1px solid color-mix(in srgb, #f59e0b 42%, var(--line)); border-radius: 13px; background: color-mix(in srgb, #fef3c7 56%, var(--card)); font-size: 12px; }
+.kd-reconciliation > span { color: var(--ink); }
+.kd-reconciliation > small { color: var(--muted); line-height: 1.45; }
+html[data-theme="dark"] .ms-issuance-card { background-color: var(--card); box-shadow: 0 4px 12px rgba(0, 0, 0, .2); }
+html[data-theme="dark"] .ms-issuance-expected { color: #c4b5fd; }
+html[data-theme="dark"] .ms-issuance-recon { color: #fde68a; background: color-mix(in srgb, #b45309 24%, var(--card)); }
+html[data-theme="dark"] .kd-reconciliation { background: color-mix(in srgb, #b45309 17%, var(--card)); border-color: color-mix(in srgb, #fbbf24 45%, var(--line)); }
+@media (max-width: 560px) {
+  .ms-issuance-board { padding: 8px; }
+  .ms-issuance-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+  .ms-issuance-card.last, .ms-issuance-card.current, .ms-issuance-card.class-vc4, .ms-issuance-card.class-vc20, .ms-issuance-card.class-vc5p { grid-column: span 1; }
+  .ms-issuance-card.current { grid-column: span 2; }
+  .ms-issuance-card { min-height: 90px; padding: 8px; }
+  .ms-issuance-card-head { font-size: 8.5px; }
+  .ms-issuance-value { font-size: 20px; }
+  .ms-issuance-foot { font-size: 8px; }
+  .ms-issuance-title > div > small { max-width: 245px; }
+}

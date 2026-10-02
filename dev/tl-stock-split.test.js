@@ -155,14 +155,15 @@ test('GV TL: class-less Stock Agent rows se VC4 dubara nahi judta (100, not 120)
   assert.deepEqual([pr.tlStock.own.total, pr.tlStock.agents.total], [30, 70]);
   assert.equal(pr.agentCount, 2, 'GV TL bhi apni list me agent nahi');
   assert.deepEqual(pr.agents.map((a) => a.name).sort(), ['GV Ramesh', 'GV Suresh']);
-  // GV convention: 'agentName === tlName' wali row Direct / self-supervised gin jaati hai (config.isDirectAgent),
-  // isliye wo agents ki list me aati hi nahi — TL ka own stock stock-detail rows se aata hai.
-  assert.equal(pr.selfAgent, null, 'GV me TL ki row self-supervised (Direct) filter se bahar rehti hai');
+  // GV convention: 'agentName === tlName' wali row self-supervised hoti hai; keep it as TL own,
+  // not as a managed agent. Its issuance is part of the repeated GV REPORT TL snapshot.
+  assert.equal(pr.selfAgent.name, 'GV TL', 'self-supervised GV REPORT row is retained as TL own');
+  assert.equal(pr.selfAgent.cur, 30, 'TL own issuance row stays separate from the two managed agents');
   assert.equal(sumStock(pr), 100, 'GV class table bhi 100 par reconcile');
   const html = FF.masterProfile.html(pr);
   assert.match(html, /ke paas \(TL own\)/, 'row na bhi ho to footer composition se reconcile karta hai');
   assert.match(html, /= TL TOTAL \(own \+ agents\)/);
-  assert.match(html, /TL ke agents · 2</);
+  assert.match(html, /TL ke agents · 2/, 'sirf do managed agents count hote hain; TL own row alag hai');
 });
 
 test('drawer / exports: TL ki row agents ke table me alag dikhti hai + footer reconcile karta hai', async () => {

@@ -10,7 +10,7 @@
 
 | Cheez | 🟦 First Forward | 🟩 GV Partner |
 | --- | --- | --- |
-| **Issuance (last month / current)** | **EIR** tab (har tag ki row) — *authoritative*. REPORT ke duplicate issuance columns sirf reconcile ke liye | **GV Master** tab (issuance log) — live; GV REPORT sirf fallback |
+| **Issuance (last month / current)** | **EIR** tab (har tag ki row) — *authoritative*. REPORT ke duplicate issuance columns sirf reconcile ke liye | **TL headline:** GV REPORT AQ:AV TL snapshot (deduplicated; period blank ho to GV Master/EIR fallback). **Agent + class/tag detail:** GV Master/EIR ledger; differences are shown, not silently padded |
 | **Stock (agent-wise, class-wise)** | **StockDataa** (tag-wise) · REPORT ka *Agent Inventory Summary* snapshot | **Tag Assignment** (tag-wise) · GV REPORT ke `Stock VC12…VC7` columns |
 | **Agent / TL operational fields** (priority, status, last active, TL stock, mobile) | **REPORT** tab | **GV REPORT** tab (header row 4) |
 | **Data basis** | **T+1** — aaj ka data kal aata hai (1 tareekh ko "current month" = pichhla month) | **Live** — aaj tak ka data |
@@ -57,7 +57,7 @@ hain, neeche sub-headings. Sections (fallback start column ke saath):
 
 ## 3) 🟩 GV REPORT sheet (GV Partner)
 
-Tab **`GV REPORT`**, **header row 4**, range `A4:BE`. Ek row = ek agent. Columns (`gv.js · REPORT_COLS`):
+Tab **`GV REPORT`**, **header row 4**, configured range `A4:AZ`. Ek row = ek agent. Columns (`gv.js · REPORT_COLS`):
 
 | Group | Columns |
 | --- | --- |
@@ -71,7 +71,9 @@ Tab **`GV REPORT`**, **header row 4**, range `A4:BE`. Ek row = ek agent. Columns
 | **TL issuance** | AQ–AS TL Last Month (VC4 / Comm / Total) · AT–AV TL Current Month (VC4 / NVC4 / Total activation MTD) |
 | **Avg run-rate** | AW Avg VC4 · AX Avg NVC4 · AY eRunrate · AZ Supervisor ID |
 
-* **GV me "Direct" agent** = `TL Name` aur `TL ID` dono khaali (ya agent == TL) — config rule `isDirectAgent`. Un par TL stock / TL card nahi banta.
+* **TL issuance precedence:** AQ–AS (`TL Last Month`) aur AT–AV (`TL Current Month`) TL-level snapshot har member row par repeat ho sakta hai. Dashboard un tuples ko **sum nahi** karta; sabse complete / most-common snapshot uthata hai. Snapshot blank ho to us period ke GV Master/EIR totals fallback hote hain.
+* **TL snapshot vs class detail:** TL headline last/current figures GV REPORT se aate hain; VC4 / VC20 / VC5+ cards aur tag drill-down GV Master/EIR ledger se. Agar refresh timing se farq ho, Home card source note aur KPI drill reconciliation note dono numbers + difference dikhate hain.
+* **GV me "Direct" agent** = `TL Name` aur `TL ID` dono khaali (ya agent == TL) — config rule `isDirectAgent`. TL ki self-supervised report row agent count se alag `selfAgent` me rakhi jaati hai.
 * GV Stock Agent rows (Tag Assignment group-by) **class-less** hote hain — unhe `Commercial` maan kar upar se REPORT ka VC4 jodna
   inflation tha (v3.40 me fix).
 * GV ke 'Commercial' stock me VC20 / VC5+ ek lump me aate hain jab sirf class-less row ho; class-wise table me isiliye kabhi
@@ -84,6 +86,7 @@ Tab **`GV REPORT`**, **header row 4**, range `A4:BE`. Ek row = ek agent. Columns
 ```
 Home → Master Search  (naam / TL / agent ID / TL ID / GV ID / mobile / barcode)
  └─ Result: Search Report  [ ⚖ FF + GV ] [ 🟦 First Forward ] [ 🟩 GV Partner ]          ← v3.41
+     ├─ Person card: colorful Last Month · Current MTD · VC4 · VC20 · VC5+ cards; each class also shows month-end run-rate projection
      ├─ ⚖ FF + GV   : Last month · Current · Stock (own / agents / TL total) · Class-wise  — FF | GV | jod
      └─ 🟦 / 🟩     : KPI cards → Last vs Current → Class-wise → TL ke agents → Agent × Class → Charts
          └─ koi bhi number (data-kpi) par click  →  KPI drawer

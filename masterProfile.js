@@ -86,6 +86,80 @@ window.FF = window.FF || {};
   const is4 = (c) => /^VC\s*4$/i.test(String(c || '').trim());
   const monthLabel = (ym) => { try { return U.labelYM(ym); } catch { return String(ym || ''); } };
   const num = (v) => Number(v) || 0;
+  const ISSUE_GROUPS = ['VC4', 'VC20', 'VC5+'];
+  const blankIssueBins = () => ({ VC4: 0, VC20: 0, 'VC5+': 0, total: 0 });
+  function issueGroup(row) {
+    const cls = clean(row && row.cls).toUpperCase().replace(/\s+/g, '');
+    if (cls === 'VC4') return 'VC4';
+    if (cls === 'VC20') return 'VC20';
+    if (cls === 'VC5+') return 'VC5+';
+    const fallback = clean(row && row.group).toUpperCase();
+    if (ISSUE_GROUPS.includes(fallback)) return fallback;
+    const modelGroup = safeCall(() => FF.model && FF.model.classGroup && FF.model.classGroup(cls), '');
+    const gvGroup = safeCall(() => FF.gv && FF.gv.classGroup && FF.gv.classGroup(cls), '');
+    return ISSUE_GROUPS.includes(modelGroup) ? modelGroup : ISSUE_GROUPS.includes(gvGroup) ? gvGroup : 'VC5+';
+  }
+  /** Tag/summary rows → exact 3-way mix. A period is available only when at least one source row exists. */
+  function classBinsFromRows(rows, curYm, lastYm) {
+    const out = { cur: blankIssueBins(), last: blankIssueBins(), available: { cur: false, last: false } };
+    (rows || []).forEach((row) => {
+      const slot = row && row.ym === curYm ? 'cur' : row && row.ym === lastYm ? 'last' : '';
+      if (!slot) return;
+      const group = issueGroup(row);
+      const raw = row.n;
+      const qty = raw === '' || raw === null || raw === undefined ? 1 : Math.max(0, num(raw));
+      out[slot][group] += qty;
+      out[slot].total += qty;
+      out.available[slot] = true;
+    });
+    return out;
+  }
+  function reportedTlSnapshot(rows, period) {
+    const prefix = period === 'last' ? 'tlLast' : 'tlCur';
+    const keys = [`${prefix}Vc4`, `${prefix}Comm`, `${prefix}Total`];
+    const candidates = [];
+    (rows || []).forEach((row) => {
+      const values = keys.map((key) => {
+        const raw = row && row[key];
+        if (raw === null || raw === undefined || raw === '') return null;
+        const value = Number(raw);
+        return Number.isFinite(value) ? value : null;
+      });
+      const availableFlag = row && row[period === 'last' ? 'tlLastAvailable' : 'tlCurAvailable'];
+      if (!availableFlag && !values.some((value) => value !== null)) return;
+      if (!values.some((value) => value !== null)) return;
+      const [vc4Raw, commRaw, totalRaw] = values;
+      const total = totalRaw !== null ? Math.max(0, totalRaw) : (vc4Raw !== null && commRaw !== null ? Math.max(0, vc4Raw) + Math.max(0, commRaw) : null);
+      let vc4 = vc4Raw === null ? null : Math.max(0, vc4Raw);
+      let comm = commRaw === null ? null : Math.max(0, commRaw);
+      if (vc4 === null && comm !== null && total !== null) vc4 = Math.max(0, total - comm);
+      if (comm === null && vc4 !== null && total !== null) comm = Math.max(0, total - vc4);
+      candidates.push({ vc4, comm, total, completeness: values.filter((value) => value !== null).length });
+    });
+    if (!candidates.length) return null;
+    // TL totals are repeated on each GV REPORT agent row. Pick the most common complete tuple;
+    // never add repeated TL snapshots together. If a refresh leaves mixed rows, prefer the most
+    // complete value and then the tuple seen most often.
+    const tuples = new Map();
+    candidates.forEach((candidate) => {
+      const key = `${candidate.vc4}|${candidate.comm}|${candidate.total}`;
+      const current = tuples.get(key) || { ...candidate, count: 0 };
+      current.count++;
+      current.completeness = Math.max(current.completeness, candidate.completeness);
+      tuples.set(key, current);
+    });
+    const picked = [...tuples.values()].sort((a, b) => b.completeness - a.completeness || b.count - a.count)[0];
+    return { vc4: picked.vc4, comm: picked.comm, total: picked.total, rows: candidates.length, source: 'GV REPORT' };
+  }
+  function reportedGvTlSnapshots(rows) {
+    return { last: reportedTlSnapshot(rows, 'last'), cur: reportedTlSnapshot(rows, 'cur') };
+  }
+  function applyReportedTlSnapshot(totals, snapshot, prefix) {
+    if (!snapshot) return;
+    [['Vc4', 'vc4'], ['Comm', 'comm'], ['Total', 'total']].forEach(([suffix, key]) => {
+      if (snapshot[key] !== null && snapshot[key] !== undefined) totals[`${prefix}${suffix}`] = snapshot[key];
+    });
+  }
   /** Sheet ka "▲ +12.5%" / "▼ 8%" text → number (sign included). */
   function pctText(value) {
     if (value === null || value === undefined || value === '') return null;
@@ -193,6 +267,12 @@ window.FF = window.FF || {};
   function gvPeopleLookup() {
     if (!gvLookupCache) gvLookupCache = buildPeopleLookup(gvReport(), (r) => r.agentName, (r) => [r.agentId], (r) => r.tlName);
     return gvLookupCache;
+  }
+  /** Public read-only helper for TL KPI drawers: the GV REPORT carries one repeated TL snapshot per member row. */
+  function gvTlSnapshot(name, id) {
+    const wantName = norm(name), wantId = clean(id).toUpperCase();
+    const rows = gvReport().filter((r) => (wantName && norm(r.tlName) === wantName) || (wantId && clean(r.tlId || r.supervisorId).toUpperCase() === wantId));
+    return reportedGvTlSnapshots(rows);
   }
   function resetProfileCache() {
     quickCache.clear();
@@ -681,6 +761,8 @@ window.FF = window.FF || {};
         const out = { kind: 'ff-agent', channel: 'First Forward', ch: 'ff', name: p.name, id: (a && (a.agentId || a.id)) || p.sub || '', found: !!a };
     const ac = rowsOf('agentClass'), agRows = rowsOf('agents'), stk = rowsOf('stockAgents');
     const n = norm(p.name);
+    const curYm = latestYm(ac.length ? ac : agRows), lastYm = U.prevMonthKey(curYm);
+    const isMine = (r) => norm(r.name) === n && (!r.channel || /first/i.test(r.channel));
     if (a) {
       const avgVc4 = U.runRate(a.curVc4, 'ff'), avgNvc4 = U.runRate(a.curNvc4, 'ff');
       Object.assign(out, {
@@ -697,16 +779,17 @@ window.FF = window.FF || {};
       Object.assign(out, { mobile: mobileFor(p.name, p.sub, ''), tl: { name: [...(p.tlSet || [])][0] || '' }, priority: '', direct: !!p.direct, directLabel: p.directLabel || '', stock: { vc4: 0, comm: 0, total: 0 }, tlStock: { has: false }, dispatch: { days: suggestDays(), sugVc4: 0, sugComm: 0, sugVc4Gross: 0, sugCommGross: 0 }, totals: {} });
     }
     out.tagRequired = out.direct && isHM(out.priority);
-    attachGrowth(out, a || {}, latestYm(ac.length ? ac : agRows));
+    out.months = { cur: curYm, last: lastYm };
+    out.classBins = classBinsFromRows(ac.filter(isMine), curYm, lastYm);
+    out.issuanceSources = { cur: 'First Forward EIR', last: 'First Forward EIR', classes: 'First Forward EIR' };
+    attachGrowth(out, a || {}, curYm);
     if (a && !out.direct && a.tlName && (!FF.config.isRealTl || FF.config.isRealTl(a.tlName))) {
       const teamStock = tlStockComposition('ff', a.tlName, a.tlId, ffPeopleLookup().rows, stk, stk);
       out.tlStock = { ...teamStock.stock, has: true, own: teamStock.own, agents: teamStock.agents };
     }
     if (light) return out;
-    const curYm = latestYm(ac.length ? ac : agRows), lastYm = U.prevMonthKey(curYm);
-    const isMine = (r) => norm(r.name) === n && (!r.channel || /first/i.test(r.channel));
-    out.months = { cur: curYm, last: lastYm };
     out.classes = classTable(ac.filter(isMine), stk.filter((r) => norm(r.agentName) === n), curYm, lastYm);
+    out.classBins = classBinsFromRows(ac.filter(isMine), curYm, lastYm);
     if (!out.classes.length && a) out.classes = [{ cls: 'VC4', cur: num(a.curVc4), last: num(a.lastVc4), stock: num(a.stockVc4) }, { cls: 'Commercial', cur: num(a.curNvc4), last: num(a.lastNvc4), stock: num(a.stockNvc4) }];
     else if (out.classes.length && rowsOf('daily').length) {
       // Only replace the REPORT snapshot once the canonical EIR daily view is loaded. Some
@@ -745,6 +828,7 @@ window.FF = window.FF || {};
     if (selfA) selfA.classStock = selfClassStock(selfRow, stockDetails, 'ff', stockComposition);
     const ac = rowsOf('agentClass'), agRows = rowsOf('agents'), stk = rowsOf('stockAgents');
     const curYm = latestYm(ac.length ? ac : agRows), lastYm = U.prevMonthKey(curYm);
+    const teamClassRows = ac.filter((r) => norm(r.tlName) === n && (!r.channel || /first/i.test(r.channel)));
     const out = {
       kind: 'ff-tl', channel: 'First Forward', ch: 'ff', name: p.name, id: tlId, found: !!underTl.length,
       mobile: (src && src.tlMobile && !/^na$/i.test(src.tlMobile)) ? src.tlMobile : '', tl: { name: p.name, id: tlId, mobile: (src && src.tlMobile) || '' },
@@ -755,13 +839,15 @@ window.FF = window.FF || {};
       totals: { curVc4: sumK('curVc4'), curComm: sumK('curNvc4'), curTotal: sumK('curTotal'), lastVc4: sumK('lastVc4'), lastComm: sumK('lastNvc4'), lastTotal: sumK('lastTotal') },
       agents: rowsA, selfAgent: selfA, agentCount: rowsA.length, teamSize: underTl.length
     };
-    // Issuance totals already come from the corrected Performance/EIR path above. Keep REPORT's
-    // TL snapshot out of the profile totals so the drawer cannot reintroduce the old mismatch.
+    // First Forward remains EIR-authoritative (T+1); its REPORT TL fields are duplicate snapshots.
     // 📈 TL growth % — REPORT tab ka apna "TL Performance Status · Percent"; expected month-end bhi saath.
+    out.months = { cur: curYm, last: lastYm };
+    out.classBins = classBinsFromRows(teamClassRows, curYm, lastYm);
+    out.issuanceSources = { cur: 'First Forward EIR', last: 'First Forward EIR', classes: 'First Forward EIR' };
     attachGrowth(out, { growth: (src && src.tlGrowth) || '', projected: src && src.tlProjected }, curYm);
     if (light) return out;
-    out.months = { cur: curYm, last: lastYm };
-    out.classes = classTable(ac.filter((r) => norm(r.tlName) === n && (!r.channel || /first/i.test(r.channel))), stockComposition.classRows, curYm, lastYm);
+    out.classes = classTable(teamClassRows, stockComposition.classRows, curYm, lastYm);
+    out.classBins = classBinsFromRows(teamClassRows, curYm, lastYm);
     if (!out.classes.length) out.classes = [{ cls: 'VC4', cur: out.totals.curVc4, last: out.totals.lastVc4, stock: stock.vc4 }, { cls: 'Commercial', cur: out.totals.curComm, last: out.totals.lastComm, stock: stock.comm }];
     else if (rowsOf('daily').length) {
       // The class table is the same EIR source used by the clicked drill-down. Use its rollup for
@@ -847,6 +933,11 @@ window.FF = window.FF || {};
     // first issuance row has not arrived yet, so the full prior month remains visible.
     const globalCurYm = U.ymKey(new Date());
     const globalLastYm = U.prevMonthKey(globalCurYm);
+    const classLedger = gvIssuanceRows();
+    const classMine = gvAgentRows(classLedger, n, out.id);
+    out.months = { cur: globalCurYm, last: globalLastYm };
+    out.classBins = classBinsFromRows(classMine, globalCurYm, globalLastYm);
+    out.issuanceSources = { cur: 'GV Master / EIR', last: 'GV Master / EIR', classes: 'GV Master / EIR' };
     const exactMine = gvAgentRows(gvCanonicalIssuanceRows(), n, out.id);
     // Use exact EIR month totals rather than Math.max(REPORT, EIR): Math.max left stale REPORT
     // numbers on top of smaller, authoritative class details, so the KPI and its drill-down disagreed.
@@ -863,11 +954,14 @@ window.FF = window.FF || {};
       out.dispatch.sugCommGross = suggestGro(out.dispatch.avgComm);
     }
     if (exactPrevious) setExactGvMonth(out.totals, exactMine, globalLastYm, 'last');
+    out.issuanceSources.cur = exactCurrent ? 'GV Master / EIR' : 'GV REPORT';
+    out.issuanceSources.last = exactPrevious ? 'GV Master / EIR' : 'GV REPORT';
     attachGrowth(out, r || {}, globalCurYm);
     if (light) return out;
     const master = gvClassRows((m) => norm(m.agentName) === n || (out.id && m.agentId === out.id));
     const curYm = globalCurYm, lastYm = globalLastYm;
-    out.months = { cur: curYm, last: lastYm };
+    out.classBins = classBinsFromRows(master, curYm, lastYm);
+    if (!out.classBins.available.cur && !out.classBins.available.last) out.issuanceSources.classes = 'GV REPORT class fields';
     const stockRows = r ? Object.entries(r.stockByClass || {}).filter(([, v]) => v).map(([cls, v]) => ({ cls, n: v })) : [];
     const stockComm = r ? Math.max(0, num(r.stockComm)) : 0;
     out.classes = classTable(master, stockRows, curYm, lastYm);
@@ -881,13 +975,17 @@ window.FF = window.FF || {};
     const n = norm(p.name);
     const gvIndex = gvPeopleLookup();
     const allReports = gvIndex.rows;
-    const list = (gvIndex.byTl.get(n) || []).filter((r) => !safeCall(() => FF.config.isDirectAgent(r, 'gv'), false)).map((r) => ({ ...r }));
-    const src = list[0] || null;
-    const tlId = (src && src.tlId) || p.sub || '';
-    // GV sheet bhi TL ko usi ki team ki "agent" row bana kar de sakta hai (uska apna stock) — use agents
-    // se alag karna zaruri, warna 'Agents' count aur agent rows ka jod TL ke stock se dubara jud jaata hai.
-    const selfSplit = splitTlSelfRow(list, p.name, tlId);
-    const team = selfSplit.team, selfRow = selfSplit.self;
+    const tlReports = gvIndex.byTl.get(n) || [];
+    const reportTeam = tlReports.filter((r) => !safeCall(() => FF.config.isDirectAgent(r, 'gv'), false));
+    const tlId = (reportTeam[0] && reportTeam[0].tlId) || (tlReports[0] && tlReports[0].tlId) || p.sub || '';
+    const isSelfReport = (r) => norm(r.agentName) === n || (!!tlId && clean(r.agentId).toUpperCase() === clean(tlId).toUpperCase() && norm(r.tlName) === n);
+    // Keep the TL's own self-supervised GV REPORT row long enough to separate its issuance from the
+    // member list. It is not a direct/no-TL agent: GV REPORT TL snapshots include this row's work.
+    const list = tlReports.filter((r) => !safeCall(() => FF.config.isDirectAgent(r, 'gv'), false) || isSelfReport(r)).map((r) => ({ ...r }));
+    const src = list.find((r) => !isSelfReport(r)) || list[0] || null;
+    const selfRows = list.filter(isSelfReport).sort((a, b) => num(a.stockTotal) - num(b.stockTotal));
+    const team = list.filter((r) => !isSelfReport(r)), selfRow = selfRows.length ? selfRows[selfRows.length - 1] : null;
+    const reportSnapshots = reportedGvTlSnapshots(list);
     const sumK = (k) => U.sum(list, (r) => num(r[k]));
     const avgVc4 = U.runRate(sumK('curVc4'), 'gv'), avgComm = U.runRate(sumK('curComm'), 'gv');
     const stockComposition = tlStockComposition('gv', p.name, tlId, allReports, gvRows('stockAgent'), gvRows('stockAgentClass'));
@@ -913,6 +1011,16 @@ window.FF = window.FF || {};
     out.priority = rowsA.some((r) => r.priority === 'High') ? 'High' : rowsA.some((r) => r.priority === 'Medium') ? 'Medium' : rowsA.length ? 'Low' : '';
     const globalCurYm = U.ymKey(new Date());
     const globalLastYm = U.prevMonthKey(globalCurYm);
+    const classLedger = gvIssuanceRows();
+    const classTeamRows = gvTeamRows(classLedger, list);
+    out.months = { cur: globalCurYm, last: globalLastYm };
+    out.classBins = classBinsFromRows(classTeamRows, globalCurYm, globalLastYm);
+    out.tlReportSnapshot = reportSnapshots;
+    out.issuanceSources = {
+      cur: reportSnapshots.cur ? 'GV REPORT · TL Current Month Issuance' : 'GV Master / EIR',
+      last: reportSnapshots.last ? 'GV REPORT · TL Last Month Issued' : 'GV Master / EIR',
+      classes: 'GV Master / EIR', stock: 'GV REPORT TL stock snapshot / Tag Assignment'
+    };
     const agentNames = new Set(list.map((r) => norm(r.agentName)));
     const agentIds = new Set(list.map((r) => clean(r.agentId).toUpperCase()).filter(Boolean));
     const exactTeamIssuance = gvTeamRows(gvCanonicalIssuanceRows(), list);
@@ -943,6 +1051,13 @@ window.FF = window.FF || {};
     const exactLast = exactGvMonth(exactTeamIssuance, globalLastYm);
     if (exactCur) Object.assign(out.totals, { curVc4: exactCur.vc4, curComm: exactCur.comm, curTotal: exactCur.total });
     if (exactLast) Object.assign(out.totals, { lastVc4: exactLast.vc4, lastComm: exactLast.comm, lastTotal: exactLast.total });
+    // GV REPORT stores the TL-level figures explicitly in AQ:AV on every team row. Prefer one
+    // de-duplicated REPORT snapshot for TL headline totals; GV Master / EIR remains the class/tag
+    // detail source (and the fallback when a REPORT period is blank).
+    applyReportedTlSnapshot(out.totals, reportSnapshots.cur, 'cur');
+    applyReportedTlSnapshot(out.totals, reportSnapshots.last, 'last');
+    out.issuanceSources.cur = reportSnapshots.cur ? 'GV REPORT · TL Current Month Issuance' : exactCur ? 'GV Master / EIR' : 'GV REPORT agent rows';
+    out.issuanceSources.last = reportSnapshots.last ? 'GV REPORT · TL Last Month Issued' : exactLast ? 'GV Master / EIR' : 'GV REPORT agent rows';
     // Rebuild TL run-rates/dispatch from the corrected issuance rows as well.
     out.dispatch.avgVc4 = U.runRate(out.totals.curVc4, 'gv');
     out.dispatch.avgComm = U.runRate(out.totals.curComm, 'gv');
@@ -960,14 +1075,16 @@ window.FF = window.FF || {};
     if (light) return out;
     const master = gvClassRows((m) => agentNames.has(norm(m.agentName)) || (m.agentId && agentIds.has(clean(m.agentId).toUpperCase())));
     const curYm = globalCurYm, lastYm = globalLastYm;
-    out.months = { cur: curYm, last: lastYm };
+    out.classBins = classBinsFromRows(master, curYm, lastYm);
     const stockRows = stockComposition.classRows;
     out.classes = classTable(master, stockRows, curYm, lastYm);
     if (!out.classes.length) out.classes = [{ cls: 'VC4', cur: out.totals.curVc4, last: out.totals.lastVc4, stock: stock.vc4 }, { cls: 'Commercial', cur: out.totals.curComm, last: out.totals.lastComm, stock: stock.comm }];
-    // Align summary KPIs with the exact rows shown in the class table for each available month.
-    if (exactCur) Object.assign(out.totals, { curVc4: exactCur.vc4, curComm: exactCur.comm, curTotal: exactCur.total });
-    if (exactLast) Object.assign(out.totals, { lastVc4: exactLast.vc4, lastComm: exactLast.comm, lastTotal: exactLast.total });
-    out.classes = enrichClassesWithTotals(out.classes, out.totals, stock);
+    // Keep the GV REPORT TL snapshots as the headline total; detailed classes stay on the tag ledger.
+    if (exactCur && !reportSnapshots.cur) Object.assign(out.totals, { curVc4: exactCur.vc4, curComm: exactCur.comm, curTotal: exactCur.total });
+    if (exactLast && !reportSnapshots.last) Object.assign(out.totals, { lastVc4: exactLast.vc4, lastComm: exactLast.comm, lastTotal: exactLast.total });
+    // When GV REPORT supplies a TL snapshot, do not pad tag-level class rows to force a false match.
+    // The search board and drill both display the ledger mix separately and expose any difference.
+    if (!reportSnapshots.cur && !reportSnapshots.last) out.classes = enrichClassesWithTotals(out.classes, out.totals, stock);
     out.trend = trendOf(master, () => true, (m) => m.ym);
     return out;
   }
@@ -1422,6 +1539,105 @@ window.FF = window.FF || {};
     }
   }
 
+  // ------------------------------------------------------------------ 📊 Search issuance cards (Last · Current · VC4 · VC20 · VC5+)
+  function issuancePresentation(pr) {
+    if (!pr) return null;
+    const t = pr.totals || {};
+    const curYm = (pr.months && pr.months.cur) || U.ymKey(new Date());
+    const lastYm = (pr.months && pr.months.last) || U.prevMonthKey(curYm);
+    const elapsed = Math.max(1, num(pr.projT1 && pr.projT1.days) || U.runRateDays(undefined, pr.ch === 'gv' ? 'gv' : 'ff'));
+    const bins = pr.classBins || { cur: blankIssueBins(), last: blankIssueBins(), available: {} };
+    const periodValue = (period, group) => bins.available && bins.available[period] ? num((bins[period] || {})[group]) : null;
+    const currentTotal = t.curTotal === null || t.curTotal === undefined ? null : Number(t.curTotal);
+    const lastTotal = t.lastTotal === null || t.lastTotal === undefined ? null : Number(t.lastTotal);
+    const expected = (value, ym) => value === null || !Number.isFinite(Number(value)) ? null : U.projectMonthEnd(Number(value), elapsed, ym);
+    const curGroups = Object.fromEntries(ISSUE_GROUPS.map((group) => [group, periodValue('cur', group)]));
+    const lastGroups = Object.fromEntries(ISSUE_GROUPS.map((group) => [group, periodValue('last', group)]));
+    const sources = pr.issuanceSources || {};
+    return {
+      __issuancePresentation: true,
+      kind: pr.kind || '', ch: pr.ch || (/^gv/.test(pr.kind || '') ? 'gv' : 'ff'),
+      isTl: /-tl$/.test(pr.kind || ''), name: pr.name || '', id: pr.id || '',
+      months: { cur: curYm, last: lastYm },
+      current: {
+        total: currentTotal,
+        vc4: t.curVc4 === null || t.curVc4 === undefined ? null : Number(t.curVc4),
+        comm: t.curComm === null || t.curComm === undefined ? null : Number(t.curComm),
+        expected: pr.projT1 && Number.isFinite(Number(pr.projT1.total)) ? Number(pr.projT1.total) : expected(currentTotal, curYm),
+        runRate: currentTotal === null ? null : currentTotal / elapsed
+      },
+      last: {
+        total: lastTotal,
+        vc4: t.lastVc4 === null || t.lastVc4 === undefined ? null : Number(t.lastVc4),
+        comm: t.lastComm === null || t.lastComm === undefined ? null : Number(t.lastComm)
+      },
+      classes: Object.fromEntries(ISSUE_GROUPS.map((group) => [group, {
+        cur: curGroups[group], last: lastGroups[group], expected: curGroups[group] === null ? null : expected(curGroups[group], curYm)
+      }])),
+      reconciliation: {
+        cur: bins.available && bins.available.cur && currentTotal !== null ? { report: currentTotal, ledger: num(bins.cur.total), delta: num(bins.cur.total) - currentTotal } : null,
+        last: bins.available && bins.available.last && lastTotal !== null ? { report: lastTotal, ledger: num(bins.last.total), delta: num(bins.last.total) - lastTotal } : null
+      },
+      runRateDays: elapsed,
+      runRateThrough: (pr.projT1 && pr.projT1.basis && (pr.projT1.basis.shortLabel || pr.projT1.basis.label)) || '',
+      sources: {
+        cur: sources.cur || (pr.ch === 'gv' ? 'GV Master / EIR' : 'First Forward EIR'),
+        last: sources.last || (pr.ch === 'gv' ? 'GV Master / EIR' : 'First Forward EIR'),
+        classes: sources.classes || (pr.ch === 'gv' ? 'GV Master / EIR class mix' : 'First Forward EIR class mix'),
+        stock: sources.stock || (pr.ch === 'gv' ? 'GV REPORT / Tag Assignment' : 'FF REPORT / StockDataa')
+      }
+    };
+  }
+  function issuanceCardsHtml(value) {
+    const m = value && value.__issuancePresentation ? value : issuancePresentation(value);
+    if (!m) return '';
+    const fmtMaybe = (n) => n === null || n === undefined || !Number.isFinite(Number(n)) ? '—' : fmt(Number(n));
+    const who = m.isTl ? `tl=${encodeURIComponent(m.name)}${m.id ? `&tlId=${encodeURIComponent(m.id)}` : ''}` : `agent=${encodeURIComponent(m.name)}${m.id ? `&agentId=${encodeURIComponent(m.id)}` : ''}`;
+    const spec = (period, group) => `src=${m.ch}&scope=${period === 'last' ? 'month' : 'mtd'}&ym=${encodeURIComponent(period === 'last' ? m.months.last : m.months.cur)}&${who}${group ? `&f=${group}` : ''}`;
+    const mixText = (period) => {
+      const groupValues = ISSUE_GROUPS.map((group) => m.classes[group][period]);
+      return groupValues.some((v) => v !== null)
+        ? `VC4 ${fmtMaybe(groupValues[0])} · VC20 ${fmtMaybe(groupValues[1])} · VC5+ ${fmtMaybe(groupValues[2])}`
+        : `VC4 ${fmtMaybe(period === 'last' ? m.last.vc4 : m.current.vc4)} · Comm ${fmtMaybe(period === 'last' ? m.last.comm : m.current.comm)}`;
+    };
+    const card = (tone, label, valueText, sub, foot, kpiSpec, extra = '') => `<div class="ms-issuance-card ${tone}${kpiSpec ? ' is-drill' : ''}"${kpiSpec ? ` data-kpi="${esc(kpiSpec)}" data-kpi-title="${esc(label.replace(/<[^>]*>/g, ''))}" data-kpi-value="${esc(valueText)}" role="button" tabindex="0" title="${esc(`${label.replace(/<[^>]*>/g, '')} · detail kholo`)}"` : ''}>
+      <div class="ms-issuance-card-head"><span>${label}</span><span class="ms-issuance-icon">${extra}</span></div>
+      <b class="ms-issuance-value">${valueText}</b>
+      <small class="ms-issuance-sub">${sub}</small>
+      ${foot ? `<span class="ms-issuance-foot">${foot}</span>` : ''}
+    </div>`;
+    const curRate = m.current.runRate === null ? '—' : fmt(m.current.runRate, true);
+    const through = m.runRateThrough ? ` · data ${esc(m.runRateThrough)}` : '';
+    const classes = [
+      ['VC4', 'vc4', '🚗'], ['VC20', 'vc20', '🛻'], ['VC5+', 'vc5p', '🚚']
+    ].map(([label, group, icon]) => {
+      const v = m.classes[label];
+      const expectedText = v.expected === null ? '—' : fmtMaybe(v.expected);
+      const curText = v.cur === null ? '—' : fmtMaybe(v.cur);
+      const lastText = v.last === null ? '—' : fmtMaybe(v.last);
+      const foot = `<span class="ms-issuance-expected">🎯 Expected in month <b>${expectedText}</b></span><span>Last ${esc(monthLabel(m.months.last))}: <b>${lastText}</b></span>`;
+      return card(`class-${group}`, `<b>${label}</b>`, curText, `Current MTD · ${esc(monthLabel(m.months.cur))}`, foot, v.cur === null ? '' : spec('cur', group), icon);
+    }).join('');
+    const totalLast = card('last', '⏮ Last month', fmtMaybe(m.last.total), `${esc(monthLabel(m.months.last))} · ${mixText('last')}`, 'Pichhle mahine ka actual issuance', spec('last', ''), '📅');
+    const totalCur = card('current', '▶ Current month · MTD', fmtMaybe(m.current.total), `${esc(monthLabel(m.months.cur))} · ${mixText('cur')}`, `<span class="ms-issuance-expected">🎯 Expected in month <b>${fmtMaybe(m.current.expected)}</b></span><span>Run-rate <b>${curRate}/day</b>${through}</span>`, spec('cur', ''), '⚡');
+    const isGvTl = m.isTl && m.ch === 'gv';
+    const reconciled = (period, label) => {
+      const r = m.reconciliation && m.reconciliation[period];
+      if (!isGvTl || !r || !/^GV REPORT/.test(m.sources[period] || '')) return '';
+      const delta = `${r.delta > 0 ? '+' : ''}${fmt(r.delta)}`;
+      return `${label}: ${fmt(r.report)} report vs ${fmt(r.ledger)} ledger (Δ ${delta})`;
+    };
+    const reconciliation = [reconciled('last', 'Last'), reconciled('cur', 'Current')].filter(Boolean).join(' · ');
+    const srcLine = isGvTl
+      ? `TL Last/Current totals: <b>${esc(m.sources.last)} / ${esc(m.sources.cur)}</b> · stock: <b>${esc(m.sources.stock)}</b> · VC4 / VC20 / VC5+ class mix: <b>${esc(m.sources.classes)}</b>.${reconciliation ? ` <span class="ms-issuance-recon">${esc(reconciliation)}</span>` : ''}`
+      : `Source: <b>${esc(m.sources.cur)}</b> · class mix: <b>${esc(m.sources.classes)}</b>.`;
+    return `<section class="ms-issuance-board" aria-label="Last month, current month and class-wise issuance">
+      <div class="ms-issuance-title"><div><b>📊 Issuance &amp; month-end pace</b><small>${esc(monthLabel(m.months.last))} → ${esc(monthLabel(m.months.cur))} · expected = current run-rate × month days</small></div><span class="ms-issuance-pill">${m.isTl ? 'TL roll-up' : 'Agent'} · ${m.ch === 'gv' ? '🟩 GV' : '🟦 FF'}</span></div>
+      <div class="ms-issuance-grid">${totalLast}${totalCur}${classes}</div>
+      <p class="ms-issuance-source">${srcLine} ${m.isTl && m.ch === 'gv' ? 'TL totals are deduplicated from GV REPORT; class mix is taken from the tag ledger, so a sheet refresh gap is called out rather than hidden.' : 'Expected values are projections, not issued tags.'}</p>
+    </section>`;
+  }
+
   // ------------------------------------------------------------------ 📊 REPORT data table (v3.43)
   /**
    * Ek person ka "REPORT data" row — Home search ki data table AUR FF/GV Agent-TL Summary ki
@@ -1458,6 +1674,7 @@ window.FF = window.FF || {};
       status: (q && q.status) || p.status || fb.status || '',
       direct, directLabel: (q && q.directLabel) || p.directLabel || '', tlName, tlId, tlLabel,
       stock, stockVc4, stockComm, cur, curVc4, curComm, last, lastVc4, lastComm, growth,
+      issuance: q ? issuancePresentation(q) : null,
       // TL rollup detail (TL row = own + agents — "total issuance with TL / stock same" rule)
       ownStock: ts.own && Number.isFinite(Number(ts.own.total)) ? Number(ts.own.total) : null,
       agentsStock: ts.agents && Number.isFinite(Number(ts.agents.total)) ? Number(ts.agents.total) : null,
@@ -1615,5 +1832,5 @@ window.FF = window.FF || {};
     </div>`;
   }
 
-  FF.masterProfile = { supports, quick, build, buildNow, html, csvRows, waText, renderInto, open, warm, load, loadFor, onData, isLoaded: () => loadedOnce, invalidate: resetProfileCache, suggest, suggestGro, findFfAgent, findGvAgent, mobileFor, reportDataRow, peopleTableHtml, personFromRow, get suggestDays() { return suggestDays(); }, _buildSoon: buildSoon, _limits: LIMITS };
+  FF.masterProfile = { supports, quick, build, buildNow, html, csvRows, waText, renderInto, open, warm, load, loadFor, onData, isLoaded: () => loadedOnce, invalidate: resetProfileCache, suggest, suggestGro, findFfAgent, findGvAgent, mobileFor, reportDataRow, issuanceCardsHtml, gvTlSnapshot, peopleTableHtml, personFromRow, get suggestDays() { return suggestDays(); }, _buildSoon: buildSoon, _limits: LIMITS };
 })(window.FF);
