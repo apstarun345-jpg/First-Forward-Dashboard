@@ -200,7 +200,7 @@ test('wiring: index.html + sw.js + package.json check me searchReport.js', async
   const fs = await import('node:fs');
   const idx = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8'), sw = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8'), pkg = fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8');
   assert.ok(idx.indexOf('masterSearch.js') < idx.indexOf('searchReport.js'), 'masterSearch ke baad load');
-  assert.match(sw, /searchReport\.js\?v=65/); assert.match(pkg, /searchReport/);
+  assert.match(sw, /searchReport\.js\?v=66/); assert.match(pkg, /searchReport/);
   const ms = fs.readFileSync(path.join(ROOT, 'masterSearch.js'), 'utf8');
   assert.match(ms, /data-ms-inline/); assert.match(ms, /groups\.length === 1/);
 });

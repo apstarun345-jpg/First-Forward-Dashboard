@@ -418,6 +418,7 @@ FF.pages = FF.pages || {};
       const extra = q1 ? [
         q1.mobile && (!FF.auth || FF.auth.can('contacts')) ? `📞 ${q1.mobile}` : '',
         `📦 ${U.fmt(q1.stock.total)}${isTlKind && q1.tlStock && q1.tlStock.own && q1.tlStock.agents ? ` (own ${U.fmt(q1.tlStock.own.total)} + agents ${U.fmt(q1.tlStock.agents.total)})` : ''}${!isTlKind && q1.tlStock && q1.tlStock.has ? ` · TL ${U.fmt(q1.tlStock.total)}${q1.tlStock.own && q1.tlStock.agents ? ` (own ${U.fmt(q1.tlStock.own.total)} + agents ${U.fmt(q1.tlStock.agents.total)})` : ''}` : ''}`,
+        (q1.totals && (q1.totals.curTotal || q1.totals.lastTotal)) ? `🏷️ Total ${U.fmt(q1.totals.curTotal)} · 📅 last month ${U.fmt(q1.totals.lastTotal)}` : '',
         q1.tagRequired ? `🏷️ TAG ${U.sugText(q1.calc.total.net, q1.calc.total.gross)}` : (!q1.direct && q1.calc && (q1.calc.total.net || q1.calc.total.gross) ? `🎯 dispatch ${U.sugText(q1.calc.total.net, q1.calc.total.gross)}` : ''),
         q1.calc && q1.calc.total.rate > 0 ? `⚡ ${U.fmt(q1.calc.total.rate, true)}/day` : '',
         q1.calc && q1.calc.total.cover != null ? `⏳ cover ${U.fmt(q1.calc.total.cover, true)} din` : ''
@@ -504,13 +505,15 @@ FF.pages = FF.pages || {};
     return `<div class="ms-kundli-stats ms-prof">
       <div><small>${isTlKind ? 'TL mobile' : 'Mobile'}</small><b>${contacts ? (q1.mobile ? esc(q1.mobile) : '—') : '🔒'}</b></div>
       <div><small>Priority</small><b>${esc(q1.priority || '—')}</b></div>
-      <div${isTlKind ? ` class="ms-stat-click" data-kpi="${esc(`src=${q1.ch}&scope=stock&tl=${encodeURIComponent(p.name)}`)}" title="TL stock ki detail"` : ''}><small>${isTlKind ? 'TL stock (own + agents)' : 'Agent stock'}</small><b>${U.fmt(q1.stock.total)}</b>${isTlKind && (splitChips || tlStockDetail) ? `<em>${splitChips || tlStockDetail}</em>` : ''}</div>
-      ${isTlKind ? `<div class="ms-stat-click" data-kpi="${esc(peopleSpec)}" title="In agents ki poori list"><small>Agents</small><b>${U.fmt(q1.agentCount)}${q1.selfAgent ? ' + TL' : ''}</b>${q1.selfAgent ? `<em>TL ka apna stock alag</em>` : ''}</div>` : `<div${q1.tlStock && q1.tlStock.has ? ` class="ms-stat-click" data-kpi="${esc(tlStockBaseSpec)}" title="TL stock ki detail"` : ''}><small>TL stock</small><b>${q1.tlStock && q1.tlStock.has ? U.fmt(q1.tlStock.total) : '—'}</b>${splitChips || tlStockDetail ? `<em>${splitChips || tlStockDetail}</em>` : ''}</div>`}
+      ${isTlKind
+        ? `<div><small>Stock split (own + agents)</small><b>${splitChips ? 'click karo 👇' : tlStockDetail || U.fmt(q1.stock.total)}</b>${splitChips ? `<em>${splitChips}</em>` : ''}</div>
+      <div${` class=\"ms-stat-click\" data-kpi=\"${esc(peopleSpec)}\" title=\"In agents ki poori list\"`}><small>Agents</small><b>${U.fmt(q1.agentCount)}${q1.selfAgent ? ' + TL' : ''}</b>${q1.selfAgent ? `<em>TL ka apna stock alag</em>` : ''}</div>`
+        : `<div${q1.tlStock && q1.tlStock.has ? ` class=\"ms-stat-click\" data-kpi=\"${esc(tlStockBaseSpec)}\" title=\"TL stock ki detail\"` : ''}><small>TL ke under stock</small><b>${q1.tlStock && q1.tlStock.has ? U.fmt(q1.tlStock.total) : '—'}</b>${splitChips || tlStockDetail ? `<em>${splitChips || tlStockDetail}</em>` : ''}</div>
+      <div><small>TL</small><b>${esc((q1.tl && q1.tl.name) ? tlText(q1.tl.name, q1.ch) : (p.direct ? (p.directLabel || 'Direct') : '—'))}</b></div>`}
       ${sugStats}
       <div><small>Run-rate / day <em>(÷ ${U.fmt(q1.calc.total.elapsed)} din)</em></small><b>${U.fmt(q1.calc.total.rate, true)}</b></div>
       <div><small>Cover</small><b>${q1.calc.total.cover != null ? `${U.fmt(q1.calc.total.cover, true)} din` : '—'}</b></div>
-      <div class="ms-growth"><small>Growth % <em>${p1 && p1.basis && p1.basis.shortLabel ? `till ${esc(p1.basis.shortLabel)}` : ''}</em></small><b>${p1 && p1.num !== null && p1.num !== undefined && Number.isFinite(p1.num) ? U.pctHtml(p1.num, { decimals: 0 }) : `<span class="dim">—</span>`}</b></div>
-      <div><small>This month · last</small><b>${U.fmt(q1.totals.curTotal)} · ${U.fmt(q1.totals.lastTotal)}</b></div>
+      <div class="ms-growth"><small>Growth % <em>${p1 && p1.basis && p1.basis.shortLabel ? `till ${esc(p1.basis.shortLabel)}` : ''}</em></small><b>${p1 && p1.num !== null && p1.num !== undefined && Number.isFinite(p1.num) ? U.pctHtml(p1.num, { decimals: 0 }) : `<span class=\"dim\">—</span>`}</b></div>
       <div><small>Expected month-end</small><b>${p1 ? U.fmt(p1.total) : '—'}</b></div>
     </div>`;
   }
@@ -552,18 +555,29 @@ FF.pages = FF.pages || {};
   }
   function personKundli(p) {
     const tl = p.direct ? (p.directLabel || 'Direct Agent') : [...p.tlSet].slice(0, 4).map((n) => tlText(n, p.kind === 'gv-agent' ? 'gv' : 'ff')).join(', ');
-    return `<article class="ms-kundli">
+    const row = MP() && MP().reportDataRow ? MP().reportDataRow(p) : null;   // REPORT tab ke same numbers
+    const strip = row ? `<div class="ms-data-strip">
+      <div class="dcell stock" data-kpi="${esc(`src=${row.ch}&scope=stock&${row.isTl ? `tl=${encodeURIComponent(row.name)}` : `agent=${encodeURIComponent(row.name)}${row.id ? `&agentId=${encodeURIComponent(row.id)}` : ''}`}`)}" role="button" tabindex="0" title="Stock ki detail">
+        <small>📦 Stock${row.isTl ? ' · own + agents' : ''}</small><b>${U.fmt(row.stock)}</b><em>VC4 ${U.fmt(row.stockVc4)} · Comm ${U.fmt(row.stockComm)}${row.isTl && row.ownStock != null ? ` · own ${U.fmt(row.ownStock)} + agents ${U.fmt(row.agentsStock || 0)}` : ''}</em></div>
+      <div class="dcell cur" data-kpi="${esc(`src=${row.ch}&scope=mtd&ym=&${row.isTl ? `tl=${encodeURIComponent(row.name)}` : `agent=${encodeURIComponent(row.name)}${row.id ? `&agentId=${encodeURIComponent(row.id)}` : ''}`}`)}" role="button" tabindex="0" title="Total issuance ki detail">
+        <small>🏷️ Total Issuance${row.isTl ? ' · TL + agents' : ' · MTD'}</small><b>${U.fmt(row.cur)}</b><em>VC4 ${U.fmt(row.curVc4)} · Comm ${U.fmt(row.curComm)}</em></div>
+      <div class="dcell last" data-kpi="${esc(`src=${row.ch}&scope=month&ym=&${row.isTl ? `tl=${encodeURIComponent(row.name)}` : `agent=${encodeURIComponent(row.name)}${row.id ? `&agentId=${encodeURIComponent(row.id)}` : ''}`}`)}" role="button" tabindex="0" title="Last month issuance ki detail">
+        <small>📅 Last Month</small><b>${U.fmt(row.last)}</b><em>VC4 ${U.fmt(row.lastVc4)} · Comm ${U.fmt(row.lastComm)}</em></div>
+      <div class="dcell grow"><small>📈 Growth</small><b>${U.pctHtml(row.growth, { decimals: 0 })}</b><em>last vs MTD</em></div>
+    </div>` : '';
+    return `<article class="ms-kundli v2" data-ms-person="${esc(`${p.kind}|${normName(p.name)}`)}">
       <div class="ms-kundli-head">
-        <span class="ms-avatar">${esc(p.name.slice(0, 1).toUpperCase())}</span>
+        <span class="ms-avatar ${p.kind.startsWith('gv') ? 'gv' : 'ff'}">${esc(p.name.slice(0, 1).toUpperCase())}</span>
         <div class="ms-kundli-id">
           <b>${esc(p.name)}</b>
-          <small>${esc(KIND_LABEL[p.kind] || p.kind)}${p.sub ? ` · ID ${esc(p.sub)}` : ''}</small>
+          <small><span class="badge ${p.kind.startsWith('gv') ? 'green' : 'blue'}">${p.kind.startsWith('gv') ? '🟩 GV Partner' : '🟦 First Forward'}</span> <span class="badge ${/tl$/.test(p.kind) ? 'purple' : 'blue'}">${esc(KIND_LABEL[p.kind] || p.kind)}</span>${p.sub ? ` · ID <b class="mono">${esc(p.sub)}</b>` : ''}</small>
         </div>
       </div>
+      ${strip}
       <div class="ms-kundli-stats">
+        <div><small>TL</small><b>${p.direct ? `<span class="direct-chip">🚫 ${esc(tl)}</span>` : esc(tl || '—')}</b>${row && row.tlId && !p.direct ? `<em>${esc(row.tlId)}</em>` : ''}</div>
         <div><small>Tags / barcodes</small><b>${p.bars.size ? U.fmt(p.bars.size) : U.fmt(p.n)}</b></div>
         <div><small>Activity rows</small><b>${U.fmt(p.n)}</b></div>
-        <div><small>TL</small><b>${p.direct ? `<span class="direct-chip">🚫 ${esc(tl)}</span>` : esc(tl || '—')}</b></div>
         <div><small>Last allocation</small><b>${esc(p.last || '—')}</b></div>
       </div>
       ${kundliProfileStats(p)}
@@ -586,6 +600,16 @@ FF.pages = FF.pages || {};
     }
     lastPeople = res.people || [];
     const parts = [];
+    if (res.people.length) {
+      const rows = MP() && MP().reportDataRow ? res.people.slice(0, 60).map((p) => MP().reportDataRow(p)) : [];
+      const table = rows.length ? `<section class="ms-section ms-data-section">
+        <h3>📊 REPORT data — ek nazar me <span class="dim small">FF → REPORT tab · GV → GV REPORT tab · Summary pages ke same numbers</span></h3>
+        <p class="dim small ms-data-note">Har row: <b>Agent · TL · 📦 Stock · 🏷️ Total Issuance · 📅 Last Month</b> — TL rows me stock/issuance = <b>own + agents</b> (rollup). Number par click → detail drawer · row par click → poori report 👇</p>
+        ${MP().peopleTableHtml(rows, { id: 'ms-home-data', footer: true, limit: 25, sourceNote: 'Source: FF REPORT / GV REPORT' })}
+      </section>` : '';
+      parts.push(`${table}<section class="ms-section"><h3>🧑‍💼 Agents & TLs — poori kundli <span class="dim small">${U.fmt(res.people.length)} match</span></h3>
+        <div class="ms-kundli-grid">${res.people.slice(0, 24).map(personKundli).join('')}</div></section>`);
+    }
     if (res.tags.length) {
       parts.push(`<section class="ms-section"><h3>🏷️ Tags / barcodes <span class="dim small">${U.fmt(res.tags.length)} match</span></h3>
         <div class="table-wrap"><table class="tbl compact"><thead><tr><th>Barcode / serial</th><th>Tag ID</th><th>FF holder</th><th>FF TL</th><th>GV holder</th><th>GV TL</th><th>GV unique</th><th>Class</th><th>Status</th><th>Allocated</th></tr></thead><tbody>
@@ -830,22 +854,38 @@ FF.pages = FF.pages || {};
   function mountHome(container) {
     if (!container) return;
     const q = state.lastQuery || '';
-    container.innerHTML = `<div class="home-master-search" id="home-master-search">
+    let chFilter = '';   // '' = dono · 'ff' = sirf First Forward · 'gv' = sirf GV Partner
+    container.innerHTML = `<div class="home-master-search v2" id="home-master-search">
       <div class="hms-head">
         <span class="hms-ico">🔎</span>
-        <div><b>Master Search</b><small>Naam · TL · agent ID · TL ID · GV ID · barcode · tag ID — First Forward + GV dono ek hi search me · naam par <b>poori report</b> (⚖ FF + GV · 🟦 FF · 🟩 GV toggle) — last month · current · stock · class-wise · TL ke agents</small></div>
+        <div class="hms-head-txt"><b>Master Search</b><small>Naam · TL · Agent ID · TL ID · GV ID · Mobile · barcode · tag ID — <span class="hms-brand ff">🟦 First Forward</span> + <span class="hms-brand gv">🟩 GV Partner</span> ek hi search me · report data seedha <b>FF REPORT / GV REPORT</b> tabs se</small></div>
+        <span class="ms-register-state" id="hms-state"></span>
       </div>
       <div class="hms-input-wrap">
-        <input id="home-master-input" class="input" type="search" value="${esc(q)}" placeholder="Type karo… jaise “Rahul”, “34161FA…”, “5845036”, “GV001”, tag ID…" autocomplete="off" aria-label="Master search">
-        <button class="btn" id="home-master-clear" title="Search clear karo">✕ Clear</button>
-        <button class="btn primary" id="home-master-go">🔎 Kholo</button>
+        <div class="hms-input-box">
+          <span class="hms-ico-in" aria-hidden="true">🔎</span>
+          <input id="home-master-input" class="input" type="search" value="${esc(q)}" placeholder="Type karo… jaise “Rahul”, “34161FA…”, “5845036”, “GV001”, tag ID…" autocomplete="off" aria-label="Master search">
+          <button class="ms-clear" id="home-master-clear" type="button" title="Search clear karo" aria-label="Search clear karo" ${q ? '' : 'hidden'}>✕</button>
+          <kbd class="ms-kbd">/</kbd>
+        </div>
+        <button class="btn primary hms-go" id="home-master-go">🔎 Search</button>
       </div>
-      <div class="hms-chips"><span class="dim small">Try:</span>${['VC4', '5845036', 'ApnaPayment'].map((s) => `<button class="chip" data-hms="${esc(s)}">${esc(s)}</button>`).join('')}<span class="ms-register-state" id="hms-state"></span></div>
+      <div class="hms-chips">
+        <span class="dim small">Channel:</span>
+        <button class="chip on" data-hms-ch="">🎯 Sab</button>
+        <button class="chip" data-hms-ch="ff">🟦 First Forward</button>
+        <button class="chip" data-hms-ch="gv">🟩 GV Partner</button>
+        <span class="hms-chip-div"></span>
+        <span class="dim small">Try:</span>${['VC4', '5845036', 'ApnaPayment'].map((s) => `<button class="chip" data-hms="${esc(s)}">${esc(s)}</button>`).join('')}
+      </div>
+      <div class="hms-meta" id="hms-meta"></div>
       <div id="home-master-results" class="ms-inline"></div>
     </div>`;
     const input = U.$('#home-master-input', container);
     const results = U.$('#home-master-results', container);
     const stateEl = U.$('#hms-state', container);
+    const metaEl = U.$('#hms-meta', container);
+    const clearBtn = U.$('#home-master-clear', container);
     const setState = () => { if (stateEl) stateEl.innerHTML = state.full && state.full.fullLoaded ? '<span class="badge green">barcode register ready ✓</span>' : '<span class="badge amber">barcode register load ho raha hai…</span>'; };
     setState();
     onIndexReady(() => {
@@ -855,18 +895,33 @@ FF.pages = FF.pages || {};
     warmFull();
     const run = (query) => {
       const val = clean(query);
-      if (val.length < 2) { results.innerHTML = ''; return; }
+      if (clearBtn) clearBtn.hidden = !val;
+      if (val.length < 2) { results.innerHTML = ''; if (metaEl) metaEl.innerHTML = ''; return; }
       state.lastQuery = val;
       const res = search(val);
-      results.innerHTML = resultsHtml(res);
+      // Channel filter — people (cards + table) dono par lagta hai; tags / IDs hamesha dikhte hain.
+      const shown = chFilter ? { ...res, people: res.people.filter((p) => (chFilter === 'gv') === p.kind.startsWith('gv')) } : res;
+      results.innerHTML = resultsHtml(shown);
       results.dataset.q = val;
-      inlineSingle(results, res);
+      inlineSingle(results, shown);
+      if (metaEl) {
+        const ag = shown.people.filter((p) => /agent$/.test(p.kind)).length, tl = shown.people.filter((p) => /tl$/.test(p.kind)).length;
+        metaEl.innerHTML = res.matched
+          ? `<b>${U.fmt(shown.people.length)}</b> log (${U.fmt(ag)} agents · ${U.fmt(tl)} TLs)${shown.ids.length ? ` · <b>${U.fmt(shown.ids.length)}</b> IDs` : ''}${shown.tags.length ? ` · <b>${U.fmt(shown.tags.length)}</b> tags` : ''} — table me <b>Agent · TL · Stock · Total Issuance · Last Month</b>${chFilter ? ` · filter: <b>${chFilter === 'gv' ? '🟩 GV' : '🟦 FF'}</b>` : ''}`
+          : `“${esc(val)}” ke liye kuch nahi mila${chFilter ? ' (is channel filter me)' : ''}`;
+      }
     };
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); run(input.value); } });
-    const hClear = U.$('#home-master-clear', container);
-    if (hClear) hClear.addEventListener('click', () => { input.value = ''; state.lastQuery = ''; results.innerHTML = ''; input.focus(); });
+    if (clearBtn) clearBtn.addEventListener('click', () => { input.value = ''; state.lastQuery = ''; results.innerHTML = ''; if (metaEl) metaEl.innerHTML = ''; clearBtn.hidden = true; input.focus(); });
     U.$('#home-master-go', container).addEventListener('click', () => { const v = clean(input.value); if (v.length < 2) { U.toast('Kam se kam 2 letter / digit type karo', 'warn'); return; } openPanel(v); });
     container.addEventListener('click', (e) => {
+      const chChip = e.target.closest('[data-hms-ch]');
+      if (chChip) {
+        chFilter = chChip.dataset.hmsCh || '';
+        container.querySelectorAll('[data-hms-ch]').forEach((c) => c.classList.toggle('on', c === chChip));
+        run(input.value);
+        return;
+      }
       const chip = e.target.closest('[data-hms]');
       if (chip) { input.value = chip.dataset.hms; run(chip.dataset.hms); return; }
       const inl = e.target.closest('[data-ms-inline]');
@@ -878,7 +933,22 @@ FF.pages = FF.pages || {};
       const tags = e.target.closest('[data-ms-tags]');
       if (tags) { FF.app.navigate('masterStock', { q: tags.dataset.msTags }); return; }
       const again = e.target.closest('[data-ms-again]');
-      if (again) { input.value = again.dataset.msAgain; run(again.dataset.msAgain); }
+      if (again) { input.value = again.dataset.msAgain; run(again.dataset.msAgain); return; }
+      // 📊 REPORT data table ki row par click → us person ka card + poori report (row = card = same data)
+      const row = e.target.closest('[data-mppt-row]');
+      if (row && !e.target.closest('[data-kpi],button,a')) {
+        const person = MP() && MP().personFromRow ? MP().personFromRow(row) : null;
+        if (!person) return;
+        const card = container.querySelector(`.ms-kundli[data-ms-person="${(person.kind || '')}|${normName(person.name || '')}"]`);
+        if (card) {
+          card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          card.classList.remove('ms-flash'); void card.offsetWidth; card.classList.add('ms-flash');
+          const btn = card.querySelector('[data-ms-inline]');
+          if (btn && !btn.classList.contains('active')) toggleCardInline(btn);
+        } else {
+          input.value = person.name; run(person.name);
+        }
+      }
     });
     if (q) run(q);
     // debounce live search on home (typing shows results without Enter)

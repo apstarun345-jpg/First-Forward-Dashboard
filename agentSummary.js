@@ -924,21 +924,22 @@ FF.pages = FF.pages || {};
           <button class="btn" data-as-act="wa">💬 WA Text</button>
           <button class="btn" data-as-act="copy">📋 Copy</button>` : '';
     return `<div class="as-report">
-      <div class="as-head">
-        <div class="as-ava">${r.isTl ? '👥' : '🧑‍💼'}</div>
+      <div class="as-head v2">
+        <div class="as-ava ${r.ch === 'gv' ? 'gv' : 'ff'}">${r.isTl ? '👥' : '🧑‍💼'}</div>
         <div class="as-who">
-          <div class="badge-row"><span class="badge ${r.ch === 'gv' ? 'green' : 'blue'}">${chLabel}</span><span class="badge purple">${r.isTl ? 'Team Leader' : 'Agent'}</span>${p.priority ? `<span class="badge ${/high/i.test(p.priority) ? 'red' : /med/i.test(p.priority) ? 'amber' : 'green'}">${esc(p.priority)}</span>` : ''}${p.activityStatus ? `<span class="badge ${p.activityStatus === 'Active' ? 'green' : 'red'}">${esc(p.activityStatus)}${p.inactiveDuration ? ` · ${esc(p.inactiveDuration)}` : ''}</span>` : ''}</div>
+          <div class="badge-row"><span class="badge ${r.ch === 'gv' ? 'green' : 'blue'}">${r.ch === 'gv' ? '🟩 GV Partner' : '🟦 First Forward'}</span><span class="badge purple">${r.isTl ? '👥 Team Leader' : '🧑‍💼 Agent'}</span>${p.direct ? `<span class="direct-chip">🚫 ${esc(p.directLabel || 'Direct (no TL)')}</span>` : ''}${p.priority ? `<span class="badge ${/high/i.test(p.priority) ? 'red' : /med/i.test(p.priority) ? 'amber' : 'green'}">🔺 ${esc(p.priority)}</span>` : ''}${p.activityStatus ? `<span class="badge ${p.activityStatus === 'Active' ? 'green' : 'red'}">${esc(p.activityStatus)}${p.inactiveDuration ? ` · ${esc(p.inactiveDuration)}` : ''}</span>` : ''}<span class="badge amber" title="Ye numbers report tab se aate hain">📄 ${r.ch === 'gv' ? 'GV REPORT tab' : 'REPORT tab'}</span></div>
           <h2>${esc(p.name)}</h2>
-          <p class="dim">${p.id ? `ID: <b>${esc(p.id)}</b> · ` : ''}${p.tlName && !r.isTl ? `TL: <b>${esc(p.tlName)}</b>${p.tlId ? ` (${esc(p.tlId)})` : ''} · ` : ''}${p.mobile && canContacts() ? `📞 <a href="tel:${esc(p.mobile)}">${esc(p.mobile)}</a>` : ''}</p>
+          <p class="as-id-line dim">${p.id ? `ID: <b>${esc(p.id)}</b> · ` : ''}${p.tlName && !r.isTl ? `TL: <b>${esc(p.tlName)}</b>${p.tlId ? ` (${esc(p.tlId)})` : ''}` : r.isTl ? `Team: <b>${fmt((p.agents || []).length)}</b> agents${p.selfAgent ? ' + TL khud (own stock)' : ''}` : ''}${p.mobile && canContacts() ? ` · 📞 <a href="tel:${esc(p.mobile)}">${esc(p.mobile)}</a>` : ''}</p>
+          ${r.isTl ? `<p class="as-tl-note"><b>👥 TL data = own + agents</b> — Stock ${fmt(t.stockTotal)} · Total Issuance ${fmt(t.curTotal)} · Last Month ${fmt(t.lastTotal)} (neeche Team Agents table me split)</p>` : ''}
         </div>
         ${expBtns || shBtns ? `<div class="as-actions">${expBtns}${shBtns}</div>` : ''}
       </div>
 
       <div class="kpi-grid six">
-        <div class="kpi g1" data-kpi="${esc(curSpec)}" title="Click karke ${esc(p.curYm || 'is mahine')} ka exact issuance data dekhein"><div class="kpi-top"><span class="kpi-title">${esc(p.curYm || 'This month')} · MTD</span><span class="kpi-icon">🏷️</span></div><div class="kpi-value">${fmt(t.curTotal)}</div><div class="kpi-foot">VC4 <b>${fmt(t.curVc4)}</b> · Comm <b>${fmt(t.curComm)}</b></div></div>
-        <div class="kpi g3" data-kpi="${esc(lastSpec)}" title="Click karke ${esc(p.lastYm || 'pichhle mahine')} ka exact issuance data dekhein"><div class="kpi-top"><span class="kpi-title">${esc(p.lastYm || 'Last month')}</span><span class="kpi-icon">📅</span></div><div class="kpi-value">${fmt(t.lastTotal)}</div><div class="kpi-foot">VC4 <b>${fmt(t.lastVc4)}</b> · Comm <b>${fmt(t.lastComm)}</b></div></div>
+        <div class="kpi g1" data-kpi="${esc(curSpec)}" title="Click karke ${esc(p.curYm || 'is mahine')} ka exact issuance data dekhein"><div class="kpi-top"><span class="kpi-title">🏷️ Total Issuance · ${esc(p.curYm || 'MTD')}</span><span class="kpi-icon">${r.isTl ? '👥' : '🏷️'}</span></div><div class="kpi-value">${fmt(t.curTotal)}</div><div class="kpi-foot">VC4 <b>${fmt(t.curVc4)}</b> · Comm <b>${fmt(t.curComm)}</b>${r.isTl ? ' · own + agents' : ''}</div></div>
+        <div class="kpi g3" data-kpi="${esc(lastSpec)}" title="Click karke ${esc(p.lastYm || 'pichhle mahine')} ka exact issuance data dekhein"><div class="kpi-top"><span class="kpi-title">📅 Last Month Issuance</span><span class="kpi-icon">📅</span></div><div class="kpi-value">${fmt(t.lastTotal)}</div><div class="kpi-foot">${esc(p.lastYm || 'Last month')} · VC4 <b>${fmt(t.lastVc4)}</b> · Comm <b>${fmt(t.lastComm)}</b>${r.isTl ? ' · own + agents' : ''}</div></div>
         <div class="kpi g2" data-kpi="${esc(curSpec)}" title="Click karke growth aur run-rate data dekhein"><div class="kpi-top"><span class="kpi-title">Expected</span><span class="kpi-icon">🎯</span></div><div class="kpi-value">${fmt(p.expected)}</div><div class="kpi-foot">${U.pctHtml(t.growth)} · <b>${fmt(p.runRate, true)}</b>/day</div></div>
-        <div class="kpi g5" data-kpi="${esc(stockSpec)}" title="Click karke exact stock in hand aur barcodes dekhein"><div class="kpi-top"><span class="kpi-title">Stock in hand</span><span class="kpi-icon">📦</span></div><div class="kpi-value">${fmt(t.stockTotal)}</div><div class="kpi-foot">${splitChips ? `${splitChips} · ` : ''}VC4 <b>${fmt(t.stockVc4)}</b> · Comm <b>${fmt(t.stockComm)}</b></div></div>
+        <div class="kpi g5" data-kpi="${esc(stockSpec)}" title="Click karke exact stock in hand aur barcodes dekhein"><div class="kpi-top"><span class="kpi-title">📦 Stock in hand</span><span class="kpi-icon">📦</span></div><div class="kpi-value">${fmt(t.stockTotal)}</div><div class="kpi-foot">${splitChips ? `${splitChips} · ` : ''}VC4 <b>${fmt(t.stockVc4)}</b> · Comm <b>${fmt(t.stockComm)}</b></div></div>
         <div class="kpi g4" data-kpi-self="1" data-as-age="30" title="Click karke 30+ din purana stock dekhein"><div class="kpi-top"><span class="kpi-title">30+d old stock</span><span class="kpi-icon">⏳</span></div><div class="kpi-value">${age ? fmt(age.old30) : '—'}</div><div class="kpi-foot">0–30d fresh: <b>${age ? fmt(age.total - age.old30) : '—'}</b></div></div>
         <div class="kpi g7" data-kpi-self="1" data-as-age="60" title="Click karke 60+ din critical stock dekhein"><div class="kpi-top"><span class="kpi-title">60+d critical</span><span class="kpi-icon">🚨</span></div><div class="kpi-value">${age ? fmt(age.old60) : '—'}</div><div class="kpi-foot">90+d: <b>${age ? fmt((age.buckets[4] && age.buckets[4].n) || 0) : '—'}</b></div></div>
       </div>
@@ -989,11 +990,12 @@ FF.pages = FF.pages || {};
     async function render(root, params) {
       const chLabel = isGv ? 'GV Partner' : 'First Forward';
       root.innerHTML = `<div class="page">
-        <div class="page-head"><div><h1>${isGv ? '🟩' : '🟦'} ${chLabel} · Agent / TL Summary</h1><p class="sub">Search by <b>Name · Agent Name · TL Name · Agent ID · TL ID · Mobile Number</b> — poora summary + charts + ageing + Grand Total PDF / Excel / CSV / WhatsApp</p></div></div>
-        <div class="card card-primary"><div class="card-body">
+        <div class="page-head"><div><h1>${isGv ? '🟩' : '🟦'} ${chLabel} · Agent / TL Summary</h1><p class="sub">Search by <b>Name · Agent Name · TL Name · Agent ID · TL ID · Mobile Number</b> — poora summary + charts + ageing + Grand Total PDF / Excel / CSV / WhatsApp · report data <b>${isGv ? 'GV REPORT' : 'REPORT'} tab</b> se</p></div></div>
+        <div class="card card-primary as-search-card"><div class="card-body">
           <div class="as-search-bar">
             <div class="as-search">
-              <input id="as-q" class="input" type="search" placeholder="🔎 Search Agent Name, TL Name, Agent ID, TL ID, ya 10-digit Mobile Number…" value="${esc((params && params.q) || state.q || '')}" autocomplete="off">
+              <span class="as-search-ico" aria-hidden="true">🔎</span>
+              <input id="as-q" class="input" type="search" placeholder="Search Agent Name, TL Name, Agent ID, TL ID, ya 10-digit Mobile Number…" value="${esc((params && params.q) || state.q || '')}" autocomplete="off" aria-label="Agent ya TL search">
               <button class="btn primary" id="as-search-btn" type="button">🔎 Search</button>
               ${can('refresh') ? `<button class="btn" id="as-refresh-btn" type="button" title="Data refresh — cache clear karke dobara load">🔄</button>` : ''}
               <div id="as-drop" class="as-drop" hidden></div>
@@ -1004,6 +1006,12 @@ FF.pages = FF.pages || {};
             <div id="as-top-suggest" class="as-top-suggest"></div>
           </div>
         </div></div>
+        <div class="card as-people-card">
+          <div class="card-head"><h3>📊 REPORT data — sabhi agents &amp; TLs</h3><div class="card-right dim small">Source: <b>${isGv ? 'GV REPORT' : 'REPORT'} tab</b> · Summary ke same numbers · row par click → poori report</div></div>
+          <div class="card-body as-people-body">
+            <div id="as-people">${U.spinner(`${chLabel} ki REPORT data list ban rahi hai…`)}</div>
+          </div>
+        </div>
         <div id="as-body">${U.spinner(`${chLabel} agents & TLs load ho rahe hain…`)}</div>
       </div>`;
       const qEl = U.$('#as-q', root), drop = U.$('#as-drop', root), body = U.$('#as-body', root);
@@ -1022,6 +1030,26 @@ FF.pages = FF.pages || {};
         return;
       }
       stopListHint();
+
+      // 📊 v3.43 — poori REPORT data list (Agent · TL · Stock · Total Issuance · Last Month) —
+      // MP().reportDataRow() se wahi numbers jo summary KPI cards me dikhte hain.
+      const peopleHost = U.$('#as-people', root);
+      const paintPeopleTable = () => {
+        if (!peopleHost) return;
+        if (!MP() || !MP().reportDataRow) { peopleHost.innerHTML = '<div class="card-body empty dim">REPORT data table available nahi hai.</div>'; return; }
+        const rows = state.list.map((p) => MP().reportDataRow(p, { cur: p.cur, last: p.last, stock: p.stock, tlName: p.tl, tlId: p.tlId, mobile: p.mobile, id: p.id }));
+        peopleHost.innerHTML = MP().peopleTableHtml(rows, {
+          id: `as-${channel}-people`,
+          chips: '<button type="button" class="chip on" data-mppt-chip="all">🎯 Sab</button><button type="button" class="chip" data-mppt-chip="agents">🧑‍💼 Agents</button><button type="button" class="chip" data-mppt-chip="tls">👥 TLs</button>',
+          footer: true,
+          footerLabel: `GRAND TOTAL — ${chLabel} agents`,
+          whoLabel: channel === 'gv' ? 'GV Agent / TL' : 'FF Agent / TL',
+          sourceNote: `Source: ${isGv ? 'GV REPORT' : 'REPORT'} tab`,
+          limit: 250,
+          rowActions: (r) => `<button type="button" class="btn tiny" data-as-open="${esc(`${r.kind}|${r.name}`)}" title="Iska poora summary kholo">📂</button>`
+        });
+      };
+      paintPeopleTable();
 
       const renderTopChips = (q) => {
         if (!topSug) return;
@@ -1094,6 +1122,25 @@ FF.pages = FF.pages || {};
         paintReport(rep);
         if (rep.ageState !== 'ready') startAgeing(rep);
       };
+      // 📊 REPORT data table — row / 📂 button par click → usi person ka poora summary neeche.
+      // Number cells ([data-kpi]) ko chhod do — wo app.js ka detail drawer kholte hain.
+      const peopleCard = U.$('.as-people-card', root) || root;
+      if (peopleCard && peopleCard.addEventListener) peopleCard.addEventListener('click', (e) => {
+        const openBtn = e.target.closest('[data-as-open]');
+        if (openBtn) {
+          const parts = String(openBtn.dataset.asOpen || '').split('|');
+          const person = state.list.find((p) => p.kind === parts[0] && norm(p.name) === norm(parts[1])) || { kind: parts[0], name: parts[1] };
+          pick(person);
+          return;
+        }
+        const row = e.target.closest('[data-mppt-row]');
+        if (row && !e.target.closest('[data-kpi],button,a')) {
+          const spec = MP() && MP().personFromRow ? MP().personFromRow(row) : null;
+          if (!spec) return;
+          const person = state.list.find((p) => p.kind === spec.kind && norm(p.name) === norm(spec.name)) || spec;
+          pick(person);
+        }
+      });
       /** v3.41 — FF / GV dono ka option: usi naam ko dusre channel ke Summary me kholo (naam wahan na ho to saaf bataata hai). */
       const otherCh = isGv ? 'ff' : 'gv';
       const canOther = () => can(`${otherCh}AgentSummary`) && (otherCh !== 'gv' || !FF.gv || !FF.gv.enabled || FF.gv.enabled());

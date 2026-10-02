@@ -1,4 +1,4 @@
-# First Forward Dashboard — First Forward + GV Partner (v3.39)
+# First Forward Dashboard — First Forward + GV Partner (v3.43)
 
 Colourful dashboard website built directly on top of **do Google Sheets**:
 
@@ -13,6 +13,22 @@ aur ek **⚖️ GV vs First Forward** page side-by-side comparison deta hai.
 Koi database nahi, koi manual upload nahi — website Google Sheet se data padhti hai
 (Google Visualization API / `gviz`) through a small Node server that also handles **login, users,
 permissions and settings**. Zero npm dependencies.
+
+## ✨ v3.43.0 — 📊 REPORT data everywhere — Home search v2 + FF/GV Summary me poori data table (same numbers)
+
+- **🎨 Home Master Search v2:** hero search bar (focus ring, `/`, ✕), **channel chips** (🎯 Sab · 🟦 FF · 🟩 GV),
+  live meta line, aur results me sabse upar **📊 REPORT data table** — **Agent · TL · 📦 Stock ·
+  🏷️ Total Issuance (MTD) · 📅 Last Month · 📈 Growth** (sortable + filterable + "Aur dikhao").
+  Number cell click → detail drawer · row click → usi person ki card + poori report. Kundli cards me
+  bhi wahi **data strip** (colour-coded) + channel badges.
+- **📋 FF / GV Agent/TL Summary:** search card v2 + **"REPORT data — sabhi agents & TLs"** roster table
+  (chips: Sab/Agents/TLs, filter, 250+ rows paging) — row/📂 click → poora summary. Report header v2
+  (channel avatar, badges, **📄 REPORT/GV REPORT tab** source chip, TL "own + agents" note), KPI titles
+  user-language me (**Total Issuance · Last Month Issuance · Stock in hand**).
+- **🧮 Same-numbers guarantee:** shared `FF.masterProfile.reportDataRow()` + `peopleTableHtml()` —
+  table numbers seedha `quick()/build()` profile (REPORT / GV REPORT rows) se; TL rows = **own + agents**
+  rollup, footer agents-only (double count nahi). Docs: [WHATS-NEW-v3.43.0.md](WHATS-NEW-v3.43.0.md) ·
+  tests: `dev/report-data-table.test.js` (8) + smoke case · `npm test` 417 pass.
 
 ## ✨ v3.40.0 — 🧮 TL ka stock double count band · own vs agents side-by-side · har number clickable
 
