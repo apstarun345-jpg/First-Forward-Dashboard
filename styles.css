@@ -4515,3 +4515,99 @@ html.ff-lite .table-wrap { contain: layout style; }
 .as-chswitch { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 0 0 12px; }
 .as-chswitch .chip.on { background: var(--brand, #6366f1); color: #fff; opacity: 1; }
 @media (max-width: 560px) { .sr-tab { padding: 6px 10px; font-size: 12px; } }
+
+/* ================================================================================================
+   🧑‍💼 v3.42 — AGENT / TL 360 BOARD (agentBoard.js) — GV + FF, ek hi colourful clickable drawer
+   • KPI text hamesha box ke andar: centre aligned, wrap + no overflow, fixed min-height grid
+   • Har tile / cell clickable (data-kpi) — andar se andar tak drill
+   • TL bar (naam · ID · mobile), class-wise agent vs TL, TL ke agents + matrix
+   ================================================================================================ */
+.ab-wrap { display: flex; flex-direction: column; gap: 14px; }
+.ab-wrap.ab-gv { --ab-a: #0d9488; --ab-b: #22c55e; }
+.ab-wrap.ab-ff { --ab-a: #4f46e5; --ab-b: #ec4899; }
+
+/* ---- hero ---- */
+.ab-hero { position: relative; display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-radius: 16px; color: #fff; text-align: center; flex-wrap: wrap; justify-content: center; box-shadow: 0 10px 24px rgba(79,70,229,.22); overflow: hidden; }
+.ab-hero.ab-gv { background: linear-gradient(135deg, #0f766e 0%, #0d9488 45%, #22c55e 100%); }
+.ab-hero.ab-ff { background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 55%, #ec4899 100%); }
+.ab-hero::after { content: ""; position: absolute; right: -40px; top: -60px; width: 160px; height: 160px; border-radius: 50%; background: rgba(255,255,255,.13); }
+.ab-ava { flex: none; width: 54px; height: 54px; border-radius: 16px; background: rgba(255,255,255,.22); display: grid; place-items: center; font-weight: 900; font-size: 19px; letter-spacing: .5px; }
+.ab-idbox { min-width: 0; flex: 1 1 240px; text-align: center; }
+.ab-name { display: block; font-size: 20px; font-weight: 800; letter-spacing: -.3px; overflow-wrap: anywhere; }
+.ab-sub { display: block; font-size: 12px; opacity: .95; margin-top: 2px; overflow-wrap: anywhere; }
+.ab-chips { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; margin-top: 8px; }
+.ab-chip { display: inline-flex; align-items: center; gap: 4px; background: rgba(255,255,255,.2); border-radius: 999px; padding: 3px 10px; font-size: 12px; font-weight: 700; color: #fff; white-space: nowrap; }
+.ab-chip.ab-tel { color: #fff; text-decoration: none; }
+.ab-chip.ab-strong { background: rgba(255,255,255,.34); }
+.ab-hero-right { flex: none; text-align: center; background: rgba(255,255,255,.16); border-radius: 14px; padding: 8px 14px; min-width: 120px; }
+.ab-hero-num { display: block; font-size: 26px; font-weight: 900; line-height: 1.1; }
+.ab-hero-right small { display: block; font-size: 11px; opacity: .95; }
+.ab-hero-sub { display: block; font-size: 11px; opacity: .9; margin-top: 2px; }
+
+/* ---- TL strip (naam · ID · mobile) ---- */
+.ab-tlbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; background: #fff; border: 1px solid var(--line); border-left: 6px solid var(--ab-a, #4f46e5); border-radius: 14px; padding: 10px 14px; box-shadow: var(--shadow); text-align: center; }
+.ab-tlbar-lbl { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); }
+.ab-tlbar .ab-chip { background: #eef2ff; color: #3730a3; }
+.ab-tlbar .ab-chip.ab-tel { color: #0f766e; background: #ecfdf5; }
+.ab-tlbar .ab-chip.ab-cta { background: linear-gradient(135deg, var(--brand), var(--brand-2)); color: #fff; cursor: pointer; }
+.ab-cta-inline { cursor: pointer; text-decoration: underline dotted; }
+
+/* ---- KPI tiles ---- */
+.ab-kpi-h { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); text-align: center; }
+.ab-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(158px, 1fr)); gap: 10px; }
+.ab-kpi { position: relative; border-radius: 14px; padding: 12px 10px; color: #fff; text-align: center; min-height: 104px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; box-shadow: 0 8px 18px rgba(79,70,229,.18); overflow: hidden; }
+.ab-kpi.ab-click { cursor: pointer; transition: transform .14s, box-shadow .14s; }
+.ab-kpi.ab-click:hover { transform: translateY(-2px); box-shadow: 0 12px 24px rgba(79,70,229,.28); }
+.ab-kpi.ab-click:focus-visible { outline: 3px solid #fde047; outline-offset: 2px; }
+.ab-kpi-l { font-size: 11px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; opacity: .97; overflow-wrap: anywhere; line-height: 1.25; }
+.ab-kpi-v { font-size: 25px; font-weight: 900; letter-spacing: -.6px; line-height: 1.1; overflow-wrap: anywhere; max-width: 100%; }
+.ab-kpi-v .delta { font-size: 16px; }
+.ab-kpi-f { font-size: 11px; opacity: .96; overflow-wrap: anywhere; max-width: 100%; line-height: 1.3; }
+.ab-kpi-f b { font-weight: 900; }
+.ab-kpi-go { position: absolute; right: 8px; top: 6px; font-style: normal; font-weight: 900; opacity: .75; }
+.ab-sug { display: inline-flex; align-items: baseline; gap: 3px; }
+.ab-sug small { font-size: 10px; opacity: .95; font-weight: 700; }
+
+/* ---- sections + tables ---- */
+.ab-sec { background: #fff; border-radius: 14px; box-shadow: var(--shadow); padding: 12px 14px; border-top: 4px solid var(--ab-a, #4f46e5); }
+.ab-sec h4 { margin: 0 0 10px; font-size: 14px; text-align: center; overflow-wrap: anywhere; }
+.ab-sec h5 { margin: 0 0 8px; font-size: 12px; text-align: center; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.ab-count { display: inline-block; background: #eef2ff; color: #3730a3; border-radius: 999px; padding: 0 8px; font-size: 12px; margin-left: 4px; }
+.ab-tbl { width: 100%; }
+.ab-tbl th, .ab-tbl td { text-align: center; vertical-align: middle; white-space: nowrap; overflow-wrap: anywhere; }
+.ab-tbl th.num, .ab-tbl td.num { text-align: center; }
+.ab-th-group { text-align: center !important; font-weight: 800; }
+.ab-th-agent { background: #eef2ff; color: #3730a3; }
+.ab-th-tl { background: #ecfdf5; color: #0f766e; }
+.ab-cellclick { cursor: pointer; border-radius: 8px; transition: background .12s; }
+.ab-cellclick:hover { background: #eef2ff; box-shadow: inset 0 0 0 2px rgba(99,102,241,.25); }
+.ab-tbl tbody tr.ab-self td { background: #fff7ed; font-weight: 700; }
+.ab-tbl tfoot tr.ab-ownrow td { background: #ecfdf5; }
+.ab-tbl tfoot tr.ab-tltotal td { background: #eef2ff; font-weight: 800; }
+.ab-tag { background: #fde68a; color: #92400e; border-radius: 999px; padding: 0 6px; font-size: 11px; font-weight: 800; }
+.ab-mini { margin: 8px 0 0; font-size: 11.5px; color: var(--muted); text-align: center; }
+.ab-note { margin: 0; font-size: 11.5px; color: var(--muted); text-align: center; }
+.ab-chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.ab-chart-card { border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; min-width: 0; }
+.ab-sec .table-wrap { max-width: 100%; }
+
+/* ---- mobile ---- */
+@media (max-width: 640px) {
+  .ab-hero { padding: 12px; }
+  .ab-hero-right { width: 100%; }
+  .ab-kpis { grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); }
+  .ab-kpi-v { font-size: 21px; }
+  .ab-tbl th, .ab-tbl td { padding: 5px 6px; font-size: 11.5px; }
+}
+
+/* ---- dark theme ---- */
+html[data-theme="dark"] .ab-tlbar, html[data-theme="dark"] .ab-sec { background: #111827; border-color: #1f2937; }
+html[data-theme="dark"] .ab-tlbar .ab-chip { background: #1e1b4b; color: #c7d2fe; }
+html[data-theme="dark"] .ab-tbl tbody tr.ab-self td { background: #3b2410; }
+html[data-theme="dark"] .ab-tbl tfoot tr.ab-ownrow td { background: #06281f; }
+html[data-theme="dark"] .ab-tbl tfoot tr.ab-tltotal td { background: #1e1b4b; }
+html[data-theme="dark"] .ab-th-agent { background: #1e1b4b; color: #c7d2fe; }
+html[data-theme="dark"] .ab-th-tl { background: #06281f; color: #5eead4; }
+html[data-theme="dark"] .ab-count { background: #1e1b4b; color: #c7d2fe; }
+html[data-theme="dark"] .ab-cellclick:hover { background: #1e1b4b; }
+html[data-theme="dark"] .ab-chart-card { border-color: #1f2937; }

@@ -654,8 +654,28 @@ FF.pages = FF.pages || {};
     const rowsHtml = [...byClass.entries()].sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true })).map(([cls, v]) => `<tr class="clickable" ${drillAttr({ src: 'gv', scope: 'day', date: today, agent: agent.agentName, agentId: agent.agentId || '', channel: 'gv', cls })}><td><b>${esc(cls)}</b></td><td class="num"><b>${U.fmt(v.total)}</b></td><td class="num">${U.fmt(v.issuance)}</td><td class="num">${U.fmt(v.replacement)}</td><td>${[...v.detail.entries()].sort((a, b) => b[1] - a[1]).map(([label, n]) => `<span class="today-tag-detail">${esc(label)} · <b>${U.fmt(n)}</b></span>`).join(' ')}</td></tr>`).join('');
     return `<div class="dsec"><h4>🏅 EIR source-date class-wise tags · ${esc(today)} <span class="count green">${U.fmt(total)}</span></h4><div class="table-wrap"><table class="tbl compact"><thead><tr><th>Class</th><th class="num">Tags</th><th class="num">Issuance</th><th class="num">Replacement</th><th>Tag type</th></tr></thead><tbody>${rowsHtml}</tbody></table></div></div>`;
   }
+  /** 👥 GV TL 360 drawer — TL ka apna issuance/stock + uske saare agents (v3.42). */
+  async function openGvTlDrawer(tlName, tlId) {
+    const name = U.clean(tlName);
+    if (!name || name === '__direct__' || /^🚫|^direct/i.test(name)) { location.hash = '#/directAgents'; return null; }
+    if (FF.agentBoard) return FF.agentBoard.open({ kind: 'gv-tl', name, sub: tlId || '', kicker: '👥 GV Partner · TL 360' });
+    return null;
+  }
+  /** GV REPORT ki asli row (column-wise) — board ke neeche, evidence ke liye. */
+  function gvRawRowBlock(r) {
+    if (!r || !r.raw || !r.raw.length) return '';
+    return `<details class="dsec collapsible"><summary>📄 Poori GV REPORT row (${esc(r.agentId || '')}) <small class="dim">column-wise</small></summary><div class="table-wrap" style="max-height:340px"><table class="tbl compact"><thead><tr><th>#</th><th>Column</th><th>Value</th></tr></thead><tbody>${r.raw.map((v, i) => v === '' ? '' : `<tr><td class="dim">${U.colLetter(i)}</td><td>${esc((G.REPORT_COLS_LABELS && G.REPORT_COLS_LABELS[i]) || '')}</td><td>${esc(v)}</td></tr>`).join('')}</tbody></table></div></details>`;
+  }
   async function agentDrawer(r) {
     await G.need('master').catch(() => []);
+    // 🧑‍💼 v3.42 — ek hi unified board (GV + FF same format): status + TL (naam/ID/mobile) + last/MTD
+    // + growth + suggested dispatch + TL ke saath class-wise issuance & stock + TL ke sab agents.
+    if (FF.agentBoard) {
+      return FF.agentBoard.open(
+        { kind: 'gv-agent', name: r.agentName, sub: r.agentId || '', kicker: '🧑‍💼 GV Partner · Agent 360' },
+        { raw: r, extraHtml: gvRawRowBlock(r) }
+      );
+    }
     const currentYm = U.ymKey(new Date()), previousYm = U.prevMonthKey(currentYm);
     const profileDrill = (scope, ym) => ({ scope, ym: ym || '', agent: r.agentName, agentId: r.agentId || '', channel: 'gv' });
     const clsRows = Object.entries(r.curByClass || {}).filter(([, v]) => v > 0);
@@ -783,12 +803,12 @@ FF.pages = FF.pages || {};
         </div>
       </div>
       <div class="gvp-view" ${perf.view !== 'overview' ? 'hidden' : ''}><div class="grid g-2">
-        ${card(`⭐ Top GV agents · MTD`, C.hbars({ items: list.slice(0, 12).map((r, i) => ({ label: r.agentName, sub: FF.config.isDirectAgent(r, 'gv') ? FF.config.directLabel(r, 'gv') : r.tlName, value: r.curTotal, compare: r.lastTotal, color: C.PALETTE[i % C.PALETTE.length], attr: `data-agent="${esc(r.agentName)}"` })), compareLabel: 'Last month', valueLabel: 'MTD' }))}
-        ${card(`🏅 GV TL rollup`, C.hbars({ items: tls.slice(0, 12).map((t, i) => ({ label: t.tlName, sub: `${t.agents} agents · stock ${U.fmtShort(t.stock)}`, value: t.cur, compare: t.last, color: C.PALETTE[(i + 3) % C.PALETTE.length] })), compareLabel: 'Last month', valueLabel: 'MTD' }))}
+        ${card(`⭐ Top GV agents · MTD`, C.hbars({ items: list.slice(0, 12).map((r, i) => ({ label: r.agentName, sub: FF.config.isDirectAgent(r, 'gv') ? FF.config.directLabel(r, 'gv') : r.tlName, value: r.curTotal, compare: r.lastTotal, color: C.PALETTE[i % C.PALETTE.length], attr: `data-gvp-agent="${esc(r.agentName)}"` })), compareLabel: 'Last month', valueLabel: 'MTD' }), { right: '<span class="dim small">Naam par click = 360 drawer</span>' })}
+        ${card(`🏅 GV TL rollup`, C.hbars({ items: tls.slice(0, 12).map((t, i) => ({ label: t.tlName, sub: `${t.agents} agents · stock ${U.fmtShort(t.stock)}`, value: t.cur, compare: t.last, color: C.PALETTE[(i + 3) % C.PALETTE.length], attr: t.tlId === '__direct__' ? '' : `data-gvp-tl="${esc(t.tlName)}" data-gvp-tlid="${esc(t.tlId || '')}"` })), compareLabel: 'Last month', valueLabel: 'MTD' }), { right: '<span class="dim small">TL par click = TL 360 drawer</span>' })}
       </div></div>
       <div class="gvp-view" ${perf.view !== 'agents' ? 'hidden' : ''}>${card('📋 GV agents', `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Agent</th><th>TL</th>${PERF_COLS.slice(2).map((c) => sortTh(c.key, c.label, c.num)).join('')}</tr></thead><tbody>${tableRows || `<tr><td colspan="15" class="empty">Koi agent match nahi hua</td></tr>`}</tbody></table></div>
         <div class="pager"><button class="btn small" data-gvp-pg="prev" ${perf.page <= 1 ? 'disabled' : ''}>‹ Prev</button><span>Page ${perf.page} / ${U.fmt(pages)}</span><button class="btn small" data-gvp-pg="next" ${perf.page >= pages ? 'disabled' : ''}>Next ›</button></div>`, { right: `${FF.auth.can('share') ? `<button class="btn small" data-share="wa" data-text="${esc(`GV Partner MTD ${U.fmt(totals.cur)} tags · stock ${U.fmt(totals.stock)} · ${tls.length} TLs`)}">🟢 Share</button>` : ''}` })}</div>
-      <div class="gvp-view" ${perf.view !== 'tls' ? 'hidden' : ''}>${card('👥 GV TL-wise summary', tableHtml(['#', 'TL', 'Agents', 'Stock', 'Stock VC4', 'Last month', 'MTD', 'MTD VC4', 'High prio', 'Inactive'], tls.map((t, i) => `<tr data-link="${t.tlId === '__direct__' ? '#/directAgents' : `#/gvPerformance?tl=${encodeURIComponent(t.tlName)}`}"><td class="dim">${i + 1}</td><td><b>${esc(t.tlName)}</b></td><td class="num">${U.fmt(t.agents)}</td><td class="num">${U.fmt(t.stock)}</td><td class="num">${U.fmt(t.stockVc4)}</td><td class="num">${U.fmt(t.last)}</td><td class="num"><b>${U.fmt(t.cur)}</b></td><td class="num">${U.fmt(t.curVc4)}</td><td class="num">${U.fmt(t.high)}</td><td class="num">${U.fmt(t.inactive)}</td></tr>`), 2), { right: exportBtn('gv-tl-summary') })}</div>
+      <div class="gvp-view" ${perf.view !== 'tls' ? 'hidden' : ''}>${card('👥 GV TL-wise summary', tableHtml(['#', 'TL', 'Agents', 'Stock', 'Stock VC4', 'Last month', 'MTD', 'MTD VC4', 'High prio', 'Inactive'], tls.map((t, i) => `<tr class="clickable" data-gvp-tl="${esc(t.tlName)}" data-gvp-tlid="${esc(t.tlId && t.tlId !== '__direct__' ? t.tlId : '')}" title="Click to open TL 360 drawer"><td class="dim">${i + 1}</td><td><b>${esc(t.tlName)}</b></td><td class="num">${U.fmt(t.agents)}</td><td class="num">${U.fmt(t.stock)}</td><td class="num">${U.fmt(t.stockVc4)}</td><td class="num">${U.fmt(t.last)}</td><td class="num"><b>${U.fmt(t.cur)}</b></td><td class="num">${U.fmt(t.curVc4)}</td><td class="num">${U.fmt(t.high)}</td><td class="num">${U.fmt(t.inactive)}</td></tr>`), 2), { right: `${exportBtn('gv-tl-summary')}<span class="dim small">Row par click = TL 360 drawer (agents + class-wise)</span>` })}</div>
       <div class="gvp-view" ${perf.view !== 'alerts' ? 'hidden' : ''}>
         <div class="mini-grid">${miniKpi('Attention list', U.fmt(alertList.length), 'priority / inactive / zero-stock / de-growth', 'c4', { scope: 'list', list: 'gvp.f.attention' })}${miniKpi('High priority', U.fmt(list.filter((r) => /high/i.test(r.priority || '')).length), 'dispatch review', 'c6', { scope: 'list', list: 'gvp.f.high' })}${miniKpi('Inactive', U.fmt(list.filter((r) => /inactive/i.test(r.agentStatus || '')).length), 'follow-up', 'c2', { scope: 'list', list: 'gvp.f.inactive' })}${miniKpi('Direct agents', U.fmt(directCount), 'stock dispatch not required', 'c3', { scope: 'list', list: 'gvp.f.direct' })}</div>
         ${card('🚨 GV attention & dispatch watch', `<div class="table-wrap tall"><table class="tbl compact"><thead><tr><th>Agent</th><th>TL / class</th><th>Priority</th><th>Status</th><th class="num">Stock</th><th class="num">Growth</th><th>Action</th></tr></thead><tbody>${attentionRows || '<tr><td colspan="7" class="empty">Current filters me koi alert nahi.</td></tr>'}</tbody></table></div>`, { right: `<span class="dim">${U.fmt(alertList.length)} rows</span>` })}
@@ -849,8 +869,13 @@ FF.pages = FF.pages || {};
       if (pgb) { perf.page += pgb.dataset.gvpPg === 'next' ? 1 : -1; rerender(); return; }
       const th = e.target.closest('th.sortable');
       if (th) { const k = th.dataset.sort; if (perf.sort.key === k) perf.sort.dir = perf.sort.dir === 'asc' ? 'desc' : 'asc'; else { perf.sort.key = k; perf.sort.dir = 'desc'; } rerender(); return; }
+      // 👥 TL row / TL bar par click = TL 360 drawer (TL ka apna + saare agents ka issuance-stock).
+      const tlEl = e.target.closest('[data-gvp-tl]');
+      if (tlEl && tlEl.dataset.gvpTl) { openGvTlDrawer(tlEl.dataset.gvpTl, tlEl.dataset.gvpTlid || ''); return; }
       const row = e.target.closest('tr[data-agent]');
       if (row) { const r = all.find((x) => x.agentName === row.dataset.agent); if (r) agentDrawer(r); }
+      const barAgent = e.target.closest('[data-gvp-agent]');
+      if (barAgent) { const r = all.find((x) => x.agentName === barAgent.dataset.gvpAgent); if (r) return agentDrawer(r); }
     });
     if (p.q) {
       const hit = all.find((r) => norm(r.agentName) === norm(p.q)) || all.find((r) => norm(r.agentName).includes(norm(p.q)));

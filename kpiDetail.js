@@ -168,7 +168,22 @@ window.FF = window.FF || {};
     if (!daily) { try { daily = await FF.store.need('daily'); } catch { daily = []; } }
     // 🟩 GV ka aaj ka data GV Master se aata hai (model/gv layer ise already splice karta hai),
     // 🟦 FF ka data EIR se. Isliye yahan sirf channel split aur T+1 lag filter hota hai.
-    const rows = (daily || []).filter((r) => src === 'both' || (src === 'gv' ? r.channel === 'GV Partner' : r.channel !== 'GV Partner'));
+    let rows = (daily || []).filter((r) => src === 'both' || (src === 'gv' ? r.channel === 'GV Partner' : r.channel !== 'GV Partner'));
+    // 🩹 GV ka ledger = gv layer (EIR + GV Master ka per-tag supplement). Store ke GV rows usi layer se
+    // bante hain, tab bhi Master ka jo hissa EIR me missing tha wo sirf `gv.issuanceRows()` me milta hai —
+    // isliye GV rows ko wahin se lo, warna KPI ka number (GV Master) aur drill (sirf EIR) alag-alag dikhte hain.
+    if ((src === 'gv' || src === 'both') && FF.gv && typeof FF.gv.issuanceRows === 'function') {
+      const gvRows = FF.gv.issuanceRows();
+      if (Array.isArray(gvRows) && gvRows.length) {
+        const mapGv = (r) => ({
+          key: r.key || (r.date ? U.dateKey(r.date) : ''), ym: r.ym, day: r.day, cls: r.cls, group: r.group,
+          type: r.type || 'ISSUANCE', status: r.status || '', tagType: r.tagType || r.vrnType || '', vrnType: r.vrnType || r.tagType || '',
+          channel: 'GV Partner', agentName: r.agentName || '', agentId: r.agentId || '', tlName: r.tlName || '', tlId: r.tlId || '',
+          tagId: r.tagId || '', vrn: r.vrn || '', n: r.n || 1
+        });
+        rows = rows.filter((r) => r.channel !== 'GV Partner').concat(gvRows.map(mapGv));
+      }
+    }
     // 🔁 FF issuance T+1 — jo FF date abhi reported nahi hai (aaj) wo FF/both counts me nahi.
     //    GV rows live rehti hain, isliye lag sirf First Forward par lagta hai.
     if (FF.filters && FF.filters.ffLagOn && FF.filters.ffLagOn()) return rows.filter((r) => FF.filters.ffVisible(r));
