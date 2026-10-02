@@ -119,10 +119,14 @@ test('TL profile: totals, class sums, TL-level vs agent-wise suggestion, agents 
   assert.equal(pr.dispatch.sumAgentVc4, 80 + 0);
   const html = MP.html(pr);
   assert.match(html, /TL ke agents/); assert.match(html, /Agent-wise issuance/); assert.match(html, /data-mp-agent="Ravi Kumar"/);
-  assert.match(html, /Own 8 \+ agents 70/);
+  // v3.40 — "Own 8 + agents 70" ab do clickable chips hai (har chip ki drawer me sirf wahi hissa khulta hai)
+  assert.match(html, /class="mp-part own"[^>]*part=own"[^>]*>Own 8<\/span> \+ <span class="mp-part team"[^>]*part=team"[^>]*>agents 70<\/span>/);
+  assert.ok(/part=own/.test(html) && /part=team/.test(html), 'own / agents chips ka drill-down alag');
+  assert.match(html, /= TL TOTAL \(own \+ agents\)/, 'agents table ka footer reconcile karta hai (double count nahi)');
   const csv = MP.csvRows(pr); assert.ok(csv.length > 20);
-  assert.ok(csv.some((row) => row[0] === 'TL own stock' && row[1] === 8));
-  assert.match(MP.waText(pr), /TL One/); assert.match(MP.waText(pr), /own 8 \+ agents 70/);
+  assert.ok(csv.some((row) => /^TL own stock/.test(row[0]) && row[1] === 8));
+  assert.ok(csv.some((row) => row[0] === '= TL TOTAL'), 'CSV me bhi own + agents = TL total row');
+  assert.match(MP.waText(pr), /TL One/); assert.match(MP.waText(pr), /TL ke paas 8 \+ agents ke paas 70/);
 });
 
 test('GV agent + GV TL profiles', async () => {

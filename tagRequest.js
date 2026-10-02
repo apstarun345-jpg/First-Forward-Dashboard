@@ -382,13 +382,16 @@ FF.pages = FF.pages || {};
     if (!g.rec) g.rec = { ...g, agentId: '', tlName: g.name, isTl: true };
     return g.rec;
   }
-  /** TL ke saare agents (stock / last / cur ke saath) — TL pick karte hi poora data dikhane ke liye. */
+  /** TL ke saare agents (stock / last / cur ke saath) — TL pick karte hi poora data dikhane ke liye.
+   *  v3.40: asli sheets me TL khud bhi apni team ki ek row hota hai (uska APNA stock) — use `isSelf`
+   *  se mark karte hain taaki UI use "agent" na gine aur phir upar se TL total me do baar na jode. */
   function tlAgents(g) {
     const idx = state.index;
     if (!idx || !g) return [];
+    const tlName = norm(g.name);
     return [...(g.agents || [])].map((k) => idx.byKey.get(k)).filter(Boolean)
-      .map((r) => { const m = groupMetrics(r); return { key: `${r.channel}|${norm(r.name)}`, name: r.name, agentId: r.agentId, channel: r.channel, stock: num(m.core.stock) + num(m.comm.stock), last: num(m.core.last) + num(m.comm.last), cur: num(m.core.cur) + num(m.comm.cur), priority: r.priority }; })
-      .sort((a, b) => b.cur - a.cur || b.stock - a.stock);
+      .map((r) => { const m = groupMetrics(r); return { key: `${r.channel}|${norm(r.name)}`, name: r.name, agentId: r.agentId, channel: r.channel, stock: num(m.core.stock) + num(m.comm.stock), last: num(m.core.last) + num(m.comm.last), cur: num(m.core.cur) + num(m.comm.cur), priority: r.priority, isSelf: !!tlName && norm(r.name) === tlName }; })
+      .sort((a, b) => (b.isSelf ? 1 : 0) - (a.isSelf ? 1 : 0) || b.cur - a.cur || b.stock - a.stock);
   }
   /** Saved request ke agent ka live record (admin table) — ID ya exact naam, channel same. */
   function lookupAgent(a) {
@@ -1048,11 +1051,17 @@ body.colorful .from-hdr { color: #166534; }
     if (!rec) return '';
     const m = metricNumbers(groupMetrics(rec));
     const list = tlAgents(rec);
+    const self = list.find((a) => a.isSelf) || null;
+    const agents = list.filter((a) => !a.isSelf);
+    const sumOf = (arr, k) => U.sum(arr, (a) => num(a[k]));
     const cell = (label, g) => `<div class="tr-tlk"><small>${label}</small><b>${fmt(g.stock)}</b><span class="dim small">stock · last ${fmt(g.last)} · MTD ${fmt(g.cur)}</span></div>`;
+    const agentRow = (a) => `<tr class="tr-tl-agent${a.isSelf ? ' mp-selfrow' : ''}" data-tr-tlagent="agent:${esc(a.channel)}:${esc(a.agentId || '')}:${esc(norm(a.name))}" style="cursor:pointer"><td>${a.isSelf ? '👤 ' : ''}<b>${esc(a.name)}</b>${a.isSelf ? '<span class="mp-tag-self">TL · apna stock</span>' : ''}${a.agentId ? ` <small class="dim">#${esc(a.agentId)}</small>` : ''}</td><td class="num">${fmt(a.stock)}</td><td class="num">${fmt(a.last)}</td><td class="num">${fmt(a.cur)}</td></tr>`;
+    const footRow = (label, stock, last, cur, cls) => `<tr class="${cls || ''}"><td><b>${label}</b></td><td class="num"><b>${fmt(stock)}</b></td><td class="num">${fmt(last)}</td><td class="num">${fmt(cur)}</td></tr>`;
     return `<div class="tr-tl-panel">
-      <div class="tr-tl-kpis">${cell('🚗 VC4+VC20', m.core)}${cell('🚚 VC5+', m.comm)}${cell('Total', m.total)}<div class="tr-tlk"><small>Agents</small><b>${fmt(list.length)}</b><span class="dim small">TL ${esc(rec.priority || '—')}</span></div></div>
-      <details class="tr-tl-agents"><summary>👥 ${esc(rec.name)} ke agents (${fmt(list.length)}) — click karke agent chuno</summary>
-        <div class="table-wrap"><table class="tbl compact"><thead><tr><th>Agent</th><th>Stock</th><th>Last</th><th>MTD</th></tr></thead><tbody>${list.map((a) => `<tr class="tr-tl-agent" data-tr-tlagent="agent:${esc(a.channel)}:${esc(a.agentId || '')}:${esc(norm(a.name))}" style="cursor:pointer"><td><b>${esc(a.name)}</b>${a.agentId ? ` <small class="dim">#${esc(a.agentId)}</small>` : ''}</td><td class="num">${fmt(a.stock)}</td><td class="num">${fmt(a.last)}</td><td class="num">${fmt(a.cur)}</td></tr>`).join('') || '<tr><td colspan="4" class="dim">Agents nahi mile</td></tr>'}</tbody></table></div>
+      <div class="tr-tl-kpis">${cell('🚗 VC4+VC20', m.core)}${cell('🚚 VC5+', m.comm)}${cell('Total', m.total)}<div class="tr-tlk"><small>Agents</small><b>${fmt(agents.length)}${self ? ' + TL' : ''}</b><span class="dim small">TL ${esc(rec.priority || '—')}</span></div></div>
+      <details class="tr-tl-agents"><summary>👥 ${esc(rec.name)} ke agents (${fmt(agents.length)})${self ? ' + TL ka apna stock' : ''} — click karke agent chuno</summary>
+        <p class="dim small" style="margin:4px 0">Hisaab: TL ka total = agents ka jod + TL ke paas (apni row alag dikhi hai, do baar nahi judti).</p>
+        <div class="table-wrap"><table class="tbl compact"><thead><tr><th>Agent</th><th>Stock</th><th>Last</th><th>MTD</th></tr></thead><tbody>${list.map(agentRow).join('') || '<tr><td colspan="4" class="dim">Agents nahi mile</td></tr>'}</tbody>${list.length ? `<tfoot>${agents.length ? footRow(`🧑‍💼 Agents total (${fmt(agents.length)})`, sumOf(agents, 'stock'), sumOf(agents, 'last'), sumOf(agents, 'cur')) : ''}${self ? footRow(`👤 ${esc(self.name)} ke paas (TL own)`, self.stock, self.last, self.cur, 'mp-selfrow') : ''}${footRow('= TL TOTAL (own + agents)', num(m.total.stock), num(m.total.last), num(m.total.cur), 'row-total')}</tfoot>` : ''}</table></div>
       </details></div>`;
   }
   // ---- 📦 "sabhi agents ka stock" board — employee link par bhi (v3.38) ---------------------------

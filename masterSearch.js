@@ -417,7 +417,7 @@ FF.pages = FF.pages || {};
       const isTlKind = /tl$/.test(p.kind);
       const extra = q1 ? [
         q1.mobile && (!FF.auth || FF.auth.can('contacts')) ? `📞 ${q1.mobile}` : '',
-        `📦 ${U.fmt(q1.stock.total)}${!isTlKind && q1.tlStock && q1.tlStock.has ? ` · TL ${U.fmt(q1.tlStock.total)}` : ''}`,
+        `📦 ${U.fmt(q1.stock.total)}${isTlKind && q1.tlStock && q1.tlStock.own && q1.tlStock.agents ? ` (own ${U.fmt(q1.tlStock.own.total)} + agents ${U.fmt(q1.tlStock.agents.total)})` : ''}${!isTlKind && q1.tlStock && q1.tlStock.has ? ` · TL ${U.fmt(q1.tlStock.total)}${q1.tlStock.own && q1.tlStock.agents ? ` (own ${U.fmt(q1.tlStock.own.total)} + agents ${U.fmt(q1.tlStock.agents.total)})` : ''}` : ''}`,
         q1.tagRequired ? `🏷️ TAG ${U.sugText(q1.calc.total.net, q1.calc.total.gross)}` : (!q1.direct && q1.calc && (q1.calc.total.net || q1.calc.total.gross) ? `🎯 dispatch ${U.sugText(q1.calc.total.net, q1.calc.total.gross)}` : ''),
         q1.calc && q1.calc.total.rate > 0 ? `⚡ ${U.fmt(q1.calc.total.rate, true)}/day` : '',
         q1.calc && q1.calc.total.cover != null ? `⏳ cover ${U.fmt(q1.calc.total.cover, true)} din` : ''
@@ -478,6 +478,14 @@ FF.pages = FF.pages || {};
     const d = q1.dispatch || {};
     const tlStockDetail = q1.tlStock && q1.tlStock.own && q1.tlStock.agents
       ? `Own ${U.fmt(q1.tlStock.own.total)} + agents ${U.fmt(q1.tlStock.agents.total)}` : '';
+    // v3.40 — TL stock ka split do clickable chips: "TL ke paas (own)" drawer me sirf TL ki rows, "agents"
+    // me sirf agents ki — aur Agents block click par wahi list (TL ki apni row count me nahi ginti jaati).
+    const tlNameForSpec = isTlKind ? p.name : ((q1.tl && q1.tl.name) || '');
+    const tlStockBaseSpec = !isTlKind && q1.direct ? '' : `src=${q1.ch}&scope=stock&tl=${encodeURIComponent(tlNameForSpec)}`;
+    const splitChips = q1.tlStock && q1.tlStock.own && q1.tlStock.agents && tlStockBaseSpec
+      ? `<span class="mp-part own" data-kpi="${esc(`${tlStockBaseSpec}&part=own`)}" title="Sirf TL ke paas (own) stock">own ${U.fmt(q1.tlStock.own.total)}</span> + <span class="mp-part team" data-kpi="${esc(`${tlStockBaseSpec}&part=team`)}" title="Sirf agents ke paas stock">agents ${U.fmt(q1.tlStock.agents.total)}</span>`
+      : '';
+    const peopleSpec = isTlKind ? `src=${q1.ch}&scope=people&tl=${encodeURIComponent(p.name)}&self=0&sort=stock` : '';
     const p1 = q1.projT1 || null;   // 📈 growth % + expected month-end
     const mode = U.suggestMode ? U.suggestMode() : 'both';
     // Dono criteria: stock ke baad (net) + bina stock ghataye (gross) — settings ka mode apply hota hai.
@@ -496,8 +504,8 @@ FF.pages = FF.pages || {};
     return `<div class="ms-kundli-stats ms-prof">
       <div><small>${isTlKind ? 'TL mobile' : 'Mobile'}</small><b>${contacts ? (q1.mobile ? esc(q1.mobile) : '—') : '🔒'}</b></div>
       <div><small>Priority</small><b>${esc(q1.priority || '—')}</b></div>
-      <div><small>${isTlKind ? 'TL stock' : 'Agent stock'}</small><b>${U.fmt(q1.stock.total)}</b>${isTlKind && tlStockDetail ? `<em>${tlStockDetail}</em>` : ''}</div>
-      ${isTlKind ? `<div><small>Agents</small><b>${U.fmt(q1.agentCount)}</b></div>` : `<div><small>TL stock</small><b>${q1.tlStock && q1.tlStock.has ? U.fmt(q1.tlStock.total) : '—'}</b>${tlStockDetail ? `<em>${tlStockDetail}</em>` : ''}</div>`}
+      <div${isTlKind ? ` class="ms-stat-click" data-kpi="${esc(`src=${q1.ch}&scope=stock&tl=${encodeURIComponent(p.name)}`)}" title="TL stock ki detail"` : ''}><small>${isTlKind ? 'TL stock (own + agents)' : 'Agent stock'}</small><b>${U.fmt(q1.stock.total)}</b>${isTlKind && (splitChips || tlStockDetail) ? `<em>${splitChips || tlStockDetail}</em>` : ''}</div>
+      ${isTlKind ? `<div class="ms-stat-click" data-kpi="${esc(peopleSpec)}" title="In agents ki poori list"><small>Agents</small><b>${U.fmt(q1.agentCount)}${q1.selfAgent ? ' + TL' : ''}</b>${q1.selfAgent ? `<em>TL ka apna stock alag</em>` : ''}</div>` : `<div${q1.tlStock && q1.tlStock.has ? ` class="ms-stat-click" data-kpi="${esc(tlStockBaseSpec)}" title="TL stock ki detail"` : ''}><small>TL stock</small><b>${q1.tlStock && q1.tlStock.has ? U.fmt(q1.tlStock.total) : '—'}</b>${splitChips || tlStockDetail ? `<em>${splitChips || tlStockDetail}</em>` : ''}</div>`}
       ${sugStats}
       <div><small>Run-rate / day <em>(÷ ${U.fmt(q1.calc.total.elapsed)} din)</em></small><b>${U.fmt(q1.calc.total.rate, true)}</b></div>
       <div><small>Cover</small><b>${q1.calc.total.cover != null ? `${U.fmt(q1.calc.total.cover, true)} din` : '—'}</b></div>

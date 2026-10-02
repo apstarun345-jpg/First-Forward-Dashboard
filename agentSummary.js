@@ -370,6 +370,29 @@ FF.pages = FF.pages || {};
     };
   }
 
+  /** profile ke agent row (masterProfile shape) ko summary shape me laao — Last/MTD/VC4/Comm/Stock + growth. */
+  function normAgentRow(a) {
+    return {
+      ...a,
+      curTotal: a.cur ?? a.curTotal ?? 0, lastTotal: a.last ?? a.lastTotal ?? 0,
+      curVc4: a.curVc4 || 0, curComm: a.curComm || 0,
+      stockTotal: a.stockTotal || ((a.stockVc4 || 0) + (a.stockComm || 0)),
+      growth: U.growth(a.cur ?? a.curTotal ?? 0, a.last ?? a.lastTotal ?? 0)
+    };
+  }
+  /** TL ka stock hisaab — screen aur saare exports (text / CSV / Excel / PDF / Team Pack) isi ko use karte
+   *  hain: `agents` (TL ki apni row ke bina) + `self` (TL ke paas) aur TL total = own + agents. */
+  function tlSplit(r) {
+    const p = (r && r.p) || {}, ts = p.tlStock || {}, t = p.totals || {};
+    const agents = (p.agents || []).slice(), self = p.selfAgent || null;
+    const own = ts.own || null, ag = ts.agents || null;
+    return {
+      own, ag, agents, self, list: self ? [self, ...agents] : agents, has: !!(own && ag),
+      sum: (k) => U.sum(agents, (a) => Number(a[k]) || 0),
+      stockTotal: Number(t.stockTotal) || 0,
+      text: own && ag ? `TL ke paas (own) ${fmt(own.total)} + agents ke paas ${fmt(ag.total)} = TL total ${fmt(t.stockTotal)}` : ''
+    };
+  }
   async function buildReport(person, opts) {
     const raw = await MP().build({
       kind: person.kind, name: person.name, sub: person.id || '',
@@ -394,17 +417,17 @@ FF.pages = FF.pages || {};
         growth: raw.growthNum != null ? raw.growthNum : U.growth(t.curTotal || 0, t.lastTotal || 0)
       },
       classTable: (raw.classes || []).map((c) => ({ ...c, growth: c.last ? ((c.cur - c.last) / c.last) * 100 : null })),
-      agents: (raw.agents || []).map((a) => ({
-        ...a,
-        curTotal: a.cur ?? a.curTotal ?? 0, lastTotal: a.last ?? a.lastTotal ?? 0,
-        curVc4: a.curVc4 || 0, curComm: a.curComm || 0,
-        stockTotal: a.stockTotal || ((a.stockVc4 || 0) + (a.stockComm || 0)),
-        growth: U.growth(a.cur ?? a.curTotal ?? 0, a.last ?? a.lastTotal ?? 0)
-      }))
+      agents: (raw.agents || []).map((a) => normAgentRow(a)),
+      // v3.40 — TL ki APNI stock row agents se alag (masterProfile bhi alag rakhta hai): count me nahi ginti,
+      // par UI/exports me dikhni chahiye — isliye `selfAgent` + composition ka `stockSplit` yahan pass hota hai.
+      selfAgent: raw.selfAgent ? normAgentRow(raw.selfAgent) : null,
+      stockSplit: raw.stockSplit || null
     };
-    const activityData = activityContext(person, isTl ? p.agents : [p], ch);
-    if (isTl) p.agents = p.agents.map((a) => ({ ...a, ...activityStatus(person, a, ch, activityData) }));
-    else Object.assign(p, activityStatus(person, p, ch, activityData));
+    const activityData = activityContext(person, isTl ? (p.selfAgent ? [p.selfAgent, ...p.agents] : p.agents) : [p], ch);
+    if (isTl) {
+      p.agents = p.agents.map((a) => ({ ...a, ...activityStatus(person, a, ch, activityData) }));
+      if (p.selfAgent) Object.assign(p.selfAgent, activityStatus(person, p.selfAgent, ch, activityData));
+    } else Object.assign(p, activityStatus(person, p, ch, activityData));
     const trend = monthlyTrend(person, ch, isTl, m.cur || '');
     const report = { person, p, age: null, ageState: 'idle', ch, isTl, trend, generatedAt: Date.now() };
     // 🧓 Ageing ab report ka rasta NAHI rokti. Summary page `{ age: false }` se base report turant dikhata hai (stock in hand,
@@ -437,6 +460,7 @@ FF.pages = FF.pages || {};
   function reportText(r) {
     const p = r.p, t = p.totals || {}, age = r.age;
     const chLabel = r.ch === 'gv' ? 'GV Partner' : 'First Forward';
+    const S = tlSplit(r);
     const lines = [
       `*📋 ${p.name}* (${chLabel} · ${r.isTl ? 'Team Leader' : 'Agent'}${p.id ? ` · ID: ${p.id}` : ''})`,
       `${p.mobile && canContacts() ? `📞 Mobile: ${p.mobile}` : ''}${!r.isTl && p.tlName ? ` · 👥 TL: ${p.tlName}${p.tlId ? ` (${p.tlId})` : ''}` : ''}`.replace(/^ · /, ''),
@@ -446,7 +470,7 @@ FF.pages = FF.pages || {};
       `• Current Month (${p.curYm || 'MTD'}): *${fmt(t.curTotal)}* (VC4: ${fmt(t.curVc4)} · Comm: ${fmt(t.curComm)})`,
       `• Last Month (${p.lastYm || 'Prev'}): *${fmt(t.lastTotal)}* (VC4: ${fmt(t.lastVc4)} · Comm: ${fmt(t.lastComm)})`,
       `• Growth: *${t.growth == null ? '—' : `${t.growth >= 0 ? '+' : ''}${t.growth.toFixed(1)}%`}* · Expected Month-End: *${fmt(p.expected)}* (Run-rate: ${fmt(p.runRate, true)}/day)`,
-      `• Stock in Hand: *${fmt(t.stockTotal)}*${r.isTl && p.tlStock && p.tlStock.own && p.tlStock.agents ? ` (Own ${fmt(p.tlStock.own.total)} + agents ${fmt(p.tlStock.agents.total)})` : ''} (VC4: ${fmt(t.stockVc4)} · Comm: ${fmt(t.stockComm)})`
+      `• Stock in Hand: *${fmt(t.stockTotal)}*${r.isTl && S.has ? ` (TL ke paas ${fmt(S.own.total)} + agents ke paas ${fmt(S.ag.total)} — TL ki row alag, double count nahi)` : ''} (VC4: ${fmt(t.stockVc4)} · Comm: ${fmt(t.stockComm)})`
     ].filter((x, i) => i !== 1 || Boolean(x));
 
     if ((p.classTable || []).length) {
@@ -466,18 +490,15 @@ FF.pages = FF.pages || {};
       lines.push(`*∑ Ageing Grand Total: ${fmt(age.total)} tags (0–30d: ${fmt(age.total - age.old30)} · 30+d Old: ${fmt(age.old30)} · 60+d Critical: ${fmt(age.old60)})*`);
     }
 
-    if (r.isTl && (p.agents || []).length) {
-      const sumLast = U.sum(p.agents, (a) => a.lastTotal);
-      const sumCur = U.sum(p.agents, (a) => a.curTotal);
-      const sumVc4 = U.sum(p.agents, (a) => a.curVc4);
-      const sumComm = U.sum(p.agents, (a) => a.curComm);
-      const sumStock = U.sum(p.agents, (a) => a.stockTotal);
-      lines.push('', `*🧑‍💼 Team Agents (${fmt(p.agents.length)}):*`);
-      p.agents.forEach((a) => {
+    if (r.isTl && S.list.length) {
+      const sumLast = S.sum('lastTotal'), sumCur = S.sum('curTotal'), sumVc4 = S.sum('curVc4'), sumComm = S.sum('curComm'), sumStock = S.sum('stockTotal');
+      lines.push('', `*🧑‍💼 Team Agents (${fmt(S.agents.length)}):*`);
+      S.list.forEach((a) => {
         const activity = a.activityStatus || 'Inactive';
-        lines.push(`• ${a.name}${a.id ? ` (${a.id})` : ''}: Last ${fmt(a.lastTotal)} · MTD *${fmt(a.curTotal)}* · Stock ${fmt(a.stockTotal)} · Status: ${activity}${a.inactiveDuration ? ` · ${a.inactiveDuration}` : ''}`);
+        lines.push(`${a.isSelf ? '👤' : '•'} ${a.name}${a.id ? ` (${a.id})` : ''}${a.isSelf ? ' — TL ka apna stock' : ''}: Last ${fmt(a.lastTotal)} · MTD *${fmt(a.curTotal)}* · Stock ${fmt(a.stockTotal)} · Status: ${activity}${a.inactiveDuration ? ` · ${a.inactiveDuration}` : ''}`);
       });
-      lines.push(`*∑ Team Grand Total (${fmt(p.agents.length)} Agents): Last ${fmt(sumLast)} · MTD ${fmt(sumCur)} (VC4 ${fmt(sumVc4)} · Comm ${fmt(sumComm)}) · Stock ${fmt(sumStock)}*`);
+      lines.push(`*∑ Agents total (${fmt(S.agents.length)} Agents): Last ${fmt(sumLast)} · MTD ${fmt(sumCur)} (VC4 ${fmt(sumVc4)} · Comm ${fmt(sumComm)}) · Stock ${fmt(S.has ? S.ag.total : sumStock)}*`);
+      if (S.has) lines.push(`*∑ ${S.text}*`);
     }
 
     lines.push('', `*🏁 GRAND TOTAL SUMMARY: Last ${fmt(t.lastTotal)} | MTD ${fmt(t.curTotal)} | Expected ${fmt(p.expected)} | Stock ${fmt(t.stockTotal)}${age ? ` | 30+d Old ${fmt(age.old30)}` : ''}*`);
@@ -488,18 +509,23 @@ FF.pages = FF.pages || {};
     const p = r.p, t = p.totals || {}, age = r.age;
     // Team-agent rows neeche explicit status columns ke saath add hote hain; profile CSV ka
     // aggregate/class-wise section keep karo, duplicate legacy team rows ko suppress karke.
-    const rows = MP().csvRows(r.isTl ? { ...p, agents: [] } : p).map((row) => [...row]);
+    const rows = MP().csvRows(r.isTl ? { ...p, agents: [], selfAgent: null } : p).map((row) => [...row]);
     if (!r.isTl) {
       rows.push(['Activity Status', p.activityStatus || '']);
       rows.push(['Inactive Duration', p.inactiveDuration || '']);
       rows.push(['Last Active Month', p.lastActiveYm || '']);
     }
-    if (r.isTl && (p.agents || []).length) {
+    const S = tlSplit(r);
+    if (r.isTl && S.list.length) {
       rows.push([]);
-      rows.push(['Team Agents', `${p.agents.length} agents under ${p.name}`]);
+      rows.push(['Team Agents', `${S.agents.length} agents under ${p.name}${S.self ? ' (TL ki apni row alag niche)' : ''}`]);
       rows.push(['Agent Name', 'ID', 'Last Month', 'Current (MTD)', 'VC4', 'Comm', 'Growth %', 'Stock', 'Status', 'Inactive Duration']);
-      p.agents.forEach((a) => rows.push([a.name, a.id || '', a.lastTotal, a.curTotal, a.curVc4, a.curComm, a.growth == null ? '' : Number(a.growth.toFixed(1)), a.stockTotal, a.activityStatus || 'Inactive', a.inactiveDuration || '']));
-      rows.push(['GRAND TOTAL', `${p.agents.length} Agents`, U.sum(p.agents, (a) => a.lastTotal), U.sum(p.agents, (a) => a.curTotal), U.sum(p.agents, (a) => a.curVc4), U.sum(p.agents, (a) => a.curComm), '', U.sum(p.agents, (a) => a.stockTotal), `${p.agents.filter((a) => a.activityStatus === 'Active').length} Active`, `${p.agents.filter((a) => a.activityStatus !== 'Active').length} Inactive`]);
+      S.list.forEach((a) => rows.push([a.isSelf ? `👤 ${a.name} (TL — apna stock)` : a.name, a.id || '', a.lastTotal, a.curTotal, a.curVc4, a.curComm, a.growth == null ? '' : Number(a.growth.toFixed(1)), a.stockTotal, a.activityStatus || 'Inactive', a.inactiveDuration || '']));
+      rows.push(['AGENTS TOTAL', `${S.agents.length} Agents`, S.sum('lastTotal'), S.sum('curTotal'), S.sum('curVc4'), S.sum('curComm'), '', S.has ? S.ag.total : S.sum('stockTotal'), `${S.agents.filter((a) => a.activityStatus === 'Active').length} Active`, `${S.agents.filter((a) => a.activityStatus !== 'Active').length} Inactive`]);
+      if (S.has) {
+        rows.push(['+ TL KE PAAS (OWN)', p.name, S.self ? S.self.lastTotal : '', S.self ? S.self.curTotal : '', '', '', '', S.own.total, '', '']);
+        rows.push(['= TL TOTAL (own + agents)', p.name, t.lastTotal, t.curTotal, t.curVc4, t.curComm, '', t.stockTotal, '', '']);
+      }
     }
     if (age && age.total) {
       rows.push([]);
@@ -537,7 +563,7 @@ FF.pages = FF.pages || {};
         ['Growth %', t.growth == null ? '' : Number(t.growth.toFixed(1))],
         ['Expected Month-End', p.expected], ['Run-rate / day', p.runRate],
         ['Stock in Hand', t.stockTotal],
-        ...(r.isTl && p.tlStock && p.tlStock.own && p.tlStock.agents ? [['TL own stock', p.tlStock.own.total], ['Agent team stock', p.tlStock.agents.total]] : []),
+        ...(r.isTl && p.tlStock && p.tlStock.own && p.tlStock.agents ? [['TL own stock (TL ke paas)', p.tlStock.own.total], ['Agents stock (agents ke paas)', p.tlStock.agents.total], ['Stock formula', 'TL ke paas (own) + agents ke paas = TL total — TL ki row agents me dobara nahi judti']] : []),
         ['VC4 Stock', t.stockVc4], ['Comm Stock', t.stockComm],
         ['30+d Old Stock', age ? age.old30 : ''],
         ['60+d Critical Stock', age ? age.old60 : ''],
@@ -558,12 +584,16 @@ FF.pages = FF.pages || {};
           .concat([['STOCK AGEING GRAND TOTAL', ...age.buckets.map((b) => b.n || 0), age.old30, age.old60, age.total]])
       });
     }
-    if (r.isTl && (p.agents || []).length) {
+    const S = tlSplit(r);
+    if (r.isTl && S.list.length) {
       sheets.push({
         name: 'Team Agents',
         header: ['Agent Name', 'ID', p.lastYm || 'Last Month', p.curYm || 'Current (MTD)', 'VC4', 'Comm', 'Growth %', 'Stock', 'Status', 'Inactive Duration'],
-        rows: p.agents.map((a) => [a.name, a.id || '', a.lastTotal, a.curTotal, a.curVc4, a.curComm, a.growth == null ? '' : Number(a.growth.toFixed(1)), a.stockTotal, a.activityStatus || 'Inactive', a.inactiveDuration || ''])
-          .concat([['GRAND TOTAL', `${p.agents.length} Agents`, U.sum(p.agents, (a) => a.lastTotal), U.sum(p.agents, (a) => a.curTotal), U.sum(p.agents, (a) => a.curVc4), U.sum(p.agents, (a) => a.curComm), '', U.sum(p.agents, (a) => a.stockTotal), `${p.agents.filter((a) => a.activityStatus === 'Active').length} Active`, `${p.agents.filter((a) => a.activityStatus !== 'Active').length} Inactive`]])
+        rows: S.list.map((a) => [a.isSelf ? `👤 ${a.name} (TL — apna stock)` : a.name, a.id || '', a.lastTotal, a.curTotal, a.curVc4, a.curComm, a.growth == null ? '' : Number(a.growth.toFixed(1)), a.stockTotal, a.activityStatus || 'Inactive', a.inactiveDuration || ''])
+          .concat([
+            ['AGENTS TOTAL', `${S.agents.length} Agents`, S.sum('lastTotal'), S.sum('curTotal'), S.sum('curVc4'), S.sum('curComm'), '', S.has ? S.ag.total : S.sum('stockTotal'), `${S.agents.filter((a) => a.activityStatus === 'Active').length} Active`, `${S.agents.filter((a) => a.activityStatus !== 'Active').length} Inactive`],
+            ...(S.has ? [['= TL TOTAL (own + agents)', p.name, t.lastTotal, t.curTotal, t.curVc4, t.curComm, '', t.stockTotal, S.text, '']] : [])
+          ])
       });
     }
     return sheets;
@@ -604,19 +634,16 @@ FF.pages = FF.pages || {};
       });
     }
 
-    if (r.isTl && (p.agents || []).length) {
-      const sumLast = U.sum(p.agents, (a) => a.lastTotal);
-      const sumCur = U.sum(p.agents, (a) => a.curTotal);
-      const sumVc4 = U.sum(p.agents, (a) => a.curVc4);
-      const sumComm = U.sum(p.agents, (a) => a.curComm);
-      const sumStock = U.sum(p.agents, (a) => a.stockTotal);
+    const S = tlSplit(r);
+    if (r.isTl && S.list.length) {
+      const sumLast = S.sum('lastTotal'), sumCur = S.sum('curTotal'), sumVc4 = S.sum('curVc4'), sumComm = S.sum('curComm'), sumStock = S.sum('stockTotal');
       const teamGrowth = U.growth(sumCur, sumLast);
-      doc.section(`Team Agents (${fmt(p.agents.length)}) — Issuance, Stock & Activity`);
+      doc.section(`Team Agents (${fmt(S.agents.length)}) — Issuance, Stock & Activity`, S.has ? S.text : '');
       doc.table({
         headers: ['Agent Name', 'ID', 'Last Month', 'Current (MTD)', 'VC4', 'Comm', 'Growth %', 'Stock', 'Status', 'Inactive Duration'],
         align: ['left', 'left', 'right', 'right', 'right', 'right', 'right', 'right', 'left', 'left'],
-        rows: p.agents.map((a) => [a.name, a.id || '—', fmt(a.lastTotal), fmt(a.curTotal), fmt(a.curVc4), fmt(a.curComm), a.growth === null || a.growth === undefined ? '—' : `${a.growth >= 0 ? '+' : ''}${a.growth.toFixed(0)}%`, fmt(a.stockTotal), a.activityStatus || 'Inactive', a.inactiveDuration || '—']),
-        foot: [`GRAND TOTAL (${fmt(p.agents.length)} Agents)`, '', fmt(sumLast), fmt(sumCur), fmt(sumVc4), fmt(sumComm), teamGrowth === null ? '—' : `${teamGrowth >= 0 ? '+' : ''}${teamGrowth.toFixed(0)}%`, fmt(sumStock), `${p.agents.filter((a) => a.activityStatus === 'Active').length} Active`, `${p.agents.filter((a) => a.activityStatus !== 'Active').length} Inactive`]
+        rows: S.list.map((a) => [a.isSelf ? `👤 ${a.name} (TL)` : a.name, a.id || '—', fmt(a.lastTotal), fmt(a.curTotal), fmt(a.curVc4), fmt(a.curComm), a.growth === null || a.growth === undefined ? '—' : `${a.growth >= 0 ? '+' : ''}${a.growth.toFixed(0)}%`, fmt(a.stockTotal), a.activityStatus || 'Inactive', a.inactiveDuration || '—']),
+        foot: [`= TL TOTAL (${fmt(S.agents.length)} Agents${S.has ? ` + TL own ${fmt(S.own.total)}` : ''})`, '', fmt(t.lastTotal), fmt(t.curTotal), fmt(t.curVc4), fmt(t.curComm), teamGrowth === null ? '—' : `${teamGrowth >= 0 ? '+' : ''}${teamGrowth.toFixed(0)}%`, fmt(S.has ? S.stockTotal : sumStock), `${S.agents.filter((a) => a.activityStatus === 'Active').length} Active`, `${S.agents.filter((a) => a.activityStatus !== 'Active').length} Inactive`]
       });
     }
 
@@ -838,6 +865,34 @@ FF.pages = FF.pages || {};
     if (st === 'building') return '<div class="card-body as-age-state">⏳ Server stock ageing ka index bana raha hai (pehli baar poora StockDataa padhna padta hai, 1–2 min). Upar ka summary ready hai — <button type="button" class="btn small" data-as-age-retry>↻ Dobara check karo</button></div>';
     return '<div class="card-body as-age-state">⚠️ Stock ageing abhi load nahi hui — upar ka summary sahi hai. <button type="button" class="btn small" data-as-age-retry>↻ Retry</button></div>';
   }
+  /** 🧑‍💼 Team Agents card — TL ki APNI row sabse upar alag (agents ke jod me nahi) aur neeche
+   *  3-line footer: Agents total → + TL ke paas (own) → = TL total. Har stock cell / footer row
+   *  click par usi hisse ki detail drawer khulti hai (card ka number == drawer ka number). */
+  function teamAgentsCard(r) {
+    const p = r.p, t = p.totals || {}, S = tlSplit(r);
+    if (!S.list.length) return '';
+    const tlStockSpec = `src=${r.ch}&scope=stock&tl=${encodeURIComponent(p.name)}`;
+    const row = (a) => {
+      const aSpec = `src=${r.ch}&scope=stock&agent=${encodeURIComponent(a.name)}${a.id ? `&agentId=${encodeURIComponent(a.id)}` : ''}`;
+      return `<tr class="clickable${a.isSelf ? ' mp-selfrow' : ''}"${a.isSelf ? ` data-kpi="${esc(`${tlStockSpec}&part=own`)}" title="TL ke paas (own) stock ki detail"` : ` data-as-pick="${esc(`${r.ch}-agent|${a.name}`)}"`}><td>${a.isSelf ? '👤 ' : ''}<b>${esc(a.name)}</b>${a.isSelf ? '<span class="mp-tag-self">TL · apna stock</span>' : ''}</td><td class="mono">${esc(a.id || '—')}</td><td class="num">${fmt(a.lastTotal)}</td><td class="num"><b>${fmt(a.curTotal)}</b></td><td class="num">${fmt(a.curVc4)}</td><td class="num">${fmt(a.curComm)}</td><td class="num">${U.pctHtml(a.growth)}</td><td class="num mp-drill" data-kpi="${esc(a.isSelf ? `${tlStockSpec}&part=own` : aSpec)}" role="button" tabindex="0" title="Stock ki detail">${fmt(a.stockTotal)}</td><td><span class="badge ${a.activityStatus === 'Active' ? 'green' : 'red'}">${esc(a.activityStatus || 'Inactive')}</span></td><td>${esc(a.inactiveDuration || '—')}</td><td>${can('share') && !a.isSelf ? `<button class="btn tiny" data-as-wa="${esc([a.name, a.id || '', a.curTotal, a.lastTotal, a.stockTotal, a.activityStatus || 'Inactive', a.inactiveDuration || ''].join('|'))}" title="WhatsApp par is agent ka summary bhejein">📲</button>` : ''}</td></tr>`;
+    };
+    const foot = (label, cells, cls, spec) => `<tr class="row-total${cls ? ` ${cls}` : ''}"${spec ? ` data-kpi="${esc(spec)}" role="button" tabindex="0"` : ''}><td colspan="2"><b>${label}</b></td>${cells}</tr>`;
+    const sum = (k) => fmt(S.sum(k));
+    const packBtns = can('export') ? `<span class="as-pack-btns"><button class="btn small" data-as-pack="xlsx" title="Poore team ki ek Excel workbook (Summary + har agent ki sheet)">👥 Team Pack Excel</button><button class="btn small primary" data-as-pack="pdf" title="Poore team ki ek combined PDF (TL + har agent ka page)">👥 Team Pack PDF</button></span>` : '';
+    return `<div class="card" style="margin-top:14px">
+        <div class="card-head"><h3>🧑‍💼 Team Agents (${fmt(S.agents.length)})${S.self ? ' · TL ka apna stock alag row me' : ''} — click any agent to open their summary</h3>${packBtns}</div>
+        <p class="dim small" style="margin:0 14px 6px">Agents ka jod + TL ke paas (own) = TL total — TL ki row agents ke jod me dobara nahi judti. Kisi bhi stock number par click → wahin ki detail.</p>
+        <div class="table-wrap"><table class="tbl compact">
+          <thead><tr><th>Agent</th><th>ID</th><th class="num">${esc(p.lastYm || 'Last')}</th><th class="num">${esc(p.curYm || 'MTD')}</th><th class="num">VC4</th><th class="num">Comm</th><th class="num">Growth</th><th class="num">Stock</th><th>Status</th><th>Inactive Duration</th><th></th></tr></thead>
+          <tbody>${S.list.map(row).join('')}</tbody>
+          <tfoot>
+            ${S.agents.length ? foot(`🧑‍💼 Agents total (${fmt(S.agents.length)})`, `<td class="num"><b>${sum('lastTotal')}</b></td><td class="num"><b>${sum('curTotal')}</b></td><td class="num">${sum('curVc4')}</td><td class="num">${sum('curComm')}</td><td class="num">${U.pctHtml(U.growth(S.sum('curTotal'), S.sum('lastTotal')))}</td><td class="num"><b>${fmt(S.has ? S.ag.total : S.sum('stockTotal'))}</b></td><td><b>${S.agents.filter((a) => a.activityStatus === 'Active').length} Active</b></td><td><b>${S.agents.filter((a) => a.activityStatus !== 'Active').length} Inactive</b></td><td></td>`, '', `${tlStockSpec}&part=team`) : ''}
+            ${S.has || S.self ? foot(`👤 ${esc(S.self ? S.self.name : p.name)} ke paas (TL own)`, `<td class="num">${S.self ? fmt(S.self.lastTotal) : '—'}</td><td class="num">${S.self ? fmt(S.self.curTotal) : '—'}</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num"><b>${fmt((S.own || {}).total)}</b></td><td>—</td><td>—</td><td></td>`, 'mp-selfrow', `${tlStockSpec}&part=own`) : ''}
+            ${foot('= TL TOTAL (own + agents)', `<td class="num"><b>${fmt(t.lastTotal)}</b></td><td class="num"><b>${fmt(t.curTotal)}</b></td><td class="num"><b>${fmt(t.curVc4)}</b></td><td class="num"><b>${fmt(t.curComm)}</b></td><td class="num">${U.pctHtml(t.growth)}</td><td class="num"><b>${fmt(t.stockTotal)}</b></td><td>—</td><td>—</td><td></td>`, 'row-strong', tlStockSpec)}
+          </tfoot>
+        </table></div>
+      </div>`;
+  }
   function reportHtml(r) {
     const p = r.p, t = p.totals || {}, age = r.age;
     const chLabel = r.ch === 'gv' ? 'GV Partner' : 'First Forward';
@@ -845,6 +900,13 @@ FF.pages = FF.pages || {};
     const curSpec = `src=${r.ch}&scope=mtd&ym=${encodeURIComponent(p.curYm || '')}&${scopeParam}`;
     const lastSpec = `src=${r.ch}&scope=month&ym=${encodeURIComponent(p.lastYm || '')}&${scopeParam}`;
     const stockSpec = `src=${r.ch}&scope=stock&${scopeParam}`;
+    // v3.40 — TL stock ka own / agents split do clickable chips bankar (drawer me sirf wahi hissa khulta hai)
+    const S = tlSplit(r);
+    const tlStockSpec = `src=${r.ch}&scope=stock&tl=${encodeURIComponent(p.name)}`;
+    const peopleSpec = `src=${r.ch}&scope=people&tl=${encodeURIComponent(p.name)}&self=0&sort=stock`;
+    const splitChips = r.isTl && S.has
+      ? `<span class="mp-part own" data-kpi="${esc(`${tlStockSpec}&part=own`)}" role="button" tabindex="0" title="Sirf TL ke paas (own) stock">TL ke paas ${fmt(S.own.total)}</span> + <span class="mp-part team" data-kpi="${esc(`${tlStockSpec}&part=team`)}" role="button" tabindex="0" title="Sirf agents ke paas stock">agents ${fmt(S.ag.total)}</span>`
+      : '';
 
     const clsRows = (p.classTable || []).filter((x) => x.cur || x.last || x.stock);
     const sumAgentsLast = r.isTl ? U.sum(p.agents || [], (a) => a.lastTotal) : 0;
@@ -876,11 +938,12 @@ FF.pages = FF.pages || {};
         <div class="kpi g1" data-kpi="${esc(curSpec)}" title="Click karke ${esc(p.curYm || 'is mahine')} ka exact issuance data dekhein"><div class="kpi-top"><span class="kpi-title">${esc(p.curYm || 'This month')} · MTD</span><span class="kpi-icon">🏷️</span></div><div class="kpi-value">${fmt(t.curTotal)}</div><div class="kpi-foot">VC4 <b>${fmt(t.curVc4)}</b> · Comm <b>${fmt(t.curComm)}</b></div></div>
         <div class="kpi g3" data-kpi="${esc(lastSpec)}" title="Click karke ${esc(p.lastYm || 'pichhle mahine')} ka exact issuance data dekhein"><div class="kpi-top"><span class="kpi-title">${esc(p.lastYm || 'Last month')}</span><span class="kpi-icon">📅</span></div><div class="kpi-value">${fmt(t.lastTotal)}</div><div class="kpi-foot">VC4 <b>${fmt(t.lastVc4)}</b> · Comm <b>${fmt(t.lastComm)}</b></div></div>
         <div class="kpi g2" data-kpi="${esc(curSpec)}" title="Click karke growth aur run-rate data dekhein"><div class="kpi-top"><span class="kpi-title">Expected</span><span class="kpi-icon">🎯</span></div><div class="kpi-value">${fmt(p.expected)}</div><div class="kpi-foot">${U.pctHtml(t.growth)} · <b>${fmt(p.runRate, true)}</b>/day</div></div>
-        <div class="kpi g5" data-kpi="${esc(stockSpec)}" title="Click karke exact stock in hand aur barcodes dekhein"><div class="kpi-top"><span class="kpi-title">Stock in hand</span><span class="kpi-icon">📦</span></div><div class="kpi-value">${fmt(t.stockTotal)}</div><div class="kpi-foot">${r.isTl && p.tlStock && p.tlStock.own && p.tlStock.agents ? `Own ${fmt(p.tlStock.own.total)} + agents ${fmt(p.tlStock.agents.total)} · ` : ''}VC4 <b>${fmt(t.stockVc4)}</b> · Comm <b>${fmt(t.stockComm)}</b></div></div>
+        <div class="kpi g5" data-kpi="${esc(stockSpec)}" title="Click karke exact stock in hand aur barcodes dekhein"><div class="kpi-top"><span class="kpi-title">Stock in hand</span><span class="kpi-icon">📦</span></div><div class="kpi-value">${fmt(t.stockTotal)}</div><div class="kpi-foot">${splitChips ? `${splitChips} · ` : ''}VC4 <b>${fmt(t.stockVc4)}</b> · Comm <b>${fmt(t.stockComm)}</b></div></div>
         <div class="kpi g4" data-kpi-self="1" data-as-age="30" title="Click karke 30+ din purana stock dekhein"><div class="kpi-top"><span class="kpi-title">30+d old stock</span><span class="kpi-icon">⏳</span></div><div class="kpi-value">${age ? fmt(age.old30) : '—'}</div><div class="kpi-foot">0–30d fresh: <b>${age ? fmt(age.total - age.old30) : '—'}</b></div></div>
         <div class="kpi g7" data-kpi-self="1" data-as-age="60" title="Click karke 60+ din critical stock dekhein"><div class="kpi-top"><span class="kpi-title">60+d critical</span><span class="kpi-icon">🚨</span></div><div class="kpi-value">${age ? fmt(age.old60) : '—'}</div><div class="kpi-foot">90+d: <b>${age ? fmt((age.buckets[4] && age.buckets[4].n) || 0) : '—'}</b></div></div>
       </div>
 
+      ${r.isTl && (S.has || S.self) ? `<p class="dim small as-split-note">📦 <b>Stock ka hisaab</b> — ${esc(S.text)}. ${S.self ? `TL ki apni row Team Agents table me sabse upar <span class="mp-tag-self">TL · apna stock</span> bankar dikhi hai (agents ke jod me nahi).` : 'TL ke paas abhi apna stock nahi, isliye TL total = agents ka jod.'} <span class="mp-linkish" data-kpi="${esc(peopleSpec)}" role="button" tabindex="0" title="In agents ki poori list">Agents ki list 👉</span></p>` : ''}
       ${chartsSectionHtml(r)}
       ${sparklineHtml(r.trend)}
       ${alertsHtml(r)}
@@ -904,14 +967,7 @@ FF.pages = FF.pages || {};
         </div>
       </div>
 
-      ${r.isTl && (p.agents || []).length ? `<div class="card" style="margin-top:14px">
-        <div class="card-head"><h3>🧑‍💼 Team Agents (${fmt(p.agents.length)}) — click any agent to open their summary</h3>${can('export') ? `<span class="as-pack-btns"><button class="btn small" data-as-pack="xlsx" title="Poore team ki ek Excel workbook (Summary + har agent ki sheet)">👥 Team Pack Excel</button><button class="btn small primary" data-as-pack="pdf" title="Poore team ki ek combined PDF (TL + har agent ka page)">👥 Team Pack PDF</button></span>` : ''}</div>
-        <div class="table-wrap"><table class="tbl compact">
-          <thead><tr><th>Agent</th><th>ID</th><th class="num">${esc(p.lastYm || 'Last')}</th><th class="num">${esc(p.curYm || 'MTD')}</th><th class="num">VC4</th><th class="num">Comm</th><th class="num">Growth</th><th class="num">Stock</th><th>Status</th><th>Inactive Duration</th><th></th></tr></thead>
-          <tbody>${p.agents.map((a) => `<tr class="clickable" data-as-pick="${esc(`${r.ch}-agent|${a.name}`)}"><td><b>${esc(a.name)}</b></td><td class="mono">${esc(a.id || '—')}</td><td class="num">${fmt(a.lastTotal)}</td><td class="num"><b>${fmt(a.curTotal)}</b></td><td class="num">${fmt(a.curVc4)}</td><td class="num">${fmt(a.curComm)}</td><td class="num">${U.pctHtml(a.growth)}</td><td class="num">${fmt(a.stockTotal)}</td><td><span class="badge ${a.activityStatus === 'Active' ? 'green' : 'red'}">${esc(a.activityStatus || 'Inactive')}</span></td><td>${esc(a.inactiveDuration || '—')}</td><td>${can('share') ? `<button class="btn tiny" data-as-wa="${esc([a.name, a.id || '', a.curTotal, a.lastTotal, a.stockTotal, a.activityStatus || 'Inactive', a.inactiveDuration || ''].join('|'))}" title="WhatsApp par is agent ka summary bhejein">📲</button>` : ''}</td></tr>`).join('')}</tbody>
-          <tfoot><tr class="row-total"><td colspan="2"><b>Grand Total (${fmt(p.agents.length)} Agents)</b></td><td class="num"><b>${fmt(sumAgentsLast)}</b></td><td class="num"><b>${fmt(sumAgentsCur)}</b></td><td class="num"><b>${fmt(sumAgentsVc4)}</b></td><td class="num"><b>${fmt(sumAgentsComm)}</b></td><td class="num">${U.pctHtml(teamGrowth)}</td><td class="num"><b>${fmt(sumAgentsStock)}</b></td><td><b>${p.agents.filter((a) => a.activityStatus === 'Active').length} Active</b></td><td><b>${p.agents.filter((a) => a.activityStatus !== 'Active').length} Inactive</b></td><td></td></tr></tfoot>
-        </table></div>
-      </div>` : ''}
+      ${r.isTl ? teamAgentsCard(r) : ''}
     </div>`;
   }
 
@@ -1150,7 +1206,9 @@ FF.pages = FF.pages || {};
           return;
         }
         const opt = e.target.closest('[data-as-opt],[data-as-pick]');
-        if (opt) {
+        // v3.40 — row ke andar [data-kpi] cell (stock number) par click = us number ki detail drawer
+        // (app.js ka global handler), summary switch nahi.
+        if (opt && !e.target.closest('[data-kpi]')) {
           const [kind, name] = (opt.dataset.asOpt || opt.dataset.asPick).split('|');
           const found = state.list.find((x) => x.kind === kind && norm(x.name) === norm(name)) || { kind, name };
           pick(found);
