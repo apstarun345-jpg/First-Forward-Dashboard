@@ -78,7 +78,7 @@ test('new pdf doc() API (columns/rows + title chaining) ab bhi waise ka waisa ka
   assert.ok((await blob.text()).startsWith('%PDF-1.4'));
 });
 
-// ---- agentSummary.js — reportXlsx / reportJson ----------------------------------------------------
+// ---- agentSummary.js — reportXlsx / class-wise stock ------------------------------------------------
 const mockProfile = {
   channel: 'First Forward', kind: 'ff-agent', name: 'José Alvarez', id: 'FF-ID_1045',
   priority: 'High', mobile: '9876543210',
@@ -106,7 +106,7 @@ test('reportXlsx multi-sheet workbook banata hai — Summary / Class-wise + Gran
   const sum = sheets.find((s) => s.name === 'Summary');
   assert.deepEqual(JSON.parse(JSON.stringify(sum.header)), ['Field', 'Value']);
   assert.ok(sum.rows.some((r) => r[0] === 'Stock in Hand' && r[1] === 3));
-  assert.ok(FF.agentSummary.reportJson(report).includes('"generatedAt"'), 'JSON payload');
+  assert.equal(typeof FF.agentSummary.reportJson, 'undefined', 'summary JSON download/API removed');
 });
 
 test('reportXlsx sheets se FF.xlsx.build valid Excel Blob banata hai', () => {

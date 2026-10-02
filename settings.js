@@ -728,7 +728,7 @@ FF.pages = FF.pages || {};
       ${section(`🕘 Aaj ki khabar <span class="dim">(${log.length})</span>`, log.length
         ? `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Time</th><th class="num">Tags</th><th>Channel</th><th>Top agents</th></tr></thead><tbody>${log.slice(0, 30).map((l) => `<tr><td>${esc(clock(l.at))}</td><td class="num"><b>+${U.fmt(l.total || 0)}</b></td><td>${l.ff ? `🟦 ${U.fmt(l.ff)}` : ''}${l.ff && l.gv ? ' · ' : ''}${l.gv ? `🟩 ${U.fmt(l.gv)}` : ''}</td><td class="dim">${esc(l.who || '—')}</td></tr>`).join('')}</tbody></table></div>`
         : '<p class="dim small">Abhi tak koi naya tag announce nahi hua. Bell 🔔 on karo aur sheet me naya tag aane do.</p>')}
-      ${section('🎯 Voice kyun nahi aa rahi thi? (fix)', `<ul class="guide"><li><b>Problem:</b> Chrome / Edge <b>autoplay policy</b> ki wajah se bina user gesture ke <code>speechSynthesis.speak()</code> block kar dete hain (<code>not-allowed</code>). Office Bell background me poll karta hai, isliye awaaz chup-chaap fail ho jaati thi.</li><li><b>Fix 1:</b> pehle click / tap / keypress par audio <b>unlock</b> hota hai (AudioContext resume + silent utterance).</li><li><b>Fix 2:</b> unlock se pehle aayi khabar <b>queue</b> me jaati hai aur unlock hote hi boli jaati hai — kuch miss nahi hota.</li><li><b>Fix 3:</b> speak fail ho to <b>ting</b> bajta hai aur <b>"Enable sound"</b> nudge dikhta hai — ab pata chal jaata hai ki awaaz block hai.</li><li><b>Fix 4:</b> tab background me ho to bhi poll chalta hai; awaaz tab visible hote hi nikalti hai.</li></ul>`)}
+      ${section('🎯 Voice kyun nahi aa rahi thi? (fix)', `<ul class="guide"><li><b>Problem:</b> Chrome / Edge <b>autoplay policy</b> ki wajah se bina user gesture ke <code>speechSynthesis.speak()</code> block kar dete hain (<code>not-allowed</code>). Office Bell background me poll karta hai, isliye awaaz chup-chaap fail ho jaati thi.</li><li><b>Fix 1:</b> pehle click / tap / keypress par audio <b>unlock</b> hota hai (AudioContext resume + silent utterance).</li><li><b>Fix 2:</b> unlock se pehle aayi khabar <b>queue</b> me jaati hai aur unlock hote hi boli jaati hai — kuch miss nahi hota.</li><li><b>Fix 3:</b> speak fail ho to <b>ting</b> bajta hai aur <b>"Enable sound"</b> nudge dikhta hai — ab pata chal jaata hai ki awaaz block hai.</li><li><b>Fix 4:</b> tab background me ho to bhi poll chalta hai; awaaz tab visible hote hi nikalti hai.</li><li><b>Mac / Safari / desktop fix:</b> system voices late-load ho sakti hain ya speech paused reh sakti hai; app ab voices ready hone ka chhota wait karti hai, synthesis resume karti hai, selected voice unavailable ho to installed system voice par fallback karti hai, aur stuck speech ko ek baar retry karti hai. <b>Test voice</b> dabao; agar still silent ho to macOS sound output/volume aur downloaded Speech voice check karke Chrome/Safari me page reload karo.</li></ul>`)}
       ${section('🔠 Multiple selection (v3.18)', `<ul class="guide"><li><b>🚚 Dispatch Planner</b> — Channel, Type, Priority, Need aur TL filters par ek saath <b>kai values</b> choose karo (jaise FF + GV, ya High + Medium).</li><li>Table me har row par <b>☑ checkbox</b> — kai agents/TL select karke ek saath <b>CSV / Excel / WhatsApp / Summary</b> nikalo.</li><li><b>🏆 Performance</b> — TL filter bhi multiple select hai.</li><li><b>📧 Dispatch email</b> — schedule me ek saath kai channel aur priority bhej sakte ho.</li></ul>`)}`;
   }
   function bindSoundTab(body, redraw) {
@@ -823,9 +823,15 @@ FF.pages = FF.pages || {};
       const viewBtn = card.querySelector('[data-user-viewas]');
       if (viewBtn) viewBtn.addEventListener('click', () => {
         if (!A.startViewAs(u)) { U.toast('Preview shuru nahi hua', 'err'); return; }
+        if (FF.agentSummary && FF.agentSummary.clearCaches) FF.agentSummary.clearCaches();
         U.toast(`👁 Preview ON — ${u.name || u.username} ke rights. Upar ke banner se Exit karo.`, 'ok');
-        if (location.hash !== '#/home') location.hash = '#/home';
-        else if (FF.app && FF.app.renderCurrent) FF.app.renderCurrent();
+        const firstRoute = FF.app && FF.app.firstAllowedRoute ? FF.app.firstAllowedRoute() : { page: FF.app && FF.app.firstAllowedPage ? FF.app.firstAllowedPage() : 'home', params: {} };
+        if (FF.app && FF.app.navigate) FF.app.navigate(firstRoute.page, firstRoute.params);
+        else {
+          const targetHash = firstRoute.page === 'sheet' ? `#/sheet/${encodeURIComponent(firstRoute.params.name || '')}` : `#/${firstRoute.page}`;
+          if (location.hash !== targetHash) location.hash = targetHash;
+          else if (FF.app && FF.app.renderCurrent) FF.app.renderCurrent();
+        }
       });
     });
     const addUser = U.$('#nu-add', root);
