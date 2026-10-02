@@ -8,7 +8,17 @@
      scope day | mtd | month | range | stock | agents | status | stockreport
      date  YYYY-MM-DD (day)   ym YYYY-MM (mtd/month)   from/to YYYY-MM-DD (range)
      f     vc4 | comm | vc20 | vc5p | repl | chassis | wrong | gv | ff
-   Cards without data-kpi are understood from their title + the page they are on. */
+   Cards without data-kpi are understood from their title + the page they are on.
+
+   🚨 CONVENTION (v3.37): pages that handle a card click THEMSELVES must mark the card with
+   data-kpi-self="1".  app.js has one global delegated click handler for `.kpi, [data-kpi]`; without
+   that marker a single click opens TWO drawers — the page's own drawer and this inferred one — and
+   because this drawer is inferred from the card TITLE it ignores the page's period/flag, the last
+   drawer wins and shows data unrelated to the card number.  The global handler skips any element
+   inside `[data-kpi-self]`, so the page stays the single owner of that click.
+   Existing examples: unusual.js anomaly cards (data-ua-flag) and agentSummary.js stock-age cards
+   (data-as-age).  Settings → 🩺 Site diagnostics detects missing markers and can repair them
+   site-wide (persisted attribute rules in localStorage `ff_diag_attr_repairs`). */
 window.FF = window.FF || {};
 (function (FF) {
   'use strict';

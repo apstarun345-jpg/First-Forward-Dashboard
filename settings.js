@@ -1499,7 +1499,7 @@ FF.pages = FF.pages || {};
   // This scanner is intentionally browser-safe: it can repair wrapping, sizing and accessible
   // names in the rendered UI, but it never edits a displayed data total. Source discrepancies are
   // surfaced with their page/selector/context and a clear "repair the source" explanation.
-  const diagnosticState = { findings: null, scannedAt: 0, running: false };
+  const diagnosticState = { findings: null, scannedAt: 0, running: false, pageStats: [], lastAllScanAt: 0 };
   const diagPage = () => {
     try { return (FF.app && FF.app.current && FF.app.current.page) || (location.hash.match(/^#\/?([^?/]*)/) || [])[1] || 'current page'; } catch { return 'current page'; }
   };
@@ -1671,6 +1671,14 @@ FF.pages = FF.pages || {};
     const el = f.element;
     if (f.fixType === 'aria') { if (!el) return false; el.setAttribute('aria-label', el.getAttribute('title') || 'Action'); f.fixed = true; return true; }
     if (f.fixType === 'alt') { if (!el) return false; el.setAttribute('alt', ''); f.fixed = true; return true; }
+    // 🆕 attribute repair (jaise data-kpi-self) — DOM par turant + localStorage rule + watcher se har re-render par.
+    if (ATTR_FIX[f.fixType]) {
+      const saved = addAttrRepair(f);
+      if (el && el.setAttribute) { try { el.setAttribute(ATTR_FIX[f.fixType].attr, ATTR_FIX[f.fixType].value); } catch { /* ignore */ } }
+      startAttrRepairWatcher();
+      f.fixed = saved || !!el;
+      return true;
+    }
     if (!REPAIR_CSS[f.fixType]) return false;
     // 1) Site-wide persistent CSS rule (page change / reload ke baad bhi lagu rehta hai)
     const saved = addRepair(f);
@@ -1689,10 +1697,226 @@ FF.pages = FF.pages || {};
   }
   /** Kya is finding ka repair pehle se saved hai? (page reload ke baad bhi "Fixed" dikhe) */
   function repairSaved(f) {
-    if (!f || !f.safe || !REPAIR_CSS[f.fixType]) return false;
+    if (!f || !f.safe) return false;
     const selector = f.repairSelector || diagStableSelector(f.element);
-    return !!selector && repairRules().some((r) => r.selector === selector && r.fixType === f.fixType);
+    if (!selector) return false;
+    if (ATTR_FIX[f.fixType]) return attrRepairRules().some((r) => r.selector === selector && r.fixType === f.fixType);
+    if (!REPAIR_CSS[f.fixType]) return false;
+    return repairRules().some((r) => r.selector === selector && r.fixType === f.fixType);
   }
+  // ============ 🩺 Diagnostics v2 (v3.37) — "Settings ke diagnose button se sab detect + fix" ============
+  /** 🎯 Root-cause detector: kuch pages apne KPI card ka click khud handle karte hain (data-ua-flag,
+      data-as-age), lekin app.js ka GLOBAL `.kpi, [data-kpi]` handler bhi usi click par chal jaata hai.
+      Dono drawer khulte hain aur aakhri wala (card ke title se inferred, period ignore) jeet jaata hai →
+      "card ka apna data drawer me nahi dikhta". Fix = card par `data-kpi-self="1"` (global handler skip). */
+  const SELF_KPI_ATTRS = ['data-ua-flag', 'data-as-age'];
+  const LS_ATTR_REPAIRS = 'ff_diag_attr_repairs';
+  const LS_SPEED_PREFS = 'ff_speed_prefs';
+  const LS_DIAG_HISTORY = 'ff_diag_history';
+  const ATTR_FIX = { kpiSelf: { attr: 'data-kpi-self', value: '1', label: 'Card ka click page khud handle kare (global kpiDetail hijack band)' } };
+
+  function attrRepairRules() { try { const v = JSON.parse(localStorage.getItem(LS_ATTR_REPAIRS) || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } }
+  function writeAttrRepairs(rules) { try { localStorage.setItem(LS_ATTR_REPAIRS, JSON.stringify((rules || []).slice(-120))); } catch { /* private mode */ } applyAttrRepairs(); }
+  function addAttrRepair(f) {
+    const selector = f.repairSelector || diagStableSelector(f.element);
+    if (!selector || !ATTR_FIX[f.fixType]) return false;
+    const rules = attrRepairRules().filter((r) => !(r.selector === selector && r.fixType === f.fixType));
+    rules.push({ selector, fixType: f.fixType, at: Date.now(), page: f.page || '' });
+    writeAttrRepairs(rules);
+    f.repairSelector = selector;
+    return true;
+  }
+  /** Saved attribute repairs DOM par lagao — page re-render ke baad watcher dobara laga deta hai. */
+  function applyAttrRepairs(root) {
+    try {
+      if (typeof document === 'undefined') return 0;
+      const rules = attrRepairRules();
+      if (!rules.length) return 0;
+      const scope = root || document;
+      let n = 0;
+      for (const r of rules) {
+        const fix = ATTR_FIX[r.fixType];
+        if (!fix || !r.selector || !scope.querySelectorAll) continue;
+        let els = [];
+        try { els = [...scope.querySelectorAll(r.selector)]; } catch { els = []; }
+        for (const el of els) { if (el && el.getAttribute && el.getAttribute(fix.attr) !== fix.value) { el.setAttribute(fix.attr, fix.value); n++; } }
+      }
+      return n;
+    } catch { return 0; }
+  }
+  let attrWatcher = null;
+  /** Naya page render hote hi saved attr repairs dobara lagao (re-render par fix gayab na ho). */
+  function startAttrRepairWatcher() {
+    try {
+      if (attrWatcher || typeof MutationObserver === 'undefined' || !document.body) return;
+      let pending = false;
+      attrWatcher = new MutationObserver(() => {
+        if (pending || !attrRepairRules().length) return;
+        pending = true;
+        setTimeout(() => { pending = false; applyAttrRepairs(document); }, 250);
+      });
+      attrWatcher.observe(document.body, { childList: true, subtree: true });
+    } catch { /* watcher optional hai */ }
+  }
+
+  /** ⚡ Speed doctor — user ke apne performance prefs; app.js inhe boot par hi laga deta hai. */
+  const SPEED_PREF_DEFS = [
+    { key: 'reduceMotion', label: '🎞 Animations band (ff-no-anim)', hint: 'Drawer/table transitions hat jaate hain — card click turant khulta hai, purane device par sabse zyada farq.' },
+    { key: 'lite', label: '🪶 Lite mode (ff-lite)', hint: 'Bhaari visual layer (shadows/gradients/big tables) halka — scroll aur paint fast.' },
+    { key: 'uaFastScan', label: '🚀 Unusual Activity: Fast scan mode', hint: 'Page turant daily numbers se paint hota hai; ≤30 min purana server scan cache use hota hai, fresh scan sirf ↻ Re-scan par.' }
+  ];
+  function speedPrefs() { try { return JSON.parse(localStorage.getItem(LS_SPEED_PREFS) || '{}') || {}; } catch { return {}; } }
+  function applySpeedPrefs(p) {
+    try {
+      const prefs = p || speedPrefs();
+      const root = (typeof document !== 'undefined' && document.documentElement) || null;
+      if (!root || !root.classList) return prefs;
+      root.classList.toggle('ff-no-anim', !!prefs.reduceMotion);
+      root.classList.toggle('ff-lite', !!prefs.lite);
+      return prefs;
+    } catch { return {}; }
+  }
+  function setSpeedPref(key, val) {
+    const next = { ...speedPrefs(), [key]: !!val };
+    try { localStorage.setItem(LS_SPEED_PREFS, JSON.stringify(next)); } catch { /* private mode */ }
+    applySpeedPrefs(next);
+    return next;
+  }
+
+  /** 🧾 Scan history — "pichli baar kitne findings the" compare karne ke liye (last 20 scans). */
+  function diagHistory() { try { const v = JSON.parse(localStorage.getItem(LS_DIAG_HISTORY) || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } }
+  function pushDiagHistory(entry) { try { localStorage.setItem(LS_DIAG_HISTORY, JSON.stringify([entry, ...diagHistory()].slice(0, 20))); } catch { /* ignore */ } }
+
+  /** 🔎 DOM pass: KPI cards jinka click page khud handle karta hai par `data-kpi-self` missing hai. */
+  function diagSelfKpiFindings(out, route) {
+    try {
+      if (typeof document === 'undefined' || !document.querySelectorAll) return out;
+      for (const el of [...document.querySelectorAll('.kpi, [data-kpi]')]) {
+        if (!el || !el.hasAttribute || el.hasAttribute('data-kpi-self')) continue;
+        const attrs = SELF_KPI_ATTRS.filter((a) => el.hasAttribute(a));
+        if (!attrs.length) continue;                    // normal kpiDetail card — theek hai
+        const sel = diagStableSelector(el) || diagSelector(el);
+        diagFinding(out, {
+          id: `kpi-self-${sel}-${attrs.join('-')}`,
+          category: 'KPI card click',
+          severity: 'high',
+          safe: true,
+          fixType: 'kpiSelf',
+          page: route,
+          selector: sel,
+          element: el,
+          context: `${diagText(el, 60) || 'KPI card'} → ${attrs.join(' + ')}${el.hasAttribute('data-kpi') ? ' + data-kpi' : ''}`,
+          explanation: 'Ye card page ka apna click handler use karta hai, lekin global `.kpi` handler (FF.kpiDetail) bhi isi click par chal jaata hai. Do drawer khulte hain aur aakhri wala card ke title se INFERRED (period/flag ignore) data dikha deta hai — isi liye card ka number drawer me nahi milta aur click slow lagta hai.',
+          suggestion: 'Fix button card par data-kpi-self="1" laga deta hai (site-wide saved + re-render par dobara lagta hai). Permanent ke liye source me bhi wahi attribute rakho — v3.37 me unusual.js/agentSummary.js par pehle se hai.'
+        });
+      }
+    } catch { /* DOM pass optional */ }
+    return out;
+  }
+
+  /** 🐢 Page weight/render timings — "kaunsa page site ko slow karta hai" ka exact jawab. */
+  function diagPageWeightFindings(out, stats) {
+    for (const s of stats || []) {
+      const kb = Math.round((s.chars || 0) / 1024);
+      const ctx = `${s.label || s.page} · render ${U.fmt(s.ms)}ms · ${U.fmt(s.nodes)} DOM nodes · ${U.fmt(kb)} KB HTML`;
+      if (s.ms > 2500 || s.nodes > 5000 || kb > 400) {
+        diagFinding(out, {
+          id: `page-weight-${s.page}`, category: 'Page speed', severity: s.ms > 6000 || s.nodes > 12000 ? 'high' : 'medium',
+          safe: false, page: s.label || s.page, selector: `#/${s.page}`, context: ctx,
+          explanation: 'Is page ka render/DOM bhaari hai — click, scroll aur drawer isi se atakte hain.',
+          suggestion: 'Tables ko cap + "Load more" par rakho (Unusual Activity ka CAP_LEDGER/CAP_DRAWER pattern), bade sections ko chunk me bharo, aur ⚡ Speed doctor me Lite mode / Animations band chalu karo.'
+        });
+      }
+    }
+    return out;
+  }
+
+  /** 🗂 Data health — store snapshot + Unusual Activity tag scan ka asli status. */
+  function diagDataHealthFindings(out) {
+    try {
+      const daily = (FF.store && FF.store.get && FF.store.get('daily')) || [];
+      if (!daily.length) {
+        diagFinding(out, { id: 'diag-store-empty', category: 'Data health', severity: 'high', safe: false, page: 'Site snapshot', selector: 'FF.store.daily', context: 'Store me 0 daily rows hain', explanation: 'Bina daily rows ke saare KPI/anomaly cards khali ya galat dikhenge.', suggestion: 'Topbar ↻ Refresh dabao; Settings → Sheets me EIR/REPORT sheet ID + mapping check karo.' });
+      }
+      const ua = FF.unusual;
+      if (ua && ua.state) {
+        const st = ua.state;
+        if (st.scanError) diagFinding(out, { id: 'diag-ua-scan-error', category: 'Unusual Activity scan', severity: 'high', safe: false, page: 'Unusual Activity', selector: '/api/unusual/scan', context: `Server scan error: ${st.scanError}`, explanation: 'Server-side tag scan fail hua, isliye page browser fallback par chala (slow + adhoora data).', suggestion: 'Unusual Activity → 🩺 Diagnose → ↻ Deep scan dabao. Deploy me server.js aur unusual-scan.js same version ke hone chahiye (hard reload / sw cache clear).' });
+        const meta = (st.scan && st.scan.meta) || null;
+        if (meta && meta.complete === false) diagFinding(out, { id: 'diag-ua-incomplete', category: 'Unusual Activity scan', severity: 'medium', safe: false, page: 'Unusual Activity', selector: 'scan.meta.complete', context: `Scan adhoora · ${U.fmt(meta.rowsRead || 0)} rows · ${U.fmt(meta.pages || 0)} pages`, explanation: 'Sheet paging cap ki wajah se kuch tag rows padhi hi nahi gayin — duplicate/wrong counts kam dikh sakte hain.', suggestion: 'Date range chhota karo (7–15 din) ya admin se page cap badhwao.' });
+        if (meta && meta.offsetIssue) diagFinding(out, { id: 'diag-ua-offset', category: 'Unusual Activity scan', severity: 'high', safe: false, page: 'Unusual Activity', selector: 'gviz offset', context: 'Google gviz offset paging me rows repeat ho rahi hain', explanation: 'Offset-based paging par sheet same rows dobara deti hai → counts double ho jaate hain.', suggestion: 'Scan library offset verify karke fallback par chali jaati hai; phir bhi dikhe to range chhota karo.' });
+        if (st.scan && st.scan.at && Date.now() - st.scan.at > 60 * 60000) diagFinding(out, { id: 'diag-ua-stale', category: 'Unusual Activity scan', severity: 'low', safe: false, page: 'Unusual Activity', selector: 'scan.at', context: `Aakhri tag scan ${U.timeLabel(st.scan.at)} ka hai`, explanation: 'Scan purana hai — naye tags isme nahi hain.', suggestion: 'Unusual Activity → ↻ Re-scan (fresh) dabao.' });
+        if (st.lastPaintMs > 400) diagFinding(out, { id: 'diag-ua-paint', category: 'Page speed', severity: 'medium', safe: false, page: 'Unusual Activity', selector: 'paintAll()', context: `Last paint ${U.fmt(st.lastPaintMs)}ms (paint #${U.fmt(st.paintCount || 0)})`, explanation: 'Page ka paint 400ms se zyada le raha hai — tables/DOM bhaari hain.', suggestion: '⚡ Speed doctor me Lite mode chalu karo; ledger/drawer caps already chunked hain.' });
+      }
+    } catch { /* data pass optional */ }
+    return out;
+  }
+
+  /** 🔬 Card ↔ drawer parity probe — Unusual Activity ke har KPI card ko asli me click karke verify. */
+  async function runCardParityProbe(body) {
+    const out = U.$('#diag-parity-out', body);
+    if (!out) return [];
+    const app = FF.app;
+    if (!app || !app.navigate) throw new Error('App shell ready nahi hai');
+    const back = (app.current && app.current.page) || 'settings';
+    out.innerHTML = U.spinner('Unusual Activity ke har KPI card par click karke drawer ka number verify ho raha hai…');
+    try {
+      if (FF.lazy && FF.lazy.ensure) await FF.lazy.ensure('unusual');
+      app.navigate('unusual', {});
+      await new Promise((r) => setTimeout(r, 2500));          // instant paint + background scan settle
+      if (!FF.unusual || typeof FF.unusual.probeCards !== 'function') throw new Error('FF.unusual.probeCards nahi mila — purana cache lag raha hai, hard reload (Ctrl+Shift+R) karo');
+      const results = (await FF.unusual.probeCards(out)) || [];
+      const bad = results.filter((r) => !r.ok);
+      for (const r of bad) {
+        diagFinding(diagnosticState.findings || (diagnosticState.findings = []), {
+          id: `parity-${r.flag}`, category: 'Card ↔ drawer parity', severity: 'high', safe: false,
+          page: 'Unusual Activity', selector: `[data-ua-flag="${r.flag}"]`,
+          context: `${r.label}: card "${r.card}" vs drawer "${r.drawerTitle}"`,
+          explanation: `Card ka number drawer me nahi mila (title ${r.okTitle ? '✓' : '✗'} · value ${r.okValue ? '✓' : '✗'} · unit ${r.okUnit ? '✓' : '✗'}).`,
+          suggestion: 'Unusual Activity → 🩺 Diagnose → ↻ Deep scan (fresh) chalao; phir yahi probe dobara karo.'
+        });
+      }
+      const head = `<p class="dim small">${U.fmt(results.length)} KPI cards test hue · ${bad.length ? `<b class="red">${U.fmt(bad.length)} mismatch</b>` : '<b>✅ har card ka number drawer me exact mila</b>'}</p>`;
+      out.innerHTML = head + out.innerHTML.replace(/^<p class="dim small">[\s\S]*?<\/p>/, '');
+      return results;
+    } finally {
+      app.navigate(back, back === 'settings' ? { tab: 'diagnostics' } : {});
+      await new Promise((r) => setTimeout(r, 700));
+    }
+  }
+
+  /** Findings ko filter/search/group karke dikhane ke liye view state. */
+  const diagView = { sev: 'all', cat: 'all', q: '', group: 'none' };
+  function diagVisibleFindings() {
+    const q = (diagView.q || '').trim().toLowerCase();
+    let list = (diagnosticState.findings || []).filter((f) => {
+      if (diagView.sev !== 'all' && f.severity !== diagView.sev) return false;
+      if (diagView.cat !== 'all' && (f.category || 'Other') !== diagView.cat) return false;
+      if (!q) return true;
+      return `${f.category} ${f.page} ${f.selector} ${f.context} ${f.explanation} ${f.suggestion}`.toLowerCase().includes(q);
+    });
+    if (diagView.group !== 'none') {
+      const key = (f) => (diagView.group === 'page' ? (f.page || '—') : (f.category || 'Other'));
+      list = list.slice().sort((a, b) => String(key(a)).localeCompare(String(key(b))) || (a.severity === b.severity ? 0 : a.severity === 'high' ? -1 : 1));
+    }
+    return list;
+  }
+  function diagExport(kind) {
+    const list = diagVisibleFindings();
+    const head = ['severity', 'category', 'page', 'selector', 'context', 'why', 'fix', 'fixed', 'safeFix'];
+    const rows = list.map((f) => [f.severity || '', f.category || '', f.page || '', f.selector || '', f.context || '', f.explanation || '', f.suggestion || '', f.fixed ? 'yes' : 'no', f.safe ? 'yes' : 'no']);
+    const stampName = U.slug(`${U.stamp()}-diagnostics`);
+    if (kind === 'csv') { U.downloadCsv(`${stampName}.csv`, head, rows); return rows.length; }
+    if (kind === 'json') {
+      const payload = { exportedAt: new Date().toISOString(), scannedAt: diagnosticState.scannedAt || null, count: rows.length, findings: rows.map((r) => Object.fromEntries(head.map((h, i) => [h, r[i]]))) };
+      U.downloadBlob(`${stampName}.json`, new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
+      return rows.length;
+    }
+    const text = rows.map((r) => `[${String(r[0]).toUpperCase()}] ${r[1]} · ${r[2]} · ${r[3]}\n  ${r[4]}\n  Why: ${r[5]}\n  Fix: ${r[6]}`).join('\n\n');
+    void U.copyText(`🩺 First Forward diagnostics — ${rows.length} findings (${U.timeLabel(Date.now())})\n\n${text}`);
+    return rows.length;
+  }
+
   function renderDiagnosticResults(body) {
     const box = U.$('#diag-results', body), status = U.$('#diag-status', body), fixAll = U.$('#diag-fix-all', body), scan = U.$('#diag-scan', body);
     if (!box) return;
@@ -1700,23 +1924,87 @@ FF.pages = FF.pages || {};
     diagnosticState.findings = list;
     if (scan) scan.textContent = diagnosticState.scannedAt ? '↻ Rescan site' : '🩺 Scan site now';
     const safe = list.filter((f) => f.safe && !f.fixed);
-    const savedCount = repairRules().length;
+    const savedCss = repairRules().length, savedAttr = attrRepairRules().length, savedCount = savedCss + savedAttr;
     const counts = ['high', 'medium', 'low'].map((s) => `${s}: ${list.filter((f) => f.severity === s).length}`).join(' · ');
     if (status) status.textContent = diagnosticState.running ? 'Scan chal raha hai…' : (diagnosticState.scannedAt ? `${list.length} findings · ${counts}${savedCount ? ` · 🛠 ${savedCount} saved repair${savedCount > 1 ? 's' : ''} active` : ''} · ${U.timeLabel(diagnosticState.scannedAt)}` : 'Abhi scan nahi hua');
     if (fixAll) { fixAll.disabled = !safe.length; fixAll.textContent = safe.length ? `🛠 Fix all safe (${safe.length})` : '🛠 Fix all safe'; }
-    if (!diagnosticState.scannedAt) { box.innerHTML = '<div class="diag-empty">🩺 Scan button dabao — current rendered pages, registered actions, KPI cards, accessibility aur available FF data consistency checks run honge.</div>'; return; }
-    if (!list.length) { box.innerHTML = `<div class="diag-ok">✅ Koi detectable issue nahi mila. Source snapshots, KPI cards, routes aur responsive UI normal dikh rahe hain.${savedCount ? `<br><small class="dim">🛠 ${savedCount} saved repair rule active — ye har page par lagu rehta hai.</small>` : ''}</div>`; return; }
-    box.innerHTML = `${savedCount ? `<div class="diag-saved"><b>🛠 ${savedCount} saved repair${savedCount > 1 ? 's' : ''}</b> poore site par lagu hain (page change / reload ke baad bhi). <button class="btn small" type="button" data-diag-clear-repairs>Clear all repairs</button></div>` : ''}
-    ${list.map((f) => `<article class="diag-finding ${esc(f.severity)} ${f.fixed ? 'fixed' : ''}">
+
+    // ---- toolbar (filter / search / group / export) ----
+    const toolbar = U.$('#diag-toolbar', body);
+    if (toolbar) toolbar.hidden = !list.length;
+    const catSel = U.$('#diag-filter-cat', body);
+    if (catSel) {
+      const cats = [...new Set(list.map((f) => f.category || 'Other'))].sort();
+      if (diagView.cat !== 'all' && !cats.includes(diagView.cat)) diagView.cat = 'all';
+      const cur = diagView.cat;
+      catSel.innerHTML = `<option value="all">All categories (${list.length})</option>` + cats.map((c) => `<option value="${esc(c)}"${c === cur ? ' selected' : ''}>${esc(c)} (${list.filter((f) => (f.category || 'Other') === c).length})</option>`).join('');
+    }
+    const sevSel = U.$('#diag-filter-sev', body);
+    if (sevSel) sevSel.innerHTML = ['all', 'high', 'medium', 'low'].map((v) => `<option value="${v}"${diagView.sev === v ? ' selected' : ''}>${v === 'all' ? `All severities (${list.length})` : `${v} (${list.filter((f) => f.severity === v).length})`}</option>`).join('');
+    const grpSel = U.$('#diag-group', body);
+    if (grpSel) grpSel.innerHTML = [['none', 'No grouping'], ['category', 'Group: category'], ['page', 'Group: page'], ['severity', 'Group: severity']].map(([v, l]) => `<option value="${v}"${diagView.group === v ? ' selected' : ''}>${l}</option>`).join('');
+    const search = U.$('#diag-search', body);
+    if (search && search.value !== diagView.q) search.value = diagView.q || '';
+
+    const visible = diagVisibleFindings();
+    const histBox = U.$('#diag-history', body);
+    if (histBox) {
+      const h = diagHistory();
+      histBox.innerHTML = h.length ? `<div class="diag-saved"><b>🧾 Scan history</b> ${h.slice(0, 5).map((e) => `<span class="chip">${U.timeLabel(e.at)} · ${e.scope || 'site'} · ${U.fmt(e.total)} findings (${U.fmt(e.high)} high)${e.repairs ? ` · 🛠 ${U.fmt(e.repairs)}` : ''}</span>`).join(' ')}</div>` : '';
+    }
+    if (!diagnosticState.scannedAt) { box.innerHTML = '<div class="diag-empty">🩺 Scan button dabao — current rendered pages, registered actions, KPI cards (click hijack samet), accessibility, page speed/DOM weight aur available FF data consistency checks run honge. Fix button se safe repairs SITE-WIDE save hote hain (reload ke baad bhi lagu).</div>'; return; }
+    if (!list.length) { box.innerHTML = `<div class="diag-ok">✅ Koi detectable issue nahi mila. Source snapshots, KPI cards, routes, page speed aur responsive UI normal dikh rahe hain.${savedCount ? `<br><small class="dim">🛠 ${savedCount} saved repair rule active — ye har page par lagu rehta hai.</small>` : ''}</div>`; return; }
+    if (!visible.length) { box.innerHTML = `<div class="diag-empty">🔍 Is filter/search me koi finding nahi — ${list.length} findings me se.</div>`; return; }
+
+    const groupKey = (f) => (diagView.group === 'page' ? (f.page || '—') : diagView.group === 'severity' ? (f.severity || 'low') : (f.category || 'Other'));
+    let lastGroup = null;
+    const articles = visible.map((f) => {
+      const head = diagView.group !== 'none' && groupKey(f) !== lastGroup ? `<div class="diag-group-head">${esc(String(groupKey(f)))} <small class="dim">(${U.fmt(visible.filter((x) => groupKey(x) === groupKey(f)).length)})</small></div>` : '';
+      lastGroup = groupKey(f);
+      const fixLabel = f.fixType === 'kpiSelf' ? '🛠 Fix: card ko page-owned banao (site-wide)' : '🛠 Fix (site-wide)';
+      return `${head}<article class="diag-finding ${esc(f.severity)} ${f.fixed ? 'fixed' : ''}">
       <div class="diag-finding-head"><span class="diag-severity">${f.severity === 'high' ? '⛔ High' : f.severity === 'medium' ? '⚠️ Medium' : 'ℹ️ Low'}</span><b>${esc(f.category)}</b><small>${esc(f.page)} · ${esc(f.selector)}</small></div>
       <p><b>${esc(f.context)}</b><br>${esc(f.explanation)}</p><p class="dim small"><b>Suggested fix:</b> ${esc(f.suggestion)}</p>
-      ${f.safe && !f.fixed ? `<button class="btn small primary" data-diagnostic-fix="${esc(f.id)}">🛠 Fix (site-wide)</button>` : f.fixed ? '<span class="diag-fixed">✅ Fixed &amp; saved — poore site par lagu (rescan recommended)</span>' : '<span class="diag-source-note">🗂️ Source/config correction required — no unsafe browser fix applied</span>'}
-    </article>`).join('')}`;
+      ${f.safe && !f.fixed ? `<button class="btn small primary" data-diagnostic-fix="${esc(f.id)}">${fixLabel}</button>` : f.fixed ? '<span class="diag-fixed">✅ Fixed &amp; saved — poore site par lagu (rescan recommended)</span>' : '<span class="diag-source-note">🗂️ Source/config correction required — no unsafe browser fix applied</span>'}
+    </article>`;
+    }).join('');
+
+    box.innerHTML = `${savedCount ? `<div class="diag-saved"><b>🛠 ${savedCount} saved repair${savedCount > 1 ? 's' : ''}</b> poore site par lagu hain${savedAttr ? ` (${savedAttr} attribute rule — re-render par apne aap dobara lagte hain)` : ''} (page change / reload ke baad bhi). <button class="btn small" type="button" data-diag-clear-repairs>Clear all repairs</button></div>` : ''}
+    <div class="dim small diag-count">Dikh rahe hain <b>${U.fmt(visible.length)}</b> / ${U.fmt(list.length)} findings${diagView.q ? ` · search "${esc(diagView.q)}"` : ''}</div>
+    ${articles}`;
+    // delegated fix buttons — har re-render ke baad dobara wire (results box ke andar hi).
+    U.$$('[data-diagnostic-fix]', box).forEach((btn) => btn.addEventListener('click', () => {
+      const finding = (diagnosticState.findings || []).find((f) => f.id === btn.dataset.diagnosticFix);
+      if (applyDiagnosticFix(finding)) { renderDiagnosticResults(body); U.toast('🛠 Safe fix site-wide apply + save ho gaya ✓', 'ok'); void runSiteDiagnostics(body); }
+      else U.toast('Ye finding browser se safely fix nahi hoti — source/config theek karo', 'warn');
+    }));
+    const clearIn = U.$('[data-diag-clear-repairs]', box);
+    if (clearIn) clearIn.addEventListener('click', () => { writeRepairs([]); writeAttrRepairs([]); U.toast('Saare saved repairs hata diye', 'warn'); renderDiagnosticResults(body); });
   }
+
+  /** 🐢 Har page ka render time + DOM weight — "site slow kyun hai" ka page-level jawab. */
+  function renderPageStats(body) {
+    const box = U.$('#diag-page-stats', body);
+    if (!box) return;
+    const stats = diagnosticState.pageStats || [];
+    if (!stats.length) { box.innerHTML = '<p class="dim small">🌐 "Scan every page" chalao → har page ka render time, DOM nodes aur HTML weight yahan aayega.</p>'; return; }
+    const worst = stats.slice().sort((a, b) => b.ms - a.ms)[0];
+    box.innerHTML = `<p class="dim small">Sabse bhaari page: <b>${esc(worst.label || worst.page)}</b> · ${U.fmt(worst.ms)}ms · ${U.fmt(worst.nodes)} nodes</p>
+      <div class="table-wrap"><table class="tbl compact"><thead><tr><th>Page</th><th class="num">Render</th><th class="num">DOM nodes</th><th class="num">HTML</th></tr></thead>
+      <tbody>${stats.slice().sort((a, b) => b.ms - a.ms).map((s) => `<tr><td><b>${esc(s.label || s.page)}</b></td><td class="num">${s.ms > 2500 ? `<b class="count red">${U.fmt(s.ms)}ms</b>` : `${U.fmt(s.ms)}ms`}</td><td class="num">${s.nodes > 5000 ? `<b class="count amber">${U.fmt(s.nodes)}</b>` : U.fmt(s.nodes)}</td><td class="num">${U.fmt(Math.round((s.chars || 0) / 1024))} KB</td></tr>`).join('')}</tbody></table></div>`;
+  }
+
   async function runSiteDiagnostics(body) {
     if (diagnosticState.running) return;
     diagnosticState.running = true; renderDiagnosticResults(body);
+    // Pehle saved repairs laga do — warna fix kiye hue cards har scan me dobara "problem" bankar aate hain.
+    applyAttrRepairs(document);
+    applySpeedPrefs();
+    const route = (FF.app && FF.app.current && FF.app.current.page) || 'current page';
     const findings = scanDomDiagnostics();
+    diagSelfKpiFindings(findings, route);
+    diagDataHealthFindings(findings);
+    diagPageWeightFindings(findings, diagnosticState.pageStats);
     try {
       // Keep the data-source pass behind the same permission gate as the Performance page. The
       // site-wide UI scan is safe for every Settings user, but a member must not learn source
@@ -1733,7 +2021,9 @@ FF.pages = FF.pages || {};
       const age = Math.max(0, Date.now() - new Date(loadedAt).getTime());
       if (age > 8 * 3600000) diagFinding(findings, { id: 'diag-site-snapshot-stale', severity: age > 24 * 3600000 ? 'high' : 'medium', category: 'Stale data', page: 'Site snapshot', selector: 'FF.store.loadedAt', context: `${U.timeLabel(loadedAt)} · snapshot purana hai`, explanation: 'Site ka in-memory snapshot recommended freshness window se purana hai.', suggestion: 'Topbar Refresh dabao aur source sync complete hone do.' });
     }
-    diagnosticState.findings = findings; diagnosticState.scannedAt = Date.now(); diagnosticState.running = false; renderDiagnosticResults(body);
+    diagnosticState.findings = findings; diagnosticState.scannedAt = Date.now(); diagnosticState.running = false;
+    pushDiagHistory({ at: diagnosticState.scannedAt, scope: route, total: findings.length, high: findings.filter((f) => f.severity === 'high').length, medium: findings.filter((f) => f.severity === 'medium').length, low: findings.filter((f) => f.severity === 'low').length, repairs: repairRules().length + attrRepairRules().length });
+    renderDiagnosticResults(body);
   }
   /** 🌐 Poora site scan — har permitted page ko render karke uske DOM ko check karta hai.
       (Pehle scan sirf current page + shell dekhta tha, isliye "diagnose kaam nahi karta" lagta tha.) */
@@ -1743,22 +2033,40 @@ FF.pages = FF.pages || {};
     const startPage = (app.current && app.current.page) || 'settings';
     const pages = (app.PAGES || []).filter((d) => d && d.id && d.id !== 'settings' && FF.pages[d.id] && typeof FF.pages[d.id].render === 'function'
       && !(d.adminOnly && !A.isAdmin()) && (!d.perm || A.can(d.perm)));
-    const found = []; const failed = [];
+    const found = []; const failed = []; const stats = [];
+    applyAttrRepairs(document);
     for (let i = 0; i < pages.length; i++) {
       const def = pages[i];
       if (onProgress) onProgress(i + 1, pages.length, def);
       try {
+        const t0 = Date.now();
         app.navigate(def.id, {});
         await new Promise((r) => setTimeout(r, 900));   // render + layout settle
-        found.push(...scanDomDiagnostics());
+        const ms = Date.now() - t0;
+        const main = (typeof document !== 'undefined' && (document.getElementById('main') || document.body)) || null;
+        let nodes = 0, chars = 0;
+        try { nodes = main ? (main.querySelectorAll ? main.querySelectorAll('*').length : 0) : 0; } catch { nodes = 0; }
+        try { chars = main ? String(main.innerHTML || '').length : 0; } catch { chars = 0; }
+        stats.push({ page: def.id, label: def.label || def.id, ms, nodes, chars });
+        const pageFindings = scanDomDiagnostics();
+        diagSelfKpiFindings(pageFindings, def.label || def.id);
+        found.push(...pageFindings);
       } catch (err) { failed.push({ page: def.id, label: def.label || def.id, error: err && err.message ? err.message : String(err) }); }
     }
+    diagnosticState.pageStats = stats;
+    diagDataHealthFindings(found);
+    diagPageWeightFindings(found, stats);
     if (startPage) { app.navigate(startPage, startPage === 'settings' ? { tab: 'diagnostics' } : {}); await new Promise((r) => setTimeout(r, 700)); }
-    return { found, failed, pages: pages.length };
+    return { found, failed, pages: pages.length, stats };
   }
 
   function diagnosticsTab() {
-    return `${section('🩺 Site diagnostics & safe repair', '<p>Poore rendered dashboard surface par responsive overflow, clipped controls, KPI card structure, links/actions, accessibility aur available FF source totals check honge. UI/configuration issues ko per-finding <b>Fix</b> se safely repair kar sakte ho; EIR/REPORT mismatch ko browser me fake nahi kiya jayega.</p><div class="diag-scope"><span>🔎 UI: site shell + current page + open drawers</span><span>🗂️ Data: FF EIR daily/class vs REPORT reconciliation</span><span>♿ A11y: labels, alt text, hit areas</span></div><div class="btn-row"><button class="btn primary" id="diag-scan">🩺 Scan is page</button><button class="btn" id="diag-scan-all">🌐 Scan every page</button><button class="btn" id="diag-fix-all" disabled>🛠 Fix all safe</button><span class="dim small" id="diag-status">Abhi scan nahi hua</span></div><div id="diag-results" class="diag-results"></div>', 'Safe UI fixes apply hote hi rescan karo; source/data findings ko sheet mapping se repair karo.')}`
+    const prefs = speedPrefs();
+    return `${section('🩺 Site diagnostics & safe repair — sab kuch yahin se', '<p>Ek hi button se poora site check hota hai: rendered pages, KPI cards (click hijack samet), links/actions, accessibility, page speed/DOM weight, data health aur available FF source totals. Safe issues <b>Fix</b> se SITE-WIDE repair ho jaate hain (localStorage rule — reload/page change ke baad bhi lagu, attribute rules har re-render par apne aap dobara lagte hain). EIR/REPORT mismatch ko browser me fake nahi kiya jayega.</p><div class="diag-scope"><span>🔎 UI: site shell + current page + open drawers</span><span>🃏 KPI: card ka click sahi handler ko jaata hai ya nahi</span><span>🗂️ Data: FF EIR daily/class vs REPORT + Unusual Activity tag scan health</span><span>🐢 Speed: per-page render ms + DOM weight</span><span>♿ A11y: labels, alt text, hit areas</span></div><div class="btn-row wrap"><button class="btn primary" id="diag-scan">🩺 Scan is page</button><button class="btn" id="diag-scan-all">🌐 Scan every page</button><button class="btn" id="diag-fix-all" disabled>🛠 Fix all safe</button><button class="btn" id="diag-parity">🔬 Card ↔ drawer parity test</button><span class="dim small" id="diag-status">Abhi scan nahi hua</span></div><div class="diag-toolbar" id="diag-toolbar" hidden><div class="btn-row wrap"><select class="input" id="diag-filter-sev" title="Severity filter"></select><select class="input" id="diag-filter-cat" title="Category filter"></select><select class="input" id="diag-group" title="Grouping"></select><input class="input" id="diag-search" type="search" placeholder="🔍 findings me dhoondho (page, selector, reason)"><button class="btn small" id="diag-export-csv" title="Visible findings CSV">⬇ CSV</button><button class="btn small" id="diag-export-json" title="Visible findings JSON">⬇ JSON</button><button class="btn small" id="diag-copy" title="Visible findings clipboard par">📋 Copy</button></div></div><div id="diag-parity-out" class="diag-parity"></div><div id="diag-results" class="diag-results"></div><div id="diag-history" class="diag-history"></div>', 'Safe UI fixes apply hote hi rescan karo; source/data findings ko sheet mapping se repair karo.')}`
+    + section('🐢 Page speed & DOM weight', '<div id="diag-page-stats"><p class="dim small">🌐 "Scan every page" chalao → har page ka render time, DOM nodes aur HTML weight yahan aayega.</p></div>', 'Bhaari page = slow click/scroll. Caps, chunked rendering aur ⚡ Speed doctor prefs se theek hota hai.')
+    + section('⚡ Speed doctor — apni site ko turant halka karo', `<p>Ye prefs isi browser me save hote hain aur <b>boot par turant</b> lagu hote hain (app.js hook). Purane/slow device par sabse pehla farq "Animations band" se dikhta hai.</p>
+      <div class="pref-list">${SPEED_PREF_DEFS.map((d) => `<label class="pref-row"><input type="checkbox" data-speed-pref="${esc(d.key)}"${prefs[d.key] ? ' checked' : ''}><span><b>${esc(d.label)}</b><br><small class="dim">${esc(d.hint)}</small></span></label>`).join('')}</div>
+      <div class="btn-row wrap"><button class="btn small" id="speed-reset-prefs">↺ Speed prefs reset</button><span class="dim small" id="speed-pref-note">${Object.keys(prefs).filter((k) => prefs[k]).length ? `Active: ${Object.keys(prefs).filter((k) => prefs[k]).join(', ')}` : 'Koi pref active nahi'}</span></div>`, 'Prefs sirf performance ke liye hain — data/reporting par koi asar nahi.')
     + speedCard();
   }
 
@@ -1855,9 +2163,12 @@ FF.pages = FF.pages || {};
           diagnosticState.findings = merged;
           diagnosticState.scannedAt = Date.now();
           diagnosticState.running = false;
+          diagnosticState.lastAllScanAt = Date.now();
+          pushDiagHistory({ at: diagnosticState.scannedAt, scope: `every page (${out.pages})`, total: merged.length, high: merged.filter((f) => f.severity === 'high').length, medium: merged.filter((f) => f.severity === 'medium').length, low: merged.filter((f) => f.severity === 'low').length, repairs: repairRules().length + attrRepairRules().length });
           body.innerHTML = diagnosticsTab();
           bindTab();
           renderDiagnosticResults(body);
+          renderPageStats(body);
           const after = U.$('#diag-status', body);
           if (after) after.textContent = `${merged.length} findings · ${out.pages} pages scanned · ${U.timeLabel(diagnosticState.scannedAt)}`;
           U.toast(`🌐 ${out.pages} pages scan ho gaye — ${merged.length} findings${out.failed.length ? ` · ${out.failed.length} page render fail` : ''}`, merged.length ? 'warn' : 'ok');
@@ -1872,17 +2183,40 @@ FF.pages = FF.pages || {};
         renderDiagnosticResults(body);
         if (safe.length) { U.toast(`${safe.length} safe UI fixes apply ho gaye — rescan ho raha hai ✓`, 'ok'); void runSiteDiagnostics(body); }
       });
-      U.$$('[data-diagnostic-fix]', body).forEach((btn) => btn.addEventListener('click', () => {
-        const finding = (diagnosticState.findings || []).find((f) => f.id === btn.dataset.diagnosticFix);
-        if (applyDiagnosticFix(finding)) { renderDiagnosticResults(body); U.toast('🛠 Safe UI fix site-wide apply + save ho gaya ✓', 'ok'); void runSiteDiagnostics(body); }
-        else U.toast('Ye finding browser se safely fix nahi hoti — source/config theek karo', 'warn');
-      }));
-      const clearRepairs = U.$('[data-diag-clear-repairs]', body);
-      if (clearRepairs) clearRepairs.addEventListener('click', () => {
-        writeRepairs([]);
-        U.toast('Saare saved repairs hata diye', 'warn');
+      // 🩺 v3.37 — parity probe, filters/search/group, exports, page stats aur Speed doctor prefs.
+      const diagParity = U.$('#diag-parity', body);
+      if (diagParity) diagParity.addEventListener('click', () => U.withButtonBusy(diagParity, async () => {
+        const results = await runCardParityProbe(body);
+        const bad = (results || []).filter((r) => !r.ok);
         renderDiagnosticResults(body);
+        U.toast(bad.length ? `🔬 ${bad.length} card(s) ka number drawer me nahi mila — findings me dekho` : `🔬 ${(results || []).length} cards verify — sab exact match ✅`, bad.length ? 'warn' : 'ok');
+      }, 'Testing…'));
+      const onFilter = () => renderDiagnosticResults(body);
+      const fSev = U.$('#diag-filter-sev', body); if (fSev) fSev.addEventListener('change', () => { diagView.sev = fSev.value || 'all'; onFilter(); });
+      const fCat = U.$('#diag-filter-cat', body); if (fCat) fCat.addEventListener('change', () => { diagView.cat = fCat.value || 'all'; onFilter(); });
+      const fGrp = U.$('#diag-group', body); if (fGrp) fGrp.addEventListener('change', () => { diagView.group = fGrp.value || 'none'; onFilter(); });
+      const fSearch = U.$('#diag-search', body);
+      if (fSearch) fSearch.addEventListener('input', U.debounce(() => { diagView.q = fSearch.value || ''; onFilter(); }, 220));
+      const exp = (kind, btn, label) => { if (!btn) return; btn.addEventListener('click', () => { const n = diagExport(kind); U.toast(`${label}: ${n} findings export hue ✓`, 'ok'); }); };
+      exp('csv', U.$('#diag-export-csv', body), 'CSV');
+      exp('json', U.$('#diag-export-json', body), 'JSON');
+      exp('copy', U.$('#diag-copy', body), 'Clipboard');
+      const prefNote = U.$('#speed-pref-note', body);
+      U.$$('[data-speed-pref]', body).forEach((cb) => cb.addEventListener('change', () => {
+        const next = setSpeedPref(cb.dataset.speedPref, cb.checked);
+        if (prefNote) { const active = Object.keys(next).filter((k) => next[k]); prefNote.textContent = active.length ? `Active: ${active.join(', ')}` : 'Koi pref active nahi'; }
+        U.toast(cb.checked ? '⚡ Pref ON — reload ke baad bhi lagu rahega' : 'Pref OFF', 'ok');
+      }));
+      const speedReset = U.$('#speed-reset-prefs', body);
+      if (speedReset) speedReset.addEventListener('click', () => {
+        try { localStorage.removeItem(LS_SPEED_PREFS); } catch { /* ignore */ }
+        applySpeedPrefs({});
+        body.innerHTML = diagnosticsTab(); bindTab(); renderDiagnosticResults(body); renderPageStats(body);
+        U.toast('↺ Speed prefs reset ho gaye', 'warn');
       });
+      applyAttrRepairs(body);
+      startAttrRepairWatcher();
+      renderPageStats(body);
       // account
       // 🛡️ My access cards — locked cards par toast + live data summary (sirf in-memory, no network).
       U.$$('[data-acc-locked]', body).forEach((b) => b.addEventListener('click', () => U.toast(`⛔ "${b.dataset.accLocked}" ke liye access chahiye — admin se Settings → Users me enable karwao.`, 'err')));
@@ -2279,8 +2613,15 @@ FF.pages = FF.pages || {};
     title: 'Settings', render,
     diagnostics: {
       scanDom: scanDomDiagnostics, state: diagnosticState,
-      applyFix: applyDiagnosticFix, repairs: repairRules, clearRepairs: () => writeRepairs([]),
-      stableSelector: diagStableSelector, repairCss: REPAIR_CSS, saved: repairSaved
+      applyFix: applyDiagnosticFix, repairs: repairRules, clearRepairs: () => { writeRepairs([]); writeAttrRepairs([]); },
+      stableSelector: diagStableSelector, repairCss: REPAIR_CSS, saved: repairSaved,
+      // v3.37 — attribute repairs (data-kpi-self), speed prefs, per-page stats, history, exports, parity probe
+      attrFix: ATTR_FIX, attrRepairs: attrRepairRules, applyAttrRepairs, clearAttrRepairs: () => writeAttrRepairs([]),
+      selfKpiAttrs: SELF_KPI_ATTRS, scanSelfKpi: diagSelfKpiFindings, dataHealth: diagDataHealthFindings,
+      speedPrefs, setSpeedPref, applySpeedPrefs, speedPrefDefs: SPEED_PREF_DEFS,
+      pageStats: () => diagnosticState.pageStats || [], history: diagHistory,
+      visibleFindings: diagVisibleFindings, view: diagView, export: diagExport,
+      probeParity: runCardParityProbe, runSite: runSiteDiagnostics, scanEveryPage, renderResults: renderDiagnosticResults
     }
   };
 })(window.FF);

@@ -18,6 +18,12 @@ import { sendMail, mailConfigured, diagnoseMail, mailHint, availableProviders, r
 import { DEFAULT_DISPATCH_EMAIL, normalizeDispatchEmail, buildDispatchPlan, dispatchEmailContent } from './dispatch-email.js';
 import { buildStockAgeIndex, summaryOf as stockAgeSummary, tagsFor as stockAgeTags, personalStock } from './stock-age.js';
 import { loadFfDispatchRows, loadGvDispatchRows } from './dispatch-report.js';
+// 🚨 Unusual Activity ka tag-level scan logic — browser (unusual-scan.js script) aur server dono ek hi
+// file use karte hain, isliye dono ke duplicate/wrong/malformed counts hamesha same rehte hain.
+// Ye classic script hai (koi export nahi): import se sirf execute hota hai aur global set karta hai.
+import './unusual-scan.js';
+
+const UA = globalThis.FFunusualScan;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 8080);
@@ -1715,6 +1721,193 @@ async function stockAgeIndex(fresh) {
   return stockAgeState.promise;
 }
 
+// ---------------------------------------------------------------------------------------------
+// 🚨 Unusual Activity — tag-level VRN scan (v3.37), SERVER SIDE.
+// Pehle browser EIR ke 25,000-row pages khud sequentially kheenchta tha (max 20 pages = 5 lakh rows),
+// isliye Unusual Activity page khulte hi kaafi der tak atka rehta tha. Ab wahi scan yahan hota hai:
+//   • pages PARALLEL (4 ek saath) — Google proxy cache ke saath,
+//   • browser ko sirf compact anomaly index (duplicate VRN groups + wrong/malformed/replacement/
+//     chassis evidence rows, capped) jaata hai — poori row dump kabhi nahi,
+//   • counting logic unusual-scan.js me shared hai, isliye server index aur browser fallback scan
+//     bilkul same numbers banate hain.
+// ---------------------------------------------------------------------------------------------
+const UA_SCAN_TTL = 10 * 60e3;
+const UA_PAGE = 25000;
+const UA_MAX_PAGES = 20;
+const UA_CONCURRENCY = 4;
+const uaScanState = { key: '', at: 0, index: null, promise: null };
+const uaDateOk = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''));
+const uaNormCls = (v) => {
+  const c = String(v || '').trim().toUpperCase().replace(/\s+/g, '');
+  if (!c) return 'VC4';
+  return /^VC\d/.test(c) ? c : /^\d+$/.test(c) ? `VC${c}` : c;
+};
+
+async function uaGvizTable(params) {
+  const out = await fetchUpstreamCached(upstreamUrl(params));
+  if (out.status < 200 || out.status >= 300) throw new Error(`Google responded ${out.status}`);
+  const table = parseGvizServer(out.body);
+  // gviz column id (letter) se index — label row ki wajah se order na bigde.
+  const ids = (table.cols || []).map((c) => String(c.id || '').toUpperCase());
+  return { rows: table.rows || [], at: (L) => { const i = ids.indexOf(String(L).toUpperCase()); return i; }, cached: !!out.cached };
+}
+
+/** EIR ke tag-level rows (date range) — parallel pages, offset-paging sanity check ke saath. */
+async function uaEirRecords(from, to, info) {
+  const s = db.settings || {};
+  const e = s.eir || {};
+  const sheet = s.eirSheet || e.sheet || 'EIR';
+  const L = {
+    date: e.date || 'AA', tagId: e.tagId || 'A', vrn: e.vrn || 'B', cls: e.cls || 'D', vrnType: e.vrnType || 'BC',
+    agentName: e.agentName || 'L', agentId: e.agentId || 'J', tlName: e.tlName || 'BA', masterId: e.masterId || 'AU',
+    gvName: e.gvName || 'AX', gvId: e.gvId || 'AW', type: e.type || 'P', status: e.status || 'Z'
+  };
+  const letters = [...new Set(Object.values(L))];
+  const select = `select ${letters.join(', ')}`;
+  const order = `order by ${L.date} asc, ${L.tagId} asc`;
+  const mkParams = (offset, limit, plain) => {
+    const d = plain ? L.date : `toDate(${L.date})`;
+    const tq = `${select} where ${d} >= date '${from}' and ${d} <= date '${to}' ${order} limit ${limit} offset ${offset}`;
+    return new URLSearchParams({ id: String(s.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet, tq });
+  };
+  let plain = false;
+  const readPage = async (offset, limit) => {
+    try { return await uaGvizTable(mkParams(offset, limit, plain)); }
+    catch (err) {
+      // Date column text me ho to toDate() fail hota hai — ek baar plain compare try karo.
+      if (!plain) { plain = true; return uaGvizTable(mkParams(offset, limit, true)); }
+      throw err;
+    }
+  };
+  const records = [];
+  const seen = new Set();
+  let at = null;
+  let pages = 0;
+  while (pages < UA_MAX_PAGES) {
+    const offsets = [];
+    for (let i = 0; i < UA_CONCURRENCY && pages + i < UA_MAX_PAGES; i++) offsets.push((pages + i) * UA_PAGE);
+    const results = await Promise.all(offsets.map((off) => readPage(off, UA_PAGE)));
+    let done = false;
+    for (const table of results) {
+      pages++;
+      info.pages = pages;
+      const rows = table.rows || [];
+      info.rowsRead += rows.length;
+      at = table.at;
+      let fresh = 0;
+      for (const row of rows) {
+        const cell = (k) => serverCell(row, at(L[k]));
+        const key = serverDate(cell('date'));
+        if (!key) continue;
+        const masterId = cell('masterId'), tlName = cell('tlName');
+        const ch = UA.chOf(UA.channelOfEir(masterId, tlName, e));
+        const agentName = ch === 'gv' ? (cell('gvName') || cell('agentName')) : (cell('agentName') || cell('gvName'));
+        const agentId = ch === 'gv' ? (cell('gvId') || cell('agentId')) : (cell('agentId') || cell('gvId'));
+        const rec = {
+          ch, key, tagId: cell('tagId'), vrn: cell('vrn'), cls: uaNormCls(cell('cls')), vrnType: cell('vrnType'),
+          agentName, agentId, tlName, type: cell('type'), status: cell('status')
+        };
+        const identity = UA.recordKey(rec);
+        if (!seen.has(identity)) { seen.add(identity); fresh++; }
+        records.push(rec);
+      }
+      // Offset paging kaam nahi kar raha (same page repeat) → aage mat badho, warn karo.
+      if (pages > 1 && rows.length && fresh === 0) { info.offsetIssue = true; done = true; break; }
+      if (pages > 1 && fresh > 0) info.offsetVerified = true;
+      if (rows.length < UA_PAGE) { done = true; break; }
+    }
+    if (done) break;
+  }
+  // Saare pages bhar gaye → ek row probe karke batao ki cap ke aage bhi data hai ya nahi.
+  if (!info.offsetIssue && pages >= UA_MAX_PAGES) {
+    try {
+      const probe = await readPage(UA_PAGE * UA_MAX_PAGES, 1);
+      info.capHit = (probe.rows || []).length > 0;
+      info.offsetVerified = info.offsetVerified || info.capHit;
+    } catch { info.probeFailed = true; }
+  }
+  return records;
+}
+
+/** GV Master (live) ke tag-level rows — aaj ka GV data EIR me T+1 aata hai, isliye ye zaroori hai. */
+async function uaGvRecords(from, to, info) {
+  const s = db.settings || {};
+  if (!s.gvSheetId) return [];
+  const m = (s.gv && s.gv.master) || {};
+  const L = {
+    date: m.date || 'P', tagId: m.tagId || 'I', serial: m.serial || 'H', vrn: m.vrn || 'E', vClass: m.vClass || 'F',
+    cch: m.cch || 'G', tagType: m.tagType || 'U', agentName: m.agentName || 'B', agentId: m.uniqueId || 'A',
+    tlName: m.tlName || 'D', status: m.status || 'N'
+  };
+  const letters = [...new Set(Object.values(L))];
+  const tab = m.tab || 'GV Master';
+  const mk = (plain) => {
+    const d = plain ? L.date : `toDate(${L.date})`;
+    const tq = `select ${letters.join(', ')} where ${d} >= date '${from}' and ${d} <= date '${to}'`;
+    return new URLSearchParams({ id: String(s.gvSheetId).replace(/[^A-Za-z0-9_-]/g, ''), sheet: tab, ...(m.gid ? { gid: String(m.gid) } : {}), tq });
+  };
+  let table;
+  try { table = await uaGvizTable(mk(false)); }
+  catch { table = await uaGvizTable(mk(true)); }
+  const at = table.at;
+  const out = [];
+  for (const row of table.rows || []) {
+    const cell = (k) => serverCell(row, at(L[k]));
+    const key = serverDate(cell('date'));
+    const agentId = cell('agentId');
+    if (!key || !agentId || /^unique_id$/i.test(agentId)) continue;
+    out.push({
+      ch: 'gv', key, tagId: cell('tagId') || cell('serial'), vrn: cell('vrn'),
+      cls: uaNormCls(cell('cch') || cell('vClass')), vrnType: cell('tagType'),
+      agentId, agentName: cell('agentName') || agentId, tlName: cell('tlName') || 'Direct',
+      status: cell('status')
+    });
+  }
+  info.gvRows = out.length;
+  return out;
+}
+
+async function loadUnusualScan(from, to) {
+  const started = Date.now();
+  const info = { pages: 0, rowsRead: 0, capHit: false, offsetIssue: false, offsetVerified: false, probeFailed: false, gvRows: 0 };
+  let eirError = '';
+  const [eir, gv] = await Promise.all([
+    uaEirRecords(from, to, info).catch((err) => { eirError = err && err.message ? err.message : String(err); return []; }),
+    uaGvRecords(from, to, info).catch(() => [])
+  ]);
+  const records = UA.dedupe(gv.concat(eir));
+  const index = UA.buildIndex({
+    records, from, to,
+    ms: Date.now() - started,
+    meta: {
+      source: eir.length ? 'server-scan (EIR + GV Master)' : 'server-scan (GV Master only)',
+      mode: `parallel ×${UA_CONCURRENCY}`,
+      rowsRead: info.rowsRead + info.gvRows, pages: info.pages, gvRows: info.gvRows,
+      capHit: info.capHit, offsetIssue: info.offsetIssue, offsetVerified: info.offsetVerified,
+      probeFailed: info.probeFailed, error: !!eirError, message: eirError,
+      complete: !info.capHit && !info.offsetIssue && !info.probeFailed && !eirError
+    }
+  });
+  return index;
+}
+
+/** Range ka scan index (10 min cache + inflight dedupe) — /api/unusual/scan isi se banta hai. */
+async function unusualScanIndex({ from, to, fresh }) {
+  const key = `${db.settings.sheetId}|${db.settings.gvSheetId}|${db.settings.eirSheet}|${from}|${to}`;
+  if (!fresh && uaScanState.index && uaScanState.key === key && Date.now() - uaScanState.at < UA_SCAN_TTL) {
+    return { ...uaScanState.index, cached: true };
+  }
+  if (uaScanState.promise && uaScanState.key === key) return uaScanState.promise;
+  uaScanState.key = key;
+  uaScanState.promise = loadUnusualScan(from, to).then((index) => {
+    // Scan fail ho gaya aur purana index same range ka hai → khali dikhaane se better purana hi do.
+    if (index.meta && index.meta.error && !index.totals.rows && uaScanState.index && uaScanState.key === key) return { ...uaScanState.index, stale: true };
+    uaScanState.index = index; uaScanState.at = Date.now();
+    return index;
+  }).finally(() => { uaScanState.promise = null; });
+  return uaScanState.promise;
+}
+
 /** StockDataa (First Forward) current stock. */
 async function stockSnapshot() {
   const s = db.settings, cfg = s.stock || {};
@@ -3044,6 +3237,27 @@ async function handleApi(req, res, url) {
     const index = await stockAgeIndex(false);
     const out = stockAgeTags(index, { ch: q.get('ch'), kind: q.get('kind'), key: q.get('key') || '', keys: split(q.get('keys')), tls: split(q.get('tls')), months: Number(q.get('months')) || 0, group: q.get('group') || '', unknown: q.get('unknown') === '1', limit: Number(q.get('limit')) || 2000 });
     return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, ...out }), { 'Cache-Control': 'no-store' });
+  }
+  // 🚨 Unusual Activity — tag-level VRN scan index (duplicate / wrong / malformed / replacement / chassis).
+  // Browser ye ek compact JSON me le leta hai; 5 lakh EIR rows download nahi karni padti (page turant khulta hai).
+  if (p === '/api/unusual/scan' && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required');
+    if (user.role !== 'admin' && !(user.permissions || []).includes('unusual')) throw new HttpError(403, 'Unusual Activity access nahi hai.');
+    const q = url.searchParams;
+    const from = String(q.get('from') || '').slice(0, 10), to = String(q.get('to') || '').slice(0, 10);
+    if (!uaDateOk(from) || !uaDateOk(to)) throw new HttpError(400, 'from/to (YYYY-MM-DD) chahiye.');
+    if (from > to) throw new HttpError(400, 'from date, to date ke baad nahi ho sakti.');
+    const spanDays = Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400e3) + 1;
+    if (spanDays > 366) throw new HttpError(400, 'Ek baar me maximum 366 din ka range scan hota hai.');
+    const fresh = q.get('fresh') === '1' && user.role === 'admin';
+    try {
+      const index = await unusualScanIndex({ from, to, fresh });
+      const body = JSON.stringify({ ok: true, spanDays, index });
+      return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', body, { 'Cache-Control': 'no-store' });
+    } catch (err) {
+      // 200 + ok:false — client apna fallback (browser-side paging scan) chala leta hai.
+      return sendJson(res, 200, { ok: false, error: err && err.message ? err.message : String(err) });
+    }
   }
   // ---- notification preferences (per user: which types show, sound on/off, mobile push) ----
   if (p === '/api/stock-history' && method === 'GET') {

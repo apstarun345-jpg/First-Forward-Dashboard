@@ -41,7 +41,8 @@ const makeDashboard = (queryImpl) => {
       query: queryImpl
     }
   };
-  const sandbox = { window: { FF }, FF, console, Map, Set, Date, Promise };
+  const sandbox = { window: { FF }, FF, console, Map, Set, Date, Promise, Object, Array, String, Number, RegExp, Math, JSON };
+  vm.runInNewContext(fs.readFileSync(path.join(ROOT, 'unusual-scan.js'), 'utf8'), sandbox, { filename: 'unusual-scan.js' });
   vm.runInNewContext(fs.readFileSync(path.join(ROOT, 'unusual.js'), 'utf8'), sandbox, { filename: 'unusual.js' });
   return FF;
 };

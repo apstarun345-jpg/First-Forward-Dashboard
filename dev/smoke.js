@@ -1266,6 +1266,39 @@ await run('liveView.openNotification (report / settings / login)', async () => {
   if (!drawerHtml().includes('data-lv-watch')) throw new Error('live view button missing');
   FF.app.closeDrawer();
 });
+// 🚨 v3.37 — Unusual Activity: card ka number == drawer ka number, server-side tag scan, page diagnose.
+await run('🚨 unusual · card = drawer parity + 🚀 server scan + 🩺 diagnose', async () => {
+  const r = root();
+  await pages.unusual.render(r, { period: 'last' }, {});
+  await settle(2500);                       // instant paint ke baad background server scan
+  const kpis = (REG.get('ua-kpis') || {}).innerHTML || '';
+  if (!kpis.includes('data-ua-flag=')) throw new Error('anomaly KPI cards nahi bane');
+  if (!/data-kpi-self="1"/.test(kpis)) throw new Error('cards par data-kpi-self nahi — global kpiDetail handler click hijack karega');
+  const scan = FF.unusual.scan;
+  if (!scan || scan.via !== 'server') throw new Error(`server scan use nahi hua (via=${scan && scan.via}, error=${FF.unusual.state.scanError || '—'})`);
+  const model = FF.unusual.model;
+  if (!model || !model.index) throw new Error('model par tag-level index nahi laga');
+  if (!(model.index.totals.rows > 0)) throw new Error('scan me 0 tag rows');
+  // 🎯 har card ka metric == drawer/evidence ka count
+  for (const flag of Object.keys(FF.unusual.FLAGS)) {
+    const m = FF.unusual.metricFor(model, flag);
+    if (m.evidenceTotal !== m.value) throw new Error(`${flag}: card ${m.value} ${m.unit} vs evidence ${m.evidenceTotal}`);
+    if (m.value === 0 && FF.unusual.evidenceFor(m, model, 0).total !== 0) throw new Error(`${flag}: card 0 par drawer me rows leak`);
+  }
+  // 🔬 asli click-path probe (drawer title/value/unit)
+  const out = new El('div');
+  const results = (await FF.unusual.probeCards(out)) || [];
+  if (results.length !== Object.keys(FF.unusual.FLAGS).length) throw new Error(`probeCards ne ${results.length} flags test kiye`);
+  const bad = results.filter((x) => !x.ok);
+  if (bad.length) throw new Error(`card↔drawer mismatch: ${bad.map((b) => `${b.flag} (card "${b.card}" vs "${b.drawerTitle}")`).join(', ')}`);
+  // 🩺 page-level diagnose drawer
+  FF.unusual.openDiagnose(model, null);
+  const dh = (REG.get('drawer-body') || {}).innerHTML || '';
+  if (!dh.includes('Tag-level scan health')) throw new Error('diagnose drawer me scan health section nahi');
+  if (!dh.includes('Har flag ka hisaab')) throw new Error('diagnose drawer me flag-wise hisaab nahi');
+  FF.app.closeDrawer();
+}, true);
+
 await run('🩺 diagnostics · safe fix site-wide persist hota hai (reload ke baad bhi)', async () => {
   const dg = FF.pages.settings && FF.pages.settings.diagnostics;
   if (!dg || typeof dg.applyFix !== 'function') throw new Error('diagnostics API missing');

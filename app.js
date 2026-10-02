@@ -723,7 +723,36 @@ window.FF = window.FF || {};
     }
     clearTimeout(loaderTimer);
     routeProgress(false, token);
-    if (token === current.token) { main.setAttribute('aria-busy', 'false'); updateStatus(); enhanceCharts(root); enhanceTables(root); translateDom(root); }
+    if (token === current.token) { main.setAttribute('aria-busy', 'false'); updateStatus(); enhanceCharts(root); enhanceTables(root); translateDom(root); applySavedTweaks(root); }
+  }
+
+  /** 🩺 v3.37 — Settings → Diagnostics ke SAVED fixes boot/par har page render par eagerly laga do.
+      settings.js lazy load hota hai, isliye ye chhota sa hook app.js me hai: speed prefs (ff-no-anim /
+      ff-lite) + attribute repairs (jaise `data-kpi-self="1"` — card ka click page khud handle kare,
+      global kpiDetail hijack na kare). Rule localStorage me hai → reload ke baad bhi fix laga rehta hai. */
+  const DIAG_ATTR_FIX = { kpiSelf: ['data-kpi-self', '1'] };
+  function applySavedTweaks(root) {
+    try {
+      const prefs = JSON.parse(localStorage.getItem('ff_speed_prefs') || '{}') || {};
+      const html = document.documentElement;
+      if (html && html.classList) {
+        html.classList.toggle('ff-no-anim', !!prefs.reduceMotion);
+        html.classList.toggle('ff-lite', !!prefs.lite);
+      }
+      const rules = JSON.parse(localStorage.getItem('ff_diag_attr_repairs') || '[]');
+      if (!Array.isArray(rules) || !rules.length) return 0;
+      const scope = root || document;
+      if (!scope.querySelectorAll) return 0;
+      let n = 0;
+      for (const r of rules) {
+        const fix = DIAG_ATTR_FIX[r && r.fixType];
+        if (!fix || !r.selector) continue;
+        let els = [];
+        try { els = [...scope.querySelectorAll(r.selector)]; } catch { els = []; }
+        for (const el of els) if (el && el.getAttribute && el.getAttribute(fix[0]) !== fix[1]) { el.setAttribute(fix[0], fix[1]); n++; }
+      }
+      return n;
+    } catch { return 0; }
   }
   /** 🚦 v3.31 — kisi bhi option/page par click → upar patli chalti progress line (Reduce motion me bhi chalti hai).
       Sirf tab dikhti hai jab render 150ms se lamba ho (fast pages par flash nahi). */
@@ -1203,8 +1232,11 @@ window.FF = window.FF || {};
       const drawerPdf = e.target.closest('[data-drawer-pdf]');
       if (drawerPdf) { exportDrawerPdf(drawerPdf); return; }
       // `.kpi` ya `[data-kpi]` — dono clickable hain (Home ke glance tiles bhi data-kpi use karte hain).
+      // 🚨 v3.37: `data-kpi-self` wale cards ka click PAGE khud handle karta hai (jaise Unusual Activity ke
+      // anomaly cards). Unhe yahan se kpiDetail.open() mat karo — warna do drawer khulte the aur aakhri
+      // (card se unrelated, MTD-inferred) drawer jeet jaata tha: "card ka data drawer me nahi dikhta".
       const kpi = e.target.closest('.kpi, [data-kpi]');
-      if (kpi && !e.target.closest('a,button:not(.kpi)')) {
+      if (kpi && !e.target.closest('a,button:not(.kpi)') && !kpi.closest('[data-kpi-self]')) {
         if (FF.kpiDetail) { FF.kpiDetail.open(kpi); return; }
         const title = kpi.dataset.kpiTitle || U.$('.kpi-title', kpi)?.textContent || 'KPI summary';
         const value = kpi.dataset.kpiValue || U.$('.kpi-value', kpi)?.innerText || '—';
@@ -1503,6 +1535,7 @@ window.FF = window.FF || {};
 
   async function init() {
     U.initTooltip();
+    applySavedTweaks();          // ⚡ saved speed prefs + diagnostic repairs — sabse pehle
     bind();
     // 🌐 Public employee link (/tag-request) — yahan login ka koi chakkar nahi: seedha form khulta
     //    hai, sirf employee name mandatory. Baaki poora app pehle jaisa login-protected rehta hai.
@@ -1533,6 +1566,6 @@ window.FF = window.FF || {};
     setLang(next);
   }
 
-  FF.app = { storageBanner, pushBanner, liveShareChip, navigate, updateParams, clearGlobalFilters, refresh, syncNow, checkFeedChange, announceDataUpdate, parseHash, resolvePage, pageKnown, openDrawer, closeDrawer, currentDrawerSnapshot, restoreDrawerSnapshot, exportDrawerCsv, exportDrawerPdf, renderSidebar, renderCurrent, renderTopUser, updateStatus, onLogin, onBackgroundDataUpdated, promptInstall, enhanceCharts, enhanceTables, themeMode, toggleThemeMode, lang, setLang, toggleLangMenu, renderGlobalFilters, renderMobileNav, focusMode: updateFocusMode, openAccessibility: renderA11yPanel, tableDensity, setTableDensity, PAGES, refreshPendingBadge, setPendingSignups, shareWhatsApp, checkVersion, exportCSV: () => exportCurrentCsv('csv'), exportXLSX: () => exportCurrentCsv('xlsx'), toggleTheme: toggleThemeMode, toggleLang: toggleLangQuick, get pendingSignups() { return pendingSignups; }, get current() { return current; }, currentFilters: () => (FF.filters ? FF.filters.current() : currentFilterValues()) };
+  FF.app = { storageBanner, pushBanner, liveShareChip, applySavedTweaks, navigate, updateParams, clearGlobalFilters, refresh, syncNow, checkFeedChange, announceDataUpdate, parseHash, resolvePage, pageKnown, openDrawer, closeDrawer, currentDrawerSnapshot, restoreDrawerSnapshot, exportDrawerCsv, exportDrawerPdf, renderSidebar, renderCurrent, renderTopUser, updateStatus, onLogin, onBackgroundDataUpdated, promptInstall, enhanceCharts, enhanceTables, themeMode, toggleThemeMode, lang, setLang, toggleLangMenu, renderGlobalFilters, renderMobileNav, focusMode: updateFocusMode, openAccessibility: renderA11yPanel, tableDensity, setTableDensity, PAGES, refreshPendingBadge, setPendingSignups, shareWhatsApp, checkVersion, exportCSV: () => exportCurrentCsv('csv'), exportXLSX: () => exportCurrentCsv('xlsx'), toggleTheme: toggleThemeMode, toggleLang: toggleLangQuick, get pendingSignups() { return pendingSignups; }, get current() { return current; }, currentFilters: () => (FF.filters ? FF.filters.current() : currentFilterValues()) };
   document.addEventListener('DOMContentLoaded', init);
 })(window.FF);
