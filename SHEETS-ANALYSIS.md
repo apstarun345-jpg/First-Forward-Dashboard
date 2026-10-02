@@ -14,7 +14,7 @@
 | **Stock (agent-wise, class-wise)** | **StockDataa** (tag-wise) · REPORT ka *Agent Inventory Summary* snapshot | **Tag Assignment** (tag-wise) · GV REPORT ke `Stock VC12…VC7` columns |
 | **Agent / TL operational fields** (priority, status, last active, TL stock, mobile) | **REPORT** tab | **GV REPORT** tab (header row 4) |
 | **Data basis** | **T+1** — aaj ka data kal aata hai (1 tareekh ko "current month" = pichhla month) | **Live** — aaj tak ka data |
-| **Run-rate** | issued ÷ (aaj − 1) din | issued ÷ din (channel basis) |
+| **Run-rate** | issued ÷ (aaj − 1) din (data kal tak ka) | issued ÷ (aaj − 1) din (`U.channelBasis('gv')`, data live) |
 | **Suggested dispatch** | `avg/day × 15 din − stock` (net) · `avg/day × 15` (gross / w/o stock) — dono dikhte hain | same formula |
 
 > Isliye ek hi naam FF aur GV me alag numbers dikhata hai — ye bug nahi, **do alag sheet / basis** hain. Home search ka naya **⚖ FF + GV**
