@@ -810,6 +810,9 @@ window.FF = window.FF || {};
         await Promise.all([FF.store.preload(true).catch(() => {}), FF.gv && FF.gv.enabled() ? FF.gv.preload(true).catch(() => {}) : Promise.resolve()]);
       }
     } catch (err) { console.error(err); }
+    if (FF.masterProfile && FF.masterProfile.invalidate) FF.masterProfile.invalidate();
+    if (FF.masterSearch && FF.masterSearch.invalidate) FF.masterSearch.invalidate();
+    if (FF.agentSummary && FF.agentSummary.clearCaches) FF.agentSummary.clearCaches();
     refreshing = false;
     await renderCurrent();
     await checkFeedChange(true).catch(() => {}); // naya data ho to notification + voice announcement

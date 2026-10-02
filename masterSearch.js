@@ -24,7 +24,7 @@ FF.pages = FF.pages || {};
   const KIND_LABEL = { 'ff-agent': 'FF Agent', 'gv-agent': 'GV Agent', 'ff-tl': 'FF TL', 'gv-tl': 'GV TL', 'gv-id': 'GV ID', 'agent-id': 'Agent ID' };
   const KIND_ICON = { 'ff-agent': '🧑‍💼', 'gv-agent': '🧑‍💼', 'ff-tl': '👥', 'gv-tl': '👥', 'gv-id': '🆔', 'agent-id': '🆔' };
 
-  const state = { light: null, lightPromise: null, full: null, fullPromise: null, lastQuery: '', results: null, listeners: new Set() };
+  const state = { generation: 0, light: null, lightPromise: null, full: null, fullPromise: null, lastQuery: '', results: null, listeners: new Set() };
   const emit = () => state.listeners.forEach((fn) => { try { fn(); } catch { /* ignore */ } });
   const onIndexReady = (fn) => { state.listeners.add(fn); return () => state.listeners.delete(fn); };
 
@@ -32,9 +32,15 @@ FF.pages = FF.pages || {};
   function newIndex() {
     return {
       people: new Map(),   // `${kind}|${normName(name)}` → { kind, name, sub, tlSet, classMap, bars, last, n }
+      personGrams: new Map(), // normalized 2-character search gram → people (substring lookup)
       bars: new Map(),     // normBar(barcode) → { key, ff: [], gv: [] }
+      barKeys: [],         // integer IDs used by the compact barcode substring index
+      barPrefixes: new Map(), // first 4 normalized barcode characters → keys
+      barGrams: new Map(), // 6-character barcode gram → integer IDs
       ids: new Map(),      // normId(id) → { name, kind, tl }
-      mobiles: new Map()   // 10-digit mobile → { name, kind, tl } (agent + TL mobile search)
+      idBuckets: new Map(), // first 4 normalized ID characters → entries
+      mobiles: new Map(), // 10-digit mobile → { name, kind, tl } (agent + TL mobile search)
+      mobileGrams: new Map() // 5-digit mobile gram → matching contact entries
     };
   }
   /** TL naam → site-wide label (direct placeholder ko "Direct Agent (APS)/(no TL)" banao). */
@@ -63,12 +69,58 @@ FF.pages = FF.pages || {};
     if (clean(cls)) p.classMap.set(clean(cls), (p.classMap.get(clean(cls)) || 0) + 1);
     return p;
   }
-  const barEntry = (idx, key) => { let e = idx.bars.get(key); if (!e) { e = { key, ff: [], gv: [] }; idx.bars.set(key, e); } return e; };
+  function pushBucket(map, key, value) {
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(value);
+  }
+  /** Build small, reusable lookup indexes once per data layer, not once per keystroke. */
+  function indexLookups(idx) {
+    const peopleGrams = new Map();
+    idx.people.forEach((p) => {
+      const tl = [...p.tlSet].map(normName).join(' ');
+      const aliases = p.alias ? [...p.alias].map(normName).join(' ') : '';
+      const hay = `${normName(p.name)} ${normName(p.sub)} ${tl} ${aliases}`.trim();
+      p._searchHay = hay;
+      const grams = new Set();
+      for (let i = 0; i < hay.length - 1; i++) grams.add(hay.slice(i, i + 2));
+      grams.forEach((gram) => pushBucket(peopleGrams, gram, p));
+    });
+    idx.personGrams = peopleGrams;
+
+    const idBuckets = new Map();
+    idx.ids.forEach((value, id) => { if (id.length >= 4) pushBucket(idBuckets, id.slice(0, 4), { id, value }); });
+    idx.idBuckets = idBuckets;
+
+    const mobileGrams = new Map();
+    idx.mobiles.forEach((value) => {
+      const mobile = String(value.mobile || '').replace(/\D/g, '');
+      const grams = new Set();
+      for (let i = 0; i <= mobile.length - 5; i++) grams.add(mobile.slice(i, i + 5));
+      grams.forEach((gram) => pushBucket(mobileGrams, gram, value));
+    });
+    idx.mobileGrams = mobileGrams;
+  }
+  const barEntry = (idx, key) => {
+    let e = idx.bars.get(key);
+    if (e) return e;
+    e = { key, ff: [], gv: [] };
+    idx.bars.set(key, e);
+    const id = idx.barKeys.length;
+    idx.barKeys.push(key);
+    if (key.length >= 4) pushBucket(idx.barPrefixes, key.slice(0, 4), key);
+    if (key.length >= 6) {
+      const grams = new Set();
+      for (let i = 0; i <= key.length - 6; i++) grams.add(key.slice(i, i + 6));
+      grams.forEach((gram) => pushBucket(idx.barGrams, gram, id));
+    }
+    return e;
+  };
 
   /** Layer 1 — aggregated rows (instant, never blocks on barcode scans). */
   async function buildLight() {
     if (state.light) return state.light;
     if (state.lightPromise) return state.lightPromise;
+    const generation = state.generation;
     state.lightPromise = (async () => {
       const idx = newIndex();
       const [agents, stockAgents, gvMaster, gvIssuance, gvReport, gvStockAgent, gvStockTl, ffReport] = await Promise.allSettled([
@@ -173,11 +225,13 @@ FF.pages = FF.pages || {};
       if (gvStockTl.status === 'fulfilled') {
         for (const r of gvStockTl.value || []) person(idx, 'gv-tl', r.tlName, '', '', clean(r.tlId));
       }
+      indexLookups(idx);
+      if (generation !== state.generation) return state.light;
       state.light = idx;
       state.lightPromise = null;
       emit();
       return idx;
-    })().catch((err) => { state.lightPromise = null; throw err; });
+    })().catch((err) => { if (generation === state.generation) state.lightPromise = null; throw err; });
     return state.lightPromise;
   }
 
@@ -191,6 +245,7 @@ FF.pages = FF.pages || {};
       await FF.lazy.inject('insights');
       if (!FF.insights || !FF.insights.loadDetails) return null;
     }
+    const generation = state.generation;
     state.fullPromise = (async () => {
       const idx = state.light || await buildLight();
       const details = await FF.insights.loadDetails();
@@ -223,12 +278,14 @@ FF.pages = FF.pages || {};
           if (g) g.bars.add(key);
         }
       }
+      indexLookups(idx);
+      if (generation !== state.generation) return state.full;
       idx.fullLoaded = true;
       state.full = idx;
       state.fullPromise = null;
       emit();
       return idx;
-    })().catch(() => { state.fullPromise = null; return state.light; });
+    })().catch(() => { if (generation === state.generation) state.fullPromise = null; return state.light; });
     return state.fullPromise;
   }
   /** Kick the heavy layer off in the background (non-blocking) — suggestions upgrade automatically. */
@@ -255,32 +312,42 @@ FF.pages = FF.pages || {};
     const ni = normId(query);
     const wantsTags = ni.length >= 4 && /\d/.test(query);
 
-    // people by name / TL / id / gv id
+    // people by name / TL / id / GV id — 2-gram index avoids scanning every person on each key.
     if (nn.length >= 2) {
-      idx.people.forEach((p) => {
-        const hay = `${normName(p.name)} ${normName(p.sub)} ${[...p.tlSet].map(normName).join(' ')} ${p.alias ? [...p.alias].map(normName).join(' ') : ''}`;
-        if (hay.includes(nn)) out.people.push(p);
-      });
+      const candidates = idx.personGrams ? (idx.personGrams.get(nn.slice(0, 2)) || []) : idx.people.values();
+      for (const p of candidates) if ((p._searchHay || '').includes(nn)) out.people.push(p);
       out.people.sort((a, b) => (b.bars.size - a.bars.size) || (b.n - a.n));
       if (out.people.length > 60) out.people.length = 60;
     }
-    // exact / prefix id hits (agent id, TL id, GV id)
+    // exact / prefix ID hits — only inspect IDs sharing the first 4 normalized characters.
     if (ni.length >= 4) {
-      idx.ids.forEach((v, k) => { if (k === ni || k.startsWith(ni)) out.ids.push({ id: k, ...v }); });
+      const candidates = idx.idBuckets ? (idx.idBuckets.get(ni.slice(0, 4)) || []) : [...idx.ids].map(([id, value]) => ({ id, value }));
+      for (const entry of candidates) if (entry.id === ni || entry.id.startsWith(ni)) out.ids.push({ id: entry.id, ...entry.value });
       out.ids.sort((a, b) => a.id.length - b.id.length);
       if (out.ids.length > 40) out.ids.length = 40;
     }
-    // 📞 mobile number (agent + TL) — poora ya aakhri digits
+    // 📞 mobile number (agent + TL) — poora ya aakhri digits, indexed by 5-digit fragments.
     const dq = query.replace(/\D/g, '');
     if (dq.length >= 5 && dq.length <= 13 && !/[a-z]/i.test(query) && idx.mobiles) {
       const want = dq.slice(-10);
-      idx.mobiles.forEach((v) => { if (v.mobile === want || v.mobile.includes(want) || want.includes(v.mobile)) out.ids.push({ id: v.mobile, name: v.name, kind: v.kind, tl: v.tl, via: 'Mobile' }); });
+      const candidates = idx.mobileGrams ? (idx.mobileGrams.get(want.slice(0, 5)) || []) : idx.mobiles.values();
+      for (const v of candidates) if (v.mobile === want || v.mobile.includes(want) || want.includes(v.mobile)) out.ids.push({ id: v.mobile, name: v.name, kind: v.kind, tl: v.tl, via: 'Mobile' });
       if (out.ids.length > 40) out.ids.length = 40;
     }
-    // barcode / tag / serial
+    // barcode / tag / serial — prefix and 6-gram inverted indexes preserve partial-barcode search.
     if (wantsTags && idx.bars.size) {
-      idx.bars.forEach((e, k) => {
-        if (k === ni || k.startsWith(ni) || (ni.length >= 6 && k.includes(ni))) out.tags.push(e);
+      let candidates = [];
+      if (ni.length >= 6 && idx.barGrams) candidates = idx.barGrams.get(ni.slice(0, 6)) || [];
+      else if (idx.barPrefixes) candidates = idx.barPrefixes.get(ni.slice(0, 4)) || [];
+      for (const item of candidates) {
+        const key = typeof item === 'number' ? idx.barKeys[item] : item;
+        if (!key || !(key === ni || key.startsWith(ni) || (ni.length >= 6 && key.includes(ni)))) continue;
+        const entry = idx.bars.get(key);
+        if (entry) out.tags.push(entry);
+      }
+      // Compatibility for an index created by an older host adapter without the new lookup maps.
+      if (!idx.barKeys || !idx.barKeys.length) idx.bars.forEach((entry, key) => {
+        if (key === ni || key.startsWith(ni) || (ni.length >= 6 && key.includes(ni))) out.tags.push(entry);
       });
       out.tags.sort((a, b) => a.key.length - b.key.length || (b.ff.length + b.gv.length) - (a.ff.length + a.gv.length));
       if (out.tags.length > 120) out.tags.length = 120;
@@ -359,6 +426,8 @@ FF.pages = FF.pages || {};
     const isTlKind = /tl$/.test(p.kind);
     const contacts = !FF.auth || FF.auth.can('contacts');
     const d = q1.dispatch || {};
+    const tlStockDetail = q1.tlStock && q1.tlStock.own && q1.tlStock.agents
+      ? `Own ${U.fmt(q1.tlStock.own.total)} + agents ${U.fmt(q1.tlStock.agents.total)}` : '';
     const p1 = q1.projT1 || null;   // 📈 growth % + expected month-end
     const mode = U.suggestMode ? U.suggestMode() : 'both';
     // Dono criteria: stock ke baad (net) + bina stock ghataye (gross) — settings ka mode apply hota hai.
@@ -377,8 +446,8 @@ FF.pages = FF.pages || {};
     return `<div class="ms-kundli-stats ms-prof">
       <div><small>${isTlKind ? 'TL mobile' : 'Mobile'}</small><b>${contacts ? (q1.mobile ? esc(q1.mobile) : '—') : '🔒'}</b></div>
       <div><small>Priority</small><b>${esc(q1.priority || '—')}</b></div>
-      <div><small>${isTlKind ? 'TL stock' : 'Agent stock'}</small><b>${U.fmt(q1.stock.total)}</b></div>
-      ${isTlKind ? `<div><small>Agents</small><b>${U.fmt(q1.agentCount)}</b></div>` : `<div><small>TL stock</small><b>${q1.tlStock && q1.tlStock.has ? U.fmt(q1.tlStock.total) : '—'}</b></div>`}
+      <div><small>${isTlKind ? 'TL stock' : 'Agent stock'}</small><b>${U.fmt(q1.stock.total)}</b>${isTlKind && tlStockDetail ? `<em>${tlStockDetail}</em>` : ''}</div>
+      ${isTlKind ? `<div><small>Agents</small><b>${U.fmt(q1.agentCount)}</b></div>` : `<div><small>TL stock</small><b>${q1.tlStock && q1.tlStock.has ? U.fmt(q1.tlStock.total) : '—'}</b>${tlStockDetail ? `<em>${tlStockDetail}</em>` : ''}</div>`}
       ${sugStats}
       <div><small>Run-rate / day <em>(÷ ${U.fmt(q1.calc.total.elapsed)} din)</em></small><b>${U.fmt(q1.calc.total.rate, true)}</b></div>
       <div><small>Cover</small><b>${q1.calc.total.cover != null ? `${U.fmt(q1.calc.total.cover, true)} din` : '—'}</b></div>
@@ -685,7 +754,10 @@ FF.pages = FF.pages || {};
     const stateEl = U.$('#hms-state', container);
     const setState = () => { if (stateEl) stateEl.innerHTML = state.full && state.full.fullLoaded ? '<span class="badge green">barcode register ready ✓</span>' : '<span class="badge amber">barcode register load ho raha hai…</span>'; };
     setState();
-    onIndexReady(setState);
+    onIndexReady(() => {
+      setState();
+      if (input && clean(input.value).length >= 2) run(input.value);
+    });
     warmFull();
     const run = (query) => {
       const val = clean(query);
@@ -719,8 +791,15 @@ FF.pages = FF.pages || {};
     return { run };
   }
 
+  function invalidate() {
+    state.generation++;
+    state.light = null; state.lightPromise = null;
+    state.full = null; state.fullPromise = null;
+    state.results = null;
+    emit();
+  }
   FF.masterSearch = {
-    buildLight, buildFull, warmFull, search, suggestItems, resultsHtml, openPanel, closePanel,
+    buildLight, buildFull, warmFull, invalidate, search, suggestItems, resultsHtml, openPanel, closePanel,
     mountTopbar, mountHome, onIndexReady, personByKey,
     get ready() { return !!(state.light); }, get heavyReady() { return !!(state.full && state.full.fullLoaded); },
     get topbarMounted() { return mountedTopbar; },
