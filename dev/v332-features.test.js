@@ -12,7 +12,7 @@ globalThis.window = globalThis;
 globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
 globalThis.document = { documentElement: { dataset: {}, style: {} }, body: { classList: { add() {}, remove() {} } }, addEventListener() {}, querySelector: () => null, querySelectorAll: () => [], createElement: () => ({ style: {}, getContext: () => null }) };
 globalThis.addEventListener = () => {};
-['config', 'util', 'unusual', 'pdf'].forEach((f) => require(path.join(ROOT, `${f}.js`)));
+['config', 'util', 'unusual-scan', 'unusual', 'pdf'].forEach((f) => require(path.join(ROOT, `${f}.js`)));
 const FF = globalThis.FF;
 const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8');
 

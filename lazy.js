@@ -58,7 +58,7 @@ window.FF = window.FF || {};
     tlScorecard: ['insights', 'cockpit'],
     directAgents: ['directAgents'],
     newAgents: ['newAgents'],
-    unusual: ['pdf', 'unusual'],
+    unusual: ['unusual-scan', 'pdf', 'unusual'],
     ffAgentSummary: ['pdf', 'agentSummary'],
     gvAgentSummary: ['gvpages', 'pdf', 'agentSummary'],
     arena: ['wow'],

@@ -1,4 +1,4 @@
-# First Forward Dashboard — First Forward + GV Partner (v3.27)
+# First Forward Dashboard — First Forward + GV Partner (v3.37)
 
 Colourful dashboard website built directly on top of **do Google Sheets**:
 
@@ -13,6 +13,43 @@ aur ek **⚖️ GV vs First Forward** page side-by-side comparison deta hai.
 Koi database nahi, koi manual upload nahi — website Google Sheet se data padhti hai
 (Google Visualization API / `gviz`) through a small Node server that also handles **login, users,
 permissions and settings**. Zero npm dependencies.
+
+## ✨ v3.37.0 — 🚨 Unusual Activity: card ka number = drawer ka data · 🚀 server-side scan · 🩺 ek button se sab fix
+
+- **🎯 Card = drawer (root cause fix):** Unusual Activity ke anomaly cards `class="kpi"` hone ki wajah se
+  `app.js` ka **global** `.kpi, [data-kpi]` handler bhi chal jaata tha — ek click par **do drawer** khulte
+  the aur aakhri wala (card ke title se *inferred*, period/flag ignore) jeet jaata tha. Isliye ♊ card
+  **652 tags** bolta tha aur drawer **"Total Issued 2,947"** dikhaata tha. Ab page apne cards
+  `data-kpi-self="1"` se mark karta hai aur global handler unhe **skip** karta hai (Agent Summary ke
+  `data-as-age` cards bhi). `kpiDetail.js` me ye convention documented hai.
+- **Ek hi source of truth — `metricFor(model, flag)`:** card value, drawer headline, drawer ki evidence
+  rows, CSV aur PDF sab ek hi function se bante hain. Drawer me upar **✅ "Card = drawer"** chip hai; farq
+  ho to **exact reason ke saath ⚠️** (aggregate vs tag-level, ya evidence list capped). Card **0** bolta hai
+  to drawer me **0 rows**.
+- **🚀 Speed:** tag-level scan ab **server** par hota hai — `GET /api/unusual/scan?from=&to=` EIR + GV Master
+  ko **parallel ×4** padh kar compact index deta hai (10-min cache, gzip, permission `unusual`). Page
+  **turant** daily numbers se paint hota hai (~5 ms), scan background me aata hai; browser ko 25k-row pages
+  sequentially kheenchne nahi padte. Badi tables chunked (ledger 60 · drawer 100 · "↓ Aur N dikhao" 200/step),
+  events ek hi baar delegate. Measured: render + scan **99 ms** (3,950 tag rows), cached **8 ms**.
+- **`unusual-scan.js` (naya, shared):** ek hi isomorphic scan/index/evidence lib server aur browser dono
+  chalate hain — duplicate logic do jagah nahi, numbers drift nahi karte. Counts **hamesha exact**, sirf
+  evidence lists cap hoti hain (`meta.truncated` me dikhta hai). Duplicate = `n ≥ 2` VRN groups (VRN normalize,
+  chassis/blank/placeholder exempt), Wrong = `union(wrong-type, malformed)` = `w + i − b`.
+- **🩺 Settings → Site diagnostics v2 ("sab fix yahin se"):** naya **🃏 KPI card click detector** (page-owned
+  card par `data-kpi-self` missing → ⛔ High finding) + **🛠 site-wide attribute repair** (`ff_diag_attr_repairs`
+  me save; `app.js` boot par aur har page render ke baad lagata hai, MutationObserver re-render par dobara).
+  Saath me **🔬 Card ↔ drawer parity test** (har card ko asli me click karke verify), **🐢 per-page render ms /
+  DOM nodes / HTML KB**, **🗂 data health** (store snapshot, scan error/adhoora/offset issue/purana),
+  findings me **filter · search · grouping · ⬇ CSV · ⬇ JSON · 📋 Copy · 🧾 history**, aur **⚡ Speed doctor**
+  prefs (`ff-no-anim`, `ff-lite`, Unusual fast scan) jo boot par lagte hain.
+- **🩺 Unusual Activity ke andar bhi Diagnose** (page-level drawer): scan health, har flag ka hisaab (kahan se
+  number aaya), data quality, aur actions — ↻ Deep scan · 🔬 probe · 🩺 site diagnostics yahin · ⚡ Fast mode ·
+  📋 Copy · ⬇ CSV.
+- **🐛 Fixed:** drawer ka KPI strip saaton flags ke liye same tha; 📄 PDF `FF.lazy.loadScript` (exist hi nahi
+  karta tha) call karta tha → ab `ensure()`; spike card "tags" label ke saath peak-day sum dikhata tha (ab unit
+  `peak-day tags`); cards `scopedRows` aur ledger/CSV `filteredRows` se bante the (ab sab ek metric se).
+- Docs + tests: [WHATS-NEW-v3.37.0.md](WHATS-NEW-v3.37.0.md) · `dev/v337-unusual-parity.test.js` (10 tests,
+  `/api/unusual/scan` integration samet) · `dev/smoke.js` me card↔drawer parity case · `npm test` 340 pass.
 
 ## ✨ v3.27.0 — 🌐 Employee link (bina login) · 📗 tag request kisi bhi sheet me
 
