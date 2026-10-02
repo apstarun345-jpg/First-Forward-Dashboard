@@ -1,4 +1,4 @@
-# First Forward Dashboard — First Forward + GV Partner (v3.38)
+# First Forward Dashboard — First Forward + GV Partner (v3.39)
 
 Colourful dashboard website built directly on top of **do Google Sheets**:
 
@@ -13,6 +13,22 @@ aur ek **⚖️ GV vs First Forward** page side-by-side comparison deta hai.
 Koi database nahi, koi manual upload nahi — website Google Sheet se data padhti hai
 (Google Visualization API / `gviz`) through a small Node server that also handles **login, users,
 permissions and settings**. Zero npm dependencies.
+
+## ✨ v3.39.0 — 📦 Summary · Master Search · drawers me stock ab hamesha aata hai (spinner nahi atakta)
+
+- **🐞 Bug:** Agent / TL Summary aur Master Search me stock load hi nahi hota tha (spinner), aur wahan se khulne wale drawers
+  (Stock in hand · ageing · kundli) me data nahi aata tha. **Root causes:** (A) Summary / drawers server ke stock-age index ka
+  intezaar karte the, jo ek **unpaged** gviz query se poora StockDataa (1.7 lakh+ rows) padhta tha — 417 MB RSS, event loop 1.7 s
+  block, fail hui build 10 min cache, browser par koi deadline nahi; (B) per-TL `quick()` quadratic (FF 2.8 s, GV **~15.6 s**);
+  (C) Master Search sab 8 datasets ka intezaar karta aur dropdown kabhi refresh nahi hota; (D) KPI stock drawer 3 datasets sequentially.
+- **Server:** stock-age index **25k-row pages** me (3 parallel, in-order), `/api/stock-age` max 20 s rukta hai phir `pending`
+  (browser poll karta hai), fail build 30 s baad auto-retry (adhura FF kabhi serve nahi), Render par boot-warm-up,
+  `/api/health` me `stockAge`, gviz proxy cache par **byte cap** (`CACHE_MAX_MB`).
+- **Browser:** Summary ageing ka intezaar nahi karta (stock turant, ageing peeche se bharti hai, na aaye to Retry);
+  KPI drawer parallel + hard limits + notice; Master Search slow dataset ke bina bhi chalta aur dataset aate hi refresh;
+  kundli / drawer 12 s par partial + `onLate`. FF / GV indexes se **numbers bit-for-bit wahi**, par TL list ~4× (FF) / ~24× (GV) tez.
+- Docs: [WHATS-NEW-v3.39.0.md](WHATS-NEW-v3.39.0.md) · SPEED.md §8 · tests: `dev/v339-stock-age-server.test.js`,
+  `dev/v339-summary-loading.test.js`, `dev/v339-profile-scale.test.js` · `npm test` 378 pass.
 
 ## ✨ v3.38.0 — 📦 employee link par sabka stock · 👁 Preview FIX · 🔊 Mac voice FIX
 
@@ -410,6 +426,11 @@ For **same-sheet encrypted storage**, follow [SHEETS_STORAGE.md](SHEETS_STORAGE.
 | `DATA_DIR` | Local: `./data`; production: set `/data` | Users / sessions / settings JSON folder (persistent disk ho to wahan) |
 | `SHEET_ID` | sheet ki current ID | Default Google Sheet ID (Settings me bhi badal sakte ho) |
 | `CACHE_SECONDS` | `600` | Server cache default (Settings → Data source override karta hai) |
+| `CACHE_MAX_MB` | `64` (min `8`) | gviz proxy cache ki memory cap (bytes par LRU; cap ke aadhe se bada akela body cache nahi hota) |
+| `STOCK_AGE_PAGE_ROWS` / `STOCK_AGE_PAGE_WINDOW` | `25000` / `3` (max 6) | stock-ageing index ke gviz pages ka size / ek saath kitne pages |
+| `STOCK_AGE_WAIT_MS` | `20000` | `/api/stock-age` itni der rukkar `pending` deta hai (build peeche chalta rehta hai) |
+| `STOCK_AGE_ERROR_RETRY_MS` | `30000` | fail / adhuri stock-ageing build ke baad dobara koshish |
+| `STOCK_AGE_WARM` | Render par on | boot ke 12 s baad stock-ageing index pehle se banao (`0` = band) |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | – (auto, durable store me save) | Web-push keys ko explicitly pin karo. Set na karo to server khud banata hai aur **durable storage** (Apps Script / Sheets / `DATA_DIR`) me save karta hai |
 | `PUSH_TTL_SECONDS` | `86400` | Push message kitni der tak retry-window me rahe (phone off/doze ho to drop na ho) |
 | `VAPID_SUBJECT` | `mailto:admin@apnapayment.com` | VAPID JWT ka `sub` (contact) claim — `mailto:` ya `https:`. localhost/.local mat dena, FCM/Apple 403 dete hain |

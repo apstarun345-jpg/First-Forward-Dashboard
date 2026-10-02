@@ -9,6 +9,8 @@
    (`sheet:<id>`) that the admin can grant per user (Settings → Access matrix / Users & access). */
 window.FF = window.FF || {};
 
+const __ffExcludedTlCache = { sig: null, set: null };   // isExcludedTl() ka cache (neeche)
+
 FF.config = {
   appName: 'First Forward & Gv Partner Dashboard',
   brand: 'First Forward',
@@ -227,8 +229,16 @@ FF.config = {
   isExcludedTl(name) {
     const n = String(name || '').trim().toUpperCase();
     if (!n) return true;
-    if (this.directTlNames().some((x) => x.toUpperCase() === n)) return true;
-    return (this.directPlaceholderTls || []).some((x) => String(x).trim().toUpperCase() === n);
+    // Ye har agent/stock row par chalta hai (lakhon baar) — pehle har call par lists dobara ban-ti thin (master search index
+    // ~2 s). Ab upper-cased Set ek baar banta hai aur sirf tab badalta hai jab Settings se lists badli hon (signature check).
+    const d = this.directRules();
+    const sig = `${(d.ffTlNames || []).join('\u0001')}\u0002${(this.excludeTls || []).join('\u0001')}\u0002${(this.directPlaceholderTls || []).join('\u0001')}`;
+    if (!__ffExcludedTlCache.set || __ffExcludedTlCache.sig !== sig) {
+      const set = new Set();
+      [...(d.ffTlNames || []), ...(this.excludeTls || []), ...(this.directPlaceholderTls || [])].forEach((x) => { const k = String(x || '').trim().toUpperCase(); if (k) set.add(k); });
+      __ffExcludedTlCache.set = set; __ffExcludedTlCache.sig = sig;
+    }
+    return __ffExcludedTlCache.set.has(n);
   },
   /** 'ff' | 'gv' | '' — channel of an agent/row (explicit param, else from the object). */
   directChannelOf(agent, channel) {

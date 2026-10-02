@@ -17,7 +17,17 @@ window.FF = window.FF || {};
   const U = FF.util;
   const esc = U.esc, clean = U.clean;
   const fmt = (n, d) => U.fmt(n, d);
-  const norm = (s) => clean(s).toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+  // norm() lakhon baar (har row × har TL) chalta hai — naam hazaaron rows me repeat hote hain, isliye memo (bounded).
+  const normMemo = new Map();
+  const norm = (s) => {
+    const key = typeof s === 'string' ? s : String(s === null || s === undefined ? '' : s);
+    const hit = normMemo.get(key);
+    if (hit !== undefined) return hit;
+    const out = clean(key).toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+    if (normMemo.size > 60000) normMemo.clear();
+    normMemo.set(key, out);
+    return out;
+  };
   const isHM = (p) => /high|medium/i.test(String(p || ''));
   const suggestDays = () => Number(FF.config && FF.config.features && FF.config.features.suggestDays) || 15;
   /** Net = avg/day × din − stock (stock ghatane ke baad). */
@@ -39,10 +49,28 @@ window.FF = window.FF || {};
     const g = FF.gv || {};
     return typeof g.rows === 'function' && typeof g.masterRows === 'function' && g.rows !== g.masterRows;
   };
+  // gv.issuanceRows() rebuilds the whole EIR→GV rollup (an object per EIR line plus a person lookup) on every
+  // call, and every TL / agent profile asked for it two or three times and then ran rows.filter() per agent.
+  // For ~120 GV TLs that was ~15 s of frozen tab. The real adapter publishes the inputs it is computed from
+  // (issuanceRows.inputsKey), so reuse the last result while they are unchanged. Everything here only
+  // filters/maps the rows (never mutates them). Stubs without a key are called every time, as before.
+  const issuanceMemo = { fn: null, key: null, rows: null };
+  const sameKey = (a, b) => !!a && !!b && a.length === b.length && a.every((v, i) => v === b[i]);
+  function adapterIssuanceRows(g) {
+    const fn = g.issuanceRows;
+    let key = null;
+    if (typeof fn.inputsKey === 'function') { try { key = fn.inputsKey(); } catch { key = null; } }
+    if (key && issuanceMemo.fn === fn && sameKey(issuanceMemo.key, key)) return issuanceMemo.rows;
+    let v;
+    try { v = fn.call(g); } catch { return []; }          // a failure is never remembered
+    const rows = (v === undefined ? [] : v) || [];
+    if (key && Array.isArray(rows)) { issuanceMemo.fn = fn; issuanceMemo.key = key; issuanceMemo.rows = rows; }
+    return rows;
+  }
   const gvIssuanceRows = () => {
     const g = FF.gv || {};
     if (gvHasRowsAdapterOverride()) return safeCall(() => g.rows(), []) || [];
-    if (typeof g.issuanceRows === 'function') return safeCall(() => g.issuanceRows(), []) || [];
+    if (typeof g.issuanceRows === 'function') return adapterIssuanceRows(g);
     return typeof g.rows === 'function' ? (safeCall(() => g.rows(), []) || []) : [];
   };
   // The real GV adapter's issuanceRows() is EIR-authoritative (with today's live GV Master rows).
@@ -51,7 +79,7 @@ window.FF = window.FF || {};
   const gvCanonicalIssuanceRows = () => {
     const g = FF.gv || {};
     if (gvHasRowsAdapterOverride() || typeof g.issuanceRows !== 'function') return [];
-    return safeCall(() => g.issuanceRows(), []) || [];
+    return adapterIssuanceRows(g);
   };
   const CLS_ORDER = ['VC4', 'VC20', 'VC5', 'VC6', 'VC7', 'VC12', 'VC16', 'VC5+'];
   const clsRank = (c) => { const i = CLS_ORDER.indexOf(String(c).toUpperCase()); return i < 0 ? 99 : i; };
@@ -98,13 +126,26 @@ window.FF = window.FF || {};
 
   // ------------------------------------------------------------------ loading
   let warmPromise = null;
+  // 🔔 Progressive data: har dataset ke aate hi caches reset + subscribers (master search dropdown / kundli) ko khabar.
+  // Pehle sab datasets ke khatam hone ka intezaar hota tha — ek slow GV query poore master search ko "REPORT load ho raha hai…"
+  // par roke rakhti thi, jabki REPORT (stock) kab ka aa chuka hota tha.
+  const dataListeners = new Set();
+  let notifyTimer = 0, loadedOnce = false;
+  function onData(fn) { dataListeners.add(fn); return () => dataListeners.delete(fn); }
+  function dataArrived() {
+    resetProfileCache();
+    clearTimeout(notifyTimer);
+    notifyTimer = setTimeout(() => dataListeners.forEach((fn) => { try { fn(); } catch { /* listener error */ } }), 60);
+  }
+  const progress = (fn) => safeAsync(fn).then((v) => { dataArrived(); return v; });
   async function load() {
     const P = perf();
     const jobs = [];
-    if (P && P.ensureLoaded) jobs.push(safeAsync(() => P.ensureLoaded()));
-    ['daily', 'agentClass', 'agents', 'stockAgents'].forEach((k) => { if (FF.store && FF.store.need) jobs.push(safeAsync(() => FF.store.need(k))); });
-    if (gvOn() && FF.gv && FF.gv.need) ['report', 'stockAgent', 'stockTl', 'stockAgentClass', 'master'].forEach((k) => jobs.push(safeAsync(() => FF.gv.need(k))));
+    if (P && P.ensureLoaded) jobs.push(progress(() => P.ensureLoaded()));
+    ['daily', 'agentClass', 'agents', 'stockAgents'].forEach((k) => { if (FF.store && FF.store.need) jobs.push(progress(() => FF.store.need(k))); });
+    if (gvOn() && FF.gv && FF.gv.need) ['report', 'stockAgent', 'stockTl', 'stockAgentClass', 'master'].forEach((k) => jobs.push(progress(() => FF.gv.need(k))));
     await Promise.all(jobs);
+    loadedOnce = true;
     resetProfileCache();
   }
   /** Summary/profile ke ek channel ko hi ready karo. Pehle FF + GV dono datasets har click par
@@ -113,13 +154,13 @@ window.FF = window.FF || {};
     const isGv = /^gv/i.test(String(person && person.kind || ''));
     const jobs = [];
     if (isGv) {
-      if (FF.gv && FF.gv.need) ['report', 'stockAgent', 'stockAgentClass', 'master'].forEach((k) => jobs.push(safeAsync(() => FF.gv.need(k, { only: true }))));
+      if (FF.gv && FF.gv.need) ['report', 'stockAgent', 'stockAgentClass', 'master'].forEach((k) => jobs.push(progress(() => FF.gv.need(k, { only: true }))));
       // GV Master is the immediate fallback; consume FF EIR rollups only if the app already has them
       // in memory. Do not make a GV summary wait for the unrelated First Forward loader.
     } else {
       const P = perf();
-      if (P && P.ensureLoaded) jobs.push(safeAsync(() => P.ensureLoaded({ light: true })));
-      ['daily', 'agentClass', 'agents', 'stockAgents'].forEach((k) => { if (FF.store && FF.store.need) jobs.push(safeAsync(() => FF.store.need(k, { only: true }))); });
+      if (P && P.ensureLoaded) jobs.push(progress(() => P.ensureLoaded({ light: true })));
+      ['daily', 'agentClass', 'agents', 'stockAgents'].forEach((k) => { if (FF.store && FF.store.need) jobs.push(progress(() => FF.store.need(k, { only: true }))); });
     }
     await Promise.all(jobs);
     resetProfileCache();
@@ -156,6 +197,8 @@ window.FF = window.FF || {};
   function resetProfileCache() {
     quickCache.clear();
     tlStockCache.clear();
+    stockIdxCache = new WeakMap();
+    reportIdxCache = new WeakMap();
     ffLookupCache = null;
     gvLookupCache = null;
   }
@@ -271,12 +314,46 @@ window.FF = window.FF || {};
     });
     return [...byPerson.values()];
   }
+  // 🚀 Per-TL composition pehle har baar POORI agents + stock list ko 4-5 baar filter karti thi (TL × rows = quadratic) —
+  // Agent/TL Summary list me har TL ke liye ye chalta tha (120 TL × ~10k rows ≈ 3 s; 300 TL par ~15 s → page "load hi nahi hota").
+  // Ab rows ek baar index hoti hain (TL naam / ID, agent naam / ID) aur har TL sirf apni rows dekhta hai; order same rehta hai.
+  let stockIdxCache = new WeakMap();   // rows array → index (resetProfileCache par naya — data reload ke baad stale na rahe)
+  function stockIndex(rows) {
+    if (!Array.isArray(rows)) return null;
+    const hit = stockIdxCache.get(rows);
+    if (hit && hit.n === rows.length) return hit;
+    const idx = { n: rows.length, byTlName: new Map(), byTlId: new Map(), byAgentId: new Map(), byAgentName: new Map() };
+    const put = (map, key, entry) => { if (!key) return; const list = map.get(key); if (list) list.push(entry); else map.set(key, [entry]); };
+    rows.forEach((row, i) => {
+      const entry = { row, i };
+      put(idx.byTlName, rowTlName(row), entry); put(idx.byTlId, rowTlId(row), entry);
+      put(idx.byAgentId, rowAgentId(row), entry); put(idx.byAgentName, rowAgentName(row), entry);
+    });
+    stockIdxCache.set(rows, idx);
+    return idx;
+  }
+  /** Lookups ki rows ka union — original list ke order me (filter jaisa). */
+  function pickIndexed(lookups) {
+    const seen = new Set(), picked = [];
+    lookups.forEach(([map, key]) => { if (key) (map.get(key) || []).forEach((e) => { if (!seen.has(e.i)) { seen.add(e.i); picked.push(e); } }); });
+    return picked.sort((a, b) => a.i - b.i).map((e) => e.row);
+  }
+  let reportIdxCache = new WeakMap();   // rows array → { ch → { list, idx } }
+  function reportIndex(rows, ch) {
+    if (!Array.isArray(rows)) return { list: uniqueReportRows(rows, ch), idx: stockIndex([]) };
+    let byCh = reportIdxCache.get(rows);
+    if (!byCh || byCh.n !== rows.length) { byCh = { n: rows.length }; reportIdxCache.set(rows, byCh); }
+    if (!byCh[ch]) { const list = uniqueReportRows(rows, ch); byCh[ch] = { list, idx: stockIndex(list) }; }
+    return byCh[ch];
+  }
   function tlStockComposition(ch, name, id, reportRows, detailRows, classRows) {
     const cacheKey = `${ch}|${norm(name)}|${clean(id).toUpperCase()}`;
     if (tlStockCache.has(cacheKey)) return tlStockCache.get(cacheKey);
-    const reports = uniqueReportRows(reportRows, ch);
-    const selfReports = reports.filter((r) => isSameAgent(r, name, id));
-    const teamReports = reports.filter((r) => belongsToTl(r, name, id) && (isSameAgent(r, name, id) || !isDirectStockRow(r, ch)));
+    const wantName = norm(name), wantId = clean(id).toUpperCase();
+    const rep = reportIndex(reportRows, ch);
+    const selfReports = pickIndexed([[rep.idx.byAgentId, wantId], [rep.idx.byAgentName, wantName]]).filter((r) => isSameAgent(r, name, id));
+    const teamReports = pickIndexed([[rep.idx.byTlName, wantName], [rep.idx.byTlId, wantId]])
+      .filter((r) => belongsToTl(r, name, id) && (isSameAgent(r, name, id) || !isDirectStockRow(r, ch)));
     const memberReports = teamReports.filter((r) => !isSameAgent(r, name, id));
     const memberReportMap = new Map();
     const memberReportParts = { vc4: 0, comm: 0, total: 0 };
@@ -289,17 +366,20 @@ window.FF = window.FF || {};
     fillClassMap(memberReportMap, memberReportParts);
 
     const detailList = detailRows || [];
-    const selfDetails = detailList.filter((r) => isSameAgent(r, name, id));
-    const memberDetails = detailList.filter((r) => belongsToTl(r, name, id) && !isSameAgent(r, name, id) && !isDirectStockRow(r, ch));
+    const didx = stockIndex(detailList);
+    const selfDetails = (didx ? pickIndexed([[didx.byAgentId, wantId], [didx.byAgentName, wantName]]) : detailList).filter((r) => isSameAgent(r, name, id));
+    const memberDetails = (didx ? pickIndexed([[didx.byTlName, wantName], [didx.byTlId, wantId]]) : detailList)
+      .filter((r) => belongsToTl(r, name, id) && !isSameAgent(r, name, id) && !isDirectStockRow(r, ch));
     const detailMemberTotal = stockRowsTotal(memberDetails);
     const teamNames = new Set([...memberReports, ...memberDetails].map((r) => rowAgentName(r)).filter(Boolean));
     const ownerName = norm(name);
     const classList = classRows || [];
+    const cidx = ch === 'gv' ? stockIndex(classList) : null;
     const detailMemberClassRows = ch === 'gv'
-      ? classList.filter((r) => teamNames.has(norm(r && (r.agentName || r.name))) && norm(r && (r.agentName || r.name)) !== ownerName)
+      ? (cidx ? pickIndexed([...teamNames].filter((t) => t !== ownerName).map((t) => [cidx.byAgentName, t])) : classList.filter((r) => teamNames.has(norm(r && (r.agentName || r.name))) && norm(r && (r.agentName || r.name)) !== ownerName))
       : memberDetails;
     const detailOwnClassRows = ch === 'gv'
-      ? classList.filter((r) => norm(r && (r.agentName || r.name)) === ownerName)
+      ? (cidx ? pickIndexed([[cidx.byAgentName, ownerName]]) : classList.filter((r) => norm(r && (r.agentName || r.name)) === ownerName))
       : selfDetails;
     const detailMemberMap = addClassRows(new Map(), detailMemberClassRows);
     const detailOwnMap = addClassRows(new Map(), detailOwnClassRows);
@@ -380,6 +460,60 @@ window.FF = window.FF || {};
     if (rowId && agentId) return rowId === agentId;
     return norm(row && (row.agentName || row.name)) === norm(agent && (agent.agentName || agent.name));
   };
+  // Row lookups that return exactly what rows.filter(<predicate>) did — same rows, same sheet order — without
+  // testing every row against every agent (rows × agents per TL, i.e. quadratic on a real-size sheet).
+  // The index is built once per rows array; positions are marked in a bitmap so the order is the sheet's own.
+  const addPos = (map, key, i) => { const l = map.get(key); if (l) l.push(i); else map.set(key, [i]); };
+  function pickRows(rows, lists) {
+    if (!lists.some(Boolean)) return [];
+    const mark = new Uint8Array(rows.length);
+    for (const l of lists) if (l) for (let k = 0; k < l.length; k++) mark[l[k]] = 1;
+    const out = [];
+    for (let i = 0; i < mark.length; i++) if (mark[i]) out.push(rows[i]);
+    return out;
+  }
+  const gvTeamIdxCache = new WeakMap(), gvAgentIdxCache = new WeakMap();
+  const sameGvKeys = (x) => ({
+    id: clean(x && (x.agentId || x.id)).toUpperCase(),
+    name: norm(x && (x.agentName || x.name))
+  });
+  /** == rows.filter((m) => agents.some((a) => sameGvAgent(m, a))) */
+  function gvTeamRows(rows, agents) {
+    if (!rows.length || !agents.length) return [];
+    let idx = gvTeamIdxCache.get(rows);
+    if (!idx || idx.n !== rows.length) {
+      const byId = new Map(), byName = new Map(), byNameNoId = new Map();
+      for (let i = 0; i < rows.length; i++) {
+        const k = sameGvKeys(rows[i]);
+        if (k.id) addPos(byId, k.id, i); else addPos(byNameNoId, k.name, i);   // sameGvAgent: ids decide only when both exist
+        addPos(byName, k.name, i);
+      }
+      idx = { n: rows.length, byId, byName, byNameNoId };
+      gvTeamIdxCache.set(rows, idx);
+    }
+    const lists = [];
+    for (const a of agents) {
+      const k = sameGvKeys(a);
+      if (k.id) lists.push(idx.byId.get(k.id), idx.byNameNoId.get(k.name));   // row id must equal; id-less rows fall back to the name
+      else lists.push(idx.byName.get(k.name));                                 // agent without id: name against every row
+    }
+    return pickRows(rows, lists);
+  }
+  /** == rows.filter((m) => norm(m.agentName) === nameKey || (id && m.agentId === id)) */
+  function gvAgentRows(rows, nameKey, id) {
+    if (!rows.length) return [];
+    let idx = gvAgentIdxCache.get(rows);
+    if (!idx || idx.n !== rows.length) {
+      const byName = new Map(), byId = new Map();
+      for (let i = 0; i < rows.length; i++) {
+        addPos(byName, norm(rows[i].agentName), i);
+        if (rows[i].agentId) addPos(byId, rows[i].agentId, i);
+      }
+      idx = { n: rows.length, byName, byId };
+      gvAgentIdxCache.set(rows, idx);
+    }
+    return pickRows(rows, [idx.byName.get(nameKey), id ? idx.byId.get(id) : undefined]);
+  }
   function applyExactGvAgentMonths(agentRows, issuanceRows, curYm, lastYm) {
     const curExists = !!exactGvMonth(issuanceRows, curYm);
     const lastExists = !!exactGvMonth(issuanceRows, lastYm);
@@ -401,7 +535,15 @@ window.FF = window.FF || {};
     rows.forEach((r) => { if (!pick(r)) return; const y = ymOf(r); if (!y) return; map.set(y, (map.get(y) || 0) + num(r.n)); });
     return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0])).slice(-6).map(([ym, n]) => ({ ym, n }));
   };
-  const latestYm = (rows) => monthsFrom(rows, 'ym').pop() || U.ymKey(new Date());
+  // Har TL / agent profile par poori agentClass list (10-20k rows) scan hoti thi — array identity par memo.
+  const ymMemo = new WeakMap();
+  const latestYm = (rows) => {
+    const hit = rows && typeof rows === 'object' ? ymMemo.get(rows) : null;
+    if (hit && hit.n === rows.length) return hit.v;
+    const found = monthsFrom(rows, 'ym').pop();
+    if (found && rows && typeof rows === 'object') ymMemo.set(rows, { n: rows.length, v: found });
+    return found || U.ymKey(new Date());
+  };
 
   // ------------------------------------------------------------------ profile builders
   function ffAgentProfile(p, light) {
@@ -563,13 +705,11 @@ window.FF = window.FF || {};
     }
     out.tagRequired = out.direct && isHM(out.priority);
     const n = norm(p.name);
-    const issuance = gvIssuanceRows();
     // GV REPORT is a live calendar-month report: keep the actual current month even when its
     // first issuance row has not arrived yet, so the full prior month remains visible.
     const globalCurYm = U.ymKey(new Date());
     const globalLastYm = U.prevMonthKey(globalCurYm);
-    const mine = issuance.filter((m) => norm(m.agentName) === n || (out.id && m.agentId === out.id));
-    const exactMine = gvCanonicalIssuanceRows().filter((m) => norm(m.agentName) === n || (out.id && m.agentId === out.id));
+    const exactMine = gvAgentRows(gvCanonicalIssuanceRows(), n, out.id);
     // Use exact EIR month totals rather than Math.max(REPORT, EIR): Math.max left stale REPORT
     // numbers on top of smaller, authoritative class details, so the KPI and its drill-down disagreed.
     const exactCurrent = exactGvMonth(exactMine, globalCurYm);
@@ -626,8 +766,7 @@ window.FF = window.FF || {};
     const globalLastYm = U.prevMonthKey(globalCurYm);
     const agentNames = new Set(list.map((r) => norm(r.agentName)));
     const agentIds = new Set(list.map((r) => clean(r.agentId).toUpperCase()).filter(Boolean));
-    const isTeamAgent = (m) => list.some((a) => sameGvAgent(m, a));
-    const exactTeamIssuance = gvCanonicalIssuanceRows().filter(isTeamAgent);
+    const exactTeamIssuance = gvTeamRows(gvCanonicalIssuanceRows(), list);
     // Canonical EIR totals feed both the TL roll-up and each listed agent row. When a month has
     // exact team issuance data, absent agents are explicitly zeroed so their sum stays exact.
     applyExactGvAgentMonths(list, exactTeamIssuance, globalCurYm, globalLastYm);
@@ -713,10 +852,28 @@ window.FF = window.FF || {};
     if (v && v.found) quickCache.set(key, v);
     return v && v.found ? v : null;
   }
+  /** Sync full profile — jo data abhi memory me hai usi se (loadFor ka intezaar nahi). */
+  function buildNow(person) {
+    if (!supports(person)) throw new Error('Is type ka profile nahi banta');
+    return BUILDERS[person.kind](person, false);
+  }
   async function build(person) {
     if (!supports(person)) throw new Error('Is type ka profile nahi banta');
     await loadFor(person);
     return BUILDERS[person.kind](person, false);
+  }
+  /** Drawer / inline ke liye: pehle SOFT ms tak data ka intezaar, phir jo hai usse profile (partial flag ke saath); baaki data aane par
+   *  `onLate(profile)` dobara bulaya jaata hai. Profile spinner ab kabhi "hamesha" nahi ghoomta. */
+  const LIMITS = { openSoftMs: 12000 };   // tests chhota karte hain
+  async function buildSoon(person, onLate) {
+    if (!supports(person)) throw new Error('Is type ka profile nahi banta');
+    const loading = loadFor(person);
+    const done = await U.within(loading.then(() => true), LIMITS.openSoftMs, false);
+    const pr = BUILDERS[person.kind](person, false);
+    if (done) return pr;
+    pr.partial = true;
+    loading.then(() => { try { if (onLate) onLate(BUILDERS[person.kind](person, false)); } catch { /* late rebuild best effort */ } }).catch(() => {});
+    return pr;
   }
 
   // ------------------------------------------------------------------ html
@@ -860,7 +1017,8 @@ window.FF = window.FF || {};
       ${pr.agents.slice(0, 200).map((a) => `<tr class="clickable" data-mp-agent="${esc(a.name)}" data-mp-kind="${pr.ch}-agent" data-mp-id="${esc(a.id || '')}"><td><b>${esc(a.name)}</b><small class="cell-sub">${esc(a.id || '')}</small></td><td>${mobileCell(a.mobile)}</td><td>${prioChip(a.priority)}</td><td class="num">${fmt(a.stockVc4)}</td><td class="num">${fmt(a.stockComm)}</td><td class="num">${fmt(a.last)}</td><td class="num">${fmt(a.cur)}</td><td class="num">${U.sugCell(a.sugVc4, a.sugVc4Gross || 0)}</td><td class="num">${U.sugCell(a.sugComm, a.sugCommGross || 0)}</td></tr>`).join('')}
       </tbody><tfoot><tr class="row-total"><td colspan="3">TL total</td><td class="num">${fmt(U.sum(pr.agents, (a) => a.stockVc4))}</td><td class="num">${fmt(U.sum(pr.agents, (a) => a.stockComm))}</td><td class="num">${fmt(U.sum(pr.agents, (a) => a.last))}</td><td class="num">${fmt(U.sum(pr.agents, (a) => a.cur))}</td><td class="num">${U.sugCell(d.sumAgentVc4, d.sumAgentVc4Gross || 0)}</td><td class="num">${U.sugCell(d.sumAgentComm, d.sumAgentCommGross || 0)}</td></tr></tfoot></table></div></section>` : '';
     const actions = `<div class="mp-actions"><button class="btn small primary" data-mp-pdf>📄 PDF</button><button class="btn small" data-mp-csv>⬇ CSV</button><button class="btn small" data-mp-copy>📋 Copy</button><button class="btn small" data-mp-wa>📲 WhatsApp</button>${isTl ? '' : `<button class="btn small" data-mp-a360="${esc(pr.name)}">👁 Agent 360</button>`}<a class="btn small" href="#/masterStock?q=${encodeURIComponent(pr.name)}">🗄️ Register / tags</a></div>`;
-    return `<div class="mp">${noData}${head}${kpis}
+    const partial = pr.partial ? '<div class="mp-partial dim small" role="status">⏳ Kuch data abhi load ho raha hai (Google Sheet slow hai) — numbers poore hote hi apne aap update ho jayenge.</div>' : '';
+    return `<div class="mp">${partial}${noData}${head}${kpis}
       ${calcHtml(pr)}
       ${growthHtml(pr)}
       <section class="mp-sec"><h4>🧾 Issuance summary${isTl ? ' — TL total' : ''}</h4>${summary}</section>
@@ -977,10 +1135,9 @@ window.FF = window.FF || {};
     if (!el || !supports(person)) return null;
     el.innerHTML = loadingHtml(person.name);
     try {
-      const pr = await build(person);
-      el.innerHTML = html(pr);
-      if (FF.charts && FF.charts.mount) FF.charts.mount(el);
-      bind(el, pr);
+      const paint = (profile) => { el.innerHTML = html(profile); if (FF.charts && FF.charts.mount) FF.charts.mount(el); bind(el, profile); };
+      const pr = await buildSoon(person, (late) => { if (el.isConnected) paint(late); });
+      paint(pr);
       return pr;
     } catch (err) {
       el.innerHTML = `<div class="ms-empty small"><b>Profile nahi ban payi</b><p class="dim">${esc(err && err.message || err)}</p></div>`;
@@ -998,14 +1155,16 @@ window.FF = window.FF || {};
     FF.app.openDrawer({ kicker, title: person.name, sub: esc(person.sub ? `ID ${person.sub}` : ''), body: `<div id="mp-drawer-slot">${loadingHtml(person.name)}</div>`, actions: '', wide: true, age });
     const slot = U.$('#mp-drawer-slot');
     try {
-      const pr = await build(person);
-      const body = U.$('#drawer-body');
-      if (!body) return pr;
       // Slot hi bharo (neeche ka ageing section bacha rahe) · user dusra drawer khol chuka ho to overwrite mat karo.
-      if (!slot || !slot.isConnected) return pr;
-      slot.innerHTML = html(pr);
-      if (FF.charts && FF.charts.mount) FF.charts.mount(body);
-      bind(body, pr);
+      const paint = (profile) => {
+        const body = U.$('#drawer-body');
+        if (!body || !slot || !slot.isConnected) return;
+        slot.innerHTML = html(profile);
+        if (FF.charts && FF.charts.mount) FF.charts.mount(body);
+        bind(body, profile);
+      };
+      const pr = await buildSoon(person, paint);
+      paint(pr);
       return pr;
     } catch (err) {
       if (slot) slot.innerHTML = `<div class="ms-empty small"><b>Profile nahi ban payi</b><p class="dim">${esc(err && err.message || err)}</p></div>`;
@@ -1013,5 +1172,5 @@ window.FF = window.FF || {};
     }
   }
 
-  FF.masterProfile = { supports, quick, build, html, csvRows, waText, renderInto, open, warm, load, loadFor, invalidate: resetProfileCache, suggest, suggestGro, findFfAgent, findGvAgent, mobileFor, get suggestDays() { return suggestDays(); } };
+  FF.masterProfile = { supports, quick, build, buildNow, html, csvRows, waText, renderInto, open, warm, load, loadFor, onData, isLoaded: () => loadedOnce, invalidate: resetProfileCache, suggest, suggestGro, findFfAgent, findGvAgent, mobileFor, get suggestDays() { return suggestDays(); }, _buildSoon: buildSoon, _limits: LIMITS };
 })(window.FF);

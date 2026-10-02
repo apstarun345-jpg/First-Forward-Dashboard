@@ -123,14 +123,56 @@ aur har period change par wahi dobara. Isi liye "option lag karta hai" sabse zya
 ## 7) Home master search + TL stock (v3.38 follow-up)
 
 - Name/TL substring search now checks a prebuilt 2-character lookup bucket; ID and mobile matches use
-  4-character / 5-digit buckets. Barcode lookup uses a 4-character prefix bucket or a 6-character
-  substring index. Matching still verifies the complete normalized query, so buckets only narrow the
-  candidates; they do not change the search semantics. Indexes are built when the light/full data
+  4-character / 5-digit buckets. Barcode lookup scans the barcode key list directly (v3.39: the earlier
+  4-character prefix / 6-character substring index cost ~1.2 s CPU and ~127 MB heap on 2.3 lakh barcodes,
+  while a plain scan takes 2–18 ms). Matching still verifies the complete normalized query, so buckets only
+  narrow the candidates; they do not change the search semantics. Indexes are built when the light/full data
   layers finish, rather than rescanning all people and barcodes on every keystroke. Profile lookups
   also keep in-memory name/TL maps, cleared when data loads or the user requests a full refresh.
 - Agent/TL cards and FF/GV TL profiles use one shared stock composition: TL's own identifiable stock
   plus non-direct agents' stock. A TL REPORT snapshot remains a floor when detail sheets are partial;
   class rows are reconciled to the displayed total. Agent Summary suggestions consume the same quick
   profile total, and exports/cards label the own-vs-team split.
-- Cache bust is `?v=61`, service-worker shell is `apnapayment-v69`; `./sw.js` is still registered without
+- Cache bust is `?v=62`, service-worker shell is `apnapayment-v70`; `./sw.js` is still registered without
   a query because the server reads its cache name dynamically for the update indicator.
+
+## 8) Stock never blocks the page (v3.39)
+
+**Symptom:** Agent / TL Summary and Master Search showed a spinner forever instead of stock, and their drawers had no data.
+
+**Causes (production-scale mock: 1,500 agents · 120 TLs · EIR 1.7 lakh · StockDataa 1.74 lakh · Tag Assignment 59k):**
+
+| Cause | Before |
+| --- | --- |
+| Summary / drawers awaited the server stock-age index, built from one **unpaged** gviz query per sheet | 3.6 s cold · event loop blocked 1.7 s · RSS 60 → 417 MB · OOM at a 192 MB heap · failed build cached 10 min · no client deadline |
+| Per-TL `quick()` (v3.38 follow-up) re-scanned rows for every TL | FF `loadPeople` 2.8 s · GV **15.6 s** (the issuance rollup was recomputed per TL) · `performance.agents()` reconciled on every call (1.6 s) |
+| Master Search `buildLight` waited for all 8 datasets; `buildFull` was one 4.9 s task; the dropdown placeholder never refreshed | search blank / kundli stuck on "REPORT load ho raha hai…" |
+| KPI stock drawer awaited 3 datasets one after another, no deadline | "Detail calculate ho rahi hai…" forever |
+
+**Now:**
+
+- **Server** — the stock-age index is read in **25k-row pages** (3 in flight, processed in order, one retry per page, a yield every
+  4,000 rows). `createStockAgeBuilder` produces exactly the old `buildStockAgeIndex` buckets (chunked ≡ one-shot, locked by tests).
+  `/api/stock-age` and `/api/stock-age/tags` wait at most `STOCK_AGE_WAIT_MS` (20 s) and then answer
+  `{ ok: true, pending: true, retryAfterMs: 3000 }`; the build keeps running and the browser polls. A failed / partial build is retried
+  after 30 s (never cached for 10 min), a half-built FF index is never served, and the last good data per channel survives a Google
+  blip (`errors.ff` / `errors.gv` tell the UI). Render warms the index 12 s after boot. `/api/health` has
+  `stockAge: { ready, building, ageSec, errors, lastError }`. The gviz proxy cache is capped by bytes (`CACHE_MAX_MB`, default 64).
+- **Browser** — every wait that feeds a spinner has a hard limit (`U.within`) and an explicit "slow / failed → Retry" state. Summary paints
+  the report first (`buildReport(person, { age: false })`) and fills ageing in later; exports / Team Pack still wait for ageing but at most
+  60 s. The KPI stock drawer loads its datasets in parallel (30 s each, optional "Tag type" 4 s) and shows what it has plus a notice.
+  Master Search builds its index from whatever arrived within 6 s and merges the rest as it lands; the profile drawer opens partial after
+  12 s and repaints via `onLate`.
+- **Indexes instead of scans** — FF `tlStockComposition` uses per-array row indexes; GV `issuanceRows()` is memoized per data version
+  (`issuanceRows.inputsKey`), GV team / agent rows come from a position index (sheet order preserved), `latestDate()` is memoized.
+  Output is identical to the old filters — checked on a seeded random dataset (digest of `quick()` / `build()` for every TL and agent).
+
+| | Before | After |
+| --- | --- | --- |
+| FF `loadPeople` | 2.8 s | 0.69 s |
+| GV `loadPeople` | 15.6 s | 0.66 s |
+| Server index build: event-loop block / memory | 1.7 s / 417 MB RSS (OOM @192 MB heap) | 0.15–0.46 s / fits a 112 MB heap |
+| Summary shows stock (ageing 40 s slow) | 57 s+ spinner | ~14 s |
+
+> Pattern for new pages: **never `await` a heavy dataset inside the render path without a deadline.** Paint from what is available,
+> merge the rest when it arrives, and show a clear state with Retry if it does not.

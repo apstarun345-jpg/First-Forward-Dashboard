@@ -65,77 +65,114 @@ export function packNode(node) {
 }
 
 /**
- * Index banao.
+ * Index banao — INCREMENTAL builder.
+ *
+ * Pehle poora StockDataa (~1 lakh+ rows) + Tag Assignment (~60k) ek saath memory me aata tha (gviz JSON ~30 MB →
+ * parse ke baad ~200-250 MB heap, measured 1.7 lakh + 59k rows par). Render ke chhote (512 MB) instance par
+ * wahi build heap bhar sakta hai / 45 s upstream timeout paar kar sakta hai — tab har drawer + Agent/TL Summary
+ * me "stock ageing load ho rahi hai" hamesha ghoomta rehta tha. Ab server page-by-page (25k rows) padhta hai
+ * aur har page turant yahan `addFf` / `addGv` se index me mil jaata hai — peak memory sirf ek page + compact index.
+ *
+ *  Order: pehle saare FF pages (`addFf`), phir GV (`addGv`) — GV tag ki umr StockDataa ke tag ID / barcode
+ *  match se aati hai. `finish()` ka output purane `buildStockAgeIndex` jaisa hi hai (same shape / same numbers).
+ *
  *  ffRows: [{ id, tagId, barcode, cls, bcDate, agentId, agentName, agentDate, tl }]
  *  gvRows: [{ cls, tagId, serial, status, agentId, agentName, tlId, tlName, date }]
  *  todayDay: aaj ka UTC day number (IST date) · masterId: GV master ID (5845036) — sirf label ke liye.
  */
-export function buildStockAgeIndex({ ffRows = [], gvRows = [], todayDay, masterId = '5845036', parkedTl = 'ApnaPayment Pvt. Ltd.' } = {}) {
+export function createStockAgeBuilder({ todayDay, masterId = '5845036', parkedTl = 'ApnaPayment Pvt. Ltd.' } = {}) {
   const today = Number.isFinite(todayDay) ? todayDay : Math.floor(Date.now() / DAY_MS);
   const ageOf = (day) => (day ? Math.max(0, Math.round(today - day)) : null);
   const masterDigits = digits(masterId), parkedTlNorm = normName(parkedTl);
+  // Agent / TL / class naam hazaaron rows me repeat hote hain — ek hi string copy share karo (raw list halki rehti hai).
+  const pool = new Map();
+  const same = (s) => {
+    if (!s || s.length > 48) return s;
+    const hit = pool.get(s);
+    if (hit !== undefined) return hit;
+    pool.set(s, s);
+    return s;
+  };
   // field = agents ke paas (asli field stock) · parked = master (5845036) / "ApnaPayment Pvt. Ltd." / bina agent (BC + GV ka stock)
   const ff = { all: newNode('First Forward · poora StockDataa'), field: newNode('First Forward · field (agents ke paas)'), parked: newNode('🏬 Master / GV parked (ApnaPayment)'), agents: new Map(), tls: new Map(), raw: [], total: 0, unknown: 0, rows: 0 };
   const byTag = new Map(), byBarcode = new Map();
-  for (const r of ffRows) {
-    if (!r) continue;
-    const tagId = str(r.tagId);
-    if (!tagId || isHeaderTag(tagId, r.cls)) continue;
-    ff.rows++;
-    const aDay = parseStockDay(r.agentDate);
-    const day = aDay || parseStockDay(r.bcDate);
-    const src = aDay ? 'agent' : day ? 'bc' : '';
-    if (day) byTag.set(tagId.toUpperCase(), day);
-    const bc = normBarcode(r.barcode);
-    if (bc && day) byBarcode.set(bc, day);
-    const age = ageOf(day);
-    if (age === null) ff.unknown++;
-    const g = groupOf(r.cls);
-    const agentName = str(r.agentName), agentDigits = digits(r.agentId);
-    const aKey = agentDigits ? agentDigits : agentName ? `n:${normName(agentName)}` : '__none__';
-    let an = ff.agents.get(aKey);
-    if (!an) { an = newNode(agentName || (aKey === '__none__' ? 'Bina agent (BC / master stock)' : str(r.agentId)), agentDigits, str(r.tl)); ff.agents.set(aKey, an); }
-    if (!an.tl && r.tl) an.tl = str(r.tl);
-    if (!an.n && agentName) an.n = agentName;
-    addAge(an, g, age);
-    const tKey = normName(r.tl) || '__none__';
-    let tn = ff.tls.get(tKey);
-    if (!tn) { tn = newNode(str(r.tl) || '— (TL blank)'); ff.tls.set(tKey, tn); }
-    addAge(tn, g, age);
-    addAge(ff.all, g, age);
-    const parked = (masterDigits && agentDigits === masterDigits) || (parkedTlNorm && normName(r.tl) === parkedTlNorm) || (!agentDigits && !agentName);
-    addAge(parked ? ff.parked : ff.field, g, age);
-    ff.total++;
-    ff.raw.push([tagId, str(r.barcode), normCls(r.cls), day, agentName, str(r.agentId), str(r.tl), age, aKey, tKey, src]);
-  }
   const gv = { all: newNode('GV Partner · poora network'), agents: new Map(), tls: new Map(), raw: [], total: 0, unknown: 0, matched: 0, own: 0, rows: 0 };
-  for (const r of gvRows) {
-    if (!r) continue;
-    const tagId = str(r.tagId);
-    if (!tagId || isHeaderTag(tagId, r.cls)) continue;
-    gv.rows++;
-    let day = parseStockDay(r.date), src = day ? 'sheet' : '';
-    if (day) gv.own++;
-    if (!day) { day = byTag.get(tagId.toUpperCase()) || byBarcode.get(normBarcode(r.serial)) || 0; if (day) { src = 'stockdataa'; gv.matched++; } }
-    const age = ageOf(day);
-    if (age === null) gv.unknown++;
-    const g = groupOf(r.cls);
-    const agentName = str(r.agentName), agentId = str(r.agentId).toUpperCase();
-    const aKey = agentId || (agentName ? `n:${normName(agentName)}` : '__none__');
-    let an = gv.agents.get(aKey);
-    if (!an) { an = newNode(agentName || agentId || 'Bina agent', agentId, str(r.tlName)); gv.agents.set(aKey, an); }
-    if (!an.tl && r.tlName) an.tl = str(r.tlName);
-    addAge(an, g, age);
-    const tlName = str(r.tlName), tlId = str(r.tlId);
-    const tKey = tlName ? normName(tlName) : tlId ? `ID:${tlId.toUpperCase()}` : '__direct__';
-    let tn = gv.tls.get(tKey);
-    if (!tn) { tn = newNode(tlName || (tlId ? `TL ${tlId}` : 'Direct agents (no TL)')); gv.tls.set(tKey, tn); }
-    addAge(tn, g, age);
-    addAge(gv.all, g, age);
-    gv.total++;
-    gv.raw.push([tagId, str(r.serial), normCls(r.cls), day, agentName, str(r.agentId), tlName, age, aKey, tKey, src]);
+  /** FF (StockDataa) rows ka ek page / chunk. */
+  function addFf(rows) {
+    for (const r of rows || []) {
+      if (!r) continue;
+      const tagId = str(r.tagId);
+      if (!tagId || isHeaderTag(tagId, r.cls)) continue;
+      ff.rows++;
+      const aDay = parseStockDay(r.agentDate);
+      const day = aDay || parseStockDay(r.bcDate);
+      const src = aDay ? 'agent' : day ? 'bc' : '';
+      if (day) byTag.set(tagId.toUpperCase(), day);
+      const bc = normBarcode(r.barcode);
+      if (bc && day) byBarcode.set(bc, day);
+      const age = ageOf(day);
+      if (age === null) ff.unknown++;
+      const g = groupOf(r.cls);
+      const agentName = same(str(r.agentName)), agentDigits = same(digits(r.agentId));
+      const aKey = agentDigits ? agentDigits : agentName ? same(`n:${normName(agentName)}`) : '__none__';
+      let an = ff.agents.get(aKey);
+      if (!an) { an = newNode(agentName || (aKey === '__none__' ? 'Bina agent (BC / master stock)' : str(r.agentId)), agentDigits, str(r.tl)); ff.agents.set(aKey, an); }
+      if (!an.tl && r.tl) an.tl = str(r.tl);
+      if (!an.n && agentName) an.n = agentName;
+      addAge(an, g, age);
+      const tKey = same(normName(r.tl)) || '__none__';
+      let tn = ff.tls.get(tKey);
+      if (!tn) { tn = newNode(str(r.tl) || '— (TL blank)'); ff.tls.set(tKey, tn); }
+      addAge(tn, g, age);
+      addAge(ff.all, g, age);
+      const parked = (masterDigits && agentDigits === masterDigits) || (parkedTlNorm && normName(r.tl) === parkedTlNorm) || (!agentDigits && !agentName);
+      addAge(parked ? ff.parked : ff.field, g, age);
+      ff.total++;
+      ff.raw.push([tagId, str(r.barcode), same(normCls(r.cls)), day, agentName, same(str(r.agentId)), same(str(r.tl)), age, aKey, tKey, src]);
+    }
   }
-  return { at: Date.now(), today, masterId: str(masterId), masterDigits, parkedTlNorm, ff, gv };
+  /** GV (Tag Assignment) rows — saare FF rows add hone ke BAAD (umr StockDataa match se aati hai). */
+  function addGv(rows) {
+    for (const r of rows || []) {
+      if (!r) continue;
+      const tagId = str(r.tagId);
+      if (!tagId || isHeaderTag(tagId, r.cls)) continue;
+      gv.rows++;
+      let day = parseStockDay(r.date), src = day ? 'sheet' : '';
+      if (day) gv.own++;
+      if (!day) { day = byTag.get(tagId.toUpperCase()) || byBarcode.get(normBarcode(r.serial)) || 0; if (day) { src = 'stockdataa'; gv.matched++; } }
+      const age = ageOf(day);
+      if (age === null) gv.unknown++;
+      const g = groupOf(r.cls);
+      const agentName = same(str(r.agentName)), agentId = same(str(r.agentId).toUpperCase());
+      const aKey = agentId || (agentName ? same(`n:${normName(agentName)}`) : '__none__');
+      let an = gv.agents.get(aKey);
+      if (!an) { an = newNode(agentName || agentId || 'Bina agent', agentId, str(r.tlName)); gv.agents.set(aKey, an); }
+      if (!an.tl && r.tlName) an.tl = str(r.tlName);
+      addAge(an, g, age);
+      const tlName = same(str(r.tlName)), tlId = str(r.tlId);
+      const tKey = tlName ? same(normName(tlName)) : tlId ? `ID:${tlId.toUpperCase()}` : '__direct__';
+      let tn = gv.tls.get(tKey);
+      if (!tn) { tn = newNode(tlName || (tlId ? `TL ${tlId}` : 'Direct agents (no TL)')); gv.tls.set(tKey, tn); }
+      addAge(tn, g, age);
+      addAge(gv.all, g, age);
+      gv.total++;
+      gv.raw.push([tagId, str(r.serial), same(normCls(r.cls)), day, agentName, same(str(r.agentId)), tlName, age, aKey, tKey, src]);
+    }
+  }
+  function finish() {
+    byTag.clear(); byBarcode.clear(); pool.clear();
+    return { at: Date.now(), today, masterId: str(masterId), masterDigits, parkedTlNorm, ff, gv };
+  }
+  return { addFf, addGv, finish, get today() { return today; } };
+}
+
+/** Purana one-shot API (tests / chhote data) — builder ke upar hi bana hai. */
+export function buildStockAgeIndex({ ffRows = [], gvRows = [], todayDay, masterId = '5845036', parkedTl = 'ApnaPayment Pvt. Ltd.' } = {}) {
+  const builder = createStockAgeBuilder({ todayDay, masterId, parkedTl });
+  builder.addFf(ffRows);
+  builder.addGv(gvRows);
+  return builder.finish();
 }
 
 /** Summary response (sab agents / TLs ke compact nodes). */
