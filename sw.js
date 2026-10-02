@@ -1,12 +1,17 @@
 // Versioned app shell + offline data cache.
 // Auth login/logout/password endpoints are NEVER cached. Sheet data (gviz), /api/auth/me and
 // /api/settings are network-first with a cached fallback — internet na ho to last loaded data se app khulta hai.
-const CACHE_NAME = 'apnapayment-v66';
+const CACHE_NAME = 'apnapayment-v67';
 const DATA_CACHE = 'ff-data-v5';
 const STASH_CACHE = 'ff-push-stash-v1'; // pushsubscriptionchange ke waqt bani subscription yahan rakho
+// 🔊 v3.36 — app band hone par aaye alerts ki VOICE queue (page khulte hi bol kar sunata hai).
+const VOICE_CACHE = 'ff-voice-v1';
+const VOICE_KEY = '/__ff_voice__/pending';
+const VOICE_MAX = 8;                    // itni lines se zyada catch-up nahi (spam nahi)
+const VOICE_TTL = 12 * 3600e3;          // 12 ghante tak wapas kholte hi suna denge
 // ⚡ Sirf eager core precache hota hai (pehla paint fast). Baaki page modules (lazy rollup)
 //    pehli use par runtime-cache ho jaate hain — install par 2 MB extra download nahi hota.
-const ASSETS = ['./', './index.html', './styles.css?v=59', './config.js?v=59', './util.js?v=59', './i18n.js?v=59', './xlsx.js?v=59', './data.js?v=59', './stockAge.js?v=59', './charts.js?v=59', './model.js?v=59', './filters.js?v=59', './store.js?v=59', './gv.js?v=59', './preload.js?v=59', './auth.js?v=59', './notifications.js?v=59', './sheets.js?v=59', './liveView.js?v=59', './kpiDetail.js?v=59', './home.js?v=59', './performance.js?v=59', './masterProfile.js?v=59', './masterSearch.js?v=59', './palette.js?v=59', './assistant.js?v=59', './officeBell.js?v=59', './liveAssist.js?v=59', './morningCard.js?v=59', './lazy.js?v=59', './publicForm.js?v=59', './app.js?v=59', './logos/apna-payment.png', './favicon.svg?v=5', './icon-192.png?v=5', './icon-512.png?v=5'];
+const ASSETS = ['./', './index.html', './styles.css?v=59', './config.js?v=59', './util.js?v=59', './i18n.js?v=59', './xlsx.js?v=59', './data.js?v=59', './stockAge.js?v=59', './charts.js?v=59', './model.js?v=59', './filters.js?v=59', './store.js?v=59', './gv.js?v=59', './preload.js?v=59', './auth.js?v=59', './notifications.js?v=59', './sheets.js?v=59', './liveView.js?v=59', './kpiDetail.js?v=59', './home.js?v=59', './performance.js?v=59', './masterProfile.js?v=59', './masterSearch.js?v=59', './palette.js?v=59', './assistant.js?v=59', './officeBell.js?v=59', './pushVoice.js?v=59', './liveAssist.js?v=59', './morningCard.js?v=59', './lazy.js?v=59', './publicForm.js?v=59', './app.js?v=59', './logos/apna-payment.png', './favicon.svg?v=5', './icon-192.png?v=5', './icon-512.png?v=5'];
 // Network-first snapshots survive a temporary connection loss; auth/actions remain live-only.
 const OFFLINE_API = (path) => path === '/api/gviz' || path === '/api/today' || path === '/api/auth/me' || path === '/api/settings' || path === '/api/stock-history';
 
@@ -22,6 +27,59 @@ self.addEventListener('activate', e => {
   e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => (k.startsWith('ff-dashboard-') || k.startsWith('apnapayment-')) && k !== CACHE_NAME).map(k => caches.delete(k)))).then(() => self.clients.claim()));
 });
 
+// ---- 🔊 Voice queue helpers ---------------------------------------------------------------------
+// Web Speech API service worker me nahi chalti aur OS notification me sirf system sound hota hai —
+// isliye har push ka "bolne layak" text yahan (Cache Storage me) queue hota hai:
+//   1. app khuli (ya background tab) hai → turant page ko postMessage; page apne unlock/prefs
+//      ke hisaab se bolta hai ya queue karta hai,
+//   2. app poora band hai → text + sound + vibration OS panel me turant jaata hai, aur ye line
+//      queue me rehti hai; app dobara khulte hi page use bol kar sunata hai (voice catch-up).
+async function voiceQueue() {
+  try {
+    const cache = await caches.open(VOICE_CACHE);
+    const hit = await cache.match(VOICE_KEY);
+    if (!hit) return [];
+    const list = await hit.json();
+    if (!Array.isArray(list)) return [];
+    const now = Date.now();
+    return list.filter(x => x && x.text && now - Number(x.at || 0) < VOICE_TTL);
+  } catch { return []; }
+}
+async function voiceSave(list) {
+  try {
+    const cache = await caches.open(VOICE_CACHE);
+    await cache.put(VOICE_KEY, new Response(JSON.stringify(list.slice(-VOICE_MAX))));
+  } catch { /* cache full / private mode — voice optional hai */ }
+}
+async function voiceAdd(item) {
+  const list = await voiceQueue();
+  if (list.some(x => x.id === item.id)) return list;
+  list.push(item);
+  await voiceSave(list);
+  return list;
+}
+async function voiceDrop(id) {
+  const list = await voiceQueue();
+  await voiceSave(list.filter(x => x.id !== id));
+}
+/** Khuli hui app windows ko message bhejo (page prefs/unlock ke hisaab se bolta ya queue karta hai). */
+async function tellClients(message) {
+  try {
+    const list = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    let n = 0;
+    for (const client of list) { try { client.postMessage(message); n++; } catch { /* controlled nahi hai */ } }
+    return n;
+  } catch { return 0; }
+}
+/** App icon par unread badge (Chromium; support na ho to chup-chaap skip). */
+async function setBadge(count) {
+  try {
+    const nav = self.navigator || {};
+    if (Number(count) > 0 && nav.setAppBadge) await nav.setAppBadge(Number(count));
+    else if (nav.clearAppBadge) await nav.clearAppBadge();
+  } catch { /* badge optional */ }
+}
+
 // ---- 📱 Mobile + desktop web push: server se instant notification (app band ho tab bhi) ----
 self.addEventListener('push', e => {
   let data = {};
@@ -32,6 +90,13 @@ self.addEventListener('push', e => {
   // Web Push cannot select a platform's native notification sound; the selected tone drives
   // in-app Web Audio, while these distinct vibration patterns carry into supported Android PWAs.
   const vibration = { classic: [200, 100, 200], soft: [70], double: [70, 80, 70], chime: [50, 60, 50, 60, 100], alert: [250, 70, 250] }[tone];
+  const link = data.link || '';
+  const voiceText = String(data.voice || '').replace(/\s+/g, ' ').trim().slice(0, 240);
+  const wantVoice = data.speak !== false && data.silent !== true && !!voiceText;
+  const id = String(data.id || `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`);
+  const actions = Array.isArray(data.actions)
+    ? data.actions.filter(a => a && a.action && a.title).slice(0, 2).map(a => ({ action: String(a.action).slice(0, 24), title: String(a.title).slice(0, 24) }))
+    : [];
   const options = {
     body: data.body || 'Naya update aaya hai — app khol ke dekho.',
     icon: 'icon-192.png',
@@ -40,28 +105,47 @@ self.addEventListener('push', e => {
     renotify: true,
     requireInteraction: !!data.persist,
     vibrate: sound ? vibration : undefined,
-    data: { link: data.link || '', sound, tone }
+    timestamp: Number(data.at) || Date.now(),
+    lang: data.lang || 'hi-IN',
+    ...(actions.length ? { actions } : {}),
+    data: { link, sound, tone, voice: wantVoice ? voiceText : '', id, type: data.tag || 'ff', user: data.user || '', at: Date.now() }
   };
+  const job = wantVoice ? { id, at: Date.now(), text: voiceText, title, type: data.tag || 'ff', tone, link, user: data.user || '' } : null;
   // Chrome ka rule: har push event par ek notification dikhani hi padti hai, warna
   // "notification not shown" error aata hai aur future push band ho sakte hain.
-  e.waitUntil(self.registration.showNotification(title, options).catch(err => console.warn('showNotification:', err && err.message)));
+  e.waitUntil((async () => {
+    // Notification PEHLE (Chrome ki requirement + user ko turant dikhe), uske baad voice/badge.
+    try { await self.registration.showNotification(title, options); }
+    catch (err) { console.warn('showNotification:', err && err.message); }
+    if (job) { await voiceAdd(job); await tellClients({ type: 'ff-speak-push', item: job }); }
+    if (data.badge !== undefined) await setBadge(data.badge);
+  })());
 });
 self.addEventListener('notificationclick', e => {
   e.notification.close();
-  const raw = (e.notification.data && e.notification.data.link) || '';
+  const info = e.notification.data || {};
+  const raw = info.link || '';
+  // "Theek hai" action = user ne alert dekh liya → voice catch-up queue se hata do.
+  if (e.action === 'dismiss') {
+    if (info.id) e.waitUntil(voiceDrop(String(info.id)));
+    return;
+  }
   // Link '#/targets' jaisa hash hota hai — SW ki script URL ('/sw.js') se resolve karne par
   // '/sw.js#/targets' ban jaata tha. Isliye registration.scope (app root) se banao.
   let target = self.registration.scope || './';
   try { target = new URL(raw || './', self.registration.scope || self.location.origin + '/').href; } catch { /* keep scope */ }
-  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+  e.waitUntil((async () => {
+    // Tap = user gesture → awaaz ab pakka chalegi (autoplay policy block nahi karti).
+    if (info.voice) await tellClients({ type: 'ff-speak-push', item: { id: info.id, text: info.voice, at: Date.now(), type: info.type || 'ff', tone: info.tone, link: raw, user: info.user || '' } });
+    const list = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     for (const client of list) {
       if ('focus' in client) {
-        client.navigate(target).catch(() => {});
+        if (client.navigate) client.navigate(target).catch(() => {});
         return client.focus();
       }
     }
     return self.clients.openWindow(target);
-  }));
+  })());
 });
 
 // ---- 🔁 Subscription refresh: push service khud subscription badal deta hai (Android par aksar) ----
@@ -144,6 +228,10 @@ self.addEventListener('message', e => {
     return;
   }
   if (msg.type === 'ff-push-resubscribe') { e.waitUntil(resubscribe(msg.reason || 'manual')); return; }
+  // 🔊 Voice catch-up: page bol kar sunane ke baad job ko queue se hata deta hai; badge bhi yahin se.
+  if (msg.type === 'ff-voice-ack') { e.waitUntil(voiceDrop(String(msg.id || ''))); return; }
+  if (msg.type === 'ff-voice-clear') { e.waitUntil(voiceSave([])); return; }
+  if (msg.type === 'ff-badge') { e.waitUntil(setBadge(Number(msg.count) || 0)); return; }
   if (msg.type === 'ff-local-test') {
     e.waitUntil(self.registration.showNotification('🔔 Test notification', {
       body: 'Ye alert phone ke notification panel me aaya — OS notifications kaam kar rahe hain ✓',

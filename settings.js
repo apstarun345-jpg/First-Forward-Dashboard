@@ -181,8 +181,10 @@ FF.pages = FF.pages || {};
       <div class="notify-switches" style="background:transparent;padding:0;border:0">
         ${switchRow('master', 'Notifications ON / OFF', on ? 'ON — app ke andar toast + phone / desktop ke notification panel par alert (app band ho tab bhi)' : 'OFF — koi alert nahi aayega (list bell me padh sakte ho)', on)}
         ${switchRow('sound', '🔊 Sound / vibration', 'Alert ke saath short beep + mobile vibration', prefs.sound !== false, !on)}
+        ${switchRow('voice', '🔊 Alert voice — app band ho tab bhi', 'Alert ki ek line phone/desktop par boli jaati hai — app khula ho to turant, band tha to dobara khulte hi (12 ghante tak catch-up). OFF karo to sirf beep / vibration.', prefs.voice !== false, !on)}
         ${switchRow('monthly', '📅 Monthly report', 'Har mahine ki 1–5 tarikh ko pichhle mahine ka FF vs GV compare', prefs.monthly !== false, !on)}
       </div>
+      <div class="btn-row" style="margin:2px 0 8px"><button type="button" class="btn small" id="voice-closed-test">🔊 Closed-app voice test</button><span class="dim small">App bilkul band ho aur phone locked ho — us waqt <b>text + sound + vibration</b> OS panel me turant aata hai (voice service worker me nahi chalti); bolne wali line app dobara khulte hi sunai deti hai. Android par “notification read aloud” app se OS panel ke alerts bhi padhwaye ja sakte hain.</span></div>
       <div class="notify-tone-row" style="display:flex;align-items:end;gap:8px;flex-wrap:wrap;margin:10px 0">
         <label class="fld" style="min-width:250px;flex:1"><span>🔔 Notification / update beep tone</span>
           <select class="input" id="notify-tone" ${!on ? 'disabled' : ''}>${toneOptions.map((x) => `<option value="${esc(x.id)}" ${tone === x.id ? 'selected' : ''}>${esc(x.label)}</option>`).join('')}</select>
@@ -234,6 +236,14 @@ FF.pages = FF.pages || {};
     });
     const toneTest = U.$('#notify-tone-test', body);
     if (toneTest && N && N.testSound) toneTest.addEventListener('click', () => N.testSound());
+    const voiceTest = U.$('#voice-closed-test', body);
+    if (voiceTest) voiceTest.addEventListener('click', async () => {
+      const V = FF.pushVoice;
+      if (!V) { U.toast('Voice module load nahi hua — app dobara kholo.', 'warn'); return; }
+      try { if (N && N.unlockAudio) N.unlockAudio(); } catch { /* ignore */ }
+      const ok = await V.test();
+      U.toast(ok ? '🔊 Voice test bhej diya — awaaz sunai di?' : '🔇 Awaaz block hai — screen par ek baar tap karke dobara try karo (browser autoplay policy).', ok ? 'ok' : 'warn');
+    });
     const slot = U.$('#push-diag-slot', body);
     if (!slot) return;
     const drawDiag = async () => {

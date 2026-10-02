@@ -163,6 +163,61 @@ test('notification click opens the app route, not /sw.js', async () => {
   assert.equal(existing.focused, true);
 });
 
+test('v3.36 voice: push ki bolne wali line queue hoti hai aur khuli app ko turant milti hai', async () => {
+  const sw = loadSW();
+  const heard = [];
+  sw.clients.push({ url: `${ORIGIN}/#/home`, postMessage: (m) => heard.push(m), focus() {}, navigate() {} });
+  await sw.fire('push', {
+    data: {
+      json: () => ({
+        id: 'n1', title: '🔴 Cover alert', body: 'VC4 sirf 3 din', tag: 'alert', link: '#/stock',
+        voice: 'Cover alert. VC4 me sirf teen din bache hain.', speak: true, sound: true, tone: 'alert',
+        badge: 4, persist: true, user: 'owner', lang: 'hi-IN',
+        actions: [{ action: 'open', title: 'Kholo' }, { action: 'dismiss', title: 'Theek hai' }]
+      })
+    }
+  });
+  assert.equal(sw.shown.length, 1, 'notification turant dikhni chahiye (app band ho tab bhi text)');
+  const n = sw.shown[0];
+  assert.equal(n.options.data.voice, 'Cover alert. VC4 me sirf teen din bache hain.');
+  assert.equal(n.options.requireInteraction, true);
+  assert.equal(n.options.lang, 'hi-IN');
+  assert.deepEqual([...n.options.vibrate], [250, 70, 250], 'alert tone ka vibration pattern');
+  assert.equal(n.options.actions.length, 2, 'Kholo / Theek hai actions panel me jaate hain');
+  assert.equal(heard.length, 1, 'khuli hui app ko live voice message jaana chahiye');
+  assert.equal(heard[0].type, 'ff-speak-push');
+  assert.match(heard[0].item.text, /Cover alert/);
+  assert.equal(heard[0].item.user, 'owner', 'shared device par dusre user ko ye line nahi bolni');
+  // App band ho to bhi line queue me rehti hai — app khulte hi pushVoice.js ise bolta hai.
+  const queued = await sw.caches.open('ff-voice-v1').then((c) => c.match('/__ff_voice__/pending').then((r) => (r ? r.json() : [])));
+  assert.equal(queued.length, 1);
+  assert.equal(queued[0].id, 'n1');
+
+  // Page ne bol kar suna diya → ack par job queue se hat jaati hai.
+  await sw.fire('message', { data: { type: 'ff-voice-ack', id: 'n1' } });
+  const after = await sw.caches.open('ff-voice-v1').then((c) => c.match('/__ff_voice__/pending').then((r) => (r ? r.json() : [])));
+  assert.equal(after.length, 0, 'ack ke baad job queue me nahi rehni chahiye');
+
+  // "Theek hai" action = user ne dekh liya → voice catch-up queue se bhi hata do.
+  await sw.fire('push', { data: { json: () => ({ id: 'n2', title: 't', voice: 'line', speak: true }) } });
+  await sw.fire('notificationclick', { action: 'dismiss', notification: { close() {}, data: { id: 'n2', link: '' } } });
+  assert.equal(sw.opened.length, 0, 'dismiss par app window nahi khulni chahiye');
+  const afterDismiss = await sw.caches.open('ff-voice-v1').then((c) => c.match('/__ff_voice__/pending').then((r) => (r ? r.json() : [])));
+  assert.equal(afterDismiss.length, 0);
+});
+
+test('v3.36 voice: speak:false / sound off par koi voice job nahi banti, badge bhi set hota hai', async () => {
+  const sw = loadSW();
+  const badges = [];
+  sw.sandbox.navigator = { setAppBadge: async (n) => badges.push(n), clearAppBadge: async () => badges.push(0) };
+  await sw.fire('push', { data: { json: () => ({ id: 'silent', title: 't', body: 'b', voice: 'ye nahi bolna', speak: false, badge: 3 }) } });
+  await sw.fire('push', { data: { json: () => ({ id: 'nom', title: 't2', body: 'b2', speak: true, voice: '', badge: 5 }) } });
+  const queued = await sw.caches.open('ff-voice-v1').then((c) => c.match('/__ff_voice__/pending').then((r) => (r ? r.json() : [])));
+  assert.equal(queued.length, 0, 'speak:false ya khali voice par queue me kuch nahi jaata');
+  assert.deepEqual(badges, [3, 5], 'app icon badge setAppBadge se update hota hai');
+  assert.equal(sw.shown.length, 2, 'text notification phir bhi dikhni chahiye');
+});
+
 test('pushsubscriptionchange re-subscribes with the current VAPID key and reports to the server', async () => {
   const sw = loadSW();
   sw.setSubscription('old-rotated-key-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA');
