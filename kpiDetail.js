@@ -523,6 +523,18 @@ window.FF = window.FF || {};
     const agentWanted = [spec.agent, spec.agentId].map(personKey).filter(Boolean);
     const agentOk = (r) => !agentWanted.length || [r.agentName, r.agentId].map(personKey).some((k) => agentWanted.includes(k));
     const tlOk = (r) => !tlWanted || U.clean(r.tlName).toUpperCase() === tlWanted;
+    // 🧩 v3.40 — TL profile ke 'Own 40' / 'agents 80' chips: drawer me bhi wahi hissa dikhe, poora nahi.
+    // `part=own` → sirf TL ki APNI stock rows; `part=team` → agents ki rows (TL ki row aur direct agents aside).
+    const part = U.clean(spec.part || '').toLowerCase();
+    const selfNameOfTl = U.clean(spec.tlName || spec.tl || '');
+    const partOk = (r, chKey) => {
+      if (!tlWanted || (part !== 'own' && part !== 'team')) return true;
+      const isSelf = !!selfNameOfTl && U.clean(r.agentName).toUpperCase() === selfNameOfTl.toUpperCase();
+      if (part === 'own') return isSelf;
+      if (isSelf) return false;
+      try { return !(FF.config && FF.config.isDirectAgent && FF.config.isDirectAgent(r, chKey)); } catch { return true; }
+    };
+    const partLabel = part === 'own' ? ' · TL ke paas (own)' : part === 'team' ? ' · agents ke paas' : '';
     const holdersTable = (title, map, unit) => {
       const list = [...map.entries()].sort((a, b) => b[1].n - a[1].n);
       holdersN = (holdersN || 0) + list.length;
@@ -538,7 +550,7 @@ window.FF = window.FF || {};
       if (stock === MISSING) { stock = []; lost.push('class × TL stock'); }
       if (agents === MISSING) { agents = []; lost.push('agent-wise stock'); }
       if (types === MISSING) types = [];   // sirf "Tag type" table optional hai
-      const agentRows = (agents || []).filter((r) => keep(r) && agentOk(r) && tlOk(r));
+      const agentRows = (agents || []).filter((r) => keep(r) && agentOk(r) && tlOk(r) && partOk(r, 'ff'));
       // agent / TL filter ho to class-wise bhi agent rows se (stock store TL × class hai, agent nahi)
       const rows = agentWanted.length || tlWanted ? agentRows.map((r) => ({ cls: r.cls, group: r.group, tlName: r.tlName, n: r.n })) : (stock || []).filter(keep).map((r) => ({ ...r, n: r.n }));
       const tot = total(rows); grand += tot;
@@ -554,7 +566,7 @@ window.FF = window.FF || {};
         });
         holders = holdersTable(spec.holders === 'tls' ? '👥 TLs jinke paas stock hai' : '🧑‍💼 Agents jinke paas stock hai', map, spec.holders === 'tls' ? 'TL' : 'Agent');
       }
-      parts.push(`<h3 class="kd-h">🟦 First Forward stock (StockDataa)${cf ? ` · ${esc(cf.label)}` : ''}${spec.agent ? ` · ${esc(spec.agent)}` : tlWanted ? ` · TL ${esc(spec.tl || spec.tlName)}` : ''} · <b>${U.fmt(tot)}</b></h3>${holders}
+      parts.push(`<h3 class="kd-h">🟦 First Forward stock (StockDataa)${cf ? ` · ${esc(cf.label)}` : ''}${spec.agent ? ` · ${esc(spec.agent)}` : tlWanted ? ` · TL ${esc(spec.tl || spec.tlName)}${partLabel}` : ''} · <b>${U.fmt(tot)}</b></h3>${holders}
         <div class="kd-grid">${breakdownTable('Class-wise', tally(rows, (r) => r.cls), null, tot, { head: 'Class', sortCls: true, drill: (key) => ({ cls: key, f: '', title: `${spec.title || 'Stock'} · ${key}` }) })}${byType.size && !agentWanted.length && !tlWanted ? breakdownTable('Tag type', byType, null, total([...byType.values()].map((n) => ({ n }))), { head: 'Tag type' }) : ''}</div>
         ${breakdownTable('TL-wise stock', tally(rows, (r) => (FF.config.isDirectAgent(r, 'gv') ? FF.config.directLabel(r, 'gv') : r.tlName)), null, tot, { head: 'TL', drill: (key) => ({ tl: key, src: 'ff', scope: 'stock', title: `TL ${key} · FF Stock` }) })}
         ${agentWanted.length ? '' : matrix('TL × class', rows, (r) => (FF.config.isDirectAgent(r, 'gv') ? FF.config.directLabel(r, 'gv') : r.tlName), (r) => r.cls, { head: 'TL', drillRow: (tl) => ({ tl, src: 'ff', scope: 'stock', title: `TL ${tl} · FF Stock` }), drillCell: (tl, cls) => ({ tl, cls, src: 'ff', scope: 'stock', title: `TL ${tl} · ${cls} Stock` }) })}
@@ -566,17 +578,36 @@ window.FF = window.FF || {};
       const got = await Promise.all(['stockClass', 'stockTl', 'stockAgent', 'stockAgentClass'].map(gsoft));
       const pickG = (v, label) => { if (v === MISSING) { if (label) lost.push(label); return []; } return v || []; };
       cls = pickG(got[0], 'GV class-wise stock'); tls = pickG(got[1], 'GV TL-wise stock'); agents = pickG(got[2], 'GV agent-wise stock'); agentCls = pickG(got[3], '');
-      const filteredAgentCls = (agentCls || []).filter((r) => keep(r) && agentOk(r) && tlOk(r));
-      const useAgentRows = !!(cf || agentWanted.length || tlWanted) && filteredAgentCls.length;
-      const clsRows = useAgentRows ? filteredAgentCls : (cls || []).filter(keep);
+      // GV ki 'Stock Agent Class' rows me TL ka column NAHI hota (sirf agentName × class). Isliye TL filter
+      // seedha wahan lagane par list khaali reh jaati aur (purana behaviour) poore GV ka stock dikh jaata —
+      // card 34, drawer hazaaron. Ab TL ke agents ka set 'Stock Agent' (agent × TL) rows se banata hai.
+      const agentRowsGv = (agents || []).filter((r) => keep(r) && agentOk(r) && tlOk(r) && partOk(r, 'gv'));
+      const tlAgentKeys = new Set();
+      if (tlWanted || agentWanted.length) (agents || []).filter((r) => agentOk(r) && tlOk(r)).forEach((r) => {
+        const nm = U.clean(r.agentName).toUpperCase(); if (nm) tlAgentKeys.add(nm);
+        const id = U.clean(r.agentId).toUpperCase(); if (id) tlAgentKeys.add('#' + id);
+      });
+      const clsTlOk = (r) => !tlWanted && !agentWanted.length ? true
+        : tlAgentKeys.has(U.clean(r.agentName).toUpperCase()) || (!!U.clean(r.agentId).toUpperCase() && tlAgentKeys.has('#' + U.clean(r.agentId).toUpperCase()));
+      const filteredAgentCls = (agentCls || []).filter((r) => keep(r) && agentOk(r) && (tlWanted || agentWanted.length ? (clsTlOk(r) && partOk(r, 'gv')) : (tlOk(r) && partOk(r, 'gv'))));
+      const useAgentRows = !!(cf || agentWanted.length || tlWanted || part) && filteredAgentCls.length;
+      const clsRows = useAgentRows ? filteredAgentCls : (tlWanted || agentWanted.length || part) ? agentRowsGv : (cls || []).filter(keep);
       const tot = total(clsRows); grand += tot;
       const agentTotals = new Map();
-      (useAgentRows ? filteredAgentCls : (agents || [])).forEach((a) => {
+      (useAgentRows ? filteredAgentCls : agentRowsGv).forEach((a) => {
         // Card "Agents with Stock" Tag Assignment ki (agent, TL) rows ginta hai — list bhi usi granularity par
         const key = useAgentRows ? (U.clean(a.agentId) || U.clean(a.agentName)) : [a.agentId, a.agentName, a.tlId, a.tlName].map((x) => U.clean(x)).join('|');
         const v = agentTotals.get(key) || { name: a.agentName, id: a.agentId, tl: a.tlName || '—', agent: a.agentName, ch: 'gv', n: 0, vc4: 0 };
         const n = Number(a.n) || 0; v.n += n; if (useAgentRows ? classKey(a.cls) === 'VC4' : false) v.vc4 += n; agentTotals.set(key, v);
       });
+      // v3.40 — GV me bhi FF jaisa "TL × class" matrix: class rows me TL column nahi hota, isliye TL ka
+      // mapping 'Stock Agent' (agent × TL) rows se jodte hain (FF drawer ke barabar detail).
+      const tlOfAgent = new Map();
+      (agents || []).forEach((r) => {
+        const k = U.clean(r.agentName).toUpperCase(); if (!k || tlOfAgent.has(k)) return;
+        tlOfAgent.set(k, r.directAgent === true || !FF.config.isRealTl(r.tlName) ? FF.config.directLabel({ tlName: r.tlName, channel: 'GV Partner' }, 'gv') : (U.clean(r.tlName) || '—'));
+      });
+      const gvTlClsRows = filteredAgentCls.map((r) => ({ ...r, tlName: r.tlName || tlOfAgent.get(U.clean(r.agentName).toUpperCase()) || (tlWanted ? U.clean(spec.tl || spec.tlName) : '—') }));
       let holders = '';
       if (spec.holders === 'agents') holders = holdersTable('🧑‍💼 GV agents jinke paas stock hai', agentTotals, 'Agent');
       else if (spec.holders === 'tls') {
@@ -584,9 +615,10 @@ window.FF = window.FF || {};
         (tls || []).filter((t) => FF.config.isRealTl(t.tlName) && t.directAgent !== true).forEach((t) => map.set(t.tlName, { name: t.tlName, tl: 'GV Partner', ch: 'gv', n: Number(t.n) || 0, vc4: 0 }));
         holders = holdersTable('👥 GV TLs jinke paas stock hai', map, 'TL');
       }
-      parts.push(`<h3 class="kd-h">🟩 GV Partner stock (Tag Assignment)${cf ? ` · ${esc(cf.label)}` : ''}${spec.agent ? ` · ${esc(spec.agent)}` : ''} · <b>${U.fmt(tot)}</b></h3>${holders}
+      parts.push(`<h3 class="kd-h">🟩 GV Partner stock (Tag Assignment)${cf ? ` · ${esc(cf.label)}` : ''}${spec.agent ? ` · ${esc(spec.agent)}` : tlWanted ? ` · TL ${esc(spec.tl || spec.tlName)}${partLabel}` : ''} · <b>${U.fmt(tot)}</b></h3>${holders}
         <div class="kd-grid">${breakdownTable('Class-wise', tally(clsRows, (r) => r.cls), null, tot, { head: 'Class', sortCls: true, drill: (key) => ({ cls: key, f: '', title: `${spec.title || 'Stock'} · ${key}` }) })}${useAgentRows ? '' : breakdownTable('TL-wise', tally(tls || [], (r) => (r.directAgent === true || !FF.config.isRealTl(r.tlName) ? FF.config.directLabel({ tlName: r.tlName, channel: 'GV Partner' }, 'gv') : r.tlName)), null, total(tls || []), { head: 'TL', drill: (key) => ({ tl: key, src: 'gv', scope: 'stock', title: `TL ${key} · GV Stock` }) })}</div>
-        ${breakdownTable('Top 30 agents (stock)', new Map([...agentTotals.values()].sort((a, b) => b.n - a.n).slice(0, 30).map((a) => [`${a.name} · ${a.tl || '—'}`, a.n])), null, tot, { head: 'Agent · TL', drill: (key) => { const ag = String(key).split(' · ')[0]; return { agent: ag, src: 'gv', channel: 'gv', scope: 'stock', title: `${ag} · GV Stock` }; } })}`);
+        ${breakdownTable('Top 30 agents (stock)', new Map([...agentTotals.values()].sort((a, b) => b.n - a.n).slice(0, 30).map((a) => [`${a.name} · ${a.tl || '—'}`, a.n])), null, tot, { head: 'Agent · TL', drill: (key) => { const ag = String(key).split(' · ')[0]; return { agent: ag, src: 'gv', channel: 'gv', scope: 'stock', title: `${ag} · GV Stock` }; } })}
+        ${agentWanted.length || !gvTlClsRows.length ? '' : matrix('TL × class', gvTlClsRows, (r) => r.tlName, (r) => r.cls, { head: 'TL', drillRow: (tl) => ({ tl, src: 'gv', scope: 'stock', title: `TL ${tl} · GV Stock` }), drillCell: (tl, cls) => ({ tl, cls, src: 'gv', scope: 'stock', title: `TL ${tl} · ${cls} Stock` }) })}`);
     }
     const btn = (kind, label) => `<button class="btn primary" data-kd-sheetrows="${kind}">📄 ${label}</button>`;
     const rawBtns = [];
@@ -711,6 +743,7 @@ window.FF = window.FF || {};
     }
     return out;
   }
+  const num2 = (v) => (Number(v) || 0);
   async function peopleDetail(spec) {
     const src = spec.src === 'gv' || spec.src === 'ff' ? spec.src : 'both';
     if ((src === 'ff' || src === 'both') && FF.pages.performance && FF.pages.performance.ensureLoaded) { try { await FF.pages.performance.ensureLoaded(); } catch { /* */ } }
@@ -722,16 +755,27 @@ window.FF = window.FF || {};
     if (spec.state === 'direct') list = list.filter((p) => p.direct);
     if (spec.state === 'active') list = list.filter((p) => p.active);
     if (spec.tl) list = list.filter((p) => U.clean(p.tl).toUpperCase() === U.clean(spec.tl).toUpperCase());
+    // v3.40 — TL ke "Agents" card ka count = sirf agents (TL ki APNI row bahar; asli sheets me wo usi ki
+    // team me ek row bankar aati hai). `self=1` par wo row dikhi degi (drawer me TL ka apna stock bhi).
+    const SELF0 = spec.tl && String(spec.self == null ? '0' : spec.self) === '0';
+    let selfRow = null;
+    if (SELF0) { const tn = U.clean(spec.tl).toUpperCase(); selfRow = list.find((p) => U.clean(p.name).toUpperCase() === tn) || null; list = list.filter((p) => U.clean(p.name).toUpperCase() !== tn); }
     if (spec.sort === 'stock') list.sort((a, b) => b.stock - a.stock || b.cur - a.cur);
     else list.sort((a, b) => b.cur - a.cur || b.stock - a.stock);
     const label = lvl ? `${lvl} priority` : spec.state === 'inactive' ? 'Inactive' : spec.state === 'direct' ? 'Direct (no TL)' : spec.tl ? `TL ${spec.tl} agents` : 'All agents (REPORT)';
     const byTl = tally(list.map((p) => ({ n: 1, tl: p.tl })), (r) => r.tl || '—');
     state.spec = spec; state.rows = null; state.raw = null;
     const stockSum = U.sum(list, (p) => p.stock), curSum = U.sum(list, (p) => p.cur), lastSum = U.sum(list, (p) => p.last);
+    const plain = (v) => esc(String(v == null ? '' : v).replace(/^[^\w]+/u, '') || '—');
+    // TL ki APNI row (agents ki list se bahar) — list ke neeche highlight karke dikhti hai, taaki
+    // "TL ke paas vs agents ke paas" side-by-side padha ja sake aur number match kare.
+    const selfRowHtml = selfRow ? `<tr class="kd-selfrow"><td class="dim">👤</td><td><b>${esc(selfRow.name)}</b><span class="kd-self-tag">TL · apna stock</span>${selfRow.id ? ` <small class="dim">${esc(selfRow.id)}</small>` : ''}</td><td>${selfRow.ch === 'gv' ? '🟩 GV' : '🟦 FF'}</td><td>${esc(selfRow.tl || '—')}</td><td>${plain(selfRow.priority)}</td><td class="dim">${plain(selfRow.status)}</td><td class="num">${U.fmt(selfRow.last)}</td><td class="num"><b>${U.fmt(selfRow.cur)}</b></td><td class="num"><b>${U.fmt(selfRow.stock)}</b></td></tr>` : '';
+    const selfFoot = selfRow ? `<tr class="kd-total"><td colspan="8"><b>= TL TOTAL — agents ${U.fmt(stockSum)} + TL ka apna stock ${U.fmt(selfRow.stock)}</b></td><td class="num"><b>${U.fmt(stockSum + num2(selfRow.stock))}</b></td></tr>` : '';
+
     const big = spec.sort === 'stock' ? `${U.fmt(stockSum)} <small>tags stock · ${U.fmt(list.length)} agents</small>` : `${U.fmt(list.length)} <small>agents</small>`;
     const body = `<div class="kd-hero"><div><span class="kd-kicker">${src === 'gv' ? '🟩 GV REPORT' : src === 'ff' ? '🟦 FF REPORT' : 'REPORT (FF + GV)'}</span><div class="kd-big">${big}</div><div class="kd-sub">${esc(label)} · current ${U.fmt(curSum)} · stock ${U.fmt(stockSum)}</div></div></div>
       ${breakdownTable('👥 TL-wise', new Map([...byTl.entries()].sort((a, b) => b[1] - a[1]).slice(0, 30)), null, list.length, { head: 'TL', drill: (tl) => ({ ...spec, tl, title: `TL ${tl} · ${label}` }) })}
-      <section class="kd-sec"><h4>🧑‍💼 ${esc(label)} · ${U.fmt(list.length)}</h4><div class="table-wrap kd-scroll tall"><table class="tbl compact kd-tbl"><thead><tr><th>#</th><th>Agent</th><th>Ch</th><th>TL</th><th>Priority</th><th>Status</th><th class="num">Last month</th><th class="num">This month</th><th class="num">Stock</th></tr></thead><tbody>${list.map((p, i) => `<tr class="clickable" data-kd-agent="${esc(p.name)}" data-kd-agent-id="${esc(p.id)}" data-kd-agent-channel="${p.ch}"><td class="dim">${i + 1}</td><td><b>${esc(p.name)}</b>${p.id ? ` <small class="dim">${esc(p.id)}</small>` : ''}</td><td>${p.ch === 'gv' ? '🟩 GV' : '🟦 FF'}</td><td>${esc(p.tl || '—')}</td><td>${esc(String(p.priority).replace(/^[^\w]+/u, '') || '—')}</td><td class="dim">${esc(String(p.status).replace(/^[^\w]+/u, '') || '—')}</td><td class="num">${U.fmt(p.last)}</td><td class="num"><b>${U.fmt(p.cur)}</b></td><td class="num">${U.fmt(p.stock)}</td></tr>`).join('') || '<tr><td colspan="9" class="empty">Koi agent nahi</td></tr>'}${list.length ? `<tr class="kd-total"><td colspan="6"><b>Grand Total (${list.length} agents)</b></td><td class="num"><b>${U.fmt(lastSum)}</b></td><td class="num"><b>${U.fmt(curSum)}</b></td><td class="num"><b>${U.fmt(stockSum)}</b></td></tr>` : ''}</tbody></table></div></section>`;
+      <section class="kd-sec"><h4>🧑‍💼 ${esc(label)} · ${U.fmt(list.length)}</h4><div class="table-wrap kd-scroll tall"><table class="tbl compact kd-tbl"><thead><tr><th>#</th><th>Agent</th><th>Ch</th><th>TL</th><th>Priority</th><th>Status</th><th class="num">Last month</th><th class="num">This month</th><th class="num">Stock</th></tr></thead><tbody>${list.map((p, i) => `<tr class="clickable" data-kd-agent="${esc(p.name)}" data-kd-agent-id="${esc(p.id)}" data-kd-agent-channel="${p.ch}"><td class="dim">${i + 1}</td><td><b>${esc(p.name)}</b>${p.id ? ` <small class="dim">${esc(p.id)}</small>` : ''}</td><td>${p.ch === 'gv' ? '🟩 GV' : '🟦 FF'}</td><td>${esc(p.tl || '—')}</td><td>${esc(String(p.priority).replace(/^[^\w]+/u, '') || '—')}</td><td class="dim">${esc(String(p.status).replace(/^[^\w]+/u, '') || '—')}</td><td class="num">${U.fmt(p.last)}</td><td class="num"><b>${U.fmt(p.cur)}</b></td><td class="num">${U.fmt(p.stock)}</td></tr>`).join('') || '<tr><td colspan="9" class="empty">Koi agent nahi</td></tr>'}${list.length ? `<tr class="kd-total"><td colspan="6"><b>Agents total (${list.length} agents)</b></td><td class="num"><b>${U.fmt(lastSum)}</b></td><td class="num"><b>${U.fmt(curSum)}</b></td><td class="num"><b>${U.fmt(stockSum)}</b></td></tr>${selfRowHtml}${selfFoot}` : selfRowHtml}</tbody></table></div></section>`;
     return { kicker: 'KPI detail · Agents list', title: spec.title || label, sub: spec.sort === 'stock' ? `<b>${U.fmt(stockSum)}</b> tags stock · ${U.fmt(list.length)} agents` : `<b>${U.fmt(list.length)}</b> agents · ${esc(label)}`, body };
   }
   // ---- 📋 page-registered lists — kisi bhi page ka number usi page ki exact rows kholta hai -----------
@@ -941,5 +985,5 @@ window.FF = window.FF || {};
     if (chip && state.spec) { open({ ...state.spec, ...JSON.parse(chip.dataset.kdSpec || '{}') }); return; }
   });
 
-  FF.kpiDetail = { open, specFrom, registerList, normYm, resetHistory, _infer: inferSpec, _rowMatchesSpec: rowMatchesSpec, _stockDetail: stockDetail, _limits: SOFT };
+  FF.kpiDetail = { open, specFrom, registerList, normYm, resetHistory, _infer: inferSpec, _rowMatchesSpec: rowMatchesSpec, _stockDetail: stockDetail, _peopleDetail: peopleDetail, _limits: SOFT };
 })(window.FF);

@@ -14,6 +14,21 @@ Koi database nahi, koi manual upload nahi — website Google Sheet se data padht
 (Google Visualization API / `gviz`) through a small Node server that also handles **login, users,
 permissions and settings**. Zero npm dependencies.
 
+## ✨ v3.40.0 — 🧮 TL ka stock double count band · own vs agents side-by-side · har number clickable
+
+- **🐞 Bug:** Master Search aur Agent/TL Summary (GV Partner + First Forward) me TL ka stock phool jaata tha —
+  TL ki REPORT row aksar **poore team ka rollup** hoti hai, aur purani composition use agents ke jod ke **upar add**
+  kar deti thi (FF: 120 ki jagah **200**). GV me class-less `Stock Agent` rows sab `Commercial` me girte aur upar se
+  report ka VC4 jud jaata (100 ki jagah **120**). TL khud apni "agents" list me agent ban kar bhi gin jaata tha.
+- **Fix:** `own` (TL ke paas) stock detail ki APNI rows → REPORT self row (rollup na ho) → sheet snapshot − agents,
+  isi priority se ek hi baar; class maps sirf class-bearing rows se (`fitClassMap` scale karta hai, add nahi);
+  sheet ka extra total hamesha **team** me. `splitTlSelfRow()` TL ki row agents ki list/count/totals se alag karta hai.
+- **UI:** TL ke agents table me TL ki row **sabse upar highlighted** + 3-line footer (`Agents total` → `+ TL ke paas (own)`
+  → `= TL TOTAL`); KPIs par `Own 40` / `agents 80` **clickable chips** (`part=own|team` drawer filter), Agents/priority
+  cells `scope=people&self=0` kholte hain; GV TL stock drawer ka TL filter fix + FF jaisa TL × class matrix (parity);
+  WhatsApp / CSV / Excel / PDF / Team Pack me bhi wahi reconcile hisaab.
+- Docs: [WHATS-NEW-v3.40.0.md](WHATS-NEW-v3.40.0.md) · tests: `dev/tl-stock-split.test.js` (9) + `dev/master-profile.test.js`
+
 ## ✨ v3.39.0 — 📦 Summary · Master Search · drawers me stock ab hamesha aata hai (spinner nahi atakta)
 
 - **🐞 Bug:** Agent / TL Summary aur Master Search me stock load hi nahi hota tha (spinner), aur wahan se khulne wale drawers

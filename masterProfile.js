@@ -259,6 +259,16 @@ window.FF = window.FF || {};
   function isDirectStockRow(row, ch) {
     return !!(row && (row.directAgent || row.tlExcluded)) || !!safeCall(() => FF.config && FF.config.isDirectAgent && FF.config.isDirectAgent(row, ch), false);
   }
+  /** Asli sheets (First Forward REPORT / GV REPORT) me TL ki APNI bhi ek "agent" row hoti hai jab uske
+   *  paas stock hota hai. Wo row agents ki list me rehne par (a) "Agents: 3" me TL khud gin jaata hai aur
+   *  (b) uska stock — jo aksar poore team ka rollup hota hai — agents ke jod me dobara jud jaata hai.
+   *  Isliye TL ki row list se alag karte hain: `team` = agents, `self` = TL ke paas (UI me alag row). */
+  function splitTlSelfRow(rows, tlName, tlId) {
+    const list = (rows || []).slice();
+    const hit = (r) => isSameAgent(r, tlName, tlId);
+    const self = list.filter(hit).sort((a, b) => num(a && a.stockTotal) - num(b && b.stockTotal));
+    return { team: list.filter((r) => !hit(r)), self: self.length ? self[self.length - 1] : null };
+  }
   const classMapTotal = (map) => U.sum([...(map || new Map()).values()], (n) => num(n));
   function classMapParts(map) {
     const parts = { vc4: 0, comm: 0 };
@@ -281,6 +291,72 @@ window.FF = window.FF || {};
     comm += Math.max(0, num(target && target.total) - vc4 - comm);
     if (vc4 > parts.vc4) map.set('VC4', (map.get('VC4') || 0) + vc4 - parts.vc4);
     if (comm > parts.comm) map.set('Commercial', (map.get('Commercial') || 0) + comm - parts.comm);
+    return map;
+  }
+  /** Sirf wo rows jinme sach me class ka column hai. GV ka 'stockAgent' aggregate (agent × TL) class-less
+   *  hota hai — use class map bana kar sab 'Commercial' me daal dena hi ek inflation ka root tha. */
+  function classRowsOnly(rows) { return (rows || []).filter((r) => !!clean(r && r.cls)); }
+  /** {VC4: a.vc4 − b.vc4, Commercial: a.comm − b.comm} — sheet ke snapshot se TL ka own split nikaalne ke liye. */
+  function classDiff(a, b) {
+    const map = new Map();
+    const vc4 = Math.max(0, num(a && a.vc4) - num(b && b.vc4));
+    const comm = Math.max(0, num(a && a.comm) - num(b && b.comm));
+    if (vc4 > 0) map.set('VC4', vc4);
+    if (comm > 0) map.set('Commercial', comm);
+    return map;
+  }
+  /** Ek class map ko `total` par laao — group (VC4 / Commercial) ke anupat se scale, kabhi UPAR jod kar nahi.
+   *  `parts` ho to (report ka apna VC4 / Comm split) wahi split follow hota hai. Total se kam bacha ho to
+   *  Commercial me, zyada ho to anupat ghat jaata hai — isse "own + agents" kabhi total se bada nahi hota. */
+  function fitClassMap(map, total, parts) {
+    const want = Math.max(0, Math.round(num(total)));
+    const out = new Map();
+    (map || new Map()).forEach((n, cls) => { const v = Math.max(0, Math.round(num(n))); if (v > 0) out.set(clean(cls) || 'Commercial', v); });
+    if (!want) return out;
+    if (!out.size) {
+      const pv = Math.max(0, num(parts && parts.vc4)), pc = Math.max(0, num(parts && parts.comm));
+      if (pv + pc > 0) { const vc4 = Math.min(want, Math.round((pv / (pv + pc)) * want)); out.set('VC4', vc4); if (want - vc4 > 0) out.set('Commercial', want - vc4); }
+      else out.set('Commercial', want);
+      return out;
+    }
+    const have = classMapTotal(out);
+    if (have === want) return out;
+    const pv = Math.max(0, num(parts && parts.vc4)), pc = Math.max(0, num(parts && parts.comm));
+    const wantVc4 = pv + pc > 0 ? Math.min(want, Math.round((pv / (pv + pc)) * want))
+      : Math.round((U.sum([...out.keys()].filter(is4), (k) => num(out.get(k))) / have) * want);
+    const groups = { vc4: [...out.keys()].filter((c) => is4(c)), comm: [...out.keys()].filter((c) => !is4(c)) };
+    const fixed = new Map();
+    let acc = 0;
+    Object.entries(groups).forEach(([g, keys], gi) => {
+      const wantG = gi === 0 ? wantVc4 : want - acc;
+      if (!keys.length) { if (wantG > 0) fixed.set(g === 'vc4' ? 'VC4' : 'Commercial', wantG); acc += wantG; return; }
+      const haveG = U.sum(keys, (k) => num(out.get(k)));
+      const sorted = keys.slice().sort((a, b) => num(out.get(b)) - num(out.get(a)));
+      sorted.forEach((k, i) => {
+        const v = haveG <= 0 ? 0 : (i === sorted.length - 1 ? Math.max(0, wantG - U.sum(sorted.slice(0, i), (x) => Math.round((num(out.get(x)) / haveG) * wantG))) : Math.round((num(out.get(k)) / haveG) * wantG));
+        if (v > 0) fixed.set(k, v);
+      });
+      acc += wantG;
+    });
+    return fixed;
+  }
+  /** Class rows ko TL total ke VC4 / Commercial totals par laao (table ka jod == KPI card). */
+  function alignClassMap(map, target) {
+    const want = { vc4: Math.max(0, Math.round(num(target && target.vc4))), comm: Math.max(0, Math.round(num(target && target.comm))) };
+    ['vc4', 'comm'].forEach((g) => {
+      const keys = [...map.keys()].filter((cls) => (g === 'vc4' ? is4(cls) : !is4(cls)));
+      const haveG = U.sum(keys, (k) => num(map.get(k)));
+      if (!keys.length) { if (want[g] > 0) map.set(g === 'vc4' ? 'VC4' : 'Commercial', want[g]); return; }
+      if (haveG === want[g]) return;
+      if (want[g] <= 0) { keys.forEach((k) => map.delete(k)); return; }
+      const sorted = keys.slice().sort((a, b) => num(map.get(b)) - num(map.get(a)));
+      let acc = 0;
+      sorted.forEach((k, i) => {
+        const v = i === sorted.length - 1 ? Math.max(0, want[g] - acc) : Math.round((num(map.get(k)) / haveG) * want[g]);
+        map.set(k, v); acc += v;
+      });
+    });
+    [...map.entries()].forEach(([k, v]) => { if (!(num(v) > 0)) map.delete(k); });
     return map;
   }
   function reportStockParts(row, ch) {
@@ -381,8 +457,8 @@ window.FF = window.FF || {};
     const detailOwnClassRows = ch === 'gv'
       ? (cidx ? pickIndexed([[cidx.byAgentName, ownerName]]) : classList.filter((r) => norm(r && (r.agentName || r.name)) === ownerName))
       : selfDetails;
-    const detailMemberMap = addClassRows(new Map(), detailMemberClassRows);
-    const detailOwnMap = addClassRows(new Map(), detailOwnClassRows);
+    const detailMemberMap = addClassRows(new Map(), classRowsOnly(detailMemberClassRows));
+    const detailOwnMap = addClassRows(new Map(), classRowsOnly(detailOwnClassRows));
     const detailOwnTotal = stockRowsTotal(selfDetails) || classMapTotal(detailOwnMap);
     const reportOwn = selfReports.sort((a, b) => reportStockParts(b, ch).total - reportStockParts(a, ch).total)[0] || null;
     const reportOwnParts = reportStockParts(reportOwn, ch);
@@ -396,37 +472,69 @@ window.FF = window.FF || {};
       || (!memberReports.length && memberDetails.length > 0);
     const memberMap = useDetailMembers && classMapTotal(detailMemberMap) ? detailMemberMap : memberReportMap;
     const memberParts = classMapParts(memberMap);
-    let ownMap = new Map();
-    const rawOwnMapTotal = classMapTotal(addClassRows(new Map(), selfDetails));
-    if (rawOwnMapTotal > 0 && withinOne(rawOwnMapTotal, detailOwnTotal)) ownMap = addClassRows(new Map(), selfDetails);
-    else if (classMapTotal(detailOwnMap) > 0 && withinOne(classMapTotal(detailOwnMap), detailOwnTotal || reportOwnParts.total)) ownMap = detailOwnMap;
-    else if (classMapTotal(reportOwnMap) > 0) ownMap = reportOwnMap;
-    let ownTotal = Math.max(detailOwnTotal, reportOwnParts.total, classMapTotal(ownMap));
-    let ownParts = classMapParts(ownMap);
-    if (!classMapTotal(ownMap) && ownTotal > 0) { ownMap.set('Commercial', ownTotal); ownParts = { vc4: 0, comm: ownTotal }; }
-    fillClassMap(ownMap, { vc4: Math.max(ownParts.vc4, reportOwnParts.vc4), comm: Math.max(ownParts.comm, reportOwnParts.comm) });
-    ownParts = classMapParts(ownMap);
-    ownTotal = Math.max(ownTotal, ownParts.vc4 + ownParts.comm);
+    const detailMemberParts = classMapParts(detailMemberMap);
+    // Agents (team) ka jod: class map / report / detail — jo bhi zyada bhara ho, taaki ek source ke
+    // adhoora rehne par team stock na gire. TL ki APNI row isme nahi (wo `own` me aati hai).
+    const teamFloor = {
+      vc4: Math.max(memberParts.vc4, detailMemberParts.vc4, memberReportParts.vc4),
+      comm: Math.max(memberParts.comm, detailMemberParts.comm, memberReportParts.comm)
+    };
+    teamFloor.total = teamFloor.vc4 + teamFloor.comm;
 
+    // ───────────── TL ka OWN stock: ek hi baar judta hai (double count fix) ─────────────
+    // Pehle TL ki REPORT row ("TL ka stock") ko agents ke jod me ALAG se add kar diya jaata tha — par
+    // asli sheets me wo row aksar POORE TEAM ka rollup hoti hai (First Forward: 'TL's Stock Details',
+    // GV Partner: 'Stock' sheet). Natija: TL ka stock do baar (own 120 + agents 80 = 200, asal 120).
+    // GV me class-less 'Stock Agent' rows sab 'Commercial' me girte aur upar se report ka VC4 ADD ho
+    // jaata (100 → 120). Ab own ka number priority se chunta hai aur kabhi team ke upar ADD nahi karta:
+    //   1) stock detail me TL ki APNI rows (class-wise — sabse trusted),
+    //   2) REPORT ki self row — par sirf tab jab wo team ke rollup jaisi na lage,
+    //   3) sheet ka "TL's stock" snapshot − agents ka jod.
     const snapshotRows = teamReports.map((r) => snapshotStockParts(r, ch)).sort((a, b) => b.total - a.total);
     const snapshot = snapshotRows[0] || { vc4: 0, comm: 0, total: 0 };
-    // The TL snapshot and each member's report are independent safeguards. Adding the own-TL
-    // inventory with max-per-class handles both report styles: agent-only snapshots and snapshots
-    // that already include the TL's own row, without dropping team stock or double-counting it.
-    const detailMemberParts = classMapParts(detailMemberMap);
-    const stock = {
-      vc4: Math.max(snapshot.vc4, memberParts.vc4 + ownParts.vc4, detailMemberParts.vc4 + ownParts.vc4),
-      comm: Math.max(snapshot.comm, memberParts.comm + ownParts.comm, detailMemberParts.comm + ownParts.comm)
-    };
+    const snapshotTotal = snapshot.total || (snapshot.vc4 + snapshot.comm);
+    const rollupOwnRow = !!reportOwn && teamFloor.total > 0 && reportOwnParts.total >= teamFloor.total - 1;
+    let ownTotal = detailOwnTotal || 0;
+    let ownFrom = ownTotal > 0 ? 'detail' : '';
+    let ownMap = ownTotal > 0 ? new Map(detailOwnMap) : new Map();
+    if (!ownTotal && reportOwn) {
+      if (rollupOwnRow) {
+        ownTotal = Math.max(0, snapshotTotal - teamFloor.total);
+        ownFrom = 'snapshot-team';
+        ownMap = classDiff(snapshot, teamFloor);
+      } else {
+        ownTotal = reportOwnParts.total || classMapTotal(reportOwnMap);
+        ownFrom = 'report';
+        ownMap = classMapTotal(reportOwnMap) > 0 ? new Map(reportOwnMap) : new Map();
+      }
+    }
+    if (!ownTotal && snapshotTotal > teamFloor.total) {
+      ownTotal = snapshotTotal - teamFloor.total;
+      ownFrom = 'snapshot-team';
+      ownMap = classDiff(snapshot, teamFloor);
+    }
+    ownMap = fitClassMap(ownMap, ownTotal, ownFrom === 'report' ? reportOwnParts : null);
+    const ownParts = classMapParts(ownMap);
+    ownTotal = ownParts.vc4 + ownParts.comm;
+
+    const teamStock = { vc4: teamFloor.vc4, comm: teamFloor.comm, total: teamFloor.total };
+    // Sheet ka total detail/report se bada ho (rows abhi load me / adhoore) to shortfall TEAM me jaayega,
+    // OWN me nahi — warna TL ka stock dobara jud jaata hai.
+    const counted = teamStock.total + ownTotal;
+    const short = Math.max(0, snapshotTotal - counted);
+    if (short > 0) { teamStock.comm += short; teamStock.total += short; }
+    const stock = { vc4: teamStock.vc4 + ownParts.vc4, comm: teamStock.comm + ownParts.comm };
     stock.total = stock.vc4 + stock.comm;
-    const teamStock = { vc4: Math.max(0, stock.vc4 - ownParts.vc4), comm: Math.max(0, stock.comm - ownParts.comm) };
-    teamStock.total = teamStock.vc4 + teamStock.comm;
     const classMap = new Map(memberMap);
     ownMap.forEach((n, cls) => classMap.set(cls, (classMap.get(cls) || 0) + n));
-    fillClassMap(classMap, stock);
+    alignClassMap(classMap, stock);
     const result = {
-      stock, own: { ...ownParts, total: ownParts.vc4 + ownParts.comm }, agents: teamStock,
-      classRows: [...classMap.entries()].map(([cls, n]) => ({ cls, n }))
+      stock, own: { ...ownParts, total: ownTotal }, agents: teamStock,
+      classRows: [...classMap.entries()].sort((a, b) => num(b[1]) - num(a[1])).map(([cls, n]) => ({ cls, n })),
+      // Diagnostics — UI ko "kaise joda gaya" dikhaane ke liye; data sources ka bharosa bhi yahi se pata chalta hai
+      ownFrom, rollupOwnRow: !!rollupOwnRow, snapshot: { ...snapshot, total: snapshotTotal },
+      membersFrom: useDetailMembers && classMapTotal(detailMemberMap) ? 'detail' : 'report',
+      raw: { detailOwnTotal, reportOwnTotal: reportOwnParts.total, detailMemberTotal, memberReportTotal: memberReportParts.total }
     };
     tlStockCache.set(cacheKey, result);
     return result;
@@ -594,28 +702,35 @@ window.FF = window.FF || {};
     const n = norm(p.name);
     const ffRows = ffPeopleLookup();
     const allAgents = ffRows.rows;
-    const agents = (ffRows.byTl.get(n) || []).filter((a) => !a.tlExcluded);
-    const src = agents.find((a) => a.tlStockTotal != null) || agents[0] || null;
+    const underTl = (ffRows.byTl.get(n) || []).filter((a) => !a.tlExcluded);
+    const src = underTl.find((a) => a.tlStockTotal != null) || underTl[0] || null;
+    const tlId = (src && src.tlId) || p.sub || '';
+    // TL ki apni row (sheet me 'Agent name' = TL) agents se alag — count/jod me double count na ho
+    const selfSplit = splitTlSelfRow(underTl, p.name, tlId);
+    const agents = selfSplit.team, selfRow = selfSplit.self;
     const P = perf();
-    const sumK = (k) => U.sum(agents, (a) => num(a[k]));
+    const sumK = (k) => U.sum(underTl, (a) => num(a[k]));
     const avgVc4 = U.runRate(sumK('curVc4'), 'ff'), avgComm = U.runRate(sumK('curNvc4'), 'ff');
     const stockDetails = rowsOf('stockAgents');
-    const stockComposition = tlStockComposition('ff', p.name, (src && src.tlId) || p.sub, allAgents, stockDetails, stockDetails);
+    const stockComposition = tlStockComposition('ff', p.name, tlId, allAgents, stockDetails, stockDetails);
     const stock = stockComposition.stock;
-    const rowsA = agents.map((a) => {
+    const agentRow = (a, isSelf) => {
       const av = U.runRate(a.curVc4, 'ff'), avc = U.runRate(a.curNvc4, 'ff');
-      return { name: a.name, id: a.agentId || a.id, mobile: mobileFor(a.name, a.agentId || a.id, a.mobile), priority: a.priority || '', stockVc4: num(a.stockVc4), stockComm: num(a.stockNvc4), stockTotal: num(a.stockTotal), cur: num(a.curTotal), last: num(a.lastTotal), curVc4: num(a.curVc4), curComm: num(a.curNvc4), sugVc4: suggest(av, a.stockVc4), sugComm: suggest(avc, a.stockNvc4), sugVc4Gross: suggestGro(av), sugCommGross: suggestGro(avc) };
-    }).sort((x, y) => y.cur - x.cur);
+      return { name: a.name, id: a.agentId || a.id, mobile: mobileFor(a.name, a.agentId || a.id, a.mobile), priority: a.priority || '', status: a.agentStatus || '', lastActive: a.lastActive || '', isSelf: !!isSelf, stockVc4: num(a.stockVc4), stockComm: num(a.stockNvc4), stockTotal: num(a.stockTotal), cur: num(a.curTotal), last: num(a.lastTotal), curVc4: num(a.curVc4), curComm: num(a.curNvc4), sugVc4: suggest(av, a.stockVc4), sugComm: suggest(avc, a.stockNvc4), sugVc4Gross: suggestGro(av), sugCommGross: suggestGro(avc) };
+    };
+    const rowsA = agents.map((a) => agentRow(a, false)).sort((x, y) => y.cur - x.cur);
+    const selfA = selfRow ? agentRow(selfRow, true) : null;
     const ac = rowsOf('agentClass'), agRows = rowsOf('agents'), stk = rowsOf('stockAgents');
     const curYm = latestYm(ac.length ? ac : agRows), lastYm = U.prevMonthKey(curYm);
     const out = {
-      kind: 'ff-tl', channel: 'First Forward', ch: 'ff', name: p.name, id: (src && src.tlId) || p.sub || '', found: !!agents.length,
-      mobile: (src && src.tlMobile && !/^na$/i.test(src.tlMobile)) ? src.tlMobile : '', tl: { name: p.name, id: (src && src.tlId) || '', mobile: (src && src.tlMobile) || '' },
+      kind: 'ff-tl', channel: 'First Forward', ch: 'ff', name: p.name, id: tlId, found: !!underTl.length,
+      mobile: (src && src.tlMobile && !/^na$/i.test(src.tlMobile)) ? src.tlMobile : '', tl: { name: p.name, id: tlId, mobile: (src && src.tlMobile) || '' },
       status: (src && src.tlStatus) || '', lastActive: (src && src.tlLastActive) || '', priority: (src && prioOf(src.tlPriority)) || '', commPriority: (src && prioOf(src.tlCommPriority)) || '',
       stock, tlStock: { ...stock, has: true, own: stockComposition.own, agents: stockComposition.agents },
-      dispatch: { days: suggestDays(), avgVc4, avgComm, cover: avgVc4 > 0 ? stock.vc4 / avgVc4 : null, sugVc4: suggest(avgVc4, stock.vc4), sugComm: suggest(avgComm, stock.comm), sugVc4Gross: suggestGro(avgVc4), sugCommGross: suggestGro(avgComm), sumAgentVc4: U.sum(rowsA, (r) => r.sugVc4), sumAgentComm: U.sum(rowsA, (r) => r.sugComm), sumAgentVc4Gross: U.sum(rowsA, (r) => r.sugVc4Gross), sumAgentCommGross: U.sum(rowsA, (r) => r.sugCommGross) },
+      stockSplit: { ownFrom: stockComposition.ownFrom, membersFrom: stockComposition.membersFrom, rollupOwnRow: stockComposition.rollupOwnRow, snapshot: stockComposition.snapshot, raw: stockComposition.raw },
+      dispatch: { days: suggestDays(), avgVc4, avgComm, cover: avgVc4 > 0 ? stock.vc4 / avgVc4 : null, sugVc4: suggest(avgVc4, stock.vc4), sugComm: suggest(avgComm, stock.comm), sugVc4Gross: suggestGro(avgVc4), sugCommGross: suggestGro(avgComm), sumAgentVc4: U.sum(rowsA, (r) => r.sugVc4), sumAgentComm: U.sum(rowsA, (r) => r.sugComm), sumAgentVc4Gross: U.sum(rowsA, (r) => r.sugVc4Gross), sumAgentCommGross: U.sum(rowsA, (r) => r.sugCommGross), sumSelfVc4: selfA ? selfA.sugVc4 : 0, sumSelfComm: selfA ? selfA.sugComm : 0, sumSelfVc4Gross: selfA ? selfA.sugVc4Gross : 0, sumSelfCommGross: selfA ? selfA.sugCommGross : 0 },
       totals: { curVc4: sumK('curVc4'), curComm: sumK('curNvc4'), curTotal: sumK('curTotal'), lastVc4: sumK('lastVc4'), lastComm: sumK('lastNvc4'), lastTotal: sumK('lastTotal') },
-      agents: rowsA, agentCount: agents.length
+      agents: rowsA, selfAgent: selfA, agentCount: rowsA.length, teamSize: underTl.length
     };
     // Issuance totals already come from the corrected Performance/EIR path above. Keep REPORT's
     // TL snapshot out of the profile totals so the drawer cannot reintroduce the old mismatch.
@@ -633,7 +748,7 @@ window.FF = window.FF || {};
       Object.assign(out.totals, { curVc4: exactTotals.vc4.cur, curComm: exactTotals.comm.cur, curTotal: exactTotals.total.cur, lastVc4: exactTotals.vc4.last, lastComm: exactTotals.comm.last, lastTotal: exactTotals.total.last });
     }
     out.trend = trendOf(agRows, (r) => norm(r.tlName) === n && (!r.channel || /first/i.test(r.channel)), (r) => r.ym);
-    out.week = agents.reduce((acc, a) => acc.map((v, i) => v + num((a.week || [])[i])), [0, 0, 0, 0, 0, 0, 0]);
+    out.week = underTl.reduce((acc, a) => acc.map((v, i) => v + num((a.week || [])[i])), [0, 0, 0, 0, 0, 0, 0]);
     out.weekLabels = safeCall(() => P.dayLabels && P.dayLabels(), []) || [];
     return out;
   }
@@ -745,20 +860,28 @@ window.FF = window.FF || {};
     const allReports = gvIndex.rows;
     const list = (gvIndex.byTl.get(n) || []).filter((r) => !safeCall(() => FF.config.isDirectAgent(r, 'gv'), false)).map((r) => ({ ...r }));
     const src = list[0] || null;
+    const tlId = (src && src.tlId) || p.sub || '';
+    // GV sheet bhi TL ko usi ki team ki "agent" row bana kar de sakta hai (uska apna stock) — use agents
+    // se alag karna zaruri, warna 'Agents' count aur agent rows ka jod TL ke stock se dubara jud jaata hai.
+    const selfSplit = splitTlSelfRow(list, p.name, tlId);
+    const team = selfSplit.team, selfRow = selfSplit.self;
     const sumK = (k) => U.sum(list, (r) => num(r[k]));
     const avgVc4 = U.runRate(sumK('curVc4'), 'gv'), avgComm = U.runRate(sumK('curComm'), 'gv');
-    const stockComposition = tlStockComposition('gv', p.name, (src && src.tlId) || p.sub, allReports, gvRows('stockAgent'), gvRows('stockAgentClass'));
+    const stockComposition = tlStockComposition('gv', p.name, tlId, allReports, gvRows('stockAgent'), gvRows('stockAgentClass'));
     const stock = stockComposition.stock;
-    const rowsA = list.map((r) => {
+    const agentRow = (r, isSelf) => {
       const av = gvDaily(r, r.curVc4), avc = gvDaily(r, r.curComm);
-      return { name: r.agentName, id: r.agentId, mobile: mobileFor(r.agentName, r.agentId, r.mobile), priority: prioOf(r.priority), stockVc4: num(r.stockVc4), stockComm: num(r.stockComm), stockTotal: num(r.stockTotal), cur: num(r.curTotal), last: num(r.lastTotal), curVc4: num(r.curVc4), curComm: num(r.curComm), sugVc4: suggest(av, r.stockVc4), sugComm: suggest(avc, r.stockComm), sugVc4Gross: suggestGro(av), sugCommGross: suggestGro(avc) };
-    }).sort((x, y) => y.cur - x.cur);
+      return { name: r.agentName, id: r.agentId, mobile: mobileFor(r.agentName, r.agentId, r.mobile), priority: prioOf(r.priority), status: r.agentStatus || '', lastActive: r.agentLastActive || r.lastActive || '', isSelf: !!isSelf, stockVc4: num(r.stockVc4), stockComm: num(r.stockComm), stockTotal: num(r.stockTotal), cur: num(r.curTotal), last: num(r.lastTotal), curVc4: num(r.curVc4), curComm: num(r.curComm), sugVc4: suggest(av, r.stockVc4), sugComm: suggest(avc, r.stockComm), sugVc4Gross: suggestGro(av), sugCommGross: suggestGro(avc) };
+    };
+    const rowsA = team.map((r) => agentRow(r, false)).sort((x, y) => y.cur - x.cur);
+    const selfA = selfRow ? agentRow(selfRow, true) : null;
     const out = {
-      kind: 'gv-tl', channel: 'GV Partner', ch: 'gv', name: p.name, id: (src && src.tlId) || p.sub || '', found: !!list.length,
-      mobile: (src && src.tlMobile) || '', tl: { name: p.name, id: (src && src.tlId) || '' }, status: '', lastActive: '', priority: '', stock, tlStock: { ...stock, has: true, own: stockComposition.own, agents: stockComposition.agents },
-      dispatch: { days: suggestDays(), avgVc4, avgComm, cover: avgVc4 > 0 ? stock.vc4 / avgVc4 : null, sugVc4: suggest(avgVc4, stock.vc4), sugComm: suggest(avgComm, stock.comm), sugVc4Gross: suggestGro(avgVc4), sugCommGross: suggestGro(avgComm), sumAgentVc4: U.sum(rowsA, (r) => r.sugVc4), sumAgentComm: U.sum(rowsA, (r) => r.sugComm), sumAgentVc4Gross: U.sum(rowsA, (r) => r.sugVc4Gross), sumAgentCommGross: U.sum(rowsA, (r) => r.sugCommGross) },
+      kind: 'gv-tl', channel: 'GV Partner', ch: 'gv', name: p.name, id: tlId, found: !!list.length,
+      mobile: (src && src.tlMobile) || '', tl: { name: p.name, id: tlId }, status: '', lastActive: '', priority: '', stock, tlStock: { ...stock, has: true, own: stockComposition.own, agents: stockComposition.agents },
+      stockSplit: { ownFrom: stockComposition.ownFrom, membersFrom: stockComposition.membersFrom, rollupOwnRow: stockComposition.rollupOwnRow, snapshot: stockComposition.snapshot, raw: stockComposition.raw },
+      dispatch: { days: suggestDays(), avgVc4, avgComm, cover: avgVc4 > 0 ? stock.vc4 / avgVc4 : null, sugVc4: suggest(avgVc4, stock.vc4), sugComm: suggest(avgComm, stock.comm), sugVc4Gross: suggestGro(avgVc4), sugCommGross: suggestGro(avgComm), sumAgentVc4: U.sum(rowsA, (r) => r.sugVc4), sumAgentComm: U.sum(rowsA, (r) => r.sugComm), sumAgentVc4Gross: U.sum(rowsA, (r) => r.sugVc4Gross), sumAgentCommGross: U.sum(rowsA, (r) => r.sugCommGross), sumSelfVc4: selfA ? selfA.sugVc4 : 0, sumSelfComm: selfA ? selfA.sugComm : 0, sumSelfVc4Gross: selfA ? selfA.sugVc4Gross : 0, sumSelfCommGross: selfA ? selfA.sugCommGross : 0 },
       totals: { curVc4: sumK('curVc4'), curComm: sumK('curComm'), curTotal: sumK('curTotal'), lastVc4: sumK('lastVc4'), lastComm: sumK('lastComm'), lastTotal: sumK('lastTotal') },
-      agents: rowsA, agentCount: list.length
+      agents: rowsA, selfAgent: selfA, agentCount: rowsA.length, teamSize: list.length
     };
     // TL priority = sabse high agent priority
     out.priority = rowsA.some((r) => r.priority === 'High') ? 'High' : rowsA.some((r) => r.priority === 'Medium') ? 'Medium' : rowsA.length ? 'Low' : '';
@@ -771,7 +894,7 @@ window.FF = window.FF || {};
     // exact team issuance data, absent agents are explicitly zeroed so their sum stays exact.
     applyExactGvAgentMonths(list, exactTeamIssuance, globalCurYm, globalLastYm);
     list.forEach((agent) => {
-      const row = rowsA.find((candidate) => sameGvAgent(candidate, agent));
+      const row = rowsA.find((candidate) => sameGvAgent(candidate, agent)) || (selfA && sameGvAgent(selfA, agent) ? selfA : null);
       if (!row) return;
       Object.assign(row, {
         cur: num(agent.curTotal), last: num(agent.lastTotal),
@@ -967,6 +1090,35 @@ window.FF = window.FF || {};
     return blocks.length ? `<div class="mp-charts">${blocks.join('')}</div>` : '';
   }
 
+  /** 🧑‍💼 TL ke agents — TL ki APNI row sabse upar alag dikhti hai (asli sheets me TL bhi apni team ki
+   *  ek "agent" row hota hai) aur neeche footer reconcile karta hai: agents ka jod + TL ka own = TL total.
+   *  Isse TL ka stock "agents ke sath" wali line me dobara nahi judta (double count fix) aur har stock cell
+   *  click par wahi detail khulti hai jo number dikha raha hai. */
+  function tlAgentsTable(pr) {
+    const d = pr.dispatch || {}, ts = pr.tlStock || {}, s = pr.stock || {}, t = pr.totals || {};
+    const rows = (pr.agents || []).slice();
+    const selfA = pr.selfAgent || null;
+    if (!rows.length && !selfA) return '';
+    const tlSpec = `src=${pr.ch}&scope=stock&tl=${encodeURIComponent(pr.name)}`;
+    const sum = (k, list) => U.sum(list || rows, (a) => num(a[k]));
+    const own = ts.own || { vc4: 0, comm: 0, total: 0 }, ag = ts.agents || { vc4: 0, comm: 0, total: 0 };
+    const rowHtml = (a) => {
+      const spec = `src=${pr.ch}&scope=stock&agent=${encodeURIComponent(a.name)}${a.id ? `&agentId=${encodeURIComponent(a.id)}` : ''}`;
+      const drill = (key) => `<td class="num mp-drill" data-kpi="${esc(spec)}" role="button" tabindex="0" title="${esc(a.name)} ka stock detail">${fmt(a[key])}</td>`;
+      return `<tr class="clickable${a.isSelf ? ' mp-selfrow' : ''}" data-mp-agent="${esc(a.name)}" data-mp-kind="${pr.ch}-agent" data-mp-id="${esc(a.id || '')}"><td>${a.isSelf ? '👤 ' : ''}<b>${esc(a.name)}</b>${a.isSelf ? '<span class="mp-tag-self">TL · apna stock</span>' : ''}<small class="cell-sub">${esc(a.id || '')}${a.status ? ` · ${esc(a.status)}` : ''}${a.lastActive ? ` · last ${esc(a.lastActive)}` : ''}</small></td><td>${mobileCell(a.mobile)}</td><td>${prioChip(a.priority)}</td>${drill('stockVc4')}${drill('stockComm')}<td class="num">${fmt(a.last)}</td><td class="num">${fmt(a.cur)}</td><td class="num">${U.sugCell(a.sugVc4, a.sugVc4Gross || 0)}</td><td class="num">${U.sugCell(a.sugComm, a.sugCommGross || 0)}</td></tr>`;
+    };
+    const footRow = (label, vc4, comm, last, cur, sugVc4, sugComm, cls, spec) => `<tr class="clickable ${cls}"${spec ? ` data-kpi="${esc(spec)}" role="button" tabindex="0" title="In hi rows ki detail"` : ''}><td colspan="3">${label}</td><td class="num">${fmt(vc4)}</td><td class="num">${fmt(comm)}</td><td class="num">${fmt(last)}</td><td class="num">${fmt(cur)}</td><td class="num">${U.sugCell(sugVc4, 0)}</td><td class="num">${U.sugCell(sugComm, 0)}</td></tr>`;
+    const agentsTotal = { vc4: sum('stockVc4'), comm: sum('stockComm'), last: sum('last'), cur: sum('cur') };
+    const selfTotals = selfA ? { vc4: num(selfA.stockVc4), comm: num(selfA.stockComm), last: num(selfA.last), cur: num(selfA.cur) } : { vc4: 0, comm: 0, last: 0, cur: 0 };
+    // Footer = KPI ka composition (own + agents = TL total hamesha barabar); upar ki rows ka jod alag ho
+    // (sheet beech me load ho rahi ho) to note saaf batata hai — number chhupate nahi, explain karte hain.
+    const rowGap = Math.abs((agentsTotal.vc4 + agentsTotal.comm + selfTotals.vc4 + selfTotals.comm) - (ag.total + own.total));
+    const note = rowGap > 1
+      ? `<p class="dim small">ℹ️ Footer ke numbers KPI se aate hain (stock rows + sheet ke snapshot ka reconcile) — isliye upar ki rows ka jod (${fmt(agentsTotal.vc4 + agentsTotal.comm + selfTotals.vc4 + selfTotals.comm)}) thoda alag ho sakta hai jab sheet abhi load ho rahi ho. TL total hamesha = own <b>${fmt(own.total)}</b> + agents <b>${fmt(ag.total)}</b> = <b>${fmt(s.total)}</b>.</p>`
+      : '';
+    return `<section class="mp-sec"><h4>🧑‍💼 TL ke agents · ${fmt(rows.length)}${selfA ? ' <span class="dim small">+ TL (apna stock alag)</span>' : ''}</h4><p class="dim small">Sug. = avg/day × ${d.days} din · <b>stock ke baad</b> (net)${sugMode() === 'both' ? ' · <span class="sug-wo-inline">w/o stock = bina stock ghataye (gross)</span>' : ''} · <span class="mp-linkish" data-kpi="${esc(`src=${pr.ch}&scope=people&tl=${encodeURIComponent(pr.name)}&self=0&sort=stock`)}" role="button" tabindex="0" title="Poora agents list">Poori list 👉</span></p><div class="table-wrap tall"><table class="tbl compact"><thead><tr><th>Agent</th><th>Mobile</th><th>Priority</th><th class="num">VC4 stock</th><th class="num">Comm stock</th><th class="num">Last</th><th class="num">This month</th><th class="num">Sug. VC4</th><th class="num">Sug. Comm</th></tr></thead><tbody>${selfA ? rowHtml(selfA) : ''}${rows.map(rowHtml).join('')}</tbody><tfoot>${rows.length ? footRow(`<span class="mp-linkish">🧑‍💼 Agents total (${fmt(rows.length)})</span>`, ag.vc4, ag.comm, agentsTotal.last, agentsTotal.cur, d.sumAgentVc4, d.sumAgentComm, '', `${tlSpec}&part=team`) : ''}${selfA || own.total ? footRow(`👤 ${esc(selfA ? selfA.name : pr.name)} ke paas (TL own)`, own.vc4, own.comm, selfTotals.last, selfTotals.cur, d.sumSelfVc4, d.sumSelfComm, 'mp-selfrow', `${tlSpec}&part=own`) : ''}${footRow('= TL TOTAL (own + agents)', s.vc4, s.comm, t.lastTotal, t.curTotal, d.sugVc4, d.sugComm, 'row-total', tlSpec)}</tfoot></table></div>${note}</section>`;
+  }
+
   function html(pr) {
     if (!pr) return '';
     const isTl = /tl$/.test(pr.kind);
@@ -977,35 +1129,45 @@ window.FF = window.FF || {};
     const cls = pr.classes || [];
     const g = groupSummary(cls);
     const noData = !pr.found ? `<div class="ms-empty small"><b>REPORT me is ${isTl ? 'TL' : 'agent'} ki row nahi mili</b><p class="dim">Performance / GV REPORT tab load hone ke baad poori profile aayegi (naam spelling bhi match honi chahiye).</p></div>` : '';
+    const scopeParam = isTl ? `tl=${encodeURIComponent(pr.name)}` : `agent=${encodeURIComponent(pr.name)}${pr.id ? `&agentId=${encodeURIComponent(pr.id)}` : ''}`;
+    const stockSpec = `src=${pr.ch}&scope=stock&${scopeParam}`;
+    const tlStockSpec = !isTl && pr.tl && pr.tl.name ? `src=${pr.ch}&scope=stock&tl=${encodeURIComponent(pr.tl.name)}` : '';
+    const curSpec = `src=${pr.ch}&scope=mtd&ym=${encodeURIComponent(m.cur || '')}&${scopeParam}`;
+    const lastSpec = `src=${pr.ch}&scope=month&ym=${encodeURIComponent(m.last || '')}&${scopeParam}`;
+    // v3.40 — har KPI/cell ki apni detail: card ka number == drawer ka number (`self=0` se TL ki apni row
+    // agents ki list me se bahar rehti hai, isliye "Agents 2" par click 2 agents hi dikhayega).
+    const peopleSpec = `src=${pr.ch}&scope=people&${isTl ? `tl=${encodeURIComponent(pr.name)}&self=0&sort=stock` : `agent=${encodeURIComponent(pr.name)}`}`;
+    const split = pr.stockSplit || {};
+    const ownBase = isTl ? stockSpec : tlStockSpec;
+    const ownAgentsChips = ts.own && ts.agents && ownBase
+      ? `<span class="mp-part own" data-kpi="${esc(`${ownBase}&part=own`)}" role="button" tabindex="0" title="Sirf TL ke paas (own) stock — click par wahin ki rows">Own ${fmt(ts.own.total)}</span> + <span class="mp-part team" data-kpi="${esc(`${ownBase}&part=team`)}" role="button" tabindex="0" title="Sirf agents ke paas stock — click par wahin ki rows">agents ${fmt(ts.agents.total)}</span>`
+      : tlStockLine;
+    const OWN_SRC = { detail: 'stock detail me TL ki APNI rows se', report: 'REPORT ki TL row se', 'snapshot-team': "sheet ke 'TL stock' total me se agents ka jod ghatane se" };
+    const stockNote = isTl ? `<p class="mp-note stock">📦 <b>Stock ka hisaab</b> — TL ke paas <b>${fmt((ts.own || {}).total)}</b> + agents ke paas <b>${fmt((ts.agents || {}).total)}</b> = TL total <b>${fmt(s.total)}</b> (VC4 ${fmt(s.vc4)} · Commercial ${fmt(s.comm)}). Own ${esc(OWN_SRC[split.ownFrom] || 'TL ke paas abhi koi stock nahi')}; agents ka jod ${split.membersFrom === 'detail' ? 'stock detail rows' : 'REPORT agent rows'} se${split.rollupOwnRow ? ' · ⚠️ sheet me TL ki row poore team ka rollup thi, use ALAG se nahi joda (warna TL ka stock do baar judta)' : ''}${split.snapshot && split.snapshot.total ? ` · sheet ka "TL's stock" <b>${fmt(split.snapshot.total)}</b>${Math.abs(num(split.snapshot.total) - num(s.total)) <= 1 ? ' ✓ match' : ` (profile ${fmt(s.total)} — rows load hote hi set hoga)`}` : ''} <span class="dim">— koi double count nahi: own + agents = total.</span></p>` : '';
     const head = `<div class="mp-head">
       <span class="ms-avatar">${esc(pr.name.slice(0, 1).toUpperCase())}</span>
       <div class="mp-id"><b>${esc(pr.name)}</b><small>${esc(pr.channel)} · ${isTl ? 'Team Leader' : 'Agent'}${pr.id ? ` · ID ${esc(pr.id)}` : ''}${pr.direct ? ` · <span class="direct-chip">🚫 ${esc(pr.directLabel || 'Direct')}</span>` : ''}</small></div>
-      <div class="mp-prio">${prioChip(pr.priority)}${pr.commPriority ? `<small class="dim">Comm: ${esc(pr.commPriority)}</small>` : ''}</div>
+      <div class="mp-prio">${isTl && pr.priority ? `<span class="mp-linkish" data-kpi="${esc(`${peopleSpec}&level=${encodeURIComponent(pr.priority)}`)}" role="button" tabindex="0" title="${esc(pr.priority)} priority wale agents">${prioChip(pr.priority)}</span>` : prioChip(pr.priority)}${pr.commPriority ? `<small class="dim">Comm: ${esc(pr.commPriority)}</small>` : ''}</div>
     </div>
     <div class="mp-cells">
       ${cell(isTl ? 'TL mobile' : 'Mobile', mobileCell(pr.mobile))}
-      ${isTl ? cell('Agents', `${fmt(pr.agentCount)}`) : cell('TL', pr.direct ? `<span class="direct-chip">🚫 ${esc(pr.directLabel || 'Direct')}</span>` : esc((pr.tl && pr.tl.name) || '—'))}
+      ${isTl ? cell('Agents', `<span class="mp-linkish" data-kpi="${esc(peopleSpec)}" role="button" tabindex="0" title="In agents ki poori list">${fmt(pr.agentCount)} 👉</span>${pr.selfAgent ? '<small class="dim"> + TL (apna stock alag)</small>' : ''}`) : cell('TL', pr.direct ? `<span class="direct-chip">🚫 ${esc(pr.directLabel || 'Direct')}</span>` : esc((pr.tl && pr.tl.name) || '—'))}
       ${isTl ? '' : cell('TL ID', esc((pr.tl && pr.tl.id) || '—'))}
       ${isTl ? '' : cell("TL's mobile", mobileCell(pr.tl && pr.tl.mobile))}
       ${cell('Status', esc(pr.status || '—'))}
       ${cell('Last active', esc(pr.lastActive || '—'))}
       ${growthCell(pr)}
     </div>`;
-    const scopeParam = isTl ? `tl=${encodeURIComponent(pr.name)}` : `agent=${encodeURIComponent(pr.name)}${pr.id ? `&agentId=${encodeURIComponent(pr.id)}` : ''}`;
-    const stockSpec = `src=${pr.ch}&scope=stock&${scopeParam}`;
-    const tlStockSpec = !isTl && pr.tl && pr.tl.name ? `src=${pr.ch}&scope=stock&tl=${encodeURIComponent(pr.tl.name)}` : '';
-    const curSpec = `src=${pr.ch}&scope=mtd&ym=${encodeURIComponent(m.cur || '')}&${scopeParam}`;
-    const lastSpec = `src=${pr.ch}&scope=month&ym=${encodeURIComponent(m.last || '')}&${scopeParam}`;
     const kpis = `<div class="mp-kpis">
-      ${kpi(isTl ? 'TL stock (total)' : 'Agent stock', fmt(s.total), `${isTl && tlStockLine ? `${tlStockLine} · ` : ''}VC4 ${fmt(s.vc4)} · Commercial ${fmt(s.comm)}`, 'k1', stockSpec)}
-      ${isTl ? '' : kpi('TL stock', ts.has ? fmt(ts.total) : '—', ts.has ? `${tlStockLine ? `${tlStockLine} · ` : ''}VC4 ${fmt(ts.vc4)} · Comm ${fmt(ts.comm)}` : (pr.direct ? 'Direct — koi TL nahi' : ''), 'k2', tlStockSpec)}
-      ${kpi('Dispatch priority', prioChip(pr.priority), pr.calc && pr.calc.total.cover != null ? `Cover ${fmt(pr.calc.total.cover, true)} din (all tags)` : (d.cover != null ? `Cover ${fmt(d.cover, true)} din` : ''), 'k3', stockSpec)}
+      ${kpi(isTl ? 'TL stock (total)' : 'Agent stock', fmt(s.total), `${isTl && ownAgentsChips ? `${ownAgentsChips} · ` : ''}VC4 ${fmt(s.vc4)} · Commercial ${fmt(s.comm)}`, 'k1', stockSpec)}
+      ${isTl ? '' : kpi('TL stock', ts.has ? fmt(ts.total) : '—', ts.has ? `${ownAgentsChips ? `${ownAgentsChips} · ` : ''}VC4 ${fmt(ts.vc4)} · Comm ${fmt(ts.comm)}` : (pr.direct ? 'Direct — koi TL nahi' : ''), 'k2', tlStockSpec)}
+      ${kpi('Dispatch priority', prioChip(pr.priority), (pr.calc && pr.calc.total.cover != null ? `Cover ${fmt(pr.calc.total.cover, true)} din (all tags)` : (d.cover != null ? `Cover ${fmt(d.cover, true)} din` : '')) + (isTl ? ` · <span class="mp-linkish">agents ki list 👉</span>` : ''), 'k3', isTl ? peopleSpec : stockSpec)}
       ${kpi(pr.tagRequired ? `Tags required · VC4 · ${d.days} din` : `Suggested VC4 · ${d.days} din`, sg.vc4, `avg ${fmt(d.avgVc4, true)}/day × ${d.days} din${pr.tagRequired ? '' : ` · stock − ${fmt(s.vc4)}`}`, pr.tagRequired ? 'k7' : 'k4', `${curSpec}&group=VC4`)}
       ${kpi(pr.tagRequired ? 'Tags required · Comm.' : 'Suggested Commercial', sg.comm, `avg ${fmt(d.avgComm, true)}/day${pr.tagRequired ? '' : ` · stock − ${fmt(s.comm)}`}`, pr.tagRequired ? 'k7' : 'k5', `${curSpec}&group=COMM`)}
       ${kpi('Issued this month', fmt(t.curTotal), `VC4 ${fmt(t.curVc4)} · Comm ${fmt(t.curComm)}`, 'k6', curSpec)}
       ${kpi('Issued last month', fmt(t.lastTotal), `VC4 ${fmt(t.lastVc4)} · Comm ${fmt(t.lastComm)}`, 'k8', lastSpec)}
     </div>
-    <p class="mp-note ${pr.tagRequired ? 'tag' : ''}">${sg.note}</p>`;
+    <p class="mp-note ${pr.tagRequired ? 'tag' : ''}">${sg.note}</p>${stockNote}`;
     const summary = `<table class="tbl compact mp-summary"><thead><tr><th></th><th class="num">${esc(monthLabel(m.last) || 'Last month')}</th><th class="num">${esc(monthLabel(m.cur) || 'This month')}</th><th class="num">Stock</th></tr></thead><tbody>
       <tr class="clickable" data-kpi="${esc(`${curSpec}&group=VC4`)}"><td><b>VC4</b></td><td class="num">${fmt(g.vc4.last)}</td><td class="num">${fmt(g.vc4.cur)}</td><td class="num">${fmt(g.vc4.stock)}</td></tr>
       <tr class="clickable" data-kpi="${esc(`${curSpec}&group=COMM`)}"><td><b>Commercial</b><small class="cell-sub">VC20 · VC5+ …</small></td><td class="num">${fmt(g.comm.last)}</td><td class="num">${fmt(g.comm.cur)}</td><td class="num">${fmt(g.comm.stock)}</td></tr>
@@ -1013,9 +1175,7 @@ window.FF = window.FF || {};
     const clsTable = cls.length ? `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Class</th><th class="num">${esc(monthLabel(m.last) || 'Last month')}</th><th class="num">${esc(monthLabel(m.cur) || 'This month')}</th><th class="num">Growth</th><th class="num">Stock</th></tr></thead><tbody>
       ${cls.map((r) => `<tr class="clickable" data-kpi="${esc(`${r.cur > 0 ? curSpec : lastSpec}&cls=${encodeURIComponent(r.cls)}`)}"><td><b>${esc(r.cls)}</b></td><td class="num">${fmt(r.last)}</td><td class="num">${fmt(r.cur)}</td><td class="num">${r.last ? U.pctHtml(((r.cur - r.last) / r.last) * 100) : '—'}</td><td class="num">${fmt(r.stock)}</td></tr>`).join('')}
       </tbody><tfoot><tr class="row-total"><td>Total</td><td class="num">${fmt(g.total.last)}</td><td class="num">${fmt(g.total.cur)}</td><td class="num">${g.total.last ? U.pctHtml(((g.total.cur - g.total.last) / g.total.last) * 100) : '—'}</td><td class="num">${fmt(g.total.stock)}</td></tr></tfoot></table></div>` : '<p class="dim small">Class-wise data abhi load nahi hua.</p>';
-    const agentsTable = isTl && pr.agents && pr.agents.length ? `<section class="mp-sec"><h4>🧑‍💼 TL ke agents · ${fmt(pr.agents.length)}</h4><p class="dim small">Sug. = avg/day × ${d.days} din · <b>stock ke baad</b> (net)${sugMode() === 'both' ? ' · <span class="sug-wo-inline">w/o stock = bina stock ghataye (gross)</span>' : ''}</p><div class="table-wrap tall"><table class="tbl compact"><thead><tr><th>Agent</th><th>Mobile</th><th>Priority</th><th class="num">VC4 stock</th><th class="num">Comm stock</th><th class="num">Last</th><th class="num">This month</th><th class="num">Sug. VC4</th><th class="num">Sug. Comm</th></tr></thead><tbody>
-      ${pr.agents.slice(0, 200).map((a) => `<tr class="clickable" data-mp-agent="${esc(a.name)}" data-mp-kind="${pr.ch}-agent" data-mp-id="${esc(a.id || '')}"><td><b>${esc(a.name)}</b><small class="cell-sub">${esc(a.id || '')}</small></td><td>${mobileCell(a.mobile)}</td><td>${prioChip(a.priority)}</td><td class="num">${fmt(a.stockVc4)}</td><td class="num">${fmt(a.stockComm)}</td><td class="num">${fmt(a.last)}</td><td class="num">${fmt(a.cur)}</td><td class="num">${U.sugCell(a.sugVc4, a.sugVc4Gross || 0)}</td><td class="num">${U.sugCell(a.sugComm, a.sugCommGross || 0)}</td></tr>`).join('')}
-      </tbody><tfoot><tr class="row-total"><td colspan="3">TL total</td><td class="num">${fmt(U.sum(pr.agents, (a) => a.stockVc4))}</td><td class="num">${fmt(U.sum(pr.agents, (a) => a.stockComm))}</td><td class="num">${fmt(U.sum(pr.agents, (a) => a.last))}</td><td class="num">${fmt(U.sum(pr.agents, (a) => a.cur))}</td><td class="num">${U.sugCell(d.sumAgentVc4, d.sumAgentVc4Gross || 0)}</td><td class="num">${U.sugCell(d.sumAgentComm, d.sumAgentCommGross || 0)}</td></tr></tfoot></table></div></section>` : '';
+    const agentsTable = isTl ? tlAgentsTable(pr) : '';
     const actions = `<div class="mp-actions"><button class="btn small primary" data-mp-pdf>📄 PDF</button><button class="btn small" data-mp-csv>⬇ CSV</button><button class="btn small" data-mp-copy>📋 Copy</button><button class="btn small" data-mp-wa>📲 WhatsApp</button>${isTl ? '' : `<button class="btn small" data-mp-a360="${esc(pr.name)}">👁 Agent 360</button>`}<a class="btn small" href="#/masterStock?q=${encodeURIComponent(pr.name)}">🗄️ Register / tags</a></div>`;
     const partial = pr.partial ? '<div class="mp-partial dim small" role="status">⏳ Kuch data abhi load ho raha hai (Google Sheet slow hai) — numbers poore hote hi apne aap update ho jayenge.</div>' : '';
     return `<div class="mp">${partial}${noData}${head}${kpis}
@@ -1029,6 +1189,20 @@ window.FF = window.FF || {};
   }
 
   // ------------------------------------------------------------------ export / share
+  /** CSV / WhatsApp / PDF me bhi wahi hisaab jo drawer me dikhta hai: TL ki apni row ALAG (agents ke jod
+   *  me nahi), phir reconcile footer — "own + agents = TL total". Exports aur screen par number alag na ho. */
+  function tlExport(pr) {
+    const ts = pr.tlStock || {}, s = pr.stock || {}, t = pr.totals || {}, d = pr.dispatch || {};
+    const own = ts.own || { vc4: 0, comm: 0, total: 0 }, ag = ts.agents || { vc4: 0, comm: 0, total: 0 };
+    const rows = (pr.agents || []).slice();
+    const selfA = pr.selfAgent || null;
+    return {
+      own, ag, s, t, d, rows, selfA, list: selfA ? [selfA, ...rows] : rows,
+      sum: (k) => U.sum(rows, (a) => num(a[k])),
+      line: `TL ke paas (own) ${fmt(own.total)} + agents ke paas ${fmt(ag.total)} = TL total ${fmt(s.total)}`,
+      foot: `Hisaab: TL ki apni row agents ke jod me ALAG dikhi hai — TL ka stock do baar nahi judta.`
+    };
+  }
   function csvRows(pr) {
     const d = pr.dispatch || {}, s = pr.stock || {}, t = pr.totals || {}, ts = pr.tlStock || {}, p = pr.projT1 || {}, b = p.basis || {};
     const g = groupSummary(pr.classes || []);
@@ -1037,16 +1211,20 @@ window.FF = window.FF || {};
       ['Growth % (REPORT)', pr.growthNum === null || pr.growthNum === undefined ? '' : Number(pr.growthNum.toFixed(1))], ['Data till (run-rate basis)', b.label || ''],
       ['Expected month-end', p.total || ''], ['Expected month-end · sheet', p.sheet || ''],
       ['Stock VC4', s.vc4], ['Stock Commercial', s.comm], ['Stock total', s.total], ['TL stock total', ts.has ? ts.total : ''],
-      ...(ts.own && ts.agents ? [['TL own stock', ts.own.total], ['TL agents stock', ts.agents.total]] : []),
+      ...(ts.own && ts.agents ? [['TL own stock (TL ke paas)', ts.own.total], ['TL agents stock (agents ke paas)', ts.agents.total], ['Stock formula', 'own + agents = TL total (koi double count nahi)']] : []),
+      ['Stock hisaab (source)', (/tl$/.test(pr.kind) && pr.stockSplit ? `${pr.stockSplit.ownFrom || 'none'}${pr.stockSplit.rollupOwnRow ? ' · report TL row = team rollup (alag se nahi joda)' : ''}` : '')],
       ['Run-rate basis', `issued ÷ ${(pr.calc && pr.calc.total.elapsed) || ''} din (${U.basisText(pr.ch, b)})`], ['Avg VC4/day', d.avgVc4], ['Suggested VC4' + (pr.tagRequired ? ' (tags)' : '') + ' · stock ke baad (net)', d.sugVc4], ['Suggested VC4 · bina stock (gross)', d.sugVc4Gross || 0], ['Suggested Commercial' + (pr.tagRequired ? ' (tags)' : '') + ' · stock ke baad (net)', d.sugComm], ['Suggested Commercial · bina stock (gross)', d.sugCommGross || 0],
       ['Total run-rate/day', pr.calc ? pr.calc.total.rate : ''], ['Total required (× days)', pr.calc ? pr.calc.total.required : ''], ['Total dispatch WITH stock', pr.calc ? pr.calc.total.net : ''], ['Total dispatch W/O stock', pr.calc ? pr.calc.total.gross : ''], ['Total cover (days)', pr.calc && pr.calc.total.cover != null ? pr.calc.total.cover : ''], ['Issued this month', t.curTotal], ['Issued last month', t.lastTotal], ['', ''], ['Class', `${(pr.months || {}).last || 'Last'} | ${(pr.months || {}).cur || 'This'} | Stock`]];
     (pr.classes || []).forEach((r) => rows.push([r.cls, r.last, r.cur, r.stock]));
     rows.push(['GRAND TOTAL', g.total.last || t.lastTotal || 0, g.total.cur || t.curTotal || 0, g.total.stock || s.total || 0]);
-    if (pr.agents && pr.agents.length) {
+    const E = tlExport(pr);
+    if (E.list.length) {
       rows.push(['', '']);
       rows.push(['Agent', 'ID', 'Mobile', 'Priority', 'VC4 stock', 'Comm stock', 'Last', 'This', 'Sug VC4 (stock −)', 'Sug VC4 (bina stock)', 'Sug Comm (stock −)', 'Sug Comm (bina stock)']);
-      pr.agents.forEach((a) => rows.push([a.name, a.id, canContacts() ? a.mobile : '', a.priority, a.stockVc4, a.stockComm, a.last, a.cur, a.sugVc4, a.sugVc4Gross || 0, a.sugComm, a.sugCommGross || 0]));
-      rows.push(['TEAM GRAND TOTAL', `${pr.agents.length} Agents`, '', '', U.sum(pr.agents, (a) => a.stockVc4), U.sum(pr.agents, (a) => a.stockComm), U.sum(pr.agents, (a) => a.last), U.sum(pr.agents, (a) => a.cur), d.sumAgentVc4 || 0, d.sumAgentVc4Gross || 0, d.sumAgentComm || 0, d.sumAgentCommGross || 0]);
+      E.list.forEach((a) => rows.push([a.isSelf ? `👤 ${a.name} (TL ka apna stock — agents ke jod me nahi)` : a.name, a.id, canContacts() ? a.mobile : '', a.priority, a.stockVc4, a.stockComm, a.last, a.cur, a.sugVc4, a.sugVc4Gross || 0, a.sugComm, a.sugCommGross || 0]));
+      rows.push(['AGENTS TOTAL', `${E.rows.length} Agents`, '', '', E.sum('stockVc4'), E.sum('stockComm'), E.sum('last'), E.sum('cur'), d.sumAgentVc4 || 0, d.sumAgentVc4Gross || 0, d.sumAgentComm || 0, d.sumAgentCommGross || 0]);
+      rows.push(['+ TL KE PAAS (OWN)', E.selfA ? 'TL ki apni row' : 'sheet ke snapshot se', '', '', E.own.vc4, E.own.comm, '', '', d.sumSelfVc4 || 0, d.sumSelfVc4Gross || 0, d.sumSelfComm || 0, d.sumSelfCommGross || 0]);
+      rows.push(['= TL TOTAL', pr.name, '', '', E.s.vc4, E.s.comm, E.t.lastTotal, E.t.curTotal, d.sugVc4 || 0, d.sugVc4Gross || 0, d.sugComm || 0, d.sugCommGross || 0]);
     }
     return rows;
   }
@@ -1057,7 +1235,7 @@ window.FF = window.FF || {};
     if (canContacts() && pr.mobile) lines.push(`📞 ${pr.mobile}`);
     if (!/tl$/.test(pr.kind) && pr.tl && pr.tl.name && !pr.direct) lines.push(`TL: ${pr.tl.name}`);
     lines.push(`Priority: ${pr.priority || '—'}${pr.tagRequired ? ' · 🏷️ TAG REQUIRED' : ''}`);
-    lines.push(`Stock: ${U.fmt(s.total)}${ts.own && ts.agents ? ` (own ${U.fmt(ts.own.total)} + agents ${U.fmt(ts.agents.total)})` : ''} (VC4 ${U.fmt(s.vc4)} · Comm ${U.fmt(s.comm)})`);
+    lines.push(`Stock: ${U.fmt(s.total)}${ts.own && ts.agents ? ` (TL ke paas ${U.fmt(ts.own.total)} + agents ke paas ${U.fmt(ts.agents.total)} — TL ki row alag, double count nahi)` : ''} (VC4 ${U.fmt(s.vc4)} · Comm ${U.fmt(s.comm)})`);
     if (pr.growthNum !== null && pr.growthNum !== undefined) lines.push(`📈 Growth: ${pr.growthNum >= 0 ? '+' : ''}${pr.growthNum.toFixed(1)}%${b.shortLabel ? ` (till ${b.shortLabel})` : ''} · expected month-end ${U.fmt(p.total)}`);
     lines.push(`${pr.tagRequired ? 'Tags needed' : 'Suggested dispatch'} (${d.days} din): VC4 ${U.fmt(d.sugVc4)} · Comm ${U.fmt(d.sugComm)} — stock ke baad`);
     lines.push(`Bina stock ghataye: VC4 ${U.fmt(d.sugVc4Gross || 0)} · Comm ${U.fmt(d.sugCommGross || 0)}`);
@@ -1065,10 +1243,12 @@ window.FF = window.FF || {};
     lines.push(`Issued: this month ${U.fmt(t.curTotal)}${b.shortLabel ? ` (till ${b.shortLabel})` : ''} · last month ${U.fmt(t.lastTotal)}`);
     (pr.classes || []).slice(0, 12).forEach((r) => lines.push(`• ${r.cls}: ${U.fmt(r.last)} → ${U.fmt(r.cur)} (stock ${U.fmt(r.stock)})`));
     lines.push(`*Total Class-wise: Last ${U.fmt(g.total.last || t.lastTotal)} → MTD ${U.fmt(g.total.cur || t.curTotal)} (Stock ${U.fmt(g.total.stock || s.total)})*`);
-    if (pr.agents && pr.agents.length) {
-      lines.push('', `*Team Agents (${U.fmt(pr.agents.length)}):*`);
-      pr.agents.slice(0, 20).forEach((a) => lines.push(`• ${a.name}: Last ${U.fmt(a.last)} · MTD ${U.fmt(a.cur)} · Stock ${U.fmt(a.stockTotal)}`));
-      lines.push(`*Team Grand Total: Last ${U.fmt(U.sum(pr.agents, (a) => a.last))} · MTD ${U.fmt(U.sum(pr.agents, (a) => a.cur))} · Stock ${U.fmt(U.sum(pr.agents, (a) => a.stockTotal))}*`);
+    const E = tlExport(pr);
+    if (E.list.length) {
+      lines.push('', `*Team Agents (${U.fmt(E.rows.length)}):*`);
+      E.list.slice(0, 22).forEach((a) => lines.push(`${a.isSelf ? '👤' : '•'} ${a.name}${a.isSelf ? ' — TL ka apna stock' : ''}: Last ${U.fmt(a.last)} · MTD ${U.fmt(a.cur)} · Stock ${U.fmt(a.stockTotal)}`));
+      lines.push(`*Agents total: Last ${U.fmt(E.sum('last'))} · MTD ${U.fmt(E.sum('cur'))} · Stock ${U.fmt(E.ag.total)}*`);
+      lines.push(`*${E.line}*`);
     }
     return lines.join('\n');
   }
@@ -1085,7 +1265,7 @@ window.FF = window.FF || {};
       { label: 'This Month (MTD)', value: fmt(t.curTotal), sub: `VC4 ${fmt(t.curVc4)} · Comm ${fmt(t.curComm)}`, color: '#2563eb' },
       { label: 'Last Month', value: fmt(t.lastTotal), sub: `VC4 ${fmt(t.lastVc4)} · Comm ${fmt(t.lastComm)}`, color: '#7c3aed' },
       { label: 'Expected', value: fmt(p.total || 0), sub: `Growth ${pr.growthNum != null ? `${pr.growthNum.toFixed(1)}%` : '—'}`, color: '#059669' },
-      { label: 'Stock in Hand', value: fmt(s.total), sub: `${pr.tlStock && pr.tlStock.own && pr.tlStock.agents ? `Own ${fmt(pr.tlStock.own.total)} + agents ${fmt(pr.tlStock.agents.total)} · ` : ''}VC4 ${fmt(s.vc4)} · Comm ${fmt(s.comm)}`, color: '#d97706' }
+      { label: /tl$/.test(pr.kind) ? 'Stock in Hand (TL + agents)' : 'Stock in Hand', value: fmt(s.total), sub: `${pr.tlStock && pr.tlStock.own && pr.tlStock.agents ? `Own ${fmt(pr.tlStock.own.total)} + agents ${fmt(pr.tlStock.agents.total)} · ` : ''}VC4 ${fmt(s.vc4)} · Comm ${fmt(s.comm)}`, color: '#d97706' }
     ]);
     doc.section(`Class-wise Issuance (${m.last || 'Last'} vs ${m.cur || 'MTD'}) & Stock`);
     doc.table({
@@ -1094,14 +1274,16 @@ window.FF = window.FF || {};
       rows: (pr.classes || []).map((c) => [c.cls, fmt(c.last), fmt(c.cur), c.last ? `${(((c.cur - c.last) / c.last) * 100).toFixed(0)}%` : '—', fmt(c.stock)]),
       foot: ['GRAND TOTAL', fmt(g.total.last || t.lastTotal), fmt(g.total.cur || t.curTotal), (g.total.last || t.lastTotal) ? `${((((g.total.cur || t.curTotal) - (g.total.last || t.lastTotal)) / (g.total.last || t.lastTotal)) * 100).toFixed(0)}%` : '—', fmt(g.total.stock || s.total)]
     });
-    if (pr.agents && pr.agents.length) {
-      doc.section(`Team Agents (${fmt(pr.agents.length)})`);
+    const E = tlExport(pr);
+    if (E.list.length) {
+      doc.section(`Team Agents (${fmt(E.rows.length)})${E.selfA ? ' · TL ka apna stock alag row me' : ''}`, E.line);
       doc.table({
         headers: ['Agent', 'ID', 'Priority', 'Last Month', 'Current (MTD)', 'VC4 Stock', 'Comm Stock', 'Total Stock'],
         align: ['left', 'left', 'left', 'right', 'right', 'right', 'right', 'right'],
-        rows: pr.agents.map((a) => [a.name, a.id || '—', a.priority || '—', fmt(a.last), fmt(a.cur), fmt(a.stockVc4), fmt(a.stockComm), fmt(a.stockTotal)]),
-        foot: ['GRAND TOTAL', `${fmt(pr.agents.length)} Agents`, '', fmt(U.sum(pr.agents, (a) => a.last)), fmt(U.sum(pr.agents, (a) => a.cur)), fmt(U.sum(pr.agents, (a) => a.stockVc4)), fmt(U.sum(pr.agents, (a) => a.stockComm)), fmt(U.sum(pr.agents, (a) => a.stockTotal))]
+        rows: E.list.map((a) => [a.isSelf ? `👤 ${a.name} (TL — apna stock)` : a.name, a.id || '—', a.priority || '—', fmt(a.last), fmt(a.cur), fmt(a.stockVc4), fmt(a.stockComm), fmt(a.stockTotal)]),
+        foot: ['= TL TOTAL (own + agents)', `${fmt(E.rows.length)} Agents`, '', fmt(E.t.lastTotal), fmt(E.t.curTotal), fmt(E.s.vc4), fmt(E.s.comm), fmt(E.s.total)]
       });
+      if (E.own.total || E.selfA) doc.text(`${E.line} — ${E.foot}`, { size: 3 });
     }
     doc.footer(`${FF.config.brand || 'ApnaPayment'} · ${pr.channel} Profile Report`);
     return doc.finish();
@@ -1126,7 +1308,9 @@ window.FF = window.FF || {};
       const a360 = e.target.closest('[data-mp-a360]');
       if (a360) { if (FF.cockpit && FF.cockpit.agent360) FF.cockpit.agent360({ name: a360.dataset.mpA360 }).catch(() => {}); return; }
       const row = e.target.closest('[data-mp-agent]');
-      if (row) { open({ kind: row.dataset.mpKind, name: row.dataset.mpAgent, sub: row.dataset.mpId, tlSet: new Set(), classMap: new Map(), bars: new Set() }); }
+      // v3.40 — row ke andar [data-kpi] wale cell (stock / footer) par click = us hisse ki detail drawer
+      // (app.js ka global handler), profile switch nahi — warna drawer aur profile do kaam ek saath.
+      if (row && !e.target.closest('[data-kpi]')) open({ kind: row.dataset.mpKind, name: row.dataset.mpAgent, sub: row.dataset.mpId, tlSet: new Set(), classMap: new Map(), bars: new Set() });
     });
   }
   const loadingHtml = (name) => `<div class="mp-loading" role="status" aria-live="polite">${U.loader ? U.loader('', { size: 'md' }) : ''} <span><b>${esc(name)}</b> ki poori report ban rahi hai${U.ellipsis ? U.ellipsis() : '…'} <small class="dim">(REPORT + stock + issuance load ho raha hai)</small></span></div>`;
