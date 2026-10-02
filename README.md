@@ -1,4 +1,4 @@
-# First Forward Dashboard — First Forward + GV Partner (v3.37)
+# First Forward Dashboard — First Forward + GV Partner (v3.38)
 
 Colourful dashboard website built directly on top of **do Google Sheets**:
 
@@ -13,6 +13,26 @@ aur ek **⚖️ GV vs First Forward** page side-by-side comparison deta hai.
 Koi database nahi, koi manual upload nahi — website Google Sheet se data padhti hai
 (Google Visualization API / `gviz`) through a small Node server that also handles **login, users,
 permissions and settings**. Zero npm dependencies.
+
+## ✨ v3.38.0 — 📦 employee link par sabka stock · 👁 Preview FIX · 🔊 Mac voice FIX
+
+- **📦 Employee link (`/tag-request`) — naam likhte hi sabka stock:** search dropdown me har agent/TL ke
+  saath `📦 stock · last · MTD` (TL par uske saare agents ka total), aur employee card ke neeche ek
+  **📦 "Sabhi agents ka stock · issuance"** board — poora agent list, 🔎 search + 🟦 FF / 🟩 GV filter,
+  🚗 VC4+VC20 · 🚚 VC5+ · total stock · last month · MTD · cover din, grand total footer, paging, aur
+  **row click → agent seedha form me**. Admin ise Link settings se OFF kar sakta hai.
+- **👁 Preview button — CRITICAL FIX:** Settings → Users ka "👁 Preview" click par
+  `ReferenceError: u is not defined` throw kar raha tha (map-callback variable, galat scope) — button
+  kuch nahi karta tha. Ab card ke username se user record resolve hota hai; preview user ke pehle
+  allowed page par jaata hai, 👁 banner dikhta hai, sidebar us user ke hisaab se, Exit se wapas admin.
+- **🔊 Voice alert — macOS Chrome FIX:** `speechSynthesis.cancel()` ke turant baad `speak()` ki utterance
+  Chrome (khaaskar macOS) me chup-chaap gir jaati hai (na onstart/onend/onerror) — isliye Mac par awaaz
+  nahi aa rahi thi. Ab cancel sirf jab kuch already bol raha ho, aur speak 90 ms baad; boot par voice
+  list garam (`warmVoices()`) taaki macOS ki async voices ready hon.
+- **📥 Admin Tag Requests — colourful total chips:** footer me `rows · approved tags · stock ·
+  suggestion (after stock · without stock deduction)`, live data par update hote hain.
+- Docs: [WHATS-NEW-v3.38.0.md](WHATS-NEW-v3.38.0.md) · tests: `dev/v338-tag-stock-board.test.js`,
+  `dev/v338-mac-voice.test.js` · `npm test` 347 pass.
 
 ## ✨ v3.37.0 — 🚨 Unusual Activity: card ka number = drawer ka data · 🚀 server-side scan · 🩺 ek button se sab fix
 

@@ -132,6 +132,20 @@ window.FF = window.FF || {};
     ['pointerdown', 'touchstart', 'keydown'].forEach((ev) => document.addEventListener(ev, once, { once: false, passive: true }));
     document.addEventListener('visibilitychange', () => { if (!document.hidden) { unlock(); flushPending(); } });
   }
+  /** 🎙️ v3.38 — boot par voice list garam karo. macOS/Safari/Chrome me `getVoices()` shuruaat me
+   *  khaali hoti hai aur `voiceschanged` par baad me aati hai; agar hum pehli announce par intezaar
+   *  karein to voice pick fail ho ke default (ya kuch bhi na) milta hai. Isliye mount par hi
+   *  getVoices() bulao + voiceschanged suno — list pehli awaaz se pehle ready hoti hai. */
+  function warmVoices() {
+    try {
+      if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+      const synth = window.speechSynthesis;
+      try { synth.getVoices(); } catch { /* optional */ }
+      const onChanged = () => { try { synth.getVoices(); } catch { /* optional */ } };
+      if (synth.addEventListener) synth.addEventListener('voiceschanged', onChanged);
+      else if ('onvoiceschanged' in synth) synth.onvoiceschanged = onChanged;
+    } catch { /* TTS available hi nahi */ }
+  }
 
   // ---- 🎙️ voice announce ------------------------------------------------------------------------
   function announceText(movers, totalNew, sourceDeltas) {
@@ -267,11 +281,26 @@ window.FF = window.FF || {};
           u.onend = () => ok(id);
           u.onerror = (ev) => bad((ev && ev.error) || 'error', id);
           // Safari/macOS may leave SpeechSynthesis paused after a silent unlock utterance.
-          // Resume before each speak, and clear stale queued speech on retry/new alert.
-          try { if (synth.cancel) synth.cancel(); } catch { /* optional */ }
+          // Resume before each speak.
           try { if (synth.resume) synth.resume(); } catch { /* optional */ }
-          synth.speak(u);
-          armWatchdog(id, Math.max(10000, Math.min(30000, plain.length * 75)), false);
+          // ⚠️ v3.38 — Chrome (khaaskar macOS) me `cancel()` ke TURANT baad `speak()` ki gayi
+          //   utterance chup-chaap gir jaati hai: na onstart, na onend, na onerror — awaaz bilkul
+          //   nahi aati (mobile Chrome par ye race aksar nahi dikhti, isliye "Mac me hi band").
+          //   Isliye cancel sirf tab jab pehle se kuch bol raha ho / queue me ho, aur speak ko
+          //   cancel ke BAAD ek tick baad karo (Chrome ko cancel process karne do).
+          let queued = false;
+          try { queued = !!(synth.speaking || synth.pending); } catch { /* optional */ }
+          const arm = () => armWatchdog(id, Math.max(10000, Math.min(30000, plain.length * 75)), false);
+          const fire = () => {
+            try { synth.speak(u); } catch (err) { bad((err && err.message) || 'exception', id); return; }
+            arm();
+          };
+          if (queued && synth.cancel) {
+            try { synth.cancel(); } catch { /* optional */ }
+            setTimeout(fire, 90);
+          } else {
+            fire();
+          }
         } catch (err) { bad(err && err.message ? err.message : 'exception', id); }
       };
       try {
@@ -649,6 +678,7 @@ window.FF = window.FF || {};
     else { actions.appendChild(btn); actions.appendChild(vbtn); }
     updateBtn();
     bindUnlock();
+    warmVoices();
     if (st.timer) clearInterval(st.timer);
     st.timer = setInterval(poll, 30000);
     setTimeout(poll, 4000); // baseline jaldi le lo

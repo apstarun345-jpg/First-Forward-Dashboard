@@ -1,4 +1,4 @@
-/* 🏷️ IDFC AGENTS TAG REQUEST (v3.25 → v3.30) — panel ka option + bina login employee link.
+/* 🏷️ IDFC AGENTS TAG REQUEST (v3.25 → v3.38) — panel ka option + bina login employee link.
  *
  * v3.30 flow (employee link /tag-request aur login form — dono same):
  *   1. 👤 Employee      — upar sirf EMPLOYEE ka naam (office wala jo request laga raha hai).
@@ -16,6 +16,14 @@
  *                          ✏️ edit wahin), ✅ approve, address. Upar ☑ select →
  *                          🖨️ Print selected (har request ka label sirf EK baar), ✅ Approve, ⬇ CSV.
  *   6. ⚙️ Link & Sheet  — employee link ON/OFF + fields, 📗 Google Sheet sync (alag tab me).
+ *
+ * v3.38 — employee link par "sabhi ka stock":
+ *   • 🔍 Search dropdown me har agent/TL ke saath stock · pichhle mahine · is mahine (MTD) —
+ *     naam likhte hi sabka stock saamne (employee link par bhi, koi login nahi).
+ *   • 📦 "Sabhi agents ka stock" board (employee card ke neeche, collapsed) — poora agent list,
+ *     search + 🟦 FF / 🟩 GV filter, 🚗 VC4+VC20 · 🚚 VC5+ · total stock · last · MTD · cover din.
+ *     Row par click → woh agent seedha form me jud jaata hai. Admin ise Link settings se OFF kar sakta hai.
+ *   • 📥 Admin table ke footer me colourful total chips (rows · approved tags · stock · suggestion).
  *
  * Data source (koi naya bhaari query nahi — sab pehle se load hota hai):
  *   • FF.store 'agentClass' → EIR class × month rows (issuance — canonical)
@@ -60,6 +68,8 @@ FF.pages = FF.pages || {};
     // 📥 requests table
     requests: [], requestsAt: 0, reqLoaded: false, reqError: '',
     sel: new Set(), filter: { status: 'all', channel: 'both', q: '' }, edit: null, limit: PAGE_ROWS, dview: [],
+    // 📦 "sabhi agents ka stock" board — employee link par bhi (search + channel filter + paging)
+    stockBoard: { q: '', channel: 'both', limit: 40 },
     sheet: { loaded: false, busy: false, config: null, fields: null, connected: false, hint: '', publicForm: null }
   };
   const rid = () => Math.random().toString(36).slice(2, 9);
@@ -150,6 +160,14 @@ FF.pages = FF.pages || {};
     return c === 'VC4' || c === 'VC20' ? 'core' : 'comm';
   };
   const emptyGroups = () => ({ core: { stock: 0, last: 0, cur: 0 }, comm: { stock: 0, last: 0, cur: 0 } });
+  /** Agent/TL record → 🚗 core (VC4+VC20) + 🚚 comm (VC5+) + total (stock · last · cur).
+   *  Dropdown, stock board aur TL panel sab isi ek shape se numbers dikhate hain (drift na ho). */
+  function recTotals(rec) {
+    const g = (rec && rec.grp) || emptyGroups();
+    const core = { stock: num(g.core && g.core.stock), last: num(g.core && g.core.last), cur: num(g.core && g.core.cur) };
+    const comm = { stock: num(g.comm && g.comm.stock), last: num(g.comm && g.comm.last), cur: num(g.comm && g.comm.cur) };
+    return { core, comm, stock: core.stock + comm.stock, last: core.last + comm.last, cur: core.cur + comm.cur };
+  }
   /** EIR class-month rows ko agent key par jama karo (class-wise + group-wise). */
   function addEir(map, channel, name, id, tl, row) {
     const key = `${channel}|${norm(name) || digits(id)}`;
@@ -279,10 +297,15 @@ FF.pages = FF.pages || {};
           ['core', 'comm'].forEach((k) => ['stock', 'last', 'cur'].forEach((f) => { g.grp[k][f] += num(rec.grp && rec.grp[k] && rec.grp[k][f]); }));
         }
       });
-      // Search list (form ke dropdown + lookup ke liye).
-      const list = [...byKey.values()].map((r) => ({
-        key: `${r.channel}|${norm(r.name)}`, channel: r.channel, name: r.name, agentId: r.agentId, tlName: r.tlName, priority: r.priority
-      }));
+      // Search list (form ke dropdown + lookup + 📦 stock board ke liye) — har agent ke saath
+      // stock / last / MTD, taaki naam likhte hi sabka stock saamne dikhe (employee link par bhi).
+      const list = [...byKey.values()].map((r) => {
+        const t = recTotals(r);
+        return {
+          key: `${r.channel}|${norm(r.name)}`, channel: r.channel, name: r.name, agentId: r.agentId, tlName: r.tlName, priority: r.priority,
+          stock: t.stock, last: t.last, cur: t.cur, core: t.core, comm: t.comm
+        };
+      });
       state.index = { at: Date.now(), byKey, tls, list, cur: idxMonths.ff.cur, last: idxMonths.ff.last, months: idxMonths };
       return state.index;
     }).catch((err) => {
@@ -959,7 +982,7 @@ body.colorful .from-hdr { color: #166534; }
             <input class="input" data-tr-emp="office" value="${esc(e.office || '')}" placeholder="e.g. Jaipur office" maxlength="80"></label>` : ''}
         </div>
         ${err ? `<p class="tr-err-line">⚠️ ${esc(err)}</p>` : ''}
-        <p class="dim small" style="margin:8px 0 0">🧑 Agent ne aapse tag maange? Neeche <b>har agent</b> ka naam, mobile, full address, pincode aur class-wise qty bharo — "➕ Add new agent" se aur agents jodo.</p>
+        <p class="dim small" style="margin:8px 0 0">🧑 Agent ne aapse tag maange? Upar <b>📦 Sabhi agents ka stock</b> kholo — naam likhte hi har agent ka <b>stock · pichhle mahine · is mahine (MTD)</b> dikh jayega. Neeche <b>har agent</b> ka naam, mobile, full address, pincode aur class-wise qty bharo — "➕ Add new agent" se aur agents jodo.</p>
       </div></section>`;
   }
   /** Search dropdown ke liye items — TL + AGENTS dono (TL pehle, taaki sirf agent hi na dikhein). */
@@ -972,17 +995,22 @@ body.colorful .from-hdr { color: #166534; }
       if (row.tlFilter && norm(a.tlName) !== norm(row.tlFilter)) return false;
       if (!q) return true;
       return norm(a.name).includes(q) || (dq && digits(a.agentId).includes(dq)) || norm(a.tlName).includes(q);
-    }).slice(0, 24).map((a) => ({ kind: 'agent', name: a.name, agentId: a.agentId, tlName: a.tlName, channel: a.channel }));
+    }).slice(0, 24).map((a) => ({
+      kind: 'agent', name: a.name, agentId: a.agentId, tlName: a.tlName, channel: a.channel,
+      stock: num(a.stock), last: num(a.last), cur: num(a.cur)
+    }));
     const tls = row.tlFilter ? [] : [...idx.tls.values()].filter((t) => !q || norm(t.name).includes(q))
       .sort((a, b) => (norm(a.name).startsWith(q) ? 0 : 1) - (norm(b.name).startsWith(q) ? 0 : 1) || norm(a.name).localeCompare(norm(b.name))).slice(0, 10)
-      .map((t) => ({ kind: 'tl', name: t.name, channel: t.channel, agents: t.agents ? t.agents.size : 0 }));
+      .map((t) => { const m = recTotals(t); return { kind: 'tl', name: t.name, channel: t.channel, agents: t.agents ? t.agents.size : 0, stock: m.stock, last: m.last, cur: m.cur }; });
     return [...tls, ...agents];
   }
+  /** Ek line me stock + issuance — naam likhte hi employee ko turant pata chal jaye kitna stock hai. */
+  const stockLine = (it) => `<small class="tr-s-stock" title="Stock (🚗 VC4+VC20 · 🚚 VC5+) · pichhle mahine issue · is mahine MTD">📦 stock <b>${fmt(it.stock)}</b> · last <b>${fmt(it.last)}</b> · MTD <b>${fmt(it.cur)}</b></small>`;
   function suggestHtml(items) {
     if (!items.length) return `<div class="tr-suggest-empty">${state.index ? 'Koi match nahi mila — naya agent hai to naam likh kar aage badho' : 'Agent list load ho rahi hai…'}</div>`;
     return items.map((it, i) => it.kind === 'tl'
-      ? `<button type="button" class="tr-suggest-item tl ${i === 0 ? 'hot' : ''}" data-tr-pick="tl:${esc(norm(it.channel) + '|' + norm(it.name))}"><span class="tr-suggest-name">🧑‍💼 ${esc(it.name)}</span><small class="dim">TL · ${esc(it.agents)} agents · ${it.channel === 'gv' ? 'GV' : 'FF'} — TL select karo → poora data dikhega</small></button>`
-      : `<button type="button" class="tr-suggest-item ${i === 0 ? 'hot' : ''}" data-tr-pick="agent:${esc(it.channel)}:${esc(it.agentId || '')}:${esc(norm(it.name))}"><span class="tr-suggest-name">${esc(it.name)}${it.agentId ? ` <small class="dim">#${esc(it.agentId)}</small>` : ''}</span><small class="dim">${it.tlName ? `TL ${esc(it.tlName)} · ` : ''}${it.channel === 'gv' ? '🟩 GV' : '🟦 FF'}</small></button>`).join('');
+      ? `<button type="button" class="tr-suggest-item tl ${i === 0 ? 'hot' : ''}" data-tr-pick="tl:${esc(norm(it.channel) + '|' + norm(it.name))}"><span class="tr-suggest-name">🧑‍💼 ${esc(it.name)}</span><small class="dim">TL · ${esc(it.agents)} agents · ${it.channel === 'gv' ? 'GV' : 'FF'} — TL select karo → poora data dikhega</small>${stockLine(it)}</button>`
+      : `<button type="button" class="tr-suggest-item ${i === 0 ? 'hot' : ''}" data-tr-pick="agent:${esc(it.channel)}:${esc(it.agentId || '')}:${esc(norm(it.name))}"><span class="tr-suggest-name">${esc(it.name)}${it.agentId ? ` <small class="dim">#${esc(it.agentId)}</small>` : ''}</span><small class="dim">${it.tlName ? `TL ${esc(it.tlName)} · ` : ''}${it.channel === 'gv' ? '🟩 GV' : '🟦 FF'}</small>${stockLine(it)}</button>`).join('');
   }
   /** Agent ke neeche ka status line — pakka match / "kya ye hai?" / naya agent. */
   function agentMetaHtml(row) {
@@ -1026,6 +1054,113 @@ body.colorful .from-hdr { color: #166534; }
       <details class="tr-tl-agents"><summary>👥 ${esc(rec.name)} ke agents (${fmt(list.length)}) — click karke agent chuno</summary>
         <div class="table-wrap"><table class="tbl compact"><thead><tr><th>Agent</th><th>Stock</th><th>Last</th><th>MTD</th></tr></thead><tbody>${list.map((a) => `<tr class="tr-tl-agent" data-tr-tlagent="agent:${esc(a.channel)}:${esc(a.agentId || '')}:${esc(norm(a.name))}" style="cursor:pointer"><td><b>${esc(a.name)}</b>${a.agentId ? ` <small class="dim">#${esc(a.agentId)}</small>` : ''}</td><td class="num">${fmt(a.stock)}</td><td class="num">${fmt(a.last)}</td><td class="num">${fmt(a.cur)}</td></tr>`).join('') || '<tr><td colspan="4" class="dim">Agents nahi mile</td></tr>'}</tbody></table></div>
       </details></div>`;
+  }
+  // ---- 📦 "sabhi agents ka stock" board — employee link par bhi (v3.38) ---------------------------
+  const SB_STEP = 40;                       // ek baar me itni rows, phir "⬇ Aur dikhao"
+  /** Search + channel filter ke baad ki agent list (MTD → stock → naam order me). */
+  function stockBoardRows() {
+    const idx = state.index;
+    if (!idx || !idx.list) return [];
+    const q = norm(state.stockBoard.q);
+    const dq = digits(state.stockBoard.q);
+    const ch = state.stockBoard.channel || 'both';
+    const rows = idx.list.filter((a) => {
+      if (ch !== 'both' && a.channel !== ch) return false;
+      if (!q) return true;
+      return norm(a.name).includes(q) || (dq && digits(a.agentId).includes(dq)) || norm(a.tlName).includes(q);
+    });
+    return rows.sort((a, b) => num(b.cur) - num(a.cur) || num(b.stock) - num(a.stock) || norm(a.name).localeCompare(norm(b.name)));
+  }
+  /** Channel chips — Sab / 🟦 First Forward / 🟩 GV (admin table jaisa hi). */
+  function stockBoardChipsHtml() {
+    const all = state.index && state.index.list ? state.index.list : [];
+    const counts = { both: all.length, ff: 0, gv: 0 };
+    all.forEach((a) => { counts[a.channel === 'gv' ? 'gv' : 'ff']++; });
+    return [['both', 'Sab'], ['ff', '🟦 First Forward'], ['gv', '🟩 GV']]
+      .map(([k, label]) => `<button type="button" class="chip ${state.stockBoard.channel === k ? 'on' : ''}" data-tr-sb-ch="${k}">${label} <span class="count">${fmt(counts[k])}</span></button>`).join('');
+  }
+  function stockBoardTableHtml() {
+    const idx = state.index;
+    if (!idx) return `<div class="tr-sb-empty dim small">⏳ Sheet ka data load ho raha hai — agent list aate hi stock yahan dikh jayega.</div>`;
+    const all = stockBoardRows();
+    const shown = all.slice(0, state.stockBoard.limit);
+    if (!all.length) return `<div class="tr-sb-empty dim small">Is search / filter me koi agent nahi mila.</div>`;
+    const tot = (list, key) => list.reduce((s, a) => s + num(key.split('.').reduce((o, k) => (o == null ? o : o[k]), a)), 0);
+    const body = shown.map((a) => `<tr class="tr-sb-row" data-tr-sb-pick="agent:${esc(a.channel)}:${esc(a.agentId || '')}:${esc(norm(a.name))}" title="${esc(a.name)} ko form me jodo">
+        <td class="tr-sb-name"><b>${esc(a.name)}</b>${a.agentId ? ` <small class="dim">#${esc(a.agentId)}</small>` : ''}<small class="dim">${a.tlName ? `TL ${esc(a.tlName)}` : 'Direct'}</small></td>
+        <td class="tr-sb-ch"><span class="badge ${a.channel === 'gv' ? 'green' : 'blue'}">${a.channel === 'gv' ? '🟩 GV' : '🟦 FF'}</span></td>
+        <td class="num"><b>${fmt(num(a.core && a.core.stock))}</b></td>
+        <td class="num"><b>${fmt(num(a.comm && a.comm.stock))}</b></td>
+        <td class="num tr-sb-total"><b>${fmt(num(a.stock))}</b></td>
+        <td class="num">${fmt(num(a.last))}</td>
+        <td class="num tr-sb-mtd"><b>${fmt(num(a.cur))}</b></td>
+        <td class="num">${num(a.cur) > 0 && num(a.stock) > 0 ? `<span class="dim small">${fmt(Math.round((num(a.stock) / num(a.cur)) * 10) / 10, 1)} din</span>` : '<span class="dim small">—</span>'}</td>
+      </tr>`).join('');
+    return `<div class="table-wrap tall tr-sb-wrap"><table class="tbl compact tr-sb-tbl">
+      <thead><tr><th>Agent</th><th>Channel</th><th class="num" title="VC4 + VC20 (car/jeep)">🚗 VC4/VC20</th><th class="num" title="VC5+ (commercial)">🚚 VC5+</th><th class="num">Stock total</th><th class="num">Last month</th><th class="num">MTD</th><th class="num" title="stock ÷ is mahine ka average per din">Cover</th></tr></thead>
+      <tbody>${body}</tbody>
+      <tfoot><tr class="row-total"><td><b>${fmt(all.length)} agents</b></td><td></td><td class="num"><b>${fmt(tot(all, 'core.stock'))}</b></td><td class="num"><b>${fmt(tot(all, 'comm.stock'))}</b></td><td class="num"><b>${fmt(tot(all, 'stock'))}</b></td><td class="num"><b>${fmt(tot(all, 'last'))}</b></td><td class="num"><b>${fmt(tot(all, 'cur'))}</b></td><td></td></tr></tfoot>
+    </table></div>
+    ${all.length > shown.length ? `<div class="tr-sb-foot-in"><button type="button" class="btn small" data-tr-sb-more>⬇ Aur dikhao (${fmt(all.length - shown.length)} baaki)</button></div>` : ''}`;
+  }
+  /** Board ka shell — collapsed `<details>` taaki form upar hi rahe (employee link par bhi).
+   *  `cfgOverride` sirf tests ke liye (asli flow `formCfg()` se aata hai). */
+  function stockBoardHtml(cfgOverride) {
+    const cfg = cfgOverride || formCfg();
+    if (cfg.showStock === false) return '';
+    const n = state.index && state.index.list ? state.index.list.length : 0;
+    return `<section class="card tr-stock-card" id="tr-stock-card">
+      <details class="tr-sb">
+        <summary><span class="tr-sb-sum"><b>📦 Sabhi agents ka stock · issuance</b>
+          <small class="dim">${n ? `${fmt(n)} agents · stock · pichhle mahine · is mahine (MTD) — search karo, row par click karo to agent seedha form me jud jaata hai` : 'data load ho raha hai…'}</small></span>
+          <span class="tr-sb-count" data-tr-sb-count>${fmt(n)}</span></summary>
+        <div class="card-body">
+          <div class="tr-sb-tools">
+            <input class="input tr-sb-search" data-tr-sb-search type="search" placeholder="🔎 Agent / ID / TL likho — sabka stock turant" value="${esc(state.stockBoard.q)}" autocomplete="off">
+            <div class="tr-sb-chips" data-tr-sb-chips>${stockBoardChipsHtml()}</div>
+          </div>
+          <div data-tr-sb-body>${stockBoardTableHtml()}</div>
+          <p class="dim small" style="margin:8px 0 0">🚗 = VC4 + VC20 (car/jeep) · 🚚 = VC5+ (commercial) · <b>Cover</b> = stock ÷ is mahine ka average per din · ye numbers sheet ke live data se hain (FF kal tak · GV aaj tak).</p>
+        </div>
+      </details></section>`;
+  }
+  /** Board ke andar sirf table + chips badlo (search box ka focus na toote). */
+  function refreshStockBoard() {
+    const card = rootEl && rootEl.querySelector ? rootEl.querySelector('#tr-stock-card') : null;
+    if (!card) return;
+    const body = card.querySelector('[data-tr-sb-body]');
+    if (body) body.innerHTML = stockBoardTableHtml();
+    const chips = card.querySelector('[data-tr-sb-chips]');
+    if (chips) chips.innerHTML = stockBoardChipsHtml();
+    const count = card.querySelector('[data-tr-sb-count]');
+    if (count) count.textContent = fmt(stockBoardRows().length);
+  }
+  /** Board ki row click → naya (ya khaali) agent block us agent par bhar do. */
+  function pickFromBoard(val) {
+    const row = state.rows.find((r) => !rowHasContent(r)) || null;
+    if (row) { if (applyPick(row, val)) { renderForm(); const card = rootEl.querySelector(`[data-tr-row="${row.id}"]`); if (card) { const q = card.querySelector('.tr-qty'); if (q && q.focus) q.focus(); } } return; }
+    if (state.rows.length >= 40) { U.toast('Ek baar me max 40 agents — pehle submit karo', 'warn'); return; }
+    const fresh = newRow();
+    if (applyPick(fresh, val)) { state.rows.push(fresh); renderForm(); const cards = rootEl.querySelectorAll('.tr-agent-card'); const last = cards[cards.length - 1]; if (last) { const q = last.querySelector('.tr-qty'); if (q && q.focus) q.focus(); } }
+  }
+  function bindStockBoard(root) {
+    const card = root.querySelector('#tr-stock-card');
+    if (!card) return;
+    const search = card.querySelector('[data-tr-sb-search]');
+    if (search) search.addEventListener('input', () => {
+      state.stockBoard.q = search.value;
+      state.stockBoard.limit = SB_STEP;
+      refreshStockBoard();
+    });
+    card.addEventListener('click', (e) => {
+      const t = e.target;
+      const ch = t.closest ? t.closest('[data-tr-sb-ch]') : null;
+      if (ch) { state.stockBoard.channel = ch.dataset.trSbCh; state.stockBoard.limit = SB_STEP; refreshStockBoard(); return; }
+      const more = t.closest ? t.closest('[data-tr-sb-more]') : null;
+      if (more) { state.stockBoard.limit += SB_STEP; refreshStockBoard(); return; }
+      const row = t.closest ? t.closest('[data-tr-sb-pick]') : null;
+      if (row) pickFromBoard(row.dataset.trSbPick);
+    });
   }
   function agentCardHtml(row, i) {
     const cfg = formCfg();
@@ -1084,6 +1219,7 @@ body.colorful .from-hdr { color: #166534; }
     const busy = state.busy === 'send';
     body.innerHTML = `
       ${employeeCardHtml()}
+      ${stockBoardHtml()}
       <section class="card tr-agents-card"><div class="card-head"><h3>🧑‍🤝‍🧑 Agent request <span class="count" data-tr-agents>${fmt(state.rows.length)} agent${state.rows.length === 1 ? '' : 's'}</span></h3>
         <div class="card-right dim">Har agent: naam · mobile · address · pincode · class-wise qty (0/khaali = nahi chahiye) · total <b data-tr-total>${fmt(grandTotal())}</b> tags</div></div>
         <div class="card-body">
@@ -1101,6 +1237,7 @@ body.colorful .from-hdr { color: #166534; }
       </div>
       <p class="dim small">🔎 Submit par system khud sheet se agent ka <b>stock</b>, <b>last month</b> aur <b>current month</b> issuance (🚗 VC4+VC20 · 🚚 VC5+ alag) check karke admin ko saath bhejta hai. Har agent ki request alag banti hai — status <b>🔎 Status</b> tab me agent ke mobile number se dikhta hai.</p>`;
     rootEl.querySelectorAll('.tr-agent-card').forEach(bindAgentCard);
+    bindStockBoard(rootEl);
     bindFormGlobal();
   }
   /** Index aane par sirf meta + hints update (typing ke beech focus na toote). */
@@ -1115,6 +1252,8 @@ body.colorful .from-hdr { color: #166534; }
       if (meta) meta.innerHTML = agentMetaHtml(row);
       updateHints(card, row);
     });
+    // 📦 Index aa gaya → stock board ke numbers bhi bhar do (search box ka focus bana rehta hai).
+    refreshStockBoard();
   }
   function updateHints(card, row) {
     const rec = exactAgent(row);
@@ -1810,6 +1949,22 @@ body.colorful .from-hdr { color: #166534; }
     buildIndex().then(() => { if (state.view === 'requests') refreshMetrics(); }).catch(() => {});
     if (isAdmin()) loadExactStock().then((m) => { if (m && state.view === 'requests') refreshMetrics(); }).catch(() => {});
   }
+  /** Footer ke colourful total chips — rows · approved tags · stock · suggestion (admin). */
+  function reqFootHtml() {
+    const tags = state.dview.reduce((s, dr) => s + dr.total, 0);
+    const asked = state.dview.reduce((s, dr) => s + dr.requested, 0);
+    let stock = 0, sugNet = 0, sugGross = 0;
+    state.dview.forEach((dr) => {
+      const n = metricNumbers(metricsFor(dr));
+      stock += num(n.total.stock); sugNet += num(n.total.suggest.net); sugGross += num(n.total.suggest.gross);
+    });
+    const shown = state.dview.slice(0, state.limit);
+    return `<span class="tr-foot-chip"><b>${fmt(state.dview.length)}</b> rows</span>
+      <span class="tr-foot-chip tags">🏷️ <b>${fmt(tags)}</b> approved${asked !== tags ? ` <small>(agent ne ${fmt(asked)} maanga)</small>` : ''}</span>
+      <span class="tr-foot-chip stock">📦 stock <b>${fmt(stock)}</b></span>
+      ${isAdmin() ? `<span class="tr-foot-chip sug">🎯 suggestion <b>${fmt(sugNet)}</b> after stock · <b>${fmt(sugGross)}</b> without stock deduction</span>` : ''}
+      ${state.dview.length > shown.length ? `<button type="button" class="btn small" data-tr-act="more">⬇ Aur dikhao (${fmt(state.dview.length - shown.length)} baaki)</button>` : ''}`;
+  }
   function renderReqTable() {
     const card = rootEl.querySelector('#tr-req-card');
     if (!card) return;
@@ -1833,10 +1988,7 @@ body.colorful .from-hdr { color: #166534; }
     const count = card.querySelector('[data-tr-count]');
     if (count) count.textContent = fmt(state.dview.length);
     const foot = card.querySelector('[data-tr-foot]');
-    if (foot) {
-      const tags = state.dview.reduce((s, dr) => s + dr.total, 0);
-      foot.innerHTML = `${fmt(state.dview.length)} rows · ${fmt(tags)} tags${state.dview.length > shown.length ? ` · <button type="button" class="btn small" data-tr-act="more">⬇ Aur dikhao (${fmt(state.dview.length - shown.length)} baaki)</button>` : ''}`;
-    }
+    if (foot) foot.innerHTML = reqFootHtml();
     updateSelUi();
     if (state.edit) {
       const first = card.querySelector('.tr-editing [data-tr-eq]');
@@ -1862,6 +2014,9 @@ body.colorful .from-hdr { color: #166534; }
         if (f.title) td.title = f.title; else td.removeAttribute('title');
       });
     });
+    // Footer ke total chips bhi live numbers par update karo (snapshot 0 dikhane se bachne ke liye).
+    const foot = card.querySelector('[data-tr-foot]');
+    if (foot) foot.innerHTML = reqFootHtml();
   }
   function updateSelUi() {
     const card = rootEl && rootEl.querySelector('#tr-req-card');
@@ -2164,6 +2319,7 @@ body.colorful .from-hdr { color: #166534; }
               <label class="tr-col-opt"><input type="checkbox" data-tr-pub="askAddress" ${pub.askAddress !== false ? 'checked' : ''}> Agent full address + pincode (zaroori)</label>
               <label class="tr-col-opt"><input type="checkbox" data-tr-pub="askOffice" ${pub.askOffice ? 'checked' : ''}> Employee branch/office (optional)</label>
               <label class="tr-col-opt"><input type="checkbox" data-tr-pub="showCheck" ${pub.showCheck !== false ? 'checked' : ''}> Class ke aage stock/MTD hint dikhao</label>
+              <label class="tr-col-opt"><input type="checkbox" data-tr-pub="showStock" ${pub.showStock !== false ? 'checked' : ''}> "📦 Sabhi agents ka stock" board dikhao</label>
             </span></label>
         </div>
         <div class="btn-row" style="margin-top:10px">
@@ -2198,7 +2354,8 @@ body.colorful .from-hdr { color: #166534; }
         askMobile: !!(card.querySelector('[data-tr-pub="askMobile"]') || {}).checked,
         askAddress: !!(card.querySelector('[data-tr-pub="askAddress"]') || {}).checked,
         askOffice: !!(card.querySelector('[data-tr-pub="askOffice"]') || {}).checked,
-        showCheck: !!(card.querySelector('[data-tr-pub="showCheck"]') || {}).checked
+        showCheck: !!(card.querySelector('[data-tr-pub="showCheck"]') || {}).checked,
+        showStock: !!(card.querySelector('[data-tr-pub="showStock"]') || {}).checked
       });
       const save = (patch, msg) => {
         const btn = card.querySelector('[data-tr-pub-act="save"]');
@@ -2349,6 +2506,9 @@ body.colorful .from-hdr { color: #166534; }
     // 🧪 Tests: requests → table rows (har agent ek row) + row HTML + submit payload.
     _test: {
       displayRows, reqRowHtml: (dr) => reqRowHtml(dr), metricCellsHtml, metricNumbers, hintText, agentGroupSummaryHtml, channelFilterHtml, requestsShellHtml, agentKeyOf, labelItem, contactOf,
+      recTotals, suggestItems, suggestHtml, stockBoardHtml, stockBoardTableHtml, stockBoardRows, stockBoardChipsHtml,
+      setIndex: (idx) => { state.index = idx || null; },
+      setStockBoard: (patch) => { state.stockBoard = { ...state.stockBoard, ...(patch || {}) }; },
       filterRows: (list, patch) => {
         const keep = state.filter;
         state.filter = { ...keep, ...(patch || {}) };
