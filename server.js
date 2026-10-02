@@ -1269,7 +1269,7 @@ function publicWorkspaceUser(username) {
 // phir wahi form (agent search + class qty + system check) → submit. Request admin ke paas
 // waise hi pahunchti hai (source: 'public-link') aur Google Sheet sync bhi chalti hai.
 const PUBLIC_TAG_DEFAULTS = {
-  enabled: true, showCheck: true, askMobile: true, askOffice: false, askNote: true,
+  enabled: true, showCheck: true, showStock: true, askMobile: true, askOffice: false, askNote: true,
   askAddress: true,          // 🏠 full address + 📮 pincode — dono mandatory (dispatch/delivery ke liye)
   title: 'IDFC Agents Tag Request', intro: '', maxRows: 60
 };
@@ -4392,6 +4392,7 @@ async function handleApi(req, res, url) {
     return {
       enabled: cfg.enabled !== false,
       showCheck: cfg.showCheck !== false,
+      showStock: cfg.showStock !== false,
       askMobile: !!cfg.askMobile,
       askOffice: !!cfg.askOffice,
       askNote: cfg.askNote !== false,
@@ -4661,6 +4662,7 @@ async function handleApi(req, res, url) {
     const cfg = publicTagFormConfig();
     if (c.enabled !== undefined) cfg.enabled = !!c.enabled;
     if (c.showCheck !== undefined) cfg.showCheck = !!c.showCheck;
+    if (c.showStock !== undefined) cfg.showStock = !!c.showStock;
     if (c.askMobile !== undefined) cfg.askMobile = !!c.askMobile;
     if (c.askOffice !== undefined) cfg.askOffice = !!c.askOffice;
     if (c.askNote !== undefined) cfg.askNote = !!c.askNote;
@@ -4714,6 +4716,7 @@ async function handleApi(req, res, url) {
       const pc = c.publicForm;
       if (pc.enabled !== undefined) pcfg.enabled = !!pc.enabled;
       if (pc.showCheck !== undefined) pcfg.showCheck = !!pc.showCheck;
+      if (pc.showStock !== undefined) pcfg.showStock = !!pc.showStock;
       if (pc.askMobile !== undefined) pcfg.askMobile = !!pc.askMobile;
       if (pc.askOffice !== undefined) pcfg.askOffice = !!pc.askOffice;
       if (pc.askNote !== undefined) pcfg.askNote = !!pc.askNote;

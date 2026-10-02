@@ -822,7 +822,11 @@ FF.pages = FF.pages || {};
       // 👁 v3.35 — view-as preview: admin is user ban kar poora dashboard dekh sake (sirf view).
       const viewBtn = card.querySelector('[data-user-viewas]');
       if (viewBtn) viewBtn.addEventListener('click', () => {
-        if (!A.startViewAs(u)) { U.toast('Preview shuru nahi hua', 'err'); return; }
+        // ⚠️ v3.38 fix — yahan `u` (map callback ka variable) scope me nahi tha, isliye click par
+        //    "u is not defined" throw hota tha aur Preview button kuch nahi karta tha. Card ke
+        //    username se cached user record nikaalo (stale ho to server se refresh).
+        const u = usersCache.find((x) => x.username === username) || { username, name: username, role: 'user', permissions: [] };
+        if (!A.startViewAs(u)) { U.toast('Preview shuru nahi hua — sirf asli admin account se ho sakta hai', 'err'); return; }
         if (FF.agentSummary && FF.agentSummary.clearCaches) FF.agentSummary.clearCaches();
         U.toast(`👁 Preview ON — ${u.name || u.username} ke rights. Upar ke banner se Exit karo.`, 'ok');
         const firstRoute = FF.app && FF.app.firstAllowedRoute ? FF.app.firstAllowedRoute() : { page: FF.app && FF.app.firstAllowedPage ? FF.app.firstAllowedPage() : 'home', params: {} };
