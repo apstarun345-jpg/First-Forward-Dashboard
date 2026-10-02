@@ -80,6 +80,34 @@ slow ho gayi" ke roop me dekha jaata hai:
 - Server env **`CACHE_SECONDS`** (default 600): badhao → Google par kam load, data thoda purana;
   ghatao → fresh, par slow. 300–900 ke beech rakho (Render blueprint me 600 set hai).
 
+## 5.5) 🚨 Unusual Activity ka tag-level scan — browser se server par (v3.37)
+
+**Pehle:** page khulte hi browser EIR ko **25,000 rows/page** ke hisaab se **sequentially** kheenchta tha
+(20 pages tak = 5 lakh rows) aur poora tag-level scan browser me chalta tha. First paint tak ruk jaata tha,
+aur har period change par wahi dobara. Isi liye "option lag karta hai" sabse zyada yahan dikhta tha.
+
+**Ab:**
+
+- **`GET /api/unusual/scan?from=&to=`** — server EIR + GV Master ko **parallel ×4** padhta hai
+  (`UA_PAGE=25000`, `UA_MAX_PAGES=20`, `UPSTREAM_TIMEOUT_MS=45s`), compact index banata hai aur
+  **gzip** karke deta hai. Server par **10-min TTL cache + inflight dedupe**; `fresh=1` sirf admin.
+  Auth: login + permission `unusual`. Range ≤ 366 din (warna 400). Fail hone par `200 {ok:false,error}`
+  → browser apna **fallback paging scan** chala leta hai (page kabhi blank nahi).
+- **`unusual-scan.js`** — ek hi **shared/isomorphic** scan-index-evidence lib (server + browser). Logic do
+  jagah nahi, isliye server aur browser fallback ke numbers **kabhi drift nahi karte**.
+- **Page turant paint** hota hai daily aggregates se (~5 ms), tag scan **background** me aata hai aur cards
+  ko exact tag numbers se update kar deta hai. `sessionStorage` me **30-min scan cache** (≤4 MB) bhi hai.
+- Index me **counts hamesha exact**, sirf evidence **lists** cap hoti hain (dup groups 4000 · dup rows /
+  bad / rep / cha 12000 · agents 8000) aur cap lagne par `meta.truncated` me saaf dikhta hai.
+- Badi tables **chunked** hain: ledger 60 rows · drawer 100 rows · "↓ Aur N dikhao" 200/step. Events
+  **ek hi baar delegate** hote hain (har paint par `wireEvents()` dobara nahi) — click → drawer isi se fast hua.
+
+**Measured** (mock gviz, Sept 2026 = 3,950 tag rows): page render + scan **99 ms** (paint 5 ms · server scan
+80 ms · cached scan **8 ms**). Endpoint ka JSON ~124 KB (gzip ke baad bahut chhota).
+
+> ⚠️ Naya page banate waqt yahi pattern use karo: **bhaari sheet scan server par**, browser ko **compact index**
+> do, page ko **pehle available data se paint** karo aur scan background me merge karo.
+
 ## 6) Numbers jo is release me badle
 
 | Cheez | Pehle | Ab |
@@ -89,3 +117,5 @@ slow ho gayi" ke roop me dekha jaata hai:
 | Auto-refresh | har 5 min × 16 queries | har 15 min × 3 queries (+ 2G par band) |
 | Repeat visit | poora HTML dobara | ETag → **304, 0 byte** |
 | Startup query order | 16 parallel | 3 workers, priority `daily` pehle |
+| Unusual Activity tag scan (v3.37) | browser me 25k-row pages **sequentially**, first paint blocked | **server** par parallel ×4 + 10-min cache; page **instant** paint, scan background (~99 ms total) |
+| Card click → drawer (v3.37) | 2 drawer + poora `renderBody` (~91 KB) + `wireEvents()` | 1 drawer (page-owned, `data-kpi-self`), cached metric, chunked tables |
