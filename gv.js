@@ -573,12 +573,27 @@ window.FF = window.FF || {};
         agentId: p.agentId, agentName: p.agentName, tlId: p.tlId, tlName: p.tlName, n: r.n
       };
     });
-    // Supplement any historical month present in GV Master that has 0 rows in EIR daily
-    const eirYms = new Set(fromEir.map((r) => r.ym).filter(Boolean));
+    // 🩹 GV Master supplement — EIR me agar us mahine ka koi bhi GV row hai to pehle poora mahina skip ho
+    // jaata tha, isliye jo agent EIR me missing tha uska last-month drawer me 0 / GV REPORT se alag dikhta
+    // tha. Ab row-by-row (tag-level) dedupe hota hai: EIR me jo tag pehle se hai wo dobara nahi judta,
+    // baaki GV Master rows (GV ka asli ledger) add ho jaate hain.
+    const seen = new Set();
+    const marker = (o) => {
+      const key = o.key || (o.d ? U.dateKey(o.d) : '') || (o.date ? U.dateKey(o.date) : '');
+      const tag = String(o.tagId || o.tag || '').trim().toUpperCase();
+      if (tag) return `t|${key}|${tag}`;
+      const vrn = String(o.vrn || '').trim().toUpperCase();
+      if (vrn) return `v|${key}|${vrn}`;
+      return `a|${key}|${o.agentId || U.clean(o.agentName).toUpperCase()}|${o.cls || ''}`;
+    };
+    (eirDaily() || []).filter((r) => r.channel === 'GV Partner').forEach((r) => seen.add(marker(r)));
     const tk = todayKey();
     for (const r of rows()) {
       const k = r.date ? U.dateKey(r.date) : '';
-      if (!r.ym || k === tk || eirYms.has(r.ym)) continue;
+      if (!r.ym || k === tk) continue;
+      const mk = marker({ key: k, tagId: r.tagId, vrn: r.vrn, agentId: r.agentId, agentName: r.agentName, cls: r.cls });
+      if (seen.has(mk)) continue;
+      seen.add(mk);
       const p = lk.resolve(r.agentId, r.agentName, r.tlId, r.tlName);
       fromEir.push({
         date: r.date, d: r.date, key: k, ym: r.ym, day: r.day, cls: r.cls, group: r.group,
