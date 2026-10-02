@@ -4611,3 +4611,107 @@ html[data-theme="dark"] .ab-th-tl { background: #06281f; color: #5eead4; }
 html[data-theme="dark"] .ab-count { background: #1e1b4b; color: #c7d2fe; }
 html[data-theme="dark"] .ab-cellclick:hover { background: #1e1b4b; }
 html[data-theme="dark"] .ab-chart-card { border-color: #1f2937; }
+
+/* ============================ v3.43 · REPORT data everywhere (home search + Agent/TL Summary) ===== */
+/* --- 📊 mppt: sortable/filterable REPORT data table (Agent · TL · Stock · Total · Last Month) --- */
+.mppt-wrap { border: 1px solid var(--line); border-radius: 14px; background: var(--card); overflow: hidden; }
+.mppt-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); background: linear-gradient(100deg, color-mix(in srgb, var(--brand) 6%, var(--card)), var(--card)); }
+.mppt-bar .mppt-filter { flex: 1 1 220px; max-width: 340px; }
+.mppt-bar .chip { cursor: pointer; }
+.mppt-count { margin-left: auto; font-weight: 800; }
+.mppt-src { flex-basis: 100%; }
+.mp-people-table { width: 100%; }
+.mp-people-table thead th { position: sticky; top: 0; z-index: 2; background: color-mix(in srgb, var(--brand) 9%, var(--card)); cursor: pointer; user-select: none; white-space: nowrap; font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; }
+.mp-people-table thead th:hover { background: color-mix(in srgb, var(--brand) 16%, var(--card)); }
+.mp-people-table thead th[data-mppt-dir]::after { content: ' ↕'; opacity: .55; }
+.mp-people-table thead th[data-mppt-dir="asc"]::after { content: ' ↑'; opacity: 1; }
+.mp-people-table thead th[data-mppt-dir="desc"]::after { content: ' ↓'; opacity: 1; }
+.mp-people-table tbody tr { cursor: pointer; }
+.mp-people-table tbody tr:hover > td { background: color-mix(in srgb, var(--brand) 6%, transparent); }
+.mp-people-table tr.mp-tlrow > td { background: color-mix(in srgb, var(--brand) 4%, transparent); }
+.mp-people-table tr.mp-tlrow:hover > td { background: color-mix(in srgb, var(--brand) 10%, transparent); }
+.mp-people-table .num { text-align: right; white-space: nowrap; }
+.mp-people-table .num b { font-size: 14px; font-weight: 850; }
+.mp-people-table .cell-sub { display: block; font-size: 10px; color: var(--muted); font-weight: 650; }
+.mp-people-table tfoot td { background: color-mix(in srgb, var(--brand) 8%, var(--card)); font-size: 13px; }
+.mp-people-table tfoot .cell-sub { font-weight: 600; }
+.mppt-who { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.mppt-who b { display: block; font-size: 13.5px; font-weight: 850; overflow-wrap: anywhere; }
+.mppt-who small { display: block; margin-top: 1px; }
+.mppt-who .badge { font-size: 9.5px; padding: 1px 7px; }
+.mppt-acts { white-space: nowrap; width: 1%; }
+.mppt-more-row { display: flex; justify-content: center; padding: 10px; border-top: 1px dashed var(--line); }
+.mp-drill { cursor: pointer; }
+.mp-drill:hover { text-decoration: underline dotted; }
+@media (max-width: 720px) { .mppt-bar .mppt-filter { max-width: none; } .mppt-count { margin-left: 0; } }
+
+/* --- 🔎 Home master search v2 (hero bar + channel chips + meta) --- */
+.home-master-search.v2 { border: 1px solid color-mix(in srgb, var(--brand) 26%, var(--line)); border-radius: 20px; padding: 18px 20px 14px; margin-bottom: 16px; background:
+  radial-gradient(1100px 220px at 8% -40px, color-mix(in srgb, var(--brand) 14%, transparent), transparent 70%),
+  radial-gradient(900px 220px at 95% -60px, color-mix(in srgb, var(--brand-2) 12%, transparent), transparent 70%),
+  linear-gradient(120deg, color-mix(in srgb, var(--brand) 7%, var(--card)), color-mix(in srgb, var(--brand-2) 6%, var(--card))); box-shadow: 0 12px 30px rgba(79, 70, 229, .10); }
+.home-master-search.v2 .hms-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.home-master-search.v2 .hms-ico { width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center; font-size: 21px; background: linear-gradient(135deg, color-mix(in srgb, var(--brand) 22%, var(--card)), color-mix(in srgb, var(--brand-2) 18%, var(--card))); box-shadow: 0 6px 14px rgba(79, 70, 229, .18); }
+.hms-head-txt { flex: 1; min-width: 0; }
+.hms-head-txt b { display: block; font-size: 17px; letter-spacing: -.01em; }
+.hms-head-txt small { color: var(--muted); font-size: 12px; line-height: 1.5; display: block; }
+.hms-brand { font-weight: 800; } .hms-brand.ff { color: #2563eb; } .hms-brand.gv { color: #059669; }
+.home-master-search.v2 .hms-input-wrap { display: flex; gap: 10px; align-items: stretch; }
+.hms-input-box { flex: 1 1 320px; display: flex; align-items: center; gap: 9px; min-width: 0; padding: 3px 12px 3px 14px; border-radius: 15px; border: 2px solid color-mix(in srgb, var(--brand) 30%, var(--line)); background: var(--card); transition: border-color .18s ease, box-shadow .18s ease; }
+.hms-input-box:focus-within { border-color: var(--brand); box-shadow: 0 0 0 4px color-mix(in srgb, var(--brand) 18%, transparent); }
+.hms-input-box .input { flex: 1; border: 0; background: transparent; outline: none; font-size: 15px; padding: 9px 0; box-shadow: none; }
+.hms-ico-in { font-size: 17px; opacity: .85; }
+.hms-go { font-size: 14.5px; padding: 10px 20px; border-radius: 14px; }
+.home-master-search.v2 .hms-chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 11px; font-size: 11.5px; }
+.home-master-search.v2 .hms-chips .chip { cursor: pointer; font-weight: 700; }
+.home-master-search.v2 .hms-chips .chip.on { background: linear-gradient(120deg, var(--brand), var(--brand-2)); color: #fff; border-color: transparent; box-shadow: 0 4px 12px color-mix(in srgb, var(--brand) 30%, transparent); }
+.hms-chip-div { width: 1px; height: 18px; background: var(--line); margin: 0 5px; }
+.hms-meta { margin-top: 10px; font-size: 12.5px; color: var(--muted); }
+.hms-meta b { color: var(--ink); }
+@media (max-width: 640px) { .home-master-search.v2 .hms-input-wrap { flex-wrap: wrap; } .hms-go { width: 100%; justify-content: center; } }
+
+/* --- 🧑‍💼 kundli card v2: data strip (Stock · Total · Last Month · Growth) --- */
+.ms-avatar.ff { background: linear-gradient(135deg, #2563eb, #38bdf8); }
+.ms-avatar.gv { background: linear-gradient(135deg, #059669, #34d399); }
+.ms-avatar.tiny { width: 30px; height: 30px; border-radius: 10px; font-size: 13px; }
+.ms-kundli.v2 { border-width: 1.5px; }
+.ms-data-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin: 2px 0 10px; }
+.ms-data-strip .dcell { border-radius: 12px; padding: 8px 9px; background: color-mix(in srgb, var(--muted) 7%, transparent); border: 1px solid color-mix(in srgb, var(--muted) 16%, transparent); min-width: 0; cursor: pointer; transition: transform .14s ease, border-color .14s ease; }
+.ms-data-strip .dcell:hover { transform: translateY(-1px); border-color: var(--brand); }
+.ms-data-strip .dcell small { display: block; font-size: 9.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ms-data-strip .dcell b { display: block; font-size: 17px; font-weight: 900; line-height: 1.2; }
+.ms-data-strip .dcell em { display: block; font-style: normal; font-size: 9.5px; color: var(--muted); font-weight: 650; overflow-wrap: anywhere; }
+.ms-data-strip .dcell.stock { background: color-mix(in srgb, #0ea5e9 9%, transparent); border-color: color-mix(in srgb, #0ea5e9 30%, transparent); }
+.ms-data-strip .dcell.cur { background: color-mix(in srgb, var(--brand) 9%, transparent); border-color: color-mix(in srgb, var(--brand) 28%, transparent); }
+.ms-data-strip .dcell.last { background: color-mix(in srgb, var(--brand-2) 8%, transparent); border-color: color-mix(in srgb, var(--brand-2) 26%, transparent); }
+.ms-data-strip .dcell.grow { background: color-mix(in srgb, #10b981 8%, transparent); border-color: color-mix(in srgb, #10b981 26%, transparent); cursor: default; }
+.ms-kundli.ms-flash { animation: msFlash 1.4s ease; }
+@keyframes msFlash { 0% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--brand) 45%, transparent), 0 6px 18px rgba(15, 23, 42, .06); } 100% { box-shadow: 0 6px 18px rgba(15, 23, 42, .06); } }
+@media (max-width: 560px) { .ms-data-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* --- 📋 Agent / TL Summary v2: search card · people list · head v2 --- */
+.as-search-card { border: 1px solid color-mix(in srgb, var(--brand) 22%, var(--line)); background: linear-gradient(120deg, color-mix(in srgb, var(--brand) 7%, var(--card)), color-mix(in srgb, var(--brand-2) 5%, var(--card))); }
+.as-search { max-width: 860px; }
+.as-search-ico { display: grid; place-items: center; width: 42px; border-radius: 12px; font-size: 18px; background: color-mix(in srgb, var(--brand) 13%, var(--card)); flex: none; }
+.as-search .input { font-size: 14.5px; padding: 11px 14px; border-radius: 12px; border-width: 2px; }
+.as-search .input:focus { border-color: var(--brand); box-shadow: 0 0 0 4px color-mix(in srgb, var(--brand) 16%, transparent); outline: none; }
+.as-people-card { margin-bottom: 14px; }
+.as-people-card .card-head h3 { letter-spacing: -.01em; }
+.as-people-body { padding-top: 8px; }
+.as-head.v2 { padding: 18px 20px; }
+.as-head.v2 .as-ava { font-size: 2.5rem; padding: 12px 16px; border-radius: 18px; background: rgba(255, 255, 255, .22); }
+.as-head.v2 .as-ava.ff { background: linear-gradient(135deg, rgba(37, 99, 235, .85), rgba(56, 189, 248, .75)); }
+.as-head.v2 .as-ava.gv { background: linear-gradient(135deg, rgba(5, 150, 105, .85), rgba(52, 211, 153, .75)); }
+.as-head.v2 .as-who h2 { font-size: 1.55rem; font-weight: 900; letter-spacing: -.02em; }
+.as-id-line b, .as-id-line a { color: #fff; }
+.as-tl-note { margin: 8px 0 0; padding: 7px 11px; border-radius: 11px; background: rgba(255, 255, 255, .16); font-size: 12px; display: inline-block; }
+.as-head .badge.amber { background: #f59e0b; color: #fff; border: 0; }
+.as-head .direct-chip { background: rgba(255, 255, 255, .9); color: #9a3412; }
+
+/* --- 🌙 dark tweaks --- */
+html[data-theme="dark"] .home-master-search.v2 { background: linear-gradient(120deg, color-mix(in srgb, var(--brand) 12%, var(--card)), color-mix(in srgb, var(--brand-2) 9%, var(--card))); }
+html[data-theme="dark"] .hms-input-box { background: color-mix(in srgb, var(--card) 92%, #000); }
+html[data-theme="dark"] .hms-brand.ff { color: #93c5fd; } html[data-theme="dark"] .hms-brand.gv { color: #6ee7b7; }
+html[data-theme="dark"] .mppt-bar { background: color-mix(in srgb, var(--brand) 10%, var(--card)); }
+html[data-theme="dark"] .mp-people-table thead th { background: color-mix(in srgb, var(--brand) 16%, var(--card)); }
+html[data-theme="dark"] .ms-data-strip .dcell b { color: var(--ink); }

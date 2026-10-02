@@ -660,6 +660,26 @@ await run('v3.11 · Master search (naam / TL / ID index + suggestions + results 
   }
   log(`      profile ${pr.name} · stock ${pr.stock.total} · class rows ${pr.classes.length} · html ${ph.length} chars`);
 }, true);
+await run('v3.43 · Agent/TL Summary (FF + GV) — search + 📊 REPORT data table + report header', async () => {
+  const list = pages.performance.agents();
+  const probe = (list.find((a) => !a.tlExcluded && a.tlName) || list[0] || {}).name || '';
+  if (!probe) throw new Error('probe agent nahi mila');
+  const r = root();
+  await FF.pages.ffAgentSummary.render(r, { q: probe }, {});
+  await settle(400);
+  let html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const label of ['Agent / TL Summary', 'as-search', 'REPORT data — sabhi agents', 'mp-people-table', 'data-mppt-filter', 'data-mppt-row', '📊 REPORT data', 'Total Issuance', 'Last Month', 'as-head v2', 'REPORT tab']) {
+    if (!html.includes(label)) throw new Error(`FF Summary page me "${label}" nahi mila`);
+  }
+  if (!/scope=stock(&amp;|&)/.test(html)) throw new Error('REPORT data table ke stock cells clickable nahi');
+  const r2 = root();
+  await FF.pages.gvAgentSummary.render(r2, {}, {});
+  await settle(400);
+  html = r2.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const label of ['mp-people-table', 'GV REPORT', 'Total Issuance', 'Last Month']) {
+    if (!html.includes(label)) throw new Error(`GV Summary page me "${label}" nahi mila`);
+  }
+}, true);
 await run('T-1 basis · growth % + suggested dispatch (master search + performance drawer)', async () => {
   const list = pages.performance.agents();
   const basis = FF.util.reportBasis();

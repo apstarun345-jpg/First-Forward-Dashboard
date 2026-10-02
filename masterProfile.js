@@ -1422,5 +1422,198 @@ window.FF = window.FF || {};
     }
   }
 
-  FF.masterProfile = { supports, quick, build, buildNow, html, csvRows, waText, renderInto, open, warm, load, loadFor, onData, isLoaded: () => loadedOnce, invalidate: resetProfileCache, suggest, suggestGro, findFfAgent, findGvAgent, mobileFor, get suggestDays() { return suggestDays(); }, _buildSoon: buildSoon, _limits: LIMITS };
+  // ------------------------------------------------------------------ 📊 REPORT data table (v3.43)
+  /**
+   * Ek person ka "REPORT data" row — Home search ki data table AUR FF/GV Agent-TL Summary ki
+   * list table DONO isi se banti hain → teeno jagah numbers SAME (user rule).
+   *   • FF → REPORT tab (performance path) · GV → GV REPORT tab
+   *   • TL rows = own + agents rollup — quick()/build() ke wahi totals jo Summary KPI cards me
+   *     dikhte hain (yahan dobara calculate nahi hota, isliye drift nahi hota)
+   *   • quick() me row na ho to caller ka `fallback` (list ke cur/last/stock) — `found:false` ke saath.
+   */
+  const rnum = (v, d) => { const n = Number(v); return Number.isFinite(n) ? n : (d === undefined ? 0 : d); };
+  function reportDataRow(person, fallback) {
+    const p = person || {};
+    const fb = fallback || {};
+    const kind = p.kind || 'ff-agent';
+    const ch = /^gv/.test(kind) ? 'gv' : 'ff';
+    const isTl = /-tl$/.test(kind);
+    let q = null;
+    if (p.name) { try { q = quick({ kind, name: p.name, sub: p.id || p.sub || '', tlSet: p.tlSet || new Set(), classMap: new Map(), bars: new Set() }); } catch { q = null; } }
+    const t = (q && q.totals) || {}, s = (q && q.stock) || {}, ts = (q && q.tlStock) || {};
+    const pick = (qv, fv) => (q && qv !== undefined && qv !== null && Number.isFinite(Number(qv)) ? Number(qv) : rnum(fv));
+    const cur = pick(t.curTotal, fb.cur), curVc4 = pick(t.curVc4, fb.curVc4), curComm = pick(t.curComm, fb.curComm);
+    const last = pick(t.lastTotal, fb.last), lastVc4 = pick(t.lastVc4, fb.lastVc4), lastComm = pick(t.lastComm, fb.lastComm);
+    const stock = pick(s.total, fb.stock), stockVc4 = pick(s.vc4, fb.stockVc4), stockComm = pick(s.comm, fb.stockComm);
+    const direct = !!(q && q.direct) || !!p.direct || !!fb.direct;
+    const tlName = isTl ? '' : ((q && q.tl && q.tl.name) || p.tl || fb.tlName || '');
+    const tlId = isTl ? '' : ((q && q.tl && q.tl.id) || p.tlId || fb.tlId || '');
+    const tlLabel = isTl ? '' : (direct ? ((q && q.directLabel) || p.directLabel || 'Direct (no TL)') : tlName);
+    let growth = q && Number.isFinite(Number(q.growthNum)) ? Number(q.growthNum) : (fb.growth != null ? rnum(fb.growth, null) : null);
+    if (growth === null || !Number.isFinite(growth)) growth = U.growth(cur, last);
+    return {
+      kind, ch, isTl, name: p.name || '', id: (q && q.id) || p.id || p.sub || fb.id || '',
+      mobile: (q && q.mobile) || p.mobile || fb.mobile || '',
+      priority: (q && q.priority) || p.priority || fb.priority || '',
+      status: (q && q.status) || p.status || fb.status || '',
+      direct, directLabel: (q && q.directLabel) || p.directLabel || '', tlName, tlId, tlLabel,
+      stock, stockVc4, stockComm, cur, curVc4, curComm, last, lastVc4, lastComm, growth,
+      // TL rollup detail (TL row = own + agents — "total issuance with TL / stock same" rule)
+      ownStock: ts.own && Number.isFinite(Number(ts.own.total)) ? Number(ts.own.total) : null,
+      agentsStock: ts.agents && Number.isFinite(Number(ts.agents.total)) ? Number(ts.agents.total) : null,
+      agentCount: q && Number.isFinite(Number(q.agentCount)) ? Number(q.agentCount) : rnum(fb.agentCount, 0),
+      found: !!q
+    };
+  }
+  /** dataset round-trip — table row ⇄ person object. */
+  const rowEncode = (r) => `${r.kind}|${encodeURIComponent(r.name || '')}|${encodeURIComponent(r.id || '')}`;
+  function personFromRow(el) {
+    const tr = el && el.closest ? el.closest('[data-mppt-row]') : (el && el.dataset ? el : null);
+    if (!tr || !tr.dataset) return null;
+    const parts = String(tr.dataset.mpptRow || '').split('|');
+    if (parts.length < 2) return null;
+    const name = decodeURIComponent(parts[1] || ''), id = decodeURIComponent(parts[2] || '');
+    return { kind: parts[0], name, id, sub: id, tlSet: new Set(), classMap: new Map(), bars: new Set() };
+  }
+  let peopleTableBound = false;
+  /** Ek hi baar document-level delegation: sort · filter · chips · "aur dikhao". */
+  function bindPeopleTable() {
+    if (peopleTableBound || typeof document === 'undefined' || !document.addEventListener) return;
+    peopleTableBound = true;
+    const visibleRows = (wrap, apply) => {
+      const rows = [...wrap.querySelectorAll('tr[data-mppt-row]')];
+      const q = clean((wrap.querySelector('[data-mppt-filter]') || {}).value || '').toLowerCase();
+      const chip = wrap.dataset.mpptChip || 'all';
+      let shown = 0;
+      rows.forEach((tr) => {
+        const okQ = !q || String(tr.dataset.mpptSearch || '').includes(q);
+        const kind = String(tr.dataset.mpptKind || '');
+        const okChip = chip === 'all' || (chip === 'agents' && /-agent$/.test(kind)) || (chip === 'tls' && /-tl$/.test(kind));
+        const ok = okQ && okChip;
+        if (apply !== false) { tr.hidden = !ok; }
+        if (ok) shown++;
+      });
+      const count = wrap.querySelector('[data-mppt-count]');
+      if (count) count.textContent = `${U.fmt(shown)} / ${U.fmt(rows.length)} rows`;
+      return shown;
+    };
+    document.addEventListener('click', (e) => {
+      if (!e.target || !e.target.closest) return;
+      const th = e.target.closest('[data-mppt-sort]');
+      if (th) {
+        const table = th.closest('table'); const tbody = table && table.querySelector('tbody');
+        if (!tbody) return;
+        const ths = [...table.querySelectorAll('thead [data-mppt-sort]')];
+        const idx = ths.indexOf(th);
+        const dir = th.dataset.mpptDir === 'asc' ? 'desc' : 'asc';
+        ths.forEach((h) => { if (h !== th) delete h.dataset.mpptDir; });
+        th.dataset.mpptDir = dir;
+        const mul = dir === 'asc' ? 1 : -1;
+        const rows = [...tbody.querySelectorAll('tr[data-mppt-row]')];
+        rows.sort((a, b) => {
+          const av = (a.children[idx] && a.children[idx].getAttribute('data-v')) || '';
+          const bv = (b.children[idx] && b.children[idx].getAttribute('data-v')) || '';
+          const an = Number(av), bn = Number(bv);
+          if (av !== '' && bv !== '' && Number.isFinite(an) && Number.isFinite(bn)) return (an - bn) * mul;
+          return String(av).localeCompare(String(bv)) * mul;
+        });
+        rows.forEach((tr) => tbody.appendChild(tr));
+        return;
+      }
+      const chip = e.target.closest('[data-mppt-chip]');
+      if (chip) {
+        const wrap = chip.closest('.mppt-wrap');
+        if (!wrap) return;
+        wrap.dataset.mpptChip = chip.dataset.mpptChip;
+        wrap.querySelectorAll('[data-mppt-chip]').forEach((c) => c.classList.toggle('on', c === chip));
+        visibleRows(wrap);
+        return;
+      }
+      const more = e.target.closest('[data-mppt-more]');
+      if (more) {
+        const wrap = more.closest('.mppt-wrap');
+        const hidden = [...wrap.querySelectorAll('tr.mppt-rest[hidden]')].slice(0, 300);
+        hidden.forEach((tr) => { tr.hidden = false; tr.classList.remove('mppt-rest'); });
+        if (!wrap.querySelector('tr.mppt-rest[hidden]')) more.remove();
+        visibleRows(wrap);
+      }
+    });
+    document.addEventListener('input', (e) => {
+      const inp = e.target && e.target.closest ? e.target.closest('[data-mppt-filter]') : null;
+      if (inp) visibleRows(inp.closest('.mppt-wrap'));
+    });
+    peopleTableVisible = visibleRows;
+  }
+  let peopleTableVisible = null;
+  /**
+   * Sortable + filterable data table: Agent | TL | 📦 Stock | 🏷️ Total Issuance | 📅 Last Month | 📈 Growth.
+   * `rows` = reportDataRow() output. opts: { id, chips, rowActions(r), footer, limit, curLabel, lastLabel, sourceNote }
+   */
+  function peopleTableHtml(rows, opts) {
+    bindPeopleTable();
+    const o = opts || {};
+    const list = Array.isArray(rows) ? rows : [];
+    const limit = o.limit || 250;
+    const sortVal = (v) => (v === null || v === undefined || (typeof v === 'number' && !Number.isFinite(v)) ? '' : v);
+    const rowHtml = (r, i) => {
+      const st = r.isTl ? `src=${r.ch}&scope=stock&tl=${encodeURIComponent(r.name)}` : `src=${r.ch}&scope=stock&agent=${encodeURIComponent(r.name)}${r.id ? `&agentId=${encodeURIComponent(r.id)}` : ''}`;
+      const ym = `ym=`;
+      const curSpec = `src=${r.ch}&scope=mtd&${ym}&${r.isTl ? `tl=${encodeURIComponent(r.name)}` : `agent=${encodeURIComponent(r.name)}${r.id ? `&agentId=${encodeURIComponent(r.id)}` : ''}`}`;
+      const lastSpec = `src=${r.ch}&scope=month&${ym}&${r.isTl ? `tl=${encodeURIComponent(r.name)}` : `agent=${encodeURIComponent(r.name)}${r.id ? `&agentId=${encodeURIComponent(r.id)}` : ''}`}`;
+      const rollup = r.isTl
+        ? ((r.ownStock != null || r.agentsStock != null)
+            ? `own ${fmt(r.ownStock || 0)} + agents ${fmt(r.agentsStock || 0)} · ${fmt(r.agentCount)} agents`
+            : `${fmt(r.agentCount)} agents`)
+        : '';
+      const tlCell = r.isTl
+        ? `<b>👥 TL total</b><small class="cell-sub">${rollup || 'own + agents'}</small>`
+        : (r.direct ? `<span class="direct-chip">🚫 ${esc(r.tlLabel || 'Direct (no TL)')}</span>` : `${esc(r.tlName || '—')}${r.tlId ? `<small class="cell-sub">${esc(r.tlId)}</small>` : ''}`);
+      return `<tr class="clickable${r.isTl ? ' mp-tlrow' : ''}${i >= limit ? ' mppt-rest' : ''}"${i >= limit ? ' hidden' : ''} data-mppt-row="${esc(rowEncode(r))}" data-mppt-kind="${esc(r.kind)}" data-mppt-search="${esc(`${r.name} ${r.tlName} ${r.tlLabel} ${r.id}`.toLowerCase())}" title="Click → poori report">
+        <td data-v="${esc(String(r.name || '').toLowerCase())}">
+          <div class="mppt-who"><span class="ms-avatar tiny ${r.ch === 'gv' ? 'gv' : 'ff'}">${esc((r.name || '?').slice(0, 1).toUpperCase())}</span>
+            <div><b>${esc(r.name)}</b><small class="cell-sub"><span class="badge ${r.ch === 'gv' ? 'green' : 'blue'}">${r.ch === 'gv' ? '🟩 GV' : '🟦 FF'}</span> <span class="badge ${r.isTl ? 'purple' : 'blue'}">${r.isTl ? 'TL' : 'Agent'}</span>${r.id ? ` · <span class="mono">${esc(r.id)}</span>` : ''}${r.priority ? ` · ${esc(r.priority)}` : ''}</small></div>
+          </div>
+        </td>
+        <td data-v="${esc(String(r.isTl ? `0-${r.name}` : (r.tlLabel || r.tlName || 'zz')).toLowerCase())}">${tlCell}</td>
+        <td class="num mp-drill" data-v="${sortVal(r.stock)}" data-kpi="${esc(st)}" role="button" tabindex="0" title="Stock ki detail"><b>${fmt(r.stock)}</b>${r.stockVc4 || r.stockComm ? `<small class="cell-sub">VC4 ${fmt(r.stockVc4)} · Comm ${fmt(r.stockComm)}</small>` : ''}</td>
+        <td class="num mp-drill" data-v="${sortVal(r.cur)}" data-kpi="${esc(curSpec)}" role="button" tabindex="0" title="Total issuance ki detail"><b>${fmt(r.cur)}</b>${r.curVc4 || r.curComm ? `<small class="cell-sub">VC4 ${fmt(r.curVc4)} · Comm ${fmt(r.curComm)}</small>` : ''}</td>
+        <td class="num mp-drill" data-v="${sortVal(r.last)}" data-kpi="${esc(lastSpec)}" role="button" tabindex="0" title="Last month issuance ki detail"><b>${fmt(r.last)}</b>${r.lastVc4 || r.lastComm ? `<small class="cell-sub">VC4 ${fmt(r.lastVc4)} · Comm ${fmt(r.lastComm)}</small>` : ''}</td>
+        <td class="num" data-v="${sortVal(Number.isFinite(r.growth) ? r.growth : -999999)}">${U.pctHtml(r.growth, { decimals: 0 })}</td>
+        ${o.rowActions ? `<td class="mppt-acts">${o.rowActions(r)}</td>` : ''}
+      </tr>`;
+    };
+    const agents = list.filter((r) => !r.isTl);
+    const foot = o.footer === false ? '' : `<tfoot>
+      <tr class="row-total"><td colspan="2"><b>${esc(o.footerLabel || 'GRAND TOTAL — agents')}</b><small class="cell-sub">${fmt(agents.length)} agents · TL rows = own + agents (rollup, isliye jod me nahi)</small></td>
+        <td class="num"><b>${fmt(U.sum(agents, (r) => r.stock))}</b></td>
+        <td class="num"><b>${fmt(U.sum(agents, (r) => r.cur))}</b></td>
+        <td class="num"><b>${fmt(U.sum(agents, (r) => r.last))}</b></td>
+        <td class="num">${U.pctHtml(U.growth(U.sum(agents, (r) => r.cur), U.sum(agents, (r) => r.last)), { decimals: 0 })}</td>
+        ${o.rowActions ? '<td></td>' : ''}
+      </tr></tfoot>`;
+    return `<div class="mppt-wrap" data-mppt="${esc(o.id || 'mppt')}" data-mppt-chip="all">
+      <div class="mppt-bar">
+        <input class="input mppt-filter" data-mppt-filter type="search" placeholder="🔍 Is table me filter — naam · TL · ID…" aria-label="Table filter">
+        ${o.chips || ''}
+        <span class="mppt-count dim small" data-mppt-count>${U.fmt(list.length)} / ${U.fmt(list.length)} rows</span>
+        ${o.sourceNote ? `<span class="dim small mppt-src">${o.sourceNote}</span>` : ''}
+      </div>
+      <div class="table-wrap"><table class="tbl compact mp-people-table">
+        <thead><tr>
+          <th data-mppt-sort="name" role="button" tabindex="0">🧑‍💼 ${esc(o.whoLabel || 'Agent / TL')}</th>
+          <th data-mppt-sort="tl" role="button" tabindex="0">👥 TL</th>
+          <th class="num" data-mppt-sort="stock" role="button" tabindex="0">📦 Stock</th>
+          <th class="num" data-mppt-sort="cur" role="button" tabindex="0">🏷️ Total Issuance${esc(o.curLabel ? ` · ${o.curLabel}` : ' (MTD)')}</th>
+          <th class="num" data-mppt-sort="last" role="button" tabindex="0">📅 Last Month${esc(o.lastLabel ? ` · ${o.lastLabel}` : '')}</th>
+          <th class="num" data-mppt-sort="growth" role="button" tabindex="0">📈 Growth</th>
+          ${o.rowActions ? '<th></th>' : ''}
+        </tr></thead>
+        <tbody>${list.map(rowHtml).join('')}</tbody>
+        ${foot}
+      </table></div>
+      ${list.length > limit ? `<div class="mppt-more-row"><button type="button" class="btn small" data-mppt-more>🔽 Aur ${fmt(Math.min(300, list.length - limit))} rows dikhao (${fmt(list.length - limit)} bache)</button></div>` : ''}
+    </div>`;
+  }
+
+  FF.masterProfile = { supports, quick, build, buildNow, html, csvRows, waText, renderInto, open, warm, load, loadFor, onData, isLoaded: () => loadedOnce, invalidate: resetProfileCache, suggest, suggestGro, findFfAgent, findGvAgent, mobileFor, reportDataRow, peopleTableHtml, personFromRow, get suggestDays() { return suggestDays(); }, _buildSoon: buildSoon, _limits: LIMITS };
 })(window.FF);

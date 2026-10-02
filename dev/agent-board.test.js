@@ -269,17 +269,17 @@ test('direct agent (TL nahi): TL bar nahi, par board phir bhi poora', () => {
 });
 
 // ---- wiring (index.html + sw.js + lazy.js + package.json) ---------------------------------------------------
-test('wiring: agentBoard.js load hota hai (index + sw) aur cache bust v65 / v73 hai', async () => {
+test('wiring: agentBoard.js load hota hai (index + sw) aur cache bust v66 / v74 hai', async () => {
   const fs = await import('node:fs');
   const idx = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
   const sw = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
   const lazy = fs.readFileSync(path.join(ROOT, 'lazy.js'), 'utf8');
   const pkg = fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8');
-  assert.ok(idx.includes('agentBoard.js?v=65'), 'index.html me agentBoard');
+  assert.ok(idx.includes('agentBoard.js?v=66'), 'index.html me agentBoard');
   assert.ok(idx.indexOf('performance.js') < idx.indexOf('agentBoard.js'), 'performance ke baad load');
   assert.ok(idx.indexOf('agentBoard.js') < idx.indexOf('masterProfile.js'), 'masterProfile se pehle load');
-  assert.ok(sw.includes('./agentBoard.js?v=65'), 'sw ASSETS me agentBoard');
-  assert.match(sw, /CACHE_NAME = 'apnapayment-v73'/);
-  assert.match(lazy, /return m \? m\[1\] : '65'/);
+  assert.ok(sw.includes('./agentBoard.js?v=66'), 'sw ASSETS me agentBoard');
+  assert.match(sw, /CACHE_NAME = 'apnapayment-v74'/);
+  assert.match(lazy, /return m \? m\[1\] : '66'/);
   assert.match(pkg, /agentBoard/);
 });
