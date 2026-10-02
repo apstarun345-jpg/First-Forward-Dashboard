@@ -297,9 +297,9 @@ test('🚀 lazy group + cache busting: unusual-scan pehle load hota hai, version
   assert.deepEqual(list, ['unusual-scan', 'pdf', 'unusual'], 'shared scan lib page module se pehle load ho');
   const idx = read('index.html'), sw = read('sw.js');
   assert.ok(!idx.includes('?v=59') && !sw.includes('?v=59'), 'purana ?v=59 kahin nahi bacha');
-  assert.ok(idx.includes('?v=63') && sw.includes('?v=63'), 'naya ?v=63 lagi hai (v3.40 — TL stock split)');
+  assert.ok(idx.includes('?v=64') && sw.includes('?v=64'), 'naya ?v=64 lagi hai (v3.41 — Search Report FF + GV)');
   assert.ok(!idx.includes('?v=62') && !sw.includes('?v=62'), 'pichhla ?v=62 kahin nahi bacha (index + sw dono bump)');
-  assert.match(sw, /CACHE_NAME = 'apnapayment-v71'/, 'SW cache bust hua');
+  assert.match(sw, /CACHE_NAME = 'apnapayment-v72'/, 'SW cache bust hua');
   const server = read('server.js');
   assert.ok(server.includes("import './unusual-scan.js'"), 'server shared scan lib import karta hai');
   assert.ok(server.includes("'/api/unusual/scan'"), 'server route hai');

@@ -647,6 +647,11 @@ await run('v3.11 · Master search (naam / TL / ID index + suggestions + results 
   if (tlName) {
     const tl = await FF.masterProfile.build({ kind: 'ff-tl', name: tlName, sub: '', tlSet: new Set(), classMap: new Map(), bars: new Set() });
     if (!tl.agentCount || !/TL ke agents/.test(FF.masterProfile.html(tl))) throw new Error('TL profile me agents table nahi');
+    // v3.41 — agents table (stock · last · this month) + Agent × Class matrix + Search Report (⚖ FF + GV)
+    const tlHtml = FF.masterProfile.html(tl);
+    for (const label of ['mp-agents-tbl', 'data-mp-go=\"agents\"', 'scope=month', 'scope=mtd']) if (!tlHtml.includes(label)) throw new Error(`TL profile me \"${label}\" nahi mila`);
+    const cmb = FF.searchReport.combinedHtml({ name: tlName }, { ff: tl, gv: null });
+    for (const label of ['Last month', 'Current month', 'Stock in hand', 'Class-wise', 'data-sr-open=\"ff\"']) if (!cmb.includes(label)) throw new Error(`Search Report combined me \"${label}\" nahi mila`);
   }  const dr = list.find((a) => a.tlExcluded);
   if (dr) {
     const dp = await FF.masterProfile.build({ kind: 'ff-agent', name: dr.name, sub: dr.agentId || '', tlSet: new Set(), classMap: new Map(), bars: new Set() });

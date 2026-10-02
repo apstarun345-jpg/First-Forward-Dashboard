@@ -1094,8 +1094,16 @@ FF.pages = FF.pages || {};
         paintReport(rep);
         if (rep.ageState !== 'ready') startAgeing(rep);
       };
+      /** v3.41 — FF / GV dono ka option: usi naam ko dusre channel ke Summary me kholo (naam wahan na ho to saaf bataata hai). */
+      const otherCh = isGv ? 'ff' : 'gv';
+      const canOther = () => can(`${otherCh}AgentSummary`) && (otherCh !== 'gv' || !FF.gv || !FF.gv.enabled || FF.gv.enabled());
+      const switchHtml = (rep) => {
+        if (!canOther() || !rep || !rep.p) return '';
+        const me = { ff: { i: '🟦', l: 'First Forward' }, gv: { i: '🟩', l: 'GV Partner' } };
+        return `<div class="as-chswitch" role="group" aria-label="Channel"><span class="dim small">Channel:</span><button type="button" class="chip on" disabled>${me[channel].i} ${me[channel].l}</button><button type="button" class="chip" data-as-switch="${otherCh}" title="${esc(rep.p.name)} ko ${me[otherCh].l} Summary me kholo">${me[otherCh].i} ${me[otherCh].l} me dekho 👉</button></div>`;
+      };
       const paintReport = (rep) => {
-        body.innerHTML = reportHtml(rep);
+        body.innerHTML = switchHtml(rep) + reportHtml(rep);
         if (FF.charts && FF.charts.mount) FF.charts.mount(body);
         if (FF.app && FF.app.enhanceTables) FF.app.enhanceTables(body);
       };
@@ -1174,6 +1182,12 @@ FF.pages = FF.pages || {};
           const txt = agentWaText(state.report, a);
           const link = mob && mob10(mob).length === 10 ? `https://wa.me/91${mob10(mob)}?text=${encodeURIComponent(txt)}` : U.waLink(txt);
           window.open(link, '_blank', 'noopener');
+          return;
+        }
+        const sw = e.target.closest('[data-as-switch]');
+        if (sw && state.report) {
+          const target = sw.dataset.asSwitch;
+          if (FF.app && FF.app.navigate) FF.app.navigate(`${target}AgentSummary`, { name: state.report.p.name });
           return;
         }
         const packBtn = e.target.closest('[data-as-pack]');
@@ -1276,6 +1290,8 @@ FF.pages = FF.pages || {};
         || state.picked
         || state.list.find((p) => p.kind.endsWith('tl'))
         || state.list[0];
+      const asked = params && (params.name || params.q);
+      if (asked && !matchPeople(state.list, asked)[0]) U.toast(`“${asked}” ${chLabel} me nahi mila — ${isGv ? 'FF' : 'GV'} se dekho ya naam check karo`, 'warn');
       if (initial) await pick(initial);
       else body.innerHTML = '<div class="card"><div class="card-body empty">Koi agent / TL data nahi mila.</div></div>';
     }

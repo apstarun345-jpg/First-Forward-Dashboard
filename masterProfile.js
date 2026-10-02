@@ -654,6 +654,27 @@ window.FF = window.FF || {};
   };
 
   // ------------------------------------------------------------------ profile builders
+  /** Ek agent ka class-wise stock: pehle stock-detail rows (class ke saath), warna REPORT row ka VC4 / Commercial
+   *  (GV me VC12/VC16/VC4/VC5… class columns). `src` = REPORT/perf row. */
+  function agentClassStock(src, detailRows, ch) {
+    const name = src.agentName || src.name, id = src.agentId || src.id;
+    const idx = stockIndex(detailRows);
+    const mine = idx ? pickIndexed([[idx.byAgentId, clean(id).toUpperCase()], [idx.byAgentName, norm(name)]]).filter((r) => isSameAgent(r, name, id) && clean(r.cls)) : [];
+    const map = mine.length ? addClassRows(new Map(), mine) : reportClassMap(src, ch);
+    return Object.fromEntries([...map.entries()].filter(([, n]) => num(n) > 0));
+  }
+  /** TL ki apni row ka class-wise stock — REPORT row poore team ka rollup ho to uska VC4 / Comm nahi, composition ka own. */
+  function selfClassStock(src, detailRows, ch, comp) {
+    const name = src.agentName || src.name, id = src.agentId || src.id;
+    const idx = stockIndex(detailRows);
+    const mine = idx ? pickIndexed([[idx.byAgentId, clean(id).toUpperCase()], [idx.byAgentName, norm(name)]]).filter((r) => isSameAgent(r, name, id) && clean(r.cls)) : [];
+    if (mine.length) return Object.fromEntries(addClassRows(new Map(), mine));
+    const own = (comp && comp.own) || { vc4: 0, comm: 0 };
+    const out = {};
+    if (num(own.vc4) > 0) out.VC4 = num(own.vc4);
+    if (num(own.comm) > 0) out.Commercial = num(own.comm);
+    return out;
+  }
   function ffAgentProfile(p, light) {
     const a = findFfAgent(p.name, p.sub);
     const P = perf();
@@ -716,10 +737,12 @@ window.FF = window.FF || {};
     const stock = stockComposition.stock;
     const agentRow = (a, isSelf) => {
       const av = U.runRate(a.curVc4, 'ff'), avc = U.runRate(a.curNvc4, 'ff');
-      return { name: a.name, id: a.agentId || a.id, mobile: mobileFor(a.name, a.agentId || a.id, a.mobile), priority: a.priority || '', status: a.agentStatus || '', lastActive: a.lastActive || '', isSelf: !!isSelf, stockVc4: num(a.stockVc4), stockComm: num(a.stockNvc4), stockTotal: num(a.stockTotal), cur: num(a.curTotal), last: num(a.lastTotal), curVc4: num(a.curVc4), curComm: num(a.curNvc4), sugVc4: suggest(av, a.stockVc4), sugComm: suggest(avc, a.stockNvc4), sugVc4Gross: suggestGro(av), sugCommGross: suggestGro(avc) };
+      return { name: a.name, id: a.agentId || a.id, mobile: mobileFor(a.name, a.agentId || a.id, a.mobile), priority: a.priority || '', status: a.agentStatus || '', lastActive: a.lastActive || '', isSelf: !!isSelf, stockVc4: num(a.stockVc4), stockComm: num(a.stockNvc4), stockTotal: num(a.stockTotal), cur: num(a.curTotal), last: num(a.lastTotal), curVc4: num(a.curVc4), curComm: num(a.curNvc4), lastVc4: num(a.lastVc4), lastComm: num(a.lastNvc4), sugVc4: suggest(av, a.stockVc4), sugComm: suggest(avc, a.stockNvc4), sugVc4Gross: suggestGro(av), sugCommGross: suggestGro(avc) };
     };
     const rowsA = agents.map((a) => agentRow(a, false)).sort((x, y) => y.cur - x.cur);
     const selfA = selfRow ? agentRow(selfRow, true) : null;
+    rowsA.forEach((r, i) => { r.classStock = agentClassStock(agents.find((a) => (a.agentId || a.id) === r.id && a.name === r.name) || { name: r.name, agentId: r.id }, stockDetails, 'ff'); });
+    if (selfA) selfA.classStock = selfClassStock(selfRow, stockDetails, 'ff', stockComposition);
     const ac = rowsOf('agentClass'), agRows = rowsOf('agents'), stk = rowsOf('stockAgents');
     const curYm = latestYm(ac.length ? ac : agRows), lastYm = U.prevMonthKey(curYm);
     const out = {
@@ -871,10 +894,13 @@ window.FF = window.FF || {};
     const stock = stockComposition.stock;
     const agentRow = (r, isSelf) => {
       const av = gvDaily(r, r.curVc4), avc = gvDaily(r, r.curComm);
-      return { name: r.agentName, id: r.agentId, mobile: mobileFor(r.agentName, r.agentId, r.mobile), priority: prioOf(r.priority), status: r.agentStatus || '', lastActive: r.agentLastActive || r.lastActive || '', isSelf: !!isSelf, stockVc4: num(r.stockVc4), stockComm: num(r.stockComm), stockTotal: num(r.stockTotal), cur: num(r.curTotal), last: num(r.lastTotal), curVc4: num(r.curVc4), curComm: num(r.curComm), sugVc4: suggest(av, r.stockVc4), sugComm: suggest(avc, r.stockComm), sugVc4Gross: suggestGro(av), sugCommGross: suggestGro(avc) };
+      return { name: r.agentName, id: r.agentId, mobile: mobileFor(r.agentName, r.agentId, r.mobile), priority: prioOf(r.priority), status: r.agentStatus || '', lastActive: r.agentLastActive || r.lastActive || '', isSelf: !!isSelf, stockVc4: num(r.stockVc4), stockComm: num(r.stockComm), stockTotal: num(r.stockTotal), cur: num(r.curTotal), last: num(r.lastTotal), curVc4: num(r.curVc4), curComm: num(r.curComm), lastVc4: num(r.lastVc4), lastComm: num(r.lastComm), sugVc4: suggest(av, r.stockVc4), sugComm: suggest(avc, r.stockComm), sugVc4Gross: suggestGro(av), sugCommGross: suggestGro(avc) };
     };
     const rowsA = team.map((r) => agentRow(r, false)).sort((x, y) => y.cur - x.cur);
     const selfA = selfRow ? agentRow(selfRow, true) : null;
+    const gvClassDetail = gvRows('stockAgentClass');
+    rowsA.forEach((r) => { r.classStock = agentClassStock(team.find((x) => x.agentId === r.id && x.agentName === r.name) || { agentName: r.name, agentId: r.id }, gvClassDetail, 'gv'); });
+    if (selfA) selfA.classStock = selfClassStock(selfRow, gvClassDetail, 'gv', stockComposition);
     const out = {
       kind: 'gv-tl', channel: 'GV Partner', ch: 'gv', name: p.name, id: tlId, found: !!list.length,
       mobile: (src && src.tlMobile) || '', tl: { name: p.name, id: tlId }, status: '', lastActive: '', priority: '', stock, tlStock: { ...stock, has: true, own: stockComposition.own, agents: stockComposition.agents },
@@ -898,7 +924,8 @@ window.FF = window.FF || {};
       if (!row) return;
       Object.assign(row, {
         cur: num(agent.curTotal), last: num(agent.lastTotal),
-        curVc4: num(agent.curVc4), curComm: num(agent.curComm)
+        curVc4: num(agent.curVc4), curComm: num(agent.curComm),
+        lastVc4: num(agent.lastVc4), lastComm: num(agent.lastComm)
       });
       const av = gvDaily(agent, agent.curVc4), avc = gvDaily(agent, agent.curComm);
       Object.assign(row, {
@@ -1095,20 +1122,30 @@ window.FF = window.FF || {};
    *  Isse TL ka stock "agents ke sath" wali line me dobara nahi judta (double count fix) aur har stock cell
    *  click par wahi detail khulti hai jo number dikha raha hai. */
   function tlAgentsTable(pr) {
-    const d = pr.dispatch || {}, ts = pr.tlStock || {}, s = pr.stock || {}, t = pr.totals || {};
+    const d = pr.dispatch || {}, ts = pr.tlStock || {}, s = pr.stock || {}, t = pr.totals || {}, m = pr.months || {};
     const rows = (pr.agents || []).slice();
     const selfA = pr.selfAgent || null;
     if (!rows.length && !selfA) return '';
     const tlSpec = `src=${pr.ch}&scope=stock&tl=${encodeURIComponent(pr.name)}`;
     const sum = (k, list) => U.sum(list || rows, (a) => num(a[k]));
     const own = ts.own || { vc4: 0, comm: 0, total: 0 }, ag = ts.agents || { vc4: 0, comm: 0, total: 0 };
+    // v3.41 — har number (stock · last month · this month, VC4 / Comm / Total) apni drawer kholta hai:
+    // agent → month / MTD → class (group) → day → tag / barcode row. Issuance drill me `ym` = profile ka month.
+    const issSpec = (a, which, group) => {
+      const who = `agent=${encodeURIComponent(a.name)}${a.id ? `&agentId=${encodeURIComponent(a.id)}` : ''}`;
+      const base = which === 'cur' ? `src=${pr.ch}&scope=mtd&ym=${encodeURIComponent(m.cur || '')}` : `src=${pr.ch}&scope=month&ym=${encodeURIComponent(m.last || '')}`;
+      return `${base}&${who}${group ? `&group=${group}` : ''}`;
+    };
     const rowHtml = (a) => {
       const spec = `src=${pr.ch}&scope=stock&agent=${encodeURIComponent(a.name)}${a.id ? `&agentId=${encodeURIComponent(a.id)}` : ''}`;
-      const drill = (key) => `<td class="num mp-drill" data-kpi="${esc(spec)}" role="button" tabindex="0" title="${esc(a.name)} ka stock detail">${fmt(a[key])}</td>`;
-      return `<tr class="clickable${a.isSelf ? ' mp-selfrow' : ''}" data-mp-agent="${esc(a.name)}" data-mp-kind="${pr.ch}-agent" data-mp-id="${esc(a.id || '')}"><td>${a.isSelf ? '👤 ' : ''}<b>${esc(a.name)}</b>${a.isSelf ? '<span class="mp-tag-self">TL · apna stock</span>' : ''}<small class="cell-sub">${esc(a.id || '')}${a.status ? ` · ${esc(a.status)}` : ''}${a.lastActive ? ` · last ${esc(a.lastActive)}` : ''}</small></td><td>${mobileCell(a.mobile)}</td><td>${prioChip(a.priority)}</td>${drill('stockVc4')}${drill('stockComm')}<td class="num">${fmt(a.last)}</td><td class="num">${fmt(a.cur)}</td><td class="num">${U.sugCell(a.sugVc4, a.sugVc4Gross || 0)}</td><td class="num">${U.sugCell(a.sugComm, a.sugCommGross || 0)}</td></tr>`;
+      const cellOf = (val, sp, ttl) => `<td class="num mp-drill" data-kpi="${esc(sp)}" role="button" tabindex="0" title="${esc(ttl)}">${fmt(val)}</td>`;
+      const stk = (key) => cellOf(a[key], spec, `${a.name} ka stock detail`);
+      const iss = (key, which, group) => cellOf(a[key], issSpec(a, which, group), `${a.name} · ${which === 'cur' ? 'is month' : 'last month'}${group ? ` · ${group}` : ''} — issuance detail (day → tag)`);
+      return `<tr class="clickable${a.isSelf ? ' mp-selfrow' : ''}" data-mp-agent="${esc(a.name)}" data-mp-kind="${pr.ch}-agent" data-mp-id="${esc(a.id || '')}"><td>${a.isSelf ? '👤 ' : ''}<b>${esc(a.name)}</b>${a.isSelf ? '<span class="mp-tag-self">TL · apna stock</span>' : ''}<small class="cell-sub">${esc(a.id || '')}${a.status ? ` · ${esc(a.status)}` : ''}${a.lastActive ? ` · last ${esc(a.lastActive)}` : ''}</small></td><td>${mobileCell(a.mobile)}</td><td>${prioChip(a.priority)}</td>${stk('stockVc4')}${stk('stockComm')}${stk('stockTotal')}${iss('lastVc4', 'last', 'VC4')}${iss('lastComm', 'last', 'COMM')}${iss('last', 'last', '')}${iss('curVc4', 'cur', 'VC4')}${iss('curComm', 'cur', 'COMM')}${iss('cur', 'cur', '')}<td class="num">${U.sugCell(a.sugVc4, a.sugVc4Gross || 0)}</td><td class="num">${U.sugCell(a.sugComm, a.sugCommGross || 0)}</td></tr>`;
     };
-    const footRow = (label, vc4, comm, last, cur, sugVc4, sugComm, cls, spec) => `<tr class="clickable ${cls}"${spec ? ` data-kpi="${esc(spec)}" role="button" tabindex="0" title="In hi rows ki detail"` : ''}><td colspan="3">${label}</td><td class="num">${fmt(vc4)}</td><td class="num">${fmt(comm)}</td><td class="num">${fmt(last)}</td><td class="num">${fmt(cur)}</td><td class="num">${U.sugCell(sugVc4, 0)}</td><td class="num">${U.sugCell(sugComm, 0)}</td></tr>`;
+    const footRow = (label, v, cls, spec) => `<tr class="clickable ${cls}"${spec ? ` data-kpi="${esc(spec)}" role="button" tabindex="0" title="In hi rows ki detail"` : ''}><td colspan="3">${label}</td><td class="num">${fmt(v.sVc4)}</td><td class="num">${fmt(v.sComm)}</td><td class="num">${fmt(v.sTotal)}</td><td class="num">${fmt(v.lVc4)}</td><td class="num">${fmt(v.lComm)}</td><td class="num">${fmt(v.last)}</td><td class="num">${fmt(v.cVc4)}</td><td class="num">${fmt(v.cComm)}</td><td class="num">${fmt(v.cur)}</td><td class="num">${U.sugCell(v.sugVc4, 0)}</td><td class="num">${U.sugCell(v.sugComm, 0)}</td></tr>`;
     const agentsTotal = { vc4: sum('stockVc4'), comm: sum('stockComm'), last: sum('last'), cur: sum('cur') };
+    const sv = (list, o) => ({ lVc4: sum('lastVc4', list), lComm: sum('lastComm', list), last: sum('last', list), cVc4: sum('curVc4', list), cComm: sum('curComm', list), cur: sum('cur', list), ...o });
     const selfTotals = selfA ? { vc4: num(selfA.stockVc4), comm: num(selfA.stockComm), last: num(selfA.last), cur: num(selfA.cur) } : { vc4: 0, comm: 0, last: 0, cur: 0 };
     // Footer = KPI ka composition (own + agents = TL total hamesha barabar); upar ki rows ka jod alag ho
     // (sheet beech me load ho rahi ho) to note saaf batata hai — number chhupate nahi, explain karte hain.
@@ -1116,7 +1153,28 @@ window.FF = window.FF || {};
     const note = rowGap > 1
       ? `<p class="dim small">ℹ️ Footer ke numbers KPI se aate hain (stock rows + sheet ke snapshot ka reconcile) — isliye upar ki rows ka jod (${fmt(agentsTotal.vc4 + agentsTotal.comm + selfTotals.vc4 + selfTotals.comm)}) thoda alag ho sakta hai jab sheet abhi load ho rahi ho. TL total hamesha = own <b>${fmt(own.total)}</b> + agents <b>${fmt(ag.total)}</b> = <b>${fmt(s.total)}</b>.</p>`
       : '';
-    return `<section class="mp-sec"><h4>🧑‍💼 TL ke agents · ${fmt(rows.length)}${selfA ? ' <span class="dim small">+ TL (apna stock alag)</span>' : ''}</h4><p class="dim small">Sug. = avg/day × ${d.days} din · <b>stock ke baad</b> (net)${sugMode() === 'both' ? ' · <span class="sug-wo-inline">w/o stock = bina stock ghataye (gross)</span>' : ''} · <span class="mp-linkish" data-kpi="${esc(`src=${pr.ch}&scope=people&tl=${encodeURIComponent(pr.name)}&self=0&sort=stock`)}" role="button" tabindex="0" title="Poora agents list">Poori list 👉</span></p><div class="table-wrap tall"><table class="tbl compact"><thead><tr><th>Agent</th><th>Mobile</th><th>Priority</th><th class="num">VC4 stock</th><th class="num">Comm stock</th><th class="num">Last</th><th class="num">This month</th><th class="num">Sug. VC4</th><th class="num">Sug. Comm</th></tr></thead><tbody>${selfA ? rowHtml(selfA) : ''}${rows.map(rowHtml).join('')}</tbody><tfoot>${rows.length ? footRow(`<span class="mp-linkish">🧑‍💼 Agents total (${fmt(rows.length)})</span>`, ag.vc4, ag.comm, agentsTotal.last, agentsTotal.cur, d.sumAgentVc4, d.sumAgentComm, '', `${tlSpec}&part=team`) : ''}${selfA || own.total ? footRow(`👤 ${esc(selfA ? selfA.name : pr.name)} ke paas (TL own)`, own.vc4, own.comm, selfTotals.last, selfTotals.cur, d.sumSelfVc4, d.sumSelfComm, 'mp-selfrow', `${tlSpec}&part=own`) : ''}${footRow('= TL TOTAL (own + agents)', s.vc4, s.comm, t.lastTotal, t.curTotal, d.sugVc4, d.sugComm, 'row-total', tlSpec)}</tfoot></table></div>${note}</section>`;
+    const monthHead = (ym, fallback) => esc(monthLabel(ym) || fallback);
+    const head = `<tr><th rowspan="2">Agent</th><th rowspan="2">Mobile</th><th rowspan="2">Priority</th><th colspan="3" class="num">📦 Stock</th><th colspan="3" class="num">⏮ ${monthHead(m.last, 'Last month')}</th><th colspan="3" class="num">▶ ${monthHead(m.cur, 'This month')}</th><th colspan="2" class="num">Suggested</th></tr><tr><th class="num">VC4</th><th class="num">Comm</th><th class="num">Total</th><th class="num">VC4</th><th class="num">Comm</th><th class="num">Total</th><th class="num">VC4</th><th class="num">Comm</th><th class="num">Total</th><th class="num">VC4</th><th class="num">Comm</th></tr>`;
+    const agentsFoot = rows.length ? footRow(`<span class="mp-linkish">🧑‍💼 Agents total (${fmt(rows.length)})</span>`, sv(rows, { sVc4: ag.vc4, sComm: ag.comm, sTotal: ag.total, sugVc4: d.sumAgentVc4, sugComm: d.sumAgentComm }), '', `${tlSpec}&part=team`) : '';
+    const ownFoot = selfA || own.total ? footRow(`👤 ${esc(selfA ? selfA.name : pr.name)} ke paas (TL own)`, sv(selfA ? [selfA] : [], { sVc4: own.vc4, sComm: own.comm, sTotal: own.total, sugVc4: d.sumSelfVc4, sugComm: d.sumSelfComm }), 'mp-selfrow', `${tlSpec}&part=own`) : '';
+    const totFoot = footRow('= TL TOTAL (own + agents)', { sVc4: s.vc4, sComm: s.comm, sTotal: s.total, lVc4: t.lastVc4, lComm: t.lastComm, last: t.lastTotal, cVc4: t.curVc4, cComm: t.curComm, cur: t.curTotal, sugVc4: d.sugVc4, sugComm: d.sugComm }, 'row-total', tlSpec);
+    return `<section class="mp-sec" data-mp-sec="agents"><h4>🧑‍💼 TL ke agents · ${fmt(rows.length)}${selfA ? ' <span class="dim small">+ TL (apna stock alag)</span>' : ''}</h4><p class="dim small">Har number par click → agent ki detail (stock / last month / is month → class → din → tag-barcode). Sug. = avg/day × ${d.days} din · <b>stock ke baad</b> (net)${sugMode() === 'both' ? ' · <span class="sug-wo-inline">w/o stock = bina stock ghataye (gross)</span>' : ''} · <span class="mp-linkish" data-kpi="${esc(`src=${pr.ch}&scope=people&tl=${encodeURIComponent(pr.name)}&self=0&sort=stock`)}" role="button" tabindex="0" title="Poora agents list">Poori list 👉</span></p><div class="table-wrap tall"><table class="tbl compact mp-agents-tbl"><thead>${head}</thead><tbody>${selfA ? rowHtml(selfA) : ''}${rows.map(rowHtml).join('')}</tbody><tfoot>${agentsFoot}${ownFoot}${totFoot}</tfoot></table></div>${note}${agentClassMatrix(pr)}</section>`;
+  }
+
+  /** 📦 Agent-wise × Class stock — TL ke har agent (aur TL ke apne) paas kis class ka kitna stock hai.
+   *  Cell click → us agent ka us class ka stock (barcode rows tak). */
+  function agentClassMatrix(pr) {
+    const list = [...(pr.selfAgent ? [pr.selfAgent] : []), ...(pr.agents || [])].filter((a) => a.classStock && Object.keys(a.classStock).length);
+    if (!list.length) return '';
+    const clsSet = new Set();
+    list.forEach((a) => Object.keys(a.classStock).forEach((c) => { if (num(a.classStock[c]) > 0) clsSet.add(c); }));
+    const cols = [...clsSet].sort((x, y) => clsRank(x) - clsRank(y) || String(x).localeCompare(String(y)));
+    if (!cols.length) return '';
+    const colTot = (c) => U.sum(list, (a) => num(a.classStock[c]));
+    const specOf = (a, c) => `src=${pr.ch}&scope=stock&agent=${encodeURIComponent(a.name)}${a.id ? `&agentId=${encodeURIComponent(a.id)}` : ''}${c ? `&cls=${encodeURIComponent(c)}` : ''}`;
+    const body = list.map((a) => `<tr${a.isSelf ? ' class="mp-selfrow"' : ''}><td>${a.isSelf ? '👤 ' : ''}<b>${esc(a.name)}</b>${a.isSelf ? '<span class="mp-tag-self">TL · apna stock</span>' : ''}</td>${cols.map((c) => { const n = num(a.classStock[c]); return n ? `<td class="num mp-drill" data-kpi="${esc(specOf(a, c))}" role="button" tabindex="0" title="${esc(a.name)} · ${esc(c)} stock">${fmt(n)}</td>` : '<td class="num dim">·</td>'; }).join('')}<td class="num mp-drill" data-kpi="${esc(specOf(a, ''))}" role="button" tabindex="0"><b>${fmt(U.sum(cols, (c) => num(a.classStock[c])))}</b></td></tr>`).join('');
+    const foot = `<tr class="row-total"><td>Total (upar ki rows)</td>${cols.map((c) => `<td class="num">${fmt(colTot(c))}</td>`).join('')}<td class="num">${fmt(U.sum(cols, colTot))}</td></tr>`;
+    return `<h5 class="mp-subh" data-mp-sec="agentclass">📦 Agent-wise × Class stock <span class="dim small">· ${fmt(list.length)} rows · cell par click → barcode tak</span></h5><div class="table-wrap tall"><table class="tbl compact"><thead><tr><th>Agent</th>${cols.map((c) => `<th class="num">${esc(c)}</th>`).join('')}<th class="num">Total</th></tr></thead><tbody>${body}</tbody><tfoot>${foot}</tfoot></table></div>`;
   }
 
   function html(pr) {
@@ -1178,13 +1236,14 @@ window.FF = window.FF || {};
     const agentsTable = isTl ? tlAgentsTable(pr) : '';
     const actions = `<div class="mp-actions"><button class="btn small primary" data-mp-pdf>📄 PDF</button><button class="btn small" data-mp-csv>⬇ CSV</button><button class="btn small" data-mp-copy>📋 Copy</button><button class="btn small" data-mp-wa>📲 WhatsApp</button>${isTl ? '' : `<button class="btn small" data-mp-a360="${esc(pr.name)}">👁 Agent 360</button>`}<a class="btn small" href="#/masterStock?q=${encodeURIComponent(pr.name)}">🗄️ Register / tags</a></div>`;
     const partial = pr.partial ? '<div class="mp-partial dim small" role="status">⏳ Kuch data abhi load ho raha hai (Google Sheet slow hai) — numbers poore hote hi apne aap update ho jayenge.</div>' : '';
-    return `<div class="mp">${partial}${noData}${head}${kpis}
+    const nav = `<nav class="mp-nav" aria-label="Report sections"><span class="dim small">Jao:</span>${[['kpis', '📦 Stock · KPI'], ['issuance', '🧾 Last vs Current'], ['class', '🎯 Class-wise'], ...(isTl && agentsTable ? [['agents', '🧑‍💼 Agents'], ['agentclass', '📦 Agent × Class']] : []), ['charts', '📊 Charts']].map(([k, l]) => `<button type="button" class="chip" data-mp-go="${k}">${l}</button>`).join('')}</nav>`;
+    return `<div class="mp">${partial}${noData}${head}${nav}<div data-mp-sec="kpis">${kpis}</div>
       ${calcHtml(pr)}
       ${growthHtml(pr)}
-      <section class="mp-sec"><h4>🧾 Issuance summary${isTl ? ' — TL total' : ''}</h4>${summary}</section>
-      <section class="mp-sec"><h4>🎯 Issuance class-wise · last month vs this month + stock</h4>${clsTable}</section>
+      <section class="mp-sec" data-mp-sec="issuance"><h4>🧾 Issuance summary${isTl ? ' — TL total' : ''}</h4>${summary}</section>
+      <section class="mp-sec" data-mp-sec="class"><h4>🎯 Issuance class-wise · last month vs this month + stock</h4>${clsTable}</section>
       ${agentsTable}
-      <section class="mp-sec"><h4>📊 Charts</h4>${chartsHtml(pr) || '<p class="dim small">Chart ke liye data nahi mila.</p>'}</section>
+      <section class="mp-sec" data-mp-sec="charts"><h4>📊 Charts</h4>${chartsHtml(pr) || '<p class="dim small">Chart ke liye data nahi mila.</p>'}</section>
       ${actions}</div>`;
   }
 
@@ -1305,6 +1364,13 @@ window.FF = window.FF || {};
       if (e.target.closest('[data-mp-csv]')) { U.downloadCsv(`profile-${U.slug(cur.name)}-${U.stamp()}.csv`, ['Field', 'Value / Last', 'This', 'Stock'], csvRows(cur).map((r) => [r[0], r[1], r[2] ?? '', r[3] ?? ''])); return; }
       if (e.target.closest('[data-mp-copy]')) { U.copyText(waText(cur)); U.toast('Summary copied ✓', 'ok'); return; }
       if (e.target.closest('[data-mp-wa]')) { const link = U.waLink ? U.waLink(waText(cur)) : ''; if (link) window.open(link, '_blank', 'noopener'); return; }
+      const go = e.target.closest('[data-mp-go]');
+      if (go) {
+        const root = go.closest('.mp') || el;
+        const target = root.querySelector(`[data-mp-sec="${go.dataset.mpGo}"]`);
+        if (target && target.scrollIntoView) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return;
+      }
       const a360 = e.target.closest('[data-mp-a360]');
       if (a360) { if (FF.cockpit && FF.cockpit.agent360) FF.cockpit.agent360({ name: a360.dataset.mpA360 }).catch(() => {}); return; }
       const row = e.target.closest('[data-mp-agent]');
