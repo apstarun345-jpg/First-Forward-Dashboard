@@ -547,6 +547,29 @@ window.FF = window.FF || {};
     const msg = err && err.message ? err.message : String(err);
     return `<div class="error-box"><div class="error-title">⚠️ Data load nahi hua</div><div class="error-msg">${esc(msg)}</div>${retryAttr ? `<button class="btn" ${retryAttr}>Retry</button>` : ''}</div>`;
   }
+  /** Promise ka intezaar sirf `ms` tak: value mili to value, deadline/reject par `fallback`. Kabhi latakta ya throw nahi karta —
+   *  underlying kaam peeche chalta rehta hai. "Loading" spinner ko hamesha ek hard limit dene ke liye (stock / ageing / drawers). */
+  function within(promise, ms, fallback) {
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (v) => { if (done) return; done = true; clearTimeout(timer); resolve(v); };
+      const timer = setTimeout(() => finish(fallback), Math.max(0, Number(ms) || 0));
+      Promise.resolve(promise).then(finish, () => finish(fallback));
+    });
+  }
+  /** Event loop ko ek baar saans do — lambe loops (lakh rows indexing) ke beech UI freeze na ho.
+   *  MessageChannel background tab me bhi 1 s throttle nahi hota (setTimeout hota hai). */
+  const breathe = (() => {
+    if (typeof MessageChannel === 'function') {
+      try {
+        const channel = new MessageChannel(), waiting = [];
+        channel.port1.onmessage = () => { const next = waiting.shift(); if (next) next(); };
+        if (typeof channel.port1.unref === 'function') channel.port1.unref();   // Node (tests): open port process ko zinda na rakhe
+        return () => new Promise((resolve) => { waiting.push(resolve); channel.port2.postMessage(0); });
+      } catch { /* niche setTimeout fallback */ }
+    }
+    return () => new Promise((resolve) => setTimeout(resolve, 0));
+  })();
   function downloadBlob(filename, blob) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -1358,7 +1381,7 @@ window.FF = window.FF || {};
     weekday, daysInMonth, prevMonthKey, nextMonthKey, weekStart, timeLabel,
     barcode, barcodeKey,
     sum, groupSum, topEntries, sortBy, uniq,
-    $, $$, h, debounce, setButtonBusy, withButtonBusy, toast, spinner, loader, loaderStyle, loaderPref, ellipsis, LOADER_STYLES, LOADER_LABELS, errorBox, downloadBlob, downloadCsv, tableToRows, slug, stamp, colLetter, colIndex, initTooltip,
+    $, $$, h, debounce, within, breathe, setButtonBusy, withButtonBusy, toast, spinner, loader, loaderStyle, loaderPref, ellipsis, LOADER_STYLES, LOADER_LABELS, errorBox, downloadBlob, downloadCsv, tableToRows, slug, stamp, colLetter, colIndex, initTooltip,
     phoneDigits, waLink, mailLink, copyText, suggest,
     parseDateTime, printReport, recentList, recentAdd, voiceInput, voicePrefs, setVoicePrefs,
     multiSelect, asValueSet, valueSetLabel,

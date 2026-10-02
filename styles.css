@@ -4455,3 +4455,9 @@ html.ff-lite .ua-head, html.ff-lite .card, html.ff-lite .kpi { box-shadow: none 
 html.ff-lite .ua-head { background: #0f172a !important; }
 html.ff-lite .ua-kpi:hover, html.ff-lite .ua-watch-card:hover { transform: none !important; }
 html.ff-lite .table-wrap { contain: layout style; }
+
+/* v3.39 — stock loading states: summary / drawers kabhi bina jankari ke "hamesha loading" nahi dikhate */
+.as-wait-actions { display: flex; justify-content: center; margin: 4px 0 14px; }
+.as-age-state { display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; padding: 16px 12px; color: var(--muted); text-align: center; }
+.mp-partial { margin: 0 0 10px; padding: 8px 12px; border-radius: 10px; background: color-mix(in srgb, #d97706 11%, transparent); border: 1px solid color-mix(in srgb, #d97706 30%, transparent); }
+.kd-notice { margin: 0 0 12px; padding: 10px 12px; border-radius: 10px; background: color-mix(in srgb, #d97706 12%, transparent); border: 1px solid color-mix(in srgb, #d97706 35%, transparent); font-size: 13px; line-height: 1.5; }

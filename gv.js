@@ -771,7 +771,27 @@ window.FF = window.FF || {};
     }
     return [...set].filter(Boolean).sort();
   }
-  function latestDate() { return eirReady() ? FF.model.latestDate(liveDailyRows()) : masterLatestDate(); }
+  // latestDate() is on every profile's hot path (U.channelBasis('gv', { force: true }) → gvLatest → here) and
+  // used to rebuild the whole EIR→GV issuance rollup just to read one date. Master Search / Summary do that
+  // once per TL and per agent, so a real-size GV sheet froze the tab for ~15 s. The answer only depends on
+  // the arrays below (loaders replace them, never mutate in place) and on today's date, so reuse it.
+  const lenOf = (a) => (Array.isArray(a) ? a.length : -1);
+  /** Identity of everything issuanceRows() / liveDailyRows() / latestDate() are computed from. */
+  function inputsKey() {
+    const daily = eirDaily();
+    const d = state.data;
+    // + the one admin setting that changes how rows are attributed (resolve() → isChannelTl), so a Settings edit is never served stale.
+    return [daily, lenOf(daily), d.master, lenOf(d.master), d.stockAgent, lenOf(d.stockAgent), d.report, lenOf(d.report), todayKey(), (FF.config && FF.config.eir && FF.config.eir.gvChannelTl) || ''];
+  }
+  const sameKey = (a, b) => !!a && !!b && a.length === b.length && a.every((v, i) => v === b[i]);
+  const latestMemo = { key: null, value: null };
+  function latestDate() {
+    const key = [FF.model && FF.model.latestDate, ...inputsKey()];
+    if (sameKey(latestMemo.key, key)) return latestMemo.value;
+    const value = eirReady() ? FF.model.latestDate(liveDailyRows()) : masterLatestDate();
+    latestMemo.key = key; latestMemo.value = value;
+    return value;
+  }
   function summary(ym, upToDay) { return eirReady() ? eirSummary(ym, upToDay) : masterSummary(ym, upToDay); }
   function dailySeries(ym, dimFn) { return eirReady() ? FF.model.dailySeries(liveDailyRows(), ym, dimFn) : masterDailySeries(ym, dimFn); }
   function byDim(ym, dimFn, upToDay) {
@@ -801,6 +821,9 @@ window.FF = window.FF || {};
   function directRollup(ym) { return eirReady() ? eirDirectRollup(ym) : masterDirectRollup(ym); }
   // GV issuance rows = EIR history + GV Master ka aaj (live). GV pages/sprint/tag-issued sab yahi use karte hain.
   function issuanceRows() { return eirReady() ? liveDailyRows() : rows(); }
+  // Consumers that only read the rows (masterProfile builds one profile per TL / agent) may reuse the result
+  // while this key is unchanged. Host/test stubs that replace issuanceRows() don't carry it, so they are never cached.
+  issuanceRows.inputsKey = inputsKey;
 
   /** Searchable people list (agents + TLs) for the suggestion dropdowns. */
   function people() {

@@ -511,8 +511,11 @@ window.FF = window.FF || {};
       fn: (r) => (cls ? classKey(r.cls) === cls : true) && (!f || (f === 'vc4' ? groupOf(r) === 'VC4' : f === 'comm' ? groupOf(r) !== 'VC4' : f === 'vc20' ? groupOf(r) === 'VC20' : groupOf(r) === 'VC5+'))
     };
   }
+  const SOFT = { stock: 30000, types: 4000 };   // ek dataset ke liye max intezaar (phir drawer jo hai wahi dikhata hai) · optional "Tag type" table ka dataset (tests chhota karte hain)
+  const MISSING = { missing: true };
   async function stockDetail(spec) {
     const parts = [];
+    const lost = [];   // jo datasets deadline tak nahi aaye
     let grand = 0, holdersN = null;
     const cf = stockClassFn(spec);
     const keep = (r) => !cf || cf.fn(r);
@@ -527,9 +530,14 @@ window.FF = window.FF || {};
     };
     if (spec.src === 'ff' || spec.src === 'both') {
       let stock = FF.store.get('stock'), agents = FF.store.get('stockAgents'), types = FF.store.get('stockTypes');
-      try { stock = stock || await FF.store.need('stock'); } catch { stock = []; }
-      try { agents = agents || await FF.store.need('stockAgents'); } catch { agents = []; }
-      try { types = types || await FF.store.need('stockTypes'); } catch { types = []; }
+      // Teeno datasets parallel (pehle ek ke baad ek — latency jod ke) aur har ek par hard limit: koi slow Google query
+      // poore drawer ko "Detail calculate ho rahi hai…" par nahi rokti. Jo na aaye uska saaf notice + Retry.
+      const soft = (key, cur, ms) => (cur !== undefined && cur !== null ? Promise.resolve(cur) : U.within(FF.store.need(key), ms || SOFT.stock, MISSING));
+      // `stockTypes` (agent × type, sabse bhaari query) sirf optional "Tag type" table ke liye hai — uske liye thoda hi ruko.
+      [stock, agents, types] = await Promise.all([soft('stock', stock), soft('stockAgents', agents), soft('stockTypes', types, SOFT.types)]);
+      if (stock === MISSING) { stock = []; lost.push('class × TL stock'); }
+      if (agents === MISSING) { agents = []; lost.push('agent-wise stock'); }
+      if (types === MISSING) types = [];   // sirf "Tag type" table optional hai
       const agentRows = (agents || []).filter((r) => keep(r) && agentOk(r) && tlOk(r));
       // agent / TL filter ho to class-wise bhi agent rows se (stock store TL × class hai, agent nahi)
       const rows = agentWanted.length || tlWanted ? agentRows.map((r) => ({ cls: r.cls, group: r.group, tlName: r.tlName, n: r.n })) : (stock || []).filter(keep).map((r) => ({ ...r, n: r.n }));
@@ -554,10 +562,10 @@ window.FF = window.FF || {};
     }
     if (spec.src === 'gv' || spec.src === 'both') {
       const G = FF.gv; let cls = [], tls = [], agents = [], agentCls = [];
-      try { cls = await G.need('stockClass'); } catch { /* */ }
-      try { tls = await G.need('stockTl'); } catch { /* */ }
-      try { agents = await G.need('stockAgent'); } catch { /* */ }
-      try { agentCls = await G.need('stockAgentClass'); } catch { agentCls = []; }
+      const gsoft = (key) => { const cur = G.get && G.get(key); return cur !== undefined && cur !== null ? Promise.resolve(cur) : U.within(G.need(key), SOFT.stock, MISSING); };
+      const got = await Promise.all(['stockClass', 'stockTl', 'stockAgent', 'stockAgentClass'].map(gsoft));
+      const pickG = (v, label) => { if (v === MISSING) { if (label) lost.push(label); return []; } return v || []; };
+      cls = pickG(got[0], 'GV class-wise stock'); tls = pickG(got[1], 'GV TL-wise stock'); agents = pickG(got[2], 'GV agent-wise stock'); agentCls = pickG(got[3], '');
       const filteredAgentCls = (agentCls || []).filter((r) => keep(r) && agentOk(r) && tlOk(r));
       const useAgentRows = !!(cf || agentWanted.length || tlWanted) && filteredAgentCls.length;
       const clsRows = useAgentRows ? filteredAgentCls : (cls || []).filter(keep);
@@ -591,7 +599,8 @@ window.FF = window.FF || {};
     }
     state.spec = spec; state.rows = null; state.raw = null;
     const headline = holdersN !== null ? `<b>${U.fmt(holdersN)}</b> ${spec.holders === 'tls' ? 'TLs' : 'agents'} · ${U.fmt(grand)} tags` : `Total <b>${U.fmt(grand)}</b> tags in field${cf ? ` · ${esc(cf.label)}` : ''}`;
-    return { kicker: 'KPI detail · Stock', title: spec.title || 'Stock in field', sub: headline, body: parts.join('') || '<div class="empty">Stock data nahi mila.</div>' };
+    const notice = lost.length ? `<div class="kd-notice" role="status">⚠️ <b>${esc([...new Set(lost)].join(' · '))}</b> abhi load nahi hua (Google Sheet slow / fail) — neeche ke numbers adhure ho sakte hain. <button type="button" class="btn small" data-kd-retry>↻ Retry</button></div>` : '';
+    return { kicker: 'KPI detail · Stock', title: spec.title || 'Stock in field', sub: headline, body: notice + (parts.join('') || '<div class="empty">Stock data nahi mila.</div>') };
   }
   function sheetRowsHtml(title, header, rows, note) {
     const bcCols = [];
@@ -862,6 +871,10 @@ window.FF = window.FF || {};
   }
 
   document.addEventListener('click', async (e) => {
+    if (e.target.closest('[data-kd-retry]')) {
+      if (state.spec) open({ ...state.spec }, { nested: state.history.length > 0, fromHistory: true });
+      return;
+    }
     const back = e.target.closest('[data-kd-back]');
     if (back) {
       const previous = state.history.pop();
@@ -928,5 +941,5 @@ window.FF = window.FF || {};
     if (chip && state.spec) { open({ ...state.spec, ...JSON.parse(chip.dataset.kdSpec || '{}') }); return; }
   });
 
-  FF.kpiDetail = { open, specFrom, registerList, normYm, resetHistory, _infer: inferSpec, _rowMatchesSpec: rowMatchesSpec };
+  FF.kpiDetail = { open, specFrom, registerList, normYm, resetHistory, _infer: inferSpec, _rowMatchesSpec: rowMatchesSpec, _stockDetail: stockDetail, _limits: SOFT };
 })(window.FF);

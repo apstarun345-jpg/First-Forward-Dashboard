@@ -184,6 +184,17 @@ FF.pages = FF.pages || {};
     return idx;
   }
   const canUseAuthoritative = () => !!(state.authoritative && state.authoritativeAt);
+  // `agents()` ko search / profile / summary teeno baar-baar bulate hain, aur har call poora EIR rollup dobara banata tha
+  // (1500 agents + 1.7 lakh daily rows par ~0.5-1.6 s, phone par aur zyada). Inputs (REPORT table, agentClass, daily, aaj ki date)
+  // wahi hon to pichla reconcile hi valid hai — dobara mat chalao.
+  let reconKey = null;
+  function reconcileIfStale() {
+    const key = [state.agents, S.get('agentClass') || null, S.get('daily') || null, state.sourceTable, U.dateKey ? U.dateKey(new Date()) : ''];
+    if (reconKey && state.authoritativeAt && reconKey.every((v, i) => v === key[i])) return state.authoritative;
+    const idx = reconcileAuthoritative();
+    reconKey = idx ? key : null;
+    return idx;
+  }
 
   // ---- ingest -------------------------------------------------------------------
   function resolveSchema(sectionRow, subRow) {
@@ -337,7 +348,7 @@ FF.pages = FF.pages || {};
     state.sourceTable = table;
     state.loadedAt = Date.now();
   }
-  function reset() { state.agents = []; state.sourceTable = null; state.allTlGroups = []; state.authoritative = null; state.authoritativeAt = 0; }
+  function reset() { state.agents = []; state.sourceTable = null; state.allTlGroups = []; state.authoritative = null; state.authoritativeAt = 0; reconKey = null; }
 
   // ---- filters / kpis -------------------------------------------------------------
   // 🔠 v3.18 — TL filter ab MULTIPLE SELECT hai: ek saath kai TL (ya "Direct agents") chune ja sakte hain.
@@ -1394,7 +1405,7 @@ FF.pages = FF.pages || {};
       if (tlEl) { openTl(tlEl.dataset.tl); return; }
     });
   }
-  FF.pages.performance = { title: 'Performance', render, openAgent, openTl, reset, ensureLoaded, diagnostics, authoritativeIndex, agents: () => { if (S.get('agentClass') || S.get('daily')) reconcileAuthoritative(); return state.agents; }, daysElapsed: () => state.daysElapsed, dayLabels: () => state.dayLabels };
+  FF.pages.performance = { title: 'Performance', render, openAgent, openTl, reset, ensureLoaded, diagnostics, authoritativeIndex, agents: () => { if (S.get('agentClass') || S.get('daily')) reconcileIfStale(); return state.agents; }, daysElapsed: () => state.daysElapsed, dayLabels: () => state.dayLabels };
   // Sidebar shortcut: First Forward → 📋 Stock Report opens the Performance page on the Stock Report view.
   FF.pages.stockReport = { title: 'Stock Report', render: (root, params) => { state.view = 'stock'; return render(root, { ...(params || {}), view: 'stock' }); } };
 })(window.FF);

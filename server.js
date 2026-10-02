@@ -16,7 +16,7 @@ import { sheetsStoreFromEnv } from './sheets-storage.js';
 import { appsScriptStoreFromEnv, AppsScriptStore } from './apps-script-storage.js';
 import { sendMail, mailConfigured, diagnoseMail, mailHint, availableProviders, resolveProviders, resetMailMemo, MAIL_PROVIDERS, splitRecipients } from './mailer.js';
 import { DEFAULT_DISPATCH_EMAIL, normalizeDispatchEmail, buildDispatchPlan, dispatchEmailContent } from './dispatch-email.js';
-import { buildStockAgeIndex, summaryOf as stockAgeSummary, tagsFor as stockAgeTags, personalStock } from './stock-age.js';
+import { createStockAgeBuilder, summaryOf as stockAgeSummary, tagsFor as stockAgeTags, personalStock } from './stock-age.js';
 import { loadFfDispatchRows, loadGvDispatchRows } from './dispatch-report.js';
 // 🚨 Unusual Activity ka tag-level scan logic — browser (unusual-scan.js script) aur server dono ek hi
 // file use karte hain, isliye dono ke duplicate/wrong/malformed counts hamesha same rehte hain.
@@ -700,7 +700,27 @@ class HttpError extends Error { constructor(status, message) { super(message); t
 // ---------------------------------------------------------------------------------------------
 // gviz proxy
 // ---------------------------------------------------------------------------------------------
-const cache = new Map();   // url → { at, body, status }
+// gviz proxy cache — entry count AUR total bytes dono par cap. Pehle sirf 400 entries ka cap tha, size ka nahi:
+// bade bodies (StockDataa 25k-row pages, GV Master, EIR…) 512 MB wale instance ki heap bhar dete the (measured:
+// ek browsing session ke baad server RSS ~400 MB). Cap se upar jaane par sabse purani entries nikal jaati hain.
+const MAX_CACHE_BYTES = Math.max(8, Number(process.env.CACHE_MAX_MB) || 64) * 1024 * 1024;
+class GvizCache extends Map {
+  constructor() { super(); this.bytes = 0; }
+  static sizeOf(entry) { return entry && typeof entry.body === 'string' ? entry.body.length : 0; }
+  set(key, entry) {
+    const old = super.get(key);
+    if (old !== undefined) { this.bytes -= GvizCache.sizeOf(old); super.delete(key); }   // delete + set → insertion order = recency
+    const size = GvizCache.sizeOf(entry);
+    if (size > MAX_CACHE_BYTES / 2) return this;   // akela entry cap ke aadhe se bada → cache me nahi (baaki entries na nikalein)
+    super.set(key, entry);
+    this.bytes += size;
+    while (this.bytes > MAX_CACHE_BYTES && this.size > 1) this.delete(this.keys().next().value);
+    return this;
+  }
+  delete(key) { const old = super.get(key); const had = super.delete(key); if (had) this.bytes -= GvizCache.sizeOf(old); return had; }
+  clear() { super.clear(); this.bytes = 0; }
+}
+const cache = new GvizCache();   // url → { at, body, status }
 const inflight = new Map(); // url → Promise
 const cacheMs = () => Math.max(0, Number(db.settings.cacheSeconds ?? DEFAULT_CACHE_SECONDS)) * 1000;
 
@@ -1665,20 +1685,69 @@ async function stockSnapshotFrom(sheetId, sheet, clsCol, tagCol, label) {
 // 🧓 Stock ageing (v3.31) — StockDataa + Tag Assignment ek baar padh kar compact index (10 min cache).
 // Browser ab 1 lakh rows download nahi karta; har drawer / page sirf agent-TL ke bucket counts leta hai.
 // ---------------------------------------------------------------------------------------------
-const STOCK_AGE_TTL = 10 * 60e3;
-const stockAgeState = { at: 0, index: null, promise: null, key: '' };
+const STOCK_AGE_TTL = 10 * 60e3;                 // index itna purana ho to background me refresh (purana turant serve hota hai)
+const STOCK_AGE_ERROR_RETRY_MS = Math.max(0, Number(process.env.STOCK_AGE_ERROR_RETRY_MS ?? 30e3));   // fail / adhura index mila → itni der baad dobara koshish (10 min nahi!)
+const STOCK_AGE_PAGE_ROWS = Math.max(1, Number(process.env.STOCK_AGE_PAGE_ROWS) || 25000);
+const STOCK_AGE_MAX_PAGES = 60;                   // 60 × 25k = 15 lakh rows — safety cap
+const STOCK_AGE_PAGE_WINDOW = Math.max(1, Math.min(6, Number(process.env.STOCK_AGE_PAGE_WINDOW) || 3));   // ek saath itne pages in-flight
+const STOCK_AGE_CHUNK = 4000;                     // itni rows ke baad event loop ko saans (health check / baaki users na atkein)
+// /api/stock-age itne ms se zyada request ko latka kar nahi rakhta: tab `{ pending: true }` deta hai aur build peeche chalta rehta
+// hai — browser poll karta hai (pehle request 45-60 s tak ghoomti thi aur Summary / drawers ka spinner kabhi khatam nahi hota tha).
+const STOCK_AGE_WAIT_MS = Math.max(0, Number(process.env.STOCK_AGE_WAIT_MS ?? 20000));
+const stockAgeState = { at: 0, index: null, promise: null, key: '', retryAt: 0, startedAt: 0, error: '' };
+const yieldLoop = () => new Promise((resolve) => setImmediate(resolve));
 const colLetter = (v, fallback) => { const c = String(v || fallback || '').trim().toUpperCase(); return /^[A-Z]{1,3}$/.test(c) ? c : ''; };
-async function gvizRowsServer(sheetId, sheet, letters, where) {
+/** Ek gviz page (bina proxy cache ke — 4-5 MB ke pages cache me bharne se server ki memory bharti thi) + ek retry. */
+async function gvizPageServer(params, sheet) {
+  let lastErr;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const out = await fetchUpstream(upstreamUrl(params));
+      if (out.status < 200 || out.status >= 300) throw new Error(`${sheet}: Google responded ${out.status}`);
+      const table = parseGvizServer(out.body);
+      // gviz column id (letter) se index — label row ki galti se order na bigde.
+      const ids = (table.cols || []).map((c) => String(c.id || '').toUpperCase());
+      return { rows: table.rows || [], ids };
+    } catch (err) {
+      lastErr = err;
+      if (attempt === 0) await new Promise((r) => setTimeout(r, 800));
+    }
+  }
+  throw lastErr;
+}
+/** Tab ko STOCK_AGE_PAGE_ROWS ke pages me padho; har page `onPage(rows, at)` ko milta hai (poora sheet ek saath memory me nahi).
+ *  Pages 3-ke-window me parallel aate hain par PROCESS hamesha order me hote hain (ageing ka raw order stable rahe). */
+async function gvizPagesServer(sheetId, sheet, letters, where, onPage) {
   const cols = letters.filter(Boolean);
-  const tq = `select ${cols.join(', ')}${where ? ` where ${where}` : ''}`;
-  const params = new URLSearchParams({ id: String(sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet, tq });
-  const out = await fetchUpstreamCached(upstreamUrl(params));
-  if (out.status < 200 || out.status >= 300) throw new Error(`${sheet}: Google responded ${out.status}`);
-  const table = parseGvizServer(out.body);
-  // gviz column id (letter) se index — label row ki galti se order na bigde.
-  const ids = (table.cols || []).map((c) => String(c.id || '').toUpperCase());
-  const at = (L) => { const i = ids.indexOf(L); return i >= 0 ? i : cols.indexOf(L); };
-  return { rows: table.rows || [], at };
+  const base = `select ${cols.join(', ')}${where ? ` where ${where}` : ''}`;
+  const id = String(sheetId || '').replace(/[^A-Za-z0-9_-]/g, '');
+  const inflight = new Map();
+  let launched = 0;
+  const launch = (upTo) => {
+    while (launched <= upTo && launched < STOCK_AGE_MAX_PAGES) {
+      const page = launched++;
+      const job = gvizPageServer(new URLSearchParams({ id, sheet, tq: `${base} limit ${STOCK_AGE_PAGE_ROWS} offset ${page * STOCK_AGE_PAGE_ROWS}` }), sheet);
+      job.catch(() => {});   // aage ke speculative pages fail / beech me ruk jaayein to unhandled rejection nahi
+      inflight.set(page, job);
+    }
+  };
+  launch(STOCK_AGE_PAGE_WINDOW - 1);
+  let firstSig = '', total = 0;
+  for (let page = 0; page < STOCK_AGE_MAX_PAGES; page++) {
+    const { rows, ids } = await inflight.get(page);
+    inflight.delete(page);
+    if (page > 0 && rows.length) {
+      // Offset ignore ho raha ho (wahi page dobara) to duplicate mat jodo — pehla page hi poora data tha.
+      if (JSON.stringify(rows[0].c || rows[0]) === firstSig) break;
+    }
+    if (page === 0) firstSig = rows.length ? JSON.stringify(rows[0].c || rows[0]) : '';
+    const at = (L) => { const i = ids.indexOf(L); return i >= 0 ? i : cols.indexOf(L); };
+    total += rows.length;
+    await onPage(rows, at);
+    if (rows.length < STOCK_AGE_PAGE_ROWS) break;
+    launch(page + STOCK_AGE_PAGE_WINDOW);
+  }
+  return total;
 }
 async function loadStockAgeIndex() {
   const s = db.settings || {};
@@ -1688,37 +1757,99 @@ async function loadStockAgeIndex() {
   const ffL = { id: colLetter(st.id, 'A'), tagId: colLetter(st.tagId, 'C'), barcode: colLetter(st.barcode, 'D'), cls: colLetter(st.cls, 'E'), bcDate: colLetter(st.bcAllocatedAt, 'G'), agentId: colLetter(st.agentId, 'H'), agentName: colLetter(st.agentName, 'I'), agentDate: colLetter(st.agentAllocatedAt, 'J'), tl: colLetter(st.tlName, 'K') };
   const gvL = { cls: colLetter(A.cls, 'A'), tagId: colLetter(A.tagId, 'B'), serial: colLetter(A.serial, 'C'), status: colLetter(A.status, 'D'), agentId: colLetter(A.agentId, 'E'), agentName: colLetter(A.agentName, 'F'), tlId: colLetter(A.tlId, 'G'), tlName: colLetter(A.tlName, 'H'), date: colLetter(A.allocatedAt, '') };
   const pick = (row, idx) => (idx >= 0 ? serverCell(row, idx) : '');
+  const [y, m, d] = dateKeyNow().split('-').map(Number);
+  const opts = { todayDay: Date.UTC(y, m - 1, d) / 86400e3, masterId: (s.eir && s.eir.gvMasterId) || '5845036', parkedTl: (s.eir && s.eir.gvChannelTl) || 'ApnaPayment Pvt. Ltd.' };
+  let builder = createStockAgeBuilder(opts);
+  const gvBuf = [];   // GV ki umr FF (StockDataa) se match hoti hai → GV rows FF ke baad jodte hain (dono pages parallel padhe jaate hain)
   const ffJob = (async () => {
     const letters = [...new Set(Object.values(ffL).filter(Boolean))];
-    const { rows, at } = await gvizRowsServer(s.sheetId, s.stockSheet || 'StockDataa', letters, `${ffL.tagId} is not null`);
-    const ix = Object.fromEntries(Object.entries(ffL).map(([k, L]) => [k, L ? at(L) : -1]));
-    return rows.map((row) => ({ id: pick(row, ix.id), tagId: pick(row, ix.tagId), barcode: pick(row, ix.barcode), cls: pick(row, ix.cls), bcDate: pick(row, ix.bcDate), agentId: pick(row, ix.agentId), agentName: pick(row, ix.agentName), agentDate: pick(row, ix.agentDate), tl: pick(row, ix.tl) }));
-  })().catch((err) => { errors.ff = err.message; return []; });
+    await gvizPagesServer(s.sheetId, s.stockSheet || 'StockDataa', letters, `${ffL.tagId} is not null`, async (rows, at) => {
+      const ix = Object.fromEntries(Object.entries(ffL).map(([k, L]) => [k, L ? at(L) : -1]));
+      for (let i = 0; i < rows.length; i += STOCK_AGE_CHUNK) {
+        builder.addFf(rows.slice(i, i + STOCK_AGE_CHUNK).map((row) => ({ id: pick(row, ix.id), tagId: pick(row, ix.tagId), barcode: pick(row, ix.barcode), cls: pick(row, ix.cls), bcDate: pick(row, ix.bcDate), agentId: pick(row, ix.agentId), agentName: pick(row, ix.agentName), agentDate: pick(row, ix.agentDate), tl: pick(row, ix.tl) })));
+        await yieldLoop();
+      }
+    });
+  })().catch((err) => { errors.ff = err.message; });
   const gvJob = (async () => {
-    if (!s.gvSheetId) return [];
+    if (!s.gvSheetId) return;
     const letters = [...new Set(Object.values(gvL).filter(Boolean))];
-    const { rows, at } = await gvizRowsServer(s.gvSheetId, A.tab || 'Tag Assignment', letters, `${gvL.tagId} is not null`);
-    const ix = Object.fromEntries(Object.entries(gvL).map(([k, L]) => [k, L ? at(L) : -1]));
-    return rows.map((row) => ({ cls: pick(row, ix.cls), tagId: pick(row, ix.tagId), serial: pick(row, ix.serial), status: pick(row, ix.status), agentId: pick(row, ix.agentId), agentName: pick(row, ix.agentName), tlId: pick(row, ix.tlId), tlName: pick(row, ix.tlName), date: pick(row, ix.date) }));
-  })().catch((err) => { errors.gv = err.message; return []; });
-  const [ffRows, gvRows] = await Promise.all([ffJob, gvJob]);
-  const [y, m, d] = dateKeyNow().split('-').map(Number);
-  const index = buildStockAgeIndex({ ffRows, gvRows, todayDay: Date.UTC(y, m - 1, d) / 86400e3, masterId: (s.eir && s.eir.gvMasterId) || '5845036', parkedTl: (s.eir && s.eir.gvChannelTl) || 'ApnaPayment Pvt. Ltd.' });
+    await gvizPagesServer(s.gvSheetId, A.tab || 'Tag Assignment', letters, `${gvL.tagId} is not null`, async (rows, at) => {
+      const ix = Object.fromEntries(Object.entries(gvL).map(([k, L]) => [k, L ? at(L) : -1]));
+      for (let i = 0; i < rows.length; i += STOCK_AGE_CHUNK) {
+        for (const row of rows.slice(i, i + STOCK_AGE_CHUNK)) gvBuf.push({ cls: pick(row, ix.cls), tagId: pick(row, ix.tagId), serial: pick(row, ix.serial), status: pick(row, ix.status), agentId: pick(row, ix.agentId), agentName: pick(row, ix.agentName), tlId: pick(row, ix.tlId), tlName: pick(row, ix.tlName), date: pick(row, ix.date) });
+        await yieldLoop();
+      }
+    });
+  })().catch((err) => { errors.gv = err.message; gvBuf.length = 0; });
+  await Promise.all([ffJob, gvJob]);
+  // Adhura FF (beech ke page fail) kabhi mat dikhao — kam ginti sahi jaisi dikhti hai. Khaali FF + GV hi do (errors.ff ke saath).
+  if (errors.ff) builder = createStockAgeBuilder(opts);
+  for (let i = 0; i < gvBuf.length; i += STOCK_AGE_CHUNK) { builder.addGv(gvBuf.slice(i, i + STOCK_AGE_CHUNK)); await yieldLoop(); }
+  const index = builder.finish();
   if (Object.keys(errors).length) index.errors = errors;
   return index;
 }
-async function stockAgeIndex(fresh) {
-  const key = JSON.stringify([db.settings.sheetId, db.settings.gvSheetId, db.settings.stockSheet, db.settings.stock, db.settings.gv && db.settings.gv.assignment]);
-  if (!fresh && stockAgeState.index && stockAgeState.key === key && Date.now() - stockAgeState.at < STOCK_AGE_TTL) return stockAgeState.index;
+const stockAgeKey = () => JSON.stringify([db.settings.sheetId, db.settings.gvSheetId, db.settings.stockSheet, db.settings.stock, db.settings.gv && db.settings.gv.assignment]);
+/** Naya index banao (single-flight). Purana accha index ho to adhure / fail result se replace nahi hota. */
+function startStockAgeBuild(key) {
   if (stockAgeState.promise && stockAgeState.key === key) return stockAgeState.promise;
   stockAgeState.key = key;
-  stockAgeState.promise = loadStockAgeIndex().then((index) => {
-    // Dono sources fail hue aur purana index hai → purana hi rakho (Google blip par blank mat karo).
-    if (index.errors && index.errors.ff && (index.errors.gv || !db.settings.gvSheetId) && stockAgeState.index) return stockAgeState.index;
-    stockAgeState.index = index; stockAgeState.at = Date.now();
+  stockAgeState.startedAt = Date.now();
+  const job = loadStockAgeIndex().then((next) => {
+    if (stockAgeState.key !== key) return next;   // settings beech me badal gayi — is result ko store mat karo
+    const prev = stockAgeState.index;
+    const err = next.errors || {};
+    let index = next;
+    if (prev) {
+      // Fail hui side ke liye purana (accha) data rakho — Google ke ek blip par ageing blank / adhuri na ho.
+      if (err.ff) index = prev;
+      else if (err.gv) index = { ...next, gv: prev.gv };
+    }
+    stockAgeState.index = index;
+    stockAgeState.at = Date.now();
+    const failed = !!(err.ff || err.gv);
+    stockAgeState.error = failed ? [err.ff && `FF: ${err.ff}`, err.gv && `GV: ${err.gv}`].filter(Boolean).join(' · ') : '';
+    stockAgeState.retryAt = failed ? Date.now() + STOCK_AGE_ERROR_RETRY_MS : 0;
+    if (failed) { index = { ...index, errors: { ...err } }; stockAgeState.index = index; }
+    else if (index.errors) { index = { ...index }; delete index.errors; stockAgeState.index = index; }
     return index;
-  }).finally(() => { stockAgeState.promise = null; });
-  return stockAgeState.promise;
+  }).catch((err) => {
+    stockAgeState.error = (err && err.message) || 'stock ageing build fail';
+    stockAgeState.retryAt = Date.now() + STOCK_AGE_ERROR_RETRY_MS;
+    if (stockAgeState.index && stockAgeState.key === key) return stockAgeState.index;
+    throw err;
+  }).finally(() => { if (stockAgeState.promise === job) stockAgeState.promise = null; });
+  stockAgeState.promise = job;
+  return job;
+}
+/** Stock ageing index. Stale-while-revalidate: ready index turant milta hai (purana ho to background me refresh),
+ *  sirf pehli baar (ya fresh=1) build ka intezaar karna padta hai. */
+async function stockAgeIndex(fresh) {
+  const key = stockAgeKey();
+  const have = stockAgeState.index && stockAgeState.key === key ? stockAgeState.index : null;
+  if (have && !fresh) {
+    const partial = !!(have.errors && Object.keys(have.errors).length);
+    const due = Date.now() - stockAgeState.at >= STOCK_AGE_TTL || (partial && Date.now() >= stockAgeState.retryAt);
+    if (due && !stockAgeState.promise) startStockAgeBuild(key).catch(() => {});
+    return have;
+  }
+  return startStockAgeBuild(key);
+}
+/** `ms` ke andar index mile to do, warna null (build peeche chalta rehta hai) — HTTP request ko latkana nahi. */
+async function stockAgeIndexWithin(ms, fresh) {
+  const job = stockAgeIndex(fresh);
+  if (!(ms > 0)) return job;
+  let timer;
+  const timeout = new Promise((resolve) => { timer = setTimeout(() => resolve(null), ms); });
+  try { return await Promise.race([job, timeout]); }
+  finally { clearTimeout(timer); job.catch(() => {}); }
+}
+const stockAgePending = () => ({ ok: true, pending: true, retryAfterMs: 3000, startedAt: stockAgeState.startedAt ? new Date(stockAgeState.startedAt).toISOString() : '', error: stockAgeState.error || '' });
+/** /api/health ke liye — sirf coarse sehat (counts / names nahi). */
+function stockAgeStatus() {
+  const idx = stockAgeState.index;
+  return { ready: !!idx, building: !!stockAgeState.promise, ageSec: idx ? Math.round((Date.now() - stockAgeState.at) / 1000) : null, errors: idx && idx.errors ? Object.keys(idx.errors) : [], lastError: stockAgeState.error || '' };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2980,7 +3111,7 @@ function perfReport() {
   const hottest = [...HOT.entries()].sort((a, b) => b[1].hits - a[1].hits).slice(0, 10)
     .map(([url, h]) => ({ url: url.length > 160 ? `${url.slice(0, 160)}…` : url, hits: h.hits }));
   return {
-    version: '3.27.0', cacheEntries: cache.size, cacheEntriesMax: MAX_CACHE_ENTRIES,
+    version: '3.27.0', cacheEntries: cache.size, cacheEntriesMax: MAX_CACHE_ENTRIES, cacheMB: Math.round(cache.bytes / 1048576), cacheMBMax: Math.round(MAX_CACHE_BYTES / 1048576),
     cacheSeconds: cacheMs() / 1000, warmedQueries: warmed, hotQueries: hottest,
     slowest: queries.filter((q) => q.upstream > 0).slice(0, 25),
     queries
@@ -3086,7 +3217,7 @@ async function handleApi(req, res, url) {
 
   if (p === '/api/health' && method === 'GET') {
     // pendingSignups sirf admin ko (sidebar badge ke liye) — public health me leak nahi.
-    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.27.0', storage: storageStatus(), push: pushHealth(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length } : {}) });
+    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.27.0', storage: storageStatus(), push: pushHealth(), stockAge: stockAgeStatus(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length } : {}) });
   }
   // 📊 Admin-only: exact reason of slowness (Google query timings, cache hit rate, warm queries).
   if (p === '/api/perf' && method === 'GET') {
@@ -3226,15 +3357,18 @@ async function handleApi(req, res, url) {
   // 🧓 v3.31 stock ageing — summary (agent / TL / network bucket counts, FF + GV) aur tag-level list.
   if (p === '/api/stock-age' && method === 'GET') {
     if (!user) throw new HttpError(401, 'Login required');
-    const index = await stockAgeIndex(url.searchParams.get('fresh') === '1');
-    const body = JSON.stringify(stockAgeSummary(index));
+    // ⏳ Index abhi ban raha ho to request ko 45-60 s latkane ke bajay `pending` do — browser poll karta hai (UI kabhi atakta nahi).
+    const index = await stockAgeIndexWithin(STOCK_AGE_WAIT_MS, url.searchParams.get('fresh') === '1');
+    if (!index) return sendJson(res, 200, stockAgePending());
+    const body = JSON.stringify({ ...stockAgeSummary(index), building: !!stockAgeState.promise });
     return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', body, { 'Cache-Control': 'no-store' });
   }
   if (p === '/api/stock-age/tags' && method === 'GET') {
     if (!user) throw new HttpError(401, 'Login required');
     const q = url.searchParams;
     const split = (v) => String(v || '').split('|').map((x) => x.trim()).filter(Boolean);
-    const index = await stockAgeIndex(false);
+    const index = await stockAgeIndexWithin(STOCK_AGE_WAIT_MS, false);
+    if (!index) return sendJson(res, 200, { ...stockAgePending(), total: 0, rows: [] });
     const out = stockAgeTags(index, { ch: q.get('ch'), kind: q.get('kind'), key: q.get('key') || '', keys: split(q.get('keys')), tls: split(q.get('tls')), months: Number(q.get('months')) || 0, group: q.get('group') || '', unknown: q.get('unknown') === '1', limit: Number(q.get('limit')) || 2000 });
     return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, ...out }), { 'Cache-Control': 'no-store' });
   }
@@ -6074,6 +6208,9 @@ async function start() {
     //    weekly inactive users + 🔴 cover alert / 📉 stock history — boot par aur har 30 min.
     setTimeout(() => runScheduledChecks(), 15000);
     setInterval(() => runScheduledChecks(), 30 * 60e3).unref();
+    // 🧓 Stock ageing index pehle se bana lo (pehla user 1-2 min intezaar na kare). Render par default ON; STOCK_AGE_WARM=0 se band.
+    const warmStockAge = process.env.STOCK_AGE_WARM ? process.env.STOCK_AGE_WARM !== '0' : !!process.env.RENDER;
+    if (warmStockAge) setTimeout(() => stockAgeIndex(false).catch((err) => console.warn('stock ageing warm-up:', err.message)), 12000).unref();
   });
 }
 start().catch((err) => { console.error('Startup stopped to protect stored data:', err); process.exitCode = 1; });

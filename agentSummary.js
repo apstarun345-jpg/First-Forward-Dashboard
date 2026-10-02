@@ -149,7 +149,7 @@ FF.pages = FF.pages || {};
     const hit = reportCache.get(key);
     if (hit && Date.now() - hit.at < REPORT_TTL && !(opts && opts.fresh)) return hit.report;
     const generation = reportCacheGeneration;
-    return buildReport(person).then((rep) => {
+    return buildReport(person, opts).then((rep) => {
       if (generation !== reportCacheGeneration) return rep;
       reportCache.set(key, { at: Date.now(), report: rep });
       // TL teams commonly exceed 24 agents; retain a full roster so the next Team Pack is also instant.
@@ -370,7 +370,7 @@ FF.pages = FF.pages || {};
     };
   }
 
-  async function buildReport(person) {
+  async function buildReport(person, opts) {
     const raw = await MP().build({
       kind: person.kind, name: person.name, sub: person.id || '',
       tlSet: new Set(person.tl ? [person.tl] : []), classMap: new Map(), bars: new Set()
@@ -405,16 +405,33 @@ FF.pages = FF.pages || {};
     const activityData = activityContext(person, isTl ? p.agents : [p], ch);
     if (isTl) p.agents = p.agents.map((a) => ({ ...a, ...activityStatus(person, a, ch, activityData) }));
     else Object.assign(p, activityStatus(person, p, ch, activityData));
-    let age = null;
-    if (FF.stockAge && FF.stockAge.compute) {
-      const scope = isTl
-        ? { kind: 'tl', key: person.name, ch, title: person.name }
-        : { kind: 'agent', key: person.id || person.name, keys: [person.name, person.id].filter(Boolean), ch, title: person.name };
-      const res = await FF.stockAge.compute(scope).catch(() => null);
-      age = res && (res[ch] || res.ff || res.gv) || null;
-    }
     const trend = monthlyTrend(person, ch, isTl, m.cur || '');
-    return { person, p, age, ch, isTl, trend, generatedAt: Date.now() };
+    const report = { person, p, age: null, ageState: 'idle', ch, isTl, trend, generatedAt: Date.now() };
+    // 🧓 Ageing ab report ka rasta NAHI rokti. Summary page `{ age: false }` se base report turant dikhata hai (stock in hand,
+    // issuance, charts — sab REPORT / StockDataa group-by se) aur ageing background me aati hai. Exports / Team Pack
+    // (`age` default) ageing ka bounded intezaar karte hain — kabhi infinite nahi.
+    if (!opts || opts.age !== false) await loadAgeing(report, { waitMs: opts && opts.ageWaitMs });
+    return report;
+  }
+  const AGE_WAIT_MS = 60000;
+  /** Report ki stock ageing (server index se) laao — report.age / report.ageState set karta hai. Kabhi throw nahi karta. */
+  async function loadAgeing(report, opts) {
+    if (!report) return null;
+    if (!(FF.stockAge && FF.stockAge.compute)) { report.ageState = 'unavailable'; return null; }
+    const person = report.person || {}, ch = report.ch, isTl = report.isTl;
+    const scope = isTl
+      ? { kind: 'tl', key: person.name, ch, title: person.name }
+      : { kind: 'agent', key: person.id || person.name, keys: [person.name, person.id].filter(Boolean), ch, title: person.name };
+    report.ageState = 'loading';
+    let res = null;
+    try { res = await FF.stockAge.compute(scope, { waitMs: (opts && opts.waitMs) || AGE_WAIT_MS }); } catch { res = null; }
+    const age = res && (res[ch] || res.ff || res.gv) || null;
+    if (age) { report.age = age; report.ageState = 'ready'; }
+    else {
+      const st = FF.stockAge.status ? FF.stockAge.status() : null;
+      report.ageState = st && st.building && !st.error ? 'building' : 'failed';
+    }
+    return report.age;
   }
 
   function reportText(r) {
@@ -813,6 +830,14 @@ FF.pages = FF.pages || {};
     return `*🧑‍💼 ${a.name}* (${chLabel} · Agent${a.id ? ` · ID: ${a.id}` : ''})\n• Status: ${a.activityStatus || 'Unknown'}${a.inactiveDuration ? ` · ${a.inactiveDuration}` : ''}\n• MTD: *${fmt(a.curTotal)}* (Last: ${fmt(a.lastTotal)} · ${a.growth == null ? '—' : `${a.growth >= 0 ? '+' : ''}${a.growth.toFixed(0)}%`})\n• Stock: *${fmt(a.stockTotal)}*\n👥 TL: ${r.p.name}\n— ${FF.config.brand || 'ApnaPayment'} 📊`;
   }
 
+  /** Ageing abhi nahi aayi — kyun (load ho rahi / server bana raha / fail) aur Retry. "Koi ageing nahi 🎉" kabhi nahi dikhata. */
+  function ageStateHtml(r) {
+    const st = r.ageState || 'idle';
+    if (st === 'unavailable') return '<div class="card-body empty dim">Stock ageing is page par available nahi hai.</div>';
+    if (st === 'loading' || st === 'idle') return `<div class="card-body as-age-state" role="status">${U.loader ? U.loader('', { size: 'sm' }) : ''} <span>🧓 Stock ageing load ho rahi hai${U.ellipsis ? U.ellipsis() : '…'} <small class="dim">(upar ka summary ready hai)</small></span></div>`;
+    if (st === 'building') return '<div class="card-body as-age-state">⏳ Server stock ageing ka index bana raha hai (pehli baar poora StockDataa padhna padta hai, 1–2 min). Upar ka summary ready hai — <button type="button" class="btn small" data-as-age-retry>↻ Dobara check karo</button></div>';
+    return '<div class="card-body as-age-state">⚠️ Stock ageing abhi load nahi hui — upar ka summary sahi hai. <button type="button" class="btn small" data-as-age-retry>↻ Retry</button></div>';
+  }
   function reportHtml(r) {
     const p = r.p, t = p.totals || {}, age = r.age;
     const chLabel = r.ch === 'gv' ? 'GV Partner' : 'First Forward';
@@ -870,12 +895,12 @@ FF.pages = FF.pages || {};
           </table></div>
         </div>
         <div class="card">
-          <div class="card-head"><h3>⏳ Stock Ageing · ${age ? fmt(age.total) : 0} tags</h3><span class="dim small">30+d: <b>${age ? fmt(age.old30) : 0}</b> · 60+d: <b class="bad">${age ? fmt(age.old60) : 0}</b></span></div>
+          <div class="card-head"><h3>⏳ Stock Ageing${age ? ` · ${fmt(age.total)} tags` : ''}</h3>${age ? `<span class="dim small">30+d: <b>${fmt(age.old30)}</b> · 60+d: <b class="bad">${fmt(age.old60)}</b></span>` : ''}</div>
           ${age && age.total ? `<div class="table-wrap"><table class="tbl compact">
             <thead><tr><th>Class</th>${age.buckets.map((b) => `<th class="num">${esc(b.label)}</th>`).join('')}<th class="num">30+d</th><th class="num">60+d</th><th class="num">Total</th></tr></thead>
             <tbody>${(age.byClass || []).map((c) => `<tr class="clickable" data-as-age-cls="${esc(c.cls)}"><td><b>${esc(c.cls)}</b></td>${age.buckets.map((b) => `<td class="num">${fmt(c[b.key] || 0)}</td>`).join('')}<td class="num"><b>${fmt(c.old30)}</b></td><td class="num"><b class="${c.old60 ? 'bad' : ''}">${fmt(c.old60)}</b></td><td class="num"><b>${fmt(c.total)}</b></td></tr>`).join('')}</tbody>
             <tfoot><tr class="row-total"><td><b>Grand Total</b></td>${age.buckets.map((b) => `<td class="num"><b>${fmt(b.n || 0)}</b></td>`).join('')}<td class="num"><b>${fmt(age.old30)}</b></td><td class="num"><b class="${age.old60 ? 'bad' : ''}">${fmt(age.old60)}</b></td><td class="num"><b>${fmt(age.total)}</b></td></tr></tfoot>
-          </table></div>` : '<div class="card-body empty">Is waqt koi pending stock ageing nahi hai 🎉</div>'}
+          </table></div>` : (age ? '<div class="card-body empty">Is waqt koi pending stock ageing nahi hai 🎉</div>' : ageStateHtml(r))}
         </div>
       </div>
 
@@ -892,7 +917,19 @@ FF.pages = FF.pages || {};
 
   function makePage(channel) {
     const isGv = channel === 'gv';
-    const state = { list: [], picked: null, report: null, q: '' };
+    const state = { list: [], picked: null, report: null, q: '', pickSeq: 0 };
+    /** Spinner + 20 s ke baad "slow hai" hint + Retry — loading kabhi bina jankari / bina Retry ke nahi ghoomti. */
+    function showWaiting(host, text, onRetry) {
+      host.innerHTML = U.spinner(text);
+      const timer = setTimeout(() => {
+        if (!host.isConnected || !host.querySelector('.loading')) return;
+        host.innerHTML = U.spinner(text, { hint: 'Google Sheet / server abhi slow hai — data aa raha hai, thoda rukiye. Bahut der lage to Retry dabaiye.' })
+          + '<div class="as-wait-actions"><button type="button" class="btn small" data-as-retry>↻ Retry</button></div>';
+        const btn = host.querySelector('[data-as-retry]');
+        if (btn && onRetry) btn.addEventListener('click', onRetry);
+      }, 20000);
+      return () => clearTimeout(timer);
+    }
     async function render(root, params) {
       const chLabel = isGv ? 'GV Partner' : 'First Forward';
       root.innerHTML = `<div class="page">
@@ -915,7 +952,20 @@ FF.pages = FF.pages || {};
       </div>`;
       const qEl = U.$('#as-q', root), drop = U.$('#as-drop', root), body = U.$('#as-body', root);
       const topSug = U.$('#as-top-suggest', root), searchBtn = U.$('#as-search-btn', root);
-      state.list = await loadPeopleCached(channel);
+      const retryRender = () => render(root, params);
+      const stopListHint = showWaiting(body, `${chLabel} agents & TLs load ho rahe hain…`, retryRender);
+      try {
+        state.list = await loadPeopleCached(channel);
+      } catch (err) {
+        // Pehle yahan throw = spinner hamesha ke liye (kuch bind hi nahi hota tha). Ab saaf error + Retry.
+        stopListHint();
+        console.error('[agentSummary] list load failed:', err);
+        body.innerHTML = U.errorBox(err, 'data-as-retry');
+        const btn = body.querySelector('[data-as-retry]');
+        if (btn) btn.addEventListener('click', retryRender);
+        return;
+      }
+      stopListHint();
 
       const renderTopChips = (q) => {
         if (!topSug) return;
@@ -967,11 +1017,50 @@ FF.pages = FF.pages || {};
         state.q = person.name;
         qEl.value = person.name;
         renderTopChips('');
-        body.innerHTML = U.spinner(`${person.name} ka poora summary ban raha hai…`);
-        state.report = await buildReportCached(person, opts);
-        body.innerHTML = reportHtml(state.report);
+        const token = ++state.pickSeq;
+        const stopHint = showWaiting(body, `${person.name} ka poora summary ban raha hai…`, () => pick(person, { ...(opts || {}), fresh: true }));
+        let rep;
+        try {
+          // age: false → ageing ka intezaar nahi; stock in hand / issuance / charts turant, ageing peeche se (startAgeing).
+          rep = await buildReportCached(person, { ...(opts || {}), age: false });
+        } catch (err) {
+          stopHint();
+          if (token !== state.pickSeq) return;
+          console.error('[agentSummary] report failed:', err);
+          body.innerHTML = U.errorBox(err, 'data-as-retry');
+          const btn = body.querySelector('[data-as-retry]');
+          if (btn) btn.addEventListener('click', () => pick(person, { ...(opts || {}), fresh: true }));
+          return;
+        }
+        stopHint();
+        if (token !== state.pickSeq) return;   // user ne beech me dusra naam chun liya
+        state.report = rep;
+        paintReport(rep);
+        if (rep.ageState !== 'ready') startAgeing(rep);
+      };
+      const paintReport = (rep) => {
+        body.innerHTML = reportHtml(rep);
         if (FF.charts && FF.charts.mount) FF.charts.mount(body);
         if (FF.app && FF.app.enhanceTables) FF.app.enhanceTables(body);
+      };
+      /** Ageing background me; aate hi (agar yehi report abhi screen par hai) report dobara paint — scroll jagah par rehta hai. */
+      const startAgeing = (rep) => {
+        if (!rep || rep.ageLoading) return;
+        rep.ageState = 'loading';
+        const finish = () => {
+          rep.ageLoading = null;
+          if (state.report !== rep || !body.isConnected) return;
+          let main = null, top = 0, winTop = 0;
+          try { main = document.getElementById('main'); top = main ? main.scrollTop : 0; winTop = window.scrollY || 0; } catch { /* non-DOM */ }
+          paintReport(rep);
+          try { if (main) main.scrollTop = top; if (winTop && window.scrollTo) window.scrollTo(0, winTop); } catch { /* non-DOM */ }
+        };
+        rep.ageLoading = loadAgeing(rep, { waitMs: AGE_WAIT_MS }).then(() => {
+          // Server abhi index bana raha ho → timeout ke baad bhi poll chalta rehta hai; ready hote hi ek baar aur koshish.
+          if (rep.ageState === 'building' && FF.stockAge && FF.stockAge.ready) {
+            FF.stockAge.ready().then((idx) => { if (idx && rep.ageState !== 'ready' && state.report === rep) { rep.ageLoading = null; startAgeing(rep); } }).catch(() => {});
+          }
+        }).then(finish, finish);
       };
 
       renderTopChips(qEl.value);
@@ -1065,6 +1154,14 @@ FF.pages = FF.pages || {};
           const [kind, name] = (opt.dataset.asOpt || opt.dataset.asPick).split('|');
           const found = state.list.find((x) => x.kind === kind && norm(x.name) === norm(name)) || { kind, name };
           pick(found);
+          return;
+        }
+        const ageRetry = e.target.closest('[data-as-age-retry]');
+        if (ageRetry && state.report) {
+          const rep = state.report;
+          rep.ageState = 'idle'; rep.ageLoading = null;
+          paintReport(rep);
+          startAgeing(rep);
           return;
         }
         const ageCard = e.target.closest('[data-as-age]');

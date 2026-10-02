@@ -34,9 +34,8 @@ FF.pages = FF.pages || {};
       people: new Map(),   // `${kind}|${normName(name)}` → { kind, name, sub, tlSet, classMap, bars, last, n }
       personGrams: new Map(), // normalized 2-character search gram → people (substring lookup)
       bars: new Map(),     // normBar(barcode) → { key, ff: [], gv: [] }
-      barKeys: [],         // integer IDs used by the compact barcode substring index
-      barPrefixes: new Map(), // first 4 normalized barcode characters → keys
-      barGrams: new Map(), // 6-character barcode gram → integer IDs
+      barKeys: [],         // barcode keys, insertion order — search seedha isi par chalti hai (neeche search() dekho)
+      tlInfo: new Map(),   // `${kind}|${tlName}` → { direct, label, real } (person() ka memo — config calls lakhon baar nahi)
       ids: new Map(),      // normId(id) → { name, kind, tl }
       idBuckets: new Map(), // first 4 normalized ID characters → entries
       mobiles: new Map(), // 10-digit mobile → { name, kind, tl } (agent + TL mobile search)
@@ -51,6 +50,18 @@ FF.pages = FF.pages || {};
     if (!FF.config.isRealTl(n)) return FF.config.directLabel({ tlName: n }, ch || 'ff');
     return n;
   }
+  /** TL naam ke hisaab se (direct? label? asli TL?) — ek idx me har distinct (kind, TL) ek hi baar nikalta hai. */
+  function tlInfoOf(idx, kind, tl) {
+    const k = `${kind}|${tl}`;
+    let info = idx.tlInfo.get(k);
+    if (info) return info;
+    const isAgent = kind === 'ff-agent' || kind === 'gv-agent';
+    const ch = kind === 'gv-agent' ? 'gv' : 'ff';
+    const direct = isAgent && FF.config.isDirectAgent({ tlName: tl, channel: ch === 'gv' ? 'GV Partner' : 'First Forward' }, ch);
+    info = { direct: !!direct, label: direct ? FF.config.directLabel({ tlName: tl }, ch) : '', real: !!tl && FF.config.isRealTl(tl) };
+    idx.tlInfo.set(k, info);
+    return info;
+  }
   function person(idx, kind, name, tlName, cls, sub) {
     const nm = clean(name);
     if (!nm) return null;
@@ -60,13 +71,14 @@ FF.pages = FF.pages || {};
     let p = idx.people.get(k);
     if (!p) { p = { kind, name: nm, sub: sub || '', tlSet: new Set(), classMap: new Map(), bars: new Set(), last: '', n: 0, direct: false }; idx.people.set(k, p); }
     if (sub && !p.sub) p.sub = clean(sub);
+    const tl = clean(tlName);
     if (kind === 'ff-agent' || kind === 'gv-agent') {
-      const ch = kind === 'gv-agent' ? 'gv' : 'ff';
-      const direct = FF.config.isDirectAgent({ tlName, channel: ch === 'gv' ? 'GV Partner' : 'First Forward' }, ch);
-      if (direct) { p.direct = true; p.directLabel = FF.config.directLabel({ tlName }, ch); }
+      const info = tlInfoOf(idx, kind, tl);
+      if (info.direct) { p.direct = true; p.directLabel = info.label; }
     }
-    if (clean(tlName) && !(p.direct && !FF.config.isRealTl(clean(tlName)))) p.tlSet.add(clean(tlName));
-    if (clean(cls)) p.classMap.set(clean(cls), (p.classMap.get(clean(cls)) || 0) + 1);
+    if (tl && !(p.direct && !tlInfoOf(idx, 'tl', tl).real)) p.tlSet.add(tl);
+    const c = clean(cls);
+    if (c) p.classMap.set(c, (p.classMap.get(c) || 0) + 1);
     return p;
   }
   function pushBucket(map, key, value) {
@@ -100,41 +112,51 @@ FF.pages = FF.pages || {};
     });
     idx.mobileGrams = mobileGrams;
   }
+  // Pehle har barcode ke liye 6-char gram + 4-char prefix index banta tha (2.3 lakh barcodes par ~1.2 s CPU + ~127 MB heap, phone par
+  // freeze/crash) jabki seedha key-list scan sirf 2-18 ms leta hai — isliye ab sirf barKeys (insertion order) rakhte hain.
   const barEntry = (idx, key) => {
     let e = idx.bars.get(key);
     if (e) return e;
     e = { key, ff: [], gv: [] };
     idx.bars.set(key, e);
-    const id = idx.barKeys.length;
     idx.barKeys.push(key);
-    if (key.length >= 4) pushBucket(idx.barPrefixes, key.slice(0, 4), key);
-    if (key.length >= 6) {
-      const grams = new Set();
-      for (let i = 0; i <= key.length - 6; i++) grams.add(key.slice(i, i + 6));
-      grams.forEach((gram) => pushBucket(idx.barGrams, gram, id));
-    }
     return e;
   };
 
   /** Layer 1 — aggregated rows (instant, never blocks on barcode scans). */
+  const LIMITS = { lightSoftMs: 6000 };   // itni der baad jo datasets aa chuke unse index banao; baaki aate hi index me judte hain (tests chhota karte hain)
+  /** Sabhi promises ka intezaar — par `ms` se zyada nahi. Return: { name: { status, value|reason } } (pending wale missing). */
+  function settleSoon(sources, ms) {
+    const out = {};
+    const tracked = Object.keys(sources).map((name) => Promise.resolve(sources[name]).then(
+      (value) => { out[name] = { status: 'fulfilled', value }; },
+      (reason) => { out[name] = { status: 'rejected', reason }; }
+    ));
+    let timer;
+    const deadline = new Promise((resolve) => { timer = setTimeout(resolve, ms); });
+    return Promise.race([Promise.all(tracked), deadline]).then(() => { clearTimeout(timer); return { ...out }; });
+  }
   async function buildLight() {
     if (state.light) return state.light;
     if (state.lightPromise) return state.lightPromise;
     const generation = state.generation;
     state.lightPromise = (async () => {
       const idx = newIndex();
-      const [agents, stockAgents, gvMaster, gvIssuance, gvReport, gvStockAgent, gvStockTl, ffReport] = await Promise.allSettled([
-        FF.store.need('agents'), FF.store.need('stockAgents'), FF.gv.need('master'),
-        FF.store.need('daily').then(() => (FF.gv.issuanceRows ? FF.gv.issuanceRows() : [])),
-        FF.gv.need('report'), FF.gv.need('stockAgent'), FF.gv.need('stockTl'),
+      let tick = 0;
+      const sources = {
+        agents: FF.store.need('agents'), stockAgents: FF.store.need('stockAgents'), gvMaster: FF.gv.need('master'),
+        gvIssuance: FF.store.need('daily').then(() => (FF.gv.issuanceRows ? FF.gv.issuanceRows() : [])),
+        gvReport: FF.gv.need('report'), gvStockAgent: FF.gv.need('stockAgent'), gvStockTl: FF.gv.need('stockTl'),
         // 🔎 FF REPORT: old/alt agent ID (ID column) · TL ID · TL mobile — search me bhi aayenge
-        (FF.pages.performance && FF.pages.performance.ensureLoaded ? FF.pages.performance.ensureLoaded().then(() => FF.pages.performance.agents()) : Promise.resolve([]))
-      ]);
+        ffReport: (FF.pages.performance && FF.pages.performance.ensureLoaded ? FF.pages.performance.ensureLoaded().then(() => FF.pages.performance.agents()) : Promise.resolve([]))
+      };
       const canMob = (() => { try { return !FF.auth || FF.auth.can('contacts'); } catch { return true; } })();
       const addAlias = (p, ...vals) => { if (!p) return; p.alias = p.alias || new Set(); vals.forEach((v) => { const t = clean(v); if (t && !/^na$/i.test(t)) p.alias.add(t); }); };
       const addMobile = (m, name, kind, tl) => { if (!canMob) return; const d = String(m || '').replace(/\D/g, '').slice(-10); if (d.length === 10) idx.mobiles.set(`${d}|${kind}|${normName(name)}`, { mobile: d, name: clean(name), kind, tl: clean(tl) }); };
-      if (ffReport.status === 'fulfilled') {
-        for (const a of ffReport.value || []) {
+      const ingest = {};
+      ingest.ffReport = async (rows) => {
+        for (const a of rows || []) {
+          if (++tick % 2500 === 0) await U.breathe();
           const ap = person(idx, 'ff-agent', a.name || a.agentId, a.tlName, '', a.agentId || a.id);
           addAlias(ap, a.agentId, a.id, a.gvIdFound);
           [a.agentId, a.id].forEach((v) => { if (clean(v) && !/^na$/i.test(clean(v))) idx.ids.set(normId(v), { name: clean(a.name || v), kind: 'ff-agent', tl: clean(a.tlName) }); });
@@ -146,10 +168,11 @@ FF.pages = FF.pages || {};
             addMobile(a.tlMobile, a.tlName, 'ff-tl', '');
           }
         }
-      }
+      };
       // FF agents (EIR) — id + name + TL + ids
-      if (agents.status === 'fulfilled') {
-        for (const a of agents.value || []) {
+      ingest.agents = async (rows) => {
+        for (const a of rows || []) {
+          if (++tick % 2500 === 0) await U.breathe();
           const p = person(idx, 'ff-agent', a.name || a.id, a.tlName, '', a.id);
           if (p) { p.bars = p.bars; p.n += Number(a.n) || 0; }
           if (clean(a.id)) idx.ids.set(normId(a.id), { name: clean(a.name || a.id), kind: 'ff-agent', tl: clean(a.tlName) });
@@ -158,19 +181,21 @@ FF.pages = FF.pages || {};
             if (t) { t.n += Number(a.n) || 0; if (clean(a.id)) idx.ids.set(`${normId(a.id)}:tl`, { name: clean(a.tlName), kind: 'ff-tl' }); }
           }
         }
-      }
+      };
       // FF stock (agent × class) — IDs + TL from StockDataa
-      if (stockAgents.status === 'fulfilled') {
-        for (const r of stockAgents.value || []) {
+      ingest.stockAgents = async (rows) => {
+        for (const r of rows || []) {
+          if (++tick % 2500 === 0) await U.breathe();
           const p = person(idx, 'ff-agent', r.agentName || r.agentId, r.tlName, r.cls, r.agentId);
           if (p) p.n += Number(r.n) || 0;
           if (clean(r.agentId)) idx.ids.set(normId(r.agentId), { name: clean(r.agentName || r.agentId), kind: 'ff-agent', tl: clean(r.tlName) });
           if (clean(r.tlName)) person(idx, 'ff-tl', r.tlName, '', r.cls, '');
         }
-      }
+      };
       // GV Master — agent id / name / TL id / TL name / GV unique id + name
-      if (gvMaster.status === 'fulfilled') {
-        for (const r of gvMaster.value || []) {
+      ingest.gvMaster = async (rows) => {
+        for (const r of rows || []) {
+          if (++tick % 2500 === 0) await U.breathe();
           const p = person(idx, 'gv-agent', r.agentName || r.agentId, r.tlName, '', r.agentId);
           // GV Master supplies identity / unique-ID metadata only; issuance quantity is EIR below.
           if (clean(r.agentId)) idx.ids.set(normId(r.agentId), { name: clean(r.agentName || r.agentId), kind: 'gv-agent', tl: clean(r.tlName) });
@@ -182,11 +207,12 @@ FF.pages = FF.pages || {};
             if (clean(r.gvUniqueId)) idx.ids.set(normId(r.gvUniqueId), { name: clean(r.gvUniqueName || r.gvUniqueId), kind: 'gv-id', tl: clean(r.tlName) });
           }
         }
-      }
+      };
       // GV issuance quantities are EIR-authoritative. Keep GV Master above only for identity and
       // unique-ID metadata; aggregated EIR rows supply the search counts and class quantities.
-      if (gvIssuance.status === 'fulfilled') {
-        for (const r of gvIssuance.value || []) {
+      ingest.gvIssuance = async (rows) => {
+        for (const r of rows || []) {
+          if (++tick % 2500 === 0) await U.breathe();
           const n = Number(r.n) || 1;
           const p = person(idx, 'gv-agent', r.agentName || r.agentId, r.tlName, '', r.agentId);
           if (p) {
@@ -200,10 +226,11 @@ FF.pages = FF.pages || {};
             if (t) t.n += n;
           }
         }
-      }
+      };
       // GV REPORT (agent + TL + supervisor ids)
-      if (gvReport.status === 'fulfilled') {
-        for (const r of gvReport.value || []) {
+      ingest.gvReport = async (rows) => {
+        for (const r of rows || []) {
+          if (++tick % 2500 === 0) await U.breathe();
           person(idx, 'gv-agent', r.agentName || r.agentId, r.tlName, '', r.agentId);
           if (clean(r.agentId)) idx.ids.set(normId(r.agentId), { name: clean(r.agentName || r.agentId), kind: 'gv-agent', tl: clean(r.tlName) });
           if (clean(r.tlId)) idx.ids.set(normId(r.tlId), { name: clean(r.tlName || r.tlId), kind: 'gv-tl' });
@@ -213,22 +240,38 @@ FF.pages = FF.pages || {};
           if (clean(r.tlName) && FF.config.isRealTl(clean(r.tlName))) addAlias(person(idx, 'gv-tl', r.tlName, '', '', r.tlId), r.tlId, canMob ? r.tlMobile : '');
           if (r.tlMobile) addMobile(r.tlMobile, r.tlName, 'gv-tl', '');
         }
-      }
+      };
       // GV stock (Tag Assignment aggregates)
-      if (gvStockAgent.status === 'fulfilled') {
-        for (const r of gvStockAgent.value || []) {
+      ingest.gvStockAgent = async (rows) => {
+        for (const r of rows || []) {
+          if (++tick % 2500 === 0) await U.breathe();
           const p = person(idx, 'gv-agent', r.agentName || r.agentId, r.tlName, '', r.agentId);
           if (p) p.n += Number(r.n) || 0;
           if (clean(r.agentId)) idx.ids.set(normId(r.agentId), { name: clean(r.agentName || r.agentId), kind: 'gv-agent', tl: clean(r.tlName) });
         }
-      }
-      if (gvStockTl.status === 'fulfilled') {
-        for (const r of gvStockTl.value || []) person(idx, 'gv-tl', r.tlName, '', '', clean(r.tlId));
-      }
+      };
+      ingest.gvStockTl = async (rows) => {
+        for (const r of rows || []) person(idx, 'gv-tl', r.tlName, '', '', clean(r.tlId));
+      };
+      // Canonical order (pehle jaisa): jo datasets deadline tak aa gaye unhe isi order me jodo — slow dataset search ko nahi rokta.
+      const ORDER = ['ffReport', 'agents', 'stockAgents', 'gvMaster', 'gvIssuance', 'gvReport', 'gvStockAgent', 'gvStockTl'];
+      const settled = await settleSoon(sources, LIMITS.lightSoftMs);
+      for (const name of ORDER) if (settled[name] && settled[name].status === 'fulfilled') await ingest[name](settled[name].value);
       indexLookups(idx);
       if (generation !== state.generation) return state.light;
       state.light = idx;
       state.lightPromise = null;
+      // Deadline tak jo nahi aaye (slow Google query) — aate hi index me jod do aur dropdown refresh; search pehle se chal rahi hai.
+      const late = ORDER.filter((name) => !settled[name]);
+      if (late.length) {
+        idx.partial = true;
+        let left = late.length;
+        late.forEach((name) => {
+          Promise.resolve(sources[name]).then(async (value) => { if (generation === state.generation) await ingest[name](value); }, () => {})
+            .catch(() => {})
+            .finally(() => { if (generation !== state.generation) return; indexLookups(idx); if (--left === 0) idx.partial = false; emit(); });
+        });
+      }
       emit();
       return idx;
     })().catch((err) => { if (generation === state.generation) state.lightPromise = null; throw err; });
@@ -250,7 +293,10 @@ FF.pages = FF.pages || {};
       const idx = state.light || await buildLight();
       const details = await FF.insights.loadDetails();
       const stamp = (d) => (d ? (d instanceof Date ? U.dateKey(d) : U.parseDate(d) ? U.dateKey(U.parseDate(d)) : '') : '');
+      let tick = 0;
+      const stop = async () => { if (++tick % 3000) return false; await U.breathe(); return generation !== state.generation; };
       for (const r of details.stock || []) {
+        if (await stop()) return state.full;
         const key = normBar(r.barcode || r.tagId);
         if (!key) continue;
         const e = barEntry(idx, key);
@@ -263,6 +309,7 @@ FF.pages = FF.pages || {};
         if (clean(r.tlName)) { const t = person(idx, 'ff-tl', r.tlName, '', r.cls, ''); if (t) t.bars.add(key); }
       }
       for (const r of details.assignment || []) {
+        if (await stop()) return state.full;
         const key = normBar(r.serial || r.tagId);
         if (!key) continue;
         const e = barEntry(idx, key);
@@ -293,7 +340,11 @@ FF.pages = FF.pages || {};
     // 🏷️ Barcode register ke liye insights.js chahiye — wo ab lazy module hai, isliye pehle background
     // me load karo (topbar search khulte hi register bhi taiyaar ho jata hai).
     const ready = (name) => (typeof FF[name] !== 'undefined' ? Promise.resolve() : (FF.lazy && FF.lazy.inject ? FF.lazy.inject(name) : Promise.resolve()));
-    ready('masterProfile').then(() => { if (FF.masterProfile && FF.masterProfile.warm) return FF.masterProfile.warm(); }).then(emit).catch(() => {});
+    ready('masterProfile').then(() => {
+      // Har dataset aate hi dropdown / kundli refresh (pehle sab ke khatam hone tak "REPORT load ho raha hai…" rehta tha).
+      if (FF.masterProfile && FF.masterProfile.onData && !state.mpSub) state.mpSub = FF.masterProfile.onData(emit);
+      if (FF.masterProfile && FF.masterProfile.warm) return FF.masterProfile.warm();
+    }).then(emit).catch(() => {});
     ready('insights').then(() => { state.fullPromise = null; if (!state.full && !state.fullPromise) return buildFull(); }).catch(() => {});
   }
   const MP = () => (FF.masterProfile && FF.masterProfile.supports ? FF.masterProfile : null);
@@ -334,21 +385,15 @@ FF.pages = FF.pages || {};
       for (const v of candidates) if (v.mobile === want || v.mobile.includes(want) || want.includes(v.mobile)) out.ids.push({ id: v.mobile, name: v.name, kind: v.kind, tl: v.tl, via: 'Mobile' });
       if (out.ids.length > 40) out.ids.length = 40;
     }
-    // barcode / tag / serial — prefix and 6-gram inverted indexes preserve partial-barcode search.
+    // barcode / tag / serial — partial barcode (prefix / beech ke digits) bhi.
     if (wantsTags && idx.bars.size) {
-      let candidates = [];
-      if (ni.length >= 6 && idx.barGrams) candidates = idx.barGrams.get(ni.slice(0, 6)) || [];
-      else if (idx.barPrefixes) candidates = idx.barPrefixes.get(ni.slice(0, 4)) || [];
-      for (const item of candidates) {
-        const key = typeof item === 'number' ? idx.barKeys[item] : item;
-        if (!key || !(key === ni || key.startsWith(ni) || (ni.length >= 6 && key.includes(ni)))) continue;
-        const entry = idx.bars.get(key);
-        if (entry) out.tags.push(entry);
+      // Seedha key-list scan (2.3 lakh keys ≈ 2-18 ms) — exact / prefix, aur 6+ digit par substring (middle ke digits bhi).
+      const keys = idx.barKeys && idx.barKeys.length ? idx.barKeys : [...idx.bars.keys()];
+      const substring = ni.length >= 6;
+      for (let i = 0; i < keys.length; i++) {
+        const key = keys[i];
+        if (key === ni || key.startsWith(ni) || (substring && key.includes(ni))) { const entry = idx.bars.get(key); if (entry) out.tags.push(entry); }
       }
-      // Compatibility for an index created by an older host adapter without the new lookup maps.
-      if (!idx.barKeys || !idx.barKeys.length) idx.bars.forEach((entry, key) => {
-        if (key === ni || key.startsWith(ni) || (ni.length >= 6 && key.includes(ni))) out.tags.push(entry);
-      });
       out.tags.sort((a, b) => a.key.length - b.key.length || (b.ff.length + b.gv.length) - (a.ff.length + a.gv.length));
       if (out.tags.length > 120) out.tags.length = 120;
     }
@@ -422,7 +467,12 @@ FF.pages = FF.pages || {};
   /** Kundli card ke andar quick stats — mobile · TL · stock · TL stock · priority · suggested (data load hone par). */
   function kundliProfileStats(p) {
     const q1 = MP() ? MP().quick(p) : null;
-    if (!q1) return MP() && MP().supports(p) ? '<div class="ms-kundli-stats ms-prof"><div><small>Stock / priority</small><b class="dim">REPORT load ho raha hai…</b></div></div>' : '';
+    if (!q1) {
+      if (!(MP() && MP().supports(p))) return '';
+      // Data aa chuka hai par is naam ki REPORT row nahi → "load ho raha hai" hamesha nahi (misleading) — saaf message.
+      const loaded = !!(MP().isLoaded && MP().isLoaded());
+      return `<div class="ms-kundli-stats ms-prof"><div><small>Stock / priority</small><b class="dim">${loaded ? 'REPORT me is naam ki row nahi mili' : 'REPORT load ho raha hai…'}</b></div></div>`;
+    }
     const isTlKind = /tl$/.test(p.kind);
     const contacts = !FF.auth || FF.auth.can('contacts');
     const d = q1.dispatch || {};
@@ -665,6 +715,14 @@ FF.pages = FF.pages || {};
       },
       onEnter: (q) => { if (clean(q).length >= 2) openPanel(q); }
     });
+    // Index / data ready hote hi khula dropdown refresh — warna "search ho raha hai…" placeholder agli key tak atka rehta tha.
+    let refreshTimer = 0;
+    onIndexReady(() => {
+      clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => {
+        try { if (suggestApi && suggestApi.refresh && input.isConnected && document.activeElement === input && clean(input.value).length >= 2) suggestApi.refresh(); } catch { /* ignore */ }
+      }, 150);
+    });
     // ✕ Clear button — input khali karo, suggestions band, wapas focus
     const clearBtn = U.$('#master-search-clear', wrap);
     const syncClear = () => { if (clearBtn) clearBtn.hidden = !input.value; };
@@ -800,7 +858,7 @@ FF.pages = FF.pages || {};
   }
   FF.masterSearch = {
     buildLight, buildFull, warmFull, invalidate, search, suggestItems, resultsHtml, openPanel, closePanel,
-    mountTopbar, mountHome, onIndexReady, personByKey,
+    mountTopbar, mountHome, onIndexReady, personByKey, _limits: LIMITS,
     get ready() { return !!(state.light); }, get heavyReady() { return !!(state.full && state.full.fullLoaded); },
     get topbarMounted() { return mountedTopbar; },
     label: KIND_LABEL

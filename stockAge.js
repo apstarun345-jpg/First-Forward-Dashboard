@@ -40,7 +40,10 @@ window.FF = window.FF || {};
   ];
   const TH_BY_MONTH = new Map(THRESH.map((t) => [t.months, t]));
   const HOST_SEL = '[data-age-host]';
-  const state = { at: 0, promise: null, index: null, error: '', seq: 0 };
+  const state = { at: 0, promise: null, index: null, error: '', seq: 0, building: false, startedAt: 0 };
+  const SOFT_MS = 20000;          // itni der baad host par "abhi bhi ban rahi hai" + Retry (spinner hamesha nahi ghoomta)
+  const POLL_HARD_MS = 4 * 60e3;  // server `pending` de raha ho to itni der tak poll
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   const digits = (v) => String(v || '').replace(/\D/g, '');
   const norm = (v) => String(v || '').trim().toUpperCase().replace(/\s+/g, ' ');
@@ -88,13 +91,25 @@ window.FF = window.FF || {};
   }
   async function loadIndex(force) {
     if (!FF.auth || typeof FF.auth.api !== 'function') return { error: 'Login ke bina stock ageing nahi milti' };
-    const data = await FF.auth.api(`/api/stock-age${force ? '?fresh=1' : ''}`);
+    // Server index abhi ban raha ho (pehli baar poora StockDataa + Tag Assignment padhna padta hai) to `{ pending: true }` deta hai
+    // — request latkti nahi; yahan poll karte hain (pehle ek request 45-60 s tak ghoomti thi aur sab spinner atke rehte the).
+    const began = Date.now();
+    let data = null;
+    for (let attempt = 0; ; attempt++) {
+      data = await FF.auth.api(`/api/stock-age${force && attempt === 0 ? '?fresh=1' : ''}`);
+      if (!(data && data.pending)) break;
+      state.building = true;
+      if (Date.now() - began > POLL_HARD_MS) return { error: 'Server abhi bhi stock ageing ka index bana raha hai — thodi der baad Retry karo' };
+      await sleep(Math.min(8000, Math.max(1000, Number(data.retryAfterMs) || 3000)));
+    }
+    state.building = false;
     if (!data || !data.ok) return { error: (data && data.error) || 'Stock ageing load nahi hui' };
     return { at: Date.now(), data, today: data.today, ff: buildMaps('ff', data.ff), gv: buildMaps('gv', data.gv), errors: data.errors || null, total: (data.ff ? data.ff.total : 0) + (data.gv ? data.gv.total : 0), unknown: (data.ff ? data.ff.unknown : 0) + (data.gv ? data.gv.unknown : 0) };
   }
   function ready(force) {
     if (!force && state.index && Date.now() - state.at < 5 * 60e3) return Promise.resolve(state.index);
     if (state.promise && !force) return state.promise;
+    state.startedAt = Date.now();
     state.promise = loadIndex(force).then((idx) => {
       if (idx && idx.error) state.error = idx.error;
       else { state.index = idx; state.error = ''; }
@@ -104,9 +119,11 @@ window.FF = window.FF || {};
       state.error = (err && err.message) || 'ageing load nahi hui';
       state.at = Date.now();
       return state.index;
-    }).finally(() => { state.promise = null; });
+    }).finally(() => { state.promise = null; state.building = false; });
     return state.promise;
   }
+  /** UI ke liye: ready / building (server index bana raha) / error. */
+  function status() { return { ready: !!state.index, building: !!(state.promise && state.building), loading: !!state.promise, error: state.error || '', since: state.startedAt }; }
 
   // ---- 🔎 lookup -----------------------------------------------------------------------------------
   const chList = (ch) => (ch === 'ff' || ch === 'gv' ? [ch] : ['ff', 'gv']);
@@ -228,6 +245,7 @@ window.FF = window.FF || {};
       const ch = c.replace(/^field:/, '');
       const sc = c.startsWith('field:') ? { ...scope, kind: 'field' } : scope;
       const out = await FF.auth.api(tagQuery(sc, ch, months, group, limit, unknown));
+      if (out && out.pending) throw new Error('Stock ageing index abhi ban raha hai — thodi der baad dobara try karo');
       total += Number(out && out.total) || 0;
       ((out && out.rows) || []).forEach((r) => rows.push({ ...r, ch }));
     }
@@ -405,6 +423,18 @@ window.FF = window.FF || {};
     const scopes = [...host.querySelectorAll(HOST_SEL)];
     const hasChips = !!host.querySelector('[data-age-chip]'), hasSums = !!host.querySelector('[data-age-sum]');
     if (!scopes.length && !hasChips && !hasSums) return Promise.resolve(false);
+    if (!state.index) {
+      // Ageing abhi nahi aayi — SOFT_MS baad spinner ki jagah saaf message + Retry (data aate hi host khud bhar jaata hai).
+      setTimeout(() => {
+        if (state.index) return;
+        for (const el of scopes) {
+          if (el.isConnected === false || !el.querySelector('.age-loading')) continue;
+          el.innerHTML = `<p class="dim small">⏳ Stock ageing abhi bhi ban rahi hai${state.building ? ' — server pehli baar poora StockDataa padh raha hai (1–2 min lag sakte hain)' : ''}. Baaki data upar ready hai. <button type="button" class="btn small" data-age-retry>↻ Retry</button></p>`;
+          bindHost(el, scopeFrom(el));
+        }
+        for (const el of host.querySelectorAll('[data-age-sum]')) if (el.querySelector('.ffl')) el.textContent = '⏳ ban rahi hai…';
+      }, SOFT_MS);
+    }
     return ready().then((idx) => {
       for (const el of scopes) {
         if (el.isConnected === false) continue;
@@ -432,16 +462,24 @@ window.FF = window.FF || {};
   }
   /** 📄 Agent/TL Summary page ke liye compact shape: buckets + byClass breakdown.
    *  Server se tag list lekar locally counts banata hai (summary endpoint me per-person class breakdown nahi hai). */
-  async function compute(scope) {
+  async function compute(scope, opts) {
     const s = scope || {};
     const ch = s.ch === 'gv' ? 'gv' : 'ff';
     if (s.kind !== 'agent' && s.kind !== 'tl') return null;
-    await ready();
+    // `opts.waitMs` — itne ms me index na mile to null (caller UI "ban rahi hai / Retry" dikhaye, spinner nahi). Bina opts = purana (poora intezaar).
+    const waitMs = opts && Number(opts.waitMs) > 0 ? Number(opts.waitMs) : 0;
+    const started = Date.now();
+    if (waitMs) { const idx = await U.within(ready(), waitMs, undefined); if (idx === undefined) return null; } else await ready();
     const params = new URLSearchParams({ ch, kind: s.kind, limit: '20000' });
     if (s.key) params.set('key', s.key);
     if (Array.isArray(s.keys) && s.keys.length) params.set('keys', s.keys.slice(0, 400).join('|'));
     let data;
-    try { data = await FF.auth.api(`/api/stock-age/tags?${params.toString()}`); } catch { return null; }
+    try {
+      const left = waitMs ? Math.max(1000, waitMs - (Date.now() - started)) : 0;
+      const call = FF.auth.api(`/api/stock-age/tags?${params.toString()}`);
+      data = waitMs ? await U.within(call, left, null) : await call;
+    } catch { return null; }
+    if (!data || data.pending) return null;   // index tags ke waqt tak ready nahi → caller dobara koshish kare
     const rows = (data && data.rows) || [];
     const buckets = [
       { key: 'b1', label: '0–30d', n: 0 },
@@ -480,7 +518,7 @@ window.FF = window.FF || {};
   }
 
   FF.stockAge = {
-    ready, forAgent, forTl, nodesFor, nodeFor, hostHtml, sectionHtml, html, decorate, csv, fetchTags, compute, chipHtml, chipText, summaryText, tagsOlder, mixOf,
+    ready, status, forAgent, forTl, nodesFor, nodeFor, hostHtml, sectionHtml, html, decorate, csv, fetchTags, compute, chipHtml, chipText, summaryText, tagsOlder, mixOf,
     thresholds: THRESH, groupOf, bucketName, mergeNodes,
     get index() { return state.index; }, get error() { return state.error; },
     _setIndexForTest(data) { state.index = { at: Date.now(), data, today: data.today, ff: buildMaps('ff', data.ff), gv: buildMaps('gv', data.gv), total: 0, unknown: 0 }; state.at = Date.now(); state.error = ''; }
