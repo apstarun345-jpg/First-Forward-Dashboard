@@ -574,6 +574,7 @@ FF.pages = FF.pages || {};
         </div>
       </div>
       ${strip}
+      ${row && row.issuance && MP() && MP().issuanceCardsHtml ? MP().issuanceCardsHtml(row.issuance) : ''}
       <div class="ms-kundli-stats">
         <div><small>TL</small><b>${p.direct ? `<span class="direct-chip">🚫 ${esc(tl)}</span>` : esc(tl || '—')}</b>${row && row.tlId && !p.direct ? `<em>${esc(row.tlId)}</em>` : ''}</div>
         <div><small>Tags / barcodes</small><b>${p.bars.size ? U.fmt(p.bars.size) : U.fmt(p.n)}</b></div>
@@ -623,10 +624,6 @@ FF.pages = FF.pages || {};
             <td><span class="badge ${st.tone}">${esc(st.t)}</span></td><td>${esc(f.allocated || g.allocated || '—')}</td></tr>`;
       }).join('')}
         </tbody></table></div>${res.tags.length > 60 ? `<p class="dim small">Pehle 60 rows dikhe — CSV me poori list.</p>` : ''}</section>`);
-    }
-    if (res.people.length) {
-      parts.push(`<section class="ms-section"><h3>🧑‍💼 Agents & TLs <span class="dim small">${U.fmt(res.people.length)} match</span></h3>
-        <div class="ms-kundli-grid">${res.people.slice(0, 24).map(personKundli).join('')}</div></section>`);
     }
     if (res.ids.length) {
       parts.push(`<section class="ms-section"><h3>🆔 ID matches <span class="dim small">${U.fmt(res.ids.length)}</span></h3>

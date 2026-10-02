@@ -279,6 +279,7 @@ window.FF = window.FF || {};
     const t = await D.query('GV REPORT', '', { ...opts, gid: rc.gid || (FF.config.tabBy('GV REPORT') || {}).gid || '', range });
     const cell = (row, key) => D.cellText(row[REPORT_COLS[key]]);
     const num = (row, key) => D.cellNumber(row[REPORT_COLS[key]]);
+    const hasNum = (row, key) => { const value = num(row, key); return value !== null && value !== undefined; };
     const rows = [];
     for (const r of t.rows) {
       const agentId = U.clean(cell(r, 'agentId'));
@@ -303,8 +304,13 @@ window.FF = window.FF || {};
         curVc4: num(r, 'curVc4') || 0, curComm: num(r, 'curComm') || 0, curTotal: num(r, 'curTotal') || 0,
         curByClass: Object.fromEntries([['VC4', 'curVc4'], ['VC5', 'curVc5'], ['VC6', 'curVc6'], ['VC7', 'curVc7'], ['VC12', 'curVc12'], ['VC16', 'curVc16']].map(([k, key]) => [k, num(r, key) || 0])),
         expected: num(r, 'expected') || 0, runrateVc4: num(r, 'runrateVc4') || 0, runrateComm: num(r, 'runrateComm') || 0, runrate: num(r, 'runrate') || 0,
-        tlLastVc4: num(r, 'tlLastVc4') || 0, tlLastComm: num(r, 'tlLastComm') || 0, tlLastTotal: num(r, 'tlLastTotal') || 0,
-        tlCurVc4: num(r, 'tlCurVc4') || 0, tlCurComm: num(r, 'tlCurComm') || 0, tlCurTotal: num(r, 'tlCurTotal') || 0,
+        // GV REPORT repeats the TL-level snapshot on every agent row. Preserve blank-vs-zero so
+        // masterProfile can pick one TL snapshot instead of summing the repeated values (or
+        // replacing them with an incomplete EIR roll-up).
+        tlLastVc4: num(r, 'tlLastVc4'), tlLastComm: num(r, 'tlLastComm'), tlLastTotal: num(r, 'tlLastTotal'),
+        tlLastAvailable: ['tlLastVc4', 'tlLastComm', 'tlLastTotal'].some((key) => hasNum(r, key)),
+        tlCurVc4: num(r, 'tlCurVc4'), tlCurComm: num(r, 'tlCurComm'), tlCurTotal: num(r, 'tlCurTotal'),
+        tlCurAvailable: ['tlCurVc4', 'tlCurComm', 'tlCurTotal'].some((key) => hasNum(r, key)),
         avgRunrateVc4: num(r, 'avgRunrateVc4') || 0, avgRunrateComm: num(r, 'avgRunrateComm') || 0, eRunrate: num(r, 'eRunrate') || 0,
         supervisorId: U.clean(cell(r, 'supervisorId')),
         raw: t.cols.map((c, i) => D.cellText(r[i], c))

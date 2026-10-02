@@ -126,6 +126,12 @@ test('masterSearch — suggestions me kind label + Enter-friendly items', async 
   assert.equal(none[0].none, true, 'no-result suggestion flag missing');
 });
 
+test('Home results render each matching person card once', () => {
+  const person = { kind: 'ff-agent', name: 'Ravi Kumar', sub: 'R101', direct: false, tlSet: new Set(['TL One']), bars: new Set(), n: 1, last: '', classMap: new Map() };
+  const html = MS.resultsHtml({ matched: 1, q: 'Ravi', heavy: true, people: [person], tags: [], ids: [] });
+  assert.equal((html.match(/<article class="ms-kundli v2"/g) || []).length, 1, 'new issuance cards must not be duplicated in a second result section');
+});
+
 test('masterSearch — heavy register (barcode) layer se barcode/tag search bhi chalti hai', async () => {
   // loadDetails ko mock karo — barcode register
   FF.insights = {
