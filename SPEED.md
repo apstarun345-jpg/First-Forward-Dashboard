@@ -119,3 +119,18 @@ aur har period change par wahi dobara. Isi liye "option lag karta hai" sabse zya
 | Startup query order | 16 parallel | 3 workers, priority `daily` pehle |
 | Unusual Activity tag scan (v3.37) | browser me 25k-row pages **sequentially**, first paint blocked | **server** par parallel ×4 + 10-min cache; page **instant** paint, scan background (~99 ms total) |
 | Card click → drawer (v3.37) | 2 drawer + poora `renderBody` (~91 KB) + `wireEvents()` | 1 drawer (page-owned, `data-kpi-self`), cached metric, chunked tables |
+
+## 7) Home master search + TL stock (v3.38 follow-up)
+
+- Name/TL substring search now checks a prebuilt 2-character lookup bucket; ID and mobile matches use
+  4-character / 5-digit buckets. Barcode lookup uses a 4-character prefix bucket or a 6-character
+  substring index. Matching still verifies the complete normalized query, so buckets only narrow the
+  candidates; they do not change the search semantics. Indexes are built when the light/full data
+  layers finish, rather than rescanning all people and barcodes on every keystroke. Profile lookups
+  also keep in-memory name/TL maps, cleared when data loads or the user requests a full refresh.
+- Agent/TL cards and FF/GV TL profiles use one shared stock composition: TL's own identifiable stock
+  plus non-direct agents' stock. A TL REPORT snapshot remains a floor when detail sheets are partial;
+  class rows are reconciled to the displayed total. Agent Summary suggestions consume the same quick
+  profile total, and exports/cards label the own-vs-team split.
+- Cache bust is `?v=61`, service-worker shell is `apnapayment-v69`; `./sw.js` is still registered without
+  a query because the server reads its cache name dynamically for the update indicator.

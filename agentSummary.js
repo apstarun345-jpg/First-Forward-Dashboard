@@ -24,7 +24,7 @@ FF.pages = FF.pages || {};
     const kind = isGv ? 'gv-agent' : 'ff-agent';
     if (MP() && MP().loadFor) await MP().loadFor({ kind }).catch(() => {});
     else if (MP() && MP().load) await MP().load().catch(() => {});
-    if (isGv && FF.gv) await Promise.all(['report', 'stockAgent', 'master'].map((k) => FF.gv.need(k, { only: true })).map((p) => p && p.catch ? p.catch(() => {}) : p));
+    if (isGv && FF.gv) await Promise.all(['report', 'stockAgent', 'stockAgentClass', 'master'].map((k) => FF.gv.need(k, { only: true })).map((p) => p && p.catch ? p.catch(() => {}) : p));
     else await Promise.all([
       FF.pages.performance && FF.pages.performance.ensureLoaded ? FF.pages.performance.ensureLoaded({ light: true }) : null,
       FF.store.need('agents', { only: true }), FF.store.need('stockAgents', { only: true }), FF.store.need('daily', { only: true }), FF.store.need('agentClass', { only: true })
@@ -62,16 +62,21 @@ FF.pages = FF.pages || {};
         add('gv-agent', r.agentName, r.agentId, r.tlName, r.mobile, r.curTotal, r.stockTotal, { tlId: r.tlId, tlMobile: r.tlMobile, last: r.lastTotal, altId: r.supervisorId });
         if (clean(r.tlName) && (!FF.config.isDirectAgent || !FF.config.isDirectAgent(r, 'gv'))) {
           const tk = norm(r.tlName);
-          const t = tlSum.get(tk) || { name: r.tlName, id: r.tlId, mobile: r.tlMobile || '', cur: 0, stock: 0, last: 0 };
+          const t = tlSum.get(tk) || { name: r.tlName, id: r.tlId, mobile: r.tlMobile || '', cur: 0, reportStock: 0, snapshotStock: 0, last: 0 };
           t.cur += Number(r.curTotal) || 0;
-          t.stock = Math.max(t.stock, Number(r.tlStockTotal) || 0) || (t.stock + (Number(r.stockTotal) || 0));
+          t.reportStock += Number(r.stockTotal) || 0;
+          t.snapshotStock = Math.max(t.snapshotStock, Number(r.tlStockTotal) || 0);
           t.last += Number(r.lastTotal) || 0;
           if (!t.id && r.tlId) t.id = r.tlId;
           if (!t.mobile && r.tlMobile) t.mobile = r.tlMobile;
           tlSum.set(tk, t);
         }
       }
-      for (const t of tlSum.values()) add('gv-tl', t.name, t.id, '', t.mobile, t.cur, t.stock, { tlId: t.id, last: t.last });
+      for (const t of tlSum.values()) {
+        const quick = MP() && MP().quick ? MP().quick({ kind: 'gv-tl', name: t.name, sub: t.id || '', tlSet: new Set(), classMap: new Map(), bars: new Set() }) : null;
+        const stock = quick && quick.stock ? quick.stock.total : Math.max(t.snapshotStock, t.reportStock);
+        add('gv-tl', t.name, t.id, '', t.mobile, t.cur, stock, { tlId: t.id, last: t.last });
+      }
       for (const s of (FF.gv && FF.gv.get('stockAgent')) || []) {
         add('gv-agent', s.agentName, s.agentId, s.tlName, '', 0, s.n, { tlId: s.tlId });
       }
@@ -88,16 +93,21 @@ FF.pages = FF.pages || {};
         });
         if (clean(a.tlName) && !a.tlExcluded) {
           const tk = norm(a.tlName);
-          const t = tlSum.get(tk) || { name: a.tlName, id: a.tlId, mobile: a.tlMobile, cur: 0, stock: Number(a.tlStockTotal) || 0, last: 0 };
+          const t = tlSum.get(tk) || { name: a.tlName, id: a.tlId, mobile: a.tlMobile, cur: 0, reportStock: 0, snapshotStock: 0, last: 0 };
           t.cur += Number(a.curTotal) || 0;
           t.last += Number(a.lastTotal) || 0;
-          if (!t.stock) t.stock += Number(a.stockTotal) || 0;
+          t.reportStock += Number(a.stockTotal) || 0;
+          t.snapshotStock = Math.max(t.snapshotStock, Number(a.tlStockTotal) || 0);
           if (!t.id && a.tlId) t.id = a.tlId;
           if (!t.mobile && a.tlMobile) t.mobile = a.tlMobile;
           tlSum.set(tk, t);
         }
       }
-      for (const t of tlSum.values()) add('ff-tl', t.name, t.id, '', t.mobile, t.cur, t.stock, { tlId: t.id, last: t.last });
+      for (const t of tlSum.values()) {
+        const quick = MP() && MP().quick ? MP().quick({ kind: 'ff-tl', name: t.name, sub: t.id || '', tlSet: new Set(), classMap: new Map(), bars: new Set() }) : null;
+        const stock = quick && quick.stock ? quick.stock.total : Math.max(t.snapshotStock, t.reportStock);
+        add('ff-tl', t.name, t.id, '', t.mobile, t.cur, stock, { tlId: t.id, last: t.last });
+      }
       for (const a of FF.store.get('agents') || []) {
         if (!a.channel || /first/i.test(a.channel)) {
           add('ff-agent', a.name, a.id, a.tlName, '', a.n, 0, { tlId: a.tlId });
@@ -419,7 +429,7 @@ FF.pages = FF.pages || {};
       `• Current Month (${p.curYm || 'MTD'}): *${fmt(t.curTotal)}* (VC4: ${fmt(t.curVc4)} · Comm: ${fmt(t.curComm)})`,
       `• Last Month (${p.lastYm || 'Prev'}): *${fmt(t.lastTotal)}* (VC4: ${fmt(t.lastVc4)} · Comm: ${fmt(t.lastComm)})`,
       `• Growth: *${t.growth == null ? '—' : `${t.growth >= 0 ? '+' : ''}${t.growth.toFixed(1)}%`}* · Expected Month-End: *${fmt(p.expected)}* (Run-rate: ${fmt(p.runRate, true)}/day)`,
-      `• Stock in Hand: *${fmt(t.stockTotal)}* (VC4: ${fmt(t.stockVc4)} · Comm: ${fmt(t.stockComm)})`
+      `• Stock in Hand: *${fmt(t.stockTotal)}*${r.isTl && p.tlStock && p.tlStock.own && p.tlStock.agents ? ` (Own ${fmt(p.tlStock.own.total)} + agents ${fmt(p.tlStock.agents.total)})` : ''} (VC4: ${fmt(t.stockVc4)} · Comm: ${fmt(t.stockComm)})`
     ].filter((x, i) => i !== 1 || Boolean(x));
 
     if ((p.classTable || []).length) {
@@ -509,7 +519,9 @@ FF.pages = FF.pages || {};
         ['VC4 (Last)', t.lastVc4], ['Comm (Last)', t.lastComm],
         ['Growth %', t.growth == null ? '' : Number(t.growth.toFixed(1))],
         ['Expected Month-End', p.expected], ['Run-rate / day', p.runRate],
-        ['Stock in Hand', t.stockTotal], ['VC4 Stock', t.stockVc4], ['Comm Stock', t.stockComm],
+        ['Stock in Hand', t.stockTotal],
+        ...(r.isTl && p.tlStock && p.tlStock.own && p.tlStock.agents ? [['TL own stock', p.tlStock.own.total], ['Agent team stock', p.tlStock.agents.total]] : []),
+        ['VC4 Stock', t.stockVc4], ['Comm Stock', t.stockComm],
         ['30+d Old Stock', age ? age.old30 : ''],
         ['60+d Critical Stock', age ? age.old60 : ''],
         ['Generated', new Date().toLocaleString('en-IN')]
@@ -552,7 +564,7 @@ FF.pages = FF.pages || {};
       { label: `This Month (${p.curYm || 'MTD'})`, value: fmt(t.curTotal), sub: `VC4 ${fmt(t.curVc4)} · Comm ${fmt(t.curComm)}`, color: '#2563eb' },
       { label: `Last Month (${p.lastYm || 'Prev'})`, value: fmt(t.lastTotal), sub: `VC4 ${fmt(t.lastVc4)} · Comm ${fmt(t.lastComm)}`, color: '#7c3aed' },
       { label: 'Growth / Expected', value: t.growth === null || t.growth === undefined ? '—' : `${t.growth >= 0 ? '+' : ''}${t.growth.toFixed(0)}%`, sub: `Expected ${fmt(p.expected)} · ${fmt(p.runRate, true)}/d`, color: (t.growth || 0) >= 0 ? '#16a34a' : '#dc2626' },
-      { label: 'Stock in Hand', value: fmt(t.stockTotal), sub: `VC4 ${fmt(t.stockVc4)} · Comm ${fmt(t.stockComm)}`, color: '#0891b2' },
+      { label: 'Stock in Hand', value: fmt(t.stockTotal), sub: `${r.isTl && p.tlStock && p.tlStock.own && p.tlStock.agents ? `Own ${fmt(p.tlStock.own.total)} + agents ${fmt(p.tlStock.agents.total)} · ` : ''}VC4 ${fmt(t.stockVc4)} · Comm ${fmt(t.stockComm)}`, color: '#0891b2' },
       { label: '30+d Old Stock', value: age ? fmt(age.old30) : '—', sub: age ? `60+d: ${fmt(age.old60)} · 90+d: ${fmt((age.buckets[4] && age.buckets[4].n) || 0)}` : 'Ageing', color: age && age.old60 ? '#dc2626' : '#d97706' }
     ]);
 
@@ -738,7 +750,7 @@ FF.pages = FF.pages || {};
       { label: `Team MTD (${p.curYm || ''})`, value: fmt(t.curTotal), sub: `VC4 ${fmt(t.curVc4)} · Comm ${fmt(t.curComm)}`, color: '#2563eb' },
       { label: 'Last Month', value: fmt(t.lastTotal), sub: `${fmt(p.agents.length)} agents`, color: '#7c3aed' },
       { label: 'Growth', value: t.growth == null ? '—' : `${t.growth >= 0 ? '+' : ''}${t.growth.toFixed(0)}%`, sub: `Expected ${fmt(p.expected)}`, color: (t.growth || 0) >= 0 ? '#16a34a' : '#dc2626' },
-      { label: 'Stock in Hand', value: fmt(t.stockTotal), sub: age ? `30+d ${fmt(age.old30)} · 60+d ${fmt(age.old60)}` : '', color: '#0891b2' }
+      { label: 'Stock in Hand', value: fmt(t.stockTotal), sub: `${p.tlStock && p.tlStock.own && p.tlStock.agents ? `Own ${fmt(p.tlStock.own.total)} + agents ${fmt(p.tlStock.agents.total)}${age ? ' · ' : ''}` : ''}${age ? `30+d ${fmt(age.old30)} · 60+d ${fmt(age.old60)}` : ''}`, color: '#0891b2' }
     ]);
     const clsRows = (p.classTable || []).filter((x) => x.cur || x.last || x.stock);
     if (clsRows.length) {
@@ -839,7 +851,7 @@ FF.pages = FF.pages || {};
         <div class="kpi g1" data-kpi="${esc(curSpec)}" title="Click karke ${esc(p.curYm || 'is mahine')} ka exact issuance data dekhein"><div class="kpi-top"><span class="kpi-title">${esc(p.curYm || 'This month')} · MTD</span><span class="kpi-icon">🏷️</span></div><div class="kpi-value">${fmt(t.curTotal)}</div><div class="kpi-foot">VC4 <b>${fmt(t.curVc4)}</b> · Comm <b>${fmt(t.curComm)}</b></div></div>
         <div class="kpi g3" data-kpi="${esc(lastSpec)}" title="Click karke ${esc(p.lastYm || 'pichhle mahine')} ka exact issuance data dekhein"><div class="kpi-top"><span class="kpi-title">${esc(p.lastYm || 'Last month')}</span><span class="kpi-icon">📅</span></div><div class="kpi-value">${fmt(t.lastTotal)}</div><div class="kpi-foot">VC4 <b>${fmt(t.lastVc4)}</b> · Comm <b>${fmt(t.lastComm)}</b></div></div>
         <div class="kpi g2" data-kpi="${esc(curSpec)}" title="Click karke growth aur run-rate data dekhein"><div class="kpi-top"><span class="kpi-title">Expected</span><span class="kpi-icon">🎯</span></div><div class="kpi-value">${fmt(p.expected)}</div><div class="kpi-foot">${U.pctHtml(t.growth)} · <b>${fmt(p.runRate, true)}</b>/day</div></div>
-        <div class="kpi g5" data-kpi="${esc(stockSpec)}" title="Click karke exact stock in hand aur barcodes dekhein"><div class="kpi-top"><span class="kpi-title">Stock in hand</span><span class="kpi-icon">📦</span></div><div class="kpi-value">${fmt(t.stockTotal)}</div><div class="kpi-foot">VC4 <b>${fmt(t.stockVc4)}</b> · Comm <b>${fmt(t.stockComm)}</b></div></div>
+        <div class="kpi g5" data-kpi="${esc(stockSpec)}" title="Click karke exact stock in hand aur barcodes dekhein"><div class="kpi-top"><span class="kpi-title">Stock in hand</span><span class="kpi-icon">📦</span></div><div class="kpi-value">${fmt(t.stockTotal)}</div><div class="kpi-foot">${r.isTl && p.tlStock && p.tlStock.own && p.tlStock.agents ? `Own ${fmt(p.tlStock.own.total)} + agents ${fmt(p.tlStock.agents.total)} · ` : ''}VC4 <b>${fmt(t.stockVc4)}</b> · Comm <b>${fmt(t.stockComm)}</b></div></div>
         <div class="kpi g4" data-kpi-self="1" data-as-age="30" title="Click karke 30+ din purana stock dekhein"><div class="kpi-top"><span class="kpi-title">30+d old stock</span><span class="kpi-icon">⏳</span></div><div class="kpi-value">${age ? fmt(age.old30) : '—'}</div><div class="kpi-foot">0–30d fresh: <b>${age ? fmt(age.total - age.old30) : '—'}</b></div></div>
         <div class="kpi g7" data-kpi-self="1" data-as-age="60" title="Click karke 60+ din critical stock dekhein"><div class="kpi-top"><span class="kpi-title">60+d critical</span><span class="kpi-icon">🚨</span></div><div class="kpi-value">${age ? fmt(age.old60) : '—'}</div><div class="kpi-foot">90+d: <b>${age ? fmt((age.buckets[4] && age.buckets[4].n) || 0) : '—'}</b></div></div>
       </div>

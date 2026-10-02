@@ -40,16 +40,32 @@ const agentClass = [
   { ym: prev, channel: 'First Forward', name: 'Ravi Kumar', tlName: 'TL One', cls: 'VC20', group: 'VC20', n: 20 },
   { ym, channel: 'First Forward', name: 'Priya Sharma', tlName: 'TL One', cls: 'VC4', group: 'VC4', n: 30 }
 ];
-const stockAgents = [{ agentId: 'R101', agentName: 'Ravi Kumar', tlName: 'TL One', cls: 'VC4', group: 'VC4', n: 10 }, { agentId: 'R101', agentName: 'Ravi Kumar', tlName: 'TL One', cls: 'VC20', group: 'VC20', n: 4 }];
+const stockAgents = [
+  { agentId: 'R101', agentName: 'Ravi Kumar', tlId: 'T1', tlName: 'TL One', cls: 'VC4', group: 'VC4', n: 10 },
+  { agentId: 'R101', agentName: 'Ravi Kumar', tlId: 'T1', tlName: 'TL One', cls: 'VC20', group: 'VC20', n: 4 },
+  // The TL also holds stock under their own agent identity; it is not in the agent REPORT rollup.
+  { agentId: 'T1', agentName: 'TL One', tlId: 'T1', tlName: 'TL One', cls: 'VC4', group: 'VC4', n: 5 },
+  { agentId: 'T1', agentName: 'TL One', tlId: 'T1', tlName: 'TL One', cls: 'VC20', group: 'VC20', n: 3 }
+];
 const gvReport = [
   { agentId: 'G001', agentName: 'GV Ramesh', mobile: '9111111111', tlId: 'GT1', tlName: 'GV TL', priority: 'High', stockVc4: 5, stockComm: 1, stockTotal: 6, stockByClass: { VC4: 5 }, curDays: 10, curVc4: 100, curComm: 10, curTotal: 110, lastVc4: 50, lastComm: 5, lastTotal: 55, suggestedDispatch: 0, tlStockVc4: 25, tlStockComm: 5, tlStockTotal: 30, curByClass: { VC4: 100 } },
   { agentId: 'G002', agentName: 'GV Direct', mobile: '9222222222', tlId: '', tlName: 'Direct', priority: 'Medium', stockVc4: 2, stockComm: 0, stockTotal: 2, stockByClass: { VC4: 2 }, curDays: 10, curVc4: 40, curComm: 0, curTotal: 40, lastVc4: 0, lastComm: 0, lastTotal: 0, suggestedDispatch: 7 },
   { agentId: 'G003', agentName: 'GV Low', mobile: '', tlId: 'GT1', tlName: 'GV TL', priority: 'Low', stockVc4: 20, stockComm: 4, stockTotal: 24, stockByClass: { VC4: 20 }, curDays: 10, curVc4: 10, curComm: 0, curTotal: 10, lastVc4: 5, lastComm: 0, lastTotal: 5, suggestedDispatch: 0, tlStockVc4: 25, tlStockComm: 5, tlStockTotal: 30 }
 ];
+const gvStockAgents = [
+  { agentId: 'G001', agentName: 'GV Ramesh', tlId: 'GT1', tlName: 'GV TL', n: 6 },
+  { agentId: 'G003', agentName: 'GV Low', tlId: 'GT1', tlName: 'GV TL', n: 24 },
+  { agentId: 'GT1', agentName: 'GV TL', tlId: 'GT1', tlName: 'GV TL', n: 4 }
+];
+const gvStockAgentClass = [
+  { agentName: 'GV Ramesh', cls: 'VC4', n: 5 }, { agentName: 'GV Ramesh', cls: 'Commercial', n: 1 },
+  { agentName: 'GV Low', cls: 'VC4', n: 20 }, { agentName: 'GV Low', cls: 'Commercial', n: 4 },
+  { agentName: 'GV TL', cls: 'VC4', n: 4 }
+];
 const master = [{ ym, agentId: 'G001', agentName: 'GV Ramesh', tlName: 'GV TL', cls: 'VC4', group: 'VC4' }, { ym, agentId: 'G001', agentName: 'GV Ramesh', tlName: 'GV TL', cls: 'VC20', group: 'VC20' }, { ym: prev, agentId: 'G001', agentName: 'GV Ramesh', tlName: 'GV TL', cls: 'VC4', group: 'VC4' }];
 const data = { agentClass, agents: [], stockAgents };
 FF.store.need = async (k) => data[k] || []; FF.store.get = (k) => data[k];
-FF.gv.need = async () => []; FF.gv.get = (k) => (k === 'report' ? gvReport : []); FF.gv.rows = () => master; FF.gv.enabled = () => true;
+FF.gv.need = async () => []; FF.gv.get = (k) => (k === 'report' ? gvReport : k === 'stockAgent' ? gvStockAgents : k === 'stockAgentClass' ? gvStockAgentClass : []); FF.gv.rows = () => master; FF.gv.enabled = () => true;
 FF.auth = { can: () => true, settings: {} };
 FF.pages = { performance: { ensureLoaded: async () => {}, agents: () => agents, daysElapsed: () => 15, dayLabels: () => ['a', 'b', 'c', 'd', 'e', 'f', 'g'] } };
 require(path.join(ROOT, 'masterProfile.js'));
@@ -60,7 +76,8 @@ test('FF agent profile: mobile fallback, stock, TL stock, priority, suggested qt
   const pr = await MP.build(person('ff-agent', 'Ravi Kumar', 'R101'));
   assert.equal(pr.found, true);
   assert.equal(pr.priority, 'High');
-  assert.equal(pr.stock.total, 14); assert.equal(pr.tlStock.total, 70);
+  assert.equal(pr.stock.total, 14); assert.equal(pr.tlStock.total, 78);
+  assert.deepEqual([pr.tlStock.own.total, pr.tlStock.agents.total], [8, 70]);
   assert.equal(pr.tl.name, 'TL One'); assert.equal(pr.tl.mobile, '9000000001');
   // suggested = ceil(avg × 15 − stock): VC4 6×15−10 = 80 ; Comm 2×15−4 = 26
   assert.equal(pr.dispatch.sugVc4, 80); assert.equal(pr.dispatch.sugComm, 26);
@@ -96,27 +113,50 @@ test('TL profile: totals, class sums, TL-level vs agent-wise suggestion, agents 
   const pr = await MP.build(person('ff-tl', 'TL One'));
   assert.equal(pr.agentCount, 2, 'direct agents TL me count nahi hote');
   assert.equal(pr.totals.curTotal, 150); assert.equal(pr.totals.lastTotal, 80);
-  assert.equal(pr.stock.total, 70);
+  assert.equal(pr.stock.total, 78, 'TL own stock is added to the 70 agent stock');
+  assert.equal(pr.classes.reduce((sum, r) => sum + r.stock, 0), 78, 'class rows reconcile with displayed TL stock');
+  assert.deepEqual([pr.tlStock.own.total, pr.tlStock.agents.total], [8, 70]);
   assert.equal(pr.dispatch.sumAgentVc4, 80 + 0);
   const html = MP.html(pr);
   assert.match(html, /TL ke agents/); assert.match(html, /Agent-wise issuance/); assert.match(html, /data-mp-agent="Ravi Kumar"/);
+  assert.match(html, /Own 8 \+ agents 70/);
   const csv = MP.csvRows(pr); assert.ok(csv.length > 20);
-  assert.match(MP.waText(pr), /TL One/);
+  assert.ok(csv.some((row) => row[0] === 'TL own stock' && row[1] === 8));
+  assert.match(MP.waText(pr), /TL One/); assert.match(MP.waText(pr), /own 8 \+ agents 70/);
 });
 
 test('GV agent + GV TL profiles', async () => {
   const a = await MP.build(person('gv-agent', 'GV Ramesh', 'G001'));
-  assert.equal(a.mobile, '9111111111'); assert.equal(a.tlStock.total, 30);
+  assert.equal(a.mobile, '9111111111'); assert.equal(a.tlStock.total, 34);
+  assert.deepEqual([a.tlStock.own.total, a.tlStock.agents.total], [4, 30]);
   assert.equal(a.dispatch.sugVc4, 95, 'run-rate 100/15 × 15 − stock 5');
   const c = a.classes.find((r) => r.cls === 'VC20'); assert.equal(c.cur, 1);
   const tl = await MP.build(person('gv-tl', 'GV TL'));
   assert.equal(tl.agentCount, 2); assert.equal(tl.totals.curTotal, 120);
+  assert.equal(tl.stock.total, 34);
+  assert.equal(tl.classes.reduce((sum, r) => sum + r.stock, 0), 34, 'GV class stock reconciles with own plus agent stock');
+  assert.deepEqual([tl.tlStock.own.total, tl.tlStock.agents.total], [4, 30]);
+});
+
+test('GV TL keeps the REPORT floor when agent stock details are partial', async () => {
+  const priorGet = FF.gv.get;
+  FF.gv.get = (key) => key === 'report' ? gvReport
+    : key === 'stockAgent' ? gvStockAgents.filter((r) => r.agentId === 'G001' || r.agentId === 'GT1')
+      : key === 'stockAgentClass' ? gvStockAgentClass.filter((r) => r.agentName === 'GV Ramesh' || r.agentName === 'GV TL') : [];
+  try {
+    const tl = await MP.build(person('gv-tl', 'GV TL'));
+    assert.equal(tl.stock.total, 34, 'partial tag detail must not lower agent report 30 + TL own 4');
+    assert.equal(tl.classes.reduce((sum, r) => sum + r.stock, 0), 34);
+  } finally {
+    FF.gv.get = priorGet;
+    await MP.loadFor({ kind: 'gv-tl' });
+  }
 });
 
 test('quick snapshot + contacts gate + unsupported kinds', async () => {
   await MP.load();
   const q = MP.quick(person('ff-agent', 'Ravi Kumar', 'R101'));
-  assert.equal(q.priority, 'High'); assert.equal(q.stock.total, 14);
+  assert.equal(q.priority, 'High'); assert.equal(q.stock.total, 14); assert.equal(q.tlStock.total, 78);
   assert.equal(MP.supports(person('gv-id', 'x')), false);
   FF.auth.can = (k) => k !== 'contacts';
   assert.doesNotMatch(MP.html(await MP.build(person('gv-agent', 'GV Ramesh', 'G001'))), /9111111111/);
@@ -135,7 +175,7 @@ test('dispatch calculation block: run-rate = issue ÷ (today−1), required, wit
   assert.match(html, /Dispatch calculation/); assert.match(html, /With stock dispatch/); assert.match(html, /W\/o stock dispatch/);
   assert.match(MP.waText(pr), /Run-rate 8\/day/);
   const tl = await MP.build(person('ff-tl', 'TL One'));
-  assert.equal(tl.calc.total.rate, 10); assert.equal(tl.calc.total.net, 80, 'TL: 150 ÷ 15 × 15 − TL stock 70');
+  assert.equal(tl.calc.total.rate, 10); assert.equal(tl.calc.total.net, 72, 'TL: 150 ÷ 15 × 15 − TL own + agent stock 78');
 });
 
 test('GV EIR month totals replace stale REPORT snapshots in agent, TL, light summary and class detail', async () => {

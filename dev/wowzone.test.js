@@ -74,7 +74,7 @@ function seedStore() {
   }
   master.push({ ym, date: new Date(today), agentId: 'G001', agentName: 'GV Ramesh', tlName: 'GV TL', cls: 'VC4', group: 'VC4', status: 'ISSUANCE', tagType: 'VRN', commission: 20, tagId: 'TG1', serial: 'SER1' });
   master.push({ ym, date: new Date(today), agentId: 'G002', agentName: 'GV Suresh', tlName: 'GV TL', cls: 'VC20', group: 'VC20', status: 'REPLACEMENT', tagType: 'CHASSIS', commission: 0, tagId: 'TG2', serial: 'SER2' });
-  gvReport.push({ agentId: 'G003', agentName: 'GV High Risk', tlName: 'GV TL', priority: 'High', stockVc4: 0, curTotal: 30 });
+  gvReport.push({ agentId: 'G003', agentName: 'GV High Risk', tlId: 'GT1', tlName: 'GV TL', mobile: '919876543210', priority: 'High', stockVc4: 0, curTotal: 30 });
   stockAgents.push({ agentId: 'R101', agentName: 'Ravi Kumar', tlName: 'TL One', cls: 'VC4', group: 'VC4', n: 40 });
   stockAgents.push({ agentId: '5845036', agentName: 'APNA PAYEMENT', tlName: 'ApnaPayment Pvt. Ltd.', cls: 'VC4', group: 'VC4', n: 25 });
   gvStockAgent.push({ agentId: 'G001', agentName: 'GV Ramesh', tlName: 'GV TL', n: 12 });
@@ -112,6 +112,8 @@ test('masterSearch — light index searches name, TL, agent ID aur GV ID', async
   assert.ok(byId.ids.some((v) => v.id === 'R101') || byId.people.some((p) => p.sub === 'R101'), 'agent ID se match nahi mila');
   const byGv = MS.search('G001');
   assert.ok(byGv.people.length >= 0, 'GV ID search crash hui');
+  const byMobile = MS.search('98765');
+  assert.ok(byMobile.ids.some((v) => v.via === 'Mobile' && v.name === 'GV High Risk'), 'partial mobile number se match nahi mila');
 });
 
 test('masterSearch — suggestions me kind label + Enter-friendly items', async () => {
@@ -141,12 +143,31 @@ test('masterSearch — heavy register (barcode) layer se barcode/tag search bhi 
   assert.equal(MS.heavyReady, true, 'heavy register ready nahi hua');
   const hit = MS.search('34161FA82032001');
   assert.equal(hit.tags.length, 1, 'barcode search se tag nahi mila');
+  const prefixHits = MS.search('3416');
+  assert.equal(prefixHits.tags.length, 2, 'indexed 4-character barcode prefix should find both records');
+  const innerHits = MS.search('FA820320');
+  assert.equal(innerHits.tags.length, 2, 'indexed barcode substring search should find both records');
   assert.equal(hit.tags[0].ff.length, 1);
   assert.equal(hit.tags[0].gv.length, 1);
   // shared barcode → owner mismatch ya matched ka status nikalta hai
   const html = MS.resultsHtml(hit);
   assert.match(html, /Barcode \/ serial/i);
   assert.match(html, /34161FA82032001/);
+});
+
+test('masterSearch invalidates its cached indexes after a data refresh', async () => {
+  const added = { ym, channel: 'First Forward', name: 'Naya Agent', tlName: 'TL Three', id: 'N707', n: 1, key: 'First Forward|N707' };
+  seed.agents.push(added);
+  try {
+    MS.invalidate();
+    await MS.buildLight();
+    assert.ok(MS.search('Naya Agent').people.some((p) => p.name === 'Naya Agent'));
+  } finally {
+    seed.agents.splice(seed.agents.indexOf(added), 1);
+    MS.invalidate();
+    await MS.buildLight();
+  }
+  assert.equal(MS.search('Naya Agent').people.length, 0, 'removed person must not survive a rebuild');
 });
 
 // ---- wowzone -------------------------------------------------------------------------------

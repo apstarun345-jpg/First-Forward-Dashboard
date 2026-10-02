@@ -33,6 +33,30 @@ test('summary top suggestions provide TLs and agents without a query and ranked 
   assert.equal(FF.agentSummary.topSuggestions(people, 'jose')[0].name, 'José Alvarez');
 });
 
+test('summary TL suggestions use composed TL-own plus agent stock from the quick profile', async () => {
+  const prior = { masterProfile: FF.masterProfile, store: FF.store, pages: FF.pages };
+  const agents = [
+    { name: 'Agent One', agentId: 'A1', tlName: 'Team One', tlId: 'T1', curTotal: 10, lastTotal: 6, stockTotal: 5, tlStockTotal: 10 },
+    { name: 'Agent Two', agentId: 'A2', tlName: 'Team One', tlId: 'T1', curTotal: 8, lastTotal: 3, stockTotal: 5, tlStockTotal: 10 }
+  ];
+  FF.masterProfile = {
+    loadFor: async () => {},
+    quick: (p) => p.kind === 'ff-tl' ? { stock: { total: 13 } } : null
+  };
+  FF.pages = { performance: { ensureLoaded: async () => {}, agents: () => agents } };
+  FF.store = { need: async () => [], get: () => [] };
+  try {
+    const list = await FF.agentSummary.loadPeople('ff');
+    const tl = list.find((p) => p.kind === 'ff-tl' && p.name === 'Team One');
+    assert.ok(tl);
+    assert.equal(tl.stock, 13, 'TL quick profile total should beat the agent-only snapshot sum');
+  } finally {
+    FF.masterProfile = prior.masterProfile;
+    FF.store = prior.store;
+    FF.pages = prior.pages;
+  }
+});
+
 test('summary CSV keeps the human channel label instead of replacing it with the internal source key', async () => {
   const prior = FF.masterProfile;
   FF.masterProfile = {

@@ -105,7 +105,7 @@ window.FF = window.FF || {};
     ['daily', 'agentClass', 'agents', 'stockAgents'].forEach((k) => { if (FF.store && FF.store.need) jobs.push(safeAsync(() => FF.store.need(k))); });
     if (gvOn() && FF.gv && FF.gv.need) ['report', 'stockAgent', 'stockTl', 'stockAgentClass', 'master'].forEach((k) => jobs.push(safeAsync(() => FF.gv.need(k))));
     await Promise.all(jobs);
-    quickCache.clear();
+    resetProfileCache();
   }
   /** Summary/profile ke ek channel ko hi ready karo. Pehle FF + GV dono datasets har click par
    *  wait hote the, jabki GV report ko FF stock/performance (aur ulta) ki zaroorat nahi hoti. */
@@ -113,7 +113,7 @@ window.FF = window.FF || {};
     const isGv = /^gv/i.test(String(person && person.kind || ''));
     const jobs = [];
     if (isGv) {
-      if (FF.gv && FF.gv.need) ['report', 'stockAgent', 'master'].forEach((k) => jobs.push(safeAsync(() => FF.gv.need(k, { only: true }))));
+      if (FF.gv && FF.gv.need) ['report', 'stockAgent', 'stockAgentClass', 'master'].forEach((k) => jobs.push(safeAsync(() => FF.gv.need(k, { only: true }))));
       // GV Master is the immediate fallback; consume FF EIR rollups only if the app already has them
       // in memory. Do not make a GV summary wait for the unrelated First Forward loader.
     } else {
@@ -122,24 +122,52 @@ window.FF = window.FF || {};
       ['daily', 'agentClass', 'agents', 'stockAgents'].forEach((k) => { if (FF.store && FF.store.need) jobs.push(safeAsync(() => FF.store.need(k, { only: true }))); });
     }
     await Promise.all(jobs);
-    quickCache.clear();
+    resetProfileCache();
   }
   function warm() { if (!warmPromise) warmPromise = load().catch(() => {}); return warmPromise; }
 
   // ------------------------------------------------------------------ lookup helpers
   const quickCache = new Map();
+  let ffLookupCache = null, gvLookupCache = null;
   const ffAgents = () => safeCall(() => (perf() && perf().agents ? perf().agents() : []), []) || [];
   const gvReport = () => gvRows('report');
+  function pushLookup(map, key, row) {
+    if (!key) return;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(row);
+  }
+  function buildPeopleLookup(rows, getName, getIds, getTl) {
+    const byName = new Map(), byId = new Map(), byTl = new Map();
+    rows.forEach((row) => {
+      pushLookup(byName, norm(getName(row)), row);
+      new Set((getIds(row) || []).map((id) => clean(id).toUpperCase()).filter(Boolean)).forEach((id) => pushLookup(byId, id, row));
+      pushLookup(byTl, norm(getTl(row)), row);
+    });
+    return { rows, byName, byId, byTl };
+  }
+  function ffPeopleLookup() {
+    if (!ffLookupCache) ffLookupCache = buildPeopleLookup(ffAgents(), (a) => a.name, (a) => [a.agentId, a.id], (a) => a.tlName);
+    return ffLookupCache;
+  }
+  function gvPeopleLookup() {
+    if (!gvLookupCache) gvLookupCache = buildPeopleLookup(gvReport(), (r) => r.agentName, (r) => [r.agentId], (r) => r.tlName);
+    return gvLookupCache;
+  }
+  function resetProfileCache() {
+    quickCache.clear();
+    tlStockCache.clear();
+    ffLookupCache = null;
+    gvLookupCache = null;
+  }
   function findFfAgent(name, id) {
-    const n = norm(name);
-    const list = ffAgents().filter((a) => norm(a.name) === n);
-    if (id) { const byId = list.find((a) => a.agentId === id || a.id === id); if (byId) return byId; }
+    const list = ffPeopleLookup().byName.get(norm(name)) || [];
+    if (id) { const wantId = clean(id).toUpperCase(); const byId = list.find((a) => clean(a.agentId || a.id).toUpperCase() === wantId || clean(a.id).toUpperCase() === wantId); if (byId) return byId; }
     return list[0] || null;
   }
   function findGvAgent(name, id) {
-    const n = norm(name);
-    const list = gvReport();
-    return list.find((r) => id && r.agentId === id) || list.find((r) => norm(r.agentName) === n) || null;
+    const index = gvPeopleLookup();
+    const idRows = id ? index.byId.get(clean(id).toUpperCase()) : null;
+    return (idRows && idRows[0]) || (index.byName.get(norm(name)) || [])[0] || null;
   }
   function gvMobileFor(name, id) {
     const r = findGvAgent(name, id);
@@ -166,6 +194,163 @@ window.FF = window.FF || {};
     table.forEach((r) => { const t = is4(r.cls) ? g.vc4 : g.comm; ['cur', 'last', 'stock'].forEach((k) => { t[k] += r[k]; g.total[k] += r[k]; }); });
     return g;
   };
+
+  // TL stock is the TL's own inventory plus their managed agents. REPORT's TL snapshot remains
+  // the floor: stock detail can be partial (a valid fixture and a real possibility during a sheet
+  // refresh), so never replace the snapshot with the sum of whatever detail rows happen to exist.
+  const tlStockCache = new Map();
+  const rowAgentId = (r) => clean(r && (r.agentId || r.id)).toUpperCase();
+  const rowAgentName = (r) => norm(r && (r.agentName || r.name));
+  const rowTlId = (r) => clean(r && (r.tlId || r.supervisorId)).toUpperCase();
+  const rowTlName = (r) => norm(r && (r.tlName || r.tl));
+  function isSameAgent(row, name, id) {
+    const wantId = clean(id).toUpperCase(), haveId = rowAgentId(row);
+    if (wantId && haveId && wantId === haveId) return true;
+    // A TL's own inventory can have an agent ID distinct from the supervisor/TL ID.
+    return !!norm(name) && rowAgentName(row) === norm(name);
+  }
+  function belongsToTl(row, name, id) {
+    const wantName = norm(name), wantId = clean(id).toUpperCase();
+    return (!!wantName && rowTlName(row) === wantName) || (!!wantId && rowTlId(row) === wantId);
+  }
+  function isDirectStockRow(row, ch) {
+    return !!(row && (row.directAgent || row.tlExcluded)) || !!safeCall(() => FF.config && FF.config.isDirectAgent && FF.config.isDirectAgent(row, ch), false);
+  }
+  const classMapTotal = (map) => U.sum([...(map || new Map()).values()], (n) => num(n));
+  function classMapParts(map) {
+    const parts = { vc4: 0, comm: 0 };
+    (map || new Map()).forEach((n, cls) => { if (is4(cls)) parts.vc4 += num(n); else parts.comm += num(n); });
+    return parts;
+  }
+  function addClassRows(map, rows) {
+    (rows || []).forEach((r) => {
+      const n = Math.max(0, num(r && r.n));
+      if (!n) return;
+      const cls = clean(r.cls) || 'Commercial';
+      map.set(cls, (map.get(cls) || 0) + n);
+    });
+    return map;
+  }
+  function fillClassMap(map, target) {
+    const parts = classMapParts(map);
+    const vc4 = Math.max(parts.vc4, num(target && target.vc4));
+    let comm = Math.max(parts.comm, num(target && target.comm));
+    comm += Math.max(0, num(target && target.total) - vc4 - comm);
+    if (vc4 > parts.vc4) map.set('VC4', (map.get('VC4') || 0) + vc4 - parts.vc4);
+    if (comm > parts.comm) map.set('Commercial', (map.get('Commercial') || 0) + comm - parts.comm);
+    return map;
+  }
+  function reportStockParts(row, ch) {
+    const vc4 = num(row && row.stockVc4);
+    const comm = num(row && (ch === 'ff' ? (row.stockNvc4 ?? row.stockComm) : (row.stockComm ?? row.stockNvc4)));
+    return { vc4, comm, total: Math.max(num(row && row.stockTotal), vc4 + comm) };
+  }
+  function reportClassMap(row, ch) {
+    const map = new Map();
+    if (ch === 'gv' && row && row.stockByClass && typeof row.stockByClass === 'object') {
+      Object.entries(row.stockByClass).forEach(([cls, n]) => { if (num(n) > 0) map.set(clean(cls) || 'Commercial', num(n)); });
+    }
+    return fillClassMap(map, reportStockParts(row, ch));
+  }
+  function snapshotStockParts(row, ch) {
+    const vc4 = num(row && row.tlStockVc4);
+    let comm = num(row && (ch === 'ff' ? (row.tlStockNvc4 ?? row.tlStockComm) : (row.tlStockComm ?? row.tlStockNvc4)));
+    const total = Math.max(num(row && row.tlStockTotal), vc4 + comm);
+    if (vc4 + comm < total) comm += total - vc4 - comm;
+    return { vc4, comm, total };
+  }
+  function stockRowsTotal(rows) { return U.sum(rows || [], (r) => Math.max(0, num(r && r.n))); }
+  function uniqueReportRows(rows, ch) {
+    const byPerson = new Map();
+    (rows || []).forEach((row) => {
+      const id = rowAgentId(row), name = rowAgentName(row);
+      const key = id ? `id:${id}` : name ? `name:${name}` : '';
+      if (!key) return;
+      const old = byPerson.get(key);
+      if (!old || reportStockParts(row, ch).total > reportStockParts(old, ch).total) byPerson.set(key, row);
+    });
+    return [...byPerson.values()];
+  }
+  function tlStockComposition(ch, name, id, reportRows, detailRows, classRows) {
+    const cacheKey = `${ch}|${norm(name)}|${clean(id).toUpperCase()}`;
+    if (tlStockCache.has(cacheKey)) return tlStockCache.get(cacheKey);
+    const reports = uniqueReportRows(reportRows, ch);
+    const selfReports = reports.filter((r) => isSameAgent(r, name, id));
+    const teamReports = reports.filter((r) => belongsToTl(r, name, id) && (isSameAgent(r, name, id) || !isDirectStockRow(r, ch)));
+    const memberReports = teamReports.filter((r) => !isSameAgent(r, name, id));
+    const memberReportMap = new Map();
+    const memberReportParts = { vc4: 0, comm: 0, total: 0 };
+    memberReports.forEach((r) => {
+      const p = reportStockParts(r, ch);
+      memberReportParts.vc4 += p.vc4; memberReportParts.comm += p.comm; memberReportParts.total += p.total;
+      const classes = reportClassMap(r, ch);
+      classes.forEach((n, cls) => memberReportMap.set(cls, (memberReportMap.get(cls) || 0) + n));
+    });
+    fillClassMap(memberReportMap, memberReportParts);
+
+    const detailList = detailRows || [];
+    const selfDetails = detailList.filter((r) => isSameAgent(r, name, id));
+    const memberDetails = detailList.filter((r) => belongsToTl(r, name, id) && !isSameAgent(r, name, id) && !isDirectStockRow(r, ch));
+    const detailMemberTotal = stockRowsTotal(memberDetails);
+    const teamNames = new Set([...memberReports, ...memberDetails].map((r) => rowAgentName(r)).filter(Boolean));
+    const ownerName = norm(name);
+    const classList = classRows || [];
+    const detailMemberClassRows = ch === 'gv'
+      ? classList.filter((r) => teamNames.has(norm(r && (r.agentName || r.name))) && norm(r && (r.agentName || r.name)) !== ownerName)
+      : memberDetails;
+    const detailOwnClassRows = ch === 'gv'
+      ? classList.filter((r) => norm(r && (r.agentName || r.name)) === ownerName)
+      : selfDetails;
+    const detailMemberMap = addClassRows(new Map(), detailMemberClassRows);
+    const detailOwnMap = addClassRows(new Map(), detailOwnClassRows);
+    const detailOwnTotal = stockRowsTotal(selfDetails) || classMapTotal(detailOwnMap);
+    const reportOwn = selfReports.sort((a, b) => reportStockParts(b, ch).total - reportStockParts(a, ch).total)[0] || null;
+    const reportOwnParts = reportStockParts(reportOwn, ch);
+    const reportOwnMap = reportOwn ? reportClassMap(reportOwn, ch) : new Map();
+    const withinOne = (a, b) => Math.abs((Number(a) || 0) - (Number(b) || 0)) <= 1;
+    const detailComplete = memberReports.length
+      ? withinOne(detailMemberTotal, memberReportParts.total)
+      : memberDetails.length > 0;
+    const detailClassComplete = classMapTotal(detailMemberMap) > 0 && withinOne(classMapTotal(detailMemberMap), detailMemberTotal);
+    const useDetailMembers = (detailComplete && (detailClassComplete || (ch === 'ff' && !detailMemberTotal)))
+      || (!memberReports.length && memberDetails.length > 0);
+    const memberMap = useDetailMembers && classMapTotal(detailMemberMap) ? detailMemberMap : memberReportMap;
+    const memberParts = classMapParts(memberMap);
+    let ownMap = new Map();
+    const rawOwnMapTotal = classMapTotal(addClassRows(new Map(), selfDetails));
+    if (rawOwnMapTotal > 0 && withinOne(rawOwnMapTotal, detailOwnTotal)) ownMap = addClassRows(new Map(), selfDetails);
+    else if (classMapTotal(detailOwnMap) > 0 && withinOne(classMapTotal(detailOwnMap), detailOwnTotal || reportOwnParts.total)) ownMap = detailOwnMap;
+    else if (classMapTotal(reportOwnMap) > 0) ownMap = reportOwnMap;
+    let ownTotal = Math.max(detailOwnTotal, reportOwnParts.total, classMapTotal(ownMap));
+    let ownParts = classMapParts(ownMap);
+    if (!classMapTotal(ownMap) && ownTotal > 0) { ownMap.set('Commercial', ownTotal); ownParts = { vc4: 0, comm: ownTotal }; }
+    fillClassMap(ownMap, { vc4: Math.max(ownParts.vc4, reportOwnParts.vc4), comm: Math.max(ownParts.comm, reportOwnParts.comm) });
+    ownParts = classMapParts(ownMap);
+    ownTotal = Math.max(ownTotal, ownParts.vc4 + ownParts.comm);
+
+    const snapshotRows = teamReports.map((r) => snapshotStockParts(r, ch)).sort((a, b) => b.total - a.total);
+    const snapshot = snapshotRows[0] || { vc4: 0, comm: 0, total: 0 };
+    // The TL snapshot and each member's report are independent safeguards. Adding the own-TL
+    // inventory with max-per-class handles both report styles: agent-only snapshots and snapshots
+    // that already include the TL's own row, without dropping team stock or double-counting it.
+    const detailMemberParts = classMapParts(detailMemberMap);
+    const stock = {
+      vc4: Math.max(snapshot.vc4, memberParts.vc4 + ownParts.vc4, detailMemberParts.vc4 + ownParts.vc4),
+      comm: Math.max(snapshot.comm, memberParts.comm + ownParts.comm, detailMemberParts.comm + ownParts.comm)
+    };
+    stock.total = stock.vc4 + stock.comm;
+    const teamStock = { vc4: Math.max(0, stock.vc4 - ownParts.vc4), comm: Math.max(0, stock.comm - ownParts.comm) };
+    teamStock.total = teamStock.vc4 + teamStock.comm;
+    const classMap = new Map(memberMap);
+    ownMap.forEach((n, cls) => classMap.set(cls, (classMap.get(cls) || 0) + n));
+    fillClassMap(classMap, stock);
+    const result = {
+      stock, own: { ...ownParts, total: ownParts.vc4 + ownParts.comm }, agents: teamStock,
+      classRows: [...classMap.entries()].map(([cls, n]) => ({ cls, n }))
+    };
+    tlStockCache.set(cacheKey, result);
+    return result;
+  }
   /** Exact GV month totals are only authoritative for months with actual issuance rows. */
   function exactGvMonth(rows, ym) {
     if (!ym) return null;
@@ -242,6 +427,10 @@ window.FF = window.FF || {};
     }
     out.tagRequired = out.direct && isHM(out.priority);
     attachGrowth(out, a || {}, latestYm(ac.length ? ac : agRows));
+    if (a && !out.direct && a.tlName && (!FF.config.isRealTl || FF.config.isRealTl(a.tlName))) {
+      const teamStock = tlStockComposition('ff', a.tlName, a.tlId, ffPeopleLookup().rows, stk, stk);
+      out.tlStock = { ...teamStock.stock, has: true, own: teamStock.own, agents: teamStock.agents };
+    }
     if (light) return out;
     const curYm = latestYm(ac.length ? ac : agRows), lastYm = U.prevMonthKey(curYm);
     const isMine = (r) => norm(r.name) === n && (!r.channel || /first/i.test(r.channel));
@@ -261,14 +450,16 @@ window.FF = window.FF || {};
 
   function ffTlProfile(p, light) {
     const n = norm(p.name);
-    const agents = ffAgents().filter((a) => !a.tlExcluded && norm(a.tlName) === n);
+    const ffRows = ffPeopleLookup();
+    const allAgents = ffRows.rows;
+    const agents = (ffRows.byTl.get(n) || []).filter((a) => !a.tlExcluded);
     const src = agents.find((a) => a.tlStockTotal != null) || agents[0] || null;
     const P = perf();
-        const sumK = (k) => U.sum(agents, (a) => num(a[k]));
+    const sumK = (k) => U.sum(agents, (a) => num(a[k]));
     const avgVc4 = U.runRate(sumK('curVc4'), 'ff'), avgComm = U.runRate(sumK('curNvc4'), 'ff');
-    const stock = src && src.tlStockTotal != null
-      ? { vc4: num(src.tlStockVc4), comm: num(src.tlStockNvc4), total: num(src.tlStockTotal) }
-      : { vc4: sumK('stockVc4'), comm: sumK('stockNvc4'), total: sumK('stockTotal') };
+    const stockDetails = rowsOf('stockAgents');
+    const stockComposition = tlStockComposition('ff', p.name, (src && src.tlId) || p.sub, allAgents, stockDetails, stockDetails);
+    const stock = stockComposition.stock;
     const rowsA = agents.map((a) => {
       const av = U.runRate(a.curVc4, 'ff'), avc = U.runRate(a.curNvc4, 'ff');
       return { name: a.name, id: a.agentId || a.id, mobile: mobileFor(a.name, a.agentId || a.id, a.mobile), priority: a.priority || '', stockVc4: num(a.stockVc4), stockComm: num(a.stockNvc4), stockTotal: num(a.stockTotal), cur: num(a.curTotal), last: num(a.lastTotal), curVc4: num(a.curVc4), curComm: num(a.curNvc4), sugVc4: suggest(av, a.stockVc4), sugComm: suggest(avc, a.stockNvc4), sugVc4Gross: suggestGro(av), sugCommGross: suggestGro(avc) };
@@ -279,7 +470,7 @@ window.FF = window.FF || {};
       kind: 'ff-tl', channel: 'First Forward', ch: 'ff', name: p.name, id: (src && src.tlId) || p.sub || '', found: !!agents.length,
       mobile: (src && src.tlMobile && !/^na$/i.test(src.tlMobile)) ? src.tlMobile : '', tl: { name: p.name, id: (src && src.tlId) || '', mobile: (src && src.tlMobile) || '' },
       status: (src && src.tlStatus) || '', lastActive: (src && src.tlLastActive) || '', priority: (src && prioOf(src.tlPriority)) || '', commPriority: (src && prioOf(src.tlCommPriority)) || '',
-      stock, tlStock: { ...stock, has: true },
+      stock, tlStock: { ...stock, has: true, own: stockComposition.own, agents: stockComposition.agents },
       dispatch: { days: suggestDays(), avgVc4, avgComm, cover: avgVc4 > 0 ? stock.vc4 / avgVc4 : null, sugVc4: suggest(avgVc4, stock.vc4), sugComm: suggest(avgComm, stock.comm), sugVc4Gross: suggestGro(avgVc4), sugCommGross: suggestGro(avgComm), sumAgentVc4: U.sum(rowsA, (r) => r.sugVc4), sumAgentComm: U.sum(rowsA, (r) => r.sugComm), sumAgentVc4Gross: U.sum(rowsA, (r) => r.sugVc4Gross), sumAgentCommGross: U.sum(rowsA, (r) => r.sugCommGross) },
       totals: { curVc4: sumK('curVc4'), curComm: sumK('curNvc4'), curTotal: sumK('curTotal'), lastVc4: sumK('lastVc4'), lastComm: sumK('lastNvc4'), lastTotal: sumK('lastTotal') },
       agents: rowsA, agentCount: agents.length
@@ -290,7 +481,7 @@ window.FF = window.FF || {};
     attachGrowth(out, { growth: (src && src.tlGrowth) || '', projected: src && src.tlProjected }, curYm);
     if (light) return out;
     out.months = { cur: curYm, last: lastYm };
-    out.classes = classTable(ac.filter((r) => norm(r.tlName) === n && (!r.channel || /first/i.test(r.channel))), stk.filter((r) => norm(r.tlName) === n), curYm, lastYm);
+    out.classes = classTable(ac.filter((r) => norm(r.tlName) === n && (!r.channel || /first/i.test(r.channel))), stockComposition.classRows, curYm, lastYm);
     if (!out.classes.length) out.classes = [{ cls: 'VC4', cur: out.totals.curVc4, last: out.totals.lastVc4, stock: stock.vc4 }, { cls: 'Commercial', cur: out.totals.curComm, last: out.totals.lastComm, stock: stock.comm }];
     else if (rowsOf('daily').length) {
       // The class table is the same EIR source used by the clicked drill-down. Use its rollup for
@@ -366,6 +557,10 @@ window.FF = window.FF || {};
     } else {
       Object.assign(out, { mobile: '', tl: { name: [...(p.tlSet || [])][0] || '' }, priority: '', direct: !!p.direct, directLabel: p.directLabel || '', stock: { vc4: 0, comm: 0, total: 0 }, tlStock: { has: false }, dispatch: { days: suggestDays(), sugVc4: 0, sugComm: 0, sugVc4Gross: 0, sugCommGross: 0 }, totals: {} });
     }
+    if (r && !out.direct && r.tlName && (!FF.config.isRealTl || FF.config.isRealTl(r.tlName))) {
+      const teamStock = tlStockComposition('gv', r.tlName, r.tlId, gvPeopleLookup().rows, gvRows('stockAgent'), gvRows('stockAgentClass'));
+      out.tlStock = { ...teamStock.stock, has: true, own: teamStock.own, agents: teamStock.agents };
+    }
     out.tagRequired = out.direct && isHM(out.priority);
     const n = norm(p.name);
     const issuance = gvIssuanceRows();
@@ -406,18 +601,21 @@ window.FF = window.FF || {};
   }
   function gvTlProfile(p, light) {
     const n = norm(p.name);
-    const list = gvReport().filter((r) => norm(r.tlName) === n && !safeCall(() => FF.config.isDirectAgent(r, 'gv'), false)).map((r) => ({ ...r }));
+    const gvIndex = gvPeopleLookup();
+    const allReports = gvIndex.rows;
+    const list = (gvIndex.byTl.get(n) || []).filter((r) => !safeCall(() => FF.config.isDirectAgent(r, 'gv'), false)).map((r) => ({ ...r }));
     const src = list[0] || null;
     const sumK = (k) => U.sum(list, (r) => num(r[k]));
     const avgVc4 = U.runRate(sumK('curVc4'), 'gv'), avgComm = U.runRate(sumK('curComm'), 'gv');
-    const stock = src && src.tlStockTotal != null ? { vc4: num(src.tlStockVc4), comm: num(src.tlStockComm), total: num(src.tlStockTotal) } : { vc4: sumK('stockVc4'), comm: sumK('stockComm'), total: sumK('stockTotal') };
+    const stockComposition = tlStockComposition('gv', p.name, (src && src.tlId) || p.sub, allReports, gvRows('stockAgent'), gvRows('stockAgentClass'));
+    const stock = stockComposition.stock;
     const rowsA = list.map((r) => {
       const av = gvDaily(r, r.curVc4), avc = gvDaily(r, r.curComm);
       return { name: r.agentName, id: r.agentId, mobile: mobileFor(r.agentName, r.agentId, r.mobile), priority: prioOf(r.priority), stockVc4: num(r.stockVc4), stockComm: num(r.stockComm), stockTotal: num(r.stockTotal), cur: num(r.curTotal), last: num(r.lastTotal), curVc4: num(r.curVc4), curComm: num(r.curComm), sugVc4: suggest(av, r.stockVc4), sugComm: suggest(avc, r.stockComm), sugVc4Gross: suggestGro(av), sugCommGross: suggestGro(avc) };
     }).sort((x, y) => y.cur - x.cur);
     const out = {
       kind: 'gv-tl', channel: 'GV Partner', ch: 'gv', name: p.name, id: (src && src.tlId) || p.sub || '', found: !!list.length,
-      mobile: (src && src.tlMobile) || '', tl: { name: p.name, id: (src && src.tlId) || '' }, status: '', lastActive: '', priority: '', stock, tlStock: { ...stock, has: true },
+      mobile: (src && src.tlMobile) || '', tl: { name: p.name, id: (src && src.tlId) || '' }, status: '', lastActive: '', priority: '', stock, tlStock: { ...stock, has: true, own: stockComposition.own, agents: stockComposition.agents },
       dispatch: { days: suggestDays(), avgVc4, avgComm, cover: avgVc4 > 0 ? stock.vc4 / avgVc4 : null, sugVc4: suggest(avgVc4, stock.vc4), sugComm: suggest(avgComm, stock.comm), sugVc4Gross: suggestGro(avgVc4), sugCommGross: suggestGro(avgComm), sumAgentVc4: U.sum(rowsA, (r) => r.sugVc4), sumAgentComm: U.sum(rowsA, (r) => r.sugComm), sumAgentVc4Gross: U.sum(rowsA, (r) => r.sugVc4Gross), sumAgentCommGross: U.sum(rowsA, (r) => r.sugCommGross) },
       totals: { curVc4: sumK('curVc4'), curComm: sumK('curComm'), curTotal: sumK('curTotal'), lastVc4: sumK('lastVc4'), lastComm: sumK('lastComm'), lastTotal: sumK('lastTotal') },
       agents: rowsA, agentCount: list.length
@@ -474,8 +672,7 @@ window.FF = window.FF || {};
     const master = gvClassRows((m) => agentNames.has(norm(m.agentName)) || (m.agentId && agentIds.has(clean(m.agentId).toUpperCase())));
     const curYm = globalCurYm, lastYm = globalLastYm;
     out.months = { cur: curYm, last: lastYm };
-    const stockRows = [];
-    list.forEach((r) => Object.entries(r.stockByClass || {}).forEach(([cls, v]) => { if (v) stockRows.push({ cls, n: v }); }));
+    const stockRows = stockComposition.classRows;
     out.classes = classTable(master, stockRows, curYm, lastYm);
     if (!out.classes.length) out.classes = [{ cls: 'VC4', cur: out.totals.curVc4, last: out.totals.lastVc4, stock: stock.vc4 }, { cls: 'Commercial', cur: out.totals.curComm, last: out.totals.lastComm, stock: stock.comm }];
     // Align summary KPIs with the exact rows shown in the class table for each available month.
@@ -617,6 +814,7 @@ window.FF = window.FF || {};
     if (!pr) return '';
     const isTl = /tl$/.test(pr.kind);
     const d = pr.dispatch || {}, s = pr.stock || {}, t = pr.totals || {}, ts = pr.tlStock || {};
+    const tlStockLine = ts.own && ts.agents ? `Own ${fmt(ts.own.total)} + agents ${fmt(ts.agents.total)}` : '';
     const sg = sugBlock(pr);
     const m = pr.months || {};
     const cls = pr.classes || [];
@@ -642,8 +840,8 @@ window.FF = window.FF || {};
     const curSpec = `src=${pr.ch}&scope=mtd&ym=${encodeURIComponent(m.cur || '')}&${scopeParam}`;
     const lastSpec = `src=${pr.ch}&scope=month&ym=${encodeURIComponent(m.last || '')}&${scopeParam}`;
     const kpis = `<div class="mp-kpis">
-      ${kpi(isTl ? 'TL stock (total)' : 'Agent stock', fmt(s.total), `VC4 ${fmt(s.vc4)} · Commercial ${fmt(s.comm)}`, 'k1', stockSpec)}
-      ${isTl ? '' : kpi('TL stock', ts.has ? fmt(ts.total) : '—', ts.has ? `VC4 ${fmt(ts.vc4)} · Comm ${fmt(ts.comm)}` : (pr.direct ? 'Direct — koi TL nahi' : ''), 'k2', tlStockSpec)}
+      ${kpi(isTl ? 'TL stock (total)' : 'Agent stock', fmt(s.total), `${isTl && tlStockLine ? `${tlStockLine} · ` : ''}VC4 ${fmt(s.vc4)} · Commercial ${fmt(s.comm)}`, 'k1', stockSpec)}
+      ${isTl ? '' : kpi('TL stock', ts.has ? fmt(ts.total) : '—', ts.has ? `${tlStockLine ? `${tlStockLine} · ` : ''}VC4 ${fmt(ts.vc4)} · Comm ${fmt(ts.comm)}` : (pr.direct ? 'Direct — koi TL nahi' : ''), 'k2', tlStockSpec)}
       ${kpi('Dispatch priority', prioChip(pr.priority), pr.calc && pr.calc.total.cover != null ? `Cover ${fmt(pr.calc.total.cover, true)} din (all tags)` : (d.cover != null ? `Cover ${fmt(d.cover, true)} din` : ''), 'k3', stockSpec)}
       ${kpi(pr.tagRequired ? `Tags required · VC4 · ${d.days} din` : `Suggested VC4 · ${d.days} din`, sg.vc4, `avg ${fmt(d.avgVc4, true)}/day × ${d.days} din${pr.tagRequired ? '' : ` · stock − ${fmt(s.vc4)}`}`, pr.tagRequired ? 'k7' : 'k4', `${curSpec}&group=VC4`)}
       ${kpi(pr.tagRequired ? 'Tags required · Comm.' : 'Suggested Commercial', sg.comm, `avg ${fmt(d.avgComm, true)}/day${pr.tagRequired ? '' : ` · stock − ${fmt(s.comm)}`}`, pr.tagRequired ? 'k7' : 'k5', `${curSpec}&group=COMM`)}
@@ -681,6 +879,7 @@ window.FF = window.FF || {};
       ['Growth % (REPORT)', pr.growthNum === null || pr.growthNum === undefined ? '' : Number(pr.growthNum.toFixed(1))], ['Data till (run-rate basis)', b.label || ''],
       ['Expected month-end', p.total || ''], ['Expected month-end · sheet', p.sheet || ''],
       ['Stock VC4', s.vc4], ['Stock Commercial', s.comm], ['Stock total', s.total], ['TL stock total', ts.has ? ts.total : ''],
+      ...(ts.own && ts.agents ? [['TL own stock', ts.own.total], ['TL agents stock', ts.agents.total]] : []),
       ['Run-rate basis', `issued ÷ ${(pr.calc && pr.calc.total.elapsed) || ''} din (${U.basisText(pr.ch, b)})`], ['Avg VC4/day', d.avgVc4], ['Suggested VC4' + (pr.tagRequired ? ' (tags)' : '') + ' · stock ke baad (net)', d.sugVc4], ['Suggested VC4 · bina stock (gross)', d.sugVc4Gross || 0], ['Suggested Commercial' + (pr.tagRequired ? ' (tags)' : '') + ' · stock ke baad (net)', d.sugComm], ['Suggested Commercial · bina stock (gross)', d.sugCommGross || 0],
       ['Total run-rate/day', pr.calc ? pr.calc.total.rate : ''], ['Total required (× days)', pr.calc ? pr.calc.total.required : ''], ['Total dispatch WITH stock', pr.calc ? pr.calc.total.net : ''], ['Total dispatch W/O stock', pr.calc ? pr.calc.total.gross : ''], ['Total cover (days)', pr.calc && pr.calc.total.cover != null ? pr.calc.total.cover : ''], ['Issued this month', t.curTotal], ['Issued last month', t.lastTotal], ['', ''], ['Class', `${(pr.months || {}).last || 'Last'} | ${(pr.months || {}).cur || 'This'} | Stock`]];
     (pr.classes || []).forEach((r) => rows.push([r.cls, r.last, r.cur, r.stock]));
@@ -694,13 +893,13 @@ window.FF = window.FF || {};
     return rows;
   }
   function waText(pr) {
-    const d = pr.dispatch || {}, s = pr.stock || {}, t = pr.totals || {}, p = pr.projT1 || {}, b = p.basis || {};
+    const d = pr.dispatch || {}, s = pr.stock || {}, t = pr.totals || {}, ts = pr.tlStock || {}, p = pr.projT1 || {}, b = p.basis || {};
     const g = groupSummary(pr.classes || []);
     const lines = [`*${pr.name}* (${pr.channel} ${/tl$/.test(pr.kind) ? 'TL' : 'Agent'}${pr.id ? ` · ${pr.id}` : ''})`];
     if (canContacts() && pr.mobile) lines.push(`📞 ${pr.mobile}`);
     if (!/tl$/.test(pr.kind) && pr.tl && pr.tl.name && !pr.direct) lines.push(`TL: ${pr.tl.name}`);
     lines.push(`Priority: ${pr.priority || '—'}${pr.tagRequired ? ' · 🏷️ TAG REQUIRED' : ''}`);
-    lines.push(`Stock: ${U.fmt(s.total)} (VC4 ${U.fmt(s.vc4)} · Comm ${U.fmt(s.comm)})`);
+    lines.push(`Stock: ${U.fmt(s.total)}${ts.own && ts.agents ? ` (own ${U.fmt(ts.own.total)} + agents ${U.fmt(ts.agents.total)})` : ''} (VC4 ${U.fmt(s.vc4)} · Comm ${U.fmt(s.comm)})`);
     if (pr.growthNum !== null && pr.growthNum !== undefined) lines.push(`📈 Growth: ${pr.growthNum >= 0 ? '+' : ''}${pr.growthNum.toFixed(1)}%${b.shortLabel ? ` (till ${b.shortLabel})` : ''} · expected month-end ${U.fmt(p.total)}`);
     lines.push(`${pr.tagRequired ? 'Tags needed' : 'Suggested dispatch'} (${d.days} din): VC4 ${U.fmt(d.sugVc4)} · Comm ${U.fmt(d.sugComm)} — stock ke baad`);
     lines.push(`Bina stock ghataye: VC4 ${U.fmt(d.sugVc4Gross || 0)} · Comm ${U.fmt(d.sugCommGross || 0)}`);
@@ -728,7 +927,7 @@ window.FF = window.FF || {};
       { label: 'This Month (MTD)', value: fmt(t.curTotal), sub: `VC4 ${fmt(t.curVc4)} · Comm ${fmt(t.curComm)}`, color: '#2563eb' },
       { label: 'Last Month', value: fmt(t.lastTotal), sub: `VC4 ${fmt(t.lastVc4)} · Comm ${fmt(t.lastComm)}`, color: '#7c3aed' },
       { label: 'Expected', value: fmt(p.total || 0), sub: `Growth ${pr.growthNum != null ? `${pr.growthNum.toFixed(1)}%` : '—'}`, color: '#059669' },
-      { label: 'Stock in Hand', value: fmt(s.total), sub: `VC4 ${fmt(s.vc4)} · Comm ${fmt(s.comm)}`, color: '#d97706' }
+      { label: 'Stock in Hand', value: fmt(s.total), sub: `${pr.tlStock && pr.tlStock.own && pr.tlStock.agents ? `Own ${fmt(pr.tlStock.own.total)} + agents ${fmt(pr.tlStock.agents.total)} · ` : ''}VC4 ${fmt(s.vc4)} · Comm ${fmt(s.comm)}`, color: '#d97706' }
     ]);
     doc.section(`Class-wise Issuance (${m.last || 'Last'} vs ${m.cur || 'MTD'}) & Stock`);
     doc.table({
@@ -814,5 +1013,5 @@ window.FF = window.FF || {};
     }
   }
 
-  FF.masterProfile = { supports, quick, build, html, csvRows, waText, renderInto, open, warm, load, loadFor, suggest, suggestGro, findFfAgent, findGvAgent, mobileFor, get suggestDays() { return suggestDays(); } };
+  FF.masterProfile = { supports, quick, build, html, csvRows, waText, renderInto, open, warm, load, loadFor, invalidate: resetProfileCache, suggest, suggestGro, findFfAgent, findGvAgent, mobileFor, get suggestDays() { return suggestDays(); } };
 })(window.FF);
