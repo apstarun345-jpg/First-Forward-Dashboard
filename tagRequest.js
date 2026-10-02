@@ -11,8 +11,9 @@
  *                          ki alag request banata hai (apna ID / status / edit / label).
  *   4. 🔎 Status        — employee link par agent ke MOBILE number (ya Request ID) se status.
  *   5. 📥 Tag Requests  — admin: har request EK ROW me (koi "Kholo" nahi) — stock total + 🚗/🚚,
- *                          last month, current MTD, run rate, expected, growth %, requested qty
- *                          (class-wise ✏️ edit wahin), ✅ approve, address. Upar ☑ select →
+ *                          last month, current MTD, run rate, expected, growth %, suggested qty (after
+ *                          stock + without stock deduction), GV/FF/both filter, requested qty (class-wise
+ *                          ✏️ edit wahin), ✅ approve, address. Upar ☑ select →
  *                          🖨️ Print selected (har request ka label sirf EK baar), ✅ Approve, ⬇ CSV.
  *   6. ⚙️ Link & Sheet  — employee link ON/OFF + fields, 📗 Google Sheet sync (alag tab me).
  *
@@ -58,7 +59,7 @@ FF.pages = FF.pages || {};
     dup: { list: [], force: false, busy: false },
     // 📥 requests table
     requests: [], requestsAt: 0, reqLoaded: false, reqError: '',
-    sel: new Set(), filter: { status: 'all', q: '' }, edit: null, limit: PAGE_ROWS, dview: [],
+    sel: new Set(), filter: { status: 'all', channel: 'both', q: '' }, edit: null, limit: PAGE_ROWS, dview: [],
     sheet: { loaded: false, busy: false, config: null, fields: null, connected: false, hint: '', publicForm: null }
   };
   const rid = () => Math.random().toString(36).slice(2, 9);
@@ -408,7 +409,7 @@ FF.pages = FF.pages || {};
   /** 🚗 / 🚚 group snapshot — submit ke saath jaata hai, admin table bhi isi shape ko padhta hai. */
   function groupMetrics(rec) {
     const g = rec.grp || emptyGroups();
-    const exact = state.exact ? (state.exact.get(`${rec.channel}|id:${rec.agentId}`) || state.exact.get(`${rec.channel}|n:${norm(rec.name)}`)) : null;
+    const exact = !isPublic() && state.exact ? (state.exact.get(`${rec.channel}|id:${rec.agentId}`) || state.exact.get(`${rec.channel}|n:${norm(rec.name)}`)) : null;
     return {
       core: { stock: exact ? exact.core : num(g.core.stock), last: num(g.core.last), cur: num(g.core.cur) },
       comm: { stock: exact ? exact.comm : num(g.comm.stock), last: num(g.comm.last), cur: num(g.comm.cur) },
@@ -421,9 +422,11 @@ FF.pages = FF.pages || {};
     const days = Math.max(1, num(m && m.days) || 1);
     const ym = (m && m.ym) || ymNow();
     const part = (g) => {
-      const cur = num(g && g.cur), last = num(g && g.last);
+      const cur = num(g && g.cur), last = num(g && g.last), stock = num(g && g.stock);
       const exp = U.projectMonthEnd(cur, days, ym);
-      return { stock: num(g && g.stock), last, cur, rate: cur / days, exp, growth: last > 0 ? ((exp - last) / last) * 100 : (exp > 0 ? null : 0) };
+      // Keep both quantities visible: net subtracts stock; gross deliberately does not.
+      const suggest = U.suggestPair(cur / days, stock);
+      return { stock, last, cur, rate: cur / days, exp, suggest: { net: suggest.net, gross: suggest.gross }, growth: last > 0 ? ((exp - last) / last) * 100 : (exp > 0 ? null : 0) };
     };
     const core = part(m && m.core), comm = part(m && m.comm);
     const total = part({ stock: core.stock + comm.stock, last: core.last + comm.last, cur: core.cur + comm.cur });
@@ -994,12 +997,22 @@ body.colorful .from-hdr { color: #166534; }
     if (guess) return `<span class="badge amber">exact match nahi</span> <button type="button" class="chip tr-guess" data-tr-guess="agent:${esc(guess.channel)}:${esc(guess.agentId || '')}:${esc(norm(guess.name))}">Kya ye agent hai? <b>${esc(guess.name)}</b>${guess.agentId ? ` #${esc(guess.agentId)}` : ''} ✓</button>${filter}`;
     return `<span class="badge amber">🆕 data me nahi mila</span> <span class="dim small">naya agent? request phir bhi jayegi — admin verify karega</span>${filter}`;
   }
-  /** Class ke aage chhota system hint (stock · MTD · 💡 suggestion) — sirf pakke match par. */
+  /** Har class ka stock + last month + current MTD — zero values bhi dikhayein, koi class chupni nahi chahiye. */
   function hintText(rec, c) {
     if (!rec) return '';
     const d = classData(rec, c);
-    if (!d.stock && !d.cur && !d.last && !d.sugNet) return '';
-    return `stock ${fmt(d.stock)} · MTD ${fmt(d.cur)}${d.sugNet > 0 ? ` · 💡 ${fmt(d.sugNet)}` : ''}`;
+    return `Stock ${fmt(d.stock)} · Last ${fmt(d.last)} · MTD ${fmt(d.cur)}${d.sugNet > 0 ? ` · 💡 ${fmt(d.sugNet)}` : ''}`;
+  }
+  /** All-class/group totals also expose VC20, which is included in the 🚗 core group rather than a request row. */
+  function agentGroupSummaryHtml(rec) {
+    if (!rec || rec.isTl) return '';
+    const m = groupMetrics(rec);
+    const rows = [
+      ['🚗 VC4 + VC20', m.core],
+      ['🚚 VC5+', m.comm],
+      ['All classes', { stock: m.core.stock + m.comm.stock, last: m.core.last + m.comm.last, cur: m.core.cur + m.comm.cur }]
+    ];
+    return `<div class="tr-qty-groups" aria-label="Agent stock and issuance summary">${rows.map(([label, g]) => `<div class="tr-qty-group"><b>${label}</b><span>Stock ${fmt(g.stock)} <i>·</i> Last ${fmt(g.last)} <i>·</i> MTD ${fmt(g.cur)}</span></div>`).join('')}<small>VC20 is included in 🚗 VC4 + VC20.</small></div>`;
   }
   /** 👥 TL select hote hi uska poora data — stock · last · current (🚗/🚚) + TL ke saare agents. */
   function tlPanelHtml(row) {
@@ -1056,7 +1069,8 @@ body.colorful .from-hdr { color: #166534; }
         <div class="tr-qty-list${badCls(row.id, 'qty')}" role="group" aria-label="Class-wise qty">
           <div class="tr-qty-head"><span>Tag class</span><span>Qty</span></div>
           ${qtyRows}
-          <div class="tr-qty-foot"><span>Total</span><b data-tr-agent-total2>${fmt(total)}</b></div>
+          ${agentGroupSummaryHtml(rec)}
+          <div class="tr-qty-foot"><span>Requested total</span><b data-tr-agent-total2>${fmt(total)}</b></div>
         </div>
       </div>
     </div>`;
@@ -1197,6 +1211,8 @@ body.colorful .from-hdr { color: #166534; }
       inp.addEventListener('input', () => {
         // Live typing — naam raw rakho; pura number likha to ID maan lo (exact match se resolve hoga).
         row.name = inp.value.trim();
+        // Naya text = nayi search: purane selected agent ka channel/TL filter stock lookup me atka na rahe.
+        row.channel = ''; row.tl = '';
         if (row.isTl) { row.isTl = false; const slot = card.querySelector('.tr-tl-slot'); if (slot) slot.innerHTML = ''; }
         const d = digits(inp.value);
         row.agentId = d.length >= 3 && !/[a-z]/i.test(inp.value) ? d : '';
@@ -1593,6 +1609,8 @@ body.colorful .from-hdr { color: #166534; }
     const dq = digits(f.q);
     return list.filter((dr) => {
       if (f.status !== 'all' && (dr.req.status || 'pending') !== f.status) return false;
+      const channel = f.channel || 'both';
+      if (isAdmin() && channel !== 'both' && dr.agent.channel !== channel) return false;
       if (!q) return true;
       const r = dr.req, e = r.employee || {};
       const hay = norm([dr.agent.name, dr.agent.agentId, dr.agent.tl, e.name, e.office, r.byName, dr.contact.name, dr.contact.address, dr.contact.pincode, r.id, r.note, r.adminNote].join(' '));
@@ -1620,17 +1638,19 @@ body.colorful .from-hdr { color: #166534; }
   const subLine = (a, b, d) => `<small class="tr-m-sub">🚗 ${fmt(a, d)} · 🚚 ${fmt(b, d)}</small>`;
   const growthHtml = (g) => (g === null ? '<span class="delta up">🆕 new</span>' : `<span class="delta ${g > 0.05 ? 'up' : g < -0.05 ? 'down' : 'flat'}">${g > 0.05 ? '▲ +' : g < -0.05 ? '▼ ' : ''}${fmt(g, 1)}%</span>`);
   const growthSmall = (g) => (g === null ? 'new' : `${g > 0 ? '+' : ''}${fmt(g, 0)}%`);
-  /** 8 metric cells — index aane par inhi ko in-place badla jaata hai (data-tr-m). */
+  /** Metric cells — admin rows also show both stock-adjusted and no-stock-deduction suggestions. */
   function metricCellsHtml(dr) {
     const m = metricsFor(dr);
     const n = metricNumbers(m);
+    const keys = ['stock', 'core', 'comm', 'last', 'cur', 'rate', 'exp', 'growth'];
+    if (isAdmin()) keys.push('suggest');
     // Agent sheet me nahi mila + koi snapshot nahi → "0" galat lagta (stock 0?) — "—" dikhao
     if (m.src === 'rows' && !n.total.stock && !n.total.last && !n.total.cur) {
       const title = dr.agent.unmatched ? 'Agent sheet data me nahi mila (naya agent?) — stock/issuance data nahi' : 'Is request ke saath data nahi aaya';
-      return ['stock', 'core', 'comm', 'last', 'cur', 'rate', 'exp', 'growth'].map((k) => `<td class="num tr-m tr-m-none" data-tr-m="${k}" title="${esc(title)}">${k === 'stock' ? '<i class="tr-src rows"></i>' : ''}—</td>`).join('');
+      return keys.map((k) => `<td class="num tr-m tr-m-none${k === 'suggest' ? ' tr-c-suggest' : ''}" data-tr-m="${k}" title="${esc(title)}">${k === 'stock' ? '<i class="tr-src rows"></i>' : ''}—</td>`).join('');
     }
     const dot = `<i class="tr-src ${m.src}" title="${esc(SRC_TITLE[m.src] || '')}${m.src !== 'live' && m.ym ? ` · ${esc(U.labelYM(m.ym))}` : ''}${m.exactStock ? ' · exact stock (StockDataa)' : ''}"></i>`;
-    return [
+    const cells = [
       `<td class="num tr-m" data-tr-m="stock">${dot}<b>${fmt(n.total.stock)}</b></td>`,
       `<td class="num tr-m tr-m-core" data-tr-m="core"><b>${fmt(n.core.stock)}</b></td>`,
       `<td class="num tr-m tr-m-comm" data-tr-m="comm"><b>${fmt(n.comm.stock)}</b></td>`,
@@ -1639,7 +1659,12 @@ body.colorful .from-hdr { color: #166534; }
       `<td class="num tr-m" data-tr-m="rate" title="${fmt(n.total.cur)} ÷ ${fmt(n.days)} din"><b>${fmt(n.total.rate, 1)}</b>${subLine(n.core.rate, n.comm.rate, 1)}</td>`,
       `<td class="num tr-m" data-tr-m="exp"><b>${fmt(n.total.exp)}</b>${subLine(n.core.exp, n.comm.exp)}</td>`,
       `<td class="num tr-m" data-tr-m="growth">${growthHtml(n.total.growth)}<small class="tr-m-sub">🚗 ${growthSmall(n.core.growth)} · 🚚 ${growthSmall(n.comm.growth)}</small></td>`
-    ].join('');
+    ];
+    if (isAdmin()) cells.push(`<td class="num tr-m tr-c-suggest" data-tr-m="suggest" title="The no-deduction quantity does not subtract current stock.">
+      <div class="tr-suggest-pair"><span class="tr-suggest-net"><small>After stock</small><b>${fmt(n.total.suggest.net)}</b></span><span class="tr-suggest-gross"><small>Without stock deduction</small><b>${fmt(n.total.suggest.gross)}</b></span></div>
+      <small class="tr-m-sub">🚗 ${fmt(n.core.suggest.net)}/${fmt(n.core.suggest.gross)} · 🚚 ${fmt(n.comm.suggest.net)}/${fmt(n.comm.suggest.gross)}</small>
+    </td>`);
+    return cells.join('');
   }
   const canEditReq = (r) => isAdmin() || (r.by === me() && (r.status || 'pending') === 'pending');
   const canDeleteReq = (r) => isAdmin() || r.by === me();
@@ -1720,6 +1745,16 @@ body.colorful .from-hdr { color: #166534; }
     const chip = (k, label) => `<button type="button" class="chip ${state.filter.status === k ? 'on' : ''}" data-tr-chip="${k}">${label} <span class="count">${fmt(counts[k] || 0)}</span></button>`;
     return chip('all', 'Sab') + STATUS_KEYS.map((k) => chip(k, STATUS[k].label)).join('');
   }
+  function channelFilterHtml(all) {
+    if (!isAdmin()) return '';
+    const counts = { both: all.length, ff: 0, gv: 0 };
+    all.forEach((dr) => { counts[dr.agent.channel === 'gv' ? 'gv' : 'ff']++; });
+    const options = [
+      ['both', 'Both'], ['ff', '🟦 First Forward'], ['gv', '🟩 GV']
+    ];
+    return `<div class="tr-channel-filter" role="group" aria-label="Request source filter"><span class="tr-channel-label">Source</span>${options.map(([key, label]) => `<button type="button" class="tr-channel-btn ${state.filter.channel === key ? 'on' : ''} tr-channel-${key}" data-tr-channel="${key}" aria-pressed="${state.filter.channel === key}">${label}<span>${fmt(counts[key])}</span></button>`).join('')}</div>`;
+  }
+  const requestColumnCount = () => 17 + (isAdmin() ? 1 : 0);
   function requestsShellHtml() {
     const lm = U.labelYM(ymLast());
     return `<section class="card tr-req-card" id="tr-req-card">
@@ -1737,6 +1772,7 @@ body.colorful .from-hdr { color: #166534; }
           <button type="button" class="btn small" data-tr-bulk="none" hidden>✕ Selection hatao</button>
         </div>
         <div class="tr-req-filter">
+          ${channelFilterHtml(displayRows(state.requests))}
           <div class="tr-chips" data-tr-chips>${chipsHtml(displayRows(state.requests))}</div>
           <input class="input tr-req-search" data-tr-search type="search" placeholder="🔎 Agent / employee / mobile / PIN / ID" value="${esc(state.filter.q)}">
           <button type="button" class="btn" data-tr-act="req-refresh" title="Nayi requests laao">↻</button>
@@ -1747,6 +1783,7 @@ body.colorful .from-hdr { color: #166534; }
           <tr>
             <th rowspan="2" class="tr-c-sel"></th><th rowspan="2">Date · ID</th><th rowspan="2">Employee</th><th rowspan="2">Agent</th><th rowspan="2">📍 Mobile · Address</th>
             <th colspan="3" class="section has">📦 Stock</th><th colspan="5" class="section has">📈 Issuance (🚗 VC4+VC20 · 🚚 VC5+)</th>
+            ${isAdmin() ? '<th rowspan="2" class="tr-th-suggest">🎯 Suggestion<small class="tr-th-sub">after stock · without stock deduction</small></th>' : ''}
             <th rowspan="2">🏷️ Requested (class-wise)</th><th rowspan="2" class="num">Total</th><th rowspan="2">Status</th><th rowspan="2"></th>
           </tr>
           <tr>
@@ -1755,7 +1792,7 @@ body.colorful .from-hdr { color: #166534; }
             <th class="num">Run rate<small class="tr-th-sub">/ din</small></th><th class="num">Expected<small class="tr-th-sub">month-end</small></th><th class="num">Growth<small class="tr-th-sub">exp vs last</small></th>
           </tr>
         </thead>
-        <tbody data-tr-tbody><tr><td colspan="17">${U.spinner('Requests load ho rahi hain…')}</td></tr></tbody>
+        <tbody data-tr-tbody><tr><td colspan="${requestColumnCount()}">${U.spinner('Requests load ho rahi hain…')}</td></tr></tbody>
       </table></div>
       <div class="tr-req-foot dim small" data-tr-foot></div>
       <p class="dim small tr-legend">🚗 = VC4 + VC20 (car/jeep) · 🚚 = VC5+ (commercial) · Run rate = current MTD ÷ din (FF: kal tak, GV: aaj tak) · Expected = run rate × mahine ke din · Growth = expected vs last month · <i class="tr-src live"></i> live data · <i class="tr-src snap"></i> submit ke waqt ka snapshot · Approve ke baad ☑ select → 🖨️ Print selected = har request ka label sirf ek baar.</p>
@@ -1784,11 +1821,13 @@ body.colorful .from-hdr { color: #166534; }
     const tbody = card.querySelector('[data-tr-tbody]');
     const shown = state.dview.slice(0, state.limit);
     if (tbody) {
-      if (state.reqError && !state.requests.length) tbody.innerHTML = `<tr><td colspan="17" class="empty">⚠️ Requests load nahi hui: ${esc(state.reqError)} <button class="btn small" data-tr-act="req-refresh">↻ Retry</button></td></tr>`;
-      else if (!all.length) tbody.innerHTML = '<tr><td colspan="17" class="empty">Abhi koi tag request nahi hai. 📝 Form bharo → 📤 submit.<br><small class="dim">Employee link se aayi requests bhi yahin dikhengi (🌐 badge ke saath).</small></td></tr>';
-      else if (!shown.length) tbody.innerHTML = '<tr><td colspan="17" class="empty">Is filter / search me koi request nahi.</td></tr>';
+      if (state.reqError && !state.requests.length) tbody.innerHTML = `<tr><td colspan="${requestColumnCount()}" class="empty">⚠️ Requests load nahi hui: ${esc(state.reqError)} <button class="btn small" data-tr-act="req-refresh">↻ Retry</button></td></tr>`;
+      else if (!all.length) tbody.innerHTML = `<tr><td colspan="${requestColumnCount()}" class="empty">Abhi koi tag request nahi hai. 📝 Form bharo → 📤 submit.<br><small class="dim">Employee link se aayi requests bhi yahin dikhengi (🌐 badge ke saath).</small></td></tr>`;
+      else if (!shown.length) tbody.innerHTML = `<tr><td colspan="${requestColumnCount()}" class="empty">Is filter / search me koi request nahi.</td></tr>`;
       else tbody.innerHTML = shown.map(reqRowHtml).join('');
     }
+    const channels = card.querySelector('.tr-channel-filter');
+    if (channels) channels.outerHTML = channelFilterHtml(all);
     const chips = card.querySelector('[data-tr-chips]');
     if (chips) chips.innerHTML = chipsHtml(all);
     const count = card.querySelector('[data-tr-count]');
@@ -1927,6 +1966,7 @@ body.colorful .from-hdr { color: #166534; }
     if (!rows.length) { U.toast('Koi row nahi', 'warn'); return; }
     const header = ['Date', 'Request ID', 'Status', 'Employee', 'Office', 'Agent', 'Agent ID', 'TL', 'Channel', 'Mobile', 'Address', 'Pincode',
       'Stock total', 'Stock VC4+VC20', 'Stock VC5+', `Last month (${U.labelYM(ymLast())})`, 'Current MTD', 'Run rate / day', 'Expected month-end', 'Growth %',
+      ...(isAdmin() ? ['Suggested after stock', 'Suggested without stock deduction'] : []),
       ...CLASS_LIST.flatMap((c) => [`${c} requested`, `${c} approved`]), 'Total requested', 'Total approved', 'Note', 'Admin note', 'Source'];
     const data = rows.map((dr) => {
       const r = dr.req, e = r.employee || {}, n = metricNumbers(metricsFor(dr));
@@ -1935,6 +1975,7 @@ body.colorful .from-hdr { color: #166534; }
         new Date(r.at).toLocaleString('en-IN'), r.id, r.status || 'pending', e.name || r.byName || '', e.office || '', dr.agent.name, dr.agent.agentId, dr.agent.tl,
         dr.agent.channel === 'gv' ? 'GV Partner' : 'First Forward', dr.contact.mobile, dr.contact.address, dr.contact.pincode,
         n.total.stock, n.core.stock, n.comm.stock, n.total.last, n.total.cur, round1(n.total.rate), n.total.exp, n.total.growth === null ? 'new' : round1(n.total.growth),
+        ...(isAdmin() ? [n.total.suggest.net, n.total.suggest.gross] : []),
         ...CLASS_LIST.flatMap(cls), dr.requested, dr.total, r.note || '', r.adminNote || '', r.source === 'public-link' ? 'employee link' : 'login'
       ];
     });
@@ -1958,6 +1999,8 @@ body.colorful .from-hdr { color: #166534; }
         else if (op === 'none') { state.sel.clear(); updateSelUi(); card.querySelectorAll('[data-tr-sel]').forEach((x) => { x.checked = false; }); }
         return;
       }
+      const source = t.closest && t.closest('[data-tr-channel]');
+      if (source) { state.filter.channel = source.dataset.trChannel || 'both'; state.limit = PAGE_ROWS; state.edit = null; renderReqTable(); return; }
       const chip = t.closest && t.closest('[data-tr-chip]');
       if (chip) { state.filter.status = chip.dataset.trChip; state.limit = PAGE_ROWS; state.edit = null; renderReqTable(); return; }
       const act = t.closest && t.closest('[data-tr-act]');
@@ -2305,7 +2348,12 @@ body.colorful .from-hdr { color: #166534; }
     },
     // 🧪 Tests: requests → table rows (har agent ek row) + row HTML + submit payload.
     _test: {
-      displayRows, reqRowHtml: (dr) => reqRowHtml(dr), metricNumbers, agentKeyOf, labelItem, contactOf,
+      displayRows, reqRowHtml: (dr) => reqRowHtml(dr), metricCellsHtml, metricNumbers, hintText, agentGroupSummaryHtml, channelFilterHtml, requestsShellHtml, agentKeyOf, labelItem, contactOf,
+      filterRows: (list, patch) => {
+        const keep = state.filter;
+        state.filter = { ...keep, ...(patch || {}) };
+        try { return filterRows(list); } finally { state.filter = keep; }
+      },
       payload: (rows, employee) => {
         const keep = { rows: state.rows, emp: state.employee };
         state.rows = rows.map((r) => newRow({ ...r, q: { ...emptyQty(), ...(r.q || {}) } }));

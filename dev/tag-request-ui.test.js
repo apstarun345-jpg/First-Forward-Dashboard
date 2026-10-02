@@ -112,9 +112,48 @@ test('📈 metrics — run rate · expected (month-end) · growth (expected vs l
   assert.equal(n.core.exp, 68); assert.equal(n.comm.exp, 12);
   assert.ok(Math.abs(n.total.growth - 17.39) < 0.01);
   assert.ok(Math.abs(n.comm.growth - 33.33) < 0.01);
+  for (const group of ['core', 'comm', 'total']) {
+    const pair = FF.util.suggestPair(n[group].rate, n[group].stock);
+    assert.deepEqual(n[group].suggest, { net: pair.net, gross: pair.gross }, `${group}: gross suggestion is not reduced by stock`);
+  }
+  assert.ok(n.total.suggest.gross >= n.total.suggest.net);
   const fresh = TR._test.metricNumbers({ core: { stock: 0, last: 0, cur: 5 }, comm: { stock: 0, last: 0, cur: 0 }, days: 5, ym: '2026-10' });
   assert.equal(fresh.core.growth, null, 'last month 0 → "new"');
   assert.equal(fresh.comm.growth, 0);
+});
+
+test('🧾 employee class hints — har class ka stock, last month aur current MTD; zero bhi visible', () => {
+  const rec = { channel: 'ff', stock: { VC4: 12, VC5: 8, VC6: 0, VC7: 1, VC12: 0, VC16: 3 }, last: { VC4: 20, VC5: 9, VC6: 0, VC7: 2, VC12: 0, VC16: 4 }, cur: { VC4: 5, VC5: 3, VC6: 0, VC7: 1, VC12: 0, VC16: 2 }, priority: '' };
+  assert.match(TR._test.hintText(rec, 'VC4'), /Stock 12 · Last 20 · MTD 5/);
+  assert.match(TR._test.hintText(rec, 'VC6'), /Stock 0 · Last 0 · MTD 0/, 'zero stock/issuance class still gets a visible hint');
+  for (const cls of ['VC4', 'VC5', 'VC6', 'VC7', 'VC12', 'VC16']) assert.ok(TR._test.hintText(rec, cls), `${cls} has a stock + issuance hint`);
+  const groups = TR._test.agentGroupSummaryHtml({
+    channel: 'ff', name: 'A', stock: rec.stock, last: rec.last, cur: rec.cur,
+    grp: { core: { stock: 14, last: 25, cur: 8 }, comm: { stock: 17, last: 15, cur: 6 } }
+  });
+  assert.ok(groups.includes('VC4 + VC20') && groups.includes('VC20 is included'));
+  assert.ok(groups.includes('Stock 14') && groups.includes('Last 25') && groups.includes('MTD 8'));
+  assert.ok(groups.includes('Stock 31') && groups.includes('Last 40') && groups.includes('MTD 14'), 'overall total includes all groups');
+});
+
+test('🧭 admin source filter — Both / First Forward / GV only; hidden from employees', () => {
+  const rows = TR._test.displayRows([rahul, legacy]);
+  assert.equal(rows.length, 3);
+  assert.equal(TR._test.filterRows(rows, { status: 'all', channel: 'both', q: '' }).length, 3);
+  assert.deepEqual(TR._test.filterRows(rows, { status: 'all', channel: 'ff', q: '' }).map((x) => x.agent.channel), ['ff', 'ff']);
+  assert.deepEqual(TR._test.filterRows(rows, { status: 'all', channel: 'gv', q: '' }).map((x) => x.agent.channel), ['gv']);
+  const controls = TR._test.channelFilterHtml(rows);
+  for (const key of ['both', 'ff', 'gv']) assert.ok(controls.includes(`data-tr-channel="${key}"`));
+  const adminShell = TR._test.requestsShellHtml();
+  assert.match(adminShell, /colspan="18"/);
+  const keep = FF.auth.user;
+  FF.auth.user = { role: 'user', username: 'member' };
+  try {
+    assert.equal(TR._test.filterRows(rows, { status: 'all', channel: 'gv', q: '' }).length, 3, 'source filtering is admin-only');
+    assert.equal(TR._test.channelFilterHtml(rows), '');
+    assert.match(TR._test.requestsShellHtml(), /colspan="17"/);
+    assert.doesNotMatch(TR._test.requestsShellHtml(), /data-tr-channel=/);
+  } finally { FF.auth.user = keep; }
 });
 
 test('📥 request row — ek hi row me sab (koi Kholo nahi): stock 🚗/🚚, issuance, class-wise, approve, address', () => {
@@ -122,12 +161,18 @@ test('📥 request row — ek hi row me sab (koi Kholo nahi): stock 🚗/🚚, i
   const html = TR._test.reqRowHtml(dr);
   assert.ok(!/Kholo|data-tr-open/.test(html), 'drawer / Kholo button nahi');
   for (const s of ['data-tr-sel="tagreq_aaa111::agent"', 'Ramesh Yadav', 'Jaipur office', 'Rahul Sharma', '#1001', 'TL TL One', '☏ 9876500001', 'Gandhi Nagar', '📮 302015']) assert.ok(html.includes(s), `row me "${s}"`);
-  for (const m of ['stock', 'core', 'comm', 'last', 'cur', 'rate', 'exp', 'growth']) assert.ok(html.includes(`data-tr-m="${m}"`), `metric cell ${m}`);
+  for (const m of ['stock', 'core', 'comm', 'last', 'cur', 'rate', 'exp', 'growth', 'suggest']) assert.ok(html.includes(`data-tr-m="${m}"`), `metric cell ${m}`);
   assert.match(html, /data-tr-m="stock"><i class="tr-src snap"[^>]*><\/i><b>17<\/b>/, 'stock total (snapshot)');
   assert.match(html, /data-tr-m="core"><b>14<\/b>/);
   assert.match(html, /data-tr-m="comm"><b>3<\/b>/);
   assert.match(html, /data-tr-m="exp"><b>81<\/b>/);
   assert.match(html, /▲ \+17\.4%/);
+  const suggestions = TR._test.metricNumbers(rahul.metrics);
+  const suggestionCell = html.match(/<td class="num tr-m tr-c-suggest"[\s\S]*?<\/td>/);
+  assert.ok(suggestionCell, 'admin gets a suggestion cell');
+  assert.ok(suggestionCell[0].includes('After stock') && suggestionCell[0].includes('Without stock deduction'));
+  assert.ok(suggestionCell[0].includes(`<b>${suggestions.total.suggest.net}</b>`));
+  assert.ok(suggestionCell[0].includes(`<b>${suggestions.total.suggest.gross}</b>`));
   assert.match(html, /<b>VC4<\/b><span><s class="dim">25<\/s> → <b>20<\/b><\/span>/, 'agent ka maanga → approved');
   assert.match(html, /req 30/, 'total ke neeche requested');
   assert.ok(html.includes('data-tr-op="edit"'), 'admin ✏️ edit');
@@ -144,6 +189,7 @@ test('📥 request row — ek hi row me sab (koi Kholo nahi): stock 🚗/🚚, i
   try {
     const uh = TR._test.reqRowHtml(pdr);
     assert.ok(!uh.includes('data-tr-op="approve"') && !uh.includes('data-tr-status'));
+    assert.ok(!uh.includes('data-tr-m="suggest"'), 'admin-only suggestion column hidden for employees');
     assert.ok(uh.includes('data-tr-op="edit"'), 'owner apni pending request edit kar sakta hai');
     const other = TR._test.reqRowHtml(TR._test.displayRows([legacy])[0]);
     assert.ok(!other.includes('data-tr-op="edit"') && !other.includes('data-tr-op="del"'), 'doosre ki request par edit/delete nahi');

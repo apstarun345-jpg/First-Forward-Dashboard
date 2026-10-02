@@ -126,13 +126,19 @@ test('wiring — settings Preview button + app.js banner + preview-aware gates',
   const settings = read('settings.js');
   assert.match(settings, /data-user-viewas/, 'Users card me Preview button');
   assert.match(settings, /A\.startViewAs\(u\)/, 'button handler startViewAs call karta hai');
-  assert.match(settings, /location\.hash !== '#\/home'/, 'preview start par home navigate');
+  assert.match(settings, /FF\.app && FF\.app\.firstAllowedRoute \? FF\.app\.firstAllowedRoute\(\)/, 'preview target user ka pehla allowed route choose karta hai');
+  assert.match(settings, /FF\.app && FF\.app\.navigate\) FF\.app\.navigate\(firstRoute\.page, firstRoute\.params\)/, 'preview router se page aur sheet params dono par jaata hai');
 
   const app = read('app.js');
+  assert.match(app, /function firstAllowedRoute\(\)[\s\S]{0,220}featOk\(x\) && FF\.auth\.can\(x\.perm\)/, 'first page permission aur enabled feature dono check karta hai');
+  assert.match(app, /return s \? \{ page: 'sheet', params: \{ name: s\.id \} \}/, 'sheet-only user ko pehle allowed sheet par bhejta hai');
+  assert.match(app, /pageKnown, firstAllowedPage, firstAllowedRoute,/, 'Preview ke liye first allowed route export hota hai');
   assert.match(app, /FF\.auth\.viewingAs \? FF\.auth\.viewingAs\(\) : null/, 'viewAsBanner state read karta hai');
   assert.match(app, /id="viewas-banner"/, 'banner markup');
   assert.match(app, /id="viewas-exit"/, 'exit button');
   assert.match(app, /FF\.auth\.stopViewAs\(\)/, 'exit handler stopViewAs');
+  assert.match(app, /if \(FF\.agentSummary && FF\.agentSummary\.clearCaches\) FF\.agentSummary\.clearCaches\(\)/, 'exit par preview user ki cached summary list clear hoti hai');
+  assert.match(settings, /if \(FF\.agentSummary && FF\.agentSummary\.clearCaches\) FF\.agentSummary\.clearCaches\(\)/, 'preview start par purani summary cache clear hoti hai');
   assert.match(app, /function renderCurrent[\s\S]{0,200}viewAsBanner\(\);/, 'renderCurrent har navigation par banner check');
   assert.match(app, /p\.adminOnly && !FF\.auth\.isAdmin\(\)/, 'featOk preview-aware (teamMap jaise adminOnly pages)');
   assert.match(app, /FF\.auth\.viewAsUser \|\| FF\.auth\.user/, 'top-user card target user dikhata hai');

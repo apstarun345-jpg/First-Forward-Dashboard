@@ -133,10 +133,11 @@ window.FF = window.FF || {};
   function retryNow() { scheduleRetry(generation, 0); }
   function get(key) { return state.data[key]; }
   function error(key) { return state.errors[key]; }
-  async function need(key) {
-    // A slow unrelated stock/report query must not block this page.
+  async function need(key, opts) {
+    // A slow unrelated stock/report query must not block this page. `{ only: true }` lets a lazy
+    // summary fetch just its selected channel's datasets instead of starting every GV loader.
     if (state.data[key] !== undefined) return state.data[key];
-    if (!state.promise) preload(false);
+    if (!(opts && opts.only) && !state.promise) preload(false);
     return loadKey(key, false);
   }
   /** ⚡ Sirf chune hue GV datasets fresh load karo (aaj ka number = master). */

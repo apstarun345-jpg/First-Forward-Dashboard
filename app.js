@@ -322,8 +322,11 @@ window.FF = window.FF || {};
     const segs = pathPart.split('/').filter(Boolean).map(decodeURIComponent);
     const params = {};
     new URLSearchParams(queryPart || '').forEach((v, k) => { params[k] = v; });
-    let page = segs[0] || firstAllowedPage();
-    if (page === 'sheet') { params.name = segs.slice(1).join('/'); }
+    const initialRoute = segs.length ? null : firstAllowedRoute();
+    let page = segs[0] || initialRoute.page;
+    if (page === 'sheet') {
+      params.name = segs.length ? segs.slice(1).join('/') : (initialRoute.params.name || '');
+    }
     page = resolvePage(page);
     if (paramOverride && paramOverride.hash === location.hash && paramOverride.page === page) {
       Object.assign(params, paramOverride.params);
@@ -364,13 +367,14 @@ window.FF = window.FF || {};
   }
   function allowed(page, params) { const perm = pagePerm(page, params); const p = pageDef(page); if (p && !featOk(p)) return false; return !perm || FF.auth.can(perm); }
   function enabledTabs() { return (FF.config.allTabs ? FF.config.allTabs(true) : (FF.config.sheets || [])); }
-  function firstAllowedPage() {
-    if (FF.auth.can('home')) return 'home';
-    const p = PAGES.find((x) => x.perm !== 'home' && FF.auth.can(x.perm));
-    if (p) return p.id;
+  function firstAllowedRoute() {
+    if (FF.auth.can('home')) return { page: 'home', params: {} };
+    const p = PAGES.find((x) => x.perm !== 'home' && featOk(x) && FF.auth.can(x.perm));
+    if (p) return { page: p.id, params: {} };
     const s = enabledTabs().find((x) => FF.auth.can(`sheet:${x.id}`));
-    return s ? 'sheet' : 'settings';
+    return s ? { page: 'sheet', params: { name: s.id } } : { page: 'settings', params: {} };
   }
+  function firstAllowedPage() { return firstAllowedRoute().page; }
 
   // ---- sidebar ----
   function navItem(id, icon, label, desc, active, href, badge) {
@@ -666,6 +670,7 @@ window.FF = window.FF || {};
       document.body.appendChild(el);
       U.$('#viewas-exit', el).addEventListener('click', () => {
         if (FF.auth.stopViewAs) FF.auth.stopViewAs();
+        if (FF.agentSummary && FF.agentSummary.clearCaches) FF.agentSummary.clearCaches();
         el.remove();
         U.toast('Preview mode off ✓', 'ok');
         if (location.hash !== '#/home') location.hash = '#/home';
@@ -1566,6 +1571,6 @@ window.FF = window.FF || {};
     setLang(next);
   }
 
-  FF.app = { storageBanner, pushBanner, liveShareChip, applySavedTweaks, navigate, updateParams, clearGlobalFilters, refresh, syncNow, checkFeedChange, announceDataUpdate, parseHash, resolvePage, pageKnown, openDrawer, closeDrawer, currentDrawerSnapshot, restoreDrawerSnapshot, exportDrawerCsv, exportDrawerPdf, renderSidebar, renderCurrent, renderTopUser, updateStatus, onLogin, onBackgroundDataUpdated, promptInstall, enhanceCharts, enhanceTables, themeMode, toggleThemeMode, lang, setLang, toggleLangMenu, renderGlobalFilters, renderMobileNav, focusMode: updateFocusMode, openAccessibility: renderA11yPanel, tableDensity, setTableDensity, PAGES, refreshPendingBadge, setPendingSignups, shareWhatsApp, checkVersion, exportCSV: () => exportCurrentCsv('csv'), exportXLSX: () => exportCurrentCsv('xlsx'), toggleTheme: toggleThemeMode, toggleLang: toggleLangQuick, get pendingSignups() { return pendingSignups; }, get current() { return current; }, currentFilters: () => (FF.filters ? FF.filters.current() : currentFilterValues()) };
+  FF.app = { storageBanner, pushBanner, liveShareChip, applySavedTweaks, navigate, updateParams, clearGlobalFilters, refresh, syncNow, checkFeedChange, announceDataUpdate, parseHash, resolvePage, pageKnown, firstAllowedPage, firstAllowedRoute, openDrawer, closeDrawer, currentDrawerSnapshot, restoreDrawerSnapshot, exportDrawerCsv, exportDrawerPdf, renderSidebar, renderCurrent, renderTopUser, updateStatus, onLogin, onBackgroundDataUpdated, promptInstall, enhanceCharts, enhanceTables, themeMode, toggleThemeMode, lang, setLang, toggleLangMenu, renderGlobalFilters, renderMobileNav, focusMode: updateFocusMode, openAccessibility: renderA11yPanel, tableDensity, setTableDensity, PAGES, refreshPendingBadge, setPendingSignups, shareWhatsApp, checkVersion, exportCSV: () => exportCurrentCsv('csv'), exportXLSX: () => exportCurrentCsv('xlsx'), toggleTheme: toggleThemeMode, toggleLang: toggleLangQuick, get pendingSignups() { return pendingSignups; }, get current() { return current; }, currentFilters: () => (FF.filters ? FF.filters.current() : currentFilterValues()) };
   document.addEventListener('DOMContentLoaded', init);
 })(window.FF);

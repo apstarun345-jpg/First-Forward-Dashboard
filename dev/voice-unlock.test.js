@@ -41,16 +41,18 @@ globalThis.requestAnimationFrame = (fn) => setTimeout(fn, 0);
 
 // ---- fake speech synthesis: pehli baar "not-allowed", unlock ke baad success ----
 let allowSpeak = false;
-const spoken = [];
+let assistantLang = 'hi', resumeCalls = 0, systemVoices = [];
+const spoken = [], utterances = [];
 globalThis.SpeechSynthesisUtterance = class {
   constructor(text) { this.text = text; this.lang = ''; this.rate = 1; this.pitch = 1; this.volume = 1; this.onend = null; this.onerror = null; }
 };
 globalThis.window.speechSynthesis = {
-  getVoices: () => [],
-  speaking: false, pending: false,
+  getVoices: () => systemVoices,
+  speaking: false, pending: false, paused: true,
   cancel() {},
+  resume() { resumeCalls++; this.paused = false; },
   speak(u) {
-    spoken.push(u.text);
+    spoken.push(u.text); utterances.push(u);
     if (!allowSpeak) { setTimeout(() => u.onerror && u.onerror({ error: 'not-allowed' }), 0); return; }
     setTimeout(() => u.onend && u.onend(), 0);
   }
@@ -59,6 +61,9 @@ globalThis.window.speechSynthesis = {
 globalThis.FF = {
   util: {
     clean: (v) => String(v === null || v === undefined ? '' : v).trim(),
+    voicePrefs: () => ({ rate: 1.12, pitch: 0.91 }),
+    voiceProfile: () => ({ gender: 'female' }),
+    matchVoice: (voices, lang) => voices.find((v) => String(v.lang || '').toLowerCase().startsWith(lang)) || voices[0] || null,
     dateKey: () => '2026-09-29',
     fmt: (n) => String(n),
     esc: (s) => String(s),
@@ -72,7 +77,7 @@ globalThis.FF = {
     gvSheetId: 'gv-sheet',
     features: {}
   },
-  assistant: { getLang: () => 'hi' }
+  assistant: { getLang: () => assistantLang }
 };
 const cell = (v) => ({ v });
 const table = (rows) => ({ rows: rows.map((r) => r.map(cell)) });
@@ -117,6 +122,24 @@ test('unlock() releases the browser lock and the same announcement then speaks',
   const ok = await bell.speakAnnounce('Rahul ne 5 naye tags issue kiye.', 5);
   assert.equal(ok, true, 'unlock ke baad voice chalti hai');
   assert.ok(spoken.some((t) => /Rahul ne 5 naye tags/.test(t)), 'utterance speech synthesis tak pahunchi');
+});
+
+test('Mac-style voice recovery resumes paused speech and uses the installed system voice/preferences', async () => {
+  allowSpeak = true;
+  assistantLang = 'en';
+  const voice = { name: 'Alex', lang: 'en-US', voiceURI: 'com.apple.voice.enhanced.en-US.Alex' };
+  systemVoices = [voice];
+  const before = resumeCalls;
+  const ok = await bell.speakAnnounce('Mac voice recovery test.', 1);
+  assert.equal(ok, true);
+  assert.ok(resumeCalls > before, 'paused SpeechSynthesis ko resume kiya');
+  const u = utterances.at(-1);
+  assert.equal(u.voice, voice, 'available macOS voice selected');
+  assert.equal(u.lang, 'en-US');
+  assert.equal(u.rate, 1.12, 'saved speech rate applied');
+  assert.equal(u.pitch, 0.91, 'saved pitch applied');
+  systemVoices = [];
+  assistantLang = 'hi';
 });
 
 test('announcements made while the tab is hidden are queued, then spoken when it is visible', async () => {

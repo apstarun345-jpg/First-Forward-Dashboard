@@ -103,7 +103,24 @@ window.FF = window.FF || {};
     const jobs = [];
     if (P && P.ensureLoaded) jobs.push(safeAsync(() => P.ensureLoaded()));
     ['daily', 'agentClass', 'agents', 'stockAgents'].forEach((k) => { if (FF.store && FF.store.need) jobs.push(safeAsync(() => FF.store.need(k))); });
-    if (gvOn() && FF.gv && FF.gv.need) ['report', 'stockAgent', 'stockAgentClass', 'master'].forEach((k) => jobs.push(safeAsync(() => FF.gv.need(k))));
+    if (gvOn() && FF.gv && FF.gv.need) ['report', 'stockAgent', 'stockTl', 'stockAgentClass', 'master'].forEach((k) => jobs.push(safeAsync(() => FF.gv.need(k))));
+    await Promise.all(jobs);
+    quickCache.clear();
+  }
+  /** Summary/profile ke ek channel ko hi ready karo. Pehle FF + GV dono datasets har click par
+   *  wait hote the, jabki GV report ko FF stock/performance (aur ulta) ki zaroorat nahi hoti. */
+  async function loadFor(person) {
+    const isGv = /^gv/i.test(String(person && person.kind || ''));
+    const jobs = [];
+    if (isGv) {
+      if (FF.gv && FF.gv.need) ['report', 'stockAgent', 'master'].forEach((k) => jobs.push(safeAsync(() => FF.gv.need(k, { only: true }))));
+      // GV Master is the immediate fallback; consume FF EIR rollups only if the app already has them
+      // in memory. Do not make a GV summary wait for the unrelated First Forward loader.
+    } else {
+      const P = perf();
+      if (P && P.ensureLoaded) jobs.push(safeAsync(() => P.ensureLoaded({ light: true })));
+      ['daily', 'agentClass', 'agents', 'stockAgents'].forEach((k) => { if (FF.store && FF.store.need) jobs.push(safeAsync(() => FF.store.need(k, { only: true }))); });
+    }
     await Promise.all(jobs);
     quickCache.clear();
   }
@@ -501,7 +518,7 @@ window.FF = window.FF || {};
   }
   async function build(person) {
     if (!supports(person)) throw new Error('Is type ka profile nahi banta');
-    await load();
+    await loadFor(person);
     return BUILDERS[person.kind](person, false);
   }
 
@@ -797,5 +814,5 @@ window.FF = window.FF || {};
     }
   }
 
-  FF.masterProfile = { supports, quick, build, html, csvRows, waText, renderInto, open, warm, load, suggest, suggestGro, findFfAgent, findGvAgent, mobileFor, get suggestDays() { return suggestDays(); } };
+  FF.masterProfile = { supports, quick, build, html, csvRows, waText, renderInto, open, warm, load, loadFor, suggest, suggestGro, findFfAgent, findGvAgent, mobileFor, get suggestDays() { return suggestDays(); } };
 })(window.FF);

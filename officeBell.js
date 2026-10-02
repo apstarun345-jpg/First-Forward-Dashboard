@@ -170,49 +170,114 @@ window.FF = window.FF || {};
   const isPolicyError = (reason) => POLICY_ERRORS.some((x) => String(reason || '').toLowerCase().includes(String(x).toLowerCase()));
   const isBenignError = (reason) => BENIGN_ERRORS.some((x) => String(reason || '').toLowerCase().includes(String(x).toLowerCase()));
 
-  /** Bol kar sunao. Fail ho (autoplay block / koi voice nahi) to ting + nudge. Promise<boolean>. */
+  function speechVoices(synth, waitMs) {
+    const read = () => {
+      try { const list = synth && synth.getVoices ? synth.getVoices() : []; return Array.isArray(list) ? list : []; }
+      catch { return []; }
+    };
+    const initial = read();
+    // macOS/Safari can publish its installed voices asynchronously. Wait briefly for voiceschanged;
+    // browsers without that event still get an immediate system-default fallback.
+    if (initial.length || !synth || (!synth.addEventListener && !('onvoiceschanged' in synth))) return Promise.resolve(initial);
+    return new Promise((resolve) => {
+      let done = false, timer = null, oldHandler = null, installedHandler = null;
+      const cleanup = () => {
+        if (timer) clearTimeout(timer);
+        if (synth.removeEventListener) synth.removeEventListener('voiceschanged', changed);
+        else if (installedHandler && synth.onvoiceschanged === installedHandler) synth.onvoiceschanged = oldHandler || null;
+      };
+      const finish = (force) => {
+        const voices = read();
+        if (!force && !voices.length) return;
+        if (done) return;
+        done = true; cleanup(); resolve(voices);
+      };
+      const changed = () => finish(false);
+      if (synth.addEventListener) synth.addEventListener('voiceschanged', changed);
+      else {
+        oldHandler = synth.onvoiceschanged;
+        installedHandler = (...args) => { try { if (typeof oldHandler === 'function') oldHandler.apply(synth, args); } catch { /* listener */ } changed(); };
+        synth.onvoiceschanged = installedHandler;
+      }
+      timer = setTimeout(() => finish(true), waitMs || 500);
+    });
+  }
+
+  /** Bol kar sunao. System voices late-load hon ya synthesis paused ho to resume/retry; asli error
+      par ting + nudge. Office Bell apni utterance banata hai (assistant callback ke duplicate fallback se bache). */
   function speakAnnounce(text, fallbackDelta) {
     return new Promise((resolve) => {
-      let settled = false;
-      let retried = false;
-      const ok = () => { if (!settled) { settled = true; st.unlocked = true; st.lastErr = ''; st.lastSpokeAt = Date.now(); hideNudge(); resolve(true); } };
-      const speakDirect = () => {
-        try {
-          const u = new SpeechSynthesisUtterance(String(text));
-          u.lang = 'hi-IN'; u.rate = 1.02;
-          u.onend = ok;
-          u.onerror = (ev) => bad((ev && ev.error) || 'error', true);
-          window.speechSynthesis.speak(u);
-        } catch (err) { bad(err && err.message ? err.message : 'exception', true); }
-      };
-      const bad = (reason, viaDirect) => {
+      let settled = false, retried = false, attempt = 0, watchdog = null, retryTimer = null;
+      const finish = (ok, reason) => {
         if (settled) return;
-        // 🔁 interrupted/canceled = browser ne pehle wali awaaz kaati — dobara try karo, block mat kaho.
-        if (isBenignError(reason) && !retried) {
-          retried = true;
-          setTimeout(() => { if (!settled) { try { window.speechSynthesis.cancel(); } catch { /* ignore */ } speakDirect(); } }, 160);
+        settled = true;
+        clearTimeout(watchdog); clearTimeout(retryTimer);
+        if (ok) {
+          st.unlocked = true; st.lastErr = ''; st.lastSpokeAt = Date.now(); hideNudge(); resolve(true);
           return;
         }
-        settled = true;
         st.lastErr = String(reason || 'error');
-        // Policy block sirf tab jab browser ne sach me mana kiya ho; warna unlock state waisi hi rehne do.
         if (isPolicyError(reason) || reason === 'unsupported') st.unlocked = false;
-        ting(fallbackDelta || 3);
-        showNudge();
-        resolve(false);
+        ting(fallbackDelta || 3); showNudge(); resolve(false);
+      };
+      const ok = (id) => { if (id === attempt) finish(true); };
+      const bad = (reason, id) => {
+        if (settled || id !== attempt) return;
+        clearTimeout(watchdog);
+        // interrupted/canceled/audio-busy aksar Safari/macOS TTS queue se aata hai — ek clean retry.
+        if ((isBenignError(reason) || reason === 'speech-timeout') && !retried) {
+          retried = true;
+          st.lastErr = String(reason || 'error');
+          retryTimer = setTimeout(() => { if (!settled) speakDirect(); }, 180);
+          return;
+        }
+        finish(false, reason);
+      };
+      const armWatchdog = (id, ms, graceUsed) => {
+        watchdog = setTimeout(() => {
+          if (settled || id !== attempt) return;
+          const synth = window.speechSynthesis;
+          let active = false;
+          try { active = !!(synth.speaking || synth.pending); if (synth.resume) synth.resume(); } catch { /* retry below */ }
+          if (active && !graceUsed) armWatchdog(id, 6500, true);
+          else bad('speech-timeout', id);
+        }, ms);
+      };
+      const speakDirect = async () => {
+        const id = ++attempt;
+        clearTimeout(watchdog);
+        try {
+          const synth = window.speechSynthesis;
+          const voices = await speechVoices(synth, 650);
+          if (settled || id !== attempt) return;
+          const Utterance = typeof SpeechSynthesisUtterance === 'function' ? SpeechSynthesisUtterance : window.SpeechSynthesisUtterance;
+          if (typeof Utterance !== 'function') { bad('unsupported', id); return; }
+          const langKey = FF.assistant && FF.assistant.getLang && FF.assistant.getLang() === 'en' ? 'en' : 'hi';
+          let voicePrefs = {}, profile = null, voice = null;
+          try { voicePrefs = U.voicePrefs ? (U.voicePrefs() || {}) : {}; } catch { /* defaults */ }
+          try { profile = U.voiceProfile ? U.voiceProfile() : null; } catch { /* optional */ }
+          try { voice = U.matchVoice ? U.matchVoice(voices, langKey, profile) : null; } catch { /* default voice */ }
+          const plain = String(text).replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
+          const u = new Utterance(plain);
+          if (voice) u.voice = voice;
+          u.lang = (voice && voice.lang) || (langKey === 'en' ? 'en-IN' : 'hi-IN');
+          u.rate = Number(voicePrefs.rate) > 0 ? Number(voicePrefs.rate) : 1.02;
+          u.pitch = Number(voicePrefs.pitch) > 0 ? Number(voicePrefs.pitch) : 1;
+          u.volume = 1;
+          u.onend = () => ok(id);
+          u.onerror = (ev) => bad((ev && ev.error) || 'error', id);
+          // Safari/macOS may leave SpeechSynthesis paused after a silent unlock utterance.
+          // Resume before each speak, and clear stale queued speech on retry/new alert.
+          try { if (synth.cancel) synth.cancel(); } catch { /* optional */ }
+          try { if (synth.resume) synth.resume(); } catch { /* optional */ }
+          synth.speak(u);
+          armWatchdog(id, Math.max(10000, Math.min(30000, plain.length * 75)), false);
+        } catch (err) { bad(err && err.message ? err.message : 'exception', id); }
       };
       try {
-        if (!('speechSynthesis' in window)) { bad('unsupported'); return; }
-        // Assistant ka voice path pehle (wo "Meri awaaz" profile + voice prefs use karta hai).
-        if (FF.assistant && typeof FF.assistant.speak === 'function') {
-          let called = false;
-          FF.assistant.speak(text, { force: true, onEnd: () => { called = true; ok(); }, onError: (reason) => { called = true; bad(reason); } });
-          // Assistant chup-chaap kuch na kare (edge cases) → 900ms baad seedha khud bol do.
-          setTimeout(() => { if (!settled && !called) speakDirect(); }, 900);
-          return;
-        }
-        speakDirect();
-      } catch (err) { bad(err && err.message ? err.message : 'exception', true); }
+        if (!('speechSynthesis' in window)) { finish(false, 'unsupported'); return; }
+        speakDirect(false);
+      } catch (err) { finish(false, err && err.message ? err.message : 'exception'); }
     });
   }
 
@@ -258,7 +323,7 @@ window.FF = window.FF || {};
     if (st.nudge) return;
     const el = U.h(`<div class="bell-unlock" role="status">
       <span aria-hidden="true">🔊</span>
-      <span><b>Naye tags ki awaaz ready hai</b><small>Browser ne autoplay roka tha — ek baar <b>Enable sound</b> dabao, phir har naya tag bol kar sunayi dega.</small></span>
+      <span><b>Naye tags ki awaaz ready hai</b><small>Browser ne autoplay roka ya system voice ready nahi thi — ek baar <b>Enable sound</b> dabao, phir har naya tag bol kar sunayi dega.</small></span>
       <button class="btn small primary" data-bell-unlock="1" type="button">Enable sound</button>
       <button class="bell-unlock-x" data-bell-nudge-x="1" type="button" aria-label="Dismiss">✕</button></div>`);
     el.addEventListener('click', (e) => {

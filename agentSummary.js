@@ -21,11 +21,13 @@ FF.pages = FF.pages || {};
 
   async function loadPeople(channel) {
     const isGv = channel === 'gv';
-    if (MP() && MP().load) await MP().load().catch(() => {});
-    if (isGv && FF.gv) await Promise.all([FF.gv.need('report'), FF.gv.need('stockAgent'), FF.gv.need('stockTl'), FF.gv.need('master')].map((p) => p && p.catch ? p.catch(() => {}) : p));
+    const kind = isGv ? 'gv-agent' : 'ff-agent';
+    if (MP() && MP().loadFor) await MP().loadFor({ kind }).catch(() => {});
+    else if (MP() && MP().load) await MP().load().catch(() => {});
+    if (isGv && FF.gv) await Promise.all(['report', 'stockAgent', 'master'].map((k) => FF.gv.need(k, { only: true })).map((p) => p && p.catch ? p.catch(() => {}) : p));
     else await Promise.all([
-      FF.pages.performance && FF.pages.performance.ensureLoaded ? FF.pages.performance.ensureLoaded() : null,
-      FF.store.need('agents'), FF.store.need('stockAgents'), FF.store.need('daily'), FF.store.need('agentClass')
+      FF.pages.performance && FF.pages.performance.ensureLoaded ? FF.pages.performance.ensureLoaded({ light: true }) : null,
+      FF.store.need('agents', { only: true }), FF.store.need('stockAgents', { only: true }), FF.store.need('daily', { only: true }), FF.store.need('agentClass', { only: true })
     ].map((p) => p && p.catch ? p.catch(() => {}) : p));
 
     const map = new Map();
@@ -114,29 +116,38 @@ FF.pages = FF.pages || {};
   // await karta tha → page lag karta tha. Ab list 3 min tak cache hoti hai; TTL ke baad purani list
   // turant dikhti hai aur naya data background me aa jata hai (agle open par).
   const peopleCache = { ff: null, gv: null }; // channel → { at, list }
+  let peopleCacheGeneration = 0;
   const PEOPLE_TTL = 3 * 60 * 1000;
   function loadPeopleCached(channel) {
     const slot = peopleCache[channel];
     if (slot && slot.list && Date.now() - slot.at < PEOPLE_TTL) return slot.list;
-    const p = loadPeople(channel).then((list) => { peopleCache[channel] = { at: Date.now(), list }; return list; });
+    const generation = peopleCacheGeneration;
+    const p = loadPeople(channel).then((list) => {
+      if (generation === peopleCacheGeneration) peopleCache[channel] = { at: Date.now(), list };
+      return list;
+    });
     if (slot && slot.list) { p.catch(() => {}); return slot.list; } // stale abhi, refresh background me
     return p;
   }
 
   // Report bhi 2 min cache — aage-peeche agent switch karne par summary turant khulti hai.
   const reportCache = new Map(); // `${kind}|${name}|${id}` → { at, report }
+  let reportCacheGeneration = 0;
   const REPORT_TTL = 2 * 60 * 1000;
   function buildReportCached(person, opts) {
     const key = `${person.kind}|${norm(person.name)}|${person.id || ''}`;
     const hit = reportCache.get(key);
     if (hit && Date.now() - hit.at < REPORT_TTL && !(opts && opts.fresh)) return hit.report;
+    const generation = reportCacheGeneration;
     return buildReport(person).then((rep) => {
+      if (generation !== reportCacheGeneration) return rep;
       reportCache.set(key, { at: Date.now(), report: rep });
-      while (reportCache.size > 24) reportCache.delete(reportCache.keys().next().value);
+      // TL teams commonly exceed 24 agents; retain a full roster so the next Team Pack is also instant.
+      while (reportCache.size > 128) reportCache.delete(reportCache.keys().next().value);
       return rep;
     });
   }
-  function clearCaches() { peopleCache.ff = null; peopleCache.gv = null; reportCache.clear(); }
+  function clearCaches() { peopleCacheGeneration++; reportCacheGeneration++; peopleCache.ff = null; peopleCache.gv = null; reportCache.clear(); }
 
   // ---- v3.34 add-ons: 6-month trend · alerts · team pack -------------------------------------------
   function ymBack(ym, k) {
@@ -148,16 +159,23 @@ FF.pages = FF.pages || {};
   }
   const monthLbl = (ym) => { const seg = String(ym || '').match(/^(\d{4})-(\d{1,2})$/); return seg ? new Date(Number(seg[1]), Number(seg[2]) - 1, 1).toLocaleString('en-IN', { month: 'short' }) : String(ym || ''); };
 
-  /** Pichhle 6 mahine ka issuance (EIR agentClass ledger — FF + GV dono, koi extra query nahi). */
+  /** Pichhle 6 mahine ka issuance (EIR ledger; GV Master rows are the already-loaded fallback). */
   function monthlyTrend(person, ch, isTl, curYm) {
     const rows = (FF.store && FF.store.get && FF.store.get('agentClass')) || [];
-    if (!rows.length) return null;
     const nm = norm(person.name);
     const wantGv = ch === 'gv';
-    const mine = rows.filter((r) => {
+    let mine = rows.filter((r) => {
       if (wantGv !== /gv/i.test(r.channel || '')) return false;
       return norm(isTl ? r.tlName : r.name) === nm;
     });
+    if (!mine.length && wantGv && FF.gv && FF.gv.issuanceRows) {
+      const wantedId = clean(person.id || person.sub).toUpperCase();
+      mine = (FF.gv.issuanceRows() || []).filter((r) => {
+        if (isTl) return norm(r.tlName || r.tl) === nm && (!wantedId || !r.tlId || clean(r.tlId).toUpperCase() === wantedId);
+        const rowId = clean(r.agentId || r.id || r.gvId || r.gvUniqueId).toUpperCase();
+        return (wantedId && rowId && rowId === wantedId) || norm(r.agentName || r.name || r.gvName) === nm;
+      }).map((r) => ({ ym: rowYm(r), n: r.n == null ? 1 : r.n }));
+    }
     if (!mine.length) return null;
     const byYm = new Map();
     mine.forEach((r) => byYm.set(r.ym, (byYm.get(r.ym) || 0) + (Number(r.n) || 0)));
@@ -225,6 +243,123 @@ FF.pages = FF.pages || {};
     return [...tls, ...ags];
   }
 
+  const monthOrdinal = (ym) => {
+    const m = String(ym || '').match(/^(\d{4})-(\d{1,2})$/);
+    return m ? Number(m[1]) * 12 + Number(m[2]) - 1 : null;
+  };
+  const monthDistance = (from, to) => {
+    const a = monthOrdinal(from), b = monthOrdinal(to);
+    return a === null || b === null ? null : Math.max(0, b - a);
+  };
+  const currentYm = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
+  function rowYm(row) {
+    if (/^\d{4}-\d{1,2}$/.test(String(row && row.ym || ''))) return String(row.ym);
+    const date = row && (row.date || row.d || row.dateKey);
+    if (!date) return '';
+    const key = typeof date === 'string' ? date : (date instanceof Date ? date.toISOString() : String(date));
+    const m = key.match(/(\d{4})-(\d{2})/);
+    return m ? `${m[1]}-${m[2]}` : '';
+  }
+  function sameAgentRow(row, agent, person) {
+    const rowId = clean(row && (row.agentId || row.id || row.gvId || row.gvUniqueId)).toUpperCase();
+    const agentId = clean(agent && (agent.id || agent.agentId)).toUpperCase();
+    const rowName = norm(row && (row.agentName || row.name || row.gvName));
+    const agentName = norm(agent && (agent.name || agent.agentName));
+    const byId = rowId && agentId && rowId === agentId;
+    if (!byId && (!rowName || rowName !== agentName)) return false;
+    const targetTl = person && /tl$/i.test(String(person.kind || '')) ? norm(person.name) : norm((agent && (agent.tlName || agent.tl)) || (person && person.tl));
+    const rowTl = norm(row && (row.tlName || row.tl));
+    return !(targetTl && rowTl && rowTl !== targetTl);
+  }
+  const activityKey = (agent) => `${clean(agent && (agent.id || agent.agentId)).toUpperCase()}|${norm(agent && (agent.name || agent.agentName))}`;
+  function activityContext(person, agents, ch) {
+    const list = (agents || []).filter((a) => a && a.name);
+    const byId = new Map(), byName = new Map(), sources = new Map(), latest = new Map();
+    const index = (map, key, agent) => {
+      if (!key) return;
+      const values = map.get(key) || [];
+      values.push(agent); map.set(key, values);
+    };
+    list.forEach((agent) => {
+      const key = activityKey(agent);
+      index(byId, clean(agent.id || agent.agentId).toUpperCase(), agent);
+      index(byName, norm(agent.name || agent.agentName), agent);
+      latest.set(key, '');
+    });
+    const performanceRows = ch === 'ff'
+      ? ((FF.pages.performance && FF.pages.performance.agents && FF.pages.performance.agents()) || [])
+      : (((FF.pages.gvPerformance && FF.pages.gvPerformance.sourceRows && FF.pages.gvPerformance.sourceRows()) || (FF.gv && FF.gv.get && FF.gv.get('report'))) || []);
+    list.forEach((agent) => {
+      const source = performanceRows.find((row) => sameAgentRow(row, agent, person)) || {};
+      sources.set(activityKey(agent), source);
+    });
+    const findAgent = (row) => {
+      const id = clean(row && (row.agentId || row.id || row.gvId || row.gvUniqueId)).toUpperCase();
+      const name = norm(row && (row.agentName || row.name || row.gvName));
+      const candidates = [...(id ? (byId.get(id) || []) : []), ...(name ? (byName.get(name) || []) : [])];
+      const seen = new Set();
+      for (const agent of candidates) {
+        const key = activityKey(agent);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        if (sameAgentRow(row, agent, person)) return agent;
+      }
+      return null;
+    };
+    const updateLatest = (rows, fallback) => {
+      for (const row of rows || []) {
+        const rowChannel = clean(row.channel || '');
+        if (!fallback && rowChannel && (ch === 'gv' ? !/gv|green/i.test(rowChannel) : !/first|ff/i.test(rowChannel))) continue;
+        const agent = findAgent(row);
+        if (!agent) continue;
+        const key = activityKey(agent);
+        if (fallback && latest.get(key)) continue;
+        if (!(Number(fallback && row.n == null ? 1 : row.n) > 0)) continue;
+        const ym = rowYm(row);
+        if (ym && ym > (latest.get(key) || '')) latest.set(key, ym);
+      }
+    };
+    const monthly = [
+      ...((FF.store && FF.store.get && FF.store.get('agentClass')) || []),
+      ...((FF.store && FF.store.get && FF.store.get('agents')) || [])
+    ];
+    updateLatest(monthly, false);
+    // Monthly EIR is exact. For GV agents with no ledger month, index the already-loaded issuance
+    // rows once (EIR or GV Master), not once per agent; never wait for another sheet request.
+    if (ch === 'gv' && FF.gv && FF.gv.issuanceRows && [...latest.values()].some((ym) => !ym)) {
+      updateLatest(FF.gv.issuanceRows() || [], true);
+    }
+    return { sources, latest };
+  }
+  function activityStatus(person, agent, ch, context) {
+    const ctx = context || activityContext(person, [agent], ch);
+    const key = activityKey(agent);
+    const source = ctx.sources.get(key) || {};
+    const latestYm = ctx.latest.get(key) || '';
+    const curTotal = Number(agent && (agent.curTotal ?? agent.cur ?? (agent.totals && agent.totals.curTotal))) || Number(source.curTotal) || 0;
+    const rawLastActive = clean(source.lastActive || source.tlLastActive || agent.lastActive || '');
+    const rawStatus = clean(source.agentStatus || source.status || agent.agentStatus || agent.status || '');
+    const nowYm = currentYm();
+    let inactiveMonths = latestYm ? monthDistance(latestYm, nowYm) : null;
+    if (curTotal > 0) inactiveMonths = 0;
+    if (inactiveMonths === null) {
+      const days = rawLastActive.match(/(\d+)\s*days?\s*inactive/i);
+      if (days) inactiveMonths = Math.max(1, Math.floor(Number(days[1]) / 30));
+      else if (/inactive|dormant|not active/i.test(`${rawLastActive} ${rawStatus}`)) inactiveMonths = 1;
+      else if (/\bactive\b/i.test(`${rawLastActive} ${rawStatus}`)) inactiveMonths = 0;
+      else inactiveMonths = 1;
+    }
+    const status = inactiveMonths > 0 ? 'Inactive' : 'Active';
+    return {
+      activityStatus: status,
+      inactiveMonths: inactiveMonths > 0 ? inactiveMonths : 0,
+      inactiveDuration: inactiveMonths > 0 ? `Inactive By ${inactiveMonths} Month` : '',
+      lastActiveYm: latestYm,
+      performanceStatus: rawStatus,
+      lastActive: rawLastActive
+    };
+  }
+
   async function buildReport(person) {
     const raw = await MP().build({
       kind: person.kind, name: person.name, sub: person.id || '',
@@ -251,12 +386,15 @@ FF.pages = FF.pages || {};
       classTable: (raw.classes || []).map((c) => ({ ...c, growth: c.last ? ((c.cur - c.last) / c.last) * 100 : null })),
       agents: (raw.agents || []).map((a) => ({
         ...a,
-        curTotal: a.cur || 0, lastTotal: a.last || 0,
+        curTotal: a.cur ?? a.curTotal ?? 0, lastTotal: a.last ?? a.lastTotal ?? 0,
         curVc4: a.curVc4 || 0, curComm: a.curComm || 0,
         stockTotal: a.stockTotal || ((a.stockVc4 || 0) + (a.stockComm || 0)),
-        growth: U.growth(a.cur || 0, a.last || 0)
+        growth: U.growth(a.cur ?? a.curTotal ?? 0, a.last ?? a.lastTotal ?? 0)
       }))
     };
+    const activityData = activityContext(person, isTl ? p.agents : [p], ch);
+    if (isTl) p.agents = p.agents.map((a) => ({ ...a, ...activityStatus(person, a, ch, activityData) }));
+    else Object.assign(p, activityStatus(person, p, ch, activityData));
     let age = null;
     if (FF.stockAge && FF.stockAge.compute) {
       const scope = isTl
@@ -275,7 +413,7 @@ FF.pages = FF.pages || {};
     const lines = [
       `*📋 ${p.name}* (${chLabel} · ${r.isTl ? 'Team Leader' : 'Agent'}${p.id ? ` · ID: ${p.id}` : ''})`,
       `${p.mobile && canContacts() ? `📞 Mobile: ${p.mobile}` : ''}${!r.isTl && p.tlName ? ` · 👥 TL: ${p.tlName}${p.tlId ? ` (${p.tlId})` : ''}` : ''}`.replace(/^ · /, ''),
-      `Priority: ${p.priority || '—'}${p.status ? ` · Status: ${p.status}` : ''}`,
+      `Priority: ${p.priority || '—'}${p.status ? ` · Performance: ${p.status}` : ''}${p.activityStatus ? ` · Activity: ${p.activityStatus}` : ''}${p.inactiveDuration ? ` · ${p.inactiveDuration}` : ''}`,
       '',
       `*📊 KPI Summary:*`,
       `• Current Month (${p.curYm || 'MTD'}): *${fmt(t.curTotal)}* (VC4: ${fmt(t.curVc4)} · Comm: ${fmt(t.curComm)})`,
@@ -308,8 +446,9 @@ FF.pages = FF.pages || {};
       const sumComm = U.sum(p.agents, (a) => a.curComm);
       const sumStock = U.sum(p.agents, (a) => a.stockTotal);
       lines.push('', `*🧑‍💼 Team Agents (${fmt(p.agents.length)}):*`);
-      p.agents.slice(0, 30).forEach((a) => {
-        lines.push(`• ${a.name}${a.id ? ` (${a.id})` : ''}: Last ${fmt(a.lastTotal)} · MTD *${fmt(a.curTotal)}* · Stock ${fmt(a.stockTotal)}`);
+      p.agents.forEach((a) => {
+        const activity = a.activityStatus || 'Inactive';
+        lines.push(`• ${a.name}${a.id ? ` (${a.id})` : ''}: Last ${fmt(a.lastTotal)} · MTD *${fmt(a.curTotal)}* · Stock ${fmt(a.stockTotal)} · Status: ${activity}${a.inactiveDuration ? ` · ${a.inactiveDuration}` : ''}`);
       });
       lines.push(`*∑ Team Grand Total (${fmt(p.agents.length)} Agents): Last ${fmt(sumLast)} · MTD ${fmt(sumCur)} (VC4 ${fmt(sumVc4)} · Comm ${fmt(sumComm)}) · Stock ${fmt(sumStock)}*`);
     }
@@ -320,7 +459,21 @@ FF.pages = FF.pages || {};
 
   function reportCsv(r) {
     const p = r.p, t = p.totals || {}, age = r.age;
-    const rows = MP().csvRows(p).map((row) => [...row]);
+    // Team-agent rows neeche explicit status columns ke saath add hote hain; profile CSV ka
+    // aggregate/class-wise section keep karo, duplicate legacy team rows ko suppress karke.
+    const rows = MP().csvRows(r.isTl ? { ...p, agents: [] } : p).map((row) => [...row]);
+    if (!r.isTl) {
+      rows.push(['Activity Status', p.activityStatus || '']);
+      rows.push(['Inactive Duration', p.inactiveDuration || '']);
+      rows.push(['Last Active Month', p.lastActiveYm || '']);
+    }
+    if (r.isTl && (p.agents || []).length) {
+      rows.push([]);
+      rows.push(['Team Agents', `${p.agents.length} agents under ${p.name}`]);
+      rows.push(['Agent Name', 'ID', 'Last Month', 'Current (MTD)', 'VC4', 'Comm', 'Growth %', 'Stock', 'Status', 'Inactive Duration']);
+      p.agents.forEach((a) => rows.push([a.name, a.id || '', a.lastTotal, a.curTotal, a.curVc4, a.curComm, a.growth == null ? '' : Number(a.growth.toFixed(1)), a.stockTotal, a.activityStatus || 'Inactive', a.inactiveDuration || '']));
+      rows.push(['GRAND TOTAL', `${p.agents.length} Agents`, U.sum(p.agents, (a) => a.lastTotal), U.sum(p.agents, (a) => a.curTotal), U.sum(p.agents, (a) => a.curVc4), U.sum(p.agents, (a) => a.curComm), '', U.sum(p.agents, (a) => a.stockTotal), `${p.agents.filter((a) => a.activityStatus === 'Active').length} Active`, `${p.agents.filter((a) => a.activityStatus !== 'Active').length} Inactive`]);
+    }
     if (age && age.total) {
       rows.push([]);
       rows.push(['Stock Ageing Class', ...age.buckets.map((b) => b.label), '30+d Old', '60+d Critical', 'Total Stock']);
@@ -347,6 +500,7 @@ FF.pages = FF.pages || {};
         ['Name', p.name], ['ID', p.id || ''], ['Mobile', canContacts() ? (p.mobile || '') : ''],
         ...(r.isTl ? [] : [['TL', p.tlName || ''], ['TL ID', p.tlId || '']]),
         ['Priority', p.priority || ''],
+        ...(r.isTl ? [] : [['Activity Status', p.activityStatus || ''], ['Inactive Duration', p.inactiveDuration || ''], ['Last Active Month', p.lastActiveYm || '']]),
         ['Current Month', p.curYm || ''],
         [`Issuance ${p.curYm || '(MTD)'}`, t.curTotal],
         ['VC4 (MTD)', t.curVc4], ['Comm (MTD)', t.curComm],
@@ -378,29 +532,12 @@ FF.pages = FF.pages || {};
     if (r.isTl && (p.agents || []).length) {
       sheets.push({
         name: 'Team Agents',
-        header: ['Agent Name', 'ID', p.lastYm || 'Last Month', p.curYm || 'Current (MTD)', 'VC4', 'Comm', 'Growth %', 'Stock'],
-        rows: p.agents.map((a) => [a.name, a.id || '', a.lastTotal, a.curTotal, a.curVc4, a.curComm, a.growth == null ? '' : Number(a.growth.toFixed(1)), a.stockTotal])
-          .concat([['GRAND TOTAL', `${p.agents.length} Agents`, U.sum(p.agents, (a) => a.lastTotal), U.sum(p.agents, (a) => a.curTotal), U.sum(p.agents, (a) => a.curVc4), U.sum(p.agents, (a) => a.curComm), '', U.sum(p.agents, (a) => a.stockTotal)]])
+        header: ['Agent Name', 'ID', p.lastYm || 'Last Month', p.curYm || 'Current (MTD)', 'VC4', 'Comm', 'Growth %', 'Stock', 'Status', 'Inactive Duration'],
+        rows: p.agents.map((a) => [a.name, a.id || '', a.lastTotal, a.curTotal, a.curVc4, a.curComm, a.growth == null ? '' : Number(a.growth.toFixed(1)), a.stockTotal, a.activityStatus || 'Inactive', a.inactiveDuration || ''])
+          .concat([['GRAND TOTAL', `${p.agents.length} Agents`, U.sum(p.agents, (a) => a.lastTotal), U.sum(p.agents, (a) => a.curTotal), U.sum(p.agents, (a) => a.curVc4), U.sum(p.agents, (a) => a.curComm), '', U.sum(p.agents, (a) => a.stockTotal), `${p.agents.filter((a) => a.activityStatus === 'Active').length} Active`, `${p.agents.filter((a) => a.activityStatus !== 'Active').length} Inactive`]])
       });
     }
     return sheets;
-  }
-
-  /** v3.34 — structured JSON backup (API / automation ke liye). */
-  function reportJson(r) {
-    const p = r.p, t = p.totals || {};
-    return JSON.stringify({
-      generatedAt: new Date().toISOString(),
-      channel: r.ch === 'gv' ? 'gv' : 'ff',
-      person: { kind: r.isTl ? 'tl' : 'agent', name: p.name, id: p.id || '', mobile: canContacts() ? (p.mobile || '') : '', tlName: p.tlName || '', tlId: p.tlId || '' },
-      months: { current: p.curYm || '', last: p.lastYm || '' },
-      totals: t,
-      expectedMonthEnd: p.expected, runRatePerDay: p.runRate,
-      classWise: (p.classTable || []).map((c) => ({ cls: c.cls, last: c.last, current: c.cur, growthPct: c.growth, stock: c.stock })),
-      stockAgeing: r.age ? { total: r.age.total, old30: r.age.old30, old60: r.age.old60, buckets: r.age.buckets, byClass: r.age.byClass } : null,
-      teamAgents: r.isTl ? (p.agents || []) : undefined,
-      grandTotalText: reportText(r)
-    }, null, 2);
   }
 
   function makePdf(r) {
@@ -408,7 +545,7 @@ FF.pages = FF.pages || {};
     const chLabel = r.ch === 'gv' ? 'GV Partner' : 'First Forward';
     const doc = FF.pdf.doc({
       title: `${chLabel} · ${r.isTl ? 'Team Leader' : 'Agent'} Summary`,
-      subtitle: `${p.name}${p.id ? ` (ID: ${p.id})` : ''}${p.tlName && !r.isTl ? ` · TL: ${p.tlName}` : ''}${p.mobile && canContacts() ? ` · ${p.mobile}` : ''}`,
+      subtitle: `${p.name}${p.id ? ` (ID: ${p.id})` : ''}${p.tlName && !r.isTl ? ` · TL: ${p.tlName}` : ''}${p.mobile && canContacts() ? ` · ${p.mobile}` : ''}${p.activityStatus ? ` · ${p.activityStatus}${p.inactiveDuration ? ` (${p.inactiveDuration})` : ''}` : ''}`,
       right: `${new Date().toLocaleDateString('en-IN')} · ${p.curYm || ''}`
     });
     doc.kpis([
@@ -445,12 +582,12 @@ FF.pages = FF.pages || {};
       const sumComm = U.sum(p.agents, (a) => a.curComm);
       const sumStock = U.sum(p.agents, (a) => a.stockTotal);
       const teamGrowth = U.growth(sumCur, sumLast);
-      doc.section(`Team Agents (${fmt(p.agents.length)}) — Issuance & Stock`);
+      doc.section(`Team Agents (${fmt(p.agents.length)}) — Issuance, Stock & Activity`);
       doc.table({
-        headers: ['Agent Name', 'ID', 'Last Month', 'Current (MTD)', 'VC4', 'Comm', 'Growth %', 'Stock'],
-        align: ['left', 'left', 'right', 'right', 'right', 'right', 'right', 'right'],
-        rows: p.agents.slice(0, 65).map((a) => [a.name, a.id || '—', fmt(a.lastTotal), fmt(a.curTotal), fmt(a.curVc4), fmt(a.curComm), a.growth === null || a.growth === undefined ? '—' : `${a.growth >= 0 ? '+' : ''}${a.growth.toFixed(0)}%`, fmt(a.stockTotal)]),
-        foot: [`GRAND TOTAL (${fmt(p.agents.length)} Agents)`, '', fmt(sumLast), fmt(sumCur), fmt(sumVc4), fmt(sumComm), teamGrowth === null ? '—' : `${teamGrowth >= 0 ? '+' : ''}${teamGrowth.toFixed(0)}%`, fmt(sumStock)]
+        headers: ['Agent Name', 'ID', 'Last Month', 'Current (MTD)', 'VC4', 'Comm', 'Growth %', 'Stock', 'Status', 'Inactive Duration'],
+        align: ['left', 'left', 'right', 'right', 'right', 'right', 'right', 'right', 'left', 'left'],
+        rows: p.agents.map((a) => [a.name, a.id || '—', fmt(a.lastTotal), fmt(a.curTotal), fmt(a.curVc4), fmt(a.curComm), a.growth === null || a.growth === undefined ? '—' : `${a.growth >= 0 ? '+' : ''}${a.growth.toFixed(0)}%`, fmt(a.stockTotal), a.activityStatus || 'Inactive', a.inactiveDuration || '—']),
+        foot: [`GRAND TOTAL (${fmt(p.agents.length)} Agents)`, '', fmt(sumLast), fmt(sumCur), fmt(sumVc4), fmt(sumComm), teamGrowth === null ? '—' : `${teamGrowth >= 0 ? '+' : ''}${teamGrowth.toFixed(0)}%`, fmt(sumStock), `${p.agents.filter((a) => a.activityStatus === 'Active').length} Active`, `${p.agents.filter((a) => a.activityStatus !== 'Active').length} Inactive`]
       });
     }
 
@@ -571,18 +708,24 @@ FF.pages = FF.pages || {};
   }
 
   // ---- v3.34 Team Pack — TL ke poore team ki ek combined PDF / Excel -------------------------------
-  const PACK_CAP = 50;
   async function buildTeamPack(r, onProgress) {
-    const agents = (r.p.agents || []).slice(0, PACK_CAP);
-    const pack = [];
-    for (let i = 0; i < agents.length; i++) {
-      const a = agents[i];
-      if (onProgress) onProgress(i + 1, agents.length, a.name);
-      let rep = null;
-      try { rep = await buildReportCached({ kind: `${r.ch}-agent`, name: a.name, id: a.id || '', tl: r.p.name }); }
-      catch (err) { console.warn('[agentSummary] team pack skip:', a.name, err); }
-      pack.push({ agent: a, rep });
-    }
+    const agents = [...(r.p.agents || [])];
+    const pack = new Array(agents.length);
+    let cursor = 0, completed = 0;
+    const workerCount = Math.min(5, agents.length);
+    const workers = Array.from({ length: workerCount }, async () => {
+      while (cursor < agents.length) {
+        const i = cursor++, agent = agents[i];
+        if (onProgress) onProgress(completed, agents.length, agent.name);
+        let rep = null;
+        try { rep = await buildReportCached({ kind: `${r.ch}-agent`, name: agent.name, id: agent.id || '', tl: r.p.name }); }
+        catch (err) { console.warn('[agentSummary] team pack skip:', agent.name, err); }
+        pack[i] = { agent, rep };
+        completed++;
+        if (onProgress) onProgress(completed, agents.length, agent.name);
+      }
+    });
+    await Promise.all(workers);
     return pack;
   }
 
@@ -610,7 +753,7 @@ FF.pages = FF.pages || {};
     pack.forEach(({ agent, rep }) => {
       if (!rep) return;
       const ap = rep.p, at = ap.totals || {};
-      doc.section(`${agent.name}${agent.id ? ` · ID ${agent.id}` : ''}`);
+      doc.section(`${agent.name}${agent.id ? ` · ID ${agent.id}` : ''} · ${agent.activityStatus || 'Inactive'}${agent.inactiveDuration ? ` · ${agent.inactiveDuration}` : ''}`);
       doc.kpis([
         { label: 'MTD', value: fmt(at.curTotal), sub: `VC4 ${fmt(at.curVc4)} · Comm ${fmt(at.curComm)}`, color: '#2563eb' },
         { label: 'Last Month', value: fmt(at.lastTotal), color: '#7c3aed' },
@@ -628,9 +771,9 @@ FF.pages = FF.pages || {};
     const p = r.p, t = p.totals || {};
     const sheets = [{
       name: 'Team Summary',
-      header: ['Agent', 'ID', p.lastYm || 'Last Month', p.curYm || 'Current (MTD)', 'VC4', 'Comm', 'Growth %', 'Stock'],
-      rows: (p.agents || []).map((a) => [a.name, a.id || '', a.lastTotal, a.curTotal, a.curVc4, a.curComm, a.growth == null ? '' : Number(a.growth.toFixed(1)), a.stockTotal])
-        .concat([['GRAND TOTAL', `${p.agents.length} Agents`, U.sum(p.agents, (a) => a.lastTotal), U.sum(p.agents, (a) => a.curTotal), U.sum(p.agents, (a) => a.curVc4), U.sum(p.agents, (a) => a.curComm), '', U.sum(p.agents, (a) => a.stockTotal)]])
+      header: ['Agent', 'ID', p.lastYm || 'Last Month', p.curYm || 'Current (MTD)', 'VC4', 'Comm', 'Growth %', 'Stock', 'Status', 'Inactive Duration'],
+      rows: (p.agents || []).map((a) => [a.name, a.id || '', a.lastTotal, a.curTotal, a.curVc4, a.curComm, a.growth == null ? '' : Number(a.growth.toFixed(1)), a.stockTotal, a.activityStatus || 'Inactive', a.inactiveDuration || ''])
+        .concat([['GRAND TOTAL', `${p.agents.length} Agents`, U.sum(p.agents, (a) => a.lastTotal), U.sum(p.agents, (a) => a.curTotal), U.sum(p.agents, (a) => a.curVc4), U.sum(p.agents, (a) => a.curComm), '', U.sum(p.agents, (a) => a.stockTotal), `${p.agents.filter((a) => a.activityStatus === 'Active').length} Active`, `${p.agents.filter((a) => a.activityStatus !== 'Active').length} Inactive`]])
     }];
     if (r.age && r.age.total) {
       sheets.push({
@@ -655,7 +798,7 @@ FF.pages = FF.pages || {};
 
   function agentWaText(r, a) {
     const chLabel = r.ch === 'gv' ? 'GV Partner' : 'First Forward';
-    return `*🧑‍💼 ${a.name}* (${chLabel} · Agent${a.id ? ` · ID: ${a.id}` : ''})\n• MTD: *${fmt(a.curTotal)}* (Last: ${fmt(a.lastTotal)} · ${a.growth == null ? '—' : `${a.growth >= 0 ? '+' : ''}${a.growth.toFixed(0)}%`})\n• Stock: *${fmt(a.stockTotal)}*\n👥 TL: ${r.p.name}\n— ${FF.config.brand || 'ApnaPayment'} 📊`;
+    return `*🧑‍💼 ${a.name}* (${chLabel} · Agent${a.id ? ` · ID: ${a.id}` : ''})\n• Status: ${a.activityStatus || 'Unknown'}${a.inactiveDuration ? ` · ${a.inactiveDuration}` : ''}\n• MTD: *${fmt(a.curTotal)}* (Last: ${fmt(a.lastTotal)} · ${a.growth == null ? '—' : `${a.growth >= 0 ? '+' : ''}${a.growth.toFixed(0)}%`})\n• Stock: *${fmt(a.stockTotal)}*\n👥 TL: ${r.p.name}\n— ${FF.config.brand || 'ApnaPayment'} 📊`;
   }
 
   function reportHtml(r) {
@@ -677,8 +820,7 @@ FF.pages = FF.pages || {};
     // 🔐 v3.35 — export buttons sirf `export` permission par, share/copy sirf `share` par (admin decides).
     const expBtns = can('export') ? `<button class="btn primary" data-as-act="pdf">📄 PDF</button>
           <button class="btn" data-as-act="excel">📊 Excel</button>
-          <button class="btn" data-as-act="csv">⬇ CSV</button>
-          <button class="btn" data-as-act="json">🧾 JSON</button>` : '';
+          <button class="btn" data-as-act="csv">⬇ CSV</button>` : '';
     const shBtns = can('share') ? `<button class="btn" data-as-act="share">📲 Share / WhatsApp</button>
           <button class="btn" data-as-act="wa">💬 WA Text</button>
           <button class="btn" data-as-act="copy">📋 Copy</button>` : '';
@@ -686,7 +828,7 @@ FF.pages = FF.pages || {};
       <div class="as-head">
         <div class="as-ava">${r.isTl ? '👥' : '🧑‍💼'}</div>
         <div class="as-who">
-          <div class="badge-row"><span class="badge ${r.ch === 'gv' ? 'green' : 'blue'}">${chLabel}</span><span class="badge purple">${r.isTl ? 'Team Leader' : 'Agent'}</span>${p.priority ? `<span class="badge ${/high/i.test(p.priority) ? 'red' : /med/i.test(p.priority) ? 'amber' : 'green'}">${esc(p.priority)}</span>` : ''}</div>
+          <div class="badge-row"><span class="badge ${r.ch === 'gv' ? 'green' : 'blue'}">${chLabel}</span><span class="badge purple">${r.isTl ? 'Team Leader' : 'Agent'}</span>${p.priority ? `<span class="badge ${/high/i.test(p.priority) ? 'red' : /med/i.test(p.priority) ? 'amber' : 'green'}">${esc(p.priority)}</span>` : ''}${p.activityStatus ? `<span class="badge ${p.activityStatus === 'Active' ? 'green' : 'red'}">${esc(p.activityStatus)}${p.inactiveDuration ? ` · ${esc(p.inactiveDuration)}` : ''}</span>` : ''}</div>
           <h2>${esc(p.name)}</h2>
           <p class="dim">${p.id ? `ID: <b>${esc(p.id)}</b> · ` : ''}${p.tlName && !r.isTl ? `TL: <b>${esc(p.tlName)}</b>${p.tlId ? ` (${esc(p.tlId)})` : ''} · ` : ''}${p.mobile && canContacts() ? `📞 <a href="tel:${esc(p.mobile)}">${esc(p.mobile)}</a>` : ''}</p>
         </div>
@@ -728,9 +870,9 @@ FF.pages = FF.pages || {};
       ${r.isTl && (p.agents || []).length ? `<div class="card" style="margin-top:14px">
         <div class="card-head"><h3>🧑‍💼 Team Agents (${fmt(p.agents.length)}) — click any agent to open their summary</h3>${can('export') ? `<span class="as-pack-btns"><button class="btn small" data-as-pack="xlsx" title="Poore team ki ek Excel workbook (Summary + har agent ki sheet)">👥 Team Pack Excel</button><button class="btn small primary" data-as-pack="pdf" title="Poore team ki ek combined PDF (TL + har agent ka page)">👥 Team Pack PDF</button></span>` : ''}</div>
         <div class="table-wrap"><table class="tbl compact">
-          <thead><tr><th>Agent</th><th>ID</th><th class="num">${esc(p.lastYm || 'Last')}</th><th class="num">${esc(p.curYm || 'MTD')}</th><th class="num">VC4</th><th class="num">Comm</th><th class="num">Growth</th><th class="num">Stock</th><th></th></tr></thead>
-          <tbody>${p.agents.map((a) => `<tr class="clickable" data-as-pick="${esc(`${r.ch}-agent|${a.name}`)}"><td><b>${esc(a.name)}</b></td><td class="mono">${esc(a.id || '—')}</td><td class="num">${fmt(a.lastTotal)}</td><td class="num"><b>${fmt(a.curTotal)}</b></td><td class="num">${fmt(a.curVc4)}</td><td class="num">${fmt(a.curComm)}</td><td class="num">${U.pctHtml(a.growth)}</td><td class="num">${fmt(a.stockTotal)}</td><td>${can('share') ? `<button class="btn tiny" data-as-wa="${esc([a.name, a.id || '', a.curTotal, a.lastTotal, a.stockTotal].join('|'))}" title="WhatsApp par is agent ka summary bhejein">📲</button>` : ''}</td></tr>`).join('')}</tbody>
-          <tfoot><tr class="row-total"><td colspan="2"><b>Grand Total (${fmt(p.agents.length)} Agents)</b></td><td class="num"><b>${fmt(sumAgentsLast)}</b></td><td class="num"><b>${fmt(sumAgentsCur)}</b></td><td class="num"><b>${fmt(sumAgentsVc4)}</b></td><td class="num"><b>${fmt(sumAgentsComm)}</b></td><td class="num">${U.pctHtml(teamGrowth)}</td><td class="num"><b>${fmt(sumAgentsStock)}</b></td><td></td></tr></tfoot>
+          <thead><tr><th>Agent</th><th>ID</th><th class="num">${esc(p.lastYm || 'Last')}</th><th class="num">${esc(p.curYm || 'MTD')}</th><th class="num">VC4</th><th class="num">Comm</th><th class="num">Growth</th><th class="num">Stock</th><th>Status</th><th>Inactive Duration</th><th></th></tr></thead>
+          <tbody>${p.agents.map((a) => `<tr class="clickable" data-as-pick="${esc(`${r.ch}-agent|${a.name}`)}"><td><b>${esc(a.name)}</b></td><td class="mono">${esc(a.id || '—')}</td><td class="num">${fmt(a.lastTotal)}</td><td class="num"><b>${fmt(a.curTotal)}</b></td><td class="num">${fmt(a.curVc4)}</td><td class="num">${fmt(a.curComm)}</td><td class="num">${U.pctHtml(a.growth)}</td><td class="num">${fmt(a.stockTotal)}</td><td><span class="badge ${a.activityStatus === 'Active' ? 'green' : 'red'}">${esc(a.activityStatus || 'Inactive')}</span></td><td>${esc(a.inactiveDuration || '—')}</td><td>${can('share') ? `<button class="btn tiny" data-as-wa="${esc([a.name, a.id || '', a.curTotal, a.lastTotal, a.stockTotal, a.activityStatus || 'Inactive', a.inactiveDuration || ''].join('|'))}" title="WhatsApp par is agent ka summary bhejein">📲</button>` : ''}</td></tr>`).join('')}</tbody>
+          <tfoot><tr class="row-total"><td colspan="2"><b>Grand Total (${fmt(p.agents.length)} Agents)</b></td><td class="num"><b>${fmt(sumAgentsLast)}</b></td><td class="num"><b>${fmt(sumAgentsCur)}</b></td><td class="num"><b>${fmt(sumAgentsVc4)}</b></td><td class="num"><b>${fmt(sumAgentsComm)}</b></td><td class="num">${U.pctHtml(teamGrowth)}</td><td class="num"><b>${fmt(sumAgentsStock)}</b></td><td><b>${p.agents.filter((a) => a.activityStatus === 'Active').length} Active</b></td><td><b>${p.agents.filter((a) => a.activityStatus !== 'Active').length} Inactive</b></td><td></td></tr></tfoot>
         </table></div>
       </div>` : ''}
     </div>`;
@@ -742,7 +884,7 @@ FF.pages = FF.pages || {};
     async function render(root, params) {
       const chLabel = isGv ? 'GV Partner' : 'First Forward';
       root.innerHTML = `<div class="page">
-        <div class="page-head"><div><h1>${isGv ? '🟩' : '🟦'} ${chLabel} · Agent / TL Summary</h1><p class="sub">Search by <b>Name · Agent Name · TL Name · Agent ID · TL ID · Mobile Number</b> — poora summary + charts + ageing + Grand Total PDF / Excel / CSV / JSON / WhatsApp</p></div></div>
+        <div class="page-head"><div><h1>${isGv ? '🟩' : '🟦'} ${chLabel} · Agent / TL Summary</h1><p class="sub">Search by <b>Name · Agent Name · TL Name · Agent ID · TL ID · Mobile Number</b> — poora summary + charts + ageing + Grand Total PDF / Excel / CSV / WhatsApp</p></div></div>
         <div class="card card-primary"><div class="card-body">
           <div class="as-search-bar">
             <div class="as-search">
@@ -761,7 +903,7 @@ FF.pages = FF.pages || {};
       </div>`;
       const qEl = U.$('#as-q', root), drop = U.$('#as-drop', root), body = U.$('#as-body', root);
       const topSug = U.$('#as-top-suggest', root), searchBtn = U.$('#as-search-btn', root);
-      state.list = await loadPeople(channel);
+      state.list = await loadPeopleCached(channel);
 
       const renderTopChips = (q) => {
         if (!topSug) return;
@@ -869,8 +1011,8 @@ FF.pages = FF.pages || {};
         const waBtn = e.target.closest('[data-as-wa]');
         if (waBtn && state.report) {
           if (!can('share')) { U.toast('Share permission nahi hai', 'err'); return; }
-          const [wName, wId, wCur, wLast, wStock] = (waBtn.dataset.asWa || '').split('|');
-          const a = { name: wName, id: wId, curTotal: Number(wCur) || 0, lastTotal: Number(wLast) || 0, stockTotal: Number(wStock) || 0, growth: U.growth(Number(wCur) || 0, Number(wLast) || 0) };
+          const [wName, wId, wCur, wLast, wStock, activityStatusValue, inactiveDuration] = (waBtn.dataset.asWa || '').split('|');
+          const a = { name: wName, id: wId, curTotal: Number(wCur) || 0, lastTotal: Number(wLast) || 0, stockTotal: Number(wStock) || 0, growth: U.growth(Number(wCur) || 0, Number(wLast) || 0), activityStatus: activityStatusValue, inactiveDuration };
           const mob = canContacts() && MP() && MP().mobileFor ? MP().mobileFor(wName, wId, '') : '';
           const txt = agentWaText(state.report, a);
           const link = mob && mob10(mob).length === 10 ? `https://wa.me/91${mob10(mob)}?text=${encodeURIComponent(txt)}` : U.waLink(txt);
@@ -928,7 +1070,7 @@ FF.pages = FF.pages || {};
           const r = state.report, fname = `${r.ch}-${r.isTl ? 'tl' : 'agent'}-${U.slug(r.p.name)}-${U.stamp()}`;
           const k = act.dataset.asAct;
           // 🔐 v3.35 — render-time hide ke baad bhi yahan check (defense in depth, same toast strings)
-          if (['pdf', 'excel', 'csv', 'json'].includes(k) && !can('export')) { U.toast('Download permission nahi hai', 'err'); return; }
+          if (['pdf', 'excel', 'csv'].includes(k) && !can('export')) { U.toast('Download permission nahi hai', 'err'); return; }
           if (['share', 'wa', 'copy'].includes(k) && !can('share')) { U.toast('Share permission nahi hai', 'err'); return; }
           act.disabled = true;
           try {
@@ -949,9 +1091,6 @@ FF.pages = FF.pages || {};
             } else if (k === 'excel') {
               FF.xlsx.download(`${fname}.xlsx`, reportXlsx(r));
               U.toast('Excel downloaded (multi-sheet, Grand Total) ✓', 'ok');
-            } else if (k === 'json') {
-              U.downloadBlob(`${fname}.json`, new Blob([reportJson(r)], { type: 'application/json' }));
-              U.toast('JSON downloaded ✓', 'ok');
             }
           } catch (err) {
             console.error('[agentSummary] export failed:', err);
@@ -980,5 +1119,5 @@ FF.pages = FF.pages || {};
 
   FF.pages.ffAgentSummary = makePage('ff');
   FF.pages.gvAgentSummary = makePage('gv');
-  FF.agentSummary = { loadPeople, matchPeople, topSuggestions, buildReport, makePdf, reportText, reportCsv, reportXlsx, reportJson, reportHtml, monthlyTrend, agentAlerts, buildTeamPack, teamPackPdf, teamPackXlsx, agentWaText, clearCaches };
+  FF.agentSummary = { loadPeople, matchPeople, topSuggestions, buildReport, makePdf, reportText, reportCsv, reportXlsx, reportHtml, monthlyTrend, agentAlerts, activityStatus, buildTeamPack, teamPackPdf, teamPackXlsx, agentWaText, clearCaches };
 })(window.FF);
