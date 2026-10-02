@@ -83,7 +83,10 @@ export const PAGE_PERMISSIONS = [
   { key: 'directAgents', label: 'Cross-channel · Direct Agents & TLs (FF APS + GV no-TL rule)', group: 'Cross Channel' },
   { key: 'newAgents', label: 'Cross-channel · New Agents & TL Changes (FF + GV)', group: 'Cross Channel' },
   { key: 'unusual', label: 'Cross-channel · Unusual Agent Activity (wrong VRN / replacement / chassis)', group: 'Cross Channel' },
-  { key: 'agentSummary', label: 'FF + GV · Agent / TL Summary report (share / PDF)', group: 'Cross Channel' },
+  { key: 'ffAgentSummary', label: 'First Forward · Agent / TL Summary (share / PDF)', group: 'First Forward' },
+  { key: 'gvAgentSummary', label: 'GV Partner · Agent / TL Summary (share / PDF)', group: 'GV Partner' },
+  // Legacy key kept so existing saved permissions remain valid during migration.
+  { key: 'agentSummary', label: 'Legacy · Agent / TL Summary (use channel-specific access above)', group: 'Cross Channel' },
   { key: 'dualChannel', label: 'Cross-channel · Identity & combined analysis', group: 'Cross Channel' },
   { key: 'masterStock', label: 'Cross-channel · Master Stock (barcode/agent/TL/GV search)', group: 'Cross Channel' },
   { key: 'fastagChampions', label: 'Cross-channel · FASTag Champions (top agents/TLs)', group: 'Cross Channel' },
@@ -130,7 +133,7 @@ const allPermKeysNow = () => allPermKeys(db.settings);
 // Back-compat export (some tooling imported PERMISSIONS).
 export const PERMISSIONS = permissionsFor({ tabs: DEFAULT_TABS });
 const DEFAULT_USER_PERMS = ['home', 'executive', 'forecast', 'dataQuality', 'savedViews', 'reportStudio', 'followups', 'tagIssued', 'rangeReport', 'targets', 'dashboard', 'trend', 'stock', 'stockReport', 'performance', 'ffCommission', 'gvDashboard', 'gvTrend', 'gvStock', 'gvStockReport', 'gvPerformance', 'gvCommission', 'dualChannel', 'masterStock', 'compare', 'tv', 'teamMap',
-  'sheet:StockDataa', 'sheet:REPORT', 'sheet:GV Master', 'sheet:Tag Assignment', 'sheet:GV REPORT', 'charts', 'export', 'dispatchPlan', 'tlScorecard', 'voiceAssistant', 'arena', 'fame', 'warRoom', 'activity', 'network', 'radar', 'reportCards', 'directAgents', 'newAgents', 'unusual', 'agentSummary', 'sprints', 'stockRadar'];
+  'sheet:StockDataa', 'sheet:REPORT', 'sheet:GV Master', 'sheet:Tag Assignment', 'sheet:GV REPORT', 'charts', 'export', 'dispatchPlan', 'tlScorecard', 'voiceAssistant', 'arena', 'fame', 'warRoom', 'activity', 'network', 'radar', 'reportCards', 'directAgents', 'newAgents', 'unusual', 'fastagChampions', 'ffAgentSummary', 'gvAgentSummary', 'agentSummary', 'sprints', 'stockRadar'];
 
 // Admin-controlled audience for automated notifications. `users` means all approved non-admin
 // users who have notification access; each user's own master/type preferences still apply.
@@ -5811,7 +5814,13 @@ async function start() {
     const has = new Set(u.permissions), add = [];
     for (const [parent, child] of PERM_CHILDREN) if (has.has(parent) && !has.has(child)) add.push(child);
     if (!has.has('voiceAssistant')) add.push('voiceAssistant');
-    if (add.length) { u.permissions = u.permissions.concat(add); permsMigrated = true; }
+    // v3.37: the combined summary became two independent controls. Keep old users'
+    // access intact, but expose separate FF and GV switches in Settings → Access matrix.
+    if (has.has('agentSummary')) {
+      if (!has.has('ffAgentSummary')) add.push('ffAgentSummary');
+      if (!has.has('gvAgentSummary')) add.push('gvAgentSummary');
+    }
+    if (add.length) { u.permissions = [...new Set(u.permissions.concat(add))]; permsMigrated = true; }
   }
   if (permsMigrated) { await persist('users'); console.log('Panel permissions migrated ✓ — existing users ko naye per-page access options grant ho gaye.'); }
   const storedNotify = stored.notify;

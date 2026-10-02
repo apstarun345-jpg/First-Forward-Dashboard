@@ -961,7 +961,7 @@ FF.pages = FF.pages || {};
       : '<p class="dim small">Filhaal koi reset request nahi hai. User login page par “Forgot password?” se request bhejta hai aur yahan dikhta hai.</p>';
 
     root.innerHTML = `${section('🔐 Access matrix <span class="dim">(kaun kya dekh sakta hai)</span>', `
-        <p class="dim small">Checkbox tick = us user ko wo permission. Admin checkbox disabled rehte hain (admin ke paas sab hota hai). Quick buttons: <b>All</b> = sab, <b>FF</b> = sirf First Forward, <b>GV</b> = sirf GV Partner, <b>None</b> = kuch nahi.</p>
+        <p class="dim small">Checkbox tick = us user ko wo permission. Admin checkbox disabled rehte hain (admin ke paas sab hota hai). Quick buttons: <b>All</b> = sab, <b>FF</b> = sirf First Forward, <b>GV</b> = sirf GV Partner, <b>None</b> = kuch nahi. Agent / TL Summary ke liye <b>FF Agent / TL Summary</b> aur <b>GV Agent / TL Summary</b> alag permission hain — dono tick karne par dono access milta hai.</p>
         <div class="table-wrap matrix-wrap"><table class="tbl compact matrix"><thead>${head}</thead><tbody>${rows}</tbody></table></div>
         <div class="save-bar"><button class="btn primary" id="mx-save">💾 Save access</button><span class="dim small" id="mx-msg"></span></div>`)}
       ${section('🔑 Password reset requests', reqHtml)}
@@ -976,8 +976,8 @@ FF.pages = FF.pages || {};
         const isSheet = k.startsWith('sheet:');
         const sheetId = isSheet ? k.slice(6) : '';
         if (kind === 'all') return true;
-        if (kind === 'ff') return k.startsWith('gv') || (isSheet && FF.config.tabBy(sheetId) && (FF.config.tabBy(sheetId).group === 'GV Partner')) ? false : true;
-        if (kind === 'gv') return k.startsWith('gv') || k === 'compare' || (isSheet && FF.config.tabBy(sheetId) && FF.config.tabBy(sheetId).group === 'GV Partner');
+        if (kind === 'ff') return k.startsWith('gv') || k === 'gvAgentSummary' || (isSheet && FF.config.tabBy(sheetId) && (FF.config.tabBy(sheetId).group === 'GV Partner')) ? false : true;
+        if (kind === 'gv') return (k.startsWith('gv') || k === 'gvAgentSummary' || k === 'compare') || (isSheet && FF.config.tabBy(sheetId) && FF.config.tabBy(sheetId).group === 'GV Partner');
         if (kind === 'view') return !['share', 'refresh', 'contacts'].includes(k) && k !== 'home' ? true : ['home'].includes(k);
         return false;
       });
@@ -989,8 +989,8 @@ FF.pages = FF.pages || {};
         const all = e.target.closest('[data-mx-all]'), none = e.target.closest('[data-mx-none]');
         if (all) { setRow(row, () => true); return; }
         if (none) { setRow(row, () => false); return; }
-        if (e.target.closest('[data-mx-ff]')) { setRow(row, (k) => !(k.startsWith('gv') || k === 'compare' || (k.startsWith('sheet:') && (FF.config.tabBy(k.slice(6)) || {}).group === 'GV Partner'))); return; }
-        if (e.target.closest('[data-mx-gv]')) { setRow(row, (k) => k.startsWith('gv') || k === 'compare' || (k.startsWith('sheet:') && (FF.config.tabBy(k.slice(6)) || {}).group === 'GV Partner')); return; }
+        if (e.target.closest('[data-mx-ff]')) { setRow(row, (k) => !((k.startsWith('gv') || k === 'gvAgentSummary' || k === 'compare') || (k.startsWith('sheet:') && (FF.config.tabBy(k.slice(6)) || {}).group === 'GV Partner'))); return; }
+        if (e.target.closest('[data-mx-gv]')) { setRow(row, (k) => k.startsWith('gv') || k === 'gvAgentSummary' || k === 'compare' || (k.startsWith('sheet:') && (FF.config.tabBy(k.slice(6)) || {}).group === 'GV Partner')); return; }
       }
       const rr = e.target.closest('[data-reset]');
       if (rr) {
