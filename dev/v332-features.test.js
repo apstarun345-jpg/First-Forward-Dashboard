@@ -25,7 +25,9 @@ test('unusual: flags high wrong-VRN / replacement / chassis agents, leaves norma
     rows.push(d('2026-09-05', `N${i}`, 1, { vrnType: 'Wrong VRN' }));
   }
   rows.push(d('2026-09-01', 'BAD', 20), d('2026-09-02', 'BAD', 10, { vrnType: 'Wrong VRN' }), d('2026-09-03', 'BAD', 10, { vrnType: 'Chassis No' }), d('2026-09-04', 'BAD', 15, { type: 'REPLACEMENT' }));
-  const out = FF.unusual.analyze(rows, { period: 'last30', mult: 2, min: 3 });
+  // `today` pin karo — warna calendar date badalne par last30 window shift ho jaata hai aur fixture
+  // (Sept 2026) window se bahar chala jaata hai (date-dependent flaky test).
+  const out = FF.unusual.analyze(rows, { period: 'last30', today: '2026-09-30', mult: 2, min: 3 });
   const bad = out.rows.find((r) => r.id === 'BAD');
   assert.ok(bad.flags.includes('wrong') && bad.flags.includes('chassis') && bad.flags.includes('replace'), bad.flags.join());
   assert.equal(out.rows.filter((r) => r.flags.length && r.id !== 'BAD').length, 0);

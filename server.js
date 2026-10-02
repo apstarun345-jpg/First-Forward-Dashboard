@@ -384,7 +384,9 @@ const normUser = (u) => String(u || '').trim().toLowerCase().replace(/[^a-z0-9._
 // `enabled` = master switch (UI me ek hi "Notifications ON/OFF" button hai). OFF → koi in-app toast
 // nahi, koi browser alert nahi, koi mobile push nahi. Feed items phir bhi save hote hain (history).
 const NOTIFY_TONES = new Set(['classic', 'soft', 'double', 'chime', 'alert']);
-const DEFAULT_NOTIFY_PREFS = { enabled: true, login: true, signup: true, report: true, monthly: true, digest: true, alert: true, activity: true, click: true, search: true, settings: true, user: true, location: true, info: true, request: true, assist: true, sound: true, tone: 'classic', push: true };
+// `voice` = app/web band hone par bhi alerts bol kar sunao (push ke saath "bolne layak" line
+// bhejta hai; app dobara khulte hi voice catch-up chalta hai — sw.js + pushVoice.js).
+const DEFAULT_NOTIFY_PREFS = { enabled: true, login: true, signup: true, report: true, monthly: true, digest: true, alert: true, activity: true, click: true, search: true, settings: true, user: true, location: true, info: true, request: true, assist: true, sound: true, tone: 'classic', push: true, voice: true };
 function normalizeNotifyPrefs(p) {
   const out = { ...DEFAULT_NOTIFY_PREFS };
   if (p && typeof p === 'object') for (const k of Object.keys(DEFAULT_NOTIFY_PREFS)) {
@@ -1451,6 +1453,8 @@ function pushStatusFor(user) {
     devices: mine.map((s) => ({ host: hostOf(s), at: s.at || '', staleKey: !!(s.vapid && vapidKeys && s.vapid !== vapidKeys.publicKey) })),
     enabled: prefs.enabled !== false,
     prefsPush: prefs.push !== false,
+    prefsVoice: prefs.voice !== false,
+    prefsSound: prefs.sound !== false,
     notifyAccess: user.role === 'admin' || user.notifyAccess !== false,
     lastOk: lastOk ? { at: lastOk.at, status: lastOk.status, host: lastOk.host } : null,
     lastError: lastError ? { at: lastError.at, status: lastError.status, error: lastError.error, host: lastError.host, dead: !!lastError.dead, config: !!lastError.config } : null,
@@ -1458,6 +1462,50 @@ function pushStatusFor(user) {
     ...(user.role === 'admin' ? { allSubs: pushSubs().length, totalDevices: pushSubs().length } : {})
   };
 }
+/**
+ * Notification text ko bolne-layak banao: HTML/emoji/symbols hata do (Web Speech inhe bol deta hai
+ * warna — "blue square", "bar chart" jaisa kachra), whitespace saaf karo, length cap karo.
+ */
+function speechSafe(value, max) {
+  return String(value == null ? '' : value)
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/[\u{1F000}-\u{1FAFF}\u{2190}-\u{21FF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}\u{200D}\u{20E3}]/gu, ' ')
+    .replace(/["'`*_#>|~^{}[\]\\]/g, ' ')
+    .replace(/[^\p{L}\p{N}\s.,:%+\-–—()/]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/\s([.,:%])/g, '$1')
+    .trim()
+    .slice(0, max || 200);
+}
+/** Push ke saath jaane wali chhoti voice line (app band hone par bhi isi ko bola jayega). */
+function pushVoiceLine(item) {
+  if (!item) return '';
+  const meta = item.meta || {};
+  let text = '';
+  if (item.type === 'report') {
+    const delta = meta.delta && typeof meta.delta === 'object' ? meta.delta : null;
+    const total = delta && Number.isFinite(Number(delta.total)) ? Number(delta.total) : null;
+    const parts = delta && delta.classes ? Object.entries(delta.classes).slice(0, 4).map(([k, v]) => `${k} ${Number(v) > 0 ? '+' : ''}${Number(v)}`) : [];
+    if (total !== null && total !== 0) text = `Data update. ${total > 0 ? '+' : ''}${total} tags${parts.length ? ` (${parts.join(', ')})` : ''}.`;
+  }
+  if (!text) text = [speechSafe(item.title, 90), speechSafe(item.body, 150)].filter(Boolean).join('. ');
+  return speechSafe(text, 240);
+}
+/** User ke kitne notifications abhi unread hain — push par app-icon badge ke liye. */
+function unreadCountFor(u) {
+  try {
+    const seen = u && u.notificationsSeenAt ? new Date(u.notificationsSeenAt).getTime() : 0;
+    return visibleNotifications(u, '1970-01-01T00:00:00.000Z').filter((item) => new Date(item.createdAt).getTime() > seen).length;
+  } catch { return 0; }
+}
+/** Important alerts par notification actions (Android/desktop par dikhte hain). */
+const PUSH_ACTIONS = {
+  report: [{ action: 'open', title: '📊 Kholo' }, { action: 'dismiss', title: '✅ Theek hai' }],
+  alert: [{ action: 'open', title: '🔴 Kholo' }, { action: 'dismiss', title: '✅ Theek hai' }],
+  digest: [{ action: 'open', title: '🌅 Kholo' }, { action: 'dismiss', title: '✅ Theek hai' }],
+  signup: [{ action: 'open', title: '👤 Kholo' }, { action: 'dismiss', title: '✅ Theek hai' }],
+  request: [{ action: 'open', title: '🏷️ Kholo' }, { action: 'dismiss', title: '✅ Theek hai' }]
+};
 /** Fan-out a notification to push subscriptions (admin-targeted → admin subs, broadcast → everyone). Per-user push + sound preference bhi respect karo. */
 function pushFanout(item) {
   if (!vapidKeys || !item) return;
@@ -1475,13 +1523,24 @@ function pushFanout(item) {
   Promise.all(subs.map(async (s) => {
     const u = findUser(s.username);
     const prefs = u ? normalizeNotifyPrefs(u.notifyPrefs) : DEFAULT_NOTIFY_PREFS;
+    const voiceLine = pushVoiceLine(item);
     const data = {
+      id: item.id,
       title: item.title,
       body: (item.body || '').replace(/\s+/g, ' ').slice(0, 180),
       tag: item.type || 'ff',
       link: (item.meta && item.meta.link) || '',
       sound: prefs.sound !== false,
       tone: prefs.tone,
+      at: Date.parse(item.createdAt) || Date.now(),
+      // 🔊 Voice: app band ho to OS notification (text + sound + vibration) turant jaata hai aur
+      // ye line queue me rehti hai; app khulte hi bol kar suna di jaati hai (sw.js + pushVoice.js).
+      voice: prefs.voice !== false && prefs.sound !== false ? voiceLine : '',
+      speak: prefs.voice !== false && prefs.sound !== false,
+      user: s.username,
+      badge: unreadCountFor(u),
+      lang: 'hi-IN',
+      actions: PUSH_ACTIONS[item.type] || undefined,
       persist: item.type === 'signup' || item.type === 'report' || item.type === 'user' // important types don't auto-dismiss
     };
     handlePushResult(s, await deliverPush(s, data), { type: item.type });
@@ -3302,11 +3361,17 @@ async function handleApi(req, res, url) {
     if (!mine.length) {
       return sendJson(res, 200, { ok: false, delivered: 0, failed: 0, results: [], hint: 'Is account par koi push device register nahi hai. Bell panel me "📲 Mobile notifications on karo" dabao (mobile par PWA install karke).' });
     }
+    const prefs = normalizeNotifyPrefs(user.notifyPrefs);
+    const wantVoice = prefs.voice !== false && prefs.sound !== false;
     const results = await Promise.all(mine.map(async (s) => {
       const result = await deliverPush(s, {
+        id: `test-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`,
         title: '🔔 Test push notification',
         body: `${user.name || user.username} — ye test alert hai. Phone ke notification panel me dikhna chahiye (app band ho tab bhi).`,
-        tag: 'ff-test', link: '#/home', sound: true, tone: normalizeNotifyPrefs(user.notifyPrefs).tone, persist: false
+        tag: 'ff-test', link: '#/home', sound: true, tone: prefs.tone, persist: false,
+        // 🔊 Ye line app band hone ke baad bhi queue me rehti hai aur app khulte hi boli jaati hai.
+        voice: wantVoice ? 'Test alert. App band hone ke baad bhi text notification aata hai, aur ye awaaz app khulte hi sunai deti hai.' : '',
+        speak: wantVoice, user: s.username, badge: unreadCountFor(user), lang: 'hi-IN'
       });
       handlePushResult(s, result, { type: 'test' });
       return { host: hostOf(s), status: result.status, ok: result.ok, error: result.error || '' };

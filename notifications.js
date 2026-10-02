@@ -41,7 +41,8 @@ window.FF = window.FF || {};
     { id: 'alert', label: 'Alert · alternating urgent notes' }
   ];
   const VALID_TONES = new Set(TONE_OPTIONS.map((x) => x.id));
-  const DEFAULT_PREFS = { enabled: true, login: true, signup: true, report: true, monthly: true, digest: true, alert: true, activity: true, click: true, search: true, settings: true, user: true, location: true, info: true, request: true, assist: true, sound: true, tone: 'classic', push: true };
+  // `voice` = app/web band hone par bhi alerts bol kar sunao (pushVoice.js + sw.js voice queue).
+  const DEFAULT_PREFS = { enabled: true, login: true, signup: true, report: true, monthly: true, digest: true, alert: true, activity: true, click: true, search: true, settings: true, user: true, location: true, info: true, request: true, assist: true, sound: true, tone: 'classic', push: true, voice: true };
   const state = { started: false, bound: false, timer: null, presenceTimer: null, fastTimer: null, lastAt: '', items: [], unread: 0, serverUnread: 0, firstPoll: true, page: 'home', pointer: null, people: [], lastInteraction: Date.now(), pointerBound: false, events: [], dirty: false, lastSent: 0, lastScroll: -1, pushOn: false, pushDevices: 0, pushStatus: null, pushTriedAt: 0, pushError: '', prefs: { ...DEFAULT_PREFS }, audioCtx: null, expanded: null, filterType: 'all', filterUnread: false, seenAt: '', voiceAt: {} };
   const normalizePrefs = (p) => {
     const out = { ...DEFAULT_PREFS, ...(p && typeof p === 'object' ? p : {}) };
@@ -287,6 +288,11 @@ window.FF = window.FF || {};
     // Favicon / title badge for unread
     const t = (FF.config && FF.config.appName) || document.title.replace(/\s*\(\d+\)\s*/, '');
     document.title = state.unread > 0 ? `(${state.unread}) ${t}` : t;
+    // 📱 App icon badge (installed PWA) — sw.js setAppBadge karta hai; support na ho to skip.
+    try {
+      const sw = navigator.serviceWorker;
+      if (sw && sw.controller && sw.controller.postMessage) sw.controller.postMessage({ type: 'ff-badge', count: state.unread });
+    } catch { /* badge optional */ }
   }
   function latestTime(items) { return (items || []).reduce((max, x) => !max || x.createdAt > max ? x.createdAt : max, ''); }
   function itemUnread(item) {
@@ -373,7 +379,7 @@ window.FF = window.FF || {};
     // 🔊 Voice announcement — office bell ke speaker path se (autoplay unlock + queue wala).
     //    UI/bell update PEHLE ho chuke hain, isliye voice me koi bhi dikkat notification ko
     //    rok nahi sakti (purana bug: voiceOn() throw karta tha aur render() tak nahi pahunchta tha).
-    if (o.voiceText) {
+    if (o.voiceText && state.prefs.voice !== false) {
       try {
         const bell = FF.officeBell;
         const bellVoice = bellVoiceOn(bell);
@@ -399,6 +405,15 @@ window.FF = window.FF || {};
   // par sirf toast + panel alert hota tha, **koi voice nahi**. Ab office bell ke speaker path se
   // bol kar sunate hain — same autoplay-unlock + queue + mute rules ke saath.
   const VOICE_TYPES = new Set(['report', 'alert', 'digest', 'request']);
+  /**
+   * pushVoice.js ne ye alert bol diya (app band hone ke baad ka catch-up ya live push) — 75s wala
+   * duplicate-guard set karo taaki wahi khabar polling se dobara na boli jaye.
+   */
+  function noteVoiced(type) {
+    const now = Date.now();
+    state.voiceAt = { ...state.voiceAt, any: now, ...(type ? { [type]: now } : {}) };
+    return now;
+  }
   /** Notification ka bolne-layak text (emoji/symbol hata kar, chhota aur saaf). */
   function voiceLineFor(item) {
     if (!item) return '';
@@ -429,6 +444,7 @@ window.FF = window.FF || {};
   function speakServerItem(item) {
     if (!item || !VOICE_TYPES.has(item.type)) return false;
     if (state.prefs.enabled === false || state.prefs[item.type] === false || state.prefs.sound === false) return false;
+    if (state.prefs.voice === false) return false; // 🔊 "app band ho tab bhi voice" OFF = koi bhi alert announcement nahi
     const bell = FF.officeBell;
     if (!bell || !bellVoiceOn(bell)) return false;
     try { if (Number((bell.prefs && bell.prefs().muteUntil) || 0) > Date.now()) return false; } catch { /* ignore */ }
@@ -488,8 +504,10 @@ window.FF = window.FF || {};
     const monthly = state.prefs.monthly !== false;
     const isAdmin = FF.auth.user && FF.auth.user.role === 'admin';
 
+    const voice = state.prefs.voice !== false;
     const switches = `<div class="notify-switches">
       ${switchRow({ id: 'master', label: '🔔 Notifications', note: on ? 'ON — app ke andar + phone / desktop panel par' : 'OFF — koi alert nahi aayega', on })}
+      ${switchRow({ id: 'voice', label: '🔊 Alert voice (band ho tab bhi)', note: voice ? 'Alert bol kar sunata hai — app khula ho to turant, band tha to khulte hi catch-up' : 'Sirf beep / vibration, koi awaaz nahi', on: voice, disabled: !on })}
       ${switchRow({ id: 'monthly', label: '📅 Monthly report', note: 'Har mahine ki 1–5 tarikh ko pichhle mahine ka FF vs GV compare', on: monthly, disabled: !on })}
     </div>`;
 
@@ -825,7 +843,11 @@ window.FF = window.FF || {};
         sw.classList.toggle('on', on); sw.setAttribute('aria-checked', String(on));
         if (which === 'master') setEnabled(on);
         else if (which === 'sound') { savePrefs({ sound: on }); if (on) beep(true); }
-        else savePrefs({ [which]: on });
+        else if (which === 'voice') {
+          savePrefs({ voice: on });
+          // ON karte hi jo alerts app band hone ke dauraan aaye the wo suna do (permission/gesture yahin hai).
+          if (on && FF.pushVoice) { try { FF.pushVoice.flush('pref-on').catch(() => {}); } catch { /* optional */ } }
+        } else savePrefs({ [which]: on });
         return;
       }
       // 🔁 Settings → Notifications: ek click me sabhi type ON — signup / search / click / page open /
@@ -833,7 +855,7 @@ window.FF = window.FF || {};
       const allOn = e.target.closest('[data-notify-all-on]');
       if (allOn) {
         e.preventDefault(); e.stopPropagation();
-        const patch = { enabled: true, push: true, sound: true, monthly: true };
+        const patch = { enabled: true, push: true, sound: true, monthly: true, voice: true };
         NOTIFY_TYPES.forEach((t) => { patch[t.key] = true; });
         savePrefs(patch, true);
         enableBrowser(true).then((granted) => {
@@ -1091,6 +1113,6 @@ window.FF = window.FF || {};
     return selected;
   }
   function testSound() { unlockAudio(); beep(true); U.toast('🔊 Test beep', 'info'); } // force: master OFF ho tab bhi test chale
-  FF.notifications = { start, stop, poll, toggle, activity, logSearch, logClick, track, testSound, setTone, toneOptions: TONE_OPTIONS, render, setupPush, disablePush, enableBrowser, setEnabled, maybeAskPermission, testPanel, testPush, refreshPushStatus, retryPush, browserAlert, localAlert, speakServerItem, countUnread, unlockAudio, beep, soundOn: () => state.prefs.sound !== false, notifyTypes: NOTIFY_TYPES, get state() { return state; }, get prefs() { return state.prefs; } };
+  FF.notifications = { start, stop, poll, toggle, activity, logSearch, logClick, track, testSound, setTone, toneOptions: TONE_OPTIONS, render, setupPush, disablePush, enableBrowser, setEnabled, maybeAskPermission, testPanel, testPush, refreshPushStatus, retryPush, browserAlert, localAlert, speakServerItem, noteVoiced, countUnread, unlockAudio, beep, soundOn: () => state.prefs.sound !== false, notifyTypes: NOTIFY_TYPES, get state() { return state; }, get prefs() { return state.prefs; } };
   bind();
 })(window.FF);
