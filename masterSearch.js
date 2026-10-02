@@ -514,17 +514,41 @@ FF.pages = FF.pages || {};
       <div><small>Expected month-end</small><b>${p1 ? U.fmt(p1.total) : '—'}</b></div>
     </div>`;
   }
-  /** Sirf ek hi person match ho to uski poori profile inline khol do (async placeholder → data). */
+  const SR = () => (FF.searchReport && FF.searchReport.groupPeople ? FF.searchReport : null);
+  let lastPeople = [];   // abhi dikh rahe result ke log (card ke inline report ko same-naam FF + GV jodne ke liye)
+  /** v3.41 — Ek hi insaan (same naam, FF + GV dono) match ho to poori report inline khol do: upar channel toggle
+   *  (⚖ FF + GV · 🟦 FF · 🟩 GV). Pehle sirf EXACTLY ek person par khulti thi — FF + GV dono me naam ho to 2 card
+   *  aate the aur kuch khulta hi nahi tha. */
   function inlineSingle(container, res) {
     try {
-      if (!container || !MP() || !res || res.tags.length || res.people.length !== 1 || !MP().supports(res.people[0])) return;
+      if (!container || !MP() || !res || res.tags.length || !res.people.length) return;
+      const sr = SR();
+      const groups = sr ? sr.groupPeople(res.people) : [];
+      const single = sr ? groups.length === 1 : (res.people.length === 1 && MP().supports(res.people[0]));
+      if (!single) return;
       const first = container.querySelector && container.querySelector('.ms-section');
       if (!first || !first.insertAdjacentHTML) return;
       first.insertAdjacentHTML('beforebegin', '<section class="ms-section ms-profile-inline"><h3>📊 Poori report</h3><div class="ms-profile-slot"></div></section>');
       const slot = container.querySelector('.ms-profile-inline .ms-profile-slot');
-      const person = res.people[0];
-      if (slot) MP().renderInto(slot, person);
+      if (!slot) return;
+      if (sr) sr.render(slot, groups[0]);
+      else MP().renderInto(slot, res.people[0]);
     } catch { /* ignore */ }
+  }
+  /** Kai log match hon to card ke neeche usi ka inline report (same FF + GV toggle) — "📂 Yahin poori report". */
+  function toggleCardInline(btn) {
+    const sr = SR();
+    if (!sr || !btn) return;
+    const person = personByKey(btn.dataset.msInline);
+    const card = btn.closest('.ms-kundli');
+    if (!person || !card) return;
+    const next = card.nextElementSibling;
+    if (next && next.classList && next.classList.contains('ms-card-inline')) { next.remove(); btn.classList.remove('active'); btn.textContent = '📂 Yahin poori report'; return; }
+    const group = sr.groupPeople(lastPeople.filter((p) => normName(p.name) === normName(person.name)))[0] || sr.groupPeople([person])[0];
+    if (!group) return;
+    card.insertAdjacentHTML('afterend', '<div class="ms-card-inline"><div class="ms-profile-slot"></div></div>');
+    sr.render(card.nextElementSibling.querySelector('.ms-profile-slot'), group);
+    btn.classList.add('active'); btn.textContent = '🔽 Report band karo';
   }
   function personKundli(p) {
     const tl = p.direct ? (p.directLabel || 'Direct Agent') : [...p.tlSet].slice(0, 4).map((n) => tlText(n, p.kind === 'gv-agent' ? 'gv' : 'ff')).join(', ');
@@ -545,7 +569,8 @@ FF.pages = FF.pages || {};
       ${kundliProfileStats(p)}
       <div class="ms-pill-row">${classPills(p.classMap)}</div>
       <div class="ms-kundli-actions">
-        ${MP() && MP().supports(p) ? `<button class="btn small primary" data-ms-profile="${esc(personKey(p))}">📊 Poori report</button>` : ''}
+        ${MP() && SR() && MP().supports(p) ? `<button class="btn small primary" data-ms-inline="${esc(personKey(p))}">📂 Yahin poori report</button>` : ''}
+        ${MP() && MP().supports(p) ? `<button class="btn small${SR() ? '' : ' primary'}" data-ms-profile="${esc(personKey(p))}">📊 Poori report${SR() ? ' (drawer)' : ''}</button>` : ''}
         <a class="btn small" href="#/masterStock?q=${encodeURIComponent(p.name)}">🗄️ Register</a>
         ${p.kind.includes('agent') ? `<button class="btn small" data-ms-agent360="${esc(p.name)}">👁 Agent 360</button>` : ''}
         <button class="btn small" data-ms-tags="${esc(p.name)}">🏷️ Tags</button>
@@ -559,6 +584,7 @@ FF.pages = FF.pages || {};
         <p>Naam, TL, agent ID, TL ID, GV ID, barcode ya tag ID se search karo. Spelling ya ID ke kuch digits bhi kaafi hain.</p>
         ${res.heavy ? '' : '<p class="dim small">Barcode / tag register abhi background me load ho raha hai — thodi der baad barcode search bhi chalega.</p>'}</div>`;
     }
+    lastPeople = res.people || [];
     const parts = [];
     if (res.tags.length) {
       parts.push(`<section class="ms-section"><h3>🏷️ Tags / barcodes <span class="dim small">${U.fmt(res.tags.length)} match</span></h3>
@@ -615,6 +641,8 @@ FF.pages = FF.pages || {};
       if (e.target.closest('[data-ms-close]')) { closePanel(); return; }
       if (e.target.closest('[data-mp-agent]')) { closePanel(); return; }
       if (e.target.closest('[data-kpi]')) { closePanel(); return; }
+      const inl = e.target.closest('[data-ms-inline]');
+      if (inl) { toggleCardInline(inl); return; }
       const prof = e.target.closest('[data-ms-profile]');
       if (prof) { const person = personByKey(prof.dataset.msProfile); if (person && MP()) { closePanel(); MP().open(person); } return; }
       const a = e.target.closest('[data-ms-agent360]');
@@ -805,7 +833,7 @@ FF.pages = FF.pages || {};
     container.innerHTML = `<div class="home-master-search" id="home-master-search">
       <div class="hms-head">
         <span class="hms-ico">🔎</span>
-        <div><b>Master Search</b><small>Naam · TL · agent ID · TL ID · GV ID · barcode · tag ID — First Forward + GV dono ek hi search me</small></div>
+        <div><b>Master Search</b><small>Naam · TL · agent ID · TL ID · GV ID · barcode · tag ID — First Forward + GV dono ek hi search me · naam par <b>poori report</b> (⚖ FF + GV · 🟦 FF · 🟩 GV toggle) — last month · current · stock · class-wise · TL ke agents</small></div>
       </div>
       <div class="hms-input-wrap">
         <input id="home-master-input" class="input" type="search" value="${esc(q)}" placeholder="Type karo… jaise “Rahul”, “34161FA…”, “5845036”, “GV001”, tag ID…" autocomplete="off" aria-label="Master search">
@@ -841,6 +869,8 @@ FF.pages = FF.pages || {};
     container.addEventListener('click', (e) => {
       const chip = e.target.closest('[data-hms]');
       if (chip) { input.value = chip.dataset.hms; run(chip.dataset.hms); return; }
+      const inl = e.target.closest('[data-ms-inline]');
+      if (inl) { toggleCardInline(inl); return; }
       const prof = e.target.closest('[data-ms-profile]');
       if (prof) { const person = personByKey(prof.dataset.msProfile); if (person && MP()) MP().open(person); return; }
       const a360 = e.target.closest('[data-ms-agent360]');
