@@ -36,12 +36,16 @@ FF.pages = FF.pages || {};
   const splitFoot = (ff, gv) => `<span class="hm-split"><span class="ff">🟦 FF <b>${U.fmt(ff)}</b></span><span class="gv">🟩 GV <b>${U.fmt(gv)}</b></span></span>`;
 
   /** month key + observed day — FF (EIR) T+1 hai, GV live — isliye aaj tak ka din count hota hai. */
+  /** Reporting-day context: FF/EIR bank feed T+1 hai, isliye Expected ko aaj ke incomplete
+      din par kabhi divide nahi karna. 03 Oct ko complete report days = 1–2 Oct. */
   function monthContext(rows) {
     const curKey = U.ymKey(TODAY());
     const prevKey = U.prevMonthKey(curKey);
-    const observedDay = Math.max(1, TODAY().getDate());
+    const lagDays = Math.max(0, Number(FF.config.ffIssuanceLagDays) || 1);
+    const observedDay = Math.max(0, TODAY().getDate() - lagDays);
+    const compareDay = Math.max(1, observedDay);
     const daysInMonth = U.daysInMonth(curKey);
-    return { curKey, prevKey, observedDay, daysInMonth };
+    return { curKey, prevKey, observedDay, compareDay, daysInMonth };
   }
 
   /** Convert the small server feed's class totals into month-summary rows until full GV Master loads. */
@@ -109,15 +113,20 @@ FF.pages = FF.pages || {};
   }
 
   function monthKpiHtml(ctx, sf, sg, sc, lastRows) {
-    const { curKey, prevKey, observedDay, daysInMonth } = ctx;
-    const lastSum = M.summary(lastRows, prevKey, observedDay, '');
+    const { curKey, prevKey, observedDay, compareDay, daysInMonth } = ctx;
+    const reportDay = Math.max(0, observedDay);
+    const lastSum = M.summary(lastRows, prevKey, compareDay, '');
     const lastFull = M.summary(lastRows, prevKey);
     const lastTotalFull = lastFull.total;
-    const rate = observedDay ? sc.total / observedDay : 0;
-    const commercialRate = observedDay ? sc.comm / observedDay : 0;
-    const expected = Math.round(rate * daysInMonth);
-    const expectedCommercial = Math.round(commercialRate * daysInMonth);
-    const lastExpected = lastSum.total ? Math.round((lastSum.total / Math.min(observedDay, U.daysInMonth(prevKey))) * U.daysInMonth(prevKey)) : 0;
+    // Expected MUST use only complete/report-available days. Today's live GV row is excluded
+    // when FF/EIR is still T+1, so the run-rate never treats today's partial day as complete.
+    const reportedRows = (sf.rows || []).filter((r) => r.ym !== curKey || Number(r.day) <= reportDay);
+    const reportedSc = M.summary(reportedRows, curKey);
+    const rate = observedDay ? reportedSc.total / observedDay : 0;
+    const commercialRate = observedDay ? reportedSc.comm / observedDay : 0;
+    const expected = observedDay ? Math.round(rate * daysInMonth) : 0;
+    const expectedCommercial = observedDay ? Math.round(commercialRate * daysInMonth) : 0;
+    const lastExpected = lastSum.total ? Math.round((lastSum.total / Math.min(compareDay, U.daysInMonth(prevKey))) * U.daysInMonth(prevKey)) : 0;
     // Kal ka issuance (last complete day) + pichhle mahine ka wahi tareekh
     const y = new Date(TODAY()); y.setDate(y.getDate() - 1);
     const yKey = dayKey(y);
@@ -138,11 +147,11 @@ FF.pages = FF.pages || {};
       kpi('g3', 'VC4', '🚗', U.fmt(sc.vc4), `${momChip(sc.vc4, lastSum.vc4)}<br>${splitFoot(M.summary(sf.ff, curKey).vc4, M.summary(sf.gv, curKey).vc4)}`, `src=both&scope=mtd&ym=${curKey}&f=vc4`),
       kpi('g8', 'VC20', '🛻', U.fmt(sc.vc20), `${momChip(sc.vc20, lastSum.vc20)}<br>${splitFoot(M.summary(sf.ff, curKey).vc20, M.summary(sf.gv, curKey).vc20)}`, `src=both&scope=mtd&ym=${curKey}&f=vc20`),
       kpi('g6', 'VC5+', '🚚', U.fmt(sc.vc5p), `${momChip(sc.vc5p, lastSum.vc5p)}<br>${splitFoot(M.summary(sf.ff, curKey).vc5p, M.summary(sf.gv, curKey).vc5p)}`, `src=both&scope=mtd&ym=${curKey}&f=vc5p`),
-      kpi('g12', 'All Commercial · VC20 + VC5+', '🚛', U.fmt(sc.comm), `${momChip(sc.comm, lastSum.comm, `${prevLabel} · same ${Math.min(observedDay, U.daysInMonth(prevKey))} din`)}<br>Last month full <b>${U.fmt(lastFull.comm)}</b> · Expected this month <b>${U.fmt(expectedCommercial)}</b>`, `src=both&scope=mtd&ym=${curKey}&f=comm`),
+      kpi('g12', 'All Commercial · VC20 + VC5+', '🚛', U.fmt(sc.comm), `${momChip(sc.comm, lastSum.comm, `${prevLabel} · same ${Math.min(compareDay, U.daysInMonth(prevKey))} reported din`)}<br>Last month full <b>${U.fmt(lastFull.comm)}</b> · Expected this month <b>${U.fmt(expectedCommercial)}</b> <span class="dim">(report till ${observedDay ? esc(U.labelDateKey(`${curKey}-${String(observedDay).padStart(2,'0')}`)) : '—'})</span>`, `src=both&scope=mtd&ym=${curKey}&f=comm`),
       kpi('g5', 'Replacement', '🔁', U.fmt(sc.replacement), `${momChip(sc.replacement, lastSum.replacement)}<br>${splitFoot(M.summary(sf.ff, curKey).replacement, M.summary(sf.gv, curKey).replacement)}`, `src=both&scope=mtd&ym=${curKey}&f=repl`),
       kpi('g7', 'Chassis', '🔧', U.fmt(sc.chassis), `${momChip(sc.chassis, lastSum.chassis)}<br>${splitFoot(M.summary(sf.ff, curKey).chassis, M.summary(sf.gv, curKey).chassis)}`, `src=both&scope=mtd&ym=${curKey}&f=chassis`),
       kpi('g2', `Expected in ${U.labelYM(curKey)}`, '🎯', U.fmt(expected),
-        `run-rate <b>${U.fmt(rate, true)}</b>/din · ${observedDay}/${daysInMonth} din<br><span class="dim">last month full <b>${U.fmt(lastTotalFull)}</b> · expected <b>${U.fmt(lastExpected)}</b></span>`,
+        `run-rate <b>${U.fmt(rate, true)}</b>/din · ${observedDay}/${daysInMonth} reported din · aaj exclude<br><span class="dim">report till <b>${observedDay ? esc(U.labelDateKey(`${curKey}-${String(observedDay).padStart(2,'0')}`)) : '—'}</b> · last month full <b>${U.fmt(lastTotalFull)}</b> · expected <b>${U.fmt(lastExpected)}</b></span>`,
         `src=both&scope=mtd&ym=${curKey}`)
     ];
     return card(`📅 ${esc(monthLabel)} · KPI cards <span class="dim">· issuance EIR se (GV = master ID ${esc(FF.config.eir.gvMasterId || '5845036')}, baaki FF)${sg.liveToday ? ' · GV aaj GV Master se live' : ''} · har card ke andar last month vs current month + %</span>`,
