@@ -187,6 +187,8 @@ const DEFAULT_SETTINGS = {
       gv: [{ min: 1, max: 50, rate: '' }, { min: 51, max: 100, rate: '' }, { min: 101, max: 150, rate: '' }, { min: 151, max: 250, rate: '' }, { min: 251, max: null, rate: '' }]
     }
   },
+  // Admin-configurable GV Master CCH → class group mapping.
+  gvClassCch: { enabled: true, source: 'cch', groups: { VC4: [], VC20: [], VC5: [] } },
   gv: {
     master: { tab: 'GV Master', gid: '', uniqueId: 'A', agentName: 'B', tlId: 'C', tlName: 'D', vrn: 'E', vClass: 'F', cch: 'G', serial: 'H', tagId: 'I', amount: 'J', customer: 'K', productId: 'L', commission: 'M', status: 'N', commissionStatus: 'O', date: 'P', time: 'Q', gvTlId: 'R', masterCch: 'S', monthName: 'T', tagType: 'U', gvUniqueId: 'W', gvUniqueName: 'X' },
     assignment: { tab: 'Tag Assignment', gid: '', cls: 'A', tagId: 'B', serial: 'C', status: 'D', agentId: 'E', agentName: 'F', tlId: 'G', tlName: 'H', gvUniqueId: 'L', gvUniqueName: 'M', allocatedAt: '' },
@@ -833,7 +835,17 @@ function serverDate(value) {
 }
 function serverNumber(value) { const n = Number(value); return Number.isFinite(n) ? n : 0; }
 function classBucket(value) {
-  const c = String(value || '').toUpperCase().replace(/\s+/g, '');
+  const cfg = (db.settings && db.settings.gvClassCch) || {};
+  const token = String(value || '').toUpperCase().replace(/\s+/g, ' ').trim();
+  if (cfg.enabled !== false && token) {
+    const groups = cfg.groups || {};
+    for (const [group, values] of Object.entries(groups)) {
+      if (Array.isArray(values) && values.some((v) => String(v || '').toUpperCase().replace(/\s+/g, ' ').trim() === token)) {
+        return group === 'VC5' || group === 'VC5+' ? 'VC5+' : group;
+      }
+    }
+  }
+  const c = token.replace(/\s+/g, '');
   if (c === '4' || c === 'VC4') return 'VC4';
   if (c === '20' || c === 'VC20') return 'VC20';
   return 'VC5+';
@@ -850,14 +862,6 @@ function countByDateClass(table) {
     rows.push({ date, cls, n });
   }
   return rows;
-}
-// Date cell helper: gviz can return typed Date(), text dates, formatted dates, or Sheets serials.
-// (Live-feed helpers ke saath hi rakha gaya hai taaki countByDateClass ke saath hi test/extract ho sake.)
-function serverDateFromCell(row, index) {
-  const cell = row && row.c && row.c[index];
-  if (!cell) return '';
-  const direct = serverDate(cell.v);
-  return direct || serverDate(cell.f);
 }
 
 /**
@@ -1168,15 +1172,6 @@ function serverColLetter(index) {
   while (n > 0) { const r = (n - 1) % 26; out = String.fromCharCode(65 + r) + out; n = Math.floor((n - 1) / 26); }
   return out;
 }
-function serverColIndex(letter) {
-  let n = 0;
-  for (const ch of String(letter || '').toUpperCase()) {
-    const code = ch.charCodeAt(0) - 64;
-    if (code < 1 || code > 26) return -1;
-    n = n * 26 + code;
-  }
-  return n - 1;
-}
 async function resolveGvServerColumns(settings, force) {
   const cfg = settings.gv && settings.gv.master || {};
   const tab = cfg.tab || 'GV Master';
@@ -1206,32 +1201,7 @@ async function resolveGvServerColumns(settings, force) {
       }
       return '';
     };
-    // Configured letter tabhi bharosa ke laayak hai jab us column ki heading expected field jaisi ho;
-    // warna (column shift / galat mapping) header probe ka column use karo — client-side mapFields bhi
-    // yahi karta hai. Kuch na mile to configured letter safe fallback rehta hai.
-    const headerAt = (letter) => { const i = serverColIndex(letter); return i >= 0 ? (normalized[i] || '') : ''; };
-    const headerMatches = (field, letter) => {
-      const label = headerAt(letter);
-      if (!label) return false;
-      return (GV_SERVER_HEADER_SYNS[field] || []).some((syn) => {
-        const want = normalizeServerHeading(syn);
-        return want && (label === want || label.includes(want) || want.includes(label));
-      });
-    };
-    const resolveCol = (field, ...configured) => {
-      const letter = configured.find((x) => x) || '';
-      if (letter && headerMatches(field, letter)) return letter;   // config letter header se confirm
-      return pick(field) || letter || '';                          // warna probe, phir bhi na mile to config
-    };
-    const dateCol = resolveCol('date', cfg.date);
-    const cols = {
-      // Fallback chain: configured letter → header probe → configured/default letter.
-      date: dateCol || cfg.date || pick('date') || fallback.date,
-      cls: resolveCol('cls', cfg.cch, cfg.vClass) || fallback.cls,
-      tagId: resolveCol('tagId', cfg.tagId) || fallback.tagId,
-      status: resolveCol('status', cfg.status) || fallback.status,
-      tagType: resolveCol('tagType', cfg.tagType) || fallback.tagType
-    };
+    const cols = { date: pick('date') || fallback.date, cls: pick('cls') || fallback.cls, tagId: pick('tagId') || fallback.tagId, status: pick('status') || fallback.status, tagType: pick('tagType') || fallback.tagType };
     gvServerHeaderCache.set(cacheKey, { at: Date.now(), cols });
     return { ...fallback, ...cols, via: 'header' };
   } catch (err) {
@@ -1239,6 +1209,14 @@ async function resolveGvServerColumns(settings, force) {
     return { ...fallback, via: 'config', warning: err.message };
   }
 }
+// Date cell helper: gviz can return typed Date(), text dates, formatted dates, or Sheets serials.
+function serverDateFromCell(row, index) {
+  const cell = row && row.c && row.c[index];
+  if (!cell) return '';
+  const direct = serverDate(cell.v);
+  return direct || serverDate(cell.f);
+}
+
 async function reportSnapshot(source) {
   const s = db.settings;
   const isGv = source === 'gv';
@@ -5626,6 +5604,20 @@ async function handleApi(req, res, url) {
     }
     // 👤 GV personal commission — exact agent ID + class settings. Blank manual rate is allowed
     // (it keeps the row unresolved instead of silently changing the payout).
+    if (patch.gvClassCch !== undefined) {
+      const cfg = patch.gvClassCch;
+      if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) throw new HttpError(400, 'gvClassCch object hona chahiye.');
+      cfg.enabled = cfg.enabled !== false && cfg.enabled !== 'false';
+      cfg.source = 'cch';
+      if (!cfg.groups || typeof cfg.groups !== 'object' || Array.isArray(cfg.groups)) throw new HttpError(400, 'gvClassCch.groups object hona chahiye.');
+      const cleanedGroups = {};
+      for (const group of ['VC4', 'VC20', 'VC5']) {
+        const raw = cfg.groups[group] === undefined ? [] : cfg.groups[group];
+        const list = Array.isArray(raw) ? raw : String(raw || '').split(',');
+        cleanedGroups[group] = [...new Set(list.map((v) => String(v || '').trim().replace(/\s+/g, ' ')).filter(Boolean))].slice(0, 200);
+      }
+      cfg.groups = cleanedGroups;
+    }
     if (patch.gvCommissionRates !== undefined) {
       const allowed = ['VC4', 'VC20', 'VC5', 'VC6', 'VC7', 'VC12'];
       const cfg = patch.gvCommissionRates;
