@@ -1,7 +1,7 @@
 // Versioned app shell + offline data cache.
 // Auth login/logout/password endpoints are NEVER cached. Sheet data (gviz), /api/auth/me and
 // /api/settings are network-first with a cached fallback — internet na ho to last loaded data se app khulta hai.
-const CACHE_NAME = 'apnapayment-v93';
+const CACHE_NAME = 'apnapayment-v94';
 const DATA_CACHE = 'ff-data-v5';
 const STASH_CACHE = 'ff-push-stash-v1'; // pushsubscriptionchange ke waqt bani subscription yahan rakho
 // 🔊 v3.36 — app band hone par aaye alerts ki VOICE queue (page khulte hi bol kar sunata hai).
@@ -12,7 +12,7 @@ const VOICE_TTL = 12 * 3600e3;          // 12 ghante tak wapas kholte hi suna de
 // ⚡ Sirf eager core precache hota hai (pehla paint fast). Baaki page modules (lazy rollup)
 //    pehli use par runtime-cache ho jaate hain — install par 2 MB extra download nahi hota.
 // homeKpiFix.css bhi precache hota hai — Home ke KPI card text ke liye zaroori (offline/warm start par bhi).
-const ASSETS = ['./', './index.html', './styles.css?v=83', './controlTower.css?v=1', './homeKpiFix.css?v=1', './config.js?v=83', './util.js?v=83', './i18n.js?v=83', './xlsx.js?v=83', './data.js?v=83', './stockAge.js?v=83', './charts.js?v=83', './model.js?v=83', './filters.js?v=83', './store.js?v=83', './gv.js?v=83', './preload.js?v=83', './auth.js?v=83', './notifications.js?v=83', './sheets.js?v=83', './liveView.js?v=83', './kpiDetail.js?v=83', './home.js?v=83', './performance.js?v=83', './agentBoard.js?v=83', './masterProfile.js?v=83', './masterSearch.js?v=83', './searchReport.js?v=83', './palette.js?v=83', './assistant.js?v=83', './officeBell.js?v=83', './pushVoice.js?v=83', './liveAssist.js?v=83', './morningCard.js?v=83', './lazy.js?v=83', './publicForm.js?v=83', './app.js?v=83', './logos/apna-payment.png', './favicon.svg?v=5', './icon-192.png?v=5', './icon-512.png?v=5'];
+const ASSETS = ['./', './index.html', './styles.css?v=85', './controlTower.css?v=1', './homeKpiFix.css?v=1', './config.js?v=85', './util.js?v=85', './i18n.js?v=85', './xlsx.js?v=85', './data.js?v=85', './stockAge.js?v=85', './charts.js?v=85', './model.js?v=85', './filters.js?v=85', './store.js?v=85', './gv.js?v=85', './preload.js?v=85', './auth.js?v=85', './notifications.js?v=85', './sheets.js?v=85', './liveView.js?v=85', './kpiDetail.js?v=85', './home.js?v=85', './performance.js?v=85', './agentBoard.js?v=85', './masterProfile.js?v=85', './masterSearch.js?v=85', './searchReport.js?v=85', './palette.js?v=85', './assistant.js?v=85', './officeBell.js?v=85', './pushVoice.js?v=85', './liveAssist.js?v=85', './morningCard.js?v=85', './lazy.js?v=85', './publicForm.js?v=85', './app.js?v=85', './logos/apna-payment.png', './favicon.svg?v=5', './icon-192.png?v=5', './icon-512.png?v=5'];
 // Network-first snapshots survive a temporary connection loss; auth/actions remain live-only.
 const OFFLINE_API = (path) => path === '/api/gviz' || path === '/api/today' || path === '/api/auth/me' || path === '/api/settings' || path === '/api/stock-history';
 
