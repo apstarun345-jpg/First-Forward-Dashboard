@@ -442,7 +442,27 @@ window.FF = window.FF || {};
     s.activeDays = s.days.size;
     s.avgPerDay = s.activeDays ? s.total / s.activeDays : 0;
     s.daysInMonth = U.daysInMonth(ym);
-    s.projected = s.lastDay ? Math.round((s.total / s.lastDay) * s.daysInMonth) : 0;
+    let projectionTotal = s.total;
+    let projectionDays = s.lastDay;
+    try {
+      const currentYm = U.ymKey(new Date());
+      if (ym === currentYm && typeof U.channelBasis === 'function') {
+        const basis = U.channelBasis(channelOnly || 'ff', { force: true });
+        projectionDays = Math.max(1, Number(basis.days) || projectionDays || 1);
+        projectionTotal = 0;
+        for (const rr of daily) {
+          if (rr.ym !== ym) continue;
+          if (upToDay && rr.day > upToDay) continue;
+          if (channelOnly && rr.channel !== channelOnly) continue;
+          if (Number(rr.day) > projectionDays) continue;
+          projectionTotal += Number(rr.n) || 0;
+        }
+      }
+    } catch {}
+    s.projectionDays = projectionDays;
+    s.projected = projectionTotal && projectionDays
+      ? Math.round((projectionTotal / projectionDays) * s.daysInMonth)
+      : 0;
     return s;
   }
 
