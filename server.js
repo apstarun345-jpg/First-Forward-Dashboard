@@ -62,6 +62,7 @@ const BLOCKED_DIRS = new Set(['data', 'dev', 'node_modules', '.git', 'google-app
 // `tabs` registry below, so the admin can add or hide sheet tabs and control each one per user.
 export const PAGE_PERMISSIONS = [
   { key: 'home', label: 'Home · highlights & charts', group: 'Pages' },
+  { key: 'controlTower', label: 'Management · Operations Control Tower (live action + changes + snapshots)', group: 'Management' },
   { key: 'rangeReport', label: 'Management · Range Report (custom from→to)', group: 'Management' },
   { key: 'tv', label: 'Management · TV Mode (big-screen rotation)', group: 'Management' },
   { key: 'teamMap', label: 'Management · Team map (location, admin-only page)', group: 'Management' },
@@ -799,6 +800,13 @@ const SERVER_MONTHS = { JAN: 1, FEB: 2, MAR: 3, APR: 4, MAY: 5, JUN: 6, JUL: 7, 
  *  Mon dd, yyyy — sab chalta hai (client ke U.parseDate jaisa hi tolerant, warna server feed aur
  *  client ke numbers alag-alag aa jaate the — "GV aaj live nahi dikh raha" ka ek bada reason). */
 function serverDate(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    // Google Sheets serial date (1899-12-30 epoch). Guard against ordinary counts/IDs.
+    if (value > 20000 && value < 80000) {
+      const dt = new Date(Date.UTC(1899, 11, 30) + Math.round(value) * 86400e3);
+      if (!Number.isNaN(dt.getTime())) return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth()+1).padStart(2,'0')}-${String(dt.getUTCDate()).padStart(2,'0')}`;
+    }
+  }
   const s = String(value === null || value === undefined ? '' : value).trim();
   if (!s) return '';
   const p2 = (n) => String(n).padStart(2, '0');
@@ -834,7 +842,7 @@ function classBucket(value) {
 function countByDateClass(table) {
   const rows = [];
   for (const row of (table && table.rows) || []) {
-    const date = serverDate(serverCell(row, 0));
+    const date = serverDateFromCell(row, 0);
     if (!date) continue;
     const cls = classBucket(serverCell(row, 1));
     const n = serverNumber(serverCell(row, 2));
@@ -938,8 +946,9 @@ async function todayFeed(force) {
     // ---- 🟩 GV · GV Master tab (live) ----
     try {
       const gv = settings.gv && settings.gv.master || {};
+      const resolved = await resolveGvServerColumns(settings, !!force);
       const tab = gv.tab || 'GV Master';
-      const dateCol = gv.date || 'P', classCol = gv.cch || gv.vClass || 'G', tagCol = gv.tagId || 'I';
+      const dateCol = resolved.date, classCol = resolved.cls, tagCol = resolved.tagId;
       const out = await gvizDailyClassCounts({ sheetId: settings.gvSheetId, tab, dateCol, classCol, countCol: tagCol, from30, cacheMaxAgeMs: liveQueryCacheMs });
       const rows = out.rows;
       const today = rows.filter((r) => r.date === day);
@@ -950,7 +959,7 @@ async function todayFeed(force) {
       try {
         detail = await gvizDayDetail({
           sheetId: settings.gvSheetId, tab, dateCol, classCol,
-          statusCol: gv.status || 'N', typeCol: gv.tagType || 'U', countCol: tagCol, day,
+          statusCol: resolved.status, typeCol: resolved.tagType, countCol: tagCol, day,
           dateMode: out.via, cacheMaxAgeMs: liveQueryCacheMs, expectRows: today.length > 0
         });
       } catch { detail = null; }
@@ -1008,6 +1017,72 @@ async function todayFeed(force) {
     return result;
   })().finally(() => { todayFeedCache.promise = null; });
   return todayFeedCache.promise;
+}
+
+
+// ---- 🟩 GV Master server-side column resolver (v3.47) -------------------------------------------
+// Home ka live GV feed pehle raw P/G/I letters par dependent tha. Client-side GV loader already
+// header-aware hai; server /api/today ko bhi wahi rule follow karna chahiye. Header shift hone par
+// probe se actual columns locate hote hain, warna configured letters safe fallback hain.
+const GV_SERVER_HEADER_SYNS = {
+  date: ['ISSUE_DATE','DATE','ISSUANCE_DATE','TXN_DATE'],
+  cls: ['CCH','CCH_CLASS','VCLASS','VEHICLE_CLASS','CLASS','TAG_CLASS'],
+  tagId: ['TAG_ID_NUMBER','TAG_ID','TAGID','TAG ID NUMBER','TAG ID'],
+  status: ['STATUS','TAG_STATUS','TAG STATUS'],
+  tagType: ['TAG_TYPE','TYPE','TAG TYPE']
+};
+const gvServerHeaderCache = new Map();
+function normalizeServerHeading(v) {
+  return String(v || '').toUpperCase().replace(/[^A-Z0-9]+/g, '');
+}
+function serverColLetter(index) {
+  let n = Number(index) + 1, out = '';
+  while (n > 0) { const r = (n - 1) % 26; out = String.fromCharCode(65 + r) + out; n = Math.floor((n - 1) / 26); }
+  return out;
+}
+async function resolveGvServerColumns(settings, force) {
+  const cfg = settings.gv && settings.gv.master || {};
+  const tab = cfg.tab || 'GV Master';
+  const fallback = {
+    date: cfg.date || 'P', cls: cfg.cch || cfg.vClass || 'G', tagId: cfg.tagId || 'I',
+    status: cfg.status || 'N', tagType: cfg.tagType || 'U'
+  };
+  const cacheKey = `${settings.gvSheetId || ''}|${tab}`;
+  const hit = gvServerHeaderCache.get(cacheKey);
+  if (!force && hit && Date.now() - hit.at < 10 * 60e3) return { ...fallback, ...hit.cols, via: 'header-cache' };
+  try {
+    const params = new URLSearchParams({
+      id: String(settings.gvSheetId || '').replace(/[^A-Za-z0-9_-]/g, ''),
+      sheet: tab,
+      tq: 'select * limit 1'
+    });
+    const out = await fetchUpstreamCached(upstreamUrl(params), { maxAgeMs: force ? 0 : 10 * 60e3 });
+    const table = parseGvizServer(out.body);
+    const labels = (table.cols || []).map((x) => x && (x.label || x.id) || '');
+    const normalized = labels.map(normalizeServerHeading);
+    const pick = (field) => {
+      for (const syn of GV_SERVER_HEADER_SYNS[field] || []) {
+        const want = normalizeServerHeading(syn);
+        let idx = normalized.indexOf(want);
+        if (idx < 0) idx = normalized.findIndex((x) => x && (x.includes(want) || want.includes(x)));
+        if (idx >= 0) return serverColLetter(idx);
+      }
+      return '';
+    };
+    const cols = { date: pick('date') || fallback.date, cls: pick('cls') || fallback.cls, tagId: pick('tagId') || fallback.tagId, status: pick('status') || fallback.status, tagType: pick('tagType') || fallback.tagType };
+    gvServerHeaderCache.set(cacheKey, { at: Date.now(), cols });
+    return { ...fallback, ...cols, via: 'header' };
+  } catch (err) {
+    // Header probe optional: live feed should still work on the configured mapping.
+    return { ...fallback, via: 'config', warning: err.message };
+  }
+}
+// Date cell helper: gviz can return typed Date(), text dates, formatted dates, or Sheets serials.
+function serverDateFromCell(row, index) {
+  const cell = row && row.c && row.c[index];
+  if (!cell) return '';
+  const direct = serverDate(cell.v);
+  return direct || serverDate(cell.f);
 }
 
 async function reportSnapshot(source) {
@@ -3216,7 +3291,7 @@ function perfReport() {
   const hottest = [...HOT.entries()].sort((a, b) => b[1].hits - a[1].hits).slice(0, 10)
     .map(([url, h]) => ({ url: url.length > 160 ? `${url.slice(0, 160)}…` : url, hits: h.hits }));
   return {
-    version: '3.45.0', cacheEntries: cache.size, cacheEntriesMax: MAX_CACHE_ENTRIES, cacheMB: Math.round(cache.bytes / 1048576), cacheMBMax: Math.round(MAX_CACHE_BYTES / 1048576),
+    version: '3.47.0', cacheEntries: cache.size, cacheEntriesMax: MAX_CACHE_ENTRIES, cacheMB: Math.round(cache.bytes / 1048576), cacheMBMax: Math.round(MAX_CACHE_BYTES / 1048576),
     cacheSeconds: cacheMs() / 1000, warmedQueries: warmed, hotQueries: hottest,
     slowest: queries.filter((q) => q.upstream > 0).slice(0, 25),
     queries
@@ -3315,6 +3390,101 @@ async function finalizeLogin(req, res, u, loginId, ip) {
   return sendJson(res, 200, { ok: true, user: publicUser(u), settings: settingsFor(u), permissions: permissionsFor(db.settings), tabs: db.settings.tabs }, { 'Set-Cookie': cookieHeader(req, token, SESSION_DAYS * 86400) });
 }
 
+
+// ---- 🎛️ Operations Control Tower snapshots -----------------------------------------------------
+const controlTowerRuntime = { at: 0, promise: null };
+const CONTROL_TOWER_HISTORY_MAX = 96;
+function controlTowerPendingRequestCount() {
+  try {
+    const rows = workspaceStore().tagRequests || [];
+    return rows.filter((r) => !['approved','dispatched','rejected','completed','cancelled'].includes(String(r.status || 'pending').toLowerCase())).length;
+  } catch { return 0; }
+}
+function controlTowerMetricDelta(current, previous) {
+  if (!previous) return null;
+  const out = {};
+  for (const [k, v] of Object.entries(current || {})) {
+    if (typeof v !== 'number') continue;
+    const p = Number(previous[k] || 0);
+    out[k] = v - p;
+  }
+  return out;
+}
+function controlTowerActions({ feed, ffStock, gvStock, notifications, pendingSignups, pendingRequests }) {
+  const actions = [];
+  if (pendingSignups > 0) actions.push({ severity: 'critical', icon: '🆕', title: `${pendingSignups} account approval pending`, detail: 'New signup ko review / approve karo.', link: '#/settings?tab=users' });
+  if (pendingRequests > 0) actions.push({ severity: 'critical', icon: '🏷️', title: `${pendingRequests} tag request pending`, detail: 'Tag Request queue me approval / dispatch action pending hai.', link: '#/tagRequest' });
+  const gv = feed && feed.gv, ff = feed && feed.ff;
+  if (!gv) actions.push({ severity: 'critical', icon: '🟩', title: 'GV live data unavailable', detail: (feed && feed.gvError) || 'GV Master se aaj ka snapshot nahi mila.', link: '#/gvDashboard' });
+  else if (gv.stale) actions.push({ severity: 'high', icon: '⏱️', title: 'GV live snapshot stale', detail: 'Latest GV snapshot cache/stale fallback se aa raha hai.', link: '#/home' });
+  if (!ff) actions.push({ severity: 'high', icon: '🟦', title: 'FF today feed unavailable', detail: (feed && feed.ffError) || 'EIR today feed nahi mila.', link: '#/dashboard' });
+  const alerts = (notifications || []).filter((x) => ['alert'].includes(x.type)).slice(-6).reverse();
+  alerts.forEach((x) => actions.push({ severity: 'high', icon: '🚨', title: x.title, detail: x.body, link: (x.meta && x.meta.link) || '#/executive' }));
+  const rateFromSeries = (series) => {
+    const vals = Object.entries(series || {}).sort((a,b)=>a[0].localeCompare(b[0])).slice(-7).map(([,v])=>Number(v)||0);
+    return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : 0;
+  };
+  if (ffStock) { const rate = rateFromSeries(ff && ff.series); const cover = rate > 0 ? ffStock.total / rate : null; if (cover !== null && cover < 7) actions.push({ severity:'high', icon:'📦', title:'FF stock cover below 7 days', detail:`FF stock ${ffStock.total} · approx cover ${cover.toFixed(1)} days.`, link:'#/stock' }); }
+  if (gvStock) { const rate = rateFromSeries(gv && gv.series); const cover = rate > 0 ? gvStock.total / rate : null; if (cover !== null && cover < 7) actions.push({ severity:'high', icon:'📦', title:'GV stock cover below 7 days', detail:`GV stock ${gvStock.total} · approx cover ${cover.toFixed(1)} days.`, link:'#/gvStock' }); }
+  if (feed && feed.gv && feed.gv.total === 0) actions.push({ severity: 'high', icon: '0️⃣', title: 'GV Today = 0', detail: 'Server ko aaj ki GV Master rows nahi mili; Control Tower ne isse exception ke roop me flag kiya hai.', link: '#/gvDashboard' });
+  const rank = { critical: 4, high: 3, medium: 2, info: 1 };
+  return actions.sort((a,b)=>(rank[b.severity]||1)-(rank[a.severity]||1)).slice(0, 20);
+}
+async function controlTowerSnapshot(user, force) {
+  const now = Date.now();
+  if (!force && controlTowerRuntime.at && now - controlTowerRuntime.at < 60e3 && controlTowerRuntime.body) return controlTowerRuntime.body;
+  if (controlTowerRuntime.promise) return controlTowerRuntime.promise;
+  controlTowerRuntime.promise = (async () => {
+    const [feedR, ffR, gvR] = await Promise.allSettled([todayFeed(!!force), stockSnapshot(), gvStockSnapshot()]);
+    const feed = feedR.status === 'fulfilled' ? feedR.value : { ok:false, gvError:feedR.reason && feedR.reason.message, ffError:feedR.reason && feedR.reason.message };
+    const ffStock = ffR.status === 'fulfilled' ? ffR.value : null;
+    const gvStock = gvR.status === 'fulfilled' ? gvR.value : null;
+    const allNotifications = notifyItems().filter((x) => notificationVisible(x, user)).slice(-80);
+    const pendingSignups = db.users.filter((x) => !x.approved).length;
+    const pendingRequests = controlTowerPendingRequestCount();
+    const metrics = {
+      gvToday: Number(feed.gv && feed.gv.total) || 0,
+      ffToday: Number(feed.ff && feed.ff.total) || 0,
+      combinedToday: (Number(feed.gv && feed.gv.total) || 0) + (Number(feed.ff && feed.ff.total) || 0),
+      gvVc4: Number(feed.gv && feed.gv.vc4) || 0,
+      gvVc20: Number(feed.gv && feed.gv.vc20) || 0,
+      gvVc5p: Number(feed.gv && feed.gv.vc5p) || 0,
+      ffStock: Number(ffStock && ffStock.total) || 0,
+      gvStock: Number(gvStock && gvStock.total) || 0,
+      pendingSignups,
+      pendingRequests,
+      criticalAlerts: allNotifications.filter((x) => x.type === 'alert').length,
+      unreadForUser: user.notificationsSeenAt ? allNotifications.filter((x) => new Date(x.createdAt).getTime() > new Date(user.notificationsSeenAt).getTime()).length : allNotifications.length
+    };
+    const previous = (controlTowerRuntime.body && controlTowerRuntime.body.snapshot) || null;
+    const snapshot = { id: workspaceId('ct'), at: new Date().toISOString(), metrics };
+    const previousStored = db.notify.controlTowerSnapshots && db.notify.controlTowerSnapshots.length ? db.notify.controlTowerSnapshots[db.notify.controlTowerSnapshots.length - 1] : null;
+    const baseline = previousStored || previous;
+    snapshot.delta = controlTowerMetricDelta(metrics, baseline && baseline.metrics);
+    if (!Array.isArray(db.notify.controlTowerSnapshots)) db.notify.controlTowerSnapshots = [];
+    const lastStoredAt = previousStored ? new Date(previousStored.at).getTime() : 0;
+    if (!lastStoredAt || now - lastStoredAt >= 5 * 60e3) {
+      db.notify.controlTowerSnapshots.push(snapshot);
+      if (db.notify.controlTowerSnapshots.length > CONTROL_TOWER_HISTORY_MAX) db.notify.controlTowerSnapshots = db.notify.controlTowerSnapshots.slice(-CONTROL_TOWER_HISTORY_MAX);
+      persist('notify').catch(() => {});
+    }
+    const body = {
+      ok: true, at: new Date().toISOString(), date: dateKeyNow(), live: {
+        feed: { date: feed.date || '', gv: feed.gv || null, ff: feed.ff || null, gvError: feed.gvError || '', ffError: feed.ffError || '' },
+        ffStock, gvStock,
+        pendingSignups, pendingRequests
+      },
+      snapshot,
+      history: (db.notify.controlTowerSnapshots || []).slice(-48),
+      actions: controlTowerActions({ feed, ffStock, gvStock, notifications: allNotifications, pendingSignups, pendingRequests }),
+      whatChanged: snapshot.delta || {}
+    };
+    controlTowerRuntime.at = now; controlTowerRuntime.body = body;
+    return body;
+  })().finally(() => { controlTowerRuntime.promise = null; });
+  return controlTowerRuntime.promise;
+}
+
 async function handleApi(req, res, url) {
   const p = url.pathname;
   const method = req.method;
@@ -3340,6 +3510,12 @@ async function handleApi(req, res, url) {
       if (process.env.DEBUG_TODAY) console.error('[api/today]', err.stack);
       return sendJson(res, 200, { ok: false, error: err.message, gv: null, ff: null });
     }
+  }
+  // 🎛️ Operations Control Tower — admin-only live operations board.
+  if (p === '/api/control-tower' && method === 'GET') {
+    requireAdmin(user);
+    const force = url.searchParams.get('fresh') === '1';
+    return sendJson(res, 200, await controlTowerSnapshot(user, force));
   }
   if (p === '/api/public-config' && method === 'GET') return sendJson(res, 200, publicSettings());
   // App version (sw.js CACHE_NAME) — update-toast ke liye; logged-in se pehle bhi chahiye.
