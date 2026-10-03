@@ -285,6 +285,11 @@ window.FF = window.FF || {};
     state.unread = Math.max(0, Number(n) || 0);
     const badge = U.$('#notification-count');
     if (badge) { badge.textContent = state.unread > 99 ? '99+' : String(state.unread); badge.hidden = state.unread < 1; }
+    const mobileBadge = U.$('#mobile-notification-count');
+    if (mobileBadge) {
+      mobileBadge.textContent = state.unread > 99 ? '99+' : String(state.unread);
+      mobileBadge.hidden = state.unread < 1;
+    }
     // Favicon / title badge for unread
     const t = (FF.config && FF.config.appName) || document.title.replace(/\s*\(\d+\)\s*/, '');
     document.title = state.unread > 0 ? `(${state.unread}) ${t}` : t;
