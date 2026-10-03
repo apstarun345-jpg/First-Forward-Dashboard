@@ -927,6 +927,44 @@ async function gvizDayDetail(cfg) {
  * GV side me aaj ka class split + replacement/chassis + weekday run-rate (expected) bhi aata hai.
  */
 const todayFeedCache = { at: 0, body: null, promise: null };
+async function gvMasterRawTodayFallback(settings, resolved, day, force) {
+  const tab = (settings.gv && settings.gv.master && settings.gv.master.tab) || 'GV Master';
+  const id = String(settings.gvSheetId || '').replace(/[^A-Za-z0-9_-]/g, '');
+  const cols = resolved || { date: 'P', cls: 'G', tagId: 'I', status: 'N', tagType: 'U' };
+  const select = [cols.date, cols.cls, cols.tagId, cols.status, cols.tagType].join(', ');
+  const attempts = [
+    { tq: `select ${select} where ${cols.date} >= date '${day}' and ${cols.tagId} is not null limit 100000`, kind: 'raw-date' },
+    { tq: `select ${select} where toDate(${cols.date}) >= date '${day}' and ${cols.tagId} is not null limit 100000`, kind: 'raw-toDate' },
+    { tq: `select ${select} where ${cols.tagId} is not null limit 100000`, kind: 'raw-bounded' }
+  ];
+  let lastErr = null;
+  for (const attempt of attempts) {
+    try {
+      const params = new URLSearchParams({ id, sheet: tab, tq: attempt.tq });
+      const out = await fetchUpstreamCached(upstreamUrl(params), { maxAgeMs: force ? 0 : 30e3 });
+      const table = parseGvizServer(out.body);
+      const todayRows = [];
+      for (const row of table.rows || []) {
+        const date = serverDateFromCell(row, 0);
+        if (date !== day) continue;
+        const tag = serverCell(row, 2);
+        if (!tag) continue;
+        todayRows.push({ date, cls: classBucket(serverCell(row, 1)), status: serverCell(row, 3), type: serverCell(row, 4) });
+      }
+      if (todayRows.length || attempt.kind === 'raw-bounded') {
+        const classes = {};
+        let replacement = 0, chassis = 0;
+        for (const row of todayRows) {
+          classes[row.cls] = (classes[row.cls] || 0) + 1;
+          if (/repl/i.test(row.status || '')) replacement++;
+          if (/chassis/i.test(row.type || '')) chassis++;
+        }
+        return { total: todayRows.length, classes, replacement, chassis, cached: !!out.cached, stale: !!out.stale, via: attempt.kind };
+      }
+    } catch (err) { lastErr = err; }
+  }
+  throw lastErr || new Error('GV Master raw today fallback failed');
+}
 async function todayFeed(force) {
   const ttl = 45e3; // 45s — "live" rehne ke liye chhota TTL, aur Google par load bhi kam
   if (!force && todayFeedCache.body && Date.now() - todayFeedCache.at < ttl) return { ...todayFeedCache.body, cached: true };
@@ -950,8 +988,20 @@ async function todayFeed(force) {
       const tab = gv.tab || 'GV Master';
       const dateCol = resolved.date, classCol = resolved.cls, tagCol = resolved.tagId;
       const out = await gvizDailyClassCounts({ sheetId: settings.gvSheetId, tab, dateCol, classCol, countCol: tagCol, from30, cacheMaxAgeMs: liveQueryCacheMs });
-      const rows = out.rows;
-      const today = rows.filter((r) => r.date === day);
+      let rows = out.rows;
+      let today = rows.filter((r) => r.date === day);
+      let rawFallback = null;
+      if (!today.length) {
+        try {
+          rawFallback = await gvMasterRawTodayFallback(settings, resolved, day, !!force);
+          if (rawFallback && rawFallback.total) {
+            today = Object.entries(rawFallback.classes || {}).map(([cls, n]) => ({ date: day, cls, n }));
+            rows = rows.concat(today);
+          }
+        } catch (rawErr) {
+          result.gvRawFallbackError = rawErr.message;
+        }
+      }
       const series = rows.filter((r) => r.date >= from30).reduce((acc, r) => { acc[r.date] = (acc[r.date] || 0) + r.n; return acc; }, {});
       // Aaj ka detail (class × status × tag type) — replacement/chassis/class split ek hi chhoti query se.
       // Fail ho jaye to bhi feed chalta rahe (total/classes upar wali query se aa jaate hain).
@@ -965,8 +1015,8 @@ async function todayFeed(force) {
       } catch { detail = null; }
       const dToday = detail ? detail.rows.filter((r) => r.date === day) : [];
       const detailClasses = dToday.reduce((acc, r) => { acc[r.cls] = (acc[r.cls] || 0) + r.n; return acc; }, {});
-      const replaced = dToday.reduce((n, r) => n + (/repl/i.test(String(r.status || '')) ? r.n : 0), 0);
-      const chassis = dToday.reduce((n, r) => n + (/chassis/i.test(String(r.type || '')) ? r.n : 0), 0);
+      const replaced = dToday.length ? dToday.reduce((n, r) => n + (/repl/i.test(String(r.status || '')) ? r.n : 0), 0) : Number(rawFallback && rawFallback.replacement) || 0;
+      const chassis = dToday.length ? dToday.reduce((n, r) => n + (/chassis/i.test(String(r.type || '')) ? r.n : 0), 0) : Number(rawFallback && rawFallback.chassis) || 0;
       const detailTotal = dToday.reduce((n, r) => n + r.n, 0);
       const classes = Object.keys(detailClasses).length ? detailClasses : today.reduce((acc, r) => { acc[r.cls] = (acc[r.cls] || 0) + r.n; return acc; }, {});
       const total = detailTotal || sum(today);

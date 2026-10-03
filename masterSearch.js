@@ -447,15 +447,34 @@ FF.pages = FF.pages || {};
     return out;
   }
 
-  /** An exact/prefix person-name match outranks agents who only share that person's TL name. */
+  /** Exact agent/TL ID match wins before name/TL substring matches.
+      GV Master: A=UNIQUE_ID (agent), C=TL ID, R=GV TL ID alias. */
   function preferNameMatches(people, query) {
+    const list = people || [];
+    const ni = normId(query);
+    if (ni.length >= 4) {
+      const exact = list.filter((p) => {
+        if (normId(p.sub) === ni) return true;
+        if (p.ids && [...p.ids].some((id) => normId(id) === ni)) return true;
+        if (p.tlIds && [...p.tlIds].some((id) => normId(id) === ni)) return true;
+        return false;
+      });
+      if (exact.length) {
+        exact.sort((a, b) => {
+          const aTl = /-tl$/.test(String(a.kind)) ? 1 : 0;
+          const bTl = /-tl$/.test(String(b.kind)) ? 1 : 0;
+          return bTl - aTl || (b.n - a.n);
+        });
+        return exact;
+      }
+    }
     const nn = normName(query);
-    if (nn.length < 2) return people || [];
-    const matches = (people || []).filter((p) => {
+    if (nn.length < 2) return list;
+    const matches = list.filter((p) => {
       const name = normName(p.name);
       return name === nn || name.startsWith(nn);
     });
-    return matches.length ? matches : (people || []);
+    return matches.length ? matches : list;
   }
 
   /** Suggestions for U.suggest() — label + sub + kind chip. */

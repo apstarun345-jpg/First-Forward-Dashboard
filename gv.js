@@ -355,9 +355,10 @@ window.FF = window.FF || {};
       const commissionRaw = get('commission');
       // GV Master me C (supervisor_agent_id) aur R (GV TL ID) dono hote hain.
       // C ko crosswalk/audit ke liye rakho; calculation aur attribution ke liye sirf R.
-      const supervisorId = U.clean(get('tlId'));
-      const gvTlId = U.clean(get('gvTlId'));
-      const tlId = gvTlId;
+      const supervisorId = U.clean(get('tlId')); // C = TL / supervisor ID
+      const gvTlId = U.clean(get('gvTlId'));     // R = GV TL ID alias
+      // Confirmed GV Master identity: A=UNIQUE_ID (agent), C=TL ID. R remains an alias.
+      const tlId = supervisorId || gvTlId;
       const rawTlName = U.clean(get('tlName'));
       const agentName = U.clean(get('agentName')) || agentId;
       const tlName = rawTlName || (tlId ? `TL ${tlId}` : 'Direct');
@@ -366,7 +367,7 @@ window.FF = window.FF || {};
         agentId, agentName,
         tlId, gvTlId, supervisorId, tlName,
         // 🧍 GV direct rule: TL ID + TL Name dono khaali (ya agent hi apna supervisor) → direct agent.
-        directAgent: FF.config.isDirectAgent({ agentId, agentName, tlId, tlName: rawTlName, channel: 'GV Partner' }, 'gv'),
+        directAgent: FF.config.isDirectAgent({ agentId, agentName, tlId, supervisorId, gvTlId, tlName: rawTlName, channel: 'GV Partner' }, 'gv'),
         channel: 'GV Partner',
         cls, group: classGroup(cls),
         status: U.clean(get('status')) || 'Issuance',
@@ -677,7 +678,8 @@ window.FF = window.FF || {};
   const masterLatestDate = () => rows().reduce((acc, r) => (!acc || (r.date && r.date > acc) ? r.date : acc), null);
   const identityId = (value) => U.clean(value).toUpperCase().replace(/[.]0+$/, '').replace(/\s+/g, '');
   const identityName = (value) => U.clean(value).toUpperCase().replace(/\s+/g, ' ');
-  const masterTlId = (r) => identityId(r && r.gvTlId);
+  const masterTlIds = (r) => [...new Set([r && r.tlId, r && r.supervisorId, r && r.gvTlId].map(identityId).filter(Boolean))];
+  const masterTlId = (r) => identityId(r && (r.tlId || r.supervisorId || r.gvTlId));
 
   /** GV Master ki ek tag row ko issuance views ke shared shape me rakho. */
   function masterIssuanceRow(r) {
@@ -703,18 +705,15 @@ window.FF = window.FF || {};
   function masterTlRows(tlId, tlName) {
     const wantedId = identityId(tlId), wantedName = identityName(tlName);
     if (wantedId) {
-      const byId = rows().filter((r) => masterTlId(r) === wantedId);
+      const byId = rows().filter((r) => masterTlIds(r).includes(wantedId));
       if (byId.length) return byId;
-      const linked = U.uniq(rows().filter((r) => identityId(r.supervisorId) === wantedId && masterTlId(r)).map(masterTlId));
-      if (linked.length === 1) return rows().filter((r) => masterTlId(r) === linked[0]);
     }
     if (!wantedName) return [];
-    const linked = U.uniq(rows().filter((r) => identityName(r.tlName) === wantedName && masterTlId(r)).map(masterTlId));
-    return linked.length === 1 ? rows().filter((r) => masterTlId(r) === linked[0]) : [];
+    return rows().filter((r) => identityName(r.tlName) === wantedName);
   }
   function masterTlIdentity(tlId, tlName) {
     const match = masterTlRows(tlId, tlName)[0];
-    return match ? U.clean(match.gvTlId) : '';
+    return match ? U.clean(match.tlId || match.supervisorId || match.gvTlId) : '';
   }
   /**
    * TL-scoped GV issuance must use the real GV Master GV TL ID (column R), not a broad EIR rollup.
@@ -1303,7 +1302,7 @@ window.FF = window.FF || {};
   const GV = {
     DATASETS, preload, refresh, need, get, error, reset, enabled, wanted, retryNow,
     normClass, classGroup, clsNum,
-    rows, masterRows: rows, issuanceRows, tlIssuanceRows, masterTlIdentity, agentIssuanceRows, eirDailyRows, liveDailyRows, gvToday, masterTodayRows, todayKey, months, latestDate, summary, dailySeries, weekly, byDim, agentRollup, tlRollup, directRollup, people,
+    rows, masterRows: rows, issuanceRows, tlIssuanceRows, masterTlIdentity, masterTlIds, agentIssuanceRows, eirDailyRows, liveDailyRows, gvToday, masterTodayRows, todayKey, months, latestDate, summary, dailySeries, weekly, byDim, agentRollup, tlRollup, directRollup, people,
     REPORT_COLS, REPORT_COLS_LABELS, reportMonthBins, reportSheetBins,
     mapping, mappingWarnings, ensureAssignmentMap, stockStatusKind,
     get labels() { return state.labels; },

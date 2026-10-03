@@ -57,7 +57,7 @@ window.FF = window.FF || {};
       push(ledger.byAgentName, nameKey(r.agentName), r);
       // ⚠️ GV Unique ID/Name se index NAHI karte: wo GV side ka shared id hota hai (ek hi value kai
       // agents par), isliye usse match karne par sab rows jod me aa jaati thi.
-      push(ledger.byTlId, idKey(r.gvTlId), r);
+      [r.tlId, r.supervisorId, r.gvTlId].forEach((id) => push(ledger.byTlId, idKey(id), r));
       push(ledger.byTlName, nameKey(r.tlName), r);
     }
     const stock = { byAgentId: new Map(), byAgentName: new Map(), byTlId: new Map(), byTlName: new Map(), classByAgent: new Map(), classByTl: new Map() };
@@ -87,6 +87,8 @@ window.FF = window.FF || {};
     const isTl = /tl$/.test(String(spec.kind || ''));
     const ids = [], names = [];
     if (spec.id) ids.push(idKey(spec.id));
+    if (spec.tlId) ids.push(idKey(spec.tlId));
+    (spec.tlIds || []).forEach((x) => ids.push(idKey(x)));
     (spec.altIds || []).forEach((x) => ids.push(idKey(x)));
     if (spec.name) names.push(nameKey(spec.name));
     return { isTl, ids: [...new Set(ids.filter(Boolean))], names: [...new Set(names.filter(Boolean))] };
@@ -186,7 +188,7 @@ window.FF = window.FF || {};
     const id = identityOf(spec);
     const ix = index();
     const tlRows = mergeLookups(lookup(ix.stock.byTlId, id.ids), lookup(ix.stock.byTlName, id.names));
-    const self = lookup(ix.stock.byAgentId, id.ids)[0] || null;
+    const self = lookup(ix.stock.byAgentId, id.ids)[0] || lookup(ix.stock.byName, id.names)[0] || lookup(ix.stock.byTlName, id.names)[0] || null;
     const members = mergeLookups(lookup(ix.stock.byTlId, id.ids), lookup(ix.stock.byTlName, id.names)).filter((r) => r !== self);
     const cls = lookup(ix.stock.classByTl, id.names);
     const split = classSplit(cls.length ? cls : tlRows);
@@ -323,13 +325,16 @@ window.FF = window.FF || {};
         else if (r.ym === prevYmOf(curYm())) a.last += n;
         if (r.key === todayKey()) a.today += n;
       }
-      if (!direct && clean(r.tlName)) {
-        const t = ensure('gv-tl', r.tlName, r.tlId || '');
+      const tlId = clean(r.tlId || r.supervisorId || r.gvTlId);
+      const tlName = clean(r.tlName) || (tlId ? `TL ${tlId}` : '');
+      if (!direct && (tlName || tlId)) {
+        const t = ensure('gv-tl', tlName, tlId);
         if (t) {
           const n = Number(r.n) || 1;
           if (r.ym === curYm()) t.cur += n;
           else if (r.ym === prevYmOf(curYm())) t.last += n;
           if (r.key === todayKey()) t.today += n;
+          [r.tlId, r.supervisorId, r.gvTlId].forEach((id) => { if (id) t.altIds.add(clean(id)); });
         }
       }
     }
