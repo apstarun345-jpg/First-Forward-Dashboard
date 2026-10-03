@@ -212,6 +212,6 @@ window.FF = window.FF || {};
   // Escape a literal for the gviz query language (double-quoted string).
   function lit(value) { return `"${String(value).replace(/["\\]/g, '')}"`; }
 
-  FF.data = { query, today, gvToday, clearCache, parseGviz, cellText, cellNumber, cellDate, textRows, looksLikeEIR, lit, QueryError,
+  FF.data = { query, today, gvToday, clearCache, status, parseGviz, cellText, cellNumber, cellDate, textRows, looksLikeEIR, lit, QueryError,
     get lastLoadAt() { return lastLoadAt; }, get lastSource() { return lastSource; } };
 })(window.FF);
