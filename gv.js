@@ -355,10 +355,13 @@ window.FF = window.FF || {};
       const commissionRaw = get('commission');
       // GV Master me C (supervisor_agent_id) aur R (GV TL ID) dono hote hain.
       // C ko crosswalk/audit ke liye rakho; calculation aur attribution ke liye sirf R.
-      const supervisorId = U.clean(get('tlId')); // C = TL / supervisor ID
-      const gvTlId = U.clean(get('gvTlId'));     // R = GV TL ID alias
-      // Confirmed GV Master identity: A=UNIQUE_ID (agent), C=TL ID. R remains an alias.
-      const tlId = supervisorId || gvTlId;
+      const supervisorId = U.clean(get('tlId')); // C = TL / supervisor ID (crosswalk / audit)
+      const gvTlId = U.clean(get('gvTlId'));     // R = GV TL ID — canonical counting key
+      // Confirmed GV Master identity: A=UNIQUE_ID (agent) aur R=GV TL ID.
+      // C (SUPERVISOR_AGENT_ID) sirf crosswalk/audit ke liye rakha jaata hai — jab C aur R me farq ho
+      // (purana/report ID vs live GV TL ID) to attribution sirf R se hoti hai, warna TL ke numbers
+      // ya to 0 aate the ya galat TL ke under chale jaate the.
+      const tlId = gvTlId || supervisorId;
       const rawTlName = U.clean(get('tlName'));
       const agentName = U.clean(get('agentName')) || agentId;
       const tlName = rawTlName || (tlId ? `TL ${tlId}` : 'Direct');
@@ -685,7 +688,8 @@ window.FF = window.FF || {};
   function masterIssuanceRow(r) {
     if (!r || !r.date) return null;
     const date = r.date;
-    const tlId = U.clean(r.gvTlId);
+    // R (GV TL ID) canonical; purani/legacy rows me R khaali ho to C par fallback.
+    const tlId = U.clean(r.gvTlId) || U.clean(r.tlId) || U.clean(r.supervisorId);
     const replacement = /replacement/i.test(`${r.status || ''} ${r.tagType || ''}`);
     return {
       date, d: date, key: U.dateKey(date), ym: r.ym || U.ymKey(date), day: r.day || date.getDate(),
@@ -713,7 +717,8 @@ window.FF = window.FF || {};
   }
   function masterTlIdentity(tlId, tlName) {
     const match = masterTlRows(tlId, tlName)[0];
-    return match ? U.clean(match.tlId || match.supervisorId || match.gvTlId) : '';
+    // Canonical ID = GV Master column R; legacy rows (R khaali) ke liye C/tlId par fallback.
+    return match ? U.clean(match.gvTlId || match.tlId || match.supervisorId) : '';
   }
   /**
    * TL-scoped GV issuance must use the real GV Master GV TL ID (column R), not a broad EIR rollup.

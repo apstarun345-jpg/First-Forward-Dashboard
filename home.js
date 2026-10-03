@@ -337,6 +337,18 @@ FF.pages = FF.pages || {};
       const wdNote = wdBars ? `pichhle ${wdBars.labels.length} same-weekday (${wdBars.labels.map((l) => `${l} = ${U.fmt(wdBars.values[wdBars.labels.indexOf(l)])}`).join(' · ')}) ka average` : '';
       gvLiveMount.innerHTML = gvLiveHtml({ ...liveState, pace, weekdayNote: wdNote, weekdayBars: wdBars });
     }
+    // 🧩 Merge fix: yeh teen painter main me call hote the par define nahi the (Home render
+    //    ReferenceError: paintMonth is not defined → poore KPI cards gayab). Base v3.47 se wapas.
+    function paintMonth() {
+      if (!monthMount || !monthMount.isConnected || !ui.ready) return;
+      monthMount.innerHTML = monthKpiHtml(ui.ctx, ui.sf, { liveToday: ui.liveToday }, ui.sc, ui.sf.rows);
+    }
+    function paintCharts() {
+      if (!chartMount || !chartMount.isConnected || !ui.ready) return;
+      chartMount.innerHTML = monthCharts(ui.ctx, ui.sf, ui.sc, ui.sf.rows, { weekdayBars: ui.wdBars });
+      C.mount(chartMount);
+    }
+    function paintAll() { paintLive(); paintMonth(); paintCharts(); }
 
     // 🟢 First visible live source: only GV Master + today, no FF/history wait.
     paintLive();

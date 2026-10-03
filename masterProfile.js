@@ -78,6 +78,14 @@ window.FF = window.FF || {};
   // per-month issuance, so do not let that partial view overwrite GV REPORT summary totals.
   const gvCanonicalIssuanceRows = () => {
     const g = FF.gv || {};
+    // Live adapter: issuanceRows() hi EIR-authoritative ledger hai (aaj ke live GV Master rows ke saath).
+    // Isse pehle masterRows() ko dekha jaata tha, jiski wajah se GV Master khaali/adhoora hone par
+    // TL team + agent ke month totals 0 ho jaate the (EIR me rows hote hue bhi).
+    // Compatibility snapshot (sirf rows() replace kiya gaya legacy/host adapter) partial hota hai —
+    // usse exact month totals nahi banate, warna GV REPORT ke bhare hue numbers 0/adhoora dikhte hain.
+    if (gvHasRowsAdapterOverride()) return [];
+    if (typeof g.issuanceRows === 'function') return adapterIssuanceRows(g);
+    // Legacy host/test adapters jo sirf masterRows() dete hain — unke liye Master row mapping.
     if (typeof g.masterRows === 'function') {
       return (safeCall(() => g.masterRows(), []) || []).filter((r) => r && r.date).map((r) => ({
         ...r,
@@ -90,8 +98,7 @@ window.FF = window.FF || {};
         source: 'GV Master'
       }));
     }
-    if (gvHasRowsAdapterOverride() || typeof g.issuanceRows !== 'function') return [];
-    return adapterIssuanceRows(g);
+    return [];
   };
   const CLS_ORDER = ['VC4', 'VC20', 'VC5', 'VC6', 'VC7', 'VC12', 'VC16', 'VC5+'];
   const clsRank = (c) => { const i = CLS_ORDER.indexOf(String(c).toUpperCase()); return i < 0 ? 99 : i; };
@@ -1121,9 +1128,11 @@ window.FF = window.FF || {};
     };
     // GV Master is authoritative for GV agent issuance; Tag Assignment is authoritative for stock.
     const curYmTruth = U.ymKey(new Date()), lastYmTruth = U.prevMonthKey(curYmTruth);
+    // Agent ka rule: naam (normalised) YA exact id — id case-sensitive rehta hai (gvAgentRows jaisa hi),
+    // warna sheet me 'g001' vs 'G001' jaise farq par doosre agent ki rows jud jaati hain.
     const myMasterRows = gvCanonicalIssuanceRows().filter((row) =>
-      (out.id && clean(row.agentId).toUpperCase() === clean(out.id).toUpperCase()) ||
-      (!out.id && norm(row.agentName) === norm(out.name))
+      (out.id && clean(row.agentId) === clean(out.id)) ||
+      norm(row.agentName) === norm(out.name)
     );
     const curExact = exactGvMonth(myMasterRows, curYmTruth);
     const lastExact = exactGvMonth(myMasterRows, lastYmTruth);
