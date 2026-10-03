@@ -78,6 +78,21 @@ window.FF = window.FF || {};
   // per-month issuance, so do not let that partial view overwrite GV REPORT summary totals.
   const gvCanonicalIssuanceRows = () => {
     const g = FF.gv || {};
+    // GV Master is the authoritative tag ledger for GV agent/TL profiles.
+    // Keep the lightweight adapter fallback for tests/legacy hosts that do not expose masterRows().
+    if (typeof g.masterRows === 'function') {
+      const rows = safeCall(() => g.masterRows(), []) || [];
+      return rows.filter((r) => r && r.date).map((r) => ({
+        ...r,
+        key: U.dateKey(r.date),
+        d: r.date,
+        n: 1,
+        type: /replacement/i.test(`${r.status || ''} ${r.tagType || ''}`) ? 'REPLACEMENT' : 'ISSUANCE',
+        vrnType: r.tagType || 'VRN',
+        channel: 'GV Partner',
+        source: 'GV Master'
+      }));
+    }
     if (gvHasRowsAdapterOverride() || typeof g.issuanceRows !== 'function') return [];
     return adapterIssuanceRows(g);
   };
@@ -1062,21 +1077,57 @@ window.FF = window.FF || {};
   }
   function gvAgentProfile(p, light) {
     const r = findGvAgent(p.name, p.sub);
-    const out = { kind: 'gv-agent', channel: 'GV Partner', ch: 'gv', name: p.name, id: (r && r.agentId) || p.sub || '', found: !!r };
-    if (r) {
-      const avgVc4 = gvDaily(r, r.curVc4), avgComm = gvDaily(r, r.curComm);
-      const direct = safeCall(() => FF.config.isDirectAgent(r, 'gv'), false);
-      const given = num(r.suggestedDispatch);
+    const truth = safeCall(() => FF.gvTruth && FF.gvTruth.person({
+      kind: 'gv-agent',
+      name: (r && r.agentName) || p.name,
+      id: (r && r.agentId) || p.sub || '',
+      tlId: r && r.tlId,
+      altIds: [r && r.supervisorId, r && r.gvTlId]
+    }), null);
+    const tStock = truth && truth.stock ? truth.stock : null;
+    const tCur = truth && truth.ledger ? truth.ledger.cur : null;
+    const tLast = truth && truth.ledger ? truth.ledger.last : null;
+    const tToday = truth && truth.ledger ? truth.ledger.today : null;
+    const baseId = (r && r.agentId) || (truth && truth.id) || p.sub || '';
+    const baseName = (r && r.agentName) || (truth && truth.name) || p.name;
+    const direct = safeCall(() => FF.config.isDirectAgent({ ...(r || {}), agentId: baseId, agentName: baseName, channel: 'GV Partner' }, 'gv'), false);
+    const reportStock = r ? { vc4: num(r.stockVc4), comm: num(r.stockComm), total: num(r.stockTotal) || num(r.stockVc4) + num(r.stockComm) } : { vc4: 0, comm: 0, total: 0 };
+    const stockTruth = tStock ? { vc4: num(tStock.vc4), comm: num(tStock.comm), total: num(tStock.total) } : reportStock;
+    const curTruth = tCur ? { vc4: num(tCur.vc4), comm: num(tCur.comm), total: num(tCur.total) } : null;
+    const lastTruth = tLast ? { vc4: num(tLast.vc4), comm: num(tLast.comm), total: num(tLast.total) } : null;
+    const out = { kind: 'gv-agent', channel: 'GV Partner', ch: 'gv', name: baseName, id: baseId, found: !!r || !!truth };
+    if (r || truth) {
+      const avgVc4 = U.runRate(curTruth ? curTruth.vc4 : num(r && r.curVc4), 'gv');
+      const avgComm = U.runRate(curTruth ? curTruth.comm : num(r && r.curComm), 'gv');
+      const given = num(r && r.suggestedDispatch);
+      const tlName = direct ? '' : ((truth && truth.tlName) || (r && r.tlName) || '');
+      const tlId = direct ? '' : ((truth && truth.tlId) || (r && r.tlId) || '');
       Object.assign(out, {
-        mobile: mobileFor(r.agentName, r.agentId, r.mobile), tl: { name: direct ? '' : r.tlName, id: r.tlId, mobile: '' }, status: r.agentStatus || '', lastActive: '', priority: prioOf(r.priority), growth: r.growth != null ? `${r.growth}%` : '',
-        direct, directLabel: direct ? FF.config.directLabel(r, 'gv') : '',
-        stock: { vc4: num(r.stockVc4), comm: num(r.stockComm), total: num(r.stockTotal) || num(r.stockVc4) + num(r.stockComm) },
-        tlStock: { vc4: num(r.tlStockVc4), comm: num(r.tlStockComm), total: num(r.tlStockTotal), has: !direct && (r.tlStockTotal != null) },
-        dispatch: { days: suggestDays(), avgVc4, avgComm, cover: avgVc4 > 0 ? num(r.stockVc4) / avgVc4 : null, given, minRequired: num(r.minRequired), sugVc4: suggest(avgVc4, r.stockVc4), sugComm: suggest(avgComm, r.stockComm), sugVc4Gross: suggestGro(avgVc4), sugCommGross: suggestGro(avgComm) },
-        totals: { curVc4: num(r.curVc4), curComm: num(r.curComm), curTotal: num(r.curTotal), lastVc4: num(r.lastVc4), lastComm: num(r.lastComm), lastTotal: num(r.lastTotal) }
+        mobile: mobileFor(baseName, baseId, r && r.mobile), tl: { name: tlName, id: tlId, mobile: '' },
+        status: (r && r.agentStatus) || '', lastActive: (r && r.lastActive) || '', priority: prioOf(r && r.priority),
+        growth: r && r.growth != null ? `${r.growth}%` : '',
+        direct, directLabel: direct ? FF.config.directLabel({ ...(r || {}), tlId, tlName }, 'gv') : '',
+        stock: stockTruth,
+        tlStock: { vc4: num(r && r.tlStockVc4), comm: num(r && r.tlStockComm), total: num(r && r.tlStockTotal), has: !direct && !!(r && r.tlStockTotal != null) },
+        dispatch: {
+          days: suggestDays(), avgVc4, avgComm,
+          cover: avgVc4 > 0 ? stockTruth.vc4 / avgVc4 : null,
+          given, minRequired: num(r && r.minRequired),
+          sugVc4: suggest(avgVc4, stockTruth.vc4), sugComm: suggest(avgComm, stockTruth.comm),
+          sugVc4Gross: suggestGro(avgVc4), sugCommGross: suggestGro(avgComm)
+        },
+        totals: {
+          curVc4: curTruth ? curTruth.vc4 : num(r && r.curVc4), curComm: curTruth ? curTruth.comm : num(r && r.curComm), curTotal: curTruth ? curTruth.total : num(r && r.curTotal),
+          lastVc4: lastTruth ? lastTruth.vc4 : num(r && r.lastVc4), lastComm: lastTruth ? lastTruth.comm : num(r && r.lastComm), lastTotal: lastTruth ? lastTruth.total : num(r && r.lastTotal)
+        },
+        today: tToday ? { vc4: num(tToday.vc4), comm: num(tToday.comm), total: num(tToday.total) } : null
       });
     } else {
-      Object.assign(out, { mobile: '', tl: { name: [...(p.tlSet || [])][0] || '' }, priority: '', direct: !!p.direct, directLabel: p.directLabel || '', stock: { vc4: 0, comm: 0, total: 0 }, tlStock: { has: false }, dispatch: { days: suggestDays(), sugVc4: 0, sugComm: 0, sugVc4Gross: 0, sugCommGross: 0 }, totals: {} });
+      Object.assign(out, {
+        mobile: '', tl: { name: [...(p.tlSet || [])][0] || '', id: p.tlId || '' }, priority: '', direct: !!p.direct,
+        directLabel: p.directLabel || '', stock: { vc4: 0, comm: 0, total: 0 }, tlStock: { has: false },
+        dispatch: { days: suggestDays(), sugVc4: 0, sugComm: 0, sugVc4Gross: 0, sugCommGross: 0 }, totals: {}
+      });
     }
     if (r && !out.direct && r.tlName && (!FF.config.isRealTl || FF.config.isRealTl(r.tlName))) {
       const teamStock = tlStockComposition('gv', r.tlName, r.tlId, gvPeopleLookup().rows, gvRows('stockAgent'), gvRows('stockAgentClass'));
@@ -1084,42 +1135,47 @@ window.FF = window.FF || {};
     }
     out.tagRequired = out.direct && isHM(out.priority);
     const n = norm(p.name);
-    // GV REPORT is a live calendar-month report: keep the actual current month even when its
-    // first issuance row has not arrived yet, so the full prior month remains visible.
+    // ---- 🟩 GV Master is final for issuance; GV REPORT is cross-check only -----------------------
     const globalCurYm = U.ymKey(new Date());
     const globalLastYm = U.prevMonthKey(globalCurYm);
-    const classLedger = gvIssuanceRows();
-    const classMine = gvAgentRows(classLedger, n, out.id);
-    out.months = { cur: globalCurYm, last: globalLastYm };
-    out.classBins = classBinsFromRows(classMine, globalCurYm, globalLastYm);
-    out.issuanceSources = { cur: 'GV Master / EIR', last: 'GV Master / EIR', classes: 'GV Master / EIR' };
-    const exactMine = gvAgentRows(gvCanonicalIssuanceRows(), n, out.id);
-    // 📑 Sheet-first: GV REPORT (jo GV ka live performance sheet hai) ka number hi final. Tag-ledger
-    // (EIR / GV Master) sirf tab chalta hai jab sheet ka wo cell khaali ho — pehle Math.max/list-sum
-    // se sheet aur ledger mix ho jaate the, isliye KPI aur sheet alag dikhte the.
-    const sheetCur = r && r.curAvailable ? sheetBinsOf(r, 'cur') : null;
-    const sheetLast = r && r.lastAvailable ? sheetBinsOf(r, 'last') : null;
+    const exactMine = gvCanonicalIssuanceRows().filter((m) =>
+      (baseId && clean(m.agentId).toUpperCase() === clean(baseId).toUpperCase()) ||
+      (!baseId && norm(m.agentName) === norm(baseName))
+    );
     const exactCurrent = exactGvMonth(exactMine, globalCurYm);
     const exactPrevious = exactGvMonth(exactMine, globalLastYm);
-    if (applySheetMonth(out.totals, 'cur', sheetCur) || exactCurrent) {
-      if (!sheetCur) setExactGvMonth(out.totals, exactMine, globalCurYm, 'cur');
-      out.dispatch.avgVc4 = U.runRate(out.totals.curVc4, 'gv');
-      out.dispatch.avgComm = U.runRate(out.totals.curComm, 'gv');
+    const masterLoaded = Array.isArray(gvRows('master')) && gvRows('master').length >= 0;
+    const masterHasAgent = exactMine.length > 0;
+    // A matched Master identity with zero rows in a month is an exact zero — never pull a stale REPORT value over it.
+    const current = exactCurrent || (masterLoaded && masterHasAgent ? { vc4: 0, comm: 0, total: 0 } : null);
+    const last = exactPrevious || (masterLoaded && masterHasAgent ? { vc4: 0, comm: 0, total: 0 } : null);
+    if (current) {
+      Object.assign(out.totals, { curVc4: current.vc4, curComm: current.comm, curTotal: current.total });
+      out.dispatch.avgVc4 = U.runRate(current.vc4, 'gv');
+      out.dispatch.avgComm = U.runRate(current.comm, 'gv');
       out.dispatch.cover = out.dispatch.avgVc4 > 0 ? out.stock.vc4 / out.dispatch.avgVc4 : null;
       out.dispatch.sugVc4 = suggest(out.dispatch.avgVc4, out.stock.vc4);
       out.dispatch.sugComm = suggest(out.dispatch.avgComm, out.stock.comm);
       out.dispatch.sugVc4Gross = suggestGro(out.dispatch.avgVc4);
       out.dispatch.sugCommGross = suggestGro(out.dispatch.avgComm);
     }
-    if (!applySheetMonth(out.totals, 'last', sheetLast) && exactPrevious) setExactGvMonth(out.totals, exactMine, globalLastYm, 'last');
-    out.sheetBins = { cur: sheetCur, last: sheetLast };
-    out.issuanceSources.cur = sheetCur ? 'GV REPORT sheet' : exactCurrent ? 'GV Master / EIR' : 'GV REPORT';
-    out.issuanceSources.last = sheetLast ? 'GV REPORT sheet' : exactPrevious ? 'GV Master / EIR' : 'GV REPORT';
-    attachGrowth(out, r || {}, globalCurYm);
+    if (last) Object.assign(out.totals, { lastVc4: last.vc4, lastComm: last.comm, lastTotal: last.total });
+    out.months = { cur: globalCurYm, last: globalLastYm };
+    out.classBins = classBinsFromRows(exactMine, globalCurYm, globalLastYm);
+    out.sheetBins = {
+      cur: r && r.curAvailable ? sheetBinsOf(r, 'cur') : null,
+      last: r && r.lastAvailable ? sheetBinsOf(r, 'last') : null
+    };
+    out.issuanceSources = {
+      cur: current ? 'GV Master' : 'GV Master / GV REPORT fallback',
+      last: last ? 'GV Master' : 'GV Master / GV REPORT fallback',
+      classes: exactMine.length ? 'GV Master' : 'GV REPORT class fields',
+      stock: tStock ? 'Tag Assignment' : 'GV REPORT'
+    };
     out.groupBins = {
-      last: sheetFirstGroups(sheetLast, out.classBins.last),
-      cur: sheetFirstGroups(sheetCur, out.classBins.cur),
-      stock: { VC4: num(out.stock && out.stock.vc4), VC20: 0, 'VC5+': num(out.stock && out.stock.comm), total: num(out.stock && out.stock.total) }
+      cur: sheetFirstGroups(null, out.classBins.cur),
+      last: sheetFirstGroups(null, out.classBins.last),
+      stock: { VC4: num(out.stock.vc4), VC20: 0, 'VC5+': num(out.stock.comm), total: num(out.stock.total) }
     };
     if (light) return out;
     const master = gvClassRows((m) => norm(m.agentName) === n || (out.id && m.agentId === out.id));
