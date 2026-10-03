@@ -704,7 +704,7 @@ window.FF = window.FF || {};
   function masterIssuanceRow(r) {
     if (!r || !r.date) return null;
     const date = r.date;
-    const tlId = U.clean(r.gvTlId);
+    const tlId = U.clean(r.tlId || r.supervisorId || r.gvTlId);
     const replacement = /replacement/i.test(`${r.status || ''} ${r.tagType || ''}`);
     return {
       date, d: date, key: U.dateKey(date), ym: r.ym || U.ymKey(date), day: r.day || date.getDate(),
