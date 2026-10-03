@@ -5604,6 +5604,20 @@ async function handleApi(req, res, url) {
     }
     // 👤 GV personal commission — exact agent ID + class settings. Blank manual rate is allowed
     // (it keeps the row unresolved instead of silently changing the payout).
+    if (patch.gvClassCch !== undefined) {
+      const cfg = patch.gvClassCch;
+      if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) throw new HttpError(400, 'gvClassCch object hona chahiye.');
+      cfg.enabled = cfg.enabled !== false && cfg.enabled !== 'false';
+      cfg.source = 'cch';
+      if (!cfg.groups || typeof cfg.groups !== 'object' || Array.isArray(cfg.groups)) throw new HttpError(400, 'gvClassCch.groups object hona chahiye.');
+      const cleanedGroups = {};
+      for (const group of ['VC4', 'VC20', 'VC5']) {
+        const raw = cfg.groups[group] === undefined ? [] : cfg.groups[group];
+        const list = Array.isArray(raw) ? raw : String(raw || '').split(',');
+        cleanedGroups[group] = [...new Set(list.map((v) => String(v || '').trim().replace(/\s+/g, ' ')).filter(Boolean))].slice(0, 200);
+      }
+      cfg.groups = cleanedGroups;
+    }
     if (patch.gvCommissionRates !== undefined) {
       const allowed = ['VC4', 'VC20', 'VC5', 'VC6', 'VC7', 'VC12'];
       const cfg = patch.gvCommissionRates;
