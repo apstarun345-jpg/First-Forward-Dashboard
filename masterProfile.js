@@ -159,15 +159,25 @@ window.FF = window.FF || {};
     }
     return out;
   }
-  /** GV TL / agent ke liye ek hi jagah se group bins: sheet (VC4 + NVC4) + ledger ka VC20/VC5+ mix. */
-  function gvGroupBins(reportSnapshots, classBins, stockComposition) {
+  /** GV TL / agent ke liye ek hi jagah se group bins: sheet (VC4 + NVC4) + ledger ka VC20/VC5+ mix.
+   *  `sheetSplit` = sheet ke apne class columns se nikla commercial batwara (TL ke team rows ka jod). */
+  function gvGroupBins(reportSnapshots, classBins, stockComposition, sheetSplit) {
     const snaps = reportSnapshots || {};
     const bins = classBins || {};
+    const cur = snaps.cur && sheetSplit && sheetSplit.cur ? { ...snaps.cur, ...sheetSplit.cur } : snaps.cur;
     return {
       last: sheetFirstGroups(snaps.last, bins.last),
-      cur: sheetFirstGroups(snaps.cur, bins.cur),
+      cur: sheetFirstGroups(cur, bins.cur),
       stock: groupBinsOf((stockComposition && stockComposition.classRows) || [], 'n')
     };
+  }
+  /** GV REPORT ke TL snapshot me commercial ka batwara nahi hota (sirf NVC4 total) — team ke class
+   *  columns (VC5…VC16, current month) us sheet ke andar hi detail dete hain, isliye wahi use karo. */
+  function tlSheetSplit(list, snapshot, period) {
+    if (!snapshot || period !== 'cur' || !(list || []).some((r) => r.curClassAvailable)) return null;
+    const comm = num(snapshot.comm);
+    const detail = Math.min(comm, U.sum(list, (r) => ['VC5', 'VC6', 'VC7', 'VC12', 'VC16'].reduce((n, cls) => n + num(r.curByClass && r.curByClass[cls]), 0)));
+    return { split: true, 'VC5+': detail, VC20: Math.max(0, comm - detail) };
   }
   /** class-wise rows → 3-way group bins (`key` = 'n' issuance ke liye, 'stock' stock ke liye). */
   function groupBinsOf(classes, key) {
@@ -1159,7 +1169,7 @@ window.FF = window.FF || {};
     out.dispatch.sumAgentCommGross = U.sum(rowsA, (r) => r.sugCommGross);
     // 📈 GV TL growth — GV sheet TL-level value nahi deta, isliye agents ke totals se.
     attachGrowth(out, {}, globalCurYm);
-    out.groupBins = gvGroupBins(reportSnapshots, out.classBins, stockComposition);
+    out.groupBins = gvGroupBins(reportSnapshots, out.classBins, stockComposition, { cur: tlSheetSplit(list, reportSnapshots.cur, 'cur') });
     if (light) return out;
     const master = gvClassRows((m) => agentNames.has(norm(m.agentName)) || (m.agentId && agentIds.has(clean(m.agentId).toUpperCase())));
     const curYm = globalCurYm, lastYm = globalLastYm;
@@ -1173,7 +1183,7 @@ window.FF = window.FF || {};
     // When GV REPORT supplies a TL snapshot, do not pad tag-level class rows to force a false match.
     // The search board and drill both display the ledger mix separately and expose any difference.
     if (!reportSnapshots.cur && !reportSnapshots.last) out.classes = enrichClassesWithTotals(out.classes, out.totals, stock);
-    out.groupBins = gvGroupBins(reportSnapshots, out.classBins, stockComposition);
+    out.groupBins = gvGroupBins(reportSnapshots, out.classBins, stockComposition, { cur: tlSheetSplit(list, reportSnapshots.cur, 'cur') });
     out.trend = trendOf(master, () => true, (m) => m.ym);
     return out;
   }

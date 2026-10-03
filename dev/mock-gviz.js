@@ -264,7 +264,7 @@ const DEMO_TEAM = [
   ['KAWARA RAM', 'APS04505', 107, 29, 136, 81, 0, 81, 6, [0, 0, 0, 0, 0]],
   ['Dharma Ram Godara', 'APS016706', 44, 9, 53, 0, 0, 0, 0, [0, 0, 0, 0, 0]],
   ['Shreeshail Vadageri', 'APS018154', 15, 1, 16, 26, 0, 26, 2, [0, 0, 0, 0, 0]],
-  ['Hemalbhai Bhavsar', 'APS011919', 329, 345, 674, 197, 21, 218, 12, [0, 0, 0, 0, 2]]
+  ['Hemalbhai Bhavsar', 'APS011919', 329, 345, 674, 197, 21, 218, 12, [0, 0, 0, 0, 0]]
 ];
 for (const [name, id, svc4, scomm, stotal, lvc4, lcomm, ltotal, cvc4, cvc5] of DEMO_TEAM) {
   const row = new Array(GVR_COLS.length).fill('');
