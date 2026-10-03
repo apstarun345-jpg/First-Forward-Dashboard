@@ -83,15 +83,27 @@ window.FF = window.FF || {};
   function renderMobileNav() {
     const nav = U.$('#mobile-nav');
     if (!nav || !FF.auth.user) return;
+    // Mobile = 5 high-frequency actions. Existing pages/sidebar stay the source of truth;
+    // Search/Bell/More are actions, not duplicate routes.
     const items = [
-      ['home', '⌂', 'Home'],
-      ['tagIssued', '▣', 'Issued'],
-      ['performance', '★', 'Team'],
-      ['stock', '▤', 'Stock'],
-      ['settings', '⚙', 'More']
-    ].filter(([id]) => id === 'settings' || allowed(id, {}));
+      { kind: 'route', id: 'home', icon: '⌂', label: 'Home' },
+      { kind: 'action', id: 'search', icon: '⌕', label: 'Search' },
+      { kind: 'action', id: 'notifications', icon: '🔔', label: 'Alerts' },
+      { kind: 'route', id: 'performance', icon: '★', label: 'Team' },
+      { kind: 'action', id: 'more', icon: '☰', label: 'More' }
+    ];
     nav.hidden = false;
-    nav.innerHTML = items.map(([id, icon, label]) => `<a href="#/${id}" class="mobile-nav-item ${current.page === id ? 'active' : ''}" aria-label="${esc(label)}"><span>${icon}</span><small>${esc(label)}</small></a>`).join('');
+    nav.innerHTML = items.map((x) => {
+      const active = x.kind === 'route' && current.page === x.id;
+      if (x.kind === 'route') return `<a href="#/${x.id}" class="mobile-nav-item ${active ? 'active' : ''}" aria-label="${esc(x.label)}"><span>${x.icon}</span><small>${esc(x.label)}</small></a>`;
+      const badge = x.id === 'notifications' ? '<b class="mobile-nav-badge" id="mobile-notification-count" hidden>0</b>' : '';
+      return `<button type="button" class="mobile-nav-item mobile-nav-action" data-mobile-action="${x.id}" aria-label="${esc(x.label)}"><span>${x.icon}${badge}</span><small>${esc(x.label)}</small></button>`;
+    }).join('');
+    try {
+      const count = FF.notifications && FF.notifications.countUnread ? FF.notifications.countUnread() : 0;
+      const badge = U.$('#mobile-notification-count');
+      if (badge) { badge.textContent = count > 99 ? '99+' : String(count); badge.hidden = count < 1; }
+    } catch { /* notifications optional during boot */ }
   }
   function updateFocusMode(on) {
     const enabled = on === undefined ? document.documentElement.classList.toggle('focus-mode') : !!on;
@@ -1208,6 +1220,19 @@ window.FF = window.FF || {};
         moreBtn.setAttribute('aria-expanded', 'false');
       });
     }
+    // Mobile bottom-nav actions reuse existing topbar/sidebar controls — no duplicate pages.
+    document.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-mobile-action]');
+      if (!btn) return;
+      const action = btn.dataset.mobileAction;
+      if (action === 'search') { U.$('#global-search-btn')?.click(); return; }
+      if (action === 'notifications') {
+        if (FF.notifications?.openCenter) FF.notifications.openCenter();
+        else U.$('#notification-btn')?.click();
+        return;
+      }
+      if (action === 'more') { U.$('#menu-btn')?.click(); return; }
+    });
     const saveViewBtn = U.$('#save-view-btn');
     if (saveViewBtn) saveViewBtn.addEventListener('click', () => {
       if (FF.workspace && FF.workspace.openSave) FF.workspace.openSave();
