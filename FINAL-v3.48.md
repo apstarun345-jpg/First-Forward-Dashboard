@@ -64,6 +64,12 @@ restore karne hain ya nahi.
 
 Agar history khaali aaye → **tareeqa 2 (purani sheet)** ya **3/4 (backup / disk)** — asli data wahin hai.
 
+> 📡 **Live confirmation (21:46 IST, PR #77 ke baad):** site ab khul kar bolti hai ki kya karna hai —
+> `/api/health` → `storage.recoverable.error` = *“Sheet ke Apps Script me naya Code.gs deploy nahi hua
+> hai (history action missing)…”*. Yani **step 2 abhi bakaaya hai** — Apps Script me naya Code.gs
+> deploy hote hi yahi jagah purani saves ka count dikhne lagegi. (Purane Code.gs par recovery chup-chaap
+> fail ho rahi thi; #77 ne use saaf error + Settings me pila warning box bana diya.)
+
 ---
 
 ## 🔧 Files badle
@@ -75,7 +81,7 @@ Agar history khaali aaye → **tareeqa 2 (purani sheet)** ya **3/4 (backup / dis
 | `server.js` | Admin-only `/api/storage/history`, `/api/storage/history/restore`, `/api/storage/pull`, `/api/storage/scan`, `/api/storage/import`, `/api/storage/backup`; `restoreStoredIntoDb()` (merge/update/replace + admin lockout guard); `migrateUserPermissions()` ab boot **aur** recovery dono me; `storage.seededFresh` signal; `/api/health` ab package.json version. |
 | `settings.js` | Naya **⏪ Purana data wapas lao** panel + `seededFresh` wala pila warning (“ye sheet nayi/khaali mili thi”). |
 | `dev/mock-apps-script.js` | Mock ab real Code.gs ki tarah overwrite se pehle **history backup** banata hai. |
-| `dev/storage-recovery.test.js` | Naye end-to-end recovery tests. |
+| `dev/storage-recovery.test.js` | Naye end-to-end recovery tests (history restore · doosri sheet · **purana Code.gs → saaf error**). |
 | `package.json` · `README.md` · `STORAGE_SETUP.md` | v3.48.0 · recovery sections + pointers. |
 | `RECOVERY.md` · `WHATS-NEW-v3.48.0.md` | Hindi guide + release note. |
 
@@ -88,16 +94,25 @@ Agar history khaali aaye → **tareeqa 2 (purani sheet)** ya **3/4 (backup / dis
 | `npm run check` | ✅ `syntax ok` |
 | `node --test dev/*.test.js` | **446 pass / 453** — 7 failing tests **pehle se** (clean `HEAD` worktree par bhi) fail hote hain, is change se unrelated |
 | `node --test dev/storage-recovery.test.js dev/apps-script-storage.test.js dev/regression.test.js` | ✅ **9/9 pass** |
+| `node --test dev/storage-recovery.test.js` (v3.48.1 ke baad) | ✅ **3/3 pass** — purane Code.gs wala naya test bhi |
 | Recovery E2E | 2 users + settings → sheet ko defaults (1 admin) se overwrite → naye deploy par `users: 1` → **history restore** → dono purane users + purani settings + **purane password se login 200** ✅ |
 | Doosri sheet | pull preview + import ✅ · `replace` mode me bhi current admin safe ✅ |
 | Permissions | Saare naye endpoints non-admin ko **403** ✅ |
 | Live-style preview (mock Sheets + mock Apps Script) | `version 3.48.0`, `storage.recoverable.available: 3`, history list me purani save ke decrypted **usernames** (`owner, tl1, agent1`) dikhe ✅ |
+| **Live site (deploy ke baad)** | `version 3.48.0` ✅ · `storage.recoverable.error` me saaf Hindi message ✅ · `users: 1` (recovery abhi aapko karni hai) |
 | `Code.gs` syntax | ✅ `node --check` |
 
 > ⚠️ `node dev/smoke.js` is sandbox se nahi chal sake — usse real **docs.google.com** chahiye, jo yahan
 > network-blocked hai (`fetch failed`). Render par (jahan Google reachable hai) chalega.
 
 ---
+
+## 🔖 PRs
+
+| PR | Kya | State |
+|---|---|---|
+| **#76** | ⏪ v3.48 recovery (sheet history · purani sheet · backup file · disk scan) | ✅ merged `d1eafd6` |
+| **#77** | Purane Code.gs par chup-chaap fail na ho — saaf error (health + Settings + notification) | ✅ merged |
 
 ## 🗺 Aage kya kar sakte hain (impact ke hisaab se)
 
