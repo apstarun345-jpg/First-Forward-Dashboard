@@ -867,11 +867,11 @@ table.matrix tr.is-admin td.mx-user { background: #f8fafc; }
 .auth-submit.busy .btn-label { opacity: .95; }
 
 /* ---------- notification centre ---------- */
-.notification-wrap { position: relative; }
-.notification-btn { position: relative; font-size: 17px; }
+.notification-wrap { position: relative; display:flex; align-items:center; }
+.notification-btn { position: relative; font-size: 20px; min-width: 42px; width: 42px; height: 42px; padding: 0; display:grid; place-items:center; flex:0 0 42px; }
 .notification-btn.open { border-color: color-mix(in srgb, var(--brand) 45%, var(--line)); background: #eef2ff; }
 .notification-count { position: absolute; top: -5px; right: -5px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 999px; display: grid; place-items: center; background: #ef4444; color: #fff; border: 2px solid var(--bg); font-size: 9px; font-weight: 900; line-height: 1; }
-.notification-pop { position: absolute; z-index: 80; top: calc(100% + 10px); right: 0; width: min(390px, calc(100vw - 28px)); max-height: min(620px, calc(100vh - 90px)); overflow: hidden; background: #fff; border: 1px solid var(--line); border-radius: 17px; box-shadow: 0 24px 70px rgba(15, 23, 42, .22); animation: menuIn .16s ease; }
+.notification-pop { position: absolute; z-index: 180; top: calc(100% + 10px); right: 0; width: min(460px, calc(100vw - 24px)); max-height: min(620px, calc(100vh - 90px)); overflow: hidden; background: #fff; border: 1px solid var(--line); border-radius: 17px; box-shadow: 0 24px 70px rgba(15, 23, 42, .22); animation: menuIn .16s ease; }
 .notification-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 13px 14px; background: linear-gradient(135deg, color-mix(in srgb, var(--brand) 11%, #fff), color-mix(in srgb, var(--brand-2) 11%, #fff)); border-bottom: 1px solid var(--line); }
 .notification-head > div { display: flex; flex-direction: column; }
 .notification-head small { color: var(--muted); font-size: 11px; }
@@ -5057,3 +5057,8 @@ html[data-theme="dark"] .mobile-nav-badge{border-color:#0b1220}
 .fresh-note{display:grid;gap:3px;margin-top:10px;padding:10px 11px;border-radius:12px;border:1px solid color-mix(in srgb,var(--brand) 22%,transparent);background:color-mix(in srgb,var(--brand) 6%,transparent);font-size:11.5px}.fresh-note span{color:var(--muted)}.fresh-actions{display:flex;gap:7px;justify-content:flex-end;margin-top:12px}
 html[data-theme="dark"] .data-fresh-card>header{background:#111827}.data-fresh-card .icon-btn{flex:none}
 @media(max-width:600px){.data-fresh-backdrop{padding:5vh 10px 18px}.data-fresh-card{max-height:88vh}.fresh-row{grid-template-columns:8px minmax(0,1fr);}.fresh-row strong{grid-column:2}.fresh-actions{justify-content:stretch}.fresh-actions .btn{flex:1}}
+
+/* Employee Tag Request status + historical contact suggestion */
+.tr-employee-summary{margin:0 0 12px;padding:11px 12px;border:1px solid var(--line);border-radius:14px;background:color-mix(in srgb,var(--brand) 5%,transparent)}
+.tr-es-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:9px}.tr-es-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}.tr-es-grid>div{padding:8px 9px;border:1px solid var(--line);border-radius:10px;background:var(--card);min-width:0}.tr-es-grid small{display:block;color:var(--muted);font-size:10px}.tr-es-grid b{display:block;font-size:18px;line-height:1.2;margin-top:2px}
+@media(max-width:600px){.notification-btn{min-width:46px;width:46px;height:44px;font-size:21px}.notification-pop{top:58px;right:8px;width:calc(100vw - 16px)}.tr-es-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
