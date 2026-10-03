@@ -35,13 +35,43 @@ FF.pages = FF.pages || {};
   };
   const splitFoot = (ff, gv) => `<span class="hm-split"><span class="ff">🟦 FF <b>${U.fmt(ff)}</b></span><span class="gv">🟩 GV <b>${U.fmt(gv)}</b></span></span>`;
 
-  /** month key + observed day — FF (EIR) T+1 hai, GV live — isliye aaj tak ka din count hota hai. */
+  /** Month KPI context.
+   * FF EIR report T+1 aati hai, isliye October ka expected/run-rate 1 din piche ke
+   * received data par based rahega: 3 Oct ko basis 2 Oct tak. GV live rows ko
+   * month total me include karna continue rahega, lekin denominator received/report
+   * cutoff par rahega taaki current day ko prematurely full day na maana jaye.
+   */
   function monthContext(rows) {
     const curKey = U.ymKey(TODAY());
     const prevKey = U.prevMonthKey(curKey);
-    const observedDay = Math.max(1, TODAY().getDate());
+    const today = TODAY();
+    const lagDays = Math.max(1, Number(
+      FF.config && FF.config.ffIssuanceLagDays != null
+        ? FF.config.ffIssuanceLagDays
+        : 1
+    ) || 1);
+
+    // Bank/EIR received-through date: today - 1 by default.
+    const receivedDate = new Date(today);
+    receivedDate.setDate(receivedDate.getDate() - lagDays);
+
+    // For current month, the number of reportable/received calendar days is the
+    // received date's day. On month boundaries this naturally becomes the prior
+    // month's full-day count (e.g. 1 Oct -> 30 Sep).
+    const observedDay = receivedDate.getFullYear() === today.getFullYear() &&
+      receivedDate.getMonth() === today.getMonth()
+      ? Math.max(1, receivedDate.getDate())
+      : Math.max(1, U.daysInMonth(U.ymKey(receivedDate)));
+
     const daysInMonth = U.daysInMonth(curKey);
-    return { curKey, prevKey, observedDay, daysInMonth };
+    return {
+      curKey,
+      prevKey,
+      observedDay,
+      daysInMonth,
+      receivedDate,
+      lagDays
+    };
   }
 
   /** Convert the small server feed's class totals into month-summary rows until full GV Master loads. */
