@@ -25,15 +25,22 @@ window.FF = window.FF || {};
     } catch { return '72'; }
   })();
 
-  // Page id → uske liye zaroori modules (order matter karta hai: dependency pehle).
+  // Page id → modules + transitive page dependencies (order matter karta hai).
+  // Lazy-loading me sirf page file load karna kaafi nahi tha: kuch purane modules
+  // agentBoard/masterProfile/cockpit/insights jaise helpers ko render-time par use karte hain.
+  // In dependencies ko yahin centralize karke page-open errors ko prevent karte hain.
+  const INSIGHT_DEPS = ['insights', 'direct', 'certificates', 'cockpit'];
+  const PROFILE_DEPS = [...INSIGHT_DEPS, 'gvTruth', 'pdf', 'masterProfile'];
+  const SUMMARY_DEPS = [...PROFILE_DEPS, 'agentSummary'];
+  const WOW_DEPS = [...INSIGHT_DEPS, 'wow', 'wowzone'];
   const GROUPS = {
     home: ['home'],
     controlTower: ['controlTower'],
-    executive: ['insights', 'cockpit'],
+    executive: [...INSIGHT_DEPS],
     tagRequest: ['pdf', 'tagRequest'],
-    masterSearch: ['gvTruth', 'masterProfile', 'masterSearch'],
+    masterSearch: [...PROFILE_DEPS, 'searchReport', 'masterSearch'],
     tagIssued: ['tagIssued'],
-    performance: ['performance'],
+    performance: [...PROFILE_DEPS, 'agentBoard', 'performance'],
     targets: ['targets'],
     rangeReport: ['rangeReport'],
     tv: ['tv'],
@@ -41,40 +48,40 @@ window.FF = window.FF || {};
     dashboard: ['dashboard', 'wowzone'],
     trend: ['trend'],
     stock: ['stock'],
-    ffCommission: ['insights'],
+    ffCommission: [...INSIGHT_DEPS],
     gvDashboard: ['gvpages'],
     gvTrend: ['gvpages'],
     gvStock: ['gvpages'],
     gvStockReport: ['gvpages'],
     gvPerformance: ['gvpages'],
-    gvCommission: ['gvpages', 'insights'],
-    dualChannel: ['insights'],
-    masterStock: ['insights'],
-    compare: ['insights', 'compare'],
-    charts: ['insights', 'chartExplorer'],
-    forecast: ['insights', 'cockpit'],
-    dataQuality: ['insights', 'cockpit'],
-    savedViews: ['insights'],
-    reportStudio: ['insights'],
-    followups: ['insights'],
-    fastagChampions: ['insights', 'certificates'],
-    dispatchPlan: ['insights', 'cockpit', 'dispatchPlanner'],
-    tlScorecard: ['insights', 'cockpit'],
+    gvCommission: [...PROFILE_DEPS, 'agentBoard', 'gvpages', 'insights'],
+    dualChannel: [...INSIGHT_DEPS],
+    masterStock: [...INSIGHT_DEPS],
+    compare: [...INSIGHT_DEPS, 'map', 'compare'],
+    charts: [...INSIGHT_DEPS, 'chartExplorer'],
+    forecast: [...INSIGHT_DEPS],
+    dataQuality: [...INSIGHT_DEPS],
+    savedViews: [...INSIGHT_DEPS],
+    reportStudio: [...INSIGHT_DEPS],
+    followups: [...INSIGHT_DEPS],
+    fastagChampions: [...INSIGHT_DEPS],
+    dispatchPlan: [...PROFILE_DEPS, 'dispatchPlanner'],
+    tlScorecard: [...INSIGHT_DEPS],
     directAgents: ['directAgents'],
-    newAgents: ['newAgents'],
-    unusual: ['unusual-scan', 'pdf', 'unusual'],
-    ffAgentSummary: ['pdf', 'agentSummary', 'gvTruth', 'summaryUI'],
-    gvAgentSummary: ['gvpages', 'pdf', 'agentSummary', 'gvTruth', 'summaryUI'],
-    arena: ['wow'],
-    fame: ['wow'],
-    warRoom: ['wow'],
-    activity: ['wowzone'],
-    network: ['wowzone'],
-    radar: ['wowzone'],
-    reportCards: ['wowzone'],
-    sprints: ['sprints', 'wowzone'],
+    newAgents: [...PROFILE_DEPS, 'newAgents'],
+    unusual: ['pdf', 'unusual-scan', 'unusual'],
+    ffAgentSummary: [...SUMMARY_DEPS, 'summaryUI'],
+    gvAgentSummary: [...SUMMARY_DEPS, 'agentBoard', 'gvpages', 'summaryUI'],
+    arena: [...WOW_DEPS],
+    fame: [...WOW_DEPS],
+    warRoom: [...WOW_DEPS],
+    activity: [...WOW_DEPS],
+    network: [...WOW_DEPS],
+    radar: [...WOW_DEPS],
+    reportCards: [...WOW_DEPS],
+    sprints: [...WOW_DEPS, 'sprints'],
     stockRadar: ['stockRadar'],
-    settings: ['settings']
+    settings: [...PROFILE_DEPS, 'agentSummary', 'unusual-scan', 'unusual', 'settings']
   };
 
   // Background warm order (login ke baad idle me) — jo pages sabse zyada khulte hain wo pehle.
