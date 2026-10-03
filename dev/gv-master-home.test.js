@@ -21,10 +21,17 @@ test('GV Master truth mapping stays authoritative', () => {
   assert.match(profile, /Tag Assignment is authoritative for stock/);
   assert.match(search, /Exact agent\/TL ID match wins/);
   assert.match(server, /function gvMasterRawTodayFallback/);
+  assert.match(server, /async function gvTodayFeed/);
+  assert.match(server, /\/api\/gv-today/);
   assert.match(server, /cfg\.date \|\| pick\('date'\)/);
   assert.match(home, /All Commercial · VC20 \+ VC5\+/);
   assert.match(home, /Expected this month/);
+  assert.match(home, /FF\.data\.gvToday/);
+  assert.match(home, /AAJ KA LIVE/|Aaj ka live/);
   assert.match(index, /homeKpiFix\.css/);
+  assert.match(profile, /todayKpiHtml/);
+  assert.match(profile, /todayTeamRows/);
+  assert.match(gv, /liveTodayRows\.forEach/);
 
   // Guard against the earlier accidental partial-file overwrite.
   assert.ok(server.split('\n').length > 6000, 'server.js unexpectedly truncated');
