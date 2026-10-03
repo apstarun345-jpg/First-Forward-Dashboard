@@ -163,3 +163,43 @@ test('recovery endpoints admin-only hain aur full backup download hota hai', asy
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+test('purana Code.gs (history action nahi) — clear error, chup-chaap fail nahi', async () => {
+  const http = await import('node:http');
+  const records = {}; // purana Code.gs: read/write to hai, par 'history' action nahi
+  const old = http.createServer((req, res) => {
+    let raw = '';
+    req.on('data', (c) => { raw += c; });
+    req.on('end', () => {
+      let body = {}; try { body = JSON.parse(raw || '{}'); } catch { /* ignore */ }
+      let out;
+      if (body.secret !== SECRET) out = { ok: false, error: 'unauthorized (secret mismatch)' };
+      else if (body.action === 'ping') out = { ok: true, tab: 'APP_STORAGE', spreadsheet: 'Old Code Sheet' };
+      else if (body.action === 'read') out = { ok: true, records };
+      else if (body.action === 'write') { Object.assign(records, body.records || {}); out = { ok: true, savedAt: new Date().toISOString(), kinds: Object.keys(body.records || {}) }; }
+      else out = { ok: false, error: 'unknown action' };
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(out));
+    });
+  });
+  await new Promise((r) => old.listen(0, '127.0.0.1', r));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ff-rec3-'));
+  let server;
+  try {
+    server = await startServer({ DATA_DIR: dir, STORAGE_BACKEND: '', APPS_SCRIPT_URL: `http://127.0.0.1:${old.address().port}/macros/s/old/exec`, APPS_SCRIPT_SECRET: SECRET, ADMIN_USER: '', ADMIN_PASSWORD: '' });
+    const c = client(server.base);
+    assert.equal((await c.call('/api/auth/login', 'POST', { username: 'admin', password: 'admin123' })).res.status, 200);
+    const hist = await c.call('/api/storage/history');
+    assert.equal(hist.res.status, 400, 'purane Code.gs par saaf 400 + Hindi message');
+    assert.match(hist.json.error, /Code\.gs deploy nahi hua|history action missing/);
+    // boot-time hint (20s) fail hone par bhi health me wajah dikhe — "pending" par atki rahe to admin ko kuch samajh nahi aata
+    let rec = null;
+    for (let i = 0; i < 20 && !rec; i++) { await new Promise((r) => setTimeout(r, 1500)); const h = await c.call('/api/health'); if (h.json.storage && h.json.storage.recoverable && h.json.storage.recoverable.error) rec = h.json.storage.recoverable; }
+    assert.ok(rec && /Code\.gs|history action/.test(rec.error), `health me error dikhe: ${JSON.stringify(rec)}`);
+    await server.stop();
+  } finally {
+    if (server) await server.stop();
+    old.close();
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
