@@ -791,6 +791,37 @@ window.FF = window.FF || {};
     if (token && token !== routeToken) return;
     if (el) el.hidden = true;
   }
+  function openDataFreshness() {
+    const old = U.$('#data-freshness-center');
+    if (old) { old.remove(); return; }
+    const ds = FF.data && FF.data.status ? FF.data.status() : {};
+    const st = FF.store && FF.store.state ? FF.store.state : {};
+    const gv = FF.gv && FF.gv.state ? FF.gv.state : {};
+    const basis = U.channelBasis ? U.channelBasis('ff') : null;
+    const gvBasis = U.channelBasis ? U.channelBasis('gv') : null;
+    const fmtAt = (t) => t ? U.timeLabel(t) : 'Not loaded';
+    const row = (name, at, note, cls) => `<div class="fresh-row"><span class="fresh-dot ${cls || ''}"></span><div><b>${U.esc(name)}</b><small>${U.esc(note)}</small></div><strong>${U.esc(fmtAt(at))}</strong></div>`;
+    const host = U.h(`<div class="data-fresh-backdrop" id="data-freshness-center" role="dialog" aria-modal="true" aria-label="Data Freshness Center">
+      <section class="data-fresh-card">
+        <header><div><b>🕒 Data Freshness Center</b><small>Sirf existing loaded state — koi extra Google/API request nahi</small></div><button class="icon-btn small" data-fresh-close aria-label="Close">✕</button></header>
+        <div class="data-fresh-body">
+          <div class="fresh-grid">
+            ${row('First Forward · EIR', st.loadedAt, basis ? `Report basis: ${basis.shortLabel} · T+1` : 'Report basis available after data load', st.loadedAt ? 'ok' : '')}
+            ${row('GV Partner · live', gv.loadedAt, gvBasis ? `Latest data: ${gvBasis.shortLabel}` : 'Live basis available after data load', gv.loadedAt ? 'ok' : '')}
+            ${row('Last query', ds.lastLoadAt, ds.lastSource ? `Source: ${ds.lastSource} · cache entries: ${ds.cacheEntries || 0}` : `Cache entries: ${ds.cacheEntries || 0}`, ds.lastLoadAt ? 'ok' : '')}
+          </div>
+          <div class="fresh-note"><b>⚡ Speed-safe design</b><span>Page data repeat-open par memory cache se aata hai. CSV/Excel download path ko touch nahi kiya gaya. Large sheets browser me full-download nahi hoti; existing query/paging architecture same hai.</span></div>
+          <div class="fresh-actions"><button class="btn small" data-fresh-refresh>↻ Fresh data load</button><button class="btn small" data-fresh-close>Close</button></div>
+        </div>
+      </section>
+    </div>`);
+    document.body.appendChild(host);
+    host.querySelectorAll('[data-fresh-close]').forEach((b) => b.addEventListener('click', () => host.remove()));
+    host.addEventListener('click', (e) => { if (e.target === host) host.remove(); });
+    const rb = host.querySelector('[data-fresh-refresh]');
+    if (rb) rb.addEventListener('click', () => { host.remove(); refresh(); });
+  }
+
   function updateStatus(progress) {
     const el = U.$('#status');
     if (!el) return;
@@ -812,6 +843,7 @@ window.FF = window.FF || {};
       ? '<span class="dot warn"></span> 📴 Offline — last loaded data dikh raha hai'
       : (t ? `<span class="dot ${errs ? 'warn' : 'live'}\"></span> Data ${U.timeLabel(t)}${errs ? ` · ${errs} failed${(st.retrying || (gv && gv.retrying)) ? ' — 🔁 auto-retry chal raha hai…' : ''}` : ''}${pre && pre.done ? ' · all sheets ready ✓' : ''}` : '<span class="dot"></span> Ready');
     const btn = U.$('#top-refresh'); if (btn) btn.classList.remove('spin');
+    const statusEl = U.$('#status'); if (statusEl) { statusEl.title = 'Click: Data Freshness Center'; statusEl.style.cursor = 'pointer'; }
   }
   let refreshing = false;
   async function refresh() {
@@ -1191,6 +1223,8 @@ window.FF = window.FF || {};
     window.addEventListener('offline', () => { updateStatus(); U.toast('📴 Offline ho — last loaded data dikhega', 'warn'); });
     U.$('#side-backdrop').addEventListener('click', closeSidebar);
     U.$('#top-refresh').addEventListener('click', refresh);
+    const statusEl = U.$('#status'); if (statusEl) statusEl.addEventListener('click', openDataFreshness);
+    window.addEventListener('ff:data-loaded', () => updateStatus());
     // ⚡ Panel links instant: hover/tap karte hi us page ka lazy module prefetch ho jaata hai
     //    (pehla click bina ruke khulta hai), aur ACTIVE link dobara click karne par page refresh
     //    hota hai — pehle hash same hone par kuch nahi hota tha ("click par khulta hi nahi").
@@ -1608,6 +1642,6 @@ window.FF = window.FF || {};
     setLang(next);
   }
 
-  FF.app = { storageBanner, pushBanner, liveShareChip, applySavedTweaks, navigate, updateParams, clearGlobalFilters, refresh, syncNow, checkFeedChange, announceDataUpdate, parseHash, resolvePage, pageKnown, firstAllowedPage, firstAllowedRoute, openDrawer, closeDrawer, currentDrawerSnapshot, restoreDrawerSnapshot, exportDrawerCsv, exportDrawerPdf, renderSidebar, renderCurrent, renderTopUser, updateStatus, onLogin, onBackgroundDataUpdated, promptInstall, enhanceCharts, enhanceTables, themeMode, toggleThemeMode, lang, setLang, toggleLangMenu, renderGlobalFilters, renderMobileNav, focusMode: updateFocusMode, openAccessibility: renderA11yPanel, tableDensity, setTableDensity, PAGES, refreshPendingBadge, setPendingSignups, shareWhatsApp, checkVersion, exportCSV: () => exportCurrentCsv('csv'), exportXLSX: () => exportCurrentCsv('xlsx'), toggleTheme: toggleThemeMode, toggleLang: toggleLangQuick, get pendingSignups() { return pendingSignups; }, get current() { return current; }, currentFilters: () => (FF.filters ? FF.filters.current() : currentFilterValues()) };
+  FF.app = { openDataFreshness, storageBanner, pushBanner, liveShareChip, applySavedTweaks, navigate, updateParams, clearGlobalFilters, refresh, syncNow, checkFeedChange, announceDataUpdate, parseHash, resolvePage, pageKnown, firstAllowedPage, firstAllowedRoute, openDrawer, closeDrawer, currentDrawerSnapshot, restoreDrawerSnapshot, exportDrawerCsv, exportDrawerPdf, renderSidebar, renderCurrent, renderTopUser, updateStatus, onLogin, onBackgroundDataUpdated, promptInstall, enhanceCharts, enhanceTables, themeMode, toggleThemeMode, lang, setLang, toggleLangMenu, renderGlobalFilters, renderMobileNav, focusMode: updateFocusMode, openAccessibility: renderA11yPanel, tableDensity, setTableDensity, PAGES, refreshPendingBadge, setPendingSignups, shareWhatsApp, checkVersion, exportCSV: () => exportCurrentCsv('csv'), exportXLSX: () => exportCurrentCsv('xlsx'), toggleTheme: toggleThemeMode, toggleLang: toggleLangQuick, get pendingSignups() { return pendingSignups; }, get current() { return current; }, currentFilters: () => (FF.filters ? FF.filters.current() : currentFilterValues()) };
   document.addEventListener('DOMContentLoaded', init);
 })(window.FF);
