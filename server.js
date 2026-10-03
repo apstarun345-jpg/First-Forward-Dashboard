@@ -3291,7 +3291,7 @@ function perfReport() {
   const hottest = [...HOT.entries()].sort((a, b) => b[1].hits - a[1].hits).slice(0, 10)
     .map(([url, h]) => ({ url: url.length > 160 ? `${url.slice(0, 160)}…` : url, hits: h.hits }));
   return {
-    version: '3.45.0', cacheEntries: cache.size, cacheEntriesMax: MAX_CACHE_ENTRIES, cacheMB: Math.round(cache.bytes / 1048576), cacheMBMax: Math.round(MAX_CACHE_BYTES / 1048576),
+    version: '3.47.0', cacheEntries: cache.size, cacheEntriesMax: MAX_CACHE_ENTRIES, cacheMB: Math.round(cache.bytes / 1048576), cacheMBMax: Math.round(MAX_CACHE_BYTES / 1048576),
     cacheSeconds: cacheMs() / 1000, warmedQueries: warmed, hotQueries: hottest,
     slowest: queries.filter((q) => q.upstream > 0).slice(0, 25),
     queries
