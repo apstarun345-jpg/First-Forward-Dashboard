@@ -27,7 +27,7 @@ test('GV Master truth mapping stays authoritative', () => {
   assert.match(home, /All Commercial · VC20 \+ VC5\+/);
   assert.match(home, /Expected this month/);
   assert.match(home, /FF\.data\.gvToday/);
-  assert.match(home, /AAJ KA LIVE/|Aaj ka live/);
+  assert.match(home, /AAJ KA LIVE|Aaj ka live/);
   assert.match(index, /homeKpiFix\.css/);
   assert.match(profile, /todayKpiHtml/);
   assert.match(profile, /todayTeamRows/);
