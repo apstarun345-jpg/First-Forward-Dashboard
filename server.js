@@ -835,7 +835,17 @@ function serverDate(value) {
 }
 function serverNumber(value) { const n = Number(value); return Number.isFinite(n) ? n : 0; }
 function classBucket(value) {
-  const c = String(value || '').toUpperCase().replace(/\s+/g, '');
+  const cfg = (db.settings && db.settings.gvClassCch) || {};
+  const token = String(value || '').toUpperCase().replace(/\s+/g, ' ').trim();
+  if (cfg.enabled !== false && token) {
+    const groups = cfg.groups || {};
+    for (const [group, values] of Object.entries(groups)) {
+      if (Array.isArray(values) && values.some((v) => String(v || '').toUpperCase().replace(/\s+/g, ' ').trim() === token)) {
+        return group === 'VC5' || group === 'VC5+' ? 'VC5+' : group;
+      }
+    }
+  }
+  const c = token.replace(/\s+/g, '');
   if (c === '4' || c === 'VC4') return 'VC4';
   if (c === '20' || c === 'VC20') return 'VC20';
   return 'VC5+';
