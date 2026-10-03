@@ -216,7 +216,13 @@ window.FF = window.FF || {};
     const ym = t.ym, lastYm = t.lastYm;
     const daysElapsed = lt.cur.lastDay || lt.cur.days || 0;
     const dim = U.daysInMonth(ym);
-    const expected = daysElapsed ? Math.round((lt.cur.total / daysElapsed) * dim) : 0;
+    // EIR/FF and GV are T+1 for monthly Expected: use only completed/report-available days.
+    const basis = U.channelBasis ? U.channelBasis('ff', { force: true }) : { days: daysElapsed || 1 };
+    const reportDays = Math.max(1, Number(basis.days) || daysElapsed || 1);
+    const expectedBase = (lt.rows && Array.isArray(lt.rows.all))
+      ? lt.rows.all.filter((r) => r.ym === ym && Number(r.day) <= reportDays).reduce((n, r) => n + (Number(r.n) || 0), 0)
+      : lt.cur.total;
+    const expected = reportDays ? Math.round((expectedBase / reportDays) * dim) : 0;
     const rate = daysElapsed ? lt.cur.total / daysElapsed : 0;
     const growth = lt.last.total ? ((lt.cur.total - lt.last.total) / lt.last.total) * 100 : null;
     const classes = (() => {
@@ -243,8 +249,8 @@ window.FF = window.FF || {};
         sub: `${isTl ? `TL ke paas <b>${fmt(st.own)}</b> + agents <b>${fmt(st.agentsTotal)}</b> · ` : ''}VC4 <b>${fmt(st.vc4)}</b> · Comm <b>${fmt(st.comm)}</b>`,
         check: checkOf(2), why: 'Tag Assignment (live stock sheet) — final', explain: `${fmt(st.total)} tag rows is waqt in ke paas${st.excluded ? ` · ${fmt(st.excluded)} out-of-stock rows chhod diye` : ''}. Click = TAG_ID/serial list.` }),
       card({ key: 'expected', icon: '🎯', tone: 'g7', label: 'Expected (month-end)', value: expected, unit: 'tags',
-        sub: `Runrate <b>${rate.toFixed(1)}</b>/din · ${fmt(daysElapsed)}/${dim} din`,
-        why: 'Ledger runrate se projection', explain: `${fmt(lt.cur.total)} ÷ ${fmt(daysElapsed)} din × ${dim} din.` }),
+        sub: `Runrate <b>${(expectedBase / reportDays).toFixed(1)}</b>/din · ${fmt(reportDays)}/${dim} reported din · aaj exclude`,
+        why: 'Ledger runrate se projection', explain: `${fmt(expectedBase)} ÷ ${fmt(reportDays)} reported din × ${dim} din. Aaj ka live/incomplete day Expected me include nahi hai.` }),
       card({ key: 'days', icon: '📆', tone: 'g8', label: 'Active days (ledger)', value: lt.cur.days, unit: 'din',
         sub: `Avg <b>${lt.cur.days ? (lt.cur.total / lt.cur.days).toFixed(1) : '0'}</b> tag/din`,
         why: 'GV Master ki dates se', explain: 'Jitne din ledger me is person ka tag dikha.' }),
