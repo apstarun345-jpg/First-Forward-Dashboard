@@ -59,7 +59,7 @@ FF.pages = FF.pages || {};
     view: 'form', rows: [], note: '', result: null, problems: [], busy: '',
     index: null, indexPromise: null, exact: null, exactPromise: null,
     // 📝 form
-    employee: { name: '', office: '' }, errs: {}, formCfg: null, formCfgPromise: null,
+    employee: { name: '', office: '' }, employeeToken: '', employeeSummary: null, employeeSummaryPromise: null, errs: {}, formCfg: null, formCfgPromise: null,
     // 🌐 public (bina login)
     publicMode: false, publicCfg: null, done: null,
     status: { q: '', list: null, busy: false, err: '', searched: '' },
@@ -101,8 +101,10 @@ FF.pages = FF.pages || {};
   // ---- 👤 employee (device par yaad rehta hai) + public API -----------------------------------------
   const PUB_EMPLOYEE_KEY = 'ff_public_employee';
   const AGENT_BOOK_KEY = 'ff_tr_agent_contacts';
+  const EMPLOYEE_TOKEN_KEY = 'ff_tr_employee_token';
   function loadEmployee() {
     try {
+      state.employeeToken = String(localStorage.getItem(EMPLOYEE_TOKEN_KEY) || '').trim();
       const raw = localStorage.getItem(PUB_EMPLOYEE_KEY);
       if (!raw) return;
       const o = JSON.parse(raw) || {};
@@ -111,7 +113,14 @@ FF.pages = FF.pages || {};
     } catch { /* private mode / bad JSON */ }
   }
   function saveEmployee() {
-    try { localStorage.setItem(PUB_EMPLOYEE_KEY, JSON.stringify({ name: state.employee.name, office: state.employee.office })); } catch { /* ignore */ }
+    try { localStorage.setItem(PUB_EMPLOYEE_KEY, JSON.stringify({ name: state.employee.name, office: state.employee.office })); if (state.employeeToken) localStorage.setItem(EMPLOYEE_TOKEN_KEY, state.employeeToken); } catch { /* ignore */ }
+  }
+  function loadEmployeeSummary(force) {
+    if (!isPublic() || !state.employeeToken) return Promise.resolve(null);
+    if (!force && state.employeeSummary) return Promise.resolve(state.employeeSummary);
+    if (state.employeeSummaryPromise) return state.employeeSummaryPromise;
+    state.employeeSummaryPromise = publicApi('/api/public/tag-request/employee-status?token=' + encodeURIComponent(state.employeeToken)).then((out) => { state.employeeSummary = out || null; return state.employeeSummary; }).catch(() => null).finally(() => { state.employeeSummaryPromise = null; });
+    return state.employeeSummaryPromise;
   }
   /** 📇 Agent ka pichla mobile/address/pincode (isi device par) — wahi agent dobara chuno to auto-fill. */
   function agentBook() {
@@ -1309,6 +1318,11 @@ body.colorful .from-hdr { color: #166534; }
     if (state.errs[row.id]) delete state.errs[row.id].agent;
     return true;
   }
+  async function suggestHistoricalContact(row) {
+    if (!isPublic() || !state.employeeToken || row.fromBook) return;
+    const rec = exactAgent(row); if (!rec) return;
+    try { const qs = new URLSearchParams({ token: state.employeeToken, agentId: rec.agentId || '', agentName: rec.name || '', channel: rec.channel || 'ff' }); const out = await publicApi('/api/public/tag-request/contact?' + qs.toString()), c = out && out.contact; if (!c || row.mobile || row.address || row.pincode) return; row.mobile = c.mobile || ''; row.address = c.address || ''; row.pincode = c.pincode || ''; row.fromBook = true; const card = rootEl && rootEl.querySelector ? rootEl.querySelector('[data-tr-row="' + row.id + '"]') : null; if (card) { const wrap = document.createElement('div'); wrap.innerHTML = agentCardHtml(row, state.rows.indexOf(row)); const fresh = wrap.firstElementChild; if (fresh) { card.replaceWith(fresh); bindAgentCard(fresh); updateTotals(fresh, row); } } } catch { /* optional suggestion */ }
+  }
   /** Ek agent-card ki bindings (search dropdown + contact + qty). Partial re-render par sirf naya card
    *  bind hota hai — purane cards ke listeners duplicate nahi hote. */
   function bindAgentCard(card) {
@@ -1345,7 +1359,7 @@ body.colorful .from-hdr { color: #166534; }
           return;
         }
         close();
-        if (applyPick(row, val)) rerenderCard(row.fromBook || digits(row.mobile) ? '.tr-qty' : '[data-tr-a="mobile"]');
+        if (applyPick(row, val)) { rerenderCard(row.fromBook || digits(row.mobile) ? '.tr-qty' : '[data-tr-a="mobile"]'); suggestHistoricalContact(row); }
       };
       const show = () => {
         box.innerHTML = suggestHtml(suggestItems(inp.value, row));
@@ -1542,7 +1556,7 @@ body.colorful .from-hdr { color: #166534; }
       };
     });
     const office = clean(state.employee.office);
-    return { employee: { name: clean(state.employee.name), ...(office && formCfg().askOffice ? { office } : {}) }, note: clean(state.note), agents };
+    return { employee: { name: clean(state.employee.name), ...(office && formCfg().askOffice ? { office } : {}) }, employeeToken: isPublic() ? state.employeeToken : '', note: clean(state.note), agents };
   }
   const withTimeout = (p, ms) => Promise.race([p, new Promise((resolve) => setTimeout(resolve, ms))]);
   async function submit() {
@@ -1675,6 +1689,7 @@ body.colorful .from-hdr { color: #166534; }
     body.innerHTML = `<section class="card tr-status-card"><div class="card-head"><h3>🔎 Request status</h3>
         <div class="card-right dim">Agent ka mobile number (jo request me diya tha) ya Request ID daalo</div></div>
       <div class="card-body">
+        ${state.employeeToken ? '<div class="tr-employee-summary"><div class="tr-es-head"><b>👤 Mere requests</b><button class="btn small" data-tr-emp-refresh>↻ Refresh</button></div>' + (state.employeeSummary ? '<div class="tr-es-grid"><div><small>Total</small><b>' + fmt(state.employeeSummary.totalRequests || 0) + '</b></div><div><small>⏳ Pending</small><b>' + fmt(state.employeeSummary.pending || 0) + '</b></div><div><small>✅ Approved</small><b>' + fmt(state.employeeSummary.approved || 0) + '</b></div><div><small>🚚 Dispatched</small><b>' + fmt(state.employeeSummary.dispatched || 0) + '</b></div><div><small>⛔ Rejected</small><b>' + fmt(state.employeeSummary.rejected || 0) + '</b></div><div><small>🏷️ Approved tags</small><b>' + fmt(state.employeeSummary.approvedTags || 0) + '</b></div></div>' : '<div class="dim small">Status summary load ho raha hai…</div>') + '</div>' : ''}
         <div class="tr-status-row">
           <input class="input" id="tr-status-id" inputmode="tel" autocomplete="off" placeholder="Agent mobile (10 digit) ya Request ID" value="${esc(st.q || '')}">
           <button class="btn primary" data-tr-act="find" ${st.busy ? 'disabled' : ''}>${st.busy ? '⏳ Dhoondh rahe hain…' : '🔎 Status dekho'}</button>
@@ -1684,6 +1699,7 @@ body.colorful .from-hdr { color: #166534; }
           ? `<p class="dim small" style="margin:12px 0 6px">${fmt(list.length)} request mili${st.searched ? ` · ${esc(st.searched)}` : ''} (nayi upar)</p><div class="tr-st-list">${list.map(statusCardHtml).join('')}</div>`
           : `<div class="tr-status-out" style="margin-top:12px">Is number se koi request nahi mili. Wahi mobile number daalo jo request lagate waqt agent ke liye diya tha — ya Request ID try karo.</div>`) : ''}
       </div></section>`;
+    const refreshEmployee = () => { if (!state.employeeToken) return; state.employeeSummary = null; renderStatus(); loadEmployeeSummary(true).then(() => renderStatus()); }; const empRefresh = body.querySelector('[data-tr-emp-refresh]'); if (empRefresh) empRefresh.addEventListener('click', refreshEmployee); if (state.employeeToken && !state.employeeSummary && !state.employeeSummaryPromise) loadEmployeeSummary().then(() => { if (rootEl && rootEl.isConnected && state.view === 'status') renderStatus(); });
     const find = () => {
       const inp = body.querySelector('#tr-status-id');
       const q = String((inp && inp.value) || '').trim();
