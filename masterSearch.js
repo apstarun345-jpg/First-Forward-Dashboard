@@ -443,6 +443,7 @@ FF.pages = FF.pages || {};
       out.tags.sort((a, b) => a.key.length - b.key.length || (b.ff.length + b.gv.length) - (a.ff.length + a.gv.length));
       if (out.tags.length > 120) out.tags.length = 120;
     }
+    suppressFalseFfMatches(out);
     out.matched = out.people.length + out.ids.length + out.tags.length;
     return out;
   }
