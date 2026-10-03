@@ -1607,6 +1607,8 @@ body.colorful .from-hdr { color: #166534; }
       state.rows = [newRow()]; state.note = ''; state.errs = {};
       state.busy = '';
       if (isPublic()) {
+        if (out && out.employeeToken) state.employeeToken = String(out.employeeToken);
+        saveEmployee(); state.employeeSummary = null;
         state.done = {
           batch: (out && out.batch) || { total: payload.agents.reduce((s, a) => s + a.rows.reduce((x, r) => x + r.approved, 0), 0), agents: reqs.length },
           requests: reqs.map((r) => ({ id: r.id, agentName: r.agentName || (r.agent && r.agent.name) || '', mobile: r.mobile || (r.agent && r.agent.mobile) || '', total: r.total, classes: r.classes || [] })),
