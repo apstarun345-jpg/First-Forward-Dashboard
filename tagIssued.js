@@ -137,10 +137,12 @@ FF.pages = FF.pages || {};
       // 🔁 FF (EIR) T+1 hai — aaj ka FF data kal aata hai; GV live. Isliye lagged FF rows yahan bhi drop.
       const rawDaily = S.get('daily') || [];
       const dailyRows = FF.filters ? FF.filters.dropLaggedFf(rawDaily) : rawDaily;
+      // 🟢 GV today/current range is authoritative from GV Master, not the lagged daily/EIR snapshot.
+      const gvIssuanceRows = (G && typeof G.issuanceRows === 'function') ? (G.issuanceRows() || []) : dailyRows.filter((r) => r.channel === 'GV Partner');
       const ffPending = !!(FF.filters && FF.filters.isFfPending(val));
       const ffLagBadge = ffPending ? `<span class="badge amber" title="First Forward ka issuance data T+1 aata hai — ${esc(val)} ka FF kal aayega, isliye FF abhi 0 dikh raha hai. GV live hai.">🟦 FF T+1 · kal aayega</span>` : '';
       const ffRangeRows = dailyRows.filter((r) => r.channel !== 'GV Partner' && inRange(r, fromVal, val));
-      const gvRangeRows = dailyRows.filter((r) => r.channel === 'GV Partner' && inRange(r, fromVal, val));
+      const gvRangeRows = gvIssuanceRows.filter((r) => r.channel === 'GV Partner' && inRange(r, fromVal, val));
       const ffRange = rangeSummary(ffRangeRows);
       const gvRange = rangeSummary(gvRangeRows);
       const combined = ffRange.total + gvRange.total;
