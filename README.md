@@ -1,4 +1,4 @@
-# First Forward Dashboard — First Forward + GV Partner (v3.46)
+# First Forward Dashboard — First Forward + GV Partner (v3.48)
 
 Colourful dashboard website built directly on top of **do Google Sheets**:
 
@@ -13,6 +13,25 @@ aur ek **⚖️ GV vs First Forward** page side-by-side comparison deta hai.
 Koi database nahi, koi manual upload nahi — website Google Sheet se data padhti hai
 (Google Visualization API / `gviz`) through a small Node server that also handles **login, users,
 permissions and settings**. Zero npm dependencies.
+
+## ✨ v3.48.0 — ⏪ Purani settings, users aur passwords wapas lana (Recovery)
+
+Agar deploy / naye Apps Script ke baad **saved settings, login password ya user details gayab** ho
+gayin hain to ab unhe wapas laya ja sakta hai — **Settings → ☁️ Storage & backup → ⏪ Purana data wapas lao**:
+
+- **🕰 Sheet history restore** — Google Sheet ke `APP_STORAGE_HISTORY` tab me har overwrite se pehle
+  purani encrypted save auto-save hoti hai (v3.28 se). Ab app un sabki list dikhati hai
+  (kab save hui, kitne users, kaunse usernames, app name) aur ek click me wapas laati hai.
+- **🔄 Purani sheet se data lao** — naya Apps Script / nayi sheet banane par asli data aksar **purani
+  sheet** me hota hai: uska Web app URL + wahi secret daalo → preview → import.
+- **📤 Backup file ya Render disk** — full backup (users + settings + sessions) download/restore, aur
+  server ke `/data` folder me purani `users.json` scan karke import.
+- **🛡 Safe by default** — jab tak aap khud *Wapas lao* na dabayein kuch bhi overwrite nahi hota; har
+  restore se pehle abhi ka data bhi history me chala jaata hai (reversible), `replace` mode me bhi
+  current admin account lockout se bacha rahta hai.
+
+Poora Hindi guide: [RECOVERY.md](RECOVERY.md) · Storage setup: [STORAGE_SETUP.md](STORAGE_SETUP.md) ·
+Release note: [WHATS-NEW-v3.48.0.md](WHATS-NEW-v3.48.0.md) · Final summary: [FINAL-v3.48.md](FINAL-v3.48.md).
 
 ## ✨ v3.46.0 — 🏠 Home v2 (GV aaj live) + 🔎 Management → Master Search + ⚡ fast Agent/TL Summary
 

@@ -52,8 +52,11 @@ const MIME = {
   '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.ico': 'image/x-icon',
   '.txt': 'text/plain; charset=utf-8', '.md': 'text/plain; charset=utf-8'
 };
-const BLOCKED_FILES = new Set(['server.js', 'sheets-storage.js', 'apps-script-storage.js', 'mailer.js', 'stock-age.js', 'DEPLOYMENT.md', 'SHEETS_STORAGE.md', 'STORAGE_SETUP.md', 'package.json', 'package-lock.json', 'render.yaml', 'README.md', '.env']);
+const BLOCKED_FILES = new Set(['server.js', 'sheets-storage.js', 'apps-script-storage.js', 'mailer.js', 'stock-age.js', 'DEPLOYMENT.md', 'SHEETS_STORAGE.md', 'STORAGE_SETUP.md', 'RECOVERY.md', 'package.json', 'package-lock.json', 'render.yaml', 'README.md', '.env']);
 const BLOCKED_DIRS = new Set(['data', 'dev', 'node_modules', '.git', 'google-apps-script']);
+// /api/health ka version ab package.json se aata hai (pehle yahan hardcoded purana string tha).
+let APP_VERSION = '3.47.0';
+try { APP_VERSION = String(JSON.parse(readFileSync(path.join(__dirname, 'package.json'), 'utf8')).version || APP_VERSION); } catch { /* keep fallback */ }
 
 // ---------------------------------------------------------------------------------------------
 // Permissions & settings schema
@@ -281,6 +284,10 @@ const personalLinkSessions = new Map();
 const storageFailures = new Map();
 const durableSnapshots = new Map();
 let persistentDiskMounted = false;
+// ⏪ v3.48: agar cloud store khaali mila aur is server par koi purana data bhi nahi tha to app ne
+// defaults seed kar diye (yahi wo situation hai jisme "settings/users gayab" lagta hai). Is flag se
+// Settings page admin ko seedha recovery dikha sakta hai — purana data aksar PURANI sheet me hota hai.
+let storageSeededFresh = false;
 const storageStatus = () => ({
   backend: STORAGE_BACKEND,
   durable: CLOUD_BACKEND || persistentDiskMounted || !process.env.RENDER,
@@ -290,6 +297,9 @@ const storageStatus = () => ({
   persistentDiskMounted,
   dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null,
   error: [...storageFailures.values()].join(' ') || null,
+  // ⏪ v3.48: sheet history me purani encrypted saves hain to yahan count dikhta hai (auto-restore nahi hota)
+  recoverable: recoveryHintInfo || (CLOUD_BACKEND ? { available: null, pending: true } : null),
+  seededFresh: storageSeededFresh,
   warning: STORAGE_BACKEND === 'files' && process.env.RENDER && !persistentDiskMounted
     ? 'Settings, users aur sessions abhi TEMPORARY folder me save ho rahe hain — Render har deploy/restart par unhe mita deta hai, isliye defaults wapas aa jaate hain. Google Sheet storage connect karo (Settings → Backup → Google Sheet storage setup, ya STORAGE_SETUP.md).' : null
 });
@@ -3648,6 +3658,140 @@ async function controlTowerSnapshot(user, force) {
   return controlTowerRuntime.promise;
 }
 
+// ---------------------------------------------------------------------------------------------
+// ⏪ Recovery (v3.48) — purani settings / users / passwords wapas lana
+//    Sheet history (APP_STORAGE_HISTORY) · doosri (purani) sheet · backup file · server disk
+//    Rule: kuch bhi tab tak overwrite nahi hota jab tak admin khud restore na dabaye. Har restore
+//    se pehle current record ka encrypted backup APP_STORAGE_HISTORY me ban jaata hai (reversible).
+// ---------------------------------------------------------------------------------------------
+const RECOVERY_KINDS = ['users', 'settings', 'sessions', 'resets'];
+const RECOVERY_USER_FIELDS = ['name', 'email', 'mobile', 'avatar', 'role', 'permissions', 'password', 'approved', 'mustChangePassword', 'notifyPrefs', 'notifyAccess', 'createdAt', 'lastLoginAt', 'loginHistory'];
+let recoveryHintInfo = null; // boot par mili purani saves ki jankari (health + settings me dikhti hai)
+
+/** 🔐 Panel-permission migration (v3.8.2): har sidebar option ka apna permission key ban gaya
+ *  (rangeReport, tv, teamMap, stockReport, gvStockReport, reportStudio, charts, voiceAssistant).
+ *  Purane users ke paas parent permission thi — child auto grant karo taaki naye options ke baad
+ *  bhi kisi ka access lock na ho. start() aur ⏪ recovery dono isi function se chalte hain. */
+async function migrateUserPermissions() {
+  const PERM_CHILDREN = [
+    ['tagIssued', 'rangeReport'], ['home', 'tv'], ['home', 'teamMap'], ['home', 'masterSearch'],
+    ['performance', 'stockReport'], ['gvStock', 'gvStockReport'],
+    ['savedViews', 'reportStudio'], ['compare', 'charts'],
+    ['dualChannel', 'masterStock'], ['fastagChampions', 'arena'], ['fastagChampions', 'fame'], ['tv', 'warRoom']
+  ];
+  let migrated = false;
+  for (const u of db.users) {
+    if (!u || u.role === 'admin' || !Array.isArray(u.permissions)) continue;
+    const has = new Set(u.permissions), add = [];
+    for (const [parent, child] of PERM_CHILDREN) if (has.has(parent) && !has.has(child)) add.push(child);
+    if (!has.has('voiceAssistant')) add.push('voiceAssistant');
+    // v3.37: the combined summary became two independent controls. Keep old users'
+    // access intact, but expose separate FF and GV switches in Settings → Access matrix.
+    if (has.has('agentSummary')) {
+      if (!has.has('ffAgentSummary')) add.push('ffAgentSummary');
+      if (!has.has('gvAgentSummary')) add.push('gvAgentSummary');
+    }
+    if (add.length) { u.permissions = [...new Set(u.permissions.concat(add))]; migrated = true; }
+  }
+  if (migrated) { await persist('users'); console.log('Panel permissions migrated ✓ — existing users ko naye per-page access options grant ho gaye.'); }
+  return migrated;
+}
+
+/** Ek stored dataset (sheet snapshot / backup file / doosri sheet) ka chhota sa preview. */
+function storedSummary(data = {}) {
+  const users = Array.isArray(data.users) ? data.users.filter((u) => u && u.username) : [];
+  const settings = data.settings && typeof data.settings === 'object' ? data.settings : {};
+  return {
+    users: users.length,
+    admins: users.filter((u) => u.role === 'admin').length,
+    usernames: users.slice(0, 60).map((u) => String(u.username)),
+    approved: users.filter((u) => u.approved !== false).length,
+    appName: String(settings.appName || ''),
+    settingsUpdatedAt: settings.updatedAt || null,
+    sessions: data.sessions && typeof data.sessions === 'object' ? Object.keys(data.sessions).length : 0,
+    kinds: RECOVERY_KINDS.filter((k) => data[k] !== undefined && data[k] !== null)
+  };
+}
+function currentSummary() {
+  return { users: db.users.length, usernames: db.users.slice(0, 60).map((u) => String(u.username)), appName: String(db.settings.appName || ''), settingsUpdatedAt: db.settings.updatedAt || null };
+}
+/**
+ * Restore kisi bhi purane dataset ko db me — MERGE by default, kabhi andha overwrite nahi.
+ *  usersMode: 'merge' (sirf missing users) | 'update' (missing + purane users ki password/permission)
+ *             | 'replace' (puri list — phir bhi current admin account hamesha bacha rahta hai, lockout se bachne ke liye)
+ */
+async function restoreStoredIntoDb(data = {}, { usersMode = 'merge', withSettings = true, withSessions = true, withResets = false, source = 'backup' } = {}) {
+  const mode = ['merge', 'update', 'replace'].includes(usersMode) ? usersMode : 'merge';
+  const out = { usersAdded: 0, usersUpdated: 0, sessionsAdded: 0, settingsRestored: false, resetsRestored: 0, usersTotal: 0, saved: [] };
+  const incoming = (Array.isArray(data.users) ? data.users : []).filter((u) => u && u.username);
+  const keepAdmins = db.users.filter((u) => u && u.role === 'admin');
+  if (mode === 'replace') {
+    const merged = incoming.map((u) => ({ ...u, username: normUser(u.username) }));
+    // 🛡️ Lockout guard: current admin account hamesha rahega chahe purane data me na ho.
+    for (const admin of keepAdmins) if (!merged.some((u) => u.username === normUser(admin.username))) merged.push(admin);
+    out.usersAdded = merged.length - Math.min(merged.length, keepAdmins.length);
+    db.users = merged;
+  } else {
+    for (const u of incoming) {
+      const username = normUser(u.username);
+      const existing = db.users.find((x) => normUser(x.username) === username);
+      if (!existing) { db.users.push({ ...u, username }); out.usersAdded++; continue; }
+      if (mode === 'update') {
+        for (const key of RECOVERY_USER_FIELDS) if (u[key] !== undefined) existing[key] = u[key];
+        out.usersUpdated++;
+      }
+    }
+  }
+  out.usersTotal = db.users.length;
+  if (withSessions && data.sessions && typeof data.sessions === 'object') {
+    for (const [token, session] of Object.entries(data.sessions)) if (!Object.hasOwn(db.sessions, token)) { db.sessions[token] = session; out.sessionsAdded++; }
+  }
+  if (withSettings && data.settings && typeof data.settings === 'object') {
+    db.settings = deepMerge(DEFAULT_SETTINGS, data.settings);
+    out.settingsRestored = true;
+  }
+  if (withResets && Array.isArray(data.resets)) { db.resets = data.resets; out.resetsRestored = data.resets.length; }
+  await migrateUserPermissions();
+  const kinds = [];
+  if (mode === 'replace' || out.usersAdded || out.usersUpdated) kinds.push('users');
+  if (out.sessionsAdded) kinds.push('sessions');
+  if (out.settingsRestored) kinds.push('settings');
+  if (out.resetsRestored) kinds.push('resets');
+  for (const kind of kinds) await persist(kind); // har persist se pehle purana record history me chala jaata hai
+  out.saved = kinds;
+  out.source = source;
+  return out;
+}
+/** Boot ke baad ek baar: sheet history me purani saves hain to admin ko batao (auto-restore kabhi nahi). */
+async function recoveryHint() {
+  if (!CLOUD_BACKEND || !sheetsStore || typeof sheetsStore.snapshots !== 'function') return null;
+  try {
+    const { snapshots } = await sheetsStore.snapshots({ limit: 50 });
+    recoveryHintInfo = { available: snapshots.length, newestAt: snapshots[0] ? snapshots[0].at : null, oldestAt: snapshots.length ? snapshots[snapshots.length - 1].at : null };
+    if (!snapshots.length) return recoveryHintInfo;
+    const stale = db.users.length <= 1;
+    recordNotification({
+      type: 'settings', title: stale ? '⏪ Purana data wapas lane ka option hai' : '⏪ Sheet me purani saves maujood hain',
+      body: `Google Sheet ke APP_STORAGE_HISTORY tab me ${snapshots.length} purani encrypted save(s) hain${stale ? ' — abhi sirf ' + db.users.length + ' user load hua hai' : ''}. Settings → ☁️ Storage & backup → ⏪ Purana data wapas lao me jaakar koi bhi purani save wapas la sakte ho. Tab tak kuch bhi change nahi hota.`,
+      target: 'admin', meta: { source: 'recovery-hint', snapshots: snapshots.length }
+    });
+    return recoveryHintInfo;
+  } catch (err) {
+    console.warn('recovery hint:', err.message);
+    return null;
+  }
+}
+/** Server par kahan-kahan purani JSON files mil sakti hain (Render disk / app folder). */
+function recoveryDiskDirs() {
+  const dirs = [];
+  const add = (dir) => { if (dir && !dirs.includes(dir)) dirs.push(dir); };
+  add(DATA_DIR);
+  add(path.join(__dirname, 'data'));
+  if (existsSync('/data')) add('/data');
+  return dirs;
+}
+const RECOVERY_FILES = { users: 'users.json', sessions: 'sessions.json', settings: 'settings.json', resets: 'resets.json' };
+
 async function handleApi(req, res, url) {
   const p = url.pathname;
   const method = req.method;
@@ -3655,7 +3799,7 @@ async function handleApi(req, res, url) {
 
   if (p === '/api/health' && method === 'GET') {
     // pendingSignups sirf admin ko (sidebar badge ke liye) — public health me leak nahi.
-    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.45.0', storage: storageStatus(), push: pushHealth(), stockAge: stockAgeStatus(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length } : {}) });
+    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: APP_VERSION, storage: storageStatus(), push: pushHealth(), stockAge: stockAgeStatus(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length } : {}) });
   }
   // 📊 Admin-only: exact reason of slowness (Google query timings, cache hit rate, warm queries).
   if (p === '/api/perf' && method === 'GET') {
@@ -5596,6 +5740,149 @@ async function handleApi(req, res, url) {
     }
   }
 
+  // ---- ⏪ Recovery (v3.48): purani settings / users / passwords wapas lana ---------------------
+  const recoveryMode = (body) => ({ usersMode: body.usersMode, withSettings: body.withSettings !== false, withSessions: body.withSessions !== false, withResets: body.withResets === true, source: body.source });
+  const cloudStore = () => {
+    if (!sheetsStore || typeof sheetsStore.snapshots !== 'function') throw new HttpError(400, 'Ye recovery sirf Google Sheet storage (appsscript backend) ke saath kaam karti hai. Settings → ☁️ Storage & backup me storage connect karo.');
+    return sheetsStore;
+  };
+  // 1) Sheet history (APP_STORAGE_HISTORY) — purani saves ki list + unka preview
+  if (p === '/api/storage/history' && method === 'GET') {
+    requireAdmin(user);
+    const store = cloudStore();
+    const limit = Math.min(60, Math.max(1, Number(url.searchParams.get('limit') || 24)));
+    try {
+      const { snapshots, total, truncated } = await store.snapshots({ limit });
+      const rows = [];
+      for (const s of snapshots) for (const e of s.entries) if (e.kind === 'users' || e.kind === 'settings') rows.push(e.row);
+      const infoByRow = new Map();
+      if (rows.length) {
+        try {
+          const detailed = await store.history({ rows: rows.slice(0, 48), withData: true });
+          for (const e of detailed.entries) {
+            if (!e.data) { infoByRow.set(e.row, { locked: true, reason: 'ciphertext nahi mila' }); continue; }
+            try {
+              const value = store.decode(e.kind, { v: e.version, data: e.data });
+              if (e.kind === 'users') {
+                const list = Array.isArray(value) ? value : [];
+                infoByRow.set(e.row, { users: list.length, admins: list.filter((u) => u && u.role === 'admin').length, usernames: list.slice(0, 60).map((u) => String((u && u.username) || '?')) });
+              } else {
+                infoByRow.set(e.row, { appName: String((value && value.appName) || ''), settingsUpdatedAt: (value && value.updatedAt) || null });
+              }
+            } catch (err) { infoByRow.set(e.row, { locked: true, reason: /decrypt/i.test(err.message) ? 'isse alag secret se encrypt hua tha' : err.message }); }
+          }
+        } catch (err) { console.warn('recovery preview:', err.message); }
+      }
+      const list = snapshots.map((s) => {
+        const infos = s.rows.map((r) => infoByRow.get(r)).filter(Boolean);
+        const u = infos.find((i) => i.users !== undefined) || {};
+        const st = infos.find((i) => i.appName !== undefined) || {};
+        return { at: s.at, kinds: s.kinds, rows: s.rows, bytes: s.bytes, users: u.users ?? null, admins: u.admins ?? null, usernames: u.usernames || [], appName: st.appName || '', settingsUpdatedAt: st.settingsUpdatedAt || null, locked: infos.some((i) => i.locked), reason: (infos.find((i) => i.locked) || {}).reason || '' };
+      });
+      return sendJson(res, 200, { ok: true, snapshots: list, total, truncated, shown: list.length, current: currentSummary(), backend: STORAGE_BACKEND });
+    } catch (err) {
+      if (err instanceof HttpError) throw err;
+      // Sabse aam wajah: Apps Script me abhi PURANA Code.gs deployed hai (usme 'history' action hi nahi).
+      if (/unknown action|HTML page|invalid response/i.test(err.message)) {
+        throw new HttpError(400, 'Is sheet ke Apps Script me naya Code.gs deploy nahi hua hai (history action missing). Upar "📋 Copy Code.gs" dabao → Apps Script me paste → Deploy → Manage deployments → Edit → Version: New version → Deploy. Uske baad phir se "Purani saves dhoondho" dabao.');
+      }
+      throw new HttpError(502, `Sheet history read nahi ho payi: ${err.message}`);
+    }
+  }
+  // 2) Sheet history se ek purani save wapas lao
+  if (p === '/api/storage/history/restore' && method === 'POST') {
+    requireAdmin(user);
+    const store = cloudStore();
+    const body = await readBody(req);
+    const at = String((body && body.at) || '').trim();
+    if (!at) throw new HttpError(400, 'Kaunsi save wapas laani hai (at) nahi bataya.');
+    try {
+      const snap = await store.snapshotData(at, RECOVERY_KINDS);
+      const summary = storedSummary(snap.data);
+      const result = await restoreStoredIntoDb(snap.data, { ...recoveryMode(body), source: 'sheet-history' });
+      recordNotification({ type: 'settings', title: '⏪ Purani save wapas layi gayi', body: `${user.name || user.username} ne ${new Date(snap.at).toLocaleString('en-IN')} ki save restore ki — ${summary.users} users, ${result.usersAdded} naye add, settings ${result.settingsRestored ? 'restore' : 'skip'}.`, target: 'admin', meta: { username: user.username, at: snap.at, changes: [{ field: 'recovery', before: `${currentSummary().users} users`, after: `${result.usersTotal} users` }] } });
+      return sendJson(res, 200, { ok: true, at: snap.at, restored: result, summary, locked: snap.locked, current: currentSummary() });
+    } catch (err) {
+      if (err instanceof HttpError) throw err;
+      throw new HttpError(502, `Restore fail: ${err.message}`);
+    }
+  }
+  // 3) Doosri (purani) Google Sheet se data dekho / lao — jab APPS_SCRIPT_URL badal gaya ho
+  if (p === '/api/storage/pull' && method === 'POST') {
+    requireAdmin(user);
+    const body = await readBody(req);
+    const url2 = String((body && body.url) || '').trim();
+    const secret2 = String((body && body.secret) || '').trim();
+    let probe;
+    try { probe = new AppsScriptStore({ url: url2, secret: secret2 }); }
+    catch (err) { throw new HttpError(400, err.message); }
+    try {
+      const data = await probe.read();
+      if (!data) throw new HttpError(404, 'Us sheet ka APP_STORAGE khaali hai — usme koi saved users/settings nahi mile.');
+      const summary = storedSummary(data);
+      if (body.mode !== 'import') return sendJson(res, 200, { ok: true, preview: summary, current: currentSummary(), spreadsheet: (await probe.ping().catch(() => ({}))).spreadsheet || '' });
+      const result = await restoreStoredIntoDb(data, { ...recoveryMode(body), source: 'other-sheet' });
+      recordNotification({ type: 'settings', title: '⏪ Doosri sheet se data restore hua', body: `${user.name || user.username} ne ek alag Google Sheet se ${summary.users} users + settings restore kiye (${result.usersAdded} naye users add).`, target: 'admin', meta: { username: user.username, changes: [{ field: 'recovery', before: `${currentSummary().users} users`, after: `${result.usersTotal} users` }] } });
+      return sendJson(res, 200, { ok: true, restored: result, summary, current: currentSummary() });
+    } catch (err) {
+      if (err instanceof HttpError) throw err;
+      throw new HttpError(502, `Us sheet se data nahi mila: ${err.message}`);
+    }
+  }
+  // 4) Server disk / app folder me purani JSON files dhoondo
+  if (p === '/api/storage/scan' && method === 'GET') {
+    requireAdmin(user);
+    const sources = [];
+    for (const dir of recoveryDiskDirs()) {
+      try {
+        const names = await fs.readdir(dir);
+        const files = [];
+        for (const name of names) {
+          if (!/^(users|settings|sessions|resets|notifications)\.json$/.test(name)) continue;
+          try { const stat = await fs.stat(path.join(dir, name)); files.push({ name, bytes: stat.size, modifiedAt: stat.mtime.toISOString() }); } catch { /* skip */ }
+        }
+        if (!files.length) continue;
+        let users = null, usernames = [], appName = '', settingsUpdatedAt = null;
+        try { const list = JSON.parse(await fs.readFile(path.join(dir, 'users.json'), 'utf8')); if (Array.isArray(list)) { users = list.length; usernames = list.slice(0, 60).map((u) => String((u && u.username) || '?')); } } catch { /* corrupt */ }
+        try { const s = JSON.parse(await fs.readFile(path.join(dir, 'settings.json'), 'utf8')); appName = String((s && s.appName) || ''); settingsUpdatedAt = (s && s.updatedAt) || null; } catch { /* missing */ }
+        sources.push({ dir, files, users, usernames, appName, settingsUpdatedAt, isDataDir: dir === DATA_DIR });
+      } catch { /* dir unreadable */ }
+    }
+    return sendJson(res, 200, { ok: true, sources, dataDir: DATA_DIR, backend: STORAGE_BACKEND, current: currentSummary() });
+  }
+  // 5) Backup file / disk folder / JSON payload se restore
+  if (p === '/api/storage/import' && method === 'POST') {
+    requireAdmin(user);
+    const body = await readBody(req);
+    let data = null;
+    let origin = 'file';
+    if (body && body.dir) {
+      const dir = recoveryDiskDirs().find((d) => d === String(body.dir));
+      if (!dir) throw new HttpError(400, 'Sirf server ke data folder se import allowed hai.');
+      data = {};
+      for (const [kind, name] of Object.entries(RECOVERY_FILES)) {
+        try { data[kind] = JSON.parse(await fs.readFile(path.join(dir, name), 'utf8')); } catch { /* missing file */ }
+      }
+      origin = `disk:${dir}`;
+    } else {
+      const payload = (body && (body.payload || body.backup)) || null;
+      if (!payload || typeof payload !== 'object') throw new HttpError(400, 'Backup JSON nahi mila.');
+      data = payload.users || payload.settings ? payload : (payload.data || null);
+      if (!data || (!Array.isArray(data.users) && typeof data.settings !== 'object')) throw new HttpError(400, 'Ye file dashboard backup jaisi nahi lagti — users ya settings nahi mile.');
+    }
+    const summary = storedSummary(data);
+    const result = await restoreStoredIntoDb(data, { ...recoveryMode(body), source: origin });
+    recordNotification({ type: 'settings', title: '⏪ Backup se data restore hua', body: `${user.name || user.username} ne ${origin} se ${summary.users} users + settings restore kiye (${result.usersAdded} naye add${result.usersUpdated ? `, ${result.usersUpdated} update` : ''}).`, target: 'admin', meta: { username: user.username, changes: [{ field: 'recovery', before: `${currentSummary().users} users`, after: `${result.usersTotal} users` }] } });
+    return sendJson(res, 200, { ok: true, restored: result, summary, origin, current: currentSummary() });
+  }
+  // 6) Poora backup download (users + settings + sessions) — aage ke liye safety net
+  if (p === '/api/storage/backup' && method === 'GET') {
+    requireAdmin(user);
+    const payload = { app: 'first-forward-dashboard', version: APP_VERSION, exportedAt: new Date().toISOString(), storage: STORAGE_BACKEND, users: db.users, sessions: db.sessions, settings: db.settings, resets: db.resets, notify: db.notify };
+    const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+    return sendJson(res, 200, payload, { 'Content-Disposition': `attachment; filename="ff-full-backup-${stamp}.json"` });
+  }
+
   // ---- settings ----
   if (p === '/api/settings' && method === 'GET') return sendJson(res, 200, { settings: settingsFor(user), defaults: DEFAULT_SETTINGS });
   if (p === '/api/settings' && method === 'PUT') {
@@ -6600,7 +6887,11 @@ async function start() {
       // First run: seed the sheet from whatever this instance has (local files if any, else defaults).
       cloudWasEmpty = true;
       stored = await readLocalStore();
+      // ⏪ Nayi/khaali sheet + khaali server disk = abhi-abhi defaults seed hone waale hain.
+      // Purana data tab aksar kisi PURANI sheet me hota hai — Settings → Recovery me wapas la sakte hain.
+      storageSeededFresh = !!process.env.RENDER && (!Array.isArray(stored.users) || stored.users.length === 0);
       console.log('APP_STORAGE (Apps Script) is empty → seeding it from the current local data.');
+      if (storageSeededFresh) console.warn('⚠️  Yeh sheet nayi/khaali thi — is server par koi purana data nahi mila. Agar users/settings pehle kisi AUR sheet me save the to Settings → ☁️ Storage & backup → ⏪ Recovery → "Doosri (purani) Google Sheet se data lao" se wapas layein.');
     } else {
       stored = {
         users: Array.isArray(stored.users) ? stored.users : [],
@@ -6654,31 +6945,8 @@ async function start() {
   db.sessions = stored.sessions;
   db.settings = deepMerge(DEFAULT_SETTINGS, stored.settings);
   db.resets = stored.resets;
-  // 🔐 Panel-permission migration (v3.8.2): har sidebar option ka apna permission key ban gaya
-  // (rangeReport, tv, teamMap, stockReport, gvStockReport, reportStudio, charts, voiceAssistant).
-  // Purane users ke paas parent permission thi — child auto grant karo taaki naye options ke baad
-  // bhi kisi ka access lock na ho. Admin Access matrix se baad me change kar sakta hai.
-  const PERM_CHILDREN = [
-    ['tagIssued', 'rangeReport'], ['home', 'tv'], ['home', 'teamMap'], ['home', 'masterSearch'],
-    ['performance', 'stockReport'], ['gvStock', 'gvStockReport'],
-    ['savedViews', 'reportStudio'], ['compare', 'charts'],
-    ['dualChannel', 'masterStock'], ['fastagChampions', 'arena'], ['fastagChampions', 'fame'], ['tv', 'warRoom']
-  ];
-  let permsMigrated = false;
-  for (const u of db.users) {
-    if (!u || u.role === 'admin' || !Array.isArray(u.permissions)) continue;
-    const has = new Set(u.permissions), add = [];
-    for (const [parent, child] of PERM_CHILDREN) if (has.has(parent) && !has.has(child)) add.push(child);
-    if (!has.has('voiceAssistant')) add.push('voiceAssistant');
-    // v3.37: the combined summary became two independent controls. Keep old users'
-    // access intact, but expose separate FF and GV switches in Settings → Access matrix.
-    if (has.has('agentSummary')) {
-      if (!has.has('ffAgentSummary')) add.push('ffAgentSummary');
-      if (!has.has('gvAgentSummary')) add.push('gvAgentSummary');
-    }
-    if (add.length) { u.permissions = [...new Set(u.permissions.concat(add))]; permsMigrated = true; }
-  }
-  if (permsMigrated) { await persist('users'); console.log('Panel permissions migrated ✓ — existing users ko naye per-page access options grant ho gaye.'); }
+  // 🔐 Panel-permission migration (v3.8.2 / v3.37) — existing users ka access lock na ho.
+  await migrateUserPermissions();
   const storedNotify = stored.notify;
   // `vapid` + `pushLog` bhi durable hain — inke bina har restart par nayi VAPID key banti thi aur
   // phone ke notification panel me push aana band ho jaata tha (subscriptions 403 par reject hoti thin).
@@ -6713,6 +6981,8 @@ async function start() {
     //    weekly inactive users + 🔴 cover alert / 📉 stock history — boot par aur har 30 min.
     setTimeout(() => runScheduledChecks(), 15000);
     setInterval(() => runScheduledChecks(), 30 * 60e3).unref();
+    // ⏪ v3.48: sheet history me purani saves hain to admin ko batao (khud kuch restore nahi karta).
+    if (CLOUD_BACKEND) setTimeout(() => recoveryHint().catch(() => {}), 20000).unref?.();
     // 🧓 Stock ageing index pehle se bana lo (pehla user 1-2 min intezaar na kare). Render par default ON; STOCK_AGE_WARM=0 se band.
     const warmStockAge = process.env.STOCK_AGE_WARM ? process.env.STOCK_AGE_WARM !== '0' : !!process.env.RENDER;
     if (warmStockAge) setTimeout(() => stockAgeIndex(false).catch((err) => console.warn('stock ageing warm-up:', err.message)), 12000).unref();

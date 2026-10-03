@@ -1,5 +1,10 @@
 # FINAL — First Forward Dashboard v3.8.0 ✅ LIVE
 
+> 🔄 **Updated final doc (v3.48.0, ⏪ Recovery release): [FINAL-v3.48.md](FINAL-v3.48.md)**
+> — saved settings / users / passwords wapas laane ka flow ab app me hai
+> (`Settings → ☁️ Storage & backup → ⏪ Purana data wapas lao`). Guide: `RECOVERY.md`.
+> Ye file v3.8 ke delivery note ke roop me archive hai.
+
 > Live: **https://first-forward-dashboard.onrender.com** · `/api/health` → `"version":"3.8.0"` (deploy ho gaya, PR #20 merged)
 > Full Hinglish guide: `WHATS-NEW-v3.7.md` (neeche **v3.8.0 section**)
 

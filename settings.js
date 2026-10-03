@@ -858,6 +858,10 @@ FF.pages = FF.pages || {};
   function storageTab() {
     const st = storage || {};
     const cloud = st.backend === 'appsscript' || st.backend === 'sheets';
+    // ⏪ v3.48: nayi/khaali sheet connect hone par defaults seed ho gaye the — purana data kahin aur hai
+    const seeded = st.seededFresh
+      ? `<div class="warn-box">⚠️ <b>Ye sheet nayi (khaali) mili thi</b> — isliye isme abhi default settings aur sirf 1 admin user save hua hai. Aapka purana data <b>kisi doosri (purani) sheet</b> me hona chahiye. Neeche <b>⏪ Purana data wapas lao → “Doosri (purani) Google Sheet se data lao”</b> se us sheet ka URL + secret daal kar sab wapas layein.</div>`
+      : '';
     const status = cloud
       ? `<div class="ok-box">✅ <b>Permanent storage ON</b> — users, settings, sessions aur notifications Google Sheet (<code>APP_STORAGE</code> tab, encrypted) me save ho rahe hain. Deploy / restart ke baad bhi sab wahi rahega.${st.lastSavedAt ? ` Last saved ${esc(U.timeLabel(new Date(st.lastSavedAt).getTime()))}.` : ''}</div>`
       : `<div class="warn-box">⚠️ <b>Abhi storage temporary hai.</b> Render har deploy / restart / sleep par app folder mita deta hai — isliye saved settings aur user details wapas <b>default</b> ho jaati hain. Neeche ke 5 steps se Google Sheet me permanent save chalu karo (free, ~5 minute).</div>`;
@@ -873,10 +877,68 @@ FF.pages = FF.pages || {};
       <label class="fld"><span>Secret (Code.gs aur Render dono me same)</span><input class="input" id="st-secret" value="${esc(sec)}"><small class="dim">Ise safe rakho, baad me kabhi mat badlo. Chat/WhatsApp par share mat karo.</small></label></div>
       <div class="btn-row"><button class="btn" id="st-test">🔌 Test connection</button><button class="btn primary" id="st-migrate">☁️ Copy current data to Sheet</button><button class="btn" id="st-copy-env">📋 Copy Render env values</button></div>
       <div id="st-msg" class="dim small"></div>`;
-    return section('☁️ Google Sheet storage — settings & user details permanent save', `${status}<p class="dim small">Active backend: <code>${esc(st.backend || 'files')}</code>${st.encrypted ? ' · encrypted ✓' : ''}${st.error ? ` · <span class="delta down">${esc(st.error)}</span>` : ''}</p>${cloud ? `<details><summary class="dim small">Setup steps dobara dekhne hain?</summary>${steps}</details>` : steps}`);
+    return section('☁️ Google Sheet storage — settings & user details permanent save', `${status}${seeded}<p class="dim small">Active backend: <code>${esc(st.backend || 'files')}</code>${st.encrypted ? ' · encrypted ✓' : ''}${st.error ? ` · <span class="delta down">${esc(st.error)}</span>` : ''}</p>${cloud ? `<details><summary class="dim small">Setup steps dobara dekhne hain?</summary>${steps}</details>` : steps}`);
+  }
+  // ---- ⏪ v3.48: purana data wapas lana (sheet history · purani sheet · backup file · disk) ------
+  const RECOVERY_MODES = [
+    ['merge', 'Merge — sirf wahi users lao jo abhi nahi hain (sabse safe, current password nahi badalta)'],
+    ['update', 'Merge + purane users ki password / permission bhi wapas lao'],
+    ['replace', 'Replace — puri user list purani wali (aapka admin account phir bhi bacha rahega)']
+  ];
+  /** Restore ke options — har source (rc = sheet history, rcp = purani sheet, rcf = file/disk) ke liye alag id. */
+  function recoveryOpts(id) {
+    return `<div class="form-grid">
+      <label class="fld"><span>Users kaise laayein</span><select class="input" id="${id}-mode">${RECOVERY_MODES.map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join('')}</select></label>
+      <label class="fld"><span>Settings</span><select class="input" id="${id}-settings"><option value="1">Settings bhi wapas lao</option><option value="0">Nahi — sirf users chahiye</option></select></label>
+      <label class="fld"><span>Login sessions</span><select class="input" id="${id}-sessions"><option value="1">Purane logins bhi restore karo</option><option value="0">Nahi — sabko dobara login karna hoga</option></select></label>
+    </div>`;
+  }
+  function recoveryValues(scope, id) {
+    return {
+      usersMode: (U.$('#' + id + '-mode', scope) || {}).value || 'merge',
+      withSettings: (U.$('#' + id + '-settings', scope) || {}).value !== '0',
+      withSessions: (U.$('#' + id + '-sessions', scope) || {}).value !== '0'
+    };
+  }
+  let rcSnapshots = [];
+  function recoveryListHtml(list, current) {
+    if (!list.length) return '<p class="dim small">Is sheet me koi purani save nahi mili. (Naya Code.gs deploy karne ke baad aage ki saves yahan aayengi — dekhein RECOVERY.md.)</p>';
+    const rows = list.map((s) => `<tr>
+      <td><b>${esc(U.timeLabel(new Date(s.at).getTime()))}</b><div class="dim small">${esc(new Date(s.at).toLocaleString('hi-IN'))}</div></td>
+      <td>${s.locked ? '<span class="delta down">locked</span>' : `${esc(s.users ?? '—')} users${s.admins ? ` · ${esc(s.admins)} admin` : ''}`}</td>
+      <td class="small">${s.locked ? esc(s.reason || 'isse alag secret se encrypted') : esc((s.usernames || []).slice(0, 12).join(', '))}${(s.usernames || []).length > 12 ? ' …' : ''}</td>
+      <td class="small">${esc(s.appName || '—')}</td>
+      <td><button class="btn small primary" data-restore="${esc(s.at)}" ${s.locked ? 'disabled' : ''}>⏪ Wapas lao</button></td>
+    </tr>`).join('');
+    return `<p class="dim small">Abhi site par loaded: <b>${esc(current.users || 0)} users</b>${current.appName ? ` · ${esc(current.appName)}` : ''}</p>
+      <div style="overflow:auto"><table class="tbl"><thead><tr><th>Kab save hui</th><th>Users</th><th>Usernames</th><th>App name</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  }
+  function recoveryTab() {
+    const cloud = !!(storage && (storage.backend === 'appsscript' || storage.backend === 'sheets'));
+    const rec = storage && storage.recoverable;
+    const hint = rec && rec.available
+      ? `<div class="ok-box">⏪ Is sheet me <b>${esc(rec.available)}</b> purani encrypted save(s) milin hain${rec.newestAt ? ` (sabse nayi: ${esc(U.timeLabel(new Date(rec.newestAt).getTime()))})` : ''} — neeche <b>Purani saves dhoondho</b> dabao.</div>`
+      : (rec && rec.pending ? '<p class="dim small">Purani saves ki talash abhi chal rahi hai — thodi der me page reload karke dekh lo.</p>' : '');
+    return section('⏪ Purana data wapas lao (Recovery)', `${hint}
+      <p class="dim small">Ek baar Google Sheet me save hui settings / users / passwords <code>APP_STORAGE_HISTORY</code> tab me encrypted backup ban kar maujood rehti hain — chahe sheet me ab sirf 1 user kyon na dikhe. Yahan se koi bhi purani save chun kar wapas layein. <b>Jab tak aap “Wapas lao” nahi dabate, kuch bhi badalta nahi</b>, aur har restore se pehle abhi ka data bhi history me save ho jaata hai (to aage wapas bhi ja sakte hain).</p>
+      ${cloud
+        ? `<div class="btn-row"><button class="btn primary" id="rc-scan">🔄 Purani saves dhoondho</button></div><div id="rc-list"></div>${recoveryOpts('rc')}`
+        : `<div class="warn-box">Ye recovery tab tabhi chalti hai jab storage Google Sheet ho. Abhi backend: <code>${esc((storage && storage.backend) || 'files')}</code> — upar ☁️ storage connect karo.</div>`}
+      <details style="margin-top:10px" ${(storage && storage.seededFresh) || (rec && rec.available) ? 'open' : ''}><summary class="dim small">Doosri (purani) Google Sheet se data lao</summary>
+        <p class="dim small">Agar aapne naya Apps Script / nayi Google Sheet banayi hai aur asli data <b>usi purani sheet</b> me hai — to uska Web app URL + wahi secret daal kar 🔍 Check dabao, phir data is site me la sakte ho.</p>
+        <div class="form-grid"><label class="fld"><span>Purani sheet ka Apps Script URL</span><input class="input" id="rc-url" placeholder="https://script.google.com/macros/s/…/exec"></label>
+        <label class="fld"><span>Us sheet ka secret</span><input class="input" id="rc-secret" placeholder="wahi secret jo us Code.gs me hai"></label></div>
+        <div class="btn-row"><button class="btn" id="rc-pull-test">🔍 Check</button><button class="btn primary" id="rc-pull">⬇ Us sheet se data lao</button></div>
+        <div id="rc-pull-msg" class="dim small"></div>${recoveryOpts('rcp')}
+      </details>
+      <details style="margin-top:10px"><summary class="dim small">Backup file ya server disk se restore</summary>
+        <div class="btn-row"><button class="btn" id="rc-full-export">⬇ Full backup download (users + settings)</button><label class="btn">📤 Backup file se restore<input type="file" accept="application/json" hidden id="rc-file"></label><button class="btn" id="rc-disk">💾 Server disk scan</button></div>
+        <p class="dim small">Full backup me users ke password hashes hote hain (isi liye se login wapas kaam karta hai) — isliye ye file sirf apne paas rakho.</p>
+        <div id="rc-file-msg" class="dim small"></div>${recoveryOpts('rcf')}
+      </details>`);
   }
   function backupTab() {
-    return `${storageTab()}${section('💾 Backup / restore settings', `${storage && storage.warning ? `<div class="warn-box">⚠️ ${esc(storage.warning)}</div>` : ''}${storage && storage.error ? `<div class="warn-box">${esc(storage.error)}</div>` : ''}<p class="dim small">Storage: <code>${esc(storage && storage.backend === 'sheets' ? 'Same Google Sheet / APP_STORAGE' : storage && storage.dataDir || 'DATA_DIR')}</code> · ${storage && storage.backend === 'sheets' ? 'Encrypted cloud storage ✓ — users, sessions and settings' : storage && storage.persistentDiskMounted ? 'Persistent mount detected ✓' : 'Local storage — verify durable hosting before deploying'}. Settings export contains only settings, NOT users or sessions. Before changing Render storage, securely back up all runtime JSON files from the old data directory using Render Shell. Never put those files in Git. Environment admin credentials are used only on first setup.</p><div class="btn-row"><button class="btn" id="bk-export">⬇ Download settings JSON</button><label class="btn">📤 Import settings JSON<input type="file" accept="application/json" hidden id="bk-import"></label></div>`)}
+    return `${storageTab()}${recoveryTab()}${section('💾 Backup / restore settings', `${storage && storage.warning ? `<div class="warn-box">⚠️ ${esc(storage.warning)}</div>` : ''}${storage && storage.error ? `<div class="warn-box">${esc(storage.error)}</div>` : ''}<p class="dim small">Storage: <code>${esc(storage && storage.backend === 'sheets' ? 'Same Google Sheet / APP_STORAGE' : storage && storage.dataDir || 'DATA_DIR')}</code> · ${storage && storage.backend === 'sheets' ? 'Encrypted cloud storage ✓ — users, sessions and settings' : storage && storage.persistentDiskMounted ? 'Persistent mount detected ✓' : 'Local storage — verify durable hosting before deploying'}. Settings export contains only settings, NOT users or sessions. Before changing Render storage, securely back up all runtime JSON files from the old data directory using Render Shell. Never put those files in Git. Environment admin credentials are used only on first setup.</p><div class="btn-row"><button class="btn" id="bk-export">⬇ Download settings JSON</button><label class="btn">📤 Import settings JSON<input type="file" accept="application/json" hidden id="bk-import"></label></div>`)}
       ${section('🧹 Maintenance', `<div class="btn-row"><button class="btn" id="bk-cache">🧹 Clear server cache</button><button class="btn danger" id="bk-reset">↺ Reset ALL settings to defaults</button></div><p class="dim small">Last saved: ${settings.updatedAt ? `${U.timeLabel(new Date(settings.updatedAt).getTime())} by ${esc(settings.updatedBy || '')}` : 'never'}</p>`)}`;
   }
 
@@ -2663,6 +2725,98 @@ FF.pages = FF.pages || {};
       });
       const stEnv = U.$('#st-copy-env', body);
       if (stEnv) stEnv.addEventListener('click', async () => { const v = stVals(); if (!v.url) return U.toast('Pehle Web app URL paste karo', 'err'); await U.copyText(`APPS_SCRIPT_URL=${v.url}\nAPPS_SCRIPT_SECRET=${v.secret}`); U.toast('Env values copied ✓ — Render → Environment me paste karo', 'ok'); });
+      // ⏪ Recovery — purani saves / purani sheet / backup file / disk
+      const rcMsg = (sel, html) => { const el = U.$(sel, body); if (el) el.innerHTML = html; };
+      const rcScan = U.$('#rc-scan', body);
+      if (rcScan) rcScan.addEventListener('click', async () => {
+        await U.withButtonBusy(rcScan, async () => {
+          rcMsg('#rc-list', '<p class="dim small">Sheet history padh rahe hain…</p>');
+          try {
+            const out = await A.api('/api/storage/history');
+            rcSnapshots = out.snapshots || [];
+            rcMsg('#rc-list', recoveryListHtml(rcSnapshots, out.current || {}));
+            (body.querySelectorAll('[data-restore]') || []).forEach((b) => b.addEventListener('click', () => rcRestore(b.dataset.restore, b)));
+          } catch (err) { rcMsg('#rc-list', `<span class="delta down">❌ ${esc(err.message)}</span>`); }
+        }, 'Dhoondh rahe hain…');
+      });
+      async function rcRestore(at, btn) {
+        const snap = (rcSnapshots || []).find((s) => s.at === at) || {};
+        const modeText = { merge: 'Merge (sirf missing users)', update: 'Merge + purane passwords', replace: 'Replace (puri list)' }[recoveryValues(body, 'rc').usersMode] || 'Merge';
+        if (!confirm(`${new Date(at).toLocaleString('hi-IN')} ki purani save wapas layein?\n\nUs save me: ${snap.users ?? '?'} users${snap.appName ? ` · ${snap.appName}` : ''}\nMode: ${modeText}\n\nAbhi ka data pehle history me backup ho jaayega — chahein to baad me wapas bhi ja sakte hain.`)) return;
+        await U.withButtonBusy(btn, async () => {
+          try {
+            const out = await A.api('/api/storage/history/restore', 'POST', { at, ...recoveryValues(body, 'rc') });
+            U.toast(`Restore ✓ — ${out.restored.usersAdded} naye users, total ${out.current.users}`, 'ok');
+            rcMsg('#rc-list', `<div class="ok-box">✅ Purani save wapas aa gayi — ${esc(out.restored.usersAdded)} naye users add${out.restored.usersUpdated ? `, ${esc(out.restored.usersUpdated)} update` : ''}, settings ${out.restored.settingsRestored ? 'restore ✓' : 'skip'}.<br>Ab ${esc(out.current.users)} users loaded hain. <b>Page reload (↻)</b> kar lo — purane password ab kaam karenge.</div>`);
+          } catch (err) { U.toast(err.message, 'err'); }
+        }, 'Restoring…');
+      }
+      const rcPullTest = U.$('#rc-pull-test', body);
+      if (rcPullTest) rcPullTest.addEventListener('click', async () => {
+        const v = { url: (U.$('#rc-url', body) || {}).value || '', secret: (U.$('#rc-secret', body) || {}).value || '' };
+        await U.withButtonBusy(rcPullTest, async () => {
+          try {
+            const out = await A.api('/api/storage/pull', 'POST', v);
+            const p = out.preview || {};
+            rcMsg('#rc-pull-msg', `<div class="ok-box">✅ <b>${esc(out.spreadsheet || 'Purani sheet')}</b> me data mila: <b>${esc(p.users)} users</b> (${esc(p.admins)} admin) · app name “${esc(p.appName || '—')}”<br><span class="small">${esc((p.usernames || []).slice(0, 20).join(', '))}${(p.usernames || []).length > 20 ? ' …' : ''}</span><br>Ab <b>“Us sheet se data lao”</b> dabao.</div>`);
+            const pullBtn = U.$('#rc-pull', body); if (pullBtn) pullBtn.disabled = false;
+          } catch (err) { rcMsg('#rc-pull-msg', `<span class="delta down">❌ ${esc(err.message)}</span>`); }
+        }, 'Checking…');
+      });
+      const rcPull = U.$('#rc-pull', body);
+      if (rcPull) rcPull.addEventListener('click', async () => {
+        const v = { url: (U.$('#rc-url', body) || {}).value || '', secret: (U.$('#rc-secret', body) || {}).value || '' };
+        if (!v.url || !v.secret) return U.toast('Pehle purani sheet ka URL + secret daalo', 'err');
+        if (!confirm('Purani sheet ka users + settings is site me laayein?\n\nAbhi ka data pehle history me backup ho jaayega.')) return;
+        await U.withButtonBusy(rcPull, async () => {
+          try {
+            const out = await A.api('/api/storage/pull', 'POST', { ...v, mode: 'import', ...recoveryValues(body, 'rcp') });
+            U.toast(`Import ✓ — ${out.restored.usersAdded} naye users`, 'ok');
+            rcMsg('#rc-pull-msg', `<div class="ok-box">✅ Purani sheet se <b>${esc(out.restored.usersAdded)}</b> naye users + settings aa gaye. Total ${esc(out.current.users)} users. <b>Page reload (↻)</b> kar lo.</div>`);
+          } catch (err) { U.toast(err.message, 'err'); }
+        }, 'Importing…');
+      });
+      const rcExport = U.$('#rc-full-export', body);
+      if (rcExport) rcExport.addEventListener('click', async () => {
+        try {
+          const r = await fetch('/api/storage/backup', { credentials: 'same-origin' });
+          if (!r.ok) throw new Error('Backup download fail (' + r.status + ')');
+          U.downloadBlob(`ff-full-backup-${U.stamp()}.json`, await r.blob());
+          U.toast('Full backup download ho gaya ✓ — ise safe jagah rakho', 'ok');
+        } catch (err) { U.toast(err.message, 'err'); }
+      });
+      const rcFile = U.$('#rc-file', body);
+      if (rcFile) rcFile.addEventListener('change', async () => {
+        const f = rcFile.files && rcFile.files[0]; if (!f) return;
+        try {
+          const payload = JSON.parse(await f.text());
+          const p = { users: Array.isArray(payload.users) ? payload.users.length : 0, appName: payload.settings && payload.settings.appName };
+          if (!confirm(`Backup file: ${p.users} users${p.appName ? ` · ${p.appName}` : ''}\n\nIsse restore karein? (Abhi ka data pehle history me backup hoga.)`)) return;
+          const out = await A.api('/api/storage/import', 'POST', { payload, ...recoveryValues(body, 'rcf') });
+          U.toast(`Restore ✓ — ${out.restored.usersAdded} naye users`, 'ok');
+          rcMsg('#rc-file-msg', `<div class="ok-box">✅ Backup se ${esc(out.restored.usersAdded)} naye users add${out.restored.usersUpdated ? `, ${esc(out.restored.usersUpdated)} update` : ''} — settings ${out.restored.settingsRestored ? 'restore ✓' : 'skip'}. <b>Page reload (↻)</b> kar lo.</div>`);
+        } catch (err) { U.toast(err.message, 'err'); }
+      });
+      const rcDisk = U.$('#rc-disk', body);
+      if (rcDisk) rcDisk.addEventListener('click', async () => {
+        await U.withButtonBusy(rcDisk, async () => {
+          try {
+            const out = await A.api('/api/storage/scan');
+            const src = (out.sources || []).filter((s) => s.users);
+            rcMsg('#rc-file-msg', src.length
+              ? src.map((s) => `<div class="ok-box"><b>${esc(s.dir)}</b> — ${esc(s.users)} users${s.appName ? ` · ${esc(s.appName)}` : ''}${s.settingsUpdatedAt ? ` · settings ${esc(U.timeLabel(new Date(s.settingsUpdatedAt).getTime()))}` : ''}<br><span class="small">${esc((s.usernames || []).slice(0, 15).join(', '))}</span><br><button class="btn small primary" data-disk="${esc(s.dir)}">⬇ Is folder se data lao</button></div>`).join('')
+              : '<p class="dim small">Server (Render disk / app folder) par koi purani users.json nahi mili.</p>');
+            (body.querySelectorAll('[data-disk]') || []).forEach((b) => b.addEventListener('click', async () => {
+              if (!confirm(`${b.dataset.disk} se users + settings restore karein?`)) return;
+              try {
+                const out2 = await A.api('/api/storage/import', 'POST', { dir: b.dataset.disk, ...recoveryValues(body, 'rcf') });
+                U.toast(`Restore ✓ — ${out2.restored.usersAdded} naye users`, 'ok');
+                rcMsg('#rc-file-msg', `<div class="ok-box">✅ ${esc(out2.restored.usersAdded)} naye users add — <b>Page reload (↻)</b> kar lo.</div>`);
+              } catch (err) { U.toast(err.message, 'err'); }
+            }));
+          } catch (err) { U.toast(err.message, 'err'); }
+        }, 'Scanning…');
+      });
       // backup
       const ex = U.$('#bk-export', body);
       if (ex) ex.addEventListener('click', () => { const s = { ...settings }; U.downloadBlob(`ff-settings-${U.stamp()}.json`, new Blob([JSON.stringify(s, null, 2)], { type: 'application/json' })); // ☁️ reminder ke liye server par timestamp (changeList skip karta hai — koi notification nahi)
