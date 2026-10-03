@@ -717,6 +717,10 @@ window.FF = window.FF || {};
     try {
       // ⚡ Page ka module sirf tab download hota hai jab us page ko khola jaye (pehla load halka rehta hai).
       if (FF.lazy && FF.lazy.ensure) await FF.lazy.ensure(page);
+      // Network/cache failure recovery: retry the requested module once before showing an error.
+      if (!FF.pages[page] && FF.lazy && FF.lazy.ensure) {
+        await FF.lazy.ensure(page);
+      }
       if (!FF.pages[page] && FF.lazy && FF.lazy.ensureAll) await FF.lazy.ensureAll();
       if (!FF.pages[page]) throw new Error(`Page module load nahi hua (${page}). Internet check karke ↻ dabaiye.`);
       // Fallback: agar kisi module ne galti se bare function register kiya ho (bina .render ke) to bhi chala lo.
