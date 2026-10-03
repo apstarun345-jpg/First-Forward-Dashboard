@@ -187,6 +187,29 @@ FF.pages = FF.pages || {};
       `<a class="btn small" href="#/tagIssued?period=month">🏷️ Tag Issued →</a><a class="btn small" href="#/trend">📈 Trend →</a>`);
   }
 
+  // ---------------------------------------------------------------- management pulse (uses already-loaded data; no extra API call)
+  function managementPulseHtml(ctx, sf, liveState, stock) {
+    const reportDay = Math.max(1, Number(ctx && ctx.observedDay) || 1);
+    const dim = Number(ctx && ctx.daysInMonth) || 30;
+    const ffTotal = sumN((sf && sf.ff) || []);
+    const gvTotal = sumN((sf && sf.gv) || []);
+    const total = ffTotal + gvTotal;
+    const expected = reportDay ? Math.round((total / reportDay) * dim) : 0;
+    const live = Number(liveState && liveState.total) || 0;
+    const stockTotal = Number(stock && stock.total) || 0;
+    const stockRate = reportDay ? total / reportDay : 0;
+    const cover = stockRate > 0 ? (stockTotal / stockRate) : null;
+    const fresh = liveState && liveState.stale ? '⚠️ Live snapshot stale' : liveState && liveState.error ? '⚠️ Live feed needs check' : '🟢 Live feed healthy';
+    const coverText = cover == null ? '—' : U.fmt(cover, true) + ' days';
+    return card('🧭 Management Pulse <span class="dim">· existing data se · extra API call nahi</span>',
+      '<div class="hm-pulse-grid">' +
+      '<div class="hm-pulse-item"><span>🟢 Live today</span><b>' + U.fmt(live) + '</b><small>' + esc(fresh) + '</small></div>' +
+      '<div class="hm-pulse-item"><span>🎯 Month expected</span><b>' + U.fmt(expected) + '</b><small>' + reportDay + '/' + dim + ' reported days · current day excluded</small></div>' +
+      '<div class="hm-pulse-item"><span>📦 Stock cover</span><b>' + esc(coverText) + '</b><small>' + U.fmt(stockTotal) + ' total stock · run-rate basis</small></div>' +
+      '<div class="hm-pulse-actions"><a class="btn small primary" href="#/executive">🧭 Executive Cockpit</a><a class="btn small" href="#/performance">🏆 Performance</a><a class="btn small" href="#/stockRadar">🗺️ Stock Radar</a><a class="btn small" href="#/dataQuality">🧪 Data Quality</a></div>' +
+      '</div>');
+  }
+
   // ---------------------------------------------------------------- charts
   function monthCharts(ctx, sf, sc, lastRows, gvLive) {
     const { curKey, prevKey, observedDay } = ctx;
@@ -291,6 +314,7 @@ FF.pages = FF.pages || {};
       </div>
       <div id="home-gv-live">${U.spinner('GV aaj ka live data aaya ja raha hai…')}</div>
       <div id="home-month">${U.spinner('EIR se month KPI cards ban rahe hain…')}</div>
+      <div id="home-pulse"></div>
       <div id="home-charts">${U.spinner('Charts…')}</div>
       <div id="home-stock">${U.spinner('Stock (StockDataa + Tag Assignment)…')}</div>
       <p class="foot-note">🟩 GV aaj = <b>GV Master sheet</b> (live) · 🧾 Issuance history = <b>EIR</b> (GV = master ID ${esc(FF.config.eir.gvMasterId || '5845036')}, baaki FF) · 📦 Stock = <b>StockDataa</b> (FF) + <b>Tag Assignment</b> (GV) · 🟦 FF ka issuance T+1 aata hai · Master search ab Management → 🔎 Master Search me hai.</p>`;
@@ -301,6 +325,7 @@ FF.pages = FF.pages || {};
     const gvLiveMount = U.$('#home-gv-live', root);
     const monthMount = U.$('#home-month', root);
     const chartMount = U.$('#home-charts', root);
+    const pulseMount = U.$('#home-pulse', root);
     const stockMount = U.$('#home-stock', root);
 
     // ⚡ Home first paint: GV-only today endpoint is intentionally separate from the heavier
@@ -380,12 +405,16 @@ FF.pages = FF.pages || {};
       if (!monthMount || !monthMount.isConnected || !ui.ready) return;
       monthMount.innerHTML = monthKpiHtml(ui.ctx, ui.sf, { liveToday: ui.liveToday }, ui.sc, ui.sf.rows);
     }
+    function paintPulse(stock) {
+      if (!pulseMount || !pulseMount.isConnected || !ui.ready) return;
+      pulseMount.innerHTML = managementPulseHtml(ui.ctx, ui.sf, liveState, stock || null);
+    }
     function paintCharts() {
       if (!chartMount || !chartMount.isConnected || !ui.ready) return;
       chartMount.innerHTML = monthCharts(ui.ctx, ui.sf, ui.sc, ui.sf.rows, { weekdayBars: ui.wdBars });
       C.mount(chartMount);
     }
-    function paintAll() { paintLive(); paintMonth(); paintCharts(); }
+    function paintAll() { paintLive(); paintMonth(); paintPulse(); paintCharts(); }
 
     // 🟢 First visible live source: only GV Master + today, no FF/history wait.
     paintLive();
@@ -478,6 +507,7 @@ FF.pages = FF.pages || {};
     const sc = M.summary(st.rows, ctx.curKey);
     ui.ready = true; ui.sf = sf; ui.ctx = ctx; ui.sc = sc; ui.liveToday = st.gvLiveAdded;
     paintMonth();
+    paintPulse();
     paintCharts();
     if (!st.rows.length) {
       if (chartMount) chartMount.innerHTML = `<div class="card"><div class="card-body empty">Is mahine ka koi issuance row nahi mila — ↻ Refresh dabao ya Settings → Data source check karo.</div></div>`;
@@ -505,6 +535,7 @@ FF.pages = FF.pages || {};
       rows: []
     };
     stockMount.innerHTML = stockHtml(ffStock, gvStock, sf);
+    paintPulse({ total: ffStock.total + gvStock.total });
     // GV agent-wise stock (agar permission/load ho to) — top holders
     if (canGv) {
       G.need('stockAgent').then((rows) => {
