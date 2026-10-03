@@ -126,7 +126,7 @@ FF.pages = FF.pages || {};
   };
 
   /** Layer 1 — aggregated rows (instant, never blocks on barcode scans). */
-  const LIMITS = { lightSoftMs: 6000 };   // itni der baad jo datasets aa chuke unse index banao; baaki aate hi index me judte hain (tests chhota karte hain)
+  const LIMITS = { lightSoftMs: 1500 };   // itni der baad jo datasets aa chuke unse index banao; baaki aate hi index me judte hain (tests chhota karte hain)
   /** Sabhi promises ka intezaar — par `ms` se zyada nahi. Return: { name: { status, value|reason } } (pending wale missing). */
   function settleSoon(sources, ms) {
     const out = {};
@@ -146,8 +146,9 @@ FF.pages = FF.pages || {};
       const idx = newIndex();
       let tick = 0;
       const sources = {
+        // ⚡ Search cold-start: identity comes from GV Master directly. Do not block on the large
+        // FF daily/EIR history just to locate a GV agent.
         agents: FF.store.need('agents'), stockAgents: FF.store.need('stockAgents'), gvMaster: FF.gv.need('master'),
-        gvIssuance: Promise.all([FF.store.need('daily'), FF.gv.need('master')]).then(() => (FF.gv.issuanceRows ? FF.gv.issuanceRows() : [])),
         gvReport: FF.gv.need('report'), gvStockAgent: FF.gv.need('stockAgent'), gvStockTl: FF.gv.need('stockTl'),
         // 🔎 FF REPORT: old/alt agent ID (ID column) · TL ID · TL mobile — search me bhi aayenge
         ffReport: (FF.pages.performance && FF.pages.performance.ensureLoaded ? FF.pages.performance.ensureLoaded().then(() => FF.pages.performance.agents()) : Promise.resolve([]))
@@ -198,7 +199,7 @@ FF.pages = FF.pages || {};
         for (const a of rows || []) {
           if (++tick % 2500 === 0) await U.breathe();
           const p = person(idx, 'ff-agent', a.name || a.id, a.tlName, '', a.id);
-          if (p) { p.bars = p.bars; p.n += Number(a.n) || 0; rememberId(p, a.id); rememberTlId(p, a.tlId); }
+          if (p) { p.bars = p.bars; p.issuanceN = (p.issuanceN || 0) + (Number(a.n) || 0); p.n += Number(a.n) || 0; rememberId(p, a.id); rememberTlId(p, a.tlId); }
           if (clean(a.id)) indexId(a.id, { name: clean(a.name || a.id), kind: 'ff-agent', tl: clean(a.tlName) });
           if (clean(a.tlName)) {
             const t = person(idx, 'ff-tl', a.tlName, '', '', a.tlId || '');
@@ -228,6 +229,7 @@ FF.pages = FF.pages || {};
           // GV Master: AGENT_ID is its UNIQUE_ID column. Retain all TL identifiers too:
           // column C (supervisor/TL ID) is the lookup alias, while column R (GV TL ID) is
           // the canonical team-attribution key used by GV issuance and stock profiles.
+          if (p) { p.issuanceN = (p.issuanceN || 0) + 1; const cls = clean(r.cls); if (cls) p.classMap.set(cls, (p.classMap.get(cls) || 0) + 1); }
           rememberId(p, r.agentId);
           rememberTlId(p, r.tlId);
           rememberTlId(p, r.gvTlId);
@@ -243,26 +245,6 @@ FF.pages = FF.pages || {};
             const g = person(idx, 'gv-id', r.gvUniqueName || r.gvUniqueId, r.tlName, r.cls, r.gvUniqueId);
             if (g) g.n += 1;
             if (clean(r.gvUniqueId)) idx.ids.set(normId(r.gvUniqueId), { name: clean(r.gvUniqueName || r.gvUniqueId), kind: 'gv-id', tl: clean(r.tlName) });
-          }
-        }
-      };
-      // GV issuance quantities are EIR-authoritative. Keep GV Master above only for identity and
-      // unique-ID metadata; aggregated EIR rows supply the search counts and class quantities.
-      ingest.gvIssuance = async (rows) => {
-        for (const r of rows || []) {
-          if (++tick % 2500 === 0) await U.breathe();
-          const n = Number(r.n) || 1;
-          const p = person(idx, 'gv-agent', r.agentName || r.agentId, r.tlName, '', r.agentId);
-          if (p) {
-            p.n += n;
-            rememberId(p, r.agentId); rememberTlId(p, r.tlId);
-            const cls = clean(r.cls);
-            if (cls) p.classMap.set(cls, (p.classMap.get(cls) || 0) + n);
-          }
-          if (clean(r.agentId)) indexId(r.agentId, { name: clean(r.agentName || r.agentId), kind: 'gv-agent', tl: clean(r.tlName) });
-          if (clean(r.tlName)) {
-            const t = person(idx, 'gv-tl', r.tlName, '', r.cls, r.tlId);
-            if (t) { t.n += n; rememberId(t, r.tlId); if (clean(r.tlId)) indexId(r.tlId, { name: clean(r.tlName), kind: 'gv-tl' }); }
           }
         }
       };
@@ -300,7 +282,7 @@ FF.pages = FF.pages || {};
         }
       };
       // Canonical order (pehle jaisa): jo datasets deadline tak aa gaye unhe isi order me jodo — slow dataset search ko nahi rokta.
-      const ORDER = ['ffReport', 'agents', 'stockAgents', 'gvMaster', 'gvIssuance', 'gvReport', 'gvStockAgent', 'gvStockTl'];
+      const ORDER = ['ffReport', 'agents', 'stockAgents', 'gvMaster', 'gvReport', 'gvStockAgent', 'gvStockTl'];
       const settled = await settleSoon(sources, LIMITS.lightSoftMs);
       for (const name of ORDER) if (settled[name] && settled[name].status === 'fulfilled') await ingest[name](settled[name].value);
       indexLookups(idx);
@@ -443,6 +425,7 @@ FF.pages = FF.pages || {};
       out.tags.sort((a, b) => a.key.length - b.key.length || (b.ff.length + b.gv.length) - (a.ff.length + a.gv.length));
       if (out.tags.length > 120) out.tags.length = 120;
     }
+    suppressFalseFfMatches(out);
     out.matched = out.people.length + out.ids.length + out.tags.length;
     return out;
   }
@@ -477,6 +460,42 @@ FF.pages = FF.pages || {};
     return matches.length ? matches : list;
   }
 
+  function identityIds(p) {
+    if (!p) return [];
+    return [...new Set([p.sub, ...(p.ids || []), ...(p.alias || [])].map(normId).filter((x) => x && x.length >= 4))];
+  }
+  function identitiesLinked(a, b) {
+    const A = new Set(identityIds(a)), B = identityIds(b);
+    if (!A.size || !B.length) return false;
+    return B.some((id) => A.has(id));
+  }
+  function suppressFalseFfMatches(res) {
+    if (!res || !res.people || !res.people.length) return res;
+    const queryName = normName(res.q);
+    const ni = normId(res.q);
+    const gvPeople = res.people.filter((p) => /^gv-/.test(String(p.kind || '')) &&
+      (p.kind === 'gv-agent' || p.kind === 'gv-tl'));
+    if (!gvPeople.length) return res;
+    const exactGv = gvPeople.filter((p) => (queryName && normName(p.name) === queryName) ||
+      (ni.length >= 4 && identityIds(p).includes(ni)));
+    if (!exactGv.length) return res;
+    const keep = (p) => {
+      if (!/^ff-/.test(String(p.kind || ''))) return true;
+      const sameNameGv = exactGv.filter((g) => normName(g.name) === normName(p.name));
+      if (!sameNameGv.length) return true;
+      return sameNameGv.some((g) => identitiesLinked(g, p));
+    };
+    res.people = res.people.filter(keep);
+    res.ids = (res.ids || []).filter((v) => {
+      if (!/^ff-/.test(String(v.kind || ''))) return true;
+      const sameNameGv = exactGv.filter((g) => normName(g.name) === normName(v.name));
+      if (!sameNameGv.length) return true;
+      return sameNameGv.some((g) => identitiesLinked(g, { sub: v.id, ids: [v.id] }));
+    });
+    res.matched = res.people.length + res.ids.length + res.tags.length;
+    return res;
+  }
+
   /** Suggestions for U.suggest() — label + sub + kind chip. */
   function suggestItems(q) {
     if (!state.light) {
@@ -489,7 +508,7 @@ FF.pages = FF.pages || {};
     const items = [];
     r.people.slice(0, 14).forEach((p) => {
       const tl = [...p.tlSet][0] || '';
-      const q1 = MP() ? MP().quick(p) : null;   // stock / priority / mobile (agar REPORT load ho chuka)
+      const q1 = (r.people.length === 1 && MP()) ? MP().quick(p) : null;   // expensive profile sirf exact single result par
       const isTlKind = /tl$/.test(p.kind);
       const extra = q1 ? [
         q1.mobile && (!FF.auth || FF.auth.can('contacts')) ? `📞 ${q1.mobile}` : '',
@@ -503,8 +522,8 @@ FF.pages = FF.pages || {};
         kind: p.kind.startsWith('gv') ? 'gv' : 'ff',
         kindLabel: KIND_LABEL[p.kind] || p.kind,
         label: p.name,
-        sub: [p.sub ? `ID ${p.sub}` : '', tl ? `TL ${p.direct ? (p.directLabel || tl) : tl}` : '', ...extra, !q1 && p.bars.size ? `${U.fmt(p.bars.size)} tags` : ''].filter(Boolean).join(' · '),
-        badge: q1 && q1.priority ? q1.priority : (p.bars.size ? `${U.fmt(p.bars.size)}` : ''),
+        sub: [p.sub ? `ID ${p.sub}` : '', tl ? `TL ${p.direct ? (p.directLabel || tl) : tl}` : '', ...extra, !q1 && (p.issuanceN || p.bars.size || p.n) ? `${U.fmt(p.issuanceN || p.bars.size || p.n)} tags` : ''].filter(Boolean).join(' · '),
+        badge: q1 && q1.priority ? q1.priority : ((p.issuanceN || p.bars.size) ? `${U.fmt(p.issuanceN || p.bars.size)}` : ''),
         keywords: `${p.sub} ${tl} ${[...p.classMap.keys()].join(' ')}`,
         value: p.name,
         person: p
@@ -686,7 +705,7 @@ FF.pages = FF.pages || {};
       <div class="ms-kundli-stats">
         <div><small>TL</small><b>${p.direct ? `<span class="direct-chip">🚫 ${esc(tl)}</span>` : esc(tl || '—')}</b>${row && row.tlId && !p.direct ? `<em>${esc(row.tlId)}</em>` : ''}</div>
         <div><small>Tags / barcodes</small><b>${p.bars.size ? U.fmt(p.bars.size) : U.fmt(p.n)}</b></div>
-        <div><small>Activity rows</small><b>${U.fmt(p.n)}</b></div>
+        <div><small>Issuance rows</small><b>${U.fmt(p.issuanceN || p.n)}</b></div>
         <div><small>Last allocation</small><b>${esc(p.last || '—')}</b></div>
       </div>
       ${kundliProfileStats(p)}
