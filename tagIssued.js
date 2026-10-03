@@ -138,11 +138,14 @@ FF.pages = FF.pages || {};
       const rawDaily = S.get('daily') || [];
       const dailyRows = FF.filters ? FF.filters.dropLaggedFf(rawDaily) : rawDaily;
       // 🟢 GV today/current range is authoritative from GV Master, not the lagged daily/EIR snapshot.
-      const gvIssuanceRows = (G && typeof G.issuanceRows === 'function') ? (G.issuanceRows() || []) : dailyRows.filter((r) => r.channel === 'GV Partner');
+      const gvTodayRows = (G && typeof G.masterTodayRows === 'function') ? (G.masterTodayRows() || []) :
+        ((G && typeof G.issuanceRows === 'function') ? (G.issuanceRows() || []).filter((r) => r.channel === 'GV Partner' && r.key === todayKey()) : []);
+      // Historical GV stays on the daily/EIR snapshot; only today's GV is replaced by live Master.
+      const gvHistoricalRows = dailyRows.filter((r) => r.channel === 'GV Partner' && r.key !== todayKey());
       const ffPending = !!(FF.filters && FF.filters.isFfPending(val));
       const ffLagBadge = ffPending ? `<span class="badge amber" title="First Forward ka issuance data T+1 aata hai — ${esc(val)} ka FF kal aayega, isliye FF abhi 0 dikh raha hai. GV live hai.">🟦 FF T+1 · kal aayega</span>` : '';
       const ffRangeRows = dailyRows.filter((r) => r.channel !== 'GV Partner' && inRange(r, fromVal, val));
-      const gvRangeRows = gvIssuanceRows.filter((r) => r.channel === 'GV Partner' && inRange(r, fromVal, val));
+      const gvRangeRows = gvHistoricalRows.concat(gvTodayRows).filter((r) => r.channel === 'GV Partner' && inRange(r, fromVal, val));
       const ffRange = rangeSummary(ffRangeRows);
       const gvRange = rangeSummary(gvRangeRows);
       const combined = ffRange.total + gvRange.total;
