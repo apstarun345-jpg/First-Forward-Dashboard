@@ -138,14 +138,16 @@ FF.pages = FF.pages || {};
       kpi('g3', 'VC4', '🚗', U.fmt(sc.vc4), `${momChip(sc.vc4, lastSum.vc4)}<br>${splitFoot(M.summary(sf.ff, curKey).vc4, M.summary(sf.gv, curKey).vc4)}`, `src=both&scope=mtd&ym=${curKey}&f=vc4`),
       kpi('g8', 'VC20', '🛻', U.fmt(sc.vc20), `${momChip(sc.vc20, lastSum.vc20)}<br>${splitFoot(M.summary(sf.ff, curKey).vc20, M.summary(sf.gv, curKey).vc20)}`, `src=both&scope=mtd&ym=${curKey}&f=vc20`),
       kpi('g6', 'VC5+', '🚚', U.fmt(sc.vc5p), `${momChip(sc.vc5p, lastSum.vc5p)}<br>${splitFoot(M.summary(sf.ff, curKey).vc5p, M.summary(sf.gv, curKey).vc5p)}`, `src=both&scope=mtd&ym=${curKey}&f=vc5p`),
-      kpi('g12', 'All Commercial · VC20 + VC5+', '🚛', U.fmt(sc.comm), `${momChip(sc.comm, lastSum.comm, `${prevLabel} · same ${Math.min(observedDay, U.daysInMonth(prevKey))} din`)}<br>Last month full <b>${U.fmt(lastFull.comm)}</b> · Expected this month <b>${U.fmt(expectedCommercial)}</b>`, `src=both&scope=mtd&ym=${curKey}&f=comm`),
+      kpi('g12', 'All Commercial · VC20 + VC5+', '🚛', U.fmt(sc.comm),
+        `Last month <b>${U.fmt(lastFull.comm)}</b> · Expected current month <b>${U.fmt(expectedCommercial)}</b><br>${momChip(sc.comm, lastSum.comm, `${prevLabel} · same ${Math.min(observedDay, U.daysInMonth(prevKey))} din`)}`,
+        `src=both&scope=mtd&ym=${curKey}&f=comm`),
       kpi('g5', 'Replacement', '🔁', U.fmt(sc.replacement), `${momChip(sc.replacement, lastSum.replacement)}<br>${splitFoot(M.summary(sf.ff, curKey).replacement, M.summary(sf.gv, curKey).replacement)}`, `src=both&scope=mtd&ym=${curKey}&f=repl`),
       kpi('g7', 'Chassis', '🔧', U.fmt(sc.chassis), `${momChip(sc.chassis, lastSum.chassis)}<br>${splitFoot(M.summary(sf.ff, curKey).chassis, M.summary(sf.gv, curKey).chassis)}`, `src=both&scope=mtd&ym=${curKey}&f=chassis`),
       kpi('g2', `Expected in ${U.labelYM(curKey)}`, '🎯', U.fmt(expected),
         `run-rate <b>${U.fmt(rate, true)}</b>/din · ${observedDay}/${daysInMonth} din<br><span class="dim">last month full <b>${U.fmt(lastTotalFull)}</b> · expected <b>${U.fmt(lastExpected)}</b></span>`,
         `src=both&scope=mtd&ym=${curKey}`)
     ];
-    return card(`📅 ${esc(monthLabel)} · KPI cards <span class="dim">· issuance EIR se (GV = master ID ${esc(FF.config.eir.gvMasterId || '5845036')}, baaki FF)${sg.liveToday ? ' · GV aaj GV Master se live' : ''} · har card ke andar last month vs current month + %</span>`,
+    return card(`📅 ${esc(monthLabel)} · KPI cards <span class="dim">· issuance: GV Master live + EIR history · <b>All Commercial = VC20 + VC5+</b>${sg.liveToday ? ' · GV aaj GV Master se live' : ''} · har card me last month / expected / %</span>`,
       `<div class="kpi-grid mini hm-month-grid">${cards.join('')}</div>`,
       `<a class="btn small" href="#/tagIssued?period=month">🏷️ Tag Issued →</a><a class="btn small" href="#/trend">📈 Trend →</a>`);
   }
@@ -240,7 +242,7 @@ FF.pages = FF.pages || {};
           ${avatar}
           <div>
             <h1>${esc(greeting())}, <span class="home-name">${esc(u.name || u.username || 'there')}</span> 👋</h1>
-            <p class="sub">GV ka aaj ka live data · ${esc(U.labelYM(U.ymKey(TODAY()), true))} ke KPI cards · charts · GV &amp; FF stock</p>
+            <p class="sub">GV Master ka aaj ka live data · ${esc(U.labelYM(U.ymKey(TODAY()), true))} ke KPI cards · charts · GV &amp; FF stock · <b>All Commercial = VC20 + VC5+</b></p>
             <div class="home-quick-stats" id="home-quick"></div>
           </div>
         </div>
