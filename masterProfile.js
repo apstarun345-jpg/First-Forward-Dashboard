@@ -1213,7 +1213,16 @@ window.FF = window.FF || {};
     const stockTlId = reportTlId;
     const tlId = safeCall(() => FF.gv && FF.gv.masterTlIdentity ? FF.gv.masterTlIdentity(reportTlId, tlNameCanon) : '', '') || reportTlId;
     const nCanon = norm(tlNameCanon);
-    const isSelfReport = (r) => (nCanon && norm(r.agentName) === nCanon) || (!!reportTlId && clean(r.agentId).toUpperCase() === clean(reportTlId).toUpperCase() && (!nCanon || norm(r.tlName) === nCanon));
+    const isSelfReport = (r) => {
+      const aid = clean(r.agentId).toUpperCase();
+      const ownTlId = clean(r.tlId || r.supervisorId || r.gvTlId).toUpperCase();
+      const rid = clean(reportTlId).toUpperCase();
+      // TL self row is either named exactly like the TL, uses the TL ID as its UNIQUE_ID,
+      // or explicitly self-supervises (agent UNIQUE_ID == its TL ID).
+      return (nCanon && norm(r.agentName) === nCanon)
+        || (!!rid && aid === rid)
+        || (!!aid && !!ownTlId && aid === ownTlId && (!rid || ownTlId === rid));
+    };
     // Keep the TL's own self-supervised GV REPORT row long enough to separate its issuance from the
     // member list. It is not a direct/no-TL agent: GV REPORT TL snapshots include this row's work.
     const list = tlReports.filter((r) => !safeCall(() => FF.config.isDirectAgent(r, 'gv'), false) || isSelfReport(r)).map((r) => ({ ...r }));
@@ -2198,5 +2207,3 @@ window.FF = window.FF || {};
         <td class="num mp-drill" data-v="${sortVal(r.stock)}" data-kpi="${esc(st)}" role="button" tabindex="0" title="Stock ki detail"><b>${fmt(r.stock)}</b>${r.stockVc4 || r.stockComm ? `<small class="cell-sub">VC4 ${fmt(r.stockVc4)} · Comm ${fmt(r.stockComm)}</small>` : ''}</td>
         <td class="num mp-drill" data-v="${sortVal(r.cur)}" data-kpi="${esc(curSpec)}" role="button" tabindex="0" title="Total issuance ki detail"><b>${fmt(r.cur)}</b>${r.curVc4 || r.curComm ? `<small class="cell-sub">VC4 ${fmt(r.curVc4)} · Comm ${fmt(r.curComm)}</small>` : ''}</td>
         <td class="num mp-drill" data-v="${sortVal(r.last)}" data-kpi="${esc(lastSpec)}" role="button" tabindex="0" title="Last month issuance ki detail"><b>${fmt(r.last)}</b>${r.lastVc4 || r.lastComm ? `<small class="cell-sub">VC4 ${fmt(r.lastVc4)} · Comm ${fmt(r.lastComm)}</small>` : ''}</td>
-        <td class="num" data-v="${sortVal(Number.isFinite(r.growth) ? r.growth : -999999)}">${U.pctHtml(r.growth, { decimals: 0 })}</td>
-        ${o.rowActions ? `<td class="mppt-acts">${o.rowActions(r)}</td>` : ''}
