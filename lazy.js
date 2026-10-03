@@ -29,7 +29,7 @@ window.FF = window.FF || {};
   const GROUPS = {
     executive: ['insights', 'cockpit'],
     tagRequest: ['pdf', 'tagRequest'],
-    masterSearch: ['masterProfile', 'masterSearch'],
+    masterSearch: ['gvTruth', 'masterProfile', 'masterSearch'],
     tagIssued: ['tagIssued'],
     targets: ['targets'],
     rangeReport: ['rangeReport'],

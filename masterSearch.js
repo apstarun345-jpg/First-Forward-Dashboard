@@ -18,7 +18,9 @@ FF.pages = FF.pages || {};
   'use strict';
   const U = FF.util;
   const esc = U.esc, clean = U.clean;
-  const normId = (v) => clean(v).toUpperCase().replace(/[^A-Z0-9]/g, '');
+  // Sheet IDs can arrive as numeric cells with a trailing ".0"; strip that before punctuation
+  // removal so the sheet's UNIQUE_ID / TL ID still matches the value typed by the user.
+  const normId = (v) => clean(v).replace(/\.0+$/, '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   const normName = (v) => clean(v).toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
   const normBar = normId;
   const KIND_LABEL = { 'ff-agent': 'FF Agent', 'gv-agent': 'GV Agent', 'ff-tl': 'FF TL', 'gv-tl': 'GV TL', 'gv-id': 'GV ID', 'agent-id': 'Agent ID' };
@@ -69,7 +71,7 @@ FF.pages = FF.pages || {};
     if (kind === 'ff-tl' || kind === 'gv-tl') { if (!FF.config.isRealTl(nm)) return null; }
     const k = `${kind}|${normName(nm)}`;
     let p = idx.people.get(k);
-    if (!p) { p = { kind, name: nm, sub: sub || '', tlSet: new Set(), classMap: new Map(), bars: new Set(), last: '', n: 0, direct: false }; idx.people.set(k, p); }
+    if (!p) { p = { kind, name: nm, sub: sub || '', tlSet: new Set(), tlIds: new Set(), ids: new Set(), alias: new Set(), classMap: new Map(), bars: new Set(), last: '', n: 0, direct: false }; idx.people.set(k, p); }
     if (sub && !p.sub) p.sub = clean(sub);
     const tl = clean(tlName);
     if (kind === 'ff-agent' || kind === 'gv-agent') {
@@ -145,7 +147,7 @@ FF.pages = FF.pages || {};
       let tick = 0;
       const sources = {
         agents: FF.store.need('agents'), stockAgents: FF.store.need('stockAgents'), gvMaster: FF.gv.need('master'),
-        gvIssuance: FF.store.need('daily').then(() => (FF.gv.issuanceRows ? FF.gv.issuanceRows() : [])),
+        gvIssuance: Promise.all([FF.store.need('daily'), FF.gv.need('master')]).then(() => (FF.gv.issuanceRows ? FF.gv.issuanceRows() : [])),
         gvReport: FF.gv.need('report'), gvStockAgent: FF.gv.need('stockAgent'), gvStockTl: FF.gv.need('stockTl'),
         // 🔎 FF REPORT: old/alt agent ID (ID column) · TL ID · TL mobile — search me bhi aayenge
         ffReport: (FF.pages.performance && FF.pages.performance.ensureLoaded ? FF.pages.performance.ensureLoaded().then(() => FF.pages.performance.agents()) : Promise.resolve([]))
@@ -153,18 +155,40 @@ FF.pages = FF.pages || {};
       const canMob = (() => { try { return !FF.auth || FF.auth.can('contacts'); } catch { return true; } })();
       const addAlias = (p, ...vals) => { if (!p) return; p.alias = p.alias || new Set(); vals.forEach((v) => { const t = clean(v); if (t && !/^na$/i.test(t)) p.alias.add(t); }); };
       const addMobile = (m, name, kind, tl) => { if (!canMob) return; const d = String(m || '').replace(/\D/g, '').slice(-10); if (d.length === 10) idx.mobiles.set(`${d}|${kind}|${normName(name)}`, { mobile: d, name: clean(name), kind, tl: clean(tl) }); };
+      const rememberId = (p, id) => {
+        const value = clean(id);
+        if (!p || !value || /^na$/i.test(value)) return '';
+        p.ids = p.ids || new Set(); p.ids.add(value);
+        p.alias = p.alias || new Set(); p.alias.add(value);
+        return value;
+      };
+      const rememberTlId = (p, id) => {
+        const value = clean(id);
+        if (!p || !value || /^na$/i.test(value)) return '';
+        p.tlIds = p.tlIds || new Set(); p.tlIds.add(value);
+        return value;
+      };
+      const indexId = (id, value) => {
+        const raw = clean(id), key = normId(raw);
+        if (!key || /^na$/i.test(raw)) return;
+        const old = idx.ids.get(key);
+        if (old && old.kind === value.kind && normName(old.name) === normName(value.name) && old.tl === value.tl) return;
+        idx.ids.set(key, { ...value, id: raw });
+      };
       const ingest = {};
       ingest.ffReport = async (rows) => {
         for (const a of rows || []) {
           if (++tick % 2500 === 0) await U.breathe();
           const ap = person(idx, 'ff-agent', a.name || a.agentId, a.tlName, '', a.agentId || a.id);
           addAlias(ap, a.agentId, a.id, a.gvIdFound);
-          [a.agentId, a.id].forEach((v) => { if (clean(v) && !/^na$/i.test(clean(v))) idx.ids.set(normId(v), { name: clean(a.name || v), kind: 'ff-agent', tl: clean(a.tlName) }); });
+          [a.agentId, a.id].forEach((v) => { rememberId(ap, v); indexId(v, { name: clean(a.name || v), kind: 'ff-agent', tl: clean(a.tlName) }); });
+          rememberTlId(ap, a.tlId);
           addMobile(a.mobile || (/^\d{10}$/.test(clean(a.agentId)) ? a.agentId : ''), a.name, 'ff-agent', a.tlName);
           if (clean(a.tlName) && FF.config.isRealTl(clean(a.tlName))) {
             const tp = person(idx, 'ff-tl', a.tlName, '', '', a.tlId);
             addAlias(tp, a.tlId, canMob ? a.tlMobile : '');
-            if (clean(a.tlId) && !/^na$/i.test(clean(a.tlId))) idx.ids.set(`${normId(a.tlId)}:tl`, { name: clean(a.tlName), kind: 'ff-tl' });
+            rememberId(tp, a.tlId);
+            indexId(a.tlId, { name: clean(a.tlName), kind: 'ff-tl' });
             addMobile(a.tlMobile, a.tlName, 'ff-tl', '');
           }
         }
@@ -174,11 +198,11 @@ FF.pages = FF.pages || {};
         for (const a of rows || []) {
           if (++tick % 2500 === 0) await U.breathe();
           const p = person(idx, 'ff-agent', a.name || a.id, a.tlName, '', a.id);
-          if (p) { p.bars = p.bars; p.n += Number(a.n) || 0; }
-          if (clean(a.id)) idx.ids.set(normId(a.id), { name: clean(a.name || a.id), kind: 'ff-agent', tl: clean(a.tlName) });
+          if (p) { p.bars = p.bars; p.n += Number(a.n) || 0; rememberId(p, a.id); rememberTlId(p, a.tlId); }
+          if (clean(a.id)) indexId(a.id, { name: clean(a.name || a.id), kind: 'ff-agent', tl: clean(a.tlName) });
           if (clean(a.tlName)) {
-            const t = person(idx, 'ff-tl', a.tlName, '', '', '');
-            if (t) { t.n += Number(a.n) || 0; if (clean(a.id)) idx.ids.set(`${normId(a.id)}:tl`, { name: clean(a.tlName), kind: 'ff-tl' }); }
+            const t = person(idx, 'ff-tl', a.tlName, '', '', a.tlId || '');
+            if (t) { t.n += Number(a.n) || 0; rememberId(t, a.tlId); if (clean(a.tlId)) indexId(a.tlId, { name: clean(a.tlName), kind: 'ff-tl' }); }
           }
         }
       };
@@ -187,9 +211,13 @@ FF.pages = FF.pages || {};
         for (const r of rows || []) {
           if (++tick % 2500 === 0) await U.breathe();
           const p = person(idx, 'ff-agent', r.agentName || r.agentId, r.tlName, r.cls, r.agentId);
-          if (p) p.n += Number(r.n) || 0;
-          if (clean(r.agentId)) idx.ids.set(normId(r.agentId), { name: clean(r.agentName || r.agentId), kind: 'ff-agent', tl: clean(r.tlName) });
-          if (clean(r.tlName)) person(idx, 'ff-tl', r.tlName, '', r.cls, '');
+          if (p) { p.n += Number(r.n) || 0; rememberId(p, r.agentId); rememberTlId(p, r.tlId); }
+          if (clean(r.agentId)) indexId(r.agentId, { name: clean(r.agentName || r.agentId), kind: 'ff-agent', tl: clean(r.tlName) });
+          if (clean(r.tlName)) {
+            const t = person(idx, 'ff-tl', r.tlName, '', r.cls, r.tlId || '');
+            rememberId(t, r.tlId);
+            if (clean(r.tlId)) indexId(r.tlId, { name: clean(r.tlName), kind: 'ff-tl' });
+          }
         }
       };
       // GV Master — agent id / name / TL id / TL name / GV unique id + name
@@ -197,10 +225,20 @@ FF.pages = FF.pages || {};
         for (const r of rows || []) {
           if (++tick % 2500 === 0) await U.breathe();
           const p = person(idx, 'gv-agent', r.agentName || r.agentId, r.tlName, '', r.agentId);
-          // GV Master supplies identity / unique-ID metadata only; issuance quantity is EIR below.
-          if (clean(r.agentId)) idx.ids.set(normId(r.agentId), { name: clean(r.agentName || r.agentId), kind: 'gv-agent', tl: clean(r.tlName) });
-          if (clean(r.tlId)) idx.ids.set(normId(r.tlId), { name: clean(r.tlName || r.tlId), kind: 'gv-tl' });
-          if (clean(r.tlName)) person(idx, 'gv-tl', r.tlName, '', r.cls, r.tlId);
+          // GV Master: AGENT_ID is its UNIQUE_ID column. Retain all TL identifiers too:
+          // column C (supervisor/TL ID) is the lookup alias, while column R (GV TL ID) is
+          // the canonical team-attribution key used by GV issuance and stock profiles.
+          rememberId(p, r.agentId);
+          rememberTlId(p, r.tlId);
+          rememberTlId(p, r.gvTlId);
+          rememberTlId(p, r.supervisorId);
+          if (clean(r.agentId)) indexId(r.agentId, { name: clean(r.agentName || r.agentId), kind: 'gv-agent', tl: clean(r.tlName) });
+          const tlIds = [r.tlId, r.gvTlId, r.supervisorId].filter((id) => clean(id));
+          const tl = clean(r.tlName) ? person(idx, 'gv-tl', r.tlName, '', r.cls, r.tlId || r.gvTlId || r.supervisorId) : null;
+          tlIds.forEach((id) => {
+            rememberId(tl, id);
+            indexId(id, { name: clean(r.tlName || id), kind: 'gv-tl' });
+          });
           if (clean(r.gvUniqueId) || clean(r.gvUniqueName)) {
             const g = person(idx, 'gv-id', r.gvUniqueName || r.gvUniqueId, r.tlName, r.cls, r.gvUniqueId);
             if (g) g.n += 1;
@@ -217,13 +255,14 @@ FF.pages = FF.pages || {};
           const p = person(idx, 'gv-agent', r.agentName || r.agentId, r.tlName, '', r.agentId);
           if (p) {
             p.n += n;
+            rememberId(p, r.agentId); rememberTlId(p, r.tlId);
             const cls = clean(r.cls);
             if (cls) p.classMap.set(cls, (p.classMap.get(cls) || 0) + n);
           }
-          if (clean(r.agentId)) idx.ids.set(normId(r.agentId), { name: clean(r.agentName || r.agentId), kind: 'gv-agent', tl: clean(r.tlName) });
+          if (clean(r.agentId)) indexId(r.agentId, { name: clean(r.agentName || r.agentId), kind: 'gv-agent', tl: clean(r.tlName) });
           if (clean(r.tlName)) {
             const t = person(idx, 'gv-tl', r.tlName, '', r.cls, r.tlId);
-            if (t) t.n += n;
+            if (t) { t.n += n; rememberId(t, r.tlId); if (clean(r.tlId)) indexId(r.tlId, { name: clean(r.tlName), kind: 'gv-tl' }); }
           }
         }
       };
@@ -231,13 +270,16 @@ FF.pages = FF.pages || {};
       ingest.gvReport = async (rows) => {
         for (const r of rows || []) {
           if (++tick % 2500 === 0) await U.breathe();
-          person(idx, 'gv-agent', r.agentName || r.agentId, r.tlName, '', r.agentId);
-          if (clean(r.agentId)) idx.ids.set(normId(r.agentId), { name: clean(r.agentName || r.agentId), kind: 'gv-agent', tl: clean(r.tlName) });
-          if (clean(r.tlId)) idx.ids.set(normId(r.tlId), { name: clean(r.tlName || r.tlId), kind: 'gv-tl' });
-          if (clean(r.tlName)) person(idx, 'gv-tl', r.tlName, '', '', clean(r.tlId));
-          addAlias(person(idx, 'gv-agent', r.agentName || r.agentId, r.tlName, '', r.agentId), r.agentId, canMob ? r.mobile : '');
+          const ap = person(idx, 'gv-agent', r.agentName || r.agentId, r.tlName, '', r.agentId);
+          rememberId(ap, r.agentId); rememberTlId(ap, r.tlId); rememberTlId(ap, r.supervisorId);
+          if (clean(r.agentId)) indexId(r.agentId, { name: clean(r.agentName || r.agentId), kind: 'gv-agent', tl: clean(r.tlName) });
+          addAlias(ap, r.agentId, canMob ? r.mobile : '');
           addMobile(r.mobile, r.agentName || r.agentId, 'gv-agent', r.tlName);
-          if (clean(r.tlName) && FF.config.isRealTl(clean(r.tlName))) addAlias(person(idx, 'gv-tl', r.tlName, '', '', r.tlId), r.tlId, canMob ? r.tlMobile : '');
+          if (clean(r.tlName) && FF.config.isRealTl(clean(r.tlName))) {
+            const tp = person(idx, 'gv-tl', r.tlName, '', '', clean(r.tlId || r.supervisorId));
+            [r.tlId, r.supervisorId].forEach((id) => { rememberId(tp, id); if (clean(id)) indexId(id, { name: clean(r.tlName), kind: 'gv-tl' }); });
+            addAlias(tp, canMob ? r.tlMobile : '');
+          }
           if (r.tlMobile) addMobile(r.tlMobile, r.tlName, 'gv-tl', '');
         }
       };
@@ -246,12 +288,16 @@ FF.pages = FF.pages || {};
         for (const r of rows || []) {
           if (++tick % 2500 === 0) await U.breathe();
           const p = person(idx, 'gv-agent', r.agentName || r.agentId, r.tlName, '', r.agentId);
-          if (p) p.n += Number(r.n) || 0;
-          if (clean(r.agentId)) idx.ids.set(normId(r.agentId), { name: clean(r.agentName || r.agentId), kind: 'gv-agent', tl: clean(r.tlName) });
+          if (p) { p.n += Number(r.n) || 0; rememberId(p, r.agentId); rememberTlId(p, r.tlId); }
+          if (clean(r.agentId)) indexId(r.agentId, { name: clean(r.agentName || r.agentId), kind: 'gv-agent', tl: clean(r.tlName) });
         }
       };
       ingest.gvStockTl = async (rows) => {
-        for (const r of rows || []) person(idx, 'gv-tl', r.tlName, '', '', clean(r.tlId));
+        for (const r of rows || []) {
+          const p = person(idx, 'gv-tl', r.tlName, '', '', clean(r.tlId));
+          rememberId(p, r.tlId);
+          if (clean(r.tlId)) indexId(r.tlId, { name: clean(r.tlName || r.tlId), kind: 'gv-tl' });
+        }
       };
       // Canonical order (pehle jaisa): jo datasets deadline tak aa gaye unhe isi order me jodo — slow dataset search ko nahi rokta.
       const ORDER = ['ffReport', 'agents', 'stockAgents', 'gvMaster', 'gvIssuance', 'gvReport', 'gvStockAgent', 'gvStockTl'];
@@ -401,6 +447,17 @@ FF.pages = FF.pages || {};
     return out;
   }
 
+  /** An exact/prefix person-name match outranks agents who only share that person's TL name. */
+  function preferNameMatches(people, query) {
+    const nn = normName(query);
+    if (nn.length < 2) return people || [];
+    const matches = (people || []).filter((p) => {
+      const name = normName(p.name);
+      return name === nn || name.startsWith(nn);
+    });
+    return matches.length ? matches : (people || []);
+  }
+
   /** Suggestions for U.suggest() — label + sub + kind chip. */
   function suggestItems(q) {
     if (!state.light) {
@@ -518,6 +575,38 @@ FF.pages = FF.pages || {};
     </div>`;
   }
   const SR = () => (FF.searchReport && FF.searchReport.groupPeople ? FF.searchReport : null);
+  /** Agent search par usi channel ka TL resolve karo — naam preferred, dono GV Master TL IDs fall back. */
+  function linkedTlFor(agent) {
+    const idx = state.full || state.light;
+    if (!idx || !agent || !/-agent$/.test(String(agent.kind || '')) || agent.direct) return null;
+    const channel = String(agent.kind).startsWith('gv') ? 'gv' : 'ff';
+    const tlKind = `${channel}-tl`;
+    const tls = [...idx.people.values()].filter((p) => p.kind === tlKind);
+    const names = [...(agent.tlSet || [])].filter((name) => clean(name) && FF.config.isRealTl(clean(name))).reverse();
+    for (const name of names) {
+      const hit = tls.find((tl) => normName(tl.name) === normName(name));
+      if (hit) return hit;
+    }
+    const ids = new Set([...(agent.tlIds || [])].map(normId).filter(Boolean));
+    if (!ids.size) return null;
+    return tls.find((tl) => [tl.sub, ...((tl.ids && [...tl.ids]) || []), ...((tl.alias && [...tl.alias]) || [])]
+      .some((id) => ids.has(normId(id)))) || null;
+  }
+  /** Per-agent search me TL ka poora team profile bhi kholna: all agents + TL self stock/issuance. */
+  function teamPeopleFor(group) {
+    const out = [], sr = SR();
+    for (const ch of ['ff', 'gv']) {
+      const agent = group && group[ch];
+      if (!agent || /-tl$/.test(String(agent.kind || ''))) continue;
+      const tl = linkedTlFor(agent);
+      if (!tl) continue;
+      const teamGroup = sr && sr.groupPeople ? sr.groupPeople([tl])[0] : null;
+      out.push({ channel: ch, person: tl, group: teamGroup || {
+        key: normName(tl.name), name: tl.name, ff: ch === 'ff' ? tl : null, gv: ch === 'gv' ? tl : null
+      } });
+    }
+    return out;
+  }
   let lastPeople = [];   // abhi dikh rahe result ke log (card ke inline report ko same-naam FF + GV jodne ke liye)
   /** v3.41 — Ek hi insaan (same naam, FF + GV dono) match ho to poori report inline khol do: upar channel toggle
    *  (⚖ FF + GV · 🟦 FF · 🟩 GV). Pehle sirf EXACTLY ek person par khulti thi — FF + GV dono me naam ho to 2 card
@@ -884,7 +973,7 @@ FF.pages = FF.pages || {};
     root.innerHTML = `<div class="page msp-page">
       <div class="page-head">
         <div><h1>🔎 Master Search</h1>
-          <p class="sub">GV + First Forward · <b>naam · agent · TL · ID · mobile</b> — type karo, click karo, poora data (last month · current month · stock · class-wise · tag-level) usi page par khul jaata hai.</p></div>
+          <p class="sub">GV + First Forward · <b>naam · agent · TL · ID · mobile</b> — agent search par uski poori details + TL ka full team (sab agents aur TL self ka stock/issuance) bhi khulta hai.</p></div>
         <div class="btn-row"><button class="btn small" data-msp-refresh>🔄 Index refresh</button></div>
       </div>
       <div class="card msp-search-card"><div class="card-body">
@@ -964,10 +1053,16 @@ FF.pages = FF.pages || {};
       if (!g || !out) return;
       current = g;
       const person = g.ff || g.gv;
+      const linkedTeams = teamPeopleFor(g);
       const bits = [g.ff ? `🟦 FF ${isTlP(g.ff) ? 'TL' : 'Agent'}${g.ff.sub ? ` · ${esc(g.ff.sub)}` : ''}` : '', g.gv ? `🟩 GV ${isTlP(g.gv) ? 'TL' : 'Agent'}${g.gv.sub ? ` · ${esc(g.gv.sub)}` : ''}` : ''].filter(Boolean).join('  ·  ');
       const chips = groups.length > 1
         ? `<div class="msp-matches"><span class="dim small">${U.fmt(groups.length)} log mile — click karo:</span>${groups.slice(0, 12).map((gp, i) => `<button type="button" class="msp-chip${gp === g ? ' on' : ''}" data-msp-g="${i}">${esc(gp.name)}</button>`).join('')}</div>`
         : '';
+      const teamCards = linkedTeams.map((team) => {
+        const chLabel = team.channel === 'gv' ? '🟩 GV Partner' : '🟦 First Forward';
+        const id = team.person.sub ? ` · TL ID ${esc(team.person.sub)}` : '';
+        return `<section class="card msp-team-card"><div class="card-head"><div><h3>👥 ${esc(team.person.name)} · ${chLabel} TL team${id}</h3><p class="dim small">All agents ka stock + issuance; TL ka apna issuance aur stock alag row me.</p></div></div><div class="card-body"><div class="msp-report" data-msp-team="${team.channel}"></div></div></section>`;
+      }).join('');
       out.innerHTML = `${chips}
         <div class="msp-hero">
           <span class="ms-avatar">${esc(String(g.name || '?').slice(0, 1).toUpperCase())}</span>
@@ -975,12 +1070,17 @@ FF.pages = FF.pages || {};
           ${person ? `<div class="msp-hero-act"><button class="btn small" data-ms-tags="${esc(person.name)}">🏷️ Tag-level rows</button></div>` : ''}
         </div>
         ${gvStripHtml(g.gv)}${ffStripHtml(g.ff)}
-        <div class="msp-report" id="msp-report"></div>`;
+        <div class="msp-report" id="msp-report"></div>${teamCards}`;
       const host = U.$('#msp-report', out);
       const sr = SR();
       if (sr && host) sr.render(host, g);
       else if (host && FF.masterProfile && FF.masterProfile.renderInto && person) FF.masterProfile.renderInto(host, person);
       else if (host) host.innerHTML = '<div class="card"><div class="card-body empty">Report module load nahi hua — page reload karo.</div></div>';
+      linkedTeams.forEach((team) => {
+        const teamHost = out.querySelector(`[data-msp-team="${team.channel}"]`);
+        if (sr && teamHost) sr.render(teamHost, team.group);
+        else if (teamHost && FF.masterProfile && FF.masterProfile.renderInto) FF.masterProfile.renderInto(teamHost, team.person);
+      });
       try { FF.charts && FF.charts.mount && FF.charts.mount(out); } catch { /* charts optional */ }
     }
 
@@ -1003,7 +1103,8 @@ FF.pages = FF.pages || {};
       paintState(); paintQuick();
       if (!state.light) { out.innerHTML = '<div class="card"><div class="card-body empty">Search index load nahi hua — internet check karke “🔄 Index refresh” dabao.</div></div>'; return; }
       const res = search(q);
-      const people = (res.people || []).filter((p) => !chFilter || chOfP(p) === chFilter);
+      const channelPeople = (res.people || []).filter((p) => !chFilter || chOfP(p) === chFilter);
+      const people = preferNameMatches(channelPeople, q);
       const sr = SR();
       groups = sr ? sr.groupPeople(people) : people.map(fallbackGroup);
       groups.sort((a, b) => Number(!!b.gv) - Number(!!a.gv) || String(a.name).localeCompare(String(b.name)));
@@ -1044,6 +1145,8 @@ FF.pages = FF.pages || {};
       }
       const gb = e.target.closest('[data-msp-g]');
       if (gb) { const gp = groups[Number(gb.dataset.mspG)]; if (gp) openGroup(gp); return; }
+      const again = e.target.closest('[data-ms-again]');
+      if (again) { const query = again.dataset.msAgain || ''; if (input) input.value = query; run(query); return; }
       const tags = e.target.closest('[data-ms-tags]');
       if (tags && FF.app && FF.app.navigate) { FF.app.navigate('masterStock', { q: tags.dataset.msTags }); return; }
     });
@@ -1054,8 +1157,8 @@ FF.pages = FF.pages || {};
   FF.pages.masterSearch = { title: 'Master Search', render: pageRender };
 
   FF.masterSearch = {
-    buildLight, buildFull, warmFull, invalidate, search, suggestItems, resultsHtml, openPanel, closePanel,
-    mountTopbar, openSearchPage, onIndexReady, personByKey, _limits: LIMITS,
+    buildLight, buildFull, warmFull, invalidate, search, preferNameMatches, suggestItems, resultsHtml, openPanel, closePanel,
+    mountTopbar, openSearchPage, onIndexReady, personByKey, linkedTlFor, teamPeopleFor, _limits: LIMITS,
     get ready() { return !!(state.light); }, get heavyReady() { return !!(state.full && state.full.fullLoaded); },
     get topbarMounted() { return mountedTopbar; },
     label: KIND_LABEL

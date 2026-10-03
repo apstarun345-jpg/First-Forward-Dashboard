@@ -44,16 +44,31 @@ FF.pages = FF.pages || {};
     return { curKey, prevKey, observedDay, daysInMonth };
   }
 
-  /** EIR daily + GV Master ke aaj ke rows = ek hi stream (double count ke bina). */
-  function streams(daily, gvTodayRows) {
-    const rows = (daily || []).slice();
+  /** Convert the small server feed's class totals into month-summary rows until full GV Master loads. */
+  function liveRowsFromFeed(live) {
+    if (!live) return null;
+    const key = live.date || todayK();
+    const d = U.fromDateKey(key);
+    const classes = live.classes && Object.keys(live.classes).length ? live.classes : {
+      VC4: live.vc4 || 0, VC20: live.vc20 || 0, 'VC5+': live.vc5p || 0
+    };
+    return Object.entries(classes).map(([cls, quantity]) => ({
+      key, date: d, d, ym: key.slice(0, 7), day: Number(key.slice(8, 10)) || d.getDate(),
+      cls, group: M.classGroup(cls), type: 'ISSUANCE', vrnType: '', channel: 'GV Partner',
+      n: Math.max(0, Number(quantity) || 0), live: true, source: 'gv-today-feed'
+    })).filter((row) => row.n > 0);
+  }
+  /** Today's GV Master/live-feed rows replace today's EIR GV rows (never add a partial duplicate). */
+  function streams(daily, gvTodayRows, replaceGvToday) {
+    let rows = (daily || []).slice();
     const tk = todayK();
-    const gvHasToday = rows.some((r) => r.channel === 'GV Partner' && r.key === tk);
-    const added = (!gvHasToday && gvTodayRows && gvTodayRows.length) ? gvTodayRows.length : 0;
+    const replace = !!replaceGvToday && Array.isArray(gvTodayRows);
+    if (replace) rows = rows.filter((r) => !(r.channel === 'GV Partner' && r.key === tk));
+    const added = replace ? gvTodayRows.length : 0;
     if (added) rows.push(...gvTodayRows);
     return {
       rows,
-      gvLiveAdded: added > 0,
+      gvLiveAdded: replace,
       ff: rows.filter((r) => r.channel !== 'GV Partner'),
       gv: rows.filter((r) => r.channel === 'GV Partner')
     };
@@ -66,7 +81,7 @@ FF.pages = FF.pages || {};
     const expected = live.expected;
     const sourceNote = live.source === 'master'
       ? 'GV Master sheet (live, abhi load hua)'
-      : `GV Master sheet (live${live.cached ? ' · cached' : ''}, server feed)`;
+      : `GV Master sheet (live${live.stale ? ' · stale fallback' : live.cached ? ' · recent cache' : ''}, server feed)`;
     const cards = [
       kpi('g11', 'Aaj Total (GV live)', '🏷️', U.fmt(live.total),
         `${expected != null ? `expected <b>${U.fmt(expected)}</b> · ` : ''}pace ${pace != null ? U.fmt(pace) : '—'} day-end`,
@@ -80,12 +95,15 @@ FF.pages = FF.pages || {};
         live.weekdayNote ? esc(live.weekdayNote) : 'pichhle same-weekday ka average',
         `src=gv&scope=day&date=${tk}`)
     ];
-    const zeroNote = live.total === 0
+    const errorNote = live.error
+      ? `<p class="hm-warn">⚠️ GV live feed error: ${esc(live.error)}. Connection / sheet mapping check karo; GV Master refresh hote hi snapshot update hoga.</p>`
+      : '';
+    const zeroNote = live.total === 0 && !live.error
       ? `<p class="hm-warn">⚠️ Aaj ki rows abhi GV Master sheet me nahi aayi (ya sirf naye tags bank feed me pending hain) — sheet me aate hi ye number apne aap update ho jayega. ↻ Refresh bhi daba sakte ho.</p>`
       : '';
     return card(`🟩 GV · Aaj ka live <span class="dim">· ${esc(U.labelDate(TODAY(), true))} (${esc(U.weekday(TODAY()))}) · ${esc(sourceNote)}</span>`,
       `<div class="kpi-grid mini gv-aaj-grid">${cards.join('')}</div>
-       ${zeroNote}
+       ${errorNote}${zeroNote}
        <p class="dim small" style="margin:10px 0 0">🎯 <b>Expected Today</b> = pichhle 4 same-weekday ka average (pichhla mahina bhi shaamil)${live.weekdayNote ? ` — ${esc(live.weekdayNote)}` : ''}. ⚡ Pace = ab tak ke tags ÷ ab tak ke ghante × 24. Har card par click → kis agent/TL ne lagaye, tag-level rows.</p>`,
       `<a class="btn small" href="#/gvDashboard">🚀 GV Dashboard →</a>`);
   }
@@ -93,9 +111,12 @@ FF.pages = FF.pages || {};
   function monthKpiHtml(ctx, sf, sg, sc, lastRows) {
     const { curKey, prevKey, observedDay, daysInMonth } = ctx;
     const lastSum = M.summary(lastRows, prevKey, observedDay, '');
-    const lastTotalFull = M.summary(lastRows, prevKey).total;
+    const lastFull = M.summary(lastRows, prevKey);
+    const lastTotalFull = lastFull.total;
     const rate = observedDay ? sc.total / observedDay : 0;
+    const commercialRate = observedDay ? sc.comm / observedDay : 0;
     const expected = Math.round(rate * daysInMonth);
+    const expectedCommercial = Math.round(commercialRate * daysInMonth);
     const lastExpected = lastSum.total ? Math.round((lastSum.total / Math.min(observedDay, U.daysInMonth(prevKey))) * U.daysInMonth(prevKey)) : 0;
     // Kal ka issuance (last complete day) + pichhle mahine ka wahi tareekh
     const y = new Date(TODAY()); y.setDate(y.getDate() - 1);
@@ -117,6 +138,7 @@ FF.pages = FF.pages || {};
       kpi('g3', 'VC4', '🚗', U.fmt(sc.vc4), `${momChip(sc.vc4, lastSum.vc4)}<br>${splitFoot(M.summary(sf.ff, curKey).vc4, M.summary(sf.gv, curKey).vc4)}`, `src=both&scope=mtd&ym=${curKey}&f=vc4`),
       kpi('g8', 'VC20', '🛻', U.fmt(sc.vc20), `${momChip(sc.vc20, lastSum.vc20)}<br>${splitFoot(M.summary(sf.ff, curKey).vc20, M.summary(sf.gv, curKey).vc20)}`, `src=both&scope=mtd&ym=${curKey}&f=vc20`),
       kpi('g6', 'VC5+', '🚚', U.fmt(sc.vc5p), `${momChip(sc.vc5p, lastSum.vc5p)}<br>${splitFoot(M.summary(sf.ff, curKey).vc5p, M.summary(sf.gv, curKey).vc5p)}`, `src=both&scope=mtd&ym=${curKey}&f=vc5p`),
+      kpi('g12', 'All Commercial · VC20 + VC5+', '🚛', U.fmt(sc.comm), `${momChip(sc.comm, lastSum.comm, `${prevLabel} · same ${Math.min(observedDay, U.daysInMonth(prevKey))} din`)}<br>Last month full <b>${U.fmt(lastFull.comm)}</b> · Expected this month <b>${U.fmt(expectedCommercial)}</b>`, `src=both&scope=mtd&ym=${curKey}&f=comm`),
       kpi('g5', 'Replacement', '🔁', U.fmt(sc.replacement), `${momChip(sc.replacement, lastSum.replacement)}<br>${splitFoot(M.summary(sf.ff, curKey).replacement, M.summary(sf.gv, curKey).replacement)}`, `src=both&scope=mtd&ym=${curKey}&f=repl`),
       kpi('g7', 'Chassis', '🔧', U.fmt(sc.chassis), `${momChip(sc.chassis, lastSum.chassis)}<br>${splitFoot(M.summary(sf.ff, curKey).chassis, M.summary(sf.gv, curKey).chassis)}`, `src=both&scope=mtd&ym=${curKey}&f=chassis`),
       kpi('g2', `Expected in ${U.labelYM(curKey)}`, '🎯', U.fmt(expected),
@@ -244,7 +266,7 @@ FF.pages = FF.pages || {};
     const chartMount = U.$('#home-charts', root);
     const stockMount = U.$('#home-stock', root);
 
-    const feedP = (canFf || canGv) ? FF.data.today().catch(() => null) : Promise.resolve(null);
+    const feedP = (canFf || canGv) ? FF.data.today().catch((err) => ({ requestError: err && err.message ? err.message : 'today feed request failed' })) : Promise.resolve(null);
     const dailyP = (canFf || canGv) ? S.need('daily').catch(() => null) : Promise.resolve(null);
     const stockP = canFf ? S.need('stock').catch(() => null) : Promise.resolve(null);
     const gvStockP = canGv ? G.need('stockClass').catch(() => null) : Promise.resolve(null);
@@ -256,8 +278,10 @@ FF.pages = FF.pages || {};
     // ---- 🟩 GV aaj live (pehla paint: chhota server feed — bade GV Master ka intezaar nahi) --------
     const feed = await feedP;
     if (!root.isConnected) return;
-    const liveFromFeed = feed && feed.gv ? feed.gv : null;
-    let liveRows = [];              // GV Master rows (aaj) — data layer se, jab load ho
+    const liveFromFeed = feed && feed.gv ? { ...feed.gv, cached: !!(feed.gv.cached || feed.cached), stale: !!feed.gv.stale } : null;
+    const feedLiveRows = liveRowsFromFeed(liveFromFeed);
+    let liveRows = feedLiveRows || []; // server feed snapshot until the full GV Master rows arrive
+    let liveSourceReady = !!liveFromFeed;
     let liveState = {
       total: liveFromFeed ? liveFromFeed.total : 0,
       vc4: liveFromFeed ? liveFromFeed.vc4 || 0 : 0,
@@ -268,6 +292,8 @@ FF.pages = FF.pages || {};
       expected: liveFromFeed ? liveFromFeed.expected : null,
       pace: null,
       cached: !!(liveFromFeed && liveFromFeed.cached),
+      stale: !!(liveFromFeed && liveFromFeed.stale),
+      error: canGv ? U.clean((feed && (feed.gvError || feed.requestError)) || (!liveFromFeed ? 'GV live feed is unavailable; GV Master data is loading.' : '')) : '',
       source: 'feed',
       liveToday: false
     };
@@ -303,32 +329,46 @@ FF.pages = FF.pages || {};
 
     // GV Master load hone par usi snapshot se aaj ka poora detail (replacement/chassis/agent-wise)
     gvMasterP.then((ok) => {
-      if (!ok || !G || G.error('master') || !G.gvToday) return;
+      const masterError = (G.error && G.error('master')) || '';
+      if (!ok || masterError || !G.gvToday) {
+        if (!liveFromFeed && canGv) liveState = { ...liveState, error: masterError || 'GV Master sheet load failed.' };
+        paintLive();
+        return;
+      }
       const snap = G.gvToday();
-      if (!snap || !snap.loaded) return;
-      liveRows = snap.rows || [];
-      // GV Master ka snapshot chhota/adhoora ho sakta hai — server feed se kam number par usse mat badlo.
-      const feedTotal = liveFromFeed ? liveFromFeed.total : 0;
+      if (!snap || !snap.loaded) {
+        if (!liveFromFeed && canGv) liveState = { ...liveState, error: 'GV Master snapshot load nahi hua.' };
+        paintLive();
+        return;
+      }
+      // Incomplete client snapshot ko server ke full live total par prefer na karo.
+      // Server class totals interim month rows ke liye kaam karte hain; full Master replaces them here.
+      const feedTotal = liveFromFeed ? Number(liveFromFeed.total) || 0 : 0;
       const useSnap = snap.total >= feedTotal || !liveFromFeed;
+      liveRows = useSnap ? (snap.rows || []) : (feedLiveRows || []);
+      liveSourceReady = true;
       liveState = useSnap ? {
         ...liveState,
         total: snap.total, vc4: snap.vc4, vc20: snap.vc20, vc5p: snap.vc5p,
         replacement: snap.replacement, chassis: snap.chassis,
-        source: 'master', liveToday: true
-      } : { ...liveState, liveToday: true };
+        error: '', stale: false, source: 'master', liveToday: true
+      } : { ...liveState, error: '', liveToday: true };
       if (ui.ready) {
-        // aaj ke GV rows month stream me shaamil karo (EIR me aaj ki GV rows nahi hoti)
-        const st2 = streams(st, liveRows);
+        // `st` is the already-built stream object, so pass its rows (not the wrapper) back in.
+        const st2 = streams(st.rows, liveRows, liveSourceReady);
         ui.sf = { rows: st2.rows, ff: st2.ff, gv: st2.gv };
         ui.sc = M.summary(st2.rows, ui.ctx.curKey);
         ui.liveToday = st2.gvLiveAdded;
         paintAll();
       } else paintLive();
-    }).catch(() => {});
+    }).catch((err) => {
+      if (!liveFromFeed && canGv) liveState = { ...liveState, error: err && err.message ? err.message : 'GV Master load failed.' };
+      paintLive();
+    });
 
     const daily = await dailyP;
     if (!root.isConnected) return;
-    const st = streams(daily || [], liveRows);
+    const st = streams(daily || [], liveRows, liveSourceReady);
     const ctx = monthContext(st.rows);
     const sf = { rows: st.rows, ff: st.ff, gv: st.gv };
     const sc = M.summary(st.rows, ctx.curKey);
@@ -390,5 +430,5 @@ FF.pages = FF.pages || {};
     obs.observe(document.body, { childList: true, subtree: true });
   }
 
-  FF.pages.home = { title: 'Home', render };
+  FF.pages.home = { title: 'Home', render, monthKpiHtml, streams, liveRowsFromFeed };
 })(window.FF);

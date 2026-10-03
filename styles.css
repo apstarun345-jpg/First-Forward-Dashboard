@@ -4474,7 +4474,15 @@ html[data-theme="dark"] .ua-hit b { color: #fca5a5; }
 /* --- ⚡ Speed doctor prefs: animations band + lite mode (boot par app.js lagata hai) --- */
 html.ff-no-anim *, html.ff-no-anim *::before, html.ff-no-anim *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; scroll-behavior: auto !important; }
 html.ff-no-anim .ua-kpi-card.ua-kpi-pending::after { animation: none !important; background: var(--brand, #4f46e5); }
-html.ff-lite .ua-head, html.ff-lite .card, html.ff-lite .kpi { box-shadow: none !important; background-image: none !important; }
+html.ff-lite .ua-head, html.ff-lite .card { box-shadow: none !important; background-image: none !important; }
+/* Lite mode removes gradients. KPI labels are white, so give their cards a solid fallback instead
+   of leaving white text on the page's white background (Home's original invisible-text bug). */
+html.ff-lite .kpi { box-shadow: none !important; background-image: none !important; background-color: #3730a3 !important; color: #fff !important; border-color: rgba(255,255,255,.18) !important; }
+html.ff-lite .kpi .kpi-title, html.ff-lite .kpi .kpi-value, html.ff-lite .kpi .kpi-foot, html.ff-lite .kpi .kpi-icon { color: #fff !important; }
+html.ff-lite .kpi .dim { color: rgba(255,255,255,.84) !important; }
+html.ff-lite .kpi .hm-split .ff, html.ff-lite .kpi .hm-split .gv { color: #e0e7ff !important; }
+html.ff-lite .kpi .pct-inline.pos { color: #bbf7d0 !important; }
+html.ff-lite .kpi .pct-inline.neg { color: #fecaca !important; }
 html.ff-lite .ua-head { background: #0f172a !important; }
 html.ff-lite .ua-kpi:hover, html.ff-lite .ua-watch-card:hover { transform: none !important; }
 html.ff-lite .table-wrap { contain: layout style; }
@@ -4960,6 +4968,9 @@ html[data-theme="dark"] .hm-toprow .rank { background: #1e293b; color: #a5b4fc; 
 .msp-today .dcell b { display: block; font-size: 20px; font-weight: 900; line-height: 1.25; }
 .msp-today .dcell em { display: block; font-style: normal; font-size: 10.5px; color: var(--muted); font-weight: 650; }
 .msp-report { margin-top: 4px; }
+.msp-team-card { margin-top: 14px; }
+.msp-team-card .card-head h3 { margin: 0; }
+.msp-team-card .card-head p { margin: 4px 0 0; }
 .msp-h { margin: 0 0 8px; }
 @media (max-width: 760px) {
   .msp-today .dgrid { grid-template-columns: 1fr; }
