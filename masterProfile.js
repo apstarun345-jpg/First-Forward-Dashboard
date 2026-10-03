@@ -78,6 +78,18 @@ window.FF = window.FF || {};
   // per-month issuance, so do not let that partial view overwrite GV REPORT summary totals.
   const gvCanonicalIssuanceRows = () => {
     const g = FF.gv || {};
+    if (typeof g.masterRows === 'function') {
+      return (safeCall(() => g.masterRows(), []) || []).filter((r) => r && r.date).map((r) => ({
+        ...r,
+        key: U.dateKey(r.date),
+        d: r.date,
+        n: 1,
+        type: /replacement/i.test(`${r.status || ''} ${r.tagType || ''}`) ? 'REPLACEMENT' : 'ISSUANCE',
+        vrnType: r.tagType || 'VRN',
+        channel: 'GV Partner',
+        source: 'GV Master'
+      }));
+    }
     if (gvHasRowsAdapterOverride() || typeof g.issuanceRows !== 'function') return [];
     return adapterIssuanceRows(g);
   };
@@ -342,7 +354,48 @@ window.FF = window.FF || {};
     return ffLookupCache;
   }
   function gvPeopleLookup() {
-    if (!gvLookupCache) gvLookupCache = buildPeopleLookup(gvReport(), (r) => r.agentName, (r) => [r.agentId], (r) => r.tlName);
+    if (gvLookupCache) return gvLookupCache;
+    // GV Master is the identity source: A=UNIQUE_ID (agent ID), C=TL ID, D=TL name.
+    // GV REPORT enriches/cross-checks these identities; Tag Assignment enriches stock.
+    const master = gvRows('master') || [];
+    const report = gvReport() || [];
+    const stock = gvRows('stockAgent') || [];
+    const byAgentId = new Map(), byName = new Map(), rows = [];
+    const normId = (v) => clean(v).toUpperCase().replace(/\.0+$/, '');
+    const merge = (raw, source) => {
+      const r = { ...(raw || {}) };
+      const id = clean(r.agentId || r.id), name = clean(r.agentName || r.name);
+      if (!id && !name) return;
+      const ik = normId(id), nk = norm(name);
+      let e = ik ? byAgentId.get(ik) : null;
+      if (!e && nk) e = byName.get(nk);
+      if (!e) { e = { ...r, agentId: id, agentName: name }; rows.push(e); }
+      else Object.keys(r).forEach((k) => { if ((e[k] === undefined || e[k] === null || e[k] === '') && r[k] !== undefined && r[k] !== null && r[k] !== '') e[k] = r[k]; });
+      if (source === 'master') {
+        e.agentId = id || e.agentId || '';
+        e.agentName = name || e.agentName || '';
+        e.supervisorId = clean(r.supervisorId) || e.supervisorId || '';
+        e.gvTlId = clean(r.gvTlId) || e.gvTlId || '';
+        e.tlId = clean(r.tlId || r.supervisorId || r.gvTlId) || e.tlId || '';
+        e.tlName = clean(r.tlName) || e.tlName || '';
+      }
+      if (ik) byAgentId.set(ik, e);
+      if (nk) byName.set(nk, e);
+    };
+    master.forEach((r) => merge(r, 'master'));
+    report.forEach((r) => merge(r, 'report'));
+    stock.forEach((r) => merge(r, 'stock'));
+    rows.forEach((r) => {
+      r.tlId = clean(r.tlId || r.supervisorId || r.gvTlId);
+      r.tlIds = [...new Set([r.tlId, r.supervisorId, r.gvTlId].map(clean).filter(Boolean))];
+    });
+    gvLookupCache = {
+      rows,
+      byName: (() => { const m = new Map(); rows.forEach((r) => { if (r.agentName) pushLookup(m, norm(r.agentName), r); }); return m; })(),
+      // IMPORTANT: Agent ID lookup is A=UNIQUE_ID only. TL IDs are separate from agent IDs.
+      byId: (() => { const m = new Map(); rows.forEach((r) => { const id = normId(r.agentId); if (id) pushLookup(m, id, r); }); return m; })(),
+      byTl: (() => { const m = new Map(); rows.forEach((r) => { if (r.tlName) pushLookup(m, norm(r.tlName), r); }); return m; })()
+    };
     return gvLookupCache;
   }
   /** Public read-only helper for TL KPI drawers: the GV REPORT carries one repeated TL snapshot per member row. */
@@ -996,6 +1049,17 @@ window.FF = window.FF || {};
   }
   function gvAgentProfile(p, light) {
     const r = findGvAgent(p.name, p.sub);
+    const truth = safeCall(() => FF.gvTruth && FF.gvTruth.person({
+      kind: 'gv-agent',
+      name: (r && r.agentName) || p.name,
+      id: (r && r.agentId) || p.sub || '',
+      tlId: r && r.tlId,
+      altIds: [r && r.supervisorId, r && r.gvTlId]
+    }), null);
+    const truthStock = truth && truth.stock;
+    const truthCur = truth && truth.ledger && truth.ledger.cur;
+    const truthLast = truth && truth.ledger && truth.ledger.last;
+    const truthToday = truth && truth.ledger && truth.ledger.today;
     const out = { kind: 'gv-agent', channel: 'GV Partner', ch: 'gv', name: p.name, id: (r && r.agentId) || p.sub || '', found: !!r };
     if (r) {
       const avgVc4 = gvDaily(r, r.curVc4), avgComm = gvDaily(r, r.curComm);
@@ -1055,6 +1119,26 @@ window.FF = window.FF || {};
       cur: sheetFirstGroups(sheetCur, out.classBins.cur),
       stock: { VC4: num(out.stock && out.stock.vc4), VC20: 0, 'VC5+': num(out.stock && out.stock.comm), total: num(out.stock && out.stock.total) }
     };
+    // GV Master is authoritative for GV agent issuance; Tag Assignment is authoritative for stock.
+    const curYmTruth = U.ymKey(new Date()), lastYmTruth = U.prevMonthKey(curYmTruth);
+    const myMasterRows = gvCanonicalIssuanceRows().filter((row) =>
+      (out.id && clean(row.agentId).toUpperCase() === clean(out.id).toUpperCase()) ||
+      (!out.id && norm(row.agentName) === norm(out.name))
+    );
+    const curExact = exactGvMonth(myMasterRows, curYmTruth);
+    const lastExact = exactGvMonth(myMasterRows, lastYmTruth);
+    if (truthCur || curExact) {
+      const cur = curExact || truthCur;
+      Object.assign(out.totals, { curVc4: num(cur.vc4), curComm: num(cur.comm), curTotal: num(cur.total) });
+    }
+    if (truthLast || lastExact) {
+      const last = lastExact || truthLast;
+      Object.assign(out.totals, { lastVc4: num(last.vc4), lastComm: num(last.comm), lastTotal: num(last.total) });
+    }
+    if (truthToday) out.today = { vc4: num(truthToday.vc4), comm: num(truthToday.comm), total: num(truthToday.total) };
+    if (truthStock) out.stock = { vc4: num(truthStock.vc4), comm: num(truthStock.comm), total: num(truthStock.total) };
+    out.tl = { name: out.direct ? '' : (truth && truth.tlName) || (out.tl && out.tl.name) || '', id: out.direct ? '' : (truth && truth.tlId) || (out.tl && out.tl.id) || '' };
+    out.issuanceSources = { current: curExact ? 'GV Master' : 'GV Truth', last: lastExact ? 'GV Master' : 'GV Truth', stock: truthStock ? 'Tag Assignment' : 'GV REPORT fallback' };
     if (light) return out;
     const master = gvClassRows((m) => norm(m.agentName) === n || (out.id && m.agentId === out.id));
     const curYm = globalCurYm, lastYm = globalLastYm;
