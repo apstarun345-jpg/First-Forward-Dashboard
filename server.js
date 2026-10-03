@@ -935,6 +935,76 @@ async function gvizDayDetail(cfg) {
  * GV side me aaj ka class split + replacement/chassis + weekday run-rate (expected) bhi aata hai.
  */
 const todayFeedCache = { at: 0, body: null, promise: null };
+const gvTodayFeedCache = { at: 0, body: null, promise: null };
+
+async function gvTodayFeed(force) {
+  const ttl = 30e3; // live today: short cache, but never scan the full 30-day history
+  if (!force && gvTodayFeedCache.body && Date.now() - gvTodayFeedCache.at < ttl) return { ...gvTodayFeedCache.body, cached: true };
+  if (gvTodayFeedCache.promise) return gvTodayFeedCache.promise;
+  gvTodayFeedCache.promise = (async () => {
+    const settings = db.settings || {};
+    const day = dateKeyNow();
+    const next = new Date(`${day}T00:00:00Z`);
+    next.setUTCDate(next.getUTCDate() + 1);
+    const nextDay = `${next.getUTCFullYear()}-${pad2(next.getUTCMonth() + 1)}-${pad2(next.getUTCDate())}`;
+    const resolved = await resolveGvServerColumns(settings, !!force);
+    const tab = (settings.gv && settings.gv.master && settings.gv.master.tab) || 'GV Master';
+    const id = String(settings.gvSheetId || '').replace(/[^A-Za-z0-9_-]/g, '');
+    const select = [resolved.date, resolved.cls, resolved.tagId, resolved.status, resolved.tagType].join(', ');
+    const attempts = [
+      { tq: `select ${select} where ${resolved.date} >= date '${day}' and ${resolved.date} < date '${nextDay}' and ${resolved.tagId} is not null limit 100000`, kind: 'today-date' },
+      { tq: `select ${select} where toDate(${resolved.date}) >= date '${day}' and toDate(${resolved.date}) < date '${nextDay}' and ${resolved.tagId} is not null limit 100000`, kind: 'today-toDate' },
+      { tq: `select ${select} where ${resolved.tagId} is not null limit 100000`, kind: 'today-bounded' }
+    ];
+    let lastErr = null;
+    for (const attempt of attempts) {
+      try {
+        const params = new URLSearchParams({ id, sheet: tab, tq: attempt.tq });
+        const out = await fetchUpstreamCached(upstreamUrl(params), { maxAgeMs: force ? 0 : ttl });
+        const table = parseGvizServer(out.body);
+        const rows = [];
+        for (const row of table.rows || []) {
+          const date = serverDateFromCell(row, 0);
+          if (date !== day) continue;
+          const tag = serverCell(row, 2);
+          if (!tag) continue;
+          rows.push({
+            cls: classBucket(serverCell(row, 1)),
+            status: serverCell(row, 3),
+            type: serverCell(row, 4)
+          });
+        }
+        // A successful filtered query with no rows means "no today's data" only after we know
+        // the date predicate worked. For the bounded fallback, empty is also a valid zero snapshot.
+        const classes = {};
+        let replacement = 0, chassis = 0;
+        for (const row of rows) {
+          classes[row.cls] = (classes[row.cls] || 0) + 1;
+          if (/repl/i.test(String(row.status || ''))) replacement++;
+          if (/chassis/i.test(String(row.type || ''))) chassis++;
+        }
+        const result = {
+          ok: true, date: day, at: new Date().toISOString(),
+          gv: {
+            source: 'GV Master', live: true, total: rows.length,
+            vc4: classes.VC4 || 0, vc20: classes.VC20 || 0, vc5p: classes['VC5+'] || 0,
+            comm: (classes.VC20 || 0) + (classes['VC5+'] || 0),
+            replacement, chassis, classes,
+            cached: !!out.cached, stale: !!out.stale, query: attempt.kind
+          }
+        };
+        gvTodayFeedCache.body = result;
+        gvTodayFeedCache.at = Date.now();
+        return result;
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+    throw lastErr || new Error('GV today feed failed');
+  })().finally(() => { gvTodayFeedCache.promise = null; });
+  return gvTodayFeedCache.promise;
+}
+
 async function gvMasterRawTodayFallback(settings, resolved, day, force) {
   const tab = (settings.gv && settings.gv.master && settings.gv.master.tab) || 'GV Master';
   const id = String(settings.gvSheetId || '').replace(/[^A-Za-z0-9_-]/g, '');
@@ -3582,6 +3652,17 @@ async function handleApi(req, res, url) {
   if (p === '/api/perf' && method === 'GET') {
     requireAdmin(user);
     return sendJson(res, 200, { ok: true, perf: perfReport() });
+  }
+  // ⚡ GV ONLY AAJ — Home ka first paint isi fast endpoint se aata hai; history /api/today se alag.
+  if (p === '/api/gv-today' && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required');
+    const force = url.searchParams.get('fresh') === '1' && user.role === 'admin';
+    try {
+      return sendJson(res, 200, await gvTodayFeed(force));
+    } catch (err) {
+      if (process.env.DEBUG_TODAY) console.error('[api/gv-today]', err.stack);
+      return sendJson(res, 200, { ok: false, error: err.message, gv: null });
+    }
   }
   // ⚡ Aaj ka live feed — chhoti grouped queries (server cache se turant). GV = GV Master tab, FF = EIR.
   if (p === '/api/today' && method === 'GET') {
