@@ -27,6 +27,7 @@ FF.config = {
   proxyPath: '/api/gviz',
   // ⚡ Chhota "aaj ka live" feed (GV = GV Master tab se, FF = EIR se) — Home ka pehla paint isse hota hai.
   todayPath: '/api/today',
+  gvTodayPath: '/api/gv-today',
   // Data only flows through the login-protected proxy (no direct browser→Google fallback), so access rules hold.
   directFallback: false,
   autoRefreshMs: 0,
