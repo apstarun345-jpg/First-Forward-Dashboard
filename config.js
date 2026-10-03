@@ -106,6 +106,13 @@ FF.config = {
 
   // GV Partner sheet mapping (tab names + column letters / header row).
   // GV Master = issuance log, Tag Assignment = stock, GV REPORT = agent-wise performance.
+  // 🧭 GV CCH → vehicle group mapping. Admin Settings se CCH values select kar sakta hai.
+  // Empty lists = existing VCLASS/CLASS fallback; values are case/space insensitive.
+  gvClassCch: {
+    enabled: true,
+    source: 'cch',
+    groups: { VC4: [], VC20: [], VC5: [] }
+  },
   gv: {
     master: {
       tab: 'GV Master', gid: '',
