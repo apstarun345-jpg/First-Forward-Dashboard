@@ -3777,8 +3777,21 @@ async function recoveryHint() {
     });
     return recoveryHintInfo;
   } catch (err) {
+    // Sabse aam wajah: Apps Script me PURANA Code.gs deployed hai (usme 'history' action hi nahi).
+    // Chup-chaap fail na ho — admin ko Settings me seedha karan dikhe.
     console.warn('recovery hint:', err.message);
-    return null;
+    const reason = /unknown action|HTML page|invalid response/i.test(err.message)
+      ? 'Sheet ke Apps Script me naya Code.gs deploy nahi hua hai (history action missing). Upar “📋 Copy Code.gs” dabao → Apps Script me paste karo → Deploy → Manage deployments → Edit (✏️) → Version: New version → Deploy.'
+      : err.message;
+    recoveryHintInfo = { available: null, error: reason };
+    if (db.users.length <= 1) {
+      recordNotification({
+        type: 'settings', title: '⏪ Recovery taiyaar nahi hai — Code.gs deploy karo',
+        body: `Purani saves dhoondhne ke liye Apps Script me naya Code.gs chahiye. ${reason}`,
+        target: 'admin', meta: { source: 'recovery-hint-error' }
+      });
+    }
+    return recoveryHintInfo;
   }
 }
 /** Server par kahan-kahan purani JSON files mil sakti hain (Render disk / app folder). */

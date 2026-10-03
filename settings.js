@@ -918,7 +918,8 @@ FF.pages = FF.pages || {};
     const rec = storage && storage.recoverable;
     const hint = rec && rec.available
       ? `<div class="ok-box">⏪ Is sheet me <b>${esc(rec.available)}</b> purani encrypted save(s) milin hain${rec.newestAt ? ` (sabse nayi: ${esc(U.timeLabel(new Date(rec.newestAt).getTime()))})` : ''} — neeche <b>Purani saves dhoondho</b> dabao.</div>`
-      : (rec && rec.pending ? '<p class="dim small">Purani saves ki talash abhi chal rahi hai — thodi der me page reload karke dekh lo.</p>' : '');
+      : (rec && rec.error ? `<div class="warn-box">⚠️ <b>Recovery abhi taiyaar nahi hai</b> — ${esc(rec.error)}</div>`
+        : (rec && rec.pending ? '<p class="dim small">Purani saves ki talash abhi chal rahi hai — thodi der me page reload karke dekh lo.</p>' : ''));
     return section('⏪ Purana data wapas lao (Recovery)', `${hint}
       <p class="dim small">Ek baar Google Sheet me save hui settings / users / passwords <code>APP_STORAGE_HISTORY</code> tab me encrypted backup ban kar maujood rehti hain — chahe sheet me ab sirf 1 user kyon na dikhe. Yahan se koi bhi purani save chun kar wapas layein. <b>Jab tak aap “Wapas lao” nahi dabate, kuch bhi badalta nahi</b>, aur har restore se pehle abhi ka data bhi history me save ho jaata hai (to aage wapas bhi ja sakte hain).</p>
       ${cloud
