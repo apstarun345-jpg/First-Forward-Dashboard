@@ -145,6 +145,7 @@ window.FF = window.FF || {};
             table.sheet = sheetName;
             lastLoadAt = Date.now();
             lastSource = source;
+            try { window.dispatchEvent(new CustomEvent('ff:data-loaded', { detail: { sheet: sheetName, source, at: lastLoadAt, cached: false } })); } catch { /* optional */ }
             return table;
           } catch (err) {
             lastErr = err;
@@ -162,6 +163,12 @@ window.FF = window.FF || {};
     promise.then(() => { entry.pending = false; }, () => { entry.pending = false; });
     promise.catch(() => { if (cache.get(key) && cache.get(key).promise === promise) cache.delete(key); });
     return promise;
+  }
+
+  function status() {
+    let pending = 0;
+    cache.forEach((v) => { if (v && v.pending) pending++; });
+    return { lastLoadAt, lastSource, cacheEntries: cache.size, pending };
   }
 
   function clearCache() {
