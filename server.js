@@ -1119,9 +1119,19 @@ async function resolveGvServerColumns(settings, force) {
       }
       return '';
     };
-    const cols = { date: pick('date') || fallback.date, cls: pick('cls') || fallback.cls, tagId: pick('tagId') || fallback.tagId, status: pick('status') || fallback.status, tagType: pick('tagType') || fallback.tagType };
-    gvServerHeaderCache.set(cacheKey, { at: Date.now(), cols });
-    return { ...fallback, ...cols, via: 'header' };
+    // Confirmed production mapping wins over fuzzy header detection.
+    // GV Master: A=UNIQUE_ID, C=TL ID, D=TL Name, G=CCH/class, I=TAG_ID, P=Date, N=status, U=Tag Type.
+    // Header detection remains the fallback for future column shifts only when a setting is blank.
+    const cols = {
+      date: cfg.date || pick('date') || fallback.date,
+      cls: cfg.cch || cfg.vClass || pick('cls') || fallback.cls,
+      tagId: cfg.tagId || pick('tagId') || fallback.tagId,
+      status: cfg.status || pick('status') || fallback.status,
+      tagType: cfg.tagType || pick('tagType') || fallback.tagType
+    };
+    const via = (cfg.date && (cfg.cch || cfg.vClass) && cfg.tagId) ? 'config' : 'header';
+    gvServerHeaderCache.set(cacheKey, { at: Date.now(), cols, via });
+    return { ...fallback, ...cols, via };
   } catch (err) {
     // Header probe optional: live feed should still work on the configured mapping.
     return { ...fallback, via: 'config', warning: err.message };
@@ -1198,53 +1208,3 @@ async function reportSnapshot(source) {
     if (isGv !== gvRow) continue;
     rows.push({ date, cls: classBucket(serverCell(row, 1)), n: serverNumber(serverCell(row, 3)) });
   }
-  // The query already returns recent dates, not just the latest one. Keep a compact date → total
-  // history for MTD digests while the watcher continues to expose the latest snapshot for deltas.
-  const grouped = {};
-  rows.forEach((r) => {
-    if (!grouped[r.date]) grouped[r.date] = { classes: {} };
-    grouped[r.date].classes[r.cls] = (grouped[r.date].classes[r.cls] || 0) + r.n;
-  });
-  let history = {};
-  Object.entries(grouped).forEach(([d, value]) => { history[d] = Object.values(value.classes).reduce((a, b) => a + b, 0); });
-  // A second, date-only aggregate avoids the old date × class × master row ceiling. It uses the
-  // exact same EIR channel predicate, so notification MTD totals cannot drift from latest-day data.
-  try {
-    const historyTq = `select ${dateCol}, count(${tagCol}) where ${baseWhere} group by ${dateCol} order by ${dateCol} desc limit 400`;
-    const hparams = new URLSearchParams({ id: String(sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet, tq: historyTq });
-    const hout = await fetchUpstream(upstreamUrl(hparams));
-    if (hout.status >= 200 && hout.status < 300) {
-      const htable = parseGvizServer(hout.body);
-      const parsed = {};
-      for (const row of htable.rows || []) {
-        const dateKey = serverDate(serverCell(row, 0));
-        if (dateKey) parsed[dateKey] = serverNumber(serverCell(row, Math.max(1, (row.c || []).length - 1)));
-      }
-      if (Object.keys(parsed).length && rows.length) history = parsed;
-    }
-  } catch (err) { /* optional date aggregate — grouped fallback is still valid */ }
-  const date = Object.keys(grouped).sort().pop() || '';
-  const classes = date ? grouped[date].classes : {};
-  return { date, total: Object.values(classes).reduce((a, b) => a + b, 0), classes, history };
-}
-function snapshotDelta(prev, next) {
-  if (!prev || !prev.date || !next || !next.date) return null;
-  const keys = new Set([...Object.keys(prev.classes || {}), ...Object.keys(next.classes || {})]);
-  const classes = {};
-  for (const key of keys) { const d = (next.classes[key] || 0) - (prev.classes[key] || 0); if (d) classes[key] = d; }
-  const total = (next.total || 0) - (prev.total || 0);
-  // Class-wise corrections (total same, andar ka badlaav) bhi "changed" hain — warna backdated
-  // edits par koi notification nahi aata tha.
-  return { total, classes, changed: next.date !== prev.date || total !== 0 || Object.keys(classes).length > 0 };
-}
-function deltaText(delta) {
-  const pieces = Object.entries(delta.classes || {}).map(([k, v]) => `${k} ${v > 0 ? '+' : ''}${v}`);
-  return `${delta.total > 0 ? '+' : ''}${delta.total} tags${pieces.length ? ` · ${pieces.join(' · ')}` : ''}`;
-}
-// ---- 📲 Web Push (VAPID + aes128gcm, zero dependencies) -----------------------------------------
-// Admin ko har notification turant phone/desktop par mile — app band ho tab bhi.
-//
-// ⚠️ VAPID keys DURABLE honi chahiye. Ek browser subscription us applicationServerKey se bandhi hoti
-// hai jis key se wo bani thi — keypair badalte hi push service har message ko 403 se reject kar deta
-// hai aur phone ke notification panel me kuch nahi aata (in-app bell chalta rehta hai kyunki wo poll
-// karta hai). Render par DATA_DIR CONTAINER ki disk hai — har deploy / free-tier spin-down par mit
