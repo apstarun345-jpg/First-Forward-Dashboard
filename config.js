@@ -27,6 +27,7 @@ FF.config = {
   proxyPath: '/api/gviz',
   // ⚡ Chhota "aaj ka live" feed (GV = GV Master tab se, FF = EIR se) — Home ka pehla paint isse hota hai.
   todayPath: '/api/today',
+  gvTodayPath: '/api/gv-today',
   // Data only flows through the login-protected proxy (no direct browser→Google fallback), so access rules hold.
   directFallback: false,
   autoRefreshMs: 0,
@@ -106,6 +107,9 @@ FF.config = {
 
   // GV Partner sheet mapping (tab names + column letters / header row).
   // GV Master = issuance log, Tag Assignment = stock, GV REPORT = agent-wise performance.
+  // 🧭 Admin CCH → class mapping for GV Master.
+  // Empty lists keep existing VCLASS/CLASS fallback.
+  gvClassCch: { enabled: true, source: 'cch', groups: { VC4: [], VC20: [], VC5: [] } },
   gv: {
     master: {
       tab: 'GV Master', gid: '',
@@ -321,6 +325,7 @@ FF.config = {
     if (!s || typeof s !== 'object') return;
     const pick = (k) => { if (s[k] !== undefined && s[k] !== null) this[k] = s[k]; };
     ['appName', 'brand', 'tagline', 'logo', 'loginImage', 'loginAnimation', 'sheetId', 'gvSheetId', 'excludeTls', 'pageSize', 'allowSignup', 'directPlaceholderTls'].forEach(pick);
+    if (s.gvClassCch) this.gvClassCch = { ...this.gvClassCch, ...s.gvClassCch, groups: { ...(this.gvClassCch && this.gvClassCch.groups), ...(s.gvClassCch.groups || {}) } };
     if (s.direct) this.direct = { ...this.direct, ...s.direct };
     if (s.theme) this.theme = { ...this.theme, ...s.theme };
     if (s.thresholds) this.thresholds = { ...this.thresholds, ...s.thresholds };

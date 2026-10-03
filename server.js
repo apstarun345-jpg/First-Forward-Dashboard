@@ -187,6 +187,7 @@ const DEFAULT_SETTINGS = {
       gv: [{ min: 1, max: 50, rate: '' }, { min: 51, max: 100, rate: '' }, { min: 101, max: 150, rate: '' }, { min: 151, max: 250, rate: '' }, { min: 251, max: null, rate: '' }]
     }
   },
+  gvClassCch: { enabled: true, source: 'cch', groups: { VC4: [], VC20: [], VC5: [] } },
   gv: {
     master: { tab: 'GV Master', gid: '', uniqueId: 'A', agentName: 'B', tlId: 'C', tlName: 'D', vrn: 'E', vClass: 'F', cch: 'G', serial: 'H', tagId: 'I', amount: 'J', customer: 'K', productId: 'L', commission: 'M', status: 'N', commissionStatus: 'O', date: 'P', time: 'Q', gvTlId: 'R', masterCch: 'S', monthName: 'T', tagType: 'U', gvUniqueId: 'W', gvUniqueName: 'X' },
     assignment: { tab: 'Tag Assignment', gid: '', cls: 'A', tagId: 'B', serial: 'C', status: 'D', agentId: 'E', agentName: 'F', tlId: 'G', tlName: 'H', gvUniqueId: 'L', gvUniqueName: 'M', allocatedAt: '' },
@@ -833,7 +834,15 @@ function serverDate(value) {
 }
 function serverNumber(value) { const n = Number(value); return Number.isFinite(n) ? n : 0; }
 function classBucket(value) {
-  const c = String(value || '').toUpperCase().replace(/\s+/g, '');
+  const cfg = (db.settings && db.settings.gvClassCch) || {};
+  const token = String(value || '').toUpperCase().replace(/\s+/g, ' ').trim();
+  if (cfg.enabled !== false && token) {
+    const groups = cfg.groups || {};
+    for (const [group, values] of Object.entries(groups)) {
+      if (Array.isArray(values) && values.some((v) => String(v || '').toUpperCase().replace(/\s+/g, ' ').trim() === token)) return group === 'VC5' || group === 'VC5+' ? 'VC5+' : group;
+    }
+  }
+  const c = token.replace(/\s+/g, '');
   if (c === '4' || c === 'VC4') return 'VC4';
   if (c === '20' || c === 'VC20') return 'VC20';
   return 'VC5+';
@@ -5626,6 +5635,19 @@ async function handleApi(req, res, url) {
     }
     // 👤 GV personal commission — exact agent ID + class settings. Blank manual rate is allowed
     // (it keeps the row unresolved instead of silently changing the payout).
+    if (patch.gvClassCch !== undefined) {
+      const cfg = patch.gvClassCch;
+      if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) throw new HttpError(400, 'gvClassCch object hona chahiye.');
+      cfg.enabled = cfg.enabled !== false && cfg.enabled !== 'false'; cfg.source = 'cch';
+      if (!cfg.groups || typeof cfg.groups !== 'object' || Array.isArray(cfg.groups)) throw new HttpError(400, 'gvClassCch.groups object hona chahiye.');
+      const cleanedGroups = {};
+      for (const group of ['VC4', 'VC20', 'VC5']) {
+        const raw = cfg.groups[group] === undefined ? [] : cfg.groups[group];
+        const list = Array.isArray(raw) ? raw : String(raw || '').split(',');
+        cleanedGroups[group] = [...new Set(list.map((v) => String(v || '').trim().replace(/\s+/g, ' ')).filter(Boolean))].slice(0, 200);
+      }
+      cfg.groups = cleanedGroups;
+    }
     if (patch.gvCommissionRates !== undefined) {
       const allowed = ['VC4', 'VC20', 'VC5', 'VC6', 'VC7', 'VC12'];
       const cfg = patch.gvCommissionRates;

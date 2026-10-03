@@ -25,20 +25,31 @@ window.FF = window.FF || {};
   const roleOf = (kind) => (isTlKind(kind) ? 'TL' : 'Agent');
   const monthLabel = (ym) => { try { return U.labelYM(ym); } catch { return String(ym || ''); } };
 
-  /** Matched people → groups (ek naam = ek group). Har channel me TL kind agent kind par jeetta hai
-   *  (sheet me TL ki apni row \"agent\" ban kar aati hai — wo alag insaan nahi). */
+  /** Same-name FF/GV merge only when a real ID links both records. */
+  function identityIds(p) {
+    if (!p) return [];
+    return [...new Set([p.sub, ...(p.ids || []), ...(p.alias || [])].map((v) => U.clean(v).toUpperCase().replace(/\.0+$/, '').replace(/[^A-Z0-9]/g, '')).filter((v) => v && v.length >= 4))];
+  }
+  function identitiesLinked(a, b) {
+    const A = new Set(identityIds(a));
+    return A.size > 0 && identityIds(b).some((id) => A.has(id));
+  }
   function groupPeople(people) {
-    const map = new Map();
+    const groups = [];
     (people || []).forEach((p) => {
       if (!p || !MP() || !MP().supports(p)) return;
-      const key = normName(p.name);
-      if (!key) return;
-      const g = map.get(key) || { key, name: p.name, ff: null, gv: null };
-      const ch = chOf(p.kind);
-      if (!g[ch] || (isTlKind(p.kind) && !isTlKind(g[ch].kind))) g[ch] = p;
-      map.set(key, g);
+      const name = normName(p.name); if (!name) return;
+      const ch = chOf(p.kind), other = ch === 'ff' ? 'gv' : 'ff';
+      const sameChannel = groups.find((g) => g.name === name && g[ch]);
+      if (sameChannel) {
+        if (isTlKind(p.kind) && !isTlKind(sameChannel[ch].kind)) sameChannel[ch] = p;
+        return;
+      }
+      const linked = groups.find((g) => g.name === name && g[other] && identitiesLinked(p, g[other]));
+      if (linked) { linked[ch] = p; return; }
+      groups.push({ key: `${name}|${ch}|${identityIds(p)[0] || name}`, name: p.name, ff: ch === 'ff' ? p : null, gv: ch === 'gv' ? p : null });
     });
-    return [...map.values()];
+    return groups;
   }
   const groupKey = (g) => g.key;
   const channelsOf = (g) => ['ff', 'gv'].filter((c) => g[c]);

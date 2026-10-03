@@ -31,6 +31,17 @@ window.FF = window.FF || {};
     return 'VC5+';
   };
   const clsNum = (c) => parseInt(String(c).replace(/\D/g, ''), 10) || 999;
+  const cchToken = (v) => U.clean(v).toUpperCase().replace(/\s+/g, ' ').trim();
+  function configuredGroup(cch, fallbackClass) {
+    const cfg = FF.config.gvClassCch || {};
+    if (cfg.enabled !== false) {
+      const token = cchToken(cch), groups = cfg.groups || {};
+      if (token) for (const [group, values] of Object.entries(groups)) {
+        if (Array.isArray(values) && values.some((v) => cchToken(v) === token)) return group === 'VC5' || group === 'VC5+' ? 'VC5+' : group;
+      }
+    }
+    return classGroup(fallbackClass || cch);
+  }
   const isHeaderRow = (row) => row.some((v) => /^(AGENT_ID|UNIQUE_ID|TAG_ID|VEHICLE_CLASS)$/i.test(U.clean(v)));
 
   // ---- 🧭 Header-aware column mapping (v3.45) ------------------------------------------------------
@@ -350,8 +361,11 @@ window.FF = window.FF || {};
       const agentId = U.clean(get('uniqueId'));
       if (!agentId || /^unique_id$/i.test(agentId)) continue;
       const date = D.cellDate(r[map.idx.date]);
-      const rawCls = get('cch') || get('vClass');
+      const rawCch = get('cch');
+      const rawVClass = get('vClass');
+      const rawCls = rawCch || rawVClass;
       const cls = normClass(rawCls);
+      const group = configuredGroup(rawCch, rawVClass || rawCch);
       const commissionRaw = get('commission');
       // GV Master me C (supervisor_agent_id) aur R (GV TL ID) dono hote hain.
       // C ko crosswalk/audit ke liye rakho; calculation aur attribution ke liye sirf R.
@@ -372,7 +386,8 @@ window.FF = window.FF || {};
         // 🧍 GV direct rule: TL ID + TL Name dono khaali (ya agent hi apna supervisor) → direct agent.
         directAgent: FF.config.isDirectAgent({ agentId, agentName, tlId, supervisorId, gvTlId, tlName: rawTlName, channel: 'GV Partner' }, 'gv'),
         channel: 'GV Partner',
-        cls, group: classGroup(cls),
+        cch: U.clean(rawCch),
+        cls, group,
         status: U.clean(get('status')) || 'Issuance',
         tagType: U.clean(get('tagType')) || 'Other',
         tagId: U.clean(get('tagId')), vrn: U.clean(get('vrn')), serial: U.clean(get('serial')),

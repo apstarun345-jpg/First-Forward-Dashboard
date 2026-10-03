@@ -15,11 +15,15 @@ test('GV Master truth mapping stays authoritative', () => {
 
   assert.match(gv, /const tlId = gvTlId \|\| supervisorId/);
   assert.match(gv, /masterTlIds/);
+  assert.match(gv, /configuredGroup/);
   assert.match(truth, /r\.tlId, r\.supervisorId, r\.gvTlId/);
   assert.match(profile, /A=UNIQUE_ID/);
   assert.match(profile, /GV Master is authoritative for GV agent issuance/);
   assert.match(profile, /Tag Assignment is authoritative for stock/);
   assert.match(search, /Exact agent\/TL ID match wins/);
+  assert.match(search, /suppressFalseFfMatches/);
+  assert.match(search, /lightSoftMs: 1500/);
+  assert.match(read('searchReport.js'), /Same-name FF\/GV merge only when a real ID links both records/);
   assert.match(server, /function gvMasterRawTodayFallback/);
   assert.match(server, /async function gvTodayFeed/);
   assert.match(server, /\/api\/gv-today/);
