@@ -5,6 +5,8 @@
  * tab "APP_STORAGE" of the spreadsheet this script is attached to. Data arrives ALREADY ENCRYPTED
  * by the dashboard server, so the cells only contain unreadable text. Do not edit that tab by hand.
  *
+ * v3.28 — encrypted APP_STORAGE history backup added. Before any users/settings/sessions/reset/notify record is overwritten, the previous encrypted record is copied to APP_STORAGE_HISTORY. This never decrypts or exposes passwords.
+ *
  * v3.27 — tag requests ab kisi BHI Google Sheet me ja sakti hain: dashboard sheet ka link/ID bhejta
  * hai aur ye script SpreadsheetApp.openById() se usi sheet me rows append karta hai (us sheet par
  * is Google account ka edit access hona chahiye). Purane deployments me sirf 'ping'/'appendrows'
@@ -28,6 +30,8 @@ const SECRET = 'PASTE_A_LONG_RANDOM_SECRET_HERE';
 const TAB = 'APP_STORAGE';
 const CHUNK = 45000; // a Google Sheets cell holds max 50,000 characters
 const KINDS = ['users', 'sessions', 'settings', 'resets', 'notify'];
+const HISTORY_TAB = 'APP_STORAGE_HISTORY';
+const HISTORY_MAX_ROWS = 2000;
 
 /** Run this ONCE from the Apps Script editor (▶ Run) to grant the "send email" permission. */
 function authorizeMail() { Logger.log('Mail quota left today: ' + MailApp.getRemainingDailyQuota()); }
@@ -173,6 +177,42 @@ function readAll_(sh) {
   return out;
 }
 
+function historySheet_(ss) {
+  let h = ss.getSheetByName(HISTORY_TAB);
+  if (!h) {
+    h = ss.insertSheet(HISTORY_TAB);
+    h.getRange(1, 1, 1, 5).setValues([['savedAt', 'kind', 'version', 'chunks', 'encryptedDataChunks']]);
+    try { h.hideSheet(); } catch (e) { /* cosmetic */ }
+  }
+  return h;
+}
+
+/**
+ * Keep the previous encrypted record before it is replaced.
+ * IMPORTANT: this copies ciphertext only. It never decrypts passwords/settings.
+ */
+function backupPreviousRecord_(sh, rowIndex, kind) {
+  if (rowIndex < 2) return;
+  const lastCol = sh.getLastColumn();
+  if (lastCol < 5) return;
+  const row = sh.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
+  if (String(row[0] || '') !== kind) return;
+  const chunkCount = Number(row[3]) || 0;
+  if (!chunkCount) return;
+  const h = historySheet_(sh.getParent());
+  const chunks = row.slice(4, 4 + chunkCount);
+  const next = h.getLastRow() + 1;
+  h.getRange(next, 1, 1, 4 + chunks.length).setValues([[
+    new Date().toISOString(),
+    String(row[0] || ''),
+    String(row[1] || ''),
+    String(row[3] || ''),
+  ].concat(chunks)]);
+  // Keep the history bounded so this protection cannot grow forever.
+  const excess = h.getLastRow() - HISTORY_MAX_ROWS;
+  if (excess > 0) h.deleteRows(2, excess);
+}
+
 function writeRecord_(sh, kind, record) {
   if (!record || typeof record.data !== 'string') throw new Error('bad record for ' + kind);
   const chunks = [];
@@ -187,6 +227,8 @@ function writeRecord_(sh, kind, record) {
     for (let i = 0; i < kinds.length; i++) if (String(kinds[i][0]) === kind) { rowIndex = i + 2; break; }
   }
   if (rowIndex < 0) rowIndex = Math.max(2, lastRow + 1);
+  // Preserve the existing encrypted record BEFORE clearing/replacing it.
+  backupPreviousRecord_(sh, rowIndex, kind);
   const lastCol = Math.max(sh.getLastColumn(), width);
   sh.getRange(rowIndex, 1, 1, lastCol).clearContent();
   const range = sh.getRange(rowIndex, 1, 1, width);
