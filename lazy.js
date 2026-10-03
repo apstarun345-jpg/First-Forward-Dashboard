@@ -27,6 +27,7 @@ window.FF = window.FF || {};
 
   // Page id → uske liye zaroori modules (order matter karta hai: dependency pehle).
   const GROUPS = {
+    controlTower: ['controlTower'],
     executive: ['insights', 'cockpit'],
     tagRequest: ['pdf', 'tagRequest'],
     masterSearch: ['gvTruth', 'masterProfile', 'masterSearch'],
