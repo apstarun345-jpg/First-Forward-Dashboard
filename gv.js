@@ -869,7 +869,7 @@ window.FF = window.FF || {};
         type: replacement ? 'REPLACEMENT' : 'ISSUANCE', status: r.status,
         tagType: r.tagType, vrnType: r.tagType || '',
         channel: 'GV Partner',
-        agentId: r.agentId || '', agentName: r.agentName || '', tlId: r.gvTlId || '', gvTlId: r.gvTlId || '', tlName: r.tlName || '',
+        agentId: r.agentId || '', agentName: r.agentName || '', tlId: r.tlId || r.supervisorId || r.gvTlId || '', supervisorId: r.supervisorId || '', gvTlId: r.gvTlId || '', tlName: r.tlName || '',
         tagId: r.tagId || '', serial: r.serial || '', vrn: r.vrn || '',
         customer: r.customer || '', amount: Number(r.amount) || 0, commission: Number(r.commission) || 0,
         live: true, source: 'gv-master', n: 1
@@ -1097,20 +1097,12 @@ window.FF = window.FF || {};
     else if (dailyRowsForYm.length) dailyRowsForYm.forEach((r) => put(r, Number(r.n) || 1, r.group, r.type));
     else eirAgents().filter((r) => r.channel === 'GV Partner' && (!ym || r.ym === ym)).forEach((r) => put({ ...r, agentName: r.name, group: 'VC5+' }, Number(r.n) || 0, 'VC5+', 'ISSUANCE'));
 
-    // Ensure any agent present in liveDailyRows (e.g. today's GV Master rows or daily rows not in monthly class) is included
-    if (usableClasses.length && dailyRowsForYm.length) {
-      const byDayAgent = new Map();
-      for (const r of dailyRowsForYm) {
-        const res = lk.resolve(r.agentId, r.agentName, r.tlId, r.tlName);
-        const k = (res.agentId || res.agentName).toUpperCase();
-        if (!k) continue;
-        const list = byDayAgent.get(k) || [];
-        list.push(r);
-        byDayAgent.set(k, list);
-      }
-      for (const [k, rs] of byDayAgent.entries()) {
-        if (!map.has(k)) rs.forEach((r) => put(r, Number(r.n) || 1, r.group, r.type));
-      }
+    // 🔴 AAJ LIVE: EIR monthly rollup usually covers yesterday/T+1 only. Merge GV Master
+    // today's rows even when the agent already exists in the EIR monthly map, otherwise Home/GV
+    // Performance/TL rollups silently miss today's issuance for existing agents.
+    const liveTodayRows = dailyRowsForYm.filter((r) => r.key === todayKey());
+    if (liveTodayRows.length) {
+      liveTodayRows.forEach((r) => put(r, Number(r.n) || 1, r.group, r.type));
     }
 
     // Fallback/enrich from GV REPORT Last Month (e.g. September 2026-09) when viewing previous month
