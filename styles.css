@@ -5024,3 +5024,16 @@ html[data-theme="dark"] .hm-toprow .rank { background: #1e293b; color: #a5b4fc; 
 .app-footer-dev{font-weight:750;color:var(--ink)}.app-footer-spacer{flex:1}.app-footer-status{font-weight:700;white-space:nowrap}.app-footer-sep{opacity:.45}
 @media(max-width:700px){.app-footer{justify-content:center;text-align:center;padding:9px 12px;gap:5px}.app-footer-spacer{display:none}.app-footer-status{width:100%}.app-footer-sep{display:none}}
 .auth-foot{line-height:1.55}
+
+/* Product identity footer */
+.site-footer{margin-left:var(--sidebar-w);padding:14px 22px 18px;border-top:1px solid var(--line);background:var(--card);display:flex;align-items:center;justify-content:center;gap:8px 18px;flex-wrap:wrap;color:var(--muted);font-size:11px}
+.site-footer-main{font-weight:800;color:var(--ink)}
+.site-footer-dev b{color:var(--brand);font-weight:800}
+.site-footer-meta{display:inline-flex;align-items:center;gap:7px;font-size:10.5px}
+#site-footer-status{color:var(--green);font-weight:700}
+.auth-brand-footer{display:flex;flex-direction:column;align-items:center;gap:4px;text-align:center;margin-top:14px;padding-top:12px;border-top:1px solid var(--line);line-height:1.35}
+.auth-brand-footer b{color:var(--brand)}
+.auth-brand-footer small{color:var(--muted);font-size:10.5px}
+html[data-theme="dark"] .site-footer{background:#0b1220;border-color:#1e293b}
+html[data-theme="dark"] .site-footer-main{color:#e5e7eb}
+@media(max-width:768px){.site-footer{margin-left:0;padding:12px 14px 84px;text-align:center}.site-footer-main,.site-footer-dev,.site-footer-meta{width:100%}.site-footer-meta{justify-content:center}.auth-brand-footer{margin-top:10px}}
