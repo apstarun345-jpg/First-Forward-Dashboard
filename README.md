@@ -1,4 +1,4 @@
-# First Forward Dashboard — First Forward + GV Partner (v3.44)
+# First Forward Dashboard — First Forward + GV Partner (v3.45)
 
 Colourful dashboard website built directly on top of **do Google Sheets**:
 
@@ -13,6 +13,24 @@ aur ek **⚖️ GV vs First Forward** page side-by-side comparison deta hai.
 Koi database nahi, koi manual upload nahi — website Google Sheet se data padhti hai
 (Google Visualization API / `gviz`) through a small Node server that also handles **login, users,
 permissions and settings**. Zero npm dependencies.
+
+## ✨ v3.45.0 — 🧾 GV sheets ka sahi column recognition + 🎨 Agent/TL Summary ka naya interface
+
+- **🧭 Heading-aware column mapping (GV Master · Tag Assignment · GV REPORT):** ab config letters par
+  andha bharosa nahi — heading row padh kar sahi column chuna jaata hai (typo/abbreviation tolerant),
+  column shift hone par **relocate** hota hai, aur kabhi gviz heading ki jagah data row de de to
+  re-probe → warna config letters (chup-chaap galat number band). Warnings **Settings → 🗂️ Sheets & tabs →
+  🧭 GV column heading check** me dikhti hain.
+- **📦 Stock = Tag Assignment ke in-stock tags:** status-aware (issued/returned stock me nahi, par
+  `nAll` + `byStatus` se poora hisaab).
+- **🎨 Agent/TL Summary v2 (GV + FF):** gradient hero, **clickable KPI cards** (har card par sheet ka
+  cross-check chip + farq), **tag-level drill drawer** (VRN barcode · TAG_ID · serial · date · class ·
+  status, CSV ke saath), "🧭 Ye numbers kahan se aaye" source cards, 🧮 Sheet-vs-Ledger table,
+  class-wise bars, 6-mahine trend, TL agents table, ageing aur 🔍 Data check panel.
+- **Truth rule (GV Summary):** final = **GV Master ledger** (tag rows), GV REPORT = cross-check
+  (farq har jagah likha aata hai). Baaki GV views me sheet-first barkarar + farq ka note.
+- Tests: naya `dev/gv-truth.test.js` (9) + smoke **v3.45 · Agent/TL Summary v2** · `npm test` **437 pass** ·
+  docs: [WHATS-NEW-v3.45.0.md](WHATS-NEW-v3.45.0.md).
 
 ## ✨ v3.44.0 — 🧾 GV REPORT sheet-first — TL ka "440" band · VC4 · VC20 · VC5+ · TL ID-wise stock
 
