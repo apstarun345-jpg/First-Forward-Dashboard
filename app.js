@@ -8,6 +8,7 @@ window.FF = window.FF || {};
 
   const PAGES = [
     { id: 'home', icon: '🏠', label: 'Home', desc: 'Highlights · GV & FF charts', perm: 'home', group: 'Management' },
+    { id: 'controlTower', icon: '🎛️', label: 'Operations Control Tower', desc: 'Live action center · changes · snapshots · GV today', perm: 'controlTower', group: 'Management', adminOnly: true },
     { id: 'executive', icon: '🧭', label: 'Executive Cockpit', desc: 'Management KPIs · outlook · exceptions', perm: 'executive', group: 'Management' },
     { id: 'tagIssued', icon: '🏷️', label: 'GV & FF Tag Issued', desc: 'Date-wise detailed issuance · VC4 vs Commercial', perm: 'tagIssued', group: 'Management' },
     { id: 'targets', icon: '🎯', label: 'Agent Targets', desc: 'Shortlist · target · progress · Excel', perm: 'targets', group: 'Management' },
