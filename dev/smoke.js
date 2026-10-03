@@ -252,19 +252,33 @@ await run('gv aggregations + people', async () => {
   if (!series.totals.some((n) => n > 0)) throw new Error('dailySeries empty');
   log(`      months ${months.join(', ')} · latest ${FF.util.ymKey(FF.gv.latestDate())} total ${s.total} · week buckets ${weekly.length} · agents ${agents.length} · tls ${tls.length} · people ${ppl.agents.length}/${ppl.tls.length}`);
 });
-await run('page home', async () => {
-  const r = root(); await pages.home.render(r, {}, {}); await settle(150);
+await run('page home — GV aaj live + month KPI + charts + stock (master search hata hua)', async () => {
+  const r = root(); await pages.home.render(r, {}, {}); await settle(500);
   const all = [r.innerHTML, ...REG.values().map((e) => e.innerHTML), ...body.children.map((c) => c.innerHTML)].join('\n');
-  // Champions card is mahine ke EIR rollup se — mahine ki 1 tareekh ko (FF T+1, GV EIR kal tak) abhi koi champion nahi hota
-  const ym = FF.util.ymKey(new Date());
-  const hasMonthData = (FF.store.get('agents') || []).some((a) => a.ym === ym) || (FF.gv.agentRollup ? FF.gv.agentRollup(ym).length > 0 : false);
-  if (!/Champions of/.test(all) && hasMonthData) throw new Error('gamification champions card missing from home');
+  // ❌ Home par master search nahi (ab Management → 🔎 Master Search page hai)
+  if (/home-master-input|home-master-search/.test(all)) throw new Error('home par purana master search abhi bhi render ho raha hai');
+  for (const mount of ['id="home-gv-live"', 'id="home-month"', 'id="home-charts"', 'id="home-stock"']) {
+    if (!all.includes(mount)) throw new Error(`home section missing: ${mount}`);
+  }
+  for (const label of ['GV · Aaj ka live', 'Expected Today', 'Last day ·', 'total (MTD)', 'Expected in ', 'KPI cards',
+    'First Forward · Stock in field', 'GV Partner · Stock in field', 'Stock split', 'Month-to-date · last vs current']) {
+    if (!all.includes(label)) throw new Error(`home me "${label}" nahi mila`);
+  }
+  if (!/pct-inline (pos|neg|flat)/.test(all)) throw new Error('month KPI cards me last-month % chip nahi mila');
+  if (process.env.HOME_DUMP) log('      HOME >>> ' + r.innerHTML.replace(/\s+/g, ' ').slice(0, Number(process.env.HOME_DUMP) || 4000));
 }, true);
-await run('v3.11 · Home me master search panel + "Aaj ka din" memories', async () => {
-  const r = root(); await pages.home.render(r, {}, {}); await settle(400);
+await run('🔎 v3.46 · Management → Master Search page (naam → poora data, koi list/box nahi)', async () => {
+  if (!FF.pages.masterSearch || typeof FF.pages.masterSearch.render !== 'function') throw new Error('FF.pages.masterSearch register nahi hua');
+  if (typeof FF.masterSearch.openSearchPage !== 'function') throw new Error('FF.masterSearch.openSearchPage export missing');
+  const list = pages.performance.agents();
+  const probe = (list[0] || {}).name || '';
+  if (!probe) throw new Error('probe agent nahi mila');
+  const r = root(); await pages.masterSearch.render(r, { q: probe.split(' ')[0] }, {}); await settle(700);
   const html = [r.innerHTML, ...REG.values().map((e) => e.innerHTML)].join('\n');
-  if (!/home-master-search|Master Search/.test(html)) throw new Error('home par master search panel nahi mila');
-  if (!/home-master-input|Master Search/.test(html)) throw new Error('home search input missing');
+  for (const label of ['Master Search', 'msp-report', '🟩 GV']) { if (!html.includes(label)) throw new Error(`Master Search page me "${label}" nahi mila`); }
+  if (!/sr-combined|sr-tab|mp-kpis/.test(html)) throw new Error('Master Search page me poora report render nahi hua');
+  if (/ms-panel/.test(html)) throw new Error('purana results panel (list/box) khul gaya');
+  log(`      master search page html ${html.length} chars ok`);
 }, true);
 await run('page gvDashboard', () => pages.gvDashboard.render(root(), {}, {}), true);
 await run('gvDashboard 4-way + suggested dispatch card', async () => {
@@ -532,7 +546,7 @@ await run('v3.11 · War Room detailed breakdown (VC4/VC20/VC5+ · chassis · rep
 await run('v3.16 · Home GV aaj KPI cards (VC4/VC20/VC5+/Chassis/Replacement + Expected Today)', async () => {
   const r = root(); await pages.home.render(r, {}, {}); await settle(250);
   const html = [r.innerHTML, ...REG.values().map((e) => e.innerHTML), ...body.children.map((c) => c.innerHTML)].join('\n');
-  for (const label of ['GV · Aaj ka live', 'Aaj Total', 'VC4 tags', 'VC20 tags', 'VC5+ tags', 'Chassis tags', 'Replacement tags', 'Expected Today', 'Aaj ki Rate', 'home-morning-card']) {
+  for (const label of ['GV · Aaj ka live', 'Aaj Total', 'VC4', 'VC20', 'VC5+', 'Chassis', 'Replacement', 'Expected Today', 'home-morning-card']) {
     if (!html.includes(label)) throw new Error(`Home GV aaj section me "${label}" nahi mila`);
   }
   // spec attribute me & HTML-escape hota hai (&amp;) — browser dataset par wapas & ban jata hai
@@ -696,6 +710,23 @@ await run('v3.45 · Agent/TL Summary v2 (FF + GV) — colourful KPI + sources + 
   const w = FF.gvTruth.health();
   if (!w.loaded.ledger) throw new Error('GV Master rows load nahi hui');
   log(`      GV truth: ${who.name} · ${truth.ledger.cur.total} MTD · ${truth.ledger.last.total} last · ${truth.stock.total} stock · drill ${d.rows.length} rows`);
+}, true);
+await run('🧑‍💼 v3.46 · Agent/TL Summary — GV TL search: last · current · today + stock (fast open)', async () => {
+  const tls = FF.gvTruth.people().filter((p) => p.kind === 'gv-tl' && (p.cur + p.stock) > 0);
+  const tl = tls[0];
+  if (!tl) throw new Error('GV TL nahi mila');
+  const t0 = Date.now();
+  const r = root();
+  await FF.pages.gvAgentSummary.render(r, { name: tl.name }, {});
+  const firstPaint = Date.now() - t0;
+  await settle(400);
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const label of ['Last month', 'Today issued', 'Stock in hand', 'Issuance ·']) {
+    if (!html.includes(label)) throw new Error(`GV TL summary me "${label}" nahi mila`);
+  }
+  if (!html.includes(tl.name)) throw new Error('GV TL summary me TL ka naam nahi mila (search nahi laga)');
+  if (firstPaint > 6000) throw new Error(`GV TL summary slow khula (${firstPaint}ms)`);
+  log(`      GV TL summary "${tl.name}" first paint ${firstPaint}ms · mtd ${tl.cur} · stock ${tl.stock}`);
 }, true);
 await run('T-1 basis · growth % + suggested dispatch (master search + performance drawer)', async () => {
   const list = pages.performance.agents();
@@ -1452,11 +1483,11 @@ await run('🧭 Removed workspace filter UI + GV live and FF T+1 behavior', asyn
   // URL-level today view → FF aaj 0 + "kal aayega" note, GV live; no saved workspace UI.
   const r1 = root(); await pages.home.render(r1, {}, {}); await settle(500);
   const h1 = htmlOf(r1);
-  if (!/kal aayega/.test(h1)) throw new Error('today view me "FF kal aayega" note nahi mila');
-  if (!/GV aaj \((GV Master · )?live\)/.test(h1.replace(/[▲▼]/g, ''))) throw new Error('today view me GV live chip nahi mila');
+  if (!/T\+1|kal aata hai/.test(h1)) throw new Error('today view me "FF T+1 / kal aata hai" note nahi mila');
+  if (!/GV aaj · GV Master \(live\)/.test(h1.replace(/[▲▼]/g, ''))) throw new Error('today view me GV live chip nahi mila');
   if (/home-filter-banner|Workspace filters|Saved workspace filters/i.test(h1)) throw new Error('removed workspace filter UI is still rendered');
-  // 2) channel=gv → FF chips 0, GV number > 0 (mock me GV data hai)
-  if (!/🟦 FF MTD[^<]*<b>0<\/b>/.test(h1) && !/FF issuance T\+1/.test(h1)) throw new Error('Home view me FF T+1 state nahi mili');
+  // 2) FF ka aaj 0 (T+1) — GV live number > 0 (mock me GV data hai)
+  if (!/🟦 FF <b>0<\/b>/.test(h1) && !/FF ka issuance T\+1/.test(h1)) throw new Error('Home view me FF T+1 state nahi mili');
 });
 
 await run('logout', async () => { await FF.auth.api('/api/auth/logout', 'POST', {}); });

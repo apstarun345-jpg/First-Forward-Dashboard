@@ -247,13 +247,13 @@ window.FF = window.FF || {};
       const res = MS.search(val);
       (res.tags || []).slice(0, 4).forEach((t) => {
         const f = t.ff[0] || {}, g = t.gv[0] || {};
-        out.push({ group: '🔎 Master search', icon: '🏷️', label: t.key, sub: [f.agentName ? `FF ${f.agentName}` : '', g.agentName ? `GV ${g.agentName}` : '', f.cls || g.cls || ''].filter(Boolean).join(' · ') || 'barcode / tag', master: t.key });
+        out.push({ group: '🔎 Master search', icon: '🏷️', label: t.key, sub: [f.agentName ? `FF ${f.agentName}` : '', g.agentName ? `GV ${g.agentName}` : '', f.cls || g.cls || ''].filter(Boolean).join(' · ') || 'barcode / tag', master: t.key, masterKind: 'barcode' });
       });
-      (res.ids || []).slice(0, 3).forEach((v) => out.push({ group: '🔎 Master search', icon: '🆔', label: v.id, sub: `${v.name || ''}${v.tl ? ` · TL ${v.tl}` : ''}`.trim(), master: v.id }));
+      (res.ids || []).slice(0, 3).forEach((v) => out.push({ group: '🔎 Master search', icon: '🆔', label: v.id, sub: `${v.name || ''}${v.tl ? ` · TL ${v.tl}` : ''}`.trim(), master: v.id, masterKind: 'id' }));
       const people = (res.people || []).slice(0, 3);
-      people.forEach((person) => out.push({ group: '🔎 Master search', icon: '🧑‍💼', label: person.name, sub: `${[...person.tlSet].slice(0, 1).join('') || 'Direct'} · kundli + tags kholo`, master: person.name }));
+      people.forEach((person) => out.push({ group: '🔎 Master search', icon: '🧑‍💼', label: person.name, sub: `${[...person.tlSet].slice(0, 1).join('') || 'Direct'} · kundli + tags kholo`, master: person.name, masterKind: 'person' }));
       // Always offer the full-search escape hatch
-      out.push({ group: '🔎 Master search', icon: '🔎', label: `“${val}” ki poori kundli kholo`, sub: 'Barcode · tag ID · agent · TL · GV ID — sab sections ek panel me', master: val });
+      out.push({ group: '🔎 Master search', icon: '🔎', label: `“${val}” ki poori kundli kholo`, sub: 'Naam / ID → seedha poora data (issuance · stock · class-wise)', master: val, masterKind: 'any' });
     } catch { /* master search optional */ }
     return out.slice(0, 8);
   }
@@ -288,7 +288,14 @@ window.FF = window.FF || {};
     if (it.calc !== undefined && it.calc !== null) { U.copyText(String(it.calc)).then(() => U.toast(`Copied: ${it.calc}`, 'ok')).catch(() => {}); return; }
     if (it.answer) { U.copyText(String(it.answer)).then(() => U.toast('📋 Jawab copy ho gaya', 'ok')).catch(() => {}); return; }
     if (it.notif) { if (FF.liveView && FF.liveView.openNotification) FF.liveView.openNotification(it.notif); return; }
-    if (it.master !== undefined) { if (FF.masterSearch) FF.masterSearch.openPanel(it.master); return; }
+    if (it.master !== undefined) {
+      if (!FF.masterSearch) return;
+      // 🏷️ barcode = tag-level rows panel; naam / ID = seedha Management → Master Search page (poora data).
+      if (it.masterKind === 'barcode' && FF.masterSearch.openPanel) FF.masterSearch.openPanel(it.master);
+      else if (FF.masterSearch.openSearchPage) FF.masterSearch.openSearchPage(it.master);
+      else if (FF.masterSearch.openPanel) FF.masterSearch.openPanel(it.master);
+      return;
+    }
     if (it.command) {
       if (it.command === 'focus') { const on = FF.app && FF.app.focusMode ? FF.app.focusMode() : false; U.toast(on ? '🎯 Focus mode ON' : 'Focus mode OFF', 'ok'); }
       else if (it.command === 'a11y') { if (FF.app && FF.app.openAccessibility) FF.app.openAccessibility(); }

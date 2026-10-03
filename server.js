@@ -73,6 +73,7 @@ export const PAGE_PERMISSIONS = [
   { key: 'followups', label: 'Workspace · Agent/TL notes & follow-ups', group: 'Professional Insights' },
   { key: 'tagIssued', label: 'GV & FF Tag Issued (date-wise)', group: 'Pages' },
   { key: 'tagRequest', label: 'Management · Tag Request (IDFC agents · class-wise stock/tag request form)', group: 'Management' },
+  { key: 'masterSearch', label: 'Management · Master Search (GV + FF naam/ID → seedha poora profile)', group: 'Management' },
   { key: 'targets', label: 'Targets · agent-wise monthly targets', group: 'Pages' },
   { key: 'dashboard', label: 'First Forward · Dashboard', group: 'First Forward' },
   { key: 'trend', label: 'First Forward · Trend', group: 'First Forward' },
@@ -138,7 +139,7 @@ const allPermKeys = (settings) => permissionsFor(settings).map((p) => p.key);
 const allPermKeysNow = () => allPermKeys(db.settings);
 // Back-compat export (some tooling imported PERMISSIONS).
 export const PERMISSIONS = permissionsFor({ tabs: DEFAULT_TABS });
-const DEFAULT_USER_PERMS = ['home', 'executive', 'forecast', 'dataQuality', 'savedViews', 'reportStudio', 'followups', 'tagIssued', 'rangeReport', 'targets', 'dashboard', 'trend', 'stock', 'stockReport', 'performance', 'ffCommission', 'gvDashboard', 'gvTrend', 'gvStock', 'gvStockReport', 'gvPerformance', 'gvCommission', 'dualChannel', 'masterStock', 'compare', 'tv', 'teamMap',
+const DEFAULT_USER_PERMS = ['home', 'executive', 'forecast', 'dataQuality', 'savedViews', 'reportStudio', 'followups', 'tagIssued', 'rangeReport', 'masterSearch', 'targets', 'dashboard', 'trend', 'stock', 'stockReport', 'performance', 'ffCommission', 'gvDashboard', 'gvTrend', 'gvStock', 'gvStockReport', 'gvPerformance', 'gvCommission', 'dualChannel', 'masterStock', 'compare', 'tv', 'teamMap',
   'sheet:StockDataa', 'sheet:REPORT', 'sheet:GV Master', 'sheet:Tag Assignment', 'sheet:GV REPORT', 'charts', 'export', 'dispatchPlan', 'tlScorecard', 'voiceAssistant', 'arena', 'fame', 'warRoom', 'activity', 'network', 'radar', 'reportCards', 'directAgents', 'newAgents', 'unusual', 'fastagChampions', 'ffAgentSummary', 'gvAgentSummary', 'agentSummary', 'sprints', 'stockRadar'];
 
 // Admin-controlled audience for automated notifications. `users` means all approved non-admin
@@ -790,11 +791,34 @@ function serverCell(row, index) {
   const cell = row && row.c && row.c[index];
   return cell && cell.v !== null && cell.v !== undefined ? String(cell.v) : '';
 }
+const SERVER_MONTHS = { JAN: 1, FEB: 2, MAR: 3, APR: 4, MAY: 5, JUN: 6, JUL: 7, AUG: 8, SEP: 9, SEPT: 9, OCT: 10, NOV: 11, DEC: 12 };
+/** Sheet ke date cell → 'yyyy-mm-dd'. gviz ka Date(y,m,d), ISO, dd-mm-yyyy (Indian), dd-Mon-yyyy,
+ *  Mon dd, yyyy — sab chalta hai (client ke U.parseDate jaisa hi tolerant, warna server feed aur
+ *  client ke numbers alag-alag aa jaate the — "GV aaj live nahi dikh raha" ka ek bada reason). */
 function serverDate(value) {
-  const m = String(value || '').match(/^Date\((\d{4}),(\d{1,2}),(\d{1,2})/);
-  if (m) return `${m[1]}-${String(+m[2] + 1).padStart(2, '0')}-${String(+m[3]).padStart(2, '0')}`;
-  const iso = String(value || '').match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-  return iso ? `${iso[1]}-${String(+iso[2]).padStart(2, '0')}-${String(+iso[3]).padStart(2, '0')}` : '';
+  const s = String(value === null || value === undefined ? '' : value).trim();
+  if (!s) return '';
+  const p2 = (n) => String(n).padStart(2, '0');
+  const iso = (y, m, d) => (y >= 1900 && y <= 2200 && m >= 1 && m <= 12 && d >= 1 && d <= 31 ? `${y}-${p2(m)}-${p2(d)}` : '');
+  const mon = (name) => { const u = String(name || '').toUpperCase(); return SERVER_MONTHS[u.slice(0, 4)] || SERVER_MONTHS[u.slice(0, 3)] || 0; };
+  let m;
+  if ((m = s.match(/^Date\((\d{4}),(\d{1,2}),(\d{1,2})/))) return iso(+m[1], +m[2] + 1, +m[3]);
+  if ((m = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/))) return iso(+m[1], +m[2], +m[3]);
+  if ((m = s.match(/^(\d{1,2})[-/ .]([A-Za-z]{3,9})[-/ .,]*(\d{2,4})?/))) {
+    const mo = mon(m[2]);
+    if (mo) { let y = m[3] ? +m[3] : new Date().getFullYear(); if (y < 100) y += 2000; return iso(y, mo, +m[1]); }
+  }
+  if ((m = s.match(/^([A-Za-z]{3,9})\s+(\d{1,2}),?\s+(\d{4})/))) {
+    const mo = mon(m[1]);
+    if (mo) return iso(+m[3], mo, +m[2]);
+  }
+  if ((m = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})(?:[ T].*)?$/))) {
+    let y = +m[3]; if (y < 100) y += 2000;
+    let d = +m[1], mo = +m[2];
+    if (mo > 12 && d <= 12) { const t = mo; mo = d; d = t; }   // mm/dd/yyyy bhi tolerate
+    return iso(y, mo, d);
+  }
+  return '';
 }
 function serverNumber(value) { const n = Number(value); return Number.isFinite(n) ? n : 0; }
 function classBucket(value) {
@@ -843,10 +867,45 @@ async function gvizDailyClassCounts(cfg) {
 }
 
 /**
+ * 🧾 Aaj ki GV Master rows ka detail — date × class × status × tag type (replacement / chassis ke liye).
+ * Chhoti grouped query hai (sirf aaj ki rows), isliye Home ka "GV aaj live" card kabhi bade
+ * full-tab download par depend nahi karta. Wahi 3-koshish wala pattern: seedha compare → toDate() → poora tab.
+ */
+async function gvizDayDetail(cfg) {
+  const { sheetId, tab, dateCol, classCol, statusCol, typeCol, countCol, day } = cfg;
+  const select = `select ${dateCol}, ${classCol}, ${statusCol}, ${typeCol}, count(${countCol})`;
+  const group = `group by ${dateCol}, ${classCol}, ${statusCol}, ${typeCol} order by ${dateCol} desc`;
+  const attempts = [
+    { tq: `${select} where ${dateCol} >= date '${day}' ${group} limit 2000`, kind: 'date' },
+    { tq: `${select} where toDate(${dateCol}) >= date '${day}' ${group} limit 2000`, kind: 'toDate' },
+    { tq: `${select} ${group} limit 3000`, kind: 'full-tab' }
+  ];
+  let lastErr = null;
+  for (const attempt of attempts) {
+    try {
+      const params = new URLSearchParams({ id: String(sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet: tab, tq: attempt.tq });
+      const out = await fetchUpstreamCached(upstreamUrl(params));
+      const table = parseGvizServer(out.body);
+      const rows = [];
+      for (const row of (table && table.rows) || []) {
+        const date = serverDate(serverCell(row, 0));
+        if (!date) continue;
+        const n = serverNumber(serverCell(row, 4));
+        if (!n) continue;
+        rows.push({ date, cls: classBucket(serverCell(row, 1)), status: serverCell(row, 2), type: serverCell(row, 3), n });
+      }
+      return { rows, cached: !!out.cached, via: attempt.kind };
+    } catch (err) { lastErr = err; }
+  }
+  throw lastErr || new Error('gviz day detail failed');
+}
+
+/**
  * ⚡ /api/today — "aaj" ka live feed (chhota aur cached).
  *   • GV  = GV Partner sheet ka **GV Master** tab (live)  → P(date) × G(class) count
  *   • FF  = First Forward sheet ka **EIR** tab (T+1 ledger) → AA(date) × D(class) count
  * Grouped-by-date queries Google par sasti hain, isliye Home pehle paint yahi se le leta hai.
+ * GV side me aaj ka class split + replacement/chassis + weekday run-rate (expected) bhi aata hai.
  */
 const todayFeedCache = { at: 0, body: null, promise: null };
 async function todayFeed(force) {
@@ -870,11 +929,41 @@ async function todayFeed(force) {
       const out = await gvizDailyClassCounts({ sheetId: settings.gvSheetId, tab, dateCol, classCol, countCol: tagCol, from30 });
       const rows = out.rows;
       const today = rows.filter((r) => r.date === day);
+      const series = rows.filter((r) => r.date >= from30).reduce((acc, r) => { acc[r.date] = (acc[r.date] || 0) + r.n; return acc; }, {});
+      // Aaj ka detail (class × status × tag type) — replacement/chassis/class split ek hi chhoti query se.
+      // Fail ho jaye to bhi feed chalta rahe (total/classes upar wali query se aa jaate hain).
+      let detail = null;
+      try {
+        detail = await gvizDayDetail({
+          sheetId: settings.gvSheetId, tab, dateCol, classCol,
+          statusCol: gv.status || 'N', typeCol: gv.tagType || 'U', countCol: tagCol, day
+        });
+      } catch { detail = null; }
+      const dToday = detail ? detail.rows.filter((r) => r.date === day) : [];
+      const detailClasses = dToday.reduce((acc, r) => { acc[r.cls] = (acc[r.cls] || 0) + r.n; return acc; }, {});
+      const replaced = dToday.reduce((n, r) => n + (/repl/i.test(String(r.status || '')) ? r.n : 0), 0);
+      const chassis = dToday.reduce((n, r) => n + (/chassis/i.test(String(r.type || '')) ? r.n : 0), 0);
+      const detailTotal = dToday.reduce((n, r) => n + r.n, 0);
+      const classes = Object.keys(detailClasses).length ? detailClasses : today.reduce((acc, r) => { acc[r.cls] = (acc[r.cls] || 0) + r.n; return acc; }, {});
+      const total = detailTotal || sum(today);
+      // 🎯 Expected today = pichhle 4 same-weekday ka average (pichhla mahina bhi shaamil), aaj se pehle wale din.
+      const weekdayAvg = (() => {
+        const keys = Object.keys(series).filter((k) => k < day).sort().reverse();
+        if (!keys.length) return null;
+        const wd = new Date(`${day}T00:00:00Z`).getUTCDay();
+        const same = keys.filter((k) => new Date(`${k}T00:00:00Z`).getUTCDay() === wd).slice(0, 4);
+        if (!same.length) return null;
+        return Math.round(same.reduce((n, k) => n + series[k], 0) / same.length);
+      })();
+      const prevDay = Object.keys(series).filter((k) => k < day).sort().pop() || '';
       result.gv = {
-        source: 'GV Master', live: true, total: sum(today),
-        classes: today.reduce((acc, r) => { acc[r.cls] = (acc[r.cls] || 0) + r.n; return acc; }, {}),
-        series: rows.filter((r) => r.date >= from30).reduce((acc, r) => { acc[r.date] = (acc[r.date] || 0) + r.n; return acc; }, {}),
-        cached: !!out.cached, query: out.via
+        source: 'GV Master', live: true, total,
+        vc4: classes.VC4 || 0, vc20: classes.VC20 || 0, vc5p: classes['VC5+'] || 0,
+        comm: (classes.VC20 || 0) + (classes['VC5+'] || 0),
+        replacement: replaced, chassis,
+        classes, expected: weekdayAvg, lastDay: prevDay ? series[prevDay] : null, lastDayDate: prevDay || '',
+        series,
+        cached: !!out.cached, query: out.via, detailQuery: detail ? detail.via : null
       };
     } catch (err) { result.gvError = err.message; }
 
@@ -6154,7 +6243,7 @@ async function start() {
   // Purane users ke paas parent permission thi — child auto grant karo taaki naye options ke baad
   // bhi kisi ka access lock na ho. Admin Access matrix se baad me change kar sakta hai.
   const PERM_CHILDREN = [
-    ['tagIssued', 'rangeReport'], ['home', 'tv'], ['home', 'teamMap'],
+    ['tagIssued', 'rangeReport'], ['home', 'tv'], ['home', 'teamMap'], ['home', 'masterSearch'],
     ['performance', 'stockReport'], ['gvStock', 'gvStockReport'],
     ['savedViews', 'reportStudio'], ['compare', 'charts'],
     ['dualChannel', 'masterStock'], ['fastagChampions', 'arena'], ['fastagChampions', 'fame'], ['tv', 'warRoom']

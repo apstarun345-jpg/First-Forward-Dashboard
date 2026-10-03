@@ -721,6 +721,17 @@ FF.pages = FF.pages || {};
   // ---------------------------------------------------------------- topbar search bar
   let suggestApi = null;
   let mountedTopbar = false;
+  /** 🔎 Naya flow (v3.46): naam / ID search → seedha Management → **Master Search page**,
+   *  jahan click karte hi uska poora related data (FF + GV) khul jaata hai — koi results list / modal box nahi.
+   *  Barcode / tag-ID searches purane panel (tag-level rows) me hi jaate hain. */
+  function openSearchPage(q) {
+    const name = clean(q);
+    if (name.length < 2) { U.toast('Kam se kam 2 letter / digit type karo', 'warn'); return false; }
+    state.lastQuery = name;
+    try { if (FF.app && FF.app.navigate) { FF.app.navigate('masterSearch', { q: name }); return true; } } catch { /* fall through */ }
+    try { location.hash = `#/masterSearch?q=${encodeURIComponent(name)}`; return true; } catch { return false; }
+  }
+
   function mountTopbar(force) {
     if (force === true) mountedTopbar = false;
     const actions = U.$('#top-actions');
@@ -765,12 +776,11 @@ FF.pages = FF.pages || {};
       items: () => suggestItems(input.value),
       onPick: (it) => {
         if (it.none) return;
-        if (it.barcode) { openPanel(it.barcode); return; }
-        if (it.person && MP() && MP().supports(it.person)) { MP().open(it.person); return; }
-        if (it.person) { const res = search(it.person.name); openPanel({ ...res, people: [it.person], ids: [], tags: [], matched: 1 + (it.person.bars.size || 0) }); return; }
-        openPanel(it.label);
+        if (it.barcode) { openPanel(it.barcode); return; }              // 🏷️ barcode/tag = tag-level rows (list yahan theek)
+        if (it.person && it.person.name) { openSearchPage(it.person.name); return; }   // 🧑 naam → poora data page
+        openSearchPage(it.label);
       },
-      onEnter: (q) => { if (clean(q).length >= 2) openPanel(q); }
+      onEnter: (q) => { if (clean(q).length >= 2) openSearchPage(q); }
     });
     // Index / data ready hote hi khula dropdown refresh — warna "search ho raha hai…" placeholder agli key tak atka rehta tha.
     let refreshTimer = 0;
@@ -848,112 +858,6 @@ FF.pages = FF.pages || {};
   }
 
   // ---------------------------------------------------------------- home page big search
-  function mountHome(container) {
-    if (!container) return;
-    const q = state.lastQuery || '';
-    let chFilter = '';   // '' = dono · 'ff' = sirf First Forward · 'gv' = sirf GV Partner
-    container.innerHTML = `<div class="home-master-search v2" id="home-master-search">
-      <div class="hms-head">
-        <span class="hms-ico">🔎</span>
-        <div class="hms-head-txt"><b>Master Search</b><small>Naam · TL · Agent ID · TL ID · GV ID · Mobile · barcode · tag ID — <span class="hms-brand ff">🟦 First Forward</span> + <span class="hms-brand gv">🟩 GV Partner</span> ek hi search me · report data seedha <b>FF REPORT / GV REPORT</b> tabs se</small></div>
-        <span class="ms-register-state" id="hms-state"></span>
-      </div>
-      <div class="hms-input-wrap">
-        <div class="hms-input-box">
-          <span class="hms-ico-in" aria-hidden="true">🔎</span>
-          <input id="home-master-input" class="input" type="search" value="${esc(q)}" placeholder="Type karo… jaise “Rahul”, “34161FA…”, “5845036”, “GV001”, tag ID…" autocomplete="off" aria-label="Master search">
-          <button class="ms-clear" id="home-master-clear" type="button" title="Search clear karo" aria-label="Search clear karo" ${q ? '' : 'hidden'}>✕</button>
-          <kbd class="ms-kbd">/</kbd>
-        </div>
-        <button class="btn primary hms-go" id="home-master-go">🔎 Search</button>
-      </div>
-      <div class="hms-chips">
-        <span class="dim small">Channel:</span>
-        <button class="chip on" data-hms-ch="">🎯 Sab</button>
-        <button class="chip" data-hms-ch="ff">🟦 First Forward</button>
-        <button class="chip" data-hms-ch="gv">🟩 GV Partner</button>
-        <span class="hms-chip-div"></span>
-        <span class="dim small">Try:</span>${['VC4', '5845036', 'ApnaPayment'].map((s) => `<button class="chip" data-hms="${esc(s)}">${esc(s)}</button>`).join('')}
-      </div>
-      <div class="hms-meta" id="hms-meta"></div>
-      <div id="home-master-results" class="ms-inline"></div>
-    </div>`;
-    const input = U.$('#home-master-input', container);
-    const results = U.$('#home-master-results', container);
-    const stateEl = U.$('#hms-state', container);
-    const metaEl = U.$('#hms-meta', container);
-    const clearBtn = U.$('#home-master-clear', container);
-    const setState = () => { if (stateEl) stateEl.innerHTML = state.full && state.full.fullLoaded ? '<span class="badge green">barcode register ready ✓</span>' : '<span class="badge amber">barcode register load ho raha hai…</span>'; };
-    setState();
-    onIndexReady(() => {
-      setState();
-      if (input && clean(input.value).length >= 2) run(input.value);
-    });
-    warmFull();
-    const run = (query) => {
-      const val = clean(query);
-      if (clearBtn) clearBtn.hidden = !val;
-      if (val.length < 2) { results.innerHTML = ''; if (metaEl) metaEl.innerHTML = ''; return; }
-      state.lastQuery = val;
-      const res = search(val);
-      // Channel filter — people (cards + table) dono par lagta hai; tags / IDs hamesha dikhte hain.
-      const shown = chFilter ? { ...res, people: res.people.filter((p) => (chFilter === 'gv') === p.kind.startsWith('gv')) } : res;
-      results.innerHTML = resultsHtml(shown);
-      results.dataset.q = val;
-      inlineSingle(results, shown);
-      if (metaEl) {
-        const ag = shown.people.filter((p) => /agent$/.test(p.kind)).length, tl = shown.people.filter((p) => /tl$/.test(p.kind)).length;
-        metaEl.innerHTML = res.matched
-          ? `<b>${U.fmt(shown.people.length)}</b> log (${U.fmt(ag)} agents · ${U.fmt(tl)} TLs)${shown.ids.length ? ` · <b>${U.fmt(shown.ids.length)}</b> IDs` : ''}${shown.tags.length ? ` · <b>${U.fmt(shown.tags.length)}</b> tags` : ''} — table me <b>Agent · TL · Stock · Total Issuance · Last Month</b>${chFilter ? ` · filter: <b>${chFilter === 'gv' ? '🟩 GV' : '🟦 FF'}</b>` : ''}`
-          : `“${esc(val)}” ke liye kuch nahi mila${chFilter ? ' (is channel filter me)' : ''}`;
-      }
-    };
-    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); run(input.value); } });
-    if (clearBtn) clearBtn.addEventListener('click', () => { input.value = ''; state.lastQuery = ''; results.innerHTML = ''; if (metaEl) metaEl.innerHTML = ''; clearBtn.hidden = true; input.focus(); });
-    U.$('#home-master-go', container).addEventListener('click', () => { const v = clean(input.value); if (v.length < 2) { U.toast('Kam se kam 2 letter / digit type karo', 'warn'); return; } openPanel(v); });
-    container.addEventListener('click', (e) => {
-      const chChip = e.target.closest('[data-hms-ch]');
-      if (chChip) {
-        chFilter = chChip.dataset.hmsCh || '';
-        container.querySelectorAll('[data-hms-ch]').forEach((c) => c.classList.toggle('on', c === chChip));
-        run(input.value);
-        return;
-      }
-      const chip = e.target.closest('[data-hms]');
-      if (chip) { input.value = chip.dataset.hms; run(chip.dataset.hms); return; }
-      const inl = e.target.closest('[data-ms-inline]');
-      if (inl) { toggleCardInline(inl); return; }
-      const prof = e.target.closest('[data-ms-profile]');
-      if (prof) { const person = personByKey(prof.dataset.msProfile); if (person && MP()) MP().open(person); return; }
-      const a360 = e.target.closest('[data-ms-agent360]');
-      if (a360) { if (FF.cockpit && FF.cockpit.agent360) FF.cockpit.agent360({ name: a360.dataset.msAgent360 }).catch(() => {}); return; }
-      const tags = e.target.closest('[data-ms-tags]');
-      if (tags) { FF.app.navigate('masterStock', { q: tags.dataset.msTags }); return; }
-      const again = e.target.closest('[data-ms-again]');
-      if (again) { input.value = again.dataset.msAgain; run(again.dataset.msAgain); return; }
-      // 📊 REPORT data table ki row par click → us person ka card + poori report (row = card = same data)
-      const row = e.target.closest('[data-mppt-row]');
-      if (row && !e.target.closest('[data-kpi],button,a')) {
-        const person = MP() && MP().personFromRow ? MP().personFromRow(row) : null;
-        if (!person) return;
-        const card = container.querySelector(`.ms-kundli[data-ms-person="${(person.kind || '')}|${normName(person.name || '')}"]`);
-        if (card) {
-          card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          card.classList.remove('ms-flash'); void card.offsetWidth; card.classList.add('ms-flash');
-          const btn = card.querySelector('[data-ms-inline]');
-          if (btn && !btn.classList.contains('active')) toggleCardInline(btn);
-        } else {
-          input.value = person.name; run(person.name);
-        }
-      }
-    });
-    if (q) run(q);
-    // debounce live search on home (typing shows results without Enter)
-    let t = null;
-    input.addEventListener('input', () => { clearTimeout(t); t = setTimeout(() => run(input.value), 320); });
-    return { run };
-  }
-
   function invalidate() {
     state.generation++;
     state.light = null; state.lightPromise = null;
@@ -961,9 +865,197 @@ FF.pages = FF.pages || {};
     state.results = null;
     emit();
   }
+
+  // -------------------------------------------------------------------------------------------------
+  // 🔎 Management → Master Search (page)  (v3.46)
+  //
+  //   Seedha naam / ID / mobile type karo → click karo → us insaan ka POORA related data (FF + GV
+  //   dono ka combined report + per-channel profile) usi page par khul jaata hai. Koi results list /
+  //   modal box nahi — ek se zyada log match hon to sirf ek line ke naam-chips.
+  //
+  //   Report component FF.searchReport.render() ka hai (numbers 100% masterProfile / GV truth se).
+  // -------------------------------------------------------------------------------------------------
+  function pageRender(root, params) {
+    const asked = clean((params && (params.q || params.name)) || '');
+    let chFilter = (params && (params.ch || params.channel)) || '';   // '' = dono · 'ff' · 'gv'
+    let groups = [];
+    let current = null;
+
+    root.innerHTML = `<div class="page msp-page">
+      <div class="page-head">
+        <div><h1>🔎 Master Search</h1>
+          <p class="sub">GV + First Forward · <b>naam · agent · TL · ID · mobile</b> — type karo, click karo, poora data (last month · current month · stock · class-wise · tag-level) usi page par khul jaata hai.</p></div>
+        <div class="btn-row"><button class="btn small" data-msp-refresh>🔄 Index refresh</button></div>
+      </div>
+      <div class="card msp-search-card"><div class="card-body">
+        <div class="msp-search">
+          <span class="msp-ico" aria-hidden="true">🔎</span>
+          <input id="msp-q" class="input" type="search" value="${esc(asked)}" placeholder="Naam / ID / mobile likho… (jaise “Rahul”, “5845036”, 98xxxxxxxx)" autocomplete="off" aria-label="Master search">
+          <button class="btn primary" data-msp-go>Search</button>
+        </div>
+        <div class="msp-filters">
+          <span class="dim small">Channel:</span>
+          <button class="chip${chFilter === '' ? ' on' : ''}" data-msp-ch="">🎯 Dono</button>
+          <button class="chip${chFilter === 'ff' ? ' on' : ''}" data-msp-ch="ff">🟦 First Forward</button>
+          <button class="chip${chFilter === 'gv' ? ' on' : ''}" data-msp-ch="gv">🟩 GV Partner</button>
+          <span class="ms-register-state" id="msp-state"></span>
+        </div>
+        <div class="msp-chips" id="msp-quick"></div>
+      </div></div>
+      <div id="msp-out"><div class="card"><div class="card-body empty">👆 <b>Naam ya ID type karo</b> — yahan us insaan ka poora FF + GV data aa jayega.</div></div></div>
+    </div>`;
+
+    const input = U.$('#msp-q', root);
+    const out = U.$('#msp-out', root);
+    const quick = U.$('#msp-quick', root);
+    const stateEl = U.$('#msp-state', root);
+    const paintState = () => { if (stateEl) stateEl.innerHTML = (state.full && state.full.fullLoaded) ? '<span class="badge green">barcode register ready ✓</span>' : '<span class="badge amber">poora index ban raha hai…</span>'; };
+    paintState();
+    onIndexReady(paintState);
+
+    const isTlP = (p) => /tl$/.test(String(p && p.kind));
+    const chOfP = (p) => (String(p && p.kind).startsWith('gv') ? 'gv' : 'ff');
+    const tlOfP = (p) => { try { return ((p.tlSet && [...p.tlSet][0]) || p.tl || ''); } catch { return ''; } };
+    const gvSpec = (p) => ({ kind: p.kind, name: p.name, id: p.sub || p.id || '', tlName: tlOfP(p), direct: !!p.direct });
+    const lightPeople = () => { try { return state.light && state.light.people ? [...state.light.people.values()] : []; } catch { return []; } };
+
+    function paintQuick() {
+      if (!quick) return;
+      const list = lightPeople()
+        .filter((p) => !chFilter || chOfP(p) === chFilter)
+        .sort((a, b) => (isTlP(b) ? 1 : 0) - (isTlP(a) ? 1 : 0) || String(a.name).localeCompare(String(b.name)))
+        .slice(0, 10);
+      quick.innerHTML = list.length
+        ? `<span class="dim small">⚡ Turant kholo:</span>${list.map((p) => `<button type="button" class="msp-chip" data-msp-name="${esc(p.name)}">${isTlP(p) ? '👥' : '🧑‍💼'} ${esc(p.name)}</button>`).join('')}`
+        : '<span class="dim small">Index ban raha hai — 2 second me suggestions aa jayenge.</span>';
+    }
+    paintQuick();
+
+    /** 🟩 GV ka aaj / mahina / stock — GV Master ledger + Tag Assignment (live). */
+    function gvStripHtml(person) {
+      if (!person || chOfP(person) !== 'gv' || !FF.gvTruth || !FF.gvTruth.person) return '';
+      let t = null;
+      try { t = FF.gvTruth.person(gvSpec(person)); } catch { return ''; }
+      if (!t) return '';
+      const g = U.growth(t.ledger.cur.total, t.ledger.last.total);
+      const tk = (FF.gv && FF.gv.todayKey) ? FF.gv.todayKey() : U.dateKey(new Date());
+      const warn = (t.warnings && t.warnings.length) ? `<p class="dim small">⚠️ ${esc(t.warnings[0])}</p>` : '';
+      return `<div class="msp-today"><h3>⚡ Aaj ka snapshot <span class="dim">· GV Master (live)</span></h3><div class="dgrid">
+        <div class="dcell"><small>🟩 GV aaj · ${esc(U.labelDateKey(tk))}</small><b>${U.fmt(t.ledger.today.total)}</b><em class="dim">VC4 ${U.fmt(t.ledger.today.vc4)} · Comm ${U.fmt(t.ledger.today.comm)}</em></div>
+        <div class="dcell"><small>🗓️ ${esc(t.ym)} / ${esc(t.lastYm)}</small><b>${U.fmt(t.ledger.cur.total)} / ${U.fmt(t.ledger.last.total)}</b><em>${g === null || g === undefined ? '<span class="dim">—</span>' : U.pctHtml(g, { decimals: 0 })}</em></div>
+        <div class="dcell"><small>📦 Stock · Tag Assignment</small><b>${U.fmt(t.stock.total)}</b><em class="dim">VC4 ${U.fmt(t.stock.vc4)} · Comm ${U.fmt(t.stock.comm)}</em></div>
+      </div>${warn}</div>`;
+    }
+
+    /** 🟦 FF ka aaj — EIR daily rows se (First Forward ka data T+1 aata hai). */
+    function ffStripHtml(person) {
+      if (!person || chOfP(person) !== 'ff') return '';
+      const daily = (FF.store && FF.store.get && FF.store.get('daily')) || [];
+      const tk = U.dateKey(new Date());
+      const nk = normName(person.name);
+      const isT = isTlP(person), id = clean(person.sub || person.id || '');
+      const n = daily.filter((r) => r.key === tk && r.channel !== 'GV Partner' && (isT ? normName(r.tlName) === nk : (normName(r.agentName) === nk || (id && normName(r.agentId) === normName(id))))).reduce((s, r) => s + (Number(r.n) || 0), 0);
+      return `<div class="msp-today"><h3>⚡ Aaj ka snapshot <span class="dim">· First Forward (EIR)</span></h3><div class="dgrid">
+        <div class="dcell"><small>🟦 FF aaj · ${esc(U.labelDateKey(tk))}</small><b>${U.fmt(n)}</b><em class="dim">FF ka aaj ka poora data T+1 (kal) aata hai</em></div>
+      </div></div>`;
+    }
+
+    function openGroup(g) {
+      if (!g || !out) return;
+      current = g;
+      const person = g.ff || g.gv;
+      const bits = [g.ff ? `🟦 FF ${isTlP(g.ff) ? 'TL' : 'Agent'}${g.ff.sub ? ` · ${esc(g.ff.sub)}` : ''}` : '', g.gv ? `🟩 GV ${isTlP(g.gv) ? 'TL' : 'Agent'}${g.gv.sub ? ` · ${esc(g.gv.sub)}` : ''}` : ''].filter(Boolean).join('  ·  ');
+      const chips = groups.length > 1
+        ? `<div class="msp-matches"><span class="dim small">${U.fmt(groups.length)} log mile — click karo:</span>${groups.slice(0, 12).map((gp, i) => `<button type="button" class="msp-chip${gp === g ? ' on' : ''}" data-msp-g="${i}">${esc(gp.name)}</button>`).join('')}</div>`
+        : '';
+      out.innerHTML = `${chips}
+        <div class="msp-hero">
+          <span class="ms-avatar">${esc(String(g.name || '?').slice(0, 1).toUpperCase())}</span>
+          <div class="msp-hero-id"><b>${esc(g.name)}</b><small>${bits || 'Report'}</small></div>
+          ${person ? `<div class="msp-hero-act"><button class="btn small" data-ms-tags="${esc(person.name)}">🏷️ Tag-level rows</button></div>` : ''}
+        </div>
+        ${gvStripHtml(g.gv)}${ffStripHtml(g.ff)}
+        <div class="msp-report" id="msp-report"></div>`;
+      const host = U.$('#msp-report', out);
+      const sr = SR();
+      if (sr && host) sr.render(host, g);
+      else if (host && FF.masterProfile && FF.masterProfile.renderInto && person) FF.masterProfile.renderInto(host, person);
+      else if (host) host.innerHTML = '<div class="card"><div class="card-body empty">Report module load nahi hua — page reload karo.</div></div>';
+      try { FF.charts && FF.charts.mount && FF.charts.mount(out); } catch { /* charts optional */ }
+    }
+
+    const fallbackGroup = (p) => ({ key: normName(p.name), name: p.name, ff: chOfP(p) === 'ff' ? p : null, gv: chOfP(p) === 'gv' ? p : null });
+
+    /** Ek se zyada match — sirf ek line ke naam-chips (koi list nahi); click par poora data. */
+    function chipsOnly() {
+      out.innerHTML = `<div class="card"><div class="card-body">
+        <p class="dim small" style="margin:0 0 8px">${U.fmt(groups.length)} log mile — <b>naam par click karo</b>, uska poora FF + GV data neeche khul jayega:</p>
+        <div class="msp-matches">${groups.slice(0, 20).map((gp, i) => `<button type="button" class="msp-chip" data-msp-g="${i}">${esc(gp.name)}${gp.ff && gp.gv ? ' <small>⚖</small>' : gp.gv ? ' <small>🟩</small>' : ' <small>🟦</small>'}</button>`).join('')}</div>
+      </div></div>`;
+    }
+
+    async function run(query, opts) {
+      const open = !opts || opts.open !== false;
+      const q = clean(query);
+      if (q.length < 2) { out.innerHTML = '<div class="card"><div class="card-body empty">Kam se kam 2 letter / digit type karo.</div></div>'; return; }
+      out.innerHTML = U.spinner(`“${q}” dhoondha ja raha hai…`);
+      try { await buildLight(); } catch { /* index fail — neeche message */ }
+      paintState(); paintQuick();
+      if (!state.light) { out.innerHTML = '<div class="card"><div class="card-body empty">Search index load nahi hua — internet check karke “🔄 Index refresh” dabao.</div></div>'; return; }
+      const res = search(q);
+      const people = (res.people || []).filter((p) => !chFilter || chOfP(p) === chFilter);
+      const sr = SR();
+      groups = sr ? sr.groupPeople(people) : people.map(fallbackGroup);
+      groups.sort((a, b) => Number(!!b.gv) - Number(!!a.gv) || String(a.name).localeCompare(String(b.name)));
+      if (groups.length) {
+        if (open || groups.length === 1) openGroup(groups[0]); else chipsOnly();
+        warmFull();
+        return;
+      }
+      if ((res.ids || []).length || (res.tags || []).length) {
+        out.innerHTML = `<div class="card"><div class="card-body"><h3 class="msp-h">🔖 ID / tag match</h3>${resultsHtml(res)}</div></div>`;
+        return;
+      }
+      out.innerHTML = `<div class="card"><div class="card-body empty">“${esc(q)}” ke liye kuch nahi mila — doosra naam / ID / mobile try karo${chFilter ? ' (ya channel filter hatao)' : ''}.</div></div>`;
+    }
+
+    if (input) {
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); run(input.value); } });
+      let t = 0;
+      // ⌨️ Type karte waqt sirf naam-chips (list nahi) — Enter / Search / chip click par poora data.
+      input.addEventListener('input', () => { clearTimeout(t); t = setTimeout(() => { if (clean(input.value).length >= 3) run(input.value, { open: false }); }, 420); });
+      setTimeout(() => { try { input.focus(); } catch { /* ignore */ } }, 60);
+    }
+    root.addEventListener('click', (e) => {
+      if (e.target.closest('[data-msp-go]')) { if (input) run(input.value); return; }
+      if (e.target.closest('[data-msp-refresh]')) {
+        invalidate(); out.innerHTML = U.spinner('Index dobara ban raha hai…');
+        buildLight().then(() => { paintState(); paintQuick(); if (current) openGroup(current); else out.innerHTML = '<div class="card"><div class="card-body empty">Index ready ✓ — naam type karo.</div></div>'; }).catch(() => {});
+        return;
+      }
+      const ch = e.target.closest('[data-msp-ch]');
+      if (ch) { chFilter = ch.dataset.mspCh || ''; $$('[data-msp-ch]', root).forEach((b) => b.classList.toggle('on', b === ch)); paintQuick(); if (input && clean(input.value).length >= 2) run(input.value, { open: false }); return; }
+      const nm = e.target.closest('[data-msp-name]');
+      if (nm) {
+        const nmKey = normName(nm.dataset.mspName);
+        const p = lightPeople().filter((x) => normName(x.name) === nmKey).sort((a, b) => (chOfP(b) === 'gv' ? 1 : 0) - (chOfP(a) === 'gv' ? 1 : 0))[0];
+        if (p) { if (input) input.value = p.name; const sr = SR(); openGroup(sr ? (sr.groupPeople([p])[0] || fallbackGroup(p)) : fallbackGroup(p)); }
+        return;
+      }
+      const gb = e.target.closest('[data-msp-g]');
+      if (gb) { const gp = groups[Number(gb.dataset.mspG)]; if (gp) openGroup(gp); return; }
+      const tags = e.target.closest('[data-ms-tags]');
+      if (tags && FF.app && FF.app.navigate) { FF.app.navigate('masterStock', { q: tags.dataset.msTags }); return; }
+    });
+    if (asked) run(asked);
+    else { buildLight().then(() => { paintState(); paintQuick(); }).catch(() => {}); }
+  }
+
+  FF.pages.masterSearch = { title: 'Master Search', render: pageRender };
+
   FF.masterSearch = {
     buildLight, buildFull, warmFull, invalidate, search, suggestItems, resultsHtml, openPanel, closePanel,
-    mountTopbar, mountHome, onIndexReady, personByKey, _limits: LIMITS,
+    mountTopbar, openSearchPage, onIndexReady, personByKey, _limits: LIMITS,
     get ready() { return !!(state.light); }, get heavyReady() { return !!(state.full && state.full.fullLoaded); },
     get topbarMounted() { return mountedTopbar; },
     label: KIND_LABEL

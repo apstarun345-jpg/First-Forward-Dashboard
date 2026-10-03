@@ -21,14 +21,15 @@ window.FF = window.FF || {};
     try {
       const tag = document.querySelector('script[src*="config.js?v="]') || document.querySelector('script[src*="app.js?v="]');
       const m = tag && /[?&]v=([\w.]+)/.exec(tag.getAttribute('src') || '');
-      return m ? m[1] : '67';
-    } catch { return '67'; }
+      return m ? m[1] : '70';
+    } catch { return '70'; }
   })();
 
   // Page id → uske liye zaroori modules (order matter karta hai: dependency pehle).
   const GROUPS = {
     executive: ['insights', 'cockpit'],
     tagRequest: ['pdf', 'tagRequest'],
+    masterSearch: ['masterProfile', 'masterSearch'],
     tagIssued: ['tagIssued'],
     targets: ['targets'],
     rangeReport: ['rangeReport'],

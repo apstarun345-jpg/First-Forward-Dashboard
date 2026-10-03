@@ -435,11 +435,19 @@ window.FF = window.FF || {};
   }
 
   // ---- page ----------------------------------------------------------------------------------------
-  async function loadList(ch) {
+  /** GV people — jo abhi memory me hai (turant). Heavy datasets background me load hote hain. */
+  function gvListNow() {
+    try { return (FF.gvTruth && FF.gvTruth.people) ? FF.gvTruth.people() : []; } catch { return []; }
+  }
+  /** ⚡ Fast open: GV list turant (current memory), poora data aane par `onLate(list)` se repaint. */
+  async function loadList(ch, onLate) {
     if (ch === 'gv') {
-      await ensureGv();
-      if (FF.gvTruth) return FF.gvTruth.people();
-      return FF.agentSummary.loadPeople('gv');
+      const now = gvListNow();
+      const heavy = ensureGv().then(() => gvListNow()).catch(() => []);
+      if (onLate) heavy.then((list) => { if (Array.isArray(list) && list.length) { try { onLate(list); } catch { /* ignore */ } } });
+      if (now.length) return now;                              // ⚡ turant
+      const waited = await U.within(heavy, 1500, null);        // cold start — thoda intezaar
+      return waited || now;
     }
     return FF.agentSummary.loadPeople('ff');
   }
@@ -472,7 +480,7 @@ window.FF = window.FF || {};
         <div class="card gs-search-card"><div class="card-body">
           <div class="gs-search">
             <span class="gs-search-ico">🔎</span>
-            <input id="gs-q" class="input" type="search" placeholder="Agent / TL ka naam, ID ya 10-digit mobile…" value="${esc((params && params.name) || '')}" autocomplete="off" aria-label="Search">
+            <input id="gs-q" class="input" type="search" placeholder="Agent / TL ka naam, ID ya 10-digit mobile…" value="${esc((params && (params.name || params.q)) || '')}" autocomplete="off" aria-label="Search">
             <button class="btn primary" data-gs-search>Search</button>
             <div id="gs-drop" class="gs-drop" hidden></div>
           </div>
@@ -481,16 +489,22 @@ window.FF = window.FF || {};
         <div id="gs-body">${U.spinner(`${label} ka data load ho raha hai…`)}</div>
       </div>`;
       const body = U.$('#gs-body', root), qEl = U.$('#gs-q', root), drop = U.$('#gs-drop', root), sug = U.$('#gs-sug', root);
+      const asked = params && (params.name || params.q);
       S.list = [];
-      try { S.list = await loadList(ch); }
+      let lateList = () => {};
+      try { S.list = await loadList(ch, (list) => { S.list = list; lateList(list); }); }
       catch (err) { body.innerHTML = U.errorBox(err, 'data-gs-retry'); return; }
       const paintSug = (q) => {
         const hits = suggestions(S.list, q);
         sug.innerHTML = hits.length ? hits.map((p) => {
           const tl = /tl$/.test(p.kind);
           return `<button type="button" class="gs-chipbtn ${tl ? 'tl' : 'ag'}" data-gs-pick="${esc(`${p.kind}|${p.name}`)}">
-            <b>${esc(p.name)}</b>${p.id ? ` <small class="mono dim">${esc(p.id)}</small>` : ''} <small class="dim">· ${fmt(p.cur)} mtd · ${fmt(p.stock)} stock</small></button>`;
+            <b>${esc(p.name)}</b>${p.id ? ` <small class="mono dim">${esc(p.id)}</small>` : ''} <small class="dim">· ${fmt(p.cur)} mtd · ${fmt(p.stock)} stock${(p.today !== undefined) ? ` · ${fmt(p.today)} aaj` : ''}</small></button>`;
         }).join('') : '<span class="dim small">Koi matching naam/ID/mobile nahi mila</span>';
+      };
+      lateList = (list) => {
+        paintSug(qEl ? qEl.value : '');
+        if (asked && !S.person) { const h = matchList(list, asked)[0]; if (h) pick(h); }
       };
       const showDrop = (q) => {
         const hits = matchList(S.list, q);
@@ -498,9 +512,14 @@ window.FF = window.FF || {};
           const tl = /tl$/.test(p.kind);
           return `<button type="button" class="gs-drop-opt" data-gs-pick="${esc(`${p.kind}|${p.name}`)}">
             <span><span class="gs-tag ${tl ? 'tl' : 'ag'}">${tl ? 'TL' : 'Agent'}</span> <b>${esc(p.name)}</b>${p.id ? ` <small class="mono dim">${esc(p.id)}</small>` : ''}${!tl && p.tl ? ` <small class="dim">· TL ${esc(p.tl)}</small>` : ''}</span>
-            <span class="dim small">ledger <b>${fmt(p.cur)}</b> · stock <b>${fmt(p.stock)}</b>${p.sheetCur !== null && p.sheetCur !== undefined ? ` · sheet ${fmt(p.sheetCur)}` : ''}</span></button>`;
+            <span class="dim small">last <b>${fmt(p.last)}</b> · mtd <b>${fmt(p.cur)}</b>${p.today !== undefined ? ` · aaj <b>${fmt(p.today)}</b>` : ''} · stock <b>${fmt(p.stock)}</b>${p.sheetCur !== null && p.sheetCur !== undefined ? ` · sheet ${fmt(p.sheetCur)}` : ''}</span></button>`;
         }).join('') : '<div class="gs-drop-empty dim">Kuch nahi mila</div>';
         drop.hidden = false;
+      };
+      const paintExtras = (v, age) => {
+        if (FF.charts && FF.charts.mount) { try { FF.charts.mount(body); } catch { /* charts optional */ } }
+        if (FF.app && FF.app.enhanceTables) { try { FF.app.enhanceTables(body); } catch { /* optional */ } }
+        if (age !== false) loadAgeing(v);
       };
       async function pick(person) {
         if (!person) return;
@@ -509,24 +528,40 @@ window.FF = window.FF || {};
         if (qEl) qEl.value = person.name;
         paintSug('');
         body.innerHTML = U.spinner(`${person.name} ka report ban raha hai…`);
-        let view;
+        let view = null;
         try {
           if (isGv) {
-            await ensureGv(person);
-            const truth = FF.gvTruth.person(personSpec(person, 'gv'));
-            view = gvView(truth, person);
-          } else {
-            view = await ffView(personSpec(person, 'ff'), person);
+            // ⚡ GV: jo abhi memory me hai usse TURANT report (stock + issuance last/current + today),
+            // heavy datasets (master/report/stock*) background me load hote hain aur numbers sync kar dete hain.
+            const spec = personSpec(person, 'gv');
+            const paintGv = (v, age) => { S.view = v; state.view = v; body.innerHTML = reportHtml(v); paintExtras(v, age); };
+            const now = FF.gvTruth.person(spec);
+            const hasNow = !!(now.ledger.rows.all.length || now.stock.total || (now.sheet && now.sheet.found));
+            const heavy = ensureGv(person).catch(() => {});
+            if (hasNow) {
+              paintGv(gvView(now, person), true);
+              heavy.then(() => {
+                if (S.person !== person || !body.isConnected) return;
+                try {
+                  const v2 = gvView(FF.gvTruth.person(spec), person);
+                  if (S.view) { v2.ageing = S.view.ageing; v2.ageState = S.view.ageState; }
+                  paintGv(v2, false);
+                } catch { /* late repaint best effort */ }
+              });
+              return;
+            }
+            await U.within(heavy, 9000, null);
+            paintGv(gvView(FF.gvTruth.person(spec), person), true);
+            return;
           }
+          view = await ffView(personSpec(person, 'ff'), person);
         } catch (err) {
           body.innerHTML = U.errorBox(err, 'data-gs-retry');
           return;
         }
         S.view = view; state.view = view;
         body.innerHTML = reportHtml(view);
-        if (FF.charts && FF.charts.mount) { try { FF.charts.mount(body); } catch { /* charts optional */ } }
-        if (FF.app && FF.app.enhanceTables) { try { FF.app.enhanceTables(body); } catch { /* optional */ } }
-        loadAgeing(view);
+        paintExtras(view, true);
       }
       async function loadAgeing(view) {
         if (!FF.stockAge || !FF.stockAge.compute) { view.ageState = 'unavailable'; return; }
@@ -586,11 +621,11 @@ window.FF = window.FF || {};
         if (!e.target.closest('.gs-search')) drop.hidden = true;
       };
       root.addEventListener('click', root.__gsClick);
-      const asked = params && (params.name || params.q);
-      const first = (asked && matchList(S.list, asked)[0]) || S.list[0] || null;
-      if (first) await pick(first);
+      const hit = asked ? matchList(S.list, asked)[0] : null;
+      if (hit) await pick(hit);
+      else if (!asked && S.list[0]) await pick(S.list[0]);
+      else if (asked) body.innerHTML = `<div class="card"><div class="card-body empty">“${esc(asked)}” abhi list me nahi mila — ${label} ka poora data background me load ho raha hai; milte hi khul jayega.</div></div>`;
       else body.innerHTML = '<div class="card"><div class="card-body empty">Koi Agent / TL data nahi mila — GV sheet me data hai? Settings → Data source check karein.</div></div>';
-      if (asked && !matchList(S.list, asked)[0]) U.toast(`“${asked}” ${label} me nahi mila`, 'warn');
     }
     return { title: 'Agent / TL Summary', render };
   }
