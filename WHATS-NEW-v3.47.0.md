@@ -28,7 +28,20 @@ Ab:
 - Home ka GV card + `/api/today` (45s cache) → aaj Total · VC4 · VC20 · VC5+ · Replacement · Chassis ·
   Expected Today (pichhle 4 same-weekday ka average) — aur har card click par tag-level rows.
 
-## 3) 🏠 Home KPI cards me text dikhna
+## 3) 🏠 Home KPI cards — `paintMonth is not defined` crash fix 🐞
+
+Main branch (PR #72 ke merge ke baad) me `home.js` ke andar **`paintMonth()` / `paintCharts()` / `paintAll()`
+sirf CALL hote the, define nahi the** → Home page render hote hi:
+
+```
+ReferenceError: paintMonth is not defined   (home.js:431)
+```
+
+…aur **poore mahine ke KPI cards + charts gayab** ho jaate the. Yehi asli wajah thi ki Home par
+"KPI cards me text/numbers nahi dikh rahe" lag raha tha (stylesheet ke saath-saath yeh runtime crash).
+Ab teenon definitions wapas add hain (monthMount/chartMount + `ui.sf` / `ui.ctx` / `ui.sc` / `ui.liveToday` par).
+
+## 3b) 🏠 Home KPI cards me text dikhna
 
 - `homeKpiFix.css` ab `index.html` me load hota hai aur service worker me precache hota hai
   (`.page-home .kpi` ke title/value/foot/icon par z-index + white text force) — white text colored card
@@ -55,8 +68,15 @@ Home ke **Is mahine ke KPI cards** grid me:
 - GV me ye sab **GV Master column R** ke usi tag-set se aata hai — headline, click-detail aur sheet cross-check
   teeno same source par (v3.47 test: 332 / 28 ka reconciliation).
 
-## 6) 🧪 Tests
+## 6) 🧪 Verify (merged state, main ke saath)
 
-- `npm test` → **451 / 451 pass** (pehle 440/451; GV R-attribution, v339 profile/scale, server live-feed retry,
-  Home KPI wiring sab green).
+- `npm test` → **451 / 451 pass** · `origin/main` par wahi suite **440/451 (11 fail)** thi
+  (GV Master truth, column-R attribution, EIR month totals, toDate retry, TL profile exact, issuanceRows
+  memo, 120×1500 perf) — ye sab is branch me green hain.
+- **jsdom smoke** (`node dev/smoke.js`): `origin/main` ke client files = **10 FAILED**
+  (Home `paintMonth` crash + KPI cards ke 3 tests); is branch par = **7 FAILED**, aur wo 7
+  bilkul wahi hain jo is kaam se pehle bhi the (stash-baseline se byte-identical proven) — matlab
+  **koi naya toota nahi**.
+- Live proof (mock gviz): `/api/gv-today` → `GV Master · live`, aaj **34** (VC4 17 · VC20 2 · VC5+ 15,
+  Replacement 7 · Chassis 6) aur `/api/today` me bhi wahi + FF EIR **T+1** (`throughYesterday: true`).
 - `npm run check` → syntax ok.
