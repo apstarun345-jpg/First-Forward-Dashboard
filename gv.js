@@ -33,7 +33,7 @@ window.FF = window.FF || {};
   const clsNum = (c) => parseInt(String(c).replace(/\D/g, ''), 10) || 999;
   const cchToken = (v) => U.clean(v).toUpperCase().replace(/\s+/g, ' ').trim();
   function configuredGroup(cch, fallbackClass) {
-    const cfg = cfgGv().classCch || {};
+    const cfg = FF.config.gvClassCch || {};
     if (cfg.enabled !== false) {
       const token = cchToken(cch);
       const groups = cfg.groups || {};
