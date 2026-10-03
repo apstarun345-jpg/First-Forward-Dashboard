@@ -64,10 +64,12 @@ FF.pages = FF.pages || {};
       : Math.max(1, U.daysInMonth(U.ymKey(receivedDate)));
 
     const daysInMonth = U.daysInMonth(curKey);
+    const compareDay = Math.max(1, observedDay);
     return {
       curKey,
       prevKey,
       observedDay,
+      compareDay,
       daysInMonth,
       receivedDate,
       lagDays
