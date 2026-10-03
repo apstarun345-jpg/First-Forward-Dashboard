@@ -414,8 +414,10 @@ window.FF = window.FF || {};
       byName: new Map(rows.filter((r) => r.agentName).map((r) => [norm(r.agentName), [r]])),
       byId: (() => {
         const m = new Map();
-        rows.forEach((r) => r.tlIds && r.tlIds.forEach(() => {}));
-        rows.forEach((r) => { [r.agentId].concat(r.tlIds || []).filter(Boolean).forEach((id) => pushLookup(m, clean(id).toUpperCase().replace(/\\.0+$/, ''), r)); });
+        rows.forEach((r) => {
+          const id = clean(r.agentId).toUpperCase();
+          if (id) pushLookup(m, id, r);
+        });
         return m;
       })(),
       byTl: (() => {
@@ -2198,40 +2200,3 @@ window.FF = window.FF || {};
         <td class="num mp-drill" data-v="${sortVal(r.last)}" data-kpi="${esc(lastSpec)}" role="button" tabindex="0" title="Last month issuance ki detail"><b>${fmt(r.last)}</b>${r.lastVc4 || r.lastComm ? `<small class="cell-sub">VC4 ${fmt(r.lastVc4)} · Comm ${fmt(r.lastComm)}</small>` : ''}</td>
         <td class="num" data-v="${sortVal(Number.isFinite(r.growth) ? r.growth : -999999)}">${U.pctHtml(r.growth, { decimals: 0 })}</td>
         ${o.rowActions ? `<td class="mppt-acts">${o.rowActions(r)}</td>` : ''}
-      </tr>`;
-    };
-    const agents = list.filter((r) => !r.isTl);
-    const foot = o.footer === false ? '' : `<tfoot>
-      <tr class="row-total"><td colspan="2"><b>${esc(o.footerLabel || 'GRAND TOTAL — agents')}</b><small class="cell-sub">${fmt(agents.length)} agents · TL rows = own + agents (rollup, isliye jod me nahi)</small></td>
-        <td class="num"><b>${fmt(U.sum(agents, (r) => r.stock))}</b></td>
-        <td class="num"><b>${fmt(U.sum(agents, (r) => r.cur))}</b></td>
-        <td class="num"><b>${fmt(U.sum(agents, (r) => r.last))}</b></td>
-        <td class="num">${U.pctHtml(U.growth(U.sum(agents, (r) => r.cur), U.sum(agents, (r) => r.last)), { decimals: 0 })}</td>
-        ${o.rowActions ? '<td></td>' : ''}
-      </tr></tfoot>`;
-    return `<div class="mppt-wrap" data-mppt="${esc(o.id || 'mppt')}" data-mppt-chip="all">
-      <div class="mppt-bar">
-        <input class="input mppt-filter" data-mppt-filter type="search" placeholder="🔍 Is table me filter — naam · TL · ID…" aria-label="Table filter">
-        ${o.chips || ''}
-        <span class="mppt-count dim small" data-mppt-count>${U.fmt(list.length)} / ${U.fmt(list.length)} rows</span>
-        ${o.sourceNote ? `<span class="dim small mppt-src">${o.sourceNote}</span>` : ''}
-      </div>
-      <div class="table-wrap"><table class="tbl compact mp-people-table">
-        <thead><tr>
-          <th data-mppt-sort="name" role="button" tabindex="0">🧑‍💼 ${esc(o.whoLabel || 'Agent / TL')}</th>
-          <th data-mppt-sort="tl" role="button" tabindex="0">👥 TL</th>
-          <th class="num" data-mppt-sort="stock" role="button" tabindex="0">📦 Stock</th>
-          <th class="num" data-mppt-sort="cur" role="button" tabindex="0">🏷️ Total Issuance${esc(o.curLabel ? ` · ${o.curLabel}` : ' (MTD)')}</th>
-          <th class="num" data-mppt-sort="last" role="button" tabindex="0">📅 Last Month${esc(o.lastLabel ? ` · ${o.lastLabel}` : '')}</th>
-          <th class="num" data-mppt-sort="growth" role="button" tabindex="0">📈 Growth</th>
-          ${o.rowActions ? '<th></th>' : ''}
-        </tr></thead>
-        <tbody>${list.map(rowHtml).join('')}</tbody>
-        ${foot}
-      </table></div>
-      ${list.length > limit ? `<div class="mppt-more-row"><button type="button" class="btn small" data-mppt-more>🔽 Aur ${fmt(Math.min(300, list.length - limit))} rows dikhao (${fmt(list.length - limit)} bache)</button></div>` : ''}
-    </div>`;
-  }
-
-  FF.masterProfile = { supports, quick, build, buildNow, html, groupBinsFor, csvRows, waText, renderInto, open, warm, load, loadFor, onData, isLoaded: () => loadedOnce, invalidate: resetProfileCache, suggest, suggestGro, findFfAgent, findGvAgent, mobileFor, reportDataRow, issuanceCardsHtml, gvTlSnapshot, peopleTableHtml, personFromRow, get suggestDays() { return suggestDays(); }, _buildSoon: buildSoon, _limits: LIMITS };
-})(window.FF);
