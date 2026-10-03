@@ -642,7 +642,11 @@ await run('v3.11 · Master search (naam / TL / ID index + suggestions + results 
   const person = FF.masterSearch.search(probe).people.find((p) => p.kind === 'ff-agent');
   const pr = await FF.masterProfile.build(person);
   const ph = FF.masterProfile.html(pr);
-  for (const label of ['mp-kpis', 'Issuance class-wise', 'Total issuance', 'Suggested', 'mp-charts']) if (!ph.includes(label)) throw new Error(`profile me \"${label}\" nahi mila`);
+  // v3.44 — summary ab VC4 · VC20 · VC5+ teen alag rows (pehle VC4 + Commercial ka ek total tha)
+  for (const label of ['mp-kpis', 'Issuance class-wise', 'Suggested', 'mp-charts']) if (!ph.includes(label)) throw new Error(`profile me \"${label}\" nahi mila`);
+  // v3.44 — summary ab VC4 · VC20 · VC5+ teen alag rows (class data na ho to placeholder wahi 3 naam batata hai)
+  if (!ph.includes('mp-group-tbl') && !ph.includes('Class-group (VC4 · VC20 · VC5+)')) throw new Error('profile me VC4 · VC20 · VC5+ summary nahi mili');
+  for (const group of ['VC4', 'VC20', 'VC5+']) if (!ph.includes(group)) throw new Error(`profile me \"${group}\" group row nahi mila`);
   const tlName = (list.find((a) => !a.tlExcluded && a.tlName) || {}).tlName;
   if (tlName) {
     const tl = await FF.masterProfile.build({ kind: 'ff-tl', name: tlName, sub: '', tlSet: new Set(), classMap: new Map(), bars: new Set() });
@@ -1401,6 +1405,31 @@ await run('🧩 GV agent issuance/class and stock drawers drill progressively', 
     await FF.kpiDetail.open({ src: 'gv', scope: 'stock', agent: stockProfile.agentName, channel: 'gv', cls: className, title: `${stockProfile.agentName} · ${className} stock` });
     html = drawerHtml();
     if (!html.includes('Tag Assignment source')) throw new Error('class click did not open Tag Assignment rows');
+  }
+  FF.app.closeDrawer();
+});
+
+await run('🧾 v3.44 · GV REPORT sheet-first: TL APS011919 = sheet ka 332 / 27 / 1054 + VC4 · VC20 · VC5+ + TL ID-wise stock', async () => {
+  await FF.masterProfile.load();
+  const person = { kind: 'gv-tl', name: 'Hemalbhai Bhavsar', sub: 'APS011919', tlSet: new Set(), classMap: new Map(), bars: new Set() };
+  const pr = await FF.masterProfile.build(person);
+  const want = { lastTotal: 332, lastVc4: 311, curTotal: 27, curVc4: 25 };
+  for (const [key, value] of Object.entries(want)) if (Number(pr.totals[key]) !== value) throw new Error(`TL ${key} sheet ke ${value} ke barabar nahi (mila ${pr.totals[key]})`);
+  if (Number(pr.stock.total) !== 1054 || Number(pr.stock.vc4) !== 657) throw new Error(`TL stock sheet ke 657 / 1054 ke barabar nahi (mila ${pr.stock.vc4} / ${pr.stock.total})`);
+  const bins = pr.groupBins || {};
+  const check = (period, group, value) => { if (Number(bins[period] && bins[period][group]) !== value) throw new Error(`groupBins.${period}.${group} = ${value} expect tha (mila ${bins[period] && bins[period][group]})`); };
+  check('last', 'VC4', 311); check('last', 'total', 332);
+  check('cur', 'VC4', 25); check('cur', 'VC20', 2); check('cur', 'total', 27);
+  // commercial ka batwara (VC20 + VC5+) sheet ke NVC4 = 21 ke barabar hona chahiye
+  const commSplit = Number(bins.last.VC20) + Number(bins.last['VC5+']);
+  if (commSplit !== 21) throw new Error(`last month ka commercial batwara 21 hona chahiye (mila ${commSplit})`);
+  const html = FF.masterProfile.html(pr);
+  for (const label of ['mp-group-tbl', 'data-mp-sec="tlstock"', 'TL ID-wise stock', 'APS011919', 'Stock Comm', '= TL TOTAL', 'APS04505']) {
+    if (!html.includes(label)) throw new Error(`TL drawer me \"${label}\" nahi mila`);
+  }
+  const board = FF.agentBoard.sections(person);
+  for (const label of ['Class group · VC4 · VC20 · VC5+', 'TL ID-wise stock', '1,054', 'data-ab-open=']) {
+    if (!board.html.includes(label)) throw new Error(`TL 360 board me \"${label}\" nahi mila`);
   }
   FF.app.closeDrawer();
 });

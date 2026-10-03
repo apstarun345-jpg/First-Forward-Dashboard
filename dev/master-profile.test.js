@@ -93,7 +93,11 @@ test('class-wise issuance table: last month, this month, stock', async () => {
   assert.deepEqual([vc4.last, vc4.cur, vc4.stock], [60, 90, 10]);
   assert.deepEqual([vc20.last, vc20.cur, vc20.stock], [20, 30, 4]);
   const html = MP.html(pr);
-  assert.match(html, /Issuance class-wise/); assert.match(html, /Total issuance/); assert.match(html, /mp-kpis/); assert.match(html, /Class-wise issuance/);
+  assert.match(html, /Issuance class-wise/); assert.match(html, /mp-kpis/); assert.match(html, /Class-wise issuance/);
+  // v3.44 — summary ab VC4 · VC20 · VC5+ teen alag rows me (Commercial ek row me nahi chhupta).
+  assert.match(html, /mp-group-tbl/);
+  for (const label of ['VC4', 'VC20', 'VC5+']) assert.ok(html.includes(`<b>${label}</b>`), `${label} group row missing`);
+  assert.match(html, /Total<\/b><\/td><td class="num"><b>80<\/b><\/td><td class="num"><b>120<\/b>/);
 });
 
 test('Direct + High/Medium = TAG REQUIRED (FF and GV); Low = no dispatch', async () => {

@@ -271,6 +271,31 @@ window.FF = window.FF || {};
     'Current Month · Total CV', 'Current Month · Total Issuance', 'Expected In Month', 'Runrate (VC4)', 'Runrate (NVC4)', 'Runrate',
     'TL Last Month (VC4)', 'TL Last Month (Comm.)', 'TL Last Month Total', 'TL Current Month (VC4)', 'TL Current Month (NVC4)', 'TL Total Activation (MTD)',
     'Avg Runrate (VC4)', 'Avg Runrate (NVC4)', 'eRunrate', 'Supervisor ID'];
+  /** GV REPORT me class ka detail: current month me VC5/VC6/VC7/VC12/VC16 columns aati hain (bache hue
+   *  commercial tags = VC20), last month me sirf VC4 + NVC4 (commercial total) hota hai.
+   *  Ye helper sheet ke numbers ko hi groups (VC4 · VC20 · VC5+) me badalta hai — kuch banata nahi. */
+  function reportMonthBins(row, period) {
+    if (!row) return null;
+    const prefix = period === 'last' ? 'last' : 'cur';
+    const raw = (key) => {
+      const value = row[`${prefix}${key}`];
+      return value === null || value === undefined || value === '' || !Number.isFinite(Number(value)) ? null : Math.max(0, Number(value));
+    };
+    const vc4 = raw('Vc4'), comm = raw('Comm'), total = raw('Total');
+    if (vc4 === null && comm === null && total === null) return null;
+    const totalN = total !== null ? total : (vc4 !== null && comm !== null ? vc4 + comm : null);
+    const bins = { VC4: vc4 || 0, VC20: null, 'VC5+': null, comm: comm || 0, total: totalN || 0, split: false };
+    if (period === 'cur' && row.curClassAvailable) {
+      const detail = ['VC5', 'VC6', 'VC7', 'VC12', 'VC16'].reduce((n, cls) => n + (Number(row.curByClass && row.curByClass[cls]) || 0), 0);
+      bins['VC5+'] = detail;
+      bins.VC20 = Math.max(0, bins.comm - detail);
+      bins.split = true;
+    }
+    return bins;
+  }
+  function reportSheetBins(row) {
+    return { last: reportMonthBins(row, 'last'), cur: reportMonthBins(row, 'cur') };
+  }
   async function loadReport(opts) {
     const rc = reportCfg();
     const headerRow = rc.headerRow || 4;
@@ -280,6 +305,13 @@ window.FF = window.FF || {};
     const cell = (row, key) => D.cellText(row[REPORT_COLS[key]]);
     const num = (row, key) => D.cellNumber(row[REPORT_COLS[key]]);
     const hasNum = (row, key) => { const value = num(row, key); return value !== null && value !== undefined; };
+    // Sheet me cell khaali hai ya asli 0 — dono alag cheez hain. Ye flags decide karte hain ki GV REPORT
+    // ko authoritative maana jaye ya tag-ledger (EIR / GV Master) se fallback lena pade.
+    const AGENT_MONTH_COLS = {
+      last: ['lastVc4', 'lastComm', 'lastTotal'],
+      cur: ['curVc4', 'curComm', 'curTotal']
+    };
+    const CUR_CLASS_COLS = ['curVc4', 'curVc5', 'curVc6', 'curVc7', 'curVc12', 'curVc16'];
     const rows = [];
     for (const r of t.rows) {
       const agentId = U.clean(cell(r, 'agentId'));
@@ -303,6 +335,13 @@ window.FF = window.FF || {};
         todayIssued: num(r, 'todayIssued') || 0, curDays: num(r, 'curDays') || 0, replace: num(r, 'replace') || 0, chassis: num(r, 'chassis') || 0,
         curVc4: num(r, 'curVc4') || 0, curComm: num(r, 'curComm') || 0, curTotal: num(r, 'curTotal') || 0,
         curByClass: Object.fromEntries([['VC4', 'curVc4'], ['VC5', 'curVc5'], ['VC6', 'curVc6'], ['VC7', 'curVc7'], ['VC12', 'curVc12'], ['VC16', 'curVc16']].map(([k, key]) => [k, num(r, key) || 0])),
+        // 🔎 Blank vs 0: GV REPORT hi GV ka live source hai. Jab sheet me cell bhari hui hai to wahi
+        // number final mana jayega (tag-ledger sirf tab jab sheet ka period khaali ho).
+        lastAvailable: AGENT_MONTH_COLS.last.some((key) => hasNum(r, key)),
+        curAvailable: AGENT_MONTH_COLS.cur.some((key) => hasNum(r, key)),
+        curClassAvailable: CUR_CLASS_COLS.some((key) => hasNum(r, key)),
+        stockClassAvailable: ['stockVc12', 'stockVc16', 'stockVc4', 'stockVc5', 'stockVc6', 'stockVc7'].some((key) => hasNum(r, key)),
+        tlStockAvailable: ['tlStockVc4', 'tlStockComm', 'tlStockTotal'].some((key) => hasNum(r, key)),
         expected: num(r, 'expected') || 0, runrateVc4: num(r, 'runrateVc4') || 0, runrateComm: num(r, 'runrateComm') || 0, runrate: num(r, 'runrate') || 0,
         // GV REPORT repeats the TL-level snapshot on every agent row. Preserve blank-vs-zero so
         // masterProfile can pick one TL snapshot instead of summing the repeated values (or
@@ -875,7 +914,7 @@ window.FF = window.FF || {};
     DATASETS, preload, refresh, need, get, error, reset, enabled, wanted, retryNow,
     normClass, classGroup, clsNum,
     rows, masterRows: rows, issuanceRows, eirDailyRows, liveDailyRows, gvToday, masterTodayRows, todayKey, months, latestDate, summary, dailySeries, weekly, byDim, agentRollup, tlRollup, directRollup, people,
-    REPORT_COLS, REPORT_COLS_LABELS,
+    REPORT_COLS, REPORT_COLS_LABELS, reportMonthBins, reportSheetBins,
     get state() { return state; },
     get loadedAt() { return state.loadedAt; },
     get loading() { return state.loading; }

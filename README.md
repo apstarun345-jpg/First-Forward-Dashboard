@@ -1,4 +1,4 @@
-# First Forward Dashboard — First Forward + GV Partner (v3.43)
+# First Forward Dashboard — First Forward + GV Partner (v3.44)
 
 Colourful dashboard website built directly on top of **do Google Sheets**:
 
@@ -13,6 +13,24 @@ aur ek **⚖️ GV vs First Forward** page side-by-side comparison deta hai.
 Koi database nahi, koi manual upload nahi — website Google Sheet se data padhti hai
 (Google Visualization API / `gviz`) through a small Node server that also handles **login, users,
 permissions and settings**. Zero npm dependencies.
+
+## ✨ v3.44.0 — 🧾 GV REPORT sheet-first — TL ka "440" band · VC4 · VC20 · VC5+ · TL ID-wise stock
+
+- **🧾 Sheet-first rule (GV):** GV REPORT sheet ka number final; tag-ledger (EIR / GV Master) sirf tab jab
+  sheet ka cell **khaali** ho (sheet ka asli 0 bhi 0 rehta hai). Pehle `Math.max(sheet, ledger)` se
+  TL **APS011919** app me **440** dikh raha tha jabki sheet me **332** hai — ab har jagah (GV Performance
+  agents + TLs, 360 board, Master Search drawer, Agent/TL Summary) **332**; farq ho to note me
+  `Last: sheet 332 vs tag ledger 440 (Δ +108)` likha aata hai. TL-wise table me **TL ID** column +
+  Last/MTD = GV REPORT ka **TL snapshot** (members ka jod dim me).
+- **🎯 VC4 · VC20 · VC5+:** naya **Class group** table (GV + FF) — rows VC4/VC20/VC5+/Total, columns
+  **last month · MTD · Stock**, har cell clickable (`&f=vc4|vc20|vc5p`). GV me VC4 + NVC4 sheet se,
+  VC20/VC5+ ka batwara sheet ke class columns / tag-ledger mix se (source line me likha rehta hai).
+- **🆔 TL ID-wise stock (drawer me sabse neeche):** **Naam · Agent ID · TL ID · Stock VC4 · Stock Comm ·
+  Stock total**, footer **agents ke paas / own / = TL TOTAL · 🆔 id** (own + agents = 1054 jaisa sheet).
+  Har row click = agent 360 · har stock cell click = us ID ka stock (class → barcode). Nav chip
+  **🆔 TL ID stock**.
+- Tests: naya `dev/gv-sheet-truth.test.js` (asli APS011919 rows — 332 / 27 / 1054 + group bins + clickable
+  TL-ID table) · `npm test` **425 pass** · docs: [WHATS-NEW-v3.44.0.md](WHATS-NEW-v3.44.0.md).
 
 ## ✨ v3.43.0 — 📊 REPORT data everywhere — Home search v2 + FF/GV Summary me poori data table (same numbers)
 

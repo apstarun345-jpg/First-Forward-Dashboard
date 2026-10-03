@@ -21,8 +21,8 @@ window.FF = window.FF || {};
     try {
       const tag = document.querySelector('script[src*="config.js?v="]') || document.querySelector('script[src*="app.js?v="]');
       const m = tag && /[?&]v=([\w.]+)/.exec(tag.getAttribute('src') || '');
-      return m ? m[1] : '66';
-    } catch { return '66'; }
+      return m ? m[1] : '67';
+    } catch { return '67'; }
   })();
 
   // Page id → uske liye zaroori modules (order matter karta hai: dependency pehle).
