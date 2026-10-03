@@ -1238,6 +1238,16 @@ window.FF = window.FF || {};
     const agentNames = new Set(list.map((r) => norm(r.agentName)));
     const agentIds = new Set(list.map((r) => clean(r.agentId).toUpperCase()).filter(Boolean));
     const exactTeamIssuance = hasMasterTlIdRows ? masterTeamIssuance : gvTeamRows(gvCanonicalIssuanceRows(), list);
+    // 🟢 TL AAJ LIVE: same GV Master team rows as the agent/team issuance cards.
+    const todayTeamRows = (exactTeamIssuance || []).filter((r) => U.dateKey(r.date || r.d || U.fromDateKey(r.key || '')) === U.dateKey(new Date()));
+    const todayTeam = {
+      vc4: U.sum(todayTeamRows, (r) => r.group === 'VC4' ? num(r.n) || 1 : 0),
+      comm: U.sum(todayTeamRows, (r) => r.group !== 'VC4' ? num(r.n) || 1 : 0),
+      total: U.sum(todayTeamRows, (r) => num(r.n) || 1),
+      replacement: U.sum(todayTeamRows, (r) => /replacement/i.test(r.status || r.type || '') ? num(r.n) || 1 : 0),
+      chassis: U.sum(todayTeamRows, (r) => /chassis/i.test(r.tagType || r.vrnType || '') ? num(r.n) || 1 : 0)
+    };
+    out.today = todayTeam;
     // Count each selected GV Master tag once; synchronize member rows as well as TL cards.
     // If GV Master has no team rows, preserve the previous GV REPORT / EIR fallback behavior.
     applyExactGvAgentMonths(list, exactTeamIssuance, globalCurYm, globalLastYm, hasMasterTlIdRows);
@@ -1370,6 +1380,15 @@ window.FF = window.FF || {};
   const tagChip = (n) => `<b class="sug-chip direct">🏷️ ${fmt(n)} tags</b>`;
   const mobileCell = (m) => (!canContacts() ? '<span class="dim">🔒</span>' : m ? `<a href="tel:${esc(m)}">📞 ${esc(m)}</a>` : '<span class="dim">—</span>');
   const kpi = (label, value, foot, tone, kpiSpec) => `<div class="mp-kpi ${tone || ''}${kpiSpec ? ' kpi-clickable' : ''}"${kpiSpec ? ` data-kpi="${esc(kpiSpec)}" role="button" tabindex="0"` : ''}><small>${esc(label)}</small><b>${value}</b>${foot ? `<em>${foot}</em>` : ''}</div>`;
+
+  const todayKpiHtml = (pr, isTl) => {
+    const t = pr && pr.today;
+    const tk = U.dateKey(new Date());
+    const spec = isTl
+      ? `src=gv&scope=day&date=${tk}&tl=${encodeURIComponent(pr.name || '')}&tlId=${encodeURIComponent(pr.id || '')}`
+      : `src=gv&scope=day&date=${tk}&agent=${encodeURIComponent(pr.name || '')}&agentId=${encodeURIComponent(pr.id || '')}`;
+    return kpi('🟢 Aaj ka Live GV', t ? fmt(t.total) : '—', t ? `VC4 ${fmt(t.vc4)} · Commercial ${fmt(t.comm)} · ${isTl ? 'TL + all agents' : 'GV Master'}` : 'GV Master se live snapshot', 'k0', spec);
+  };
   const cell = (label, value) => `<div><small>${esc(label)}</small><b>${value}</b></div>`;
 
   /** Net (after stock) and gross (without stock deduction), with gross visually emphasized. */
@@ -1665,6 +1684,7 @@ window.FF = window.FF || {};
       ${growthCell(pr)}
     </div>`;
     const kpis = `<div class="mp-kpis">
+      ${pr.ch === 'gv' ? todayKpiHtml(pr, isTl) : ''}
       ${kpi(isTl ? 'TL stock (total)' : 'Agent stock', fmt(s.total), `${isTl && ownAgentsChips ? `${ownAgentsChips} · ` : ''}VC4 ${fmt(s.vc4)} · Commercial ${fmt(s.comm)}`, 'k1', stockSpec)}
       ${isTl ? '' : kpi('TL stock', ts.has ? fmt(ts.total) : '—', ts.has ? `${ownAgentsChips ? `${ownAgentsChips} · ` : ''}VC4 ${fmt(ts.vc4)} · Comm ${fmt(ts.comm)}` : (pr.direct ? 'Direct — koi TL nahi' : ''), 'k2', tlStockSpec)}
       ${kpi('Dispatch priority', prioChip(pr.priority), (pr.calc && pr.calc.total.cover != null ? `Cover ${fmt(pr.calc.total.cover, true)} din (all tags)` : (d.cover != null ? `Cover ${fmt(d.cover, true)} din` : '')) + (isTl ? ` · <span class="mp-linkish">agents ki list 👉</span>` : ''), 'k3', isTl ? peopleSpec : stockSpec)}

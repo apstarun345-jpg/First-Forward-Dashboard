@@ -8,6 +8,10 @@ window.FF = window.FF || {};
   const U = FF.util;
   const TTL_MS = Infinity; // no auto expiry — data stays until the ↻ button / browser reload
   const cache = new Map(); // key → { t, promise }
+  // Tiny live endpoints are shared across pages/preloader so multiple renders don't hit Google twice.
+  const todayCache = { at: 0, value: null, promise: null };
+  const gvTodayCache = { at: 0, value: null, promise: null };
+  const TODAY_TTL = 25e3;
   let lastLoadAt = null;
   let lastSource = '';
 
@@ -160,21 +164,47 @@ window.FF = window.FF || {};
     return promise;
   }
 
-  function clearCache() { cache.clear(); }
+  function clearCache() {
+    cache.clear();
+    todayCache.at = 0; todayCache.value = null; todayCache.promise = null;
+    gvTodayCache.at = 0; gvTodayCache.value = null; gvTodayCache.promise = null;
+  }
 
-  /** ⚡ Aaj ka live feed (chhoti server query): GV = GV Master sheet, FF = EIR. */
-  function today(opts) {
+  function endpointJson(path, cacheState, opts) {
     const o = opts || {};
+    const fresh = !!o.fresh;
+    const now = Date.now();
+    if (!fresh && cacheState.value && now - cacheState.at < TODAY_TTL) return Promise.resolve({ ...cacheState.value, cached: true });
+    if (cacheState.promise && !fresh) return cacheState.promise;
+    const base = path || '';
+    const url = `${base}${fresh ? '?fresh=1' : ''}`;
+    const promise = fetch(url, { credentials: 'same-origin', cache: 'no-store', headers: { 'X-Requested-With': 'FF-Dashboard' } })
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`live feed HTTP ${res.status}`))))
+      .then((json) => {
+        if (json && json.ok === false) throw new Error(json.error || 'live feed unavailable');
+        cacheState.value = json; cacheState.at = Date.now();
+        return json;
+      })
+      .finally(() => { if (cacheState.promise === promise) cacheState.promise = null; });
+    cacheState.promise = promise;
+    return promise;
+  }
+
+  /** ⚡ Combined today feed: FF + GV + 30-day context. Shared so Home/preloader don't duplicate it. */
+  function today(opts) {
     const base = FF.config.todayPath || '/api/today';
-    const url = `${base}${o.fresh ? '?fresh=1' : ''}`;
-    return fetch(url, { credentials: 'same-origin', cache: 'no-store', headers: { 'X-Requested-With': 'FF-Dashboard' } })
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`today feed HTTP ${res.status}`))))
-      .then((json) => { if (json && json.ok === false) throw new Error(json.error || 'today feed unavailable'); return json; });
+    return endpointJson(base, todayCache, opts);
+  }
+
+  /** 🟢 Fast GV-only today feed: GV Master current-day data without FF/history scans. */
+  function gvToday(opts) {
+    const base = FF.config.gvTodayPath || '/api/gv-today';
+    return endpointJson(base, gvTodayCache, opts);
   }
 
   // Escape a literal for the gviz query language (double-quoted string).
   function lit(value) { return `"${String(value).replace(/["\\]/g, '')}"`; }
 
-  FF.data = { query, today, clearCache, parseGviz, cellText, cellNumber, cellDate, textRows, looksLikeEIR, lit, QueryError,
+  FF.data = { query, today, gvToday, clearCache, parseGviz, cellText, cellNumber, cellDate, textRows, looksLikeEIR, lit, QueryError,
     get lastLoadAt() { return lastLoadAt; }, get lastSource() { return lastSource; } };
 })(window.FF);
