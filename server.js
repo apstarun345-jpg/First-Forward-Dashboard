@@ -4628,7 +4628,7 @@ async function handleApi(req, res, url) {
     const batch = workspaceId('tagbatch');
     const created = drafts.map((d) => ({
       id: nextTagReqId(usedIds), at: now, batch, by: ctx.by, byName: ctx.byName,
-      employee: ctx.employee, agent: d.agent,
+      employee: ctx.employee, employeeToken: ctx.employeeToken || '', agent: d.agent,
       ...(ctx.source ? { source: ctx.source, ip: ctx.ip } : {}),
       status: 'pending', note: ctx.note || '', adminNote: '',
       rows: d.rows, total: d.total, ...(d.metrics ? { metrics: d.metrics } : {}),
@@ -5060,9 +5060,10 @@ async function handleApi(req, res, url) {
       if (!publicRateOk(`tag:${ip}`, 15, 60 * 60e3)) throw new HttpError(429, 'Is device se bahut requests aa gayi hain — kuch der baad try karo.');
       drafts.forEach((d) => { d.dupes = tagAgentDupes([{ ...d.agent, rows: d.rows }]); });
       const note = shortText(body.note, 300);
+      const employeeToken = publicEmployeeToken(body.employeeToken);
       const out = await createTagBatch(drafts, {
         by: `public:${normUser(employeeName) || 'employee'}`, byName: employeeName,
-        employee: { name: employeeName, ...(office ? { office } : {}) },
+        employee: { name: employeeName, ...(office ? { office } : {}) }, employeeToken,
         source: 'public-link', ip: String(ip || '').slice(0, 45), note, updatedBy: 'public-link'
       });
       const n = out.created.length;
@@ -5082,6 +5083,7 @@ async function handleApi(req, res, url) {
       return sendJson(res, 201, {
         ok: true,
         batch: { id: out.batch, total: out.total, agents: n, rows: out.rows },
+         employeeToken,
         request: tagBatchSummary(out.created[0]),
         requests: out.created.map(tagBatchSummary),
         warnings: dupReqs.length ? [{
@@ -5112,6 +5114,7 @@ async function handleApi(req, res, url) {
     if (!publicRateOk(`tag:${ip}`, 15, 60 * 60e3)) throw new HttpError(429, 'Is device se bahut requests aa gayi hain — kuch der baad try karo.');
     // 🔁 Duplicate: same employee ki active request me same agent × class pehle se hai?
     const dupes = publicTagDupes(employeeName, rows);
+    const employeeToken = publicEmployeeToken(body.employeeToken);
     const now = new Date().toISOString();
     const row = {
       id: nextTagReqId(), at: now,
@@ -5144,7 +5147,7 @@ async function handleApi(req, res, url) {
       ok: true,
       request: {
         id: row.id, at: row.at, status: row.status, total: row.total, rows: rows.length,
-        byName: employeeName, sheetSync: !!row.sheetSync, duplicates: dupes.length
+        byName: employeeName, sheetSync: !!row.sheetSync, duplicates: dupes.length, employeeToken
       },
       warnings: dupes.length ? [{
         code: 'duplicate', count: dupes.length,
@@ -5170,6 +5173,34 @@ async function handleApi(req, res, url) {
     const rows = Array.isArray(body.rows) ? body.rows.slice(0, 150) : [];
     const dupes = publicTagDupes(employeeName, rows);
     return sendJson(res, 200, { ok: true, name: employeeName, checked: rows.length, duplicates: dupes });
+  }
+  // 👤 Employee link identity — device par save hone wala private token.
+  function publicEmployeeToken(raw) {
+    const v = String(raw || '').trim();
+    return /^[A-Za-z0-9_-]{24,120}$/.test(v) ? v.slice(0, 120) : crypto.randomBytes(24).toString('base64url');
+  }
+  function employeeStatusByToken(token) {
+    const key = String(token || '').trim();
+    return key ? (workspaceStore().tagRequests || []).filter((r) => r && r.source === 'public-link' && r.employeeToken === key) : [];
+  }
+  function employeeStatusSummary(token) {
+    const rows = employeeStatusByToken(token), counts = { all: rows.length, pending: 0, approved: 0, dispatched: 0, rejected: 0 };
+    let requestedTags = 0, approvedTags = 0;
+    rows.forEach((r) => { const st = String(r.status || 'pending').toLowerCase(); if (counts[st] !== undefined) counts[st]++; requestedTags += (r.rows || []).reduce((n, x) => n + (Number(x.requested ?? x.approved) || 0), 0); approvedTags += (r.rows || []).reduce((n, x) => n + (Number(x.approved) || 0), 0); });
+    return { totalRequests:counts.all, pending:counts.pending, approved:counts.approved, dispatched:counts.dispatched, rejected:counts.rejected, requestedTags, approvedTags,
+      requests:rows.slice(-100).reverse().map((r) => ({ id:r.id, at:r.at, status:r.status, total:r.total, rows:(r.rows||[]).length, agentName:(r.agent&&r.agent.name)||'', agentId:(r.agent&&r.agent.agentId)||'', classes:(r.rows||[]).map(x=>({cls:x.cls,requested:x.requested,approved:x.approved})) })) };
+  }
+  if (p === '/api/public/tag-request/employee-status' && method === 'GET') {
+    const token = String(url.searchParams.get('token') || '').trim();
+    if (!/^[A-Za-z0-9_-]{24,120}$/.test(token)) throw new HttpError(400, 'Employee status token missing hai.');
+    const ip = clientIp(req); if (!publicRateOk(`tagemp:${ip}`, 60, 10 * 60e3)) throw new HttpError(429, 'Bahut zyada status checks — thodi der baad try karo.');
+    return sendJson(res, 200, { ok:true, ...employeeStatusSummary(token) });
+  }
+  if (p === '/api/public/tag-request/contact' && method === 'GET') {
+    const token = String(url.searchParams.get('token') || '').trim(), agentId = tagDigits(url.searchParams.get('agentId') || ''), agentName = tagNameKey(url.searchParams.get('agentName') || ''), channel = String(url.searchParams.get('channel') || '').toLowerCase() === 'gv' ? 'gv' : 'ff';
+    if (!/^[A-Za-z0-9_-]{24,120}$/.test(token) || (!agentId && !agentName)) return sendJson(res, 200, { ok:true, found:false });
+    for (const r of employeeStatusByToken(token).slice().reverse()) { const a = r && r.agent || {}; const sameId = agentId && tagDigits(a.agentId) === agentId, sameName = agentName && tagNameKey(a.name) === agentName, sameChannel = !a.channel || String(a.channel).toLowerCase() === channel; if ((sameId || sameName) && sameChannel && (a.address || a.pincode || a.mobile)) return sendJson(res, 200, { ok:true, found:true, contact:{ mobile:a.mobile||'', address:a.address||'', pincode:a.pincode||'' }, at:r.at }); }
+    return sendJson(res, 200, { ok:true, found:false });
   }
   if (p === '/api/public/tag-request/status' && method === 'GET') {
     // 📱 v3.30 — agent ke mobile number se saari requests (jo request lagate waqt diya tha). Minimum
