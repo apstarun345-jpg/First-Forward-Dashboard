@@ -30,6 +30,10 @@ test('GV Master truth mapping stays authoritative', () => {
   assert.match(server, /cfg\.date \|\| pick\('date'\)/);
   assert.match(home, /All Commercial · VC20 \+ VC5\+/);
   assert.match(home, /Expected this month/);
+  assert.match(home, /ffIssuanceLagDays/);
+  assert.match(home, /reportedSc/);
+  assert.match(home, /aaj exclude/);
+  assert.match(home, /reported din/);
   assert.match(home, /FF\.data\.gvToday/);
   assert.match(home, /AAJ KA LIVE|Aaj ka live/);
   assert.match(index, /homeKpiFix\.css/);
