@@ -45,7 +45,7 @@ window.FF = window.FF || {};
     rangeReport: ['rangeReport'],
     tv: ['tv'],
     teamMap: ['map'],
-    dashboard: ['dashboard', 'wowzone'],
+    dashboard: [...WOW_DEPS, 'dashboard'],
     trend: ['trend'],
     stock: ['stock'],
     ffCommission: [...INSIGHT_DEPS],
