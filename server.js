@@ -851,6 +851,14 @@ function countByDateClass(table) {
   }
   return rows;
 }
+// Date cell helper: gviz can return typed Date(), text dates, formatted dates, or Sheets serials.
+// (Live-feed helpers ke saath hi rakha gaya hai taaki countByDateClass ke saath hi test/extract ho sake.)
+function serverDateFromCell(row, index) {
+  const cell = row && row.c && row.c[index];
+  if (!cell) return '';
+  const direct = serverDate(cell.v);
+  return direct || serverDate(cell.f);
+}
 
 /**
  * 🛡️ Grouped daily-count query — live sheet me date column kabhi date-typed hota hai, kabhi text.
@@ -1090,6 +1098,15 @@ function serverColLetter(index) {
   while (n > 0) { const r = (n - 1) % 26; out = String.fromCharCode(65 + r) + out; n = Math.floor((n - 1) / 26); }
   return out;
 }
+function serverColIndex(letter) {
+  let n = 0;
+  for (const ch of String(letter || '').toUpperCase()) {
+    const code = ch.charCodeAt(0) - 64;
+    if (code < 1 || code > 26) return -1;
+    n = n * 26 + code;
+  }
+  return n - 1;
+}
 async function resolveGvServerColumns(settings, force) {
   const cfg = settings.gv && settings.gv.master || {};
   const tab = cfg.tab || 'GV Master';
@@ -1119,7 +1136,32 @@ async function resolveGvServerColumns(settings, force) {
       }
       return '';
     };
-    const cols = { date: pick('date') || fallback.date, cls: pick('cls') || fallback.cls, tagId: pick('tagId') || fallback.tagId, status: pick('status') || fallback.status, tagType: pick('tagType') || fallback.tagType };
+    // Configured letter tabhi bharosa ke laayak hai jab us column ki heading expected field jaisi ho;
+    // warna (column shift / galat mapping) header probe ka column use karo — client-side mapFields bhi
+    // yahi karta hai. Kuch na mile to configured letter safe fallback rehta hai.
+    const headerAt = (letter) => { const i = serverColIndex(letter); return i >= 0 ? (normalized[i] || '') : ''; };
+    const headerMatches = (field, letter) => {
+      const label = headerAt(letter);
+      if (!label) return false;
+      return (GV_SERVER_HEADER_SYNS[field] || []).some((syn) => {
+        const want = normalizeServerHeading(syn);
+        return want && (label === want || label.includes(want) || want.includes(label));
+      });
+    };
+    const resolveCol = (field, ...configured) => {
+      const letter = configured.find((x) => x) || '';
+      if (letter && headerMatches(field, letter)) return letter;   // config letter header se confirm
+      return pick(field) || letter || '';                          // warna probe, phir bhi na mile to config
+    };
+    const dateCol = resolveCol('date', cfg.date);
+    const cols = {
+      // Fallback chain: configured letter → header probe → configured/default letter.
+      date: dateCol || cfg.date || pick('date') || fallback.date,
+      cls: resolveCol('cls', cfg.cch, cfg.vClass) || fallback.cls,
+      tagId: resolveCol('tagId', cfg.tagId) || fallback.tagId,
+      status: resolveCol('status', cfg.status) || fallback.status,
+      tagType: resolveCol('tagType', cfg.tagType) || fallback.tagType
+    };
     gvServerHeaderCache.set(cacheKey, { at: Date.now(), cols });
     return { ...fallback, ...cols, via: 'header' };
   } catch (err) {
@@ -1127,14 +1169,6 @@ async function resolveGvServerColumns(settings, force) {
     return { ...fallback, via: 'config', warning: err.message };
   }
 }
-// Date cell helper: gviz can return typed Date(), text dates, formatted dates, or Sheets serials.
-function serverDateFromCell(row, index) {
-  const cell = row && row.c && row.c[index];
-  if (!cell) return '';
-  const direct = serverDate(cell.v);
-  return direct || serverDate(cell.f);
-}
-
 async function reportSnapshot(source) {
   const s = db.settings;
   const isGv = source === 'gv';

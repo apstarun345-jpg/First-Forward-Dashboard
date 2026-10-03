@@ -13,7 +13,7 @@ test('GV Master truth mapping stays authoritative', () => {
   const home = read('home.js');
   const index = read('index.html');
 
-  assert.match(gv, /const tlId = supervisorId \|\| gvTlId/);
+  assert.match(gv, /const tlId = gvTlId \|\| supervisorId/);
   assert.match(gv, /masterTlIds/);
   assert.match(truth, /r\.tlId, r\.supervisorId, r\.gvTlId/);
   assert.match(profile, /A=UNIQUE_ID/);
