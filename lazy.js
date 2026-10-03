@@ -29,7 +29,7 @@ window.FF = window.FF || {};
   // Lazy-loading me sirf page file load karna kaafi nahi tha: kuch purane modules
   // agentBoard/masterProfile/cockpit/insights jaise helpers ko render-time par use karte hain.
   // In dependencies ko yahin centralize karke page-open errors ko prevent karte hain.
-  const INSIGHT_DEPS = ['insights', 'direct', 'certificates', 'cockpit'];
+  const INSIGHT_DEPS = ['insights', 'directAgents', 'certificates', 'cockpit'];
   const PROFILE_DEPS = [...INSIGHT_DEPS, 'gvTruth', 'pdf', 'masterProfile'];
   const SUMMARY_DEPS = [...PROFILE_DEPS, 'agentSummary'];
   const WOW_DEPS = [...INSIGHT_DEPS, 'wow', 'wowzone'];
