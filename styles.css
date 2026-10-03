@@ -4991,3 +4991,20 @@ html[data-theme="dark"] .hm-toprow .rank { background: #1e293b; color: #a5b4fc; 
 .nci-priority{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:#f1f5f9}.nci-priority.critical{background:#fee2e2}.nci-priority.action{background:#fef3c7}.nci-priority.info{background:#e0f2fe}
 .nci-main{min-width:0}.nci-top{display:flex;gap:10px;align-items:center}.nci-top b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.nci-time{margin-left:auto;white-space:nowrap;color:var(--muted);font-size:11px}.nci-time strong{color:#4f46e5}.nci-main p{margin:3px 0;color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.nci-meta{display:flex;gap:10px;color:#94a3b8;font-size:10px}
 @media(max-width:700px){.notify-center-item{grid-template-columns:32px minmax(0,1fr)}.notify-center-item>.btn{grid-column:2;justify-self:start}.nci-time{font-size:10px}.notify-center-filters{width:100%}.notify-center-filters .input{flex:1}}
+
+/* ⚡ v3.48 Fast UI mode — less layout/paint work, especially on large reports. */
+.card, .kpi, .panel, .table-card, .report-card, .chart-card { content-visibility: auto; contain-intrinsic-size: 180px; }
+.tbl-wrap, .table-wrap, .data-table-wrap { contain: layout paint; }
+.nav-item, .btn, .icon-btn { -webkit-tap-highlight-color: transparent; }
+@media (max-width: 768px) {
+  .topbar { backdrop-filter: none; -webkit-backdrop-filter: none; background: var(--bg); }
+  .sidebar { box-shadow: 2px 0 14px rgba(15,23,42,.18); }
+  .page { animation: none; }
+  .kpi:hover, .btn:hover, .nav-item:hover { transform: none; box-shadow: none; }
+  .kpi-grid.six { grid-template-columns: repeat(2, minmax(0,1fr)) !important; }
+  .head-actions { width: 100%; }
+  .head-actions > * { max-width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .page, .gvp-view, .gvsr-view, .btn, .kpi { animation: none !important; transition: none !important; }
+}
