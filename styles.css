@@ -5062,3 +5062,6 @@ html[data-theme="dark"] .data-fresh-card>header{background:#111827}.data-fresh-c
 .tr-employee-summary{margin:0 0 12px;padding:11px 12px;border:1px solid var(--line);border-radius:14px;background:color-mix(in srgb,var(--brand) 5%,transparent)}
 .tr-es-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:9px}.tr-es-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}.tr-es-grid>div{padding:8px 9px;border:1px solid var(--line);border-radius:10px;background:var(--card);min-width:0}.tr-es-grid small{display:block;color:var(--muted);font-size:10px}.tr-es-grid b{display:block;font-size:18px;line-height:1.2;margin-top:2px}
 @media(max-width:600px){.notification-btn{min-width:46px;width:46px;height:44px;font-size:21px}.notification-pop{top:58px;right:8px;width:calc(100vw - 16px)}.tr-es-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* 🔔 Notification quick panel readability */
+.notification-head{padding:13px 15px}.notification-head b{font-size:15px}.notification-head small{font-size:11.5px}.notification-list{max-height:540px;padding:7px}.notification-item{gap:12px;padding:12px 11px}.notification-icon{width:34px;height:34px;font-size:17px}.notification-item b{font-size:13.5px}.notification-item p{font-size:12.5px;line-height:1.48}.notification-item small{font-size:11px}
