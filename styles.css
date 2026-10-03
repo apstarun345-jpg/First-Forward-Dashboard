@@ -4894,3 +4894,79 @@ html[data-theme="dark"] .gs-source.sheet { background: #451a03; }
 html[data-theme="dark"] .gs-drop { background: #0f172a; }
 html[data-theme="dark"] .gs-col { background: #1e293b; }
 html[data-theme="dark"] .gs-chipbtn { background: #0f172a; }
+
+/* ---- 🏠 Home v2 (GV aaj live + month KPI cards + charts + stock) ------------------------------- */
+.hm-month-grid { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; }
+@media (max-width: 1100px) { .hm-month-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; } }
+@media (max-width: 620px) { .hm-month-grid { grid-template-columns: 1fr !important; } }
+.hm-stock-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+@media (max-width: 700px) { .hm-stock-grid { grid-template-columns: 1fr !important; } }
+.hm-split { display: inline-flex; gap: 10px; flex-wrap: wrap; margin-top: 2px; }
+.hm-split .ff { color: #c7d2fe; }
+.hm-split .gv { color: #99f6e4; }
+html:not([data-theme="dark"]) .hm-split .ff { color: #4338ca; }
+html:not([data-theme="dark"]) .hm-split .gv { color: #0f766e; }
+.pct-inline { font-weight: 800; }
+.pct-inline.pos { color: #bbf7d0; }
+.pct-inline.neg { color: #fecaca; }
+html:not([data-theme="dark"]) .pct-inline.pos { color: #15803d; }
+html:not([data-theme="dark"]) .pct-inline.neg { color: #b91c1c; }
+.hm-toplist { display: flex; flex-direction: column; gap: 6px; }
+.hm-toprow { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border: 1px solid var(--line, #e2e8f0); border-radius: 10px; background: var(--card, #fff); }
+.hm-toprow .rank { width: 22px; height: 22px; border-radius: 50%; background: #eef2ff; color: #4338ca; display: grid; place-items: center; font-size: 11.5px; font-weight: 800; flex: none; }
+.hm-toprow b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hm-toprow strong { font-variant-numeric: tabular-nums; }
+.hm-toprow .tag { font-size: 10px; font-weight: 800; padding: 2px 6px; border-radius: 6px; }
+.hm-toprow .tag.ff { background: #e0e7ff; color: #3730a3; }
+.hm-toprow .tag.gv { background: #ccfbf1; color: #0f766e; }
+.hm-donuts { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; }
+html[data-theme="dark"] .hm-toprow { background: #0f172a; border-color: #1e293b; }
+html[data-theme="dark"] .hm-toprow .rank { background: #1e293b; color: #a5b4fc; }
+
+/* ================================================================================================
+   🔎 MANAGEMENT → MASTER SEARCH  (v3.46) — naam type karo, click karo, poora FF + GV data usi page par.
+   Purana master-search panel (list / box) yahan nahi hai — sirf ek line ke naam-chips jab ek se zyada
+   log match karein. Report component .sr / .mp (searchReport + masterProfile) reuse karta hai.
+   ================================================================================================ */
+.msp-page .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.msp-search-card { margin: 10px 0 14px; }
+.msp-search { display: flex; align-items: center; gap: 8px; position: relative; }
+.msp-search .msp-ico { font-size: 18px; line-height: 1; }
+.msp-search .input { flex: 1 1 auto; font-size: 16px; padding: 12px 14px; }
+.msp-search .btn { flex: 0 0 auto; }
+.msp-filters { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.msp-filters .chip { cursor: pointer; }
+.msp-filters .chip.on { background: color-mix(in srgb, var(--brand) 18%, transparent); border-color: var(--brand); font-weight: 800; }
+.msp-filters .ms-register-state { margin-left: auto; }
+.msp-chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.msp-chip { border: 1px solid color-mix(in srgb, var(--muted) 26%, transparent); background: color-mix(in srgb, var(--muted) 6%, transparent); color: inherit;
+  border-radius: 999px; padding: 5px 11px; font-size: 12.5px; font-weight: 700; cursor: pointer; transition: transform .12s ease, border-color .12s ease, background .12s ease; }
+.msp-chip:hover { transform: translateY(-1px); border-color: var(--brand); }
+.msp-chip.on { background: color-mix(in srgb, var(--brand) 16%, transparent); border-color: var(--brand); }
+.msp-matches { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 0 0 10px; }
+.msp-hero { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 16px; margin-bottom: 10px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--brand) 14%, transparent), color-mix(in srgb, #0d9488 12%, transparent));
+  border: 1px solid color-mix(in srgb, var(--brand) 26%, transparent); }
+.msp-hero .msp-hero-id { flex: 1 1 auto; min-width: 0; }
+.msp-hero .msp-hero-id b { display: block; font-size: 19px; font-weight: 900; line-height: 1.2; }
+.msp-hero .msp-hero-id small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+.msp-hero .msp-hero-act { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.msp-today { margin: 0 0 12px; padding: 10px 12px; border-radius: 14px; background: color-mix(in srgb, var(--muted) 5%, transparent);
+  border: 1px solid color-mix(in srgb, var(--muted) 16%, transparent); }
+.msp-today h3 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: .05em; }
+.msp-today .dgrid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.msp-today .dcell { border-radius: 12px; padding: 8px 10px; background: var(--card, #fff); border: 1px solid color-mix(in srgb, var(--muted) 18%, transparent); min-width: 0; }
+.msp-today .dcell small { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msp-today .dcell b { display: block; font-size: 20px; font-weight: 900; line-height: 1.25; }
+.msp-today .dcell em { display: block; font-style: normal; font-size: 10.5px; color: var(--muted); font-weight: 650; }
+.msp-report { margin-top: 4px; }
+.msp-h { margin: 0 0 8px; }
+@media (max-width: 760px) {
+  .msp-today .dgrid { grid-template-columns: 1fr; }
+  .msp-hero { flex-wrap: wrap; }
+  .msp-search { flex-wrap: wrap; }
+  .msp-search .btn { width: 100%; }
+}
+[data-theme="dark"] .msp-today .dcell { background: color-mix(in srgb, #fff 6%, transparent); }
+.hm-warn { margin: 10px 0 0; padding: 8px 10px; border-radius: 10px; font-size: 12px; font-weight: 650;
+  background: color-mix(in srgb, #f59e0b 12%, transparent); border: 1px solid color-mix(in srgb, #f59e0b 34%, transparent); }

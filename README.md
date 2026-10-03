@@ -1,4 +1,4 @@
-# First Forward Dashboard — First Forward + GV Partner (v3.45)
+# First Forward Dashboard — First Forward + GV Partner (v3.46)
 
 Colourful dashboard website built directly on top of **do Google Sheets**:
 
@@ -13,6 +13,30 @@ aur ek **⚖️ GV vs First Forward** page side-by-side comparison deta hai.
 Koi database nahi, koi manual upload nahi — website Google Sheet se data padhti hai
 (Google Visualization API / `gviz`) through a small Node server that also handles **login, users,
 permissions and settings**. Zero npm dependencies.
+
+## ✨ v3.46.0 — 🏠 Home v2 (GV aaj live) + 🔎 Management → Master Search + ⚡ fast Agent/TL Summary
+
+- **🟩 GV aaj live ab pakka:** Home ka GV aaj ka number server feed (`/api/today`) se aata hai —
+  **GV Master sheet** ki chhoti grouped query (date × class, 30 din), 45s cache. Saath me VC4 · VC20 ·
+  VC5+ · **Replacement · Chassis**, aur **Expected Today** = pichhle 4 same-weekday ka average
+  (pichhla mahina bhi shaamil) + aaj ka pace. GV Master load hone par wahi snapshot card ko enrich
+  karta hai (chhota snapshot bade number ko replace nahi karta).
+- **🗓️ Asli bug fix:** server `serverDate` pehle sirf `Date(y,m,d)` + ISO samajhta tha — jis sheet me
+  date text (`03-10-2026`, `3-Oct-2026`) hai wahan GV aaj **0** dikhta tha. Ab sab formats
+  (`dev/server-date-formats.test.js`).
+- **🏠 Home v2:** (1) GV aaj live cards, (2) **is mahine ke KPI cards — har card ke andar last month vs
+  current month ka % + FF/GV split** (Last day · MTD total · VC4 · VC20 · VC5+ · Replacement · Chassis ·
+  Expected in month), (3) charts (current vs last month line, class bars, donut, same-weekday run-rate),
+  (4) **stock — FF (StockDataa) + GV (Tag Assignment)** charts aur data ke saath.
+  **Home se master search hata diya.**
+- **🔎 Management → Master Search (naya):** koi results list / box nahi — naam / ID / mobile → click →
+  **poora data usi page par** (⚖ FF + GV combined + per-channel profile). Ek se zyada match par sirf
+  ek line ke naam-chips. Topbar `/` search aur Ctrl+K palette bhi seedha yahi page kholte hain.
+  Permission key **`masterSearch`**.
+- **⚡ Agent/TL Summary fast:** list turant (memory se), GV ke bhaari datasets background me; TL search
+  par **last · current · today + stock** sync ho jaate hain; dropdown me last/mtd/aaj/stock.
+- Tests: smoke **Home v2 + Master Search page + GV TL fast open** · naya `dev/server-date-formats.test.js`
+  · docs: [WHATS-NEW-v3.46.0.md](WHATS-NEW-v3.46.0.md).
 
 ## ✨ v3.45.0 — 🧾 GV sheets ka sahi column recognition + 🎨 Agent/TL Summary ka naya interface
 
@@ -350,7 +374,8 @@ Docs: [WHATS-NEW-v3.27.0.md](WHATS-NEW-v3.27.0.md) · feature ideas: [FEATURE-ID
 
 | Page | Kya dikhata hai |
 | --- | --- |
-| **Home** | "**Hello <name> 👋**" greeting (time-based), avatar + role, FF aur GV ke snapshot cards (MTD issuance, VC4, stock, last-month same-period line), sirf aapke access wale shortcuts, aur aapka permission grid. |
+| **Home** | Greeting + status, phir: **🟩 GV · Aaj ka live** (Aaj Total · VC4 · VC20 · VC5+ · Replacement · Chassis · **Expected Today** = pichhle 4 same-weekday ka average, pichhla mahina bhi), **📅 is mahine ke KPI cards** (Last day · MTD total · VC4 · VC20 · VC5+ · Replacement · Chassis · Expected in month — **har card me last month vs current ka % + FF/GV split**), **📈 charts** (current vs last month line, class bars, donut, same-weekday run-rate) aur **📦 stock** (FF · StockDataa + GV · Tag Assignment, class-wise bars + donuts + top holders). Master search Home par **nahi** — wo Management → 🔎 Master Search page hai. |
+| **🔎 Master Search** (Management) | Koi list/box nahi — **naam / agent / TL / ID / mobile type karo → click → poora data usi page par**: ⚖ FF + GV combined (last month · current month · stock · class-wise, har number clickable → class → din → tag/barcode row) + per-channel full profile (KPI, charts, TL ke agents, Agent × Class) + 🟩 GV aaj snapshot (GV Master live). Ek se zyada match par sirf ek line ke naam-chips. |
 | **Dashboard** | KPI cards + charts (daily line current vs last month, class mix, monthly by class, **VC4 vs Commercial** compare card (MTD vs last month same period), top TLs (APS excluded), top agents, stock by class/TL, tag status, weekday pattern…). |
 | **Trend** | Daily / Weekly / Monthly / **Last vs Current** — dimension: Total, Class (VC4 / VC20 / VC5+), Type, Channel, VRN type. TL select + **agent/TL quick-find with dropdown suggestions**. |
 | **Stock** | StockDataa: **search bar (agent-wise / TL-wise / class criteria, dropdown suggestions)**. Agent → pivot Class × Tag type; TL → pivot Agent × Class; Class → pivot TL. Har view me **VC4 vs Commercial** compare, **⬇ Excel** (Sheet 1 = Summary/pivot, Sheet 2 = us agent/TL ki saari raw StockDataa rows), CSV, WhatsApp / Email share. Overview me KPIs, TL × class matrix, agent table. |
