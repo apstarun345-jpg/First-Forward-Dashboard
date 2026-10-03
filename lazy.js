@@ -93,7 +93,12 @@ window.FF = window.FF || {};
       el.onload = () => resolve(name);
       el.onerror = () => reject(new Error(`${name}.js load nahi hua`));
       document.head.appendChild(el);
-    }).catch((err) => { failed.add(name); console.warn('lazy:', err.message); return null; });
+    }).catch((err) => {
+      loaded.delete(name);
+      failed.add(name);
+      console.warn('lazy:', err.message);
+      return null;
+    });
     loaded.set(name, p);
     return p;
   }
