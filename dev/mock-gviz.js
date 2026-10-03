@@ -255,6 +255,38 @@ for (const a of AGENTS) {
   GV_REPORT.rows.push(row);
 }
 
+// 🧾 Demo (user ka asli case): TL APS011919 — GV REPORT sheet ke exact numbers, taaki preview me
+// sheet-first behaviour dikh sake (sheet ka TL total 332 / stock 1054, ledger ka jod alag se note me).
+const DEMO_TL = { id: 'APS011919', name: 'Hemalbhai Bhavsar', stockVc4: 657, stockComm: 397, stockTotal: 1054, lastVc4: 311, lastComm: 21, lastTotal: 332, curVc4: 25, curComm: 2, curTotal: 27 };
+// name, id, [stockVc4, stockComm, stockTotal], [lastVc4, lastComm, lastTotal], [curVc4, curVc5..16]
+const DEMO_TEAM = [
+  ['Taga Ram', 'APS013659', 162, 13, 175, 7, 0, 7, 5, [0, 0, 0, 0, 0]],
+  ['KAWARA RAM', 'APS04505', 107, 29, 136, 81, 0, 81, 6, [0, 0, 0, 0, 0]],
+  ['Dharma Ram Godara', 'APS016706', 44, 9, 53, 0, 0, 0, 0, [0, 0, 0, 0, 0]],
+  ['Shreeshail Vadageri', 'APS018154', 15, 1, 16, 26, 0, 26, 2, [0, 0, 0, 0, 0]],
+  ['Hemalbhai Bhavsar', 'APS011919', 329, 345, 674, 197, 21, 218, 12, [0, 0, 0, 0, 2]]
+];
+for (const [name, id, svc4, scomm, stotal, lvc4, lcomm, ltotal, cvc4, cvc5] of DEMO_TEAM) {
+  const row = new Array(GVR_COLS.length).fill('');
+  const comm = cvc5.reduce((n, v) => n + v, 0);
+  row[0] = `98${20000000 + GV_REPORT.rows.length}`; row[1] = id; row[2] = name;
+  row[3] = DEMO_TL.id; row[4] = DEMO_TL.name;
+  row[7] = svc4; row[11] = stotal; row[12] = scomm;
+  row[15] = svc4 / 8 < 8 ? '🔴 High' : '🟡 Medium';
+  row[16] = DEMO_TL.stockVc4; row[17] = DEMO_TL.stockComm; row[18] = DEMO_TL.stockTotal;
+  row[19] = 30; row[20] = lvc4; row[21] = lcomm; row[22] = ltotal; row[23] = '▲ +0%';
+  row[24] = cvc4 ? '🟢 Active Today' : 'Inactive In Month'; row[25] = '🟢 Growth'; row[26] = 0;
+  row[27] = cvc4 ? 3 : 0; row[28] = 0; row[29] = 0;
+  row[30] = cvc4; row[31] = cvc5[0]; row[32] = cvc5[1]; row[33] = cvc5[2]; row[34] = cvc5[3]; row[35] = cvc5[4];
+  row[36] = comm; row[37] = cvc4 + comm; row[38] = cvc4 + comm;
+  row[39] = (cvc4 / 2).toFixed(1); row[40] = (comm / 2).toFixed(1); row[41] = ((cvc4 + comm) / 2).toFixed(1);
+  row[42] = DEMO_TL.lastVc4; row[43] = DEMO_TL.lastComm; row[44] = DEMO_TL.lastTotal;
+  row[45] = DEMO_TL.curVc4; row[46] = DEMO_TL.curComm; row[47] = DEMO_TL.curTotal;
+  row[48] = (DEMO_TL.curVc4 / 2).toFixed(1); row[49] = (DEMO_TL.curComm / 2).toFixed(1); row[50] = (DEMO_TL.curTotal / 2).toFixed(1);
+  row[51] = DEMO_TL.id;
+  GV_REPORT.rows.push(row);
+}
+
 // Optional unified movement ledger used by stock-balance reconciliation.
 const STOCK_MOVEMENTS = { cols: ['Date', 'Channel', 'Type', 'Quantity', 'Class', 'From', 'To', 'Reference', 'Note'].map((l, i) => ({ id: L(i), label: l, type: i === 0 ? 'date' : i === 3 ? 'number' : 'string' })), rows: [] };
 for (let back = 55; back >= 0; back -= 5) {
