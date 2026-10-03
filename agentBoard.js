@@ -284,7 +284,7 @@ window.FF = window.FF || {};
     const bins = groupsOf(whoAm === 'tl' ? c.tlPr : c.pr);
     if (!bins || (!bins.last && !bins.cur && !(bins.stock && num(bins.stock.total)))) return '';
     const stock = bins.stock || (r && r.stock ? { VC4: r.stock.vc4, VC20: null, 'VC5+': null, total: r.stock.total } : null);
-    const spec = (scope, f) => ({ src: c.ch, channel: c.ch, scope, ...(scope === 'month' ? { ym: c.ymLast } : scope === 'stock' ? {} : { ym: c.ymCur }), ...(whoAm === 'tl' ? { tl: r.name } : { agent: r.name, agentId: r.id }), f });
+    const spec = (scope, f) => ({ src: c.ch, channel: c.ch, scope, ...(scope === 'month' ? { ym: c.ymLast } : scope === 'stock' ? {} : { ym: c.ymCur }), ...(whoAm === 'tl' ? { tl: r.name, tlId: r.id } : { agent: r.name, agentId: r.id }), f });
     const cell = (value, sp, title) => value === null || value === undefined
       ? '<td class="num dim">—</td>'
       : `<td class="num ab-cellclick"${kpiAttr(sp, title)}>${fmt(value)}</td>`;
@@ -363,7 +363,7 @@ window.FF = window.FF || {};
     const who = target && target !== c.row ? `TL ${r.name}` : (c.tlView ? 'TL' : 'Agent');
     const p = c.tlView ? 'TL ' : '';
     const base = { src: ch, channel: ch };
-    const specFor = (scope, who_, extra) => ({ ...base, scope, ...(scope === 'month' ? { ym: c.ymLast } : scope === 'stock' ? {} : { ym: c.ymCur }), ...(who_ === 'tl' ? { tl: r.name } : { agent: r.name, agentId: r.id }), ...extra });
+    const specFor = (scope, who_, extra) => ({ ...base, scope, ...(scope === 'month' ? { ym: c.ymLast } : scope === 'stock' ? {} : { ym: c.ymCur }), ...(who_ === 'tl' ? { tl: r.name, tlId: r.id } : { agent: r.name, agentId: r.id }), ...extra });
     const whoAm = target && target !== c.row ? 'tl' : (c.tlView ? 'tl' : 'agent');
     return `<div class="ab-kpis">
       ${tile({ label: `${p}Last month · ${esc(c.ymLastLabel)}`, value: fmt(r.last.total), foot: `VC4 <b>${fmt(r.last.vc4)}</b> · Comm <b>${fmt(r.last.comm)}</b>`, tone: 'g5', spec: specFor('month', whoAm), title: `${who} ${r.name} · ${c.ymLastLabel} issuance (tag-level)` })}
@@ -380,7 +380,7 @@ window.FF = window.FF || {};
   function tlSection(c) {
     if (c.tlView || !c.tlRow || c.direct) return '';
     const t = c.tlRow, team = c.team;
-    const tlSpec = (scope, extra) => ({ src: c.ch, channel: c.ch, scope: scope === 'month' ? 'month' : scope === 'stock' ? 'stock' : 'mtd', ...(scope === 'month' ? { ym: c.ymLast } : scope === 'stock' ? {} : { ym: c.ymCur }), tl: t.name, ...extra });
+    const tlSpec = (scope, extra) => ({ src: c.ch, channel: c.ch, scope: scope === 'month' ? 'month' : scope === 'stock' ? 'stock' : 'mtd', ...(scope === 'month' ? { ym: c.ymLast } : scope === 'stock' ? {} : { ym: c.ymCur }), tl: t.name, tlId: t.id, ...extra });
     const agentsTotal = sumBy(team.agents, 'stockTotal');
     const ownTotal = team.own ? num(team.own.stockTotal) : num(t.stockOwn);
     const foot = `apna <b>${fmt(ownTotal)}</b> + agents <b>${fmt(agentsTotal)}</b> = <b>${fmt(t.stock.total)}</b>`;
@@ -404,8 +404,8 @@ window.FF = window.FF || {};
     const keys = [...new Set([...mine, ...tlCls].map((x) => String(x.cls).toUpperCase()))].sort((a, b) => clsRank(a) - clsRank(b));
     const pick = (list, cls, key) => num((list.find((x) => String(x.cls).toUpperCase() === cls) || {})[key]);
     const cell = (v, spec, title) => `<td class="num ab-cellclick"${kpiAttr(spec, title)}>${fmt(v)}</td>`;
-    const specA = (scope, cls) => ({ src: c.ch, channel: c.ch, scope, ...(scope === 'month' ? { ym: c.ymLast } : scope === 'stock' ? {} : { ym: c.ymCur }), agent: c.row.name, agentId: c.row.id, cls, group: /^VC4$/i.test(cls) ? 'VC4' : 'COMM' });
-    const specT = (scope, cls) => ({ src: c.ch, channel: c.ch, scope, ...(scope === 'month' ? { ym: c.ymLast } : scope === 'stock' ? {} : { ym: c.ymCur }), tl: c.tlRow.name, cls, group: /^VC4$/i.test(cls) ? 'VC4' : 'COMM' });
+    const specA = (scope, cls) => ({ src: c.ch, channel: c.ch, scope, ...(scope === 'month' ? { ym: c.ymLast } : scope === 'stock' ? {} : { ym: c.ymCur }), ...(c.tlView ? { tl: c.row.name, tlId: c.row.id } : { agent: c.row.name, agentId: c.row.id }), cls, group: /^VC4$/i.test(cls) ? 'VC4' : 'COMM' });
+    const specT = (scope, cls) => ({ src: c.ch, channel: c.ch, scope, ...(scope === 'month' ? { ym: c.ymLast } : scope === 'stock' ? {} : { ym: c.ymCur }), tl: c.tlRow.name, tlId: c.tlRow.id, cls, group: /^VC4$/i.test(cls) ? 'VC4' : 'COMM' });
     const mineTot = { last: sumBy(mine, 'last'), cur: sumBy(mine, 'cur'), stock: sumBy(mine, 'stock') };
     const tlTot = { last: sumBy(tlCls, 'last'), cur: sumBy(tlCls, 'cur'), stock: sumBy(tlCls, 'stock') };
     // Neeche ke total ko KPI se hi lo (sheet ka row) — class rows ke jod se mismatch ho to bhi ek hi hisaab dikhe.
@@ -515,7 +515,7 @@ window.FF = window.FF || {};
   function chartSection(c) {
     const C = FF.charts;
     if (!C || !C.bars) return '';
-    const spec = (cls, scope, who) => ({ src: c.ch, channel: c.ch, scope, ...(scope === 'month' ? { ym: c.ymLast } : scope === 'stock' ? {} : { ym: c.ymCur }), ...(who === 'tl' ? { tl: c.tlRow.name } : { agent: c.row.name, agentId: c.row.id }), cls, group: /^VC4$/i.test(cls) ? 'VC4' : 'COMM' });
+    const spec = (cls, scope, who) => ({ src: c.ch, channel: c.ch, scope, ...(scope === 'month' ? { ym: c.ymLast } : scope === 'stock' ? {} : { ym: c.ymCur }), ...(who === 'tl' ? { tl: c.tlRow.name, tlId: c.tlRow.id } : { agent: c.row.name, agentId: c.row.id }), cls, group: /^VC4$/i.test(cls) ? 'VC4' : 'COMM' });
     const blocks = [];
     const mine = c.row.classes;
     if (mine.length) {

@@ -197,8 +197,11 @@ window.FF = window.FF || {};
     const latest = latestKey(rows);
     if (spec.scope === 'range' && spec.from && spec.to) return { from: spec.from, to: spec.to };
     if (spec.scope === 'day') { const d = spec.date || latest; return { from: d, to: d }; }
-    if (spec.scope === 'month' && spec.ym) return { from: `${spec.ym}-01`, to: `${spec.ym}-${U.pad2(U.daysInMonth(spec.ym))}` };
-    const ym = spec.ym || (latest ? latest.slice(0, 7) : U.ymKey(new Date()));
+    if (spec.scope === 'month') {
+      const ym = spec.ym || U.prevMonthKey(dataYm(spec.src));
+      return { from: `${ym}-01`, to: `${ym}-${U.pad2(U.daysInMonth(ym))}` };
+    }
+    const ym = spec.ym || ((spec.tl || spec.tlId || spec.agent || spec.agentId) ? dataYm(spec.src) : (latest ? latest.slice(0, 7) : U.ymKey(new Date())));
     const lastDay = latest && latest.startsWith(ym) ? latest : `${ym}-${U.pad2(U.daysInMonth(ym))}`;
     return { from: `${ym}-01`, to: lastDay };
   }
@@ -230,7 +233,19 @@ window.FF = window.FF || {};
     if (spec.type === 'REPLACEMENT' && r.type !== 'REPLACEMENT') return false;
     if (spec.type === 'NOT_REPLACEMENT' && r.type === 'REPLACEMENT') return false;
     if (spec.vrnBucket && vrnBucket(r.vrnType) !== spec.vrnBucket) return false;
-    if (spec.tl && String(r.tlName || '').trim().toUpperCase() !== String(spec.tl).trim().toUpperCase()) return false;
+    if ((spec.tl || spec.tlId) && !(spec.agent || spec.agentId)) {
+      const wantTl = personKey(spec.tl);
+      const wantId = personKey(spec.tlId);
+      const matchName = wantTl && (personKey(r.tlName) === wantTl || personKey(r.agentName) === wantTl);
+      const matchId = wantId && (personKey(r.tlId) === wantId || personKey(r.agentId) === wantId);
+      if (!matchName && !matchId) return false;
+    } else if (spec.tl && String(r.tlName || '').trim() && !/^direct$/i.test(String(r.tlName || '').trim())) {
+      const wantTl = personKey(spec.tl);
+      const wantId = personKey(spec.tlId);
+      const matchName = wantTl && (personKey(r.tlName) === wantTl || personKey(r.agentName) === wantTl);
+      const matchId = wantId && (personKey(r.tlId) === wantId || personKey(r.agentId) === wantId);
+      if (!matchName && !matchId) return false;
+    }
     if (spec.channel === 'gv' && r.channel !== 'GV Partner') return false;
     if (spec.channel === 'ff' && r.channel === 'GV Partner') return false;
     return true;
@@ -270,6 +285,110 @@ window.FF = window.FF || {};
   const stat = (label, value, sub, cls, drill) => `<div class="kd-stat ${cls || ''}${drill ? ' clickable kpi-clickable' : ''}"${drill ? ` data-kd-spec='${specAttr(drill)}' title="Click to open ${esc(label)} details"` : ''}><span>${esc(label)}</span><b>${value}</b>${sub ? `<small>${sub}</small>` : ''}</div>`;
 
   // ---- issuance drill-down ---------------------------------------------------------------------
+  function gvSheetContext(spec, p, ledgerTot) {
+    if (!spec || !(spec.src === 'gv' || spec.channel === 'gv')) return null;
+    if (['day', 'range', 'week', 'all'].includes(spec.scope)) return null;
+    const isTl = !!(spec.tl || spec.tlId) && !(spec.agent || spec.agentId);
+    const isAgent = !!(spec.agent || spec.agentId);
+    if (!isTl && !isAgent) return null;
+    const MP = FF.masterProfile;
+    if (!MP || typeof MP.quick !== 'function') return null;
+    const name = (isTl ? spec.tl : spec.agent) || '';
+    const id = (isTl ? spec.tlId : spec.agentId) || '';
+    let prof = null;
+    try {
+      prof = MP.quick({ kind: isTl ? 'gv-tl' : 'gv-agent', name, sub: id, id, tlSet: new Set(), classMap: new Map(), bars: new Set() });
+    } catch { prof = null; }
+    if (!prof || !prof.found) return null;
+    const ym = (p && p.from ? p.from.slice(0, 7) : '') || spec.ym || U.ymKey(new Date());
+    const nowYm = (prof.months && prof.months.cur) || U.ymKey(new Date());
+    const prevYm = (prof.months && prof.months.last) || U.prevMonthKey(nowYm);
+    const periodKey = ym === nowYm ? 'cur' : ym === prevYm ? 'last' : '';
+    if (!periodKey) return null;
+    const bins = prof.groupBins && prof.groupBins[periodKey];
+    const prevBins = periodKey === 'cur' && prof.groupBins ? prof.groupBins.last : null;
+    const snapshots = isTl && MP.gvTlSnapshot ? MP.gvTlSnapshot(spec.tl || prof.name, spec.tlId || prof.id) : null;
+    const reportSnap = snapshots && snapshots[periodKey];
+    const prevSnap = periodKey === 'cur' && snapshots ? snapshots.last : null;
+    const hasSheet = (bins && bins.source === 'GV REPORT sheet') || !!(reportSnap && reportSnap.total !== null && reportSnap.total !== undefined);
+    if (!hasSheet) return null;
+    const fullVc4 = reportSnap && reportSnap.vc4 != null ? Number(reportSnap.vc4) : Number((bins && bins.VC4) ?? 0);
+    const fullVc20 = Number((bins && bins.VC20) ?? 0);
+    const fullVc5p = Number((bins && bins['VC5+']) ?? 0);
+    const fullComm = reportSnap && reportSnap.comm != null ? Number(reportSnap.comm) : Number((bins && (bins.VC20 + bins['VC5+'])) ?? (fullVc20 + fullVc5p));
+    const fullTotal = reportSnap && reportSnap.total != null ? Number(reportSnap.total) : Number((bins && bins.total) ?? (fullVc4 + fullComm));
+    const hasPrevSheet = (prevBins && prevBins.source === 'GV REPORT sheet') || !!(prevSnap && prevSnap.total !== null && prevSnap.total !== undefined);
+    const pFullVc4 = hasPrevSheet ? (prevSnap && prevSnap.vc4 != null ? Number(prevSnap.vc4) : Number((prevBins && prevBins.VC4) ?? 0)) : null;
+    const pFullVc20 = hasPrevSheet ? Number((prevBins && prevBins.VC20) ?? 0) : null;
+    const pFullVc5p = hasPrevSheet ? Number((prevBins && prevBins['VC5+']) ?? 0) : null;
+    const pFullComm = hasPrevSheet ? (prevSnap && prevSnap.comm != null ? Number(prevSnap.comm) : Number((prevBins && (prevBins.VC20 + prevBins['VC5+'])) ?? 0)) : null;
+    const pFullTotal = hasPrevSheet ? (prevSnap && prevSnap.total != null ? Number(prevSnap.total) : Number((prevBins && prevBins.total) ?? 0)) : null;
+
+    const hasAttrFilter = !!(spec.type || spec.vrnBucket || spec.tagId || spec.vrn || ['repl', 'chassis', 'wrong'].includes(spec.f));
+    const clsFilter = spec.cls ? classKey(spec.cls) : '';
+    const grpFilter = String(spec.group || '').trim().toUpperCase();
+    let headlineTotal = null, headlineVc4 = null, headlineComm = null, prevTotal = null, filterKind = '';
+    if (!hasAttrFilter) {
+      if (spec.f === 'vc4' || clsFilter === 'VC4' || (grpFilter === 'VC4' && !clsFilter)) {
+        headlineTotal = fullVc4; headlineVc4 = fullVc4; headlineComm = 0; prevTotal = pFullVc4; filterKind = 'VC4';
+      } else if (spec.f === 'vc20' || clsFilter === 'VC20') {
+        headlineTotal = fullVc20; headlineVc4 = 0; headlineComm = fullVc20; prevTotal = pFullVc20; filterKind = 'VC20';
+      } else if (spec.f === 'vc5p' || clsFilter === 'VC5+') {
+        headlineTotal = fullVc5p; headlineVc4 = 0; headlineComm = fullVc5p; prevTotal = pFullVc5p; filterKind = 'VC5+';
+      } else if (spec.f === 'comm' || (/^(COMM|COMMERCIAL|NVC4)$/.test(grpFilter) && !clsFilter)) {
+        headlineTotal = fullComm; headlineVc4 = 0; headlineComm = fullComm; prevTotal = pFullComm; filterKind = 'COMM';
+      } else if (!clsFilter && !grpFilter && !spec.f) {
+        headlineTotal = fullTotal; headlineVc4 = fullVc4; headlineComm = fullComm; prevTotal = pFullTotal; filterKind = 'ALL';
+      }
+    }
+    const rawCardVal = String(spec.cardValue || '').replace(/,/g, '').trim();
+    const clickedInt = /^\d+$/.test(rawCardVal) ? Number(rawCardVal) : null;
+    if (clickedInt !== null && Number.isFinite(ledgerTot) && clickedInt === ledgerTot && headlineTotal !== null && clickedInt !== headlineTotal) {
+      headlineTotal = ledgerTot;
+    }
+    const rawMembers = isTl ? [...(prof.selfAgent ? [prof.selfAgent] : []), ...(prof.agents || [])] : [];
+    const members = rawMembers.map((m) => {
+      const mVc4 = Number(periodKey === 'last' ? m.lastVc4 : m.curVc4) || 0;
+      const mComm = Number(periodKey === 'last' ? m.lastComm : m.curComm) || 0;
+      const mTot = Number(periodKey === 'last' ? m.last : m.cur) || (mVc4 + mComm);
+      const sheetVc4 = filterKind === 'COMM' || filterKind === 'VC20' || filterKind === 'VC5+' ? 0 : mVc4;
+      const sheetComm = filterKind === 'VC4' ? 0 : mComm;
+      const sheetN = filterKind === 'VC4' ? mVc4 : (filterKind === 'COMM' || filterKind === 'VC20' || filterKind === 'VC5+') ? mComm : mTot;
+      return { name: m.name || '', id: m.id || '', isSelf: !!m.isSelf, tl: prof.name || spec.tl || '', sheetN, sheetVc4, sheetComm, fullTot: mTot, fullVc4: mVc4, fullComm: mComm };
+    });
+    return {
+      isTl, isAgent, prof, periodKey, ym, nowYm, prevYm,
+      fullVc4, fullVc20, fullVc5p, fullComm, fullTotal,
+      pFullVc4, pFullVc20, pFullVc5p, pFullComm, pFullTotal,
+      headlineTotal, headlineVc4, headlineComm, prevTotal, filterKind,
+      reportSnap, members
+    };
+  }
+  function applySheetBreakdowns(sheetCtx, byChannel, byGroup, byClass, ledgerTot, displayTot) {
+    if (!sheetCtx || sheetCtx.headlineTotal === null || ledgerTot === displayTot) return;
+    byChannel.clear();
+    if (displayTot > 0) byChannel.set('GV Partner', displayTot);
+    byGroup.clear();
+    const fk = sheetCtx.filterKind;
+    if (fk === 'VC4') {
+      if (displayTot > 0) byGroup.set('VC4', displayTot);
+    } else if (fk === 'VC20') {
+      if (displayTot > 0) byGroup.set('VC20', displayTot);
+    } else if (fk === 'VC5+') {
+      if (displayTot > 0) byGroup.set('VC5+', displayTot);
+    } else if (fk === 'COMM') {
+      if (sheetCtx.fullVc20 > 0) byGroup.set('VC20', sheetCtx.fullVc20);
+      if (sheetCtx.fullVc5p > 0) byGroup.set('VC5+', sheetCtx.fullVc5p);
+      if (!byGroup.size && displayTot > 0) byGroup.set('VC5+', displayTot);
+    } else {
+      if (sheetCtx.fullVc4 > 0 || (!sheetCtx.fullComm && displayTot === 0)) byGroup.set('VC4', sheetCtx.fullVc4);
+      if (sheetCtx.fullVc20 > 0) byGroup.set('VC20', sheetCtx.fullVc20);
+      if (sheetCtx.fullVc5p > 0) byGroup.set('VC5+', sheetCtx.fullVc5p);
+      else if (sheetCtx.fullComm > 0 && !sheetCtx.fullVc20) byGroup.set('VC5+', sheetCtx.fullComm);
+    }
+    byClass.clear();
+    for (const [k, v] of byGroup.entries()) byClass.set(k, v);
+  }
   async function issuanceDetail(spec) {
     const all = await issuanceRows(spec.src);
     const p = period(spec, all);
@@ -278,24 +397,39 @@ window.FF = window.FF || {};
     const pick = (per) => all.filter((r) => inP(r, per) && (!filt || filt.fn(r)) && rowMatchesSpec(r, spec));
     const cur = pick(p), prev = pick(pp);
     state.rows = cur; state.period = p; state.spec = spec; state.raw = null;
-    const tot = total(cur), ptot = total(prev);
-    const vc4 = total(cur.filter((r) => r.group === 'VC4')), comm = tot - vc4;
-    const gv = total(cur.filter((r) => r.channel === 'GV Partner')), ff = tot - gv;
+    const ledgerTot = total(cur), ledgerPtot = total(prev);
+    const ledgerVc4 = total(cur.filter((r) => r.group === 'VC4')), ledgerComm = ledgerTot - ledgerVc4;
+    const sheetCtx = gvSheetContext(spec, p, ledgerTot);
+    const useSheet = !!(sheetCtx && sheetCtx.headlineTotal !== null);
+    const tot = useSheet ? sheetCtx.headlineTotal : ledgerTot;
+    const ptot = useSheet && sheetCtx.prevTotal !== null && sheetCtx.prevTotal !== undefined ? sheetCtx.prevTotal : ledgerPtot;
+    const prevLabel = useSheet && sheetCtx.prevTotal !== null && sheetCtx.prevTotal !== undefined ? `${U.labelYM(sheetCtx.prevYm)}` : pp.label;
+    const vc4 = useSheet ? sheetCtx.headlineVc4 : ledgerVc4;
+    const comm = useSheet ? sheetCtx.headlineComm : ledgerComm;
+    const gv = useSheet ? tot : total(cur.filter((r) => r.channel === 'GV Partner')), ff = useSheet ? 0 : (tot - gv);
     const repl = total(cur.filter((r) => r.type === 'REPLACEMENT'));
     const chassis = total(cur.filter((r) => /chassis/i.test(r.vrnType)));
-    const newVrn = tot - chassis - total(cur.filter((r) => /wrong/i.test(r.vrnType)));
+    const newVrn = Math.max(0, tot - chassis - total(cur.filter((r) => /wrong/i.test(r.vrnType))));
     const days = [...new Set(cur.map((r) => r.key))].sort();
     const periodLabel = p.from === p.to ? `${U.labelDateKey(p.from, true)} (${U.weekday(U.fromDateKey(p.from))})` : `${U.labelDateKey(p.from, true)} → ${U.labelDateKey(p.to, true)}`;
     // 🟩 GV aaj = GV Master sheet (live) · 🟦 FF = EIR (T+1). Purane dinon ke liye EIR ledger.
-    const srcLabel = spec.src === 'gv' ? 'GV Partner · GV Master sheet (live)' : spec.src === 'ff' ? 'First Forward issuance · EIR sheet (T+1)' : 'First Forward (EIR) + GV Partner (GV Master)';
+    const srcLabel = useSheet ? 'GV Partner · GV REPORT sheet + GV Master (live)' : spec.src === 'gv' ? 'GV Partner · GV Master sheet (live)' : spec.src === 'ff' ? 'First Forward issuance · EIR sheet (T+1)' : 'First Forward (EIR) + GV Partner (GV Master)';
     let reconciliationNote = '';
-    if (spec.src === 'gv' && spec.tl && !filt && FF.masterProfile && FF.masterProfile.gvTlSnapshot) {
+    if (sheetCtx && sheetCtx.isTl) {
+      const reportTotal = sheetCtx.fullTotal;
+      const difference = ledgerTot - reportTotal;
+      const memberBreakdown = (sheetCtx.members || [])
+        .filter((m) => m.fullTot > 0)
+        .map((m) => `${esc(m.name)}${m.isSelf ? ' (TL own)' : ''} <b>${U.fmt(m.fullTot)}</b>`)
+        .join(' + ');
+      reconciliationNote = `<div class="kd-reconciliation"><b>GV REPORT ↔ tag-ledger reconciliation</b><span>GV REPORT TL snapshot: <b>${U.fmt(reportTotal)}</b> (VC4 <b>${U.fmt(sheetCtx.fullVc4)}</b> · Commercial <b>${U.fmt(sheetCtx.fullComm)}</b>) · GV Master / EIR detail: <b>${U.fmt(ledgerTot)}</b> · Difference: <b>${difference > 0 ? '+' : ''}${U.fmt(difference)}</b>.</span><small>${memberBreakdown ? `GV REPORT team breakdown: ${memberBreakdown}. ` : ''}${difference ? 'The headline TL card uses the dedicated GV REPORT TL value; class and tag details show the live issuance ledger. A refresh or source-coverage gap can explain the difference.' : 'TL snapshot and tag-level detail currently reconcile.'}</small></div>`;
+    } else if (spec.src === 'gv' && spec.tl && !filt && FF.masterProfile && FF.masterProfile.gvTlSnapshot) {
       const ym = p.from.slice(0, 7), nowYm = U.ymKey(new Date());
       const snapshots = FF.masterProfile.gvTlSnapshot(spec.tl, spec.tlId);
       const report = ym === nowYm ? snapshots.cur : ym === U.prevMonthKey(nowYm) ? snapshots.last : null;
       if (report) {
-        const difference = tot - report.total;
-        reconciliationNote = `<div class="kd-reconciliation"><b>GV REPORT ↔ tag-ledger reconciliation</b><span>GV REPORT TL snapshot: <b>${U.fmt(report.total)}</b> · GV Master / EIR detail: <b>${U.fmt(tot)}</b> · Difference: <b>${difference > 0 ? '+' : ''}${U.fmt(difference)}</b>.</span><small>${difference ? 'The headline TL card uses the dedicated GV REPORT TL value; class and tag details show the live issuance ledger. A refresh or source-coverage gap can explain the difference.' : 'TL snapshot and tag-level detail currently reconcile.'}</small></div>`;
+        const difference = ledgerTot - report.total;
+        reconciliationNote = `<div class="kd-reconciliation"><b>GV REPORT ↔ tag-ledger reconciliation</b><span>GV REPORT TL snapshot: <b>${U.fmt(report.total)}</b> · GV Master / EIR detail: <b>${U.fmt(ledgerTot)}</b> · Difference: <b>${difference > 0 ? '+' : ''}${U.fmt(difference)}</b>.</span><small>${difference ? 'The headline TL card uses the dedicated GV REPORT TL value; class and tag details show the live issuance ledger. A refresh or source-coverage gap can explain the difference.' : 'TL snapshot and tag-level detail currently reconcile.'}</small></div>`;
       }
     }
     const byClass = tally(cur, (r) => r.cls), byClassPrev = tally(prev, (r) => r.cls);
@@ -303,7 +437,8 @@ window.FF = window.FF || {};
     const byType = tally(cur, (r) => (r.type === 'REPLACEMENT' ? 'Replacement' : 'New issuance')), byTypePrev = tally(prev, (r) => (r.type === 'REPLACEMENT' ? 'Replacement' : 'New issuance'));
     const byVrn = tally(cur, (r) => vrnBucket(r.vrnType)), byVrnPrev = tally(prev, (r) => vrnBucket(r.vrnType));
     const byGroup = tally(cur, (r) => r.group), byGroupPrev = tally(prev, (r) => r.group);
-    const dayTable = days.length > 1 ? `<section class="kd-sec"><h4>📅 Day-wise (${days.length} days)</h4><div class="table-wrap kd-scroll"><table class="tbl compact kd-tbl"><thead><tr><th>Date</th><th class="num">Total</th><th class="num">VC4</th><th class="num">Commercial</th><th class="num">First Forward</th><th class="num">GV</th><th class="num">Replacement</th><th class="num">Chassis</th></tr></thead><tbody>${days.slice().reverse().map((k) => { const rs = cur.filter((r) => r.key === k); const t = total(rs), v = total(rs.filter((r) => r.group === 'VC4')), g = total(rs.filter((r) => r.channel === 'GV Partner')); return `<tr class="clickable" data-kd-day="${k}"><td><b>${esc(U.labelDateKey(k))}</b> <small class="dim">${esc(U.weekday(U.fromDateKey(k)))}</small></td><td class="num"><b>${U.fmt(t)}</b></td><td class="num">${U.fmt(v)}</td><td class="num">${U.fmt(t - v)}</td><td class="num">${U.fmt(t - g)}</td><td class="num">${U.fmt(g)}</td><td class="num">${U.fmt(total(rs.filter((r) => r.type === 'REPLACEMENT')))}</td><td class="num">${U.fmt(total(rs.filter((r) => /chassis/i.test(r.vrnType))))}</td></tr>`; }).join('')}<tr class="kd-total"><td><b>Grand Total</b></td><td class="num"><b>${U.fmt(tot)}</b></td><td class="num"><b>${U.fmt(vc4)}</b></td><td class="num"><b>${U.fmt(comm)}</b></td><td class="num"><b>${U.fmt(ff)}</b></td><td class="num"><b>${U.fmt(gv)}</b></td><td class="num"><b>${U.fmt(repl)}</b></td><td class="num"><b>${U.fmt(chassis)}</b></td></tr></tbody></table></div><p class="dim small">Kisi bhi din par click karo → us din ka poora breakdown.</p></section>` : '';
+    applySheetBreakdowns(sheetCtx, byChannel, byGroup, byClass, ledgerTot, tot);
+    const dayTable = days.length > 1 ? `<section class="kd-sec"><h4>📅 Day-wise (${days.length} days)</h4><div class="table-wrap kd-scroll"><table class="tbl compact kd-tbl"><thead><tr><th>Date</th><th class="num">Total</th><th class="num">VC4</th><th class="num">Commercial</th><th class="num">First Forward</th><th class="num">GV</th><th class="num">Replacement</th><th class="num">Chassis</th></tr></thead><tbody>${days.slice().reverse().map((k) => { const rs = cur.filter((r) => r.key === k); const t = total(rs), v = total(rs.filter((r) => r.group === 'VC4')), g = total(rs.filter((r) => r.channel === 'GV Partner')); return `<tr class="clickable" data-kd-day="${k}"><td><b>${esc(U.labelDateKey(k))}</b> <small class="dim">${esc(U.weekday(U.fromDateKey(k)))}</small></td><td class="num"><b>${U.fmt(t)}</b></td><td class="num">${U.fmt(v)}</td><td class="num">${U.fmt(t - v)}</td><td class="num">${U.fmt(t - g)}</td><td class="num">${U.fmt(g)}</td><td class="num">${U.fmt(total(rs.filter((r) => r.type === 'REPLACEMENT')))}</td><td class="num">${U.fmt(total(rs.filter((r) => /chassis/i.test(r.vrnType))))}</td></tr>`; }).join('')}<tr class="kd-total"><td><b>Grand Total</b></td><td class="num"><b>${U.fmt(ledgerTot)}</b></td><td class="num"><b>${U.fmt(ledgerVc4)}</b></td><td class="num"><b>${U.fmt(ledgerComm)}</b></td><td class="num"><b>${U.fmt(ledgerTot - total(cur.filter((r) => r.channel === 'GV Partner')))}</b></td><td class="num"><b>${U.fmt(total(cur.filter((r) => r.channel === 'GV Partner')))}</b></td><td class="num"><b>${U.fmt(repl)}</b></td><td class="num"><b>${U.fmt(chassis)}</b></td></tr></tbody></table></div><p class="dim small">Kisi bhi din par click karo → us din ka poora breakdown.</p></section>` : '';
     // 📐 Projection / expected card → wahi formula (aaj − 1 basis) jisse card ka number bana
     let formula = '';
     if (/projected|expected|month-?end/i.test(`${spec.title || ''}`) && p.from.endsWith('-01')) {
@@ -314,42 +449,43 @@ window.FF = window.FF || {};
       const projDays = bb && bb.ym === ym ? bb.days : Math.round((U.fromDateKey(p.to) - U.fromDateKey(p.from)) / 86400e3) + 1;
       formula = `<div class="kd-formula">📐 Month-end projection = ${U.fmt(tot)} ÷ ${U.fmt(projDays)} din (aaj − 1) × ${U.fmt(md)} din = <b>${U.fmt(U.projectMonthEnd(tot, projDays, ym))}</b></div>`;
     }
-    const body = `<div class="kd-hero"><div><span class="kd-kicker">${esc(srcLabel)}</span><div class="kd-big">${U.fmt(tot)} <small>tags</small></div><div class="kd-sub">${esc(periodLabel)}${filt ? ` · filter: <b>${esc(filt.label)}</b>` : ''}</div>${formula}</div><div class="kd-vs">${U.deltaHtml(U.growth(tot, ptot), { decimals: 0 })}<small>vs ${esc(pp.label)}: <b>${U.fmt(ptot)}</b></small></div></div>
+    const body = `<div class="kd-hero"><div><span class="kd-kicker">${esc(srcLabel)}</span><div class="kd-big">${U.fmt(tot)} <small>tags</small></div><div class="kd-sub">${esc(periodLabel)}${filt ? ` · filter: <b>${esc(filt.label)}</b>` : ''}</div>${formula}</div><div class="kd-vs">${U.deltaHtml(U.growth(tot, ptot), { decimals: 0 })}<small>vs ${esc(prevLabel)}: <b>${U.fmt(ptot)}</b></small></div></div>
       ${reconciliationNote}
-      <div class="kd-stats">${stat('VC4 (payable)', U.fmt(vc4), pct(vc4, tot), 'blue', { f: 'vc4', cls: '', title: `${spec.title || 'Detail'} · VC4` })}${stat('Commercial', U.fmt(comm), pct(comm, tot), 'violet', { f: 'comm', cls: '', title: `${spec.title || 'Detail'} · Commercial` })}${stat('First Forward', U.fmt(ff), pct(ff, tot), 'indigo', { src: 'ff', channel: '', title: `${spec.title || 'Detail'} · First Forward` })}${stat('GV Partner', U.fmt(gv), pct(gv, tot), 'teal', { src: 'gv', channel: '', title: `${spec.title || 'Detail'} · GV Partner` })}${stat('New issuance', U.fmt(tot - repl), pct(tot - repl, tot), 'green', { type: 'NOT_REPLACEMENT', title: `${spec.title || 'Detail'} · New issuance` })}${stat('Replacement', U.fmt(repl), pct(repl, tot), 'amber', { type: 'REPLACEMENT', title: `${spec.title || 'Detail'} · Replacement` })}${stat('Chassis', U.fmt(chassis), pct(chassis, tot), 'orange', { f: 'chassis', title: `${spec.title || 'Detail'} · Chassis` })}${stat('New / VRN', U.fmt(Math.max(0, newVrn)), pct(Math.max(0, newVrn), tot), 'sky', { vrnBucket: 'New / VRN (New)', title: `${spec.title || 'Detail'} · New / VRN` })}</div>
+      <div class="kd-stats">${stat('VC4 (payable)', U.fmt(vc4), pct(vc4, tot), 'blue', { f: 'vc4', cls: '', title: `${spec.title || 'Detail'} · VC4` })}${stat('Commercial', U.fmt(comm), pct(comm, tot), 'violet', { f: 'comm', cls: '', title: `${spec.title || 'Detail'} · Commercial` })}${stat('First Forward', U.fmt(ff), pct(ff, tot), 'indigo', { src: 'ff', channel: '', title: `${spec.title || 'Detail'} · First Forward` })}${stat('GV Partner', U.fmt(gv), pct(gv, tot), 'teal', { src: 'gv', channel: '', title: `${spec.title || 'Detail'} · GV Partner` })}${stat('New issuance', U.fmt(Math.max(0, tot - repl)), pct(Math.max(0, tot - repl), tot), 'green', { type: 'NOT_REPLACEMENT', title: `${spec.title || 'Detail'} · New issuance` })}${stat('Replacement', U.fmt(repl), pct(repl, tot), 'amber', { type: 'REPLACEMENT', title: `${spec.title || 'Detail'} · Replacement` })}${stat('Chassis', U.fmt(chassis), pct(chassis, tot), 'orange', { f: 'chassis', title: `${spec.title || 'Detail'} · Chassis` })}${stat('New / VRN', U.fmt(Math.max(0, newVrn)), pct(Math.max(0, newVrn), tot), 'sky', { vrnBucket: 'New / VRN (New)', title: `${spec.title || 'Detail'} · New / VRN` })}</div>
       <div class="kd-chips">
         ${[['both', 'FF + GV'], ['ff', '🟦 First Forward only'], ['gv', '🟩 GV Partner only']].map(([s, label]) => `<button class="kd-chip ${spec.src === s ? 'green' : ''}" data-kd-spec='${specAttr({ src: s, f: '', agent: '', channel: '', title: `${spec.title || 'Detail'} · ${label}` })}'>${label}</button>`).join('')}
         ${[['vc4', 'VC4'], ['comm', 'Commercial'], ['vc20', 'VC20'], ['vc5p', 'VC5+'], ['repl', 'Replacement'], ['chassis', 'Chassis']].map(([fl, label]) => `<button class="kd-chip ${spec.f === fl ? 'green' : ''}" data-kd-spec='${specAttr({ f: fl, agent: '', channel: '', title: `${spec.title || 'Detail'} · ${label}` })}'>${label}</button>`).join('')}
         ${(spec.f || spec.agent || spec.channel) ? `<button class="kd-chip" data-kd-spec='${specAttr({ f: '', agent: '', channel: '', src: spec.src, title: spec.title })}'>↺ Clear</button>` : ''}
       </div>
       <div class="kd-grid">
-        ${breakdownTable('🤝 Kis channel se — GV ya First Forward', byChannel, byChannelPrev, tot, { head: 'Channel', prevLabel: pp.label, drill: (key) => ({ src: /GV Partner/i.test(key) ? 'gv' : 'ff', channel: '', f: '', cls: '', type: '', vrnBucket: '', agent: '', agentId: '', title: `${spec.title || 'Detail'} · ${key}` }) })}
-        ${breakdownTable('🚗 Class group', byGroup, byGroupPrev, tot, { head: 'Group', prevLabel: pp.label, sortCls: true, drill: (key) => ({ f: key === 'VC4' ? 'vc4' : key === 'VC20' ? 'vc20' : 'vc5p', cls: '', type: '', vrnBucket: '', title: `${spec.title || 'Detail'} · ${key}` }) })}
+        ${breakdownTable('🤝 Kis channel se — GV ya First Forward', byChannel, useSheet ? null : byChannelPrev, tot, { head: 'Channel', prevLabel: pp.label, drill: (key) => ({ src: /GV Partner/i.test(key) ? 'gv' : 'ff', channel: '', f: '', cls: '', type: '', vrnBucket: '', agent: '', agentId: '', title: `${spec.title || 'Detail'} · ${key}` }) })}
+        ${breakdownTable('🚗 Class group', byGroup, useSheet ? null : byGroupPrev, tot, { head: 'Group', prevLabel: pp.label, sortCls: true, drill: (key) => ({ f: key === 'VC4' ? 'vc4' : key === 'VC20' ? 'vc20' : 'vc5p', cls: '', type: '', vrnBucket: '', title: `${spec.title || 'Detail'} · ${key}` }) })}
       </div>
-      ${agentSection(cur, spec, tot)}
-      ${breakdownTable('🏷️ Class-wise (har class kitne)', byClass, byClassPrev, tot, { head: 'Class', prevLabel: pp.label, sortCls: true, drill: (key) => ({ cls: key, f: '', type: '', vrnBucket: '', title: `${spec.title || 'Detail'} · ${key}` }) })}
+      ${agentSection(cur, spec, tot, sheetCtx, ledgerTot)}
+      ${breakdownTable('🏷️ Class-wise (har class kitne)', byClass, useSheet ? null : byClassPrev, tot, { head: 'Class', prevLabel: pp.label, sortCls: true, drill: (key) => ({ cls: key, f: '', type: '', vrnBucket: '', title: `${spec.title || 'Detail'} · ${key}` }) })}
       <div class="kd-grid">
-        ${breakdownTable('🔁 New issuance vs Replacement', byType, byTypePrev, tot, { head: 'Type', prevLabel: pp.label, drill: (key) => ({ type: key === 'Replacement' ? 'REPLACEMENT' : 'NOT_REPLACEMENT', cls: '', f: '', vrnBucket: '', title: `${spec.title || 'Detail'} · ${key}` }) })}
-        ${breakdownTable('🧩 Chassis / New VRN / Wrong VRN', byVrn, byVrnPrev, tot, { head: 'VRN type', prevLabel: pp.label, drill: (key) => ({ vrnBucket: key, cls: '', f: '', type: '', title: `${spec.title || 'Detail'} · ${key}` }) })}
+        ${breakdownTable('🔁 New issuance vs Replacement', byType, byTypePrev, ledgerTot, { head: 'Type', prevLabel: pp.label, drill: (key) => ({ type: key === 'Replacement' ? 'REPLACEMENT' : 'NOT_REPLACEMENT', cls: '', f: '', vrnBucket: '', title: `${spec.title || 'Detail'} · ${key}` }) })}
+        ${breakdownTable('🧩 Chassis / New VRN / Wrong VRN', byVrn, byVrnPrev, ledgerTot, { head: 'VRN type', prevLabel: pp.label, drill: (key) => ({ vrnBucket: key, cls: '', f: '', type: '', title: `${spec.title || 'Detail'} · ${key}` }) })}
       </div>
       ${matrix('🧮 Class × Issuance / Replacement', cur, (r) => r.cls, (r) => (r.type === 'REPLACEMENT' ? 'Replacement' : 'Issuance'), { head: 'Class', sortCls: true, drillRow: (key) => ({ cls: key, f: '', type: '', vrnBucket: '' }), drillCell: (cls, type) => ({ cls, f: '', type: type === 'Replacement' ? 'REPLACEMENT' : 'NOT_REPLACEMENT', vrnBucket: '' }) })}
       ${matrix('🧮 Class × Chassis / VRN', cur, (r) => r.cls, (r) => vrnBucket(r.vrnType).replace(/^New \/ VRN.*/, 'New / VRN'), { head: 'Class', sortCls: true, drillRow: (key) => ({ cls: key, f: '', type: '', vrnBucket: '' }), drillCell: (cls, bucket) => ({ cls, f: '', type: '', vrnBucket: bucket }) })}
       ${matrix('🧮 Class × Channel', cur, (r) => r.cls, (r) => r.channel, { head: 'Class', sortCls: true, drillRow: (key) => ({ cls: key, f: '', type: '', vrnBucket: '' }), drillCell: (cls, channel) => ({ cls, src: /GV Partner/i.test(channel) ? 'gv' : 'ff', channel: '', f: '', type: '', vrnBucket: '' }) })}
       ${dayTable}
       ${ffPendingNote()}
-      <section class="kd-sec" id="kd-raw"><h4>📄 Poora data — sab ${U.fmt(tot)} tags (tag-level list)</h4>
+      <section class="kd-sec" id="kd-raw"><h4>📄 Poora data — sab ${U.fmt(ledgerTot || tot)} tags (tag-level list)</h4>
         <p class="dim small">Har tag ki row: Tag ID, VRN, class, type, VRN type, status, agent, TL, channel. ${spec.src === 'gv' ? '' : 'First Forward rows Google Sheet (EIR) se abhi on-demand aayengi.'}</p>
-        <div class="btn-row"><button class="btn primary" data-kd-raw>📄 Load all ${U.fmt(tot)} rows</button></div><div id="kd-raw-body"></div></section>`;
+        <div class="btn-row"><button class="btn primary" data-kd-raw>📄 Load all ${U.fmt(ledgerTot || tot)} rows</button></div><div id="kd-raw-body"></div></section>`;
     return { kicker: `KPI detail · ${spec.page || ''}`, title: spec.title || 'KPI detail', sub: `${esc(periodLabel)} · <b>${U.fmt(tot)}</b> tags${filt ? ` · ${esc(filt.label)}` : ''}`, body, exportable: true };
   }
   /** 👥 "Kisne lagaye" — agent-wise (GV agent ya FF agent), poori clickable list.
       Har row par click → us agent ka poora detail (day-wise, class-wise, tags) usi drawer me. */
-  function agentSection(cur, spec, tot) {
-    if (!cur.length) return '';
+  function agentSection(cur, spec, tot, sheetCtx, ledgerTot) {
+    const useSheetTeam = !!(sheetCtx && sheetCtx.isTl && sheetCtx.headlineTotal !== null && Array.isArray(sheetCtx.members) && sheetCtx.members.length);
+    if (!cur.length && !useSheetTeam) return '';
     const map = new Map();
     cur.forEach((r) => {
       const name = r.agentName || r.agentId || 'Unknown';
-      const key = `${r.channel}|${name}`;
+      const key = `${r.channel}|${personKey(r.agentId || name)}`;
       const a = map.get(key) || { name, channel: r.channel, tl: r.tlName || '', id: r.agentId || '', n: 0, vc4: 0, comm: 0, repl: 0, chassis: 0, days: new Set() };
       a.n += r.n; a.days.add(r.key);
       if (r.group === 'VC4') a.vc4 += r.n;
@@ -360,16 +496,32 @@ window.FF = window.FF || {};
       if (!a.id && r.agentId) a.id = r.agentId;
       map.set(key, a);
     });
+    if (useSheetTeam && ledgerTot !== tot) {
+      const sheetMap = new Map();
+      sheetCtx.members.forEach((m) => {
+        const key = `GV Partner|${personKey(m.id || m.name)}`;
+        const existing = map.get(key) || map.get(`GV Partner|${personKey(m.name)}`);
+        sheetMap.set(key, {
+          name: m.name, channel: 'GV Partner', tl: m.tl || (existing && existing.tl) || '', id: m.id || (existing && existing.id) || '',
+          isSelf: m.isSelf, n: m.sheetN, vc4: m.sheetVc4, comm: m.sheetComm,
+          ledgerN: existing ? existing.n : 0,
+          repl: existing ? existing.repl : 0, chassis: existing ? existing.chassis : 0,
+          days: existing ? existing.days : new Set()
+        });
+      });
+      map.clear();
+      for (const [k, v] of sheetMap.entries()) map.set(k, v);
+    }
     const all = [...map.values()].sort((a, b) => b.n - a.n);
     const gv = all.filter((a) => a.channel === 'GV Partner');
     const ff = all.filter((a) => a.channel !== 'GV Partner');
     const top = all.slice(0, 60);
     const rows = top.map((a, i) => `<tr class="clickable" data-kd-agent="${esc(a.name)}" data-kd-agent-id="${esc(a.id || '')}" data-kd-agent-channel="${a.channel === 'GV Partner' ? 'gv' : 'ff'}" title="Click → ${esc(a.name)} ka poora detail">
       <td class="dim">${i + 1}</td>
-      <td><b>${esc(a.name)}</b>${a.id ? ` <small class="dim">${esc(a.id)}</small>` : ''}</td>
+      <td><b>${esc(a.name)}</b>${a.isSelf ? ' <span class="badge purple">TL own</span>' : ''}${a.id ? ` <small class="dim">${esc(a.id)}</small>` : ''}</td>
       <td><span class="kd-badge ${a.channel === 'GV Partner' ? 'gv' : 'ff'}">${a.channel === 'GV Partner' ? '🟩 GV' : '🟦 FF'}</span></td>
       <td>${esc(a.tl || (a.channel === 'GV Partner' ? 'Direct' : '—'))}</td>
-      <td class="num"><b>${U.fmt(a.n)}</b></td>
+      <td class="num"><b>${U.fmt(a.n)}</b>${a.ledgerN !== undefined && a.ledgerN !== a.n ? ` <small class="dim">(ledger ${U.fmt(a.ledgerN)})</small>` : ''}</td>
       <td class="num">${pct(a.n, tot)}</td>
       <td class="num">${U.fmt(a.vc4)}</td>
       <td class="num">${U.fmt(a.comm)}</td>
@@ -377,10 +529,12 @@ window.FF = window.FF || {};
       <td class="num">${U.fmt(a.chassis)}</td>
       <td class="num">${U.fmt(a.days.size)}</td>
     </tr>`).join('');
-    const tlTally = tally(cur, (r) => `${r.tlName || 'Direct'} · ${r.channel === 'GV Partner' ? 'GV' : 'FF'}`);
+    const tlTally = useSheetTeam && ledgerTot !== tot
+      ? new Map([[`${sheetCtx.prof.name || spec.tl || 'Direct'} · GV`, tot]])
+      : tally(cur, (r) => `${r.tlName || 'Direct'} · ${r.channel === 'GV Partner' ? 'GV' : 'FF'}`);
     return `<section class="kd-sec"><h4>👥 Kisne lagaye — agent-wise (GV agent ya FF agent) <span class="dim small">· ${all.length} agents · ${gv.length} GV · ${ff.length} FF</span></h4>
       <p class="dim small">Kisi bhi agent par click karo → uski day-wise, class-wise aur tag-level detail usi drawer me khulegi (andar tak click hota rahega).</p>
-      <div class="table-wrap kd-scroll tall"><table class="tbl compact kd-tbl"><thead><tr><th>#</th><th>Agent</th><th>Channel</th><th>TL</th><th class="num">Tags</th><th class="num">Share</th><th class="num">VC4</th><th class="num">Comm.</th><th class="num">Repl.</th><th class="num">Chassis</th><th class="num">Days</th></tr></thead><tbody>${rows}<tr class="kd-total"><td colspan="4"><b>Grand Total (${all.length} agents)</b></td><td class="num"><b>${U.fmt(tot)}</b></td><td class="num">100%</td><td class="num"><b>${U.fmt(U.sum(all, (a) => a.vc4))}</b></td><td class="num"><b>${U.fmt(U.sum(all, (a) => a.comm))}</b></td><td class="num"><b>${U.fmt(U.sum(all, (a) => a.repl))}</b></td><td class="num"><b>${U.fmt(U.sum(all, (a) => a.chassis))}</b></td><td class="num">—</td></tr></tbody></table></div>
+      <div class="table-wrap kd-scroll tall"><table class="tbl compact kd-tbl"><thead><tr><th>#</th><th>Agent</th><th>Channel</th><th>TL</th><th class="num">Tags</th><th class="num">Share</th><th class="num">VC4</th><th class="num">Comm.</th><th class="num">Repl.</th><th class="num">Chassis</th><th class="num">Days</th></tr></thead><tbody>${rows}<tr class="kd-total"><td colspan="4"><b>Grand Total (${all.length} agents)</b></td><td class="num"><b>${U.fmt(tot)}</b></td><td class="num">100%</td><td class="num"><b>${U.fmt(useSheetTeam && ledgerTot !== tot ? (sheetCtx.headlineVc4 ?? U.sum(all, (a) => a.vc4)) : U.sum(all, (a) => a.vc4))}</b></td><td class="num"><b>${U.fmt(useSheetTeam && ledgerTot !== tot ? (sheetCtx.headlineComm ?? U.sum(all, (a) => a.comm)) : U.sum(all, (a) => a.comm))}</b></td><td class="num"><b>${U.fmt(U.sum(all, (a) => a.repl))}</b></td><td class="num"><b>${U.fmt(U.sum(all, (a) => a.chassis))}</b></td><td class="num">—</td></tr></tbody></table></div>
       ${all.length > top.length ? `<p class="dim small">Top ${top.length} dikhaye — poore ${all.length} agents ka Excel "⬇ Breakdown Excel" se milta hai.</p>` : ''}
       ${breakdownTable('🧑‍💼 TL-wise (channel ke saath)', tlTally, null, tot, { head: 'TL · channel', drill: (key) => { const [tlPart, chPart] = String(key).split(' · '); return { tl: tlPart === 'Direct' ? '' : tlPart, src: chPart === 'GV' ? 'gv' : 'ff', title: `TL ${tlPart}` }; } })}
     </section>`;
@@ -397,11 +551,14 @@ window.FF = window.FF || {};
     });
     const p = period(spec, all);
     const inRange = all.filter((r) => inP(r, p));
-    const tot = total(inRange);
-    const channel = inRange.length ? inRange[0].channel : (spec.channel === 'gv' ? 'GV Partner' : 'First Forward');
+    const ledgerTot = total(inRange);
+    const channel = inRange.length ? inRange[0].channel : (spec.channel === 'gv' || spec.src === 'gv' ? 'GV Partner' : 'First Forward');
+    const sheetCtx = gvSheetContext(spec, p, ledgerTot);
+    const useSheet = !!(sheetCtx && sheetCtx.headlineTotal !== null);
+    const tot = useSheet ? sheetCtx.headlineTotal : ledgerTot;
     // TL naam — issuance rows se; na mile to stock ageing index / performance list se (v3.28: drawer me TL hamesha dikhe).
-    let tl = inRange.reduce((t, r) => t || r.tlName, '');
-    const id = inRange.reduce((t, r) => t || r.agentId, '');
+    let tl = inRange.reduce((t, r) => t || r.tlName, '') || (sheetCtx && sheetCtx.prof && sheetCtx.prof.tl && sheetCtx.prof.tl.name) || '';
+    const id = inRange.reduce((t, r) => t || r.agentId, '') || spec.agentId || (sheetCtx && sheetCtx.prof && sheetCtx.prof.id) || '';
     if (!tl) {
       const node = FF.stockAge && FF.stockAge.forAgent(spec.agentId || name);
       if (node && node.tl) tl = node.tl;
@@ -413,6 +570,8 @@ window.FF = window.FF || {};
     const byDay = tally(inRange, (r) => r.key);
     const byCls = tally(inRange, (r) => r.cls);
     const byGroup = tally(inRange, (r) => r.group);
+    const byChannel = tally(inRange, (r) => r.channel);
+    applySheetBreakdowns(sheetCtx, byChannel, byGroup, byCls, ledgerTot, tot);
     const byType = tally(inRange, (r) => (r.type === 'REPLACEMENT' ? 'Replacement' : 'New issuance'));
     const byVrn = tally(inRange, (r) => vrnBucket(r.vrnType));
     const days = [...byDay.keys()].sort();
@@ -420,20 +579,28 @@ window.FF = window.FF || {};
     const otherRows = (await issuanceRows('both')).filter((r) => (r.agentName || '') !== name);
     const rank = [...tally(otherRows.concat(inRange), (r) => r.agentName || r.agentId || '—').entries()].sort((a, b) => b[1] - a[1]).findIndex(([k]) => k === name) + 1;
     state.rows = inRange; state.period = p; state.spec = spec; state.raw = null;
-    const totVc4 = total(inRange.filter((r) => r.group === 'VC4'));
-    const totComm = total(inRange.filter((r) => r.group !== 'VC4'));
+    const ledgerVc4 = total(inRange.filter((r) => r.group === 'VC4'));
+    const ledgerComm = total(inRange.filter((r) => r.group !== 'VC4'));
+    const totVc4 = useSheet ? sheetCtx.headlineVc4 : ledgerVc4;
+    const totComm = useSheet ? sheetCtx.headlineComm : ledgerComm;
     const totChassis = total(inRange.filter((r) => /chassis/i.test(r.vrnType)));
     const totRepl = total(inRange.filter((r) => r.type === 'REPLACEMENT'));
+    let reconciliationNote = '';
+    if (sheetCtx) {
+      const difference = ledgerTot - sheetCtx.fullTotal;
+      reconciliationNote = `<div class="kd-reconciliation"><b>GV REPORT ↔ tag-ledger reconciliation</b><span>GV REPORT agent snapshot: <b>${U.fmt(sheetCtx.fullTotal)}</b> (VC4 <b>${U.fmt(sheetCtx.fullVc4)}</b> · Commercial <b>${U.fmt(sheetCtx.fullComm)}</b>) · GV Master / EIR detail: <b>${U.fmt(ledgerTot)}</b> · Difference: <b>${difference > 0 ? '+' : ''}${U.fmt(difference)}</b>.</span><small>${difference ? 'Headline & summary cards show the GV REPORT sheet value; day-wise & tag-level tables below come from the GV Master / EIR tag ledger.' : 'GV REPORT snapshot and tag-level detail currently reconcile.'}</small></div>`;
+    }
     const body = `<div class="kd-hero"><div><span class="kd-kicker">${esc(channel === 'GV Partner' ? '🟩 GV Partner agent' : '🟦 First Forward agent')}</span><div class="kd-big">${U.fmt(tot)} <small>tags</small></div><div class="kd-sub">${esc(periodLabel)} · TL <b>${esc(tl || '—')}</b>${id ? ` · ID ${esc(id)}` : ''}${rank > 0 ? ` · rank #${rank}` : ''}</div></div>
       <div class="kd-acts"><a class="btn small" href="#/performance?agent=${encodeURIComponent(name)}">🏆 Performance →</a><a class="btn small" href="#/masterSearch?q=${encodeURIComponent(name)}">🔎 Master profile →</a></div></div>
+      ${reconciliationNote}
       <div class="kd-stats">${stat('VC4 (payable)', U.fmt(totVc4), pct(totVc4, tot), 'blue', { f: 'vc4', cls: '', title: `${name} · VC4` })}${stat('Commercial', U.fmt(totComm), pct(totComm, tot), 'violet', { f: 'comm', cls: '', title: `${name} · Commercial` })}${stat('Chassis', U.fmt(totChassis), '', 'orange', { f: 'chassis', title: `${name} · Chassis` })}${stat('Replacement', U.fmt(totRepl), '', 'amber', { type: 'REPLACEMENT', title: `${name} · Replacement` })}${stat('Active days', U.fmt(days.length), days.length ? `${U.fmt(Math.round(tot / days.length))}/day` : '', 'green')}</div>
-      <div class="kd-grid">${breakdownTable('🚗 Class group', byGroup, null, tot, { head: 'Group', sortCls: true, drill: (key) => ({ f: key === 'VC4' ? 'vc4' : key === 'VC20' ? 'vc20' : 'vc5p', cls: '', type: '', vrnBucket: '' }) })}${breakdownTable('🔁 Type', byType, null, tot, { head: 'Type', drill: (key) => ({ type: key === 'Replacement' ? 'REPLACEMENT' : 'NOT_REPLACEMENT', cls: '', f: '', vrnBucket: '' }) })}</div>
+      <div class="kd-grid">${breakdownTable('🚗 Class group', byGroup, null, tot, { head: 'Group', sortCls: true, drill: (key) => ({ f: key === 'VC4' ? 'vc4' : key === 'VC20' ? 'vc20' : 'vc5p', cls: '', type: '', vrnBucket: '' }) })}${breakdownTable('🔁 Type', byType, null, ledgerTot, { head: 'Type', drill: (key) => ({ type: key === 'Replacement' ? 'REPLACEMENT' : 'NOT_REPLACEMENT', cls: '', f: '', vrnBucket: '' }) })}</div>
       ${breakdownTable('🏷️ Class-wise', byCls, null, tot, { head: 'Class', sortCls: true, drill: (key) => ({ cls: key, f: '', type: '', vrnBucket: '' }) })}
-      ${breakdownTable('🧩 VRN type', byVrn, null, tot, { head: 'VRN type', drill: (key) => ({ vrnBucket: key, cls: '', f: '', type: '' }) })}
-      <section class="kd-sec"><h4>📅 Day-wise (${days.length} din)</h4><div class="table-wrap kd-scroll"><table class="tbl compact kd-tbl"><thead><tr><th>Date</th><th class="num">Tags</th><th class="num">VC4</th><th class="num">Commercial</th></tr></thead><tbody>${days.slice().reverse().map((k) => { const rs = inRange.filter((r) => r.key === k); const t = total(rs), v = total(rs.filter((r) => r.group === 'VC4')); return `<tr class="clickable" data-kd-agent-day="${k}"><td><b>${esc(U.labelDateKey(k))}</b> <small class="dim">${esc(U.weekday(U.fromDateKey(k)))}</small></td><td class="num"><b>${U.fmt(t)}</b></td><td class="num">${U.fmt(v)}</td><td class="num">${U.fmt(t - v)}</td></tr>`; }).join('')}<tr class="kd-total"><td><b>Grand Total</b></td><td class="num"><b>${U.fmt(tot)}</b></td><td class="num"><b>${U.fmt(totVc4)}</b></td><td class="num"><b>${U.fmt(totComm)}</b></td></tr></tbody></table></div></section>
-      <section class="kd-sec" id="kd-raw"><h4>📄 Poora data — sab ${U.fmt(tot)} tags (tag-level list)</h4>
+      ${breakdownTable('🧩 VRN type', byVrn, null, ledgerTot, { head: 'VRN type', drill: (key) => ({ vrnBucket: key, cls: '', f: '', type: '' }) })}
+      <section class="kd-sec"><h4>📅 Day-wise (${days.length} din)</h4><div class="table-wrap kd-scroll"><table class="tbl compact kd-tbl"><thead><tr><th>Date</th><th class="num">Tags</th><th class="num">VC4</th><th class="num">Commercial</th></tr></thead><tbody>${days.slice().reverse().map((k) => { const rs = inRange.filter((r) => r.key === k); const t = total(rs), v = total(rs.filter((r) => r.group === 'VC4')); return `<tr class="clickable" data-kd-agent-day="${k}"><td><b>${esc(U.labelDateKey(k))}</b> <small class="dim">${esc(U.weekday(U.fromDateKey(k)))}</small></td><td class="num"><b>${U.fmt(t)}</b></td><td class="num">${U.fmt(v)}</td><td class="num">${U.fmt(t - v)}</td></tr>`; }).join('')}<tr class="kd-total"><td><b>Grand Total</b></td><td class="num"><b>${U.fmt(ledgerTot)}</b></td><td class="num"><b>${U.fmt(ledgerVc4)}</b></td><td class="num"><b>${U.fmt(ledgerComm)}</b></td></tr></tbody></table></div></section>
+      <section class="kd-sec" id="kd-raw"><h4>📄 Poora data — sab ${U.fmt(ledgerTot || tot)} tags (tag-level list)</h4>
         <p class="dim small">Har tag ki row: Tag ID, VRN, class, type, VRN type, status, agent, TL, channel.</p>
-        <div class="btn-row"><button class="btn primary" data-kd-raw>📄 Load all ${U.fmt(tot)} rows</button></div><div id="kd-raw-body"></div></section>`;
+        <div class="btn-row"><button class="btn primary" data-kd-raw>📄 Load all ${U.fmt(ledgerTot || tot)} rows</button></div><div id="kd-raw-body"></div></section>`;
     return { kicker: 'KPI detail · Agent', title: `${name} · ${channel === 'GV Partner' ? 'GV' : 'FF'} agent`, sub: `${esc(periodLabel)} · <b>${U.fmt(tot)}</b> tags`, body, exportable: true, agent: name, period: p, spec };
   }
 
@@ -455,7 +622,7 @@ window.FF = window.FF || {};
       const row = {
         key, tagId: r.tagId || '', vrn: r.vrn || '', cls: r.cls, group: r.group, type,
         vrnType: r.tagType || '', status: r.status || '', channel: 'GV Partner',
-        agentName: r.agentName || '', agentId: r.agentId || '', tlName: r.tlName || '',
+        agentName: r.agentName || '', agentId: r.agentId || '', tlName: r.tlName || '', tlId: r.tlId || '',
         barcode: r.serial || '', amount: Number(r.amount) || 0, commission: Number(r.commission) || 0, n: 1
       };
       if (filt && !filt.fn(row)) continue;
@@ -1011,5 +1178,5 @@ window.FF = window.FF || {};
     if (chip && state.spec) { open({ ...state.spec, ...JSON.parse(chip.dataset.kdSpec || '{}') }); return; }
   });
 
-  FF.kpiDetail = { open, specFrom, registerList, normYm, resetHistory, _infer: inferSpec, _rowMatchesSpec: rowMatchesSpec, _stockDetail: stockDetail, _peopleDetail: peopleDetail, _issuanceDetail: issuanceDetail, _limits: SOFT };
+  FF.kpiDetail = { open, specFrom, registerList, normYm, resetHistory, _infer: inferSpec, _rowMatchesSpec: rowMatchesSpec, _stockDetail: stockDetail, _peopleDetail: peopleDetail, _issuanceDetail: issuanceDetail, _agentDetail: agentDetail, _limits: SOFT };
 })(window.FF);

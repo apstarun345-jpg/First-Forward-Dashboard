@@ -184,3 +184,37 @@ test('agent board (GV Performance ka 360): wahi sheet numbers + TL ID-wise stock
   const idxGroup = html.indexOf('Class group'), idxStock = html.indexOf('TL ID-wise stock');
   assert.ok(idxGroup > -1 && idxStock > idxGroup, 'stock block group table ke baad / neeche aata hai');
 });
+
+test('kpiDetail drill-down: Hemalbhai Bhavsar ke drawer me Last month (332) ya This month (27/28) click karne par wahi exact number + explanation aata hai', async () => {
+  await bootReport();
+  const KD = FF.kpiDetail;
+  // 1) Last month = 332 (chahe ym diya ho ya Home kundli strip jaisa ym="" khaali ho)
+  const lastDrill = await KD._issuanceDetail({ src: 'gv', channel: 'gv', scope: 'month', ym: prev, tl: TL.name, tlId: TL.id, title: `${TL.name} · Last month` });
+  assert.match(lastDrill.sub, /<b>332<\/b> tags/, 'Last month drill sub me 332');
+  assert.match(lastDrill.body, /<div class="kd-big">332 <small>tags<\/small><\/div>/, 'Last month hero big number = 332 (670 ya 440 nahi)');
+  assert.match(lastDrill.body, /GV REPORT TL snapshot: <b>332<\/b> \(VC4 <b>311<\/b> · Commercial <b>21<\/b>\)/);
+  assert.match(lastDrill.body, /GV Master \/ EIR detail: <b>440<\/b> · Difference: <b>\+108<\/b>/);
+  assert.match(lastDrill.body, /Hemalbhai Bhavsar \(TL own\) <b>218<\/b>/);
+  assert.match(lastDrill.body, /KAWARA RAM <b>81<\/b>/);
+
+  // Empty ym="" (Home strip / peopleTableHtml regression guard)
+  const lastNoYm = await KD._issuanceDetail({ src: 'gv', channel: 'gv', scope: 'month', ym: '', tl: TL.name, tlId: TL.id, title: `${TL.name} · Last month` });
+  assert.match(lastNoYm.body, /<div class="kd-big">332 <small>tags<\/small><\/div>/, 'scope=month&ym= bhi Last month 332 hi khole (Current month par fall-through nahi)');
+
+  // 2) This month = 27 (aur cardValue="28" jab aaj ka 1 live tag jud kar 28 ho)
+  const curDrill = await KD._issuanceDetail({ src: 'gv', channel: 'gv', scope: 'mtd', ym, tl: TL.name, tlId: TL.id, title: `${TL.name} · Current month` });
+  assert.match(curDrill.sub, /<b>27<\/b> tags/, 'Current month drill sub me 27');
+  assert.match(curDrill.body, /<div class="kd-big">27 <small>tags<\/small><\/div>/, 'Current month hero big number = 27 (55 nahi)');
+  assert.match(curDrill.body, /<b>332<\/b><\/small><\/div><\/div>/, 'Current month ke vs comparison me bhi Last month = 332 dikhe (670 nahi)');
+
+  // 3) Class/group filtered click (VC4 = 311, Comm = 21)
+  const vc4Drill = await KD._issuanceDetail({ src: 'gv', channel: 'gv', scope: 'month', ym: prev, tl: TL.name, tlId: TL.id, f: 'vc4', title: `${TL.name} · VC4` });
+  assert.match(vc4Drill.body, /<div class="kd-big">311 <small>tags<\/small><\/div>/, 'VC4 click par 311');
+  const commDrill = await KD._issuanceDetail({ src: 'gv', channel: 'gv', scope: 'month', ym: prev, tl: TL.name, tlId: TL.id, f: 'comm', title: `${TL.name} · Commercial` });
+  assert.match(commDrill.body, /<div class="kd-big">21 <small>tags<\/small><\/div>/, 'Commercial click par 21');
+
+  // 4) Agent row click (KAWARA RAM = 81, Hemalbhai Bhavsar own = 218)
+  const agDrill = await KD._agentDetail({ src: 'gv', channel: 'gv', scope: 'month', ym: prev, agent: 'KAWARA RAM', agentId: 'APS04505', title: 'KAWARA RAM · Last month' });
+  assert.match(agDrill.body, /<div class="kd-big">81 <small>tags<\/small><\/div>/, 'Agent Last month click par wahi 81 dikhe');
+  assert.match(agDrill.body, /GV REPORT agent snapshot: <b>81<\/b>/);
+});
