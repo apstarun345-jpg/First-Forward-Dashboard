@@ -146,8 +146,7 @@ FF.pages = FF.pages || {};
       const idx = newIndex();
       let tick = 0;
       const sources = {
-        // ⚡ Search cold-start: identity comes from GV Master directly. Do not block on the large
-        // FF daily/EIR history just to locate a GV agent.
+        // ⚡ Search cold-start: identity comes from GV Master directly. Do not block on large FF daily/EIR history.
         agents: FF.store.need('agents'), stockAgents: FF.store.need('stockAgents'), gvMaster: FF.gv.need('master'),
         gvReport: FF.gv.need('report'), gvStockAgent: FF.gv.need('stockAgent'), gvStockTl: FF.gv.need('stockTl'),
         // 🔎 FF REPORT: old/alt agent ID (ID column) · TL ID · TL mobile — search me bhi aayenge
@@ -462,37 +461,25 @@ FF.pages = FF.pages || {};
 
   function identityIds(p) {
     if (!p) return [];
-    return [...new Set([p.sub, ...(p.ids || []), ...(p.alias || [])].map(normId).filter((x) => x && x.length >= 4))];
+    return [...new Set([p.sub, ...(p.ids || []), ...(p.alias || [])].map(normId).filter((v) => v && v.length >= 4))];
   }
-  function identitiesLinked(a, b) {
-    const A = new Set(identityIds(a)), B = identityIds(b);
-    if (!A.size || !B.length) return false;
-    return B.some((id) => A.has(id));
-  }
+  function identitiesLinked(a, b) { const A = new Set(identityIds(a)); return A.size > 0 && identityIds(b).some((id) => A.has(id)); }
   function suppressFalseFfMatches(res) {
     if (!res || !res.people || !res.people.length) return res;
-    const queryName = normName(res.q);
-    const ni = normId(res.q);
-    const gvPeople = res.people.filter((p) => /^gv-/.test(String(p.kind || '')) &&
-      (p.kind === 'gv-agent' || p.kind === 'gv-tl'));
-    if (!gvPeople.length) return res;
-    const exactGv = gvPeople.filter((p) => (queryName && normName(p.name) === queryName) ||
-      (ni.length >= 4 && identityIds(p).includes(ni)));
+    const queryName = normName(res.q), ni = normId(res.q);
+    const gvPeople = res.people.filter((p) => /^gv-/.test(String(p.kind || '')) && (p.kind === 'gv-agent' || p.kind === 'gv-tl'));
+    const exactGv = gvPeople.filter((p) => (queryName && normName(p.name) === queryName) || (ni.length >= 4 && identityIds(p).includes(ni)));
     if (!exactGv.length) return res;
-    const keep = (p) => {
+    res.people = res.people.filter((p) => {
       if (!/^ff-/.test(String(p.kind || ''))) return true;
-      const sameNameGv = exactGv.filter((g) => normName(g.name) === normName(p.name));
-      if (!sameNameGv.length) return true;
-      return sameNameGv.some((g) => identitiesLinked(g, p));
-    };
-    res.people = res.people.filter(keep);
+      const same = exactGv.filter((g) => normName(g.name) === normName(p.name));
+      return !same.length || same.some((g) => identitiesLinked(g, p));
+    });
     res.ids = (res.ids || []).filter((v) => {
       if (!/^ff-/.test(String(v.kind || ''))) return true;
-      const sameNameGv = exactGv.filter((g) => normName(g.name) === normName(v.name));
-      if (!sameNameGv.length) return true;
-      return sameNameGv.some((g) => identitiesLinked(g, { sub: v.id, ids: [v.id] }));
+      const same = exactGv.filter((g) => normName(g.name) === normName(v.name));
+      return !same.length || same.some((g) => identitiesLinked(g, { sub: v.id, ids: [v.id] }));
     });
-    res.matched = res.people.length + res.ids.length + res.tags.length;
     return res;
   }
 
@@ -508,7 +495,7 @@ FF.pages = FF.pages || {};
     const items = [];
     r.people.slice(0, 14).forEach((p) => {
       const tl = [...p.tlSet][0] || '';
-      const q1 = (r.people.length === 1 && MP()) ? MP().quick(p) : null;   // expensive profile sirf exact single result par
+      const q1 = (r.people.length === 1 && MP()) ? MP().quick(p) : null;   // focused single result par hi expensive profile
       const isTlKind = /tl$/.test(p.kind);
       const extra = q1 ? [
         q1.mobile && (!FF.auth || FF.auth.can('contacts')) ? `📞 ${q1.mobile}` : '',
@@ -705,7 +692,7 @@ FF.pages = FF.pages || {};
       <div class="ms-kundli-stats">
         <div><small>TL</small><b>${p.direct ? `<span class="direct-chip">🚫 ${esc(tl)}</span>` : esc(tl || '—')}</b>${row && row.tlId && !p.direct ? `<em>${esc(row.tlId)}</em>` : ''}</div>
         <div><small>Tags / barcodes</small><b>${p.bars.size ? U.fmt(p.bars.size) : U.fmt(p.n)}</b></div>
-        <div><small>Issuance rows</small><b>${U.fmt(p.issuanceN || p.n)}</b></div>
+        <div><small>Activity rows</small><b>${U.fmt(p.n)}</b></div>
         <div><small>Last allocation</small><b>${esc(p.last || '—')}</b></div>
       </div>
       ${kundliProfileStats(p)}
