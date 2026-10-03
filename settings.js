@@ -2310,7 +2310,7 @@ FF.pages = FF.pages || {};
         const card = btn.closest('.card');
         const patch = collect(card, {});
         const msg = U.$(`#save-msg-${btn.dataset.save}`, body);
-        const reload = ['data', 'eir', 'stock', 'stockMovement', 'ffPayout', 'gvCommissionRates'].includes(btn.dataset.save);
+        const reload = ['data', 'eir', 'stock', 'stockMovement', 'ffPayout', 'gvCommissionRates', 'gvClassCch'].includes(btn.dataset.save);
         U.withButtonBusy(btn, () => save(patch, msg, { reload }), 'Saving…');
       }));
       // 📧 Features → email: status chips, pehle save phir test mail, aur 🩺 diagnose
