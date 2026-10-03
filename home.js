@@ -266,7 +266,14 @@ FF.pages = FF.pages || {};
     const chartMount = U.$('#home-charts', root);
     const stockMount = U.$('#home-stock', root);
 
-    const feedP = (canFf || canGv) ? FF.data.today().catch((err) => ({ requestError: err && err.message ? err.message : 'today feed request failed' })) : Promise.resolve(null);
+    // ⚡ Home first paint: GV-only today endpoint is intentionally separate from the heavier
+    // FF+GV history feed. This makes "AAJ KA LIVE" visible even when 30-day history is slow.
+    const liveP = canGv
+      ? FF.data.gvToday().catch((err) => ({ requestError: err && err.message ? err.message : 'GV today feed request failed' }))
+      : Promise.resolve(null);
+    const feedP = (canFf || canGv)
+      ? FF.data.today().catch((err) => ({ requestError: err && err.message ? err.message : 'today feed request failed' }))
+      : Promise.resolve(null);
     const dailyP = (canFf || canGv) ? S.need('daily').catch(() => null) : Promise.resolve(null);
     const stockP = canFf ? S.need('stock').catch(() => null) : Promise.resolve(null);
     const gvStockP = canGv ? G.need('stockClass').catch(() => null) : Promise.resolve(null);
@@ -274,40 +281,55 @@ FF.pages = FF.pages || {};
 
     // Repaint kit (GV Master load hone par month cards dobara banti hain — aaj ke live rows ke saath).
     const ui = { ready: false, sf: null, ctx: null, sc: null, wdBars: null, liveToday: false };
+    let liveFromFeed = null;
+    let feedLiveRows = [];
+    let liveRows = [];
+    let liveSourceReady = false;
 
-    // ---- 🟩 GV aaj live (pehla paint: chhota server feed — bade GV Master ka intezaar nahi) --------
-    const feed = await feedP;
-    if (!root.isConnected) return;
-    const liveFromFeed = feed && feed.gv ? { ...feed.gv, cached: !!(feed.gv.cached || feed.cached), stale: !!feed.gv.stale } : null;
-    const feedLiveRows = liveRowsFromFeed(liveFromFeed);
-    let liveRows = feedLiveRows || []; // server feed snapshot until the full GV Master rows arrive
-    let liveSourceReady = !!liveFromFeed;
     let liveState = {
-      total: liveFromFeed ? liveFromFeed.total : 0,
-      vc4: liveFromFeed ? liveFromFeed.vc4 || 0 : 0,
-      vc20: liveFromFeed ? liveFromFeed.vc20 || 0 : 0,
-      vc5p: liveFromFeed ? liveFromFeed.vc5p || 0 : 0,
-      replacement: liveFromFeed ? liveFromFeed.replacement || 0 : 0,
-      chassis: liveFromFeed ? liveFromFeed.chassis || 0 : 0,
-      expected: liveFromFeed ? liveFromFeed.expected : null,
-      pace: null,
-      cached: !!(liveFromFeed && liveFromFeed.cached),
-      stale: !!(liveFromFeed && liveFromFeed.stale),
-      error: canGv ? U.clean((feed && (feed.gvError || feed.requestError)) || (!liveFromFeed ? 'GV live feed is unavailable; GV Master data is loading.' : '')) : '',
-      source: 'feed',
-      liveToday: false
+      total: 0, vc4: 0, vc20: 0, vc5p: 0, replacement: 0, chassis: 0,
+      expected: null, pace: null, cached: false, stale: false,
+      error: canGv ? 'GV aaj ka live data aa raha hai…' : '',
+      source: 'feed', liveToday: false
     };
-    // same-weekday run-rate bars (feed ki 30-din series se)
-    const wdBars = (() => {
-      const series = (liveFromFeed && liveFromFeed.series) || {};
-      const tk = todayK();
-      const wd = TODAY().getDay();
+
+    let wdBars = null;
+    const hoursGone = Math.max(1, (Date.now() - new Date().setHours(0, 0, 0, 0)) / 3600000);
+
+    function applyHistoryFeed(feed) {
+      if (!feed) return;
+      const historyLive = feed.gv || null;
+      if (historyLive && !liveFromFeed) {
+        liveFromFeed = { ...historyLive, cached: !!(historyLive.cached || feed.cached), stale: !!historyLive.stale };
+        feedLiveRows = liveRowsFromFeed(liveFromFeed);
+        if (!liveSourceReady) liveRows = feedLiveRows || [];
+      }
+      const series = (historyLive && historyLive.series) || {};
+      const tk = todayK(), wd = TODAY().getDay();
       const keys = Object.keys(series).filter((k) => k < tk).sort().reverse()
         .filter((k) => U.fromDateKey(k).getDay() === wd).slice(0, 4).reverse();
-      return keys.length ? { labels: keys.map((k) => U.labelDateKey(k)), values: keys.map((k) => series[k]) } : null;
-    })();
-    ui.wdBars = wdBars;
-    const hoursGone = Math.max(1, (Date.now() - new Date().setHours(0, 0, 0, 0)) / 3600000);
+      wdBars = keys.length ? { labels: keys.map((k) => U.labelDateKey(k)), values: keys.map((k) => series[k]) } : null;
+      ui.wdBars = wdBars;
+      if (historyLive) {
+        liveState = {
+          ...liveState,
+          expected: historyLive.expected != null ? historyLive.expected : liveState.expected,
+          cached: !!(historyLive.cached || feed.cached),
+          stale: !!historyLive.stale,
+          error: historyLive.total === undefined ? liveState.error : ''
+        };
+      }
+      paintLive();
+      if (ui.ready && liveRows.length) {
+        const st2 = streams(ui.sf.rows, liveRows, liveSourceReady);
+        ui.sf = { rows: st2.rows, ff: st2.ff, gv: st2.gv };
+        ui.sc = M.summary(st2.rows, ui.ctx.curKey);
+        ui.liveToday = st2.gvLiveAdded;
+        paintMonth();
+        paintCharts();
+      }
+    }
+
     function paintLive() {
       if (!gvLiveMount || !gvLiveMount.isConnected) return;
       const pace = liveState.total > 0 ? Math.round((liveState.total / hoursGone) * 24) : null;
@@ -315,17 +337,50 @@ FF.pages = FF.pages || {};
       const wdNote = wdBars ? `pichhle ${wdBars.labels.length} same-weekday (${wdBars.labels.map((l) => `${l} = ${U.fmt(wdBars.values[wdBars.labels.indexOf(l)])}`).join(' · ')}) ka average` : '';
       gvLiveMount.innerHTML = gvLiveHtml({ ...liveState, pace, weekdayNote: wdNote, weekdayBars: wdBars });
     }
-    function paintMonth() {
-      if (!monthMount || !monthMount.isConnected || !ui.ready) return;
-      monthMount.innerHTML = monthKpiHtml(ui.ctx, ui.sf, { liveToday: ui.liveToday }, ui.sc, ui.sf.rows);
-    }
-    function paintCharts() {
-      if (!chartMount || !chartMount.isConnected || !ui.ready) return;
-      chartMount.innerHTML = monthCharts(ui.ctx, ui.sf, ui.sc, ui.sf.rows, { weekdayBars: ui.wdBars });
-      C.mount(chartMount);
-    }
-    function paintAll() { paintLive(); paintMonth(); paintCharts(); }
+
+    // 🟢 First visible live source: only GV Master + today, no FF/history wait.
     paintLive();
+    liveP.then((quick) => {
+      if (!quick || !quick.gv) {
+        liveState = { ...liveState, error: quick && quick.requestError ? quick.requestError : 'GV today live feed unavailable.' };
+        paintLive();
+        return;
+      }
+      liveFromFeed = { ...quick.gv, cached: !!(quick.gv.cached || quick.cached), stale: !!quick.gv.stale };
+      feedLiveRows = liveRowsFromFeed(liveFromFeed);
+      liveRows = feedLiveRows || [];
+      liveSourceReady = true;
+      liveState = {
+        ...liveState,
+        total: Number(liveFromFeed.total) || 0,
+        vc4: Number(liveFromFeed.vc4) || 0,
+        vc20: Number(liveFromFeed.vc20) || 0,
+        vc5p: Number(liveFromFeed.vc5p) || 0,
+        replacement: Number(liveFromFeed.replacement) || 0,
+        chassis: Number(liveFromFeed.chassis) || 0,
+        expected: liveFromFeed.expected ?? null,
+        cached: !!liveFromFeed.cached,
+        stale: !!liveFromFeed.stale,
+        error: '',
+        source: 'feed', liveToday: true
+      };
+      paintLive();
+      if (ui.ready) {
+        const st2 = streams(ui.sf.rows, liveRows, true);
+        ui.sf = { rows: st2.rows, ff: st2.ff, gv: st2.gv };
+        ui.sc = M.summary(st2.rows, ui.ctx.curKey);
+        ui.liveToday = true;
+        paintMonth();
+        paintCharts();
+      }
+    }).catch((err) => {
+      liveState = { ...liveState, error: err && err.message ? err.message : 'GV today feed failed.' };
+      paintLive();
+    });
+
+    // 30-day history is background only — it supplies Expected Today / same-weekday bars and
+    // must never delay the initial GV live card.
+    feedP.then(applyHistoryFeed).catch(() => {});
 
     // GV Master load hone par usi snapshot se aaj ka poora detail (replacement/chassis/agent-wise)
     gvMasterP.then((ok) => {
