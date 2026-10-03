@@ -5018,3 +5018,9 @@ html[data-theme="dark"] .hm-toprow .rank { background: #1e293b; color: #a5b4fc; 
 .hm-pulse-actions{grid-column:1/-1;display:flex;gap:7px;flex-wrap:wrap;padding-top:1px}
 @media(max-width:700px){.hm-pulse-grid{grid-template-columns:1fr 1fr}.hm-pulse-actions{grid-column:1/-1}.hm-pulse-item b{font-size:18px}}
 @media(max-width:460px){.hm-pulse-grid{grid-template-columns:1fr}.hm-pulse-actions{display:grid;grid-template-columns:1fr 1fr}.hm-pulse-actions .btn{justify-content:center}}
+
+/* Professional application footer */
+.app-footer{display:flex;align-items:center;gap:8px;padding:9px 18px;color:var(--muted);font-size:10.5px;line-height:1.35;border-top:1px solid var(--line);background:var(--card);min-height:34px;flex-wrap:wrap}
+.app-footer-dev{font-weight:750;color:var(--ink)}.app-footer-spacer{flex:1}.app-footer-status{font-weight:700;white-space:nowrap}.app-footer-sep{opacity:.45}
+@media(max-width:700px){.app-footer{justify-content:center;text-align:center;padding:9px 12px;gap:5px}.app-footer-spacer{display:none}.app-footer-status{width:100%}.app-footer-sep{display:none}}
+.auth-foot{line-height:1.55}
