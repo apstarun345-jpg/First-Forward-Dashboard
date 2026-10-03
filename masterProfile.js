@@ -1049,6 +1049,11 @@ window.FF = window.FF || {};
     out.issuanceSources.cur = sheetCur ? 'GV REPORT sheet' : exactCurrent ? 'GV Master / EIR' : 'GV REPORT';
     out.issuanceSources.last = sheetLast ? 'GV REPORT sheet' : exactPrevious ? 'GV Master / EIR' : 'GV REPORT';
     attachGrowth(out, r || {}, globalCurYm);
+    out.groupBins = {
+      last: sheetFirstGroups(sheetLast, out.classBins.last),
+      cur: sheetFirstGroups(sheetCur, out.classBins.cur),
+      stock: { VC4: num(out.stock && out.stock.vc4), VC20: 0, 'VC5+': num(out.stock && out.stock.comm), total: num(out.stock && out.stock.total) }
+    };
     if (light) return out;
     const master = gvClassRows((m) => norm(m.agentName) === n || (out.id && m.agentId === out.id));
     const curYm = globalCurYm, lastYm = globalLastYm;
@@ -1072,10 +1077,16 @@ window.FF = window.FF || {};
     const n = norm(p.name);
     const gvIndex = gvPeopleLookup();
     const allReports = gvIndex.rows;
-    const tlReports = gvIndex.byTl.get(n) || [];
+    let tlReports = n ? (gvIndex.byTl.get(n) || []) : [];
+    if (!tlReports.length && p.sub) {
+      const wantId = clean(p.sub).toUpperCase();
+      tlReports = allReports.filter((r) => clean(r.tlId || r.supervisorId).toUpperCase() === wantId);
+    }
     const reportTeam = tlReports.filter((r) => !safeCall(() => FF.config.isDirectAgent(r, 'gv'), false));
     const tlId = (reportTeam[0] && reportTeam[0].tlId) || (tlReports[0] && tlReports[0].tlId) || p.sub || '';
-    const isSelfReport = (r) => norm(r.agentName) === n || (!!tlId && clean(r.agentId).toUpperCase() === clean(tlId).toUpperCase() && norm(r.tlName) === n);
+    const tlNameCanon = (reportTeam[0] && reportTeam[0].tlName) || (tlReports[0] && tlReports[0].tlName) || p.name || '';
+    const nCanon = norm(tlNameCanon);
+    const isSelfReport = (r) => (nCanon && norm(r.agentName) === nCanon) || (!!tlId && clean(r.agentId).toUpperCase() === clean(tlId).toUpperCase() && (!nCanon || norm(r.tlName) === nCanon));
     // Keep the TL's own self-supervised GV REPORT row long enough to separate its issuance from the
     // member list. It is not a direct/no-TL agent: GV REPORT TL snapshots include this row's work.
     const list = tlReports.filter((r) => !safeCall(() => FF.config.isDirectAgent(r, 'gv'), false) || isSelfReport(r)).map((r) => ({ ...r }));
@@ -1897,6 +1908,8 @@ window.FF = window.FF || {};
       status: (q && q.status) || p.status || fb.status || '',
       direct, directLabel: (q && q.directLabel) || p.directLabel || '', tlName, tlId, tlLabel,
       stock, stockVc4, stockComm, cur, curVc4, curComm, last, lastVc4, lastComm, growth,
+      curYm: (q && q.months && q.months.cur) || fb.curYm || '',
+      lastYm: (q && q.months && q.months.last) || fb.lastYm || '',
       issuance: q ? issuancePresentation(q) : null,
       // TL rollup detail (TL row = own + agents — "total issuance with TL / stock same" rule)
       ownStock: ts.own && Number.isFinite(Number(ts.own.total)) ? Number(ts.own.total) : null,
@@ -1996,10 +2009,10 @@ window.FF = window.FF || {};
     const limit = o.limit || 250;
     const sortVal = (v) => (v === null || v === undefined || (typeof v === 'number' && !Number.isFinite(v)) ? '' : v);
     const rowHtml = (r, i) => {
+      const whoParam = r.isTl ? `tl=${encodeURIComponent(r.name)}${r.id ? `&tlId=${encodeURIComponent(r.id)}` : ''}` : `agent=${encodeURIComponent(r.name)}${r.id ? `&agentId=${encodeURIComponent(r.id)}` : ''}`;
       const st = r.isTl ? `src=${r.ch}&scope=stock&tl=${encodeURIComponent(r.name)}` : `src=${r.ch}&scope=stock&agent=${encodeURIComponent(r.name)}${r.id ? `&agentId=${encodeURIComponent(r.id)}` : ''}`;
-      const ym = `ym=`;
-      const curSpec = `src=${r.ch}&scope=mtd&${ym}&${r.isTl ? `tl=${encodeURIComponent(r.name)}` : `agent=${encodeURIComponent(r.name)}${r.id ? `&agentId=${encodeURIComponent(r.id)}` : ''}`}`;
-      const lastSpec = `src=${r.ch}&scope=month&${ym}&${r.isTl ? `tl=${encodeURIComponent(r.name)}` : `agent=${encodeURIComponent(r.name)}${r.id ? `&agentId=${encodeURIComponent(r.id)}` : ''}`}`;
+      const curSpec = `src=${r.ch}&scope=mtd&ym=${encodeURIComponent(r.curYm || '')}&${whoParam}`;
+      const lastSpec = `src=${r.ch}&scope=month&ym=${encodeURIComponent(r.lastYm || '')}&${whoParam}`;
       const rollup = r.isTl
         ? ((r.ownStock != null || r.agentsStock != null)
             ? `own ${fmt(r.ownStock || 0)} + agents ${fmt(r.agentsStock || 0)} · ${fmt(r.agentCount)} agents`

@@ -623,6 +623,7 @@ window.FF = window.FF || {};
     // tha. Ab row-by-row (tag-level) dedupe hota hai: EIR me jo tag pehle se hai wo dobara nahi judta,
     // baaki GV Master rows (GV ka asli ledger) add ho jaate hain.
     const seen = new Set();
+    const seenAgg = new Set();
     const marker = (o) => {
       const key = o.key || (o.d ? U.dateKey(o.d) : '') || (o.date ? U.dateKey(o.date) : '');
       const tag = String(o.tagId || o.tag || '').trim().toUpperCase();
@@ -631,15 +632,33 @@ window.FF = window.FF || {};
       if (vrn) return `v|${key}|${vrn}`;
       return `a|${key}|${o.agentId || U.clean(o.agentName).toUpperCase()}|${o.cls || ''}`;
     };
-    (eirDaily() || []).filter((r) => r.channel === 'GV Partner').forEach((r) => seen.add(marker(r)));
+    (eirDaily() || []).filter((r) => r.channel === 'GV Partner').forEach((r) => {
+      seen.add(marker(r));
+      const hasTagOrVrn = String(r.tagId || r.tag || r.vrn || '').trim();
+      if (!hasTagOrVrn) {
+        const key = r.key || (r.d ? U.dateKey(r.d) : '') || (r.date ? U.dateKey(r.date) : '');
+        const cls = normClass(r.cls || '');
+        const p = lk.resolve(r.agentId, r.agentName, r.tlId, r.tlName);
+        [p.agentId, p.agentName, r.agentId, r.agentName].forEach((who) => {
+          const w = U.clean(who).toUpperCase();
+          if (w && !lk.isChannelTl(w)) seenAgg.add(`a|${key}|${w}|${cls}`);
+        });
+      }
+    });
     const tk = todayKey();
     for (const r of rows()) {
       const k = r.date ? U.dateKey(r.date) : '';
       if (!r.ym || k === tk) continue;
-      const mk = marker({ key: k, tagId: r.tagId, vrn: r.vrn, agentId: r.agentId, agentName: r.agentName, cls: r.cls });
+      const p = lk.resolve(r.agentId, r.agentName, r.tlId, r.tlName);
+      const cls = normClass(r.cls || '');
+      const coveredByAgg = [p.agentId, p.agentName, r.agentId, r.agentName, r.gvUniqueId, r.gvUniqueName].some((who) => {
+        const w = U.clean(who).toUpperCase();
+        return w && seenAgg.has(`a|${k}|${w}|${cls}`);
+      });
+      if (coveredByAgg) continue;
+      const mk = marker({ key: k, tagId: r.tagId, vrn: r.vrn, agentId: p.agentId || r.agentId, agentName: p.agentName || r.agentName, cls });
       if (seen.has(mk)) continue;
       seen.add(mk);
-      const p = lk.resolve(r.agentId, r.agentName, r.tlId, r.tlName);
       fromEir.push({
         date: r.date, d: r.date, key: k, ym: r.ym, day: r.day, cls: r.cls, group: r.group,
         type: /replace/i.test(`${r.status || ''} ${r.tagType || ''}`) ? 'REPLACEMENT' : 'ISSUANCE',

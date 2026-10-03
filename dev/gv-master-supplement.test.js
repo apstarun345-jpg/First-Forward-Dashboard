@@ -82,3 +82,36 @@ test('kpiDetail GV ka ledger bhi isi source se leta hai (KPI aur drill ek jaise)
   assert.match(src, /FF\.gv\.issuanceRows\(\)/, 'GV rows gv layer se');
   assert.match(src, /rows\.filter\(\(r\) => r\.channel !== 'GV Partner'\)\.concat\(gvRows\.map\(mapGv\)\)/, 'store ke GV rows replace hote hain (double count nahi)');
 });
+
+test('EIR grouped daily rows (bina tagId/vrn) aur GV Master (tagId ke saath) double-count nahi hote (28 → 55 aur 332 → 670 bug guard)', () => {
+  const curYm = U.ymKey(new Date());
+  const dPrior = U.fromDateKey(`${curYm}-01`);
+  const dToday = new Date();
+  const kPrior = U.dateKey(dPrior);
+  // Production M.loadDaily() grouped rows deta hai (bina tagId / vrn): prior day = 27, last month = 338
+  const store = {
+    daily: [
+      { d: dPrior, key: kPrior, ym: curYm, day: 1, cls: 'VC4', group: 'VC4', type: 'ISSUANCE', vrnType: 'New', channel: 'GV Partner', agentId: 'APS011919', agentName: 'Hemalbhai Bhavsar', tlId: 'APS011919', tlName: 'Hemalbhai Bhavsar', n: 27 },
+      { d: U.fromDateKey(`${lastYm}-10`), key: `${lastYm}-10`, ym: lastYm, day: 10, cls: 'VC4', group: 'VC4', type: 'ISSUANCE', vrnType: 'New', channel: 'GV Partner', agentId: 'APS011919', agentName: 'Hemalbhai Bhavsar', tlId: 'APS011919', tlName: 'Hemalbhai Bhavsar', n: 338 }
+    ]
+  };
+  const masterRows = [];
+  for (let i = 1; i <= 27; i++) {
+    masterRows.push({ date: dPrior, ym: curYm, day: 1, cls: 'VC4', group: 'VC4', status: 'ISSUANCE', tagId: `CUR-${i}`, vrn: `GJ01${i}`, agentId: 'APS011919', agentName: 'Hemalbhai Bhavsar', tlId: 'APS011919', tlName: 'Hemalbhai Bhavsar' });
+  }
+  // Aaj ka 1 live tag GV Master me
+  masterRows.push({ date: dToday, ym: curYm, day: dToday.getDate(), cls: 'VC4', group: 'VC4', status: 'ISSUANCE', tagId: 'CUR-TODAY-1', vrn: 'GJ01TODAY', agentId: 'APS011919', agentName: 'Hemalbhai Bhavsar', tlId: 'APS011919', tlName: 'Hemalbhai Bhavsar' });
+  for (let i = 1; i <= 332; i++) {
+    masterRows.push({ date: U.fromDateKey(`${lastYm}-10`), ym: lastYm, day: 10, cls: 'VC4', group: 'VC4', status: 'ISSUANCE', tagId: `LAST-${i}`, vrn: `GJ02${i}`, agentId: 'APS011919', agentName: 'Hemalbhai Bhavsar', tlId: 'APS011919', tlName: 'Hemalbhai Bhavsar' });
+  }
+  FF.gv.state.data = {
+    master: masterRows,
+    report: [{ agentId: 'APS011919', agentName: 'Hemalbhai Bhavsar', tlId: 'APS011919', tlName: 'Hemalbhai Bhavsar' }],
+    stockAgent: [], stockTl: [], stockAgentClass: []
+  };
+  FF.store.get = (k) => store[k];
+  const rows = FF.gv.issuanceRows();
+  const sumYm = (m) => rows.filter((r) => r.ym === m).reduce((s, r) => s + (r.n || 1), 0);
+  assert.equal(sumYm(curYm), 28, 'this month = 27 (EIR prior) + 1 (GV Master today) = 28 (55 nahi!)');
+  assert.equal(sumYm(lastYm), 338, 'last month = 338 (EIR grouped, GV Master ke 332 dobara add hokar 670 nahi!)');
+});
