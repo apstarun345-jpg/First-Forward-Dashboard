@@ -96,7 +96,10 @@ test('wiring: print popup no longer relies on inline script (CSP), PDF buttons +
   assert.match(tr, /data-tr-bulk="pdf"/);
   assert.match(tr, /data-tr-a="dispatchName"/);
   assert.match(srv, /dispatchName/);
-  assert.match(lazy, /ffAgentSummary: \['pdf', 'agentSummary'\]/);
+  assert.match(lazy, /ffAgentSummary: \[[^\]]*'agentSummary'[^\]]*\]/, 'FF summary group me agentSummary ho');
+  assert.match(lazy, /gvAgentSummary: \[[^\]]*'gvpages'[^\]]*'agentSummary'[^\]]*\]/, 'GV summary group me legacy + naya UI dono');
+  assert.match(lazy, /gvAgentSummary: \[[^\]]*'gvTruth'[^\]]*'summaryUI'[^\]]*\]/, 'GV summary ka naya engine + UI wired ho');
+  assert.match(lazy, /ffAgentSummary: \[[^\]]*'gvTruth'[^\]]*'summaryUI'[^\]]*\]/, 'FF summary bhi naya UI use kare');
   assert.match(app, /id: 'gvAgentSummary'/); assert.match(app, /id: 'unusual'/);
   assert.match(srv, /key: 'agentSummary'/); assert.match(srv, /key: 'unusual'/);
   assert.match(read('store.js'), /scheduleRetry/); assert.match(read('gv.js'), /scheduleRetry/); assert.match(read('data.js'), /Auto-retry/);

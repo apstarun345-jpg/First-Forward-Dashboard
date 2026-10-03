@@ -3111,7 +3111,7 @@ function perfReport() {
   const hottest = [...HOT.entries()].sort((a, b) => b[1].hits - a[1].hits).slice(0, 10)
     .map(([url, h]) => ({ url: url.length > 160 ? `${url.slice(0, 160)}…` : url, hits: h.hits }));
   return {
-    version: '3.42.0', cacheEntries: cache.size, cacheEntriesMax: MAX_CACHE_ENTRIES, cacheMB: Math.round(cache.bytes / 1048576), cacheMBMax: Math.round(MAX_CACHE_BYTES / 1048576),
+    version: '3.45.0', cacheEntries: cache.size, cacheEntriesMax: MAX_CACHE_ENTRIES, cacheMB: Math.round(cache.bytes / 1048576), cacheMBMax: Math.round(MAX_CACHE_BYTES / 1048576),
     cacheSeconds: cacheMs() / 1000, warmedQueries: warmed, hotQueries: hottest,
     slowest: queries.filter((q) => q.upstream > 0).slice(0, 25),
     queries
@@ -3217,7 +3217,7 @@ async function handleApi(req, res, url) {
 
   if (p === '/api/health' && method === 'GET') {
     // pendingSignups sirf admin ko (sidebar badge ke liye) — public health me leak nahi.
-    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.42.0', storage: storageStatus(), push: pushHealth(), stockAge: stockAgeStatus(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length } : {}) });
+    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: '3.45.0', storage: storageStatus(), push: pushHealth(), stockAge: stockAgeStatus(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length } : {}) });
   }
   // 📊 Admin-only: exact reason of slowness (Google query timings, cache hit rate, warm queries).
   if (p === '/api/perf' && method === 'GET') {

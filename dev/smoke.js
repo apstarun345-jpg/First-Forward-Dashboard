@@ -664,25 +664,38 @@ await run('v3.11 · Master search (naam / TL / ID index + suggestions + results 
   }
   log(`      profile ${pr.name} · stock ${pr.stock.total} · class rows ${pr.classes.length} · html ${ph.length} chars`);
 }, true);
-await run('v3.43 · Agent/TL Summary (FF + GV) — search + 📊 REPORT data table + report header', async () => {
+await run('v3.45 · Agent/TL Summary v2 (FF + GV) — colourful KPI + sources + tag drill', async () => {
   const list = pages.performance.agents();
   const probe = (list.find((a) => !a.tlExcluded && a.tlName) || list[0] || {}).name || '';
   if (!probe) throw new Error('probe agent nahi mila');
   const r = root();
   await FF.pages.ffAgentSummary.render(r, { q: probe }, {});
-  await settle(400);
+  await settle(500);
   let html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  for (const label of ['Agent / TL Summary', 'as-search', 'REPORT data — sabhi agents', 'mp-people-table', 'data-mppt-filter', 'data-mppt-row', '📊 REPORT data', 'Total Issuance', 'Last Month', 'as-head v2', 'REPORT tab']) {
+  for (const label of ['Agent / TL Summary', 'gs-search', 'gs-kpi', 'data-gs-kpi', 'Issuance ·', 'Stock in hand', 'Ye numbers kahan se aaye', 'Class-wise', 'gs-hero']) {
     if (!html.includes(label)) throw new Error(`FF Summary page me "${label}" nahi mila`);
   }
-  if (!/scope=stock(&amp;|&)/.test(html)) throw new Error('REPORT data table ke stock cells clickable nahi');
+  if (!/data-gs-kpi="stock"/.test(html)) throw new Error('FF Summary ke KPI cards clickable nahi');
   const r2 = root();
   await FF.pages.gvAgentSummary.render(r2, {}, {});
-  await settle(400);
+  await settle(600);
   html = r2.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  for (const label of ['mp-people-table', 'GV REPORT', 'Total Issuance', 'Last Month']) {
+  for (const label of ['gs-kpi', 'Issuance ·', 'Last month', 'Stock in hand', 'GV Master', 'GV REPORT', 'Tag Assignment', 'Data check']) {
     if (!html.includes(label)) throw new Error(`GV Summary page me "${label}" nahi mila`);
   }
+  // ledger-final truth: GV Master ki tag rows se number + sheet cross-check + tag-level drill
+  const people = FF.gvTruth.people();
+  if (!people.length) throw new Error('gvTruth.people() khali hai');
+  const who = people.find((p) => p.kind === 'gv-agent' && p.cur > 0) || people[0];
+  const truth = FF.gvTruth.person({ kind: who.kind, name: who.name, id: who.id });
+  if (!truth.ledger.cur.total && !truth.ledger.last.total) throw new Error('GV truth me ledger numbers 0 hain');
+  if (!truth.checks.length) throw new Error('GV truth me sheet-vs-ledger checks nahi');
+  const d = await FF.gvTruth.drill({ kind: who.kind, name: who.name, id: who.id, scope: 'cur', truth });
+  if (!d.rows.length) throw new Error('tag-level drill rows khali hain');
+  for (const col of ['VRN / BARCODE', 'TAG_ID', 'SERIAL']) if (!d.columns.includes(col)) throw new Error(`drill me "${col}" column nahi`);
+  const w = FF.gvTruth.health();
+  if (!w.loaded.ledger) throw new Error('GV Master rows load nahi hui');
+  log(`      GV truth: ${who.name} · ${truth.ledger.cur.total} MTD · ${truth.ledger.last.total} last · ${truth.stock.total} stock · drill ${d.rows.length} rows`);
 }, true);
 await run('T-1 basis · growth % + suggested dispatch (master search + performance drawer)', async () => {
   const list = pages.performance.agents();

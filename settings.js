@@ -881,6 +881,35 @@ FF.pages = FF.pages || {};
   }
 
 
+  // ---- 🧭 GV column heading check (v3.45) -----------------------------------------------------------
+  /** GV sheets ki heading → column mapping ka status. Column shift hone par yahan warning dikhti hai. */
+  function gvMappingHtml() {
+    const gv = FF.gv;
+    if (!gv || !gv.mapping) return '<p class="dim small">GV module load nahi hua (is user ko GV access nahi hai?).</p>';
+    const sets = [['master', 'GV Master (issuance)'], ['assignment', 'Tag Assignment (stock)'], ['report', 'GV REPORT (performance)']];
+    const loaded = sets.filter(([k]) => gv.mapping(k));
+    if (!loaded.length) return '<p class="dim small">Abhi GV data load nahi hua — <b>🔎 Ab check karo</b> dabao (ya GV page kholo).</p>';
+    const warns = (gv.mappingWarnings ? gv.mappingWarnings() : []) || [];
+    const rows = [];
+    loaded.forEach(([key, label]) => {
+      const m = gv.mapping(key) || {};
+      Object.entries(m.info || {}).forEach(([field, i]) => {
+        if (i.how === 'config') return; // sirf jo config letter se hat kar padha gaya
+        rows.push(`<tr><td>${esc(label)}</td><td>${esc(field)}</td><td class="mono">${esc(i.configLetter)}</td><td class="mono">${esc(i.letter)}${i.label ? ` · ${esc(i.label)}` : ''}</td><td>${i.how === 'header' ? '<span class="badge green">heading se</span>' : '<span class="badge amber">verify karein</span>'}</td></tr>`);
+      });
+    });
+    const heads = loaded.map(([key, label]) => {
+      const m = gv.mapping(key) || {};
+      const labels = (gv.labels && gv.labels[key]) || [];
+      return `<div class="dim small">${esc(label)}: ${labels.length ? `<b>${labels.length}</b> headings mile` : 'headings nahi mili'}` +
+        (m.hasLabels === false ? ' · <b>heading row detect nahi hui</b> — config letters use hue' : '') + '</div>';
+    }).join('');
+    const tbl = rows.length
+      ? `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Sheet</th><th>Field</th><th>Config col</th><th>Padha gaya</th><th>Kaise</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>`
+      : '<p class="dim small">✅ Sabhi configured columns ki heading match hui — koi column shift nahi mila.</p>';
+    return `${heads}${tbl}${warns.length ? `<div class="gs-warn">${warns.map((w) => `<p>⚠️ ${esc(typeof w === 'string' ? w : `${w.dataset}: ${w.text}`)}</p>`).join('')}</div>` : ''}`;
+  }
+
   // ---- 🗂️ Sheets & tabs: registry of every sheet tab the app can show ----------------------------
   function sourcesTab() {
     const tabs = (settings.tabs && settings.tabs.length ? settings.tabs : FF.config.allTabs());
@@ -931,6 +960,10 @@ FF.pages = FF.pages || {};
         <p class="dim small">Kis sheet ka data kaun se row aur column se chahiye aur kahan tak — yahan har sheet ke liye customize karo (jaise Column A Row 1 se Column M tak <code>A1:M</code> ya Row 4 se BE tak <code>A4:BE</code>). Save karne par Google Visualization proxy isi range me query karega.</p>
         <div class="range-config-grid">${rangeCards}</div>
         <div class="save-bar"><button class="btn primary" id="range-save-btn">💾 Save range settings</button></div>`)}
+      ${section('🧭 GV column heading check <span class="dim">(GV Master / Tag Assignment / GV REPORT)</span>', `
+        <p class="dim small">GV sheet me column aage-peeche hone par app <b>heading padh kar</b> sahi column pakadta hai. Yahan dikhta hai ki har field kis column se padha gaya — aur koi mismatch ho to warning. Yahi wajah hoti hai jab GV page par number galat lage.</p>
+        <div id="gv-map-out">${gvMappingHtml()}</div>
+        <div class="save-bar"><button class="btn" id="gv-map-check">🔎 Ab check karo (GV data load)</button><span class="dim small" id="gv-map-msg"></span></div>`)}
       ${section('➕ Naya tab jodo <span class="dim">(optional)</span>', `
         <p class="dim small">Dono Google Sheets me koi naya tab ho to yahan add karke user ko access de sakte ho.</p>
         <div class="form-grid"><label class="fld"><span>Tab id (permission key)</span><input class="input" id="nt-id" placeholder="e.g. GV Tag Status"></label>
@@ -2562,6 +2595,22 @@ FF.pages = FF.pages || {};
           await Promise.all([FF.store.preload(true).catch(() => {}), FF.gv && FF.gv.enabled() ? FF.gv.preload(true).catch(() => {}) : Promise.resolve()]);
         }
         U.toast('Fresh data load complete ✓', 'ok');
+        draw();
+      });
+      const gvMapCheck = U.$('#gv-map-check', body);
+      if (gvMapCheck) gvMapCheck.addEventListener('click', async () => {
+        const msg = U.$('#gv-map-msg', body);
+        if (msg) msg.textContent = 'GV data load ho raha hai…';
+        const jobs = [];
+        try {
+          if (FF.gv) {
+            jobs.push(FF.gv.need('master', { only: true }).catch(() => {}));
+            jobs.push(FF.gv.need('report', { only: true }).catch(() => {}));
+            if (FF.gv.ensureAssignmentMap) jobs.push(FF.gv.ensureAssignmentMap().catch(() => {}));
+            await Promise.all(jobs);
+            if (msg) msg.textContent = '✓ Check ho gaya';
+          }
+        } catch (err) { if (msg) msg.textContent = `Load fail: ${(err && err.message) || err}`; }
         draw();
       });
       const ntAdd = U.$('#nt-add', body);

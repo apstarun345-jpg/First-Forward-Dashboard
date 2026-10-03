@@ -122,6 +122,14 @@ FF.config = {
     report: { tab: 'GV REPORT', gid: '1284424234', headerRow: 4, lastCol: 'AZ' }
   },
 
+  // 📦 GV stock ka "sahi" matlab: Tag Assignment me jo tags asli me field me hain. Column D (TAG_STATUS)
+  // me ye shabd aaye to row stock se bahar (issued / returned…) — baaki sab in-stock maana jata hai.
+  // Blank ya naya status kabhi chhupaya nahi jata: count ke saath byStatus bhi dikhta hai.
+  gvStockStatus: {
+    inStock: ['IN STOCK', 'STOCK', 'ASSIGNED', 'ALLOCATED', 'AVAILABLE', 'ACTIVE', 'FRESH', 'OK'],
+    outStock: ['ISSUE', 'SOLD', 'DISPATCH', 'DELIVER', 'RETURN', 'CANCEL', 'DEAD', 'BLOCK', 'LOST', 'DAMAGE', 'REPLAC', 'VOID', 'EXPIRE', 'CLOSED', 'INACTIVE']
+  },
+
   report: { sheet: 'REPORT', gid: '242489821' },
   ffCommission: { rateCol: '', earnedCol: '', categoryCol: '', dateCol: '' }, // blank = dynamic REPORT heading discovery
   // FF Google Sheet ki "payout" tab — har class ka commission rate aur penalty. Blank fields auto-detect.

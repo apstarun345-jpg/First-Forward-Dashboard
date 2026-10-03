@@ -322,6 +322,16 @@ function applyRange(sheet, range) {
   const c1 = colIdx(m[1]), r1 = Number(m[2]) - 1;
   const c2 = m[3] ? colIdx(m[3]) : sheet.cols.length - 1;
   const r2 = (m[4] !== undefined && m[4] !== '') ? Number(m[4]) : sheet.rows.length;
+  // ⚠️ gviz me `range` ka pehla row labels deta hai. Range row 1 se shuru ho (A1:M) to wahi asli
+  // heading row hai — mock me heading `cols[].label` me rehti hai aur `rows` data-only hote hain,
+  // isliye us case me rows ko shift NAHI karte. Range row 4 se shuru ho (GV REPORT) to mock ke
+  // rows me title/header rows bhi hote hain — wahan pehla row hi heading banta hai (asli jaisa).
+  if (r1 === 0) {
+    const cols = [];
+    for (let c = c1; c <= c2; c++) cols.push({ id: sheet.cols[c] ? sheet.cols[c].id : L(c), label: sheet.cols[c] ? sheet.cols[c].label : '', type: sheet.cols[c] ? sheet.cols[c].type : 'string' });
+    const data = sheet.rows.slice(0, r2).map((r) => { const out = []; for (let c = c1; c <= c2; c++) out.push(r[c] === undefined ? '' : r[c]); return out; });
+    return { cols, rows: data };
+  }
   const rows = sheet.rows.slice(r1, r2);
   const head = rows[0] || [];
   const cols = [];

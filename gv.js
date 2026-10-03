@@ -33,6 +33,171 @@ window.FF = window.FF || {};
   const clsNum = (c) => parseInt(String(c).replace(/\D/g, ''), 10) || 999;
   const isHeaderRow = (row) => row.some((v) => /^(AGENT_ID|UNIQUE_ID|TAG_ID|VEHICLE_CLASS)$/i.test(U.clean(v)));
 
+  // ---- 🧭 Header-aware column mapping (v3.45) ------------------------------------------------------
+  // Pehle har field sirf config ke column LETTER par padhi jaati thi — sheet me column aage-peeche
+  // hote hi (naya column, merged heading, partner ka edit) number chup-chaap galat aane lagta tha.
+  // Ab: config letter ka heading expected jaisa ho to wahi; warna heading se sahi column dhoondha
+  // jaata hai; kuch bhi match na ho to configured letter hi chalega + warning (Settings/Data check me
+  // dikhti hai). Isse "GV REPORT / GV Master ko sahi recognise karo" wali dikkat jad se theek hoti hai.
+  const normHead = (s) => U.clean(s).toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const headTokens = (s) => new Set((String(s || '').toUpperCase().match(/[A-Z0-9]{2,}/g) || []).filter((t) => t.length >= 3));
+  /** Do tokens "lagbhag same" hain? (typo ya chhota abbreviation — MAX_QUANTITY vs MAX_QTY) */
+  function tokenClose(a, b) {
+    if (a === b) return true;
+    if (Math.abs(a.length - b.length) > 3) return false;
+    if (a.startsWith(b) || b.startsWith(a)) return true;
+    // chhota edit distance (typo: EXPACTED vs EXPECTED)
+    if (a.length <= 12 && b.length <= 12) {
+      const dp = Array.from({ length: a.length + 1 }, (_, i) => [i, ...new Array(b.length).fill(0)]);
+      for (let j = 0; j <= b.length; j++) dp[0][j] = j;
+      for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      if (dp[a.length][b.length] <= 2) return true;
+    }
+    return false;
+  }
+  /** 0–100: sheet ke heading label aur humari expected heading kitne milte hain. */
+  function headScore(label, expected) {
+    const a = normHead(label), e = normHead(expected);
+    if (!a || !e) return 0;
+    if (a === e) return 100;
+    if (a.startsWith(e) || e.startsWith(a)) return 85;
+    if (e.length >= 3 && a.includes(e)) return 75;
+    if (a.length >= 3 && e.includes(a)) return 65;
+    const ta = headTokens(label), te = headTokens(expected);
+    if (!ta.size || !te.size) return 0;
+    let hit = 0;
+    te.forEach((t) => { if (ta.has(t) || [...ta].some((x) => tokenClose(x, t))) hit++; });
+    const cov = hit / te.size;
+    return cov >= 0.5 ? Math.round(40 + cov * 48) : 0;
+  }
+  /** True lagta hai ki labels sach me sheet ki headings hain (data rows nahi)? */
+  function labelsPlausible(labels, spec, synonyms) {
+    let sum = 0, n = 0;
+    Object.keys(spec).forEach((field) => {
+      const letter = spec[field];
+      const isCol = typeof letter === 'number' || (typeof letter === 'string' && /^[A-Za-z]{1,3}$/.test(letter.trim()));
+      if (!isCol) return;
+      const syns = (synonyms && synonyms[field]) || [];
+      if (!syns.length) return;
+      const cfg = typeof letter === 'number' ? letter : U.colIndex(letter);
+      sum += syns.reduce((best, s) => Math.max(best, headScore(U.clean(labels[cfg]), s)), 0);
+      n++;
+    });
+    return n ? (sum / n) >= 45 : true;
+  }
+  /** Ek dataset ke labels se field → column index map banao (synonyms + nearest-index preference).
+   *  `opts.firstRow` diya ho to pehle ye pakadta hai ki labels sach me headings hain ya pehli data row
+   *  (gviz kabhi range ke pehle row ko hi label bana deta hai) — us case me config letters hi safe hain. */
+  function mapFields(labels, spec, synonyms, opts) {
+    let hasLabels = Array.isArray(labels) && labels.some((l) => U.clean(l));
+    if (hasLabels && opts && Array.isArray(opts.firstRow) && opts.firstRow.length) {
+      let same = 0, n = 0;
+      labels.forEach((l, i) => {
+        const a = U.clean(l), b = U.clean(opts.firstRow[i]);
+        if (!a && !b) return;
+        n++;
+        if (a && b && a === b) same++;
+      });
+      if (n && (same / n) >= 0.6) hasLabels = false;
+    }
+    const idx = {}, info = {}, warnings = [];
+    Object.keys(spec).forEach((field) => {
+      const letter = spec[field];
+      // spec me column letter ('E') ya seedha index (0, 1, … — jaise REPORT_COLS) dono chalte hain.
+      // `tab`, `gid`, `headerRow` jaise settings column nahi hain — unko chhod do.
+      const isCol = typeof letter === 'number' || (typeof letter === 'string' && /^[A-Za-z]{1,3}$/.test(letter.trim()));
+      if (!isCol) return;
+      const cfg = typeof letter === 'number' ? letter : U.colIndex(letter);
+      const at = hasLabels ? U.clean(labels[cfg]) : '';
+      const syns = (synonyms && synonyms[field]) || [];
+      const scoreOf = (l) => syns.reduce((best, s) => Math.max(best, headScore(l, s)), 0);
+      let use = cfg, how = hasLabels ? 'config' : 'no-headers';
+      const hereScore = at ? scoreOf(at) : 0;
+      if (hasLabels && at && syns.length && hereScore < 55) {
+        let best = -1, bestScore = 0;
+        labels.forEach((l, i) => {
+          const s = scoreOf(l) - Math.min(20, Math.abs(i - cfg) * 2);
+          if (s > bestScore) { bestScore = s; best = i; }
+        });
+        if (best >= 0 && bestScore >= 55) { use = best; how = best === cfg ? 'config' : 'header'; }
+        else how = 'mismatch';
+      }
+      idx[field] = use;
+      const cfgRef = typeof letter === 'number' ? U.colLetter(cfg) : letter;
+      info[field] = { index: use, letter: U.colLetter(use), configLetter: cfgRef, label: at, how, score: hereScore };
+      if (how === 'header') warnings.push(`${field}: column ${cfgRef} par "${at}" mila — heading "${U.clean(labels[use])}" (${U.colLetter(use)}) se padha gaya`);
+    });
+    return { idx, info, warnings, hasLabels };
+  }
+  // Expected headings (synonyms) — sheet me jo naam aam taur par hote hain.
+  const MASTER_SYNS = {
+    uniqueId: ['UNIQUE_ID', 'AGENT_ID', 'AGENTID', 'AGENT_CODE'], agentName: ['AGENT_NAME', 'AGENT', 'NAME'],
+    tlId: ['SUPERVISOR_AGENT_ID', 'SUPERVISOR_ID', 'TL_ID'], tlName: ['SUPERVISOR_NAME', 'SUPERVISOR', 'TL_NAME'],
+    vrn: ['VRN', 'VNO', 'VEHICLE_NUMBER', 'VEHICLE_NO'], vClass: ['VCLASS', 'VEHICLE_CLASS', 'CLASS', 'TAG_CLASS'],
+    cch: ['CCH', 'CCH_CLASS'], serial: ['SNO', 'SERIAL_NUMBER', 'SERIAL'], tagId: ['TAG_ID_NUMBER', 'TAG_ID', 'TAGID'],
+    amount: ['AMOUNT', 'VALUE', 'TXN_AMOUNT'], customer: ['CUSTOMER_NAME', 'CUSTOMER', 'NAME_OF_CUSTOMER'],
+    productId: ['PRODUCT_ID', 'PRODUCT'], commission: ['COMMISSION', 'COMM', 'COMMISSION_AMOUNT'],
+    status: ['STATUS', 'TAG_STATUS'], commissionStatus: ['COMMISSION_STATUS', 'COMM_STATUS', 'PAYMENT_STATUS'],
+    date: ['ISSUE_DATE', 'DATE', 'ISSUANCE_DATE', 'TXN_DATE'], time: ['TIME', 'TXN_TIME'],
+    gvTlId: ['GV_TL_ID', 'GVTLID', 'GV_TL'], masterCch: ['MASTER_CCH', 'MASTER_CCH_CLASS'],
+    monthName: ['MONTH_NAME', 'MONTH'], tagType: ['TAG_TYPE', 'TYPE'],
+    gvUniqueId: ['GV_UNIQUE_ID', 'GVUNIQUEID'], gvUniqueName: ['GV_UNIQUE_NAME', 'GVUNIQUENAME']
+  };
+  const ASSIGN_SYNS = {
+    cls: ['VEHICLE_CLASS', 'VCLASS', 'CLASS', 'TAG_CLASS'], tagId: ['TAG_ID', 'TAG_ID_NUMBER', 'TAGID'],
+    serial: ['SERIAL_NUMBER', 'SERIAL', 'SNO'], status: ['TAG_STATUS', 'STATUS', 'STOCK_STATUS'],
+    agentId: ['AGENT_ID', 'AGENTID', 'UNIQUE_ID'], agentName: ['AGENT_NAME', 'AGENT', 'NAME'],
+    tlId: ['SUPERVISOR_ID', 'SUPERVISOR_AGENT_ID', 'TL_ID'], tlName: ['SUPERVISOR_NAME', 'SUPERVISOR', 'TL_NAME'],
+    gvUniqueId: ['GV_UNIQUE_ID'], gvUniqueName: ['GV_UNIQUE_NAME'], allocatedAt: ['ALLOCATED_AT', 'TAG_ALLOCATED_AT']
+  };
+  /** GV REPORT ke field → expected heading (REPORT_COLS_LABELS ke saath sync). */
+  // Asli sheet ke headings (mock/dev/mock-gviz.js + live GV REPORT se) — inhe synonym me rakhne se
+  // sahi column kabhi "mismatch" flag nahi hota, aur column shift hone par relocation bhi sahi hoti hai.
+  const REPORT_SYNS = {
+    mobile: ['Mobile Number', 'Mobile No', 'Mobile'], agentId: ['AGENT_ID', 'AGENT ID', 'AGENTID', 'AGENT CODE'],
+    agentName: ['AGENT_NAME', 'AGENT NAME', 'AGENT', 'NAME'], tlId: ['TL ID', 'TL_ID', 'SUPERVISER ID', 'SUPERVISOR_ID'],
+    tlName: ['TL Name', 'TL_NAME', 'SUPERVISOR_NAME', 'TL'],
+    stockVc12: ['VC12', 'Stock VC12'], stockVc16: ['VC16', 'Stock VC16'], stockVc4: ['VC4', 'Stock VC4'],
+    stockVc5: ['VC5', 'Stock VC5'], stockVc6: ['VC6', 'Stock VC6'], stockVc7: ['VC7', 'Stock VC7'],
+    stockTotal: ['Grand Total', 'TOTAL CV', 'Stock Grand Total', 'TOTAL STOCK'],
+    stockComm: ['Total CV', 'Total Stock Comm', 'Commercial', 'NVC4', 'Stock Commercial'],
+    minRequired: ['Minimum Required Inventory', 'Minimum Required', 'MIN REQUIRED'],
+    suggestedDispatch: ['Suggested Dispatch Quantity', 'Suggested Dispatch Qty', 'Suggested Dispatch'],
+    priority: ['Priority Level', 'Priority', 'Priority Level '],
+    tlStockVc4: ['TL Total Stock (VC4)', 'TL Stock VC4'], tlStockComm: ['TL Total Stock (NVC4)', 'TL Total Stock (Comm.)', 'TL Stock NVC4'],
+    tlStockTotal: ['TL Total Stock', 'TL Stock Total'],
+    lastDays: ['Last Month · Issuance Days', 'Issuance Days', 'Last Month Issuance Days'],
+    lastVc4: ['Last Month  (VC4)', 'Last Month · VC4', 'Last Month (VC4)', 'Last Month VC4'],
+    lastComm: ['Last Month (Comm.)', 'Last Month · Commercial', 'Last Month Comm', 'NVC4'],
+    lastTotal: ['Total Last Month', 'Last Month · Total', 'Last Month Total'],
+    growthText: ['Percent', 'Growth %', 'Growth', 'Percentage'],
+    agentStatus: ['AGENT  Status', 'Agent Status', 'Status'], agentPerf: ['Agent Performance', 'Performance'],
+    todayIssued: ['Today Issued', 'Today Issuance', 'Today'],
+    curDays: ['Current Month · Issuance Days', 'Issuance Days', 'Current Month Issuance Days'],
+    replace: ['Replace', 'Replacement', 'Current Month · Replace'], chassis: ['Chassis', 'Current Month · Chassis'],
+    curVc4: ['VC4', 'Current Month · VC4'], curVc5: ['VC5', 'Current Month · VC5'], curVc6: ['VC6', 'Current Month · VC6'],
+    curVc7: ['VC7', 'Current Month · VC7'], curVc12: ['VC12', 'Current Month · VC12'], curVc16: ['VC16', 'Current Month · VC16'],
+    curComm: ['TOTAL CV CURRENT MONTH', 'Current Month · Commercial', 'Current Month · Total CV'],
+    curTotal: ['Total Issunce', 'Total Issuance', 'Current Month · Total Issuance', 'Current Month · Total'],
+    expected: ['Expacted In Month', 'Expected In Month', 'Expected Month End', 'Expected'],
+    runrateVc4: ['Runrate (VC4)', 'Runrate VC4'], runrateComm: ['Runrate (NVC4)', 'Runrate NVC4'], runrate: ['Runrate', 'Run Rate'],
+    tlLastVc4: ['TL Last Month (VC4)', 'Last Month  (VC4)'], tlLastComm: ['TL Last Month (Comm.)', 'TL Last Month Comm'],
+    tlLastTotal: ['TL Last Month Total', 'Total Last Month'],
+    tlCurVc4: ['VC4 Issuance', 'TL Current Month (VC4)', 'TL Current Month VC4'],
+    tlCurComm: ['NVC4 Issuance', 'TL Current Month (NVC4)', 'TL Current Month Comm'],
+    tlCurTotal: ['TL Total Activation(Current Month)', 'TL Total Activation (MTD)', 'TL Current Month Total', 'TL Total Activation'],
+    avgRunrateVc4: ['Average Runrate (VC4)', 'Avg Runrate (VC4)'], avgRunrateComm: ['Average Runrate (NVC4)', 'Avg Runrate (NVC4)'],
+    eRunrate: ['eRunrate', 'ERunrate', 'Expected Runrate'], supervisorId: ['SUPERVISER ID', 'SUPERVISOR ID', 'SUPERVISER_ID']
+  };
+  function reportSynonyms() {
+    const out = {};
+    Object.keys(REPORT_COLS).forEach((f) => {
+      // Note: alias table + descriptive label dono — jo bhi heading sheet me mile, match ho jaye.
+      out[f] = [REPORT_COLS_LABELS[REPORT_COLS[f]] || f].concat(REPORT_SYNS[f] || []);
+    });
+    return out;
+  }
+
   // ---- store -------------------------------------------------------------------------------------
   const DATASETS = {
     master: { label: 'GV Master · issuance' },
@@ -43,7 +208,7 @@ window.FF = window.FF || {};
     stockAgentClass: { label: 'Tag Assignment · agent × class' },
     report: { label: 'GV REPORT · performance' }
   };
-  const state = { data: {}, errors: {}, loading: false, loadedAt: null, progress: { done: 0, total: 0 }, promise: null };
+  const state = { data: {}, errors: {}, loading: false, loadedAt: null, progress: { done: 0, total: 0 }, promise: null, labels: {}, mapping: {} };
 
   /** Which datasets this user actually needs (permission aware). */
   function wanted() {
@@ -149,8 +314,25 @@ window.FF = window.FF || {};
   }
   function reset() {
     generation++; jobs.clear(); state.loading = false; state.promise = null;
-    state.data = {}; state.errors = {}; state.loadedAt = null; D.clearCache();
+    state.data = {}; state.errors = {}; state.loadedAt = null; state.labels = {}; state.mapping = {};
+    D.clearCache();
   }
+  /** 🧭 Header mapping health — Settings → Data check / Summary ke "Data check" panel ke liye. */
+  function mapping(dataset) {
+    if (dataset) return state.mapping[dataset] || null;
+    const out = {};
+    Object.keys(state.mapping).forEach((k) => { out[k] = state.mapping[k]; });
+    return out;
+  }
+  function mappingWarnings() {
+    const list = [];
+    Object.entries(state.mapping).forEach(([key, m]) => {
+      (m.warnings || []).forEach((w) => list.push({ dataset: key, text: w }));
+    });
+    return list;
+  }
+  /** Tag Assignment probe ko bahar se bhi chala sakte ho (Data check panel). */
+  const ensureAssignmentMap = (opts) => assignMap(opts);
 
   // ---- loaders -----------------------------------------------------------------------------------
   /** GV Master (issuance log) — small tab, loaded fully so every page can aggregate in memory. */
@@ -158,22 +340,26 @@ window.FF = window.FF || {};
     const m = masterCfg();
     const gid = m.gid || (FF.config.tabBy('GV Master') || {}).gid || '';
     const t = await D.query('GV Master', '', { ...opts, gid });
+    const map = mapFields((t.cols || []).map((c) => c.label), m, MASTER_SYNS);
+    state.mapping.master = map;
+    state.labels.master = (t.cols || []).map((c) => c.label || '');
     const rows = [];
     for (const r of t.rows) {
-      const get = (letter) => D.cellText(r[U.colIndex(letter)]);
-      const agentId = U.clean(get(m.uniqueId));
+      const get = (field) => D.cellText(r[map.idx[field]]);
+      const num = (field) => D.cellNumber(r[map.idx[field]]);
+      const agentId = U.clean(get('uniqueId'));
       if (!agentId || /^unique_id$/i.test(agentId)) continue;
-      const date = D.cellDate(r[U.colIndex(m.date)]);
-      const rawCls = get(m.cch) || get(m.vClass);
+      const date = D.cellDate(r[map.idx.date]);
+      const rawCls = get('cch') || get('vClass');
       const cls = normClass(rawCls);
-      const commissionRaw = D.cellText(r[U.colIndex(m.commission)]);
+      const commissionRaw = get('commission');
       // GV Master me C (supervisor_agent_id) aur R (GV TL ID) dono hote hain.
       // C ko crosswalk/audit ke liye rakho; calculation aur attribution ke liye sirf R.
-      const supervisorId = U.clean(get(m.tlId));
-      const gvTlId = U.clean(get(m.gvTlId));
+      const supervisorId = U.clean(get('tlId'));
+      const gvTlId = U.clean(get('gvTlId'));
       const tlId = gvTlId;
-      const rawTlName = U.clean(get(m.tlName));
-      const agentName = U.clean(get(m.agentName)) || agentId;
+      const rawTlName = U.clean(get('tlName'));
+      const agentName = U.clean(get('agentName')) || agentId;
       const tlName = rawTlName || (tlId ? `TL ${tlId}` : 'Direct');
       rows.push({
         date, ym: date ? U.ymKey(date) : '', day: date ? date.getDate() : 0,
@@ -183,35 +369,108 @@ window.FF = window.FF || {};
         directAgent: FF.config.isDirectAgent({ agentId, agentName, tlId, tlName: rawTlName, channel: 'GV Partner' }, 'gv'),
         channel: 'GV Partner',
         cls, group: classGroup(cls),
-        status: U.clean(get(m.status)) || 'Issuance',
-        tagType: U.clean(get(m.tagType)) || 'Other',
-        tagId: U.clean(get(m.tagId)), vrn: U.clean(get(m.vrn)), serial: U.clean(get(m.serial)),
-        customer: U.clean(get(m.customer)), productId: U.clean(get(m.productId)),
-        amount: D.cellNumber(r[U.colIndex(m.amount)]) || 0,
-        commission: D.cellNumber(r[U.colIndex(m.commission)]) || 0,
+        status: U.clean(get('status')) || 'Issuance',
+        tagType: U.clean(get('tagType')) || 'Other',
+        tagId: U.clean(get('tagId')), vrn: U.clean(get('vrn')), serial: U.clean(get('serial')),
+        customer: U.clean(get('customer')), productId: U.clean(get('productId')),
+        amount: num('amount') || 0,
+        commission: num('commission') || 0,
         commissionHasValue: commissionRaw !== '',
-        gvUniqueId: U.clean(get(m.gvUniqueId)), gvUniqueName: U.clean(get(m.gvUniqueName)),
-        monthName: U.clean(get(m.monthName)), time: U.clean(get(m.time))
+        gvUniqueId: U.clean(get('gvUniqueId')), gvUniqueName: U.clean(get('gvUniqueName')),
+        monthName: U.clean(get('monthName')), time: U.clean(get('time'))
       });
     }
     rows.sort((a, b) => (a.date && b.date ? a.date - b.date : 0));
     return rows;
   }
 
+  // ---- 📦 Tag Assignment (stock) loaders — header-mapped + status-aware ---------------------------
+  // Stock ka sahi matlab: jo tags ASLI me field me hain. Tag Assignment tab me status column hota hai;
+  // pehle har row ginti thi, isliye issued/returned rows bhi "stock" me jud jaate the aur number
+  // inflated dikhta tha. Ab clearly out-of-stock statuses chhod diye jaate hain (rule config se
+  // badal sakte ho) aur dono count rakhe jaate hain: `n` = in-stock, `nAll` = tab me total rows.
+  const IN_STOCK_WORDS = ['IN STOCK', 'INSTOCK', 'STOCK', 'ASSIGNED', 'ALLOCATED', 'AVAILABLE', 'ACTIVE', 'FRESH', 'OK'];
+  const OUT_STOCK_WORDS = ['ISSUE', 'ISSUED', 'SOLD', 'DISPATCH', 'DELIVER', 'RETURN', 'CANCEL', 'DEAD', 'BLOCK', 'LOST', 'DAMAGE', 'REPLAC', 'VOID', 'EXPIRE', 'CLOSED', 'INACTIVE'];
+  const stockStatusCfg = () => (FF.config.gvStockStatus || {});
+  /** 'in' | 'out' | 'blank' | 'other' — clear out-of-stock rows hi chhodi jaati hain. */
+  function stockStatusKind(raw) {
+    const s = U.clean(raw).toUpperCase();
+    if (!s) return 'blank';
+    const cfg = stockStatusCfg();
+    const out = (cfg.outStock || OUT_STOCK_WORDS).map((x) => String(x).toUpperCase());
+    const inn = (cfg.inStock || IN_STOCK_WORDS).map((x) => String(x).toUpperCase());
+    if (out.some((x) => s.includes(x))) return 'out';
+    if (inn.some((x) => s.includes(x))) return 'in';
+    return 'other';
+  }
+  /** Tag Assignment ke headings ek baar padho (1 row probe) — phir wahi letters sab queries me. */
+  async function assignMap(opts) {
+    const cached = state.mapping.assignment;
+    if (cached && cached.hasLabels) return cached;
+    const a = assignCfg();
+    let labels = [];
+    try {
+      const probe = await D.query('Tag Assignment', 'select * limit 1', opts);
+      labels = (probe.cols || []).map((c) => c.label || '');
+      state.labels.assignmentProbeRow = (probe.rows && probe.rows[0]) ? probe.rows[0].map((c) => D.cellText(c)) : [];
+      if (!labels.some((l) => U.clean(l)) || !labelsPlausible(labels, a, ASSIGN_SYNS)) {
+        // labels ya to khaali hain ya heading ki jagah data row aa gayi hai — poora pehla page
+        // (headers ke saath) maang kar dobara dekho. Sirf ek extra query.
+        const t = await D.query('Tag Assignment', 'select * limit 5', opts);
+        if ((t.cols || []).length) labels = (t.cols || []).map((c) => c.label || '');
+      }
+    } catch (err) { labels = []; }
+    const map = mapFields(labels, a, ASSIGN_SYNS, { firstRow: state.labels.assignmentProbeRow });
+    state.mapping.assignment = map;
+    state.labels.assignment = labels;
+    return map;
+  }
+  const letterOf = (map, field, fallback) => U.colLetter(map && map.idx && map.idx[field] !== undefined ? map.idx[field] : U.colIndex(fallback));
+  /** Ek grouped result → { n (in-stock), nAll, byStatus } */
+  function stockCounts(countCell, statusText) {
+    const nAll = D.cellNumber(countCell) || 0;
+    const kind = stockStatusKind(statusText);
+    return { nAll, in: kind === 'out' ? 0 : nAll, out: kind === 'out' ? nAll : 0, kind, status: U.clean(statusText) };
+  }
   /** Tag Assignment: class mix. */
   async function loadStockClass(opts) {
     const a = assignCfg();
-    const t = await D.query('Tag Assignment', `select ${a.cls}, count(${a.tagId}) group by ${a.cls}`, opts);
-    return t.rows.map((r) => ({ cls: normClass(D.cellText(r[0])), group: classGroup(D.cellText(r[0])), n: D.cellNumber(r[1]) || 0 }))
-      .filter((r) => r.n && !/^(NA|CLASS)$/i.test(r.cls))
+    const map = await assignMap(opts);
+    const cls = letterOf(map, 'cls', a.cls), tag = letterOf(map, 'tagId', a.tagId), st = letterOf(map, 'status', a.status);
+    const t = await D.query('Tag Assignment', `select ${cls}, ${st}, count(${tag}) group by ${cls}, ${st}`, opts);
+    const byCls = new Map();
+    for (const r of t.rows) {
+      const clsName = normClass(D.cellText(r[0]));
+      const c = stockCounts(r[2], D.cellText(r[1]));
+      const cur = byCls.get(clsName) || { cls: clsName, group: classGroup(clsName), n: 0, nAll: 0, byStatus: {} };
+      cur.n += c.in; cur.nAll += c.nAll;
+      if (c.status) cur.byStatus[c.status] = (cur.byStatus[c.status] || 0) + c.nAll;
+      byCls.set(clsName, cur);
+    }
+    return [...byCls.values()]
+      .filter((r) => r.n && !/^(NA|CLASS|N A)$/i.test(r.cls))
       .sort((x, y) => clsNum(x.cls) - clsNum(y.cls));
   }
   /** Tag Assignment: TL-wise stock. */
   async function loadStockTl(opts) {
     const a = assignCfg();
-    const t = await D.query('Tag Assignment', `select ${a.tlId}, ${a.tlName}, count(${a.tagId}) group by ${a.tlId}, ${a.tlName} order by count(${a.tagId}) desc`, opts);
-    return t.rows.map((r) => ({ tlId: D.cellText(r[0]), tlName: U.clean(D.cellText(r[1])), n: D.cellNumber(r[2]) || 0 }))
-      .filter((r) => r.n && !isHeaderRow([r.tlId, r.tlName]))
+    const map = await assignMap(opts);
+    const tlId = letterOf(map, 'tlId', a.tlId), tlName = letterOf(map, 'tlName', a.tlName);
+    const tag = letterOf(map, 'tagId', a.tagId), st = letterOf(map, 'status', a.status);
+    const t = await D.query('Tag Assignment', `select ${tlId}, ${tlName}, ${st}, count(${tag}) group by ${tlId}, ${tlName}, ${st} order by count(${tag}) desc`, opts);
+    const byTl = new Map();
+    for (const r of t.rows) {
+      const id = U.clean(D.cellText(r[0])), name = U.clean(D.cellText(r[1]));
+      if (isHeaderRow([id, name])) continue;
+      const key = `${id}|${name}`;
+      const c = stockCounts(r[3], D.cellText(r[2]));
+      const cur = byTl.get(key) || { tlId: id, tlName: name, n: 0, nAll: 0, byStatus: {} };
+      cur.n += c.in; cur.nAll += c.nAll;
+      if (c.status) cur.byStatus[c.status] = (cur.byStatus[c.status] || 0) + c.nAll;
+      byTl.set(key, cur);
+    }
+    return [...byTl.values()]
+      .filter((r) => r.n)
       .map((r) => {
         const tlName = r.tlName || (U.clean(r.tlId) ? `TL ${U.clean(r.tlId)}` : 'Unassigned');
         return { ...r, tlName, channel: 'GV Partner', directAgent: !U.clean(r.tlName) && !U.clean(r.tlId), isRealTl: FF.config.isRealTl(tlName) };
@@ -220,31 +479,71 @@ window.FF = window.FF || {};
   /** Tag Assignment: TL × class. */
   async function loadStockTlClass(opts) {
     const a = assignCfg();
-    const t = await D.query('Tag Assignment', `select ${a.tlName}, ${a.cls}, count(${a.tagId}) group by ${a.tlName}, ${a.cls}`, opts);
-    return t.rows.map((r) => ({ tlName: U.clean(D.cellText(r[0])) || 'Unassigned', cls: normClass(D.cellText(r[1])), group: classGroup(D.cellText(r[1])), n: D.cellNumber(r[2]) || 0 }))
-      .filter((r) => r.n && !isHeaderRow([r.tlName, r.cls]));
+    const map = await assignMap(opts);
+    const tlNameL = letterOf(map, 'tlName', a.tlName), cls = letterOf(map, 'cls', a.cls);
+    const tag = letterOf(map, 'tagId', a.tagId), st = letterOf(map, 'status', a.status);
+    const t = await D.query('Tag Assignment', `select ${tlNameL}, ${cls}, ${st}, count(${tag}) group by ${tlNameL}, ${cls}, ${st}`, opts);
+    const by = new Map();
+    for (const r of t.rows) {
+      const tlName = U.clean(D.cellText(r[0])) || 'Unassigned';
+      const clsName = normClass(D.cellText(r[1]));
+      if (isHeaderRow([tlName, clsName])) continue;
+      const c = stockCounts(r[3], D.cellText(r[2]));
+      const key = `${tlName}|${clsName}`;
+      const cur = by.get(key) || { tlName, cls: clsName, group: classGroup(clsName), n: 0, nAll: 0, byStatus: {} };
+      cur.n += c.in; cur.nAll += c.nAll;
+      if (c.status) cur.byStatus[c.status] = (cur.byStatus[c.status] || 0) + c.nAll;
+      by.set(key, cur);
+    }
+    return [...by.values()].filter((r) => r.n);
   }
   /** Tag Assignment: agent-wise stock. */
   async function loadStockAgent(opts) {
     const a = assignCfg();
-    const t = await D.query('Tag Assignment', `select ${a.agentId}, ${a.agentName}, ${a.tlId}, ${a.tlName}, count(${a.tagId}) group by ${a.agentId}, ${a.agentName}, ${a.tlId}, ${a.tlName} order by count(${a.tagId}) desc`, opts);
-    return t.rows.map((r) => {
+    const map = await assignMap(opts);
+    const agId = letterOf(map, 'agentId', a.agentId), agName = letterOf(map, 'agentName', a.agentName);
+    const tlId = letterOf(map, 'tlId', a.tlId), tlNameL = letterOf(map, 'tlName', a.tlName);
+    const tag = letterOf(map, 'tagId', a.tagId), st = letterOf(map, 'status', a.status);
+    const t = await D.query('Tag Assignment', `select ${agId}, ${agName}, ${tlId}, ${tlNameL}, ${st}, count(${tag}) group by ${agId}, ${agName}, ${tlId}, ${tlNameL}, ${st} order by count(${tag}) desc`, opts);
+    const by = new Map();
+    for (const r of t.rows) {
       const agentId = U.clean(D.cellText(r[0])), agentName = U.clean(D.cellText(r[1])) || U.clean(D.cellText(r[0]));
-      const tlId = U.clean(D.cellText(r[2])), tlName = U.clean(D.cellText(r[3]));
-      return {
-        agentId, agentName, tlId, tlName: tlName || (tlId ? `TL ${tlId}` : 'Direct'), n: D.cellNumber(r[4]) || 0,
-        channel: 'GV Partner',
-        directAgent: FF.config.isDirectAgent({ agentId, agentName, tlId, tlName, channel: 'GV Partner' }, 'gv')
-      };
-    })
-      .filter((r) => r.n && !isHeaderRow([r.agentId, r.agentName]));
+      const tId = U.clean(D.cellText(r[2])), tName = U.clean(D.cellText(r[3]));
+      if (isHeaderRow([agentId, agentName])) continue;
+      const c = stockCounts(r[5], D.cellText(r[4]));
+      const key = `${agentId}|${agentName}|${tId}|${tName}`;
+      const cur = by.get(key) || { agentId, agentName, tlId: tId, tlName: tName, n: 0, nAll: 0, byStatus: {} };
+      cur.n += c.in; cur.nAll += c.nAll;
+      if (c.status) cur.byStatus[c.status] = (cur.byStatus[c.status] || 0) + c.nAll;
+      by.set(key, cur);
+    }
+    return [...by.values()]
+      .filter((r) => r.n)
+      .map((r) => ({
+        ...r, tlName: r.tlName || (r.tlId ? `TL ${r.tlId}` : 'Direct'), channel: 'GV Partner',
+        directAgent: FF.config.isDirectAgent({ agentId: r.agentId, agentName: r.agentName, tlId: r.tlId, tlName: r.tlName, channel: 'GV Partner' }, 'gv')
+      }));
   }
   /** Tag Assignment: agent × class. */
   async function loadStockAgentClass(opts) {
     const a = assignCfg();
-    const t = await D.query('Tag Assignment', `select ${a.agentName}, ${a.cls}, count(${a.tagId}) group by ${a.agentName}, ${a.cls}`, opts);
-    return t.rows.map((r) => ({ agentName: U.clean(D.cellText(r[0])), cls: normClass(D.cellText(r[1])), group: classGroup(D.cellText(r[1])), n: D.cellNumber(r[2]) || 0 }))
-      .filter((r) => r.n && !isHeaderRow([r.agentName, r.cls]));
+    const map = await assignMap(opts);
+    const agName = letterOf(map, 'agentName', a.agentName), cls = letterOf(map, 'cls', a.cls);
+    const tag = letterOf(map, 'tagId', a.tagId), st = letterOf(map, 'status', a.status);
+    const t = await D.query('Tag Assignment', `select ${agName}, ${cls}, ${st}, count(${tag}) group by ${agName}, ${cls}, ${st}`, opts);
+    const by = new Map();
+    for (const r of t.rows) {
+      const agentName = U.clean(D.cellText(r[0]));
+      const clsName = normClass(D.cellText(r[1]));
+      if (isHeaderRow([agentName, clsName])) continue;
+      const c = stockCounts(r[3], D.cellText(r[2]));
+      const key = `${agentName}|${clsName}`;
+      const cur = by.get(key) || { agentName, cls: clsName, group: classGroup(clsName), n: 0, nAll: 0, byStatus: {} };
+      cur.n += c.in; cur.nAll += c.nAll;
+      if (c.status) cur.byStatus[c.status] = (cur.byStatus[c.status] || 0) + c.nAll;
+      by.set(key, cur);
+    }
+    return [...by.values()].filter((r) => r.n);
   }
 
   /**
@@ -306,8 +605,15 @@ window.FF = window.FF || {};
     const lastCol = rc.lastCol || 'BE';
     const range = `A${headerRow}:${lastCol}`;
     const t = await D.query('GV REPORT', '', { ...opts, gid: rc.gid || (FF.config.tabBy('GV REPORT') || {}).gid || '', range });
-    const cell = (row, key) => D.cellText(row[REPORT_COLS[key]]);
-    const num = (row, key) => D.cellNumber(row[REPORT_COLS[key]]);
+    // 🧭 Heading se column verify/relocate — GV REPORT header row (row 4) me jo heading likhi hai,
+    // usse hi confirm hota hai ki config ka letter wahi column hai (warna sheet ka column shift hone par
+    // number chup-chaap galat aata rehta tha).
+    const rmap = mapFields((t.cols || []).map((c) => c.label), REPORT_COLS, reportSynonyms());
+    state.mapping.report = rmap;
+    state.labels.report = (t.cols || []).map((c) => c.label || '');
+    const colOf = (key) => (rmap.idx[key] !== undefined ? rmap.idx[key] : REPORT_COLS[key]);
+    const cell = (row, key) => D.cellText(row[colOf(key)]);
+    const num = (row, key) => D.cellNumber(row[colOf(key)]);
     const hasNum = (row, key) => { const value = num(row, key); return value !== null && value !== undefined; };
     // Sheet me cell khaali hai ya asli 0 — dono alag cheez hain. Ye flags decide karte hain ki GV REPORT
     // ko authoritative maana jaye ya tag-ledger (EIR / GV Master) se fallback lena pade.
@@ -999,6 +1305,8 @@ window.FF = window.FF || {};
     normClass, classGroup, clsNum,
     rows, masterRows: rows, issuanceRows, tlIssuanceRows, masterTlIdentity, agentIssuanceRows, eirDailyRows, liveDailyRows, gvToday, masterTodayRows, todayKey, months, latestDate, summary, dailySeries, weekly, byDim, agentRollup, tlRollup, directRollup, people,
     REPORT_COLS, REPORT_COLS_LABELS, reportMonthBins, reportSheetBins,
+    mapping, mappingWarnings, ensureAssignmentMap, stockStatusKind,
+    get labels() { return state.labels; },
     get state() { return state; },
     get loadedAt() { return state.loadedAt; },
     get loading() { return state.loading; }
