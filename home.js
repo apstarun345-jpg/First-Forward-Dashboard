@@ -191,9 +191,9 @@ FF.pages = FF.pages || {};
   function managementPulseHtml(ctx, sf, liveState, stock) {
     const reportDay = Math.max(1, Number(ctx && ctx.observedDay) || 1);
     const dim = Number(ctx && ctx.daysInMonth) || 30;
-    const ffTotal = sumN((sf && sf.ff) || []);
-    const gvTotal = sumN((sf && sf.gv) || []);
-    const total = ffTotal + gvTotal;
+    const rows = (sf && sf.rows) || [];
+    const reportedRows = rows.filter((r) => r.ym !== (ctx && ctx.curKey) || Number(r.day) <= reportDay);
+    const total = sumN(reportedRows);
     const expected = reportDay ? Math.round((total / reportDay) * dim) : 0;
     const live = Number(liveState && liveState.total) || 0;
     const stockTotal = Number(stock && stock.total) || 0;
