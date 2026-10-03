@@ -33,6 +33,7 @@ window.FF = window.FF || {};
     tagRequest: ['pdf', 'tagRequest'],
     masterSearch: ['gvTruth', 'masterProfile', 'masterSearch'],
     tagIssued: ['tagIssued'],
+    performance: ['performance'],
     targets: ['targets'],
     rangeReport: ['rangeReport'],
     tv: ['tv'],
