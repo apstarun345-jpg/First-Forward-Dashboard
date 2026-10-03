@@ -17,7 +17,9 @@ FF.pages = FF.pages || {};
       Data basis: FF = kal tak ka data (aaj ka data kal aata hai) · GV = live aaj. */
   function expectedRows(rows, ym, ch) {
     const b = (U.channelBasis ? U.channelBasis(ch || 'ff', { force: true }) : (U.reportBasis ? U.reportBasis() : { days: U.runRateDays(), shortLabel: '' }));
-    const cur = rows.filter((r) => r.ym === ym);
+    // Expected numerator must use only report-available days. GV live rows for today
+    // are still shown elsewhere, but must never inflate the month-end projection.
+    const cur = rows.filter((r) => r.ym === ym && Number(r.day) <= Math.max(1, b.days));
     const days = Math.max(1, b.days);
     const monthDays = U.daysInMonth(ym);
     const left = Math.max(0, monthDays - days);
