@@ -197,6 +197,13 @@ test('GV TL board: TL ke apne KPIs + agents table + matrix (agent drawer jaisa f
   assert.equal(s.team.agents.length, 2, 'TL ki apni row agents me nahi');
   assert.match(s.teamBlock, /GV Suresh/);
   assert.equal(s.tlRow.cur.total, sumOf(s.team.agents, 'curTotal') + (s.team.own ? s.team.own.curTotal : 0), 'TL MTD = agents + own');
+  // v3.44 — GV TL ke liye bhi group table (VC4 · VC20 · VC5+) + TL ID-wise stock (har ID alag, clickable)
+  assert.match(s.groupBlock, /Class group · VC4 · VC20 · VC5\+/);
+  assert.match(s.stockIdBlock, /TL ID-wise stock · GT1/);
+  assert.match(s.stockIdBlock, /Stock VC4<\/th><th class="num">Stock Comm<\/th><th class="num">Stock total/);
+  assert.match(s.stockIdBlock, /data-ab-open="GV Suresh"/, 'har agent row se nested board khulta hai');
+  assert.match(s.stockIdBlock, /agentId=G002/, 'stock cell par us ID ka drill');
+  assert.match(s.stockIdBlock, /= TL TOTAL · 🆔 GT1/, 'TL ID ke saath total');
 });
 
 test('FF agent board: wahi sections + TL naam/ID/mobile (channel parity)', () => {
@@ -222,6 +229,10 @@ test('FF TL board: TL ka apna stock (own) alag, own + agents = TL total (double 
   assert.equal(s.team.own.stockTotal + sumOf(s.team.agents, 'stockTotal'), s.tlRow.stock.total, 'own + agents = TL total');
   assert.match(s.teamBlock, /ab-ownrow/);
   assert.match(s.matrixBlock, /Ravi Kumar/);
+  // v3.44 — FF par bhi wahi do sections (channel parity): group table + TL ID-wise stock
+  assert.match(s.groupBlock, /Class group · VC4 · VC20 · VC5\+[\s\S]*?TL One/);
+  assert.match(s.stockIdBlock, /TL ID-wise stock · T1/);
+  assert.match(s.stockIdBlock, /= TL TOTAL · 🆔 T1/);
 });
 
 test('dono channel: har KPI / cell clickable (data-kpi drill) + koi undefined/NaN nahi', () => {
@@ -269,17 +280,17 @@ test('direct agent (TL nahi): TL bar nahi, par board phir bhi poora', () => {
 });
 
 // ---- wiring (index.html + sw.js + lazy.js + package.json) ---------------------------------------------------
-test('wiring: agentBoard.js load hota hai (index + sw) aur cache bust v67 / v75 hai', async () => {
+test('wiring: agentBoard.js load hota hai (index + sw) aur cache bust v68 / v76 hai', async () => {
   const fs = await import('node:fs');
   const idx = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
   const sw = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
   const lazy = fs.readFileSync(path.join(ROOT, 'lazy.js'), 'utf8');
   const pkg = fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8');
-  assert.ok(idx.includes('agentBoard.js?v=67'), 'index.html me agentBoard');
+  assert.ok(idx.includes('agentBoard.js?v=68'), 'index.html me agentBoard');
   assert.ok(idx.indexOf('performance.js') < idx.indexOf('agentBoard.js'), 'performance ke baad load');
   assert.ok(idx.indexOf('agentBoard.js') < idx.indexOf('masterProfile.js'), 'masterProfile se pehle load');
-  assert.ok(sw.includes('./agentBoard.js?v=67'), 'sw ASSETS me agentBoard');
-  assert.match(sw, /CACHE_NAME = 'apnapayment-v75'/);
-  assert.match(lazy, /return m \? m\[1\] : '66'/);
+  assert.ok(sw.includes('./agentBoard.js?v=68'), 'sw ASSETS me agentBoard');
+  assert.match(sw, /CACHE_NAME = 'apnapayment-v76'/);
+  assert.match(lazy, /return m \? m\[1\] : '67'/);
   assert.match(pkg, /agentBoard/);
 });

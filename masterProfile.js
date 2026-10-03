@@ -114,6 +114,73 @@ window.FF = window.FF || {};
     });
     return out;
   }
+  /** GV REPORT ki row se period ka sheet-only view (blank cell = null, asli 0 = 0). */
+  function sheetBinsOf(row, period) {
+    if (!row) return null;
+    return safeCall(() => (FF.gv && FF.gv.reportMonthBins ? FF.gv.reportMonthBins(row, period) : null), null);
+  }
+  /** Sheet ke period totals + ledger ka VC20/VC5+ mix → ek saaf 3-way group table.
+   *  VC4 aur total hamesha GV REPORT sheet se (jab sheet me cell bhari ho); VC20/VC5+ ka batwara
+   *  tag-ledger (EIR / GV Master) ke mix se hota hai kyunki sheet me sirf VC4 + NVC4 milta hai.
+   *  `mix` batata hai ki batwara kahan se aaya — UI wahi note dikhata hai. */
+  function sheetFirstGroups(sheetBins, ledgerBins) {
+    const out = { VC4: 0, VC20: 0, 'VC5+': 0, total: 0, comm: 0, source: '', mix: '', sheet: null, ledger: null };
+    const ledger = ledgerBins ? {
+      VC4: num(ledgerBins.VC4), VC20: num(ledgerBins.VC20), 'VC5+': num(ledgerBins['VC5+']), total: num(ledgerBins.total)
+    } : null;
+    out.ledger = ledger;
+    if (!sheetBins) {
+      if (!ledger) return out;
+      Object.assign(out, { VC4: ledger.VC4, VC20: ledger.VC20, 'VC5+': ledger['VC5+'], total: ledger.total, comm: ledger.VC20 + ledger['VC5+'], source: 'tag ledger', mix: 'ledger' });
+      return out;
+    }
+    // Do shakal aati hain: gv.reportMonthBins → { VC4, VC20, 'VC5+', comm, total } aur TL snapshot
+    // (masterProfile.reportedTlSnapshot) → { vc4, comm, total }.
+    const rawVc4 = sheetBins.VC4 === null || sheetBins.VC4 === undefined ? sheetBins.vc4 : sheetBins.VC4;
+    const vc4 = num(rawVc4);
+    const comm = sheetBins.comm === null || sheetBins.comm === undefined ? Math.max(0, num(sheetBins.total) - vc4) : num(sheetBins.comm);
+    const total = Math.max(num(sheetBins.total), vc4 + comm);
+    Object.assign(out, { VC4: vc4, comm, total, source: 'GV REPORT sheet' });
+    out.sheet = { vc4, comm, total };
+    if (sheetBins.split && sheetBins.VC20 !== null && sheetBins.VC20 !== undefined) {
+      // Current month: sheet khud VC5/VC6/… columns deta hai, isliye batwara bhi sheet ka hai.
+      out.VC20 = Math.min(comm, Math.max(0, num(sheetBins.VC20)));
+      out['VC5+'] = Math.max(0, comm - out.VC20);
+      out.mix = 'sheet';
+    } else if (ledger && ledger.VC20 + ledger['VC5+'] > 0) {
+      const mixTotal = ledger.VC20 + ledger['VC5+'];
+      out.VC20 = Math.min(comm, Math.max(0, Math.round((comm * ledger.VC20) / mixTotal)));
+      out['VC5+'] = Math.max(0, comm - out.VC20);
+      out.mix = 'ledger-mix';
+    } else {
+      out.VC20 = 0;
+      out['VC5+'] = comm;
+      out.mix = 'no-detail';
+    }
+    return out;
+  }
+  /** GV TL / agent ke liye ek hi jagah se group bins: sheet (VC4 + NVC4) + ledger ka VC20/VC5+ mix. */
+  function gvGroupBins(reportSnapshots, classBins, stockComposition) {
+    const snaps = reportSnapshots || {};
+    const bins = classBins || {};
+    return {
+      last: sheetFirstGroups(snaps.last, bins.last),
+      cur: sheetFirstGroups(snaps.cur, bins.cur),
+      stock: groupBinsOf((stockComposition && stockComposition.classRows) || [], 'n')
+    };
+  }
+  /** class-wise rows → 3-way group bins (`key` = 'n' issuance ke liye, 'stock' stock ke liye). */
+  function groupBinsOf(classes, key) {
+    const k = key || 'n';
+    const out = { VC4: 0, VC20: 0, 'VC5+': 0, total: 0 };
+    (classes || []).forEach((row) => {
+      const group = issueGroup(row);
+      const n = Math.max(0, num(row && row[k]));
+      out[group] += n;
+      out.total += n;
+    });
+    return out;
+  }
   function reportedTlSnapshot(rows, period) {
     const prefix = period === 'last' ? 'tlLast' : 'tlCur';
     const keys = [`${prefix}Vc4`, `${prefix}Comm`, `${prefix}Total`];
@@ -642,6 +709,15 @@ window.FF = window.FF || {};
     totals[`${prefix}Total`] = exact.total;
     return true;
   }
+  /** GV REPORT sheet ke period numbers seedhe totals me (sheet-first). Returns true jab lagaye gaye. */
+  function applySheetMonth(totals, prefix, bins) {
+    if (!bins || !totals) return false;
+    const vc4 = num(bins.VC4);
+    const comm = bins.comm === null || bins.comm === undefined ? Math.max(0, num(bins.total) - vc4) : num(bins.comm);
+    const total = Math.max(num(bins.total), vc4 + comm);
+    Object.assign(totals, { [`${prefix}Vc4`]: vc4, [`${prefix}Comm`]: comm, [`${prefix}Total`]: total });
+    return true;
+  }
   const sameGvAgent = (row, agent) => {
     const rowId = clean(row && (row.agentId || row.id)).toUpperCase();
     const agentId = clean(agent && (agent.agentId || agent.id)).toUpperCase();
@@ -708,11 +784,13 @@ window.FF = window.FF || {};
     if (!curExists && !lastExists) return;
     agentRows.forEach((agent) => {
       const issued = issuanceRows.filter((r) => sameGvAgent(r, agent));
-      if (curExists) {
+      // 📑 Sheet-first: GV REPORT ki row me wo month bhara hua hai to sheet hi final hai (sheet ke
+      // numbers TL 360 / drawer me dikhte hain). Ledger sirf us cell ko bharta hai jo sheet me khaali hai.
+      if (curExists && agent.curAvailable !== true) {
         const x = exactGvMonth(issued, curYm) || { vc4: 0, comm: 0, total: 0 };
         Object.assign(agent, { curVc4: x.vc4, curComm: x.comm, curTotal: x.total });
       }
-      if (lastExists) {
+      if (lastExists && agent.lastAvailable !== true) {
         const x = exactGvMonth(issued, lastYm) || { vc4: 0, comm: 0, total: 0 };
         Object.assign(agent, { lastVc4: x.vc4, lastComm: x.comm, lastTotal: x.total });
       }
@@ -939,12 +1017,15 @@ window.FF = window.FF || {};
     out.classBins = classBinsFromRows(classMine, globalCurYm, globalLastYm);
     out.issuanceSources = { cur: 'GV Master / EIR', last: 'GV Master / EIR', classes: 'GV Master / EIR' };
     const exactMine = gvAgentRows(gvCanonicalIssuanceRows(), n, out.id);
-    // Use exact EIR month totals rather than Math.max(REPORT, EIR): Math.max left stale REPORT
-    // numbers on top of smaller, authoritative class details, so the KPI and its drill-down disagreed.
+    // 📑 Sheet-first: GV REPORT (jo GV ka live performance sheet hai) ka number hi final. Tag-ledger
+    // (EIR / GV Master) sirf tab chalta hai jab sheet ka wo cell khaali ho — pehle Math.max/list-sum
+    // se sheet aur ledger mix ho jaate the, isliye KPI aur sheet alag dikhte the.
+    const sheetCur = r && r.curAvailable ? sheetBinsOf(r, 'cur') : null;
+    const sheetLast = r && r.lastAvailable ? sheetBinsOf(r, 'last') : null;
     const exactCurrent = exactGvMonth(exactMine, globalCurYm);
     const exactPrevious = exactGvMonth(exactMine, globalLastYm);
-    if (exactCurrent) {
-      setExactGvMonth(out.totals, exactMine, globalCurYm, 'cur');
+    if (applySheetMonth(out.totals, 'cur', sheetCur) || exactCurrent) {
+      if (!sheetCur) setExactGvMonth(out.totals, exactMine, globalCurYm, 'cur');
       out.dispatch.avgVc4 = U.runRate(out.totals.curVc4, 'gv');
       out.dispatch.avgComm = U.runRate(out.totals.curComm, 'gv');
       out.dispatch.cover = out.dispatch.avgVc4 > 0 ? out.stock.vc4 / out.dispatch.avgVc4 : null;
@@ -953,9 +1034,10 @@ window.FF = window.FF || {};
       out.dispatch.sugVc4Gross = suggestGro(out.dispatch.avgVc4);
       out.dispatch.sugCommGross = suggestGro(out.dispatch.avgComm);
     }
-    if (exactPrevious) setExactGvMonth(out.totals, exactMine, globalLastYm, 'last');
-    out.issuanceSources.cur = exactCurrent ? 'GV Master / EIR' : 'GV REPORT';
-    out.issuanceSources.last = exactPrevious ? 'GV Master / EIR' : 'GV REPORT';
+    if (!applySheetMonth(out.totals, 'last', sheetLast) && exactPrevious) setExactGvMonth(out.totals, exactMine, globalLastYm, 'last');
+    out.sheetBins = { cur: sheetCur, last: sheetLast };
+    out.issuanceSources.cur = sheetCur ? 'GV REPORT sheet' : exactCurrent ? 'GV Master / EIR' : 'GV REPORT';
+    out.issuanceSources.last = sheetLast ? 'GV REPORT sheet' : exactPrevious ? 'GV Master / EIR' : 'GV REPORT';
     attachGrowth(out, r || {}, globalCurYm);
     if (light) return out;
     const master = gvClassRows((m) => norm(m.agentName) === n || (out.id && m.agentId === out.id));
@@ -968,6 +1050,11 @@ window.FF = window.FF || {};
     if (!out.classes.length && r) out.classes = Object.entries(r.curByClass || {}).map(([cls, cur]) => ({ cls, cur: num(cur), last: num((r.lastByClass || {})[cls]), stock: num((r.stockByClass || {})[cls]) })).filter((x) => x.cur || x.last || x.stock);
     if (!out.classes.length && r) out.classes = [{ cls: 'VC4', cur: num(r.curVc4), last: num(r.lastVc4), stock: num(r.stockVc4) }, { cls: 'Commercial', cur: num(r.curComm), last: num(r.lastComm), stock: stockComm }];
     out.classes = enrichClassesWithTotals(out.classes, out.totals, out.stock);
+    out.groupBins = {
+      last: sheetFirstGroups(sheetLast, out.classBins.last),
+      cur: sheetFirstGroups(sheetCur, out.classBins.cur),
+      stock: groupBinsOf(out.classes, 'stock')
+    };
     out.trend = trendOf(master, () => true, (m) => m.ym);
     return out;
   }
@@ -1072,6 +1159,7 @@ window.FF = window.FF || {};
     out.dispatch.sumAgentCommGross = U.sum(rowsA, (r) => r.sugCommGross);
     // 📈 GV TL growth — GV sheet TL-level value nahi deta, isliye agents ke totals se.
     attachGrowth(out, {}, globalCurYm);
+    out.groupBins = gvGroupBins(reportSnapshots, out.classBins, stockComposition);
     if (light) return out;
     const master = gvClassRows((m) => agentNames.has(norm(m.agentName)) || (m.agentId && agentIds.has(clean(m.agentId).toUpperCase())));
     const curYm = globalCurYm, lastYm = globalLastYm;
@@ -1085,6 +1173,7 @@ window.FF = window.FF || {};
     // When GV REPORT supplies a TL snapshot, do not pad tag-level class rows to force a false match.
     // The search board and drill both display the ledger mix separately and expose any difference.
     if (!reportSnapshots.cur && !reportSnapshots.last) out.classes = enrichClassesWithTotals(out.classes, out.totals, stock);
+    out.groupBins = gvGroupBins(reportSnapshots, out.classBins, stockComposition);
     out.trend = trendOf(master, () => true, (m) => m.ym);
     return out;
   }
@@ -1278,6 +1367,109 @@ window.FF = window.FF || {};
     return `<section class="mp-sec" data-mp-sec="agents"><h4>🧑‍💼 TL ke agents · ${fmt(rows.length)}${selfA ? ' <span class="dim small">+ TL (apna stock alag)</span>' : ''}</h4><p class="dim small">Har number par click → agent ki detail (stock / last month / is month → class → din → tag-barcode). Sug. = avg/day × ${d.days} din · <b>stock ke baad</b> (net)${sugMode() === 'both' ? ' · <span class="sug-wo-inline">w/o stock = bina stock ghataye (gross)</span>' : ''} · <span class="mp-linkish" data-kpi="${esc(`src=${pr.ch}&scope=people&tl=${encodeURIComponent(pr.name)}&self=0&sort=stock`)}" role="button" tabindex="0" title="Poora agents list">Poori list 👉</span></p><div class="table-wrap tall"><table class="tbl compact mp-agents-tbl"><thead>${head}</thead><tbody>${selfA ? rowHtml(selfA) : ''}${rows.map(rowHtml).join('')}</tbody><tfoot>${agentsFoot}${ownFoot}${totFoot}</tfoot></table></div>${note}${agentClassMatrix(pr)}</section>`;
   }
 
+  /** 🎯 Group table ke liye bins — GV me sheet-first (pr.groupBins), FF me tag-ledger (pr.classBins). */
+  function groupBinsFor(pr) {
+    const usable = (g) => !!(g && (g.source || num(g.total) || num(g.VC4) || num(g.VC20) || num(g['VC5+'])));
+    const given = pr && pr.groupBins;
+    if (given && (usable(given.last) || usable(given.cur))) {
+      return { last: usable(given.last) ? given.last : null, cur: usable(given.cur) ? given.cur : null, stock: given.stock || null };
+    }
+    const bins = (pr && pr.classBins) || null;
+    if (!bins) return null;
+    if (!usable(bins.last) && !usable(bins.cur)) return null;
+    return {
+      last: usable(bins.last) ? sheetFirstGroups(null, bins.last) : null,
+      cur: usable(bins.cur) ? sheetFirstGroups(null, bins.cur) : null,
+      stock: groupBinsOf((pr.classes || []), 'stock')
+    };
+  }
+  /** 📑 Sheet vs tag-ledger ka farq ek hi jagah se — class table aur group table dono me dikhta hai. */
+  function reconLine(bins) {
+    return ['last', 'cur'].map((period) => {
+      const b = bins && bins[period];
+      if (!b || !b.ledger || !b.sheet || !num(b.ledger.total)) return '';
+      const delta = num(b.ledger.total) - num(b.sheet.total);
+      if (!delta) return '';
+      return `${period === 'cur' ? 'Current' : 'Last'}: sheet <b>${fmt(b.sheet.total)}</b> vs tag ledger <b>${fmt(b.ledger.total)}</b> (Δ ${delta > 0 ? '+' : ''}${fmt(delta)})`;
+    }).filter(Boolean).join(' · ');
+  }
+  /** 🎯 VC4 · VC20 · VC5+ — last month, current month aur stock ek hi table me, har cell clickable.
+   *  GV me VC4 + NVC4 sheet (GV REPORT) se aate hain aur VC20/VC5+ ka batwara tag-ledger mix se —
+   *  isliye neeche `mix` note rehta hai (koi number chhupaya nahi jata). */
+  function groupTableHtml(pr, specs) {
+    if (!pr) return '';
+    const bins = groupBinsFor(pr);
+    if (!bins) return '<p class="dim small">Class-group (VC4 · VC20 · VC5+) data abhi load nahi hua.</p>';
+    const t = pr.totals || {}, s = pr.stock || {}, m = pr.months || {};
+    const stock = bins.stock || {};
+    const val = (period, group) => (bins[period] ? num(bins[period][group]) : null);
+    const totalOf = (period) => {
+      if (bins[period] && (bins[period].source || num(bins[period].total))) return num(bins[period].total);
+      const sum = ['VC4', 'VC20', 'VC5+'].reduce((n, k) => n + (val(period, k) || 0), 0);
+      return sum || num(period === 'cur' ? t.curTotal : t.lastTotal);
+    };
+    const stockTotal = num(stock.total) || num(s.total);
+    const cell = (value, spec, title) => value === null
+      ? '<td class="num dim">—</td>'
+      : `<td class="num mp-drill" data-kpi="${esc(spec)}" role="button" tabindex="0" title="${esc(title)}">${fmt(value)}</td>`;
+    const rowOf = (group, filter, label) => {
+      const stockValue = ['VC4', 'VC20', 'VC5+'].includes(group) ? num(stock[group]) : null;
+      return `<tr><td><b>${esc(label || group)}</b></td>
+        ${cell(val('last', group), `${specs.last}&f=${filter}`, `${label || group} · last month issuance (din → tag)`)}
+        ${cell(val('cur', group), `${specs.cur}&f=${filter}`, `${label || group} · current month issuance (din → tag)`)}
+        ${cell(stockValue, `${specs.stock}${filter === 'comm' ? '' : `&f=${filter}`}`, `${label || group} · stock (barcode tak)`)}</tr>`;
+    };
+    const rows = [
+      rowOf('VC4', 'vc4', 'VC4'),
+      rowOf('VC20', 'vc20', 'VC20'),
+      rowOf('VC5+', 'vc5p', 'VC5+'),
+      `<tr class="row-total"><td><b>Total</b></td><td class="num"><b>${fmt(totalOf('last'))}</b></td><td class="num"><b>${fmt(totalOf('cur'))}</b></td><td class="num"><b>${fmt(stockTotal)}</b></td></tr>`
+    ].join('');
+    const src = (period) => {
+      const b = bins[period];
+      if (!b) return '';
+      if (b.source === 'GV REPORT sheet') return b.mix === 'ledger-mix' ? 'GV REPORT sheet (VC4 + NVC4) · VC20/VC5+ ka batwara tag-ledger mix se' : 'GV REPORT sheet';
+      return 'tag ledger (EIR / GV Master)';
+    };
+    const notes = reconLine(bins);
+    return `<div class="table-wrap"><table class="tbl compact mp-group-tbl"><thead><tr><th>Class group</th><th class="num">${esc(monthLabel(m.last) || 'Last month')}</th><th class="num">${esc(monthLabel(m.cur) || 'This month')}</th><th class="num">Stock</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <p class="dim small">Source — Last: ${src('last') || '—'} · Current: ${src('cur') || '—'} · Stock: Tag Assignment / StockDataa.${notes ? ` <span class="mp-recon">${notes}</span>` : ''}</p>`;
+  }
+
+  /** 🆔 TL ID ke saath stock — TL apna + har agent alag-alag, sab clickable (TL ID hamesha sath).
+   *  User rule: TL ka stock tab hi bharosemand hai jab pata ho kis ID ke paas kitna hai aur wo
+   *  own ho ya agent ka — isliye ye section drawer me sabse neeche rehta hai. */
+  function tlStockByIdHtml(pr) {
+    if (!pr || !/-tl$/.test(String(pr.kind || ''))) return '';
+    const ts = pr.tlStock || {}, s = pr.stock || {};
+    const own = ts.own || null, ag = ts.agents || null;
+    const tlId = (pr.tl && pr.tl.id) || pr.id || '';
+    const rows = [];
+    if (pr.selfAgent) rows.push({ ...pr.selfAgent, isSelf: true });
+    rows.push(...(pr.agents || []));
+    if (!rows.length && !own) return '';
+    const stockLine = (a) => `<td class="num mp-drill" data-kpi="${esc(`src=${pr.ch}&scope=stock&agent=${encodeURIComponent(a.name)}${a.id ? `&agentId=${encodeURIComponent(a.id)}` : ''}`)}" role="button" tabindex="0" title="${esc(a.name)} · stock detail (class → barcode)">${fmt(a.stockVc4)}</td>
+      <td class="num mp-drill" data-kpi="${esc(`src=${pr.ch}&scope=stock&agent=${encodeURIComponent(a.name)}${a.id ? `&agentId=${encodeURIComponent(a.id)}` : ''}`)}" role="button" tabindex="0" title="${esc(a.name)} · commercial stock">${fmt(a.stockComm)}</td>
+      <td class="num mp-drill" data-kpi="${esc(`src=${pr.ch}&scope=stock&agent=${encodeURIComponent(a.name)}${a.id ? `&agentId=${encodeURIComponent(a.id)}` : ''}`)}" role="button" tabindex="0" title="${esc(a.name)} · total stock"><b>${fmt(a.stockTotal)}</b></td>`;
+    const body = rows.map((a) => `<tr class="${a.isSelf ? 'mp-selfrow ' : ''}clickable" data-mp-agent="${esc(a.name)}" data-mp-kind="${pr.ch}-agent" data-mp-id="${esc(a.id || '')}" title="Click → ${esc(a.name)} ka 360 profile">
+      <td>${a.isSelf ? '👤 ' : ''}<b>${esc(a.name)}</b>${a.isSelf ? '<span class="mp-tag-self">TL · apna stock</span>' : ''}</td>
+      <td><small class="dim">${esc(a.id || '—')}</small></td>
+      <td><small class="dim">${esc(tlId || '—')}</small></td>
+      ${stockLine(a)}</tr>`).join('');
+    const agentsOnly = (pr.agents || []);
+    const agentsTotal = { vc4: num(ag && ag.vc4), comm: num(ag && ag.comm), total: num(ag && ag.total) };
+    const ownTotal = own ? { vc4: num(own.vc4), comm: num(own.comm), total: num(own.total) } : null;
+    const footRows = [
+      agentsOnly.length ? `<tr class="row-total"><td colspan="3"><b>🧑‍💼 Agents ke paas (${fmt(agentsOnly.length)})</b></td><td class="num">${fmt(agentsTotal.vc4)}</td><td class="num">${fmt(agentsTotal.comm)}</td><td class="num"><b>${fmt(agentsTotal.total)}</b></td></tr>` : '',
+      ownTotal ? `<tr class="mp-selfrow"><td colspan="3"><b>👤 TL ke paas (own)</b></td><td class="num">${fmt(ownTotal.vc4)}</td><td class="num">${fmt(ownTotal.comm)}</td><td class="num"><b>${fmt(ownTotal.total)}</b></td></tr>` : '',
+      `<tr class="row-total"><td colspan="3"><b>= TL TOTAL · 🆔 ${esc(tlId || '—')}</b></td><td class="num"><b>${fmt(s.vc4)}</b></td><td class="num"><b>${fmt(s.comm)}</b></td><td class="num"><b>${fmt(s.total)}</b></td></tr>`
+    ].filter(Boolean).join('');
+    return `<section class="mp-sec" data-mp-sec="tlstock"><h4>🆔 TL ID-wise stock · ${esc(tlId || pr.name)} <span class="dim small">— kis ke paas kitna (own + agents)</span></h4>
+      <p class="dim small">TL ka stock = TL ke paas (own) + agents ke paas. Har row par click → us agent ka 360 profile, stock cell par click → us ID ka stock (class → barcode tak).</p>
+      <div class="table-wrap"><table class="tbl compact mp-tlid-tbl"><thead><tr><th>Naam</th><th>Agent ID</th><th>TL ID</th><th class="num">Stock VC4</th><th class="num">Stock Comm</th><th class="num">Stock total</th></tr></thead>
+      <tbody>${body}</tbody><tfoot>${footRows}</tfoot></table></div></section>`;
+  }
+
   /** 📦 Agent-wise × Class stock — TL ke har agent (aur TL ke apne) paas kis class ka kitna stock hai.
    *  Cell click → us agent ka us class ka stock (barcode rows tak). */
   function agentClassMatrix(pr) {
@@ -1343,23 +1535,37 @@ window.FF = window.FF || {};
       ${kpi('Issued last month', fmt(t.lastTotal), `VC4 ${fmt(t.lastVc4)} · Comm ${fmt(t.lastComm)}`, 'k8', lastSpec)}
     </div>
     <p class="mp-note ${pr.tagRequired ? 'tag' : ''}">${sg.note}</p>${stockNote}`;
-    const summary = `<table class="tbl compact mp-summary"><thead><tr><th></th><th class="num">${esc(monthLabel(m.last) || 'Last month')}</th><th class="num">${esc(monthLabel(m.cur) || 'This month')}</th><th class="num">Stock</th></tr></thead><tbody>
-      <tr class="clickable" data-kpi="${esc(`${curSpec}&group=VC4`)}"><td><b>VC4</b></td><td class="num">${fmt(g.vc4.last)}</td><td class="num">${fmt(g.vc4.cur)}</td><td class="num">${fmt(g.vc4.stock)}</td></tr>
-      <tr class="clickable" data-kpi="${esc(`${curSpec}&group=COMM`)}"><td><b>Commercial</b><small class="cell-sub">VC20 · VC5+ …</small></td><td class="num">${fmt(g.comm.last)}</td><td class="num">${fmt(g.comm.cur)}</td><td class="num">${fmt(g.comm.stock)}</td></tr>
-      </tbody><tfoot><tr class="row-total"><td>Total issuance</td><td class="num">${fmt(g.total.last)}</td><td class="num">${fmt(g.total.cur)}</td><td class="num">${fmt(g.total.stock)}</td></tr></tfoot></table>`;
+    // v3.44 — VC4 · VC20 · VC5+ teeno alag rows me (GV me sheet-first, FF me tag-ledger): har cell
+    // apni detail kholta hai, aur sheet vs ledger ka farq neeche note me saaf likha rehta hai.
+    const summary = groupTableHtml(pr, { cur: curSpec, last: lastSpec, stock: stockSpec });
+    // 🧾 Class-wise rows ka source tag-ledger hai (GV REPORT me sirf VC4 + NVC4 hota hai), isliye
+    // footer me SHEET ka total dikhta hai aur neeche ledger ka jod alag likha rehta hai — warna sheet
+    // me 332 aur ledger me 440 hone par drawer me do alag total dikhte the (user ka sawaal).
+    const groupBins = groupBinsFor(pr) || {};
+    const sheetPeriod = (period) => (groupBins[period] && groupBins[period].source === 'GV REPORT sheet' ? num(groupBins[period].total) : null);
+    const footOf = (period) => {
+      const sheet = sheetPeriod(period);
+      return { value: sheet === null ? num(period === 'cur' ? g.total.cur : g.total.last) : sheet, fromSheet: sheet !== null };
+    };
+    const footLast = footOf('last'), footCur = footOf('cur');
+    const clsRecon = reconLine(groupBins);
+    const clsNote = clsRecon ? `<p class="dim small">📑 Class rows tag-ledger (EIR / GV Master) se aate hain — GV REPORT me sirf VC4 + NVC4 hota hai. Upar <b>Issuance summary</b> me sheet ka total final hai. <span class="mp-recon">${clsRecon}</span></p>` : '';
     const clsTable = cls.length ? `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Class</th><th class="num">${esc(monthLabel(m.last) || 'Last month')}</th><th class="num">${esc(monthLabel(m.cur) || 'This month')}</th><th class="num">Growth</th><th class="num">Stock</th></tr></thead><tbody>
       ${cls.map((r) => `<tr class="clickable" data-kpi="${esc(`${r.cur > 0 ? curSpec : lastSpec}&cls=${encodeURIComponent(r.cls)}`)}"><td><b>${esc(r.cls)}</b></td><td class="num">${fmt(r.last)}</td><td class="num">${fmt(r.cur)}</td><td class="num">${r.last ? U.pctHtml(((r.cur - r.last) / r.last) * 100) : '—'}</td><td class="num">${fmt(r.stock)}</td></tr>`).join('')}
-      </tbody><tfoot><tr class="row-total"><td>Total</td><td class="num">${fmt(g.total.last)}</td><td class="num">${fmt(g.total.cur)}</td><td class="num">${g.total.last ? U.pctHtml(((g.total.cur - g.total.last) / g.total.last) * 100) : '—'}</td><td class="num">${fmt(g.total.stock)}</td></tr></tfoot></table></div>` : '<p class="dim small">Class-wise data abhi load nahi hua.</p>';
+      </tbody><tfoot><tr class="row-total"><td>Total ${footLast.fromSheet || footCur.fromSheet ? '<small class="dim">(sheet)</small>' : ''}</td><td class="num">${fmt(footLast.value)}</td><td class="num">${fmt(footCur.value)}</td><td class="num">${footLast.value ? U.pctHtml(((footCur.value - footLast.value) / footLast.value) * 100) : '—'}</td><td class="num">${fmt(g.total.stock)}</td></tr></tfoot></table></div>${clsNote}` : '<p class="dim small">Class-wise data abhi load nahi hua.</p>';
     const agentsTable = isTl ? tlAgentsTable(pr) : '';
+    const tlIdStockTable = isTl ? tlStockByIdHtml(pr) : '';
+    const isTlStockVisible = !!tlIdStockTable;
     const actions = `<div class="mp-actions"><button class="btn small primary" data-mp-pdf>📄 PDF</button><button class="btn small" data-mp-csv>⬇ CSV</button><button class="btn small" data-mp-copy>📋 Copy</button><button class="btn small" data-mp-wa>📲 WhatsApp</button>${isTl ? '' : `<button class="btn small" data-mp-a360="${esc(pr.name)}">👁 Agent 360</button>`}<a class="btn small" href="#/masterStock?q=${encodeURIComponent(pr.name)}">🗄️ Register / tags</a></div>`;
     const partial = pr.partial ? '<div class="mp-partial dim small" role="status">⏳ Kuch data abhi load ho raha hai (Google Sheet slow hai) — numbers poore hote hi apne aap update ho jayenge.</div>' : '';
-    const nav = `<nav class="mp-nav" aria-label="Report sections"><span class="dim small">Jao:</span>${[['kpis', '📦 Stock · KPI'], ['issuance', '🧾 Last vs Current'], ['class', '🎯 Class-wise'], ...(isTl && agentsTable ? [['agents', '🧑‍💼 Agents'], ['agentclass', '📦 Agent × Class']] : []), ['charts', '📊 Charts']].map(([k, l]) => `<button type="button" class="chip" data-mp-go="${k}">${l}</button>`).join('')}</nav>`;
+    const nav = `<nav class="mp-nav" aria-label="Report sections"><span class="dim small">Jao:</span>${[['kpis', '📦 Stock · KPI'], ['issuance', '🧾 Last vs Current'], ['class', '🎯 Class-wise'], ...(isTl && agentsTable ? [['agents', '🧑‍💼 Agents'], ['agentclass', '📦 Agent × Class']] : []), ...(isTl && isTlStockVisible ? [['tlstock', '🆔 TL ID stock']] : []), ['charts', '📊 Charts']].map(([k, l]) => `<button type="button" class="chip" data-mp-go="${k}">${l}</button>`).join('')}</nav>`;
     return `<div class="mp">${partial}${noData}${head}${nav}<div data-mp-sec="kpis">${kpis}</div>
       ${calcHtml(pr)}
       ${growthHtml(pr)}
       <section class="mp-sec" data-mp-sec="issuance"><h4>🧾 Issuance summary${isTl ? ' — TL total' : ''}</h4>${summary}</section>
       <section class="mp-sec" data-mp-sec="class"><h4>🎯 Issuance class-wise · last month vs this month + stock</h4>${clsTable}</section>
       ${agentsTable}
+      ${tlIdStockTable}
       <section class="mp-sec" data-mp-sec="charts"><h4>📊 Charts</h4>${chartsHtml(pr) || '<p class="dim small">Chart ke liye data nahi mila.</p>'}</section>
       ${actions}</div>`;
   }
@@ -1547,7 +1753,13 @@ window.FF = window.FF || {};
     const lastYm = (pr.months && pr.months.last) || U.prevMonthKey(curYm);
     const elapsed = Math.max(1, num(pr.projT1 && pr.projT1.days) || U.runRateDays(undefined, pr.ch === 'gv' ? 'gv' : 'ff'));
     const bins = pr.classBins || { cur: blankIssueBins(), last: blankIssueBins(), available: {} };
-    const periodValue = (period, group) => bins.available && bins.available[period] ? num((bins[period] || {})[group]) : null;
+    // 📑 GV me group numbers sheet-first hote hain (VC4 + NVC4 sheet se, VC20/VC5+ ka batwara ledger
+    // mix se) — FF me pehle jaisa tag-ledger hi chalta hai. Isse card, board aur drawer ek jaise rehte hain.
+    const groups = pr.groupBins || null;
+    const usableBins = (g) => !!(g && (g.source || num(g.total) || num(g.VC4) || num(g.VC20) || num(g['VC5+'])));
+    const periodValue = (period, group) => usableBins(groups && groups[period])
+      ? num(groups[period][group])
+      : (bins.available && bins.available[period] ? num((bins[period] || {})[group]) : null);
     const currentTotal = t.curTotal === null || t.curTotal === undefined ? null : Number(t.curTotal);
     const lastTotal = t.lastTotal === null || t.lastTotal === undefined ? null : Number(t.lastTotal);
     const expected = (value, ym) => value === null || !Number.isFinite(Number(value)) ? null : U.projectMonthEnd(Number(value), elapsed, ym);
@@ -1575,9 +1787,10 @@ window.FF = window.FF || {};
         cur: curGroups[group], last: lastGroups[group], expected: curGroups[group] === null ? null : expected(curGroups[group], curYm)
       }])),
       reconciliation: {
-        cur: bins.available && bins.available.cur && currentTotal !== null ? { report: currentTotal, ledger: num(bins.cur.total), delta: num(bins.cur.total) - currentTotal } : null,
-        last: bins.available && bins.available.last && lastTotal !== null ? { report: lastTotal, ledger: num(bins.last.total), delta: num(bins.last.total) - lastTotal } : null
+        cur: bins.available && bins.available.cur && currentTotal !== null ? { report: currentTotal, ledger: num(bins.cur.total), delta: num(bins.cur.total) - currentTotal, mix: (groups && groups.cur && groups.cur.mix) || '' } : null,
+        last: bins.available && bins.available.last && lastTotal !== null ? { report: lastTotal, ledger: num(bins.last.total), delta: num(bins.last.total) - lastTotal, mix: (groups && groups.last && groups.last.mix) || '' } : null
       },
+      groups,
       runRateDays: elapsed,
       runRateThrough: (pr.projT1 && pr.projT1.basis && (pr.projT1.basis.shortLabel || pr.projT1.basis.label)) || '',
       sources: {
@@ -1832,5 +2045,5 @@ window.FF = window.FF || {};
     </div>`;
   }
 
-  FF.masterProfile = { supports, quick, build, buildNow, html, csvRows, waText, renderInto, open, warm, load, loadFor, onData, isLoaded: () => loadedOnce, invalidate: resetProfileCache, suggest, suggestGro, findFfAgent, findGvAgent, mobileFor, reportDataRow, issuanceCardsHtml, gvTlSnapshot, peopleTableHtml, personFromRow, get suggestDays() { return suggestDays(); }, _buildSoon: buildSoon, _limits: LIMITS };
+  FF.masterProfile = { supports, quick, build, buildNow, html, groupBinsFor, csvRows, waText, renderInto, open, warm, load, loadFor, onData, isLoaded: () => loadedOnce, invalidate: resetProfileCache, suggest, suggestGro, findFfAgent, findGvAgent, mobileFor, reportDataRow, issuanceCardsHtml, gvTlSnapshot, peopleTableHtml, personFromRow, get suggestDays() { return suggestDays(); }, _buildSoon: buildSoon, _limits: LIMITS };
 })(window.FF);

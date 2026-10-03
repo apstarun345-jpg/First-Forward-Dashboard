@@ -100,6 +100,18 @@ window.FF = window.FF || {};
   }
   const sumBy = (list, key) => (list || []).reduce((n, r) => n + num(r[key]), 0);
 
+  /** 🎯 VC4 · VC20 · VC5+ bins — masterProfile se (GV me sheet-first, FF me tag-ledger). */
+  function groupsOf(pr) {
+    const mod = MP();
+    if (mod && mod.groupBinsFor) { const g = mod.groupBinsFor(pr); if (g) return g; }
+    const bins = pr && pr.classBins;
+    if (!bins) return null;
+    const usable = (b) => !!(b && (num(b.total) || num(b.VC4) || num(b.VC20) || num(b['VC5+'])));
+    if (!usable(bins.last) && !usable(bins.cur)) return null;
+    const to = (b) => ({ VC4: num(b.VC4), VC20: num(b.VC20), 'VC5+': num(b['VC5+']), total: num(b.total), source: 'tag ledger', mix: 'ledger' });
+    return { last: usable(bins.last) ? to(bins.last) : null, cur: usable(bins.cur) ? to(bins.cur) : null, stock: null };
+  }
+
   /** GV ka class-wise stock asli source = Tag Assignment (GV REPORT ke columns me VC20 chhup jaata hai).
    *  Detail rows mil jayein to class table ka stock column unse hi banao — warna jod aur total me farq rehta hai. */
   function stockDetailMap(ch, name, id) {
@@ -264,6 +276,83 @@ window.FF = window.FF || {};
         <span class="ab-hero-sub">Last ${fmt(r.last.total)} · Stock ${fmt(r.stock.total)}</span>
       </div>
     </section>${tlBar}`;
+  }
+
+  /** 🎯 VC4 · VC20 · VC5+ — last month · MTD · stock, har cell apni detail kholta hai. */
+  function groupSection(c, target, whoAm) {
+    const r = target || c.row;
+    const bins = groupsOf(whoAm === 'tl' ? c.tlPr : c.pr);
+    if (!bins || (!bins.last && !bins.cur && !(bins.stock && num(bins.stock.total)))) return '';
+    const stock = bins.stock || (r && r.stock ? { VC4: r.stock.vc4, VC20: null, 'VC5+': null, total: r.stock.total } : null);
+    const spec = (scope, f) => ({ src: c.ch, channel: c.ch, scope, ...(scope === 'month' ? { ym: c.ymLast } : scope === 'stock' ? {} : { ym: c.ymCur }), ...(whoAm === 'tl' ? { tl: r.name } : { agent: r.name, agentId: r.id }), f });
+    const cell = (value, sp, title) => value === null || value === undefined
+      ? '<td class="num dim">—</td>'
+      : `<td class="num ab-cellclick"${kpiAttr(sp, title)}>${fmt(value)}</td>`;
+    const value = (period, key) => (bins[period] ? num(bins[period][key]) : null);
+    const totalOf = (period) => {
+      const b = bins[period];
+      if (!b) return null;
+      if (num(b.total)) return num(b.total);
+      const sum = ['VC4', 'VC20', 'VC5+'].reduce((n, k) => n + num(b[k]), 0);
+      return sum || null;
+    };
+    const who = whoAm === 'tl' ? `TL ${r.name}` : r.name;
+    const rows = ['VC4', 'VC20', 'VC5+'].map((group) => {
+      const f = group === 'VC4' ? 'vc4' : group === 'VC20' ? 'vc20' : 'vc5p';
+      return `<tr><td class="ab-cls"><b>${group}</b></td>${cell(value('last', group), spec('month', f), `${who} · ${group} · last month (din → tag)`)}${cell(value('cur', group), spec('mtd', f), `${who} · ${group} · MTD (din → tag)`)}${cell(stock ? stock[group] : null, spec('stock', f), `${who} · ${group} · stock (barcode tak)`)}</tr>`;
+    }).join('');
+    const stockTotal = stock ? num(stock.total) : 0;
+    const src = (period) => {
+      const b = bins[period];
+      if (!b) return '—';
+      if (b.source === 'GV REPORT sheet') return b.mix === 'ledger-mix' ? 'GV REPORT sheet (VC4 + NVC4), VC20/VC5+ ka batwara tag-ledger mix se' : 'GV REPORT sheet';
+      return b.source || 'tag ledger';
+    };
+    const recon = ['last', 'cur'].map((period) => {
+      const b = bins[period];
+      if (!b || !b.ledger || !b.sheet || !b.ledger.total || b.ledger.total === b.sheet.total) return '';
+      const delta = b.ledger.total - b.sheet.total;
+      return `${period === 'cur' ? 'MTD' : 'Last'}: sheet ${fmt(b.sheet.total)} vs tag ledger ${fmt(b.ledger.total)} (Δ ${delta > 0 ? '+' : ''}${fmt(delta)})`;
+    }).filter(Boolean).join(' · ');
+    return sec(`ab-group-${whoAm}`, `🎯 Class group · VC4 · VC20 · VC5+ <span class="dim small">· ${esc(who)}</span>`, `
+      <div class="table-wrap"><table class="tbl compact ab-tbl">
+        <thead><tr><th class="ab-th-cls">Group</th><th class="num">Last <small>(${esc(c.ymLastLabel)})</small></th><th class="num">MTD <small>(${esc(c.ymCurLabel)})</small></th><th class="num">Stock</th></tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr class="row-total"><td><b>Total</b></td><td class="num"><b>${fmt(totalOf('last'))}</b></td><td class="num"><b>${fmt(totalOf('cur'))}</b></td><td class="num"><b>${fmt(stockTotal)}</b></td></tr></tfoot>
+      </table></div>
+      <p class="ab-mini">Source — Last: ${esc(src('last'))} · MTD: ${esc(src('cur'))} · Stock: Tag Assignment / StockDataa.${recon ? ` <span class="mp-recon">${recon}</span>` : ''}</p>`);
+  }
+
+  /** 🆔 TL ID-wise stock — TL ka apna + har agent ka stock, ID ke saath, sab clickable. */
+  function stockIdSection(c) {
+    if (!c.tlRow && c.ch !== 'gv') return '';
+    const tl = c.tlRow || c.row;
+    const tlId = clean(tl.id || c.row.id);
+    const own = c.team.own;
+    const agents = c.team.agents.slice().sort((a, b) => b.stockTotal - a.stockTotal);
+    if (!own && !agents.length) return '';
+    const stockCells = (a) => {
+      const spec = { src: c.ch, channel: c.ch, scope: 'stock', agent: a.name, agentId: a.id };
+      return `<td class="num ab-cellclick"${kpiAttr(spec, `${a.name} · VC4 stock`)}>${fmt(a.stockVc4)}</td>
+        <td class="num ab-cellclick"${kpiAttr(spec, `${a.name} · commercial stock`)}>${fmt(a.stockComm)}</td>
+        <td class="num ab-cellclick"${kpiAttr(spec, `${a.name} · total stock`)}><b>${fmt(a.stockTotal)}</b></td>`;
+    };
+    const rowOf = (a, isSelf) => `<tr class="clickable${isSelf || a.isSelf ? ' ab-self' : ''}"${openAttr(a.name, kindFor(c.ch, !!a.isSelf && !isSelf ? true : false), a.id)}>
+      <td class="ab-cellname">${a.isSelf || isSelf ? '👤 ' : ''}<b>${esc(a.name)}</b>${a.isSelf || isSelf ? ' <span class="ab-tag">TL apna</span>' : ''}</td>
+      <td><small class="dim">${esc(a.id || '—')}</small></td>
+      <td><small class="dim">${esc(tlId || '—')}</small></td>
+      ${stockCells(a)}</tr>`;
+    const agentsStock = { vc4: sumBy(agents, 'stockVc4'), comm: sumBy(agents, 'stockComm'), total: sumBy(agents, 'stockTotal') };
+    return sec('ab-stockid', `🆔 TL ID-wise stock · ${esc(tlId || tl.name)} <span class="dim small">— TL apna + har agent alag-alag</span>`, `
+      <div class="table-wrap"><table class="tbl compact ab-tbl">
+        <thead><tr><th>Naam</th><th>Agent ID</th><th>TL ID</th><th class="num">Stock VC4</th><th class="num">Stock Comm</th><th class="num">Stock total</th></tr></thead>
+        <tbody>${own ? rowOf(own, true) : ''}${agents.map((a) => rowOf(a, false)).join('')}</tbody>
+        <tfoot>
+          ${agents.length ? `<tr class="row-total"><td colspan="3"><b>🧑‍💼 Agents ke paas (${fmt(agents.length)})</b></td><td class="num">${fmt(agentsStock.vc4)}</td><td class="num">${fmt(agentsStock.comm)}</td><td class="num"><b>${fmt(agentsStock.total)}</b></td></tr>` : ''}
+          ${own ? `<tr class="ab-ownrow"><td colspan="3"><b>👤 TL ke paas (own)</b></td><td class="num">${fmt(own.stockVc4)}</td><td class="num">${fmt(own.stockComm)}</td><td class="num"><b>${fmt(own.stockTotal)}</b></td></tr>` : ''}
+          <tr class="row-total ab-tltotal"><td colspan="3"><b>= TL TOTAL · 🆔 ${esc(tlId || '—')}</b></td><td class="num"><b>${fmt(tl.stock.vc4)}</b></td><td class="num"><b>${fmt(tl.stock.comm)}</b></td><td class="num"><b>${fmt(tl.stock.total)}</b></td></tr>
+        </tfoot></table></div>
+      <p class="ab-mini">Har row par click = us agent ka apna 360 board · stock cell par click = us ID ka stock (class → barcode tak). TL total = own + agents (koi double count nahi).</p>`);
   }
 
   /** 3 · issuance summary — last month, current month, growth, dispatch, stock, expected. */
@@ -458,14 +547,17 @@ window.FF = window.FF || {};
       hero: heroSection(c),
       kpis: kpiSection(c),
       tlBlock: tlSection(c),
+      groupBlock: groupSection(c, c.row, c.tlView ? 'tl' : 'agent'),
+      tlGroupBlock: c.tlView || c.direct || !c.tlRow ? '' : groupSection(c, c.tlRow, 'tl'),
       classBlock: classSection(c),
       teamBlock: teamSection(c),
       matrixBlock: matrixSection(c),
       dispatchBlock: dispatchSection(c),
       chartBlock: chartSection(c),
+      stockIdBlock: stockIdSection(c),
       note: noteSection(c)
     };
-    parts.html = [parts.hero, '<div class="ab-kpi-h">📊 Issuance &amp; dispatch summary</div>', parts.kpis, parts.tlBlock, parts.classBlock, parts.teamBlock, parts.matrixBlock, parts.dispatchBlock, parts.chartBlock, extra.extraHtml || '', parts.note].filter(Boolean).join('');
+    parts.html = [parts.hero, '<div class="ab-kpi-h">📊 Issuance &amp; dispatch summary</div>', parts.kpis, parts.tlBlock, parts.groupBlock, parts.tlGroupBlock, parts.classBlock, parts.teamBlock, parts.matrixBlock, parts.dispatchBlock, parts.chartBlock, parts.stockIdBlock, extra.extraHtml || '', parts.note].filter(Boolean).join('');
     return { missing: false, ch: c.ch, isTl: c.tlView, pr: c.pr, tlPr: c.tlPr, row: c.row, tlRow: c.tlRow, team: c.team, ctx: c, ...parts };
   }
 

@@ -577,16 +577,22 @@ FF.pages = FF.pages || {};
       const tlName = r.tlName || 'Direct';
       const tlCur = curTl.get(norm(tlName)) || {};
       const tlPrev = prevTl.get(norm(tlName)) || {};
-      const curVc4 = Math.max(Number(r.curVc4) || 0, cur.vc4 || 0);
-      const curComm = Math.max(Number(r.curComm) || 0, cur.comm || 0);
-      const curTotal = Math.max(Number(r.curTotal) || 0, cur.total || 0, curVc4 + curComm);
-      const lastVc4 = Math.max(Number(r.lastVc4) || 0, prev.vc4 || 0);
-      const lastComm = Math.max(Number(r.lastComm) || 0, prev.comm || 0);
-      const lastTotal = Math.max(Number(r.lastTotal) || 0, prev.total || 0, lastVc4 + lastComm);
+      // 📑 Sheet-first (user rule): GV REPORT GV ka live sheet hai — jo usme likha hai wahi final.
+      // Tag-ledger (EIR / GV Master) ka number sirf tab use hota hai jab sheet me wo cell khaali ho.
+      // Pehle Math.max(sheet, ledger) chalta tha, isliye GV REPORT page par TL ka last-month 440 dikhta
+      // tha jabki sheet me 332 tha. Cell khaali hone par hi ledger aage aata hai.
+      const sheetCur = r.curAvailable === true, sheetLast = r.lastAvailable === true;
+      const curVc4 = sheetCur ? (Number(r.curVc4) || 0) : Math.max(Number(r.curVc4) || 0, cur.vc4 || 0);
+      const curComm = sheetCur ? (Number(r.curComm) || 0) : Math.max(Number(r.curComm) || 0, cur.comm || 0);
+      const curTotal = sheetCur ? Math.max(Number(r.curTotal) || 0, curVc4 + curComm) : Math.max(Number(r.curTotal) || 0, cur.total || 0, curVc4 + curComm);
+      const lastVc4 = sheetLast ? (Number(r.lastVc4) || 0) : Math.max(Number(r.lastVc4) || 0, prev.vc4 || 0);
+      const lastComm = sheetLast ? (Number(r.lastComm) || 0) : Math.max(Number(r.lastComm) || 0, prev.comm || 0);
+      const lastTotal = sheetLast ? Math.max(Number(r.lastTotal) || 0, lastVc4 + lastComm) : Math.max(Number(r.lastTotal) || 0, prev.total || 0, lastVc4 + lastComm);
       const curByClass = { ...(r.curByClass || {}) };
-      Object.entries(cur.byClass || {}).forEach(([cls, n]) => { curByClass[cls] = Math.max(curByClass[cls] || 0, n); });
+      // Class detail bhi sheet-first: sheet ke class columns bhare hue hain to ledger unke upar max nahi karta.
+      if (!r.curClassAvailable) Object.entries(cur.byClass || {}).forEach(([cls, n]) => { curByClass[cls] = Math.max(curByClass[cls] || 0, n); });
       const lastByClass = { ...(r.lastByClass || {}) };
-      Object.entries(prev.byClass || {}).forEach(([cls, n]) => { lastByClass[cls] = Math.max(lastByClass[cls] || 0, n); });
+      if (!sheetLast) Object.entries(prev.byClass || {}).forEach(([cls, n]) => { lastByClass[cls] = Math.max(lastByClass[cls] || 0, n); });
       if (lastVc4 > (lastByClass.VC4 || 0)) lastByClass.VC4 = lastVc4;
       const sumLastCommByClass = Object.entries(lastByClass).filter(([k]) => k !== 'VC4').reduce((s, [, n]) => s + (Number(n) || 0), 0);
       if (lastComm > sumLastCommByClass) lastByClass['VC5+'] = (lastByClass['VC5+'] || 0) + (lastComm - sumLastCommByClass);
@@ -597,12 +603,16 @@ FF.pages = FF.pages || {};
         todayIssued, todayIssuedSource: eirToday ? 'EIR' : (todayIssued ? 'GV REPORT' : 'EIR + GV REPORT'), expected: expected(curTotal),
         runrateVc4: lastDay ? curVc4 / lastDay : 0, runrateComm: lastDay ? curComm / lastDay : 0,
         runrate: lastDay ? curTotal / lastDay : 0, growth: finalGrowth !== null ? finalGrowth : r.growth,
-        tlLastVc4: Math.max(Number(r.tlLastVc4) || 0, tlPrev.vc4 || 0),
-        tlLastComm: Math.max(Number(r.tlLastComm) || 0, tlPrev.comm || 0),
-        tlLastTotal: Math.max(Number(r.tlLastTotal) || 0, tlPrev.total || 0),
-        tlCurVc4: Math.max(Number(r.tlCurVc4) || 0, tlCur.vc4 || 0),
-        tlCurComm: Math.max(Number(r.tlCurComm) || 0, tlCur.comm || 0),
-        tlCurTotal: Math.max(Number(r.tlCurTotal) || 0, tlCur.total || 0),
+        // TL snapshot bhi sheet-first: GV REPORT ki TL columns (TL Last Month Issued / TL Issuance In
+        // Current Month) sheet ka apna TL total hain — unke upar ledger ka jod nahi lagta.
+        tlLastAvailable: r.tlLastAvailable === true,
+        tlCurAvailable: r.tlCurAvailable === true,
+        tlLastVc4: r.tlLastAvailable ? (Number(r.tlLastVc4) || 0) : Math.max(Number(r.tlLastVc4) || 0, tlPrev.vc4 || 0),
+        tlLastComm: r.tlLastAvailable ? (Number(r.tlLastComm) || 0) : Math.max(Number(r.tlLastComm) || 0, tlPrev.comm || 0),
+        tlLastTotal: r.tlLastAvailable ? (Number(r.tlLastTotal) || 0) : Math.max(Number(r.tlLastTotal) || 0, tlPrev.total || 0),
+        tlCurVc4: r.tlCurAvailable ? (Number(r.tlCurVc4) || 0) : Math.max(Number(r.tlCurVc4) || 0, tlCur.vc4 || 0),
+        tlCurComm: r.tlCurAvailable ? (Number(r.tlCurComm) || 0) : Math.max(Number(r.tlCurComm) || 0, tlCur.comm || 0),
+        tlCurTotal: r.tlCurAvailable ? (Number(r.tlCurTotal) || 0) : Math.max(Number(r.tlCurTotal) || 0, tlCur.total || 0),
         eirIssuance: true
       };
     });
@@ -749,13 +759,29 @@ FF.pages = FF.pages || {};
     for (const r of list) {
       const direct = FF.config.isDirectAgent(r, 'gv');
       const k = direct ? `🚫 ${FF.config.directLabel(r, 'gv')}` : (r.tlName || 'TL (blank)');
-      if (!tlGroups.has(k)) tlGroups.set(k, { tlName: k, tlId: direct ? '__direct__' : r.tlId, agents: 0, stock: 0, stockVc4: 0, last: 0, cur: 0, curVc4: 0, high: 0, inactive: 0 });
+      if (!tlGroups.has(k)) tlGroups.set(k, { tlName: k, tlId: direct ? '__direct__' : r.tlId, agents: 0, stock: 0, stockVc4: 0, last: 0, cur: 0, curVc4: 0, lastSum: 0, curSum: 0, curVc4Sum: 0, snapshot: null, high: 0, inactive: 0 });
       const t = tlGroups.get(k);
-      t.agents += 1; t.stock += r.stockTotal; t.stockVc4 += r.stockVc4; t.last += r.lastTotal; t.cur += r.curTotal; t.curVc4 += r.curVc4;
+      t.agents += 1; t.stock += r.stockTotal; t.stockVc4 += r.stockVc4;
+      t.lastSum += r.lastTotal; t.curSum += r.curTotal; t.curVc4Sum += r.curVc4;
+      // 📑 GV REPORT har team row par TL ka apna snapshot repeat karta hai (TL Last Month Issued /
+      // TL Issuance In Current Month). Sheet ka wahi number TL row me dikhta hai — members ka jod
+      // mismatch hone par bhi TL ka total sheet jaisa hi rehta hai.
+      if (!direct) {
+        const s = t.snapshot || (t.snapshot = {});
+        if (r.tlLastAvailable) { s.last = Number(r.tlLastTotal) || 0; s.lastVc4 = Number(r.tlLastVc4) || 0; s.lastComm = Number(r.tlLastComm) || 0; }
+        if (r.tlCurAvailable) { s.cur = Number(r.tlCurTotal) || 0; s.curVc4 = Number(r.tlCurVc4) || 0; s.curComm = Number(r.tlCurComm) || 0; }
+      }
       if (/high/i.test(r.priority)) t.high += 1;
       if (/inactive/i.test(r.agentStatus)) t.inactive += 1;
     }
-    const tls = [...tlGroups.values()].sort((a, b) => b.cur - a.cur);
+    const tls = [...tlGroups.values()].map((t) => {
+      const s = t.snapshot || {};
+      const last = s.last !== undefined ? s.last : t.lastSum;
+      const cur = s.cur !== undefined ? s.cur : t.curSum;
+      const curVc4 = s.curVc4 !== undefined ? s.curVc4 : t.curVc4Sum;
+      const sheetTotals = s.last !== undefined || s.cur !== undefined;
+      return { ...t, last, cur, curVc4, sheetTotals, lastSum: t.lastSum, curSum: t.curSum, curVc4Sum: t.curVc4Sum };
+    }).sort((a, b) => b.cur - a.cur);
     const totals = {
       agents: all.length, stock: U.sum(all, (r) => r.stockTotal), stockVc4: U.sum(all, (r) => r.stockVc4),
       last: U.sum(all, (r) => r.lastTotal), cur: U.sum(all, (r) => r.curTotal), curVc4: U.sum(all, (r) => r.curVc4),
@@ -808,7 +834,7 @@ FF.pages = FF.pages || {};
       </div></div>
       <div class="gvp-view" ${perf.view !== 'agents' ? 'hidden' : ''}>${card('📋 GV agents', `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Agent</th><th>TL</th>${PERF_COLS.slice(2).map((c) => sortTh(c.key, c.label, c.num)).join('')}</tr></thead><tbody>${tableRows || `<tr><td colspan="15" class="empty">Koi agent match nahi hua</td></tr>`}</tbody></table></div>
         <div class="pager"><button class="btn small" data-gvp-pg="prev" ${perf.page <= 1 ? 'disabled' : ''}>‹ Prev</button><span>Page ${perf.page} / ${U.fmt(pages)}</span><button class="btn small" data-gvp-pg="next" ${perf.page >= pages ? 'disabled' : ''}>Next ›</button></div>`, { right: `${FF.auth.can('share') ? `<button class="btn small" data-share="wa" data-text="${esc(`GV Partner MTD ${U.fmt(totals.cur)} tags · stock ${U.fmt(totals.stock)} · ${tls.length} TLs`)}">🟢 Share</button>` : ''}` })}</div>
-      <div class="gvp-view" ${perf.view !== 'tls' ? 'hidden' : ''}>${card('👥 GV TL-wise summary', tableHtml(['#', 'TL', 'Agents', 'Stock', 'Stock VC4', 'Last month', 'MTD', 'MTD VC4', 'High prio', 'Inactive'], tls.map((t, i) => `<tr class="clickable" data-gvp-tl="${esc(t.tlName)}" data-gvp-tlid="${esc(t.tlId && t.tlId !== '__direct__' ? t.tlId : '')}" title="Click to open TL 360 drawer"><td class="dim">${i + 1}</td><td><b>${esc(t.tlName)}</b></td><td class="num">${U.fmt(t.agents)}</td><td class="num">${U.fmt(t.stock)}</td><td class="num">${U.fmt(t.stockVc4)}</td><td class="num">${U.fmt(t.last)}</td><td class="num"><b>${U.fmt(t.cur)}</b></td><td class="num">${U.fmt(t.curVc4)}</td><td class="num">${U.fmt(t.high)}</td><td class="num">${U.fmt(t.inactive)}</td></tr>`), 2), { right: `${exportBtn('gv-tl-summary')}<span class="dim small">Row par click = TL 360 drawer (agents + class-wise)</span>` })}</div>
+      <div class="gvp-view" ${perf.view !== 'tls' ? 'hidden' : ''}>${card('👥 GV TL-wise summary', tableHtml(['#', 'TL', 'TL ID', 'Agents', 'Stock', 'Stock VC4', 'Last month', 'MTD', 'MTD VC4', 'High prio', 'Inactive'], tls.map((t, i) => `<tr class="clickable" data-gvp-tl="${esc(t.tlName)}" data-gvp-tlid="${esc(t.tlId && t.tlId !== '__direct__' ? t.tlId : '')}" title="Click to open TL 360 drawer"><td class="dim">${i + 1}</td><td><b>${esc(t.tlName)}</b></td><td><small class="dim">${esc(t.tlId && t.tlId !== '__direct__' ? t.tlId : '—')}</small></td><td class="num">${U.fmt(t.agents)}</td><td class="num">${U.fmt(t.stock)}</td><td class="num">${U.fmt(t.stockVc4)}</td><td class="num" title="${t.sheetTotals ? `GV REPORT sheet TL snapshot (TL Last Month Issued)${t.lastSum !== t.last ? ` · members ka jod ${U.fmt(t.lastSum)}` : ''}` : 'Members ka jod (sheet me TL snapshot blank tha)'}">${U.fmt(t.last)}${t.sheetTotals && t.lastSum !== t.last ? ` <small class="dim">${U.fmt(t.lastSum)}</small>` : ''}</td><td class="num" title="${t.sheetTotals ? `GV REPORT sheet TL snapshot (TL Issuance In Current Month)${t.curSum !== t.cur ? ` · members ka jod ${U.fmt(t.curSum)}` : ''}` : 'Members ka jod (sheet me TL snapshot blank tha)'}"><b>${U.fmt(t.cur)}</b>${t.sheetTotals && t.curSum !== t.cur ? ` <small class="dim">${U.fmt(t.curSum)}</small>` : ''}</td><td class="num">${U.fmt(t.curVc4)}</td><td class="num">${U.fmt(t.high)}</td><td class="num">${U.fmt(t.inactive)}</td></tr>`), 2), { right: `${exportBtn('gv-tl-summary')}<span class="dim small">Row par click = TL 360 drawer (agents + class-wise) · Last/MTD = <b>GV REPORT sheet ka TL snapshot</b>, chhota dim number = members ka jod</span>` })}</div>
       <div class="gvp-view" ${perf.view !== 'alerts' ? 'hidden' : ''}>
         <div class="mini-grid">${miniKpi('Attention list', U.fmt(alertList.length), 'priority / inactive / zero-stock / de-growth', 'c4', { scope: 'list', list: 'gvp.f.attention' })}${miniKpi('High priority', U.fmt(list.filter((r) => /high/i.test(r.priority || '')).length), 'dispatch review', 'c6', { scope: 'list', list: 'gvp.f.high' })}${miniKpi('Inactive', U.fmt(list.filter((r) => /inactive/i.test(r.agentStatus || '')).length), 'follow-up', 'c2', { scope: 'list', list: 'gvp.f.inactive' })}${miniKpi('Direct agents', U.fmt(directCount), 'stock dispatch not required', 'c3', { scope: 'list', list: 'gvp.f.direct' })}</div>
         ${card('🚨 GV attention & dispatch watch', `<div class="table-wrap tall"><table class="tbl compact"><thead><tr><th>Agent</th><th>TL / class</th><th>Priority</th><th>Status</th><th class="num">Stock</th><th class="num">Growth</th><th>Action</th></tr></thead><tbody>${attentionRows || '<tr><td colspan="7" class="empty">Current filters me koi alert nahi.</td></tr>'}</tbody></table></div>`, { right: `<span class="dim">${U.fmt(alertList.length)} rows</span>` })}
@@ -830,8 +856,8 @@ FF.pages = FF.pages || {};
       const rows = list.map((r) => PERF_COLS.map((c) => cell(r, c)));
       if (action === 'csv') { U.downloadCsv(`gv-performance-${U.stamp()}.csv`, header, rows); U.toast(`${U.fmt(rows.length)} GV agents CSV ready`, 'ok'); return; }
       if (action === 'xlsx') {
-        const tlHeader = ['TL', 'Agents', 'Stock', 'Stock VC4', 'Last month', 'MTD', 'MTD VC4', 'High priority', 'Inactive'];
-        const tlRows = tls.map((t) => [t.tlName, t.agents, t.stock, t.stockVc4, t.last, t.cur, t.curVc4, t.high, t.inactive]);
+        const tlHeader = ['TL', 'TL ID', 'Agents', 'Stock', 'Stock VC4', 'Last month', 'Last month (members sum)', 'MTD', 'MTD (members sum)', 'MTD VC4', 'High priority', 'Inactive', 'Snapshot source'];
+        const tlRows = tls.map((t) => [t.tlName, t.tlId && t.tlId !== '__direct__' ? t.tlId : '', t.agents, t.stock, t.stockVc4, t.last, t.lastSum, t.cur, t.curSum, t.curVc4, t.high, t.inactive, t.sheetTotals ? 'GV REPORT TL snapshot' : 'members sum (sheet blank)']);
         FF.xlsx.download(`gv-performance-${U.stamp()}.xlsx`, [
           { name: 'Summary', header: ['Metric', 'Value'], rows: [['Agents', totals.agents], ['TLs', tls.length], ['Stock', totals.stock], ['Stock VC4', totals.stockVc4], ['MTD', totals.cur], ['Last month', totals.last], ['Today', totals.today], ['High priority', totals.high], ['Inactive', totals.inactive]] },
           { name: 'Agents', header, rows }, { name: 'TL Summary', header: tlHeader, rows: tlRows }
@@ -1037,5 +1063,5 @@ FF.pages = FF.pages || {};
     make('gvp.f.inactive', () => filtered().filter((r) => /inactive/i.test(r.agentStatus || '')), 'GV · Inactive (filtered)');
     make('gvp.f.direct', () => filtered().filter((r) => FF.config.isDirectAgent(r, 'gv')), 'GV · Direct agents (filtered)');
   }
-  FF.pages.gvPerformance = { title: 'GV Performance', render: renderPerformance, sourceRows: () => perf.sourceRows || null };
+  FF.pages.gvPerformance = { title: 'GV Performance', render: renderPerformance, sourceRows: () => perf.sourceRows || null, _overlay: overlayGvReportWithEir };
 })(window.FF);
