@@ -10,7 +10,7 @@
   <link id="site-favicon" rel="icon" type="image/svg+xml" href="favicon.svg?v=5">
   <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png?v=5">
   <link rel="apple-touch-icon" href="icon-192.png?v=5">
-  <link rel="stylesheet" href="styles.css?v=70">\n  <link rel="stylesheet" href="controlTower.css?v=1">
+  <link rel="stylesheet" href="styles.css?v=71">\n  <link rel="stylesheet" href="controlTower.css?v=1">
   <script>try { if (localStorage.getItem('ff_theme') === 'dark') document.documentElement.dataset.theme = 'dark'; } catch (e) {}</script>
 </head>
 <body>
@@ -18,92 +18,3 @@
     <img src="logos/apna-payment.png" alt="ApnaPayment" width="280" height="153">
     <p>Opening your workspace…</p><small>Checking your secure session…</small>
     <div class="boot-progress"></div>
-  </div>
-  <aside class="sidebar" id="sidebar">
-    <div class="brand">
-      <div class="brand-logo" id="brand-logo">FF</div>
-      <div class="brand-text"><b id="brand-name">First Forward</b><small id="brand-tag">Dashboard</small></div>
-    </div>
-    <nav id="nav" class="nav"></nav>
-    <div class="side-foot">
-      <div id="status" class="status"><span class="dot"></span> Ready</div>
-      <div id="user-box"></div>
-    </div>
-  </aside>
-  <div class="side-backdrop" id="side-backdrop"></div>
-
-  <div class="content">
-    <header class="topbar">
-      <button class="icon-btn" id="menu-btn" aria-label="Menu">☰</button>
-      <div class="top-title" id="top-title">Dashboard</div>
-      <div id="offline-state" class="offline-state" role="status" aria-live="polite" hidden></div>
-      <div class="top-actions" id="top-actions">
-        <button class="btn small primary" id="pwa-install" hidden title="Install app">⬇️ Install App</button>
-        <button class="icon-btn" id="lang-toggle" title="Language · भाषा (English / हिंदी)" aria-label="Language" data-top-secondary="1">🌐</button>
-        <button class="icon-btn" id="theme-toggle" title="Dark / light mode" aria-label="Theme" data-top-secondary="1">🌙</button>
-        <button class="icon-btn" id="a11y-btn" title="Accessibility mode" aria-label="Accessibility mode" data-top-secondary="1">♿</button>
-        <button class="icon-btn" id="focus-toggle" title="Focus mode" aria-label="Focus mode">🎯</button>
-        <button class="icon-btn" id="top-refresh" title="Refresh data (Google Sheet se naya data)" aria-label="Refresh">↻</button>
-        <button class="icon-btn" id="save-view-btn" title="Save current filtered view" aria-label="Save current view" data-top-secondary="1">☆</button>
-        <button class="icon-btn" id="global-search-btn" title="Global search (Ctrl / ⌘ + K)" aria-label="Search" data-top-secondary="1">🔍</button>
-        <button class="icon-btn" id="top-more" title="More options · और विकल्प" aria-label="More options" aria-expanded="false">⋯</button>
-        <div class="notification-wrap">
-          <button class="icon-btn notification-btn" id="notification-btn" title="Notifications" aria-label="Notifications" aria-expanded="false">🔔<span class="notification-count" id="notification-count" hidden>0</span></button>
-          <div class="notification-pop" id="notification-pop" hidden></div>
-        </div>
-        <div class="user-wrap">
-          <button class="user-btn" id="user-btn" aria-haspopup="true" aria-expanded="false"></button>
-          <div class="user-menu" id="user-menu" hidden></div>
-        </div>
-      </div>
-    </header>
-    <main id="main" class="main"></main>
-  </div>
-  <nav id="mobile-nav" class="mobile-nav" aria-label="Mobile navigation" hidden></nav>
-
-  <div class="drawer-backdrop" id="drawer-backdrop" hidden></div>
-  <aside class="drawer" id="drawer" aria-hidden="true">
-    <div class="drawer-head">
-      <div class="drawer-head-main"><div class="drawer-kicker" id="drawer-kicker"></div><h2 id="drawer-title"></h2><div class="drawer-sub" id="drawer-sub"></div><div class="drawer-actions" id="drawer-actions"></div></div>
-      <button class="icon-btn" id="drawer-close" aria-label="Close">✕</button>
-    </div>
-    <div class="drawer-body" id="drawer-body"></div>
-  </aside>
-
-  <!-- ⚡ Eager core: shell + Home + search + KPI drawer. Baaki page modules (insights, settings,
-       gvpages, cockpit, wow*, stock, trend, dashboard, targets, dispatch… ~1.5 MB) ab lazy.js
-       us page ko kholne par load karta hai, aur login ke baad idle me background warm karta hai. -->
-  <script defer src="config.js?v=71"></script>
-  <script defer src="util.js?v=71"></script>
-  <script defer src="i18n.js?v=71"></script>
-  <script defer src="xlsx.js?v=71"></script>
-  <script defer src="data.js?v=71"></script>
-  <script defer src="stockAge.js?v=71"></script>
-  <script defer src="charts.js?v=71"></script>
-  <script defer src="model.js?v=71"></script>
-  <script defer src="filters.js?v=71"></script>
-  <script defer src="store.js?v=71"></script>
-  <script defer src="gv.js?v=71"></script>
-  <script defer src="preload.js?v=71"></script>
-  <script defer src="auth.js?v=71"></script>
-  <script defer src="notifications.js?v=71"></script>
-  <script defer src="sheets.js?v=71"></script>
-  <script defer src="liveView.js?v=71"></script>
-  <script defer src="kpiDetail.js?v=71"></script>
-  <script defer src="home.js?v=71"></script>
-  <script defer src="performance.js?v=71"></script>
-  <script defer src="agentBoard.js?v=71"></script>
-  <script defer src="masterProfile.js?v=71"></script>
-  <script defer src="masterSearch.js?v=71"></script>
-  <script defer src="searchReport.js?v=71"></script>
-  <script defer src="palette.js?v=71"></script>
-  <script defer src="assistant.js?v=71"></script>
-  <script defer src="officeBell.js?v=71"></script>
-  <script defer src="pushVoice.js?v=71"></script>
-  <script defer src="liveAssist.js?v=71"></script>
-  <script defer src="morningCard.js?v=71"></script>
-  <script defer src="lazy.js?v=71"></script>
-  <script defer src="publicForm.js?v=71"></script>
-  <script defer src="app.js?v=71"></script>
-</body>
-</html>
