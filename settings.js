@@ -964,6 +964,16 @@ FF.pages = FF.pages || {};
         <p class="dim small">GV sheet me column aage-peeche hone par app <b>heading padh kar</b> sahi column pakadta hai. Yahan dikhta hai ki har field kis column se padha gaya — aur koi mismatch ho to warning. Yahi wajah hoti hai jab GV page par number galat lage.</p>
         <div id="gv-map-out">${gvMappingHtml()}</div>
         <div class="save-bar"><button class="btn" id="gv-map-check">🔎 Ab check karo (GV data load)</button><span class="dim small" id="gv-map-msg"></span></div>`)}
+      ${section('🎯 GV CCH → Class mapping <span class="dim">(Admin controls)</span>', `
+        <p class="dim small">GV Master ke <b>CCH / CCH_CLASS (Column G)</b> ke exact values ko yahan vehicle group me map karo. <b>VC5</b> ka matlab site ka Commercial bucket <b>VC5+</b> hai. Blank group me existing VCLASS/CLASS fallback chalega.</p>
+        <div class="form-grid">
+          ${check('gvClassCch.enabled', settings.gvClassCch?.enabled !== false, 'CCH mapping ON')}
+          ${field('VC4 CCH values', `<input class="input mono" data-path="gvClassCch.groups.VC4" data-list value="${esc((settings.gvClassCch?.groups?.VC4 || []).join(', '))}" placeholder="e.g. CCH4, CAR, 4">`, 'Comma separated')}
+          ${field('VC20 CCH values', `<input class="input mono" data-path="gvClassCch.groups.VC20" data-list value="${esc((settings.gvClassCch?.groups?.VC20 || []).join(', '))}" placeholder="e.g. CCH20, 20">`, 'Comma separated')}
+          ${field('VC5 CCH values', `<input class="input mono" data-path="gvClassCch.groups.VC5" data-list value="${esc((settings.gvClassCch?.groups?.VC5 || []).join(', '))}" placeholder="e.g. CCH5, CCH6, CCH7">`, 'Comma separated · ye VC5+ Commercial bucket hai')}
+        </div>
+        <div class="chip-row"><span class="chip on">Source: GV Master · Column G (CCH)</span><span class="chip">Fallback: VCLASS / CLASS</span><span class="chip">Admin controlled</span></div>
+        <div class="save-bar"><button class="btn primary" data-save="gvClassCch">💾 Save CCH mapping</button><span class="dim small" id="save-msg-gvClassCch"></span></div>`)}
       ${section('➕ Naya tab jodo <span class="dim">(optional)</span>', `
         <p class="dim small">Dono Google Sheets me koi naya tab ho to yahan add karke user ko access de sakte ho.</p>
         <div class="form-grid"><label class="fld"><span>Tab id (permission key)</span><input class="input" id="nt-id" placeholder="e.g. GV Tag Status"></label>
@@ -2300,7 +2310,7 @@ FF.pages = FF.pages || {};
         const card = btn.closest('.card');
         const patch = collect(card, {});
         const msg = U.$(`#save-msg-${btn.dataset.save}`, body);
-        const reload = ['data', 'eir', 'stock', 'stockMovement', 'ffPayout', 'gvCommissionRates'].includes(btn.dataset.save);
+        const reload = ['data', 'eir', 'stock', 'stockMovement', 'ffPayout', 'gvCommissionRates', 'gvClassCch'].includes(btn.dataset.save);
         U.withButtonBusy(btn, () => save(patch, msg, { reload }), 'Saving…');
       }));
       // 📧 Features → email: status chips, pehle save phir test mail, aur 🩺 diagnose
