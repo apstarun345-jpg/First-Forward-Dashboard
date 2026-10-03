@@ -43,7 +43,7 @@ window.FF = window.FF || {};
   const VALID_TONES = new Set(TONE_OPTIONS.map((x) => x.id));
   // `voice` = app/web band hone par bhi alerts bol kar sunao (pushVoice.js + sw.js voice queue).
   const DEFAULT_PREFS = { enabled: true, login: true, signup: true, report: true, monthly: true, digest: true, alert: true, activity: true, click: true, search: true, settings: true, user: true, location: true, info: true, request: true, assist: true, sound: true, tone: 'classic', push: true, voice: true };
-  const state = { started: false, bound: false, timer: null, presenceTimer: null, fastTimer: null, lastAt: '', items: [], unread: 0, serverUnread: 0, firstPoll: true, page: 'home', pointer: null, people: [], lastInteraction: Date.now(), pointerBound: false, events: [], dirty: false, lastSent: 0, lastScroll: -1, pushOn: false, pushDevices: 0, pushStatus: null, pushTriedAt: 0, pushError: '', prefs: { ...DEFAULT_PREFS }, audioCtx: null, expanded: null, filterType: 'all', filterUnread: false, seenAt: '', voiceAt: {} };
+  const state = { started: false, bound: false, timer: null, presenceTimer: null, fastTimer: null, lastAt: '', items: [], unread: 0, serverUnread: 0, firstPoll: true, page: 'home', pointer: null, people: [], lastInteraction: Date.now(), pointerBound: false, events: [], dirty: false, lastSent: 0, lastScroll: -1, pushOn: false, pushDevices: 0, pushStatus: null, pushTriedAt: 0, pushError: '', prefs: { ...DEFAULT_PREFS }, audioCtx: null, expanded: null, filterType: 'all', filterUnread: false, filterSearch: '', centerPriority: 'all', centerDate: 'all', seenAt: '', voiceAt: {} };
   const normalizePrefs = (p) => {
     const out = { ...DEFAULT_PREFS, ...(p && typeof p === 'object' ? p : {}) };
     if (!VALID_TONES.has(String(out.tone))) out.tone = DEFAULT_PREFS.tone;
@@ -520,12 +520,127 @@ window.FF = window.FF || {};
       <span class="notification-icon">${icon(item)}</span><div><b>${U.esc(item.title)}</b><p>${U.esc(item.body)}</p><small>${unread ? '<strong>NEW</strong> · ' : ''}${U.esc(U.timeLabel(new Date(item.createdAt).getTime()))} · <u>${open ? 'band karo ↑' : 'data dekho ↓'}</u></small></div></button>${open ? detailHtml(item) : ''}</div>`;
     }).join('');
     const presence = isAdmin ? `<section class="presence-panel"><div class="presence-title">🟢 User activity <small>Admin only · live / last seen</small></div>${state.people.length ? state.people.map((p) => `<div class="presence-row"><span class="presence-dot ${p.active ? 'is-live' : ''}"></span><div><b>${U.esc(p.name || p.username)}</b><small>${p.active ? `Active now · ${U.esc(p.page)}` : `Last active ${U.esc(U.timeLabel(p.lastSeen))} · last page: ${U.esc(p.page)}`}</small>${p.lastEvent ? `<small>Last action: ${U.esc(p.lastEvent.label || p.lastEvent.kind)}</small>` : ''}</div><span class="presence-side"><span class="presence-state">${p.online && p.active ? 'LIVE' : p.online ? 'IDLE' : 'AWAY'}</span>${isAdmin ? `<button class="btn small" data-live-watch="${U.esc(p.username)}">👁 Live view</button> <button class="btn small" data-la-request="${U.esc(p.username)}" title="User ki marzi se live awaaz/video session shuru karo">🎙 Assist</button>` : ''}</span></div>`).join('') : '<div class="notification-empty">Users seen after this server started will appear here.</div>'}</section>` : '';
-    pop.innerHTML = `<div class="notification-head"><div><b>Notifications</b><small>${state.unread ? `${state.unread} unread` : 'Sab updated hai'} · ${filtered.length} shown</small></div><div style="display:flex;gap:6px"><button class="btn small" data-notify-read ${state.unread ? '' : 'disabled'}>✓ Mark all read</button></div></div>
+    pop.innerHTML = `<div class="notification-head"><div><b>Notifications</b><small>${state.unread ? `${state.unread} unread` : 'Sab updated hai'} · ${filtered.length} shown</small></div><div style="display:flex;gap:6px"><button class="btn small primary" data-notify-center>📬 Full Center</button><button class="btn small" data-notify-read ${state.unread ? '' : 'disabled'}>✓ Mark all read</button></div></div>
       <div class="notify-filter-bar"><label>Type <select data-notify-filter="type">${typeOptions.map((t) => `<option value="${U.esc(t.key)}" ${state.filterType === t.key ? 'selected' : ''}>${U.esc(t.label)}</option>`).join('')}</select></label><button type="button" class="btn small ${state.filterUnread ? 'primary' : ''}" data-notify-filter="unread">${state.filterUnread ? '✓ Unread only' : 'Unread only'}</button></div>
       ${presence}
       ${switches}
       ${hintLine()}
       <div class="notification-list">${rows || `<div class="notification-empty">${state.filterUnread ? 'No unread notifications in this view.' : 'Abhi koi notification nahi. User login/page open, report update aur shared location yahan dikhegi.'}</div>`}</div>`;
+  }
+
+  // ---- 📬 Notification Center 2.0 ----------------------------------------------------------------
+  // Full-screen style inbox: priority + search + date window. Existing bell remains the quick inbox.
+  const NOTIFY_PRIORITY = {
+    alert: 'critical',
+    request: 'action', settings: 'action', user: 'action', signup: 'action',
+    report: 'info', digest: 'info', monthly: 'info', login: 'info', info: 'info',
+    activity: 'info', click: 'info', search: 'info', location: 'info', assist: 'action'
+  };
+  const PRIORITY_META = {
+    critical: { label: 'Critical', icon: '🚨' },
+    action: { label: 'Action', icon: '⚡' },
+    info: { label: 'Info', icon: 'ℹ️' }
+  };
+  function notifyPriority(item) { return NOTIFY_PRIORITY[item && item.type] || 'info'; }
+  function notifyMatchesDate(item, range) {
+    if (!range || range === 'all') return true;
+    const t = new Date(item.createdAt || 0).getTime();
+    if (!Number.isFinite(t)) return false;
+    const now = Date.now();
+    if (range === 'today') return new Date(t).toDateString() === new Date(now).toDateString();
+    if (range === '7d') return now - t <= 7 * 86400e3;
+    if (range === '30d') return now - t <= 30 * 86400e3;
+    return true;
+  }
+  function centerItems() {
+    const q = String(state.filterSearch || '').trim().toLowerCase();
+    return state.items.slice().reverse().filter((item) => {
+      if (state.centerPriority !== 'all' && notifyPriority(item) !== state.centerPriority) return false;
+      if (!notifyMatchesDate(item, state.centerDate)) return false;
+      if (!q) return true;
+      return [item.title, item.body, item.type, ...(Object.values(item.meta || {}).map((v) => typeof v === 'object' ? JSON.stringify(v) : String(v)))]
+        .join(' ').toLowerCase().includes(q);
+    });
+  }
+  function centerItemHtml(item) {
+    const p = notifyPriority(item), pm = PRIORITY_META[p] || PRIORITY_META.info, unread = itemUnread(item);
+    const link = item.meta && item.meta.link;
+    return `<article class="notify-center-item ${unread ? 'is-unread' : ''}" data-center-id="${U.esc(item.id)}">
+      <div class="nci-priority ${p}" title="${U.esc(pm.label)}">${pm.icon}</div>
+      <div class="nci-main">
+        <div class="nci-top"><b>${U.esc(item.title)}</b><span class="nci-time">${unread ? '<strong>NEW</strong> · ' : ''}${U.esc(U.timeLabel(new Date(item.createdAt).getTime()))}</span></div>
+        <p>${U.esc(item.body)}</p>
+        <div class="nci-meta"><span>${icon(item)} ${U.esc(item.type || 'info')}</span>${link ? '<span>↗ linked</span>' : ''}</div>
+      </div>
+      <button type="button" class="btn small" data-center-open="${U.esc(item.id)}">Open</button>
+    </article>`;
+  }
+  function centerRender(host) {
+    if (!host) return;
+    const items = centerItems();
+    const counts = { critical: 0, action: 0, info: 0 };
+    state.items.forEach((x) => { counts[notifyPriority(x)]++; });
+    host.innerHTML = `
+      <div class="notify-center-toolbar">
+        <div class="notify-center-search"><span>🔎</span><input id="notify-center-search" class="input" placeholder="Search title, user, page, type…" value="${U.esc(state.filterSearch)}"></div>
+        <div class="notify-center-filters">
+          <select id="notify-center-priority" class="input">
+            <option value="all" ${state.centerPriority === 'all' ? 'selected' : ''}>All priority · ${state.items.length}</option>
+            <option value="critical" ${state.centerPriority === 'critical' ? 'selected' : ''}>🚨 Critical · ${counts.critical}</option>
+            <option value="action" ${state.centerPriority === 'action' ? 'selected' : ''}>⚡ Action · ${counts.action}</option>
+            <option value="info" ${state.centerPriority === 'info' ? 'selected' : ''}>ℹ️ Info · ${counts.info}</option>
+          </select>
+          <select id="notify-center-date" class="input">
+            <option value="all" ${state.centerDate === 'all' ? 'selected' : ''}>Any time</option>
+            <option value="today" ${state.centerDate === 'today' ? 'selected' : ''}>Today</option>
+            <option value="7d" ${state.centerDate === '7d' ? 'selected' : ''}>Last 7 days</option>
+            <option value="30d" ${state.centerDate === '30d' ? 'selected' : ''}>Last 30 days</option>
+          </select>
+          <button class="btn small" data-center-clear>↺ Clear</button>
+        </div>
+      </div>
+      <div class="notify-center-summary">
+        <span>Showing <b>${items.length}</b> of <b>${state.items.length}</b></span>
+        <span>${state.unread ? `🔵 <b>${state.unread}</b> unread` : '✅ All caught up'}</span>
+        <button class="btn small" data-center-read ${state.unread ? '' : 'disabled'}>✓ Mark all read</button>
+      </div>
+      <div class="notify-center-list">${items.length ? items.slice(0, 100).map(centerItemHtml).join('') : '<div class="notification-empty">No notifications match these filters.</div>'}</div>`;
+    const search = host.querySelector('#notify-center-search');
+    if (search) {
+      search.addEventListener('input', () => {
+        state.filterSearch = search.value;
+        clearTimeout(state.centerSearchTimer);
+        state.centerSearchTimer = setTimeout(() => centerRender(host), 120);
+      });
+    }
+    const priority = host.querySelector('#notify-center-priority');
+    if (priority) priority.addEventListener('change', () => { state.centerPriority = priority.value; centerRender(host); });
+    const date = host.querySelector('#notify-center-date');
+    if (date) date.addEventListener('change', () => { state.centerDate = date.value; centerRender(host); });
+    host.querySelector('[data-center-clear]')?.addEventListener('click', () => {
+      state.filterSearch = ''; state.centerPriority = 'all'; state.centerDate = 'all'; centerRender(host);
+    });
+    host.querySelector('[data-center-read]')?.addEventListener('click', () => markAllRead());
+    host.querySelectorAll('[data-center-open]').forEach((btn) => btn.addEventListener('click', () => {
+      const item = state.items.find((x) => x.id === btn.dataset.centerOpen);
+      if (!item) return;
+      FF.app.closeDrawer();
+      if (FF.liveView && FF.liveView.openNotification) FF.liveView.openNotification(item);
+      else if (item.meta && item.meta.link) location.hash = item.meta.link;
+    }));
+  }
+  function openCenter() {
+    if (!hasAccess() || !FF.app || !FF.app.openDrawer) return;
+    const hostId = 'notification-center-host';
+    FF.app.openDrawer({
+      wide: true,
+      kicker: '🔔 Notification Center 2.0',
+      title: 'Priority Inbox',
+      sub: 'Search, priority aur date se alerts filter karo — click se direct detail / source page kholo.',
+      body: `<div id="${hostId}"></div>`
+    });
+    const host = U.$('#' + hostId);
+    if (host) centerRender(host);
   }
 
   // ---- polling -----------------------------------------------------------------------------------
@@ -954,6 +1069,8 @@ window.FF = window.FF || {};
           .finally(() => { digTest.disabled = false; digTest.textContent = label; });
         return;
       }
+      const center = e.target.closest('[data-notify-center]');
+      if (center) { e.preventDefault(); e.stopPropagation(); toggle(false); openCenter(); return; }
       const filter = e.target.closest('[data-notify-filter]');
       if (filter && filter.dataset.notifyFilter === 'unread') {
         e.preventDefault(); e.stopPropagation(); state.filterUnread = !state.filterUnread; render(); return;
@@ -1113,6 +1230,6 @@ window.FF = window.FF || {};
     return selected;
   }
   function testSound() { unlockAudio(); beep(true); U.toast('🔊 Test beep', 'info'); } // force: master OFF ho tab bhi test chale
-  FF.notifications = { start, stop, poll, toggle, activity, logSearch, logClick, track, testSound, setTone, toneOptions: TONE_OPTIONS, render, setupPush, disablePush, enableBrowser, setEnabled, maybeAskPermission, testPanel, testPush, refreshPushStatus, retryPush, browserAlert, localAlert, speakServerItem, noteVoiced, countUnread, unlockAudio, beep, soundOn: () => state.prefs.sound !== false, notifyTypes: NOTIFY_TYPES, get state() { return state; }, get prefs() { return state.prefs; } };
+  FF.notifications = { start, stop, poll, toggle, openCenter, activity, logSearch, logClick, track, testSound, setTone, toneOptions: TONE_OPTIONS, render, setupPush, disablePush, enableBrowser, setEnabled, maybeAskPermission, testPanel, testPush, refreshPushStatus, retryPush, browserAlert, localAlert, speakServerItem, noteVoiced, countUnread, unlockAudio, beep, soundOn: () => state.prefs.sound !== false, notifyTypes: NOTIFY_TYPES, get state() { return state; }, get prefs() { return state.prefs; } };
   bind();
 })(window.FF);

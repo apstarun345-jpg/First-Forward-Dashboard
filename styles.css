@@ -4981,3 +4981,13 @@ html[data-theme="dark"] .hm-toprow .rank { background: #1e293b; color: #a5b4fc; 
 [data-theme="dark"] .msp-today .dcell { background: color-mix(in srgb, #fff 6%, transparent); }
 .hm-warn { margin: 10px 0 0; padding: 8px 10px; border-radius: 10px; font-size: 12px; font-weight: 650;
   background: color-mix(in srgb, #f59e0b 12%, transparent); border: 1px solid color-mix(in srgb, #f59e0b 34%, transparent); }
+/* Notification Center 2.0 */
+.notify-center-toolbar{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:10px}
+.notify-center-search{display:flex;align-items:center;gap:7px;flex:1;min-width:240px}.notify-center-search .input{width:100%;min-width:0}
+.notify-center-filters{display:flex;gap:7px;flex-wrap:wrap}.notify-center-filters .input{min-width:125px}
+.notify-center-summary{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:9px 11px;margin-bottom:10px;background:#f8fafc;border:1px solid var(--line);border-radius:10px;color:var(--muted);font-size:12px}.notify-center-summary span:first-child{margin-right:auto}
+.notify-center-list{display:flex;flex-direction:column;gap:8px;max-height:58vh;overflow:auto;padding-right:2px}
+.notify-center-item{display:grid;grid-template-columns:38px minmax(0,1fr) auto;gap:10px;align-items:center;padding:11px 12px;border:1px solid var(--line);border-radius:13px;background:#fff;transition:.15s}.notify-center-item:hover{border-color:#c7d2fe;box-shadow:0 5px 16px rgba(79,70,229,.08);transform:translateY(-1px)}.notify-center-item.is-unread{background:linear-gradient(90deg,#eef2ff,#fff)}
+.nci-priority{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:#f1f5f9}.nci-priority.critical{background:#fee2e2}.nci-priority.action{background:#fef3c7}.nci-priority.info{background:#e0f2fe}
+.nci-main{min-width:0}.nci-top{display:flex;gap:10px;align-items:center}.nci-top b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.nci-time{margin-left:auto;white-space:nowrap;color:var(--muted);font-size:11px}.nci-time strong{color:#4f46e5}.nci-main p{margin:3px 0;color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.nci-meta{display:flex;gap:10px;color:#94a3b8;font-size:10px}
+@media(max-width:700px){.notify-center-item{grid-template-columns:32px minmax(0,1fr)}.notify-center-item>.btn{grid-column:2;justify-self:start}.nci-time{font-size:10px}.notify-center-filters{width:100%}.notify-center-filters .input{flex:1}}
