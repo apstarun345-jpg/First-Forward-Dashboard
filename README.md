@@ -31,7 +31,7 @@ gayin hain to ab unhe wapas laya ja sakta hai — **Settings → ☁️ Storage 
   current admin account lockout se bacha rahta hai.
 
 Poora Hindi guide: [RECOVERY.md](RECOVERY.md) · Storage setup: [STORAGE_SETUP.md](STORAGE_SETUP.md) ·
-Release note: [WHATS-NEW-v3.48.0.md](WHATS-NEW-v3.48.0.md).
+Release note: [WHATS-NEW-v3.48.0.md](WHATS-NEW-v3.48.0.md) · Final summary: [FINAL-v3.48.md](FINAL-v3.48.md).
 
 ## ✨ v3.46.0 — 🏠 Home v2 (GV aaj live) + 🔎 Management → Master Search + ⚡ fast Agent/TL Summary
 
