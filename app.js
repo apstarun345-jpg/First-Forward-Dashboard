@@ -749,7 +749,17 @@ window.FF = window.FF || {};
     }
     clearTimeout(loaderTimer);
     routeProgress(false, token);
-    if (token === current.token) { main.setAttribute('aria-busy', 'false'); updateStatus(); enhanceCharts(root); enhanceTables(root); translateDom(root); applySavedTweaks(root); }
+    if (token === current.token) {
+      main.setAttribute('aria-busy', 'false'); updateStatus(); translateDom(root); applySavedTweaks(root);
+      // ⚡ Paint-first: non-essential chart/table decoration is idle-deferred.
+      // Data fetching/query/cache/export paths are untouched, so downloads stay identical.
+      const polish = () => {
+        if (token !== current.token || !root.isConnected) return;
+        enhanceCharts(root); enhanceTables(root);
+      };
+      if (typeof requestIdleCallback === 'function') requestIdleCallback(polish, { timeout: 250 });
+      else setTimeout(polish, 0);
+    }
   }
 
   /** 🩺 v3.37 — Settings → Diagnostics ke SAVED fixes boot/par har page render par eagerly laga do.
