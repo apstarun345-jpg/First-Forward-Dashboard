@@ -108,12 +108,51 @@ test('masterSearch — light index searches name, TL, agent ID aur GV ID', async
   assert.ok(byName.people.some((p) => p.name === 'Ravi Kumar'), 'naam se agent nahi mila');
   const byTl = MS.search('TL One');
   assert.ok(byTl.people.some((p) => p.kind === 'ff-tl'), 'TL search nahi chali');
+  const preferredTl = MS.preferNameMatches(byTl.people, 'TL One');
+  assert.equal(preferredTl.length, 1, 'exact TL-name search should open TL, not a member whose TL has that name');
+  assert.equal(preferredTl[0].kind, 'ff-tl');
   const byId = MS.search('R101');
   assert.ok(byId.ids.some((v) => v.id === 'R101') || byId.people.some((p) => p.sub === 'R101'), 'agent ID se match nahi mila');
   const byGv = MS.search('G001');
   assert.ok(byGv.people.length >= 0, 'GV ID search crash hui');
   const byMobile = MS.search('98765');
   assert.ok(byMobile.ids.some((v) => v.via === 'Mobile' && v.name === 'GV High Risk'), 'partial mobile number se match nahi mila');
+});
+
+test('masterSearch — GV Master UNIQUE_ID agent search resolves both TL IDs and exposes the linked TL team', async () => {
+  const row = {
+    ym, date: new Date(today), day: today.getDate(), key: U.dateKey(today),
+    agentId: 'UNIQ-TEAM-77', agentName: 'GV Search Agent',
+    supervisorId: 'TL-C-77', tlId: 'GV-R-77', gvTlId: 'GV-R-77', tlName: 'GV Team Lead',
+    cls: 'VC20', group: 'VC20', n: 1
+  };
+  seed.master.push(row);
+  MS.invalidate();
+  try {
+    await MS.buildLight();
+    const agentHit = MS.search('UNIQ-TEAM-77');
+    const agent = agentHit.people.find((p) => p.kind === 'gv-agent' && p.name === 'GV Search Agent');
+    assert.ok(agent, 'GV Master UNIQUE_ID se GV agent open hona chahiye');
+    assert.equal(agent.sub, 'UNIQ-TEAM-77', 'agent ID UNIQUE_ID se hi liya gaya');
+    const byTlName = MS.search('GV Team Lead');
+    const preferredTl = MS.preferNameMatches(byTlName.people, 'GV Team Lead');
+    assert.equal(preferredTl.length, 1, 'exact TL name should select the TL profile instead of all team agents');
+    assert.equal(preferredTl[0].kind, 'gv-tl');
+    const oldTlId = MS.search('TL-C-77');
+    const tl = oldTlId.people.find((p) => p.kind === 'gv-tl' && p.name === 'GV Team Lead');
+    assert.ok(tl, 'GV Master column C TL ID bhi name/TL profile tak resolve ho');
+    assert.ok(oldTlId.ids.some((hit) => hit.kind === 'gv-tl' && hit.name === 'GV Team Lead'));
+    assert.ok(!oldTlId.people.some((p) => p.kind === 'gv-agent'), 'TL ID search agent roster nahi, TL result khole');
+    assert.ok(tl.ids.has('TL-C-77') && tl.ids.has('GV-R-77'), 'C lookup ID aur R canonical GV TL ID dono safe rahen');
+    const teams = MS.teamPeopleFor({ key: 'GV SEARCH AGENT', name: 'GV Search Agent', ff: null, gv: agent });
+    assert.equal(teams.length, 1, 'agent search ke saath linked TL report bhi attach ho');
+    assert.equal(teams[0].person.name, 'GV Team Lead');
+    assert.equal(teams[0].person.sub, 'GV-R-77', 'team profile canonical GV TL ID use kare');
+  } finally {
+    seed.master.splice(seed.master.indexOf(row), 1);
+    MS.invalidate();
+    await MS.buildLight();
+  }
 });
 
 test('masterSearch — suggestions me kind label + Enter-friendly items', async () => {

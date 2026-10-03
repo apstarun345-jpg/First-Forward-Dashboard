@@ -759,9 +759,12 @@ async function fetchUpstream(url) {
   } finally { clearTimeout(timer); }
 }
 /** Reuse the gviz proxy cache for server-rendered personal pages (and stale data if Google blips). */
-async function fetchUpstreamCached(url) {
+async function fetchUpstreamCached(url, options) {
   const hit = cache.get(url);
-  if (hit && Date.now() - hit.at < cacheMs()) return { status: hit.status || 200, body: hit.body, cached: true };
+  // Most dashboard queries use the configured (usually 10-minute) cache. Live feeds can set a
+  // shorter per-query age so a long CACHE_SECONDS value never freezes GV's "today" number.
+  const maxAgeMs = options && options.maxAgeMs !== undefined ? Math.max(0, Number(options.maxAgeMs) || 0) : cacheMs();
+  if (hit && Date.now() - hit.at < maxAgeMs) return { status: hit.status || 200, body: hit.body, cached: true };
   try {
     let job = inflight.get(url);
     if (!job) { job = fetchUpstream(url).finally(() => inflight.delete(url)); inflight.set(url, job); }
@@ -846,7 +849,7 @@ function countByDateClass(table) {
  * Isliye 3 koshish, pehli jo chale wahi: (1) seedha compare, (2) toDate(), (3) poora tab (chhota tab).
  */
 async function gvizDailyClassCounts(cfg) {
-  const { sheetId, tab, dateCol, classCol, countCol, extraWhere, from30 } = cfg;
+  const { sheetId, tab, dateCol, classCol, countCol, extraWhere, from30, cacheMaxAgeMs } = cfg;
   const select = `select ${dateCol}, ${classCol}, count(${countCol})`;
   const group = `group by ${dateCol}, ${classCol} order by ${dateCol} desc`;
   const where = (d) => [extraWhere ? `(${extraWhere})` : '', d ? `${d} >= date '${from30}'` : ''].filter(Boolean).join(' and ');
@@ -855,14 +858,20 @@ async function gvizDailyClassCounts(cfg) {
     { tq: `${select} where ${where(`toDate(${dateCol})`)} ${group} limit 500`, kind: 'toDate' },
     { tq: `${select}${extraWhere ? ` where ${extraWhere}` : ''} ${group} limit 2000`, kind: 'full-tab' }
   ];
-  let lastErr = null;
+  let lastErr = null, emptyResult = null;
   for (const attempt of attempts) {
     try {
       const params = new URLSearchParams({ id: String(sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet: tab, tq: attempt.tq });
-      const out = await fetchUpstreamCached(upstreamUrl(params));
-      return { rows: countByDateClass(parseGvizServer(out.body)), cached: !!out.cached, via: attempt.kind };
+      const out = await fetchUpstreamCached(upstreamUrl(params), cacheMaxAgeMs === undefined ? undefined : { maxAgeMs: cacheMaxAgeMs });
+      const rows = countByDateClass(parseGvizServer(out.body));
+      // Google Visualization can return a successful-but-empty result when a date column is stored
+      // as text. Treat that as a type mismatch too and try toDate(), then the bounded grouped fallback.
+      const hasRecentRows = !from30 || rows.some((row) => row.date >= from30);
+      if ((rows.length && hasRecentRows) || attempt.kind === 'full-tab') return { rows, cached: !!out.cached, stale: !!out.stale, via: attempt.kind };
+      emptyResult = { rows, cached: !!out.cached, stale: !!out.stale, via: attempt.kind };
     } catch (err) { lastErr = err; }
   }
+  if (emptyResult) return emptyResult;
   throw lastErr || new Error('gviz grouped count failed');
 }
 
@@ -872,19 +881,18 @@ async function gvizDailyClassCounts(cfg) {
  * full-tab download par depend nahi karta. Wahi 3-koshish wala pattern: seedha compare → toDate() → poora tab.
  */
 async function gvizDayDetail(cfg) {
-  const { sheetId, tab, dateCol, classCol, statusCol, typeCol, countCol, day } = cfg;
+  const { sheetId, tab, dateCol, classCol, statusCol, typeCol, countCol, day, dateMode, cacheMaxAgeMs, expectRows } = cfg;
   const select = `select ${dateCol}, ${classCol}, ${statusCol}, ${typeCol}, count(${countCol})`;
   const group = `group by ${dateCol}, ${classCol}, ${statusCol}, ${typeCol} order by ${dateCol} desc`;
-  const attempts = [
-    { tq: `${select} where ${dateCol} >= date '${day}' ${group} limit 2000`, kind: 'date' },
-    { tq: `${select} where toDate(${dateCol}) >= date '${day}' ${group} limit 2000`, kind: 'toDate' },
-    { tq: `${select} ${group} limit 3000`, kind: 'full-tab' }
-  ];
-  let lastErr = null;
+  const dateAttempt = { tq: `${select} where ${dateCol} >= date '${day}' ${group} limit 2000`, kind: 'date' };
+  const toDateAttempt = { tq: `${select} where toDate(${dateCol}) >= date '${day}' ${group} limit 2000`, kind: 'toDate' };
+  const fullAttempt = { tq: `${select} ${group} limit 3000`, kind: 'full-tab' };
+  const attempts = dateMode === 'toDate' ? [toDateAttempt, dateAttempt, fullAttempt] : [dateAttempt, toDateAttempt, fullAttempt];
+  let lastErr = null, emptyResult = null;
   for (const attempt of attempts) {
     try {
       const params = new URLSearchParams({ id: String(sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet: tab, tq: attempt.tq });
-      const out = await fetchUpstreamCached(upstreamUrl(params));
+      const out = await fetchUpstreamCached(upstreamUrl(params), cacheMaxAgeMs === undefined ? undefined : { maxAgeMs: cacheMaxAgeMs });
       const table = parseGvizServer(out.body);
       const rows = [];
       for (const row of (table && table.rows) || []) {
@@ -894,9 +902,12 @@ async function gvizDayDetail(cfg) {
         if (!n) continue;
         rows.push({ date, cls: classBucket(serverCell(row, 1)), status: serverCell(row, 2), type: serverCell(row, 3), n });
       }
-      return { rows, cached: !!out.cached, via: attempt.kind };
+      const hasExpectedDay = !expectRows || rows.some((row) => row.date === day);
+      if (hasExpectedDay || attempt.kind === 'full-tab') return { rows, cached: !!out.cached, stale: !!out.stale, via: attempt.kind };
+      emptyResult = { rows, cached: !!out.cached, stale: !!out.stale, via: attempt.kind };
     } catch (err) { lastErr = err; }
   }
+  if (emptyResult) return emptyResult;
   throw lastErr || new Error('gviz day detail failed');
 }
 
@@ -918,6 +929,9 @@ async function todayFeed(force) {
     const [y, m, d] = day.split('-').map(Number);
     const dayStart30 = new Date(Date.UTC(y, m - 1, d - 29));
     const from30 = `${dayStart30.getUTCFullYear()}-${pad2(dayStart30.getUTCMonth() + 1)}-${pad2(dayStart30.getUTCDate())}`;
+    // Live feed freshness is intentionally independent of the general gviz cache setting.
+    // A manual admin refresh bypasses both the feed snapshot and per-query cache.
+    const liveQueryCacheMs = force ? 0 : 30e3;
     const sum = (rows, filter) => rows.reduce((a, r) => a + (!filter || filter(r) ? r.n : 0), 0);
     const result = { ok: true, date: day, at: new Date().toISOString(), gv: null, ff: null };
 
@@ -926,7 +940,7 @@ async function todayFeed(force) {
       const gv = settings.gv && settings.gv.master || {};
       const tab = gv.tab || 'GV Master';
       const dateCol = gv.date || 'P', classCol = gv.cch || gv.vClass || 'G', tagCol = gv.tagId || 'I';
-      const out = await gvizDailyClassCounts({ sheetId: settings.gvSheetId, tab, dateCol, classCol, countCol: tagCol, from30 });
+      const out = await gvizDailyClassCounts({ sheetId: settings.gvSheetId, tab, dateCol, classCol, countCol: tagCol, from30, cacheMaxAgeMs: liveQueryCacheMs });
       const rows = out.rows;
       const today = rows.filter((r) => r.date === day);
       const series = rows.filter((r) => r.date >= from30).reduce((acc, r) => { acc[r.date] = (acc[r.date] || 0) + r.n; return acc; }, {});
@@ -936,7 +950,8 @@ async function todayFeed(force) {
       try {
         detail = await gvizDayDetail({
           sheetId: settings.gvSheetId, tab, dateCol, classCol,
-          statusCol: gv.status || 'N', typeCol: gv.tagType || 'U', countCol: tagCol, day
+          statusCol: gv.status || 'N', typeCol: gv.tagType || 'U', countCol: tagCol, day,
+          dateMode: out.via, cacheMaxAgeMs: liveQueryCacheMs, expectRows: today.length > 0
         });
       } catch { detail = null; }
       const dToday = detail ? detail.rows.filter((r) => r.date === day) : [];
@@ -963,7 +978,8 @@ async function todayFeed(force) {
         replacement: replaced, chassis,
         classes, expected: weekdayAvg, lastDay: prevDay ? series[prevDay] : null, lastDayDate: prevDay || '',
         series,
-        cached: !!out.cached, query: out.via, detailQuery: detail ? detail.via : null
+        cached: !!out.cached, stale: !!out.stale, query: out.via,
+        detailCached: !!(detail && detail.cached), detailStale: !!(detail && detail.stale), detailQuery: detail ? detail.via : null
       };
     } catch (err) { result.gvError = err.message; }
 
@@ -976,7 +992,7 @@ async function todayFeed(force) {
       const gvTl = String(e.gvChannelTl || 'ApnaPayment Pvt. Ltd.').replace(/'/g, '');
       // GV channel = master ID 5845036 (ya legacy: master blank + GV channel TL) — model.channelOf jaisa hi.
       const extraWhere = `not (${masterCol} = '${gvId}' or (${masterCol} is null and ${tlCol} = '${gvTl}'))`;
-      const out = await gvizDailyClassCounts({ sheetId: settings.sheetId, tab: sheet, dateCol, classCol, countCol: tagCol, extraWhere, from30 });
+      const out = await gvizDailyClassCounts({ sheetId: settings.sheetId, tab: sheet, dateCol, classCol, countCol: tagCol, extraWhere, from30, cacheMaxAgeMs: liveQueryCacheMs });
       const rows = out.rows;
       const today = rows.filter((r) => r.date === day);
       const latest = rows.reduce((acc, r) => (r.date > acc ? r.date : acc), '');
@@ -984,7 +1000,7 @@ async function todayFeed(force) {
         source: 'EIR', total: sum(today), latest, throughYesterday: latest ? latest < day : false,
         classes: today.reduce((acc, r) => { acc[r.cls] = (acc[r.cls] || 0) + r.n; return acc; }, {}),
         series: rows.reduce((acc, r) => { acc[r.date] = (acc[r.date] || 0) + r.n; return acc; }, {}),
-        cached: !!out.cached, query: out.via
+        cached: !!out.cached, stale: !!out.stale, query: out.via
       };
     } catch (err) { result.ffError = err.message; }
 

@@ -290,7 +290,7 @@ test('wiring: agentBoard.js load hota hai (index + sw) aur cache bust v68 / v76 
   assert.ok(idx.indexOf('performance.js') < idx.indexOf('agentBoard.js'), 'performance ke baad load');
   assert.ok(idx.indexOf('agentBoard.js') < idx.indexOf('masterProfile.js'), 'masterProfile se pehle load');
   assert.ok(sw.includes('./agentBoard.js?v=70'), 'sw ASSETS me agentBoard');
-  assert.match(sw, /CACHE_NAME = 'apnapayment-v77'/);
+  assert.match(sw, /CACHE_NAME = 'apnapayment-v78'/);
   assert.match(lazy, /return m \? m\[1\] : '70'/);
   assert.match(pkg, /agentBoard/);
 });

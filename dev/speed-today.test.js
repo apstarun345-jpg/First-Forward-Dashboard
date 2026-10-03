@@ -125,6 +125,9 @@ test('server: /api/today (GV Master + EIR), /api/perf diagnostics, ETag/304', as
   assert.match(src, /toDate\(\$\{dateCol\}\)/, 'text date ke liye toDate() attempt');
   assert.match(src, /kind: 'full-tab'/, 'aakhri fallback: poora chhota tab');
   assert.match(src, /todayFeedCache/, 'today feed server par cached (45s)');
+  assert.match(src, /async function fetchUpstreamCached\(url, options\)/, 'per-query cache age override hai');
+  assert.match(src, /liveQueryCacheMs = force \? 0 : 30e3/, 'GV live feed 30s se zyada stale cache use nahi karta; force bypass karta hai');
+  assert.match(src, /successful-but-empty result/, 'text-date column par empty date query toDate fallback try karti hai');
   assert.match(src, /p === '\/api\/perf'/, 'admin ke liye query timing diagnostics');
   assert.match(src, /function perfReport\(\)/, 'perfReport() slowest queries + cache hit rate deta hai');
   assert.match(src, /if-none-match/i, 'ETag revalidation (304) support');
@@ -132,6 +135,12 @@ test('server: /api/today (GV Master + EIR), /api/perf diagnostics, ETag/304', as
   const data = await read('data.js');
   assert.match(data, /todayPath: '\/api\/today'|todayPath/, 'config me today path');
   assert.match(data, /function today\(/, 'FF.data.today() client API');
+});
+
+test('Lite mode keeps Home KPI text readable after removing gradient backgrounds', async () => {
+  const css = await read('styles.css');
+  assert.match(css, /html\.ff-lite \.kpi \{[^}]*background-color:\s*#3730a3\s*!important/i, 'solid dark fallback behind white KPI text');
+  assert.match(css, /html\.ff-lite \.kpi \.dim \{[^}]*color:\s*rgba\(255,255,255,\.84\)\s*!important/i, 'muted footnote text stays legible');
 });
 
 test('app.js: auto-sync 5 min + turant sync triggers (16 heavy queries nahi)', async () => {
