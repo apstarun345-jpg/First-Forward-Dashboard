@@ -342,7 +342,73 @@ window.FF = window.FF || {};
     return ffLookupCache;
   }
   function gvPeopleLookup() {
-    if (!gvLookupCache) gvLookupCache = buildPeopleLookup(gvReport(), (r) => r.agentName, (r) => [r.agentId], (r) => r.tlName);
+    if (gvLookupCache) return gvLookupCache;
+    // GV profile/search identity is rooted in GV Master (A=UNIQUE_ID, C=TL ID, D=TL name).
+    // GV REPORT is an enrichment/cross-check, not the only source: an agent/TL can exist in
+    // GV Master before a REPORT row is populated. Merge all three sources without summing them.
+    const master = gvRows('master') || [];
+    const report = gvReport() || [];
+    const stock = gvRows('stockAgent') || [];
+    const byId = new Map(), byName = new Map(), rows = [];
+    const resolve = (r) => {
+      const id = clean(r.agentId || r.id);
+      const name = clean(r.agentName || r.name);
+      return { id, name, idKey: id ? id.toUpperCase().replace(/\\.0+$/, '') : '', nameKey: norm(name) };
+    };
+    const merge = (raw, source) => {
+      const r = { ...(raw || {}) };
+      const k = resolve(r);
+      if (!k.id && !k.name) return;
+      let e = k.id ? byId.get(k.idKey) : null;
+      if (!e && k.name) e = byName.get(k.nameKey);
+      if (!e) {
+        e = { ...r, agentId: k.id, agentName: k.name };
+        rows.push(e);
+      } else {
+        // Fill missing fields; never replace a populated report/performance value with blank master/stock data.
+        Object.keys(r).forEach((key) => {
+          const v = r[key];
+          if (e[key] === undefined || e[key] === null || e[key] === '') {
+            if (v !== undefined && v !== null && v !== '') e[key] = v;
+          }
+        });
+      }
+      if (source === 'master') {
+        if (k.id) e.agentId = k.id;
+        if (k.name) e.agentName = k.name;
+        const tlId = clean(r.tlId || r.supervisorId || r.gvTlId);
+        const tlName = clean(r.tlName);
+        if (tlId) e.tlId = tlId;
+        if (tlName) e.tlName = tlName;
+        e.supervisorId = clean(r.supervisorId) || e.supervisorId || '';
+        e.gvTlId = clean(r.gvTlId) || e.gvTlId || '';
+      }
+      if (k.id) byId.set(k.idKey, e);
+      if (k.name) byName.set(k.nameKey, e);
+    };
+    master.forEach((r) => merge(r, 'master'));
+    report.forEach((r) => merge(r, 'report'));
+    stock.forEach((r) => merge(r, 'stock'));
+    // Identity aliases: C (TL ID), R (GV TL ID), and stock/report TL IDs should all resolve to the same TL.
+    rows.forEach((r) => {
+      r.tlId = clean(r.tlId || r.supervisorId || r.gvTlId);
+      r.tlIds = [...new Set([r.tlId, r.supervisorId, r.gvTlId].map((x) => clean(x)).filter(Boolean))];
+    });
+    gvLookupCache = {
+      rows,
+      byName: new Map(rows.filter((r) => r.agentName).map((r) => [norm(r.agentName), [r]])),
+      byId: (() => {
+        const m = new Map();
+        rows.forEach((r) => r.tlIds && r.tlIds.forEach(() => {}));
+        rows.forEach((r) => { [r.agentId].concat(r.tlIds || []).filter(Boolean).forEach((id) => pushLookup(m, clean(id).toUpperCase().replace(/\\.0+$/, ''), r)); });
+        return m;
+      })(),
+      byTl: (() => {
+        const m = new Map();
+        rows.forEach((r) => { if (r.tlName) pushLookup(m, norm(r.tlName), r); });
+        return m;
+      })
+    };
     return gvLookupCache;
   }
   /** Public read-only helper for TL KPI drawers: the GV REPORT carries one repeated TL snapshot per member row. */
