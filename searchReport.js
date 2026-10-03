@@ -28,26 +28,19 @@ window.FF = window.FF || {};
   /** Same-name FF/GV merge only when a real ID links both records. */
   function identityIds(p) {
     if (!p) return [];
-    return [...new Set([p.sub, ...(p.ids || []), ...(p.alias || [])]
-      .map((v) => U.clean(v).toUpperCase().replace(/\.0+$/, '').replace(/[^A-Z0-9]/g, ''))
-      .filter((v) => v && v.length >= 4))];
+    return [...new Set([p.sub, ...(p.ids || []), ...(p.alias || [])].map((v) => U.clean(v).toUpperCase().replace(/\.0+$/, '').replace(/[^A-Z0-9]/g, '')).filter((v) => v && v.length >= 4))];
   }
   function identitiesLinked(a, b) {
     const A = new Set(identityIds(a));
     return A.size > 0 && identityIds(b).some((id) => A.has(id));
   }
-  /**
-   * A same-name GV agent and FF agent can be different people. Merge them only when their
-   * actual agent/TL identity IDs intersect; otherwise keep GV-only and FF-only groups separate.
-   */
   function groupPeople(people) {
     const groups = [];
     (people || []).forEach((p) => {
       if (!p || !MP() || !MP().supports(p)) return;
-      const name = normName(p.name);
-      if (!name) return;
+      const name = normName(p.name); if (!name) return;
       const ch = chOf(p.kind), other = ch === 'ff' ? 'gv' : 'ff';
-      let sameChannel = groups.find((g) => g.name === name && g[ch]);
+      const sameChannel = groups.find((g) => g.name === name && g[ch]);
       if (sameChannel) {
         if (isTlKind(p.kind) && !isTlKind(sameChannel[ch].kind)) sameChannel[ch] = p;
         return;
