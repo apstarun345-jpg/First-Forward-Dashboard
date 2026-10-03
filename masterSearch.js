@@ -477,6 +477,42 @@ FF.pages = FF.pages || {};
     return matches.length ? matches : list;
   }
 
+  function identityIds(p) {
+    if (!p) return [];
+    return [...new Set([p.sub, ...(p.ids || []), ...(p.alias || [])].map(normId).filter((x) => x && x.length >= 4))];
+  }
+  function identitiesLinked(a, b) {
+    const A = new Set(identityIds(a)), B = identityIds(b);
+    if (!A.size || !B.length) return false;
+    return B.some((id) => A.has(id));
+  }
+  function suppressFalseFfMatches(res) {
+    if (!res || !res.people || !res.people.length) return res;
+    const queryName = normName(res.q);
+    const ni = normId(res.q);
+    const gvPeople = res.people.filter((p) => /^gv-/.test(String(p.kind || '')) &&
+      (p.kind === 'gv-agent' || p.kind === 'gv-tl'));
+    if (!gvPeople.length) return res;
+    const exactGv = gvPeople.filter((p) => (queryName && normName(p.name) === queryName) ||
+      (ni.length >= 4 && identityIds(p).includes(ni)));
+    if (!exactGv.length) return res;
+    const keep = (p) => {
+      if (!/^ff-/.test(String(p.kind || ''))) return true;
+      const sameNameGv = exactGv.filter((g) => normName(g.name) === normName(p.name));
+      if (!sameNameGv.length) return true;
+      return sameNameGv.some((g) => identitiesLinked(g, p));
+    };
+    res.people = res.people.filter(keep);
+    res.ids = (res.ids || []).filter((v) => {
+      if (!/^ff-/.test(String(v.kind || ''))) return true;
+      const sameNameGv = exactGv.filter((g) => normName(g.name) === normName(v.name));
+      if (!sameNameGv.length) return true;
+      return sameNameGv.some((g) => identitiesLinked(g, { sub: v.id, ids: [v.id] }));
+    });
+    res.matched = res.people.length + res.ids.length + res.tags.length;
+    return res;
+  }
+
   /** Suggestions for U.suggest() — label + sub + kind chip. */
   function suggestItems(q) {
     if (!state.light) {
