@@ -188,7 +188,7 @@ window.FF = window.FF || {};
     const id = identityOf(spec);
     const ix = index();
     const tlRows = mergeLookups(lookup(ix.stock.byTlId, id.ids), lookup(ix.stock.byTlName, id.names));
-    const self = lookup(ix.stock.byAgentId, id.ids)[0] || null;
+    const self = lookup(ix.stock.byAgentId, id.ids)[0] || lookup(ix.stock.byName, id.names)[0] || lookup(ix.stock.byTlName, id.names)[0] || null;
     const members = mergeLookups(lookup(ix.stock.byTlId, id.ids), lookup(ix.stock.byTlName, id.names)).filter((r) => r !== self);
     const cls = lookup(ix.stock.classByTl, id.names);
     const split = classSplit(cls.length ? cls : tlRows);
