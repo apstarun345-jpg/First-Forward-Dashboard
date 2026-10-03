@@ -126,7 +126,7 @@ FF.pages = FF.pages || {};
   };
 
   /** Layer 1 — aggregated rows (instant, never blocks on barcode scans). */
-  const LIMITS = { lightSoftMs: 6000 };   // itni der baad jo datasets aa chuke unse index banao; baaki aate hi index me judte hain (tests chhota karte hain)
+  const LIMITS = { lightSoftMs: 1500 };   // itni der baad jo datasets aa chuke unse index banao; baaki aate hi index me judte hain (tests chhota karte hain)
   /** Sabhi promises ka intezaar — par `ms` se zyada nahi. Return: { name: { status, value|reason } } (pending wale missing). */
   function settleSoon(sources, ms) {
     const out = {};
@@ -705,7 +705,7 @@ FF.pages = FF.pages || {};
       <div class="ms-kundli-stats">
         <div><small>TL</small><b>${p.direct ? `<span class="direct-chip">🚫 ${esc(tl)}</span>` : esc(tl || '—')}</b>${row && row.tlId && !p.direct ? `<em>${esc(row.tlId)}</em>` : ''}</div>
         <div><small>Tags / barcodes</small><b>${p.bars.size ? U.fmt(p.bars.size) : U.fmt(p.n)}</b></div>
-        <div><small>Activity rows</small><b>${U.fmt(p.n)}</b></div>
+        <div><small>Issuance rows</small><b>${U.fmt(p.issuanceN || p.n)}</b></div>
         <div><small>Last allocation</small><b>${esc(p.last || '—')}</b></div>
       </div>
       ${kundliProfileStats(p)}
