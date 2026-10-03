@@ -329,6 +329,7 @@ FF.config = {
     if (!s || typeof s !== 'object') return;
     const pick = (k) => { if (s[k] !== undefined && s[k] !== null) this[k] = s[k]; };
     ['appName', 'brand', 'tagline', 'logo', 'loginImage', 'loginAnimation', 'sheetId', 'gvSheetId', 'excludeTls', 'pageSize', 'allowSignup', 'directPlaceholderTls'].forEach(pick);
+    if (s.gvClassCch) this.gvClassCch = { ...this.gvClassCch, ...s.gvClassCch, groups: { ...(this.gvClassCch && this.gvClassCch.groups), ...(s.gvClassCch.groups || {}) } };
     if (s.direct) this.direct = { ...this.direct, ...s.direct };
     if (s.theme) this.theme = { ...this.theme, ...s.theme };
     if (s.thresholds) this.thresholds = { ...this.thresholds, ...s.thresholds };
