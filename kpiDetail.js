@@ -163,7 +163,32 @@ window.FF = window.FF || {};
     if (!G || !G.issuanceRows) return [];
     return G.issuanceRows().map((r) => ({ ...r, raw: null }));
   }
-  async function issuanceRows(src) {
+  async function issuanceRows(src, spec) {
+    // GV TL / agent card aur uska click ek hi tag-level source use karein. GV Master column R
+    // (GV TL ID) se TL rows seedha chune jaate hain; EIR ke grouped totals ko unke upar add nahi karte.
+    if (src === 'gv' && spec && FF.gv) {
+      const G = FF.gv;
+      let master = G.get && G.get('master');
+      if (!Array.isArray(master) && G.need) {
+        try { master = await G.need('master', { only: true }); } catch { master = null; }
+      }
+      if (Array.isArray(master)) {
+        let scoped = null;
+        if ((spec.agent || spec.agentId) && (spec.tlId || spec.tl) && typeof G.tlIssuanceRows === 'function') {
+          const teamRows = G.tlIssuanceRows(spec.tlId, spec.tl);
+          if (Array.isArray(teamRows) && teamRows.length) {
+            const wantedIds = [spec.agentId].filter(Boolean).map((v) => String(v).toUpperCase().replace(/[.]0+$/, '').replace(/\s+/g, ''));
+            const wantedNames = [spec.agent].filter(Boolean).map((v) => String(v).toUpperCase().replace(/\s+/g, ' '));
+            scoped = teamRows.filter((r) => (wantedIds.length && wantedIds.includes(String(r.agentId || '').toUpperCase().replace(/[.]0+$/, '').replace(/\s+/g, ''))) || (!wantedIds.length && wantedNames.includes(String(r.agentName || '').toUpperCase().replace(/\s+/g, ' '))));
+          }
+        } else if ((spec.agent || spec.agentId) && typeof G.agentIssuanceRows === 'function') {
+          scoped = G.agentIssuanceRows(spec.agentId, spec.agent);
+        } else if ((spec.tl || spec.tlId) && typeof G.tlIssuanceRows === 'function') {
+          scoped = G.tlIssuanceRows(spec.tlId, spec.tl);
+        }
+        if (Array.isArray(scoped)) return scoped.map((r) => ({ ...r, raw: null }));
+      }
+    }
     let daily = FF.store.get('daily');
     if (!daily) { try { daily = await FF.store.need('daily'); } catch { daily = []; } }
     // 🟩 GV ka aaj ka data GV Master se aata hai (model/gv layer ise already splice karta hai),
@@ -291,6 +316,12 @@ window.FF = window.FF || {};
     const isTl = !!(spec.tl || spec.tlId) && !(spec.agent || spec.agentId);
     const isAgent = !!(spec.agent || spec.agentId);
     if (!isTl && !isAgent) return null;
+    // Nested agent rows from a TL's GV drawer already came from that TL's GV Master R team slice.
+    // Do not let the agent's global GV REPORT snapshot replace this parent-scoped detail total.
+    if (isAgent && (spec.tl || spec.tlId) && FF.gv && typeof FF.gv.tlIssuanceRows === 'function') {
+      const parentRows = FF.gv.tlIssuanceRows(spec.tlId, spec.tl);
+      if (Array.isArray(parentRows) && parentRows.length) return null;
+    }
     const MP = FF.masterProfile;
     if (!MP || typeof MP.quick !== 'function') return null;
     const name = (isTl ? spec.tl : spec.agent) || '';
@@ -310,19 +341,40 @@ window.FF = window.FF || {};
     const snapshots = isTl && MP.gvTlSnapshot ? MP.gvTlSnapshot(spec.tl || prof.name, spec.tlId || prof.id) : null;
     const reportSnap = snapshots && snapshots[periodKey];
     const prevSnap = periodKey === 'cur' && snapshots ? snapshots.last : null;
-    const hasSheet = (bins && bins.source === 'GV REPORT sheet') || !!(reportSnap && reportSnap.total !== null && reportSnap.total !== undefined);
-    if (!hasSheet) return null;
-    const fullVc4 = reportSnap && reportSnap.vc4 != null ? Number(reportSnap.vc4) : Number((bins && bins.VC4) ?? 0);
+    const masterTlSource = isTl && prof.issuanceSources && prof.issuanceSources[periodKey] === 'GV Master · GV TL ID';
+    const previousMasterSource = isTl && prof.issuanceSources && prof.issuanceSources.last === 'GV Master · GV TL ID';
+    const reportValues = (snapshot, key) => {
+      if (isTl && masterTlSource && key === periodKey) {
+        const totals = prof.totals || {};
+        const prefix = key === 'cur' ? 'cur' : 'last';
+        return { vc4: Number(totals[`${prefix}Vc4`]) || 0, comm: Number(totals[`${prefix}Comm`]) || 0, total: Number(totals[`${prefix}Total`]) || 0 };
+      }
+      if (isTl && key === 'last' && previousMasterSource) {
+        const totals = prof.totals || {};
+        return { vc4: Number(totals.lastVc4) || 0, comm: Number(totals.lastComm) || 0, total: Number(totals.lastTotal) || 0 };
+      }
+      if (snapshot && snapshot.total !== null && snapshot.total !== undefined) return {
+        vc4: snapshot.vc4 == null ? null : Number(snapshot.vc4),
+        comm: snapshot.comm == null ? null : Number(snapshot.comm),
+        total: Number(snapshot.total)
+      };
+      return null;
+    };
+    const currentValues = reportValues(reportSnap, periodKey);
+    const previousValues = periodKey === 'cur' ? reportValues(prevSnap, 'last') : null;
+    const hasSource = masterTlSource || (bins && bins.source === 'GV REPORT sheet') || !!currentValues;
+    if (!hasSource) return null;
+    const fullVc4 = currentValues && currentValues.vc4 != null ? Number(currentValues.vc4) : Number((bins && bins.VC4) ?? 0);
     const fullVc20 = Number((bins && bins.VC20) ?? 0);
     const fullVc5p = Number((bins && bins['VC5+']) ?? 0);
-    const fullComm = reportSnap && reportSnap.comm != null ? Number(reportSnap.comm) : Number((bins && (bins.VC20 + bins['VC5+'])) ?? (fullVc20 + fullVc5p));
-    const fullTotal = reportSnap && reportSnap.total != null ? Number(reportSnap.total) : Number((bins && bins.total) ?? (fullVc4 + fullComm));
-    const hasPrevSheet = (prevBins && prevBins.source === 'GV REPORT sheet') || !!(prevSnap && prevSnap.total !== null && prevSnap.total !== undefined);
-    const pFullVc4 = hasPrevSheet ? (prevSnap && prevSnap.vc4 != null ? Number(prevSnap.vc4) : Number((prevBins && prevBins.VC4) ?? 0)) : null;
-    const pFullVc20 = hasPrevSheet ? Number((prevBins && prevBins.VC20) ?? 0) : null;
-    const pFullVc5p = hasPrevSheet ? Number((prevBins && prevBins['VC5+']) ?? 0) : null;
-    const pFullComm = hasPrevSheet ? (prevSnap && prevSnap.comm != null ? Number(prevSnap.comm) : Number((prevBins && (prevBins.VC20 + prevBins['VC5+'])) ?? 0)) : null;
-    const pFullTotal = hasPrevSheet ? (prevSnap && prevSnap.total != null ? Number(prevSnap.total) : Number((prevBins && prevBins.total) ?? 0)) : null;
+    const fullComm = currentValues && currentValues.comm != null ? Number(currentValues.comm) : Number((bins && (bins.VC20 + bins['VC5+'])) ?? (fullVc20 + fullVc5p));
+    const fullTotal = currentValues && currentValues.total != null ? Number(currentValues.total) : Number((bins && bins.total) ?? (fullVc4 + fullComm));
+    const hasPrevSource = !!previousValues || !!(prevBins && prevBins.source);
+    const pFullVc4 = hasPrevSource ? (previousValues && previousValues.vc4 != null ? Number(previousValues.vc4) : Number((prevBins && prevBins.VC4) ?? 0)) : null;
+    const pFullVc20 = hasPrevSource ? Number((prevBins && prevBins.VC20) ?? 0) : null;
+    const pFullVc5p = hasPrevSource ? Number((prevBins && prevBins['VC5+']) ?? 0) : null;
+    const pFullComm = hasPrevSource ? (previousValues && previousValues.comm != null ? Number(previousValues.comm) : Number((prevBins && (prevBins.VC20 + prevBins['VC5+'])) ?? 0)) : null;
+    const pFullTotal = hasPrevSource ? (previousValues && previousValues.total != null ? Number(previousValues.total) : Number((prevBins && prevBins.total) ?? 0)) : null;
 
     const hasAttrFilter = !!(spec.type || spec.vrnBucket || spec.tagId || spec.vrn || ['repl', 'chassis', 'wrong'].includes(spec.f));
     const clsFilter = spec.cls ? classKey(spec.cls) : '';
@@ -361,7 +413,7 @@ window.FF = window.FF || {};
       fullVc4, fullVc20, fullVc5p, fullComm, fullTotal,
       pFullVc4, pFullVc20, pFullVc5p, pFullComm, pFullTotal,
       headlineTotal, headlineVc4, headlineComm, prevTotal, filterKind,
-      reportSnap, members
+      masterTlSource, reportSnap, members
     };
   }
   function applySheetBreakdowns(sheetCtx, byChannel, byGroup, byClass, ledgerTot, displayTot) {
@@ -390,7 +442,7 @@ window.FF = window.FF || {};
     for (const [k, v] of byGroup.entries()) byClass.set(k, v);
   }
   async function issuanceDetail(spec) {
-    const all = await issuanceRows(spec.src);
+    const all = await issuanceRows(spec.src, spec);
     const p = period(spec, all);
     const pp = previousPeriod(p);
     const filt = filterOf(spec.f);
@@ -422,7 +474,14 @@ window.FF = window.FF || {};
         .filter((m) => m.fullTot > 0)
         .map((m) => `${esc(m.name)}${m.isSelf ? ' (TL own)' : ''} <b>${U.fmt(m.fullTot)}</b>`)
         .join(' + ');
-      reconciliationNote = `<div class="kd-reconciliation"><b>GV REPORT ↔ tag-ledger reconciliation</b><span>GV REPORT TL snapshot: <b>${U.fmt(reportTotal)}</b> (VC4 <b>${U.fmt(sheetCtx.fullVc4)}</b> · Commercial <b>${U.fmt(sheetCtx.fullComm)}</b>) · GV Master / EIR detail: <b>${U.fmt(ledgerTot)}</b> · Difference: <b>${difference > 0 ? '+' : ''}${U.fmt(difference)}</b>.</span><small>${memberBreakdown ? `GV REPORT team breakdown: ${memberBreakdown}. ` : ''}${difference ? 'The headline TL card uses the dedicated GV REPORT TL value; class and tag details show the live issuance ledger. A refresh or source-coverage gap can explain the difference.' : 'TL snapshot and tag-level detail currently reconcile.'}</small></div>`;
+      if (sheetCtx.masterTlSource) {
+        const snapshot = sheetCtx.reportSnap;
+        const reportComparison = snapshot && snapshot.total !== null && snapshot.total !== undefined
+          ? `GV REPORT cross-check: <b>${U.fmt(snapshot.total)}</b> · Difference vs GV Master: <b>${difference > 0 ? '+' : ''}${U.fmt(snapshot.total - ledgerTot)}</b>. ` : '';
+        reconciliationNote = `<div class="kd-reconciliation"><b>GV Master TL-ID calculation · no duplicate EIR add</b><span>GV Master <b>GV TL ID column (R)</b>: <b>${U.fmt(reportTotal)}</b> (VC4 <b>${U.fmt(sheetCtx.fullVc4)}</b> · Commercial <b>${U.fmt(sheetCtx.fullComm)}</b>) · clicked tag rows: <b>${U.fmt(ledgerTot)}</b>.</span><small>${reportComparison}${memberBreakdown ? `TL team rows: ${memberBreakdown}. ` : ''}Team match = GV Master GV TL ID ${esc(spec.tlId || sheetCtx.prof.id || '—')}; grouped EIR totals ko dobara add nahi kiya gaya, isliye headline aur click same source se hain.</small></div>`;
+      } else {
+        reconciliationNote = `<div class="kd-reconciliation"><b>GV REPORT ↔ tag-ledger reconciliation</b><span>GV REPORT TL snapshot: <b>${U.fmt(reportTotal)}</b> (VC4 <b>${U.fmt(sheetCtx.fullVc4)}</b> · Commercial <b>${U.fmt(sheetCtx.fullComm)}</b>) · GV Master / EIR detail: <b>${U.fmt(ledgerTot)}</b> · Difference: <b>${difference > 0 ? '+' : ''}${U.fmt(difference)}</b>.</span><small>${memberBreakdown ? `GV REPORT team breakdown: ${memberBreakdown}. ` : ''}${difference ? 'The headline TL card uses the dedicated GV REPORT TL value; class and tag details show the live issuance ledger. A refresh or source-coverage gap can explain the difference.' : 'TL snapshot and tag-level detail currently reconcile.'}</small></div>`;
+      }
     } else if (spec.src === 'gv' && spec.tl && !filt && FF.masterProfile && FF.masterProfile.gvTlSnapshot) {
       const ym = p.from.slice(0, 7), nowYm = U.ymKey(new Date());
       const snapshots = FF.masterProfile.gvTlSnapshot(spec.tl, spec.tlId);
@@ -545,7 +604,7 @@ window.FF = window.FF || {};
     const name = spec.agent;
     const src = spec.src === 'ff' || spec.src === 'gv' ? spec.src : 'both';
     const wanted = [spec.agent, spec.agentId].map(personKey).filter(Boolean);
-    const all = (await issuanceRows(src)).filter((r) => {
+    const all = (await issuanceRows(src, spec)).filter((r) => {
       if (!wanted.length || ![r.agentName, r.agentId].map(personKey).some((key) => wanted.includes(key))) return false;
       return rowMatchesSpec(r, spec);
     });
@@ -614,8 +673,16 @@ window.FF = window.FF || {};
     if (!G || typeof G.rows !== 'function') return [];
     const filt = filterOf(spec.f);
     const wanted = [spec.agent, spec.agentId].map(personKey).filter(Boolean);
+    let sourceRows = G.rows();
+    if ((spec.tlId || spec.tl) && typeof G.tlIssuanceRows === 'function') {
+      const teamRows = G.tlIssuanceRows(spec.tlId, spec.tl);
+      sourceRows = Array.isArray(teamRows) ? teamRows : [];
+    } else if ((spec.agentId || spec.agent) && typeof G.agentIssuanceRows === 'function') {
+      const agentRows = G.agentIssuanceRows(spec.agentId, spec.agent);
+      if (Array.isArray(agentRows)) sourceRows = agentRows;
+    }
     const out = [];
-    for (const r of G.rows()) {
+    for (const r of sourceRows) {
       const key = r.date ? U.dateKey(r.date) : '';
       if (!key || key < p.from || key > p.to) continue;
       const type = /replacement/i.test(r.status || '') ? 'REPLACEMENT' : 'ISSUANCE';
@@ -633,6 +700,13 @@ window.FF = window.FF || {};
     return out;
   }
 
+  function gvMasterScopeAvailable(spec) {
+    const G = FF.gv;
+    if (!G || typeof G.get !== 'function' || !Array.isArray(G.get('master'))) return false;
+    if ((spec.tlId || spec.tl) && typeof G.tlIssuanceRows === 'function') return Array.isArray(G.tlIssuanceRows(spec.tlId, spec.tl));
+    if ((spec.agentId || spec.agent) && typeof G.agentIssuanceRows === 'function') return Array.isArray(G.agentIssuanceRows(spec.agentId, spec.agent));
+    return true;
+  }
   async function loadRaw() {
     const spec = state.spec, p = state.period;
     const out = [];
@@ -640,7 +714,7 @@ window.FF = window.FF || {};
     const wantFf = spec.src === 'ff' || spec.src === 'both';
     // 🟩 GV side — GV Master tab se (live). Master load ho chuka hai to Google par dobara query nahi.
     const gvRows = wantGv ? gvMasterRawRows(spec, p) : [];
-    const gvFromMaster = !!(FF.gv && typeof FF.gv.get === 'function' && Array.isArray(FF.gv.get('master')));
+    const gvFromMaster = wantGv && gvMasterScopeAvailable(spec);
     out.push(...gvRows);
     // 🟦 FF side (aur GV ka fallback jab GV Master load na hua ho) — EIR tab se.
     const needsEir = wantFf || (wantGv && !gvFromMaster);

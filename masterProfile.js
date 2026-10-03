@@ -788,19 +788,20 @@ window.FF = window.FF || {};
     }
     return pickRows(rows, [idx.byName.get(nameKey), id ? idx.byId.get(id) : undefined]);
   }
-  function applyExactGvAgentMonths(agentRows, issuanceRows, curYm, lastYm) {
+  function applyExactGvAgentMonths(agentRows, issuanceRows, curYm, lastYm, preferLedger = false) {
     const curExists = !!exactGvMonth(issuanceRows, curYm);
     const lastExists = !!exactGvMonth(issuanceRows, lastYm);
-    if (!curExists && !lastExists) return;
+    if (!preferLedger && !curExists && !lastExists) return;
     agentRows.forEach((agent) => {
       const issued = issuanceRows.filter((r) => sameGvAgent(r, agent));
-      // 📑 Sheet-first: GV REPORT ki row me wo month bhara hua hai to sheet hi final hai (sheet ke
-      // numbers TL 360 / drawer me dikhte hain). Ledger sirf us cell ko bharta hai jo sheet me khaali hai.
-      if (curExists && agent.curAvailable !== true) {
+      // GV TL profile me GV Master ka GV TL ID (R) exact source hai; us source ke available
+      // period totals member ke REPORT snapshots ko bhi replace karte hain, warna row/drill alag honge.
+      // Other GV views me existing sheet-first rule barkarar: filled REPORT cells win.
+      if (curExists && (preferLedger || agent.curAvailable !== true)) {
         const x = exactGvMonth(issued, curYm) || { vc4: 0, comm: 0, total: 0 };
         Object.assign(agent, { curVc4: x.vc4, curComm: x.comm, curTotal: x.total });
       }
-      if (lastExists && agent.lastAvailable !== true) {
+      if (lastExists && (preferLedger || agent.lastAvailable !== true)) {
         const x = exactGvMonth(issued, lastYm) || { vc4: 0, comm: 0, total: 0 };
         Object.assign(agent, { lastVc4: x.vc4, lastComm: x.comm, lastTotal: x.total });
       }
@@ -1083,10 +1084,12 @@ window.FF = window.FF || {};
       tlReports = allReports.filter((r) => clean(r.tlId || r.supervisorId).toUpperCase() === wantId);
     }
     const reportTeam = tlReports.filter((r) => !safeCall(() => FF.config.isDirectAgent(r, 'gv'), false));
-    const tlId = (reportTeam[0] && reportTeam[0].tlId) || (tlReports[0] && tlReports[0].tlId) || p.sub || '';
+    const reportTlId = (reportTeam[0] && reportTeam[0].tlId) || (tlReports[0] && tlReports[0].tlId) || p.sub || '';
     const tlNameCanon = (reportTeam[0] && reportTeam[0].tlName) || (tlReports[0] && tlReports[0].tlName) || p.name || '';
+    const stockTlId = reportTlId;
+    const tlId = safeCall(() => FF.gv && FF.gv.masterTlIdentity ? FF.gv.masterTlIdentity(reportTlId, tlNameCanon) : '', '') || reportTlId;
     const nCanon = norm(tlNameCanon);
-    const isSelfReport = (r) => (nCanon && norm(r.agentName) === nCanon) || (!!tlId && clean(r.agentId).toUpperCase() === clean(tlId).toUpperCase() && (!nCanon || norm(r.tlName) === nCanon));
+    const isSelfReport = (r) => (nCanon && norm(r.agentName) === nCanon) || (!!reportTlId && clean(r.agentId).toUpperCase() === clean(reportTlId).toUpperCase() && (!nCanon || norm(r.tlName) === nCanon));
     // Keep the TL's own self-supervised GV REPORT row long enough to separate its issuance from the
     // member list. It is not a direct/no-TL agent: GV REPORT TL snapshots include this row's work.
     const list = tlReports.filter((r) => !safeCall(() => FF.config.isDirectAgent(r, 'gv'), false) || isSelfReport(r)).map((r) => ({ ...r }));
@@ -1096,7 +1099,7 @@ window.FF = window.FF || {};
     const reportSnapshots = reportedGvTlSnapshots(list);
     const sumK = (k) => U.sum(list, (r) => num(r[k]));
     const avgVc4 = U.runRate(sumK('curVc4'), 'gv'), avgComm = U.runRate(sumK('curComm'), 'gv');
-    const stockComposition = tlStockComposition('gv', p.name, tlId, allReports, gvRows('stockAgent'), gvRows('stockAgentClass'));
+    const stockComposition = tlStockComposition('gv', p.name, stockTlId, allReports, gvRows('stockAgent'), gvRows('stockAgentClass'));
     const stock = stockComposition.stock;
     const agentRow = (r, isSelf) => {
       const av = gvDaily(r, r.curVc4), avc = gvDaily(r, r.curComm);
@@ -1119,22 +1122,41 @@ window.FF = window.FF || {};
     out.priority = rowsA.some((r) => r.priority === 'High') ? 'High' : rowsA.some((r) => r.priority === 'Medium') ? 'Medium' : rowsA.length ? 'Low' : '';
     const globalCurYm = U.ymKey(new Date());
     const globalLastYm = U.prevMonthKey(globalCurYm);
-    const classLedger = gvIssuanceRows();
-    const classTeamRows = gvTeamRows(classLedger, list);
+    // GV Master column R (GV TL ID) is the canonical TL team key. Profile and its KPI drill
+    // consume this same tagged row set; the broad EIR+Master rollup is fallback only.
+    const masterTeamIssuance = safeCall(() => FF.gv && FF.gv.tlIssuanceRows ? FF.gv.tlIssuanceRows(tlId, tlNameCanon) : null, null);
+    const hasMasterTlIdRows = Array.isArray(masterTeamIssuance) && masterTeamIssuance.length > 0;
+    const classLedger = hasMasterTlIdRows ? masterTeamIssuance : gvIssuanceRows();
+    const classTeamRows = hasMasterTlIdRows ? masterTeamIssuance : gvTeamRows(classLedger, list);
     out.months = { cur: globalCurYm, last: globalLastYm };
     out.classBins = classBinsFromRows(classTeamRows, globalCurYm, globalLastYm);
+    const groupBinsWithTlMaster = () => {
+      const fallback = gvGroupBins(reportSnapshots, out.classBins, stockComposition, { cur: tlSheetSplit(list, reportSnapshots.cur, 'cur') });
+      if (!hasMasterTlIdRows) return fallback;
+      const fromMaster = (period) => {
+        const b = (out.classBins && out.classBins[period]) || blankIssueBins();
+        const values = { VC4: num(b.VC4), VC20: num(b.VC20), 'VC5+': num(b['VC5+']), total: num(b.total) };
+        const snap = reportSnapshots[period];
+        const reportTotal = snap && snap.total !== null && snap.total !== undefined
+          ? { vc4: snap.vc4, comm: snap.comm, total: snap.total } : null;
+        return {
+          ...values, comm: values.VC20 + values['VC5+'], source: 'GV Master · GV TL ID', mix: 'GV TL ID',
+          sheet: reportTotal, ledger: values
+        };
+      };
+      return { last: fromMaster('last') || fallback.last, cur: fromMaster('cur') || fallback.cur, stock: fallback.stock };
+    };
     out.tlReportSnapshot = reportSnapshots;
     out.issuanceSources = {
-      cur: reportSnapshots.cur ? 'GV REPORT · TL Current Month Issuance' : 'GV Master / EIR',
-      last: reportSnapshots.last ? 'GV REPORT · TL Last Month Issued' : 'GV Master / EIR',
-      classes: 'GV Master / EIR', stock: 'GV REPORT TL stock snapshot / Tag Assignment'
+      cur: 'GV Master · GV TL ID', last: 'GV Master · GV TL ID',
+      classes: hasMasterTlIdRows ? 'GV Master · GV TL ID' : 'GV Master / EIR', stock: 'GV REPORT TL stock snapshot / Tag Assignment'
     };
     const agentNames = new Set(list.map((r) => norm(r.agentName)));
     const agentIds = new Set(list.map((r) => clean(r.agentId).toUpperCase()).filter(Boolean));
-    const exactTeamIssuance = gvTeamRows(gvCanonicalIssuanceRows(), list);
-    // Canonical EIR totals feed both the TL roll-up and each listed agent row. When a month has
-    // exact team issuance data, absent agents are explicitly zeroed so their sum stays exact.
-    applyExactGvAgentMonths(list, exactTeamIssuance, globalCurYm, globalLastYm);
+    const exactTeamIssuance = hasMasterTlIdRows ? masterTeamIssuance : gvTeamRows(gvCanonicalIssuanceRows(), list);
+    // Count each selected GV Master tag once; synchronize member rows as well as TL cards.
+    // If GV Master has no team rows, preserve the previous GV REPORT / EIR fallback behavior.
+    applyExactGvAgentMonths(list, exactTeamIssuance, globalCurYm, globalLastYm, hasMasterTlIdRows);
     list.forEach((agent) => {
       const row = rowsA.find((candidate) => sameGvAgent(candidate, agent)) || (selfA && sameGvAgent(selfA, agent) ? selfA : null);
       if (!row) return;
@@ -1157,15 +1179,18 @@ window.FF = window.FF || {};
     });
     const exactCur = exactGvMonth(exactTeamIssuance, globalCurYm);
     const exactLast = exactGvMonth(exactTeamIssuance, globalLastYm);
-    if (exactCur) Object.assign(out.totals, { curVc4: exactCur.vc4, curComm: exactCur.comm, curTotal: exactCur.total });
-    if (exactLast) Object.assign(out.totals, { lastVc4: exactLast.vc4, lastComm: exactLast.comm, lastTotal: exactLast.total });
-    // GV REPORT stores the TL-level figures explicitly in AQ:AV on every team row. Prefer one
-    // de-duplicated REPORT snapshot for TL headline totals; GV Master / EIR remains the class/tag
-    // detail source (and the fallback when a REPORT period is blank).
-    applyReportedTlSnapshot(out.totals, reportSnapshots.cur, 'cur');
-    applyReportedTlSnapshot(out.totals, reportSnapshots.last, 'last');
-    out.issuanceSources.cur = reportSnapshots.cur ? 'GV REPORT · TL Current Month Issuance' : exactCur ? 'GV Master / EIR' : 'GV REPORT agent rows';
-    out.issuanceSources.last = reportSnapshots.last ? 'GV REPORT · TL Last Month Issued' : exactLast ? 'GV Master / EIR' : 'GV REPORT agent rows';
+    const masterCur = hasMasterTlIdRows ? (exactCur || { vc4: 0, comm: 0, total: 0 }) : null;
+    const masterLast = hasMasterTlIdRows ? (exactLast || { vc4: 0, comm: 0, total: 0 }) : null;
+    const currentTotal = masterCur || exactCur;
+    const lastTotal = masterLast || exactLast;
+    if (currentTotal) Object.assign(out.totals, { curVc4: currentTotal.vc4, curComm: currentTotal.comm, curTotal: currentTotal.total });
+    if (lastTotal) Object.assign(out.totals, { lastVc4: lastTotal.vc4, lastComm: lastTotal.comm, lastTotal: lastTotal.total });
+    // GV TL totals and class/tag rows now share the exact GV Master GV TL ID team selection.
+    // GV REPORT AQ:AV remains the fallback only when Master has no rows for that period.
+    if (!masterCur) applyReportedTlSnapshot(out.totals, reportSnapshots.cur, 'cur');
+    if (!masterLast) applyReportedTlSnapshot(out.totals, reportSnapshots.last, 'last');
+    out.issuanceSources.cur = masterCur ? 'GV Master · GV TL ID' : reportSnapshots.cur ? 'GV REPORT · TL Current Month Issuance' : exactCur ? 'GV Master / EIR' : 'GV REPORT agent rows';
+    out.issuanceSources.last = masterLast ? 'GV Master · GV TL ID' : reportSnapshots.last ? 'GV REPORT · TL Last Month Issued' : exactLast ? 'GV Master / EIR' : 'GV REPORT agent rows';
     // Rebuild TL run-rates/dispatch from the corrected issuance rows as well.
     out.dispatch.avgVc4 = U.runRate(out.totals.curVc4, 'gv');
     out.dispatch.avgComm = U.runRate(out.totals.curComm, 'gv');
@@ -1180,21 +1205,24 @@ window.FF = window.FF || {};
     out.dispatch.sumAgentCommGross = U.sum(rowsA, (r) => r.sugCommGross);
     // 📈 GV TL growth — GV sheet TL-level value nahi deta, isliye agents ke totals se.
     attachGrowth(out, {}, globalCurYm);
-    out.groupBins = gvGroupBins(reportSnapshots, out.classBins, stockComposition, { cur: tlSheetSplit(list, reportSnapshots.cur, 'cur') });
+    out.groupBins = groupBinsWithTlMaster();
     if (light) return out;
-    const master = gvClassRows((m) => agentNames.has(norm(m.agentName)) || (m.agentId && agentIds.has(clean(m.agentId).toUpperCase())));
+    const master = hasMasterTlIdRows
+      ? masterTeamIssuance
+      : gvClassRows((m) => agentNames.has(norm(m.agentName)) || (m.agentId && agentIds.has(clean(m.agentId).toUpperCase())));
     const curYm = globalCurYm, lastYm = globalLastYm;
     out.classBins = classBinsFromRows(master, curYm, lastYm);
     const stockRows = stockComposition.classRows;
     out.classes = classTable(master, stockRows, curYm, lastYm);
     if (!out.classes.length) out.classes = [{ cls: 'VC4', cur: out.totals.curVc4, last: out.totals.lastVc4, stock: stock.vc4 }, { cls: 'Commercial', cur: out.totals.curComm, last: out.totals.lastComm, stock: stock.comm }];
-    // Keep the GV REPORT TL snapshots as the headline total; detailed classes stay on the tag ledger.
-    if (exactCur && !reportSnapshots.cur) Object.assign(out.totals, { curVc4: exactCur.vc4, curComm: exactCur.comm, curTotal: exactCur.total });
-    if (exactLast && !reportSnapshots.last) Object.assign(out.totals, { lastVc4: exactLast.vc4, lastComm: exactLast.comm, lastTotal: exactLast.total });
-    // When GV REPORT supplies a TL snapshot, do not pad tag-level class rows to force a false match.
+    // Preserve the legacy report fallback only if it had no TL snapshot; a matched GV Master R team
+    // remains authoritative regardless of whether GV REPORT also has repeated snapshots.
+    if (!hasMasterTlIdRows && exactCur && !reportSnapshots.cur) Object.assign(out.totals, { curVc4: exactCur.vc4, curComm: exactCur.comm, curTotal: exactCur.total });
+    if (!hasMasterTlIdRows && exactLast && !reportSnapshots.last) Object.assign(out.totals, { lastVc4: exactLast.vc4, lastComm: exactLast.comm, lastTotal: exactLast.total });
+    // With GV Master GV TL ID rows, the tag-level class rows and headline intentionally share a source.
     // The search board and drill both display the ledger mix separately and expose any difference.
     if (!reportSnapshots.cur && !reportSnapshots.last) out.classes = enrichClassesWithTotals(out.classes, out.totals, stock);
-    out.groupBins = gvGroupBins(reportSnapshots, out.classBins, stockComposition, { cur: tlSheetSplit(list, reportSnapshots.cur, 'cur') });
+    out.groupBins = groupBinsWithTlMaster();
     out.trend = trendOf(master, () => true, (m) => m.ym);
     return out;
   }
@@ -1361,7 +1389,9 @@ window.FF = window.FF || {};
     const issSpec = (a, which, group) => {
       const who = `agent=${encodeURIComponent(a.name)}${a.id ? `&agentId=${encodeURIComponent(a.id)}` : ''}`;
       const base = which === 'cur' ? `src=${pr.ch}&scope=mtd&ym=${encodeURIComponent(m.cur || '')}` : `src=${pr.ch}&scope=month&ym=${encodeURIComponent(m.last || '')}`;
-      return `${base}&${who}${group ? `&group=${group}` : ''}`;
+      const parentTl = pr.ch === 'gv' && /-tl$/.test(pr.kind || '')
+        ? `&tl=${encodeURIComponent(pr.name || '')}&tlId=${encodeURIComponent(pr.id || '')}` : '';
+      return `${base}${parentTl}&${who}${group ? `&group=${group}` : ''}`;
     };
     const rowHtml = (a) => {
       const spec = `src=${pr.ch}&scope=stock&agent=${encodeURIComponent(a.name)}${a.id ? `&agentId=${encodeURIComponent(a.id)}` : ''}`;
@@ -1408,15 +1438,15 @@ window.FF = window.FF || {};
   function reconLine(bins) {
     return ['last', 'cur'].map((period) => {
       const b = bins && bins[period];
-      if (!b || !b.ledger || !b.sheet || !num(b.ledger.total)) return '';
+      if (!b || !b.ledger || !b.sheet) return '';
       const delta = num(b.ledger.total) - num(b.sheet.total);
       if (!delta) return '';
       return `${period === 'cur' ? 'Current' : 'Last'}: sheet <b>${fmt(b.sheet.total)}</b> vs tag ledger <b>${fmt(b.ledger.total)}</b> (Δ ${delta > 0 ? '+' : ''}${fmt(delta)})`;
     }).filter(Boolean).join(' · ');
   }
   /** 🎯 VC4 · VC20 · VC5+ — last month, current month aur stock ek hi table me, har cell clickable.
-   *  GV me VC4 + NVC4 sheet (GV REPORT) se aate hain aur VC20/VC5+ ka batwara tag-ledger mix se —
-   *  isliye neeche `mix` note rehta hai (koi number chhupaya nahi jata). */
+   *  Source bins `groupBinsFor()` se aate hain: GV TL me matched GV Master GV TL ID rows, otherwise
+   *  legacy GV REPORT snapshot + tag mix; the source/reconciliation note names the path explicitly. */
   function groupTableHtml(pr, specs) {
     if (!pr) return '';
     const bins = groupBinsFor(pr);
@@ -1450,11 +1480,14 @@ window.FF = window.FF || {};
       const b = bins[period];
       if (!b) return '';
       if (b.source === 'GV REPORT sheet') return b.mix === 'ledger-mix' ? 'GV REPORT sheet (VC4 + NVC4) · VC20/VC5+ ka batwara tag-ledger mix se' : 'GV REPORT sheet';
-      return 'tag ledger (EIR / GV Master)';
+      if (b.source === 'GV Master · GV TL ID') return 'GV Master · GV TL ID (column R)';
+      return b.source || 'tag ledger (EIR / GV Master)';
     };
     const notes = reconLine(bins);
+    const usesTlMasterId = /-tl$/.test(pr.kind || '') && ['cur', 'last'].some((period) => bins[period] && bins[period].source === 'GV Master · GV TL ID');
+    const sourceNote = usesTlMasterId ? ' TL issuance aur uske clicks GV Master ke GV TL ID (column R) se grouped hain; EIR aggregate is total me dobara nahi joda jata.' : '';
     return `<div class="table-wrap"><table class="tbl compact mp-group-tbl"><thead><tr><th>Class group</th><th class="num">${esc(monthLabel(m.last) || 'Last month')}</th><th class="num">${esc(monthLabel(m.cur) || 'This month')}</th><th class="num">Stock</th></tr></thead><tbody>${rows}</tbody></table></div>
-      <p class="dim small">Source — Last: ${src('last') || '—'} · Current: ${src('cur') || '—'} · Stock: Tag Assignment / StockDataa.${notes ? ` <span class="mp-recon">${notes}</span>` : ''}</p>`;
+      <p class="dim small">Source — Last: ${src('last') || '—'} · Current: ${src('cur') || '—'} · Stock: Tag Assignment / StockDataa.${sourceNote}${notes ? ` <span class="mp-recon">${notes}</span>` : ''}</p>`;
   }
 
   /** 🆔 TL ID ke saath stock — TL apna + har agent alag-alag, sab clickable (TL ID hamesha sath).
@@ -1518,10 +1551,11 @@ window.FF = window.FF || {};
     const g = groupSummary(cls);
     const noData = !pr.found ? `<div class="ms-empty small"><b>REPORT me is ${isTl ? 'TL' : 'agent'} ki row nahi mili</b><p class="dim">Performance / GV REPORT tab load hone ke baad poori profile aayegi (naam spelling bhi match honi chahiye).</p></div>` : '';
     const scopeParam = isTl ? `tl=${encodeURIComponent(pr.name)}` : `agent=${encodeURIComponent(pr.name)}${pr.id ? `&agentId=${encodeURIComponent(pr.id)}` : ''}`;
+    const masterTlParam = isTl && pr.ch === 'gv' && pr.id ? `&tlId=${encodeURIComponent(pr.id)}` : '';
     const stockSpec = `src=${pr.ch}&scope=stock&${scopeParam}`;
     const tlStockSpec = !isTl && pr.tl && pr.tl.name ? `src=${pr.ch}&scope=stock&tl=${encodeURIComponent(pr.tl.name)}` : '';
-    const curSpec = `src=${pr.ch}&scope=mtd&ym=${encodeURIComponent(m.cur || '')}&${scopeParam}`;
-    const lastSpec = `src=${pr.ch}&scope=month&ym=${encodeURIComponent(m.last || '')}&${scopeParam}`;
+    const curSpec = `src=${pr.ch}&scope=mtd&ym=${encodeURIComponent(m.cur || '')}&${scopeParam}${masterTlParam}`;
+    const lastSpec = `src=${pr.ch}&scope=month&ym=${encodeURIComponent(m.last || '')}&${scopeParam}${masterTlParam}`;
     // v3.40 — har KPI/cell ki apni detail: card ka number == drawer ka number (`self=0` se TL ki apni row
     // agents ki list me se bahar rehti hai, isliye "Agents 2" par click 2 agents hi dikhayega).
     const peopleSpec = `src=${pr.ch}&scope=people&${isTl ? `tl=${encodeURIComponent(pr.name)}&self=0&sort=stock` : `agent=${encodeURIComponent(pr.name)}`}`;
@@ -1559,21 +1593,28 @@ window.FF = window.FF || {};
     // v3.44 — VC4 · VC20 · VC5+ teeno alag rows me (GV me sheet-first, FF me tag-ledger): har cell
     // apni detail kholta hai, aur sheet vs ledger ka farq neeche note me saaf likha rehta hai.
     const summary = groupTableHtml(pr, { cur: curSpec, last: lastSpec, stock: stockSpec });
-    // 🧾 Class-wise rows ka source tag-ledger hai (GV REPORT me sirf VC4 + NVC4 hota hai), isliye
-    // footer me SHEET ka total dikhta hai aur neeche ledger ka jod alag likha rehta hai — warna sheet
-    // me 332 aur ledger me 440 hone par drawer me do alag total dikhte the (user ka sawaal).
+    // 🧾 Class-table footer follows the selected period source: GV TL Master R when matched,
+    // otherwise the existing GV REPORT/EIR fallback. Never show a headline total from one source
+    // beside a contradictory tag sum from another without labeling the source/reconciliation.
     const groupBins = groupBinsFor(pr) || {};
-    const sheetPeriod = (period) => (groupBins[period] && groupBins[period].source === 'GV REPORT sheet' ? num(groupBins[period].total) : null);
+    const sourceTotal = (period) => {
+      const source = groupBins[period] && groupBins[period].source;
+      return source === 'GV REPORT sheet' || source === 'GV Master · GV TL ID' ? num(groupBins[period].total) : null;
+    };
     const footOf = (period) => {
-      const sheet = sheetPeriod(period);
-      return { value: sheet === null ? num(period === 'cur' ? g.total.cur : g.total.last) : sheet, fromSheet: sheet !== null };
+      const sourced = sourceTotal(period);
+      return { value: sourced === null ? num(period === 'cur' ? g.total.cur : g.total.last) : sourced,
+        fromSheet: groupBins[period] && groupBins[period].source === 'GV REPORT sheet',
+        fromTlMaster: groupBins[period] && groupBins[period].source === 'GV Master · GV TL ID' };
     };
     const footLast = footOf('last'), footCur = footOf('cur');
+    const footSourceLabel = (footLast.fromTlMaster || footCur.fromTlMaster) ? ' <small class="dim">(GV Master · TL ID)</small>'
+      : (footLast.fromSheet || footCur.fromSheet) ? ' <small class="dim">(sheet)</small>' : '';
     const clsRecon = reconLine(groupBins);
-    const clsNote = clsRecon ? `<p class="dim small">📑 Class rows tag-ledger (EIR / GV Master) se aate hain — GV REPORT me sirf VC4 + NVC4 hota hai. Upar <b>Issuance summary</b> me sheet ka total final hai. <span class="mp-recon">${clsRecon}</span></p>` : '';
+    const clsNote = clsRecon ? `<p class="dim small">📑 Class rows tag-ledger (EIR / GV Master) se aate hain — GV REPORT me sirf VC4 + NVC4 hota hai. Upar <b>Issuance summary</b> me source ke hisaab se total final hai. <span class="mp-recon">${clsRecon}</span></p>` : '';
     const clsTable = cls.length ? `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Class</th><th class="num">${esc(monthLabel(m.last) || 'Last month')}</th><th class="num">${esc(monthLabel(m.cur) || 'This month')}</th><th class="num">Growth</th><th class="num">Stock</th></tr></thead><tbody>
       ${cls.map((r) => `<tr class="clickable" data-kpi="${esc(`${r.cur > 0 ? curSpec : lastSpec}&cls=${encodeURIComponent(r.cls)}`)}"><td><b>${esc(r.cls)}</b></td><td class="num">${fmt(r.last)}</td><td class="num">${fmt(r.cur)}</td><td class="num">${r.last ? U.pctHtml(((r.cur - r.last) / r.last) * 100) : '—'}</td><td class="num">${fmt(r.stock)}</td></tr>`).join('')}
-      </tbody><tfoot><tr class="row-total"><td>Total ${footLast.fromSheet || footCur.fromSheet ? '<small class="dim">(sheet)</small>' : ''}</td><td class="num">${fmt(footLast.value)}</td><td class="num">${fmt(footCur.value)}</td><td class="num">${footLast.value ? U.pctHtml(((footCur.value - footLast.value) / footLast.value) * 100) : '—'}</td><td class="num">${fmt(g.total.stock)}</td></tr></tfoot></table></div>${clsNote}` : '<p class="dim small">Class-wise data abhi load nahi hua.</p>';
+      </tbody><tfoot><tr class="row-total"><td>Total${footSourceLabel}</td><td class="num">${fmt(footLast.value)}</td><td class="num">${fmt(footCur.value)}</td><td class="num">${footLast.value ? U.pctHtml(((footCur.value - footLast.value) / footLast.value) * 100) : '—'}</td><td class="num">${fmt(g.total.stock)}</td></tr></tfoot></table></div>${clsNote}` : '<p class="dim small">Class-wise data abhi load nahi hua.</p>';
     const agentsTable = isTl ? tlAgentsTable(pr) : '';
     const tlIdStockTable = isTl ? tlStockByIdHtml(pr) : '';
     const isTlStockVisible = !!tlIdStockTable;
@@ -1774,8 +1815,8 @@ window.FF = window.FF || {};
     const lastYm = (pr.months && pr.months.last) || U.prevMonthKey(curYm);
     const elapsed = Math.max(1, num(pr.projT1 && pr.projT1.days) || U.runRateDays(undefined, pr.ch === 'gv' ? 'gv' : 'ff'));
     const bins = pr.classBins || { cur: blankIssueBins(), last: blankIssueBins(), available: {} };
-    // 📑 GV me group numbers sheet-first hote hain (VC4 + NVC4 sheet se, VC20/VC5+ ka batwara ledger
-    // mix se) — FF me pehle jaisa tag-ledger hi chalta hai. Isse card, board aur drawer ek jaise rehte hain.
+    // 📑 GV TL with a matched Master identity uses GV Master GV TL ID rows for totals and class groups;
+    // other GV profiles keep sheet-first fallbacks. FF continues using the First Forward EIR ledger.
     const groups = pr.groupBins || null;
     const usableBins = (g) => !!(g && (g.source || num(g.total) || num(g.VC4) || num(g.VC20) || num(g['VC5+'])));
     const periodValue = (period, group) => usableBins(groups && groups[period])
@@ -1862,8 +1903,10 @@ window.FF = window.FF || {};
       return `${label}: ${fmt(r.report)} report vs ${fmt(r.ledger)} ledger (Δ ${delta})`;
     };
     const reconciliation = [reconciled('last', 'Last'), reconciled('cur', 'Current')].filter(Boolean).join(' · ');
+    const masterAttributionNote = isGvTl && ['cur', 'last'].some((period) => m.sources[period] === 'GV Master · GV TL ID')
+      ? ' Where source is GV Master · GV TL ID, GV Master column R is the attribution key; EIR grouped totals are not added again.' : '';
     const srcLine = isGvTl
-      ? `TL Last/Current totals: <b>${esc(m.sources.last)} / ${esc(m.sources.cur)}</b> · stock: <b>${esc(m.sources.stock)}</b> · VC4 / VC20 / VC5+ class mix: <b>${esc(m.sources.classes)}</b>.${reconciliation ? ` <span class="ms-issuance-recon">${esc(reconciliation)}</span>` : ''}`
+      ? `TL Last/Current totals: <b>${esc(m.sources.last)} / ${esc(m.sources.cur)}</b> · stock: <b>${esc(m.sources.stock)}</b> · VC4 / VC20 / VC5+ class mix: <b>${esc(m.sources.classes)}</b>.${masterAttributionNote}${reconciliation ? ` <span class="ms-issuance-recon">${esc(reconciliation)}</span>` : ''}`
       : `Source: <b>${esc(m.sources.cur)}</b> · class mix: <b>${esc(m.sources.classes)}</b>.`;
     return `<section class="ms-issuance-board" aria-label="Last month, current month and class-wise issuance">
       <div class="ms-issuance-title"><div><b>📊 Issuance &amp; month-end pace</b><small>${esc(monthLabel(m.months.last))} → ${esc(monthLabel(m.months.cur))} · expected = current run-rate × month days</small></div><span class="ms-issuance-pill">${m.isTl ? 'TL roll-up' : 'Agent'} · ${m.ch === 'gv' ? '🟩 GV' : '🟦 FF'}</span></div>

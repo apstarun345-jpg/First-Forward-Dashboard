@@ -167,14 +167,18 @@ window.FF = window.FF || {};
       const rawCls = get(m.cch) || get(m.vClass);
       const cls = normClass(rawCls);
       const commissionRaw = D.cellText(r[U.colIndex(m.commission)]);
-      const tlId = U.clean(get(m.tlId));
+      // GV Master me C (supervisor_agent_id) aur R (GV TL ID) dono hote hain.
+      // C ko crosswalk/audit ke liye rakho; calculation aur attribution ke liye sirf R.
+      const supervisorId = U.clean(get(m.tlId));
+      const gvTlId = U.clean(get(m.gvTlId));
+      const tlId = gvTlId;
       const rawTlName = U.clean(get(m.tlName));
       const agentName = U.clean(get(m.agentName)) || agentId;
       const tlName = rawTlName || (tlId ? `TL ${tlId}` : 'Direct');
       rows.push({
         date, ym: date ? U.ymKey(date) : '', day: date ? date.getDate() : 0,
         agentId, agentName,
-        tlId, tlName,
+        tlId, gvTlId, supervisorId, tlName,
         // 🧍 GV direct rule: TL ID + TL Name dono khaali (ya agent hi apna supervisor) → direct agent.
         directAgent: FF.config.isDirectAgent({ agentId, agentName, tlId, tlName: rawTlName, channel: 'GV Partner' }, 'gv'),
         channel: 'GV Partner',
@@ -365,6 +369,67 @@ window.FF = window.FF || {};
   const rows = () => state.data.master || [];
   const masterMonths = () => U.uniq(rows().map((r) => r.ym).filter(Boolean)).sort();
   const masterLatestDate = () => rows().reduce((acc, r) => (!acc || (r.date && r.date > acc) ? r.date : acc), null);
+  const identityId = (value) => U.clean(value).toUpperCase().replace(/[.]0+$/, '').replace(/\s+/g, '');
+  const identityName = (value) => U.clean(value).toUpperCase().replace(/\s+/g, ' ');
+  const masterTlId = (r) => identityId(r && r.gvTlId);
+
+  /** GV Master ki ek tag row ko issuance views ke shared shape me rakho. */
+  function masterIssuanceRow(r) {
+    if (!r || !r.date) return null;
+    const date = r.date;
+    const tlId = U.clean(r.gvTlId);
+    const replacement = /replacement/i.test(`${r.status || ''} ${r.tagType || ''}`);
+    return {
+      date, d: date, key: U.dateKey(date), ym: r.ym || U.ymKey(date), day: r.day || date.getDate(),
+      cls: r.cls || normClass(''), group: r.group || classGroup(r.cls),
+      type: replacement ? 'REPLACEMENT' : 'ISSUANCE', status: r.status || 'Issuance',
+      tagType: r.tagType || 'Other', vrnType: r.tagType || '', channel: 'GV Partner',
+      agentId: r.agentId || '', agentName: r.agentName || '', tlId,
+      gvTlId: U.clean(r.gvTlId), tlName: r.tlName || (tlId ? `TL ${tlId}` : 'Direct'),
+      tagId: r.tagId || '', vrn: r.vrn || '', serial: r.serial || '',
+      amount: Number(r.amount) || 0, commission: Number(r.commission) || 0, n: 1,
+      source: 'gv-master'
+    };
+  }
+  /** Resolve the incoming/report TL identity, then attribute rows only by GV Master R (GV TL ID).
+   * C (`supervisorId`) and TL name may crosswalk an old/report ID to R only when that mapping is unique;
+   * neither C nor the name is used to count issuance rows. */
+  function masterTlRows(tlId, tlName) {
+    const wantedId = identityId(tlId), wantedName = identityName(tlName);
+    if (wantedId) {
+      const byId = rows().filter((r) => masterTlId(r) === wantedId);
+      if (byId.length) return byId;
+      const linked = U.uniq(rows().filter((r) => identityId(r.supervisorId) === wantedId && masterTlId(r)).map(masterTlId));
+      if (linked.length === 1) return rows().filter((r) => masterTlId(r) === linked[0]);
+    }
+    if (!wantedName) return [];
+    const linked = U.uniq(rows().filter((r) => identityName(r.tlName) === wantedName && masterTlId(r)).map(masterTlId));
+    return linked.length === 1 ? rows().filter((r) => masterTlId(r) === linked[0]) : [];
+  }
+  function masterTlIdentity(tlId, tlName) {
+    const match = masterTlRows(tlId, tlName)[0];
+    return match ? U.clean(match.gvTlId) : '';
+  }
+  /**
+   * TL-scoped GV issuance must use the real GV Master GV TL ID (column R), not a broad EIR rollup.
+   * Returns null when there are no usable dated Master rows (caller may use its existing fallback).
+   * Once any dated row identifies this TL, a month with no rows is an exact zero.
+   */
+  function tlIssuanceRows(tlId, tlName) {
+    if (!Array.isArray(state.data.master)) return null;
+    const matches = masterTlRows(tlId, tlName).map(masterIssuanceRow).filter(Boolean);
+    return matches.length ? matches : null;
+  }
+  /** Agent-level GV drill uses the same canonical GV Master row set (unique_id / agent ID). */
+  function agentIssuanceRows(agentId, agentName) {
+    if (!Array.isArray(state.data.master)) return null;
+    const wantedId = identityId(agentId), wantedName = identityName(agentName);
+    let matches = [];
+    if (wantedId) matches = rows().filter((r) => identityId(r.agentId) === wantedId);
+    else if (wantedName) matches = rows().filter((r) => identityName(r.agentName) === wantedName);
+    matches = matches.map(masterIssuanceRow).filter(Boolean);
+    return matches.length ? matches : null;
+  }
 
   function masterSummary(ym, upToDay) {
     const s = { ym, total: 0, vc4: 0, vc20: 0, vc5p: 0, comm: 0, issuance: 0, replacement: 0, vrn: 0, chassis: 0, agents: new Set(), tls: new Set(), directSet: new Set(), days: new Set(), lastDay: 0, amount: 0, commission: 0, commissionVc4: 0, commissionVc20: 0, commissionVc5p: 0, amountVc4: 0, amountVc20: 0, amountVc5p: 0 };
@@ -499,7 +564,7 @@ window.FF = window.FF || {};
         type: replacement ? 'REPLACEMENT' : 'ISSUANCE', status: r.status,
         tagType: r.tagType, vrnType: r.tagType || '',
         channel: 'GV Partner',
-        agentId: r.agentId || '', agentName: r.agentName || '', tlId: r.tlId || '', tlName: r.tlName || '',
+        agentId: r.agentId || '', agentName: r.agentName || '', tlId: r.gvTlId || '', gvTlId: r.gvTlId || '', tlName: r.tlName || '',
         tagId: r.tagId || '', serial: r.serial || '', vrn: r.vrn || '',
         customer: r.customer || '', amount: Number(r.amount) || 0, commission: Number(r.commission) || 0,
         live: true, source: 'gv-master', n: 1
@@ -932,7 +997,7 @@ window.FF = window.FF || {};
   const GV = {
     DATASETS, preload, refresh, need, get, error, reset, enabled, wanted, retryNow,
     normClass, classGroup, clsNum,
-    rows, masterRows: rows, issuanceRows, eirDailyRows, liveDailyRows, gvToday, masterTodayRows, todayKey, months, latestDate, summary, dailySeries, weekly, byDim, agentRollup, tlRollup, directRollup, people,
+    rows, masterRows: rows, issuanceRows, tlIssuanceRows, masterTlIdentity, agentIssuanceRows, eirDailyRows, liveDailyRows, gvToday, masterTodayRows, todayKey, months, latestDate, summary, dailySeries, weekly, byDim, agentRollup, tlRollup, directRollup, people,
     REPORT_COLS, REPORT_COLS_LABELS, reportMonthBins, reportSheetBins,
     get state() { return state; },
     get loadedAt() { return state.loadedAt; },
