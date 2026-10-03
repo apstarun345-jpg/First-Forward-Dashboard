@@ -21,7 +21,6 @@ window.FF = window.FF || {};
     { id: 'trend', icon: '📈', label: 'Trend', desc: 'Daily · Monthly · Last vs Current', perm: 'trend', group: 'First Forward' },
     { id: 'performance', icon: '🏆', label: 'Performance', desc: 'Agents & TLs (REPORT)', perm: 'performance', group: 'First Forward' },
     { id: 'stock', icon: '📦', label: 'Stock', desc: 'Search · pivot · Excel (StockDataa)', perm: 'stock', group: 'First Forward' },
-    { id: 'stockReport', icon: '📋', label: 'Stock Report', desc: 'REPORT · agent & TL-wise stock', perm: 'stockReport', group: 'First Forward' },
     { id: 'ffCommission', icon: '₹', label: 'Commission Intelligence', desc: 'Reported rate & earned commission · Direct vs TL', perm: 'ffCommission', group: 'First Forward' },
     { id: 'gvDashboard', icon: '🚀', label: 'GV Partner Dashboard', desc: 'GV issuance · stock · performance', perm: 'gvDashboard', group: 'GV Partner' },
     { id: 'gvTrend', icon: '📈', label: 'GV Trend', desc: 'GV Master daily / monthly', perm: 'gvTrend', group: 'GV Partner' },
@@ -687,6 +686,10 @@ window.FF = window.FF || {};
     if (!FF.auth.user) return;
     viewAsBanner();
     const { page, params } = parseHash();
+    // Legacy route: Stock Report ka koi standalone module nahi hai; same stock/report
+    // capability Performance + Stock pages me already available hai. Purane bookmarks
+    // ko broken lazy route par bhejne ke bajay existing Performance page par redirect karo.
+    if (page === 'stockReport') { location.hash = '#/performance'; return; }
     current = { page, params, token: current.token + 1 };
     const token = current.token;
     renderGlobalFilters();
