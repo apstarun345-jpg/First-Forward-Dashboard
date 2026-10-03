@@ -6635,6 +6635,12 @@ async function start() {
       for (const [file, content] of copies) await fs.writeFile(file, content, { mode: 0o600 });
     }
     stored = await readLocalStore();
+    // 🛡️ Render safety: an empty /data must NEVER silently bootstrap a fresh admin/settings store.
+    // A missing/unmounted disk would otherwise make existing login, theme, branding and history appear
+    // to be reset after a deploy. Fresh Render installs must explicitly opt in with ALLOW_FRESH_RENDER=1.
+    if (process.env.RENDER && STORAGE_BACKEND === 'files' && (!Array.isArray(stored.users) || stored.users.length === 0) && process.env.ALLOW_FRESH_RENDER !== '1') {
+      throw new Error('Persistent data store is empty on Render. Existing users/settings were NOT reset. Mount /data or restore the existing storage first; set ALLOW_FRESH_RENDER=1 only for a genuinely new installation.');
+    }
     const mountInfo = await fs.readFile('/proc/self/mountinfo', 'utf8').catch(() => '');
     persistentDiskMounted = mountInfo.split('\n').some(line => {
       const mount = (line.split(' ')[4] || '').replace(/\\040/g, ' ');
