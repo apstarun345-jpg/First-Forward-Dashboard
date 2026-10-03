@@ -5,6 +5,11 @@
  * tab "APP_STORAGE" of the spreadsheet this script is attached to. Data arrives ALREADY ENCRYPTED
  * by the dashboard server, so the cells only contain unreadable text. Do not edit that tab by hand.
  *
+ * v3.48 — history recovery. The dashboard can now LIST the encrypted saves in APP_STORAGE_HISTORY
+ * (action 'history') and bring an older save back (Settings → ☁️ Storage & backup → ⏪ Recovery).
+ * Still ciphertext-only: this script never decrypts anything. You MUST paste this file and deploy a
+ * NEW VERSION to use recovery — see RECOVERY.md.
+ *
  * v3.28 — encrypted APP_STORAGE history backup added. Before any users/settings/sessions/reset/notify record is overwritten, the previous encrypted record is copied to APP_STORAGE_HISTORY. This never decrypts or exposes passwords.
  *
  * v3.27 — tag requests ab kisi BHI Google Sheet me ja sakti hain: dashboard sheet ka link/ID bhejta
@@ -124,12 +129,25 @@ function doPost(e) {
     if (body.action === 'read') return json_({ ok: true, records: readAll_(sheet) });
     if (body.action === 'write') {
       const records = body.records || {};
+      // Ek hi save-batch ke sabhi records ka timestamp same hona chahiye — tabhi dashboard
+      // unhe ek "snapshot" (purani save) ke roop me group kar ke wapas la sakta hai.
+      const nowIso = new Date().toISOString();
       Object.keys(records).forEach(function (kind) {
         if (KINDS.indexOf(kind) < 0) throw new Error('unknown kind ' + kind);
-        writeRecord_(sheet, kind, records[kind]);
+        writeRecord_(sheet, kind, records[kind], nowIso);
       });
       SpreadsheetApp.flush();
-      return json_({ ok: true, savedAt: new Date().toISOString(), kinds: Object.keys(records) });
+      return json_({ ok: true, savedAt: nowIso, kinds: Object.keys(records) });
+    }
+    // ⏪ Recovery (v3.48) — APP_STORAGE_HISTORY ke purane encrypted records ki list.
+    //   body: { rows?: [rowNumbers], withData?: true }
+    //   Sirf metadata (row, savedAt, kind, size) bhejta hai; `data` tabhi jab withData + rows diye hon.
+    //   Ye kabhi decrypt nahi karta — ciphertext hi aata/jaata hai.
+    if (body.action === 'history') {
+      const h = historySheet_(sheet.getParent());
+      const want = Array.isArray(body.rows) ? body.rows.map(Number).filter(function (n) { return n >= 2; }) : null;
+      const hist = readHistory_(h, want, !!body.withData && !!want);
+      return json_({ ok: true, tab: HISTORY_TAB, entries: hist.entries, truncated: hist.truncated });
     }
     return json_({ ok: false, error: 'unknown action' });
   } catch (err) {
@@ -187,6 +205,51 @@ function historySheet_(ss) {
   return h;
 }
 
+/** Sheet me date auto-format ho jaaye to bhi ISO string hi mile — recovery isi par snapshots group karti hai. */
+function isoOf_(v) {
+  if (v instanceof Date) return v.toISOString();
+  const s = String(v == null ? '' : v);
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? s : d.toISOString();
+}
+
+/**
+ * ⏪ Recovery (v3.48) — APP_STORAGE_HISTORY ke purane encrypted records.
+ * Default: sirf metadata (row, savedAt, kind, size). `withData` + `rows` dene par ciphertext bhi.
+ * Ye kabhi decrypt nahi karta — data hamesha encrypted rehta hai.
+ */
+function readHistory_(h, rows, withData) {
+  const out = [];
+  const lastRow = h.getLastRow(), lastCol = h.getLastColumn();
+  if (lastRow < 2 || lastCol < 5) return { entries: out, truncated: false };
+  const want = rows && rows.length ? rows.slice(0, 40) : null;
+  const maxChars = 6 * 1000 * 1000; // ek response me kitna ciphertext bhej sakte hain (safety)
+  let used = 0, truncated = false;
+  // Metadata (savedAt/kind/version/chunks) EK hi call me padho — 2000 rows par bhi turant chalta hai.
+  const meta = h.getRange(2, 1, lastRow - 1, 4).getValues();
+  for (let i = 0; i < meta.length; i++) {
+    const r = i + 2;
+    const row = meta[i];
+    const kind = String(row[1] || '');
+    if (KINDS.indexOf(kind) < 0) continue;
+    if (want && want.indexOf(r) < 0) continue;
+    const chunks = Number(row[3]) || 0;
+    const entry = { row: r, savedAt: isoOf_(row[0]), kind: kind, version: String(row[2] || ''), chunks: chunks, bytes: chunks * CHUNK };
+    if (withData) {
+      const width = Math.max(1, Math.min(lastCol, 4 + chunks) - 4);
+      const dataRow = h.getRange(r, 5, 1, width).getValues()[0];
+      const parts = [];
+      for (let j = 0; j < chunks; j++) parts.push(String(dataRow[j] || '').replace(/^~/, ''));
+      const data = parts.join('');
+      if (used + data.length > maxChars) truncated = true;
+      else { entry.data = data; used += data.length; }
+    }
+    out.push(entry);
+  }
+  out.reverse(); // nayi save pehle
+  return { entries: out, truncated: truncated };
+}
+
 /**
  * Keep the previous encrypted record before it is replaced.
  * IMPORTANT: this copies ciphertext only. It never decrypts passwords/settings.
@@ -202,6 +265,7 @@ function backupPreviousRecord_(sh, rowIndex, kind) {
   const h = historySheet_(sh.getParent());
   const chunks = row.slice(4, 4 + chunkCount);
   const next = h.getLastRow() + 1;
+  h.getRange(next, 1, 1, 1).setNumberFormat('@'); // savedAt hamesha TEXT rahe (date auto-format se bachao)
   h.getRange(next, 1, 1, 4 + chunks.length).setValues([[
     new Date().toISOString(),
     String(row[0] || ''),
@@ -213,7 +277,7 @@ function backupPreviousRecord_(sh, rowIndex, kind) {
   if (excess > 0) h.deleteRows(2, excess);
 }
 
-function writeRecord_(sh, kind, record) {
+function writeRecord_(sh, kind, record, nowIso) {
   if (!record || typeof record.data !== 'string') throw new Error('bad record for ' + kind);
   const chunks = [];
   for (let i = 0; i < record.data.length; i += CHUNK) chunks.push('~' + record.data.slice(i, i + CHUNK));
@@ -233,7 +297,7 @@ function writeRecord_(sh, kind, record) {
   sh.getRange(rowIndex, 1, 1, lastCol).clearContent();
   const range = sh.getRange(rowIndex, 1, 1, width);
   range.setNumberFormat('@');
-  range.setValues([[kind, record.v || '', new Date().toISOString(), String(chunks.length)].concat(chunks)]);
+  range.setValues([[kind, record.v || '', String(nowIso || new Date().toISOString()), String(chunks.length)].concat(chunks)]);
 }
 
 function json_(obj) {

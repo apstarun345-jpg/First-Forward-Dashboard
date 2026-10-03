@@ -42,6 +42,12 @@ Check: `https://<site>/api/health` → `storage.backend: "appsscript"`, `durable
 > ⚠️ Render free plan 15 minute idle par so jaata hai (aur files mita deta hai). Isliye deploy ke
 > turant baad steps 1-5 kar lo; uske baad jo bhi settings / users banaoge sab permanent rahenge.
 
+## ⏪ Saved settings / users / passwords gayab ho gaye hain?
+
+Ghabrao mat — data aksar maujood hota hai, bas wapas lana padta hai: **Settings → ☁️ Storage & backup
+→ ⏪ Purana data wapas lao** (`APP_STORAGE_HISTORY` ki purani encrypted saves, purani sheet se import,
+backup file ya Render disk se restore). Poora step-by-step guide: **[RECOVERY.md](RECOVERY.md)**.
+
 ## Zaroori baatein
 
 * **Secret kabhi mat badlo.** Badla to purana data decrypt nahi hoga — app start hi nahi hogi

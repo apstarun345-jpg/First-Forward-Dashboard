@@ -96,6 +96,59 @@ export class AppsScriptStore {
 
   async ping() { return this.call('ping'); }
 
+  /** ⏪ APP_STORAGE_HISTORY ke encrypted records. `rows` + `withData` se ciphertext bhi mangwa sakte hain. */
+  async history({ rows = null, withData = false } = {}) {
+    const out = await this.call('history', { ...(rows && rows.length ? { rows: rows.slice(0, 40) } : {}), ...(withData ? { withData: true } : {}) });
+    return { entries: (out.entries || []).filter((e) => APPS_SCRIPT_KINDS.includes(e.kind)), truncated: !!out.truncated };
+  }
+
+  /** History rows ko "save batch" (snapshot) me group karo — ek hi write call ke sab records ek saath. */
+  groupSnapshots(entries) {
+    const sorted = [...entries].sort((a, b) => (Date.parse(b.savedAt) || 0) - (Date.parse(a.savedAt) || 0));
+    const groups = [];
+    for (const e of sorted) {
+      const time = Date.parse(e.savedAt) || 0;
+      // Purane deployments me har record ka timestamp alag tha (kuch ms ka farq) — 1.5s tak ek hi save maano.
+      let group = groups.find((g) => Math.abs(g.time - time) <= 1500);
+      if (!group) { group = { at: e.savedAt, time, entries: [] }; groups.push(group); }
+      group.entries.push(e);
+      if (time > group.time) { group.time = time; group.at = e.savedAt; }
+    }
+    return groups.map((g) => ({
+      at: g.at, time: g.time,
+      kinds: g.entries.map((e) => e.kind).sort(),
+      rows: g.entries.map((e) => e.row).sort((a, b) => a - b),
+      bytes: g.entries.reduce((n, e) => n + (Number(e.bytes) || 0), 0),
+      entries: g.entries
+    }));
+  }
+
+  /** Purani saves ki list (nayi pehle). */
+  async snapshots({ limit = 0 } = {}) {
+    const { entries, truncated } = await this.history();
+    const all = this.groupSnapshots(entries);
+    return { snapshots: limit > 0 ? all.slice(0, limit) : all, total: all.length, truncated };
+  }
+
+  /** Ek purani save ka DECRYPTED data (sirf server ke paas key hai). */
+  async snapshotData(at, kinds = null) {
+    const { entries } = await this.history();
+    const all = this.groupSnapshots(entries);
+    const key = String(at || '').trim();
+    const snap = all.find((s) => s.at === key) || all.find((s) => String(s.at).startsWith(key.slice(0, 19)));
+    if (!snap) throw new Error('Ye purani save sheet history me nahi mili (ho sakta hai APP_STORAGE_HISTORY tab se hat gayi ho).');
+    const want = snap.entries.filter((e) => !kinds || kinds.includes(e.kind));
+    if (!want.length) throw new Error('Is save me users/settings ka koi record nahi hai.');
+    const { entries: detailed, truncated } = await this.history({ rows: want.map((e) => e.row), withData: true });
+    const data = {}; const locked = {};
+    for (const e of detailed) {
+      if (!e.data) { locked[e.kind] = 'ciphertext nahi mila (response bada tha)'; continue; }
+      try { data[e.kind] = this.decode(e.kind, { v: e.version, data: e.data }); }
+      catch (err) { locked[e.kind] = err.message; }
+    }
+    return { at: snap.at, rows: snap.rows, kinds: want.map((e) => e.kind), data, locked, truncated };
+  }
+
   /** Returns null when the storage tab is still empty (first run), else { users, sessions, … }. */
   async read() {
     const out = await this.call('read');
