@@ -99,6 +99,9 @@ window.FF = window.FF || {};
     const logo = U.$('#brand-logo');
     if (logo) { logo.innerHTML = FF.config.logo ? `<img src="${esc(FF.config.logo)}\" alt=\"logo\">` : esc((FF.config.brand || 'FF').split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase()); logo.classList.toggle('has-img', !!FF.config.logo); }
     // App/tab identity stays ApnaPayment; uploaded branding still controls the sidebar.
+    const fc = U.$('#app-footer-copy'); if (fc) fc.textContent = '© 2026 ' + (FF.config.footerText || FF.config.appName || 'First Forward Dashboard');
+    const fd = U.$('#app-footer-dev'); if (fd) fd.textContent = 'Designed & Developed by ' + (FF.config.developerName || 'Tarun Kumawat');
+    const footer = U.$('#app-footer'); if (footer) footer.hidden = FF.config.showFooter === false;
     const favicon = U.$('#site-favicon');
     if (favicon) { favicon.href = 'favicon.svg?v=5'; favicon.type = 'image/svg+xml'; }
   }
@@ -202,7 +205,7 @@ window.FF = window.FF || {};
             <p class="dim small pro-note">${mode === 'signup' ? 'New account requires admin approval. You will receive access after verification.' : 'Need access? Contact your administrator for account creation and permissions.'}</p>
           </form>
         </div>
-        <p class="auth-foot dim small pro-foot">${esc(c.brand || '')} • Live data from Google Sheets • Secure & Enterprise Ready${state.settings && state.settings.updatedAt ? ` • Updated ${U.timeLabel(new Date(state.settings.updatedAt).getTime())}` : ''}</p>
+        <p class="auth-foot dim small pro-foot">© 2026 ${esc(c.footerText || c.appName || c.brand || 'First Forward Dashboard')} • Designed &amp; Developed by ${esc(c.developerName || 'Tarun Kumawat')}<br><span>${esc(c.brand || '')} • Live data from Google Sheets • Secure &amp; Enterprise Ready${state.settings && state.settings.updatedAt ? ` • Updated ${U.timeLabel(new Date(state.settings.updatedAt).getTime())}` : ''}</span></p>
       </div>
     </div>`;
   }
