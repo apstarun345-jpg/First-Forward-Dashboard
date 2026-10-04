@@ -4342,6 +4342,40 @@ async function handleApi(req, res, url) {
     persist('notify').catch(() => {});
     return sendJson(res, 200, { ok: results.every((r) => r.ok), delivered: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length, results });
   }
+  // 📡 Google Sheets → OS/browser push webhook. Called by Apps Script on sheet edits.
+  if (p === '/api/push/sheet-update' && method === 'POST') {
+    const body = await readBody(req);
+    const expected = String(process.env.APPS_SCRIPT_SECRET || '').trim();
+    const supplied = String(body.secret || req.headers['x-app-script-secret'] || '').trim();
+    if (!expected || supplied !== expected) throw new HttpError(401, 'Sheet push webhook unauthorized.');
+    const title = shortText(body.title || '📊 Google Sheet Updated', 120);
+    const sheet = shortText(body.sheet || 'Google Sheet', 120);
+    const range = shortText(body.range || '', 120);
+    const editor = shortText(body.editor || '', 80);
+    const changed = shortText(body.changed || 'Data update detected', 240);
+    const data = {
+      id: `sheet-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`,
+      title,
+      body: [sheet, range && `Range: ${range}`, changed, editor && `By: ${editor}`].filter(Boolean).join(' · '),
+      tag: `sheet-update-${sheet.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40)}`,
+      link: '/#/home',
+      type: 'alert',
+      persist: true,
+      sound: true,
+      speak: false,
+      user: '',
+      badge: 1,
+      lang: 'hi-IN'
+    };
+    const subs = pushSubs().slice();
+    const results = await Promise.all(subs.map(async (s) => {
+      const result = await deliverPush(s, data);
+      handlePushResult(s, result, { type: 'sheet-update', sheet });
+      return { username: s.username, ok: !!result.ok, status: result.status || 0 };
+    }));
+    persist('notify').catch(() => {});
+    return sendJson(res, 200, { ok: true, delivered: results.filter((x) => x.ok).length, failed: results.filter((x) => !x.ok).length, total: results.length });
+  }
   if (p === '/api/push/subscribe' && method === 'POST') {
     if (!user) throw new HttpError(401, 'Login required');
     if (user.role !== 'admin' && user.notifyAccess === false) throw new HttpError(403, 'Notifications access disabled by admin.');
