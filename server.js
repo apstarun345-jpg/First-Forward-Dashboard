@@ -5458,29 +5458,28 @@ async function handleApi(req, res, url) {
     const ip = clientIp(req); if (!publicRateOk(`tagemp:${ip}`, 60, 10 * 60e3)) throw new HttpError(429, 'Bahut zyada status checks — thodi der baad try karo.');
     return sendJson(res, 200, { ok:true, ...employeeStatusSummary(token) });
   }
+  // 📇 Agent contact lookup — central Address tab, exact-agent match only.
+  if (p === '/api/tag-request/contact' && method === 'GET') {
+    if (!user || (user.role !== 'admin' && !(user.permissions || []).includes('tagRequest'))) throw new HttpError(403, 'Tag Request access disabled.');
+    const ip = clientIp(req);
+    if (!publicRateOk(`tagcontact:${user.username}:${ip}`, 120, 10 * 60e3)) throw new HttpError(429, 'Bahut zyada contact lookups — thodi der baad try karo.');
+    const agentId = shortText(url.searchParams.get('agentId') || '', 40);
+    const agentName = shortText(url.searchParams.get('agentName') || '', 120);
+    const channel = String(url.searchParams.get('channel') || '').toLowerCase() === 'gv' ? 'gv' : 'ff';
+    if (!agentId && !agentName) return sendJson(res, 200, { ok:true, found:false });
+    const contact = await lookupAgentAddress({ agentId, agentName, channel });
+    return sendJson(res, 200, { ok:true, found:!!contact, contact:contact || null });
+  }
   if (p === '/api/public/tag-request/contact' && method === 'GET') {
-    // 📇 Agent contact lookup — central Address tab, exact-agent match only.
-    if (p === '/api/tag-request/contact' && method === 'GET') {
-      if (!user || (user.role !== 'admin' && !(user.permissions || []).includes('tagRequest'))) throw new HttpError(403, 'Tag Request access disabled.');
-      const ip = clientIp(req);
-      if (!publicRateOk(`tagcontact:${user.username}:${ip}`, 120, 10 * 60e3)) throw new HttpError(429, 'Bahut zyada contact lookups — thodi der baad try karo.');
-      const agentId = shortText(url.searchParams.get('agentId') || '', 40);
-      const agentName = shortText(url.searchParams.get('agentName') || '', 120);
-      const channel = String(url.searchParams.get('channel') || '').toLowerCase() === 'gv' ? 'gv' : 'ff';
-      if (!agentId && !agentName) return sendJson(res, 200, { ok:true, found:false });
-      const contact = await lookupAgentAddress({ agentId, agentName, channel });
-      return sendJson(res, 200, { ok:true, found:!!contact, contact:contact || null });
-    }
-    if (p === '/api/public/tag-request/contact' && method === 'GET') {
-      const ip = clientIp(req);
-      if (!publicRateOk(`tagcontact:${ip}`, 120, 10 * 60e3)) throw new HttpError(429, 'Bahut zyada contact lookups — thodi der baad try karo.');
-      const agentId = shortText(url.searchParams.get('agentId') || '', 40);
-      const agentName = shortText(url.searchParams.get('agentName') || '', 120);
-      const channel = String(url.searchParams.get('channel') || '').toLowerCase() === 'gv' ? 'gv' : 'ff';
-      if (!agentId && !agentName) return sendJson(res, 200, { ok:true, found:false });
-      const contact = await lookupAgentAddress({ agentId, agentName, channel });
-      return sendJson(res, 200, { ok:true, found:!!contact, contact:contact || null });
-    }
+    const ip = clientIp(req);
+    if (!publicRateOk(`tagcontact:${ip}`, 120, 10 * 60e3)) throw new HttpError(429, 'Bahut zyada contact lookups — thodi der baad try karo.');
+    const agentId = shortText(url.searchParams.get('agentId') || '', 40);
+    const agentName = shortText(url.searchParams.get('agentName') || '', 120);
+    const channel = String(url.searchParams.get('channel') || '').toLowerCase() === 'gv' ? 'gv' : 'ff';
+    if (!agentId && !agentName) return sendJson(res, 200, { ok:true, found:false });
+    const contact = await lookupAgentAddress({ agentId, agentName, channel });
+    return sendJson(res, 200, { ok:true, found:!!contact, contact:contact || null });
+  }
   if (p === '/api/public/tag-request/status' && method === 'GET') {
     // 📱 v3.30 — agent ke mobile number se saari requests (jo request lagate waqt diya tha). Minimum
     // fields hi jaate hain (status · classes · qty · admin note) — address / IP kabhi nahi.
