@@ -4836,6 +4836,104 @@ async function handleApi(req, res, url) {
     if (w.tagRequestSheet.spreadsheetId === undefined) w.tagRequestSheet.spreadsheetId = sheetIdFromLink(w.tagRequestSheet.sheetLink) || '';
     return w.tagRequestSheet;
   };
+  // 📇 Central Agent Address Book — Address tab in the configured request spreadsheet.
+  const ADDRESS_BOOK_TAB = 'Address';
+  const addressBookRuntime = { at: 0, map: null, promise: null };
+  const addressBookKey = (a) => {
+    const channel = a && a.channel === 'gv' ? 'gv' : 'ff';
+    const id = String((a && (a.agentId || a.id)) || '').trim();
+    const name = tagNameKey(a && (a.agentName || a.name));
+    return `${channel}|${id ? `id:${id}` : `n:${name}`}`;
+  };
+  const addressEntryFromRequest = (req) => {
+    const a = req && req.agent ? req.agent : {};
+    const name = shortText(a.name || a.agentName, 120);
+    const agentId = shortText(a.agentId, 40);
+    const channel = a.channel === 'gv' ? 'gv' : 'ff';
+    const mobile = String(a.mobile || a.phone || '').replace(/[^\\d+]/g, '').slice(0, 16);
+    const address = shortText(String(a.address || a.fullAddress || '').replace(/\\s+/g, ' '), 300);
+    const pincode = tagDigits(a.pincode || a.pin).slice(0, 6);
+    const tl = shortText(a.tl || a.tlName, 120);
+    if ((!agentId && name.length < 2) || (!address && !pincode && tagDigits(mobile).length < 10)) return null;
+    return { key: addressBookKey({ channel, agentId, agentName: name }), agentId, agent: name, channel, mobile, address, pincode, tl, updatedAt: new Date().toISOString() };
+  };
+  function addressBookMemoryEntries() {
+    const w = workspaceStore();
+    if (!w.addressBook || typeof w.addressBook !== 'object') w.addressBook = {};
+    return w.addressBook;
+  }
+  function rememberAddressBook(list) {
+    const mem = addressBookMemoryEntries();
+    (Array.isArray(list) ? list : []).forEach((e) => {
+      if (!e || !e.key) return;
+      const old = mem[e.key] || {};
+      mem[e.key] = { ...old, ...e, mobile: e.mobile || old.mobile || '', address: e.address || old.address || '', pincode: e.pincode || old.pincode || '', tl: e.tl || old.tl || '', updatedAt: e.updatedAt || old.updatedAt || new Date().toISOString() };
+    });
+    return mem;
+  }
+  function fallbackAddressMap() {
+    const map = new Map(Object.entries(addressBookMemoryEntries()));
+    for (const r of (workspaceStore().tagRequests || []).slice().reverse()) {
+      const e = addressEntryFromRequest(r);
+      if (e && !map.has(e.key)) map.set(e.key, e);
+    }
+    return map;
+  }
+  async function addressBookMap() {
+    const now = Date.now();
+    if (addressBookRuntime.map && now - addressBookRuntime.at < 10 * 60e3) return addressBookRuntime.map;
+    if (addressBookRuntime.promise) return addressBookRuntime.promise;
+    const fallback = fallbackAddressMap();
+    const store = sheetSyncStore();
+    if (!store) { addressBookRuntime.map = fallback; addressBookRuntime.at = now; return fallback; }
+    const cfg = tagSheetConfig();
+    const targetId = sheetIdFromLink(cfg.sheetLink) || String(cfg.spreadsheetId || '').trim() || '';
+    addressBookRuntime.promise = store.call('readaddresses', { tab: ADDRESS_BOOK_TAB, ...(targetId ? { spreadsheetId: targetId } : {}) })
+      .then((out) => {
+        const map = fallback;
+        (out.rows || []).forEach((e) => { if (e && e.key) map.set(String(e.key), e); });
+        addressBookRuntime.map = map; addressBookRuntime.at = Date.now(); return map;
+      })
+      .catch((err) => {
+        console.warn('address book read:', err.message);
+        addressBookRuntime.map = fallback; addressBookRuntime.at = Date.now(); return fallback;
+      })
+      .finally(() => { addressBookRuntime.promise = null; });
+    return addressBookRuntime.promise;
+  }
+  async function syncAddressBookToSheet(requests) {
+    const entries = (Array.isArray(requests) ? requests : [requests]).map(addressEntryFromRequest).filter(Boolean);
+    rememberAddressBook(entries);
+    addressBookRuntime.map = null; addressBookRuntime.at = 0;
+    const store = sheetSyncStore();
+    if (!store || !entries.length) return { ok: true, local: true, synced: false, count: entries.length };
+    const cfg = tagSheetConfig();
+    const targetId = sheetIdFromLink(cfg.sheetLink) || String(cfg.spreadsheetId || '').trim() || '';
+    try {
+      const out = await store.call('upsertaddresses', { tab: ADDRESS_BOOK_TAB, rows: entries, ...(targetId ? { spreadsheetId: targetId } : {}) });
+      addressBookRuntime.map = null; addressBookRuntime.at = 0;
+      return { ok: true, local: true, synced: true, count: entries.length, sheet: out };
+    } catch (err) {
+      console.warn('address book sync:', err.message);
+      return { ok: false, local: true, synced: false, count: entries.length, error: String(err.message || err).slice(0, 180) };
+    }
+  }
+  async function lookupAgentAddress({ agentId, agentName, channel }) {
+    const ch = String(channel || '').toLowerCase() === 'gv' ? 'gv' : 'ff';
+    const id = String(agentId || '').trim();
+    const name = tagNameKey(agentName || '');
+    if (!id && !name) return null;
+    const map = await addressBookMap();
+    const keys = [];
+    if (id) keys.push(`${ch}|id:${id}`);
+    if (name) keys.push(`${ch}|n:${name}`);
+    for (const key of keys) {
+      const e = map.get(key);
+      if (e && (e.address || e.pincode || e.mobile)) return { mobile: e.mobile || '', address: e.address || '', pincode: e.pincode || '', tl: e.tl || '', source: 'Address' };
+    }
+    return null;
+  }
+
   /** Apps Script store — storage backend se independent (files backend par bhi sheet sync chale). */
   let tagSheetStore = null;
   function sheetSyncStore() {
@@ -5008,6 +5106,9 @@ async function handleApi(req, res, url) {
     };
     storeTagRequests([row]);
     await persist('notify');
+       rememberAddressBook([addressEntryFromRequest(row)].filter(Boolean));
+       await persist('notify').catch(() => {});
+       syncAddressBookToSheet([row]).then(() => persist('notify').catch(() => {})).catch(() => {});
     // 📗 Google Sheet sync ON ho to entry direct configured sheet me chali jaati hai (fire & forget —
     // sheet fail hone se request submit kabhi rukti nahi; status drawer me dikh jaata hai).
     if (tagSheetConfig().enabled && tagSheetConfig().onSubmit) {
@@ -5277,6 +5378,7 @@ async function handleApi(req, res, url) {
       id: nextTagReqId(), at: now,
       by: `public:${normUser(employeeName) || 'employee'}`, byName: employeeName,
       employee: { name: employeeName, mobile, office, address, pincode, ...(city ? { city } : {}) },
+       employeeToken,
       source: 'public-link', ip: String(ip || '').slice(0, 45),
       status: 'pending', note: shortText(body.note, 300), adminNote: '',
       rows, tls: tagRequestTls(body.tls), total, updatedAt: now, updatedBy: 'public-link',
@@ -5284,6 +5386,9 @@ async function handleApi(req, res, url) {
     };
     storeTagRequests([row]);
     await persist('notify');
+       rememberAddressBook([addressEntryFromRequest(row)].filter(Boolean));
+       await persist('notify').catch(() => {});
+       syncAddressBookToSheet([row]).then(() => persist('notify').catch(() => {})).catch(() => {});
     // 📗 Sheet sync ON ho to public request bhi seedha usi Google Sheet me entry banati hai.
     if (tagSheetConfig().enabled && tagSheetConfig().onSubmit) {
       pushTagRequestToSheet(row, 'new').then(() => persist('notify').catch(() => {})).catch((err) => {
@@ -5354,11 +5459,28 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { ok:true, ...employeeStatusSummary(token) });
   }
   if (p === '/api/public/tag-request/contact' && method === 'GET') {
-    const token = String(url.searchParams.get('token') || '').trim(), agentId = tagDigits(url.searchParams.get('agentId') || ''), agentName = tagNameKey(url.searchParams.get('agentName') || ''), channel = String(url.searchParams.get('channel') || '').toLowerCase() === 'gv' ? 'gv' : 'ff';
-    if (!/^[A-Za-z0-9_-]{24,120}$/.test(token) || (!agentId && !agentName)) return sendJson(res, 200, { ok:true, found:false });
-    for (const r of employeeStatusByToken(token).slice().reverse()) { const a = r && r.agent || {}; const sameId = agentId && tagDigits(a.agentId) === agentId, sameName = agentName && tagNameKey(a.name) === agentName, sameChannel = !a.channel || String(a.channel).toLowerCase() === channel; if ((sameId || sameName) && sameChannel && (a.address || a.pincode || a.mobile)) return sendJson(res, 200, { ok:true, found:true, contact:{ mobile:a.mobile||'', address:a.address||'', pincode:a.pincode||'' }, at:r.at }); }
-    return sendJson(res, 200, { ok:true, found:false });
-  }
+    // 📇 Agent contact lookup — central Address tab, exact-agent match only.
+    if (p === '/api/tag-request/contact' && method === 'GET') {
+      if (!user || (user.role !== 'admin' && !(user.permissions || []).includes('tagRequest'))) throw new HttpError(403, 'Tag Request access disabled.');
+      const ip = clientIp(req);
+      if (!publicRateOk(`tagcontact:${user.username}:${ip}`, 120, 10 * 60e3)) throw new HttpError(429, 'Bahut zyada contact lookups — thodi der baad try karo.');
+      const agentId = shortText(url.searchParams.get('agentId') || '', 40);
+      const agentName = shortText(url.searchParams.get('agentName') || '', 120);
+      const channel = String(url.searchParams.get('channel') || '').toLowerCase() === 'gv' ? 'gv' : 'ff';
+      if (!agentId && !agentName) return sendJson(res, 200, { ok:true, found:false });
+      const contact = await lookupAgentAddress({ agentId, agentName, channel });
+      return sendJson(res, 200, { ok:true, found:!!contact, contact:contact || null });
+    }
+    if (p === '/api/public/tag-request/contact' && method === 'GET') {
+      const ip = clientIp(req);
+      if (!publicRateOk(`tagcontact:${ip}`, 120, 10 * 60e3)) throw new HttpError(429, 'Bahut zyada contact lookups — thodi der baad try karo.');
+      const agentId = shortText(url.searchParams.get('agentId') || '', 40);
+      const agentName = shortText(url.searchParams.get('agentName') || '', 120);
+      const channel = String(url.searchParams.get('channel') || '').toLowerCase() === 'gv' ? 'gv' : 'ff';
+      if (!agentId && !agentName) return sendJson(res, 200, { ok:true, found:false });
+      const contact = await lookupAgentAddress({ agentId, agentName, channel });
+      return sendJson(res, 200, { ok:true, found:!!contact, contact:contact || null });
+    }
   if (p === '/api/public/tag-request/status' && method === 'GET') {
     // 📱 v3.30 — agent ke mobile number se saari requests (jo request lagate waqt diya tha). Minimum
     // fields hi jaate hain (status · classes · qty · admin note) — address / IP kabhi nahi.
