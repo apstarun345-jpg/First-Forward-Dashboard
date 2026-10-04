@@ -1216,7 +1216,7 @@ body.colorful .from-hdr { color: #166534; }
             <label class="field tr-span-all"><span class="dim small">🏠 Full address${askAddress ? ' *' : ''} <small class="dim">(house / street / area / city — tags isi address par jayenge)</small></span>
               <textarea class="input${badCls(row.id, 'address')}" data-tr-a="address" rows="2" maxlength="300" placeholder="e.g. 24, Shanti Nagar, Sodala, Jaipur">${esc(row.address)}</textarea></label>
           </div>
-          ${row.fromBook ? '<p class="dim small tr-book-note">📇 Is agent ka pichli baar wala mobile/address bhar diya — ek baar check kar lo.</p>' : ''}
+          ${row.fromBook ? '<p class="dim small tr-book-note">📇 Pichla mobile/address <b>Address</b> tab se auto-fill hua — ek baar check kar lo.</p>' : ''}
           ${errList.length ? `<ul class="tr-err-list">${errList.map((m) => `<li>⚠️ ${esc(m)}</li>`).join('')}</ul>` : ''}
         </div>
         <div class="tr-qty-list${badCls(row.id, 'qty')}" role="group" aria-label="Class-wise qty">
@@ -1319,10 +1319,27 @@ body.colorful .from-hdr { color: #166534; }
     return true;
   }
   async function suggestHistoricalContact(row) {
-    if (!isPublic() || !state.employeeToken || row.fromBook) return;
-    const rec = exactAgent(row); if (!rec) return;
-    try { const qs = new URLSearchParams({ token: state.employeeToken, agentId: rec.agentId || '', agentName: rec.name || '', channel: rec.channel || 'ff' }); const out = await publicApi('/api/public/tag-request/contact?' + qs.toString()), c = out && out.contact; if (!c || row.mobile || row.address || row.pincode) return; row.mobile = c.mobile || ''; row.address = c.address || ''; row.pincode = c.pincode || ''; row.fromBook = true; const card = rootEl && rootEl.querySelector ? rootEl.querySelector('[data-tr-row="' + row.id + '"]') : null; if (card) { const wrap = document.createElement('div'); wrap.innerHTML = agentCardHtml(row, state.rows.indexOf(row)); const fresh = wrap.firstElementChild; if (fresh) { card.replaceWith(fresh); bindAgentCard(fresh); updateTotals(fresh, row); } } } catch { /* optional suggestion */ }
-  }
+     const rec = exactAgent(row); if (!rec || row.contactManual) return;
+     try {
+       const qs = new URLSearchParams({ agentId: rec.agentId || '', agentName: rec.name || '', channel: rec.channel || 'ff' });
+       const path = isPublic() ? '/api/public/tag-request/contact?' + qs.toString() : '/api/tag-request/contact?' + qs.toString();
+       const out = isPublic() ? await publicApi(path) : await FF.auth.api(path);
+       const contact = out && out.contact;
+       if (!contact) return;
+       let changed = false;
+       if (!clean(row.mobile) && clean(contact.mobile)) { row.mobile = contact.mobile; changed = true; }
+       if (!clean(row.address) && clean(contact.address)) { row.address = contact.address; changed = true; }
+       if (!clean(row.pincode) && clean(contact.pincode)) { row.pincode = contact.pincode; changed = true; }
+       if (!changed) return;
+       row.fromBook = true; row.addressSource = 'Address';
+       const card = rootEl && rootEl.querySelector ? rootEl.querySelector('[data-tr-row="' + row.id + '"]') : null;
+       if (card) {
+         const wrap = document.createElement('div'); wrap.innerHTML = agentCardHtml(row, state.rows.indexOf(row));
+         const fresh = wrap.firstElementChild;
+         if (fresh) { card.replaceWith(fresh); bindAgentCard(fresh); updateTotals(fresh, row); }
+       }
+     } catch { /* optional suggestion */ }
+   }
   /** Ek agent-card ki bindings (search dropdown + contact + qty). Partial re-render par sirf naya card
    *  bind hota hai — purane cards ke listeners duplicate nahi hote. */
   function bindAgentCard(card) {
@@ -1413,6 +1430,7 @@ body.colorful .from-hdr { color: #166534; }
       if (key === 'mobile') { const c = v.replace(/[^\d+\s-]/g, ''); if (c !== v) el.value = c; v = c.replace(/[\s-]/g, ''); }
       if (key === 'pincode') { const c = v.replace(/\D/g, '').slice(0, 6); if (c !== v) el.value = c; v = c; }
       row[key] = v;
+       if (key === 'mobile' || key === 'address' || key === 'pincode') { row.contactManual = true; row.fromBook = false; row.addressSource = ''; }
       const ok = key === 'mobile' ? digits(v).length >= 10 : key === 'pincode' ? /^\d{6}$/.test(v) : key === 'dispatchName' ? clean(v).length >= 2 : clean(v).length >= 8;
       if (ok) clearErr(card, row.id, key);
       updateTotals(null, null);
@@ -1691,7 +1709,7 @@ body.colorful .from-hdr { color: #166534; }
     body.innerHTML = `<section class="card tr-status-card"><div class="card-head"><h3>🔎 Request status</h3>
         <div class="card-right dim">Agent ka mobile number (jo request me diya tha) ya Request ID daalo</div></div>
       <div class="card-body">
-        ${state.employeeToken ? '<div class="tr-employee-summary"><div class="tr-es-head"><b>👤 Mere requests</b><button class="btn small" data-tr-emp-refresh>↻ Refresh</button></div>' + (state.employeeSummary ? '<div class="tr-es-grid"><div><small>Total</small><b>' + fmt(state.employeeSummary.totalRequests || 0) + '</b></div><div><small>⏳ Pending</small><b>' + fmt(state.employeeSummary.pending || 0) + '</b></div><div><small>✅ Approved</small><b>' + fmt(state.employeeSummary.approved || 0) + '</b></div><div><small>🚚 Dispatched</small><b>' + fmt(state.employeeSummary.dispatched || 0) + '</b></div><div><small>⛔ Rejected</small><b>' + fmt(state.employeeSummary.rejected || 0) + '</b></div><div><small>🏷️ Approved tags</small><b>' + fmt(state.employeeSummary.approvedTags || 0) + '</b></div></div>' : '<div class="dim small">Status summary load ho raha hai…</div>') + '</div>' : ''}
+        ${state.employeeToken ? '<div class="tr-employee-summary"><div class="tr-es-head"><b>👤 Meri sabhi requests</b><button class="btn small" data-tr-emp-refresh>↻ Refresh</button></div>' + (state.employeeSummary ? '<div class="tr-es-grid"><div><small>Total</small><b>' + fmt(state.employeeSummary.totalRequests || 0) + '</b></div><div><small>⏳ Pending</small><b>' + fmt(state.employeeSummary.pending || 0) + '</b></div><div><small>✅ Approved</small><b>' + fmt(state.employeeSummary.approved || 0) + '</b></div><div><small>🚚 Dispatched</small><b>' + fmt(state.employeeSummary.dispatched || 0) + '</b></div><div><small>⛔ Rejected</small><b>' + fmt(state.employeeSummary.rejected || 0) + '</b></div><div><small>🏷️ Approved tags</small><b>' + fmt(state.employeeSummary.approvedTags || 0) + '</b></div></div>' : '<div class="dim small">Status summary load ho raha hai…</div>') + (state.employeeSummary && Array.isArray(state.employeeSummary.requests) ? '<div style="margin-top:12px"><div class="dim small" style="margin-bottom:6px">📋 Request history — nayi request sabse upar</div>' + (state.employeeSummary.requests.length ? '<div class="tr-st-list">' + state.employeeSummary.requests.map(statusCardHtml).join('') + '</div>' : '<div class="tr-status-out">Abhi tak koi request nahi mili.</div>') + '</div>' : '') + '</div>' : ''}
         <div class="tr-status-row">
           <input class="input" id="tr-status-id" inputmode="tel" autocomplete="off" placeholder="Agent mobile (10 digit) ya Request ID" value="${esc(st.q || '')}">
           <button class="btn primary" data-tr-act="find" ${st.busy ? 'disabled' : ''}>${st.busy ? '⏳ Dhoondh rahe hain…' : '🔎 Status dekho'}</button>
