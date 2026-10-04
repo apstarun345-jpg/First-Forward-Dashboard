@@ -126,6 +126,100 @@ function doPost(e) {
       SpreadsheetApp.flush();
       return json_({ ok: true, tab: tabName, added: added, atRow: startRow, spreadsheet: ss.getName(), spreadsheetId: ss.getId(), url: ss.getUrl() });
     }
+
+    // 📇 Agent Address Book — central sheet tab, automatically created and de-duplicated.
+    // body: { tab: 'Address', rows: [{key,agentId,agent,channel,mobile,address,pincode,tl,updatedAt}], spreadsheetId?: '<sheet id>' }
+    if (body.action === 'readaddresses') {
+      var aTab = String(body.tab || 'Address').slice(0, 80);
+      var aSs = target_(body.spreadsheetId);
+      var aSh = aSs.getSheetByName(aTab);
+      if (!aSh || aSh.getLastRow() < 2) return json_({ ok: true, tab: aTab, rows: [], spreadsheet: aSs.getName(), spreadsheetId: aSs.getId(), url: aSs.getUrl() });
+      var aLastRow = aSh.getLastRow();
+      var aWidth = Math.min(9, Math.max(1, aSh.getLastColumn()));
+      var aVals = aSh.getRange(2, 1, aLastRow - 1, aWidth).getValues();
+      var aOut = aVals.map(function (r) {
+        return {
+          key: String(r[0] || '').trim(), agentId: String(r[1] || '').trim(), agent: String(r[2] || '').trim(),
+          channel: String(r[3] || '').trim().toLowerCase() === 'gv' ? 'gv' : 'ff',
+          mobile: String(r[4] || '').trim(), address: String(r[5] || '').trim(),
+          pincode: String(r[6] || '').replace(/\\D/g, '').slice(0, 6),
+          tl: String(r[7] || '').trim(), updatedAt: r[8] instanceof Date ? r[8].toISOString() : String(r[8] || '')
+        };
+      }).filter(function (x) { return !!x.key; });
+      return json_({ ok: true, tab: aTab, rows: aOut.slice(-5000), spreadsheet: aSs.getName(), spreadsheetId: aSs.getId(), url: aSs.getUrl() });
+    }
+
+    if (body.action === 'upsertaddresses') {
+      var uTab = String(body.tab || 'Address').slice(0, 80);
+      var uRows = Array.isArray(body.rows) ? body.rows.slice(0, 500) : [];
+      var uSs = target_(body.spreadsheetId);
+      var uSh = uSs.getSheetByName(uTab);
+      if (!uSh) uSh = uSs.insertSheet(uTab);
+      var uHeader = ['Key', 'Agent ID', 'Agent', 'Channel', 'Mobile', 'Address', 'Pincode', 'TL', 'Updated At'];
+      if (uSh.getMaxColumns() < uHeader.length) uSh.insertColumnsAfter(uSh.getMaxColumns(), uHeader.length - uSh.getMaxColumns());
+      if (uSh.getLastRow() < 1) uSh.getRange(1, 1, 1, uHeader.length).setValues([uHeader]);
+      else {
+        var hNow = uSh.getRange(1, 1, 1, uHeader.length).getValues()[0];
+        var hEmpty = hNow.every(function (v) { return !String(v || '').trim(); });
+        if (hEmpty) uSh.getRange(1, 1, 1, uHeader.length).setValues([uHeader]);
+      }
+
+      var existing = {};
+      var dupRows = {};
+      var last = uSh.getLastRow();
+      if (last >= 2) {
+        var vals = uSh.getRange(2, 1, last - 1, uHeader.length).getValues();
+        vals.forEach(function (r, idx) {
+          var key = String(r[0] || '').trim();
+          if (!key) return;
+          var rowNo = idx + 2;
+          if (existing[key]) {
+            if (!dupRows[key]) dupRows[key] = [];
+            dupRows[key].push(rowNo);
+          } else existing[key] = rowNo;
+        });
+      }
+
+      var added = 0, updated = 0, deduped = 0;
+      uRows.forEach(function (x) {
+        if (!x || typeof x !== 'object') return;
+        var key = String(x.key || '').trim();
+        if (!key) return;
+        var valsOut = [[
+          key,
+          String(x.agentId || '').trim(),
+          String(x.agent || '').trim(),
+          String(x.channel || '').trim().toLowerCase() === 'gv' ? 'gv' : 'ff',
+          String(x.mobile || '').trim(),
+          String(x.address || '').trim(),
+          String(x.pincode || '').replace(/\\D/g, '').slice(0, 6),
+          String(x.tl || '').trim(),
+          String(x.updatedAt || new Date().toISOString())
+        ]];
+
+        if (existing[key]) {
+          var rowNo = existing[key];
+          uSh.getRange(rowNo, 1, 1, uHeader.length).setValues(valsOut);
+          updated++;
+          var ds = dupRows[key] || [];
+          for (var di = ds.length - 1; di >= 0; di--) {
+            uSh.deleteRow(ds[di]);
+            deduped++;
+          }
+          delete dupRows[key];
+        } else {
+          var nr = Math.max(2, uSh.getLastRow() + 1);
+          uSh.getRange(nr, 1, 1, uHeader.length).setValues(valsOut);
+          existing[key] = nr;
+          added++;
+        }
+      });
+      try { uSh.getRange(1, 1, 1, uHeader.length).setFontWeight('bold'); } catch (e) { /* cosmetic */ }
+      try { uSh.setFrozenRows(1); } catch (e) { /* cosmetic */ }
+      SpreadsheetApp.flush();
+      return json_({ ok: true, tab: uTab, added: added, updated: updated, deduped: deduped, spreadsheet: uSs.getName(), spreadsheetId: uSs.getId(), url: uSs.getUrl() });
+    }
+
     if (body.action === 'read') return json_({ ok: true, records: readAll_(sheet) });
     if (body.action === 'write') {
       const records = body.records || {};
