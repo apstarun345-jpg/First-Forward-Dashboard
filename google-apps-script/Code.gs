@@ -40,6 +40,72 @@ const HISTORY_MAX_ROWS = 2000;
 
 /** Run this ONCE from the Apps Script editor (▶ Run) to grant the "send email" permission. */
 function authorizeMail() { Logger.log('Mail quota left today: ' + MailApp.getRemainingDailyQuota()); }
+/**
+ * 📡 INSTANT GOOGLE SHEET → BROWSER/PHONE PUSH
+ *
+ * One-time setup:
+ *   setDashboardPushUrl('https://YOUR-DASHBOARD-DOMAIN/api/push/sheet-update')
+ *   setupInstantSheetPush()
+ *
+ * The installable onEdit trigger calls the dashboard webhook immediately after a cell edit.
+ * The dashboard then fans out a Web Push notification to every subscribed device.
+ */
+function setDashboardPushUrl(url) {
+  url = String(url || '').trim().replace(/\\/+$/, '');
+  if (!/^https:\\/\\//i.test(url) || !/\\/api\\/push\\/sheet-update$/i.test(url)) {
+    throw new Error('Dashboard URL should end with /api/push/sheet-update and use HTTPS.');
+  }
+  PropertiesService.getScriptProperties().setProperty('DASHBOARD_PUSH_URL', url);
+  Logger.log('Dashboard push URL saved.');
+  return url;
+}
+
+function setupInstantSheetPush() {
+  const url = PropertiesService.getScriptProperties().getProperty('DASHBOARD_PUSH_URL');
+  if (!url) throw new Error('First run setDashboardPushUrl("https://YOUR-DASHBOARD/api/push/sheet-update")');
+  const ss = SpreadsheetApp.getActive();
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (t.getHandlerFunction() === 'instantSheetEditPush') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('instantSheetEditPush').forSpreadsheet(ss).onEdit().create();
+  Logger.log('Instant sheet push trigger installed for: ' + ss.getName());
+  return 'OK';
+}
+
+function instantSheetEditPush(e) {
+  try {
+    if (!e || !e.range) return;
+    const range = e.range;
+    const sheet = range.getSheet();
+    const a1 = range.getA1Notation();
+    const numRows = range.getNumRows();
+    const numCols = range.getNumColumns();
+    const changed = numRows === 1 && numCols === 1
+      ? 'Cell updated'
+      : `${numRows} rows × ${numCols} columns updated`;
+    const editor = (e.user && e.user.getEmail) ? e.user.getEmail() : '';
+    const payload = {
+      secret: SECRET,
+      title: '📊 Google Sheet Updated',
+      sheet: sheet.getName(),
+      range: a1,
+      changed: changed,
+      editor: editor,
+      at: new Date().toISOString()
+    };
+    const url = PropertiesService.getScriptProperties().getProperty('DASHBOARD_PUSH_URL');
+    if (!url) return;
+    UrlFetchApp.fetch(url, {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+  } catch (err) {
+    console.error('instantSheetEditPush:', err && err.message || err);
+  }
+}
+
 
 function doGet() {
   return json_({ ok: true, service: 'apnapayment-storage', note: 'POST only. Storage is working if you can see this.' });
