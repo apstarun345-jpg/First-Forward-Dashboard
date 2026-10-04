@@ -1512,7 +1512,11 @@ window.FF = window.FF || {};
       const iss = (key, which, group) => cellOf(a[key], issSpec(a, which, group), `${a.name} · ${which === 'cur' ? 'is month' : 'last month'}${group ? ` · ${group}` : ''} — issuance detail (day → tag)`);
       return `<tr class="clickable${a.isSelf ? ' mp-selfrow' : ''}" data-mp-agent="${esc(a.name)}" data-mp-kind="${pr.ch}-agent" data-mp-id="${esc(a.id || '')}"><td>${a.isSelf ? '👤 ' : ''}<b>${esc(a.name)}</b>${a.isSelf ? '<span class="mp-tag-self">TL · apna stock</span>' : ''}<small class="cell-sub">${esc(a.id || '')}${a.status ? ` · ${esc(a.status)}` : ''}${a.lastActive ? ` · last ${esc(a.lastActive)}` : ''}</small></td><td>${mobileCell(a.mobile)}</td><td>${prioChip(a.priority)}</td>${stk('stockVc4')}${stk('stockComm')}${stk('stockTotal')}${iss('lastVc4', 'last', 'VC4')}${iss('lastComm', 'last', 'COMM')}${iss('last', 'last', '')}${iss('curVc4', 'cur', 'VC4')}${iss('curComm', 'cur', 'COMM')}${iss('cur', 'cur', '')}<td class="num">${U.sugCell(a.sugVc4, a.sugVc4Gross || 0)}</td><td class="num">${U.sugCell(a.sugComm, a.sugCommGross || 0)}</td></tr>`;
     };
-    const footRow = (label, v, cls, spec) => `<tr class="clickable ${cls}"${spec ? ` data-kpi="${esc(spec)}" role="button" tabindex="0" title="In hi rows ki detail"` : ''}><td colspan="3">${label}</td><td class="num">${fmt(v.sVc4)}</td><td class="num">${fmt(v.sComm)}</td><td class="num">${fmt(v.sTotal)}</td><td class="num">${fmt(v.lVc4)}</td><td class="num">${fmt(v.lComm)}</td><td class="num">${fmt(v.last)}</td><td class="num">${fmt(v.cVc4)}</td><td class="num">${fmt(v.cComm)}</td><td class="num">${fmt(v.cur)}</td><td class="num">${U.sugCell(v.sugVc4, 0)}</td><td class="num">${U.sugCell(v.sugComm, 0)}</td></tr>`;
+    // Suggested footer values MUST come from the exact rows shown above.
+    // TL total dispatch = agents' suggested dispatch + TL's own suggested dispatch.
+    // The old footer used TL-level dispatch (d.sugVc4/d.sugComm), which can be 0 when
+    // TL stock alone covers the TL-level run-rate even though individual agents still need tags.
+    const footRow = (label, v, cls, spec) => `<tr class="clickable ${cls}"${spec ? ` data-kpi="${esc(spec)}" role="button" tabindex="0" title="In hi rows ki detail"` : ''}><td colspan="3">${label}</td><td class="num">${fmt(v.sVc4)}</td><td class="num">${fmt(v.sComm)}</td><td class="num">${fmt(v.sTotal)}</td><td class="num">${fmt(v.lVc4)}</td><td class="num">${fmt(v.lComm)}</td><td class="num">${fmt(v.last)}</td><td class="num">${fmt(v.cVc4)}</td><td class="num">${fmt(v.cComm)}</td><td class="num">${fmt(v.cur)}</td><td class="num">${U.sugCell(v.sugVc4, v.sugVc4Gross || 0)}</td><td class="num">${U.sugCell(v.sugComm, v.sugCommGross || 0)}</td></tr>`;
     const agentsTotal = { vc4: sum('stockVc4'), comm: sum('stockComm'), last: sum('last'), cur: sum('cur') };
     const sv = (list, o) => ({ lVc4: sum('lastVc4', list), lComm: sum('lastComm', list), last: sum('last', list), cVc4: sum('curVc4', list), cComm: sum('curComm', list), cur: sum('cur', list), ...o });
     const selfTotals = selfA ? { vc4: num(selfA.stockVc4), comm: num(selfA.stockComm), last: num(selfA.last), cur: num(selfA.cur) } : { vc4: 0, comm: 0, last: 0, cur: 0 };
@@ -1524,9 +1528,43 @@ window.FF = window.FF || {};
       : '';
     const monthHead = (ym, fallback) => esc(monthLabel(ym) || fallback);
     const head = `<tr><th rowspan="2">Agent</th><th rowspan="2">Mobile</th><th rowspan="2">Priority</th><th colspan="3" class="num">📦 Stock</th><th colspan="3" class="num">⏮ ${monthHead(m.last, 'Last month')}</th><th colspan="3" class="num">▶ ${monthHead(m.cur, 'This month')}</th><th colspan="2" class="num">Suggested</th></tr><tr><th class="num">VC4</th><th class="num">Comm</th><th class="num">Total</th><th class="num">VC4</th><th class="num">Comm</th><th class="num">Total</th><th class="num">VC4</th><th class="num">Comm</th><th class="num">Total</th><th class="num">VC4</th><th class="num">Comm</th></tr>`;
-    const agentsFoot = rows.length ? footRow(`<span class="mp-linkish">🧑‍💼 Agents total (${fmt(rows.length)})</span>`, sv(rows, { sVc4: ag.vc4, sComm: ag.comm, sTotal: ag.total, sugVc4: d.sumAgentVc4, sugComm: d.sumAgentComm }), '', `${tlSpec}&part=team`) : '';
-    const ownFoot = selfA || own.total ? footRow(`👤 ${esc(selfA ? selfA.name : pr.name)} ke paas (TL own)`, sv(selfA ? [selfA] : [], { sVc4: own.vc4, sComm: own.comm, sTotal: own.total, sugVc4: d.sumSelfVc4, sugComm: d.sumSelfComm }), 'mp-selfrow', `${tlSpec}&part=own`) : '';
-    const totFoot = footRow('= TL TOTAL (own + agents)', { sVc4: s.vc4, sComm: s.comm, sTotal: s.total, lVc4: t.lastVc4, lComm: t.lastComm, last: t.lastTotal, cVc4: t.curVc4, cComm: t.curComm, cur: t.curTotal, sugVc4: d.sugVc4, sugComm: d.sugComm }, 'row-total', tlSpec);
+    const agentsSug = {
+      vc4: U.sum(rows, (a) => num(a.sugVc4)),
+      comm: U.sum(rows, (a) => num(a.sugComm)),
+      vc4Gross: U.sum(rows, (a) => num(a.sugVc4Gross)),
+      commGross: U.sum(rows, (a) => num(a.sugCommGross))
+    };
+    const ownSug = {
+      vc4: selfA ? num(selfA.sugVc4) : 0,
+      comm: selfA ? num(selfA.sugComm) : 0,
+      vc4Gross: selfA ? num(selfA.sugVc4Gross) : 0,
+      commGross: selfA ? num(selfA.sugCommGross) : 0
+    };
+    const combinedSug = {
+      vc4: agentsSug.vc4 + ownSug.vc4,
+      comm: agentsSug.comm + ownSug.comm,
+      vc4Gross: agentsSug.vc4Gross + ownSug.vc4Gross,
+      commGross: agentsSug.commGross + ownSug.commGross
+    };
+    const agentsFoot = rows.length ? footRow(`<span class="mp-linkish">🧑‍💼 Agents total (${fmt(rows.length)})</span>`, sv(rows, {
+      sVc4: ag.vc4, sComm: ag.comm, sTotal: ag.total,
+      sugVc4: agentsSug.vc4, sugComm: agentsSug.comm,
+      sugVc4Gross: agentsSug.vc4Gross, sugCommGross: agentsSug.commGross
+    }), '', `${tlSpec}&part=team`) : '';
+    const ownFoot = selfA || own.total ? footRow(`👤 ${esc(selfA ? selfA.name : pr.name)} ke paas (TL own)`, sv(selfA ? [selfA] : [], {
+      sVc4: own.vc4, sComm: own.comm, sTotal: own.total,
+      sugVc4: ownSug.vc4, sugComm: ownSug.comm,
+      sugVc4Gross: ownSug.vc4Gross, sugCommGross: ownSug.commGross
+    }), 'mp-selfrow', `${tlSpec}&part=own`) : '';
+    // This row is intentionally NOT d.sugVc4/d.sugComm. Those are TL-level net dispatch
+    // after subtracting the whole TL stock and can be 0 while individual agents need stock.
+    const totFoot = footRow('= TL TOTAL (own + agents)', {
+      sVc4: s.vc4, sComm: s.comm, sTotal: s.total,
+      lVc4: t.lastVc4, lComm: t.lastComm, last: t.lastTotal,
+      cVc4: t.curVc4, cComm: t.curComm, cur: t.curTotal,
+      sugVc4: combinedSug.vc4, sugComm: combinedSug.comm,
+      sugVc4Gross: combinedSug.vc4Gross, sugCommGross: combinedSug.commGross
+    }, 'row-total', tlSpec);
     return `<section class="mp-sec" data-mp-sec="agents"><h4>🧑‍💼 TL ke agents · ${fmt(rows.length)}${selfA ? ' <span class="dim small">+ TL (apna stock alag)</span>' : ''}</h4><p class="dim small">Har number par click → agent ki detail (stock / last month / is month → class → din → tag-barcode). Sug. = avg/day × ${d.days} din · <b>stock ke baad</b> (net)${sugMode() === 'both' ? ' · <span class="sug-wo-inline">w/o stock = bina stock ghataye (gross)</span>' : ''} · <span class="mp-linkish" data-kpi="${esc(`src=${pr.ch}&scope=people&tl=${encodeURIComponent(pr.name)}&self=0&sort=stock`)}" role="button" tabindex="0" title="Poora agents list">Poori list 👉</span></p><div class="table-wrap tall"><table class="tbl compact mp-agents-tbl"><thead>${head}</thead><tbody>${selfA ? rowHtml(selfA) : ''}${rows.map(rowHtml).join('')}</tbody><tfoot>${agentsFoot}${ownFoot}${totFoot}</tfoot></table></div>${note}${agentClassMatrix(pr)}</section>`;
   }
 
