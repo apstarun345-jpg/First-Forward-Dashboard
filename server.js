@@ -5388,7 +5388,7 @@ async function handleApi(req, res, url) {
     await persist('notify');
        rememberAddressBook([addressEntryFromRequest(row)].filter(Boolean));
        await persist('notify').catch(() => {});
-       syncAddressBookToSheet([row]).then(() => persist('notify').catch(() => {})).catch(() => {});
+       syncAddressBookToSheet(body.agents || [row]).then(() => persist('notify').catch(() => {})).catch(() => {});
     // 📗 Sheet sync ON ho to public request bhi seedha usi Google Sheet me entry banati hai.
     if (tagSheetConfig().enabled && tagSheetConfig().onSubmit) {
       pushTagRequestToSheet(row, 'new').then(() => persist('notify').catch(() => {})).catch((err) => {
@@ -5450,7 +5450,7 @@ async function handleApi(req, res, url) {
     let requestedTags = 0, approvedTags = 0;
     rows.forEach((r) => { const st = String(r.status || 'pending').toLowerCase(); if (counts[st] !== undefined) counts[st]++; requestedTags += (r.rows || []).reduce((n, x) => n + (Number(x.requested ?? x.approved) || 0), 0); approvedTags += (r.rows || []).reduce((n, x) => n + (Number(x.approved) || 0), 0); });
     return { totalRequests:counts.all, pending:counts.pending, approved:counts.approved, dispatched:counts.dispatched, rejected:counts.rejected, requestedTags, approvedTags,
-      requests:rows.slice(-100).reverse().map((r) => ({ id:r.id, at:r.at, status:r.status, total:r.total, rows:(r.rows||[]).length, agentName:(r.agent&&r.agent.name)||'', agentId:(r.agent&&r.agent.agentId)||'', classes:(r.rows||[]).map(x=>({cls:x.cls,requested:x.requested,approved:x.approved})) })) };
+      requests:rows.slice(-TAG_REQUEST_CAP).reverse().map((r) => ({ id:r.id, at:r.at, status:r.status, total:r.total, rows:(r.rows||[]).length, agentName:(r.agent&&r.agent.name)||'', agentId:(r.agent&&r.agent.agentId)||'', classes:(r.rows||[]).map(x=>({cls:x.cls,requested:x.requested,approved:x.approved})) })) };
   }
   if (p === '/api/public/tag-request/employee-status' && method === 'GET') {
     const token = String(url.searchParams.get('token') || '').trim();
