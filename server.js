@@ -1923,7 +1923,7 @@ function pushFanout(item) {
       badge: unreadCountFor(u),
       lang: 'hi-IN',
       actions: PUSH_ACTIONS[item.type] || undefined,
-      persist: item.type === 'signup' || item.type === 'report' || item.type === 'user' // important types don't auto-dismiss
+      persist: item.type === 'signup' || item.type === 'report' || item.type === 'user' || item.type === 'request' || item.type === 'alert' // important operational alerts stay visible
     };
     handlePushResult(s, await deliverPush(s, data), { type: item.type });
   })).then(() => persist('notify')).catch(() => {});
