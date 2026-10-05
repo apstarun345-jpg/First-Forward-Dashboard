@@ -122,7 +122,7 @@ test('Global search bar is eagerly mounted across the app and covers both channe
   const idx = await read('index.html');
   const lazyAt = idx.indexOf('lazy.js?v=103');
   const searchAt = idx.indexOf('masterSearch.js?v=107');
-  const appAt = idx.indexOf('app.js?v=107');
+  const appAt = idx.indexOf('app.js?v=108');
   assert.ok(lazyAt >= 0 && searchAt > lazyAt && appAt > searchAt, 'search module loads after lazy dependencies and before app login wiring');
   const app = await read('app.js');
   assert.match(app, /Global search stays visible on every page/);
@@ -140,7 +140,7 @@ test('🏷️ v3.56 wiring — version + cache-bust pins (PR #100 final)', async
   assert.equal(pkg.version, '3.58.0');
   assert.match(await read('server.js'), /APP_VERSION = '3\.56\.0'/);
   const idx = await read('index.html');
-  assert.match(idx, /styles\.css\?v=111/); assert.match(idx, /config\.js\?v=109/); assert.match(idx, /home\.js\?v=89/); assert.match(idx, /app\.js\?v=107/); assert.match(idx, /lazy\.js\?v=103/); assert.match(idx, /masterSearch\.js\?v=107/);
+  assert.match(idx, /styles\.css\?v=112/); assert.match(idx, /config\.js\?v=109/); assert.match(idx, /home\.js\?v=89/); assert.match(idx, /app\.js\?v=108/); assert.match(idx, /lazy\.js\?v=103/); assert.match(idx, /masterSearch\.js\?v=107/);
   const sw = await read('sw.js');
-  assert.match(sw, /apnapayment-v114/); assert.match(sw, /styles\.css\?v=111/); assert.match(sw, /config\.js\?v=109/); assert.match(sw, /home\.js\?v=89/); assert.match(sw, /app\.js\?v=107/); assert.match(sw, /performance\.js\?v=105/); assert.match(sw, /masterSearch\.js\?v=107/);
+  assert.match(sw, /apnapayment-v115/); assert.match(sw, /styles\.css\?v=112/); assert.match(sw, /config\.js\?v=109/); assert.match(sw, /home\.js\?v=89/); assert.match(sw, /app\.js\?v=108/); assert.match(sw, /performance\.js\?v=105/); assert.match(sw, /masterSearch\.js\?v=107/);
 });

@@ -34,7 +34,18 @@ test('mobile/PWA bootstrap is external so the self-only CSP does not block it', 
   assert.match(html, /<script src="\/ui-boot\.js\?v=105"><\/script>/);
   assert.doesNotMatch(html, /<script\b(?![^>]*\bsrc=)[^>]*>[\s\S]*?<\/script>/);
   assert.match(sw, /\.\/ui-boot\.js\?v=105/);
-  assert.match(sw, /apnapayment-v114/);
+  assert.match(sw, /apnapayment-v115/);
+});
+
+test('bottom bar uses uniform inline SVG icons (emoji icons broke per-phone alignment)', () => {
+  assert.match(app, /const NAV_ICONS = \{/, 'icon set defined');
+  assert.match(app, /class="mnav-ico"/, 'icons render as svg');
+  const navPart = app.slice(app.indexOf('function renderMobileNav'), app.indexOf('function updateFocusMode'));
+  assert.doesNotMatch(navPart, /[\u{1F300}-\u{1FAFF}\u2600-\u27BF]/u, 'bottom bar must not use emoji glyphs');
+  assert.match(css, /#mobile-nav \.mnav-ico \{ width: 23px; height: 23px/, 'one icon size for every tab');
+  assert.match(css, /#mobile-nav \.mobile-nav-item small \{[\s\S]*?text-align: center/, 'labels share one centred baseline');
+  assert.match(css, /@media \(min-width: 600px\) and \(pointer: coarse\)[\s\S]*?width: min\(560px, calc\(100vw - 24px\)\)/, 'tablets get a capped, centred bar');
+  assert.match(css, /@media \(max-height: 480px\) and \(pointer: coarse\)/, 'landscape gets a slim bar');
 });
 
 test('installed PWA launches from the root, and legacy /api/pwa start URLs return the app shell', () => {

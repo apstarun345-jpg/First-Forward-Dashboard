@@ -5590,8 +5590,15 @@ html.mobile-ui .mobile-nav-item span {
   font-size: 23px !important;
 }
 html.mobile-ui .mobile-nav-item small {
-  font-size: 11px !important;
-  font-weight: 850 !important;
+  font-size: 10.2px !important;   /* v3.59: "Tag Issued" ko 320px tak fit karata hai */
+  font-weight: 700 !important;
+  letter-spacing: -.01em !important;
+  text-align: center !important;
+}
+@media (max-width: 360px) {
+  html.mobile-ui .mobile-nav-item small { font-size: 9.4px !important; }
+  html.mobile-ui .mobile-nav-item,
+  html.mobile-ui .mobile-nav-item.mobile-nav-action { padding-left: 0 !important; padding-right: 0 !important; }
 }
 html.mobile-ui .mobile-nav-badge {
   min-width: 20px !important;
@@ -5745,3 +5752,87 @@ html.pwa-standalone .mobile-nav { padding-bottom: max(6px, env(safe-area-inset-b
 @keyframes ffPageIn { from { opacity: .35; transform: translateY(7px); } to { opacity: 1; transform: none; } }
 /* App jaisa scroll: momentum + koi horizontal wobble nahi. */
 html.pwa-standalone body { -webkit-overflow-scrolling: touch; overflow-x: hidden; }
+
+/* ================================================================================================
+   v3.59 — Bottom navigation polish (phone alignment fix)
+   · Icons are 24×24 inline SVG (see app.js) → same size, stroke weight and optical centre on every
+     phone; emoji icons used to render at different sizes or as empty boxes and broke the alignment.
+   · Items are flex columns centred on a fixed icon box, so all five labels share one baseline even
+     when a label wraps to two words ("Tag Issued").
+   · Tablets (≥600px) get a thumb-sized floating bar instead of an edge-to-edge strip, and landscape
+     phones get a slimmer bar so the content area stays usable.
+   ================================================================================================ */
+@media (pointer: coarse), (display-mode: standalone) {
+  #mobile-nav.mobile-nav { align-items: center; }
+  #mobile-nav .mobile-nav-item,
+  #mobile-nav .mobile-nav-item.mobile-nav-action {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 4px;
+  }
+  #mobile-nav .mobile-nav-item > span {
+    width: 30px;
+    height: 30px;
+    display: grid;
+    place-items: center;
+    font-size: 0;                 /* no glyph metrics leaking into the layout */
+    line-height: 0;
+  }
+  #mobile-nav .mnav-ico { width: 23px; height: 23px; display: block; stroke-width: 1.75; }
+  #mobile-nav .mobile-nav-item small {
+    font-size: 10.5px;
+    font-weight: 700;
+    line-height: 1.15;
+    letter-spacing: -.01em;
+    text-align: center;
+    max-width: 100%;
+    padding: 0 1px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  /* Long labels ("Tag Issued") must fit between 320–430px — ellipsis se align bigadta hai */
+  @media (max-width: 430px) {
+    #mobile-nav .mobile-nav-item small { font-size: 9.8px; }
+    #mobile-nav .mobile-nav-item,
+    #mobile-nav .mobile-nav-item.mobile-nav-action { padding: 4px 1px; }
+  }
+  @media (max-width: 360px) {
+    #mobile-nav .mobile-nav-item small { font-size: 9.2px; }
+  }
+  #mobile-nav .mobile-nav-badge { top: -4px; right: -6px; min-width: 17px; height: 17px; padding: 0 4px; font-size: 8.5px; }
+  #mobile-nav .mobile-nav-item.active > span,
+  #mobile-nav .mobile-nav-item.mobile-nav-action:focus-visible > span {
+    background: color-mix(in srgb, var(--brand) 14%, var(--card));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--brand) 20%, transparent);
+  }
+}
+
+/* Tablets / large touch screens: keep the bar thumb-sized and centred instead of stretching it */
+@media (min-width: 600px) and (pointer: coarse), (min-width: 600px) and (display-mode: standalone) {
+  /* html.mobile-ui sets left/right with !important — isliye yahan bhi !important chahiye */
+  #mobile-nav.mobile-nav,
+  html.mobile-ui #mobile-nav.mobile-nav {
+    left: 50% !important;
+    right: auto !important;
+    transform: translateX(-50%) !important;
+    width: min(560px, calc(100vw - 24px)) !important;
+    border: 1px solid var(--line);
+    border-bottom: 0;
+    border-radius: 20px 20px 0 0;
+    box-shadow: 0 -10px 30px rgba(15, 23, 42, .14);
+  }
+}
+
+/* Landscape phones: slim bar, tighter rows — content stays the hero */
+@media (max-height: 480px) and (pointer: coarse) {
+  :root { --mobile-nav-h: 58px; }
+  #mobile-nav.mobile-nav { padding: 4px 6px max(4px, env(safe-area-inset-bottom)); }
+  #mobile-nav .mobile-nav-item,
+  #mobile-nav .mobile-nav-item.mobile-nav-action { min-height: 46px; height: 46px; gap: 1px; }
+  #mobile-nav .mnav-ico { width: 20px; height: 20px; }
+  #mobile-nav .mobile-nav-item small { font-size: 9.5px; }
+}

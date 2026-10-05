@@ -309,7 +309,7 @@ test('🧩 UI + cache-bust wiring: ⏪ button, banner, health summary, naya vers
   const lazy = await read('lazy.js');
   assert.match(lazy, /const VERSION = \(function/, 'lazy VERSION derive');
   const sw = await read('sw.js');
-  assert.match(sw, /apnapayment-v114/, 'service worker cache bump');
+  assert.match(sw, /apnapayment-v115/, 'service worker cache bump');
   assert.match(sw, /config\.js\?v=109/, 'sw pin config 109');
   const docs = await read('RECOVERY.md');
   assert.match(docs, /Tag Request/i, 'RECOVERY.md me tag request recovery');
