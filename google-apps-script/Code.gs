@@ -39,8 +39,8 @@ function appSecret_() {
 
 // Final production targets supplied for this dashboard.
 const DASHBOARD_BASE_URL = 'https://first-forward-dashboard.onrender.com';
-const GV_SPREADSHEET_ID = '13eyCSDnXysQM-nWymBE5yPeKw8fnbVCY-hCTqJSPUsM';
-const GV_SHEET_NAME = 'GV Master';
+const GV_SPREADSHEET_ID = String(PropertiesService.getScriptProperties().getProperty('GV_SPREADSHEET_ID') || '').trim();
+const GV_SHEET_NAME = String(PropertiesService.getScriptProperties().getProperty('GV_SHEET_NAME') || 'GV Master').trim();
 const TAG_REQUEST_SPREADSHEET_ID = '13eyCSDnXysQM-nWymBE5yPeKw8fnbVCY-hCTqJSPUsM';
 const TAG_REQUEST_DEFAULT_TAB = 'Tag Requests';
 
@@ -90,8 +90,20 @@ function setDashboardPushUrl(url, spreadsheetId, sheetName) {
 
 /** Edit the three placeholders, run this once, then keep/remove this helper as preferred. */
 function configureInstantGvPushOnce() {
+  if (!GV_SPREADSHEET_ID) throw new Error('GV_SPREADSHEET_ID Script Property missing. Run setGvSourceOnce(gvSpreadsheetId, "GV Master") first.');
   setDashboardPushUrl(DASHBOARD_BASE_URL + '/api/push/sheet-update', GV_SPREADSHEET_ID, GV_SHEET_NAME);
   return setupInstantSheetPush();
+}
+
+/** Optional: configure the separate GV Master source for instant edit push. */
+function setGvSourceOnce(spreadsheetId, sheetName) {
+  spreadsheetId = String(spreadsheetId || '').trim();
+  sheetName = String(sheetName || 'GV Master').trim();
+  if (!spreadsheetId) throw new Error('GV spreadsheet ID required.');
+  PropertiesService.getScriptProperties().setProperty('GV_SPREADSHEET_ID', spreadsheetId);
+  PropertiesService.getScriptProperties().setProperty('GV_SHEET_NAME', sheetName);
+  Logger.log('GV source saved: ' + spreadsheetId + ' / ' + sheetName);
+  return 'OK';
 }
 
 function setupInstantSheetPush() {
