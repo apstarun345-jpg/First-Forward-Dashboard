@@ -87,13 +87,41 @@ FF.pages = FF.pages || {};
     const o = opts || {};
     return new Promise((resolve, reject) => {
       if (!/^image\//.test(file.type)) return reject(new Error('Sirf image file (PNG / JPG / WEBP / SVG)'));
-      if (file.type === 'image/svg+xml') { const r = new FileReader(); r.onload = () => resolve(r.result); r.onerror = reject; r.readAsDataURL(file); return; }
+      if (file.type === 'image/svg+xml') {
+        const r = new FileReader();
+        r.onload = () => {
+          const img = new Image();
+          img.onload = () => {
+            const sw = img.width, sh = img.height;
+            const square = !!o.square;
+            const side = Math.min(sw, sh);
+            const sx = square ? Math.round((sw - side) / 2) : 0;
+            const sy = square ? Math.round((sh - side) / 2) : 0;
+            const rw = square ? side : sw, rh = square ? side : sh;
+            const scale = Math.min(1, (maxSide || 512) / Math.max(rw, rh));
+            const c = document.createElement('canvas');
+            c.width = Math.max(1, Math.round(rw * scale));
+            c.height = Math.max(1, Math.round(rh * scale));
+            const ctx = c.getContext('2d');
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
+            ctx.clearRect(0, 0, c.width, c.height);
+            ctx.drawImage(img, sx, sy, rw, rh, 0, 0, c.width, c.height);
+            resolve(c.toDataURL('image/png'));
+          };
+          img.onerror = () => reject(new Error('SVG image load nahi hui'));
+          img.src = r.result;
+        };
+        r.onerror = reject;
+        r.readAsDataURL(file);
+        return;
+      }
       const img = new Image();
       const url = URL.createObjectURL(file);
       img.onload = () => {
         URL.revokeObjectURL(url);
         const isLogo = (maxSide || 512) <= 512 && !o.square;
-        const keepAlpha = (file.type === 'image/png' || file.type === 'image/gif') && (isLogo || o.square);
+        const keepAlpha = !!o.forcePng || ((file.type === 'image/png' || file.type === 'image/gif') && (isLogo || o.square));
         // Source rect: full image, or centred square crop for avatars.
         let sx = 0, sy = 0, sw = img.width, sh = img.height;
         if (o.square) {
@@ -120,7 +148,7 @@ FF.pages = FF.pages || {};
             ctx.fillRect(0,0,c.width,c.height);
           }
           ctx.drawImage(img, sx, sy, sw, sh, 0, 0, c.width, c.height);
-          const mime = keepAlpha ? 'image/png' : 'image/webp';
+          const mime = o.forcePng ? 'image/png' : (keepAlpha ? 'image/png' : 'image/webp');
           const quality = keepAlpha ? undefined : Math.max(.65, .92 - pass * .08);
           data = c.toDataURL(mime, quality);
           const limit = isLogo ? 600 * 1024 : 1200 * 1024;
@@ -571,7 +599,7 @@ FF.pages = FF.pages || {};
       return `<div class="img-field"><div class="img-preview ${key}">${s[key] ? `<img src="${esc(s[key])}" alt="">` : '<span class="dim">No image</span>'}</div><div><b>${label}</b><small class="dim">${hint}</small><small class="dim img-info" data-img-info="${key}">${s[key] ? `Saved: ${imgSizeInfo(s[key])}` : ''}</small><div class="btn-row"><label class="btn small">📤 Upload<input type="file" accept="image/*" hidden data-img="${key}" data-max="${max}"></label>${sizeSel}${s[key] ? `<button class="btn small" data-img-clear="${key}">✕ Remove</button>` : ''}</div></div></div>`;
     };
     return `${section('🏷️ Branding', `<div class="form-grid">${field('App name', txt('appName', s.appName), 'Browser title / login page')}${field('Brand (sidebar)', txt('brand', s.brand))}${field('Tagline', txt('tagline', s.tagline))}${field('Footer product name', txt('footerText', s.footerText || s.appName || 'First Forward Dashboard'), 'Copyright me ye naam dikhega')}${field('Developer credit', txt('developerName', s.developerName || 'Tarun Kumawat'), 'Login aur site footer par credit')}${field('Show site footer', check('showFooter', s.showFooter !== false, 'Footer visible on dashboard'))}</div>${saveBar('brand')}`)}
-      ${section('🖼️ Images', `${img('logo', 'Logo', 'Sidebar + login page (square works best, PNG with transparency). Upload ke baad selected size par auto-resize hota hai.', 512)}${img('loginImage', 'Login / hero image', 'Left side of the login page (landscape). Upload ke baad selected size par auto-resize hoti hai.', 1600)}<div class="img-field"><div class="img-preview logo">${s.pwaIcon512 ? `<img src="${esc(s.pwaIcon512)}" alt="PWA icon">` : '<span class="dim">Default PWA icon</span>'}</div><div><b>📱 PWA App Icon — All</b><small class="dim">Ek square image upload karo. Isse PWA 64×64, 192×192 aur 512×512 icons automatically banenge. Install hone wale app, browser favicon aur PWA manifest isi icon ko use karenge.</small><small class="dim img-info">${s.pwaIcon512 ? `Saved: ${imgSizeInfo(s.pwaIcon512)}` : ''}</small><div class="btn-row"><label class="btn small">📤 Change PWA Icon<input type="file" accept="image/*" hidden data-pwa-icon></label>${s.pwaIcon512 ? '<button class="btn small" data-pwa-icon-clear>✕ Default icon</button>' : ''}</div></div></div><p class="dim small">Logo aur PWA icon alag hain. PWA icon change karne se installed app icon + favicon + manifest icon update hoga.</p><p class="dim small">Images server par save hoti hain (settings.json) — upload karte hi live.</p>`)}
+      ${section('🖼️ Images', `${img('logo', 'Logo', 'Sidebar + login page (square works best, PNG with transparency). Upload ke baad selected size par auto-resize hota hai.', 512)}${img('loginImage', 'Login / hero image', 'Left side of the login page (landscape). Upload ke baad selected size par auto-resize hoti hai.', 1600)}<div class="img-field pwa-icon-admin-card"><div class="img-preview pwa-icon-preview">${s.pwaIcon512 ? `<img src="${esc(s.pwaIcon512)}" alt="PWA app icon">` : '<span class="dim">Default PWA icon</span>'}</div><div><b>📱 PWA App Icon — All</b><small class="dim">Ye aapke installed mobile app ka main logo hai. Ek <b>square image</b> upload karo — system automatically clean <b>64×64, 192×192 aur 512×512 PNG</b> versions banayega. App icon, browser favicon aur PWA install icon sab isi se update honge.</small><small class="dim img-info">${s.pwaIcon512 ? `Saved: ${imgSizeInfo(s.pwaIcon512)}` : 'Using default app icon'}</small><div class="btn-row"><label class="btn small primary">📱 Change PWA Icon<input type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml" hidden data-pwa-icon></label>${s.pwaIcon512 ? '<button class="btn small" data-pwa-icon-clear>↺ Restore default</button>' : ''}</div></div></div><p class="dim small">Logo aur PWA icon alag hain. PWA icon change karne se installed app icon + favicon + manifest icon update hoga.</p><p class="dim small">Images server par save hoti hain (settings.json) — upload karte hi live.</p>`)}
       ${section('🎨 Theme colours', `<div class="form-grid">${field('Sidebar background (top)', color('theme.sidebarBg', t.sidebarBg))}${field('Sidebar background (bottom)', color('theme.sidebarBg2', t.sidebarBg2))}${field('Sidebar text', color('theme.sidebarText', t.sidebarText))}${field('Accent', color('theme.accent', t.accent))}${field('Accent 2 (gradient)', color('theme.accent2', t.accent2))}</div><p class="dim small">Colour preview turant dikhta hai; picker selection complete karne par automatically save hota hai. Save button bhi use kar sakte hain.</p>${saveBar('theme')}<button class="btn small" data-reset-theme>↺ Default colours</button>`)}`;
   }
   function dataTab() {
@@ -2532,7 +2560,7 @@ FF.pages = FF.pages || {};
       if (pwaInput) pwaInput.addEventListener('change', async () => {
         const file = pwaInput.files[0]; if (!file) return;
         try {
-          const make = (size) => readImage(file, size, { square: true, minSide: size });
+          const make = (size) => readImage(file, size, { square: true, minSide: size, forcePng: true });
           const [p64, p192, p512] = await Promise.all([make(64), make(192), make(512)]);
           await save({ pwaIcon64: p64, pwaIcon192: p192, pwaIcon512: p512 }, null);
           U.toast('📱 PWA icon ke saare sizes update ho gaye ✓', 'ok');
