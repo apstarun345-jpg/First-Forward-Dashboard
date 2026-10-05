@@ -1919,7 +1919,7 @@ function pushFanout(item) {
     const data = {
       id: item.id,
       title: item.title,
-      body: (item.body || '').replace(/\\s+/g, ' ').slice(0, 300),
+      body: (item.body || '').replace(/\s+/g, ' ').slice(0, 300),
       tag: eventTag,
       type: item.type || 'info',
       routeKey: item.routeKey || '',
