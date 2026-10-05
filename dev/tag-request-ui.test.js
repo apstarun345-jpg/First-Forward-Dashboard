@@ -131,9 +131,13 @@ test('🧾 employee class hints — har class ka stock, last month aur current M
     channel: 'ff', name: 'A', stock: rec.stock, last: rec.last, cur: rec.cur,
     grp: { core: { stock: 14, last: 25, cur: 8 }, comm: { stock: 17, last: 15, cur: 6 } }
   });
-  assert.ok(groups.includes('VC4 + VC20') && groups.includes('VC20 is included'));
-  assert.ok(groups.includes('Stock 14') && groups.includes('Last 25') && groups.includes('MTD 8'));
-  assert.ok(groups.includes('Stock 31') && groups.includes('Last 40') && groups.includes('MTD 14'), 'overall total includes all groups');
+  // v3.52 — ek box-strip (stock · last · MTD · suggested · priority) + EK class table; 🚗/🚚 group rows gayi
+  assert.ok(groups.includes('tr-boxes') && groups.includes('VC4 + VC20 group'), 'boxes + VC20 note');
+  assert.ok(/📦 Stock<\/small><b>31<\/b><em>VC4 12 · VC20 2 · VC5\+ 17/.test(groups), 'stock box: total + class mix');
+  assert.ok(/Last month[^<]*<\/small><b>40<\/b><em>VC4 20 · VC20 5 · VC5\+ 15/.test(groups), 'last month box');
+  assert.ok(/Current MTD[^<]*<\/small><b>14<\/b><em>VC4 5 · VC20 3 · VC5\+ 6/.test(groups), 'MTD box');
+  assert.ok(groups.includes('🎯 Suggested qty') && groups.includes('🚦 Priority'), 'suggested + priority boxes');
+  assert.ok(!groups.includes('tr-qty-group"'), 'purane 🚗/🚚 duplicate group rows nahi');
 });
 
 test('🧭 admin source filter — Both / First Forward / GV only; hidden from employees', () => {

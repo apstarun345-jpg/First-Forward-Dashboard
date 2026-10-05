@@ -308,7 +308,16 @@ window.FF = window.FF || {};
     notifyTimer = setTimeout(() => dataListeners.forEach((fn) => { try { fn(); } catch { /* listener error */ } }), 60);
   }
   const progress = (fn) => safeAsync(fn).then((v) => { dataArrived(); return v; });
+  /** v3.52 — FF REPORT reader (`performance.js`) lazy module hai; agar abhi tak load nahi hua to pehle
+   *  use lao, warna FF agent/TL ka stock · priority · suggested dispatch kabhi nahi aata ("REPORT me
+   *  row nahi mili" sirf isliye ki module hi nahi tha). Fail ho to chup-chaap aage badho. */
+  async function ensurePerfModule() {
+    if (perf()) return perf();
+    try { if (FF.lazy && FF.lazy.need) await FF.lazy.need('performance'); } catch { /* optional */ }
+    return perf();
+  }
   async function load() {
+    await ensurePerfModule();
     const P = perf();
     const jobs = [];
     if (P && P.ensureLoaded) jobs.push(progress(() => P.ensureLoaded()));
@@ -328,7 +337,7 @@ window.FF = window.FF || {};
       // GV Master is the immediate fallback; consume FF EIR rollups only if the app already has them
       // in memory. Do not make a GV summary wait for the unrelated First Forward loader.
     } else {
-      const P = perf();
+      const P = await ensurePerfModule();
       if (P && P.ensureLoaded) jobs.push(progress(() => P.ensureLoaded({ light: true })));
       ['daily', 'agentClass', 'agents', 'stockAgents'].forEach((k) => { if (FF.store && FF.store.need) jobs.push(progress(() => FF.store.need(k, { only: true }))); });
     }

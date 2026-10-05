@@ -168,6 +168,30 @@ html[data-theme="dark"] .pct.neg { color: #f87171; }
 .msp-trend-chart { margin: 4px 0 12px; }
 .msp-trend-tbl { font-size: 0.86rem; }
 .msp-trend-tbl td, .msp-trend-tbl th { padding: 4px 8px; }
+/* 📅 v3.52 — trend ke upar VC4 · VC20 · VC5+ ke total chips */
+.msp-trend-sum { display: flex; flex-wrap: wrap; gap: 8px; margin: 2px 0 10px; }
+.msp-tsum { display: inline-flex; align-items: baseline; gap: 6px; padding: 6px 11px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); border-left: 4px solid var(--brand); min-width: 0; }
+.msp-tsum small { color: var(--muted); font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; }
+.msp-tsum b { font-size: 16px; font-weight: 900; }
+.msp-tsum.vc4 { border-left-color: #6366f1; } .msp-tsum.vc20 { border-left-color: #f59e0b; } .msp-tsum.vc5p { border-left-color: #10b981; }
+.msp-tsum.total { border-left-color: #0ea5e9; } .msp-tsum.peak { border-left-color: #ec4899; }
+
+/* 📦 v3.52 — Master Search: search ke turant neeche har channel ka KPI card
+   (stock · issuance VC4/VC20/VC5+ · priority · suggested dispatch · growth) */
+.msp-kpis-wrap { display: grid; gap: 10px; margin: 0 0 12px; }
+.msp-kpi-card { margin: 0; }
+.msp-kpi-card .card-head h3 { font-size: 14px; margin: 0; }
+.msp-kpi-card .card-head p { margin: 2px 0 0; }
+.msp-kpi-card .card-body { padding-top: 10px; }
+.msp-kpis { grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr)); }
+.msp-kpi small { display: block; font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); }
+.msp-kpi b { font-size: 20px; }
+.msp-kpi b .sug-pair { font-size: 12px; }
+.msp-kpi.k0 { border-top-color: #ec4899; } .msp-kpi.k9 { border-top-color: #22c55e; background: color-mix(in srgb, #22c55e 6%, var(--card)); }
+.msp-kpi.kpi-clickable { cursor: pointer; }
+.msp-kpi.kpi-clickable:hover { box-shadow: 0 4px 14px color-mix(in srgb, var(--brand) 16%, transparent); transform: translateY(-1px); }
+.msp-kpi-note { margin: 8px 0 0; }
+@media (max-width: 640px) { .msp-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } .msp-kpi b { font-size: 17px; } }
 html[data-theme="dark"] .sug-result.gross > small { color: #5eead4; }
 .g1 { background: linear-gradient(135deg, #6366f1, #8b5cf6); }
 .g2 { background: linear-gradient(135deg, #ec4899, #f43f5e); }
@@ -4076,6 +4100,18 @@ html[data-theme='dark'] .age-tbl tr.age-total td { background: rgba(255, 255, 25
 .tr-tlk { background: #fff; border-radius: 10px; padding: 8px 10px; border-left: 4px solid #6366f1; display: flex; flex-direction: column; gap: 1px; color: #0f172a; }
 .tr-tlk:nth-child(2) { border-left-color: #f59e0b; } .tr-tlk:nth-child(3) { border-left-color: #10b981; } .tr-tlk:nth-child(4) { border-left-color: #ec4899; }
 .tr-tlk small { color: #475569; font-weight: 600; } .tr-tlk b { font-size: 1.35rem; }
+/* 📦 v3.52 — employee link: agent / TL ka ek jaisa box-strip (stock · last · MTD · 🎯 suggested · priority) */
+.tr-tl-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 0.95rem; }
+.tr-boxes { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr)); gap: 8px; }
+.tr-box { background: #fff; border-radius: 10px; padding: 8px 10px; border-left: 4px solid #6366f1; display: flex; flex-direction: column; gap: 2px; color: #0f172a; min-width: 0; }
+.tr-box small { color: #475569; font-weight: 700; font-size: 10px; text-transform: uppercase; letter-spacing: .03em; }
+.tr-box b { font-size: 1.3rem; line-height: 1.15; }
+.tr-box b .sug-pair { font-size: 11px; }
+.tr-box em { font-style: normal; color: #64748b; font-size: 10.5px; line-height: 1.25; font-variant-numeric: tabular-nums; }
+.tr-box.last { border-left-color: #f59e0b; } .tr-box.cur { border-left-color: #10b981; } .tr-box.sug { border-left-color: #0ea5e9; } .tr-box.prio { border-left-color: #ec4899; }
+.tr-qty-list .tr-boxes { padding: 8px 10px; border-top: 1px solid var(--line); background: color-mix(in srgb, #0ea5e9 5%, var(--card)); gap: 6px; grid-template-columns: repeat(auto-fit, minmax(min(120px, 100%), 1fr)); }
+.tr-qty-list .tr-box { padding: 6px 8px; } .tr-qty-list .tr-box b { font-size: 1.05rem; }
+html[data-theme="dark"] .tr-box { background: #0f172a; color: #e2e8f0; } html[data-theme="dark"] .tr-box small { color: #94a3b8; } html[data-theme="dark"] .tr-box em { color: #94a3b8; }
 
 /* 🪶 v3.51 — 🚚 courier (form + table) aur 📊 class-wise breakdown (VC4 · VC20 · VC5+) */
 .tr-form-extra { display: grid; grid-template-columns: minmax(160px, 240px) 1fr; gap: 10px; margin-top: 12px; align-items: end; }

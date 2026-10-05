@@ -232,6 +232,11 @@ FF.pages = FF.pages || {};
     if (!force && state.index && Date.now() - state.index.at < 60e3) return state.index;
     if (state.indexPromise) return state.indexPromise;
     const S = FF.store;
+    // v3.52 — FF REPORT reader (`performance.js`) lazy hai; employee link / Tag Request page par wo
+    // pehle load nahi hota tha → FF agents ka stock 0, priority khaali, "data me nahi mila". Ab index
+    // banane se pehle module ko laate hain (fail ho to EIR + GV REPORT se jo bane wahi).
+    if (!FF.pages.performance && FF.lazy && FF.lazy.need) { try { await FF.lazy.need('performance'); } catch { /* optional */ } }
+    if (state.indexPromise) return state.indexPromise;
     const perf = FF.pages.performance;
     // 🌐 Public form: sirf zaroori datasets (`only`) + light performance load — Google par kam load.
     const light = isPublic();
@@ -1079,17 +1084,35 @@ body.colorful .from-hdr { color: #166534; }
     const d = classData(rec, c);
     return `Stock ${fmt(d.stock)} · Last ${fmt(d.last)} · MTD ${fmt(d.cur)}${d.sugNet > 0 ? ` · 💡 ${fmt(d.sugNet)}` : ''}`;
   }
-  /** All-class/group totals also expose VC20, which is included in the 🚗 core group rather than a request row. */
+  /** 📦 v3.52 — Agent / TL dono ke liye EK jaisa box-strip: stock · last month · MTD · 🎯 suggested ·
+   *  priority (+ TL me agents count). Har number ek hi baar — pehle 🚗/🚚 group rows + class table +
+   *  footer rows me wahi stock/last/MTD 3 baar aata tha ("double data"). Class-wise detail neeche
+   *  sirf ek table me (VC4 · VC20 · VC5+ · Total). */
+  function personBoxesHtml(rec, opts) {
+    if (!rec) return '';
+    const o = opts || {};
+    const m = metricNumbers(groupMetrics(rec));
+    const rows = classBreakdownRows(rec, groupMetrics(rec));
+    const by = Object.fromEntries(rows);
+    const mix = (k) => `VC4 ${fmt(by.VC4[k])} · VC20 ${fmt(by.VC20[k])} · VC5+ ${fmt(by['VC5+'][k])}`;
+    const t = m.total;
+    const prio = priorityFor(coverOf(t.rate, t.stock), rec.priority);
+    const prioChip = `<span class="badge ${/high/i.test(prio) ? 'red' : /medium/i.test(prio) ? 'amber' : 'green'}">${esc(prio)}</span>`;
+    const cover = coverOf(t.rate, t.stock);
+    const box = (cls, label, value, sub) => `<div class="tr-box ${cls}"><small>${label}</small><b>${value}</b>${sub ? `<em>${sub}</em>` : ''}</div>`;
+    const sug = `<span class="sug-pair sug-pair-tight"><span class="sug-result net" title="Run-rate × ${fmt(U.suggestDays ? U.suggestDays() : 15)} din − stock"><small>After stock</small><b class="sug-chip">${fmt(t.suggest.net)}</b></span><span class="sug-result gross" title="Run-rate × din (stock ghata kar nahi)"><small>W/o stock</small><b class="sug-chip wo">${fmt(t.suggest.gross)}</b></span></span>`;
+    return `<div class="tr-boxes" aria-label="${esc(rec.isTl ? 'TL' : 'Agent')} stock, issuance, priority and suggested qty">
+      ${box('stock', `📦 Stock${rec.isTl ? ' · TL total' : ''}`, fmt(t.stock), mix('stock'))}
+      ${box('last', `📅 Last month${m.ym ? ` · ${esc(U.labelYM(U.prevMonthKey(m.ym), true))}` : ''}`, fmt(t.last), mix('last'))}
+      ${box('cur', `▶ Current MTD${m.ym ? ` · ${esc(U.labelYM(m.ym, true))}` : ''}`, fmt(t.cur), `${mix('cur')} · ${fmt(t.rate, true)}/din`)}
+      ${box('sug', '🎯 Suggested qty · all tags', sug, `VC4 ${fmt(by.VC4.net)} / ${fmt(by.VC4.gross)} · VC5+ ${fmt(by['VC5+'].net)} / ${fmt(by['VC5+'].gross)}`)}
+      ${box('prio', '🚦 Priority', prioChip, `${cover == null ? 'cover —' : `cover ${fmt(cover, true)} din`}${o.agents != null ? ` · 👥 ${fmt(o.agents)} agents${o.self ? ' + TL' : ''}` : ''}${rec.channel === 'gv' ? ' · 🟩 GV' : ' · 🟦 FF'}`)}
+    </div>`;
+  }
+  /** Agent ke qty-list ke neeche: boxes + EK class-wise table (VC20 🚗 VC4+VC20 group me ginta hai). */
   function agentGroupSummaryHtml(rec) {
     if (!rec || rec.isTl) return '';
-    const m = groupMetrics(rec);
-    const rows = [
-      ['🚗 VC4 + VC20', m.core],
-      ['🚚 VC5+', m.comm],
-      ['All classes', { stock: m.core.stock + m.comm.stock, last: m.core.last + m.comm.last, cur: m.core.cur + m.comm.cur }]
-    ];
-    return `<div class="tr-qty-groups" aria-label="Agent stock and issuance summary">${rows.map(([label, g]) => `<div class="tr-qty-group"><b>${label}</b><span>Stock ${fmt(g.stock)} <i>·</i> Last ${fmt(g.last)} <i>·</i> MTD ${fmt(g.cur)}</span></div>`).join('')}<small>VC20 is included in 🚗 VC4 + VC20.</small></div>`
-      + classBreakdownHtml(rec, { title: '📊 Class-wise (VC4 · VC20 · VC5+)' });
+    return personBoxesHtml(rec) + classBreakdownHtml(rec, { title: '📊 Class-wise (VC4 · VC20 · VC5+)', note: 'VC20 ki apni request row nahi — wo 🚗 VC4 + VC20 group me ginta hai.' });
   }
   /** 📊 VC4 · VC20 · VC5+ ka stock / last month / current MTD + suggested qty (stock − aur bina stock).
    *  VC20 ki apni class row nahi hoti (wo 🚗 VC4+VC20 me judta hai) — isliye VC20 = core − VC4. */
@@ -1117,7 +1140,7 @@ body.colorful .from-hdr { color: #166534; }
     const rows = classBreakdownRows(rec, groupMetrics(rec));
     const body = rows.map(([label, r]) => `<tr${label === 'Total' ? ' class="row-total"' : ''}><td><b>${esc(label)}</b></td><td class="num">${fmt(r.stock)}</td><td class="num">${fmt(r.last)}</td><td class="num">${fmt(r.cur)}</td><td class="num"><b class="sug-chip">${fmt(r.net)}</b></td><td class="num"><b class="sug-chip wo">${fmt(r.gross)}</b></td></tr>`).join('');
     return `<div class="tr-class-tbl">
-      <div class="tr-class-head"><b>${esc(o.title || '📊 Class-wise')}</b><span class="dim small">Stock · Last month · Current MTD · 🎯 suggested qty (stock ke baad / bina stock ghataye)</span></div>
+      <div class="tr-class-head"><b>${esc(o.title || '📊 Class-wise')}</b><span class="dim small">Stock · Last month · Current MTD · 🎯 suggested qty (stock ke baad / bina stock ghataye)${o.note ? ` · ${esc(o.note)}` : ''}</span></div>
       <div class="table-wrap"><table class="tbl compact"><thead><tr><th>Class</th><th class="num">Stock</th><th class="num">Last month</th><th class="num">Current MTD</th><th class="num" title="Run-rate × target din − stock">🎯 After stock</th><th class="num" title="Run-rate × target din (stock ghata kar nahi)">W/o stock</th></tr></thead><tbody>${body}</tbody></table></div>
     </div>`;
   }
@@ -1130,15 +1153,20 @@ body.colorful .from-hdr { color: #166534; }
     const self = list.find((a) => a.isSelf) || null;
     const agents = list.filter((a) => !a.isSelf);
     const sumOf = (arr, k) => U.sum(arr, (a) => num(a[k]));
-    const cell = (label, g) => `<div class="tr-tlk"><small>${label}</small><b>${fmt(g.stock)}</b><span class="dim small">stock · last ${fmt(g.last)} · MTD ${fmt(g.cur)}</span></div>`;
     const agentRow = (a) => `<tr class="tr-tl-agent${a.isSelf ? ' mp-selfrow' : ''}" data-tr-tlagent="agent:${esc(a.channel)}:${esc(a.agentId || '')}:${esc(norm(a.name))}" style="cursor:pointer"><td>${a.isSelf ? '👤 ' : ''}<b>${esc(a.name)}</b>${a.isSelf ? '<span class="mp-tag-self">TL · apna stock</span>' : ''}${a.agentId ? ` <small class="dim">#${esc(a.agentId)}</small>` : ''}</td><td class="num">${fmt(a.stock)}</td><td class="num">${fmt(a.last)}</td><td class="num">${fmt(a.cur)}</td></tr>`;
     const footRow = (label, stock, last, cur, cls) => `<tr class="${cls || ''}"><td><b>${label}</b></td><td class="num"><b>${fmt(stock)}</b></td><td class="num">${fmt(last)}</td><td class="num">${fmt(cur)}</td></tr>`;
+    // v3.52 — footer me wahi total do baar nahi: TL ki apni row ho to "agents + own = TL total" teeno,
+    // warna sirf ek "= TL TOTAL (N agents)" row (agents ka jod hi TL total hai).
+    const foot = !list.length ? '' : `<tfoot>${self
+      ? `${agents.length ? footRow(`🧑‍💼 Agents total (${fmt(agents.length)})`, sumOf(agents, 'stock'), sumOf(agents, 'last'), sumOf(agents, 'cur')) : ''}${footRow(`👤 ${esc(self.name)} ke paas (TL own)`, self.stock, self.last, self.cur, 'mp-selfrow')}${footRow('= TL TOTAL (own + agents)', num(m.total.stock), num(m.total.last), num(m.total.cur), 'row-total')}`
+      : footRow(`= TL TOTAL (${fmt(agents.length)} agents ka jod)`, num(m.total.stock), num(m.total.last), num(m.total.cur), 'row-total')}</tfoot>`;
     return `<div class="tr-tl-panel">
-      <div class="tr-tl-kpis">${cell('🚗 VC4+VC20', m.core)}${cell('🚚 VC5+', m.comm)}${cell('Total', m.total)}<div class="tr-tlk"><small>Agents</small><b>${fmt(agents.length)}${self ? ' + TL' : ''}</b><span class="dim small">TL ${esc(rec.priority || '—')}</span></div></div>
-      ${classBreakdownHtml(rec, { title: '📊 ' + rec.name + ' · class-wise (VC4 · VC20 · VC5+)' })}
+      <div class="tr-tl-head"><b>👥 ${esc(rec.name)}</b> <span class="badge ${rec.channel === 'gv' ? 'green' : 'blue'}">${rec.channel === 'gv' ? '🟩 GV Partner' : '🟦 First Forward'} TL</span> <span class="dim small">· TL + ${fmt(agents.length)} agents ka jod${self ? ' (TL ki apni row alag)' : ''}</span></div>
+      ${personBoxesHtml(rec, { agents: agents.length, self: !!self })}
+      ${classBreakdownHtml(rec, { title: '📊 Class-wise (VC4 · VC20 · VC5+) · TL total' })}
       <details class="tr-tl-agents"><summary>👥 ${esc(rec.name)} ke agents (${fmt(agents.length)})${self ? ' + TL ka apna stock' : ''} — click karke agent chuno</summary>
-        <p class="dim small" style="margin:4px 0">Hisaab: TL ka total = agents ka jod + TL ke paas (apni row alag dikhi hai, do baar nahi judti).</p>
-        <div class="table-wrap"><table class="tbl compact"><thead><tr><th>Agent</th><th>Stock</th><th>Last</th><th>MTD</th></tr></thead><tbody>${list.map(agentRow).join('') || '<tr><td colspan="4" class="dim">Agents nahi mile</td></tr>'}</tbody>${list.length ? `<tfoot>${agents.length ? footRow(`🧑‍💼 Agents total (${fmt(agents.length)})`, sumOf(agents, 'stock'), sumOf(agents, 'last'), sumOf(agents, 'cur')) : ''}${self ? footRow(`👤 ${esc(self.name)} ke paas (TL own)`, self.stock, self.last, self.cur, 'mp-selfrow') : ''}${footRow('= TL TOTAL (own + agents)', num(m.total.stock), num(m.total.last), num(m.total.cur), 'row-total')}</tfoot>` : ''}</table></div>
+        <p class="dim small" style="margin:4px 0">${self ? 'Hisaab: TL ka total = agents ka jod + TL ke paas (apni row alag dikhi hai, do baar nahi judti).' : 'Har agent ka apna stock · last month · MTD — jod upar ke boxes ke barabar.'}</p>
+        <div class="table-wrap"><table class="tbl compact"><thead><tr><th>Agent</th><th class="num">Stock</th><th class="num">Last</th><th class="num">MTD</th></tr></thead><tbody>${list.map(agentRow).join('') || '<tr><td colspan="4" class="dim">Agents nahi mile</td></tr>'}</tbody>${foot}</table></div>
       </details></div>`;
   }
   // ---- 📦 "sabhi agents ka stock" board — employee link par bhi (v3.38) ---------------------------

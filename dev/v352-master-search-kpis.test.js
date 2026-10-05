@@ -1,0 +1,129 @@
+/* 🔍📦 v3.52 — Master Search + Tag Request employee link: boxes me poora data, suggestions, VC4/VC20/VC5+ trend.
+ *
+ *   • Root cause: `performance.js` (FF REPORT reader) Master Search / Tag Request / public form par
+ *     lazy-load hi nahi hota tha → FF agent/TL ke boxes me stock 0, priority —, suggested 0.
+ *     Ab PROFILE_DEPS + tagRequest group + WARM me `performance`, aur masterProfile/tagRequest khud
+ *     `FF.lazy.need('performance')` karte hain (self-heal).
+ *   • Master Search: type karte hi `U.suggest` dropdown; result ke upar har channel ka KPI strip
+ *     (stock · issuance · priority · suggested · growth); trend chart VC4 · VC20 · VC5+ stacked.
+ *   • Tag Request employee link: agent / TL dono ke liye EK box-strip + EK class table — koi number
+ *     do baar nahi (purane 🚗/🚚 KPI cells + double footer gaye).
+ */
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import { createRequire } from 'node:module';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const read = (f) => fs.readFile(path.join(ROOT, f), 'utf8');
+const require = createRequire(import.meta.url);
+const ls = new Map();
+globalThis.window = globalThis;
+globalThis.localStorage = { getItem: (k) => (ls.has(k) ? ls.get(k) : null), setItem: (k, v) => ls.set(k, String(v)), removeItem: (k) => ls.delete(k) };
+globalThis.addEventListener = () => {};
+globalThis.removeEventListener = () => {};
+require(path.join(ROOT, 'config.js'));
+require(path.join(ROOT, 'util.js'));
+require(path.join(ROOT, 'tagRequest.js'));
+const FF = globalThis.FF;
+const TR = FF.pages.tagRequest;
+FF.auth = { user: { role: 'admin', username: 'owner', name: 'Owner' }, can: () => true, settings: {} };
+
+test('🧩 performance.js ab Master Search / Tag Request / public form par bhi load hota hai (lazy deps + self-heal)', async () => {
+  const lazy = await read('lazy.js');
+  const deps = /const PROFILE_DEPS = \[([^\]]+)\]/.exec(lazy);
+  assert.ok(deps && /'performance'/.test(deps[1]) && /'agentBoard'/.test(deps[1]), 'PROFILE_DEPS me agentBoard + performance');
+  const tagGroup = /tagRequest:\s*\[([^\]]+)\]/.exec(lazy);
+  assert.ok(tagGroup && /'performance'/.test(tagGroup[1]), 'tagRequest group me performance');
+  const warm = /const WARM = \[([^\]]+)\]/.exec(lazy);
+  assert.ok(warm && /'performance'/.test(warm[1]), 'WARM me performance');
+
+  const mp = await read('masterProfile.js');
+  assert.match(mp, /function ensurePerfModule\(/, 'masterProfile self-heal helper');
+  assert.match(mp, /FF\.lazy\.need\('performance'\)/, 'masterProfile lazy.need(performance)');
+  const tr = await read('tagRequest.js');
+  assert.match(tr, /if \(!FF\.pages\.performance && FF\.lazy[^\n]{0,80}await FF\.lazy\.need\('performance'\)/, 'tagRequest buildIndex performance load karta hai');
+});
+
+test('🔍 Master Search — type karte hi suggestions, result ke upar KPI strip, trend VC4 · VC20 · VC5+', async () => {
+  const ms = await read('masterSearch.js');
+  const page = ms.slice(ms.indexOf('function pageRender'));
+  assert.match(page, /U\.suggest\(input, \{[\s\S]{0,400}items: \(\) => suggestItems\(/, '#msp-q par U.suggest dropdown');
+  assert.match(page, /onIndexReady[\s\S]{0,200}sug\.refresh\(\)/, 'index ready hone par dropdown refresh');
+  assert.match(ms, /function kpiStripHtml\(pr\)/, 'KPI strip builder');
+  assert.match(ms, /async function paintKpis\(g, host\)/, 'quick → full upgrade painter');
+  assert.match(ms, /<div id="msp-kpis"/, 'openGroup me KPI host');
+  assert.match(ms, /paintKpis\(g, U\.\$\('#msp-kpis', out\)\)/, 'openGroup paintKpis call karta hai');
+  for (const s of ['📦 Stock', 'Issued this month', 'Last month', '🚦 Priority', 'Sug. VC4', 'Sug. Commercial', 'Dispatch · all tags', '📈 Growth']) assert.ok(ms.includes(s), `KPI box "${s}"`);
+  // trend: stacked VC4 / VC20 / VC5+ series (pehle sirf 'Total tags')
+  const trend = ms.slice(ms.indexOf('function trendHtml'), ms.indexOf('function paintTrend'));
+  assert.ok(!trend.includes("name: 'Total tags'"), 'single Total series gayi');
+  for (const n of ['VC4', 'VC20', 'VC5+']) assert.ok(trend.includes(`name: '${n}'`), `series ${n}`);
+  assert.match(trend, /msp-trend-sum[\s\S]*msp-tsum vc4[\s\S]*msp-tsum vc20[\s\S]*msp-tsum vc5p/, 'class-wise total chips');
+  assert.ok(!trend.includes("'Sab (kul ${U.fmt"), 'header me literal ${} template bug nahi');
+  const css = await read('styles.css');
+  for (const c of ['.msp-kpis', '.msp-kpi-card', '.msp-trend-sum', '.tr-boxes', '.tr-box.prio']) assert.ok(css.includes(c), `css ${c}`);
+});
+
+const grp = (core, comm) => ({ core, comm });
+const mkIdx = (withSelf) => {
+  const agents = new Set(['ff|A ONE', 'ff|A TWO']);
+  if (withSelf) agents.add('ff|TL ONE');
+  const list = [
+    { key: 'ff|A ONE', channel: 'ff', name: 'A ONE', agentId: '1', tlName: 'TL One', priority: 'High', stock: 10, last: 50, cur: 6, core: { stock: 7, last: 40, cur: 4 }, comm: { stock: 3, last: 10, cur: 2 } },
+    { key: 'ff|A TWO', channel: 'ff', name: 'A TWO', agentId: '2', tlName: 'TL One', priority: 'Low', stock: 4, last: 20, cur: 2, core: { stock: 3, last: 15, cur: 1 }, comm: { stock: 1, last: 5, cur: 1 } }
+  ];
+  if (withSelf) list.push({ key: 'ff|TL ONE', channel: 'ff', name: 'TL One', agentId: '9', tlName: 'TL One', priority: 'Low', stock: 6, last: 30, cur: 2, core: { stock: 4, last: 20, cur: 1 }, comm: { stock: 2, last: 10, cur: 1 } });
+  const tot = withSelf ? { core: { stock: 14, last: 75, cur: 6 }, comm: { stock: 6, last: 25, cur: 4 } } : { core: { stock: 10, last: 55, cur: 5 }, comm: { stock: 4, last: 15, cur: 3 } };
+  return {
+    at: Date.now(), cur: '2026-10', last: '2026-09', byKey: new Map(list.map((a) => [a.key, a])),
+    tls: new Map([[`ff|TL ONE`, { key: 'ff|TL ONE', name: 'TL One', channel: 'ff', priority: 'Low', agents, stock: { VC4: 8 }, cur: { VC4: 4 }, last: { VC4: 40 }, grp: grp(tot.core, tot.comm) }]]),
+    list
+  };
+};
+
+test('👥 employee link TL — ek box-strip + ek class table + footer me total sirf EK baar', () => {
+  TR._test.setIndex(mkIdx(false));
+  const panel = TR._test.tlPanelHtml({ isTl: true, name: 'TL One', channel: 'ff' });
+  assert.ok(panel.includes('tr-boxes') && !panel.includes('tr-tl-kpis') && !panel.includes('tr-tlk'), 'purane 🚗/🚚 KPI cells nahi');
+  assert.match(panel, /📦 Stock · TL total<\/small><b>14<\/b><em>VC4 8 · VC20 2 · VC5\+ 4/, 'stock box: total 14 + class mix');
+  assert.match(panel, /Last month · September 2026<\/small><b>70<\/b>/, 'last month box');
+  assert.match(panel, /Current MTD · October 2026<\/small><b>8<\/b>/, 'MTD box');
+  assert.ok(panel.includes('🎯 Suggested qty') && panel.includes('sug-chip wo') && panel.includes('🚦 Priority'), 'suggested (dono) + priority');
+  assert.ok((panel.match(/tr-class-tbl/g) || []).length === 1, 'class table sirf ek');
+  const foot = panel.slice(panel.indexOf('<tfoot>'), panel.indexOf('</tfoot>'));
+  assert.ok(!foot.includes('Agents total'), 'TL ki apni row nahi → "Agents total" alag nahi (wahi TL total hota)');
+  assert.ok((foot.match(/<tr/g) || []).length === 1 && foot.includes('= TL TOTAL (2 agents ka jod)'), 'footer me sirf ek total row');
+  assert.ok(!/undefined|NaN/.test(panel));
+
+  TR._test.setIndex(mkIdx(true));
+  const p2 = TR._test.tlPanelHtml({ isTl: true, name: 'TL One', channel: 'ff' });
+  const f2 = p2.slice(p2.indexOf('<tfoot>'), p2.indexOf('</tfoot>'));
+  assert.ok(f2.includes('Agents total (2)') && f2.includes('TL own') && f2.includes('= TL TOTAL (own + agents)'), 'TL ki apni row ho to agents + own = total teeno rows');
+  assert.ok(p2.includes('👥 2 agents + TL'), 'priority box me agents + TL');
+  TR._test.setIndex(null);
+});
+
+test('🧑‍💼 employee link agent — boxes + ek class table, 🚗/🚚 group rows (duplicate) gayi', () => {
+  const html = TR._test.agentGroupSummaryHtml({
+    channel: 'gv', name: 'A', stock: { VC4: 12, VC5: 8, VC16: 3 }, last: { VC4: 20, VC5: 9, VC16: 4 }, cur: { VC4: 5, VC5: 3, VC16: 2 },
+    grp: { core: { stock: 14, last: 25, cur: 8 }, comm: { stock: 17, last: 15, cur: 6 } }
+  });
+  assert.ok(!html.includes('tr-qty-group"') && !html.includes('tr-qty-groups'), 'purani group rows nahi');
+  assert.match(html, /📦 Stock<\/small><b>31<\/b><em>VC4 12 · VC20 2 · VC5\+ 17/);
+  assert.ok((html.match(/tr-class-tbl/g) || []).length === 1, 'ek class table');
+  assert.ok(html.includes('🟩 GV') && html.includes('VC4 + VC20 group'), 'channel + VC20 note');
+  assert.ok(!/undefined|NaN/.test(html));
+});
+
+test('🏷️ v3.52 wiring — version + cache-bust pins', async () => {
+  const pkg = JSON.parse(await read('package.json'));
+  assert.equal(pkg.version, '3.52.0');
+  assert.match(await read('server.js'), /APP_VERSION = '3\.52\.0'/);
+  const idx = await read('index.html');
+  assert.match(idx, /styles\.css\?v=106/); assert.match(idx, /config\.js\?v=104/); assert.match(idx, /lazy\.js\?v=103/);
+  const sw = await read('sw.js');
+  assert.match(sw, /apnapayment-v108/); assert.match(sw, /styles\.css\?v=106/); assert.match(sw, /config\.js\?v=104/); assert.match(sw, /masterSearch\.js\?v=104/);
+});

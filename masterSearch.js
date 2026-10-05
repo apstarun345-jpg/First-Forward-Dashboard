@@ -1071,9 +1071,22 @@ FF.pages = FF.pages || {};
       const tk = U.dateKey(new Date());
       const nk = normName(person.name);
       const isT = isTlP(person), id = clean(person.sub || person.id || '');
-      const n = daily.filter((r) => r.key === tk && r.channel !== 'GV Partner' && (isT ? normName(r.tlName) === nk : (normName(r.agentName) === nk || (id && normName(r.agentId) === normName(id))))).reduce((s, r) => s + (Number(r.n) || 0), 0);
+      const mine = daily.filter((r) => r.channel !== 'GV Partner' && (isT ? normName(r.tlName) === nk : (normName(r.agentName) === nk || (id && normName(r.agentId) === normName(id)))));
+      const sumOn = (key) => mine.filter((r) => r.key === key).reduce((s, r) => s + (Number(r.n) || 0), 0);
+      const n = sumOn(tk);
+      // v3.52 — FF ka data T+1 aata hai, isliye sirf "aaj 0" dikhana bekaar tha: ab kal (ya jo aakhri
+      // din data me hai) ka issuance + last 7 din ka jod bhi, VC4 · VC20 · VC5+ ke saath.
+      const back = (days) => { const d = new Date(); d.setDate(d.getDate() - days); return U.dateKey(d); };
+      const lastKey = mine.map((r) => String(r.key)).filter((k) => k < tk).sort().pop() || back(1);
+      const lastN = sumOn(lastKey);
+      const from7 = back(7);
+      const week = mine.filter((r) => String(r.key) >= from7 && String(r.key) < tk);
+      const bins = { vc4: 0, vc20: 0, vc5p: 0, total: 0 };
+      week.forEach((r) => { const q = Number(r.n) || 0; bins.total += q; if (r.group === 'VC4') bins.vc4 += q; else if (r.group === 'VC20') bins.vc20 += q; else bins.vc5p += q; });
       return `<div class="msp-today"><h3>⚡ Aaj ka snapshot <span class="dim">· First Forward (EIR)</span></h3><div class="dgrid">
         <div class="dcell"><small>🟦 FF aaj · ${esc(U.labelDateKey(tk))}</small><b>${U.fmt(n)}</b><em class="dim">FF ka aaj ka poora data T+1 (kal) aata hai</em></div>
+        <div class="dcell"><small>📅 Aakhri din · ${esc(U.labelDateKey(lastKey))}</small><b>${U.fmt(lastN)}</b><em class="dim">jo aakhri din data me hai</em></div>
+        <div class="dcell"><small>🗓️ Last 7 din (kal tak)</small><b>${U.fmt(bins.total)}</b><em class="dim">VC4 ${U.fmt(bins.vc4)} · VC20 ${U.fmt(bins.vc20)} · VC5+ ${U.fmt(bins.vc5p)}</em></div>
       </div></div>`;
     }
 
@@ -1115,10 +1128,24 @@ FF.pages = FF.pages || {};
       });
       const days = [...byDay.values()].sort((a, b) => a.day - b.day);
       const tot = (k) => U.sum(days, (d) => d[k]);
+      // v3.52 — chart bhi VC4 · VC20 · VC5+ (stacked) — pehle sirf "Total tags" ki ek series thi.
       const chart = (days.length && FF.charts) ? FF.charts.bars({
-        labels: days.map((d) => String(d.day)), height: 210, showValues: true,
-        series: [{ name: 'Total tags', values: days.map((d) => d.total), color: '#6366f1' }]
+        labels: days.map((d) => String(d.day)), height: 220, showValues: true, legendAlways: true,
+        series: [
+          { name: 'VC4', values: days.map((d) => d.vc4), color: '#6366f1' },
+          { name: 'VC20', values: days.map((d) => d.vc20), color: '#f59e0b' },
+          { name: 'VC5+', values: days.map((d) => d.vc5p), color: '#10b981' }
+        ]
       }) : '';
+      const pct = (n) => (tot('total') ? ` <small class="dim">${Math.round((n / tot('total')) * 100)}%</small>` : '');
+      const peak = days.reduce((best, d) => (d.total > (best ? best.total : -1) ? d : best), null);
+      const classChips = days.length ? `<div class="msp-trend-sum">
+          <span class="msp-tsum vc4"><small>🚗 VC4</small><b>${U.fmt(tot('vc4'))}</b>${pct(tot('vc4'))}</span>
+          <span class="msp-tsum vc20"><small>🛻 VC20</small><b>${U.fmt(tot('vc20'))}</b>${pct(tot('vc20'))}</span>
+          <span class="msp-tsum vc5p"><small>🚚 VC5+</small><b>${U.fmt(tot('vc5p'))}</b>${pct(tot('vc5p'))}</span>
+          <span class="msp-tsum total"><small>🏷️ Total · ${U.fmt(days.length)} din</small><b>${U.fmt(tot('total'))}</b> <small class="dim">avg ${U.fmt(tot('total') / Math.max(1, days.length), true)}/din</small></span>
+          ${peak ? `<span class="msp-tsum peak"><small>⭐ Best din</small><b>${esc(U.labelDateKey(`${ym}-${U.pad2(peak.day)}`, true))}</b> <small class="dim">${U.fmt(peak.total)} tags</small></span>` : ''}
+        </div>` : '';
       let cum = 0;
       const table = days.length ? `<div class="table-wrap tall"><table class="tbl compact msp-trend-tbl">
         <thead><tr><th>Date</th><th class="num">VC4</th><th class="num">VC20</th><th class="num">VC5+</th><th class="num">Total</th><th class="num">Cumulative</th></tr></thead>
@@ -1128,7 +1155,7 @@ FF.pages = FF.pages || {};
       return `<div class="card msp-trend-card"><div class="card-head"><div>
           <h3>📅 Date-wise issuance trend <span class="dim small">· agent ya TL</span></h3>
           <p class="dim small">Naam likho → roz ka issuance (VC4 · VC20 · VC5+). FF ka aaj ka data kal aata hai aur GV ki aaj ki row bhi is trend me nahi dikhti — aaj ki date kabhi nahi.</p></div>
-        <div class="card-right dim small">${trend.q ? `👤 ${esc(trend.q)}` : 'Sab (kul ${U.fmt(trendDaily().length)} rows)'}</div></div>
+        <div class="card-right dim small">${trend.q ? `${trend.kind === 'tl' ? '👥' : '👤'} ${esc(trend.q)}${trend.channel ? ` · ${trend.channel === 'gv' ? '🟩 GV' : '🟦 FF'}` : ''}` : `Sab (${trend.channel ? (trend.channel === 'gv' ? '🟩 GV' : '🟦 FF') : 'FF + GV'} · kul ${U.fmt(trendDaily().length)} rows)`}</div></div>
         <div class="card-body">
           <div class="msp-trend-controls">
             <span class="msp-trend-find"><input class="input" id="msp-trend-q" type="search" placeholder="🔎 Agent / TL naam likho (khaali = sab)" value="${esc(trend.q)}" autocomplete="off" aria-label="Date-wise trend ke liye agent ya TL"></span>
@@ -1137,6 +1164,7 @@ FF.pages = FF.pages || {};
             <label class="msp-trend-month">Mahina <select class="input" id="msp-trend-ym">${(months.length ? months : [ym]).map((m) => `<option value="${esc(m)}" ${m === ym ? 'selected' : ''}>${esc(U.labelYM(m, true))}</option>`).join('')}</select></label>
             <button type="button" class="btn small" data-msp-tclear ${trend.q ? '' : 'disabled'}>✕ Clear</button>
           </div>
+          ${classChips}
           ${chart ? `<div class="msp-trend-chart">${chart}</div>` : ''}
           ${table}
         </div></div>`;
@@ -1145,8 +1173,10 @@ FF.pages = FF.pages || {};
       if (!trendEl || !trendEl.isConnected) return;
       trendEl.innerHTML = trendHtml();
       const input = U.$('#msp-trend-q', trendEl);
+      // Purana dropdown hatao (har paint par naya input banta hai — warna body me orphan boxes jama hote).
+      if (paintTrend._sug) { try { paintTrend._sug.destroy(); } catch { /* ignore */ } paintTrend._sug = null; }
       if (input) {
-        U.suggest(input, {
+        paintTrend._sug = U.suggest(input, {
           items: () => lightPeople().slice(0, 400).map((p) => ({
             kind: isTlP(p) ? 'tl' : 'agent', kindLabel: isTlP(p) ? 'TL' : 'Agent', label: p.name,
             sub: `${chOfP(p) === 'gv' ? '🟩 GV' : '🟦 FF'}${tlOfP(p) ? ` · TL ${tlOfP(p)}` : ''}`, value: p.name
@@ -1155,7 +1185,19 @@ FF.pages = FF.pages || {};
           onEnter: (q) => { trend.q = clean(q || ''); paintTrend(); },
           min: 0
         });
-        input.addEventListener('input', () => { trend.q = clean(input.value); clearTimeout(paintTrend._t); paintTrend._t = setTimeout(() => { const keep = document.activeElement === input; paintTrend(); const box = U.$('#msp-trend-q', trendEl); if (box && keep) box.focus(); }, 200); });
+        // v3.52 — type karte waqt suggestions dikhte hain (pick / Enter se apply); poora card tabhi
+        // repaint hota hai jab box khaali ho jaaye ya naam exact match kare — warna dropdown har key par mar jaata tha.
+        input.addEventListener('input', () => {
+          const v = clean(input.value);
+          clearTimeout(paintTrend._t);
+          paintTrend._t = setTimeout(() => {
+            const exact = v && lightPeople().some((p) => normName(p.name) === normName(v));
+            if ((!v && trend.q) || (exact && normName(v) !== normName(trend.q))) {
+              trend.q = v; const keep = document.activeElement === input; paintTrend();
+              const box = U.$('#msp-trend-q', trendEl); if (box && keep) { box.focus(); try { box.setSelectionRange(box.value.length, box.value.length); } catch { /* ignore */ } }
+            }
+          }, 350);
+        });
       }
       trendEl.querySelectorAll('[data-msp-tch]').forEach((b) => b.addEventListener('click', () => { trend.channel = b.dataset.mspTch; paintTrend(); }));
       trendEl.querySelectorAll('[data-msp-tkind]').forEach((b) => b.addEventListener('click', () => { trend.kind = b.dataset.mspTkind; paintTrend(); }));
@@ -1171,6 +1213,86 @@ FF.pages = FF.pages || {};
     }
     /** Koi insaan khola → trend card usi ka ho jaata hai (ek click me date-wise data). */
     const trendFollow = (person) => { if (!trendEl || !person) return; trend.q = person.name; trend.kind = isTlP(person) ? 'tl' : 'agent'; trend.ym = ''; paintTrend(); };
+
+    // ---- 📦 v3.52 — upar ke boxes: stock · issuance (VC4 · VC20 · VC5+) · priority · suggested dispatch ----
+    // Pehle search ke upar sirf "aaj ka snapshot" tha (FF me to bas "aaj 0 — data kal aayega") aur
+    // priority / suggested sirf neeche channel-tab kholne par milta tha. Ab har channel (FF / GV) ke
+    // liye ek KPI card — numbers 100% masterProfile (REPORT + EIR + stock) ke, wahi jo report me hain.
+    const num = (v) => Number(v) || 0;
+    const prioChip = (p) => (p ? `<span class="badge ${/high/i.test(p) ? 'red' : /medium/i.test(p) ? 'amber' : 'green'}">${esc(p)}</span>` : '<span class="dim">—</span>');
+    const sugPair = (net, gross) => `<span class="sug-pair sug-pair-tight"><span class="sug-result net" title="Required − stock"><small>After stock</small><b class="sug-chip">${U.fmt(net)}</b></span><span class="sug-result gross" title="Run-rate × din, stock ghata kar nahi"><small>W/o stock</small><b class="sug-chip wo">${U.fmt(gross)}</b></span></span>`;
+    const ymLabel = (ym) => { try { return ym ? U.labelYM(ym, true) : ''; } catch { return String(ym || ''); } };
+    function kpiStripHtml(pr) {
+      if (!pr) return '';
+      const isTl = /tl$/.test(String(pr.kind || '')), ch = pr.ch || chOfP(pr);
+      const s = pr.stock || {}, t = pr.totals || {}, d = pr.dispatch || {}, ts = pr.tlStock || {}, m = pr.months || {};
+      const c = (pr.calc && pr.calc.total) || {};
+      const p1 = pr.projT1 || null;
+      let bins = {};
+      try { bins = (MP() && MP().groupBinsFor && MP().groupBinsFor(pr)) || {}; } catch { bins = {}; }
+      const mix = (b) => (b && (num(b.VC4) || num(b.VC20) || num(b['VC5+'])) ? `VC4 ${U.fmt(b.VC4)} · VC20 ${U.fmt(b.VC20)} · VC5+ ${U.fmt(b['VC5+'])}` : '');
+      const stockMix = mix(bins.stock) || `VC4 ${U.fmt(s.vc4)} · Comm ${U.fmt(s.comm)}`;
+      const curMix = mix(bins.cur) || `VC4 ${U.fmt(t.curVc4)} · Comm ${U.fmt(t.curComm)}`;
+      const lastMix = mix(bins.last) || `VC4 ${U.fmt(t.lastVc4)} · Comm ${U.fmt(t.lastComm)}`;
+      const who = isTl ? `tl=${encodeURIComponent(pr.name)}${pr.id && ch === 'gv' ? `&tlId=${encodeURIComponent(pr.id)}` : ''}` : `agent=${encodeURIComponent(pr.name)}${pr.id ? `&agentId=${encodeURIComponent(pr.id)}` : ''}`;
+      const spec = (scope, ym) => `src=${ch}&scope=${scope}${ym ? `&ym=${encodeURIComponent(ym)}` : ''}&${who}`;
+      const peopleSpec = `src=${ch}&scope=people&tl=${encodeURIComponent(pr.name)}&self=0&sort=stock`;
+      const box = (cls, label, value, sub, kpi) => `<div class="mp-kpi msp-kpi ${cls}${kpi ? ' kpi-clickable' : ''}"${kpi ? ` data-kpi="${esc(kpi)}" role="button" tabindex="0" title="Detail kholo"` : ''}><small>${label}</small><b>${value}</b>${sub ? `<em>${sub}</em>` : ''}</div>`;
+      const ownAgents = ts.own && ts.agents ? `own ${U.fmt(ts.own.total)} + agents ${U.fmt(ts.agents.total)}` : '';
+      const tlName = (pr.tl && pr.tl.name) || '';
+      let sug = '';
+      if (pr.tagRequired) {
+        sug = box('k7', `🏷️ Tags required · ${U.fmt(d.days)} din`, sugPair(num(d.sugVc4) + num(d.sugComm), num(d.sugVc4Gross) + num(d.sugCommGross)), `VC4 ${U.fmt(d.sugVc4)} + Comm ${U.fmt(d.sugComm)} · ${esc(pr.directLabel || 'Direct')} · priority ${esc(pr.priority || '—')}`);
+      } else if (pr.direct) {
+        sug = box('k4', '🎯 Suggested dispatch', '<span class="dim">No dispatch</span>', `🚫 ${esc(pr.directLabel || 'Direct agent')} · priority ${esc(pr.priority || 'Low')} — abhi tags ki zarurat nahi`);
+      } else {
+        sug = box('k4', `🎯 Sug. VC4 · ${U.fmt(d.days)} din`, sugPair(d.sugVc4, d.sugVc4Gross || 0), `avg ${U.fmt(d.avgVc4, true)}/day × ${U.fmt(d.days)} din − stock ${U.fmt(s.vc4)}`, `${spec('mtd', m.cur)}&group=VC4`)
+          + box('k5', '🎯 Sug. Commercial', sugPair(d.sugComm, d.sugCommGross || 0), `avg ${U.fmt(d.avgComm, true)}/day × ${U.fmt(d.days)} din − stock ${U.fmt(s.comm)}`, `${spec('mtd', m.cur)}&group=COMM`)
+          + box('k9', '🎯 Dispatch · all tags', sugPair(c.net, c.gross), `run-rate ${U.fmt(c.rate, true)}/day × ${U.fmt(c.days)} din − stock ${U.fmt(c.stock)}`);
+      }
+      const growthNum = (pr.growthNum !== null && pr.growthNum !== undefined && Number.isFinite(Number(pr.growthNum))) ? Number(pr.growthNum) : U.growth(num(t.curTotal), num(t.lastTotal));
+      const growthHtml = (growthNum === null || growthNum === undefined || !Number.isFinite(Number(growthNum))) ? '<span class="dim">—</span>' : U.pctHtml(growthNum, { decimals: 0 });
+      const notFound = pr.found === false
+        ? `<p class="dim small msp-kpi-note">⚠️ ${ch === 'gv' ? 'GV REPORT' : 'REPORT'} tab me is ${isTl ? 'TL' : 'agent'} ki row nahi mili — stock / priority sheet se nahi aa paaye (naam ki spelling check karo); issuance tag-ledger (EIR) se hai.</p>` : '';
+      return `<section class="card msp-kpi-card" data-msp-kpi-ch="${ch}"><div class="card-head"><div>
+          <h3>${ch === 'gv' ? '🟩 GV Partner' : '🟦 First Forward'} · ${isTl ? 'TL (own + agents)' : 'Agent'} — ek nazar me${pr.id ? ` <small class="dim mono">· ${esc(pr.id)}</small>` : ''}</h3>
+          <p class="dim small">📦 stock · 🏷️ issuance (VC4 · VC20 · VC5+) · 🚦 priority · 🎯 suggested dispatch — ${isTl ? 'TL + saare agents ka jod' : `sirf is agent ka${tlName && !pr.direct ? ` · TL ${esc(tlName)}` : ''}`}${pr.partial ? ' · <span class="badge amber">⏳ data aa raha hai</span>' : ''}</p></div>
+          <div class="card-right">${prioChip(pr.priority)}</div></div>
+        <div class="card-body"><div class="mp-kpis msp-kpis">
+          ${box('k1', `📦 Stock${isTl ? ' · TL total' : ' · apna'}`, U.fmt(s.total), `${isTl && ownAgents ? `${ownAgents} · ` : ''}${stockMix}`, spec('stock'))}
+          ${isTl
+    ? box('k2', '🧑‍💼 Agents', `${U.fmt(pr.agentCount)}${pr.selfAgent ? ' + TL' : ''}`, 'click → agents ki list (stock · issuance ke saath)', peopleSpec)
+    : box('k2', '📦 TL ke under stock', ts.has ? U.fmt(ts.total) : '—', ts.has ? `${ownAgents ? `${ownAgents} · ` : ''}TL ${esc(tlName || '—')}` : (pr.direct ? `🚫 ${esc(pr.directLabel || 'Direct — koi TL nahi')}` : 'TL ka stock nahi mila'), ts.has && tlName ? `src=${ch}&scope=stock&tl=${encodeURIComponent(tlName)}` : '')}
+          ${box('k6', `🏷️ Issued this month${m.cur ? ` · ${esc(ymLabel(m.cur))}` : ''}`, U.fmt(t.curTotal), curMix, spec('mtd', m.cur))}
+          ${box('k8', `📅 Last month${m.last ? ` · ${esc(ymLabel(m.last))}` : ''}`, U.fmt(t.lastTotal), lastMix, spec('month', m.last))}
+          ${box('k3', '🚦 Priority', prioChip(pr.priority), `${c.cover != null ? `cover ${U.fmt(c.cover, true)} din` : 'cover —'} · run-rate ${U.fmt(c.rate, true)}/day (÷ ${U.fmt(c.elapsed)} din)`, isTl ? peopleSpec : '')}
+          ${sug}
+          ${box('k0', `📈 Growth${p1 && p1.basis && p1.basis.shortLabel ? ` <small class="dim">till ${esc(p1.basis.shortLabel)}</small>` : ''}`, growthHtml, p1 && p1.total ? `expected month-end ${U.fmt(p1.total)}` : 'last month vs MTD')}
+        </div>${notFound}</div></section>`;
+    }
+    const kpiLoadingHtml = (name, ch) => `<section class="card msp-kpi-card" data-msp-kpi-ch="${ch}"><div class="card-body">${U.spinner(`${esc(name)} ka ${ch === 'gv' ? '🟩 GV' : '🟦 FF'} stock · issuance · priority · suggested load ho raha hai…`)}</div></section>`;
+    /** Group (FF + GV) ke har channel ka KPI card — pehle quick (memory wala data), phir poora profile aate hi upgrade. */
+    async function paintKpis(g, host) {
+      if (!host || !MP()) return;
+      const chans = ['ff', 'gv'].filter((c) => g[c]);
+      const html = {};
+      const paint = () => { if (host.isConnected !== false && current === g) host.innerHTML = chans.map((c) => html[c] || '').join(''); };
+      chans.forEach((c) => {
+        let q = null;
+        try { q = MP().quick(g[c]); } catch { q = null; }
+        html[c] = q ? kpiStripHtml({ ...q, partial: true }) : kpiLoadingHtml(g.name, c);
+      });
+      paint();
+      await Promise.all(chans.map(async (c) => {
+        try {
+          const pr = await MP()._buildSoon(g[c], (late) => { html[c] = kpiStripHtml(late); paint(); });
+          html[c] = kpiStripHtml(pr);
+        } catch (err) {
+          html[c] = `<section class="card msp-kpi-card" data-msp-kpi-ch="${c}"><div class="card-body dim small">⚠️ ${c === 'gv' ? 'GV' : 'FF'} profile nahi bana: ${esc((err && err.message) || err)}</div></section>`;
+        }
+        paint();
+      }));
+    }
 
     function openGroup(g) {
       if (!g || !out) return;
@@ -1193,8 +1315,10 @@ FF.pages = FF.pages || {};
           <div class="msp-hero-id"><b>${esc(g.name)}</b><small>${bits || 'Report'}</small></div>
           ${person ? `<div class="msp-hero-act"><button class="btn small" data-ms-tags="${esc(person.name)}">🏷️ Tag-level rows</button></div>` : ''}
         </div>
+        <div id="msp-kpis" class="msp-kpis-wrap">${['ff', 'gv'].filter((c) => g[c]).map((c) => kpiLoadingHtml(g.name, c)).join('')}</div>
         ${gvStripHtml(g.gv)}${ffStripHtml(g.ff)}
         <div class="msp-report" id="msp-report"></div>${teamCards}`;
+      paintKpis(g, U.$('#msp-kpis', out)).catch(() => {});
       const host = U.$('#msp-report', out);
       const sr = SR();
       if (sr && host) sr.render(host, g);
@@ -1245,11 +1369,33 @@ FF.pages = FF.pages || {};
     }
 
     if (input) {
-      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); run(input.value); } });
+      // 🔎 v3.52 — type karte hi suggestion dropdown (topbar wale search jaisa): agent / TL / ID /
+      // mobile / barcode — har item ke saath stock · MTD · suggested. Pick → usi ka poora data.
+      // (Enter ab U.suggest ke onEnter se chalta hai — pehle wala alag keydown handler double-run karta tha.)
+      let sug = null;
+      try {
+        sug = U.suggest(input, {
+          min: 2, max: 14,
+          items: () => suggestItems(input.value),
+          onPick: (it) => {
+            if (!it || it.none) return;
+            if (it.barcode) { input.value = it.barcode; run(it.barcode); return; }
+            const name = (it.person && it.person.name) || it.value || it.label;
+            input.value = name;
+            run(name);
+          },
+          onEnter: (q) => { if (clean(q).length >= 2) run(q); }
+        });
+      } catch { sug = null; }
+      if (!sug) input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); run(input.value); } });
+      // Index / REPORT data aate hi khula dropdown refresh (warna "search ho raha hai…" atka rehta).
+      let refreshT = 0;
+      onIndexReady(() => { clearTimeout(refreshT); refreshT = setTimeout(() => { try { if (sug && sug.refresh && input.isConnected && document.activeElement === input && clean(input.value).length >= 2) sug.refresh(); } catch { /* ignore */ } }, 150); });
       let t = 0;
       // ⌨️ Type karte waqt sirf naam-chips (list nahi) — Enter / Search / chip click par poora data.
       input.addEventListener('input', () => { clearTimeout(t); t = setTimeout(() => { if (clean(input.value).length >= 3) run(input.value, { open: false }); }, 420); });
-      setTimeout(() => { try { input.focus(); } catch { /* ignore */ } }, 60);
+      // Khaali page par cursor seedha search me; URL me naam ho to focus nahi (warna dropdown report ke upar khul jaata).
+      if (!asked) setTimeout(() => { try { input.focus(); } catch { /* ignore */ } }, 60);
     }
     root.addEventListener('click', (e) => {
       if (e.target.closest('[data-msp-go]')) { if (input) run(input.value); return; }

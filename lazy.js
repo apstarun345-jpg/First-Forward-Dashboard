@@ -30,14 +30,18 @@ window.FF = window.FF || {};
   // agentBoard/masterProfile/cockpit/insights jaise helpers ko render-time par use karte hain.
   // In dependencies ko yahin centralize karke page-open errors ko prevent karte hain.
   const INSIGHT_DEPS = ['insights', 'directAgents', 'certificates', 'cockpit'];
-  const PROFILE_DEPS = [...INSIGHT_DEPS, 'gvTruth', 'pdf', 'masterProfile'];
+  // v3.52 — `performance` (FF REPORT tab reader) PROFILE_DEPS me: masterProfile FF agent/TL ka
+  // stock · priority · suggested dispatch FF.pages.performance se padhta hai. Pehle Master Search /
+  // Tag Request / Summary pages par ye module load hi nahi hota tha (sirf Performance page kholne par
+  // aata tha) → FF profile me "REPORT me row nahi mili", stock 0, priority —, suggested 0.
+  const PROFILE_DEPS = [...INSIGHT_DEPS, 'gvTruth', 'pdf', 'agentBoard', 'performance', 'masterProfile'];
   const SUMMARY_DEPS = [...PROFILE_DEPS, 'agentSummary'];
   const WOW_DEPS = [...INSIGHT_DEPS, 'wow', 'wowzone'];
   const GROUPS = {
     home: ['home'],
     controlTower: ['controlTower'],
     executive: [...INSIGHT_DEPS],
-    tagRequest: ['pdf', 'tagRequest'],
+    tagRequest: ['pdf', 'performance', 'tagRequest'],   // performance = FF REPORT (stock / priority) — employee link par bhi
     masterSearch: [...PROFILE_DEPS, 'searchReport', 'masterSearch'],
     tagIssued: ['tagIssued'],
     performance: [...PROFILE_DEPS, 'agentBoard', 'performance'],
@@ -86,7 +90,7 @@ window.FF = window.FF || {};
 
   // Background warm order (login ke baad idle me) — jo pages sabse zyada khulte hain wo pehle.
   // Bhaari module (insights 330 KB+) sabse aakhir me, taaki pehle paint par asar na pade.
-  const WARM = ['pdf', 'tagIssued', 'stock', 'dashboard', 'trend', 'gvpages', 'wowzone', 'targets', 'settings', 'tagRequest', 'cockpit', 'insights'];
+  const WARM = ['pdf', 'performance', 'tagIssued', 'stock', 'dashboard', 'trend', 'gvpages', 'wowzone', 'targets', 'settings', 'tagRequest', 'cockpit', 'insights'];
 
   const loaded = new Map();   // name → promise
   const failed = new Set();
