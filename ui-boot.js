@@ -18,6 +18,25 @@
     // Installed (home-screen) app window — CSS isse browser-feel hataane ke liye use karta hai
     // (no pull-to-refresh, no text-selection on chrome, native-style page transitions).
     if (standalone) document.documentElement.classList.add('pwa-standalone');
+
+    // Register the root-scoped worker before the login/network boot starts.  Waiting until
+    // onLogin() meant Chrome could treat the page as an ordinary tab on the first visit and
+    // the install prompt/push setup raced the auth request.  This is deliberately best-effort:
+    // a private/unsupported browser must still be able to use the dashboard normally.
+    if (navigator.serviceWorker && window.isSecureContext !== false) {
+      navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).then((registration) => {
+        // The worker uses this small hint to prefer an already-open standalone client when a
+        // notification is tapped.  Without it, an unrelated normal Chrome tab could win.
+        const tellWorker = () => {
+          try {
+            const target = navigator.serviceWorker.controller || registration.active;
+            if (target) target.postMessage({ type: 'ff-client-mode', standalone, at: Date.now() });
+          } catch { /* optional */ }
+        };
+        tellWorker();
+        if (navigator.serviceWorker.addEventListener) navigator.serviceWorker.addEventListener('controllerchange', tellWorker, { once: true });
+      }).catch((error) => console.warn('Early service worker registration failed:', error));
+    }
   } catch (error) {
     console.warn('Could not detect the mobile app display mode:', error);
   }

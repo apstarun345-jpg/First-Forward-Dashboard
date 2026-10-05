@@ -4,6 +4,10 @@
 const CACHE_NAME = 'apnapayment-v114';
 const DATA_CACHE = 'ff-data-v5';
 const STASH_CACHE = 'ff-push-stash-v1'; // pushsubscriptionchange ke waqt bani subscription yahan rakho
+// A same-origin browser tab and an installed PWA are both WindowClients. Remember the display
+// mode reported by the page so a notification tap prefers the actual app window instead of
+// randomly focusing a normal Chrome tab.
+const CLIENT_MODES = new Map();
 // 🔊 v3.36 — app band hone par aaye alerts ki VOICE queue (page khulte hi bol kar sunata hai).
 const VOICE_CACHE = 'ff-voice-v1';
 const VOICE_KEY = '/__ff_voice__/pending';
@@ -109,7 +113,7 @@ self.addEventListener('push', e => {
     timestamp: Number(data.at) || Date.now(),
     lang: data.lang || 'hi-IN',
     ...(actions.length ? { actions } : {}),
-    data: { link, sound, tone, voice: wantVoice ? voiceText : '', id, type: data.type || 'info', user: data.user || '', at: Date.now() }
+    data: { link, sound, tone, voice: wantVoice ? voiceText : '', id, type: data.type || 'info', dataChange: data.dataChange === true, user: data.user || '', at: Date.now() }
   };
   const job = wantVoice ? { id, at: Date.now(), text: voiceText, title, type: data.tag || 'ff', tone, link, user: data.user || '' } : null;
   // Chrome ka rule: har push event par ek notification dikhani hi padti hai, warna
@@ -139,11 +143,15 @@ self.addEventListener('notificationclick', e => {
     // Tap = user gesture → awaaz ab pakka chalegi (autoplay policy block nahi karti).
     if (info.voice) await tellClients({ type: 'ff-speak-push', item: { id: info.id, text: info.voice, at: Date.now(), type: info.type || 'ff', tone: info.tone, link: raw, user: info.user || '' } });
     const list = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-    for (const client of list) {
-      if ('focus' in client) {
-        if (client.navigate) client.navigate(target).catch(() => {});
-        return client.focus();
-      }
+    // Prefer a client that explicitly reported standalone display mode.  If the app was not
+    // installed (or the worker restarted before receiving the hint), fall back to the most
+    // recently visible same-origin window and finally open the scoped app URL.
+    const standaloneClient = list.find((client) => CLIENT_MODES.get(client.id)?.standalone === true);
+    const visibleClient = list.find((client) => CLIENT_MODES.get(client.id)?.visible === true);
+    const client = standaloneClient || visibleClient || list[0];
+    if (client && 'focus' in client) {
+      if (client.navigate) client.navigate(target).catch(() => {});
+      return client.focus();
     }
     return self.clients.openWindow(target);
   })());
@@ -217,6 +225,15 @@ self.addEventListener('pushsubscriptionchange', e => {
 // Page se commands: pending subscription flush, forced re-subscribe, aur OS-panel test notification.
 self.addEventListener('message', e => {
   const msg = e.data || {};
+  if (msg.type === 'ff-client-mode' && e.source && e.source.id) {
+    CLIENT_MODES.set(e.source.id, { standalone: msg.standalone === true, visible: true, at: Date.now() });
+    return;
+  }
+  if (msg.type === 'ff-client-visibility' && e.source && e.source.id) {
+    const old = CLIENT_MODES.get(e.source.id) || {};
+    CLIENT_MODES.set(e.source.id, { ...old, visible: msg.visible !== false, at: Date.now() });
+    return;
+  }
   if (msg.type === 'ff-push-flush') {
     e.waitUntil((async () => {
       const pending = await stashGet('pending');

@@ -516,15 +516,18 @@ window.FF = window.FF || {};
     const btn = U.$('#pwa-install');
     if (!btn) return;
     const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
-    if (pwaInstalled || isStandalone || !deferredPrompt) {
-      btn.hidden = true;
-    } else {
-      btn.hidden = false;
-    }
+    // Android Chrome sometimes does not emit beforeinstallprompt until the browser menu has
+    // been opened once. Keep a visible, manual-install entry on mobile instead of silently
+    // hiding it; tapping it gives the exact browser-specific steps below.
+    const mobile = document.documentElement.classList.contains('mobile-ui') || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+    btn.hidden = !!(pwaInstalled || isStandalone || (!deferredPrompt && !mobile));
   }
   async function promptInstall() {
     if (!deferredPrompt) {
-      U.toast('Install: browser menu → Install app / Add to Home Screen', 'info');
+      const ios = /iPad|iPhone|iPod/i.test(navigator.userAgent || '');
+      U.toast(ios
+        ? 'App banane ke liye Safari Share ↗ → Add to Home Screen dabao, phir home-screen icon se kholo.'
+        : 'Chrome me ⋮ → Install app / Add to Home screen dabao. Install ke baad home-screen icon se kholo — tab URL bar nahi dikhega.', 'info');
       return;
     }
     deferredPrompt.prompt();
@@ -1399,13 +1402,22 @@ window.FF = window.FF || {};
   let lastSyncAt = 0, syncingNow = null, syncLockUntil = 0;
   function feedSig(feed) {
     if (!feed || feed.ok === false) return null;
-    const series = (s) => Object.entries(s || {}).sort().slice(-3).map(([d, n]) => `${d}:${n}`).join(',');
-    const f = feed.ff || {}, g = feed.gv || {};
+    // /api/today deliberately returns 200 with ffError/gvError so the dashboard can still show
+    // the healthy channel.  That partial response is NOT a zero-tag snapshot: treating the
+    // missing side as zero made recovery from a temporary Google error look like a new issuance
+    // and produced the exact false notification users were seeing.
+    if (feed.ffError || feed.gvError || !feed.ff || !feed.gv) return null;
+    const series = (s) => (s && typeof s === 'object')
+      ? Object.entries(s).filter(([, n]) => Number.isFinite(Number(n))).sort().slice(-3).map(([d, n]) => `${d}:${Number(n)}`).join(',')
+      : '';
+    const f = feed.ff, g = feed.gv;
+    const ffTotal = Number(f.total), gvTotal = Number(g.total);
+    if (!Number.isFinite(ffTotal) || !Number.isFinite(gvTotal)) return null;
     // `classes` bhi saath rakho — notification ke drawer me class-wise breakdown dikhane ke liye
     // (sirf totals rakhne se "kitna update hua class wise" pata nahi chalta tha).
     const classesOf = (v) => (v && typeof v.classes === 'object' && v.classes) ? { ...v.classes } : {};
     return {
-      ff: Number(f.total) || 0, gv: Number(g.total) || 0, s: `${series(f.series)}|${series(g.series)}`,
+      ff: ffTotal, gv: gvTotal, s: `${series(f.series)}|${series(g.series)}`,
       date: feed.date || '', ffClasses: classesOf(f), gvClasses: classesOf(g)
     };
   }
@@ -1414,6 +1426,26 @@ window.FF = window.FF || {};
   }
   function saveFeedSig(sig) {
     try { if (sig) localStorage.setItem(FEED_SIG_KEY, JSON.stringify({ ...sig, at: Date.now() })); } catch { /* private mode */ }
+  }
+  // A notification is a data event, not a fetch/status event.  Compare the two live channels
+  // and their class maps; a date rollover with no tags is only a new baseline and must stay quiet.
+  function feedChanged(before, after) {
+    if (!before || !after) return false;
+    const classChanged = (a, b) => {
+      const keys = new Set([...Object.keys(a || {}), ...Object.keys(b || {})]);
+      for (const key of keys) if (Number((a || {})[key] || 0) !== Number((b || {})[key] || 0)) return true;
+      return false;
+    };
+    const currentChanged = before.ff !== after.ff || before.gv !== after.gv
+      || classChanged(before.ffClasses, after.ffClasses) || classChanged(before.gvClasses, after.gvClasses);
+    const historyChanged = before.s !== after.s;
+    if (!currentChanged && !historyChanged) return false;
+    // Midnight with no issuance: the server deliberately treats this as a baseline. Mirror that
+    // rule here so the foreground poll cannot show a phantom "0 tags" update.
+    if (before.date && after.date && before.date !== after.date
+      && Number(after.ff) === 0 && Number(after.gv) === 0
+      && !classChanged(before.ffClasses, after.ffClasses) && !classChanged(before.gvClasses, after.gvClasses)) return false;
+    return true;
   }
   /** Pichhle snapshot se badlaav → notification + voice announcement (class-wise breakdown ke saath). */
   function announceDataUpdate(before, after) {
@@ -1445,7 +1477,11 @@ window.FF = window.FF || {};
         body,
         // 📊 class-wise snapshot: bell ke andar expand + drawer me "kitna update hua class wise,
         //    chassis / replace / wrong" — sab isi meta se banta hai (liveView.reportView).
+        // This flag distinguishes a real sheet/tag delta from generic informational items in
+        // the notification centre and is also carried into the push payload.
+        dataChange: true,
         meta: {
+          dataChange: true,
           link: '#/tagIssued', ff: after.ff, gv: after.gv,
           date: after.date || '',
           ffClasses: after.ffClasses || {}, gvClasses: after.gvClasses || {},
@@ -1465,7 +1501,7 @@ window.FF = window.FF || {};
     if (!after) return null;
     const before = loadFeedSig();
     saveFeedSig(after);
-    if (announce !== false && before && (before.ff !== after.ff || before.gv !== after.gv || before.s !== after.s)) {
+    if (announce !== false && feedChanged(before, after)) {
       announceDataUpdate(before, after);
     }
     return after;
@@ -1499,7 +1535,7 @@ window.FF = window.FF || {};
       try { after = feedSig(await FF.data.today({ fresh: true })); } catch { /* offline */ }
       if (after) {
         saveFeedSig(after);
-        if (before && (before.ff !== after.ff || before.gv !== after.gv || before.s !== after.s)) {
+        if (feedChanged(before, after)) {
           announceDataUpdate(before, after);
         }
       }

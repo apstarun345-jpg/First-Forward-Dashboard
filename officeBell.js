@@ -527,6 +527,7 @@ window.FF = window.FF || {};
           title: `📊 Sheet update — +${U.fmt(totalNew)} tags`,
           body: `${parts.join(' · ')}${keptMovers.length ? ` · ${keptMovers.slice(0, 3).map((m) => `${m.agent} (${m.n})`).join(', ')}` : ''}`,
           meta: {
+            dataChange: true,
             link: '#/tagIssued',
             date: today,
             source: keptFf > 0 && keptGv > 0 ? '' : keptFf > 0 ? 'ff' : 'gv',

@@ -2300,6 +2300,7 @@ function pushFanout(item) {
       body: (item.body || '').replace(/\s+/g, ' ').slice(0, 300),
       tag: eventTag,
       type: item.type || 'info',
+      dataChange: item.meta && item.meta.dataChange === true,
       routeKey: item.routeKey || '',
       link,
       sound: prefs.sound !== false,
@@ -3730,7 +3731,10 @@ async function checkReports(force = false, selectedSources = null) {
         const delta = providerChanged ? null : snapshotDelta(previous, next);
         if (delta && delta.changed) {
           const label = source === 'gv' ? 'GV Partner' : 'First Forward';
-          recordNotification({ type: 'report', title: `${label} report update`, body: `${next.date}: ${deltaText(delta)} — Google Sheet me naya data aaya.`, target: 'admin', routeKey: 'reportUpdate', meta: { source, snapshot: currentSnapshot, previous, delta, link: '#/tagIssued' } });
+          // `delta.changed` is reached only after a valid same-day class/total change or a
+          // positive new-day count. Keep an explicit marker so clients never treat a generic
+          // informational notification as a tag-issuance event.
+          recordNotification({ type: 'report', title: `${label} report update`, body: `${next.date}: ${deltaText(delta)} — Google Sheet me naya data aaya.`, target: 'admin', routeKey: 'reportUpdate', meta: { dataChange: true, source, snapshot: currentSnapshot, previous, delta, link: '#/tagIssued' } });
           changed.push(source);
         }
       } catch (err) {
@@ -4326,6 +4330,7 @@ async function handleApi(req, res, url) {
       description: s.tagline || 'ApnaPayment workspace',
       id: '/',
       start_url: '/#/home', scope: '/', display: 'standalone', orientation: 'any',
+      lang: 'en-IN', dir: 'ltr',
       // 📱 Android-app shell: standalone window, ek hi app-instance me launch, koi browser UI nahi.
       display_override: ['standalone', 'minimal-ui'],
       launch_handler: { client_mode: 'navigate-existing' },
@@ -4336,8 +4341,13 @@ async function handleApi(req, res, url) {
       icons: [
         { src: '/api/pwa/icon/192', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
         { src: '/api/pwa/icon/512', sizes: '512x512', type: 'image/png', purpose: 'any maskable' }
+      ],
+      shortcuts: [
+        { name: 'Home Highlights', url: '/#/home', description: 'GV & FF highlights charts' },
+        { name: 'GV & FF Tag Issued', url: '/#/tagIssued', description: 'Date-wise detailed issuance' },
+        { name: 'Dashboard', url: '/#/dashboard', description: 'First Forward dashboard' }
       ]
-    }, { 'Cache-Control': 'no-cache' });
+    }, { 'Content-Type': 'application/manifest+json; charset=utf-8', 'Cache-Control': 'no-cache' });
   }
 
   if (p === '/api/health' && method === 'GET') {
