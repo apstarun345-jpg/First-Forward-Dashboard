@@ -385,16 +385,25 @@ test('📢 announcement broadcast, 📜 audit log, 📬 weekly digest + 📊 rep
   const upstream = http.createServer((req, res) => {
     const tq = new URL(req.url, 'http://x').searchParams.get('tq') || '';
     let rows = [];
+    const liveMasterQuery = /select P, G, (?:F, )?I, N, U/i.test(tq);
+    const groupedMasterQuery = /group by P, G(?:, F)?/i.test(tq);
     if (/group by AA/.test(tq)) rows = rowsFF;                         // FF EIR snapshot (date, class, master, count)
-    else if (/select P, G, I, N, U/i.test(tq)) rows = rowsGVLive;      // live GV Master rows (date, class, tag, status, type)
-    else if (/group by P, G/.test(tq)) rows = rowsGV;                 // GV 90-day history (date, class, count)
+    else if (liveMasterQuery) rows = rowsGVLive;                      // live GV Master rows (date, CCH, optional VCLASS, tag, status, type)
+    else if (groupedMasterQuery) rows = rowsGV;                       // GV 90-day history (date, CCH, optional VCLASS, count)
     const headerCols = Array.from({ length: 23 }, (_, i) => ({ id: String.fromCharCode(65 + i), label: '' }));
-    headerCols[6].label = 'CCH'; headerCols[8].label = 'TAG_ID_NUMBER';
+    headerCols[5].label = 'VCLASS'; headerCols[6].label = 'CCH'; headerCols[8].label = 'TAG_ID_NUMBER';
     headerCols[13].label = 'STATUS'; headerCols[15].label = 'ISSUE_DATE'; headerCols[20].label = 'TAG_TYPE';
+    const useVClass = /select P, G, F,|group by P, G, F/i.test(tq);
     const cols = /^select \* limit 1$/i.test(tq) ? headerCols
-      : /select P, G, I, N, U/i.test(tq)
-        ? [{ id: 'P', type: 'date' }, { id: 'G', type: 'string' }, { id: 'I', type: 'string' }, { id: 'N', type: 'string' }, { id: 'U', type: 'string' }]
-        : [{ id: 'A', type: 'date' }, { id: 'B', type: 'string' }, { id: 'C', type: 'number' }, { id: 'D', type: 'number' }];
+      : liveMasterQuery
+        ? (useVClass
+          ? [{ id: 'P', type: 'date' }, { id: 'G', type: 'string' }, { id: 'F', type: 'string' }, { id: 'I', type: 'string' }, { id: 'N', type: 'string' }, { id: 'U', type: 'string' }]
+          : [{ id: 'P', type: 'date' }, { id: 'G', type: 'string' }, { id: 'I', type: 'string' }, { id: 'N', type: 'string' }, { id: 'U', type: 'string' }])
+        : useVClass
+          ? [{ id: 'P', type: 'date' }, { id: 'G', type: 'string' }, { id: 'F', type: 'string' }, { id: 'count-I', type: 'number' }]
+          : [{ id: 'P', type: 'date' }, { id: 'G', type: 'string' }, { id: 'count-I', type: 'number' }];
+    if (liveMasterQuery && useVClass) rows = rows.map((row) => ({ c: [row.c[0], row.c[1], { v: '' }, ...row.c.slice(2)] }));
+    else if (groupedMasterQuery && useVClass) rows = rows.map((row) => ({ c: [row.c[0], row.c[1], { v: '' }, row.c[2]] }));
     res.end(`google.visualization.Query.setResponse(${JSON.stringify({ status: 'ok', table: { cols, rows } })});`);
   });
   upstream.listen(0, '127.0.0.1');

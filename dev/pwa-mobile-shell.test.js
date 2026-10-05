@@ -9,6 +9,8 @@ const html = source('index.html');
 const css = source('styles.css');
 const app = source('app.js');
 const sw = source('sw.js');
+const server = source('server.js');
+const manifest = JSON.parse(source('manifest.webmanifest'));
 
 function runBoot({ standalone = false, touch = 0, screenWidth = 1440, screenHeight = 900, innerWidth = 1440, innerHeight = 900, userAgent = '', dark = false } = {}) {
   const classes = new Set();
@@ -32,7 +34,20 @@ test('mobile/PWA bootstrap is external so the self-only CSP does not block it', 
   assert.match(html, /<script src="\/ui-boot\.js\?v=104"><\/script>/);
   assert.doesNotMatch(html, /<script\b(?![^>]*\bsrc=)[^>]*>[\s\S]*?<\/script>/);
   assert.match(sw, /\.\/ui-boot\.js\?v=104/);
-  assert.match(sw, /apnapayment-v108/);
+  assert.match(sw, /apnapayment-v109/);
+});
+
+test('installed PWA launches from the root, and legacy /api/pwa start URLs return the app shell', () => {
+  assert.equal(manifest.start_url, '/#/home');
+  assert.equal(manifest.scope, '/');
+  assert.match(html, /<base href="\/">/, 'legacy nested launch URLs resolve every relative app asset from the origin root');
+  assert.match(app, /serviceWorker\.register\('\/sw\.js'/, 'service worker is registered at the origin root');
+  assert.match(server, /start_url:\s*'\/#\/home',\s*scope:\s*'\/'/, 'API manifest uses root-absolute launch URL and scope');
+  const legacyRoute = server.indexOf("if ((p === '/api/pwa' || p === '/api/pwa/') && (method === 'GET' || method === 'HEAD'))");
+  const publicPwaRoutes = server.indexOf("if (p === '/api/pwa/icon/192'");
+  assert.ok(legacyRoute >= 0 && publicPwaRoutes > legacyRoute, 'legacy shell route runs before the auth-protected API fallback');
+  assert.match(server.slice(legacyRoute, publicPwaRoutes), /serveStatic\(req, res, '\/index\.html', url\.search\)/);
+  assert.match(html, /\/api\/pwa\/manifest\?v=106/, 'manifest is refetched by installed clients');
 });
 
 test('mobile UI detection survives Android desktop-site wide viewports and standalone PWAs', () => {

@@ -649,9 +649,11 @@ test('GV Master edit webhook detects the live snapshot and fans out a real phone
     let table;
     if (tq === 'select * limit 1') {
       table = { cols: columnLabels.map((label, i) => ({ id: `C${i}`, label })), rows: [] };
-    } else if (/^select P, G, I, N, U/i.test(tq)) {
-      table = { cols: [{ id: 'P' }, { id: 'G' }, { id: 'I' }, { id: 'N' }, { id: 'U' }], rows: gvRows.map((row) => ({ c: [{ v: row.date }, { v: row.cls }, { v: row.tag }, { v: row.status }, { v: row.type }] })) };
-    } else if (/select P, G, count\(I\)/i.test(tq)) {
+    } else if (/^select P, G, (?:F, )?I, N, U/i.test(tq)) {
+      const hasVClass = /^select P, G, F, I, N, U/i.test(tq);
+      const values = (row) => [{ v: row.date }, { v: row.cls }, ...(hasVClass ? [{ v: row.vClass || '' }] : []), { v: row.tag }, { v: row.status }, { v: row.type }];
+      table = { cols: (hasVClass ? ['P', 'G', 'F', 'I', 'N', 'U'] : ['P', 'G', 'I', 'N', 'U']).map((id) => ({ id })), rows: gvRows.map((row) => ({ c: values(row) })) };
+    } else if (/select P, G, (?:F, )?count\(I\)/i.test(tq)) {
       const totals = new Map();
       gvRows.forEach((row) => totals.set(row.cls, (totals.get(row.cls) || 0) + 1));
       table = { cols: [{ id: 'P' }, { id: 'G' }, { id: 'count-I', type: 'number' }], rows: [...totals].map(([cls, n]) => ({ c: [{ v: dateCell }, { v: cls }, { v: n }] })) };

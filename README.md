@@ -1,4 +1,12 @@
-# First Forward Dashboard — First Forward + GV Partner (v3.51)
+# First Forward Dashboard — First Forward + GV Partner (v3.53.0)
+
+## ✨ v3.53.0 — 📲 PWA launch recovery + 🧭 consistent GV CCH categories
+
+- **Installed PWA recovery:** new manifests launch at `/#/home` with root scope; existing installs at `/api/pwa/` receive the SPA shell, whose root base keeps all scripts and styles loading correctly.
+- **No GV category flash:** server fast/history/detail feeds now use the saved CCH map and VCLASS fallback consistently. Settings changes invalidate cached feeds, in-flight old generations cannot overwrite them, and Home rejects snapshots stamped with a different map.
+- **Regression tests** cover PWA compatibility, CCH/VCLASS query parity, column discovery, map signatures, and stale-feed protection.
+
+Release note: [WHATS-NEW-v3.53.0.md](WHATS-NEW-v3.53.0.md).
 
 Colourful dashboard website built directly on top of **do Google Sheets**:
 

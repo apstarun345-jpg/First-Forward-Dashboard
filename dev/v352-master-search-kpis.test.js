@@ -120,10 +120,10 @@ test('🧑‍💼 employee link agent — boxes + ek class table, 🚗/🚚 grou
 
 test('🏷️ v3.52 wiring — version + cache-bust pins', async () => {
   const pkg = JSON.parse(await read('package.json'));
-  assert.equal(pkg.version, '3.52.0');
-  assert.match(await read('server.js'), /APP_VERSION = '3\.52\.0'/);
+  assert.equal(pkg.version, '3.53.0');
+  assert.match(await read('server.js'), /APP_VERSION = '3\.53\.0'/);
   const idx = await read('index.html');
-  assert.match(idx, /styles\.css\?v=106/); assert.match(idx, /config\.js\?v=104/); assert.match(idx, /lazy\.js\?v=103/);
+  assert.match(idx, /styles\.css\?v=106/); assert.match(idx, /config\.js\?v=105/); assert.match(idx, /home\.js\?v=87/); assert.match(idx, /app\.js\?v=105/); assert.match(idx, /lazy\.js\?v=103/);
   const sw = await read('sw.js');
-  assert.match(sw, /apnapayment-v108/); assert.match(sw, /styles\.css\?v=106/); assert.match(sw, /config\.js\?v=104/); assert.match(sw, /masterSearch\.js\?v=104/);
+  assert.match(sw, /apnapayment-v109/); assert.match(sw, /styles\.css\?v=106/); assert.match(sw, /config\.js\?v=105/); assert.match(sw, /home\.js\?v=87/); assert.match(sw, /app\.js\?v=105/); assert.match(sw, /masterSearch\.js\?v=104/);
 });

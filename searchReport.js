@@ -40,12 +40,12 @@ window.FF = window.FF || {};
       if (!p || !MP() || !MP().supports(p)) return;
       const name = normName(p.name); if (!name) return;
       const ch = chOf(p.kind), other = ch === 'ff' ? 'gv' : 'ff';
-      const sameChannel = groups.find((g) => g.name === name && g[ch]);
+      const sameChannel = groups.find((g) => normName(g.name) === name && g[ch]);
       if (sameChannel) {
         if (isTlKind(p.kind) && !isTlKind(sameChannel[ch].kind)) sameChannel[ch] = p;
         return;
       }
-      const linked = groups.find((g) => g.name === name && g[other] && identitiesLinked(p, g[other]));
+      const linked = groups.find((g) => normName(g.name) === name && g[other] && identitiesLinked(p, g[other]));
       if (linked) { linked[ch] = p; return; }
       groups.push({ key: `${name}|${ch}|${identityIds(p)[0] || name}`, name: p.name, ff: ch === 'ff' ? p : null, gv: ch === 'gv' ? p : null });
     });

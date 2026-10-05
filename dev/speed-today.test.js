@@ -73,7 +73,13 @@ test('lazy.js: har FF.pages module ya eager core me hai ya lazy group me', async
   const html = await read('index.html');
   const eager = new Set([...html.matchAll(/<script[^>]+src="([^"]+)"/g)].map((m) => m[1].replace(/\?.*$/, '')));
   const lazy = await read('lazy.js');
-  const groups = [...lazy.matchAll(/^\s{4}([A-Za-z][\w]*): \[([^\]]*)\]/gm)].map((m) => [m[1], [...m[2].matchAll(/'([\w]+)'/g)].map((x) => x[1])]);
+  const arrayDefs = new Map([...lazy.matchAll(/const ([A-Z_]+) = \[([^\]]*)\];/g)].map((m) => [m[1], m[2]]));
+  const expand = (expr, stack = []) => [...expr.matchAll(/'([\w-]+)'|\.\.\.([A-Z_]+)/g)].flatMap((m) => {
+    if (m[1]) return [m[1]];
+    if (stack.includes(m[2]) || !arrayDefs.has(m[2])) return [];
+    return expand(arrayDefs.get(m[2]), stack.concat(m[2]));
+  });
+  const groups = [...lazy.matchAll(/^\s{4}([A-Za-z][\w]*): \[([^\]]*)\]/gm)].map((m) => [m[1], expand(m[2])]);
   assert.ok(groups.length >= 20, `lazy groups parse hue (${groups.length})`);
   const map = new Map(groups);
   for (const file of files) {
@@ -81,6 +87,10 @@ test('lazy.js: har FF.pages module ya eager core me hai ya lazy group me', async
     for (const m of src.matchAll(/FF\.pages\.([A-Za-z][\w]*) =/g)) {
       const page = m[1];
       if (eager.has(file)) continue; // page ka module eager core me hai (home/sheets) — lazy group ki zaroorat nahi
+      if (page === 'stockReport') {
+        assert.ok((map.get('performance') || []).includes('performance'), 'stockReport /performance route ka alias hai');
+        continue;
+      }
       assert.ok(map.has(page), `page "${page}" (${file}) lazy.js GROUPS me hona chahiye`);
       const mods = map.get(page);
       assert.ok(mods.length, `page "${page}" ke liye modules listed hain`);
@@ -118,7 +128,8 @@ test('app.js: page render se pehle us page ka module ensure hota hai + login ke 
 test('server: /api/today (GV Master + EIR), /api/perf diagnostics, ETag/304', async () => {
   const src = await read('server.js');
   assert.match(src, /p === '\/api\/today'/, '/api/today route hai');
-  assert.match(src, /const select = `select \$\{dateCol\}, \$\{classCol\}, count\(\$\{countCol\}\)`/, 'aaj ka count grouped query se (poora tab download nahi)');
+  assert.match(src, /const classCols = \[classCol, \.\.\.\(hasFallbackClass \? \[fallbackClassCol\] : \[\]\)\]/, 'GV query selects CCH plus optional VCLASS fallback');
+  assert.match(src, /const select = `select \$\{dateCol\}, \$\{classCols\.join\(', '\)\}, count\(\$\{countCol\}\)`/, 'aaj ka count grouped query se (poora tab download nahi)');
   assert.match(src, /result\.gv = \{[\s\S]*source: 'GV Master'/, 'GV side GV Master tab se');
   assert.match(src, /result\.ff = \{[\s\S]*source: 'EIR'/, 'FF side EIR tab se');
   assert.match(src, /async function gvizDailyClassCounts\(/, 'date column text ho ya date — dono ke liye fallback chain');
@@ -183,11 +194,11 @@ test('lazy.js: page ka module load karta hai, order sahi, dobara load nahi', asy
   const lazy = win.FF.lazy;
   assert.ok(lazy && typeof lazy.ensure === 'function');
   assert.equal((lazy.GROUPS.trend || []).join(','), 'trend');
-  assert.equal((lazy.GROUPS.executive || []).join(','), 'insights,cockpit', 'dependency pehle');
+  assert.equal((lazy.GROUPS.executive || []).join(','), 'insights,directAgents,certificates,cockpit', 'transitive dependencies resolve before page module');
   await lazy.ensure('executive');
-  assert.deepEqual(requested, ['./insights.js?v=45', './cockpit.js?v=45'], 'order + version sahi');
+  assert.deepEqual(requested, ['./insights.js?v=45', './directAgents.js?v=45', './certificates.js?v=45', './cockpit.js?v=45'], 'order + version sahi');
   await lazy.ensure('executive');
-  assert.equal(requested.length, 2, 'dedup: dobara request nahi');
+  assert.equal(requested.length, 4, 'dedup: dobara request nahi');
   assert.ok(lazy.WARM.length >= 5 && lazy.WARM.includes('insights'), 'warm list me bhaari modules aakhir me');
   assert.ok(lazy.GROUPS.settings.includes('settings'), 'settings page ka module lazy hai');
 });

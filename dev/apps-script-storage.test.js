@@ -67,7 +67,9 @@ test('in-app wizard: test + migrate, then restart on EMPTY disk keeps users & se
     assert.equal(login.res.status, 200); cookie = login.res.headers.get('set-cookie').split(';')[0];
     assert.equal((await call('/api/settings', 'PUT', { settings: { brand: 'Before Cloud' } })).res.status, 200);
     const code = await call('/api/storage/apps-script');
-    assert.match(code.json.code, /PASTE_A_LONG_RANDOM_SECRET_HERE/);
+    assert.match(code.json.code, /function setAppSecretOnce\(secret\)/, 'the Apps Script secret is configured in Script Properties, not committed into the source');
+    assert.match(code.json.code, /APPS_SCRIPT_SECRET/);
+    assert.doesNotMatch(code.json.code, /PASTE_A_LONG_RANDOM_SECRET_HERE/);
     assert.equal((await call('/api/storage/test', 'POST', { url: mock.url, secret: 'wrong-secret-wrong-secret' })).res.status, 502);
     const t = await call('/api/storage/test', 'POST', { url: mock.url, secret: SECRET });
     assert.equal(t.json.ok, true); assert.equal(t.json.hasData, false);

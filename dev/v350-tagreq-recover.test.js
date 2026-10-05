@@ -302,15 +302,15 @@ test('🧩 UI + cache-bust wiring: ⏪ button, banner, health summary, naya vers
   assert.match(srv, /tagRequestRecovery: tagReqRecoveryInfo/, 'health me recovery summary');
 
   const pkg = JSON.parse(await read('package.json'));
-  assert.equal(pkg.version, '3.52.0', 'version bump');
+  assert.equal(pkg.version, '3.53.0', 'version bump');
   const idx = await read('index.html');
-  assert.match(idx, /config\.js\?v=104/, 'config cache-bust 104');
+  assert.match(idx, /config\.js\?v=105/, 'config cache-bust 105');
   assert.match(idx, /lazy\.js\?v=103/, 'lazy cache-bust 103');
   const lazy = await read('lazy.js');
   assert.match(lazy, /const VERSION = \(function/, 'lazy VERSION derive');
   const sw = await read('sw.js');
-  assert.match(sw, /apnapayment-v108/, 'service worker cache bump');
-  assert.match(sw, /config\.js\?v=104/, 'sw pin config 104');
+  assert.match(sw, /apnapayment-v109/, 'service worker cache bump');
+  assert.match(sw, /config\.js\?v=105/, 'sw pin config 105');
   const docs = await read('RECOVERY.md');
   assert.match(docs, /Tag Request/i, 'RECOVERY.md me tag request recovery');
 });

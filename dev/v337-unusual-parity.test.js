@@ -289,17 +289,19 @@ test('🃏 app.js: global KPI click handler `data-kpi-self` cards ko hijack nahi
   assert.ok(ua.includes('data-ua-modal-evcsv') && ua.includes('data-ua-modal-pdf'), 'drawer ke CSV/PDF actions wahi flag use karte hain');
 });
 
-test('🚀 lazy group + cache busting: unusual-scan pehle load hota hai, version bump consistent', () => {
+test('🚀 lazy group + current cache busting: unusual-scan pehle load hota hai', () => {
   const lazy = read('lazy.js');
   const m = lazy.match(/unusual:\s*\[([^\]]+)\]/);
   assert.ok(m, 'GROUPS.unusual mila');
   const list = m[1].split(',').map((x) => x.trim().replace(/['"]/g, ''));
-  assert.deepEqual(list, ['unusual-scan', 'pdf', 'unusual'], 'shared scan lib page module se pehle load ho');
+  assert.deepEqual(list, ['pdf', 'unusual-scan', 'unusual'], 'PDF helper aa sakta hai pehle, shared scan lib unusual page se pehle load hoti hai');
+  assert.ok(list.indexOf('unusual-scan') < list.indexOf('unusual'), 'shared scan lib page module se pehle load ho');
   const idx = read('index.html'), sw = read('sw.js');
   assert.ok(!idx.includes('?v=59') && !sw.includes('?v=59'), 'purana ?v=59 kahin nahi bacha');
-  assert.ok(idx.includes('?v=72') && sw.includes('?v=72'), 'naya ?v=72 lagi hai (v3.47 GV Master truth + Home KPI + live feed fix)');
-  assert.ok(!idx.includes('?v=70') && !sw.includes('?v=70'), 'pichhla ?v=70 kahin nahi bacha (index + sw dono bump)');
-  assert.match(sw, /CACHE_NAME = 'apnapayment-v80'/, 'SW cache bust hua');
+  assert.ok(idx.includes('config.js?v=105') && sw.includes('./config.js?v=105'), 'CCH signature helper cache-busted in shell + SW');
+  assert.ok(idx.includes('home.js?v=87') && sw.includes('./home.js?v=87'), 'Home map-mismatch guard cache-busted in shell + SW');
+  assert.ok(idx.includes('app.js?v=105') && sw.includes('./app.js?v=105'), 'root service-worker registration cache-busted in shell + SW');
+  assert.match(sw, /CACHE_NAME = 'apnapayment-v109'/, 'SW cache bust hua');
   const server = read('server.js');
   assert.ok(server.includes("import './unusual-scan.js'"), 'server shared scan lib import karta hai');
   assert.ok(server.includes("'/api/unusual/scan'"), 'server route hai');

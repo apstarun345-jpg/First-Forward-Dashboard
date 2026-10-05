@@ -26,6 +26,8 @@ test('GV Master truth mapping stays authoritative', () => {
   assert.match(read('searchReport.js'), /Same-name FF\/GV merge only when a real ID links both records/);
   assert.match(server, /function gvMasterRawTodayFallback/);
   assert.match(server, /async function gvTodayFeed/);
+  assert.match(server, /classMapVersion/);
+  assert.match(server, /fallbackClassCol: resolved\.vClass, classMap: settings\.gvClassCch/);
   assert.match(server, /\/api\/gv-today/);
   assert.match(server, /cfg\.date \|\| pick\('date'\)/);
   assert.match(home, /All Commercial · VC20 \+ VC5\+/);
@@ -36,6 +38,8 @@ test('GV Master truth mapping stays authoritative', () => {
   assert.match(home, /reported din/);
   assert.match(home, /FF\.data\.gvToday/);
   assert.match(home, /AAJ KA LIVE|Aaj ka live/);
+  assert.match(home, /function feedMatchesCurrentClassMap/);
+  assert.match(home, /if \(!feedMatchesCurrentClassMap\(quick\.gv\)\) return/);
   assert.match(index, /homeKpiFix\.css/);
   assert.match(profile, /todayKpiHtml/);
   assert.match(profile, /todayTeamRows/);

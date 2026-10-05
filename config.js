@@ -82,6 +82,19 @@ FF.config = {
     chatCharts: true, levelUp: true, memoryLane: true,
     officeLat: 0, officeLng: 0
   },
+  /** Stable signature shared with server feeds — Home will not paint categories from an older map. */
+  gvClassMapVersion(config) {
+    const cfg = config && typeof config === 'object' ? config : (this.gvClassCch || {});
+    const groups = cfg.groups && typeof cfg.groups === 'object' ? cfg.groups : {};
+    const token = (value) => String(value || '').toUpperCase().replace(/\s+/g, ' ').trim();
+    const text = [cfg.enabled === false ? 'off' : 'on', ...Object.keys(groups).sort().map((key) => {
+      const values = Array.isArray(groups[key]) ? groups[key].map(token).filter(Boolean).sort() : [];
+      return `${key}=${values.join('\u001f')}`;
+    })].join('\u001e');
+    let hash = 2166136261;
+    for (let i = 0; i < text.length; i++) hash = Math.imul(hash ^ text.charCodeAt(i), 16777619);
+    return (hash >>> 0).toString(36);
+  },
   /** Feature flag padho — FF.config.feat('search') / FF.config.feat('alerts').lowCover */
   feat(key) { const f = this.features || {}; return f[key]; },
 
