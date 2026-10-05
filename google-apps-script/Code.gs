@@ -5,6 +5,22 @@
  * tab "APP_STORAGE" of the spreadsheet this script is attached to. Data arrives ALREADY ENCRYPTED
  * by the dashboard server, so the cells only contain unreadable text. Do not edit that tab by hand.
  *
+ * v3.58 — "Could not save users/notify" fix + easy debugging:
+ *   • SECRET AUTO-SETUP (TOFU): agar Script Property APPS_SCRIPT_SECRET abhi set NAHI hai, to
+ *     pehli hi server call ka secret (>=16 chars) yahan save ho jata hai — setAppSecretOnce()
+ *     bhoolne par bhi save fail nahi hota. (Secret set hone ke BAAD mismatch par pehle jaisa
+ *     'unauthorized' hi milta hai — security same rehti hai.)
+ *   • WRITE VERIFY: har 'write' ke baad script row ko dobara padh kar confirm karta hai ki data
+ *     sach me sheet me utar gaya (response me verified:true) — "save not confirmed" ab sirf
+ *     real failure par aayega.
+ *   • BUSY RETRY: lock busy hone par script khud thoda ruk kar dobara koshish karta hai, aur
+ *     dashboard server bhi 'busy' par ab retry karta hai.
+ *   • checkSetup(): editor me ▶ Run karo — poori setup checklist (secret, tabs, mail permission)
+ *     Logger me mil jaati hai. Browser me /exec URL kholne par bhi ab status dikhta hai
+ *     (secretSet, storage rows, history rows — koi secret leak nahi hota).
+ *   ⚠️ Paste karne ke baad: Deploy → Manage deployments → ✏️ Edit → Version: "New version" →
+ *   Deploy — nahi to purana code hi chalta rehta hai!
+ *
  * v3.48 — history recovery. The dashboard can now LIST the encrypted saves in APP_STORAGE_HISTORY
  * (action 'history') and bring an older save back (Settings → ☁️ Storage & backup → ⏪ Recovery).
  * Still ciphertext-only: this script never decrypts anything. You MUST paste this file and deploy a
@@ -49,9 +65,41 @@ const CHUNK = 45000; // a Google Sheets cell holds max 50,000 characters
 const KINDS = ['users', 'sessions', 'settings', 'resets', 'notify'];
 const HISTORY_TAB = 'APP_STORAGE_HISTORY';
 const HISTORY_MAX_ROWS = 2000;
+const CODE_VERSION = 'v3.58';
 
 /** Run this ONCE from the Apps Script editor (▶ Run) to grant the "send email" permission. */
 function authorizeMail() { Logger.log('Mail quota left today: ' + MailApp.getRemainingDailyQuota()); }
+
+/**
+ * 🩺 Editor me ▶ Run karo — poori setup checklist Logger (View → Logs / Execution log) me aati hai.
+ * "Could not save … to Google Sheets" dikhe to SABSE PEHLE yahi chalao.
+ */
+function checkSetup() {
+  var lines = ['— ApnaPayment storage checkSetup (' + CODE_VERSION + ') —'];
+  var secret = appSecret_();
+  lines.push(secret.length >= 16
+    ? '✅ APPS_SCRIPT_SECRET set hai (' + secret.length + ' characters). Render ke APPS_SCRIPT_SECRET se EXACT same hona chahiye.'
+    : '⚠️ APPS_SCRIPT_SECRET abhi set NAHI hai — ya to setAppSecretOnce(\'...\') chalao, ya kuch mat karo: server ki PEHLI call par ye khud save ho jayega (v3.58 auto-setup).');
+  try {
+    var ss = SpreadsheetApp.getActive();
+    lines.push('✅ Script is spreadsheet se bandha hai: "' + ss.getName() + '"');
+    var sh = ss.getSheetByName(TAB);
+    lines.push(sh
+      ? '✅ ' + TAB + ' tab maujood hai (' + Math.max(0, sh.getLastRow() - 1) + ' records).'
+      : 'ℹ️ ' + TAB + ' tab abhi nahi hai — pehli save par apne aap ban jayega.');
+    var h = ss.getSheetByName(HISTORY_TAB);
+    lines.push(h ? '✅ ' + HISTORY_TAB + ' me ' + Math.max(0, h.getLastRow() - 1) + ' purani saves hain.' : 'ℹ️ ' + HISTORY_TAB + ' pehli overwrite par banega.');
+  } catch (e) {
+    lines.push('❌ Spreadsheet access error: ' + String(e && e.message || e));
+  }
+  try { lines.push('✅ Mail permission OK — aaj ka quota: ' + MailApp.getRemainingDailyQuota()); }
+  catch (e) { lines.push('⚠️ Mail permission missing — authorizeMail() chala kar Allow karo (OTP/digest emails ke liye).'); }
+  lines.push('ℹ️ Code paste karne ke baad: Deploy → Manage deployments → ✏️ Edit → Version: "New version" → Deploy. /exec URL wahi rehta hai.');
+  lines.push('ℹ️ Web app settings: Execute as: Me · Who has access: Anyone.');
+  var out = lines.join('\n');
+  Logger.log('\n' + out);
+  return out;
+}
 
 /**
  * 🔐 Run ONCE after pasting this file. Do NOT put the secret into GitHub.
@@ -166,16 +214,49 @@ function instantSheetEditPush(e) {
 }
 
 function doGet() {
-  return json_({ ok: true, service: 'apnapayment-storage', note: 'POST only. Storage is working if you can see this.' });
+  // 🩺 Browser me /exec URL kholo → ye status dikhta hai (koi secret/ciphertext leak nahi hota).
+  var out = { ok: true, service: 'apnapayment-storage', version: CODE_VERSION, time: new Date().toISOString(), note: 'Storage is working if you can see this. Saves happen via POST only.' };
+  try {
+    out.secretSet = appSecret_().length >= 16;
+    if (!out.secretSet) out.hint = 'Secret abhi set nahi — server ki pehli call par auto-set hoga, ya editor me setAppSecretOnce(\'...\') chalao.';
+  } catch (e) { out.secretSet = false; }
+  try {
+    var ss = SpreadsheetApp.getActive();
+    out.spreadsheet = ss.getName();
+    var sh = ss.getSheetByName(TAB);
+    out.storageTab = !!sh;
+    if (sh && sh.getLastRow() >= 2) {
+      var meta = sh.getRange(2, 1, sh.getLastRow() - 1, 4).getValues();
+      out.records = meta
+        .filter(function (r) { return KINDS.indexOf(String(r[0] || '')) >= 0; })
+        .map(function (r) { return { kind: String(r[0]), updatedAt: String(r[2] || ''), chunks: Number(r[3]) || 0 }; });
+    }
+    var h = ss.getSheetByName(HISTORY_TAB);
+    out.historyRows = h ? Math.max(0, h.getLastRow() - 1) : 0;
+  } catch (e) { out.sheetError = String(e && e.message || e); }
+  try { out.mailQuota = MailApp.getRemainingDailyQuota(); } catch (e) { out.mailQuota = 'permission missing — run authorizeMail()'; }
+  return json_(out);
 }
 
 function doPost(e) {
   let body;
   try { body = JSON.parse((e && e.postData && e.postData.contents) || '{}'); }
   catch (err) { return json_({ ok: false, error: 'invalid JSON' }); }
-  const SECRET = appSecret_();
-  if (!SECRET || SECRET.length < 16) return json_({ ok: false, error: 'APPS_SCRIPT_SECRET missing — run setAppSecretOnce(secret) once, then deploy a new version.' });
-  if (body.secret !== SECRET) return json_({ ok: false, error: 'unauthorized (secret mismatch)' });
+  let SECRET = appSecret_();
+  if (!SECRET || SECRET.length < 16) {
+    // 🔓 v3.58 AUTO-SETUP (trust-on-first-use): secret abhi set nahi hai, isliye pehli authorized
+    // call ka secret yahan save kar lo — setAppSecretOnce() bhoolne par bhi saves fail nahi hote.
+    // Ek baar set hone ke baad mismatch par hamesha 'unauthorized' hi milta hai.
+    const candidate = String(body.secret || '').trim();
+    if (candidate.length >= 16) {
+      PropertiesService.getScriptProperties().setProperty('APPS_SCRIPT_SECRET', candidate);
+      SECRET = candidate;
+      console.log('APPS_SCRIPT_SECRET was empty — saved from the first authorized call (auto-setup).');
+    } else {
+      return json_({ ok: false, error: 'APPS_SCRIPT_SECRET missing — run setAppSecretOnce(secret) once (or simply retry: the first server call sets it automatically), then deploy a new version.' });
+    }
+  }
+  if (body.secret !== SECRET) return json_({ ok: false, error: 'unauthorized (secret mismatch) — Render env APPS_SCRIPT_SECRET aur yahan Script Property APPS_SCRIPT_SECRET exact same hone chahiye. Editor me checkSetup() chalao.' });
 
   // 📧 Mail relay (HTTPS) — Render free blocks SMTP ports, so the dashboard can send its emails
   // (login OTP, daily digest, champion certificates, test mail) THROUGH this script via Gmail.
@@ -205,10 +286,14 @@ function doPost(e) {
   }
 
   const lock = LockService.getScriptLock();
-  if (!lock.tryLock(25000)) return json_({ ok: false, error: 'busy, retry' });
+  // v3.58 — lock busy ho to turant give-up mat karo: thoda ruk kar ek aur koshish (total ~26s).
+  if (!lock.tryLock(18000)) {
+    Utilities.sleep(1500 + Math.floor(Math.random() * 1500));
+    if (!lock.tryLock(5000)) return json_({ ok: false, error: 'busy, retry' });
+  }
   try {
     const sheet = sheet_();
-    if (body.action === 'ping') return json_({ ok: true, tab: TAB, spreadsheet: SpreadsheetApp.getActive().getName(), url: SpreadsheetApp.getActive().getUrl() });
+    if (body.action === 'ping') return json_({ ok: true, version: CODE_VERSION, tab: TAB, spreadsheet: SpreadsheetApp.getActive().getName(), url: SpreadsheetApp.getActive().getUrl() });
     // 📗 Tag Request (v3.27) — dashboard se aayi rows ko kisi bhi NORMAL tab me direct append karo.
     // body: { tab: 'Tag Requests', header: [...], rows: [[...], ...], spreadsheetId?: '<alag sheet ka ID>' }
     // Tab na ho to ban jaata hai; tab khaali ho to pehle header row likhi jaati hai.
@@ -356,7 +441,10 @@ function doPost(e) {
         writeRecord_(sheet, kind, records[kind], nowIso);
       });
       SpreadsheetApp.flush();
-      return json_({ ok: true, savedAt: nowIso, kinds: Object.keys(records) });
+      // v3.58 — save CONFIRM karo: har kind ki row wapas padh kar timestamp + chunk count milao.
+      // Flush ke baad bhi kuch galat ho (quota/row issue) to yahin pakda jayega, chup-chaap nahi.
+      verifyWrite_(sheet, records, nowIso);
+      return json_({ ok: true, savedAt: nowIso, kinds: Object.keys(records), verified: true });
     }
     // ⏪ Recovery (v3.48) — APP_STORAGE_HISTORY ke purane encrypted records ki list.
     //   body: { rows?: [rowNumbers], withData?: true }
@@ -517,6 +605,25 @@ function writeRecord_(sh, kind, record, nowIso) {
   const range = sh.getRange(rowIndex, 1, 1, width);
   range.setNumberFormat('@');
   range.setValues([[kind, record.v || '', String(nowIso || new Date().toISOString()), String(chunks.length)].concat(chunks)]);
+}
+
+/**
+ * v3.58 — write ke turant baad sheet ko dobara padh kar confirm karo ki har record sach me
+ * utar gaya: kind row mile, timestamp wahi ho jo abhi likha, aur chunk count expected se match kare.
+ * Mismatch par throw — server ko saaf error milta hai (silent data-loss nahi).
+ */
+function verifyWrite_(sh, records, nowIso) {
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) throw new Error('write verify failed: ' + TAB + ' tab is empty after save');
+  const meta = sh.getRange(2, 1, lastRow - 1, 4).getValues();
+  Object.keys(records).forEach(function (kind) {
+    const expected = Math.max(1, Math.ceil(String(records[kind].data || '').length / CHUNK));
+    let found = null;
+    for (let i = 0; i < meta.length; i++) if (String(meta[i][0]) === kind) { found = meta[i]; break; }
+    if (!found) throw new Error('write verify failed: row for "' + kind + '" not found after save');
+    if (String(found[2]) !== String(nowIso)) throw new Error('write verify failed: "' + kind + '" timestamp mismatch after save');
+    if ((Number(found[3]) || 0) !== expected) throw new Error('write verify failed: "' + kind + '" chunk count ' + found[3] + ' ≠ expected ' + expected);
+  });
 }
 
 function json_(obj) {

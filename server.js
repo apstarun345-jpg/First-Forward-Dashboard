@@ -418,9 +418,10 @@ function persist(kind) {
       if (kind === 'notify') { notifyTagBaseline = tagReqCount(); notifyLastWriteAt = Date.now(); }
       storageFailures.delete(kind);
     } catch (err) {
+      const cause = String(err && err.message || '').slice(0, 300);
       const storageError = sheetsStore
-        ? `Could not save ${kind} to Google Sheets${STORAGE_BACKEND === 'appsscript' ? ' (Apps Script)' : ''}. Save not confirmed; check the Apps Script deployment / secret and retry.`
-        : `Could not save ${kind}. Check DATA_DIR disk permissions and free space.`;
+        ? `Could not save ${kind} to Google Sheets${STORAGE_BACKEND === 'appsscript' ? ' (Apps Script)' : ''}. Save not confirmed; check the Apps Script deployment / secret and retry.${cause ? ` Reason: ${cause}` : ''}`
+        : `Could not save ${kind}. Check DATA_DIR disk permissions and free space.${cause ? ` Reason: ${cause}` : ''}`;
       storageFailures.set(kind, storageError);
       if (JSON.stringify(db[kind], null, 2) === snapshot && durableSnapshots.has(kind)) db[kind] = JSON.parse(durableSnapshots.get(kind));
       console.error(storageError, err.message);
@@ -4323,7 +4324,12 @@ async function handleApi(req, res, url) {
       name: s.appName || 'First Forward & Gv Partner Dashboard',
       short_name: s.brand || 'FF & GV',
       description: s.tagline || 'ApnaPayment workspace',
+      id: '/',
       start_url: '/#/home', scope: '/', display: 'standalone', orientation: 'any',
+      // 📱 Android-app shell: standalone window, ek hi app-instance me launch, koi browser UI nahi.
+      display_override: ['standalone', 'minimal-ui'],
+      launch_handler: { client_mode: 'navigate-existing' },
+      prefer_related_applications: false,
       background_color: (s.theme && s.theme.sidebarBg) || '#111214',
       theme_color: (s.theme && s.theme.accent) || '#111214',
       categories: ['business', 'productivity', 'finance'],

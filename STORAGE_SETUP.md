@@ -12,6 +12,22 @@ Har record server par hi **AES-256-GCM encrypt** hota hai, sheet me sirf encrypt
 > Alternative: Render par paid persistent disk (`/data`, `DATA_DIR=/data`) — DEPLOYMENT.md dekho.
 > Advanced alternative (service account): SHEETS_STORAGE.md.
 
+## 🆕 v3.58 — "Could not save users/notify … (Apps Script)" error aa raha hai?
+
+Naya `google-apps-script/Code.gs` paste karo aur **Deploy → Manage deployments → ✏️ Edit →
+Version: "New version" → Deploy** karo (ye step bhoolne par purana code hi chalta rehta hai!).
+Naye code me:
+
+- **Secret auto-setup:** `setAppSecretOnce()` chalana bhool gaye to bhi ab fail nahi hota —
+  server ki pehli call ka secret Script Properties me khud save ho jata hai.
+- **Save confirm hota hai:** har write ke baad script sheet ko dobara padh kar verify karta hai.
+- **Busy retry:** do saves takraane par script (aur server) khud retry karte hain — pehle yahi
+  "busy, retry" error ban kar upar aa jata tha.
+- **Debugging aasaan:** Apps Script editor me `checkSetup()` ▶ Run karo → poori checklist milti
+  hai; ya browser me apna `/exec` URL kholo → status JSON dikhta hai (secret kabhi leak nahi hota).
+- Dashboard error me ab **asli reason** bhi dikhta hai (`Reason: unauthorized (secret mismatch)`
+  waghaira) — turant pata chal jata hai ki kya galat hai.
+
 ## Sabse aasaan tarika — app ke andar wizard (≈5 minute)
 
 Latest code deploy hone ke baad admin login karo → **Settings → ☁️ Storage & backup**.

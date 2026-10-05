@@ -15,6 +15,9 @@
     if (standalone || (touch && (mobilePlatform || screenShort <= 900 || viewportShort <= 900))) {
       document.documentElement.classList.add('mobile-ui');
     }
+    // Installed (home-screen) app window — CSS isse browser-feel hataane ke liye use karta hai
+    // (no pull-to-refresh, no text-selection on chrome, native-style page transitions).
+    if (standalone) document.documentElement.classList.add('pwa-standalone');
   } catch (error) {
     console.warn('Could not detect the mobile app display mode:', error);
   }

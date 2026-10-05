@@ -5712,3 +5712,36 @@ html[data-theme="dark"] .home-exp-stat { background: color-mix(in srgb, var(--br
 .dp2-stock-mix b { font-size: 10.5px; font-variant-numeric: tabular-nums; }
 @media(max-width:900px) { .home-exp-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); } .home-exp-date-filter { grid-column: 1 / -1; } }
 @media(max-width:560px) { .home-exp-controls { grid-template-columns: 1fr; } .home-exp-date-filter { grid-column: auto; } .home-exp-summary { gap: 5px; } .home-exp-stat { padding: 8px; } .home-exp-stat > span, .home-exp-stat > small { font-size: 9px; } .home-exp-stat > b { font-size: 14px; } .home-exp-dates label { width: 100%; justify-content: space-between; } .home-exp-dates .input { flex: 1; min-width: 0; } .home-exp-card > .card-head { flex-direction: row; } .home-exp-card .card-right { margin-left: auto; } }
+
+/* ───────────────────────────────────────────────────────────────────────────────
+   📱 v3.58 — ANDROID-APP SHELL: installed PWA ab browser jaisa nahi, native app
+   jaisa feel karta hai. Desktop browser layout par koi asar nahi.
+   • Pull-to-refresh / rubber-band scroll band (app content apna refresh button use karta hai)
+   • Link long-press callout, blue tap flash aur UI-chrome text selection band
+   • Double-tap zoom delay hataya (touch-action: manipulation)
+   • Route change par halka native-style page transition
+   ─────────────────────────────────────────────────────────────────────────────── */
+@media (pointer: coarse), (display-mode: standalone) {
+  html, body { overscroll-behavior: none; }
+  button, a, .btn, .icon-btn, .nav-item, .chip, .tab, .mobile-nav a { touch-action: manipulation; }
+}
+html.pwa-standalone, html.pwa-standalone body { overscroll-behavior: none; }
+/* UI chrome (topbar/sidebar/bottom-nav/buttons) select ya long-press callout nahi hota —
+   tables aur page content par selection pehle jaisi chalti hai (copy karne ke liye). */
+html.pwa-standalone .topbar, html.pwa-standalone .sidebar, html.pwa-standalone .mobile-nav,
+html.pwa-standalone .btn, html.pwa-standalone .icon-btn, html.pwa-standalone .nav-item,
+html.pwa-standalone .drawer-head, html.pwa-standalone .app-footer, html.pwa-standalone .site-footer {
+  -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+}
+/* Installed app me "Install" button ki zaroorat nahi. */
+html.pwa-standalone #pwa-install { display: none !important; }
+/* Status-bar / display-cutout ke neeche content na dabe (edge-to-edge Android + notch). */
+html.pwa-standalone .topbar { padding-top: max(8px, env(safe-area-inset-top)); height: auto; }
+html.pwa-standalone .mobile-nav { padding-bottom: max(6px, env(safe-area-inset-bottom)); }
+/* Native-style page transition: route render par content halka sa upar slide + fade hota hai. */
+@media (prefers-reduced-motion: no-preference) {
+  html.pwa-standalone #main > * { animation: ffPageIn .18s ease-out both; }
+}
+@keyframes ffPageIn { from { opacity: .35; transform: translateY(7px); } to { opacity: 1; transform: none; } }
+/* App jaisa scroll: momentum + koi horizontal wobble nahi. */
+html.pwa-standalone body { -webkit-overflow-scrolling: touch; overflow-x: hidden; }
