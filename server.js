@@ -1889,9 +1889,14 @@ const PUSH_ACTIONS = {
   alert: [{ action: 'open', title: '🔴 Kholo' }, { action: 'dismiss', title: '✅ Theek hai' }],
   digest: [{ action: 'open', title: '🌅 Kholo' }, { action: 'dismiss', title: '✅ Theek hai' }],
   signup: [{ action: 'open', title: '👤 Kholo' }, { action: 'dismiss', title: '✅ Theek hai' }],
-  request: [{ action: 'open', title: '🏷️ Kholo' }, { action: 'dismiss', title: '✅ Theek hai' }]
+  request: [{ action: 'open', title: '🏷️ Kholo' }, { action: 'dismiss', title: '✅ Theek hai' }],
+  monthly: [{ action: 'open', title: '📅 Kholo' }, { action: 'dismiss', title: '✅ Theek hai' }],
+  user: [{ action: 'open', title: '👤 Kholo' }, { action: 'dismiss', title: '✅ Theek hai' }],
+  info: [{ action: 'open', title: 'ℹ️ Kholo' }, { action: 'dismiss', title: '✅ Theek hai' }]
 };
-/** Fan-out a notification to push subscriptions (admin-targeted → admin subs, broadcast → everyone). Per-user push + sound preference bhi respect karo. */
+/** Fan-out a notification to every subscribed device that is actually allowed to see it.
+ * A unique notification tag is deliberately used per notification ID — type-only tags caused
+ * consecutive Tag Issued/report alerts to replace each other in the Android notification shade. */
 function pushFanout(item) {
   if (!vapidKeys || !item) return;
   const subs = pushSubs().filter((s) => {
@@ -1899,8 +1904,7 @@ function pushFanout(item) {
     if (!u) return false;
     if (!notificationVisible(item, u)) return false;
     const prefs = normalizeNotifyPrefs(u.notifyPrefs);
-    if (prefs.enabled === false) return false; // master switch OFF → koi push nahi
-    if (prefs.push === false) return false;
+    if (prefs.enabled === false || prefs.push === false) return false;
     if (prefs[item.type] === false) return false;
     return true;
   });
@@ -1909,26 +1913,30 @@ function pushFanout(item) {
     const u = findUser(s.username);
     const prefs = u ? normalizeNotifyPrefs(u.notifyPrefs) : DEFAULT_NOTIFY_PREFS;
     const voiceLine = pushVoiceLine(item);
+    const eventTag = `ff-${String(item.type || 'info').replace(/[^a-z0-9_-]/gi, '-').slice(0, 24)}-${item.id}`;
+    const link = (item.meta && item.meta.link) || '';
+    const important = new Set(['report', 'alert', 'request', 'signup', 'user', 'monthly']).has(item.type);
     const data = {
       id: item.id,
       title: item.title,
-      body: (item.body || '').replace(/\s+/g, ' ').slice(0, 180),
-      tag: item.type || 'ff',
-      link: (item.meta && item.meta.link) || '',
+      body: (item.body || '').replace(/\\s+/g, ' ').slice(0, 300),
+      tag: eventTag,
+      type: item.type || 'info',
+      routeKey: item.routeKey || '',
+      link,
       sound: prefs.sound !== false,
       tone: prefs.tone,
       at: Date.parse(item.createdAt) || Date.now(),
-      // 🔊 Voice: app band ho to OS notification (text + sound + vibration) turant jaata hai aur
-      // ye line queue me rehti hai; app khulte hi bol kar suna di jaati hai (sw.js + pushVoice.js).
+      // App band ho tab OS notification turant; voice text sirf app reopen/click par बोल सकता hai.
       voice: prefs.voice !== false && prefs.sound !== false ? voiceLine : '',
       speak: prefs.voice !== false && prefs.sound !== false,
       user: s.username,
       badge: unreadCountFor(u),
       lang: 'hi-IN',
-      actions: PUSH_ACTIONS[item.type] || undefined,
-      persist: item.type === 'signup' || item.type === 'report' || item.type === 'user' || item.type === 'request' || item.type === 'alert' // important operational alerts stay visible
+      actions: PUSH_ACTIONS[item.type] || [{ action: 'open', title: '🔔 Kholo' }],
+      persist: important
     };
-    handlePushResult(s, await deliverPush(s, data), { type: item.type });
+    handlePushResult(s, await deliverPush(s, data), { type: item.type, id: item.id });
   })).then(() => persist('notify')).catch(() => {});
 }
 // ---- monthly auto-report: har mahine ki 1–5 tarikh ko pichhle mahine ka FF-vs-GV compare broadcast ----
