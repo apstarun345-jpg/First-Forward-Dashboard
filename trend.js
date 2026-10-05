@@ -91,7 +91,17 @@ FF.pages = FF.pages || {};
     const directOptions = directVol ? ffDirectNames.map((n) => `<option value="${esc(n)}" ${String(filter.tl).toUpperCase() === n.toUpperCase() ? 'selected' : ''}>🚫 Direct Agents · ${esc(n)} (${U.fmtShort(directVol)})</option>`).join('') : '';
     const agentVol = U.groupSum(agents, (a) => a.name, (a) => a.n);
     const agentTl = new Map(); agents.forEach((a) => { if (!agentTl.has(a.name)) agentTl.set(a.name, FF.config.isExcludedTl(a.tlName) ? FF.config.directLabel(a, 'ff') : a.tlName); });
-    const allDaily = dailyR.status === 'fulfilled' ? dailyR.value : [];
+    const allDailyRaw = dailyR.status === 'fulfilled' ? dailyR.value : [];
+    // 🟦 v3.51 — FF (First Forward) ka data T+1 aata hai: aaj ki FF rows kisi bhi total me nahi jaati.
+    // FF trend page ab DEFAULT me sirf First Forward dikhata hai (GV apni alag ⚙️ GV Trend page par
+    // hai) — pehle dono channel mila hua number dikh raha tha ("First Forward" me GV ka data).
+    const chMode = ['ff', 'gv', 'both'].includes(String(p.ch)) ? String(p.ch) : 'ff';
+    const todayKey = U.dateKey(new Date());
+    // Aaj ka data kisi bhi channel ka nahi dikhta (user rule) — FF ka T+1 lag bhi respect hota hai.
+    const isToday = (r) => String(r.key) >= todayKey;
+    const ffLagPending = (r) => r.channel !== 'GV Partner' && !!(FF.filters && FF.filters.isFfPending && FF.filters.isFfPending(r.key));
+    const droppedToday = allDailyRaw.filter((r) => isToday(r) || ffLagPending(r)).length;
+    const allDaily = allDailyRaw.filter((r) => (chMode === 'gv' ? r.channel === 'GV Partner' : chMode === 'ff' ? r.channel !== 'GV Partner' : true) && !isToday(r) && !ffLagPending(r));
     const monthsList = M.months(allDaily);
     const waBtn = U.$('#tr-wa', root);
     if (waBtn) waBtn.addEventListener('click', () => {
@@ -105,11 +115,12 @@ FF.pages = FF.pages || {};
     controls.innerHTML = `<div class="card controls"><div class="seg">${MODES.map(([k, l]) => `<button class="seg-btn ${k === mode ? 'on' : ''}" data-param="mode" data-value="${k}">${l}</button>`).join('')}</div>
       <div class="ctrl-row">
         ${mode === 'daily' ? `<label>Month <select data-param="month">${monthsList.map((m) => `<option value="${m}" ${m === curMonth ? 'selected' : ''}>${U.labelYM(m, true)}</option>`).join('')}</select></label>` : ''}
+        <label>Channel <select data-param="ch">${[['ff', '🟦 First Forward'], ['gv', '🟩 GV Partner'], ['both', '⚖ Dono (FF + GV)']].map(([v, l]) => `<option value="${v}" ${v === chMode ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
         <label>Breakdown <select data-param="dim">${Object.entries(DIMS).map(([k, d]) => `<option value="${k}" ${k === dimKey ? 'selected' : ''}>${d.label}</option>`).join('')}</select></label>
         <label>TL <select data-param="tl"><option value="">All TLs</option>${directOptions}${tlOptions}</select></label>
         <label>Find <span class="finder-input small"><input class="input" id="tr-find" placeholder="Agent / TL naam type karo → select" value="${esc(filter.agent)}"></span></label>
         ${filter.tl || filter.agent ? `<button class="btn small" data-action="clear-filters">✕ Clear filters</button>` : ''}
-        <span class="ctrl-note">${esc(filterLabel)}</span>
+        <span class="ctrl-note">${esc(filterLabel)} · ${chMode === 'ff' ? '🟦 FF only' : chMode === 'gv' ? '🟩 GV only' : '⚖ FF + GV'} · 🗓️ aaj (${esc(U.labelDateKey(todayKey))}) ki rows nahi dikhti${droppedToday ? ` — ${U.fmt(droppedToday)} rows hatayi` : ''}</span>
       </div></div>`;
 
     const findInput = U.$('#tr-find', controls);
@@ -191,9 +202,7 @@ FF.pages = FF.pages || {};
       // Data basis alag hai: FF = kal tak (aaj ka data kal aata hai) · GV = live aaj.
       const curYm = latest ? U.ymKey(latest) : monthsList[monthsList.length - 1];
       const lastYm = U.prevMonthKey(curYm);
-      const chOpts = [['', '🔵 Both channels'], ['ff', '🟦 First Forward'], ['gv', '🟩 GV Partner']];
-      html += `<div class="card controls"><div class="ctrl-row"><label>Channel <select data-param="ch">${chOpts.map(([v, l]) => `<option value="${v}" ${v === (p.ch || '') ? 'selected' : ''}>${l}</option>`).join('')}</select></label><span class="ctrl-note">${esc(filterLabel)}</span></div></div>`;
-      const wanted = (p.ch || '') === 'ff' ? ['First Forward'] : (p.ch || '') === 'gv' ? ['GV Partner'] : ['First Forward', 'GV Partner'];
+      const wanted = chMode === 'ff' ? ['First Forward'] : chMode === 'gv' ? ['GV Partner'] : ['First Forward', 'GV Partner'];
       for (const chName of wanted) {
         const key = chName === 'GV Partner' ? 'gv' : 'ff';
         const ex = expectedRows(allDaily.filter((r) => r.channel === chName), curYm, key);
@@ -253,7 +262,7 @@ FF.pages = FF.pages || {};
     }
     body.innerHTML = html + `<p class="foot-note">Filter: ${esc(filterLabel)} · Rows aggregated by Google (gviz) · Loaded ${U.timeLabel(S.loadedAt || FF.data.lastLoadAt)}</p>`;
     if (mode === 'expected') {
-      const want = new Set((p.ch || '') === 'ff' ? ['ff'] : (p.ch || '') === 'gv' ? ['gv'] : ['ff', 'gv']);
+      const want = new Set(chMode === 'ff' ? ['ff'] : chMode === 'gv' ? ['gv'] : ['ff', 'gv']);
       const exRows = [];
       for (const chName of ['First Forward', 'GV Partner']) {
         const key = chName === 'GV Partner' ? 'gv' : 'ff';

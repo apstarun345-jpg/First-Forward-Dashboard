@@ -55,7 +55,7 @@ const MIME = {
 const BLOCKED_FILES = new Set(['server.js', 'sheets-storage.js', 'apps-script-storage.js', 'mailer.js', 'stock-age.js', 'DEPLOYMENT.md', 'SHEETS_STORAGE.md', 'STORAGE_SETUP.md', 'RECOVERY.md', 'package.json', 'package-lock.json', 'render.yaml', 'README.md', '.env']);
 const BLOCKED_DIRS = new Set(['data', 'dev', 'node_modules', '.git', 'google-apps-script']);
 // /api/health ka version ab package.json se aata hai (pehle yahan hardcoded purana string tha).
-let APP_VERSION = '3.48.0';
+let APP_VERSION = '3.51.0';
 try { APP_VERSION = String(JSON.parse(readFileSync(path.join(__dirname, 'package.json'), 'utf8')).version || APP_VERSION); } catch { /* keep fallback */ }
 
 // ---------------------------------------------------------------------------------------------
@@ -1904,13 +1904,23 @@ let tagReqRecoveryInfo = null; // boot scan / UI check ka summary (health + noti
 const PUBLIC_TAG_DEFAULTS = {
   enabled: true, showCheck: true, showStock: true, askMobile: true, askOffice: false, askNote: true,
   askAddress: true,          // 🏠 full address + 📮 pincode — dono mandatory (dispatch/delivery ke liye)
+  askCourier: true,          // 🚚 courier naam (Delhivery / DTDC …) — label par bhi chhapta hai
+  couriers: ['Delhivery', 'DTDC'],
   title: 'IDFC Agents Tag Request', intro: '', maxRows: 60
 };
+/** 🚚 Courier naam — free text bhi chalega, par list se select karna aasan (label + sheet me chhapta hai). */
+function courierList(cfg) {
+  const raw = cfg && Array.isArray(cfg.couriers) ? cfg.couriers : (typeof (cfg && cfg.couriers) === 'string' ? String(cfg.couriers).split(',') : []);
+  const list = raw.map((c) => shortText(c, 40)).filter(Boolean);
+  return [...new Set(list)].slice(0, 12);
+}
 function publicTagFormConfig() {
   const w = workspaceStore();
-  if (!w.publicTagForm || typeof w.publicTagForm !== 'object') w.publicTagForm = { ...PUBLIC_TAG_DEFAULTS };
+  if (!w.publicTagForm || typeof w.publicTagForm !== 'object') w.publicTagForm = { ...PUBLIC_TAG_DEFAULTS, couriers: [...PUBLIC_TAG_DEFAULTS.couriers] };
   const cfg = w.publicTagForm;
-  for (const k of Object.keys(PUBLIC_TAG_DEFAULTS)) if (cfg[k] === undefined) cfg[k] = PUBLIC_TAG_DEFAULTS[k];
+  for (const k of Object.keys(PUBLIC_TAG_DEFAULTS)) if (cfg[k] === undefined) cfg[k] = Array.isArray(PUBLIC_TAG_DEFAULTS[k]) ? [...PUBLIC_TAG_DEFAULTS[k]] : PUBLIC_TAG_DEFAULTS[k];
+  if (typeof cfg.couriers === 'string') cfg.couriers = String(cfg.couriers).split(',').map((x) => x.trim()).filter(Boolean);
+  if (!Array.isArray(cfg.couriers) || !cfg.couriers.length) cfg.couriers = [...PUBLIC_TAG_DEFAULTS.couriers];
   return cfg;
 }
 /** Google Sheet link (…/spreadsheets/d/<ID>/edit) ya seedha ID → spreadsheet ID. */
@@ -5170,7 +5180,7 @@ async function handleApi(req, res, url) {
     const rows = r.rows || [];
     const names = [...new Set(rows.map((x) => x.agentName).filter(Boolean))];
     return {
-      id: r.id, at: r.at, status: r.status || 'pending', total: Number(r.total) || 0, byName: r.byName || '', batch: r.batch || '',
+      id: r.id, at: r.at, status: r.status || 'pending', total: Number(r.total) || 0, byName: r.byName || '', batch: r.batch || '', courier: r.courier || '',
       agentName: (r.agent && r.agent.name) || names[0] || '', agentId: (r.agent && r.agent.agentId) || (rows[0] && rows[0].agentId) || '',
       rows: rows.length, agents: Math.max(1, names.length),
       classes: rows.map((x) => ({ cls: x.cls, requested: x.requested === undefined ? Number(x.approved) || 0 : Number(x.requested) || 0, approved: Number(x.approved) || 0, ...(names.length > 1 ? { agent: x.agentName || '' } : {}) })),
@@ -5206,6 +5216,7 @@ async function handleApi(req, res, url) {
     const created = drafts.map((d) => ({
       id: nextTagReqId(usedIds), at: now, batch, by: ctx.by, byName: ctx.byName,
       employee: ctx.employee, employeeToken: ctx.employeeToken || '', agent: d.agent,
+      ...(ctx.courier ? { courier: ctx.courier } : {}),
       ...(ctx.source ? { source: ctx.source, ip: ctx.ip } : {}),
       status: 'pending', note: ctx.note || '', adminNote: '',
       rows: d.rows, total: d.total, ...(d.metrics ? { metrics: d.metrics } : {}),
@@ -5242,19 +5253,33 @@ async function handleApi(req, res, url) {
     approved: 'Approved qty', remark: 'Remark', note: 'Note', adminNote: 'Admin note',
     empName: 'Employee', empMobile: 'Employee mobile', empAddress: 'Employee address', empPincode: 'Pincode',
     // v3.30 — delivery ab AGENT ke address par (employee form me agent ka mobile/address/pincode bharta hai)
-    agentMobile: 'Agent mobile', agentAddress: 'Agent address', agentPincode: 'Agent pincode', requested: 'Requested qty'
+    agentMobile: 'Agent mobile', agentAddress: 'Agent address', agentPincode: 'Agent pincode', requested: 'Requested qty',
+    // v3.51 — 🚚 courier naam (Delhivery / DTDC) — label + sheet dono me
+    courier: 'Courier'
   };
+  // 🪶 v3.51 — sheet ko chhota rakho: har AGENT ki EK row (saari classes ek hi cell me) + kam columns.
+  const TAG_SHEET_DEFAULT_COLUMNS = ['date', 'time', 'requestId', 'by', 'agent', 'agentId', 'agentMobile', 'agentPincode', 'tl', 'channel', 'cls', 'stock', 'cur', 'approved', 'courier', 'status'];
   const tagSheetConfig = () => {
     const w = workspaceStore();
     if (!w.tagRequestSheet || typeof w.tagRequestSheet !== 'object') {
       w.tagRequestSheet = {
-        enabled: false, tab: 'Tag Requests', sheetLink: '', spreadsheetId: '', onSubmit: true, onStatus: true,
-        rowMode: 'class', columns: ['date', 'time', 'by', 'agentId', 'agent', 'agentMobile', 'agentAddress', 'agentPincode', 'tl', 'channel', 'cls', 'stock', 'cur', 'priority', 'approved', 'remark', 'status']
+        enabled: false, tab: 'Tag Requests', sheetLink: '', spreadsheetId: '', onSubmit: true, onStatus: true, v: 2,
+        rowMode: 'agent', columns: [...TAG_SHEET_DEFAULT_COLUMNS]
       };
     }
+    const cfg = w.tagRequestSheet;
+    // v3.51 migration (ek hi baar): purani config class-wise rows + lamba column set use kar rahi thi,
+    // jisse sheet bahut lambi/chaudi ho jaati thi. Ab default = ek agent = ek row (classes usi row me)
+    // aur compact columns. Admin chahe to 📗 sheet card se dobara badal sakta hai.
+    if (Number(cfg.v || 1) < 2) {
+      if (!cfg.rowMode || cfg.rowMode === 'class') cfg.rowMode = 'agent';
+      cfg.columns = [...TAG_SHEET_DEFAULT_COLUMNS];
+      cfg.v = 2;
+    }
     // v3.27 — link me sheet ka ID ho to wahi (alag sheet) target banta hai.
-    if (w.tagRequestSheet.spreadsheetId === undefined) w.tagRequestSheet.spreadsheetId = sheetIdFromLink(w.tagRequestSheet.sheetLink) || '';
-    return w.tagRequestSheet;
+    if (cfg.spreadsheetId === undefined) cfg.spreadsheetId = sheetIdFromLink(cfg.sheetLink) || '';
+    if (cfg.v === undefined) cfg.v = 2;
+    return cfg;
   };
   // 📇 Central Agent Address Book — Address tab in the configured request spreadsheet.
   const ADDRESS_BOOK_TAB = 'Address';
@@ -5380,6 +5405,7 @@ async function handleApi(req, res, url) {
       case 'agentAddress': return (req.agent && req.agent.address) || '';
       case 'agentPincode': return (req.agent && req.agent.pincode) || '';
       case 'requested': return x.requested === undefined || x.requested === null ? Number(x.approved) || 0 : Number(x.requested) || 0;
+      case 'courier': return req.courier || '';
       case 'status': return req.status || '';
       case 'agentId': return x.agentId || '';
       case 'agent': return x.agentName || '';
@@ -5409,16 +5435,22 @@ async function handleApi(req, res, url) {
     const mk = (x) => cols.map((c) => tagSheetFieldValue(c, x, req, event));
     let data = [];
     if (cfg.rowMode === 'agent') {
+      // 🪶 v3.51 — ek AGENT = ek row. Saari classes usi row me qty ke saath ("VC4 40 · VC6 10"),
+      // aur stock / cur / last / approved / requested jod diye jaate hain — sheet chhoti rehti hai.
       const byAgent = new Map();
       rowsIn.forEach((x) => {
         const key = `${x.agentId || ''}|${x.agentName || ''}`;
-        const a = byAgent.get(key) || { ...x, cls: '', approved: 0, requested: 0 };
-        a.cls = [a.cls, x.cls].filter(Boolean).join('+');
-        a.approved = (Number(a.approved) || 0) + (Number(x.approved) || 0);
-        a.requested = (Number(a.requested) || 0) + (x.requested === undefined || x.requested === null ? Number(x.approved) || 0 : Number(x.requested) || 0);
+        const asked = x.requested === undefined || x.requested === null ? Number(x.approved) || 0 : Number(x.requested) || 0;
+        const a = byAgent.get(key) || { ...x, clsList: [], approved: 0, requested: 0, last: 0, cur: 0, stock: 0, sugNet: 0, sugGross: 0 };
+        const qty = Number(x.approved) || 0;
+        if (x.cls && qty > 0) a.clsList.push(`${x.cls} ${qty}`);
+        a.approved += qty;
+        a.requested += asked;
+        a.last += Number(x.last) || 0; a.cur += Number(x.cur) || 0; a.stock += Number(x.stock) || 0;
+        a.sugNet += Number(x.sugNet) || 0; a.sugGross += Number(x.sugGross) || 0;
         byAgent.set(key, a);
       });
-      data = [...byAgent.values()].map(mk);
+      data = [...byAgent.values()].map((a) => mk({ ...a, cls: a.clsList.join(' · ') }));
     } else if (cfg.rowMode === 'request') {
       const sum = rowsIn.reduce((s, x) => s + (Number(x.approved) || 0), 0);
       const oneAgent = new Set(rowsIn.map((x) => `${x.agentId || ''}|${x.agentName || ''}`)).size === 1;
@@ -5501,7 +5533,7 @@ async function handleApi(req, res, url) {
       const emp = body.employee && typeof body.employee === 'object' ? body.employee : {};
       const employee = { name: shortText(emp.name, 80) || user.name || user.username, ...(shortText(emp.office || emp.branch, 80) ? { office: shortText(emp.office || emp.branch, 80) } : {}) };
       drafts.forEach((d) => { d.dupes = tagAgentDupes([{ ...d.agent, rows: d.rows }]); });
-      const out = await createTagBatch(drafts, { by: user.username, byName: user.name || user.username, employee, note: shortText(body.note, 300), updatedBy: user.username });
+      const out = await createTagBatch(drafts, { by: user.username, byName: user.name || user.username, employee, note: shortText(body.note, 300), courier: shortText(body.courier, 40), updatedBy: user.username });
       const n = out.created.length;
       try {
         recordNotification({
@@ -5527,6 +5559,7 @@ async function handleApi(req, res, url) {
     const row = {
       id: nextTagReqId(), at: now, by: user.username, byName: user.name || user.username,
       status: 'pending', note: shortText(body.note, 300), adminNote: '',
+      ...(shortText(body.courier, 40) ? { courier: shortText(body.courier, 40) } : {}),
       rows, tls: tagRequestTls(body.tls), total, updatedAt: now, updatedBy: user.username
     };
     storeTagRequests([row]);
@@ -5620,6 +5653,11 @@ async function handleApi(req, res, url) {
     }
     if (body.adminNote !== undefined) row.adminNote = shortText(body.adminNote, 300);
     if (body.note !== undefined && row.status === 'pending') row.note = shortText(body.note, 300);
+    // 🚚 v3.51 — courier naam (Delhivery / DTDC …) admin yahin se badal sakta hai; label + sheet me chhapta hai.
+    if (body.courier !== undefined) {
+      const c = shortText(body.courier, 40);
+      if (c) row.courier = c; else delete row.courier;
+    }
     row.updatedAt = new Date().toISOString(); row.updatedBy = user.username;
     await persist('notify');
     // 📗 Status change (approved/dispatched/rejected) par bhi sheet me fresh entry — config ON ho to.
@@ -5802,6 +5840,8 @@ async function handleApi(req, res, url) {
       askOffice: !!cfg.askOffice,
       askNote: cfg.askNote !== false,
       askAddress: cfg.askAddress !== false,
+      askCourier: cfg.askCourier !== false,
+      couriers: courierList(cfg),
       maxRows: Math.min(150, Math.max(5, Number(cfg.maxRows) || 60)),
       title: shortText(cfg.title, 120) || 'IDFC Agents Tag Request',
       intro: shortText(cfg.intro, 400),
@@ -5880,6 +5920,7 @@ async function handleApi(req, res, url) {
       const out = await createTagBatch(drafts, {
         by: `public:${normUser(employeeName) || 'employee'}`, byName: employeeName,
         employee: { name: employeeName, ...(office ? { office } : {}) }, employeeToken,
+        courier: shortText(body.courier, 40),
         source: 'public-link', ip: String(ip || '').slice(0, 45), note, updatedBy: 'public-link'
       });
       const n = out.created.length;
@@ -5939,6 +5980,7 @@ async function handleApi(req, res, url) {
        employeeToken,
       source: 'public-link', ip: String(ip || '').slice(0, 45),
       status: 'pending', note: shortText(body.note, 300), adminNote: '',
+      ...(shortText(body.courier, 40) ? { courier: shortText(body.courier, 40) } : {}),
       rows, tls: tagRequestTls(body.tls), total, updatedAt: now, updatedBy: 'public-link',
       ...(dupes.length ? { dupOf: dupes.map((d) => d.id), dupCount: dupes.length } : {})
     };
@@ -6123,6 +6165,11 @@ async function handleApi(req, res, url) {
     if (c.askOffice !== undefined) cfg.askOffice = !!c.askOffice;
     if (c.askNote !== undefined) cfg.askNote = !!c.askNote;
     if (c.askAddress !== undefined) cfg.askAddress = !!c.askAddress;
+    if (c.askCourier !== undefined) cfg.askCourier = !!c.askCourier;
+    if (c.couriers !== undefined) {
+      const list = (Array.isArray(c.couriers) ? c.couriers : String(c.couriers || '').split(',')).map((x) => shortText(x, 40)).filter(Boolean);
+      cfg.couriers = [...new Set(list)].slice(0, 12);
+    }
     if (c.title !== undefined) cfg.title = shortText(c.title, 120);
     if (c.intro !== undefined) cfg.intro = shortText(c.intro, 400);
     if (c.maxRows !== undefined) cfg.maxRows = Math.min(150, Math.max(5, Number(c.maxRows) || 60));
@@ -6176,6 +6223,12 @@ async function handleApi(req, res, url) {
       if (pc.askMobile !== undefined) pcfg.askMobile = !!pc.askMobile;
       if (pc.askOffice !== undefined) pcfg.askOffice = !!pc.askOffice;
       if (pc.askNote !== undefined) pcfg.askNote = !!pc.askNote;
+      if (pc.askAddress !== undefined) pcfg.askAddress = !!pc.askAddress;
+      if (pc.askCourier !== undefined) pcfg.askCourier = !!pc.askCourier;
+      if (pc.couriers !== undefined) {
+        const list = (Array.isArray(pc.couriers) ? pc.couriers : String(pc.couriers || '').split(',')).map((x) => shortText(x, 40)).filter(Boolean);
+        pcfg.couriers = [...new Set(list)].slice(0, 12);
+      }
       if (pc.title !== undefined) pcfg.title = shortText(pc.title, 120);
       if (pc.intro !== undefined) pcfg.intro = shortText(pc.intro, 400);
       if (pc.maxRows !== undefined) pcfg.maxRows = Math.min(150, Math.max(5, Number(pc.maxRows) || 60));
