@@ -1528,17 +1528,23 @@ window.FF = window.FF || {};
       : '';
     const monthHead = (ym, fallback) => esc(monthLabel(ym) || fallback);
     const head = `<tr><th rowspan="2">Agent</th><th rowspan="2">Mobile</th><th rowspan="2">Priority</th><th colspan="3" class="num">📦 Stock</th><th colspan="3" class="num">⏮ ${monthHead(m.last, 'Last month')}</th><th colspan="3" class="num">▶ ${monthHead(m.cur, 'This month')}</th><th colspan="2" class="num">Suggested</th></tr><tr><th class="num">VC4</th><th class="num">Comm</th><th class="num">Total</th><th class="num">VC4</th><th class="num">Comm</th><th class="num">Total</th><th class="num">VC4</th><th class="num">Comm</th><th class="num">Total</th><th class="num">VC4</th><th class="num">Comm</th></tr>`;
+    // Calculate from the exact agent/self rows displayed in this table.
+    // Number(...) + fallback keeps this robust even when a host adapter gives numeric strings.
+    const sugSum = (list, key) => (list || []).reduce((total, item) => {
+      const value = Number(item && item[key]);
+      return total + (Number.isFinite(value) ? value : 0);
+    }, 0);
     const agentsSug = {
-      vc4: U.sum(rows, (a) => num(a.sugVc4)),
-      comm: U.sum(rows, (a) => num(a.sugComm)),
-      vc4Gross: U.sum(rows, (a) => num(a.sugVc4Gross)),
-      commGross: U.sum(rows, (a) => num(a.sugCommGross))
+      vc4: sugSum(rows, 'sugVc4'),
+      comm: sugSum(rows, 'sugComm'),
+      vc4Gross: sugSum(rows, 'sugVc4Gross'),
+      commGross: sugSum(rows, 'sugCommGross')
     };
     const ownSug = {
-      vc4: selfA ? num(selfA.sugVc4) : 0,
-      comm: selfA ? num(selfA.sugComm) : 0,
-      vc4Gross: selfA ? num(selfA.sugVc4Gross) : 0,
-      commGross: selfA ? num(selfA.sugCommGross) : 0
+      vc4: selfA ? Number(selfA.sugVc4) || 0 : 0,
+      comm: selfA ? Number(selfA.sugComm) || 0 : 0,
+      vc4Gross: selfA ? Number(selfA.sugVc4Gross) || 0 : 0,
+      commGross: selfA ? Number(selfA.sugCommGross) || 0 : 0
     };
     const combinedSug = {
       vc4: agentsSug.vc4 + ownSug.vc4,
@@ -1546,25 +1552,40 @@ window.FF = window.FF || {};
       vc4Gross: agentsSug.vc4Gross + ownSug.vc4Gross,
       commGross: agentsSug.commGross + ownSug.commGross
     };
-    const agentsFoot = rows.length ? footRow(`<span class="mp-linkish">🧑‍💼 Agents total (${fmt(rows.length)})</span>`, sv(rows, {
-      sVc4: ag.vc4, sComm: ag.comm, sTotal: ag.total,
-      sugVc4: agentsSug.vc4, sugComm: agentsSug.comm,
-      sugVc4Gross: agentsSug.vc4Gross, sugCommGross: agentsSug.commGross
-    }), '', `${tlSpec}&part=team`) : '';
-    const ownFoot = selfA || own.total ? footRow(`👤 ${esc(selfA ? selfA.name : pr.name)} ke paas (TL own)`, sv(selfA ? [selfA] : [], {
-      sVc4: own.vc4, sComm: own.comm, sTotal: own.total,
-      sugVc4: ownSug.vc4, sugComm: ownSug.comm,
-      sugVc4Gross: ownSug.vc4Gross, sugCommGross: ownSug.commGross
-    }), 'mp-selfrow', `${tlSpec}&part=own`) : '';
-    // This row is intentionally NOT d.sugVc4/d.sugComm. Those are TL-level net dispatch
-    // after subtracting the whole TL stock and can be 0 while individual agents need stock.
-    const totFoot = footRow('= TL TOTAL (own + agents)', {
-      sVc4: s.vc4, sComm: s.comm, sTotal: s.total,
-      lVc4: t.lastVc4, lComm: t.lastComm, last: t.lastTotal,
-      cVc4: t.curVc4, cComm: t.curComm, cur: t.curTotal,
-      sugVc4: combinedSug.vc4, sugComm: combinedSug.comm,
-      sugVc4Gross: combinedSug.vc4Gross, sugCommGross: combinedSug.commGross
-    }, 'row-total', tlSpec);
+    agentsSug.total = agentsSug.vc4 + agentsSug.comm;
+    agentsSug.totalGross = agentsSug.vc4Gross + agentsSug.commGross;
+    ownSug.total = ownSug.vc4 + ownSug.comm;
+    ownSug.totalGross = ownSug.vc4Gross + ownSug.commGross;
+    combinedSug.total = combinedSug.vc4 + combinedSug.comm;
+    combinedSug.totalGross = combinedSug.vc4Gross + combinedSug.commGross;
+
+    const agentsFoot = rows.length ? footRow(
+      `<span class="mp-linkish">🧑‍💼 Agents total (${fmt(rows.length)}) · 🎯 ${fmt(agentsSug.total)} tags</span>`,
+      sv(rows, {
+        sVc4: ag.vc4, sComm: ag.comm, sTotal: ag.total,
+        sugVc4: agentsSug.vc4, sugComm: agentsSug.comm,
+        sugVc4Gross: agentsSug.vc4Gross, sugCommGross: agentsSug.commGross
+      }), '', `${tlSpec}&part=team`) : '';
+
+    const ownFoot = selfA || own.total ? footRow(
+      `👤 ${esc(selfA ? selfA.name : pr.name)} ke paas (TL own) · 🎯 ${fmt(ownSug.total)} tags`,
+      sv(selfA ? [selfA] : [], {
+        sVc4: own.vc4, sComm: own.comm, sTotal: own.total,
+        sugVc4: ownSug.vc4, sugComm: ownSug.comm,
+        sugVc4Gross: ownSug.vc4Gross, sugCommGross: ownSug.commGross
+      }), 'mp-selfrow', `${tlSpec}&part=own`) : '';
+
+    // IMPORTANT: TL TOTAL here means OWN + AGENTS suggested dispatch.
+    // It is deliberately not d.sugVc4/d.sugComm because those are TL-stock-net values.
+    const totFoot = footRow(
+      `= TL TOTAL (own + agents) · 🎯 ${fmt(combinedSug.total)} tags`,
+      {
+        sVc4: s.vc4, sComm: s.comm, sTotal: s.total,
+        lVc4: t.lastVc4, lComm: t.lastComm, last: t.lastTotal,
+        cVc4: t.curVc4, cComm: t.curComm, cur: t.curTotal,
+        sugVc4: combinedSug.vc4, sugComm: combinedSug.comm,
+        sugVc4Gross: combinedSug.vc4Gross, sugCommGross: combinedSug.commGross
+      }, 'row-total', tlSpec);
     return `<section class="mp-sec" data-mp-sec="agents"><h4>🧑‍💼 TL ke agents · ${fmt(rows.length)}${selfA ? ' <span class="dim small">+ TL (apna stock alag)</span>' : ''}</h4><p class="dim small">Har number par click → agent ki detail (stock / last month / is month → class → din → tag-barcode). Sug. = avg/day × ${d.days} din · <b>stock ke baad</b> (net)${sugMode() === 'both' ? ' · <span class="sug-wo-inline">w/o stock = bina stock ghataye (gross)</span>' : ''} · <span class="mp-linkish" data-kpi="${esc(`src=${pr.ch}&scope=people&tl=${encodeURIComponent(pr.name)}&self=0&sort=stock`)}" role="button" tabindex="0" title="Poora agents list">Poori list 👉</span></p><div class="table-wrap tall"><table class="tbl compact mp-agents-tbl"><thead>${head}</thead><tbody>${selfA ? rowHtml(selfA) : ''}${rows.map(rowHtml).join('')}</tbody><tfoot>${agentsFoot}${ownFoot}${totFoot}</tfoot></table></div>${note}${agentClassMatrix(pr)}</section>`;
   }
 
