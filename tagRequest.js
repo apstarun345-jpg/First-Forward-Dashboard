@@ -54,14 +54,6 @@ FF.pages = FF.pages || {};
   };
   const STATUS_KEYS = ['pending', 'approved', 'dispatched', 'rejected'];
   const PAGE_ROWS = 150; // requests table — pehle itni rows, phir "⬇ Aur dikhao" (mobile par fast)
-  const EMPLOYEE_STATUS_PAGE_SIZE = 10;
-  const EMPLOYEE_STATUS_FILTERS = [
-    { key: 'all', label: '📋 All requests', count: 'totalRequests' },
-    { key: 'pending', label: '⏳ Pending', count: 'pending' },
-    { key: 'approved', label: '✅ Approved', count: 'approved' },
-    { key: 'dispatched', label: '🚚 Dispatched', count: 'dispatched' },
-    { key: 'rejected', label: '⛔ Rejected', count: 'rejected' }
-  ];
 
   const state = {
     view: 'form', rows: [], note: '', result: null, problems: [], busy: '',
@@ -71,7 +63,6 @@ FF.pages = FF.pages || {};
     // 🌐 public (bina login)
     publicMode: false, publicCfg: null, done: null,
     status: { q: '', list: null, busy: false, err: '', searched: '' },
-    employeeHistoryFilter: 'all', employeeHistoryPage: 1,
     // 🔁 submit se pehle duplicate check (wahi agent + class pehle se active?)
     dup: { list: [], force: false, busy: false },
     // ⏪ v3.50 — recovery (sheet history se gayab requests wapas) + 🔔 notification check (admin)
@@ -1321,7 +1312,7 @@ body.colorful .from-hdr { color: #166534; }
             <label class="field tr-span-all"><span class="dim small">🏠 Full address${askAddress ? ' *' : ''} <small class="dim">(house / street / area / city — tags isi address par jayenge)</small></span>
               <textarea class="input${badCls(row.id, 'address')}" data-tr-a="address" rows="2" maxlength="300" placeholder="e.g. 24, Shanti Nagar, Sodala, Jaipur">${esc(row.address)}</textarea></label>
           </div>
-          ${row.fromBook ? '<p class="dim small tr-book-note">📇 Pichli request / Address book se purana mobile-address auto-fill hua — submit se pehle ek baar check kar lo.</p>' : ''}
+          ${row.fromBook ? '<p class="dim small tr-book-note">📇 Pichla mobile/address <b>Address</b> tab se auto-fill hua — ek baar check kar lo.</p>' : ''}
           ${errList.length ? `<ul class="tr-err-list">${errList.map((m) => `<li>⚠️ ${esc(m)}</li>`).join('')}</ul>` : ''}
         </div>
         <div class="tr-qty-list${badCls(row.id, 'qty')}" role="group" aria-label="Class-wise qty">
@@ -1740,7 +1731,6 @@ body.colorful .from-hdr { color: #166534; }
       if (isPublic()) {
         if (out && out.employeeToken) state.employeeToken = String(out.employeeToken);
         saveEmployee(); state.employeeSummary = null;
-        state.employeeHistoryFilter = 'all'; state.employeeHistoryPage = 1;
         state.done = {
           batch: (out && out.batch) || { total: payload.agents.reduce((s, a) => s + a.rows.reduce((x, r) => x + r.approved, 0), 0), agents: reqs.length },
           requests: reqs.map((r) => ({ id: r.id, agentName: r.agentName || (r.agent && r.agent.name) || '', mobile: r.mobile || (r.agent && r.agent.mobile) || '', total: r.total, classes: r.classes || [] })),
@@ -1815,66 +1805,6 @@ body.colorful .from-hdr { color: #166534; }
       ${s.adminNote ? `<div class="notice green" style="margin-top:8px">💬 Admin note: ${esc(s.adminNote)}</div>` : ''}
     </div>`;
   }
-  function employeeStatusPage(summary, filter, requestedPage) {
-    const requests = Array.isArray(summary && summary.requests) ? summary.requests : [];
-    const selected = EMPLOYEE_STATUS_FILTERS.some((x) => x.key === filter) ? filter : 'all';
-    const filtered = selected === 'all' ? requests : requests.filter((r) => String(r && r.status || 'pending').toLowerCase() === selected);
-    const total = filtered.length;
-    const pageCount = Math.ceil(total / EMPLOYEE_STATUS_PAGE_SIZE);
-    const lastPage = Math.max(1, pageCount);
-    const pageNum = Math.max(1, Number.parseInt(requestedPage, 10) || 1);
-    const page = Math.min(pageNum, lastPage);
-    const start = total ? (page - 1) * EMPLOYEE_STATUS_PAGE_SIZE + 1 : 0;
-    const end = Math.min(page * EMPLOYEE_STATUS_PAGE_SIZE, total);
-    return {
-      filter: selected, page, pageSize: EMPLOYEE_STATUS_PAGE_SIZE, pageCount, total, start, end,
-      requests: filtered.slice((page - 1) * EMPLOYEE_STATUS_PAGE_SIZE, page * EMPLOYEE_STATUS_PAGE_SIZE)
-    };
-  }
-  function employeeStatusCount(summary, filter) {
-    const config = EMPLOYEE_STATUS_FILTERS.find((x) => x.key === filter) || EMPLOYEE_STATUS_FILTERS[0];
-    const raw = summary && summary[config.count];
-    if (raw !== undefined && Number.isFinite(Number(raw))) return Math.max(0, Number(raw));
-    const requests = Array.isArray(summary && summary.requests) ? summary.requests : [];
-    return filter === 'all' ? requests.length : requests.filter((r) => String(r && r.status || 'pending').toLowerCase() === filter).length;
-  }
-  function employeeStatusFiltersHtml(summary, selected) {
-    return `<div class="tr-emp-filters" role="group" aria-label="Meri requests status filter">${EMPLOYEE_STATUS_FILTERS.map((item) => {
-      const active = item.key === selected;
-      return `<button type="button" class="tr-emp-filter tr-emp-filter-${item.key}${active ? ' on' : ''}" data-tr-emp-filter="${item.key}" aria-pressed="${active}"><span>${item.label}</span><b>${fmt(employeeStatusCount(summary, item.key))}</b></button>`;
-    }).join('')}</div>`;
-  }
-  function employeeStatusHistoryHtml(summary, filter, requestedPage) {
-    const page = employeeStatusPage(summary, filter, requestedPage);
-    const requests = page.requests.length
-      ? `<div class="tr-st-list">${page.requests.map(statusCardHtml).join('')}</div>`
-      : `<div class="tr-status-out">${page.total ? 'Is status me koi request nahi mili.' : 'Abhi tak koi request nahi mili.'}</div>`;
-    const pageCount = page.pageCount || 1;
-    const html = `<div class="tr-emp-history">
-      ${employeeStatusFiltersHtml(summary, page.filter)}
-      <div class="tr-emp-history-head"><span>📋 Request history · nayi request sabse upar</span><b>${fmt(page.start)}–${fmt(page.end)} / ${fmt(page.total)}</b></div>
-      ${requests}
-      <nav class="tr-emp-pagination" aria-label="Request pages">
-        <button type="button" class="btn small" data-tr-emp-page="prev" ${page.page <= 1 ? 'disabled' : ''}>← Previous</button>
-        <span>Page ${fmt(page.page)} of ${fmt(pageCount)}</span>
-        <button type="button" class="btn small" data-tr-emp-page="next" ${page.page >= page.pageCount ? 'disabled' : ''}>Next →</button>
-      </nav>
-    </div>`;
-    return { ...page, html };
-  }
-  function employeeSummaryHtml() {
-    if (!state.employeeToken) return '';
-    if (!state.employeeSummary) return `<div class="tr-employee-summary"><div class="tr-es-head"><div><b>👤 Meri requests</b><small class="dim">Aapki bheji hui requests ka status yahan dikhega.</small></div><button class="btn small" data-tr-emp-refresh>↻ Refresh</button></div><div class="dim small">Request history load ho rahi hai…</div></div>`;
-    const summary = state.employeeSummary;
-    const history = employeeStatusHistoryHtml(summary, state.employeeHistoryFilter, state.employeeHistoryPage);
-    state.employeeHistoryFilter = history.filter;
-    state.employeeHistoryPage = history.page;
-    return `<div class="tr-employee-summary">
-      <div class="tr-es-head"><div><b>👤 Meri sabhi requests</b><small class="dim">All / status par click karke request dekhein.</small></div><button class="btn small" data-tr-emp-refresh>↻ Refresh</button></div>
-      <div class="tr-es-tags"><span>🏷️ Requested tags <b>${fmt(summary.requestedTags || 0)}</b></span><span>✅ Approved tags <b>${fmt(summary.approvedTags || 0)}</b></span></div>
-      ${history.html}
-    </div>`;
-  }
   function renderStatus() {
     const body = bodyEl();
     if (!body) return;
@@ -1883,7 +1813,7 @@ body.colorful .from-hdr { color: #166534; }
     body.innerHTML = `<section class="card tr-status-card"><div class="card-head"><h3>🔎 Request status</h3>
         <div class="card-right dim">Agent ka mobile number (jo request me diya tha) ya Request ID daalo</div></div>
       <div class="card-body">
-        ${employeeSummaryHtml()}
+        ${state.employeeToken ? '<div class="tr-employee-summary"><div class="tr-es-head"><b>👤 Meri sabhi requests</b><button class="btn small" data-tr-emp-refresh>↻ Refresh</button></div>' + (state.employeeSummary ? '<div class="tr-es-grid"><div><small>Total</small><b>' + fmt(state.employeeSummary.totalRequests || 0) + '</b></div><div><small>⏳ Pending</small><b>' + fmt(state.employeeSummary.pending || 0) + '</b></div><div><small>✅ Approved</small><b>' + fmt(state.employeeSummary.approved || 0) + '</b></div><div><small>🚚 Dispatched</small><b>' + fmt(state.employeeSummary.dispatched || 0) + '</b></div><div><small>⛔ Rejected</small><b>' + fmt(state.employeeSummary.rejected || 0) + '</b></div><div><small>🏷️ Approved tags</small><b>' + fmt(state.employeeSummary.approvedTags || 0) + '</b></div></div>' : '<div class="dim small">Status summary load ho raha hai…</div>') + (state.employeeSummary && Array.isArray(state.employeeSummary.requests) ? '<div style="margin-top:12px"><div class="dim small" style="margin-bottom:6px">📋 Request history — nayi request sabse upar</div>' + (state.employeeSummary.requests.length ? '<div class="tr-st-list">' + state.employeeSummary.requests.map(statusCardHtml).join('') + '</div>' : '<div class="tr-status-out">Abhi tak koi request nahi mili.</div>') + '</div>' : '') + '</div>' : ''}
         <div class="tr-status-row">
           <input class="input" id="tr-status-id" inputmode="tel" autocomplete="off" placeholder="Agent mobile (10 digit) ya Request ID" value="${esc(st.q || '')}">
           <button class="btn primary" data-tr-act="find" ${st.busy ? 'disabled' : ''}>${st.busy ? '⏳ Dhoondh rahe hain…' : '🔎 Status dekho'}</button>
@@ -1893,28 +1823,7 @@ body.colorful .from-hdr { color: #166534; }
           ? `<p class="dim small" style="margin:12px 0 6px">${fmt(list.length)} request mili${st.searched ? ` · ${esc(st.searched)}` : ''} (nayi upar)</p><div class="tr-st-list">${list.map(statusCardHtml).join('')}</div>`
           : `<div class="tr-status-out" style="margin-top:12px">Is number se koi request nahi mili. Wahi mobile number daalo jo request lagate waqt agent ke liye diya tha — ya Request ID try karo.</div>`) : ''}
       </div></section>`;
-    const refreshEmployee = () => {
-      if (!state.employeeToken) return;
-      state.employeeSummary = null;
-      renderStatus();
-      loadEmployeeSummary(true).then(() => { if (rootEl && rootEl.isConnected && state.view === 'status') renderStatus(); });
-    };
-    const empRefresh = body.querySelector('[data-tr-emp-refresh]');
-    if (empRefresh) empRefresh.addEventListener('click', refreshEmployee);
-    body.querySelectorAll('[data-tr-emp-filter]').forEach((button) => button.addEventListener('click', () => {
-      state.employeeHistoryFilter = button.dataset.trEmpFilter || 'all';
-      state.employeeHistoryPage = 1;
-      renderStatus();
-    }));
-    body.querySelectorAll('[data-tr-emp-page]').forEach((button) => button.addEventListener('click', () => {
-      if (button.disabled) return;
-      const delta = button.dataset.trEmpPage === 'next' ? 1 : -1;
-      state.employeeHistoryPage = Math.max(1, state.employeeHistoryPage + delta);
-      renderStatus();
-    }));
-    if (state.employeeToken && !state.employeeSummary && !state.employeeSummaryPromise) loadEmployeeSummary().then(() => {
-      if (rootEl && rootEl.isConnected && state.view === 'status') renderStatus();
-    });
+    const refreshEmployee = () => { if (!state.employeeToken) return; state.employeeSummary = null; renderStatus(); loadEmployeeSummary(true).then(() => renderStatus()); }; const empRefresh = body.querySelector('[data-tr-emp-refresh]'); if (empRefresh) empRefresh.addEventListener('click', refreshEmployee); if (state.employeeToken && !state.employeeSummary && !state.employeeSummaryPromise) loadEmployeeSummary().then(() => { if (rootEl && rootEl.isConnected && state.view === 'status') renderStatus(); });
     const find = () => {
       const inp = body.querySelector('#tr-status-id');
       const q = String((inp && inp.value) || '').trim();
@@ -2714,7 +2623,7 @@ body.colorful .from-hdr { color: #166534; }
           <button class="btn primary" data-tr-pub-act="save">💾 Save</button>
           <button class="btn" data-tr-pub-act="toggle">${open ? '⏸ Link OFF karo' : '▶️ Link ON karo'}</button>
         </div>
-        <p class="dim small" style="margin-top:8px">🔐 Employee ko sirf yehi form dikhta hai (📝 Form + 🔎 Status) — dashboard ka koi doosra page nahi. Employee apne link/browser ki request history me <b>All / Pending / Approved / Dispatched / Rejected</b> filters aur 10-per-page Previous/Next dekh sakta hai. Har agent ki request <b>🌐 link</b> badge ke saath 📥 Tag Requests me alag row me aati hai. Agent / employee status <b>agent ke mobile number</b> (ya Request ID) se bhi dekh sakte hain — status summary me address nahi dikhta. Login form par bhi yahi mandatory fields lagti hain.</p>
+        <p class="dim small" style="margin-top:8px">🔐 Employee ko sirf yehi form dikhta hai (📝 Form + 🔎 Status) — dashboard ka koi doosra page nahi. Har agent ki request <b>🌐 link</b> badge ke saath 📥 Tag Requests me alag row me aati hai. Agent / employee status <b>agent ke mobile number</b> (ya Request ID) se dekh sakte hain — status me address kabhi nahi dikhta. Login form par bhi yahi mandatory fields lagti hain.</p>
       </div></section>`;
   }
   function replaceCard(id, html) {
@@ -2899,7 +2808,6 @@ body.colorful .from-hdr { color: #166534; }
     // 🧪 Tests: requests → table rows (har agent ek row) + row HTML + submit payload.
     _test: {
       displayRows, reqRowHtml: (dr) => reqRowHtml(dr), metricCellsHtml, metricNumbers, hintText, agentGroupSummaryHtml, channelFilterHtml, requestsShellHtml, agentKeyOf, labelItem, contactOf,
-      employeeStatusPage, employeeStatusFiltersHtml, employeeStatusHistoryHtml,
       recTotals, suggestItems, suggestHtml, stockBoardHtml, stockBoardTableHtml, stockBoardRows, stockBoardChipsHtml,
       classBreakdownRows, classBreakdownHtml, tlPanelHtml, findTlRecord, courierOptions, requestColumnCount,
       setIndex: (idx) => { state.index = idx || null; },

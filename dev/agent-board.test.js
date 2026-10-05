@@ -289,7 +289,7 @@ test('wiring: agentBoard.js lazy-load hota hai, SW me precache hai', async () =>
   assert.ok(!idx.includes('agentBoard.js'), 'agentBoard index shell me eager nahi hai');
   assert.match(lazy, /performance: \[\.\.\.PROFILE_DEPS, 'agentBoard', 'performance'\]/, 'performance page ki lazy dependency me hai');
   assert.ok(sw.includes('./agentBoard.js?v=86'), 'sw ASSETS me agentBoard precache hai');
-  assert.match(sw, /CACHE_NAME = 'apnapayment-v111'/);
+  assert.match(sw, /CACHE_NAME = 'apnapayment-v109'/);
   assert.match(lazy, /return m \? m\[1\] : '72'/);
   assert.match(pkg, /agentBoard/);
 });

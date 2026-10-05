@@ -79,9 +79,6 @@ test('v3.30 per-agent tag requests — split, validation, mobile status, duplica
     const sheetGet = await jsonCall(server.base, '/api/tag-request-sheet', 'GET', undefined, admin);
     assert.ok(sheetGet.json.fields.agentMobile && sheetGet.json.fields.agentAddress && sheetGet.json.fields.agentPincode, 'naye agent columns fields list me');
     const appendCallsBefore = mock.calls.filter((c) => c.action === 'appendrows').length;
-    // Pehle se empty lookup cache karo — nayi agent request ke baad contact cache ko turant refresh hona chahiye.
-    const oldContact = await jsonCall(server.base, '/api/public/tag-request/contact?agentId=1001&agentName=Rahul%20Sharma&channel=ff');
-    assert.equal(oldContact.json.found, false);
 
     // 1) validation — agent-wise messages
     const noEmp = await jsonCall(server.base, '/api/public/tag-request', 'POST', { employee: { name: 'R' }, agents: [rahul()] }, '', '10.1.0.1');
@@ -112,27 +109,6 @@ test('v3.30 per-agent tag requests — split, validation, mobile status, duplica
     assert.equal(rq2.agentName, 'Priya Verma'); assert.equal(rq2.total, 6); assert.equal(rq2.pincode, '305001');
     assert.equal(created.json.request.id, rq1.id, 'request = pehla agent (purane client ke liye)');
     assert.notEqual(rq1.id, rq2.id);
-    const employeeToken = created.json.employeeToken;
-    assert.match(employeeToken, /^[A-Za-z0-9_-]{24,120}$/, 'employee status ke liye private token mila');
-
-    // 🌐 Employee apne token se apni saari requests/status dekhe — address aur IP public summary me nahi.
-    const employeeStatus = await jsonCall(server.base, `/api/public/tag-request/employee-status?token=${encodeURIComponent(employeeToken)}`);
-    assert.equal(employeeStatus.res.status, 200, JSON.stringify(employeeStatus.json));
-    assert.equal(employeeStatus.json.totalRequests, 2);
-    assert.equal(employeeStatus.json.pending, 2);
-    assert.equal(employeeStatus.json.requestedTags, 36);
-    assert.equal(employeeStatus.json.requests.length, 2);
-    assert.ok(employeeStatus.json.requests.some((r) => r.agentName === 'Rahul Sharma'));
-    assert.ok(!JSON.stringify(employeeStatus.json).includes('Gandhi Nagar'), 'employee summary me address expose nahi hota');
-    assert.ok(!JSON.stringify(employeeStatus.json).includes('10.1.0.2'), 'employee summary me submitter IP expose nahi hota');
-    const otherEmployeeStatus = await jsonCall(server.base, `/api/public/tag-request/employee-status?token=${'x'.repeat(32)}`);
-    assert.equal(otherEmployeeStatus.json.totalRequests, 0, 'doosre employee ka token alag history deta hai');
-
-    // 📇 Request submit hone ke turant baad purana mobile/address public lookup se suggest ho.
-    const savedContact = await jsonCall(server.base, '/api/public/tag-request/contact?agentId=1001&agentName=Rahul%20Sharma&channel=ff');
-    assert.equal(savedContact.json.found, true);
-    assert.equal(savedContact.json.contact.address, '12, Gandhi Nagar, Tonk Road, Jaipur');
-    assert.equal(savedContact.json.contact.pincode, '302015');
 
     // 📗 sheet: ek hi appendrows call, rows order me, agent ka delivery address
     await sleep(1200);
@@ -193,15 +169,6 @@ test('v3.30 per-agent tag requests — split, validation, mobile status, duplica
     assert.equal(byMobile.json.duplicates.length, 1, 'naam alag ho par mobile same → bhi duplicate');
     const otherCls = await jsonCall(server.base, '/api/public/tag-request/check', 'POST', { employee: { name: 'Suresh Kumar' }, agents: [{ agentName: 'Rahul Sharma', agentId: '1001', rows: [{ cls: 'VC16', approved: 2 }] }] }, '', '10.1.0.3');
     assert.equal(otherCls.json.duplicates.length, 0, 'alag class → duplicate nahi');
-    const resubmit = await jsonCall(server.base, '/api/public/tag-request', 'POST', {
-      employee: { name: 'Ramesh Yadav', office: 'Jaipur office' }, employeeToken,
-      agents: [rahul({ address: '99, New Road, Jaipur', pincode: '302016', rows: [{ cls: 'VC16', requested: 2, approved: 2 }] })]
-    }, '', '10.1.0.30');
-    assert.equal(resubmit.res.status, 201, JSON.stringify(resubmit.json));
-    assert.equal(resubmit.json.employeeToken, employeeToken, 'same employee ko wahi private history token re-use hota hai');
-    const updatedContact = await jsonCall(server.base, '/api/public/tag-request/contact?agentId=1001&agentName=Rahul%20Sharma&channel=ff');
-    assert.equal(updatedContact.json.contact.address, '99, New Road, Jaipur', 'repeat request me naya address Address book ko update karta hai');
-    assert.equal(updatedContact.json.contact.pincode, '302016');
     const again = await jsonCall(server.base, '/api/public/tag-request', 'POST', { employee: { name: 'Suresh Kumar' }, agents: [rahul({ rows: [{ cls: 'VC4', approved: 8 }] })] }, '', '10.1.0.4');
     assert.equal(again.res.status, 201, JSON.stringify(again.json));
     assert.equal(again.json.requests[0].duplicates, 1);
@@ -235,15 +202,6 @@ test('v3.30 per-agent tag requests — split, validation, mobile status, duplica
     assert.equal(mine.status, 'approved');
     assert.equal(mine.adminNote, 'VC5 abhi stock me nahi');
     assert.deepEqual(mine.classes.find((c) => c.cls === 'VC4'), { cls: 'VC4', requested: 25, approved: 20 });
-    const rej = await jsonCall(server.base, `/api/tag-requests/${encodeURIComponent(rq2.id)}`, 'PUT', { status: 'rejected', adminNote: 'Pincode detail confirm karein' }, admin);
-    assert.equal(rej.json.request.status, 'rejected');
-    const employeeStatusUpdated = await jsonCall(server.base, `/api/public/tag-request/employee-status?token=${encodeURIComponent(employeeToken)}`);
-    assert.equal(employeeStatusUpdated.json.totalRequests, 3);
-    assert.equal(employeeStatusUpdated.json.pending, 1, 'repeat submission remains pending');
-    assert.equal(employeeStatusUpdated.json.approved, 1);
-    assert.equal(employeeStatusUpdated.json.rejected, 1);
-    assert.equal(employeeStatusUpdated.json.requests.find((r) => r.id === rq1.id).adminNote, 'VC5 abhi stock me nahi');
-    assert.equal(employeeStatusUpdated.json.requests.find((r) => r.id === rq2.id).adminNote, 'Pincode detail confirm karein');
 
     // 7) login form (member) — same agents format → split; owner pending edit kar sakta hai, status nahi
     await jsonCall(server.base, '/api/users', 'POST', { username: 'member', name: 'Member One', password: 'member-pass-1', role: 'user', permissions: ['home', 'tagRequest'] }, admin);

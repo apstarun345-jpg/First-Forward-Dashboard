@@ -5,7 +5,7 @@
    • 🧾 Saara issuance EIR (First Forward sheet) se: GV channel = master ID 5845036, baaki FF.
      GV ka AAJ ka data EIR me nahi hota (T+1) — isliye aaj sirf GV Master sheet se aata hai.
    • 📦 Stock: FF = StockDataa, GV = Tag Assignment.
-   • 🔎 Global search lives in the top bar on every page; the full Master Search page remains under Management.
+   • ❌ Home par master search nahi — Management → Master Search ka alag page hai.
    Sources are always spelled out under every card. */
 window.FF = window.FF || {};
 FF.pages = FF.pages || {};
@@ -34,171 +34,6 @@ FF.pages = FF.pages || {};
     return `<span class="dim">${esc(label || 'last month')} <b>${U.fmt(last)}</b></span> · <span class="pct-inline ${g > 0 ? 'pos' : g < 0 ? 'neg' : 'flat'}">${g > 0 ? '▲' : g < 0 ? '▼' : '•'} ${Math.abs(g).toFixed(0)}%</span>`;
   };
   const splitFoot = (ff, gv) => `<span class="hm-split"><span class="ff">🟦 FF <b>${U.fmt(ff)}</b></span><span class="gv">🟩 GV <b>${U.fmt(gv)}</b></span></span>`;
-
-  // ---------------------------------------------------------------- interactive cross-channel issuance explorer
-  const EXPLORER_STORAGE_KEY = 'ff-home-issuance-explorer-v1';
-  const EXPLORER_CLASSES = ['VC4', 'VC20', 'VC5+'];
-  const EXPLORER_FILTERS = {
-    channels: [['ff', '🟦 First Forward'], ['gv', '🟩 GV Partner']],
-    types: [['replacement', '🔁 Replacement'], ['chassis', '🔧 Chassis']],
-    classes: [['VC4', '🚗 VC4'], ['VC20', '🛻 VC20'], ['VC5+', '🚚 VC5+']]
-  };
-  const cleanSet = (values, options) => new Set([...U.asValueSet(values)].filter((v) => options.includes(String(v))));
-  function explorerDateKey(value) {
-    if (value === null || value === undefined || value === '') return '';
-    if (value instanceof Date) return Number.isNaN(value.getTime()) ? '' : U.dateKey(value);
-    const raw = String(value).trim();
-    const iso = raw.match(/^(\d{4}-\d{2}-\d{2})/);
-    if (iso) return iso[1];
-    const parsed = U.parseDate(value);
-    return parsed ? U.dateKey(parsed) : '';
-  }
-  function defaultExplorerRange(now) {
-    const d = now instanceof Date ? new Date(now) : new Date();
-    return { from: `${U.ymKey(d)}-01`, to: U.dateKey(d) };
-  }
-  function validExplorerDate(value) {
-    const key = String(value || '');
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return '';
-    const date = U.parseDate(key);
-    return date && U.dateKey(date) === key ? key : '';
-  }
-  function loadExplorerFilters() {
-    const defaults = defaultExplorerRange();
-    let saved = null;
-    try { saved = JSON.parse(localStorage.getItem(EXPLORER_STORAGE_KEY) || 'null'); } catch { saved = null; }
-    if (!saved || typeof saved !== 'object') saved = {};
-    const hasSavedRange = Object.prototype.hasOwnProperty.call(saved, 'from') && Object.prototype.hasOwnProperty.call(saved, 'to');
-    const savedDate = (value, fallback) => value === '' && hasSavedRange ? '' : validExplorerDate(value) || fallback;
-    return {
-      channels: cleanSet(saved.channels, EXPLORER_FILTERS.channels.map(([value]) => value)),
-      types: cleanSet(saved.types, EXPLORER_FILTERS.types.map(([value]) => value)),
-      classes: cleanSet(saved.classes, EXPLORER_CLASSES),
-      from: hasSavedRange ? savedDate(saved.from, defaults.from) : defaults.from,
-      to: hasSavedRange ? savedDate(saved.to, defaults.to) : defaults.to
-    };
-  }
-  const explorerFilters = loadExplorerFilters();
-  function saveExplorerFilters() {
-    try {
-      localStorage.setItem(EXPLORER_STORAGE_KEY, JSON.stringify({
-        channels: [...explorerFilters.channels], types: [...explorerFilters.types], classes: [...explorerFilters.classes],
-        from: explorerFilters.from, to: explorerFilters.to
-      }));
-    } catch { /* private mode */ }
-  }
-  function resetExplorerFilters(now) {
-    const range = defaultExplorerRange(now);
-    explorerFilters.channels.clear(); explorerFilters.types.clear(); explorerFilters.classes.clear();
-    explorerFilters.from = range.from; explorerFilters.to = range.to;
-    return explorerFilters;
-  }
-  function explorerRangePreset(preset, now) {
-    const d = now instanceof Date ? new Date(now) : new Date();
-    const today = U.dateKey(d);
-    const monthStart = U.dateKey(new Date(d.getFullYear(), d.getMonth(), 1));
-    if (preset === 'today') return { from: today, to: today };
-    if (preset === 'month') return { from: monthStart, to: today };
-    if (preset === 'last-month') {
-      const end = new Date(d.getFullYear(), d.getMonth(), 0);
-      return { from: U.dateKey(new Date(end.getFullYear(), end.getMonth(), 1)), to: U.dateKey(end) };
-    }
-    if (preset === '30d') {
-      const start = new Date(d); start.setDate(start.getDate() - 29);
-      return { from: U.dateKey(start), to: today };
-    }
-    if (preset === 'all') return { from: '', to: '' };
-    return { from: monthStart, to: today };
-  }
-  function explorerChannel(row) {
-    const value = String(row && row.channel || (row && row.gvName ? 'GV Partner' : '')).trim().toLowerCase();
-    return /^(gv|green)|gv partner/.test(value) ? 'gv' : 'ff';
-  }
-  function explorerClass(row) {
-    const group = String(row && row.group || '').trim().toUpperCase();
-    if (EXPLORER_CLASSES.includes(group)) return group;
-    const cls = String(row && row.cls || '').trim();
-    return cls && M && typeof M.classGroup === 'function' ? M.classGroup(cls) : '';
-  }
-  function explorerHasType(row, kind) {
-    const typeText = `${row && row.type || ''} ${row && row.status || ''} ${row && row.tagType || ''}`;
-    if (kind === 'replacement') return /replace/i.test(typeText);
-    if (kind === 'chassis') return /chassis/i.test(`${typeText} ${row && row.vrnType || ''}`);
-    return false;
-  }
-  function filterExplorerRows(rows, filters, allowedChannels) {
-    const f = filters || {};
-    const allowed = new Set((allowedChannels || ['ff', 'gv']).map((v) => /^(gv|green)/i.test(String(v)) ? 'gv' : 'ff'));
-    const channels = cleanSet(f.channels || f.ch, ['ff', 'gv']);
-    const types = cleanSet(f.types || f.type, EXPLORER_FILTERS.types.map(([value]) => value));
-    const classes = cleanSet(f.classes || f.class, EXPLORER_CLASSES);
-    let from = validExplorerDate(f.from) || '', to = validExplorerDate(f.to) || '';
-    if (from && to && from > to) [from, to] = [to, from];
-    return (rows || []).filter((row) => {
-      const channel = explorerChannel(row);
-      if (!allowed.has(channel) || (channels.size && !channels.has(channel))) return false;
-      const key = explorerDateKey(row.key || row.dateKey || row.date || row.d);
-      if (from && (!key || key < from)) return false;
-      if (to && (!key || key > to)) return false;
-      if (classes.size && !classes.has(explorerClass(row))) return false;
-      if (types.size && ![...types].some((kind) => explorerHasType(row, kind))) return false;
-      return true;
-    });
-  }
-  function explorerTotals(rows) {
-    const empty = () => ({ VC4: 0, VC20: 0, 'VC5+': 0 });
-    const byChannel = { ff: empty(), gv: empty() };
-    let total = 0;
-    for (const row of rows || []) {
-      const channel = explorerChannel(row), group = explorerClass(row);
-      if (!EXPLORER_CLASSES.includes(group)) continue;
-      const n = Math.max(0, Number(row.n) || 0);
-      byChannel[channel][group] += n;
-      total += n;
-    }
-    return { byChannel, total, rows: (rows || []).length, byClass: Object.fromEntries(EXPLORER_CLASSES.map((group) => [group, byChannel.ff[group] + byChannel.gv[group]])) };
-  }
-  function explorerHtml(rows, allowedChannels) {
-    const allowed = [...new Set((allowedChannels || ['ff', 'gv']).map((v) => /^(gv|green)/i.test(String(v)) ? 'gv' : 'ff'))];
-    const accessibleFilters = { ...explorerFilters, channels: new Set([...explorerFilters.channels].filter((ch) => allowed.includes(ch))) };
-    const matched = filterExplorerRows(rows, accessibleFilters, allowed);
-    const totals = explorerTotals(matched);
-    const activeChannels = accessibleFilters.channels.size ? allowed.filter((ch) => accessibleFilters.channels.has(ch)) : allowed;
-    const series = activeChannels.map((ch) => ({
-      name: ch === 'ff' ? 'First Forward · FF' : 'GV Partner · GV',
-      values: EXPLORER_CLASSES.map((group) => totals.byChannel[ch][group]),
-      color: ch === 'ff' ? '#6366f1' : '#0d9488'
-    }));
-    const bars = series.length ? C.bars({ labels: EXPLORER_CLASSES, height: 220, series, showValues: true, legendAlways: true }) : '';
-    const groupButtons = (dim, options) => {
-      const active = accessibleFilters[dim];
-      const all = `<button type="button" class="home-exp-chip ${active.size ? '' : 'on'}" data-home-exp-filter="${dim}:all" aria-pressed="${active.size ? 'false' : 'true'}">All</button>`;
-      return all + options.filter(([value]) => dim !== 'channels' || allowed.includes(value)).map(([value, label]) => {
-        const on = active.has(value);
-        return `<button type="button" class="home-exp-chip ${on ? 'on' : ''}" data-home-exp-filter="${dim}:${esc(value)}" aria-pressed="${on ? 'true' : 'false'}">${label}</button>`;
-      }).join('');
-    };
-    const rangeLabel = accessibleFilters.from || accessibleFilters.to
-      ? `${accessibleFilters.from ? U.labelDateKey(accessibleFilters.from, true) : 'Start'} → ${accessibleFilters.to ? U.labelDateKey(accessibleFilters.to, true) : 'Today'}`
-      : 'All available dates';
-    const summary = EXPLORER_CLASSES.map((group) => `<div class="home-exp-stat"><span>${group}</span><b>${U.fmt(totals.byClass[group])}</b><small>FF ${U.fmt(totals.byChannel.ff[group])} · GV ${U.fmt(totals.byChannel.gv[group])}</small></div>`).join('');
-    const emptyMessage = !matched.length ? '<div class="home-exp-empty">Is date / filters ke liye koi issuance nahi mila.</div>' : '';
-    return `<section class="card home-exp-card"><div class="card-head"><div><h3>📊 Issuance mix · class-wise</h3><span class="dim small">FF + GV · ${esc(rangeLabel)} · ${U.fmt(totals.total)} tags</span></div><div class="card-right"><button type="button" class="btn small" data-home-exp-reset title="Current month ke default filters lagao">↺ Reset</button></div></div>
-      <div class="card-body home-exp-body">
-        <div class="home-exp-controls">
-          <div class="home-exp-filter"><span>Channel · multi-select</span><div>${groupButtons('channels', EXPLORER_FILTERS.channels)}</div></div>
-          <div class="home-exp-filter"><span>Type · multi-select</span><div>${groupButtons('types', EXPLORER_FILTERS.types)}</div></div>
-          <div class="home-exp-filter"><span>Class · multi-select</span><div>${groupButtons('classes', EXPLORER_FILTERS.classes)}</div></div>
-          <div class="home-exp-filter home-exp-date-filter"><span>Date range</span><div class="home-exp-dates">
-            <label>From <input class="input" type="date" id="home-exp-from" data-home-exp-date="from" value="${esc(accessibleFilters.from)}"></label>
-            <label>To <input class="input" type="date" id="home-exp-to" data-home-exp-date="to" value="${esc(accessibleFilters.to)}"></label>
-          </div><div class="home-exp-presets">${[['today', 'Today'], ['month', 'This month'], ['last-month', 'Last month'], ['30d', 'Last 30 days'], ['all', 'All dates']].map(([key, label]) => `<button type="button" class="chip" data-home-exp-range="${key}">${label}</button>`).join('')}</div></div>
-        </div>
-        <div class="home-exp-summary" aria-label="Class totals">${summary}</div>
-        <div class="home-exp-chart">${bars || '<div class="home-exp-empty">Aapke account ke liye channel data available nahi hai.</div>'}${emptyMessage}</div>
-        <p class="dim small home-exp-note">Bars me FF / GV ka alag split aur upar har class ka total dikhaya gaya hai. Ek hi filter group me multiple options select kar sakte ho.</p>
-      </div></section>`;
-  }
 
   /** Month KPI context.
    * FF EIR report T+1 aati hai, isliye October ka expected/run-rate 1 din piche ke
@@ -488,7 +323,7 @@ FF.pages = FF.pages || {};
       <div id="home-pulse"></div>
       <div id="home-charts">${U.spinner('Charts…')}</div>
       <div id="home-stock">${U.spinner('Stock (StockDataa + Tag Assignment)…')}</div>
-      <p class="foot-note">🟩 GV aaj = <b>GV Master sheet</b> (live) · 🧾 Issuance history = <b>EIR</b> (GV = master ID ${esc(FF.config.eir.gvMasterId || '5845036')}, baaki FF) · 📦 Stock = <b>StockDataa</b> (FF) + <b>Tag Assignment</b> (GV) · 🟦 FF ka issuance T+1 aata hai · 🔎 Global search top bar par hai · full profile/results Management → Master Search me.</p>`;
+      <p class="foot-note">🟩 GV aaj = <b>GV Master sheet</b> (live) · 🧾 Issuance history = <b>EIR</b> (GV = master ID ${esc(FF.config.eir.gvMasterId || '5845036')}, baaki FF) · 📦 Stock = <b>StockDataa</b> (FF) + <b>Tag Assignment</b> (GV) · 🟦 FF ka issuance T+1 aata hai · Master search ab Management → 🔎 Master Search me hai.</p>`;
 
     const quick = U.$('#home-quick', root);
     if (quick) quick.innerHTML = `<div class="chip-row"><span class="chip on">🟩 GV aaj · GV Master (live)</span><span class="chip">🧾 EIR: FF + GV history</span><span class="chip dim">📦 Stock: StockDataa + Tag Assignment</span></div>`;
@@ -582,52 +417,9 @@ FF.pages = FF.pages || {};
     }
     function paintCharts() {
       if (!chartMount || !chartMount.isConnected || !ui.ready) return;
-      const allowedChannels = [canFf ? 'ff' : '', canGv ? 'gv' : ''].filter(Boolean);
-      const explorer = explorerHtml(ui.sf.rows, allowedChannels);
-      chartMount.innerHTML = `${explorer}${monthCharts(ui.ctx, ui.sf, ui.sc, ui.sf.rows, { weekdayBars: ui.wdBars })}`;
+      chartMount.innerHTML = monthCharts(ui.ctx, ui.sf, ui.sc, ui.sf.rows, { weekdayBars: ui.wdBars });
       C.mount(chartMount);
     }
-    function bindExplorerEvents() {
-      if (!chartMount || chartMount.__homeExplorerBound) return;
-      chartMount.__homeExplorerBound = true;
-      chartMount.addEventListener('click', (event) => {
-        const filterButton = event.target.closest('[data-home-exp-filter]');
-        if (filterButton) {
-          const [dim, value] = filterButton.dataset.homeExpFilter.split(':');
-          if (!Object.prototype.hasOwnProperty.call(EXPLORER_FILTERS, dim)) return;
-          const choices = dim === 'channels' ? ['ff', 'gv'] : EXPLORER_FILTERS[dim].map(([v]) => v);
-          if (value === 'all') explorerFilters[dim].clear();
-          else if (choices.includes(value)) {
-            if (explorerFilters[dim].has(value)) explorerFilters[dim].delete(value);
-            else explorerFilters[dim].add(value);
-          }
-          saveExplorerFilters(); paintCharts(); return;
-        }
-        const preset = event.target.closest('[data-home-exp-range]');
-        if (preset) {
-          Object.assign(explorerFilters, explorerRangePreset(preset.dataset.homeExpRange));
-          saveExplorerFilters(); paintCharts(); return;
-        }
-        if (event.target.closest('[data-home-exp-reset]')) {
-          resetExplorerFilters(); saveExplorerFilters(); paintCharts();
-        }
-      });
-      chartMount.addEventListener('change', (event) => {
-        const input = event.target.closest('[data-home-exp-date]');
-        if (!input) return;
-        const fromInput = U.$('#home-exp-from', chartMount), toInput = U.$('#home-exp-to', chartMount);
-        const from = validExplorerDate(fromInput && fromInput.value), to = validExplorerDate(toInput && toInput.value);
-        if (from && to && from > to) {
-          U.toast('From date, To date se pehle chuniye', 'warn');
-          if (fromInput) fromInput.value = explorerFilters.from;
-          if (toInput) toInput.value = explorerFilters.to;
-          return;
-        }
-        explorerFilters.from = from; explorerFilters.to = to;
-        saveExplorerFilters(); paintCharts();
-      });
-    }
-    bindExplorerEvents();
     function paintAll() { paintLive(); paintMonth(); paintPulse(); paintCharts(); }
 
     // 🟢 First visible live source: only GV Master + today, no FF/history wait.
@@ -727,6 +519,10 @@ FF.pages = FF.pages || {};
     paintMonth();
     paintPulse();
     paintCharts();
+    if (!st.rows.length) {
+      if (chartMount) chartMount.innerHTML = `<div class="card"><div class="card-body empty">Is mahine ka koi issuance row nahi mila — ↻ Refresh dabao ya Settings → Data source check karo.</div></div>`;
+    }
+
     // ---- 📦 Stock (FF = StockDataa · GV = Tag Assignment) ----------------------------------------
     const [stockR, gvStockR] = await Promise.all([stockP, gvStockP]);
     if (!root.isConnected || !stockMount) return;
@@ -779,12 +575,5 @@ FF.pages = FF.pages || {};
     obs.observe(document.body, { childList: true, subtree: true });
   }
 
-  FF.pages.home = {
-    title: 'Home', render, monthKpiHtml, streams, liveRowsFromFeed,
-    explorer: {
-      state: explorerFilters, filterRows: filterExplorerRows, totals: explorerTotals, html: explorerHtml,
-      dateKey: explorerDateKey, rangePreset: explorerRangePreset, reset: resetExplorerFilters,
-      loadFilters: loadExplorerFilters, saveFilters: saveExplorerFilters
-    }
-  };
+  FF.pages.home = { title: 'Home', render, monthKpiHtml, streams, liveRowsFromFeed };
 })(window.FF);

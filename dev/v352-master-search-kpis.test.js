@@ -118,29 +118,12 @@ test('🧑‍💼 employee link agent — boxes + ek class table, 🚗/🚚 grou
   assert.ok(!/undefined|NaN/.test(html));
 });
 
-test('Global search bar is eagerly mounted across the app and covers both channels + tag identifiers', async () => {
-  const idx = await read('index.html');
-  const lazyAt = idx.indexOf('lazy.js?v=103');
-  const searchAt = idx.indexOf('masterSearch.js?v=107');
-  const appAt = idx.indexOf('app.js?v=106');
-  assert.ok(lazyAt >= 0 && searchAt > lazyAt && appAt > searchAt, 'search module loads after lazy dependencies and before app login wiring');
-  const app = await read('app.js');
-  assert.match(app, /Global search stays visible on every page/);
-  assert.match(app, /FF\.masterSearch\.mountTopbar\(\)/, 'login mounts the search immediately rather than after sheets resolve');
-  assert.match(app, /const inp = U\.\$\('#master-search-input'\);[\s\S]{0,100}inp\.focus\(\)/, 'topbar search button focuses the existing input');
-  const search = await read('masterSearch.js');
-  assert.match(search, /Search all — FF\/GV agent, TL, ID, barcode, tag ID/);
-  assert.match(search, /ingest\.ffReport[\s\S]*ingest\.gvReport/);
-  assert.match(search, /details\.stock/);
-  assert.match(search, /details\.assignment/);
-});
-
-test('🏷️ v3.55 wiring — version + cache-bust pins', async () => {
+test('🏷️ v3.52 wiring — version + cache-bust pins', async () => {
   const pkg = JSON.parse(await read('package.json'));
-  assert.equal(pkg.version, '3.55.0');
-  assert.match(await read('server.js'), /APP_VERSION = '3\.55\.0'/);
+  assert.equal(pkg.version, '3.53.0');
+  assert.match(await read('server.js'), /APP_VERSION = '3\.53\.0'/);
   const idx = await read('index.html');
-  assert.match(idx, /styles\.css\?v=108/); assert.match(idx, /config\.js\?v=107/); assert.match(idx, /home\.js\?v=88/); assert.match(idx, /app\.js\?v=106/); assert.match(idx, /lazy\.js\?v=103/); assert.match(idx, /masterSearch\.js\?v=107/);
+  assert.match(idx, /styles\.css\?v=106/); assert.match(idx, /config\.js\?v=105/); assert.match(idx, /home\.js\?v=87/); assert.match(idx, /app\.js\?v=105/); assert.match(idx, /lazy\.js\?v=103/);
   const sw = await read('sw.js');
-  assert.match(sw, /apnapayment-v111/); assert.match(sw, /styles\.css\?v=108/); assert.match(sw, /config\.js\?v=107/); assert.match(sw, /home\.js\?v=88/); assert.match(sw, /app\.js\?v=106/); assert.match(sw, /performance\.js\?v=105/); assert.match(sw, /masterSearch\.js\?v=107/);
+  assert.match(sw, /apnapayment-v109/); assert.match(sw, /styles\.css\?v=106/); assert.match(sw, /config\.js\?v=105/); assert.match(sw, /home\.js\?v=87/); assert.match(sw, /app\.js\?v=105/); assert.match(sw, /masterSearch\.js\?v=104/);
 });

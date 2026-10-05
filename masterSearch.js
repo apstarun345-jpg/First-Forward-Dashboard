@@ -859,8 +859,8 @@ FF.pages = FF.pages || {};
       <div class="master-search-row">
         <div class="master-search-input">
           <span class="ms-ico" aria-hidden="true">🔎</span>
-          <input id="master-search-input" class="input" type="search" placeholder="Search all — FF/GV agent, TL, ID, barcode, tag ID…" autocomplete="off"
-            aria-label="Global search across First Forward and GV agents, TLs, IDs, barcodes and tag IDs">
+          <input id="master-search-input" class="input" type="search" placeholder="Search — naam, TL, ID, GV ID, barcode, tag ID…" autocomplete="off"
+            aria-label="Master search: agent, TL, ID, barcode or tag ID">
           <button class="ms-clear" id="master-search-clear" type="button" title="Search clear karo" aria-label="Search clear karo" hidden>✕</button>
           <kbd class="ms-kbd">/</kbd>
         </div>

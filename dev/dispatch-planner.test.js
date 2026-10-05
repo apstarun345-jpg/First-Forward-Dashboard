@@ -27,14 +27,14 @@ FF.config.features.suggestDays = 25;
 
 const A = (o) => ({ week: [0, 0, 0, 0, 0, 0, 0], curVc4: 0, curNvc4: 0, curTotal: 0, lastVc4: 0, lastNvc4: 0, lastTotal: 0, stockVc4: 0, stockNvc4: 0, stockTotal: 0, tlExcluded: false, agentStatus: 'Active', ...o });
 const ffAgents = [
-  A({ name: 'Ravi Kumar', agentId: 'R1', tlName: 'TL One', tlId: 'T1', priority: 'High', curVc4: 280, curNvc4: 0, curTotal: 280, lastVc4: 200, lastTotal: 200, stockVc4: 100, stockTotal: 100, stockByClass: { VC4: 70, VC5: 30 }, stockClassAvailable: true, tlStockVc4: 300, tlStockTotal: 300, tlPriority: 'Medium' }),
-  A({ name: 'Sita Devi', agentId: 'R2', tlName: 'TL One', tlId: 'T1', priority: 'Low', curVc4: 56, curTotal: 56, lastVc4: 90, lastTotal: 90, stockVc4: 500, stockTotal: 500, stockByClass: { VC4: 500 }, stockClassAvailable: true, tlStockVc4: 300, tlStockTotal: 300, tlPriority: 'Medium' }),
+  A({ name: 'Ravi Kumar', agentId: 'R1', tlName: 'TL One', tlId: 'T1', priority: 'High', curVc4: 280, curNvc4: 0, curTotal: 280, lastVc4: 200, lastTotal: 200, stockVc4: 100, stockTotal: 100, tlStockVc4: 300, tlStockTotal: 300, tlPriority: 'Medium' }),
+  A({ name: 'Sita Devi', agentId: 'R2', tlName: 'TL One', tlId: 'T1', priority: 'Low', curVc4: 56, curTotal: 56, lastVc4: 90, lastTotal: 90, stockVc4: 500, stockTotal: 500, tlStockVc4: 300, tlStockTotal: 300, tlPriority: 'Medium' }),
   A({ name: 'Direct Dev', agentId: 'D1', tlName: 'APS', agentPriority: 'Medium', priority: 'Medium', tlExcluded: true, curVc4: 84, curTotal: 84, stockVc4: 10, stockTotal: 10 }),
   A({ name: 'Source Review', agentId: 'D2', tlName: 'APS', agentPriority: 'Review soon', priority: 'High', tlExcluded: true, curVc4: 40, curTotal: 40 })
 ];
 const gvRows = [
-  { agentId: 'G1', agentName: 'GV Ramesh', tlId: 'GT1', tlName: 'GV TL', priority: 'High', stockVc4: 0, stockComm: 0, stockTotal: 0, stockByClass: { VC4: 0, VC5: 0, VC7: 0 }, stockClassAvailable: true, curVc4: 140, curComm: 28, curTotal: 168, lastVc4: 100, lastComm: 20, lastTotal: 120, agentStatus: 'Active' },
-  { agentId: 'G2', agentName: 'GV Free', tlId: '', tlName: '', priority: 'Low', stockVc4: 5, stockComm: 0, stockTotal: 5, stockByClass: { VC4: 5, VC6: 0 }, stockClassAvailable: true, curVc4: 28, curComm: 0, curTotal: 28, lastVc4: 0, lastComm: 0, lastTotal: 0 }
+  { agentId: 'G1', agentName: 'GV Ramesh', tlId: 'GT1', tlName: 'GV TL', priority: 'High', stockVc4: 0, stockComm: 0, stockTotal: 0, curVc4: 140, curComm: 28, curTotal: 168, lastVc4: 100, lastComm: 20, lastTotal: 120, agentStatus: 'Active' },
+  { agentId: 'G2', agentName: 'GV Free', tlId: '', tlName: '', priority: 'Low', stockVc4: 5, stockComm: 0, stockTotal: 5, curVc4: 28, curComm: 0, curTotal: 28, lastVc4: 0, lastComm: 0, lastTotal: 0 }
 ];
 FF.pages = { performance: { ensureLoaded: async () => {}, agents: () => ffAgents } };
 FF.gv.enabled = () => true; FF.gv.need = async () => gvRows; FF.gv.get = (k) => (k === 'report' ? gvRows : []);
@@ -69,24 +69,6 @@ test('tag basis VC4 / Commercial / total', () => {
   const g = DP.collectAgents().find((x) => x.name === 'GV Ramesh');
   assert.equal(DP.withCalc(g, 'vc4').rate, 5); assert.equal(DP.withCalc(g, 'comm').rate, 1);
   assert.equal(DP.withCalc(g, 'total').required, 150);
-});
-
-test('Dispatch Planner shows per-agent stock class counts for FF and GV', () => {
-  const agents = DP.collectAgents();
-  const ravi = DP.withCalc(agents.find((a) => a.name === 'Ravi Kumar'), 'total');
-  const gv = DP.withCalc(agents.find((a) => a.name === 'GV Free'), 'total');
-  assert.deepEqual(ravi.stockClasses, { VC4: 70, VC5: 30 });
-  assert.equal(DP.stockClassText(ravi), 'VC4 70 · VC5 30');
-  assert.match(DP.stockClassCell(ravi), /VC4[\s\S]*70[\s\S]*VC5[\s\S]*30/);
-  assert.deepEqual(gv.stockClasses, { VC4: 5, VC6: 0 });
-  assert.match(DP.stockClassCell(gv), /VC4[\s\S]*5/);
-  const tl = DP.collectTls(agents).find((row) => row.name === 'TL One');
-  assert.deepEqual(tl.stockClasses, { VC4: 570, VC5: 30 }, 'TL breakdown sums member-agent class stock');
-  assert.match(DP.tableHtml([ravi], 'agents'), /All stock[\s\S]*class-wise mix[\s\S]*VC4[\s\S]*70[\s\S]*VC5[\s\S]*30/);
-  const agentCsvHead = DP.csvHead('agents'), agentCsv = DP.csvRow(ravi, 'agents');
-  assert.equal(agentCsv[agentCsvHead.indexOf('All stock · class-wise mix')], 'VC4 70 · VC5 30');
-  const tlCalc = DP.withCalc(tl, 'total'), tlCsvHead = DP.csvHead('tls'), tlCsv = DP.csvRow(tlCalc, 'tls');
-  assert.equal(tlCsv[tlCsvHead.indexOf('Agents stock · class-wise sum')], 'VC4 570 · VC5 30');
 });
 
 test('direct agents: tags for High/Medium, none for Low', () => {
