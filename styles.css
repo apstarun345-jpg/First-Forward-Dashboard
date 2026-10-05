@@ -5111,3 +5111,28 @@ html[data-theme="dark"] .data-fresh-card>header{background:#111827}.data-fresh-c
     flex-basis: 88px;
   }
 }
+
+
+/* Final touch-device guard v102: some Android browsers in "Desktop site"
+   report a wide CSS viewport. Keep touch/PWA devices in the real app layout. */
+@media (pointer: coarse), (display-mode: standalone) {
+  html, body { width: 100%; max-width: 100%; overflow-x: hidden; }
+  .content { width: 100%; min-width: 0; margin-left: 0; }
+  .sidebar { transform: translateX(-100%); }
+  body.side-open .sidebar { transform: translateX(0); }
+  body.side-open .side-backdrop { display: block; }
+  #menu-btn { display: inline-grid; place-items: center; }
+  .mobile-nav { position: fixed; display: grid; left: 0; right: 0; bottom: 0; z-index: 120; }
+  .main { width: 100%; max-width: 100%; min-width: 0; }
+  .card, .kpi, .page, .page-head { max-width: 100%; min-width: 0; }
+  .topbar { max-width: 100vw; }
+}
+@media (pointer: coarse) and (max-width: 900px), (display-mode: standalone) {
+  body { font-size: 14px !important; -webkit-text-size-adjust: 100%; }
+  .main { padding-bottom: max(94px, calc(24px + env(safe-area-inset-bottom))); }
+  .kpi-grid, .kpi-grid.six { grid-template-columns: repeat(2, minmax(0,1fr)) !important; }
+  .kpi-value { font-size: 23px !important; }
+  .input, select, textarea, .ctrl-row input { font-size: 14px; min-height: 40px; }
+  .btn { min-height: 38px; font-size: 13px; }
+  .icon-btn { width: 40px; height: 40px; }
+}
