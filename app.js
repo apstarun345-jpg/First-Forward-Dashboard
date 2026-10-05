@@ -83,21 +83,22 @@ window.FF = window.FF || {};
   function renderMobileNav() {
     const nav = U.$('#mobile-nav');
     if (!nav || !FF.auth.user) return;
-    // Mobile = 5 high-frequency actions. Existing pages/sidebar stay the source of truth;
-    // Search/Bell/More are actions, not duplicate routes.
+    // Native-app style: keep five primary destinations/actions visible and thumb-friendly.
+    // Search remains available from the top search/command palette; More exposes every route.
     const items = [
       { kind: 'route', id: 'home', icon: '⌂', label: 'Home' },
-      { kind: 'action', id: 'search', icon: '⌕', label: 'Search' },
+      { kind: 'route', id: 'tagIssued', icon: '🏷️', label: 'Tag Issued' },
       { kind: 'action', id: 'notifications', icon: '🔔', label: 'Alerts' },
       { kind: 'route', id: 'performance', icon: '★', label: 'Team' },
       { kind: 'action', id: 'more', icon: '☰', label: 'More' }
     ];
     nav.hidden = false;
+    nav.setAttribute('aria-label', 'Primary mobile navigation');
     nav.innerHTML = items.map((x) => {
       const active = x.kind === 'route' && current.page === x.id;
-      if (x.kind === 'route') return `<a href="#/${x.id}" class="mobile-nav-item ${active ? 'active' : ''}" aria-label="${esc(x.label)}"><span>${x.icon}</span><small>${esc(x.label)}</small></a>`;
+      if (x.kind === 'route') return `<a href="#/${x.id}" class="mobile-nav-item ${active ? 'active' : ''}" aria-label="${esc(x.label)}"><span aria-hidden="true">${x.icon}</span><small>${esc(x.label)}</small></a>`;
       const badge = x.id === 'notifications' ? '<b class="mobile-nav-badge" id="mobile-notification-count" hidden>0</b>' : '';
-      return `<button type="button" class="mobile-nav-item mobile-nav-action" data-mobile-action="${x.id}" aria-label="${esc(x.label)}"><span>${x.icon}${badge}</span><small>${esc(x.label)}</small></button>`;
+      return `<button type="button" class="mobile-nav-item mobile-nav-action" data-mobile-action="${x.id}" aria-label="${esc(x.label)}"><span aria-hidden="true">${x.icon}${badge}</span><small>${esc(x.label)}</small></button>`;
     }).join('');
     try {
       const count = FF.notifications && FF.notifications.countUnread ? FF.notifications.countUnread() : 0;
