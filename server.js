@@ -55,7 +55,7 @@ const MIME = {
 const BLOCKED_FILES = new Set(['server.js', 'sheets-storage.js', 'apps-script-storage.js', 'mailer.js', 'stock-age.js', 'DEPLOYMENT.md', 'SHEETS_STORAGE.md', 'STORAGE_SETUP.md', 'RECOVERY.md', 'package.json', 'package-lock.json', 'render.yaml', 'README.md', '.env']);
 const BLOCKED_DIRS = new Set(['data', 'dev', 'node_modules', '.git', 'google-apps-script']);
 // /api/health ka version ab package.json se aata hai (pehle yahan hardcoded purana string tha).
-let APP_VERSION = '3.47.0';
+let APP_VERSION = '3.48.0';
 try { APP_VERSION = String(JSON.parse(readFileSync(path.join(__dirname, 'package.json'), 'utf8')).version || APP_VERSION); } catch { /* keep fallback */ }
 
 // ---------------------------------------------------------------------------------------------
@@ -161,6 +161,9 @@ const DEFAULT_SETTINGS = {
   brand: 'First Forward',
   tagline: 'Dashboard',
   logo: '',          // data URL (uploaded in Settings → Branding)
+  pwaIcon192: '',    // generated PWA app icon, 192x192
+  pwaIcon512: '',    // generated PWA app icon, 512x512
+  pwaIcon64: '',     // generated browser/favicon icon, 64x64
   loginImage: '',    // data URL (login page / hero image)
   loginAnimation: true, // animated login page + "Welcome back" splash
   theme: { sidebarBg: '#1e1b4b', sidebarBg2: '#4c1d95', sidebarText: '#e0e7ff', accent: '#6366f1', accent2: '#a855f7', gvAccent: '#0d9488' },
@@ -3810,6 +3813,49 @@ async function handleApi(req, res, url) {
   const method = req.method;
   const user = sessionUser(req);
 
+  // Public PWA icon/manifest — custom icon is stored in admin settings but only the
+  // image bytes are exposed here. This lets installed PWAs pick up the admin-selected icon.
+  if (p === '/api/pwa/icon/192' || p === '/api/pwa/icon/512' || p === '/api/pwa/icon/64') {
+    if (method !== 'GET' && method !== 'HEAD') return sendText(res, 405, 'Method not allowed');
+    const key = p.endsWith('/192') ? 'pwaIcon192' : p.endsWith('/512') ? 'pwaIcon512' : 'pwaIcon64';
+    const fallback = key === 'pwaIcon64' ? 'favicon.svg' : (key === 'pwaIcon192' ? 'icon-192.png' : 'icon-512.png');
+    const data = String(db.settings && db.settings[key] || '');
+    if (/^data:image\\/(png|jpe?g|webp|gif);base64,/i.test(data)) {
+      const match = data.match(/^data:(image\\/[a-z0-9.+-]+);base64,(.*)$/i);
+      if (match) {
+        const buf = Buffer.from(match[2], 'base64');
+        return sendMaybeCompressed(req, res, 200, match[1], buf, { 'Cache-Control': 'no-cache' });
+      }
+    }
+    if (data.startsWith('data:image/svg+xml;base64,')) {
+      const buf = Buffer.from(data.slice('data:image/svg+xml;base64,'.length), 'base64');
+      return sendMaybeCompressed(req, res, 200, 'image/svg+xml', buf, { 'Cache-Control': 'no-cache' });
+    }
+    try {
+      const fp = path.join(__dirname, fallback);
+      const buf = await fs.readFile(fp);
+      const mime = fallback.endsWith('.svg') ? 'image/svg+xml' : 'image/png';
+      return sendMaybeCompressed(req, res, 200, mime, buf, { 'Cache-Control': 'no-cache' });
+    } catch { return sendText(res, 404, 'Icon not found'); }
+  }
+
+  if (p === '/api/pwa/manifest' && method === 'GET') {
+    const s = db.settings || {};
+    return sendJson(res, 200, {
+      name: s.appName || 'First Forward & Gv Partner Dashboard',
+      short_name: s.brand || 'FF & GV',
+      description: s.tagline || 'ApnaPayment workspace',
+      start_url: './#/home', scope: './', display: 'standalone', orientation: 'any',
+      background_color: (s.theme && s.theme.sidebarBg) || '#111214',
+      theme_color: (s.theme && s.theme.accent) || '#111214',
+      categories: ['business', 'productivity', 'finance'],
+      icons: [
+        { src: '/api/pwa/icon/192', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
+        { src: '/api/pwa/icon/512', sizes: '512x512', type: 'image/png', purpose: 'any maskable' }
+      ]
+    }, { 'Cache-Control': 'no-cache' });
+  }
+
   if (p === '/api/health' && method === 'GET') {
     // pendingSignups sirf admin ko (sidebar badge ke liye) — public health me leak nahi.
     return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: APP_VERSION, storage: storageStatus(), push: pushHealth(), stockAge: stockAgeStatus(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length } : {}) });
@@ -6058,7 +6104,7 @@ async function handleApi(req, res, url) {
     const body = await readBody(req);
     const patch = body && typeof body === 'object' ? (body.settings || body) : {};
     delete patch.updatedAt; delete patch.updatedBy;
-    for (const key of ['logo', 'loginImage']) {
+    for (const key of ['logo', 'pwaIcon192', 'pwaIcon512', 'pwaIcon64', 'loginImage']) {
       if (patch[key] && !/^data:image\/(png|jpe?g|webp|gif|svg\+xml);base64,/.test(patch[key])) throw new HttpError(400, `${key}: sirf PNG/JPG/WEBP/SVG image (data URL) allowed.`);
       if (patch[key] && patch[key].length > 2.5 * 1024 * 1024) throw new HttpError(400, `${key}: image 1.8 MB se chhoti rakho.`);
     }
