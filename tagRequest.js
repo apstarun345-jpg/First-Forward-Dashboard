@@ -1342,7 +1342,6 @@ body.colorful .from-hdr { color: #166534; }
     const busy = state.busy === 'send';
     body.innerHTML = `
       ${employeeCardHtml()}
-      ${employeeQuickChipHtml()}
       ${stockBoardHtml()}
       <section class="card tr-agents-card"><div class="card-head"><h3>🧑‍🤝‍🧑 Agent request <span class="count" data-tr-agents>${fmt(state.rows.length)} agent${state.rows.length === 1 ? '' : 's'}</span></h3>
         <div class="card-right dim">Har agent: naam · mobile · address · pincode · class-wise qty (0/khaali = nahi chahiye) · total <b data-tr-total>${fmt(grandTotal())}</b> tags</div></div>
@@ -1367,9 +1366,6 @@ body.colorful .from-hdr { color: #166534; }
     rootEl.querySelectorAll('.tr-agent-card').forEach(bindAgentCard);
     bindStockBoard(rootEl);
     bindFormGlobal();
-    // 📋 Quick chip → seedha Status tab (apni request history: All/Pending/Approved/Dispatched/Rejected)
-    const empChip = rootEl.querySelector('[data-tr-emp-open]');
-    if (empChip) empChip.addEventListener('click', () => { state.view = 'status'; renderRoot(); });
   }
   /** Index aane par sirf meta + hints update (typing ke beech focus na toote). */
   function refreshFormMeta() {
@@ -1865,24 +1861,6 @@ body.colorful .from-hdr { color: #166534; }
       </nav>
     </div>`;
     return { ...page, html };
-  }
-  /** 📋 Form tab ka quick chip — employee ki apni requests ka seedha raasta (Status tab tak ek click). */
-  function employeeChipCountsText() {
-    const s = state.employeeSummary;
-    if (!s) return 'aapki requests check ho rahi hain…';
-    return `⏳ ${fmt(employeeStatusCount(s, 'pending'))} pending · ✅ ${fmt(employeeStatusCount(s, 'approved'))} approved · 🚚 ${fmt(employeeStatusCount(s, 'dispatched'))} · ⛔ ${fmt(employeeStatusCount(s, 'rejected'))} · 📋 ${fmt(employeeStatusCount(s, 'all'))} total`;
-  }
-  function employeeQuickChipHtml() {
-    if (!isPublic() || !state.employeeToken) return '';
-    return `<button type="button" class="tr-emp-chip" data-tr-emp-open title="Aapki sabhi requests — All / Pending / Approved / Dispatched / Rejected filter, 10-10 request ke pages ke saath">
-      <span class="tr-emp-chip-label">📋 <b>Meri requests</b><small data-tr-emp-chip-counts>${esc(employeeChipCountsText())}</small></span>
-      <span class="tr-emp-chip-go">Status dekho →</span>
-    </button>`;
-  }
-  /** Summary aa gayi → sirf chip ka count text badlo (poora form re-render nahi — typing/focus safe). */
-  function refreshEmployeeChip() {
-    const el = rootEl && rootEl.querySelector ? rootEl.querySelector('[data-tr-emp-chip-counts]') : null;
-    if (el) el.textContent = employeeChipCountsText();
   }
   function employeeSummaryHtml() {
     if (!state.employeeToken) return '';
@@ -2867,15 +2845,6 @@ body.colorful .from-hdr { color: #166534; }
       });
     }
     buildIndex().then(() => onIndexReady()).catch(() => {});
-    // 📋 Public form: employee ka token hai to request counts background me lao — Form tab ka
-    // "Meri requests" chip bina Status tab khole hi pending/approved counts dikha de (in-place update).
-    if (state.publicMode && state.employeeToken && !state.employeeSummary) {
-      loadEmployeeSummary().then(() => {
-        if (!rootEl || !rootEl.isConnected) return;
-        if (state.view === 'form') refreshEmployeeChip();
-        else if (state.view === 'status') renderStatus();
-      });
-    }
   }
 
   /**
@@ -2931,20 +2900,6 @@ body.colorful .from-hdr { color: #166534; }
     _test: {
       displayRows, reqRowHtml: (dr) => reqRowHtml(dr), metricCellsHtml, metricNumbers, hintText, agentGroupSummaryHtml, channelFilterHtml, requestsShellHtml, agentKeyOf, labelItem, contactOf,
       employeeStatusPage, employeeStatusFiltersHtml, employeeStatusHistoryHtml,
-      employeeQuickChipHtml: (opts) => {
-        const o = opts || {};
-        const keep = { pub: state.publicMode, token: state.employeeToken, summary: state.employeeSummary };
-        state.publicMode = o.publicMode !== false;
-        state.employeeToken = o.token === undefined ? 'tok_test_12345678901234567890' : o.token;
-        state.employeeSummary = o.summary === undefined ? null : o.summary;
-        try { return employeeQuickChipHtml(); }
-        finally { state.publicMode = keep.pub; state.employeeToken = keep.token; state.employeeSummary = keep.summary; }
-      },
-      employeeChipCountsText: (summary) => {
-        const keep = state.employeeSummary;
-        state.employeeSummary = summary === undefined ? null : summary;
-        try { return employeeChipCountsText(); } finally { state.employeeSummary = keep; }
-      },
       recTotals, suggestItems, suggestHtml, stockBoardHtml, stockBoardTableHtml, stockBoardRows, stockBoardChipsHtml,
       classBreakdownRows, classBreakdownHtml, tlPanelHtml, findTlRecord, courierOptions, requestColumnCount,
       setIndex: (idx) => { state.index = idx || null; },

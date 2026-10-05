@@ -298,10 +298,10 @@ test('🚀 lazy group + current cache busting: unusual-scan pehle load hota hai'
   assert.ok(list.indexOf('unusual-scan') < list.indexOf('unusual'), 'shared scan lib page module se pehle load ho');
   const idx = read('index.html'), sw = read('sw.js');
   assert.ok(!idx.includes('?v=59') && !sw.includes('?v=59'), 'purana ?v=59 kahin nahi bacha');
-  assert.ok(idx.includes('config.js?v=109') && sw.includes('./config.js?v=109'), 'CCH signature helper cache-busted in shell + SW');
+  assert.ok(idx.includes('config.js?v=108') && sw.includes('./config.js?v=108'), 'CCH signature helper cache-busted in shell + SW');
   assert.ok(idx.includes('home.js?v=89') && sw.includes('./home.js?v=89'), 'Home map-mismatch guard cache-busted in shell + SW');
   assert.ok(idx.includes('app.js?v=107') && sw.includes('./app.js?v=107'), 'root service-worker registration cache-busted in shell + SW');
-  assert.match(sw, /CACHE_NAME = 'apnapayment-v113'/, 'SW cache bust hua');
+  assert.match(sw, /CACHE_NAME = 'apnapayment-v112'/, 'SW cache bust hua');
   const server = read('server.js');
   assert.ok(server.includes("import './unusual-scan.js'"), 'server shared scan lib import karta hai');
   assert.ok(server.includes("'/api/unusual/scan'"), 'server route hai');
