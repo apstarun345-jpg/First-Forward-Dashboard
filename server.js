@@ -3828,7 +3828,7 @@ async function handleApi(req, res, url) {
     const key = p.endsWith('/192') ? 'pwaIcon192' : p.endsWith('/512') ? 'pwaIcon512' : 'pwaIcon64';
     const fallback = key === 'pwaIcon64' ? 'favicon.svg' : (key === 'pwaIcon192' ? 'icon-192.png' : 'icon-512.png');
     const data = String(db.settings && db.settings[key] || '');
-    if (/^data:image\\/(png|jpe?g|webp|gif);base64,/i.test(data)) {
+    if (/^data:image\/(png|jpe?g|webp|gif);base64,/i.test(data)) {
       const match = data.match(/^data:(image\\/[a-z0-9.+-]+);base64,(.*)$/i);
       if (match) {
         const buf = Buffer.from(match[2], 'base64');
