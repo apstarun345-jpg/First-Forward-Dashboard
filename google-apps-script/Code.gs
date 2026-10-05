@@ -31,7 +31,19 @@
  *
  * NEVER change SECRET after data is saved (the old records could no longer be decrypted).
  */
-const SECRET = 'PASTE_A_LONG_RANDOM_SECRET_HERE';
+// 🔐 Secret is kept in Apps Script Script Properties, NOT in GitHub.
+// Set it once by running setAppSecretOnce('YOUR_SECRET') in the Apps Script editor.
+function appSecret_() {
+  return String(PropertiesService.getScriptProperties().getProperty('APPS_SCRIPT_SECRET') || '').trim();
+}
+
+// Final production targets supplied for this dashboard.
+const DASHBOARD_BASE_URL = 'https://first-forward-dashboard.onrender.com';
+const GV_SPREADSHEET_ID = '13eyCSDnXysQM-nWymBE5yPeKw8fnbVCY-hCTqJSPUsM';
+const GV_SHEET_NAME = 'GV Master';
+const TAG_REQUEST_SPREADSHEET_ID = '13eyCSDnXysQM-nWymBE5yPeKw8fnbVCY-hCTqJSPUsM';
+const TAG_REQUEST_DEFAULT_TAB = 'Tag Requests';
+
 const TAB = 'APP_STORAGE';
 const CHUNK = 45000; // a Google Sheets cell holds max 50,000 characters
 const KINDS = ['users', 'sessions', 'settings', 'resets', 'notify'];
@@ -40,6 +52,18 @@ const HISTORY_MAX_ROWS = 2000;
 
 /** Run this ONCE from the Apps Script editor (▶ Run) to grant the "send email" permission. */
 function authorizeMail() { Logger.log('Mail quota left today: ' + MailApp.getRemainingDailyQuota()); }
+
+/**
+ * 🔐 Run ONCE after pasting this file. Do NOT put the secret into GitHub.
+ * Example: setAppSecretOnce('your-secret-here');
+ */
+function setAppSecretOnce(secret) {
+  secret = String(secret || '').trim();
+  if (secret.length < 16) throw new Error('Secret must be at least 16 characters.');
+  PropertiesService.getScriptProperties().setProperty('APPS_SCRIPT_SECRET', secret);
+  Logger.log('APPS_SCRIPT_SECRET saved in Script Properties.');
+  return 'OK';
+}
 /**
  * 📡 INSTANT GV MASTER EDIT → SERVER SNAPSHOT → PHONE PUSH
  *
@@ -66,7 +90,7 @@ function setDashboardPushUrl(url, spreadsheetId, sheetName) {
 
 /** Edit the three placeholders, run this once, then keep/remove this helper as preferred. */
 function configureInstantGvPushOnce() {
-  setDashboardPushUrl('https://YOUR-DASHBOARD-DOMAIN/api/push/sheet-update', 'YOUR-GV-SPREADSHEET-ID', 'GV Master');
+  setDashboardPushUrl(DASHBOARD_BASE_URL + '/api/push/sheet-update', GV_SPREADSHEET_ID, GV_SHEET_NAME);
   return setupInstantSheetPush();
 }
 
@@ -105,7 +129,7 @@ function instantSheetEditPush(e) {
     var numRows = range.getNumRows();
     var numCols = range.getNumColumns();
     var payload = {
-      secret: SECRET,
+      secret: appSecret_(),
       title: 'GV Partner live update',
       sheet: sheetName,
       spreadsheetId: spreadsheetId,
@@ -137,7 +161,8 @@ function doPost(e) {
   let body;
   try { body = JSON.parse((e && e.postData && e.postData.contents) || '{}'); }
   catch (err) { return json_({ ok: false, error: 'invalid JSON' }); }
-  if (!SECRET || SECRET.indexOf('PASTE_') === 0 || SECRET.length < 16) return json_({ ok: false, error: 'Set SECRET in Code.gs (min 16 chars) and redeploy.' });
+  const SECRET = appSecret_();
+  if (!SECRET || SECRET.length < 16) return json_({ ok: false, error: 'APPS_SCRIPT_SECRET missing — run setAppSecretOnce(secret) once, then deploy a new version.' });
   if (body.secret !== SECRET) return json_({ ok: false, error: 'unauthorized (secret mismatch)' });
 
   // 📧 Mail relay (HTTPS) — Render free blocks SMTP ports, so the dashboard can send its emails
@@ -183,9 +208,9 @@ function doPost(e) {
       return json_({ ok: true, spreadsheet: ssT.getName(), spreadsheetId: ssT.getId(), url: ssT.getUrl(), tab: tabT, exists: !!ssT.getSheetByName(tabT) });
     }
     if (body.action === 'appendrows') {
-      var tabName = String(body.tab || 'Tag Requests').slice(0, 80);
+      var tabName = String(body.tab || TAG_REQUEST_DEFAULT_TAB).slice(0, 80);
       if (tabName === TAB && !body.spreadsheetId) return json_({ ok: false, error: 'APP_STORAGE tab me likhna allowed nahi — koi doosra tab naam do.' });
-      var ss = target_(body.spreadsheetId);
+      var ss = target_(body.spreadsheetId || TAG_REQUEST_SPREADSHEET_ID);
       var sh = ss.getSheetByName(tabName);
       if (!sh) sh = ss.insertSheet(tabName);
       var header = Array.isArray(body.header) ? body.header.map(function (h) { return String(h == null ? '' : h); }) : [];
