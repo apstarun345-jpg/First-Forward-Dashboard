@@ -105,7 +105,8 @@ window.FF = window.FF || {};
       const active = x.kind === 'route' && current.page === x.id;
       if (x.kind === 'route') return `<a href="#/${x.id}" class="mobile-nav-item ${active ? 'active' : ''}" aria-label="${esc(x.label)}"><span aria-hidden="true">${x.icon}</span><small>${esc(x.label)}</small></a>`;
       const badge = x.id === 'notifications' ? '<b class="mobile-nav-badge" id="mobile-notification-count" hidden>0</b>' : '';
-      return `<button type="button" class="mobile-nav-item mobile-nav-action" data-mobile-action="${x.id}" aria-label="${esc(x.label)}"><span aria-hidden="true">${x.icon}${badge}</span><small>${esc(x.label)}</small></button>`;
+      const menuAttrs = x.id === 'more' ? ' aria-controls="sidebar" aria-expanded="false"' : '';
+      return `<button type="button" class="mobile-nav-item mobile-nav-action" data-mobile-action="${x.id}" aria-label="${esc(x.label)}"${menuAttrs}><span aria-hidden="true">${x.icon}${badge}</span><small>${esc(x.label)}</small></button>`;
     }).join('');
     try {
       const count = FF.notifications && FF.notifications.countUnread ? FF.notifications.countUnread() : 0;
@@ -1061,13 +1062,11 @@ window.FF = window.FF || {};
   }
   function openSidebar() {
     document.body.classList.add('side-open');
-    const menuButton = U.$('#menu-btn');
-    if (menuButton) menuButton.setAttribute('aria-expanded', 'true');
+    U.$$('#menu-btn, #mobile-nav [data-mobile-action="more"]').forEach((button) => button.setAttribute('aria-expanded', 'true'));
   }
   function closeSidebar() {
     document.body.classList.remove('side-open');
-    const menuButton = U.$('#menu-btn');
-    if (menuButton) menuButton.setAttribute('aria-expanded', 'false');
+    U.$$('#menu-btn, #mobile-nav [data-mobile-action="more"]').forEach((button) => button.setAttribute('aria-expanded', 'false'));
   }
   function toggleSidebar() {
     if (document.body.classList.contains('side-open')) closeSidebar();
