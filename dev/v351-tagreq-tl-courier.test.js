@@ -53,7 +53,11 @@ test('👥 TL naam — class-wise stock / last / MTD (VC4 · VC20 · VC5+) + �
 
   const panel = TR._test.tlPanelHtml({ isTl: true, name: 'TL One', channel: 'ff' });
   assert.match(panel, /tr-tl-panel/, 'TL panel render hua');
-  assert.match(panel, /class-wise \(VC4 · VC20 · VC5\+\)/);
+  assert.match(panel, /Class-wise \(VC4 · VC20 · VC5\+\)/);
+  // v3.52 — boxes me har number ek hi baar: stock 14 sirf stock-box + table-total me, purane 🚗/🚚 KPI cells nahi
+  assert.ok(panel.includes('tr-boxes') && !panel.includes('tr-tl-kpis'), 'unified box strip, purane duplicate KPI cells nahi');
+  assert.ok(/📦 Stock · TL total<\/small><b>14<\/b><em>VC4 4 · VC20 8 · VC5\+ 2/.test(panel), 'stock box = total + class mix');
+  assert.ok(panel.includes('🎯 Suggested qty') && panel.includes('🚦 Priority'), 'suggested + priority boxes');
   assert.match(panel, /tr-class-tbl/, 'class-wise table');
   for (const s of ['VC4', 'VC20', 'VC5+', 'Total', 'Stock', 'Last month', 'Current MTD', 'After stock', 'W/o stock']) assert.ok(panel.includes(s), `table me "${s}"`);
 
