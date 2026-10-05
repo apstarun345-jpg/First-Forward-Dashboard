@@ -280,3 +280,23 @@ test('👤 employee link request history — ALL/status filters and 10-request p
   assert.ok(filteredHtml.includes('aria-pressed="true"'), 'selected status filter is visibly and accessibly active');
   assert.equal((filteredHtml.match(/class="tr-st-card /g) || []).length, counts.rejected);
 });
+
+test('👤 employee quick chip — Form tab par "Meri requests" ka seedha raasta (public + token par hi)', () => {
+  const summary = { totalRequests: 7, pending: 3, approved: 2, dispatched: 1, rejected: 1, requestedTags: 40, approvedTags: 31, requests: [] };
+  const html = TR._test.employeeQuickChipHtml({ summary });
+  assert.ok(html.includes('data-tr-emp-open'), 'chip public employee ke liye render hota hai');
+  assert.ok(html.includes('Meri requests'), 'chip ka label saaf hai');
+  assert.ok(html.includes('Status dekho'), 'chip seedha Status/history tab ki taraf point karta hai');
+  assert.match(html, /3 pending/, 'pending count chip par dikhta hai');
+  assert.match(html, /2 approved/, 'approved count chip par dikhta hai');
+  assert.match(html, /7 total/, 'ALL total chip par dikhta hai');
+  assert.ok(!/undefined|NaN/.test(html), 'chip me koi undefined/NaN nahi');
+
+  const loading = TR._test.employeeQuickChipHtml({ summary: null });
+  assert.ok(loading.includes('check ho rahi hain'), 'summary aane tak loading text dikhta hai');
+
+  assert.equal(TR._test.employeeQuickChipHtml({ publicMode: false, summary }), '', 'admin/login mode me chip nahi aata');
+  assert.equal(TR._test.employeeQuickChipHtml({ token: '', summary }), '', 'bina employee token chip nahi aata');
+
+  assert.match(TR._test.employeeChipCountsText(null), /check ho rahi hain/, 'null summary = loading text');
+});
