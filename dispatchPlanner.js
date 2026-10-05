@@ -187,6 +187,53 @@ FF.pages = FF.pages || {};
     return `<div class="dp2-stock-mix" title="${esc(title)}">${entries.map(([name, value]) => `<span><small>${esc(name)}</small><b>${fmt(value)}</b></span>`).join('')}</div>`;
   }
 
+  // ---- class-wise stock summary ---------------------------------------------------------------------------
+  // "Kis class ka kitna stock hai" — poore filtered view ka jod, FF/GV split ke saath.
+  // Row-level mix `stockClassCell` se aata hai; ye usi data ka aggregate hai (TL rows me member-agents ka sum).
+  function classStockSummary(list) {
+    const rowsList = list || [];
+    const buckets = new Map();
+    let unmapped = 0, sourceTotal = 0;
+    rowsList.forEach((r) => {
+      if (!r || !r.stockClassAvailable) return;
+      const rowTotal = Math.max(0, n0(r.stock && r.stock.total));
+      sourceTotal += rowTotal;
+      let known = 0;
+      Object.entries(r.stockClasses || {}).forEach(([name, value]) => {
+        const n = Math.max(0, n0(value));
+        const cls = clean(name).toUpperCase();
+        if (!n || !cls) return;
+        known += n;
+        const entry = buckets.get(cls) || { name: cls, ff: 0, gv: 0, total: 0 };
+        entry[r.ch === 'gv' ? 'gv' : 'ff'] += n;
+        entry.total += n;
+        buckets.set(cls, entry);
+      });
+      // TL rows: sheet ka TL total (ya agent sum) alag ho sakta hai — unme "Other" mat jodo.
+      if (r.kind !== 'tl' && rowTotal > known) unmapped += rowTotal - known;
+    });
+    const classNum = (name) => Number(String(name).replace(/\D+/g, '')) || 0;
+    const items = [...buckets.values()].filter((c) => c.total > 0)
+      .sort((a, b) => classNum(a.name) - classNum(b.name) || a.name.localeCompare(b.name));
+    return {
+      items, unmapped, sourceTotal,
+      stockTotal: items.reduce((n, c) => n + c.total, 0),
+      available: rowsList.some((r) => r && r.stockClassAvailable),
+      rows: rowsList.length
+    };
+  }
+  function classMixHtml(list) {
+    const mix = classStockSummary(list);
+    if (!mix.available) {
+      return `<div class="dp2-classmix"><div class="dp2-classmix-head"><b>📦 Stock · class-wise</b><span class="dim small">source sheet me class columns nahi</span></div><p class="dim small">Class-wise stock ke liye REPORT / GV REPORT me VC4 · VC5 · VC6 · VC7 · VC12 · VC16 columns chahiye (Settings → sheet mapping).</p></div>`;
+    }
+    const chips = mix.items.map((c) => `<span class="dp2-class-chip" title="${esc(`${c.name} · FF ${fmt(c.ff)} · GV ${fmt(c.gv)}`)}"><small>${esc(c.name)}</small><b>${fmt(c.total)}</b><em>FF ${fmt(c.ff)} · GV ${fmt(c.gv)}</em></span>`).join('');
+    const other = mix.unmapped > 0
+      ? `<span class="dp2-class-chip other" title="In rows ka sheet total class columns se zyada hai — baaki classes / unmapped"><small>Other</small><b>${fmt(mix.unmapped)}</b><em>unmapped stock</em></span>`
+      : '';
+    return `<div class="dp2-classmix"><div class="dp2-classmix-head"><b>📦 Stock · class-wise</b><span class="dim small">${fmt(mix.rows)} ${mix.rows === 1 ? 'row' : 'rows'} · ${fmt(mix.items.length)} classes · total <b>${fmt(mix.stockTotal)}</b> tags${mix.unmapped > 0 ? ` + ${fmt(mix.unmapped)} unmapped` : ''}</span></div><div class="dp2-classchips">${chips}${other || '<span class="dim small">Is filter par stock 0 hai.</span>'}</div></div>`;
+  }
+
   /** Sab agents (FF EIR + GV REPORT operational fields) ek hi shape me. */
   function collectAgents() {
     const out = [];
@@ -720,6 +767,7 @@ FF.pages = FF.pages || {};
       </section>
       <div id="dp2-selbar" class="dp2-selbar" hidden></div>
       <div id="dp2-kpis" class="dp2-kpis"></div>
+      <div id="dp2-classmix"></div>
       <section class="card dp2-card"><div class="card-head"><h3 id="dp2-title"></h3><span class="dim small" id="dp2-sub"></span></div><div id="dp2-table"></div></section>
       <p class="foot-note">Direct agents (GV: TL ID + TL Name khaali · FF: TL Name APS) ko stock nahi jaata — unki qty <b>tags</b> me hai (High/Medium ko chahiye). Row / TL naam / KPI par click karo → drawer.</p>`;
 
@@ -816,6 +864,7 @@ FF.pages = FF.pages || {};
       lastList = sorted;
       const t = agg(sorted);
       U.$('#dp2-kpis', root).innerHTML = kpiHtml(t, state.view);
+      U.$('#dp2-classmix', root).innerHTML = classMixHtml(sorted);
       U.$('#dp2-title', root).textContent = state.view === 'tls' ? '👥 TL-wise dispatch' : '🧑‍💼 Agent-wise dispatch';
       U.$('#dp2-sub', root).textContent = `${fmt(sorted.length)} ${state.view === 'tls' ? 'TLs' : 'agents'} · ${BASIS[state.basis]} · sorted by ${state.sort[state.view].key} ${state.sort[state.view].dir}${picked.size ? ` · ${fmt(picked.size)} selected` : ''}`;
       U.$('#dp2-table', root).innerHTML = tableHtml(sorted, state.view);
@@ -924,7 +973,7 @@ FF.pages = FF.pages || {};
 
   FF.dispatchPlanner = {
     collectAgents, collectTls, withCalc, agg, state, prioOf, passes, sortRows, columns, tableHtml, chipsHtml, kpiHtml,
-    stockClassCell, stockClassText, csvHead: CSV_HEAD, csvRow,
+    stockClassCell, stockClassText, classStockSummary, classMixHtml, csvHead: CSV_HEAD, csvRow,
     // v3.18 — multiple selection
     filterOptions, channelLabel, FILTER_OPTIONS,
     get picked() { return picked; }, get pickedCount() { return picked.size; },

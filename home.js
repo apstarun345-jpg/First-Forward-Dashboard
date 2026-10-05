@@ -181,7 +181,8 @@ FF.pages = FF.pages || {};
     const rangeLabel = accessibleFilters.from || accessibleFilters.to
       ? `${accessibleFilters.from ? U.labelDateKey(accessibleFilters.from, true) : 'Start'} → ${accessibleFilters.to ? U.labelDateKey(accessibleFilters.to, true) : 'Today'}`
       : 'All available dates';
-    const summary = EXPLORER_CLASSES.map((group) => `<div class="home-exp-stat"><span>${group}</span><b>${U.fmt(totals.byClass[group])}</b><small>FF ${U.fmt(totals.byChannel.ff[group])} · GV ${U.fmt(totals.byChannel.gv[group])}</small></div>`).join('');
+    const channelSplit = (group) => allowed.map((ch) => `${ch === 'ff' ? 'FF' : 'GV'} ${U.fmt(totals.byChannel[ch][group])}`).join(' · ');
+    const summary = EXPLORER_CLASSES.map((group) => `<div class="home-exp-stat"><span>${group}</span><b>${U.fmt(totals.byClass[group])}</b><small>${channelSplit(group)}</small></div>`).join('');
     const emptyMessage = !matched.length ? '<div class="home-exp-empty">Is date / filters ke liye koi issuance nahi mila.</div>' : '';
     return `<section class="card home-exp-card"><div class="card-head"><div><h3>📊 Issuance mix · class-wise</h3><span class="dim small">FF + GV · ${esc(rangeLabel)} · ${U.fmt(totals.total)} tags</span></div><div class="card-right"><button type="button" class="btn small" data-home-exp-reset title="Current month ke default filters lagao">↺ Reset</button></div></div>
       <div class="card-body home-exp-body">

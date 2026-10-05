@@ -1,6 +1,6 @@
 {
   "name": "first-forward-dashboard",
-  "version": "3.55.0",
+  "version": "3.56.0",
   "private": true,
   "description": "First Forward + GV Partner FASTag dashboards — login-protected issuance, stock, trend, performance and GV-vs-FF comparison from two Google Sheets, with animated login, forgot-password flow, per-user/per-sheet access matrix and downloadable Excel/CSV.",
   "type": "module",

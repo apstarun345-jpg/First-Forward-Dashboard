@@ -3119,6 +3119,18 @@ html[data-theme="dark"] .dp-mail-sections { background: #171f36; border-color: #
 .dp2-kpi b { font-size: 25px; letter-spacing: -.5px; line-height: 1.15; color: var(--kc, var(--ink)); }
 .dp2-kpi small { font-size: 11px; color: var(--muted); line-height: 1.35; }
 .dp2-kpi.k1 { --kc: #6366f1; } .dp2-kpi.k2 { --kc: #0ea5e9; } .dp2-kpi.k3 { --kc: #8b5cf6; } .dp2-kpi.k4 { --kc: #f59e0b; } .dp2-kpi.k5 { --kc: #16a34a; } .dp2-kpi.k6 { --kc: #0d9488; } .dp2-kpi.k7 { --kc: #ef4444; }
+/* 📦 Class-wise stock summary (filtered view) — kis class ka kitna, FF/GV split ke saath */
+.dp2-classmix { margin-top: 10px; border: 1px solid var(--line); border-radius: 16px; padding: 11px 14px; background: linear-gradient(110deg, color-mix(in srgb, #0d9488 7%, var(--card)), color-mix(in srgb, #6366f1 5%, var(--card))); box-shadow: var(--shadow); }
+.dp2-classmix-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.dp2-classmix-head > b { font-size: 12.5px; }
+.dp2-classchips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 9px; }
+.dp2-class-chip { display: grid; grid-template-columns: auto auto; align-items: baseline; gap: 1px 8px; min-width: 104px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+.dp2-class-chip small { color: var(--muted); font-size: 10.5px; font-weight: 850; letter-spacing: .05em; }
+.dp2-class-chip b { justify-self: end; font-size: 15px; font-variant-numeric: tabular-nums; color: #0f766e; }
+.dp2-class-chip em { grid-column: 1 / -1; font-style: normal; font-size: 10px; color: var(--muted); }
+.dp2-class-chip.other b { color: #b45309; }
+html[data-theme="dark"] .dp2-classmix { background: linear-gradient(110deg, color-mix(in srgb, #0d9488 12%, var(--card)), color-mix(in srgb, #6366f1 10%, var(--card))); }
+html[data-theme="dark"] .dp2-class-chip b { color: #5eead4; }
 
 .dp2-card { padding-bottom: 6px; }
 .dp2-wrap { max-height: 72vh; overflow: auto; border-radius: 12px; }

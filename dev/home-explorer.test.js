@@ -108,3 +108,15 @@ test('date presets handle month boundaries and inclusive 30-day range', () => {
   assert.deepEqual(explorer.rangePreset('30d', anchor), { from: '2026-01-31', to: '2026-03-01' });
   assert.deepEqual(explorer.rangePreset('all', anchor), { from: '', to: '' });
 });
+
+test('class totals sirf accessible channel ka split dikhate hain (permission leak nahi)', () => {
+  chartCalls.length = 0;
+  explorer.state.from = monthFilters.from; explorer.state.to = monthFilters.to;
+  explorer.state.channels.clear(); explorer.state.types.clear(); explorer.state.classes.clear();
+  const onlyFf = explorer.html(rows, ['ff']);
+  assert.match(onlyFf, /<small>FF 4<\/small>/);          // VC4: FF 4 (GV 0 chhupa)
+  assert.doesNotMatch(onlyFf, /FF 4 · GV/);
+  const onlyGv = explorer.html(rows, ['gv']);
+  assert.match(onlyGv, /<small>GV 2<\/small>/);          // VC20: GV 2
+  assert.doesNotMatch(onlyGv, /<small>[^<]*FF [\d,]/);
+});

@@ -1036,6 +1036,15 @@ await run('professional page dispatch planner (boxes + pick-list)', async () => 
   if (one && (Math.abs(one.rate - one.cur.total / el) > 1e-9 || one.required !== Math.max(0, Math.ceil(one.rate * days)) || one.net !== Math.max(0, Math.ceil(one.rate * days - one.stock.total)))) throw new Error('run-rate / required / with-stock formula galat');
   const table = DP.tableHtml(DP.sortRows(rows, { key: 'net', dir: 'desc' }), 'agents');
   for (const label of ['data-dp-sort="net"', 'data-dp-open="', 'WITH stock', 'W/O stock', 'Cover']) if (!table.includes(label)) throw new Error(`planner table me "${label}" nahi mila`);
+  // 📦 v3.56 — class-wise stock summary ("kis class ka kitna") view + TL roll-up me render hona chahiye
+  const mix = DP.classStockSummary(rows);
+  if (!mix.available) throw new Error('class-wise stock summary data available nahi (mock me class columns hone chahiye)');
+  if (!mix.items.length || !mix.items.every((c) => c.total === c.ff + c.gv)) throw new Error('class-wise FF/GV split galat hai');
+  if (!html.includes('dp2-classmix') || !html.includes('Stock · class-wise')) throw new Error('dispatch planner me class-wise stock panel nahi mila');
+  if (!/dp2-class-chip/.test(html)) throw new Error('class-wise stock panel me class chips nahi hain');
+  const tlMix = DP.classStockSummary(DP.collectTls(DP.collectAgents()).map((x) => DP.withCalc(x, 'total')));
+  if (!tlMix.items.length) throw new Error('TL view me class-wise stock summary khali hai');
+  if (/NaN|undefined/.test(DP.classMixHtml(rows))) throw new Error('class-wise stock panel me NaN/undefined');
   const tls = DP.collectTls(DP.collectAgents());
   if (!tls.length) throw new Error('TL-wise rows nahi bane');
   // 🔠 v3.18 — multiple selection: multi-select controls, row picks + bulk bar, saved filters

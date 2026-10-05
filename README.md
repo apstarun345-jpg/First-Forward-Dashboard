@@ -1,4 +1,17 @@
-# First Forward Dashboard — First Forward + GV Partner (v3.55.0)
+# First Forward Dashboard — First Forward + GV Partner (v3.56.0)
+
+## ✨ v3.56.0 — 📦 Dispatch Planner me class-wise stock summary (PR #100 final)
+
+- **Kis class ka kitna stock:** Dispatch Planner ke Agent-wise aur TL-wise views me KPI cards ke neeche naya
+  **Stock · class-wise** panel — har class ka total aur **FF/GV split**, poore filtered view ka jod.
+- **Unmapped saaf dikhta hai:** row ka sheet total class columns se zyada ho to **Other / unmapped** bucket;
+  class columns na hon to panel saaf batata hai ki source sheet me class-wise stock nahi hai.
+- **TL view:** class totals member-agents ka sum (TL sheet total alag ho to Other bucket me farak).
+- **Home explorer:** class totals ab sirf accessible channel ka split dikhate hain (permission leak nahi).
+- **Yeh v3.55.0 (PR #100) ka continuation hai** — Home issuance explorer, top-bar universal search aur
+  row-level class-wise dispatch stock wahi rehte hain. Open revert PR #101 ko merge nahi karna hai.
+
+Release note: [WHATS-NEW-v3.56.0.md](WHATS-NEW-v3.56.0.md).
 
 ## ✨ v3.55.0 — 📊 Home issuance explorer + 🔎 universal search + 📦 class-wise dispatch stock
 
