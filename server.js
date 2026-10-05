@@ -796,8 +796,8 @@ async function fetchUpstreamCached(url, options) {
   }
 }
 
-// The watcher only asks Google for grouped counts for the newest day. It does not download
-// the full EIR/REPORT tabs. Render can sleep, so the same check also runs when the feed is opened.
+// The watcher uses grouped EIR counts for FF and the same short-cache GV Master feed as Home;
+// it never downloads raw tabs. GV daily-history backfill is separately grouped and cached for 5 minutes.
 function parseGvizServer(text) {
   const start = text.indexOf('{'), end = text.lastIndexOf('}');
   if (start < 0 || end < 0) throw new Error('gviz response parse failed');
@@ -957,13 +957,18 @@ async function gvizDayDetail(cfg) {
  * GV side me aaj ka class split + replacement/chassis + weekday run-rate (expected) bhi aata hai.
  */
 const todayFeedCache = { at: 0, body: null, promise: null };
-const gvTodayFeedCache = { at: 0, body: null, promise: null };
+const gvTodayFeedCache = { at: 0, body: null, promise: null, forcePromise: null };
 
 async function gvTodayFeed(force) {
   const ttl = 30e3; // live today: short cache, but never scan the full 30-day history
   if (!force && gvTodayFeedCache.body && Date.now() - gvTodayFeedCache.at < ttl) return { ...gvTodayFeedCache.body, cached: true };
-  if (gvTodayFeedCache.promise) return gvTodayFeedCache.promise;
-  gvTodayFeedCache.promise = (async () => {
+  if (force && gvTodayFeedCache.forcePromise) return gvTodayFeedCache.forcePromise;
+  if (gvTodayFeedCache.promise) {
+    if (!force) return gvTodayFeedCache.promise;
+    await gvTodayFeedCache.promise.catch(() => {}); // edit webhook must not inherit an older cached/in-flight read
+    if (gvTodayFeedCache.forcePromise) return gvTodayFeedCache.forcePromise;
+  }
+  const job = (async () => {
     const settings = db.settings || {};
     const day = dateKeyNow();
     const next = new Date(`${day}T00:00:00Z`);
@@ -1023,8 +1028,15 @@ async function gvTodayFeed(force) {
       }
     }
     throw lastErr || new Error('GV today feed failed');
-  })().finally(() => { gvTodayFeedCache.promise = null; });
-  return gvTodayFeedCache.promise;
+  })();
+  let tracked;
+  tracked = job.finally(() => {
+    if (gvTodayFeedCache.promise === tracked) gvTodayFeedCache.promise = null;
+    if (gvTodayFeedCache.forcePromise === tracked) gvTodayFeedCache.forcePromise = null;
+  });
+  gvTodayFeedCache.promise = tracked;
+  if (force) gvTodayFeedCache.forcePromise = tracked;
+  return tracked;
 }
 
 async function gvMasterRawTodayFallback(settings, resolved, day, force) {
@@ -1185,6 +1197,13 @@ const gvServerHeaderCache = new Map();
 function normalizeServerHeading(v) {
   return String(v || '').toUpperCase().replace(/[^A-Z0-9]+/g, '');
 }
+function serverHeaderMatches(label, want) {
+  const a = normalizeServerHeading(label), b = normalizeServerHeading(want);
+  if (!a || !b) return false;
+  // `cols[].id` is often just A/B/C… when a header cell is blank. Those one-letter IDs
+  // must not match a synonym merely because the letter occurs inside words like DATE or CCH.
+  return a === b || (a.length >= 3 && b.length >= 3 && (a.includes(b) || b.includes(a)));
+}
 function serverColLetter(index) {
   let n = Number(index) + 1, out = '';
   while (n > 0) { const r = (n - 1) % 26; out = String.fromCharCode(65 + r) + out; n = Math.floor((n - 1) / 26); }
@@ -1222,8 +1241,7 @@ async function resolveGvServerColumns(settings, force) {
     const pick = (field) => {
       for (const syn of GV_SERVER_HEADER_SYNS[field] || []) {
         const want = normalizeServerHeading(syn);
-        let idx = normalized.indexOf(want);
-        if (idx < 0) idx = normalized.findIndex((x) => x && (x.includes(want) || want.includes(x)));
+        const idx = normalized.findIndex((x) => serverHeaderMatches(x, want));
         if (idx >= 0) return serverColLetter(idx);
       }
       return '';
@@ -1235,10 +1253,7 @@ async function resolveGvServerColumns(settings, force) {
     const headerMatches = (field, letter) => {
       const label = headerAt(letter);
       if (!label) return false;
-      return (GV_SERVER_HEADER_SYNS[field] || []).some((syn) => {
-        const want = normalizeServerHeading(syn);
-        return want && (label === want || label.includes(want) || want.includes(label));
-      });
+      return (GV_SERVER_HEADER_SYNS[field] || []).some((syn) => serverHeaderMatches(label, syn));
     };
     const resolveCol = (field, ...configured) => {
       const letter = configured.find((x) => x) || '';
@@ -1261,12 +1276,75 @@ async function resolveGvServerColumns(settings, force) {
     return { ...fallback, via: 'config', warning: err.message };
   }
 }
-async function reportSnapshot(source) {
-  const s = db.settings;
-  const isGv = source === 'gv';
-  // Both watcher channels come from the bank-backed EIR.  The master ID is the only
-  // issuance-channel discriminator here: GV is exactly 5845036 (or the configured equivalent),
-  // while FF is every other EIR row, including rows whose master cell is blank.
+const GV_REPORT_HISTORY_TTL_MS = 5 * 60e3;
+const gvReportHistoryCache = { key: '', at: 0, history: null, promise: null };
+async function gvReportHistory() {
+  const settings = db.settings || {};
+  const master = settings.gv && settings.gv.master || {};
+  const tab = master.tab || 'GV Master';
+  const today = dateKeyNow();
+  const key = `${settings.gvSheetId || ''}|${tab}|${today}`;
+  if (gvReportHistoryCache.key === key && gvReportHistoryCache.history && Date.now() - gvReportHistoryCache.at < GV_REPORT_HISTORY_TTL_MS) {
+    return { ...gvReportHistoryCache.history };
+  }
+  if (gvReportHistoryCache.promise) {
+    if (gvReportHistoryCache.key === key) return gvReportHistoryCache.promise;
+    await gvReportHistoryCache.promise.catch(() => {});
+    return gvReportHistory();
+  }
+  gvReportHistoryCache.key = key;
+  gvReportHistoryCache.history = null;
+  gvReportHistoryCache.promise = (async () => {
+    const resolved = await resolveGvServerColumns(settings, false);
+    const from = new Date(`${today}T00:00:00Z`);
+    from.setUTCDate(from.getUTCDate() - 89);
+    const from90 = `${from.getUTCFullYear()}-${pad2(from.getUTCMonth() + 1)}-${pad2(from.getUTCDate())}`;
+    const out = await gvizDailyClassCounts({
+      sheetId: settings.gvSheetId, tab,
+      dateCol: resolved.date, classCol: resolved.cls, countCol: resolved.tagId,
+      from30: from90, cacheMaxAgeMs: GV_REPORT_HISTORY_TTL_MS
+    });
+    const history = {};
+    for (const row of out.rows || []) history[row.date] = (history[row.date] || 0) + (Number(row.n) || 0);
+    gvReportHistoryCache.history = history;
+    gvReportHistoryCache.at = Date.now();
+    return { ...history };
+  })().catch((err) => {
+    // History is optional for immediate alerts. Back off on failure instead of retrying Google every 15s.
+    gvReportHistoryCache.history = {};
+    gvReportHistoryCache.at = Date.now();
+    throw err;
+  }).finally(() => { gvReportHistoryCache.promise = null; });
+  return gvReportHistoryCache.promise;
+}
+async function reportSnapshot(source, force = false) {
+  const s = db.settings || {};
+  if (source === 'gv') {
+    // GV's live Home/API feed reads GV Master directly. Watch the exact same source so the
+    // server-side closed-app alert cannot silently wait for a separate EIR mirror to change.
+    const feed = await gvTodayFeed(!!force);
+    if (!feed || !feed.gv || feed.gvError) throw new Error((feed && feed.gvError) || 'GV Master live snapshot unavailable');
+    const total = Number(feed.gv.total) || 0;
+    const master = s.gv && s.gv.master || {};
+    const historyKey = `${s.gvSheetId || ''}|${master.tab || 'GV Master'}|${dateKeyNow()}`;
+    // The edit webhook bypasses all live-feed caches; don't hold its prompt push behind the
+    // optional 90-day digest backfill. The next regular poll fills/refreshes that history.
+    let history = force && gvReportHistoryCache.key === historyKey && gvReportHistoryCache.history
+      ? { ...gvReportHistoryCache.history }
+      : {};
+    if (!force) {
+      try { history = await gvReportHistory(); }
+      catch (err) { console.warn('GV report history snapshot:', err.message); }
+    }
+    if (feed.date) history[feed.date] = total;
+    return {
+      date: feed.date || dateKeyNow(), total,
+      classes: { ...(feed.gv.classes || {}) }, history,
+      snapshotSource: 'gv-master'
+    };
+  }
+
+  // First Forward remains on the T+1 EIR ledger. GV rows are deliberately excluded here.
   const e = s.eir || {};
   const sheetId = s.sheetId;
   const sheet = s.eirSheet || e.sheet || 'EIR';
@@ -1275,10 +1353,7 @@ async function reportSnapshot(source) {
   const tagCol = e.tagId || 'A';
   const masterCol = e.masterId || 'AU';
   const configuredGvId = String(e.gvMasterId || '5845036').trim().replace(/\.0+$/, '');
-  const channelWhere = isGv
-    ? `${masterCol} = ${configuredGvId}`
-    : `(${masterCol} is null or ${masterCol} <> ${configuredGvId})`;
-  const baseWhere = `${dateCol} is not null and ${channelWhere}`;
+  const baseWhere = `${dateCol} is not null and (${masterCol} is null or ${masterCol} <> ${configuredGvId})`;
   const select = `${dateCol}, ${classCol}, ${masterCol}, count(${tagCol})`;
   const group = `${dateCol}, ${classCol}, ${masterCol}`;
   const tq = `select ${select} where ${baseWhere} group by ${group} order by ${dateCol} desc limit 5000`;
@@ -1286,46 +1361,14 @@ async function reportSnapshot(source) {
   const out = await fetchUpstream(upstreamUrl(params));
   if (out.status < 200 || out.status >= 300) throw new Error(`Google responded ${out.status}`);
   const table = parseGvizServer(out.body);
-  // A few old/private adapters still return the pre-EIR GV Master schema (date, class, count)
-  // despite receiving the new EIR request. Keep that compatibility branch schema-gated; a normal
-  // production EIR response includes the configured master column and never reaches GV Master.
-  const responseCols = (table.cols || []).map((c) => String(c.id || c.label || '').trim().toUpperCase());
-  const hasEirMasterColumn = responseCols.includes(String(masterCol).toUpperCase());
-  if (isGv && !hasEirMasterColumn) {
-    const legacy = s.gv && s.gv.master || {};
-    const legacySheet = legacy.tab || 'GV Master';
-    const legacyDate = legacy.date || 'P', legacyClass = legacy.cch || legacy.vClass || 'G', legacyTag = legacy.tagId || 'I';
-    const legacyTq = `select ${legacyDate}, ${legacyClass}, count(${legacyTag}) where ${legacyDate} is not null group by ${legacyDate}, ${legacyClass} order by ${legacyDate} desc limit 5000`;
-    const legacyParams = new URLSearchParams({ id: String(s.gvSheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet: legacySheet, tq: legacyTq });
-    const legacyOut = await fetchUpstream(upstreamUrl(legacyParams));
-    if (legacyOut.status < 200 || legacyOut.status >= 300) throw new Error(`GV legacy snapshot responded ${legacyOut.status}`);
-    const legacyTable = parseGvizServer(legacyOut.body);
-    const legacyGrouped = {};
-    for (const row of legacyTable.rows || []) {
-      const date = serverDate(serverCell(row, 0));
-      if (!date) continue;
-      const cls = classBucket(serverCell(row, 1));
-      if (!legacyGrouped[date]) legacyGrouped[date] = { classes: {} };
-      legacyGrouped[date].classes[cls] = (legacyGrouped[date].classes[cls] || 0) + serverNumber(serverCell(row, 2));
-    }
-    const legacyHistory = Object.fromEntries(Object.entries(legacyGrouped).map(([date, value]) => [date, Object.values(value.classes).reduce((a, b) => a + b, 0)]));
-    const legacyDateKey = Object.keys(legacyGrouped).sort().pop() || '';
-    const legacyClasses = legacyDateKey ? legacyGrouped[legacyDateKey].classes : {};
-    return { date: legacyDateKey, total: Object.values(legacyClasses).reduce((a, b) => a + b, 0), classes: legacyClasses, history: legacyHistory };
-  }
   const rows = [];
   for (const row of table.rows || []) {
     const date = serverDate(serverCell(row, 0));
     if (!date) continue;
     const master = serverCell(row, 2).trim().replace(/\.0+$/, '');
-    // Keep the client/server channel contract identical even if an upstream query ignores a
-    // malformed filter: never let a GV master row enter FF, or another master enter GV.
-    const gvRow = master === configuredGvId;
-    if (isGv !== gvRow) continue;
+    if (master === configuredGvId) continue;
     rows.push({ date, cls: classBucket(serverCell(row, 1)), n: serverNumber(serverCell(row, 3)) });
   }
-  // The query already returns recent dates, not just the latest one. Keep a compact date → total
-  // history for MTD digests while the watcher continues to expose the latest snapshot for deltas.
   const grouped = {};
   rows.forEach((r) => {
     if (!grouped[r.date]) grouped[r.date] = { classes: {} };
@@ -1333,8 +1376,7 @@ async function reportSnapshot(source) {
   });
   let history = {};
   Object.entries(grouped).forEach(([d, value]) => { history[d] = Object.values(value.classes).reduce((a, b) => a + b, 0); });
-  // A second, date-only aggregate avoids the old date × class × master row ceiling. It uses the
-  // exact same EIR channel predicate, so notification MTD totals cannot drift from latest-day data.
+  // Backfill recent FF days for MTD digests, but the latest alert snapshot is the same grouped EIR query.
   try {
     const historyTq = `select ${dateCol}, count(${tagCol}) where ${baseWhere} group by ${dateCol} order by ${dateCol} desc limit 400`;
     const hparams = new URLSearchParams({ id: String(sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet, tq: historyTq });
@@ -1348,20 +1390,26 @@ async function reportSnapshot(source) {
       }
       if (Object.keys(parsed).length && rows.length) history = parsed;
     }
-  } catch (err) { /* optional date aggregate — grouped fallback is still valid */ }
+  } catch { /* optional date aggregate — grouped fallback is still valid */ }
   const date = Object.keys(grouped).sort().pop() || '';
   const classes = date ? grouped[date].classes : {};
-  return { date, total: Object.values(classes).reduce((a, b) => a + b, 0), classes, history };
+  return { date, total: Object.values(classes).reduce((a, b) => a + b, 0), classes, history, snapshotSource: 'eir' };
 }
 function snapshotDelta(prev, next) {
   if (!prev || !prev.date || !next || !next.date) return null;
+  const sameDate = next.date === prev.date;
   const keys = new Set([...Object.keys(prev.classes || {}), ...Object.keys(next.classes || {})]);
   const classes = {};
-  for (const key of keys) { const d = (next.classes[key] || 0) - (prev.classes[key] || 0); if (d) classes[key] = d; }
-  const total = (next.total || 0) - (prev.total || 0);
-  // Class-wise corrections (total same, andar ka badlaav) bhi "changed" hain — warna backdated
-  // edits par koi notification nahi aata tha.
-  return { total, classes, changed: next.date !== prev.date || total !== 0 || Object.keys(classes).length > 0 };
+  for (const key of keys) {
+    const before = sameDate ? (Number(prev.classes && prev.classes[key]) || 0) : 0;
+    const after = Number(next.classes && next.classes[key]) || 0;
+    const delta = after - before;
+    if (delta) classes[key] = delta;
+  }
+  // On a date rollover, compare to zero for the new day (not yesterday's count). A zero-data
+  // rollover is only a new baseline, not a GV update; real same-day class corrections still alert.
+  const total = (Number(next.total) || 0) - (sameDate ? (Number(prev.total) || 0) : 0);
+  return { total, classes, changed: sameDate ? (total !== 0 || Object.keys(classes).length > 0) : total > 0 };
 }
 function deltaText(delta) {
   const pieces = Object.entries(delta.classes || {}).map(([k, v]) => `${k} ${v > 0 ? '+' : ''}${v}`);
@@ -1843,8 +1891,20 @@ function pushStatusFor(user) {
     notifyAccess: user.role === 'admin' || user.notifyAccess !== false,
     lastOk: lastOk ? { at: lastOk.at, status: lastOk.status, host: lastOk.host } : null,
     lastError: lastError ? { at: lastError.at, status: lastError.status, error: lastError.error, host: lastError.host, dead: !!lastError.dead, config: !!lastError.config } : null,
-    // Admin ko poora picture: sab devices + global config health (normal user ko sirf apna).
-    ...(user.role === 'admin' ? { allSubs: pushSubs().length, totalDevices: pushSubs().length } : {})
+    // Admin ko poora picture: devices + config + GV watcher status (normal user ko sirf apna).
+    ...(user.role === 'admin' ? {
+      allSubs: pushSubs().length,
+      totalDevices: pushSubs().length,
+      reportWatcher: {
+        gv: {
+          ...reportWatcherState.gv,
+          intervalMs: REPORT_CHECK_INTERVALS.gv,
+          snapshot: db.notify.watch && db.notify.watch.gv
+            ? { date: db.notify.watch.gv.date || '', total: Number(db.notify.watch.gv.total) || 0 }
+            : null
+        }
+      }
+    } : {})
   };
 }
 /**
@@ -3077,8 +3137,13 @@ async function maybeAgentAnomaly(force = false) {
     return out;
   } catch (err) { console.warn('agent anomaly:', err.message); return null; }
 }
-let reportCheckAt = 0;
+let reportCheckAt = { ff: 0, gv: 0 };
 let reportCheckPromise = null;
+const REPORT_CHECK_INTERVALS = Object.freeze({ ff: 150e3, gv: 15e3 });
+const reportWatcherState = {
+  ff: { attemptedAt: '', checkedAt: '', error: '' },
+  gv: { attemptedAt: '', checkedAt: '', error: '' }
+};
 
 // ---- 🗓 custom alert scheduler (admin ke reminders/status) ------------------------------------
 function renderSchedText(text) {
@@ -3299,45 +3364,69 @@ async function maybeWorkspaceFollowups(force = false) {
     return item;
   } catch (err) { console.warn('workspace followups:', err.message); if (force) throw err; return null; }
 }
-async function checkReports(force = false) {
-  if (reportCheckPromise) return reportCheckPromise;
-  // 2.5 min throttle — "data update ki notification late aati hai" ka fix (pehle 5 min tha).
-  // Client notification polls (har 5s) isi ko trigger karti hain — cadence effectively 2.5 min.
-  if (!force && Date.now() - reportCheckAt < 150e3) return;
-  reportCheckAt = Date.now();
-  reportCheckPromise = (async () => {
-    for (const source of ['ff', 'gv']) {
+async function checkReports(force = false, selectedSources = null) {
+  const allowed = new Set(['ff', 'gv']);
+  const requested = Array.isArray(selectedSources)
+    ? [...new Set(selectedSources.map((source) => String(source).toLowerCase()))].filter((source) => allowed.has(source))
+    : ['ff', 'gv'];
+  if (reportCheckPromise) {
+    const pending = reportCheckPromise;
+    await pending.catch(() => {});
+    // A webhook is a freshness signal. Do not let an older periodic query swallow its forced check.
+    if (force) return checkReports(true, requested);
+    return { checked: [], changed: [], skipped: 'in-flight' };
+  }
+  const now = Date.now();
+  const due = requested.filter((source) => force || now - (reportCheckAt[source] || 0) >= REPORT_CHECK_INTERVALS[source]);
+  if (!due.length) return { checked: [], changed: [] };
+  for (const source of due) {
+    reportCheckAt[source] = now;
+    reportWatcherState[source] = { ...reportWatcherState[source], attemptedAt: new Date(now).toISOString() };
+  }
+  const job = (async () => {
+    const changed = [];
+    for (const source of due) {
       try {
-        const next = await reportSnapshot(source);
+        const next = await reportSnapshot(source, force && source === 'gv');
         const previous = db.notify.watch[source];
-        const currentSnapshot = next && next.date ? { date: next.date, total: Number(next.total) || 0, classes: { ...(next.classes || {}) } } : { date: '', total: 0, classes: {} };
+        const currentSnapshot = next && next.date
+          ? { date: next.date, total: Number(next.total) || 0, classes: { ...(next.classes || {}) }, snapshotSource: next.snapshotSource || (source === 'gv' ? 'gv-master' : 'eir') }
+          : { date: '', total: 0, classes: {}, snapshotSource: next && next.snapshotSource || '' };
+        // Deployment ke pehle GV watcher EIR ki mirrored rows padhta tha. Source switch par us
+        // snapshot ko GV Master se compare mat karo — pehli live read ko safe baseline maano.
+        const providerChanged = source === 'gv' && previous && previous.date && previous.snapshotSource !== 'gv-master';
         db.notify.watch[source] = currentSnapshot;
-        // Per-date issuance history (daily digest ke liye): persist every recent date returned by
-        // the grouped query, not only the latest date. Explicit zero snapshots are meaningful.
+        // Per-date issuance history feeds MTD digests. Keep recent totals and explicit zero days.
         const history = next && next.history && typeof next.history === 'object' ? next.history : (next && next.date ? { [next.date]: next.total } : {});
         if (Object.keys(history).length) {
           if (!db.notify.watch.daily || typeof db.notify.watch.daily !== 'object') db.notify.watch.daily = {};
           for (const [date, total] of Object.entries(history)) {
             if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
             const prevEntry = db.notify.watch.daily[date] || {};
-            // A truthy guard here used to erase zero/empty source days and made GV-only days
-            // disappear from MTD and active-day counts.
             if (prevEntry[source] !== total) db.notify.watch.daily[date] = { ...prevEntry, [source]: Number(total) || 0 };
           }
           const keys = Object.keys(db.notify.watch.daily).sort();
           for (let i = 0; i < keys.length - 400; i++) delete db.notify.watch.daily[keys[i]];
         }
-        const delta = snapshotDelta(previous, next);
+        reportWatcherState[source] = { ...reportWatcherState[source], checkedAt: new Date().toISOString(), error: '' };
+        const delta = providerChanged ? null : snapshotDelta(previous, next);
         if (delta && delta.changed) {
           const label = source === 'gv' ? 'GV Partner' : 'First Forward';
           recordNotification({ type: 'report', title: `${label} report update`, body: `${next.date}: ${deltaText(delta)} — Google Sheet me naya data aaya.`, target: 'admin', routeKey: 'reportUpdate', meta: { source, snapshot: currentSnapshot, previous, delta, link: '#/tagIssued' } });
+          changed.push(source);
         }
-      } catch (err) { console.warn(`report watcher ${source}:`, err.message); }
+      } catch (err) {
+        reportWatcherState[source] = { ...reportWatcherState[source], error: String(err && err.message || err).slice(0, 300) };
+        console.warn(`report watcher ${source}:`, err.message);
+      }
     }
     await persist('notify');
-  })().finally(() => { reportCheckPromise = null; });
+    return { checked: due, changed };
+  })();
+  reportCheckPromise = job.finally(() => { reportCheckPromise = null; });
   return reportCheckPromise;
 }
+
 const etagCache = new Map();   // body-key → etag (chhota LRU, sirf header banane ke liye)
 function bodyEtag(body) {
   const key = `${body.length}:${body.slice(0, 64)}:${body.slice(-64)}`;
@@ -4396,39 +4485,24 @@ async function handleApi(req, res, url) {
     persist('notify').catch(() => {});
     return sendJson(res, 200, { ok: results.every((r) => r.ok), delivered: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length, results });
   }
-  // 📡 Google Sheets → OS/browser push webhook. Called by Apps Script on sheet edits.
+  // 📡 Google Sheets edit signal → immediately re-read the configured GV Master live snapshot.
+  // The poller remains the fallback for formula/API/import updates that do not fire onEdit triggers.
   if (p === '/api/push/sheet-update' && method === 'POST') {
     const body = await readBody(req);
     const expected = String(process.env.APPS_SCRIPT_SECRET || '').trim();
     const supplied = String(body.secret || req.headers['x-app-script-secret'] || '').trim();
     if (!expected || supplied !== expected) throw new HttpError(401, 'Sheet push webhook unauthorized.');
-    const title = shortText(body.title || '📊 Google Sheet Updated', 120);
-    const sheet = shortText(body.sheet || 'Google Sheet', 120);
-    const range = shortText(body.range || '', 120);
-    const editor = shortText(body.editor || '', 80);
-    const changed = shortText(body.changed || 'Data update detected', 240);
-    const data = {
-      id: `sheet-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`,
-      title,
-      body: [sheet, range && `Range: ${range}`, changed, editor && `By: ${editor}`].filter(Boolean).join(' · '),
-      tag: `sheet-update-${sheet.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40)}`,
-      link: '/#/home',
-      type: 'alert',
-      persist: true,
-      sound: true,
-      speak: false,
-      user: '',
-      badge: 1,
-      lang: 'hi-IN'
-    };
-    const subs = pushSubs().slice();
-    const results = await Promise.all(subs.map(async (s) => {
-      const result = await deliverPush(s, data);
-      handlePushResult(s, result, { type: 'sheet-update', sheet });
-      return { username: s.username, ok: !!result.ok, status: result.status || 0 };
-    }));
-    persist('notify').catch(() => {});
-    return sendJson(res, 200, { ok: true, delivered: results.filter((x) => x.ok).length, failed: results.filter((x) => !x.ok).length, total: results.length });
+    const sourceId = String(body.spreadsheetId || '').trim();
+    if (sourceId && !/^[A-Za-z0-9_-]+$/.test(sourceId)) throw new HttpError(400, 'Spreadsheet ID invalid hai.');
+    const configuredId = String(db.settings.gvSheetId || '').trim();
+    if (!configuredId) throw new HttpError(503, 'GV Master spreadsheet configure nahi hai.');
+    if (sourceId && sourceId !== configuredId) throw new HttpError(403, 'Ye webhook configured GV spreadsheet se nahi aaya.');
+    const expectedTab = String((db.settings.gv && db.settings.gv.master && db.settings.gv.master.tab) || 'GV Master').trim();
+    const sheet = String(body.sheet || '').trim();
+    if (!sheet) throw new HttpError(400, 'GV sheet name missing hai.');
+    if (sheet !== expectedTab) return sendJson(res, 200, { ok: true, ignored: true, reason: 'sheet not watched' });
+    const result = await checkReports(true, ['gv']);
+    return sendJson(res, 200, { ok: true, checked: result.checked || [], changed: result.changed || [], watcher: reportWatcherState.gv });
   }
   if (p === '/api/push/subscribe' && method === 'POST') {
     if (!user) throw new HttpError(401, 'Login required');
@@ -7196,7 +7270,9 @@ async function start() {
     console.log(`First Forward Dashboard → http://0.0.0.0:${server.address().port}`);
     console.log(`Sheet ${db.settings.sheetId} · cache ${cacheMs() / 1000}s · storage ${sheetsStore ? `Google Sheets / encrypted APP_STORAGE (${STORAGE_BACKEND})` : DATA_DIR} · users ${db.users.length} · push ${vapidKeys ? `${pushSubs().length} device(s), VAPID from ${vapidSource}, TTL ${PUSH_TTL}s` : 'DISABLED (no VAPID key)'}${GVIZ_BASE !== 'https://docs.google.com' ? ` · upstream ${GVIZ_BASE}` : ''}`);
     setTimeout(() => checkReports(true).catch(() => {}), 5000);
-    setInterval(() => checkReports(false).catch(() => {}), 3 * 60e3).unref();
+    // GV Master is a live source: check every 15s (its shared feed cache caps Google reads at 30s).
+    // FF remains at 150s, so the faster GV alert cadence does not multiply EIR queries.
+    setInterval(() => checkReports(false).catch(() => {}), 15e3).unref();
     setTimeout(() => maybeMonthlyReport(), 8000);
     setInterval(() => maybeMonthlyReport(), 60 * 60e3).unref();
     // 🌅 Scheduled checks: daily digest (subah 8 IST ke baad roz ek baar) + mid-month target +

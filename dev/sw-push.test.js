@@ -125,6 +125,25 @@ function loadSW({ vapidKey = 'BVGV0cGxpY2l0LWtleS1mb3ItdGVzdGluZy0xMjM0NTY3ODkw'
   return { fire, shown, opened, requests, clients, registration, sandbox, hasListener: (t) => (listeners.get(t) || []).length > 0, setSubscription: (k) => { subscription = subObj(k); }, getSubscription: () => subscription, caches: sandbox.caches };
 }
 
+test('raw /api/gviz is network-only in the service worker; no stale offline route remains', async () => {
+  const sw = loadSW();
+  let interceptedGviz;
+  await sw.fire('fetch', {
+    request: { url: `${ORIGIN}/api/gviz?id=live&sheet=GV%20Master`, method: 'GET' },
+    respondWith: (response) => { interceptedGviz = response; }
+  });
+  assert.equal(interceptedGviz, undefined, 'browser should send /api/gviz directly to the live server');
+  assert.ok(!sw.requests.some((request) => request.includes('/api/gviz')), 'the worker must not serve or cache raw gviz');
+
+  let interceptedToday;
+  await sw.fire('fetch', {
+    request: { url: `${ORIGIN}/api/today`, method: 'GET' },
+    respondWith: (response) => { interceptedToday = response; }
+  });
+  assert.ok(interceptedToday, 'the explicit stable feed cache remains available offline');
+  await interceptedToday;
+});
+
 test('push event shows an OS-panel notification with vibration, sound-off support and a deep link', async () => {
   const sw = loadSW();
   await sw.fire('push', { data: { json: () => ({ title: '📊 FF report update', body: '27 Sep: +42 tags', tag: 'report', link: '#/targets?month=2026-09', sound: true, persist: true }) } });

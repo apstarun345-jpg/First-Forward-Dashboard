@@ -65,6 +65,28 @@ backup file ya Render disk se restore). Poora step-by-step guide: **[RECOVERY.md
   karta. Server start par sheet read na ho to server start hi nahi hota (defaults par nahi girta).
 * Notifications thode delay (≈4s) se batch me save hote hain, taaki Apps Script quota bache.
 
+## 📱 GV live update → phone panel (optional instant edit trigger)
+
+The dashboard server checks the configured **GV Master** live tab every 15 seconds (the shared feed cache
+limits normal Google reads to 30 seconds). For direct manual edits, the updated `google-apps-script/Code.gs`
+can also install an edit trigger that wakes the server immediately; the server re-reads the live snapshot and
+sends a detailed alert only when the GV count/class data actually changed. Formula recalculation, imports and
+API/script writes do not fire Google’s `onEdit` trigger, so the server poll remains the fallback.
+
+1. Paste the updated repository `google-apps-script/Code.gs` into the existing Apps Script project. Keep its
+   `SECRET` exactly the same as the existing Render `APPS_SCRIPT_SECRET`.
+2. In the temporary `configureInstantGvPushOnce()` helper, replace `YOUR-DASHBOARD-DOMAIN` with the HTTPS
+   dashboard host and `YOUR-GV-SPREADSHEET-ID` with the spreadsheet ID configured in Dashboard Settings
+   (the workbook containing the `GV Master` tab). Run this helper once in Apps Script and allow access; the
+   script account needs Editor access to the GV workbook.
+3. **Deploy → Manage deployments → Edit → New version → Deploy** so the storage web app keeps using the
+   updated Code.gs. Do not change the deployment URL or secret.
+4. In Dashboard → Settings → My account → Notifications, admin **Push diagnostics** shows both the last GV
+   snapshot check and the last phone push result. The `/api/push/status` endpoint reports the same status.
+
+The Apps Script trigger handles direct cell edits. For formula-driven/API-fed rows, push may follow the 15-second
+poll (typically within 30–45 seconds); the dashboard process must remain awake for background checks.
+
 ## Local test
 
 ```bash

@@ -41,71 +41,93 @@ const HISTORY_MAX_ROWS = 2000;
 /** Run this ONCE from the Apps Script editor (▶ Run) to grant the "send email" permission. */
 function authorizeMail() { Logger.log('Mail quota left today: ' + MailApp.getRemainingDailyQuota()); }
 /**
- * 📡 INSTANT GOOGLE SHEET → BROWSER/PHONE PUSH
+ * 📡 INSTANT GV MASTER EDIT → SERVER SNAPSHOT → PHONE PUSH
  *
- * One-time setup:
- *   setDashboardPushUrl('https://YOUR-DASHBOARD-DOMAIN/api/push/sheet-update')
- *   setupInstantSheetPush()
- *
- * The installable onEdit trigger calls the dashboard webhook immediately after a cell edit.
- * The dashboard then fans out a Web Push notification to every subscribed device.
+ * Configure the dashboard URL + GV spreadsheet ID, then run setupInstantSheetPush() once.
+ * This project can be bound to APP_STORAGE and still watch the separate GV spreadsheet: the
+ * account executing this script must have Editor access to that GV spreadsheet.
+ * The server verifies the edit by re-reading its live GV Master feed before it sends an alert.
+ * Its 15-second server poll remains the fallback for imports, formulas and API/script writes that
+ * do not fire Google Sheets onEdit triggers.
  */
-function setDashboardPushUrl(url) {
-  url = String(url || '').trim().replace(/\\/+$/, '');
-  if (!/^https:\\/\\//i.test(url) || !/\\/api\\/push\\/sheet-update$/i.test(url)) {
+function setDashboardPushUrl(url, spreadsheetId, sheetName) {
+  url = String(url || '').trim().replace(/\/+$/, '');
+  if (!/^https:\/\//i.test(url) || !/\/api\/push\/sheet-update$/i.test(url)) {
     throw new Error('Dashboard URL should end with /api/push/sheet-update and use HTTPS.');
   }
-  PropertiesService.getScriptProperties().setProperty('DASHBOARD_PUSH_URL', url);
-  Logger.log('Dashboard push URL saved.');
+  var props = PropertiesService.getScriptProperties();
+  props.setProperty('DASHBOARD_PUSH_URL', url);
+  if (spreadsheetId) props.setProperty('DASHBOARD_PUSH_SPREADSHEET_ID', String(spreadsheetId).trim());
+  else props.deleteProperty('DASHBOARD_PUSH_SPREADSHEET_ID');
+  props.setProperty('DASHBOARD_PUSH_SHEET_NAME', String(sheetName || 'GV Master').trim());
+  Logger.log('Dashboard push URL and GV source saved.');
   return url;
 }
 
+/** Edit the three placeholders, run this once, then keep/remove this helper as preferred. */
+function configureInstantGvPushOnce() {
+  setDashboardPushUrl('https://YOUR-DASHBOARD-DOMAIN/api/push/sheet-update', 'YOUR-GV-SPREADSHEET-ID', 'GV Master');
+  return setupInstantSheetPush();
+}
+
 function setupInstantSheetPush() {
-  const url = PropertiesService.getScriptProperties().getProperty('DASHBOARD_PUSH_URL');
-  if (!url) throw new Error('First run setDashboardPushUrl("https://YOUR-DASHBOARD/api/push/sheet-update")');
-  const ss = SpreadsheetApp.getActive();
-  ScriptApp.getProjectTriggers().forEach(function(t) {
-    if (t.getHandlerFunction() === 'instantSheetEditPush') ScriptApp.deleteTrigger(t);
+  var props = PropertiesService.getScriptProperties();
+  var url = props.getProperty('DASHBOARD_PUSH_URL');
+  if (!url) throw new Error('First configure setDashboardPushUrl(url, gvSpreadsheetId, "GV Master").');
+  var spreadsheetId = props.getProperty('DASHBOARD_PUSH_SPREADSHEET_ID');
+  var sheetName = props.getProperty('DASHBOARD_PUSH_SHEET_NAME') || 'GV Master';
+  var ss = spreadsheetId ? SpreadsheetApp.openById(spreadsheetId) : SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) throw new Error('GV spreadsheet nahi mila — setDashboardPushUrl me uska spreadsheet ID do.');
+  if (!ss.getSheetByName(sheetName)) throw new Error('GV tab "' + sheetName + '" is spreadsheet me nahi mila.');
+  // Replace any prior trigger for this handler, including one installed on the storage workbook.
+  ScriptApp.getProjectTriggers().forEach(function(trigger) {
+    if (trigger.getHandlerFunction() === 'instantSheetEditPush') ScriptApp.deleteTrigger(trigger);
   });
   ScriptApp.newTrigger('instantSheetEditPush').forSpreadsheet(ss).onEdit().create();
-  Logger.log('Instant sheet push trigger installed for: ' + ss.getName());
+  Logger.log('Instant GV edit push installed: ' + ss.getName() + ' → ' + sheetName);
   return 'OK';
 }
 
 function instantSheetEditPush(e) {
   try {
     if (!e || !e.range) return;
-    const range = e.range;
-    const sheet = range.getSheet();
-    const a1 = range.getA1Notation();
-    const numRows = range.getNumRows();
-    const numCols = range.getNumColumns();
-    const changed = numRows === 1 && numCols === 1
-      ? 'Cell updated'
-      : `${numRows} rows × ${numCols} columns updated`;
-    const editor = (e.user && e.user.getEmail) ? e.user.getEmail() : '';
-    const payload = {
+    var props = PropertiesService.getScriptProperties();
+    var url = props.getProperty('DASHBOARD_PUSH_URL');
+    if (!url) return;
+    var range = e.range;
+    var sheet = range.getSheet();
+    var sheetName = props.getProperty('DASHBOARD_PUSH_SHEET_NAME') || 'GV Master';
+    if (sheet.getName() !== sheetName) return;
+    var source = e.source || sheet.getParent();
+    var spreadsheetId = source && source.getId ? source.getId() : '';
+    var configuredId = props.getProperty('DASHBOARD_PUSH_SPREADSHEET_ID') || '';
+    if (configuredId && spreadsheetId !== configuredId) return;
+    var numRows = range.getNumRows();
+    var numCols = range.getNumColumns();
+    var payload = {
       secret: SECRET,
-      title: '📊 Google Sheet Updated',
-      sheet: sheet.getName(),
-      range: a1,
-      changed: changed,
-      editor: editor,
+      title: 'GV Partner live update',
+      sheet: sheetName,
+      spreadsheetId: spreadsheetId,
+      range: range.getA1Notation(),
+      changed: numRows === 1 && numCols === 1 ? 'Cell updated' : numRows + ' rows × ' + numCols + ' columns updated',
+      editor: (e.user && e.user.getEmail) ? e.user.getEmail() : '',
       at: new Date().toISOString()
     };
-    const url = PropertiesService.getScriptProperties().getProperty('DASHBOARD_PUSH_URL');
-    if (!url) return;
-    UrlFetchApp.fetch(url, {
+    var response = UrlFetchApp.fetch(url, {
       method: 'post',
       contentType: 'application/json',
       payload: JSON.stringify(payload),
       muteHttpExceptions: true
     });
+    var code = response.getResponseCode();
+    if (code < 200 || code >= 300) {
+      console.error('GV live push webhook HTTP ' + code + ': ' + String(response.getContentText() || '').slice(0, 300));
+    }
   } catch (err) {
     console.error('instantSheetEditPush:', err && err.message || err);
   }
 }
-
 
 function doGet() {
   return json_({ ok: true, service: 'apnapayment-storage', note: 'POST only. Storage is working if you can see this.' });

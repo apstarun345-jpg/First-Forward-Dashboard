@@ -634,3 +634,92 @@ test('master switch OFF wale user ko server push fan-out nahi karta', async () =
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+test('GV Master edit webhook detects the live snapshot and fans out a real phone push', async () => {
+  const push = await startMockPushService();
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'apna-gv-push-'));
+  const nowIst = new Date(Date.now() + 5.5 * 3600e3);
+  const dateCell = `Date(${nowIst.getUTCFullYear()},${nowIst.getUTCMonth()},${nowIst.getUTCDate()})`;
+  const gvRows = [{ date: dateCell, cls: '4', tag: 'gv-tag-1', status: 'Active', type: 'Regular' }];
+  const columnLabels = Array.from({ length: 21 }, () => '');
+  columnLabels[6] = 'CCH'; columnLabels[8] = 'TAG_ID'; columnLabels[13] = 'STATUS';
+  columnLabels[15] = 'ISSUE_DATE'; columnLabels[20] = 'TAG_TYPE';
+  const gviz = http.createServer((req, res) => {
+    const tq = new URL(req.url, 'http://localhost').searchParams.get('tq') || '';
+    let table;
+    if (tq === 'select * limit 1') {
+      table = { cols: columnLabels.map((label, i) => ({ id: `C${i}`, label })), rows: [] };
+    } else if (/^select P, G, I, N, U/i.test(tq)) {
+      table = { cols: [{ id: 'P' }, { id: 'G' }, { id: 'I' }, { id: 'N' }, { id: 'U' }], rows: gvRows.map((row) => ({ c: [{ v: row.date }, { v: row.cls }, { v: row.tag }, { v: row.status }, { v: row.type }] })) };
+    } else if (/select P, G, count\(I\)/i.test(tq)) {
+      const totals = new Map();
+      gvRows.forEach((row) => totals.set(row.cls, (totals.get(row.cls) || 0) + 1));
+      table = { cols: [{ id: 'P' }, { id: 'G' }, { id: 'count-I', type: 'number' }], rows: [...totals].map(([cls, n]) => ({ c: [{ v: dateCell }, { v: cls }, { v: n }] })) };
+    } else {
+      table = { cols: [{ id: 'date' }, { id: 'class' }, { id: 'master' }, { id: 'count', type: 'number' }], rows: [] };
+    }
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end(`google.visualization.Query.setResponse(${JSON.stringify({ status: 'ok', table })});`);
+  });
+  gviz.listen(0, '127.0.0.1');
+  await once(gviz, 'listening');
+  let server;
+  try {
+    server = await startServer({
+      STORAGE_BACKEND: 'files', DATA_DIR: dir, GVIZ_BASE: `http://127.0.0.1:${gviz.address().port}`,
+      APPS_SCRIPT_SECRET: SECRET, ADMIN_USER: 'owner', ADMIN_PASSWORD: 'owner-password'
+    });
+    let cookie = '';
+    const call = async (route, method = 'GET', body) => {
+      const res = await fetch(server.base + route, {
+        method, headers: { cookie, 'Content-Type': 'application/json' },
+        ...(body ? { body: JSON.stringify(body) } : {})
+      });
+      return { res, json: await res.json().catch(() => ({})) };
+    };
+    cookie = (await call('/api/auth/login', 'POST', { username: 'owner', password: 'owner-password' })).res.headers.get('set-cookie').split(';')[0];
+    const vapid = (await call('/api/push/vapid')).json.publicKey;
+    push.state.ua = makeUA();
+    push.state.expectedKey = vapid;
+    const sub = { endpoint: push.url('gv-device'), keys: { p256dh: push.state.ua.publicKey.toString('base64url'), auth: push.state.ua.authSecret.toString('base64url') } };
+    assert.equal((await call('/api/push/subscribe', 'POST', { subscription: sub })).res.status, 200);
+
+    const route = '/api/push/sheet-update';
+    const invalid = await call(route, 'POST', { secret: 'wrong-secret', spreadsheetId: '1LkYX746lGZQKhl5ueoKe3kYOo4SNtu47p5-jkVNUiBA', sheet: 'GV Master' });
+    assert.equal(invalid.res.status, 401, 'unauthorized Apps Script webhook must be rejected');
+    const wrongBook = await call(route, 'POST', { secret: SECRET, spreadsheetId: 'another-book', sheet: 'GV Master' });
+    assert.equal(wrongBook.res.status, 403, 'only the configured GV source spreadsheet may trigger checks');
+    const otherTab = await call(route, 'POST', { secret: SECRET, spreadsheetId: '1LkYX746lGZQKhl5ueoKe3kYOo4SNtu47p5-jkVNUiBA', sheet: 'Tag Assignment' });
+    assert.equal(otherTab.json.ignored, true, 'unrelated tabs are ignored');
+
+    const sheetEdit = { secret: SECRET, spreadsheetId: '1LkYX746lGZQKhl5ueoKe3kYOo4SNtu47p5-jkVNUiBA', sheet: 'GV Master', range: 'P2' };
+    const baseline = await call(route, 'POST', sheetEdit);
+    assert.equal(baseline.res.status, 200);
+    assert.deepEqual(baseline.json.checked, ['gv']);
+    assert.deepEqual(baseline.json.changed, [], 'first snapshot establishes a baseline without a false alert');
+
+    gvRows.push({ date: dateCell, cls: '20', tag: 'gv-tag-2', status: 'Active', type: 'Regular' });
+    const update = await call(route, 'POST', sheetEdit);
+    assert.equal(update.res.status, 200);
+    assert.deepEqual(update.json.changed, ['gv'], 'the edit-triggered fresh GV Master read must detect the +1');
+    for (let i = 0; i < 40 && !push.state.deliveries.length; i++) await sleep(50);
+    assert.equal(push.state.deliveries.length, 1, 'reportUpdate fan-out must send a phone Web Push');
+    const delivered = push.state.deliveries[0];
+    assert.equal(delivered.status, 201, `push service rejected the GV alert: ${delivered.error}`);
+    assert.match(delivered.payload.title, /GV Partner report update/);
+    assert.match(delivered.payload.body, /\+1 tags/);
+    assert.equal(delivered.payload.type, 'report');
+
+    const feed = await call('/api/notifications');
+    assert.ok(feed.json.items.some((item) => item.type === 'report' && item.meta.source === 'gv'), 'the same detected change remains in the in-app notification feed');
+    const status = (await call('/api/push/status')).json;
+    assert.equal(status.reportWatcher.gv.snapshot.total, 2, 'admin diagnostics expose the latest GV Master snapshot');
+    assert.ok(status.reportWatcher.gv.checkedAt, 'admin diagnostics confirm the server-side GV check ran');
+    assert.equal(status.lastOk.status, 201, 'admin diagnostics confirm the phone push transport succeeded');
+  } finally {
+    if (server) await server.stop();
+    await push.close();
+    await new Promise((resolve) => gviz.close(resolve));
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});

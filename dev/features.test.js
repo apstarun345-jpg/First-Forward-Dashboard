@@ -367,6 +367,10 @@ test('📢 announcement broadcast, 📜 audit log, 📬 weekly digest + 📊 rep
   const istDayBack = (i) => new Date(istNow.getTime() - i * 86400e3);
   const rowsFF = [{ c: [{ v: dcell(istDayBack(0)) }, { v: '1' }, { v: '999' }, { v: 40 }] }, { c: [{ v: dcell(istDayBack(1)) }, { v: '1' }, { v: '999' }, { v: 35 }] }, { c: [{ v: dcell(istDayBack(2)) }, { v: '1' }, { v: '999' }, { v: 0 }] }, { c: [{ v: dcell(istDayBack(3)) }, { v: '1' }, { v: '999' }, { v: 0 }] }];
   const rowsGV = [{ c: [{ v: dcell(istDayBack(0)) }, { v: '1' }, { v: 12 }] }, { c: [{ v: dcell(istDayBack(1)) }, { v: '1' }, { v: 9 }] }, { c: [{ v: dcell(istDayBack(2)) }, { v: '1' }, { v: 5 }] }, { c: [{ v: dcell(istDayBack(3)) }, { v: '1' }, { v: 0 }] }];
+  // The GV live card/watcher reads individual GV Master rows, unlike the grouped 90-day history.
+  const rowsGVLive = Array.from({ length: 12 }, (_, i) => ({ c: [
+    { v: dcell(istDayBack(0)) }, { v: 'VC4' }, { v: `GV-${i + 1}` }, { v: 'Active' }, { v: 'RFID' }
+  ] }));
   // Expected MTD: server ke sourceAwareDigestSummary ko hi mirror karo — IST current month me
   // jo rows aati hain utni hi (month boundary par bhi sahi).
   const ymIst = `${istNow.getUTCFullYear()}-${pad(istNow.getUTCMonth() + 1)}`;
@@ -381,9 +385,17 @@ test('📢 announcement broadcast, 📜 audit log, 📬 weekly digest + 📊 rep
   const upstream = http.createServer((req, res) => {
     const tq = new URL(req.url, 'http://x').searchParams.get('tq') || '';
     let rows = [];
-    if (/group by AA/.test(tq)) rows = rowsFF;            // FF EIR snapshot (date, class, master, count)
-    else if (/group by P, G/.test(tq)) rows = rowsGV;     // GV master snapshot (date, class, count)
-    res.end(`google.visualization.Query.setResponse(${JSON.stringify({ status: 'ok', table: { cols: [{ id: 'A', type: 'date' }, { id: 'B', type: 'string' }, { id: 'C', type: 'number' }, { id: 'D', type: 'number' }], rows } })});`);
+    if (/group by AA/.test(tq)) rows = rowsFF;                         // FF EIR snapshot (date, class, master, count)
+    else if (/select P, G, I, N, U/i.test(tq)) rows = rowsGVLive;      // live GV Master rows (date, class, tag, status, type)
+    else if (/group by P, G/.test(tq)) rows = rowsGV;                 // GV 90-day history (date, class, count)
+    const headerCols = Array.from({ length: 23 }, (_, i) => ({ id: String.fromCharCode(65 + i), label: '' }));
+    headerCols[6].label = 'CCH'; headerCols[8].label = 'TAG_ID_NUMBER';
+    headerCols[13].label = 'STATUS'; headerCols[15].label = 'ISSUE_DATE'; headerCols[20].label = 'TAG_TYPE';
+    const cols = /^select \* limit 1$/i.test(tq) ? headerCols
+      : /select P, G, I, N, U/i.test(tq)
+        ? [{ id: 'P', type: 'date' }, { id: 'G', type: 'string' }, { id: 'I', type: 'string' }, { id: 'N', type: 'string' }, { id: 'U', type: 'string' }]
+        : [{ id: 'A', type: 'date' }, { id: 'B', type: 'string' }, { id: 'C', type: 'number' }, { id: 'D', type: 'number' }];
+    res.end(`google.visualization.Query.setResponse(${JSON.stringify({ status: 'ok', table: { cols, rows } })});`);
   });
   upstream.listen(0, '127.0.0.1');
   await once(upstream, 'listening');
