@@ -321,7 +321,9 @@ async function readJson(file, fallback) {
 let notifyTagBaseline = -1;   // last durably save hui tag-request count
 let tagReqScanBusy = false;   // boot recovery scan ek hi baar chale
 function tagReqBaselineSync() { notifyTagBaseline = tagReqCount(); }
-let notifyVerifyAt = 0;       // last storage verify (throttle — har save par read mehnga hai)
+let notifyVerifyAt = 0;       // last poora storage read (mehnga call — throttle zaroori)
+let notifyProbeAt = 0;        // last sasti history-probe (doosre writer ki talash)
+const NOTIFY_PROBE_MS = 30e3; // har notify save par Apps Script call na ho
 let notifyLastWriteAt = 0;    // hamari aakhri notify save kab confirm hui (doosre writer ki pehchaan)
 const NOTIFY_VERIFY_MS = 3 * 60e3;
 // Naya tag request aane par save se pehle storage SEEDHA verify hota hai (neeche `tagReqForceVerify`)
@@ -359,9 +361,11 @@ async function notifyGuardRun() {
   const forced = tagReqForceVerify;
   const due = Date.now() - notifyVerifyAt > NOTIFY_VERIFY_MS;
   let needRead = shrunk || forced || due || !notifyLastWriteAt;
-  if (!needRead && typeof sheetsStore.history === 'function') {
-    // Sasta check (sirf metadata, ciphertext nahi): hamare aakhri save ke BAAD kisi doosre process ne
-    // notify record likha hai? Uska data hamare snapshot me nahi hai — save se pehle merge karna hoga.
+  // Sasta check (sirf metadata, ciphertext nahi): hamare aakhri save ke BAAD kisi doosre process ne
+  // notify record likha hai? Uska data hamare snapshot me nahi hai — save se pehle merge karna hoga.
+  // Throttled: har save par Apps Script call na ho (notify save bahut baar chalta hai).
+  if (!needRead && typeof sheetsStore.history === 'function' && Date.now() - notifyProbeAt > NOTIFY_PROBE_MS) {
+    notifyProbeAt = Date.now();
     try {
       const hist = await sheetsStore.history();
       const newest = (hist.entries || []).reduce((m, e) => (e.kind === 'notify' ? Math.max(m, Date.parse(e.savedAt) || 0) : m), 0);

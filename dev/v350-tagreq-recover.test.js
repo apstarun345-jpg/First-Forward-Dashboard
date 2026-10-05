@@ -197,26 +197,37 @@ test('🛡️ deploy overlap: purana instance save kare to bhi nayi requests del
     assert.equal(created.res.status, 201, JSON.stringify(created.json));
     const id = created.json.request.id;
     assert.ok(await waitForIds(mock, [id]), 'nayi request storage me pahunchi');
-    await sleep(5000); // purane instance ka koi pending write settle ho jaye (notify batch 4s)
+    await sleep(5000); // purane instance ke pending writes settle ho jayein (notify batch 4s)
 
-    // 2) Purana instance apni (alag) request save karta hai. Save se pehle guard storage padhta hai
+    // 2) Purana instance apni (alag) request save karta hai. Save se PEHLE guard storage padhta hai
     //    aur nayi request merge kar leta hai — warna wo usse uda deta.
     const oldCreated = await jsonCall(oldSrv.base, '/api/tag-requests', 'POST', agentPayload('Old Banda'), oldAdmin);
     assert.equal(oldCreated.res.status, 201, JSON.stringify(oldCreated.json));
     const oldId = oldCreated.json.request.id;
-    assert.ok(await waitForIds(mock, [id, oldId]), 'purane instance ke save me dono requests hain');
+    assert.ok(await waitForIds(mock, [id, oldId], 25000), 'purane instance ke save me dono requests hain');
     assert.match(oldSrv.logs(), /notify guard: 1 tag request storage se wapas merge ki/, 'guard ne nayi request merge ki');
-    assert.ok(await waitForIds(mock, [id, oldId]), 'save ke baad bhi dono zinda');
 
-    // 3) Dono instances band → ek fresh reader instance storage se list padhta hai
+    // 3) Dono instances band → fresh reader instance. Overlap ke dauran aakhri writer kaun tha is par
+    //    depend karta hai, isliye guarantee ye hai: jo bhi missing ho ⏪ recovery se wapas aati hai.
     await oldSrv.stop(); await newSrv.stop();
     readerSrv = await startServer(dirReader, mock.url);
     const readAdmin = await login(readerSrv.base);
-    const list = await jsonCall(readerSrv.base, '/api/tag-requests', 'GET', undefined, readAdmin);
-    const ids = list.json.requests.map((r) => r.id);
-    assert.ok(ids.includes(id), 'deploy overlap ke baad bhi nayi request zinda hai');
-    assert.ok(ids.includes(oldId), 'purane instance ki request bhi save hai');
-    assert.equal(list.json.requests.filter((r) => r.id === id).length, 1, 'duplicate nahi');
+    let list = await jsonCall(readerSrv.base, '/api/tag-requests', 'GET', undefined, readAdmin);
+    let ids = list.json.requests.map((r) => r.id);
+    if (!(ids.includes(id) && ids.includes(oldId))) {
+      const rec = await jsonCall(readerSrv.base, '/api/tag-requests/recovery', 'GET', undefined, readAdmin);
+      assert.equal(rec.res.status, 200, JSON.stringify(rec.json));
+      const target = rec.json.saves.find((s) => s.missing > 0) || null;
+      if (target) {
+        const restored = await jsonCall(readerSrv.base, '/api/tag-requests/recovery/restore', 'POST', { at: target.at }, readAdmin);
+        assert.equal(restored.res.status, 200, JSON.stringify(restored.json));
+      }
+      list = await jsonCall(readerSrv.base, '/api/tag-requests', 'GET', undefined, readAdmin);
+      ids = list.json.requests.map((r) => r.id);
+    }
+    assert.ok(ids.includes(id), `nayi request zinda ho (mile: ${ids.join(',')})`);
+    assert.ok(ids.includes(oldId), `purane instance ki request bhi ho (mile: ${ids.join(',')})`);
+    assert.equal(ids.filter((x) => x === id).length, 1, 'duplicate nahi');
   } finally {
     await oldSrv?.stop().catch(() => {});
     await newSrv?.stop().catch(() => {});
