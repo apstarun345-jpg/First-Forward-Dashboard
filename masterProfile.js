@@ -1534,6 +1534,8 @@ window.FF = window.FF || {};
       const value = Number(item && item[key]);
       return total + (Number.isFinite(value) ? value : 0);
     }, 0);
+    // The visible "Without subtracting stock" number is the gross suggested dispatch.
+    // For the footer, gross is the requested total dispatch; net/After-stock remains visible separately.
     const agentsSug = {
       vc4: sugSum(rows, 'sugVc4'),
       comm: sugSum(rows, 'sugComm'),
@@ -1560,7 +1562,7 @@ window.FF = window.FF || {};
     combinedSug.totalGross = combinedSug.vc4Gross + combinedSug.commGross;
 
     const agentsFoot = rows.length ? footRow(
-      `<span class="mp-linkish">🧑‍💼 Agents total (${fmt(rows.length)}) · 🎯 ${fmt(agentsSug.total)} tags</span>`,
+      `<span class="mp-linkish">🧑‍💼 Agents total (${fmt(rows.length)}) · 🎯 ${fmt(agentsSug.totalGross)} tags</span>`,
       sv(rows, {
         sVc4: ag.vc4, sComm: ag.comm, sTotal: ag.total,
         sugVc4: agentsSug.vc4, sugComm: agentsSug.comm,
@@ -1568,17 +1570,17 @@ window.FF = window.FF || {};
       }), '', `${tlSpec}&part=team`) : '';
 
     const ownFoot = selfA || own.total ? footRow(
-      `👤 ${esc(selfA ? selfA.name : pr.name)} ke paas (TL own) · 🎯 ${fmt(ownSug.total)} tags`,
+      `👤 ${esc(selfA ? selfA.name : pr.name)} ke paas (TL own) · 🎯 ${fmt(ownSug.totalGross)} tags`,
       sv(selfA ? [selfA] : [], {
         sVc4: own.vc4, sComm: own.comm, sTotal: own.total,
         sugVc4: ownSug.vc4, sugComm: ownSug.comm,
         sugVc4Gross: ownSug.vc4Gross, sugCommGross: ownSug.commGross
       }), 'mp-selfrow', `${tlSpec}&part=own`) : '';
 
-    // IMPORTANT: TL TOTAL here means OWN + AGENTS suggested dispatch.
-    // It is deliberately not d.sugVc4/d.sugComm because those are TL-stock-net values.
+    // TL TOTAL = TL own gross suggested dispatch + all agents gross suggested dispatch.
+    // This is intentionally independent of TL-level net d.sugVc4/d.sugComm.
     const totFoot = footRow(
-      `= TL TOTAL (own + agents) · 🎯 ${fmt(combinedSug.total)} tags`,
+      `= TL TOTAL (own + agents) · 🎯 ${fmt(combinedSug.totalGross)} tags`,
       {
         sVc4: s.vc4, sComm: s.comm, sTotal: s.total,
         lVc4: t.lastVc4, lComm: t.lastComm, last: t.lastTotal,
