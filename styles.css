@@ -1538,117 +1538,49 @@ html[data-theme="dark"] .ff-switch { background: #33415c; }
   background: #faf5ff;
 }
 
-/* ---------- PWA & Mobile Viewing Optimization (Small text & Clean Alignment) ---------- */
+/* ---------- PWA & Mobile Viewing — natural-size, app-like layout ---------- */
 @media all and (display-mode: standalone), (max-width: 768px) {
-  body {
-    font-size: 12.5px;
-    -webkit-text-size-adjust: 100%;
-  }
-  /* FIX (v3.18): ye block pehle `.top` ko target karta tha — app me header ka class `.topbar`
-     hai, isliye safe-area padding kabhi apply hi nahi hoti thi. */
+  html, body { width: 100%; max-width: 100%; overflow-x: hidden; }
+  body { font-size: 14px; -webkit-text-size-adjust: 100%; }
   .topbar {
-    padding-top: max(8px, env(safe-area-inset-top));
-    padding-left: max(10px, env(safe-area-inset-left));
-    padding-right: max(10px, env(safe-area-inset-right));
-    height: auto;
-    min-height: 52px;
+    padding-top: max(10px, env(safe-area-inset-top));
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
+    min-height: 54px;
   }
-  .main {
-    padding: 10px 10px max(18px, env(safe-area-inset-bottom));
-  }
-  .page-head {
-    margin-bottom: 12px;
-  }
-  .page-head h1 {
-    font-size: 20px;
-    letter-spacing: -.3px;
-  }
-  .page-head .sub {
-    font-size: 11px;
-  }
-  .tbl {
-    font-size: 11.5px;
-    line-height: 1.35;
-  }
-  .tbl th, .tbl td {
-    padding: 6px 8px;
-    vertical-align: middle;
-  }
-  .tbl th {
-    font-size: 10.5px;
-    letter-spacing: .03em;
-    font-weight: 800;
-    text-transform: uppercase;
-  }
-  .tbl td.num, .tbl th.num {
-    text-align: right;
-    font-variant-numeric: tabular-nums;
-  }
-  .tbl.sticky-first th:first-child,
-  .tbl.sticky-first td:first-child {
-    position: sticky;
-    left: 0;
-    background: #ffffff;
-    z-index: 2;
-    box-shadow: 2px 0 6px rgba(0, 0, 0, .04);
-  }
-  .tbl.sticky-first thead th:first-child {
-    background: #f8fafc;
-    z-index: 3;
-  }
-  .kpi-grid {
-    grid-template-columns: repeat(2, 1fr) !important;
-    gap: 8px !important;
-  }
-  .kpi {
-    padding: 10px 12px !important;
-    border-radius: 12px !important;
-  }
-  .kpi-value {
-    font-size: 19px !important;
-    letter-spacing: -.3px;
-  }
-  .kpi-title {
-    font-size: 11px !important;
-  }
-  .kpi-foot {
-    font-size: 10px !important;
-  }
-  .card {
-    padding: 12px 14px;
-    border-radius: 12px;
-    margin-bottom: 12px;
-  }
-  .card-head h3 {
-    font-size: 14px;
-  }
-  .user-menu {
-    width: min(310px, calc(100vw - 20px)) !important;
-    right: 5px;
-    border-radius: 16px;
-  }
-  .user-card-clean {
-    padding: 14px 12px;
-  }
-  .btn {
-    padding: 7px 11px;
-    font-size: 12px;
-    border-radius: 8px;
-  }
-  .btn.small {
-    padding: 5px 9px;
-    font-size: 11px;
-  }
-  .chip {
-    padding: 4px 8px;
-    font-size: 11px;
-  }
-  .notification-pop {
-    width: min(330px, calc(100vw - 20px));
-    right: 5px;
-  }
+  .main { padding: 14px 12px max(24px, env(safe-area-inset-bottom)); }
+  .page-head { margin-bottom: 14px; }
+  .page-head h1 { font-size: 21px; letter-spacing: -.25px; }
+  .page-head .sub { font-size: 12px; }
+  .tbl { font-size: 12.5px; line-height: 1.4; }
+  .tbl th, .tbl td { padding: 7px 9px; vertical-align: middle; }
+  .tbl th { font-size: 11px; letter-spacing: .03em; font-weight: 800; }
+  .kpi-grid { grid-template-columns: repeat(2, minmax(0,1fr)) !important; gap: 10px !important; }
+  .kpi { min-height: 112px; padding: 13px 14px !important; border-radius: 14px !important; }
+  .kpi-value { font-size: 23px !important; letter-spacing: -.25px; }
+  .kpi-title { font-size: 11.5px !important; }
+  .kpi-foot { font-size: 10.5px !important; }
+  .card { padding: 14px 14px; border-radius: 14px; margin-bottom: 14px; }
+  .card-head { padding: 0; }
+  .card-body { padding: 12px 2px 2px; }
+  .btn { min-height: 38px; padding: 8px 12px; font-size: 13px; border-radius: 9px; }
+  .btn.small { min-height: 34px; padding: 6px 10px; font-size: 12px; }
+  .input, select, .ctrl-row input { min-height: 40px; font-size: 14px; }
+  .top-actions { gap: 6px; }
+  .icon-btn { width: 40px; height: 40px; }
+  .notification-btn { min-width: 44px; width: 44px; height: 40px; }
+  .pwa-icon-field { align-items: flex-start; }
 }
-
+@media (max-width: 560px) {
+  .kpi-grid, .kpi-grid.six { grid-template-columns: repeat(2, minmax(0,1fr)) !important; }
+  .kpi { min-height: 106px; }
+  .img-field { gap: 12px; }
+  .pwa-icon-field { flex-direction: column; }
+}
+@media (max-width: 420px) {
+  .kpi-grid, .kpi-grid.six { grid-template-columns: 1fr !important; }
+  .main { padding-left: 10px; padding-right: 10px; }
+}
 
 
 /* Fast, non-blocking ApnaPayment launch. Never hold the dashboard behind a timed splash. */
