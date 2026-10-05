@@ -80,7 +80,18 @@ export class AppsScriptStore {
             ? 'Apps Script returned an HTML page. Deploy it as Web app → Execute as: Me, Who has access: Anyone, and use the /exec URL.'
             : 'Apps Script returned an invalid response.');
         }
-        if (!json.ok) throw new Error(`${this.label || 'Apps Script storage'}: ${json.error || 'request failed'}`);
+        if (!json.ok) {
+          // 🛡️ v3.58 — Apps Script "busy" (script lock), quota, rate-limit ya timeout par client ko
+          // retry karna hi hai. Pehle sirf `error` string aati thi: `{ ok:false, error:'busy, retry' }`
+          // par retry flag nahi lagta tha (aur "busy" niche wale network regex me match nahi karta),
+          // isliye save turant fail ho jaati thi — "Could not save … Save not confirmed".
+          const message = String(json.error || 'request failed');
+          const transient = json.retry === true || json.code === 'busy'
+            || /busy|lock|timeout|rate limit|quota|temporar/i.test(message);
+          const err = new Error(`${this.label || 'Apps Script storage'}: ${message}`);
+          if (transient) { err.retry = true; err.code = json.code || 'busy'; }
+          throw err;
+        }
         this.lastError = null;
         return json;
       } catch (err) {

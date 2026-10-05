@@ -37,6 +37,39 @@ test('Apps Script store: redirect-follow, batching, encryption, wrong secret and
   } finally { await mock.close(); }
 });
 
+/* 🛡️ v3.58 — "Could not save … Save not confirmed" ka bada karan: Apps Script ka script lock busy
+ * hone par { ok:false, code:'busy', retry:true } aata tha, par client us error par retry NAHI karta
+ * tha (retry flag nahi lagta tha, aur "busy" network-regex me match nahi karta tha). Ab har busy
+ * response par retry hota hai — aur busy lagataar rahe to save LOUD fail hoti hai (chup-chaap nahi). */
+test('🛡️ v3.58 — lock-busy par client retry karke save SUCCEED karta hai (notify/users save confirm)', async () => {
+  const mock = await startMockAppsScript({ secret: SECRET });
+  try {
+    const store = new AppsScriptStore({ url: mock.url, secret: SECRET, batchDelay: 5, wait: async () => {} });
+    await store.save('users', [{ username: 'owner', name: 'Owner' }]);
+    mock.busyWrites(2); // pehle 2 writes busy → teesri koshish par save hona chahiye
+    await store.save('notify', [{ id: 'n1', title: 'busy ke baad bhi saved' }]);
+    const saved = await new AppsScriptStore({ url: mock.url, secret: SECRET }).read();
+    assert.equal(saved.notify[0].title, 'busy ke baad bhi saved', 'busy ke baad save confirm hui');
+    assert.equal(mock.calls.filter((c) => c.busy && c.action === 'write').length, 2, 'do busy responses write par aaye');
+  } finally { await mock.close(); }
+});
+
+test('🛡️ v3.58 — busy lagataar rahe to error aata hai aur purana data safe rehta hai (chup-chaap loss nahi)', async () => {
+  const mock = await startMockAppsScript({ secret: SECRET });
+  try {
+    const store = new AppsScriptStore({ url: mock.url, secret: SECRET, batchDelay: 5, wait: async () => {} });
+    await store.save('users', [{ username: 'owner', name: 'Owner' }]);
+    const before = structuredClone(mock.records.users);
+    mock.busyWrites(99); // har attempt busy
+    await assert.rejects(store.save('users', [{ username: 'changed' }]), /busy/i);
+    assert.equal(mock.calls.filter((c) => c.busy).length, 4, 'chaaron attempts busy mile (retry loop chala)');
+    assert.deepEqual(mock.records.users, before, 'sheet me purana record hi raha — aadha-adhoora save nahi hua');
+    mock.busyWrites(0); // lock free hua (busy transient hai) → ab read confirm karo
+    const saved = await new AppsScriptStore({ url: mock.url, secret: SECRET }).read();
+    assert.equal(saved.users[0].username, 'owner', 'purana user data safe hai');
+  } finally { await mock.close(); }
+});
+
 async function startServer(env) {
   const child = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: { ...process.env, PORT: '0', RENDER: '', APPS_SCRIPT_ALLOW_LOCAL: '1', ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
   let log = '';

@@ -9,8 +9,10 @@ export function startMockAppsScript({ secret, spreadsheet = 'Mock Sheet' } = {})
   const calls = [];
   const mails = [];
   const appends = []; // 📗 appendrows (tag request sheet sync) — { tab, header, rows, atRow }
+  const addressUpserts = []; // 📇 upsertaddresses — Address tab me bheji gayi rows (v3.58 mobile/address guard)
   let seq = 0;
   let failNext = 0;
+  let busyNext = 0; // 🛡️ v3.58 — asli Code.gs ka lock-busy: HTTP 200 + { ok:false, code:'busy', retry:true }
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
     if (req.method === 'GET' && url.pathname === '/echo') {
@@ -26,6 +28,17 @@ export function startMockAppsScript({ secret, spreadsheet = 'Mock Sheet' } = {})
       if (failNext > 0) { failNext--; res.writeHead(503); return res.end('busy'); }
       let body = {}; try { body = JSON.parse(raw); } catch { /* invalid */ }
       calls.push({ action: body.action, kinds: body.records ? Object.keys(body.records) : [] });
+      // 🛡️ v3.58 — script lock busy hone par asli Code.gs HTTP 200 par
+      // { ok:false, code:'busy', retry:true, version } bhejta hai (302 → /echo flow ke through).
+      // Client ko isi par retry karna chahiye — warna save "Save not confirmed" likh kar fail hoti hai.
+      if (busyNext > 0) {
+        busyNext--;
+        calls[calls.length - 1].busy = true;
+        const busyId = String(++seq);
+        results.set(busyId, { ok: false, error: 'busy, retry — script lock 60s tak free nahi hua', code: 'busy', retry: true, version: 'v3.58-storage' });
+        res.writeHead(302, { Location: `/echo?id=${busyId}` });
+        return res.end();
+      }
       let out;
       if (body.secret !== secret) out = { ok: false, error: 'unauthorized (secret mismatch)' };
       else if (body.action === 'ping') out = { ok: true, tab: 'APP_STORAGE', spreadsheet, url: 'https://docs.google.com/spreadsheets/d/mock/edit' };
@@ -57,6 +70,13 @@ export function startMockAppsScript({ secret, spreadsheet = 'Mock Sheet' } = {})
         const id = String(body.spreadsheetId || 'mock-own-sheet-id');
         out = { ok: true, spreadsheet, spreadsheetId: id, url: `https://docs.google.com/spreadsheets/d/${id}/edit`, tab, exists: false };
       }
+      else if (body.action === 'upsertaddresses') {
+        // 📇 Address tab — asli Code.gs jaisa dedupe nahi, sirf rows capture (test guard ke liye).
+        const rows = Array.isArray(body.rows) ? body.rows : [];
+        addressUpserts.push(...rows);
+        const id = String(body.spreadsheetId || 'mock-own-sheet-id');
+        out = { ok: true, tab: String(body.tab || 'Address'), added: rows.length, updated: 0, deduped: 0, spreadsheet, spreadsheetId: id, url: `https://docs.google.com/spreadsheets/d/${id}/edit`, version: 'v3.58-storage' };
+      }
       else if (body.action === 'appendrows') {
         const tab = String(body.tab || 'Tag Requests');
         const targetId = String(body.spreadsheetId || 'mock-own-sheet-id');
@@ -81,6 +101,6 @@ export function startMockAppsScript({ secret, spreadsheet = 'Mock Sheet' } = {})
   });
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => {
     const { port } = server.address();
-    resolve({ url: `http://127.0.0.1:${port}/macros/s/mock/exec`, records, history, calls, mails, appends, failWrites(n) { failNext = n; }, close: () => new Promise((r) => server.close(r)) });
+    resolve({ url: `http://127.0.0.1:${port}/macros/s/mock/exec`, records, history, calls, mails, appends, addressUpserts, failWrites(n) { failNext = n; }, busyWrites(n) { busyNext = n; }, close: () => new Promise((r) => server.close(r)) });
   }));
 }

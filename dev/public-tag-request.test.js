@@ -275,7 +275,7 @@ test('👤 employee-status — apni requests + counts, admin approve par status 
 
     const emp = { name: 'Ramesh Yadav', mobile: '9876543210', address: '24, Shanti Nagar, Sodala, Jaipur', pincode: '302019' };
     // Form jo shape bhejta hai wahi — har agent ka apna mobile/address/pincode + class-wise rows.
-    const rahul = { agentId: '1001', agentName: 'Rahul Sharma', tl: 'TL One', channel: 'ff', mobile: '9876500001', address: '12, Gandhi Nagar, Tonk Road, Jaipur', pincode: '302015', rows: [{ cls: 'VC4', approved: 25, stock: 3, last: 40, cur: 25 }] };
+    const rahul = { agentId: '1001', agentName: 'Rahul Sharma', tl: 'TL One', channel: 'ff', mobile: '9876500001', address: '12,  Near Bus   Stand,  Tonk Road, Jaipur', pincode: '302015', rows: [{ cls: 'VC4', approved: 25, stock: 3, last: 40, cur: 25 }] };
     const first = await jsonCall(server.base, '/api/public/tag-request', 'POST', { employee: emp, agents: [rahul] }, '', '10.7.7.7');
     assert.equal(first.res.status, 201, JSON.stringify(first.json));
     const token = first.json.employeeToken || (first.json.request && first.json.request.employeeToken);
@@ -300,7 +300,7 @@ test('👤 employee-status — apni requests + counts, admin approve par status 
     const body = JSON.stringify(one.json);
     assert.ok(!body.includes('Shanti Nagar'), 'employee ka address response me nahi jaata');
     assert.ok(!body.includes('302019'), 'employee ka pincode response me nahi jaata');
-    assert.ok(!body.includes('Gandhi Nagar'), 'agent ka address bhi nahi jaata');
+    assert.ok(!body.includes('Near Bus Stand'), 'agent ka address bhi nahi jaata');
 
     // 2) ek aur request → counts badhte hain (panel me "All" isi ko dikhata hai)
     const second = await jsonCall(server.base, '/api/public/tag-request', 'POST', { employee: emp, employeeToken: token, agents: [{ agentId: '2002', agentName: 'Priya Verma', tl: 'TL Two', channel: 'gv', mobile: '9876500002', address: '7, Malviya Nagar, Jaipur', pincode: '302017', rows: [{ cls: 'VC6', approved: 6 }] }] }, '', '10.7.7.8');
@@ -324,8 +324,16 @@ test('👤 employee-status — apni requests + counts, admin approve par status 
     const contact = await jsonCall(server.base, '/api/public/tag-request/contact?agentId=1001&agentName=Rahul%20Sharma&channel=ff');
     assert.equal(contact.res.status, 200, JSON.stringify(contact.json));
     assert.equal(contact.json.found, true, 'pichli request ka contact mila');
-    assert.equal(contact.json.contact.address, '12, Gandhi Nagar, Tonk Road, Jaipur', 'purana address suggest hota hai');
+    assert.equal(contact.json.contact.address, '12, Near Bus Stand, Tonk Road, Jaipur', "purana address suggest hota hai (extra spaces collapse aur 's' jaise characters safe)");
     assert.equal(contact.json.contact.pincode, '302015');
+    // 🛡️ v3.58 — pehle server.js me regex double-backslash thi (`/[^\\d+]/g`), jisse saare digits
+    // hat jaate the: '9876500001'.replace(/[^\\d+]/g,'') === ''. Mobile kabhi save hi nahi hota tha.
+    assert.equal(contact.json.contact.mobile, '9876500001', 'agent ka mobile address book me save hua aur wapas mila');
+    // 📇 sheet par bheji gayi Address row me bhi mobile + collapsed address jaana chahiye
+    const addrRow = mock.addressUpserts.find((e) => e && e.agentId === '1001');
+    assert.ok(addrRow, 'address book sheet sync (upsertaddresses) me agent 1001 ki row gayi');
+    assert.equal(addrRow.mobile, '9876500001', 'sheet wali row me mobile save hua');
+    assert.equal(addrRow.address, '12, Near Bus Stand, Tonk Road, Jaipur', 'sheet wali row me address collapse hokar gaya');
 
     // 5) doosre employee ka token — doosre ki request NAHI dikhni chahiye (privacy)
     const other = await jsonCall(server.base, '/api/public/tag-request', 'POST', { employee: { name: 'Koi Doosra', mobile: '9800001111', address: '9, Other Nagar, Jaipur', pincode: '302020' }, agents: [{ agentId: '3003', agentName: 'Anil Kumar', channel: 'ff', mobile: '9800002222', address: '3, Another Nagar, Jaipur', pincode: '302021', rows: [{ cls: 'VC5', approved: 4 }] }] }, '', '10.7.7.9');

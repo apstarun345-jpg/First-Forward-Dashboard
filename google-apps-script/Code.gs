@@ -5,6 +5,15 @@
  * tab "APP_STORAGE" of the spreadsheet this script is attached to. Data arrives ALREADY ENCRYPTED
  * by the dashboard server, so the cells only contain unreadable text. Do not edit that tab by hand.
  *
+ * v3.58 — "Could not save … Save not confirmed" ka asli karan: doPost ek hi global script lock leta tha
+ * aur busy hone par sirf { ok:false, error:'busy, retry' } bhejta tha — dashboard ka client us error ko
+ * retry-worthy nahi maanta tha, isliye save turant fail ho jaati thi. Ab:
+ *   • lock 60s tak slices me maanga jaata hai (LOCK_WAIT_MS / LOCK_SLICE_MS),
+ *   • busy hone par { ok:false, code:'busy', retry:true, version } jaata hai,
+ *   • read-only actions (ping/health/sheettest/readaddresses) bina lock chalte hain,
+ *   • har response me SCRIPT_VERSION aati hai, aur healthOnce() poora diagnosis deta hai.
+ * Naya code paste karke Deploy → Manage deployments → Edit → Version: "New version" karna ZAROORI hai.
+ *
  * v3.48 — history recovery. The dashboard can now LIST the encrypted saves in APP_STORAGE_HISTORY
  * (action 'history') and bring an older save back (Settings → ☁️ Storage & backup → ⏪ Recovery).
  * Still ciphertext-only: this script never decrypts anything. You MUST paste this file and deploy a
@@ -49,6 +58,15 @@ const CHUNK = 45000; // a Google Sheets cell holds max 50,000 characters
 const KINDS = ['users', 'sessions', 'settings', 'resets', 'notify'];
 const HISTORY_TAB = 'APP_STORAGE_HISTORY';
 const HISTORY_MAX_ROWS = 2000;
+
+// 🧾 v3.58 — is deployed Code.gs ki version. Har response me jaati hai, taaki turant pata chale ki
+// naya code deploy hua hai ya purana (dashboard ka /api/tag-request-sheet/test isi ko dikhata hai).
+const SCRIPT_VERSION = 'v3.58-storage';
+const MAX_SHEET_COLUMNS = 18278; // Google Sheets ka hard limit — isse bade record pe pehle chup-chaap data kat jaata tha
+const LOCK_WAIT_MS = 60000;      // pehle 25s tha → "busy, retry" par save fail (client retry nahi karta tha)
+const LOCK_SLICE_MS = 8000;      // ek-ek chhoti slice me tryLock — Apps Script me lamba tryLock reliable nahi
+const READ_ONLY_ACTIONS = ['ping', 'health', 'sheettest', 'readaddresses']; // lock ke bina — inme koi write nahi
+const HEALTH_SCRATCH_TAB = 'APP_STORAGE_HEALTH'; // healthOnce() ka likh-padh (write test) yahin hota hai
 
 /** Run this ONCE from the Apps Script editor (▶ Run) to grant the "send email" permission. */
 function authorizeMail() { Logger.log('Mail quota left today: ' + MailApp.getRemainingDailyQuota()); }
@@ -166,31 +184,114 @@ function instantSheetEditPush(e) {
 }
 
 function doGet() {
-  return json_({ ok: true, service: 'apnapayment-storage', note: 'POST only. Storage is working if you can see this.' });
+  return json_({ ok: true, service: 'apnapayment-storage', version: SCRIPT_VERSION, note: 'POST only. Storage is working if you can see this.' });
+}
+
+/** 🔓 Read-only actions — ye APP_STORAGE ko kabhi likhte nahi, isliye lock ke bina chalte hain.
+ *  Apps Script me keyed lock nahi hota — poora script ek hi lock par hai. Isliye reads ko bahar
+ *  nikaalna hi contention kam karne ka asli raasta hai (warna ek save dusre ka wait karwata hai). */
+function readOnlyAction_(action, body) {
+  if (action === 'ping') {
+    const ss = SpreadsheetApp.getActive();
+    // Dhyan: ping yahan APP_STORAGE tab BANATA NAHI (ye lock ke bina chalta hai) — sirf batata hai.
+    return { ok: true, version: SCRIPT_VERSION, tab: TAB, hasTab: !!ss.getSheetByName(TAB), spreadsheet: ss.getName(), url: ss.getUrl() };
+  }
+  if (action === 'health') return healthOnce();
+  if (action === 'sheettest') {
+    var ssT = target_(body.spreadsheetId);
+    var tabT = String(body.tab || 'Tag Requests').slice(0, 80);
+    return { ok: true, version: SCRIPT_VERSION, spreadsheet: ssT.getName(), spreadsheetId: ssT.getId(), url: ssT.getUrl(), tab: tabT, exists: !!ssT.getSheetByName(tabT) };
+  }
+  if (action === 'readaddresses') {
+    var aTab = String(body.tab || 'Address').slice(0, 80);
+    var aSs = target_(body.spreadsheetId);
+    var aSh = aSs.getSheetByName(aTab);
+    if (!aSh || aSh.getLastRow() < 2) return { ok: true, version: SCRIPT_VERSION, tab: aTab, rows: [], spreadsheet: aSs.getName(), spreadsheetId: aSs.getId(), url: aSs.getUrl() };
+    var aLastRow = aSh.getLastRow();
+    var aWidth = Math.min(9, Math.max(1, aSh.getLastColumn()));
+    var aVals = aSh.getRange(2, 1, aLastRow - 1, aWidth).getValues();
+    var aOut = aVals.map(function (r) {
+      return {
+        key: String(r[0] || '').trim(), agentId: String(r[1] || '').trim(), agent: String(r[2] || '').trim(),
+        channel: String(r[3] || '').trim().toLowerCase() === 'gv' ? 'gv' : 'ff',
+        mobile: String(r[4] || '').trim(), address: String(r[5] || '').trim(),
+        pincode: String(r[6] || '').replace(/\D/g, '').slice(0, 6),
+        tl: String(r[7] || '').trim(), updatedAt: r[8] instanceof Date ? r[8].toISOString() : String(r[8] || '')
+      };
+    }).filter(function (x) { return !!x.key; });
+    return { ok: true, version: SCRIPT_VERSION, tab: aTab, rows: aOut.slice(-5000), spreadsheet: aSs.getName(), spreadsheetId: aSs.getId(), url: aSs.getUrl() };
+  }
+  return { ok: false, error: 'unknown read-only action', action: String(action || ''), version: SCRIPT_VERSION };
+}
+
+/** Busy/quota/timeout jaisi transient galtiyan — client ko retry karna chahiye. */
+function isBusyError_(err) {
+  return /too many|rate limit|quota|exceeded|timeout|timed out|service is unavailable|temporar|try again|later|busy|lock/i.test(String(err && err.message || err) + ' ' + String(err && err.name || ''));
+}
+
+/** Har fail response me action + exception ka naam — "kya fail hua" turant pata chale (pehle sirf message tha). */
+function failJson_(err, action) {
+  const message = String(err && err.message || err);
+  const name = String(err && err.name || 'Error');
+  const busy = isBusyError_(err);
+  return json_({
+    ok: false,
+    error: (action ? action + ': ' : '') + message,
+    action: String(action || ''),
+    errorName: name,
+    ...(busy ? { code: 'busy', retry: true } : {}),
+    version: SCRIPT_VERSION
+  });
+}
+
+/** Lock 60s tak nahi mila → saaf "busy, retry" + code/retry + version (client isi par dobara koshish karta hai). */
+function busyJson_(action) {
+  return json_({
+    ok: false,
+    error: 'busy, retry — script lock ' + Math.round(LOCK_WAIT_MS / 1000) + 's tak free nahi hua (doosra save chal raha hai)',
+    action: String(action || ''),
+    code: 'busy',
+    retry: true,
+    version: SCRIPT_VERSION
+  });
+}
+
+/** Lock ko chhoti-chhoti slices me maango — ek lamba tryLock(timeout) Apps Script me bharosemand nahi hai. */
+function acquireLock_(waitMs, sliceMs) {
+  const lock = LockService.getScriptLock();
+  const deadline = Date.now() + (waitMs || LOCK_WAIT_MS);
+  do {
+    const left = Math.max(0, deadline - Date.now());
+    if (lock.tryLock(Math.min(sliceMs || LOCK_SLICE_MS, left || 1))) return lock;
+    if (Date.now() >= deadline) break;
+    Utilities.sleep(250);
+  } while (Date.now() < deadline);
+  return null;
 }
 
 function doPost(e) {
   let body;
   try { body = JSON.parse((e && e.postData && e.postData.contents) || '{}'); }
-  catch (err) { return json_({ ok: false, error: 'invalid JSON' }); }
+  catch (err) { return json_({ ok: false, error: 'invalid JSON', errorName: 'SyntaxError', version: SCRIPT_VERSION }); }
   const SECRET = appSecret_();
-  if (!SECRET || SECRET.length < 16) return json_({ ok: false, error: 'APPS_SCRIPT_SECRET missing — run setAppSecretOnce(secret) once, then deploy a new version.' });
-  if (body.secret !== SECRET) return json_({ ok: false, error: 'unauthorized (secret mismatch)' });
+  if (!SECRET || SECRET.length < 16) return json_({ ok: false, error: 'APPS_SCRIPT_SECRET missing — run setAppSecretOnce(secret) once, then deploy a new version.', errorName: 'SecretMissing', version: SCRIPT_VERSION });
+  if (body.secret !== SECRET) return json_({ ok: false, error: 'unauthorized (secret mismatch)', errorName: 'Unauthorized', version: SCRIPT_VERSION });
+  const action = String(body.action || '');
 
   // 📧 Mail relay (HTTPS) — Render free blocks SMTP ports, so the dashboard can send its emails
   // (login OTP, daily digest, champion certificates, test mail) THROUGH this script via Gmail.
   // First time: after pasting this code, run any function once (e.g. authorizeMail) OR redeploy
   // as "New version" and click Allow when Google asks for the "send email" permission.
-  if (body.action === 'mailping') {
-    try { return json_({ ok: true, quota: MailApp.getRemainingDailyQuota(), account: Session.getEffectiveUser().getEmail() }); }
-    catch (err) { return json_({ ok: false, error: 'mail permission missing — Deploy → Manage deployments → Edit → New version, then Allow email permission (' + String(err && err.message || err) + ')' }); }
+  if (action === 'mailping') {
+    try { return json_({ ok: true, quota: MailApp.getRemainingDailyQuota(), account: Session.getEffectiveUser().getEmail(), version: SCRIPT_VERSION }); }
+    catch (err) { return json_({ ok: false, error: 'mail permission missing — Deploy → Manage deployments → Edit → New version, then Allow email permission (' + String(err && err.message || err) + ')', errorName: String(err && err.name || 'Error'), version: SCRIPT_VERSION }); }
   }
-  if (body.action === 'mail') {
+  if (action === 'mail') {
     try {
       const m = body.mail || {};
       const to = String(m.to || '').split(/[,;]/).map(function (x) { return x.trim(); }).filter(Boolean);
-      if (!to.length || to.length > 20) return json_({ ok: false, error: 'invalid recipients' });
-      if (!m.subject || String(m.subject).length > 300) return json_({ ok: false, error: 'invalid subject' });
+      if (!to.length || to.length > 20) return json_({ ok: false, error: 'invalid recipients', action: action, errorName: 'MailRejected', version: SCRIPT_VERSION });
+      if (!m.subject || String(m.subject).length > 300) return json_({ ok: false, error: 'invalid subject', action: action, errorName: 'MailRejected', version: SCRIPT_VERSION });
       const opts = { to: to.join(','), subject: String(m.subject), body: String(m.body || ' '), name: String(m.name || '') || 'Dashboard' };
       if (m.htmlBody) opts.htmlBody = String(m.htmlBody);
       const files = (m.attachments || []).slice(0, 5).map(function (a) {
@@ -198,30 +299,30 @@ function doPost(e) {
       });
       if (files.length) opts.attachments = files;
       MailApp.sendEmail(opts);
-      return json_({ ok: true, sent: to.length, quota: MailApp.getRemainingDailyQuota() });
+      return json_({ ok: true, sent: to.length, quota: MailApp.getRemainingDailyQuota(), version: SCRIPT_VERSION });
     } catch (err) {
-      return json_({ ok: false, error: String(err && err.message || err) });
+      return failJson_(err, action);
     }
   }
 
-  const lock = LockService.getScriptLock();
-  if (!lock.tryLock(25000)) return json_({ ok: false, error: 'busy, retry' });
+  // 🔓 Read-only actions lock ke bina — jab koi save lock hold kar raha ho tab bhi ye jawab dete hain.
+  if (READ_ONLY_ACTIONS.indexOf(action) >= 0) {
+    try { return json_(readOnlyAction_(action, body)); }
+    catch (err) { return failJson_(err, action); }
+  }
+
+  const lock = acquireLock_(LOCK_WAIT_MS, LOCK_SLICE_MS);
+  if (!lock) return busyJson_(action);
   try {
     const sheet = sheet_();
-    if (body.action === 'ping') return json_({ ok: true, tab: TAB, spreadsheet: SpreadsheetApp.getActive().getName(), url: SpreadsheetApp.getActive().getUrl() });
     // 📗 Tag Request (v3.27) — dashboard se aayi rows ko kisi bhi NORMAL tab me direct append karo.
     // body: { tab: 'Tag Requests', header: [...], rows: [[...], ...], spreadsheetId?: '<alag sheet ka ID>' }
     // Tab na ho to ban jaata hai; tab khaali ho to pehle header row likhi jaati hai.
     // spreadsheetId diya ho to entry US sheet me hoti hai (us sheet par is Google account ka edit access
     // hona chahiye — Sheet → Share). Nahi diya to script jis sheet se bandha hai usi me.
-    if (body.action === 'sheettest') {
-      var ssT = target_(body.spreadsheetId);
-      var tabT = String(body.tab || 'Tag Requests').slice(0, 80);
-      return json_({ ok: true, spreadsheet: ssT.getName(), spreadsheetId: ssT.getId(), url: ssT.getUrl(), tab: tabT, exists: !!ssT.getSheetByName(tabT) });
-    }
-    if (body.action === 'appendrows') {
+    if (action === 'appendrows') {
       var tabName = String(body.tab || TAG_REQUEST_DEFAULT_TAB).slice(0, 80);
-      if (tabName === TAB && !body.spreadsheetId) return json_({ ok: false, error: 'APP_STORAGE tab me likhna allowed nahi — koi doosra tab naam do.' });
+      if (tabName === TAB && !body.spreadsheetId) return json_({ ok: false, error: 'APP_STORAGE tab me likhna allowed nahi — koi doosra tab naam do.', action: action, version: SCRIPT_VERSION });
       var ss = target_(body.spreadsheetId || TAG_REQUEST_SPREADSHEET_ID);
       var sh = ss.getSheetByName(tabName);
       if (!sh) sh = ss.insertSheet(tabName);
@@ -249,32 +350,12 @@ function doPost(e) {
         added = padded.length;
       }
       SpreadsheetApp.flush();
-      return json_({ ok: true, tab: tabName, added: added, atRow: startRow, spreadsheet: ss.getName(), spreadsheetId: ss.getId(), url: ss.getUrl() });
+      return json_({ ok: true, tab: tabName, added: added, atRow: startRow, spreadsheet: ss.getName(), spreadsheetId: ss.getId(), url: ss.getUrl(), version: SCRIPT_VERSION });
     }
 
     // 📇 Agent Address Book — central sheet tab, automatically created and de-duplicated.
     // body: { tab: 'Address', rows: [{key,agentId,agent,channel,mobile,address,pincode,tl,updatedAt}], spreadsheetId?: '<sheet id>' }
-    if (body.action === 'readaddresses') {
-      var aTab = String(body.tab || 'Address').slice(0, 80);
-      var aSs = target_(body.spreadsheetId);
-      var aSh = aSs.getSheetByName(aTab);
-      if (!aSh || aSh.getLastRow() < 2) return json_({ ok: true, tab: aTab, rows: [], spreadsheet: aSs.getName(), spreadsheetId: aSs.getId(), url: aSs.getUrl() });
-      var aLastRow = aSh.getLastRow();
-      var aWidth = Math.min(9, Math.max(1, aSh.getLastColumn()));
-      var aVals = aSh.getRange(2, 1, aLastRow - 1, aWidth).getValues();
-      var aOut = aVals.map(function (r) {
-        return {
-          key: String(r[0] || '').trim(), agentId: String(r[1] || '').trim(), agent: String(r[2] || '').trim(),
-          channel: String(r[3] || '').trim().toLowerCase() === 'gv' ? 'gv' : 'ff',
-          mobile: String(r[4] || '').trim(), address: String(r[5] || '').trim(),
-          pincode: String(r[6] || '').replace(/\\D/g, '').slice(0, 6),
-          tl: String(r[7] || '').trim(), updatedAt: r[8] instanceof Date ? r[8].toISOString() : String(r[8] || '')
-        };
-      }).filter(function (x) { return !!x.key; });
-      return json_({ ok: true, tab: aTab, rows: aOut.slice(-5000), spreadsheet: aSs.getName(), spreadsheetId: aSs.getId(), url: aSs.getUrl() });
-    }
-
-    if (body.action === 'upsertaddresses') {
+    if (action === 'upsertaddresses') {
       var uTab = String(body.tab || 'Address').slice(0, 80);
       var uRows = Array.isArray(body.rows) ? body.rows.slice(0, 500) : [];
       var uSs = target_(body.spreadsheetId);
@@ -317,7 +398,7 @@ function doPost(e) {
           String(x.channel || '').trim().toLowerCase() === 'gv' ? 'gv' : 'ff',
           String(x.mobile || '').trim(),
           String(x.address || '').trim(),
-          String(x.pincode || '').replace(/\\D/g, '').slice(0, 6),
+          String(x.pincode || '').replace(/\D/g, '').slice(0, 6),
           String(x.tl || '').trim(),
           String(x.updatedAt || new Date().toISOString())
         ]];
@@ -342,11 +423,11 @@ function doPost(e) {
       try { uSh.getRange(1, 1, 1, uHeader.length).setFontWeight('bold'); } catch (e) { /* cosmetic */ }
       try { uSh.setFrozenRows(1); } catch (e) { /* cosmetic */ }
       SpreadsheetApp.flush();
-      return json_({ ok: true, tab: uTab, added: added, updated: updated, deduped: deduped, spreadsheet: uSs.getName(), spreadsheetId: uSs.getId(), url: uSs.getUrl() });
+      return json_({ ok: true, tab: uTab, added: added, updated: updated, deduped: deduped, spreadsheet: uSs.getName(), spreadsheetId: uSs.getId(), url: uSs.getUrl(), version: SCRIPT_VERSION });
     }
 
-    if (body.action === 'read') return json_({ ok: true, records: readAll_(sheet) });
-    if (body.action === 'write') {
+    if (action === 'read') return json_({ ok: true, records: readAll_(sheet), version: SCRIPT_VERSION });
+    if (action === 'write') {
       const records = body.records || {};
       // Ek hi save-batch ke sabhi records ka timestamp same hona chahiye — tabhi dashboard
       // unhe ek "snapshot" (purani save) ke roop me group kar ke wapas la sakta hai.
@@ -356,21 +437,21 @@ function doPost(e) {
         writeRecord_(sheet, kind, records[kind], nowIso);
       });
       SpreadsheetApp.flush();
-      return json_({ ok: true, savedAt: nowIso, kinds: Object.keys(records) });
+      return json_({ ok: true, savedAt: nowIso, kinds: Object.keys(records), version: SCRIPT_VERSION });
     }
     // ⏪ Recovery (v3.48) — APP_STORAGE_HISTORY ke purane encrypted records ki list.
     //   body: { rows?: [rowNumbers], withData?: true }
     //   Sirf metadata (row, savedAt, kind, size) bhejta hai; `data` tabhi jab withData + rows diye hon.
     //   Ye kabhi decrypt nahi karta — ciphertext hi aata/jaata hai.
-    if (body.action === 'history') {
+    if (action === 'history') {
       const h = historySheet_(sheet.getParent());
       const want = Array.isArray(body.rows) ? body.rows.map(Number).filter(function (n) { return n >= 2; }) : null;
       const hist = readHistory_(h, want, !!body.withData && !!want);
-      return json_({ ok: true, tab: HISTORY_TAB, entries: hist.entries, truncated: hist.truncated });
+      return json_({ ok: true, tab: HISTORY_TAB, entries: hist.entries, truncated: hist.truncated, version: SCRIPT_VERSION });
     }
-    return json_({ ok: false, error: 'unknown action' });
+    return json_({ ok: false, error: 'unknown action', action: action, errorName: 'UnknownAction', version: SCRIPT_VERSION });
   } catch (err) {
-    return json_({ ok: false, error: String(err && err.message || err) });
+    return failJson_(err, action);
   } finally {
     lock.releaseLock();
   }
@@ -502,6 +583,11 @@ function writeRecord_(sh, kind, record, nowIso) {
   for (let i = 0; i < record.data.length; i += CHUNK) chunks.push('~' + record.data.slice(i, i + CHUNK));
   if (!chunks.length) chunks.push('~');
   const width = 4 + chunks.length;
+  // 🛑 v3.58 — Google Sheets me max 18278 columns hote hain. Isse bada record pehle chup-chaap
+  // adhoora likha jaata tha (ya insertColumnsAfter par ulta error aata tha). Ab saaf error.
+  if (width > MAX_SHEET_COLUMNS) {
+    throw new Error('record for "' + kind + '" needs ' + width + ' columns, but a Google Sheet can hold only ' + MAX_SHEET_COLUMNS + '. Record too big (' + Math.round(record.data.length / 1048576) + ' MB) — ise chhota karo (images/attachments kam karo), warna data adhoora likha jayega.');
+  }
   if (sh.getMaxColumns() < width) sh.insertColumnsAfter(sh.getMaxColumns(), width - sh.getMaxColumns());
   let rowIndex = -1;
   const lastRow = sh.getLastRow();
@@ -517,6 +603,87 @@ function writeRecord_(sh, kind, record, nowIso) {
   const range = sh.getRange(rowIndex, 1, 1, width);
   range.setNumberFormat('@');
   range.setValues([[kind, record.v || '', String(nowIso || new Date().toISOString()), String(chunks.length)].concat(chunks)]);
+}
+
+/**
+ * 🩺 v3.58 — ek hi jagah poora diagnosis: secret set hai + lamba hai?, kaun user chal raha hai,
+ * kaunsi spreadsheet, APP_STORAGE me kitne rows/columns, kaunse kinds ke records hain aur kaunse
+ * MISSING, history tab, aur ek scratch cell par likh-padh kar write permission confirm.
+ * Lock ke bina chalta hai (Read-only actions me hai) — jab saves lock ke liye wait kar rahe hon
+ * tab bhi jawab de deta hai. Chalane ka tarika: Apps Script editor me ▶ Run, ya doPost
+ * { secret, action: 'health' }, ya dashboard se.
+ */
+function healthOnce() {
+  const out = {
+    ok: true, version: SCRIPT_VERSION, at: new Date().toISOString(),
+    secret: { set: false, length: 0, ok: false },
+    effectiveUser: '', spreadsheet: { name: '', id: '', url: '' },
+    appStorage: { exists: false, rows: 0, columns: 0, hidden: false },
+    kinds: { present: [], missing: KINDS.slice(), counts: {} },
+    history: { exists: false, rows: 0, latest: '' },
+    writable: { ok: false, detail: '' },
+    notes: []
+  };
+  try {
+    const secret = appSecret_();
+    out.secret = { set: !!secret, length: secret.length, ok: secret.length >= 16 };
+    if (!out.secret.set) out.notes.push('APPS_SCRIPT_SECRET Script Property me set nahi hai — setAppSecretOnce(secret) run karo.');
+    else if (!out.secret.ok) out.notes.push('APPS_SCRIPT_SECRET 16 characters se chhota hai — lamba secret set karo (dashboard ke APPS_SCRIPT_SECRET se bilkul same).');
+  } catch (err) { out.notes.push('secret read fail: ' + String(err && err.message || err)); }
+  try { out.effectiveUser = Session.getEffectiveUser().getEmail(); }
+  catch (err) { out.notes.push('Session.getEffectiveUser() nahi mila: ' + String(err && err.message || err)); }
+  try {
+    const ss = SpreadsheetApp.getActive();
+    out.spreadsheet = { name: ss.getName(), id: ss.getId(), url: ss.getUrl() };
+    const sh = ss.getSheetByName(TAB);
+    const hist = ss.getSheetByName(HISTORY_TAB);
+    if (sh) {
+      out.appStorage = { exists: true, rows: sh.getLastRow(), columns: sh.getLastColumn(), hidden: !!sh.isSheetHidden() };
+      const records = readAll_(sh);
+      out.kinds.present = Object.keys(records);
+      out.kinds.missing = KINDS.filter(function (k) { return !records[k]; });
+      KINDS.forEach(function (k) {
+        out.kinds.counts[k] = records[k]
+          ? { version: records[k].v, updatedAt: records[k].updatedAt, bytes: String(records[k].data || '').length }
+          : null;
+      });
+      if (!out.kinds.present.length) out.notes.push('APP_STORAGE khaali hai (sirf header ya bilkul blank) — pehli save par bhar jayega.');
+      if (out.kinds.missing.length) out.notes.push('APP_STORAGE me in kinds ka record nahi hai: ' + out.kinds.missing.join(', ') + ' — dashboard us kind ko save karne par ban jayega.');
+    } else {
+      out.notes.push('APP_STORAGE tab abhi nahi hai — pehli save par ye script khud bana lega.');
+    }
+    if (hist) {
+      const lastRow = hist.getLastRow();
+      out.history = { exists: true, rows: lastRow, latest: lastRow >= 2 ? isoOf_(hist.getRange(lastRow, 1).getValue()) : '' };
+    } else {
+      out.notes.push('APP_STORAGE_HISTORY tab nahi hai — purani saves tabhi dikhengi jab naya Code.gs deploy ho aur koi record overwrite ho.');
+    }
+    // ✍️ write test — scratch tab ke A1 par likh kar wapas padho (data tab me kuch nahi likha jaata).
+    try {
+      let scratch = ss.getSheetByName(HEALTH_SCRATCH_TAB);
+      if (!scratch) {
+        try { scratch = ss.insertSheet(HEALTH_SCRATCH_TAB); scratch.hideSheet(); }
+        catch (race) { scratch = ss.getSheetByName(HEALTH_SCRATCH_TAB); }
+      }
+      if (!scratch) throw new Error('scratch tab nahi bana');
+      const token = 'health-' + new Date().getTime();
+      const cell = scratch.getRange('A1');
+      cell.setNumberFormat('@');
+      cell.setValue(token);
+      SpreadsheetApp.flush();
+      const back = String(scratch.getRange('A1').getValue() || '');
+      cell.clearContent();
+      out.writable = { ok: back === token, detail: HEALTH_SCRATCH_TAB + '!A1 par likha aur padha' + (back === token ? '' : ' — wapas "' + back + '" mila') };
+      if (back !== token) out.notes.push('Scratch cell me likha par wahi value wapas nahi mili — sheet/script ki write permission check karo.');
+    } catch (err) {
+      out.writable = { ok: false, detail: String(err && err.message || err) };
+      out.notes.push('Likhne ka test fail: ' + String(err && err.message || err));
+    }
+  } catch (err) {
+    out.ok = false;
+    out.notes.push('SpreadsheetApp.getActive() fail: ' + String(err && err.message || err) + ' — script kisi sheet se BANDHA hona chahiye (Sheet → Extensions → Apps Script se kholo).');
+  }
+  return out;
 }
 
 function json_(obj) {

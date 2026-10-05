@@ -302,7 +302,7 @@ test('🧩 UI + cache-bust wiring: ⏪ button, banner, health summary, naya vers
   assert.match(srv, /tagRequestRecovery: tagReqRecoveryInfo/, 'health me recovery summary');
 
   const pkg = JSON.parse(await read('package.json'));
-  assert.equal(pkg.version, '3.57.0', 'version bump');
+  assert.equal(pkg.version, '3.58.0', 'version bump');
   const idx = await read('index.html');
   assert.match(idx, /config\.js\?v=109/, 'config cache-bust 109');
   assert.match(idx, /lazy\.js\?v=103/, 'lazy cache-bust 103');

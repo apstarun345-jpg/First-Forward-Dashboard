@@ -55,7 +55,7 @@ const MIME = {
 const BLOCKED_FILES = new Set(['server.js', 'sheets-storage.js', 'apps-script-storage.js', 'mailer.js', 'stock-age.js', 'DEPLOYMENT.md', 'SHEETS_STORAGE.md', 'STORAGE_SETUP.md', 'RECOVERY.md', 'package.json', 'package-lock.json', 'render.yaml', 'README.md', '.env']);
 const BLOCKED_DIRS = new Set(['data', 'dev', 'node_modules', '.git', 'google-apps-script']);
 // /api/health ka version ab package.json se aata hai (pehle yahan hardcoded purana string tha).
-let APP_VERSION = '3.56.0';
+let APP_VERSION = '3.58.0';
 try { APP_VERSION = String(JSON.parse(readFileSync(path.join(__dirname, 'package.json'), 'utf8')).version || APP_VERSION); } catch { /* keep fallback */ }
 
 // ---------------------------------------------------------------------------------------------
@@ -3230,7 +3230,7 @@ async function overlayDispatchEirIssuance(agents) {
   const agentIdCol = e.agentId || 'J', agentNameCol = e.agentName || 'L';
   const gvIdCol = e.gvId || 'AW', gvNameCol = e.gvName || 'AX';
   const masterCol = e.masterId || 'AU';
-  const gvId = String(e.gvMasterId || '5845036').trim().replace(/\\.0+$/, '');
+  const gvId = String(e.gvMasterId || '5845036').trim().replace(/\.0+$/, '');
   const today = dateKeyNow();
   const [y, m, d] = today.split('-').map(Number);
   const ymOf = (dt) => `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}`;
@@ -3261,7 +3261,7 @@ async function overlayDispatchEirIssuance(agents) {
   for (const row of table.rows || []) {
     const date = serverDate(serverCell(row, 4));
     if (!date) continue;
-    const master = serverCell(row, 6).trim().replace(/\\.0+$/, '');
+    const master = serverCell(row, 6).trim().replace(/\.0+$/, '');
     const ch = master === gvId ? 'gv' : 'ff';
     const id = ch === 'gv' ? (serverCell(row, 2) || serverCell(row, 0)) : (serverCell(row, 0) || serverCell(row, 2));
     const name = ch === 'gv' ? (serverCell(row, 3) || serverCell(row, 1)) : (serverCell(row, 1) || serverCell(row, 3));
@@ -5415,8 +5415,8 @@ async function handleApi(req, res, url) {
     const name = shortText(a.name || a.agentName, 120);
     const agentId = shortText(a.agentId, 40);
     const channel = a.channel === 'gv' ? 'gv' : 'ff';
-    const mobile = String(a.mobile || a.phone || '').replace(/[^\\d+]/g, '').slice(0, 16);
-    const address = shortText(String(a.address || a.fullAddress || '').replace(/\\s+/g, ' '), 300);
+    const mobile = String(a.mobile || a.phone || '').replace(/[^\d+]/g, '').slice(0, 16);
+    const address = shortText(String(a.address || a.fullAddress || '').replace(/\s+/g, ' '), 300);
     const pincode = tagDigits(a.pincode || a.pin).slice(0, 6);
     const tl = shortText(a.tl || a.tlName, 120);
     if ((!agentId && name.length < 2) || (!address && !pincode && tagDigits(mobile).length < 10)) return null;
