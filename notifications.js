@@ -366,6 +366,7 @@ window.FF = window.FF || {};
       last.title = String(o.title || last.title).slice(0, 120);
       last.body = String(o.body || last.body).slice(0, 800);
       last.meta = { ...(last.meta || {}), ...(o.meta || {}) };
+      if (o.dataChange !== undefined) last.dataChange = o.dataChange === true;
       last.createdAt = new Date(now).toISOString();
       item = last;
     } else {
@@ -373,6 +374,7 @@ window.FF = window.FF || {};
         id: `local-${now.toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
         type, title: String(o.title || 'Update').slice(0, 120),
         body: String(o.body || '').slice(0, 800), meta: o.meta || {},
+        dataChange: o.dataChange === true,
         local: true, createdAt: new Date(now).toISOString()
       };
       state.items.push(item);
