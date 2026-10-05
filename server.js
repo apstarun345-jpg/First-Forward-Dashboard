@@ -3828,12 +3828,12 @@ async function handleApi(req, res, url) {
     const key = p.endsWith('/192') ? 'pwaIcon192' : p.endsWith('/512') ? 'pwaIcon512' : 'pwaIcon64';
     const fallback = key === 'pwaIcon64' ? 'favicon.svg' : (key === 'pwaIcon192' ? 'icon-192.png' : 'icon-512.png');
     const data = String(db.settings && db.settings[key] || '');
-    if (/^data:image\/(png|jpe?g|webp|gif);base64,/i.test(data)) {
-      const match = data.match(/^data:(image\\/[a-z0-9.+-]+);base64,(.*)$/i);
-      if (match) {
-        const buf = Buffer.from(match[2], 'base64');
-        return sendMaybeCompressed(req, res, 200, match[1], buf, { 'Cache-Control': 'no-cache' });
-      }
+    const comma = data.indexOf(',');
+    if (data.startsWith('data:image/') && comma > 0 && data.slice(0, comma).endsWith(';base64')) {
+      const header = data.slice(0, comma);
+      const buf = Buffer.from(data.slice(comma + 1), 'base64');
+      const mime = header.slice(5, -7);
+      return sendMaybeCompressed(req, res, 200, mime, buf, { 'Cache-Control': 'no-cache' });
     }
     if (data.startsWith('data:image/svg+xml;base64,')) {
       const buf = Buffer.from(data.slice('data:image/svg+xml;base64,'.length), 'base64');
