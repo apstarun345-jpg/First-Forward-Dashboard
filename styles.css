@@ -5312,3 +5312,206 @@ html[data-theme="dark"] .data-fresh-card>header{background:#111827}.data-fresh-c
   .mobile-nav-item small { font-size: 9px; }
   .mobile-nav-item span { font-size: 20px; }
 }
+
+
+/* v3.50 — Forced mobile UI for Android/PWA devices.
+   This does NOT depend on the browser's reported CSS viewport width, so Chrome
+   "Desktop site" / wide-viewport mode still gets the real phone layout. */
+html.mobile-ui body {
+  font-size: 16px !important;
+  line-height: 1.45;
+}
+html.mobile-ui .sidebar {
+  display: none !important;
+}
+html.mobile-ui .content {
+  margin-left: 0 !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+}
+html.mobile-ui .topbar {
+  width: 100% !important;
+  min-height: 60px !important;
+  height: 60px !important;
+  padding: 7px 10px !important;
+}
+html.mobile-ui .top-title {
+  max-width: 46vw !important;
+  font-size: 17px !important;
+  font-weight: 800 !important;
+}
+html.mobile-ui .top-actions {
+  gap: 5px !important;
+}
+html.mobile-ui .top-actions > [data-top-secondary="1"] {
+  display: none !important;
+}
+html.mobile-ui #menu-btn,
+html.mobile-ui #top-more,
+html.mobile-ui #user-btn,
+html.mobile-ui #notification-btn,
+html.mobile-ui #top-refresh {
+  width: 44px !important;
+  min-width: 44px !important;
+  height: 44px !important;
+  min-height: 44px !important;
+}
+html.mobile-ui .main {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  padding: 16px 12px 104px !important;
+}
+html.mobile-ui .page-head {
+  gap: 8px !important;
+  margin: 4px 0 16px !important;
+}
+html.mobile-ui .page-head h1,
+html.mobile-ui .page-title,
+html.mobile-ui h1 {
+  font-size: 24px !important;
+  line-height: 1.18 !important;
+}
+html.mobile-ui h2 { font-size: 21px !important; }
+html.mobile-ui h3 { font-size: 18px !important; }
+html.mobile-ui .page-head .sub,
+html.mobile-ui .sub,
+html.mobile-ui .dim,
+html.mobile-ui .muted {
+  font-size: 13px !important;
+  line-height: 1.45 !important;
+}
+html.mobile-ui .card,
+html.mobile-ui .panel,
+html.mobile-ui .table-card,
+html.mobile-ui .report-card,
+html.mobile-ui .chart-card,
+html.mobile-ui .kpi {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  border-radius: 18px !important;
+}
+html.mobile-ui .card,
+html.mobile-ui .panel,
+html.mobile-ui .table-card {
+  padding: 14px !important;
+}
+html.mobile-ui .kpi-grid,
+html.mobile-ui .kpi-grid.six,
+html.mobile-ui .grid,
+html.mobile-ui .cards-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 10px !important;
+}
+html.mobile-ui .kpi {
+  padding: 13px !important;
+}
+html.mobile-ui .kpi-value {
+  font-size: 27px !important;
+  line-height: 1.05 !important;
+  font-weight: 900 !important;
+}
+html.mobile-ui .kpi-title,
+html.mobile-ui .kpi-label {
+  font-size: 12px !important;
+}
+html.mobile-ui .kpi-foot {
+  font-size: 11px !important;
+}
+html.mobile-ui .btn,
+html.mobile-ui button,
+html.mobile-ui .icon-btn,
+html.mobile-ui .input,
+html.mobile-ui select,
+html.mobile-ui textarea {
+  min-height: 44px !important;
+  font-size: 15px !important;
+}
+html.mobile-ui .btn.small,
+html.mobile-ui .icon-btn.small {
+  min-height: 40px !important;
+  font-size: 14px !important;
+}
+html.mobile-ui input::placeholder,
+html.mobile-ui textarea::placeholder {
+  font-size: 14px !important;
+}
+html.mobile-ui table {
+  font-size: 14px !important;
+}
+html.mobile-ui th {
+  font-size: 12px !important;
+  line-height: 1.2 !important;
+}
+html.mobile-ui td {
+  font-size: 13.5px !important;
+  line-height: 1.3 !important;
+}
+html.mobile-ui .site-footer,
+html.mobile-ui .app-footer {
+  display: none !important;
+}
+html.mobile-ui #mobile-nav.mobile-nav {
+  display: grid !important;
+  position: fixed !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  z-index: 9999 !important;
+  min-height: 76px !important;
+  padding: 7px 7px max(9px, env(safe-area-inset-bottom)) !important;
+}
+html.mobile-ui .mobile-nav-item,
+html.mobile-ui .mobile-nav-item.mobile-nav-action {
+  min-height: 60px !important;
+  height: 60px !important;
+}
+html.mobile-ui .mobile-nav-item span {
+  width: 38px !important;
+  height: 32px !important;
+  font-size: 23px !important;
+}
+html.mobile-ui .mobile-nav-item small {
+  font-size: 11px !important;
+  font-weight: 850 !important;
+}
+html.mobile-ui .mobile-nav-badge {
+  min-width: 20px !important;
+  height: 20px !important;
+  font-size: 9px !important;
+}
+html.mobile-ui .tbl-wrap,
+html.mobile-ui .table-wrap,
+html.mobile-ui .data-table-wrap {
+  max-width: 100% !important;
+  overflow-x: auto !important;
+  -webkit-overflow-scrolling: touch !important;
+}
+html.mobile-ui .notification-pop {
+  position: fixed !important;
+  left: 8px !important;
+  right: 8px !important;
+  top: 66px !important;
+  width: auto !important;
+  max-width: none !important;
+  max-height: 78dvh !important;
+  z-index: 10000 !important;
+}
+html.mobile-ui .drawer {
+  left: 0 !important;
+  right: 0 !important;
+  top: auto !important;
+  bottom: 0 !important;
+  width: 100% !important;
+  max-width: none !important;
+  max-height: 92dvh !important;
+  border-radius: 22px 22px 0 0 !important;
+}
+@media (max-width: 520px) {
+  html.mobile-ui .kpi-grid,
+  html.mobile-ui .kpi-grid.six {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
