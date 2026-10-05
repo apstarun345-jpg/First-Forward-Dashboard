@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" role="img" aria-label="ApnaPayment">
+  <rect width="192" height="192" rx="40" fill="#111214"/>
+  <circle cx="69" cy="51" r="10" fill="#ffff00"/>
+  <path d="M37 137 59 73h22l23 64H84l-4-14H58l-4 14Zm26-30h12l-6-21Z" fill="white"/>
+  <path d="m116 73 43 32-43 32Z" fill="#ffff00"/>
+</svg>

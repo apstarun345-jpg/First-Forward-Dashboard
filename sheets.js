@@ -68,23 +68,25 @@ FF.pages = FF.pages || {};
 
   async function render(root, params, ctx) {
     const name = params.name || '';
-    const cfg = FF.config.sheetByName(name) || { name, icon: '📄', title: name, desc: '' };
-    const state = getState(name);
+    const cfg = FF.config.sheetByName(name) || { id: name, tab: name, icon: '📄', label: name, desc: '' };
+    const sheetTab = cfg.tab || name;   // exact Google Sheet tab name
+    const tabId = cfg.id || name;       // registry id (also the permission key)
+    const state = getState(tabId);
     if (ctx && ctx.fresh) { state.full = null; state.total = null; state.mode = null; state.headerRows = null; }
-    const csvUrl = cfg.gid ? `https://docs.google.com/spreadsheets/d/${FF.config.sheetId}/export?format=csv&gid=${cfg.gid}` : `https://docs.google.com/spreadsheets/d/${FF.config.sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(name)}`;
-    root.innerHTML = `<div class="page-head"><div><h1>${cfg.icon || '📄'} ${esc(cfg.title || name)}</h1><p class="sub">${esc(cfg.desc || `Sheet tab "${name}"`)} · <span id="sh-info">loading…</span></p></div>
-      <div class="head-actions"><button class="btn primary" data-action="refresh">↻ Refresh</button><button class="btn" data-action="export-visible">⬇ Export visible</button><a class="btn" href="${esc(csvUrl)}" target="_blank" rel="noopener">⬇ Full CSV</a><a class="btn" target="_blank" rel="noopener" href="${esc(FF.config.sheetUrl(name))}">Open in Google ↗</a></div></div>
+    root.innerHTML = `<div class="page-head"><div><h1>${cfg.icon || '📄'} ${esc(cfg.label || cfg.title || name)}</h1><p class="sub">${esc(cfg.desc || `Sheet tab "${sheetTab}"`)} · <b>${esc(cfg.source === 'gv' ? 'GV Partner' : 'First Forward')}</b> · <span id="sh-info">loading…</span></p></div>
+      <div class="head-actions"><button class="btn primary" data-action="refresh">↻ Refresh</button>${FF.auth.can('export') ? '<button class="btn" data-action="export-visible">⬇ Export visible (CSV)</button><button class="btn" data-action="export-visible-xlsx">⬇ Excel</button>' : ''}${cfg.kind === 'stock' && FF.auth.can('stock') ? '<a class="btn" href="#/stock">📦 Stock pivot / search →</a>' : ''}${cfg.kind === 'gv-stock' && FF.auth.can('gvStock') ? '<a class="btn" href="#/gvStock">📦 GV stock search →</a>' : ''}${cfg.kind === 'report' && FF.auth.can('performance') ? '<a class="btn" href="#/performance">🏆 Performance →</a>' : ''}${cfg.kind === 'gv-report' && FF.auth.can('gvPerformance') ? '<a class="btn" href="#/gvPerformance">🏆 GV performance →</a>' : ''}</div></div>
       <div id="sh-warn"></div>
       <div class="card grid-card"><div class="toolbar"><input id="sh-q" class="input wide" placeholder="Search… (Enter)" value="${esc(state.q)}"><span id="sh-mode" class="dim small"></span><div class="pager" id="sh-pager"></div></div>
       <div class="table-wrap grid-wrap" id="sh-grid">${U.spinner('Sheet load ho rahi hai…')}</div></div>`;
 
     const grid = U.$('#sh-grid', root), info = U.$('#sh-info', root), modeEl = U.$('#sh-mode', root), pagerEl = U.$('#sh-pager', root), warn = U.$('#sh-warn', root), qInput = U.$('#sh-q', root);
     let current = { cols: [], rows: [], labels: [], headerRows: [] };
+    const range = cfg.range || (cfg.startCol || cfg.startRow || cfg.endCol || cfg.endRow ? (FF.config.formatRange ? FF.config.formatRange(cfg.startCol, cfg.startRow, cfg.endCol, cfg.endRow) : `${cfg.startCol || 'A'}${cfg.startRow || 1}:${cfg.endCol || ''}${cfg.endRow || ''}`) : '');
     const fresh = !!(ctx && ctx.fresh);
 
     function checkFallback(table) {
-      if (name !== 'EIR' && D.looksLikeEIR(table)) {
-        warn.innerHTML = `<div class="warn-box">⚠️ Google ne "<b>${esc(name)}</b>" naam ka tab nahi pehchana, isliye pehla tab (EIR) dikh raha hai. Sheet me tab ka exact naam check karo ya <code>js/config.js</code> me is sheet ka <code>gid</code> set karo (URL me <code>#gid=…</code>).</div>`;
+      if (sheetTab !== 'EIR' && D.looksLikeEIR(table)) {
+        warn.innerHTML = `<div class="warn-box">⚠️ Google ne "<b>${esc(name)}</b>" naam ka tab nahi pehchana, isliye pehla tab dikh raha hai. Sheet me tab ka exact naam check karo ya Settings → Sheets &amp; tabs me is tab ka <code>gid</code> set karo (Google URL me <code>#gid=…</code>).</div>`;
       } else warn.innerHTML = '';
     }
     function searchableCols(cols) {
@@ -146,9 +148,9 @@ FF.pages = FF.pages || {};
     async function loadPaged() {
       grid.innerHTML = U.spinner(`Page ${state.page + 1} load ho raha hai…`);
       try {
-        const probe = state.probeCols || (await D.query(name, 'select * limit 1', { fresh })).cols;
+        const probe = state.probeCols || (await D.query(sheetTab, 'select * limit 1', { fresh, range })).cols;
         state.probeCols = probe;
-        const table = await D.query(name, buildTq(probe), { fresh });
+        const table = await D.query(sheetTab, buildTq(probe), { fresh, range });
         if (!root.isConnected) return;
         checkFallback(table);
         if (table.headers === 0 && !state.headerRows && state.page === 0 && !state.q) state.headerRows = detectHeaderRows(table.rows, table.cols);
@@ -159,7 +161,7 @@ FF.pages = FF.pages || {};
           try {
             const sc = searchableCols(probe);
             const q = state.q.toLowerCase().replace(/["\\]/g, '');
-            const ct = await D.query(name, `select count(${probe[0].id}) where (${sc.map((l) => `lower(${l}) contains "${q}"`).join(' or ')})`, { fresh });
+            const ct = await D.query(sheetTab, `select count(${probe[0].id}) where (${sc.map((l) => `lower(${l}) contains "${q}"`).join(' or ')})`, { fresh, range });
             total = D.cellNumber(ct.rows[0] && ct.rows[0][0]) || 0;
           } catch (e) { total = dataRows.length + state.page * state.pageSize; }
         }
@@ -171,16 +173,19 @@ FF.pages = FF.pages || {};
     }
     async function load() {
       try {
-        const [countT, firstT] = await Promise.all([
-          D.query(name, 'select count(A)', { fresh }).catch(() => null),
-          D.query(name, `select * limit ${state.pageSize}`, { fresh })
-        ]);
+        // Paint a real first page before waiting on Google's potentially slow full-sheet count.
+        const firstT = await D.query(sheetTab, `select * limit ${state.pageSize}`, { fresh, range });
         if (!root.isConnected) return;
         checkFallback(firstT);
+        state.probeCols = firstT.cols;
+        if (firstT.headers === 0) state.headerRows = detectHeaderRows(firstT.rows, firstT.cols);
+        renderTable(firstT, state.headerRows ? firstT.rows.slice(state.headerRows.length) : firstT.rows, firstT.rows.length);
+        modeEl.textContent = 'First page ready · sheet size check ho raha hai…';
+        const countT = await D.query(sheetTab, 'select count(A)', { fresh, range }).catch(() => null);
+        if (!root.isConnected) return;
         const total = countT && countT.rows[0] ? D.cellNumber(countT.rows[0][0]) : null;
         state.total = total;
-        state.probeCols = firstT.cols;
-        if (total !== null && total > FULL_LIMIT) {
+        if ((total !== null && total > FULL_LIMIT) || (total === null && firstT.rows.length >= state.pageSize)) {
           state.mode = 'paged';
           if (firstT.headers === 0) state.headerRows = detectHeaderRows(firstT.rows, firstT.cols);
           if (state.page === 0 && !state.q && !state.sort) {
@@ -194,7 +199,7 @@ FF.pages = FF.pages || {};
           if (firstT.headers === 0) state.headerRows = detectHeaderRows(firstT.rows, firstT.cols);
           renderTable(firstT, state.headerRows ? firstT.rows.slice(state.headerRows.length) : firstT.rows, total || firstT.rows.length);
           modeEl.textContent = 'Full sheet load ho rahi hai…';
-          const fullT = await D.query(name, '', { fresh });
+          const fullT = await D.query(sheetTab, '', { fresh, range });
           if (!root.isConnected) return;
           if (fullT.headers === 0) state.headerRows = detectHeaderRows(fullT.rows, fullT.cols); else state.headerRows = null;
           state.full = fullT;
@@ -209,7 +214,14 @@ FF.pages = FF.pages || {};
     }
 
     // events
-    const doSearch = () => { state.q = qInput.value.trim(); state.page = 0; refreshView(); };
+    const doSearch = () => {
+      state.q = qInput.value.trim();
+      state.page = 0;
+      if (state.q && FF.notifications && FF.notifications.logSearch) {
+        FF.notifications.logSearch(`Sheet: ${cfg.label || tabId}`, state.q);
+      }
+      refreshView();
+    };
     qInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSearch(); });
     qInput.addEventListener('input', U.debounce(() => { if (state.mode === 'full') doSearch(); else if (!qInput.value.trim() && state.q) doSearch(); }, 250));
     pagerEl.addEventListener('click', (e) => {
@@ -226,17 +238,24 @@ FF.pages = FF.pages || {};
       const th = e.target.closest('th.sortable'); if (!th) return;
       const id = th.dataset.sort; if (!id) return;
       if (state.sort === id) { if (state.dir === 'asc') state.dir = 'desc'; else { state.sort = null; state.dir = 'asc'; } } else { state.sort = id; state.dir = 'asc'; }
+      if (FF.notifications && FF.notifications.logClick) {
+        FF.notifications.logClick(`Sheet Sort: ${cfg.label || tabId}`, `Col ${id} (${state.dir})`);
+      }
       state.page = 0; refreshView();
     });
     root.addEventListener('click', (e) => {
-      if (e.target.closest('[data-action="export-visible"]')) {
+      const ex = e.target.closest('[data-action="export-visible"], [data-action="export-visible-xlsx"]');
+      if (ex) {
+        if (!FF.auth.can('export')) { U.toast('Download permission nahi hai', 'err'); return; }
         const header = current.cols.map((c, i) => c.label || (current.headerRows[current.headerRows.length - 1] || [])[i] || c.id);
-        U.downloadCsv(`${name}-page${state.page + 1}.csv`, header, current.rows.map((r) => current.cols.map((c, i) => D.cellText(r[i], c))));
+        const rows = current.rows.map((r) => current.cols.map((c, i) => D.cellText(r[i], c)));
+        if (ex.dataset.action === 'export-visible') U.downloadCsv(`${tabId}-page${state.page + 1}.csv`, header, rows);
+        else FF.xlsx.download(`${tabId}-page${state.page + 1}.xlsx`, [{ name: sheetTab.slice(0, 28), header, rows: rows.map((r) => r.map((v) => (v !== '' && /^-?\d+(\.\d+)?$/.test(v) && v.length < 15 ? Number(v) : v))) }]);
       }
     });
     if (state.mode === 'full' && state.full && !fresh) { renderFull(); info.textContent = `${U.fmt(state.full.rows.length)} rows · ${state.full.cols.length} columns`; }
     else await load();
   }
 
-  FF.pages.sheet = { title: 'Sheet', render };
+  FF.pages.sheet = { title: 'Sheet', render, reset() { states.clear(); } };
 })(window.FF);

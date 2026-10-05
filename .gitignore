@@ -1,0 +1,16 @@
+node_modules/
+# runtime store (users, sessions, settings) — never commit
+data/
+.DS_Store
+
+# Never commit storage/auth secrets or downloaded account backups
+.env
+.env.*
+service-account*.json
+credentials*.json
+*.pem
+*.key
+
+# generated i18n harvest/coverage artifacts (rebuild: node dev/i18n-coverage.js)
+dev/i18n-words.json
+dev/i18n-coverage.json

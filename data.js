@@ -6,19 +6,32 @@ window.FF = window.FF || {};
 (function (FF) {
   'use strict';
   const U = FF.util;
-  const TTL_MS = 5 * 60 * 1000;
+  const TTL_MS = Infinity; // no auto expiry — data stays until the ↻ button / browser reload
   const cache = new Map(); // key → { t, promise }
+  // Tiny live endpoints are shared across pages/preloader so multiple renders don't hit Google twice.
+  const todayCache = { at: 0, value: null, promise: null };
+  const gvTodayCache = { at: 0, value: null, promise: null };
+  const TODAY_TTL = 25e3;
   let lastLoadAt = null;
   let lastSource = '';
 
-  function directBase() { return `https://docs.google.com/spreadsheets/d/${FF.config.sheetId}/gviz/tq`; }
+  function directBase(sheet) {
+    const cfg = FF.config.sheetByName(sheet);
+    const id = cfg && cfg.source === 'gv' ? FF.config.gvSheetId : FF.config.sheetId;
+    return `https://docs.google.com/spreadsheets/d/${id}/gviz/tq`;
+  }
+
+  /** Sheet tab config for a name — falls back to a synthetic entry so unknown tabs still load. */
+  function cfgFor(sheet) { return FF.config.sheetByName(sheet) || { id: sheet, tab: sheet, source: 'main', gid: '' }; }
 
   function buildUrl(base, sheet, tq, gid, extra) {
     const p = new URLSearchParams();
     p.set('tqx', 'out:json');
     if (gid) p.set('gid', gid); else p.set('sheet', sheet);
     if (tq) p.set('tq', tq);
-    if (extra) Object.entries(extra).forEach(([k, v]) => p.set(k, v));
+    if (extra) Object.entries(extra).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') p.set(k, v); });
+    const cfg = cfgFor(sheet);
+    if (cfg.source === 'gv' && FF.config.gvSheetId && !base.startsWith('https://docs.google.com')) p.set('id', FF.config.gvSheetId);
     return `${base}?${p.toString()}`;
   }
 
@@ -44,6 +57,14 @@ window.FF = window.FF || {};
 
   function cellText(cell, col) {
     if (!cell || cell.v === null || cell.v === undefined) return '';
+    // 🔢 Barcode/16-digit serial: sheet ka "formatted" text (6.08E+15) dikhta tha — us se digits hi
+    // gum ho jaate the. Bade integer ke liye exact value do, display format util.barcode() banata hai.
+    const v0 = cell.v;
+    if (typeof v0 === 'number' && Number.isInteger(v0) && Math.abs(v0) >= 1e15) return String(v0);
+    if (typeof v0 === 'string' && /^-?\d(?:\.\d+)?e\+?\d+$/i.test(v0.trim())) {
+      const num = Number(v0);
+      if (Number.isFinite(num)) return BigInt(Math.round(num)).toString();
+    }
     if (cell.f !== null && cell.f !== undefined) return String(cell.f);
     const v = cell.v;
     if (typeof v === 'string' && /^Date\(/.test(v)) {
@@ -71,13 +92,19 @@ window.FF = window.FF || {};
 
   async function fetchText(url, timeoutMs) {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), timeoutMs || 60000);
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs || 55000);
     try {
-      const res = await fetch(url, { signal: ctrl.signal, cache: 'no-store', credentials: 'same-origin' });
+      const res = await fetch(url, { 
+        signal: ctrl.signal, 
+        cache: 'no-store', 
+        credentials: 'same-origin',
+        headers: { 'X-Requested-With': 'FF-Dashboard' }
+      });
       const text = await res.text();
       if (!res.ok) {
         let detail = '';
         try { detail = JSON.parse(text).error || ''; } catch (e) { /* ignore */ }
+        if (res.status === 401 && !url.startsWith('http')) { const e = new Error('Login required'); e.name = 'AuthError'; throw e; }
         throw new Error(`HTTP ${res.status}${detail ? ' – ' + detail : ''}`);
       }
       return { text, source: res.headers.get('x-ff-source') || (url.startsWith('http') ? 'direct' : 'proxy'), cached: res.headers.get('x-cache') === 'HIT' };
@@ -89,43 +116,102 @@ window.FF = window.FF || {};
     const o = opts || {};
     const cfg = FF.config.sheetByName(sheetName);
     const gid = o.gid !== undefined ? o.gid : (cfg && cfg.gid) || '';
-    const key = `${sheetName}|${gid}|${tq || ''}`;
+    const configuredRange = (cfg && (cfg.range || (cfg.startCol || cfg.startRow || cfg.endCol || cfg.endRow ? (FF.config.formatRange ? FF.config.formatRange(cfg.startCol, cfg.startRow, cfg.endCol, cfg.endRow) : `${cfg.startCol || 'A'}${cfg.startRow || 1}:${cfg.endCol || ''}${cfg.endRow || ''}`) : ''))) || '';
+    let range = o.range !== undefined ? o.range : configuredRange;
+    if (/^[A-Z]+[0-9]+:$/i.test(range)) range = range.toUpperCase() === 'A1:' ? '' : `${range}ZZZ`;
+    const sourceId = cfg && cfg.source === 'gv' ? FF.config.gvSheetId : FF.config.sheetId;
+    const key = `${sourceId}|${sheetName}|${gid}|${range || ''}|${tq || ''}`;
     const now = Date.now();
     const hit = cache.get(key);
-    if (hit && !o.fresh && now - hit.t < TTL_MS) return hit.promise;
+    if (hit && (hit.pending || (!o.fresh && now - hit.t < TTL_MS))) return hit.promise;
 
+    const extra = { ...(o.fresh ? { fresh: '1' } : {}), ...(range ? { range } : {}) };
     const attempts = [];
-    if (FF.config.proxyPath && FF.config.proxy !== false) attempts.push(buildUrl(FF.config.proxyPath, sheetName, tq, gid, o.fresh ? { fresh: '1' } : null));
-    attempts.push(buildUrl(directBase(), sheetName, tq, gid));
+    if (FF.config.proxyPath && FF.config.proxy !== false) attempts.push(buildUrl(FF.config.proxyPath, sheetName, tq, gid, extra));
+    if (FF.config.directFallback !== false) attempts.push(buildUrl(directBase(sheetName), sheetName, tq, gid, range ? { range } : null));
 
     const promise = (async () => {
       let lastErr = null;
-      for (const url of attempts) {
-        try {
-          const { text, source } = await fetchText(url, o.timeoutMs);
-          const table = parseGviz(text);
-          table.source = source;
-          table.sheet = sheetName;
-          lastLoadAt = Date.now();
-          lastSource = source;
-          return table;
-        } catch (err) {
-          lastErr = err;
-          if (err instanceof QueryError) break; // same query would fail directly too
+      // 🔁 Auto-retry (v3.32): network hiccup / Google 429-5xx / timeout par chup-chaap 3 try (backoff 0.7s, 1.8s).
+      //    QueryError (galat query) aur login-expiry par retry nahi — wo dobara bhi fail hote.
+      const delays = o.retries === 0 ? [] : [700, 1800];
+      for (let round = 0; round <= delays.length; round++) {
+        let fatal = false;
+        for (const url of attempts) {
+          try {
+            const { text, source } = await fetchText(url, o.timeoutMs);
+            const table = parseGviz(text);
+            table.source = source;
+            table.sheet = sheetName;
+            lastLoadAt = Date.now();
+            lastSource = source;
+            try { window.dispatchEvent(new CustomEvent('ff:data-loaded', { detail: { sheet: sheetName, source, at: lastLoadAt, cached: false } })); } catch { /* optional */ }
+            return table;
+          } catch (err) {
+            lastErr = err;
+            if (err instanceof QueryError) { fatal = true; break; } // same query would fail directly too
+            if (err.name === 'AuthError') { if (FF.auth && FF.auth.onExpired) FF.auth.onExpired(); fatal = true; break; }
+          }
         }
+        if (fatal || round >= delays.length) break;
+        await new Promise((r) => setTimeout(r, delays[round]));
       }
       throw lastErr || new Error('Fetch failed');
     })();
-    cache.set(key, { t: now, promise });
+    const entry = { t: now, promise, pending: true };
+    cache.set(key, entry);
+    promise.then(() => { entry.pending = false; }, () => { entry.pending = false; });
     promise.catch(() => { if (cache.get(key) && cache.get(key).promise === promise) cache.delete(key); });
     return promise;
   }
 
-  function clearCache() { cache.clear(); }
+  function status() {
+    let pending = 0;
+    cache.forEach((v) => { if (v && v.pending) pending++; });
+    return { lastLoadAt, lastSource, cacheEntries: cache.size, pending };
+  }
+
+  function clearCache() {
+    cache.clear();
+    todayCache.at = 0; todayCache.value = null; todayCache.promise = null;
+    gvTodayCache.at = 0; gvTodayCache.value = null; gvTodayCache.promise = null;
+  }
+
+  function endpointJson(path, cacheState, opts) {
+    const o = opts || {};
+    const fresh = !!o.fresh;
+    const now = Date.now();
+    if (!fresh && cacheState.value && now - cacheState.at < TODAY_TTL) return Promise.resolve({ ...cacheState.value, cached: true });
+    if (cacheState.promise && !fresh) return cacheState.promise;
+    const base = path || '';
+    const url = `${base}${fresh ? '?fresh=1' : ''}`;
+    const promise = fetch(url, { credentials: 'same-origin', cache: 'no-store', headers: { 'X-Requested-With': 'FF-Dashboard' } })
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`live feed HTTP ${res.status}`))))
+      .then((json) => {
+        if (json && json.ok === false) throw new Error(json.error || 'live feed unavailable');
+        cacheState.value = json; cacheState.at = Date.now();
+        return json;
+      })
+      .finally(() => { if (cacheState.promise === promise) cacheState.promise = null; });
+    cacheState.promise = promise;
+    return promise;
+  }
+
+  /** ⚡ Combined today feed: FF + GV + 30-day context. Shared so Home/preloader don't duplicate it. */
+  function today(opts) {
+    const base = FF.config.todayPath || '/api/today';
+    return endpointJson(base, todayCache, opts);
+  }
+
+  /** 🟢 Fast GV-only today feed: GV Master current-day data without FF/history scans. */
+  function gvToday(opts) {
+    const base = FF.config.gvTodayPath || '/api/gv-today';
+    return endpointJson(base, gvTodayCache, opts);
+  }
 
   // Escape a literal for the gviz query language (double-quoted string).
   function lit(value) { return `"${String(value).replace(/["\\]/g, '')}"`; }
 
-  FF.data = { query, clearCache, parseGviz, cellText, cellNumber, cellDate, textRows, looksLikeEIR, lit, QueryError,
+  FF.data = { query, today, gvToday, clearCache, status, parseGviz, cellText, cellNumber, cellDate, textRows, looksLikeEIR, lit, QueryError,
     get lastLoadAt() { return lastLoadAt; }, get lastSource() { return lastSource; } };
 })(window.FF);

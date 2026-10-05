@@ -1,15 +1,52 @@
 {
-  "name": "First Forward Dashboard",
-  "short_name": "FF Dashboard",
-  "description": "Live FASTag issuance, stock, trend and agent performance dashboard.",
-  "start_url": "./",
-  "scope": "./",
+  "name": "First Forward & Gv Partner Dashboard",
+  "short_name": "FF & Gv Partner",
+  "description": "ApnaPayment workspace \u2014 First Forward & GV issuance, stock and performance.",
+  "start_url": "/#/home",
+  "scope": "/",
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#f3f4fb",
-  "theme_color": "#4f46e5",
+  "background_color": "#111214",
+  "theme_color": "#111214",
+  "categories": [
+    "business",
+    "productivity",
+    "finance"
+  ],
   "icons": [
-    { "src": "./icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
-    { "src": "./icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+    {
+      "src": "./icon-192.png?v=6",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./icon-512.png?v=6",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Home Highlights",
+      "url": "./#/home",
+      "description": "GV & FF highlights charts"
+    },
+    {
+      "name": "GV & FF Tag Issued",
+      "url": "./#/tagIssued",
+      "description": "Date-wise detailed issuance"
+    },
+    {
+      "name": "Dashboard",
+      "url": "./#/dashboard",
+      "description": "First Forward dashboard"
+    },
+    {
+      "name": "GV Dashboard",
+      "url": "./#/gvDashboard",
+      "description": "GV Partner dashboard"
+    }
   ]
 }
