@@ -10,11 +10,21 @@
   <title>First Forward &amp; Gv Partner Dashboard</title>
   <meta name="description" content="First Forward + GV Partner FASTag dashboard — issuance, stock, trends and agent performance.">
   <meta name="theme-color" content="#111214">
-  <link rel="manifest" href="/api/pwa/manifest?v=102">
-  <link id="site-favicon" rel="icon" href="/api/pwa/icon/64?v=102">
+  <script>
+  (() => {
+    try {
+      const standalone = window.matchMedia && window.matchMedia('(display-mode: standalone)').matches;
+      const touch = Number(navigator.maxTouchPoints || 0) > 0;
+      const screenShort = Math.min(Number(screen.width || 9999), Number(screen.height || 9999));
+      if (standalone || (touch && screenShort <= 900)) document.documentElement.classList.add('mobile-ui');
+    } catch (_) {}
+  })();
+</script>
+  <link rel="manifest" href="/api/pwa/manifest?v=103">
+  <link id="site-favicon" rel="icon" href="/api/pwa/icon/64?v=103">
   <link rel="icon" type="image/png" sizes="192x192" href="/api/pwa/icon/192">
-  <link rel="apple-touch-icon" href="/api/pwa/icon/192?v=102">
-  <link rel="stylesheet" href="styles.css?v=102">
+  <link rel="apple-touch-icon" href="/api/pwa/icon/192?v=103">
+  <link rel="stylesheet" href="styles.css?v=103">
   <link rel="stylesheet" href="controlTower.css?v=1">
   <!-- 🏠 Home KPI text visibility (v3.47): gradient KPI cards ke andar title/value/foot hamesha
        readable — pehle kuch themes/browsers me white text white card par chala jaata tha. -->
