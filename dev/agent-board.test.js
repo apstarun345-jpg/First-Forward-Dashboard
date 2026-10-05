@@ -280,17 +280,16 @@ test('direct agent (TL nahi): TL bar nahi, par board phir bhi poora', () => {
 });
 
 // ---- wiring (index.html + sw.js + lazy.js + package.json) ---------------------------------------------------
-test('wiring: agentBoard.js load hota hai (index + sw) aur cache bust v68 / v76 hai', async () => {
+test('wiring: agentBoard.js lazy-load hota hai, SW me precache hai', async () => {
   const fs = await import('node:fs');
   const idx = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
   const sw = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
   const lazy = fs.readFileSync(path.join(ROOT, 'lazy.js'), 'utf8');
   const pkg = fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8');
-  assert.ok(idx.includes('agentBoard.js?v=72'), 'index.html me agentBoard');
-  assert.ok(idx.indexOf('performance.js') < idx.indexOf('agentBoard.js'), 'performance ke baad load');
-  assert.ok(idx.indexOf('agentBoard.js') < idx.indexOf('masterProfile.js'), 'masterProfile se pehle load');
-  assert.ok(sw.includes('./agentBoard.js?v=72'), 'sw ASSETS me agentBoard');
-  assert.match(sw, /CACHE_NAME = 'apnapayment-v80'/);
+  assert.ok(!idx.includes('agentBoard.js'), 'agentBoard index shell me eager nahi hai');
+  assert.match(lazy, /performance: \[\.\.\.PROFILE_DEPS, 'agentBoard', 'performance'\]/, 'performance page ki lazy dependency me hai');
+  assert.ok(sw.includes('./agentBoard.js?v=86'), 'sw ASSETS me agentBoard precache hai');
+  assert.match(sw, /CACHE_NAME = 'apnapayment-v109'/);
   assert.match(lazy, /return m \? m\[1\] : '72'/);
   assert.match(pkg, /agentBoard/);
 });

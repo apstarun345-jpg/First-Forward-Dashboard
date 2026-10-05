@@ -11,7 +11,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SECRET = 'test-secret-0123456789-abcdef';
 
 function loadAppsScript() {
-  const props = new Map();
+  const props = new Map([['APPS_SCRIPT_SECRET', SECRET]]);
   const requests = [];
   const logs = [];
   const staleStorageTrigger = {
@@ -56,8 +56,7 @@ function loadAppsScript() {
     Logger: { log: (value) => logs.push(String(value)) },
     console: { error: (...args) => logs.push(args.join(' ')) }
   };
-  const source = readFileSync(path.join(ROOT, 'google-apps-script/Code.gs'), 'utf8')
-    .replace("'PASTE_A_LONG_RANDOM_SECRET_HERE'", JSON.stringify(SECRET));
+  const source = readFileSync(path.join(ROOT, 'google-apps-script/Code.gs'), 'utf8');
   vm.runInNewContext(source, context, { filename: 'Code.gs' });
   return { context, props, requests, logs, triggers, spreadsheet, sheet };
 }

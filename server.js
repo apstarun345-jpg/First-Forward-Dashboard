@@ -55,7 +55,7 @@ const MIME = {
 const BLOCKED_FILES = new Set(['server.js', 'sheets-storage.js', 'apps-script-storage.js', 'mailer.js', 'stock-age.js', 'DEPLOYMENT.md', 'SHEETS_STORAGE.md', 'STORAGE_SETUP.md', 'RECOVERY.md', 'package.json', 'package-lock.json', 'render.yaml', 'README.md', '.env']);
 const BLOCKED_DIRS = new Set(['data', 'dev', 'node_modules', '.git', 'google-apps-script']);
 // /api/health ka version ab package.json se aata hai (pehle yahan hardcoded purana string tha).
-let APP_VERSION = '3.52.0';
+let APP_VERSION = '3.53.0';
 try { APP_VERSION = String(JSON.parse(readFileSync(path.join(__dirname, 'package.json'), 'utf8')).version || APP_VERSION); } catch { /* keep fallback */ }
 
 // ---------------------------------------------------------------------------------------------
@@ -932,28 +932,47 @@ function serverDate(value) {
   return '';
 }
 function serverNumber(value) { const n = Number(value); return Number.isFinite(n) ? n : 0; }
-function classBucket(value) {
-  const cfg = (db.settings && db.settings.gvClassCch) || {};
-  const token = String(value || '').toUpperCase().replace(/\s+/g, ' ').trim();
+function cchToken(value) { return String(value || '').toUpperCase().replace(/\s+/g, ' ').trim(); }
+/** Stable, non-sensitive version of the GV CCH map; quick feeds use it to reject stale categories. */
+function gvClassMapVersion(config) {
+  const cfg = config && typeof config === 'object' ? config : {};
+  const groups = cfg.groups && typeof cfg.groups === 'object' ? cfg.groups : {};
+  const keys = Object.keys(groups).sort();
+  const text = [cfg.enabled === false ? 'off' : 'on', ...keys.map((key) => {
+    const values = Array.isArray(groups[key]) ? groups[key].map(cchToken).filter(Boolean).sort() : [];
+    return `${key}=${values.join('\u001f')}`;
+  })].join('\u001e');
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i++) hash = Math.imul(hash ^ text.charCodeAt(i), 16777619);
+  return (hash >>> 0).toString(36);
+}
+function classBucket(value, fallbackClass, mapping) {
+  const cfg = mapping && typeof mapping === 'object' ? mapping : {};
+  const token = cchToken(value);
   if (cfg.enabled !== false && token) {
     const groups = cfg.groups || {};
     for (const [group, values] of Object.entries(groups)) {
-      if (Array.isArray(values) && values.some((v) => String(v || '').toUpperCase().replace(/\s+/g, ' ').trim() === token)) return group === 'VC5' || group === 'VC5+' ? 'VC5+' : group;
+      if (Array.isArray(values) && values.some((v) => cchToken(v) === token)) return group === 'VC5' || group === 'VC5+' ? 'VC5+' : group;
     }
   }
-  const c = token.replace(/\s+/g, '');
+  // GV Master's CCH is authoritative when mapped; if a CCH is not listed, fall back to
+  // its actual VCLASS (not the opaque CCH label). FF EIR passes no mapping/fallback here.
+  const c = (cchToken(fallbackClass) || token).replace(/\s+/g, '');
   if (c === '4' || c === 'VC4') return 'VC4';
   if (c === '20' || c === 'VC20') return 'VC20';
   return 'VC5+';
 }
-/** gviz table → [{ date, cls, n }] (col indexes 0/1/2). */
-function countByDateClass(table) {
+/** gviz table → [{ date, cls, n }]; GV may include CCH + VCLASS before count. */
+function countByDateClass(table, options) {
+  const o = options || {};
+  const fallbackIndex = o.fallbackClassIndex === undefined || o.fallbackClassIndex === null ? null : Number(o.fallbackClassIndex);
+  const countIndex = o.countIndex === undefined ? (fallbackIndex === null ? 2 : 3) : Number(o.countIndex);
   const rows = [];
   for (const row of (table && table.rows) || []) {
     const date = serverDateFromCell(row, 0);
     if (!date) continue;
-    const cls = classBucket(serverCell(row, 1));
-    const n = serverNumber(serverCell(row, 2));
+    const cls = classBucket(serverCell(row, 1), fallbackIndex === null ? '' : serverCell(row, fallbackIndex), o.classMap);
+    const n = serverNumber(serverCell(row, countIndex));
     if (!n) continue;
     rows.push({ date, cls, n });
   }
@@ -973,9 +992,11 @@ function serverDateFromCell(row, index) {
  * Isliye 3 koshish, pehli jo chale wahi: (1) seedha compare, (2) toDate(), (3) poora tab (chhota tab).
  */
 async function gvizDailyClassCounts(cfg) {
-  const { sheetId, tab, dateCol, classCol, countCol, extraWhere, from30, cacheMaxAgeMs } = cfg;
-  const select = `select ${dateCol}, ${classCol}, count(${countCol})`;
-  const group = `group by ${dateCol}, ${classCol} order by ${dateCol} desc`;
+  const { sheetId, tab, dateCol, classCol, fallbackClassCol, classMap, countCol, extraWhere, from30, cacheMaxAgeMs } = cfg;
+  const hasFallbackClass = !!fallbackClassCol && String(fallbackClassCol).toUpperCase() !== String(classCol).toUpperCase();
+  const classCols = [classCol, ...(hasFallbackClass ? [fallbackClassCol] : [])];
+  const select = `select ${dateCol}, ${classCols.join(', ')}, count(${countCol})`;
+  const group = `group by ${dateCol}, ${classCols.join(', ')} order by ${dateCol} desc`;
   const where = (d) => [extraWhere ? `(${extraWhere})` : '', d ? `${d} >= date '${from30}'` : ''].filter(Boolean).join(' and ');
   const attempts = [
     { tq: `${select} where ${where(dateCol)} ${group} limit 500`, kind: 'date' },
@@ -987,7 +1008,11 @@ async function gvizDailyClassCounts(cfg) {
     try {
       const params = new URLSearchParams({ id: String(sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet: tab, tq: attempt.tq });
       const out = await fetchUpstreamCached(upstreamUrl(params), cacheMaxAgeMs === undefined ? undefined : { maxAgeMs: cacheMaxAgeMs });
-      const rows = countByDateClass(parseGvizServer(out.body));
+      const rows = countByDateClass(parseGvizServer(out.body), {
+        fallbackClassIndex: hasFallbackClass ? 2 : null,
+        countIndex: hasFallbackClass ? 3 : 2,
+        classMap
+      });
       // Google Visualization can return a successful-but-empty result when a date column is stored
       // as text. Treat that as a type mismatch too and try toDate(), then the bounded grouped fallback.
       const hasRecentRows = !from30 || rows.some((row) => row.date >= from30);
@@ -1005,9 +1030,11 @@ async function gvizDailyClassCounts(cfg) {
  * full-tab download par depend nahi karta. Wahi 3-koshish wala pattern: seedha compare → toDate() → poora tab.
  */
 async function gvizDayDetail(cfg) {
-  const { sheetId, tab, dateCol, classCol, statusCol, typeCol, countCol, day, dateMode, cacheMaxAgeMs, expectRows } = cfg;
-  const select = `select ${dateCol}, ${classCol}, ${statusCol}, ${typeCol}, count(${countCol})`;
-  const group = `group by ${dateCol}, ${classCol}, ${statusCol}, ${typeCol} order by ${dateCol} desc`;
+  const { sheetId, tab, dateCol, classCol, fallbackClassCol, classMap, statusCol, typeCol, countCol, day, dateMode, cacheMaxAgeMs, expectRows } = cfg;
+  const hasFallbackClass = !!fallbackClassCol && String(fallbackClassCol).toUpperCase() !== String(classCol).toUpperCase();
+  const classCols = [classCol, ...(hasFallbackClass ? [fallbackClassCol] : [])];
+  const select = `select ${dateCol}, ${classCols.join(', ')}, ${statusCol}, ${typeCol}, count(${countCol})`;
+  const group = `group by ${dateCol}, ${classCols.join(', ')}, ${statusCol}, ${typeCol} order by ${dateCol} desc`;
   const dateAttempt = { tq: `${select} where ${dateCol} >= date '${day}' ${group} limit 2000`, kind: 'date' };
   const toDateAttempt = { tq: `${select} where toDate(${dateCol}) >= date '${day}' ${group} limit 2000`, kind: 'toDate' };
   const fullAttempt = { tq: `${select} ${group} limit 3000`, kind: 'full-tab' };
@@ -1019,12 +1046,20 @@ async function gvizDayDetail(cfg) {
       const out = await fetchUpstreamCached(upstreamUrl(params), cacheMaxAgeMs === undefined ? undefined : { maxAgeMs: cacheMaxAgeMs });
       const table = parseGvizServer(out.body);
       const rows = [];
+      const classFallbackIndex = hasFallbackClass ? 2 : null;
+      const statusIndex = hasFallbackClass ? 3 : 2;
+      const typeIndex = statusIndex + 1;
+      const countIndex = typeIndex + 1;
       for (const row of (table && table.rows) || []) {
         const date = serverDate(serverCell(row, 0));
         if (!date) continue;
-        const n = serverNumber(serverCell(row, 4));
+        const n = serverNumber(serverCell(row, countIndex));
         if (!n) continue;
-        rows.push({ date, cls: classBucket(serverCell(row, 1)), status: serverCell(row, 2), type: serverCell(row, 3), n });
+        rows.push({
+          date,
+          cls: classBucket(serverCell(row, 1), classFallbackIndex === null ? '' : serverCell(row, classFallbackIndex), classMap),
+          status: serverCell(row, statusIndex), type: serverCell(row, typeIndex), n
+        });
       }
       const hasExpectedDay = !expectRows || rows.some((row) => row.date === day);
       if (hasExpectedDay || attempt.kind === 'full-tab') return { rows, cached: !!out.cached, stale: !!out.stale, via: attempt.kind };
@@ -1044,6 +1079,23 @@ async function gvizDayDetail(cfg) {
  */
 const todayFeedCache = { at: 0, body: null, promise: null };
 const gvTodayFeedCache = { at: 0, body: null, promise: null, forcePromise: null };
+let liveFeedGeneration = 0;
+function invalidateLiveFeedCaches() {
+  liveFeedGeneration++;
+  todayFeedCache.at = 0; todayFeedCache.body = null; todayFeedCache.promise = null;
+  gvTodayFeedCache.at = 0; gvTodayFeedCache.body = null; gvTodayFeedCache.promise = null; gvTodayFeedCache.forcePromise = null;
+  // Column changes can accompany a GV mapping change; do not reuse an older probe.
+  gvServerHeaderCache.clear();
+}
+function liveFeedSettingsDiffer(before, after) {
+  const a = before || {}, b = after || {};
+  return a.sheetId !== b.sheetId
+    || a.eirSheet !== b.eirSheet
+    || JSON.stringify(a.eir || {}) !== JSON.stringify(b.eir || {})
+    || a.gvSheetId !== b.gvSheetId
+    || JSON.stringify((a.gv && a.gv.master) || {}) !== JSON.stringify((b.gv && b.gv.master) || {})
+    || JSON.stringify(a.gvClassCch || {}) !== JSON.stringify(b.gvClassCch || {});
+}
 
 async function gvTodayFeed(force) {
   const ttl = 30e3; // live today: short cache, but never scan the full 30-day history
@@ -1054,8 +1106,10 @@ async function gvTodayFeed(force) {
     await gvTodayFeedCache.promise.catch(() => {}); // edit webhook must not inherit an older cached/in-flight read
     if (gvTodayFeedCache.forcePromise) return gvTodayFeedCache.forcePromise;
   }
+  const generation = liveFeedGeneration;
   const job = (async () => {
     const settings = db.settings || {};
+    const classMapVersion = gvClassMapVersion(settings.gvClassCch);
     const day = dateKeyNow();
     const next = new Date(`${day}T00:00:00Z`);
     next.setUTCDate(next.getUTCDate() + 1);
@@ -1063,7 +1117,8 @@ async function gvTodayFeed(force) {
     const resolved = await resolveGvServerColumns(settings, !!force);
     const tab = (settings.gv && settings.gv.master && settings.gv.master.tab) || 'GV Master';
     const id = String(settings.gvSheetId || '').replace(/[^A-Za-z0-9_-]/g, '');
-    const select = [resolved.date, resolved.cls, resolved.tagId, resolved.status, resolved.tagType].join(', ');
+    const hasFallbackClass = !!resolved.vClass && String(resolved.vClass).toUpperCase() !== String(resolved.cls).toUpperCase();
+    const select = [resolved.date, resolved.cls, ...(hasFallbackClass ? [resolved.vClass] : []), resolved.tagId, resolved.status, resolved.tagType].filter(Boolean).join(', ');
     const attempts = [
       { tq: `select ${select} where ${resolved.date} >= date '${day}' and ${resolved.date} < date '${nextDay}' and ${resolved.tagId} is not null limit 100000`, kind: 'today-date' },
       { tq: `select ${select} where toDate(${resolved.date}) >= date '${day}' and toDate(${resolved.date}) < date '${nextDay}' and ${resolved.tagId} is not null limit 100000`, kind: 'today-toDate' },
@@ -1079,12 +1134,16 @@ async function gvTodayFeed(force) {
         for (const row of table.rows || []) {
           const date = serverDateFromCell(row, 0);
           if (date !== day) continue;
-          const tag = serverCell(row, 2);
+          const classFallbackIndex = hasFallbackClass ? 2 : null;
+          const tagIndex = hasFallbackClass ? 3 : 2;
+          const statusIndex = tagIndex + 1;
+          const typeIndex = statusIndex + 1;
+          const tag = serverCell(row, tagIndex);
           if (!tag) continue;
           rows.push({
-            cls: classBucket(serverCell(row, 1)),
-            status: serverCell(row, 3),
-            type: serverCell(row, 4)
+            cls: classBucket(serverCell(row, 1), classFallbackIndex === null ? '' : serverCell(row, classFallbackIndex), settings.gvClassCch),
+            status: serverCell(row, statusIndex),
+            type: serverCell(row, typeIndex)
           });
         }
         // A successful filtered query with no rows means "no today's data" only after we know
@@ -1103,11 +1162,14 @@ async function gvTodayFeed(force) {
             vc4: classes.VC4 || 0, vc20: classes.VC20 || 0, vc5p: classes['VC5+'] || 0,
             comm: (classes.VC20 || 0) + (classes['VC5+'] || 0),
             replacement, chassis, classes,
+            classMapVersion,
             cached: !!out.cached, stale: !!out.stale, query: attempt.kind
           }
         };
-        gvTodayFeedCache.body = result;
-        gvTodayFeedCache.at = Date.now();
+        if (generation === liveFeedGeneration) {
+          gvTodayFeedCache.body = result;
+          gvTodayFeedCache.at = Date.now();
+        }
         return result;
       } catch (err) {
         lastErr = err;
@@ -1128,8 +1190,10 @@ async function gvTodayFeed(force) {
 async function gvMasterRawTodayFallback(settings, resolved, day, force) {
   const tab = (settings.gv && settings.gv.master && settings.gv.master.tab) || 'GV Master';
   const id = String(settings.gvSheetId || '').replace(/[^A-Za-z0-9_-]/g, '');
-  const cols = resolved || { date: 'P', cls: 'G', tagId: 'I', status: 'N', tagType: 'U' };
-  const select = [cols.date, cols.cls, cols.tagId, cols.status, cols.tagType].join(', ');
+  const cols = resolved || { date: 'P', cls: 'G', vClass: 'F', tagId: 'I', status: 'N', tagType: 'U' };
+  const hasFallbackClass = !!cols.vClass && String(cols.vClass).toUpperCase() !== String(cols.cls).toUpperCase();
+  const classCols = [cols.cls, ...(hasFallbackClass ? [cols.vClass] : [])];
+  const select = [cols.date, ...classCols, cols.tagId, cols.status, cols.tagType].join(', ');
   const attempts = [
     { tq: `select ${select} where ${cols.date} >= date '${day}' and ${cols.tagId} is not null limit 100000`, kind: 'raw-date' },
     { tq: `select ${select} where toDate(${cols.date}) >= date '${day}' and ${cols.tagId} is not null limit 100000`, kind: 'raw-toDate' },
@@ -1145,9 +1209,17 @@ async function gvMasterRawTodayFallback(settings, resolved, day, force) {
       for (const row of table.rows || []) {
         const date = serverDateFromCell(row, 0);
         if (date !== day) continue;
-        const tag = serverCell(row, 2);
+        const classFallbackIndex = hasFallbackClass ? 2 : null;
+        const tagIndex = hasFallbackClass ? 3 : 2;
+        const statusIndex = tagIndex + 1;
+        const typeIndex = statusIndex + 1;
+        const tag = serverCell(row, tagIndex);
         if (!tag) continue;
-        todayRows.push({ date, cls: classBucket(serverCell(row, 1)), status: serverCell(row, 3), type: serverCell(row, 4) });
+        todayRows.push({
+          date,
+          cls: classBucket(serverCell(row, 1), classFallbackIndex === null ? '' : serverCell(row, classFallbackIndex), settings.gvClassCch),
+          status: serverCell(row, statusIndex), type: serverCell(row, typeIndex)
+        });
       }
       if (todayRows.length || attempt.kind === 'raw-bounded') {
         const classes = {};
@@ -1167,8 +1239,10 @@ async function todayFeed(force) {
   const ttl = 45e3; // 45s — "live" rehne ke liye chhota TTL, aur Google par load bhi kam
   if (!force && todayFeedCache.body && Date.now() - todayFeedCache.at < ttl) return { ...todayFeedCache.body, cached: true };
   if (todayFeedCache.promise) return todayFeedCache.promise;
-  todayFeedCache.promise = (async () => {
+  const generation = liveFeedGeneration;
+  const job = (async () => {
     const settings = db.settings || {};
+    const classMapVersion = gvClassMapVersion(settings.gvClassCch);
     const day = dateKeyNow();
     const [y, m, d] = day.split('-').map(Number);
     const dayStart30 = new Date(Date.UTC(y, m - 1, d - 29));
@@ -1185,7 +1259,11 @@ async function todayFeed(force) {
       const resolved = await resolveGvServerColumns(settings, !!force);
       const tab = gv.tab || 'GV Master';
       const dateCol = resolved.date, classCol = resolved.cls, tagCol = resolved.tagId;
-      const out = await gvizDailyClassCounts({ sheetId: settings.gvSheetId, tab, dateCol, classCol, countCol: tagCol, from30, cacheMaxAgeMs: liveQueryCacheMs });
+      const out = await gvizDailyClassCounts({
+        sheetId: settings.gvSheetId, tab, dateCol, classCol,
+        fallbackClassCol: resolved.vClass, classMap: settings.gvClassCch,
+        countCol: tagCol, from30, cacheMaxAgeMs: liveQueryCacheMs
+      });
       let rows = out.rows;
       let today = rows.filter((r) => r.date === day);
       let rawFallback = null;
@@ -1207,6 +1285,7 @@ async function todayFeed(force) {
       try {
         detail = await gvizDayDetail({
           sheetId: settings.gvSheetId, tab, dateCol, classCol,
+          fallbackClassCol: resolved.vClass, classMap: settings.gvClassCch,
           statusCol: resolved.status, typeCol: resolved.tagType, countCol: tagCol, day,
           dateMode: out.via, cacheMaxAgeMs: liveQueryCacheMs, expectRows: today.length > 0
         });
@@ -1233,7 +1312,7 @@ async function todayFeed(force) {
         vc4: classes.VC4 || 0, vc20: classes.VC20 || 0, vc5p: classes['VC5+'] || 0,
         comm: (classes.VC20 || 0) + (classes['VC5+'] || 0),
         replacement: replaced, chassis,
-        classes, expected: weekdayAvg, lastDay: prevDay ? series[prevDay] : null, lastDayDate: prevDay || '',
+        classes, classMapVersion, expected: weekdayAvg, lastDay: prevDay ? series[prevDay] : null, lastDayDate: prevDay || '',
         series,
         cached: !!out.cached, stale: !!out.stale, query: out.via,
         detailCached: !!(detail && detail.cached), detailStale: !!(detail && detail.stale), detailQuery: detail ? detail.via : null
@@ -1261,10 +1340,16 @@ async function todayFeed(force) {
       };
     } catch (err) { result.ffError = err.message; }
 
-    todayFeedCache.body = result; todayFeedCache.at = Date.now();
+    if (generation === liveFeedGeneration) {
+      todayFeedCache.body = result;
+      todayFeedCache.at = Date.now();
+    }
     return result;
-  })().finally(() => { todayFeedCache.promise = null; });
-  return todayFeedCache.promise;
+  })();
+  let tracked;
+  tracked = job.finally(() => { if (todayFeedCache.promise === tracked) todayFeedCache.promise = null; });
+  todayFeedCache.promise = tracked;
+  return tracked;
 }
 
 
@@ -1274,7 +1359,8 @@ async function todayFeed(force) {
 // probe se actual columns locate hote hain, warna configured letters safe fallback hain.
 const GV_SERVER_HEADER_SYNS = {
   date: ['ISSUE_DATE','DATE','ISSUANCE_DATE','TXN_DATE'],
-  cls: ['CCH','CCH_CLASS','VCLASS','VEHICLE_CLASS','CLASS','TAG_CLASS'],
+  cls: ['CCH','CCH_CLASS'],
+  vClass: ['VCLASS','VEHICLE_CLASS','CLASS','TAG_CLASS'],
   tagId: ['TAG_ID_NUMBER','TAG_ID','TAGID','TAG ID NUMBER','TAG ID'],
   status: ['STATUS','TAG_STATUS','TAG STATUS'],
   tagType: ['TAG_TYPE','TYPE','TAG TYPE']
@@ -1308,8 +1394,8 @@ async function resolveGvServerColumns(settings, force) {
   const cfg = settings.gv && settings.gv.master || {};
   const tab = cfg.tab || 'GV Master';
   const fallback = {
-    date: cfg.date || 'P', cls: cfg.cch || cfg.vClass || 'G', tagId: cfg.tagId || 'I',
-    status: cfg.status || 'N', tagType: cfg.tagType || 'U'
+    date: cfg.date || 'P', cls: cfg.cch || cfg.vClass || 'G', vClass: cfg.vClass || '',
+    tagId: cfg.tagId || 'I', status: cfg.status || 'N', tagType: cfg.tagType || 'U'
   };
   const cacheKey = `${settings.gvSheetId || ''}|${tab}`;
   const hit = gvServerHeaderCache.get(cacheKey);
@@ -1347,10 +1433,22 @@ async function resolveGvServerColumns(settings, force) {
       return pick(field) || letter || '';                          // warna probe, phir bhi na mile to config
     };
     const dateCol = resolveCol('date', cfg.date);
+    const configuredCch = String(cfg.cch || '').trim();
+    const configuredVClass = String(cfg.vClass || '').trim();
+    const detectedCch = pick('cls');
+    const detectedVClass = pick('vClass');
+    const cchCol = detectedCch || (configuredCch && headerMatches('cls', configuredCch) ? configuredCch : '');
+    const vClassCol = detectedVClass || (configuredVClass && headerMatches('vClass', configuredVClass) ? configuredVClass : '');
+    const classCol = cchCol || vClassCol || configuredCch || configuredVClass || fallback.cls;
+    // CCH is primary when available; VCLASS is only a fallback. If CCH cannot be found but
+    // VCLASS is detected, query it once as the primary instead of selecting the same column twice.
+    const vClassColFallback = cchCol
+      ? (vClassCol || configuredVClass)
+      : (vClassCol ? '' : (configuredCch ? configuredVClass : ''));
     const cols = {
-      // Fallback chain: configured letter → header probe → configured/default letter.
       date: dateCol || cfg.date || pick('date') || fallback.date,
-      cls: resolveCol('cls', cfg.cch, cfg.vClass) || fallback.cls,
+      cls: classCol,
+      vClass: vClassColFallback && vClassColFallback !== classCol ? vClassColFallback : '',
       tagId: resolveCol('tagId', cfg.tagId) || fallback.tagId,
       status: resolveCol('status', cfg.status) || fallback.status,
       tagType: resolveCol('tagType', cfg.tagType) || fallback.tagType
@@ -4066,8 +4164,10 @@ async function restoreStoredIntoDb(data = {}, { usersMode = 'merge', withSetting
     for (const [token, session] of Object.entries(data.sessions)) if (!Object.hasOwn(db.sessions, token)) { db.sessions[token] = session; out.sessionsAdded++; }
   }
   if (withSettings && data.settings && typeof data.settings === 'object') {
+    const previousSettings = db.settings;
     db.settings = deepMerge(DEFAULT_SETTINGS, data.settings);
     out.settingsRestored = true;
+    if (liveFeedSettingsDiffer(previousSettings, db.settings)) invalidateLiveFeedCaches();
   }
   if (withResets && Array.isArray(data.resets)) { db.resets = data.resets; out.resetsRestored = data.resets.length; }
   await migrateUserPermissions();
@@ -4182,6 +4282,15 @@ async function handleApi(req, res, url) {
   const method = req.method;
   const user = sessionUser(req);
 
+  // Backward compatibility for PWAs installed from the API-hosted manifest before its start_url
+  // was made root-relative. That manifest resolved "./#/home" to /api/pwa/#/home, which hit the
+  // API router and returned 404. Serve the public app shell at that old launch path so existing
+  // installs keep opening inside their current standalone scope until the manifest refreshes; the
+  // shell's <base href="/"> keeps its relative scripts and styles rooted at the app origin.
+  if ((p === '/api/pwa' || p === '/api/pwa/') && (method === 'GET' || method === 'HEAD')) {
+    return serveStatic(req, res, '/index.html', url.search);
+  }
+
   // Public PWA icon/manifest — custom icon is stored in admin settings but only the
   // image bytes are exposed here. This lets installed PWAs pick up the admin-selected icon.
   if (p === '/api/pwa/icon/192' || p === '/api/pwa/icon/512' || p === '/api/pwa/icon/64') {
@@ -4214,7 +4323,7 @@ async function handleApi(req, res, url) {
       name: s.appName || 'First Forward & Gv Partner Dashboard',
       short_name: s.brand || 'FF & GV',
       description: s.tagline || 'ApnaPayment workspace',
-      start_url: './#/home', scope: './', display: 'standalone', orientation: 'any',
+      start_url: '/#/home', scope: '/', display: 'standalone', orientation: 'any',
       background_color: (s.theme && s.theme.sidebarBg) || '#111214',
       theme_color: (s.theme && s.theme.accent) || '#111214',
       categories: ['business', 'productivity', 'finance'],
@@ -6818,8 +6927,11 @@ async function handleApi(req, res, url) {
     const next = body.reset ? { ...DEFAULT_SETTINGS } : deepMerge(db.settings, patch);
     next.updatedAt = new Date().toISOString(); next.updatedBy = user.username;
     if (next.sheetId !== db.settings.sheetId || next.cacheSeconds !== db.settings.cacheSeconds) cache.clear();
-    const changes = changeList(db.settings, next, { skip: ['updatedAt', 'updatedBy', 'lastBackupAt', 'personalLinks'] });
+    const previousSettings = db.settings;
+    const changes = changeList(previousSettings, next, { skip: ['updatedAt', 'updatedBy', 'lastBackupAt', 'personalLinks'] });
+    const liveFeedConfigChanged = !!body.reset || liveFeedSettingsDiffer(previousSettings, next);
     db.settings = next;
+    if (liveFeedConfigChanged) invalidateLiveFeedCaches();
     await persist('settings');
     if (patch.lastBackupAt) logAudit(user, 'backup_export', { ip: clientIp(req), note: 'settings JSON download' });
     else if (changes.length || body.reset) logAudit(user, 'settings_update', { ip: clientIp(req), note: (changes.slice(0, 5).map((c) => c.field).join(', ') + (changes.length > 5 ? '…' : '')) || 'reset' });

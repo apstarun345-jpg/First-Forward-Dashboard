@@ -77,6 +77,12 @@ FF.pages = FF.pages || {};
   }
 
   /** Convert the small server feed's class totals into month-summary rows until full GV Master loads. */
+  function feedMatchesCurrentClassMap(live) {
+    const current = FF.config && typeof FF.config.gvClassMapVersion === 'function'
+      ? FF.config.gvClassMapVersion()
+      : '';
+    return !!(live && current && live.classMapVersion && live.classMapVersion === current);
+  }
   function liveRowsFromFeed(live) {
     if (!live) return null;
     const key = live.date || todayK();
@@ -361,7 +367,7 @@ FF.pages = FF.pages || {};
     function applyHistoryFeed(feed) {
       if (!feed) return;
       const historyLive = feed.gv || null;
-      if (historyLive && !liveFromFeed) {
+      if (historyLive && !liveFromFeed && feedMatchesCurrentClassMap(historyLive)) {
         liveFromFeed = { ...historyLive, cached: !!(historyLive.cached || feed.cached), stale: !!historyLive.stale };
         feedLiveRows = liveRowsFromFeed(liveFromFeed);
         if (!liveSourceReady) liveRows = feedLiveRows || [];
@@ -424,6 +430,10 @@ FF.pages = FF.pages || {};
         paintLive();
         return;
       }
+      // A service worker may briefly serve an older snapshot after a Settings mapping change.
+      // Keep the loading shell rather than painting categories from a different CCH map; the
+      // client GV Master snapshot below is already classified with the current settings.
+      if (!feedMatchesCurrentClassMap(quick.gv)) return;
       liveFromFeed = { ...quick.gv, cached: !!(quick.gv.cached || quick.cached), stale: !!quick.gv.stale };
       feedLiveRows = liveRowsFromFeed(liveFromFeed);
       liveRows = feedLiveRows || [];

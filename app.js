@@ -1521,7 +1521,7 @@ window.FF = window.FF || {};
   function registerServiceWorker() {
     if (!('serviceWorker' in navigator)) return Promise.resolve(null);
     if (!swRegistrationPromise) {
-      swRegistrationPromise = navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' })
+      swRegistrationPromise = navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' })
         .then((reg) => {
           console.log('SW registered · scope', reg.scope, '· push', !!(reg.pushManager));
           // SW ne khud skipWaiting() kiya hai; update milte hi clients.claim() ho jaata hai.

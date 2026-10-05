@@ -81,10 +81,10 @@ const html = (s) => String(s).replace(/&amp;/g, '&');
 test('groupPeople: same naam FF + GV = ek group, TL kind agent kind par jeetta hai, alag naam alag group', () => {
   const { SR } = mount({ ff: ffFixture(), gv: gvFixture() });
   const groups = SR.groupPeople([
-    person('ff-agent', 'TL One', 'R100'), person('ff-tl', 'TL One', 'T1'), person('gv-tl', 'tl one', 'GT1'),
+    person('ff-agent', 'TL One', 'R100'), person('ff-tl', 'TL One', 'T100'), person('gv-tl', 'tl one', 'T100'),
     person('ff-agent', 'Ravi Kumar', 'R101'), person('gv-id', 'zzz')
   ]);
-  assert.equal(groups.length, 2, 'TL One (FF+GV) aur Ravi Kumar');
+  assert.equal(groups.length, 2, `TL One (FF+GV) aur Ravi Kumar: ${groups.map((g) => `${g.name}[${g.ff?.kind || '-'}:${g.ff?.sub || '-'}|${g.gv?.kind || '-'}:${g.gv?.sub || '-'}]`).join(', ')}`);
   const tl = groups.find((g) => /tl one/i.test(g.name));
   assert.equal(tl.ff.kind, 'ff-tl', 'FF me TL kind ne agent row ko replace kiya');
   assert.equal(tl.gv.kind, 'gv-tl');
@@ -196,11 +196,12 @@ test('Agent / TL Summary: dusre channel me dekho switch (FF ↔ GV) + naam na mi
   assert.match(src, /nahi mila — \$\{isGv \? 'FF' : 'GV'\} se dekho/);
 });
 
-test('wiring: index.html + sw.js + package.json check me searchReport.js', async () => {
+test('wiring: searchReport.js masterSearch ke lazy dependencies me hai + SW precache', async () => {
   const fs = await import('node:fs');
-  const idx = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8'), sw = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8'), pkg = fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8');
-  assert.ok(idx.indexOf('masterSearch.js') < idx.indexOf('searchReport.js'), 'masterSearch ke baad load');
-  assert.match(sw, /searchReport\.js\?v=72/); assert.match(pkg, /searchReport/);
+  const idx = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8'), sw = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8'), pkg = fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'), lazy = fs.readFileSync(path.join(ROOT, 'lazy.js'), 'utf8');
+  assert.ok(!idx.includes('searchReport.js'), 'searchReport core shell me eager nahi');
+  assert.match(lazy, /masterSearch: \[\.\.\.PROFILE_DEPS, 'searchReport', 'masterSearch'\]/, 'masterSearch load order dependencies me hai');
+  assert.match(sw, /searchReport\.js\?v=86/); assert.match(pkg, /searchReport/);
   const ms = fs.readFileSync(path.join(ROOT, 'masterSearch.js'), 'utf8');
   assert.match(ms, /data-ms-inline/); assert.match(ms, /groups\.length === 1/);
 });
