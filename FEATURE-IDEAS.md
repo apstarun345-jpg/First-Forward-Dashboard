@@ -240,3 +240,31 @@
 | 91 | **Exports ki apni language** — report text/PDF/WhatsApp template Hindi/English toggle | reportText/reportHtml me 2 template dicts + user pref (i18n system ka extension) | 🟡 |
 
 Quick-win jo abhi bina kisi naye service ke ho sakte hain: **83, 84, 86, 87, 90**.
+
+---
+
+## 1️⃣2️⃣ v3.57 ke baad — naye ideas (employee link + tag request flow ke agle kadam)
+
+> v3.57 me ship hua: employee link ke **📝 Form tab par "👤 Meri requests"** (All / Pending / Approved /
+> Dispatched / Rejected filters + 10-10 ke page) aur **📇 purana address suggestion** (device + server-side
+> Address book). Ye ideas usi flow ko aage badhate hain — #1–91 exclude karke.
+
+| # | Idea | Kya hoga | Kaise | Effort |
+|---|---|---|---|---|
+| 92 | **Status change par employee ko WhatsApp/SMS** | Approve/dispatch/reject hote hi employee ke mobile par message — abhi use khud ↻ Refresh dabana padta hai | `mailer.js` + notification watcher pattern already hai; WhatsApp Cloud API ya SMS gateway env-based, opt-in. `/api/tag-requests/:id` PUT par hook | 🔴 |
+| 93 | **Reject par reason mandatory + 🔁 Dobara bhejo** | Admin reason likhe; employee ko rejected card par "dobara bhejo" — pura purana data pre-filled, sirf correct karke submit | `rows[].adminReason` / `req.rejectReason` add (employee-status view me already `adminNote` jaata hai) + Form par `?again=<reqId>` se prefill | 🟡 |
+| 94 | **OTP-based employee identity** | Abhi `employeeToken` **device-local** hai — phone change / browser data clear hote hi poori history gayab. OTP se identity mobile par bind | `db` me `employees[] {name, mobileHash, token}`; public form par pehli baar mobile + OTP (email/WhatsApp), phir wahi token. Existing OTP 2FA ka code reuse | 🟡 |
+| 95 | **Courier AWB tracking** | `courier` already store hota hai — AWB/docket number add karo, employee khud delivery track kare | `req.dispatch.awb`; Dispatched karte waqt admin bhare; employee-status view me ek field + courier tracking link | 🟢 |
+| 96 | **Address book admin panel** | Admin purane/galat address correct ya merge kar sake — abhi sirf auto-accumulate hota hai (`workspaceStore().addressBook`) | Settings → 🏷️ Tag Request me naya tab: address book list (search · edit · delete · duplicate merge). Server endpoints already `rememberAddressBook` / `addressBookMap` use karte hain | 🟡 |
+| 97 | **Duplicate agent alert across employees** | Abhi duplicate check sirf **same employee naam** par hota hai (`tagAgentDupes`). Do alag employees same agent ki request laga dein to admin ko warning | `tagAgentDupes` ko agent×class par broaden karo (naam ignore), warning me employee ka naam bhi | 🟢 |
+| 98 | **Tag issuance reconciliation** | Dispatch hui tags vs actually issued ka match — employee link par "kitni tags use hui" | `tagIssued.js` already hai; request ke agent×class ko issued rows se compare, `req.reconciled` badge | 🟡 |
+| 99 | **Employee leaderboard / monthly summary** | Kitni requests, approval rate, avg turnaround (submit → dispatch), kitne tags | employee-status summary me hi aggregate; admin side par employee-wise table + CSV | 🟢 |
+
+**Quick wins (koi naya external service nahi chahiye):** **95, 97, 99** — teeno 🟢, existing data se ban jaate hain.
+**Sabse zyada employee-visible fayda:** **92** (WhatsApp status) aur **93** (reject reason + resubmit).
+
+### 🐛 v3.57 me pakda gaya bug (reference ke liye)
+`GET /api/public/tag-request/employee-status` ka `approvedTags` **sabhi** requests ka `approved` qty jodta
+tha. Submit par `approved = requested` hota hai, isliye **bina approve hue bhi** "31 approved tags" dikhta
+tha. Ab sirf `approved` / `dispatched` status wali requests ka jod. Is endpoint ke liye pehle koi test tha
+hi nahi — `dev/public-tag-request.test.js` me end-to-end test add hote hi bug pakda gaya.
