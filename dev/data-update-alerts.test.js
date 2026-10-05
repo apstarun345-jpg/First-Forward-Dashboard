@@ -159,7 +159,43 @@ test('server.js — reportUpdate route users ko bhi, deep link, corrections par 
   assert.match(src, /reportUpdate: 'both'/, 'data-update notification admin + users dono ko');
   assert.match(src, /delta[^\n]*link: '#\/tagIssued'/, 'report notification me page deep link');
   assert.match(src, /Object\.keys\(classes\)\.length > 0/, 'class-wise corrections bhi "changed"');
-  assert.match(src, /Date\.now\(\) - reportCheckAt < 150e3/, 'watcher 2.5 min throttle (fast notifications)');
+  assert.match(src, /REPORT_CHECK_INTERVALS = Object\.freeze\(\{ ff: 150e3, gv: 15e3 \}\)/, 'GV watcher runs every 15s while FF remains throttled');
+  assert.match(src, /gvTodayFeed\(!!force\)/, 'GV alert snapshot uses the same live GV Master feed as Home');
+  assert.match(src, /setInterval\(\(\) => checkReports\(false\)\.catch\(\(\) => \{\}\), 15e3\)/, 'closed-app server poll stays alive');
+  assert.match(src, /providerChanged = source === 'gv'/, 'old EIR-based GV snapshots are safely re-baselined');
+});
+
+test('GV header resolution ignores bare column-letter IDs without weakening real heading matches', async () => {
+  const src = await fs.readFile(path.join(ROOT, 'server.js'), 'utf8');
+  const normalizeStart = src.indexOf('function normalizeServerHeading(v) {');
+  const start = src.indexOf('function serverHeaderMatches(label, want) {', normalizeStart);
+  const end = src.indexOf('\n}', start) + 2;
+  assert.ok(normalizeStart >= 0 && start > normalizeStart && end > start, 'safe header matcher exists');
+  const matches = new Function(`${src.slice(normalizeStart, end)}; return serverHeaderMatches;`)();
+  assert.equal(matches('A', 'DATE'), false, 'bare column A is not mistaken for a DATE header');
+  assert.equal(matches('C', 'CCH'), false, 'bare column C is not mistaken for CCH');
+  assert.equal(matches('Issue Date', 'DATE'), true, 'a real multi-word date header still matches');
+  assert.equal(matches('Tag ID Number', 'TAG_ID'), true, 'specific GV tag-ID header still matches');
+});
+
+test('snapshotDelta compares new-day counts to zero and does not alert on an empty date rollover', async () => {
+  const src = await fs.readFile(path.join(ROOT, 'server.js'), 'utf8');
+  const start = src.indexOf('function snapshotDelta(prev, next) {');
+  const end = src.indexOf('\nfunction deltaText(delta) {', start);
+  assert.ok(start >= 0 && end > start, 'server snapshot delta helper exists');
+  const delta = new Function(`${src.slice(start, end)}; return snapshotDelta;`)();
+  assert.equal(delta(
+    { date: '2026-10-04', total: 12, classes: { VC4: 12 } },
+    { date: '2026-10-05', total: 0, classes: {} }
+  ).changed, false, 'midnight zero baseline is not a data-change notification');
+  assert.deepEqual(delta(
+    { date: '2026-10-04', total: 12, classes: { VC4: 12 } },
+    { date: '2026-10-05', total: 2, classes: { VC20: 2 } }
+  ), { total: 2, classes: { VC20: 2 }, changed: true }, 'new-day count is +2, not -10 vs yesterday');
+  assert.deepEqual(delta(
+    { date: '2026-10-05', total: 3, classes: { VC4: 2, VC20: 1 } },
+    { date: '2026-10-05', total: 3, classes: { VC4: 1, VC20: 2 } }
+  ), { total: 0, classes: { VC4: -1, VC20: 1 }, changed: true }, 'class corrections still notify at same total');
 });
 
 test('localAlert — office bell ka voiceOn BOOLEAN GETTER ho to bhi voice chalti hai (v3.24 fix)', () => {

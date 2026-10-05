@@ -1,0 +1,65 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
+
+const source = (name) => readFileSync(new URL(`../${name}`, import.meta.url), 'utf8');
+const bootScript = source('ui-boot.js');
+const html = source('index.html');
+const css = source('styles.css');
+const app = source('app.js');
+const sw = source('sw.js');
+
+function runBoot({ standalone = false, touch = 0, screenWidth = 1440, screenHeight = 900, innerWidth = 1440, innerHeight = 900, userAgent = '', dark = false } = {}) {
+  const classes = new Set();
+  const dataset = {};
+  const matchMedia = (query) => ({
+    matches: query === '(display-mode: standalone)' ? standalone : query === '(pointer: coarse)' ? touch > 0 : false
+  });
+  const context = {
+    window: { matchMedia, innerWidth, innerHeight },
+    navigator: { maxTouchPoints: touch, userAgent, userAgentData: { mobile: /Android|iPhone|iPad|iPod/i.test(userAgent) }, standalone },
+    screen: { width: screenWidth, height: screenHeight },
+    document: { documentElement: { classList: { add: (name) => classes.add(name) }, dataset } },
+    localStorage: { getItem: (key) => key === 'ff_theme' && dark ? 'dark' : null },
+    console: { warn() {} }
+  };
+  vm.runInNewContext(bootScript, context);
+  return { classes, dataset };
+}
+
+test('mobile/PWA bootstrap is external so the self-only CSP does not block it', () => {
+  assert.match(html, /<script src="\/ui-boot\.js\?v=104"><\/script>/);
+  assert.doesNotMatch(html, /<script\b(?![^>]*\bsrc=)[^>]*>[\s\S]*?<\/script>/);
+  assert.match(sw, /\.\/ui-boot\.js\?v=104/);
+  assert.match(sw, /apnapayment-v105/);
+});
+
+test('mobile UI detection survives Android desktop-site wide viewports and standalone PWAs', () => {
+  const androidDesktopSite = runBoot({ touch: 1, screenWidth: 393, screenHeight: 852, innerWidth: 980, userAgent: 'Mozilla/5.0 (Linux; Android 15) Chrome/140.0.0.0' });
+  const standalone = runBoot({ standalone: true, screenWidth: 1440, screenHeight: 900 });
+  const desktop = runBoot();
+
+  assert.equal(androidDesktopSite.classes.has('mobile-ui'), true);
+  assert.equal(standalone.classes.has('mobile-ui'), true);
+  assert.equal(desktop.classes.has('mobile-ui'), false);
+  assert.equal(runBoot({ dark: true }).dataset.theme, 'dark');
+});
+
+test('PWA More menu can open the off-canvas sidebar and close on navigation', () => {
+  assert.match(css, /html\.mobile-ui \.sidebar\s*\{[^}]*display:\s*flex !important/s);
+  assert.match(css, /html\.mobile-ui body\.side-open \.sidebar\s*\{[^}]*transform:\s*translateX\(0\) !important/s);
+  assert.match(css, /html\.mobile-ui body\.side-open \.side-backdrop\s*\{\s*display:\s*block !important/s);
+  assert.match(app, /U\.\$\('#menu-btn'\)\.addEventListener\('click', toggleSidebar\)/);
+  assert.match(app, /if \(action === 'more'\) \{ U\.\$\('#menu-btn'\)\?\.click\(\); return; \}/);
+  assert.match(app, /function closeSidebar\(\)[\s\S]*?setAttribute\('aria-expanded', 'false'\)/);
+});
+
+test('fixed bottom nav stays hidden before login and above-app sheets layer above it', () => {
+  assert.match(html, /id="mobile-nav" class="mobile-nav"[^>]*hidden/);
+  assert.match(css, /html\.mobile-ui #mobile-nav\.mobile-nav\[hidden\]\s*\{\s*display:\s*none !important/);
+  assert.match(css, /html\.mobile-ui \.side-backdrop\s*\{\s*z-index:\s*10000 !important/);
+  assert.match(css, /html\.mobile-ui \.drawer\s*\{\s*z-index:\s*10003 !important/);
+  assert.match(app, /document\.body\.classList\.add\('has-mobile-nav'\)/);
+  assert.match(app, /document\.body\.classList\.remove\('has-mobile-nav'\)/);
+});

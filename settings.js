@@ -202,6 +202,10 @@ FF.pages = FF.pages || {};
   function pushDiagHtml(st, health) {
     const p = (health && health.push) || {};
     const selfTest = st.selfTest || p.selfTest || {};
+    const gvWatcher = st.reportWatcher && st.reportWatcher.gv;
+    const gvWatcherText = gvWatcher
+      ? `${gvWatcher.error ? `⚠️ ${esc(String(gvWatcher.error).slice(0, 180))}` : '✅ no recent server error'}${gvWatcher.checkedAt ? ` · last OK ${esc(U.timeLabel(new Date(gvWatcher.checkedAt).getTime()))}` : ' · first read pending'}${gvWatcher.intervalMs ? ` · ${Math.round(gvWatcher.intervalMs / 1000)}s poll` : ''}${gvWatcher.snapshot ? ` · ${esc(gvWatcher.snapshot.date || '')}: ${Number(gvWatcher.snapshot.total) || 0} tags` : ''}`
+      : '—';
     const rows = [
       ['VAPID key source', `${esc(String(st.keySource || p.keySource || 'none'))} · ${st.keyDurable || p.durable ? 'durable ✓ (redeploy par same rahegi)' : '⚠️ TEMPORARY — deploy/restart par key badal jaayegi'}`],
       ['Auth scheme + subject', `${esc(String(st.scheme || p.scheme || 'vapid'))} · ${esc(String(st.subject || ''))}`],
@@ -210,10 +214,12 @@ FF.pages = FF.pages || {};
       ['Total devices (sab users)', String(p.devices !== undefined ? p.devices : (st.allSubs !== undefined ? st.allSubs : '—'))],
       ['TTL (retry window)', `${st.ttl || p.ttl || 0} seconds`],
       ['Aakhri delivery OK', st.lastOk ? `${esc(U.timeLabel(new Date(st.lastOk.at).getTime()))} · status ${esc(String(st.lastOk.status))} · ${esc(String(st.lastOk.host || ''))}` : '—'],
-      ['Aakhri delivery fail', st.lastError ? `${esc(U.timeLabel(new Date(st.lastError.at).getTime()))} · status ${esc(String(st.lastError.status || 'network'))} · ${esc(String(st.lastError.error || '').slice(0, 140))}` : '—']
+      ['Aakhri delivery fail', st.lastError ? `${esc(U.timeLabel(new Date(st.lastError.at).getTime()))} · status ${esc(String(st.lastError.status || 'network'))} · ${esc(String(st.lastError.error || '').slice(0, 140))}` : '—'],
+      ['GV live data detection', gvWatcherText]
     ];
     const boxes = [];
     if (st.configError) boxes.push(`<div class="warn-box">⚠️ Push service delivery reject kar rahi hai (status ${esc(String(st.configError.status || '?'))}) — ${esc(String(st.configError.error || '').slice(0, 200))}${st.configError.hint ? `<br><small>${esc(String(st.configError.hint))}</small>` : ''}</div>`);
+    if (gvWatcher && gvWatcher.error) boxes.push(`<div class="warn-box">⚠️ GV Master se live snapshot read nahi ho pa raha: ${esc(String(gvWatcher.error).slice(0, 220))}</div>`);
     if (p.warning) boxes.push(`<div class="warn-box">⚠️ ${esc(String(p.warning))}</div>`);
     if (!boxes.length) boxes.push('<div class="ok-box" style="margin:0">✅ Push pipeline theek hai — VAPID keys durable hain, self-test pass, aur delivery 2xx aa rahi hai.</div>');
     return `${boxes.join('')}

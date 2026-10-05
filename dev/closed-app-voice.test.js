@@ -145,7 +145,7 @@ test('push me voice line + badge jaate hain; voice pref OFF par text push phir b
     push.state.deliveries.length = 0;
     await fetch(server.base + '/api/auth/signup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'voicecheck', name: 'Voice Check', email: 'vc@example.test', password: 'voice-pass-1' }) });
     assert.ok(await waitForPush(push, 1), 'signup notification admin tak push honi chahiye');
-    const p2 = push.state.deliveries.find((d) => d.payload && d.payload.tag === 'signup').payload;
+    const p2 = push.state.deliveries.find((d) => d.payload && d.payload.type === 'signup').payload;
     assert.ok(p2, 'signup push mili');
     assert.equal(p2.speak, true);
     assert.match(p2.voice, /Voice Check|signup/i, `voice line me khabar honi chahiye: ${p2.voice}`);
