@@ -140,6 +140,52 @@ FF.pages = FF.pages || {};
     return { cur, last, ready: true };
   }
   const gvEirKey = (r) => clean(r.agentId) ? `id:${norm(r.agentId)}` : `name:${norm(r.agentName)}`;
+  const FF_STOCK_CLASS_FIELDS = [['VC4', 'stockVc4'], ['VC5', 'stockC1'], ['VC6', 'stockC2'], ['VC7', 'stockC3'], ['VC12', 'stockC4'], ['VC16', 'stockC5']];
+  /** Class mix is separate from the selected dispatch basis: it always shows the agent's full field stock. */
+  function stockMixOf(r, ch) {
+    const source = r && r.stockByClass && typeof r.stockByClass === 'object' ? r.stockByClass : null;
+    let classes = source ? Object.fromEntries(Object.entries(source).map(([name, value]) => [clean(name).toUpperCase(), Math.max(0, n0(value))]).filter(([name]) => !!name)) : {};
+    let available = source ? r.stockClassAvailable !== false : false;
+    if (!Object.keys(classes).length && ch === 'ff') {
+      classes = Object.fromEntries(FF_STOCK_CLASS_FIELDS.map(([label, key]) => [label, Math.max(0, n0(r && r[key]))]));
+      available = r && (r.stockClassAvailable === true || FF_STOCK_CLASS_FIELDS.some(([, key]) => Object.prototype.hasOwnProperty.call(r, key)));
+    }
+    if (!Object.keys(classes).length && ch === 'gv' && r && r.stockClassAvailable === true) {
+      classes = { VC4: Math.max(0, n0(r.stockVc4)) };
+      available = true;
+    }
+    return { classes, available: !!available };
+  }
+  function aggregateStockMix(list) {
+    const classes = new Map();
+    let available = false;
+    (list || []).forEach((r) => {
+      if (!r.stockClassAvailable) return;
+      available = true;
+      Object.entries(r.stockClasses || {}).forEach(([name, value]) => classes.set(name, (classes.get(name) || 0) + n0(value)));
+    });
+    return { stockClasses: Object.fromEntries(classes), stockClassAvailable: available };
+  }
+  function stockClassEntries(r) {
+    if (!r || !r.stockClassAvailable) return [];
+    const sourceTotal = Math.max(0, n0(r.stock && r.stock.total));
+    const entries = Object.entries(r.stockClasses || {}).filter(([, value]) => n0(value) > 0);
+    const knownTotal = entries.reduce((sum, [, value]) => sum + n0(value), 0);
+    if (r.kind !== 'tl' && sourceTotal > knownTotal) entries.push(['Other / unmapped', sourceTotal - knownTotal]);
+    return entries;
+  }
+  function stockClassText(r) {
+    return stockClassEntries(r).map(([name, value]) => `${name} ${fmt(value)}`).join(' · ');
+  }
+  function stockClassCell(r) {
+    const sourceTotal = Math.max(0, n0(r && r.stock && r.stock.total));
+    if (!r || !r.stockClassAvailable) return sourceTotal > 0 ? '<span class="dim" title="Source sheet me class-wise stock available nahi">Class mix unavailable</span>' : '<span class="dim" title="Koi stock nahi">—</span>';
+    const entries = stockClassEntries(r);
+    if (!entries.length) return '<span class="dim">—</span>';
+    const detail = entries.map(([name, value]) => `${name}: ${fmt(value)}`).join(' · ');
+    const title = r.kind === 'tl' ? `Sum of member-agent class stock (may differ from TL sheet total ${fmt(sourceTotal)}): ${detail}` : detail;
+    return `<div class="dp2-stock-mix" title="${esc(title)}">${entries.map(([name, value]) => `<span><small>${esc(name)}</small><b>${fmt(value)}</b></span>`).join('')}</div>`;
+  }
 
   /** Sab agents (FF EIR + GV REPORT operational fields) ek hi shape me. */
   function collectAgents() {
@@ -148,12 +194,14 @@ FF.pages = FF.pages || {};
     ff.forEach((a) => {
       if (a.isMaster) return;
       const direct = !!a.tlExcluded;
+      const stockMix = stockMixOf(a, 'ff');
       out.push({
         kind: 'agent', ch: 'ff', name: clean(a.name || a.agentId), id: clean(a.agentId || a.id),
         tl: direct ? '' : clean(a.tlName), tlId: clean(a.tlId), direct,
         directLabel: direct ? FF.config.directLabel(a, 'ff') : '', priority: prioOf(a.agentPriority || a.priority),
         status: clean(a.agentStatus),
         cur: trio(a.curVc4, a.curNvc4, a.curTotal), last: trio(a.lastVc4, a.lastNvc4, a.lastTotal), stock: trio(a.stockVc4, a.stockNvc4, a.stockTotal),
+        stockClasses: stockMix.classes, stockClassAvailable: stockMix.available,
         tlStock: a.tlStockTotal != null || a.tlStockVc4 != null ? trio(a.tlStockVc4, a.tlStockNvc4, a.tlStockTotal) : null,
         tlPriority: clean(a.tlPriority)
       });
@@ -164,6 +212,7 @@ FF.pages = FF.pages || {};
       const findEir = (map, r) => map.get(gvEirKey(r)) || map.get(`name:${norm(r.agentName)}`) || null;
       gv.forEach((r) => {
         const direct = !!FF.config.isDirectAgent(r, 'gv');
+        const stockMix = stockMixOf(r, 'gv');
         const current = findEir(eir.cur, r), previous = findEir(eir.last, r);
         // In a real load, an empty EIR result is a real zero—not permission to resurrect REPORT
         // issuance. The fallback is only for isolated legacy adapters/tests that never loaded daily.
@@ -174,6 +223,7 @@ FF.pages = FF.pages || {};
           tl: direct ? '' : clean(r.tlName), tlId: clean(r.tlId), direct,
           directLabel: direct ? FF.config.directLabel(r, 'gv') : '', priority: prioOf(r.priority), status: clean(r.agentStatus),
           cur, last, stock: trio(r.stockVc4, r.stockComm, r.stockTotal),
+          stockClasses: stockMix.classes, stockClassAvailable: stockMix.available,
           tlStock: r.tlStockTotal != null ? trio(r.tlStockVc4, r.tlStockComm, r.tlStockTotal) : null, tlPriority: ''
         });
       });
@@ -198,12 +248,13 @@ FF.pages = FF.pages || {};
       const cur = sumTrio(list, 'cur'), last = sumTrio(list, 'last'), agentStock = sumTrio(list, 'stock');
       const src = list.find((a) => a.tlStock);
       const stock = !g.direct && src ? src.tlStock : agentStock;          // TL stock: sheet ki value, warna agents ka jod (profile drawer jaisa)
+      const stockMix = aggregateStockMix(list);
       const sourceTlPrios = !g.direct ? U.uniq(list.map((a) => clean(a.tlPriority)).filter(Boolean)) : [];
       const sheetPrio = sourceTlPrios.length === 1 ? prioOf(sourceTlPrios[0]) : sourceTlPrios.map(prioOf).join(' / ');
       out.push({
         kind: 'tl', ch: g.ch, name: g.name, id: (list.find((a) => a.tlId) || {}).tlId || '', tl: g.direct ? '' : g.name, direct: g.direct,
         directLabel: g.direct ? g.name : '', priority: sheetPrio, status: '', agents: list.length, members: list,
-        cur, last, stock, tlStock: null
+        cur, last, stock, stockClasses: stockMix.stockClasses, stockClassAvailable: stockMix.stockClassAvailable, tlStock: null
       });
     });
     out.forEach((r, i) => { r.uid = `t${i}`; });
@@ -297,6 +348,7 @@ FF.pages = FF.pages || {};
       { k: 'rate', t: 'Run-rate', num: 1, sub: `/day · ÷ ${el}` },
       { k: 'required', t: 'Required', num: 1, sub: `rate × ${days} din` },
       { k: 'stock', t: 'Stock', num: 1, sub: 'in field' },
+      { k: '', t: view === 'tls' ? 'Agents stock' : 'All stock', sub: view === 'tls' ? 'agent class sum' : 'class-wise mix' },
       { k: 'net', t: 'Dispatch', num: 1, sub: 'WITH stock', hot: 1 },
       { k: 'gross', t: 'Dispatch', num: 1, sub: 'W/O stock', hot: 2 },
       { k: 'cover', t: 'Cover', num: 1, sub: 'din' },
@@ -317,7 +369,7 @@ FF.pages = FF.pages || {};
     const on = picked.has(r.uid);
     return `<tr class="dp2-row ${r.direct ? 'is-direct' : ''} ${r.cover != null && r.cover < 7 && !r.direct ? 'is-low' : ''} ${on ? 'is-picked' : ''}" data-dp-open="${r.uid}">
       <td class="dp2-pick"><input type="checkbox" data-dp-pick="${r.uid}" ${on ? 'checked' : ''} aria-label="Select ${esc(r.name)}"></td><td class="dp2-idx">${i + 1}</td><td>${nameCell}</td>${view === 'tls' ? `<td class="num">${fmt(r.agents)}</td>` : `<td>${tlCell}</td>`}<td>${prioBadge(r.priority)}</td>
-      <td class="num">${fmt(r.lastV)}</td><td class="num"><b>${fmt(r.curV)}</b>${growthChip(r.c.growth)}</td><td class="num">${fmt(r.rate, true)}</td><td class="num">${fmt(r.required)}</td><td class="num">${fmt(r.stockV)}</td>
+      <td class="num">${fmt(r.lastV)}</td><td class="num"><b>${fmt(r.curV)}</b>${growthChip(r.c.growth)}</td><td class="num">${fmt(r.rate, true)}</td><td class="num">${fmt(r.required)}</td><td class="num">${fmt(r.stockV)}</td><td>${stockClassCell(r)}</td>
       <td class="num dp2-hot1"><b>${fmt(r.net)}</b></td><td class="num dp2-hot2"><b>${fmt(r.gross)}</b></td><td class="num">${coverCell(r.cover)}</td>
       <td><span class="dp2-act ${r.action.cls}">${r.action.t}</span></td></tr>`;
   }
@@ -325,7 +377,7 @@ FF.pages = FF.pages || {};
     const shown = list.slice(0, state.limit);
     const t = agg(list);
     const label = view === 'tls' ? 'TLs' : 'agents';
-    const foot = list.length ? `<tfoot><tr class="row-total"><td></td><td></td><td colspan="${view === 'tls' ? 1 : 1}">Total · ${fmt(list.length)} ${label}</td><td class="num">${view === 'tls' ? fmt(U.sum(list, (r) => r.agents)) : ''}</td><td></td><td class="num">${fmt(t.last)}</td><td class="num">${fmt(t.cur)}</td><td class="num">${fmt(t.rate, true)}</td><td class="num">${fmt(t.required)}</td><td class="num">${fmt(t.stock)}</td><td class="num dp2-hot1">${fmt(t.net)}</td><td class="num dp2-hot2">${fmt(t.gross)}</td><td class="num">${coverCell(t.cover)}</td><td></td></tr></tfoot>` : '';
+    const foot = list.length ? `<tfoot><tr class="row-total"><td></td><td></td><td colspan="${view === 'tls' ? 1 : 1}">Total · ${fmt(list.length)} ${label}</td><td class="num">${view === 'tls' ? fmt(U.sum(list, (r) => r.agents)) : ''}</td><td></td><td class="num">${fmt(t.last)}</td><td class="num">${fmt(t.cur)}</td><td class="num">${fmt(t.rate, true)}</td><td class="num">${fmt(t.required)}</td><td class="num">${fmt(t.stock)}</td><td></td><td class="num dp2-hot1">${fmt(t.net)}</td><td class="num dp2-hot2">${fmt(t.gross)}</td><td class="num">${coverCell(t.cover)}</td><td></td></tr></tfoot>` : '';
     const body = shown.map((r, i) => rowHtml(r, i, view)).join('') || `<tr><td colspan="15"><div class="empty-state">Is filter par koi ${label === 'TLs' ? 'TL' : 'agent'} nahi mila<br><span class="dim small">Filters clear karke dekho</span></div></td></tr>`;
     return `<div class="table-wrap dp2-wrap"><table class="dp2-table">${head(view)}<tbody>${body}</tbody>${foot}</table></div>
       ${list.length > shown.length ? `<div class="dp2-more"><button class="btn small" data-dp-more="1">⬇ Aur dikhao (${fmt(list.length - shown.length)} baaki)</button><span class="dim small">Showing ${fmt(shown.length)} / ${fmt(list.length)} · sort karne par poori list sort hoti hai</span></div>` : ''}`;
@@ -382,8 +434,8 @@ FF.pages = FF.pages || {};
   }
 
   // ---- export / share -----------------------------------------------------------------------------------
-  const CSV_HEAD = (view) => [view === 'tls' ? 'TL' : 'Agent', 'ID', 'Channel', 'Type', view === 'tls' ? 'Agents' : 'TL', 'Priority', 'Last month', 'This month', 'Run-rate / day', `Required (× ${U.suggestDays()} din)`, 'Stock', 'Dispatch WITH stock', 'Dispatch W/O stock', 'Cover (din)', 'Status'];
-  const csvRow = (r, view) => [r.name, r.id, CH[r.ch].label, r.direct ? 'Direct' : 'TL-managed', view === 'tls' ? r.agents : (r.direct ? r.directLabel : r.tl), r.priority, r.lastV, r.curV, Number(r.rate.toFixed(2)), r.required, r.stockV, r.net, r.gross, r.cover == null ? '' : Number(r.cover.toFixed(1)), r.action.t.replace(/^\S+\s/, '')];
+  const CSV_HEAD = (view) => [view === 'tls' ? 'TL' : 'Agent', 'ID', 'Channel', 'Type', view === 'tls' ? 'Agents' : 'TL', 'Priority', 'Last month', 'This month', 'Run-rate / day', `Required (× ${U.suggestDays()} din)`, 'Stock', view === 'tls' ? 'Agents stock · class-wise sum' : 'All stock · class-wise mix', 'Dispatch WITH stock', 'Dispatch W/O stock', 'Cover (din)', 'Status'];
+  const csvRow = (r, view) => [r.name, r.id, CH[r.ch].label, r.direct ? 'Direct' : 'TL-managed', view === 'tls' ? r.agents : (r.direct ? r.directLabel : r.tl), r.priority, r.lastV, r.curV, Number(r.rate.toFixed(2)), r.required, r.stockV, stockClassText(r), r.net, r.gross, r.cover == null ? '' : Number(r.cover.toFixed(1)), r.action.t.replace(/^\S+\s/, '')];
   /** Channel filter ka readable label — multi-select ke saath "First Forward + GV Partner". */
   function channelLabel() {
     const set = U.asValueSet(state.ch);
@@ -872,6 +924,7 @@ FF.pages = FF.pages || {};
 
   FF.dispatchPlanner = {
     collectAgents, collectTls, withCalc, agg, state, prioOf, passes, sortRows, columns, tableHtml, chipsHtml, kpiHtml,
+    stockClassCell, stockClassText, csvHead: CSV_HEAD, csvRow,
     // v3.18 — multiple selection
     filterOptions, channelLabel, FILTER_OPTIONS,
     get picked() { return picked; }, get pickedCount() { return picked.size; },
