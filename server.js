@@ -6176,7 +6176,15 @@ async function handleApi(req, res, url) {
   function employeeStatusSummary(token) {
     const rows = employeeStatusByToken(token), counts = { all: rows.length, pending: 0, approved: 0, dispatched: 0, rejected: 0 };
     let requestedTags = 0, approvedTags = 0;
-    rows.forEach((r) => { const st = String(r.status || 'pending').toLowerCase(); if (counts[st] !== undefined) counts[st]++; requestedTags += (r.rows || []).reduce((n, x) => n + (Number(x.requested ?? x.approved) || 0), 0); approvedTags += (r.rows || []).reduce((n, x) => n + (Number(x.approved) || 0), 0); });
+    rows.forEach((r) => {
+      const st = String(r.status || 'pending').toLowerCase();
+      if (counts[st] !== undefined) counts[st]++;
+      requestedTags += (r.rows || []).reduce((n, x) => n + (Number(x.requested ?? x.approved) || 0), 0);
+      // ✅ Approved tags = sirf woh requests jinko admin ne sach me approve/dispatch kiya. Pehle ye
+      // sabhi requests ka 'approved' qty jodta tha — submit par approved = requested hota hai, isliye
+      // bina approve hue bhi "31 approved tags" dikhta tha (employee ke liye galat number).
+      if (st === 'approved' || st === 'dispatched') approvedTags += (r.rows || []).reduce((n, x) => n + (Number(x.approved) || 0), 0);
+    });
     return {
       totalRequests: counts.all, pending: counts.pending, approved: counts.approved,
       dispatched: counts.dispatched, rejected: counts.rejected, requestedTags, approvedTags,

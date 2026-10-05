@@ -280,3 +280,99 @@ test('👤 employee link request history — ALL/status filters and 10-request p
   assert.ok(filteredHtml.includes('aria-pressed="true"'), 'selected status filter is visibly and accessibly active');
   assert.equal((filteredHtml.match(/class="tr-st-card /g) || []).length, counts.rejected);
 });
+
+/* 🌐 v3.57 — employee link ke 📝 Form tab par "👤 Meri requests" + 📇 purana address suggestion.
+ *
+ *   • Employee ko apni requests dekhne ke liye 🔎 Status tab kholna NAHI padta — wahi Form page par
+ *     panel hai: All / Pending / Approved / Dispatched / Rejected chips (band panel me bhi counts
+ *     dikhte hain), andar wahi 10-10 ke page + ← Previous / Next →.
+ *   • Wahi agent dobara chuno (kabhi bhi) to purana mobile · address · pincode chip me dikhta hai aur
+ *     ek click me bhar jaata hai — chip tab bhi dikhta hai jab employee ne khud kuch type kiya ho.
+ */
+test('🌐 employee link Form tab — "👤 Meri requests" panel: All + status filters, 10-10 ke page, prev/next', () => {
+  const statuses = ['pending', 'approved', 'dispatched', 'rejected'];
+  const requests = Array.from({ length: 23 }, (_, i) => ({
+    id: `tagreq_${String(i + 1).padStart(4, '0')}`, at: '2026-10-02T05:00:00.000Z',
+    status: statuses[i % statuses.length], total: i + 1, agentName: `Agent ${i + 1}`,
+    classes: [{ cls: 'VC4', requested: i + 2, approved: i + 1 }]
+  }));
+  const counts = requests.reduce((o, r) => { o[r.status]++; return o; }, { pending: 0, approved: 0, dispatched: 0, rejected: 0 });
+  const summary = { totalRequests: requests.length, ...counts, requestedTags: 100, approvedTags: 80, requests };
+
+  try {
+    TR._test.setPublic({ brand: 'First Forward', enabled: true });
+    TR._test.setEmployee({ token: 'tok_0123456789abcdefghij', summary, filter: 'all', page: 1 });
+
+    const panel = TR._test.employeeHistoryPanelHtml();
+    assert.ok(panel.includes('id="tr-emp-history-panel"'), 'panel Form tab par render hota hai');
+    assert.ok(panel.includes('👤 Meri requests'), 'employee ko apni requests ka section dikhta hai');
+    for (const key of ['all', 'pending', 'approved', 'dispatched', 'rejected']) {
+      assert.ok(panel.includes(`data-tr-emp-filter="${key}"`), `${key} filter Form tab par bhi hai`);
+    }
+    assert.equal((panel.match(/class="tr-st-card /g) || []).length, 10, 'pehla page = exactly 10 requests');
+    assert.match(panel, /1–10 \/ 23/);
+    assert.match(panel, /data-tr-emp-page="prev" disabled/, 'page 1 par Previous disabled');
+    assert.match(panel, /data-tr-emp-page="next"/);
+    assert.ok(panel.includes('↻ Refresh'), 'employee khud refresh kar sakta hai');
+
+    // Band panel me bhi status counts dikhne chahiye — employee ko ek nazar me pata chale.
+    for (const [key, n] of [['pending', counts.pending], ['approved', counts.approved], ['dispatched', counts.dispatched], ['rejected', counts.rejected]]) {
+      const chip = new RegExp(`tr-emp-chip-${key}">[^<]*<b>${n}</b>`);
+      assert.match(panel, chip, `${key} count collapsed summary me dikhta hai`);
+    }
+
+    // Page 3 (aakhri) — Next disabled, baaki 3 requests.
+    TR._test.setEmployee({ token: 'tok_0123456789abcdefghij', summary, filter: 'all', page: 3 });
+    const lastPanel = TR._test.employeeHistoryPanelHtml();
+    assert.equal((lastPanel.match(/class="tr-st-card /g) || []).length, 3);
+    assert.match(lastPanel, /data-tr-emp-page="next" disabled/);
+    assert.match(lastPanel, /data-tr-emp-page="prev"/);
+
+    // Status filter — sirf wahi status ki requests.
+    TR._test.setEmployee({ token: 'tok_0123456789abcdefghij', summary, filter: 'rejected', page: 1 });
+    const rejectedPanel = TR._test.employeeHistoryPanelHtml();
+    assert.equal((rejectedPanel.match(/class="tr-st-card /g) || []).length, counts.rejected);
+    assert.match(rejectedPanel, /data-tr-emp-filter="rejected"[^>]*aria-pressed="true"/);
+  } finally {
+    TR._test.setPublic(null);
+    TR._test.setEmployee({});
+  }
+});
+
+test('🌐 Meri requests panel — bina token / login form par nahi dikhta (koi data leak nahi)', () => {
+  try {
+    TR._test.setPublic({ brand: 'First Forward', enabled: true });
+    TR._test.setEmployee({ token: '' });
+    assert.equal(TR._test.employeeHistoryPanelHtml(), '', 'token na ho (pehle kabhi request nahi lagi) → panel nahi');
+    TR._test.setEmployee({ token: 'tok_0123456789abcdefghij', summary: null });
+    assert.ok(TR._test.employeeHistoryPanelHtml().includes('load ho rahi hai'), 'summary load hote waqt loading state');
+    TR._test.setPublic(null); // login wala form
+    TR._test.setEmployee({ token: 'tok_0123456789abcdefghij', summary: { totalRequests: 1, pending: 1, approved: 0, dispatched: 0, rejected: 0, requestedTags: 5, approvedTags: 0, requests: [] } });
+    assert.equal(TR._test.employeeHistoryPanelHtml(), '', 'login form par panel nahi (wahan 📥 Meri requests tab hai)');
+  } finally {
+    TR._test.setPublic(null);
+    TR._test.setEmployee({});
+  }
+});
+
+test('📇 purana address suggestion — same agent dobara chuno to purana mobile/address/pincode ek click me', () => {
+  const saved = { mobile: '9876500001', address: '24, Shanti Nagar, Sodala, Jaipur', pincode: '302019', source: 'Address' };
+  const chip = TR._test.contactSuggestHtml({ id: 'r1', suggest: saved, mobile: '', address: '', pincode: '' });
+  assert.match(chip, /data-tr-fill-old="r1"/, 'chip par click handler hai');
+  assert.ok(chip.includes('9876500001'), 'purana mobile dikhta hai');
+  assert.ok(chip.includes('24, Shanti Nagar, Sodala, Jaipur'), 'purana address dikhta hai');
+  assert.ok(chip.includes('302019'), 'purana pincode dikhta hai');
+  assert.ok(chip.includes('Address book'), 'source batata hai ki address kahan se aaya');
+
+  // Employee ne khud alag address type kiya → suggestion chhupni NAHI chahiye (wohi maang thi).
+  const typed = TR._test.contactSuggestHtml({ id: 'r2', suggest: saved, mobile: '9000000000', address: 'Naya address, Jaipur', pincode: '302001' });
+  assert.match(typed, /data-tr-fill-old="r2"/, 'khud type kiya ho tab bhi purana address suggest hota hai');
+
+  // Purana address pehle se same bhara hua → chip bekaar, dikhegi nahi.
+  assert.equal(TR._test.contactSuggestHtml({ id: 'r3', suggest: saved, mobile: '9876500001', address: '24, Shanti Nagar, Sodala, Jaipur', pincode: '302019' }), '');
+  // Koi purana record nahi / khaali record → chip nahi.
+  assert.equal(TR._test.contactSuggestHtml({ id: 'r4', mobile: '', address: '', pincode: '' }), '');
+  assert.equal(TR._test.contactSuggestHtml({ id: 'r5', suggest: { mobile: '', address: '', pincode: '' } }), '');
+  // Purani request (device book) se aaya ho to source wahi dikhe.
+  assert.ok(TR._test.contactSuggestHtml({ id: 'r6', suggest: { ...saved, source: 'Request' }, mobile: '', address: '', pincode: '' }).includes('Pichli request'));
+});
