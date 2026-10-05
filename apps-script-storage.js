@@ -85,7 +85,8 @@ export class AppsScriptStore {
         return json;
       } catch (err) {
         lastErr = err.name === 'AbortError' ? Object.assign(new Error(`${this.label || 'Apps Script storage'} timeout`), { retry: true }) : err;
-        const retry = lastErr.retry || /fetch failed|ECONN|ENOTFOUND|EAI_AGAIN|socket/i.test(String(lastErr.message) + String(lastErr.cause || ''));
+        // 'busy, retry' = Apps Script lock contention (another write in flight) — retryable by design.
+        const retry = lastErr.retry || /busy, retry|fetch failed|ECONN|ENOTFOUND|EAI_AGAIN|socket/i.test(String(lastErr.message) + String(lastErr.cause || ''));
         if (!retry || attempt === maxAttempts - 1) break;
         await this.wait(500 * 2 ** attempt + Math.floor(Math.random() * 200));
       } finally { clearTimeout(timer); }

@@ -31,10 +31,10 @@ function runBoot({ standalone = false, touch = 0, screenWidth = 1440, screenHeig
 }
 
 test('mobile/PWA bootstrap is external so the self-only CSP does not block it', () => {
-  assert.match(html, /<script src="\/ui-boot\.js\?v=104"><\/script>/);
+  assert.match(html, /<script src="\/ui-boot\.js\?v=105"><\/script>/);
   assert.doesNotMatch(html, /<script\b(?![^>]*\bsrc=)[^>]*>[\s\S]*?<\/script>/);
-  assert.match(sw, /\.\/ui-boot\.js\?v=104/);
-  assert.match(sw, /apnapayment-v113/);
+  assert.match(sw, /\.\/ui-boot\.js\?v=105/);
+  assert.match(sw, /apnapayment-v114/);
 });
 
 test('installed PWA launches from the root, and legacy /api/pwa start URLs return the app shell', () => {
@@ -47,7 +47,7 @@ test('installed PWA launches from the root, and legacy /api/pwa start URLs retur
   const publicPwaRoutes = server.indexOf("if (p === '/api/pwa/icon/192'");
   assert.ok(legacyRoute >= 0 && publicPwaRoutes > legacyRoute, 'legacy shell route runs before the auth-protected API fallback');
   assert.match(server.slice(legacyRoute, publicPwaRoutes), /serveStatic\(req, res, '\/index\.html', url\.search\)/);
-  assert.match(html, /\/api\/pwa\/manifest\?v=106/, 'manifest is refetched by installed clients');
+  assert.match(html, /\/api\/pwa\/manifest\?v=107/, 'manifest is refetched by installed clients');
 });
 
 test('mobile UI detection survives Android desktop-site wide viewports and standalone PWAs', () => {
