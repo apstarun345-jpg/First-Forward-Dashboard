@@ -314,32 +314,114 @@ async function readJson(file, fallback) {
     throw new Error(`Cannot read persistent data ${path.basename(file)}: ${err.message}`);
   }
 }
+// 🛡️ v3.50 — notify record ka self-heal guard.
+// notify me hi tag requests (workspace) save hoti hain, isliye ek purana process jo kam data jaanta
+// hai wo apna snapshot likh kar nayi requests uda sakta hai (deploy overlap / rollback). Save se
+// pehle storage copy se missing requests id-wise merge ho jaati hain — kuch bhi delete nahi hota.
+let notifyTagBaseline = -1;   // last durably save hui tag-request count
+let tagReqScanBusy = false;   // boot recovery scan ek hi baar chale
+function tagReqBaselineSync() { notifyTagBaseline = tagReqCount(); }
+let notifyVerifyAt = 0;       // last storage verify (throttle — har save par read mehnga hai)
+let notifyLastWriteAt = 0;    // hamari aakhri notify save kab confirm hui (doosre writer ki pehchaan)
+const NOTIFY_VERIFY_MS = 3 * 60e3;
+// Naya tag request aane par save se pehle storage SEEDHA verify hota hai (neeche `tagReqForceVerify`)
+// — ek purana process jo bas apni hi request save kar raha ho, doosron ki requests na uda de.
+let tagReqForceVerify = false;
+// Admin ne jaan-bujh kar delete ki hui requests ko guard wapas na laaye (storage me purani copy
+// kuch der tak zinda rehti hai). 30 min tak un IDs ko merge list se hata do.
+const tagReqDeletedIds = new Map();
+function tagReqMarkDeleted(id) {
+  const key = String(id || '').trim();
+  if (!key) return;
+  tagReqDeletedIds.set(key, Date.now());
+  if (tagReqDeletedIds.size > 500) for (const [k, t] of tagReqDeletedIds) if (Date.now() - t > 30 * 60e3) tagReqDeletedIds.delete(k);
+}
+const tagReqSuppressed = (r) => {
+  const t = tagReqDeletedIds.get(tagReqKeyOf(r));
+  return !!t && Date.now() - t < 30 * 60e3;
+};
+/**
+ * Save se pehle: (a) is process me requests kam ho gayi hain, (b) naya tag request store me aaya hai,
+ * ya (c) 3 min se koi check nahi hua — to storage record padho aur MISSING requests id-wise merge kar
+ * do (kuch delete nahi hota). Saves serialised hain: ek verify chalti ho to doosri uske baad.
+ */
+let notifyGuardChain = Promise.resolve();
+function notifyShrinkGuard() {
+  const run = notifyGuardChain.then(() => notifyGuardRun()).catch((err) => { console.warn('notify guard skip:', err.message); });
+  notifyGuardChain = run.catch(() => {});
+  return run;
+}
+async function notifyGuardRun() {
+  if (!sheetsStore || typeof sheetsStore.read !== 'function') return;
+  const count = tagReqCount();
+  if (notifyTagBaseline < 0) notifyTagBaseline = count;
+  const shrunk = count < notifyTagBaseline;
+  const forced = tagReqForceVerify;
+  const due = Date.now() - notifyVerifyAt > NOTIFY_VERIFY_MS;
+  let needRead = shrunk || forced || due || !notifyLastWriteAt;
+  if (!needRead && typeof sheetsStore.history === 'function') {
+    // Sasta check (sirf metadata, ciphertext nahi): hamare aakhri save ke BAAD kisi doosre process ne
+    // notify record likha hai? Uska data hamare snapshot me nahi hai — save se pehle merge karna hoga.
+    try {
+      const hist = await sheetsStore.history();
+      const newest = (hist.entries || []).reduce((m, e) => (e.kind === 'notify' ? Math.max(m, Date.parse(e.savedAt) || 0) : m), 0);
+      if (newest > notifyLastWriteAt) needRead = true;
+    } catch { needRead = true; }   // history na mile to safety ke liye poora read karo
+  }
+  if (!needRead) return;
+  if (!forced && Date.now() - notifyVerifyAt < 1500) return;  // read storm se bacho — agla save dekh lega
+  notifyVerifyAt = Date.now(); tagReqForceVerify = false;
+  const stored = await sheetsStore.read();
+  const ws = tagReqWorkspaceOf(stored && stored.notify);
+  const missed = tagReqMissing(workspaceStore().tagRequests, ws.tagRequests).filter((r) => !tagReqSuppressed(r)); // storage me zyada
+  if (missed.length) {
+    const merged = mergeMissingTagRequests(missed, { addressBook: ws.addressBook || null });
+    durableSnapshots.set('notify', JSON.stringify(db.notify, null, 2)); // rollback bhi recovery ke baad ka state rakhe
+    console.warn(`🛡️ notify guard: ${merged.added.length} tag request storage se wapas merge ki (koi doosra process aage badh gaya tha).`);
+    try {
+      recordNotification({
+        type: 'settings', title: `🛡️ ${merged.added.length} tag request storage se wapas mile`,
+        body: `Save se pehle check hua ki storage me ${merged.added.length} request zyada hain — wo ID-wise wapas jod di gayin (${merged.added.map(tagReqKeyOf).slice(0, 8).map((id) => `#${id}`).join(', ')}). Kuch delete nahi hua.`,
+        target: 'admin', meta: { source: 'notify-guard', ids: merged.added.map(tagReqKeyOf).slice(0, 20), link: '#/tagRequest?view=requests&recover=1' }
+      });
+    } catch { /* notification optional */ }
+  } else if (shrunk) {
+    const lost = notifyTagBaseline - count;
+    if (lost > 5) { db.notify.lastTagReqCheckLost = lost; console.warn(`🛡️ notify guard: ${lost} tag request kam thi par storage me bhi nahi mili — ⏪ Wapas lao se history check karo.`); }
+  }
+  notifyTagBaseline = tagReqCount();
+}
 function persist(kind) {
   const file = FILES[kind];
-  const snapshot = JSON.stringify(db[kind], null, 2);
   const prev = writeQueue.get(kind) || Promise.resolve();
   // Apps Script store batches + orders writes itself, so don't serialise (each call would wait seconds).
   const chain = STORAGE_BACKEND === 'appsscript' ? Promise.resolve() : prev.catch(() => {});
   const next = chain.then(async () => {
-    if (sheetsStore) {
-      await sheetsStore.save(kind, JSON.parse(snapshot));
-    } else {
-      const tmp = `${file}.tmp`;
-      const handle = await fs.open(tmp, 'w', 0o600);
-      try { await handle.writeFile(snapshot); await handle.sync(); }
-      finally { await handle.close(); }
-      await fs.rename(tmp, file);
+    // 🛡️ notify: save se PEHLE shrink guard — snapshot guard ke baad hi banta hai.
+    if (kind === 'notify') await notifyShrinkGuard();
+    const snapshot = JSON.stringify(db[kind], null, 2);
+    try {
+      if (sheetsStore) {
+        await sheetsStore.save(kind, JSON.parse(snapshot));
+      } else {
+        const tmp = `${file}.tmp`;
+        const handle = await fs.open(tmp, 'w', 0o600);
+        try { await handle.writeFile(snapshot); await handle.sync(); }
+        finally { await handle.close(); }
+        await fs.rename(tmp, file);
+      }
+      durableSnapshots.set(kind, snapshot);
+      if (kind === 'notify') { notifyTagBaseline = tagReqCount(); notifyLastWriteAt = Date.now(); }
+      storageFailures.delete(kind);
+    } catch (err) {
+      const storageError = sheetsStore
+        ? `Could not save ${kind} to Google Sheets${STORAGE_BACKEND === 'appsscript' ? ' (Apps Script)' : ''}. Save not confirmed; check the Apps Script deployment / secret and retry.`
+        : `Could not save ${kind}. Check DATA_DIR disk permissions and free space.`;
+      storageFailures.set(kind, storageError);
+      if (JSON.stringify(db[kind], null, 2) === snapshot && durableSnapshots.has(kind)) db[kind] = JSON.parse(durableSnapshots.get(kind));
+      console.error(storageError, err.message);
+      throw new HttpError(503, storageError);
     }
-    durableSnapshots.set(kind, snapshot);
-    storageFailures.delete(kind);
-  }).catch((err) => {
-    const storageError = sheetsStore
-      ? `Could not save ${kind} to Google Sheets${STORAGE_BACKEND === 'appsscript' ? ' (Apps Script)' : ''}. Save not confirmed; check the Apps Script deployment / secret and retry.`
-      : `Could not save ${kind}. Check DATA_DIR disk permissions and free space.`;
-    storageFailures.set(kind, storageError);
-    if (JSON.stringify(db[kind], null, 2) === snapshot && durableSnapshots.has(kind)) db[kind] = JSON.parse(durableSnapshots.get(kind));
-    console.error(storageError, err.message);
-    throw new HttpError(503, storageError);
   });
   // Observe background notification writes too, without hiding failures from API callers.
   next.catch(() => {});
@@ -1685,6 +1767,129 @@ function publicWorkspaceUser(username) {
   const u = findUser(username);
   return u ? { username: u.username, name: u.name || u.username } : { username, name: username };
 }
+
+// ---------------------------------------------------------------------------------------------
+// 🏷️ Tag Requests — durable helpers (v3.50)
+// ---------------------------------------------------------------------------------------------
+// Requests `db.notify.workspace.tagRequests` me hi rehti hain (koi naya storage kind nahi). Notify
+// ek hi record me save hota hai, isliye ek purana/stale process apna snapshot likh kar nayi requests
+// uda sakta hai (Render deploy overlap me yahi hua tha). Yahan wale helpers: cap, id-wise MERGE
+// (kabhi delete nahi) aur ⏪ sheet-history se recovery — taaki gayab requests wapas layi ja sakein.
+const TAG_REQUEST_CAP = 500; // per-agent requests chhoti hoti hain — notify blob ab bhi halka rehta hai
+const tagReqKeyOf = (r) => String((r && r.id) || '').trim();
+/** Valid request = numeric-ish ID + rows array — recovery bakiyon ko ignore karti hai. */
+const tagReqValid = (r) => !!r && typeof r === 'object' && /^[A-Za-z0-9_:-]{1,60}$/.test(tagReqKeyOf(r)) && Array.isArray(r.rows);
+const tagReqCount = () => (workspaceStore().tagRequests || []).length;
+/** CAP se zyada → pehle purani dispatched/rejected, phir approved, phir koi bhi (v3.30 jaisa). */
+function capTagRequests() {
+  const w = workspaceStore();
+  const before = w.tagRequests.length;
+  let extra = before - TAG_REQUEST_CAP;
+  for (const drop of [['dispatched', 'rejected'], ['approved'], null]) {
+    if (extra <= 0) break;
+    for (let i = 0; i < w.tagRequests.length && extra > 0;) {
+      if (!drop || drop.includes(w.tagRequests[i].status)) { w.tagRequests.splice(i, 1); extra--; } else i++;
+    }
+  }
+  return before - w.tagRequests.length;
+}
+/** Purani list ko current list me MERGE karo — jo ID pehle se hai use chhod do, kuch delete nahi hota. */
+function mergeMissingTagRequests(incoming, { addressBook = null } = {}) {
+  const w = workspaceStore();
+  const have = new Set(w.tagRequests.map(tagReqKeyOf));
+  const added = [];
+  (Array.isArray(incoming) ? incoming : []).forEach((r) => {
+    if (!tagReqValid(r) || have.has(tagReqKeyOf(r))) return;
+    have.add(tagReqKeyOf(r));
+    w.tagRequests.push(r);
+    added.push(r);
+  });
+  if (added.length) {
+    // list ka tail = newest; recovery ke baad bhi wahi order rahe (same time par original order).
+    w.tagRequests.sort((a, b) => (Date.parse(a.at || 0) || 0) - (Date.parse(b.at || 0) || 0));
+    capTagRequests();
+  }
+  let addresses = 0;
+  if (addressBook && typeof addressBook === 'object') {
+    if (!w.addressBook || typeof w.addressBook !== 'object') w.addressBook = {};
+    Object.entries(addressBook).forEach(([key, val]) => {
+      if (!key || !val || typeof val !== 'object' || w.addressBook[key]) return; // maujooda entry overwrite nahi hoti
+      w.addressBook[key] = val; addresses++;
+    });
+  }
+  tagReqBaselineSync(); // ye explicit change hai — 🛡️ guard ise "shrink" na samjhe
+  return { added, addresses, total: w.tagRequests.length };
+}
+/** Kitni requests live list me nahi hain (id-wise) — recovery/guard dono isi se chunte hain. */
+function tagReqMissing(live, incoming) {
+  const have = new Set((Array.isArray(live) ? live : []).map(tagReqKeyOf));
+  return (Array.isArray(incoming) ? incoming : []).filter((r) => tagReqValid(r) && !have.has(tagReqKeyOf(r)));
+}
+/** Recovery preview — chhoti sample list (UI me dikhane ke liye; newest pehle). */
+function tagReqSamples(list, n = 6) {
+  return (Array.isArray(list) ? list : []).slice(-n).reverse().map((r) => ({
+    id: tagReqKeyOf(r), at: r.at || '', status: r.status || 'pending', total: Number(r.total) || 0,
+    agent: (r.agent && r.agent.name) || ((r.rows || [])[0] || {}).agentName || '',
+    employee: (r.employee && r.employee.name) || r.byName || ''
+  }));
+}
+const tagReqWorkspaceOf = (value) => (value && value.workspace && typeof value.workspace === 'object' ? value.workspace : {});
+/** Abhi jo notify record storage (Sheet) me pada hai uske andar ka workspace — recovery ka pehla source. */
+async function tagReqStorageWorkspace() {
+  if (!sheetsStore || typeof sheetsStore.read !== 'function') return null;
+  const stored = await sheetsStore.read();
+  return tagReqWorkspaceOf(stored && stored.notify);
+}
+
+/**
+ * ⏪ v3.50 — APP_STORAGE_HISTORY me jitni saves ke paas notify record hai (nayi pehle).
+ * Ek metadata call + ek ciphertext call (bhaari nahi). Har save ke liye: kitni tag requests,
+ * unme se kitni abhi live list me nahi (`missing`) aur chhoti sample list.
+ */
+async function tagReqHistorySaves({ limit = 6, includeValues = false } = {}) {
+  if (!sheetsStore || typeof sheetsStore.history !== 'function' || typeof sheetsStore.groupSnapshots !== 'function') {
+    throw new HttpError(400, 'Tag Request recovery sirf Google Sheet storage (Apps Script backend) ke saath chalti hai — Settings → ☁️ Storage & backup → ⏪ Purana data wapas lao dekho.');
+  }
+  const hist = await sheetsStore.history();
+  const all = sheetsStore.groupSnapshots(hist.entries || []);
+  // Ek save (batch) me kai notify records ho sakte hain (node/notification ki writes 1.5s ke andar).
+  // Sabse POORA record chuno — bahut baar sabse naya record thoda peecha reh jaata hai.
+  const snaps = all.slice(0, Math.max(1, Math.min(10, limit)))
+    .map((snap) => ({ snap, notifies: (snap.entries || []).filter((e) => e.kind === 'notify').slice(0, 4) }))
+    .filter((x) => x.notifies.length);
+  if (!snaps.length) return { saves: [], total: all.length, truncated: !!hist.truncated };
+  const rows = [...new Set(snaps.flatMap((x) => x.notifies.map((e) => e.row)))].slice(0, 24); // Code.gs max 40
+  const detailed = await sheetsStore.history({ rows, withData: true });
+  const byRow = new Map((detailed.entries || []).map((e) => [e.row, e]));
+  const live = workspaceStore().tagRequests || [];
+  const saves = [];
+  for (const x of snaps) {
+    const out = { at: x.snap.at, row: 0, bytes: 0, found: 0, missing: 0, addresses: 0, samples: [], unavailable: '', records: x.notifies.length };
+    let bestWs = null, bestList = [], firstErr = '';
+    for (const e of x.notifies) {
+      const d = byRow.get(e.row);
+      if (!d || !d.data) { firstErr = firstErr || 'ciphertext response me nahi aaya (record bada tha)'; continue; }
+      try {
+        const value = sheetsStore.decode('notify', { v: d.version, data: d.data });
+        const ws = tagReqWorkspaceOf(value);
+        const list = (Array.isArray(ws.tagRequests) ? ws.tagRequests : []).filter(tagReqValid);
+        if (list.length >= bestList.length) { bestList = list; bestWs = ws; out.row = e.row; out.bytes = d.bytes || e.bytes || 0; }
+      } catch (err) {
+        firstErr = firstErr || (/decrypt/i.test(err.message) ? 'isse alag secret se encrypt hua tha (decrypt nahi hua)' : String(err.message || err));
+      }
+    }
+    if (!bestWs) { out.unavailable = firstErr || 'notify record padha nahi ja saka'; saves.push(out); continue; }
+    const missing = tagReqMissing(live, bestList);
+    out.found = bestList.length;
+    out.missing = missing.length;
+    out.addresses = Object.keys(bestWs.addressBook || {}).length;
+    out.samples = tagReqSamples(missing.length ? missing : bestList, 5);
+    if (includeValues) out.workspace = bestWs;
+    saves.push(out);
+  }
+  return { saves, total: all.length, truncated: !!hist.truncated || !!detailed.truncated };
+}
+let tagReqRecoveryInfo = null; // boot scan / UI check ka summary (health + notification me dikhta hai)
 
 // ---------------------------------------------------------------------------------------------
 // 🌐 PUBLIC (bina login) employee Tag Request — v3.27
@@ -3868,6 +4073,9 @@ async function recoveryHint() {
   try {
     const { snapshots } = await sheetsStore.snapshots({ limit: 50 });
     recoveryHintInfo = { available: snapshots.length, newestAt: snapshots[0] ? snapshots[0].at : null, oldestAt: snapshots.length ? snapshots[snapshots.length - 1].at : null };
+    // 🏷️ v3.50 — tag requests recovery check: purani save me zyada requests hain to admin ko
+    // seedha batao (users/settings wali recovery me `notify` shamil nahi hai — alag raasta chahiye).
+    await tagReqRecoveryHint();
     if (!snapshots.length) return recoveryHintInfo;
     const stale = db.users.length <= 1;
     recordNotification({
@@ -3884,6 +4092,7 @@ async function recoveryHint() {
       ? 'Sheet ke Apps Script me naya Code.gs deploy nahi hua hai (history action missing). Upar “📋 Copy Code.gs” dabao → Apps Script me paste karo → Deploy → Manage deployments → Edit (✏️) → Version: New version → Deploy.'
       : err.message;
     recoveryHintInfo = { available: null, error: reason };
+    tagReqRecoveryInfo = { at: null, missing: 0, found: 0, saves: 0, checkedAt: new Date().toISOString(), error: reason };
     if (db.users.length <= 1) {
       recordNotification({
         type: 'settings', title: '⏪ Recovery taiyaar nahi hai — Code.gs deploy karo',
@@ -3892,6 +4101,55 @@ async function recoveryHint() {
       });
     }
     return recoveryHintInfo;
+  }
+}
+/**
+ * Boot par ek nazar: history ki sabse nayi save me `tagRequests` zyada hain to admin ko notification
+ * (kuch bhi auto-restore nahi hota — ek click wala raasta `#/tagRequest?view=requests → ⏪ Wapas lao`).
+ */
+async function tagReqRecoveryHint() {
+  // Boot par recoveryHint() isse call karta hai; dobara schedule hone par 10 min tak cache hi kaafi hai.
+  if (tagReqRecoveryInfo && tagReqRecoveryInfo.checkedAt && Date.now() - (Date.parse(tagReqRecoveryInfo.checkedAt) || 0) < 10 * 60e3) return tagReqRecoveryInfo;
+  if (tagReqScanBusy) return tagReqRecoveryInfo;
+  tagReqScanBusy = true;
+  try {
+    // 1) Abhi ka storage record (deploy overlap ka asli case) 2) phir APP_STORAGE_HISTORY.
+    let storageMissing = 0, storageFound = 0;
+    try {
+      const stored = await tagReqStorageWorkspace();
+      if (stored) {
+        const list = (Array.isArray(stored.tagRequests) ? stored.tagRequests : []).filter(tagReqValid);
+        storageFound = list.length;
+        storageMissing = tagReqMissing(workspaceStore().tagRequests || [], list).length;
+      }
+    } catch (err) { console.warn('tag request storage check:', err.message); }
+    const out = await tagReqHistorySaves({ limit: 3 });
+    const best = out.saves.find((s) => s.missing > 0) || null;
+    const found = Math.max(storageFound, best ? best.found : 0);
+    const missing = Math.max(storageMissing, best ? best.missing : 0);
+    tagReqRecoveryInfo = {
+      at: best ? best.at : (out.saves[0] ? out.saves[0].at : null), missing, found,
+      storageMissing, historyMissing: best ? best.missing : 0,
+      saves: out.saves.length, checkedAt: new Date().toISOString()
+    };
+    if (missing) {
+      console.warn(`⏪ Tag Requests recovery: ${missing} request list me nahi (storage ${storageMissing} · history ${best ? best.missing : 0}).`);
+      const hintedAt = Date.parse((db.notify.watch && db.notify.watch.tagReqRecoverHintAt) || 0) || 0;
+      if (Date.now() - hintedAt < 12 * 3600e3) return tagReqRecoveryInfo; // din me ek hi baar
+      db.notify.watch.tagReqRecoverHintAt = new Date().toISOString();
+      recordNotification({
+        type: 'settings', title: `⏪ ${missing} tag request wapas laayi ja sakti hai`,
+        body: `Storage/history me ${missing} aisi request hai jo abhi Tag Request list me nahi dikh rahi (save me total ${found}). Kuch bhi apne aap nahi badla — 🏷️ Tag Request → 📥 Tag Requests → “⏪ Wapas lao” dabao (ya Settings → ⏪ Purana data wapas lao).`,
+        target: 'admin', meta: { source: 'tagreq-recovery-hint', at: tagReqRecoveryInfo.at, missing, storageMissing, link: '#/tagRequest?view=requests&recover=1' }
+      });
+    }
+    return tagReqRecoveryInfo;
+  } catch (err) {
+    console.warn('tag request recovery hint:', err.message);
+    tagReqRecoveryInfo = { at: null, missing: 0, found: 0, saves: 0, checkedAt: new Date().toISOString(), error: String(err.message || err) };
+    return tagReqRecoveryInfo;
+  } finally {
+    tagReqScanBusy = false;
   }
 }
 /** Server par kahan-kahan purani JSON files mil sakti hain (Render disk / app folder). */
@@ -3955,7 +4213,7 @@ async function handleApi(req, res, url) {
 
   if (p === '/api/health' && method === 'GET') {
     // pendingSignups sirf admin ko (sidebar badge ke liye) — public health me leak nahi.
-    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: APP_VERSION, storage: storageStatus(), push: pushHealth(), stockAge: stockAgeStatus(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length } : {}) });
+    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: APP_VERSION, storage: storageStatus(), push: pushHealth(), stockAge: stockAgeStatus(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length, tagRequestRecovery: tagReqRecoveryInfo } : {}) });
   }
   // 📊 Admin-only: exact reason of slowness (Google query timings, cache hit rate, warm queries).
   if (p === '/api/perf' && method === 'GET') {
@@ -4801,7 +5059,7 @@ async function handleApi(req, res, url) {
   // mobile · address · pincode · class-wise qty, "➕ Add new agent"). Server har agent ki ALAG request
   // banata hai — apna ID / status / edit / print label; ek submit ke saare agents `batch` ID se jude.
   // Purana `rows[]` payload (purane cached client) bilkul pehle jaisa EK request banata hai.
-  const TAG_REQUEST_CAP = 500; // per-agent requests chhoti hoti hain — notify blob ab bhi halka rehta hai
+  // (TAG_REQUEST_CAP ab module scope par hai — upar 🏷️ durable helpers me.)
   const tagDigits = (v) => String(v ?? '').replace(/\D/g, '');
   const tagNameKey = (v) => String(v ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
   /** Agent key — client (tagRequest.js → agentKeyOf) bilkul yahi banata hai (inline class edit isi se). */
@@ -4857,17 +5115,13 @@ async function handleApi(req, res, url) {
     });
     return drafts;
   }
-  /** Store me daalo + cap: pehle sabse purani dispatched/rejected hatao, phir approved, phir koi bhi. */
+  /** Store me daalo + cap (purani dispatched → approved → koi bhi) — upar wale helper se. */
   function storeTagRequests(list) {
     const w = workspaceStore();
     w.tagRequests.push(...list);
-    let extra = w.tagRequests.length - TAG_REQUEST_CAP;
-    for (const drop of [['dispatched', 'rejected'], ['approved'], null]) {
-      if (extra <= 0) break;
-      for (let i = 0; i < w.tagRequests.length && extra > 0;) {
-        if (!drop || drop.includes(w.tagRequests[i].status)) { w.tagRequests.splice(i, 1); extra--; } else i++;
-      }
-    }
+    capTagRequests();
+    tagReqBaselineSync();
+    tagReqForceVerify = true; // 💾 save se pehle storage verify — kisi doosre process ki requests safe rahein
     return w;
   }
   /** 🔁 v3.30 agent-wise duplicate — KISI BHI employee ki 30 din ke andar ki active (pending/approved)
@@ -5225,7 +5479,12 @@ async function handleApi(req, res, url) {
   }
   if (p === '/api/tag-requests' && method === 'GET') {
     if (user.role !== 'admin' && !(user.permissions || []).includes('tagRequest')) throw new HttpError(403, 'Tag Request access disabled.');
-    return sendJson(res, 200, { ok: true, requests: visibleTagRequests(user), admin: user.role === 'admin' });
+    // ⏪ v3.50 — boot scan me purani save ke missing requests mile the? UI banner ko batao.
+    const all = workspaceStore().tagRequests || [];
+    const recovery = user.role === 'admin' && tagReqRecoveryInfo && tagReqRecoveryInfo.missing > 0
+      ? { missing: tagReqRecoveryInfo.missing, found: tagReqRecoveryInfo.found, at: tagReqRecoveryInfo.at, checkedAt: tagReqRecoveryInfo.checkedAt }
+      : null;
+    return sendJson(res, 200, { ok: true, requests: visibleTagRequests(user), admin: user.role === 'admin', total: all.length, recovery });
   }
   if (p === '/api/tag-requests' && method === 'POST') {
     if (user.role !== 'admin' && !(user.permissions || []).includes('tagRequest')) throw new HttpError(403, 'Tag Request access disabled.');
@@ -5386,9 +5645,142 @@ async function handleApi(req, res, url) {
     if (i < 0) throw new HttpError(404, 'Tag request nahi mili.');
     if (user.role !== 'admin' && w.tagRequests[i].by !== user.username) throw new HttpError(403, 'Sirf apni request delete kar sakte ho.');
     w.tagRequests.splice(i, 1);
+    tagReqMarkDeleted(tagReqPath[1]);
+    tagReqBaselineSync(); // explicit delete — 🛡️ guard ise wapas na laaye
     await persist('notify');
     logAudit(user, 'tag_request_deleted', { target: tagReqPath[1], ip: clientIp(req) });
     return sendJson(res, 200, { ok: true });
+  }
+
+  // ---- ⏪ v3.50 — Tag Requests recovery: sheet history se gayab ho chuki requests wapas lao ------
+  // (users/settings recovery `RECOVERY_KINDS` me `notify` nahi hai — isliye tag requests ke liye
+  //  alag raasta: APP_STORAGE_HISTORY ki purani saves me notify record padho aur id-wise MERGE karo.)
+  if (p === '/api/tag-requests/recovery' && method === 'GET') {
+    requireAdmin(user);
+    const limit = Math.min(10, Math.max(1, Number(url.searchParams.get('limit') || 6)));
+    try {
+      const out = await tagReqHistorySaves({ limit });
+      const live = workspaceStore().tagRequests || [];
+      // 🛡️ Sabse pehle "abhi ke storage record" ki jaanch — agar in-memory list se zyada requests
+      // wahan hain (deploy overlap ka asli case) to wahi sabse aasan recovery hai.
+      let storage = null;
+      try {
+        const stored = await tagReqStorageWorkspace();
+        if (stored) {
+          const list = (Array.isArray(stored.tagRequests) ? stored.tagRequests : []).filter(tagReqValid);
+          const missing = tagReqMissing(live, list);
+          storage = { found: list.length, missing: missing.length, addresses: Object.keys(stored.addressBook || {}).length, samples: tagReqSamples(missing.length ? missing : list, 8) };
+        }
+      } catch (err) { storage = { error: String(err.message || err), found: 0, missing: 0 }; }
+      const best = out.saves.find((s) => s.missing > 0) || null;
+      const big = (storage && storage.missing) || 0;
+      tagReqRecoveryInfo = {
+        at: best ? best.at : (out.saves[0] ? out.saves[0].at : null),
+        missing: Math.max(big, best ? best.missing : 0),
+        found: storage ? storage.found : (best ? best.found : 0),
+        storageMissing: big, historyMissing: best ? best.missing : 0,
+        saves: out.saves.length, checkedAt: new Date().toISOString()
+      };
+      const hint = big
+        ? `Abhi ke storage record me ${big} request aisi hai jo is list me nahi — “Storage se wapas lao” sabse fast hai.`
+        : best
+          ? `Sabse nayi purani save (${new Date(best.at).toLocaleString('en-IN')}) me ${best.missing} request missing hai (list me nahi) — “⏪ Wapas lao” dabao, storage/history se ID-wise jud jaayegi.`
+          : (out.saves.length ? 'Sheet history ki in saves me har request abhi list me hi hai — kuch missing nahi.' : 'History me notify record wali koi save nahi mili — is case me storage record hi asli source hai.');
+      return sendJson(res, 200, { ok: true, live: { total: live.length, ids: live.map(tagReqKeyOf).slice(-20) }, storage, saves: out.saves, total: out.total, truncated: out.truncated, best: best ? best.at : null, hint });
+    } catch (err) {
+      if (err instanceof HttpError) throw err;
+      throw new HttpError(502, `Sheet history read nahi ho payi: ${err.message}`);
+    }
+  }
+  if (p === '/api/tag-requests/recovery/restore' && method === 'POST') {
+    requireAdmin(user);
+    const body = await readBody(req);
+    const at = String((body && body.at) || '').trim();
+    const source = String((body && body.source) || (at ? 'history' : 'storage')).trim();
+    if (!at && !(body && body.auto === true) && source !== 'storage') throw new HttpError(400, 'Kaunsi purani save se wapas laana hai (at) nahi bataya.');
+    const withAddressBook = !body || body.withAddressBook !== false;
+    try {
+      let save = null;
+      if (source === 'storage') {
+        // Deploy overlap ka sabse aam case: storage record me requests zyada, in-memory list me kam.
+        const stored = await tagReqStorageWorkspace();
+        if (!stored) throw new HttpError(400, 'Storage record khaali hai — history se try karo (“Purani saves dhoondho”).');
+        const list = (Array.isArray(stored.tagRequests) ? stored.tagRequests : []).filter(tagReqValid);
+        save = { at: new Date().toISOString(), storage: true, workspace: stored, found: list.length, missing: tagReqMissing(workspaceStore().tagRequests || [], list).length };
+        if (!save.missing) throw new HttpError(400, 'Storage record me bhi koi extra request nahi hai — “Purani saves dhoondho” se history check karo.');
+      } else {
+        const out = await tagReqHistorySaves({ limit: 10, includeValues: true });
+        save = at
+          ? (out.saves.find((s) => String(s.at) === at) || out.saves.find((s) => String(s.at).startsWith(at.slice(0, 19))))
+          : (out.saves.find((s) => s.missing > 0) || null);
+        if (!save) throw new HttpError(404, at ? 'Ye save sheet history me nahi mili — list dobara load karo.' : 'History me aisi koi save nahi mili jisme missing requests hon.');
+        if (save.unavailable) throw new HttpError(400, `Is save ko padha nahi ja saka: ${save.unavailable}`);
+      }
+      const ws = save.workspace || {};
+      const merged = mergeMissingTagRequests(ws.tagRequests || [], { addressBook: withAddressBook ? ws.addressBook : null });
+      await persist('notify');
+      try {
+        recordNotification({
+          type: 'settings', title: merged.added.length ? `⏪ ${merged.added.length} tag request wapas aayi` : '⏪ Tag Requests recovery',
+          body: merged.added.length
+            ? `${user.name || user.username} ne ${new Date(save.at).toLocaleString('en-IN')} wali save se ${merged.added.length} request(s) wapas layi${merged.addresses ? ` + ${merged.addresses} agent address` : ''} — ab total ${merged.total}.`
+            : `Is save me koi nayi request nahi mili — sab pehle se list me hain (total ${merged.total}).`,
+          target: 'admin', meta: { source: 'tagreq-recovery', at: save.at, ids: merged.added.map(tagReqKeyOf).slice(0, 20), link: '#/tagRequest?view=requests' }
+        });
+      } catch { /* notification optional */ }
+      logAudit(user, 'tag_request_recovered', { target: save.at, note: `${merged.added.length} requests · ${merged.addresses} addresses · source sheet-history`, ip: clientIp(req) });
+      return sendJson(res, 200, { ok: true, at: save.at, added: merged.added.length, addresses: merged.addresses, total: merged.total, samples: tagReqSamples(merged.added, 10) });
+    } catch (err) {
+      if (err instanceof HttpError) throw err;
+      throw new HttpError(502, `Tag request recovery fail: ${err.message}`);
+    }
+  }
+  // ---- 🔔 v3.50 — Tag Request notification check (admin ko seedha reason dikhta hai) -------------
+  if (p === '/api/tag-requests/notify-check' && method === 'GET') {
+    requireAdmin(user);
+    const route = String((notificationRoutes().tagRequest) || 'admin');
+    const admins = db.users.filter((u) => u.role === 'admin').map((u) => {
+      const prefs = normalizeNotifyPrefs(u.notifyPrefs);
+      const subs = pushSubs().filter((s) => normUser(s.username) === u.username);
+      const events = pushLog().filter((e) => normUser(e.username) === u.username).slice(-10).reverse();
+      const lastErr = events.find((e) => !e.ok) || null;
+      const lastOk = events.find((e) => e.ok) || null;
+      return {
+        username: u.username, name: u.name || u.username, enabled: prefs.enabled !== false, request: prefs.request !== false,
+        push: prefs.push !== false, devices: subs.length, vapidCurrent: subs.filter((s) => !s.vapid || (vapidKeys && s.vapid === vapidKeys.publicKey)).length,
+        lastOk: lastOk ? { at: lastOk.at, type: lastOk.type || '', status: lastOk.status } : null,
+        lastError: lastErr ? { at: lastErr.at, type: lastErr.type || '', status: lastErr.status, error: lastErr.error || '' } : null
+      };
+    });
+    const recent = notifyItems().filter((i) => i.type === 'request').slice(-6).reverse().map((i) => ({
+      id: i.id, title: i.title, at: i.createdAt, target: i.target, routeKey: i.routeKey || '', audience: i.audience || ''
+    }));
+    const health = pushHealth();
+    const problems = [];
+    if (route === 'off') problems.push('Settings → 🔔 Notification routes me “tagRequest” OFF hai — nayi request ka koi notification nahi banega. Ise admin/both karo.');
+    admins.forEach((a) => {
+      if (a.enabled === false) problems.push(`${a.username}: notifications ka master switch OFF hai (🔔 panel me ON karo).`);
+      if (a.request === false) problems.push(`${a.username}: “🏷️ Tag Request” type ka preference OFF hai — Settings → 🔔 Notifications → Tag Request ON karo.`);
+      if (a.push === false) problems.push(`${a.username}: mobile push preference OFF hai — phone ke OS panel me alert nahi aayega (in-app feed aayega).`);
+      if (health.enabled && a.devices === 0) problems.push(`${a.username}: is account par koi push device register nahi hai — phone par app khol kar 🔔 panel se notifications ON karo.`);
+      if (a.devices > 0 && a.vapidCurrent === 0) problems.push(`${a.username}: purani VAPID key wali subscription hai — phone par app ek baar kholte hi apne aap refresh ho jayegi.`);
+    });
+    if (!health.enabled) problems.push('Mobile push server par off hai (VAPID keys nahi) — in-app 🔔 feed chalega, OS panel nahi.');
+    if (health.configError) problems.push(`Push service ne delivery reject ki (${health.configError.status}): ${health.configError.error}`);
+    if (health.warning) problems.push(health.warning);
+    if (!recent.length) problems.push('Feed me abhi koi tag-request notification nahi hai — jab nayi request aayegi tab yahan dikhega (aur 🔔 bell me bhi).');
+    const recovery = tagReqRecoveryInfo && tagReqRecoveryInfo.missing > 0
+      ? { missing: tagReqRecoveryInfo.missing, at: tagReqRecoveryInfo.at, storageMissing: tagReqRecoveryInfo.storageMissing || 0, historyMissing: tagReqRecoveryInfo.historyMissing || 0, checkedAt: tagReqRecoveryInfo.checkedAt }
+      : null;
+    if (recovery) problems.push(`${recovery.missing} tag request purani save/storage me maujood hai jo is list me nahi — 🏷️ Tag Request → ⏪ Wapas lao dabao (kuch delete nahi hoga).`);
+    const lastLost = Number(db.notify && db.notify.lastTagReqCheckLost) || 0;
+    return sendJson(res, 200, {
+      ok: true, at: new Date().toISOString(), route: { key: 'tagRequest', value: route, ok: route !== 'off' },
+      admins, recent, recovery, lastLost,
+      live: { total: tagReqCount() },
+      push: { enabled: health.enabled, durable: health.durable, devices: health.devices, scheme: health.scheme, selfTest: health.selfTest, configError: health.configError, warning: health.warning },
+      problems, verdict: problems.length ? 'issue' : 'ok'
+    });
   }
 
   // ---- 🌐 PUBLIC (bina login) employee Tag Request — v3.27 ---------------------------------------
@@ -6092,12 +6484,20 @@ async function handleApi(req, res, url) {
     const body = await readBody(req);
     const at = String((body && body.at) || '').trim();
     if (!at) throw new HttpError(400, 'Kaunsi save wapas laani hai (at) nahi bataya.');
+    // 🏷️ v3.50 — usi save se tag requests bhi merge kar lo (notify record) — delete kuch nahi hota.
+    const withTagRequests = !body || body.withTagRequests !== false;
     try {
-      const snap = await store.snapshotData(at, RECOVERY_KINDS);
+      const snap = await store.snapshotData(at, withTagRequests ? [...RECOVERY_KINDS, 'notify'] : RECOVERY_KINDS);
       const summary = storedSummary(snap.data);
       const result = await restoreStoredIntoDb(snap.data, { ...recoveryMode(body), source: 'sheet-history' });
-      recordNotification({ type: 'settings', title: '⏪ Purani save wapas layi gayi', body: `${user.name || user.username} ne ${new Date(snap.at).toLocaleString('en-IN')} ki save restore ki — ${summary.users} users, ${result.usersAdded} naye add, settings ${result.settingsRestored ? 'restore' : 'skip'}.`, target: 'admin', meta: { username: user.username, at: snap.at, changes: [{ field: 'recovery', before: `${currentSummary().users} users`, after: `${result.usersTotal} users` }] } });
-      return sendJson(res, 200, { ok: true, at: snap.at, restored: result, summary, locked: snap.locked, current: currentSummary() });
+      let tags = null;
+      if (withTagRequests && snap.data.notify) {
+        const ws = tagReqWorkspaceOf(snap.data.notify);
+        tags = mergeMissingTagRequests(ws.tagRequests || [], { addressBook: ws.addressBook || null });
+        if (tags.added.length || tags.addresses) { await persist('notify'); tagReqBaselineSync(); }
+      }
+      recordNotification({ type: 'settings', title: '⏪ Purani save wapas layi gayi', body: `${user.name || user.username} ne ${new Date(snap.at).toLocaleString('en-IN')} ki save restore ki — ${summary.users} users, ${result.usersAdded} naye add, settings ${result.settingsRestored ? 'restore' : 'skip'}${tags && tags.added.length ? `, ${tags.added.length} tag request wapas` : ''}.`, target: 'admin', meta: { username: user.username, at: snap.at, tagRequests: tags ? tags.added.length : 0, changes: [{ field: 'recovery', before: `${currentSummary().users} users`, after: `${result.usersTotal} users` }] } });
+      return sendJson(res, 200, { ok: true, at: snap.at, restored: result, summary, locked: snap.locked, tagRequests: tags, current: currentSummary() });
     } catch (err) {
       if (err instanceof HttpError) throw err;
       throw new HttpError(502, `Restore fail: ${err.message}`);
@@ -6118,8 +6518,15 @@ async function handleApi(req, res, url) {
       const summary = storedSummary(data);
       if (body.mode !== 'import') return sendJson(res, 200, { ok: true, preview: summary, current: currentSummary(), spreadsheet: (await probe.ping().catch(() => ({}))).spreadsheet || '' });
       const result = await restoreStoredIntoDb(data, { ...recoveryMode(body), source: 'other-sheet' });
-      recordNotification({ type: 'settings', title: '⏪ Doosri sheet se data restore hua', body: `${user.name || user.username} ne ek alag Google Sheet se ${summary.users} users + settings restore kiye (${result.usersAdded} naye users add).`, target: 'admin', meta: { username: user.username, changes: [{ field: 'recovery', before: `${currentSummary().users} users`, after: `${result.usersTotal} users` }] } });
-      return sendJson(res, 200, { ok: true, restored: result, summary, current: currentSummary() });
+      // 🏷️ v3.50 — us sheet ke notify record se tag requests bhi id-wise merge karo (kabhi delete nahi).
+      let tags = null;
+      if (body.withTagRequests !== false && data.notify) {
+        const ws = tagReqWorkspaceOf(data.notify);
+        tags = mergeMissingTagRequests(ws.tagRequests || [], { addressBook: ws.addressBook || null });
+        if (tags.added.length || tags.addresses) { await persist('notify'); tagReqBaselineSync(); }
+      }
+      recordNotification({ type: 'settings', title: '⏪ Doosri sheet se data restore hua', body: `${user.name || user.username} ne ek alag Google Sheet se ${summary.users} users + settings restore kiye (${result.usersAdded} naye users add)${tags && tags.added.length ? ` + ${tags.added.length} tag request` : ''}.`, target: 'admin', meta: { username: user.username, tagRequests: tags ? tags.added.length : 0, changes: [{ field: 'recovery', before: `${currentSummary().users} users`, after: `${result.usersTotal} users` }] } });
+      return sendJson(res, 200, { ok: true, restored: result, summary, tagRequests: tags, current: currentSummary() });
     } catch (err) {
       if (err instanceof HttpError) throw err;
       throw new HttpError(502, `Us sheet se data nahi mila: ${err.message}`);
@@ -7248,6 +7655,7 @@ async function start() {
   // phone ke notification panel me push aana band ho jaata tha (subscriptions 403 par reject hoti thin).
   db.notify = { items: Array.isArray(storedNotify.items) ? storedNotify.items.slice(-500) : [], watch: storedNotify.watch && typeof storedNotify.watch === 'object' ? storedNotify.watch : {}, push: Array.isArray(storedNotify.push) ? storedNotify.push.slice(-300) : [], pushLog: Array.isArray(storedNotify.pushLog) ? storedNotify.pushLog.slice(-40) : [], vapid: storedNotify.vapid && typeof storedNotify.vapid === 'object' ? storedNotify.vapid : null, workspace: storedNotify.workspace && typeof storedNotify.workspace === 'object' ? storedNotify.workspace : { views: [], notes: [] } };
   for (const kind of Object.keys(FILES)) durableSnapshots.set(kind, JSON.stringify(db[kind], null, 2));
+  tagReqBaselineSync(); // 🛡️ v3.50 — notify guard ka base: jo tag requests abhi durable hain
   // Upgrade the known previous/default product title in durable settings; preserve admin custom names.
   if (/^First Forward Dashboard(?:\s*[-–—]\s*Robo\s*v?3\.2)?$/i.test(String(db.settings.appName || '').trim())) {
     db.settings.appName = 'First Forward & Gv Partner Dashboard';

@@ -1,7 +1,7 @@
 // Versioned app shell + offline data cache.
 // Auth login/logout/password endpoints are NEVER cached. Stable feed snapshots (/api/today),
 // /api/auth/me and /api/settings are network-first with a cached fallback; raw /api/gviz stays live-only.
-const CACHE_NAME = 'apnapayment-v105';
+const CACHE_NAME = 'apnapayment-v106';
 const DATA_CACHE = 'ff-data-v5';
 const STASH_CACHE = 'ff-push-stash-v1'; // pushsubscriptionchange ke waqt bani subscription yahan rakho
 // 🔊 v3.36 — app band hone par aaye alerts ki VOICE queue (page khulte hi bol kar sunata hai).

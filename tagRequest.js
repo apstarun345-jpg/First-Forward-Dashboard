@@ -65,6 +65,9 @@ FF.pages = FF.pages || {};
     status: { q: '', list: null, busy: false, err: '', searched: '' },
     // 🔁 submit se pehle duplicate check (wahi agent + class pehle se active?)
     dup: { list: [], force: false, busy: false },
+    // ⏪ v3.50 — recovery (sheet history se gayab requests wapas) + 🔔 notification check (admin)
+    recovery: { open: false, busy: false, data: null, err: '' }, recoveryInfo: null,
+    notifyCheck: { open: false, busy: false, data: null, err: '' },
     // 📥 requests table
     requests: [], requestsAt: 0, reqLoaded: false, reqError: '',
     sel: new Set(), filter: { status: 'all', channel: 'both', q: '' }, edit: null, limit: PAGE_ROWS, dview: [],
@@ -1750,6 +1753,7 @@ body.colorful .from-hdr { color: #166534; }
     if (!force && state.reqLoaded && Date.now() - state.requestsAt < 30e3) return Promise.resolve(state.requests);
     return FF.auth.api('/api/tag-requests').then((out) => {
       state.requests = Array.isArray(out && out.requests) ? out.requests : [];
+      state.recoveryInfo = out && out.recovery ? out.recovery : null;
       state.requestsAt = Date.now(); state.reqLoaded = true; state.reqError = '';
       return state.requests;
     }).catch((err) => { console.warn('tag requests:', err && err.message); state.reqError = (err && err.message) || 'load fail'; state.reqLoaded = true; return state.requests; });
@@ -1938,6 +1942,96 @@ body.colorful .from-hdr { color: #166534; }
     ];
     return `<div class="tr-channel-filter" role="group" aria-label="Request source filter"><span class="tr-channel-label">Source</span>${options.map(([key, label]) => `<button type="button" class="tr-channel-btn ${state.filter.channel === key ? 'on' : ''} tr-channel-${key}" data-tr-channel="${key}" aria-pressed="${state.filter.channel === key}">${label}<span>${fmt(counts[key])}</span></button>`).join('')}</div>`;
   }
+  // ---- ⏪ v3.50 — requests recovery (sheet history) + 🔔 notification check (admin) ----------------
+  const rcHostHtml = (sel, html) => { const host = rootEl && rootEl.querySelector(sel); if (host) host.innerHTML = html; };
+  function recoveryCardHtml() {
+    const st = state.recovery;
+    const head = '<div class="card-head"><h3>⏪ Tag Requests wapas lao</h3><div class="card-right dim">Pehle <b>abhi ka storage record</b>, phir Google Sheet ke <b>APP_STORAGE_HISTORY</b> tab ki purani encrypted saves</div></div>';
+    if (st.busy) return `<section class="card tr-rc-card">${head}<div class="card-body">${U.spinner('Recovery sources check ho rahe hain…')}</div></section>`;
+    if (st.err) return `<section class="card tr-rc-card">${head}<div class="card-body"><div class="notice amber">⚠️ ${esc(st.err)}</div><div class="btn-row"><button class="btn" data-tr-act="recover">↻ Dobara koshish</button><button class="btn" data-tr-rc="close">✕ Band karo</button></div></div></section>`;
+    const d = st.data || {};
+    const saves = Array.isArray(d.saves) ? d.saves : [];
+    const store = d.storage && typeof d.storage === 'object' ? d.storage : null;
+    const sampleHtml = (list) => (list || []).slice(0, 5).map((x) => `${x.agent || '—'}${x.employee ? ` · ${x.employee}` : ''}${x.total ? ` · ${x.total} tags` : ''}${x.at ? ` · ${esc(timeLabelShort(x.at))}` : ''}`).join(' | ');
+    const storeHtml = !store ? ''
+      : store.error ? `<div class="notice amber">Storage record check nahi hua: ${esc(store.error)}</div>`
+        : store.missing
+          ? `<div class="ok-box" style="margin-bottom:10px"><b>✅ Sabse aasan raasta:</b> abhi ka storage record (Google Sheet APP_STORAGE) me <b>${fmt(store.found)}</b> request hai — inme <b>${fmt(store.missing)}</b> aisi hain jo is list me nahi dikh rahi${store.addresses ? ` (+${fmt(store.addresses)} agent addresses)` : ''}. <div class="btn-row" style="margin-top:6px"><button class="btn primary" data-tr-rc="restore-storage">⏪ Storage se wapas lao (${fmt(store.missing)})</button></div><p class="dim small" style="margin:6px 0 0">${esc(sampleHtml(store.samples))}</p></div>`
+          : `<div class="notice amber" style="margin-bottom:10px">Abhi ke storage record me sab requests maujood hain (${fmt(store.found)}) — kuch missing nahi.</div>`;
+    const rows = saves.map((s) => `<tr>
+      <td><b>${esc(longDate(s.at))}</b><small class="dim">${esc(timeLabelShort(s.at))}</small></td>
+      <td>${fmt(s.found)}${s.addresses ? `<small class="dim"> + ${fmt(s.addresses)} addr</small>` : ''}</td>
+      <td>${s.unavailable ? `<span class="badge amber" title="${esc(s.unavailable)}">padha nahi ja saka</span>` : s.missing ? `<span class="badge red">${fmt(s.missing)} missing</span>` : '<span class="badge green">sab maujood</span>'}</td>
+      <td class="small">${esc(sampleHtml(s.samples)) || '<span class="dim">—</span>'}</td>
+      <td><button class="btn small ${s.missing ? 'primary' : ''}" data-tr-rc="restore" data-at="${esc(s.at)}" ${(!s.missing || s.unavailable) ? 'disabled' : ''}>⏪ Wapas lao</button></td></tr>`).join('');
+    return `<section class="card tr-rc-card">${head}<div class="card-body">
+      <div class="notice amber" style="margin-bottom:10px">Sirf <b>missing</b> requests ID-wise judengi — kuch delete nahi hota, maujooda requests/status waisi hi rehti hain. Abhi list me: <b>${fmt((d.live && d.live.total) || 0)}</b> request.</div>
+      ${storeHtml}
+      <p class="dim small" style="margin:4px 0">Purani saves (history) — inme se bhi wapas laa sakte ho:</p>
+      ${saves.length ? `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Kab save hui</th><th>Us save me</th><th>Status</th><th>Requests</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`
+        : `<p class="dim small">Sheet history me notify record wali koi purani save nahi mili — is case me storage record hi asli source hai.</p>`}
+      ${d.hint ? `<p class="dim small" style="margin-top:8px">${esc(d.hint)}</p>` : ''}
+      <div class="btn-row" style="margin-top:10px"><button class="btn" data-tr-act="recover">↻ Dobara dhoondho</button><button class="btn" data-tr-rc="close">✕ Band karo</button></div>
+    </div></section>`;
+  }
+  async function openRecovery() {
+    const st = state.recovery;
+    st.open = true; st.busy = true; st.err = '';
+    rcHostHtml('[data-tr-rc-host]', recoveryCardHtml());
+    try { st.data = await FF.auth.api('/api/tag-requests/recovery'); st.err = ''; }
+    catch (err) { st.data = null; st.err = (err && err.message) || 'Recovery load nahi hui'; }
+    st.busy = false;
+    rcHostHtml('[data-tr-rc-host]', recoveryCardHtml());
+  }
+  async function restoreFromSave(at, btn, source) {
+    const asked = source === 'storage' ? 'Abhi ke storage record se missing tag requests wapas laani hain? (kuch delete nahi hoga)' : 'Purani save se missing tag requests wapas laani hain? (kuch delete nahi hoga)';
+    if (!window.confirm(asked)) return;
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Wapas laa rahe hain…'; }
+    try {
+      const out = await FF.auth.api('/api/tag-requests/recovery/restore', 'POST', source === 'storage' ? { source: 'storage' } : { at });
+      U.toast(out.added ? `⏪ ${out.added} request wapas aa gayi${out.addresses ? ` + ${out.addresses} agent address` : ''}` : 'Is save me koi nayi request nahi mili', out.added ? 'ok' : 'info');
+      await loadRequests(true);
+      renderReqTable();
+      if (out.added) openRecovery();
+    } catch (err) {
+      U.toast('Recovery fail: ' + ((err && err.message) || ''), 'err');
+      if (btn) { btn.disabled = false; btn.textContent = '⏪ Wapas lao'; }
+    }
+  }
+  function notifyCheckCardHtml() {
+    const st = state.notifyCheck;
+    const head = '<div class="card-head"><h3>🔔 Tag Request notification check</h3><div class="card-right dim">Nayi request aane par admin ko 🔔 feed aur mobile push milta hai ya nahi</div></div>';
+    if (st.busy) return `<section class="card tr-nc-card">${head}<div class="card-body">${U.spinner('Notification pipeline check ho raha hai…')}</div></section>`;
+    if (st.err) return `<section class="card tr-nc-card">${head}<div class="card-body"><div class="notice amber">⚠️ ${esc(st.err)}</div><div class="btn-row"><button class="btn" data-tr-act="notify-check">↻ Dobara</button><button class="btn" data-tr-rc="close-nc">✕ Band karo</button></div></div></section>`;
+    const d = st.data || {};
+    const ok = d.verdict === 'ok';
+    const route = d.route || {};
+    const admins = Array.isArray(d.admins) ? d.admins : [];
+    const push = d.push || {};
+    const items = Array.isArray(d.recent) ? d.recent : [];
+    const line = (label, value, good) => `<div class="dim small"><b>${label}:</b> <span class="badge ${good === false ? 'red' : good === true ? 'green' : 'gray'}">${esc(value)}</span></div>`;
+    return `<section class="card tr-nc-card">${head}<div class="card-body">
+      <div class="${ok ? 'ok-box' : 'warn-box'}">${ok ? '✅ Notification pipeline theek hai — nayi request par admin ko feed item aur (subscribed phone par) OS notification dono milte hain.' : `⚠️ ${fmt((d.problems || []).length)} dhyan dene wali baat ${(d.problems || []).length ? '(neeche list)' : ''}`}</div>
+      ${line('Route (Settings → 🔔 Notification routes)', `tagRequest → ${route.value || '?'}`, route.ok)}
+      ${line('Server push', push.enabled ? `ON · ${fmt(push.devices || 0)} device · scheme ${push.scheme || '—'}${push.durable ? ' · keys durable' : ' · ⚠️ keys temporary'}` : 'OFF — sirf in-app 🔔 feed (mobile OS panel nahi)', push.enabled)}
+      ${push.selfTest && !push.selfTest.ok ? `<div class="dim small"><b>VAPID self-test:</b> <span class="badge red">${esc(push.selfTest.error || 'fail')}</span></div>` : ''}
+      ${admins.map((a) => `<div class="dim small"><b>${esc(a.username)}</b> — master ${a.enabled ? 'ON' : '<span class="badge red">OFF</span>'} · 🏷️ request type ${a.request ? 'ON' : '<span class="badge red">OFF</span>'} · push ${a.push ? 'ON' : '<span class="badge amber">OFF</span>'} · devices <b>${fmt(a.devices)}</b>${a.lastOk ? ` · last push ✓ ${esc(timeLabelShort(a.lastOk.at))}` : ''}${a.lastError ? ` · <span class="badge amber" title="${esc(a.lastError.error || '')}">last error ${esc(String(a.lastError.status || ''))}</span>` : ''}</div>`).join('')}
+      <p class="dim small" style="margin:8px 0 4px">Recent tag-request notifications (🔔 feed se):</p>
+      ${items.length ? `<ul class="dim small" style="margin:0 0 4px 16px">${items.map((i) => `<li><b>${esc(i.title || '')}</b> · ${esc(ago(i.at))}${i.routeKey ? ` · route ${esc(i.routeKey)}` : ''}</li>`).join('')}</ul>` : '<p class="dim small">Feed me abhi koi tag-request notification nahi hai — nayi request aane par yahan turant dikhega.</p>'}
+      ${(d.problems || []).length ? `<ul class="dim small" style="margin:6px 0 0 16px">${d.problems.map((p) => `<li>⚠️ ${esc(p)}</li>`).join('')}</ul>` : ''}
+      <p class="dim small" style="margin-top:8px">Test push: Settings → 👤 My account → 📲 Push diagnostics → 🛰 Server push test.</p>
+      <div class="btn-row" style="margin-top:6px"><button class="btn" data-tr-act="notify-check">↻ Dobara check karo</button><button class="btn" data-tr-rc="close-nc">✕ Band karo</button></div>
+    </div></section>`;
+  }
+  async function openNotifyCheck() {
+    const st = state.notifyCheck;
+    st.open = true; st.busy = true; st.err = '';
+    rcHostHtml('[data-tr-nc-host]', notifyCheckCardHtml());
+    try { st.data = await FF.auth.api('/api/tag-requests/notify-check'); st.err = ''; }
+    catch (err) { st.data = null; st.err = (err && err.message) || 'Notification check load nahi hua'; }
+    st.busy = false;
+    rcHostHtml('[data-tr-nc-host]', notifyCheckCardHtml());
+  }
   const requestColumnCount = () => 17 + (isAdmin() ? 1 : 0);
   function requestsShellHtml() {
     const lm = U.labelYM(ymLast());
@@ -1954,6 +2048,8 @@ body.colorful .from-hdr { color: #166534; }
           ${isAdmin() ? '<button type="button" class="btn" data-tr-bulk="approve" disabled>✅ Approve selected</button>' : ''}
           <button type="button" class="btn" data-tr-bulk="csv" title="Selected (ya saari dikhti) rows ka CSV">⬇ CSV</button>
           <button type="button" class="btn small" data-tr-bulk="none" hidden>✕ Selection hatao</button>
+          ${isAdmin() ? '<button type="button" class="btn small" data-tr-act="recover" title="Google Sheet ki purani saves (APP_STORAGE_HISTORY) se gayab ho chuki tag requests wapas laao — kuch delete nahi hota">⏪ Wapas lao</button>' : ''}
+          ${isAdmin() ? '<button type="button" class="btn small" data-tr-act="notify-check" title="Nayi request par notification ban raha hai ya nahi — route · prefs · mobile push ki jaanch">🔔 Notification check</button>' : ''}
         </div>
         <div class="tr-req-filter">
           ${channelFilterHtml(displayRows(state.requests))}
@@ -1962,6 +2058,9 @@ body.colorful .from-hdr { color: #166534; }
           <button type="button" class="btn" data-tr-act="req-refresh" title="Nayi requests laao">↻</button>
         </div>
       </div>
+      <div data-tr-rc-banner></div>
+      <div data-tr-rc-host></div>
+      <div data-tr-nc-host></div>
       <div class="table-wrap tall tr-req-wrap"><table class="tbl tr-req-tbl">
         <thead>
           <tr>
@@ -1989,6 +2088,8 @@ body.colorful .from-hdr { color: #166534; }
     state.dview = filterRows(displayRows(state.requests));
     body.innerHTML = requestsShellHtml();
     bindRequestsCard();
+    if (state.recovery.open) rcHostHtml('[data-tr-rc-host]', recoveryCardHtml());
+    if (state.notifyCheck.open) rcHostHtml('[data-tr-nc-host]', notifyCheckCardHtml());
     if (state.reqLoaded) renderReqTable();
     loadRequests(true).then(() => { if (state.view === 'requests') renderReqTable(); });
     buildIndex().then(() => { if (state.view === 'requests') refreshMetrics(); }).catch(() => {});
@@ -2010,9 +2111,18 @@ body.colorful .from-hdr { color: #166534; }
       ${isAdmin() ? `<span class="tr-foot-chip sug">🎯 suggestion <b>${fmt(sugNet)}</b> after stock · <b>${fmt(sugGross)}</b> without stock deduction</span>` : ''}
       ${state.dview.length > shown.length ? `<button type="button" class="btn small" data-tr-act="more">⬇ Aur dikhao (${fmt(state.dview.length - shown.length)} baaki)</button>` : ''}`;
   }
+  /** ⏪ Deploy overlap me gayab hui requests ka banner (boot scan ka summary — auto kuch nahi hota). */
+  function recoveryBannerHtml() {
+    const info = state.recoveryInfo;
+    if (!isAdmin() || !info || !info.missing) return '';
+    const src = info.storageMissing ? 'abhi ke storage record' : 'purani save';
+    return `<div class="warn-box" style="margin:0 0 10px">⏪ <b>${fmt(info.missing)} tag request wapas laayi ja sakti hai</b> — ye ${src} me maujood hai par is list me nahi dikh rahi (${info.found ? `${fmt(info.found)} us save me` : ''}${info.at ? ` · ${esc(longDate(info.at))}` : ''}). Kuch bhi apne aap nahi badla. <button type="button" class="btn small primary" data-tr-act="recover">⏪ Wapas lao…</button></div>`;
+  }
   function renderReqTable() {
     const card = rootEl.querySelector('#tr-req-card');
     if (!card) return;
+    const banner = card.querySelector('[data-tr-rc-banner]');
+    if (banner) banner.innerHTML = recoveryBannerHtml();
     const all = displayRows(state.requests);
     // Jo request ab list me hi nahi (delete) unka selection bhi hatao
     const keys = new Set(all.map((dr) => dr.key));
@@ -2206,6 +2316,17 @@ body.colorful .from-hdr { color: #166534; }
       const act = t.closest && t.closest('[data-tr-act]');
       if (act && act.dataset.trAct === 'req-refresh') { loadRequests(true).then(() => { renderReqTable(); U.toast('↻ Requests taaza', 'ok'); }); return; }
       if (act && act.dataset.trAct === 'more') { state.limit += PAGE_ROWS; renderReqTable(); return; }
+      if (act && act.dataset.trAct === 'recover') { openRecovery(); return; }
+      if (act && act.dataset.trAct === 'notify-check') { openNotifyCheck(); return; }
+      const rc = t.closest && t.closest('[data-tr-rc]');
+      if (rc) {
+        const op = rc.dataset.trRc;
+        if (op === 'restore') restoreFromSave(rc.dataset.at, rc);
+        else if (op === 'restore-storage') restoreFromSave('', rc, 'storage');
+        else if (op === 'close') { state.recovery.open = false; rcHostHtml('[data-tr-rc-host]', ''); }
+        else if (op === 'close-nc') { state.notifyCheck.open = false; rcHostHtml('[data-tr-nc-host]', ''); }
+        return;
+      }
       const opEl = t.closest && t.closest('[data-tr-op]');
       if (!opEl) return;
       const dr = findDr(opEl.dataset.key);
@@ -2489,6 +2610,8 @@ body.colorful .from-hdr { color: #166534; }
     const qp = (params && params.agent) ? String(params.agent) : '';
     if (qp && !state.rows.some((r) => r.name || r.agentId)) state.rows = [newRow({ agentId: /^\d+$/.test(qp) ? qp : '', name: /^\d+$/.test(qp) ? '' : qp })];
     renderRoot();
+    // 🔔 Bell me "⏪ Wapas lao" wali notification par click → seedha recovery card khul jaye.
+    if (!state.publicMode && state.view === 'requests' && params && params.recover && isAdmin() && !state.recovery.open) openRecovery();
     if (!state.publicMode) {
       loadFormCfg().then(() => {
         const active = document.activeElement;
