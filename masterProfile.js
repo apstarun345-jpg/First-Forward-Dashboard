@@ -1400,15 +1400,17 @@ window.FF = window.FF || {};
   };
   const cell = (label, value) => `<div><small>${esc(label)}</small><b>${value}</b></div>`;
 
-  /** Net (after stock) and gross (without stock deduction), with gross visually emphasized. */
-  function sugPairHtml(net, gross) { return U.sugCell(net, gross); }
+  /** Net (after stock) and gross (without stock deduction) — 🎯 KPI tile me HAMESHA dono dikhte hain
+   *  (v3.51). Warna mode 'net' hone par tile me sirf 0 dikhta tha aur "bina stock" ka number neeche
+   *  table me chhupa rehta tha. */
+  function sugPairHtml(net, gross) {
+    return `<span class="sug-pair sug-pair-tight"><span class="sug-result net" title="Required − stock"><small>After stock</small><b class="sug-chip">${fmt(net)}</b></span><span class="sug-result gross" title="Run-rate × din, stock ghata kar nahi"><small>W/o stock</small><b class="sug-chip wo">${fmt(gross)}</b></span></span>`;
+  }
   function sugBlock(pr) {
     const d = pr.dispatch || {};
     const isTl = /tl$/.test(pr.kind);
     if (pr.tagRequired) {
-      const tagPair = (net, gross) => sugMode() === 'both'
-        ? `<span class="sug-pair"><span class="sug-result net"><small>Tag need · after stock</small>${tagChip(net)}</span><span class="sug-result gross"><small>Tags · no stock deducted</small><b class="sug-chip wo">🏷️ ${fmt(gross)} tags</b></span></span>`
-        : tagChip(sugMode() === 'gross' ? gross : net);
+      const tagPair = (net, gross) => `<span class="sug-pair sug-pair-tight"><span class="sug-result net"><small>Tag need · after stock</small>${tagChip(net)}</span><span class="sug-result gross"><small>Tags · w/o stock</small><b class="sug-chip wo">🏷️ ${fmt(gross)} tags</b></span></span>`;
       return { vc4: tagPair(d.sugVc4, d.sugVc4Gross || 0), comm: tagPair(d.sugComm, d.sugCommGross || 0), note: `🏷️ <b>TAG REQUIRED</b> — ${esc(pr.directLabel || 'Direct agent')} · stock box nahi jaata, par ${esc(pr.priority)} priority hai to tags chahiye. Suggested ${d.days} din ke run-rate par.` };
     }
     if (pr.direct) return { vc4: '<span class="dim">No dispatch</span>', comm: '<span class="dim">No dispatch</span>', note: `🚫 ${esc(pr.directLabel || 'Direct agent')} — priority ${esc(pr.priority || 'Low')}: abhi dispatch / tags ki zarurat nahi.` };

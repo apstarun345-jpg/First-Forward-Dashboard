@@ -1,4 +1,4 @@
-# First Forward Dashboard — First Forward + GV Partner (v3.50)
+# First Forward Dashboard — First Forward + GV Partner (v3.51)
 
 Colourful dashboard website built directly on top of **do Google Sheets**:
 
@@ -13,6 +13,26 @@ aur ek **⚖️ GV vs First Forward** page side-by-side comparison deta hai.
 Koi database nahi, koi manual upload nahi — website Google Sheet se data padhti hai
 (Google Visualization API / `gviz`) through a small Node server that also handles **login, users,
 permissions and settings**. Zero npm dependencies.
+
+## ✨ v3.51.0 — 🪶 chhoti sheet + 🚚 courier + 📊 TL class-wise + 📅 date-wise trend
+
+Saat chhoti-chhoti par kaam ki cheezein (poora detail: [WHATS-NEW-v3.51.0.md](WHATS-NEW-v3.51.0.md)).
+
+- **🪶 Sheet ab chhoti:** default **ek agent = ek row** (saari classes usi cell me — “VC4 40 · VC6 10”)
+  + compact columns; purani class-wise config ek hi baar me migrate ho jaati hai.
+- **🚚 Courier naam:** form me **Delhivery / DTDC** (+ settings ki list) select karo — naam print label,
+  colourful label aur PDF teeno par chhapta hai; admin **📥 Requests** row ke dropdown se badal sakta
+  hai; sheet me alag column; employee link ke liye ON/OFF + list setting.
+- **👥 TL ka data:** employee link par TL ka naam likhte hi **VC4 · VC20 · VC5+** ka **stock / last
+  month / current MTD** + **🎯 dono suggested qty** (stock ke baad · bina stock ghataye) dikhta hai
+  (`VC20 = core − VC4`).
+- **🔎 Master Search:** “Suggested dispatch qty” box me **hamesha dono** number (pehle sirf net = 0
+  dikhta tha) + naya **📅 Date-wise issuance trend** card (search bar, agent/TL, FF/GV, mahina,
+  roz ka table) — **aaj ki date kabhi nahi** (FF ka data T+1; GV bhi kal tak).
+- **🔔 Notification box** bada (520px × 86vh, list poori jagah leti hai, mobile par poora screen) —
+  data ab cut nahi hota.
+- **☁️ Settings save karte hi toast batata hai** ki data Google Sheet me permanent gaya ya sirf
+  server disk par (warning ke saath).
 
 ## ✨ v3.50.0 — 🏷️ Tag Requests wapas lao + 🛡️ durable save + 🔔 notification check
 

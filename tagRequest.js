@@ -59,7 +59,7 @@ FF.pages = FF.pages || {};
     view: 'form', rows: [], note: '', result: null, problems: [], busy: '',
     index: null, indexPromise: null, exact: null, exactPromise: null,
     // 📝 form
-    employee: { name: '', office: '' }, employeeToken: '', employeeSummary: null, employeeSummaryPromise: null, errs: {}, formCfg: null, formCfgPromise: null,
+    employee: { name: '', office: '' }, employeeToken: '', employeeSummary: null, employeeSummaryPromise: null, errs: {}, formCfg: null, formCfgPromise: null, courier: '',
     // 🌐 public (bina login)
     publicMode: false, publicCfg: null, done: null,
     status: { q: '', list: null, busy: false, err: '', searched: '' },
@@ -105,6 +105,21 @@ FF.pages = FF.pages || {};
   const PUB_EMPLOYEE_KEY = 'ff_public_employee';
   const AGENT_BOOK_KEY = 'ff_tr_agent_contacts';
   const EMPLOYEE_TOKEN_KEY = 'ff_tr_employee_token';
+  const COURIER_KEY = 'ff_tr_courier';   // 🚚 pichhla chuna hua courier — dobara type na karna pade
+  /** 🚚 Courier list — Settings → 🏷️ Tag Request → courier names se aati hai (default Delhivery / DTDC). */
+  function courierOptions() {
+    const cfg = formCfg() || {};
+    const list = Array.isArray(cfg.couriers) ? cfg.couriers.map((c) => clean(c)).filter(Boolean) : [];
+    const out = [...new Set([...list, 'Delhivery', 'DTDC'])];
+    if (state.courier && !out.some((c) => c.toLowerCase() === state.courier.toLowerCase())) out.push(state.courier);
+    return out.slice(0, 12);
+  }
+  function loadCourier() {
+    try { const saved = clean(localStorage.getItem(COURIER_KEY) || ''); if (saved && !state.courier) state.courier = saved.slice(0, 40); } catch { /* private mode */ }
+  }
+  function saveCourier() {
+    try { if (state.courier) localStorage.setItem(COURIER_KEY, state.courier); else localStorage.removeItem(COURIER_KEY); } catch { /* ignore */ }
+  }
   function loadEmployee() {
     try {
       state.employeeToken = String(localStorage.getItem(EMPLOYEE_TOKEN_KEY) || '').trim();
@@ -369,7 +384,18 @@ FF.pages = FF.pages || {};
     const starts = idx.list.filter((a) => norm(a.name).startsWith(n));
     if (starts.length) return idx.byKey.get(starts[0].key) || null;
     const includes = idx.list.filter((a) => norm(a.name).includes(n));
-    return includes.length ? (idx.byKey.get(includes[0].key) || null) : null;
+    if (includes.length) return idx.byKey.get(includes[0].key) || null;
+    return findTlRecord(text, channel);   // 👥 agent nahi mila to TL naam ho sakta hai
+  }
+  /** 👥 Naam se TL record (channel diya ho to wahi, warna FF pehle phir GV).
+   *  Employee link par log TL ka naam seedha type karte hain — uska poora data turant dikhna chahiye. */
+  function findTlRecord(text, channel) {
+    const idx = state.index;
+    const n = norm(text);
+    if (!idx || !n) return null;
+    const channels = channel ? [channel === 'gv' ? 'gv' : 'ff'] : ['ff', 'gv'];
+    for (const ch of channels) { const rec = tlRecord(ch, n); if (rec) return rec; }
+    return null;
   }
   /** Sirf PAKKA match (dropdown se chuna / exact ID / exact naam) — galat agent se request na jud jaaye. */
   function exactAgent(row) {
@@ -383,7 +409,8 @@ FF.pages = FF.pages || {};
     if (!text) return null;
     const d = digits(text);
     if (d.length >= 4 && d.length === text.replace(/[\s#-]/g, '').length) { const r = pick(idx.list.filter((a) => a.agentId === d)); if (r) return r; }
-    return pick(idx.list.filter((a) => norm(a.name) === norm(text)));
+    // Agents me exact naam nahi mila → TL naam hai kya? (TL ka poora data neeche dikhta hai)
+    return pick(idx.list.filter((a) => norm(a.name) === norm(text))) || findTlRecord(text, row.channel);
   }
   /** 👥 TL ko ek "record" ki tarah (stock / cur / last / grp) — TL ke naam par bhi request ban sake. */
   function tlRecord(channel, name) {
@@ -580,7 +607,8 @@ FF.pages = FF.pages || {};
       classes, total: classes.reduce((s, x) => s + x.qty, 0),
       employee: (r.employee && r.employee.name) || r.byName || r.by || '',
       agentName, agentId: (r.agent && r.agent.agentId) || (rows[0] && rows[0].agentId) || '',
-      agents: agents.length, forTl: !!(r.agent && r.agent.kind === 'tl'), tl: (r.agent && r.agent.tl) || (rows[0] && rows[0].tl !== '—' ? rows[0].tl : '') || ''
+      agents: agents.length, forTl: !!(r.agent && r.agent.kind === 'tl'), tl: (r.agent && r.agent.tl) || (rows[0] && rows[0].tl !== '—' ? rows[0].tl : '') || '',
+      courier: clean(r.courier || '')          // 🚚 label par courier ka naam
     };
   }
   /** Label par agent / TL ka reference line (dispatch name alag ho ya purani employee request ho tab). */
@@ -605,6 +633,7 @@ FF.pages = FF.pages || {};
       ...(agentRef(it) ? [agentRef(it)] : []),
       '',
       `🏷️ FASTags: ${it.total} tags${it.classes.length ? ` (${it.classes.map((c) => `${c.cls}×${c.qty}`).join(', ')})` : ''} · Date: ${it.date}`,
+      it.courier ? `🚚 Courier: ${it.courier}` : '',
       '',
       `📤 FROM (SENDER):`,
       `FROM: ${f.name}${f.address ? `, ${f.address}` : ''}${f.phone ? ` · Ph: ${f.phone}` : ''}`,
@@ -626,8 +655,9 @@ FF.pages = FF.pages || {};
       const t = it.to || {};
       const cls = it.classes.length ? it.classes.map((c) => `${esc(c.cls)} × ${fmt(c.qty)}`).join(' · ') : '—';
       const agentLine = agentRef(it) ? `<div class="to-agent">${esc(agentRef(it))}</div>` : '';
-      const meta = `Req #${esc(it.id.slice(-10))} · ${esc(it.date)}${it.employee ? ` · Emp: ${esc(it.employee)}` : ''}${it.tl ? ` · TL ${esc(it.tl)}` : ''}${it.agentId && t.who === 'agent' ? ` · ID ${esc(it.agentId)}` : ''}`;
-      return `<div class="lbl"><div class="lbl-top-bar"><span class="tag">TO</span><span class="to-hdr-title">📬 DELIVER TO (RECEIVER)</span><span class="lbl-id">#${esc(it.id.slice(-10))}</span></div><div class="to"><div class="to-row"><span class="lbl-k">Name - </span><b class="to-name">${esc(t.name || '')}</b>${t.mobile ? `<div class="to-mob">☏ ${esc(t.mobile)}</div>` : ''}</div>${t.address ? `<div class="to-addr"><span class="lbl-k">Address - </span>${esc(t.address)}</div>` : ''}${t.pincode ? `<div class="to-pin"><span class="lbl-k">PIN Code - </span>PIN: ${esc(t.pincode)}</div>` : ''}${agentLine}</div><div class="cls">🏷️ ${cls} = <b>${fmt(it.total)} tags</b></div>${fromLine}<div class="meta">${meta}</div></div>`;
+      const meta = `Req #${esc(it.id.slice(-10))} · ${esc(it.date)}${it.courier ? ` · 🚚 Courier: ${esc(it.courier)}` : ''}${it.employee ? ` · Emp: ${esc(it.employee)}` : ''}${it.tl ? ` · TL ${esc(it.tl)}` : ''}${it.agentId && t.who === 'agent' ? ` · ID ${esc(it.agentId)}` : ''}`;
+      const courierChip = it.courier ? `<div class="to-courier">🚚 Courier: <b>${esc(it.courier)}</b></div>` : '';
+      return `<div class="lbl"><div class="lbl-top-bar"><span class="tag">TO</span><span class="to-hdr-title">📬 DELIVER TO (RECEIVER)</span><span class="lbl-id">#${esc(it.id.slice(-10))}</span></div><div class="to"><div class="to-row"><span class="lbl-k">Name - </span><b class="to-name">${esc(t.name || '')}</b>${t.mobile ? `<div class="to-mob">☏ ${esc(t.mobile)}</div>` : ''}</div>${t.address ? `<div class="to-addr"><span class="lbl-k">Address - </span>${esc(t.address)}</div>` : ''}${t.pincode ? `<div class="to-pin"><span class="lbl-k">PIN Code - </span>PIN: ${esc(t.pincode)}</div>` : ''}${courierChip}${agentLine}</div><div class="cls">🏷️ ${cls} = <b>${fmt(it.total)} tags</b></div>${fromLine}<div class="meta">${meta}</div></div>`;
     }).join('');
     const totalTags = list.reduce((s, it) => s + num(it.total), 0);
     return `<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -659,6 +689,8 @@ body { font-family: "Inter", Arial, "Segoe UI", sans-serif; color: #0f172a; marg
 .to-addr { margin-top: 0.5mm; font-size: 90%; color: #1e293b; line-height: 1.22; }
 .to-pin { font-size: 118%; font-weight: 900; letter-spacing: 0.4px; margin-top: 0.6mm; color: #0f172a; }
 .to-agent { font-size: 78%; font-weight: 700; margin-top: 0.4mm; color: #334155; }
+.to-courier { font-size: 84%; font-weight: 800; margin-top: 0.5mm; color: #7c2d12; }
+body.colorful .to-courier { display: inline-block; background: #ffedd5; border: 1px solid #fdba74; border-radius: 1mm; padding: 0.1mm 1.4mm; }
 .cls { font-size: 80%; font-weight: 700; border: 1px solid #cbd5e1; background: #f1f5f9; border-radius: 1mm; margin-top: 0.9mm; padding: 0.6mm 1.4mm; color: #0f172a; }
 .from { font-size: 68%; color: #1e293b; border-top: 1.2px dashed #64748b; padding-top: 0.8mm; margin-top: 0.9mm; line-height: 1.24; }
 .from-hdr { display: flex; align-items: center; justify-content: space-between; font-weight: 800; font-size: 92%; margin-bottom: 0.3mm; color: #334155; }
@@ -754,6 +786,7 @@ body.colorful .from-hdr { color: #166534; }
         if (t.mobile) text(`Mobile Number - ${t.mobile}`, 0.92, 700, colorful ? '#15803d' : '#111', 0.2);
         if (t.address) text(`Address - ${t.address}`, 0.84, 500, '#1e293b', 0.2);
         if (t.pincode) text(`PIN Code - ${t.pincode}`, 1.15, 900, colorful ? '#b91c1c' : '#111', 0.3);
+        if (it.courier) text(`Courier - ${it.courier}`, 0.95, 800, colorful ? '#c2410c' : '#111', 0.25);
         const aref = agentRef(it);
         if (aref) text(aref, 0.74, 600, '#334155', 0.2);
 
@@ -1055,12 +1088,43 @@ body.colorful .from-hdr { color: #166534; }
       ['🚚 VC5+', m.comm],
       ['All classes', { stock: m.core.stock + m.comm.stock, last: m.core.last + m.comm.last, cur: m.core.cur + m.comm.cur }]
     ];
-    return `<div class="tr-qty-groups" aria-label="Agent stock and issuance summary">${rows.map(([label, g]) => `<div class="tr-qty-group"><b>${label}</b><span>Stock ${fmt(g.stock)} <i>·</i> Last ${fmt(g.last)} <i>·</i> MTD ${fmt(g.cur)}</span></div>`).join('')}<small>VC20 is included in 🚗 VC4 + VC20.</small></div>`;
+    return `<div class="tr-qty-groups" aria-label="Agent stock and issuance summary">${rows.map(([label, g]) => `<div class="tr-qty-group"><b>${label}</b><span>Stock ${fmt(g.stock)} <i>·</i> Last ${fmt(g.last)} <i>·</i> MTD ${fmt(g.cur)}</span></div>`).join('')}<small>VC20 is included in 🚗 VC4 + VC20.</small></div>`
+      + classBreakdownHtml(rec, { title: '📊 Class-wise (VC4 · VC20 · VC5+)' });
+  }
+  /** 📊 VC4 · VC20 · VC5+ ka stock / last month / current MTD + suggested qty (stock − aur bina stock).
+   *  VC20 ki apni class row nahi hoti (wo 🚗 VC4+VC20 me judta hai) — isliye VC20 = core − VC4. */
+  function classBreakdownRows(rec, m) {
+    const g = m || groupMetrics(rec);
+    const days = Math.max(1, num(g.days) || 1);
+    const v4 = classData(rec, 'VC4');
+    const core = { stock: num(g.core && g.core.stock), last: num(g.core && g.core.last), cur: num(g.core && g.core.cur) };
+    const v20 = { stock: Math.max(0, core.stock - num(v4.stock)), last: Math.max(0, core.last - num(v4.last)), cur: Math.max(0, core.cur - num(v4.cur)) };
+    const pair20 = U.suggestPair(v20.cur / days, v20.stock);
+    const comm = { stock: num(g.comm && g.comm.stock), last: num(g.comm && g.comm.last), cur: num(g.comm && g.comm.cur) };
+    const pairComm = U.suggestPair(comm.cur / days, comm.stock);
+    const total = { stock: core.stock + comm.stock, last: core.last + comm.last, cur: core.cur + comm.cur };
+    const pairTotal = U.suggestPair(total.cur / days, total.stock);
+    return [
+      ['VC4', { stock: num(v4.stock), last: num(v4.last), cur: num(v4.cur), net: num(v4.sugNet), gross: num(v4.sugGross) }],
+      ['VC20', { ...v20, net: pair20.net, gross: pair20.gross }],
+      ['VC5+', { ...comm, net: pairComm.net, gross: pairComm.gross }],
+      ['Total', { ...total, net: pairTotal.net, gross: pairTotal.gross }]
+    ];
+  }
+  function classBreakdownHtml(rec, opts) {
+    if (!rec) return '';
+    const o = opts || {};
+    const rows = classBreakdownRows(rec, groupMetrics(rec));
+    const body = rows.map(([label, r]) => `<tr${label === 'Total' ? ' class="row-total"' : ''}><td><b>${esc(label)}</b></td><td class="num">${fmt(r.stock)}</td><td class="num">${fmt(r.last)}</td><td class="num">${fmt(r.cur)}</td><td class="num"><b class="sug-chip">${fmt(r.net)}</b></td><td class="num"><b class="sug-chip wo">${fmt(r.gross)}</b></td></tr>`).join('');
+    return `<div class="tr-class-tbl">
+      <div class="tr-class-head"><b>${esc(o.title || '📊 Class-wise')}</b><span class="dim small">Stock · Last month · Current MTD · 🎯 suggested qty (stock ke baad / bina stock ghataye)</span></div>
+      <div class="table-wrap"><table class="tbl compact"><thead><tr><th>Class</th><th class="num">Stock</th><th class="num">Last month</th><th class="num">Current MTD</th><th class="num" title="Run-rate × target din − stock">🎯 After stock</th><th class="num" title="Run-rate × target din (stock ghata kar nahi)">W/o stock</th></tr></thead><tbody>${body}</tbody></table></div>
+    </div>`;
   }
   /** 👥 TL select hote hi uska poora data — stock · last · current (🚗/🚚) + TL ke saare agents. */
   function tlPanelHtml(row) {
-    const rec = row.isTl ? exactAgent(row) : null;
-    if (!rec) return '';
+    const rec = exactAgent(row);
+    if (!rec || !rec.isTl) return '';
     const m = metricNumbers(groupMetrics(rec));
     const list = tlAgents(rec);
     const self = list.find((a) => a.isSelf) || null;
@@ -1071,6 +1135,7 @@ body.colorful .from-hdr { color: #166534; }
     const footRow = (label, stock, last, cur, cls) => `<tr class="${cls || ''}"><td><b>${label}</b></td><td class="num"><b>${fmt(stock)}</b></td><td class="num">${fmt(last)}</td><td class="num">${fmt(cur)}</td></tr>`;
     return `<div class="tr-tl-panel">
       <div class="tr-tl-kpis">${cell('🚗 VC4+VC20', m.core)}${cell('🚚 VC5+', m.comm)}${cell('Total', m.total)}<div class="tr-tlk"><small>Agents</small><b>${fmt(agents.length)}${self ? ' + TL' : ''}</b><span class="dim small">TL ${esc(rec.priority || '—')}</span></div></div>
+      ${classBreakdownHtml(rec, { title: '📊 ' + rec.name + ' · class-wise (VC4 · VC20 · VC5+)' })}
       <details class="tr-tl-agents"><summary>👥 ${esc(rec.name)} ke agents (${fmt(agents.length)})${self ? ' + TL ka apna stock' : ''} — click karke agent chuno</summary>
         <p class="dim small" style="margin:4px 0">Hisaab: TL ka total = agents ka jod + TL ke paas (apni row alag dikhi hai, do baar nahi judti).</p>
         <div class="table-wrap"><table class="tbl compact"><thead><tr><th>Agent</th><th>Stock</th><th>Last</th><th>MTD</th></tr></thead><tbody>${list.map(agentRow).join('') || '<tr><td colspan="4" class="dim">Agents nahi mile</td></tr>'}</tbody>${list.length ? `<tfoot>${agents.length ? footRow(`🧑‍💼 Agents total (${fmt(agents.length)})`, sumOf(agents, 'stock'), sumOf(agents, 'last'), sumOf(agents, 'cur')) : ''}${self ? footRow(`👤 ${esc(self.name)} ke paas (TL own)`, self.stock, self.last, self.cur, 'mp-selfrow') : ''}${footRow('= TL TOTAL (own + agents)', num(m.total.stock), num(m.total.last), num(m.total.cur), 'row-total')}</tfoot>` : ''}</table></div>
@@ -1247,8 +1312,12 @@ body.colorful .from-hdr { color: #166534; }
           <div class="tr-rows">${state.rows.map(agentCardHtml).join('')}</div>
           <div class="tr-add-row"><button type="button" class="btn tr-add-btn" data-tr-act="add">➕ Add new agent</button>
             <span class="dim small">Ek aur agent ki request? Naya block khul jayega.</span></div>
-          ${cfg.askNote === false ? '' : `<label class="field" style="display:block;margin-top:12px"><span class="dim small">Note (optional — admin ke liye)</span>
-            <input class="input" data-tr-field="note" value="${esc(state.note)}" placeholder="e.g. urgent — kal dispatch chahiye" maxlength="300" style="width:100%"></label>`}
+          <div class="tr-form-extra">
+            ${cfg.askCourier === false ? '' : `<label class="field"><span class="dim small">🚚 Courier (optional — label par chhapta hai)</span>
+              <select class="input" data-tr-field="courier"><option value="" ${state.courier ? '' : 'selected'}>🚚 courier chuno…</option>${courierOptions().map((c) => `<option value="${esc(c)}" ${c.toLowerCase() === String(state.courier || '').toLowerCase() ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></label>`}
+            ${cfg.askNote === false ? '' : `<label class="field tr-note-field"><span class="dim small">Note (optional — admin ke liye)</span>
+              <input class="input" data-tr-field="note" value="${esc(state.note)}" placeholder="e.g. urgent — kal dispatch chahiye" maxlength="300"></label>`}
+          </div>
         </div></section>
       ${dupWarningHtml()}
       <div class="tr-submit-bar">
@@ -1467,6 +1536,10 @@ body.colorful .from-hdr { color: #166534; }
   /** Global form actions — employee, note, add/clear/send, duplicate card. */
   function bindFormGlobal() {
     const root = rootEl;
+    const courier = root.querySelector('[data-tr-field="courier"]');
+    if (courier) {
+      courier.addEventListener('change', () => { state.courier = clean(courier.value); saveCourier(); });
+    }
     const note = root.querySelector('[data-tr-field="note"]');
     if (note) note.addEventListener('input', () => { state.note = note.value; });
     root.querySelectorAll('[data-tr-emp]').forEach((inp) => inp.addEventListener('input', () => {
@@ -1577,7 +1650,7 @@ body.colorful .from-hdr { color: #166534; }
       };
     });
     const office = clean(state.employee.office);
-    return { employee: { name: clean(state.employee.name), ...(office && formCfg().askOffice ? { office } : {}) }, employeeToken: isPublic() ? state.employeeToken : '', note: clean(state.note), agents };
+    return { employee: { name: clean(state.employee.name), ...(office && formCfg().askOffice ? { office } : {}) }, employeeToken: isPublic() ? state.employeeToken : '', note: clean(state.note), courier: clean(state.courier), agents };
   }
   const withTimeout = (p, ms) => Promise.race([p, new Promise((resolve) => setTimeout(resolve, ms))]);
   async function submit() {
@@ -1874,6 +1947,14 @@ body.colorful .from-hdr { color: #166534; }
       return `<div class="tr-cq-row${changed ? ' changed' : ''}${num(x.approved) === 0 ? ' zero' : ''}"><b>${esc(x.cls)}</b><span>${changed ? `<s class="dim">${fmt(asked)}</s> → ` : ''}<b>${fmt(x.approved)}</b></span></div>`;
     }).join('')}</div>`;
   }
+  /** 🚚 Per-request courier select ke options — courier list + current value (khaali bhi allowed). */
+  function courierPickOptions(current) {
+    const out = [''];
+    courierOptions().forEach((c) => { if (!out.some((x) => x.toLowerCase() === c.toLowerCase())) out.push(c); });
+    const cur = clean(current || '');
+    if (cur && !out.some((c) => c.toLowerCase() === cur.toLowerCase())) out.push(cur);
+    return out;
+  }
   function statusCellHtml(dr) {
     const r = dr.req;
     const v = statusOf(r);
@@ -1885,6 +1966,7 @@ body.colorful .from-hdr { color: #166534; }
     return `<div class="tr-st-cell">${top}
       ${status === 'pending' ? `<button class="btn small primary tr-approve" data-tr-op="approve" data-key="${esc(dr.key)}">✅ Approve</button>` : ''}
       <select class="input tr-status-sel" data-tr-status data-key="${esc(dr.key)}" aria-label="Status badlo">${STATUS_KEYS.map((k) => `<option value="${k}" ${k === status ? 'selected' : ''}>${STATUS[k].label}</option>`).join('')}</select>
+      <select class="input tr-courier-sel" data-tr-courier data-key="${esc(dr.key)}" aria-label="Courier chuno" title="🚚 Courier — label par yahi naam chhapta hai">${courierPickOptions(r.courier).map((c) => `<option value="${esc(c)}" ${String(r.courier || '').toLowerCase() === c.toLowerCase() ? 'selected' : ''}>${c ? `🚚 ${esc(c)}` : '🚚 courier chuno'}</option>`).join('')}</select>
       ${r.adminNote ? `<small class="dim tr-note" title="${esc(r.adminNote)}">💬 ${esc(String(r.adminNote).slice(0, 60))}</small>` : ''}</div>`;
   }
   function actionsCellHtml(dr) {
@@ -1918,6 +2000,7 @@ body.colorful .from-hdr { color: #166534; }
       <td class="tr-c-emp"><b>${esc(empName)}</b>${e.office ? `<small class="dim">${esc(e.office)}</small>` : ''}${entryBy}${r.source === 'public-link' ? '<span class="badge" title="Employee link se aayi (bina login)">🌐 link</span>' : ''}</td>
       <td class="tr-c-agent"><b>${esc(dr.agent.name)}</b>${dr.agent.kind === 'tl' ? ' <span class="badge purple">TL</span>' : ''}${dr.agent.dispatchName ? `<small class="dim"> 🚚 ${esc(dr.agent.dispatchName)}</small>` : ''}<small class="dim">${dr.agent.agentId ? `#${esc(dr.agent.agentId)}` : ''}${dr.agent.tl ? `${dr.agent.agentId ? ' · ' : ''}TL ${esc(dr.agent.tl)}` : ''}</small>
         <span class="tr-tags"><span class="badge ${dr.agent.channel === 'gv' ? 'green' : 'blue'}">${dr.agent.channel === 'gv' ? '🟩 GV' : '🟦 FF'}</span>${dr.agent.unmatched ? '<span class="badge amber" title="Sheet data me nahi mila — naya agent?">🆕 verify</span>' : ''}${dr.siblings > 1 ? `<span class="badge gray" title="Purani request — ek request me ${dr.siblings} agents">🔗 ${dr.siblings} agents</span>` : ''}</span></td>
+      ${isAdmin() ? `<td class="tr-c-courier"><span class="badge ${r.courier ? 'blue' : 'gray'}">🚚 ${esc(r.courier || '—')}</span></td>` : ''}
       <td class="tr-c-addr">${c.who === 'employee' && (c.mobile || c.address) ? '<small class="dim">employee ka address:</small>' : ''}${c.mobile ? `<a class="tr-mob" href="tel:${esc(String(c.mobile).replace(/[^\d+]/g, ''))}">☏ ${esc(c.mobile)}</a>` : ''}${c.address ? `<div class="tr-addr">${esc(c.address)}</div>` : ''}${c.pincode ? `<b class="tr-pin">📮 ${esc(c.pincode)}</b>` : ''}${!c.mobile && !c.address && !c.pincode ? '<span class="dim small">—</span>' : ''}</td>
       ${metricCellsHtml(dr)}
       <td class="tr-c-cls">${classCellHtml(dr)}</td>
@@ -2032,7 +2115,7 @@ body.colorful .from-hdr { color: #166534; }
     st.busy = false;
     rcHostHtml('[data-tr-nc-host]', notifyCheckCardHtml());
   }
-  const requestColumnCount = () => 17 + (isAdmin() ? 1 : 0);
+  const requestColumnCount = () => 17 + (isAdmin() ? 2 : 0);   // + 🚚 Courier + 🎯 Suggestion
   function requestsShellHtml() {
     const lm = U.labelYM(ymLast());
     return `<section class="card tr-req-card" id="tr-req-card">
@@ -2065,6 +2148,7 @@ body.colorful .from-hdr { color: #166534; }
         <thead>
           <tr>
             <th rowspan="2" class="tr-c-sel"></th><th rowspan="2">Date · ID</th><th rowspan="2">Employee</th><th rowspan="2">Agent</th><th rowspan="2">📍 Mobile · Address</th>
+            ${isAdmin() ? '<th rowspan="2">🚚 Courier</th>' : ''}
             <th colspan="3" class="section has">📦 Stock</th><th colspan="5" class="section has">📈 Issuance (🚗 VC4+VC20 · 🚚 VC5+)</th>
             ${isAdmin() ? '<th rowspan="2" class="tr-th-suggest">🎯 Suggestion<small class="tr-th-sub">after stock · without stock deduction</small></th>' : ''}
             <th rowspan="2">🏷️ Requested (class-wise)</th><th rowspan="2" class="num">Total</th><th rowspan="2">Status</th><th rowspan="2"></th>
@@ -2370,6 +2454,22 @@ body.colorful .from-hdr { color: #166534; }
       if (t.matches && t.matches('[data-tr-status]')) {
         const dr = findDr(t.dataset.key);
         if (dr && t.value !== (dr.req.status || 'pending')) setStatus(dr, t.value, t);
+        return;
+      }
+      if (t.matches && t.matches('[data-tr-courier]')) {
+        const dr = findDr(t.dataset.key);
+        if (!dr) return;
+        const val = clean(t.value);
+        const prev = clean(dr.req.courier || '');
+        if (val === prev) return;
+        t.disabled = true;
+        FF.auth.api(`/api/tag-requests/${encodeURIComponent(dr.req.id)}`, 'PUT', { courier: val }).then((out) => {
+          const saved = (out && out.request && out.request.courier) || '';
+          dr.req.courier = saved;
+          t.disabled = false;
+          U.toast(saved ? `🚚 Courier: ${saved}` : '🚚 Courier hata diya', 'ok');
+          renderReqTable();
+        }).catch((err) => { t.disabled = false; t.value = prev; U.toast('Courier save nahi hua: ' + ((err && err.message) || ''), 'err'); });
       }
     });
     card.addEventListener('input', (e) => {
@@ -2439,8 +2539,8 @@ body.colorful .from-hdr { color: #166534; }
             <input class="input" data-tr-sheet="tab" value="${esc(cfg.tab || 'Tag Requests')}" placeholder="Tag Requests"></label>
           <label class="field"><span class="dim small">Kaunsi rows likhi jaayein</span>
             <select class="input" data-tr-sheet="rowMode">
-              <option value="class" ${cfg.rowMode === 'class' ? 'selected' : ''}>Har agent × class ki alag row (default)</option>
-              <option value="agent" ${cfg.rowMode === 'agent' ? 'selected' : ''}>Har agent ki ek row (classes ek saath)</option>
+              <option value="agent" ${cfg.rowMode === 'agent' ? 'selected' : ''}>🪶 Har agent ki EK row — saari classes usi row me (default, sheet chhoti rehti hai)</option>
+              <option value="class" ${cfg.rowMode === 'class' ? 'selected' : ''}>Har agent × class ki alag row (lambi sheet)</option>
               <option value="request" ${cfg.rowMode === 'request' ? 'selected' : ''}>Har request ki ek total row</option>
             </select></label>
           <label class="field"><span class="dim small">Kab entry ho</span>
@@ -2457,7 +2557,7 @@ body.colorful .from-hdr { color: #166534; }
           <button class="btn" data-tr-sheet-act="test">🔌 Sheet check karo</button>
           ${cfg.sheetLink ? `<a class="btn" href="${esc(cfg.sheetLink)}" target="_blank" rel="noopener">↗ Sheet kholo</a>` : ''}
         </div>
-        <p class="dim small" style="margin-top:8px">${targetId ? `🎯 Entries <b>is sheet</b> me jaayengi (ID …${esc(String(targetId).slice(-8))} · tab <b>${esc(cfg.tab || '')}</b>). Us sheet par Apps Script wale Google account ka <b>Editor</b> access hona chahiye — Sheet → Share.` : 'Entries is waqt usi sheet me hoti hain jisme Apps Script bana hai (Settings → Backup). Kahin aur bhejna ho to upar <b>alag sheet ka link</b> paste karo.'} Tab na ho to ban jaata hai; pehli entry par header row apne aap likhi jaati hai. Har agent ki request alag rows me jaati hai (ek submit = ek saath). Table ki har row me <b>📗</b> button se manual entry bhi kar sakte ho.</p>
+        <p class="dim small" style="margin-top:8px">${targetId ? `🎯 Entries <b>is sheet</b> me jaayengi (ID …${esc(String(targetId).slice(-8))} · tab <b>${esc(cfg.tab || '')}</b>). Us sheet par Apps Script wale Google account ka <b>Editor</b> access hona chahiye — Sheet → Share.` : 'Entries is waqt usi sheet me hoti hain jisme Apps Script bana hai (Settings → Backup). Kahin aur bhejna ho to upar <b>alag sheet ka link</b> paste karo.'} Tab na ho to ban jaata hai; pehli entry par header row apne aap likhi jaati hai. Default me <b>har agent ki ek hi row</b> jaati hai (saari classes usi cell me — “VC4 40 · VC6 10”) taaki sheet bahut lambi na ho; class-wise alag rows chahiye to upar <b>rowMode</b> badal do. Har submit me har agent ki apni entry aati hai aur <b>🚚 courier</b> column me label wala courier naam bhi likha jaata hai. Table ki har row me <b>📗</b> button se manual entry bhi kar sakte ho.</p>
       </div></section>`;
   }
   /** Employee link (bina login) ka admin control: ON/OFF, fields, title, link copy. */
@@ -2486,7 +2586,10 @@ body.colorful .from-hdr { color: #166534; }
               <label class="tr-col-opt"><input type="checkbox" data-tr-pub="askOffice" ${pub.askOffice ? 'checked' : ''}> Employee branch/office (optional)</label>
               <label class="tr-col-opt"><input type="checkbox" data-tr-pub="showCheck" ${pub.showCheck !== false ? 'checked' : ''}> Class ke aage stock/MTD hint dikhao</label>
               <label class="tr-col-opt"><input type="checkbox" data-tr-pub="showStock" ${pub.showStock !== false ? 'checked' : ''}> "📦 Sabhi agents ka stock" board dikhao</label>
+              <label class="tr-col-opt"><input type="checkbox" data-tr-pub="askCourier" ${pub.askCourier !== false ? 'checked' : ''}> 🚚 Courier select (Delhivery / DTDC…) — label par chhapta hai</label>
             </span></label>
+          <label class="field"><span class="dim small">🚚 Courier ke naam (comma se alag — form ke dropdown me yahi dikhenge)</span>
+            <input class="input" data-tr-pub="couriers" value="${esc((Array.isArray(pub.couriers) ? pub.couriers : []).join(', ') || 'Delhivery, DTDC')}" placeholder="Delhivery, DTDC, Bluedart…"></label>
         </div>
         <div class="btn-row" style="margin-top:10px">
           <button class="btn primary" data-tr-pub-act="save">💾 Save</button>
@@ -2521,7 +2624,9 @@ body.colorful .from-hdr { color: #166534; }
         askAddress: !!(card.querySelector('[data-tr-pub="askAddress"]') || {}).checked,
         askOffice: !!(card.querySelector('[data-tr-pub="askOffice"]') || {}).checked,
         showCheck: !!(card.querySelector('[data-tr-pub="showCheck"]') || {}).checked,
-        showStock: !!(card.querySelector('[data-tr-pub="showStock"]') || {}).checked
+        showStock: !!(card.querySelector('[data-tr-pub="showStock"]') || {}).checked,
+        askCourier: !!(card.querySelector('[data-tr-pub="askCourier"]') || {}).checked,
+        couriers: String((card.querySelector('[data-tr-pub="couriers"]') || {}).value || '').split(',').map((x) => x.trim()).filter(Boolean)
       });
       const save = (patch, msg) => {
         const btn = card.querySelector('[data-tr-pub-act="save"]');
@@ -2554,7 +2659,7 @@ body.colorful .from-hdr { color: #166534; }
       const collect = () => ({
         sheetLink: (card.querySelector('[data-tr-sheet="sheetLink"]') || {}).value || '',
         tab: (card.querySelector('[data-tr-sheet="tab"]') || {}).value || 'Tag Requests',
-        rowMode: (card.querySelector('[data-tr-sheet="rowMode"]') || {}).value || 'class',
+        rowMode: (card.querySelector('[data-tr-sheet="rowMode"]') || {}).value || 'agent',
         onSubmit: !!(card.querySelector('[data-tr-sheet="onSubmit"]') || {}).checked,
         onStatus: !!(card.querySelector('[data-tr-sheet="onStatus"]') || {}).checked,
         columns: [...card.querySelectorAll('[data-tr-col]:checked')].map((x) => x.dataset.trCol)
@@ -2597,6 +2702,7 @@ body.colorful .from-hdr { color: #166534; }
     if (params && ctx && ctx.publicConfig) state.publicCfg = ctx.publicConfig;
     if (state.publicMode && !state.publicCfg && FF.publicForm && FF.publicForm.config) state.publicCfg = FF.publicForm.config;
     loadEmployee();
+    loadCourier();
     if (!state.publicMode && !clean(state.employee.name)) state.employee.name = (FF.auth && FF.auth.user && (FF.auth.user.name || FF.auth.user.username)) || '';
     const views = state.publicMode ? ['form', 'status', 'done'] : ['form', 'requests', 'settings'];
     if (params && params.view) {
@@ -2675,6 +2781,7 @@ body.colorful .from-hdr { color: #166534; }
     _test: {
       displayRows, reqRowHtml: (dr) => reqRowHtml(dr), metricCellsHtml, metricNumbers, hintText, agentGroupSummaryHtml, channelFilterHtml, requestsShellHtml, agentKeyOf, labelItem, contactOf,
       recTotals, suggestItems, suggestHtml, stockBoardHtml, stockBoardTableHtml, stockBoardRows, stockBoardChipsHtml,
+      classBreakdownRows, classBreakdownHtml, tlPanelHtml, findTlRecord, courierOptions, requestColumnCount,
       setIndex: (idx) => { state.index = idx || null; },
       setStockBoard: (patch) => { state.stockBoard = { ...state.stockBoard, ...(patch || {}) }; },
       filterRows: (list, patch) => {

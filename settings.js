@@ -55,8 +55,13 @@ FF.pages = FF.pages || {};
       settings = clone(out.settings);
       A.applySettings(out.settings);
       FF.app.renderSidebar();
+      // ☁️ v3.51 — save hone ke baad saaf-saaf batao ki data KAHAN gaya (Google Sheet me permanent
+      // ya sirf server disk par) — user ko kabhi confusion na ho ki settings ud gayi.
+      const cloud = !!(storage && (storage.backend === 'appsscript' || storage.backend === 'sheets'));
+      const where = cloud ? '☁️ Google Sheet me permanent save ✓' : '⚠️ sirf server disk par save — Render restart par ud sakta hai (Storage tab se Google Sheet connect karo)';
       if (msgEl) msgEl.textContent = `Saved ✓ ${U.timeLabel(Date.now())}`;
-      U.toast('Settings saved ✓', 'ok');
+      U.toast(`Settings saved ✓ · ${where}`, cloud ? 'ok' : 'warn');
+      if (cloud && storage) storage.lastSavedAt = Date.now();
       if (opts && opts.reload) { U.toast('Sheet mapping badli — data dobara load ho raha hai…'); FF.store.reset(); if (FF.gv) FF.gv.reset(); if (FF.pages.sheet.reset) FF.pages.sheet.reset(); if (FF.pages.performance.reset) FF.pages.performance.reset(); if (FF.insights && FF.insights.reset) FF.insights.reset(); FF.preloader.fastSync(false).catch(() => {}); }
       return true;
     } catch (err) {

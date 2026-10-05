@@ -145,7 +145,7 @@ test('🧭 admin source filter — Both / First Forward / GV only; hidden from e
   const controls = TR._test.channelFilterHtml(rows);
   for (const key of ['both', 'ff', 'gv']) assert.ok(controls.includes(`data-tr-channel="${key}"`));
   const adminShell = TR._test.requestsShellHtml();
-  assert.match(adminShell, /colspan="18"/);
+  assert.match(adminShell, /colspan="19"/);   // + 🚚 Courier column (v3.51)
   const keep = FF.auth.user;
   FF.auth.user = { role: 'user', username: 'member' };
   try {

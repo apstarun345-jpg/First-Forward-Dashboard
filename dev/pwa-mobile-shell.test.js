@@ -32,7 +32,7 @@ test('mobile/PWA bootstrap is external so the self-only CSP does not block it', 
   assert.match(html, /<script src="\/ui-boot\.js\?v=104"><\/script>/);
   assert.doesNotMatch(html, /<script\b(?![^>]*\bsrc=)[^>]*>[\s\S]*?<\/script>/);
   assert.match(sw, /\.\/ui-boot\.js\?v=104/);
-  assert.match(sw, /apnapayment-v106/);
+  assert.match(sw, /apnapayment-v107/);
 });
 
 test('mobile UI detection survives Android desktop-site wide viewports and standalone PWAs', () => {

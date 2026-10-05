@@ -571,17 +571,19 @@ FF.pages = FF.pages || {};
     const peopleSpec = isTlKind ? `src=${q1.ch}&scope=people&tl=${encodeURIComponent(p.name)}&self=0&sort=stock` : '';
     const p1 = q1.projT1 || null;   // 📈 growth % + expected month-end
     const mode = U.suggestMode ? U.suggestMode() : 'both';
-    // Dono criteria: stock ke baad (net) + bina stock ghataye (gross) — settings ka mode apply hota hai.
-    const pair = (net, gross) => U.sugCell(net, gross);
+    // 🎯 v3.51 — upar ke boxes me HAMESHA dono numbers (stock ke baad + bina stock ghataye).
+    // Pehle settings ka mode 'net' hone par box me sirf 0 dikhta tha, jabki neeche table me
+    // "without stock deduction" ka data pada hota tha — confusing tha.
+    const pair = (net, gross) => `<span class="sug-pair sug-pair-tight"><span class="sug-result net" title="Required − stock"><small>After stock</small><b class="sug-chip">${U.fmt(net)}</b></span><span class="sug-result gross" title="Run-rate × din, stock ghata kar nahi"><small>W/o stock</small><b class="sug-chip wo">${U.fmt(gross)}</b></span></span>`;
     let sugStats = '';
     if (q1.tagRequired) {
-      sugStats = `<div class="ms-sug-full"><small>🏷️ Tags required · ${U.fmt(d.days)} din</small><b>${mode === 'both' ? `<span class="sug-pair"><span class="sug-result net"><small>Tag need · after stock</small><span class="sug-chip direct">🏷️ ${U.fmt(d.sugVc4)} + ${U.fmt(d.sugComm)} tags</span></span><span class="sug-result gross"><small>Tags · no stock deducted</small><span class="sug-chip wo">🏷️ ${U.fmt((d.sugVc4Gross || 0) + (d.sugCommGross || 0))} tags</span></span></span>` : `<span class="sug-chip direct">🏷️ ${U.fmt(mode === 'gross' ? (d.sugVc4Gross || 0) + (d.sugCommGross || 0) : d.sugVc4 + d.sugComm)} tags</span>`}</b></div>`;
+      sugStats = `<div class="ms-sug-full"><small>🏷️ Tags required · ${U.fmt(d.days)} din</small><b><span class="sug-pair sug-pair-tight"><span class="sug-result net"><small>After stock</small><span class="sug-chip direct">🏷️ ${U.fmt(d.sugVc4)} + ${U.fmt(d.sugComm)}</span></span><span class="sug-result gross"><small>W/o stock</small><span class="sug-chip wo">🏷️ ${U.fmt((d.sugVc4Gross || 0) + (d.sugCommGross || 0))}</span></span></span></b></div>`;
     } else if (q1.direct) {
       sugStats = '<div class="ms-sug-full"><small>Suggested dispatch</small><b class="dim">No dispatch</b></div>';
     } else {
       const ct = q1.calc.total;
-      sugStats = `<div><small>Sug. VC4 ${mode === 'both' ? '(stock − · w/o stock)' : mode === 'gross' ? '(bina stock)' : '(stock −)'}</small><b>${pair(d.sugVc4, d.sugVc4Gross || 0)}</b></div>
-      <div><small>Sug. Comm. ${mode === 'both' ? '(stock − · w/o stock)' : mode === 'gross' ? '(bina stock)' : '(stock −)'}</small><b>${pair(d.sugComm, d.sugCommGross || 0)}</b></div>
+      sugStats = `<div><small>Sug. VC4 <em>(after stock · w/o stock)</em></small><b>${pair(d.sugVc4, d.sugVc4Gross || 0)}</b></div>
+      <div><small>Sug. Comm. <em>(after stock · w/o stock)</em></small><b>${pair(d.sugComm, d.sugCommGross || 0)}</b></div>
       <div class="ms-sug-full"><small>🎯 Dispatch · all tags · ${U.fmt(ct.days)} din</small><b>${pair(ct.net, ct.gross)}</b></div>`;
     }
     return `<div class="ms-kundli-stats ms-prof">
@@ -1017,6 +1019,7 @@ FF.pages = FF.pages || {};
         <div class="msp-chips" id="msp-quick"></div>
       </div></div>
       <div id="msp-out"><div class="card"><div class="card-body empty">👆 <b>Naam ya ID type karo</b> — yahan us insaan ka poora FF + GV data aa jayega.</div></div></div>
+      <div id="msp-trend"></div>
     </div>`;
 
     const input = U.$('#msp-q', root);
@@ -1074,10 +1077,106 @@ FF.pages = FF.pages || {};
       </div></div>`;
     }
 
+    // ---- 📅 v3.51 — Date-wise issuance trend (agent / TL) --------------------------------------
+    // Apna search bar: naam likho → us agent / TL ka ROZ ka issuance (VC4 · VC20 · VC5+ · total).
+    // FF (EIR) ka data T+1 aata hai isliye aaj ki FF rows hata di jaati hain; GV ki bhi aaj ki row
+    // is trend me nahi dikhti (user rule — 5 Oct jaisi aaj ki date kabhi na aaye).
+    const trendEl = U.$('#msp-trend', root);
+    const trend = { q: '', kind: 'agent', channel: '', ym: '' };
+    const trendDaily = () => {
+      let rows = (FF.store && FF.store.get && FF.store.get('daily')) || [];
+      try { if (FF.filters && FF.filters.dropLaggedFf) rows = FF.filters.dropLaggedFf(rows); } catch { /* optional */ }
+      // 🗓️ Aaj ki rows kabhi nahi (FF ka data T+1 aata hai; GV bhi is trend me kal tak hi) — user rule.
+      const tk = U.dateKey(new Date());
+      return rows.filter((r) => String(r.key) < tk);
+    };
+    function trendPickRows() {
+      const chOk = (r) => !trend.channel || (trend.channel === 'gv' ? r.channel === 'GV Partner' : r.channel !== 'GV Partner');
+      const rows = trendDaily().filter(chOk);
+      const q = normName(trend.q);
+      if (!q) return rows;
+      return rows.filter((r) => (trend.kind === 'tl'
+        ? normName(r.tlName) === q || normName(r.agentName) === q
+        : normName(r.agentName) === q));
+    }
+    function trendHtml() {
+      const rows = trendPickRows();
+      const months = U.uniq(rows.map((r) => r.ym)).sort().slice(-6);
+      const ym = months.includes(trend.ym) ? trend.ym : (months[months.length - 1] || U.ymKey(new Date()));
+      trend.ym = ym;
+      const inMonth = rows.filter((r) => r.ym === ym);
+      const byDay = new Map();
+      inMonth.forEach((r) => {
+        const d = byDay.get(r.day) || { day: r.day, vc4: 0, vc20: 0, vc5p: 0, total: 0 };
+        const n = Number(r.n) || 0;
+        d.total += n;
+        if (r.group === 'VC4') d.vc4 += n; else if (r.group === 'VC20') d.vc20 += n; else d.vc5p += n;
+        byDay.set(r.day, d);
+      });
+      const days = [...byDay.values()].sort((a, b) => a.day - b.day);
+      const tot = (k) => U.sum(days, (d) => d[k]);
+      const chart = (days.length && FF.charts) ? FF.charts.bars({
+        labels: days.map((d) => String(d.day)), height: 210, showValues: true,
+        series: [{ name: 'Total tags', values: days.map((d) => d.total), color: '#6366f1' }]
+      }) : '';
+      let cum = 0;
+      const table = days.length ? `<div class="table-wrap tall"><table class="tbl compact msp-trend-tbl">
+        <thead><tr><th>Date</th><th class="num">VC4</th><th class="num">VC20</th><th class="num">VC5+</th><th class="num">Total</th><th class="num">Cumulative</th></tr></thead>
+        <tbody>${days.map((d) => { cum += d.total; return `<tr><td><b>${esc(U.labelDateKey(`${ym}-${U.pad2(d.day)}`, true))}</b></td><td class="num">${U.fmt(d.vc4)}</td><td class="num">${U.fmt(d.vc20)}</td><td class="num">${U.fmt(d.vc5p)}</td><td class="num"><b>${U.fmt(d.total)}</b></td><td class="num dim">${U.fmt(cum)}</td></tr>`; }).join('')}</tbody>
+        <tfoot><tr class="row-total"><td>${U.fmt(days.length)} din</td><td class="num">${U.fmt(tot('vc4'))}</td><td class="num">${U.fmt(tot('vc20'))}</td><td class="num">${U.fmt(tot('vc5p'))}</td><td class="num">${U.fmt(tot('total'))}</td><td class="num dim">—</td></tr></tfoot></table></div>`
+        : `<div class="empty-state">📅 Is ${trend.q ? `naam (<b>${esc(trend.q)}</b>)` : 'filter'} ke liye ${U.labelYM(ym, true)} me koi issuance nahi mili — doosra mahina / channel try karo.</div>`;
+      return `<div class="card msp-trend-card"><div class="card-head"><div>
+          <h3>📅 Date-wise issuance trend <span class="dim small">· agent ya TL</span></h3>
+          <p class="dim small">Naam likho → roz ka issuance (VC4 · VC20 · VC5+). FF ka aaj ka data kal aata hai aur GV ki aaj ki row bhi is trend me nahi dikhti — aaj ki date kabhi nahi.</p></div>
+        <div class="card-right dim small">${trend.q ? `👤 ${esc(trend.q)}` : 'Sab (kul ${U.fmt(trendDaily().length)} rows)'}</div></div>
+        <div class="card-body">
+          <div class="msp-trend-controls">
+            <span class="msp-trend-find"><input class="input" id="msp-trend-q" type="search" placeholder="🔎 Agent / TL naam likho (khaali = sab)" value="${esc(trend.q)}" autocomplete="off" aria-label="Date-wise trend ke liye agent ya TL"></span>
+            <span class="msp-trend-kind"><button type="button" class="chip${trend.kind === 'agent' ? ' on' : ''}" data-msp-tkind="agent">🧑‍💼 Agent</button><button type="button" class="chip${trend.kind === 'tl' ? ' on' : ''}" data-msp-tkind="tl">👥 TL (poori team)</button></span>
+            <span class="msp-trend-ch"><button type="button" class="chip${trend.channel === '' ? ' on' : ''}" data-msp-tch="">Dono</button><button type="button" class="chip${trend.channel === 'ff' ? ' on' : ''}" data-msp-tch="ff">🟦 FF</button><button type="button" class="chip${trend.channel === 'gv' ? ' on' : ''}" data-msp-tch="gv">🟩 GV</button></span>
+            <label class="msp-trend-month">Mahina <select class="input" id="msp-trend-ym">${(months.length ? months : [ym]).map((m) => `<option value="${esc(m)}" ${m === ym ? 'selected' : ''}>${esc(U.labelYM(m, true))}</option>`).join('')}</select></label>
+            <button type="button" class="btn small" data-msp-tclear ${trend.q ? '' : 'disabled'}>✕ Clear</button>
+          </div>
+          ${chart ? `<div class="msp-trend-chart">${chart}</div>` : ''}
+          ${table}
+        </div></div>`;
+    }
+    function paintTrend() {
+      if (!trendEl || !trendEl.isConnected) return;
+      trendEl.innerHTML = trendHtml();
+      const input = U.$('#msp-trend-q', trendEl);
+      if (input) {
+        U.suggest(input, {
+          items: () => lightPeople().slice(0, 400).map((p) => ({
+            kind: isTlP(p) ? 'tl' : 'agent', kindLabel: isTlP(p) ? 'TL' : 'Agent', label: p.name,
+            sub: `${chOfP(p) === 'gv' ? '🟩 GV' : '🟦 FF'}${tlOfP(p) ? ` · TL ${tlOfP(p)}` : ''}`, value: p.name
+          })),
+          onPick: (it) => { trend.q = it.value; trend.kind = it.kind; paintTrend(); },
+          onEnter: (q) => { trend.q = clean(q || ''); paintTrend(); },
+          min: 0
+        });
+        input.addEventListener('input', () => { trend.q = clean(input.value); clearTimeout(paintTrend._t); paintTrend._t = setTimeout(() => { const keep = document.activeElement === input; paintTrend(); const box = U.$('#msp-trend-q', trendEl); if (box && keep) box.focus(); }, 200); });
+      }
+      trendEl.querySelectorAll('[data-msp-tch]').forEach((b) => b.addEventListener('click', () => { trend.channel = b.dataset.mspTch; paintTrend(); }));
+      trendEl.querySelectorAll('[data-msp-tkind]').forEach((b) => b.addEventListener('click', () => { trend.kind = b.dataset.mspTkind; paintTrend(); }));
+      const ymSel = U.$('#msp-trend-ym', trendEl);
+      if (ymSel) ymSel.addEventListener('change', () => { trend.ym = ymSel.value; paintTrend(); });
+      const clr = trendEl.querySelector('[data-msp-tclear]');
+      if (clr) clr.addEventListener('click', () => { trend.q = ''; paintTrend(); });
+    }
+    if (trendEl) {
+      paintTrend();
+      const need = (FF.store && FF.store.need) ? FF.store.need('daily') : Promise.resolve(null);
+      Promise.resolve(need).catch(() => null).then(() => paintTrend());
+    }
+    /** Koi insaan khola → trend card usi ka ho jaata hai (ek click me date-wise data). */
+    const trendFollow = (person) => { if (!trendEl || !person) return; trend.q = person.name; trend.kind = isTlP(person) ? 'tl' : 'agent'; trend.ym = ''; paintTrend(); };
+
     function openGroup(g) {
       if (!g || !out) return;
       current = g;
       const person = g.ff || g.gv;
+      trendFollow(person);
       const linkedTeams = teamPeopleFor(g);
       const bits = [g.ff ? `🟦 FF ${isTlP(g.ff) ? 'TL' : 'Agent'}${g.ff.sub ? ` · ${esc(g.ff.sub)}` : ''}` : '', g.gv ? `🟩 GV ${isTlP(g.gv) ? 'TL' : 'Agent'}${g.gv.sub ? ` · ${esc(g.gv.sub)}` : ''}` : ''].filter(Boolean).join('  ·  ');
       const chips = groups.length > 1
