@@ -5065,3 +5065,103 @@ html[data-theme="dark"] .data-fresh-card>header{background:#111827}.data-fresh-c
 
 /* 🔔 Notification quick panel readability */
 .notification-head{padding:13px 15px}.notification-head b{font-size:15px}.notification-head small{font-size:11.5px}.notification-list{max-height:540px;padding:7px}.notification-item{gap:12px;padding:12px 11px}.notification-icon{width:34px;height:34px;font-size:17px}.notification-item b{font-size:13.5px}.notification-item p{font-size:12.5px;line-height:1.48}.notification-item small{font-size:11px}
+
+
+/* 📱 Mobile / PWA viewport hardening — v100
+   Keep the installed app and mobile Chrome at the real device width.
+   Also prevents Settings image controls/cards from becoming desktop-width. */
+html {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+html, body {
+  max-width: 100%;
+}
+body {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+.content {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+.main {
+  width: 100%;
+  max-width: 1600px;
+  min-width: 0;
+  box-sizing: border-box;
+}
+@media (max-width: 1000px) {
+  .content {
+    width: 100%;
+    max-width: 100%;
+    margin-left: 0;
+  }
+  .main {
+    width: 100%;
+    max-width: none;
+  }
+}
+@media (max-width: 768px) {
+  html, body {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+  .content {
+    width: 100%;
+    min-width: 0;
+  }
+  .topbar,
+  .main,
+  .card,
+  .controls,
+  .grid,
+  .form-grid,
+  .img-field,
+  .page-head {
+    max-width: 100%;
+    min-width: 0;
+  }
+  .main {
+    padding-left: max(10px, env(safe-area-inset-left));
+    padding-right: max(10px, env(safe-area-inset-right));
+    padding-bottom: max(92px, env(safe-area-inset-bottom));
+  }
+  .img-field {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .img-field > div:last-child {
+    flex: 1 1 190px;
+    min-width: 0;
+  }
+  .pwa-icon-admin-card {
+    padding-top: 14px;
+    padding-bottom: 14px;
+  }
+  .pwa-icon-preview {
+    width: 96px;
+    height: 96px;
+    border-radius: 18px;
+  }
+}
+@media (max-width: 480px) {
+  .main {
+    padding-left: max(8px, env(safe-area-inset-left));
+    padding-right: max(8px, env(safe-area-inset-right));
+  }
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+  .pwa-icon-preview {
+    width: 84px;
+    height: 84px;
+  }
+}
