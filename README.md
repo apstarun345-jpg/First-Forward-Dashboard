@@ -1,16 +1,4 @@
-# First Forward Dashboard — First Forward + GV Partner (v3.57.0)
-
-## ✨ v3.57.0 — 📋 "Meri requests" quick chip employee link ke Form tab par
-
-- **Form tab se hi tracking:** employee link ke 📝 Form ke upar naya **📋 Meri requests** chip — pending/approved/
-  dispatched/rejected/total counts background me load hokar bina reload ke chip par update hote hain; click = seedha
-  🔎 Status tab (All + status filters, 10-10 pages, Previous/Next — v3.54.0 wali poori history).
-- **Privacy same:** chip sirf public form me aur sirf tab jab us device ka employee token ho; admin mode me nahi.
-- **Repeat address confirm:** wahi agent dobara chunte hi pichhla mobile/address/pincode auto-suggest (device +
-  server Address book), verify note ke saath.
-- **Regression tests** chip render, counts, loading state aur visibility rules cover karte hain.
-
-Release note: [WHATS-NEW-v3.57.0.md](WHATS-NEW-v3.57.0.md).
+# First Forward Dashboard — First Forward + GV Partner (v3.56.0)
 
 ## ✨ v3.56.0 — 📦 Dispatch Planner me class-wise stock summary (PR #100 final)
 
