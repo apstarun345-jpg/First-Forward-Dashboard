@@ -1590,12 +1590,8 @@ window.FF = window.FF || {};
     if (FF.notifications) FF.notifications.start();
     if (FF.liveAssist) FF.liveAssist.start(); // 🎙️ Live Assist — consent-based voice/video (v3.26)
     liveShareChip();
-    // 🔎 Master search bar (har page par) + 🎨 theme packs + 🟢 live tab heartbeat
-    if (!(FF.config.feat && FF.config.feat('masterSearch') === false)) {
-      Promise.all([FF.store.need('agents'), FF.gv.enabled && FF.gv.enabled() ? FF.gv.need('master').catch(() => []) : Promise.resolve([])])
-        .then(() => { if (FF.masterSearch) FF.masterSearch.mountTopbar(); })
-        .catch(() => { if (FF.masterSearch) FF.masterSearch.mountTopbar(); });
-    }
+    // 🔎 Global search stays visible on every page; index/data continue loading in the background.
+    if (!(FF.config.feat && FF.config.feat('masterSearch') === false) && FF.masterSearch && FF.masterSearch.mountTopbar) FF.masterSearch.mountTopbar();
     mountShellExtras();
     // 🔍 Global search button — features.search OFF ho to hide
     const gsBtn = U.$('#global-search-btn');
@@ -1604,7 +1600,8 @@ window.FF = window.FF || {};
       if (!gsBtn.__ffWired) {
         gsBtn.__ffWired = true;
         gsBtn.addEventListener('click', () => {
-          if (FF.masterSearch && FF.masterSearch.mountTopbar()) {
+          if (FF.masterSearch && FF.masterSearch.mountTopbar) {
+            FF.masterSearch.mountTopbar();
             const inp = U.$('#master-search-input');
             if (inp) { inp.focus(); inp.select(); return; }
           }

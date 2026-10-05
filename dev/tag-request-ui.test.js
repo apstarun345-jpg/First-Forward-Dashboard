@@ -224,3 +224,59 @@ test('📝 form — employee + agent blocks: agent-wise validation aur payload',
   const ok = TR._test.payload([{ name: 'Rahul Sharma', mobile: '9876500001', address: '12, Gandhi Nagar, Jaipur', pincode: '302015', q: { VC4: '3' } }], { name: 'Ramesh Yadav' });
   assert.equal(ok.errors, null, 'sab bhara → koi error nahi');
 });
+
+test('👤 employee link request history — ALL/status filters and 10-request previous/next pages', () => {
+  const statuses = ['pending', 'approved', 'dispatched', 'rejected'];
+  const requests = Array.from({ length: 23 }, (_, i) => ({
+    id: `tagreq_${String(i + 1).padStart(4, '0')}`,
+    at: '2026-10-02T05:00:00.000Z',
+    status: statuses[i % statuses.length],
+    total: i + 1,
+    agentName: `Agent ${i + 1}`,
+    classes: [{ cls: 'VC4', requested: i + 2, approved: i + 1 }],
+    adminNote: i === 0 ? 'Pincode verify karein' : ''
+  }));
+  const counts = requests.reduce((out, request) => {
+    out[request.status]++;
+    return out;
+  }, { pending: 0, approved: 0, dispatched: 0, rejected: 0 });
+  const summary = { totalRequests: requests.length, ...counts, requestedTags: 299, approvedTags: 276, requests };
+
+  const first = TR._test.employeeStatusPage(summary, 'all', 1);
+  assert.equal(first.pageSize, 10);
+  assert.equal(first.total, 23);
+  assert.equal(first.pageCount, 3);
+  assert.equal(first.start, 1);
+  assert.equal(first.end, 10);
+  assert.equal(first.requests.length, 10);
+  assert.equal(first.requests[0].id, requests[0].id, 'newest-first order preserved');
+  const last = TR._test.employeeStatusPage(summary, 'all', 99);
+  assert.equal(last.page, 3, 'out-of-range page clamps to last page');
+  assert.equal(last.requests.length, 3);
+  assert.equal(last.start, 21);
+  assert.equal(last.end, 23);
+
+  const approved = TR._test.employeeStatusPage(summary, 'approved', 1);
+  assert.equal(approved.total, counts.approved);
+  assert.ok(approved.requests.every((request) => request.status === 'approved'));
+  assert.equal(TR._test.employeeStatusPage(summary, 'rejected', 1).total, counts.rejected);
+  assert.equal(TR._test.employeeStatusPage(summary, 'unknown', 1).filter, 'all');
+
+  const firstHtml = TR._test.employeeStatusHistoryHtml(summary, 'all', 1).html;
+  for (const key of ['all', 'pending', 'approved', 'dispatched', 'rejected']) {
+    assert.ok(firstHtml.includes(`data-tr-emp-filter="${key}"`), `${key} filter is available`);
+  }
+  assert.equal((firstHtml.match(/class="tr-st-card /g) || []).length, 10, 'first page renders exactly 10 requests');
+  assert.match(firstHtml, /1–10 \/ 23/);
+  assert.match(firstHtml, /data-tr-emp-page="prev" disabled/);
+  assert.match(firstHtml, /data-tr-emp-page="next"/);
+  assert.ok(firstHtml.includes('Pincode verify karein'), 'employee can see the admin note on a request');
+
+  const lastHtml = TR._test.employeeStatusHistoryHtml(summary, 'all', 3).html;
+  assert.equal((lastHtml.match(/class="tr-st-card /g) || []).length, 3);
+  assert.match(lastHtml, /data-tr-emp-page="prev"/);
+  assert.match(lastHtml, /data-tr-emp-page="next" disabled/);
+  const filteredHtml = TR._test.employeeStatusHistoryHtml(summary, 'rejected', 1).html;
+  assert.ok(filteredHtml.includes('aria-pressed="true"'), 'selected status filter is visibly and accessibly active');
+  assert.equal((filteredHtml.match(/class="tr-st-card /g) || []).length, counts.rejected);
+});

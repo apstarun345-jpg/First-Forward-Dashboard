@@ -1,4 +1,22 @@
-# First Forward Dashboard — First Forward + GV Partner (v3.53.0)
+# First Forward Dashboard — First Forward + GV Partner (v3.55.0)
+
+## ✨ v3.55.0 — 📊 Home issuance explorer + 🔎 universal search + 📦 class-wise dispatch stock
+
+- **Home issuance explorer:** FF + GV bar chart for VC4 / VC20 / VC5+ with multi-select channel, replacement/chassis, class, and date-range filters; per-class totals show the FF/GV split.
+- **Always-visible global search:** the top bar is available on every page and searches FF/GV agents, TLs, IDs, barcodes, and tag IDs; the search icon focuses the input.
+- **Dispatch Planner stock mix:** Agent-wise rows show each agent’s non-zero stock counts by class; CSV/Excel exports include the class mix, and TL-wise rows label the agent-level class sum.
+- **Regression tests** cover chart filters/date ranges, per-class stock counts, and global-search shell wiring.
+
+Release note: [WHATS-NEW-v3.55.0.md](WHATS-NEW-v3.55.0.md).
+
+## ✨ v3.54.0 — 🌐 Employee request tracking + 📇 remembered agent addresses
+
+- **Employee self-service status:** Employee links can switch among All, Pending, Approved, Dispatched, and Rejected requests; each status shows its count and pages 10 request cards at a time.
+- **Previous / Next:** Employee request history is newest-first, includes the admin note, and has straightforward 10-request pagination.
+- **Remembered agent contact:** per-agent submissions now update the server-side Address book immediately, so the public form can suggest a previous mobile/address/pincode on repeat requests and across devices.
+- **Regression tests** cover filters, paging, token-scoped history, privacy, and contact suggestions.
+
+Release note: [WHATS-NEW-v3.54.0.md](WHATS-NEW-v3.54.0.md).
 
 ## ✨ v3.53.0 — 📲 PWA launch recovery + 🧭 consistent GV CCH categories
 
@@ -409,8 +427,7 @@ Poore dashboard ke liye login zaroori hai, **sirf ek cheez ke liye nahi**: emplo
   🔍 system check (stock / issuance / priority / suggestion) → 📤 submit.
 * Request admin ke **🏷️ Tag Request → 📥 Tag Requests** me **🌐 employee link** badge ke saath aati hai —
   naam, mobile, IP, rows, agents, total ke saath. Admin wahin se qty/status edit karta hai.
-* Employee apna **Request ID** (submit ke baad milta hai) daal ke **🔎 Status** tab se status dekh sakta hai
-  (⏳ Pending → ✅ Approved → 🚚 Dispatched / ⛔ Rejected + admin note) — isi ke liye usko login ki zaroorat nahi.
+* Employee **🔎 Status** tab me apne token se linked **All requests** aur **Pending / Approved / Dispatched / Rejected** dekh sakta hai — 10 requests per page, **Previous / Next**, admin note ke saath; agent mobile ya Request ID se alag se search bhi kar sakta hai.
 * Employee ko **dashboard ka koi doosra page nahi dikhta** — public link par sirf yehi form khulta hai.
 * Data usi sheet se aata hai, par server ke **scoped public endpoint** `/api/public/gviz` se — sirf
   form ke kaam ke tabs (EIR · REPORT · GV REPORT), EIR par **sirf aggregated (group-by) queries**,

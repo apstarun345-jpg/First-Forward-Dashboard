@@ -55,7 +55,7 @@ const MIME = {
 const BLOCKED_FILES = new Set(['server.js', 'sheets-storage.js', 'apps-script-storage.js', 'mailer.js', 'stock-age.js', 'DEPLOYMENT.md', 'SHEETS_STORAGE.md', 'STORAGE_SETUP.md', 'RECOVERY.md', 'package.json', 'package-lock.json', 'render.yaml', 'README.md', '.env']);
 const BLOCKED_DIRS = new Set(['data', 'dev', 'node_modules', '.git', 'google-apps-script']);
 // /api/health ka version ab package.json se aata hai (pehle yahan hardcoded purana string tha).
-let APP_VERSION = '3.53.0';
+let APP_VERSION = '3.55.0';
 try { APP_VERSION = String(JSON.parse(readFileSync(path.join(__dirname, 'package.json'), 'utf8')).version || APP_VERSION); } catch { /* keep fallback */ }
 
 // ---------------------------------------------------------------------------------------------
@@ -5333,7 +5333,18 @@ async function handleApi(req, res, url) {
       ...(d.dupes && d.dupes.length ? { dupOf: d.dupes.map((x) => x.id), dupCount: d.dupes.length } : {})
     }));
     storeTagRequests(created);
+    // 📇 Agent contact ko server-side Address book me bhi save karo. Sirf browser localStorage me
+    // rakhne se doosre device par purana address nahi aata; batch request me har agent ka address
+    // pehli baar save hote hi public form ke contact lookup ko turant milna chahiye.
+    const addressEntries = created.map(addressEntryFromRequest).filter(Boolean);
+    if (addressEntries.length) {
+      rememberAddressBook(addressEntries);
+      addressBookRuntime.map = null; addressBookRuntime.at = 0;
+    }
     await persist('notify');
+    if (addressEntries.length) {
+      syncAddressBookToSheet(created).then(() => persist('notify').catch(() => {})).catch((err) => console.warn('tag request address sync:', err && err.message));
+    }
     if (tagSheetConfig().enabled && tagSheetConfig().onSubmit) {
       pushTagRequestsToSheet(created, 'new').then(() => persist('notify').catch(() => {})).catch((err) => {
         console.warn('tag-request sheet sync:', err.message);
@@ -5477,13 +5488,21 @@ async function handleApi(req, res, url) {
     const id = String(agentId || '').trim();
     const name = tagNameKey(agentName || '');
     if (!id && !name) return null;
-    const map = await addressBookMap();
+    const memory = addressBookMemoryEntries();
     const keys = [];
     if (id) keys.push(`${ch}|id:${id}`);
     if (name) keys.push(`${ch}|n:${name}`);
+    const asContact = (e) => e && (e.address || e.pincode || e.mobile)
+      ? { mobile: e.mobile || '', address: e.address || '', pincode: e.pincode || '', tl: e.tl || '', source: 'Address' }
+      : null;
+    // A recent submission is already in durable workspace memory; don't wait for a sheet read.
+    for (const key of keys) { const contact = asContact(memory[key]); if (contact) return contact; }
+    const map = await addressBookMap();
     for (const key of keys) {
-      const e = map.get(key);
-      if (e && (e.address || e.pincode || e.mobile)) return { mobile: e.mobile || '', address: e.address || '', pincode: e.pincode || '', tl: e.tl || '', source: 'Address' };
+      // Runtime sheet reads may have started just before a submission. Prefer the freshly saved
+      // workspace copy so the just-entered address is suggested immediately, not after cache expiry.
+      const contact = asContact(memory[key] || map.get(key));
+      if (contact) return contact;
     }
     return null;
   }
@@ -6158,8 +6177,27 @@ async function handleApi(req, res, url) {
     const rows = employeeStatusByToken(token), counts = { all: rows.length, pending: 0, approved: 0, dispatched: 0, rejected: 0 };
     let requestedTags = 0, approvedTags = 0;
     rows.forEach((r) => { const st = String(r.status || 'pending').toLowerCase(); if (counts[st] !== undefined) counts[st]++; requestedTags += (r.rows || []).reduce((n, x) => n + (Number(x.requested ?? x.approved) || 0), 0); approvedTags += (r.rows || []).reduce((n, x) => n + (Number(x.approved) || 0), 0); });
-    return { totalRequests:counts.all, pending:counts.pending, approved:counts.approved, dispatched:counts.dispatched, rejected:counts.rejected, requestedTags, approvedTags,
-      requests:rows.slice(-TAG_REQUEST_CAP).reverse().map((r) => ({ id:r.id, at:r.at, status:r.status, total:r.total, rows:(r.rows||[]).length, agentName:(r.agent&&r.agent.name)||'', agentId:(r.agent&&r.agent.agentId)||'', classes:(r.rows||[]).map(x=>({cls:x.cls,requested:x.requested,approved:x.approved})) })) };
+    return {
+      totalRequests: counts.all, pending: counts.pending, approved: counts.approved,
+      dispatched: counts.dispatched, rejected: counts.rejected, requestedTags, approvedTags,
+      requests: rows.slice(-TAG_REQUEST_CAP).reverse().map((r) => {
+        const classes = Array.isArray(r.rows) ? r.rows : [];
+        const first = classes[0] || {};
+        return {
+          id: r.id, at: r.at, status: r.status || 'pending', total: Number(r.total) || 0,
+          rows: classes.length,
+          agentName: (r.agent && r.agent.name) || first.agentName || '',
+          agentId: (r.agent && r.agent.agentId) || first.agentId || '',
+          classes: classes.map((x) => ({
+            cls: x.cls,
+            requested: Number(x.requested ?? x.approved) || 0,
+            approved: Number(x.approved) || 0
+          })),
+          adminNote: r.adminNote || '', updatedAt: r.updatedAt || r.at || '',
+          sheetSynced: !!r.sheetSync && !r.sheetSync.error
+        };
+      })
+    };
   }
   if (p === '/api/public/tag-request/employee-status' && method === 'GET') {
     const token = String(url.searchParams.get('token') || '').trim();

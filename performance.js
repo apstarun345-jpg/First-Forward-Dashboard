@@ -263,6 +263,13 @@ FF.pages = FF.pages || {};
         else if (col.type === 'pct') { agent[col.key] = text; agent[col.key + 'Num'] = pct(text); }
         else agent[col.key] = text;
       });
+      const stockClassFields = [['stockVc4', 'VC4'], ['stockC1', 'VC5'], ['stockC2', 'VC6'], ['stockC3', 'VC7'], ['stockC4', 'VC12'], ['stockC5', 'VC16']];
+      const stockClassLabel = (key, fallback) => {
+        const rawLabel = clean(c[key] && c[key].label).replace(/^stock\s+/i, '').replace(/\s+stock$/i, '');
+        return rawLabel && !/commercial|total|column\s+\w+/i.test(rawLabel) ? rawLabel : fallback;
+      };
+      agent.stockByClass = Object.fromEntries(stockClassFields.map(([key, fallback]) => [stockClassLabel(key, fallback), Number(agent[key]) || 0]));
+      agent.stockClassAvailable = stockClassFields.some(([key]) => c[key] && c[key].index !== undefined && !c[key].unknown);
       agent.week = ['d1', 'd2', 'd3', 'd4', 'd5', 'd6', 'd7'].map((k) => agent[k] || 0);
       agent.weekTotal = agent.week.reduce((a, b) => a + b, 0);
       agent.curTotal = agent.curTotal ?? 0; agent.lastTotal = agent.lastTotal ?? 0;
