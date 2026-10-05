@@ -95,7 +95,8 @@ window.FF = window.FF || {};
     if (loaded.has(name)) return loaded.get(name);
     const p = new Promise((resolve, reject) => {
       const el = document.createElement('script');
-      el.src = `./${name}.js?v=${VERSION}`;
+      const assetVersion = name === 'settings' ? `${VERSION}-pwa2` : VERSION;
+      el.src = `./${name}.js?v=${assetVersion}`;
       el.defer = true;
       el.async = true;
       el.onload = () => resolve(name);
