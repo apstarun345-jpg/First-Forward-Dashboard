@@ -560,7 +560,7 @@ FF.pages = FF.pages || {};
       ${section('🔑 Change password', `<div class="form-grid">${field('Current password', '<input class="input" id="pw-cur" type="password" autocomplete="current-password">')}${field('New password', '<input class="input" id="pw-new" type="password" minlength="6" autocomplete="new-password">')}${field('Repeat new password', '<input class="input" id="pw-new2" type="password" minlength="6" autocomplete="new-password">')}</div><div class="save-bar"><button class="btn primary" id="pw-save">🔑 Update password</button>${u.mustChangePassword ? '<span class="badge red">Default password — please change</span>' : ''}</div>`)}
       ${section('🛡️ My access <span class="dim">· colorful · click = page + data summary</span>', accessSection(perms, u))}`;
   }
-  const IMG_SIZES = { logo: [256, 384, 512, 768], loginImage: [1200, 1600, 2000, 2400] };
+  const IMG_SIZES = { logo: [256, 384, 512, 768], loginImage: [1200, 1600, 2000, 2400], pwaIcon: [512] };
   function brandTab() {
     const s = settings, t = s.theme || {};
     const img = (key, label, hint, max) => {
@@ -571,7 +571,7 @@ FF.pages = FF.pages || {};
       return `<div class="img-field"><div class="img-preview ${key}">${s[key] ? `<img src="${esc(s[key])}" alt="">` : '<span class="dim">No image</span>'}</div><div><b>${label}</b><small class="dim">${hint}</small><small class="dim img-info" data-img-info="${key}">${s[key] ? `Saved: ${imgSizeInfo(s[key])}` : ''}</small><div class="btn-row"><label class="btn small">📤 Upload<input type="file" accept="image/*" hidden data-img="${key}" data-max="${max}"></label>${sizeSel}${s[key] ? `<button class="btn small" data-img-clear="${key}">✕ Remove</button>` : ''}</div></div></div>`;
     };
     return `${section('🏷️ Branding', `<div class="form-grid">${field('App name', txt('appName', s.appName), 'Browser title / login page')}${field('Brand (sidebar)', txt('brand', s.brand))}${field('Tagline', txt('tagline', s.tagline))}${field('Footer product name', txt('footerText', s.footerText || s.appName || 'First Forward Dashboard'), 'Copyright me ye naam dikhega')}${field('Developer credit', txt('developerName', s.developerName || 'Tarun Kumawat'), 'Login aur site footer par credit')}${field('Show site footer', check('showFooter', s.showFooter !== false, 'Footer visible on dashboard'))}</div>${saveBar('brand')}`)}
-      ${section('🖼️ Images', `${img('logo', 'Logo', 'Sidebar + login page (square works best, PNG with transparency). Upload ke baad selected size par auto-resize hota hai.', 512)}${img('loginImage', 'Login / hero image', 'Left side of the login page (landscape). Upload ke baad selected size par auto-resize hoti hai.', 1600)}<p class="dim small">Images server par save hoti hain (settings.json) — upload karte hi live. 📐 Size dropdown se choose karo kitne pixels par resize ho.</p>`)}
+      ${section('🖼️ Images', `${img('logo', 'Logo', 'Sidebar + login page (square works best, PNG with transparency). Upload ke baad selected size par auto-resize hota hai.', 512)}${img('loginImage', 'Login / hero image', 'Left side of the login page (landscape). Upload ke baad selected size par auto-resize hoti hai.', 1600)}<div class="img-field"><div class="img-preview logo">${s.pwaIcon512 ? `<img src="${esc(s.pwaIcon512)}" alt="PWA icon">` : '<span class="dim">Default PWA icon</span>'}</div><div><b>📱 PWA App Icon — All</b><small class="dim">Ek square image upload karo. Isse PWA 64×64, 192×192 aur 512×512 icons automatically banenge. Install hone wale app, browser favicon aur PWA manifest isi icon ko use karenge.</small><small class="dim img-info">${s.pwaIcon512 ? `Saved: ${imgSizeInfo(s.pwaIcon512)}` : ''}</small><div class="btn-row"><label class="btn small">📤 Change PWA Icon<input type="file" accept="image/*" hidden data-pwa-icon></label>${s.pwaIcon512 ? '<button class="btn small" data-pwa-icon-clear>✕ Default icon</button>' : ''}</div></div></div><p class="dim small">Logo aur PWA icon alag hain. PWA icon change karne se installed app icon + favicon + manifest icon update hoga.</p><p class="dim small">Images server par save hoti hain (settings.json) — upload karte hi live.</p>`)}
       ${section('🎨 Theme colours', `<div class="form-grid">${field('Sidebar background (top)', color('theme.sidebarBg', t.sidebarBg))}${field('Sidebar background (bottom)', color('theme.sidebarBg2', t.sidebarBg2))}${field('Sidebar text', color('theme.sidebarText', t.sidebarText))}${field('Accent', color('theme.accent', t.accent))}${field('Accent 2 (gradient)', color('theme.accent2', t.accent2))}</div><p class="dim small">Colour preview turant dikhta hai; picker selection complete karne par automatically save hota hai. Save button bhi use kar sakte hain.</p>${saveBar('theme')}<button class="btn small" data-reset-theme>↺ Default colours</button>`)}`;
   }
   function dataTab() {
@@ -2526,6 +2526,24 @@ FF.pages = FF.pages || {};
         const im = new Image();
         im.onload = () => { if (U.$(`[data-img-info="${el.dataset.imgInfo}"]`, body)) el.textContent = `Saved: ${im.naturalWidth}×${im.naturalHeight}px · ${imgSizeInfo(data)}`; };
         im.src = data;
+      });
+      // 📱 PWA icon — one upload generates all required icon sizes and keeps them in settings.
+      const pwaInput = U.$('[data-pwa-icon]', body);
+      if (pwaInput) pwaInput.addEventListener('change', async () => {
+        const file = pwaInput.files[0]; if (!file) return;
+        try {
+          const make = (size) => readImage(file, size, { square: true, minSide: size });
+          const [p64, p192, p512] = await Promise.all([make(64), make(192), make(512)]);
+          await save({ pwaIcon64: p64, pwaIcon192: p192, pwaIcon512: p512 }, null);
+          U.toast('📱 PWA icon ke saare sizes update ho gaye ✓', 'ok');
+          draw();
+        } catch (err) { U.toast(err.message, 'err'); }
+      });
+      const pwaClear = U.$('[data-pwa-icon-clear]', body);
+      if (pwaClear) pwaClear.addEventListener('click', async () => {
+        await save({ pwaIcon64: '', pwaIcon192: '', pwaIcon512: '' }, null);
+        U.toast('📱 Default PWA icon restore ho gaya ✓', 'ok');
+        draw();
       });
       // bulk CSV tool
       const bulkFile = U.$('#bulk-file', body);
