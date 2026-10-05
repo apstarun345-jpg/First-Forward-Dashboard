@@ -1,4 +1,4 @@
-# First Forward Dashboard — First Forward + GV Partner (v3.48)
+# First Forward Dashboard — First Forward + GV Partner (v3.50)
 
 Colourful dashboard website built directly on top of **do Google Sheets**:
 
@@ -13,6 +13,26 @@ aur ek **⚖️ GV vs First Forward** page side-by-side comparison deta hai.
 Koi database nahi, koi manual upload nahi — website Google Sheet se data padhti hai
 (Google Visualization API / `gviz`) through a small Node server that also handles **login, users,
 permissions and settings**. Zero npm dependencies.
+
+## ✨ v3.50.0 — 🏷️ Tag Requests wapas lao + 🛡️ durable save + 🔔 notification check
+
+Employee link (`/tag-request`) se aayi requests kabhi **📥 Tag Requests** list me gayab ho jaati thin —
+deploy/restart ke waqt do process kuch second saath chalte hain aur purana process apna purana snapshot
+likh deta hai (requests `notify` record ke andar hi save hoti hain).
+
+- **🛡️ Save se pehle merge** — save hone se pehle storage copy se **missing requests ID-wise merge**
+  hoti hain (nayi request par, 3 min me ek baar, aur jab bhi requests kam dikhein) — kuch delete nahi hota.
+- **⏪ Wapas lao** — **🏷️ Tag Request → 📥 Tag Requests → ⏪ Wapas lao**: pehle **abhi ka storage record**,
+  phir **`APP_STORAGE_HISTORY` ki purani saves** — sirf missing requests judti hain (status/notes safe,
+  duplicate nahi). Wahi option **Settings → ⏪ Purana data wapas lao → 🏷️ Tag Requests recovery** me bhi.
+- **🔔 Notification check** — ek click me: `tagRequest` route ON/OFF, admin ke master switch / type
+  preference / push devices, last push error, VAPID self-test, recent tag-request notifications.
+- **Settings → 🔔 Notification audience** me ab **🏷️ Tag Request** row (pehle missing thi — route OFF
+  hone par notification chup-chaap banta hi nahi tha).
+- `/api/health` (admin) me `tagRequestRecovery` summary; users/settings restore + “doosri sheet” dono
+  ab tag requests bhi merge karte hain.
+
+Guide: [RECOVERY.md](RECOVERY.md) · Release note: [WHATS-NEW-v3.50.0.md](WHATS-NEW-v3.50.0.md).
 
 ## ✨ v3.48.0 — ⏪ Purani settings, users aur passwords wapas lana (Recovery)
 

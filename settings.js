@@ -931,6 +931,10 @@ FF.pages = FF.pages || {};
       ${cloud
         ? `<div class="btn-row"><button class="btn primary" id="rc-scan">🔄 Purani saves dhoondho</button></div><div id="rc-list"></div>${recoveryOpts('rc')}`
         : `<div class="warn-box">Ye recovery tab tabhi chalti hai jab storage Google Sheet ho. Abhi backend: <code>${esc((storage && storage.backend) || 'files')}</code> — upar ☁️ storage connect karo.</div>`}
+      <div class="ok-box" style="margin-top:12px"><b>🏷️ Tag Requests recovery</b> — employee link / form se aayi requests gayab lag rahi hain? Ye users/settings wali recovery se alag hai (requests <code>notify</code> record me rehti hain). Yahan se <b>abhi ka storage record</b> aur purani saves dono check karo — jo request missing hai wahi ID-wise judegi, kuch delete nahi hota.
+        <div class="btn-row" style="margin-top:8px"><button class="btn primary" id="rc-tag-scan">🔎 Tag Requests wapas dhoondho</button></div>
+        <div id="rc-tag-list"></div>
+      </div>
       <details style="margin-top:10px" ${(storage && storage.seededFresh) || (rec && rec.available) ? 'open' : ''}><summary class="dim small">Doosri (purani) Google Sheet se data lao</summary>
         <p class="dim small">Agar aapne naya Apps Script / nayi Google Sheet banayi hai aur asli data <b>usi purani sheet</b> me hai — to uska Web app URL + wahi secret daal kar 🔍 Check dabao, phir data is site me la sakte ho.</p>
         <div class="form-grid"><label class="fld"><span>Purani sheet ka Apps Script URL</span><input class="input" id="rc-url" placeholder="https://script.google.com/macros/s/…/exec"></label>
@@ -1230,7 +1234,8 @@ FF.pages = FF.pages || {};
       ['champion', '🥇 Monthly champions', 'Champion email ke baad winner notification'],
       ['reportUpdate', '🔄 Sheet/report update', 'Google Sheet me fresh rows aane par'],
       ['inactiveUsers', '💤 Inactive app users', 'Dashboard login inactivity report'],
-      ['backupReminder', '☁️ Backup reminder', 'Settings backup purana hone par']
+      ['backupReminder', '☁️ Backup reminder', 'Settings backup purana hone par'],
+      ['tagRequest', '🏷️ Tag Request (employee link / form)', 'Nayi tag request aane par admin ko + employee ko confirmation']
     ];
     const routeOptions = (value) => [['admin', '👑 Sirf admin'], ['users', '👥 Sirf users'], ['both', '📢 Admin + users'], ['off', '⛔ Kisi ko nahi']]
       .map(([v, label]) => `<option value="${v}" ${value === v ? 'selected' : ''}>${label}</option>`).join('');
@@ -2776,6 +2781,53 @@ FF.pages = FF.pages || {};
           } catch (err) { U.toast(err.message, 'err'); }
         }, 'Restoring…');
       }
+      // 🏷️ v3.50 — Tag Requests recovery (employee link / form wali requests `notify` record me rehti hain)
+      function tagRecoveryHtml(d, live) {
+        const store = d && d.storage ? d.storage : null;
+        const saves = (d && Array.isArray(d.saves)) ? d.saves : [];
+        const sample = (list) => (list || []).slice(0, 4).map((x) => `${x.agent || '—'}${x.employee ? ` · ${x.employee}` : ''}${x.total ? ` · ${x.total} tags` : ''}`).join(' | ');
+        const storeBox = !store ? ''
+          : store.error ? `<div class="warn-box">Storage record check nahi hua: ${esc(store.error)}</div>`
+            : store.missing
+              ? `<div class="ok-box"><b>✅ Sabse aasan:</b> abhi ke storage record me ${esc(store.found)} request hai — <b>${esc(store.missing)} missing</b>${store.addresses ? ` (+${esc(store.addresses)} agent addresses)` : ''}.<div class="btn-row" style="margin-top:6px"><button class="btn primary" data-trc-storage="1">⏪ Storage se wapas lao (${esc(store.missing)})</button></div><div class="dim small" style="margin-top:4px">${esc(sample(store.samples))}</div></div>`
+              : `<div class="dim small">Abhi ke storage record me sab ${esc(store.found)} requests maujood hain — kuch missing nahi.</div>`;
+        const rows = saves.map((x) => `<tr>
+          <td>${esc(new Date(x.at).toLocaleString('hi-IN'))}</td>
+          <td>${esc(x.found)}${x.addresses ? ` <span class="dim small">+${esc(x.addresses)} addr</span>` : ''}</td>
+          <td>${x.unavailable ? `<span class="delta down" title="${esc(x.unavailable)}">padha nahi ja saka</span>` : x.missing ? `<span class="delta down">${esc(x.missing)} missing</span>` : '<span class="delta up">sab maujood</span>'}</td>
+          <td class="small">${esc(sample(x.samples)) || '—'}</td>
+          <td><button class="btn small" data-trc-at="${esc(x.at)}" ${x.unavailable ? 'disabled' : ''}>⏪ Wapas lao</button></td>
+        </tr>`).join('');
+        return `<p class="dim small" style="margin-top:8px">Abhi list me <b>${esc(live)}</b> request. ${d && d.hint ? esc(d.hint) : ''}</p>${storeBox}
+          ${saves.length ? `<div style="overflow:auto;margin-top:8px"><table class="tbl"><thead><tr><th>Kab save hui</th><th>Us save me</th><th>Status</th><th>Requests</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="dim small">History me notify record wali koi purani save nahi mili — storage record hi asli source hai.</p>'}`;
+      }
+      async function tagRecover(payload, btn) {
+        const msg = payload.source === 'storage' ? 'Abhi ke storage record se missing tag requests wapas laani hain? (kuch delete nahi hoga)' : `${payload.at ? new Date(payload.at).toLocaleString('hi-IN') + ' ki purani save' : 'Purani save'} se missing tag requests wapas laani hain? (kuch delete nahi hoga)`;
+        if (!confirm(msg)) return;
+        await U.withButtonBusy(btn, async () => {
+          try {
+            const out = await A.api('/api/tag-requests/recovery/restore', 'POST', payload);
+            U.toast(out.added ? `⏪ ${out.added} request wapas aa gayi${out.addresses ? ` + ${out.addresses} addresses` : ''}` : 'Is save me koi nayi request nahi mili', out.added ? 'ok' : 'info');
+            rcMsg('#rc-tag-list', `<div class="ok-box">✅ ${esc(out.added)} request wapas aa gayi${out.addresses ? ` + ${esc(out.addresses)} agent address` : ''} — ab total <b>${esc(out.total)}</b>. ${out.added ? '🏷️ Tag Request → 📥 Tag Requests me check kar lo.' : ''}</div>`);
+            scanTagRecovery();
+          } catch (err) { U.toast(err.message, 'err'); }
+        }, 'Wapas laa rahe hain…');
+      }
+      async function scanTagRecovery() {
+        const btn = U.$('#rc-tag-scan', body);
+        if (btn) await U.withButtonBusy(btn, async () => {
+          rcMsg('#rc-tag-list', '<p class="dim small">Storage record + sheet history check ho rahe hain…</p>');
+          try {
+            const out = await A.api('/api/tag-requests/recovery');
+            rcMsg('#rc-tag-list', tagRecoveryHtml(out, (out.live && out.live.total) || 0));
+            (body.querySelectorAll('[data-trc-at]') || []).forEach((b) => b.addEventListener('click', () => tagRecover({ at: b.dataset.trcAt }, b)));
+            const sb = U.$('[data-trc-storage]', body);
+            if (sb) sb.addEventListener('click', () => tagRecover({ source: 'storage' }, sb));
+          } catch (err) { rcMsg('#rc-tag-list', `<span class="delta down">❌ ${esc(err.message)}</span>`); }
+        }, 'Dhoondh rahe hain…');
+      }
+      const rcTagScan = U.$('#rc-tag-scan', body);
+      if (rcTagScan) rcTagScan.addEventListener('click', () => scanTagRecovery());
       const rcPullTest = U.$('#rc-pull-test', body);
       if (rcPullTest) rcPullTest.addEventListener('click', async () => {
         const v = { url: (U.$('#rc-url', body) || {}).value || '', secret: (U.$('#rc-secret', body) || {}).value || '' };
