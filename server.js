@@ -3845,7 +3845,7 @@ async function handleApi(req, res, url) {
       name: s.appName || 'First Forward & Gv Partner Dashboard',
       short_name: s.brand || 'FF & GV',
       description: s.tagline || 'ApnaPayment workspace',
-      start_url: './#/home', scope: './', display: 'standalone', orientation: 'any',
+      id: '/', start_url: '/#/home', scope: '/', display: 'standalone', orientation: 'any',
       background_color: (s.theme && s.theme.sidebarBg) || '#111214',
       theme_color: (s.theme && s.theme.accent) || '#111214',
       categories: ['business', 'productivity', 'finance'],
