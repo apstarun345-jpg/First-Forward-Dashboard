@@ -137,3 +137,37 @@ test('table html: sortable headers, clickable rows, formula columns', () => {
   assert.doesNotMatch(html, /NaN|undefined/);
   assert.match(DP.kpiHtml(DP.agg(list), 'agents'), /data-dp-kpi="net"/);
 });
+
+test('class-wise stock summary: FF/GV split, class order, unmapped bucket', () => {
+  const agents = DP.collectAgents();
+  const mix = DP.classStockSummary(agents);
+  assert.equal(mix.available, true);
+  // Ravi 70 VC4 + 30 VC5 · Sita 500 VC4 · Direct Dev 10 VC4 · Source Review 0 · GV Ramesh 0 · GV Free 5 VC4
+  assert.deepEqual(mix.items.map((c) => [c.name, c.total, c.ff, c.gv]), [
+    ['VC4', 585, 580, 5],
+    ['VC5', 30, 30, 0]
+  ]);
+  assert.equal(mix.stockTotal, 615);
+  assert.equal(mix.unmapped, 0);
+  const html = DP.classMixHtml(agents);
+  assert.match(html, /Stock · class-wise/);
+  assert.match(html, /VC4[\s\S]*585[\s\S]*FF 580[\s\S]*GV 5/);
+  assert.match(html, /VC5[\s\S]*30[\s\S]*FF 30[\s\S]*GV 0/);
+  assert.doesNotMatch(html, /NaN|undefined/);
+});
+
+test('class-wise stock summary: unmapped rows + TL aggregation + empty state', () => {
+  const rowsList = [
+    { kind: 'agent', ch: 'ff', stockClassAvailable: true, stockClasses: { VC4: 10 }, stock: { total: 14 } },
+    { kind: 'agent', ch: 'gv', stockClassAvailable: true, stockClasses: { VC12: 6 }, stock: { total: 6 } },
+    { kind: 'agent', ch: 'ff', stockClassAvailable: false, stock: { total: 9 } }
+  ];
+  const mix = DP.classStockSummary(rowsList);
+  assert.deepEqual(mix.items.map((c) => [c.name, c.total, c.ff, c.gv]), [['VC4', 10, 10, 0], ['VC12', 6, 0, 6]]);
+  assert.equal(mix.unmapped, 4, 'sheet total se kam class data → unmapped bucket');
+  assert.match(DP.classMixHtml(rowsList), /Other[\s\S]*4[\s\S]*unmapped/);
+  const tl = DP.classStockSummary([{ kind: 'tl', ch: 'ff', stockClassAvailable: true, stockClasses: { VC4: 2 }, stock: { total: 99 } }]);
+  assert.equal(tl.unmapped, 0, 'TL sheet total alag hota hai — unmapped bucket nahi');
+  const none = DP.classMixHtml([{ kind: 'agent', ch: 'ff', stockClassAvailable: false, stock: { total: 0 } }]);
+  assert.match(none, /class columns nahi/);
+});

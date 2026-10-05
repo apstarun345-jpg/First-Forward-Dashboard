@@ -34,7 +34,7 @@ test('mobile/PWA bootstrap is external so the self-only CSP does not block it', 
   assert.match(html, /<script src="\/ui-boot\.js\?v=104"><\/script>/);
   assert.doesNotMatch(html, /<script\b(?![^>]*\bsrc=)[^>]*>[\s\S]*?<\/script>/);
   assert.match(sw, /\.\/ui-boot\.js\?v=104/);
-  assert.match(sw, /apnapayment-v111/);
+  assert.match(sw, /apnapayment-v112/);
 });
 
 test('installed PWA launches from the root, and legacy /api/pwa start URLs return the app shell', () => {
