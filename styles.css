@@ -5078,6 +5078,39 @@ html[data-theme="dark"] .data-fresh-card>header{background:#111827}.data-fresh-c
 html[data-theme="dark"] .tr-emp-filter-pending.on{background:rgba(245,158,11,.16);color:#fde68a}html[data-theme="dark"] .tr-emp-filter-approved.on{background:rgba(22,163,74,.16);color:#86efac}html[data-theme="dark"] .tr-emp-filter-dispatched.on{background:rgba(37,99,235,.18);color:#93c5fd}html[data-theme="dark"] .tr-emp-filter-rejected.on{background:rgba(220,38,38,.16);color:#fca5a5}
 @media(max-width:600px){.notification-btn{min-width:46px;width:46px;height:44px;font-size:21px}.notification-pop{top:58px;right:8px;width:calc(100vw - 16px)}.tr-emp-filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.tr-emp-filter{min-width:0;font-size:10.5px;padding:6px 8px}.tr-emp-history-head{align-items:flex-start;font-size:10px}.tr-emp-pagination{gap:8px}.tr-emp-pagination .btn{min-width:0;padding:6px 8px}}
 
+/* 👤 Meri requests — employee link ke 📝 Form tab par (v3.57): collapsed card, summary me status counts
+   dikhte hain taaki band panel me bhi pata chale ki kitni request kis status me hai; kholne par wahi
+   All/Pending/Approved/Dispatched/Rejected filter + 10-10 ke page (← Previous / Next →) jo Status tab par hain. */
+.tr-emp-panel{margin:0 0 14px}
+.tr-emp-details>summary{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:12px 14px;cursor:pointer;list-style:none;user-select:none}
+.tr-emp-details>summary::-webkit-details-marker{display:none}
+.tr-emp-details>summary::before{content:"▸";color:var(--muted);font-size:11px;transition:transform .15s ease}
+.tr-emp-details[open]>summary::before{transform:rotate(90deg)}
+.tr-emp-details[open]>summary{border-bottom:1px solid var(--line)}
+.tr-emp-sum{display:grid;gap:2px;min-width:0}
+.tr-emp-sum b{font-size:13px}
+.tr-emp-sum small{font-size:11px}
+.tr-emp-chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.tr-emp-chip{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);border-radius:999px;padding:3px 9px;background:var(--card);color:var(--muted);font-size:10.5px;font-weight:700;white-space:nowrap}
+.tr-emp-chip b{color:var(--ink);font-variant-numeric:tabular-nums}
+.tr-emp-chip-pending{border-color:rgba(245,158,11,.5);color:#92400e}
+.tr-emp-chip-approved{border-color:rgba(22,163,74,.5);color:#166534}
+.tr-emp-chip-dispatched{border-color:rgba(37,99,235,.5);color:#1d4ed8}
+.tr-emp-chip-rejected{border-color:rgba(220,38,38,.5);color:#b91c1c}
+.tr-emp-chips-loading{font-size:10.5px}
+html[data-theme="dark"] .tr-emp-chip-pending{background:rgba(245,158,11,.14);color:#fde68a}
+html[data-theme="dark"] .tr-emp-chip-approved{background:rgba(22,163,74,.14);color:#86efac}
+html[data-theme="dark"] .tr-emp-chip-dispatched{background:rgba(37,99,235,.16);color:#93c5fd}
+html[data-theme="dark"] .tr-emp-chip-rejected{background:rgba(220,38,38,.14);color:#fca5a5}
+.tr-emp-panel .tr-employee-summary{margin:0;background:none;border:0;padding:10px 0 0}
+/* 📇 Purana address suggestion — wahi agent dobara chuno to purana mobile/address/pincode ek click me.
+   Auto-fill sirf khaali fields me hota hai; chip hamesha dikhta hai taaki employee dekh kar khud bhare. */
+.tr-contact-slot:not(:empty){margin:8px 0 0}
+.tr-contact-suggest{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;border:1px dashed var(--brand);border-radius:12px;background:color-mix(in srgb,var(--brand) 6%,transparent)}
+.tr-cs-label{flex:0 0 auto}
+.tr-cs-fill{text-align:left;word-break:break-word;max-width:100%}
+@media(max-width:600px){.tr-emp-details>summary{padding:11px 12px}.tr-emp-chip{font-size:10px;padding:3px 7px}.tr-cs-fill{width:100%}}
+
 /* 🔔 Notification quick panel readability */
 .notification-head{padding:13px 15px}.notification-head b{font-size:15px}.notification-head small{font-size:11.5px}.notification-list{max-height:540px;padding:7px}.notification-item{gap:12px;padding:12px 11px}.notification-icon{width:34px;height:34px;font-size:17px}.notification-item b{font-size:13.5px}.notification-item p{font-size:12.5px;line-height:1.48}.notification-item small{font-size:11px}
 

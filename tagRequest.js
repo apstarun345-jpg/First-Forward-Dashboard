@@ -71,7 +71,7 @@ FF.pages = FF.pages || {};
     // 🌐 public (bina login)
     publicMode: false, publicCfg: null, done: null,
     status: { q: '', list: null, busy: false, err: '', searched: '' },
-    employeeHistoryFilter: 'all', employeeHistoryPage: 1,
+    employeeHistoryFilter: 'all', employeeHistoryPage: 1, employeeHistoryOpen: false,
     // 🔁 submit se pehle duplicate check (wahi agent + class pehle se active?)
     dup: { list: [], force: false, busy: false },
     // ⏪ v3.50 — recovery (sheet history se gayab requests wapas) + 🔔 notification check (admin)
@@ -1285,6 +1285,27 @@ body.colorful .from-hdr { color: #166534; }
       if (row) pickFromBoard(row.dataset.trSbPick);
     });
   }
+  /** 📇 Purana address chip — wahi agent dobara chuno (kabhi bhi, kisi bhi device par) to uski purani
+   *  request ka mobile · address · pincode ek click me bhar jaata hai. Do sources: isi device ki address
+   *  book (turant) + server-side Address book (doosre device se bhi). Auto-fill sirf khaali fields me hota
+   *  hai, lekin chip hamesha dikhta hai — employee khud dekh kar bhare, chup-chaap kuch na badle. */
+  function contactSuggestHtml(row) {
+    const s = row && row.suggest;
+    if (!s) return '';
+    const sm = clean(s.mobile), sa = clean(s.address), sp = clean(s.pincode);
+    if (!sm && !sa && !sp) return '';
+    const differs = (a, b) => clean(a) && norm(a) !== norm(b);
+    if (!(differs(sm, row.mobile) || differs(sa, row.address) || differs(sp, row.pincode))) return '';
+    const bits = [sm ? `📱 ${esc(sm)}` : '', sa ? `🏠 ${esc(sa)}` : '', sp ? `📮 ${esc(sp)}` : ''].filter(Boolean).join(' · ');
+    return `<div class="tr-contact-suggest"><span class="tr-cs-label dim small">📇 ${esc(s.source === 'Address' ? 'Address book' : 'Pichli request')} se purana address mila —</span>
+      <button type="button" class="btn small tr-cs-fill" data-tr-fill-old="${esc(row.id)}" title="Purana mobile · address · pincode bhar do">${bits}</button></div>`;
+  }
+  /** Sirf chip slot update karo — poora card dobara banane se typing ka focus toot jaata. */
+  function refreshContactSuggest(row) {
+    const card = rootEl && rootEl.querySelector ? rootEl.querySelector('[data-tr-row="' + row.id + '"]') : null;
+    const slot = card && card.querySelector ? card.querySelector('[data-tr-suggest-slot]') : null;
+    if (slot) slot.innerHTML = contactSuggestHtml(row);
+  }
   function agentCardHtml(row, i) {
     const cfg = formCfg();
     const askMobile = cfg.askMobile !== false, askAddress = cfg.askAddress !== false;
@@ -1321,6 +1342,7 @@ body.colorful .from-hdr { color: #166534; }
             <label class="field tr-span-all"><span class="dim small">🏠 Full address${askAddress ? ' *' : ''} <small class="dim">(house / street / area / city — tags isi address par jayenge)</small></span>
               <textarea class="input${badCls(row.id, 'address')}" data-tr-a="address" rows="2" maxlength="300" placeholder="e.g. 24, Shanti Nagar, Sodala, Jaipur">${esc(row.address)}</textarea></label>
           </div>
+          <div class="tr-contact-slot" data-tr-suggest-slot>${contactSuggestHtml(row)}</div>
           ${row.fromBook ? '<p class="dim small tr-book-note">📇 Pichli request / Address book se purana mobile-address auto-fill hua — submit se pehle ek baar check kar lo.</p>' : ''}
           ${errList.length ? `<ul class="tr-err-list">${errList.map((m) => `<li>⚠️ ${esc(m)}</li>`).join('')}</ul>` : ''}
         </div>
@@ -1342,6 +1364,7 @@ body.colorful .from-hdr { color: #166534; }
     const busy = state.busy === 'send';
     body.innerHTML = `
       ${employeeCardHtml()}
+      ${employeeHistoryPanelHtml()}
       ${stockBoardHtml()}
       <section class="card tr-agents-card"><div class="card-head"><h3>🧑‍🤝‍🧑 Agent request <span class="count" data-tr-agents>${fmt(state.rows.length)} agent${state.rows.length === 1 ? '' : 's'}</span></h3>
         <div class="card-right dim">Har agent: naam · mobile · address · pincode · class-wise qty (0/khaali = nahi chahiye) · total <b data-tr-total>${fmt(grandTotal())}</b> tags</div></div>
@@ -1366,6 +1389,8 @@ body.colorful .from-hdr { color: #166534; }
     rootEl.querySelectorAll('.tr-agent-card').forEach(bindAgentCard);
     bindStockBoard(rootEl);
     bindFormGlobal();
+    // 🌐 Employee link: "👤 Meri requests" panel — Form tab par hi (employee ko Status tab kholna nahi padta).
+    if (isPublic()) { bindEmployeePanel(rootEl.querySelector('#tr-emp-history-panel')); ensureEmployeeSummaryLoaded(repaintEmployeePanel); }
   }
   /** Index aane par sirf meta + hints update (typing ke beech focus na toote). */
   function refreshFormMeta() {
@@ -1420,26 +1445,38 @@ body.colorful .from-hdr { color: #166534; }
     const rec = idx && idx.byKey.get(`${channel}|${nameKey}`);
     if (!rec) return false;
     row.agentId = rec.agentId || ''; row.name = rec.name; row.tl = rec.tlName; row.channel = rec.channel; row.tlFilter = ''; row.isTl = false;
-    if (!digits(row.mobile) && !clean(row.address)) {
+    // 📇 Isi device ki address book se purana contact — khaali fields me auto-fill, aur chip ke liye
+    // row.suggest me bhi (server ka lookup async hai, usse pehle bhi purana address dikhna chahiye).
+    {
       const saved = agentBook()[`${rec.channel}|${norm(rec.name)}`];
-      if (saved) { row.mobile = saved.mobile || ''; row.address = saved.address || ''; row.pincode = saved.pincode || ''; row.fromBook = true; }
+      if (saved && (saved.mobile || saved.address || saved.pincode)) {
+        row.suggest = { mobile: clean(saved.mobile), address: clean(saved.address), pincode: clean(saved.pincode), source: 'Request' };
+        if (!digits(row.mobile) && !clean(row.address)) {
+          row.mobile = saved.mobile || ''; row.address = saved.address || ''; row.pincode = saved.pincode || ''; row.fromBook = true;
+        }
+      } else row.suggest = null;
     }
     if (state.errs[row.id]) delete state.errs[row.id].agent;
     return true;
   }
   async function suggestHistoricalContact(row) {
-     const rec = exactAgent(row); if (!rec || row.contactManual) return;
+     const rec = exactAgent(row); if (!rec) return;
      try {
        const qs = new URLSearchParams({ agentId: rec.agentId || '', agentName: rec.name || '', channel: rec.channel || 'ff' });
        const path = isPublic() ? '/api/public/tag-request/contact?' + qs.toString() : '/api/tag-request/contact?' + qs.toString();
        const out = isPublic() ? await publicApi(path) : await FF.auth.api(path);
        const contact = out && out.contact;
        if (!contact) return;
+       // 📇 Purana address chip me hamesha dikhao — employee ne pehle kuch type kiya ho tab bhi, taaki
+       // purana address dekh kar ek click me bhar sake. Auto-fill sirf khaali fields me (chup-chaap overwrite nahi).
+       row.suggest = { mobile: clean(contact.mobile), address: clean(contact.address), pincode: clean(contact.pincode), source: contact.source || 'Address' };
        let changed = false;
-       if (!clean(row.mobile) && clean(contact.mobile)) { row.mobile = contact.mobile; changed = true; }
-       if (!clean(row.address) && clean(contact.address)) { row.address = contact.address; changed = true; }
-       if (!clean(row.pincode) && clean(contact.pincode)) { row.pincode = contact.pincode; changed = true; }
-       if (!changed) return;
+       if (!row.contactManual) {
+         if (!clean(row.mobile) && clean(contact.mobile)) { row.mobile = contact.mobile; changed = true; }
+         if (!clean(row.address) && clean(contact.address)) { row.address = contact.address; changed = true; }
+         if (!clean(row.pincode) && clean(contact.pincode)) { row.pincode = contact.pincode; changed = true; }
+       }
+       if (!changed) { refreshContactSuggest(row); return; }
        row.fromBook = true; row.addressSource = 'Address';
        const card = rootEl && rootEl.querySelector ? rootEl.querySelector('[data-tr-row="' + row.id + '"]') : null;
        if (card) {
@@ -1505,6 +1542,8 @@ body.colorful .from-hdr { color: #166534; }
         const d = digits(inp.value);
         row.agentId = d.length >= 3 && !/[a-z]/i.test(inp.value) ? d : '';
         row.fromBook = false;
+        // Naya/ adhura naam = purane agent ka address suggestion ab maayne ka nahi.
+        if (row.suggest) { row.suggest = null; const cs = card.querySelector('[data-tr-suggest-slot]'); if (cs) cs.innerHTML = ''; }
         clearErr(card, row.id, 'agent');
         const meta = card.querySelector('.tr-row-meta');
         if (meta) meta.innerHTML = agentMetaHtml(row);
@@ -1525,6 +1564,19 @@ body.colorful .from-hdr { color: #166534; }
     }
     // "Kya ye agent hai?" chip + TL filter clear (meta line dobara banti hai — delegation)
     card.addEventListener('click', (e) => {
+      // 📇 Purana address chip — ek click me purana mobile · address · pincode bhar do.
+      const fillOld = e.target.closest ? e.target.closest('[data-tr-fill-old]') : null;
+      if (fillOld) {
+        const s = row.suggest || {};
+        if (clean(s.mobile)) row.mobile = String(s.mobile);
+        if (clean(s.address)) row.address = String(s.address);
+        if (clean(s.pincode)) row.pincode = String(s.pincode);
+        row.fromBook = true; row.contactManual = true; row.addressSource = s.source === 'Address' ? 'Address' : 'Request';
+        ['mobile', 'address', 'pincode'].forEach((f) => { if (state.errs[row.id]) delete state.errs[row.id][f]; });
+        rerenderCard('[data-tr-a="address"]');
+        U.toast('📇 Purana address bhar diya — submit se pehle ek baar check kar lo', 'ok');
+        return;
+      }
       const guess = e.target.closest ? e.target.closest('[data-tr-guess]') : null;
       if (guess) { if (applyPick(row, guess.dataset.trGuess)) rerenderCard(digits(row.mobile) ? '.tr-qty' : '[data-tr-a="mobile"]'); return; }
       const tla = e.target.closest ? e.target.closest('[data-tr-tlagent]') : null;
@@ -1741,6 +1793,7 @@ body.colorful .from-hdr { color: #166534; }
         if (out && out.employeeToken) state.employeeToken = String(out.employeeToken);
         saveEmployee(); state.employeeSummary = null;
         state.employeeHistoryFilter = 'all'; state.employeeHistoryPage = 1;
+        state.employeeHistoryOpen = true; // 👤 Meri requests khula rahe — nayi request wahi turant dikhe
         state.done = {
           batch: (out && out.batch) || { total: payload.agents.reduce((s, a) => s + a.rows.reduce((x, r) => x + r.approved, 0), 0), agents: reqs.length },
           requests: reqs.map((r) => ({ id: r.id, agentName: r.agentName || (r.agent && r.agent.name) || '', mobile: r.mobile || (r.agent && r.agent.mobile) || '', total: r.total, classes: r.classes || [] })),
@@ -1774,7 +1827,7 @@ body.colorful .from-hdr { color: #166534; }
     body.innerHTML = `<section class="card tr-done"><div class="card-body">
       <div class="tr-done-icon">✅</div>
       <h2 style="margin:6px 0">Request bhej di gayi!</h2>
-      <p class="dim" style="margin:0 0 12px">${esc(d.employee || state.employee.name || '')} — <b>${fmt(reqs.length || batch.agents || 0)} agent</b> ki request (${fmt(batch.total || 0)} tags) admin ke paas pahunch gayi. Status <b>🔎 Status</b> tab me <b>agent ke mobile number</b> se dekh sakte ho.</p>
+      <p class="dim" style="margin:0 0 12px">${esc(d.employee || state.employee.name || '')} — <b>${fmt(reqs.length || batch.agents || 0)} agent</b> ki request (${fmt(batch.total || 0)} tags) admin ke paas pahunch gayi. Apni saari requests <b>📝 Form</b> par <b>👤 Meri requests</b> me dikh jaayengi (All / Pending / Approved / Dispatched / Rejected) — ya <b>🔎 Status</b> tab me <b>agent ke mobile number</b> se dekho.</p>
       ${reqs.length ? `<div class="table-wrap"><table class="tbl tr-done-tbl"><thead><tr><th>Agent</th><th>Mobile</th><th>Classes</th><th class="num">Tags</th><th>Request ID</th></tr></thead><tbody>
         ${reqs.map((r) => `<tr><td><b>${esc(r.agentName || '—')}</b></td><td>${esc(r.mobile || '—')}</td><td class="small">${esc((r.classes || []).map((c) => `${c.cls}×${c.qty}`).join(' · '))}</td><td class="num"><b>${fmt(r.total)}</b></td>
           <td><span class="mono small">${esc(r.id)}</span> <button class="btn small" data-tr-copy-id="${esc(r.id)}" title="Request ID copy">📋</button></td></tr>`).join('')}
@@ -1862,18 +1915,94 @@ body.colorful .from-hdr { color: #166534; }
     </div>`;
     return { ...page, html };
   }
-  function employeeSummaryHtml() {
+  /** 👤 Meri requests ka andar ka hissa — Status tab (poora card) aur Form tab (collapsed panel) dono isi ko
+   *  use karte hain, taaki filter/paging ek hi jagah se chale aur dono par same dikhe.
+   *  `compact` = Form tab ka panel (title summary me pehle se hai, isliye andar sirf ↻ Refresh). */
+  function employeeHistoryInnerHtml(compact) {
     if (!state.employeeToken) return '';
-    if (!state.employeeSummary) return `<div class="tr-employee-summary"><div class="tr-es-head"><div><b>👤 Meri requests</b><small class="dim">Aapki bheji hui requests ka status yahan dikhega.</small></div><button class="btn small" data-tr-emp-refresh>↻ Refresh</button></div><div class="dim small">Request history load ho rahi hai…</div></div>`;
+    const refresh = '<button class="btn small" data-tr-emp-refresh>↻ Refresh</button>';
+    if (!state.employeeSummary) {
+      return `<div class="tr-es-head">${compact ? '<div></div>' : '<div><b>👤 Meri requests</b><small class="dim">Aapki bheji hui requests ka status yahan dikhega.</small></div>'}${refresh}</div><div class="dim small">Request history load ho rahi hai…</div>`;
+    }
     const summary = state.employeeSummary;
     const history = employeeStatusHistoryHtml(summary, state.employeeHistoryFilter, state.employeeHistoryPage);
     state.employeeHistoryFilter = history.filter;
     state.employeeHistoryPage = history.page;
-    return `<div class="tr-employee-summary">
-      <div class="tr-es-head"><div><b>👤 Meri sabhi requests</b><small class="dim">All / status par click karke request dekhein.</small></div><button class="btn small" data-tr-emp-refresh>↻ Refresh</button></div>
+    return `<div class="tr-es-head">${compact ? '<div></div>' : '<div><b>👤 Meri sabhi requests</b><small class="dim">All / status par click karke request dekhein.</small></div>'}${refresh}</div>
       <div class="tr-es-tags"><span>🏷️ Requested tags <b>${fmt(summary.requestedTags || 0)}</b></span><span>✅ Approved tags <b>${fmt(summary.approvedTags || 0)}</b></span></div>
-      ${history.html}
-    </div>`;
+      ${history.html}`;
+  }
+  function employeeSummaryHtml() {
+    const inner = employeeHistoryInnerHtml(false);
+    return inner ? `<div class="tr-employee-summary">${inner}</div>` : '';
+  }
+  /** Form tab ke collapsed panel ki summary line — counts band panel me bhi dikhte hain, taaki employee ko
+   *  pata chale ki uski kitni request kis status me hai (ek click me poori list). */
+  function employeeHistoryChipsHtml(summary) {
+    if (!summary) return '<span class="tr-emp-chips-loading dim">load ho raha hai…</span>';
+    return EMPLOYEE_STATUS_FILTERS.map((item) =>
+      `<span class="tr-emp-chip tr-emp-chip-${item.key}">${item.label} <b>${fmt(employeeStatusCount(summary, item.key))}</b></span>`).join('');
+  }
+  /** 📝 Form tab par bhi "👤 Meri requests" — employee link kholte hi wahi page par (Status tab kholna nahi padta).
+   *  Collapsed, kyunki form upar hi rehna chahiye; counts summary me dikhte hain. */
+  function employeeHistoryPanelHtml() {
+    if (!isPublic() || !state.employeeToken) return '';
+    const summary = state.employeeSummary;
+    return `<section class="card tr-emp-panel" id="tr-emp-history-panel"><details class="tr-emp-details"${state.employeeHistoryOpen ? ' open' : ''}>
+        <summary><span class="tr-emp-sum"><b>👤 Meri requests</b>
+            <small class="dim">Apni bheji hui saari requests — All / Pending / Approved / Dispatched / Rejected · 10-10 ke page</small></span>
+          <span class="tr-emp-chips">${employeeHistoryChipsHtml(summary)}</span></summary>
+        <div class="card-body"><div class="tr-employee-summary" data-tr-emp-body>${employeeHistoryInnerHtml(true)}</div></div>
+      </details></section>`;
+  }
+  /** 👤 Meri requests ke controls (↻ Refresh · status filter · ← Previous / Next →).
+   *  `repaint` = kya dobara banana hai: Status tab poora view, Form tab sirf panel (form ka focus na toote). */
+  function bindEmployeeHistory(scope, repaint) {
+    if (!scope || !scope.querySelectorAll) return;
+    const refresh = scope.querySelector('[data-tr-emp-refresh]');
+    if (refresh) refresh.addEventListener('click', () => {
+      if (!state.employeeToken) return;
+      state.employeeSummary = null;
+      repaint();
+      loadEmployeeSummary(true).then(() => { if (rootEl && rootEl.isConnected) repaint(); });
+    });
+    scope.querySelectorAll('[data-tr-emp-filter]').forEach((button) => button.addEventListener('click', () => {
+      state.employeeHistoryFilter = button.dataset.trEmpFilter || 'all';
+      state.employeeHistoryPage = 1;
+      repaint();
+    }));
+    scope.querySelectorAll('[data-tr-emp-page]').forEach((button) => button.addEventListener('click', () => {
+      if (button.disabled) return;
+      const delta = button.dataset.trEmpPage === 'next' ? 1 : -1;
+      state.employeeHistoryPage = Math.max(1, state.employeeHistoryPage + delta);
+      repaint();
+    }));
+  }
+  /** Form tab: sirf panel ko dobara banao — form ke inputs/focus ko chhue bina. */
+  function repaintEmployeePanel() {
+    if (!rootEl || !rootEl.querySelector) return;
+    const panel = rootEl.querySelector('#tr-emp-history-panel');
+    if (!panel) return;
+    const open = panel.querySelector('details');
+    if (open) state.employeeHistoryOpen = !!open.open; // user ne khola/band kiya — wahi rakho
+    const wrap = document.createElement('div');
+    wrap.innerHTML = employeeHistoryPanelHtml();
+    const fresh = wrap.firstElementChild;
+    if (!fresh || !panel.replaceWith) return;
+    panel.replaceWith(fresh);
+    bindEmployeePanel(fresh);
+  }
+  function bindEmployeePanel(panel) {
+    if (!panel) return;
+    const d = panel.querySelector('details');
+    if (d) d.addEventListener('toggle', () => { state.employeeHistoryOpen = !!d.open; });
+    bindEmployeeHistory(panel, repaintEmployeePanel);
+  }
+  /** Form khulte hi ek baar history le aao (token ho tabhi) — Status tab jaane ki zaroorat nahi. */
+  function ensureEmployeeSummaryLoaded(repaint) {
+    if (!isPublic() || !state.employeeToken) return;
+    if (state.employeeSummary || state.employeeSummaryPromise) return;
+    loadEmployeeSummary().then(() => { if (rootEl && rootEl.isConnected && state.view === 'form') repaint(); });
   }
   function renderStatus() {
     const body = bodyEl();
@@ -1893,25 +2022,8 @@ body.colorful .from-hdr { color: #166534; }
           ? `<p class="dim small" style="margin:12px 0 6px">${fmt(list.length)} request mili${st.searched ? ` · ${esc(st.searched)}` : ''} (nayi upar)</p><div class="tr-st-list">${list.map(statusCardHtml).join('')}</div>`
           : `<div class="tr-status-out" style="margin-top:12px">Is number se koi request nahi mili. Wahi mobile number daalo jo request lagate waqt agent ke liye diya tha — ya Request ID try karo.</div>`) : ''}
       </div></section>`;
-    const refreshEmployee = () => {
-      if (!state.employeeToken) return;
-      state.employeeSummary = null;
-      renderStatus();
-      loadEmployeeSummary(true).then(() => { if (rootEl && rootEl.isConnected && state.view === 'status') renderStatus(); });
-    };
-    const empRefresh = body.querySelector('[data-tr-emp-refresh]');
-    if (empRefresh) empRefresh.addEventListener('click', refreshEmployee);
-    body.querySelectorAll('[data-tr-emp-filter]').forEach((button) => button.addEventListener('click', () => {
-      state.employeeHistoryFilter = button.dataset.trEmpFilter || 'all';
-      state.employeeHistoryPage = 1;
-      renderStatus();
-    }));
-    body.querySelectorAll('[data-tr-emp-page]').forEach((button) => button.addEventListener('click', () => {
-      if (button.disabled) return;
-      const delta = button.dataset.trEmpPage === 'next' ? 1 : -1;
-      state.employeeHistoryPage = Math.max(1, state.employeeHistoryPage + delta);
-      renderStatus();
-    }));
+    // 👤 Meri requests ke controls — wahi shared binder jo Form tab ka panel use karta hai.
+    bindEmployeeHistory(body, renderStatus);
     if (state.employeeToken && !state.employeeSummary && !state.employeeSummaryPromise) loadEmployeeSummary().then(() => {
       if (rootEl && rootEl.isConnected && state.view === 'status') renderStatus();
     });
@@ -2900,10 +3012,14 @@ body.colorful .from-hdr { color: #166534; }
     _test: {
       displayRows, reqRowHtml: (dr) => reqRowHtml(dr), metricCellsHtml, metricNumbers, hintText, agentGroupSummaryHtml, channelFilterHtml, requestsShellHtml, agentKeyOf, labelItem, contactOf,
       employeeStatusPage, employeeStatusFiltersHtml, employeeStatusHistoryHtml,
+      employeeHistoryInnerHtml, employeeHistoryChipsHtml, employeeHistoryPanelHtml, contactSuggestHtml,
       recTotals, suggestItems, suggestHtml, stockBoardHtml, stockBoardTableHtml, stockBoardRows, stockBoardChipsHtml,
       classBreakdownRows, classBreakdownHtml, tlPanelHtml, findTlRecord, courierOptions, requestColumnCount,
       setIndex: (idx) => { state.index = idx || null; },
       setStockBoard: (patch) => { state.stockBoard = { ...state.stockBoard, ...(patch || {}) }; },
+      // 🧪 Public (employee link) mode + employee identity/history — panel generators inhi par chalte hain.
+      setPublic: (cfg) => { state.publicMode = !!cfg; state.publicCfg = cfg || null; },
+      setEmployee: (patch) => { state.employeeToken = (patch && patch.token) || ''; state.employeeSummary = (patch && patch.summary) || null; state.employeeHistoryFilter = (patch && patch.filter) || 'all'; state.employeeHistoryPage = (patch && patch.page) || 1; state.employeeHistoryOpen = !!(patch && patch.open); },
       filterRows: (list, patch) => {
         const keep = state.filter;
         state.filter = { ...keep, ...(patch || {}) };

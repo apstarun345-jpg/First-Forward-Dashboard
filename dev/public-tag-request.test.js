@@ -252,3 +252,95 @@ test('public employee tag request — bina login submit, status, admin visibilit
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+/* 👤 v3.57 — employee link: employee apni requests KHUD dekh sake + 📇 purana address suggest ho.
+ *
+ *   • GET /api/public/tag-request/employee-status — employee link ke 📝 Form tab par "👤 Meri requests"
+ *     panel isi se data leta hai: All / Pending / Approved / Dispatched / Rejected counts + nayi-pehle
+ *     request list (panel 10-10 ke page me dikhata hai).
+ *   • GET /api/public/tag-request/contact — wahi agent dobara chuno to purana address mil jaaye
+ *     (server-side Address book; sirf browser localStorage nahi, isliye doosre device par bhi chalta hai).
+ *   • Privacy: employee-status me employee/agent ka address-pincode nahi jaata, aur ek employee ka token
+ *     doosre employee ki request NAHI dikhata.
+ */
+test('👤 employee-status — apni requests + counts, admin approve par status badalta hai, 📇 purana address milta hai', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'apna-empst-'));
+  const mock = await startMockAppsScript({ secret: SECRET });
+  let server;
+  try {
+    server = await startServer(dir, mock.url);
+    const login = await jsonCall(server.base, '/api/auth/login', 'POST', { username: 'owner', password: 'initial-password' });
+    const admin = login.cookie;
+    assert.ok(admin, 'admin login cookie');
+
+    const emp = { name: 'Ramesh Yadav', mobile: '9876543210', address: '24, Shanti Nagar, Sodala, Jaipur', pincode: '302019' };
+    // Form jo shape bhejta hai wahi — har agent ka apna mobile/address/pincode + class-wise rows.
+    const rahul = { agentId: '1001', agentName: 'Rahul Sharma', tl: 'TL One', channel: 'ff', mobile: '9876500001', address: '12, Gandhi Nagar, Tonk Road, Jaipur', pincode: '302015', rows: [{ cls: 'VC4', approved: 25, stock: 3, last: 40, cur: 25 }] };
+    const first = await jsonCall(server.base, '/api/public/tag-request', 'POST', { employee: emp, agents: [rahul] }, '', '10.7.7.7');
+    assert.equal(first.res.status, 201, JSON.stringify(first.json));
+    const token = first.json.employeeToken || (first.json.request && first.json.request.employeeToken);
+    assert.ok(/^[A-Za-z0-9_-]{24,120}$/.test(String(token || '')), 'submit par employee token milta hai (device par save hota hai)');
+    const firstId = first.json.request.id;
+
+    // 1) employee apni request khud dekhta hai — Status tab kholne ki zaroorat nahi
+    const one = await jsonCall(server.base, '/api/public/tag-request/employee-status?token=' + encodeURIComponent(token));
+    assert.equal(one.res.status, 200, JSON.stringify(one.json));
+    assert.equal(one.json.totalRequests, 1, 'ek request lagayi → ek hi dikhti hai');
+    assert.equal(one.json.pending, 1);
+    assert.equal(one.json.approved, 0);
+    assert.equal(one.json.dispatched, 0);
+    assert.equal(one.json.rejected, 0);
+    assert.equal(one.json.requestedTags, 25);
+    assert.equal(one.json.approvedTags, 0, 'admin ne abhi approve nahi kiya → approved tags 0 (pehle yahan 25 dikhta tha)');
+    assert.equal(one.json.requests.length, 1);
+    assert.equal(one.json.requests[0].agentName, 'Rahul Sharma', 'agent ka naam employee ko dikhta hai');
+    assert.equal(one.json.requests[0].classes[0].cls, 'VC4');
+
+    // privacy — address/pincode employee-status response me nahi jaate
+    const body = JSON.stringify(one.json);
+    assert.ok(!body.includes('Shanti Nagar'), 'employee ka address response me nahi jaata');
+    assert.ok(!body.includes('302019'), 'employee ka pincode response me nahi jaata');
+    assert.ok(!body.includes('Gandhi Nagar'), 'agent ka address bhi nahi jaata');
+
+    // 2) ek aur request → counts badhte hain (panel me "All" isi ko dikhata hai)
+    const second = await jsonCall(server.base, '/api/public/tag-request', 'POST', { employee: emp, employeeToken: token, agents: [{ agentId: '2002', agentName: 'Priya Verma', tl: 'TL Two', channel: 'gv', mobile: '9876500002', address: '7, Malviya Nagar, Jaipur', pincode: '302017', rows: [{ cls: 'VC6', approved: 6 }] }] }, '', '10.7.7.8');
+    assert.equal(second.res.status, 201, JSON.stringify(second.json));
+    const two = await jsonCall(server.base, '/api/public/tag-request/employee-status?token=' + encodeURIComponent(token));
+    assert.equal(two.json.totalRequests, 2, 'doosri request bhi isi token par jud gayi');
+    assert.equal(two.json.pending, 2);
+    assert.equal(two.json.requestedTags, 31, '25 + 6');
+    assert.equal(two.json.requests[0].agentName, 'Priya Verma', 'nayi request sabse upar (panel isi order me dikhata hai)');
+
+    // 3) admin approve karta hai → employee ke panel me status turant Approved me chala jaata hai
+    const approved = await jsonCall(server.base, `/api/tag-requests/${firstId}`, 'PUT', { status: 'approved' }, admin);
+    assert.equal(approved.res.status, 200, JSON.stringify(approved.json));
+    const three = await jsonCall(server.base, '/api/public/tag-request/employee-status?token=' + encodeURIComponent(token));
+    assert.equal(three.json.approved, 1, 'approve hui request Approved count me');
+    assert.equal(three.json.pending, 1, 'baaki abhi pending');
+    assert.equal(three.json.totalRequests, 2);
+    assert.equal(three.json.approvedTags, 25, 'approved tags ka total');
+
+    // 4) 📇 wahi agent dobara → purana address server se mil jaata hai (doosre device par bhi)
+    const contact = await jsonCall(server.base, '/api/public/tag-request/contact?agentId=1001&agentName=Rahul%20Sharma&channel=ff');
+    assert.equal(contact.res.status, 200, JSON.stringify(contact.json));
+    assert.equal(contact.json.found, true, 'pichli request ka contact mila');
+    assert.equal(contact.json.contact.address, '12, Gandhi Nagar, Tonk Road, Jaipur', 'purana address suggest hota hai');
+    assert.equal(contact.json.contact.pincode, '302015');
+
+    // 5) doosre employee ka token — doosre ki request NAHI dikhni chahiye (privacy)
+    const other = await jsonCall(server.base, '/api/public/tag-request', 'POST', { employee: { name: 'Koi Doosra', mobile: '9800001111', address: '9, Other Nagar, Jaipur', pincode: '302020' }, agents: [{ agentId: '3003', agentName: 'Anil Kumar', channel: 'ff', mobile: '9800002222', address: '3, Another Nagar, Jaipur', pincode: '302021', rows: [{ cls: 'VC5', approved: 4 }] }] }, '', '10.7.7.9');
+    const otherToken = other.json.employeeToken || (other.json.request && other.json.request.employeeToken);
+    assert.ok(otherToken && otherToken !== token, 'doosre employee ka apna alag token');
+    const otherStatus = await jsonCall(server.base, '/api/public/tag-request/employee-status?token=' + encodeURIComponent(otherToken));
+    assert.equal(otherStatus.json.totalRequests, 1, 'doosra employee sirf apni ek request dekhta hai');
+    assert.equal(otherStatus.json.requests[0].agentName, 'Anil Kumar');
+
+    // 6) token ke bina / galat token → 400 (koi list leak nahi)
+    assert.equal((await jsonCall(server.base, '/api/public/tag-request/employee-status')).res.status, 400);
+    assert.equal((await jsonCall(server.base, '/api/public/tag-request/employee-status?token=short')).res.status, 400);
+  } finally {
+    if (server) await server.stop();
+    await mock.close();
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
