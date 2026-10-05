@@ -102,14 +102,14 @@ self.addEventListener('push', e => {
     body: data.body || 'Naya update aaya hai — app khol ke dekho.',
     icon: 'icon-192.png',
     badge: 'icon-192.png',
-    tag: data.tag || 'ff',
+    tag: data.tag || `ff-${String(data.type || 'info').replace(/[^a-z0-9_-]/gi, '-').slice(0, 24)}-${id}`,
     renotify: true,
     requireInteraction: !!data.persist,
     vibrate: sound ? vibration : undefined,
     timestamp: Number(data.at) || Date.now(),
     lang: data.lang || 'hi-IN',
     ...(actions.length ? { actions } : {}),
-    data: { link, sound, tone, voice: wantVoice ? voiceText : '', id, type: data.tag || 'ff', user: data.user || '', at: Date.now() }
+    data: { link, sound, tone, voice: wantVoice ? voiceText : '', id, type: data.type || 'info', user: data.user || '', at: Date.now() }
   };
   const job = wantVoice ? { id, at: Date.now(), text: voiceText, title, type: data.tag || 'ff', tone, link, user: data.user || '' } : null;
   // Chrome ka rule: har push event par ek notification dikhani hi padti hai, warna
