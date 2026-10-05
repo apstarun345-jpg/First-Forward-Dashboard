@@ -82,7 +82,13 @@ window.FF = window.FF || {};
   }
   function renderMobileNav() {
     const nav = U.$('#mobile-nav');
-    if (!nav || !FF.auth.user) return;
+    if (!nav) return;
+    if (!FF.auth || !FF.auth.user) {
+      nav.hidden = true;
+      nav.replaceChildren();
+      document.body.classList.remove('has-mobile-nav');
+      return;
+    }
     // Native-app style: keep five primary destinations/actions visible and thumb-friendly.
     // Search remains available from the top search/command palette; More exposes every route.
     const items = [
@@ -93,6 +99,7 @@ window.FF = window.FF || {};
       { kind: 'action', id: 'more', icon: '☰', label: 'More' }
     ];
     nav.hidden = false;
+    document.body.classList.add('has-mobile-nav');
     nav.setAttribute('aria-label', 'Primary mobile navigation');
     nav.innerHTML = items.map((x) => {
       const active = x.kind === 'route' && current.page === x.id;
@@ -1052,7 +1059,20 @@ window.FF = window.FF || {};
     activeDrawerSnap = null;
     if (FF.kpiDetail && FF.kpiDetail.resetHistory) FF.kpiDetail.resetHistory();
   }
-  function closeSidebar() { document.body.classList.remove('side-open'); }
+  function openSidebar() {
+    document.body.classList.add('side-open');
+    const menuButton = U.$('#menu-btn');
+    if (menuButton) menuButton.setAttribute('aria-expanded', 'true');
+  }
+  function closeSidebar() {
+    document.body.classList.remove('side-open');
+    const menuButton = U.$('#menu-btn');
+    if (menuButton) menuButton.setAttribute('aria-expanded', 'false');
+  }
+  function toggleSidebar() {
+    if (document.body.classList.contains('side-open')) closeSidebar();
+    else openSidebar();
+  }
 
   function exportCard(btn) {
     if (!FF.auth.can('export')) { U.toast('Download permission nahi hai', 'err'); return; }
@@ -1213,7 +1233,7 @@ window.FF = window.FF || {};
     // Sidebar stays fixed/visible on desktop — the old hover auto-hide mode is removed.
     document.body.classList.remove('sidebar-auto'); try { localStorage.removeItem('ff_sidebar_auto'); } catch { /* private mode */ }
     window.addEventListener('hashchange', () => { paramOverride = null; renderCurrent(); toggleUserMenu(false); });
-    U.$('#menu-btn').addEventListener('click', () => document.body.classList.toggle('side-open'));
+    U.$('#menu-btn').addEventListener('click', toggleSidebar);
     const themeBtn = U.$('#theme-toggle'); if (themeBtn) themeBtn.addEventListener('click', toggleThemeMode);
     const langBtn = U.$('#lang-toggle');
     if (langBtn) {

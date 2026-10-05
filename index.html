@@ -10,26 +10,16 @@
   <title>First Forward &amp; Gv Partner Dashboard</title>
   <meta name="description" content="First Forward + GV Partner FASTag dashboard — issuance, stock, trends and agent performance.">
   <meta name="theme-color" content="#111214">
-  <script>
-  (() => {
-    try {
-      const standalone = window.matchMedia && window.matchMedia('(display-mode: standalone)').matches;
-      const touch = Number(navigator.maxTouchPoints || 0) > 0;
-      const screenShort = Math.min(Number(screen.width || 9999), Number(screen.height || 9999));
-      if (standalone || (touch && screenShort <= 900)) document.documentElement.classList.add('mobile-ui');
-    } catch (_) {}
-  })();
-</script>
-  <link rel="manifest" href="/api/pwa/manifest?v=103">
-  <link id="site-favicon" rel="icon" href="/api/pwa/icon/64?v=103">
-  <link rel="icon" type="image/png" sizes="192x192" href="/api/pwa/icon/192">
-  <link rel="apple-touch-icon" href="/api/pwa/icon/192?v=103">
-  <link rel="stylesheet" href="styles.css?v=103">
+  <script src="/ui-boot.js?v=104"></script>
+  <link rel="manifest" href="/api/pwa/manifest?v=104">
+  <link id="site-favicon" rel="icon" href="/api/pwa/icon/64?v=104">
+  <link rel="icon" type="image/png" sizes="192x192" href="/api/pwa/icon/192?v=104">
+  <link rel="apple-touch-icon" href="/api/pwa/icon/192?v=104">
+  <link rel="stylesheet" href="styles.css?v=104">
   <link rel="stylesheet" href="controlTower.css?v=1">
   <!-- 🏠 Home KPI text visibility (v3.47): gradient KPI cards ke andar title/value/foot hamesha
        readable — pehle kuch themes/browsers me white text white card par chala jaata tha. -->
   <link rel="stylesheet" href="homeKpiFix.css?v=1">
-  <script>try { if (localStorage.getItem('ff_theme') === 'dark') document.documentElement.dataset.theme = 'dark'; } catch (e) {}</script>
 </head>
 <body>
   <div id="app-boot" class="app-boot" role="status" aria-live="polite">
@@ -52,7 +42,7 @@
 
   <div class="content">
     <header class="topbar">
-      <button class="icon-btn" id="menu-btn" aria-label="Menu">☰</button>
+      <button class="icon-btn" id="menu-btn" type="button" aria-label="Open navigation" aria-controls="sidebar" aria-expanded="false">☰</button>
       <div class="top-title" id="top-title">Dashboard</div>
       <div id="offline-state" class="offline-state" role="status" aria-live="polite" hidden></div>
       <div class="top-actions" id="top-actions">
@@ -119,6 +109,6 @@
   <script defer src="morningCard.js?v=86"></script>
   <script defer src="lazy.js?v=101"></script>
   <script defer src="publicForm.js?v=86"></script>
-  <script defer src="app.js?v=86"></script>
+  <script defer src="app.js?v=104"></script>
 </body>
 </html>

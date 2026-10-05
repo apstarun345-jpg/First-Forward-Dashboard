@@ -5164,7 +5164,7 @@ html[data-theme="dark"] .data-fresh-card>header{background:#111827}.data-fresh-c
     z-index: 105;
     min-height: 56px !important;
     height: 56px;
-    padding: 6px max(10px, env(safe-area-inset-left)) 6px max(10px, env(safe-area-inset-right));
+    padding: 6px max(10px, env(safe-area-inset-right)) 6px max(10px, env(safe-area-inset-left));
     border-bottom: 1px solid color-mix(in srgb, var(--line) 85%, transparent);
     box-shadow: 0 1px 12px rgba(15,23,42,.07);
   }
@@ -5187,7 +5187,7 @@ html[data-theme="dark"] .data-fresh-card>header{background:#111827}.data-fresh-c
     width: 100% !important;
     max-width: 100% !important;
     min-width: 0 !important;
-    padding: 12px max(10px, env(safe-area-inset-left)) max(calc(var(--mobile-nav-h) + 18px), calc(var(--mobile-nav-h) + env(safe-area-inset-bottom) + 10px)) max(10px, env(safe-area-inset-right)) !important;
+    padding: 12px max(10px, env(safe-area-inset-right)) max(calc(var(--mobile-nav-h) + 18px), calc(var(--mobile-nav-h) + env(safe-area-inset-bottom) + 10px)) max(10px, env(safe-area-inset-left)) !important;
   }
   .page-head {
     gap: 10px !important;
@@ -5515,3 +5515,50 @@ html.mobile-ui .drawer {
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }
 }
+
+/* PWA shell fixes: keep More usable, respect the hidden nav before login, and keep
+   overlays above the fixed tab bar. The previous mobile-ui rule hid the sidebar,
+   so the hamburger/More action could never open the remaining dashboard pages. */
+#mobile-nav[hidden],
+html.mobile-ui #mobile-nav.mobile-nav[hidden] { display: none !important; }
+html.mobile-ui #menu-btn { display: inline-grid !important; place-items: center; }
+html.mobile-ui .sidebar {
+  display: flex !important;
+  position: fixed !important;
+  inset: 0 auto 0 0 !important;
+  width: min(88vw, 320px) !important;
+  max-width: 320px !important;
+  height: 100vh !important;
+  height: 100dvh !important;
+  padding-top: env(safe-area-inset-top, 0px) !important;
+  padding-bottom: env(safe-area-inset-bottom, 0px) !important;
+  z-index: 10001 !important;
+  visibility: hidden !important;
+  transform: translateX(-105%) !important;
+  transition: transform .22s ease, visibility .22s ease !important;
+}
+html.mobile-ui body.side-open .sidebar {
+  visibility: visible !important;
+  transform: translateX(0) !important;
+}
+html.mobile-ui .side-backdrop { z-index: 10000 !important; }
+html.mobile-ui body.side-open .side-backdrop { display: block !important; }
+html.mobile-ui body.side-open { overflow: hidden !important; }
+html.mobile-ui .topbar {
+  padding-left: max(10px, env(safe-area-inset-left, 0px)) !important;
+  padding-right: max(10px, env(safe-area-inset-right, 0px)) !important;
+}
+html.mobile-ui .main {
+  padding-left: max(10px, env(safe-area-inset-left, 0px)) !important;
+  padding-right: max(10px, env(safe-area-inset-right, 0px)) !important;
+}
+html.mobile-ui body.has-mobile-nav .main {
+  padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)) !important;
+}
+html.mobile-ui body:not(.has-mobile-nav) .main { padding-bottom: 16px !important; }
+html.mobile-ui #mobile-nav.mobile-nav {
+  padding-left: max(7px, env(safe-area-inset-left, 0px)) !important;
+  padding-right: max(7px, env(safe-area-inset-right, 0px)) !important;
+}
+html.mobile-ui .drawer-backdrop { z-index: 10002 !important; }
+html.mobile-ui .drawer { z-index: 10003 !important; }
