@@ -1294,34 +1294,57 @@ FF.pages = FF.pages || {};
       }));
     }
 
-    function openGroup(g) {
+    function displayGroupForChannel(g, channel) {
+      if (!g) return g;
+      if (!g.ff || !g.gv || !channel || channel === 'both') return g;
+      return {
+        ...g,
+        key: `${g.key || normName(g.name)}|${channel}`,
+        ff: channel === 'ff' ? g.ff : null,
+        gv: channel === 'gv' ? g.gv : null,
+        _selectedChannel: channel,
+        _channelChoice: true
+      };
+    }
+    const channelChoiceHtml = (g, selected) => {
+      if (!g || !g.ff || !g.gv) return '';
+      const pick = (key, label) => `<button type="button" class="chip${selected === key ? ' on' : ''}" data-msp-channel="${key}" aria-pressed="${selected === key}">${label}</button>`;
+      return `<div class="msp-channel-choice">
+        <div><b>⚖ Ye agent / TL FF + GV dono me hai</b><small class="dim">Data mix-up se bachne ke liye channel select karo.</small></div>
+        <div class="msp-channel-choice-btns">${pick('both','⚖ Dono')}${pick('ff','🟦 First Forward')}${pick('gv','🟩 GV Partner')}</div>
+      </div>`;
+    };
+    function openGroup(g, channelOverride) {
       if (!g || !out) return;
+      const selected = g.ff && g.gv ? (channelOverride || g._selectedChannel || 'both') : (g.ff ? 'ff' : 'gv');
+      g._selectedChannel = selected;
       current = g;
-      const person = g.ff || g.gv;
+      const viewGroup = displayGroupForChannel(g, selected);
+      const person = viewGroup.ff || viewGroup.gv;
       trendFollow(person);
-      const linkedTeams = teamPeopleFor(g);
-      const bits = [g.ff ? `🟦 FF ${isTlP(g.ff) ? 'TL' : 'Agent'}${g.ff.sub ? ` · ${esc(g.ff.sub)}` : ''}` : '', g.gv ? `🟩 GV ${isTlP(g.gv) ? 'TL' : 'Agent'}${g.gv.sub ? ` · ${esc(g.gv.sub)}` : ''}` : ''].filter(Boolean).join('  ·  ');
+      const linkedTeams = teamPeopleFor(viewGroup);
+      const bits = [viewGroup.ff ? `🟦 FF ${isTlP(viewGroup.ff) ? 'TL' : 'Agent'}${viewGroup.ff.sub ? ` · ${esc(viewGroup.ff.sub)}` : ''}` : '', viewGroup.gv ? `🟩 GV ${isTlP(viewGroup.gv) ? 'TL' : 'Agent'}${viewGroup.gv.sub ? ` · ${esc(viewGroup.gv.sub)}` : ''}` : ''].filter(Boolean).join('  ·  ');
       const chips = groups.length > 1
-        ? `<div class="msp-matches"><span class="dim small">${U.fmt(groups.length)} log mile — click karo:</span>${groups.slice(0, 12).map((gp, i) => `<button type="button" class="msp-chip${gp === g ? ' on' : ''}" data-msp-g="${i}">${esc(gp.name)}</button>`).join('')}</div>`
+        ? `<div class="msp-matches"><span class="dim small">${U.fmt(groups.length)} log mile — click karo:</span>${groups.slice(0, 12).map((gp, i) => `<button type="button" class="msp-chip${gp === g ? ' on' : ''}" data-msp-g="${i}">${esc(gp.name)}${gp.ff && gp.gv ? ' ⚖' : gp.gv ? ' 🟩' : ' 🟦'}</button>`).join('')}</div>`
         : '';
       const teamCards = linkedTeams.map((team) => {
         const chLabel = team.channel === 'gv' ? '🟩 GV Partner' : '🟦 First Forward';
         const id = team.person.sub ? ` · TL ID ${esc(team.person.sub)}` : '';
         return `<section class="card msp-team-card"><div class="card-head"><div><h3>👥 ${esc(team.person.name)} · ${chLabel} TL team${id}</h3><p class="dim small">All agents ka stock + issuance; TL ka apna issuance aur stock alag row me.</p></div></div><div class="card-body"><div class="msp-report" data-msp-team="${team.channel}"></div></div></section>`;
       }).join('');
-      out.innerHTML = `${chips}
+      out.innerHTML = `${channelChoiceHtml(g, selected)}${chips}
         <div class="msp-hero">
-          <span class="ms-avatar">${esc(String(g.name || '?').slice(0, 1).toUpperCase())}</span>
+          <span class="ms-avatar ${viewGroup.gv ? 'gv' : 'ff'}">${esc(String(g.name || '?').slice(0, 1).toUpperCase())}</span>
           <div class="msp-hero-id"><b>${esc(g.name)}</b><small>${bits || 'Report'}</small></div>
           ${person ? `<div class="msp-hero-act"><button class="btn small" data-ms-tags="${esc(person.name)}">🏷️ Tag-level rows</button></div>` : ''}
         </div>
-        <div id="msp-kpis" class="msp-kpis-wrap">${['ff', 'gv'].filter((c) => g[c]).map((c) => kpiLoadingHtml(g.name, c)).join('')}</div>
-        ${gvStripHtml(g.gv)}${ffStripHtml(g.ff)}
+        <div id="msp-kpis" class="msp-kpis-wrap">${['ff', 'gv'].filter((c) => viewGroup[c]).map((c) => kpiLoadingHtml(g.name, c)).join('')}</div>
+        ${gvStripHtml(viewGroup.gv)}${ffStripHtml(viewGroup.ff)}
         <div class="msp-report" id="msp-report"></div>${teamCards}`;
-      paintKpis(g, U.$('#msp-kpis', out)).catch(() => {});
+      paintKpis(viewGroup, U.$('#msp-kpis', out)).catch(() => {});
       const host = U.$('#msp-report', out);
       const sr = SR();
-      if (sr && host) sr.render(host, g);
+      if (sr && host) sr.render(host, viewGroup);
       else if (host && FF.masterProfile && FF.masterProfile.renderInto && person) FF.masterProfile.renderInto(host, person);
       else if (host) host.innerHTML = '<div class="card"><div class="card-body empty">Report module load nahi hua — page reload karo.</div></div>';
       linkedTeams.forEach((team) => {
@@ -1331,6 +1354,7 @@ FF.pages = FF.pages || {};
       });
       try { FF.charts && FF.charts.mount && FF.charts.mount(out); } catch { /* charts optional */ }
     }
+
 
     const fallbackGroup = (p) => ({ key: normName(p.name), name: p.name, ff: chOfP(p) === 'ff' ? p : null, gv: chOfP(p) === 'gv' ? p : null });
 
@@ -1355,7 +1379,19 @@ FF.pages = FF.pages || {};
       const people = preferNameMatches(channelPeople, q);
       const sr = SR();
       groups = sr ? sr.groupPeople(people) : people.map(fallbackGroup);
-      groups.sort((a, b) => Number(!!b.gv) - Number(!!a.gv) || String(a.name).localeCompare(String(b.name)));
+      // Exact-name cross-channel match: keep one group with a visible FF/GV chooser so
+      // the report never silently mixes the two datasets.
+      const exactName = normName(q);
+      if (exactName) {
+        const sameName = groups.filter((g) => normName(g.name) === exactName);
+        const hasFf = sameName.some((g) => !!g.ff), hasGv = sameName.some((g) => !!g.gv);
+        if (hasFf && hasGv && sameName.length > 1) {
+          const first = sameName[0];
+          const merged = { ...first, ff: sameName.find((g) => g.ff)?.ff || null, gv: sameName.find((g) => g.gv)?.gv || null, _selectedChannel: 'both', _channelChoice: true };
+          groups = [merged, ...groups.filter((g) => !sameName.includes(g))];
+        }
+      }
+      groups.sort((a, b) => Number(!!b.gv) - Number(!!b.ff) || String(a.name).localeCompare(String(b.name)));
       if (groups.length) {
         if (open || groups.length === 1) openGroup(groups[0]); else chipsOnly();
         warmFull();
@@ -1411,6 +1447,12 @@ FF.pages = FF.pages || {};
         const nmKey = normName(nm.dataset.mspName);
         const p = lightPeople().filter((x) => normName(x.name) === nmKey).sort((a, b) => (chOfP(b) === 'gv' ? 1 : 0) - (chOfP(a) === 'gv' ? 1 : 0))[0];
         if (p) { if (input) input.value = p.name; const sr = SR(); openGroup(sr ? (sr.groupPeople([p])[0] || fallbackGroup(p)) : fallbackGroup(p)); }
+        return;
+      }
+      const channelBtn = e.target.closest('[data-msp-channel]');
+      if (channelBtn && current) {
+        const choice = channelBtn.dataset.mspChannel || 'both';
+        openGroup(current, choice);
         return;
       }
       const gb = e.target.closest('[data-msp-g]');
