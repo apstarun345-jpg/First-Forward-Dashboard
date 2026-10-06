@@ -3046,7 +3046,7 @@ async function maybeSmartActionCenter(force = false) {
 /** Ek jagah se saare scheduled checks — boot + har 30 min. */
 async function runScheduledChecks() {
   const F = feats();
-  return Promise.allSettled([
+  const results = await Promise.allSettled([
     maybeDailyDigest(false),
     maybeMidMonthAlert(),
     maybeInactiveUsers(),
