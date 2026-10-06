@@ -1,6 +1,6 @@
-/* 🪶🚚 v3.51 — Tag Request sheet ko chhota rakho + courier naam.
+/* 🧩🚚 v3.60 — Tag Request sheet grouped agent classes + courier naam.
  *
- *   • Sheet default = rowMode 'agent' (har AGENT ki EK row, saari classes usi cell me: "VC4 25 · VC6 4")
+ *   • Sheet default = rowMode 'agent-class-gap' (har agent ki class rows saath, beech me 1 blank spacer row)
  *     aur compact column set jisme 'courier' bhi hai.
  *   • Purani (v1) config ek baar migrate hoti hai — class-wise lambi sheet apne aap chhoti ho jaati hai.
  *   • 🚚 Courier: request ke saath save, list me dikhta hai, admin badal sakta hai, sheet me column.
@@ -63,7 +63,7 @@ test('v3.51 — sheet ek agent = ek chhoti row (classes merged) + 🚚 courier c
     // 1) default config hi chhota hai — agent mode + compact columns (+ courier)
     const cfg = await jsonCall(server.base, '/api/tag-request-sheet', 'GET', undefined, admin);
     assert.equal(cfg.res.status, 200, JSON.stringify(cfg.json));
-    assert.equal(cfg.json.config.rowMode, 'agent', 'default ab ek agent = ek row');
+    assert.equal(cfg.json.config.rowMode, 'agent-class-gap', 'default ab agent class rows + blank spacer hai');
     assert.equal(cfg.json.config.v, 2, 'migration version mark');
     assert.ok(cfg.json.config.columns.includes('cls'), 'classes cell');
     assert.ok(cfg.json.config.columns.includes('courier'), '🚚 courier column');
@@ -104,7 +104,7 @@ test('v3.51 — sheet ek agent = ek chhoti row (classes merged) + 🚚 courier c
 
     // 6) legacy (v1) config ek hi baar migrate hoti hai — class mode + lambe columns se chhota set
     const cfg2 = await jsonCall(server.base, '/api/tag-request-sheet', 'GET', undefined, admin);
-    assert.equal(cfg2.json.config.rowMode, 'agent');
+    assert.equal(cfg2.json.config.rowMode, 'agent-class-gap');
   } finally {
     if (server) await server.stop();
     await mock.close();
@@ -131,7 +131,7 @@ test('v3.51 — purani (v1) class-wise config ek baar me chhote agent-mode par m
     const admin = (await jsonCall(server.base, '/api/auth/login', 'POST', { username: 'owner', password: 'initial-password' })).cookie;
     const cfg = await jsonCall(server.base, '/api/tag-request-sheet', 'GET', undefined, admin);
     assert.equal(cfg.json.config.rowMode, 'agent', 'v1 class mode → agent mode');
-    assert.equal(cfg.json.config.v, 2);
+    assert.equal(cfg.json.config.v, 3);
     assert.ok(cfg.json.config.columns.includes('courier'), 'naya compact column set');
     assert.ok(!cfg.json.config.columns.includes('remark'), 'purani lambi columns hata di');
   } finally {
