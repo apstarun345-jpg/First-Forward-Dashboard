@@ -2734,7 +2734,9 @@ body.colorful .from-hdr { color: #166534; }
     const btn = rootEl.querySelector('[data-tr-bulk="approve"]');
     if (btn) { btn.disabled = true; btn.textContent = '⏳ Approve ho rahi hain…'; }
     // ⚡ Bulk approve sequential nahi — selected requests parallel update hoti hain.
-    const results = await Promise.allSettled(list.map((r) => putRequest(r, { status: 'approved' })));
+    const pending = list.map((r) => putRequest(r, { status: 'approved' }));
+    renderReqTable(); // optimistic status sabhi selected rows me turant dikhao
+    const results = await Promise.allSettled(pending);
     const ok = results.filter((x) => x.status === 'fulfilled').length;
     const fail = results.length - ok;
     renderReqTable();
@@ -2817,11 +2819,18 @@ body.colorful .from-hdr { color: #166534; }
           .catch((err) => { U.toast('Sheet push fail: ' + ((err && err.message) || ''), 'err'); opEl.disabled = false; });
       } else if (op === 'del') {
         if (!window.confirm(`${dr.agent.name} ki request delete karein? (${fmt(dr.req.total)} tags${dr.siblings > 1 ? ` · poori request ${dr.siblings} agents ki` : ''})`)) return;
+        // ⚡ Delete bhi optimistic — row turant hat jaaye; server fail ho to exact list restore.
+        const oldRequests = state.requests.slice();
+        state.requests = state.requests.filter((x) => x.id !== dr.req.id);
+        state.sel.forEach((key) => { if (String(key).startsWith(dr.req.id + '::')) state.sel.delete(key); });
+        renderReqTable();
         FF.auth.api(`/api/tag-requests/${encodeURIComponent(dr.req.id)}`, 'DELETE').then(() => {
-          state.requests = state.requests.filter((x) => x.id !== dr.req.id);
           U.toast('🗑 Request delete ho gayi', 'ok');
+        }).catch((err) => {
+          state.requests = oldRequests;
           renderReqTable();
-        }).catch((err) => U.toast('Delete fail: ' + ((err && err.message) || ''), 'err'));
+          U.toast('Delete fail: ' + ((err && err.message) || ''), 'err');
+        });
       }
     });
     card.addEventListener('change', (e) => {
