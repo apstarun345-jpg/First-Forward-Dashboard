@@ -1201,7 +1201,7 @@ FF.pages = FF.pages || {};
         ${c('personalLinks', '🔗 Personal links', 'Har agent/TL ka secret read-only performance link — Settings me 🔗 tab')}
         ${c('customAlerts', '🗓 Custom alert scheduler', 'Apne reminders/status — roz / har Somwar / har mahine fixed time par bell me')}
         ${c('smartNotifications', '🧠 Smart notifications / Action Center', 'Important problems ko ek actionable alert me combine karta hai — duplicate/noise se bachata hai')}
-        ${c('championEmail', '🥇 Champion certificate email', 'Mahine ke top agents ka certificate SMTP se email (SMTP set ho tabhi)')
+        ${c('championEmail', '🥇 Champion certificate email', 'Mahine ke top agents ka certificate SMTP se email (SMTP set ho tabhi)')}
         ${c('followupTracker', '⏰ Follow-up tracker', 'Silent agents + due agent/TL notes — roz owner timeline reminder')}
         ${c('dispatchPlan', '🎯 Suggested dispatch cards', 'High + Medium priority agents: cover din + suggested tag qty (GV + FF)')}
         ${c('masterSearch', '🔎 Master search bar', 'Topbar + Home panel — naam, TL, ID, GV ID, barcode, tag ID sab ek search me (dropdown suggestions + kundli cards)')}
