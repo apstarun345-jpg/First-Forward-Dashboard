@@ -5787,7 +5787,14 @@ async function handleApi(req, res, url) {
     }
     let header = [];
     const rows = [];
-    const counts = reqs.map((r) => { const out = tagSheetRows(r, cfg, event); header = out.header; rows.push(...out.rows); return out.rows.length; });
+    const counts = reqs.map((r, ri) => {
+      const out = tagSheetRows(r, cfg, event);
+      header = out.header;
+      rows.push(...out.rows);
+      // 🧩 Preferred batch layout: one blank spacer between agents.
+      if (cfg.rowMode === 'agent-class-gap' && ri < reqs.length - 1) rows.push(header.map(() => ''));
+      return out.rows.length;
+    });
     if (!rows.length) { if (throwOnFail) throw new HttpError(400, 'Sheet ke liye koi row nahi bani.'); return null; }
     const tabName = String(cfg.tab || 'Tag Requests').slice(0, 80) || 'Tag Requests';
     // v3.27 — sheetLink me ID diya ho to entry US ALAG SHEET me jaati hai (Apps Script openById
