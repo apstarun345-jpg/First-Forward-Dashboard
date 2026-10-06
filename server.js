@@ -3053,6 +3053,7 @@ async function runScheduledChecks() {
     F.alerts.zeroDay === false ? Promise.resolve() : maybeZeroDayAlert(),
     F.backupReminder === false ? Promise.resolve() : maybeBackupReminder(),
     maybeAgentAnomaly(),
+    maybeSmartNotification(),
     schedulesTick(),
     maybeChampionEmail(false),
     maybeFollowup(false),
@@ -3403,6 +3404,56 @@ async function sendDispatchPlanEmail(force = false, input = null) {
   return { date: dateKey, recipients: recipients.length, agents: plan.summary.agents, tls: plan.summary.tls, provider: result.provider, attached: email.attachments.map((a) => a.name) };
 }
 
+// ---- 🧠 Smart Action Center notification ------------------------------------------------------
+async function maybeSmartNotification(force = false) {
+  try {
+    const F = feats();
+    if (F.smartNotifications === false) return null;
+    if (!db.notify || typeof db.notify !== 'object') db.notify = { items: [], watch: {} };
+    if (!db.notify.watch || typeof db.notify.watch !== 'object') db.notify.watch = {};
+    const watch = db.notify.watch, now = istNow(), dateKey = dateKeyNow(), hour = now.getUTCHours();
+    const cooldownH = Math.max(1, Number(F.smartCooldownHours) || 6);
+    if (!force && watch.smartAlertAt && Date.now() - Date.parse(watch.smartAlertAt) < cooldownH * 3600e3) return null;
+    await checkReports(false).catch(() => {});
+    const daily = watch.daily && typeof watch.daily === 'object' ? watch.daily : {};
+    const today = daily[dateKey] || {}, ff = Number(today.ff) || 0, gv = Number(today.gv) || 0, total = ff + gv;
+    const reasons = [], pad = (n) => String(n).padStart(2, '0');
+    const prevTotals = [];
+    for (let i = 1; i <= 7; i++) {
+      const d = new Date(`${dateKey}T00:00:00Z`); d.setUTCDate(d.getUTCDate() - i);
+      const k = `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+      if (daily[k]) prevTotals.push((Number(daily[k].ff) || 0) + (Number(daily[k].gv) || 0));
+    }
+    const prevAvg = prevTotals.length ? prevTotals.reduce((a,b) => a+b, 0) / prevTotals.length : 0;
+    const targets = Array.isArray(db.settings.targets) ? db.settings.targets : [], ym = dateKey.slice(0, 7);
+    const monthTarget = targets.filter(t => t && t.ym === ym && Number(t.target) > 0).reduce((a,t) => a + Number(t.target), 0);
+    const day = Number(dateKey.slice(8, 10)), daysInMonth = new Date(Number(ym.slice(0,4)), Number(ym.slice(5,7)), 0).getDate();
+    const expectedToday = monthTarget > 0 ? monthTarget / daysInMonth : prevAvg;
+    const gapPct = Math.max(10, Number(F.smartTargetGapPct) || 25), minAvg = Math.max(1, Number(F.smartMinPrevAvg) || 5);
+    if (hour >= 11 && expectedToday >= minAvg && total < expectedToday * (1 - gapPct / 100)) {
+      reasons.push(`Aaj ${total} tags — expected pace ~${Math.round(expectedToday)}, lagbhag ${Math.round(100 - (total / expectedToday) * 100)}% peeche`);
+    }
+    const zeroAfter = Math.max(9, Number(F.smartZeroAfterHour) || 12);
+    if (hour >= zeroAfter && total === 0 && prevAvg >= minAvg) reasons.push(`Aaj abhi tak 0 issuance (pichhle 7 din avg ~${Math.round(prevAvg)}/din)`);
+    if (monthTarget > 0 && hour >= 13) {
+      const expectedMtd = monthTarget * (day / daysInMonth);
+      const actualMtd = Object.entries(daily).filter(([d]) => d.startsWith(ym)).reduce((sum,[,v]) => sum + (Number(v && v.ff)||0) + (Number(v && v.gv)||0), 0);
+      if (expectedMtd > 0 && actualMtd < expectedMtd * (1 - gapPct / 100)) reasons.push(`MTD ${actualMtd} vs expected ~${Math.round(expectedMtd)} — ${Math.round(100 - (actualMtd / expectedMtd) * 100)}% behind target pace`);
+    }
+    if (!reasons.length) return null;
+    const signature = `${dateKey}|${reasons.join('|')}`;
+    if (!force && watch.smartAlertSignature === signature) return null;
+    watch.smartAlertAt = new Date().toISOString(); watch.smartAlertSignature = signature;
+    persist('notify').catch(() => {});
+    const item = recordNotification({
+      type: 'alert', title: `🧠 Action Required · ${dateKey.slice(8,10)} ${MON_SHORT[Number(dateKey.slice(5,7)) - 1]}`,
+      body: reasons.join(' · ') + '. Dashboard → Home/Targets me action lo.', target: 'admin', routeKey: 'smartAlert',
+      meta: { link: monthTarget > 0 ? '#/targets' : '#/dashboard', date: dateKey, today: total, ff, gv, expectedToday: Math.round(expectedToday), prevAvg: Math.round(prevAvg), target: monthTarget, reasons }
+    });
+    logAudit(null, 'smart_action_alert', { actor: force ? 'admin:test' : 'scheduler', note: reasons.join(' · ').slice(0, 180) });
+    return item;
+  } catch (err) { console.warn('smart notification:', err.message); return null; }
+}
 // ---- 🔍 agent anomaly (raat 9 IST) — achanak 0 / bahut kam issuance wale agents -----------------
 async function maybeAgentAnomaly(force = false) {
   try {
