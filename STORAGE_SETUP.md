@@ -12,6 +12,40 @@ Har record server par hi **AES-256-GCM encrypt** hota hai, sheet me sirf encrypt
 > Alternative: Render par paid persistent disk (`/data`, `DATA_DIR=/data`) — DEPLOYMENT.md dekho.
 > Advanced alternative (service account): SHEETS_STORAGE.md.
 
+## 🚨 "The document cannot be modified. Perhaps it has grown too large" error aa raha hai?
+
+Jab login/OTP par ye error aaye:
+`Could not save users to Google Sheets (Apps Script). Reason: Apps Script storage: The document cannot be modified. Perhaps it has grown too larg`
+
+**Kyun hota hai:**
+1. **Google Sheet me `APP_STORAGE_HISTORY` tab bohot bada ho gaya:** Purani saves ke encrypted chunks se Google Sheets ki document size limit cross ho gayi.
+2. **Ya Apps Script MAIN business sheet me laga diya gaya:** First Forward ki main sheet me EIR (60,000+ rows) aur StockDataa (100,000+ rows) hain — Google Sheets itni badi sheet me kisi script ko write nahi karne deta.
+
+**Turant Fix (Do tareeqe):**
+
+### Tareeqa 1: Existing sheet ko 1 minute me saaf karo (Agar alag sheet thi)
+1. Wo Google Sheet kholo jisme Apps Script laga hai.
+2. Agar `APP_STORAGE_HISTORY` tab hai (chhipa ho to menu **View → Hidden sheets → APP_STORAGE_HISTORY**):
+   - Uspar right-click karke **Delete** kar do. (Koi user/settings data loss nahi hoga — active data `APP_STORAGE` me rehta hai).
+3. `APP_STORAGE` tab me:
+   - Row 10 ke neeche ki saari khaali rows delete kar do.
+   - Column F ke aage ke saare khaali columns delete kar do.
+4. Apps Script editor kholo (Extensions → Apps Script):
+   - Naya `google-apps-script/Code.gs` paste karo (ab history 60 rows par bound hai aur auto-trim hoti hai).
+   - Dropdown se `cleanStorageHistory` select karke **▶ Run** dabao.
+   - **Deploy → Manage deployments → ✏️ Edit → Version: "New version" → Deploy**.
+5. Sheet reload karo aur dashboard par OTP / login dobara karo — error gayab ho jayega!
+
+### Tareeqa 2: Nayi clean sheet banao (Sabse reliable, agar main sheet me tha)
+1. Google Drive me ek **brand new, empty Google Sheet** banao (naam: `First Forward Storage`).
+2. Us sheet me **Extensions → Apps Script** kholo.
+3. Purana code hata kar `google-apps-script/Code.gs` paste karo.
+4. Editor me `setAppSecretOnce('APNA_RENDER_SECRET')` chalao (wahi same secret jo Render ke `APPS_SCRIPT_SECRET` me hai).
+5. **Deploy → New deployment** → ⚙️ **Web app** → *Execute as:* **Me** · *Who has access:* **Anyone** → **Deploy** → URL copy karo.
+6. Render dashboard → Environment me `APPS_SCRIPT_URL` naye URL se update karo (secret mat badalna). Save & redeploy.
+
+---
+
 ## 🆕 v3.58 — "Could not save users/notify … (Apps Script)" error aa raha hai?
 
 Naya `google-apps-script/Code.gs` paste karo aur **Deploy → Manage deployments → ✏️ Edit →

@@ -80,7 +80,13 @@ export class AppsScriptStore {
             ? 'Apps Script returned an HTML page. Deploy it as Web app → Execute as: Me, Who has access: Anyone, and use the /exec URL.'
             : 'Apps Script returned an invalid response.');
         }
-        if (!json.ok) throw new Error(`${this.label || 'Apps Script storage'}: ${json.error || 'request failed'}`);
+        if (!json.ok) {
+          let errStr = json.error || 'request failed';
+          if (/grown too large|cannot be modified/i.test(errStr)) {
+            errStr += ' (Google Sheet document size limit reached: delete APP_STORAGE_HISTORY tab or deploy Apps Script in a fresh clean sheet)';
+          }
+          throw new Error(`${this.label || 'Apps Script storage'}: ${errStr}`);
+        }
         this.lastError = null;
         return json;
       } catch (err) {
