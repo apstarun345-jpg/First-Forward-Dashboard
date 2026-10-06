@@ -1,0 +1,126 @@
+/* v3.69 — Premium PWA + Workspace launch layer
+   Loaded last so it can safely correct legacy boot rules without touching dashboard logic. */
+
+/* ---------- Workspace launch: make the existing fireworks actually visible ---------- */
+.app-boot{
+  background:
+    radial-gradient(circle at 50% 42%, rgba(37,99,235,.30) 0, transparent 28%),
+    radial-gradient(circle at 18% 20%, rgba(236,72,153,.22) 0, transparent 25%),
+    radial-gradient(circle at 82% 78%, rgba(34,211,238,.18) 0, transparent 26%),
+    linear-gradient(145deg,#050816 0%,#0b1020 48%,#12051b 100%) !important;
+  z-index:99999 !important;
+  isolation:isolate !important;
+}
+.app-boot::before{
+  z-index:0 !important;
+  background:
+    radial-gradient(circle at 50% 44%,rgba(96,165,250,.22),transparent 30%),
+    radial-gradient(circle at 20% 25%,rgba(244,114,182,.16),transparent 26%),
+    radial-gradient(circle at 80% 72%,rgba(34,211,238,.14),transparent 28%) !important;
+  animation:premiumBootGlow 2.2s ease-in-out infinite alternate !important;
+}
+.boot-fireworks{
+  z-index:1 !important;
+  overflow:hidden;
+}
+.boot-fireworks .fw{
+  z-index:1;
+  width:8px !important;
+  height:8px !important;
+  box-shadow:
+    0 -108px 0 #60a5fa,0 108px 0 #f472b6,
+    108px 0 0 #facc15,-108px 0 0 #34d399,
+    76px 76px 0 #fb7185,-76px 76px 0 #a78bfa,
+    76px -76px 0 #22d3ee,-76px -76px 0 #fde047,
+    0 -62px 0 #fff,0 62px 0 #fff,
+    62px 0 0 #fff,-62px 0 0 #fff !important;
+  animation:premiumBurst 1.85s cubic-bezier(.16,.72,.28,1) infinite !important;
+}
+.boot-fireworks .fw-b{animation-delay:.55s !important;transform:scale(.72);}
+.boot-fireworks .fw-c{animation-delay:1.08s !important;transform:scale(.58);}
+.app-boot picture,.app-boot .boot-welcome,.app-boot p,.app-boot small,.app-boot .boot-progress{
+  position:relative;
+  z-index:3;
+}
+.app-boot img{
+  width:min(250px,72vw) !important;
+  filter:drop-shadow(0 0 16px rgba(96,165,250,.35)) drop-shadow(0 16px 38px rgba(0,0,0,.35)) !important;
+  animation:premiumBootLogo 1.8s ease-in-out infinite !important;
+}
+.boot-welcome{
+  font-size:11px !important;
+  letter-spacing:.30em !important;
+  color:#fde047 !important;
+  text-shadow:0 0 14px rgba(250,204,21,.55) !important;
+}
+.app-boot p{font-size:18px !important;letter-spacing:.01em;}
+.app-boot small{font-size:12px !important;color:rgba(255,255,255,.66) !important;}
+.boot-progress{
+  width:min(210px,65vw) !important;
+  height:4px !important;
+  background:rgba(255,255,255,.13) !important;
+  box-shadow:0 0 18px rgba(96,165,250,.22);
+}
+.boot-progress::after{
+  width:42% !important;
+  background:linear-gradient(90deg,#22d3ee,#60a5fa,#f472b6,#facc15) !important;
+  box-shadow:0 0 12px rgba(96,165,250,.65);
+  animation:premiumBootSlide 1.05s ease-in-out infinite !important;
+}
+
+/* ---------- Premium installed-app surface ---------- */
+html.pwa-standalone body{
+  overscroll-behavior-y:none;
+  -webkit-tap-highlight-color:transparent;
+}
+html.pwa-standalone .topbar{
+  padding-top:max(10px,env(safe-area-inset-top,0px));
+}
+html.pwa-standalone .main{
+  padding-bottom:calc(40px + env(safe-area-inset-bottom,0px));
+}
+html.mobile-ui button,
+html.mobile-ui .btn,
+html.mobile-ui .mobile-nav-item{
+  -webkit-tap-highlight-color:transparent;
+  touch-action:manipulation;
+}
+html.mobile-ui .btn:active,
+html.mobile-ui .icon-btn:active,
+html.mobile-ui .mobile-nav-item:active{
+  transform:scale(.97);
+}
+html.mobile-ui .card,
+html.mobile-ui .kpi,
+html.mobile-ui .mini-kpi{
+  -webkit-backface-visibility:hidden;
+  backface-visibility:hidden;
+}
+html.mobile-ui.pwa-standalone .topbar{
+  box-shadow:0 2px 18px rgba(15,23,42,.06);
+}
+
+/* Respect users who disable motion. */
+@media (prefers-reduced-motion:reduce){
+  .app-boot::before,.app-boot img,.boot-fireworks .fw,.boot-progress::after{
+    animation:none !important;
+  }
+}
+@keyframes premiumBootGlow{
+  from{opacity:.62;transform:scale(1);}
+  to{opacity:1;transform:scale(1.10);}
+}
+@keyframes premiumBurst{
+  0%{opacity:0;transform:scale(.05);}
+  12%{opacity:1;transform:scale(.22);}
+  58%{opacity:.95;transform:scale(1);}
+  100%{opacity:0;transform:scale(1.16);}
+}
+@keyframes premiumBootLogo{
+  0%,100%{transform:scale(.97) translateY(0);}
+  50%{transform:scale(1.035) translateY(-3px);}
+}
+@keyframes premiumBootSlide{
+  0%{transform:translateX(-115%);}
+  100%{transform:translateX(260%);}
+}
