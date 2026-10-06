@@ -5107,6 +5107,7 @@ html[data-theme="dark"] .tr-emp-chip-rejected{background:rgba(220,38,38,.14);col
    Auto-fill sirf khaali fields me hota hai; chip hamesha dikhta hai taaki employee dekh kar khud bhare. */
 .tr-contact-slot:not(:empty){margin:8px 0 0}
 .tr-contact-suggest{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;border:1px dashed var(--brand);border-radius:12px;background:color-mix(in srgb,var(--brand) 6%,transparent)}
+.tr-cs-date{font-size:11px;font-weight:700;color:var(--ink);white-space:nowrap}.tr-cs-filled{font-size:11px;font-weight:700;color:var(--muted);white-space:nowrap}
 .tr-cs-label{flex:0 0 auto}
 .tr-cs-fill{text-align:left;word-break:break-word;max-width:100%}
 @media(max-width:600px){.tr-emp-details>summary{padding:11px 12px}.tr-emp-chip{font-size:10px;padding:3px 7px}.tr-cs-fill{width:100%}}
