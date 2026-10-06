@@ -222,61 +222,9 @@
   function rows_numberDiff(a, b) { return a !== null && b !== null ? a - b : null; }
 
   const PAYOUT_HEADERS = ['Agent ID', 'Agent', 'TL / Direct', 'Network', 'Tags (period)', 'Rate (sheet)', 'Earned (sheet)', 'Rate × tags', 'Slab expected', 'Payout to process', 'Payout source', 'Δ earned − slab', 'Slab band', 'Status', 'Flags'];
-  const payoutRowToArray = (r) => [r.agentId || '', r.name || '', r.tl || '', r.segment || '', r.tags, r.rateSheet === null ? '' : r.rateSheet, r.earned === null ? '' : r.earned, r.computed === null ? '' : r.computed, r.slabExpected === null ? '' : r.slabExpected, r.recommended === null ? '' : r.recommended, r.source, r.diffSlab === null ? '' : r.diffSlab, r.slabTier || '', r.status, (r.flags || []).join(' · ')];
   const GV_PAYOUT_HEADERS = ['Agent ID', 'Agent', 'TL / Direct', 'Network', 'Tags', 'Amount', 'Commission', 'Commission / tag', 'Class median / tag', 'Gap vs median %', 'Weakest class', 'Status', 'Flags'];
-  const gvPayoutRowToArray = (r) => [r.agentId || '', r.name || '', r.tl || '', r.segment || '', r.tags, r.amount || 0, r.earned === null ? '' : r.earned, r.perTag ? r.perTag.toFixed(2) : '', r.classMedianPerTag ? r.classMedianPerTag.toFixed(2) : '', r.gapPct === null || r.gapPct === undefined ? '' : r.gapPct.toFixed(1), r.weakestClass || '', r.status, (r.flags || []).join(' · ')];
 
   /** FF commission page me dikhne wale payout card + alerts (insights.js isko mount karta hai). */
-  async function mountFfTools(root) {
-    const holder = root.querySelector('#ffc-tools');
-    if (!holder) return;
-    const [recon, alerts] = await Promise.all([safe(() => payoutRecon({}), null), safe(() => commissionAlerts(), [])]);
-    if (!recon) { holder.innerHTML = ''; return; }
-    const t = recon.totals;
-    const preview = recon.rows.filter((r) => r.status !== 'Ready' || r.recommended !== null).slice(0, 60);
-    holder.innerHTML = `
-      ${renderAlertsCard(alerts)}
-      <div class="card"><div class="card-head"><h3>🧾 Payout reconciliation · sheet vs rate×tags vs slab</h3>${t.ffUnresolved ? `<span class="sev-pill high">${U.fmt(t.ffUnresolved)} unresolved</span>` : `<span class="sev-pill low">all agents payable</span>`}<div class="btn-row"><button class="btn primary small" id="ffp-payout-csv">⬇ Payout CSV</button><button class="btn small" id="ffp-payout-xlsx">⬇ Payout Excel (4 sheets)</button><button class="btn small" id="ffp-payout-copy">📋 Copy for Google Sheets</button></div></div>
-        <div class="check-grid payout-grid">
-          <div class="${t.ffUnresolved ? 'bad' : 'ok'}"><small>Payout to process</small><b>${money(t.ffAmount, 2)}</b><span>${U.fmt(t.ffPayable)} / ${U.fmt(t.ffAgents)} agents ke paas figure hai</span></div>
-          <div class="${t.ffComputed > t.ffSheet ? 'warn' : 'ok'}"><small>Sheet earned</small><b>${money(t.ffSheet, 2)}</b><span>Source: ${esc(t.earnedSource)}</span></div>
-          <div class="ok"><small>Rate × tags (verified)</small><b>${money(t.ffComputed, 2)}</b><span>Rate column: ${esc(t.rateSource)}${t.rateSource.includes('not detected') ? ' ⚠️' : ''}</span></div>
-          <div class="${t.slabEnabled ? 'ok' : 'warn'}"><small>Configured slab</small><b>${t.slabEnabled ? money(t.ffSlab, 2) : 'Off'}</b><span>${t.slabEnabled ? 'Settings → Commission slabs' : 'Slab rates set karo to 3-way comparison chalu ho jayega'}</span></div>
-        </div>
-        <p class="dim small">Har agent ke liye teen source ek saath: <b>sheet me likha earned</b>, <b>rate × tags</b> (computed) aur <b>configured slab</b>. “Payout to process” = sheet earned → warna rate × tags → warna slab (source column me likha hai). Dashboard khud koi amount guess nahi karta — jo source missing hai wo <b>Unresolved</b> dikhta hai.</p>
-        <div class="table-wrap"><table class="data-table ins-table"><thead><tr><th class="tone-emerald">Agent</th><th class="tone-emerald">TL / Direct</th><th class="tone-emerald num">Tags</th><th class="tone-emerald num">Rate</th><th class="tone-emerald num">Earned (sheet)</th><th class="tone-emerald num">Rate × tags</th><th class="tone-emerald num">Slab expected</th><th class="tone-emerald num">Payout</th><th class="tone-emerald">Source</th><th class="tone-emerald">Status</th></tr></thead><tbody>
-          ${preview.map((r) => `<tr class="${r.status === 'Unresolved' ? 'dup-row' : ''}"><td><b class="agent-link" data-agent360="${esc(r.name || r.agentId)}">${esc(r.name || r.agentId)}</b><small>${esc(r.agentId || '')}</small></td><td>${esc(r.tl || '—')}</td><td class="num">${U.fmt(r.tags)}</td><td class="num">${r.rateSheet === null ? '<span class="dim">—</span>' : U.fmt(r.rateSheet, 2)}</td><td class="num">${r.earned === null ? '<span class="dim">blank</span>' : money(r.earned, 2)}</td><td class="num">${r.computed === null ? '<span class="dim">—</span>' : money(r.computed, 2)}</td><td class="num">${r.slabExpected === null ? '<span class="dim">—</span>' : money(r.slabExpected, 2)}</td><td class="num"><b>${r.recommended === null ? '—' : money(r.recommended, 2)}</b></td><td>${statusPillSafe(r.source)}</td><td>${r.status === 'Ready' ? statusPillSafe('Ready') : r.status === 'Review' ? statusPillSafe('Review') : statusPillSafe('Unresolved')}${(r.flags || []).length ? `<small class="wrap">${esc(r.flags.join(' · '))}</small>` : ''}</td></tr>`).join('') || `<tr><td colspan="10">${empty('Koi agent row nahi', 'REPORT load hone par yahan payout list aayegi.')}</td></tr>`}
-        </tbody></table></div>
-        <p class="dim small">Preview me pehle ${U.fmt(preview.length)} rows (flag wale upar).<b> Payout CSV / Excel</b> me poora FF list + GV sheet + summary hai — seedha Google Sheet me paste kar sakte hain.</p>
-      </div>`;
-    const csvBtn = U.$('#ffp-payout-csv', holder);
-    if (csvBtn) csvBtn.addEventListener('click', () => U.downloadCsv(`ff-payout-reconciliation-${U.stamp()}.csv`, PAYOUT_HEADERS, recon.rows.map(payoutRowToArray)));
-    const xlsxBtn = U.$('#ffp-payout-xlsx', holder);
-    if (xlsxBtn) xlsxBtn.addEventListener('click', () => FF.xlsx.download(`payout-reconciliation-${U.stamp()}.xlsx`, [
-      { name: 'FF Payout', header: PAYOUT_HEADERS, rows: recon.rows.map(payoutRowToArray) },
-      { name: 'GV Payout', header: GV_PAYOUT_HEADERS, rows: recon.gvRows.map(gvPayoutRowToArray) },
-      { name: 'Ready only', header: PAYOUT_HEADERS, rows: recon.rows.filter((r) => r.status === 'Ready').map(payoutRowToArray) },
-      { name: 'Review', header: PAYOUT_HEADERS, rows: recon.rows.filter((r) => r.status !== 'Ready').map(payoutRowToArray) }
-    ]));
-    const alertsCsv = U.$('#ffa-alerts-csv', holder);
-    if (alertsCsv) alertsCsv.addEventListener('click', () => U.downloadCsv(`commission-alerts-${U.stamp()}.csv`, ['Severity', 'Alert', 'Count', 'Detail', 'Suggested action'], alerts.flatMap((a) => [[a.severity, a.title, a.count, a.detail, a.suggestion || '']]))); 
-    const alertsWa = U.$('#ffa-alerts-wa', holder);
-    if (alertsWa) alertsWa.addEventListener('click', () => {
-      const lines = ['*Commission alerts*', ...alerts.map((a) => `· ${a.severity.toUpperCase()}: ${a.title} — ${a.count}`)];
-      FF.app.shareWhatsApp(lines.join('\n'));
-    });
-    holder.querySelectorAll('[data-alert-samples]').forEach((btn) => btn.addEventListener('click', () => {
-      const a = alerts[Number(btn.dataset.alertSamples)];
-      if (!a) return;
-      if (FF.insights && FF.insights.openInsDialog) FF.insights.openInsDialog(root, `${a.title} · samples`, ['#', 'Record'], a.samples.map((v, i) => [i + 1, v]), a.suggestion || '');
-    }));
-    const copyBtn = U.$('#ffp-payout-copy', holder);
-    if (copyBtn) copyBtn.addEventListener('click', async () => {
-      const tsv = [PAYOUT_HEADERS.join('\t'), ...recon.rows.map((r) => payoutRowToArray(r).join('\t'))].join('\n');
-      const ok = await U.copyText(tsv);
-      U.toast(ok ? 'Payout table copy ho gayi — Google Sheet me paste karo' : 'Copy nahi hui — CSV download karo', ok ? 'ok' : 'warn');
-    });
-  }
   function statusPillSafe(text) {
     const tone = /Unresolved/i.test(text) ? 'red' : /Review/i.test(text) ? 'amber' : /^REPORT earned|Rate × tags|GV Master/i.test(text) ? 'green' : 'blue';
     return `<span class="badge ${tone}">${esc(text)}</span>`;
@@ -295,7 +243,7 @@
     const agentName = (a) => a.name || a.agentId || '—';
 
     if (!m.rateCol && !m.amountCol) {
-      push({ id: 'no-source', severity: 'critical', title: 'REPORT me commission heading hi nahi mili', detail: `Columns A–${m.lastColLetter} scan hue. Settings me letter/heading naam set karo, ya 🔄 fresh sync karo.`, count: 1, samples: [`Scanned columns: ${m.headers.length}`, `Last column: ${m.lastColLetter}`], route: '#/ffCommission', suggestion: 'Settings → Data source me “Commission Rate” likho ya column finder se ek click me set karo.' });
+      push({ id: 'no-source', severity: 'critical', title: 'REPORT me commission heading hi nahi mili', detail: `Columns A–${m.lastColLetter} scan hue. Settings me letter/heading naam set karo, ya 🔄 fresh sync karo.`, count: 1, samples: [`Scanned columns: ${m.headers.length}`, `Last column: ${m.lastColLetter}`], route: '#/performance', suggestion: 'Settings → Data source me “Commission Rate” likho ya column finder se ek click me set karo.' });
     }
     const rateSamples = (m.agents || []).map((a) => valid(a.rateValue) ? Number(a.rateValue) : null).filter((v) => v !== null && v > 0);
     const rateMedian = median(rateSamples);
@@ -309,22 +257,22 @@
     const segMedians = new Map([...bySegment.entries()].map(([k, v]) => [k, median(v)]));
 
     const missingRate = (m.agents || []).filter((a) => Number(a.curTotal || 0) > 0 && !(valid(a.rateValue) && Number(a.rateValue) > 0));
-    push({ id: 'rate-missing', severity: missingRate.length ? 'high' : 'info', title: 'Rate missing — sheet me issuance hai par rate blank', detail: 'In agents ka commission calculate nahi ho sakta; sheet me rate bharo (ya Settings me sahi column map karo).', count: missingRate.length, samples: missingRate.slice(0, 200).map((a) => `${agentName(a)} (${a.agentId || '—'}) · tags ${a.curTotal || 0}`), route: '#/ffCommission', suggestion: 'Sheet ke Commission Rate column me in agents ki rate add karo.' });
+    push({ id: 'rate-missing', severity: missingRate.length ? 'high' : 'info', title: 'Rate missing — sheet me issuance hai par rate blank', detail: 'In agents ka commission calculate nahi ho sakta; sheet me rate bharo (ya Settings me sahi column map karo).', count: missingRate.length, samples: missingRate.slice(0, 200).map((a) => `${agentName(a)} (${a.agentId || '—'}) · tags ${a.curTotal || 0}`), route: '#/performance', suggestion: 'Sheet ke Commission Rate column me in agents ki rate add karo.' });
 
     const zeroEarned = (m.agents || []).filter((a) => valid(a.earned) && Number(a.earned) === 0 && Number(a.curTotal || 0) >= cfgA.zeroEarnedMin);
-    push({ id: 'earned-zero', severity: zeroEarned.length ? 'high' : 'info', title: 'Earned = 0 jabki issuance hui hai', detail: 'Sheet me earned amount 0 likha hai — ya rate 0 hai ya payout row update nahi hui.', count: zeroEarned.length, samples: zeroEarned.slice(0, 200).map((a) => `${agentName(a)} · tags ${a.curTotal || 0} · rate ${a.rateRaw || '—'}`), route: '#/ffPayout?tab=ff', suggestion: 'Sheet me in agents ka earned amount verify karo.' });
+    push({ id: 'earned-zero', severity: zeroEarned.length ? 'high' : 'info', title: 'Earned = 0 jabki issuance hui hai', detail: 'Sheet me earned amount 0 likha hai — ya rate 0 hai ya payout row update nahi hui.', count: zeroEarned.length, samples: zeroEarned.slice(0, 200).map((a) => `${agentName(a)} · tags ${a.curTotal || 0} · rate ${a.rateRaw || '—'}`), route: '#/performance', suggestion: 'Sheet me in agents ka earned amount verify karo.' });
 
     const mismatch = (m.agents || []).filter((a) => valid(a.earned) && valid(a.computed) && Math.abs(Number(a.earned) - Number(a.computed)) > Math.max(cfgA.mismatchMin, (cfgA.mismatchPct / 100) * Math.max(Number(a.earned), Number(a.computed))));
-    push({ id: 'sheet-mismatch', severity: mismatch.length ? 'medium' : 'info', title: 'Sheet earned aur rate × tags match nahi karte', detail: `Har row me ${cfgA.mismatchPct}% (ya ${money(cfgA.mismatchMin)}) se zyada gap hai — rate ya tags ka koi hissa sheet me update nahi hua.`, count: mismatch.length, samples: mismatch.slice(0, 200).map((a) => `${agentName(a)} · sheet ${money(a.earned, 2)} vs computed ${money(a.computed, 2)} · tags ${a.curTotal || 0}`), route: '#/ffCommission', suggestion: 'Dono figures sheet me compare karo — mismatch wali row theek karo.' });
+    push({ id: 'sheet-mismatch', severity: mismatch.length ? 'medium' : 'info', title: 'Sheet earned aur rate × tags match nahi karte', detail: `Har row me ${cfgA.mismatchPct}% (ya ${money(cfgA.mismatchMin)}) se zyada gap hai — rate ya tags ka koi hissa sheet me update nahi hua.`, count: mismatch.length, samples: mismatch.slice(0, 200).map((a) => `${agentName(a)} · sheet ${money(a.earned, 2)} vs computed ${money(a.computed, 2)} · tags ${a.curTotal || 0}`), route: '#/performance', suggestion: 'Dono figures sheet me compare karo — mismatch wali row theek karo.' });
 
     const outliers = (m.agents || []).filter((a) => {
       if (!valid(a.rateValue) || Number(a.rateValue) <= 0) return false;
       const med = segMedians.get(a.segment || 'Other') || rateMedian;
       return med > 0 && Math.abs((Number(a.rateValue) - med) / med) * 100 > cfgA.outlierPct;
     });
-    push({ id: 'rate-outlier', severity: outliers.length ? 'medium' : 'info', title: `Rate peer median se ${cfgA.outlierPct}%+ alag`, detail: 'Same network (Direct / TL-managed) ke agents ke rate ke muqable ye rate bahut upar/neeche hai — data-entry error ho sakta hai.', count: outliers.length, samples: outliers.slice(0, 200).map((a) => `${agentName(a)} · rate ${a.rateRaw || a.rateValue} (peer median ${(segMedians.get(a.segment || 'Other') || rateMedian).toFixed(2)}) · ${a.segment}`), route: '#/ffCommission', suggestion: 'Outlier rate ko sheet me verify karo.' });
+    push({ id: 'rate-outlier', severity: outliers.length ? 'medium' : 'info', title: `Rate peer median se ${cfgA.outlierPct}%+ alag`, detail: 'Same network (Direct / TL-managed) ke agents ke rate ke muqable ye rate bahut upar/neeche hai — data-entry error ho sakta hai.', count: outliers.length, samples: outliers.slice(0, 200).map((a) => `${agentName(a)} · rate ${a.rateRaw || a.rateValue} (peer median ${(segMedians.get(a.segment || 'Other') || rateMedian).toFixed(2)}) · ${a.segment}`), route: '#/performance', suggestion: 'Outlier rate ko sheet me verify karo.' });
 
-    if (m.rateIsPercent) push({ id: 'percent-rate', severity: 'medium', title: 'Rate percent (%) me hai — base amount ke bina payout nahi banega', detail: 'Sheet ka rate percent lag raha hai, isliye dashboard per-tag payout calculate nahi karta (galat amount se bachne ke liye).', count: (m.agents || []).filter((a) => Number(a.curTotal || 0) > 0).length, samples: (m.agents || []).slice(0, 200).map((a) => `${agentName(a)} · rate ${a.rateRaw || '—'}`), route: '#/ffCommission', suggestion: 'Percent rate ke saath base amount (ya per-tag rate) column bhi do.' });
+    if (m.rateIsPercent) push({ id: 'percent-rate', severity: 'medium', title: 'Rate percent (%) me hai — base amount ke bina payout nahi banega', detail: 'Sheet ka rate percent lag raha hai, isliye dashboard per-tag payout calculate nahi karta (galat amount se bachne ke liye).', count: (m.agents || []).filter((a) => Number(a.curTotal || 0) > 0).length, samples: (m.agents || []).slice(0, 200).map((a) => `${agentName(a)} · rate ${a.rateRaw || '—'}`), route: '#/performance', suggestion: 'Percent rate ke saath base amount (ya per-tag rate) column bhi do.' });
 
     if (gv.agents.length) {
       const gvGap = gv.agents.filter((a) => {
@@ -332,10 +280,10 @@
         const med = cls ? (gv.classMedians.get(cls.cls) || 0) : 0;
         return a.tags >= 3 && med > 0 && a.perTag < med * (1 - cfgA.gvGapPct / 100);
       });
-      push({ id: 'gv-class-gap', severity: gvGap.length ? 'medium' : 'info', title: `GV commission per tag class median se ${cfgA.gvGapPct}%+ neeche`, detail: 'GV Master me in agents ka ₹/tag apni class ke median se kaafi kam hai — rate ya amount row check karni chahiye.', count: gvGap.length, samples: gvGap.slice(0, 200).map((a) => { const cls = (a.classes || []).slice().sort((x, y) => x.perTag - y.perTag)[0]; const med = cls ? (gv.classMedians.get(cls.cls) || 0) : 0; return `${a.agentName} · ${cls ? cls.cls : '—'} ₹/tag ${a.perTag.toFixed(2)} vs median ${med.toFixed(2)} · tags ${a.tags}`; }), route: '#/gvCommission', suggestion: 'GV Master me in rows ka amount/commission verify karo.' });
+      push({ id: 'gv-class-gap', severity: gvGap.length ? 'medium' : 'info', title: `GV commission per tag class median se ${cfgA.gvGapPct}%+ neeche`, detail: 'GV Master me in agents ka ₹/tag apni class ke median se kaafi kam hai — rate ya amount row check karni chahiye.', count: gvGap.length, samples: gvGap.slice(0, 200).map((a) => { const cls = (a.classes || []).slice().sort((x, y) => x.perTag - y.perTag)[0]; const med = cls ? (gv.classMedians.get(cls.cls) || 0) : 0; return `${a.agentName} · ${cls ? cls.cls : '—'} ₹/tag ${a.perTag.toFixed(2)} vs median ${med.toFixed(2)} · tags ${a.tags}`; }), route: '#/gvPerformance', suggestion: 'GV Master me in rows ka amount/commission verify karo.' });
 
       const gvZero = gv.agents.filter((a) => a.tags >= 3 && a.commission <= 0);
-      push({ id: 'gv-zero', severity: gvZero.length ? 'high' : 'info', title: 'GV me commission 0 par tags issue hue', detail: 'GV Master me commission column blank/zero hai — payout list adhoori rahegi.', count: gvZero.length, samples: gvZero.slice(0, 200).map((a) => `${a.agentName} · tags ${a.tags} · amount ${money(a.amount, 0)}`), route: '#/gvCommission', suggestion: 'GV Master commission column bharo.' });
+      push({ id: 'gv-zero', severity: gvZero.length ? 'high' : 'info', title: 'GV me commission 0 par tags issue hue', detail: 'GV Master me commission column blank/zero hai — payout list adhoori rahegi.', count: gvZero.length, samples: gvZero.slice(0, 200).map((a) => `${a.agentName} · tags ${a.tags} · amount ${money(a.amount, 0)}`), route: '#/gvPerformance', suggestion: 'GV Master commission column bharo.' });
     }
 
     const high7 = fc.rows.filter((r) => r.need7 > 0 && r.rate > 0 && r.stockDays <= 7);
@@ -344,12 +292,6 @@
   }
   function severityRank(s) { return s === 'critical' ? 4 : s === 'high' ? 3 : s === 'medium' ? 2 : 1; }
 
-  function renderAlertsCard(alerts) {
-    if (!alerts || !alerts.length) return `<div class="card compact-card"><div class="card-head"><h3>🚨 Commission alerts</h3>${statusPillSafe('Sab checks pass')}</div><p class="dim small">Koi commission anomaly nahi mili — rate, earned, slab aur GV class comparison sab theek hain.</p></div>`;
-    const worst = alerts.reduce((a, b) => (severityRank(b.severity) > severityRank(a.severity) ? b : a), alerts[0]);
-    return `<div class="card compact-card commission-alerts"><div class="card-head"><h3>🚨 Commission alerts <span class="dim small">${U.fmt(alerts.length)} checks</span></h3>${sevPill(worst.severity)}<div class="btn-row"><button class="btn small" id="ffa-alerts-csv">⬇ Alerts CSV</button><button class="btn small" id="ffa-alerts-wa">📲 WhatsApp summary</button></div></div>
-      <div class="alert-list">${alerts.map((a, i) => `<div class="alert-row sev-${esc(a.severity)}"><div class="alert-head">${sevPill(a.severity)}<b>${esc(a.title)}</b><span class="alert-count">${U.fmt(a.count)}</span></div><p>${esc(a.detail)}</p><small>${esc(a.suggestion || '')}</small><div class="btn-row"><button class="btn tiny" data-alert-samples="${i}">Samples dekho</button>${a.route ? `<a class="btn tiny" href="${esc(a.route)}">Kholo</a>` : ''}</div></div>`).join('')}</div></div>`;
-  }
 
   // ==================================================================================================
   // 2. AGENT 360
@@ -727,73 +669,6 @@
     return { rows, month: curMonth, targetsFound: targets.length };
   }
 
-  async function renderTlScorecard(root, params) {
-    const data = await tlScorecard();
-    const channel = ['all', 'ff', 'gv'].includes(params.channel) ? params.channel : 'all';
-    const q = clean(params.q).toLowerCase();
-    const rows = data.rows.filter((r) => (channel === 'ff' ? r.channel === 'First Forward' : channel === 'gv' ? r.channel === 'GV Partner' : true) && (!q || (r.tl || '').toLowerCase().includes(q)));
-    const t = {
-      tls: rows.length, agents: sum(rows, (r) => r.agents), active: sum(rows, (r) => r.active), inactive: sum(rows, (r) => r.inactive),
-      issuance: sum(rows, (r) => r.issuance), target: sum(rows, (r) => r.target), commission: sum(rows, (r) => r.commission),
-      critical: sum(rows, (r) => r.risk.Critical + r.risk.High), dq: sum(rows, (r) => r.dq),
-      avgScore: rows.length ? sum(rows, (r) => r.score) / rows.length : 0,
-      withTarget: rows.filter((r) => r.target > 0).length
-    };
-    const S_HEADERS = ['Rank', 'TL', 'Channel', 'Agents', 'Active', 'Inactive', 'Issuance (MTD)', 'Prev month', 'Growth %', 'Target', 'Achievement %', 'Stock', 'Cover days', 'Commission', '₹ / tag', 'Commission completeness %', 'Critical+High', 'DQ records', 'Score', 'Grade', 'Focus'];
-    const toArray = (r) => [r.rank, r.tl, r.channel, r.agents, r.active, r.inactive, r.issuance, r.prev, r.growth === null ? '' : Number(r.growth.toFixed(1)), r.target || '', r.achievement === null ? '' : Number(r.achievement.toFixed(1)), r.stock, r.cover === null ? '' : Number(r.cover.toFixed(1)), Number(r.commission.toFixed(2)), Number(r.commissionPerTag.toFixed(2)), Number(r.comp.commission.toFixed(1)), r.risk.Critical + r.risk.High, r.dq, Number(r.score.toFixed(1)), r.grade, r.focus.join(' · ')];
-    rows.forEach((r, i) => { r.rank = i + 1; });
-    const gradeTone = (g) => (g === 'A+' || g === 'A' ? 'green' : g === 'B' ? 'blue' : g === 'C' ? 'amber' : 'red');
-    const top = rows.slice(0, 3), bottom = rows.slice(-3).reverse();
-    root.innerHTML = UI.head('🏅', 'TL Scorecard', `TL-wise monthly score — target vs achievement, stock cover, commission efficiency aur risk. Month ${U.labelYM(data.month, true)}`,
-      `<button class="btn small" id="tl-csv">⬇ Scorecard CSV</button><button class="btn small" id="tl-xlsx">⬇ Excel</button><button class="btn small" id="tl-wa">📲 WhatsApp</button>${UI.printButton}`) + `
-      <div class="source-row">${UI.sourceChip('TLs', `${U.fmt(t.tls)} groups`)}${UI.sourceChip('Agents', `${U.fmt(t.agents)} (${U.fmt(t.active)} active)`)}${UI.sourceChip('Targets', t.withTarget ? `${U.fmt(t.withTarget)} TL ke agents ke targets` : 'koi target set nahi')}<span class="dim small">Score = target 30% · active agents 20% · commission completeness 20% · stock cover 15% · quality 15%</span></div>
-      <div class="ins-filters"><label class="fld"><span>Channel</span><select class="select" data-param="channel"><option value="all">Both</option><option value="ff" ${channel === 'ff' ? 'selected' : ''}>First Forward</option><option value="gv" ${channel === 'gv' ? 'selected' : ''}>GV Partner</option></select></label>
-        <form id="tl-search" class="ins-search"><input class="input" name="q" value="${esc(params.q || '')}" placeholder="TL naam…"><button class="btn">Search</button></form></div>
-      ${metricCards([
-        { label: 'Average TL score', value: t.avgScore.toFixed(1), foot: `Grade ${t.avgScore >= 75 ? 'A' : t.avgScore >= 65 ? 'B' : t.avgScore >= 50 ? 'C' : 'D'} · ${U.fmt(t.tls)} TLs`, tone: 'g6', icon: '🏅' },
-        { label: 'Issuance MTD', value: U.fmt(t.issuance), foot: t.target ? `${U.fmtPct ? '' : ''}${U.fmt(t.target)} target · ${(t.issuance / t.target * 100).toFixed(0)}% achieved` : 'Target set karo (🎯 Targets page)', tone: 'g1', icon: '🏷️' },
-        { label: 'Active agents', value: `${U.fmt(t.active)} <small>/ ${U.fmt(t.agents)}</small>`, foot: `${U.fmt(t.inactive)} agents ne is month issue nahi kiya`, tone: t.active / Math.max(1, t.agents) < 0.6 ? 'g7' : 'g9', icon: '✅' },
-        { label: 'Commission (MTD)', value: money(t.commission, 2), foot: `${t.issuance ? money(t.commission / t.issuance, 2) : '—'} per tag`, tone: 'g5', icon: '💰' },
-        { label: 'Stock risk agents', value: U.fmt(t.critical), foot: 'Critical + High — dispatch planner dekho', tone: t.critical ? 'g7' : 'g9', icon: '🚨' },
-        { label: 'Data-quality records', value: U.fmt(t.dq), foot: 'TL ke agents ke findings', tone: t.dq ? 'g4' : 'g9', icon: '🧪' }
-      ])}
-      <div class="split-cards">
-        <div class="card"><div class="card-head"><h3>🥇 Top 3 TLs</h3><span class="dim small">Score ke hisaab se</span></div><div class="tl-medals">${top.map((r) => `<div><b>${esc(r.tl)}</b> <span class="badge ${gradeTone(r.grade)}">${esc(r.grade)} · ${r.score.toFixed(0)}</span><small>${U.fmt(r.issuance)} tags · ${U.fmt(r.active)}/${U.fmt(r.agents)} active · ${money(r.commission, 0)} commission</small></div>`).join('') || '<p class="dim">No TL rows</p>'}</div></div>
-        <div class="card"><div class="card-head"><h3>🎯 Focus needed</h3><span class="dim small">Sabse kam score</span></div><div class="tl-medals warn">${bottom.map((r) => `<div><b>${esc(r.tl)}</b> <span class="badge red">${esc(r.grade)} · ${r.score.toFixed(0)}</span><small>${esc(r.focus.slice(0, 3).join(' · ') || 'Koi major issue nahi')}</small></div>`).join('') || '<p class="dim">No TL rows</p>'}</div></div>
-      </div>
-      <div class="card"><div class="card-head"><h3>📊 TL-wise scoreboard</h3><span class="dim small">${U.fmt(rows.length)} TLs · month ${esc(U.labelYM(data.month))}</span></div>
-        <div class="table-wrap"><table class="data-table ins-table tl-score-table"><thead><tr><th class="tone-violet">#</th><th class="tone-violet">TL</th><th class="tone-violet">Channel</th><th class="tone-violet num">Agents</th><th class="tone-violet num">Active</th><th class="tone-violet num">Issuance</th><th class="tone-violet num">Prev</th><th class="tone-violet num">Target</th><th class="tone-violet num">Achv %</th><th class="tone-violet num">Stock</th><th class="tone-violet num">Cover</th><th class="tone-violet num">Commission</th><th class="tone-violet num">₹ / tag</th><th class="tone-violet num">Comm. %</th><th class="tone-violet num">Critical+High</th><th class="tone-violet num">DQ</th><th class="tone-violet num">Score</th><th class="tone-violet">Grade</th><th class="tone-violet">Focus</th></tr></thead><tbody>
-          ${rows.map((r) => `<tr><td>${r.rank}</td><td><b>${esc(r.tl)}</b><small>${U.fmt(r.active)}/${U.fmt(r.agents)} active</small></td><td>${statusPillSafe(r.channel)}</td><td class="num">${U.fmt(r.agents)}</td><td class="num">${U.fmt(r.active)}${r.inactive ? `<small class="dim">${U.fmt(r.inactive)} off</small>` : ''}</td><td class="num"><b>${U.fmt(r.issuance)}</b></td><td class="num">${U.fmt(r.prev)}</td><td class="num">${r.target ? U.fmt(r.target) : '<span class="dim">—</span>'}</td><td class="num">${r.achievement === null ? '<span class="dim">—</span>' : `<span class="badge ${r.achievement >= 100 ? 'green' : r.achievement >= 60 ? 'amber' : 'red'}">${r.achievement.toFixed(0)}%</span>`}</td><td class="num">${U.fmt(r.stock)}</td><td class="num">${r.cover === null ? '—' : r.cover.toFixed(1)}</td><td class="num">${money(r.commission, 0)}</td><td class="num">${r.commissionPerTag ? r.commissionPerTag.toFixed(2) : '—'}</td><td class="num">${r.comp.commission.toFixed(0)}%</td><td class="num">${r.risk.Critical + r.risk.High || '<span class="dim">0</span>'}</td><td class="num">${r.dq || '<span class="dim">0</span>'}</td><td class="num"><b>${r.score.toFixed(1)}</b></td><td><span class="badge ${gradeTone(r.grade)}">${esc(r.grade)}</span></td><td class="small wrap">${esc(r.focus.slice(0, 2).join(' · ') || '—')}</td></tr>`).join('') || `<tr><td colspan="18">${empty('Koi TL nahi mila', 'Filter change karo ya data load hone do.')}</td></tr>`}
-        </tbody>${rows.length ? `<tfoot><tr class="row-total"><td colspan="3">Total · ${U.fmt(rows.length)} TLs</td><td class="num">${U.fmt(t.agents)}</td><td class="num">${U.fmt(t.active)}</td><td class="num">${U.fmt(t.issuance)}</td><td colspan="2"></td><td class="num">${t.target ? U.fmt(t.target) : '—'}</td><td colspan="3"></td><td class="num">${money(t.commission, 0)}</td><td colspan="4"></td><td class="num">${t.avgScore.toFixed(1)} avg</td></tr></tfoot>` : ''}</table></div>
-      </div>`;
-    // KPI cards clickable → TL-wise full data (v3.8.3)
-    const TL_HEADERS = ['Rank', 'TL', 'Channel', 'Agents', 'Active', 'Issuance', 'Prev', 'Target', 'Achv %', 'Stock', 'Cover', 'Commission', '₹/tag', 'Critical+High', 'DQ', 'Score', 'Grade'];
-    const tlRowArr = (r) => [r.rank, r.tl, r.channel, r.agents, r.active, r.issuance, r.prev, r.target || '', r.achievement === null ? '' : Number(r.achievement.toFixed(1)), r.stock, r.cover === null ? '' : Number(r.cover.toFixed(1)), Number(r.commission.toFixed(2)), Number(r.commissionPerTag.toFixed(2)), r.risk.Critical + r.risk.High, r.dq, Number(r.score.toFixed(1)), r.grade];
-    if (UI.bindMetricDetails) UI.bindMetricDetails(root, `TL scorecard · ${U.labelYM(data.month)}`, TL_HEADERS, rows.map(tlRowArr), {
-      'Average TL score': { title: `${U.fmt(t.tls)} TLs ranked`, headers: TL_HEADERS, rows: rows.map(tlRowArr) },
-      'Issuance MTD': { title: 'Issuance ke hisaab se TLs', headers: TL_HEADERS, rows: [...rows].sort((a, b) => b.issuance - a.issuance).map(tlRowArr) },
-      'Active agents': { title: 'Active agents ke hisaab se TLs', headers: TL_HEADERS, rows: [...rows].sort((a, b) => b.active - a.active).map(tlRowArr), stats: [`${U.fmt(t.inactive)} agents is month inactive`] },
-      'Commission (MTD)': { title: 'Commission ke hisaab se TLs', headers: TL_HEADERS, rows: [...rows].sort((a, b) => b.commission - a.commission).map(tlRowArr) },
-      'Stock risk agents': { title: 'Critical + High stock risk', headers: TL_HEADERS, rows: rows.filter((r) => r.risk.Critical + r.risk.High > 0).map(tlRowArr) },
-      'Data-quality records': { title: 'DQ findings wale TLs', headers: TL_HEADERS, rows: rows.filter((r) => r.dq > 0).map(tlRowArr) }
-    });
-    const search = U.$('#tl-search', root);
-    if (search) search.addEventListener('submit', (e) => { e.preventDefault(); FF.app.updateParams({ q: new FormData(search).get('q') || '' }); });
-    const csv = U.$('#tl-csv', root);
-    if (csv) csv.addEventListener('click', () => U.downloadCsv(`tl-scorecard-${data.month}-${U.stamp()}.csv`, S_HEADERS, rows.map(toArray)));
-    const xlsx = U.$('#tl-xlsx', root);
-    if (xlsx) xlsx.addEventListener('click', () => FF.xlsx.download(`tl-scorecard-${data.month}-${U.stamp()}.xlsx`, [
-      { name: 'TL Scorecard', header: S_HEADERS, rows: rows.map(toArray) },
-      { name: 'Agents by TL', header: ['TL', 'Channel', 'Agent', 'Agent ID', 'MTD', 'Prev', 'Stock', 'Cover days', 'Risk', 'Need 7d', '₹ / tag'], rows: rows.flatMap((r) => r.agents.map((a) => [r.tl, r.channel, a.name, a.id || '', a.cur || 0, a.prev || 0, a.stock || 0, a.cover === null || a.cover === undefined ? '' : Number(a.cover.toFixed(1)), a.risk || '', a.need7 || 0, a.rate ? Number(a.rate.toFixed(2)) : ''])) },
-      { name: 'Focus list', header: ['TL', 'Channel', 'Score', 'Grade', 'Focus'], rows: rows.filter((r) => r.focus.length).map((r) => [r.tl, r.channel, Number(r.score.toFixed(1)), r.grade, r.focus.join(' · ')]) }
-    ]));
-    const wa = U.$('#tl-wa', root);
-    if (wa) wa.addEventListener('click', () => {
-      const lines = [`*TL Scorecard · ${U.labelYM(data.month)}*`, `Average score ${t.avgScore.toFixed(1)} · ${U.fmt(t.issuance)} tags MTD · ${money(t.commission, 0)} commission`, '', '*Top:*', ...top.map((r) => `· ${r.tl} — ${r.grade} (${r.score.toFixed(0)})`), '', '*Focus:*', ...bottom.map((r) => `· ${r.tl} — ${r.grade} (${r.score.toFixed(0)}): ${r.focus.slice(0, 2).join(', ') || '—'}`)];
-      FF.app.shareWhatsApp(lines.join('\n'));
-    });
-    return data;
-  }
 
   // ---- wiring -------------------------------------------------------------------------------------
   function wireAgentLinks() {
@@ -806,8 +681,8 @@
     });
   }
 
-  FF.cockpit = { commissionIndex, gvAgentCommission, forecastIndex, payoutRecon, commissionAlerts, renderAlertsCard, agent360, dispatchPlan, tlScorecard, mountFfTools, wireAgentLinks, PAYOUT_HEADERS, GV_PAYOUT_HEADERS };
+  // 🧹 v3.62 — TL Scorecard + FF Tools page retire ho gayi, isliye unke renderers export nahi hote.
+  FF.cockpit = { commissionIndex, gvAgentCommission, forecastIndex, payoutRecon, commissionAlerts, agent360, dispatchPlan, tlScorecard, wireAgentLinks, PAYOUT_HEADERS, GV_PAYOUT_HEADERS };
   FF.pages.dispatchPlan = { title: 'Dispatch Planner', render: renderDispatchPlan };
-  FF.pages.tlScorecard = { title: 'TL Scorecard', render: renderTlScorecard };
   wireAgentLinks();
 })(window.FF);

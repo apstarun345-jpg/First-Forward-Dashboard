@@ -630,7 +630,9 @@ function permissionDiff(before, after) {
 }
 const activityLast = new Map();
 // Client routes (app.js PAGES) — notification tap par seedha usi page par le jao.
-const CLIENT_PAGES = new Set(['home', 'tagIssued', 'tagRequest', 'targets', 'rangeReport', 'dashboard', 'trend', 'performance', 'stock', 'stockReport', 'gvDashboard', 'gvTrend', 'gvPerformance', 'gvStock', 'gvStockReport', 'compare', 'charts', 'dispatchPlan', 'tlScorecard']);
+// 🧹 v3.62 — retired pages (charts, tlScorecard, forecast, commission, wow zone…) yahan se hata diye:
+// notification / push link sirf live page par hi ja sakta hai.
+const CLIENT_PAGES = new Set(['home', 'tagIssued', 'tagRequest', 'targets', 'rangeReport', 'dashboard', 'trend', 'performance', 'stock', 'stockReport', 'gvDashboard', 'gvTrend', 'gvPerformance', 'gvStock', 'gvStockReport', 'compare', 'dispatchPlan', 'masterSearch', 'dataQuality', 'dualChannel', 'masterStock', 'fastagChampions', 'directAgents', 'newAgents', 'unusual', 'ffAgentSummary', 'gvAgentSummary', 'settings', 'sheet', 'teamMap']);
 /** Search/click ki "option" se client route banao (deep link — mobile push tap → seedha page). */
 function pageLinkFor(option, query) {
   const t = String(option || '').trim();

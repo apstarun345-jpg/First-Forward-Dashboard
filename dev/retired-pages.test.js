@@ -92,3 +92,42 @@ test('hataayi gayi pages ka koi reachable link ya voice shortcut nahi bachta', (
     }
   }
 });
+
+test('retired pages ka render code bhi inherit nahi hota (module halka rehta hai)', () => {
+  const insights = src('insights.js');
+  const cockpit = src('cockpit.js');
+  // Page-level renderers + registrations insights.js se hat gaye (module ab sirf live pages ke liye).
+  for (const gone of ['renderExecutive', 'renderGvCommission', 'renderFfCommission', 'renderForecast',
+    'renderForecastAccuracy', 'renderStockBalance', 'renderSavedViews', 'renderReportStudio', 'renderFollowups']) {
+    assert.ok(!new RegExp(`function ${gone}\\b`).test(insights), `insights.js me ${gone} nahi hona chahiye`);
+  }
+  for (const page of ['executive', 'gvCommission', 'ffCommission', 'forecast', 'savedViews', 'reportStudio', 'followups']) {
+    assert.ok(!new RegExp(`FF\\.pages\\.${page}\\s*=`).test(insights), `insights.js me FF.pages.${page} registration nahi`);
+  }
+  assert.ok(!/#\/(forecast|savedViews|reportStudio|followups)\b/.test(insights), 'insights.js me retired page ka link nahi');
+  assert.ok(!/FF\.workspace\s*=/.test(insights), 'Saved Views workspace API ka client hook bhi gaya');
+  // cockpit.js ke sirf retired pages wale renderers hata diye (agent360 / dispatch / alerts data intact).
+  for (const gone of ['renderTlScorecard', 'mountFfTools', 'renderAlertsCard']) {
+    assert.ok(!new RegExp(`function ${gone}\\b`).test(cockpit), `cockpit.js me ${gone} nahi hona chahiye`);
+  }
+  assert.ok(!/FF\.pages\.tlScorecard\s*=/.test(cockpit), 'cockpit.js TL scorecard page register nahi karta');
+  assert.match(cockpit, /agent360/, 'agent360 (Master Search / Profile drawer) intact hai');
+  assert.match(cockpit, /dispatchPlan/, 'dispatch planner intact hai');
+});
+
+test('shell me retired page ka assets/UI bacha hua nahi hai', () => {
+  const idx = src('index.html');
+  assert.ok(!/controlTower\.css/.test(idx), 'controlTower.css har page par load nahi hota');
+  assert.ok(!/save-view-btn/.test(idx), '☆ save-view button gaya');
+  assert.ok(!/save-view-btn|FF\.workspace/.test(app), 'app.js me save-view wiring nahi');
+  const client = server.slice(server.indexOf('const CLIENT_PAGES'), server.indexOf('const CLIENT_PAGES') + 700);
+  for (const gone of ['charts', 'tlScorecard', 'executive', 'forecast', 'tv']) {
+    assert.ok(!new RegExp(`'${gone}'`).test(client), `notification route whitelist me ${gone} nahi`);
+  }
+  const smoke = src('dev/smoke.js');
+  for (const gone of ['pages.executive', 'pages.tv', 'pages.ffCommission', 'pages.gvCommission',
+    'pages.forecast', 'pages.savedViews', 'pages.reportStudio', 'pages.followups', 'pages.stockRadar',
+    'pages.sprints', 'pages.arena', 'pages.fame', 'pages.warRoom', 'pages.activity', 'pages.network', 'pages.radar', 'pages.reportCards']) {
+    assert.ok(!smoke.includes(gone), `smoke harness me ${gone} call nahi bachna chahiye`);
+  }
+});

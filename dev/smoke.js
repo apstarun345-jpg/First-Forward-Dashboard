@@ -97,11 +97,10 @@ const FF = win.FF;
 try {
   const lazySrc = fs.readFileSync(path.join(ROOT, 'lazy.js'), 'utf8');
   const names = [...new Set([...lazySrc.matchAll(/'([A-Za-z][A-Za-z0-9-]*)'/g)].map((m) => m[1]))];
-  // 🧹 v3.62 — retired pages (Control Tower · TV · Charts · Stock Radar · Sprints · Wow Zone) ke
-  // module lazy GROUPS me nahi hain (sidebar se bhi hata diye gaye), lekin inka render logic smoke me
-  // test hota rehta hai: file disk par hai aur feature wapas laana ho to yahi code chalta hai.
-  const RETIRED_MODULES = ['controlTower', 'tv', 'chartExplorer', 'stockRadar', 'sprints', 'wow', 'wowzone'];
-  const lazyFiles = [...new Set([...names, ...RETIRED_MODULES])].filter((n) => fs.existsSync(path.join(ROOT, `${n}.js`)) && !scripts.includes(`${n}.js`));
+  // 🧹 v3.62 — retired pages (Control Tower · Executive Cockpit · TV · Commission · Charts ·
+  // Forecasting · TL Scorecard · Stock Radar · Workspace · Wow Zone) ke lazy groups hata diye gaye,
+  // isliye unke module smoke me load nahi hote — unke page-level tests bhi harness se nikaal diye.
+  const lazyFiles = names.filter((n) => fs.existsSync(path.join(ROOT, `${n}.js`)) && !scripts.includes(`${n}.js`));
   for (const n of lazyFiles) vm.runInContext(fs.readFileSync(path.join(ROOT, `${n}.js`), 'utf8'), ctx, { filename: `${n}.js` });
   if (FF.lazy) FF.lazy.inject = (n) => Promise.resolve(n);
   log('lazy modules (smoke me pre-loaded):', lazyFiles.length, lazyFiles.join(' '));
@@ -306,7 +305,6 @@ await run('page gvStockReport dispatch', async () => { const r = root(); await p
 await run('page gvPerformance', async () => { const r = root(); await pages.gvPerformance.render(r, {}, {}); const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n'); for (const s of ['WhatsApp report', 'GV Stock Report', 'Overview', 'Agents', 'TLs', 'Alerts']) if (!html.includes(s)) throw new Error(`GV Performance me "${s}" nahi mila`); }, true);
 await run('page gvPerformance q=agent', () => pages.gvPerformance.render(root(), { q: gvAgent }, {}), true);
 await run('page compare', () => pages.compare.render(root(), {}, {}), true);
-await run('professional page executive cockpit', () => pages.executive.render(root(), {}, {}), true);
 await run('FF commission wide-range fallback (right-side column bhi mile)', async () => {
   const store = FF.store.state.data;
   const full = store.report;
@@ -330,16 +328,6 @@ await run('FF commission wide-range fallback (right-side column bhi mile)', asyn
   if (!mapping.agents.some((a) => Number.isFinite(a.computed))) throw new Error('full width me computed commission nahi bana');
 }, false);
 
-await run('professional page GV commission · per-class boards', async () => {
-  const r = root(); await pages.gvCommission.render(r, { group: 'weekday' }, {});
-  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  for (const label of ['Class boards · agent-wise commission', 'VC4 · Car / Jeep', 'VC20 · Light commercial', 'VC5+ · Commercial', 'Class-wise commission summary']) {
-    if (!html.includes(label)) throw new Error(`GV commission class board me "${label}" nahi mila`);
-  }
-  for (const id of ['gvc-class-vc4-csv', 'gvc-class-vc20-csv', 'gvc-class-vc5-csv']) if (!html.includes(id)) throw new Error(`class CSV button ${id} missing`);
-  if (!/Effective rate/.test(html) || !/Commission \/ tag/.test(html)) throw new Error('class board columns missing');
-  if (/commission-selfcheck|Rate column \(row 2 heading\)|ffc-tl-csv/.test(html)) throw new Error('FF-only markup GV page me leak ho gaya');
-}, true);
 await run('FF commission · row-2 heading (2-header REPORT) detect hota hai', async () => {
   const store = FF.store.state.data;
   const full = store.report;
@@ -371,82 +359,6 @@ await run('FF commission · row-2 heading (2-header REPORT) detect hota hai', as
   } finally { Object.assign(cfg, before); store.report = full; FF.data.clearCache(); }
 }, false);
 
-await run('professional page FF reported commission (dynamic mapping)', async () => {
-  const mapping = await FF.insights.ffCommissionData();
-  if (!mapping.amountCol) throw new Error('REPORT ka earned-commission heading detect nahi hua');
-  if (!mapping.rateCol) throw new Error('REPORT ka commission-rate heading detect nahi hua');
-  if (mapping.rateCol.letter !== 'CA' || mapping.amountCol.letter !== 'CB') throw new Error(`commission columns galat detect hue: ${mapping.rateCol.letter}/${mapping.amountCol.letter}`);
-  if (!mapping.agents.some((a) => Number.isFinite(a.earned))) throw new Error('earned commission values read nahi hue');
-  if (!mapping.agents.some((a) => Number.isFinite(a.computed))) { throw new Error('rate × tags fallback compute nahi hua'); }
-  const r = root(); await pages.ffCommission.render(r, { headings: 'all' }, {});
-  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  for (const s of ['REPORT commission column finder', 'Commission rate source', 'Rate range in sheet', 'Agent-wise commission', 'Rate × tags', 'Heading map', 'ffc-fresh-top', 'Commission source self-check', 'Rate column (row 2 heading)', 'TL-wise commission rollup', 'ffc-tl-csv']) if (!html.includes(s)) throw new Error(`FF commission me "${s}" nahi mila`);
-  if (!/CA/.test(html) || !/CB/.test(html)) throw new Error('heading map me column letters nahi dikh rahe');
-}, true);
-await run('FF commission · Settings me heading ka naam (letter nahi) bhi chalta hai', async () => {
-  const cfg = FF.config.ffCommission;
-  const before = { ...cfg };
-  try {
-    cfg.rateCol = 'commission rate';           // chhote letters + space
-    cfg.earnedCol = '  Earned   Commission  '; // extra spaces
-    FF.data.clearCache();
-    const m = await FF.insights.ffCommissionData();
-    if (!m.rateCol || m.rateCol.letter !== 'CA' || m.rateCol.via !== 'name') throw new Error(`rate naam se resolve nahi hua: ${JSON.stringify(m.rateCol && { l: m.rateCol.letter, via: m.rateCol.via })}`);
-    if (!m.amountCol || m.amountCol.letter !== 'CB' || m.amountCol.via !== 'name') throw new Error('earned naam se resolve nahi hua');
-    if (m.warnings.length) throw new Error('resolved mapping ke liye warning nahi honi chahiye');
-    cfg.rateCol = 'Aisi Heading Nahin Hai';
-    FF.data.clearCache();
-    const bad = await FF.insights.ffCommissionData();
-    if (!bad.warnings.some((w) => w.key === 'rateCol')) throw new Error('galat heading naam par warning nahi mili');
-    const r = root(); await pages.ffCommission.render(r, {}, {});
-    const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-    if (!/REPORT me nahi mila/.test(html)) throw new Error('missing-heading warning page par nahi dikhi');
-  } finally { Object.assign(cfg, before); FF.data.clearCache(); }
-}, true);
-await run('FF commission · payout sheet class rates + expected commission', async () => {
-  const payout = await FF.insights.ffPayoutRates();
-  if (!payout.found) throw new Error(`payout tab parse nahi hui: ${payout.error || ''}`);
-  const vc4 = payout.byClass.get('VC4');
-  if (!vc4 || Number(vc4.rate) !== 3.5) throw new Error(`VC4 payout rate galat: ${JSON.stringify(vc4 && vc4.rate)}`);
-  if (!payout.penaltyRows.some((p) => p.key === 'wrong-vrn' && Number(p.penalty) === 50)) throw new Error('Wrong VRN penalty line nahi mili');
-  const sample = { name: 'S', curVc4: 10, curC1: 2, curC2: 0, curC3: 0, curC4: 0, curC5: 0, curNvc4: 4, wrongVrn: 1 }; // NVC4=4 me VC5(2)+VC20(2)
-  const calc = FF.insights.payoutExpected(sample, payout);
-  if (!calc || calc.expected !== (10 * 3.5 + 2 * 5 + 2 * 8) - 50) throw new Error(`payout expected calc galat: ${JSON.stringify(calc)}`);
-  const r = root(); await pages.ffCommission.render(r, {}, {});
-  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  for (const s of ['Payout sheet · class-wise rates', 'Expected commission · payout rates', 'Payout expected', 'ffc-payout-csv', 'Wrong VRN penalty']) if (!html.includes(s)) throw new Error(`payout card me "${s}" nahi mila`);
-}, true);
-await run('GV commission · per-class agent matrix (exact sums, no average)', async () => {
-  const r = root(); await pages.gvCommission.render(r, {}, {});
-  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  for (const s of ['Agent × class commission', 'gvc-matrix-csv', 'VC5+ · exact class split', 'VC4 commission', 'VC20 commission', 'VC5+ commission', 'Commission (sum)']) if (!html.includes(s)) throw new Error(`GV class matrix me "${s}" nahi mila`);
-  if (/commission-selfcheck|ffc-tl-csv/.test(html)) throw new Error('FF-only markup GV page me leak ho gaya');
-}, true);
-await run('stock forecasting · FF demand se GV rows (5845036) exclude', async () => {
-  const rows = await FF.insights.forecastRows(0, 5);
-  if (!rows.length) throw new Error('forecast rows khali hain');
-  const r = root(); await pages.forecast.render(r, {}, {});
-  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  if (!/5845036 exclude/.test(html)) throw new Error('channel summary me GV-exclude note nahi');
-}, true);
-await run('executive cockpit · FF/GV combined me double count nahi + colourful clickable cards', async () => {
-  const r = root(); await pages.executive.render(r, {}, {});
-  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  if (!/5845036/.test(html) || !/double count nahi/.test(html)) throw new Error('executive me GV-exclude note nahi');
-  if (!/data-tone="g\d+"/.test(html)) throw new Error('executive KPI cards colourful (gradient tone) nahi hain');
-  if (!/ins-metric-icon/.test(html)) throw new Error('executive KPI cards me icons nahi hain');
-  if (!/Full data/.test(html)) throw new Error('executive KPI cards par click-hint (Full data) nahi hai');
-  // 📦 Field stock: GV master ID 5845036 wali StockDataa rows FF total se exclude honi chahiye.
-  const stockAgents = FF.store.get('stockAgents') || [];
-  // GV parked = master ID 5845036 ke naam, ya TL "ApnaPayment Pvt. Ltd." (asli sheet me agent khaali master rows)
-  const parked = (x) => String(x.agentId || '').trim() === '5845036' || /^apnapayment pvt\.? ltd\.?$/i.test(String(x.tlName || '').trim());
-  const gvHeld = stockAgents.filter(parked).reduce((n, x) => n + (x.n || 0), 0);
-  if (!(gvHeld > 0)) throw new Error('mock StockDataa me GV master ID wali rows hi nahi — exclusion test meaningless');
-  const ffClean = stockAgents.filter((x) => !parked(x)).reduce((n, x) => n + (x.n || 0), 0);
-  const gvStock = (FF.gv.get('stockClass') || []).reduce((n, x) => n + (x.n || 0), 0);
-  const combined = FF.util.fmt(ffClean + gvStock);
-  if (!html.includes(`<b>${combined}</b>`)) throw new Error(`Combined field stock <b>${combined}</b> executive me nahi dikha — GV master ${FF.util.fmt(gvHeld)} exclude hua?`);
-}, true);
 await run('professional page verified dual-channel agents', async () => {
   const identity = await FF.insights.buildCross();
   if (!identity.rows.length) throw new Error('mock identity join returned zero verified agents');
@@ -482,70 +394,16 @@ await run('professional page Master Stock (search + StockDataa ↔ Tag Assignmen
   if (!html2.includes('Search:')) throw new Error('Master Stock search section render nahi hui');
   if (!/tag · |tag matches/.test(html2)) throw new Error('barcode search results missing');
 }, true);
-await run('cross-channel KPI cards colorful + clickable (compare / charts / dispatch / TL)', async () => {
+await run('cross-channel KPI cards colorful + clickable (compare / dispatch)', async () => {
   const cmp = root(); await pages.compare.render(cmp, {}, {});
   const cmpHtml = cmp.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
   for (const label of ['ins-metric-tap', 'data-tone="g2"']) {
     if (!cmpHtml.includes(label)) throw new Error(`compare page me "${label}" nahi mila`);
   }
-  const cx = root(); await pages.charts.render(cx, {}, {});
-  const cxHtml = cx.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  for (const label of ['Combined total', 'ins-metric-tap']) {
-    if (!cxHtml.includes(label)) throw new Error(`charts page me "${label}" nahi mila`);
-  }
+  // 🧹 v3.62 — charts + TL scorecard pages retire (KPI-card check sirf live pages par).
   const dp = root(); await pages.dispatchPlan.render(dp, {}, {});
   await settle(200);
   if (![...REG.values()].some((e) => String(e.innerHTML).includes('data-dp-kpi='))) throw new Error('dispatch planner KPI cards clickable nahi');
-  const tl = root(); await pages.tlScorecard.render(tl, {}, {});
-  if (!tl.innerHTML.includes('ins-metric-tap')) throw new Error('TL scorecard KPI cards clickable nahi');
-}, true);
-await run('wow zone · Agent Arena (levels, badges, challenges, crystal ball)', async () => {
-  const r = root(); await pages.arena.render(r, {}, {});
-  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  for (const label of ['Agent Arena', 'Crystal Ball', 'Leaderboard', 'Badge gallery', 'Is month ke challenges', 'Tag Machine', 'Rookie', 'XP', 'ins-metric-tap']) {
-    if (!html.includes(label)) throw new Error(`Agent Arena me "${label}" nahi mila`);
-  }
-}, true);
-await run('wow zone · Wall of Fame (champions + winner cards)', async () => {
-  const r = root(); await pages.fame.render(r, {}, {});
-  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  for (const label of ['Wall of Fame', 'Is month ke champions', 'First Forward', 'GV Partner', 'Winner card', 'fame-card-btn']) {
-    if (!html.includes(label)) throw new Error(`Wall of Fame me "${label}" nahi mila`);
-  }
-}, true);
-await run('wow zone · War Room live pulse', async () => {
-  const r = root(); await pages.warRoom.render(r, {}, {});
-  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  for (const label of ['WAR ROOM', 'AAJ KA TOTAL', 'war-counter', 'Live ticker', 'Fullscreen', 'war-race']) {
-    if (!html.includes(label)) throw new Error(`War Room me "${label}" nahi mila`);
-  }
-}, true);await run('wow zone · Agent Arena (levels, badges, challenges, crystal ball)', async () => {
-  const r = root(); await pages.arena.render(r, {}, {});
-  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  for (const label of ['Agent Arena', 'Crystal Ball', 'Leaderboard', 'Badge gallery', 'Is month ke challenges', 'Tag Machine', 'Rookie', 'XP', 'ins-metric-tap']) {
-    if (!html.includes(label)) throw new Error(`Agent Arena me "${label}" nahi mila`);
-  }
-}, true);
-await run('wow zone · Wall of Fame (champions + winner cards)', async () => {
-  const r = root(); await pages.fame.render(r, {}, {});
-  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  for (const label of ['Wall of Fame', 'Is month ke champions', 'First Forward', 'GV Partner', 'Winner card', 'fame-card-btn']) {
-    if (!html.includes(label)) throw new Error(`Wall of Fame me "${label}" nahi mila`);
-  }
-}, true);
-await run('wow zone · War Room live pulse', async () => {
-  const r = root(); await pages.warRoom.render(r, {}, {});
-  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  for (const label of ['WAR ROOM', 'AAJ KA TOTAL', 'war-counter', 'Live ticker', 'Fullscreen', 'war-race']) {
-    if (!html.includes(label)) throw new Error(`War Room me "${label}" nahi mila`);
-  }
-}, true);
-await run('v3.11 · War Room detailed breakdown (VC4/VC20/VC5+ · chassis · replacement · wrong VRN · TL-wise)', async () => {
-  const r = root(); await pages.warRoom.render(r, {}, {});
-  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  for (const label of ['Aaj ka detailed breakdown', 'VC4 tags', 'VC20 tags', 'VC5+ tags', 'Chassis', 'Wrong VRN', 'Replacement', 'Month-to-date detail', 'TL-wise aaj ka detail', 'war-kv', 'live-instant']) {
-    if (!html.includes(label)) throw new Error(`War Room detail me "${label}" nahi mila`);
-  }
 }, true);
 await run('v3.16 · Home GV aaj KPI cards (VC4/VC20/VC5+/Chassis/Replacement + Expected Today)', async () => {
   const r = root(); await pages.home.render(r, {}, {}); await settle(250);
@@ -557,23 +415,6 @@ await run('v3.16 · Home GV aaj KPI cards (VC4/VC20/VC5+/Chassis/Replacement + E
   if (!/data-kpi="src=gv&amp;scope=day&amp;date=\d{4}-\d{2}-\d{2}&amp;f=vc4"/.test(html)) throw new Error('VC4 card clickable data-kpi missing');
   if (!/data-kpi="src=gv&amp;scope=day&amp;date=\d{4}-\d{2}-\d{2}&amp;f=chassis"/.test(html)) throw new Error('Chassis card clickable data-kpi missing');
 }, false);
-await run('v3.16 · Hourly Sprints (countdown + TL/agent leaderboard + winners)', async () => {
-  const r = root(); await pages.sprints.render(r, {}, {}); await settle(150);
-  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  for (const label of ['Hourly Sprints', 'SPRINT CHALU HAI', 'spr-cd', 'TL Sprint Leaderboard', 'Agent Sprint Leaderboard', 'Sprint winners', 'spr-full']) {
-    if (!html.includes(label)) throw new Error(`Hourly Sprints me "${label}" nahi mila`);
-  }
-}, true);
-await run('v3.16 · Stock Radar (bubbles + cover rings + suggested dono criteria)', async () => {
-  const r = root(); await pages.stockRadar.render(r, { ch: 'ff' }, {}); await settle(150);
-  let html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  for (const label of ['Stock Radar', 'radar-svg', 'radar-bub', 'Critical TLs', '🔴 <7 din', 'w/o stock']) {
-    if (!html.includes(label)) throw new Error(`Stock Radar (FF) me "${label}" nahi mila`);
-  }
-  const r2 = root(); await pages.stockRadar.render(r2, { ch: 'gv' }, {}); await settle(150);
-  html = r2.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  if (!html.includes('radar-svg') && !html.includes('Is channel ka TL stock data')) throw new Error('Stock Radar (GV) render nahi hua');
-}, true);
 await run('v3.16 · Good Morning card (yesterday + MTD + expected calculations)', async () => {
   if (!FF.morningCard) throw new Error('FF.morningCard missing');
   const y = FF.morningCard.yesterdayStats();
@@ -609,39 +450,6 @@ await run('v3.16.1 · Office Bell + Voice Announcer (agent-wise query + announce
   if (!FF.officeBell.logList().length) throw new Error('bell announcement log khali hai');
   log(`      agent-wise rows ${t.rows.length} · "${single}"`);
 }, false);
-await run('v3.11 · Activity Calendar (heatmap + streak + sparkline board)', async () => {
-  const r = root(); await pages.activity.render(r, {}, {});
-  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  for (const label of ['Activity Calendar', 'heat-cols', 'heat-cell', 'heat-legend', 'Current streak', 'Longest streak', 'Sparkline board', 'Month-wise activity', 'Weekday pattern']) {
-    if (!html.includes(label)) throw new Error(`Activity Calendar me "${label}" nahi mila`);
-  }
-}, true);
-await run('v3.11 · Team Network (TL-agent constellation + hover tips)', async () => {
-  const r = root(); await pages.network.render(r, {}, {});
-  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  for (const label of ['Team Network', 'net-wrap', 'data-net-tl', 'net-link', 'net-legend', 'net-orbit']) {
-    if (!html.includes(label)) throw new Error(`Team Network me "${label}" nahi mila`);
-  }
-}, true);
-await run('v3.11 · Anomaly Radar (rule engine + severity cards)', async () => {
-  const findings = await FF.wowzone.anomalyFindings();
-  if (!Array.isArray(findings)) throw new Error('anomalyFindings array nahi hai');
-  const r = root(); await pages.radar.render(r, {}, {});
-  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  if (!/Anomaly Radar/.test(html)) throw new Error('radar page head missing');
-  if (!/radar-card|Koi anomaly nahi mili/.test(html)) throw new Error('radar cards / empty state missing');
-  log(`      ${findings.length} signals: ${findings.map((f) => f.id).join(', ') || 'none'}`);
-}, true);
-await run('v3.11 · Agent Report Cards (grades + auto remarks + sign block)', async () => {
-  const list = pages.performance.agents();
-  const name = (list[0] || {}).name;
-  if (!name) throw new Error('koi agent nahi mila');
-  const r = root(); await pages.reportCards.render(r, { q: name }, {});
-  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  for (const label of ['Agent Report Card', 'rc-grade', 'Teacher remarks', 'TL sign', 'Issuance volume', 'VC4 share', 'Growth vs last month']) {
-    if (!html.includes(label)) throw new Error(`Report Card me "${label}" nahi mila`);
-  }
-}, true);
 await run('v3.11 · Master search (naam / TL / ID index + suggestions + results markup)', async () => {
   const list = pages.performance.agents();
   const probe = (list[0] || {}).name || '';
@@ -883,20 +691,6 @@ await run('v3.12 · Direct Agents rule (FF: TL Name APS · GV: TL ID + Name blan
   if (!roster.length) throw new Error('direct roster khali hai');
   log(`      GV direct ${gvDirect.length} · FF direct ${list.filter((a) => a.tlExcluded).length} · roster ${roster.length} · tls ${tlRoll.length}`);
 }, true);
-await run('v3.11 · Executive combined stock — GV-parked rows NAAM/TL se bhi exclude', async () => {
-  const stockAgents = FF.store.get('stockAgents') || [];
-  const gvId = String(FF.config.eir.gvMasterId || '5845036');
-  const isGv = (r) => String(r.agentId || '').trim() === gvId || /^apna\s*pay/i.test(String(r.agentName || '')) || /^apnapayment pvt\.? ltd\.?$/i.test(String(r.tlName || ''));
-  const gvHeld = stockAgents.filter(isGv).reduce((n, x) => n + (x.n || 0), 0);
-  const ffClean = stockAgents.filter((r) => !isGv(r)).reduce((n, x) => n + (x.n || 0), 0);
-  if (!(gvHeld > 0)) throw new Error('mock me GV-parked rows hi nahi');
-  const r = root(); await pages.executive.render(r, {}, {});
-  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  const gvStock = (FF.gv.get('stockClass') || []).reduce((n, x) => n + (x.n || 0), 0);
-  const combined = FF.util.fmt(ffClean + gvStock);
-  if (!html.includes(`<b>${combined}</b>`)) throw new Error(`combined field stock ${combined} nahi mila (name/TL based exclusion?)`);
-  if (!/GV-parked/.test(html)) throw new Error('exclusion ka naya label nahi dikha');
-}, true);
 await run('professional page FASTag Champions (vivid KPI + clickable full-data drill-down)', async () => {
   const r = root(); await pages.fastagChampions.render(r, {}, {});
   const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
@@ -908,28 +702,6 @@ await run('professional page FASTag Champions (vivid KPI + clickable full-data d
   const r2 = root(); await pages.fastagChampions.render(r2, { scope: 'ff', top: '5' }, {});
   if (!/Top Agents/.test(r2.innerHTML)) throw new Error('scope=ff board render nahi hua');
 }, true);
-await run('professional page stock forecast', async () => {
-  const r = root(); await pages.forecast.render(r, { growth: '20', safety: '7' }, {});
-  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  for (const label of ['Urgent dispatch list', 'Channel summary', 'TL-wise replenishment rollup', 'Agent-level requirement forecast', '7-day replenishment need', 'Stock-out within 7 days', 'forecast-urgent-csv']) {
-    if (!html.includes(label)) throw new Error(`stock forecast me "${label}" nahi mila`);
-  }
-  const pageRisks = (html.match(/class="risk-chip (critical|high|medium|covered|norate)"/g) || []).length;
-  if (pageRisks !== 5) throw new Error(`risk strip ke 5 chips expected, mile ${pageRisks}`);
-}, true);
-await run('professional page forecast accuracy backtest', async () => {
-  const accuracy = await FF.insights.forecastAccuracy(28), sample = accuracy.horizons[7].combined;
-  if (!sample || !sample.agents || sample.predicted <= 0 || sample.actual <= 0) throw new Error('backtest sample coverage/predicted/actual is empty');
-  for (const horizon of [7, 15, 30]) if (!accuracy.horizons[horizon].combined || !accuracy.horizons[horizon].combined.agents) throw new Error(`${horizon}-day backtest coverage is empty`);
-  for (const key of ['accuracy', 'wape', 'bias', 'absoluteError', 'mae']) if (!Number.isFinite(sample[key])) throw new Error(`${key} metric is not finite`);
-  if (accuracy.horizons[7].combinedWindows.length < 2) throw new Error('rolling accuracy trend needs multiple completed windows');
-  if (!sample.sources.some((s) => s.channel === 'First Forward') || !sample.sources.some((s) => s.channel === 'GV Partner')) throw new Error('both channel backtests are not covered');
-  const r = root(); await pages.forecast.render(r, { view: 'accuracy', horizon: '7', lookback: '28', channel: 'all' }, {});
-  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  for (const s of ['Forecast Accuracy', 'Forecast accuracy', 'WAPE', 'Predicted consumption', 'Actual consumption', 'Forecast bias', 'Agent-wise predicted vs actual consumption', 'Methodology']) if (!html.includes(s)) throw new Error(`forecast accuracy me "${s}" nahi mila`);
-  if (!/\d+\.\d%/.test(html)) throw new Error('forecast accuracy metric missing');
-  if (/0 exact daily agent groups/.test(html) || /0 issuance rows/.test(html)) throw new Error('forecast history coverage is zero');
-}, true);
 await run('stock-history API exposes FF + GV closing snapshots', async () => {
   const out = await FF.auth.api('/api/stock-history'), latest = (out.points || []).at(-1);
   if (!latest || !latest.ff || !latest.gv) throw new Error('channel-wise FF/GV stock snapshot missing');
@@ -937,22 +709,6 @@ await run('stock-history API exposes FF + GV closing snapshots', async () => {
   if (!out.mtd || !Number.isFinite(Number(out.mtd.ff)) || !Number.isFinite(Number(out.mtd.gv))) throw new Error('channel MTD issuance missing');
   if (!Array.isArray(out.issuance)) throw new Error('date-wise issuance reconciliation series missing');
 });
-await run('professional page stock-balance reconciliation', async () => {
-  const originalApi = FF.auth.api, originalEnabled = FF.config.stockMovement && FF.config.stockMovement.enabled;
-  const latest = FF.model.latestDate(await FF.store.need('daily')) || new Date();
-  const key = (offset) => { const d = new Date(latest); d.setDate(d.getDate() + offset); return FF.util.dateKey(d); };
-  FF.config.stockMovement.enabled = true;
-  FF.auth.api = async (path, ...args) => path === '/api/stock-history' ? { points: [
-    { date: key(-7), ff: { total: 4510, vc4: 3400, comm: 1110 }, gv: { total: 2200, vc4: 1700, comm: 500 } },
-    { date: key(0), ff: { total: 4488, vc4: 3380, comm: 1108 }, gv: { total: 2185, vc4: 1688, comm: 497 } }
-  ] } : originalApi(path, ...args);
-  try {
-    const r = root(); await pages.forecast.render(r, { view: 'balance', horizon: '7', lookback: '28', channel: 'all' }, {});
-    const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-    for (const s of ['Stock Balance Reconciliation', 'Movement ledger connected', 'Closing-stock accuracy', 'Projected closing', 'Observed actual closing', 'Unexplained variance', 'Channel reconciliation detail', 'Balance methodology']) if (!html.includes(s)) throw new Error(`stock balance me "${s}" nahi mila`);
-    if (!html.includes('First Forward') || !html.includes('GV Partner')) throw new Error('both stock-balance channels missing');
-  } finally { FF.auth.api = originalApi; FF.config.stockMovement.enabled = originalEnabled; }
-}, true);
 await run('cockpit · payout reconciliation (sheet vs rate×tags vs slab)', async () => {
   const d = await FF.cockpit.payoutRecon();
   if (!d.rows.length) throw new Error('payout rows khali hain');
@@ -963,12 +719,7 @@ await run('cockpit · payout reconciliation (sheet vs rate×tags vs slab)', asyn
   if (!d.rows.some((r) => (r.flags || []).includes('Rate missing'))) throw new Error('missing-rate flag nahi mila');
   if (!(d.totals.ffAmount > 0)) throw new Error('payout total 0 hai');
   if (!d.gvRows.length || !(d.totals.gvAmount > 0)) throw new Error('GV payout sheet khali hai');
-  const r = root(); await pages.ffCommission.render(r, {}, {});
-  await settle(250);
-  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  for (const label of ['Payout reconciliation', 'Payout to process', 'ffp-payout-csv', 'ffp-payout-xlsx', 'ffp-payout-copy', 'Rate × tags (verified)', 'Slab expected']) {
-    if (!html.includes(label)) throw new Error(`payout card me "${label}" nahi mila`);
-  }
+  // 🧹 v3.62 — FF Commission page retire ho gayi (payout card ka UI test hata diya, data checks upar).
 }, false);
 
 await run('cockpit · commission alerts rule engine', async () => {
@@ -980,12 +731,7 @@ await run('cockpit · commission alerts rule engine', async () => {
   if (!first.title || !first.detail || !first.count) throw new Error('alert shape adhoora hai');
   if (!first.samples.length) throw new Error('alert samples khali hain');
   if (!['critical', 'high', 'medium', 'info'].includes(first.severity)) throw new Error(`severity galat: ${first.severity}`);
-  const r = root(); await pages.ffCommission.render(r, {}, {});
-  await settle(250);
-  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  for (const label of ['Commission alerts', 'alert-row sev-', 'ffa-alerts-csv', 'ffa-alerts-wa', 'data-alert-samples']) {
-    if (!html.includes(label)) throw new Error(`alerts card me "${label}" nahi mila`);
-  }
+  // 🧹 v3.62 — alerts card sirf FF Commission page par tha (page retire) — UI assertions hata diye.
   // ghata hua mapping → source alert
   const cfg = FF.config.ffCommission; const before = { ...cfg };
   try {
@@ -1007,14 +753,7 @@ await run('cockpit · Agent 360 drawer (FF + GV + risk + quality + notes)', asyn
     if (!body.includes(label)) throw new Error(`Agent 360 me "${label}" section nahi mila`);
   }
   if (!(body.match(/class="dkpi"/g) || []).length) throw new Error('Agent 360 KPI cards nahi bane');
-  const ff = root(); await pages.ffCommission.render(ff, {}, {});
-  await settle(250);
-  const html = ff.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  if (!/data-agent360="/.test(html)) throw new Error('FF commission page par Agent 360 links nahi hain');
-  const gv = root(); await pages.gvCommission.render(gv, {}, {});
-  await settle(200);
-  const gvHtml = gv.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  if (!/data-agent360="/.test(gvHtml)) throw new Error('GV commission page par Agent 360 links nahi hain');
+  // 🧹 v3.62 — commission pages retire; Agent 360 links ab Master Search / Performance par (drawer check upar).
 }, false);
 
 await run('professional page dispatch planner (boxes + pick-list)', async () => {
@@ -1069,21 +808,6 @@ await run('professional page dispatch planner (boxes + pick-list)', async () => 
   if (FF.util.valueSetLabel(['High', 'Medium'], [{ value: 'High', label: 'High' }, { value: 'Medium', label: 'Medium' }]) !== 'High + Medium') throw new Error('multi-select label galat');
 }, true);
 
-await run('professional page TL scorecard (score · grade · target)', async () => {
-  const data = await FF.cockpit.tlScorecard();
-  if (!data.rows.length) throw new Error('TL rows khali hain');
-  const first = data.rows[0];
-  if (!(first.score >= 0 && first.score <= 120)) throw new Error(`score range galat: ${first.score}`);
-  if (!/^[ABCD]\+?$/.test(first.grade)) throw new Error(`grade galat: ${first.grade}`);
-  if (!first.agents) throw new Error('agents count missing');
-  if (!data.rows.every((r, i, arr) => i === 0 || arr[i - 1].score >= r.score)) throw new Error('rows score ke hisaab se sorted nahi hain');
-  const r = root(); await pages.tlScorecard.render(r, {}, {});
-  await settle(300);
-  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
-  for (const label of ['TL-wise scoreboard', 'Top 3 TLs', 'Focus needed', 'tl-csv', 'tl-xlsx', 'tl-wa', 'Average TL score', 'Comm. %', 'commission completeness']) {
-    if (!html.includes(label)) throw new Error(`TL scorecard me "${label}" nahi mila`);
-  }
-}, true);
 
 await run('professional page data quality', async () => {
   const quality = await FF.insights.qualityIssues();
@@ -1099,18 +823,6 @@ await run('professional page data quality', async () => {
   const dialog = FF.insights.openInsDialog(root(), 'Sample rows · smoke', ['Field', 'Value'], [['TAG_ID', '34161FA820320001'], ['VRN', 'RJ14' + '1'.repeat(4)]], 'smoke note');
   if (!dialog || !/34161FA820320001/.test(dialog.innerHTML)) throw new Error('shared sample dialog rows render nahi kar raha');
   if (!/smoke note/.test(dialog.innerHTML) || !/ins-detail-dialog/.test(dialog.className)) throw new Error('dialog header/note missing');
-}, true);
-await run('workspace saved views API + page', async () => {
-  const created = await FF.auth.api('/api/workspace/views', 'POST', { title: 'Smoke view', route: '#/forecast?risk=High', shared: false });
-  await pages.savedViews.render(root(), {}, {});
-  if (created.view && created.view.id) await FF.auth.api(`/api/workspace/views/${created.view.id}`, 'DELETE');
-}, true);
-await run('professional report studio', () => pages.reportStudio.render(root(), {}, {}), true);
-await run('workspace note timeline API + page', async () => {
-  const created = await FF.auth.api('/api/workspace/notes', 'POST', { entityName: 'Smoke Agent', entityKey: 'SMOKE-1', entityType: 'agent', channel: 'both', text: 'Smoke follow-up', status: 'open' });
-  await FF.auth.api(`/api/workspace/notes/${created.note.id}`, 'PATCH', { status: 'done' });
-  await pages.followups.render(root(), { status: 'done' }, {});
-  await FF.auth.api(`/api/workspace/notes/${created.note.id}`, 'DELETE');
 }, true);
 await run('sheet.render GV Master', () => pages.sheet.render(root(), { name: 'GV Master' }, {}), true);
 await run('sheet.render Tag Assignment', () => pages.sheet.render(root(), { name: 'Tag Assignment' }, {}), true);
@@ -1146,8 +858,6 @@ await run('v3.16.1 · My access me sirf granted cards (locked ⛔ cards nahi)', 
 });
 await run('settings notification audience matrix', async () => { const r = root(); await pages.settings.render(r, { tab: 'features' }, {}); await settle(30); const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n'); for (const s of ['Notification audience', 'Low-stock / cover alert', 'Monthly champions', 'Sirf admin', 'Admin + users', 'Kisi ko nahi']) if (!html.includes(s)) throw new Error(`notification matrix me "${s}" nahi mila`); });
 await run('teamMap.render (admin location map)', () => pages.teamMap.render(root(), {}, {}), true);
-await run('tv.render (TV mode rotation)', () => pages.tv.render(root(), {}, {}), true);
-await run('tv unmount', () => { if (pages.tv.unmount) pages.tv.unmount(); });
 await run('app.refresh (manual ↻)', async () => { await FF.app.refresh(); await settle(100); });
 await run('xlsx builder', async () => { let got = null; FF.util.downloadBlob = (name, blob) => { got = { name, size: blob.size }; }; FF.xlsx.download('t.xlsx', [{ name: 'Summary', header: ['a', 'b'], rows: [['x', 1], ['y', 2]] }, { name: 'StockDataa', header: ['c'], rows: [['z']] }]); if (!got || got.size < 200) throw new Error('xlsx not produced'); log(`      ${got.name} ${got.size} bytes`); });
 const drawerHtml = () => (REG.get('drawer-body') || {}).innerHTML || '';

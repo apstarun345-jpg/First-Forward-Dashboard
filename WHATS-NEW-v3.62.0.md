@@ -65,5 +65,12 @@ bhi nahi.
 | Lazy page groups | 45 | 25 |
 | Phone par auto-load hote background modules | 3 + shell waves + wowzone | sirf 3 (wo bhi 25s baad) |
 | Settings feature toggles | 40 | 33 |
-| Unit tests | 510 pass | 510 pass (+ naye `dev/retired-pages.test.js` locks) |
-| Smoke test | 7 known failures | 7 known failures (koi naya nahi) |
+| `insights.js` (sabse bhaari module) | 347 KB | **181 KB** — retired pages ka render code nikal gaya |
+| `cockpit.js` | 86 KB | **65 KB** |
+| Unit tests | 510 pass | **512 pass** (`dev/retired-pages.test.js` + 2 naye locks) |
+| Smoke test | 7 known failures | **6** (retired-page blocks harness se hate; koi naya nahi) |
+
+> Note: `controlTower.js` · `tv.js` · `stockRadar.js` · `sprints.js` · `wow.js` · `chartExplorer.js` files
+> **disk par** rahenge (backend + purane admin scripts na tootein), par app kabhi load nahi karta —
+> isliye user ke phone par ek byte bhi nahi jaata. `charts.js` / `chartExplorer.js` charting libraries
+> waise hi hain (jaise decide hua tha).

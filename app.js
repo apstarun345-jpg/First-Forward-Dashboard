@@ -1405,11 +1405,6 @@ window.FF = window.FF || {};
       if (action === 'notifications') { openNotifications('center'); return; }
       if (action === 'more') { U.$('#menu-btn')?.click(); return; }
     });
-    const saveViewBtn = U.$('#save-view-btn');
-    if (saveViewBtn) saveViewBtn.addEventListener('click', () => {
-      if (FF.workspace && FF.workspace.openSave) FF.workspace.openSave();
-      else U.toast('Saved views module ready nahi hai', 'warn');
-    });
     const pwaBtn = U.$('#pwa-install');
     if (pwaBtn) pwaBtn.addEventListener('click', promptInstall);
     const ub = U.$('#user-btn');
@@ -1784,10 +1779,6 @@ window.FF = window.FF || {};
         });
       }
     }
-    // 🧹 v3.62 — Saved Views page hata di gayi, isliye topbar ka ☆ (save current view) button bhi
-    // hamesha chhupa rehta hai (pehle wo ek dead page kholta tha).
-    const svBtn = U.$('#save-view-btn');
-    if (svBtn) svBtn.hidden = true;
     startVersionWatch(); // 🔄 update-available toast (features.updateToast)
     const u = FF.auth.user;
     if (FF.auth.isAdmin()) FF.auth.api('/api/health').then(h => { storageBanner(h.storage); pushBanner(h.push); setPendingSignups(h.pendingSignups); renderSidebar(); }).catch(() => {});
