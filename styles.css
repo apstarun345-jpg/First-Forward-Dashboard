@@ -6100,3 +6100,81 @@ html[data-theme="dark"] .home-exp-stat { background: color-mix(in srgb, var(--br
   .tr-req-tbl .tr-class-break { gap:3px; }
   .tr-req-tbl .tr-class-break b { font-size:10px !important; padding:2px 4px; }
 }
+
+
+/* v3.65 — all-class compact metric grids: VC4 / VC5 / VC7 / VC12 / VC16 */
+.tr-req-tbl col.tr-col-stock-total { width: 166px !important; }
+.tr-req-tbl col.tr-col-last { width: 166px !important; }
+.tr-req-tbl col.tr-col-current { width: 166px !important; }
+.tr-req-tbl {
+  min-width: 2680px !important;
+}
+.tr-req-tbl .tr-class-grid {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3px 5px;
+  margin-top: 5px;
+  text-align: left;
+}
+.tr-req-tbl .tr-class-grid > span {
+  display: flex !important;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  min-width: 0;
+  padding: 2px 5px;
+  border-radius: 5px;
+  background: rgba(255,255,255,.78);
+  border: 1px solid rgba(148,163,184,.25);
+  white-space: nowrap;
+  line-height: 1.05 !important;
+}
+.tr-req-tbl .tr-class-grid > span b {
+  font-size: 9.5px !important;
+  font-weight: 900 !important;
+  color: #475569 !important;
+}
+.tr-req-tbl .tr-class-grid > span strong {
+  font-size: 10.5px !important;
+  font-weight: 950 !important;
+  color: #0f172a !important;
+  font-variant-numeric: tabular-nums;
+}
+.tr-req-tbl td.tr-m-stock-total .tr-class-grid > span {
+  background: #faf5ff;
+  border-color: #ddd6fe;
+}
+.tr-req-tbl td.tr-m-stock-total .tr-class-grid > span strong {
+  color: #6d28d9 !important;
+}
+.tr-req-tbl td.tr-m-last .tr-class-grid > span {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+.tr-req-tbl td.tr-m-last .tr-class-grid > span strong {
+  color: #1d4ed8 !important;
+}
+.tr-req-tbl td.tr-m-current .tr-class-grid > span {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+}
+.tr-req-tbl td.tr-m-current .tr-class-grid > span strong {
+  color: #047857 !important;
+}
+.tr-req-tbl td.tr-m-stock-total > .tr-big-num,
+.tr-req-tbl td.tr-m-last > .tr-big-num,
+.tr-req-tbl td.tr-m-current > .tr-big-num {
+  font-size: 15px !important;
+}
+@media (max-width: 900px) {
+  .tr-req-tbl {
+    min-width: 2500px !important;
+  }
+  .tr-req-tbl .tr-class-grid {
+    grid-template-columns: repeat(2, minmax(65px, 1fr));
+    gap: 2px 3px;
+  }
+  .tr-req-tbl .tr-class-grid > span {
+    padding: 2px 4px;
+  }
+}
