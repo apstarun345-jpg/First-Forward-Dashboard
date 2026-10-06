@@ -260,8 +260,8 @@ test('public employee tag request — bina login submit, status, admin visibilit
  *     request list (panel 10-10 ke page me dikhata hai).
  *   • GET /api/public/tag-request/contact — wahi agent dobara chuno to purana address mil jaaye
  *     (server-side Address book; sirf browser localStorage nahi, isliye doosre device par bhi chalta hai).
- *   • Privacy: employee-status me employee/agent ka address-pincode nahi jaata, aur ek employee ka token
- *     doosre employee ki request NAHI dikhata.
+ *   • Shared employee link: employee-status me employee/agent ka address-pincode nahi jaata, aur same public
+ *     employee link se bani sabhi requests har visitor ko dikhengi (token sirf backwards compatibility hai).
  */
 test('👤 employee-status — apni requests + counts, admin approve par status badalta hai, 📇 purana address milta hai', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'apna-empst-'));
@@ -327,17 +327,24 @@ test('👤 employee-status — apni requests + counts, admin approve par status 
     assert.equal(contact.json.contact.address, '12, Gandhi Nagar, Tonk Road, Jaipur', 'purana address suggest hota hai');
     assert.equal(contact.json.contact.pincode, '302015');
 
-    // 5) doosre employee ka token — doosre ki request NAHI dikhni chahiye (privacy)
+    // 5) doosre employee ka request — same shared Employee Link par sabko dikhna chahiye.
     const other = await jsonCall(server.base, '/api/public/tag-request', 'POST', { employee: { name: 'Koi Doosra', mobile: '9800001111', address: '9, Other Nagar, Jaipur', pincode: '302020' }, agents: [{ agentId: '3003', agentName: 'Anil Kumar', channel: 'ff', mobile: '9800002222', address: '3, Another Nagar, Jaipur', pincode: '302021', rows: [{ cls: 'VC5', approved: 4 }] }] }, '', '10.7.7.9');
+    assert.equal(other.res.status, 201, JSON.stringify(other.json));
     const otherToken = other.json.employeeToken || (other.json.request && other.json.request.employeeToken);
-    assert.ok(otherToken && otherToken !== token, 'doosre employee ka apna alag token');
-    const otherStatus = await jsonCall(server.base, '/api/public/tag-request/employee-status?token=' + encodeURIComponent(otherToken));
-    assert.equal(otherStatus.json.totalRequests, 1, 'doosra employee sirf apni ek request dekhta hai');
-    assert.equal(otherStatus.json.requests[0].agentName, 'Anil Kumar');
+    assert.ok(otherToken && otherToken !== token, 'doosre employee ka legacy token alag reh sakta hai');
+    const sharedFromFirstToken = await jsonCall(server.base, '/api/public/tag-request/employee-status?token=' + encodeURIComponent(token));
+    assert.equal(sharedFromFirstToken.json.totalRequests, 3, 'same link ki sabhi public requests ek saath dikhni chahiye');
+    assert.ok(sharedFromFirstToken.json.requests.some((x) => x.employeeName === 'Koi Doosra'), 'doosre employee ki request bhi dikhe');
+    assert.ok(sharedFromFirstToken.json.requests.some((x) => x.agentName === 'Anil Kumar'), 'doosre employee ka agent bhi dikhe');
+    const sharedFromOtherToken = await jsonCall(server.base, '/api/public/tag-request/employee-status?token=' + encodeURIComponent(otherToken));
+    assert.equal(sharedFromOtherToken.json.totalRequests, 3, 'token badalne par bhi shared list wahi rahe');
+    assert.equal(sharedFromOtherToken.json.requests[0].employeeName, 'Koi Doosra', 'nayi request sabse upar');
 
-    // 6) token ke bina / galat token → 400 (koi list leak nahi)
-    assert.equal((await jsonCall(server.base, '/api/public/tag-request/employee-status')).res.status, 400);
-    assert.equal((await jsonCall(server.base, '/api/public/tag-request/employee-status?token=short')).res.status, 400);
+    // 6) token optional — naya device/browser bina token ke bhi shared list dekh sakta hai.
+    const noToken = await jsonCall(server.base, '/api/public/tag-request/employee-status');
+    assert.equal(noToken.res.status, 200, JSON.stringify(noToken.json));
+    assert.equal(noToken.json.totalRequests, 3, 'bina token bhi same shared list');
+    assert.equal(noToken.json.shared, true);
   } finally {
     if (server) await server.stop();
     await mock.close();
