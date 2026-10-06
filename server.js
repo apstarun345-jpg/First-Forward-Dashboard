@@ -135,6 +135,7 @@ const DEFAULT_NOTIFICATION_ROUTES = Object.freeze({
   dailyDigest: 'admin', monthlyReport: 'both', lowStock: 'admin', midMonth: 'admin',
   zeroDay: 'admin', agentAnomaly: 'admin', tlAnomaly: 'admin', followup: 'both',
   champion: 'both', reportUpdate: 'both', inactiveUsers: 'admin', backupReminder: 'admin',
+  smartAlert: 'admin', // 🧠 Smart Action Center
   tagRequest: 'admin'   // 🏷️ IDFC Agents Tag Request → admin ke paas
 });
 const NOTIFICATION_AUDIENCES = new Set(['admin', 'users', 'both', 'off']);
@@ -233,6 +234,8 @@ const DEFAULT_SETTINGS = {
     personalLinks: true, // 🔗 personal read-only links (agent + TL)
     // ---- round 4 ke naye features ----
     customAlerts: true,  // 🗓 custom alert scheduler (admin ke apne reminders/status)
+    smartNotifications: true, smartTargetGapPct: 25, smartZeroAfterHour: 12,
+    smartMinPrevAvg: 5, smartCooldownHours: 6,
     championEmail: false,// 🥇 monthly champion certificate email (SMTP chahiye)
     championHour: 10, championTop: 3,
     followupTracker: true, // ⏰ follow-up tracker (3+ din silent agents)
