@@ -1293,21 +1293,34 @@ body.colorful .from-hdr { color: #166534; }
   function contactSuggestHtml(row) {
     const s = row && row.suggest;
     if (!s) return '';
-    const sm = clean(s.mobile), sa = clean(s.address), sp = clean(s.pincode);
+    const sm = clean(s.mobile), sd = clean(s.dispatchName), sa = clean(s.address), sp = clean(s.pincode);
     const lastAt = String(s.lastRequestAt || '').trim();
-    if (!sm && !sa && !sp && !lastAt) return '';
+    if (!sm && !sd && !sa && !sp && !lastAt) return '';
     const differs = (a, b) => clean(a) && norm(a) !== norm(b);
-    const canFill = !!(differs(sm, row.mobile) || differs(sa, row.address) || differs(sp, row.pincode));
-    const date = lastAt ? longDate(lastAt) : '';
-    const dateHtml = date ? `<span class="tr-cs-date">📅 Last request: <b>${esc(date)}</b></span>` : '';
-    const bits = [sm ? `📱 ${esc(sm)}` : '', sa ? `🏠 ${esc(sa)}` : '', sp ? `📮 ${esc(sp)}` : ''].filter(Boolean).join(' · ');
+    const canFill = !!(
+      differs(sm, row.mobile) || differs(sd, row.dispatchName) ||
+      differs(sa, row.address) || differs(sp, row.pincode)
+    );
+    const dateTime = lastAt ? (() => {
+      try {
+        const d = new Date(lastAt);
+        return d.toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+      } catch { return ''; }
+    })() : '';
+    const dateHtml = dateTime ? `<div class="tr-cs-last">📅 Last request: <b>${esc(dateTime)}</b></div>` : '';
+    const bits = [
+      sm ? `📱 Mobile ${esc(sm)}` : '',
+      sd ? `🏷️ Dispatch ${esc(sd)}` : '',
+      sa ? `🏠 ${esc(sa)}` : '',
+      sp ? `📮 ${esc(sp)}` : ''
+    ].filter(Boolean).join(' · ');
     const source = s.source === 'Address' ? 'Address book' : 'Pichli request';
     const fill = canFill
-      ? `<button type="button" class="btn small tr-cs-fill" data-tr-fill-old="${esc(row.id)}" title="Purana mobile · address · pincode bhar do">${bits || '📇 Purani details fill karo'}</button>`
+      ? `<button type="button" class="btn small tr-cs-fill" data-tr-fill-old="${esc(row.id)}" title="Purana mobile · dispatch name · address · pincode bhar do">${bits || '📇 Purani details fill karo'}</button>`
       : `<span class="tr-cs-filled">✅ Details already filled</span>`;
     return `<div class="tr-contact-suggest">
-      <span class="tr-cs-label dim small">📇 ${esc(source)} se purani details mili</span>
       ${dateHtml}
+      <span class="tr-cs-label dim small">📇 ${esc(source)} se purani details mili</span>
       ${fill}
     </div>`;
   }
