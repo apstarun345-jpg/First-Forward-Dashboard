@@ -11,7 +11,7 @@
   z-index:99999 !important;
   isolation:isolate !important;
 }
-.app-boot::before{
+.app-boot.boot-exit{animation:premiumBootExit .26s ease-in forwards !important;pointer-events:none;}\n.app-boot::before{
   z-index:0 !important;
   background:
     radial-gradient(circle at 50% 44%,rgba(96,165,250,.22),transparent 30%),
@@ -124,3 +124,4 @@ html.mobile-ui.pwa-standalone .topbar{
   0%{transform:translateX(-115%);}
   100%{transform:translateX(260%);}
 }
+\n@keyframes premiumBootExit{to{opacity:0;transform:scale(1.018);filter:blur(4px);}}\n
