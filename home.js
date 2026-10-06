@@ -371,6 +371,23 @@ FF.pages = FF.pages || {};
     };
   }
 
+  // GV today ke har class ka highest issuer — live GV Master rows se directly calculate hota hai.
+  function gvTodayHighest(rows) {
+    const maps = { VC4: new Map(), VC20: new Map(), 'VC5+': new Map() };
+    for (const r of rows || []) {
+      const group = r.group === 'VC4' ? 'VC4' : r.group === 'VC20' ? 'VC20' : 'VC5+';
+      const key = String(r.agentId || r.agentName || '—').trim() || '—';
+      const cur = maps[group].get(key) || { name: String(r.agentName || r.agentId || '—').trim() || '—', n: 0 };
+      cur.n += 1;
+      maps[group].set(key, cur);
+    }
+    const best = {};
+    for (const group of Object.keys(maps)) {
+      best[group] = [...maps[group].values()].sort((a, b) => b.n - a.n || String(a.name).localeCompare(String(b.name)))[0] || null;
+    }
+    return best;
+  }
+
   // ---------------------------------------------------------------- cards
   function gvLiveHtml(live) {
     const tk = todayK();
@@ -390,7 +407,10 @@ FF.pages = FF.pages || {};
       kpi('g7', 'Chassis', '🔧', U.fmt(live.chassis), live.total ? `${U.fmtPct(U.pctOf(live.chassis, live.total), 0)} of today` : '—', `src=gv&scope=day&date=${tk}&f=chassis`),
       kpi('g2', 'Expected Today', '🎯', expected != null ? U.fmt(expected) : '—',
         live.weekdayNote ? esc(live.weekdayNote) : 'pichhle same-weekday ka average',
-        `src=gv&scope=day&date=${tk}`)
+        `src=gv&scope=day&date=${tk}`),
+      kpi('g10', 'Today Highest Issued', '🏆', live.highest ? `${['VC4','VC20','VC5+'].map((g) => `<span class="hm-highest-name">${g}: ${esc(live.highest[g] ? live.highest[g].name : '—')}</span>`).join('<br>')}` : '—',
+        live.highest ? `VC4 <b>${U.fmt(live.highest.VC4 ? live.highest.VC4.n : 0)}</b> · VC20 <b>${U.fmt(live.highest.VC20 ? live.highest.VC20.n : 0)}</b> · VC5+ <b>${U.fmt(live.highest['VC5+'] ? live.highest['VC5+'].n : 0)}</b>` : 'GV Master load hone par class-wise highest dikhega',
+        `src=gv&scope=day&date=${tk}&f=highest`)
     ];
     const errorNote = live.error
       ? `<p class="hm-warn">⚠️ GV live feed error: ${esc(live.error)}. Connection / sheet mapping check karo; GV Master refresh hote hi snapshot update hoga.</p>`
@@ -614,7 +634,7 @@ FF.pages = FF.pages || {};
     let liveSourceReady = false;
 
     let liveState = {
-      total: 0, vc4: 0, vc20: 0, vc5p: 0, replacement: 0, chassis: 0,
+      total: 0, vc4: 0, vc20: 0, vc5p: 0, replacement: 0, chassis: 0, highest: null,
       expected: null, pace: null, cached: false, stale: false,
       error: canGv ? 'GV aaj ka live data aa raha hai…' : '',
       source: 'feed', liveToday: false
@@ -795,7 +815,7 @@ FF.pages = FF.pages || {};
       liveState = useSnap ? {
         ...liveState,
         total: snap.total, vc4: snap.vc4, vc20: snap.vc20, vc5p: snap.vc5p,
-        replacement: snap.replacement, chassis: snap.chassis,
+        replacement: snap.replacement, chassis: snap.chassis, highest: gvTodayHighest(snap.rows),
         error: '', stale: false, source: 'master', liveToday: true
       } : { ...liveState, error: '', liveToday: true };
       if (ui.ready) {
