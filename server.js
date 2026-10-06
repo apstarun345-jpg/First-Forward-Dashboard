@@ -5497,35 +5497,58 @@ async function handleApi(req, res, url) {
     const name = tagNameKey(agentName || '');
     if (!id && !name) return null;
 
-    // 🔁 Last public-link request: address suggestion ke saath last request date bhi dikhani hai.
+    // 🔁 Latest request snapshot: last request ki date/time + dispatch/contact details.
     const requestList = Array.isArray(workspaceStore().tagRequests) ? workspaceStore().tagRequests : [];
-    const lastRequestAt = (() => {
-      let latest = 0;
-      requestList.forEach((r) => {
-        if (!r || r.source !== 'public-link' || !r.agent) return;
-        const rch = String(r.agent.channel || 'ff').toLowerCase() === 'gv' ? 'gv' : 'ff';
-        if (rch !== ch) return;
-        const rid = String(r.agent.agentId || '').trim();
-        const rname = tagNameKey(r.agent.name || '');
-        const sameId = id && rid && rid === id;
-        const sameName = name && rname && rname === name;
-        if (sameId || sameName) {
-          const at = Date.parse(r.at || '');
-          if (Number.isFinite(at) && at > latest) latest = at;
-        }
-      });
-      return latest ? new Date(latest).toISOString() : '';
-    })();
+    let latest = null, latestAt = 0;
+    requestList.forEach((r) => {
+      if (!r || r.source !== 'public-link' || !r.agent) return;
+      const rch = String(r.agent.channel || 'ff').toLowerCase() === 'gv' ? 'gv' : 'ff';
+      if (rch !== ch) return;
+      const rid = String(r.agent.agentId || '').trim();
+      const rname = tagNameKey(r.agent.name || '');
+      const sameId = id && rid && rid === id;
+      const sameName = name && rname && rname === name;
+      if (!sameId && !sameName) return;
+      const at = Date.parse(r.at || '');
+      if (Number.isFinite(at) && at > latestAt) { latestAt = at; latest = r; }
+    });
+    const lastRequestAt = latestAt ? new Date(latestAt).toISOString() : '';
 
     const memory = addressBookMemoryEntries();
     const keys = [];
     if (id) keys.push(ch + '|id:' + id);
     if (name) keys.push(ch + '|n:' + name);
-    const asContact = (e) => e && (e.address || e.pincode || e.mobile)
-      ? { mobile: e.mobile || '', address: e.address || '', pincode: e.pincode || '', tl: e.tl || '', source: 'Address', lastRequestAt: lastRequestAt || e.lastRequestAt || '' }
+    const asContact = (e) => e && (e.address || e.pincode || e.mobile || e.dispatchName)
+      ? {
+          mobile: e.mobile || '',
+          address: e.address || '',
+          pincode: e.pincode || '',
+          dispatchName: e.dispatchName || '',
+          tl: e.tl || '',
+          source: 'Address',
+          lastRequestAt: lastRequestAt || e.lastRequestAt || ''
+        }
       : null;
 
-    // A recent submission is already in durable workspace memory; don't wait for a sheet read.
+    // Freshest request data wins for the just-selected agent; memory remains the fallback.
+    if (latest && latest.agent) {
+      const ra = latest.agent;
+      const fresh = asContact({
+        mobile: ra.mobile || '', address: ra.address || '', pincode: ra.pincode || '',
+        dispatchName: ra.dispatchName || '', tl: ra.tl || '', lastRequestAt
+      });
+      if (fresh) {
+        const fallback = keys.map((key) => asContact(memory[key])).find(Boolean);
+        return {
+          ...fresh,
+          mobile: fresh.mobile || (fallback && fallback.mobile) || '',
+          address: fresh.address || (fallback && fallback.address) || '',
+          pincode: fresh.pincode || (fallback && fallback.pincode) || '',
+          dispatchName: fresh.dispatchName || (fallback && fallback.dispatchName) || ''
+        };
+      }
+    }
+
     for (const key of keys) { const contact = asContact(memory[key]); if (contact) return contact; }
     const map = await addressBookMap();
     for (const key of keys) {
