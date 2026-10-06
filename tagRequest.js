@@ -1369,11 +1369,11 @@ body.colorful .from-hdr { color: #166534; }
           <div class="tr-contact-slot" data-tr-suggest-slot>${contactSuggestHtml(row)}</div>
           ${row.fromBook ? '<p class="dim small tr-book-note">📇 Pichli request / Address book se purana mobile-address auto-fill hua — submit se pehle ek baar check kar lo.</p>' : ''}
           ${errList.length ? `<ul class="tr-err-list">${errList.map((m) => `<li>⚠️ ${esc(m)}</li>`).join('')}</ul>` : ''}
+          ${agentGroupSummaryHtml(rec)}
         </div>
         <div class="tr-qty-list${badCls(row.id, 'qty')}" role="group" aria-label="Class-wise qty">
           <div class="tr-qty-head"><span>Tag class</span><span>Qty</span></div>
           ${qtyRows}
-          ${agentGroupSummaryHtml(rec)}
           <div class="tr-qty-foot"><span>Requested total</span><b data-tr-agent-total2>${fmt(total)}</b></div>
         </div>
       </div>
