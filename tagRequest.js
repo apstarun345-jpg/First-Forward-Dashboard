@@ -1473,11 +1473,14 @@ body.colorful .from-hdr { color: #166534; }
     // row.suggest me bhi (server ka lookup async hai, usse pehle bhi purana address dikhna chahiye).
     {
       const saved = agentBook()[`${rec.channel}|${norm(rec.name)}`];
-      if (saved && (saved.mobile || saved.address || saved.pincode)) {
-        row.suggest = { mobile: clean(saved.mobile), address: clean(saved.address), pincode: clean(saved.pincode), source: 'Request' };
-        if (!digits(row.mobile) && !clean(row.address)) {
-          row.mobile = saved.mobile || ''; row.address = saved.address || ''; row.pincode = saved.pincode || ''; row.fromBook = true;
-        }
+      if (saved && (saved.mobile || saved.dispatchName || saved.address || saved.pincode)) {
+        row.suggest = { mobile: clean(saved.mobile), dispatchName: clean(saved.dispatchName), address: clean(saved.address), pincode: clean(saved.pincode), source: 'Request', lastRequestAt: clean(saved.lastRequestAt) };
+        let filled = false;
+        if (!clean(row.mobile) && clean(saved.mobile)) { row.mobile = saved.mobile; filled = true; }
+        if (!clean(row.dispatchName) && clean(saved.dispatchName)) { row.dispatchName = saved.dispatchName; filled = true; }
+        if (!clean(row.address) && clean(saved.address)) { row.address = saved.address; filled = true; }
+        if (!clean(row.pincode) && clean(saved.pincode)) { row.pincode = saved.pincode; filled = true; }
+        if (filled) row.fromBook = true;
       } else row.suggest = null;
     }
     if (state.errs[row.id]) delete state.errs[row.id].agent;
@@ -1493,10 +1496,18 @@ body.colorful .from-hdr { color: #166534; }
        if (!contact) return;
        // 📇 Purana address chip me hamesha dikhao — employee ne pehle kuch type kiya ho tab bhi, taaki
        // purana address dekh kar ek click me bhar sake. Auto-fill sirf khaali fields me (chup-chaap overwrite nahi).
-       row.suggest = { mobile: clean(contact.mobile), address: clean(contact.address), pincode: clean(contact.pincode), source: contact.source || 'Address' };
+       row.suggest = {
+         mobile: clean(contact.mobile),
+         dispatchName: clean(contact.dispatchName),
+         address: clean(contact.address),
+         pincode: clean(contact.pincode),
+         source: contact.source || 'Address',
+         lastRequestAt: clean(contact.lastRequestAt)
+       };
        let changed = false;
        if (!row.contactManual) {
          if (!clean(row.mobile) && clean(contact.mobile)) { row.mobile = contact.mobile; changed = true; }
+         if (!clean(row.dispatchName) && clean(contact.dispatchName)) { row.dispatchName = contact.dispatchName; changed = true; }
          if (!clean(row.address) && clean(contact.address)) { row.address = contact.address; changed = true; }
          if (!clean(row.pincode) && clean(contact.pincode)) { row.pincode = contact.pincode; changed = true; }
        }
@@ -1592,9 +1603,10 @@ body.colorful .from-hdr { color: #166534; }
       const fillOld = e.target.closest ? e.target.closest('[data-tr-fill-old]') : null;
       if (fillOld) {
         const s = row.suggest || {};
-        if (clean(s.mobile)) row.mobile = String(s.mobile);
-        if (clean(s.address)) row.address = String(s.address);
-        if (clean(s.pincode)) row.pincode = String(s.pincode);
+        if (!clean(row.mobile) && clean(s.mobile)) row.mobile = String(s.mobile);
+        if (!clean(row.dispatchName) && clean(s.dispatchName)) row.dispatchName = String(s.dispatchName);
+        if (!clean(row.address) && clean(s.address)) row.address = String(s.address);
+        if (!clean(row.pincode) && clean(s.pincode)) row.pincode = String(s.pincode);
         row.fromBook = true; row.contactManual = true; row.addressSource = s.source === 'Address' ? 'Address' : 'Request';
         ['mobile', 'address', 'pincode'].forEach((f) => { if (state.errs[row.id]) delete state.errs[row.id][f]; });
         rerenderCard('[data-tr-a="address"]');
