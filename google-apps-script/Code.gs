@@ -64,8 +64,8 @@ const TAB = 'APP_STORAGE';
 const CHUNK = 45000; // a Google Sheets cell holds max 50,000 characters
 const KINDS = ['users', 'sessions', 'settings', 'resets', 'notify'];
 const HISTORY_TAB = 'APP_STORAGE_HISTORY';
-const HISTORY_MAX_ROWS = 2000;
-const CODE_VERSION = 'v3.58';
+const HISTORY_MAX_ROWS = 60; // bounded to 60 snapshots to avoid Google Sheets document size limits
+const CODE_VERSION = 'v3.60';
 
 /** Run this ONCE from the Apps Script editor (▶ Run) to grant the "send email" permission. */
 function authorizeMail() { Logger.log('Mail quota left today: ' + MailApp.getRemainingDailyQuota()); }
@@ -79,10 +79,16 @@ function checkSetup() {
   var secret = appSecret_();
   lines.push(secret.length >= 16
     ? '✅ APPS_SCRIPT_SECRET set hai (' + secret.length + ' characters). Render ke APPS_SCRIPT_SECRET se EXACT same hona chahiye.'
-    : '⚠️ APPS_SCRIPT_SECRET abhi set NAHI hai — ya to setAppSecretOnce(\'...\') chalao, ya kuch mat karo: server ki PEHLI call par ye khud save ho jayega (v3.58 auto-setup).');
+    : '⚠️ APPS_SCRIPT_SECRET abhi set NAHI hai — ya to setAppSecretOnce(\'...\') chalao, ya kuch mat karo: server ki PEHLI call par ye khud save ho jayega (auto-setup).');
   try {
     var ss = SpreadsheetApp.getActive();
     lines.push('✅ Script is spreadsheet se bandha hai: "' + ss.getName() + '"');
+    if (ss.getSheetByName('EIR') || ss.getSheetByName('StockDataa')) {
+      lines.push('⚠️ WARNING: Ye Apps Script First Forward ki MAIN business sheet ("' + ss.getName() + '") me laga hai!');
+      lines.push('   Main business sheet me bohot zyada rows (60,000+ EIR, 100,000+ StockDataa) hoti hain,');
+      lines.push('   jisse Google "The document cannot be modified. Perhaps it has grown too large" error deta hai.');
+      lines.push('   👉 FIX: Hamesha ek NAYI, ALAG private Google Sheet banayein aur Apps Script usme deploy karein.');
+    }
     var sh = ss.getSheetByName(TAB);
     lines.push(sh
       ? '✅ ' + TAB + ' tab maujood hai (' + Math.max(0, sh.getLastRow() - 1) + ' records).'
@@ -99,6 +105,44 @@ function checkSetup() {
   var out = lines.join('\n');
   Logger.log('\n' + out);
   return out;
+}
+
+/**
+ * 🧹 "The document cannot be modified. Perhaps it has grown too large" fix:
+ * Editor me ye function chuno aur ▶ Run dabao.
+ * Ye APP_STORAGE_HISTORY tab ko clean/trim karta hai aur empty rows/columns hatata hai.
+ */
+function cleanStorageHistory() {
+  var ss = SpreadsheetApp.getActive();
+  var log = [];
+  try {
+    var h = ss.getSheetByName(HISTORY_TAB);
+    if (h) {
+      var last = h.getLastRow();
+      if (last > 20) {
+        h.deleteRows(2, last - 20);
+        log.push('APP_STORAGE_HISTORY trimmed to latest 20 rows.');
+      } else {
+        log.push('APP_STORAGE_HISTORY already has only ' + Math.max(0, last - 1) + ' rows.');
+      }
+    }
+    var sh = ss.getSheetByName(TAB);
+    if (sh) {
+      if (sh.getMaxRows() > 20) {
+        sh.deleteRows(21, sh.getMaxRows() - 20);
+        log.push('APP_STORAGE unused rows deleted.');
+      }
+      if (sh.getMaxColumns() > 15) {
+        sh.deleteColumns(16, sh.getMaxColumns() - 15);
+        log.push('APP_STORAGE unused columns deleted.');
+      }
+    }
+  } catch (e) {
+    log.push('cleanStorageHistory error: ' + (e && e.message || e));
+  }
+  var msg = log.join('\n');
+  Logger.log(msg);
+  return msg;
 }
 
 /**
@@ -562,26 +606,32 @@ function readHistory_(h, rows, withData) {
  * IMPORTANT: this copies ciphertext only. It never decrypts passwords/settings.
  */
 function backupPreviousRecord_(sh, rowIndex, kind) {
-  if (rowIndex < 2) return;
-  const lastCol = sh.getLastColumn();
-  if (lastCol < 5) return;
-  const row = sh.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
-  if (String(row[0] || '') !== kind) return;
-  const chunkCount = Number(row[3]) || 0;
-  if (!chunkCount) return;
-  const h = historySheet_(sh.getParent());
-  const chunks = row.slice(4, 4 + chunkCount);
-  const next = h.getLastRow() + 1;
-  h.getRange(next, 1, 1, 1).setNumberFormat('@'); // savedAt hamesha TEXT rahe (date auto-format se bachao)
-  h.getRange(next, 1, 1, 4 + chunks.length).setValues([[
-    new Date().toISOString(),
-    String(row[0] || ''),
-    String(row[1] || ''),
-    String(row[3] || ''),
-  ].concat(chunks)]);
-  // Keep the history bounded so this protection cannot grow forever.
-  const excess = h.getLastRow() - HISTORY_MAX_ROWS;
-  if (excess > 0) h.deleteRows(2, excess);
+  try {
+    if (rowIndex < 2) return;
+    // sessions change constantly on every single login and have no recovery value.
+    if (kind === 'sessions') return;
+    const lastCol = sh.getLastColumn();
+    if (lastCol < 5) return;
+    const row = sh.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
+    if (String(row[0] || '') !== kind) return;
+    const chunkCount = Number(row[3]) || 0;
+    if (!chunkCount) return;
+    const h = historySheet_(sh.getParent());
+    const chunks = row.slice(4, 4 + chunkCount);
+    const next = h.getLastRow() + 1;
+    h.getRange(next, 1, 1, 1).setNumberFormat('@'); // savedAt hamesha TEXT rahe (date auto-format se bachao)
+    h.getRange(next, 1, 1, 4 + chunks.length).setValues([[
+      new Date().toISOString(),
+      String(row[0] || ''),
+      String(row[1] || ''),
+      String(row[3] || ''),
+    ].concat(chunks)]);
+    // Keep the history bounded so this protection cannot grow forever.
+    const excess = h.getLastRow() - HISTORY_MAX_ROWS;
+    if (excess > 0) h.deleteRows(2, excess);
+  } catch (err) {
+    Logger.log('backupPreviousRecord_ non-fatal error: ' + (err && err.message || err));
+  }
 }
 
 function writeRecord_(sh, kind, record, nowIso) {
