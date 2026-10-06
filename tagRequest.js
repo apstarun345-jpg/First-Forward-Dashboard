@@ -1294,12 +1294,22 @@ body.colorful .from-hdr { color: #166534; }
     const s = row && row.suggest;
     if (!s) return '';
     const sm = clean(s.mobile), sa = clean(s.address), sp = clean(s.pincode);
-    if (!sm && !sa && !sp) return '';
+    const lastAt = String(s.lastRequestAt || '').trim();
+    if (!sm && !sa && !sp && !lastAt) return '';
     const differs = (a, b) => clean(a) && norm(a) !== norm(b);
-    if (!(differs(sm, row.mobile) || differs(sa, row.address) || differs(sp, row.pincode))) return '';
+    const canFill = !!(differs(sm, row.mobile) || differs(sa, row.address) || differs(sp, row.pincode));
+    const date = lastAt ? longDate(lastAt) : '';
+    const dateHtml = date ? `<span class="tr-cs-date">📅 Last request: <b>${esc(date)}</b></span>` : '';
     const bits = [sm ? `📱 ${esc(sm)}` : '', sa ? `🏠 ${esc(sa)}` : '', sp ? `📮 ${esc(sp)}` : ''].filter(Boolean).join(' · ');
-    return `<div class="tr-contact-suggest"><span class="tr-cs-label dim small">📇 ${esc(s.source === 'Address' ? 'Address book' : 'Pichli request')} se purana address mila —</span>
-      <button type="button" class="btn small tr-cs-fill" data-tr-fill-old="${esc(row.id)}" title="Purana mobile · address · pincode bhar do">${bits}</button></div>`;
+    const source = s.source === 'Address' ? 'Address book' : 'Pichli request';
+    const fill = canFill
+      ? `<button type="button" class="btn small tr-cs-fill" data-tr-fill-old="${esc(row.id)}" title="Purana mobile · address · pincode bhar do">${bits || '📇 Purani details fill karo'}</button>`
+      : `<span class="tr-cs-filled">✅ Details already filled</span>`;
+    return `<div class="tr-contact-suggest">
+      <span class="tr-cs-label dim small">📇 ${esc(source)} se purani details mili</span>
+      ${dateHtml}
+      ${fill}
+    </div>`;
   }
   /** Sirf chip slot update karo — poora card dobara banane se typing ka focus toot jaata. */
   function refreshContactSuggest(row) {
