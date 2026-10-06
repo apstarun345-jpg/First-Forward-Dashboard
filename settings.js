@@ -1200,7 +1200,8 @@ FF.pages = FF.pages || {};
         ${c('teamMap', '🗺 Team map', 'Admin sidebar page — location share karne walo ka distance map (office se)')}
         ${c('personalLinks', '🔗 Personal links', 'Har agent/TL ka secret read-only performance link — Settings me 🔗 tab')}
         ${c('customAlerts', '🗓 Custom alert scheduler', 'Apne reminders/status — roz / har Somwar / har mahine fixed time par bell me')}
-        ${c('championEmail', '🥇 Champion certificate email', 'Mahine ke top agents ka certificate SMTP se email (SMTP set ho tabhi)')}
+        ${c('smartNotifications', '🧠 Smart notifications / Action Center', 'Important problems ko ek actionable alert me combine karta hai — duplicate/noise se bachata hai')}
+        ${c('championEmail', '🥇 Champion certificate email', 'Mahine ke top agents ka certificate SMTP se email (SMTP set ho tabhi)')
         ${c('followupTracker', '⏰ Follow-up tracker', 'Silent agents + due agent/TL notes — roz owner timeline reminder')}
         ${c('dispatchPlan', '🎯 Suggested dispatch cards', 'High + Medium priority agents: cover din + suggested tag qty (GV + FF)')}
         ${c('masterSearch', '🔎 Master search bar', 'Topbar + Home panel — naam, TL, ID, GV ID, barcode, tag ID sab ek search me (dropdown suggestions + kundli cards)')}
@@ -1233,6 +1234,7 @@ FF.pages = FF.pages || {};
       ['reportUpdate', '🔄 Sheet/report update', 'Google Sheet me fresh rows aane par'],
       ['inactiveUsers', '💤 Inactive app users', 'Dashboard login inactivity report'],
       ['backupReminder', '☁️ Backup reminder', 'Settings backup purana hone par'],
+      ['smartAlert', '🧠 Smart Action Center', 'Combined actionable alert — target pace, stock cover, zero issuance, pending requests'],
       ['tagRequest', '🏷️ Tag Request (employee link / form)', 'Nayi tag request aane par admin ko + employee ko confirmation']
     ];
     const routeOptions = (value) => [['admin', '👑 Sirf admin'], ['users', '👥 Sirf users'], ['both', '📢 Admin + users'], ['off', '⛔ Kisi ko nahi']]
@@ -1254,6 +1256,10 @@ FF.pages = FF.pages || {};
         ${n('features.championTop', f.championTop ?? 3, '🥇 Kitne top champions (1-10)', 'min="1" max="10"')}
         ${n('features.followupDays', f.followupDays ?? 3, '⏰ Follow-up: kitne din silent = alert', 'min="1" max="30"')}
         ${n('features.followupHour', f.followupHour ?? 10, '⏰ Follow-up hour (IST)', 'min="0" max="23"')}
+        ${n('features.smartTargetGapPct', f.smartTargetGapPct ?? 25, '🧠 Smart target gap (%)', 'min="5" max="80"')}
+        ${n('features.smartZeroAfterHour', f.smartZeroAfterHour ?? 12, '🧠 Smart 0-issuance check hour (IST)', 'min="8" max="23"')}
+        ${n('features.smartMinPrevAvg', f.smartMinPrevAvg ?? 5, '🧠 Minimum previous avg for 0-issuance alert', 'min="1" max="100"')}
+        ${n('features.smartCooldownHours', f.smartCooldownHours ?? 6, '🧠 Same Smart issue repeat gap (hours)', 'min="1" max="48"')}
       </div>
       <p class="dim small">Cover bands (🔴/🟠/🟡) aur “went quiet” days → <b>📐 Thresholds</b> tab. Digest ka ON/OFF type → 🔔 Notifications. 🎯 Suggested dispatch/tags ke din aur style → upar <b>🎯 Suggested dispatch / tags</b> card.</p>${saveBar('feat-mods')}`);
     const smode = f.suggestMode === 'net' || f.suggestMode === 'gross' ? f.suggestMode : 'both';
