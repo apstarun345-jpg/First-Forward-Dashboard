@@ -577,6 +577,7 @@ window.FF = window.FF || {};
   function centerItems() {
     const q = String(state.filterSearch || '').trim().toLowerCase();
     return state.items.slice().reverse().filter((item) => {
+      if (item && item.meta && item.meta.source === 'recovery-hint') return false;
       if (state.centerPriority !== 'all' && notifyPriority(item) !== state.centerPriority) return false;
       if (!notifyMatchesDate(item, state.centerDate)) return false;
       if (!q) return true;
@@ -676,16 +677,20 @@ window.FF = window.FF || {};
       const qs = state.lastAt && !initial ? `?since=${encodeURIComponent(state.lastAt)}` : '';
       const out = await FF.auth.api(`/api/notifications${qs}`);
       const incoming = Array.isArray(out.items) ? out.items : [];
+      const isNormalRecoveryInfo = (item) => !!(item && item.meta && item.meta.source === 'recovery-hint');
+      // Normal APP_STORAGE_HISTORY availability is not an alert. Old records are suppressed from
+      // the feed, toast/browser notification and unread badge; genuine recovery errors/missing data remain.
+      const visibleIncoming = incoming.filter((x) => !isNormalRecoveryInfo(x));
       const known = new Set(state.items.map((x) => x.id));
-      const fresh = incoming.filter((x) => !known.has(x.id) && state.prefs[x.type] !== false);
-      // Naya item: visible tab par toast + beep, aur (voice ON ho to) bol kar bhi announce.
+      const fresh = visibleIncoming.filter((x) => !known.has(x.id) && state.prefs[x.type] !== false);
       if (!initial) fresh.forEach((x) => { browserAlert(x); speakServerItem(x); });
       // Naya signup aaya → sidebar ke pending-approvals badge ko turant update karo.
       if (fresh.some((x) => x.type === 'signup') && FF.app && FF.app.refreshPendingBadge) FF.app.refreshPendingBadge();
-      state.items = [...state.items, ...incoming].filter((x, i, a) => a.findIndex((y) => y.id === x.id) === i).slice(-100);
+      state.items = [...state.items, ...visibleIncoming].filter((x, i, a) => a.findIndex((y) => y.id === x.id) === i).slice(-100);
       state.lastAt = latestTime(state.items) || out.checkAt || state.lastAt;
       state.seenAt = (FF.auth.user && FF.auth.user.notificationsSeenAt) || state.seenAt;
-      state.serverUnread = Number(out.unread) || 0;
+      const hiddenUnread = incoming.filter(isNormalRecoveryInfo).filter((x) => itemUnread(x)).length;
+      state.serverUnread = Math.max(0, (Number(out.unread) || 0) - hiddenUnread);
       setCount(countUnread());
       if (FF.auth.user && FF.auth.user.role === 'admin') {
         try { const live = await FF.auth.api('/api/presence'); state.people = Array.isArray(live.people) ? live.people : []; } catch { /* older server */ }
