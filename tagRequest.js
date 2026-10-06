@@ -940,6 +940,7 @@ body.colorful .from-hdr { color: #166534; }
     if (body && body.classList) body.classList.toggle('tr-no-check', isPublic() && !!state.publicCfg && state.publicCfg.showCheck === false);
     if (isPublic()) {
       if (state.view === 'done' && state.done) return renderDone();
+      if (state.view === 'requests') return renderPublicEmployeeRequests();
       if (state.view === 'status') return renderStatus();
       return renderForm();
     }
@@ -956,7 +957,7 @@ body.colorful .from-hdr { color: #166534; }
     const v = state.view === 'done' ? 'form' : state.view;
     const tab = (id, label) => `<button class="seg-btn ${v === id ? 'on' : ''}" data-tr-view="${id}">${label}</button>`;
     // 🌐 Employee link: sirf Form + Status (Result tab hata diya — system check submit ke saath hota hai)
-    if (isPublic()) return `<div class="seg" id="tr-tabs">${tab('form', '📝 Form')}${tab('status', '🔎 Status')}</div>`;
+    if (isPublic()) return `<div class="seg" id="tr-tabs">${tab('form', '📝 Form')}${tab('requests', '👤 Meri requests')}${tab('status', '🔎 Status')}</div>`;
     return `<div class="seg" id="tr-tabs">${tab('form', '📝 Form')}${tab('requests', isAdmin() ? '📥 Tag Requests' : '📥 Meri requests')}${isAdmin() ? tab('settings', '⚙️ Link & Sheet') : ''}</div>`;
   };
   function headHtml() {
@@ -2004,6 +2005,45 @@ body.colorful .from-hdr { color: #166534; }
     if (state.employeeSummary || state.employeeSummaryPromise) return;
     loadEmployeeSummary().then(() => { if (rootEl && rootEl.isConnected && state.view === 'form') repaint(); });
   }
+  function renderPublicEmployeeRequests() {
+    const body = bodyEl();
+    if (!body) return;
+    if (!state.employeeToken) {
+      body.innerHTML = `<section class="card tr-employee-summary">
+        <div class="card-head"><h3>👤 Meri requests</h3><div class="card-right dim">Aapki request history</div></div>
+        <div class="card-body">
+          <div class="notice" style="margin:0">📝 <b>Abhi koi request history available nahi hai.</b><br>
+          Pehle <b>Form</b> me tag request submit karein. Submit hone ke baad isi <b>👤 Meri requests</b> tab me aapki saari requests automatically dikhengi.</div>
+        </div>
+      </section>`;
+      return;
+    }
+    if (!state.employeeSummary) {
+      body.innerHTML = `<section class="card tr-employee-summary">
+        <div class="card-head"><h3>👤 Meri requests</h3><button class="btn small" data-tr-emp-refresh>↻ Refresh</button></div>
+        <div class="card-body"><div class="dim">Request history load ho rahi hai…</div></div>
+      </section>`;
+      bindEmployeeHistory(body, renderPublicEmployeeRequests);
+      loadEmployeeSummary().then(() => { if (rootEl && rootEl.isConnected && state.view === 'requests') renderPublicEmployeeRequests(); });
+      return;
+    }
+    const summary = state.employeeSummary;
+    const history = employeeStatusHistoryHtml(summary, state.employeeHistoryFilter, state.employeeHistoryPage);
+    state.employeeHistoryFilter = history.filter;
+    state.employeeHistoryPage = history.page;
+    body.innerHTML = `<section class="card tr-employee-summary">
+      <div class="card-head"><h3>👤 Meri requests</h3>
+        <div class="card-right dim">Total <b>${fmt(summary.totalRequests || 0)}</b> · Requested <b>${fmt(summary.requestedTags || 0)}</b> · Approved <b>${fmt(summary.approvedTags || 0)}</b></div>
+      </div>
+      <div class="card-body">
+        <div class="tr-es-head"><div><b>📋 Request history</b><small class="dim">Nayi request sabse upar</small></div><button class="btn small" data-tr-emp-refresh>↻ Refresh</button></div>
+        <div class="tr-es-tags"><span>🏷️ Requested tags <b>${fmt(summary.requestedTags || 0)}</b></span><span>✅ Approved tags <b>${fmt(summary.approvedTags || 0)}</b></span></div>
+        ${history.html}
+      </div>
+    </section>`;
+    bindEmployeeHistory(body, renderPublicEmployeeRequests);
+  }
+
   function renderStatus() {
     const body = bodyEl();
     if (!body) return;
