@@ -5082,6 +5082,9 @@ html[data-theme="dark"] .tr-emp-filter-pending.on{background:rgba(245,158,11,.16
    dikhte hain taaki band panel me bhi pata chale ki kitni request kis status me hai; kholne par wahi
    All/Pending/Approved/Dispatched/Rejected filter + 10-10 ke page (← Previous / Next →) jo Status tab par hain. */
 .tr-emp-panel{margin:0 0 14px}
+.tr-public-requests-card{margin:0 0 14px;border-left:4px solid var(--brand)}
+.tr-public-requests-card .tr-emp-history-head{margin-top:0}
+
 .tr-emp-details>summary{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:12px 14px;cursor:pointer;list-style:none;user-select:none}
 .tr-emp-details>summary::-webkit-details-marker{display:none}
 .tr-emp-details>summary::before{content:"▸";color:var(--muted);font-size:11px;transition:transform .15s ease}
