@@ -2209,9 +2209,20 @@ body.colorful .from-hdr { color: #166534; }
   const growthHtml = (g) => (g === null ? '<span class="delta up">🆕 new</span>' : `<span class="delta ${g > 0.05 ? 'up' : g < -0.05 ? 'down' : 'flat'}">${g > 0.05 ? '▲ +' : g < -0.05 ? '▼ ' : ''}${fmt(g, 1)}%</span>`);
   const growthSmall = (g) => (g === null ? 'new' : `${g > 0 ? '+' : ''}${fmt(g, 0)}%`);
   /** Metric cells — admin rows also show both stock-adjusted and no-stock-deduction suggestions. */
+  const CLASS_DETAIL_LIST = ['VC4', 'VC5', 'VC7', 'VC12', 'VC16'];
   function metricCellsHtml(dr) {
     const m = metricsFor(dr);
     const n = metricNumbers(m);
+    const rec = state.index ? lookupAgent(dr.agent) : null;
+    const classMetrics = (field) => CLASS_DETAIL_LIST.map((c) => {
+      if (rec) {
+        const d = classData(rec, c);
+        return [c, num(d[field])];
+      }
+      const x = dr.rows.find((r) => String(r.cls || '').toUpperCase() === c);
+      return [c, x ? num(x[field]) : 0];
+    });
+    const classLineHtml = (field) => classMetrics(field).map(([cls, val]) => `<span><b>${esc(cls)}</b> <strong>${fmt(val)}</strong></span>`).join('');
     const keys = ['stock', 'core', 'comm', 'last', 'cur', 'rate', 'exp', 'growth'];
     if (isAdmin()) keys.push('suggest');
     // Agent sheet me nahi mila + koi snapshot nahi → "0" galat lagta (stock 0?) — "—" dikhao
@@ -2221,11 +2232,11 @@ body.colorful .from-hdr { color: #166534; }
     }
     const dot = `<i class="tr-src ${m.src}" title="${esc(SRC_TITLE[m.src] || '')}${m.src !== 'live' && m.ym ? ` · ${esc(U.labelYM(m.ym))}` : ''}${m.exactStock ? ' · exact stock (StockDataa)' : ''}"></i>`;
     const cells = [
-      `<td class="num tr-m tr-m-stock-total" data-tr-m="stock">${dot}<b class="tr-big-num">${fmt(n.total.stock)}</b><div class="tr-class-break"><b class="car">🚗 ${fmt(n.core.stock)}</b><b class="comm">🚚 ${fmt(n.comm.stock)}</b></div></td>`,
-      `<td class="num tr-m tr-m-core" data-tr-m="core"><b class="tr-big-num">${fmt(n.core.stock)}</b><small class="tr-class-label">🚗 VC4/VC20</small></td>`,
-      `<td class="num tr-m tr-m-comm" data-tr-m="comm"><b class="tr-big-num">${fmt(n.comm.stock)}</b><small class="tr-class-label">🚚 VC5+</small></td>`,
-      `<td class="num tr-m tr-m-last" data-tr-m="last"><b class="tr-big-num">${fmt(n.total.last)}</b><div class="tr-class-break"><b class="car">🚗 ${fmt(n.core.last)}</b><b class="comm">🚚 ${fmt(n.comm.last)}</b></div></td>`,
-      `<td class="num tr-m tr-m-current" data-tr-m="cur"><b class="tr-big-num">${fmt(n.total.cur)}</b><div class="tr-class-break"><b class="car">🚗 ${fmt(n.core.cur)}</b><b class="comm">🚚 ${fmt(n.comm.cur)}</b></div></td>`,
+      `<td class="num tr-m tr-m-stock-total" data-tr-m="stock">${dot}<b class="tr-big-num">${fmt(n.total.stock)}</b><div class="tr-class-grid">${classLineHtml('stock')}</div></td>`,
+      `<td class="num tr-m tr-m-core" data-tr-m="core"><b class="tr-big-num">${fmt(n.core.stock)}</b></td>`,
+      `<td class="num tr-m tr-m-comm" data-tr-m="comm"><b class="tr-big-num">${fmt(n.comm.stock)}</b></td>`,
+      `<td class="num tr-m tr-m-last" data-tr-m="last"><b class="tr-big-num">${fmt(n.total.last)}</b><div class="tr-class-grid">${classLineHtml('last')}</div></td>`,
+      `<td class="num tr-m tr-m-current" data-tr-m="cur"><b class="tr-big-num">${fmt(n.total.cur)}</b><div class="tr-class-grid">${classLineHtml('cur')}</div></td>`,
       `<td class="num tr-m" data-tr-m="rate" title="${fmt(n.total.cur)} ÷ ${fmt(n.days)} din"><b>${fmt(n.total.rate, 1)}</b>${subLine(n.core.rate, n.comm.rate, 1)}</td>`,
       `<td class="num tr-m" data-tr-m="exp"><b>${fmt(n.total.exp)}</b>${subLine(n.core.exp, n.comm.exp)}</td>`,
       `<td class="num tr-m" data-tr-m="growth">${growthHtml(n.total.growth)}<small class="tr-m-sub">🚗 ${growthSmall(n.core.growth)} · 🚚 ${growthSmall(n.comm.growth)}</small></td>`
@@ -2468,10 +2479,10 @@ body.colorful .from-hdr { color: #166534; }
             <th rowspan="2" class="tr-th-date">📅 Date · ID</th>
             <th rowspan="2" class="tr-th-employee">👤 Employee</th>
             <th rowspan="2" class="tr-th-agent">🧑 Agent</th>
-            <th rowspan="2" class="tr-th-contact">📍 Mobile · Address</th>
-            ${isAdmin() ? '<th rowspan="2" class="tr-th-courier">🚚 Courier</th>' : ''}
-            <th colspan="3" class="section has tr-th-stock">📦 STOCK<small class="tr-th-sub">total · class-wise</small></th>
-            <th colspan="5" class="section has tr-th-issuance">📈 ISSUANCE<small class="tr-th-sub">class-wise · monthly run</small></th>
+            <th rowspan="2" class="tr-th-contact">Mobile · Address</th>
+            ${isAdmin() ? '<th rowspan="2" class="tr-th-courier">Courier</th>' : ''}
+            <th colspan="3" class="section has tr-th-stock">STOCK<small class="tr-th-sub">total · class-wise</small></th>
+            <th colspan="5" class="section has tr-th-issuance">ISSUANCE<small class="tr-th-sub">class-wise · monthly run</small></th>
             ${isAdmin() ? '<th rowspan="2" class="tr-th-suggest">🎯 SUGGESTION<small class="tr-th-sub">after stock · without stock deduction</small></th>' : ''}
             <th rowspan="2" class="tr-th-requested">🏷️ REQUESTED<small class="tr-th-sub">class-wise</small></th>
             <th rowspan="2" class="num tr-th-total">TOTAL</th>
@@ -2480,8 +2491,8 @@ body.colorful .from-hdr { color: #166534; }
           </tr>
           <tr>
             <th class="num tr-th-stock-total">Total</th>
-            <th class="num tr-th-stock-core">🚗 VC4/VC20</th>
-            <th class="num tr-th-stock-comm">🚚 VC5+</th>
+            <th class="num tr-th-stock-core">VC4/VC20</th>
+            <th class="num tr-th-stock-comm">VC5+</th>
             <th class="num tr-th-last">Last month<small class="tr-th-sub">${esc(lm)}</small></th>
             <th class="num tr-th-current">Current<small class="tr-th-sub">MTD</small></th>
             <th class="num tr-th-rate">Run rate<small class="tr-th-sub">/ din</small></th>
