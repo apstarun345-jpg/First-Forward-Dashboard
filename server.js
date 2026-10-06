@@ -5502,14 +5502,13 @@ async function handleApi(req, res, url) {
     const w = workspaceStore();
     if (!w.tagRequestSheet || typeof w.tagRequestSheet !== 'object') {
       w.tagRequestSheet = {
-        enabled: false, tab: 'Tag Requests', sheetLink: '', spreadsheetId: '', onSubmit: true, onStatus: true, v: 2,
+        enabled: false, tab: 'Tag Requests', sheetLink: '', spreadsheetId: '', onSubmit: true, onStatus: true, v: 3,
         rowMode: 'agent-class-gap', columns: [...TAG_SHEET_DEFAULT_COLUMNS]
       };
     }
     const cfg = w.tagRequestSheet;
-    // v3.51 migration (ek hi baar): purani config class-wise rows + lamba column set use kar rahi thi,
-    // jisse sheet bahut lambi/chaudi ho jaati thi. Ab default = ek agent = ek row (classes usi row me)
-    // aur compact columns. Admin chahe to 📗 sheet card se dobara badal sakta hai.
+    // v3.60 migration: preferred layout = agent ki saari class rows saath + 1 blank spacer row + next agent.
+    // Existing v2 configs automatically switch to this layout; compact columns remain unchanged.
     if (Number(cfg.v || 1) < 3) {
       // v3.60 — preferred sheet layout: each agent's classes stay together, then one blank spacer row.
       cfg.rowMode = 'agent-class-gap';
@@ -5518,7 +5517,7 @@ async function handleApi(req, res, url) {
     }
     // v3.27 — link me sheet ka ID ho to wahi (alag sheet) target banta hai.
     if (cfg.spreadsheetId === undefined) cfg.spreadsheetId = sheetIdFromLink(cfg.sheetLink) || '';
-    if (cfg.v === undefined) cfg.v = 2;
+    if (cfg.v === undefined) cfg.v = 3;
     return cfg;
   };
   // 📇 Central Agent Address Book — Address tab in the configured request spreadsheet.
