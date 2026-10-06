@@ -93,6 +93,16 @@ test('date-wise bar UI exposes filters and sends per-channel daily totals to the
   assert.equal(chartCalls[0].tipLabels[0], `${U.labelDateKey(priorKey, true)} · ${priorKey}`);
   assert.deepEqual(chartCalls[0].series.map((series) => series.values.slice(0, 2)), [[12, 4], [3, 2]]);
   assert.ok(chartCalls[0].series.every((series) => series.values.length === chartCalls[0].labels.length));
+  assert.ok(chartCalls[0].tips[0].includes('VC4: <b>0</b>'), 'day 1 tooltip shows VC4');
+  assert.ok(chartCalls[0].tips[0].includes('VC20: <b>7</b>'), 'day 1 tooltip shows VC20');
+  assert.ok(chartCalls[0].tips[0].includes('VC5+: <b>8</b>'), 'day 1 tooltip shows VC5+');
+  assert.ok(chartCalls[0].tips[0].includes('Chassis: <b>10</b>'), 'day 1 tooltip shows chassis');
+  assert.ok(chartCalls[0].tips[0].includes('Replacement: <b>12</b>'), 'day 1 tooltip shows replacement');
+  assert.ok(chartCalls[0].tips[1].includes('VC4: <b>4</b>'), 'day 2 tooltip shows VC4');
+  assert.ok(chartCalls[0].tips[1].includes('VC20: <b>2</b>'), 'day 2 tooltip shows VC20');
+  assert.ok(chartCalls[0].tips[1].includes('Chassis: <b>2</b>'), 'day 2 tooltip shows chassis');
+  assert.ok(chartCalls[0].tips[1].includes('Replacement: <b>2</b>'), 'day 2 tooltip shows replacement');
+
 });
 
 test('daily aggregation is date-bounded, date-complete, and channel-filter aware', () => {
@@ -101,6 +111,9 @@ test('daily aggregation is date-bounded, date-complete, and channel-filter aware
   assert.deepEqual(daily.keys, [priorKey, currentKey]);
   assert.deepEqual(daily.byChannel.ff, [12, 4]);
   assert.deepEqual(daily.byChannel.gv, [3, 2]);
+  assert.deepEqual(daily.byClass, { VC4: [0, 4], VC20: [7, 2], 'VC5+': [8, 0] });
+  assert.deepEqual(daily.byType.replacement, [12, 2]);
+  assert.deepEqual(daily.byType.chassis, [10, 2]);
   const gvOnly = explorer.daily(explorer.filterRows(rows, { from: priorKey, to: currentKey, channels: new Set(['gv']) }, ['ff', 'gv']), { from: priorKey, to: currentKey }, ['gv']);
   assert.deepEqual(gvOnly.byChannel.gv, [3, 2]);
   assert.deepEqual(gvOnly.byChannel.ff, [0, 0]);
