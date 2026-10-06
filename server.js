@@ -6178,8 +6178,10 @@ async function handleApi(req, res, url) {
     return /^[A-Za-z0-9_-]{24,120}$/.test(v) ? v.slice(0, 120) : crypto.randomBytes(24).toString('base64url');
   }
   function employeeStatusByToken(token) {
-    const key = String(token || '').trim();
-    return key ? (workspaceStore().tagRequests || []).filter((r) => r && r.source === 'public-link' && r.employeeToken === key) : [];
+    // 🌐 Shared Employee Link: every visitor using the public link can see every
+    // request created through that link. The old device token is kept in records
+    // for backwards compatibility, but it is no longer used as a visibility filter.
+    return (workspaceStore().tagRequests || []).filter((r) => r && r.source === 'public-link');
   }
   function employeeStatusSummary(token) {
     const rows = employeeStatusByToken(token), counts = { all: rows.length, pending: 0, approved: 0, dispatched: 0, rejected: 0 };
@@ -6201,6 +6203,7 @@ async function handleApi(req, res, url) {
         const first = classes[0] || {};
         return {
           id: r.id, at: r.at, status: r.status || 'pending', total: Number(r.total) || 0,
+          employeeName: (r.employee && r.employee.name) || r.byName || '',
           rows: classes.length,
           agentName: (r.agent && r.agent.name) || first.agentName || '',
           agentId: (r.agent && r.agent.agentId) || first.agentId || '',
@@ -6216,10 +6219,11 @@ async function handleApi(req, res, url) {
     };
   }
   if (p === '/api/public/tag-request/employee-status' && method === 'GET') {
+    // 🌐 Shared public Employee Link: token is optional/backwards-compatible only.
+    // Visibility is intentionally ALL public-link requests, regardless of browser/device.
     const token = String(url.searchParams.get('token') || '').trim();
-    if (!/^[A-Za-z0-9_-]{24,120}$/.test(token)) throw new HttpError(400, 'Employee status token missing hai.');
     const ip = clientIp(req); if (!publicRateOk(`tagemp:${ip}`, 60, 10 * 60e3)) throw new HttpError(429, 'Bahut zyada status checks — thodi der baad try karo.');
-    return sendJson(res, 200, { ok:true, ...employeeStatusSummary(token) });
+    return sendJson(res, 200, { ok:true, shared:true, ...employeeStatusSummary(token) });
   }
   // 📇 Agent contact lookup — central Address tab, exact-agent match only.
   if (p === '/api/tag-request/contact' && method === 'GET') {
