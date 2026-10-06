@@ -1391,7 +1391,7 @@ FF.pages = FF.pages || {};
           groups = [merged, ...groups.filter((g) => !sameName.includes(g))];
         }
       }
-      groups.sort((a, b) => Number(!!b.gv) - Number(!!b.ff) || String(a.name).localeCompare(String(b.name)));
+      groups.sort((a, b) => Number(!!b.gv) - Number(!!a.gv) || Number(!!b.ff) - Number(!!a.ff) || String(a.name).localeCompare(String(b.name)));
       if (groups.length) {
         if (open || groups.length === 1) openGroup(groups[0]); else chipsOnly();
         warmFull();
