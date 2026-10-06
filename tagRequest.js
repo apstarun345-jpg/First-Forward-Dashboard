@@ -143,10 +143,10 @@ FF.pages = FF.pages || {};
     try { localStorage.setItem(PUB_EMPLOYEE_KEY, JSON.stringify({ name: state.employee.name, office: state.employee.office })); if (state.employeeToken) localStorage.setItem(EMPLOYEE_TOKEN_KEY, state.employeeToken); } catch { /* ignore */ }
   }
   function loadEmployeeSummary(force) {
-    if (!isPublic() || !state.employeeToken) return Promise.resolve(null);
+    if (!isPublic()) return Promise.resolve(null);
     if (!force && state.employeeSummary) return Promise.resolve(state.employeeSummary);
     if (state.employeeSummaryPromise) return state.employeeSummaryPromise;
-    state.employeeSummaryPromise = publicApi('/api/public/tag-request/employee-status?token=' + encodeURIComponent(state.employeeToken)).then((out) => { state.employeeSummary = out || null; return state.employeeSummary; }).catch(() => null).finally(() => { state.employeeSummaryPromise = null; });
+    state.employeeSummaryPromise = publicApi('/api/public/tag-request/employee-status').then((out) => { state.employeeSummary = out || null; return state.employeeSummary; }).catch(() => null).finally(() => { state.employeeSummaryPromise = null; });
     return state.employeeSummaryPromise;
   }
   /** 📇 Agent ka pichla mobile/address/pincode (isi device par) — wahi agent dobara chuno to auto-fill. */
@@ -1865,7 +1865,7 @@ body.colorful .from-hdr { color: #166534; }
       <div class="tr-st-top"><span class="badge ${v.tone}">${v.label}</span><b class="tr-st-agent">${esc(s.agentName || '—')}</b>${s.agents > 1 ? `<small class="dim"> +${s.agents - 1} agents</small>` : ''}<span class="tr-st-total"><b>${fmt(s.total)}</b> tags</span></div>
       ${steps}
       ${cls ? `<div class="tr-st-classes">${cls}</div>` : ''}
-      <div class="dim small">📅 ${esc(longDate(s.at))} · ${esc(ago(s.at))}${s.byName ? ` · 👤 entry: ${esc(s.byName)}` : ''} · <span class="mono">${esc(s.id)}</span>${s.sheetSynced ? ' · 📗 sheet entry' : ''}</div>
+      <div class="dim small">📅 ${esc(longDate(s.at))} · ${esc(ago(s.at))}${s.employeeName ? ` · 👤 employee: ${esc(s.employeeName)}` : (s.byName ? ` · 👤 entry: ${esc(s.byName)}` : '')} · <span class="mono">${esc(s.id)}</span>${s.sheetSynced ? ' · 📗 sheet entry' : ''}</div>
       ${s.adminNote ? `<div class="notice green" style="margin-top:8px">💬 Admin note: ${esc(s.adminNote)}</div>` : ''}
     </div>`;
   }
@@ -1947,7 +1947,7 @@ body.colorful .from-hdr { color: #166534; }
   /** 📝 Form tab par bhi "👤 Meri requests" — employee link kholte hi wahi page par (Status tab kholna nahi padta).
    *  Collapsed, kyunki form upar hi rehna chahiye; counts summary me dikhte hain. */
   function employeeHistoryPanelHtml() {
-    if (!isPublic() || !state.employeeToken) return '';
+    if (!isPublic()) return '';
     const summary = state.employeeSummary;
     return `<section class="card tr-emp-panel" id="tr-emp-history-panel"><details class="tr-emp-details"${state.employeeHistoryOpen ? ' open' : ''}>
         <summary><span class="tr-emp-sum"><b>👤 Meri requests</b>
@@ -2001,7 +2001,7 @@ body.colorful .from-hdr { color: #166534; }
   }
   /** Form khulte hi ek baar history le aao (token ho tabhi) — Status tab jaane ki zaroorat nahi. */
   function ensureEmployeeSummaryLoaded(repaint) {
-    if (!isPublic() || !state.employeeToken) return;
+    if (!isPublic()) return;
     if (state.employeeSummary || state.employeeSummaryPromise) return;
     loadEmployeeSummary().then(() => { if (rootEl && rootEl.isConnected && state.view === 'form') repaint(); });
   }
