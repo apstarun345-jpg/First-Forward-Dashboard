@@ -2968,8 +2968,9 @@ body.colorful .from-hdr { color: #166534; }
             <input class="input" data-tr-sheet="tab" value="${esc(cfg.tab || 'Tag Requests')}" placeholder="Tag Requests"></label>
           <label class="field"><span class="dim small">Kaunsi rows likhi jaayein</span>
             <select class="input" data-tr-sheet="rowMode">
-              <option value="agent" ${cfg.rowMode === 'agent' ? 'selected' : ''}>🪶 Har agent ki EK row — saari classes usi row me (default, sheet chhoti rehti hai)</option>
-              <option value="class" ${cfg.rowMode === 'class' ? 'selected' : ''}>Har agent × class ki alag row (lambi sheet)</option>
+              <option value="agent-class-gap" ${cfg.rowMode === 'agent-class-gap' ? 'selected' : ''}>🧩 Agent ki har class alag row → 1 blank row → next agent (recommended)</option>
+              <option value="agent" ${cfg.rowMode === 'agent' ? 'selected' : ''}>🪶 Har agent ki EK row — saari classes usi row me (compact)</option>
+              <option value="class" ${cfg.rowMode === 'class' ? 'selected' : ''}>Har agent × class ki alag row (no blank spacer)</option>
               <option value="request" ${cfg.rowMode === 'request' ? 'selected' : ''}>Har request ki ek total row</option>
             </select></label>
           <label class="field"><span class="dim small">Kab entry ho</span>
@@ -2986,7 +2987,7 @@ body.colorful .from-hdr { color: #166534; }
           <button class="btn" data-tr-sheet-act="test">🔌 Sheet check karo</button>
           ${cfg.sheetLink ? `<a class="btn" href="${esc(cfg.sheetLink)}" target="_blank" rel="noopener">↗ Sheet kholo</a>` : ''}
         </div>
-        <p class="dim small" style="margin-top:8px">${targetId ? `🎯 Entries <b>is sheet</b> me jaayengi (ID …${esc(String(targetId).slice(-8))} · tab <b>${esc(cfg.tab || '')}</b>). Us sheet par Apps Script wale Google account ka <b>Editor</b> access hona chahiye — Sheet → Share.` : 'Entries is waqt usi sheet me hoti hain jisme Apps Script bana hai (Settings → Backup). Kahin aur bhejna ho to upar <b>alag sheet ka link</b> paste karo.'} Tab na ho to ban jaata hai; pehli entry par header row apne aap likhi jaati hai. Default me <b>har agent ki ek hi row</b> jaati hai (saari classes usi cell me — “VC4 40 · VC6 10”) taaki sheet bahut lambi na ho; class-wise alag rows chahiye to upar <b>rowMode</b> badal do. Har submit me har agent ki apni entry aati hai aur <b>🚚 courier</b> column me label wala courier naam bhi likha jaata hai. Table ki har row me <b>📗</b> button se manual entry bhi kar sakte ho.</p>
+        <p class="dim small" style="margin-top:8px">${targetId ? `🎯 Entries <b>is sheet</b> me jaayengi (ID …${esc(String(targetId).slice(-8))} · tab <b>${esc(cfg.tab || '')}</b>). Us sheet par Apps Script wale Google account ka <b>Editor</b> access hona chahiye — Sheet → Share.` : 'Entries is waqt usi sheet me hoti hain jisme Apps Script bana hai (Settings → Backup). Kahin aur bhejna ho to upar <b>alag sheet ka link</b> paste karo.'} Tab na ho to ban jaata hai; pehli entry par header row apne aap likhi jaati hai. Default me <b>ek agent ki saari class rows ek saath</b> jaati hain, phir <b>1 blank row</b> aur phir next agent — isse multiple agents clearly separate rehte hain. Har submit me har agent ki apni entry aati hai aur <b>🚚 courier</b> column me label wala courier naam bhi likha jaata hai. Table ki har row me <b>📗</b> button se manual entry bhi kar sakte ho.</p>
       </div></section>`;
   }
   /** Employee link (bina login) ka admin control: ON/OFF, fields, title, link copy. */
@@ -3088,7 +3089,7 @@ body.colorful .from-hdr { color: #166534; }
       const collect = () => ({
         sheetLink: (card.querySelector('[data-tr-sheet="sheetLink"]') || {}).value || '',
         tab: (card.querySelector('[data-tr-sheet="tab"]') || {}).value || 'Tag Requests',
-        rowMode: (card.querySelector('[data-tr-sheet="rowMode"]') || {}).value || 'agent',
+        rowMode: (card.querySelector('[data-tr-sheet="rowMode"]') || {}).value || 'agent-class-gap',
         onSubmit: !!(card.querySelector('[data-tr-sheet="onSubmit"]') || {}).checked,
         onStatus: !!(card.querySelector('[data-tr-sheet="onStatus"]') || {}).checked,
         columns: [...card.querySelectorAll('[data-tr-col]:checked')].map((x) => x.dataset.trCol)
