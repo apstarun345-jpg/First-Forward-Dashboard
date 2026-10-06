@@ -2986,8 +2986,65 @@ function maybeInactiveUsers() {
     });
   } catch (err) { console.warn('inactive users:', err.message); return null; }
 }
+// 🧠 Smart Action Center: one consolidated, low-noise actionable alert.
+async function maybeSmartActionCenter(force = false) {
+  try {
+    const F = feats();
+    if (!force && F.smartNotifications === false) return null;
+    const w = db.notify.watch || (db.notify.watch = {});
+    const now = Date.now(), ist = istNow();
+    const pad = (n) => String(n).padStart(2, '0');
+    const day = String(ist.getUTCFullYear()) + '-' + pad(ist.getUTCMonth() + 1) + '-' + pad(ist.getUTCDate());
+    const ym = day.slice(0, 7), dom = Number(day.slice(8, 10));
+    const daily = w.daily && typeof w.daily === 'object' ? w.daily : {};
+    const today = daily[day] || {};
+    const issues = [];
+    if (ist.getUTCHours() >= (Number(F.smartZeroAfterHour) || 12) && !(Number(today.ff) || 0) && !(Number(today.gv) || 0)) {
+      let sum = 0, n = 0;
+      for (let i = 1; i <= 7; i++) {
+        const d = new Date(day + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() - i);
+        const k = String(d.getUTCFullYear()) + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate());
+        if (daily[k]) { sum += (Number(daily[k].ff) || 0) + (Number(daily[k].gv) || 0); n++; }
+      }
+      const avg = n ? sum / n : 0;
+      if (avg >= (Number(F.smartMinPrevAvg) || 5)) issues.push({ key: 'zero-issuance', severity: 'critical', link: '#/tagIssued', text: 'Aaj abhi tak 0 issuance; recent avg ≈ ' + Math.round(avg) + '/din.' });
+    }
+    const targets = Array.isArray(db.settings.targets) ? db.settings.targets : [];
+    const target = targets.filter((t) => t && t.ym === ym && Number(t.target) > 0).reduce((s, t) => s + Number(t.target), 0);
+    if (dom >= 3 && target > 0) {
+      let mtd = Number(today.gv) || 0;
+      for (const [d, v] of Object.entries(daily)) if (d.startsWith(ym) && d < day && v) mtd += (Number(v.ff) || 0) + (Number(v.gv) || 0);
+      const daysInMonth = new Date(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)), 0).getDate();
+      const expected = Math.round(target * (Math.max(1, dom - 1) / daysInMonth));
+      const gap = Number(F.smartTargetGapPct) || 25;
+      if (expected > 0 && mtd < expected * (1 - gap / 100)) issues.push({ key: 'target-pace', severity: 'action', link: '#/targets', text: 'MTD target pace ' + Math.round((mtd / expected) * 100) + '%; actual ' + mtd.toLocaleString('en-IN') + ' vs expected ' + expected.toLocaleString('en-IN') + '.' });
+    }
+    const cover = w.cover && Number(w.cover.cover);
+    const red = Number((db.settings.thresholds || {}).coverRed) || 7;
+    const orange = Number((db.settings.thresholds || {}).coverOrange) || 15;
+    if (cover > 0 && cover < orange) issues.push({ key: 'vc4-cover', severity: cover < red ? 'critical' : 'action', link: '#/stock', text: 'VC4 stock cover ≈ ' + Math.round(cover) + ' din (' + (cover < red ? 'red' : 'orange') + ' zone).' });
+    const pending = workspaceStore().tagRequests.filter((r) => String(r && r.status || 'pending').toLowerCase() === 'pending').length;
+    if (pending >= 3) issues.push({ key: 'pending-requests', severity: 'action', link: '#/tagRequest?view=requests', text: pending + ' Tag Requests pending hain.' });
+    if (!issues.length) {
+      if (w.smartAlertActive) { w.smartAlertActive = false; w.smartAlertKeys = []; w.smartAlertPriority = ''; persist('notify').catch(() => {}); }
+      return null;
+    }
+    const priority = issues.some((x) => x.severity === 'critical') ? 'critical' : 'action';
+    const keys = issues.map((x) => x.key);
+    const old = Array.isArray(w.smartAlertKeys) ? w.smartAlertKeys : [];
+    const newIssue = keys.some((k) => !old.includes(k));
+    const raised = priority === 'critical' && w.smartAlertPriority !== 'critical';
+    const cooldown = Math.max(1, Number(F.smartCooldownHours) || 6) * 60 * 60e3;
+    if (!force && w.smartAlertActive && !newIssue && !raised && w.smartAlertSentAt && now - Number(w.smartAlertSentAt) < cooldown) return null;
+    const item = recordNotification({ type: 'alert', title: '🧠 Smart Action Center · ' + issues.length + ' action' + (issues.length === 1 ? '' : 's'), body: issues.map((x) => x.text).slice(0, 4).join(' · '), target: 'admin', routeKey: 'smartAlert', meta: { smart: true, link: '#/home', date: day, priority, issues } });
+    if (!item) return null;
+    w.smartAlertActive = true; w.smartAlertKeys = keys; w.smartAlertPriority = priority; w.smartAlertSentAt = now;
+    persist('notify').catch(() => {});
+    return item;
+  } catch (err) { console.warn('smart action center:', err.message); return null; }
+}
 /** Ek jagah se saare scheduled checks — boot + har 30 min. */
-function runScheduledChecks() {
+async function runScheduledChecks() {
   const F = feats();
   return Promise.allSettled([
     maybeDailyDigest(false),
@@ -3005,6 +3062,8 @@ function runScheduledChecks() {
     sendDispatchPlanEmail(false),
     refreshStockState(false)
   ]);
+  results.push(await maybeSmartActionCenter());
+  return results;
 }
 // ---- ⚠️ zero-day / sharp-drop alert (raat 9 IST ke baad, din me ek baar) ------------------------
 async function maybeZeroDayAlert() {
