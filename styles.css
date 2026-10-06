@@ -1627,8 +1627,15 @@ html[data-theme="dark"] .ff-switch { background: #33415c; }
 
 
 /* Fast, non-blocking ApnaPayment launch. Never hold the dashboard behind a timed splash. */
+.app-boot { position: fixed; inset: 0; z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: radial-gradient(circle at 50% 42%, #172554 0, #0b1020 38%, #05070d 100%); color: #fff; text-align: center; padding: 24px; overflow: hidden; isolation: isolate; }
+.app-boot::before { content: ''; position: absolute; inset: 0; background: radial-gradient(circle at 50% 45%, rgba(59,130,246,.16), transparent 34%), radial-gradient(circle at 25% 25%, rgba(236,72,153,.12), transparent 24%), radial-gradient(circle at 78% 70%, rgba(34,211,238,.10), transparent 26%); animation: boot-glow 2.8s ease-in-out infinite alternate; pointer-events: none; }
+.boot-fireworks { position: absolute; inset: 0; pointer-events: none; z-index: -1; }
+.boot-fireworks .fw { position: absolute; left: 50%; top: 43%; width: 7px; height: 7px; border-radius: 50%; opacity: 0; box-shadow: 0 -92px 0 #60a5fa, 0 92px 0 #f472b6, 92px 0 0 #facc15, -92px 0 0 #34d399, 65px 65px 0 #fb7185, -65px 65px 0 #a78bfa, 65px -65px 0 #22d3ee, -65px -65px 0 #fde047; animation: boot-burst 2.4s ease-out infinite; }
+.boot-fireworks .fw-b { left: 24%; top: 31%; animation-delay: .65s; transform: scale(.72); }
+.boot-fireworks .fw-c { left: 76%; top: 30%; animation-delay: 1.25s; transform: scale(.62); }
+.boot-welcome { font-size: 11px; letter-spacing: .32em; font-weight: 900; color: #fde047; text-shadow: 0 0 18px rgba(250,204,21,.65); animation: boot-title 1.8s ease-in-out infinite; z-index: 2; }
 .app-boot { position: fixed; inset: 0; z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: #111214; color: #fff; text-align: center; padding: 24px; }
-.app-boot img { width: min(280px, 80vw); height: auto; border-radius: 14px; }
+.app-boot img { width: min(280px, 80vw); height: auto; border-radius: 14px; filter: drop-shadow(0 14px 35px rgba(59,130,246,.28)); animation: boot-logo 2.2s ease-in-out infinite; z-index: 2; }
 .app-boot p { font-size: 20px; margin: 0; font-weight: 600; }
 .app-boot small { color: #b7b9c1; }
 .boot-progress { width: 160px; height: 3px; overflow: hidden; border-radius: 9px; background: #343438; margin-top: 12px; }
@@ -1644,6 +1651,10 @@ html[data-theme="dark"] .ff-switch { background: #33415c; }
 @keyframes greeting-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes greeting-wave { 25% { transform: rotate(18deg); } 75% { transform: rotate(-12deg); } }
 @keyframes boot-slide { to { transform: translateX(125%); } }
+@keyframes boot-burst { 0% { opacity: 0; transform: scale(.08); } 12% { opacity: 1; transform: scale(.25); } 58% { opacity: .85; transform: scale(1); } 100% { opacity: 0; transform: scale(1.18); } }
+@keyframes boot-glow { from { transform: scale(1); opacity: .7; } to { transform: scale(1.08); opacity: 1; } }
+@keyframes boot-logo { 0%,100% { transform: scale(1); } 50% { transform: scale(1.035); } }
+@keyframes boot-title { 0%,100% { opacity: .72; letter-spacing: .28em; } 50% { opacity: 1; letter-spacing: .36em; } }
 @media (max-width: 600px) { .welcome-greeting { top: calc(80px + env(safe-area-inset-top)); bottom: auto; left: 14px; right: 14px; padding: 16px; gap: 12px; } .welcome-greeting h2 { font-size: 17px; } }
 @media (prefers-reduced-motion: reduce) { .app-boot img, .welcome-greeting, .greeting-wave, .home-hero.v2 { animation: none !important; } html .boot-progress::after { animation-duration: 1.2s !important; animation-iteration-count: infinite !important; } } /* v3.31: boot progress = loader, chalta rahe */
 
