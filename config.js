@@ -73,7 +73,10 @@ FF.config = {
     tlGoals: true, otp2fa: true, emailReport: false, emailReportHour: 21,
     weeklyEmail: false, weeklyEmailHour: 9, anomalyPct: 80,
     badges: true, voiceSummary: true, askBox: true, teamMap: true, tlAnomaly: true, personalLinks: true,
-    customAlerts: true, championEmail: false, championHour: 10, championTop: 3,
+    customAlerts: true,
+    smartNotifications: true, smartTargetGapPct: 25, smartZeroAfterHour: 12,
+    smartMinPrevAvg: 5, smartCooldownHours: 6,
+    championEmail: false, championHour: 10, championTop: 3,
     followupTracker: true, followupDays: 3, followupHour: 10,
     dispatchPlan: true, suggestDays: 15, suggestMode: 'both',
     // v3.11 — naye feature flags (Settings → Features se on/off ho sakte hain)
