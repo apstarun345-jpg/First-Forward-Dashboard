@@ -5496,19 +5496,39 @@ async function handleApi(req, res, url) {
     const id = String(agentId || '').trim();
     const name = tagNameKey(agentName || '');
     if (!id && !name) return null;
+
+    // 🔁 Last public-link request: address suggestion ke saath last request date bhi dikhani hai.
+    const requestList = Array.isArray(workspaceStore().tagRequests) ? workspaceStore().tagRequests : [];
+    const lastRequestAt = (() => {
+      let latest = 0;
+      requestList.forEach((r) => {
+        if (!r || r.source !== 'public-link' || !r.agent) return;
+        const rch = String(r.agent.channel || 'ff').toLowerCase() === 'gv' ? 'gv' : 'ff';
+        if (rch !== ch) return;
+        const rid = String(r.agent.agentId || '').trim();
+        const rname = tagNameKey(r.agent.name || '');
+        const sameId = id && rid && rid === id;
+        const sameName = name && rname && rname === name;
+        if (sameId || sameName) {
+          const at = Date.parse(r.at || '');
+          if (Number.isFinite(at) && at > latest) latest = at;
+        }
+      });
+      return latest ? new Date(latest).toISOString() : '';
+    })();
+
     const memory = addressBookMemoryEntries();
     const keys = [];
-    if (id) keys.push(`${ch}|id:${id}`);
-    if (name) keys.push(`${ch}|n:${name}`);
+    if (id) keys.push(ch + '|id:' + id);
+    if (name) keys.push(ch + '|n:' + name);
     const asContact = (e) => e && (e.address || e.pincode || e.mobile)
-      ? { mobile: e.mobile || '', address: e.address || '', pincode: e.pincode || '', tl: e.tl || '', source: 'Address' }
+      ? { mobile: e.mobile || '', address: e.address || '', pincode: e.pincode || '', tl: e.tl || '', source: 'Address', lastRequestAt: lastRequestAt || e.lastRequestAt || '' }
       : null;
+
     // A recent submission is already in durable workspace memory; don't wait for a sheet read.
     for (const key of keys) { const contact = asContact(memory[key]); if (contact) return contact; }
     const map = await addressBookMap();
     for (const key of keys) {
-      // Runtime sheet reads may have started just before a submission. Prefer the freshly saved
-      // workspace copy so the just-entered address is suggested immediately, not after cache expiry.
       const contact = asContact(memory[key] || map.get(key));
       if (contact) return contact;
     }
