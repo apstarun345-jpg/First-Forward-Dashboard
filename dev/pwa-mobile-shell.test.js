@@ -89,3 +89,12 @@ test('fixed bottom nav stays hidden before login and above-app sheets layer abov
   assert.match(app, /document\.body\.classList\.add\('has-mobile-nav'\)/);
   assert.match(app, /document\.body\.classList\.remove\('has-mobile-nav'\)/);
 });
+
+test('mobile PWA typography and touch controls remain readable', () => {
+  const readableRules = css.slice(css.lastIndexOf('v3.60'));
+  assert.match(readableRules, /html\.mobile-ui body\s*\{[^}]*font-size:\s*17px !important/s);
+  assert.match(readableRules, /html\.mobile-ui \.kpi-title,[\s\S]*?font-size:\s*14px !important/);
+  assert.match(readableRules, /html\.mobile-ui \.kpi-foot\s*\{\s*font-size:\s*14px !important/);
+  assert.match(readableRules, /html\.mobile-ui \.mobile-nav-item small\s*\{\s*font-size:\s*12px !important/);
+  assert.match(readableRules, /min-height:\s*48px !important/);
+});
