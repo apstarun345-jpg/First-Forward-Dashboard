@@ -940,6 +940,7 @@ body.colorful .from-hdr { color: #166534; }
     if (body && body.classList) body.classList.toggle('tr-no-check', isPublic() && !!state.publicCfg && state.publicCfg.showCheck === false);
     if (isPublic()) {
       if (state.view === 'done' && state.done) return renderDone();
+      if (state.view === 'requests') return renderEmployeeRequests();
       if (state.view === 'status') return renderStatus();
       return renderForm();
     }
@@ -2002,7 +2003,34 @@ body.colorful .from-hdr { color: #166534; }
   function ensureEmployeeSummaryLoaded(repaint) {
     if (!isPublic() || !state.employeeToken) return;
     if (state.employeeSummary || state.employeeSummaryPromise) return;
-    loadEmployeeSummary().then(() => { if (rootEl && rootEl.isConnected && state.view === 'form') repaint(); });
+    loadEmployeeSummary().then(() => { if (root  function renderEmployeeRequests() {
+    const body = bodyEl();
+    if (!body) return;
+    if (!state.employeeToken) {
+      body.innerHTML = '<section class="card tr-public-requests-card"><div class="card-body"><h3>👤 My Requests</h3><p class="dim">Pehle ek request submit karo; uske baad aapki private request history yahan dikhegi.</p></div></section>';
+      return;
+    }
+    if (!state.employeeSummary) {
+      body.innerHTML = '<section class="card tr-public-requests-card"><div class="card-body"><div class="tr-es-head"><div><b>👤 My Requests</b><small class="dim">Aapki saari tag requests aur unka latest status.</small></div><button class="btn small" data-tr-emp-refresh>↻ Refresh</button></div><div class="dim small">Request history load ho rahi hai…</div></div></section>';
+      bindEmployeeHistory(body, renderEmployeeRequests);
+      loadEmployeeSummary().then(() => { if (rootEl && rootEl.isConnected && state.view === 'requests') renderEmployeeRequests(); });
+      return;
+    }
+    const summary = state.employeeSummary;
+    const history = employeeStatusHistoryHtml(summary, state.employeeHistoryFilter, state.employeeHistoryPage);
+    state.employeeHistoryFilter = history.filter;
+    state.employeeHistoryPage = history.page;
+    const empty = history.total ? 'Is status me koi request nahi mili.' : 'Abhi tak koi request nahi mili.';
+    body.innerHTML = `<section class="card tr-public-requests-card"><div class="card-head"><h3>👤 My Requests</h3><div class="card-right dim">Total requests <b>${fmt(summary.totalRequests || 0)}</b> · Requested tags <b>${fmt(summary.requestedTags || 0)}</b> · Approved tags <b>${fmt(summary.approvedTags || 0)}</b></div></div><div class="card-body">
+      ${employeeStatusFiltersHtml(summary, history.filter)}
+      <div class="tr-emp-history-head"><span>📋 Request history · nayi request sabse upar</span><b>${fmt(history.start)}–${fmt(history.end)} / ${fmt(history.total)}</b></div>
+      ${history.requests.length ? '<div class="tr-st-list">'+history.requests.map(statusCardHtml).join('')+'</div>' : '<div class="tr-status-out">'+empty+'</div>'}
+      <nav class="tr-emp-pagination" aria-label="Request pages"><button type="button" class="btn small" data-tr-emp-page="prev" ${history.page<=1?'disabled':''}>← Previous</button><span>Page ${fmt(history.page)} of ${fmt(history.pageCount || 1)}</span><button type="button" class="btn small" data-tr-emp-page="next" ${history.page>=history.pageCount?'disabled':''}>Next →</button></nav>
+    </div></section>`;
+    bindEmployeeHistory(body, renderEmployeeRequests);
+  }
+
+El && rootEl.isConnected && state.view === 'form') repaint(); });
   }
   function renderStatus() {
     const body = bodyEl();
