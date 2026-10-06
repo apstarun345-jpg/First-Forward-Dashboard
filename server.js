@@ -5428,7 +5428,7 @@ async function handleApi(req, res, url) {
     const pincode = tagDigits(a.pincode || a.pin).slice(0, 6);
     const tl = shortText(a.tl || a.tlName, 120);
     if ((!agentId && name.length < 2) || (!address && !pincode && tagDigits(mobile).length < 10)) return null;
-    return { key: addressBookKey({ channel, agentId, agentName: name }), agentId, agent: name, channel, mobile, address, pincode, tl, updatedAt: new Date().toISOString() };
+    return { key: addressBookKey({ channel, agentId, agentName: name }), agentId, agent: name, channel, mobile, address, pincode, tl, dispatchName: shortText(a.dispatchName || '', 120), updatedAt: new Date().toISOString() };
   };
   function addressBookMemoryEntries() {
     const w = workspaceStore();
