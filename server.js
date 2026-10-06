@@ -4186,11 +4186,9 @@ async function recoveryHint() {
     await tagReqRecoveryHint();
     if (!snapshots.length) return recoveryHintInfo;
     const stale = db.users.length <= 1;
-    recordNotification({
-      type: 'settings', title: stale ? '⏪ Purana data wapas lane ka option hai' : '⏪ Sheet me purani saves maujood hain',
-      body: `Google Sheet ke APP_STORAGE_HISTORY tab me ${snapshots.length} purani encrypted save(s) hain${stale ? ' — abhi sirf ' + db.users.length + ' user load hua hai' : ''}. Settings → ☁️ Storage & backup → ⏪ Purana data wapas lao me jaakar koi bhi purani save wapas la sakte ho. Tab tak kuch bhi change nahi hota.`,
-      target: 'admin', meta: { source: 'recovery-hint', snapshots: snapshots.length }
-    });
+    // ℹ️ History backups normal hain — sirf history maujood hone par notification mat bhejo.
+    // Notification tabhi aayegi jab actual recovery problem / missing data detect ho.
+    // Old `recovery-hint` notifications are hidden client-side as well, so the bell stays clean.
     return recoveryHintInfo;
   } catch (err) {
     // Sabse aam wajah: Apps Script me PURANA Code.gs deployed hai (usme 'history' action hi nahi).
