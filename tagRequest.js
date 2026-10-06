@@ -956,7 +956,7 @@ body.colorful .from-hdr { color: #166534; }
     const v = state.view === 'done' ? 'form' : state.view;
     const tab = (id, label) => `<button class="seg-btn ${v === id ? 'on' : ''}" data-tr-view="${id}">${label}</button>`;
     // 🌐 Employee link: sirf Form + Status (Result tab hata diya — system check submit ke saath hota hai)
-    if (isPublic()) return `<div class="seg" id="tr-tabs">${tab('form', '📝 Form')}${tab('status', '🔎 Status')}</div>`;
+    if (isPublic()) return `<div class="seg" id="tr-tabs">${tab('form', '📝 Form')}${state.employeeToken ? tab('requests', '👤 My Requests') : ''}${tab('status', '🔎 Status')}</div>`;
     return `<div class="seg" id="tr-tabs">${tab('form', '📝 Form')}${tab('requests', isAdmin() ? '📥 Tag Requests' : '📥 Meri requests')}${isAdmin() ? tab('settings', '⚙️ Link & Sheet') : ''}</div>`;
   };
   function headHtml() {
@@ -2935,7 +2935,7 @@ body.colorful .from-hdr { color: #166534; }
     loadEmployee();
     loadCourier();
     if (!state.publicMode && !clean(state.employee.name)) state.employee.name = (FF.auth && FF.auth.user && (FF.auth.user.name || FF.auth.user.username)) || '';
-    const views = state.publicMode ? ['form', 'status', 'done'] : ['form', 'requests', 'settings'];
+    const views = state.publicMode ? ['form', 'requests', 'status', 'done'] : ['form', 'requests', 'settings'];
     if (params && params.view) {
       const v = params.view === 'result' ? 'form' : String(params.view); // purana "Result" tab ab form me hi
       if (views.includes(v)) state.view = v;
