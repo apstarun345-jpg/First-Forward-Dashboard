@@ -504,9 +504,19 @@ window.FF = window.FF || {};
     if (!state.pushOn) return `<div class="notify-line">📲 Push subscription ban rahi hai… app band ho tab bhi alerts milenge.</div>`;
     return '';
   }
-  function render() {
+  function render(force) {
     const pop = U.$('#notification-pop');
     if (!pop) return;
+    // ⚡ v3.61 — Bell BAND ho aur kuch badla na ho to poora notification DOM dobara mat banao.
+    // Pehle har poll (5s) par 60 rows + presence panel + switches innerHTML se rebuild hote the —
+    // chahe popup hidden ho aur koi nayi notification na aayi ho. Phone par ye lagatar background
+    // main-thread kaam tha (scroll/typing me leg). Ab: khula popup hamesha fresh, band popup sirf
+    // tab rebuild hota hai jab content sach me badla ho (badge alag se setCount() se update hota hai).
+    const lastItem = state.items[state.items.length - 1];
+    const sig = [state.items.length, lastItem && lastItem.id, state.unread, state.serverUnread, state.filterType,
+      state.filterUnread, state.expanded, state.people.length, JSON.stringify(state.prefs || {})].join('|');
+    if (force !== true && pop.hidden && sig === state.renderSig) return;
+    state.renderSig = sig;
     const on = state.prefs.enabled !== false;
     const monthly = state.prefs.monthly !== false;
     const isAdmin = FF.auth.user && FF.auth.user.role === 'admin';
@@ -653,6 +663,10 @@ window.FF = window.FF || {};
   // ---- polling -----------------------------------------------------------------------------------
   async function poll(initial) {
     if (!FF.auth || !FF.auth.user) return;
+    // Slow server par agla interval pehle request complete hone se pehle aa jaata tha → requests
+    // stack hoti thi (browser ki 6-connection limit bhi bhar jaati thi). Ek request ek baar.
+    if (state.pollBusy) return;
+    state.pollBusy = true;
     try {
       const qs = state.lastAt && !initial ? `?since=${encodeURIComponent(state.lastAt)}` : '';
       const out = await FF.auth.api(`/api/notifications${qs}`);
@@ -674,7 +688,7 @@ window.FF = window.FF || {};
       render();
     } catch (err) {
       if (err && err.status === 401) stop();
-    } finally { state.firstPoll = false; }
+    } finally { state.firstPoll = false; state.pollBusy = false; }
   }
 
   // ---- push subscribe ----------------------------------------------------------------------------
@@ -934,7 +948,7 @@ window.FF = window.FF || {};
     if (next) {
       // Opening the bell must not erase unread state.  Users can filter NEW items and explicitly
       // choose “Mark all read”, which keeps the badge trustworthy across devices.
-      render();
+      render(true);   // band popup par render skip hota hai → khulte hi fresh DOM
     }
   }
   function bind() {
@@ -1166,21 +1180,33 @@ window.FF = window.FF || {};
     loadPrefs().then(() => { setupPush(true); render(); });
     poll(true);
     sendPresence();
-    // ⚡ Near-instant: first fast poll in 800ms, then every 5s visible / 15s hidden.
+    // ⚡ v3.60 cadence: pehla fast poll 800ms, phir 15s visible / 60s hidden (pehle 5s/15s tha).
+    // Bell ka kaam "naya alert turant dikhe" hai — 15s me bhi wahi hota hai, aur phone par requests
+    // 1/3 reh jaati hain (server + battery + 6-connection limit sab par asar). Push (OS panel) waise
+    // bhi instant hai, wo is poll par depend nahi karta.
     setTimeout(() => poll(false), 800);
-    state.timer = setInterval(() => poll(false), document.visibilityState === 'visible' ? 5e3 : 15e3);
+    const pollMs = () => (document.visibilityState === 'visible' ? 15e3 : 60e3);
+    state.timer = setInterval(() => poll(false), pollMs());
     document.addEventListener('visibilitychange', () => {
-      if (state.timer) { clearInterval(state.timer); state.timer = setInterval(() => poll(false), document.visibilityState === 'visible' ? 5e3 : 15e3); }
+      if (state.timer) { clearInterval(state.timer); state.timer = setInterval(() => poll(false), pollMs()); }
       if (document.visibilityState === 'visible') { poll(false); retryPush(); }
     });
     bindPushWatchers();
-    state.presenceTimer = setInterval(() => sendPresence(), 15e3);
-    state.fastTimer = setInterval(() => {
+    state.presenceTimer = setInterval(() => sendPresence(), 45e3);
+    // 👁 Admin live-view pointer/scroll share — sirf tab chalao jab share ON ho (warna 400ms ka
+    //    timer din bhar CPU ko jagata rehta tha, chahe koi admin dekh hi na raha ho).
+    const fastTick = () => {
       if (!sharing() || document.visibilityState !== 'visible') return;
       const sc = Math.round(window.scrollY);
       if (sc !== state.lastScroll) { state.lastScroll = sc; state.dirty = true; }
       if (state.dirty && Date.now() - state.lastSent > 800) sendPresence();
-    }, 400);
+    };
+    state.fastTimer = setInterval(fastTick, 400);
+    state.shareWatchTimer = setInterval(() => {
+      const want = sharing() && !EMBED && !!(FF.auth && FF.auth.user && FF.auth.user.role !== 'admin');
+      if (want && !state.fastTimer) state.fastTimer = setInterval(fastTick, 400);
+      else if (!want && state.fastTimer) { clearInterval(state.fastTimer); state.fastTimer = null; }
+    }, 10e3);
     if (!state.pointerBound) {
       state.pointerBound = true;
       document.addEventListener('pointermove', (e) => {
@@ -1201,7 +1227,7 @@ window.FF = window.FF || {};
       ['keydown', 'wheel', 'touchstart'].forEach((type) => document.addEventListener(type, () => { state.lastInteraction = Date.now(); }, { passive: true }));
     }
   }
-  function stop() { clearInterval(state.timer); clearInterval(state.presenceTimer); clearInterval(state.fastTimer); state.timer = null; state.presenceTimer = null; state.fastTimer = null; state.started = false; }
+  function stop() { clearInterval(state.timer); clearInterval(state.presenceTimer); clearInterval(state.fastTimer); clearInterval(state.shareWatchTimer); state.timer = null; state.presenceTimer = null; state.fastTimer = null; state.shareWatchTimer = null; state.started = false; }
   function activity(page) {
     if (!FF.auth || !FF.auth.user) return;
     state.page = String(page || 'dashboard');

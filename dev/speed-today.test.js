@@ -109,6 +109,29 @@ test('lazy.js: har FF.pages module ya eager core me hai ya lazy group me', async
   }
 });
 
+test('index.html: sirf critical shell eager hai — bell/search/assistant first paint ke baad aate hain', async () => {
+  const idx = await read('index.html');
+  const app = await read('app.js');
+  const lazy = await read('lazy.js');
+  // Ye 11 modules pehle eager the (~550 KB JS first paint se PEHLE parse hota tha → phone par Home
+  // 1-3s late + scroll leg). Ab ye first paint ke baad waves me aate hain, aur click par on-demand.
+  const SHELL_EXTRAS = ['notifications', 'kpiDetail', 'stockAge', 'masterSearch', 'palette', 'assistant',
+    'officeBell', 'pushVoice', 'liveAssist', 'morningCard', 'liveView'];
+  for (const mod of SHELL_EXTRAS) {
+    assert.ok(!new RegExp(`src="${mod}\\.js`).test(idx), `${mod}.js index.html me eager nahi hona chahiye`);
+    assert.ok(lazy.includes(`'${mod}'`), `${mod} lazy.js SHELL_WAVES me hai`);
+  }
+  for (const mod of ['config', 'util', 'i18n', 'data', 'charts', 'model', 'filters', 'store', 'gv', 'preload', 'auth', 'sheets', 'home', 'lazy', 'app']) {
+    assert.ok(new RegExp(`src="${mod}\\.js\\?v=`).test(idx), `${mod}.js eager core me zaroori hai`);
+  }
+  assert.match(app, /function startShellExtras\(/, 'app.js shell extras first paint ke baad start karta hai');
+  assert.match(app, /FF\.lazy\.shell\(\{ afterWave: hooks \}\)/, 'waves ke baad hooks (bell start, search mount) chalte hain');
+  assert.match(app, /const ensureShell = /, 'click par on-demand shell module load hota hai');
+  assert.match(app, /if \(FF\.notifications\) return;[\s\S]{0,120}openNotifications\(\);/, 'bell click kabhi dead nahi hota (module load karke kholta hai)');
+  assert.match(app, /shellNeed\(\['kpiDetail', 'stockAge'\]\)/, 'KPI drill click par module load hota hai');
+  assert.match(lazy, /const SHELL_WAVES = \[/, 'wave order lazy.js me defined hai');
+});
+
 test('app.js: page render se pehle us page ka module ensure hota hai + login ke baad warm', async () => {
   const src = await read('app.js');
   assert.match(src, /await FF\.lazy\.ensure\(page\)/, 'renderCurrent lazy ensure karta hai');
@@ -117,9 +140,24 @@ test('app.js: page render se pehle us page ka module ensure hota hai + login ke 
   const lazy = await read('lazy.js');
   assert.match(lazy, /requestIdleCallback/, 'warm idle me chalta hai');
   assert.match(lazy, /el\.async = true/, 'lazy scripts async/defer');
+  // 📱 v3.61 — warm ab device-aware hai: phone par ~2 MB JS background me parse karwana hi sabse bada
+  // leg ka karan tha. Touch device par sirf 3 roz kaam aane wale modules (25s baad), data-saver par 0.
+  assert.match(lazy, /const WARM_TOUCH = \['performance', 'tagIssued', 'stock'\]/, 'phone ke liye chhoti warm list');
+  assert.match(lazy, /if \(dev\.saveData\) return;/, 'data-saver / 2G par warm band');
+  assert.match(lazy, /const startDelay = dev\.coarse \? 25000 : 6000;/, 'phone par warm bahut baad me (pehle scroll smooth)');
+  assert.match(lazy, /document\.visibilityState === 'hidden'/, 'background tab me warm rukta hai');
   const sw = await read('sw.js');
-  for (const mod of ['lazy.js', 'home.js', 'app.js', 'performance.js']) assert.ok(sw.includes(`./${mod}?v=`), `sw precache me ${mod}`);
+  // 🧬 v3.61 — SW ki precache list index.html se derive hoti hai. Pehle yahan 44 hard-coded ?v= pins the
+  // jo index.html/lazy.js se match nahi karte the (./performance.js?v=105 jabki app ?v=109 maangta tha):
+  // install par ~2.5 MB extra download hota tha aur wo cache kabhi use nahi hota tha.
+  assert.match(sw, /async function shellAssets\(/, 'SW shell assets index.html se padhta hai');
+  assert.match(sw, /fetch\('\.\/index\.html'/, 'install par real (stamped) shell HTML se list banti hai');
+  assert.match(sw, /Promise\.allSettled/, 'ek asset fail ho to poora SW install fail na ho');
+  assert.match(sw, /const isVersioned = \/\[\?&\]v=\//, 'versioned assets cache-first (immutable) serve hote hain');
+  assert.ok(!/\.\/performance\.js\?v=/.test(sw), 'lazy page module hard-coded precache me nahi');
   assert.ok(!/\.\/insights\.js\?v=/.test(sw), 'insights.js lazy hai — precache me nahi (pehla load halka)');
+  const idx = await read('index.html');
+  for (const mod of ['lazy.js', 'home.js', 'app.js']) assert.ok(idx.includes(mod), `eager shell me ${mod} hai`);
 });
 
 // ------------------------------------------------------------------------------------------------
@@ -146,6 +184,26 @@ test('server: /api/today (GV Master + EIR), /api/perf diagnostics, ETag/304', as
   const data = await read('data.js');
   assert.match(data, /todayPath: '\/api\/today'|todayPath/, 'config me today path');
   assert.match(data, /function today\(/, 'FF.data.today() client API');
+});
+
+test('⏱️ polling budget: phone/server par background requests ka cadence sane hai', async () => {
+  const notif = await read('notifications.js');
+  const assist = await read('liveAssist.js');
+  const voice = await read('pushVoice.js');
+  const app = await read('app.js');
+  const home = await read('home.js');
+  // Bell poll pehle 5s tha (+ presence 15s + live-assist 3s + push-voice 20s + install-btn 3s):
+  // ~41 requests/min per open tab. Render + Apps Script par ye sab ko slow karta tha ("leg").
+  assert.match(notif, /pollMs = \(\) => \(document\.visibilityState === 'visible' \? 15e3 : 60e3\)/, 'bell poll 15s visible / 60s hidden');
+  assert.match(notif, /setInterval\(\(\) => sendPresence\(\), 45e3\)/, 'presence 45s (pehle 15s)');
+  assert.match(notif, /if \(state\.pollBusy\) return;/, 'slow server par requests stack nahi hoti');
+  assert.match(notif, /state\.shareWatchTimer/, 'pointer-share timer sirf admin live-view ON par chalta hai');
+  assert.match(notif, /if \(force !== true && pop\.hidden && sig === state\.renderSig\) return;/, 'band bell par bekaar DOM rebuild nahi');
+  assert.match(assist, /\}, 20000\);/, 'live-assist inbox poll 20s (pehle 3s)');
+  assert.match(voice, /const POLL_MS = 60e3;/, 'push voice catch-up poll 60s (pehle 20s)');
+  assert.match(app, /setInterval\(updateInstallBtn, 60000\)/, 'install button check 60s (pehle har 3s)');
+  assert.match(home, /if \(document\.hidden\) return;/, 'home sync pill background tab me update nahi karta');
+  assert.ok(!/new MutationObserver/.test(home), 'poore <body> par subtree MutationObserver hata diya (har mutation par DOM walk = scroll leg)');
 });
 
 test('Lite mode keeps Home KPI text readable after removing gradient backgrounds', async () => {

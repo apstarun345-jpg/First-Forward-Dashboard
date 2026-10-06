@@ -296,12 +296,19 @@ test('🚀 lazy group + current cache busting: unusual-scan pehle load hota hai'
   const list = m[1].split(',').map((x) => x.trim().replace(/['"]/g, ''));
   assert.deepEqual(list, ['pdf', 'unusual-scan', 'unusual'], 'PDF helper aa sakta hai pehle, shared scan lib unusual page se pehle load hoti hai');
   assert.ok(list.indexOf('unusual-scan') < list.indexOf('unusual'), 'shared scan lib page module se pehle load ho');
-  const idx = read('index.html'), sw = read('sw.js');
-  assert.ok(!idx.includes('?v=59') && !sw.includes('?v=59'), 'purana ?v=59 kahin nahi bacha');
-  assert.ok(idx.includes('config.js?v=109') && sw.includes('./config.js?v=109'), 'CCH signature helper cache-busted in shell + SW');
-  assert.ok(idx.includes('home.js?v=89') && sw.includes('./home.js?v=89'), 'Home map-mismatch guard cache-busted in shell + SW');
-  assert.ok(idx.includes('app.js?v=108') && sw.includes('./app.js?v=108'), 'root service-worker registration cache-busted in shell + SW');
-  assert.match(sw, /CACHE_NAME = 'apnapayment-v115'/, 'SW cache bust hua');
+  const idx = read('index.html'), sw = read('sw.js'), srv = read('server.js');
+  assert.ok(!idx.includes('?v=59'), 'purana ?v=59 shell me nahi bacha');
+  // 🧬 v3.61 — cache-busting AB AUTOMATIC hai: server index.html ke har asset URL par content
+  // fingerprint stamp karta hai (badli file → naya ?v=, wahi file → wahi ?v= → 1 saal immutable),
+  // aur SW apni precache list usi stamped HTML se banata hai. Isliye index.html aur sw.js me matching
+  // pins ki zaroorat nahi — wo manual pins hi drift karke "deploy ke baad bhi purana JS" banate the.
+  assert.ok(idx.includes('config.js?v=109'), 'CCH signature helper shell me cache-busted');
+  assert.ok(idx.includes('home.js?v=90'), 'Home map-mismatch guard shell me cache-busted');
+  assert.ok(idx.includes('app.js?v=109'), 'root service-worker registration shell me cache-busted');
+  assert.match(srv, /async function stampedShellHtml\(/, 'server har asset par fingerprint stamp karta hai');
+  assert.match(srv, /ff-asset-versions/, 'lazy modules ka version map bhi HTML me jaata hai');
+  assert.match(sw, /async function shellAssets\(/, 'SW precache list stamped index.html se banti hai');
+  assert.match(sw, /CACHE_NAME = 'apnapayment-v116'/, 'SW cache bust hua');
   const server = read('server.js');
   assert.ok(server.includes("import './unusual-scan.js'"), 'server shared scan lib import karta hai');
   assert.ok(server.includes("'/api/unusual/scan'"), 'server route hai');

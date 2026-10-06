@@ -441,10 +441,14 @@ window.FF = window.FF || {};
     if (typeof window === 'undefined' || !window.setInterval) return;
     st.started = true;
     if (st.inboxTimer) clearInterval(st.inboxTimer);
+    // ⚡ v3.60 — inbox poll 3s → 20s. Live Assist request aane par admin ke paas waise bhi
+    // notification + push jaata hai (turant); ye poll sirf consent popup ko sync rakhta hai.
+    // 3s ka matlab tha har user ke phone se din bhar 20 requests/min — server + connection queue
+    // dono par load, aur app "leg" karti thi.
     st.inboxTimer = setInterval(() => {
       if (document && document.visibilityState === 'hidden') return; // background me poll mat karo
       pollInbox();
-    }, 3000);
+    }, 20000);
     setTimeout(pollInbox, 1200);
     // 🎙️ Mic permission — site khulne par pehle user gesture par EK HI BAAR (baad me kabhi nahi).
     if (typeof document !== 'undefined' && document.addEventListener && hasMedia()) {

@@ -23,7 +23,7 @@ window.FF = window.FF || {};
   const MAX_PER_FLUSH = 3;                      // ek baar me itni lines (spam nahi)
   const GAP_MS = 1400;                          // do lines ke beech ka gap
   const MIN_GAP = 2500;                         // flush calls ke beech minimum gap
-  const POLL_MS = 20e3;                         // background me halka check
+  const POLL_MS = 60e3;                         // background me halka check (v3.60: 20s → 60s — voice catch-up boot + push par hi chalta hai)
   const st = { started: false, bound: false, timer: null, speaking: false, lastFlush: 0, lastNudge: 0, lastToastAt: 0, spoken: 0 };
 
   const localOn = () => { try { return localStorage.getItem(LS_ON) !== '0'; } catch { return true; } };

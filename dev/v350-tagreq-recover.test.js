@@ -171,7 +171,7 @@ test('⏪ stale snapshot se gayab hui employee-link request ID-wise wapas aati h
 
     // 7) /api/health (admin) me recovery summary — silent fail nahi
     const health = await jsonCall(server.base, '/api/health', 'GET', undefined, admin2);
-    assert.equal(health.json.version.startsWith('3.5'), true, `version ${health.json.version}`);
+    assert.match(String(health.json.version), /^\d+\.\d+\.\d+$/, `version ${health.json.version}`);
   } finally {
     await server.stop().catch(() => {});
     await mock.close();
@@ -302,15 +302,16 @@ test('🧩 UI + cache-bust wiring: ⏪ button, banner, health summary, naya vers
   assert.match(srv, /tagRequestRecovery: tagReqRecoveryInfo/, 'health me recovery summary');
 
   const pkg = JSON.parse(await read('package.json'));
-  assert.equal(pkg.version, '3.58.0', 'version bump');
+  assert.equal(pkg.version, '3.61.0', 'version bump');
   const idx = await read('index.html');
   assert.match(idx, /config\.js\?v=109/, 'config cache-bust 109');
-  assert.match(idx, /lazy\.js\?v=103/, 'lazy cache-bust 103');
+  assert.match(idx, /lazy\.js\?v=104/, 'lazy cache-bust 104');
   const lazy = await read('lazy.js');
   assert.match(lazy, /const VERSION = \(function/, 'lazy VERSION derive');
+  assert.match(lazy, /ff-asset-versions/, 'v3.61: lazy modules ka version server ke fingerprint map se aata hai');
   const sw = await read('sw.js');
-  assert.match(sw, /apnapayment-v115/, 'service worker cache bump');
-  assert.match(sw, /config\.js\?v=109/, 'sw pin config 109');
+  assert.match(sw, /apnapayment-v116/, 'service worker cache bump');
+  assert.match(sw, /async function shellAssets\(/, 'v3.61: SW pins hard-coded nahi — list index.html se derive hoti hai');
   const docs = await read('RECOVERY.md');
   assert.match(docs, /Tag Request/i, 'RECOVERY.md me tag request recovery');
 });

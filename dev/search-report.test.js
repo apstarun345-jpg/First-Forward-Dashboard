@@ -196,12 +196,16 @@ test('Agent / TL Summary: dusre channel me dekho switch (FF ↔ GV) + naam na mi
   assert.match(src, /nahi mila — \$\{isGv \? 'FF' : 'GV'\} se dekho/);
 });
 
-test('wiring: searchReport.js masterSearch ke lazy dependencies me hai + SW precache', async () => {
+test('wiring: searchReport.js masterSearch ke lazy dependencies me hai + SW shell derive', async () => {
   const fs = await import('node:fs');
   const idx = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8'), sw = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8'), pkg = fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'), lazy = fs.readFileSync(path.join(ROOT, 'lazy.js'), 'utf8');
   assert.ok(!idx.includes('searchReport.js'), 'searchReport core shell me eager nahi');
   assert.match(lazy, /masterSearch: \[\.\.\.PROFILE_DEPS, 'searchReport', 'masterSearch'\]/, 'masterSearch load order dependencies me hai');
-  assert.match(sw, /searchReport\.js\?v=86/); assert.match(pkg, /searchReport/);
+  // v3.61: lazy modules SW me hard-coded nahi hote — precache list index.html se derive hoti hai aur
+  // ?v= content fingerprint server deta hai (warna install par bekaar 2.5 MB download hota tha).
+  assert.ok(!/searchReport\.js\?v=/.test(sw), 'lazy module SW precache me hard-coded nahi');
+  assert.match(sw, /async function shellAssets\(/, 'SW shell assets index.html se padhta hai');
+  assert.match(pkg, /searchReport/);
   const ms = fs.readFileSync(path.join(ROOT, 'masterSearch.js'), 'utf8');
   assert.match(ms, /data-ms-inline/); assert.match(ms, /groups\.length === 1/);
 });
