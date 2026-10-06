@@ -1,7 +1,7 @@
 // Versioned app shell + offline data cache.
 // Auth login/logout/password endpoints are NEVER cached. Stable feed snapshots (/api/today),
 // /api/auth/me and /api/settings are network-first with a cached fallback; raw /api/gviz stays live-only.
-const CACHE_NAME = 'apnapayment-v115';
+const CACHE_NAME = 'apnapayment-v116';
 const DATA_CACHE = 'ff-data-v5';
 const STASH_CACHE = 'ff-push-stash-v1'; // pushsubscriptionchange ke waqt bani subscription yahan rakho
 // A same-origin browser tab and an installed PWA are both WindowClients. Remember the display
@@ -13,10 +13,27 @@ const VOICE_CACHE = 'ff-voice-v1';
 const VOICE_KEY = '/__ff_voice__/pending';
 const VOICE_MAX = 8;                    // itni lines se zyada catch-up nahi (spam nahi)
 const VOICE_TTL = 12 * 3600e3;          // 12 ghante tak wapas kholte hi suna denge
-// ⚡ Sirf eager core precache hota hai (pehla paint fast). Baaki page modules (lazy rollup)
-//    pehli use par runtime-cache ho jaate hain — install par 2 MB extra download nahi hota.
-// homeKpiFix.css bhi precache hota hai — Home ke KPI card text ke liye zaroori (offline/warm start par bhi).
-const ASSETS = ['./', './index.html', './styles.css?v=112', './ui-boot.js?v=105', './controlTower.css?v=1', './homeKpiFix.css?v=1', './config.js?v=109', './util.js?v=86', './i18n.js?v=86', './xlsx.js?v=86', './data.js?v=86', './stockAge.js?v=86', './charts.js?v=86', './model.js?v=86', './filters.js?v=86', './store.js?v=86', './gv.js?v=86', './preload.js?v=86', './auth.js?v=86', './notifications.js?v=86', './sheets.js?v=86', './liveView.js?v=86', './kpiDetail.js?v=86', './home.js?v=89', './performance.js?v=105', './agentBoard.js?v=86', './masterProfile.js?v=104', './masterSearch.js?v=107', './searchReport.js?v=86', './palette.js?v=86', './assistant.js?v=86', './officeBell.js?v=86', './pushVoice.js?v=86', './liveAssist.js?v=86', './morningCard.js?v=86', './lazy.js?v=103', './publicForm.js?v=86', './settings.js?v=102', './app.js?v=108', './logos/apna-payment.png', './favicon.svg?v=5', './icon-192.png?v=5', './icon-512.png?v=5'];
+// ⚡ v3.60 — precache list AB index.html se khud nikalti hai (hard-coded ?v= nahi).
+//    Pehle yahan 44 files ke version haath se likhe the; index.html/lazy.js ke versions se match
+//    na hone par (jaise performance module ka pin 105 tha jabki app 109 maangta tha) install par ~2.5 MB
+//    extra download hota tha aur wo cache kabhi use hi nahi hota tha — phone par pehla load aur
+//    navigation dono slow. Ab:
+//      • install par sirf REAL shell (index.html + usme likhe eager assets + icons) precache hota hai
+//      • lazy page modules pehli use par runtime-cache hote hain (cache-first, kyunki ?v= immutable hai)
+//    Server har asset par content fingerprint stamp karta hai, isliye list kabhi stale nahi hoti.
+const SHELL_EXTRA = ['./favicon.svg', './icon-192.png', './icon-512.png', './logos/apna-payment-boot.webp', './logos/apna-payment-boot.png'];
+// Poora URL (?v= fingerprint ke saath) — wahi string page maangta hai, isliye cache hit pakka hai.
+const ASSET_URL_RE = /(?:src|href)="(?!(?:https?:)?\/\/|data:|#|\/api\/)([^"]+\.(?:js|css|png|svg|webmanifest)(?:\?v=[\w.-]+)?)"/g;
+async function shellAssets() {
+  const urls = new Set(['./', './index.html']);
+  try {
+    const res = await fetch('./index.html', { cache: 'no-store' });
+    const html = res.ok ? await res.text() : '';
+    for (const m of html.matchAll(ASSET_URL_RE)) urls.add(`./${String(m[1]).replace(/^\//, '')}`);
+  } catch { /* index.html na mile to icons/shell fallback hi kaafi hai */ }
+  for (const extra of SHELL_EXTRA) urls.add(extra);
+  return [...urls];
+}
 // Network-first snapshots survive a temporary connection loss; auth/actions remain live-only.
 const OFFLINE_API = (path) => path === '/api/today' || path === '/api/auth/me' || path === '/api/settings' || path === '/api/stock-history';
 
@@ -26,7 +43,18 @@ const OFFLINE_API = (path) => path === '/api/today' || path === '/api/auth/me' |
 // Using the showNotification vibration pattern + badge is the most mobile-reliable approach.
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(ASSETS)).then(() => self.skipWaiting()));
+  // Ek asset 404/timeout ho to poora install fail hota tha (aur SW activate hi nahi hota tha →
+  // offline + push dead). Ab har asset alag try hota hai: jo mil gaya wo cache, baaki skip.
+  e.waitUntil((async () => {
+    const cache = await caches.open(CACHE_NAME);
+    const urls = await shellAssets();
+    const put = async (u) => {
+      try { if (typeof cache.add === 'function') await cache.add(u); else await cache.addAll([u]); }
+      catch { /* ek asset fail ho to poora install fail na ho */ }
+    };
+    await Promise.allSettled(urls.map(put));
+    await self.skipWaiting();
+  })());
 });
 self.addEventListener('activate', e => {
   e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => (k.startsWith('ff-dashboard-') || k.startsWith('apnapayment-')) && k !== CACHE_NAME).map(k => caches.delete(k)))).then(() => self.clients.claim()));
@@ -282,9 +310,28 @@ self.addEventListener('fetch', e => {
     return;
   }
 
-  // ---- static assets: network first, runtime-cached, offline fallback ----
+  // ---- static assets ----
+  // 🧭 v3.60 strategy (pehle sab kuch network-first tha, aur HAR response par cache.put hota tha —
+  //    matlab repeat visit par bhi har file ke liye network + Cache Storage write):
+  //    • `?v=` wale assets = content-fingerprinted immutable → CACHE FIRST (0 network, turant paint)
+  //    • bina version wale (index.html, icons) → network-first + offline fallback
+  //    • navigate (HTML) → network-first, fail par cached shell
+  const isVersioned = /[?&]v=/.test(e.request.url);
   e.respondWith((async () => {
     const cache = await caches.open(CACHE_NAME);
+    if (isVersioned && e.request.mode !== 'navigate') {
+      const hit = await cache.match(e.request);
+      if (hit) return hit;
+      try {
+        const response = await fetch(e.request);
+        if (response.ok) await cache.put(e.request, response.clone());
+        return response;
+      } catch (err) {
+        const cached = await cache.match(e.request, { ignoreSearch: true });
+        if (cached) return cached;
+        throw err;
+      }
+    }
     try {
       const response = await fetch(e.request);
       if (response.ok) {

@@ -762,22 +762,29 @@ FF.pages = FF.pages || {};
     }
 
     const morningBtn = U.$('#home-morning-card', root);
-    if (morningBtn) morningBtn.addEventListener('click', () => { if (FF.morningCard) FF.morningCard.generate(root); });
+    // 📲 Morning card module first paint ke baad load hota hai — click par load karke bana do.
+    if (morningBtn) morningBtn.addEventListener('click', () => {
+      if (FF.morningCard) { FF.morningCard.generate(root); return; }
+      if (FF.lazy && FF.lazy.shellNeed) FF.lazy.shellNeed(['morningCard']).then(() => { if (FF.morningCard) FF.morningCard.generate(root); });
+    });
 
     // Sync pill — chhota live status
     const syncPoll = setInterval(() => {
       const el = U.$('#home-sync', root);
       const loaded = U.$('#home-loaded', root);
       if (!root.isConnected) { clearInterval(syncPoll); return; }
+      if (document.hidden) return;   // background tab me DOM update bekaar
       if (loaded) loaded.textContent = U.timeLabel(S.loadedAt || G.loadedAt || Date.now());
       if (!el) return;
       if (FF.preloader && FF.preloader.done) { el.textContent = 'All sheets ready ✓'; el.className = 'sync-fast'; }
       else if (FF.preloader && FF.preloader.running) { const p = FF.preloader.state.progress; el.textContent = `Preloading ${p.loaded}/${p.total}…`; }
       else if (FF.preloader && FF.preloader.state.errors.length) { el.textContent = 'Some sheets unavailable · retry ↻'; }
       else el.textContent = 'Background sync…';
-    }, 2500);
-    const obs = new MutationObserver(() => { if (!document.body.contains(root)) { clearInterval(syncPoll); obs.disconnect(); } });
-    obs.observe(document.body, { childList: true, subtree: true });
+    }, 4000);
+    // 🧹 v3.60 — poore <body> par subtree MutationObserver hata diya. App har second DOM mutate karti
+    // hai (toasts, polls, tables), isliye ye observer har mutation par `document.body.contains(root)`
+    // chalata tha = scroll/paint ke waqt lagatar main-thread kaam (scroll leg ka ek bada karan).
+    // Interval ke andar `root.isConnected` check hi kaafi hai — kaam wahi, cost zero.
   }
 
   FF.pages.home = {

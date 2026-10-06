@@ -5929,3 +5929,75 @@ html.pwa-standalone body { -webkit-overflow-scrolling: touch; overflow-x: hidden
   /* Retain a legible caption on narrow phones while keeping the longest tab on one line. */
   html.mobile-ui .mobile-nav-item small { font-size: 11px !important; }
 }
+
+/* ================================================================================================
+   🚀 v3.61 — PHONE PERF BUDGET (scroll lag fix) + app-shell polish
+   Phone par "leg" ka sabse bada CSS karan: sticky/fixed chrome par backdrop-filter (blur). Blur wala
+   element har scroll frame par apne peeche ka poora area dobara sample + paint karta hai — topbar aur
+   bottom nav hamesha viewport me rehte hain, isliye scroll ke waqt ye cost har frame milti thi.
+   Glass theme-pack me to HAR card par blur tha. Ab touch/standalone UI me blur sirf wahan hai jahan
+   wo zaroori hai (modal backdrop), aur fixed chrome solid background use karta hai — look wahi,
+   paint cost ~zero. Design desktop par bilkul untouched hai.
+   ================================================================================================ */
+@media (pointer: coarse), (display-mode: standalone) {
+  /* 1) Fixed/sticky chrome: blur hatao, solid background do (content dikhega nahi, feel wahi rahega). */
+  .topbar,
+  #mobile-nav.mobile-nav,
+  html.mobile-ui #mobile-nav.mobile-nav,
+  .global-filter-bar,
+  .tr-submit-bar,
+  .notification-pop,
+  .user-menu,
+  .table-columns-menu,
+  .a11y-panel,
+  .drawer,
+  .drawer-head {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+  .topbar { background: var(--card) !important; }
+  #mobile-nav.mobile-nav,
+  html.mobile-ui #mobile-nav.mobile-nav { background: var(--card) !important; border-top: 1px solid var(--line) !important; }
+  .global-filter-bar { background: var(--bg) !important; }
+  /* Glass theme pack: har card par blur = phone par unusable scroll. Card ko solid rakho. */
+  html[data-theme-pack="glass"] .card,
+  html[data-theme-pack="glass"] .kpi,
+  html[data-theme-pack="glass"] .panel {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background: var(--card) !important;
+  }
+  /* 2) Bottom nav ko apna compositor layer do — scroll par repaint nahi, sirf composite. */
+  #mobile-nav.mobile-nav { will-change: transform; contain: layout paint; }
+
+  /* 3) Install button ki infinite pulse band: topbar sticky hai, isliye wo pulse har frame topbar
+        ko repaint karata tha (login ke baad hamesha chalta rehta tha). */
+  #pwa-install { animation: none !important; }
+  .zip-btn { animation: none !important; }
+
+  /* 4) Hover-only decoration touch par kabhi trigger nahi hoti, par tap/active par transform +
+        box-shadow recalc hota tha — scroll ke dauraan bekaar layout work. */
+  .home-avatar:hover, .brand-logo:hover, .kpi:hover, .card:hover, .panel:hover, .nav-item:hover,
+  .btn:hover, .hm-toprow:hover, .ua-kpi:hover, .ua-watch-card:hover, .notify-center-item:hover,
+  .chip:hover, .sr-tab:hover {
+    transform: none !important;
+    box-shadow: none !important;
+  }
+
+  /* 5) Inner scrollers (tables, notification list) apna scroll rakhein — page rubber-band na ho. */
+  .tbl-wrap, .table-wrap, .data-table-wrap, .notification-list, .notify-center-list, .drawer-body {
+    overscroll-behavior: contain;
+  }
+
+  /* 6) App-shell feel: page content ke beech browser jaisi cheezein nahi. */
+  html.mobile-ui .main > .page { min-height: 40dvh; }
+  html.mobile-ui .empty-state, html.mobile-ui .page-loader { padding-top: 18px; }
+  /* KPI cards aur tables par tap ka native feedback (long-press callout pehle hi band hai). */
+  html.mobile-ui .kpi:active, html.mobile-ui .card:active { transform: scale(.995); }
+}
+
+/* Reduced-motion / lite-mode users ke liye ye sab pehle se band tha; ab low-end phones par bhi
+   decorative animation ka budget chhota hai (loader + route progress chalte rehte hain). */
+@media (pointer: coarse) and (prefers-reduced-motion: no-preference) {
+  .home-hero.v2 { animation-duration: .22s; }
+}

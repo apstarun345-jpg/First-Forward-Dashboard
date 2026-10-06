@@ -604,7 +604,7 @@ window.FF = window.FF || {};
       notifyBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         toggleUserMenu(false);
-        if (FF.notifications) FF.notifications.toggle(true);
+        openNotifications();
       });
     }
   }
@@ -663,6 +663,48 @@ window.FF = window.FF || {};
         }
       }
     } catch (err) { console.warn('shell extras', err && err.message); }
+  }
+
+  // ---- 🐚 v3.60 shell extras — bell / KPI drawer / search / assistant first paint ke BAAD aate hain ----
+  // Pehle ye 11 modules index.html me eager the: login se PEHLE ~550 KB extra JS download + parse hota
+  // tha, isliye phone par Home 1-3 second late khulta tha aur scroll atka hua lagta tha. Ab pehle Home
+  // paint hota hai, phir idle me chhoti waves me ye modules aate hain aur apne hooks chala lete hain.
+  // Koi feature band nahi hota — jo cheez user turant click kare (🔔 bell, KPI card, Ctrl/⌘+K, 🔍
+  // search) wo on-demand load ho jaati hai (ensureShell).
+  let shellExtrasStarted = false;
+  const ensureShell = (names) => (FF.lazy && FF.lazy.shellNeed ? FF.lazy.shellNeed(names) : Promise.resolve());
+  // 🔎 Global search stays visible on every page; index/data continue loading in the background.
+  // v3.61: module first paint ke baad aata hai, isliye mount bhi usi wave hook se hota hai —
+  // topbar search bar waise hi har page par dikhta hai (bas ~1s baad, bina pehla paint roke).
+  function mountSearchTopbar() {
+    if (FF.config.feat && FF.config.feat('masterSearch') === false) return;
+    if (FF.masterSearch && FF.masterSearch.mountTopbar) FF.masterSearch.mountTopbar();
+  }
+  function startShellExtras() {
+    if (shellExtrasStarted) return Promise.resolve(false);
+    shellExtrasStarted = true;
+    const hooks = (wave) => {
+      try {
+        if (wave.includes('notifications')) { registerServiceWorker(); if (FF.notifications) FF.notifications.start(); }
+        if (wave.includes('masterSearch')) mountSearchTopbar();
+        if (wave.includes('officeBell')) mountShellExtras();
+        if (wave.includes('liveAssist') && FF.liveAssist) FF.liveAssist.start();
+      } catch (err) { console.warn('shell extras hook', err && err.message); }
+    };
+    const touch = !!(FF.lazy && FF.lazy.deviceProfile && FF.lazy.deviceProfile().coarse);
+    // Pehla paint + Home ka data fetch ho jaane do, uske baad hi extras (phone par thoda aur gap).
+    setTimeout(() => {
+      if (FF.lazy && FF.lazy.shell) FF.lazy.shell({ afterWave: hooks }).catch(() => {});
+      else hooks(['notifications', 'liveView', 'masterSearch', 'officeBell', 'liveAssist']);   // loader na ho to jo loaded hai wahi
+    }, touch ? 1800 : 700);
+    return Promise.resolve(true);
+  }
+  /** 🔔 Bell / alert center — module abhi load nahi hua to load karke kholo (click kabhi dead nahi hota). */
+  function openNotifications(force) {
+    if (FF.notifications) { if (FF.notifications.openCenter && force === 'center') FF.notifications.openCenter(); else FF.notifications.toggle(true); return Promise.resolve(); }
+    return ensureShell(['notifications', 'liveView']).then(() => {
+      if (FF.notifications) { if (FF.notifications.openCenter && force === 'center') FF.notifications.openCenter(); else FF.notifications.toggle(true); }
+    });
   }
 
   function markActive() {
@@ -1305,11 +1347,7 @@ window.FF = window.FF || {};
       if (!btn) return;
       const action = btn.dataset.mobileAction;
       if (action === 'search') { U.$('#global-search-btn')?.click(); return; }
-      if (action === 'notifications') {
-        if (FF.notifications?.openCenter) FF.notifications.openCenter();
-        else U.$('#notification-btn')?.click();
-        return;
-      }
+      if (action === 'notifications') { openNotifications('center'); return; }
       if (action === 'more') { U.$('#menu-btn')?.click(); return; }
     });
     const saveViewBtn = U.$('#save-view-btn');
@@ -1323,7 +1361,25 @@ window.FF = window.FF || {};
     if (ub) ub.addEventListener('click', (e) => { e.stopPropagation(); toggleUserMenu(); });
     U.$('#drawer-close').addEventListener('click', closeDrawer);
     U.$('#drawer-backdrop').addEventListener('click', closeDrawer);
+    // 🔔 Bell ka apna handler notifications.js me hai, jo ab first paint ke BAAD load hota hai.
+    // Pehle 1-2 second me bell dabane par kuch nahi hota tha — isliye ye fallback: module lao, phir kholo.
+    // (Module load hone ke baad ye handler no-op reh jaata hai, kyunki FF.notifications set ho jaata hai.)
+    const bellBtn = U.$('#notification-btn');
+    if (bellBtn && !bellBtn.__ffFallbackWired) {
+      bellBtn.__ffFallbackWired = true;
+      bellBtn.addEventListener('click', (e) => {
+        if (FF.notifications) return;
+        e.preventDefault(); e.stopPropagation();
+        openNotifications();
+      });
+    }
     document.addEventListener('keydown', (e) => {
+      // ⌨️ Ctrl/⌘+K — palette first paint ke baad load hota hai, isliye pehli dabane par load karke kholo.
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && String(e.key).toLowerCase() === 'k' && !FF.palette) {
+        e.preventDefault();
+        ensureShell(['palette', 'masterSearch']).then(() => { if (FF.palette) FF.palette.toggle(); });
+        return;
+      }
       if (e.key === 'Escape') { closeDrawer(); closeSidebar(); toggleUserMenu(false); }
       // ⌨️ v3.31 — [data-kpi] role=button tiles (Home ke top agents) keyboard se bhi khulein
       if ((e.key === 'Enter' || e.key === ' ') && e.target && e.target.matches && e.target.matches('[data-kpi][role="button"]')) { e.preventDefault(); e.target.click(); }
@@ -1359,6 +1415,15 @@ window.FF = window.FF || {};
       const kpi = e.target.closest('.kpi, [data-kpi]');
       if (kpi && !e.target.closest('a,button:not(.kpi)') && !kpi.closest('[data-kpi-self]')) {
         if (FF.kpiDetail) { FF.kpiDetail.open(kpi); return; }
+        // Drill drawer ka module first paint ke baad load hota hai — click par load karke kholo.
+        if (FF.lazy && FF.lazy.shellNeed) {
+          const card = kpi;
+          FF.lazy.shellNeed(['kpiDetail', 'stockAge']).then(() => {
+            if (FF.kpiDetail) FF.kpiDetail.open(card);
+            else showKpiSummary(card.dataset.kpiTitle || U.$('.kpi-title', card)?.textContent || 'KPI summary', card.dataset.kpiValue || U.$('.kpi-value', card)?.innerText || '—', card.dataset.kpiFoot || U.$('.kpi-foot', card)?.innerText || '');
+          });
+          return;
+        }
         const title = kpi.dataset.kpiTitle || U.$('.kpi-title', kpi)?.textContent || 'KPI summary';
         const value = kpi.dataset.kpiValue || U.$('.kpi-value', kpi)?.innerText || '—';
         const foot = kpi.dataset.kpiFoot || U.$('.kpi-foot', kpi)?.innerText || '';
@@ -1374,7 +1439,7 @@ window.FF = window.FF || {};
         else if (a === 'export') exportCard(act);
         else if (a === 'clear-filters') updateParams({ tl: '', agent: '' });
         else if (a === 'focus-mode') updateFocusMode();
-        else if (a === 'notifications' && FF.notifications) FF.notifications.toggle(true);
+        else if (a === 'notifications') openNotifications();
         else if (a === 'close-drawer') closeDrawer();
         return;
       }
@@ -1396,8 +1461,10 @@ window.FF = window.FF || {};
       if (el) updateParams({ [el.dataset.param]: el.value, ...(el.dataset.param === 'tl' ? { agent: '' } : {}), ...(el.dataset.param === 'agent' ? { tl: '' } : {}) });
     });
     FF.store.on((ev, detail) => { if (ev === 'progress' || ev === 'start' || ev === 'done' || ev === 'retry' || ev === 'refresh') updateStatus(detail); });
-    // periodic install btn check
-    setInterval(updateInstallBtn, 3000);
+    // ⚡ Install button pehle har 3 second me check hota tha (din bhar ka bekaar timer). Ab wo
+    // beforeinstallprompt / appinstalled events + theme-language change par update hota hai, aur
+    // safety ke liye 60s ka ek halka interval hai.
+    setInterval(updateInstallBtn, 60000);
   }
 
   function onBackgroundDataUpdated() {
@@ -1631,16 +1698,15 @@ window.FF = window.FF || {};
     renderCurrent();
     maybeOnboarding();
     if (FF.config.loginAnimation !== false) FF.auth.splash(FF.auth.user);
-    // ⚡ Baaki page modules background me (idle) load ho jaate hain — pehla load fast, navigation instant.
-    //    (wowzone jaise modules lazy hain → warm ke baad shell extras dobara mount karne padte hain.)
-    if (FF.lazy && FF.lazy.warm) Promise.resolve(FF.lazy.warm()).then(() => setTimeout(mountShellExtras, 400)).catch(() => {});
     registerServiceWorker(); // push notifications ke liye SW pehle ready ho
-    if (FF.notifications) FF.notifications.start();
-    if (FF.liveAssist) FF.liveAssist.start(); // 🎙️ Live Assist — consent-based voice/video (v3.26)
     liveShareChip();
-    // 🔎 Global search stays visible on every page; index/data continue loading in the background.
-    if (!(FF.config.feat && FF.config.feat('masterSearch') === false) && FF.masterSearch && FF.masterSearch.mountTopbar) FF.masterSearch.mountTopbar();
-    mountShellExtras();
+    // 🐚 Bell · KPI drill drawer · search · assistant · office bell · live assist → first paint ke
+    //    baad waves me (pehle ye sab login se pehle eager load hote the → pehla paint slow).
+    startShellExtras();
+    // ⚡ Baaki page modules background me (idle) load hote hain — device ke hisaab se: phone par sirf
+    //    roz kaam aane wale 3 modules, desktop par poori list. (wowzone jaise modules lazy hain →
+    //    warm ke baad shell extras dobara mount karne padte hain.)
+    if (FF.lazy && FF.lazy.warm) Promise.resolve(FF.lazy.warm()).then(() => setTimeout(mountShellExtras, 400)).catch(() => {});
     // 🔍 Global search button — features.search OFF ho to hide
     const gsBtn = U.$('#global-search-btn');
     if (gsBtn) {
@@ -1648,12 +1714,18 @@ window.FF = window.FF || {};
       if (!gsBtn.__ffWired) {
         gsBtn.__ffWired = true;
         gsBtn.addEventListener('click', () => {
-          if (FF.masterSearch && FF.masterSearch.mountTopbar) {
-            FF.masterSearch.mountTopbar();
-            const inp = U.$('#master-search-input');
-            if (inp) { inp.focus(); inp.select(); return; }
-          }
-          if (FF.palette) FF.palette.toggle();
+          const focusSearch = () => {
+            if (FF.masterSearch && FF.masterSearch.mountTopbar) {
+              FF.masterSearch.mountTopbar();
+              const inp = U.$('#master-search-input');
+              if (inp) { inp.focus(); inp.select(); return true; }
+            }
+            if (FF.palette) { FF.palette.toggle(); return true; }
+            return false;
+          };
+          if (focusSearch()) return;
+          // Module abhi load nahi hua (first paint ke baad aata hai) → load karke kholo.
+          ensureShell(['masterSearch', 'palette']).then(focusSearch);
         });
       }
     }

@@ -176,3 +176,29 @@ aur har period change par wahi dobara. Isi liye "option lag karta hai" sabse zya
 
 > Pattern for new pages: **never `await` a heavy dataset inside the render path without a deadline.** Paint from what is available,
 > merge the rest when it arrives, and show a clear state with Retry if it does not.
+
+---
+
+## 7) v3.61 — phone lag ka final root-cause pass (2026-10)
+
+Upar wale fixes ke BAAD bhi phone par leg bacha tha, isliye ye teen cheezein ki gayi:
+
+1. **Eager core aur chhota** — bell / KPI drawer / search / assistant / office bell / live-assist /
+   morning card (11 modules ≈ 550 KB JS) ab `index.html` me eager NAHI hote. Pehla paint hone ke baad
+   `lazy.js SHELL_WAVES` inhe idle me lata hai; click par on-demand (`app.js startShellExtras` +
+   `ensureShell`). Eager JS 1086 KB → **557 KB**.
+2. **Boot logo 874 KB → 7.8 KB WebP** (`logos/apna-payment-boot.webp`, `<picture>` fallback PNG).
+   Boot screen pehla paint hai — 0.9 MB ka PNG wahan sabse bada quick win tha.
+3. **Paint + polling budget** — sticky/fixed chrome se `backdrop-filter` blur hataya (har scroll frame
+   par poora area repaint hota tha; glass theme me har card par tha), bell panel ka har-poll DOM
+   rebuild band (sirf content badalne par), `<body>`-wide MutationObserver hata, scroll listeners
+   rAF-throttled, aur sab background polls 3× slow (bell 5s→15s, live-assist 3s→20s, presence 15s→45s,
+   pointer-share timer sirf admin live-view ON par). Server par report watcher ab **sirf tab persist
+   karta hai jab data sach me badla** (Apps Script quota + CPU bachti hai).
+4. **🧬 Automatic cache-busting** — server `index.html` ke har asset par content fingerprint stamp
+   karta hai aur ETag stamped body se banta hai; `<meta name="ff-asset-versions">` se lazy modules apna
+   URL khud banate hain; SW apni precache list index.html se derive karta hai aur `?v=` assets
+   cache-first serve karta hai. **Manual `?v=` bump miss hone se purana UI phansna ab possible nahi.**
+
+Naya module banate waqt: index.html me sirf tab daalo jab wo pehle paint ke liye zaroori ho; warna
+`lazy.js` ke `SHELL_WAVES` (shell extras) ya `GROUPS` (page modules) me daalo.

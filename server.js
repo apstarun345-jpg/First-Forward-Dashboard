@@ -3704,6 +3704,10 @@ async function checkReports(force = false, selectedSources = null) {
   }
   const job = (async () => {
     const changed = [];
+    // 💾 v3.60 — storage write sirf tab jab kuch SACH me badla. Pehle har watcher tick (GV 15s)
+    // par poora notify DB Apps Script me likha jaata tha, chahe data wahi ho. Render + Apps Script
+    // par ye din bhar ka background load tha → baaki requests slow ("app leg karti hai").
+    let dirty = false;
     for (const source of due) {
       try {
         const next = await reportSnapshot(source, force && source === 'gv');
@@ -3714,6 +3718,7 @@ async function checkReports(force = false, selectedSources = null) {
         // Deployment ke pehle GV watcher EIR ki mirrored rows padhta tha. Source switch par us
         // snapshot ko GV Master se compare mat karo — pehli live read ko safe baseline maano.
         const providerChanged = source === 'gv' && previous && previous.date && previous.snapshotSource !== 'gv-master';
+        if (JSON.stringify(previous || null) !== JSON.stringify(currentSnapshot)) dirty = true;
         db.notify.watch[source] = currentSnapshot;
         // Per-date issuance history feeds MTD digests. Keep recent totals and explicit zero days.
         const history = next && next.history && typeof next.history === 'object' ? next.history : (next && next.date ? { [next.date]: next.total } : {});
@@ -3722,7 +3727,7 @@ async function checkReports(force = false, selectedSources = null) {
           for (const [date, total] of Object.entries(history)) {
             if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
             const prevEntry = db.notify.watch.daily[date] || {};
-            if (prevEntry[source] !== total) db.notify.watch.daily[date] = { ...prevEntry, [source]: Number(total) || 0 };
+            if (prevEntry[source] !== total) { db.notify.watch.daily[date] = { ...prevEntry, [source]: Number(total) || 0 }; dirty = true; }
           }
           const keys = Object.keys(db.notify.watch.daily).sort();
           for (let i = 0; i < keys.length - 400; i++) delete db.notify.watch.daily[keys[i]];
@@ -3736,14 +3741,15 @@ async function checkReports(force = false, selectedSources = null) {
           // informational notification as a tag-issuance event.
           recordNotification({ type: 'report', title: `${label} report update`, body: `${next.date}: ${deltaText(delta)} — Google Sheet me naya data aaya.`, target: 'admin', routeKey: 'reportUpdate', meta: { dataChange: true, source, snapshot: currentSnapshot, previous, delta, link: '#/tagIssued' } });
           changed.push(source);
+          dirty = true;   // recordNotification ne bhi persist queue kiya hai
         }
       } catch (err) {
         reportWatcherState[source] = { ...reportWatcherState[source], error: String(err && err.message || err).slice(0, 300) };
         console.warn(`report watcher ${source}:`, err.message);
       }
     }
-    await persist('notify');
-    return { checked: due, changed };
+    if (dirty) await persist('notify');
+    return { checked: due, changed, saved: dirty };
   })();
   reportCheckPromise = job.finally(() => { reportCheckPromise = null; });
   return reportCheckPromise;
@@ -4494,10 +4500,13 @@ async function handleApi(req, res, url) {
     checkReports().catch(() => {});
     maybeMonthlyReport();
     const since = url.searchParams.get('since') || '';
-    const items = visibleNotifications(user, since);
-    const all = visibleNotifications(user, '1970-01-01T00:00:00.000Z');
-    const seen = user.notificationsSeenAt ? new Date(user.notificationsSeenAt).getTime() : 0;
-    const unread = all.filter((item) => new Date(item.createdAt).getTime() > seen).length;
+    // ⚡ v3.60 — ek hi visibility pass (pehle poori list do baar filter hoti thi: ek `since` ke liye,
+    // ek unread count ke liye). Bell har user ke liye poll hoti hai, isliye ye sasta hona chahiye.
+    const all = visibleNotifications(user, '');
+    const after = since ? Date.parse(since) : 0;
+    const items = after ? all.filter((item) => Date.parse(item.createdAt) > after) : all;
+    const seen = user.notificationsSeenAt ? Date.parse(user.notificationsSeenAt) : 0;
+    const unread = all.filter((item) => Date.parse(item.createdAt) > seen).length;
     return sendJson(res, 200, { items, unread, checkAt: new Date().toISOString() });
   }
   if (p === '/api/notifications/read' && method === 'POST') {
@@ -7108,6 +7117,83 @@ async function handleApi(req, res, url) {
 // ---------------------------------------------------------------------------------------------
 // Static files
 // ---------------------------------------------------------------------------------------------
+// 🧬 v3.60 — AUTO CACHE-BUSTING. Pehle har deploy par `?v=` haath se bump karna padta tha
+// (index.html + sw.js ASSETS + lazy.js). Kahin ek bump miss ho gaya to phone par PURANA JS/CSS
+// immutable cache me phans jaata tha aur app "kaam nahi karti / atakti" dikhti thi — deploy ke
+// baad bhi. Ab server index.html ko serve karte waqt har asset par uska **content fingerprint**
+// stamp kar deta hai:
+//   • file badli   → naya ?v= → browser/SW turant naya file laate hain (koi stale shell nahi)
+//   • file wahi    → wahi ?v= → 1 saal immutable (repeat visit par 0 byte, 0 request)
+// Saath me `<meta name="ff-asset-versions">` me sab root modules ka fingerprint jaata hai, jisse
+// lazy.js (page modules) bhi bina manual version ke sahi URL maangta hai.
+const ASSET_FP = new Map();                       // abs path → { key: 'size-mtime', fp }
+const SHELL_ASSET_RE = /(?:src|href)="(?!(?:https?:)?\/\/|data:|#|\/api\/)([^"?]+\.(?:js|css|png|svg|webmanifest))(?:\?v=([\w.-]+))?"/g;
+let assetMapMemo = { at: 0, versions: null };     // name → fingerprint (5s memo)
+let shellMemo = { at: 0, html: '', etag: '' };    // stamped index.html (5s memo)
+
+/** File ke content ka chhota fingerprint (size+mtime badalne par hi dobara hash hota hai). */
+async function assetFingerprint(abs) {
+  try {
+    const st = await fs.stat(abs);
+    if (!st.isFile()) return '';
+    const key = `${st.size}-${Math.round(st.mtimeMs)}`;
+    const hit = ASSET_FP.get(abs);
+    if (hit && hit.key === key) return hit.fp;
+    const buf = await fs.readFile(abs);
+    const fp = crypto.createHash('sha1').update(buf).digest('base64url').slice(0, 10);
+    if (ASSET_FP.size > 500) ASSET_FP.clear();
+    ASSET_FP.set(abs, { key, fp });
+    return fp;
+  } catch { return ''; }
+}
+/** Root ke sab client modules (name → fingerprint) — lazy.js + service worker isi se URL banate hain. */
+async function assetVersions() {
+  if (assetMapMemo.versions && Date.now() - assetMapMemo.at < 5000) return assetMapMemo.versions;
+  const versions = {};
+  try {
+    for (const entry of await fs.readdir(__dirname, { withFileTypes: true })) {
+      if (!entry.isFile() || !/\.(js|css)$/.test(entry.name)) continue;
+      if (entry.name === 'server.js' || entry.name === 'sw.js') continue;   // server/worker khud stamp nahi hote
+      const fp = await assetFingerprint(path.join(__dirname, entry.name));
+      if (fp) versions[entry.name.replace(/\.(js|css)$/, '')] = fp;
+    }
+  } catch { /* map optional — lazy.js purane VERSION fallback par chala jaata hai */ }
+  assetMapMemo = { at: Date.now(), versions };
+  return versions;
+}
+/** index.html body: har local asset URL par content fingerprint + lazy modules ka version map. */
+async function stampedShellHtml(abs) {
+  const source = await fs.readFile(abs, 'utf8');
+  const versions = await assetVersions();
+  const fpOf = new Map();
+  for (const m of source.matchAll(SHELL_ASSET_RE)) {
+    const file = m[1];
+    if (fpOf.has(file)) continue;
+    const base = path.basename(file);
+    let fp = /\.(js|css)$/.test(base) ? (versions[base.replace(/\.(js|css)$/, '')] || '') : '';
+    if (!fp) fp = await assetFingerprint(path.resolve(__dirname, file.replace(/^\//, '')));
+    fpOf.set(file, fp);
+  }
+  const html = source.replace(SHELL_ASSET_RE, (whole, file, ver) => {
+    const fp = fpOf.get(file) || '';
+    const attr = whole.slice(0, whole.indexOf('="'));
+    const v = fp ? (ver ? `${ver}-${fp}` : fp) : (ver || '');
+    return `${attr}="${file}${v ? `?v=${v}` : ''}"`;
+  });
+  const meta = `<meta name="ff-asset-versions" content="${JSON.stringify(versions).replace(/"/g, '&quot;')}">`;
+  return html.includes('</head>') ? html.replace('</head>', `${meta}</head>`) : html;
+}
+/** Stamped shell (5s memo) — ETag body se banta hai, isliye koi bhi asset badla → HTML fresh. */
+async function shellHtml(abs) {
+  if (shellMemo.html && Date.now() - shellMemo.at < 5000) return shellMemo;
+  const html = await stampedShellHtml(abs);
+  const etag = `W/"${Buffer.byteLength(html).toString(36)}-${crypto.createHash('sha1').update(html).digest('base64url').slice(0, 14)}"`;
+  shellMemo = { at: Date.now(), html, etag };
+  return shellMemo;
+}
+/** Deploy/test ke baad memo hatana ho to (settings se bhi call hota hai). */
+function resetAssetMemo() { ASSET_FP.clear(); assetMapMemo = { at: 0, versions: null }; shellMemo = { at: 0, html: '', etag: '' }; }
+
 async function serveStatic(req, res, pathname, search) {
   let requested = decodeURIComponent(pathname);
   if (requested === '/' || requested === '') requested = '/index.html';
@@ -7125,6 +7211,19 @@ async function serveStatic(req, res, pathname, search) {
       if (!stat.isFile()) continue;
       const ext = path.extname(candidate).toLowerCase();
       const isShell = ext === '.html' || ext === '.webmanifest';
+      // 🧬 index.html hamesha stamped (auto cache-busting) jaata hai — ETag stamped body se banta
+      // hai, isliye koi bhi asset badalte hi HTML invalidate hota hai aur phone par purana JS/CSS
+      // nahi phansta. Stamp na ban paye (koi bhi error) to neeche wala raw path hi chalta hai.
+      if (base === 'index.html') {
+        try {
+          const shell = await shellHtml(candidate);
+          if (String(req.headers['if-none-match'] || '').split(',').map((x) => x.trim()).includes(shell.etag)) {
+            res.writeHead(304, headers({ ETag: shell.etag, 'Cache-Control': 'no-cache', 'X-FF-Cache': 'not-modified' }));
+            return res.end();
+          }
+          return sendMaybeCompressed(req, res, 200, 'text/html; charset=utf-8', shell.html, { 'Cache-Control': 'no-cache', ETag: shell.etag, 'X-FF-Cache': 'revalidate', 'X-FF-Stamp': 'auto' });
+        } catch (err) { console.warn('shell stamp skip:', err && err.message); }
+      }
       // `?v=45` wala asset immutable ho gaya (index.html har deploy par bump karta hai) → repeat visits
       // par scripts ek baar hi download hote hain, phir 0 requests. HTML/manifest no-cache rehta hai.
       const cache = isShell ? 'no-cache' : versioned ? 'public, max-age=31536000, immutable' : 'public, max-age=600';

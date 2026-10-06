@@ -33,8 +33,11 @@ function runBoot({ standalone = false, touch = 0, screenWidth = 1440, screenHeig
 test('mobile/PWA bootstrap is external so the self-only CSP does not block it', () => {
   assert.match(html, /<script src="\/ui-boot\.js\?v=105"><\/script>/);
   assert.doesNotMatch(html, /<script\b(?![^>]*\bsrc=)[^>]*>[\s\S]*?<\/script>/);
-  assert.match(sw, /\.\/ui-boot\.js\?v=105/);
-  assert.match(sw, /apnapayment-v115/);
+  // v3.61: SW apni precache list khud index.html se padhta hai (ui-boot.js?v=… wahan se aata hai).
+  // Hard-coded pins index.html se drift kar jaate the → phone par purana shell cache me phans jaata tha.
+  assert.match(sw, /async function shellAssets\(/);
+  assert.match(sw, /fetch\('\.\/index\.html'/);
+  assert.match(sw, /apnapayment-v116/);
 });
 
 test('bottom bar uses uniform inline SVG icons (emoji icons broke per-phone alignment)', () => {

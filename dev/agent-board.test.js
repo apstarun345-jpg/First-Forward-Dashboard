@@ -280,7 +280,7 @@ test('direct agent (TL nahi): TL bar nahi, par board phir bhi poora', () => {
 });
 
 // ---- wiring (index.html + sw.js + lazy.js + package.json) ---------------------------------------------------
-test('wiring: agentBoard.js lazy-load hota hai, SW me precache hai', async () => {
+test('wiring: agentBoard.js lazy-load hota hai, SW shell index.html se derive hota hai', async () => {
   const fs = await import('node:fs');
   const idx = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
   const sw = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
@@ -288,8 +288,13 @@ test('wiring: agentBoard.js lazy-load hota hai, SW me precache hai', async () =>
   const pkg = fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8');
   assert.ok(!idx.includes('agentBoard.js'), 'agentBoard index shell me eager nahi hai');
   assert.match(lazy, /performance: \[\.\.\.PROFILE_DEPS, 'agentBoard', 'performance'\]/, 'performance page ki lazy dependency me hai');
-  assert.ok(sw.includes('./agentBoard.js?v=86'), 'sw ASSETS me agentBoard precache hai');
-  assert.match(sw, /CACHE_NAME = 'apnapayment-v115'/);
+  // v3.61: SW ki precache list ab index.html se derive hoti hai (hard-coded ?v= pins drift karte the:
+  // ./performance.js?v=105 precache tha jabki app ?v=109 maangta tha → 2.5 MB bekaar install download).
+  // agentBoard lazy module hai → install par precache nahi; pehli use par runtime cache (cache-first).
+  assert.ok(!/agentBoard\.js\?v=/.test(sw), 'lazy module SW me hard-coded precache nahi hota');
+  assert.match(sw, /async function shellAssets\(/, 'SW precache list index.html se banti hai');
+  assert.match(sw, /CACHE_NAME = 'apnapayment-v116'/);
   assert.match(lazy, /return m \? m\[1\] : '72'/);
+  assert.match(lazy, /ff-asset-versions/, 'lazy modules apna content fingerprint index.html se padhte hain');
   assert.match(pkg, /agentBoard/);
 });

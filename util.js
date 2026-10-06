@@ -713,7 +713,18 @@ window.FF = window.FF || {};
       if (!input.isConnected) { destroy(); return; }
       if (!box.contains(e.target) && e.target !== input) close();
     };
-    const viewportChange = () => { if (!input.isConnected) destroy(); else if (!box.hidden) place(); };
+    // ⚡ v3.60 — ye listener window par CAPTURE me lagta hai, matlab page ke kisi bhi scrollable
+    // hisse (tables, drawers) par scroll hote hi chalta hai. Pehle har event par place() →
+    // getBoundingClientRect() (forced layout) hota tha: jitne suggest/multiselect filter utna zyada
+    // scroll leg. Ab: popup band ho to kuch nahi, khula ho to ek frame me ek baar reposition.
+    let vpQueued = false;
+    const viewportChange = () => {
+      if (destroyed || !input.isConnected) { destroy(); return; }
+      if (box.hidden || vpQueued) return;
+      vpQueued = true;
+      const run = () => { vpQueued = false; if (!destroyed && input.isConnected && !box.hidden) place(); };
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run); else run();
+    };
     function destroy() {
       if (destroyed) return;
       destroyed = true;
@@ -876,7 +887,14 @@ window.FF = window.FF || {};
     const onBtnClick = (e) => { e.preventDefault(); e.stopPropagation(); open(); };
     const outside = (e) => { if (destroyed) return; if (!pop.hidden && !pop.contains(e.target) && e.target !== button && !button.contains(e.target)) close(); };
     const onKey = (e) => { if (e.key === 'Escape' && !pop.hidden) { close(); button.focus(); } };
-    const viewportChange = () => { if (destroyed) { destroy(); return; } if (!pop.hidden) place(); };
+    let vpQueued = false;   // ⚡ v3.60 — scroll par forced layout ek frame me ek baar hi (see suggest)
+    const viewportChange = () => {
+      if (destroyed) { destroy(); return; }
+      if (pop.hidden || vpQueued) return;
+      vpQueued = true;
+      const run = () => { vpQueued = false; if (!destroyed && !pop.hidden) place(); };
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run); else run();
+    };
     function destroy() {
       if (destroyed) return;
       destroyed = true;
@@ -911,16 +929,40 @@ window.FF = window.FF || {};
 
   // Shared tooltip for elements with data-tip
   function initTooltip() {
+    // 📱 v3.60 — touch device par tooltip dikhta hi nahi (hover nahi hota), phir bhi document par
+    // mouseover/mousemove listeners lagte the: har tap/scroll par closest() + getBoundingClientRect()
+    // = bekaar ka main-thread kaam. Phone par poora tooltip layer hi skip.
+    // `(pointer: coarse)` = primary input touch (phone/tablet). Touch-capable desktop par tooltips
+    // chalte rehne chahiye, isliye maxTouchPoints ko yahan vote nahi diya.
+    const coarse = (() => {
+      try {
+        if (window.matchMedia) return !!window.matchMedia('(pointer: coarse)').matches;
+        return Number(navigator.maxTouchPoints || 0) > 0 && !/Windows NT|Mac OS X|Linux x86_64/i.test(String(navigator.userAgent || ''));
+      } catch { return false; }
+    })();
+    if (coarse) return;
     const tip = h('<div class="tip" hidden></div>');
     document.body.appendChild(tip);
     let current = null;
-    function move(e) {
+    let moveQueued = false, lastEvent = null;
+    function paint() {
+      moveQueued = false;
+      const e = lastEvent;
+      if (!e || !current || tip.hidden) return;
       const pad = 14;
       let x = e.clientX + pad, y = e.clientY + pad;
       const r = tip.getBoundingClientRect();
       if (x + r.width > window.innerWidth - 8) x = e.clientX - r.width - pad;
       if (y + r.height > window.innerHeight - 8) y = e.clientY - r.height - pad;
       tip.style.left = `${x}px`; tip.style.top = `${y}px`;
+    }
+    // ⚡ mousemove par har baar layout read (getBoundingClientRect) hota tha — ab ek frame me ek baar.
+    function move(e) {
+      lastEvent = e;
+      if (moveQueued) return;
+      moveQueued = true;
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(paint);
+      else paint();
     }
     document.addEventListener('mouseover', (e) => {
       const t = e.target.closest && e.target.closest('[data-tip]');

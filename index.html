@@ -20,7 +20,7 @@
   <link id="site-favicon" rel="icon" href="/api/pwa/icon/64?v=104">
   <link rel="icon" type="image/png" sizes="192x192" href="/api/pwa/icon/192?v=104">
   <link rel="apple-touch-icon" href="/api/pwa/icon/192?v=104">
-  <link rel="stylesheet" href="styles.css?v=112">
+  <link rel="stylesheet" href="styles.css?v=113">
   <link rel="stylesheet" href="controlTower.css?v=1">
   <!-- 🏠 Home KPI text visibility (v3.47): gradient KPI cards ke andar title/value/foot hamesha
        readable — pehle kuch themes/browsers me white text white card par chala jaata tha. -->
@@ -28,7 +28,13 @@
 </head>
 <body>
   <div id="app-boot" class="app-boot" role="status" aria-live="polite">
-    <img src="logos/apna-payment.png" alt="ApnaPayment" width="280" height="153">
+    <!-- 🖼️ v3.61: boot logo pehle 874 KB PNG tha (1408×768, 280×153 par dikhta tha) — har app start
+         par phone 0.9 MB sirf logo ke liye download karta tha. Ab 560px WebP 7.8 KB (+ PNG fallback
+         sirf purane browsers ke liye). Boot screen = pehla paint, isliye ye sabse bada quick win tha. -->
+    <picture>
+      <source srcset="logos/apna-payment-boot.webp" type="image/webp">
+      <img src="logos/apna-payment-boot.png" alt="ApnaPayment" width="280" height="153">
+    </picture>
     <p>Opening your workspace…</p><small>Checking your secure session…</small>
     <div class="boot-progress"></div>
   </div>
@@ -85,15 +91,21 @@
     <div class="drawer-body" id="drawer-body"></div>
   </aside>
 
-  <!-- ⚡ Eager core: shell + Home + search + KPI drawer. Baaki page modules (insights, settings,
-       gvpages, cockpit, wow*, stock, trend, dashboard, targets, dispatch… ~1.5 MB) ab lazy.js
-       us page ko kholne par load karta hai, aur login ke baad idle me background warm karta hai. -->
+  <!-- ⚡ Eager core (v3.60): sirf shell + login + data layer + Home. Pehle yahan 28 scripts (~1.09 MB
+       JS) the, isliye phone par Home ka pehla paint hi 1-3 second ruk jaata tha. Ab:
+         • eager  = config/util/i18n/xlsx/data/charts/model/filters/store/gv/preload/auth/sheets/home/app
+         • shell extras (notifications · kpiDetail · stockAge · masterSearch · palette · officeBell ·
+           pushVoice · assistant · liveAssist · liveView · morningCard ≈ 550 KB) → first paint ke BAAD
+           idle me waves me (lazy.js SHELL_WAVES + app.js startShellExtras). Bell/KPI drill/search click
+           par on-demand bhi load ho jaate hain, isliye koi feature missing nahi lagta.
+         • baaki page modules (insights, settings, gvpages, cockpit, wow*, stock, trend, dashboard,
+           targets, dispatch…) → us page ko kholne par, aur desktop par idle me background warm.
+       ?v= ab server har request par content fingerprint se stamp karta hai (auto cache-busting). -->
   <script defer src="config.js?v=109"></script>
-  <script defer src="util.js?v=86"></script>
+  <script defer src="util.js?v=87"></script>
   <script defer src="i18n.js?v=86"></script>
   <script defer src="xlsx.js?v=86"></script>
   <script defer src="data.js?v=86"></script>
-  <script defer src="stockAge.js?v=86"></script>
   <script defer src="charts.js?v=86"></script>
   <script defer src="model.js?v=86"></script>
   <script defer src="filters.js?v=86"></script>
@@ -101,20 +113,10 @@
   <script defer src="gv.js?v=86"></script>
   <script defer src="preload.js?v=86"></script>
   <script defer src="auth.js?v=86"></script>
-  <script defer src="notifications.js?v=86"></script>
   <script defer src="sheets.js?v=86"></script>
-  <script defer src="liveView.js?v=86"></script>
-  <script defer src="kpiDetail.js?v=86"></script>
-  <script defer src="home.js?v=89"></script>
-  <script defer src="palette.js?v=86"></script>
-  <script defer src="assistant.js?v=86"></script>
-  <script defer src="officeBell.js?v=86"></script>
-  <script defer src="pushVoice.js?v=86"></script>
-  <script defer src="liveAssist.js?v=86"></script>
-  <script defer src="morningCard.js?v=86"></script>
-  <script defer src="lazy.js?v=103"></script>
-  <script defer src="masterSearch.js?v=107"></script>
+  <script defer src="home.js?v=90"></script>
+  <script defer src="lazy.js?v=104"></script>
   <script defer src="publicForm.js?v=86"></script>
-  <script defer src="app.js?v=108"></script>
+  <script defer src="app.js?v=109"></script>
 </body>
 </html>

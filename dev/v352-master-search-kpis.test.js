@@ -120,13 +120,23 @@ test('🧑‍💼 employee link agent — boxes + ek class table, 🚗/🚚 grou
 
 test('Global search bar is eagerly mounted across the app and covers both channels + tag identifiers', async () => {
   const idx = await read('index.html');
-  const lazyAt = idx.indexOf('lazy.js?v=103');
-  const searchAt = idx.indexOf('masterSearch.js?v=107');
-  const appAt = idx.indexOf('app.js?v=108');
-  assert.ok(lazyAt >= 0 && searchAt > lazyAt && appAt > searchAt, 'search module loads after lazy dependencies and before app login wiring');
+  const lazy = await read('lazy.js');
+  // v3.61: masterSearch ab eager nahi (pehle index.html me app.js se pehle load hota tha, ~100 KB
+  // extra first paint se pehle). Ab ye shell-extra wave me aata hai — loader (lazy.js) shell se pehle
+  // load hona chahiye, aur search module usi wave list me hona chahiye.
+  const lazyAt = idx.indexOf('lazy.js?v=104');
+  const appAt = idx.indexOf('app.js?v=109');
+  assert.ok(lazyAt >= 0 && appAt > lazyAt, 'loader app shell se pehle load hota hai');
+  assert.ok(!/src="masterSearch\.js/.test(idx), 'search module eager nahi — first paint halka');
+  assert.match(lazy, /\['masterSearch', 'palette'\]/, 'search shell-extra wave me hai');
+  assert.match(lazy, /masterSearch: \[\.\.\.PROFILE_DEPS, 'searchReport', 'masterSearch'\]/, 'search page route bhi lazy group me hai');
   const app = await read('app.js');
   assert.match(app, /Global search stays visible on every page/);
-  assert.match(app, /FF\.masterSearch\.mountTopbar\(\)/, 'login mounts the search immediately rather than after sheets resolve');
+  assert.match(app, /FF\.masterSearch\.mountTopbar\(\)/, 'search bar har page par mount hota hai');
+  // v3.61: module first paint ke baad shell-extra wave me load hota hai, isliye mount bhi wahi hook
+  // karta hai + search button click par on-demand load hota hai (bar kabhi missing nahi lagta).
+  assert.match(app, /startShellExtras\(\)/, 'login ke baad shell extras (search included) start hote hain');
+  assert.match(app, /ensureShell\(\['masterSearch', 'palette'\]\)/, 'search click par module on-demand load');
   assert.match(app, /const inp = U\.\$\('#master-search-input'\);[\s\S]{0,100}inp\.focus\(\)/, 'topbar search button focuses the existing input');
   const search = await read('masterSearch.js');
   assert.match(search, /Search all — FF\/GV agent, TL, ID, barcode, tag ID/);
@@ -135,12 +145,19 @@ test('Global search bar is eagerly mounted across the app and covers both channe
   assert.match(search, /details\.assignment/);
 });
 
-test('🏷️ v3.56 wiring — version + cache-bust pins (PR #100 final)', async () => {
+test('🏷️ v3.61 wiring — version pins + automatic cache-busting', async () => {
   const pkg = JSON.parse(await read('package.json'));
-  assert.equal(pkg.version, '3.58.0');
+  assert.equal(pkg.version, '3.61.0');
   assert.match(await read('server.js'), /APP_VERSION = '3\.56\.0'/);
   const idx = await read('index.html');
-  assert.match(idx, /styles\.css\?v=112/); assert.match(idx, /config\.js\?v=109/); assert.match(idx, /home\.js\?v=89/); assert.match(idx, /app\.js\?v=108/); assert.match(idx, /lazy\.js\?v=103/); assert.match(idx, /masterSearch\.js\?v=107/);
+  assert.match(idx, /styles\.css\?v=113/); assert.match(idx, /config\.js\?v=109/); assert.match(idx, /home\.js\?v=90/); assert.match(idx, /app\.js\?v=109/); assert.match(idx, /lazy\.js\?v=104/);
+  // masterSearch ab shell-extra hai (first paint ke baad load hota hai) — index.html me eager nahi.
+  assert.ok(!/src="masterSearch\.js/.test(idx), 'masterSearch eager nahi (first paint ke baad aata hai)');
   const sw = await read('sw.js');
-  assert.match(sw, /apnapayment-v115/); assert.match(sw, /styles\.css\?v=112/); assert.match(sw, /config\.js\?v=109/); assert.match(sw, /home\.js\?v=89/); assert.match(sw, /app\.js\?v=108/); assert.match(sw, /performance\.js\?v=105/); assert.match(sw, /masterSearch\.js\?v=107/);
+  assert.match(sw, /apnapayment-v116/);
+  assert.match(sw, /async function shellAssets\(/, 'SW precache list index.html se derive hoti hai (pins drift nahi karte)');
+  assert.match(sw, /const isVersioned = \/\[\?&\]v=\//, 'fingerprinted assets cache-first serve hote hain');
+  const srv = await read('server.js');
+  assert.match(srv, /async function shellHtml\(/, 'stamped shell + body-based ETag');
+  assert.match(srv, /X-FF-Stamp/, 'stamped response marker');
 });
