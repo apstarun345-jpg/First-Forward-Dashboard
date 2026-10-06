@@ -214,16 +214,14 @@ window.FF = window.FF || {};
     const t = truth, isTl = t.kind === 'tl';
     const lt = t.ledger, st = t.stock, sh = t.sheet || {};
     const ym = t.ym, lastYm = t.lastYm;
-    const daysElapsed = lt.cur.lastDay || lt.cur.days || 0;
     const dim = U.daysInMonth(ym);
-    // EIR/FF and GV are T+1 for monthly Expected: use only completed/report-available days.
-    const basis = U.channelBasis ? U.channelBasis('ff', { force: true }) : { days: daysElapsed || 1 };
-    const reportDays = Math.max(1, Number(basis.days) || daysElapsed || 1);
-    const expectedBase = (lt.rows && Array.isArray(lt.rows.all))
-      ? lt.rows.all.filter((r) => r.ym === ym && Number(r.day) <= reportDays).reduce((n, r) => n + (Number(r.n) || 0), 0)
-      : lt.cur.total;
-    const expected = reportDays ? Math.round((expectedBase / reportDays) * dim) : 0;
-    const rate = daysElapsed ? lt.cur.total / daysElapsed : 0;
+    // GV is LIVE (today included), so its month-end projection must never use FF/T+1 basis.
+    // Use calendar days elapsed for the projection; FF remains T+1 through ffView/buildReport.
+    const liveDay = Math.max(1, new Date().getDate());
+    const reportDays = Math.max(1, Math.min(dim, liveDay));
+    const expectedBase = lt.cur.total;
+    const expected = Math.round((expectedBase / reportDays) * dim);
+    const rate = reportDays ? lt.cur.total / reportDays : 0;
     const growth = lt.last.total ? ((lt.cur.total - lt.last.total) / lt.last.total) * 100 : null;
     const classes = (() => {
       const keys = new Set([...Object.keys(lt.cur.byClass), ...Object.keys(lt.last.byClass), ...st.byClass.map((c) => c.cls)]);
@@ -428,15 +426,116 @@ window.FF = window.FF || {};
   }
   function viewPdf(v) {
     if (!FF.pdf || !FF.pdf.doc) throw new Error('PDF module load nahi hua');
-    const doc = FF.pdf.doc({ title: `${v.ch === 'gv' ? 'GV Partner' : 'First Forward'} · ${v.kind === 'tl' ? 'Team Leader' : 'Agent'} Summary`, subtitle: `${v.name}${v.id ? ` (ID: ${v.id})` : ''}${v.tlName ? ` · TL: ${v.tlName}` : ''}`, right: new Date().toLocaleDateString('en-IN') });
-    doc.kpis(v.cards.slice(0, 5).map((c) => ({ label: c.label, value: String(c.value), sub: String(c.sub || '').replace(/<[^>]+>/g, '').slice(0, 60), color: '#2563eb' })));
-    doc.section(`Class-wise (${v.lastYm} vs ${v.ym}) & Stock`);
-    doc.table({ headers: ['Class', v.lastYm, v.ym, 'Stock'], align: ['left', 'right', 'right', 'right'], rows: v.classes.map((c) => [c.cls, fmt(c.last), fmt(c.cur), fmt(c.stock)]), foot: ['TOTAL', fmt(v.totals.last), fmt(v.totals.cur), fmt(v.totals.stock)] });
-    if (v.checks.length) {
-      doc.section('Sheet vs Ledger (final = ledger)');
-      doc.table({ headers: ['Metric', 'Ledger (final)', ...v.checks[0].others.map((o) => o.label), 'Farq'], align: ['left', 'right', 'right', 'right', 'right'], rows: v.checks.map((c) => [c.metric, fmt(c.final), ...c.others.map((o) => fmt(o.value)), `${c.others[0] && c.others[0].diff > 0 ? '+' : ''}${fmt((c.others[0] && c.others[0].diff) || 0)}`]) });
+    const label = v.ch === 'gv' ? 'GV Partner' : 'First Forward';
+    const role = v.kind === 'tl' ? 'Team Leader' : 'Agent';
+    const doc = FF.pdf.doc({
+      title: `${label} · ${role} Summary`,
+      subtitle: `${v.name}${v.id ? ` (ID: ${v.id})` : ''}${v.tlName ? ` · TL: ${v.tlName}` : ''}`,
+      right: new Date().toLocaleDateString('en-IN')
+    });
+
+    // 1) Complete KPI strip — Expected was previously outside the first 5 cards.
+    doc.kpis(v.cards.map((c) => ({
+      label: c.label,
+      value: String(c.value),
+      sub: String(c.sub || '').replace(/<[^>]+>/g, '').slice(0, 90),
+      color: '#2563eb'
+    })));
+
+    // 2) Complete class-wise issuance + stock.
+    doc.section(`Class-wise Issuance (${v.lastYm || 'Last Month'} vs ${v.ym || 'Current MTD'}) & Stock`);
+    doc.table({
+      headers: ['Class', v.lastYm || 'Last Month', v.ym || 'Current MTD', 'Growth %', 'Stock'],
+      align: ['left', 'right', 'right', 'right', 'right'],
+      rows: v.classes.map((c) => [
+        c.cls, fmt(c.last), fmt(c.cur),
+        c.growth == null ? '—' : `${c.growth >= 0 ? '+' : ''}${Number(c.growth).toFixed(0)}%`,
+        fmt(c.stock)
+      ]),
+      foot: [
+        'GRAND TOTAL', fmt(v.totals.last), fmt(v.totals.cur),
+        v.totals.growth == null ? '—' : `${v.totals.growth >= 0 ? '+' : ''}${Number(v.totals.growth).toFixed(0)}%`,
+        fmt(v.totals.stock)
+      ]
+    });
+
+    // 3) TL: agent-wise complete operational summary.
+    if (v.kind === 'tl' && Array.isArray(v.team) && v.team.length) {
+      const team = v.team;
+      const isGv = v.ch === 'gv';
+      doc.section(`Agent-wise Issuance & Stock (${team.length} Agents)`);
+      const rows = team.map((a) => {
+        const cur = Number(a.curTotal ?? a.cur) || 0;
+        const last = Number(a.lastTotal ?? a.last) || 0;
+        const stock = Number(a.stockTotal ?? a.stock) || 0;
+        const vc4 = Number(a.curVc4) || 0;
+        const comm = Number(a.curComm) || 0;
+        const growth = last ? ((cur - last) / last) * 100 : null;
+        return [
+          a.isSelf ? `${a.name} (TL own)` : (a.name || '—'),
+          a.id || '—', fmt(last), fmt(cur), fmt(vc4), fmt(comm), fmt(stock),
+          growth == null ? '—' : `${growth >= 0 ? '+' : ''}${growth.toFixed(0)}%`
+        ];
+      });
+      const totalLast = team.reduce((n,a)=>n+(Number(a.lastTotal ?? a.last)||0),0);
+      const totalCur = team.reduce((n,a)=>n+(Number(a.curTotal ?? a.cur)||0),0);
+      const totalStock = team.reduce((n,a)=>n+(Number(a.stockTotal ?? a.stock)||0),0);
+      doc.table({
+        headers: ['Agent', 'ID', 'Last Month', 'Current MTD', 'VC4 MTD', 'Comm MTD', 'Stock', 'Growth'],
+        align: ['left','left','right','right','right','right','right','right'],
+        rows,
+        foot: ['TEAM TOTAL', '', fmt(totalLast), fmt(totalCur),
+          fmt(team.reduce((n,a)=>n+(Number(a.curVc4)||0),0)),
+          fmt(team.reduce((n,a)=>n+(Number(a.curComm)||0),0)),
+          fmt(totalStock),
+          totalLast ? `${totalCur >= totalLast ? '+' : ''}${((totalCur-totalLast)/totalLast*100).toFixed(0)}%` : '—']
+      });
+
+      // Agent × class stock/issuance where the loaded team model exposes class buckets.
+      const classKeys = [...new Set(team.flatMap(a => Object.keys(a.classes || {})))];
+      if (classKeys.length) {
+        doc.section('Agent-wise Class Issuance');
+        doc.table({
+          headers: ['Agent', ...classKeys, 'TOTAL'],
+          align: ['left', ...classKeys.map(() => 'right'), 'right'],
+          rows: team.map(a => {
+            const vals = classKeys.map(k => Number((a.classes || {})[k]) || 0);
+            return [a.name || '—', ...vals.map(fmt), fmt(vals.reduce((x,y)=>x+y,0))];
+          }),
+          foot: ['GRAND TOTAL', ...classKeys.map(k => fmt(team.reduce((n,a)=>n+(Number((a.classes||{})[k])||0),0))),
+            fmt(team.reduce((n,a)=>n+classKeys.reduce((x,k)=>x+(Number((a.classes||{})[k])||0),0),0))]
+        });
+      }
     }
-    doc.footer(`${v.ch === 'gv' ? 'GV Master ledger (final) · GV REPORT (cross-check)' : 'EIR ledger (final) · REPORT sheet (cross-check)'}`);
+
+    // 4) Source/check section and explicit expected figure.
+    const expectedCard = v.cards.find(c => c.key === 'expected');
+    doc.section('Projection & Data Source');
+    doc.table({
+      headers: ['Metric', 'Value', 'Details'],
+      align: ['left','right','left'],
+      rows: [
+        ['Expected in month', expectedCard ? fmt(expectedCard.value) : '—',
+          expectedCard ? String(expectedCard.sub || '').replace(/<[^>]+>/g, '') : '—'],
+        ['Current month issuance', fmt(v.totals.cur), 'Final issuance total'],
+        ['Last month issuance', fmt(v.totals.last), 'Previous month total'],
+        ['Stock in hand', fmt(v.totals.stock), 'Final stock total']
+      ]
+    });
+
+    if (v.checks.length) {
+      doc.section('Sheet vs Ledger (Cross-check)');
+      doc.table({
+        headers: ['Metric', 'Final', ...v.checks[0].others.map(o => o.label), 'Difference'],
+        align: ['left', 'right', ...v.checks[0].others.map(() => 'right'), 'right'],
+        rows: v.checks.map(c => [
+          c.metric, fmt(c.final), ...c.others.map(o => fmt(o.value)),
+          c.others.length ? `${c.others[0].diff > 0 ? '+' : ''}${fmt(c.others[0].diff || 0)}` : '—'
+        ])
+      });
+    }
+
+    doc.footer(`${FF.config.brand || 'ApnaPayment'} · ${label} · ${role} · Grand Total: Last ${fmt(v.totals.last)} | MTD ${fmt(v.totals.cur)} | Stock ${fmt(v.totals.stock)}`);
     return doc.finish();
   }
 
