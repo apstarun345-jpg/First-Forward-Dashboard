@@ -5708,7 +5708,9 @@ html.mobile-ui .drawer { z-index: 10003 !important; }
 .home-exp-stat > span { color: var(--muted); font-size: 11px; font-weight: 850; }
 .home-exp-stat > b { justify-self: end; font-size: 17px; font-variant-numeric: tabular-nums; }
 .home-exp-stat > small { grid-column: 1 / -1; color: var(--muted); font-size: 10px; }
-.home-exp-chart { min-width: 0; }
+.home-exp-chart { min-width: 0; overflow-x: auto; overscroll-behavior-x: contain; }
+.home-exp-chart .vbars-plot { min-width: 640px; }
+.home-exp-chart .vcol { min-width: 14px; }
 .home-exp-empty { padding: 12px; color: var(--muted); text-align: center; font-size: 12px; }
 .home-exp-note { margin: -2px 0 0; line-height: 1.45; }
 html[data-theme="dark"] .home-exp-card > .card-head { background: linear-gradient(110deg, #1b2037, #142a2d); }

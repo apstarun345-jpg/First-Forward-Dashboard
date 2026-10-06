@@ -489,30 +489,40 @@ window.FF = window.FF || {};
       { key: 'b180', label: '180+d', n: 0 }
     ];
     const byClassMap = new Map();
-    const slot = (cls) => {
+    const byHolderMap = new Map();
+    const slot = (map, cls) => {
       const k = String(cls || '—').toUpperCase();
-      if (!byClassMap.has(k)) byClassMap.set(k, { cls: k, b1: 0, b30: 0, b90: 0, b150: 0, b180: 0, total: 0, old30: 0, old60: 0 });
-      return byClassMap.get(k);
+      if (!map.has(k)) map.set(k, { cls: k, b1: 0, b30: 0, b90: 0, b150: 0, b180: 0, total: 0, old30: 0, old60: 0 });
+      return map.get(k);
     };
     let total = 0, old30 = 0, old60 = 0;
     rows.forEach((r) => {
       const age = Number(r.age);
       const known = Number.isFinite(age) && age >= 0;
-      const c = slot(r.cls || 'NA');
-      c.total++; total++;
+      const cls = r.cls || 'NA';
+      const c = slot(byClassMap, cls);
+      const id = String(r.agentId || '').trim();
+      const name = String(r.agent || r.agentId || 'Unassigned').trim();
+      const holderKey = id ? `#${id.toUpperCase().replace(/\s+/g, '')}` : `n:${name.toUpperCase().replace(/\s+/g, ' ')}`;
+      if (!byHolderMap.has(holderKey)) byHolderMap.set(holderKey, { id, name, tl: String(r.tl || ''), total: 0, old30: 0, old60: 0, byClass: new Map() });
+      const holder = byHolderMap.get(holderKey);
+      const hc = slot(holder.byClass, cls);
+      c.total++; hc.total++; holder.total++; total++;
       if (!known) return;
-      if (age >= 30) { c.b30++; buckets[1].n++; old30++; } else { c.b1++; buckets[0].n++; }
-      if (age >= 60) { /* 60+d critical KPI = 90+d bucket (3 mahine) se match karta hai */ }
-      if (age >= 90) { c.b90++; buckets[2].n++; }
-      if (age >= 150) { c.b150++; buckets[3].n++; }
-      if (age >= 180) { c.b180++; buckets[4].n++; }
-      // KPI "60+d critical" = 90+ (≥3 mahine) — baaki UI 30/90/150/180 cumulative use karta hai.
-      if (age >= 90) { c.old60++; old60++; }
+      if (age >= 30) { c.b30++; hc.b30++; buckets[1].n++; old30++; holder.old30++; } else { c.b1++; hc.b1++; buckets[0].n++; }
+      if (age >= 90) { c.b90++; hc.b90++; buckets[2].n++; old60++; holder.old60++; }
+      if (age >= 150) { c.b150++; hc.b150++; buckets[3].n++; }
+      if (age >= 180) { c.b180++; hc.b180++; buckets[4].n++; }
     });
-    byClassMap.forEach((c) => { c.old30 = c.b30 + c.b90 + c.b150 + c.b180; c.old60 = c.b90 + c.b150 + c.b180; });
+    // Buckets are cumulative: b30 already includes every 90+/150+/180+ tag.
+    byClassMap.forEach((c) => { c.old30 = c.b30; c.old60 = c.b90; });
+    byHolderMap.forEach((holder) => holder.byClass.forEach((c) => { c.old30 = c.b30; c.old60 = c.b90; }));
     buckets[1].n = old30;
     buckets[2].n = old60;
-    const out = { total, old30, old60, buckets, byClass: [...byClassMap.values()].sort((a, b) => b.total - a.total) };
+    const byHolder = [...byHolderMap.values()]
+      .map((h) => ({ ...h, byClass: [...h.byClass.values()].sort((a, b) => b.total - a.total) }))
+      .sort((a, b) => (b.total - a.total) || a.name.localeCompare(b.name));
+    const out = { total, old30, old60, buckets, byClass: [...byClassMap.values()].sort((a, b) => b.total - a.total), byHolder };
     out[ch] = out;
     return out;
   }

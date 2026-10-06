@@ -322,7 +322,7 @@ window.FF = window.FF || {};
     const jobs = [];
     if (P && P.ensureLoaded) jobs.push(progress(() => P.ensureLoaded()));
     ['daily', 'agentClass', 'agents', 'stockAgents'].forEach((k) => { if (FF.store && FF.store.need) jobs.push(progress(() => FF.store.need(k))); });
-    if (gvOn() && FF.gv && FF.gv.need) ['report', 'stockAgent', 'stockTl', 'stockAgentClass', 'master'].forEach((k) => jobs.push(progress(() => FF.gv.need(k))));
+    if (gvOn() && FF.gv && FF.gv.need) ['report', 'stockAgent', 'stockTl', 'stockTlClass', 'stockAgentClass', 'master'].forEach((k) => jobs.push(progress(() => FF.gv.need(k))));
     await Promise.all(jobs);
     loadedOnce = true;
     resetProfileCache();
@@ -333,7 +333,7 @@ window.FF = window.FF || {};
     const isGv = /^gv/i.test(String(person && person.kind || ''));
     const jobs = [];
     if (isGv) {
-      if (FF.gv && FF.gv.need) ['report', 'stockAgent', 'stockAgentClass', 'master'].forEach((k) => jobs.push(progress(() => FF.gv.need(k, { only: true }))));
+      if (FF.gv && FF.gv.need) ['report', 'stockAgent', 'stockTl', 'stockTlClass', 'stockAgentClass', 'master'].forEach((k) => jobs.push(progress(() => FF.gv.need(k, { only: true }))));
       // GV Master is the immediate fallback; consume FF EIR rollups only if the app already has them
       // in memory. Do not make a GV summary wait for the unrelated First Forward loader.
     } else {
@@ -479,8 +479,9 @@ window.FF = window.FF || {};
     return !!norm(name) && rowAgentName(row) === norm(name);
   }
   function belongsToTl(row, name, id) {
-    const wantName = norm(name), wantId = clean(id).toUpperCase();
-    return (!!wantName && rowTlName(row) === wantName) || (!!wantId && rowTlId(row) === wantId);
+    const wantName = norm(name), wantId = clean(id).toUpperCase(), haveId = rowTlId(row);
+    if (wantId && haveId) return haveId === wantId;
+    return !!wantName && rowTlName(row) === wantName;
   }
   function isDirectStockRow(row, ch) {
     return !!(row && (row.directAgent || row.tlExcluded)) || !!safeCall(() => FF.config && FF.config.isDirectAgent && FF.config.isDirectAgent(row, ch), false);
@@ -653,7 +654,8 @@ window.FF = window.FF || {};
     if (tlStockCache.has(cacheKey)) return tlStockCache.get(cacheKey);
     const wantName = norm(name), wantId = clean(id).toUpperCase();
     const rep = reportIndex(reportRows, ch);
-    const selfReports = pickIndexed([[rep.idx.byAgentId, wantId], [rep.idx.byAgentName, wantName]]).filter((r) => isSameAgent(r, name, id));
+    const selfReports = pickIndexed([[rep.idx.byAgentId, wantId], [rep.idx.byAgentName, wantName]])
+      .filter((r) => belongsToTl(r, name, id) && isSameAgent(r, name, id));
     const teamReports = pickIndexed([[rep.idx.byTlName, wantName], [rep.idx.byTlId, wantId]])
       .filter((r) => belongsToTl(r, name, id) && (isSameAgent(r, name, id) || !isDirectStockRow(r, ch)));
     const memberReports = teamReports.filter((r) => !isSameAgent(r, name, id));
@@ -669,20 +671,24 @@ window.FF = window.FF || {};
 
     const detailList = detailRows || [];
     const didx = stockIndex(detailList);
-    const selfDetails = (didx ? pickIndexed([[didx.byAgentId, wantId], [didx.byAgentName, wantName]]) : detailList).filter((r) => isSameAgent(r, name, id));
+    const selfDetails = (didx ? pickIndexed([[didx.byAgentId, wantId], [didx.byAgentName, wantName]]) : detailList)
+      .filter((r) => belongsToTl(r, name, id) && isSameAgent(r, name, id));
     const memberDetails = (didx ? pickIndexed([[didx.byTlName, wantName], [didx.byTlId, wantId]]) : detailList)
       .filter((r) => belongsToTl(r, name, id) && !isSameAgent(r, name, id) && !isDirectStockRow(r, ch));
     const detailMemberTotal = stockRowsTotal(memberDetails);
-    const teamNames = new Set([...memberReports, ...memberDetails].map((r) => rowAgentName(r)).filter(Boolean));
-    const ownerName = norm(name);
     const classList = classRows || [];
-    const cidx = ch === 'gv' ? stockIndex(classList) : null;
-    const detailMemberClassRows = ch === 'gv'
-      ? (cidx ? pickIndexed([...teamNames].filter((t) => t !== ownerName).map((t) => [cidx.byAgentName, t])) : classList.filter((r) => teamNames.has(norm(r && (r.agentName || r.name))) && norm(r && (r.agentName || r.name)) !== ownerName))
-      : memberDetails;
-    const detailOwnClassRows = ch === 'gv'
-      ? (cidx ? pickIndexed([[cidx.byAgentName, ownerName]]) : classList.filter((r) => norm(r && (r.agentName || r.name)) === ownerName))
-      : selfDetails;
+    const classRowsForHolders = (holders) => {
+      const out = [], seen = new Set();
+      for (const holder of holders || []) {
+        const holderId = rowAgentId(holder), holderName = rowAgentName(holder);
+        let matches = holderId ? classList.filter((r) => rowAgentId(r) === holderId) : [];
+        if (!holderId && holderName) matches = classList.filter((r) => rowAgentName(r) === holderName);
+        matches.filter((r) => belongsToTl(r, name, id)).forEach((r) => { if (!seen.has(r)) { seen.add(r); out.push(r); } });
+      }
+      return out;
+    };
+    const detailMemberClassRows = ch === 'gv' ? classRowsForHolders([...memberReports, ...memberDetails]) : memberDetails;
+    const detailOwnClassRows = ch === 'gv' ? classRowsForHolders([...selfReports, ...selfDetails]) : selfDetails;
     const detailMemberMap = addClassRows(new Map(), classRowsOnly(detailMemberClassRows));
     const detailOwnMap = addClassRows(new Map(), classRowsOnly(detailOwnClassRows));
     const detailOwnTotal = stockRowsTotal(selfDetails) || classMapTotal(detailOwnMap);
@@ -754,7 +760,7 @@ window.FF = window.FF || {};
     const classMap = new Map(memberMap);
     ownMap.forEach((n, cls) => classMap.set(cls, (classMap.get(cls) || 0) + n));
     alignClassMap(classMap, stock);
-    const result = {
+    let result = {
       stock, own: { ...ownParts, total: ownTotal }, agents: teamStock,
       classRows: [...classMap.entries()].sort((a, b) => num(b[1]) - num(a[1])).map(([cls, n]) => ({ cls, n })),
       // Diagnostics — UI ko "kaise joda gaya" dikhaane ke liye; data sources ka bharosa bhi yahi se pata chalta hai
@@ -762,6 +768,21 @@ window.FF = window.FF || {};
       membersFrom: useDetailMembers && classMapTotal(detailMemberMap) ? 'detail' : 'report',
       raw: { detailOwnTotal, reportOwnTotal: reportOwnParts.total, detailMemberTotal, memberReportTotal: memberReportParts.total }
     };
+    if (ch === 'gv' && FF.gvTruth && FF.gvTruth.stockFor) {
+      const exact = safeCall(() => FF.gvTruth.stockFor({ kind: 'gv-tl', name, id }), null);
+      if (exact && exact.authoritative) {
+        const exactTotal = num(exact.total), exactOwn = num(exact.own);
+        result = {
+          ...result,
+          stock: { vc4: num(exact.vc4), comm: num(exact.comm), total: exactTotal },
+          own: { ...(exact.ownParts || {}), total: exactOwn },
+          agents: { ...(exact.agents || {}), total: num(exact.agentsTotal) },
+          classRows: (exact.byClass || []).map((r) => ({ cls: r.cls, n: num(r.n) })).filter((r) => r.n > 0),
+          ownFrom: 'Tag Assignment', membersFrom: 'Tag Assignment',
+          raw: { ...result.raw, tagAssignmentTotal: exactTotal, tagAssignmentOwn: exactOwn, tagAssignmentAgents: num(exact.agentsTotal) }
+        };
+      }
+    }
     tlStockCache.set(cacheKey, result);
     return result;
   }
@@ -892,22 +913,34 @@ window.FF = window.FF || {};
   };
 
   // ------------------------------------------------------------------ profile builders
-  /** Ek agent ka class-wise stock: pehle stock-detail rows (class ke saath), warna REPORT row ka VC4 / Commercial
-   *  (GV me VC12/VC16/VC4/VC5… class columns). `src` = REPORT/perf row. */
+  function exactHolderMatch(row, name, id) {
+    const wantId = clean(id).toUpperCase(), haveId = rowAgentId(row);
+    if (wantId && haveId) return wantId === haveId;
+    return !!norm(name) && rowAgentName(row) === norm(name);
+  }
+  function rowBelongsToHolderTl(row, src) {
+    const wantId = rowTlId(src), haveId = rowTlId(row);
+    if (wantId && haveId) return wantId === haveId;
+    const wantName = rowTlName(src), haveName = rowTlName(row);
+    return !!wantName && (!haveName || haveName === wantName);
+  }
+  /** Ek agent ka class-wise stock: pehle ID/TL-matched Tag Assignment rows, warna REPORT class split. */
   function agentClassStock(src, detailRows, ch) {
     const name = src.agentName || src.name, id = src.agentId || src.id;
     const idx = stockIndex(detailRows);
-    const mine = idx ? pickIndexed([[idx.byAgentId, clean(id).toUpperCase()], [idx.byAgentName, norm(name)]]).filter((r) => isSameAgent(r, name, id) && clean(r.cls)) : [];
+    const mine = idx ? pickIndexed([[idx.byAgentId, clean(id).toUpperCase()], [idx.byAgentName, norm(name)]])
+      .filter((r) => exactHolderMatch(r, name, id) && rowBelongsToHolderTl(r, src) && clean(r.cls)) : [];
     const map = mine.length ? addClassRows(new Map(), mine) : reportClassMap(src, ch);
     return Object.fromEntries([...map.entries()].filter(([, n]) => num(n) > 0));
   }
-  /** TL ki apni row ka class-wise stock — REPORT row poore team ka rollup ho to uska VC4 / Comm nahi, composition ka own. */
+  /** TL ki apni row ka class-wise stock — ID/TL match pehle, REPORT fallback doosre. */
   function selfClassStock(src, detailRows, ch, comp) {
     const name = src.agentName || src.name, id = src.agentId || src.id;
     const idx = stockIndex(detailRows);
-    const mine = idx ? pickIndexed([[idx.byAgentId, clean(id).toUpperCase()], [idx.byAgentName, norm(name)]]).filter((r) => isSameAgent(r, name, id) && clean(r.cls)) : [];
+    const mine = idx ? pickIndexed([[idx.byAgentId, clean(id).toUpperCase()], [idx.byAgentName, norm(name)]])
+      .filter((r) => exactHolderMatch(r, name, id) && rowBelongsToHolderTl(r, src) && clean(r.cls)) : [];
     if (mine.length) return Object.fromEntries(addClassRows(new Map(), mine));
-    const own = (comp && comp.own) || { vc4: 0, comm: 0 };
+    const own = (comp && (comp.ownParts || comp.own)) || { vc4: 0, comm: 0 };
     const out = {};
     if (num(own.vc4) > 0) out.VC4 = num(own.vc4);
     if (num(own.comm) > 0) out.Commercial = num(own.comm);
@@ -964,9 +997,15 @@ window.FF = window.FF || {};
     const n = norm(p.name);
     const ffRows = ffPeopleLookup();
     const allAgents = ffRows.rows;
-    const underTl = (ffRows.byTl.get(n) || []).filter((a) => !a.tlExcluded);
+    const nameRows = ffRows.byTl.get(n) || [];
+    const requestedTlId = clean(p.sub || p.id).toUpperCase();
+    const exactTlRows = requestedTlId ? nameRows.filter((a) => clean(a.tlId).toUpperCase() === requestedTlId) : [];
+    const idTlRows = requestedTlId ? ffRows.rows.filter((a) => clean(a.tlId).toUpperCase() === requestedTlId) : [];
+    const knownTlIds = new Set(nameRows.map((a) => clean(a.tlId).toUpperCase()).filter(Boolean));
+    const scopedTlRows = exactTlRows.length ? exactTlRows : idTlRows.length ? idTlRows : requestedTlId && knownTlIds.size > 1 ? [] : nameRows;
+    const underTl = scopedTlRows.filter((a) => !a.tlExcluded);
     const src = underTl.find((a) => a.tlStockTotal != null) || underTl[0] || null;
-    const tlId = (src && src.tlId) || p.sub || '';
+    const tlId = (src && src.tlId) || requestedTlId || '';
     // TL ki apni row (sheet me 'Agent name' = TL) agents se alag — count/jod me double count na ho
     const selfSplit = splitTlSelfRow(underTl, p.name, tlId);
     const agents = selfSplit.team, selfRow = selfSplit.self;
@@ -978,12 +1017,50 @@ window.FF = window.FF || {};
     const stock = stockComposition.stock;
     const agentRow = (a, isSelf) => {
       const av = U.runRate(a.curVc4, 'ff'), avc = U.runRate(a.curNvc4, 'ff');
-      return { name: a.name, id: a.agentId || a.id, mobile: mobileFor(a.name, a.agentId || a.id, a.mobile), priority: a.priority || '', status: a.agentStatus || '', lastActive: a.lastActive || '', isSelf: !!isSelf, stockVc4: num(a.stockVc4), stockComm: num(a.stockNvc4), stockTotal: num(a.stockTotal), cur: num(a.curTotal), last: num(a.lastTotal), curVc4: num(a.curVc4), curComm: num(a.curNvc4), lastVc4: num(a.lastVc4), lastComm: num(a.lastNvc4), sugVc4: suggest(av, a.stockVc4), sugComm: suggest(avc, a.stockNvc4), sugVc4Gross: suggestGro(av), sugCommGross: suggestGro(avc) };
+      return { name: a.name, id: a.agentId || a.id, tlId: a.tlId || tlId, tlName: a.tlName || p.name, mobile: mobileFor(a.name, a.agentId || a.id, a.mobile), priority: a.priority || '', status: a.agentStatus || '', lastActive: a.lastActive || '', isSelf: !!isSelf, stockVc4: num(a.stockVc4), stockComm: num(a.stockNvc4), stockTotal: num(a.stockTotal), cur: num(a.curTotal), last: num(a.lastTotal), curVc4: num(a.curVc4), curComm: num(a.curNvc4), lastVc4: num(a.lastVc4), lastComm: num(a.lastNvc4), sugVc4: suggest(av, a.stockVc4), sugComm: suggest(avc, a.stockNvc4), sugVc4Gross: suggestGro(av), sugCommGross: suggestGro(avc) };
     };
-    const rowsA = agents.map((a) => agentRow(a, false)).sort((x, y) => y.cur - x.cur);
-    const selfA = selfRow ? agentRow(selfRow, true) : null;
-    rowsA.forEach((r, i) => { r.classStock = agentClassStock(agents.find((a) => (a.agentId || a.id) === r.id && a.name === r.name) || { name: r.name, agentId: r.id }, stockDetails, 'ff'); });
-    if (selfA) selfA.classStock = selfClassStock(selfRow, stockDetails, 'ff', stockComposition);
+    const ffStockByHolder = new Map(), ffStockByName = new Map();
+    const stockHolderKey = (a) => clean(a.agentId || a.id) ? `#${clean(a.agentId || a.id).toUpperCase()}` : `n:${norm(a.agentName || a.name)}`;
+    stockDetails.filter((r) => {
+      const ownerId = clean(r.tlId).toUpperCase();
+      if (tlId) return !!ownerId && ownerId === clean(tlId).toUpperCase();
+      return norm(r.tlName) === n;
+    }).filter((r) => !safeCall(() => FF.config.isDirectAgent(r, 'ff'), false)).forEach((r) => {
+      if (selfRow && isSameAgent(r, selfRow.name, selfRow.agentId || selfRow.id)) return;
+      const key = stockHolderKey(r), holder = ffStockByHolder.get(key) || { ...r, n: 0, classStock: {} };
+      holder.n += num(r.n);
+      holder.classStock[r.cls] = (holder.classStock[r.cls] || 0) + num(r.n);
+      ffStockByHolder.set(key, holder);
+      if (norm(r.agentName)) ffStockByName.set(norm(r.agentName), holder);
+    });
+    const matchedHolders = new Set();
+    const rowsA = agents.map((a) => {
+      const holder = (a.agentId || a.id) && ffStockByHolder.get(`#${clean(a.agentId || a.id).toUpperCase()}`) || ffStockByName.get(norm(a.name));
+      if (holder) matchedHolders.add(stockHolderKey(holder));
+      const out = agentRow(holder ? { ...a, stockTotal: holder.n } : a, false);
+      out.classStock = agentClassStock(a, stockDetails, 'ff');
+      if (holder || Object.keys(out.classStock || {}).length) {
+        const classes = Object.entries(out.classStock || {});
+        out.stockTotal = holder ? holder.n : U.sum(classes.map(([, value]) => ({ n: value })), (x) => x.n);
+        out.stockVc4 = num(classes.find(([cls]) => /^VC4$/i.test(cls))?.[1]);
+        out.stockComm = Math.max(0, out.stockTotal - out.stockVc4);
+      }
+      return out;
+    });
+    ffStockByHolder.forEach((holder, key) => {
+      if (matchedHolders.has(key)) return;
+      const base = { ...holder, name: holder.agentName, agentId: holder.agentId, curTotal: 0, lastTotal: 0, curVc4: 0, curNvc4: 0, lastVc4: 0, lastNvc4: 0, stockTotal: holder.n, stockVc4: 0, stockNvc4: 0 };
+      const out = agentRow(base, false);
+      out.classStock = { ...holder.classStock };
+      out.stockVc4 = num(Object.entries(out.classStock).find(([cls]) => /^VC4$/i.test(cls))?.[1]);
+      out.stockComm = Math.max(0, holder.n - out.stockVc4);
+      out.stockTotal = holder.n;
+      rowsA.push(out);
+    });
+    rowsA.sort((x, y) => y.cur - x.cur || y.stockTotal - x.stockTotal || x.name.localeCompare(y.name));
+    let selfA = selfRow ? agentRow({ ...selfRow, stockTotal: stockComposition.own.total, stockVc4: stockComposition.own.vc4, stockNvc4: stockComposition.own.comm }, true) : null;
+    if (!selfA && num(stockComposition.own.total) > 0) selfA = agentRow({ name: p.name, agentId: tlId, tlName: p.name, stockTotal: stockComposition.own.total, stockVc4: stockComposition.own.vc4, stockNvc4: stockComposition.own.comm }, true);
+    if (selfA) selfA.classStock = selfClassStock(selfRow || { name: selfA.name, agentId: selfA.id, tlId, tlName: p.name }, stockDetails, 'ff', stockComposition);
     const ac = rowsOf('agentClass'), agRows = rowsOf('agents'), stk = rowsOf('stockAgents');
     const curYm = latestYm(ac.length ? ac : agRows), lastYm = U.prevMonthKey(curYm);
     const teamClassRows = ac.filter((r) => norm(r.tlName) === n && (!r.channel || /first/i.test(r.channel)));
@@ -1180,10 +1257,13 @@ window.FF = window.FF || {};
     const n = norm(p.name);
     const gvIndex = gvPeopleLookup();
     const allReports = gvIndex.rows;
-    let tlReports = n ? (gvIndex.byTl.get(n) || []) : [];
-    if (!tlReports.length && p.sub) {
-      const wantId = clean(p.sub).toUpperCase();
-      tlReports = allReports.filter((r) => clean(r.tlId || r.supervisorId).toUpperCase() === wantId);
+    const nameReports = n ? (gvIndex.byTl.get(n) || []) : [];
+    const requestedTlId = clean(p.sub || p.id).toUpperCase();
+    const exactReports = requestedTlId ? nameReports.filter((r) => clean(r.tlId || r.supervisorId).toUpperCase() === requestedTlId) : [];
+    const knownTlIds = new Set(nameReports.map((r) => clean(r.tlId || r.supervisorId).toUpperCase()).filter(Boolean));
+    let tlReports = exactReports.length ? exactReports : requestedTlId && knownTlIds.size > 1 ? [] : nameReports;
+    if (!tlReports.length && requestedTlId) {
+      tlReports = allReports.filter((r) => clean(r.tlId || r.supervisorId).toUpperCase() === requestedTlId);
     }
     const reportTeam = tlReports.filter((r) => !safeCall(() => FF.config.isDirectAgent(r, 'gv'), false));
     const reportTlId = (reportTeam[0] && reportTeam[0].tlId) || (tlReports[0] && tlReports[0].tlId) || p.sub || '';
@@ -1205,15 +1285,54 @@ window.FF = window.FF || {};
     const stock = stockComposition.stock;
     const agentRow = (r, isSelf) => {
       const av = gvDaily(r, r.curVc4), avc = gvDaily(r, r.curComm);
-      return { name: r.agentName, id: r.agentId, mobile: mobileFor(r.agentName, r.agentId, r.mobile), priority: prioOf(r.priority), status: r.agentStatus || '', lastActive: r.agentLastActive || r.lastActive || '', isSelf: !!isSelf, stockVc4: num(r.stockVc4), stockComm: num(r.stockComm), stockTotal: num(r.stockTotal), cur: num(r.curTotal), last: num(r.lastTotal), curVc4: num(r.curVc4), curComm: num(r.curComm), lastVc4: num(r.lastVc4), lastComm: num(r.lastComm), sugVc4: suggest(av, r.stockVc4), sugComm: suggest(avc, r.stockComm), sugVc4Gross: suggestGro(av), sugCommGross: suggestGro(avc) };
+      return { name: r.agentName, id: r.agentId, tlId: r.tlId || stockTlId, tlName: r.tlName || tlNameCanon, mobile: mobileFor(r.agentName, r.agentId, r.mobile), priority: prioOf(r.priority), status: r.agentStatus || '', lastActive: r.agentLastActive || r.lastActive || '', isSelf: !!isSelf, stockVc4: num(r.stockVc4), stockComm: num(r.stockComm), stockTotal: num(r.stockTotal), cur: num(r.curTotal), last: num(r.lastTotal), curVc4: num(r.curVc4), curComm: num(r.curComm), lastVc4: num(r.lastVc4), lastComm: num(r.lastComm), sugVc4: suggest(av, r.stockVc4), sugComm: suggest(avc, r.stockComm), sugVc4Gross: suggestGro(av), sugCommGross: suggestGro(avc) };
     };
-    const rowsA = team.map((r) => agentRow(r, false)).sort((x, y) => y.cur - x.cur);
-    const selfA = selfRow ? agentRow(selfRow, true) : null;
     const gvClassDetail = gvRows('stockAgentClass');
-    rowsA.forEach((r) => { r.classStock = agentClassStock(team.find((x) => x.agentId === r.id && x.agentName === r.name) || { agentName: r.name, agentId: r.id }, gvClassDetail, 'gv'); });
-    if (selfA) selfA.classStock = selfClassStock(selfRow, gvClassDetail, 'gv', stockComposition);
+    const gvStockByHolder = new Map(), gvStockByName = new Map();
+    const stockHolderKey = (r) => clean(r.agentId) ? `#${clean(r.agentId).toUpperCase()}` : `n:${norm(r.agentName)}`;
+    const stockTlRows = gvRows('stockAgent').filter((r) => {
+      const ownerId = clean(r.tlId);
+      if (stockTlId) return !!ownerId && ownerId.toUpperCase() === clean(stockTlId).toUpperCase();
+      return norm(r.tlName) === nCanon;
+    });
+    stockTlRows.forEach((r) => {
+      if (safeCall(() => FF.config.isDirectAgent(r, 'gv'), false) || isSelfReport(r)) return;
+      const key = stockHolderKey(r), holder = gvStockByHolder.get(key) || { ...r, n: 0, stockVc4: 0, stockComm: 0 };
+      holder.n += num(r.n);
+      gvStockByHolder.set(key, holder);
+      if (norm(r.agentName)) gvStockByName.set(norm(r.agentName), holder);
+    });
+    const matchedRoster = new Set();
+    const rowsA = team.map((r) => {
+      const holder = (r.agentId && gvStockByHolder.get(`#${clean(r.agentId).toUpperCase()}`)) || gvStockByName.get(norm(r.agentName));
+      if (holder) matchedRoster.add(stockHolderKey(holder));
+      const exact = holder ? { ...r, stockVc4: 0, stockComm: 0, stockTotal: holder.n } : r;
+      const out = agentRow(exact, false);
+      out.classStock = agentClassStock(r, gvClassDetail, 'gv');
+      if (holder) {
+        const cls = Object.entries(out.classStock || {});
+        out.stockVc4 = num(cls.find(([k]) => /^VC4$/i.test(k))?.[1]);
+        out.stockComm = Math.max(0, holder.n - out.stockVc4);
+        out.stockTotal = holder.n;
+      }
+      return out;
+    });
+    gvStockByHolder.forEach((holder, key) => {
+      if (matchedRoster.has(key)) return;
+      const base = { ...holder, agentName: holder.agentName, agentId: holder.agentId, curTotal: 0, lastTotal: 0, curVc4: 0, curComm: 0, lastVc4: 0, lastComm: 0, stockTotal: holder.n, stockVc4: 0, stockComm: 0 };
+      const out = agentRow(base, false);
+      out.classStock = agentClassStock(base, gvClassDetail, 'gv');
+      out.stockVc4 = num(Object.entries(out.classStock || {}).find(([k]) => /^VC4$/i.test(k))?.[1]);
+      out.stockComm = Math.max(0, holder.n - out.stockVc4);
+      out.stockTotal = holder.n;
+      rowsA.push(out);
+    });
+    rowsA.sort((x, y) => y.cur - x.cur || y.stockTotal - x.stockTotal || x.name.localeCompare(y.name));
+    let selfA = selfRow ? agentRow({ ...selfRow, stockTotal: stockComposition.own.total, stockVc4: stockComposition.own.vc4, stockComm: stockComposition.own.comm }, true) : null;
+    if (!selfA && num(stockComposition.own.total) > 0) selfA = agentRow({ agentName: tlNameCanon || p.name, agentId: reportTlId || '', tlId: stockTlId, tlName: tlNameCanon || p.name, stockTotal: stockComposition.own.total, stockVc4: stockComposition.own.vc4, stockComm: stockComposition.own.comm }, true);
+    if (selfA) selfA.classStock = selfClassStock(selfRow || { agentName: selfA.name, agentId: selfA.id, tlId: stockTlId, tlName: tlNameCanon }, gvClassDetail, 'gv', stockComposition);
     const out = {
-      kind: 'gv-tl', channel: 'GV Partner', ch: 'gv', name: p.name, id: tlId, found: !!list.length,
+      kind: 'gv-tl', channel: 'GV Partner', ch: 'gv', name: p.name, id: tlId, stockTlId: stockTlId || tlId, found: !!list.length,
       mobile: (src && src.tlMobile) || '', tl: { name: p.name, id: tlId }, status: '', lastActive: '', priority: '', stock, tlStock: { ...stock, has: true, own: stockComposition.own, agents: stockComposition.agents },
       stockSplit: { ownFrom: stockComposition.ownFrom, membersFrom: stockComposition.membersFrom, rollupOwnRow: stockComposition.rollupOwnRow, snapshot: stockComposition.snapshot, raw: stockComposition.raw },
       dispatch: { days: suggestDays(), avgVc4, avgComm, cover: avgVc4 > 0 ? stock.vc4 / avgVc4 : null, sugVc4: suggest(avgVc4, stock.vc4), sugComm: suggest(avgComm, stock.comm), sugVc4Gross: suggestGro(avgVc4), sugCommGross: suggestGro(avgComm), sumAgentVc4: U.sum(rowsA, (r) => r.sugVc4), sumAgentComm: U.sum(rowsA, (r) => r.sugComm), sumAgentVc4Gross: U.sum(rowsA, (r) => r.sugVc4Gross), sumAgentCommGross: U.sum(rowsA, (r) => r.sugCommGross), sumSelfVc4: selfA ? selfA.sugVc4 : 0, sumSelfComm: selfA ? selfA.sugComm : 0, sumSelfVc4Gross: selfA ? selfA.sugVc4Gross : 0, sumSelfCommGross: selfA ? selfA.sugCommGross : 0 },
@@ -1735,9 +1854,11 @@ window.FF = window.FF || {};
     const g = groupSummary(cls);
     const noData = !pr.found ? `<div class="ms-empty small"><b>REPORT me is ${isTl ? 'TL' : 'agent'} ki row nahi mili</b><p class="dim">Performance / GV REPORT tab load hone ke baad poori profile aayegi (naam spelling bhi match honi chahiye).</p></div>` : '';
     const scopeParam = isTl ? `tl=${encodeURIComponent(pr.name)}` : `agent=${encodeURIComponent(pr.name)}${pr.id ? `&agentId=${encodeURIComponent(pr.id)}` : ''}`;
-    const masterTlParam = isTl && pr.ch === 'gv' && pr.id ? `&tlId=${encodeURIComponent(pr.id)}` : '';
-    const stockSpec = `src=${pr.ch}&scope=stock&${scopeParam}`;
-    const tlStockSpec = !isTl && pr.tl && pr.tl.name ? `src=${pr.ch}&scope=stock&tl=${encodeURIComponent(pr.tl.name)}` : '';
+    const masterTlParam = isTl && (pr.stockTlId || pr.id) ? `&tlId=${encodeURIComponent(pr.stockTlId || pr.id)}` : '';
+    const agentStockTlParam = !isTl && pr.tl && pr.tl.id ? `&tl=${encodeURIComponent(pr.tl.name || '')}&tlId=${encodeURIComponent(pr.tl.id)}` : '';
+    const stockSpec = `src=${pr.ch}&scope=stock&${scopeParam}${isTl ? masterTlParam : agentStockTlParam}`;
+    const tlStockSpec = !isTl && pr.tl && pr.tl.name
+      ? `src=${pr.ch}&scope=stock&tl=${encodeURIComponent(pr.tl.name)}${pr.tl.id ? `&tlId=${encodeURIComponent(pr.tl.id)}` : ''}` : '';
     const curSpec = `src=${pr.ch}&scope=mtd&ym=${encodeURIComponent(m.cur || '')}&${scopeParam}${masterTlParam}`;
     const lastSpec = `src=${pr.ch}&scope=month&ym=${encodeURIComponent(m.last || '')}&${scopeParam}${masterTlParam}`;
     // v3.40 — har KPI/cell ki apni detail: card ka number == drawer ka number (`self=0` se TL ki apni row

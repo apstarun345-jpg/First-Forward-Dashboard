@@ -12,6 +12,7 @@ FF.pages = FF.pages || {};
   const esc = U.esc, clean = U.clean, fmt = U.fmt;
   const norm = (s) => clean(s).normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
   const digits = (s) => String(s || '').replace(/\D/g, '');
+  const idKey = (s) => clean(s).toUpperCase().replace(/\.0+$/, '').replace(/\s+/g, '');
   const mob10 = (s) => { const d = digits(s); return d.length >= 10 ? d.slice(-10) : d; };
   const MP = () => FF.masterProfile;
   // 🔐 v3.35 — har option admin ke control me (Settings → Users / Access matrix).
@@ -24,7 +25,7 @@ FF.pages = FF.pages || {};
     const kind = isGv ? 'gv-agent' : 'ff-agent';
     if (MP() && MP().loadFor) await MP().loadFor({ kind }).catch(() => {});
     else if (MP() && MP().load) await MP().load().catch(() => {});
-    if (isGv && FF.gv) await Promise.all(['report', 'stockAgent', 'stockAgentClass', 'master'].map((k) => FF.gv.need(k, { only: true })).map((p) => p && p.catch ? p.catch(() => {}) : p));
+    if (isGv && FF.gv) await Promise.all(['report', 'stockAgent', 'stockTl', 'stockTlClass', 'stockAgentClass', 'master'].map((k) => FF.gv.need(k, { only: true })).map((p) => p && p.catch ? p.catch(() => {}) : p));
     else await Promise.all([
       FF.pages.performance && FF.pages.performance.ensureLoaded ? FF.pages.performance.ensureLoaded({ light: true }) : null,
       FF.store.need('agents', { only: true }), FF.store.need('stockAgents', { only: true }), FF.store.need('daily', { only: true }), FF.store.need('agentClass', { only: true })
@@ -441,10 +442,20 @@ FF.pages = FF.pages || {};
   async function loadAgeing(report, opts) {
     if (!report) return null;
     if (!(FF.stockAge && FF.stockAge.compute)) { report.ageState = 'unavailable'; return null; }
-    const person = report.person || {}, ch = report.ch, isTl = report.isTl;
-    const scope = isTl
-      ? { kind: 'tl', key: person.name, ch, title: person.name }
-      : { kind: 'agent', key: person.id || person.name, keys: [person.name, person.id].filter(Boolean), ch, title: person.name };
+    const person = report.person || {}, p = report.p || {}, ch = report.ch, isTl = report.isTl;
+    let scope;
+    if (isTl) {
+      // Team-ageing ko TL display-name se nahi, selected TL ke exact agent IDs/holders se compute karo.
+      // Isse same-name TLs ki ageing merge nahi hoti aur consolidated table ko per-agent buckets milte hain.
+      const holders = [p.selfAgent, ...(p.agents || [])].filter(Boolean);
+      // Use IDs whenever present; name aliases can resolve to another same-name holder in the age index.
+      const keys = [...new Set(holders.flatMap((a) => (a.id ? [a.id] : [a.name]).filter(Boolean).map((x) => clean(x))))];
+      scope = keys.length && keys.length <= 400
+        ? { kind: 'agent', key: keys[0], keys, ch, title: person.name }
+        : { kind: 'tl', key: person.name, ch, title: person.name };
+    } else {
+      scope = { kind: 'agent', key: person.id || person.name, keys: [person.name, person.id].filter(Boolean), ch, title: person.name };
+    }
     report.ageState = 'loading';
     let res = null;
     try { res = await FF.stockAge.compute(scope, { waitMs: (opts && opts.waitMs) || AGE_WAIT_MS }); } catch { res = null; }
@@ -485,9 +496,9 @@ FF.pages = FF.pages || {};
       lines.push('', `*⏳ Stock Ageing (Total ${fmt(age.total)} tags):*`);
       lines.push(`• Buckets: ${age.buckets.filter((b) => b.n > 0).map((b) => `${b.label}: ${fmt(b.n)}`).join(' · ')}`);
       if ((age.byClass || []).length) {
-        age.byClass.forEach((c) => lines.push(`  - ${c.cls}: Total ${fmt(c.total)} (30+d: ${fmt(c.old30)} · 60+d: ${fmt(c.old60)})`));
+        age.byClass.forEach((c) => lines.push(`  - ${c.cls}: Total ${fmt(c.total)} (30+d: ${fmt(c.old30)} · 90+d: ${fmt(c.old60)})`));
       }
-      lines.push(`*∑ Ageing Grand Total: ${fmt(age.total)} tags (0–30d: ${fmt(age.total - age.old30)} · 30+d Old: ${fmt(age.old30)} · 60+d Critical: ${fmt(age.old60)})*`);
+      lines.push(`*∑ Ageing Grand Total: ${fmt(age.total)} tags (0–30d: ${fmt(age.total - age.old30)} · 30+d Old: ${fmt(age.old30)} · 90+d Critical: ${fmt(age.old60)})*`);
     }
 
     if (r.isTl && S.list.length) {
@@ -529,7 +540,7 @@ FF.pages = FF.pages || {};
     }
     if (age && age.total) {
       rows.push([]);
-      rows.push(['Stock Ageing Class', ...age.buckets.map((b) => b.label), '30+d Old', '60+d Critical', 'Total Stock']);
+      rows.push(['Stock Ageing Class', ...age.buckets.map((b) => b.label), '30+d Old', '90+d Critical', 'Total Stock']);
       for (const c of age.byClass || []) {
         rows.push([c.cls, ...age.buckets.map((b) => c[b.key] || 0), c.old30, c.old60, c.total]);
       }
@@ -566,7 +577,7 @@ FF.pages = FF.pages || {};
         ...(r.isTl && p.tlStock && p.tlStock.own && p.tlStock.agents ? [['TL own stock (TL ke paas)', p.tlStock.own.total], ['Agents stock (agents ke paas)', p.tlStock.agents.total], ['Stock formula', 'TL ke paas (own) + agents ke paas = TL total — TL ki row agents me dobara nahi judti']] : []),
         ['VC4 Stock', t.stockVc4], ['Comm Stock', t.stockComm],
         ['30+d Old Stock', age ? age.old30 : ''],
-        ['60+d Critical Stock', age ? age.old60 : ''],
+        ['90+d Critical Stock', age ? age.old60 : ''],
         ['Generated', new Date().toLocaleString('en-IN')]
       ]
     });
@@ -579,7 +590,7 @@ FF.pages = FF.pages || {};
     if (age && age.total) {
       sheets.push({
         name: 'Stock Ageing',
-        header: ['Class', ...age.buckets.map((b) => b.label), '30+d Old', '60+d Critical', 'Total Stock'],
+        header: ['Class', ...age.buckets.map((b) => b.label), '30+d Old', '90+d Critical', 'Total Stock'],
         rows: (age.byClass || []).map((c) => [c.cls, ...age.buckets.map((b) => c[b.key] || 0), c.old30, c.old60, c.total])
           .concat([['STOCK AGEING GRAND TOTAL', ...age.buckets.map((b) => b.n || 0), age.old30, age.old60, age.total]])
       });
@@ -612,7 +623,7 @@ FF.pages = FF.pages || {};
       { label: `Last Month (${p.lastYm || 'Prev'})`, value: fmt(t.lastTotal), sub: `VC4 ${fmt(t.lastVc4)} · Comm ${fmt(t.lastComm)}`, color: '#7c3aed' },
       { label: 'Growth / Expected', value: t.growth === null || t.growth === undefined ? '—' : `${t.growth >= 0 ? '+' : ''}${t.growth.toFixed(0)}%`, sub: `Expected ${fmt(p.expected)} · ${fmt(p.runRate, true)}/d`, color: (t.growth || 0) >= 0 ? '#16a34a' : '#dc2626' },
       { label: 'Stock in Hand', value: fmt(t.stockTotal), sub: `${r.isTl && p.tlStock && p.tlStock.own && p.tlStock.agents ? `Own ${fmt(p.tlStock.own.total)} + agents ${fmt(p.tlStock.agents.total)} · ` : ''}VC4 ${fmt(t.stockVc4)} · Comm ${fmt(t.stockComm)}`, color: '#0891b2' },
-      { label: '30+d Old Stock', value: age ? fmt(age.old30) : '—', sub: age ? `60+d: ${fmt(age.old60)} · 90+d: ${fmt((age.buckets[4] && age.buckets[4].n) || 0)}` : 'Ageing', color: age && age.old60 ? '#dc2626' : '#d97706' }
+      { label: '30+d Old Stock', value: age ? fmt(age.old30) : '—', sub: age ? `90+d: ${fmt(age.old60)} · 180+d: ${fmt((age.buckets[4] && age.buckets[4].n) || 0)}` : 'Ageing', color: age && age.old60 ? '#dc2626' : '#d97706' }
     ]);
 
     doc.section(`Class-wise Issuance (${p.lastYm || 'Last'} vs ${p.curYm || 'MTD'}) & Stock in Hand`);
@@ -625,9 +636,9 @@ FF.pages = FF.pages || {};
     });
 
     if (age && age.total) {
-      doc.section(`Stock Ageing — ${fmt(age.total)} tags (30+d: ${fmt(age.old30)} · 60+d: ${fmt(age.old60)})`);
+      doc.section(`Stock Ageing — ${fmt(age.total)} tags (30+d: ${fmt(age.old30)} · 90+d: ${fmt(age.old60)})`);
       doc.table({
-        headers: ['Class', ...age.buckets.map((b) => b.label), '30+d Old', '60+d Critical', 'Total'],
+        headers: ['Class', ...age.buckets.map((b) => b.label), '30+d Old', '90+d Critical', 'Total'],
         align: ['left', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right'],
         rows: (age.byClass || []).map((c) => [c.cls, ...age.buckets.map((b) => fmt(c[b.key] || 0)), fmt(c.old30), fmt(c.old60), fmt(c.total)]),
         foot: ['GRAND TOTAL', ...age.buckets.map((b) => fmt(b.n || 0)), fmt(age.old30), fmt(age.old60), fmt(age.total)]
@@ -657,7 +668,9 @@ FF.pages = FF.pages || {};
     const p = r.p;
     const cls = (p.classTable || []).filter((x) => x.cur || x.last || x.stock);
     const stockCls = cls.filter((x) => x.stock > 0);
-    const scopeParam = r.isTl ? `tl=${encodeURIComponent(p.name)}` : `agent=${encodeURIComponent(p.name)}${p.id ? `&agentId=${encodeURIComponent(p.id)}` : ''}`;
+    const scopeParam = r.isTl
+      ? `tl=${encodeURIComponent(p.name)}${(p.stockTlId || p.id) ? `&tlId=${encodeURIComponent(p.stockTlId || p.id)}` : ''}`
+      : `agent=${encodeURIComponent(p.name)}${p.id ? `&agentId=${encodeURIComponent(p.id)}` : ''}${p.tlId ? `&tlId=${encodeURIComponent(p.tlId)}&tl=${encodeURIComponent(p.tlName || '')}` : ''}`;
     const curSpec = `src=${r.ch}&scope=mtd&ym=${encodeURIComponent(p.curYm || '')}&${scopeParam}`;
     const stockSpec = `src=${r.ch}&scope=stock&${scopeParam}`;
 
@@ -711,18 +724,18 @@ FF.pages = FF.pages || {};
       return;
     }
     const chLabel = r.ch === 'gv' ? 'GV Partner' : 'First Forward';
-    const rows = (age.byClass || []).filter((c) => (!filterCls || c.cls === filterCls) && (minDays === 60 ? c.old60 > 0 : minDays === 30 ? c.old30 > 0 : c.total > 0));
+    const rows = (age.byClass || []).filter((c) => (!filterCls || c.cls === filterCls) && (minDays === 90 ? c.old60 > 0 : minDays === 30 ? c.old30 > 0 : c.total > 0));
     const title = `${p.name} · ${filterCls ? `${filterCls} ` : ''}${minDays ? `${minDays}+ Days Old ` : ''}Stock Ageing`;
     const tot30 = U.sum(rows, (c) => c.old30), tot60 = U.sum(rows, (c) => c.old60), totAll = U.sum(rows, (c) => c.total);
     const body = `<div class="dsec">
       <div class="mini-grid">
         <div class="mini-kpi c1"><span class="mini-label">Total Stock</span><b class="mini-value">${fmt(totAll)}</b><span class="mini-foot">${esc(chLabel)}</span></div>
         <div class="mini-kpi c4"><span class="mini-label">30+d Old Stock</span><b class="mini-value">${fmt(tot30)}</b><span class="mini-foot">Needs attention</span></div>
-        <div class="mini-kpi c6"><span class="mini-label">60+d Critical</span><b class="mini-value">${fmt(tot60)}</b><span class="mini-foot">Urgent action</span></div>
+        <div class="mini-kpi c6"><span class="mini-label">90+d Critical</span><b class="mini-value">${fmt(tot60)}</b><span class="mini-foot">Urgent action</span></div>
       </div>
       <div class="table-wrap"><table class="tbl compact">
-        <thead><tr><th>Class</th>${age.buckets.map((b) => `<th class="num">${esc(b.label)}</th>`).join('')}<th class="num">30+d</th><th class="num">60+d</th><th class="num">Total</th></tr></thead>
-        <tbody>${rows.map((c) => `<tr class="clickable" data-kpi="${esc(`src=${r.ch}&scope=stock&${r.isTl ? `tl=${encodeURIComponent(p.name)}` : `agent=${encodeURIComponent(p.name)}${p.id ? `&agentId=${encodeURIComponent(p.id)}` : ''}`}&cls=${encodeURIComponent(c.cls)}`)}"><td><b>${esc(c.cls)}</b></td>${age.buckets.map((b) => `<td class="num">${fmt(c[b.key] || 0)}</td>`).join('')}<td class="num"><b>${fmt(c.old30)}</b></td><td class="num"><b class="${c.old60 ? 'bad' : ''}">${fmt(c.old60)}</b></td><td class="num"><b>${fmt(c.total)}</b></td></tr>`).join('') || '<tr><td colspan="9" class="empty">Is bucket me koi stock nahi hai 🎉</td></tr>'}</tbody>
+        <thead><tr><th>Class</th>${age.buckets.map((b) => `<th class="num">${esc(b.label)}</th>`).join('')}<th class="num">30+d</th><th class="num">90+d</th><th class="num">Total</th></tr></thead>
+        <tbody>${rows.map((c) => `<tr class="clickable" data-kpi="${esc(`${stockSpec}&cls=${encodeURIComponent(c.cls)}`)}"><td><b>${esc(c.cls)}</b></td>${age.buckets.map((b) => `<td class="num">${fmt(c[b.key] || 0)}</td>`).join('')}<td class="num"><b>${fmt(c.old30)}</b></td><td class="num"><b class="${c.old60 ? 'bad' : ''}">${fmt(c.old60)}</b></td><td class="num"><b>${fmt(c.total)}</b></td></tr>`).join('') || '<tr><td colspan="9" class="empty">Is bucket me koi stock nahi hai 🎉</td></tr>'}</tbody>
         <tfoot><tr class="row-total"><td>GRAND TOTAL</td>${age.buckets.map((b) => `<td class="num">${fmt(U.sum(rows, (c) => c[b.key] || 0))}</td>`).join('')}<td class="num">${fmt(tot30)}</td><td class="num">${fmt(tot60)}</td><td class="num">${fmt(totAll)}</td></tr></tfoot>
       </table></div>
     </div>`;
@@ -794,7 +807,7 @@ FF.pages = FF.pages || {};
       { label: `Team MTD (${p.curYm || ''})`, value: fmt(t.curTotal), sub: `VC4 ${fmt(t.curVc4)} · Comm ${fmt(t.curComm)}`, color: '#2563eb' },
       { label: 'Last Month', value: fmt(t.lastTotal), sub: `${fmt(p.agents.length)} agents`, color: '#7c3aed' },
       { label: 'Growth', value: t.growth == null ? '—' : `${t.growth >= 0 ? '+' : ''}${t.growth.toFixed(0)}%`, sub: `Expected ${fmt(p.expected)}`, color: (t.growth || 0) >= 0 ? '#16a34a' : '#dc2626' },
-      { label: 'Stock in Hand', value: fmt(t.stockTotal), sub: `${p.tlStock && p.tlStock.own && p.tlStock.agents ? `Own ${fmt(p.tlStock.own.total)} + agents ${fmt(p.tlStock.agents.total)}${age ? ' · ' : ''}` : ''}${age ? `30+d ${fmt(age.old30)} · 60+d ${fmt(age.old60)}` : ''}`, color: '#0891b2' }
+      { label: 'Stock in Hand', value: fmt(t.stockTotal), sub: `${p.tlStock && p.tlStock.own && p.tlStock.agents ? `Own ${fmt(p.tlStock.own.total)} + agents ${fmt(p.tlStock.agents.total)}${age ? ' · ' : ''}` : ''}${age ? `30+d ${fmt(age.old30)} · 90+d ${fmt(age.old60)}` : ''}`, color: '#0891b2' }
     ]);
     const clsRows = (p.classTable || []).filter((x) => x.cur || x.last || x.stock);
     if (clsRows.length) {
@@ -834,7 +847,7 @@ FF.pages = FF.pages || {};
     if (r.age && r.age.total) {
       sheets.push({
         name: 'Stock Ageing',
-        header: ['Class', ...r.age.buckets.map((b) => b.label), '30+d Old', '60+d Critical', 'Total'],
+        header: ['Class', ...r.age.buckets.map((b) => b.label), '30+d Old', '90+d Critical', 'Total'],
         rows: (r.age.byClass || []).map((c) => [c.cls, ...r.age.buckets.map((b) => c[b.key] || 0), c.old30, c.old60, c.total])
           .concat([['GRAND TOTAL', ...r.age.buckets.map((b) => b.n || 0), r.age.old30, r.age.old60, r.age.total]])
       });
@@ -871,9 +884,9 @@ FF.pages = FF.pages || {};
   function teamAgentsCard(r) {
     const p = r.p, t = p.totals || {}, S = tlSplit(r);
     if (!S.list.length) return '';
-    const tlStockSpec = `src=${r.ch}&scope=stock&tl=${encodeURIComponent(p.name)}`;
+    const tlStockSpec = `src=${r.ch}&scope=stock&tl=${encodeURIComponent(p.name)}${(p.stockTlId || p.id) ? `&tlId=${encodeURIComponent(p.stockTlId || p.id)}` : ''}`;
     const row = (a) => {
-      const aSpec = `src=${r.ch}&scope=stock&agent=${encodeURIComponent(a.name)}${a.id ? `&agentId=${encodeURIComponent(a.id)}` : ''}`;
+      const aSpec = `src=${r.ch}&scope=stock&agent=${encodeURIComponent(a.name)}${a.id ? `&agentId=${encodeURIComponent(a.id)}` : ''}${r.isTl ? `&tl=${encodeURIComponent(p.name)}${(p.stockTlId || p.id) ? `&tlId=${encodeURIComponent(p.stockTlId || p.id)}` : ''}` : ''}`;
       return `<tr class="clickable${a.isSelf ? ' mp-selfrow' : ''}"${a.isSelf ? ` data-kpi="${esc(`${tlStockSpec}&part=own`)}" title="TL ke paas (own) stock ki detail"` : ` data-as-pick="${esc(`${r.ch}-agent|${a.name}`)}"`}><td>${a.isSelf ? '👤 ' : ''}<b>${esc(a.name)}</b>${a.isSelf ? '<span class="mp-tag-self">TL · apna stock</span>' : ''}</td><td class="mono">${esc(a.id || '—')}</td><td class="num">${fmt(a.lastTotal)}</td><td class="num"><b>${fmt(a.curTotal)}</b></td><td class="num">${fmt(a.curVc4)}</td><td class="num">${fmt(a.curComm)}</td><td class="num">${U.pctHtml(a.growth)}</td><td class="num mp-drill" data-kpi="${esc(a.isSelf ? `${tlStockSpec}&part=own` : aSpec)}" role="button" tabindex="0" title="Stock ki detail">${fmt(a.stockTotal)}</td><td><span class="badge ${a.activityStatus === 'Active' ? 'green' : 'red'}">${esc(a.activityStatus || 'Inactive')}</span></td><td>${esc(a.inactiveDuration || '—')}</td><td>${can('share') && !a.isSelf ? `<button class="btn tiny" data-as-wa="${esc([a.name, a.id || '', a.curTotal, a.lastTotal, a.stockTotal, a.activityStatus || 'Inactive', a.inactiveDuration || ''].join('|'))}" title="WhatsApp par is agent ka summary bhejein">📲</button>` : ''}</td></tr>`;
     };
     const foot = (label, cells, cls, spec) => `<tr class="row-total${cls ? ` ${cls}` : ''}"${spec ? ` data-kpi="${esc(spec)}" role="button" tabindex="0"` : ''}><td colspan="2"><b>${label}</b></td>${cells}</tr>`;
@@ -893,16 +906,92 @@ FF.pages = FF.pages || {};
         </table></div>
       </div>`;
   }
+  function teamStockMatrixHtml(r) {
+    if (!r || !r.isTl) return '';
+    const p = r.p || {}, t = p.totals || {}, S = tlSplit(r), age = r.age;
+    const holders = S.list || [];
+    const classKey = (v) => {
+      const s = clean(v).toUpperCase().replace(/\s+/g, '');
+      return /^\d+$/.test(s) ? `VC${s}` : s;
+    };
+    const classSet = new Set();
+    (p.classTable || []).forEach((x) => { if (Number(x.stock) > 0) classSet.add(classKey(x.cls)); });
+    holders.forEach((a) => Object.entries(a.classStock || {}).forEach(([cls, value]) => { if (Number(value) > 0) classSet.add(classKey(cls)); }));
+    (age && age.byClass || []).forEach((x) => { if (Number(x.total) > 0) classSet.add(classKey(x.cls)); });
+    const classes = [...classSet].sort((a, b) => {
+      const an = Number((a.match(/\d+/) || [999])[0]), bn = Number((b.match(/\d+/) || [999])[0]);
+      return (an - bn) || a.localeCompare(b);
+    });
+    if (!classes.length && !holders.length) return '';
+
+    const stockSpec = `src=${r.ch}&scope=stock&tl=${encodeURIComponent(p.name)}${(p.stockTlId || p.id) ? `&tlId=${encodeURIComponent(p.stockTlId || p.id)}` : ''}`;
+    const classValue = (holder, cls) => {
+      const hit = Object.entries(holder && holder.classStock || {}).find(([key]) => classKey(key) === classKey(cls));
+      return hit ? Number(hit[1]) || 0 : 0;
+    };
+    const ageFor = (holder) => {
+      const list = age && Array.isArray(age.byHolder) ? age.byHolder : [];
+      if (!list.length) return null;
+      const id = idKey(holder && holder.id);
+      const exact = id ? list.find((x) => idKey(x.id) === id) : null;
+      if (exact) return exact;
+      const named = list.filter((x) => norm(x.name) === norm(holder && holder.name));
+      return named.find((x) => norm(x.tl) === norm(p.name)) || (named.length === 1 ? named[0] : null);
+    };
+    const ageSum = (list) => {
+      if (!age) return null;
+      return (list || []).reduce((out, holder) => {
+        const h = ageFor(holder);
+        if (!h) return out;
+        out.old30 += Number(h.old30) || 0;
+        out.old60 += Number(h.old60) || 0;
+        out.found = true;
+        return out;
+      }, { old30: 0, old60: 0, found: false });
+    };
+    const cellHtml = (value, spec) => `<td class="num"${value > 0 && spec ? ` data-kpi="${esc(spec)}" role="button" tabindex="0" title="Tag Assignment detail kholein"` : ''}>${value ? fmt(value) : '<span class="dim">0</span>'}</td>`;
+    const rows = holders.map((holder) => {
+      const isSelf = !!holder.isSelf;
+      const holderSpec = isSelf
+        ? `${stockSpec}&part=own`
+        : `src=${r.ch}&scope=stock&agent=${encodeURIComponent(holder.name)}${holder.id ? `&agentId=${encodeURIComponent(holder.id)}` : ''}&tl=${encodeURIComponent(p.name)}${(p.stockTlId || p.id) ? `&tlId=${encodeURIComponent(p.stockTlId || p.id)}` : ''}`;
+      const hAge = ageFor(holder);
+      const classCells = classes.map((cls) => cellHtml(classValue(holder, cls), `${holderSpec}&cls=${encodeURIComponent(cls)}`)).join('');
+      const total = Number(holder.stockTotal) || 0;
+      const age30 = hAge ? fmt(hAge.old30) : '—', age90 = hAge ? fmt(hAge.old60) : '—';
+      return `<tr class="${isSelf ? 'mp-selfrow' : ''}"><td>${isSelf ? '👤 ' : ''}<b>${esc(holder.name)}</b>${isSelf ? '<span class="mp-tag-self">TL · own</span>' : ''}${holder.id ? ` <small class="dim">${esc(holder.id)}</small>` : ''}</td>${classCells}${cellHtml(total, holderSpec)}<td class="num">${age30}</td><td class="num">${age90}</td></tr>`;
+    });
+    const agentRows = (S.agents || []);
+    const agentAge = ageSum(agentRows), ownAge = S.self ? ageSum([S.self]) : null, totalAge = ageSum(holders);
+    const sumClass = (list, cls) => (list || []).reduce((n, a) => n + classValue(a, cls), 0);
+    const totalClassMap = new Map();
+    (p.classTable || []).forEach((x) => totalClassMap.set(classKey(x.cls), Number(x.stock) || 0));
+    if (!totalClassMap.size) classes.forEach((cls) => totalClassMap.set(cls, sumClass(holders, cls)));
+    const ownClassMap = new Map(classes.map((cls) => [cls, S.self ? classValue(S.self, cls) : 0]));
+    const agentClassMap = new Map(classes.map((cls) => [cls, sumClass(agentRows, cls)]));
+    const totalRow = (label, values, total, rowAge, spec, clsName = '') => `<tr class="row-total ${clsName}"${spec ? ` data-kpi="${esc(spec)}" role="button" tabindex="0"` : ''}><td><b>${label}</b></td>${classes.map((cls) => cellHtml(Number(values.get(cls)) || 0, `${spec || stockSpec}&cls=${encodeURIComponent(cls)}`)).join('')}${cellHtml(total, spec)}<td class="num">${rowAge && rowAge.found ? fmt(rowAge.old30) : '—'}</td><td class="num">${rowAge && rowAge.found ? fmt(rowAge.old60) : '—'}</td></tr>`;
+    const head = `<tr><th>Agent / TL</th>${classes.map((cls) => `<th class="num">${esc(cls)}</th>`).join('')}<th class="num">Stock total</th><th class="num">30+d</th><th class="num">90+d</th></tr>`;
+    const foot = [
+      ...(agentRows.length ? [totalRow(`Agents total (${fmt(agentRows.length)})`, agentClassMap, S.has ? S.ag.total : U.sum(agentRows, (x) => x.stockTotal), agentAge, `${stockSpec}&part=team`)] : []),
+      ...(S.self || S.has ? [totalRow('TL own stock', ownClassMap, S.own ? S.own.total : 0, ownAge, `${stockSpec}&part=own`)] : []),
+      totalRow('= TL TOTAL (own + agents)', totalClassMap, t.stockTotal || S.stockTotal || 0, totalAge, stockSpec, 'row-strong')
+    ].join('');
+    const ageHint = age ? 'Ageing Tag Assignment ke tag allocation dates / StockDataa match se.' : 'Ageing abhi load nahi hui.';
+    return `<section class="card as-team-stock-card"><div class="card-head"><h3>📦 Consolidated Agent + TL stock · class-wise + ageing</h3><span class="dim small">${esc(ageHint)}</span></div><div class="table-wrap as-team-stock-wrap"><table class="tbl compact as-team-stock"><thead>${head}</thead><tbody>${rows.join('') || `<tr><td colspan="${classes.length + 4}" class="empty">Team stock holders nahi mile.</td></tr>`}</tbody><tfoot>${foot}</tfoot></table></div><p class="dim small as-team-stock-note">Class cells aur stock totals par click → usi holder / class ki Tag Assignment detail. 90+d ageing = dashboard ka critical ageing bucket.</p></section>`;
+  }
+
   function reportHtml(r) {
     const p = r.p, t = p.totals || {}, age = r.age;
     const chLabel = r.ch === 'gv' ? 'GV Partner' : 'First Forward';
-    const scopeParam = r.isTl ? `tl=${encodeURIComponent(p.name)}` : `agent=${encodeURIComponent(p.name)}${p.id ? `&agentId=${encodeURIComponent(p.id)}` : ''}`;
+    const scopeParam = r.isTl
+      ? `tl=${encodeURIComponent(p.name)}${(p.stockTlId || p.id) ? `&tlId=${encodeURIComponent(p.stockTlId || p.id)}` : ''}`
+      : `agent=${encodeURIComponent(p.name)}${p.id ? `&agentId=${encodeURIComponent(p.id)}` : ''}${p.tlId ? `&tlId=${encodeURIComponent(p.tlId)}&tl=${encodeURIComponent(p.tlName || '')}` : ''}`;
     const curSpec = `src=${r.ch}&scope=mtd&ym=${encodeURIComponent(p.curYm || '')}&${scopeParam}`;
     const lastSpec = `src=${r.ch}&scope=month&ym=${encodeURIComponent(p.lastYm || '')}&${scopeParam}`;
     const stockSpec = `src=${r.ch}&scope=stock&${scopeParam}`;
     // v3.40 — TL stock ka own / agents split do clickable chips bankar (drawer me sirf wahi hissa khulta hai)
     const S = tlSplit(r);
-    const tlStockSpec = `src=${r.ch}&scope=stock&tl=${encodeURIComponent(p.name)}`;
+    const tlStockSpec = `src=${r.ch}&scope=stock&tl=${encodeURIComponent(p.name)}${(p.stockTlId || p.id) ? `&tlId=${encodeURIComponent(p.stockTlId || p.id)}` : ''}`;
     const peopleSpec = `src=${r.ch}&scope=people&tl=${encodeURIComponent(p.name)}&self=0&sort=stock`;
     const splitChips = r.isTl && S.has
       ? `<span class="mp-part own" data-kpi="${esc(`${tlStockSpec}&part=own`)}" role="button" tabindex="0" title="Sirf TL ke paas (own) stock">TL ke paas ${fmt(S.own.total)}</span> + <span class="mp-part team" data-kpi="${esc(`${tlStockSpec}&part=team`)}" role="button" tabindex="0" title="Sirf agents ke paas stock">agents ${fmt(S.ag.total)}</span>`
@@ -941,7 +1030,7 @@ FF.pages = FF.pages || {};
         <div class="kpi g2" data-kpi="${esc(curSpec)}" title="Click karke growth aur run-rate data dekhein"><div class="kpi-top"><span class="kpi-title">Expected</span><span class="kpi-icon">🎯</span></div><div class="kpi-value">${fmt(p.expected)}</div><div class="kpi-foot">${U.pctHtml(t.growth)} · <b>${fmt(p.runRate, true)}</b>/day</div></div>
         <div class="kpi g5" data-kpi="${esc(stockSpec)}" title="Click karke exact stock in hand aur barcodes dekhein"><div class="kpi-top"><span class="kpi-title">📦 Stock in hand</span><span class="kpi-icon">📦</span></div><div class="kpi-value">${fmt(t.stockTotal)}</div><div class="kpi-foot">${splitChips ? `${splitChips} · ` : ''}VC4 <b>${fmt(t.stockVc4)}</b> · Comm <b>${fmt(t.stockComm)}</b></div></div>
         <div class="kpi g4" data-kpi-self="1" data-as-age="30" title="Click karke 30+ din purana stock dekhein"><div class="kpi-top"><span class="kpi-title">30+d old stock</span><span class="kpi-icon">⏳</span></div><div class="kpi-value">${age ? fmt(age.old30) : '—'}</div><div class="kpi-foot">0–30d fresh: <b>${age ? fmt(age.total - age.old30) : '—'}</b></div></div>
-        <div class="kpi g7" data-kpi-self="1" data-as-age="60" title="Click karke 60+ din critical stock dekhein"><div class="kpi-top"><span class="kpi-title">60+d critical</span><span class="kpi-icon">🚨</span></div><div class="kpi-value">${age ? fmt(age.old60) : '—'}</div><div class="kpi-foot">90+d: <b>${age ? fmt((age.buckets[4] && age.buckets[4].n) || 0) : '—'}</b></div></div>
+        <div class="kpi g7" data-kpi-self="1" data-as-age="90" title="Click karke 90+ din critical stock dekhein"><div class="kpi-top"><span class="kpi-title">90+d critical</span><span class="kpi-icon">🚨</span></div><div class="kpi-value">${age ? fmt(age.old60) : '—'}</div><div class="kpi-foot">180+d: <b>${age ? fmt((age.buckets[4] && age.buckets[4].n) || 0) : '—'}</b></div></div>
       </div>
 
       ${r.isTl && (S.has || S.self) ? `<p class="dim small as-split-note">📦 <b>Stock ka hisaab</b> — ${esc(S.text)}. ${S.self ? `TL ki apni row Team Agents table me sabse upar <span class="mp-tag-self">TL · apna stock</span> bankar dikhi hai (agents ke jod me nahi).` : 'TL ke paas abhi apna stock nahi, isliye TL total = agents ka jod.'} <span class="mp-linkish" data-kpi="${esc(peopleSpec)}" role="button" tabindex="0" title="In agents ki poori list">Agents ki list 👉</span></p>` : ''}
@@ -954,14 +1043,14 @@ FF.pages = FF.pages || {};
           <div class="card-head"><h3>🚗 Class-wise Issuance &amp; Stock</h3><span class="dim small">${esc(p.lastYm || 'Last')} → ${esc(p.curYm || 'MTD')} · Row par click karke details kholein</span></div>
           <div class="table-wrap"><table class="tbl compact">
             <thead><tr><th>Class</th><th class="num">${esc(p.lastYm || 'Last')}</th><th class="num">${esc(p.curYm || 'MTD')}</th><th class="num">Growth</th><th class="num">Stock</th></tr></thead>
-            <tbody>${clsRows.map((c) => `<tr class="clickable" data-kpi="${esc(`${c.cur > 0 ? curSpec : lastSpec}&cls=${encodeURIComponent(c.cls)}`)}"><td><b>${esc(c.cls)}</b></td><td class="num">${fmt(c.last)}</td><td class="num"><b>${fmt(c.cur)}</b></td><td class="num">${U.pctHtml(c.growth)}</td><td class="num">${fmt(c.stock)}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">No class rows</td></tr>'}</tbody>
+            <tbody>${clsRows.map((c) => `<tr class="clickable" data-kpi="${esc(`${stockSpec}&cls=${encodeURIComponent(c.cls)}`)}"><td><b>${esc(c.cls)}</b></td><td class="num">${fmt(c.last)}</td><td class="num"><b>${fmt(c.cur)}</b></td><td class="num">${U.pctHtml(c.growth)}</td><td class="num">${fmt(c.stock)}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">No class rows</td></tr>'}</tbody>
             <tfoot><tr class="row-total"><td><b>Grand Total</b></td><td class="num"><b>${fmt(t.lastTotal)}</b></td><td class="num"><b>${fmt(t.curTotal)}</b></td><td class="num">${U.pctHtml(t.growth)}</td><td class="num"><b>${fmt(t.stockTotal)}</b></td></tr></tfoot>
           </table></div>
         </div>
         <div class="card">
-          <div class="card-head"><h3>⏳ Stock Ageing${age ? ` · ${fmt(age.total)} tags` : ''}</h3>${age ? `<span class="dim small">30+d: <b>${fmt(age.old30)}</b> · 60+d: <b class="bad">${fmt(age.old60)}</b></span>` : ''}</div>
+          <div class="card-head"><h3>⏳ Stock Ageing${age ? ` · ${fmt(age.total)} tags` : ''}</h3>${age ? `<span class="dim small">30+d: <b>${fmt(age.old30)}</b> · 90+d: <b class="bad">${fmt(age.old60)}</b></span>` : ''}</div>
           ${age && age.total ? `<div class="table-wrap"><table class="tbl compact">
-            <thead><tr><th>Class</th>${age.buckets.map((b) => `<th class="num">${esc(b.label)}</th>`).join('')}<th class="num">30+d</th><th class="num">60+d</th><th class="num">Total</th></tr></thead>
+            <thead><tr><th>Class</th>${age.buckets.map((b) => `<th class="num">${esc(b.label)}</th>`).join('')}<th class="num">30+d</th><th class="num">90+d</th><th class="num">Total</th></tr></thead>
             <tbody>${(age.byClass || []).map((c) => `<tr class="clickable" data-as-age-cls="${esc(c.cls)}"><td><b>${esc(c.cls)}</b></td>${age.buckets.map((b) => `<td class="num">${fmt(c[b.key] || 0)}</td>`).join('')}<td class="num"><b>${fmt(c.old30)}</b></td><td class="num"><b class="${c.old60 ? 'bad' : ''}">${fmt(c.old60)}</b></td><td class="num"><b>${fmt(c.total)}</b></td></tr>`).join('')}</tbody>
             <tfoot><tr class="row-total"><td><b>Grand Total</b></td>${age.buckets.map((b) => `<td class="num"><b>${fmt(b.n || 0)}</b></td>`).join('')}<td class="num"><b>${fmt(age.old30)}</b></td><td class="num"><b class="${age.old60 ? 'bad' : ''}">${fmt(age.old60)}</b></td><td class="num"><b>${fmt(age.total)}</b></td></tr></tfoot>
           </table></div>` : (age ? '<div class="card-body empty">Is waqt koi pending stock ageing nahi hai 🎉</div>' : ageStateHtml(r))}
@@ -969,6 +1058,7 @@ FF.pages = FF.pages || {};
       </div>
 
       ${r.isTl ? teamAgentsCard(r) : ''}
+      ${r.isTl ? teamStockMatrixHtml(r) : ''}
     </div>`;
   }
 

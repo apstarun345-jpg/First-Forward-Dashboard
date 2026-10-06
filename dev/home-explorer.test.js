@@ -72,7 +72,7 @@ test('date bounds and account channel access are enforced even when All channels
   assert.equal(explorer.filterRows(rows, { from: currentKey, to: currentKey }, ['ff', 'gv']).length, 2);
 });
 
-test('bar-chart UI exposes the requested filters and sends per-channel class counts to the chart', () => {
+test('date-wise bar UI exposes filters and sends per-channel daily totals to the chart', () => {
   chartCalls.length = 0;
   explorer.state.from = monthFilters.from; explorer.state.to = monthFilters.to;
   explorer.state.channels.clear(); explorer.state.types.clear(); explorer.state.classes.clear();
@@ -87,9 +87,37 @@ test('bar-chart UI exposes the requested filters and sends per-channel class cou
   assert.match(html, /type="date"/);
   assert.match(html, /data-home-exp-range="last-month"/);
   assert.match(html, /VC4/); assert.match(html, /VC20/); assert.match(html, /VC5\+/);
+  assert.match(html, /Issuance mix · date-wise/);
   assert.equal(chartCalls.length, 1);
-  assert.deepEqual(chartCalls[0].labels, ['VC4', 'VC20', 'VC5+']);
-  assert.deepEqual(chartCalls[0].series.map((series) => series.values), [[4, 7, 5], [0, 2, 3]]);
+  assert.equal(chartCalls[0].labels.length, U.daysInMonth(ym));
+  assert.equal(chartCalls[0].tipLabels[0], `${U.labelDateKey(priorKey, true)} · ${priorKey}`);
+  assert.deepEqual(chartCalls[0].series.map((series) => series.values.slice(0, 2)), [[12, 4], [3, 2]]);
+  assert.ok(chartCalls[0].series.every((series) => series.values.length === chartCalls[0].labels.length));
+});
+
+test('daily aggregation is date-bounded, date-complete, and channel-filter aware', () => {
+  const filtered = explorer.filterRows(rows, { from: priorKey, to: currentKey }, ['ff', 'gv']);
+  const daily = explorer.daily(filtered, { from: priorKey, to: currentKey }, ['ff', 'gv']);
+  assert.deepEqual(daily.keys, [priorKey, currentKey]);
+  assert.deepEqual(daily.byChannel.ff, [12, 4]);
+  assert.deepEqual(daily.byChannel.gv, [3, 2]);
+  const gvOnly = explorer.daily(explorer.filterRows(rows, { from: priorKey, to: currentKey, channels: new Set(['gv']) }, ['ff', 'gv']), { from: priorKey, to: currentKey }, ['gv']);
+  assert.deepEqual(gvOnly.byChannel.gv, [3, 2]);
+  assert.deepEqual(gvOnly.byChannel.ff, [0, 0]);
+});
+
+test('All dates caps the rendered daily axis at the latest 366 dates, with the cap disclosed', () => {
+  explorer.state.from = ''; explorer.state.to = '';
+  explorer.state.channels.clear(); explorer.state.types.clear(); explorer.state.classes.clear();
+  const longRows = [
+    { key: '2023-01-01', channel: 'ff', group: 'VC4', n: 2 },
+    { key: '2025-12-31', channel: 'gv', group: 'VC5+', n: 3 }
+  ];
+  const daily = explorer.daily(longRows, { from: '', to: '' }, ['ff', 'gv']);
+  assert.equal(daily.capped, true);
+  assert.equal(daily.keys.length, 366);
+  assert.equal(daily.keys.at(-1), '2025-12-31');
+  assert.match(explorer.html(longRows, ['ff', 'gv']), /latest 366 daily bars/i);
 });
 
 test('saved All dates range remains unbounded after a reload', () => {
