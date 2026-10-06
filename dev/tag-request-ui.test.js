@@ -357,7 +357,7 @@ test('🌐 Meri requests panel — bina token / login form par nahi dikhta (koi 
 
 test('📇 purana address suggestion — same agent dobara chuno to purana mobile/address/pincode ek click me', () => {
   const saved = { mobile: '9876500001', address: '24, Shanti Nagar, Sodala, Jaipur', pincode: '302019', source: 'Address' };
-  const chip = TR._test.contactSuggestHtml({ id: 'r1', suggest: saved, mobile: '', address: '', pincode: '' });
+  const chip = TR._test.contactSuggestHtml({ id: 'r1', suggest: { ...saved, lastRequestAt: '2026-10-05T05:00:00.000Z' }, mobile: '', address: '', pincode: '' });
   assert.match(chip, /data-tr-fill-old="r1"/, 'chip par click handler hai');
   assert.ok(chip.includes('9876500001'), 'purana mobile dikhta hai');
   assert.ok(chip.includes('24, Shanti Nagar, Sodala, Jaipur'), 'purana address dikhta hai');
@@ -365,11 +365,13 @@ test('📇 purana address suggestion — same agent dobara chuno to purana mobil
   assert.ok(chip.includes('Address book'), 'source batata hai ki address kahan se aaya');
 
   // Employee ne khud alag address type kiya → suggestion chhupni NAHI chahiye (wohi maang thi).
-  const typed = TR._test.contactSuggestHtml({ id: 'r2', suggest: saved, mobile: '9000000000', address: 'Naya address, Jaipur', pincode: '302001' });
+  const typed = TR._test.contactSuggestHtml({ id: 'r2', suggest: { ...saved, lastRequestAt: '2026-10-05T05:00:00.000Z' }, mobile: '9000000000', address: 'Naya address, Jaipur', pincode: '302001' });
   assert.match(typed, /data-tr-fill-old="r2"/, 'khud type kiya ho tab bhi purana address suggest hota hai');
 
   // Purana address pehle se same bhara hua → chip bekaar, dikhegi nahi.
-  assert.equal(TR._test.contactSuggestHtml({ id: 'r3', suggest: saved, mobile: '9876500001', address: '24, Shanti Nagar, Sodala, Jaipur', pincode: '302019' }), '');
+  const same = TR._test.contactSuggestHtml({ id: 'r3', suggest: { ...saved, lastRequestAt: '2026-10-05T05:00:00.000Z' }, mobile: '9876500001', address: '24, Shanti Nagar, Sodala, Jaipur', pincode: '302019' });
+  assert.ok(same.includes('Last request:'), 'last request date remains visible even when details are already filled');
+  assert.ok(same.includes('05 Oct 2026'), 'last request date formatted for employee');
   // Koi purana record nahi / khaali record → chip nahi.
   assert.equal(TR._test.contactSuggestHtml({ id: 'r4', mobile: '', address: '', pincode: '' }), '');
   assert.equal(TR._test.contactSuggestHtml({ id: 'r5', suggest: { mobile: '', address: '', pincode: '' } }), '');
