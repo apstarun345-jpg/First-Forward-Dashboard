@@ -1551,6 +1551,9 @@ body.colorful .from-hdr { color: #166534; }
           close();
           if (!g) { U.toast('TL data nahi mila', 'warn'); return; }
           row.isTl = true; row.tlFilter = ''; row.agentId = ''; row.name = g.name; row.tl = g.name; row.channel = g.channel;
+          // Agent/TL change means contact belongs to the previous selection — clear it immediately.
+          row.mobile = ''; row.dispatchName = ''; row.address = ''; row.pincode = '';
+          row.fromBook = false; row.contactManual = false; row.addressSource = '';
           if (state.errs[row.id]) delete state.errs[row.id].agent;
           rerenderCard('[data-tr-a="dispatchName"]');
           U.toast(`👥 TL ${g.name} ka poora data neeche hai — dispatch name bharo ya uska koi agent chuno`, 'info');
@@ -1576,7 +1579,17 @@ body.colorful .from-hdr { color: #166534; }
         if (row.isTl) { row.isTl = false; const slot = card.querySelector('.tr-tl-slot'); if (slot) slot.innerHTML = ''; }
         const d = digits(inp.value);
         row.agentId = d.length >= 3 && !/[a-z]/i.test(inp.value) ? d : '';
-        row.fromBook = false;
+        // 🔄 Agent naam/ID badalte hi pichhle agent ki contact details turant hatao.
+        // Isse galat mobile/address naye agent ke saath submit nahi hota. Naye agent ko select
+        // karte hi applyPick() us agent ka saved contact dobara auto-fill kar sakta hai.
+        row.mobile = ''; row.dispatchName = ''; row.address = ''; row.pincode = '';
+        row.fromBook = false; row.contactManual = false; row.addressSource = '';
+        ['mobile', 'dispatchName', 'pincode'].forEach((key) => {
+          const el = card.querySelector('[data-tr-a="' + key + '"]');
+          if (el) el.value = '';
+        });
+        const addressEl = card.querySelector('[data-tr-a="address"]');
+        if (addressEl) addressEl.value = '';
         // Naya/ adhura naam = purane agent ka address suggestion ab maayne ka nahi.
         if (row.suggest) { row.suggest = null; const cs = card.querySelector('[data-tr-suggest-slot]'); if (cs) cs.innerHTML = ''; }
         clearErr(card, row.id, 'agent');
