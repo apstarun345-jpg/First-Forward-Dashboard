@@ -73,3 +73,453 @@ html.mobile-ui .drawer-body { padding-bottom: max(16px, env(safe-area-inset-bott
 
 /* 9) Installed PWA par duplicate footers hamesha hide (HTML me do footers hain) */
 html.mobile-ui .site-footer, html.mobile-ui .app-footer { display: none !important; }
+
+
+/* =================================================================================================
+   v3.66 — 📱 Native PWA shell refresh
+   Goal: installed PWA / Android / iPhone should feel like an app, not a desktop page squeezed
+   into a phone viewport. Desktop remains untouched because every rule is scoped to .mobile-ui.
+   ================================================================================================= */
+html.mobile-ui {
+  background: #f5f7fb !important;
+  color: #111827;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  overscroll-behavior-y: none;
+  -webkit-tap-highlight-color: transparent;
+}
+html.mobile-ui body {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  min-height: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow-x: hidden !important;
+  background: #f5f7fb !important;
+  font-size: 15px !important;
+  line-height: 1.42 !important;
+  overscroll-behavior-y: none !important;
+}
+html.mobile-ui .content {
+  display: flex !important;
+  flex-direction: column !important;
+  width: 100% !important;
+  max-width: none !important;
+  min-width: 0 !important;
+  min-height: 100dvh !important;
+  margin-left: 0 !important;
+}
+html.mobile-ui .sidebar {
+  display: none !important;
+}
+
+/* Compact native app bar — only essential controls remain on top. */
+html.mobile-ui .topbar {
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 1100 !important;
+  width: 100% !important;
+  min-height: 58px !important;
+  height: 58px !important;
+  padding: max(7px, env(safe-area-inset-top, 0px)) max(10px, env(safe-area-inset-right, 0px)) 7px max(10px, env(safe-area-inset-left, 0px)) !important;
+  gap: 6px !important;
+  background: rgba(255,255,255,.97) !important;
+  border-bottom: 1px solid #e5eaf2 !important;
+  box-shadow: 0 2px 12px rgba(15,23,42,.06) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+html.mobile-ui .topbar .top-title {
+  min-width: 0 !important;
+  max-width: none !important;
+  flex: 1 1 auto !important;
+  font-size: 16px !important;
+  line-height: 1.15 !important;
+  font-weight: 850 !important;
+  letter-spacing: -.15px !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+html.mobile-ui .topbar .top-actions {
+  display: flex !important;
+  flex: 0 0 auto !important;
+  gap: 4px !important;
+  margin-left: auto !important;
+  align-items: center !important;
+  flex-wrap: nowrap !important;
+}
+html.mobile-ui #menu-btn,
+html.mobile-ui #focus-toggle,
+html.mobile-ui #top-more {
+  display: none !important;
+}
+html.mobile-ui #top-refresh,
+html.mobile-ui #notification-btn,
+html.mobile-ui #user-btn {
+  width: 40px !important;
+  min-width: 40px !important;
+  height: 40px !important;
+  min-height: 40px !important;
+  border-radius: 12px !important;
+}
+html.mobile-ui .user-btn {
+  padding: 4px !important;
+  border-radius: 12px !important;
+}
+html.mobile-ui .user-btn-text,
+html.mobile-ui .user-btn .chev {
+  display: none !important;
+}
+html.mobile-ui .top-actions > [data-top-secondary="1"] {
+  display: none !important;
+}
+
+/* Real app content width: no oversized desktop gutters, no accidental 1600px canvas. */
+html.mobile-ui .main {
+  flex: 1 1 auto !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  padding: 12px 10px calc(var(--mobile-nav-h) + env(safe-area-inset-bottom, 0px) + 14px) !important;
+}
+html.mobile-ui .page,
+html.mobile-ui .page-head,
+html.mobile-ui .page-body,
+html.mobile-ui .card,
+html.mobile-ui .panel,
+html.mobile-ui .table-card,
+html.mobile-ui .report-card,
+html.mobile-ui .chart-card,
+html.mobile-ui .grid,
+html.mobile-ui .cards-grid,
+html.mobile-ui .kpi-grid,
+html.mobile-ui .mini-grid,
+html.mobile-ui .g-2,
+html.mobile-ui .g-3,
+html.mobile-ui .g-4,
+html.mobile-ui .g-2-1,
+html.mobile-ui .kpi {
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+html.mobile-ui .page-head {
+  display: flex !important;
+  align-items: flex-start !important;
+  flex-direction: column !important;
+  gap: 6px !important;
+  margin: 2px 2px 12px !important;
+}
+html.mobile-ui .page-head h1,
+html.mobile-ui .page-title,
+html.mobile-ui h1 {
+  margin: 0 !important;
+  font-size: 22px !important;
+  line-height: 1.18 !important;
+  letter-spacing: -.35px !important;
+}
+html.mobile-ui .page-head .sub,
+html.mobile-ui .page-head .dim,
+html.mobile-ui .sub {
+  max-width: 100% !important;
+  font-size: 12px !important;
+  line-height: 1.38 !important;
+}
+html.mobile-ui .head-actions,
+html.mobile-ui .card-right,
+html.mobile-ui .toolbar,
+html.mobile-ui .table-tools {
+  max-width: 100% !important;
+}
+html.mobile-ui .head-actions {
+  display: flex !important;
+  width: 100% !important;
+  overflow-x: auto !important;
+  flex-wrap: nowrap !important;
+  gap: 6px !important;
+  padding-bottom: 2px !important;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x !important;
+}
+html.mobile-ui .head-actions::-webkit-scrollbar { display: none; }
+
+/* Cards: flatter, tighter, quicker to paint. */
+html.mobile-ui .card,
+html.mobile-ui .panel,
+html.mobile-ui .table-card,
+html.mobile-ui .report-card,
+html.mobile-ui .chart-card {
+  width: 100% !important;
+  margin-bottom: 10px !important;
+  border-radius: 15px !important;
+  border: 1px solid #e4e9f2 !important;
+  box-shadow: 0 2px 10px rgba(15,23,42,.045) !important;
+  transform: none !important;
+  transition: border-color .15s ease, box-shadow .15s ease !important;
+  contain: layout paint;
+}
+html.mobile-ui .card:hover,
+html.mobile-ui .panel:hover,
+html.mobile-ui .kpi:hover {
+  transform: none !important;
+  box-shadow: 0 2px 10px rgba(15,23,42,.045) !important;
+}
+html.mobile-ui .card-head {
+  padding: 12px 13px 0 !important;
+  gap: 7px !important;
+}
+html.mobile-ui .card-body {
+  padding: 11px 13px 13px !important;
+}
+
+/* KPI cards: 2-column phone dashboard, single column on very narrow phones. */
+html.mobile-ui .kpi-grid,
+html.mobile-ui .kpi-grid.six,
+html.mobile-ui .mini-grid,
+html.mobile-ui .cards-grid {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 8px !important;
+  width: 100% !important;
+}
+html.mobile-ui .kpi {
+  min-height: 104px !important;
+  padding: 11px !important;
+  border-radius: 14px !important;
+}
+html.mobile-ui .kpi-title {
+  font-size: 10px !important;
+  line-height: 1.15 !important;
+}
+html.mobile-ui .kpi-value {
+  margin: 6px 0 3px !important;
+  font-size: 24px !important;
+  line-height: 1 !important;
+}
+html.mobile-ui .kpi-foot {
+  font-size: 10px !important;
+  line-height: 1.25 !important;
+}
+html.mobile-ui .mini-kpi {
+  min-width: 0 !important;
+  padding: 10px !important;
+  border-radius: 13px !important;
+}
+html.mobile-ui .mini-value {
+  font-size: 19px !important;
+}
+
+/* Forms and controls: thumb-friendly, one clean column where needed. */
+html.mobile-ui .field,
+html.mobile-ui label.field,
+html.mobile-ui .form-grid,
+html.mobile-ui .tr-agent-grid,
+html.mobile-ui .tr-contact-grid {
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+html.mobile-ui .form-grid,
+html.mobile-ui .tr-agent-grid,
+html.mobile-ui .tr-contact-grid {
+  grid-template-columns: 1fr !important;
+}
+html.mobile-ui .tr-qty-list {
+  grid-template-columns: 1fr 1fr !important;
+}
+html.mobile-ui input,
+html.mobile-ui select,
+html.mobile-ui textarea {
+  max-width: 100% !important;
+  border-radius: 11px !important;
+}
+html.mobile-ui .btn,
+html.mobile-ui button,
+html.mobile-ui .input,
+html.mobile-ui select,
+html.mobile-ui textarea {
+  touch-action: manipulation !important;
+}
+html.mobile-ui .btn:not(.small),
+html.mobile-ui .input,
+html.mobile-ui select {
+  min-height: 44px !important;
+}
+html.mobile-ui .btn.small,
+html.mobile-ui .icon-btn.small {
+  min-height: 38px !important;
+}
+
+/* Horizontal controls become native swipe strips instead of wrapped desktop toolbars. */
+html.mobile-ui .toolbar,
+html.mobile-ui .table-tools,
+html.mobile-ui .tr-req-actions,
+html.mobile-ui .tr-req-filter,
+html.mobile-ui .tr-sb-tools,
+html.mobile-ui .tr-sb-chips,
+html.mobile-ui .tr-chips,
+html.mobile-ui .tr-channel-filter {
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  overflow-x: auto !important;
+  max-width: 100% !important;
+  gap: 6px !important;
+  scrollbar-width: none !important;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y !important;
+}
+html.mobile-ui .toolbar::-webkit-scrollbar,
+html.mobile-ui .table-tools::-webkit-scrollbar,
+html.mobile-ui .tr-req-actions::-webkit-scrollbar,
+html.mobile-ui .tr-req-filter::-webkit-scrollbar,
+html.mobile-ui .tr-sb-tools::-webkit-scrollbar,
+html.mobile-ui .tr-sb-chips::-webkit-scrollbar,
+html.mobile-ui .tr-chips::-webkit-scrollbar,
+html.mobile-ui .tr-channel-filter::-webkit-scrollbar { display:none; }
+html.mobile-ui .tr-req-search,
+html.mobile-ui .tr-sb-search,
+html.mobile-ui .search-input {
+  min-width: 180px !important;
+  flex: 1 0 180px !important;
+}
+
+/* Data tables stay inside their own swipe area; the page itself remains vertical-scrollable. */
+html.mobile-ui .table-wrap,
+html.mobile-ui .tbl-wrap,
+html.mobile-ui .data-table-wrap {
+  width: 100% !important;
+  max-width: 100% !important;
+  overflow-x: auto !important;
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch !important;
+  overscroll-behavior: contain;
+  touch-action: pan-x pan-y !important;
+  border-radius: 12px;
+}
+html.mobile-ui table {
+  max-width: none !important;
+}
+html.mobile-ui .table-wrap.tall,
+html.mobile-ui .tbl-wrap.tall,
+html.mobile-ui .data-table-wrap.tall {
+  max-height: min(62dvh, 560px) !important;
+}
+
+/* Native bottom navigation — compact floating-safe area, no oversized desktop bar. */
+html.mobile-ui #mobile-nav.mobile-nav {
+  position: fixed !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  z-index: 1200 !important;
+  width: 100% !important;
+  min-height: 66px !important;
+  height: auto !important;
+  padding: 5px max(7px, env(safe-area-inset-left, 0px)) max(6px, env(safe-area-inset-bottom, 0px)) !important;
+  grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+  gap: 2px !important;
+  background: rgba(255,255,255,.98) !important;
+  border-top: 1px solid #e1e7f0 !important;
+  box-shadow: 0 -4px 18px rgba(15,23,42,.08) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+html.mobile-ui .mobile-nav-item,
+html.mobile-ui .mobile-nav-item.mobile-nav-action {
+  min-width: 0 !important;
+  min-height: 54px !important;
+  height: 54px !important;
+  padding: 4px 2px !important;
+  border-radius: 13px !important;
+  color: #64748b !important;
+  transition: background .14s ease, color .14s ease, transform .1s ease !important;
+}
+html.mobile-ui .mobile-nav-item.active {
+  color: var(--brand) !important;
+  background: color-mix(in srgb, var(--brand) 10%, #fff) !important;
+}
+html.mobile-ui .mobile-nav-item span {
+  width: 32px !important;
+  height: 27px !important;
+  margin: 0 auto !important;
+}
+html.mobile-ui #mobile-nav .mnav-ico {
+  width: 22px !important;
+  height: 22px !important;
+}
+html.mobile-ui .mobile-nav-item small {
+  font-size: 10px !important;
+  line-height: 1.05 !important;
+  font-weight: 850 !important;
+  text-align: center !important;
+}
+
+/* Native action sheet/drawer: full-width, reachable with the thumb, app-like. */
+html.mobile-ui .drawer-backdrop {
+  z-index: 1300 !important;
+  background: rgba(15,23,42,.42) !important;
+  backdrop-filter: none !important;
+}
+html.mobile-ui .drawer {
+  z-index: 1301 !important;
+  left: 0 !important;
+  right: 0 !important;
+  top: auto !important;
+  bottom: 0 !important;
+  width: 100% !important;
+  max-width: none !important;
+  max-height: 88dvh !important;
+  border-radius: 20px 20px 0 0 !important;
+  box-shadow: 0 -12px 34px rgba(15,23,42,.18) !important;
+}
+html.mobile-ui .drawer-head {
+  padding: 13px 14px !important;
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 2 !important;
+  background: #fff !important;
+}
+html.mobile-ui .drawer-body {
+  padding: 10px 13px calc(14px + env(safe-area-inset-bottom, 0px)) !important;
+}
+
+/* Shell-only text selection is off, content remains selectable/copyable. */
+html.mobile-ui .topbar,
+html.mobile-ui #mobile-nav,
+html.mobile-ui .sidebar,
+html.mobile-ui .drawer-head {
+  -webkit-user-select: none !important;
+  user-select: none !important;
+}
+html.mobile-ui .topbar button,
+html.mobile-ui #mobile-nav button,
+html.mobile-ui .sidebar button {
+  -webkit-touch-callout: none !important;
+}
+
+/* Reduce unnecessary animation/shadow work on phones while keeping a short native transition. */
+html.mobile-ui .page {
+  animation: ffMobilePageIn .16s ease-out both !important;
+}
+@keyframes ffMobilePageIn {
+  from { opacity: .55; transform: translate3d(0, 3px, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+html.mobile-ui .topbar,
+html.mobile-ui .mobile-nav,
+html.mobile-ui .drawer,
+html.mobile-ui .notification-pop,
+html.mobile-ui .user-menu {
+  will-change: transform;
+}
+@media (max-width: 380px) {
+  html.mobile-ui .main { padding-left: 8px !important; padding-right: 8px !important; }
+  html.mobile-ui .kpi-grid,
+  html.mobile-ui .kpi-grid.six,
+  html.mobile-ui .mini-grid,
+  html.mobile-ui .cards-grid { gap: 7px !important; }
+  html.mobile-ui .kpi { min-height: 96px !important; }
+  html.mobile-ui .kpi-value { font-size: 22px !important; }
+}
