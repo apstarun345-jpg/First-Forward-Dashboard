@@ -2454,6 +2454,14 @@ body.colorful .from-hdr { color: #166534; }
       <div data-tr-rc-host></div>
       <div data-tr-nc-host></div>
       <div class="table-wrap tall tr-req-wrap"><table class="tbl tr-req-tbl">
+        <colgroup>
+          <col class="tr-col-sel"><col class="tr-col-date"><col class="tr-col-employee"><col class="tr-col-agent"><col class="tr-col-contact">
+          ${isAdmin() ? '<col class="tr-col-courier">' : ''}
+          <col class="tr-col-stock-total"><col class="tr-col-stock-core"><col class="tr-col-stock-comm">
+          <col class="tr-col-last"><col class="tr-col-current"><col class="tr-col-rate"><col class="tr-col-expected"><col class="tr-col-growth">
+          ${isAdmin() ? '<col class="tr-col-suggest">' : ''}
+          <col class="tr-col-requested"><col class="tr-col-total"><col class="tr-col-status"><col class="tr-col-actions">
+        </colgroup>
         <thead>
           <tr>
             <th rowspan="2" class="tr-c-sel"></th><th rowspan="2">Date · ID</th><th rowspan="2">Employee</th><th rowspan="2">Agent</th><th rowspan="2">📍 Mobile · Address</th>
