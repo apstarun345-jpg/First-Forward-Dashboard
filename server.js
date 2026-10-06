@@ -4311,6 +4311,22 @@ async function handleApi(req, res, url) {
     } catch { return sendText(res, 404, 'Icon not found'); }
   }
 
+  // 🎭 Maskable icon (Android adaptive shape) — admin ne custom icon lagaya ho to wahi, warna safe-zone padded default.
+  if (p === '/api/pwa/icon/maskable-192' || p === '/api/pwa/icon/maskable-512') {
+    if (method !== 'GET' && method !== 'HEAD') return sendText(res, 405, 'Method not allowed');
+    const is192 = p.endsWith('-192');
+    const data = String(db.settings && db.settings[is192 ? 'pwaIcon192' : 'pwaIcon512'] || '');
+    const comma = data.indexOf(',');
+    if (data.startsWith('data:image/') && comma > 0 && data.slice(0, comma).endsWith(';base64')) {
+      const buf = Buffer.from(data.slice(comma + 1), 'base64');
+      return sendMaybeCompressed(req, res, 200, data.slice(5, comma - 7), buf, { 'Cache-Control': 'no-cache' });
+    }
+    try {
+      const buf = await fs.readFile(path.join(__dirname, is192 ? 'icon-maskable-192.png' : 'icon-maskable-512.png'));
+      return sendMaybeCompressed(req, res, 200, 'image/png', buf, { 'Cache-Control': 'no-cache' });
+    } catch { return sendText(res, 404, 'Icon not found'); }
+  }
+
   if (p === '/api/pwa/manifest' && method === 'GET') {
     const s = db.settings || {};
     return sendJson(res, 200, {
@@ -4328,8 +4344,10 @@ async function handleApi(req, res, url) {
       theme_color: (s.theme && s.theme.accent) || '#111214',
       categories: ['business', 'productivity', 'finance'],
       icons: [
-        { src: '/api/pwa/icon/192', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
-        { src: '/api/pwa/icon/512', sizes: '512x512', type: 'image/png', purpose: 'any maskable' }
+        { src: '/api/pwa/icon/192', sizes: '192x192', type: 'image/png', purpose: 'any' },
+        { src: '/api/pwa/icon/512', sizes: '512x512', type: 'image/png', purpose: 'any' },
+        { src: '/api/pwa/icon/maskable-192', sizes: '192x192', type: 'image/png', purpose: 'maskable' },
+        { src: '/api/pwa/icon/maskable-512', sizes: '512x512', type: 'image/png', purpose: 'maskable' }
       ],
       shortcuts: [
         { name: 'Home Highlights', url: '/#/home', description: 'GV & FF highlights charts' },

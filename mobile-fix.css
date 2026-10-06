@@ -1,4 +1,4 @@
-/* mobile-fix.css — PWA / mobile layout repair (loaded LAST, after styles.css).
+/* mobile-fix.css — PWA / mobile layout repair (loaded LAST, after styles.css). (Sirf footer rule global hai, baaki html.mobile-ui par.)
    styles.css me v3.49 / v3.59 / "PWA shell fixes" ke !important overrides aapas me takra rahe the.
    Ye file unke conflicts ko ek jagah settle karti hai. Sirf html.mobile-ui par asar karti hai,
    desktop layout untouched. Har rule ki specificity jaan-boojh kar purane rule se zyada rakhi hai. */
@@ -11,30 +11,42 @@ html.mobile-ui, html.mobile-ui body { max-width: 100%; overflow-x: hidden; }
 html.mobile-ui .content { min-height: 100vh; min-height: 100dvh; }
 html.mobile-ui img, html.mobile-ui svg, html.mobile-ui canvas, html.mobile-ui video { max-width: 100%; }
 
-/* 2) Topbar: fixed 60px + 10 icons overlap karte the. Ab height content ke hisaab se,
-      title ellipsis hota hai, icons right me rehte hain. */
+/* 2) Topbar: .top-actions me 417px ka #master-search + 10 icons (total ~805px) the, isliye title 0px
+      reh jaata tha aur avatar screen ke bahar chala jaata tha. Ab mobile par bar me sirf
+      menu | title | ⋯ | notification | user; baaki controls "⋯ More" me. */
 html.mobile-ui .topbar {
-  height: auto !important;
-  min-height: 56px !important;
-  flex-wrap: nowrap !important;
-  align-items: center !important;
-  padding-top: max(8px, env(safe-area-inset-top, 0px)) !important;
-  padding-bottom: 8px !important;
+  height: auto !important; min-height: 56px !important;
+  flex-wrap: nowrap !important; align-items: center !important; gap: 6px !important;
+  padding-top: max(8px, env(safe-area-inset-top, 0px)) !important; padding-bottom: 8px !important;
 }
 html.mobile-ui .topbar .top-title {
-  flex: 1 1 auto !important; min-width: 0 !important; max-width: none !important;
+  flex: 1 1 0 !important; min-width: 0 !important; max-width: none !important; width: auto !important;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-html.mobile-ui .topbar .top-actions { flex: 0 0 auto; margin-left: auto; flex-wrap: nowrap; }
+html.mobile-ui .topbar .top-actions {
+  flex: 0 0 auto !important; width: auto !important; max-width: none !important;
+  margin-left: auto; flex-wrap: nowrap !important; gap: 6px !important;
+}
+html.mobile-ui .topbar .top-actions > #master-search,
+html.mobile-ui .topbar .top-actions > #bell-voice-btn,
+html.mobile-ui .topbar .top-actions > #bell-btn,
+html.mobile-ui .topbar .top-actions > #pwa-install,
+html.mobile-ui .topbar .top-actions > #focus-toggle,
+html.mobile-ui .topbar .top-actions > #top-refresh { display: none !important; }
 html.mobile-ui .topbar #offline-state:not([hidden]) { flex: 0 0 auto; }
 
-/* 3) "⋯ More" button: pehle secondary icons har haal me display:none !important the, isliye
-      More dabane par kuch khulta hi nahi tha. Ab more-open par secondary row neeche khulti hai. */
+/* 3) "⋯ More": pehle secondary icons har haal me display:none !important the, More dabane par
+      kuch khulta nahi tha. Ab more-open par poori row neeche khulti hai. */
 html.mobile-ui .topbar:has(.top-actions.more-open) { flex-wrap: wrap !important; row-gap: 6px; }
-html.mobile-ui .topbar .top-actions.more-open { flex-wrap: wrap; justify-content: flex-end; }
-html.mobile-ui .topbar .top-actions.more-open > [data-top-secondary="1"] {
-  display: inline-grid !important; place-items: center;
-  width: 44px; min-width: 44px; height: 44px;
+html.mobile-ui .topbar .top-actions.more-open {
+  flex: 1 0 100% !important; flex-wrap: wrap !important; justify-content: flex-end; order: 5;
+}
+html.mobile-ui .topbar .top-actions.more-open > [data-top-secondary="1"],
+html.mobile-ui .topbar .top-actions.more-open > #bell-voice-btn,
+html.mobile-ui .topbar .top-actions.more-open > #focus-toggle,
+html.mobile-ui .topbar .top-actions.more-open > #top-refresh,
+html.mobile-ui .topbar .top-actions.more-open > #pwa-install:not([hidden]) {
+  display: inline-flex !important; align-items: center; justify-content: center; min-height: 44px; min-width: 44px;
 }
 
 /* 4) Buttons: har <button> ko 44px min-height mil rahi thi — chips, tabs, bottom-nav, table
@@ -49,8 +61,10 @@ html.mobile-ui .table-wrap .btn.small { min-height: 34px !important; font-size: 
       badi screen/tablet par jagah waste). Ab width ke hisaab se 1–N columns. */
 html.mobile-ui .kpi-grid, html.mobile-ui .kpi-grid.six,
 html.mobile-ui .grid, html.mobile-ui .cards-grid {
-  grid-template-columns: repeat(auto-fit, minmax(152px, 1fr)) !important;
+  grid-template-columns: repeat(auto-fit, minmax(138px, 1fr)) !important;
 }
+/* card ke andar wale chhote KPI grids (246px chaude) 320px par bhi 2 columns rahen */
+html.mobile-ui .kpi-grid.mini { grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)) !important; }
 html.mobile-ui .kpi-value { font-size: clamp(20px, 6.2vw, 27px) !important; overflow-wrap: anywhere; }
 html.mobile-ui .home-exp-controls { grid-template-columns: minmax(0, 1fr) !important; }
 
@@ -71,5 +85,7 @@ html.mobile-ui .ask-fab { bottom: calc(var(--mobile-nav-h) + env(safe-area-inset
 html.mobile-ui .drawer { max-height: 100dvh; }
 html.mobile-ui .drawer-body { padding-bottom: max(16px, env(safe-area-inset-bottom, 0px)); }
 
-/* 9) Installed PWA par duplicate footers hamesha hide (HTML me do footers hain) */
-html.mobile-ui .site-footer, html.mobile-ui .app-footer { display: none !important; }
+/* 9) Do footers: #app-footer (config/showFooter se chalta hai) + static .site-footer dono ek ke neeche
+      dikhte the (desktop par bhi). Ek hi rakha: .app-footer; mobile par dono hide (bottom nav hai). */
+.site-footer { display: none !important; }
+html.mobile-ui .app-footer { display: none !important; }
