@@ -161,7 +161,13 @@ FF.pages = FF.pages || {};
   function explorerDaily(rows, filters, allowedChannels) {
     const f = filters || {};
     const keys = (rows || []).map((row) => explorerDateKey(row.key || row.dateKey || row.date || row.d)).filter(Boolean).sort();
-    if (!keys.length) return { keys: [], labels: [], byChannel: { ff: [], gv: [] }, from: '', to: '', capped: false, undated: (rows || []).length, total: 0 };
+    if (!keys.length) return {
+      keys: [], labels: [], tipLabels: [],
+      byChannel: { ff: [], gv: [] },
+      byClass: { VC4: [], VC20: [], 'VC5+': [] },
+      byType: { replacement: [], chassis: [] },
+      from: '', to: '', capped: false, undated: (rows || []).length, total: 0
+    };
     let from = validExplorerDate(f.from) || keys[0], to = validExplorerDate(f.to) || keys[keys.length - 1];
     if (from > to) [from, to] = [to, from];
     const fullFrom = from, fullTo = to;
@@ -175,7 +181,20 @@ FF.pages = FF.pages || {};
     const dateKeys = [];
     const cursor = U.fromDateKey(from), end = U.fromDateKey(to);
     while (cursor <= end) { dateKeys.push(U.dateKey(cursor)); cursor.setDate(cursor.getDate() + 1); }
-    const daily = { ff: new Map(dateKeys.map((key) => [key, 0])), gv: new Map(dateKeys.map((key) => [key, 0])) };
+
+    const daily = {
+      ff: new Map(dateKeys.map((key) => [key, 0])),
+      gv: new Map(dateKeys.map((key) => [key, 0]))
+    };
+    const dailyClass = {
+      VC4: new Map(dateKeys.map((key) => [key, 0])),
+      VC20: new Map(dateKeys.map((key) => [key, 0])),
+      'VC5+': new Map(dateKeys.map((key) => [key, 0]))
+    };
+    const dailyType = {
+      replacement: new Map(dateKeys.map((key) => [key, 0])),
+      chassis: new Map(dateKeys.map((key) => [key, 0]))
+    };
     let total = 0, datedCount = 0;
     for (const row of rows || []) {
       const key = explorerDateKey(row.key || row.dateKey || row.date || row.d);
@@ -184,12 +203,23 @@ FF.pages = FF.pages || {};
       if (!daily[channel] || key < from || key > to) continue;
       const n = Math.max(0, Number(row.n) || 0);
       daily[channel].set(key, (daily[channel].get(key) || 0) + n);
+      const group = explorerClass(row);
+      if (EXPLORER_CLASSES.includes(group)) dailyClass[group].set(key, (dailyClass[group].get(key) || 0) + n);
+      if (explorerHasType(row, 'replacement')) dailyType.replacement.set(key, (dailyType.replacement.get(key) || 0) + n);
+      if (explorerHasType(row, 'chassis')) dailyType.chassis.set(key, (dailyType.chassis.get(key) || 0) + n);
       total += n; datedCount++;
     }
     const allowed = new Set((allowedChannels || ['ff', 'gv']).map((v) => /^(gv|green)/i.test(String(v)) ? 'gv' : 'ff'));
     return {
-      keys: dateKeys, labels: dateKeys.map((key) => U.labelDateKey(key, false)), tipLabels: dateKeys.map((key) => `${U.labelDateKey(key, true)} · ${key}`),
-      byChannel: { ff: dateKeys.map((key) => allowed.has('ff') ? daily.ff.get(key) || 0 : 0), gv: dateKeys.map((key) => allowed.has('gv') ? daily.gv.get(key) || 0 : 0) },
+      keys: dateKeys,
+      labels: dateKeys.map((key) => U.labelDateKey(key, false)),
+      tipLabels: dateKeys.map((key) => `${U.labelDateKey(key, true)} · ${key}`),
+      byChannel: {
+        ff: dateKeys.map((key) => allowed.has('ff') ? daily.ff.get(key) || 0 : 0),
+        gv: dateKeys.map((key) => allowed.has('gv') ? daily.gv.get(key) || 0 : 0)
+      },
+      byClass: Object.fromEntries(EXPLORER_CLASSES.map((group) => [group, dateKeys.map((key) => dailyClass[group].get(key) || 0)])),
+      byType: Object.fromEntries([['replacement', 'replacement'], ['chassis', 'chassis']].map(([k, src]) => [k, dateKeys.map((key) => dailyType[src].get(key) || 0)])),
       from, to, fullFrom, fullTo, capped, undated: Math.max(0, (rows || []).length - datedCount), total
     };
   }
@@ -207,8 +237,23 @@ FF.pages = FF.pages || {};
     }));
     const labelEvery = daily.keys.length > 180 ? 21 : daily.keys.length > 90 ? 14 : daily.keys.length > 45 ? 7 : daily.keys.length > 20 ? 3 : 1;
     const plotWidth = Math.max(640, daily.keys.length * 23 + 56);
+    const chartTips = daily.keys.map((key, i) => {
+      const total = [...daily.byChannel.ff, ...daily.byChannel.gv].length ? (daily.byChannel.ff[i] || 0) + (daily.byChannel.gv[i] || 0) : 0;
+      const rows = [
+        `<b>${esc(daily.tipLabels[i] || key)}</b>`,
+        `🟦 First Forward: <b>${U.fmt(daily.byChannel.ff[i] || 0)}</b>`,
+        `🟩 GV Partner: <b>${U.fmt(daily.byChannel.gv[i] || 0)}</b>`,
+        `🚗 VC4: <b>${U.fmt(daily.byClass.VC4[i] || 0)}</b>`,
+        `🛻 VC20: <b>${U.fmt(daily.byClass.VC20[i] || 0)}</b>`,
+        `🚚 VC5+: <b>${U.fmt(daily.byClass['VC5+'][i] || 0)}</b>`,
+        `🔧 Chassis: <b>${U.fmt(daily.byType.chassis[i] || 0)}</b>`,
+        `🔁 Replacement: <b>${U.fmt(daily.byType.replacement[i] || 0)}</b>`,
+        `🏷️ Total: <b>${U.fmt(total)}</b>`
+      ];
+      return rows.join('<br>');
+    });
     const bars = series.length && daily.keys.length ? C.bars({
-      labels: daily.labels, tipLabels: daily.tipLabels, height: 220, series,
+      labels: daily.labels, tipLabels: daily.tipLabels, tips: chartTips, height: 220, series,
       showValues: daily.keys.length <= 14, labelEvery, legendAlways: true,
       minPlotWidth: plotWidth
     }) : '';
