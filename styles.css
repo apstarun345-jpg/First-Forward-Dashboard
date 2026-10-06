@@ -6001,3 +6001,90 @@ html.pwa-standalone body { -webkit-overflow-scrolling: touch; overflow-x: hidden
 @media (pointer: coarse) and (prefers-reduced-motion: no-preference) {
   .home-hero.v2 { animation-duration: .22s; }
 }
+
+/* ================================================================================================
+   🧹🔋 v3.62 — PHONE PASS: "scroll chalti hai · leg nahi · app jaisa"
+   ────────────────────────────────────────────────────────────────────────────────────────────────
+   Client feedback: "layout app ki tarah nahi hai, leg kar rahi hai, scroll nahi hoti".
+   Isliye teen cheezein guarantee ki gayi hain (sirf touch/installed app par — desktop untouched):
+     1) SCROLL — page ka scroll kabhi kisi leaked lock/overflow se band na ho. Har scroll container ko
+        explicitly `pan-y` milta hai, aur body/html hamesha apna natural page-scroll rakhte hain.
+     2) SPEED  — off-screen cards ka render skip (content-visibility), blur (sabse mehnga scroll cost)
+        poori tarah band, aur bache hue infinite decorations band.
+     3) APP FEEL — bade tap targets, horizontal scroll wale action/chip rows (native jaisa), halke
+        kaard shadows, smooth page transition.
+   ================================================================================================ */
+@media (pointer: coarse), (display-mode: standalone) {
+  /* ── 1) SCROLL: page ka apna scroller ─────────────────────────────────────────────────────── */
+  html, body {
+    height: auto !important;
+    min-height: 100% !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;          /* drawer/panel band hone ke baad bhi scroll zinda */
+    overscroll-behavior-y: auto !important; /* "none" Android par scroll ko atka hua dikhata tha */
+    -webkit-overflow-scrolling: touch;
+  }
+  html.pwa-standalone, html.pwa-standalone body { overscroll-behavior-y: auto !important; }
+  body.no-scroll { overflow: hidden !important; }   /* overlay khula ho tab hi lock (app.js manage karta hai) */
+  .content, .main, .page { height: auto !important; max-height: none !important; overflow: visible !important; }
+  .main { touch-action: pan-y; }
+  .drawer-body, .notification-list, .ms-panel-body { touch-action: pan-y; }
+  /* Table/filter wrappers apna horizontal scroll rakhein, aur vertical page scroll bhi chalta rahe. */
+  .tbl-wrap, .table-wrap, .data-table-wrap, .grid-wrap, .mp-people-table-wrap, .chip-row, .seg, .head-actions { touch-action: pan-x pan-y; }
+
+  /* ── 2) SPEED: off-screen cards skip (chart/table wale cards safe rehte hain) ─────────────── */
+  .card:not(:has(canvas)):not(:has(table)):not(:has(.chart-body)):not(:has(iframe)):not(:has(.radar-svg)) {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 260px;
+  }
+  /* Blur (backdrop-filter) har scroll frame par peechhe ka area dobara paint karta hai — phone par
+     poori tarah band. Look solid rehta hai, feel wahi. */
+  html.mobile-ui *, html.pwa-standalone * {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+  /* Bache hue infinite decorations (login ke robo/mesh, sync glow, zip/pwa pulse) band. */
+  .dot.busy, .zip-btn, #pwa-install, .sync-fast, .auth-float, .robo-badge, .robo-live, .rp-dot.live,
+  .robo-glow, .robo-star, .auth-visual::before, .rf-bar, .pro-visual .mesh, .auth-submit.busy::after {
+    animation: none !important;
+  }
+  .card, .kpi, .panel, .table-card, .report-card, .chart-card { box-shadow: none !important; }
+  .page { animation-duration: .16s !important; }
+
+  /* ── 3) APP FEEL: thumb-friendly, native-style rows ───────────────────────────────────────── */
+  html { scroll-padding-top: 70px; }              /* sticky topbar ke neeche anchor scroll */
+  .page-head { gap: 8px !important; }
+  /* Page actions ek line me — bahut se buttons wrap hokar poori screen na khayen (native segmented
+     row jaisa horizontally scroll hota hai). */
+  .head-actions, .card-head .head-actions {
+    flex-wrap: nowrap !important;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    max-width: 100%;
+    padding: 1px 0 3px;
+  }
+  .head-actions::-webkit-scrollbar { display: none; }
+  .head-actions > * { flex: 0 0 auto; }
+  /* Filter chips bhi ek hi line me swipe hote hain (do-line ka dher khatam). */
+  .chip-row, .seg, .forecast-tabs, .ms-tabs, .tr-tabs {
+    flex-wrap: nowrap !important;
+    overflow-x: auto;
+    scrollbar-width: none;
+    max-width: 100%;
+    padding-bottom: 2px;
+  }
+  .chip-row::-webkit-scrollbar, .seg::-webkit-scrollbar { display: none; }
+  .chip-row > *, .seg > * { flex: 0 0 auto; }
+  /* Card ke andar ka table mobile par edge-to-edge (app jaisa) — 1 px bleed. */
+  html.mobile-ui .card > .table-wrap, html.mobile-ui .table-card > .table-wrap {
+    margin-left: -6px;
+    margin-right: -6px;
+  }
+}
+
+/* Bade action rows (Reports/Export) touch par full-width — thumb se aasani se lagta hai. */
+@media (pointer: coarse) and (max-width: 560px) {
+  .head-actions .btn { min-height: 42px; }
+  .page-head h1 { font-size: 21px !important; }
+}

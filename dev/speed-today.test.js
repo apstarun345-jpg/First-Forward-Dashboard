@@ -82,11 +82,24 @@ test('lazy.js: har FF.pages module ya eager core me hai ya lazy group me', async
   const groups = [...lazy.matchAll(/^\s{4}([A-Za-z][\w]*): \[([^\]]*)\]/gm)].map((m) => [m[1], expand(m[2])]);
   assert.ok(groups.length >= 20, `lazy groups parse hue (${groups.length})`);
   const map = new Map(groups);
+  // 🧹 v3.62 — ye pages app se hata di gayi hain (sidebar + lazy groups dono se). Unke module files
+  // disk par hain (purana code/test toota na ho), par koi route ya lazy entry nahi — isliye ye
+  // check se bahar hain. app.js RETIRED_PAGES me har id honi chahiye, warna purana link dead page
+  // khol dega.
+  const appSrc = await read('app.js');
+  const RETIRED = ['controlTower', 'executive', 'tv', 'ffCommission', 'gvCommission', 'charts', 'forecast',
+    'tlScorecard', 'stockRadar', 'savedViews', 'reportStudio', 'followups',
+    'arena', 'fame', 'warRoom', 'activity', 'network', 'radar', 'reportCards', 'sprints'];
+  for (const page of RETIRED) {
+    assert.ok(new RegExp(`\\b${page}: '[a-zA-Z]+'`).test(appSrc), `retired page "${page}" app.js RETIRED_PAGES me hona chahiye`);
+    assert.ok(!map.has(page), `retired page "${page}" lazy GROUPS me wapas nahi aana chahiye`);
+  }
   for (const file of files) {
     const src = await read(file);
     for (const m of src.matchAll(/FF\.pages\.([A-Za-z][\w]*) =/g)) {
       const page = m[1];
       if (eager.has(file)) continue; // page ka module eager core me hai (home/sheets) — lazy group ki zaroorat nahi
+      if (RETIRED.includes(page)) continue;   // 🧹 v3.62 retired page — lazy group jaan-boojh kar nahi hai
       if (page === 'stockReport') {
         assert.ok((map.get('performance') || []).includes('performance'), 'stockReport /performance route ka alias hai');
         continue;
@@ -252,10 +265,12 @@ test('lazy.js: page ka module load karta hai, order sahi, dobara load nahi', asy
   const lazy = win.FF.lazy;
   assert.ok(lazy && typeof lazy.ensure === 'function');
   assert.equal((lazy.GROUPS.trend || []).join(','), 'trend');
-  assert.equal((lazy.GROUPS.executive || []).join(','), 'insights,directAgents,certificates,cockpit', 'transitive dependencies resolve before page module');
-  await lazy.ensure('executive');
+  // 🧹 v3.62 — `executive` page retire ho gayi, isliye yahi INSIGHT_DEPS check ab dualChannel par
+  // hota hai (dono ka module set same hai: insights → directAgents → certificates → cockpit).
+  assert.equal((lazy.GROUPS.dualChannel || []).join(','), 'insights,directAgents,certificates,cockpit', 'transitive dependencies resolve before page module');
+  await lazy.ensure('dualChannel');
   assert.deepEqual(requested, ['./insights.js?v=45', './directAgents.js?v=45', './certificates.js?v=45', './cockpit.js?v=45'], 'order + version sahi');
-  await lazy.ensure('executive');
+  await lazy.ensure('dualChannel');
   assert.equal(requested.length, 4, 'dedup: dobara request nahi');
   assert.ok(lazy.WARM.length >= 5 && lazy.WARM.includes('insights'), 'warm list me bhaari modules aakhir me');
   assert.ok(lazy.GROUPS.settings.includes('settings'), 'settings page ka module lazy hai');

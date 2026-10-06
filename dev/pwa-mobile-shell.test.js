@@ -37,7 +37,7 @@ test('mobile/PWA bootstrap is external so the self-only CSP does not block it', 
   // Hard-coded pins index.html se drift kar jaate the → phone par purana shell cache me phans jaata tha.
   assert.match(sw, /async function shellAssets\(/);
   assert.match(sw, /fetch\('\.\/index\.html'/);
-  assert.match(sw, /apnapayment-v116/);
+  assert.match(sw, /apnapayment-v117/);
 });
 
 test('bottom bar uses uniform inline SVG icons (emoji icons broke per-phone alignment)', () => {

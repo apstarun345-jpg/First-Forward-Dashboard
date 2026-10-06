@@ -55,7 +55,7 @@ const MIME = {
 const BLOCKED_FILES = new Set(['server.js', 'sheets-storage.js', 'apps-script-storage.js', 'mailer.js', 'stock-age.js', 'DEPLOYMENT.md', 'SHEETS_STORAGE.md', 'STORAGE_SETUP.md', 'RECOVERY.md', 'package.json', 'package-lock.json', 'render.yaml', 'README.md', '.env']);
 const BLOCKED_DIRS = new Set(['data', 'dev', 'node_modules', '.git', 'google-apps-script']);
 // /api/health ka version ab package.json se aata hai (pehle yahan hardcoded purana string tha).
-let APP_VERSION = '3.56.0';
+let APP_VERSION = '3.62.0';
 try { APP_VERSION = String(JSON.parse(readFileSync(path.join(__dirname, 'package.json'), 'utf8')).version || APP_VERSION); } catch { /* keep fallback */ }
 
 // ---------------------------------------------------------------------------------------------
@@ -65,16 +65,9 @@ try { APP_VERSION = String(JSON.parse(readFileSync(path.join(__dirname, 'package
 // `tabs` registry below, so the admin can add or hide sheet tabs and control each one per user.
 export const PAGE_PERMISSIONS = [
   { key: 'home', label: 'Home · highlights & charts', group: 'Pages' },
-  { key: 'controlTower', label: 'Management · Operations Control Tower (live action + changes + snapshots)', group: 'Management' },
   { key: 'rangeReport', label: 'Management · Range Report (custom from→to)', group: 'Management' },
-  { key: 'tv', label: 'Management · TV Mode (big-screen rotation)', group: 'Management' },
   { key: 'teamMap', label: 'Management · Team map (location, admin-only page)', group: 'Management' },
-  { key: 'executive', label: 'Management · Executive Cockpit', group: 'Professional Insights' },
-  { key: 'forecast', label: 'Management · Forecast Accuracy & Stock Balance', group: 'Professional Insights' },
   { key: 'dataQuality', label: 'Management · Data Quality Center', group: 'Professional Insights' },
-  { key: 'savedViews', label: 'Workspace · Saved views & report studio', group: 'Professional Insights' },
-  { key: 'reportStudio', label: 'Workspace · Report Studio (scheduled emails, share)', group: 'Professional Insights' },
-  { key: 'followups', label: 'Workspace · Agent/TL notes & follow-ups', group: 'Professional Insights' },
   { key: 'tagIssued', label: 'GV & FF Tag Issued (date-wise)', group: 'Pages' },
   { key: 'tagRequest', label: 'Management · Tag Request (IDFC agents · class-wise stock/tag request form)', group: 'Management' },
   { key: 'masterSearch', label: 'Management · Master Search (GV + FF naam/ID → seedha poora profile)', group: 'Management' },
@@ -84,13 +77,11 @@ export const PAGE_PERMISSIONS = [
   { key: 'performance', label: 'First Forward · Performance', group: 'First Forward' },
   { key: 'stock', label: 'First Forward · Stock', group: 'First Forward' },
   { key: 'stockReport', label: 'First Forward · Stock Report (REPORT-wise)', group: 'First Forward' },
-  { key: 'ffCommission', label: 'First Forward · Commission Intelligence', group: 'First Forward' },
   { key: 'gvDashboard', label: 'GV Partner · Dashboard', group: 'GV Partner' },
   { key: 'gvTrend', label: 'GV Partner · Trend', group: 'GV Partner' },
   { key: 'gvPerformance', label: 'GV Partner · Performance', group: 'GV Partner' },
   { key: 'gvStock', label: 'GV Partner · Stock', group: 'GV Partner' },
   { key: 'gvStockReport', label: 'GV Partner · GV Stock Report (GV REPORT-wise)', group: 'GV Partner' },
-  { key: 'gvCommission', label: 'GV Partner · Commission Intelligence', group: 'GV Partner' },
   { key: 'directAgents', label: 'Cross-channel · Direct Agents & TLs (FF APS + GV no-TL rule)', group: 'Cross Channel' },
   { key: 'newAgents', label: 'Cross-channel · New Agents & TL Changes (FF + GV)', group: 'Cross Channel' },
   { key: 'unusual', label: 'Cross-channel · Unusual Agent Activity (wrong VRN / replacement / chassis)', group: 'Cross Channel' },
@@ -102,23 +93,12 @@ export const PAGE_PERMISSIONS = [
   { key: 'masterStock', label: 'Cross-channel · Master Stock (barcode/agent/TL/GV search)', group: 'Cross Channel' },
   { key: 'fastagChampions', label: 'Cross-channel · FASTag Champions (top agents/TLs)', group: 'Cross Channel' },
   { key: 'dispatchPlan', label: 'Cross-channel · Dispatch planner (auto box plan)', group: 'Cross Channel' },
-  { key: 'tlScorecard', label: 'Cross-channel · TL scorecard', group: 'Cross Channel' },
   { key: 'compare', label: 'GV vs First Forward (comparison)', group: 'Cross Channel' },
-  { key: 'charts', label: 'Cross-channel · Charts-only GV vs FF view', group: 'Cross Channel' },
   { key: 'export', label: 'Download CSV / Excel', group: 'Actions' },
   { key: 'share', label: 'WhatsApp / Email share', group: 'Actions' },
   { key: 'refresh', label: 'Force refresh from Google', group: 'Actions' },
   { key: 'contacts', label: 'See mobile numbers', group: 'Actions' },
   { key: 'voiceAssistant', label: 'Voice assistant (🎙️ panel + 👂 wake word)', group: 'Actions' },
-  { key: 'arena', label: 'Wow Zone · Agent Arena (levels, badges, challenges)', group: 'Wow Zone' },
-  { key: 'fame', label: 'Wow Zone · Wall of Fame (champions + winner cards)', group: 'Wow Zone' },
-  { key: 'warRoom', label: 'Wow Zone · War Room (live big-screen pulse + detailed breakdown)', group: 'Wow Zone' },
-  { key: 'activity', label: 'Wow Zone · Activity Calendar (heatmap + streak)', group: 'Wow Zone' },
-  { key: 'network', label: 'Wow Zone · Team Network (TL–agent constellation)', group: 'Wow Zone' },
-  { key: 'radar', label: 'Wow Zone · Anomaly Radar (spike / crash / stale auto-detect)', group: 'Wow Zone' },
-  { key: 'reportCards', label: 'Wow Zone · Agent Report Cards (printable monthly card)', group: 'Wow Zone' },
-  { key: 'sprints', label: 'Wow Zone · Hourly Sprints (live TL/agent race per hour)', group: 'Wow Zone' },
-  { key: 'stockRadar', label: 'Cross Channel · Stock Radar (TL bubbles + suggested qty)', group: 'Cross Channel' }
 ];
 
 // Sheet-tab registry defaults (also mirrored in config.js). `enabled:false` hides a tab everywhere.
@@ -143,8 +123,11 @@ const allPermKeys = (settings) => permissionsFor(settings).map((p) => p.key);
 const allPermKeysNow = () => allPermKeys(db.settings);
 // Back-compat export (some tooling imported PERMISSIONS).
 export const PERMISSIONS = permissionsFor({ tabs: DEFAULT_TABS });
-const DEFAULT_USER_PERMS = ['home', 'executive', 'forecast', 'dataQuality', 'savedViews', 'reportStudio', 'followups', 'tagIssued', 'rangeReport', 'masterSearch', 'targets', 'dashboard', 'trend', 'stock', 'stockReport', 'performance', 'ffCommission', 'gvDashboard', 'gvTrend', 'gvStock', 'gvStockReport', 'gvPerformance', 'gvCommission', 'dualChannel', 'masterStock', 'compare', 'tv', 'teamMap',
-  'sheet:StockDataa', 'sheet:REPORT', 'sheet:GV Master', 'sheet:Tag Assignment', 'sheet:GV REPORT', 'charts', 'export', 'dispatchPlan', 'tlScorecard', 'voiceAssistant', 'arena', 'fame', 'warRoom', 'activity', 'network', 'radar', 'reportCards', 'directAgents', 'newAgents', 'unusual', 'fastagChampions', 'ffAgentSummary', 'gvAgentSummary', 'agentSummary', 'sprints', 'stockRadar'];
+// 🧹 v3.62 — naye users ko sirf wahi pages milte hain jo app me bache hain (retired pages ke perms
+// ki zaroorat nahi). Purane users ke saved perms waise hi rehte hain; wo bas kisi page se bind nahi
+// hote, isliye kuch bhi tootta nahi.
+const DEFAULT_USER_PERMS = ['home', 'dataQuality', 'tagIssued', 'rangeReport', 'masterSearch', 'targets', 'dashboard', 'trend', 'stock', 'stockReport', 'performance', 'gvDashboard', 'gvTrend', 'gvStock', 'gvStockReport', 'gvPerformance', 'dualChannel', 'masterStock', 'compare', 'teamMap',
+  'sheet:StockDataa', 'sheet:REPORT', 'sheet:GV Master', 'sheet:Tag Assignment', 'sheet:GV REPORT', 'export', 'dispatchPlan', 'voiceAssistant', 'directAgents', 'newAgents', 'unusual', 'fastagChampions', 'ffAgentSummary', 'gvAgentSummary', 'agentSummary'];
 
 // Admin-controlled audience for automated notifications. `users` means all approved non-admin
 // users who have notification access; each user's own master/type preferences still apply.
@@ -3677,7 +3660,7 @@ async function maybeWorkspaceFollowups(force = false) {
       body: top.map((n) => `${n.entityName}${n.assignee ? ` → ${n.assignee}` : ''}`).join(', ') + (due.length > top.length ? ` …+${due.length - top.length}` : ''),
       target: 'broadcast',
       routeKey: 'followup',
-      meta: { link: '#/followups?status=open', count: due.length, noteIds: due.slice(0, 30).map((n) => n.id) }
+      meta: { link: '#/home', count: due.length, noteIds: due.slice(0, 30).map((n) => n.id) }
     });
     logAudit(null, 'workspace_followup_alert', { actor: force ? 'admin:test' : 'scheduler', note: `${due.length} due timeline items` });
     return item;
@@ -4020,7 +4003,7 @@ function controlTowerActions({ feed, ffStock, gvStock, notifications, pendingSig
   else if (gv.stale) actions.push({ severity: 'high', icon: '⏱️', title: 'GV live snapshot stale', detail: 'Latest GV snapshot cache/stale fallback se aa raha hai.', link: '#/home' });
   if (!ff) actions.push({ severity: 'high', icon: '🟦', title: 'FF today feed unavailable', detail: (feed && feed.ffError) || 'EIR today feed nahi mila.', link: '#/dashboard' });
   const alerts = (notifications || []).filter((x) => ['alert'].includes(x.type)).slice(-6).reverse();
-  alerts.forEach((x) => actions.push({ severity: 'high', icon: '🚨', title: x.title, detail: x.body, link: (x.meta && x.meta.link) || '#/executive' }));
+  alerts.forEach((x) => actions.push({ severity: 'high', icon: '🚨', title: x.title, detail: x.body, link: (x.meta && x.meta.link) || '#/home' }));
   const rateFromSeries = (series) => {
     const vals = Object.entries(series || {}).sort((a,b)=>a[0].localeCompare(b[0])).slice(-7).map(([,v])=>Number(v)||0);
     return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : 0;

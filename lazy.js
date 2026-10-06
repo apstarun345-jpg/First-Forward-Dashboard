@@ -53,61 +53,44 @@ window.FF = window.FF || {};
   // aata tha) → FF profile me "REPORT me row nahi mili", stock 0, priority —, suggested 0.
   const PROFILE_DEPS = [...INSIGHT_DEPS, 'gvTruth', 'pdf', 'agentBoard', 'performance', 'masterProfile'];
   const SUMMARY_DEPS = [...PROFILE_DEPS, 'agentSummary'];
-  const WOW_DEPS = [...INSIGHT_DEPS, 'wow', 'wowzone'];
+  // 🧹 v3.62 — Wow Zone pages (arena/fame/warRoom/activity/network/radar/reportCards/sprints) hata
+  // diye gaye, isliye `wow`/`wowzone` ab kisi page ki dependency nahi hain. `wowzone` (66 KB) sirf
+  // theme-packs + tab heartbeat ke liye chahiye — wo ab on-demand aata hai (app.js mountShellExtras),
+  // pehle har page open karne par background me 1 MB+ JS parse hota tha.
   const GROUPS = {
     home: ['home'],
-    controlTower: ['controlTower'],
-    executive: [...INSIGHT_DEPS],
     tagRequest: ['pdf', 'performance', 'tagRequest'],   // performance = FF REPORT (stock / priority) — employee link par bhi
     masterSearch: [...PROFILE_DEPS, 'searchReport', 'masterSearch'],
     tagIssued: ['tagIssued'],
     performance: [...PROFILE_DEPS, 'agentBoard', 'performance'],
     targets: ['targets'],
     rangeReport: ['rangeReport'],
-    tv: ['tv'],
     teamMap: ['map'],
-    dashboard: [...WOW_DEPS, 'dashboard'],
+    dashboard: ['dashboard'],
     trend: ['trend'],
     stock: ['stock'],
-    ffCommission: [...INSIGHT_DEPS],
     gvDashboard: ['gvpages'],
     gvTrend: ['gvpages'],
     gvStock: ['gvpages'],
     gvStockReport: ['gvpages'],
     gvPerformance: ['gvpages'],
-    gvCommission: [...PROFILE_DEPS, 'agentBoard', 'gvpages', 'insights'],
     dualChannel: [...INSIGHT_DEPS],
     masterStock: [...INSIGHT_DEPS],
     compare: [...INSIGHT_DEPS, 'map', 'compare'],
-    charts: [...INSIGHT_DEPS, 'chartExplorer'],
-    forecast: [...INSIGHT_DEPS],
     dataQuality: [...INSIGHT_DEPS],
-    savedViews: [...INSIGHT_DEPS],
-    reportStudio: [...INSIGHT_DEPS],
-    followups: [...INSIGHT_DEPS],
     fastagChampions: [...INSIGHT_DEPS],
     dispatchPlan: [...PROFILE_DEPS, 'dispatchPlanner'],
-    tlScorecard: [...INSIGHT_DEPS],
     directAgents: ['kpiDetail', 'directAgents'],   // KPI drill lists kpiDetail me register hoti hain
     newAgents: [...PROFILE_DEPS, 'newAgents'],
     unusual: ['pdf', 'unusual-scan', 'unusual'],
     ffAgentSummary: [...SUMMARY_DEPS, 'agentSummary', 'gvTruth', 'summaryUI'],
     gvAgentSummary: [...SUMMARY_DEPS, 'gvpages', 'agentSummary', 'gvTruth', 'agentBoard', 'summaryUI'],
-    arena: [...WOW_DEPS],
-    fame: [...WOW_DEPS],
-    warRoom: [...WOW_DEPS],
-    activity: [...WOW_DEPS],
-    network: [...WOW_DEPS],
-    radar: [...WOW_DEPS],
-    reportCards: [...WOW_DEPS],
-    sprints: [...WOW_DEPS, 'sprints'],
-    stockRadar: ['stockRadar'],
     settings: [...PROFILE_DEPS, 'agentSummary', 'unusual-scan', 'unusual', 'settings']
   };
 
   // Background warm order (login ke baad idle me) — jo pages sabse zyada khulte hain wo pehle.
   // Bhaari module (insights 330 KB+) sabse aakhir me, taaki pehle paint par asar na pade.
-  const WARM = ['pdf', 'performance', 'tagIssued', 'stock', 'dashboard', 'trend', 'gvpages', 'wowzone', 'targets', 'settings', 'tagRequest', 'cockpit', 'insights'];
+  const WARM = ['pdf', 'performance', 'tagIssued', 'stock', 'dashboard', 'trend', 'gvpages', 'targets', 'settings', 'tagRequest', 'cockpit', 'insights'];
   // 📱 v3.60 — phone par 2 MB JS background me parse karwana hi "app leg karti hai" ka sabse bada
   // karan tha. Isliye warm ab device ke hisaab se hota hai: touch device par sirf roz kaam aane
   // wale 3 modules (wo bhi 25s baad, jab tak user idle ho), data-saver/2G/low-end par bilkul nahi.

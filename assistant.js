@@ -133,14 +133,9 @@ window.FF = window.FF || {};
     if (has('KHOLO', 'KHOL DO', 'KHOLNA', 'OPEN', 'DIKHAO', 'SHOW ME', 'NAVIGATE', 'GO TO', 'CHALAO', 'PAGE')) {
       const NAV_MAP = [
         { keys: ['MASTER STOCK'], page: 'masterStock', label: 'Master Stock' },
-        { keys: ['EXECUTIVE', 'COCKPIT'], page: 'executive', label: 'Executive Cockpit' },
         { keys: ['DUAL CHANNEL', 'DUAL AGENT'], page: 'dualChannel', label: 'Dual-channel Agents' },
         { keys: ['DATA QUALITY'], page: 'dataQuality', label: 'Data Quality Center' },
-        { keys: ['FORECAST'], page: 'forecast', label: 'Stock Forecasting' },
-        { keys: ['GV COMMISSION'], page: 'gvCommission', label: 'GV Commission Intelligence' },
-        { keys: ['COMMISSION'], page: 'ffCommission', label: 'FF Commission Intelligence' },
         { keys: ['DISPATCH'], page: 'dispatchPlan', label: 'Dispatch Planner' },
-        { keys: ['SCORECARD'], page: 'tlScorecard', label: 'TL Scorecard' },
         { keys: ['CHAMPION'], page: 'fastagChampions', label: 'FASTag Champions' },
         { keys: ['COMPARE'], page: 'compare', label: 'GV vs First Forward' },
         { keys: ['GV DASHBOARD'], page: 'gvDashboard', label: 'GV Partner Dashboard' },
@@ -610,6 +605,11 @@ window.FF = window.FF || {};
     const botEl = bubble(a, 'bot');
     // 📊 Chat ke andar hi chart — "last 7 days ka graph", "monthly trend", "VC4 vs commercial",
     // "GV vs FF" jaise sawaal par bubble me chart mount ho jaata hai (koi page change nahi).
+    // 🧹 v3.62 — wowzone ab background me load nahi hota (site halki rehti hai), isliye chart
+    // chahiye to usi waqt module load karo. Feature pehle jaisa hi kaam karta hai.
+    if (!FF.wowzone && FF.lazy && FF.lazy.need && FF.config.feat && FF.config.feat('chatCharts') !== false) {
+      try { await FF.lazy.need(['wowzone']); } catch { /* chart optional */ }
+    }
     if (FF.wowzone && FF.wowzone.chatChart) {
       try { await FF.wowzone.chatChart(text, botEl); } catch { /* chart optional */ }
     }

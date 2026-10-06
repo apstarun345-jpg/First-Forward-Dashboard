@@ -293,7 +293,7 @@ test('wiring: agentBoard.js lazy-load hota hai, SW shell index.html se derive ho
   // agentBoard lazy module hai → install par precache nahi; pehli use par runtime cache (cache-first).
   assert.ok(!/agentBoard\.js\?v=/.test(sw), 'lazy module SW me hard-coded precache nahi hota');
   assert.match(sw, /async function shellAssets\(/, 'SW precache list index.html se banti hai');
-  assert.match(sw, /CACHE_NAME = 'apnapayment-v116'/);
+  assert.match(sw, /CACHE_NAME = 'apnapayment-v117'/);
   assert.match(lazy, /return m \? m\[1\] : '72'/);
   assert.match(lazy, /ff-asset-versions/, 'lazy modules apna content fingerprint index.html se padhte hain');
   assert.match(pkg, /agentBoard/);

@@ -22,7 +22,7 @@ Ye sab sirf **installed app / mobile** me lagta hai (`html.pwa-standalone` class
 2. Topbar ka **⬇️ Install App** button dabao (ya Chrome menu → *Add to Home screen* → **Install**).
 3. Home screen icon se kholo — ab na URL bar, na browser menu: full-screen app window, apna icon, apna splash screen, Recents me alag card.
 
-> Pehle se installed hai? App band karke dobara kholo — service worker `apnapayment-v114` naya shell khud le aayega (update toast bhi aa sakta hai).
+> Pehle se installed hai? App band karke dobara kholo — service worker `apnapayment-v117` naya shell khud le aayega (update toast bhi aa sakta hai).
 
 ## Real APK chahiye (Play Store / APK file)?
 

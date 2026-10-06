@@ -147,14 +147,14 @@ test('Global search bar is eagerly mounted across the app and covers both channe
 
 test('🏷️ v3.61 wiring — version pins + automatic cache-busting', async () => {
   const pkg = JSON.parse(await read('package.json'));
-  assert.equal(pkg.version, '3.61.0');
-  assert.match(await read('server.js'), /APP_VERSION = '3\.56\.0'/);
+  assert.equal(pkg.version, '3.62.0');
+  assert.match(await read('server.js'), /APP_VERSION = '3\.62\.0'/);
   const idx = await read('index.html');
   assert.match(idx, /styles\.css\?v=113/); assert.match(idx, /config\.js\?v=109/); assert.match(idx, /home\.js\?v=90/); assert.match(idx, /app\.js\?v=109/); assert.match(idx, /lazy\.js\?v=104/);
   // masterSearch ab shell-extra hai (first paint ke baad load hota hai) — index.html me eager nahi.
   assert.ok(!/src="masterSearch\.js/.test(idx), 'masterSearch eager nahi (first paint ke baad aata hai)');
   const sw = await read('sw.js');
-  assert.match(sw, /apnapayment-v116/);
+  assert.match(sw, /apnapayment-v117/);
   assert.match(sw, /async function shellAssets\(/, 'SW precache list index.html se derive hoti hai (pins drift nahi karte)');
   assert.match(sw, /const isVersioned = \/\[\?&\]v=\//, 'fingerprinted assets cache-first serve hote hain');
   const srv = await read('server.js');

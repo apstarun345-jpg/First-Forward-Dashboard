@@ -97,7 +97,11 @@ const FF = win.FF;
 try {
   const lazySrc = fs.readFileSync(path.join(ROOT, 'lazy.js'), 'utf8');
   const names = [...new Set([...lazySrc.matchAll(/'([A-Za-z][A-Za-z0-9-]*)'/g)].map((m) => m[1]))];
-  const lazyFiles = names.filter((n) => fs.existsSync(path.join(ROOT, `${n}.js`)) && !scripts.includes(`${n}.js`));
+  // 🧹 v3.62 — retired pages (Control Tower · TV · Charts · Stock Radar · Sprints · Wow Zone) ke
+  // module lazy GROUPS me nahi hain (sidebar se bhi hata diye gaye), lekin inka render logic smoke me
+  // test hota rehta hai: file disk par hai aur feature wapas laana ho to yahi code chalta hai.
+  const RETIRED_MODULES = ['controlTower', 'tv', 'chartExplorer', 'stockRadar', 'sprints', 'wow', 'wowzone'];
+  const lazyFiles = [...new Set([...names, ...RETIRED_MODULES])].filter((n) => fs.existsSync(path.join(ROOT, `${n}.js`)) && !scripts.includes(`${n}.js`));
   for (const n of lazyFiles) vm.runInContext(fs.readFileSync(path.join(ROOT, `${n}.js`), 'utf8'), ctx, { filename: `${n}.js` });
   if (FF.lazy) FF.lazy.inject = (n) => Promise.resolve(n);
   log('lazy modules (smoke me pre-loaded):', lazyFiles.length, lazyFiles.join(' '));
@@ -1128,7 +1132,7 @@ await run('settings.render (all tabs)', async () => { for (const tab of ['accoun
 await run('v3.16.1 · My access me sirf granted cards (locked ⛔ cards nahi)', async () => {
   const realCan = FF.auth.can;
   // member simulation: sirf Management ke 4 pages + ek sheet + ek action
-  FF.auth.can = (perm) => ['home', 'targets', 'rangeReport', 'tv', 'sheet:EIR', 'refresh'].includes(perm);
+  FF.auth.can = (perm) => ['home', 'targets', 'rangeReport', 'masterSearch', 'sheet:EIR', 'refresh'].includes(perm);
   try {
     const r = root(); await pages.settings.render(r, { tab: 'account' }, {}); await settle(20);
     const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');

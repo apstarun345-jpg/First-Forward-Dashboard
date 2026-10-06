@@ -61,6 +61,12 @@
       <div class="top-actions" id="top-actions">
         <button class="btn small primary" id="pwa-install" hidden title="Install app">⬇️ Install App</button>
         <button class="icon-btn" id="lang-toggle" title="Language · भाषा (English / हिंदी)" aria-label="Language" data-top-secondary="1">🌐</button>
+        <!-- 🎨 v3.62 — ye button pehle se shell me hai (pehle 66 KB ka wowzone module har load par aata
+             tha sirf isi button ko banane ke liye). Click par hi wo module load hota hai. Phone par
+             ye secondary control chhupa rehta hai (🌙 theme toggle ki tarah) — app clean rehta hai. -->
+        <div class="theme-wrap" data-top-secondary="1">
+          <button class="icon-btn" id="theme-pack-btn" title="Theme packs · theme pack chuno" aria-label="Theme packs" aria-haspopup="true">🎨</button>
+        </div>
         <button class="icon-btn" id="theme-toggle" title="Dark / light mode" aria-label="Theme" data-top-secondary="1">🌙</button>
         <button class="icon-btn" id="a11y-btn" title="Accessibility mode" aria-label="Accessibility mode" data-top-secondary="1">♿</button>
         <button class="icon-btn" id="focus-toggle" title="Focus mode" aria-label="Focus mode">🎯</button>

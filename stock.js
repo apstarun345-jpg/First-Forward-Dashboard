@@ -257,7 +257,7 @@ FF.pages = FF.pages || {};
         ${card('🏬 Top TLs by stock <span class="dim">(APS excluded)</span>', C.hbars({ items: topTls, valueLabel: 'Stock' }))}
       </div>
       ${!FF.config.feat || FF.config.feat('stockTrend') !== false ? `<div id="st-trend-card">${card('📉 Stock trend <span class="dim">(server snapshots · last 30 din)</span>', `<div id="st-trend"><div class="dim small">History load ho rahi hai…</div></div>`, `<span class="dim small" id="st-trend-cover"></span>`)}</div>` : ''}
-      ${!FF.config.feat || FF.config.feat('recon') !== false ? `<div id="st-recon-card">${card('🧾 FF stock balance <span class="dim">(is mahine · implied movement)</span>', `<div id="st-recon"><div class="dim small">Reconciliation load ho raha hai…</div></div>`, '<a class="btn small" href="#/forecast?view=balance">Full stock balance →</a>')}</div>` : ''}
+      ${!FF.config.feat || FF.config.feat('recon') !== false ? `<div id="st-recon-card">${card('🧾 FF stock balance <span class="dim">(is mahine · implied movement)</span>', `<div id="st-recon"><div class="dim small">Reconciliation load ho raha hai…</div></div>`, '<span class="dim small">Is mahine ka implied movement (issued + net stock change)</span>')}</div>` : ''}
       ${!FF.config.feat || FF.config.feat('agedStock') !== false ? `<div id="st-aged-card">${card('🧓 Stock ageing · kitna stock kitna purana <span class="dim">(StockDataa <b>Agent Allocated At</b> se · 1 / 3 / 5 / 6+ mahine · 🚗 VC4+VC20 alag, 🚚 VC5+ alag · month ke saath ⬇ CSV)</span>', `<div id="st-aged"><div class="dim small">Stock ageing load ho rahi hai…</div></div>`, `<span class="dim small" id="st-aged-note"></span>`)}</div>` : ''}
       ${!FF.config.feat || FF.config.feat('tlCover') !== false ? card(`📈 TL-wise cover <span class="dim">(sabse kam cover upar · VC4 stock ÷ avg daily issuance MTD)</span>`, `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>TL</th><th class="num">VC4 stock</th><th class="num">MTD issued</th><th class="num">Avg / din</th><th>Cover</th></tr></thead><tbody>${(() => {
         const sorted = [...tls].sort((a, b) => (a.cover === null ? 1 : b.cover === null ? -1 : a.cover - b.cover)).slice(0, 14);
@@ -345,7 +345,7 @@ FF.pages = FF.pages || {};
             <tr><td>📤 FF issued (out)</td><td class="num"><b>${U.fmt(issued)}</b></td><td class="dim">Exact FF issuance · opening snapshot ke baad · ${issueDays.length} recorded din</td></tr>
             <tr><td>📦 Net stock change</td><td class="num">${change >= 0 ? '+' : ''}${U.fmt(change)}</td><td class="dim">${first.date.slice(8)}/${first.date.slice(5, 7)} (${U.fmt(first.total)}) → ${last.date.slice(8)}/${last.date.slice(5, 7)} (${U.fmt(last.total)})</td></tr>
             <tr><td>📥 Implied net movement</td><td class="num"><b>${U.fmt(added)}</b></td><td class="dim">issued + net change (opening snapshot ke baad)</td></tr>
-          </tbody></table></div><p class="dim small" style="margin-top:6px">Ye residual estimate hai, actual inward nahi. Exact IN/OUT/transfer reconciliation ke liye <a href="#/forecast?view=balance">Stock Balance</a> me movement ledger connect karein.</p>`;
+          </tbody></table></div><p class="dim small" style="margin-top:6px">Ye residual estimate hai, actual inward nahi. Exact IN/OUT/transfer reconciliation ke liye Settings → 🔄 Stock movement ledger me movement ledger connect karein.</p>`;
         }
       }
     }).catch(() => {

@@ -677,14 +677,22 @@ FF.pages = FF.pages || {};
   function currentPack() { try { return localStorage.getItem('ff_theme_pack') || 'default'; } catch { return 'default'; } }
   function mountThemePicker() {
     const actions = U.$('#top-actions');
-    if (!actions || U.$('#theme-pack-btn')) return false;
-    const wrap = U.h(`<div class="theme-wrap" style="position:relative">
+    // v3.62 — shell me ek static 🎨 button pehle se hota hai (index.html), taaki 66 KB ka wowzone
+    // module sirf tab load ho jab user theme pack kholna chahe. Button mile to usi ko use karo.
+    let wrap = U.$('#theme-pack-btn') ? U.$('#theme-pack-btn').closest('.theme-wrap') : null;
+    if (!wrap && actions && U.$('#theme-pack-btn')) wrap = actions;
+    if (!wrap) {
+      if (!actions) return false;
+      wrap = U.h(`<div class="theme-wrap" style="position:relative">
       <button class="icon-btn" id="theme-pack-btn" title="Theme packs — Neon · Glass · Diwali · Gold · Mono" aria-label="Theme packs" aria-haspopup="true">🎨</button>
     </div>`);
-    const themeToggle = U.$('#theme-toggle');
-    if (themeToggle && themeToggle.parentElement) themeToggle.parentElement.insertBefore(wrap, themeToggle.nextSibling);
-    else actions.appendChild(wrap);
-    const btn = U.$('#theme-pack-btn', wrap);
+      const themeToggle = U.$('#theme-toggle');
+      if (themeToggle && themeToggle.parentElement) themeToggle.parentElement.insertBefore(wrap, themeToggle.nextSibling);
+      else actions.appendChild(wrap);
+    }
+    const btn = U.$('#theme-pack-btn', wrap) || U.$('#theme-pack-btn');
+    if (!btn || btn.__ffThemeWired) return !!btn;
+    btn.__ffThemeWired = true;
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       const old = U.$('#theme-pop');
