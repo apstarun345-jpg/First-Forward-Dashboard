@@ -529,7 +529,12 @@ window.FF = window.FF || {};
     </div>`;
 
     const typeOptions = [{ key: 'all', label: 'All types' }, ...NOTIFY_TYPES.filter((t) => t.admin || t.user).map((t) => ({ key: t.key, label: t.label }))];
-    const filtered = state.items.slice().reverse().filter((item) => (state.filterType === 'all' || item.type === state.filterType) && (!state.filterUnread || itemUnread(item)));
+    const filtered = state.items.slice().reverse().filter((item) => {
+      // ℹ️ "APP_STORAGE_HISTORY me purani saves hain" normal informational noise hai — recovery
+      // issue na ho to ise bell/feed me mat dikhao (purani saved notifications bhi yahin suppress hoti hain).
+      if (item && item.meta && item.meta.source === 'recovery-hint') return false;
+      return (state.filterType === 'all' || item.type === state.filterType) && (!state.filterUnread || itemUnread(item));
+    });
     const rows = filtered.slice(0, 60).map((item) => {
       const open = state.expanded === item.id;
       const unread = itemUnread(item);
