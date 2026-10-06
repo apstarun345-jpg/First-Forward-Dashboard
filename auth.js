@@ -111,7 +111,7 @@ window.FF = window.FF || {};
     if (!el) { el = U.h('<div id="auth-screen" class="auth-screen pro"></div>'); document.body.appendChild(el); }
     el.innerHTML = html;
     el.hidden = false;
-    const boot = U.$('#app-boot'); if (boot) boot.remove();
+    if (typeof window.__FF_FINISH_BOOT === 'function') window.__FF_FINISH_BOOT(); else { const boot = U.$('#app-boot'); if (boot) boot.remove(); }
     document.body.classList.add('auth-open');
     return el;
   }
@@ -389,7 +389,7 @@ window.FF = window.FF || {};
       applySettings(me.settings);
       // 👁 stored preview tab hi chale jab logged-in account real admin ho (warna clear).
       if (viewAs && (!me.user || me.user.role !== 'admin')) stopViewAs();
-      if (me.user) { state.user = me.user; state.ready = true; const boot = U.$('#app-boot'); if (boot) boot.remove(); return true; }
+      if (me.user) { state.user = me.user; state.ready = true; if (typeof window.__FF_FINISH_BOOT === 'function') window.__FF_FINISH_BOOT(); else { const boot = U.$('#app-boot'); if (boot) boot.remove(); } return true; }
     } catch (err) {
       console.error(err);
       screen(`<div class="auth-shell single"><div class="auth-panel"><div class="auth-card"><h2>Unable to connect to server</h2><p class="dim">${esc(err.message)}</p><button class="btn primary" onclick="location.reload()">Retry</button></div></div></div>`);
