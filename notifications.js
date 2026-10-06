@@ -177,6 +177,7 @@ window.FF = window.FF || {};
 
   // ---- icon / helpers ----------------------------------------------------------------------------
   function icon(item) {
+    if (item && item.meta && item.meta.smart) return '🧠';
     return ({ report: '📊', monthly: '📅', digest: '🌅', alert: '🔴', login: '🔐', activity: '👀', location: '📍', search: '🔍', click: '👆', settings: '⚙️', user: '👤', info: 'ℹ️', request: '🏷️', assist: '🎙️' }[item.type] || '🔔');
   }
   // ---- 📂 notification ka data (panel me expand + redirect) --------------------------------------
