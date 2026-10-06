@@ -1739,6 +1739,34 @@ window.FF = window.FF || {};
     if (!on) { if (chip) chip.remove(); return; }
     if (!chip) { chip = U.h('<a class="live-share-chip" id="live-share-chip" href="#/settings?tab=account" title="Admin aapka page, cursor aur clicks live dekh sakta hai. Settings → My account me band kar sakte ho.">👁 Admin live view on</a>'); foot.insertBefore(chip, foot.firstChild); }
   }
+  function showWorkspaceOpening() {
+    const old = U.$('#workspace-opening');
+    if (old) old.remove();
+    const el = U.h(`<div class="workspace-opening" id="workspace-opening" role="status" aria-live="polite">
+      <div class="wo-aura"></div>
+      <div class="wo-burst wo-burst-a"></div>
+      <div class="wo-burst wo-burst-b"></div>
+      <div class="wo-burst wo-burst-c"></div>
+      <div class="wo-spark-field" aria-hidden="true">
+        <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+      </div>
+      <div class="wo-core">
+        <div class="wo-logo">FF</div>
+        <div class="wo-title">Opening your workspace</div>
+        <div class="wo-sub">Preparing your secure dashboard…</div>
+        <div class="wo-loader"><span></span></div>
+      </div>
+    </div>`);
+    document.body.appendChild(el);
+    const finish = () => {
+      el.classList.add('is-closing');
+      setTimeout(() => el.remove(), 420);
+    };
+    // Minimum visible time makes the celebration actually visible on fast refresh/login.
+    setTimeout(finish, 1450);
+    return el;
+  }
+
   function onLogin() {
     if (EMBED_LIVE) {
       // Admin live-view mirror: render only the page, no timers / prompts / notifications.
@@ -1752,6 +1780,7 @@ window.FF = window.FF || {};
     renderSidebar();
     FF.auth.applyTheme();
     document.body.classList.add('ready');
+    showWorkspaceOpening();
     // Start one shared load BEFORE rendering; page requests join it.
     if (FF.preloader) FF.preloader.preloadAll(false).catch(console.warn);
     renderCurrent();
