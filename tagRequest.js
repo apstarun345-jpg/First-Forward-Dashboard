@@ -2604,8 +2604,77 @@ body.colorful .from-hdr { color: #166534; }
     const i = state.requests.findIndex((x) => x.id === updated.id);
     if (i >= 0) state.requests[i] = { ...state.requests[i], ...updated };
   }
+
+  // ⚡ Admin Tag Request mutations are optimistic: UI updates immediately, server confirms in parallel.
+  // Per-request sequencing prevents an older slow response/failure from overwriting a newer click.
+  const reqMutationSeq = new Map();
+
+  function optimisticRequest(r, payload) {
+    if (!r || !r.id || !payload || typeof payload !== 'object') return { before: null, token: 0 };
+    let before;
+    try { before = JSON.parse(JSON.stringify(r)); } catch { before = { ...r, rows: Array.isArray(r.rows) ? r.rows.map((x) => ({ ...x })) : [] }; }
+    const next = { ...before, rows: Array.isArray(before.rows) ? before.rows.map((x) => ({ ...x })) : [] };
+
+    if (payload.status !== undefined) next.status = payload.status;
+    if (payload.adminNote !== undefined) next.adminNote = String(payload.adminNote || '');
+    if (payload.note !== undefined && (next.status || 'pending') === 'pending') next.note = String(payload.note || '');
+    if (payload.courier !== undefined) {
+      const courier = String(payload.courier || '').trim();
+      if (courier) next.courier = courier; else delete next.courier;
+    }
+
+    if (payload.classQty && typeof payload.classQty === 'object' && !Array.isArray(payload.classQty)) {
+      const agentKey = String(payload.agentKey || '').trim();
+      const inScope = (x) => !agentKey || agentKeyOf(x) === agentKey;
+      const rows = next.rows;
+      const tpl = rows.find(inScope) || rows[0] || {};
+      const extra = payload.classData && typeof payload.classData === 'object' ? payload.classData : {};
+      Object.entries(payload.classQty).slice(0, 16).forEach(([clsRaw, qtyRaw]) => {
+        const cls = String(clsRaw || '').trim().toUpperCase();
+        if (!/^VC\d{1,2}$/.test(cls)) return;
+        const qty = Math.max(0, Math.min(100000, Math.round(Number(qtyRaw) || 0)));
+        const hit = rows.find((x) => inScope(x) && String(x.cls || '').toUpperCase() === cls);
+        if (hit) {
+          if (hit.requested === undefined) hit.requested = Number(hit.approved) || 0;
+          hit.approved = qty;
+        } else if (qty > 0 && rows.length < 150) {
+          const d = extra[cls] && typeof extra[cls] === 'object' ? extra[cls] : {};
+          const ag = next.agent || {};
+          rows.push({
+            agentId: tpl.agentId || ag.agentId || '', agentName: tpl.agentName || ag.name || '',
+            tl: tpl.tl || ag.tl || '', channel: (tpl.channel || ag.channel) === 'gv' ? 'gv' : 'ff',
+            cls, last: Number(d.last) || 0, cur: Number(d.cur) || 0, stock: Number(d.stock) || 0,
+            cover: null, priority: '', growth: 0, sugNet: 0, sugGross: 0,
+            requested: 0, approved: qty, remark: 'admin optimistic edit'
+          });
+        }
+      });
+      next.total = rows.reduce((s, x) => s + (Number(x.approved) || 0), 0);
+    }
+
+    const token = (reqMutationSeq.get(r.id) || 0) + 1;
+    reqMutationSeq.set(r.id, token);
+    replaceRequest(next);
+    return { before, token };
+  }
+
   function putRequest(r, payload) {
-    return FF.auth.api(`/api/tag-requests/${encodeURIComponent(r.id)}`, 'PUT', payload).then((out) => { if (out && out.request) replaceRequest(out.request); return out; });
+    const local = optimisticRequest(r, payload);
+    return FF.auth.api(`/api/tag-requests/${encodeURIComponent(r.id)}`, 'PUT', payload)
+      .then((out) => {
+        if (reqMutationSeq.get(r.id) === local.token) {
+          if (out && out.request) replaceRequest(out.request);
+          reqMutationSeq.delete(r.id);
+        }
+        return out;
+      })
+      .catch((err) => {
+        if (reqMutationSeq.get(r.id) === local.token) {
+          reqMutationSeq.delete(r.id);
+          if (local.before && local.before.id) replaceRequest(local.before);
+        }
+        throw err;
+      });
   }
   function startEdit(dr) {
     const qty = {};
@@ -2634,21 +2703,29 @@ body.colorful .from-hdr { color: #166534; }
     if (!Object.keys(payload).length) { state.edit = null; renderReqTable(); U.toast('Kuch badla nahi', 'info'); return; }
     const btn = rootEl.querySelector('.tr-editing [data-tr-op="save"]');
     if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
-    putRequest(dr.req, payload).then(() => {
-      state.edit = null;
+    const savePromise = putRequest(dr.req, payload);
+    // ⚡ Save click ka result turant table me dikhao; API confirmation background me.
+    state.edit = null;
+    renderReqTable();
+    savePromise.then(() => {
       U.toast(`💾 ${dr.agent.name} — qty update ho gayi`, 'ok');
-      renderReqTable();
     }).catch((err) => {
       U.toast('Save fail: ' + ((err && err.message) || ''), 'err');
-      if (btn) { btn.disabled = false; btn.textContent = '💾 Save'; }
+      renderReqTable();
     });
   }
   function setStatus(dr, status, btn) {
     if (btn) { btn.disabled = true; }
-    return putRequest(dr.req, { status }).then(() => {
+    // ⚡ Pending / Approved / Rejected / Dispatched — status UI turant badlo.
+    const p = putRequest(dr.req, { status });
+    renderReqTable();
+    p.then(() => {
       U.toast(`${STATUS[status] ? STATUS[status].label : status} — ${dr.agent.name}`, 'ok');
+    }).catch((err) => {
+      U.toast('Status update fail: ' + ((err && err.message) || ''), 'err');
       renderReqTable();
-    }).catch((err) => { U.toast('Status update fail: ' + ((err && err.message) || ''), 'err'); renderReqTable(); });
+    });
+    return p;
   }
   async function bulkApprove() {
     const list = selectedRequests().filter((r) => (r.status || 'pending') === 'pending');
@@ -2656,12 +2733,12 @@ body.colorful .from-hdr { color: #166534; }
     if (!window.confirm(`${list.length} pending request${list.length > 1 ? 's' : ''} approve karein?`)) return;
     const btn = rootEl.querySelector('[data-tr-bulk="approve"]');
     if (btn) { btn.disabled = true; btn.textContent = '⏳ Approve ho rahi hain…'; }
-    let ok = 0, fail = 0;
-    for (const r of list) {
-      try { await putRequest(r, { status: 'approved' }); ok++; } catch { fail++; }
-    }
-    U.toast(`✅ ${ok} approve${fail ? ` · ⚠️ ${fail} fail` : ''}`, fail ? 'warn' : 'ok');
+    // ⚡ Bulk approve sequential nahi — selected requests parallel update hoti hain.
+    const results = await Promise.allSettled(list.map((r) => putRequest(r, { status: 'approved' })));
+    const ok = results.filter((x) => x.status === 'fulfilled').length;
+    const fail = results.length - ok;
     renderReqTable();
+    U.toast(`✅ ${ok} approve${fail ? ` · ⚠️ ${fail} fail` : ''}`, fail ? 'warn' : 'ok');
   }
   function exportCsv() {
     if (FF.auth && FF.auth.can && !FF.auth.can('export')) { U.toast('Download permission nahi hai', 'err'); return; }
@@ -2772,13 +2849,15 @@ body.colorful .from-hdr { color: #166534; }
         const prev = clean(dr.req.courier || '');
         if (val === prev) return;
         t.disabled = true;
-        FF.auth.api(`/api/tag-requests/${encodeURIComponent(dr.req.id)}`, 'PUT', { courier: val }).then((out) => {
-          const saved = (out && out.request && out.request.courier) || '';
-          dr.req.courier = saved;
-          t.disabled = false;
-          U.toast(saved ? `🚚 Courier: ${saved}` : '🚚 Courier hata diya', 'ok');
+        // ⚡ Courier select ka result bhi turant reflect ho.
+        const p = putRequest(dr.req, { courier: val });
+        renderReqTable();
+        p.then(() => {
+          U.toast(val ? `🚚 Courier: ${val}` : '🚚 Courier hata diya', 'ok');
+        }).catch((err) => {
+          U.toast('Courier save nahi hua: ' + ((err && err.message) || ''), 'err');
           renderReqTable();
-        }).catch((err) => { t.disabled = false; t.value = prev; U.toast('Courier save nahi hua: ' + ((err && err.message) || ''), 'err'); });
+        });
       }
     });
     card.addEventListener('input', (e) => {
