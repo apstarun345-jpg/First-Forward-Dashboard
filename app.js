@@ -794,6 +794,10 @@ window.FF = window.FF || {};
     try {
       if (U.$('.drawer.open') || U.$('.ms-panel') || U.$('.live-modal') || U.$('.palette-backdrop:not([hidden])') || U.$('#auth-screen:not([hidden])')) return false;
       document.body.classList.remove('no-scroll');
+      document.body.style.removeProperty('overflow');
+      document.body.style.removeProperty('overflow-y');
+      document.documentElement.style.removeProperty('overflow');
+      document.documentElement.style.removeProperty('overflow-y');
       return true;
     } catch { return false; }
   }
