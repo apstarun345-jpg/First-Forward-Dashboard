@@ -2008,16 +2008,6 @@ body.colorful .from-hdr { color: #166534; }
   function renderPublicEmployeeRequests() {
     const body = bodyEl();
     if (!body) return;
-    if (!state.employeeToken) {
-      body.innerHTML = `<section class="card tr-employee-summary">
-        <div class="card-head"><h3>👤 Meri requests</h3><div class="card-right dim">Aapki request history</div></div>
-        <div class="card-body">
-          <div class="notice" style="margin:0">📝 <b>Abhi koi request history available nahi hai.</b><br>
-          Pehle <b>Form</b> me tag request submit karein. Submit hone ke baad isi <b>👤 Meri requests</b> tab me aapki saari requests automatically dikhengi.</div>
-        </div>
-      </section>`;
-      return;
-    }
     if (!state.employeeSummary) {
       body.innerHTML = `<section class="card tr-employee-summary">
         <div class="card-head"><h3>👤 Meri requests</h3><button class="btn small" data-tr-emp-refresh>↻ Refresh</button></div>
@@ -2036,7 +2026,7 @@ body.colorful .from-hdr { color: #166534; }
         <div class="card-right dim">Total <b>${fmt(summary.totalRequests || 0)}</b> · Requested <b>${fmt(summary.requestedTags || 0)}</b> · Approved <b>${fmt(summary.approvedTags || 0)}</b></div>
       </div>
       <div class="card-body">
-        <div class="tr-es-head"><div><b>📋 Request history</b><small class="dim">Nayi request sabse upar</small></div><button class="btn small" data-tr-emp-refresh>↻ Refresh</button></div>
+        <div class="tr-es-head"><div><b>📋 All employee-link requests</b><small class="dim">Same Employee Link se aayi sabhi requests · nayi request sabse upar</small></div><button class="btn small" data-tr-emp-refresh>↻ Refresh</button></div>
         <div class="tr-es-tags"><span>🏷️ Requested tags <b>${fmt(summary.requestedTags || 0)}</b></span><span>✅ Approved tags <b>${fmt(summary.approvedTags || 0)}</b></span></div>
         ${history.html}
       </div>
