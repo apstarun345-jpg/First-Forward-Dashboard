@@ -259,7 +259,7 @@ html.mobile-ui .chart-card {
   box-shadow: 0 2px 10px rgba(15,23,42,.045) !important;
   transform: none !important;
   transition: border-color .15s ease, box-shadow .15s ease !important;
-  contain: layout paint;
+  /* No paint containment here: dropdowns/suggestions and popovers must be allowed to escape the card. */
 }
 html.mobile-ui .card:hover,
 html.mobile-ui .panel:hover,
