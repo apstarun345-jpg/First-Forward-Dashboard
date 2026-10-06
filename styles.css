@@ -5795,3 +5795,176 @@ html[data-theme="dark"] .home-exp-stat { background: color-mix(in srgb, var(--br
 .dp2-stock-mix b { font-size: 10.5px; font-variant-numeric: tabular-nums; }
 @media(max-width:900px) { .home-exp-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); } .home-exp-date-filter { grid-column: 1 / -1; } }
 @media(max-width:560px) { .home-exp-controls { grid-template-columns: 1fr; } .home-exp-date-filter { grid-column: auto; } .home-exp-summary { gap: 5px; } .home-exp-stat { padding: 8px; } .home-exp-stat > span, .home-exp-stat > small { font-size: 9px; } .home-exp-stat > b { font-size: 14px; } .home-exp-dates label { width: 100%; justify-content: space-between; } .home-exp-dates .input { flex: 1; min-width: 0; } .home-exp-card > .card-head { flex-direction: row; } .home-exp-card .card-right { margin-left: auto; } }
+
+
+/* =================================================================================================
+   v3.63 — 🏷️ Tag Request admin table: fixed professional identity/contact layout
+   Keeps agent/employee names on one clean line, gives the address its own aligned block,
+   and uses the colgroup widths from tagRequest.js so every row lines up consistently.
+   ================================================================================================= */
+.tr-req-tbl {
+  width: max-content !important;
+  min-width: 2465px !important;
+  table-layout: fixed !important;
+  border-collapse: separate !important;
+  border-spacing: 0 !important;
+}
+.tr-req-tbl thead th {
+  vertical-align: middle !important;
+  text-align: center !important;
+  white-space: nowrap !important;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tr-req-tbl tbody td {
+  overflow: hidden !important;
+  vertical-align: top !important;
+  border-right: 1px solid rgba(148,163,184,.12);
+}
+.tr-req-tbl tbody td.tr-c-sel {
+  vertical-align: middle !important;
+}
+.tr-req-tbl tbody td.tr-c-date {
+  padding: 13px 8px 10px !important;
+  white-space: nowrap !important;
+}
+.tr-req-tbl tbody td.tr-c-emp {
+  min-width: 0 !important;
+  max-width: none !important;
+  padding: 13px 10px 10px !important;
+}
+.tr-req-tbl tbody td.tr-c-emp > b:first-child {
+  display: block !important;
+  width: 100% !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  line-height: 1.25 !important;
+}
+.tr-req-tbl tbody td.tr-c-agent {
+  min-width: 0 !important;
+  max-width: none !important;
+  padding: 13px 10px 10px !important;
+  line-height: 1.25 !important;
+}
+.tr-req-tbl tbody td.tr-c-agent > b:first-child {
+  display: inline-block !important;
+  max-width: 100% !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  vertical-align: middle !important;
+  font-size: 14px !important;
+  line-height: 1.2 !important;
+}
+.tr-req-tbl tbody td.tr-c-agent > small {
+  display: block !important;
+  max-width: 100% !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+.tr-req-tbl tbody td.tr-c-agent .tr-tags {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 4px !important;
+  margin-top: 6px !important;
+}
+.tr-req-tbl tbody td.tr-c-addr {
+  min-width: 0 !important;
+  max-width: none !important;
+  padding: 11px 12px !important;
+  vertical-align: top !important;
+  text-align: left !important;
+  background: linear-gradient(180deg, #fbfdff 0%, #f5f8fc 100%) !important;
+}
+.tr-req-tbl tbody td.tr-c-addr::before {
+  content: "DELIVERY CONTACT";
+  display: block;
+  margin-bottom: 5px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  color: #64748b;
+}
+.tr-req-tbl tbody td.tr-c-addr .tr-mob {
+  display: block !important;
+  margin: 0 0 5px !important;
+  color: #0f766e !important;
+  font-size: 12.5px !important;
+  font-weight: 800 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+.tr-req-tbl tbody td.tr-c-addr .tr-addr {
+  display: block !important;
+  margin: 0 0 6px !important;
+  padding: 5px 7px !important;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 7px !important;
+  background: #ffffff !important;
+  color: #334155 !important;
+  font-size: 11.5px !important;
+  line-height: 1.38 !important;
+  white-space: normal !important;
+  word-break: normal !important;
+  overflow-wrap: anywhere !important;
+}
+.tr-req-tbl tbody td.tr-c-addr .tr-pin {
+  display: inline-flex !important;
+  align-items: center;
+  min-height: 21px;
+  padding: 2px 7px !important;
+  border: 1px solid #cbd5e1 !important;
+  border-radius: 7px !important;
+  background: #fff !important;
+  color: #991b1b !important;
+  font-size: 11.5px !important;
+  font-weight: 850 !important;
+  white-space: nowrap !important;
+}
+.tr-req-tbl tbody td.tr-c-courier {
+  text-align: center !important;
+  padding-top: 14px !important;
+}
+.tr-req-tbl tbody td.tr-c-cls {
+  padding-top: 11px !important;
+}
+.tr-req-tbl tbody td.tr-c-total,
+.tr-req-tbl tbody td.tr-c-status,
+.tr-req-tbl tbody td.tr-c-act {
+  padding-top: 12px !important;
+}
+.tr-req-tbl tbody .tr-m {
+  text-align: center !important;
+  white-space: nowrap !important;
+  font-variant-numeric: tabular-nums;
+}
+.tr-req-tbl tbody .tr-m > b,
+.tr-req-tbl tbody .tr-m > .tr-src {
+  vertical-align: middle;
+}
+.tr-req-tbl tbody tr:nth-child(even) td.tr-c-addr {
+  background: linear-gradient(180deg, #f6faff 0%, #eff5fb 100%) !important;
+}
+.tr-req-tbl tbody tr:hover td.tr-c-addr {
+  background: #ecfeff !important;
+}
+.tr-req-tbl tbody tr.st-approved td.tr-c-emp,
+.tr-req-tbl tbody tr.st-approved td.tr-c-agent {
+  background: linear-gradient(180deg, rgba(240,253,244,.95), rgba(255,255,255,.7)) !important;
+}
+.tr-req-tbl tbody tr.st-pending td.tr-c-emp,
+.tr-req-tbl tbody tr.st-pending td.tr-c-agent {
+  background: linear-gradient(180deg, rgba(255,251,235,.95), rgba(255,255,255,.7)) !important;
+}
+.tr-req-tbl tbody tr.st-rejected td.tr-c-emp,
+.tr-req-tbl tbody tr.st-rejected td.tr-c-agent {
+  background: linear-gradient(180deg, rgba(254,242,242,.95), rgba(255,255,255,.7)) !important;
+}
+@media (max-width: 900px) {
+  .tr-req-tbl {
+    min-width: 2200px !important;
+  }
+}
