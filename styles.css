@@ -4949,7 +4949,8 @@ html[data-theme="dark"] .hm-toprow .rank { background: #1e293b; color: #a5b4fc; 
    Purana master-search panel (list / box) yahan nahi hai — sirf ek line ke naam-chips jab ek se zyada
    log match karein. Report component .sr / .mp (searchReport + masterProfile) reuse karta hai.
    ================================================================================================ */
-.msp-page .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+
+.msp-channel-choice{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:10px 12px;margin:0 0 10px;border:1px solid var(--line);border-left:4px solid var(--brand);border-radius:12px;background:color-mix(in srgb,var(--brand) 5%,var(--card))}.msp-channel-choice>div:first-child{display:grid;gap:2px}.msp-channel-choice small{font-size:11px}.msp-channel-choice-btns{display:flex;gap:6px;flex-wrap:wrap}.msp-page .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .msp-search-card { margin: 10px 0 14px; }
 .msp-search { display: flex; align-items: center; gap: 8px; position: relative; }
 .msp-search .msp-ico { font-size: 18px; line-height: 1; }
