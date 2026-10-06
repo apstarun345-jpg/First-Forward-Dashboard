@@ -5503,17 +5503,18 @@ async function handleApi(req, res, url) {
     if (!w.tagRequestSheet || typeof w.tagRequestSheet !== 'object') {
       w.tagRequestSheet = {
         enabled: false, tab: 'Tag Requests', sheetLink: '', spreadsheetId: '', onSubmit: true, onStatus: true, v: 2,
-        rowMode: 'agent', columns: [...TAG_SHEET_DEFAULT_COLUMNS]
+        rowMode: 'agent-class-gap', columns: [...TAG_SHEET_DEFAULT_COLUMNS]
       };
     }
     const cfg = w.tagRequestSheet;
     // v3.51 migration (ek hi baar): purani config class-wise rows + lamba column set use kar rahi thi,
     // jisse sheet bahut lambi/chaudi ho jaati thi. Ab default = ek agent = ek row (classes usi row me)
     // aur compact columns. Admin chahe to 📗 sheet card se dobara badal sakta hai.
-    if (Number(cfg.v || 1) < 2) {
-      if (!cfg.rowMode || cfg.rowMode === 'class') cfg.rowMode = 'agent';
+    if (Number(cfg.v || 1) < 3) {
+      // v3.60 — preferred sheet layout: each agent's classes stay together, then one blank spacer row.
+      cfg.rowMode = 'agent-class-gap';
       cfg.columns = [...TAG_SHEET_DEFAULT_COLUMNS];
-      cfg.v = 2;
+      cfg.v = 3;
     }
     // v3.27 — link me sheet ka ID ho to wahi (alag sheet) target banta hai.
     if (cfg.spreadsheetId === undefined) cfg.spreadsheetId = sheetIdFromLink(cfg.sheetLink) || '';
@@ -5725,8 +5726,7 @@ async function handleApi(req, res, url) {
     const mk = (x) => cols.map((c) => tagSheetFieldValue(c, x, req, event));
     let data = [];
     if (cfg.rowMode === 'agent') {
-      // 🪶 v3.51 — ek AGENT = ek row. Saari classes usi row me qty ke saath ("VC4 40 · VC6 10"),
-      // aur stock / cur / last / approved / requested jod diye jaate hain — sheet chhoti rehti hai.
+      // 🪶 Legacy: ek AGENT = ek row, saari classes ek cell me.
       const byAgent = new Map();
       rowsIn.forEach((x) => {
         const key = `${x.agentId || ''}|${x.agentName || ''}`;
@@ -5741,7 +5741,20 @@ async function handleApi(req, res, url) {
         byAgent.set(key, a);
       });
       data = [...byAgent.values()].map((a) => mk({ ...a, cls: a.clsList.join(' · ') }));
-    } else if (cfg.rowMode === 'request') {
+    } else if (cfg.rowMode === 'agent-class-gap') {
+      // 🧩 Preferred: ek agent ki saari class rows saath, phir exactly 1 blank row, phir next agent.
+      const groups = new Map();
+      rowsIn.forEach((x) => {
+        const key = `${x.agentId || ''}|${x.agentName || ''}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(x);
+      });
+      const keys = [...groups.keys()];
+      keys.forEach((key, gi) => {
+        const groupRows = groups.get(key) || [];
+        groupRows.forEach((x) => data.push(mk(x)));
+        if (gi < keys.length - 1) data.push(cols.map(() => ''));
+      });    } else if (cfg.rowMode === 'request') {
       const sum = rowsIn.reduce((s, x) => s + (Number(x.approved) || 0), 0);
       const oneAgent = new Set(rowsIn.map((x) => `${x.agentId || ''}|${x.agentName || ''}`)).size === 1;
       const agg = {
@@ -6530,7 +6543,7 @@ async function handleApi(req, res, url) {
     if (typeof c.spreadsheetId === 'string') cfg.spreadsheetId = sheetIdFromLink(c.spreadsheetId);
     if (c.onSubmit !== undefined) cfg.onSubmit = !!c.onSubmit;
     if (c.onStatus !== undefined) cfg.onStatus = !!c.onStatus;
-    if (c.rowMode !== undefined && ['class', 'agent', 'request'].includes(c.rowMode)) cfg.rowMode = c.rowMode;
+    if (c.rowMode !== undefined && ['class', 'agent', 'agent-class-gap', 'request'].includes(c.rowMode)) cfg.rowMode = c.rowMode;
     if (Array.isArray(c.columns)) {
       const cols = c.columns.map((x) => String(x)).filter((x) => TAG_SHEET_FIELDS[x]);
       if (cols.length) cfg.columns = [...new Set(cols)];
