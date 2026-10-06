@@ -252,6 +252,38 @@ test('gvTruth: TL ka stock = TL ke paas + agents ke paas · team rollup ledger s
   assert.equal(a1.sheetCur, 3, 'sheet ka number bhi saath');
 });
 
+test('Tag Assignment TL/agent totals and drill-down prefer exact IDs when display names collide', async () => {
+  const originalLength = ASSIGN_ROWS.length;
+  const assignmentRow = ({ cls = '4', tag, status = 'In Stock', agentId, agentName, tlId, tlName }) => [
+    cls, tag, `SER-${tag}`, status, agentId, agentName, tlId, tlName, '', '', '', 'GVU', 'GV User', ''
+  ].map((v) => ({ v: String(v), f: String(v) }));
+  ASSIGN_ROWS.push(
+    assignmentRow({ tag: 'TA-1', agentId: 'AG-A', agentName: 'Same Agent', tlId: 'TL-A', tlName: 'Shared TL' }),
+    assignmentRow({ tag: 'TA-2', agentId: 'AG-A', agentName: 'Same Agent', tlId: 'TL-A', tlName: 'Shared TL' }),
+    assignmentRow({ tag: 'TA-OUT', status: 'Tag Issued', agentId: 'AG-A', agentName: 'Same Agent', tlId: 'TL-A', tlName: 'Shared TL' }),
+    assignmentRow({ cls: '20', tag: 'TB-1', agentId: 'AG-B', agentName: 'Same Agent', tlId: 'TL-B', tlName: 'Shared TL' }),
+    assignmentRow({ cls: '20', tag: 'TB-2', agentId: 'AG-B', agentName: 'Same Agent', tlId: 'TL-B', tlName: 'Shared TL' }),
+    assignmentRow({ cls: '20', tag: 'TB-3', agentId: 'AG-B', agentName: 'Same Agent', tlId: 'TL-B', tlName: 'Shared TL' })
+  );
+  try {
+    await boot();
+    const T = FF.gvTruth;
+    const tlA = T.stockFor({ kind: 'gv-tl', name: 'Shared TL', id: 'TL-A' });
+    const tlB = T.stockFor({ kind: 'gv-tl', name: 'Shared TL', id: 'TL-B' });
+    assert.deepEqual([tlA.total, tlA.vc4, tlA.comm], [2, 2, 0]);
+    assert.deepEqual([tlB.total, tlB.vc4, tlB.comm], [3, 0, 3]);
+    assert.equal(T.stockFor({ kind: 'gv-agent', name: 'Same Agent', id: 'AG-A' }).total, 2);
+    assert.equal(T.stockFor({ kind: 'gv-agent', name: 'Same Agent', id: 'AG-B' }).total, 3);
+    const detail = await T.drill({ kind: 'gv-tl', name: 'Shared TL', id: 'TL-A', scope: 'stock' });
+    assert.equal(detail.rows.length, 3, 'exact TL ID detail includes its 2 in-stock + 1 issued row');
+    assert.equal(detail.rowFlags.filter((flag) => flag === 'out').length, 1);
+    assert.ok(detail.raw.every((row) => row.tlId === 'TL-A'), 'same-name TL B rows do not leak into TL A detail');
+  } finally {
+    ASSIGN_ROWS.length = originalLength;
+    await boot();
+  }
+});
+
 test('gvTruth.people: list me agents + TL dono, ledger aur stock ke saath', async () => {
   await boot();
   const list = FF.gvTruth.people();

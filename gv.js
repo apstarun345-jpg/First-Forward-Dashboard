@@ -497,21 +497,22 @@ window.FF = window.FF || {};
         return { ...r, tlName, channel: 'GV Partner', directAgent: !U.clean(r.tlName) && !U.clean(r.tlId), isRealTl: FF.config.isRealTl(tlName) };
       });
   }
-  /** Tag Assignment: TL × class. */
+  /** Tag Assignment: TL ID × name × class. Keep TL ID in the key: same-name TLs must not merge. */
   async function loadStockTlClass(opts) {
     const a = assignCfg();
     const map = await assignMap(opts);
-    const tlNameL = letterOf(map, 'tlName', a.tlName), cls = letterOf(map, 'cls', a.cls);
+    const tlIdL = letterOf(map, 'tlId', a.tlId), tlNameL = letterOf(map, 'tlName', a.tlName), cls = letterOf(map, 'cls', a.cls);
     const tag = letterOf(map, 'tagId', a.tagId), st = letterOf(map, 'status', a.status);
-    const t = await D.query('Tag Assignment', `select ${tlNameL}, ${cls}, ${st}, count(${tag}) group by ${tlNameL}, ${cls}, ${st}`, opts);
+    const t = await D.query('Tag Assignment', `select ${tlIdL}, ${tlNameL}, ${cls}, ${st}, count(${tag}) group by ${tlIdL}, ${tlNameL}, ${cls}, ${st}`, opts);
     const by = new Map();
     for (const r of t.rows) {
-      const tlName = U.clean(D.cellText(r[0])) || 'Unassigned';
-      const clsName = normClass(D.cellText(r[1]));
-      if (isHeaderRow([tlName, clsName])) continue;
-      const c = stockCounts(r[3], D.cellText(r[2]));
-      const key = `${tlName}|${clsName}`;
-      const cur = by.get(key) || { tlName, cls: clsName, group: classGroup(clsName), n: 0, nAll: 0, byStatus: {} };
+      const tlId = U.clean(D.cellText(r[0]));
+      const tlName = U.clean(D.cellText(r[1])) || (tlId ? `TL ${tlId}` : 'Unassigned');
+      const clsName = normClass(D.cellText(r[2]));
+      if (isHeaderRow([tlId, tlName, clsName])) continue;
+      const c = stockCounts(r[4], D.cellText(r[3]));
+      const key = `${tlId}|${tlName}|${clsName}`;
+      const cur = by.get(key) || { tlId, tlName, cls: clsName, group: classGroup(clsName), n: 0, nAll: 0, byStatus: {} };
       cur.n += c.in; cur.nAll += c.nAll;
       if (c.status) cur.byStatus[c.status] = (cur.byStatus[c.status] || 0) + c.nAll;
       by.set(key, cur);
@@ -545,21 +546,25 @@ window.FF = window.FF || {};
         directAgent: FF.config.isDirectAgent({ agentId: r.agentId, agentName: r.agentName, tlId: r.tlId, tlName: r.tlName, channel: 'GV Partner' }, 'gv')
       }));
   }
-  /** Tag Assignment: agent × class. */
+  /** Tag Assignment: agent ID × agent × TL ID × TL × class. IDs prevent same-name holders from merging. */
   async function loadStockAgentClass(opts) {
     const a = assignCfg();
     const map = await assignMap(opts);
-    const agName = letterOf(map, 'agentName', a.agentName), cls = letterOf(map, 'cls', a.cls);
-    const tag = letterOf(map, 'tagId', a.tagId), st = letterOf(map, 'status', a.status);
-    const t = await D.query('Tag Assignment', `select ${agName}, ${cls}, ${st}, count(${tag}) group by ${agName}, ${cls}, ${st}`, opts);
+    const agId = letterOf(map, 'agentId', a.agentId), agName = letterOf(map, 'agentName', a.agentName);
+    const tlId = letterOf(map, 'tlId', a.tlId), tlName = letterOf(map, 'tlName', a.tlName);
+    const cls = letterOf(map, 'cls', a.cls), tag = letterOf(map, 'tagId', a.tagId), st = letterOf(map, 'status', a.status);
+    const t = await D.query('Tag Assignment', `select ${agId}, ${agName}, ${tlId}, ${tlName}, ${cls}, ${st}, count(${tag}) group by ${agId}, ${agName}, ${tlId}, ${tlName}, ${cls}, ${st}`, opts);
     const by = new Map();
     for (const r of t.rows) {
-      const agentName = U.clean(D.cellText(r[0]));
-      const clsName = normClass(D.cellText(r[1]));
-      if (isHeaderRow([agentName, clsName])) continue;
-      const c = stockCounts(r[3], D.cellText(r[2]));
-      const key = `${agentName}|${clsName}`;
-      const cur = by.get(key) || { agentName, cls: clsName, group: classGroup(clsName), n: 0, nAll: 0, byStatus: {} };
+      const agentId = U.clean(D.cellText(r[0]));
+      const agentName = U.clean(D.cellText(r[1])) || agentId;
+      const ownerTlId = U.clean(D.cellText(r[2]));
+      const ownerTlName = U.clean(D.cellText(r[3]));
+      const clsName = normClass(D.cellText(r[4]));
+      if (isHeaderRow([agentId, agentName, ownerTlId, ownerTlName, clsName])) continue;
+      const c = stockCounts(r[6], D.cellText(r[5]));
+      const key = `${agentId}|${agentName}|${ownerTlId}|${ownerTlName}|${clsName}`;
+      const cur = by.get(key) || { agentId, agentName, tlId: ownerTlId, tlName: ownerTlName, cls: clsName, group: classGroup(clsName), n: 0, nAll: 0, byStatus: {} };
       cur.n += c.in; cur.nAll += c.nAll;
       if (c.status) cur.byStatus[c.status] = (cur.byStatus[c.status] || 0) + c.nAll;
       by.set(key, cur);

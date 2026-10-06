@@ -282,7 +282,7 @@ test('🃏 app.js: global KPI click handler `data-kpi-self` cards ko hijack nahi
   const ua = read('unusual.js');
   assert.ok(/data-ua-flag="\$\{[^}]+\}"[^>]*data-kpi-self="1"|data-kpi-self="1"[^>]*data-ua-flag/.test(ua) || ua.includes('data-kpi-self="1"'), 'unusual cards par data-kpi-self hai');
   const as = read('agentSummary.js');
-  assert.ok(as.includes('data-kpi-self="1" data-as-age="30"') && as.includes('data-kpi-self="1" data-as-age="60"'), 'agent summary age cards par data-kpi-self hai');
+  assert.ok(as.includes('data-kpi-self="1" data-as-age="30"') && as.includes('data-kpi-self="1" data-as-age="90"'), 'agent summary age cards par data-kpi-self hai');
   // Ek hi source of truth: card, drawer, CSV aur PDF sab metricFor se bante hain.
   assert.ok(ua.includes('function metricFor(model, flagKey)'), 'metricFor single source of truth');
   assert.ok(/metricFor\(model, (k|flagKey|drawerState\.flag)\)/.test(ua), 'drawer/cards metricFor use karte hain');
@@ -303,7 +303,7 @@ test('🚀 lazy group + current cache busting: unusual-scan pehle load hota hai'
   // aur SW apni precache list usi stamped HTML se banata hai. Isliye index.html aur sw.js me matching
   // pins ki zaroorat nahi — wo manual pins hi drift karke "deploy ke baad bhi purana JS" banate the.
   assert.ok(idx.includes('config.js?v=109'), 'CCH signature helper shell me cache-busted');
-  assert.ok(idx.includes('home.js?v=90'), 'Home map-mismatch guard shell me cache-busted');
+  assert.ok(idx.includes('home.js?v=91'), 'Home map-mismatch guard shell me cache-busted');
   assert.ok(idx.includes('app.js?v=109'), 'root service-worker registration shell me cache-busted');
   assert.match(srv, /async function stampedShellHtml\(/, 'server har asset par fingerprint stamp karta hai');
   assert.match(srv, /ff-asset-versions/, 'lazy modules ka version map bhi HTML me jaata hai');

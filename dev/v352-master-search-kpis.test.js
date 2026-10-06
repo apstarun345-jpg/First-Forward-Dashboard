@@ -150,7 +150,7 @@ test('🏷️ v3.61 wiring — version pins + automatic cache-busting', async ()
   assert.equal(pkg.version, '3.62.0');
   assert.match(await read('server.js'), /APP_VERSION = '3\.62\.0'/);
   const idx = await read('index.html');
-  assert.match(idx, /styles\.css\?v=113/); assert.match(idx, /config\.js\?v=109/); assert.match(idx, /home\.js\?v=90/); assert.match(idx, /app\.js\?v=109/); assert.match(idx, /lazy\.js\?v=104/);
+  assert.match(idx, /styles\.css\?v=114/); assert.match(idx, /config\.js\?v=109/); assert.match(idx, /home\.js\?v=91/); assert.match(idx, /app\.js\?v=109/); assert.match(idx, /lazy\.js\?v=104/);
   // masterSearch ab shell-extra hai (first paint ke baad load hota hai) — index.html me eager nahi.
   assert.ok(!/src="masterSearch\.js/.test(idx), 'masterSearch eager nahi (first paint ke baad aata hai)');
   const sw = await read('sw.js');

@@ -47,10 +47,13 @@ window.FF = window.FF || {};
     const len = (a) => (Array.isArray(a) ? a.length : -1);
     return [len(d.master), len(d.stockAgent), len(d.stockAgentClass), len(d.stockTl), len(d.stockTlClass), len(d.report), todayKey()].join('|');
   }
-  let idxCache = { key: '', value: null };
+  let idxCache = { key: '', refs: [], value: null };
+  function invalidateIndex() { idxCache = { key: '', refs: [], value: null }; }
   function index() {
     const key = dataKey();
-    if (idxCache.key === key && idxCache.value) return idxCache.value;
+    const data = (G() && G().state && G().state.data) || {};
+    const refs = ['master', 'stockAgent', 'stockAgentClass', 'stockTl', 'stockTlClass', 'report'].map((k) => data[k]);
+    if (idxCache.key === key && idxCache.value && refs.every((ref, i) => ref === idxCache.refs[i])) return idxCache.value;
     const ledger = { byAgentId: new Map(), byAgentName: new Map(), byTlId: new Map(), byTlName: new Map() };
     for (const r of ledgerRows()) {
       push(ledger.byAgentId, idKey(r.agentId), r);
@@ -60,15 +63,29 @@ window.FF = window.FF || {};
       [r.tlId, r.supervisorId, r.gvTlId].forEach((id) => push(ledger.byTlId, idKey(id), r));
       push(ledger.byTlName, nameKey(r.tlName), r);
     }
-    const stock = { byAgentId: new Map(), byAgentName: new Map(), byTlId: new Map(), byTlName: new Map(), classByAgent: new Map(), classByTl: new Map() };
+    const stock = {
+      byAgentId: new Map(), byAgentName: new Map(), byTlId: new Map(), byTlName: new Map(),
+      tlTotalsById: new Map(), tlTotalsByName: new Map(),
+      classByAgentId: new Map(), classByAgent: new Map(), classByTlId: new Map(), classByTl: new Map()
+    };
     for (const r of stockAgentRows()) {
       push(stock.byAgentId, idKey(r.agentId), r);
       push(stock.byAgentName, nameKey(r.agentName), r);
       push(stock.byTlId, idKey(r.tlId), r);
       push(stock.byTlName, nameKey(r.tlName), r);
     }
-    for (const r of stockAgentClassRows()) push(stock.classByAgent, nameKey(r.agentName), r);
-    for (const r of stockTlClassRows()) push(stock.classByTl, nameKey(r.tlName), r);
+    for (const r of stockTlRows()) {
+      push(stock.tlTotalsById, idKey(r.tlId), r);
+      push(stock.tlTotalsByName, nameKey(r.tlName), r);
+    }
+    for (const r of stockAgentClassRows()) {
+      push(stock.classByAgentId, idKey(r.agentId), r);
+      push(stock.classByAgent, nameKey(r.agentName), r);
+    }
+    for (const r of stockTlClassRows()) {
+      push(stock.classByTlId, idKey(r.tlId), r);
+      push(stock.classByTl, nameKey(r.tlName), r);
+    }
     const sheet = { byAgentId: new Map(), byAgentName: new Map(), byTlId: new Map(), byTlName: new Map() };
     for (const r of reportRows()) {
       push(sheet.byAgentId, idKey(r.agentId), r);
@@ -78,7 +95,7 @@ window.FF = window.FF || {};
       push(sheet.byTlName, nameKey(r.tlName), r);
     }
     const value = { key, ledger, stock, sheet };
-    idxCache = { key, value };
+    idxCache = { key, refs, value };
     return value;
   }
 
@@ -162,46 +179,143 @@ window.FF = window.FF || {};
   function classSplit(rows) {
     const byClass = new Map();
     (rows || []).forEach((r) => {
-      const c = byClass.get(r.cls) || { cls: r.cls, group: r.group, n: 0, nAll: 0 };
-      c.n += Number(r.n) || 0;
-      c.nAll += r.nAll === undefined ? (Number(r.n) || 0) : Number(r.nAll) || 0;
-      byClass.set(r.cls, c);
+      const cls = clean(r && r.cls) || 'Commercial';
+      const group = r && r.group || (/^VC4$/i.test(cls) ? 'VC4' : 'COMM');
+      const c = byClass.get(cls) || { cls, group, n: 0, nAll: 0 };
+      c.n += Number(r && r.n) || 0;
+      c.nAll += r && r.nAll !== undefined ? (Number(r.nAll) || 0) : (Number(r && r.n) || 0);
+      byClass.set(cls, c);
     });
     const list = [...byClass.values()].sort((a, b) => b.n - a.n);
     const total = sum(list, (c) => c.n);
     const nAll = sum(list, (c) => c.nAll);
-    const vc4 = sum(list.filter((c) => c.group === 'VC4'), (c) => c.n);
+    const vc4 = sum(list.filter((c) => c.group === 'VC4' || /^VC4$/i.test(c.cls)), (c) => c.n);
     return { total, nAll, vc4, comm: total - vc4, excluded: Math.max(0, nAll - total), byClass: list };
   }
+  /** ID is authoritative when available; a same-name holder must never be merged into it. */
+  function preferredRows(byId, byName, rawId, rawName, ownerField) {
+    const id = idKey(rawId);
+    const exact = id ? lookup(byId, [id]) : [];
+    if (exact.length) return exact;
+    const name = nameKey(rawName);
+    const named = name ? lookup(byName, [name]) : [];
+    // When an ID was requested, a name fallback is safe only if every named row has that same owner ID.
+    // Missing IDs are ambiguous too; do not quietly merge same-name people/TLs.
+    if (id && named.length) {
+      const field = ownerField || 'agentId';
+      const ids = new Set(named.map((r) => idKey(r && r[field])).filter(Boolean));
+      if (ids.size !== 1 || !ids.has(id)) return [];
+    }
+    return named;
+  }
+  function fitClassSplit(split, target) {
+    const want = Math.max(0, Math.round(Number(target) || 0));
+    const rows = (split.byClass || []).map((r) => ({ ...r, n: Math.max(0, Number(r.n) || 0) }));
+    const have = sum(rows, (r) => r.n);
+    if (have === want) return { ...split, total: want, byClass: rows };
+    if (!want) return { ...classSplit([]), byClass: [] };
+    if (!have) rows.push({ cls: 'Commercial', group: 'COMM', n: want, nAll: want });
+    else if (have < want) rows.push({ cls: 'Commercial', group: 'COMM', n: want - have, nAll: want - have });
+    else {
+      let used = 0;
+      rows.forEach((r, i) => {
+        r.n = i === rows.length - 1 ? want - used : Math.floor((r.n / have) * want);
+        r.nAll = Math.min(Number(r.nAll) || r.n, r.n);
+        used += r.n;
+      });
+    }
+    return classSplit(rows);
+  }
+  function assignmentLoaded(key) {
+    try { return Array.isArray(G() && G().get && G().get(key)); } catch { return false; }
+  }
   function agentStock(spec) {
-    const id = identityOf(spec);
     const ix = index();
-    const rows = mergeLookups(lookup(ix.stock.byAgentId, id.ids), lookup(ix.stock.byAgentName, id.names));
-    const cls = lookup(ix.stock.classByAgent, id.names);
-    const split = classSplit(cls.length ? cls : rows);
+    const tlId = clean(spec.tlId || spec.supervisorId || '');
+    const inTlScope = (r) => !tlId || idKey(r && r.tlId) === idKey(tlId);
+    const rows = preferredRows(ix.stock.byAgentId, ix.stock.byAgentName, spec.id, spec.name, 'agentId').filter(inTlScope);
+    const cls = preferredRows(ix.stock.classByAgentId, ix.stock.classByAgent, spec.id, spec.name, 'agentId').filter(inTlScope);
+    const total = rows.length ? sum(rows, (r) => r.n) : sum(cls, (r) => r.n);
+    const split = fitClassSplit(classSplit(cls.length ? cls : rows), total);
     const byStatus = {};
     rows.forEach((r) => Object.entries(r.byStatus || {}).forEach(([k, v]) => { byStatus[k] = (byStatus[k] || 0) + v; }));
     const one = rows[0] || {};
-    return { ...split, byStatus, tlName: one.tlName || '', tlId: one.tlId || '', own: split.total, agentsTotal: 0, agentCount: rows.length ? 1 : 0, source: 'Tag Assignment' };
+    return { ...split, byStatus, tlName: one.tlName || '', tlId: one.tlId || '', own: split.total, agentsTotal: 0, agentCount: rows.length ? 1 : 0, source: 'Tag Assignment', authoritative: rows.length > 0 || cls.length > 0 };
+  }
+  function sameSelf(row, tlId, tlName) {
+    return (!!tlId && idKey(row && row.agentId) === idKey(tlId)) || (!!tlName && nameKey(row && row.agentName) === nameKey(tlName));
   }
   function tlStock(spec) {
-    const id = identityOf(spec);
     const ix = index();
-    const tlRows = mergeLookups(lookup(ix.stock.byTlId, id.ids), lookup(ix.stock.byTlName, id.names));
-    const self = lookup(ix.stock.byAgentId, id.ids)[0] || lookup(ix.stock.byName, id.names)[0] || lookup(ix.stock.byTlName, id.names)[0] || null;
-    const members = mergeLookups(lookup(ix.stock.byTlId, id.ids), lookup(ix.stock.byTlName, id.names)).filter((r) => r !== self);
-    const cls = lookup(ix.stock.classByTl, id.names);
-    const split = classSplit(cls.length ? cls : tlRows);
-    const own = self ? Number(self.n) || 0 : 0;
-    const agentsTotal = sum(members, (r) => r.n);
-    if (split.total < own + agentsTotal) {
-      const total = own + agentsTotal;
-      const nAll = (self ? Number(self.nAll === undefined ? self.n : self.nAll) || 0 : 0) + sum(members, (r) => (r.nAll === undefined ? r.n : r.nAll));
-      return { ...split, total, nAll, comm: total - split.vc4, excluded: Math.max(0, nAll - total), own, agentsTotal, agentCount: members.length, source: 'Tag Assignment (TL + agents)' };
-    }
-    return { ...split, own, agentsTotal, agentCount: members.length, source: 'Tag Assignment (TL + agents)' };
+    const tlId = clean(spec.tlId || spec.id || (spec.tlIds || [])[0] || '');
+    const tlName = clean(spec.name || '');
+    const directRows = preferredRows(ix.stock.tlTotalsById, ix.stock.tlTotalsByName, tlId, tlName, 'tlId');
+    const tlClassRows = preferredRows(ix.stock.classByTlId, ix.stock.classByTl, tlId, tlName, 'tlId');
+    const agentRows = preferredRows(ix.stock.byTlId, ix.stock.byTlName, tlId, tlName, 'tlId');
+    const assignmentAuthoritative = assignmentLoaded('stockTl') || assignmentLoaded('stockTlClass');
+    const exactTotal = directRows.length ? sum(directRows, (r) => r.n) : tlClassRows.length ? sum(tlClassRows, (r) => r.n) : null;
+
+    // Agent × class is keyed by holder IDs and TL IDs (not just a shared display name).
+    const classRows = stockAgentClassRows();
+    const scopedClassRows = classRows.filter((r) => {
+      const rowTlId = clean(r && r.tlId);
+      if (tlId) return !!rowTlId && idKey(rowTlId) === idKey(tlId);
+      return !!tlName && nameKey(r && r.tlName) === nameKey(tlName);
+    });
+    const peopleForClass = (people) => {
+      const picked = [], seen = new Set();
+      for (const person of people || []) {
+        const id = idKey(person.agentId), name = nameKey(person.agentName);
+        let matches = id ? scopedClassRows.filter((r) => idKey(r.agentId) === id) : [];
+        if (!matches.length && name) {
+          const namedRows = scopedClassRows.filter((r) => nameKey(r.agentName) === name);
+          const rowIds = new Set(namedRows.map((r) => idKey(r.agentId)).filter(Boolean));
+          const rosterIds = new Set(agentRows.filter((r) => nameKey(r.agentName) === name).map((r) => idKey(r.agentId)).filter(Boolean));
+          const safeNameFallback = !id
+            ? rowIds.size <= 1
+            : rowIds.size === 0 && rosterIds.size === 1 && rosterIds.has(id);
+          if (safeNameFallback) matches = namedRows;
+        }
+        matches.forEach((r) => { if (!seen.has(r)) { seen.add(r); picked.push(r); } });
+      }
+      return picked;
+    };
+    const selfRows = agentRows.filter((r) => sameSelf(r, tlId, tlName));
+    const members = agentRows.filter((r) => !sameSelf(r, tlId, tlName)
+      && !(r.directAgent === true || safeDirectAgent(r)));
+    const selfClassRows = peopleForClass(selfRows);
+    const memberClassRows = peopleForClass(members);
+    const classSource = tlClassRows.length ? tlClassRows : scopedClassRows;
+    const rawClass = classSplit(classSource);
+    const derivedTotal = sum(agentRows, (r) => r.n);
+    const total = exactTotal === null ? (rawClass.total || derivedTotal) : exactTotal;
+    const split = fitClassSplit(rawClass, total);
+
+    // Own + team are explanatory parts only. The TL × class / TL total aggregate stays authoritative;
+    // any incomplete agent list is reconciled downward/upward to the same Tag Assignment total.
+    const ownRaw = sum(selfRows, (r) => r.n);
+    const agentsRaw = sum(members, (r) => r.n);
+    let ownTotal = Math.min(ownRaw, total);
+    if (!ownRaw && !members.length && total) ownTotal = total;
+    if (ownRaw >= total && agentsRaw > 0) ownTotal = Math.max(0, total - Math.min(total, agentsRaw));
+    const agentsTotal = Math.max(0, total - ownTotal);
+    const own = fitClassSplit(classSplit(selfClassRows), ownTotal);
+    const agents = fitClassSplit(classSplit(memberClassRows), agentsTotal);
+    const byStatus = {};
+    directRows.forEach((r) => Object.entries(r.byStatus || {}).forEach(([k, v]) => { byStatus[k] = (byStatus[k] || 0) + v; }));
+    const nAll = directRows.length ? sum(directRows, (r) => r.nAll === undefined ? r.n : r.nAll) : split.nAll;
+    return {
+      ...split, byStatus, own: ownTotal, agentsTotal,
+      ownParts: { ...own, total: ownTotal }, agents: { ...agents, total: agentsTotal },
+      agentCount: members.length, source: 'Tag Assignment',
+      authoritative: assignmentAuthoritative || directRows.length > 0 || tlClassRows.length > 0,
+      nAll: Math.max(total, nAll), excluded: Math.max(0, nAll - total)
+    };
   }
   const stockFor = (spec) => (identityOf(spec).isTl ? tlStock(spec) : agentStock(spec));
+  function safeDirectAgent(row) {
+    try { return !!(FF.config && FF.config.isDirectAgent && FF.config.isDirectAgent(row, 'gv')); } catch { return false; }
+  }
 
   // ---- GV REPORT (sheet) cross-check ---------------------------------------------------------------
   function reportRowFor(spec) {
@@ -420,14 +534,27 @@ window.FF = window.FF || {};
     const isTl = p.kind === 'tl';
     const who = `${p.name}${p.id ? ` (${p.id})` : ''}`;
     if (scope === 'stock') {
-      const rows = await stockTagRows({ ...spec, truth: p });
+      let rows = await stockTagRows({ ...spec, truth: p });
+      const classKey = (v) => clean(v).toUpperCase().replace(/\s+/g, '');
+      if (cls) rows = rows.filter((r) => classKey(r.cls) === classKey(cls));
+      const part = clean(spec.part).toLowerCase();
+      if (isTl && (part === 'own' || part === 'team')) {
+        const selfId = idKey(p.tlId || p.id || spec.tlId || spec.id);
+        const selfName = nameKey(p.name || spec.tl || spec.name);
+        const isSelf = (r) => (selfId && idKey(r.agentId) === selfId) || (selfName && nameKey(r.agentName) === selfName);
+        rows = rows.filter((r) => {
+          if (part === 'own') return isSelf(r);
+          if (isSelf(r)) return false;
+          try { return !(FF.config && FF.config.isDirectAgent && FF.config.isDirectAgent(r, 'gv')); } catch { return true; }
+        });
+      }
       const shown = rows.filter((r) => r.inStock);
       const out = rows.filter((r) => !r.inStock);
       return {
-        title: `📦 Stock in hand · ${who}`, source: 'Tag Assignment (GV Partner sheet)',
-        note: `${isTl ? 'TL + uske agents' : 'Is agent'} ke ${shown.length} tag rows stock me hain${out.length ? ` · ${out.length} rows ka status out-of-stock tha (list me grey)` : ''}. Har row = ek tag (column B TAG_ID, C serial/barcode, D status).`,
-        columns: ['TAG_ID', 'SERIAL / BARCODE', 'CLASS', 'STATUS', 'AGENT', 'TL', 'GV UNIQUE ID'],
-        rows: rows.map((r) => [r.tagId || '—', r.serial || r.barcode || '—', r.cls || '—', r.status || '—', r.agentName || '—', r.tlName || '—', r.gvUniqueId || '—']),
+        title: `📦 Stock in hand · ${who}${cls ? ` · ${cls}` : ''}`, source: 'Tag Assignment (GV Partner sheet)',
+        note: `${isTl ? (part === 'own' ? 'TL own' : part === 'team' ? 'TL ke agents' : 'TL + uske agents') : 'Is agent'} ke ${shown.length} matching tag rows stock me hain${out.length ? ` · ${out.length} rows ka status out-of-stock tha (list me grey)` : ''}. Har row = ek tag (TAG_ID, serial/barcode, class, status, holder, TL).`,
+        columns: ['TAG_ID', 'SERIAL / BARCODE', 'CLASS', 'STATUS', 'AGENT', 'AGENT ID', 'TL', 'TL ID', 'GV UNIQUE ID'],
+        rows: rows.map((r) => [r.tagId || '—', r.serial || r.barcode || '—', r.cls || '—', r.status || '—', r.agentName || '—', r.agentId || '—', r.tlName || '—', r.tlId || '—', r.gvUniqueId || '—']),
         rowFlags: rows.map((r) => (r.inStock ? '' : 'out')),
         raw: rows, truth: p
       };
@@ -461,23 +588,25 @@ window.FF = window.FF || {};
       tlName: letter('tlName', a.tlName), gvUniqueId: letter('gvUniqueId', a.gvUniqueId || 'L')
     };
     const lit = (v) => `'${String(v).replace(/'/g, "\\'")}'`;
-    const cols = `${L.cls}, ${L.tagId}, ${L.serial}, ${L.status}, ${L.agentId}, ${L.agentName}, ${L.tlName}, ${L.gvUniqueId}`;
+    const cols = `${L.cls}, ${L.tagId}, ${L.serial}, ${L.status}, ${L.agentId}, ${L.agentName}, ${L.tlId}, ${L.tlName}, ${L.gvUniqueId}`;
     const limit = Math.max(1, Math.min(5000, Number(spec.limit) || 3000));
     const where = [];
     if (id.isTl) {
-      const tName = truth.tlName || spec.name;
-      const tId = truth.tlId || spec.id;
-      where.push(tId ? `(${L.tlId} = ${lit(tId)} or ${L.tlName} = ${lit(tName)})` : `${L.tlName} = ${lit(tName)}`);
+      const tName = truth.tlName || spec.tl || spec.name;
+      const tId = truth.tlId || spec.tlId || spec.id;
+      // Do not OR an exact TL ID with the display name: duplicate names would leak another TL's rows.
+      where.push(tId ? `${L.tlId} = ${lit(tId)}` : `${L.tlName} = ${lit(tName)}`);
     } else if (spec.id || truth.id) {
       where.push(`${L.agentId} = ${lit(spec.id || truth.id)}`);
+      if ((spec.tlId || truth.tlId) && L.tlId) where.push(`${L.tlId} = ${lit(spec.tlId || truth.tlId)}`);
     } else {
       where.push(`${L.agentName} = ${lit(spec.name)}`);
     }
     let t = null;
     try { t = await FF.data.query('Tag Assignment', `select ${cols} where ${where.join(' and ')} order by ${L.cls} limit ${limit}`, { only: true }); }
     catch (err) { t = null; }
-    if (!t && id.isTl) {
-      try { t = await FF.data.query('Tag Assignment', `select ${cols} where ${L.tlName} = ${lit(truth.tlName || spec.name)} limit ${limit}`, { only: true }); }
+    if (!t && id.isTl && !(truth.tlId || spec.tlId || spec.id)) {
+      try { t = await FF.data.query('Tag Assignment', `select ${cols} where ${L.tlName} = ${lit(truth.tlName || spec.tl || spec.name)} limit ${limit}`, { only: true }); }
       catch (err) { t = null; }
     }
     if (!t && !id.isTl) {
@@ -490,7 +619,7 @@ window.FF = window.FF || {};
       const status = FF.data.cellText(r[3]);
       return {
         cls: normClass(FF.data.cellText(r[0])), tagId: FF.data.cellText(r[1]), serial: FF.data.cellText(r[2]), barcode: FF.data.cellText(r[2]),
-        status, agentId: FF.data.cellText(r[4]), agentName: FF.data.cellText(r[5]), tlName: FF.data.cellText(r[6]), gvUniqueId: FF.data.cellText(r[7]),
+        status, agentId: FF.data.cellText(r[4]), agentName: FF.data.cellText(r[5]), tlId: FF.data.cellText(r[6]), tlName: FF.data.cellText(r[7]), gvUniqueId: FF.data.cellText(r[8]),
         inStock: kindOf(status) !== 'out'
       };
     });
@@ -524,5 +653,5 @@ window.FF = window.FF || {};
     };
   }
 
-  FF.gvTruth = { person, people, team, drill, stockTagRows, mapping, health, index, ledgerRows, reportRows, reportRowFor, sheetFor, stockFor, identityOf, monthStat, todayKey };
+  FF.gvTruth = { person, people, team, drill, stockTagRows, mapping, health, index, invalidateIndex, ledgerRows, reportRows, reportRowFor, sheetFor, stockFor, identityOf, monthStat, todayKey };
 })(window.FF);

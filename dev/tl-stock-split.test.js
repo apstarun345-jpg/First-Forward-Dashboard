@@ -78,15 +78,20 @@ function gvFixture() {
       // TL ki apni row: alag agent code (self-supervised "Direct" nahi) — sheet me aisa hi hota hai
       { agentId: 'G999', agentName: 'GV TL', mobile: '9333333333', tlId: 'GT1', tlName: 'GV TL', priority: 'Medium', stockVc4: 20, stockComm: 10, stockTotal: 30, stockByClass: { VC4: 20, VC20: 10 }, curDays: 15, curVc4: 20, curComm: 10, curTotal: 30, lastVc4: 20, lastComm: 0, lastTotal: 20, tlStockVc4: 60, tlStockComm: 40, tlStockTotal: 100 }
     ],
+    stockTl: [{ tlId: 'GT1', tlName: 'GV TL', n: 100, nAll: 100, byStatus: { 'IN STOCK': 100 } }],
+    stockTlClass: [
+      { tlId: 'GT1', tlName: 'GV TL', cls: 'VC4', group: 'VC4', n: 60, nAll: 60 },
+      { tlId: 'GT1', tlName: 'GV TL', cls: 'Commercial', group: 'COMM', n: 40, nAll: 40 }
+    ],
     stockAgent: [
       { agentId: 'G001', agentName: 'GV Ramesh', tlId: 'GT1', tlName: 'GV TL', n: 30 },
       { agentId: 'G002', agentName: 'GV Suresh', tlId: 'GT1', tlName: 'GV TL', n: 40 },
       { agentId: 'G999', agentName: 'GV TL', tlId: 'GT1', tlName: 'GV TL', n: 30 }
     ],
     stockAgentClass: [
-      { agentName: 'GV Ramesh', cls: 'VC4', n: 20 }, { agentName: 'GV Ramesh', cls: 'Commercial', n: 10 },
-      { agentName: 'GV Suresh', cls: 'VC4', n: 20 }, { agentName: 'GV Suresh', cls: 'Commercial', n: 20 },
-      { agentName: 'GV TL', cls: 'VC4', n: 20 }, { agentName: 'GV TL', cls: 'Commercial', n: 10 }
+      { agentId: 'G001', agentName: 'GV Ramesh', tlId: 'GT1', tlName: 'GV TL', cls: 'VC4', n: 20 }, { agentId: 'G001', agentName: 'GV Ramesh', tlId: 'GT1', tlName: 'GV TL', cls: 'Commercial', n: 10 },
+      { agentId: 'G002', agentName: 'GV Suresh', tlId: 'GT1', tlName: 'GV TL', cls: 'VC4', n: 20 }, { agentId: 'G002', agentName: 'GV Suresh', tlId: 'GT1', tlName: 'GV TL', cls: 'Commercial', n: 20 },
+      { agentId: 'G999', agentName: 'GV TL', tlId: 'GT1', tlName: 'GV TL', cls: 'VC4', n: 20 }, { agentId: 'G999', agentName: 'GV TL', tlId: 'GT1', tlName: 'GV TL', cls: 'Commercial', n: 10 }
     ]
   };
 }
@@ -175,7 +180,7 @@ test('drawer / exports: TL ki row agents ke table me alag dikhti hai + footer re
   assert.match(html, /TL · apna stock/);
   assert.match(html, /Agents total \(2\)/);
   assert.match(html, /= TL TOTAL \(own \+ agents\)/);
-  assert.match(html, /class="mp-part own"[^>]*data-kpi="src=ff&amp;scope=stock&amp;tl=TL%20One&amp;part=own"[^>]*>Own 40<\/span>/, 'KPI ka own chip');
+  assert.match(html, /class="mp-part own"[^>]*data-kpi="src=ff&amp;scope=stock&amp;tl=TL%20One&amp;tlId=T1&amp;part=own"[^>]*>Own 40<\/span>/, 'KPI ka own chip');
   assert.match(html, /part=team"[^>]*>agents 80</, 'KPI ka agents chip');
   assert.match(html, /scope=people&amp;tl=TL%20One&amp;self=0/, 'Agents count click → wahi list (TL row ke bina)');
   assert.match(html, /Stock ka hisaab/, 'hisaab ka note (kahan se aaya number)');
@@ -206,16 +211,61 @@ test('Agent/TL Summary page (agentSummary.js): Team Agents card + exports bhi re
   assert.equal(r.p.agents.length, 2, 'summary page ke agents me TL ki row nahi');
   assert.equal(r.p.selfAgent.name, 'TL One');
   assert.equal(r.p.totals.stockTotal, 120, 'summary ka stock KPI = TL total (double count nahi)');
+  r.age = {
+    total: 120, old30: 20, old60: 8,
+    buckets: [{ key: 'b1', label: '0–30d', n: 100 }, { key: 'b30', label: '30+d', n: 20 }, { key: 'b90', label: '90+d', n: 8 }, { key: 'b150', label: '150+d', n: 4 }, { key: 'b180', label: '180+d', n: 2 }],
+    byClass: [{ cls: 'VC4', total: 90, b1: 75, b30: 15, b90: 6, b150: 3, b180: 1, old30: 15, old60: 6 }, { cls: 'VC20', total: 30, b1: 25, b30: 5, b90: 2, b150: 1, b180: 1, old30: 5, old60: 2 }],
+    byHolder: [
+      { id: 'R100', name: 'TL One', tl: 'TL One', total: 40, old30: 8, old60: 3 },
+      { id: 'R101', name: 'Ravi Kumar', tl: 'TL One', total: 50, old30: 7, old60: 3 },
+      { id: 'R102', name: 'Priya Sharma', tl: 'TL One', total: 30, old30: 5, old60: 2 }
+    ]
+  };
   const html = AS.reportHtml(r);
   assert.match(html, /Team Agents \(2\)/);
   assert.match(html, /Agents total \(2\)/);
   assert.match(html, /= TL TOTAL \(own \+ agents\)/);
   assert.match(html, /TL ke paas 40<\/span> \+ <span class="mp-part team"[^>]*part=team"[^>]*>agents 80</, 'stock KPI par clickable split chips');
   assert.match(html, /mp-selfrow/);
+  assert.match(html, /Consolidated Agent \+ TL stock · class-wise \+ ageing/);
+  const teamMatrix = html.slice(html.indexOf('Consolidated Agent + TL stock'));
+  assert.match(teamMatrix, /<th class="num">30\+d<\/th><th class="num">90\+d<\/th>/);
+  assert.match(teamMatrix, /Ravi Kumar[\s\S]*?>40<\/td>[\s\S]*?>10<\/td>[\s\S]*?>50<\/td>[\s\S]*?>7<\/td>[\s\S]*?>3<\/td>/, 'holder row shows exact VC4/VC20 counts, total stock and age buckets');
+  assert.match(html, /Agents total \(2\)/);
   assert.match(AS.reportText(r), /TL ke paas \(own\) 40 \+ agents ke paas 80 = TL total 120/);
   const csv = AS.reportCsv(r);
   assert.ok(csv.some((row) => row[0] === '= TL TOTAL (own + agents)'), 'summary CSV me reconcile row');
   assert.ok(csv.some((row) => String(row[0] || '').startsWith('👤 TL One (TL')), 'summary CSV me TL ki own row marked');
+});
+
+test('GV TL profile with a duplicate display name stays scoped to the selected TL ID', async () => {
+  const gv = gvFixture();
+  gv.report.push({ agentId: 'G201', agentName: 'Other Holder', tlId: 'GT2', tlName: 'GV TL', stockVc4: 450, stockComm: 450, stockTotal: 900, curDays: 15, curVc4: 0, curComm: 0, curTotal: 0, lastVc4: 0, lastComm: 0, lastTotal: 0 });
+  gv.stockTl.push({ tlId: 'GT2', tlName: 'GV TL', n: 900, nAll: 900 });
+  gv.stockTlClass.push({ tlId: 'GT2', tlName: 'GV TL', cls: 'VC4', group: 'VC4', n: 450, nAll: 450 }, { tlId: 'GT2', tlName: 'GV TL', cls: 'Commercial', group: 'COMM', n: 450, nAll: 450 });
+  gv.stockAgent.push({ agentId: 'G201', agentName: 'Other Holder', tlId: 'GT2', tlName: 'GV TL', n: 900 });
+  gv.stockAgentClass.push({ agentId: 'G201', agentName: 'Other Holder', tlId: 'GT2', tlName: 'GV TL', cls: 'VC4', n: 450 }, { agentId: 'G201', agentName: 'Other Holder', tlId: 'GT2', tlName: 'GV TL', cls: 'Commercial', n: 450 });
+  const { MP } = mount({ ff: ffFixture(), gv });
+  const r = await MP.build(person('gv-tl', 'GV TL', 'GT1'));
+  assert.equal(r.stock.total, 100, 'GT2 ka 900 stock selected GT1 profile me merge nahi hota');
+  assert.equal(r.stockTlId, 'GT1');
+  assert.ok(!r.agents.some((a) => a.name === 'Other Holder'));
+});
+
+test('GV TL Summary stock card carries its Tag Assignment ID and opens a populated class detail', async () => {
+  mount({ ff: ffFixture(), gv: gvFixture() });
+  delete require.cache[require.resolve(path.join(ROOT, 'agentSummary.js'))];
+  require(path.join(ROOT, 'agentSummary.js'));
+  const r = await FF.agentSummary.buildReport({ kind: 'gv-tl', name: 'GV TL', id: 'GT1' }, { age: false });
+  assert.equal(r.p.totals.stockTotal, 100, 'Summary stock total reconciles to the GV TL stock');
+  assert.equal(r.p.stockTlId, 'GT1');
+  const html = FF.agentSummary.reportHtml(r);
+  assert.match(html, /tlId=GT1/, 'Summary stock link preserves the exact Tag Assignment TL ID');
+  assert.match(html, /VC4/);
+  const detail = await FF.kpiDetail._stockDetail({ src: 'gv', scope: 'stock', tl: 'GV TL', tlId: 'GT1' });
+  assert.match(detail.sub, /100/);
+  assert.match(detail.body, /60/);
+  assert.match(detail.body, /40/);
 });
 
 test('KPI drawer: TL card ka number == drawer ka number (GV TL filter + FF own/team parts)', async () => {

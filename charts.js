@@ -54,8 +54,10 @@ window.FF = window.FF || {};
     }).join('');
     const grid = [1, 0.75, 0.5, 0.25, 0].map((f) => `<div class="vgrid-line"><span>${U.fmtShort(max * f)}</span></div>`).join('');
     const cid = `ch${++seq}`;
+    const minPlotWidth = Math.max(0, Number(opts.minPlotWidth) || 0);
+    const plotStyle = minPlotWidth ? ` style="min-width:${minPlotWidth}px"` : '';
     specs.set(cid, { kind: 'bars', opts: { ...opts, series } });
-    return `<div class="chart-shot" data-cid="${cid}"><div class="vbars" style="--h:${height}px"><div class="vbars-plot"><div class="vgrid">${grid}</div><div class="vbars-cols">${cols}</div></div>${series.length > 1 || opts.legendAlways ? legend(series) : ''}</div></div>`;
+    return `<div class="chart-shot" data-cid="${cid}"><div class="vbars" style="--h:${height}px"><div class="vbars-plot"${plotStyle}><div class="vgrid">${grid}</div><div class="vbars-cols">${cols}</div></div>${series.length > 1 || opts.legendAlways ? legend(series) : ''}</div></div>`;
   }
 
   /** Horizontal bars. opts: { items:[{label, sub, value, compare, color, tip, attr}], max, format, compareLabel } */

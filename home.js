@@ -158,18 +158,60 @@ FF.pages = FF.pages || {};
     }
     return { byChannel, total, rows: (rows || []).length, byClass: Object.fromEntries(EXPLORER_CLASSES.map((group) => [group, byChannel.ff[group] + byChannel.gv[group]])) };
   }
+  function explorerDaily(rows, filters, allowedChannels) {
+    const f = filters || {};
+    const keys = (rows || []).map((row) => explorerDateKey(row.key || row.dateKey || row.date || row.d)).filter(Boolean).sort();
+    if (!keys.length) return { keys: [], labels: [], byChannel: { ff: [], gv: [] }, from: '', to: '', capped: false, undated: (rows || []).length, total: 0 };
+    let from = validExplorerDate(f.from) || keys[0], to = validExplorerDate(f.to) || keys[keys.length - 1];
+    if (from > to) [from, to] = [to, from];
+    const fullFrom = from, fullTo = to;
+    const dayNumber = (key) => { const [y, m, d] = key.split('-').map(Number); return Math.floor(Date.UTC(y, m - 1, d) / 86400e3); };
+    const dayCount = dayNumber(to) - dayNumber(from) + 1;
+    const capped = dayCount > 366;
+    if (capped) {
+      const end = U.fromDateKey(to); end.setDate(end.getDate() - 365);
+      from = U.dateKey(end);
+    }
+    const dateKeys = [];
+    const cursor = U.fromDateKey(from), end = U.fromDateKey(to);
+    while (cursor <= end) { dateKeys.push(U.dateKey(cursor)); cursor.setDate(cursor.getDate() + 1); }
+    const daily = { ff: new Map(dateKeys.map((key) => [key, 0])), gv: new Map(dateKeys.map((key) => [key, 0])) };
+    let total = 0, datedCount = 0;
+    for (const row of rows || []) {
+      const key = explorerDateKey(row.key || row.dateKey || row.date || row.d);
+      if (!key) continue;
+      const channel = explorerChannel(row);
+      if (!daily[channel] || key < from || key > to) continue;
+      const n = Math.max(0, Number(row.n) || 0);
+      daily[channel].set(key, (daily[channel].get(key) || 0) + n);
+      total += n; datedCount++;
+    }
+    const allowed = new Set((allowedChannels || ['ff', 'gv']).map((v) => /^(gv|green)/i.test(String(v)) ? 'gv' : 'ff'));
+    return {
+      keys: dateKeys, labels: dateKeys.map((key) => U.labelDateKey(key, false)), tipLabels: dateKeys.map((key) => `${U.labelDateKey(key, true)} · ${key}`),
+      byChannel: { ff: dateKeys.map((key) => allowed.has('ff') ? daily.ff.get(key) || 0 : 0), gv: dateKeys.map((key) => allowed.has('gv') ? daily.gv.get(key) || 0 : 0) },
+      from, to, fullFrom, fullTo, capped, undated: Math.max(0, (rows || []).length - datedCount), total
+    };
+  }
   function explorerHtml(rows, allowedChannels) {
     const allowed = [...new Set((allowedChannels || ['ff', 'gv']).map((v) => /^(gv|green)/i.test(String(v)) ? 'gv' : 'ff'))];
     const accessibleFilters = { ...explorerFilters, channels: new Set([...explorerFilters.channels].filter((ch) => allowed.includes(ch))) };
     const matched = filterExplorerRows(rows, accessibleFilters, allowed);
     const totals = explorerTotals(matched);
     const activeChannels = accessibleFilters.channels.size ? allowed.filter((ch) => accessibleFilters.channels.has(ch)) : allowed;
+    const daily = explorerDaily(matched, accessibleFilters, allowed);
     const series = activeChannels.map((ch) => ({
       name: ch === 'ff' ? 'First Forward · FF' : 'GV Partner · GV',
-      values: EXPLORER_CLASSES.map((group) => totals.byChannel[ch][group]),
+      values: daily.byChannel[ch] || [],
       color: ch === 'ff' ? '#6366f1' : '#0d9488'
     }));
-    const bars = series.length ? C.bars({ labels: EXPLORER_CLASSES, height: 220, series, showValues: true, legendAlways: true }) : '';
+    const labelEvery = daily.keys.length > 180 ? 21 : daily.keys.length > 90 ? 14 : daily.keys.length > 45 ? 7 : daily.keys.length > 20 ? 3 : 1;
+    const plotWidth = Math.max(640, daily.keys.length * 23 + 56);
+    const bars = series.length && daily.keys.length ? C.bars({
+      labels: daily.labels, tipLabels: daily.tipLabels, height: 220, series,
+      showValues: daily.keys.length <= 14, labelEvery, legendAlways: true,
+      minPlotWidth: plotWidth
+    }) : '';
     const groupButtons = (dim, options) => {
       const active = accessibleFilters[dim];
       const all = `<button type="button" class="home-exp-chip ${active.size ? '' : 'on'}" data-home-exp-filter="${dim}:all" aria-pressed="${active.size ? 'false' : 'true'}">All</button>`;
@@ -183,8 +225,14 @@ FF.pages = FF.pages || {};
       : 'All available dates';
     const channelSplit = (group) => allowed.map((ch) => `${ch === 'ff' ? 'FF' : 'GV'} ${U.fmt(totals.byChannel[ch][group])}`).join(' · ');
     const summary = EXPLORER_CLASSES.map((group) => `<div class="home-exp-stat"><span>${group}</span><b>${U.fmt(totals.byClass[group])}</b><small>${channelSplit(group)}</small></div>`).join('');
-    const emptyMessage = !matched.length ? '<div class="home-exp-empty">Is date / filters ke liye koi issuance nahi mila.</div>' : '';
-    return `<section class="card home-exp-card"><div class="card-head"><div><h3>📊 Issuance mix · class-wise</h3><span class="dim small">FF + GV · ${esc(rangeLabel)} · ${U.fmt(totals.total)} tags</span></div><div class="card-right"><button type="button" class="btn small" data-home-exp-reset title="Current month ke default filters lagao">↺ Reset</button></div></div>
+    const emptyMessage = !matched.length
+      ? '<div class="home-exp-empty">Is date / filter selection ke liye koi issuance nahi mila.</div>'
+      : '<div class="home-exp-empty">Filtered rows me valid issuance date nahi mili; date-wise bars nahi ban sake.</div>';
+    const chartNote = daily.capped
+      ? 'Date range 366 days se lamba hai; chart me latest 366 daily bars dikhte hain.'
+      : `${U.fmt(daily.keys.length)} daily bars · ${U.fmt(daily.total)} dated tags`;
+    const undatedNote = daily.undated ? ` · ${U.fmt(daily.undated)} rows bina date ke chart me nahi dikhte` : '';
+    return `<section class="card home-exp-card"><div class="card-head"><div><h3>📊 Issuance mix · date-wise</h3><span class="dim small">FF + GV · ${esc(rangeLabel)} · ${U.fmt(totals.total)} tags</span></div><div class="card-right"><button type="button" class="btn small" data-home-exp-reset title="Current month ke default filters lagao">↺ Reset</button></div></div>
       <div class="card-body home-exp-body">
         <div class="home-exp-controls">
           <div class="home-exp-filter"><span>Channel · multi-select</span><div>${groupButtons('channels', EXPLORER_FILTERS.channels)}</div></div>
@@ -196,8 +244,8 @@ FF.pages = FF.pages || {};
           </div><div class="home-exp-presets">${[['today', 'Today'], ['month', 'This month'], ['last-month', 'Last month'], ['30d', 'Last 30 days'], ['all', 'All dates']].map(([key, label]) => `<button type="button" class="chip" data-home-exp-range="${key}">${label}</button>`).join('')}</div></div>
         </div>
         <div class="home-exp-summary" aria-label="Class totals">${summary}</div>
-        <div class="home-exp-chart">${bars || '<div class="home-exp-empty">Aapke account ke liye channel data available nahi hai.</div>'}${emptyMessage}</div>
-        <p class="dim small home-exp-note">Bars me FF / GV ka alag split aur upar har class ka total dikhaya gaya hai. Ek hi filter group me multiple options select kar sakte ho.</p>
+        <div class="home-exp-chart">${bars || emptyMessage}</div>
+        <p class="dim small home-exp-note">Daily FF / GV issuance bars hain; type, class, channel aur date filters sab apply hote hain. Upar class-wise totals hain. ${esc(chartNote + undatedNote)}</p>
       </div></section>`;
   }
 
@@ -790,7 +838,7 @@ FF.pages = FF.pages || {};
   FF.pages.home = {
     title: 'Home', render, monthKpiHtml, streams, liveRowsFromFeed,
     explorer: {
-      state: explorerFilters, filterRows: filterExplorerRows, totals: explorerTotals, html: explorerHtml,
+      state: explorerFilters, filterRows: filterExplorerRows, totals: explorerTotals, daily: explorerDaily, html: explorerHtml,
       dateKey: explorerDateKey, rangePreset: explorerRangePreset, reset: resetExplorerFilters,
       loadFilters: loadExplorerFilters, saveFilters: saveExplorerFilters
     }
