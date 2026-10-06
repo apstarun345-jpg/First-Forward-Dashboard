@@ -7,55 +7,55 @@ window.FF = window.FF || {};
   const esc = U.esc;
 
   const PAGES = [
+    // 🧹 v3.62 — retired pages (Operations Control Tower · Executive Cockpit · TV Mode · GV & FF
+    // Commission Intelligence · Charts · Stock Forecasting · TL Scorecard · Stock Radar · poora
+    // Workspace group · poora Wow Zone group) yahan se hata di gayi hain. Sidebar me nahi dikhti aur
+    // inka module (lazy GROUPS) download bhi nahi hota. Purana bookmark/WhatsApp/notification link
+    // khule to RETIRED_PAGES use safe page par redirect kar deta hai.
     { id: 'home', icon: '🏠', label: 'Home', desc: 'Highlights · GV & FF charts', perm: 'home', group: 'Management' },
-    { id: 'controlTower', icon: '🎛️', label: 'Operations Control Tower', desc: 'Live action center · changes · snapshots · GV today', perm: 'controlTower', group: 'Management', adminOnly: true },
-    { id: 'executive', icon: '🧭', label: 'Executive Cockpit', desc: 'Management KPIs · outlook · exceptions', perm: 'executive', group: 'Management' },
     { id: 'tagIssued', icon: '🏷️', label: 'GV & FF Tag Issued', desc: 'Date-wise detailed issuance · VC4 vs Commercial', perm: 'tagIssued', group: 'Management' },
     { id: 'targets', icon: '🎯', label: 'Agent Targets', desc: 'Shortlist · target · progress · Excel', perm: 'targets', group: 'Management' },
     { id: 'tagRequest', icon: '🏷️', label: 'Tag Request', desc: 'IDFC agents · employee + har agent ka mobile/address/pincode + class-wise qty → admin table (select · print · approve)', perm: 'tagRequest', group: 'Management' },
     { id: 'masterSearch', icon: '🔎', label: 'Master Search', desc: 'GV + FF · naam / ID / mobile → seedha poora profile (koi list nahi)', perm: 'masterSearch', group: 'Management' },
     { id: 'rangeReport', icon: '📅', label: 'Range Report', desc: 'Custom from→to report · FF + GV · Excel', perm: 'rangeReport', group: 'Management' },
-    { id: 'tv', icon: '📺', label: 'TV Mode', desc: 'Big-screen rotation · fullscreen', perm: 'tv', group: 'Management', feat: 'tvMode' },
     { id: 'teamMap', icon: '🗺️', label: 'Team map', desc: 'Location + office distance (admin)', perm: 'teamMap', group: 'Management', feat: 'teamMap', adminOnly: true },
     { id: 'dashboard', icon: '📊', label: 'Dashboard', desc: 'KPIs & charts (EIR)', perm: 'dashboard', group: 'First Forward' },
     { id: 'trend', icon: '📈', label: 'Trend', desc: 'Daily · Monthly · Last vs Current', perm: 'trend', group: 'First Forward' },
     { id: 'performance', icon: '🏆', label: 'Performance', desc: 'Agents & TLs (REPORT)', perm: 'performance', group: 'First Forward' },
     { id: 'stock', icon: '📦', label: 'Stock', desc: 'Search · pivot · Excel (StockDataa)', perm: 'stock', group: 'First Forward' },
-    { id: 'ffCommission', icon: '₹', label: 'Commission Intelligence', desc: 'Reported rate & earned commission · Direct vs TL', perm: 'ffCommission', group: 'First Forward' },
     { id: 'gvDashboard', icon: '🚀', label: 'GV Partner Dashboard', desc: 'GV issuance · stock · performance', perm: 'gvDashboard', group: 'GV Partner' },
     { id: 'gvTrend', icon: '📈', label: 'GV Trend', desc: 'GV Master daily / monthly', perm: 'gvTrend', group: 'GV Partner' },
     { id: 'gvPerformance', icon: '🏆', label: 'GV Performance', desc: 'GV agents & TLs (GV REPORT)', perm: 'gvPerformance', group: 'GV Partner' },
     { id: 'gvStock', icon: '📦', label: 'GV Stock', desc: 'Tag Assignment stock search', perm: 'gvStock', group: 'GV Partner' },
     { id: 'gvStockReport', icon: '📋', label: 'GV Stock Report', desc: 'GV REPORT · agent, TL, class & dispatch', perm: 'gvStockReport', group: 'GV Partner' },
-    { id: 'gvCommission', icon: '₹', label: 'Commission Intelligence', desc: 'Personal agent payout · class-wise rate · GV Master', perm: 'gvCommission', group: 'GV Partner' },
     { id: 'dualChannel', icon: '🔗', label: 'Dual-channel Agents', desc: 'Verified GV + FF overlap · separate & combined', perm: 'dualChannel', group: 'Cross Channel' },
     { id: 'masterStock', icon: '🗄️', label: 'Master Stock', desc: 'Barcode / agent / TL / GV search · StockDataa ↔ Tag Assignment reconciliation', perm: 'masterStock', group: 'Cross Channel' },
     { id: 'compare', icon: '⚖️', label: 'GV vs First Forward', desc: 'Dono ka side-by-side comparison', perm: 'compare', group: 'Cross Channel' },
-    { id: 'charts', icon: '📊', label: 'Charts', desc: 'Chart-only GV vs FF analysis', perm: 'charts', group: 'Cross Channel' },
-    { id: 'forecast', icon: '🔭', label: 'Stock Forecasting', desc: 'Projection · accuracy · reconciled closing stock', perm: 'forecast', group: 'Cross Channel' },
     { id: 'dataQuality', icon: '🧪', label: 'Data Quality Center', desc: 'Duplicates · missing IDs · stale & mismatch checks', perm: 'dataQuality', group: 'Cross Channel' },
     { id: 'dispatchPlan', icon: '🚚', label: 'Dispatch Planner', desc: 'Auto box plan · printable pick-list · WhatsApp', perm: 'dispatchPlan', group: 'Cross Channel' },
-    { id: 'tlScorecard', icon: '🏅', label: 'TL Scorecard', desc: 'TL-wise score · target · commission · risk', perm: 'tlScorecard', group: 'Cross Channel' },
     { id: 'directAgents', icon: '🧍', label: 'Direct Agents & TLs', desc: 'FF: TL Name APS · GV: TL ID + Name blank — ek hi rule poore site par', perm: 'directAgents', group: 'Cross Channel' },
     { id: 'newAgents', icon: '🆕', label: 'New Agents & TL Changes', desc: 'Naye agents · TL badla / hata — FF + GV alag table, click → poori profile', perm: 'newAgents', group: 'Cross Channel' },
     { id: 'unusual', icon: '🚨', label: 'Unusual Activity', desc: 'High Wrong VRN · Replacement · Chassis · single-day spike — agent-wise flags (FF + GV)', perm: 'unusual', group: 'Cross Channel' },
     { id: 'ffAgentSummary', icon: '📄', label: 'Agent / TL Summary', desc: 'FF agent ya TL → stock · issuance · ageing · Share / PDF', perm: 'ffAgentSummary', group: 'First Forward' },
     { id: 'gvAgentSummary', icon: '📄', label: 'Agent / TL Summary', desc: 'GV agent ya TL → stock · issuance · ageing · Share / PDF', perm: 'gvAgentSummary', group: 'GV Partner' },
-    { id: 'savedViews', icon: '⭐', label: 'Saved Views', desc: 'Reusable filters · shareable links', perm: 'savedViews', group: 'Workspace' },
-    { id: 'reportStudio', icon: '🗓️', label: 'Report Studio', desc: 'Scheduled email · CSV · PDF · share', perm: 'reportStudio', group: 'Workspace' },
-    { id: 'followups', icon: '📝', label: 'Notes & Follow-ups', desc: 'Agent/TL timeline · owner · due date', perm: 'followups', group: 'Workspace' },
     { id: 'fastagChampions', icon: '🏆', label: 'FASTag Champions', desc: 'Top agents/TLs by VC4, Commercial, Chassis, Replacement, Wrong VRN — FF & GV', perm: 'fastagChampions', group: 'Cross Channel' },
-    { id: 'arena', icon: '🎮', label: 'Agent Arena', desc: 'Levels · badges · challenges · crystal ball — gamified leaderboard', perm: 'arena', group: 'Wow Zone' },
-    { id: 'fame', icon: '🏆', label: 'Wall of Fame', desc: 'Monthly champions · shareable winner cards (PNG)', perm: 'fame', group: 'Wow Zone' },
-    { id: 'warRoom', icon: '🔴', label: 'War Room', desc: 'Full-screen live pulse · counters · VC4/VC20/VC5 · chassis · replacement', perm: 'warRoom', group: 'Wow Zone' },
-    { id: 'activity', icon: '📅', label: 'Activity Calendar', desc: 'GitHub-style heatmap · streak · poore saal ka pattern', perm: 'activity', group: 'Wow Zone' },
-    { id: 'network', icon: '🕸️', label: 'Team Network', desc: 'TL centre · agents orbit — animated constellation', perm: 'network', group: 'Wow Zone' },
-    { id: 'radar', icon: '🚨', label: 'Anomaly Radar', desc: 'Spike · crash · naya dhamaka · stale sheet auto-detect', perm: 'radar', group: 'Wow Zone' },
-    { id: 'reportCards', icon: '🧾', label: 'Agent Report Cards', desc: 'Monthly report card · grades · auto remarks · print/PDF', perm: 'reportCards', group: 'Wow Zone' },
-    { id: 'sprints', icon: '⏰', label: 'Hourly Sprints', desc: 'Ghadi-ghadi ki race — is hour kaunsa TL/agent sabse tez? Live countdown + winner flash', perm: 'sprints', group: 'Wow Zone' },
-    { id: 'stockRadar', icon: '🗺️', label: 'Stock Radar', desc: 'TL bubbles — size = stock · colour = cover days · click → suggested qty (dono criteria)', perm: 'stockRadar', group: 'Cross Channel' }
   ];
   const GROUP_ICON = { 'Management': '🧭', 'First Forward': '🟦', 'GV Partner': '🟩', 'Cross Channel': '🔗', 'Workspace': '🗂️', 'Account': '👤', 'Wow Zone': '🎉' };
+  // ── 🧹 v3.62 · RETIRED PAGES ────────────────────────────────────────────────────────────────────
+  // Ye pages app se hata di gayi hain (client request: sirf kaam ki cheezein — site halki aur phone
+  // par smooth). Modules disk par hain (koi purana code crash na ho), par:
+  //   • PAGES/lazy GROUPS me nahi → koi download/parse nahi,
+  //   • purana bookmark / WhatsApp link / notification link khule to yahan se redirect ho jaata hai.
+  // Naya page add karna ho to sirf upar PAGES me line daalo — yahan kuch nahi chhedna padta.
+  const RETIRED_PAGES = {
+    controlTower: 'home', executive: 'home', tv: 'home',
+    ffCommission: 'home', gvCommission: 'gvDashboard',
+    charts: 'home', forecast: 'stock', tlScorecard: 'performance', stockRadar: 'stock',
+    savedViews: 'home', reportStudio: 'home', followups: 'home',
+    arena: 'home', fame: 'home', warRoom: 'home', activity: 'home', network: 'home',
+    radar: 'home', reportCards: 'home', sprints: 'home'
+  };
+  const retiredTarget = (id) => (Object.prototype.hasOwnProperty.call(RETIRED_PAGES, id) ? RETIRED_PAGES[id] : '');
   const pageDef = (id) => PAGES.find((p) => p.id === id) || null;
   let current = { page: '', params: {}, token: 0 };
 
@@ -190,7 +190,6 @@ window.FF = window.FF || {};
     targets: { label: 'एजेंट टार्गेट', desc: 'शॉर्टलिस्ट · टार्गेट · प्रोग्रेस · उपलब्धि इतिहास · TL रोलअप' },
     tagRequest: { label: 'टैग रिक्वेस्ट', desc: 'IDFC एजेंट · कर्मचारी + हर एजेंट का मोबाइल/पता/पिनकोड + क्लास-वार मात्रा → एडमिन टेबल (चुनें · प्रिंट · अप्रूव)' },
     rangeReport: { label: 'रेंज रिपोर्ट', desc: 'मनचाही तारीख़ रेंज · FF + GV संयुक्त · एक्सेल' },
-    tv: { label: 'टीवी मोड', desc: 'बड़ी स्क्रीन रोटेशन · फुलस्क्रीन' },
     dashboard: { label: 'डैशबोर्ड', desc: 'KPI और चार्ट (EIR)' },
     trend: { label: 'ट्रेंड', desc: 'दैनिक · मासिक · पिछला बनाम चालू' },
     performance: { label: 'परफ़ॉर्मेंस', desc: 'एजेंट और TL (REPORT)' },
@@ -202,15 +201,11 @@ window.FF = window.FF || {};
     gvStock: { label: 'GV स्टॉक', desc: 'टैग असाइनमेंट स्टॉक सर्च' },
     gvStockReport: { label: 'GV स्टॉक रिपोर्ट', desc: 'एजेंट · TL · क्लास · डिस्पैच' },
     dispatchPlan: { label: 'डिस्पैच प्लानर', desc: 'ऑटो बॉक्स प्लान · प्रिंट पिक-लिस्ट · WhatsApp' },
-    tlScorecard: { label: 'TL स्कोरकार्ड', desc: 'TL अनुसार स्कोर · टार्गेट · कमीशन · रिस्क' },
     compare: { label: 'GV बनाम फर्स्ट फॉरवर्ड', desc: 'दोनों की तुलना' },
-    charts: { label: 'चार्ट्स', desc: 'सिर्फ़ चार्ट · GV बनाम FF' },
     settings: { label: 'सेटिंग्स' },
     newAgents: { label: 'नए एजेंट और TL बदलाव', desc: 'नए एजेंट · TL बदला / हटा — FF + GV अलग टेबल' },
     directAgents: { label: 'डायरेक्ट एजेंट और TL', desc: 'FF: TL Name APS · GV: TL ID + Name खाली — पूरी साइट पर एक ही नियम' },
     fastagChampions: { label: 'फास्टैग चैंपियंस', desc: 'टॉप एजेंट/TL — VC4, कॉमर्शियल, चेसिस, रिप्लेसमेंट, रॉन्ग VRN · FF और GV' },
-    sprints: { label: 'ओवर्ली स्प्रिंट', desc: 'हर घंटे की रेस — लाइव काउंटडाउन + विनर फ्लैश' },
-    stockRadar: { label: 'स्टॉक रडार', desc: 'टीएल बबल — साइज़ = स्टॉक · रंग = कवर दिन · क्लिक → सुझाई मात्रा (दोनों तरीके)' },
   };
   const HI_GROUPS = { 'Management': 'मैनेजमेंट', 'First Forward': 'फर्स्ट फॉरवर्ड', 'GV Partner': 'जीवी पार्टनर', 'Cross Channel': 'क्रॉस चैनल', 'Workspace': 'वर्कस्पेस', 'Account': 'अकाउंट', 'Sheets': 'शीट्स' };
   const EN_PAGES = {
@@ -348,6 +343,10 @@ window.FF = window.FF || {};
   function resolvePage(id) {
     if (!id) return firstAllowedPage();
     if (PAGE_ALIAS[id]) return PAGE_ALIAS[id];
+    // 🧹 v3.62 — hata di gayi page par purana link (bookmark / WhatsApp / notification) aaye to
+    // yahin safe page resolve ho jaata hai — koi adhoora render ya blank screen nahi.
+    const retired = retiredTarget(id);
+    if (retired) return FF.auth.can && !FF.auth.can(retired) ? firstAllowedPage() : retired;
     return pageKnown(id) ? id : firstAllowedPage();
   }
   function parseHash() {
@@ -651,18 +650,45 @@ window.FF = window.FF || {};
   }
 
   /** Theme picker + office bell — modules lazy ho sakte hain, isliye mount idempotent rakhna hai. */
+  const touchShell = () => !!(FF.lazy && FF.lazy.deviceProfile && FF.lazy.deviceProfile().coarse);
+  const savedThemePack = () => { try { return localStorage.getItem('ff_theme_pack') || 'default'; } catch { return 'default'; } };
   function mountShellExtras() {
     try {
       if (FF.officeBell && FF.officeBell.mount) FF.officeBell.mount();
+      // 🧹 v3.62 — wowzone (~66 KB: theme packs + tab heartbeat + Wow Zone graphics) ab background me
+      // apne aap download nahi hota. Phone par sirf 🎨 tap karne par (ya pehle se koi theme pack chuna
+      // ho to usko apply karne ke liye) aata hai — login ke baad 1 MB+ JS parse nahi hota, isliye
+      // scroll/paint smooth rehta hai. Desktop par pehle jaisa hi (idle me) load hota hai.
+      if (!FF.wowzone && !mountShellExtras.wowAsked) {
+        if (savedThemePack() === 'default' && touchShell()) return;
+        mountShellExtras.wowAsked = true;
+        ensureShell(['wowzone']).then(() => { if (FF.wowzone) mountShellExtras(); }).catch(() => {});
+        return;
+      }
       if (FF.wowzone) {
         if (!(FF.config.feat && FF.config.feat('themePacks') === false)) FF.wowzone.mountThemePicker();
-        if (!(FF.config.feat && FF.config.feat('tabHeartbeat') === false)) {
+        if (!(FF.config.feat && FF.config.feat('tabHeartbeat') === false) && !touchShell()) {
           clearInterval(appHeartbeat.timer);
           if (appHeartbeat.instance) appHeartbeat.instance.stop();
           appHeartbeat.instance = FF.wowzone.startHeartbeat({ interval: 45000 });
         }
       }
     } catch (err) { console.warn('shell extras', err && err.message); }
+  }
+  /** 🎨 Shell ka static theme button → wowzone sirf click par load karo, phir wahi popup kholo. */
+  function bindThemePackButton() {
+    const btn = U.$('#theme-pack-btn');
+    if (!btn || btn.__ffWired) return;
+    btn.__ffWired = true;
+    btn.addEventListener('click', (e) => {
+      if (FF.wowzone && FF.wowzone.mountThemePicker) return;      // module ready → uska handler popup khol dega
+      e.preventDefault(); e.stopPropagation();
+      ensureShell(['wowzone']).then(() => {
+        mountShellExtras();
+        const b = U.$('#theme-pack-btn');
+        if (b && FF.wowzone && FF.wowzone.mountThemePicker) b.click();
+      }).catch(() => {});
+    });
   }
 
   // ---- 🐚 v3.60 shell extras — bell / KPI drawer / search / assistant first paint ke BAAD aate hain ----
@@ -681,6 +707,7 @@ window.FF = window.FF || {};
     if (FF.masterSearch && FF.masterSearch.mountTopbar) FF.masterSearch.mountTopbar();
   }
   function startShellExtras() {
+    bindThemePackButton();
     if (shellExtrasStarted) return Promise.resolve(false);
     shellExtrasStarted = true;
     const hooks = (wave) => {
@@ -760,6 +787,24 @@ window.FF = window.FF || {};
     if (changed) { renderSidebar(); renderTopUser(); }
   }
 
+  // 🖐️ v3.62 — "scroll nahi hoti" ka sabse aam karan: koi overlay apna `no-scroll` lock chhod jaata
+  // tha (drawer/panel/notes modal band karne par bhi) aur poora page scroll-proof ho jaata tha. Ab
+  // har route render se pehle check hota hai — koi overlay khula nahi hai to lock hat jaata hai.
+  function unlockPageScroll() {
+    try {
+      if (U.$('.drawer.open') || U.$('.ms-panel') || U.$('.live-modal') || U.$('.palette-backdrop:not([hidden])') || U.$('#auth-screen:not([hidden])')) return false;
+      document.body.classList.remove('no-scroll');
+      return true;
+    } catch { return false; }
+  }
+  let retiredNoticeKey = '';
+  /** Retired-page notice ek hi baar (per page id) dikhao — toast spam na ho. */
+  function retiredNotice(page) {
+    if (retiredNoticeKey === page) return false;
+    retiredNoticeKey = page;
+    return true;
+  }
+
   async function renderCurrent(ctx) {
     if (!FF.auth.user) return;
     viewAsBanner();
@@ -768,6 +813,15 @@ window.FF = window.FF || {};
     // capability Performance + Stock pages me already available hai. Purane bookmarks
     // ko broken lazy route par bhejne ke bajay existing Performance page par redirect karo.
     if (page === 'stockReport') { location.hash = '#/performance'; return; }
+    // 🧹 v3.62 — hata di gayi page (bookmark / purana link / notification link) → seedha safe page.
+    const retired = retiredTarget(page);
+    if (retired) {
+      const dest = retired === 'home' || (FF.auth.can && FF.auth.can(retired)) ? retired : 'home';
+      if (retiredNotice(page)) U.toast('🧹 Ye page ab dashboard me nahi hai — simple version me hata di gayi hai.', 'info');
+      current = { page: dest, params: {}, token: current.token + 1 };
+      if (location.hash !== `#/${dest}`) { try { history.replaceState(null, '', `#/${dest}`); } catch { location.hash = `#/${dest}`; } }
+      return renderCurrent(ctx);
+    }
     current = { page, params, token: current.token + 1 };
     const token = current.token;
     renderGlobalFilters();
@@ -776,6 +830,7 @@ window.FF = window.FF || {};
     if (openNavGroup !== pageGroup) selectNavGroup(pageGroup);
     markActive();
     closeSidebar();
+    unlockPageScroll();      // 🖐️ leaked scroll-lock kabhi page freeze na kare
     const main = U.$('#main');
     const root = document.createElement('div');
     root.className = `page page-${page}`;
@@ -1469,7 +1524,7 @@ window.FF = window.FF || {};
 
   function onBackgroundDataUpdated() {
     // If user is on a data page, smoothly re-render so new stock and stats appear automatically
-    if (['stock', 'stockReport', 'home', 'executive', 'forecast', 'dataQuality', 'dualChannel', 'masterStock', 'fastagChampions', 'ffCommission', 'gvCommission', 'tagIssued', 'dashboard', 'trend', 'performance', 'gvStock', 'gvStockReport', 'gvDashboard', 'gvTrend', 'gvPerformance', 'compare', 'charts', 'sheet'].includes(current.page)) {
+    if (['stock', 'stockReport', 'home', 'dataQuality', 'dualChannel', 'masterStock', 'fastagChampions', 'tagIssued', 'dashboard', 'trend', 'performance', 'gvStock', 'gvStockReport', 'gvDashboard', 'gvTrend', 'gvPerformance', 'compare', 'sheet'].includes(current.page)) {
       renderCurrent({ bgUpdated: true });
     }
   }
@@ -1729,8 +1784,10 @@ window.FF = window.FF || {};
         });
       }
     }
+    // 🧹 v3.62 — Saved Views page hata di gayi, isliye topbar ka ☆ (save current view) button bhi
+    // hamesha chhupa rehta hai (pehle wo ek dead page kholta tha).
     const svBtn = U.$('#save-view-btn');
-    if (svBtn) svBtn.hidden = !FF.auth.can('savedViews');
+    if (svBtn) svBtn.hidden = true;
     startVersionWatch(); // 🔄 update-available toast (features.updateToast)
     const u = FF.auth.user;
     if (FF.auth.isAdmin()) FF.auth.api('/api/health').then(h => { storageBanner(h.storage); pushBanner(h.push); setPendingSignups(h.pendingSignups); renderSidebar(); }).catch(() => {});

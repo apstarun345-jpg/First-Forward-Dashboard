@@ -378,7 +378,7 @@ FF.pages = FF.pages || {};
       '<div class="hm-pulse-item"><span>🟢 Live today</span><b>' + U.fmt(live) + '</b><small>' + esc(fresh) + '</small></div>' +
       '<div class="hm-pulse-item"><span>🎯 Month expected</span><b>' + U.fmt(expected) + '</b><small>' + reportDay + '/' + dim + ' reported days · current day excluded</small></div>' +
       '<div class="hm-pulse-item"><span>📦 Stock cover</span><b>' + esc(coverText) + '</b><small>' + U.fmt(stockTotal) + ' total stock · run-rate basis</small></div>' +
-      '<div class="hm-pulse-actions"><a class="btn small primary" href="#/executive">🧭 Executive Cockpit</a><a class="btn small" href="#/performance">🏆 Performance</a><a class="btn small" href="#/stockRadar">🗺️ Stock Radar</a><a class="btn small" href="#/dataQuality">🧪 Data Quality</a></div>' +
+      '<div class="hm-pulse-actions"><a class="btn small primary" href="#/performance">🏆 Performance</a><a class="btn small" href="#/stock">📦 Stock</a><a class="btn small" href="#/dispatchPlan">🚚 Dispatch</a><a class="btn small" href="#/dataQuality">🧪 Data Quality</a></div>' +
       '</div>');
   }
 

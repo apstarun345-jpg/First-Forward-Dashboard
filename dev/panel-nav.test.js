@@ -68,14 +68,34 @@ require(path.join(ROOT, 'app.js'));
 const FF = globalThis.FF;
 
 // ================= 1) parseHash / resolvePage — lazy pages kabhi Home par redirect nahi =================
-test('resolvePage — lazy page (module load se pehle bhi) valid: warRoom / settings / gvStockReport', () => {
+test('resolvePage — lazy page (module load se pehle bhi) valid: dispatchPlan / settings / gvStockReport', () => {
   // FF.pages me abhi kuch nahi — jaisa cold start par hota hai (lazy modules load nahi hue)
-  assert.ok(!FF.pages || !FF.pages.warRoom, 'precondition: warRoom module abhi load nahi');
-  assert.equal(FF.app.resolvePage('warRoom'), 'warRoom');
+  assert.ok(!FF.pages || !FF.pages.dispatchPlan, 'precondition: dispatchPlan module abhi load nahi');
+  assert.equal(FF.app.resolvePage('dispatchPlan'), 'dispatchPlan');
   assert.equal(FF.app.resolvePage('settings'), 'settings');
   assert.equal(FF.app.resolvePage('gvStockReport'), 'gvStockReport');
-  assert.equal(FF.app.resolvePage('executive'), 'executive');
-  assert.equal(FF.app.resolvePage('stockRadar'), 'stockRadar');
+  assert.equal(FF.app.resolvePage('newAgents'), 'newAgents');
+});
+
+test('resolvePage — 🧹 v3.62 me hata di gayi pages apne safe page par jaati hain', () => {
+  // Purane bookmark / WhatsApp link / notification link kabhi blank ya dead page na khole.
+  assert.equal(FF.app.resolvePage('executive'), 'home');
+  assert.equal(FF.app.resolvePage('controlTower'), 'home');
+  assert.equal(FF.app.resolvePage('tv'), 'home');
+  assert.equal(FF.app.resolvePage('stockRadar'), 'stock');
+  assert.equal(FF.app.resolvePage('forecast'), 'stock');
+  assert.equal(FF.app.resolvePage('tlScorecard'), 'performance');
+  assert.equal(FF.app.resolvePage('gvCommission'), 'gvDashboard');
+  assert.equal(FF.app.resolvePage('warRoom'), 'home');
+  assert.equal(FF.app.resolvePage('arena'), 'home');
+  assert.equal(FF.app.resolvePage('followups'), 'home');
+  assert.equal(FF.app.resolvePage('charts'), 'home');
+  // Sidebar (PAGES) me ye ids bilkul nahi honi chahiye.
+  const ids = FF.app.PAGES.map((p) => p.id);
+  for (const gone of ['executive', 'controlTower', 'tv', 'stockRadar', 'forecast', 'tlScorecard', 'charts', 'arena', 'fame', 'warRoom', 'followups', 'savedViews', 'reportStudio', 'stockRadar']) {
+    assert.ok(!ids.includes(gone), `retired page "${gone}" sidebar se hatni chahiye`);
+  }
+  assert.ok(!FF.app.PAGES.some((p) => p.group === 'Wow Zone' || p.group === 'Workspace'), 'Wow Zone / Workspace group hata diye gaye');
 });
 
 test('resolvePage — aliases map hote hain; unknown id par first-allowed fallback', () => {
@@ -87,11 +107,18 @@ test('resolvePage — aliases map hote hain; unknown id par first-allowed fallba
   assert.equal(FF.app.resolvePage(''), 'home');
 });
 
-test('parseHash — #/warRoom?x=1 seedha warRoom khola (Home redirect nahi)', () => {
-  globalThis.location.hash = '#/warRoom?x=1';
+test('parseHash — #/dispatchPlan?x=1 seedha dispatchPlan khola (Home redirect nahi)', () => {
+  globalThis.location.hash = '#/dispatchPlan?x=1';
   const r = FF.app.parseHash();
-  assert.equal(r.page, 'warRoom');
+  assert.equal(r.page, 'dispatchPlan');
   assert.equal(r.params.x, '1');
+});
+
+test('parseHash — retired page ka purana hash safe page par resolve hota hai', () => {
+  globalThis.location.hash = '#/forecast?view=balance';
+  const r = FF.app.parseHash();
+  assert.equal(r.page, 'stock', 'retired page → safe page');
+  assert.equal(r.params.view, 'balance', 'query params preserve rehte hain');
 });
 
 test('parseHash — sheet deep-link + settings params + alias hash', () => {

@@ -1,4 +1,28 @@
-# First Forward Dashboard — First Forward + GV Partner (v3.56.0)
+# First Forward Dashboard — First Forward + GV Partner (v3.62.0)
+
+## ✨ v3.62.0 — 🧹 Simple + Light + App-jaisa (retired pages, phone speed, scroll fix)
+
+- **🗑️ 21 pages hata di gayi:** Operations Control Tower · Executive Cockpit · TV Mode · FF/GV
+  Commission Intelligence · Charts · Stock Forecasting · TL Scorecard · Stock Radar · poora
+  **Workspace** group (Saved Views · Report Studio · Notes & Follow-ups) aur poora **Wow Zone** group
+  (Arena · Wall of Fame · War Room · Activity Calendar · Team Network · Anomaly Radar · Report Cards ·
+  Hourly Sprints). Sidebar 47 → 26 pages.
+- **Purane link dead nahi:** bookmark / WhatsApp / notification link `RETIRED_PAGES` se apne aap safe
+  page par redirect hota hai (`#/forecast` → Stock, `#/tlScorecard` → Performance, `#/warRoom` → Home …)
+  + ek baar notice toast. Module files disk par hain, feature wapas chahiye to PAGES me line daalo.
+- **🪶 Site halki:** retired pages ke lazy groups/perms hata diye; `wowzone` (~66 KB theme packs +
+  heartbeat) ab apne aap load nahi hota — phone par sirf 🎨 tap par; GV dataset loader bhi sirf bache
+  hue pages ke hisaab se data maangta hai; off-screen cards ka render skip + phone par blur band.
+- **📱 Scroll + app feel:** page scroll kabhi lock nahi rehta (har route change par leaked
+  `no-scroll` hatta hai), `touch-action: pan-y`, action buttons/filter chips ek hi line me swipe hote
+  hain, bade tap targets, halke cards, tez page transition (safe-area + bottom nav pehle jaisa).
+- **🎛️ Settings saaf:** retired pages ke 7 feature toggles (TV mode, heatmap, network graph, report
+  cards, anomaly radar, level-up, memory lane) nikaal diye.
+- **Regression:** naya `dev/retired-pages.test.js` (sidebar/lazy/perms/links) + unit 510/510 pass;
+  smoke baseline jaisa hi (7 known mock-data failures, koi naya nahi).
+
+Release note: [WHATS-NEW-v3.62.0.md](WHATS-NEW-v3.62.0.md).
+
 
 ## ✨ v3.56.0 — 📦 Dispatch Planner me class-wise stock summary (PR #100 final)
 

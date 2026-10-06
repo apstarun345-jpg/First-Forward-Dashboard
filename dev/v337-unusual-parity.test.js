@@ -308,7 +308,7 @@ test('🚀 lazy group + current cache busting: unusual-scan pehle load hota hai'
   assert.match(srv, /async function stampedShellHtml\(/, 'server har asset par fingerprint stamp karta hai');
   assert.match(srv, /ff-asset-versions/, 'lazy modules ka version map bhi HTML me jaata hai');
   assert.match(sw, /async function shellAssets\(/, 'SW precache list stamped index.html se banti hai');
-  assert.match(sw, /CACHE_NAME = 'apnapayment-v116'/, 'SW cache bust hua');
+  assert.match(sw, /CACHE_NAME = 'apnapayment-v117'/, 'SW cache bust hua');
   const server = read('server.js');
   assert.ok(server.includes("import './unusual-scan.js'"), 'server shared scan lib import karta hai');
   assert.ok(server.includes("'/api/unusual/scan'"), 'server route hai');
