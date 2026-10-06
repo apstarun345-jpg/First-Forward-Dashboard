@@ -175,24 +175,58 @@ FF.pages = FF.pages || {};
     const dateKeys = [];
     const cursor = U.fromDateKey(from), end = U.fromDateKey(to);
     while (cursor <= end) { dateKeys.push(U.dateKey(cursor)); cursor.setDate(cursor.getDate() + 1); }
+    const emptyBreakdown = () => ({
+      total: 0, rowCount: 0, byChannel: { ff: 0, gv: 0 },
+      byClass: { VC4: 0, VC20: 0, 'VC5+': 0 },
+      byType: { replacement: 0, chassis: 0, replacementChassis: 0, other: 0 }
+    });
     const daily = { ff: new Map(dateKeys.map((key) => [key, 0])), gv: new Map(dateKeys.map((key) => [key, 0])) };
+    const breakdowns = new Map(dateKeys.map((key) => [key, emptyBreakdown()]));
     let total = 0, datedCount = 0;
+    const allowed = new Set((allowedChannels || ['ff', 'gv']).map((v) => /^(gv|green)/i.test(String(v)) ? 'gv' : 'ff'));
     for (const row of rows || []) {
       const key = explorerDateKey(row.key || row.dateKey || row.date || row.d);
       if (!key) continue;
       const channel = explorerChannel(row);
-      if (!daily[channel] || key < from || key > to) continue;
+      if (!daily[channel] || !allowed.has(channel) || key < from || key > to) continue;
       const n = Math.max(0, Number(row.n) || 0);
       daily[channel].set(key, (daily[channel].get(key) || 0) + n);
+      const day = breakdowns.get(key);
+      if (!day) continue;
+      day.total += n; day.rowCount++;
+      day.byChannel[channel] += n;
+      const cls = explorerClass(row);
+      if (EXPLORER_CLASSES.includes(cls)) day.byClass[cls] += n;
+      const replacement = explorerHasType(row, 'replacement');
+      const chassis = explorerHasType(row, 'chassis');
+      if (replacement) day.byType.replacement += n;
+      if (chassis) day.byType.chassis += n;
+      if (replacement && chassis) day.byType.replacementChassis += n;
+      if (!replacement && !chassis) day.byType.other += n;
       total += n; datedCount++;
     }
-    const allowed = new Set((allowedChannels || ['ff', 'gv']).map((v) => /^(gv|green)/i.test(String(v)) ? 'gv' : 'ff'));
     return {
       keys: dateKeys, labels: dateKeys.map((key) => U.labelDateKey(key, false)), tipLabels: dateKeys.map((key) => `${U.labelDateKey(key, true)} · ${key}`),
       byChannel: { ff: dateKeys.map((key) => allowed.has('ff') ? daily.ff.get(key) || 0 : 0), gv: dateKeys.map((key) => allowed.has('gv') ? daily.gv.get(key) || 0 : 0) },
+      breakdowns: dateKeys.map((key) => ({ key, ...breakdowns.get(key) })),
       from, to, fullFrom, fullTo, capped, undated: Math.max(0, (rows || []).length - datedCount), total
     };
   }
+  function explorerDailyTip(daily, index, activeChannels, filters) {
+    const day = daily && daily.breakdowns && daily.breakdowns[index];
+    if (!day) return '';
+    const channelLine = (activeChannels || []).map((ch) => `${ch === 'ff' ? '🟦 First Forward · FF' : '🟩 GV Partner · GV'}: <b>${U.fmt(day.byChannel[ch] || 0)}</b>`).join(' · ');
+    const classes = day.byClass || {};
+    const types = day.byType || {};
+    const filtered = filters && ((filters.types && filters.types.size) || (filters.classes && filters.classes.size));
+    return `<b>${esc(U.labelDateKey(day.key, true))} · ${esc(day.key)}</b><br>`
+      + `${channelLine}<br><b>Total issuance:</b> ${U.fmt(day.total)} tags · ${U.fmt(day.rowCount)} rows<br>`
+      + `<b>Class:</b> VC4 ${U.fmt(classes.VC4)} · VC20 ${U.fmt(classes.VC20)} · VC5+ ${U.fmt(classes['VC5+'])}<br>`
+      + `<b>Type:</b> Replacement ${U.fmt(types.replacement)} · Chassis ${U.fmt(types.chassis)} · Other / regular ${U.fmt(types.other)}`
+      + (types.replacementChassis ? `<br><small>Replacement + chassis overlap: ${U.fmt(types.replacementChassis)} tags</small>` : '')
+      + (filtered ? '<br><small>Current type / class filters apply.</small>' : '');
+  }
+
   function explorerHtml(rows, allowedChannels) {
     const allowed = [...new Set((allowedChannels || ['ff', 'gv']).map((v) => /^(gv|green)/i.test(String(v)) ? 'gv' : 'ff'))];
     const accessibleFilters = { ...explorerFilters, channels: new Set([...explorerFilters.channels].filter((ch) => allowed.includes(ch))) };
@@ -207,8 +241,9 @@ FF.pages = FF.pages || {};
     }));
     const labelEvery = daily.keys.length > 180 ? 21 : daily.keys.length > 90 ? 14 : daily.keys.length > 45 ? 7 : daily.keys.length > 20 ? 3 : 1;
     const plotWidth = Math.max(640, daily.keys.length * 23 + 56);
+    const tips = daily.keys.map((_, i) => explorerDailyTip(daily, i, activeChannels, accessibleFilters));
     const bars = series.length && daily.keys.length ? C.bars({
-      labels: daily.labels, tipLabels: daily.tipLabels, height: 220, series,
+      labels: daily.labels, tipLabels: daily.tipLabels, tips, height: 220, series,
       showValues: daily.keys.length <= 14, labelEvery, legendAlways: true,
       minPlotWidth: plotWidth
     }) : '';
@@ -245,7 +280,7 @@ FF.pages = FF.pages || {};
         </div>
         <div class="home-exp-summary" aria-label="Class totals">${summary}</div>
         <div class="home-exp-chart">${bars || emptyMessage}</div>
-        <p class="dim small home-exp-note">Daily FF / GV issuance bars hain; type, class, channel aur date filters sab apply hote hain. Upar class-wise totals hain. ${esc(chartNote + undatedNote)}</p>
+        <p class="dim small home-exp-note">Date par hover karo: FF/GV totals ke saath VC4 · VC20 · VC5+, replacement, chassis aur other issuance ka daily breakdown milega. Active type, class, channel aur date filters apply hote hain. ${esc(chartNote + undatedNote)}</p>
       </div></section>`;
   }
 
@@ -838,7 +873,7 @@ FF.pages = FF.pages || {};
   FF.pages.home = {
     title: 'Home', render, monthKpiHtml, streams, liveRowsFromFeed,
     explorer: {
-      state: explorerFilters, filterRows: filterExplorerRows, totals: explorerTotals, daily: explorerDaily, html: explorerHtml,
+      state: explorerFilters, filterRows: filterExplorerRows, totals: explorerTotals, daily: explorerDaily, tooltip: explorerDailyTip, html: explorerHtml,
       dateKey: explorerDateKey, rangePreset: explorerRangePreset, reset: resetExplorerFilters,
       loadFilters: loadExplorerFilters, saveFilters: saveExplorerFilters
     }

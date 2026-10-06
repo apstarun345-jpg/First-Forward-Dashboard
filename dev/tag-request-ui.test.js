@@ -355,24 +355,90 @@ test('🌐 Meri requests panel — bina token / login form par nahi dikhta (koi 
   }
 });
 
+test('🌐 employee link — My Request tab lists all employees with status filters and exact submitted date/time', () => {
+  const at = '2026-10-02T05:00:00.000Z';
+  const page = {
+    filter: 'all', page: 1, pageSize: 20, pageCount: 2, total: 21, loaded: true,
+    counts: { totalRequests: 25, pending: 8, approved: 7, dispatched: 6, rejected: 4 },
+    requests: [{
+      id: 'tagreq_1001', at, status: 'approved', total: 25, employeeName: 'Kavita Sharma',
+      agentName: 'Rahul Sharma', agents: 1, classes: [{ cls: 'VC4', requested: 25, approved: 20 }]
+    }]
+  };
+  try {
+    TR._test.setPublic({ brand: 'First Forward', enabled: true });
+    const tabs = TR._test.tabsHtml();
+    assert.ok(tabs.includes('data-tr-view="status"'), 'Status tab is available');
+    assert.ok(tabs.includes('data-tr-view="requests"'), 'My Request tab is beside Status');
+    assert.ok(tabs.includes('📋 My Request'));
+
+    const html = TR._test.publicRequestsPageHtml(page);
+    assert.ok(html.includes('My Request · All employees'), 'tab is explicit that the feed is shared');
+    for (const key of ['all', 'pending', 'approved', 'dispatched', 'rejected']) {
+      assert.ok(html.includes(`data-tr-all-filter="${key}"`), `${key} filter is present`);
+    }
+    assert.ok(html.includes('Kavita Sharma'), 'employee name is shown');
+    assert.ok(html.includes('Rahul Sharma'), 'agent name is shown');
+    assert.ok(html.includes('✅ Approved'));
+    assert.ok(html.includes('Request #tagreq_1001'));
+    assert.ok(html.includes(new Date(at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })));
+    assert.ok(html.includes(new Date(at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })), 'exact request time is shown');
+    assert.match(html, /Page 1 of 2/);
+    assert.match(html, /data-tr-all-page="prev" disabled/);
+    assert.ok(html.includes('data-tr-all-refresh'));
+  } finally {
+    TR._test.setPublic(null);
+  }
+});
+
 test('📇 purana address suggestion — same agent dobara chuno to purana mobile/address/pincode ek click me', () => {
-  const saved = { mobile: '9876500001', address: '24, Shanti Nagar, Sodala, Jaipur', pincode: '302019', source: 'Address' };
+  const saved = { mobile: '9876500001', address: '24, Shanti Nagar, Sodala, Jaipur', pincode: '302019', source: 'Address', lastRequestAt: '2026-10-02T05:00:00.000Z' };
   const chip = TR._test.contactSuggestHtml({ id: 'r1', suggest: saved, mobile: '', address: '', pincode: '' });
   assert.match(chip, /data-tr-fill-old="r1"/, 'chip par click handler hai');
   assert.ok(chip.includes('9876500001'), 'purana mobile dikhta hai');
   assert.ok(chip.includes('24, Shanti Nagar, Sodala, Jaipur'), 'purana address dikhta hai');
   assert.ok(chip.includes('302019'), 'purana pincode dikhta hai');
   assert.ok(chip.includes('Address book'), 'source batata hai ki address kahan se aaya');
+  assert.ok(chip.includes('Last request:'), 'pichli request ka exact submission time address suggestion ke saath dikhta hai');
 
   // Employee ne khud alag address type kiya → suggestion chhupni NAHI chahiye (wohi maang thi).
   const typed = TR._test.contactSuggestHtml({ id: 'r2', suggest: saved, mobile: '9000000000', address: 'Naya address, Jaipur', pincode: '302001' });
   assert.match(typed, /data-tr-fill-old="r2"/, 'khud type kiya ho tab bhi purana address suggest hota hai');
 
-  // Purana address pehle se same bhara hua → chip bekaar, dikhegi nahi.
-  assert.equal(TR._test.contactSuggestHtml({ id: 'r3', suggest: saved, mobile: '9876500001', address: '24, Shanti Nagar, Sodala, Jaipur', pincode: '302019' }), '');
+  // Purana address pehle se same bhara hua → fill button bekaar, par last request time phir bhi dikhe.
+  const same = TR._test.contactSuggestHtml({ id: 'r3', suggest: saved, mobile: '9876500001', address: '24, Shanti Nagar, Sodala, Jaipur', pincode: '302019' });
+  assert.ok(same.includes('Last request:'));
+  assert.ok(!same.includes('data-tr-fill-old='));
   // Koi purana record nahi / khaali record → chip nahi.
   assert.equal(TR._test.contactSuggestHtml({ id: 'r4', mobile: '', address: '', pincode: '' }), '');
   assert.equal(TR._test.contactSuggestHtml({ id: 'r5', suggest: { mobile: '', address: '', pincode: '' } }), '');
   // Purani request (device book) se aaya ho to source wahi dikhe.
   assert.ok(TR._test.contactSuggestHtml({ id: 'r6', suggest: { ...saved, source: 'Request' }, mobile: '', address: '', pincode: '' }).includes('Pichli request'));
+});
+
+test('📇 public address lookup auto-fills blank contact fields and carries the server last-request timestamp', async () => {
+  const previousApi = FF.publicForm;
+  const at = '2026-10-02T05:00:00.000Z';
+  const record = { key: 'ff|RAHUL SHARMA', channel: 'ff', name: 'Rahul Sharma', agentId: '1001', tlName: 'TL One' };
+  const index = { list: [record], byKey: new Map([[record.key, record]]), tls: new Map() };
+  const row = { id: 'r7', agentId: '1001', name: 'Rahul Sharma', channel: 'ff', mobile: '', address: '', pincode: '' };
+  try {
+    TR._test.setPublic({ brand: 'First Forward', enabled: true });
+    TR._test.setIndex(index);
+    FF.publicForm = { api: async (path) => {
+      assert.match(path, /\/api\/public\/tag-request\/contact\?/);
+      return { contact: { mobile: '9876500001', address: '24, Shanti Nagar, Sodala, Jaipur', pincode: '302019', source: 'Address', lastRequestAt: at } };
+    } };
+    await TR._test.suggestHistoricalContact(row);
+    assert.equal(row.mobile, '9876500001');
+    assert.equal(row.address, '24, Shanti Nagar, Sodala, Jaipur');
+    assert.equal(row.pincode, '302019');
+    assert.equal(row.suggest.lastRequestAt, at, 'exact server timestamp survives the lookup');
+    assert.match(TR._test.contactSuggestHtml(row), /Last request:/);
+    assert.ok(TR._test.contactSuggestHtml(row).includes(new Date(at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })));
+  } finally {
+    TR._test.setPublic(null);
+    TR._test.setIndex(null);
+    FF.publicForm = previousApi;
+  }
 });

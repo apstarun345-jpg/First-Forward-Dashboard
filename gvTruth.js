@@ -176,21 +176,41 @@ window.FF = window.FF || {};
   function monthStatOf(rows, ym) { return monthStat(rows.filter((r) => r.ym === ym)); }
 
   // ---- stock ---------------------------------------------------------------------------------------
+  function stockClassLabel(value) {
+    const token = clean(value).toUpperCase().replace(/\s+/g, '');
+    if (!token || /^(?:NA|N\/A|UNKNOWN|UNSPECIFIED|OTHER|—|-)$/i.test(token)) return '';
+    if (/^\d+$/.test(token)) return `VC${token}`;
+    if (/^VC\d+$/.test(token)) return token;
+    if (/^(?:COMMERCIAL|COMM|NVC4)$/.test(token)) return 'Commercial';
+    return '';
+  }
+  function stockClassGroup(cls) {
+    if (cls === 'VC4') return 'VC4';
+    if (cls === 'VC20' || cls === 'Commercial') return 'COMM';
+    if (/^VC\d+$/.test(cls)) return 'VC5+';
+    return '';
+  }
   function classSplit(rows) {
     const byClass = new Map();
+    let invalid = 0;
     (rows || []).forEach((r) => {
-      const cls = clean(r && r.cls) || 'Commercial';
-      const group = r && r.group || (/^VC4$/i.test(cls) ? 'VC4' : 'COMM');
+      const raw = clean(r && r.cls);
+      const cls = stockClassLabel(raw);
+      const n = Number(r && r.n) || 0;
+      const group = cls && stockClassGroup(cls);
+      // A missing or unfamiliar Tag Assignment class is not Commercial. Keep its count separate,
+      // then mark the split unavailable instead of manufacturing a class allocation.
+      if (!cls || !group) { invalid += n; return; }
       const c = byClass.get(cls) || { cls, group, n: 0, nAll: 0 };
-      c.n += Number(r && r.n) || 0;
-      c.nAll += r && r.nAll !== undefined ? (Number(r.nAll) || 0) : (Number(r && r.n) || 0);
+      c.n += n;
+      c.nAll += r && r.nAll !== undefined ? (Number(r.nAll) || 0) : n;
       byClass.set(cls, c);
     });
     const list = [...byClass.values()].sort((a, b) => b.n - a.n);
     const total = sum(list, (c) => c.n);
     const nAll = sum(list, (c) => c.nAll);
-    const vc4 = sum(list.filter((c) => c.group === 'VC4' || /^VC4$/i.test(c.cls)), (c) => c.n);
-    return { total, nAll, vc4, comm: total - vc4, excluded: Math.max(0, nAll - total), byClass: list };
+    const vc4 = sum(list.filter((c) => c.group === 'VC4'), (c) => c.n);
+    return { total, nAll, vc4, comm: total - vc4, excluded: Math.max(0, nAll - total), invalid, byClass: list };
   }
   /** ID is authoritative when available; a same-name holder must never be merged into it. */
   function preferredRows(byId, byName, rawId, rawName, ownerField) {
@@ -208,26 +228,18 @@ window.FF = window.FF || {};
     }
     return named;
   }
-  function fitClassSplit(split, target) {
-    const want = Math.max(0, Math.round(Number(target) || 0));
-    const rows = (split.byClass || []).map((r) => ({ ...r, n: Math.max(0, Number(r.n) || 0) }));
-    const have = sum(rows, (r) => r.n);
-    if (have === want) return { ...split, total: want, byClass: rows };
-    if (!want) return { ...classSplit([]), byClass: [] };
-    if (!have) rows.push({ cls: 'Commercial', group: 'COMM', n: want, nAll: want });
-    else if (have < want) rows.push({ cls: 'Commercial', group: 'COMM', n: want - have, nAll: want - have });
-    else {
-      let used = 0;
-      rows.forEach((r, i) => {
-        r.n = i === rows.length - 1 ? want - used : Math.floor((r.n / have) * want);
-        r.nAll = Math.min(Number(r.nAll) || r.n, r.n);
-        used += r.n;
-      });
-    }
-    return classSplit(rows);
-  }
   function assignmentLoaded(key) {
     try { return Array.isArray(G() && G().get && G().get(key)); } catch { return false; }
+  }
+  function unknownClassSplit(total) {
+    const n = Math.max(0, Number(total) || 0);
+    return { total: n, units: n, vc4: null, comm: null, byClass: [], classAvailable: false };
+  }
+  function exactClassSplit(rows, total, available) {
+    const n = Math.max(0, Number(total) || 0);
+    const raw = classSplit(rows || []);
+    if (!available || raw.invalid > 0 || raw.total !== n) return unknownClassSplit(n);
+    return { ...raw, classAvailable: true };
   }
   function agentStock(spec) {
     const ix = index();
@@ -236,11 +248,25 @@ window.FF = window.FF || {};
     const rows = preferredRows(ix.stock.byAgentId, ix.stock.byAgentName, spec.id, spec.name, 'agentId').filter(inTlScope);
     const cls = preferredRows(ix.stock.classByAgentId, ix.stock.classByAgent, spec.id, spec.name, 'agentId').filter(inTlScope);
     const total = rows.length ? sum(rows, (r) => r.n) : sum(cls, (r) => r.n);
-    const split = fitClassSplit(classSplit(cls.length ? cls : rows), total);
+    const classLoaded = assignmentLoaded('stockAgentClass');
+    const split = exactClassSplit(cls, total, classLoaded);
     const byStatus = {};
     rows.forEach((r) => Object.entries(r.byStatus || {}).forEach(([k, v]) => { byStatus[k] = (byStatus[k] || 0) + v; }));
-    const one = rows[0] || {};
-    return { ...split, byStatus, tlName: one.tlName || '', tlId: one.tlId || '', own: split.total, agentsTotal: 0, agentCount: rows.length ? 1 : 0, source: 'Tag Assignment', authoritative: rows.length > 0 || cls.length > 0 };
+    const one = rows[0] || cls[0] || {};
+    const sourceLoaded = assignmentLoaded('stockAgent') || classLoaded;
+    const holderFound = rows.length > 0 || cls.length > 0;
+    const tlCoverage = tlId ? tlStock({ kind: 'gv-tl', id: tlId, name: spec.tlName || spec.supervisorName || '' }) : null;
+    // A missing agent row is a confirmed zero only when there is no team scope, or the Tag
+    // Assignment holder rows reconcile exactly to that TL's independent aggregate. If the TL
+    // total exposes a partial holder list, leave absent agents unavailable instead of showing 0.
+    const holderAbsenceConfirmed = !tlId || !!(tlCoverage && tlCoverage.authoritative && tlCoverage.holderBreakdownAvailable);
+    const authoritative = sourceLoaded && (holderFound || holderAbsenceConfirmed);
+    return {
+      ...split, total, byStatus, tlName: one.tlName || '', tlId: one.tlId || '', own: total,
+      ownParts: { ...split, total }, agentsTotal: 0, agentCount: rows.length ? 1 : 0,
+      source: 'Tag Assignment', authoritative, classAvailable: split.classAvailable,
+      holderBreakdownAvailable: authoritative
+    };
   }
   function sameSelf(row, tlId, tlName) {
     return (!!tlId && idKey(row && row.agentId) === idKey(tlId)) || (!!tlName && nameKey(row && row.agentName) === nameKey(tlName));
@@ -252,7 +278,11 @@ window.FF = window.FF || {};
     const directRows = preferredRows(ix.stock.tlTotalsById, ix.stock.tlTotalsByName, tlId, tlName, 'tlId');
     const tlClassRows = preferredRows(ix.stock.classByTlId, ix.stock.classByTl, tlId, tlName, 'tlId');
     const agentRows = preferredRows(ix.stock.byTlId, ix.stock.byTlName, tlId, tlName, 'tlId');
-    const assignmentAuthoritative = assignmentLoaded('stockTl') || assignmentLoaded('stockTlClass');
+    const isSelfHolder = (r) => sameSelf(r, tlId, tlName);
+    // The TL's own Tag Assignment row can satisfy the generic GV self-supervised/direct rule.
+    // It remains a legitimate TL-own holder here; exclude only unrelated direct agents.
+    const eligibleAgentRows = agentRows.filter((r) => isSelfHolder(r) || !(r.directAgent === true || safeDirectAgent(r)));
+    const assignmentAuthoritative = ['stockTl', 'stockTlClass', 'stockAgent', 'stockAgentClass'].some(assignmentLoaded);
     const exactTotal = directRows.length ? sum(directRows, (r) => r.n) : tlClassRows.length ? sum(tlClassRows, (r) => r.n) : null;
 
     // Agent × class is keyed by holder IDs and TL IDs (not just a shared display name).
@@ -280,35 +310,57 @@ window.FF = window.FF || {};
       }
       return picked;
     };
-    const selfRows = agentRows.filter((r) => sameSelf(r, tlId, tlName));
-    const members = agentRows.filter((r) => !sameSelf(r, tlId, tlName)
-      && !(r.directAgent === true || safeDirectAgent(r)));
+    const eligibleClassRows = scopedClassRows.filter((r) => isSelfHolder(r) || !(r.directAgent === true || safeDirectAgent(r)));
+    const selfRows = eligibleAgentRows.filter((r) => sameSelf(r, tlId, tlName));
+    const members = eligibleAgentRows.filter((r) => !sameSelf(r, tlId, tlName));
     const selfClassRows = peopleForClass(selfRows);
     const memberClassRows = peopleForClass(members);
-    const classSource = tlClassRows.length ? tlClassRows : scopedClassRows;
-    const rawClass = classSplit(classSource);
-    const derivedTotal = sum(agentRows, (r) => r.n);
-    const total = exactTotal === null ? (rawClass.total || derivedTotal) : exactTotal;
-    const split = fitClassSplit(rawClass, total);
+    const classSource = tlClassRows.length ? tlClassRows : eligibleClassRows;
+    const derivedTotal = sum(eligibleAgentRows, (r) => r.n);
+    const total = exactTotal === null ? (sum(classSource, (r) => r.n) || derivedTotal) : exactTotal;
+    const classDatasetLoaded = assignmentLoaded('stockTlClass') || assignmentLoaded('stockAgentClass');
+    const split = exactClassSplit(classSource, total, classDatasetLoaded);
 
-    // Own + team are explanatory parts only. The TL × class / TL total aggregate stays authoritative;
-    // any incomplete agent list is reconciled downward/upward to the same Tag Assignment total.
-    const ownRaw = sum(selfRows, (r) => r.n);
-    const agentsRaw = sum(members, (r) => r.n);
-    let ownTotal = Math.min(ownRaw, total);
-    if (!ownRaw && !members.length && total) ownTotal = total;
-    if (ownRaw >= total && agentsRaw > 0) ownTotal = Math.max(0, total - Math.min(total, agentsRaw));
-    const agentsTotal = Math.max(0, total - ownTotal);
-    const own = fitClassSplit(classSplit(selfClassRows), ownTotal);
-    const agents = fitClassSplit(classSplit(memberClassRows), agentsTotal);
+    // Own/agent counts are shown only when Tag Assignment holder rows account for the exact TL total.
+    // A TL-level aggregate by itself cannot tell us who holds it; never guess that all stock is TL-own.
+    const classHolderMap = new Map();
+    for (const r of eligibleClassRows) {
+      const id = idKey(r.agentId), name = nameKey(r.agentName), key = id ? `#${id}` : `n:${name}`;
+      if (!key || key === 'n:') continue;
+      const cur = classHolderMap.get(key) || { agentId: r.agentId, agentName: r.agentName, tlId: r.tlId, tlName: r.tlName, n: 0 };
+      cur.n += Number(r.n) || 0;
+      classHolderMap.set(key, cur);
+    }
+    const classHolderRows = [...classHolderMap.values()];
+    const agentRowsTotal = sum(eligibleAgentRows, (r) => r.n);
+    const classHolderTotal = sum(classHolderRows, (r) => r.n);
+    const holderDataLoaded = assignmentLoaded('stockAgent') || assignmentLoaded('stockAgentClass');
+    const holders = eligibleAgentRows.length && agentRowsTotal === total
+      ? eligibleAgentRows
+      : classHolderRows.length && classHolderTotal === total ? classHolderRows
+        : eligibleAgentRows.length ? eligibleAgentRows : classHolderRows;
+    const holderTotal = sum(holders, (r) => r.n);
+    const holderBreakdownAvailable = holderDataLoaded && holderTotal === total;
+    const selfHolders = holders.filter((r) => sameSelf(r, tlId, tlName));
+    const memberHolders = holders.filter((r) => !sameSelf(r, tlId, tlName)
+      && !(r.directAgent === true || safeDirectAgent(r)));
+    const ownTotal = holderBreakdownAvailable ? sum(selfHolders, (r) => r.n) : null;
+    const agentsTotal = holderBreakdownAvailable ? sum(memberHolders, (r) => r.n) : null;
+    const ownRows = peopleForClass(selfHolders);
+    const memberRows = peopleForClass(memberHolders);
+    const ownClass = exactClassSplit(ownRows, ownTotal || 0, holderBreakdownAvailable && assignmentLoaded('stockAgentClass'));
+    const agentsClass = exactClassSplit(memberRows, agentsTotal || 0, holderBreakdownAvailable && assignmentLoaded('stockAgentClass'));
     const byStatus = {};
     directRows.forEach((r) => Object.entries(r.byStatus || {}).forEach(([k, v]) => { byStatus[k] = (byStatus[k] || 0) + v; }));
-    const nAll = directRows.length ? sum(directRows, (r) => r.nAll === undefined ? r.n : r.nAll) : split.nAll;
+    const nAll = directRows.length ? sum(directRows, (r) => r.nAll === undefined ? r.n : r.nAll) : split.nAll || total;
+    const ownParts = { ...ownClass, total: ownTotal };
+    const agents = { ...agentsClass, total: agentsTotal };
     return {
       ...split, byStatus, own: ownTotal, agentsTotal,
-      ownParts: { ...own, total: ownTotal }, agents: { ...agents, total: agentsTotal },
-      agentCount: members.length, source: 'Tag Assignment',
-      authoritative: assignmentAuthoritative || directRows.length > 0 || tlClassRows.length > 0,
+      ownParts, agents, agentCount: memberHolders.length, source: 'Tag Assignment',
+      authoritative: assignmentAuthoritative, classAvailable: split.classAvailable,
+      holderBreakdownAvailable, holderClassAvailable: ownClass.classAvailable && agentsClass.classAvailable,
+      memberStockAvailable: holderBreakdownAvailable,
       nAll: Math.max(total, nAll), excluded: Math.max(0, nAll - total)
     };
   }
@@ -391,6 +443,9 @@ window.FF = window.FF || {};
     if (!sheet && !isTl) warnings.push('Is agent ka row GV REPORT sheet me nahi mila — sirf GV Master ledger numbers dikh rahe hain.');
     if (sheet && !sheet.curAvailable && !sheet.lastAvailable) warnings.push('GV REPORT me is person ke month cells khaali hain — sheet cross-check available nahi.');
     if (stock.excluded > 0) warnings.push(`Tag Assignment me ${stock.excluded} tag rows ka status out-of-stock (issued/returned) hai — wo stock me nahi gine gaye.`);
+    if (!stock.authoritative) warnings.push('Tag Assignment stock source abhi available nahi — stock ko confirm hone tak nahi dikhaya jayega.');
+    else if (!stock.classAvailable) warnings.push('Tag Assignment se total stock available hai, lekin class mix match nahi hua — VC4 / Commercial split nahi dikhaya jayega.');
+    if (isTl && stock.authoritative && !stock.holderBreakdownAvailable) warnings.push('Tag Assignment TL total available hai, lekin complete holder rows nahi mili — TL own / agents split nahi dikhaya jayega.');
     if (!all.length) warnings.push('GV Master me is person ki koi tag row nahi mili — naam/ID check karein (ya sheet me hi data nahi hai).');
     const checks = [
       { metric: `Issuance · is mahine (${ym})`, final: ledger.cur.total, others: [
@@ -399,9 +454,9 @@ window.FF = window.FF || {};
       { metric: `Issuance · last month (${prevYmOf(ym)})`, final: ledger.last.total, others: [
         sheet && sheet.lastAvailable ? { label: 'GV REPORT sheet', value: sheet.last } : null,
         { label: 'EIR ledger', value: eir.last }] },
-      { metric: 'Stock in hand (live)', final: stock.total, others: [
+      { metric: 'Stock in hand (live)', final: stock.authoritative ? stock.total : null, others: [
         sheet && sheet.stockAvailable ? { label: 'GV REPORT sheet', value: sheet.stock } : null] }
-    ].map((c) => ({ ...c, others: c.others.filter(Boolean).map((o) => ({ ...o, diff: c.final - (Number(o.value) || 0) })) }));
+    ].map((c) => ({ ...c, others: c.others.filter(Boolean).map((o) => ({ ...o, diff: c.final === null || c.final === undefined ? null : c.final - (Number(o.value) || 0) })) }));
     return {
       ch: 'gv', kind: isTl ? 'tl' : 'agent', name: spec.name, id: spec.id || (sheet && sheet.agentId) || '', mobile: spec.mobile || '',
       direct: !!spec.direct, tlName: spec.tlName || (sheet && !isTl ? sheet.tlName : '') || stock.tlName || '', tlId: spec.tlId || (sheet && sheet.tlId) || stock.tlId || '',
@@ -452,14 +507,38 @@ window.FF = window.FF || {};
         }
       }
     }
-    for (const r of stockAgentRows()) {
+    const hasAgentStock = assignmentLoaded('stockAgent');
+    const hasAgentClassStock = assignmentLoaded('stockAgentClass');
+    const hasTlStock = assignmentLoaded('stockTl');
+    const hasTlClassStock = assignmentLoaded('stockTlClass');
+    const agentStockSource = hasAgentStock ? stockAgentRows() : (hasAgentClassStock ? stockAgentClassRows() : []);
+    for (const r of agentStockSource) {
       const a = ensure('gv-agent', r.agentName, r.agentId, { tlName: r.tlName, tlId: r.tlId });
       if (a) a.stock += Number(r.n) || 0;
     }
-    for (const r of stockTlRows()) {
+    const tlStockMap = new Map();
+    if (hasTlStock) {
+      for (const r of stockTlRows()) {
+        const key = idKey(r.tlId) || nameKey(r.tlName);
+        if (key) tlStockMap.set(key, (tlStockMap.get(key) || 0) + (Number(r.n) || 0));
+      }
+    } else if (hasTlClassStock) {
+      for (const r of stockTlClassRows()) {
+        const key = idKey(r.tlId) || nameKey(r.tlName);
+        if (key) tlStockMap.set(key, (tlStockMap.get(key) || 0) + (Number(r.n) || 0));
+      }
+    } else {
+      for (const r of agentStockSource) {
+        if (r.directAgent === true || safeDirectAgent(r)) continue;
+        const key = idKey(r.tlId) || nameKey(r.tlName);
+        if (key) tlStockMap.set(key, (tlStockMap.get(key) || 0) + (Number(r.n) || 0));
+      }
+    }
+    for (const r of (hasTlStock ? stockTlRows() : hasTlClassStock ? stockTlClassRows() : agentStockSource)) {
       if (!clean(r.tlName) && !clean(r.tlId)) continue;
       const t = ensure('gv-tl', r.tlName || `TL ${r.tlId}`, r.tlId, {});
-      if (t) t.stock = Math.max(t.stock, Number(r.n) || 0);
+      const key = idKey(r.tlId) || nameKey(r.tlName);
+      if (t && key) t.stock = tlStockMap.get(key) || 0;
     }
     for (const r of reportRows()) {
       const a = ensure('gv-agent', r.agentName, r.agentId, { tlName: r.tlName, tlId: r.tlId });
@@ -480,8 +559,13 @@ window.FF = window.FF || {};
     }
     // Asli log pehle (jin ka issuance/stock hai), placeholder TL (Unassigned/Direct…) sabse aakhir me —
     // page ka default pick hamesha kisi kaam ke person par hi jaye.
-    return [...map.values()].map((e) => ({ ...e, altIds: [...e.altIds] }))
-      .sort((a, b) => (Number(a.isPlaceholder) - Number(b.isPlaceholder)) || ((b.cur + b.stock) - (a.cur + a.stock)) || a.name.localeCompare(b.name));
+    const tlStockAvailable = hasTlStock || hasTlClassStock || hasAgentStock || hasAgentClassStock;
+    const agentStockAvailable = hasAgentStock || hasAgentClassStock;
+    return [...map.values()].map((e) => ({
+      ...e, altIds: [...e.altIds], stockAvailable: e.kind === 'gv-tl' ? tlStockAvailable : agentStockAvailable,
+      stockClassAvailable: e.kind === 'gv-agent' ? hasAgentClassStock : hasTlClassStock || hasAgentClassStock
+    }))
+      .sort((a, b) => (Number(a.isPlaceholder) - Number(b.isPlaceholder)) || ((b.cur + (b.stockAvailable ? b.stock : 0)) - (a.cur + (a.stockAvailable ? a.stock : 0))) || a.name.localeCompare(b.name));
   }
 
   // ---- TL team rollup (ledger + stock + sheet, per agent) -------------------------------------------
@@ -510,8 +594,12 @@ window.FF = window.FF || {};
       const cls = U.clean(r.cls) || 'NA';
       e.classes[cls] = (e.classes[cls] || 0) + n;
     }
-    for (const r of stockAgentRows()) {
+    const hasAgentStock = assignmentLoaded('stockAgent');
+    const hasAgentClassStock = assignmentLoaded('stockAgentClass');
+    const teamStockRows = hasAgentStock ? stockAgentRows() : (hasAgentClassStock ? stockAgentClassRows() : []);
+    for (const r of teamStockRows) {
       if (!(id.ids.includes(idKey(r.tlId)) || id.names.includes(nameKey(r.tlName)))) continue;
+      if ((r.directAgent === true || safeDirectAgent(r)) && !isSelf(r.agentId, r.agentName)) continue;
       const e = ensure(r.agentId, r.agentName);
       if (e) e.stock += Number(r.n) || 0;
     }
@@ -523,7 +611,9 @@ window.FF = window.FF || {};
       if (r.lastAvailable) e.sheetLast = r.lastTotal;
       if (r.stockClassAvailable) e.sheetStock = r.stockTotal;
     }
-    return [...map.values()].sort((a, b) => (b.cur + b.stock) - (a.cur + a.stock));
+    return [...map.values()].map((r) => ({
+      ...r, stockAvailable: hasAgentStock || hasAgentClassStock, stockClassAvailable: hasAgentClassStock
+    })).sort((a, b) => (b.cur + (a.stockAvailable ? b.stock : 0)) - (a.cur + (a.stockAvailable ? a.stock : 0)));
   }
 
   // ---- tag-level drill -----------------------------------------------------------------------------

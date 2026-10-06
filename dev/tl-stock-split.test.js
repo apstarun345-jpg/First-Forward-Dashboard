@@ -25,7 +25,7 @@ globalThis.document = {
   createElement: () => ({ style: {}, classList: { add() {} }, setAttribute() {}, appendChild() {}, addEventListener() {}, getContext: () => null }),
   querySelector: () => null, querySelectorAll: () => [], getElementById: () => null
 };
-['config', 'util', 'model', 'gv', 'store', 'charts'].forEach((f) => require(path.join(ROOT, `${f}.js`)));
+['config', 'util', 'model', 'gv', 'gvTruth', 'store', 'charts'].forEach((f) => require(path.join(ROOT, `${f}.js`)));
 const FF = globalThis.FF;
 const U = FF.util;
 U.runRateDays = () => 15;
@@ -105,6 +105,7 @@ function mount({ ff, gv } = {}) {
   FF.store.get = (k) => (k in data ? data[k] : []);
   FF.gv.need = async () => [];
   FF.gv.get = (k) => (k in gvData ? gvData[k] : []);
+  if (FF.gvTruth && FF.gvTruth.invalidateIndex) FF.gvTruth.invalidateIndex();
   FF.gv.rows = () => []; FF.gv.enabled = () => true; FF.gv.issuanceRows = () => []; FF.gv.masterRows = () => [];
   FF.auth = { can: () => true, settings: {}, isAdmin: () => true };
   FF.pages = {

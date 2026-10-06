@@ -499,9 +499,9 @@ FF.pages = FF.pages || {};
       const isTlKind = /tl$/.test(p.kind);
       const extra = q1 ? [
         q1.mobile && (!FF.auth || FF.auth.can('contacts')) ? `📞 ${q1.mobile}` : '',
-        `📦 ${U.fmt(q1.stock.total)}${isTlKind && q1.tlStock && q1.tlStock.own && q1.tlStock.agents ? ` (own ${U.fmt(q1.tlStock.own.total)} + agents ${U.fmt(q1.tlStock.agents.total)})` : ''}${!isTlKind && q1.tlStock && q1.tlStock.has ? ` · TL ${U.fmt(q1.tlStock.total)}${q1.tlStock.own && q1.tlStock.agents ? ` (own ${U.fmt(q1.tlStock.own.total)} + agents ${U.fmt(q1.tlStock.agents.total)})` : ''}` : ''}`,
+        `📦 ${q1.stockAvailable === false ? '— · Tag Assignment unavailable' : U.fmt(q1.stock.total)}${q1.stockAvailable !== false && isTlKind && q1.tlStock && q1.tlStock.own && q1.tlStock.agents ? ` (own ${U.fmt(q1.tlStock.own.total)} + agents ${U.fmt(q1.tlStock.agents.total)})` : ''}${q1.stockAvailable !== false && !isTlKind && q1.tlStock && q1.tlStock.has ? ` · TL ${U.fmt(q1.tlStock.total)}${q1.tlStock.own && q1.tlStock.agents ? ` (own ${U.fmt(q1.tlStock.own.total)} + agents ${U.fmt(q1.tlStock.agents.total)})` : ''}` : ''}`,
         (q1.totals && (q1.totals.curTotal || q1.totals.lastTotal)) ? `🏷️ Total ${U.fmt(q1.totals.curTotal)} · 📅 last month ${U.fmt(q1.totals.lastTotal)}` : '',
-        q1.tagRequired ? `🏷️ TAG ${U.sugText(q1.calc.total.net, q1.calc.total.gross)}` : (!q1.direct && q1.calc && (q1.calc.total.net || q1.calc.total.gross) ? `🎯 dispatch ${U.sugText(q1.calc.total.net, q1.calc.total.gross)}` : ''),
+        q1.tagRequired ? (q1.stockAvailable === false ? '🏷️ TAG — Tag Assignment unavailable' : q1.calc && q1.calc.total ? `🏷️ TAG ${U.sugText(q1.calc.total.net, q1.calc.total.gross)}` : '') : (!q1.direct && q1.calc && (q1.calc.total.net || q1.calc.total.gross) ? `🎯 dispatch ${U.sugText(q1.calc.total.net, q1.calc.total.gross)}` : ''),
         q1.calc && q1.calc.total.rate > 0 ? `⚡ ${U.fmt(q1.calc.total.rate, true)}/day` : '',
         q1.calc && q1.calc.total.cover != null ? `⏳ cover ${U.fmt(q1.calc.total.cover, true)} din` : ''
       ].filter(Boolean) : [];
@@ -559,13 +559,16 @@ FF.pages = FF.pages || {};
     const isTlKind = /tl$/.test(p.kind);
     const contacts = !FF.auth || FF.auth.can('contacts');
     const d = q1.dispatch || {};
-    const tlStockDetail = q1.tlStock && q1.tlStock.own && q1.tlStock.agents
+    const stockAvailable = q1.stockAvailable !== false;
+    const stockClassAvailable = stockAvailable && q1.stockClassAvailable !== false;
+    const calc = q1.calc && q1.calc.total || null;
+    const tlStockDetail = stockAvailable && q1.tlStock && q1.tlStock.own && q1.tlStock.agents
       ? `Own ${U.fmt(q1.tlStock.own.total)} + agents ${U.fmt(q1.tlStock.agents.total)}` : '';
     // v3.40 — TL stock ka split do clickable chips: "TL ke paas (own)" drawer me sirf TL ki rows, "agents"
     // me sirf agents ki — aur Agents block click par wahi list (TL ki apni row count me nahi ginti jaati).
     const tlNameForSpec = isTlKind ? p.name : ((q1.tl && q1.tl.name) || '');
     const tlStockBaseSpec = !isTlKind && q1.direct ? '' : `src=${q1.ch}&scope=stock&tl=${encodeURIComponent(tlNameForSpec)}`;
-    const splitChips = q1.tlStock && q1.tlStock.own && q1.tlStock.agents && tlStockBaseSpec
+    const splitChips = stockAvailable && q1.tlStock && q1.tlStock.own && q1.tlStock.agents && tlStockBaseSpec
       ? `<span class="mp-part own" data-kpi="${esc(`${tlStockBaseSpec}&part=own`)}" title="Sirf TL ke paas (own) stock">own ${U.fmt(q1.tlStock.own.total)}</span> + <span class="mp-part team" data-kpi="${esc(`${tlStockBaseSpec}&part=team`)}" title="Sirf agents ke paas stock">agents ${U.fmt(q1.tlStock.agents.total)}</span>`
       : '';
     const peopleSpec = isTlKind ? `src=${q1.ch}&scope=people&tl=${encodeURIComponent(p.name)}&self=0&sort=stock` : '';
@@ -576,27 +579,32 @@ FF.pages = FF.pages || {};
     // "without stock deduction" ka data pada hota tha — confusing tha.
     const pair = (net, gross) => `<span class="sug-pair sug-pair-tight"><span class="sug-result net" title="Required − stock"><small>After stock</small><b class="sug-chip">${U.fmt(net)}</b></span><span class="sug-result gross" title="Run-rate × din, stock ghata kar nahi"><small>W/o stock</small><b class="sug-chip wo">${U.fmt(gross)}</b></span></span>`;
     let sugStats = '';
-    if (q1.tagRequired) {
+    if (q1.direct && !q1.tagRequired) {
+      sugStats = '<div class="ms-sug-full"><small>Suggested dispatch</small><b class="dim">No dispatch</b></div>';
+    } else if (!stockAvailable) {
+      sugStats = '<div class="ms-sug-full"><small>Suggested dispatch</small><b class="dim">— · Tag Assignment stock unavailable</b></div>';
+    } else if (!stockClassAvailable) {
+      sugStats = `<div class="ms-sug-full"><small>Class-wise after-stock dispatch</small><b class="dim">— · Tag Assignment class split unavailable</b></div>${calc ? `<div class="ms-sug-full"><small>🎯 Dispatch · all tags · ${U.fmt(calc.days)} din</small><b>${pair(calc.net, calc.gross)}</b></div>` : ''}`;
+    } else if (q1.tagRequired) {
       sugStats = `<div class="ms-sug-full"><small>🏷️ Tags required · ${U.fmt(d.days)} din</small><b><span class="sug-pair sug-pair-tight"><span class="sug-result net"><small>After stock</small><span class="sug-chip direct">🏷️ ${U.fmt(d.sugVc4)} + ${U.fmt(d.sugComm)}</span></span><span class="sug-result gross"><small>W/o stock</small><span class="sug-chip wo">🏷️ ${U.fmt((d.sugVc4Gross || 0) + (d.sugCommGross || 0))}</span></span></span></b></div>`;
     } else if (q1.direct) {
       sugStats = '<div class="ms-sug-full"><small>Suggested dispatch</small><b class="dim">No dispatch</b></div>';
-    } else {
-      const ct = q1.calc.total;
+    } else if (calc) {
       sugStats = `<div><small>Sug. VC4 <em>(after stock · w/o stock)</em></small><b>${pair(d.sugVc4, d.sugVc4Gross || 0)}</b></div>
       <div><small>Sug. Comm. <em>(after stock · w/o stock)</em></small><b>${pair(d.sugComm, d.sugCommGross || 0)}</b></div>
-      <div class="ms-sug-full"><small>🎯 Dispatch · all tags · ${U.fmt(ct.days)} din</small><b>${pair(ct.net, ct.gross)}</b></div>`;
-    }
+      <div class="ms-sug-full"><small>🎯 Dispatch · all tags · ${U.fmt(calc.days)} din</small><b>${pair(calc.net, calc.gross)}</b></div>`;
+    } else sugStats = '<div class="ms-sug-full"><small>Suggested dispatch</small><b class="dim">—</b></div>';
     return `<div class="ms-kundli-stats ms-prof">
       <div><small>${isTlKind ? 'TL mobile' : 'Mobile'}</small><b>${contacts ? (q1.mobile ? esc(q1.mobile) : '—') : '🔒'}</b></div>
       <div><small>Priority</small><b>${esc(q1.priority || '—')}</b></div>
       ${isTlKind
-        ? `<div><small>Stock split (own + agents)</small><b>${splitChips ? 'click karo 👇' : tlStockDetail || U.fmt(q1.stock.total)}</b>${splitChips ? `<em>${splitChips}</em>` : ''}</div>
+        ? `<div><small>Stock split (own + agents)</small><b>${!stockAvailable ? '—' : splitChips ? 'click karo 👇' : tlStockDetail || U.fmt(q1.stock.total)}</b>${splitChips ? `<em>${splitChips}</em>` : !stockAvailable ? '<em>Tag Assignment unavailable</em>' : !stockClassAvailable ? '<em>Class split unavailable</em>' : ''}</div>
       <div${` class=\"ms-stat-click\" data-kpi=\"${esc(peopleSpec)}\" title=\"In agents ki poori list\"`}><small>Agents</small><b>${U.fmt(q1.agentCount)}${q1.selfAgent ? ' + TL' : ''}</b>${q1.selfAgent ? `<em>TL ka apna stock alag</em>` : ''}</div>`
-        : `<div${q1.tlStock && q1.tlStock.has ? ` class=\"ms-stat-click\" data-kpi=\"${esc(tlStockBaseSpec)}\" title=\"TL stock ki detail\"` : ''}><small>TL ke under stock</small><b>${q1.tlStock && q1.tlStock.has ? U.fmt(q1.tlStock.total) : '—'}</b>${splitChips || tlStockDetail ? `<em>${splitChips || tlStockDetail}</em>` : ''}</div>
+        : `<div${stockAvailable && q1.tlStock && q1.tlStock.has ? ` class=\"ms-stat-click\" data-kpi=\"${esc(tlStockBaseSpec)}\" title=\"TL stock ki detail\"` : ''}><small>TL ke under stock</small><b>${stockAvailable && q1.tlStock && q1.tlStock.has ? U.fmt(q1.tlStock.total) : '—'}</b>${!stockAvailable ? '<em>Tag Assignment unavailable</em>' : splitChips || tlStockDetail ? `<em>${splitChips || tlStockDetail}</em>` : ''}</div>
       <div><small>TL</small><b>${esc((q1.tl && q1.tl.name) ? tlText(q1.tl.name, q1.ch) : (p.direct ? (p.directLabel || 'Direct') : '—'))}</b></div>`}
       ${sugStats}
-      <div><small>Run-rate / day <em>(÷ ${U.fmt(q1.calc.total.elapsed)} din)</em></small><b>${U.fmt(q1.calc.total.rate, true)}</b></div>
-      <div><small>Cover</small><b>${q1.calc.total.cover != null ? `${U.fmt(q1.calc.total.cover, true)} din` : '—'}</b></div>
+      <div><small>Run-rate / day <em>${calc ? `(÷ ${U.fmt(calc.elapsed)} din)` : ''}</em></small><b>${calc ? U.fmt(calc.rate, true) : '—'}</b></div>
+      <div><small>Cover</small><b>${calc && calc.cover != null ? `${U.fmt(calc.cover, true)} din` : '—'}</b></div>
       <div class="ms-growth"><small>Growth % <em>${p1 && p1.basis && p1.basis.shortLabel ? `till ${esc(p1.basis.shortLabel)}` : ''}</em></small><b>${p1 && p1.num !== null && p1.num !== undefined && Number.isFinite(p1.num) ? U.pctHtml(p1.num, { decimals: 0 }) : `<span class=\"dim\">—</span>`}</b></div>
       <div><small>Expected month-end</small><b>${p1 ? U.fmt(p1.total) : '—'}</b></div>
     </div>`;
@@ -672,9 +680,12 @@ FF.pages = FF.pages || {};
   function personKundli(p) {
     const tl = p.direct ? (p.directLabel || 'Direct Agent') : [...p.tlSet].slice(0, 4).map((n) => tlText(n, p.kind === 'gv-agent' ? 'gv' : 'ff')).join(', ');
     const row = MP() && MP().reportDataRow ? MP().reportDataRow(p) : null;   // REPORT tab ke same numbers
+    const stockSpec = row ? `src=${row.ch}&scope=stock&${row.isTl ? `tl=${encodeURIComponent(row.name)}${row.id ? `&tlId=${encodeURIComponent(row.id)}` : ''}` : `agent=${encodeURIComponent(row.name)}${row.id ? `&agentId=${encodeURIComponent(row.id)}` : ''}`}` : '';
+    const stockStrip = !row ? '' : row.stockAvailable
+      ? `<div class="dcell stock" data-kpi="${esc(stockSpec)}" role="button" tabindex="0" title="Stock ki detail"><small>📦 Stock${row.isTl ? ' · own + agents' : ''}</small><b>${U.fmt(row.stock)}</b><em>${row.stockClassAvailable ? `VC4 ${U.fmt(row.stockVc4)} · Comm ${U.fmt(row.stockComm)}` : 'Tag Assignment class split unavailable'}${row.isTl && row.ownStock != null ? ` · own ${U.fmt(row.ownStock)} + agents ${U.fmt(row.agentsStock || 0)}` : ''}</em></div>`
+      : `<div class="dcell stock unavailable"><small>📦 Stock · Tag Assignment</small><b>—</b><em>Stock unavailable; no GV REPORT snapshot shown</em></div>`;
     const strip = row ? `<div class="ms-data-strip">
-      <div class="dcell stock" data-kpi="${esc(`src=${row.ch}&scope=stock&${row.isTl ? `tl=${encodeURIComponent(row.name)}${row.id ? `&tlId=${encodeURIComponent(row.id)}` : ''}` : `agent=${encodeURIComponent(row.name)}${row.id ? `&agentId=${encodeURIComponent(row.id)}` : ''}`}`)}" role="button" tabindex="0" title="Stock ki detail">
-        <small>📦 Stock${row.isTl ? ' · own + agents' : ''}</small><b>${U.fmt(row.stock)}</b><em>VC4 ${U.fmt(row.stockVc4)} · Comm ${U.fmt(row.stockComm)}${row.isTl && row.ownStock != null ? ` · own ${U.fmt(row.ownStock)} + agents ${U.fmt(row.agentsStock || 0)}` : ''}</em></div>
+      ${stockStrip}
       <div class="dcell cur" data-kpi="${esc(`src=${row.ch}&scope=mtd&ym=${encodeURIComponent(row.curYm || '')}&${row.isTl ? `tl=${encodeURIComponent(row.name)}${row.id ? `&tlId=${encodeURIComponent(row.id)}` : ''}` : `agent=${encodeURIComponent(row.name)}${row.id ? `&agentId=${encodeURIComponent(row.id)}` : ''}`}`)}" role="button" tabindex="0" title="Total issuance ki detail">
         <small>🏷️ Total Issuance${row.isTl ? ' · TL + agents' : ' · MTD'}</small><b>${U.fmt(row.cur)}</b><em>VC4 ${U.fmt(row.curVc4)} · Comm ${U.fmt(row.curComm)}</em></div>
       <div class="dcell last" data-kpi="${esc(`src=${row.ch}&scope=month&ym=${encodeURIComponent(row.lastYm || '')}&${row.isTl ? `tl=${encodeURIComponent(row.name)}${row.id ? `&tlId=${encodeURIComponent(row.id)}` : ''}` : `agent=${encodeURIComponent(row.name)}${row.id ? `&agentId=${encodeURIComponent(row.id)}` : ''}`}`)}" role="button" tabindex="0" title="Last month issuance ki detail">
@@ -996,6 +1007,7 @@ FF.pages = FF.pages || {};
     let chFilter = (params && (params.ch || params.channel)) || '';   // '' = dono · 'ff' · 'gv'
     let groups = [];
     let current = null;
+    let currentBase = null;
 
     root.innerHTML = `<div class="page msp-page">
       <div class="page-head">
@@ -1043,7 +1055,7 @@ FF.pages = FF.pages || {};
         .sort((a, b) => (isTlP(b) ? 1 : 0) - (isTlP(a) ? 1 : 0) || String(a.name).localeCompare(String(b.name)))
         .slice(0, 10);
       quick.innerHTML = list.length
-        ? `<span class="dim small">⚡ Turant kholo:</span>${list.map((p) => `<button type="button" class="msp-chip" data-msp-name="${esc(p.name)}">${isTlP(p) ? '👥' : '🧑‍💼'} ${esc(p.name)}</button>`).join('')}`
+        ? `<span class="dim small">⚡ Turant kholo:</span>${list.map((p) => `<button type="button" class="msp-chip" data-msp-name="${esc(p.name)}" data-msp-nm-ch="${chOfP(p)}">${isTlP(p) ? '👥' : '🧑‍💼'} ${esc(p.name)} <small>${chOfP(p) === 'gv' ? '🟩 GV Partner' : '🟦 First Forward'}</small></button>`).join('')}`
         : '<span class="dim small">Index ban raha hai — 2 second me suggestions aa jayenge.</span>';
     }
     paintQuick();
@@ -1060,7 +1072,7 @@ FF.pages = FF.pages || {};
       return `<div class="msp-today"><h3>⚡ Aaj ka snapshot <span class="dim">· GV Master (live)</span></h3><div class="dgrid">
         <div class="dcell"><small>🟩 GV aaj · ${esc(U.labelDateKey(tk))}</small><b>${U.fmt(t.ledger.today.total)}</b><em class="dim">VC4 ${U.fmt(t.ledger.today.vc4)} · Comm ${U.fmt(t.ledger.today.comm)}</em></div>
         <div class="dcell"><small>🗓️ ${esc(t.ym)} / ${esc(t.lastYm)}</small><b>${U.fmt(t.ledger.cur.total)} / ${U.fmt(t.ledger.last.total)}</b><em>${g === null || g === undefined ? '<span class="dim">—</span>' : U.pctHtml(g, { decimals: 0 })}</em></div>
-        <div class="dcell"><small>📦 Stock · Tag Assignment</small><b>${U.fmt(t.stock.total)}</b><em class="dim">VC4 ${U.fmt(t.stock.vc4)} · Comm ${U.fmt(t.stock.comm)}</em></div>
+        <div class="dcell"><small>📦 Stock · Tag Assignment</small><b>${t.stock.authoritative ? U.fmt(t.stock.total) : '—'}</b><em class="dim">${!t.stock.authoritative ? 'stock unavailable' : t.stock.classAvailable ? `VC4 ${U.fmt(t.stock.vc4)} · Comm ${U.fmt(t.stock.comm)}` : 'class split unavailable'}</em></div>
       </div>${warn}</div>`;
     }
 
@@ -1231,7 +1243,11 @@ FF.pages = FF.pages || {};
       let bins = {};
       try { bins = (MP() && MP().groupBinsFor && MP().groupBinsFor(pr)) || {}; } catch { bins = {}; }
       const mix = (b) => (b && (num(b.VC4) || num(b.VC20) || num(b['VC5+'])) ? `VC4 ${U.fmt(b.VC4)} · VC20 ${U.fmt(b.VC20)} · VC5+ ${U.fmt(b['VC5+'])}` : '');
-      const stockMix = mix(bins.stock) || `VC4 ${U.fmt(s.vc4)} · Comm ${U.fmt(s.comm)}`;
+      const stockAvailable = pr.stockAvailable !== false;
+      const stockClassAvailable = stockAvailable && pr.stockClassAvailable !== false;
+      const stockMix = !stockAvailable ? 'Tag Assignment stock unavailable'
+        : !stockClassAvailable ? 'Tag Assignment total available · class split unavailable'
+          : mix(bins.stock) || `VC4 ${U.fmt(s.vc4)} · Comm ${U.fmt(s.comm)}`;
       const curMix = mix(bins.cur) || `VC4 ${U.fmt(t.curVc4)} · Comm ${U.fmt(t.curComm)}`;
       const lastMix = mix(bins.last) || `VC4 ${U.fmt(t.lastVc4)} · Comm ${U.fmt(t.lastComm)}`;
       const who = isTl ? `tl=${encodeURIComponent(pr.name)}${pr.id && ch === 'gv' ? `&tlId=${encodeURIComponent(pr.id)}` : ''}` : `agent=${encodeURIComponent(pr.name)}${pr.id ? `&agentId=${encodeURIComponent(pr.id)}` : ''}`;
@@ -1241,10 +1257,15 @@ FF.pages = FF.pages || {};
       const ownAgents = ts.own && ts.agents ? `own ${U.fmt(ts.own.total)} + agents ${U.fmt(ts.agents.total)}` : '';
       const tlName = (pr.tl && pr.tl.name) || '';
       let sug = '';
-      if (pr.tagRequired) {
-        sug = box('k7', `🏷️ Tags required · ${U.fmt(d.days)} din`, sugPair(num(d.sugVc4) + num(d.sugComm), num(d.sugVc4Gross) + num(d.sugCommGross)), `VC4 ${U.fmt(d.sugVc4)} + Comm ${U.fmt(d.sugComm)} · ${esc(pr.directLabel || 'Direct')} · priority ${esc(pr.priority || '—')}`);
-      } else if (pr.direct) {
+      if (pr.direct && !pr.tagRequired) {
         sug = box('k4', '🎯 Suggested dispatch', '<span class="dim">No dispatch</span>', `🚫 ${esc(pr.directLabel || 'Direct agent')} · priority ${esc(pr.priority || 'Low')} — abhi tags ki zarurat nahi`);
+      } else if (!stockAvailable) {
+        sug = box('k4', '🎯 Suggested dispatch', '<span class="dim">—</span>', 'Tag Assignment stock unavailable; after-stock dispatch calculate nahi kiya gaya');
+      } else if (!stockClassAvailable) {
+        sug = box('k4', '🎯 Sug. VC4 / Commercial', '<span class="dim">—</span>', 'Tag Assignment class split unavailable; class-wise after-stock dispatch nahi dikhaya gaya')
+          + box('k9', '🎯 Dispatch · all tags', sugPair(c.net, c.gross), `run-rate ${U.fmt(c.rate, true)}/day × ${U.fmt(c.days)} din − total stock ${U.fmt(c.stock)}`);
+      } else if (pr.tagRequired) {
+        sug = box('k7', `🏷️ Tags required · ${U.fmt(d.days)} din`, sugPair(num(d.sugVc4) + num(d.sugComm), num(d.sugVc4Gross) + num(d.sugCommGross)), `VC4 ${U.fmt(d.sugVc4)} + Comm ${U.fmt(d.sugComm)} · ${esc(pr.directLabel || 'Direct')} · priority ${esc(pr.priority || '—')}`);
       } else {
         sug = box('k4', `🎯 Sug. VC4 · ${U.fmt(d.days)} din`, sugPair(d.sugVc4, d.sugVc4Gross || 0), `avg ${U.fmt(d.avgVc4, true)}/day × ${U.fmt(d.days)} din − stock ${U.fmt(s.vc4)}`, `${spec('mtd', m.cur)}&group=VC4`)
           + box('k5', '🎯 Sug. Commercial', sugPair(d.sugComm, d.sugCommGross || 0), `avg ${U.fmt(d.avgComm, true)}/day × ${U.fmt(d.days)} din − stock ${U.fmt(s.comm)}`, `${spec('mtd', m.cur)}&group=COMM`)
@@ -1253,13 +1274,16 @@ FF.pages = FF.pages || {};
       const growthNum = (pr.growthNum !== null && pr.growthNum !== undefined && Number.isFinite(Number(pr.growthNum))) ? Number(pr.growthNum) : U.growth(num(t.curTotal), num(t.lastTotal));
       const growthHtml = (growthNum === null || growthNum === undefined || !Number.isFinite(Number(growthNum))) ? '<span class="dim">—</span>' : U.pctHtml(growthNum, { decimals: 0 });
       const notFound = pr.found === false
-        ? `<p class="dim small msp-kpi-note">⚠️ ${ch === 'gv' ? 'GV REPORT' : 'REPORT'} tab me is ${isTl ? 'TL' : 'agent'} ki row nahi mili — stock / priority sheet se nahi aa paaye (naam ki spelling check karo); issuance tag-ledger (EIR) se hai.</p>` : '';
+        ? `<p class="dim small msp-kpi-note">⚠️ ${ch === 'gv' ? 'GV REPORT' : 'REPORT'} tab me is ${isTl ? 'TL' : 'agent'} ki row nahi mili — priority sheet se nahi aa paayi (naam ki spelling check karo); issuance GV Master / tag ledger se hai.</p>` : '';
+      const stockNote = ch === 'gv' && !stockAvailable
+        ? '<p class="dim small msp-kpi-note">Tag Assignment stock unavailable — koi GV REPORT stock snapshot ya zero substitute nahi kiya gaya.</p>'
+        : ch === 'gv' && !stockClassAvailable ? '<p class="dim small msp-kpi-note">Tag Assignment total available; class-wise mix unavailable, so class stock / dispatch figures are hidden.</p>' : '';
       return `<section class="card msp-kpi-card" data-msp-kpi-ch="${ch}"><div class="card-head"><div>
           <h3>${ch === 'gv' ? '🟩 GV Partner' : '🟦 First Forward'} · ${isTl ? 'TL (own + agents)' : 'Agent'} — ek nazar me${pr.id ? ` <small class="dim mono">· ${esc(pr.id)}</small>` : ''}</h3>
           <p class="dim small">📦 stock · 🏷️ issuance (VC4 · VC20 · VC5+) · 🚦 priority · 🎯 suggested dispatch — ${isTl ? 'TL + saare agents ka jod' : `sirf is agent ka${tlName && !pr.direct ? ` · TL ${esc(tlName)}` : ''}`}${pr.partial ? ' · <span class="badge amber">⏳ data aa raha hai</span>' : ''}</p></div>
           <div class="card-right">${prioChip(pr.priority)}</div></div>
         <div class="card-body"><div class="mp-kpis msp-kpis">
-          ${box('k1', `📦 Stock${isTl ? ' · TL total' : ' · apna'}`, U.fmt(s.total), `${isTl && ownAgents ? `${ownAgents} · ` : ''}${stockMix}`, spec('stock'))}
+          ${box('k1', `📦 Stock${isTl ? ' · TL total' : ' · apna'}`, stockAvailable ? U.fmt(s.total) : '—', `${isTl && ownAgents ? `${ownAgents} · ` : ''}${stockMix}`, stockAvailable ? spec('stock') : '')}
           ${isTl
     ? box('k2', '🧑‍💼 Agents', `${U.fmt(pr.agentCount)}${pr.selfAgent ? ' + TL' : ''}`, 'click → agents ki list (stock · issuance ke saath)', peopleSpec)
     : box('k2', '📦 TL ke under stock', ts.has ? U.fmt(ts.total) : '—', ts.has ? `${ownAgents ? `${ownAgents} · ` : ''}TL ${esc(tlName || '—')}` : (pr.direct ? `🚫 ${esc(pr.directLabel || 'Direct — koi TL nahi')}` : 'TL ka stock nahi mila'), ts.has && tlName ? `src=${ch}&scope=stock&tl=${encodeURIComponent(tlName)}` : '')}
@@ -1268,7 +1292,7 @@ FF.pages = FF.pages || {};
           ${box('k3', '🚦 Priority', prioChip(pr.priority), `${c.cover != null ? `cover ${U.fmt(c.cover, true)} din` : 'cover —'} · run-rate ${U.fmt(c.rate, true)}/day (÷ ${U.fmt(c.elapsed)} din)`, isTl ? peopleSpec : '')}
           ${sug}
           ${box('k0', `📈 Growth${p1 && p1.basis && p1.basis.shortLabel ? ` <small class="dim">till ${esc(p1.basis.shortLabel)}</small>` : ''}`, growthHtml, p1 && p1.total ? `expected month-end ${U.fmt(p1.total)}` : 'last month vs MTD')}
-        </div>${notFound}</div></section>`;
+        </div>${notFound}${stockNote}</div></section>`;
     }
     const kpiLoadingHtml = (name, ch) => `<section class="card msp-kpi-card" data-msp-kpi-ch="${ch}"><div class="card-body">${U.spinner(`${esc(name)} ka ${ch === 'gv' ? '🟩 GV' : '🟦 FF'} stock · issuance · priority · suggested load ho raha hai…`)}</div></section>`;
     /** Group (FF + GV) ke har channel ka KPI card — pehle quick (memory wala data), phir poora profile aate hi upgrade. */
@@ -1294,15 +1318,21 @@ FF.pages = FF.pages || {};
       }));
     }
 
-    function openGroup(g) {
+    function openGroup(g, baseGroup) {
       if (!g || !out) return;
       current = g;
+      currentBase = baseGroup || g;
       const person = g.ff || g.gv;
       trendFollow(person);
       const linkedTeams = teamPeopleFor(g);
       const bits = [g.ff ? `🟦 FF ${isTlP(g.ff) ? 'TL' : 'Agent'}${g.ff.sub ? ` · ${esc(g.ff.sub)}` : ''}` : '', g.gv ? `🟩 GV ${isTlP(g.gv) ? 'TL' : 'Agent'}${g.gv.sub ? ` · ${esc(g.gv.sub)}` : ''}` : ''].filter(Boolean).join('  ·  ');
+      const source = currentBase;
+      const selected = g.ff && g.gv ? 'both' : g.gv ? 'gv' : 'ff';
+      const channelChoice = source.ff && source.gv
+        ? `<section class="msp-channel-choice" aria-label="Master Search channel choice"><div class="msp-channel-choice-copy"><b>⚖ Same name is present in both channels</b><small>Choose one channel to inspect, or keep both only in the clearly separated compare view.</small></div><div class="msp-channel-choice-buttons"><button type="button" class="msp-channel-btn${selected === 'both' ? ' on' : ''}" data-msp-person-ch="both" aria-pressed="${selected === 'both'}">⚖ Compare both</button><button type="button" class="msp-channel-btn${selected === 'ff' ? ' on' : ''}" data-msp-person-ch="ff" aria-pressed="${selected === 'ff'}">🟦 First Forward</button><button type="button" class="msp-channel-btn${selected === 'gv' ? ' on' : ''}" data-msp-person-ch="gv" aria-pressed="${selected === 'gv'}">🟩 GV Partner</button></div></section>`
+        : `<section class="msp-channel-choice single" aria-label="Master Search channel choice"><b>${source.gv ? '🟩' : '🟦'} Showing only ${source.gv ? 'GV Partner' : 'First Forward'}</b><small>${chFilter ? `Channel filter is set to ${chFilter === 'gv' ? 'GV Partner' : 'First Forward'}; other-channel results are excluded.` : `Only this channel matched the search; no other-channel data is included.`}</small></section>`;
       const chips = groups.length > 1
-        ? `<div class="msp-matches"><span class="dim small">${U.fmt(groups.length)} log mile — click karo:</span>${groups.slice(0, 12).map((gp, i) => `<button type="button" class="msp-chip${gp === g ? ' on' : ''}" data-msp-g="${i}">${esc(gp.name)}</button>`).join('')}</div>`
+        ? `<div class="msp-matches"><span class="dim small">${U.fmt(groups.length)} log mile — channel and name check karke choose karo:</span>${groups.slice(0, 12).map((gp, i) => `<button type="button" class="msp-chip${gp === g ? ' on' : ''}" data-msp-g="${i}">${esc(gp.name)} <small>${gp.ff && gp.gv ? '⚖ FF + GV' : gp.gv ? '🟩 GV Partner' : '🟦 First Forward'}</small></button>`).join('')}</div>`
         : '';
       const teamCards = linkedTeams.map((team) => {
         const chLabel = team.channel === 'gv' ? '🟩 GV Partner' : '🟦 First Forward';
@@ -1315,6 +1345,7 @@ FF.pages = FF.pages || {};
           <div class="msp-hero-id"><b>${esc(g.name)}</b><small>${bits || 'Report'}</small></div>
           ${person ? `<div class="msp-hero-act"><button class="btn small" data-ms-tags="${esc(person.name)}">🏷️ Tag-level rows</button></div>` : ''}
         </div>
+        ${channelChoice}
         <div id="msp-kpis" class="msp-kpis-wrap">${['ff', 'gv'].filter((c) => g[c]).map((c) => kpiLoadingHtml(g.name, c)).join('')}</div>
         ${gvStripHtml(g.gv)}${ffStripHtml(g.ff)}
         <div class="msp-report" id="msp-report"></div>${teamCards}`;
@@ -1337,13 +1368,12 @@ FF.pages = FF.pages || {};
     /** Ek se zyada match — sirf ek line ke naam-chips (koi list nahi); click par poora data. */
     function chipsOnly() {
       out.innerHTML = `<div class="card"><div class="card-body">
-        <p class="dim small" style="margin:0 0 8px">${U.fmt(groups.length)} log mile — <b>naam par click karo</b>, uska poora FF + GV data neeche khul jayega:</p>
-        <div class="msp-matches">${groups.slice(0, 20).map((gp, i) => `<button type="button" class="msp-chip" data-msp-g="${i}">${esc(gp.name)}${gp.ff && gp.gv ? ' <small>⚖</small>' : gp.gv ? ' <small>🟩</small>' : ' <small>🟦</small>'}</button>`).join('')}</div>
+        <p class="dim small" style="margin:0 0 8px">${U.fmt(groups.length)} log mile — <b>naam aur channel label check karke choose karo</b>. Ambiguous results khud se open nahi honge:</p>
+        <div class="msp-matches">${groups.slice(0, 20).map((gp, i) => `<button type="button" class="msp-chip" data-msp-g="${i}">${esc(gp.name)} <small>${gp.ff && gp.gv ? '⚖ FF + GV' : gp.gv ? '🟩 GV Partner' : '🟦 First Forward'}</small></button>`).join('')}</div>
       </div></div>`;
     }
 
     async function run(query, opts) {
-      const open = !opts || opts.open !== false;
       const q = clean(query);
       if (q.length < 2) { out.innerHTML = '<div class="card"><div class="card-body empty">Kam se kam 2 letter / digit type karo.</div></div>'; return; }
       out.innerHTML = U.spinner(`“${q}” dhoondha ja raha hai…`);
@@ -1357,7 +1387,7 @@ FF.pages = FF.pages || {};
       groups = sr ? sr.groupPeople(people) : people.map(fallbackGroup);
       groups.sort((a, b) => Number(!!b.gv) - Number(!!a.gv) || String(a.name).localeCompare(String(b.name)));
       if (groups.length) {
-        if (open || groups.length === 1) openGroup(groups[0]); else chipsOnly();
+        if (groups.length === 1) openGroup(groups[0]); else chipsOnly();
         warmFull();
         return;
       }
@@ -1365,7 +1395,7 @@ FF.pages = FF.pages || {};
         out.innerHTML = `<div class="card"><div class="card-body"><h3 class="msp-h">🔖 ID / tag match</h3>${resultsHtml(res)}</div></div>`;
         return;
       }
-      out.innerHTML = `<div class="card"><div class="card-body empty">“${esc(q)}” ke liye kuch nahi mila — doosra naam / ID / mobile try karo${chFilter ? ' (ya channel filter hatao)' : ''}.</div></div>`;
+      out.innerHTML = `<div class="card"><div class="card-body empty"><b>Agent / TL match nahi mila</b><br>“${esc(q)}” ${chFilter ? (chFilter === 'gv' ? 'GV Partner' : 'First Forward') : 'First Forward ya GV Partner'} me nahi mila. ${chFilter ? 'Channel filter badal kar' : 'Naam, ID ya mobile check karke'} dobara try karo.</div></div>`;
     }
 
     if (input) {
@@ -1409,8 +1439,26 @@ FF.pages = FF.pages || {};
       const nm = e.target.closest('[data-msp-name]');
       if (nm) {
         const nmKey = normName(nm.dataset.mspName);
-        const p = lightPeople().filter((x) => normName(x.name) === nmKey).sort((a, b) => (chOfP(b) === 'gv' ? 1 : 0) - (chOfP(a) === 'gv' ? 1 : 0))[0];
-        if (p) { if (input) input.value = p.name; const sr = SR(); openGroup(sr ? (sr.groupPeople([p])[0] || fallbackGroup(p)) : fallbackGroup(p)); }
+        const wantedCh = nm.dataset.mspNmCh || '';
+        const p = lightPeople().filter((x) => normName(x.name) === nmKey && (!wantedCh || chOfP(x) === wantedCh))[0];
+        if (p) {
+          chFilter = wantedCh;
+          $$('[data-msp-ch]', root).forEach((b) => b.classList.toggle('on', (b.dataset.mspCh || '') === chFilter));
+          if (input) input.value = p.name;
+          const sr = SR();
+          openGroup(sr ? (sr.groupPeople([p])[0] || fallbackGroup(p)) : fallbackGroup(p));
+        }
+        return;
+      }
+      const personCh = e.target.closest('[data-msp-person-ch]');
+      if (personCh && currentBase && currentBase.ff && currentBase.gv) {
+        const choice = personCh.dataset.mspPersonCh;
+        const base = currentBase;
+        chFilter = choice === 'both' ? '' : choice;
+        $$('[data-msp-ch]', root).forEach((b) => b.classList.toggle('on', (b.dataset.mspCh || '') === chFilter));
+        paintQuick();
+        const selectedGroup = choice === 'both' ? base : { ...base, ff: choice === 'ff' ? base.ff : null, gv: choice === 'gv' ? base.gv : null };
+        openGroup(selectedGroup, base);
         return;
       }
       const gb = e.target.closest('[data-msp-g]');

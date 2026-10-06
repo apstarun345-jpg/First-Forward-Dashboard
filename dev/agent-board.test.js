@@ -30,7 +30,7 @@ globalThis.document = {
   createElement: () => ({ style: {}, classList: { add() {} }, setAttribute() {}, appendChild() {}, addEventListener() {}, getContext: () => null }),
   querySelector: () => null, querySelectorAll: () => [], getElementById: () => null
 };
-['config', 'util', 'model', 'gv', 'store', 'charts'].forEach((f) => require(path.join(ROOT, `${f}.js`)));
+['config', 'util', 'model', 'gv', 'gvTruth', 'store', 'charts'].forEach((f) => require(path.join(ROOT, `${f}.js`)));
 const FF = globalThis.FF;
 const U = FF.util;
 U.runRateDays = () => 15;
@@ -109,9 +109,9 @@ function gvFixture() {
       { agentId: 'G999', agentName: 'GV TL', tlId: 'GT1', tlName: 'GV TL', n: 30 }
     ],
     stockAgentClass: [
-      { agentId: 'G001', agentName: 'GV Ramesh', cls: 'VC4', n: 20 }, { agentId: 'G001', agentName: 'GV Ramesh', cls: 'VC20', n: 10 },
-      { agentId: 'G002', agentName: 'GV Suresh', cls: 'VC4', n: 20 }, { agentId: 'G002', agentName: 'GV Suresh', cls: 'VC20', n: 20 },
-      { agentId: 'G999', agentName: 'GV TL', cls: 'VC4', n: 20 }, { agentId: 'G999', agentName: 'GV TL', cls: 'VC20', n: 10 }
+      { agentId: 'G001', agentName: 'GV Ramesh', tlId: 'GT1', tlName: 'GV TL', cls: 'VC4', n: 20 }, { agentId: 'G001', agentName: 'GV Ramesh', tlId: 'GT1', tlName: 'GV TL', cls: 'VC20', n: 10 },
+      { agentId: 'G002', agentName: 'GV Suresh', tlId: 'GT1', tlName: 'GV TL', cls: 'VC4', n: 20 }, { agentId: 'G002', agentName: 'GV Suresh', tlId: 'GT1', tlName: 'GV TL', cls: 'VC20', n: 20 },
+      { agentId: 'G999', agentName: 'GV TL', tlId: 'GT1', tlName: 'GV TL', cls: 'VC4', n: 20 }, { agentId: 'G999', agentName: 'GV TL', tlId: 'GT1', tlName: 'GV TL', cls: 'VC20', n: 10 }
     ],
     master: [...gvMaster(G1, { cur: cur1, last: last1 }), ...gvMaster(G2, { cur: cur2, last: last2 }), ...gvMaster(TL, { cur: curT, last: lastT })]
   };
@@ -125,6 +125,7 @@ function mount({ ff, gv } = {}) {
   FF.store.get = (k) => (k in data ? data[k] : []);
   FF.gv.need = async () => [];
   FF.gv.get = (k) => (k in gvData ? gvData[k] : []);
+  if (FF.gvTruth && FF.gvTruth.invalidateIndex) FF.gvTruth.invalidateIndex();
   FF.gv.rows = () => gvData.master || [];
   FF.gv.issuanceRows = () => [];
   FF.gv.enabled = () => true;

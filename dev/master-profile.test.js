@@ -19,7 +19,7 @@ globalThis.document = {
   createElement: () => ({ style: {}, classList: { add() {} }, setAttribute() {}, appendChild() {}, addEventListener() {}, getContext: () => null }),
   querySelector: () => null, querySelectorAll: () => [], getElementById: () => null
 };
-['config', 'util', 'model', 'gv', 'store', 'charts'].forEach((f) => require(path.join(ROOT, `${f}.js`)));
+['config', 'util', 'model', 'gv', 'gvTruth', 'store', 'charts'].forEach((f) => require(path.join(ROOT, `${f}.js`)));
 const FF = globalThis.FF;
 const U = FF.util;
 U.runRateDays = () => 15; // run-rate = issued ÷ (today − 1): test me fixed 15 din
@@ -58,14 +58,15 @@ const gvStockAgents = [
   { agentId: 'GT1', agentName: 'GV TL', tlId: 'GT1', tlName: 'GV TL', n: 4 }
 ];
 const gvStockAgentClass = [
-  { agentName: 'GV Ramesh', cls: 'VC4', n: 5 }, { agentName: 'GV Ramesh', cls: 'Commercial', n: 1 },
-  { agentName: 'GV Low', cls: 'VC4', n: 20 }, { agentName: 'GV Low', cls: 'Commercial', n: 4 },
-  { agentName: 'GV TL', cls: 'VC4', n: 4 }
+  { agentId: 'G001', agentName: 'GV Ramesh', tlId: 'GT1', tlName: 'GV TL', cls: 'VC4', n: 5 }, { agentId: 'G001', agentName: 'GV Ramesh', tlId: 'GT1', tlName: 'GV TL', cls: 'Commercial', n: 1 },
+  { agentId: 'G003', agentName: 'GV Low', tlId: 'GT1', tlName: 'GV TL', cls: 'VC4', n: 20 }, { agentId: 'G003', agentName: 'GV Low', tlId: 'GT1', tlName: 'GV TL', cls: 'Commercial', n: 4 },
+  { agentId: 'GT1', agentName: 'GV TL', tlId: 'GT1', tlName: 'GV TL', cls: 'VC4', n: 4 }
 ];
 const master = [{ ym, agentId: 'G001', agentName: 'GV Ramesh', tlName: 'GV TL', cls: 'VC4', group: 'VC4' }, { ym, agentId: 'G001', agentName: 'GV Ramesh', tlName: 'GV TL', cls: 'VC20', group: 'VC20' }, { ym: prev, agentId: 'G001', agentName: 'GV Ramesh', tlName: 'GV TL', cls: 'VC4', group: 'VC4' }];
 const data = { agentClass, agents: [], stockAgents };
 FF.store.need = async (k) => data[k] || []; FF.store.get = (k) => data[k];
 FF.gv.need = async () => []; FF.gv.get = (k) => (k === 'report' ? gvReport : k === 'stockAgent' ? gvStockAgents : k === 'stockAgentClass' ? gvStockAgentClass : []); FF.gv.rows = () => master; FF.gv.enabled = () => true;
+if (FF.gvTruth && FF.gvTruth.invalidateIndex) FF.gvTruth.invalidateIndex();
 FF.auth = { can: () => true, settings: {} };
 FF.pages = { performance: { ensureLoaded: async () => {}, agents: () => agents, daysElapsed: () => 15, dayLabels: () => ['a', 'b', 'c', 'd', 'e', 'f', 'g'] } };
 require(path.join(ROOT, 'masterProfile.js'));
@@ -109,7 +110,9 @@ test('Direct + High/Medium = TAG REQUIRED (FF and GV); Low = no dispatch', async
   assert.equal(ffLow.tagRequired, false); assert.match(MP.html(ffLow), /No dispatch/);
   const gvMed = await MP.build(person('gv-agent', 'GV Direct', 'G002'));
   assert.equal(gvMed.direct, true); assert.equal(gvMed.tagRequired, true);
-  assert.equal(gvMed.dispatch.sugVc4, 38, 'formula: 40 ÷ 15 × 15 − stock 2 (sheet qty ab use nahi hoti)');
+  assert.equal(gvMed.stockAvailable, true, 'Tag Assignment datasets are loaded for the fixture');
+  assert.equal(gvMed.stock.total, 0, 'GV REPORT stock 2 is not a substitute for no Tag Assignment holder row');
+  assert.equal(gvMed.dispatch.sugVc4, 40, 'formula uses Tag Assignment zero stock, not GV REPORT snapshot 2');
   assert.equal(MP.suggest(4, 10), 50);
 });
 
@@ -146,17 +149,31 @@ test('GV agent + GV TL profiles', async () => {
   assert.deepEqual([tl.tlStock.own.total, tl.tlStock.agents.total], [4, 30]);
 });
 
-test('GV TL keeps the REPORT floor when agent stock details are partial', async () => {
+test('GV TL Tag Assignment aggregate stays visible when holder rows are partial; splits stay hidden', async () => {
   const priorGet = FF.gv.get;
   FF.gv.get = (key) => key === 'report' ? gvReport
-    : key === 'stockAgent' ? gvStockAgents.filter((r) => r.agentId === 'G001' || r.agentId === 'GT1')
-      : key === 'stockAgentClass' ? gvStockAgentClass.filter((r) => r.agentName === 'GV Ramesh' || r.agentName === 'GV TL') : [];
+    : key === 'stockTl' ? [{ tlId: 'GT1', tlName: 'GV TL', n: 34, nAll: 34 }]
+      : key === 'stockAgent' ? gvStockAgents.filter((r) => r.agentId === 'G001' || r.agentId === 'GT1')
+        : key === 'stockAgentClass' ? gvStockAgentClass.filter((r) => r.agentName === 'GV Ramesh' || r.agentName === 'GV TL') : [];
+  if (FF.gvTruth && FF.gvTruth.invalidateIndex) FF.gvTruth.invalidateIndex();
+  MP.invalidate();
   try {
     const tl = await MP.build(person('gv-tl', 'GV TL'));
-    assert.equal(tl.stock.total, 34, 'partial tag detail must not lower agent report 30 + TL own 4');
-    assert.equal(tl.classes.reduce((sum, r) => sum + r.stock, 0), 34);
+    assert.equal(tl.stock.total, 34, 'exact Tag Assignment TL aggregate remains authoritative');
+    assert.equal(tl.stockSource, 'Tag Assignment');
+    assert.equal(tl.stockClassAvailable, false, 'incomplete class rows are not fabricated from GV REPORT');
+    assert.equal(tl.stockBreakdownAvailable, false, 'partial holders do not get an invented own / agent split');
+    const missingHolder = tl.agents.find((agent) => agent.id === 'G003');
+    assert.equal(missingHolder.stockAvailable, false, 'an absent holder row is not treated as a confirmed zero when the TL total does not reconcile');
+    assert.equal(missingHolder.stockTotal, null);
+    const missingAgent = await MP.build(person('gv-agent', 'GV Low', 'G003'));
+    assert.equal(missingAgent.stockAvailable, false);
+    assert.equal(missingAgent.stock.total, null);
+    assert.equal(missingAgent.dispatch.sugVc4, null, 'incomplete Tag Assignment must not produce a dispatch estimate');
   } finally {
     FF.gv.get = priorGet;
+    if (FF.gvTruth && FF.gvTruth.invalidateIndex) FF.gvTruth.invalidateIndex();
+    MP.invalidate();
     await MP.loadFor({ kind: 'gv-tl' });
   }
 });

@@ -31,9 +31,16 @@ window.FF = window.FF || {};
   /** ledger (final) vs doosre sources — chip: "Sheet 332 (Δ +108)" */
   function crossChip(c) {
     if (!c || !c.others || !c.others.length) return '';
-    return c.others.map((o) => `<span class="gs-x ${o.diff === 0 ? 'ok' : 'diff'}" title="${esc(o.label)}: ${fmt(o.value)} · final se farq ${o.diff > 0 ? '+' : ''}${fmt(o.diff)}">${esc(o.label.replace(/\s*\(.*\)\s*$/, ''))} <b>${fmt(o.value)}</b>${o.diff === 0 ? ' ✓' : ` <i>(${o.diff > 0 ? '+' : ''}${fmt(o.diff)})</i>`}</span>`).join('');
+    return c.others.map((o) => {
+      const hasValue = o.value !== null && o.value !== undefined && Number.isFinite(Number(o.value));
+      const hasDiff = o.diff !== null && o.diff !== undefined && Number.isFinite(Number(o.diff));
+      const valueText = hasValue ? fmt(o.value) : '—';
+      const diffText = hasDiff ? `${o.diff > 0 ? '+' : ''}${fmt(o.diff)}` : '—';
+      const matched = hasDiff && Number(o.diff) === 0;
+      return `<span class="gs-x ${matched ? 'ok' : 'diff'}" title="${esc(o.label)}: ${valueText} · final se farq ${diffText}">${esc(o.label.replace(/\s*\(.*\)\s*$/, ''))} <b>${valueText}</b>${matched ? ' ✓' : ` <i>(${diffText})</i>`}</span>`;
+    }).join('');
   }
-  const bar = (n, max, tone) => `<span class="gs-bar ${tone || ''}"><i style="width:${max ? Math.max(2, Math.round((n / max) * 100)) : 0}%"></i></span>`;
+  const bar = (n, max, tone) => `<span class="gs-bar ${tone || ''}"><i style="width:${max && Number.isFinite(Number(n)) ? Math.max(2, Math.round((n / max) * 100)) : 0}%"></i></span>`;
 
   // ---- KPI cards -----------------------------------------------------------------------------------
   function card(o) { return { unit: '', ...o }; }
@@ -81,7 +88,7 @@ window.FF = window.FF || {};
     if (!v.sources || !v.sources.length) return '';
     const cols = v.sources.map((s) => `<div class="gs-source ${s.tone || ''}">
       <div class="gs-source-head"><b>${esc(s.name)}</b>${s.role ? `<span class="gs-src ${s.tone || ''}">${esc(s.role)}</span>` : ''}</div>
-      <ul>${s.values.map((x) => `<li><span>${esc(x.label)}</span><b>${x.valueText !== undefined ? x.valueText : fmt(x.value)}</b></li>`).join('')}</ul>
+      <ul>${s.values.map((x) => `<li><span>${esc(x.label)}</span><b>${x.valueText !== undefined ? x.valueText : (x.value === null || x.value === undefined ? '—' : fmt(x.value))}</b></li>`).join('')}</ul>
       ${s.note ? `<p class="dim small">${s.note}</p>` : ''}
     </div>`).join('');
     return `<section class="card gs-card"><div class="card-head"><h3>🧭 Ye numbers kahan se aaye</h3><span class="dim small">${esc(v.sourceNote || '')}</span></div>
@@ -91,6 +98,7 @@ window.FF = window.FF || {};
   function classTableHtml(v) {
     const rows = v.classes || [];
     const max = Math.max(1, ...rows.map((c) => Math.max(c.cur || 0, c.last || 0, c.stock || 0)));
+    const stockClassAvailable = v.stockClassAvailable !== false;
     if (!rows.length) return '<section class="card gs-card"><div class="card-head"><h3>🚗 Class-wise</h3></div><div class="card-body empty">Koi class row nahi mili.</div></section>';
     return `<section class="card gs-card"><div class="card-head"><h3>🚗 Class-wise · issuance &amp; stock</h3><span class="dim small">Row par click = us class ki tag rows</span></div>
       <div class="table-wrap"><table class="tbl compact gs-class">
@@ -100,10 +108,10 @@ window.FF = window.FF || {};
           <td class="num">${fmt(c.last)}</td>
           <td class="num"><b>${fmt(c.cur)}</b></td>
           <td class="num"><span class="gs-growth ${growthTone(c.growth)}">${pct(c.growth)}</span></td>
-          <td class="num"><b>${fmt(c.stock)}</b></td>
-          <td class="gs-barcell">${bar(c.cur || c.stock || 0, max, c.cur ? 'in' : 'st')}</td></tr>`).join('')}</tbody>
+          <td class="num"><b>${stockClassAvailable && c.stock !== null && c.stock !== undefined ? fmt(c.stock) : '—'}</b></td>
+          <td class="gs-barcell">${bar(c.cur || (stockClassAvailable ? c.stock : 0) || 0, max, c.cur ? 'in' : 'st')}</td></tr>`).join('')}</tbody>
         <tfoot><tr class="row-total"><td><b>Grand Total</b></td><td class="num"><b>${fmt(v.totals.last)}</b></td><td class="num"><b>${fmt(v.totals.cur)}</b></td>
-          <td class="num"><span class="gs-growth ${growthTone(v.totals.growth)}">${pct(v.totals.growth)}</span></td><td class="num"><b>${fmt(v.totals.stock)}</b></td><td></td></tr></tfoot>
+          <td class="num"><span class="gs-growth ${growthTone(v.totals.growth)}">${pct(v.totals.growth)}</span></td><td class="num"><b>${v.stockAvailable === false ? '—' : fmt(v.totals.stock)}</b></td><td></td></tr></tfoot>
       </table></div></section>`;
   }
 
@@ -123,14 +131,14 @@ window.FF = window.FF || {};
     const rows = v.team.map((a) => `<tr class="clickable" data-gs-agent="${esc(a.name)}" data-gs-agent-id="${esc(a.id || '')}">
       <td><b>${esc(a.name)}</b>${a.id ? `<br><small class="mono dim">${esc(a.id)}</small>` : ''}</td>
       <td class="num">${fmt(a.last)}</td><td class="num"><b>${fmt(a.cur)}</b></td>
-      <td class="num">${fmt(a.stock)}</td>
+      <td class="num">${a.stockAvailable === false ? '—' : fmt(a.stock)}</td>
       <td class="num">${a.sheetCur === null || a.sheetCur === undefined ? '<span class="dim">—</span>' : (a.sheetCur === a.cur ? `<span class="gs-growth good">✓ ${fmt(a.sheetCur)}</span>` : `<span class="gs-growth bad">${fmt(a.sheetCur)}</span>`)}</td>
-      <td class="gs-barcell">${bar(a.cur || a.stock, max, 'in')}</td></tr>`).join('');
+      <td class="gs-barcell">${bar(a.cur || (a.stockAvailable === false ? 0 : a.stock), max, 'in')}</td></tr>`).join('');
     const sheetNote = v.ch === 'gv' ? 'Sheet column = GV REPORT ka us agent ka number · ✓ = ledger se match' : 'Sheet column = REPORT sheet ka number (jahan mila) · ✓ = ledger se match';
     return `<section class="card gs-card"><div class="card-head"><h3>👥 Team agents (${fmt(v.team.length)})</h3><span class="dim small">${sheetNote}</span></div>
       <div class="table-wrap"><table class="tbl compact"><thead><tr><th>Agent</th><th class="num">${esc(v.lastYm)}</th><th class="num">${esc(v.ym)}</th><th class="num">Stock</th><th class="num">Sheet</th><th></th></tr></thead>
       <tbody>${rows}</tbody>
-      <tfoot><tr class="row-total"><td><b>TL total (agents)</b></td><td class="num"><b>${fmt(v.totals.last)}</b></td><td class="num"><b>${fmt(v.totals.cur)}</b></td><td class="num"><b>${fmt(v.totals.stock)}</b></td><td class="num">${v.sheetTotals && v.sheetTotals.cur !== null ? fmt(v.sheetTotals.cur) : '—'}</td><td></td></tr></tfoot></table></div></section>`;
+      <tfoot><tr class="row-total"><td><b>${v.ch !== 'gv' || v.stockHolderBreakdownAvailable ? 'TL stock total (own + agents)' : 'TL stock · Tag Assignment aggregate'}</b></td><td class="num"><b>${fmt(v.totals.last)}</b></td><td class="num"><b>${fmt(v.totals.cur)}</b></td><td class="num"><b>${v.stockAvailable === false ? '—' : fmt(v.totals.stock)}</b></td><td class="num">${v.sheetTotals && v.sheetTotals.cur !== null ? fmt(v.sheetTotals.cur) : '—'}</td><td></td></tr></tfoot></table></div>${v.ch === 'gv' && v.stockAvailable && !v.stockHolderBreakdownAvailable ? '<p class="dim small">Holder rows ko Tag Assignment TL aggregate se reconcile nahi kiya ja saka; own + agents split ko final nahi maana gaya.</p>' : ''}</section>`;
   }
 
   function ageingHtml(v) {
@@ -151,8 +159,10 @@ window.FF = window.FF || {};
       <tbody>${list.map((c) => {
         const o = c.others[0] || {};
         const d = o.diff;
-        return `<tr><td><b>${esc(c.metric)}</b></td><td class="num"><b>${fmt(c.final)}</b></td>${c.others.map((x) => `<td class="num">${fmt(x.value)}</td>`).join('')}
-          <td class="num"><span class="gs-growth ${d === 0 ? 'good' : d > 0 ? 'mid' : 'bad'}">${d === 0 ? 'match ✓' : `${d > 0 ? '+' : ''}${fmt(d)}`}</span></td></tr>`;
+        const finalText = c.final === null || c.final === undefined ? '—' : fmt(c.final);
+        const diffText = d === null || d === undefined ? '—' : d === 0 ? 'match ✓' : `${d > 0 ? '+' : ''}${fmt(d)}`;
+        return `<tr><td><b>${esc(c.metric)}</b></td><td class="num"><b>${finalText}</b></td>${c.others.map((x) => `<td class="num">${x.value === null || x.value === undefined ? '—' : fmt(x.value)}</td>`).join('')}
+          <td class="num"><span class="gs-growth ${d === null || d === undefined ? '' : d === 0 ? 'good' : d > 0 ? 'mid' : 'bad'}">${diffText}</span></td></tr>`;
       }).join('')}</tbody></table></div>
       ${v.warnings && v.warnings.length ? `<div class="card-body gs-warn">${v.warnings.map((w) => `<p>⚠️ ${esc(w)}</p>`).join('')}</div>` : ''}
     </section>`;
@@ -213,6 +223,9 @@ window.FF = window.FF || {};
   function gvView(truth, person) {
     const t = truth, isTl = t.kind === 'tl';
     const lt = t.ledger, st = t.stock, sh = t.sheet || {};
+    const stockAvailable = !!(st && st.authoritative);
+    const stockClassAvailable = stockAvailable && st.classAvailable !== false;
+    const stockHolderBreakdownAvailable = stockAvailable && st.holderBreakdownAvailable !== false;
     const ym = t.ym, lastYm = t.lastYm;
     const daysElapsed = lt.cur.lastDay || lt.cur.days || 0;
     const dim = U.daysInMonth(ym);
@@ -226,11 +239,12 @@ window.FF = window.FF || {};
     const rate = daysElapsed ? lt.cur.total / daysElapsed : 0;
     const growth = lt.last.total ? ((lt.cur.total - lt.last.total) / lt.last.total) * 100 : null;
     const classes = (() => {
-      const keys = new Set([...Object.keys(lt.cur.byClass), ...Object.keys(lt.last.byClass), ...st.byClass.map((c) => c.cls)]);
-      const stockBy = new Map(st.byClass.map((c) => [c.cls, c.n]));
+      const stockRows = stockClassAvailable ? (st.byClass || []) : [];
+      const keys = new Set([...Object.keys(lt.cur.byClass), ...Object.keys(lt.last.byClass), ...stockRows.map((c) => c.cls)]);
+      const stockBy = new Map(stockRows.map((c) => [c.cls, c.n]));
       return [...keys].map((cls) => {
         const cur = lt.cur.byClass[cls] || 0, last = lt.last.byClass[cls] || 0;
-        return { cls, cur, last, stock: stockBy.get(cls) || 0, growth: last ? ((cur - last) / last) * 100 : null };
+        return { cls, cur, last, stock: stockClassAvailable ? (stockBy.get(cls) || 0) : null, growth: last ? ((cur - last) / last) * 100 : null };
       }).sort((a, b) => (b.cur + b.last + b.stock) - (a.cur + a.last + a.stock));
     })();
     const checks = t.checks.map((c, i) => ({ ...c, metric: c.metric }));
@@ -245,9 +259,9 @@ window.FF = window.FF || {};
       card({ key: 'today', icon: '⚡', tone: 'g10', label: 'Today issued', value: lt.today.total, unit: 'tags',
         sub: lt.today.total ? `VC4 ${fmt(lt.today.vc4)} · Comm ${fmt(lt.today.comm)}` : 'aaj koi tag nahi',
         why: 'GV Master ka aaj ka data (live)', explain: 'Aaj ki tag rows — GV ki sheet live chalti hai, isliye EIR se pehle GV Master.' }),
-      card({ key: 'stock', icon: '📦', tone: 'g5', label: 'Stock in hand', value: st.total, unit: 'tags',
-        sub: `${isTl ? `TL ke paas <b>${fmt(st.own)}</b> + agents <b>${fmt(st.agentsTotal)}</b> · ` : ''}VC4 <b>${fmt(st.vc4)}</b> · Comm <b>${fmt(st.comm)}</b>`,
-        check: checkOf(2), why: 'Tag Assignment (live stock sheet) — final', explain: `${fmt(st.total)} tag rows is waqt in ke paas${st.excluded ? ` · ${fmt(st.excluded)} out-of-stock rows chhod diye` : ''}. Click = TAG_ID/serial list.` }),
+      card({ key: 'stock', icon: '📦', tone: 'g5', label: 'Stock in hand', value: stockAvailable ? st.total : '—', valueText: stockAvailable ? fmt(st.total) : '<span class="dim">—</span>', unit: 'tags',
+        sub: `${isTl ? (stockHolderBreakdownAvailable ? `TL ke paas <b>${fmt(st.own)}</b> + agents <b>${fmt(st.agentsTotal)}</b> · ` : 'TL own / agents split unavailable · ') : ''}${stockClassAvailable ? `VC4 <b>${fmt(st.vc4)}</b> · Comm <b>${fmt(st.comm)}</b>` : 'Tag Assignment class mix unavailable'}`,
+        check: checkOf(2), why: 'Tag Assignment (live stock sheet) — final', explain: stockAvailable ? `${fmt(st.total)} Tag Assignment stock tags is waqt in ke paas${st.excluded ? ` · ${fmt(st.excluded)} out-of-stock rows chhod diye` : ''}.${stockClassAvailable ? '' : ' Class split unavailable; VC4 / Commercial figures are hidden.'} Click = TAG_ID/serial list.` : 'Tag Assignment load nahi hua; stock aur GV REPORT snapshot se koi stock number nahi dikhaya gaya.' }),
       card({ key: 'expected', icon: '🎯', tone: 'g7', label: 'Expected (month-end)', value: expected, unit: 'tags',
         sub: `Runrate <b>${(expectedBase / reportDays).toFixed(1)}</b>/din · ${fmt(reportDays)}/${dim} reported din · aaj exclude`,
         why: 'Ledger runrate se projection', explain: `${fmt(expectedBase)} ÷ ${fmt(reportDays)} reported din × ${dim} din. Aaj ka live/incomplete day Expected me include nahi hai.` }),
@@ -265,15 +279,15 @@ window.FF = window.FF || {};
     return {
       ch: 'gv', kind: t.kind, name: t.name, id: t.id, tlName: t.tlName, tlId: t.tlId, mobile: t.mobile || person.mobile || '',
       direct: t.direct, ym, lastYm, cards, classes, months: monthsTrend(lt.rows.all, ym), team: isTl ? FF.gvTruth.team({ ...person, ym }) : null,
-      checks, warnings: t.warnings, ageing: null, ageState: 'idle',
-      totals: { cur: lt.cur.total, last: lt.last.total, stock: st.total, growth },
+      stockAvailable, stockClassAvailable, stockHolderBreakdownAvailable, checks, warnings: t.warnings, ageing: null, ageState: 'idle',
+      totals: { cur: lt.cur.total, last: lt.last.total, stock: stockAvailable ? st.total : null, growth },
       sheetTotals: { cur: sh.curAvailable ? sh.cur : null, last: sh.lastAvailable ? sh.last : null, stock: sh.stockAvailable ? sh.stock : null },
       sources: [
         { name: '🧾 GV Master (issuance ledger)', role: 'FINAL', tone: 'ledger', note: 'Column A = agent ID, I = TAG_ID, E = VRN barcode, F = class, P = date.', values: [
           { label: `Is mahine (${ym})`, value: lt.cur.total }, { label: `Last month (${lastYm})`, value: lt.last.total },
           { label: 'Aaj', value: lt.today.total }, { label: 'Total rows', value: lt.rows.all.length }] },
-        { name: '📦 Tag Assignment (stock)', role: 'FINAL stock', tone: 'stock', note: 'Ek row = ek tag; status out-of-stock ho to stock me nahi ginta.', values: [
-          { label: 'Stock in hand', value: st.total }, { label: 'VC4', value: st.vc4 }, { label: 'Commercial', value: st.comm }] },
+        { name: '📦 Tag Assignment (stock)', role: 'FINAL stock', tone: 'stock', note: stockAvailable ? `Tag Assignment total${stockClassAvailable ? ' aur class split' : ' available; class split unavailable'}. Out-of-stock status stock me nahi ginta.` : 'Tag Assignment source unavailable; GV REPORT snapshot ko final stock nahi maana.', values: [
+          { label: 'Stock in hand', value: stockAvailable ? st.total : null }, { label: 'VC4', value: stockClassAvailable ? st.vc4 : null }, { label: 'Commercial', value: stockClassAvailable ? st.comm : null }] },
         { name: '📑 GV REPORT (sheet)', role: 'CROSS-CHECK', tone: 'sheet', note: 'Sheet ke bane hue numbers — sirf verify karne ke liye.', values: [
           { label: 'Current month', value: sh.curAvailable ? sh.cur : null }, { label: 'Last month', value: sh.lastAvailable ? sh.last : null },
           { label: 'Stock', value: sh.stockAvailable ? sh.stock : null }] }
@@ -410,10 +424,10 @@ window.FF = window.FF || {};
     v.cards.forEach((c) => rows.push([c.label, c.value]));
     rows.push([]);
     rows.push(['Metric', 'Final (ledger)', ...(v.checks[0] ? v.checks[0].others.map((o) => o.label) : [])]);
-    v.checks.forEach((c) => rows.push([c.metric, c.final, ...c.others.map((o) => o.value)]));
+    v.checks.forEach((c) => rows.push([c.metric, c.final === null || c.final === undefined ? '' : c.final, ...c.others.map((o) => o.value === null || o.value === undefined ? '' : o.value)]));
     rows.push([]);
     rows.push(['Class', v.lastYm, v.ym, 'Stock']);
-    v.classes.forEach((c) => rows.push([c.cls, c.last, c.cur, c.stock]));
+    v.classes.forEach((c) => rows.push([c.cls, c.last, c.cur, c.stock === null || c.stock === undefined ? '' : c.stock]));
     return rows;
   }
   function viewText(v) {
@@ -422,7 +436,7 @@ window.FF = window.FF || {};
     v.cards.forEach((c) => lines.push(`${c.icon || ''} ${c.label}: *${c.value}*${c.sub ? ` (${String(c.sub).replace(/<[^>]+>/g, '')})` : ''}`));
     if (v.checks.length) {
       lines.push('', '*🧮 Sheet vs Ledger:*');
-      v.checks.forEach((c) => lines.push(`• ${c.metric}: ledger *${c.final}*${c.others.map((o) => ` · ${o.label} ${o.value} (${o.diff > 0 ? '+' : ''}${o.diff})`).join('')}`));
+      v.checks.forEach((c) => lines.push(`• ${c.metric}: ledger *${c.final === null || c.final === undefined ? '—' : fmt(c.final)}*${c.others.map((o) => ` · ${o.label} ${o.value === null || o.value === undefined ? '—' : fmt(o.value)} (${o.diff === null || o.diff === undefined ? '—' : `${o.diff > 0 ? '+' : ''}${fmt(o.diff)}`})`).join('')}`));
     }
     return lines.join('\n');
   }
@@ -431,10 +445,10 @@ window.FF = window.FF || {};
     const doc = FF.pdf.doc({ title: `${v.ch === 'gv' ? 'GV Partner' : 'First Forward'} · ${v.kind === 'tl' ? 'Team Leader' : 'Agent'} Summary`, subtitle: `${v.name}${v.id ? ` (ID: ${v.id})` : ''}${v.tlName ? ` · TL: ${v.tlName}` : ''}`, right: new Date().toLocaleDateString('en-IN') });
     doc.kpis(v.cards.slice(0, 5).map((c) => ({ label: c.label, value: String(c.value), sub: String(c.sub || '').replace(/<[^>]+>/g, '').slice(0, 60), color: '#2563eb' })));
     doc.section(`Class-wise (${v.lastYm} vs ${v.ym}) & Stock`);
-    doc.table({ headers: ['Class', v.lastYm, v.ym, 'Stock'], align: ['left', 'right', 'right', 'right'], rows: v.classes.map((c) => [c.cls, fmt(c.last), fmt(c.cur), fmt(c.stock)]), foot: ['TOTAL', fmt(v.totals.last), fmt(v.totals.cur), fmt(v.totals.stock)] });
+    doc.table({ headers: ['Class', v.lastYm, v.ym, 'Stock'], align: ['left', 'right', 'right', 'right'], rows: v.classes.map((c) => [c.cls, fmt(c.last), fmt(c.cur), c.stock === null || c.stock === undefined ? '—' : fmt(c.stock)]), foot: ['TOTAL', fmt(v.totals.last), fmt(v.totals.cur), v.stockAvailable === false ? '—' : fmt(v.totals.stock)] });
     if (v.checks.length) {
       doc.section('Sheet vs Ledger (final = ledger)');
-      doc.table({ headers: ['Metric', 'Ledger (final)', ...v.checks[0].others.map((o) => o.label), 'Farq'], align: ['left', 'right', 'right', 'right', 'right'], rows: v.checks.map((c) => [c.metric, fmt(c.final), ...c.others.map((o) => fmt(o.value)), `${c.others[0] && c.others[0].diff > 0 ? '+' : ''}${fmt((c.others[0] && c.others[0].diff) || 0)}`]) });
+      doc.table({ headers: ['Metric', 'Ledger (final)', ...v.checks[0].others.map((o) => o.label), 'Farq'], align: ['left', 'right', 'right', 'right', 'right'], rows: v.checks.map((c) => [c.metric, c.final === null || c.final === undefined ? '—' : fmt(c.final), ...c.others.map((o) => o.value === null || o.value === undefined ? '—' : fmt(o.value)), c.others[0] && c.others[0].diff !== null && c.others[0].diff !== undefined ? `${c.others[0].diff > 0 ? '+' : ''}${fmt(c.others[0].diff)}` : '—']) });
     }
     doc.footer(`${v.ch === 'gv' ? 'GV Master ledger (final) · GV REPORT (cross-check)' : 'EIR ledger (final) · REPORT sheet (cross-check)'}`);
     return doc.finish();
@@ -505,7 +519,7 @@ window.FF = window.FF || {};
         sug.innerHTML = hits.length ? hits.map((p) => {
           const tl = /tl$/.test(p.kind);
           return `<button type="button" class="gs-chipbtn ${tl ? 'tl' : 'ag'}" data-gs-pick="${esc(`${p.kind}|${p.name}`)}">
-            <b>${esc(p.name)}</b>${p.id ? ` <small class="mono dim">${esc(p.id)}</small>` : ''} <small class="dim">· ${fmt(p.cur)} mtd · ${fmt(p.stock)} stock${(p.today !== undefined) ? ` · ${fmt(p.today)} aaj` : ''}</small></button>`;
+            <b>${esc(p.name)}</b>${p.id ? ` <small class="mono dim">${esc(p.id)}</small>` : ''} <small class="dim">· ${fmt(p.cur)} mtd · ${p.stockAvailable === false ? '—' : fmt(p.stock)} stock${(p.today !== undefined) ? ` · ${fmt(p.today)} aaj` : ''}</small></button>`;
         }).join('') : '<span class="dim small">Koi matching naam/ID/mobile nahi mila</span>';
       };
       lateList = (list) => {
@@ -518,7 +532,7 @@ window.FF = window.FF || {};
           const tl = /tl$/.test(p.kind);
           return `<button type="button" class="gs-drop-opt" data-gs-pick="${esc(`${p.kind}|${p.name}`)}">
             <span><span class="gs-tag ${tl ? 'tl' : 'ag'}">${tl ? 'TL' : 'Agent'}</span> <b>${esc(p.name)}</b>${p.id ? ` <small class="mono dim">${esc(p.id)}</small>` : ''}${!tl && p.tl ? ` <small class="dim">· TL ${esc(p.tl)}</small>` : ''}</span>
-            <span class="dim small">last <b>${fmt(p.last)}</b> · mtd <b>${fmt(p.cur)}</b>${p.today !== undefined ? ` · aaj <b>${fmt(p.today)}</b>` : ''} · stock <b>${fmt(p.stock)}</b>${p.sheetCur !== null && p.sheetCur !== undefined ? ` · sheet ${fmt(p.sheetCur)}` : ''}</span></button>`;
+            <span class="dim small">last <b>${fmt(p.last)}</b> · mtd <b>${fmt(p.cur)}</b>${p.today !== undefined ? ` · aaj <b>${fmt(p.today)}</b>` : ''} · stock <b>${p.stockAvailable === false ? '—' : fmt(p.stock)}</b>${p.sheetCur !== null && p.sheetCur !== undefined ? ` · sheet ${fmt(p.sheetCur)}` : ''}</span></button>`;
         }).join('') : '<div class="gs-drop-empty dim">Kuch nahi mila</div>';
         drop.hidden = false;
       };

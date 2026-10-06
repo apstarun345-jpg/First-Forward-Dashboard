@@ -30,6 +30,7 @@ window.FF = window.FF || {};
   const esc = U.esc;
   const num = (v) => (v === null || v === undefined || v === '' ? 0 : Number(v) || 0);
   const fmt = (v) => U.fmt(num(v));
+  const stockFmt = (v, available = true) => (!available || v === null || v === undefined || v === '') ? '—' : U.fmt(num(v));
   const clean = (v) => String(v === null || v === undefined || v === '' ? '' : v).trim();
   const norm = (v) => clean(v).normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 
@@ -66,9 +67,13 @@ window.FF = window.FF || {};
     r.lastTotal = num(a.lastTotal !== undefined ? a.lastTotal : a.last);
     r.curVc4 = num(a.curVc4); r.curComm = num(a.curComm !== undefined ? a.curComm : a.curNvc4);
     r.lastVc4 = num(a.lastVc4); r.lastComm = num(a.lastComm !== undefined ? a.lastComm : a.lastNvc4);
-    r.stockVc4 = num(a.stockVc4); r.stockComm = num(a.stockComm !== undefined ? a.stockComm : a.stockNvc4);
-    r.stockTotal = num(a.stockTotal);
-    r.sugVc4 = num(a.sugVc4); r.sugComm = num(a.sugComm);
+    r.stockAvailable = a.stockAvailable !== false;
+    r.stockClassAvailable = r.stockAvailable && a.stockClassAvailable !== false;
+    r.stockVc4 = r.stockClassAvailable ? num(a.stockVc4) : null;
+    r.stockComm = r.stockClassAvailable ? num(a.stockComm !== undefined ? a.stockComm : a.stockNvc4) : null;
+    r.stockTotal = r.stockAvailable ? num(a.stockTotal) : null;
+    r.classStock = r.stockClassAvailable && a.classStock ? { ...a.classStock } : {};
+    r.sugVc4 = r.stockClassAvailable ? num(a.sugVc4) : null; r.sugComm = r.stockClassAvailable ? num(a.sugComm) : null;
     r.sugVc4Gross = num(a.sugVc4Gross); r.sugCommGross = num(a.sugCommGross);
     r.growth = (a.growth === undefined || a.growth === null) ? growthPct(r.curTotal, r.lastTotal) : a.growth;
     return r;
@@ -88,13 +93,16 @@ window.FF = window.FF || {};
   /** Class rows — profile ke `classes`, aur agar khaali ho to VC4/Comm se bana do (dono channel me safe). */
   function classRowsOf(pr) {
     const t = (pr && pr.totals) || {}, s = (pr && pr.stock) || {};
-    let list = (pr && pr.classes ? pr.classes : []).map((c) => ({ cls: c.cls, last: num(c.last), cur: num(c.cur), stock: num(c.stock) }));
-    list = list.filter((c) => c.last || c.cur || c.stock);
-    if (!list.length && (num(t.curTotal) || num(t.lastTotal) || num(s.total))) {
+    const stockClassAvailable = !!pr && pr.stockAvailable !== false && pr.stockClassAvailable !== false;
+    let list = (pr && pr.classes ? pr.classes : []).map((c) => ({
+      cls: c.cls, last: num(c.last), cur: num(c.cur), stock: stockClassAvailable && c.stock !== null && c.stock !== undefined ? num(c.stock) : null
+    }));
+    list = list.filter((c) => c.last || c.cur || (stockClassAvailable && c.stock));
+    if (!list.length && (num(t.curTotal) || num(t.lastTotal) || (pr && pr.stockAvailable !== false && num(s.total)))) {
       list = [
-        { cls: 'VC4', last: num(t.lastVc4), cur: num(t.curVc4), stock: num(s.vc4) },
-        { cls: 'Commercial', last: num(t.lastComm), cur: num(t.curComm), stock: num(s.comm) }
-      ].filter((c) => c.last || c.cur || c.stock);
+        { cls: 'VC4', last: num(t.lastVc4), cur: num(t.curVc4), stock: stockClassAvailable ? num(s.vc4) : null },
+        { cls: 'Commercial', last: num(t.lastComm), cur: num(t.curComm), stock: stockClassAvailable ? num(s.comm) : null }
+      ].filter((c) => c.last || c.cur || (stockClassAvailable && c.stock));
     }
     return list.sort((a, b) => clsRank(a.cls) - clsRank(b.cls));
   }
@@ -228,6 +236,10 @@ window.FF = window.FF || {};
   function rowOf(pr) {
     const t = pr.totals || {}, s = pr.stock || {}, d = pr.dispatch || {};
     const tl = pr.tl || {};
+    const stockAvailable = pr.stockAvailable !== false;
+    const stockClassAvailable = stockAvailable && pr.stockClassAvailable !== false;
+    const stockBreakdownAvailable = stockAvailable && pr.stockBreakdownAvailable !== false && !!(pr.tlStock && pr.tlStock.has);
+    const classes = classRowsOf(pr);
     return {
       name: clean(pr.name), id: clean(pr.id), mobile: clean(pr.mobile), status: clean(pr.status), lastActive: clean(pr.lastActive),
       priority: clean(pr.priority), commPriority: clean(pr.commPriority), direct: !!pr.direct, directLabel: clean(pr.directLabel),
@@ -235,12 +247,13 @@ window.FF = window.FF || {};
       tl: { name: clean(tl.name), id: clean(tl.id), mobile: clean(tl.mobile) },
       last: { vc4: num(t.lastVc4), comm: num(t.lastComm), total: num(t.lastTotal) },
       cur: { vc4: num(t.curVc4), comm: num(t.curComm), total: num(t.curTotal) },
-      stock: { vc4: num(s.vc4), comm: num(s.comm), total: num(s.total) },
-      stockOwn: num(pr.tlStock && pr.tlStock.own && pr.tlStock.own.total),
-      stockAgents: num(pr.tlStock && pr.tlStock.agents && pr.tlStock.agents.total),
+      stock: { vc4: stockClassAvailable && s.vc4 != null ? num(s.vc4) : null, comm: stockClassAvailable && s.comm != null ? num(s.comm) : null, total: stockAvailable && s.total != null ? num(s.total) : null },
+      stockAvailable, stockClassAvailable, stockBreakdownAvailable,
+      stockOwn: stockBreakdownAvailable && pr.tlStock.own ? num(pr.tlStock.own.total) : null,
+      stockAgents: stockBreakdownAvailable && pr.tlStock.agents ? num(pr.tlStock.agents.total) : null,
       dispatch: d, growth: pr.growthNum !== undefined && pr.growthNum !== null ? pr.growthNum : growthPct(num(t.curTotal), num(t.lastTotal)),
       proj: num(pr.projT1 && pr.projT1.total), projBasis: (pr.projT1 && pr.projT1.basis) || null,
-      classes: withStockDetail(classRowsOf(pr), pr.ch, pr.name, pr.id, 'stock', num(s.total)),
+      classes: stockClassAvailable ? withStockDetail(classes, pr.ch, pr.name, pr.id, 'stock', num(s.total)) : classes,
       agentCount: num(pr.agentCount), hasTlStock: !!(pr.tlStock && pr.tlStock.has)
     };
   }
@@ -273,7 +286,7 @@ window.FF = window.FF || {};
       <div class="ab-hero-right">
         <span class="ab-hero-num" title="Current month (MTD) issuance — tags ka count, agents ka nahi">${fmt(r.cur.total)}</span>
         <small>MTD issuance</small>
-        <span class="ab-hero-sub">Last ${fmt(r.last.total)} · Stock ${fmt(r.stock.total)}</span>
+        <span class="ab-hero-sub">Last ${fmt(r.last.total)} · Stock ${stockFmt(r.stock.total, r.stockAvailable)}</span>
       </div>
     </section>${tlBar}`;
   }
@@ -282,8 +295,9 @@ window.FF = window.FF || {};
   function groupSection(c, target, whoAm) {
     const r = target || c.row;
     const bins = groupsOf(whoAm === 'tl' ? c.tlPr : c.pr);
-    if (!bins || (!bins.last && !bins.cur && !(bins.stock && num(bins.stock.total)))) return '';
-    const stock = bins.stock || (r && r.stock ? { VC4: r.stock.vc4, VC20: null, 'VC5+': null, total: r.stock.total } : null);
+    if (!bins || (!bins.last && !bins.cur && (r.stockAvailable === false || !(bins.stock && num(bins.stock.total))))) return '';
+    const stockKnown = r.stockAvailable !== false && r.stockClassAvailable !== false;
+    const stock = stockKnown ? (bins.stock || (r && r.stock ? { VC4: r.stock.vc4, VC20: null, 'VC5+': null, total: r.stock.total } : null)) : null;
     const spec = (scope, f) => ({ src: c.ch, channel: c.ch, scope, ...(scope === 'month' ? { ym: c.ymLast } : scope === 'stock' ? {} : { ym: c.ymCur }), ...(whoAm === 'tl' ? { tl: r.name, tlId: r.id } : { agent: r.name, agentId: r.id }), f });
     const cell = (value, sp, title) => value === null || value === undefined
       ? '<td class="num dim">—</td>'
@@ -301,7 +315,7 @@ window.FF = window.FF || {};
       const f = group === 'VC4' ? 'vc4' : group === 'VC20' ? 'vc20' : 'vc5p';
       return `<tr><td class="ab-cls"><b>${group}</b></td>${cell(value('last', group), spec('month', f), `${who} · ${group} · last month (din → tag)`)}${cell(value('cur', group), spec('mtd', f), `${who} · ${group} · MTD (din → tag)`)}${cell(stock ? stock[group] : null, spec('stock', f), `${who} · ${group} · stock (barcode tak)`)}</tr>`;
     }).join('');
-    const stockTotal = stock ? num(stock.total) : 0;
+    const stockTotal = stock && stock.total !== null && stock.total !== undefined ? num(stock.total) : null;
     const src = (period) => {
       const b = bins[period];
       if (!b) return '—';
@@ -318,9 +332,9 @@ window.FF = window.FF || {};
       <div class="table-wrap"><table class="tbl compact ab-tbl">
         <thead><tr><th class="ab-th-cls">Group</th><th class="num">Last <small>(${esc(c.ymLastLabel)})</small></th><th class="num">MTD <small>(${esc(c.ymCurLabel)})</small></th><th class="num">Stock</th></tr></thead>
         <tbody>${rows}</tbody>
-        <tfoot><tr class="row-total"><td><b>Total</b></td><td class="num"><b>${fmt(totalOf('last'))}</b></td><td class="num"><b>${fmt(totalOf('cur'))}</b></td><td class="num"><b>${fmt(stockTotal)}</b></td></tr></tfoot>
+        <tfoot><tr class="row-total"><td><b>Total</b></td><td class="num"><b>${fmt(totalOf('last'))}</b></td><td class="num"><b>${fmt(totalOf('cur'))}</b></td><td class="num"><b>${stockFmt(stockTotal, !!stock)}</b></td></tr></tfoot>
       </table></div>
-      <p class="ab-mini">Source — Last: ${esc(src('last'))} · MTD: ${esc(src('cur'))} · Stock: Tag Assignment / StockDataa.${recon ? ` <span class="mp-recon">${recon}</span>` : ''}</p>`);
+      <p class="ab-mini">Source — Last: ${esc(src('last'))} · MTD: ${esc(src('cur'))} · Stock: ${c.ch === 'gv' ? (r.stockAvailable === false ? 'Tag Assignment unavailable; GV REPORT stock suppressed' : r.stockClassAvailable === false ? 'Tag Assignment class split unavailable' : 'Tag Assignment') : 'StockDataa'}.${recon ? ` <span class="mp-recon">${recon}</span>` : ''}</p>`);
   }
 
   /** 🆔 TL ID-wise stock — TL ka apna + har agent ka stock, ID ke saath, sab clickable. */
@@ -328,29 +342,35 @@ window.FF = window.FF || {};
     if (!c.tlRow && c.ch !== 'gv') return '';
     const tl = c.tlRow || c.row;
     const tlId = clean(tl.id || c.row.id);
+    if (tl.stockAvailable === false) return sec('ab-stockid', `🆔 TL ID-wise stock · ${esc(tlId || tl.name)}`, '<p class="ab-mini">Tag Assignment stock unavailable — GV REPORT snapshot ko stock source nahi maana; holder rows nahi dikhayi gayi.</p>');
+    if (c.ch === 'gv' && tl.stockBreakdownAvailable === false) return sec('ab-stockid', `🆔 TL ID-wise stock · ${esc(tlId || tl.name)}`, `<p class="ab-mini">Tag Assignment TL total ${stockFmt(tl.stock.total, tl.stockAvailable)} available; own / agent holder breakdown reconcile nahi hua, isliye per-ID stock nahi dikhaya gaya.</p>`);
     const own = c.team.own;
     const agents = c.team.agents.slice().sort((a, b) => b.stockTotal - a.stockTotal);
     if (!own && !agents.length) return '';
     const stockCells = (a) => {
       const spec = { src: c.ch, channel: c.ch, scope: 'stock', agent: a.name, agentId: a.id };
-      return `<td class="num ab-cellclick"${kpiAttr(spec, `${a.name} · VC4 stock`)}>${fmt(a.stockVc4)}</td>
-        <td class="num ab-cellclick"${kpiAttr(spec, `${a.name} · commercial stock`)}>${fmt(a.stockComm)}</td>
-        <td class="num ab-cellclick"${kpiAttr(spec, `${a.name} · total stock`)}><b>${fmt(a.stockTotal)}</b></td>`;
+      return `<td class="num ab-cellclick"${kpiAttr(spec, `${a.name} · VC4 stock`)}>${stockFmt(a.stockVc4, a.stockClassAvailable)}</td>
+        <td class="num ab-cellclick"${kpiAttr(spec, `${a.name} · commercial stock`)}>${stockFmt(a.stockComm, a.stockClassAvailable)}</td>
+        <td class="num ab-cellclick"${kpiAttr(spec, `${a.name} · total stock`)}><b>${stockFmt(a.stockTotal, a.stockAvailable)}</b></td>`;
     };
     const rowOf = (a, isSelf) => `<tr class="clickable${isSelf || a.isSelf ? ' ab-self' : ''}"${openAttr(a.name, kindFor(c.ch, !!a.isSelf && !isSelf ? true : false), a.id)}>
       <td class="ab-cellname">${a.isSelf || isSelf ? '👤 ' : ''}<b>${esc(a.name)}</b>${a.isSelf || isSelf ? ' <span class="ab-tag">TL apna</span>' : ''}</td>
       <td><small class="dim">${esc(a.id || '—')}</small></td>
       <td><small class="dim">${esc(tlId || '—')}</small></td>
       ${stockCells(a)}</tr>`;
-    const agentsStock = { vc4: sumBy(agents, 'stockVc4'), comm: sumBy(agents, 'stockComm'), total: sumBy(agents, 'stockTotal') };
+    const agentsStock = {
+      vc4: agents.every((a) => a.stockClassAvailable !== false) ? sumBy(agents, 'stockVc4') : null,
+      comm: agents.every((a) => a.stockClassAvailable !== false) ? sumBy(agents, 'stockComm') : null,
+      total: agents.every((a) => a.stockAvailable !== false) ? sumBy(agents, 'stockTotal') : null
+    };
     return sec('ab-stockid', `🆔 TL ID-wise stock · ${esc(tlId || tl.name)} <span class="dim small">— TL apna + har agent alag-alag</span>`, `
       <div class="table-wrap"><table class="tbl compact ab-tbl">
         <thead><tr><th>Naam</th><th>Agent ID</th><th>TL ID</th><th class="num">Stock VC4</th><th class="num">Stock Comm</th><th class="num">Stock total</th></tr></thead>
         <tbody>${own ? rowOf(own, true) : ''}${agents.map((a) => rowOf(a, false)).join('')}</tbody>
         <tfoot>
-          ${agents.length ? `<tr class="row-total"><td colspan="3"><b>🧑‍💼 Agents ke paas (${fmt(agents.length)})</b></td><td class="num">${fmt(agentsStock.vc4)}</td><td class="num">${fmt(agentsStock.comm)}</td><td class="num"><b>${fmt(agentsStock.total)}</b></td></tr>` : ''}
-          ${own ? `<tr class="ab-ownrow"><td colspan="3"><b>👤 TL ke paas (own)</b></td><td class="num">${fmt(own.stockVc4)}</td><td class="num">${fmt(own.stockComm)}</td><td class="num"><b>${fmt(own.stockTotal)}</b></td></tr>` : ''}
-          <tr class="row-total ab-tltotal"><td colspan="3"><b>= TL TOTAL · 🆔 ${esc(tlId || '—')}</b></td><td class="num"><b>${fmt(tl.stock.vc4)}</b></td><td class="num"><b>${fmt(tl.stock.comm)}</b></td><td class="num"><b>${fmt(tl.stock.total)}</b></td></tr>
+          ${agents.length ? `<tr class="row-total"><td colspan="3"><b>🧑‍💼 Agents ke paas (${fmt(agents.length)})</b></td><td class="num">${stockFmt(agentsStock.vc4, agentsStock.vc4 !== null)}</td><td class="num">${stockFmt(agentsStock.comm, agentsStock.comm !== null)}</td><td class="num"><b>${stockFmt(agentsStock.total, agentsStock.total !== null)}</b></td></tr>` : ''}
+          ${own ? `<tr class="ab-ownrow"><td colspan="3"><b>👤 TL ke paas (own)</b></td><td class="num">${stockFmt(own.stockVc4, own.stockClassAvailable)}</td><td class="num">${stockFmt(own.stockComm, own.stockClassAvailable)}</td><td class="num"><b>${stockFmt(own.stockTotal, own.stockAvailable)}</b></td></tr>` : ''}
+          <tr class="row-total ab-tltotal"><td colspan="3"><b>= TL TOTAL · 🆔 ${esc(tlId || '—')}</b></td><td class="num"><b>${stockFmt(tl.stock.vc4, tl.stockClassAvailable)}</b></td><td class="num"><b>${stockFmt(tl.stock.comm, tl.stockClassAvailable)}</b></td><td class="num"><b>${stockFmt(tl.stock.total, tl.stockAvailable)}</b></td></tr>
         </tfoot></table></div>
       <p class="ab-mini">Har row par click = us agent ka apna 360 board · stock cell par click = us ID ka stock (class → barcode tak). TL total = own + agents (koi double count nahi).</p>`);
   }
@@ -369,8 +389,8 @@ window.FF = window.FF || {};
       ${tile({ label: `${p}Last month · ${esc(c.ymLastLabel)}`, value: fmt(r.last.total), foot: `VC4 <b>${fmt(r.last.vc4)}</b> · Comm <b>${fmt(r.last.comm)}</b>`, tone: 'g5', spec: specFor('month', whoAm), title: `${who} ${r.name} · ${c.ymLastLabel} issuance (tag-level)` })}
       ${tile({ label: `${p}Current month · ${esc(c.ymCurLabel)} <span class="ab-tag">MTD</span>`, value: fmt(r.cur.total), foot: `VC4 <b>${fmt(r.cur.vc4)}</b> · Comm <b>${fmt(r.cur.comm)}</b>`, tone: 'g2', spec: specFor('mtd', whoAm), title: `${who} ${r.name} · ${c.ymCurLabel} issuance (tag-level)` })}
       ${tile({ label: `${p}Growth`, value: delta(r.growth), foot: `${fmt(r.last.total)} → ${fmt(r.cur.total)}`, tone: 'g3', spec: specFor('mtd', whoAm), title: `${who} ${r.name} · growth split (class → din)` })}
-      ${tile({ label: `${p}Suggested dispatch · ${fmt(c.days)} din`, value: `<span class="ab-sug">${fmt(d.sugVc4)}<small>VC4</small></span><span class="ab-sug">${fmt(d.sugComm)}<small>Comm</small></span>`, foot: `bina stock: VC4 <b>${fmt(d.sugVc4Gross)}</b> · Comm <b>${fmt(d.sugCommGross)}</b>`, tone: 'g4', spec: specFor('mtd', whoAm), title: `${who} ${r.name} · dispatch calculation` })}
-      ${tile({ label: `${p}Stock in hand`, value: fmt(r.stock.total), foot: `VC4 <b>${fmt(r.stock.vc4)}</b> · Comm <b>${fmt(r.stock.comm)}</b>`, tone: 'g1', spec: specFor('stock', whoAm), title: `${who} ${r.name} · stock (class → tag/barcode)` })}
+      ${tile({ label: `${p}Suggested dispatch · ${fmt(c.days)} din`, value: `<span class="ab-sug">${stockFmt(d.sugVc4, r.stockClassAvailable)}<small>VC4</small></span><span class="ab-sug">${stockFmt(d.sugComm, r.stockClassAvailable)}<small>Comm</small></span>`, foot: `bina stock: VC4 <b>${fmt(d.sugVc4Gross)}</b> · Comm <b>${fmt(d.sugCommGross)}</b>`, tone: 'g4', spec: specFor('mtd', whoAm), title: `${who} ${r.name} · dispatch calculation` })}
+      ${tile({ label: `${p}Stock in hand`, value: stockFmt(r.stock.total, r.stockAvailable), foot: !r.stockAvailable ? 'Tag Assignment unavailable; GV REPORT stock snapshot suppressed' : `VC4 <b>${stockFmt(r.stock.vc4, r.stockClassAvailable)}</b> · Comm <b>${stockFmt(r.stock.comm, r.stockClassAvailable)}</b>`, tone: 'g1', spec: r.stockAvailable ? specFor('stock', whoAm) : null, title: `${who} ${r.name} · stock (class → tag/barcode)` })}
       ${c.tlView ? tile({ label: 'TL ke agents', value: fmt(c.team.agents.length), foot: '<span class="ab-cta-inline" data-ab-scroll="ab-team">poori list neeche ↓</span>', tone: 'g7', spec: { src: ch, channel: ch, scope: 'people', tl: r.name, sort: 'stock' }, title: `TL ${r.name} · agents list` }) : ''}
       ${tile({ label: `${p}Expected month-end`, value: fmt(r.proj), foot: r.projBasis && r.projBasis.shortLabel ? `basis ${esc(r.projBasis.shortLabel)}` : `${fmt(d.avgVc4, true)}/day VC4`, tone: 'g6', spec: specFor('mtd', whoAm), title: `${who} ${r.name} · expected month-end` })}
     </div>`;
@@ -381,17 +401,20 @@ window.FF = window.FF || {};
     if (c.tlView || !c.tlRow || c.direct) return '';
     const t = c.tlRow, team = c.team;
     const tlSpec = (scope, extra) => ({ src: c.ch, channel: c.ch, scope: scope === 'month' ? 'month' : scope === 'stock' ? 'stock' : 'mtd', ...(scope === 'month' ? { ym: c.ymLast } : scope === 'stock' ? {} : { ym: c.ymCur }), tl: t.name, tlId: t.id, ...extra });
-    const agentsTotal = sumBy(team.agents, 'stockTotal');
-    const ownTotal = team.own ? num(team.own.stockTotal) : num(t.stockOwn);
-    const foot = `apna <b>${fmt(ownTotal)}</b> + agents <b>${fmt(agentsTotal)}</b> = <b>${fmt(t.stock.total)}</b>`;
+    const breakdownKnown = t.stockBreakdownAvailable === true;
+    const agentsTotal = breakdownKnown ? sumBy(team.agents, 'stockTotal') : null;
+    const ownTotal = breakdownKnown ? (team.own ? num(team.own.stockTotal) : num(t.stockOwn)) : null;
+    const foot = !t.stockAvailable ? 'Tag Assignment unavailable; GV REPORT stock snapshot suppressed.'
+      : !breakdownKnown ? `TL Tag Assignment total ${stockFmt(t.stock.total, true)}; own / agent holder breakdown unavailable.`
+        : `apna <b>${stockFmt(ownTotal)}</b> + agents <b>${stockFmt(agentsTotal)}</b> = <b>${stockFmt(t.stock.total, true)}</b>`;
     return sec('ab-tl', `👥 Team Leader ${esc(t.name)} — TL ka issuance, stock aur dispatch`, `
       <div class="ab-kpis">
         ${tile({ label: `TL last month · ${esc(c.ymLastLabel)}`, value: fmt(t.last.total), foot: `VC4 <b>${fmt(t.last.vc4)}</b> · Comm <b>${fmt(t.last.comm)}</b>`, tone: 'g5', spec: tlSpec('month'), title: `TL ${t.name} · ${c.ymLastLabel} issuance` })}
         ${tile({ label: `TL current month · ${esc(c.ymCurLabel)}`, value: fmt(t.cur.total), foot: `VC4 <b>${fmt(t.cur.vc4)}</b> · Comm <b>${fmt(t.cur.comm)}</b>`, tone: 'g2', spec: tlSpec('mtd'), title: `TL ${t.name} · ${c.ymCurLabel} issuance` })}
         ${tile({ label: 'TL growth', value: delta(t.growth), foot: `${fmt(t.last.total)} → ${fmt(t.cur.total)}`, tone: 'g3', spec: tlSpec('mtd'), title: `TL ${t.name} · growth` })}
-        ${tile({ label: 'TL stock (total)', value: fmt(t.stock.total), foot, tone: 'g1', spec: tlSpec('stock'), title: `TL ${t.name} · stock (class → barcode)` })}
+        ${tile({ label: 'TL stock (total)', value: stockFmt(t.stock.total, t.stockAvailable), foot, tone: 'g1', spec: t.stockAvailable ? tlSpec('stock') : null, title: `TL ${t.name} · stock (class → barcode)` })}
         ${tile({ label: 'TL ke agents', value: fmt(team.agents.length), foot: `<span class="ab-cta-inline" data-ab-scroll="ab-team">poori list neeche ↓</span>`, tone: 'g7', spec: { src: c.ch, channel: c.ch, scope: 'people', tl: t.name, sort: 'stock' }, title: `TL ${t.name} · agents list` })}
-        ${tile({ label: `TL dispatch · ${fmt(c.days)} din`, value: `<span class="ab-sug">${fmt(t.dispatch.sugVc4)}<small>VC4</small></span><span class="ab-sug">${fmt(t.dispatch.sugComm)}<small>Comm</small></span>`, foot: `bina stock: VC4 <b>${fmt(t.dispatch.sugVc4Gross)}</b> · Comm <b>${fmt(t.dispatch.sugCommGross)}</b>`, tone: 'g4', spec: tlSpec('mtd'), title: `TL ${t.name} · dispatch` })}
+        ${tile({ label: `TL dispatch · ${fmt(c.days)} din`, value: `<span class="ab-sug">${stockFmt(t.dispatch.sugVc4, t.stockClassAvailable)}<small>VC4</small></span><span class="ab-sug">${stockFmt(t.dispatch.sugComm, t.stockClassAvailable)}<small>Comm</small></span>`, foot: `bina stock: VC4 <b>${fmt(t.dispatch.sugVc4Gross)}</b> · Comm <b>${fmt(t.dispatch.sugCommGross)}</b>`, tone: 'g4', spec: tlSpec('mtd'), title: `TL ${t.name} · dispatch` })}
       </div>
       <p class="ab-mini">TL ka number = uske <b>saare agents</b> + TL ki apni (own) issuance/stock. Row par click = us agent/TL ka apna 360 board.</p>`);
   }
@@ -402,15 +425,21 @@ window.FF = window.FF || {};
     const tlCls = c.tlView || c.direct || !c.tlRow ? [] : c.tlRow.classes;
     if (!mine.length && !tlCls.length) return '';
     const keys = [...new Set([...mine, ...tlCls].map((x) => String(x.cls).toUpperCase()))].sort((a, b) => clsRank(a) - clsRank(b));
-    const pick = (list, cls, key) => num((list.find((x) => String(x.cls).toUpperCase() === cls) || {})[key]);
-    const cell = (v, spec, title) => `<td class="num ab-cellclick"${kpiAttr(spec, title)}>${fmt(v)}</td>`;
+    const pick = (list, cls, key) => {
+      const row = list.find((x) => String(x.cls).toUpperCase() === cls);
+      if (key === 'stock' && (!row || row.stock === null || row.stock === undefined)) return null;
+      return num(row && row[key]);
+    };
+    const cell = (v, spec, title) => v === null || v === undefined
+      ? '<td class="num dim">—</td>'
+      : `<td class="num ab-cellclick"${kpiAttr(spec, title)}>${fmt(v)}</td>`;
     const specA = (scope, cls) => ({ src: c.ch, channel: c.ch, scope, ...(scope === 'month' ? { ym: c.ymLast } : scope === 'stock' ? {} : { ym: c.ymCur }), ...(c.tlView ? { tl: c.row.name, tlId: c.row.id } : { agent: c.row.name, agentId: c.row.id }), cls, group: /^VC4$/i.test(cls) ? 'VC4' : 'COMM' });
     const specT = (scope, cls) => ({ src: c.ch, channel: c.ch, scope, ...(scope === 'month' ? { ym: c.ymLast } : scope === 'stock' ? {} : { ym: c.ymCur }), tl: c.tlRow.name, tlId: c.tlRow.id, cls, group: /^VC4$/i.test(cls) ? 'VC4' : 'COMM' });
-    const mineTot = { last: sumBy(mine, 'last'), cur: sumBy(mine, 'cur'), stock: sumBy(mine, 'stock') };
-    const tlTot = { last: sumBy(tlCls, 'last'), cur: sumBy(tlCls, 'cur'), stock: sumBy(tlCls, 'stock') };
+    const mineTot = { last: sumBy(mine, 'last'), cur: sumBy(mine, 'cur'), stock: c.row.stockClassAvailable ? sumBy(mine, 'stock') : null };
+    const tlTot = { last: sumBy(tlCls, 'last'), cur: sumBy(tlCls, 'cur'), stock: c.tlRow && c.tlRow.stockClassAvailable ? sumBy(tlCls, 'stock') : null };
     // Neeche ke total ko KPI se hi lo (sheet ka row) — class rows ke jod se mismatch ho to bhi ek hi hisaab dikhe.
-    const aTot = { last: num(c.row.last.total), cur: num(c.row.cur.total), stock: num(c.row.stock.total) };
-    const tTot = c.tlRow ? { last: num(c.tlRow.last.total), cur: num(c.tlRow.cur.total), stock: num(c.tlRow.stock.total) } : null;
+    const aTot = { last: num(c.row.last.total), cur: num(c.row.cur.total), stock: c.row.stockAvailable ? num(c.row.stock.total) : null };
+    const tTot = c.tlRow ? { last: num(c.tlRow.last.total), cur: num(c.tlRow.cur.total), stock: c.tlRow.stockAvailable ? num(c.tlRow.stock.total) : null } : null;
     const head = c.tlView ? 'TL' : 'Agent';
     return sec('ab-class', `🎯 Class-wise · ${head} ${esc(c.row.name)}${tlCls.length ? ` <span class="dim small">vs TL ${esc(c.tlRow.name)}</span>` : ''}`, `
       <div class="table-wrap"><table class="tbl compact ab-tbl">
@@ -428,8 +457,8 @@ window.FF = window.FF || {};
           ${cell(pick(tlCls, cls, 'stock'), specT('stock', cls), `TL ${c.tlRow.name} · ${cls} · stock`)}` : ''}
         </tr>`).join('')}</tbody>
         <tfoot><tr class="row-total"><td><b>Grand Total</b></td>
-          <td class="num"><b>${fmt(aTot.last)}</b></td><td class="num"><b>${fmt(aTot.cur)}</b></td><td class="num"><b>${fmt(aTot.stock)}</b></td>
-          ${tTot ? `<td class="num"><b>${fmt(tTot.last)}</b></td><td class="num"><b>${fmt(tTot.cur)}</b></td><td class="num"><b>${fmt(tTot.stock)}</b></td>` : ''}
+          <td class="num"><b>${fmt(aTot.last)}</b></td><td class="num"><b>${fmt(aTot.cur)}</b></td><td class="num"><b>${stockFmt(aTot.stock, aTot.stock !== null)}</b></td>
+          ${tTot ? `<td class="num"><b>${fmt(tTot.last)}</b></td><td class="num"><b>${fmt(tTot.cur)}</b></td><td class="num"><b>${stockFmt(tTot.stock, tTot.stock !== null)}</b></td>` : ''}
         </tr></tfoot></table></div>
       <p class="ab-mini">Agent ka stock sheet ke class columns se, TL ka stock uske saare agents + own se. Har cell clickable — class → din → tag / barcode tak.${mine.length && (mineTot.cur !== aTot.cur || mineTot.stock !== aTot.stock) ? ' <span class="dim">(jod aur total me farq ho to total sheet ka authoritative number hai.)</span>' : ''}</p>`);
   }
@@ -449,14 +478,19 @@ window.FF = window.FF || {};
         <td class="num ab-cellclick"${kpiAttr(spec('month'), `${a.name} · last month`)}>${fmt(a.lastTotal)}</td>
         <td class="num ab-cellclick"${kpiAttr(spec('mtd'), `${a.name} · MTD`)}><b>${fmt(a.curTotal)}</b></td>
         <td class="num">${delta(a.growth)}</td>
-        <td class="num ab-cellclick"${kpiAttr(spec('stock'), `${a.name} · VC4 stock`)}>${fmt(a.stockVc4)}</td>
-        <td class="num ab-cellclick"${kpiAttr(spec('stock'), `${a.name} · Comm stock`)}>${fmt(a.stockComm)}</td>
-        <td class="num ab-cellclick"${kpiAttr(spec('stock'), `${a.name} · total stock`)}><b>${fmt(a.stockTotal)}</b></td>
+        <td class="num ab-cellclick"${kpiAttr(spec('stock'), `${a.name} · VC4 stock`)}>${stockFmt(a.stockVc4, a.stockClassAvailable)}</td>
+        <td class="num ab-cellclick"${kpiAttr(spec('stock'), `${a.name} · Comm stock`)}>${stockFmt(a.stockComm, a.stockClassAvailable)}</td>
+        <td class="num ab-cellclick"${kpiAttr(spec('stock'), `${a.name} · total stock`)}><b>${stockFmt(a.stockTotal, a.stockAvailable)}</b></td>
       </tr>`;
     };
+    const breakdownKnown = t.stockBreakdownAvailable === true;
+    const rowClassStockKnown = breakdownKnown && agents.every((a) => a.stockClassAvailable !== false);
+    const rowTotalStockKnown = breakdownKnown && agents.every((a) => a.stockAvailable !== false);
     const sums = {
       last: sumBy(agents, 'lastTotal'), cur: sumBy(agents, 'curTotal'),
-      vc4: sumBy(agents, 'stockVc4'), comm: sumBy(agents, 'stockComm'), stock: sumBy(agents, 'stockTotal')
+      vc4: rowClassStockKnown ? sumBy(agents, 'stockVc4') : null,
+      comm: rowClassStockKnown ? sumBy(agents, 'stockComm') : null,
+      stock: rowTotalStockKnown ? sumBy(agents, 'stockTotal') : null
     };
     const own = team.own;
     const ownLast = own ? own.lastTotal : num(t.stockOwn ? 0 : 0);
@@ -465,15 +499,16 @@ window.FF = window.FF || {};
         <thead><tr><th>Agent</th><th>ID</th><th>Status</th><th>Priority</th><th class="num">Last <small>(${esc(c.ymLastLabel)})</small></th><th class="num">MTD <small>(${esc(c.ymCurLabel)})</small></th><th class="num">Growth</th><th class="num">Stock VC4</th><th class="num">Stock Comm</th><th class="num">Stock total</th></tr></thead>
         <tbody>${agents.map(rowHtml).join('')}</tbody>
         <tfoot>
-          <tr class="row-total"><td colspan="4"><b>Agents total (${fmt(agents.length)})</b></td><td class="num"><b>${fmt(sums.last)}</b></td><td class="num"><b>${fmt(sums.cur)}</b></td><td></td><td class="num"><b>${fmt(sums.vc4)}</b></td><td class="num"><b>${fmt(sums.comm)}</b></td><td class="num"><b>${fmt(sums.stock)}</b></td></tr>
-          ${own ? `<tr class="ab-ownrow"${openAttr(own.name, kindFor(c.ch, true), own.id)}><td colspan="4"><b>👤 TL ka apna (own)</b></td><td class="num"><b>${fmt(own.lastTotal)}</b></td><td class="num"><b>${fmt(own.curTotal)}</b></td><td></td><td class="num"><b>${fmt(own.stockVc4)}</b></td><td class="num"><b>${fmt(own.stockComm)}</b></td><td class="num"><b>${fmt(own.stockTotal)}</b></td></tr>` : ''}
-          <tr class="row-total ab-tltotal"><td colspan="4"><b>= TL TOTAL${own ? ' (own + agents)' : ''}</b></td><td class="num"><b>${fmt(t.last.total)}</b></td><td class="num"><b>${fmt(t.cur.total)}</b></td><td></td><td class="num"><b>${fmt(t.stock.vc4)}</b></td><td class="num"><b>${fmt(t.stock.comm)}</b></td><td class="num"><b>${fmt(t.stock.total)}</b></td></tr>
+          <tr class="row-total"><td colspan="4"><b>Agents total (${fmt(agents.length)})</b></td><td class="num"><b>${fmt(sums.last)}</b></td><td class="num"><b>${fmt(sums.cur)}</b></td><td></td><td class="num"><b>${stockFmt(sums.vc4, sums.vc4 !== null)}</b></td><td class="num"><b>${stockFmt(sums.comm, sums.comm !== null)}</b></td><td class="num"><b>${stockFmt(sums.stock, sums.stock !== null)}</b></td></tr>
+          ${own ? `<tr class="ab-ownrow"${openAttr(own.name, kindFor(c.ch, true), own.id)}><td colspan="4"><b>👤 TL ka apna (own)</b></td><td class="num"><b>${fmt(own.lastTotal)}</b></td><td class="num"><b>${fmt(own.curTotal)}</b></td><td></td><td class="num"><b>${stockFmt(own.stockVc4, own.stockClassAvailable)}</b></td><td class="num"><b>${stockFmt(own.stockComm, own.stockClassAvailable)}</b></td><td class="num"><b>${stockFmt(own.stockTotal, own.stockAvailable)}</b></td></tr>` : ''}
+          <tr class="row-total ab-tltotal"><td colspan="4"><b>= TL TOTAL${own ? ' (own + agents)' : ''}</b></td><td class="num"><b>${fmt(t.last.total)}</b></td><td class="num"><b>${fmt(t.cur.total)}</b></td><td></td><td class="num"><b>${stockFmt(t.stock.vc4, t.stockClassAvailable)}</b></td><td class="num"><b>${stockFmt(t.stock.comm, t.stockClassAvailable)}</b></td><td class="num"><b>${stockFmt(t.stock.total, t.stockAvailable)}</b></td></tr>
         </tfoot></table></div>
-      <p class="ab-mini">Row par click = us agent ka poora 360 board (Back se wapas). TL ki apni row agents ke jod me <b>dobara nahi</b> judti — <b>own + agents = TL total</b>${ownLast ? '' : ''}.</p>`, 'ab-team-sec');
+      <p class="ab-mini">Row par click = us agent ka poora 360 board (Back se wapas). TL ki apni row agents ke jod me <b>dobara nahi</b> judti — <b>own + agents = TL total</b>${ownLast ? '' : ''}.${!t.stockAvailable ? ' Tag Assignment stock unavailable; GV REPORT stock snapshots suppressed.' : !breakdownKnown ? ' Tag Assignment TL total available, lekin own/agent holder breakdown unavailable.' : ''}</p>`, 'ab-team-sec');
   }
 
   /** 6 · Agent × Class stock matrix — TL ke saare agents + TL ki apni row. */
   function matrixSection(c) {
+    if (c.ch === 'gv' && c.tlView && (c.tlRow.stockAvailable === false || c.tlRow.stockClassAvailable === false || c.team.all.some((a) => a.stockAvailable === false || a.stockClassAvailable === false))) return '';
     const rows = c.team.all.filter((a) => a.classStock && Object.keys(a.classStock).length);
     if (rows.length < 2) return '';
     const classes = [...new Set(rows.flatMap((a) => Object.keys(a.classStock)))].sort((a, b) => clsRank(a) - clsRank(b));
@@ -496,19 +531,21 @@ window.FF = window.FF || {};
   function dispatchSection(c) {
     const rows = c.team.all.filter((a) => num(a.sugVc4) || num(a.sugComm) || num(a.sugVc4Gross) || num(a.sugCommGross) || num(a.stockTotal));
     if (rows.length < 2) return '';
-    const list = rows.slice().sort((a, b) => (num(b.sugVc4) + num(b.sugComm)) - (num(a.sugVc4) + num(a.sugComm)) || b.stockTotal - a.stockTotal);
+    const list = rows.slice().sort((a, b) => (num(b.sugVc4) + num(b.sugComm)) - (num(a.sugVc4) + num(a.sugComm)) || num(b.stockTotal) - num(a.stockTotal));
     const s = (k) => sumBy(list, k);
+    const listStockKnown = list.every((a) => a.stockAvailable !== false);
+    const listClassKnown = list.every((a) => a.stockClassAvailable !== false);
     return sec('ab-dispatch', `🚚 Kis agent ko kitna dispatch chahiye · ${fmt(c.days)} din`, `
       <div class="table-wrap"><table class="tbl compact ab-tbl">
         <thead><tr><th>Agent</th><th class="num">VC4 stock</th><th class="num">Comm stock</th><th class="num">Sug VC4 <small>after stock</small></th><th class="num">Sug Comm <small>after stock</small></th><th class="num">W/o stock VC4</th><th class="num">W/o stock Comm</th><th class="num">Total sugg.</th></tr></thead>
         <tbody>${list.map((a) => `<tr class="clickable${a.isSelf ? ' ab-self' : ''}"${openAttr(a.name, kindFor(c.ch, a.isSelf ? true : false), a.id)}>
           <td class="ab-cellname"><b>${esc(a.name)}</b>${a.isSelf ? ' <span class="ab-tag">👤 own</span>' : ''} ${badge(a.priority)}</td>
-          <td class="num">${fmt(a.stockVc4)}</td><td class="num">${fmt(a.stockComm)}</td>
-          <td class="num"><b>${fmt(a.sugVc4)}</b></td><td class="num"><b>${fmt(a.sugComm)}</b></td>
+          <td class="num">${stockFmt(a.stockVc4, a.stockClassAvailable)}</td><td class="num">${stockFmt(a.stockComm, a.stockClassAvailable)}</td>
+          <td class="num"><b>${stockFmt(a.sugVc4, a.stockClassAvailable)}</b></td><td class="num"><b>${stockFmt(a.sugComm, a.stockClassAvailable)}</b></td>
           <td class="num dim">${fmt(a.sugVc4Gross)}</td><td class="num dim">${fmt(a.sugCommGross)}</td>
-          <td class="num"><b>${fmt(num(a.sugVc4) + num(a.sugComm))}</b></td></tr>`).join('')}</tbody>
-        <tfoot><tr class="row-total"><td><b>Total (${fmt(list.length)})</b></td><td class="num">${fmt(s('stockVc4'))}</td><td class="num">${fmt(s('stockComm'))}</td><td class="num"><b>${fmt(s('sugVc4'))}</b></td><td class="num"><b>${fmt(s('sugComm'))}</b></td><td class="num">${fmt(s('sugVc4Gross'))}</td><td class="num">${fmt(s('sugCommGross'))}</td><td class="num"><b>${fmt(s('sugVc4') + s('sugComm'))}</b></td></tr></tfoot></table></div>
-      <p class="ab-mini">„After stock“ = run-rate × ${fmt(c.days)} din − agent ka apna stock · „W/o stock“ = bina ghataaye (gross).</p>`);
+          <td class="num"><b>${stockFmt(num(a.sugVc4) + num(a.sugComm), a.stockClassAvailable)}</b></td></tr>`).join('')}</tbody>
+        <tfoot><tr class="row-total"><td><b>Total (${fmt(list.length)})</b></td><td class="num">${stockFmt(s('stockVc4'), listStockKnown && listClassKnown)}</td><td class="num">${stockFmt(s('stockComm'), listStockKnown && listClassKnown)}</td><td class="num"><b>${stockFmt(s('sugVc4'), listClassKnown)}</b></td><td class="num"><b>${stockFmt(s('sugComm'), listClassKnown)}</b></td><td class="num">${fmt(s('sugVc4Gross'))}</td><td class="num">${fmt(s('sugCommGross'))}</td><td class="num"><b>${stockFmt(s('sugVc4') + s('sugComm'), listClassKnown)}</b></td></tr></tfoot></table></div>
+      <p class="ab-mini">„After stock“ = run-rate × ${fmt(c.days)} din − agent ka apna stock · „W/o stock“ = bina ghataaye (gross).${!listStockKnown ? ' Tag Assignment stock unavailable; GV REPORT stock snapshots suppressed.' : !listClassKnown ? ' Tag Assignment class split unavailable; after-stock estimates hidden.' : ''}</p>`);
   }
 
   /** 8 · charts — class split, last vs MTD, stock donut (agent + TL). */
@@ -521,7 +558,14 @@ window.FF = window.FF || {};
     if (mine.length) {
       blocks.push(`<div class="ab-chart-card"><h5>${c.tlView ? 'TL' : 'Agent'} MTD class split · ${esc(c.row.name)}</h5>${C.bars({ labels: mine.map((x) => classLabel(x.cls)), height: 170, series: [{ name: 'MTD', values: mine.map((x) => num(x.cur)), color: '#0d9488' }], showValues: true, onClickAttr: (i) => kpiAttr(spec(mine[i].cls, 'mtd', c.tlView ? 'tl' : 'agent'), `${c.row.name} · ${mine[i].cls} MTD`) })}</div>`);
       blocks.push(`<div class="ab-chart-card"><h5>Last (${esc(c.ymLastLabel)}) vs MTD (${esc(c.ymCurLabel)})</h5>${C.bars({ labels: mine.map((x) => classLabel(x.cls)), height: 170, series: [{ name: `Last ${c.ymLastLabel}`, values: mine.map((x) => num(x.last)), color: '#c7d2fe' }, { name: `MTD ${c.ymCurLabel}`, values: mine.map((x) => num(x.cur)), color: '#6366f1' }], legendAlways: true, onClickAttr: (i) => kpiAttr(spec(mine[i].cls, 'mtd', c.tlView ? 'tl' : 'agent'), `${c.row.name} · ${mine[i].cls}`) })}</div>`);
-      if (C.donut) blocks.push(`<div class="ab-chart-card"><h5>Stock by class · ${esc(c.row.name)}</h5>${C.donut({ items: mine.filter((x) => num(x.stock)).map((x) => ({ label: classLabel(x.cls), value: num(x.stock), attr: kpiAttr(spec(x.cls, 'stock', c.tlView ? 'tl' : 'agent'), `${c.row.name} · ${x.cls} stock`) })), subtitle: 'stock' })}</div>`);
+      if (C.donut) {
+        const stockChart = c.row.stockAvailable === false
+          ? '<p class="ab-mini">Tag Assignment stock unavailable — GV REPORT snapshot se chart nahi banaya gaya.</p>'
+          : c.row.stockClassAvailable === false
+            ? '<p class="ab-mini">Tag Assignment class split unavailable — stock chart hidden.</p>'
+            : C.donut({ items: mine.filter((x) => num(x.stock)).map((x) => ({ label: classLabel(x.cls), value: num(x.stock), attr: kpiAttr(spec(x.cls, 'stock', c.tlView ? 'tl' : 'agent'), `${c.row.name} · ${x.cls} stock`) })), subtitle: 'stock' });
+        blocks.push(`<div class="ab-chart-card"><h5>Stock by class · ${esc(c.row.name)}</h5>${stockChart}</div>`);
+      }
     }
     if (!c.tlView && c.tlRow && c.tlRow.classes.length && C.bars) {
       const tc = c.tlRow.classes;
@@ -582,16 +626,22 @@ window.FF = window.FF || {};
     L.push('', `*Last month (${c.ymLastLabel})*: ${fmt(r.last.total)} (VC4 ${fmt(r.last.vc4)} · Comm ${fmt(r.last.comm)})`);
     L.push(`*Current month (${c.ymCurLabel})*: ${fmt(r.cur.total)} (VC4 ${fmt(r.cur.vc4)} · Comm ${fmt(r.cur.comm)})`);
     L.push(`Growth: ${r.growth === null || r.growth === undefined ? '—' : `${r.growth >= 0 ? '+' : ''}${Number(r.growth).toFixed(1)}%`} · Expected: ${fmt(r.proj)}`);
-    L.push(`Stock: ${fmt(r.stock.total)} (VC4 ${fmt(r.stock.vc4)} · Comm ${fmt(r.stock.comm)}) · Suggested dispatch (${c.days} din): VC4 ${fmt(r.dispatch.sugVc4)} · Comm ${fmt(r.dispatch.sugComm)}`);
+    L.push(r.stockAvailable === false
+      ? 'Stock: — (Tag Assignment unavailable; GV REPORT stock snapshot not shown) · Suggested dispatch after stock: —'
+      : `Stock: ${stockFmt(r.stock.total, true)} (VC4 ${stockFmt(r.stock.vc4, r.stockClassAvailable)} · Comm ${stockFmt(r.stock.comm, r.stockClassAvailable)}) · Suggested dispatch (${c.days} din): VC4 ${stockFmt(r.dispatch.sugVc4, r.stockClassAvailable)} · Comm ${stockFmt(r.dispatch.sugComm, r.stockClassAvailable)}`);
     if (t && !c.tlView) {
-      L.push('', `*TL ${t.name}* — last ${fmt(t.last.total)} · MTD ${fmt(t.cur.total)} · stock ${fmt(t.stock.total)} (own ${fmt(t.stockOwn)} + agents ${fmt(t.stockAgents)})`);
+      L.push('', t.stockAvailable === false
+        ? `*TL ${t.name}* — last ${fmt(t.last.total)} · MTD ${fmt(t.cur.total)} · stock Tag Assignment unavailable`
+        : t.stockBreakdownAvailable
+          ? `*TL ${t.name}* — last ${fmt(t.last.total)} · MTD ${fmt(t.cur.total)} · stock ${stockFmt(t.stock.total)} (own ${stockFmt(t.stockOwn)} + agents ${stockFmt(t.stockAgents)})`
+          : `*TL ${t.name}* — last ${fmt(t.last.total)} · MTD ${fmt(t.cur.total)} · Tag Assignment stock ${stockFmt(t.stock.total)}; holder breakdown unavailable`);
       L.push(`TL ke agents: ${fmt(c.team.agents.length)}`);
     }
     if (c.team.agents.length) {
       L.push('', `*TL ke saare agents (MTD · stock)*:`);
-      c.team.agents.slice().sort((a, b) => b.curTotal - a.curTotal).forEach((a) => L.push(`• ${a.name} — last ${fmt(a.lastTotal)} · MTD ${fmt(a.curTotal)} · stock ${fmt(a.stockTotal)} (VC4 ${fmt(a.stockVc4)} · Comm ${fmt(a.stockComm)})`));
+      c.team.agents.slice().sort((a, b) => b.curTotal - a.curTotal).forEach((a) => L.push(`• ${a.name} — last ${fmt(a.lastTotal)} · MTD ${fmt(a.curTotal)} · stock ${stockFmt(a.stockTotal, a.stockAvailable)} (VC4 ${stockFmt(a.stockVc4, a.stockClassAvailable)} · Comm ${stockFmt(a.stockComm, a.stockClassAvailable)})`));
     }
-    L.push('', `Class-wise (last · MTD · stock): ${r.classes.map((x) => `${classLabel(x.cls)} ${fmt(x.last)}·${fmt(x.cur)}·${fmt(x.stock)}`).join(' | ') || '—'}`);
+    L.push('', `Class-wise (last · MTD · stock): ${r.classes.map((x) => `${classLabel(x.cls)} ${fmt(x.last)}·${fmt(x.cur)}·${stockFmt(x.stock, r.stockClassAvailable)}`).join(' | ') || '—'}`);
     L.push('', 'Generated by First Forward & GV Partner Dashboard');
     return L.join('\n');
   }
@@ -665,7 +715,7 @@ window.FF = window.FF || {};
       subParts.push(`ID ${esc(row.id || person.sub || '—')}`);
       if (tlName) subParts.push(`TL <b>${esc(tlName)}</b>${row.tl.id ? ` (${esc(row.tl.id)})` : ''}${canContacts() && row.tl.mobile ? ` · 📞 <a href="tel:${esc(row.tl.mobile)}">${esc(row.tl.mobile)}</a>` : ''}`);
       if (tl && canContacts() && row.mobile) subParts.push(`📞 <a href="tel:${esc(row.mobile)}">${esc(row.mobile)}</a>`);
-      subParts.push(`Last <b>${fmt(row.last.total)}</b> · MTD <b>${fmt(row.cur.total)}</b> · Stock <b>${fmt(row.stock.total)}</b>`);
+      subParts.push(`Last <b>${fmt(row.last.total)}</b> · MTD <b>${fmt(row.cur.total)}</b> · Stock <b>${stockFmt(row.stock.total, row.stockAvailable)}</b>`);
       if (row.priority) subParts.push(`Priority <b>${esc(row.priority)}</b>`);
     }
     const age = tl

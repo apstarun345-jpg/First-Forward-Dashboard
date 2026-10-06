@@ -71,6 +71,7 @@ FF.pages = FF.pages || {};
     // 🌐 public (bina login)
     publicMode: false, publicCfg: null, done: null,
     status: { q: '', list: null, busy: false, err: '', searched: '' },
+    publicRequests: { filter: 'all', page: 1, pageSize: 20, pageCount: 0, total: 0, counts: null, requests: [], busy: false, error: '', loaded: false, at: 0, sequence: 0, promise: null },
     employeeHistoryFilter: 'all', employeeHistoryPage: 1, employeeHistoryOpen: false,
     // 🔁 submit se pehle duplicate check (wahi agent + class pehle se active?)
     dup: { list: [], force: false, busy: false },
@@ -941,6 +942,7 @@ body.colorful .from-hdr { color: #166534; }
     if (isPublic()) {
       if (state.view === 'done' && state.done) return renderDone();
       if (state.view === 'status') return renderStatus();
+      if (state.view === 'requests') return renderPublicRequests();
       return renderForm();
     }
     if (state.view === 'requests') return renderRequests();
@@ -955,8 +957,8 @@ body.colorful .from-hdr { color: #166534; }
   const tabsHtml = () => {
     const v = state.view === 'done' ? 'form' : state.view;
     const tab = (id, label) => `<button class="seg-btn ${v === id ? 'on' : ''}" data-tr-view="${id}">${label}</button>`;
-    // 🌐 Employee link: sirf Form + Status (Result tab hata diya — system check submit ke saath hota hai)
-    if (isPublic()) return `<div class="seg" id="tr-tabs">${tab('form', '📝 Form')}${tab('status', '🔎 Status')}</div>`;
+    // 🌐 Employee link: form + personal mobile/ID lookup + sabhi employees ki shared request list.
+    if (isPublic()) return `<div class="seg" id="tr-tabs">${tab('form', '📝 Form')}${tab('status', '🔎 Status')}${tab('requests', '📋 My Request')}</div>`;
     return `<div class="seg" id="tr-tabs">${tab('form', '📝 Form')}${tab('requests', isAdmin() ? '📥 Tag Requests' : '📥 Meri requests')}${isAdmin() ? tab('settings', '⚙️ Link & Sheet') : ''}</div>`;
   };
   function headHtml() {
@@ -998,7 +1000,7 @@ body.colorful .from-hdr { color: #166534; }
           body: `<div class="kd-sec">
             <label class="field" style="display:block"><span class="dim small">Link (copy karke bhejo)</span>
               <input class="input" id="tr-share-link" readonly style="width:100%" value="${esc(link)}"></label>
-            <p class="dim small">✅ Koi account nahi chahiye — employee apna <b>naam</b> likhta hai, phir har agent ka naam · mobile · address · pincode · class-wise qty bhar kar submit karta hai. Har agent ki request aapke <b>🏷️ Tag Request → 📥 Tag Requests</b> me alag row me aati hai ("🌐 employee link" badge). Agent apna status link ke <b>🔎 Status</b> tab me apne mobile number se dekh sakta hai.<br>
+            <p class="dim small">✅ Koi account nahi chahiye — employee apna <b>naam</b> likhta hai, phir har agent ka naam · mobile · address · pincode · class-wise qty bhar kar submit karta hai. Har agent ki request aapke <b>🏷️ Tag Request → 📥 Tag Requests</b> me alag row me aati hai ("🌐 employee link" badge). <b>🔎 Status</b> tab se apne mobile/Request ID par status dekho, aur <b>📋 My Request</b> tab par sabhi employees ki requests aur unke current status/date-time dekho.<br>
             Form band karna ho ya fields badalni ho → <b>⚙️ Link & Sheet</b> tab.</p>
             <div class="btn-row" style="margin-top:8px">
               <button class="btn primary" id="tr-share-copy">📋 Copy link</button>
@@ -1293,12 +1295,17 @@ body.colorful .from-hdr { color: #166534; }
     const s = row && row.suggest;
     if (!s) return '';
     const sm = clean(s.mobile), sa = clean(s.address), sp = clean(s.pincode);
-    if (!sm && !sa && !sp) return '';
+    const lastAt = s.lastRequestAt || '';
+    if (!sm && !sa && !sp && !lastAt) return '';
     const differs = (a, b) => clean(a) && norm(a) !== norm(b);
-    if (!(differs(sm, row.mobile) || differs(sa, row.address) || differs(sp, row.pincode))) return '';
+    const canFill = differs(sm, row.mobile) || differs(sa, row.address) || differs(sp, row.pincode);
     const bits = [sm ? `📱 ${esc(sm)}` : '', sa ? `🏠 ${esc(sa)}` : '', sp ? `📮 ${esc(sp)}` : ''].filter(Boolean).join(' · ');
-    return `<div class="tr-contact-suggest"><span class="tr-cs-label dim small">📇 ${esc(s.source === 'Address' ? 'Address book' : 'Pichli request')} se purana address mila —</span>
-      <button type="button" class="btn small tr-cs-fill" data-tr-fill-old="${esc(row.id)}" title="Purana mobile · address · pincode bhar do">${bits}</button></div>`;
+    const when = lastAt ? `<small class="tr-cs-last dim">🕒 Last request: ${esc(longDate(lastAt))} · ${esc(timeLabelShort(lastAt))}</small>` : '';
+    const suggestion = bits
+      ? `<span class="tr-cs-label dim small">📇 ${esc(s.source === 'Address' ? 'Address book' : 'Pichli request')} se purana address mila —</span>${canFill ? `<button type="button" class="btn small tr-cs-fill" data-tr-fill-old="${esc(row.id)}" title="Purana mobile · address · pincode bhar do">${bits}</button>` : ''}`
+      : '<span class="tr-cs-label dim small">📇 Is agent ki pehle ki request mili.</span>';
+    if (!canFill && !lastAt) return '';
+    return `<div class="tr-contact-suggest">${suggestion}${when}</div>`;
   }
   /** Sirf chip slot update karo — poora card dobara banane se typing ka focus toot jaata. */
   function refreshContactSuggest(row) {
@@ -1450,7 +1457,7 @@ body.colorful .from-hdr { color: #166534; }
     {
       const saved = agentBook()[`${rec.channel}|${norm(rec.name)}`];
       if (saved && (saved.mobile || saved.address || saved.pincode)) {
-        row.suggest = { mobile: clean(saved.mobile), address: clean(saved.address), pincode: clean(saved.pincode), source: 'Request' };
+        row.suggest = { mobile: clean(saved.mobile), address: clean(saved.address), pincode: clean(saved.pincode), lastRequestAt: saved.lastRequestAt || saved.at || '', source: 'Request' };
         if (!digits(row.mobile) && !clean(row.address)) {
           row.mobile = saved.mobile || ''; row.address = saved.address || ''; row.pincode = saved.pincode || ''; row.fromBook = true;
         }
@@ -1469,7 +1476,7 @@ body.colorful .from-hdr { color: #166534; }
        if (!contact) return;
        // 📇 Purana address chip me hamesha dikhao — employee ne pehle kuch type kiya ho tab bhi, taaki
        // purana address dekh kar ek click me bhar sake. Auto-fill sirf khaali fields me (chup-chaap overwrite nahi).
-       row.suggest = { mobile: clean(contact.mobile), address: clean(contact.address), pincode: clean(contact.pincode), source: contact.source || 'Address' };
+       row.suggest = { mobile: clean(contact.mobile), address: clean(contact.address), pincode: clean(contact.pincode), lastRequestAt: contact.lastRequestAt || '', source: contact.source || 'Address' };
        let changed = false;
        if (!row.contactManual) {
          if (!clean(row.mobile) && clean(contact.mobile)) { row.mobile = contact.mobile; changed = true; }
@@ -1864,9 +1871,58 @@ body.colorful .from-hdr { color: #166534; }
       <div class="tr-st-top"><span class="badge ${v.tone}">${v.label}</span><b class="tr-st-agent">${esc(s.agentName || '—')}</b>${s.agents > 1 ? `<small class="dim"> +${s.agents - 1} agents</small>` : ''}<span class="tr-st-total"><b>${fmt(s.total)}</b> tags</span></div>
       ${steps}
       ${cls ? `<div class="tr-st-classes">${cls}</div>` : ''}
-      <div class="dim small">📅 ${esc(longDate(s.at))} · ${esc(ago(s.at))}${s.byName ? ` · 👤 entry: ${esc(s.byName)}` : ''} · <span class="mono">${esc(s.id)}</span>${s.sheetSynced ? ' · 📗 sheet entry' : ''}</div>
+      <div class="dim small">📅 ${esc(longDate(s.at))} · 🕒 ${esc(timeLabelShort(s.at))} · ${esc(ago(s.at))}${s.employeeName ? ` · 👤 employee: ${esc(s.employeeName)}` : s.byName ? ` · 👤 entry: ${esc(s.byName)}` : ''} · <span class="mono">${esc(s.id)}</span>${s.sheetSynced ? ' · 📗 sheet entry' : ''}</div>
       ${s.adminNote ? `<div class="notice green" style="margin-top:8px">💬 Admin note: ${esc(s.adminNote)}</div>` : ''}
     </div>`;
+  }
+  function publicRequestCardHtml(s) {
+    const v = STATUS[s.status] || STATUS.pending;
+    const classes = (s.classes || []).map((c) => {
+      const changed = num(c.requested) !== num(c.approved) && (s.status !== 'pending' || num(c.requested));
+      return `<span class="tr-st-cls"><b>${esc(c.cls)}</b> ${changed ? `<s class="dim">${fmt(c.requested)}</s> → <b>${fmt(c.approved)}</b>` : fmt(c.approved)}${c.agent ? ` <small class="dim">${esc(c.agent)}</small>` : ''}</span>`;
+    }).join('');
+    return `<article class="tr-st-card st-${esc(s.status || 'pending')} tr-public-request-card">
+      <div class="tr-st-top"><span class="badge ${v.tone}">${v.label}</span><b class="tr-st-agent">${esc(s.employeeName || 'Employee')}</b><small class="dim">employee</small><span class="tr-st-total"><b>${fmt(s.total)}</b> tags</span></div>
+      <div class="tr-public-request-agent">${esc(s.agentName || 'Agent details unavailable')}${s.agents > 1 ? ` <small class="dim">+${fmt(s.agents - 1)} agents</small>` : ''}</div>
+      ${classes ? `<div class="tr-st-classes">${classes}</div>` : ''}
+      <div class="dim small">📅 ${esc(longDate(s.at))} · 🕒 ${esc(timeLabelShort(s.at))} · <span class="mono">Request #${esc(s.id)}</span></div>
+    </article>`;
+  }
+  function publicRequestFiltersHtml(counts, selected) {
+    const summary = counts || {};
+    return `<div class="tr-emp-filters tr-public-request-filters" role="group" aria-label="All employees request status filter">${EMPLOYEE_STATUS_FILTERS.map((item) => {
+      const active = item.key === selected;
+      const raw = summary[item.count];
+      const count = raw !== undefined && Number.isFinite(Number(raw)) ? Math.max(0, Number(raw)) : 0;
+      return `<button type="button" class="tr-emp-filter tr-emp-filter-${item.key}${active ? ' on' : ''}" data-tr-all-filter="${item.key}" aria-pressed="${active}"><span>${item.label}</span><b>${fmt(count)}</b></button>`;
+    }).join('')}</div>`;
+  }
+  function publicRequestsPageHtml(s) {
+    const stateView = s || {};
+    const filter = EMPLOYEE_STATUS_FILTERS.some((x) => x.key === stateView.filter) ? stateView.filter : 'all';
+    const total = Math.max(0, Number(stateView.total) || 0);
+    const page = Math.max(1, Number(stateView.page) || 1);
+    const pageCount = Math.max(1, Number(stateView.pageCount) || 0);
+    const pageSize = Math.max(1, Number(stateView.pageSize) || 20);
+    const start = total ? (page - 1) * pageSize + 1 : 0;
+    const end = Math.min(page * pageSize, total);
+    const requests = Array.isArray(stateView.requests) ? stateView.requests : [];
+    const list = requests.length
+      ? `<div class="tr-st-list">${requests.map(publicRequestCardHtml).join('')}</div>`
+      : stateView.busy ? '<div class="tr-status-out">All employees ki requests load ho rahi hain…</div>'
+        : `<div class="tr-status-out">${total ? 'Is status me koi request nahi mili.' : 'Abhi tak koi Tag Request nahi mili.'}</div>`;
+    return `<section class="card tr-public-requests-card"><div class="card-head"><div><h3>📋 My Request · All employees</h3><small class="dim">Har employee ki Tag Request aur uska current status · nayi request sabse upar</small></div><button type="button" class="btn small" data-tr-all-refresh ${stateView.busy ? 'disabled' : ''}>${stateView.busy ? '⏳ Loading…' : '↻ Refresh'}</button></div>
+      <div class="card-body">
+        ${publicRequestFiltersHtml(stateView.counts, filter)}
+        ${stateView.error ? `<div class="notice amber" style="margin:10px 0">⚠️ ${esc(stateView.error)} <button type="button" class="btn small" data-tr-all-retry>Retry</button></div>` : ''}
+        <div class="tr-emp-history-head"><span>📋 ${fmt(Number((stateView.counts || {}).totalRequests) || 0)} total requests</span><b>${fmt(start)}–${fmt(end)} / ${fmt(total)}</b></div>
+        ${list}
+        <nav class="tr-emp-pagination" aria-label="All employee request pages">
+          <button type="button" class="btn small" data-tr-all-page="prev" ${page <= 1 || stateView.busy ? 'disabled' : ''}>← Previous</button>
+          <span>Page ${fmt(page)} of ${fmt(pageCount)}</span>
+          <button type="button" class="btn small" data-tr-all-page="next" ${page >= pageCount || stateView.busy ? 'disabled' : ''}>Next →</button>
+        </nav>
+      </div></section>`;
   }
   function employeeStatusPage(summary, filter, requestedPage) {
     const requests = Array.isArray(summary && summary.requests) ? summary.requests : [];
@@ -2050,6 +2106,63 @@ body.colorful .from-hdr { color: #166534; }
     if (inp) inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') find(); });
     // Done screen / duplicate card se aaye → seedha search
     if (st.q && !st.list && !st.busy && !st.err && !st.searched && st.autoDone !== st.q) { st.autoDone = st.q; find(); }
+  }
+
+  function loadPublicRequests(force) {
+    const s = state.publicRequests;
+    if (!isPublic()) return Promise.resolve(null);
+    if (!force && s.busy && s.promise) return s.promise;
+    if (!force && s.loaded && Date.now() - s.at < 30e3) return Promise.resolve(s);
+    const sequence = ++s.sequence;
+    const filter = EMPLOYEE_STATUS_FILTERS.some((x) => x.key === s.filter) ? s.filter : 'all';
+    const page = Math.max(1, Number(s.page) || 1);
+    const params = new URLSearchParams({ status: filter, page: String(page), pageSize: String(s.pageSize || 20) });
+    s.busy = true; s.error = '';
+    if (rootEl && rootEl.isConnected && state.view === 'requests') renderPublicRequests();
+    const request = publicApi('/api/public/tag-request/requests?' + params.toString()).then((out) => {
+      if (sequence !== s.sequence) return s;
+      s.requests = Array.isArray(out && out.requests) ? out.requests : [];
+      s.counts = out || {};
+      s.total = Math.max(0, Number(out && out.total) || 0);
+      s.page = Math.max(1, Number(out && out.page) || page);
+      s.pageSize = Math.max(1, Number(out && out.pageSize) || s.pageSize || 20);
+      s.pageCount = Math.max(0, Number(out && out.pageCount) || 0);
+      s.loaded = true; s.at = Date.now();
+      return s;
+    }).catch((err) => {
+      if (sequence === s.sequence) {
+        s.error = (err && err.message) || 'Request list load nahi hui.';
+        s.loaded = true; s.at = Date.now();
+      }
+      return null;
+    }).finally(() => {
+      if (sequence !== s.sequence) return;
+      s.busy = false; s.promise = null;
+      if (rootEl && rootEl.isConnected && state.view === 'requests') renderPublicRequests();
+    });
+    s.promise = request;
+    return request;
+  }
+  function renderPublicRequests() {
+    const body = bodyEl();
+    if (!body) return;
+    const s = state.publicRequests;
+    body.innerHTML = publicRequestsPageHtml(s);
+    body.querySelectorAll('[data-tr-all-filter]').forEach((button) => button.addEventListener('click', () => {
+      const filter = button.dataset.trAllFilter || 'all';
+      if (filter === s.filter) return;
+      s.filter = filter; s.page = 1; s.requests = []; s.total = 0; s.pageCount = 0; s.loaded = false; s.at = 0;
+      loadPublicRequests(true);
+    }));
+    body.querySelectorAll('[data-tr-all-page]').forEach((button) => button.addEventListener('click', () => {
+      if (button.disabled) return;
+      const delta = button.dataset.trAllPage === 'next' ? 1 : -1;
+      s.page = Math.max(1, Math.min(Math.max(1, s.pageCount), s.page + delta));
+      s.requests = []; s.total = 0; s.loaded = false; s.at = 0;
+      loadPublicRequests(true);
+    }));
+    body.querySelectorAll('[data-tr-all-refresh],[data-tr-all-retry]').forEach((button) => button.addEventListener('click', () => loadPublicRequests(true)));
+    if (!s.loaded && !s.busy) loadPublicRequests(false);
   }
 
   // ---- 📥 requests table (admin / apni) — har agent ki request EK ROW me ------------------------------
@@ -2935,7 +3048,7 @@ body.colorful .from-hdr { color: #166534; }
     loadEmployee();
     loadCourier();
     if (!state.publicMode && !clean(state.employee.name)) state.employee.name = (FF.auth && FF.auth.user && (FF.auth.user.name || FF.auth.user.username)) || '';
-    const views = state.publicMode ? ['form', 'status', 'done'] : ['form', 'requests', 'settings'];
+    const views = state.publicMode ? ['form', 'status', 'requests', 'done'] : ['form', 'requests', 'settings'];
     if (params && params.view) {
       const v = params.view === 'result' ? 'form' : String(params.view); // purana "Result" tab ab form me hi
       if (views.includes(v)) state.view = v;
@@ -3012,7 +3125,8 @@ body.colorful .from-hdr { color: #166534; }
     _test: {
       displayRows, reqRowHtml: (dr) => reqRowHtml(dr), metricCellsHtml, metricNumbers, hintText, agentGroupSummaryHtml, channelFilterHtml, requestsShellHtml, agentKeyOf, labelItem, contactOf,
       employeeStatusPage, employeeStatusFiltersHtml, employeeStatusHistoryHtml,
-      employeeHistoryInnerHtml, employeeHistoryChipsHtml, employeeHistoryPanelHtml, contactSuggestHtml,
+      employeeHistoryInnerHtml, employeeHistoryChipsHtml, employeeHistoryPanelHtml, contactSuggestHtml, suggestHistoricalContact,
+      tabsHtml, publicRequestCardHtml, publicRequestFiltersHtml, publicRequestsPageHtml,
       recTotals, suggestItems, suggestHtml, stockBoardHtml, stockBoardTableHtml, stockBoardRows, stockBoardChipsHtml,
       classBreakdownRows, classBreakdownHtml, tlPanelHtml, findTlRecord, courierOptions, requestColumnCount,
       setIndex: (idx) => { state.index = idx || null; },

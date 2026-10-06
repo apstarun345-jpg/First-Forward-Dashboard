@@ -66,17 +66,20 @@ window.FF = window.FF || {};
   const cellHtml = (value, spec, title) => (spec
     ? `<td class="num sr-drill" data-kpi="${esc(spec)}" role="button" tabindex="0" title="${esc(title || 'Detail kholo')}">${fmt(value)}</td>`
     : `<td class="num">${fmt(value)}</td>`);
-  const sumCell = (a, b) => `<td class="num sr-sum"><b>${fmt(num(a) + num(b))}</b></td>`;
+  const sumCell = (a, b, available = true) => `<td class="num sr-sum"><b>${available ? fmt(num(a) + num(b)) : '—'}</b></td>`;
   const missCell = '<td class="num dim" title="Is channel me ye naam nahi mila">—</td>';
+  const unavailableCell = '<td class="num dim" title="Tag Assignment stock unavailable">—</td>';
+  const hasValue = (value) => value !== null && value !== undefined && Number.isFinite(Number(value));
 
-  /** ek metric row: ff / gv numbers (clickable) + jod. `get(pr)` → number · `spec(pr)` → drill spec. */
+  /** ek metric row: ff / gv numbers (clickable) + jod. `get(pr)` → number ya unavailable. */
   function metricRow(label, prs, get, spec, opts) {
     const o = opts || {};
     const f = prs.ff, g = prs.gv;
-    const fv = f ? num(get(f)) : 0, gvv = g ? num(get(g)) : 0;
-    const f1 = f ? cellHtml(fv, spec ? spec(f) : '', `${CH.ff.label} · ${label}`) : missCell;
-    const g1 = g ? cellHtml(gvv, spec ? spec(g) : '', `${CH.gv.label} · ${label}`) : missCell;
-    return `<tr${o.cls ? ` class="${o.cls}"` : ''}><td>${o.indent ? '<span class="sr-ind"></span>' : ''}${o.strong ? `<b>${label}</b>` : label}</td>${f1}${g1}${sumCell(fv, gvv)}</tr>`;
+    const fv = f ? get(f) : 0, gvv = g ? get(g) : 0;
+    const f1 = !f ? missCell : hasValue(fv) ? cellHtml(Number(fv), spec ? spec(f) : '', `${CH.ff.label} · ${label}`) : unavailableCell;
+    const g1 = !g ? missCell : hasValue(gvv) ? cellHtml(Number(gvv), spec ? spec(g) : '', `${CH.gv.label} · ${label}`) : unavailableCell;
+    const combinedAvailable = (!f || hasValue(fv)) && (!g || hasValue(gvv));
+    return `<tr${o.cls ? ` class="${o.cls}"` : ''}><td>${o.indent ? '<span class="sr-ind"></span>' : ''}${o.strong ? `<b>${label}</b>` : label}</td>${f1}${g1}${sumCell(fv, gvv, combinedAvailable)}</tr>`;
   }
   function sectionRow(text) { return `<tr class="sr-sec"><td colspan="4">${text}</td></tr>`; }
 
@@ -95,7 +98,12 @@ window.FF = window.FF || {};
     const lastLbl = [f ? `${CH.ff.icon} ${monthLabel(mf.last)}` : '', v ? `${CH.gv.icon} ${monthLabel(mg.last)}` : ''].filter(Boolean).join(' · ');
     const curLbl = [f ? `${CH.ff.icon} ${monthLabel(mf.cur)}` : '', v ? `${CH.gv.icon} ${monthLabel(mg.cur)}` : ''].filter(Boolean).join(' · ');
     const T = (pr, k) => num((pr.totals || {})[k]);
-    const S = (pr, k) => num((pr.stock || {})[k]);
+    const S = (pr, k) => {
+      if (pr && pr.stockAvailable === false) return null;
+      if (pr && k !== 'total' && pr.stockClassAvailable === false) return null;
+      const value = (pr && pr.stock || {})[k];
+      return hasValue(value) ? Number(value) : null;
+    };
     const hasTlStock = (pr) => pr.tlStock && (pr.tlStock.has || isTlKind(pr.kind));
     const tlSpec = (pr, part) => (isTlKind(pr.kind) ? `src=${pr.ch}&scope=stock&tl=${encodeURIComponent(pr.name)}${part ? `&part=${part}` : ''}`
       : (pr.tl && pr.tl.name ? `src=${pr.ch}&scope=stock&tl=${encodeURIComponent(pr.tl.name)}${part ? `&part=${part}` : ''}` : ''));
@@ -138,16 +146,26 @@ window.FF = window.FF || {};
     const cf = classMapOf(f), cg = classMapOf(v);
     const classes = [...new Set([...cf.keys(), ...cg.keys()])].sort((a, b) => clsRank(a) - clsRank(b) || a.localeCompare(b));
     const val = (map, c, k) => (map.get(c) ? num(map.get(c)[k]) : 0);
+    const stockClassAvailableFor = (pr) => !pr || (pr.stockAvailable !== false && pr.stockClassAvailable !== false);
     const classCell = (pr, map, c, k, which) => {
       if (!pr) return missCell;
+      if (which === 'stock' && !stockClassAvailableFor(pr)) return unavailableCell;
       const n = val(map, c, k);
       if (!n) return '<td class="num dim">·</td>';
       const scope = which === 'stock' ? 'stock' : which;
       return cellHtml(n, specOf(pr, scope, `&cls=${encodeURIComponent(c)}`), `${pr.channel} · ${c}`);
     };
-    const classBody = classes.map((c) => `<tr><td><b>${esc(c)}</b></td>${classCell(f, cf, c, 'last', 'month')}${classCell(v, cg, c, 'last', 'month')}${classCell(f, cf, c, 'cur', 'mtd')}${classCell(v, cg, c, 'cur', 'mtd')}${classCell(f, cf, c, 'stock', 'stock')}${classCell(v, cg, c, 'stock', 'stock')}<td class="num sr-sum"><b>${fmt(val(cf, c, 'stock') + val(cg, c, 'stock'))}</b></td></tr>`).join('');
+    const classBody = classes.map((c) => {
+      const stockF = f ? (stockClassAvailableFor(f) ? val(cf, c, 'stock') : null) : 0;
+      const stockG = v ? (stockClassAvailableFor(v) ? val(cg, c, 'stock') : null) : 0;
+      const stockSum = stockF === null || stockG === null ? '—' : fmt(stockF + stockG);
+      return `<tr><td><b>${esc(c)}</b></td>${classCell(f, cf, c, 'last', 'month')}${classCell(v, cg, c, 'last', 'month')}${classCell(f, cf, c, 'cur', 'mtd')}${classCell(v, cg, c, 'cur', 'mtd')}${classCell(f, cf, c, 'stock', 'stock')}${classCell(v, cg, c, 'stock', 'stock')}<td class="num sr-sum"><b>${stockSum}</b></td></tr>`;
+    }).join('');
     const colSum = (map, k) => U.sum(classes, (c) => val(map, c, k));
-    const classFoot = `<tr class="row-total"><td>Total</td><td class="num">${fmt(colSum(cf, 'last'))}</td><td class="num">${fmt(colSum(cg, 'last'))}</td><td class="num">${fmt(colSum(cf, 'cur'))}</td><td class="num">${fmt(colSum(cg, 'cur'))}</td><td class="num">${fmt(colSum(cf, 'stock'))}</td><td class="num">${fmt(colSum(cg, 'stock'))}</td><td class="num sr-sum"><b>${fmt(colSum(cf, 'stock') + colSum(cg, 'stock'))}</b></td></tr>`;
+    const fStockTotal = f ? (stockClassAvailableFor(f) ? colSum(cf, 'stock') : null) : 0;
+    const gStockTotal = v ? (stockClassAvailableFor(v) ? colSum(cg, 'stock') : null) : 0;
+    const allStockTotal = fStockTotal === null || gStockTotal === null ? '—' : fmt(fStockTotal + gStockTotal);
+    const classFoot = `<tr class="row-total"><td>Total</td><td class="num">${fmt(colSum(cf, 'last'))}</td><td class="num">${fmt(colSum(cg, 'last'))}</td><td class="num">${fmt(colSum(cf, 'cur'))}</td><td class="num">${fmt(colSum(cg, 'cur'))}</td><td class="num">${fStockTotal === null ? '—' : fmt(fStockTotal)}</td><td class="num">${gStockTotal === null ? '—' : fmt(gStockTotal)}</td><td class="num sr-sum"><b>${allStockTotal}</b></td></tr>`;
     const classTable = classes.length
       ? `<div class="table-wrap"><table class="tbl compact sr-tbl"><thead><tr><th rowspan="2">Class</th><th colspan="2" class="num">⏮ Last month</th><th colspan="2" class="num">▶ Current</th><th colspan="3" class="num">📦 Stock</th></tr><tr><th class="num">${CH.ff.icon} FF</th><th class="num">${CH.gv.icon} GV</th><th class="num">${CH.ff.icon} FF</th><th class="num">${CH.gv.icon} GV</th><th class="num">${CH.ff.icon} FF</th><th class="num">${CH.gv.icon} GV</th><th class="num">⚖ Total</th></tr></thead><tbody>${classBody}</tbody><tfoot>${classFoot}</tfoot></table></div>`
       : '<p class="dim small">Class-wise data abhi load nahi hua.</p>';
@@ -159,6 +177,13 @@ window.FF = window.FF || {};
       ${mainTable}
       <h4 class="sr-h">🎯 Class-wise — last month · current · stock</h4>${classTable}
       <div class="sr-open-row">${open('ff')}${open('gv')}</div></div>`;
+  }
+
+  function channelChoiceHtml(g) {
+    const chans = channelsOf(g);
+    if (chans.length > 1) return '<div class="sr-channel-note"><b>⚖ Is naam ka match FF aur GV dono me mila.</b> Neeche First Forward ya GV Partner chuno; Compare view dono ko alag columns me rakhta hai.</div>';
+    if (!chans.length) return '';
+    return `<div class="sr-channel-note"><b>${CH[chans[0]].icon} Sirf ${CH[chans[0]].label} match mila.</b> Neeche isi channel ka data dikh raha hai.</div>`;
   }
 
   // ------------------------------------------------------------------ the component
@@ -185,10 +210,12 @@ window.FF = window.FF || {};
     const chans = channelsOf(g);
     if (!chans.length) return null;
     const tabs = chans.length > 1 ? ['both', ...chans] : [chans[0]];
-    const tabLabel = (t) => (t === 'both' ? '⚖ FF + GV' : `${CH[t].icon} ${CH[t].label} <small>${roleOf(g[t].kind)}</small>`);
+    const tabLabel = (t) => (t === 'both' ? '⚖ Compare FF + GV' : `${CH[t].icon} ${CH[t].label} <small>${roleOf(g[t].kind)}</small>`);
     const sub = chans.map((c) => `${CH[c].icon} ${CH[c].label} · ${roleOf(g[c].kind)}${g[c].sub ? ` ${esc(g[c].sub)}` : ''}`).join('  |  ');
+    const choiceNote = channelChoiceHtml(g);
     slot.innerHTML = `<div class="sr" data-sr-key="${esc(groupKey(g))}">
       <div class="sr-head"><span class="ms-avatar">${esc(String(g.name).slice(0, 1).toUpperCase())}</span><div class="sr-id"><b>${esc(g.name)}</b><small>${sub}</small></div></div>
+      ${choiceNote}
       <div class="sr-tabs" role="tablist" aria-label="Channel">${tabs.map((t) => `<button type="button" role="tab" class="sr-tab" data-sr-tab="${t}">${tabLabel(t)}</button>`).join('')}</div>
       ${tabs.map((t) => `<div class="sr-pane" data-sr-pane="${t}" role="tabpanel" hidden></div>`).join('')}
     </div>`;
@@ -213,5 +240,5 @@ window.FF = window.FF || {};
     return { show };
   }
 
-  FF.searchReport = { groupPeople, render, combinedHtml, groupKey, channelsOf };
+  FF.searchReport = { groupPeople, render, combinedHtml, groupKey, channelsOf, channelChoiceHtml };
 })(window.FF);

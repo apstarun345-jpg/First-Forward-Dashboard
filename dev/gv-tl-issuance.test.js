@@ -48,7 +48,7 @@ test('GV REPORT parser retains explicit zero and distinguishes it from a blank T
   }
 });
 
-test('GV TL profile uses deduplicated GV REPORT totals; colored cards show ledger class groups and projections', async () => {
+test('GV TL issuance stays GV REPORT-authoritative while stock is unavailable without Tag Assignment', async () => {
   const stock = { daily: [], agentClass: [], agents: [], stockAgents: [] };
   FF.store.get = (key) => stock[key] || [];
   FF.store.need = async (key) => stock[key] || [];
@@ -93,16 +93,23 @@ test('GV TL profile uses deduplicated GV REPORT totals; colored cards show ledge
   assert.equal(profile.classes.reduce((sum, row) => sum + row.cur, 0), 15, 'detailed class rows are not padded to hide the snapshot gap');
   assert.equal(profile.issuanceSources.cur, 'GV REPORT · TL Current Month Issuance');
   assert.equal(profile.issuanceSources.classes, 'GV Master / EIR');
-  assert.equal(profile.issuanceSources.stock, 'GV REPORT TL stock snapshot / Tag Assignment');
+  assert.equal(profile.issuanceSources.stock, 'Tag Assignment unavailable');
+  assert.equal(profile.stockSource, 'Tag Assignment unavailable');
+  assert.equal(profile.stockAvailable, false);
+  assert.equal(profile.stock.total, null, 'GV REPORT stock snapshot must not become a displayed stock total');
+  assert.equal(profile.tlStock.has, false);
 
   const row = MP.reportDataRow(person);
   assert.equal(row.cur, 17, 'Home search uses the same TL snapshot as profile');
   assert.equal(row.last, 11);
+  assert.equal(row.stock, null, 'search/report rows preserve unavailable Tag Assignment stock');
+  assert.equal(row.stockAvailable, false);
   assert.equal(row.issuance.current.expected, U.projectMonthEnd(17, row.issuance.runRateDays, ym));
   const cards = MP.issuanceCardsHtml(row.issuance);
   for (const label of ['Last month', 'Current month', 'VC4', 'VC20', 'VC5+', 'Expected in month']) assert.ok(cards.includes(label), `${label} card / projection missing`);
   assert.match(cards, /GV REPORT[^<]*TL Current Month Issuance/);
-  assert.match(cards, /stock: <b>GV REPORT TL stock snapshot \/ Tag Assignment<\/b>/);
+  assert.match(cards, /stock: <b>Tag Assignment unavailable<\/b>/);
+  assert.doesNotMatch(cards, /stock: <b>GV REPORT/);
   assert.match(cards, /Current: 17 report vs 15 ledger \(Δ -2\)/, 'Home card discloses the exact TL-snapshot / ledger difference');
   assert.match(cards, /data-kpi="src=gv&amp;scope=mtd/);
   assert.match(cards, /f=vc20/);

@@ -104,6 +104,11 @@ test('daily aggregation is date-bounded, date-complete, and channel-filter aware
   const gvOnly = explorer.daily(explorer.filterRows(rows, { from: priorKey, to: currentKey, channels: new Set(['gv']) }, ['ff', 'gv']), { from: priorKey, to: currentKey }, ['gv']);
   assert.deepEqual(gvOnly.byChannel.gv, [3, 2]);
   assert.deepEqual(gvOnly.byChannel.ff, [0, 0]);
+
+  const tip = explorer.tooltip(daily, 1, ['ff', 'gv'], {});
+  for (const piece of ['First Forward · FF', 'GV Partner · GV', 'VC4 4', 'VC20 2', 'VC5+ 0', 'Replacement 2', 'Chassis 2', 'Other / regular 4']) {
+    assert.ok(tip.includes(piece), `daily hover breakdown includes ${piece}`);
+  }
 });
 
 test('All dates caps the rendered daily axis at the latest 366 dates, with the cap disclosed', () => {

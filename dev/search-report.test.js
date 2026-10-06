@@ -20,7 +20,7 @@ globalThis.document = {
   createElement: () => ({ style: {}, classList: { add() {} }, setAttribute() {}, appendChild() {}, addEventListener() {}, getContext: () => null }),
   querySelector: () => null, querySelectorAll: () => [], getElementById: () => null
 };
-['config', 'util', 'model', 'gv', 'store', 'charts'].forEach((f) => require(path.join(ROOT, `${f}.js`)));
+['config', 'util', 'model', 'gv', 'gvTruth', 'store', 'charts'].forEach((f) => require(path.join(ROOT, `${f}.js`)));
 const FF = globalThis.FF;
 const U = FF.util;
 U.runRateDays = () => 15;
@@ -51,9 +51,9 @@ function gvFixture() {
     ],
     stockAgent: [{ agentId: 'G001', agentName: 'GV Ramesh', tlId: 'GT1', tlName: 'TL One', n: 30 }, { agentId: 'G002', agentName: 'GV Suresh', tlId: 'GT1', tlName: 'TL One', n: 40 }, { agentId: 'GT1', agentName: 'TL One', tlId: 'GT1', tlName: 'TL One', n: 30 }],
     stockAgentClass: [
-      { agentName: 'GV Ramesh', cls: 'VC4', n: 20 }, { agentName: 'GV Ramesh', cls: 'Commercial', n: 10 },
-      { agentName: 'GV Suresh', cls: 'VC4', n: 20 }, { agentName: 'GV Suresh', cls: 'Commercial', n: 20 },
-      { agentName: 'TL One', cls: 'VC4', n: 20 }, { agentName: 'TL One', cls: 'Commercial', n: 10 }
+      { agentId: 'G001', agentName: 'GV Ramesh', tlId: 'GT1', tlName: 'TL One', cls: 'VC4', n: 20 }, { agentId: 'G001', agentName: 'GV Ramesh', tlId: 'GT1', tlName: 'TL One', cls: 'Commercial', n: 10 },
+      { agentId: 'G002', agentName: 'GV Suresh', tlId: 'GT1', tlName: 'TL One', cls: 'VC4', n: 20 }, { agentId: 'G002', agentName: 'GV Suresh', tlId: 'GT1', tlName: 'TL One', cls: 'Commercial', n: 20 },
+      { agentId: 'GT1', agentName: 'TL One', tlId: 'GT1', tlName: 'TL One', cls: 'VC4', n: 20 }, { agentId: 'GT1', agentName: 'TL One', tlId: 'GT1', tlName: 'TL One', cls: 'Commercial', n: 10 }
     ]
   };
 }
@@ -67,6 +67,7 @@ function mount({ ff, gv } = {}) {
   FF.gv.need = async () => [];
   FF.gv.get = (k) => (k in gvData ? gvData[k] : []);
   FF.gv.rows = () => []; FF.gv.enabled = () => true; FF.gv.issuanceRows = () => []; FF.gv.masterRows = () => [];
+  if (FF.gvTruth && FF.gvTruth.invalidateIndex) FF.gvTruth.invalidateIndex();
   FF.auth = { can: () => true, settings: {}, isAdmin: () => true };
   FF.pages = {
     performance: { ensureLoaded: async () => {}, agents: () => data.agents || [], daysElapsed: () => 15, dayLabels: () => ['a', 'b', 'c', 'd', 'e', 'f', 'g'] },
@@ -127,6 +128,32 @@ test('combined: sirf ek channel me naam ho to dusra column "—" aur jod wahi', 
   assert.match(out, /Is channel me ye naam nahi mila/);
   assert.ok(out.includes(`<b>${U.fmt(f.totals.curTotal)}</b>`), 'jod = FF ka hi number');
   assert.match(out, /src=ff&scope=mtd&ym=[^"]*&agent=Ravi%20Kumar&agentId=R101/);
+});
+
+test('⚖ missing Tag Assignment stock stays unavailable in combined reports; channel choice is explicit', () => {
+  const { SR } = mount();
+  const ff = {
+    kind: 'ff-agent', ch: 'ff', channel: 'First Forward', months: { last: '2026-09', cur: '2026-10' },
+    totals: { lastVc4: 2, lastComm: 1, lastTotal: 3, curVc4: 4, curComm: 1, curTotal: 5 },
+    stock: { vc4: 5, comm: 2, total: 7 }, stockAvailable: true, stockClassAvailable: true,
+    classes: [{ cls: 'VC4', last: 2, cur: 4, stock: 5 }]
+  };
+  const gv = {
+    kind: 'gv-agent', ch: 'gv', channel: 'GV Partner', months: { last: '2026-09', cur: '2026-10' },
+    totals: { lastVc4: 1, lastComm: 2, lastTotal: 3, curVc4: 2, curComm: 3, curTotal: 5 },
+    stock: { vc4: 0, comm: 0, total: 0 }, stockAvailable: false, stockClassAvailable: false,
+    classes: [{ cls: 'VC4', last: 1, cur: 2, stock: null }]
+  };
+  const group = { key: 'RAVI|both|R101', name: 'Ravi Kumar', ff: person('ff-agent', 'Ravi Kumar', 'R101'), gv: person('gv-agent', 'Ravi Kumar', 'G101') };
+  assert.match(SR.channelChoiceHtml(group), /FF aur GV dono me mila/);
+  assert.match(SR.channelChoiceHtml({ ...group, gv: null }), /Sirf First Forward match mila/);
+
+  const out = html(SR.combinedHtml(group, { ff, gv }));
+  const stockRow = out.match(/<tr class="row-total"><td><b>Agent stock<\/b>[\s\S]*?<\/tr>/);
+  assert.ok(stockRow, 'stock total row exists');
+  assert.match(stockRow[0], />7<\/td>/, 'known First Forward stock remains visible');
+  assert.match(stockRow[0], /Tag Assignment stock unavailable/);
+  assert.match(stockRow[0], /<td class="num sr-sum"><b>—<\/b><\/td>/, 'FF+GV total is not shown as an incomplete zero-filled sum');
 });
 
 test('render(): FF + GV dono ho to ⚖ / 🟦 / 🟩 tabs, ek hi channel ho to sirf wahi tab', () => {

@@ -253,15 +253,12 @@ test('public employee tag request — bina login submit, status, admin visibilit
   }
 });
 
-/* 👤 v3.57 — employee link: employee apni requests KHUD dekh sake + 📇 purana address suggest ho.
+/* 👤 employee link — private device history + shared all-employee feed + 📇 historical address.
  *
- *   • GET /api/public/tag-request/employee-status — employee link ke 📝 Form tab par "👤 Meri requests"
- *     panel isi se data leta hai: All / Pending / Approved / Dispatched / Rejected counts + nayi-pehle
- *     request list (panel 10-10 ke page me dikhata hai).
- *   • GET /api/public/tag-request/contact — wahi agent dobara chuno to purana address mil jaaye
- *     (server-side Address book; sirf browser localStorage nahi, isliye doosre device par bhi chalta hai).
- *   • Privacy: employee-status me employee/agent ka address-pincode nahi jaata, aur ek employee ka token
- *     doosre employee ki request NAHI dikhata.
+ *   • GET /api/public/tag-request/employee-status — device-token wali personal history, filters/paging ke saath.
+ *   • GET /api/public/tag-request/requests — public "My Request" tab: all employees, all statuses, paging.
+ *   • GET /api/public/tag-request/contact — wahi agent dobara chuno to purana address + last request time.
+ *   • Shared feed me status/date-time dikhte hain, lekin employee/agent mobile, address, pincode aur IP nahi.
  */
 test('👤 employee-status — apni requests + counts, admin approve par status badalta hai, 📇 purana address milta hai', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'apna-empst-'));
@@ -326,16 +323,38 @@ test('👤 employee-status — apni requests + counts, admin approve par status 
     assert.equal(contact.json.found, true, 'pichli request ka contact mila');
     assert.equal(contact.json.contact.address, '12, Gandhi Nagar, Tonk Road, Jaipur', 'purana address suggest hota hai');
     assert.equal(contact.json.contact.pincode, '302015');
+    assert.equal(contact.json.contact.lastRequestAt, first.json.requests[0].at, 'last request ka exact timestamp address suggestion ke saath');
 
-    // 5) doosre employee ka token — doosre ki request NAHI dikhni chahiye (privacy)
+    // 5) doosre employee ka token — personal history alag rahe; shared tab alag se sab requests dikhaata hai.
     const other = await jsonCall(server.base, '/api/public/tag-request', 'POST', { employee: { name: 'Koi Doosra', mobile: '9800001111', address: '9, Other Nagar, Jaipur', pincode: '302020' }, agents: [{ agentId: '3003', agentName: 'Anil Kumar', channel: 'ff', mobile: '9800002222', address: '3, Another Nagar, Jaipur', pincode: '302021', rows: [{ cls: 'VC5', approved: 4 }] }] }, '', '10.7.7.9');
     const otherToken = other.json.employeeToken || (other.json.request && other.json.request.employeeToken);
     assert.ok(otherToken && otherToken !== token, 'doosre employee ka apna alag token');
     const otherStatus = await jsonCall(server.base, '/api/public/tag-request/employee-status?token=' + encodeURIComponent(otherToken));
-    assert.equal(otherStatus.json.totalRequests, 1, 'doosra employee sirf apni ek request dekhta hai');
+    assert.equal(otherStatus.json.totalRequests, 1, 'doosra employee sirf apni ek private-device request dekhta hai');
     assert.equal(otherStatus.json.requests[0].agentName, 'Anil Kumar');
 
-    // 6) token ke bina / galat token → 400 (koi list leak nahi)
+    // 6) bina login/token sab employees ki shared list — status/date-time visible, contact details private.
+    const all = await jsonCall(server.base, '/api/public/tag-request/requests?page=1&pageSize=50');
+    assert.equal(all.res.status, 200, JSON.stringify(all.json));
+    assert.equal(all.json.totalRequests, 3);
+    assert.equal(all.json.pending, 2);
+    assert.equal(all.json.approved, 1);
+    const shared = new Map(all.json.requests.map((r) => [r.id, r]));
+    assert.equal(shared.get(firstId).status, 'approved');
+    assert.equal(shared.get(firstId).employeeName, 'Ramesh Yadav');
+    assert.equal(shared.get(other.json.requests[0].id).employeeName, 'Koi Doosra');
+    assert.ok(shared.get(firstId).at, 'exact submission timestamp included');
+    assert.equal(Object.hasOwn(shared.get(firstId), 'employee'), false, 'employee contacts are not public');
+    assert.doesNotMatch(JSON.stringify(all.json.requests), /9876500001|Gandhi Nagar|302015|9800002222|Another Nagar/);
+
+    const pendingPage = await jsonCall(server.base, '/api/public/tag-request/requests?status=pending&page=2&pageSize=1');
+    assert.equal(pendingPage.res.status, 200);
+    assert.equal(pendingPage.json.total, 2, 'status-filter total is not just this page');
+    assert.equal(pendingPage.json.pageCount, 2);
+    assert.equal(pendingPage.json.requests.length, 1);
+    assert.equal((await jsonCall(server.base, '/api/public/tag-request/requests?status=unknown')).res.status, 400);
+
+    // 7) personal-history API still rejects missing/invalid tokens (no personal list leak).
     assert.equal((await jsonCall(server.base, '/api/public/tag-request/employee-status')).res.status, 400);
     assert.equal((await jsonCall(server.base, '/api/public/tag-request/employee-status?token=short')).res.status, 400);
   } finally {

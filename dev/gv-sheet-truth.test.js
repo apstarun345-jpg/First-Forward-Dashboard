@@ -128,7 +128,7 @@ test('sheet-first: 440 wala tag-ledger GV REPORT ke 332 ko override nahi karta (
   assert.equal(self.curTotal, 14);
 });
 
-test('GV TL 360 profile: totals + stock sheet ke barabar (332 / 27 / 1054) aur group bins 3-way', async () => {
+test('GV TL 360: GV REPORT issuance remains sheet-first; stock snapshot stays hidden without Tag Assignment', async () => {
   await bootReport();
   const MP = FF.masterProfile;
   const pr = await MP.build({ kind: 'gv-tl', name: TL.name, id: TL.id, sub: TL.id, tlSet: new Set(), classMap: new Map(), bars: new Set() });
@@ -137,10 +137,15 @@ test('GV TL 360 profile: totals + stock sheet ke barabar (332 / 27 / 1054) aur g
   assert.equal(pr.totals.lastComm, 21);
   assert.equal(pr.totals.curTotal, 27, 'TL current month = sheet');
   assert.equal(pr.totals.curVc4, 25);
-  assert.equal(pr.stock.total, 1054, 'TL ka stock = GV REPORT "TL Total Stock" (own + agents)');
-  assert.equal(pr.stock.vc4, 657);
-  assert.equal(pr.stock.comm, 397);
-  assert.deepEqual([pr.tlStock.own.total, pr.tlStock.agents.total], [674, 380], 'own 674 + agents 380 = 1054 (double count nahi)');
+  assert.equal(pr.stockAvailable, false, 'REPORT fixture has no Tag Assignment stock data');
+  assert.equal(pr.stockSource, 'Tag Assignment unavailable');
+  assert.equal(pr.stock.total, null, 'GV REPORT "TL Total Stock" must not be used as live stock');
+  assert.equal(pr.stock.vc4, null);
+  assert.equal(pr.stock.comm, null);
+  assert.equal(pr.tlStock.has, false);
+  assert.equal(pr.tlStock.own, null);
+  assert.equal(pr.tlStock.agents, null);
+  assert.equal(pr.stockSplit.snapshot, null, 'the unavailable result does not expose a GV REPORT stock snapshot');
   assert.equal(pr.groupBins.last.VC4, 311, 'last month VC4 sheet se');
   assert.equal(pr.groupBins.last.total, 332);
   assert.equal(pr.groupBins.last.source, 'GV REPORT sheet');
@@ -148,41 +153,37 @@ test('GV TL 360 profile: totals + stock sheet ke barabar (332 / 27 / 1054) aur g
   assert.equal(pr.groupBins.cur.VC4, 25);
   assert.equal(pr.groupBins.cur.total, 27);
   assert.deepEqual([pr.groupBins.cur.VC4, pr.groupBins.cur.VC20, pr.groupBins.cur['VC5+']], [25, 2, 0], 'current month ka batwara sheet ke class columns se');
-  assert.deepEqual([pr.groupBins.stock.VC4, pr.groupBins.stock['VC5+'], pr.groupBins.stock.total], [657, 397, 1054]);
+  assert.equal(pr.groupBins.stock, null, 'no Tag Assignment dataset loaded; REPORT stock bins stay unavailable');
 });
 
-test('drawer: TL ID-wise stock neeche, har agent alag + clickable, VC4 · VC20 · VC5+ table', async () => {
+test('drawer: issuance detail remains available while GV REPORT stock stays hidden without Tag Assignment', async () => {
   await bootReport();
   const MP = FF.masterProfile;
   const pr = await MP.build({ kind: 'gv-tl', name: TL.name, id: TL.id, sub: TL.id, tlSet: new Set(), classMap: new Map(), bars: new Set() });
   const html = MP.html(pr);
   assert.match(html, /mp-group-tbl/, 'VC4 · VC20 · VC5+ summary table');
-  assert.match(html, /data-mp-sec="tlstock"/, 'TL ID-wise stock section');
-  assert.match(html, /🆔 TL ID-wise stock/);
-  assert.ok(html.includes('APS011919'), 'TL ID ke saath stock');
-  assert.match(html, /Stock VC4<\/th><th class="num">Stock Comm<\/th><th class="num">Stock total/, 'per-agent stock columns');
-  for (const [, id] of TEAM) assert.ok(html.includes(id), `${id} ki row drawer me`);
-  assert.match(html, /scope=stock&amp;agent=[^&]*&amp;agentId=APS011919/, 'stock cell clickable (us ID ka stock)');
-  assert.match(html, /= TL TOTAL · 🆔 APS011919/, 'footer me TL ID ke saath total');
-  assert.ok(html.includes(U.fmt(1054)), 'TL stock total 1,054 drawer me');
+  assert.match(html, /data-mp-sec="tlstock"/, 'TL stock section has an explicit unavailable state');
+  assert.match(html, /Tag Assignment stock source unavailable/);
+  assert.doesNotMatch(html, new RegExp(U.fmt(1054)), 'GV REPORT total 1,054 is never rendered as stock');
+  assert.match(html, /GV Tag Assignment stock source unavailable — GV REPORT snapshot ko final stock nahi maana/);
   assert.match(html, /data-mp-go="tlstock"/);
   // 🧾 class-wise table ka Total bhi sheet ka (440 ledger jod sirf note me) — warna drawer me do total dikhte the
   assert.match(html, /Total <small class="dim">\(sheet\)<\/small><\/td><td class="num">332<\/td><td class="num">27<\/td>/);
-  assert.match(html, /Class rows tag-ledger \(EIR \/ GV Master\) se aate hain/);
+  assert.match(html, /data-mp-sec="class"/, 'class-wise issuance remains visible even when stock is unavailable');
   assert.match(html, /Last: sheet <b>332<\/b> vs tag ledger <b>440<\/b> \(Δ \+108\)/);
 });
 
 let board;
-test('agent board (GV Performance ka 360): wahi sheet numbers + TL ID-wise stock bottom me', async () => {
+test('agent board (GV Performance ka 360): issuance numbers stay visible; GV REPORT stock is not substituted', async () => {
   await bootReport();
   board = FF.agentBoard.sections({ kind: 'gv-tl', name: TL.name, sub: TL.id });
   const html = board.html;
   assert.match(html, /Class group · VC4 · VC20 · VC5\+/);
   assert.match(html, /TL ID-wise stock · APS011919/);
-  assert.ok(html.includes(U.fmt(1054)), 'TL stock total 1,054 board me');
-  assert.match(html, /data-kpi="src=gv&amp;channel=gv&amp;scope=stock&amp;agent=[^"]*agentId=APS011919/, 'stock cells clickable');
+  assert.match(html, /Tag Assignment stock unavailable — GV REPORT snapshot ko stock source nahi maana; holder rows nahi dikhayi gayi/);
+  assert.doesNotMatch(html, new RegExp(U.fmt(1054)), 'Agent/TL board never shows GV REPORT 1,054 as stock');
   const idxGroup = html.indexOf('Class group'), idxStock = html.indexOf('TL ID-wise stock');
-  assert.ok(idxGroup > -1 && idxStock > idxGroup, 'stock block group table ke baad / neeche aata hai');
+  assert.ok(idxGroup > -1 && idxStock > idxGroup, 'stock status block group table ke baad / neeche aata hai');
 });
 
 test('kpiDetail drill-down: Hemalbhai Bhavsar ke drawer me Last month (332) ya This month (27/28) click karne par wahi exact number + explanation aata hai', async () => {

@@ -5491,17 +5491,41 @@ async function handleApi(req, res, url) {
       return { ok: false, local: true, synced: false, count: entries.length, error: String(err.message || err).slice(0, 180) };
     }
   }
+  function latestAgentRequestAt({ agentId, agentName, channel }) {
+    const ch = String(channel || '').toLowerCase() === 'gv' ? 'gv' : 'ff';
+    const id = String(agentId || '').trim().toUpperCase();
+    const name = tagNameKey(agentName || '');
+    if (!id && !name) return '';
+    let latestAt = '', latestMs = -1;
+    for (const request of (workspaceStore().tagRequests || [])) {
+      const requestAgent = request && request.agent || {};
+      const rows = Array.isArray(request && request.rows) ? request.rows : [];
+      const matched = rows.some((row) => {
+        const rowChannel = (row && row.channel) || requestAgent.channel || 'ff';
+        if ((String(rowChannel).toLowerCase() === 'gv' ? 'gv' : 'ff') !== ch) return false;
+        const rowId = String((row && row.agentId) || requestAgent.agentId || '').trim().toUpperCase();
+        const rowName = tagNameKey((row && row.agentName) || requestAgent.name || '');
+        return id ? (rowId ? rowId === id : !!name && rowName === name) : !!name && rowName === name;
+      });
+      if (!matched) continue;
+      const at = String(request.at || request.updatedAt || '').trim();
+      const ms = Date.parse(at);
+      if (Number.isFinite(ms) && ms > latestMs) { latestAt = at; latestMs = ms; }
+    }
+    return latestAt;
+  }
   async function lookupAgentAddress({ agentId, agentName, channel }) {
     const ch = String(channel || '').toLowerCase() === 'gv' ? 'gv' : 'ff';
     const id = String(agentId || '').trim();
     const name = tagNameKey(agentName || '');
     if (!id && !name) return null;
+    const lastRequestAt = latestAgentRequestAt({ agentId: id, agentName: name, channel: ch });
     const memory = addressBookMemoryEntries();
     const keys = [];
     if (id) keys.push(`${ch}|id:${id}`);
     if (name) keys.push(`${ch}|n:${name}`);
     const asContact = (e) => e && (e.address || e.pincode || e.mobile)
-      ? { mobile: e.mobile || '', address: e.address || '', pincode: e.pincode || '', tl: e.tl || '', source: 'Address' }
+      ? { mobile: e.mobile || '', address: e.address || '', pincode: e.pincode || '', tl: e.tl || '', source: 'Address', ...(lastRequestAt ? { lastRequestAt } : {}) }
       : null;
     // A recent submission is already in durable workspace memory; don't wait for a sheet read.
     for (const key of keys) { const contact = asContact(memory[key]); if (contact) return contact; }
@@ -5512,7 +5536,7 @@ async function handleApi(req, res, url) {
       const contact = asContact(memory[key] || map.get(key));
       if (contact) return contact;
     }
-    return null;
+    return lastRequestAt ? { mobile: '', address: '', pincode: '', tl: '', source: 'Request', lastRequestAt } : null;
   }
 
   /** Apps Script store — storage backend se independent (files backend par bhi sheet sync chale). */
@@ -6214,6 +6238,52 @@ async function handleApi(req, res, url) {
         };
       })
     };
+  }
+  const publicTagRequestStatuses = ['pending', 'approved', 'dispatched', 'rejected'];
+  const publicTagRequestStatus = (r) => {
+    const status = String(r && r.status || 'pending').toLowerCase();
+    return publicTagRequestStatuses.includes(status) ? status : 'pending';
+  };
+  const publicTagRequestListView = (r) => {
+    const rows = Array.isArray(r && r.rows) ? r.rows : [];
+    const names = [...new Set(rows.map((x) => shortText(x && x.agentName, 120)).filter(Boolean))];
+    const agentName = shortText((r && r.agent && r.agent.name) || names[0] || '', 120);
+    const total = Number(r && r.total) || rows.reduce((sum, x) => sum + (Number(x && (x.requested ?? x.approved)) || 0), 0);
+    return {
+      id: shortText(r && r.id, 60), at: r && r.at || '', status: publicTagRequestStatus(r),
+      employeeName: shortText((r && r.employee && r.employee.name) || (r && r.byName) || '', 80),
+      total: Math.max(0, total), agentName, agents: Math.max(1, names.length || (r && r.agent ? 1 : 0)),
+      classes: rows.slice(0, 150).map((x) => ({
+        cls: shortText(x && x.cls, 12), requested: Number(x && (x.requested ?? x.approved)) || 0,
+        approved: Number(x && x.approved) || 0, ...(names.length > 1 ? { agent: shortText(x && x.agentName, 120) } : {})
+      }))
+    };
+  };
+  if (p === '/api/public/tag-request/requests' && method === 'GET') {
+    if (publicTagFormConfig().enabled === false) throw new HttpError(403, 'Employee Tag Request link abhi band hai.');
+    const ip = clientIp(req);
+    if (!publicRateOk(`tagall:${ip}`, 60, 10 * 60e3)) throw new HttpError(429, 'Bahut zyada request list checks — thodi der baad try karo.');
+    const filter = String(url.searchParams.get('status') || 'all').trim().toLowerCase();
+    if (filter !== 'all' && !publicTagRequestStatuses.includes(filter)) throw new HttpError(400, 'Status filter invalid hai.');
+    const parsedPage = Number.parseInt(url.searchParams.get('page') || '1', 10);
+    const pageSizeRaw = Number.parseInt(url.searchParams.get('pageSize') || '20', 10);
+    const requestedPage = Number.isFinite(parsedPage) ? Math.max(1, parsedPage) : 1;
+    const pageSize = Number.isFinite(pageSizeRaw) ? Math.max(1, Math.min(50, pageSizeRaw)) : 20;
+    const all = (workspaceStore().tagRequests || []).filter((r) => r && typeof r === 'object');
+    const counts = { totalRequests: all.length, pending: 0, approved: 0, dispatched: 0, rejected: 0 };
+    all.forEach((r) => { counts[publicTagRequestStatus(r)]++; });
+    const filtered = (filter === 'all' ? all : all.filter((r) => publicTagRequestStatus(r) === filter)).slice().sort((a, b) => {
+      const aAt = Date.parse(a.at || '') || 0, bAt = Date.parse(b.at || '') || 0;
+      return bAt - aAt;
+    });
+    const total = filtered.length;
+    const pageCount = Math.ceil(total / pageSize);
+    const page = Math.min(requestedPage, Math.max(1, pageCount));
+    const offset = (page - 1) * pageSize;
+    return sendJson(res, 200, {
+      ok: true, filter, page, pageSize, pageCount, total, ...counts,
+      requests: filtered.slice(offset, offset + pageSize).map(publicTagRequestListView)
+    });
   }
   if (p === '/api/public/tag-request/employee-status' && method === 'GET') {
     const token = String(url.searchParams.get('token') || '').trim();
