@@ -342,6 +342,24 @@ FF.pages = FF.pages || {};
       : '';
     return !!(live && current && live.classMapVersion && live.classMapVersion === current);
   }
+  // Expected Today fallback: server feed me expected kabhi transiently missing ho to bhi
+  // recent same-weekday GV series se value turant calculate ho jaye.
+  function expectedFromWeekdaySeries(series, dayKey) {
+    const src = series && typeof series === 'object' ? series : {};
+    const day = String(dayKey || todayK());
+    const keys = Object.keys(src).filter((k) => k < day).sort().reverse();
+    if (!keys.length) return null;
+    const parsed = new Date(day + 'T00:00:00Z');
+    if (Number.isNaN(parsed.getTime())) return null;
+    const wd = parsed.getUTCDay();
+    const same = keys.filter((k) => {
+      const d = new Date(k + 'T00:00:00Z');
+      return !Number.isNaN(d.getTime()) && d.getUTCDay() === wd;
+    }).slice(0, 4);
+    if (!same.length) return null;
+    return Math.round(same.reduce((n, k) => n + (Number(src[k]) || 0), 0) / same.length);
+  }
+
   function liveRowsFromFeed(live) {
     if (!live) return null;
     const key = live.date || todayK();
@@ -660,7 +678,9 @@ FF.pages = FF.pages || {};
       if (historyLive) {
         liveState = {
           ...liveState,
-          expected: historyLive.expected != null ? historyLive.expected : liveState.expected,
+          expected: historyLive.expected != null
+            ? historyLive.expected
+            : (expectedFromWeekdaySeries(historyLive.series, tk) ?? liveState.expected),
           cached: !!(historyLive.cached || feed.cached),
           stale: !!historyLive.stale,
           error: historyLive.total === undefined ? liveState.error : ''
@@ -768,7 +788,9 @@ FF.pages = FF.pages || {};
         vc5p: Number(liveFromFeed.vc5p) || 0,
         replacement: Number(liveFromFeed.replacement) || 0,
         chassis: Number(liveFromFeed.chassis) || 0,
-        expected: liveFromFeed.expected ?? null,
+        expected: liveFromFeed.expected != null
+          ? liveFromFeed.expected
+          : expectedFromWeekdaySeries(liveFromFeed.series, todayK()),
         cached: !!liveFromFeed.cached,
         stale: !!liveFromFeed.stale,
         error: '',
