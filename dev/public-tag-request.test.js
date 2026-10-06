@@ -326,6 +326,8 @@ test('👤 employee-status — apni requests + counts, admin approve par status 
     assert.equal(contact.json.found, true, 'pichli request ka contact mila');
     assert.equal(contact.json.contact.address, '12, Gandhi Nagar, Tonk Road, Jaipur', 'purana address suggest hota hai');
     assert.equal(contact.json.contact.pincode, '302015');
+    assert.ok(contact.json.contact.lastRequestAt, 'last public request date is returned with contact suggestion');
+    assert.equal(contact.json.contact.lastRequestAt, first.json.request.at, 'lastRequestAt points to the latest matching request');
 
     // 5) doosre employee ka request — same shared Employee Link par sabko dikhna chahiye.
     const other = await jsonCall(server.base, '/api/public/tag-request', 'POST', { employee: { name: 'Koi Doosra', mobile: '9800001111', address: '9, Other Nagar, Jaipur', pincode: '302020' }, agents: [{ agentId: '3003', agentName: 'Anil Kumar', channel: 'ff', mobile: '9800002222', address: '3, Another Nagar, Jaipur', pincode: '302021', rows: [{ cls: 'VC5', approved: 4 }] }] }, '', '10.7.7.9');
