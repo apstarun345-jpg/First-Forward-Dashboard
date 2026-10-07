@@ -155,6 +155,22 @@ test('🔎 topbar search remounts and routes through canonical Master Search pag
   assert.match(search, /const ch = \^\(gv-\|ff-\)/);
 });
 
+test('🚦 startup readiness — Render health stays green and storage retry is bounded', async () => {
+  const server = await read('server.js');
+  assert.match(server, /const bootState = \{ startedAt: Date\.now\(\), stage: 'starting', error: null \}/);
+  assert.match(server, /url\.pathname === '\/api\/health'.*ready: false/s);
+  assert.match(server, /Retry-After.*3/);
+  assert.match(server, /StorageStore|AppsScriptStore/);
+  assert.doesNotMatch(server, /for \(let attempt = 0; attempt < 5; attempt\+\+\) \{[\s\S]{0,500}sheetsStore\.read\(\)/);
+  const auth = await read('auth.js');
+  assert.match(auth, /booting = err && err\.status === 503 && err\.data && err\.data\.booting/);
+  assert.match(auth, /maxBootRetries = 7/);
+  const storage = await read('apps-script-storage.js');
+  assert.match(storage, /APPS_SCRIPT_ATTEMPTS/);
+  assert.match(storage, /APPS_SCRIPT_TIMEOUT_MS/);
+  assert.match(storage, /this\.timeoutMs/);
+});
+
 test('🏷️ v3.61 wiring — version pins + automatic cache-busting', async () => {
   const pkg = JSON.parse(await read('package.json'));
   assert.equal(pkg.version, '3.62.0');
