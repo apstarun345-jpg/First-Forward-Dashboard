@@ -720,7 +720,21 @@ window.FF = window.FF || {};
           const kind = act.dataset.gsAct;
           try {
             if (kind === 'csv') { U.downloadCsv(`${ch}-${U.slug(S.view.name)}-${U.stamp()}.csv`, viewCsv(S.view)[0], viewCsv(S.view).slice(1)); U.toast('CSV ✓', 'ok'); }
-            else if (kind === 'pdf') { if (!FF.pdf && FF.lazy && FF.lazy.need) { try { await FF.lazy.need('pdf'); } catch { /* ignore */ } } FF.pdf.download(viewPdf(S.view), `${ch}-${U.slug(S.view.name)}-${U.stamp()}.pdf`); U.toast('PDF ✓', 'ok'); }
+            else if (kind === 'pdf') {
+              const filename = ch + '-' + U.slug(S.view.name) + '-' + U.stamp() + '.pdf';
+              if (U.downloadStart) U.downloadStart(filename, 'Preparing PDF…');
+              try {
+                if (!FF.pdf && FF.lazy && FF.lazy.need) await FF.lazy.need('pdf');
+                if (!FF.pdf || !FF.pdf.doc || typeof FF.pdf.download !== 'function') throw new Error('PDF module load nahi hua');
+                const blob = viewPdf(S.view);
+                if (!blob) throw new Error('PDF data nahi bana');
+                FF.pdf.download(blob, filename);
+                U.toast('PDF ✓', 'ok');
+              } catch (err) {
+                if (U.downloadFail) U.downloadFail(filename, (err && err.message) || 'PDF export failed');
+                throw err;
+              }
+            }
             else if (kind === 'wa') window.open(U.waLink(viewText(S.view)), '_blank', 'noopener');
             else if (kind === 'copy') { await U.copyText(viewText(S.view)); U.toast('Copy ✓', 'ok'); }
             else if (kind === 'excel') { FF.xlsx.download(`${ch}-${U.slug(S.view.name)}-${U.stamp()}.xlsx`, { Summary: viewCsv(S.view), Classes: [['Class', S.view.lastYm, S.view.ym, 'Stock'], ...S.view.classes.map((c) => [c.cls, c.last, c.cur, c.stock])] }); U.toast('Excel ✓', 'ok'); }
