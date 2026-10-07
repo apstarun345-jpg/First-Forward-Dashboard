@@ -137,7 +137,12 @@ window.FF = window.FF || {};
 
   async function loadList(list) {
     for (const name of list || []) {
-      if (typeof FF[name] !== 'undefined') { loaded.set(name, Promise.resolve(name)); continue; }
+      // Eager page modules register under FF.pages.<name>, not FF.<name>.
+      // Recognize both forms so an eager module (especially Home) is never downloaded again
+      // during the boot gate. A duplicate home.js request could otherwise keep first paint stuck.
+      if (typeof FF[name] !== 'undefined' || (FF.pages && typeof FF.pages[name] !== 'undefined')) {
+        loaded.set(name, Promise.resolve(name)); continue;
+      }
       await inject(name);
     }
   }
