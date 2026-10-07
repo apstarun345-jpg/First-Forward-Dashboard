@@ -8161,6 +8161,39 @@ async function readLocalStore() {
     notify: await readJson(FILES.notify, { items: [], watch: {} })
   };
 }
+async function autoRecoverHistoryOnce() {
+  if (process.env.AUTO_RECOVER_HISTORY !== '1' || !sheetsStore || STORAGE_BACKEND !== 'appsscript') return null;
+  const hint = String(process.env.AUTO_RECOVER_LOGIN_HINT || '').trim();
+  if (!hint) { console.warn('🛟 AUTO_RECOVER_HISTORY enabled but AUTO_RECOVER_LOGIN_HINT is empty — skipped.'); return null; }
+  try {
+    const meta = await sheetsStore.snapshots({ limit: 20 });
+    const snapshots = meta.snapshots || [];
+    for (const snap of snapshots) {
+      let data;
+      try { data = (await sheetsStore.snapshotData(snap.at, ['users', 'settings', 'resets', 'notify'])).data || {}; }
+      catch (err) { console.warn('🛟 history snapshot skipped:', err.message); continue; }
+      const users = Array.isArray(data.users) ? data.users : [];
+      const target = users.find((u) => {
+        if (!u) return false;
+        const id = String(hint).toLowerCase();
+        if (String(u.username || '').trim().toLowerCase() === id) return true;
+        if (u.email && String(u.email).trim().toLowerCase() === id) return true;
+        const digits = hint.replace(/\\D/g, '');
+        const md = String(u.mobile || '').replace(/\\D/g, '');
+        return !!digits && digits.length >= 7 && !!md &&
+          (md === digits || (md.length >= 10 && digits.length >= 10 && md.slice(-10) === digits.slice(-10)));
+      });
+      if (!target) continue;
+      console.warn('🛟 Restoring users/settings from APP_STORAGE_HISTORY snapshot:', snap.at);
+      return { data, at: snap.at, users: users.length, username: target.username || '' };
+    }
+    console.warn('🛟 No APP_STORAGE_HISTORY snapshot matched the recovery login hint.');
+  } catch (err) {
+    console.warn('🛟 AUTO_RECOVER_HISTORY failed:', err.message);
+  }
+  return null;
+}
+
 async function start() {
   if (!['files', 'sheets', 'appsscript'].includes(STORAGE_BACKEND)) throw new Error('STORAGE_BACKEND must be files, sheets or appsscript.');
   let stored;
@@ -8201,6 +8234,18 @@ async function start() {
         notify: stored.notify && typeof stored.notify === 'object' ? stored.notify : { items: [], watch: {} }
       };
       console.log(`Loaded users/settings/sessions from Google Sheet APP_STORAGE (Apps Script) · users ${stored.users.length}`);
+      const autoRecovery = await autoRecoverHistoryOnce();
+      if (autoRecovery && autoRecovery.data && Array.isArray(autoRecovery.data.users) && autoRecovery.data.users.length) {
+        stored = {
+          users: autoRecovery.data.users,
+          sessions: {},
+          settings: autoRecovery.data.settings && typeof autoRecovery.data.settings === 'object' ? autoRecovery.data.settings : stored.settings,
+          resets: Array.isArray(autoRecovery.data.resets) ? autoRecovery.data.resets : stored.resets,
+          notify: autoRecovery.data.notify && typeof autoRecovery.data.notify === 'object' ? autoRecovery.data.notify : stored.notify
+        };
+        stored.__autoRecoveredHistoryAt = autoRecovery.at;
+        stored.__autoRecoveredHistoryLogin = autoRecovery.username;
+      }
     }
   } else if (STORAGE_BACKEND === 'sheets') {
     // Google is authoritative. Never fall back to ephemeral files or a new default admin.
@@ -8251,6 +8296,12 @@ async function start() {
   // `vapid` + `pushLog` bhi durable hain — inke bina har restart par nayi VAPID key banti thi aur
   // phone ke notification panel me push aana band ho jaata tha (subscriptions 403 par reject hoti thin).
   db.notify = { items: Array.isArray(storedNotify.items) ? storedNotify.items.slice(-500) : [], watch: storedNotify.watch && typeof storedNotify.watch === 'object' ? storedNotify.watch : {}, push: Array.isArray(storedNotify.push) ? storedNotify.push.slice(-300) : [], pushLog: Array.isArray(storedNotify.pushLog) ? storedNotify.pushLog.slice(-40) : [], vapid: storedNotify.vapid && typeof storedNotify.vapid === 'object' ? storedNotify.vapid : null, workspace: storedNotify.workspace && typeof storedNotify.workspace === 'object' ? storedNotify.workspace : { views: [], notes: [] } };
+  if (stored.__autoRecoveredHistoryAt) {
+    console.warn('🛟 AUTO_RECOVER_HISTORY applied:', stored.__autoRecoveredHistoryAt);
+    await Promise.all(['users', 'settings', 'resets', 'notify'].map((kind) => persist(kind)));
+    delete stored.__autoRecoveredHistoryAt;
+    delete stored.__autoRecoveredHistoryLogin;
+  }
   for (const kind of Object.keys(FILES)) durableSnapshots.set(kind, JSON.stringify(db[kind], null, 2));
   tagReqBaselineSync(); // 🛡️ v3.50 — notify guard ka base: jo tag requests abhi durable hain
   // Upgrade the known previous/default product title in durable settings; preserve admin custom names.
