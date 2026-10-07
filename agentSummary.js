@@ -440,8 +440,8 @@ FF.pages = FF.pages || {};
       tlId: (raw.tl && raw.tl.id) || person.tlId || '',
       tlMobile: (raw.tl && raw.tl.mobile) || person.tlMobile || '',
       curYm: m.cur || '', lastYm: m.last || '',
-      expected: (raw.projT1 && raw.projT1.total) || 0,
-      runRate: (raw.calc && raw.calc.total && raw.calc.total.rate) || 0,
+      expected: raw.projT1 && raw.projT1.projectedCurrent != null ? Number(raw.projT1.projectedCurrent) || 0 : ((raw.projT1 && raw.projT1.total) || 0),
+      runRate: raw.projT1 && raw.projT1.basis && raw.projT1.basis.growthElapsed > 0 ? (Number(raw.projT1.projectedCurrent) || 0) / Number(raw.projT1.basis.growthElapsed) : ((raw.calc && raw.calc.total && raw.calc.total.rate) || 0),
       totals: {
         ...t,
         curVc4: t.curVc4 || 0, curComm: t.curComm || 0, curTotal: t.curTotal || 0,
@@ -1208,7 +1208,8 @@ FF.pages = FF.pages || {};
             <b>${esc(p.name)}</b>
             ${p.id ? `<small class="mono">(${esc(p.id)})</small>` : ''}
             ${p.mobile && canContacts() ? `<small class="dim">📞${esc(mob10(p.mobile))}</small>` : ''}
-            <small class="dim">· MTD ${fmt(p.cur)}</small>
+            ${!isTl && p.tl ? `<small class="dim">· TL: ${esc(p.tl)}${p.tlId ? ` (${esc(p.tlId)})` : ''}</small>` : ''}
+            <small class="dim">· MTD ${fmt(p.cur)} · Last ${fmt(p.last)} · Stock ${fmt(p.stock)}</small>
           </button>`;
         }).join('');
       };
