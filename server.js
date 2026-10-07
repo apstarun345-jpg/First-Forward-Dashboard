@@ -674,6 +674,25 @@ function noteActivity(user, page) {
   return recordNotification({ type: 'activity', title: '👀 User ne page khola', body: `${user.name || user.username} ne "${cleanPage}" open kiya.`, target: 'admin', meta: { username: user.username, page: cleanPage, ...(CLIENT_PAGES.has(cleanPage) ? { link: `#/${cleanPage}` } : {}) } });
 }
 function sha(token) { return crypto.createHash('sha256').update(token).digest('hex'); }
+function createSessionLocal(username) {
+  const token = crypto.randomBytes(32).toString('base64url');
+  db.sessions[sha(token)] = { username, createdAt: Date.now(), expiresAt: Date.now() + SESSION_DAYS * 86400e3 };
+  pruneSessions();
+  return token;
+}
+// Background durable retry: login should never remain stuck on a slow Apps Script write.
+// A successful login already has an in-memory session; this keeps the cloud copy catching up.
+function backgroundPersistKinds(kinds, attemptsLeft = 3) {
+  const list = [...new Set(kinds)].filter((k) => FILES[k]);
+  if (!list.length) return;
+  Promise.all(list.map((kind) => persist(kind))).then(() => {
+    console.log('☁️ Background durable login save confirmed:', list.join(', '));
+  }).catch((err) => {
+    console.warn('☁️ Background durable login save retry:', err.message);
+    if (attemptsLeft > 1) setTimeout(() => backgroundPersistKinds(list, attemptsLeft - 1), 2500 * (4 - attemptsLeft)).unref?.();
+  });
+}
+
 async function createSession(username) {
   const token = crypto.randomBytes(32).toString('base64url');
   db.sessions[sha(token)] = { username, createdAt: Date.now(), expiresAt: Date.now() + SESSION_DAYS * 86400e3 };
@@ -4158,8 +4177,11 @@ async function finalizeLogin(req, res, u, loginId, ip) {
   u.loginHistory.push({ at: u.lastLoginAt, id: String(loginId).slice(0, 60), ip: ip || '' });
   if (u.loginHistory.length > 20) u.loginHistory = u.loginHistory.slice(-20);
   logAudit(u, 'login', { target: loginId, ip, note: knownIps.size && !knownIps.has(ip) ? 'naya IP (OTP ok)' : '' });
-  // One Google Sheets batch can confirm the user timestamp and session together.
-  const [token] = await Promise.all([createSession(u.username), persist('users')]);
+  // ⚡ Login must not wait for Google Sheets/Apps Script storage.
+  // Create the session immediately; users + session durability is verified/retried in background.
+  // This prevents the login button from hanging on "Authenticating..." during a slow/locked Sheet write.
+  const token = createSessionLocal(u.username);
+  backgroundPersistKinds(['users', 'sessions']);
   const ipLabel = ip ? ` · IP ${ip}` : '';
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
