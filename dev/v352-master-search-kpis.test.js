@@ -164,6 +164,17 @@ test('🔎 topbar search remounts and routes through canonical Master Search pag
   assert.match(search, /const ch = \^\(gv-\|ff-\)/);
 });
 
+test('🛑 suggestion selection locks current instance until next typing', async () => {
+  const u = await read('util.js');
+  assert.match(u, /let list = \[\], active = -1, destroyed = false, suspended = false/);
+  assert.match(u, /if \(suspended\) \{ close\(\); return; \}/);
+  assert.match(u, /const suspend = \(\) => \{ suspended = true; close\(\); \}/);
+  assert.match(u, /const onInput = debounce\(\(\) => \{ suspended = false; compute\(\); \}, 80\)/);
+  assert.match(u, /function destroyAllSuggestions\(keep\)/);
+  const ms = await read('masterSearch.js');
+  assert.match(ms, /U\.destroyAllSuggestions\(sug\)/);
+  assert.match(ms, /if \(sug && sug\.suspend\) sug\.suspend\(\)/);
+});
 test('🧹 global Master Search suggestion closes before navigation', async () => {
   const ms = await read('masterSearch.js');
   assert.match(ms, /Close the portalled dropdown BEFORE navigation/, 'global suggestion popup is explicitly closed before route change');
