@@ -175,6 +175,27 @@ test('🛑 suggestion selection locks current instance until next typing', async
   assert.match(ms, /U\.destroyAllSuggestions\(sug\)/);
   assert.match(ms, /if \(sug && sug\.suspend\) sug\.suspend\(\)/);
 });
+test('🎨 settings/theme — dark mode is opt-in and Tag Request order rows stay readable', async () => {
+  const app = await read('app.js');
+  assert.match(app, /ff_theme_explicit/);
+  assert.match(app, /return 'light'/);
+  const css = await read('styles.css');
+  assert.match(css, /\.tr-col-label[\s\S]{0,260}color: #0f172a !important/);
+  const tr = await read('tagRequest.js');
+  assert.match(tr, /tr-col-index/);
+  assert.match(tr, /data-tr-order-key/);
+  assert.match(tr, /columns: \[\.\.\.card\.querySelectorAll/);
+});
+
+test('📗 Tag Request Sheet — configurable column order + one Agent spacer row', async () => {
+  const server = await read('server.js');
+  assert.match(server, /rowMode: 'agent-class-gap'/);
+  const gs = await read('google-apps-script/Code.gs');
+  assert.match(gs, /Tag Requests: Agent groups are separated by exactly one blank row/);
+  assert.match(gs, /sh\.insertRowsAfter\(lastDataRow, 1\)/);
+  assert.match(gs, /var agentCol = -1/);
+});
+
 test('🧹 global Master Search suggestion closes before navigation', async () => {
   const ms = await read('masterSearch.js');
   assert.match(ms, /Close the portalled dropdown BEFORE navigation/, 'global suggestion popup is explicitly closed before route change');
