@@ -6189,3 +6189,35 @@ html[data-theme="dark"] .home-exp-stat { background: color-mix(in srgb, var(--br
     padding: 2px 4px;
   }
 }
+
+/* Today Highest Issued — class-wise vertical KPI value */
+.hm-highest-list {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  font-size: inherit;
+  font-weight: 800;
+  letter-spacing: inherit;
+  line-height: 1.15;
+  text-align: left;
+}
+.hm-highest-list > div {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+  align-items: baseline;
+  column-gap: 5px;
+  min-width: 0;
+}
+.hm-highest-list > div > span {
+  font-weight: 800;
+}
+.hm-highest-list > div > b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 800;
+}
+.hm-highest-list > div > strong {
+  font-weight: 900;
+}
