@@ -786,6 +786,7 @@ window.FF = window.FF || {};
       const available = Math.max(88, openAbove ? above : below);
       box.dataset.placement = openAbove ? 'top' : 'bottom';
       box.style.position = 'fixed';
+      box.style.zIndex = '9999';
       box.style.left = `${Math.round(left)}px`;
       box.style.width = `${Math.round(width)}px`;
       box.style.maxHeight = `${Math.round(Math.min(360, available))}px`;
