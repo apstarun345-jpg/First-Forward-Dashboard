@@ -905,6 +905,7 @@ window.FF = window.FF || {};
     const suspend = () => { suspended = true; close(); };
     const resume = () => { suspended = false; compute(); };
     api = { close, refresh: compute, reposition: place, destroy, suspend, resume };
+    api._box = box;
     suggestRegistry.add(api);
     return api;
   }
