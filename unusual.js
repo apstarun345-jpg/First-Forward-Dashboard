@@ -734,7 +734,7 @@ FF.pages = FF.pages || {};
 
   async function exportPdfData(rows, model, btn, titleOverride, metric) {
     try {
-      if (!FF.pdf && FF.lazy && FF.lazy.need) await FF.lazy.need('pdf.js');
+      if (!FF.pdf && FF.lazy && FF.lazy.need) await FF.lazy.need('pdf');
       if (!FF.pdf) { U.toast('PDF module load nahi hua', 'err'); return; }
       if (btn) U.setButtonBusy(btn, true, 'PDF…');
       const m = metric || metricFor(model, state.flag);
