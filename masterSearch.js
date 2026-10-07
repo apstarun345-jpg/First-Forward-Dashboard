@@ -1080,6 +1080,8 @@ FF.pages = FF.pages || {};
   //   Report component FF.searchReport.render() ka hai (numbers 100% masterProfile / GV truth se).
   // -------------------------------------------------------------------------------------------------
   function pageRender(root, params) {
+    try { if (root.__mspSuggestDestroy) root.__mspSuggestDestroy(); } catch { /* stale suggestion portal */ }
+    root.__mspSuggestDestroy = null;
     const asked = clean((params && (params.q || params.name)) || '');
     const askedId = clean((params && (params.id || params.agentId || params.tlId)) || '');
     let chFilter = (params && (params.ch || params.channel)) || '';   // '' = dono · 'ff' · 'gv'
@@ -1132,7 +1134,7 @@ FF.pages = FF.pages || {};
         .sort((a, b) => (isTlP(b) ? 1 : 0) - (isTlP(a) ? 1 : 0) || String(a.name).localeCompare(String(b.name)))
         .slice(0, 10);
       quick.innerHTML = list.length
-        ? `<span class="dim small">⚡ Turant kholo:</span>${list.map((p) => `<button type="button" class="msp-chip" data-msp-name="${esc(p.name)}">${isTlP(p) ? '👥' : '🧑‍💼'} ${esc(p.name)}</button>`).join('')}`
+        ? `<span class="dim small">⚡ Turant kholo:</span>${list.map((p) => `<button type="button" class="msp-chip" data-msp-name="${esc(p.name)}" data-msp-person="${esc(p.kind + '|' + normId(p.sub || p.id || ''))}">${isTlP(p) ? '👥' : '🧑‍💼'} ${esc(p.name)}</button>`).join('')}`
         : '<span class="dim small">Index ban raha hai — 2 second me suggestions aa jayenge.</span>';
     }
     paintQuick();
@@ -1455,14 +1457,18 @@ FF.pages = FF.pages || {};
       </div></div>`;
     }
 
+    let runSeq = 0;
     async function run(query, opts) {
+      const seq = ++runSeq;
       const open = !opts || opts.open !== false;
       const q = clean(query);
       if (q.length < 2) { out.innerHTML = '<div class="card"><div class="card-body empty">Kam se kam 2 letter / digit type karo.</div></div>'; return; }
       out.innerHTML = U.spinner(`“${q}” dhoondha ja raha hai…`);
       try { await buildLight(); } catch { /* index fail — neeche message */ }
+      if (seq !== runSeq || !out.isConnected) return;
       paintState(); paintQuick();
       if (!state.light) { out.innerHTML = '<div class="card"><div class="card-body empty">Search index load nahi hua — internet check karke “🔄 Index refresh” dabao.</div></div>'; return; }
+      if (seq !== runSeq || !out.isConnected) return;
       const res = search(q);
       // Exact URL/selection ID wins over same-name duplicates. Requested channel is authoritative.
       let exactRequestedPerson = null;
@@ -1517,6 +1523,25 @@ FF.pages = FF.pages || {};
       out.innerHTML = `<div class="card"><div class="card-body empty">“${esc(q)}” ke liye kuch nahi mila — doosra naam / ID / mobile try karo${chFilter ? ' (ya channel filter hatao)' : ''}.</div></div>`;
     }
 
+    async function runSelectedPerson(person) {
+      const seq = ++runSeq;
+      if (!person) return;
+      const q = clean(person.name || person.sub || '');
+      if (!q) return;
+      if (input) input.value = q;
+      out.innerHTML = U.spinner(`“${q}” ka profile khola ja raha hai…`);
+      try { await buildLight(); } catch { /* profile fallback below */ }
+      if (seq !== runSeq || !out.isConnected) return;
+      const idx = state.full || state.light;
+      const cp = canonicalPerson(person, idx) || person;
+      const sr = SR();
+      const gp = sr && sr.groupPeople ? sr.groupPeople([cp])[0] : fallbackGroup(cp);
+      if (!gp) return;
+      groups = [gp];
+      openGroup(gp, chOfP(cp));
+      try { warmFull(); } catch {}
+    }
+
     if (input) {
       // 🔎 v3.52 — type karte hi suggestion dropdown (topbar wale search jaisa): agent / TL / ID /
       // mobile / barcode — har item ke saath stock · MTD · suggested. Pick → usi ka poora data.
@@ -1528,9 +1553,10 @@ FF.pages = FF.pages || {};
           items: () => suggestItems(input.value),
           onPick: (it) => {
             if (!it || it.none) return;
-            if (it.barcode) { input.value = it.barcode; run(it.barcode); return; }
-            const name = (it.person && it.person.name) || it.value || it.label;
-            input.value = name;
+            if (it.barcode) { run(it.barcode); return; }
+            const person = it.person ? canonicalPerson(it.person, state.full || state.light) : null;
+            if (person) { runSelectedPerson(person); return; }
+            const name = it.value || it.label;
             run(name);
           },
           onEnter: (q) => { if (clean(q).length >= 2) run(q); }
@@ -1540,6 +1566,7 @@ FF.pages = FF.pages || {};
       // Index / REPORT data aate hi khula dropdown refresh (warna "search ho raha hai…" atka rehta).
       let refreshT = 0;
       onIndexReady(() => { clearTimeout(refreshT); refreshT = setTimeout(() => { try { if (sug && sug.refresh && input.isConnected && document.activeElement === input && clean(input.value).length >= 2) sug.refresh(); } catch { /* ignore */ } }, 150); });
+      root.__mspSuggestDestroy = () => { try { if (sug && sug.destroy) sug.destroy(); else if (sug && sug.close) sug.close(); } catch {} };
       // Khaali page par cursor seedha search me; URL me naam ho to focus nahi (warna dropdown report ke upar khul jaata).
       if (!asked) setTimeout(() => { try { input.focus(); } catch { /* ignore */ } }, 60);
     }
@@ -1558,7 +1585,8 @@ FF.pages = FF.pages || {};
         const candidates = lightPeople()
           .filter((x) => normName(x.name) === nmKey && (!chFilter || chOfP(x) === chFilter))
           .sort((a, b) => (chOfP(a) === chFilter ? -1 : 1) || (isTlP(b) ? 1 : 0) - (isTlP(a) ? 1 : 0));
-        const p = candidates[0];
+        const idPick = nm.dataset.mspPerson ? candidates.find((x) => `${x.kind}|${normId(x.sub || x.id || '')}` === nm.dataset.mspPerson) : null;
+        const p = idPick || candidates[0];
         if (p) {
           if (input) input.value = p.name;
           const sr = SR();
