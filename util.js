@@ -909,9 +909,9 @@ window.FF = window.FF || {};
     return api;
   }
 
-  function destroyAllSuggestions() {
-    [...suggestRegistry].forEach((x) => { try { x.destroy(); } catch {} });
-    document.querySelectorAll('.suggest').forEach((el) => { try { el.remove(); } catch {} });
+  function destroyAllSuggestions(keep) {
+    [...suggestRegistry].forEach((x) => { if (keep && x === keep) return; try { x.destroy(); } catch {} });
+    document.querySelectorAll('.suggest').forEach((el) => { try { if (keep && keep._box === el) return; el.remove(); } catch {} });
   }
 
   // ---- 🔠 MULTI-SELECT popover (multiple selection anywhere) ------------------------------------
