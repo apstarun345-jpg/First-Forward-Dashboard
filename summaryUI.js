@@ -481,8 +481,12 @@ window.FF = window.FF || {};
       const totalCur = team.reduce((n,a)=>n+(Number(a.curTotal ?? a.cur)||0),0);
       const totalStock = team.reduce((n,a)=>n+(Number(a.stockTotal ?? a.stock)||0),0);
       doc.table({
-        headers: ['Agent', 'ID', 'Last Month', 'Current MTD', 'VC4 MTD', 'Comm MTD', 'Stock', 'Growth'],
-        align: ['left','left','right','right','right','right','right','right'],
+        columns: [
+          { h: 'Agent Name', w: 3.2, align: 'left' }, { h: 'Agent ID', w: 1.6, align: 'left' },
+          { h: 'Last Month', w: 1.25, align: 'right' }, { h: 'Current MTD', w: 1.25, align: 'right' },
+          { h: 'VC4', w: .9, align: 'right' }, { h: 'Commercial', w: 1.05, align: 'right' },
+          { h: 'Stock', w: 1.1, align: 'right' }, { h: 'Growth', w: 1.0, align: 'right' }
+        ],
         rows,
         foot: ['TEAM TOTAL', '', fmt(totalLast), fmt(totalCur),
           fmt(team.reduce((n,a)=>n+(Number(a.curVc4)||0),0)),
@@ -496,7 +500,7 @@ window.FF = window.FF || {};
       if (classKeys.length) {
         doc.section('Agent-wise Class Issuance');
         doc.table({
-          headers: ['Agent', ...classKeys, 'TOTAL'],
+          columns: [{ h: 'Agent Name', w: 3.2, align: 'left' }, ...classKeys.map(k => ({ h: k, w: 1, align: 'right' })), { h: 'TOTAL', w: 1.1, align: 'right' }],
           align: ['left', ...classKeys.map(() => 'right'), 'right'],
           rows: team.map(a => {
             const vals = classKeys.map(k => Number((a.classes || {})[k]) || 0);
