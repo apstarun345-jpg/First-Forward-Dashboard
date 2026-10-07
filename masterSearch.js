@@ -493,7 +493,7 @@ FF.pages = FF.pages || {};
       return [{ kind: 'cls', kindLabel: 'Search', label: `“${clean(q)}” search ho raha hai…`, sub: 'index ban raha hai (agents + TLs + IDs)', value: clean(q), none: true }];
     }
     const r = search(q);
-    const filteredPeople = (r.people || []).filter((p) => !chFilter || chOfP(p) === chFilter);
+    // Top-bar search is global: FF + GV dono suggestions yahan aayenge.\n    // Channel filter sirf dedicated Master Search page ke scope me apply hota hai.\n    const filteredPeople = (r.people || []);
     const items = [];
     filteredPeople.slice(0, 14).forEach((p) => {
       const tl = [...p.tlSet][0] || '';
