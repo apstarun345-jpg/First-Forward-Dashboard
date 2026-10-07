@@ -3073,12 +3073,25 @@ body.colorful .from-hdr { color: #166534; }
         couriers: String((card.querySelector('[data-tr-pub="couriers"]') || {}).value || '').split(',').map((x) => x.trim()).filter(Boolean)
       });
       const save = (patch, msg) => {
-        const btn = card.querySelector('[data-tr-pub-act="save"]');
-        if (btn) { btn.disabled = true; btn.textContent = '⏳ Save…'; }
-        FF.auth.api('/api/public-tag-form', 'PUT', { config: { ...collect(), ...(patch || {}) } })
-          .then((out) => { state.sheet.publicForm = out.config; state.formCfg = { ...(state.formCfg || {}), ...out.config }; U.toast(msg || '💾 Employee link settings save ho gayi', 'ok'); if (replaceCard('#tr-public-card', publicCardHtml())) attach(); })
-          .catch((err) => U.toast('Save fail: ' + ((err && err.message) || ''), 'err'))
-          .finally(() => { const b = rootEl.querySelector('#tr-public-card [data-tr-pub-act="save"]'); if (b) { b.disabled = false; b.textContent = '💾 Save'; } });
+        const before = JSON.parse(JSON.stringify(state.sheet.publicForm || {}));
+        const next = { ...before, ...collect(), ...(patch || {}) };
+        state.sheet.publicForm = next;
+        state.formCfg = { ...(state.formCfg || {}), ...next };
+        if (replaceCard('#tr-public-card', publicCardHtml())) attach();
+        U.toast(msg || '💾 Employee link settings applied ✓ · saving in background…', 'ok');
+        FF.auth.api('/api/public-tag-form', 'PUT', { config: next })
+          .then((out) => {
+            state.sheet.publicForm = out.config || next;
+            state.formCfg = { ...(state.formCfg || {}), ...(out.config || next) };
+            U.toast('☁️ Employee link settings saved ✓', 'ok');
+            if (replaceCard('#tr-public-card', publicCardHtml())) attach();
+          })
+          .catch((err) => {
+            state.sheet.publicForm = before;
+            state.formCfg = { ...(state.formCfg || {}), ...before };
+            U.toast('Save fail — previous settings restored: ' + ((err && err.message) || ''), 'err');
+            if (replaceCard('#tr-public-card', publicCardHtml())) attach();
+          });
       };
       act('save', () => save(null));
       act('toggle', () => {
@@ -3156,12 +3169,24 @@ body.colorful .from-hdr { color: #166534; }
         }).map((row) => row.dataset.trOrderKey).filter(Boolean)
       });
       act('save', () => {
-        const btn = card.querySelector('[data-tr-sheet-act="save"]');
-        if (btn) { btn.disabled = true; btn.textContent = '⏳ Save…'; }
-        FF.auth.api('/api/tag-request-sheet', 'PUT', { config: collect() })
-          .then((out) => { state.sheet.config = out.config; state.sheet.connected = !!out.connected; U.toast('💾 Sheet sync settings save ho gayi', 'ok'); if (replaceCard('#tr-sheet-card', sheetCardHtml())) attach(); })
-          .catch((err) => U.toast('Save fail: ' + ((err && err.message) || ''), 'err'))
-          .finally(() => { if (btn) { btn.disabled = false; btn.textContent = '💾 Save settings'; } });
+        const patch = collect();
+        const before = JSON.parse(JSON.stringify(state.sheet.config || {}));
+        const optimistic = { ...before, ...patch, columns: [...(patch.columns || [])] };
+        state.sheet.config = optimistic;
+        if (replaceCard('#tr-sheet-card', sheetCardHtml())) attach();
+        U.toast('💾 Sheet settings applied ✓ · saving in background…', 'ok');
+        FF.auth.api('/api/tag-request-sheet', 'PUT', { config: patch })
+          .then((out) => {
+            state.sheet.config = out.config || optimistic;
+            state.sheet.connected = !!out.connected;
+            U.toast('☁️ Sheet settings permanently saved ✓', 'ok');
+            if (replaceCard('#tr-sheet-card', sheetCardHtml())) attach();
+          })
+          .catch((err) => {
+            state.sheet.config = before;
+            U.toast('Save fail — previous settings restored: ' + ((err && err.message) || ''), 'err');
+            if (replaceCard('#tr-sheet-card', sheetCardHtml())) attach();
+          });
       });
       act('toggle', () => {
         const cfg = collect();
