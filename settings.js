@@ -10,6 +10,7 @@ FF.pages = FF.pages || {};
   let tab = 'account';
   let storage = null;
   let settings = null, defaults = null, usersCache = null, permsCache = [];
+  let settingsSaveSeq = 0;
 
   // 🎙 Assistant voice prefs — assistant.js ke 🌐/⚙ changes ko bhi yahan sync rakho (ek hi baar register).
   if (typeof window !== 'undefined' && !window.__ffVoiceSettingsSync) {
@@ -44,33 +45,54 @@ FF.pages = FF.pages || {};
       return out;
     };
     const before = clone(settings || A.settings || {});
+    const optimistic = merge(before, patch);
+    const seq = ++settingsSaveSeq;
+    // ⚡ UI is committed immediately; server persistence continues in the background.
+    settings = clone(optimistic);
+    A.applySettings(optimistic);
+    if (patch.tabs) FF.app.renderSidebar();
+    if (msgEl) msgEl.textContent = 'Saved ✓ syncing…';
+    U.toast('Changes applied ✓ · saving in background…', 'ok');
     try {
-      if (msgEl) msgEl.textContent = 'Saving… server confirmation ka wait hai';
-      // ⚡ Optimistic preview, but nested Features values ko accidentally drop mat karo.
-      const optimistic = merge(before, patch);
-      settings = clone(optimistic);
-      A.applySettings(optimistic);
-      if (patch.tabs) FF.app.renderSidebar();
-      const out = await A.api('/api/settings', 'PUT', { settings: patch });
-      settings = clone(out.settings);
-      A.applySettings(out.settings);
-      FF.app.renderSidebar();
-      // ☁️ v3.51 — save hone ke baad saaf-saaf batao ki data KAHAN gaya (Google Sheet me permanent
-      // ya sirf server disk par) — user ko kabhi confusion na ho ki settings ud gayi.
-      const cloud = !!(storage && (storage.backend === 'appsscript' || storage.backend === 'sheets'));
-      const where = cloud ? '☁️ Google Sheet me permanent save ✓' : '⚠️ sirf server disk par save — Render restart par ud sakta hai (Storage tab se Google Sheet connect karo)';
-      if (msgEl) msgEl.textContent = `Saved ✓ ${U.timeLabel(Date.now())}`;
-      U.toast(`Settings saved ✓ · ${where}`, cloud ? 'ok' : 'warn');
-      if (cloud && storage) storage.lastSavedAt = Date.now();
-      if (opts && opts.reload) { U.toast('Sheet mapping badli — data dobara load ho raha hai…'); FF.store.reset(); if (FF.gv) FF.gv.reset(); if (FF.pages.sheet.reset) FF.pages.sheet.reset(); if (FF.pages.performance.reset) FF.pages.performance.reset(); if (FF.insights && FF.insights.reset) FF.insights.reset(); FF.preloader.fastSync(false).catch(() => {}); }
+      const promise = A.api('/api/settings', 'PUT', { settings: patch });
+      promise.then((out) => {
+        // An older save must never overwrite a newer optimistic save.
+        if (seq !== settingsSaveSeq) return;
+        settings = clone(out.settings);
+        A.applySettings(out.settings);
+        FF.app.renderSidebar();
+        if (msgEl) msgEl.textContent = `Saved ✓ ${U.timeLabel(Date.now())}`;
+        const cloud = !!(storage && (storage.backend === 'appsscript' || storage.backend === 'sheets'));
+        const where = cloud ? '☁️ permanent' : '⚠️ server disk';
+        U.toast(`Settings saved ✓ · ${where}`, cloud ? 'ok' : 'warn');
+        if (cloud && storage) storage.lastSavedAt = Date.now();
+        if (opts && opts.reload) {
+          U.toast('Sheet mapping changed — refreshing data…');
+          FF.store.reset(); if (FF.gv) FF.gv.reset();
+          if (FF.pages.sheet && FF.pages.sheet.reset) FF.pages.sheet.reset();
+          if (FF.pages.performance && FF.pages.performance.reset) FF.pages.performance.reset();
+          if (FF.insights && FF.insights.reset) FF.insights.reset();
+          if (FF.preloader && FF.preloader.fastSync) FF.preloader.fastSync(false).catch(() => {});
+        }
+      }).catch((err) => {
+        if (seq !== settingsSaveSeq) return;
+        settings = clone(before);
+        A.applySettings(before);
+        FF.app.renderSidebar();
+        if (msgEl) msgEl.textContent = 'Save failed — reverted';
+        U.toast((err && err.message) || 'Settings save failed', 'err');
+      });
       return true;
     } catch (err) {
-      settings = clone(before); A.applySettings(before); FF.app.renderSidebar();
-      if (msgEl) msgEl.textContent = 'Not saved — retry';
-      U.toast(err.message, 'err');
+      if (seq === settingsSaveSeq) {
+        settings = clone(before); A.applySettings(before); FF.app.renderSidebar();
+        if (msgEl) msgEl.textContent = 'Save failed — reverted';
+      }
+      U.toast((err && err.message) || 'Settings save failed', 'err');
       return false;
     }
   }
+
   function collect(root, base) {
     const patch = JSON.parse(JSON.stringify(base || {}));
     U.$$('[data-path]', root).forEach((el) => {
