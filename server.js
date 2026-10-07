@@ -8193,6 +8193,36 @@ async function autoRecoverHistoryOnce() {
   }
   return null;
 }
+async function recoveryDiagnostic() {
+  if (process.env.RECOVERY_DIAGNOSTIC !== '1' || !sheetsStore || STORAGE_BACKEND !== 'appsscript') return null;
+  try {
+    const meta = await sheetsStore.snapshots({ limit: 40 });
+    const out = [];
+    for (let idx = 0; idx < meta.snapshots.length; idx++) {
+      const snap = meta.snapshots[idx];
+      let data = {};
+      try { data = (await sheetsStore.snapshotData(snap.at, ['users', 'settings'])).data || {}; } catch (err) {}
+      const users = Array.isArray(data.users) ? data.users : [];
+      const settings = data.settings && typeof data.settings === 'object' ? data.settings : {};
+      out.push({
+        index: idx,
+        at: snap.at,
+        users: users.length,
+        admins: users.filter((u) => u && u.role === 'admin').length,
+        approved: users.filter((u) => !u || u.approved !== false).length,
+        usernames: users.slice(0, 12).map((u) => String((u && u.username) || '')),
+        appName: String(settings.appName || ''),
+        settingsUpdatedAt: settings.updatedAt || null
+      });
+    }
+    console.warn('🧾 RECOVERY_DIAGNOSTIC ' + JSON.stringify(out));
+    return out;
+  } catch (err) {
+    console.warn('🧾 RECOVERY_DIAGNOSTIC failed:', err.message);
+    return null;
+  }
+}
+
 
 async function start() {
   if (!['files', 'sheets', 'appsscript'].includes(STORAGE_BACKEND)) throw new Error('STORAGE_BACKEND must be files, sheets or appsscript.');
@@ -8234,6 +8264,7 @@ async function start() {
         notify: stored.notify && typeof stored.notify === 'object' ? stored.notify : { items: [], watch: {} }
       };
       console.log(`Loaded users/settings/sessions from Google Sheet APP_STORAGE (Apps Script) · users ${stored.users.length}`);
+      await recoveryDiagnostic();
       const autoRecovery = await autoRecoverHistoryOnce();
       if (autoRecovery && autoRecovery.data && Array.isArray(autoRecovery.data.users) && autoRecovery.data.users.length) {
         stored = {
