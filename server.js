@@ -5627,7 +5627,7 @@ async function handleApi(req, res, url) {
     courier: 'Courier'
   };
   // 🪶 v3.51 — sheet ko chhota rakho: har AGENT ki EK row (saari classes ek hi cell me) + kam columns.
-  const TAG_SHEET_DEFAULT_COLUMNS = ['date', 'time', 'requestId', 'by', 'agent', 'agentId', 'agentMobile', 'agentPincode', 'tl', 'channel', 'cls', 'stock', 'cur', 'approved', 'courier', 'status'];
+  const TAG_SHEET_DEFAULT_COLUMNS = ['agent', 'agentId', 'date', 'time', 'tl', 'channel', 'cls', 'agentMobile', 'agentPincode', 'stock', 'last', 'cur', 'growth', 'approved', 'courier', 'status'];
   const tagSheetConfig = () => {
     const w = workspaceStore();
     if (!w.tagRequestSheet || typeof w.tagRequestSheet !== 'object') {
@@ -5644,6 +5644,14 @@ async function handleApi(req, res, url) {
       cfg.rowMode = 'agent-class-gap';
       cfg.columns = [...TAG_SHEET_DEFAULT_COLUMNS];
       cfg.v = 3;
+    }
+    if (Number(cfg.v || 3) < 4) {
+      // v4 — admin-selectable column ordering. Preserve a genuinely custom v3 selection/order;
+      // only replace the old untouched v3 default with the new Agent → Agent ID → Date default.
+      const oldV3 = ['date', 'time', 'requestId', 'by', 'agent', 'agentId', 'agentMobile', 'agentPincode', 'tl', 'channel', 'cls', 'stock', 'cur', 'approved', 'courier', 'status'];
+      const same = Array.isArray(cfg.columns) && cfg.columns.length === oldV3.length && cfg.columns.every((x, i) => x === oldV3[i]);
+      if (!Array.isArray(cfg.columns) || !cfg.columns.length || same) cfg.columns = [...TAG_SHEET_DEFAULT_COLUMNS];
+      cfg.v = 4;
     }
     // v3.27 — link me sheet ka ID ho to wahi (alag sheet) target banta hai.
     if (cfg.spreadsheetId === undefined) cfg.spreadsheetId = sheetIdFromLink(cfg.sheetLink) || '';
