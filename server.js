@@ -4526,7 +4526,13 @@ async function handleApi(req, res, url) {
     const body = await readBody(req);
     const loginId = String(body.username || body.email || body.mobile || '').trim();
     const u = findUserByLogin(loginId) || findUserByLogin(body.username);
-    if (!u || !verifyPassword(body.password || '', u.password)) { noteFail(ip); logAudit(null, 'login_failed', { actor: loginId, ip, note: 'galat password/ID' }); throw new HttpError(401, 'Invalid login — check username / email / mobile and password.'); }
+    const rawPassword = typeof body.password === 'string' ? body.password : String(body.password || '');
+    const cleanPassword = rawPassword.trim();
+    const passwordOk = !!u && (
+      verifyPassword(rawPassword, u.password) ||
+      (cleanPassword !== rawPassword && verifyPassword(cleanPassword, u.password))
+    );
+    if (!passwordOk) { noteFail(ip); logAudit(null, 'login_failed', { actor: loginId, ip, note: 'galat password/ID' }); throw new HttpError(401, 'Invalid login — check username / email / mobile and password.'); }
     if (!u.approved) throw new HttpError(403, 'Account pending admin approval.');
     // 🔐 OTP (2FA): naye IP par email code possible ho to login yahin rok do.
     const otp = await maybeRequireOtp(u, loginId, ip);
