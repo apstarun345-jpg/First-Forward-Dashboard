@@ -1308,6 +1308,32 @@ window.FF = window.FF || {};
       const teamStock = tlStockComposition('gv', r.tlName, r.tlId, gvPeopleLookup().rows, gvRows('stockAgent'), gvRows('stockAgentClass'));
       out.tlStock = { ...teamStock.stock, has: true, own: teamStock.own, agents: teamStock.agents };
     }
+    // 📦 GV individual-agent card must use the same Tag Assignment stock source as the clicked class-wise detail.
+    // GV REPORT row snapshots can legitimately show 0/stale stock while stockAgent has the live holder rows.
+    // Resolve by exact agent ID first, then exact normalized name, and use this same total in the light card.
+    if (r && out.stock && num(out.stock.total) === 0) {
+      try {
+        const stockRows = gvRows('stockAgent') || [];
+        const wantId = clean(out.id || p.sub).replace(/\\.0+$/, '').toUpperCase();
+        const wantName = norm(out.name);
+        const mine = stockRows.filter((x) => {
+          const xid = clean(x.agentId || x.id).replace(/\\.0+$/, '').toUpperCase();
+          const xname = norm(x.agentName || x.name);
+          return (wantId && xid && xid === wantId) || (!wantId && wantName && xname === wantName) || (wantId && !xid && wantName && xname === wantName);
+        });
+        if (mine.length) {
+          const total = U.sum(mine, (x) => num(x.n));
+          const vc4 = U.sum(mine, (x) => /^VC4$/i.test(clean(x.cls)) ? num(x.n) : 0);
+          const comm = Math.max(0, total - vc4);
+          out.stock = { vc4, comm, total };
+          out.stockSource = 'Tag Assignment';
+          // Keep dispatch/cover/suggestions in sync with the corrected stock.
+          out.dispatch.cover = out.dispatch.avgVc4 > 0 ? vc4 / out.dispatch.avgVc4 : null;
+          out.dispatch.sugVc4 = suggest(out.dispatch.avgVc4, vc4);
+          out.dispatch.sugComm = suggest(out.dispatch.avgComm, comm);
+        }
+      } catch { /* REPORT fallback remains safe */ }
+    }
     out.tagRequired = out.direct && isHM(out.priority);
     const n = norm(p.name);
     // GV REPORT is a live calendar-month report: keep the actual current month even when its
