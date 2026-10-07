@@ -2117,6 +2117,20 @@ window.FF = window.FF || {};
       ${cell('Last active', esc(pr.lastActive || '—'))}
       ${growthCell(pr)}
     </div>`;
+    const lt = !isTl ? (pr.linkedTl || null) : null;
+    const ltScope = lt ? `tl=${encodeURIComponent(lt.name)}${lt.id ? `&tlId=${encodeURIComponent(lt.id)}` : ''}` : '';
+    const ltCurSpec = lt ? `src=${pr.ch}&scope=mtd&ym=${encodeURIComponent(m.cur || '')}&${ltScope}` : '';
+    const ltLastSpec = lt ? `src=${pr.ch}&scope=month&ym=${encodeURIComponent(m.last || '')}&${ltScope}` : '';
+    const ltStockSpec = lt ? `src=${pr.ch}&scope=stock&${ltScope}` : '';
+    const agentTlKpis = lt ? `<section class="mp-sec mp-agent-tl-sec"><h4>👤 Agent + 👥 TL — ek nazar me</h4><div class="mp-kpis mp-agent-tl-kpis">
+      ${kpi('Agent stock', fmt(s.total), `VC4 ${fmt(s.vc4)} · Comm ${fmt(s.comm)}`, 'k1', stockSpec)}
+      ${kpi('TL stock', fmt(lt.stock.total), `VC4 ${fmt(lt.stock.vc4)} · Comm ${fmt(lt.stock.comm)}`, 'k2', ltStockSpec)}
+      ${kpi(`Agent current · ${monthLabel(m.cur) || 'MTD'}`, fmt(t.curTotal), `VC4 ${fmt(t.curVc4)} · Comm ${fmt(t.curComm)}`, 'k6', curSpec)}
+      ${kpi(`Agent last · ${monthLabel(m.last) || 'Last'}`, fmt(t.lastTotal), `VC4 ${fmt(t.lastVc4)} · Comm ${fmt(t.lastComm)}`, 'k8', lastSpec)}
+      ${kpi(`TL current · ${monthLabel(m.cur) || 'MTD'}`, fmt(lt.totals.curTotal), `VC4 ${fmt(lt.totals.curVc4)} · Comm ${fmt(lt.totals.curComm)}`, 'k6', ltCurSpec)}
+      ${kpi(`TL last · ${monthLabel(m.last) || 'Last'}`, fmt(lt.totals.lastTotal), `VC4 ${fmt(lt.totals.lastVc4)} · Comm ${fmt(lt.totals.lastComm)}`, 'k8', ltLastSpec)}
+      ${kpi('Projected growth', pr.projectedGrowthNum == null ? '—' : U.pctHtml(pr.projectedGrowthNum, { decimals: 0 }), `Projected current ${fmt(pr.projT1 && pr.projT1.projectedCurrent || 0)} vs previous full month ${fmt(t.lastTotal)} · till ${esc((pr.projT1 && pr.projT1.growthThrough) || 'yesterday')}`, 'k0', '')}
+    </div><p class="dim small">👥 TL: <button type="button" class="mp-link-btn" data-mp-open-tl="1" data-mp-tl-name="${esc(lt.name)}" data-mp-tl-id="${esc(lt.id || '')}">${esc(lt.name)}</button>${lt.id ? ` · ID ${esc(lt.id)}` : ''} — click karke isi channel ki TL report kholo.</p></section>` : '';
     const kpis = `<div class="mp-kpis">
       ${pr.ch === 'gv' ? todayKpiHtml(pr, isTl) : ''}
       ${kpi(isTl ? 'TL stock (total)' : 'Agent stock', fmt(s.total), `${isTl && ownAgentsChips ? `${ownAgentsChips} · ` : ''}VC4 ${fmt(s.vc4)} · Commercial ${fmt(s.comm)}`, 'k1', stockSpec)}
