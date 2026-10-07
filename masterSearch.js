@@ -378,7 +378,7 @@ FF.pages = FF.pages || {};
   const MP = () => (FF.masterProfile && FF.masterProfile.supports ? FF.masterProfile : null);
   const allPeople = () => [...((state.full || state.light || {}).people || new Map()).values()];
   const personByKey = (key) => ((state.full || state.light || {}).people || new Map()).get(key) || null;
-  const personKey = (p) => `${p.kind}|${normName(p.name)}`;
+  const personKey = (p) => `${p.kind}|${normName(p.name)}|${normId(p.sub || p.id || [...(p.ids || [])][0] || '')}`;
 
   // ---------------------------------------------------------------- identity resolver
   /**
