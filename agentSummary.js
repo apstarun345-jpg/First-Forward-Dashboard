@@ -32,28 +32,31 @@ FF.pages = FF.pages || {};
     ].map((p) => p && p.catch ? p.catch(() => {}) : p));
 
     const map = new Map();
+    const byName = new Map();
+    const personKey = (kind, id, name) => `${kind}|${idKey(id) || norm(name)}`;
+    const rememberPerson = (kind, name, person) => {
+      const k = `${kind}|${norm(name)}`; const arr = byName.get(k) || [];
+      if (!arr.includes(person)) arr.push(person); byName.set(k, arr);
+    };
     const add = (kind, name, id, tl, mobile, cur, stock, extra = {}) => {
       const nm = clean(name);
       if (!nm || /^(—|na|unknown|unassigned|direct)$/i.test(nm)) return;
       if (kind.endsWith('tl') && FF.config.isRealTl && !FF.config.isRealTl(nm)) return;
-      const identity = clean(id).replace(/\.0+$/, '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-      const k = `${kind}|${identity || norm(nm)}`;
-      const curMob = clean(mobile) || (MP() && MP().mobileFor ? MP().mobileFor(nm, id, '') : '');
-      const e = map.get(k) || {
-        kind, name: nm, id: clean(id), altIds: new Set(), tl: clean(tl), tlId: clean(extra.tlId),
-        mobile: curMob, tlMobile: clean(extra.tlMobile), cur: 0, stock: 0, last: 0
-      };
+      const identity = idKey(id); const exactKey = personKey(kind, id, nm);
+      let e = identity ? map.get(exactKey) : null;
+      if (!e) { const candidates = byName.get(`${kind}|${norm(nm)}`) || []; e = candidates.find((x) => !identity || !idKey(x.id) || idKey(x.id) === identity) || null; }
+      if (!e) {
+        e = { kind, name: nm, id: clean(id), altIds: new Set(), tl: clean(tl), tlId: clean(extra.tlId), mobile: clean(mobile), tlMobile: clean(extra.tlMobile), cur: 0, stock: 0, last: 0 };
+        map.set(exactKey, e); rememberPerson(kind, nm, e);
+      } else if (identity && !idKey(e.id)) {
+        for (const [k, value] of map.entries()) if (value === e && k !== exactKey) map.delete(k);
+        e.id = clean(id); map.set(exactKey, e);
+      }
       if (!e.id && id) e.id = clean(id);
-      if (id) e.altIds.add(clean(id));
-      if (extra.altId) e.altIds.add(clean(extra.altId));
-      if (!e.tl && tl) e.tl = clean(tl);
-      if (!e.tlId && extra.tlId) e.tlId = clean(extra.tlId);
-      if (!e.mobile && curMob) e.mobile = curMob;
-      if (!e.tlMobile && extra.tlMobile) e.tlMobile = clean(extra.tlMobile);
-      e.cur = Math.max(e.cur, Number(cur) || 0);
-      e.stock = Math.max(e.stock, Number(stock) || 0);
-      e.last = Math.max(e.last, Number(extra.last) || 0);
-      map.set(k, e);
+      if (id) e.altIds.add(clean(id)); if (extra.altId) e.altIds.add(clean(extra.altId));
+      if (!e.tl && tl) e.tl = clean(tl); if (!e.tlId && extra.tlId) e.tlId = clean(extra.tlId);
+      if (!e.mobile && mobile) e.mobile = clean(mobile); if (!e.tlMobile && extra.tlMobile) e.tlMobile = clean(extra.tlMobile);
+      e.cur = Math.max(e.cur, Number(cur) || 0); e.stock = Math.max(e.stock, Number(stock) || 0); e.last = Math.max(e.last, Number(extra.last) || 0);
     };
 
     if (isGv) {
@@ -1066,6 +1069,10 @@ FF.pages = FF.pages || {};
     </div>`;
   }
 
+  // Exact identity token: same-name users stay distinguishable.
+  const personUiToken = (p) => `${p.kind || ''}|${encodeURIComponent(p.id || '')}|${encodeURIComponent(p.name || '')}`;
+  const parsePersonUiToken = (value) => { const parts = String(value || '').split('|'); return { kind: parts[0] || '', id: decodeURIComponent(parts[1] || ''), name: decodeURIComponent(parts.slice(2).join('|') || '') }; };
+
   function makePage(channel) {
     const isGv = channel === 'gv';
     const state = { list: [], picked: null, report: null, q: '', pickSeq: 0 };
@@ -1092,7 +1099,7 @@ FF.pages = FF.pages || {};
               <input id="as-q" class="input" type="search" placeholder="Search Agent Name, TL Name, Agent ID, TL ID, ya 10-digit Mobile Number…" value="${esc((params && params.q) || state.q || '')}" autocomplete="off" aria-label="Agent ya TL search">
               <button class="btn primary" id="as-search-btn" type="button">🔎 Search</button>
               ${can('refresh') ? `<button class="btn" id="as-refresh-btn" type="button" title="Data refresh — cache clear karke dobara load">🔄</button>` : ''}
-              <div id="as-drop" class="as-drop" hidden></div>
+              <div id="as-drop" hidden aria-hidden="true"></div>
             </div>
           </div>
           <div class="as-quick-wrap" style="margin-top:10px">
@@ -1140,7 +1147,7 @@ FF.pages = FF.pages || {};
           whoLabel: channel === 'gv' ? 'GV Agent / TL' : 'FF Agent / TL',
           sourceNote: `Source: ${isGv ? 'GV REPORT' : 'REPORT'} tab`,
           limit: 250,
-          rowActions: (r) => `<button type="button" class="btn tiny" data-as-open="${esc(`${r.kind}|${r.name}`)}" title="Iska poora summary kholo">📂</button>`
+          rowActions: (r) => `<button type="button" class="btn tiny" data-as-open="${esc(personUiToken(r))}" title="Iska poora summary kholo">📂</button>`
         });
       };
       paintPeopleTable();
@@ -1155,7 +1162,7 @@ FF.pages = FF.pages || {};
         topSug.innerHTML = hits.map((p) => {
           const isTl = p.kind.endsWith('tl');
           const active = state.picked && state.picked.kind === p.kind && norm(state.picked.name) === norm(p.name);
-          return `<button type="button" class="chip as-sug-chip ${active ? 'on' : ''}" data-as-opt="${esc(`${p.kind}|${p.name}`)}">
+          return `<button type="button" class="chip as-sug-chip ${active ? 'on' : ''}" data-as-opt="${esc(personUiToken(p))}">
             <span class="badge ${isTl ? 'purple' : 'blue'}">${isTl ? 'TL' : 'Agent'}</span>
             <b>${esc(p.name)}</b>
             ${p.id ? `<small class="mono">(${esc(p.id)})</small>` : ''}
@@ -1165,28 +1172,8 @@ FF.pages = FF.pages || {};
         }).join('');
       };
 
-      const showDrop = (q) => {
-        const hits = matchPeople(state.list, q);
-        if (!hits.length) {
-          drop.innerHTML = `<div class="as-opt dim"><span>"${esc(q)}" ke liye koi Agent / TL / ID / Mobile nahi mila</span></div>`;
-          drop.hidden = false;
-          return;
-        }
-        drop.innerHTML = hits.map((p) => {
-          const isTl = p.kind.endsWith('tl');
-          return `<button type="button" class="as-opt" data-as-opt="${esc(`${p.kind}|${p.name}`)}">
-            <span>
-              <span class="badge ${isTl ? 'purple' : 'blue'}">${isTl ? 'TL' : 'Agent'}</span>
-              <b>${esc(p.name)}</b>
-              ${p.id ? `<small class="mono">· ID ${esc(p.id)}</small>` : ''}
-              ${!isTl && p.tl ? `<small class="dim">· TL ${esc(p.tl)}${p.tlId ? ` (${esc(p.tlId)})` : ''}</small>` : ''}
-              ${p.mobile && canContacts() ? `<small class="dim">· 📞 ${esc(mob10(p.mobile))}</small>` : ''}
-            </span>
-            <span class="dim small">MTD <b>${fmt(p.cur)}</b> · Stock <b>${fmt(p.stock)}</b></span>
-          </button>`;
-        }).join('');
-        drop.hidden = false;
-      };
+      const showDrop = () => {}; // shared U.suggest handles suggestions
+
 
       const pick = async (person, opts) => {
         if (!person) return;
@@ -1222,8 +1209,9 @@ FF.pages = FF.pages || {};
       if (peopleCard && peopleCard.addEventListener) peopleCard.addEventListener('click', (e) => {
         const openBtn = e.target.closest('[data-as-open]');
         if (openBtn) {
-          const parts = String(openBtn.dataset.asOpen || '').split('|');
-          const person = state.list.find((p) => p.kind === parts[0] && norm(p.name) === norm(parts[1])) || { kind: parts[0], name: parts[1] };
+          const tokenData = parsePersonUiToken(openBtn.dataset.asOpen);
+          const person = state.list.find((p) => p.kind === tokenData.kind && (tokenData.id ? idKey(p.id) === idKey(tokenData.id) : norm(p.name) === norm(tokenData.name)))
+            || { kind: tokenData.kind, name: tokenData.name, id: tokenData.id };
           pick(person);
           return;
         }
@@ -1269,30 +1257,32 @@ FF.pages = FF.pages || {};
       };
 
       renderTopChips(qEl.value);
-
-      qEl.addEventListener('focus', () => showDrop(qEl.value));
-      let qTimer = 0;
-      qEl.addEventListener('input', () => {
-        state.q = qEl.value;
-        clearTimeout(qTimer);
-        qTimer = setTimeout(() => { showDrop(qEl.value); renderTopChips(qEl.value); }, 120); // v3.34 debounce — fast typing par render storm nahi
-      });
+      // Shared body-portal autocomplete: input ke neeche anchored, card overflow se clipped nahi.
+      let asSuggest = null;
+      try {
+        asSuggest = U.suggest(qEl, {
+          min: 2, max: 14,
+          items: () => state.list.map((p) => {
+            const isTl = p.kind.endsWith('tl');
+            return { kind: isTl ? 'tl' : 'agent', kindLabel: isTl ? 'TL' : 'Agent', label: p.name,
+              sub: [p.id ? `ID ${p.id}` : '', !isTl && p.tl ? `TL ${p.tl}${p.tlId ? ` (${p.tlId})` : ''}` : '', p.mobile && canContacts() ? `📞 ${mob10(p.mobile)}` : '', `MTD ${fmt(p.cur)} · Stock ${fmt(p.stock)}`].filter(Boolean).join(' · '),
+              value: p.name, inputValue: p.name, person: p };
+          }),
+          onPick: (it) => { if (it && it.person) pick(it.person); },
+          onEnter: (q) => { const hit = matchPeople(state.list, q)[0]; if (hit) pick(hit); else if (clean(q)) U.toast('Koi matching Agent ya TL nahi mila', 'warn'); }
+        });
+      } catch (err) { console.warn('[agentSummary] suggest init failed:', err); }
+      qEl.addEventListener('input', () => { state.q = qEl.value; clearTimeout(qTimer); qTimer = setTimeout(() => renderTopChips(qEl.value), 120); });
       qEl.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          const hits = matchPeople(state.list, qEl.value);
-          if (hits[0]) pick(hits[0]);
-        } else if (e.key === 'Escape') {
-          drop.hidden = true;
+        if (e.key === 'Enter' && (!asSuggest || qEl.getAttribute('aria-expanded') !== 'true')) {
+          e.preventDefault(); const hit = matchPeople(state.list, qEl.value)[0]; if (hit) pick(hit); else U.toast('Koi matching Agent ya TL nahi mila', 'warn');
         }
       });
-      if (searchBtn) {
-        searchBtn.addEventListener('click', () => {
-          const hits = matchPeople(state.list, qEl.value);
-          if (hits[0]) pick(hits[0], { fresh: true }); // Search = fresh report (cache bypass)
-          else U.toast('Koi matching Agent ya TL nahi mila', 'warn');
-        });
-      }
+      if (searchBtn) searchBtn.addEventListener('click', () => {
+        if (asSuggest && asSuggest.close) asSuggest.close();
+        const hit = matchPeople(state.list, qEl.value); if (hit[0]) pick(hit[0], { fresh: true }); else U.toast('Koi matching Agent ya TL nahi mila', 'warn');
+      });
+
       const refreshBtn = U.$('#as-refresh-btn', root);
       if (refreshBtn) {
         refreshBtn.addEventListener('click', async () => {
@@ -1367,8 +1357,9 @@ FF.pages = FF.pages || {};
         // v3.40 — row ke andar [data-kpi] cell (stock number) par click = us number ki detail drawer
         // (app.js ka global handler), summary switch nahi.
         if (opt && !e.target.closest('[data-kpi]')) {
-          const [kind, name] = (opt.dataset.asOpt || opt.dataset.asPick).split('|');
-          const found = state.list.find((x) => x.kind === kind && norm(x.name) === norm(name)) || { kind, name };
+          const tokenData = parsePersonUiToken(opt.dataset.asOpt || opt.dataset.asPick);
+          const found = state.list.find((x) => x.kind === tokenData.kind && (tokenData.id ? idKey(x.id) === idKey(tokenData.id) : norm(x.name) === norm(tokenData.name)))
+            || { kind: tokenData.kind, name: tokenData.name, id: tokenData.id };
           pick(found);
           return;
         }
