@@ -32,6 +32,9 @@ test('Apps Script store: redirect-follow, batching, encryption, wrong secret and
     mock.failWrites(2);
     await store.save('settings', { brand: 'Retried' });
     assert.equal((await store.read()).settings.brand, 'Retried', '503 is retried');
+    // Critical safety: missing cloud settings must fail closed, never be silently replaced with defaults.
+    delete mock.records.settings;
+    await assert.rejects(new AppsScriptStore({ url: mock.url, secret: SECRET }).read(), /no settings row/);
     assert.throws(() => new AppsScriptStore({ url: 'https://evil.example.com/exec', secret: SECRET }), /script\.google\.com/);
     assert.throws(() => new AppsScriptStore({ url: mock.url, secret: 'short' }), /16 characters/);
   } finally { await mock.close(); }
