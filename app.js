@@ -1113,6 +1113,8 @@ window.FF = window.FF || {};
   }
   async function exportDrawerPdf(btn) {
     if (!FF.auth.can('export')) { U.toast('Download permission nahi hai', 'err'); return; }
+    const drawerPdfName = `${U.slug(d.title || 'drawer')}-${U.stamp()}.pdf`;
+    if (U.downloadStart) U.downloadStart(drawerPdfName, 'Preparing PDF…');
     try {
       if (!FF.pdf && FF.lazy && FF.lazy.need) await FF.lazy.need('pdf');
       if (!FF.pdf || !FF.pdf.doc) { U.toast('PDF module load nahi hua', 'err'); return; }
@@ -1133,7 +1135,7 @@ window.FF = window.FF || {};
         used = true;
       });
       if (!used) doc.text('Summary details exported.');
-      FF.pdf.download(doc.finish(), `${U.slug(d.title || 'drawer')}-${U.stamp()}.pdf`);
+      FF.pdf.download(doc.finish(), drawerPdfName);
       U.toast('Drawer PDF downloaded ✓', 'ok');
     } catch (err) {
       U.toast((err && err.message) || 'PDF export failed', 'err');
