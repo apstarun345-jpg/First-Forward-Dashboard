@@ -373,7 +373,10 @@ window.FF = window.FF || {};
     const gi = growthBlock(growthSrc, out.totals, ym, out.ch);
     out.growth = gi.text;
     out.growthNum = gi.num;
-    out.projT1 = { num: gi.num, total: gi.projected, vc4: gi.projectedVc4, comm: gi.projectedComm, sheet: gi.sheetProjected, days: gi.basis.days, basis: gi.basis, growthThrough: gi.growthThrough, comparableCurrent: gi.comparableCurrent, comparableLast: gi.comparableLast };
+    out.mtdGrowthNum = gi.mtdGrowthNum;
+    out.projectedGrowth = gi.projectedGrowth;
+    out.projectedGrowthNum = gi.projectedGrowth;
+    out.projT1 = { num: gi.num, total: gi.projected, vc4: gi.projectedVc4, comm: gi.projectedComm, sheet: gi.sheetProjected, days: gi.basis.days, basis: gi.basis, growthThrough: gi.growthThrough, comparableCurrent: gi.comparableCurrent, comparableLast: gi.comparableLast, projectedCurrent: gi.projectedCurrent, projectedGrowth: gi.projectedGrowth };
     return gi;
   }
 
