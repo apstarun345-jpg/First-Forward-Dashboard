@@ -1,0 +1,98 @@
+/* ux-fast.css — login animation + fast/responsive polish (v1)
+   Sirf transform/opacity animate hote hain (GPU, smooth). Hamesha sabse last load hota hai.
+   Band karne ke liye: OS "Reduce motion" ya Settings → Animations band (ff-no-anim). */
+
+/* ---------- 1) Login animation ---------- */
+@keyframes ffLoginIn { from { opacity: 0; transform: translateY(18px) scale(.985); } to { opacity: 1; transform: none; } }
+@keyframes ffRise    { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+@keyframes ffSlideL  { from { opacity: 0; transform: translateX(-16px); } to { opacity: 1; transform: none; } }
+@keyframes ffFloatA  { from { transform: translate3d(0,0,0) scale(1); } to { transform: translate3d(34px,26px,0) scale(1.12); } }
+@keyframes ffFloatB  { from { transform: translate3d(0,0,0) scale(1); } to { transform: translate3d(-30px,-24px,0) scale(1.1); } }
+@keyframes ffGrid    { from { transform: translate3d(0,0,0); } to { transform: translate3d(40px,40px,0); } }
+@keyframes ffShine   { 0%, 55% { transform: translateX(-130%); } 100% { transform: translateX(130%); } }
+@keyframes ffTabPop  { 0% { transform: scale(.94); } 60% { transform: scale(1.04); } 100% { transform: scale(1); } }
+
+.auth-shell.pro-shell { animation: ffLoginIn .6s cubic-bezier(.2, .7, .2, 1) both; }
+
+/* Left visual: floating glows + drifting grid */
+.auth-visual.pro-visual .pro-glow.g1 { animation: ffFloatA 9s ease-in-out infinite alternate; will-change: transform; }
+.auth-visual.pro-visual .pro-glow.g2 { animation: ffFloatB 11s ease-in-out infinite alternate; will-change: transform; }
+.auth-visual.pro-visual .pro-grid { inset: -44px; animation: ffGrid 26s linear infinite; will-change: transform; }
+.auth-visual.pro-visual .auth-visual-inner > * { animation: ffSlideL .6s cubic-bezier(.2, .7, .2, 1) both; }
+.auth-visual.pro-visual .auth-visual-inner > :nth-child(1) { animation-delay: .15s; }
+.auth-visual.pro-visual .auth-visual-inner > :nth-child(2) { animation-delay: .27s; }
+.auth-visual.pro-visual .auth-visual-inner > :nth-child(3) { animation-delay: .39s; }
+.auth-visual.pro-visual .auth-visual-inner > :nth-child(4) { animation-delay: .51s; }
+.auth-visual.pro-visual .auth-visual-inner > :nth-child(n+5) { animation-delay: .62s; }
+
+/* Right panel: header, tabs and form fields rise one after another */
+.pro-panel .pro-brand-sm,
+.pro-panel .pro-login-header,
+.pro-panel .pro-tabs,
+.pro-panel .pro-form > * { animation: ffRise .5s cubic-bezier(.2, .7, .2, 1) both; }
+.pro-panel .pro-brand-sm   { animation-delay: .12s; }
+.pro-panel .pro-login-header { animation-delay: .2s; }
+.pro-panel .pro-tabs       { animation-delay: .28s; }
+.pro-panel .pro-form > :nth-child(1) { animation-delay: .34s; }
+.pro-panel .pro-form > :nth-child(2) { animation-delay: .41s; }
+.pro-panel .pro-form > :nth-child(3) { animation-delay: .48s; }
+.pro-panel .pro-form > :nth-child(4) { animation-delay: .55s; }
+.pro-panel .pro-form > :nth-child(5) { animation-delay: .62s; }
+.pro-panel .pro-form > :nth-child(n+6) { animation-delay: .7s; }
+.pro-panel .pro-tabs .seg-btn.on { animation: ffTabPop .35s ease-out; }
+
+/* Login button: soft shine sweep (busy state ka ::after untouched) */
+.pro-submit { position: relative; overflow: hidden; }
+.pro-submit::before { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(110deg, transparent 30%, rgba(255, 255, 255, .24) 50%, transparent 70%); transform: translateX(-130%); animation: ffShine 3.4s ease-in-out 1.4s infinite; }
+.pro-submit:disabled::before, .pro-submit.busy::before { animation: none; opacity: 0; }
+.pro-submit:active { transform: scale(.985); }
+.pro-input { transition: border-color .2s, box-shadow .2s, transform .2s !important; }
+.pro-input:focus { transform: translateY(-1px); }
+
+/* ---------- 2) Fast + responsive ---------- */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+body { overflow-x: clip; }                       /* sideways scroll nahi */
+img, video, canvas, svg { max-width: 100%; }
+.kpi-grid > *, .card, .panel, .content > * { min-width: 0; }
+.table-wrap, .tbl-wrap, .data-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; }
+button, .btn, .nav-item, .seg-btn, a, input, select, textarea { touch-action: manipulation; }  /* 300ms tap delay hatao */
+.app-boot, .auth-shell.single { min-height: 100dvh; }
+
+@media (max-width: 900px) {
+  .auth-visual.pro-visual { display: none; }       /* chhoti screen par heavy visual load hi nahi hota */
+  .auth-shell.pro-shell { min-height: 0; animation-duration: .45s; }
+}
+@media (max-width: 600px) {
+  .pro-input, .input, select, textarea { font-size: 16px !important; }   /* iPhone auto-zoom band */
+  .pro-submit, .btn.big { min-height: 48px; }
+}
+@media (pointer: coarse) {
+  .nav-item, .seg-btn, .icon-btn { min-height: 44px; }
+}
+@media (hover: none) {
+  .kpi:hover, .card:hover, .btn:hover { transform: none; }
+}
+
+/* Slow/battery-saver devices: bhari infinite effects band, login entry animation rehne do */
+html.ff-no-anim .auth-visual.pro-visual .pro-glow,
+html.ff-no-anim .auth-visual.pro-visual .pro-grid,
+html.ff-no-anim .pro-submit::before { animation: none !important; }
+html.ff-no-anim .auth-shell.pro-shell,
+html.ff-no-anim .auth-visual.pro-visual .auth-visual-inner > *,
+html.ff-no-anim .pro-panel .pro-brand-sm,
+html.ff-no-anim .pro-panel .pro-login-header,
+html.ff-no-anim .pro-panel .pro-tabs,
+html.ff-no-anim .pro-panel .pro-form > * { animation: none !important; opacity: 1; transform: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-shell.pro-shell,
+  .auth-visual.pro-visual .pro-glow,
+  .auth-visual.pro-visual .pro-grid,
+  .auth-visual.pro-visual .auth-visual-inner > *,
+  .pro-panel .pro-brand-sm,
+  .pro-panel .pro-login-header,
+  .pro-panel .pro-tabs,
+  .pro-panel .pro-tabs .seg-btn.on,
+  .pro-panel .pro-form > * { animation: none !important; opacity: 1; transform: none; }
+  .pro-submit::before { display: none; }
+}
