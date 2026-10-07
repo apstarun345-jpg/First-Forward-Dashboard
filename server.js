@@ -64,7 +64,7 @@ const MIME = {
 const BLOCKED_FILES = new Set(['server.js', 'sheets-storage.js', 'apps-script-storage.js', 'mailer.js', 'stock-age.js', 'DEPLOYMENT.md', 'SHEETS_STORAGE.md', 'STORAGE_SETUP.md', 'RECOVERY.md', 'package.json', 'package-lock.json', 'render.yaml', 'README.md', '.env']);
 const BLOCKED_DIRS = new Set(['data', 'dev', 'node_modules', '.git', 'google-apps-script']);
 // /api/health ka version ab package.json se aata hai (pehle yahan hardcoded purana string tha).
-let APP_VERSION = '3.63.0';
+let APP_VERSION = '3.64.0';
 try { APP_VERSION = String(JSON.parse(readFileSync(path.join(__dirname, 'package.json'), 'utf8')).version || APP_VERSION); } catch { /* keep fallback */ }
 
 // ---------------------------------------------------------------------------------------------
@@ -752,7 +752,8 @@ function sessionUser(req) {
 }
 function isSecure(req) { return (req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https'; }
 function cookieHeader(req, token, maxAgeSec) {
-  return `ff_sid=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSec}${isSecure(req) ? '; Secure' : ''}`;
+  // 🔐 Persistent login cookie. Its Max-Age matches the server-side durable session TTL.
+  return `ff_sid=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${Math.max(86400, Number(maxAgeSec) || SESSION_DAYS * 86400)}${isSecure(req) ? '; Secure' : ''}`;
 }
 async function bootstrapAdmin() {
   if (ADMIN_USER && ADMIN_PASSWORD) {
@@ -8316,9 +8317,12 @@ async function start() {
       await recoveryDiagnostic();
       const autoRecovery = await autoRecoverHistoryOnce(stored);
       if (autoRecovery && autoRecovery.data && Array.isArray(autoRecovery.data.users) && autoRecovery.data.users.length) {
+        const recoveredSessions = autoRecovery.data.sessions && typeof autoRecovery.data.sessions === 'object' ? autoRecovery.data.sessions : {};
         stored = {
           users: autoRecovery.data.users,
-          sessions: {},
+          // 🔐 Preserve the currently durable APP_STORAGE sessions across history recovery.
+          // Recovery must NEVER log everybody out by replacing sessions with {}.
+          sessions: { ...(stored.sessions && typeof stored.sessions === 'object' ? stored.sessions : {}), ...recoveredSessions },
           settings: autoRecovery.data.settings && typeof autoRecovery.data.settings === 'object' ? autoRecovery.data.settings : stored.settings,
           resets: Array.isArray(autoRecovery.data.resets) ? autoRecovery.data.resets : stored.resets,
           notify: autoRecovery.data.notify && typeof autoRecovery.data.notify === 'object' ? autoRecovery.data.notify : stored.notify
