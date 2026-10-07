@@ -793,6 +793,50 @@ function noteFail(key) {
 }
 function clearLoginFailures(key) { attempts.delete(key); }
 
+// 🛟 Password recovery fallback for the encrypted APP_STORAGE_HISTORY journal.
+// If the current user record was accidentally overwritten, a previously saved password hash
+// can still prove ownership. On a successful historical-password match, only the password hash
+// is restored into the CURRENT user record; settings/sessions/other data are untouched.
+// This runs only after a normal password check fails and only on the Apps Script cloud backend.
+async function recoverPasswordFromHistory(loginId, password, currentUser) {
+  if (!sheetsStore || STORAGE_BACKEND !== 'appsscript' || !currentUser || !password) return false;
+  try {
+    const h = await sheetsStore.history({ withData: true });
+    const entries = (h.entries || [])
+      .filter((e) => e && e.kind === 'users' && e.data)
+      .sort((a, b) => (Date.parse(b.savedAt) || 0) - (Date.parse(a.savedAt) || 0));
+    const input = String(loginId || '').trim();
+    const lower = input.toLowerCase();
+    const digits = input.replace(/\\D/g, '');
+    for (const e of entries.slice(0, 40)) {
+      let users = null;
+      try { users = sheetsStore.decode('users', { v: e.version, data: e.data }); } catch { continue; }
+      if (!Array.isArray(users)) continue;
+      const historical = users.find((x) => {
+        if (!x) return false;
+        if (String(x.username || '').trim().toLowerCase() === String(currentUser.username || '').trim().toLowerCase()) return true;
+        if (lower && x.email && String(x.email).trim().toLowerCase() === lower) return true;
+        if (digits.length >= 7 && x.mobile) {
+          const md = String(x.mobile).replace(/\\D/g, '');
+          if (md === digits) return true;
+          if (md.length >= 10 && digits.length >= 10 && md.slice(-10) === digits.slice(-10)) return true;
+        }
+        return false;
+      });
+      if (historical && historical.password && verifyPassword(password, historical.password)) {
+        currentUser.password = historical.password;
+        await persist('users');
+        console.warn('🔐 Password recovered from APP_STORAGE_HISTORY for an existing account:', currentUser.username);
+        logAudit(currentUser, 'password_recovered_from_history', { target: currentUser.username, ip: 'login-recovery', note: 'historical password hash restored' });
+        return true;
+      }
+    }
+  } catch (err) {
+    console.warn('password history recovery skipped:', err.message);
+  }
+  return false;
+}
+
 // ---------------------------------------------------------------------------------------------
 // HTTP helpers
 // ---------------------------------------------------------------------------------------------
@@ -4569,10 +4613,16 @@ async function handleApi(req, res, url) {
     const u = findUserByLogin(loginId) || findUserByLogin(body.username);
     const rawPassword = typeof body.password === 'string' ? body.password : String(body.password || '');
     const cleanPassword = rawPassword.trim();
-    const passwordOk = !!u && (
+    let passwordOk = !!u && (
       verifyPassword(rawPassword, u.password) ||
       (cleanPassword !== rawPassword && verifyPassword(cleanPassword, u.password))
     );
+    // 🛟 One-time-safe recovery path: if APP_STORAGE has the account but its password hash was
+    // accidentally changed, validate against recent encrypted history and repair ONLY the hash.
+    if (!passwordOk && u && (STORAGE_BACKEND === 'appsscript')) {
+      passwordOk = await recoverPasswordFromHistory(loginId, rawPassword, u);
+      if (!passwordOk && cleanPassword !== rawPassword) passwordOk = await recoverPasswordFromHistory(loginId, cleanPassword, u);
+    }
     if (!passwordOk) { noteFail(attemptKey); logAudit(null, 'login_failed', { actor: loginId, ip, note: 'galat password/ID' }); throw new HttpError(401, 'Invalid login — check username / email / mobile and password.'); }
     if (!u.approved) throw new HttpError(403, 'Account pending admin approval.');
     clearLoginFailures(attemptKey);
