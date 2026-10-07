@@ -44,6 +44,9 @@ const SESSION_DAYS = Math.max(1, Number(process.env.SESSION_DAYS || 30));
 // a default admin (admin / admin123) is created and must change its password.
 const ADMIN_USER = (process.env.ADMIN_USER || '').trim().toLowerCase();
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
+// One-time account recovery: when enabled, the configured ADMIN_* credentials may
+// repair the existing matching account once, without creating a duplicate account.
+const ADMIN_FORCE_RESET = process.env.ADMIN_FORCE_RESET === '1';
 const MAX_BODY = 6 * 1024 * 1024; // settings may carry two base64 images
 
 const MIME = {
@@ -728,10 +731,25 @@ function cookieHeader(req, token, maxAgeSec) {
 }
 async function bootstrapAdmin() {
   if (ADMIN_USER && ADMIN_PASSWORD) {
-    if (findUser(ADMIN_USER)) return; // Environment credentials bootstrap ONCE, not every restart.
+    const existing = findUser(ADMIN_USER);
+    if (existing) {
+      // Explicit one-time recovery only. Never overwrite a working password on ordinary restarts.
+      if (ADMIN_FORCE_RESET && existing.recoveryAdminResetApplied !== true) {
+        existing.password = hashPassword(ADMIN_PASSWORD);
+        existing.approved = true;
+        existing.role = 'admin';
+        existing.permissions = allPermKeysNow();
+        existing.mustChangePassword = true;
+        existing.recoveryAdminResetApplied = true;
+        await persist('users');
+        console.warn(`🔐 One-time admin credential recovery applied for "${ADMIN_USER}".`);
+      }
+      return;
+    }
     const u = { username: ADMIN_USER, name: 'Admin', createdAt: new Date().toISOString(),
       role: 'admin', approved: true, permissions: allPermKeysNow(), mustChangePassword: false,
       password: hashPassword(ADMIN_PASSWORD) };
+    if (ADMIN_FORCE_RESET) u.recoveryAdminResetApplied = true;
     db.users.unshift(u);
     await persist('users');
     console.log(`Admin "${ADMIN_USER}" created from environment.`);
