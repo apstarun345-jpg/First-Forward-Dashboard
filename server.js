@@ -8427,6 +8427,7 @@ async function start() {
   // 🔐 Panel-permission migration (v3.8.2 / v3.37) — existing users ka access lock na ho.
   bootState.stage = 'migrating:permissions';
   await migrateUserPermissions();
+  const storedNotify = stored.notify && typeof stored.notify === 'object' ? stored.notify : {};
   // `vapid` + `pushLog` bhi durable hain — inke bina har restart par nayi VAPID key banti thi aur
   // phone ke notification panel me push aana band ho jaata tha (subscriptions 403 par reject hoti thin).
   db.notify = { items: Array.isArray(storedNotify.items) ? storedNotify.items.slice(-500) : [], watch: storedNotify.watch && typeof storedNotify.watch === 'object' ? storedNotify.watch : {}, push: Array.isArray(storedNotify.push) ? storedNotify.push.slice(-300) : [], pushLog: Array.isArray(storedNotify.pushLog) ? storedNotify.pushLog.slice(-40) : [], vapid: storedNotify.vapid && typeof storedNotify.vapid === 'object' ? storedNotify.vapid : null, workspace: storedNotify.workspace && typeof storedNotify.workspace === 'object' ? storedNotify.workspace : { views: [], notes: [] } };
