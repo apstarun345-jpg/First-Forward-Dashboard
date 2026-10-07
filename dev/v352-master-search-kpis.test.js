@@ -124,8 +124,8 @@ test('Global search bar is eagerly mounted across the app and covers both channe
   // v3.61: masterSearch ab eager nahi (pehle index.html me app.js se pehle load hota tha, ~100 KB
   // extra first paint se pehle). Ab ye shell-extra wave me aata hai — loader (lazy.js) shell se pehle
   // load hona chahiye, aur search module usi wave list me hona chahiye.
-  const lazyAt = idx.indexOf('lazy.js?v=104');
-  const appAt = idx.indexOf('app.js?v=109');
+  const lazyAt = idx.indexOf('lazy.js?v=110');
+  const appAt = idx.indexOf('app.js?v=110');
   assert.ok(lazyAt >= 0 && appAt > lazyAt, 'loader app shell se pehle load hota hai');
   assert.ok(!/src="masterSearch\.js/.test(idx), 'search module eager nahi — first paint halka');
   assert.match(lazy, /\['masterSearch', 'palette'\]/, 'search shell-extra wave me hai');
@@ -173,10 +173,10 @@ test('🚦 startup readiness — Render health stays green and storage retry is 
 
 test('🏷️ v3.61 wiring — version pins + automatic cache-busting', async () => {
   const pkg = JSON.parse(await read('package.json'));
-  assert.equal(pkg.version, '3.62.0');
+  assert.equal(pkg.version, '3.64.0');
   assert.match(await read('server.js'), /APP_VERSION = '3\.62\.0'/);
   const idx = await read('index.html');
-  assert.match(idx, /styles\.css\?v=114/); assert.match(idx, /config\.js\?v=109/); assert.match(idx, /home\.js\?v=91/); assert.match(idx, /app\.js\?v=109/); assert.match(idx, /lazy\.js\?v=104/);
+  assert.match(idx, /styles\.css\?v=114/); assert.match(idx, /config\.js\?v=110/); assert.match(idx, /home\.js\?v=91/); assert.match(idx, /app\.js\?v=110/); assert.match(idx, /lazy\.js\?v=110/);
   // masterSearch ab shell-extra hai (first paint ke baad load hota hai) — index.html me eager nahi.
   assert.ok(!/src="masterSearch\.js/.test(idx), 'masterSearch eager nahi (first paint ke baad aata hai)');
   const sw = await read('sw.js');
