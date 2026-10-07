@@ -384,21 +384,40 @@ window.FF = window.FF || {};
   }
 
   async function init() {
-    try {
-      const me = await api('/api/auth/me');
-      state.permissions = me.permissions || [];
-      applySettings(me.settings);
-      // 👁 stored preview tab hi chale jab logged-in account real admin ho (warna clear).
-      if (viewAs && (!me.user || me.user.role !== 'admin')) stopViewAs();
-      if (me.user) { state.user = me.user; state.ready = true; if (typeof window.__FF_FINISH_BOOT === 'function') window.__FF_FINISH_BOOT(); else { const boot = U.$('#app-boot'); if (boot) boot.remove(); } return true; }
-    } catch (err) {
-      console.error(err);
-      screen(`<div class="auth-shell single"><div class="auth-panel"><div class="auth-card"><h2>Unable to connect to server</h2><p class="dim">${esc(err.message)}</p><button class="btn primary" onclick="location.reload()">Retry</button></div></div></div>`);
-      return false;
+    // Render may expose the shell a few seconds before durable storage finishes loading.
+    // /api/auth/me returns 503 + booting:true during that window; retry automatically
+    // instead of trapping the user on a manual connection error screen.
+    const maxBootRetries = 7;
+    for (let attempt = 0; attempt <= maxBootRetries; attempt++) {
+      try {
+        const me = await api('/api/auth/me');
+        state.permissions = me.permissions || [];
+        applySettings(me.settings);
+        if (viewAs && (!me.user || me.user.role !== 'admin')) stopViewAs();
+        if (me.user) {
+          state.user = me.user; state.ready = true;
+          if (typeof window.__FF_FINISH_BOOT === 'function') window.__FF_FINISH_BOOT();
+          else { const boot = U.$('#app-boot'); if (boot) boot.remove(); }
+          return true;
+        }
+        showLogin('login');
+        return false;
+      } catch (err) {
+        const booting = err && err.status === 503 && err.data && err.data.booting;
+        if (booting && attempt < maxBootRetries) {
+          const wait = Math.min(5000, 700 + attempt * 700);
+          screen('<div class="auth-shell single"><div class="auth-panel"><div class="auth-card"><h2>Workspace starting…</h2><p class="dim">Durable storage load ho rahi hai. Automatic retry ' + (attempt + 1) + '/' + maxBootRetries + '…</p><button class="btn primary" onclick="location.reload()">Retry now</button></div></div></div>');
+          await new Promise((resolve) => setTimeout(resolve, wait));
+          continue;
+        }
+        console.error(err);
+        screen('<div class="auth-shell single"><div class="auth-panel"><div class="auth-card"><h2>Unable to connect to server</h2><p class="dim">' + esc(err.message) + '</p><button class="btn primary" onclick="location.reload()">Retry</button></div></div></div>');
+        return false;
+      }
     }
-    showLogin('login');
     return false;
   }
+
   async function logout() {
     // ⚡ Instant UI — don't wait for the network round-trip before clearing state.
     state.user = null;
