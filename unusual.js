@@ -738,7 +738,7 @@ FF.pages = FF.pages || {};
     if (U.downloadYield) await U.downloadYield();
     try {
       if (!FF.pdf && FF.lazy && FF.lazy.need) await FF.lazy.need('pdf');
-      if (!FF.pdf) { U.toast('PDF module load nahi hua', 'err'); return; }
+      if (!FF.pdf || !FF.pdf.doc) throw new Error('PDF module load nahi hua');
       if (btn) U.setButtonBusy(btn, true, 'PDF…');
       const m = metric || metricFor(model, state.flag);
       const totIssued = U.sum(rows, (r) => r.total);
