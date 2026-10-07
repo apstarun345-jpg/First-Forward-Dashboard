@@ -269,19 +269,97 @@ window.FF = window.FF || {};
   const basis = (ch) => (U.channelBasis
     ? U.channelBasis(ch, { force: true })
     : (U.reportBasis ? U.reportBasis({ force: true }) : { day: U.runRateDays(), days: U.runRateDays(), label: '', back: 1, shortLabel: '' }));
+  /**
+   * 📈 Comparable MTD growth — current month ko yesterday tak aur previous month ko
+   * usi calendar day tak compare karta hai. Whole previous-month total kabhi compare nahi hota.
+   * Example: 7 Oct ko → 1–6 Oct vs 1–6 Sep.
+   */
+  function comparableMtdGrowth(pr, ch) {
+    const channel = /^gv/i.test(String(ch || pr.ch || pr.channel || '')) ? 'gv' : 'ff';
+    const now = new Date();
+    const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+    const curYm = U.ymKey(yesterday);
+    const prevYm = U.prevMonthKey(curYm);
+    const day = yesterday.getDate();
+    const prevLastDay = U.daysInMonth(prevYm);
+    const prevCutDay = Math.min(day, prevLastDay);
+    const curStart = `${curYm}-01`;
+    const curEnd = U.dateKey(yesterday);
+    const prevStart = `${prevYm}-01`;
+    const prevEndDate = U.fromDateKey(`${prevYm}-${String(prevCutDay).padStart(2, '0')}`);
+    const prevEnd = U.dateKey(prevEndDate);
+    const rowDateKey = (r) => {
+      try {
+        if (r && r.key && /^\\d{4}-\\d{1,2}-\\d{1,2}$/.test(String(r.key))) return U.dateKey(U.fromDateKey(String(r.key)));
+        const raw = r && (r.date || r.d || r.createdAt);
+        const d = raw instanceof Date ? raw : U.parseDate(raw);
+        return d && !isNaN(d) ? U.dateKey(d) : '';
+      } catch { return ''; }
+    };
+    let rows = [];
+    try {
+      if (channel === 'gv') {
+        if (/-tl$/i.test(String(pr && pr.kind || ''))) {
+          rows = (FF.gv && FF.gv.tlIssuanceRows ? FF.gv.tlIssuanceRows(pr.id || '', pr.name || '') : []) || [];
+        } else {
+          rows = gvCanonicalIssuanceRows() || [];
+        }
+      } else {
+        rows = rowsOf('daily') || [];
+      }
+    } catch { rows = []; }
+    const tl = /-tl$/i.test(String(pr && pr.kind || ''));
+    const wantName = norm(pr && pr.name);
+    const wantId = clean(pr && pr.id).replace(/\\.0+$/, '').toUpperCase();
+    const belongs = (r) => {
+      if (!r) return false;
+      if (channel === 'gv') {
+        if (tl) {
+          const rid = clean(r.tlId || r.gvTlId || r.supervisorId).replace(/\\.0+$/, '').toUpperCase();
+          return (wantId && rid && rid === wantId) || (!wantId && wantName && norm(r.tlName) === wantName);
+        }
+        const rid = clean(r.agentId).replace(/\\.0+$/, '').toUpperCase();
+        return (wantId && rid && rid === wantId) || (!wantId && wantName && norm(r.agentName) === wantName);
+      }
+      if (String(r.channel || '').toLowerCase().includes('gv')) return false;
+      if (tl) {
+        const rid = clean(r.tlId).replace(/\\.0+$/, '').toUpperCase();
+        return (wantId && rid && rid === wantId) || (!wantId && wantName && norm(r.tlName) === wantName);
+      }
+      const rid = clean(r.agentId || r.id).replace(/\\.0+$/, '').toUpperCase();
+      return (wantId && rid && rid === wantId) || (!wantId && wantName && norm(r.agentName || r.name) === wantName);
+    };
+    let cur = 0, last = 0, curRows = 0, lastRows = 0;
+    rows.forEach((r) => {
+      if (!belongs(r)) return;
+      const k = rowDateKey(r);
+      if (!k) return;
+      const n = num(r.n || r.count || 1);
+      if (k >= curStart && k <= curEnd) { cur += n; curRows++; }
+      else if (k >= prevStart && k <= prevEnd) { last += n; lastRows++; }
+    });
+    // No comparable previous-period data = don't invent 0%/100% growth.
+    const growth = last > 0 ? ((cur - last) / last) * 100 : (last === 0 && cur === 0 ? 0 : null);
+    return { growth, current: cur, last, curRows, lastRows, day, currentEnd: curEnd, previousEnd: prevEnd, label: U.labelDateKey(curEnd), currentYm: curYm, previousYm: prevYm };
+  }
+
   /** Growth % (sheet ka apna, warna totals se) + month-end projection us channel ke basis par. */
   function growthBlock(o, totals, ym, ch) {
     const b = basis(ch);
     const t = totals || {};
+    const comparable = comparableMtdGrowth({ ...t, kind: o.kind || '', name: o.name || '', id: o.id || '', ch }, ch);
     const sheet = pctText(o.growth);
-    const g = sheet !== null ? sheet : U.growth(num(t.curTotal), num(t.lastTotal));
+    const g = comparable && comparable.growth !== null ? comparable.growth : (sheet !== null ? sheet : U.growth(num(t.curTotal), num(t.lastTotal)));
     const proj = (k) => U.projectMonthEnd(t[k], b.days, ym);
+    const growthText = g === null ? '' : `${g >= 0 ? '▲ +' : '▼ '}${Math.abs(g).toFixed(1)}%`;
+    const growthBasis = { ...b, growthThrough: comparable ? comparable.label : '', growthCurrent: comparable ? comparable.current : null, growthLast: comparable ? comparable.last : null };
     return {
-      text: o.growth || (g === null ? '' : `${g >= 0 ? '▲ +' : '▼ '}${Math.abs(g).toFixed(1)}%`),
-      num: g, basis: b,
+      text: growthText,
+      num: g, basis: growthBasis, growthThrough: comparable ? comparable.label : '',
+      comparableCurrent: comparable ? comparable.current : null,
+      comparableLast: comparable ? comparable.last : null,
       cur: num(t.curTotal), last: num(t.lastTotal),
       projected: proj('curTotal'), projectedVc4: proj('curVc4'), projectedComm: proj('curComm'),
-      // Sheet ka apna projected (REPORT) — hamare recompute se compare karne ke liye rakhte hain.
       sheetProjected: num(o.projected) || num(o.curProjected) || num(o.tlProjected)
     };
   }
@@ -290,7 +368,7 @@ window.FF = window.FF || {};
     const gi = growthBlock(src || {}, out.totals, ym, out.ch);
     out.growth = gi.text;
     out.growthNum = gi.num;
-    out.projT1 = { num: gi.num, total: gi.projected, vc4: gi.projectedVc4, comm: gi.projectedComm, sheet: gi.sheetProjected, days: gi.basis.days, basis: gi.basis };
+    out.projT1 = { num: gi.num, total: gi.projected, vc4: gi.projectedVc4, comm: gi.projectedComm, sheet: gi.sheetProjected, days: gi.basis.days, basis: gi.basis, growthThrough: gi.growthThrough, comparableCurrent: gi.comparableCurrent, comparableLast: gi.comparableLast };
     return gi;
   }
 
