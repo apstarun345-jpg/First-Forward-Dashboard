@@ -1856,8 +1856,7 @@ window.FF = window.FF || {};
     await renderCurrent({ bootGate: true });
 
     // Background module warming must NEVER hold the first screen hostage.
-    // The critical route above controls normal release; the 3.9s safety cap handles slow devices.
-    await Promise.resolve(warmPromise).catch(() => {});
+    // Do not await warmPromise here; it continues in the background after the shell is visible.
     bootSetMessage('Workspace ready ✓', 'Your dashboard data is loaded.');
     await releaseWorkspaceBoot();
 
