@@ -1123,14 +1123,20 @@ window.FF = window.FF || {};
     const ac = rowsOf('agentClass'), agRows = rowsOf('agents'), stk = rowsOf('stockAgents');
     const n = norm(p.name);
     const curYm = latestYm(ac.length ? ac : agRows), lastYm = U.prevMonthKey(curYm);
-    const personId = clean(p.sub).replace(/\.0+$/, '').toUpperCase();
+    const identityIds = new Set([p.sub, a && a.agentId, a && a.id].map((v) => clean(v).replace(/\.0+$/, '').toUpperCase()).filter(Boolean));
+    const personId = clean((a && (a.agentId || a.id)) || p.sub).replace(/\.0+$/, '').toUpperCase();
     const rowAgentId = (r) => clean(r.agentId || r.id).replace(/\.0+$/, '').toUpperCase();
     const isMine = (r) => {
       if (r.channel && !/first/i.test(r.channel)) return false;
-      if (personId) return rowAgentId(r) === personId;
-      return norm(r.name) === n;
+      const rid = rowAgentId(r);
+      if (rid && identityIds.has(rid)) return true;
+      if (norm(r.name || r.agentName) !== n) return false;
+      const rtl = norm(r.tlName || r.tl);
+      const atl = norm(a && a.tlName);
+      const rtlId = clean(r.tlId).replace(/\.0+$/, '').toUpperCase();
+      const atlId = clean(a && a.tlId).replace(/\.0+$/, '').toUpperCase();
+      return !atlId || !rtlId || rtlId === atlId || !atl || !rtl || rtl === atl;
     };
-    const identityIds = new Set([p.sub, a && a.agentId, a && a.id].map((v) => clean(v).replace(/\.0+$/, '').toUpperCase()).filter(Boolean));
     const eirRows = ffAgentIssueRows(p.name, [...identityIds], a && a.tlName, a && a.tlId);
     const eirBins = classBinsFromRows(eirRows, curYm, lastYm);
     if (a) {
