@@ -188,9 +188,9 @@ window.FF = window.FF || {};
   //    PEHLE). Ab first paint ke baad chhoti waves me aate hain aur apne hooks khud chala lete hain
   //    (notifications bell, KPI drill drawer, search, assistant, office bell, live assist).
   const SHELL_WAVES = [
-    ['notifications', 'liveView'],
+    // Global search is a core shell affordance — load it in the first idle wave.
+    ['masterSearch', 'palette', 'notifications', 'liveView'],
     ['kpiDetail', 'stockAge'],
-    ['masterSearch', 'palette'],
     ['officeBell', 'pushVoice'],
     ['assistant', 'liveAssist', 'morningCard']
   ];

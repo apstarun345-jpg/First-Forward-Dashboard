@@ -821,7 +821,10 @@ window.FF = window.FF || {};
       if (destroyed || !input.isConnected) { destroy(); return; }
       const q = norm(input.value.trim());
       if (q.length < o.min) { close(); return; }
-      const all = typeof o.items === 'function' ? o.items() : o.items || [];
+      let all = [];
+      try { all = typeof o.items === 'function' ? (o.items() || []) : (o.items || []); }
+      catch (err) { console.warn('suggest items error:', err && err.message); all = []; }
+      if (!Array.isArray(all)) all = [];
       const starts = [], contains = [];
       for (const it of all) {
         const hay = norm(`${it.label} ${it.sub || ''} ${it.keywords || ''}`);

@@ -492,12 +492,18 @@ FF.pages = FF.pages || {};
       warmFull();
       return [{ kind: 'cls', kindLabel: 'Search', label: `“${clean(q)}” search ho raha hai…`, sub: 'index ban raha hai (agents + TLs + IDs)', value: clean(q), none: true }];
     }
-    const r = search(q);
+    let r;
+    try { r = search(q) || { q: clean(q), people: [], tags: [], ids: [], matched: 0, heavy: false }; }
+    catch (err) {
+      console.warn('Master Search suggestion error:', err && err.message);
+      r = { q: clean(q), people: [], tags: [], ids: [], matched: 0, heavy: false };
+    }
     // Top-bar search is global: FF + GV dono suggestions yahan aayenge.\n    // Channel filter sirf dedicated Master Search page ke scope me apply hota hai.\n    const filteredPeople = (r.people || []);
     const items = [];
     filteredPeople.slice(0, 14).forEach((p) => {
       const tl = [...p.tlSet][0] || '';
-      const q1 = (r.people.length === 1 && MP()) ? MP().quick(p) : null;   // focused single result par hi expensive profile
+      let q1 = null;
+      if (r.people.length === 1 && MP()) { try { q1 = MP().quick(p); } catch (err) { console.warn('Master Search quick preview:', err && err.message); } }
       const isTlKind = /tl$/.test(p.kind);
       const extra = q1 ? [
         q1.mobile && (!FF.auth || FF.auth.can('contacts')) ? `📞 ${q1.mobile}` : '',
@@ -848,12 +854,19 @@ FF.pages = FF.pages || {};
   /** 🔎 Naya flow (v3.46): naam / ID search → seedha Management → **Master Search page**,
    *  jahan click karte hi uska poora related data (FF + GV) khul jaata hai — koi results list / modal box nahi.
    *  Barcode / tag-ID searches purane panel (tag-level rows) me hi jaate hain. */
-  function openSearchPage(q) {
+  function openSearchPage(q, person) {
     const name = clean(q);
     if (name.length < 2) { U.toast('Kam se kam 2 letter / digit type karo', 'warn'); return false; }
+    const p = person || {};
+    const kind = clean(p.kind);
+    const id = clean(p.id || p.sub);
+    const ch = /^gv-/i.test(kind) ? 'gv' : /^ff-/i.test(kind) ? 'ff' : '';
     state.lastQuery = name;
-    try { if (FF.app && FF.app.navigate) { FF.app.navigate('masterSearch', { q: name }); return true; } } catch { /* fall through */ }
-    try { location.hash = `#/masterSearch?q=${encodeURIComponent(name)}`; return true; } catch { return false; }
+    const params = { q: name };
+    if (id) params.id = id;
+    if (ch) params.ch = ch;
+    try { if (FF.app && FF.app.navigate) { FF.app.navigate('masterSearch', params); return true; } } catch {}
+    try { const extra = `${id ? `&id=${encodeURIComponent(id)}` : ''}${ch ? `&ch=${encodeURIComponent(ch)}` : ''}`; location.hash = `#/masterSearch?q=${encodeURIComponent(name)}${extra}`; return true; } catch { return false; }
   }
 
   function mountTopbar(force) {
@@ -901,7 +914,7 @@ FF.pages = FF.pages || {};
       onPick: (it) => {
         if (it.none) return;
         if (it.barcode) { openPanel(it.barcode); return; }              // 🏷️ barcode/tag = tag-level rows (list yahan theek)
-        if (it.person && it.person.name) { openSearchPage(it.person.name); return; }   // 🧑 naam → poora data page
+        if (it.person && it.person.name) { openSearchPage(it.person.name, it.person); return; }
         openSearchPage(it.label);
       },
       onEnter: (q) => { if (clean(q).length >= 2) openSearchPage(q); }
@@ -1001,6 +1014,7 @@ FF.pages = FF.pages || {};
   // -------------------------------------------------------------------------------------------------
   function pageRender(root, params) {
     const asked = clean((params && (params.q || params.name)) || '');
+    const askedId = clean((params && (params.id || params.agentId || params.tlId)) || '');
     let chFilter = (params && (params.ch || params.channel)) || '';   // '' = dono · 'ff' · 'gv'
     let groups = [];
     let current = null;
@@ -1401,7 +1415,11 @@ FF.pages = FF.pages || {};
       }
       groups.sort((a, b) => Number(!!b.gv) - Number(!!a.gv) || Number(!!b.ff) - Number(!!a.ff) || String(a.name).localeCompare(String(b.name)));
       if (groups.length) {
-        const preferred = chFilter && groups.find((g) => !!g[chFilter]) || groups[0];
+        const exactIdGroup = askedId ? groups.find((g) => {
+          const p = (chFilter && g[chFilter]) || g.ff || g.gv;
+          return !!p && normId(p.sub || p.id) === normId(askedId);
+        }) : null;
+        const preferred = exactIdGroup || (chFilter && groups.find((g) => !!g[chFilter])) || groups[0];
         if (open || groups.length === 1) openGroup(preferred, chFilter || undefined); else chipsOnly();
         warmFull();
         return;

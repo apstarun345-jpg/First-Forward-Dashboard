@@ -8160,7 +8160,17 @@ const PERSONAL_PORTAL_JS = `(function () {
   });
 })();`;
 
+let appReady = false;
+
 const server = http.createServer(async (req, res) => {
+  // Render needs an open port while durable storage boots; serve 503 until initialization is safe.
+  if (!appReady) {
+    res.statusCode = 503;
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    res.end(JSON.stringify({ error: 'Service is starting — durable storage is loading.' }));
+    return;
+  }
   try {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
     if (url.pathname.startsWith('/api/')) {
@@ -8184,6 +8194,10 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+  appReady = true;
+  console.log('✅ Durable storage loaded — dashboard is ready.');
+  console.log(`First Forward Dashboard socket listening on 0.0.0.0:${server.address().port} — bootstrapping durable storage…`);
+
 async function readLocalStore() {
   return {
     users: await readJson(FILES.users, []),
@@ -8202,7 +8216,8 @@ async function autoRecoverHistoryOnce(currentStored = {}) {
   const looksFreshDefaultStore = !!process.env.RENDER &&
     currentUsers.length <= 1 &&
     (!String(currentSettings.appName || '').trim() || String(currentSettings.appName || '').trim() === String(DEFAULT_SETTINGS.appName || '').trim());
-  const autoEnabled = process.env.AUTO_RECOVER_HISTORY === '1' || looksFreshDefaultStore;
+  const forced = process.env.AUTO_RECOVER_HISTORY_FORCE === '1';
+  const autoEnabled = looksFreshDefaultStore || (process.env.AUTO_RECOVER_HISTORY === '1' && (currentUsers.length <= 1 || forced));
   if (!autoEnabled || !sheetsStore || STORAGE_BACKEND !== 'appsscript') return null;
   if (currentSettings.__autoRecoveryAppliedAt) return null; // already completed once; never revert later user changes
   const hint = String(process.env.AUTO_RECOVER_LOGIN_HINT || '').trim();
@@ -8242,7 +8257,11 @@ async function autoRecoverHistoryOnce(currentStored = {}) {
   return null;
 }
 
-async function recoveryDiagnostic() {
+async function recoveryDiagnostic(currentStored = {}) {
+  const users = Array.isArray(currentStored.users) ? currentStored.users : [];
+  const forced = process.env.RECOVERY_DIAGNOSTIC_FORCE === '1';
+  if (process.env.RECOVERY_DIAGNOSTIC !== '1' || !sheetsStore || STORAGE_BACKEND !== 'appsscript') return null;
+  if (users.length > 1 && !forced) return null;
   if (process.env.RECOVERY_DIAGNOSTIC !== '1' || !sheetsStore || STORAGE_BACKEND !== 'appsscript') return null;
   try {
     const meta = await sheetsStore.snapshots({ limit: 40 });
@@ -8314,7 +8333,7 @@ async function start() {
         notify: stored.notify && typeof stored.notify === 'object' ? stored.notify : { items: [], watch: {} }
       };
       console.log(`Loaded users/settings/sessions from Google Sheet APP_STORAGE (Apps Script) · users ${stored.users.length}`);
-      await recoveryDiagnostic();
+      await recoveryDiagnostic(stored);
       const autoRecovery = await autoRecoverHistoryOnce(stored);
       if (autoRecovery && autoRecovery.data && Array.isArray(autoRecovery.data.users) && autoRecovery.data.users.length) {
         const recoveredSessions = autoRecovery.data.sessions && typeof autoRecovery.data.sessions === 'object' ? autoRecovery.data.sessions : {};
@@ -8425,7 +8444,12 @@ async function start() {
     if (warmStockAge) setTimeout(() => stockAgeIndex(false).catch((err) => console.warn('stock ageing warm-up:', err.message)), 12000).unref();
   });
 }
-start().catch((err) => { console.error('Startup stopped to protect stored data:', err); process.exitCode = 1; });
+start().catch((err) => {
+  console.error('Startup stopped to protect stored data:', err);
+  appReady = false;
+  try { server.close(); } catch {}
+  process.exitCode = 1;
+});
 for (const signal of ['SIGTERM', 'SIGINT']) {
   process.on(signal, () => {
     if (sheetsStore && sheetsStore.drain) sheetsStore.drain().catch(() => {});
