@@ -5717,7 +5717,7 @@ async function handleApi(req, res, url) {
       const currentIds = new Set(reqs.map((r) => String(r && r.id || '')));
       const previous = (workspaceStore().tagRequests || [])
         .filter((r) => r && !currentIds.has(String(r.id || '')) && r.sheetSync && !r.sheetSync.error
-          && (!targetId || String(r.sheetSync.targetId || '') === targetId))
+          && (targetId ? String(r.sheetSync.targetId || '') === targetId : !String(r.sheetSync.targetId || '')))
         .sort((a, b) => Date.parse(a.sheetSync.at || a.updatedAt || a.at || 0) - Date.parse(b.sheetSync.at || b.updatedAt || b.at || 0))
         .pop();
       const previousLastKey = tagRequestAgentKey(previous);
