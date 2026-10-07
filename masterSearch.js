@@ -485,25 +485,56 @@ FF.pages = FF.pages || {};
   }
 
   /** Suggestions for U.suggest() — label + sub + kind chip. */
+  /** Suggestions for U.suggest() — direct/fallback matching so 1-2 letters bhi reliably dropdown me aaye. */
   function suggestItems(q) {
+    const query = clean(q);
+    if (!query) return [];
     if (!state.light) {
-      // Index pehli baar ban raha hai — suggestion me spinner jaisa item do (dropdown kabhi khali na lage).
       buildLight().catch(() => {});
       warmFull();
-      return [{ kind: 'cls', kindLabel: 'Search', label: `“${clean(q)}” search ho raha hai…`, sub: 'index ban raha hai (agents + TLs + IDs)', value: clean(q), none: true }];
+      return query.length >= 2
+        ? [{ kind: 'cls', kindLabel: 'Search', label: `“${query}” search ho raha hai…`, sub: 'index ban raha hai (agents + TLs + IDs)', value: query, none: true }]
+        : [];
     }
-    let r;
-    try { r = search(q) || { q: clean(q), people: [], tags: [], ids: [], matched: 0, heavy: false }; }
-    catch (err) {
-      console.warn('Master Search suggestion error:', err && err.message);
-      r = { q: clean(q), people: [], tags: [], ids: [], matched: 0, heavy: false };
+
+    let r = null;
+    try { r = search(query) || { q: query, people: [], tags: [], ids: [], matched: 0, heavy: false }; }
+    catch (err) { console.warn('Master Search suggestion search error:', err && err.message); r = { q: query, people: [], tags: [], ids: [], matched: 0, heavy: false }; }
+
+    // Primary path = indexed search. Fallback = direct scan of the lightweight people index.
+    // Isse short-name typing aur stale/missing 2-gram buckets dono cases me dropdown guaranteed hai.
+    let people = Array.isArray(r.people) ? r.people.slice() : [];
+    if (!people.length) {
+      const nq = normName(query);
+      const ni = normId(query);
+      const all = allPeople();
+      const scored = [];
+      for (const p of all) {
+        const name = normName(p.name);
+        const sub = normId(p.sub);
+        const tl = [...(p.tlSet || [])].map(normName);
+        const aliases = [...(p.alias || [])].map(normName);
+        const ids = [...(p.ids || [])].map(normId);
+        const hay = [name, sub, ...tl, ...aliases, ...ids].filter(Boolean);
+        let score = 0;
+        if (nq && name === nq) score = 1000;
+        else if (nq && name.startsWith(nq)) score = 850;
+        else if (nq && name.includes(nq)) score = 700;
+        else if (ni && (sub === ni || ids.includes(ni))) score = 950;
+        else if (ni && hay.some((x) => x.startsWith(ni))) score = 800;
+        else if (hay.some((x) => x.includes(nq || ni))) score = 500;
+        if (score) scored.push({ p, score });
+      }
+      scored.sort((x, y) => y.score - x.score || (Number(y.p.n) || 0) - (Number(x.p.n) || 0) || String(x.p.name).localeCompare(String(y.p.name)));
+      people = scored.slice(0, 60).map((x) => x.p);
     }
-    // Top-bar search is global: FF + GV dono suggestions yahan aayenge.\n    // Channel filter sirf dedicated Master Search page ke scope me apply hota hai.\n    const filteredPeople = (r.people || []);
+
+    const filteredPeople = people;
     const items = [];
     filteredPeople.slice(0, 14).forEach((p) => {
-      const tl = [...p.tlSet][0] || '';
+      const tl = [...(p.tlSet || [])][0] || '';
       let q1 = null;
-      if (r.people.length === 1 && MP()) { try { q1 = MP().quick(p); } catch (err) { console.warn('Master Search quick preview:', err && err.message); } }
+      if (people.length === 1 && MP()) { try { q1 = MP().quick(p); } catch (err) { console.warn('Master Search quick preview:', err && err.message); } }
       const isTlKind = /tl$/.test(p.kind);
       const extra = q1 ? [
         q1.mobile && (!FF.auth || FF.auth.can('contacts')) ? `📞 ${q1.mobile}` : '',
@@ -519,16 +550,17 @@ FF.pages = FF.pages || {};
         label: p.name,
         sub: [p.sub ? `ID ${p.sub}` : '', tl ? `TL ${p.direct ? (p.directLabel || tl) : tl}` : '', ...extra, !q1 && (p.issuanceN || p.bars.size || p.n) ? `${U.fmt(p.issuanceN || p.bars.size || p.n)} tags` : ''].filter(Boolean).join(' · '),
         badge: q1 && q1.priority ? q1.priority : ((p.issuanceN || p.bars.size) ? `${U.fmt(p.issuanceN || p.bars.size)}` : ''),
-        keywords: `${p.sub} ${tl} ${[...p.classMap.keys()].join(' ')}`,
+        keywords: `${p.sub} ${tl} ${[...(p.classMap || new Map()).keys()].join(' ')}`,
         value: p.name,
         person: p
       });
     });
-    r.ids.slice(0, 6).forEach((v) => items.push({
+
+    (r.ids || []).slice(0, 6).forEach((v) => items.push({
       kind: 'cls', kindLabel: KIND_LABEL[v.kind] || 'ID', label: `${v.name} · ${v.id}`,
       sub: [`ID ${v.id}`, v.tl ? `TL ${v.tl}` : ''].filter(Boolean).join(' · '), value: v.name, personKey: `${v.kind}|${normName(v.name)}`
     }));
-    r.tags.slice(0, 8).forEach((t) => {
+    (r.tags || []).slice(0, 8).forEach((t) => {
       const f = t.ff[0], g = t.gv[0];
       items.push({
         kind: 'cls', kindLabel: 'Barcode',
@@ -537,10 +569,9 @@ FF.pages = FF.pages || {};
         value: t.key, barcode: t.key
       });
     });
-    if (!items.length) items.push({ kind: 'cls', kindLabel: 'Search', label: `“${clean(q)}” ke liye kuch nahi mila`, sub: 'Doosra naam / ID / barcode try karo', value: clean(q), none: true });
+    if (!items.length && query.length >= 2) items.push({ kind: 'cls', kindLabel: 'Search', label: `“${query}” ke liye kuch nahi mila`, sub: 'Doosra naam / ID / barcode try karo', value: query, none: true });
     return items;
   }
-
   // ---------------------------------------------------------------- results panel (kundli)
   const classPills = (map) => [...(map || new Map()).entries()].sort((a, b) => b[1] - a[1]).slice(0, 5)
     .map(([c, n]) => `<span class="ms-pill">${esc(c)} <b>${U.fmt(n)}</b></span>`).join('') || '<span class="dim small">class data nahi</span>';
@@ -910,7 +941,7 @@ FF.pages = FF.pages || {};
     const hint = U.$('#master-search-hint', wrap);
     warmFull();
     suggestApi = U.suggest(input, {
-      min: 2, max: 16,
+      min: 1, max: 16,
       items: () => suggestItems(input.value),
       onPick: (it) => {
         if (it.none) return;
@@ -1439,7 +1470,7 @@ FF.pages = FF.pages || {};
       let sug = null;
       try {
         sug = U.suggest(input, {
-          min: 2, max: 14,
+          min: 1, max: 14,
           items: () => suggestItems(input.value),
           onPick: (it) => {
             if (!it || it.none) return;
@@ -1455,9 +1486,6 @@ FF.pages = FF.pages || {};
       // Index / REPORT data aate hi khula dropdown refresh (warna "search ho raha hai…" atka rehta).
       let refreshT = 0;
       onIndexReady(() => { clearTimeout(refreshT); refreshT = setTimeout(() => { try { if (sug && sug.refresh && input.isConnected && document.activeElement === input && clean(input.value).length >= 2) sug.refresh(); } catch { /* ignore */ } }, 150); });
-      let t = 0;
-      // ⌨️ Type karte waqt sirf naam-chips (list nahi) — Enter / Search / chip click par poora data.
-      input.addEventListener('input', () => { clearTimeout(t); t = setTimeout(() => { if (clean(input.value).length >= 3) run(input.value, { open: false }); }, 420); });
       // Khaali page par cursor seedha search me; URL me naam ho to focus nahi (warna dropdown report ke upar khul jaata).
       if (!asked) setTimeout(() => { try { input.focus(); } catch { /* ignore */ } }, 60);
     }
