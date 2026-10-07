@@ -1349,6 +1349,7 @@ FF.pages = FF.pages || {};
               U.toast(`Team Pack Excel ✓ (${okCount} agents, alag-alag sheet)`, 'ok');
             }
           } catch (err) {
+            if (kind === 'pdf' && U.downloadFail) U.downloadFail(`${state.report.ch}-team-pack-${U.slug(state.report.p.name)}-${U.stamp()}.pdf`, (err && err.message) || 'Team Pack PDF failed');
             console.error('[agentSummary] team pack failed:', err);
             U.toast((err && err.message) || 'Team Pack fail hua', 'err');
           } finally {
