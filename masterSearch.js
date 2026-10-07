@@ -981,8 +981,9 @@ FF.pages = FF.pages || {};
       min: 1, max: 16,
       items: () => suggestItems(input.value),
       onPick: (it) => {
-        // Close the portalled dropdown BEFORE navigation. Otherwise the old topbar
-        // suggestion list can remain visible over the newly opened Master Search page.
+        // Hard cleanup: destroy every suggestion instance, including orphaned portals from
+        // previous Master Search renders.
+        try { if (U.destroyAllSuggestions) U.destroyAllSuggestions(); } catch {}
         try { if (suggestApi && suggestApi.close) suggestApi.close(); } catch {}
         if (it.none) return;
         if (it.barcode) { openPanel(it.barcode); return; }              // 🏷️ barcode/tag = tag-level rows (list yahan theek)
@@ -990,6 +991,7 @@ FF.pages = FF.pages || {};
         openSearchPage(it.label);
       },
       onEnter: (q) => {
+        try { if (U.destroyAllSuggestions) U.destroyAllSuggestions(); } catch {}
         try { if (suggestApi && suggestApi.close) suggestApi.close(); } catch {}
         if (clean(q).length >= 2) openSearchPage(q);
       }
@@ -1088,6 +1090,7 @@ FF.pages = FF.pages || {};
   //   Report component FF.searchReport.render() ka hai (numbers 100% masterProfile / GV truth se).
   // -------------------------------------------------------------------------------------------------
   function pageRender(root, params) {
+    try { if (U.destroyAllSuggestions) U.destroyAllSuggestions(); } catch { /* stale suggestion portals */ }
     try { if (root.__mspSuggestDestroy) root.__mspSuggestDestroy(); } catch { /* stale suggestion portal */ }
     root.__mspSuggestDestroy = null;
     const asked = clean((params && (params.q || params.name)) || '');
@@ -1561,6 +1564,7 @@ FF.pages = FF.pages || {};
           items: () => suggestItems(input.value),
           onPick: (it) => {
             if (!it || it.none) return;
+            try { if (U.destroyAllSuggestions) U.destroyAllSuggestions(); } catch {}
             if (it.barcode) { run(it.barcode); return; }
             const person = it.person ? canonicalPerson(it.person, state.full || state.light) : null;
             if (person) { runSelectedPerson(person); return; }
@@ -1596,6 +1600,7 @@ FF.pages = FF.pages || {};
         const idPick = nm.dataset.mspPerson ? candidates.find((x) => `${x.kind}|${normId(x.sub || x.id || '')}` === nm.dataset.mspPerson) : null;
         const p = idPick || candidates[0];
         if (p) {
+          try { if (U.destroyAllSuggestions) U.destroyAllSuggestions(); } catch {}
           if (input) input.value = p.name;
           const sr = SR();
           const gp = sr ? sr.groupPeople([p])[0] : fallbackGroup(p);
