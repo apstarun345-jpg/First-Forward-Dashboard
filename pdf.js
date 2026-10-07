@@ -93,11 +93,23 @@ window.FF = window.FF || {};
     return new Blob(parts, { type: 'application/pdf' });
   }
   function download(blob, filename) {
-    const url = URL.createObjectURL(blob);
+    // Accept both current Blob API and legacy callers that still pass [canvas, canvas, ...].
+    let file = blob;
+    if (Array.isArray(file)) file = build(file);
+    if (!file) throw new Error('PDF data nahi mila');
+    if (FF.util && typeof FF.util.downloadBlob === 'function') {
+      return FF.util.downloadBlob(filename || 'report.pdf', file);
+    }
+
+    // Defensive fallback when pdf.js is used standalone in tests/isolated pages.
+    const url = URL.createObjectURL(file);
     const a = document.createElement('a');
     a.href = url; a.download = filename || 'report.pdf'; a.rel = 'noopener';
-    document.body.appendChild(a); a.click();
-    setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 4000);
+    document.body.appendChild(a);
+    try { a.click(); } finally {
+      setTimeout(() => { try { a.remove(); } catch {} try { URL.revokeObjectURL(url); } catch {} }, 6000);
+    }
+    return true;
   }
   /** Mobile par seedha share sheet (PDF file) · desktop par download + WhatsApp text. */
   async function share(blob, filename, text) {
