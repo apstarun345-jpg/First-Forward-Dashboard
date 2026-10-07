@@ -366,7 +366,19 @@ window.FF = window.FF || {};
     return { rows, byName, byId, byTl };
   }
   function ffPeopleLookup() {
-    if (!ffLookupCache) ffLookupCache = buildPeopleLookup(ffAgents(), (a) => a.name, (a) => [a.agentId, a.id], (a) => a.tlName);
+    if (!ffLookupCache) {
+      const base = ffAgents();
+      const extraAgents = rowsOf('agents') || [];
+      const stockOnly = rowsOf('stockAgents') || [];
+      // Merge all FF identity sources for lookup only. This does NOT change KPI calculations.
+      const merged = [...base, ...extraAgents, ...stockOnly];
+      ffLookupCache = buildPeopleLookup(
+        merged,
+        (a) => a.name || a.agentName,
+        (a) => [a.agentId, a.id],
+        (a) => a.tlName
+      );
+    }
     return ffLookupCache;
   }
   function gvPeopleLookup() {
@@ -377,16 +389,39 @@ window.FF = window.FF || {};
     const report = gvReport() || [];
     const stock = gvRows('stockAgent') || [];
     const byAgentId = new Map(), byName = new Map(), rows = [];
-    const normId = (v) => clean(v).toUpperCase().replace(/\.0+$/, '');
+    const normId = (v) => clean(v).replace(/\.0+$/, '').toUpperCase();
+    const pushName = (name, row) => {
+      const k = norm(name);
+      if (!k) return;
+      if (!byName.has(k)) byName.set(k, []);
+      byName.get(k).push(row);
+    };
+    const sameIdentity = (e, id, nk) => {
+      if (!e) return false;
+      const haveId = normId(e.agentId);
+      const wantId = normId(id);
+      if (wantId && haveId) return wantId === haveId;
+      return nk && norm(e.agentName) === nk;
+    };
     const merge = (raw, source) => {
       const r = { ...(raw || {}) };
       const id = clean(r.agentId || r.id), name = clean(r.agentName || r.name);
       if (!id && !name) return;
       const ik = normId(id), nk = norm(name);
       let e = ik ? byAgentId.get(ik) : null;
-      if (!e && nk) e = byName.get(nk);
-      if (!e) { e = { ...r, agentId: id, agentName: name }; rows.push(e); }
-      else Object.keys(r).forEach((k) => { if ((e[k] === undefined || e[k] === null || e[k] === '') && r[k] !== undefined && r[k] !== null && r[k] !== '') e[k] = r[k]; });
+      if (!e && nk) {
+        const sameName = byName.get(nk) || [];
+        e = sameName.find((candidate) => sameIdentity(candidate, id, nk)) || null;
+      }
+      if (!e) {
+        e = { ...r, agentId: id, agentName: name };
+        rows.push(e);
+        pushName(name, e);
+      } else {
+        Object.keys(r).forEach((k) => {
+          if ((e[k] === undefined || e[k] === null || e[k] === '') && r[k] !== undefined && r[k] !== null && r[k] !== '') e[k] = r[k];
+        });
+      }
       if (source === 'master') {
         e.agentId = id || e.agentId || '';
         e.agentName = name || e.agentName || '';
@@ -396,7 +431,8 @@ window.FF = window.FF || {};
         e.tlName = clean(r.tlName) || e.tlName || '';
       }
       if (ik) byAgentId.set(ik, e);
-      if (nk) byName.set(nk, e);
+      // A merged row's name may change from a later source; keep lookup buckets current.
+      return e;
     };
     master.forEach((r) => merge(r, 'master'));
     report.forEach((r) => merge(r, 'report'));
@@ -407,10 +443,18 @@ window.FF = window.FF || {};
     });
     gvLookupCache = {
       rows,
-      byName: (() => { const m = new Map(); rows.forEach((r) => { if (r.agentName) pushLookup(m, norm(r.agentName), r); }); return m; })(),
+      byName,
       // IMPORTANT: Agent ID lookup is A=UNIQUE_ID only. TL IDs are separate from agent IDs.
-      byId: (() => { const m = new Map(); rows.forEach((r) => { const id = normId(r.agentId); if (id) pushLookup(m, id, r); }); return m; })(),
-      byTl: (() => { const m = new Map(); rows.forEach((r) => { if (r.tlName) pushLookup(m, norm(r.tlName), r); }); return m; })()
+      byId: (() => {
+        const m = new Map();
+        rows.forEach((r) => { const id = normId(r.agentId); if (id) pushLookup(m, id, r); });
+        return m;
+      })(),
+      byTl: (() => {
+        const m = new Map();
+        rows.forEach((r) => { if (r.tlName) pushLookup(m, norm(r.tlName), r); });
+        return m;
+      })()
     };
     return gvLookupCache;
   }
@@ -435,8 +479,11 @@ window.FF = window.FF || {};
   }
   function findGvAgent(name, id) {
     const index = gvPeopleLookup();
-    const idRows = id ? index.byId.get(clean(id).toUpperCase()) : null;
-    return (idRows && idRows[0]) || (index.byName.get(norm(name)) || [])[0] || null;
+    const normWanted = clean(id).replace(/\.0+$/, '').toUpperCase();
+    const idRows = normWanted ? index.byId.get(normWanted) : null;
+    if (idRows && idRows.length) return idRows[0];
+    const same = index.byName.get(norm(name)) || [];
+    return same[0] || null;
   }
   function gvMobileFor(name, id) {
     const r = findGvAgent(name, id);
