@@ -981,8 +981,8 @@ FF.pages = FF.pages || {};
       min: 1, max: 16,
       items: () => suggestItems(input.value),
       onPick: (it) => {
-        // Hard cleanup: destroy every suggestion instance, including orphaned portals from
-        // previous Master Search renders.
+        // Hard cleanup + suspend current instance so no async refresh can reopen the dropdown.
+        try { if (suggestApi && suggestApi.suspend) suggestApi.suspend(); } catch {}
         try { if (U.destroyAllSuggestions) U.destroyAllSuggestions(); } catch {}
         try { if (suggestApi && suggestApi.close) suggestApi.close(); } catch {}
         if (it.none) return;
@@ -991,6 +991,7 @@ FF.pages = FF.pages || {};
         openSearchPage(it.label);
       },
       onEnter: (q) => {
+        try { if (suggestApi && suggestApi.suspend) suggestApi.suspend(); } catch {}
         try { if (U.destroyAllSuggestions) U.destroyAllSuggestions(); } catch {}
         try { if (suggestApi && suggestApi.close) suggestApi.close(); } catch {}
         if (clean(q).length >= 2) openSearchPage(q);
@@ -1564,6 +1565,9 @@ FF.pages = FF.pages || {};
           items: () => suggestItems(input.value),
           onPick: (it) => {
             if (!it || it.none) return;
+            // Lock this page's suggestion instance after a selection. This prevents
+            // onIndexReady / async refresh from reopening the exact same dropdown.
+            try { if (sug && sug.suspend) sug.suspend(); } catch {}
             try { if (U.destroyAllSuggestions) U.destroyAllSuggestions(); } catch {}
             if (it.barcode) { run(it.barcode); return; }
             const person = it.person ? canonicalPerson(it.person, state.full || state.light) : null;
@@ -1571,7 +1575,10 @@ FF.pages = FF.pages || {};
             const name = it.value || it.label;
             run(name);
           },
-          onEnter: (q) => { if (clean(q).length >= 2) run(q); }
+          onEnter: (q) => {
+            try { if (sug && sug.suspend) sug.suspend(); } catch {}
+            if (clean(q).length >= 2) run(q);
+          }
         });
       } catch { sug = null; }
       if (!sug) input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); run(input.value); } });
