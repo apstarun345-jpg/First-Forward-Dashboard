@@ -1392,9 +1392,54 @@ window.FF = window.FF || {};
       Object.assign(out.totals, { lastVc4: num(last.vc4), lastComm: num(last.comm), lastTotal: num(last.total) });
     }
     if (truthToday) out.today = { vc4: num(truthToday.vc4), comm: num(truthToday.comm), total: num(truthToday.total) };
-    if (truthStock) out.stock = { vc4: num(truthStock.vc4), comm: num(truthStock.comm), total: num(truthStock.total) };
+
+    // 📦 GV individual-agent stock: detail view ke exact class-wise/Tag Assignment source ko priority do.
+    // GV Truth/REPORT snapshot 0 ya stale ho sakta hai jab Tag Assignment me actual holder rows present hon.
+    const fallbackGvStock = () => {
+      let vc4 = 0, comm = 0, total = 0;
+      const classMap = r && r.stockByClass && typeof r.stockByClass === 'object' ? r.stockByClass : {};
+      for (const [cls, n] of Object.entries(classMap)) {
+        const v = num(n);
+        total += v;
+        if (/^VC4$/i.test(clean(cls))) vc4 += v;
+        else comm += v;
+      }
+      if (total > 0) return { vc4, comm, total, source: 'GV REPORT class-wise' };
+
+      try {
+        const rows = gvRows('stockAgent') || [];
+        const wantId = clean(out.id || p.sub).replace(/\\.0+$/, '').toUpperCase();
+        const wantName = norm(out.name);
+        const mine = rows.filter((x) => {
+          const xid = clean(x.agentId || x.id).replace(/\\.0+$/, '').toUpperCase();
+          const xn = norm(x.agentName || x.name);
+          return (wantId && xid && xid === wantId) || (wantName && xn === wantName);
+        });
+        if (mine.length) {
+          total = U.sum(mine, (x) => num(x.n));
+          vc4 = U.sum(mine, (x) => /^VC4$/i.test(clean(x.cls)) ? num(x.n) : 0);
+          comm = Math.max(0, total - vc4);
+          if (total > 0) return { vc4, comm, total, source: 'Tag Assignment' };
+        }
+      } catch { /* fall through to Truth */ }
+      if (truthStock) return { vc4: num(truthStock.vc4), comm: num(truthStock.comm), total: num(truthStock.total), source: 'GV Truth' };
+      return null;
+    };
+    const resolvedStock = fallbackGvStock();
+    if (resolvedStock && (resolvedStock.total > 0 || !truthStock)) {
+      out.stock = { vc4: resolvedStock.vc4, comm: resolvedStock.comm, total: resolvedStock.total };
+      out.stockSource = resolvedStock.source;
+    } else if (truthStock) {
+      out.stock = { vc4: num(truthStock.vc4), comm: num(truthStock.comm), total: num(truthStock.total) };
+      out.stockSource = 'GV Truth';
+    }
     out.tl = { name: out.direct ? '' : (truth && truth.tlName) || (out.tl && out.tl.name) || '', id: out.direct ? '' : (truth && truth.tlId) || (out.tl && out.tl.id) || '' };
-    out.issuanceSources = { current: curExact ? 'GV Master' : 'GV Truth', last: lastExact ? 'GV Master' : 'GV Truth', stock: truthStock ? 'Tag Assignment' : 'GV REPORT fallback' };
+    out.issuanceSources = { current: curExact ? 'GV Master' : 'GV Truth', last: lastExact ? 'GV Master' : 'GV Truth', stock: out.stockSource || (truthStock ? 'GV Truth' : 'GV REPORT fallback') };
+    out.dispatch.cover = out.dispatch.avgVc4 > 0 ? out.stock.vc4 / out.dispatch.avgVc4 : null;
+    out.dispatch.sugVc4 = suggest(out.dispatch.avgVc4, out.stock.vc4);
+    out.dispatch.sugComm = suggest(out.dispatch.avgComm, out.stock.comm);
+    out.dispatch.sugVc4Gross = suggestGro(out.dispatch.avgVc4);
+    out.dispatch.sugCommGross = suggestGro(out.dispatch.avgComm);
     if (light) return out;
     const master = gvClassRows((m) => {
       if (out.id) return clean(m.agentId).replace(/\.0+$/, '').toUpperCase() === clean(out.id).replace(/\.0+$/, '').toUpperCase();
