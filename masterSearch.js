@@ -921,9 +921,11 @@ FF.pages = FF.pages || {};
    *  jahan click karte hi uska poora related data (FF + GV) khul jaata hai — koi results list / modal box nahi.
    *  Barcode / tag-ID searches purane panel (tag-level rows) me hi jaate hain. */
   function openSearchPage(q, person) {
-    const name = clean(q);
-    if (name.length < 2) { U.toast('Kam se kam 2 letter / digit type karo', 'warn'); return false; }
     const p = person || {};
+    // A selected suggestion is authoritative: route using the selected person's canonical name,
+    // not the stale/free-typed query text. This prevents URL q=one-name + id=another-person mismatches.
+    const name = clean(p.name || q);
+    if (name.length < 2) { U.toast('Kam se kam 2 letter / digit type karo', 'warn'); return false; }
     const kind = clean(p.kind);
     const id = clean(p.id || p.sub);
     const ch = /^gv-/i.test(kind) ? 'gv' : /^ff-/i.test(kind) ? 'ff' : '';
