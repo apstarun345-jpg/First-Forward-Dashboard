@@ -1334,6 +1334,7 @@ FF.pages = FF.pages || {};
           const kind = packBtn.dataset.asPack;
           packBtn.disabled = true;
           const orig = packBtn.textContent;
+          if (kind === 'pdf' && U.downloadStart) U.downloadStart(`team-pack-${U.slug(state.report.p.name)}-${U.stamp()}.pdf`, 'Preparing Team Pack PDF…');
           try {
             if (kind === 'pdf' && !FF.pdf && FF.lazy && FF.lazy.need) await FF.lazy.need('pdf').catch(() => {});
             const pack = await buildTeamPack(state.report, (done, total, name) => { packBtn.textContent = `⏳ ${done}/${total}…`; packBtn.title = name; });
