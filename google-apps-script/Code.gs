@@ -573,9 +573,21 @@ function captureRows_(sh, kinds) {
 }
 
 function restoreCapturedRows_(sh, snap) {
-  const currentLastRow = sh.getLastRow();
-  const currentLastCol = Math.max(4, sh.getLastColumn());
-  if (currentLastRow >= 2) sh.getRange(2, 1, currentLastRow - 1, currentLastCol).clearContent();
+  const wanted = new Set(snap.rows.map(function (x) {
+    return x && x.values ? String(x.values[0] || '') : '';
+  }).filter(Boolean));
+  // Roll back ONLY the record kinds in this transaction. Never clear unrelated APP_STORAGE rows.
+  const lastRow = sh.getLastRow();
+  const lastCol = Math.max(4, sh.getLastColumn());
+  if (lastRow >= 2 && wanted.size) {
+    const values = sh.getRange(2, 1, lastRow - 1, lastCol).getValues();
+    for (let i = 0; i < values.length; i++) {
+      if (wanted.has(String(values[i][0] || ''))) {
+        sh.getRange(i + 2, 1, 1, lastCol).clearContent();
+      }
+    }
+  }
+  // Restore the exact previous row contents for each affected kind.
   snap.rows.forEach(function (item) {
     if (item.row < 2 || !item.values || !item.values.length) return;
     const width = Math.max(4, item.values.length);
@@ -583,6 +595,8 @@ function restoreCapturedRows_(sh, snap) {
     sh.getRange(item.row, 1, 1, width).setValues([item.values]);
   });
 }
+
+
 
 function historySheet_(ss) {
   let h = ss.getSheetByName(HISTORY_TAB);
