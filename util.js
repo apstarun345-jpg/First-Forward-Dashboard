@@ -769,7 +769,7 @@ window.FF = window.FF || {};
     input.setAttribute('aria-expanded', 'false');
     // Body portal avoids stacking/overflow bugs in cards, drawers and horizontally scrolling tables.
     document.body.appendChild(box);
-    let list = [], active = -1, destroyed = false;
+    let list = [], active = -1, destroyed = false, suspended = false;
     const norm = (s) => String(s || '').toLowerCase();
 
     function place() {
@@ -820,6 +820,7 @@ window.FF = window.FF || {};
     }
     function compute() {
       if (destroyed || !input.isConnected) { destroy(); return; }
+      if (suspended) { close(); return; }
       const q = norm(input.value.trim());
       if (q.length < o.min) { close(); return; }
       let all = [];
@@ -842,7 +843,7 @@ window.FF = window.FF || {};
       input.value = it.inputValue !== undefined ? it.inputValue : it.label;
       close(); o.onPick && o.onPick(it);
     }
-    const onInput = debounce(compute, 80);
+    const onInput = debounce(() => { suspended = false; compute(); }, 80);
     const onFocus = () => { if (input.value.trim().length >= o.min) compute(); };
     const onKeydown = (e) => {
       if (box.hidden) { if (e.key === 'Enter' && o.onEnter) { e.preventDefault(); o.onEnter(input.value.trim()); } return; }
@@ -901,7 +902,9 @@ window.FF = window.FF || {};
       window.visualViewport.addEventListener('resize', viewportChange);
       window.visualViewport.addEventListener('scroll', viewportChange);
     }
-    api = { close, refresh: compute, reposition: place, destroy };
+    const suspend = () => { suspended = true; close(); };
+    const resume = () => { suspended = false; compute(); };
+    api = { close, refresh: compute, reposition: place, destroy, suspend, resume };
     suggestRegistry.add(api);
     return api;
   }
