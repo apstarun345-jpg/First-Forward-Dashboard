@@ -214,10 +214,13 @@ window.FF = window.FF || {};
           columns.forEach((c, i) => {
             let txt = String(r[i] == null ? '' : r[i]);
             const maxW = px(widths[i] - 3);
-            while (txt.length > 1 && ctx.measureText(txt).width > maxW) txt = txt.slice(0, -2) + '…';
-            const w = ctx.measureText(txt).width;
-            const x = c.align === 'right' ? xs[i] + widths[i] - 1.5 - w / px(1) : xs[i] + 1.5;
-            ctx.fillText(txt, px(x), px(y + 4.2));
+            const lines = wrap(ctx, txt, maxW).slice(0, 2);
+            const lineH = 3.0;
+            lines.forEach((line, li) => {
+              const w = ctx.measureText(line).width;
+              const x = c.align === 'right' ? xs[i] + widths[i] - 1.5 - w / px(1) : xs[i] + 1.5;
+              ctx.fillText(line, px(x), px(y + 3.0 + li * lineH));
+            });
           });
           y += rh;
         });
