@@ -182,6 +182,17 @@ test('🧹 global Master Search suggestion closes before navigation', async () =
   assert.match(ms, /onEnter: \(q\) => \{[\s\S]{0,220}suggestApi && suggestApi\.close/, 'Enter search also closes the portal');
 });
 
+test('🚀 workspace boot gate — wait for data + first route before revealing dashboard', async () => {
+  const app = await read('app.js');
+  assert.match(app, /const WORKSPACE_BOOT_MIN_MS = 3600/);
+  assert.match(app, /window\.__FF_FINISH_BOOT = \(\) => \{/);
+  assert.match(app, /if \(FF\.auth && FF\.auth\.user\) return/);
+  assert.match(app, /const preloadPromise = FF\.preloader \? FF\.preloader\.preloadAll\(false\)/);
+  assert.match(app, /await renderCurrent\(\{ bootGate: true \}\)/);
+  assert.match(app, /await releaseWorkspaceBoot\(\)/);
+  assert.match(app, /document\.body\.classList\.remove\('ready'\)/);
+  assert.match(app, /const warmPromise = FF\.lazy && FF\.lazy\.ensureAll/);
+});
 test('🎆 workspace boot animation survives macOS Reduce Motion', async () => {
   const css = await read('styles.css');
   assert.match(css, /\.boot-fireworks \{ position: absolute; inset: 0; pointer-events: none; z-index: 1;/, 'fireworks stay above boot background');
