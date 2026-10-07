@@ -4393,6 +4393,7 @@ async function restoreStoredIntoDb(data = {}, { usersMode = 'merge', withSetting
     if (liveFeedSettingsDiffer(previousSettings, db.settings)) invalidateLiveFeedCaches();
   }
   if (withResets && Array.isArray(data.resets)) { db.resets = data.resets; out.resetsRestored = data.resets.length; }
+  bootState.stage = 'migrating:permissions';
   await migrateUserPermissions();
   const kinds = [];
   if (mode === 'replace' || out.usersAdded || out.usersUpdated) kinds.push('users');
@@ -8161,18 +8162,48 @@ const PERSONAL_PORTAL_JS = `(function () {
 })();`;
 
 let appReady = false;
+const bootState = { startedAt: Date.now(), stage: 'starting', error: null };
+
+function bootResponse(res, status = 503) {
+  res.statusCode = status;
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Retry-After', '3');
+  res.end(JSON.stringify({
+    ok: false,
+    booting: !appReady,
+    ready: appReady,
+    stage: bootState.stage,
+    startedAt: new Date(bootState.startedAt).toISOString(),
+    error: bootState.error || (appReady ? null : 'Service is starting — durable storage is loading.')
+  }));
+}
 
 const server = http.createServer(async (req, res) => {
-  // Render gets the TCP port immediately; app routes stay 503 until durable storage is ready.
-  if (!appReady) {
-    res.statusCode = 503;
-    res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    res.setHeader('Cache-Control', 'no-store');
-    res.end(JSON.stringify({ error: 'Service is starting — durable storage is loading.' }));
-    return;
-  }
   try {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+    // Render health checks must stay green while durable storage is booting; otherwise a slow
+    // Apps Script response makes Render keep restarting an otherwise healthy Node process.
+    if (!appReady && url.pathname === '/api/health' && req.method === 'GET') {
+      return sendJson(res, 200, {
+        ok: true,
+        ready: false,
+        booting: true,
+        service: 'first-forward-dashboard',
+        version: APP_VERSION,
+        boot: {
+          stage: bootState.stage,
+          startedAt: new Date(bootState.startedAt).toISOString(),
+          elapsedSec: Math.max(0, Math.round((Date.now() - bootState.startedAt) / 1000))
+        }
+      });
+    }
+    // Version endpoint is intentionally available during boot so update checks never loop on a 503.
+    if (!appReady && url.pathname === '/api/version' && req.method === 'GET') {
+      return sendJson(res, 200, { version: SW_VERSION || 'dev', ready: false, booting: true });
+    }
+    // Static app assets can load during storage boot; only data/auth API calls wait for readiness.
+    if (!appReady && url.pathname.startsWith('/api/')) return bootResponse(res, 503);
     if (url.pathname.startsWith('/api/')) {
       try { return await handleApi(req, res, url); } catch (err) {
         if (err instanceof HttpError) return sendJson(res, err.status, { error: err.message });
@@ -8294,18 +8325,17 @@ async function recoveryDiagnostic(currentStored = {}) {
 
 
 async function start() {
+  bootState.stage = 'storage:loading';
   if (!['files', 'sheets', 'appsscript'].includes(STORAGE_BACKEND)) throw new Error('STORAGE_BACKEND must be files, sheets or appsscript.');
   let stored;
   let cloudWasEmpty = false;
   if (STORAGE_BACKEND === 'appsscript') {
     // Google Sheet (via Apps Script web app) is authoritative. Never start with defaults if it can't be read.
     sheetsStore = appsScriptStoreFromEnv();
-    let lastErr;
-    for (let attempt = 0; attempt < 5; attempt++) {
-      try { stored = await sheetsStore.read(); lastErr = null; break; }
-      catch (err) { lastErr = err; if (/decrypt|no users row|unauthorized|Set SECRET|HTML page/i.test(err.message)) break; await new Promise((r) => setTimeout(r, 1500 * (attempt + 1))); }
-    }
-    if (lastErr) throw lastErr;
+    // AppsScriptStore.call() already performs bounded retry/backoff. Do NOT wrap read() in
+    // another retry loop here — the old 5 × (4 internal attempts × 30s) could hold Render in
+    // "Service is starting" for several minutes and trigger unhealthy/restart loops.
+    stored = await sheetsStore.read();
     if (!stored) {
       // 🛡️ Render safety: an empty cloud store must NEVER silently become a fresh admin.
       // Render free instances are ephemeral; if APP_STORAGE is empty and this process has no local
@@ -8390,6 +8420,7 @@ async function start() {
     const probe = path.join(DATA_DIR, '.write-check');
     await fs.writeFile(probe, 'ok', { mode: 0o600 }); await fs.unlink(probe);
   }
+  bootState.stage = 'storage:loaded';
   db.users = stored.users;
   db.sessions = stored.sessions;
   db.settings = deepMerge(DEFAULT_SETTINGS, stored.settings);
@@ -8413,11 +8444,13 @@ async function start() {
     console.log('Updated saved app name to First Forward & Gv Partner Dashboard.');
   }
   pruneSessions();
+  bootState.stage = 'bootstrapping:admin';
   await bootstrapAdmin();
   if (cloudWasEmpty) {
     await Promise.all(Object.keys(FILES).map((kind) => persist(kind)));
     console.log('APP_STORAGE seeded ✓ — users, settings and sessions now survive every deploy/restart.');
   }
+  bootState.stage = 'finalizing';
   await loadVapid(); // durable keys load hone ke baad hi push bhejo — warna subscriptions 403 khaati hain
   const selfTest = vapidSelfTest();
   if (selfTest.ok) console.log(`📲 Push ready — VAPID ${vapidSource}${vapidDurable ? ' (durable ✓)' : ' (⚠️ TEMPORARY — deploy par tootegi)'}, auth scheme "${pushAuthScheme}", subject ${VAPID_SUBJECT}, ${pushSubs().length} device registered.`);
@@ -8425,6 +8458,8 @@ async function start() {
   pruneStalePushSubs();
   ensureVapidDurable();
   appReady = true;
+  bootState.stage = 'ready';
+  bootState.error = null;
   console.log('✅ Durable storage loaded — dashboard is ready.');
     console.log(`First Forward Dashboard → http://0.0.0.0:${server.address().port}`);
     console.log(`Sheet ${db.settings.sheetId} · cache ${cacheMs() / 1000}s · storage ${sheetsStore ? `Google Sheets / encrypted APP_STORAGE (${STORAGE_BACKEND})` : DATA_DIR} · users ${db.users.length} · push ${vapidKeys ? `${pushSubs().length} device(s), VAPID from ${vapidSource}, TTL ${PUSH_TTL}s` : 'DISABLED (no VAPID key)'}${GVIZ_BASE !== 'https://docs.google.com' ? ` · upstream ${GVIZ_BASE}` : ''}`);
@@ -8445,6 +8480,8 @@ async function start() {
     if (warmStockAge) setTimeout(() => stockAgeIndex(false).catch((err) => console.warn('stock ageing warm-up:', err.message)), 12000).unref();
 }
 start().catch((err) => {
+  bootState.stage = 'failed';
+  bootState.error = String(err && err.message || err);
   console.error('Startup stopped to protect stored data:', err);
   appReady = false;
   try { server.close(); } catch {}
