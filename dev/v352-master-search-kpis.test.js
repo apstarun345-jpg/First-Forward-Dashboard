@@ -145,6 +145,16 @@ test('Global search bar is eagerly mounted across the app and covers both channe
   assert.match(search, /details\.assignment/);
 });
 
+test('🔎 topbar search remounts and routes through canonical Master Search page', async () => {
+  const app = await read('app.js');
+  assert.match(app, /FF\.masterSearch\.mountTopbar\(true\)/, 'shell wave remounts topbar search');
+  const search = await read('masterSearch.js');
+  assert.match(search, /Canonical route: every topbar \/ Master Search selection opens the same Master Search renderer/);
+  assert.match(search, /FF\.app\.navigate\('masterSearch', params\)/);
+  assert.match(search, /const id = clean\(p\.id \|\| p\.sub\)/);
+  assert.match(search, /const ch = \^\(gv-\|ff-\)/);
+});
+
 test('🏷️ v3.61 wiring — version pins + automatic cache-busting', async () => {
   const pkg = JSON.parse(await read('package.json'));
   assert.equal(pkg.version, '3.62.0');
