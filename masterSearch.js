@@ -1568,7 +1568,7 @@ FF.pages = FF.pages || {};
             // Lock this page's suggestion instance after a selection. This prevents
             // onIndexReady / async refresh from reopening the exact same dropdown.
             try { if (sug && sug.suspend) sug.suspend(); } catch {}
-            try { if (U.destroyAllSuggestions) U.destroyAllSuggestions(); } catch {}
+            try { if (U.destroyAllSuggestions) U.destroyAllSuggestions(sug); } catch {}
             if (it.barcode) { run(it.barcode); return; }
             const person = it.person ? canonicalPerson(it.person, state.full || state.light) : null;
             if (person) { runSelectedPerson(person); return; }
