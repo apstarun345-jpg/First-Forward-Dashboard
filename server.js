@@ -745,13 +745,32 @@ async function bootstrapAdmin() {
   }
 }
 
-// login / password-reset throttle (per IP)
+// login / password-reset throttle
+// Login failures are isolated per client IP + login identifier. This prevents one
+// user's mistyped password from locking every user behind the same office/NAT IP.
+// A successful login clears that identifier's failure bucket.
 const attempts = new Map();
 const otps = new Map(); // 📱 pending login OTP tickets (ticket → {username, code, exp, tries, ip, loginId})
 const forgotHits = new Map();
 function clientIp(req) { return (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || '?'; }
-function throttled(ip) { const a = attempts.get(ip); return a && a.count >= 8 && Date.now() - a.at < 10 * 60e3; }
-function noteFail(ip) { const a = attempts.get(ip) || { count: 0, at: Date.now() }; if (Date.now() - a.at > 10 * 60e3) { a.count = 0; } a.count++; a.at = Date.now(); attempts.set(ip, a); }
+function loginAttemptKey(ip, loginId) {
+  const id = String(loginId || '').trim().toLowerCase();
+  return String(ip) + '|' + (id || '(empty)');
+}
+function throttled(key) {
+  const a = attempts.get(key);
+  if (!a) return false;
+  if (Date.now() - a.at >= 10 * 60e3) { attempts.delete(key); return false; }
+  return a.count >= 8;
+}
+function noteFail(key) {
+  const a = attempts.get(key) || { count: 0, at: Date.now() };
+  if (Date.now() - a.at > 10 * 60e3) { a.count = 0; }
+  a.count++;
+  a.at = Date.now();
+  attempts.set(key, a);
+}
+function clearLoginFailures(key) { attempts.delete(key); }
 
 // ---------------------------------------------------------------------------------------------
 // HTTP helpers
@@ -4522,9 +4541,10 @@ async function handleApi(req, res, url) {
   }
   if (p === '/api/auth/login' && method === 'POST') {
     const ip = clientIp(req);
-    if (throttled(ip)) throw new HttpError(429, 'Too many failed attempts — try again after 10 minutes.');
     const body = await readBody(req);
     const loginId = String(body.username || body.email || body.mobile || '').trim();
+    const attemptKey = loginAttemptKey(ip, loginId);
+    if (throttled(attemptKey)) throw new HttpError(429, 'Too many failed attempts for this login — try again after 10 minutes.');
     const u = findUserByLogin(loginId) || findUserByLogin(body.username);
     const rawPassword = typeof body.password === 'string' ? body.password : String(body.password || '');
     const cleanPassword = rawPassword.trim();
@@ -4532,8 +4552,9 @@ async function handleApi(req, res, url) {
       verifyPassword(rawPassword, u.password) ||
       (cleanPassword !== rawPassword && verifyPassword(cleanPassword, u.password))
     );
-    if (!passwordOk) { noteFail(ip); logAudit(null, 'login_failed', { actor: loginId, ip, note: 'galat password/ID' }); throw new HttpError(401, 'Invalid login — check username / email / mobile and password.'); }
+    if (!passwordOk) { noteFail(attemptKey); logAudit(null, 'login_failed', { actor: loginId, ip, note: 'galat password/ID' }); throw new HttpError(401, 'Invalid login — check username / email / mobile and password.'); }
     if (!u.approved) throw new HttpError(403, 'Account pending admin approval.');
+    clearLoginFailures(attemptKey);
     // 🔐 OTP (2FA): naye IP par email code possible ho to login yahin rok do.
     const otp = await maybeRequireOtp(u, loginId, ip);
     if (otp) return sendJson(res, 428, { error: 'OTP bheja gaya — email check karo', otpRequired: true, ticket: otp.ticket, hint: otp.hint });
