@@ -1563,7 +1563,7 @@ window.FF = window.FF || {};
     weekday, daysInMonth, prevMonthKey, nextMonthKey, weekStart, timeLabel,
     barcode, barcodeKey,
     sum, groupSum, topEntries, sortBy, uniq,
-    $, $, h, debounce, within, breathe, setButtonBusy, withButtonBusy, toast, spinner, loader, loaderStyle, loaderPref, ellipsis, LOADER_STYLES, LOADER_LABELS, errorBox, downloadBlob, downloadStart, downloadYield, downloadFail, downloadCsv, tableToRows, slug, stamp, colLetter, colIndex, initTooltip,
+    $, $$, h, debounce, within, breathe, setButtonBusy, withButtonBusy, toast, spinner, loader, loaderStyle, loaderPref, ellipsis, LOADER_STYLES, LOADER_LABELS, errorBox, downloadBlob, downloadStart, downloadYield, downloadFail, downloadCsv, tableToRows, slug, stamp, colLetter, colIndex, initTooltip,
     phoneDigits, waLink, mailLink, copyText, suggest,
     parseDateTime, printReport, recentList, recentAdd, voiceInput, voicePrefs, setVoicePrefs,
     multiSelect, asValueSet, valueSetLabel,
