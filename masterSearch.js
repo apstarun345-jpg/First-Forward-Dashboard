@@ -380,6 +380,39 @@ FF.pages = FF.pages || {};
   const personByKey = (key) => ((state.full || state.light || {}).people || new Map()).get(key) || null;
   const personKey = (p) => `${p.kind}|${normName(p.name)}`;
 
+  // ---------------------------------------------------------------- identity resolver
+  /**
+   * Canonical person resolver:
+   * - exact ID ka authoritative channel idx.ids me already indexed hota hai (GV Master ke IDs last me ingest hote hain).
+   * - FF row me gvIdFound / alias ho aur wahi ID GV canonical registry me ho to GV person return karo.
+   * - same-name duplicates ko bina identity proof ke merge nahi karta.
+   */
+  function canonicalPerson(p, idx) {
+    if (!p || !idx) return p;
+    const ids = new Set([p.sub, ...(p.ids || []), ...(p.alias || [])].map(normId).filter((x) => x && x.length >= 4));
+    for (const id of ids) {
+      const canonical = idx.ids && idx.ids.get(id);
+      if (!canonical || !/^gv-/.test(String(canonical.kind || ''))) continue;
+      const gv = [...idx.people.values()].find((x) => /^gv-agent$|^gv-tl$/.test(String(x.kind || ''))
+        && normName(x.name) === normName(canonical.name || p.name)
+        && ([x.sub, ...(x.ids || []), ...(x.alias || [])].map(normId).includes(id)));
+      if (gv) return gv;
+    }
+    return p;
+  }
+
+  function canonicalPeople(list, idx) {
+    const out = [], seen = new Set();
+    for (const p of list || []) {
+      const cp = canonicalPerson(p, idx);
+      const key = `${cp.kind}|${normName(cp.name)}|${normId(cp.sub || '')}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(cp);
+    }
+    return out;
+  }
+
   // ---------------------------------------------------------------- query
   function search(q) {
     const idx = state.full || state.light;
@@ -425,6 +458,7 @@ FF.pages = FF.pages || {};
       out.tags.sort((a, b) => a.key.length - b.key.length || (b.ff.length + b.gv.length) - (a.ff.length + a.gv.length));
       if (out.tags.length > 120) out.tags.length = 120;
     }
+    out.people = canonicalPeople(out.people, idx);
     suppressFalseFfMatches(out);
     out.matched = out.people.length + out.ids.length + out.tags.length;
     return out;
@@ -531,7 +565,8 @@ FF.pages = FF.pages || {};
 
     const filteredPeople = people;
     const items = [];
-    filteredPeople.slice(0, 14).forEach((p) => {
+    filteredPeople.slice(0, 14).forEach((rawP) => {
+      const p = canonicalPerson(rawP, state.full || state.light);
       const tl = [...(p.tlSet || [])][0] || '';
       let q1 = null;
       if (people.length === 1 && MP()) { try { q1 = MP().quick(p); } catch (err) { console.warn('Master Search quick preview:', err && err.message); } }
@@ -1447,12 +1482,21 @@ FF.pages = FF.pages || {};
       }
       groups.sort((a, b) => Number(!!b.gv) - Number(!!a.gv) || Number(!!b.ff) - Number(!!a.ff) || String(a.name).localeCompare(String(b.name)));
       if (groups.length) {
-        const exactIdGroup = askedId ? groups.find((g) => {
-          const p = (chFilter && g[chFilter]) || g.ff || g.gv;
-          return !!p && normId(p.sub || p.id) === normId(askedId);
-        }) : null;
+        let exactIdGroup = null, exactIdChannel = chFilter || '';
+        if (askedId) {
+          const want = normId(askedId);
+          const matchId = (p) => !!p && (
+            normId(p.sub || p.id) === want ||
+            [...(p.ids || []), ...(p.alias || []), ...(p.tlIds || [])].some((id) => normId(id) === want)
+          );
+          exactIdGroup = groups.find((g) => (chFilter ? matchId(g[chFilter]) : matchId(g.gv) || matchId(g.ff))) || null;
+          if (exactIdGroup && !chFilter) {
+            if (matchId(exactIdGroup.gv)) exactIdChannel = 'gv';
+            else if (matchId(exactIdGroup.ff)) exactIdChannel = 'ff';
+          }
+        }
         const preferred = exactIdGroup || (chFilter && groups.find((g) => !!g[chFilter])) || groups[0];
-        if (open || groups.length === 1) openGroup(preferred, chFilter || undefined); else chipsOnly();
+        if (open || groups.length === 1) openGroup(preferred, exactIdChannel || undefined); else chipsOnly();
         warmFull();
         return;
       }
