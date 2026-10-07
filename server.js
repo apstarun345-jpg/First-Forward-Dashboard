@@ -8077,14 +8077,23 @@ async function start() {
     }
     if (lastErr) throw lastErr;
     if (!stored) {
-      // First run: seed the sheet from whatever this instance has (local files if any, else defaults).
+      // 🛡️ Render safety: an empty cloud store must NEVER silently become a fresh admin.
+      // Render free instances are ephemeral; if APP_STORAGE is empty and this process has no local
+      // users, seeding defaults would make every existing login/password/settings appear deleted.
+      // A genuinely new Render install must explicitly opt in with ALLOW_FRESH_RENDER=1.
+      const localStored = await readLocalStore();
+      const emptyLocalUsers = !Array.isArray(localStored.users) || localStored.users.length === 0;
+      if (process.env.RENDER && emptyLocalUsers && process.env.ALLOW_FRESH_RENDER !== '1') {
+        storageSeededFresh = true;
+        console.error('🛑 APP_STORAGE is empty on Render — refusing to seed/reset users or settings. Restore the existing APP_STORAGE / history or intentionally set ALLOW_FRESH_RENDER=1 for a brand-new install.');
+        throw new Error('APP_STORAGE is empty on Render. Existing users/settings were NOT reset by this server. Restore the existing Google Sheet storage/history first; set ALLOW_FRESH_RENDER=1 only for a genuinely new installation.');
+      }
+      // Local development / explicitly fresh Render install: seed once.
       cloudWasEmpty = true;
-      stored = await readLocalStore();
-      // ⏪ Nayi/khaali sheet + khaali server disk = abhi-abhi defaults seed hone waale hain.
-      // Purana data tab aksar kisi PURANI sheet me hota hai — Settings → Recovery me wapas la sakte hain.
-      storageSeededFresh = !!process.env.RENDER && (!Array.isArray(stored.users) || stored.users.length === 0);
+      stored = localStored;
+      storageSeededFresh = !!process.env.RENDER && emptyLocalUsers;
       console.log('APP_STORAGE (Apps Script) is empty → seeding it from the current local data.');
-      if (storageSeededFresh) console.warn('⚠️  Yeh sheet nayi/khaali thi — is server par koi purana data nahi mila. Agar users/settings pehle kisi AUR sheet me save the to Settings → ☁️ Storage & backup → ⏪ Recovery → "Doosri (purani) Google Sheet se data lao" se wapas layein.');
+      if (storageSeededFresh) console.warn('⚠️  Fresh Render storage explicitly allowed — default data will be seeded. Remove ALLOW_FRESH_RENDER after initialization.');
     } else {
       stored = {
         users: Array.isArray(stored.users) ? stored.users : [],
