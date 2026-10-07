@@ -428,9 +428,9 @@ FF.pages = FF.pages || {};
         `src=gv&scope=day&date=${tk}`),
       kpi('g10', 'Today Highest Issued', '🏆',
         live.highest ? `<div class="hm-highest-list">
-          <div><span>VC4</span> — <b>${esc(live.highest.VC4 ? live.highest.VC4.name : '—')}</b> — <strong>${U.fmt(live.highest.VC4 ? live.highest.VC4.n : 0)}</strong></div>
-          <div><span>VC20</span> — <b>${esc(live.highest.VC20 ? live.highest.VC20.name : '—')}</b> — <strong>${U.fmt(live.highest.VC20 ? live.highest.VC20.n : 0)}</strong></div>
-          <div><span>VC5+</span> — <b>${esc(live.highest['VC5+'] ? live.highest['VC5+'].name : '—')}</b> — <strong>${U.fmt(live.highest['VC5+'] ? live.highest['VC5+'].n : 0)}</strong></div>
+          <div><span>VC4</span><b>${esc(live.highest.VC4 ? live.highest.VC4.name : '—')}</b><strong>${U.fmt(live.highest.VC4 ? live.highest.VC4.n : 0)}</strong></div>
+          <div><span>VC20</span><b>${esc(live.highest.VC20 ? live.highest.VC20.name : '—')}</b><strong>${U.fmt(live.highest.VC20 ? live.highest.VC20.n : 0)}</strong></div>
+          <div><span>VC5+</span><b>${esc(live.highest['VC5+'] ? live.highest['VC5+'].name : '—')}</b><strong>${U.fmt(live.highest['VC5+'] ? live.highest['VC5+'].n : 0)}</strong></div>
         </div>` : '—',
         live.highest ? 'Class-wise highest issuer · Today' : 'GV Master load hone par class-wise highest dikhega',
         `src=gv&scope=day&date=${tk}&f=highest`)

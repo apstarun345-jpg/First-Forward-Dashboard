@@ -6190,26 +6190,34 @@ html[data-theme="dark"] .home-exp-stat { background: color-mix(in srgb, var(--br
   }
 }
 
-/* Today Highest Issued — class-wise vertical KPI value */
+/* Today Highest Issued — class-wise vertical KPI value
+   Font .kpi-value se inherit NAHI hota (wo 22-44px ka hota hai) — apna chhota, readable size. */
 .hm-highest-list {
   display: grid;
-  gap: 3px;
+  gap: 5px;
   width: 100%;
-  font-size: inherit;
-  font-weight: 800;
-  letter-spacing: inherit;
-  line-height: 1.15;
+  font-size: clamp(12px, 1.05vw, 14px) !important;
+  font-weight: 700;
+  letter-spacing: 0 !important;
+  line-height: 1.25 !important;
   text-align: left;
+  word-break: normal;
 }
 .hm-highest-list > div {
   display: grid;
-  grid-template-columns: 48px minmax(0, 1fr) auto;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
   align-items: baseline;
-  column-gap: 5px;
+  column-gap: 6px;
   min-width: 0;
+  padding-bottom: 4px;
+  border-bottom: 1px dashed rgba(255,255,255,.28);
 }
+.hm-highest-list > div:last-child { border-bottom: 0; padding-bottom: 0; }
 .hm-highest-list > div > span {
-  font-weight: 800;
+  font-size: .86em;
+  font-weight: 900;
+  opacity: .88;
+  letter-spacing: .02em;
 }
 .hm-highest-list > div > b {
   min-width: 0;
@@ -6219,5 +6227,12 @@ html[data-theme="dark"] .home-exp-stat { background: color-mix(in srgb, var(--br
   font-weight: 800;
 }
 .hm-highest-list > div > strong {
+  font-size: 1.25em;
   font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+@media (max-width: 600px) {
+  .hm-highest-list { font-size: 12.5px !important; gap: 4px; }
+  .hm-highest-list > div { grid-template-columns: 36px minmax(0, 1fr) auto; column-gap: 5px; }
 }
