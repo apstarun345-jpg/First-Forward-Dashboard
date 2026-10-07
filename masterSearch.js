@@ -802,6 +802,8 @@ FF.pages = FF.pages || {};
       }
       const pdfBtn = e.target.closest('[data-ms-pdf]');
       if (pdfBtn) {
+        const pdfName = `master-search-${U.slug(res.q || 'results')}-${U.stamp()}.pdf`;
+        if (U.downloadStart) U.downloadStart(pdfName, 'Preparing PDF…');
         try {
           if (!FF.pdf && FF.lazy && FF.lazy.need) await FF.lazy.need('pdf');
           if (!FF.pdf) return;
@@ -813,7 +815,7 @@ FF.pages = FF.pages || {};
           const totCount = U.sum(rows, (r) => Number(r[6]) || 0);
           const tblHtml = `<table style="width:100%;border-collapse:collapse;font-size:10.5px"><thead><tr style="background:#f1f5f9"><th style="border:1px solid #cbd5e1;padding:5px">Type</th><th style="border:1px solid #cbd5e1;padding:5px">Key / Name</th><th style="border:1px solid #cbd5e1;padding:5px">Role / Holder</th><th style="border:1px solid #cbd5e1;padding:5px">TL</th><th style="border:1px solid #cbd5e1;padding:5px">Class</th><th style="border:1px solid #cbd5e1;padding:5px">Status / Last</th><th style="border:1px solid #cbd5e1;padding:5px;text-align:right">Count</th></tr></thead><tbody>${rows.slice(0, 120).map((r) => `<tr>${r.map((c, i) => `<td style="border:1px solid #e2e8f0;padding:4px 6px;${i === 6 ? 'text-align:right;font-weight:700' : ''}">${esc(c)}</td>`).join('')}</tr>`).join('')}<tr style="background:#eef2ff;font-weight:800"><td colspan="6" style="border:1px solid #cbd5e1;padding:5px 6px">Grand Total (${rows.length} matches)</td><td style="border:1px solid #cbd5e1;padding:5px 6px;text-align:right">${U.fmt(totCount)}</td></tr></tbody></table>`;
           const page = FF.pdf.doc({ title: `Master Search · ${res.q || 'Results'}`, sub: `${U.fmt(res.matched)} matches`, meta: new Date().toLocaleString('en-IN'), body: tblHtml });
-          await FF.pdf.download([page], `master-search-${U.slug(res.q || 'results')}-${U.stamp()}.pdf`);
+          await FF.pdf.download([page], pdfName);
           U.toast('Master search PDF downloaded ✓', 'ok');
         } finally {
           U.setButtonBusy(pdfBtn, false);
