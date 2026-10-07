@@ -32,7 +32,8 @@ window.FF = window.FF || {};
   async function api(path, method, body) {
     const controller = new AbortController();
     const isAuthCall = /^\/api\/auth\//.test(path);
-    const timer = setTimeout(() => controller.abort(), isAuthCall ? 25000 : 60000);
+    const timeoutMs = path === '/api/auth/me' ? 120000 : (isAuthCall ? 25000 : 60000);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     let res;
     try { res = await fetch(path, { signal: controller.signal, method: method || 'GET', headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined, credentials: 'same-origin', cache: 'no-store' }); } finally { clearTimeout(timer); }
     let json = null;
@@ -394,7 +395,7 @@ window.FF = window.FF || {};
     // Render may expose the shell a few seconds before durable storage finishes loading.
     // /api/auth/me returns 503 + booting:true during that window; retry automatically
     // instead of trapping the user on a manual connection error screen.
-    const maxBootRetries = 12;
+    const maxBootRetries = 2; // Emergency fallback only; normal boot waits server-side.
     for (let attempt = 0; attempt <= maxBootRetries; attempt++) {
       try {
         const me = await api('/api/auth/me');
@@ -412,8 +413,10 @@ window.FF = window.FF || {};
       } catch (err) {
         const booting = err && err.status === 503 && err.data && err.data.booting;
         if (booting && attempt < maxBootRetries) {
-          const wait = Math.min(5000, 700 + attempt * 700);
-          screen('<div class="auth-shell single"><div class="auth-panel"><div class="auth-card"><h2>Workspace starting…</h2><p class="dim">Durable storage load ho rahi hai. Automatic retry ' + (attempt + 1) + '/' + maxBootRetries + '…</p><button class="btn primary" onclick="location.reload()">Retry now</button></div></div></div>');
+          const wait = Math.min(5000, 1200 + attempt * 1400);
+          const stage = (err.data && err.data.stage) ? String(err.data.stage).replace(/^storage:/, 'secure storage: ') : 'secure workspace startup';
+          screen('<div class="auth-shell single"><div class="auth-panel"><div class="auth-card"><h2>Workspace starting…</h2><p class="dim">' +
+            esc(stage) + ' chal raha hai. Secure storage ready hote hi workspace automatically open ho jayega.</p><button class="btn primary" onclick="location.reload()">Retry now</button></div></div></div>');
           await new Promise((resolve) => setTimeout(resolve, wait));
           continue;
         }
