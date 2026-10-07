@@ -155,6 +155,15 @@ test('🔎 topbar search remounts and routes through canonical Master Search pag
   assert.match(search, /const ch = \^\(gv-\|ff-\)/);
 });
 
+test('📈 growth — compare yesterday MTD against same calendar day last month', async () => {
+  const mp = await read('masterProfile.js');
+  assert.match(mp, /Comparable MTD growth/);
+  assert.match(mp, /const yesterday = new Date\(now\.getFullYear\(\), now\.getMonth\(\), now\.getDate\(\) - 1\)/);
+  assert.match(mp, /const prevCutDay = Math\.min\(day, prevLastDay\)/);
+  assert.match(mp, /const growth = last > 0 \? \(\(cur - last\) \/ last\) \* 100/);
+  assert.match(mp, /growthThrough: gi\.growthThrough/);
+  assert.match(await read('masterSearch.js'), /p1\.growthThrough/);
+});
 test('🔎 dropdown suggestions — partial names use direct fallback and both inputs use 1-char trigger', async () => {
   const ms = await read('masterSearch.js');
   assert.match(ms, /direct\/fallback matching/);
