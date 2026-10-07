@@ -493,8 +493,9 @@ FF.pages = FF.pages || {};
       return [{ kind: 'cls', kindLabel: 'Search', label: `“${clean(q)}” search ho raha hai…`, sub: 'index ban raha hai (agents + TLs + IDs)', value: clean(q), none: true }];
     }
     const r = search(q);
+    const filteredPeople = (r.people || []).filter((p) => !chFilter || chOfP(p) === chFilter);
     const items = [];
-    r.people.slice(0, 14).forEach((p) => {
+    filteredPeople.slice(0, 14).forEach((p) => {
       const tl = [...p.tlSet][0] || '';
       const q1 = (r.people.length === 1 && MP()) ? MP().quick(p) : null;   // focused single result par hi expensive profile
       const isTlKind = /tl$/.test(p.kind);
