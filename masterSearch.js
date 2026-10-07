@@ -981,12 +981,18 @@ FF.pages = FF.pages || {};
       min: 1, max: 16,
       items: () => suggestItems(input.value),
       onPick: (it) => {
+        // Close the portalled dropdown BEFORE navigation. Otherwise the old topbar
+        // suggestion list can remain visible over the newly opened Master Search page.
+        try { if (suggestApi && suggestApi.close) suggestApi.close(); } catch {}
         if (it.none) return;
         if (it.barcode) { openPanel(it.barcode); return; }              // 🏷️ barcode/tag = tag-level rows (list yahan theek)
         if (it.person && it.person.name) { openSearchPage(it.person.name, it.person); return; }
         openSearchPage(it.label);
       },
-      onEnter: (q) => { if (clean(q).length >= 2) openSearchPage(q); }
+      onEnter: (q) => {
+        try { if (suggestApi && suggestApi.close) suggestApi.close(); } catch {}
+        if (clean(q).length >= 2) openSearchPage(q);
+      }
     });
     // Index / data ready hote hi khula dropdown refresh — warna "search ho raha hai…" placeholder agli key tak atka rehta tha.
     let refreshTimer = 0;
