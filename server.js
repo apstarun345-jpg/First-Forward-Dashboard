@@ -5710,6 +5710,19 @@ async function handleApi(req, res, url) {
     if (!store) { addressBookRuntime.map = fallback; addressBookRuntime.at = now; return fallback; }
     const cfg = tagSheetConfig();
     const targetId = sheetIdFromLink(cfg.sheetLink) || String(cfg.spreadsheetId || '').trim() || '';
+    if (cfg.rowMode === 'agent-class-gap' && rows.length) {
+      // Separate submissions bhi visually separate hon: agar last successfully-synced request
+      // kisi doosre agent ki thi, to current agent se pehle exactly one blank row bhejo.
+      const currentFirstKey = tagRequestFirstAgentKey(reqs[0]);
+      const currentIds = new Set(reqs.map((r) => String(r && r.id || '')));
+      const previous = (workspaceStore().tagRequests || [])
+        .filter((r) => r && !currentIds.has(String(r.id || '')) && r.sheetSync && !r.sheetSync.error
+          && (!targetId || String(r.sheetSync.targetId || '') === targetId))
+        .sort((a, b) => Date.parse(a.sheetSync.at || a.updatedAt || a.at || 0) - Date.parse(b.sheetSync.at || b.updatedAt || b.at || 0))
+        .pop();
+      const previousLastKey = tagRequestAgentKey(previous);
+      if (currentFirstKey && previousLastKey && currentFirstKey !== previousLastKey) rows.unshift(header.map(() => ''));
+    }
     addressBookRuntime.promise = store.call('readaddresses', { tab: ADDRESS_BOOK_TAB, ...(targetId ? { spreadsheetId: targetId } : {}) })
       .then((out) => {
         const map = fallback;
@@ -5914,6 +5927,17 @@ async function handleApi(req, res, url) {
   }
   /** Ek ya kai requests (ek submit ka batch) ek hi appendrows call me — rows ka order bana rehta hai aur
    *  Apps Script par kam calls. `throwOnFail` sirf manual/test push ke liye. */
+  const tagRequestAgentKey = (req) => {
+    const rows = Array.isArray(req && req.rows) ? req.rows : [];
+    const keys = rows.map((x) => `${String(x && x.agentId || '').trim()}|${String(x && x.agentName || '').trim().toLowerCase()}`).filter((x) => x !== '|');
+    return keys.length ? keys[keys.length - 1] : '';
+  };
+  const tagRequestFirstAgentKey = (req) => {
+    const rows = Array.isArray(req && req.rows) ? req.rows : [];
+    const x = rows.find((r) => r && (r.agentId || r.agentName));
+    return x ? `${String(x.agentId || '').trim()}|${String(x.agentName || '').trim().toLowerCase()}` : '';
+  };
+
   async function pushTagRequestsToSheet(list, event, throwOnFail) {
     const reqs = (Array.isArray(list) ? list : [list]).filter(Boolean);
     const cfg = tagSheetConfig();
