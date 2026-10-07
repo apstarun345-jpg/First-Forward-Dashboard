@@ -31,7 +31,8 @@ window.FF = window.FF || {};
 
   async function api(path, method, body) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 60000);
+    const isAuthCall = /^\/api\/auth\//.test(path);
+    const timer = setTimeout(() => controller.abort(), isAuthCall ? 25000 : 60000);
     let res;
     try { res = await fetch(path, { signal: controller.signal, method: method || 'GET', headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined, credentials: 'same-origin', cache: 'no-store' }); } finally { clearTimeout(timer); }
     let json = null;
