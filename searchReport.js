@@ -40,7 +40,7 @@ window.FF = window.FF || {};
       if (!p || !MP() || !MP().supports(p)) return;
       const name = normName(p.name); if (!name) return;
       const ch = chOf(p.kind), other = ch === 'ff' ? 'gv' : 'ff';
-      const sameChannel = groups.find((g) => normName(g.name) === name && g[ch]);
+      const sameChannel = groups.find((g) => normName(g.name) === name && g[ch] && identitiesLinked(p, g[ch]));
       if (sameChannel) {
         if (isTlKind(p.kind) && !isTlKind(sameChannel[ch].kind)) sameChannel[ch] = p;
         return;
