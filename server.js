@@ -8162,11 +8162,22 @@ async function readLocalStore() {
   };
 }
 async function autoRecoverHistoryOnce(currentStored = {}) {
-  if (process.env.AUTO_RECOVER_HISTORY !== '1' || !sheetsStore || STORAGE_BACKEND !== 'appsscript') return null;
   const currentSettings = currentStored && currentStored.settings && typeof currentStored.settings === 'object' ? currentStored.settings : {};
+  const currentUsers = Array.isArray(currentStored.users) ? currentStored.users : [];
+  // 🛟 Safe self-heal: if Render has booted with only the stock/default admin and default app title,
+  // automatically recover the newest pre-incident snapshot once. A marker is persisted after success,
+  // so normal later Settings changes are NEVER overwritten again.
+  const looksFreshDefaultStore = !!process.env.RENDER &&
+    currentUsers.length <= 1 &&
+    (!String(currentSettings.appName || '').trim() || String(currentSettings.appName || '').trim() === String(DEFAULT_SETTINGS.appName || '').trim());
+  const autoEnabled = process.env.AUTO_RECOVER_HISTORY === '1' || looksFreshDefaultStore;
+  if (!autoEnabled || !sheetsStore || STORAGE_BACKEND !== 'appsscript') return null;
   if (currentSettings.__autoRecoveryAppliedAt) return null; // already completed once; never revert later user changes
   const hint = String(process.env.AUTO_RECOVER_LOGIN_HINT || '').trim();
-  if (!hint) { console.warn('🛟 AUTO_RECOVER_HISTORY enabled but AUTO_RECOVER_LOGIN_HINT is empty — skipped.'); return null; }
+  if (!hint && !looksFreshDefaultStore) {
+    console.warn('🛟 AUTO_RECOVER_HISTORY enabled but AUTO_RECOVER_LOGIN_HINT is empty — skipped.');
+    return null;
+  }
   try {
     const meta = await sheetsStore.snapshots({ limit: 40 });
     const snapshots = meta.snapshots || [];
@@ -8178,7 +8189,7 @@ async function autoRecoverHistoryOnce(currentStored = {}) {
       catch (err) { console.warn('🛟 history snapshot skipped:', err.message); continue; }
       const users = Array.isArray(data.users) ? data.users : [];
       const id = String(hint).toLowerCase();
-      const target = users.find((u) => {
+      const target = hint ? users.find((u) => {
         if (!u) return false;
         if (String(u.username || '').trim().toLowerCase() === id) return true;
         if (u.email && String(u.email).trim().toLowerCase() === id) return true;
@@ -8186,18 +8197,20 @@ async function autoRecoverHistoryOnce(currentStored = {}) {
         const md = String(u.mobile || '').replace(/\D/g, '');
         return !!digits && digits.length >= 7 && !!md &&
           (md === digits || (md.length >= 10 && digits.length >= 10 && md.slice(-10) === digits.slice(-10)));
-      });
-      if (target || (Number.isFinite(cutoff) && snapTime <= cutoff && users.length >= 2)) {
-        console.warn('🛟 Restoring users/settings from APP_STORAGE_HISTORY snapshot:', snap.at, target ? '(login matched)' : '(pre-cutoff fallback)');
+      }) : null;
+      if (target || (!hint && looksFreshDefaultStore && Number.isFinite(cutoff) && snapTime <= cutoff && users.length >= 2)) {
+        console.warn('🛟 Restoring users/settings from APP_STORAGE_HISTORY snapshot:', snap.at, target ? '(login matched)' : '(safe pre-cutoff fallback)');
         return { data, at: snap.at, users: users.length, username: target ? (target.username || '') : '' };
       }
     }
-    console.warn('🛟 No APP_STORAGE_HISTORY snapshot matched the recovery login hint or cutoff fallback.');
+    console.warn('🛟 No APP_STORAGE_HISTORY snapshot matched the recovery login hint or safe default-store fallback.');
   } catch (err) {
     console.warn('🛟 AUTO_RECOVER_HISTORY failed:', err.message);
   }
   return null;
-}async function recoveryDiagnostic() {
+}
+
+async function recoveryDiagnostic() {
   if (process.env.RECOVERY_DIAGNOSTIC !== '1' || !sheetsStore || STORAGE_BACKEND !== 'appsscript') return null;
   try {
     const meta = await sheetsStore.snapshots({ limit: 40 });
