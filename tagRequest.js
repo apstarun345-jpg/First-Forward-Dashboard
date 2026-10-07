@@ -2956,9 +2956,10 @@ body.colorful .from-hdr { color: #166534; }
     const savedCols = Array.isArray(cfg.columns) ? cfg.columns.filter((k) => fields[k]) : [];
     const orderedCols = [...savedCols, ...Object.keys(fields).filter((k) => !savedCols.includes(k))];
     const colBox = orderedCols.map((k, idx) => {
-      const label = fields[k];
+      const label = clean(fields[k] || k.replace(/([A-Z])/g, ' $1')).replace(/^./, (x) => x.toUpperCase());
       const checked = savedCols.includes(k);
       return `<div class="tr-col-order" draggable="true" data-tr-order-key="${esc(k)}">
+        <span class="tr-col-index">${idx + 1}</span>
         <span class="tr-drag" title="Drag karke order badlo">☷</span>
         <input type="checkbox" data-tr-col="${esc(k)}" ${checked ? 'checked' : ''}>
         <span class="tr-col-label">${esc(label)}</span>
