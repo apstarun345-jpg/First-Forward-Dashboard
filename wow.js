@@ -257,10 +257,12 @@ FF.pages = FF.pages || {};
   function downloadWinnerCard(opts) {
     try {
       const url = winnerCardPng(opts);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${U.slug(`winner-${opts.name}-r${opts.rank}-${opts.monthLabel}`)}.png`;
-      document.body.appendChild(a); a.click(); a.remove();
+      const name = `${U.slug(`winner-${opts.name}-r${opts.rank}-${opts.monthLabel}`)}.png`;
+      if (U.downloadBlob) U.downloadBlob(name, url);
+      else {
+        const a = document.createElement('a');
+        a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+      }
       if (U.toast) U.toast('🎴 Winner card PNG download ho gaya', 'ok');
     } catch { if (U.toast) U.toast('Card nahi ban paya', 'err'); }
   }
