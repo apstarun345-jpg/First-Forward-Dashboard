@@ -755,6 +755,7 @@ window.FF = window.FF || {};
       The list is portalled to <body> and anchored outside the input, so it can never cover typed text
       or get clipped by a card/table overflow container. */
   let suggestSeq = 0;
+  const suggestRegistry = new Set();
   function suggest(input, opts) {
     const o = { min: 1, max: 12, ...opts };
     const box = h('<div class="suggest" hidden role="listbox" aria-label="Search suggestions"></div>');
@@ -869,9 +870,11 @@ window.FF = window.FF || {};
       const run = () => { vpQueued = false; if (!destroyed && input.isConnected && !box.hidden) place(); };
       if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run); else run();
     };
+    let api = null;
     function destroy() {
       if (destroyed) return;
       destroyed = true;
+      if (api) suggestRegistry.delete(api);
       document.removeEventListener('click', outsideClick);
       window.removeEventListener('resize', viewportChange);
       window.removeEventListener('scroll', viewportChange, true);
@@ -898,7 +901,14 @@ window.FF = window.FF || {};
       window.visualViewport.addEventListener('resize', viewportChange);
       window.visualViewport.addEventListener('scroll', viewportChange);
     }
-    return { close, refresh: compute, reposition: place, destroy };
+    api = { close, refresh: compute, reposition: place, destroy };
+    suggestRegistry.add(api);
+    return api;
+  }
+
+  function destroyAllSuggestions() {
+    [...suggestRegistry].forEach((x) => { try { x.destroy(); } catch {} });
+    document.querySelectorAll('.suggest').forEach((el) => { try { el.remove(); } catch {} });
   }
 
   // ---- 🔠 MULTI-SELECT popover (multiple selection anywhere) ------------------------------------
