@@ -172,6 +172,24 @@ test('📋 summary lists — Agent/TL Summary inherits canonical Master Profile 
   assert.match(as, /base\.stock = Number\(q\.stock && q\.stock\.total\)/);
   assert.match(as, /base\.last = Number\(q\.totals && q\.totals\.lastTotal\)/);
 });
+test('🧑‍💼 FF Agent report — exact ID/EIR fallback + linked TL KPIs', async () => {
+  const mp = await read('masterProfile.js');
+  assert.match(mp, /function ffAgentIssueRows\(name, ids, tlName, tlId\)/);
+  assert.match(mp, /const personId = clean\(\(a && \(a\.agentId \|\| a\.id\)\) \|\| p\.sub\)/);
+  assert.match(mp, /const eirBins = classBinsFromRows\(eirRows, curYm, lastYm\)/);
+  assert.match(mp, /out\.totals\.lastTotal = num\(eirBins\.last\.total\)/);
+  assert.match(mp, /function attachLinkedTl\(out, light\)/);
+  assert.match(mp, /const agentTlKpis = lt \? /);
+  assert.match(mp, /TL Class-wise Issuance/);
+  assert.match(mp, /Agent Stock/);
+});
+
+test('🎯 FF/GV identity — same-name same-channel records stay separate without linked IDs', async () => {
+  const sr = await read('searchReport.js');
+  assert.match(sr, /g\[ch\] && identitiesLinked\(p, g\[ch\]\)/);
+  const ms = await read('masterSearch.js');
+  assert.match(ms, /const personKey = \(p\) => .*normId/);
+});
 test('📦 GV individual stock — card fallback matches Tag Assignment class-wise stock', async () => {
   const mp = await read('masterProfile.js');
   assert.match(mp, /GV individual-agent card must use the same Tag Assignment stock source/);
