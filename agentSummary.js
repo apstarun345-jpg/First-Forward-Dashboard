@@ -1272,6 +1272,7 @@ FF.pages = FF.pages || {};
           onEnter: (q) => { const hit = matchPeople(state.list, q)[0]; if (hit) pick(hit); else if (clean(q)) U.toast('Koi matching Agent ya TL nahi mila', 'warn'); }
         });
       } catch (err) { console.warn('[agentSummary] suggest init failed:', err); }
+      let qTimer = 0;
       qEl.addEventListener('input', () => { state.q = qEl.value; clearTimeout(qTimer); qTimer = setTimeout(() => renderTopChips(qEl.value), 120); });
       qEl.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && (!asSuggest || qEl.getAttribute('aria-expanded') !== 'true')) {
