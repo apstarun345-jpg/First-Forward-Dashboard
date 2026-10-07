@@ -18,7 +18,23 @@ window.FF = window.FF || {};
     // pending render will replace it as soon as the data/page is ready.
     const main = document.getElementById('main');
     if (main && !main.innerHTML.trim()) {
-      main.innerHTML = '<section class="card" style="min-height:220px;display:grid;place-items:center;text-align:center"><div><div style="font-size:34px">⚡</div><h2 style="margin:8px 0">Preparing your dashboard…</h2><p class="dim">Live data is loading in the background. Your workspace will appear automatically.</p><div class="boot-progress" style="margin:18px auto;max-width:280px"></div></div></section>';
+      // Never show a generic waiting card. If the normal route render is still blocked at the
+      // safety cap, paint the REAL Home module immediately; its own sections load data in the
+      // background. The normal renderCurrent() may finish later and safely replace this root.
+      try {
+        const home = FF.pages && FF.pages.home;
+        if (home && typeof home.render === 'function') {
+          const root = document.createElement('div');
+          root.className = 'page page-home';
+          main.replaceChildren(root);
+          main.setAttribute('aria-busy', 'false');
+          Promise.resolve(home.render(root, {}, { bootGate: false })).catch((err) => console.warn('boot home fallback', err));
+        } else {
+          main.innerHTML = '<section class="card" style="min-height:180px;display:grid;place-items:center;text-align:center"><div><div style="font-size:34px">⚡</div><h2 style="margin:8px 0">Opening Home…</h2><p class="dim">Dashboard is starting.</p></div></section>';
+        }
+      } catch (err) {
+        console.warn('boot home fallback', err);
+      }
     }
     document.body.classList.add('ready');
     document.body.classList.add('workspace-ready');
