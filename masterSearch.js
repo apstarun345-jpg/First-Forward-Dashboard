@@ -69,7 +69,8 @@ FF.pages = FF.pages || {};
     if (!nm) return null;
     // 🧍 Placeholder TL names ("APS", "Direct", "Unassigned") kabhi TL card nahi banate.
     if (kind === 'ff-tl' || kind === 'gv-tl') { if (!FF.config.isRealTl(nm)) return null; }
-    const k = `${kind}|${normName(nm)}`;
+    const identity = clean(sub).replace(/\.0+$/, '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const k = `${kind}|${identity || normName(nm)}`;
     let p = idx.people.get(k);
     if (!p) { p = { kind, name: nm, sub: sub || '', tlSet: new Set(), tlIds: new Set(), ids: new Set(), alias: new Set(), classMap: new Map(), bars: new Set(), last: '', n: 0, direct: false }; idx.people.set(k, p); }
     if (sub && !p.sub) p.sub = clean(sub);
@@ -1399,7 +1400,8 @@ FF.pages = FF.pages || {};
       }
       groups.sort((a, b) => Number(!!b.gv) - Number(!!a.gv) || Number(!!b.ff) - Number(!!a.ff) || String(a.name).localeCompare(String(b.name)));
       if (groups.length) {
-        if (open || groups.length === 1) openGroup(groups[0]); else chipsOnly();
+        const preferred = chFilter && groups.find((g) => !!g[chFilter]) || groups[0];
+        if (open || groups.length === 1) openGroup(preferred, chFilter || undefined); else chipsOnly();
         warmFull();
         return;
       }
@@ -1451,8 +1453,16 @@ FF.pages = FF.pages || {};
       const nm = e.target.closest('[data-msp-name]');
       if (nm) {
         const nmKey = normName(nm.dataset.mspName);
-        const p = lightPeople().filter((x) => normName(x.name) === nmKey).sort((a, b) => (chOfP(b) === 'gv' ? 1 : 0) - (chOfP(a) === 'gv' ? 1 : 0))[0];
-        if (p) { if (input) input.value = p.name; const sr = SR(); openGroup(sr ? (sr.groupPeople([p])[0] || fallbackGroup(p)) : fallbackGroup(p)); }
+        const candidates = lightPeople()
+          .filter((x) => normName(x.name) === nmKey && (!chFilter || chOfP(x) === chFilter))
+          .sort((a, b) => (chOfP(a) === chFilter ? -1 : 1) || (isTlP(b) ? 1 : 0) - (isTlP(a) ? 1 : 0));
+        const p = candidates[0];
+        if (p) {
+          if (input) input.value = p.name;
+          const sr = SR();
+          const gp = sr ? sr.groupPeople([p])[0] : fallbackGroup(p);
+          openGroup(gp, chFilter || undefined);
+        }
         return;
       }
       const channelBtn = e.target.closest('[data-msp-channel]');
