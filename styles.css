@@ -6310,3 +6310,53 @@ html[data-theme="dark"] .tr-col-order.drag-over { background: #172554; }
   .login-only-shell { grid-template-columns: 1fr !important; padding: 18px 12px; }
   .login-only-shell .pro-card { width: 100%; }
 }
+
+/* v3.66 — Tag Request settings: always readable in light mode and clearly visible in dark mode. */
+.tr-sheet-grid,
+.tr-cols-grid,
+.tr-cols-order,
+.tr-col-order,
+.tr-col-order * { color: var(--ink) !important; }
+.tr-col-order {
+  background: #ffffff !important;
+  border-color: #dbe3ef !important;
+  min-height: 44px;
+}
+.tr-col-label {
+  color: #0f172a !important;
+  font-size: 13px !important;
+  line-height: 1.25 !important;
+  opacity: 1 !important;
+  font-weight: 800 !important;
+}
+.tr-drag {
+  color: #64748b !important;
+  opacity: 1 !important;
+}
+.tr-col-move .btn.tiny {
+  color: #1e293b !important;
+  background: #f8fafc !important;
+  border-color: #cbd5e1 !important;
+}
+.tr-col-order.drag-over {
+  background: #eff6ff !important;
+  outline: 2px solid #60a5fa !important;
+}
+.tr-col-index {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  background: #eef2ff;
+  color: #3730a3 !important;
+  font-size: 10px;
+  font-weight: 900;
+}
+html[data-theme="dark"] .tr-col-order {
+  background: #111827 !important;
+  border-color: #334155 !important;
+}
+html[data-theme="dark"] .tr-col-order * { color: #e2e8f0 !important; }
+html[data-theme="dark"] .tr-drag { color: #94a3b8 !important; }
+html[data-theme="dark"] .tr-col-move .btn.tiny { background: #1e293b !important; border-color: #475569 !important; }
