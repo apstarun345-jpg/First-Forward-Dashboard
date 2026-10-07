@@ -1414,6 +1414,7 @@ FF.pages = FF.pages || {};
               U.toast('Excel downloaded (multi-sheet, Grand Total) ✓', 'ok');
             }
           } catch (err) {
+            if (k === 'pdf' && U.downloadFail) U.downloadFail(`${fname}.pdf`, (err && err.message) || 'PDF export failed');
             console.error('[agentSummary] export failed:', err);
             U.toast(`${(err && err.message) || 'Export fail hua'}`, 'err');
           } finally {
