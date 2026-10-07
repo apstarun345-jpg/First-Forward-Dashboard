@@ -6285,3 +6285,28 @@ html.a11y-motion .app-boot .boot-welcome,
 html.ff-no-anim .app-boot .boot-welcome { animation: boot-title 1.8s ease-in-out infinite !important; }
 html.a11y-motion .app-boot .boot-progress::after,
 html.ff-no-anim .app-boot .boot-progress::after { animation: boot-slide 1.2s ease-in-out infinite alternate !important; }
+
+
+/* v3.66 — Login-only polish + instant logout + stable branded background */
+body,html { background: #0b1020; }
+body.auth-open { background: radial-gradient(circle at 50% 35%, #1e2a62 0, #11182f 38%, #070b16 100%) !important; }
+.auth-screen.pro { min-height: 100vh; background: radial-gradient(circle at 50% 35%, #1e2a62 0, #11182f 38%, #070b16 100%) !important; }
+.login-only-shell { grid-template-columns: minmax(360px, 620px) !important; justify-content: center !important; min-height: 100vh; padding: 32px 18px; }
+.login-only-shell .pro-panel { width: 100%; max-width: 620px; margin: 0 auto; }
+.login-only-shell .pro-card { box-shadow: 0 30px 90px rgba(0,0,0,.34), 0 0 0 1px rgba(255,255,255,.05); }
+.developer-credit { font-weight: 950; color: #facc15; text-shadow: 0 0 12px rgba(250,204,21,.25); }
+.developer-credit::before { content: '✨ '; }
+.tr-cols-order { display: flex; flex-direction: column; gap: 6px; }
+.tr-col-order { display: grid; grid-template-columns: 28px 22px minmax(0,1fr) auto; align-items: center; gap: 8px; padding: 7px 9px; border: 1px solid var(--line,#e2e8f0); border-radius: 10px; background: var(--card,#fff); cursor: grab; user-select: none; }
+.tr-col-order.dragging { opacity: .55; }
+.tr-col-order.drag-over { outline: 2px solid #60a5fa; background: #eff6ff; }
+.tr-drag { font-size: 18px; font-weight: 900; color: var(--muted,#64748b); cursor: grab; }
+.tr-col-label { font-weight: 750; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tr-col-move { display: inline-flex; gap: 4px; }
+.btn.tiny { min-width: 28px; min-height: 28px; padding: 3px 7px; font-size: 12px; }
+html[data-theme="dark"] .tr-col-order { background: #111827; border-color: #334155; }
+html[data-theme="dark"] .tr-col-order.drag-over { background: #172554; }
+@media(max-width:700px){
+  .login-only-shell { grid-template-columns: 1fr !important; padding: 18px 12px; }
+  .login-only-shell .pro-card { width: 100%; }
+}
