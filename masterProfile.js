@@ -2176,7 +2176,7 @@ window.FF = window.FF || {};
     const actions = `<div class="mp-actions"><button class="btn small primary" data-mp-pdf>📄 PDF</button><button class="btn small" data-mp-csv>⬇ CSV</button><button class="btn small" data-mp-copy>📋 Copy</button><button class="btn small" data-mp-wa>📲 WhatsApp</button>${isTl ? '' : `<button class="btn small" data-mp-a360="${esc(pr.name)}">👁 Agent 360</button>`}<a class="btn small" href="#/masterStock?q=${encodeURIComponent(pr.name)}">🗄️ Register / tags</a></div>`;
     const partial = pr.partial ? '<div class="mp-partial dim small" role="status">⏳ Kuch data abhi load ho raha hai (Google Sheet slow hai) — numbers poore hote hi apne aap update ho jayenge.</div>' : '';
     const nav = `<nav class="mp-nav" aria-label="Report sections"><span class="dim small">Jao:</span>${[['kpis', '📦 Stock · KPI'], ['issuance', '🧾 Last vs Current'], ['class', '🎯 Class-wise'], ...(isTl && agentsTable ? [['agents', '🧑‍💼 Agents'], ['agentclass', '📦 Agent × Class']] : []), ...(isTl && isTlStockVisible ? [['tlstock', '🆔 TL ID stock']] : []), ['charts', '📊 Charts']].map(([k, l]) => `<button type="button" class="chip" data-mp-go="${k}">${l}</button>`).join('')}</nav>`;
-    return `<div class="mp">${partial}${noData}${head}${nav}<div data-mp-sec="kpis">${kpis}</div>
+    return `<div class="mp">${partial}${noData}${head}${nav}${agentTlKpis}<div data-mp-sec="kpis">${kpis}</div>
       ${calcHtml(pr)}
       ${growthHtml(pr)}
       <section class="mp-sec" data-mp-sec="issuance"><h4>🧾 Issuance summary${isTl ? ' — TL total' : ''}</h4>${summary}</section>
