@@ -570,11 +570,116 @@ window.FF = window.FF || {};
     }
     return () => new Promise((resolve) => setTimeout(resolve, 0));
   })();
+  // ---- instant file download UI -----------------------------------------------------------------
+  // One download engine for PDF / CSV / XLSX / any Blob. The click itself stays synchronous so
+  // mobile browsers have the best chance of honoring it, while the UI animation starts immediately.
+  let downloadUi = null;
+  let downloadUiTimer = 0;
+  function getDownloadUi() {
+    if (downloadUi && document.body.contains(downloadUi)) return downloadUi;
+    const host = document.createElement('div');
+    host.setAttribute('aria-live', 'polite');
+    host.setAttribute('role', 'status');
+    host.style.cssText = [
+      'position:fixed','left:50%','top:50%','transform:translate(-50%,-50%)',
+      'z-index:2147483647','display:none','width:min(330px,calc(100vw - 32px))',
+      'padding:18px 20px','border-radius:18px','background:rgba(15,23,42,.96)',
+      'box-shadow:0 18px 55px rgba(2,6,23,.32)','border:1px solid rgba(255,255,255,.12)',
+      'color:#fff','font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
+      'backdrop-filter:blur(14px)','-webkit-backdrop-filter:blur(14px)'
+    ].join(';');
+    host.innerHTML = [
+      '<div style="display:flex;align-items:center;gap:12px">',
+      '<div data-dl-spin style="width:24px;height:24px;border:3px solid rgba(255,255,255,.22);border-top-color:#60a5fa;border-radius:50%;flex:0 0 auto"></div>',
+      '<div style="min-width:0;flex:1">',
+      '<div data-dl-title style="font-weight:800;font-size:15px;line-height:1.2">Downloading…</div>',
+      '<div data-dl-file style="margin-top:4px;font-size:11px;color:#cbd5e1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>',
+      '</div>',
+      '</div>',
+      '<div data-dl-track style="height:4px;background:rgba(255,255,255,.12);border-radius:999px;overflow:hidden;margin-top:13px">',
+      '<div data-dl-bar style="height:100%;width:26%;background:linear-gradient(90deg,#22c55e,#38bdf8,#a78bfa);border-radius:999px"></div>',
+      '</div>'
+    ].join('');
+    document.body.appendChild(host);
+    downloadUi = host;
+
+    const spin = host.querySelector('[data-dl-spin]');
+    if (spin && typeof spin.animate === 'function') spin.animate(
+      [{ transform:'rotate(0deg)' }, { transform:'rotate(360deg)' }],
+      { duration:850, iterations:Infinity }
+    );
+    const bar = host.querySelector('[data-dl-bar]');
+    if (bar && typeof bar.animate === 'function') bar.animate(
+      [{ transform:'translateX(-140%)' }, { transform:'translateX(400%)' }],
+      { duration:1050, iterations:Infinity, easing:'ease-in-out' }
+    );
+    return host;
+  }
+  function downloadStatus(title, filename, done) {
+    try {
+      const ui = getDownloadUi();
+      const titleEl = ui.querySelector('[data-dl-title]');
+      const fileEl = ui.querySelector('[data-dl-file]');
+      const spin = ui.querySelector('[data-dl-spin]');
+      const bar = ui.querySelector('[data-dl-bar]');
+      if (titleEl) titleEl.textContent = done ? 'Downloaded ✓' : (title || 'Downloading…');
+      if (fileEl) fileEl.textContent = String(filename || 'File');
+      if (spin) {
+        spin.style.borderTopColor = done ? '#22c55e' : '#60a5fa';
+        spin.style.borderColor = done ? 'rgba(34,197,94,.20)' : 'rgba(255,255,255,.22)';
+      }
+      if (bar) {
+        bar.style.background = done ? '#22c55e' : 'linear-gradient(90deg,#22c55e,#38bdf8,#a78bfa)';
+        if (done) bar.style.width = '100%';
+      }
+      ui.style.display = 'block';
+      clearTimeout(downloadUiTimer);
+      if (done) downloadUiTimer = setTimeout(() => { if (downloadUi) downloadUi.style.display = 'none'; }, 900);
+    } catch { /* download must never fail because UI feedback failed */ }
+  }
   function downloadBlob(filename, blob) {
-    const url = URL.createObjectURL(blob);
+    const name = String(filename || 'download');
+    if (!blob) throw new Error('Download file data nahi mila');
+    downloadStatus('Downloading…', name, false);
+
+    // URL.createObjectURL accepts Blob/File; coerce other common binary values safely.
+    let file = blob;
+    if (!(file instanceof Blob)) {
+      if (file instanceof ArrayBuffer || ArrayBuffer.isView(file)) file = new Blob([file]);
+      else file = new Blob([String(file)], { type: 'application/octet-stream' });
+    }
+
+    const url = URL.createObjectURL(file);
     const a = document.createElement('a');
-    a.href = url; a.download = filename; document.body.appendChild(a); a.click();
-    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 800);
+    a.href = url;
+    a.download = name;
+    a.rel = 'noopener';
+    a.style.position = 'fixed';
+    a.style.left = '-9999px';
+    a.style.width = '1px';
+    a.style.height = '1px';
+    a.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(a);
+
+    try {
+      // Synchronous click: no setTimeout / promise before the browser download trigger.
+      a.click();
+    } catch (err) {
+      // Secondary path for WebView-like browsers where HTMLElement.click() is unreliable.
+      try { a.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window })); }
+      catch { /* surfaced below */ }
+      if (!document.body.contains(a)) throw err;
+    }
+
+    // Keep the object URL alive long enough for slower mobile download managers.
+    setTimeout(() => {
+      try { URL.revokeObjectURL(url); } catch {}
+      try { a.remove(); } catch {}
+    }, 6000);
+
+    // The browser owns the actual transfer; mark the hand-off as complete immediately.
+    downloadStatus('Downloaded ✓', name, true);
+    return true;
   }
   function downloadCsv(filename, header, rows) {
     const quote = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
