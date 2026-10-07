@@ -731,7 +731,10 @@ function cookieHeader(req, token, maxAgeSec) {
 }
 async function bootstrapAdmin() {
   if (ADMIN_USER && ADMIN_PASSWORD) {
-    const existing = findUser(ADMIN_USER);
+    // Recovery/bootstrap lookup accepts the same identifiers as normal login (username/email/mobile).
+    // This lets an explicit one-time ADMIN_* recovery repair an existing account even when its
+    // username differs from the mobile/email used on the login screen.
+    const existing = findUserByLogin(ADMIN_USER) || findUser(ADMIN_USER);
     if (existing) {
       // Explicit one-time recovery only. Never overwrite a working password on ordinary restarts.
       if (ADMIN_FORCE_RESET && existing.recoveryAdminResetApplied !== true) {
