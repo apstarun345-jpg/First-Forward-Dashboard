@@ -164,6 +164,20 @@ test('🔎 topbar search remounts and routes through canonical Master Search pag
   assert.match(search, /const ch = \^\(gv-\|ff-\)/);
 });
 
+test('🧹 global Master Search suggestion closes before navigation', async () => {
+  const ms = await read('masterSearch.js');
+  assert.match(ms, /Close the portalled dropdown BEFORE navigation/, 'global suggestion popup is explicitly closed before route change');
+  assert.match(ms, /try \{ if \(suggestApi && suggestApi\.close\) suggestApi\.close\(\); \} catch \{\}/, 'selected suggestion closes the portal');
+  assert.match(ms, /onEnter: \(q\) => \{[\s\S]{0,220}suggestApi && suggestApi\.close/, 'Enter search also closes the portal');
+});
+
+test('🎆 workspace boot animation survives macOS Reduce Motion', async () => {
+  const css = await read('styles.css');
+  assert.match(css, /\.boot-fireworks \{ position: absolute; inset: 0; pointer-events: none; z-index: 1;/, 'fireworks stay above boot background');
+  assert.match(css, /prefers-reduced-motion: reduce\)[\s\S]{0,900}\.app-boot \.boot-fireworks \.fw \{ animation: boot-burst 2\.4s ease-out infinite !important;/, 'fireworks remain animated even when OS Reduce Motion is enabled');
+  assert.match(css, /\.app-boot \.boot-welcome \{ animation: boot-title 1\.8s ease-in-out infinite !important;/, 'workspace title animation remains visible');
+  assert.match(css, /html \.boot-progress::after \{ animation: boot-slide 1\.2s ease-in-out infinite alternate !important;/, 'moving progress line remains visible');
+});
 test('🔗 selected suggestion identity — route name comes from the selected person', async () => {
   const ms = await read('masterSearch.js');
   assert.match(ms, /const p = person \|\| \{\};[\s\S]{0,220}const name = clean\(p\.name \|\| q\);/, 'selected person name is authoritative for route q');
