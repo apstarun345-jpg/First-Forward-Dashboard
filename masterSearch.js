@@ -848,12 +848,19 @@ FF.pages = FF.pages || {};
   /** 🔎 Naya flow (v3.46): naam / ID search → seedha Management → **Master Search page**,
    *  jahan click karte hi uska poora related data (FF + GV) khul jaata hai — koi results list / modal box nahi.
    *  Barcode / tag-ID searches purane panel (tag-level rows) me hi jaate hain. */
-  function openSearchPage(q) {
-    const name = clean(q);
+  function openSearchPage(q, person) {
+    const name = clean(typeof q === 'object' ? (q.name || '') : q);
     if (name.length < 2) { U.toast('Kam se kam 2 letter / digit type karo', 'warn'); return false; }
+    const params = { q: name };
+    if (person && person.id) params.id = person.id;
+    if (person && person.kind) params.ch = String(person.kind).startsWith('gv') ? 'gv' : 'ff';
     state.lastQuery = name;
-    try { if (FF.app && FF.app.navigate) { FF.app.navigate('masterSearch', { q: name }); return true; } } catch { /* fall through */ }
-    try { location.hash = `#/masterSearch?q=${encodeURIComponent(name)}`; return true; } catch { return false; }
+    try { if (FF.app && FF.app.navigate) { FF.app.navigate('masterSearch', params); return true; } } catch { /* fall through */ }
+    try {
+      const qs = Object.entries(params).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
+      location.hash = `#/masterSearch?${qs}`;
+      return true;
+    } catch { return false; }
   }
 
   function mountTopbar(force) {
@@ -901,7 +908,7 @@ FF.pages = FF.pages || {};
       onPick: (it) => {
         if (it.none) return;
         if (it.barcode) { openPanel(it.barcode); return; }              // 🏷️ barcode/tag = tag-level rows (list yahan theek)
-        if (it.person && it.person.name) { openSearchPage(it.person.name); return; }   // 🧑 naam → poora data page
+        if (it.person && it.person.name) { openSearchPage(it.person.name, it.person); return; }   // 🧑 naam → poora data page
         openSearchPage(it.label);
       },
       onEnter: (q) => { if (clean(q).length >= 2) openSearchPage(q); }
@@ -1384,7 +1391,10 @@ FF.pages = FF.pages || {};
       if (!state.light) { out.innerHTML = '<div class="card"><div class="card-body empty">Search index load nahi hua — internet check karke “🔄 Index refresh” dabao.</div></div>'; return; }
       const res = search(q);
       const channelPeople = (res.people || []).filter((p) => !chFilter || chOfP(p) === chFilter);
-      const people = preferNameMatches(channelPeople, q);
+      const forcedId = clean((params && params.id) || '');
+      const forcedNormId = forcedId ? normId(forcedId) : '';
+      const forcedPeople = forcedNormId ? channelPeople.filter((p) => normId(p.sub) === forcedNormId || (p.ids && [...p.ids].some((id) => normId(id) === forcedNormId))) : [];
+      const people = forcedPeople.length ? forcedPeople : preferNameMatches(channelPeople, q);
       const sr = SR();
       groups = sr ? sr.groupPeople(people) : people.map(fallbackGroup);
       // Exact-name cross-channel match: keep one group with a visible FF/GV chooser so
