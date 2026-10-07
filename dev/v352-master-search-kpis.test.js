@@ -172,6 +172,14 @@ test('📋 summary lists — Agent/TL Summary inherits canonical Master Profile 
   assert.match(as, /base\.stock = Number\(q\.stock && q\.stock\.total\)/);
   assert.match(as, /base\.last = Number\(q\.totals && q\.totals\.lastTotal\)/);
 });
+test('📈 Growth — empty comparable EIR rows must not produce false -100%', async () => {
+  const mp = await read('masterProfile.js');
+  assert.match(mp, /const comparableUsable = !!\(comparable && \(num\(comparable\.curRows\) > 0 \|\| num\(comparable\.lastRows\) > 0\)\)/);
+  assert.match(mp, /const projectedCurrent = comparableUsable/);
+  assert.match(mp, /: projFallback\(num\(t\.curTotal\), b\.days, ym\)/);
+  assert.match(mp, /const projectedGrowth = num\(t\.lastTotal\) > 0/);
+});
+
 test('🧑‍💼 FF Agent report — exact ID/EIR fallback + linked TL KPIs', async () => {
   const mp = await read('masterProfile.js');
   assert.match(mp, /function ffAgentIssueRows\(name, ids, tlName, tlId\)/);
