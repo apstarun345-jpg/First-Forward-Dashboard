@@ -6246,3 +6246,42 @@ html[data-theme="dark"] .home-exp-stat { background: color-mix(in srgb, var(--br
   .hm-highest-list { font-size: 12.5px !important; gap: 4px; }
   .hm-highest-list > div { grid-template-columns: 36px minmax(0, 1fr) auto; column-gap: 5px; }
 }
+
+
+/* v3.65 — Workspace splash animation is intentional feedback. Keep it visible even
+   when macOS/Chrome Reduce Motion or the app's speed-doctor reduced-motion class is ON. */
+html.a11y-motion .app-boot,
+html.ff-no-anim .app-boot,
+html.a11y-motion .app-boot::before,
+html.ff-no-anim .app-boot::before,
+html.a11y-motion .app-boot img,
+html.ff-no-anim .app-boot img,
+html.a11y-motion .app-boot .boot-welcome,
+html.ff-no-anim .app-boot .boot-welcome,
+html.a11y-motion .app-boot .boot-fireworks .fw,
+html.ff-no-anim .app-boot .boot-fireworks .fw,
+html.a11y-motion .app-boot .boot-progress::after,
+html.ff-no-anim .app-boot .boot-progress::after {
+  animation-duration: initial !important;
+  animation-iteration-count: initial !important;
+  transition-duration: initial !important;
+}
+html.a11y-motion .app-boot img,
+html.ff-no-anim .app-boot img { animation: bootBreathe 2.2s ease-in-out infinite !important; }
+html.a11y-motion .app-boot::before,
+html.ff-no-anim .app-boot::before { animation: boot-glow 2.8s ease-in-out infinite alternate !important; }
+html.a11y-motion .app-boot .boot-fireworks,
+html.ff-no-anim .app-boot .boot-fireworks { z-index: 3 !important; opacity: 1 !important; visibility: visible !important; }
+html.a11y-motion .app-boot .boot-fireworks .fw,
+html.ff-no-anim .app-boot .boot-fireworks .fw {
+  opacity: 0;
+  animation: boot-burst 2.4s ease-out infinite !important;
+}
+html.a11y-motion .app-boot .boot-fireworks .fw-b,
+html.ff-no-anim .app-boot .boot-fireworks .fw-b { animation-delay: .65s !important; }
+html.a11y-motion .app-boot .boot-fireworks .fw-c,
+html.ff-no-anim .app-boot .boot-fireworks .fw-c { animation-delay: 1.25s !important; }
+html.a11y-motion .app-boot .boot-welcome,
+html.ff-no-anim .app-boot .boot-welcome { animation: boot-title 1.8s ease-in-out infinite !important; }
+html.a11y-motion .app-boot .boot-progress::after,
+html.ff-no-anim .app-boot .boot-progress::after { animation: boot-slide 1.2s ease-in-out infinite alternate !important; }
