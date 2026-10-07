@@ -817,6 +817,9 @@ FF.pages = FF.pages || {};
           const page = FF.pdf.doc({ title: `Master Search · ${res.q || 'Results'}`, sub: `${U.fmt(res.matched)} matches`, meta: new Date().toLocaleString('en-IN'), body: tblHtml });
           await FF.pdf.download([page], pdfName);
           U.toast('Master search PDF downloaded ✓', 'ok');
+        } catch (err) {
+          if (U.downloadFail) U.downloadFail(pdfName, (err && err.message) || 'Master Search PDF failed');
+          throw err;
         } finally {
           U.setButtonBusy(pdfBtn, false);
         }
