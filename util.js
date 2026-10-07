@@ -710,8 +710,10 @@ window.FF = window.FF || {};
       try { a.remove(); } catch {}
     }, 6000);
 
-    // The browser owns the actual transfer; mark the hand-off as complete immediately.
-    downloadStatus('Downloaded ✓', name, true);
+    // Browser actual transfer khud handle karta hai. Completion ko thoda defer karo so the
+    // "Downloading…" animation ko kam-se-kam ek paint cycle / short visible window mil sake.
+    clearTimeout(downloadUiTimer);
+    downloadUiTimer = setTimeout(() => downloadStatus('Downloaded ✓', name, true), 650);
     return true;
   }
   function downloadCsv(filename, header, rows) {
