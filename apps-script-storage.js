@@ -162,9 +162,14 @@ export class AppsScriptStore {
     const records = out.records || {};
     const present = APPS_SCRIPT_KINDS.filter((k) => records[k]);
     if (!present.length) return null;
-    if (!records.users) throw new Error('APP_STORAGE has records but no users row. Restore the APP_STORAGE tab; refusing to reset accounts.');
+    // 🔒 Fail closed: users + settings are the two critical durable records.
+    // Never let a missing/corrupt cloud record turn into silently restored defaults.
+    if (!records.users) throw new Error('APP_STORAGE has no users row. Refusing to reset accounts or create a default admin.');
+    if (!records.settings) throw new Error('APP_STORAGE has no settings row. Refusing to replace saved settings with defaults.');
     const data = {};
     for (const kind of present) data[kind] = this.decode(kind, records[kind]);
+    if (!Array.isArray(data.users) || data.users.length === 0) throw new Error('APP_STORAGE users record is empty/invalid. Refusing to reset accounts.');
+    if (!data.settings || typeof data.settings !== 'object' || Array.isArray(data.settings)) throw new Error('APP_STORAGE settings record is empty/invalid. Refusing to replace saved settings with defaults.');
     return data;
   }
 
@@ -194,8 +199,8 @@ export class AppsScriptStore {
     const records = {};
     const job = (async () => {
       for (const [kind, entry] of batch) records[kind] = this.encode(kind, entry.value);
-      await this.call('write', { records });
-      this.lastSavedAt = new Date().toISOString();
+      const out = await this.call('write', { records });
+      this.lastSavedAt = String(out.savedAt || new Date().toISOString());
     })();
     this.flushing = job;
     try {
