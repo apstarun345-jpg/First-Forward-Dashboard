@@ -803,7 +803,7 @@ FF.pages = FF.pages || {};
       const pdfBtn = e.target.closest('[data-ms-pdf]');
       if (pdfBtn) {
         try {
-          if (!FF.pdf && FF.lazy && FF.lazy.need) await FF.lazy.need('pdf.js');
+          if (!FF.pdf && FF.lazy && FF.lazy.need) await FF.lazy.need('pdf');
           if (!FF.pdf) return;
           U.setButtonBusy(pdfBtn, true, 'PDF…');
           const rows = [];
