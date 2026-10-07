@@ -13,6 +13,13 @@ window.FF = window.FF || {};
   // Hard safety cap: even if preload/render/storage hangs, the splash exits within 3.9s.
   setTimeout(() => {
     if (workspaceBootReleased) return;
+    // Never reveal a blank white shell. If the initial async render is still running at the
+    // 3.9s safety cap, reveal the real app shell with a lightweight skeleton immediately; the
+    // pending render will replace it as soon as the data/page is ready.
+    const main = document.getElementById('main');
+    if (main && !main.innerHTML.trim()) {
+      main.innerHTML = '<section class="card" style="min-height:220px;display:grid;place-items:center;text-align:center"><div><div style="font-size:34px">⚡</div><h2 style="margin:8px 0">Preparing your dashboard…</h2><p class="dim">Live data is loading in the background. Your workspace will appear automatically.</p><div class="boot-progress" style="margin:18px auto;max-width:280px"></div></div></section>';
+    }
     document.body.classList.add('ready');
     document.body.classList.add('workspace-ready');
     const boot = U_BOOT();
@@ -1848,10 +1855,9 @@ window.FF = window.FF || {};
     // module and async render, so when splash exits the dashboard is already populated.
     await renderCurrent({ bootGate: true });
 
-    // Give background modules a chance to finish before reveal when they are already close; never
-    // block indefinitely on a non-critical module.
-    await Promise.race([warmPromise, new Promise((resolve) => setTimeout(resolve, 1200))]);
-
+    // Background module warming must NEVER hold the first screen hostage.
+    // The critical route above controls normal release; the 3.9s safety cap handles slow devices.
+    await Promise.resolve(warmPromise).catch(() => {});
     bootSetMessage('Workspace ready ✓', 'Your dashboard data is loaded.');
     await releaseWorkspaceBoot();
 
