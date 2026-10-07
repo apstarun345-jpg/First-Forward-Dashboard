@@ -36,7 +36,8 @@ FF.pages = FF.pages || {};
       const nm = clean(name);
       if (!nm || /^(—|na|unknown|unassigned|direct)$/i.test(nm)) return;
       if (kind.endsWith('tl') && FF.config.isRealTl && !FF.config.isRealTl(nm)) return;
-      const k = `${kind}|${norm(nm)}`;
+      const identity = clean(id).replace(/\.0+$/, '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+      const k = `${kind}|${identity || norm(nm)}`;
       const curMob = clean(mobile) || (MP() && MP().mobileFor ? MP().mobileFor(nm, id, '') : '');
       const e = map.get(k) || {
         kind, name: nm, id: clean(id), altIds: new Set(), tl: clean(tl), tlId: clean(extra.tlId),
@@ -116,7 +117,10 @@ FF.pages = FF.pages || {};
         }
       }
       for (const s of FF.store.get('stockAgents') || []) {
-        add('ff-agent', s.agentName, s.agentId, s.tlName, '', 0, s.n);
+        add('ff-agent', s.agentName, s.agentId, s.tlName, '', 0, s.n, { tlId: s.tlId });
+        if (clean(s.tlName) && (!FF.config.isDirectAgent || !FF.config.isDirectAgent(s, 'ff'))) {
+          add('ff-tl', s.tlName, s.tlId, '', '', 0, 0, { tlId: s.tlId });
+        }
       }
     }
     return [...map.values()].map((p) => ({ ...p, altIds: [...(p.altIds || [])] })).sort((a, b) => (b.cur + b.stock) - (a.cur + a.stock));
