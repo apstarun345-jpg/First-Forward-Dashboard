@@ -1629,7 +1629,7 @@ html[data-theme="dark"] .ff-switch { background: #33415c; }
 /* Fast, non-blocking ApnaPayment launch. Never hold the dashboard behind a timed splash. */
 .app-boot { position: fixed; inset: 0; z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: radial-gradient(circle at 50% 42%, #172554 0, #0b1020 38%, #05070d 100%); color: #fff; text-align: center; padding: 24px; overflow: hidden; isolation: isolate; }
 .app-boot::before { content: ''; position: absolute; inset: 0; background: radial-gradient(circle at 50% 45%, rgba(59,130,246,.16), transparent 34%), radial-gradient(circle at 25% 25%, rgba(236,72,153,.12), transparent 24%), radial-gradient(circle at 78% 70%, rgba(34,211,238,.10), transparent 26%); animation: boot-glow 2.8s ease-in-out infinite alternate; pointer-events: none; }
-.boot-fireworks { position: absolute; inset: 0; pointer-events: none; z-index: -1; }
+.boot-fireworks { position: absolute; inset: 0; pointer-events: none; z-index: 1; overflow: hidden; }
 .boot-fireworks .fw { position: absolute; left: 50%; top: 43%; width: 7px; height: 7px; border-radius: 50%; opacity: 0; box-shadow: 0 -92px 0 #60a5fa, 0 92px 0 #f472b6, 92px 0 0 #facc15, -92px 0 0 #34d399, 65px 65px 0 #fb7185, -65px 65px 0 #a78bfa, 65px -65px 0 #22d3ee, -65px -65px 0 #fde047; animation: boot-burst 2.4s ease-out infinite; }
 .boot-fireworks .fw-b { left: 24%; top: 31%; animation-delay: .65s; transform: scale(.72); }
 .boot-fireworks .fw-c { left: 76%; top: 30%; animation-delay: 1.25s; transform: scale(.62); }
@@ -1656,7 +1656,17 @@ html[data-theme="dark"] .ff-switch { background: #33415c; }
 @keyframes boot-logo { 0%,100% { transform: scale(1); } 50% { transform: scale(1.035); } }
 @keyframes boot-title { 0%,100% { opacity: .72; letter-spacing: .28em; } 50% { opacity: 1; letter-spacing: .36em; } }
 @media (max-width: 600px) { .welcome-greeting { top: calc(80px + env(safe-area-inset-top)); bottom: auto; left: 14px; right: 14px; padding: 16px; gap: 12px; } .welcome-greeting h2 { font-size: 17px; } }
-@media (prefers-reduced-motion: reduce) { .app-boot img, .welcome-greeting, .greeting-wave, .home-hero.v2 { animation: none !important; } html .boot-progress::after { animation-duration: 1.2s !important; animation-iteration-count: infinite !important; } } /* v3.31: boot progress = loader, chalta rahe */
+@media (prefers-reduced-motion: reduce) {
+  /* Workspace-opening animation is intentional product feedback, not decorative page motion.
+     Keep it visible even when macOS Reduce Motion is enabled. */
+  .app-boot img { animation: boot-logo 2.2s ease-in-out infinite !important; }
+  .app-boot::before { animation: boot-glow 2.8s ease-in-out infinite alternate !important; }
+  .app-boot .boot-fireworks .fw { animation: boot-burst 2.4s ease-out infinite !important; }
+  .app-boot .boot-fireworks .fw-b { animation-delay: .65s !important; }
+  .app-boot .boot-fireworks .fw-c { animation-delay: 1.25s !important; }
+  .app-boot .boot-welcome { animation: boot-title 1.8s ease-in-out infinite !important; }
+  html .boot-progress::after { animation: boot-slide 1.2s ease-in-out infinite alternate !important; }
+} /* v3.31: boot progress + workspace animation always visible */
 
 @media (max-width: 600px) { .loc-banner { left: 12px; right: 12px; bottom: 12px; transform: none; max-width: none; flex-wrap: wrap; } .loc-banner > span { flex: 1 1 170px; } }
 
