@@ -704,7 +704,7 @@ window.FF = window.FF || {};
   // topbar search bar waise hi har page par dikhta hai (bas ~1s baad, bina pehla paint roke).
   function mountSearchTopbar() {
     if (FF.config.feat && FF.config.feat('masterSearch') === false) return;
-    if (FF.masterSearch && FF.masterSearch.mountTopbar) FF.masterSearch.mountTopbar();
+    if (FF.masterSearch && FF.masterSearch.mountTopbar) FF.masterSearch.mountTopbar(true);
   }
   function startShellExtras() {
     bindThemePackButton();
