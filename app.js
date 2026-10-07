@@ -332,14 +332,27 @@ window.FF = window.FF || {};
   }
 
   // ---- theme (light / dark) ---------------------------------------------------------------------
-  function themeMode() { try { return localStorage.getItem('ff_theme') === 'dark' ? 'dark' : 'light'; } catch { return 'light'; } }
+  // 🌙 Dark mode is opt-in. Legacy ff_theme=dark is ignored once for old sessions so the
+  // dashboard never opens dark accidentally; after the user explicitly toggles the toolbar, the
+  // chosen theme is persisted normally.
+  function themeMode() {
+    try {
+      const explicit = localStorage.getItem('ff_theme_explicit');
+      if (explicit === 'dark' || explicit === 'light') return explicit;
+      return 'light';
+    } catch { return 'light'; }
+  }
   function applyThemeMode() {
     document.documentElement.dataset.theme = themeMode();
     const b = U.$('#theme-toggle');
     if (b) { b.textContent = themeMode() === 'dark' ? '☀️' : '🌙'; b.title = themeMode() === 'dark' ? 'Light mode' : 'Dark mode'; }
   }
   function toggleThemeMode() {
-    try { localStorage.setItem('ff_theme', themeMode() === 'dark' ? 'light' : 'dark'); } catch {}
+    const next = themeMode() === 'dark' ? 'light' : 'dark';
+    try {
+      localStorage.setItem('ff_theme_explicit', next);
+      localStorage.setItem('ff_theme', next); // backward-compatible with older code.
+    } catch {}
     applyThemeMode();
   }
   // ---- chart PNG buttons -------------------------------------------------------------------------
