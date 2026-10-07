@@ -365,7 +365,8 @@ window.FF = window.FF || {};
   }
   /** out par growth + month-end projection lagao (agent aur TL, dono channels). */
   function attachGrowth(out, src, ym) {
-    const gi = growthBlock(src || {}, out.totals, ym, out.ch);
+    const growthSrc = { ...(src || {}), kind: out.kind || '', name: out.name || '', id: out.id || '', ch: out.ch || '' };
+    const gi = growthBlock(growthSrc, out.totals, ym, out.ch);
     out.growth = gi.text;
     out.growthNum = gi.num;
     out.projT1 = { num: gi.num, total: gi.projected, vc4: gi.projectedVc4, comm: gi.projectedComm, sheet: gi.sheetProjected, days: gi.basis.days, basis: gi.basis, growthThrough: gi.growthThrough, comparableCurrent: gi.comparableCurrent, comparableLast: gi.comparableLast };
