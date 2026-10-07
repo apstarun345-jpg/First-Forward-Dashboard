@@ -28,6 +28,10 @@ export class AppsScriptStore {
     this.wait = wait;
     this.batchDelay = batchDelay;
     this.slowKinds = slowKinds;
+    // Keep storage calls bounded so a slow Apps Script cannot hold Render in boot forever.
+    // Environment overrides remain available for unusually slow tenants.
+    this.attempts = Math.max(1, Number(process.env.APPS_SCRIPT_ATTEMPTS || 3));
+    this.timeoutMs = Math.max(5000, Number(process.env.APPS_SCRIPT_TIMEOUT_MS || 20000));
     this.pending = new Map(); // kind → { value, waiters: [] }
     this.timer = null;
     this.timerAt = 0;
@@ -62,10 +66,10 @@ export class AppsScriptStore {
 
   async call(action, extra = {}) {
     let lastErr;
-    const maxAttempts = this.attempts || 4;
+    const maxAttempts = this.attempts || 3;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 30000);
+      const timer = setTimeout(() => controller.abort(), this.timeoutMs);
       try {
         const response = await this.fetch(this.url, {
           method: 'POST', redirect: 'follow', signal: controller.signal,
