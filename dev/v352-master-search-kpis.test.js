@@ -164,6 +164,12 @@ test('🔎 topbar search remounts and routes through canonical Master Search pag
   assert.match(search, /const ch = \^\(gv-\|ff-\)/);
 });
 
+test('🔗 selected suggestion identity — route name comes from the selected person', async () => {
+  const ms = await read('masterSearch.js');
+  assert.match(ms, /const p = person \|\| \{\};[\s\S]{0,220}const name = clean\(p\.name \|\| q\);/, 'selected person name is authoritative for route q');
+  assert.match(ms, /if \(id\) params\.id = id;/, 'selected person ID stays attached to route');
+  assert.match(ms, /if \(ch\) params\.ch = ch;/, 'selected person channel stays attached to route');
+});
 test('🧭 identity routing — exact canonical GV ID cannot open the FF duplicate', async () => {
   const ms = await read('masterSearch.js');
   assert.match(ms, /function canonicalPerson\(p, idx\)/);
