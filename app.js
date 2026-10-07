@@ -1828,8 +1828,6 @@ window.FF = window.FF || {};
 
     maybeOnboarding();
     if (FF.config.loginAnimation !== false) FF.auth.splash(FF.auth.user);
-    maybeOnboarding();
-    if (FF.config.loginAnimation !== false) FF.auth.splash(FF.auth.user);
     registerServiceWorker(); // push notifications ke liye SW pehle ready ho
     liveShareChip();
     // 🐚 Bell · KPI drill drawer · search · assistant · office bell · live assist → first paint ke
