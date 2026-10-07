@@ -155,6 +155,14 @@ test('🔎 topbar search remounts and routes through canonical Master Search pag
   assert.match(search, /const ch = \^\(gv-\|ff-\)/);
 });
 
+test('🔎 dropdown suggestions — partial names use direct fallback and both inputs use 1-char trigger', async () => {
+  const ms = await read('masterSearch.js');
+  assert.match(ms, /direct\/fallback matching/);
+  assert.match(ms, /const all = allPeople\(\)/);
+  assert.match(ms, /suggestApi = U\.suggest\(input, \{\s*min: 1, max: 16/);
+  assert.match(ms, /sug = U\.suggest\(input, \{\s*min: 1, max: 14/);
+  assert.doesNotMatch(ms, /clearTimeout\(t\).*run\(input\.value, \{ open: false \}\)/s);
+});
 test('🚦 startup readiness — Render health stays green and storage retry is bounded', async () => {
   const server = await read('server.js');
   assert.match(server, /const bootState = \{ startedAt: Date\.now\(\), stage: 'starting', error: null \}/);
