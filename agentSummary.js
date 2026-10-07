@@ -1335,7 +1335,7 @@ FF.pages = FF.pages || {};
           packBtn.disabled = true;
           const orig = packBtn.textContent;
           try {
-            if (kind === 'pdf' && !FF.pdf && FF.lazy && FF.lazy.need) await FF.lazy.need('pdf.js').catch(() => {});
+            if (kind === 'pdf' && !FF.pdf && FF.lazy && FF.lazy.need) await FF.lazy.need('pdf').catch(() => {});
             const pack = await buildTeamPack(state.report, (done, total, name) => { packBtn.textContent = `⏳ ${done}/${total}…`; packBtn.title = name; });
             const okCount = pack.filter((x) => x.rep).length;
             const fname = `${state.report.ch}-team-pack-${U.slug(state.report.p.name)}-${U.stamp()}`;
@@ -1394,7 +1394,7 @@ FF.pages = FF.pages || {};
           try {
             await new Promise((res) => setTimeout(res, 30)); // busy paint
             if (k === 'pdf' || k === 'share') {
-              if (!FF.pdf && FF.lazy && FF.lazy.need) await FF.lazy.need('pdf.js').catch(() => {});
+              if (!FF.pdf && FF.lazy && FF.lazy.need) await FF.lazy.need('pdf').catch(() => {});
               if (!FF.pdf || !FF.pdf.doc) throw new Error('PDF module load nahi hua — page refresh karo');
               const bytes = makePdf(r);
               if (k === 'share') await FF.pdf.share(bytes, `${fname}.pdf`, `${r.p.name} — Summary`, reportText(r));
