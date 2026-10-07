@@ -8131,7 +8131,6 @@ const PERSONAL_PORTAL_JS = `(function () {
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
-    if (url.pathname === '/api/recovery/audit' && req.method === 'GET') return await recoveryAuditPublic(req, res, url);
     if (url.pathname.startsWith('/api/')) {
       try { return await handleApi(req, res, url); } catch (err) {
         if (err instanceof HttpError) return sendJson(res, err.status, { error: err.message });
@@ -8162,14 +8161,16 @@ async function readLocalStore() {
     notify: await readJson(FILES.notify, { items: [], watch: {} })
   };
 }
-async function autoRecoverHistoryOnce() {
+async function autoRecoverHistoryOnce(currentStored = {}) {
   if (process.env.AUTO_RECOVER_HISTORY !== '1' || !sheetsStore || STORAGE_BACKEND !== 'appsscript') return null;
+  const currentSettings = currentStored && currentStored.settings && typeof currentStored.settings === 'object' ? currentStored.settings : {};
+  if (currentSettings.__autoRecoveryAppliedAt) return null; // already completed once; never revert later user changes
   const hint = String(process.env.AUTO_RECOVER_LOGIN_HINT || '').trim();
   if (!hint) { console.warn('🛟 AUTO_RECOVER_HISTORY enabled but AUTO_RECOVER_LOGIN_HINT is empty — skipped.'); return null; }
   try {
-    const meta = await sheetsStore.snapshots({ limit: 20 });
+    const meta = await sheetsStore.snapshots({ limit: 40 });
     const snapshots = meta.snapshots || [];
-    const cutoff = Date.parse(String(process.env.AUTO_RECOVER_HISTORY_BEFORE || ''));
+    const cutoff = Date.parse(String(process.env.AUTO_RECOVER_HISTORY_BEFORE || '2026-10-03T23:59:59Z'));
     for (const snap of snapshots) {
       const snapTime = Date.parse(snap.at) || 0;
       let data;
@@ -8181,8 +8182,8 @@ async function autoRecoverHistoryOnce() {
         if (!u) return false;
         if (String(u.username || '').trim().toLowerCase() === id) return true;
         if (u.email && String(u.email).trim().toLowerCase() === id) return true;
-        const digits = hint.replace(/\\D/g, '');
-        const md = String(u.mobile || '').replace(/\\D/g, '');
+        const digits = hint.replace(/\D/g, '');
+        const md = String(u.mobile || '').replace(/\D/g, '');
         return !!digits && digits.length >= 7 && !!md &&
           (md === digits || (md.length >= 10 && digits.length >= 10 && md.slice(-10) === digits.slice(-10)));
       });
@@ -8196,8 +8197,7 @@ async function autoRecoverHistoryOnce() {
     console.warn('🛟 AUTO_RECOVER_HISTORY failed:', err.message);
   }
   return null;
-}
-async function recoveryDiagnostic() {
+}async function recoveryDiagnostic() {
   if (process.env.RECOVERY_DIAGNOSTIC !== '1' || !sheetsStore || STORAGE_BACKEND !== 'appsscript') return null;
   try {
     const meta = await sheetsStore.snapshots({ limit: 40 });
@@ -8228,32 +8228,6 @@ async function recoveryDiagnostic() {
 }
 
 
-async function recoveryAuditPublic(req, res, url) {
-  const key = String(url.searchParams.get('key') || '');
-  const expected = String(process.env.RECOVERY_READ_KEY || '');
-  if (!expected || key !== expected) return sendJson(res, 404, { error: 'Not found' });
-  if (!sheetsStore || STORAGE_BACKEND !== 'appsscript') return sendJson(res, 200, { ok: true, backend: STORAGE_BACKEND, snapshots: [] });
-  const meta = await sheetsStore.snapshots({ limit: 60 });
-  const list = [];
-  for (let idx = 0; idx < meta.snapshots.length; idx++) {
-    const snap = meta.snapshots[idx];
-    let users = [], settings = {};
-    try {
-      const data = (await sheetsStore.snapshotData(snap.at, ['users', 'settings'])).data || {};
-      users = Array.isArray(data.users) ? data.users : [];
-      settings = data.settings && typeof data.settings === 'object' ? data.settings : {};
-    } catch {}
-    list.push({
-      index: idx, at: snap.at, users: users.length,
-      admins: users.filter((u) => u && u.role === 'admin').length,
-      approved: users.filter((u) => !u || u.approved !== false).length,
-      usernames: users.slice(0, 30).map((u) => String((u && u.username) || '')),
-      appName: String(settings.appName || ''),
-      settingsUpdatedAt: settings.updatedAt || null
-    });
-  }
-  return sendJson(res, 200, { ok: true, current: currentSummary(), snapshots: list });
-}
 
 async function start() {
   if (!['files', 'sheets', 'appsscript'].includes(STORAGE_BACKEND)) throw new Error('STORAGE_BACKEND must be files, sheets or appsscript.');
@@ -8296,7 +8270,7 @@ async function start() {
       };
       console.log(`Loaded users/settings/sessions from Google Sheet APP_STORAGE (Apps Script) · users ${stored.users.length}`);
       await recoveryDiagnostic();
-      const autoRecovery = await autoRecoverHistoryOnce();
+      const autoRecovery = await autoRecoverHistoryOnce(stored);
       if (autoRecovery && autoRecovery.data && Array.isArray(autoRecovery.data.users) && autoRecovery.data.users.length) {
         stored = {
           users: autoRecovery.data.users,
@@ -8305,8 +8279,9 @@ async function start() {
           resets: Array.isArray(autoRecovery.data.resets) ? autoRecovery.data.resets : stored.resets,
           notify: autoRecovery.data.notify && typeof autoRecovery.data.notify === 'object' ? autoRecovery.data.notify : stored.notify
         };
-        stored.__autoRecoveredHistoryAt = autoRecovery.at;
-        stored.__autoRecoveredHistoryLogin = autoRecovery.username;
+        stored.settings = stored.settings && typeof stored.settings === 'object' ? stored.settings : {};
+        stored.settings.__autoRecoveryAppliedAt = new Date().toISOString();
+        stored.settings.__autoRecoveredHistoryAt = autoRecovery.at;
       }
     }
   } else if (STORAGE_BACKEND === 'sheets') {
@@ -8361,8 +8336,6 @@ async function start() {
   if (stored.__autoRecoveredHistoryAt) {
     console.warn('🛟 AUTO_RECOVER_HISTORY applied:', stored.__autoRecoveredHistoryAt);
     await Promise.all(['users', 'settings', 'resets', 'notify'].map((kind) => persist(kind)));
-    delete stored.__autoRecoveredHistoryAt;
-    delete stored.__autoRecoveredHistoryLogin;
   }
   for (const kind of Object.keys(FILES)) durableSnapshots.set(kind, JSON.stringify(db[kind], null, 2));
   tagReqBaselineSync(); // 🛡️ v3.50 — notify guard ka base: jo tag requests abhi durable hain
