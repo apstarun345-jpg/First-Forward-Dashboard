@@ -1114,7 +1114,7 @@ window.FF = window.FF || {};
   async function exportDrawerPdf(btn) {
     if (!FF.auth.can('export')) { U.toast('Download permission nahi hai', 'err'); return; }
     try {
-      if (!FF.pdf && FF.lazy && FF.lazy.need) await FF.lazy.need('pdf.js');
+      if (!FF.pdf && FF.lazy && FF.lazy.need) await FF.lazy.need('pdf');
       if (!FF.pdf || !FF.pdf.doc) { U.toast('PDF module load nahi hua', 'err'); return; }
       if (btn) U.setButtonBusy(btn, true, 'PDF…');
       const d = extractDrawerData();
