@@ -865,6 +865,7 @@ FF.pages = FF.pages || {};
     const params = { q: name };
     if (id) params.id = id;
     if (ch) params.ch = ch;
+    // Canonical route: every topbar / Master Search selection opens the same Master Search renderer.
     try { if (FF.app && FF.app.navigate) { FF.app.navigate('masterSearch', params); return true; } } catch {}
     try { const extra = `${id ? `&id=${encodeURIComponent(id)}` : ''}${ch ? `&ch=${encodeURIComponent(ch)}` : ''}`; location.hash = `#/masterSearch?q=${encodeURIComponent(name)}${extra}`; return true; } catch { return false; }
   }
