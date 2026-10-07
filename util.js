@@ -645,7 +645,16 @@ window.FF = window.FF || {};
     // URL.createObjectURL accepts Blob/File; coerce other common binary values safely.
     let file = blob;
     if (!(file instanceof Blob)) {
-      if (file instanceof ArrayBuffer || ArrayBuffer.isView(file)) file = new Blob([file]);
+      if (typeof file === 'string' && /^data:[^,]*,/i.test(file)) {
+        const comma = file.indexOf(',');
+        const meta = file.slice(5, comma);
+        const body = file.slice(comma + 1);
+        const mime = (meta.split(';')[0] || 'application/octet-stream');
+        const bin = /;base64/i.test(meta) ? atob(body) : decodeURIComponent(body);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        file = new Blob([bytes], { type: mime });
+      } else if (file instanceof ArrayBuffer || ArrayBuffer.isView(file)) file = new Blob([file]);
       else file = new Blob([String(file)], { type: 'application/octet-stream' });
     }
 
