@@ -155,6 +155,14 @@ test('🔎 topbar search remounts and routes through canonical Master Search pag
   assert.match(search, /const ch = \^\(gv-\|ff-\)/);
 });
 
+test('📦 GV individual stock — card fallback matches Tag Assignment class-wise stock', async () => {
+  const mp = await read('masterProfile.js');
+  assert.match(mp, /GV individual-agent card must use the same Tag Assignment stock source/);
+  assert.match(mp, /gvRows\('stockAgent'\)/);
+  assert.match(mp, /const total = U\.sum\(mine, \(x\) => num\(x\.n\)\)/);
+  assert.match(mp, /out\.stockSource = 'Tag Assignment'/);
+  assert.match(mp, /out\.dispatch\.sugVc4 = suggest\(out\.dispatch\.avgVc4, vc4\)/);
+});
 test('📈 growth — compare yesterday MTD against same calendar day last month', async () => {
   const mp = await read('masterProfile.js');
   assert.match(mp, /Comparable MTD growth/);
