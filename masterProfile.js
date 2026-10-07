@@ -349,13 +349,18 @@ window.FF = window.FF || {};
     const b = basis(ch);
     const t = totals || {};
     const comparable = comparableMtdGrowth({ ...t, kind: o.kind || '', name: o.name || '', id: o.id || '', ch }, ch);
+    // Daily comparable is optional (it may still be loading or may not contain this person's alias).
+    // Never treat an empty 0/0 comparable as real data — that was the source of false -100% growth.
+    const comparableUsable = !!(comparable && (num(comparable.curRows) > 0 || num(comparable.lastRows) > 0));
     const sheet = pctText(o.growth);
-    const g = comparable && comparable.growth !== null ? comparable.growth : (sheet !== null ? sheet : U.growth(num(t.curTotal), num(t.lastTotal)));
-    const projectedCurrent = comparable ? Math.round((num(comparable.current) / Math.max(1, num(comparable.day))) * U.daysInMonth(comparable.currentYm || ym)) : projFallback(num(t.curTotal), b.days, ym);
+    const g = comparableUsable && comparable.growth !== null ? comparable.growth : (sheet !== null ? sheet : U.growth(num(t.curTotal), num(t.lastTotal)));
+    const projectedCurrent = comparableUsable
+      ? Math.round((num(comparable.current) / Math.max(1, num(comparable.day))) * U.daysInMonth(comparable.currentYm || ym))
+      : projFallback(num(t.curTotal), b.days, ym);
     const projectedGrowth = num(t.lastTotal) > 0 ? ((projectedCurrent - num(t.lastTotal)) / num(t.lastTotal)) * 100 : null;
     const proj = (k) => U.projectMonthEnd(t[k], b.days, ym);
     const growthText = g === null ? '' : `${g >= 0 ? '▲ +' : '▼ '}${Math.abs(g).toFixed(1)}%`;
-    const growthBasis = { ...b, growthThrough: comparable ? comparable.label : '', growthCurrent: comparable ? comparable.current : null, growthLast: comparable ? comparable.last : null, growthElapsed: comparable ? comparable.day : null };
+    const growthBasis = { ...b, growthThrough: comparableUsable ? comparable.label : '', growthCurrent: comparableUsable ? comparable.current : num(t.curTotal), growthLast: comparableUsable ? comparable.last : num(t.lastTotal), growthElapsed: comparableUsable ? comparable.day : b.days };
     return {
       text: growthText,
       num: projectedGrowth !== null ? projectedGrowth : g, mtdGrowthNum: g, projectedGrowth, projectedCurrent,
