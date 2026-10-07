@@ -1138,6 +1138,7 @@ window.FF = window.FF || {};
       FF.pdf.download(doc.finish(), drawerPdfName);
       U.toast('Drawer PDF downloaded ✓', 'ok');
     } catch (err) {
+      if (U.downloadFail) U.downloadFail(drawerPdfName, (err && err.message) || 'PDF export failed');
       U.toast((err && err.message) || 'PDF export failed', 'err');
     } finally {
       if (btn) U.setButtonBusy(btn, false);
