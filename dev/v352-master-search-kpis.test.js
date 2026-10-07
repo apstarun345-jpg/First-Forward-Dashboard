@@ -301,10 +301,12 @@ test('🚦 startup readiness — Render health stays green and storage retry is 
   assert.match(server, /url\.pathname === '\/api\/health'.*ready: false/s);
   assert.match(server, /Retry-After.*3/);
   assert.match(server, /StorageStore|AppsScriptStore/);
+  assert.match(server, /await waitForBoot\(\)/, 'API requests wait on one server-side boot promise');
   assert.doesNotMatch(server, /for \(let attempt = 0; attempt < 5; attempt\+\+\) \{[\s\S]{0,500}sheetsStore\.read\(\)/);
   const auth = await read('auth.js');
   assert.match(auth, /booting = err && err\.status === 503 && err\.data && err\.data\.booting/);
-  assert.match(auth, /maxBootRetries = 7/);
+  assert.match(auth, /maxBootRetries = 2/);
+  assert.match(auth, /path === '\/api\/auth\/me' \? 120000/, 'auth readiness call can wait for durable startup');
   const storage = await read('apps-script-storage.js');
   assert.match(storage, /APPS_SCRIPT_ATTEMPTS/);
   assert.match(storage, /APPS_SCRIPT_TIMEOUT_MS/);
