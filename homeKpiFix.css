@@ -13,3 +13,21 @@
 
 /* v3.65 — Home greeting visibility: keep the time greeting readable on every theme/device. */
 .home-hero.v2 .home-greeting,.home-hero.v2 .home-greeting-text{color:#111827 !important;-webkit-text-fill-color:#111827 !important;opacity:1 !important;visibility:visible !important;display:inline !important;font-weight:900 !important}.home-hero.v2 .home-greeting-text{background:linear-gradient(135deg,#4338ca,#7c3aed,#db2777);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent !important}html[data-theme="dark"] .home-hero.v2 .home-greeting{color:#f8fafc !important;-webkit-text-fill-color:#f8fafc !important}html[data-theme="dark"] .home-hero.v2 .home-greeting-text{-webkit-text-fill-color:transparent !important}@media (max-width:600px){.home-hero.v2 .home-greeting{font-size:19px !important;line-height:1.3 !important}}
+
+/* v3.67 — Home mobile KPI cards: keep the intended vivid gradient backgrounds.
+   The Home KPI text is intentionally white, so a missing/overridden gradient makes the
+   cards look like invisible white text on the page. Scope this to Home and use !important
+   so PWA/mobile repair styles cannot wash the backgrounds out. */
+.page-home .kpi.g1,.page-home .kpi.g1{background:linear-gradient(135deg,#6366f1,#8b5cf6)!important}
+.page-home .kpi.g2{background:linear-gradient(135deg,#ec4899,#f43f5e)!important}
+.page-home .kpi.g3{background:linear-gradient(135deg,#0ea5e9,#6366f1)!important}
+.page-home .kpi.g4{background:linear-gradient(135deg,#f59e0b,#f97316)!important}
+.page-home .kpi.g5{background:linear-gradient(135deg,#10b981,#14b8a6)!important}
+.page-home .kpi.g6{background:linear-gradient(135deg,#8b5cf6,#d946ef)!important}
+.page-home .kpi.g7{background:linear-gradient(135deg,#f97316,#ef4444)!important}
+.page-home .kpi.g8{background:linear-gradient(135deg,#06b6d4,#3b82f6)!important}
+.page-home .kpi.g9{background:linear-gradient(135deg,#14b8a6,#22c55e)!important}
+.page-home .kpi.g10{background:linear-gradient(135deg,#a855f7,#ec4899)!important}
+.page-home .kpi.g11{background:linear-gradient(135deg,#3b82f6,#06b6d4)!important}
+.page-home .kpi.g12{background:linear-gradient(135deg,#22c55e,#84cc16)!important}
+.page-home .kpi{background-clip:border-box!important;-webkit-background-clip:border-box!important}
