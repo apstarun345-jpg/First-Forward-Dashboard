@@ -334,7 +334,7 @@ window.FF = window.FF || {};
       if (!belongs(r)) return;
       const k = rowDateKey(r);
       if (!k) return;
-      const n = num(r.n || r.count || 1);
+      const n = num(r.n !== undefined ? r.n : (r.count !== undefined ? r.count : 1));
       if (k >= curStart && k <= curEnd) { cur += n; curRows++; }
       else if (k >= prevStart && k <= prevEnd) { last += n; lastRows++; }
     });
