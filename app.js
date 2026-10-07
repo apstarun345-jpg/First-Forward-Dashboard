@@ -4,11 +4,27 @@ window.FF = window.FF || {};
 (function (FF) {
   'use strict';
   // 🚀 v3.66 — Real workspace boot gate.
-  // Splash stays visible for at least 3.6s, but it can only release after critical data + the
-  // initial route have finished rendering. This prevents a half-loaded dashboard/zero KPI first paint.
-  const WORKSPACE_BOOT_MIN_MS = 3600;
+  // Splash is intentionally short: target 3–4 seconds. It must NEVER remain on screen
+  // indefinitely because a slow/non-critical data source is still loading.
+  const WORKSPACE_BOOT_MIN_MS = 3000;
+  const WORKSPACE_BOOT_MAX_MS = 3900;
   const workspaceBootStarted = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
   let workspaceBootReleased = false;
+  // Hard safety cap: even if preload/render/storage hangs, the splash exits within 3.9s.
+  setTimeout(() => {
+    if (workspaceBootReleased) return;
+    document.body.classList.add('ready');
+    document.body.classList.add('workspace-ready');
+    const boot = U_BOOT();
+    if (boot) {
+      workspaceBootReleased = true;
+      boot.classList.add('boot-exit');
+      setTimeout(() => { try { boot.remove(); } catch {} }, 360);
+    }
+  }, WORKSPACE_BOOT_MAX_MS);
+  function U_BOOT() {
+    try { return document.getElementById('app-boot'); } catch { return null; }
+  }
   function bootElapsed() {
     const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
     return now - workspaceBootStarted;
