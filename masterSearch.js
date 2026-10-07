@@ -807,7 +807,7 @@ FF.pages = FF.pages || {};
         if (U.downloadYield) await U.downloadYield();
         try {
           if (!FF.pdf && FF.lazy && FF.lazy.need) await FF.lazy.need('pdf');
-          if (!FF.pdf) return;
+          if (!FF.pdf || !FF.pdf.doc) throw new Error('PDF module load nahi hua');
           U.setButtonBusy(pdfBtn, true, 'PDF…');
           const rows = [];
           res.tags.forEach((tt) => { const f = tt.ff[0] || {}, g = tt.gv[0] || {}; const st = tagStatus(tt); rows.push(['Tag', U.barcode(tt.key), f.agentName || g.agentName || '', f.tlName || g.tlName || '', f.cls || g.cls || '', st.t, 1]); });
