@@ -953,7 +953,13 @@ window.FF = window.FF || {};
     const ac = rowsOf('agentClass'), agRows = rowsOf('agents'), stk = rowsOf('stockAgents');
     const n = norm(p.name);
     const curYm = latestYm(ac.length ? ac : agRows), lastYm = U.prevMonthKey(curYm);
-    const isMine = (r) => norm(r.name) === n && (!r.channel || /first/i.test(r.channel));
+    const personId = clean(p.sub).replace(/\.0+$/, '').toUpperCase();
+    const rowAgentId = (r) => clean(r.agentId || r.id).replace(/\.0+$/, '').toUpperCase();
+    const isMine = (r) => {
+      if (r.channel && !/first/i.test(r.channel)) return false;
+      if (personId) return rowAgentId(r) === personId;
+      return norm(r.name) === n;
+    };
     if (a) {
       const avgVc4 = U.runRate(a.curVc4, 'ff'), avgNvc4 = U.runRate(a.curNvc4, 'ff');
       Object.assign(out, {
@@ -979,7 +985,10 @@ window.FF = window.FF || {};
       out.tlStock = { ...teamStock.stock, has: true, own: teamStock.own, agents: teamStock.agents };
     }
     if (light) return out;
-    out.classes = classTable(ac.filter(isMine), stk.filter((r) => norm(r.agentName) === n), curYm, lastYm);
+    out.classes = classTable(ac.filter(isMine), stk.filter((r) => {
+      if (personId) return rowAgentId(r) === personId;
+      return norm(r.agentName) === n;
+    }), curYm, lastYm);
     out.classBins = classBinsFromRows(ac.filter(isMine), curYm, lastYm);
     if (!out.classes.length && a) out.classes = [{ cls: 'VC4', cur: num(a.curVc4), last: num(a.lastVc4), stock: num(a.stockVc4) }, { cls: 'Commercial', cur: num(a.curNvc4), last: num(a.lastNvc4), stock: num(a.stockNvc4) }];
     else if (out.classes.length && rowsOf('daily').length) {
@@ -1216,10 +1225,10 @@ window.FF = window.FF || {};
     const curYmTruth = U.ymKey(new Date()), lastYmTruth = U.prevMonthKey(curYmTruth);
     // Agent ka rule: naam (normalised) YA exact id — id case-sensitive rehta hai (gvAgentRows jaisa hi),
     // warna sheet me 'g001' vs 'G001' jaise farq par doosre agent ki rows jud jaati hain.
-    const myMasterRows = gvCanonicalIssuanceRows().filter((row) =>
-      (out.id && clean(row.agentId) === clean(out.id)) ||
-      norm(row.agentName) === norm(out.name)
-    );
+    const myMasterRows = gvCanonicalIssuanceRows().filter((row) => {
+      if (out.id) return clean(row.agentId).replace(/\.0+$/, '').toUpperCase() === clean(out.id).replace(/\.0+$/, '').toUpperCase();
+      return norm(row.agentName) === norm(out.name);
+    });
     const curExact = exactGvMonth(myMasterRows, curYmTruth);
     const lastExact = exactGvMonth(myMasterRows, lastYmTruth);
     if (truthCur || curExact) {
@@ -1235,7 +1244,10 @@ window.FF = window.FF || {};
     out.tl = { name: out.direct ? '' : (truth && truth.tlName) || (out.tl && out.tl.name) || '', id: out.direct ? '' : (truth && truth.tlId) || (out.tl && out.tl.id) || '' };
     out.issuanceSources = { current: curExact ? 'GV Master' : 'GV Truth', last: lastExact ? 'GV Master' : 'GV Truth', stock: truthStock ? 'Tag Assignment' : 'GV REPORT fallback' };
     if (light) return out;
-    const master = gvClassRows((m) => norm(m.agentName) === n || (out.id && m.agentId === out.id));
+    const master = gvClassRows((m) => {
+      if (out.id) return clean(m.agentId).replace(/\.0+$/, '').toUpperCase() === clean(out.id).replace(/\.0+$/, '').toUpperCase();
+      return norm(m.agentName) === n;
+    });
     const curYm = globalCurYm, lastYm = globalLastYm;
     out.classBins = classBinsFromRows(master, curYm, lastYm);
     if (!out.classBins.available.cur && !out.classBins.available.last) out.issuanceSources.classes = 'GV REPORT class fields';
