@@ -65,7 +65,7 @@ const CHUNK = 45000; // a Google Sheets cell holds max 50,000 characters
 const KINDS = ['users', 'sessions', 'settings', 'resets', 'notify'];
 const HISTORY_TAB = 'APP_STORAGE_HISTORY';
 const HISTORY_MAX_ROWS = 60; // bounded to 60 snapshots to avoid Google Sheets document size limits
-const CODE_VERSION = 'v3.60';
+const CODE_VERSION = 'v3.63';
 
 /** Run this ONCE from the Apps Script editor (▶ Run) to grant the "send email" permission. */
 function authorizeMail() { Logger.log('Mail quota left today: ' + MailApp.getRemainingDailyQuota()); }
@@ -477,18 +477,29 @@ function doPost(e) {
     if (body.action === 'read') return json_({ ok: true, records: readAll_(sheet) });
     if (body.action === 'write') {
       const records = body.records || {};
-      // Ek hi save-batch ke sabhi records ka timestamp same hona chahiye — tabhi dashboard
-      // unhe ek "snapshot" (purani save) ke roop me group kar ke wapas la sakta hai.
+      const kinds = Object.keys(records);
+      if (!kinds.length) return json_({ ok: false, error: 'write me koi record nahi diya.' });
+      kinds.forEach(function (kind) { if (KINDS.indexOf(kind) < 0) throw new Error('unknown kind ' + kind); });
+
+      // 🔐 Transactional save:
+      // old rows → encrypted history backup → replace → exact verify → rollback on ANY failure.
+      // Isse partial/half-saved Settings ya users kabhi active state nahi bante.
+      const originals = captureRows_(sheet, kinds);
       const nowIso = new Date().toISOString();
-      Object.keys(records).forEach(function (kind) {
-        if (KINDS.indexOf(kind) < 0) throw new Error('unknown kind ' + kind);
-        writeRecord_(sheet, kind, records[kind], nowIso);
-      });
-      SpreadsheetApp.flush();
-      // v3.58 — save CONFIRM karo: har kind ki row wapas padh kar timestamp + chunk count milao.
-      // Flush ke baad bhi kuch galat ho (quota/row issue) to yahin pakda jayega, chup-chaap nahi.
-      verifyWrite_(sheet, records, nowIso);
-      return json_({ ok: true, savedAt: nowIso, kinds: Object.keys(records), verified: true });
+      try {
+        kinds.forEach(function (kind) { writeRecord_(sheet, kind, records[kind], nowIso); });
+        SpreadsheetApp.flush();
+        verifyWrite_(sheet, records, nowIso);
+        return json_({ ok: true, savedAt: nowIso, kinds: kinds, verified: true, transactional: true });
+      } catch (err) {
+        try {
+          restoreCapturedRows_(sheet, originals);
+          SpreadsheetApp.flush();
+        } catch (rollbackErr) {
+          throw new Error('write failed AND rollback failed: ' + String(err && err.message || err) + ' | ' + String(rollbackErr && rollbackErr.message || rollbackErr));
+        }
+        throw err;
+      }
     }
     // ⏪ Recovery (v3.48) — APP_STORAGE_HISTORY ke purane encrypted records ki list.
     //   body: { rows?: [rowNumbers], withData?: true }
@@ -544,6 +555,33 @@ function readAll_(sh) {
     out[kind] = { v: String(row[1] || ''), data: parts.join(''), updatedAt: row[2] ? String(row[2]) : '' };
   });
   return out;
+}
+
+function captureRows_(sh, kinds) {
+  const wanted = new Set(kinds);
+  const lastRow = sh.getLastRow();
+  const lastCol = Math.max(4, sh.getLastColumn());
+  const rows = [];
+  if (lastRow >= 2) {
+    const values = sh.getRange(2, 1, lastRow - 1, lastCol).getValues();
+    for (let i = 0; i < values.length; i++) {
+      const kind = String(values[i][0] || '');
+      if (wanted.has(kind)) rows.push({ row: i + 2, values: values[i].slice() });
+    }
+  }
+  return { lastRow: lastRow, lastCol: lastCol, rows: rows };
+}
+
+function restoreCapturedRows_(sh, snap) {
+  const currentLastRow = sh.getLastRow();
+  const currentLastCol = Math.max(4, sh.getLastColumn());
+  if (currentLastRow >= 2) sh.getRange(2, 1, currentLastRow - 1, currentLastCol).clearContent();
+  snap.rows.forEach(function (item) {
+    if (item.row < 2 || !item.values || !item.values.length) return;
+    const width = Math.max(4, item.values.length);
+    if (sh.getMaxColumns() < width) sh.insertColumnsAfter(sh.getMaxColumns(), width - sh.getMaxColumns());
+    sh.getRange(item.row, 1, 1, width).setValues([item.values]);
+  });
 }
 
 function historySheet_(ss) {
@@ -618,6 +656,10 @@ function backupPreviousRecord_(sh, rowIndex, kind) {
     if (!chunkCount) return;
     const h = historySheet_(sh.getParent());
     const chunks = row.slice(4, 4 + chunkCount);
+    // Trim BEFORE append so the journal stays bounded.
+    const keepBeforeAppend = Math.max(1, HISTORY_MAX_ROWS - 1);
+    const excessBefore = h.getLastRow() - 1 - keepBeforeAppend;
+    if (excessBefore > 0) h.deleteRows(2, excessBefore);
     const next = h.getLastRow() + 1;
     h.getRange(next, 1, 1, 1).setNumberFormat('@'); // savedAt hamesha TEXT rahe (date auto-format se bachao)
     h.getRange(next, 1, 1, 4 + chunks.length).setValues([[
@@ -630,6 +672,8 @@ function backupPreviousRecord_(sh, rowIndex, kind) {
     const excess = h.getLastRow() - HISTORY_MAX_ROWS;
     if (excess > 0) h.deleteRows(2, excess);
   } catch (err) {
+    // 🔐 Fail closed for every durable record except transient sessions.
+    if (kind !== 'sessions') throw new Error('history backup failed for "' + kind + '": ' + String(err && err.message || err));
     Logger.log('backupPreviousRecord_ non-fatal error: ' + (err && err.message || err));
   }
 }
@@ -664,15 +708,21 @@ function writeRecord_(sh, kind, record, nowIso) {
  */
 function verifyWrite_(sh, records, nowIso) {
   const lastRow = sh.getLastRow();
-  if (lastRow < 2) throw new Error('write verify failed: ' + TAB + ' tab is empty after save');
-  const meta = sh.getRange(2, 1, lastRow - 1, 4).getValues();
+  const lastCol = sh.getLastColumn();
+  if (lastRow < 2 || lastCol < 5) throw new Error('write verify failed: ' + TAB + ' tab is empty after save');
+  const values = sh.getRange(2, 1, lastRow - 1, lastCol).getValues();
   Object.keys(records).forEach(function (kind) {
-    const expected = Math.max(1, Math.ceil(String(records[kind].data || '').length / CHUNK));
+    const source = records[kind] || {};
+    const expectedData = String(source.data || '');
+    const expectedChunks = Math.max(1, Math.ceil(expectedData.length / CHUNK));
     let found = null;
-    for (let i = 0; i < meta.length; i++) if (String(meta[i][0]) === kind) { found = meta[i]; break; }
+    for (let i = 0; i < values.length; i++) if (String(values[i][0]) === kind) { found = values[i]; break; }
     if (!found) throw new Error('write verify failed: row for "' + kind + '" not found after save');
     if (String(found[2]) !== String(nowIso)) throw new Error('write verify failed: "' + kind + '" timestamp mismatch after save');
-    if ((Number(found[3]) || 0) !== expected) throw new Error('write verify failed: "' + kind + '" chunk count ' + found[3] + ' ≠ expected ' + expected);
+    if ((Number(found[3]) || 0) !== expectedChunks) throw new Error('write verify failed: "' + kind + '" chunk count ' + found[3] + ' ≠ expected ' + expectedChunks);
+    const parts = [];
+    for (let j = 0; j < expectedChunks; j++) parts.push(String(found[4 + j] || '').replace(/^~/, ''));
+    if (parts.join('') !== expectedData) throw new Error('write verify failed: "' + kind + '" encrypted payload mismatch after save');
   });
 }
 
