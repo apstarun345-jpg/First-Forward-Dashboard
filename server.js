@@ -37,7 +37,13 @@ const DATA_DIR = path.resolve(process.env.DATA_DIR || (process.env.RENDER && exi
 // Render free / no-disk plans — see STORAGE_SETUP.md). 'sheets' = service-account mode, 'files' = local JSON.
 const STORAGE_BACKEND = process.env.STORAGE_BACKEND || ((process.env.APPS_SCRIPT_URL || '').trim() ? 'appsscript' : 'files');
 const CLOUD_BACKEND = STORAGE_BACKEND === 'sheets' || STORAGE_BACKEND === 'appsscript';
+// 🔒 Production rule: Render par durable Google Sheet storage mandatory rakho.
+// Missing/misconfigured cloud storage ko temporary files/default admin me silently downgrade mat karo.
+const REQUIRE_DURABLE_CLOUD = process.env.REQUIRE_DURABLE_CLOUD === '1' || !!process.env.RENDER;
 let sheetsStore = null;
+if (REQUIRE_DURABLE_CLOUD && STORAGE_BACKEND !== 'appsscript') {
+  throw new Error('Production storage guard: Render par APPS_SCRIPT_URL + APPS_SCRIPT_SECRET wala Google Sheet storage required hai. Temporary file/default storage intentionally disabled.');
+}
 const FRAME_PROTECTION = process.env.FRAME_PROTECTION === '1';
 const SESSION_DAYS = Math.max(1, Number(process.env.SESSION_DAYS || 30));
 // Admin bootstrap: ADMIN_USER / ADMIN_PASSWORD (recommended on Render). If no user exists and no env is set,
@@ -58,7 +64,7 @@ const MIME = {
 const BLOCKED_FILES = new Set(['server.js', 'sheets-storage.js', 'apps-script-storage.js', 'mailer.js', 'stock-age.js', 'DEPLOYMENT.md', 'SHEETS_STORAGE.md', 'STORAGE_SETUP.md', 'RECOVERY.md', 'package.json', 'package-lock.json', 'render.yaml', 'README.md', '.env']);
 const BLOCKED_DIRS = new Set(['data', 'dev', 'node_modules', '.git', 'google-apps-script']);
 // /api/health ka version ab package.json se aata hai (pehle yahan hardcoded purana string tha).
-let APP_VERSION = '3.62.0';
+let APP_VERSION = '3.63.0';
 try { APP_VERSION = String(JSON.parse(readFileSync(path.join(__dirname, 'package.json'), 'utf8')).version || APP_VERSION); } catch { /* keep fallback */ }
 
 // ---------------------------------------------------------------------------------------------
@@ -757,11 +763,14 @@ async function bootstrapAdmin() {
     await persist('users');
     console.log(`Admin "${ADMIN_USER}" created from environment.`);
   } else if (!db.users.some((u) => u.role === 'admin')) {
+    // 🔐 In durable cloud mode, "no admin" indicates damaged/incomplete saved state.
+    // Never invent a new admin; stop so the existing Google Sheet can be recovered safely.
+    if (CLOUD_BACKEND) throw new Error('APP_STORAGE users record has no admin account. Refusing to create a new default admin because that could overwrite/alter the saved account state. Restore the original APP_STORAGE_HISTORY snapshot instead.');
     const username = 'admin';
     if (!findUser(username)) {
       db.users.unshift({ username, name: 'Admin', role: 'admin', approved: true, permissions: allPermKeysNow(), password: hashPassword('admin123'), mustChangePassword: true, createdAt: new Date().toISOString() });
       await persist('users');
-      console.log('⚠️  No admin found → created default admin  user: admin  password: admin123  (change it in Settings → My account, or set ADMIN_USER / ADMIN_PASSWORD env).');
+      console.log('⚠️  No admin found → created default admin only for local/non-cloud installs.');
     }
   }
 }
