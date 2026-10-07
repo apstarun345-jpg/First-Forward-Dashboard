@@ -766,7 +766,7 @@ FF.pages = FF.pages || {};
       ${strip}
       ${row && row.issuance && MP() && MP().issuanceCardsHtml ? MP().issuanceCardsHtml(row.issuance) : ''}
       <div class="ms-kundli-stats">
-        <div><small>TL</small><b>${p.direct ? `<span class="direct-chip">🚫 ${esc(tl)}</span>` : esc(tl || '—')}</b>${row && row.tlId && !p.direct ? `<em>${esc(row.tlId)}</em>` : ''}</div>
+        <div><small>TL</small><b>${p.direct ? `<span class="direct-chip">🚫 ${esc(tl)}</span>` : (row && row.tlName && !p.direct ? `<button type="button" class="mp-link-btn" data-ms-open-tl="1" data-ms-tl-name="${esc(row.tlName)}" data-ms-tl-id="${esc(row.tlId || '')}" data-ms-tl-ch="${esc(row.ch || (p.kind.startsWith('gv') ? 'gv' : 'ff'))}">${esc(row.tlName)}</button>` : esc(tl || '—'))}</b>${row && row.tlId && !p.direct ? `<em>${esc(row.tlId)}</em>` : ''}</div>
         <div><small>Tags / barcodes</small><b>${p.bars.size ? U.fmt(p.bars.size) : U.fmt(p.n)}</b></div>
         <div><small>Activity rows</small><b>${U.fmt(p.n)}</b></div>
         <div><small>Last allocation</small><b>${esc(p.last || '—')}</b></div>
@@ -1464,7 +1464,17 @@ FF.pages = FF.pages || {};
       paintState(); paintQuick();
       if (!state.light) { out.innerHTML = '<div class="card"><div class="card-body empty">Search index load nahi hua — internet check karke “🔄 Index refresh” dabao.</div></div>'; return; }
       const res = search(q);
-      const channelPeople = (res.people || []).filter((p) => !chFilter || chOfP(p) === chFilter);
+      // Exact URL/selection ID wins over same-name duplicates. Requested channel is authoritative.
+      let exactRequestedPerson = null;
+      if (askedId && chFilter) {
+        const want = normId(askedId);
+        const idx = state.full || state.light;
+        exactRequestedPerson = idx && idx.people ? [...idx.people.values()].find((p) => {
+          if (chOfP(p) !== chFilter) return false;
+          return normId(p.sub || p.id) === want || [...(p.ids || []), ...(p.alias || []), ...(p.tlIds || [])].some((id) => normId(id) === want);
+        }) || null : null;
+      }
+      const channelPeople = exactRequestedPerson ? [exactRequestedPerson] : (res.people || []).filter((p) => !chFilter || chOfP(p) === chFilter);
       const people = preferNameMatches(channelPeople, q);
       const sr = SR();
       groups = sr ? sr.groupPeople(people) : people.map(fallbackGroup);
@@ -1567,6 +1577,8 @@ FF.pages = FF.pages || {};
       if (gb) { const gp = groups[Number(gb.dataset.mspG)]; if (gp) openGroup(gp); return; }
       const again = e.target.closest('[data-ms-again]');
       if (again) { const query = again.dataset.msAgain || ''; if (input) input.value = query; run(query); return; }
+      const tlOpen = e.target.closest('[data-ms-open-tl]');
+      if (tlOpen && FF.app && FF.app.navigate) { FF.app.navigate('masterSearch', { q: tlOpen.dataset.msTlName || '', id: tlOpen.dataset.msTlId || '', ch: tlOpen.dataset.msTlCh || '' }); return; }
       const tags = e.target.closest('[data-ms-tags]');
       if (tags && FF.app && FF.app.navigate) { FF.app.navigate('masterStock', { q: tags.dataset.msTags }); return; }
     });
