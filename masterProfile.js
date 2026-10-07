@@ -561,21 +561,17 @@ window.FF = window.FF || {};
   function findFfAgent(name, id) {
     const index = ffPeopleLookup();
     const wantId = clean(id).replace(/\.0+$/, '').toUpperCase();
-    // Exact ID must win across ALL FF identity sources. The old lookup searched only the
-    // same-name bucket, so an old/new ID pair with the same name could silently open the wrong agent.
     if (wantId) {
       const idRows = index.byId.get(wantId) || [];
       if (idRows.length) {
-        const scored = idRows.slice().sort((a, b) => {
-          const rich = (x) => ['curTotal','lastTotal','stockTotal','curVc4','lastVc4','tlName','tlId'].reduce((n, k) => n + (x[k] !== undefined && x[k] !== null && x[k] !== '' ? 1 : 0), 0);
+        return idRows.slice().sort((a, b) => {
+          const rich = (x) => ['curTotal','lastTotal','stockTotal','curVc4','lastVc4','tlName','tlId','tlMobile'].reduce((n, k) => n + (x[k] !== undefined && x[k] !== null && x[k] !== '' ? 1 : 0), 0);
           return rich(b) - rich(a);
-        });
-        return scored[0];
+        })[0];
       }
     }
     const list = index.byName.get(norm(name)) || [];
     if (!list.length) return null;
-    // Without an exact ID, prefer the row carrying actual performance KPIs, then stock.
     return list.slice().sort((a, b) => {
       const score = (x) => (x.curTotal != null ? 8 : 0) + (x.lastTotal != null ? 8 : 0) + (x.tlName ? 3 : 0) + (x.tlId ? 2 : 0) + (x.stockTotal != null ? 1 : 0);
       return score(b) - score(a);
@@ -598,6 +594,29 @@ window.FF = window.FF || {};
     if (own && !/^na$/i.test(own)) return own;
     if (/^\d{10}$/.test(clean10(id)) && clean10(id) === String(id).trim()) return String(id).trim();
     return gvMobileFor(name, id) || '';
+  }
+  /** FF agent issuance rows: EIR daily is authoritative and can bridge ID aliases from performance/stock sources. */
+  function ffAgentIssueRows(name, ids, tlName, tlId) {
+    const wantName = norm(name);
+    const idSet = new Set((ids || []).map((v) => clean(v).replace(/\.0+$/, '').toUpperCase()).filter(Boolean));
+    const wantTl = norm(tlName);
+    const wantTlId = clean(tlId).replace(/\.0+$/, '').toUpperCase();
+    const out = [];
+    for (const row of (rowsOf('daily') || [])) {
+      if (!row || /gv|green/i.test(String(row.channel || ''))) continue;
+      const rid = clean(row.agentId || row.id).replace(/\.0+$/, '').toUpperCase();
+      const rn = norm(row.agentName || row.name);
+      const rtl = norm(row.tlName || row.tl);
+      const rtlId = clean(row.tlId).replace(/\.0+$/, '').toUpperCase();
+      const idMatch = rid && idSet.has(rid);
+      const nameMatch = wantName && rn === wantName && (!wantTlId || !rtlId || rtlId === wantTlId) && (!wantTl || !rtl || rtl === wantTl);
+      if (!idMatch && !nameMatch) continue;
+      const d = row.date || row.d || row.dateKey;
+      const ym = row.ym || (d ? U.ymKey(U.parseDate(d)) : '');
+      if (!ym) continue;
+      out.push({ ...row, ym, cls: clean(row.cls || row.class || row.group || 'Commercial') || 'Commercial', n: row.n === '' || row.n === null || row.n === undefined ? 1 : Math.max(0, num(row.n)) });
+    }
+    return out;
   }
   const monthsFrom = (rows, key) => U.uniq(rows.map((r) => r[key]).filter(Boolean)).sort();
 
@@ -1111,6 +1130,9 @@ window.FF = window.FF || {};
       if (personId) return rowAgentId(r) === personId;
       return norm(r.name) === n;
     };
+    const identityIds = new Set([p.sub, a && a.agentId, a && a.id].map((v) => clean(v).replace(/\.0+$/, '').toUpperCase()).filter(Boolean));
+    const eirRows = ffAgentIssueRows(p.name, [...identityIds], a && a.tlName, a && a.tlId);
+    const eirBins = classBinsFromRows(eirRows, curYm, lastYm);
     if (a) {
       const avgVc4 = U.runRate(a.curVc4, 'ff'), avgNvc4 = U.runRate(a.curNvc4, 'ff');
       Object.assign(out, {
@@ -1129,7 +1151,7 @@ window.FF = window.FF || {};
     out.tagRequired = out.direct && isHM(out.priority);
     out.months = { cur: curYm, last: lastYm };
     out.classBins = classBinsFromRows(ac.filter(isMine), curYm, lastYm);
-    out.issuanceSources = { cur: 'First Forward EIR', last: 'First Forward EIR', classes: 'First Forward EIR' };
+    out.issuanceSources = { cur: 'First Forward EIR', last: 'First Forward EIR', classes: 'First Forward EIR' };    // Prefer exact EIR agent rows for month totals; performance snapshot can be stale/empty for this identity.    if (eirBins.available.cur || eirBins.available.last) {      out.totals.curVc4 = num(eirBins.cur.VC4); out.totals.curComm = num(eirBins.cur.VC20) + num(eirBins.cur['VC5+']); out.totals.curTotal = num(eirBins.cur.total);      out.totals.lastVc4 = num(eirBins.last.VC4); out.totals.lastComm = num(eirBins.last.VC20) + num(eirBins.last['VC5+']); out.totals.lastTotal = num(eirBins.last.total);      out.classBins = eirBins;    }
     attachGrowth(out, a || {}, curYm);
     attachLinkedTl(out);
     if (a && !out.direct && a.tlName && (!FF.config.isRealTl || FF.config.isRealTl(a.tlName))) {
@@ -1137,8 +1159,9 @@ window.FF = window.FF || {};
       out.tlStock = { ...teamStock.stock, has: true, own: teamStock.own, agents: teamStock.agents };
     }
     if (light) return out;
-    out.classes = classTable(ac.filter(isMine), stk.filter((r) => {
-      if (personId) return rowAgentId(r) === personId;
+    out.classes = classTable((eirRows.length ? eirRows : ac.filter(isMine)), stk.filter((r) => {
+      const rid = rowAgentId(r);
+      if (identityIds.size && rid) return identityIds.has(rid);
       return norm(r.agentName) === n;
     }), curYm, lastYm);
     out.classBins = classBinsFromRows(ac.filter(isMine), curYm, lastYm);
