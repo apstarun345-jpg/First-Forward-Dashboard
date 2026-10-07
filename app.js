@@ -1115,6 +1115,7 @@ window.FF = window.FF || {};
     if (!FF.auth.can('export')) { U.toast('Download permission nahi hai', 'err'); return; }
     const drawerPdfName = `${U.slug(d.title || 'drawer')}-${U.stamp()}.pdf`;
     if (U.downloadStart) U.downloadStart(drawerPdfName, 'Preparing PDF…');
+    if (U.downloadYield) await U.downloadYield();
     try {
       if (!FF.pdf && FF.lazy && FF.lazy.need) await FF.lazy.need('pdf');
       if (!FF.pdf || !FF.pdf.doc) { U.toast('PDF module load nahi hua', 'err'); return; }
