@@ -735,6 +735,7 @@ FF.pages = FF.pages || {};
   async function exportPdfData(rows, model, btn, titleOverride, metric) {
     const pdfName = `unusual-activity-${U.slug(titleOverride || state.flag)}-${model.from}_${model.to}.pdf`;
     if (U.downloadStart) U.downloadStart(pdfName, 'Preparing PDF…');
+    if (U.downloadYield) await U.downloadYield();
     try {
       if (!FF.pdf && FF.lazy && FF.lazy.need) await FF.lazy.need('pdf');
       if (!FF.pdf) { U.toast('PDF module load nahi hua', 'err'); return; }
