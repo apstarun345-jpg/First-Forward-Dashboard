@@ -616,6 +616,13 @@ window.FF = window.FF || {};
     return host;
   }
   function downloadStart(filename, title) { downloadStatus(title || 'Preparing download…', filename, false); }
+  // Let the browser paint the download overlay before a CPU-heavy PDF build begins.
+  function downloadYield() {
+    return new Promise((resolve) => {
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => resolve());
+      else setTimeout(resolve, 0);
+    });
+  }
   function downloadFail(filename, message) {
     try {
       const ui = getDownloadUi();
@@ -1554,7 +1561,7 @@ window.FF = window.FF || {};
     weekday, daysInMonth, prevMonthKey, nextMonthKey, weekStart, timeLabel,
     barcode, barcodeKey,
     sum, groupSum, topEntries, sortBy, uniq,
-    $, $, h, debounce, within, breathe, setButtonBusy, withButtonBusy, toast, spinner, loader, loaderStyle, loaderPref, ellipsis, LOADER_STYLES, LOADER_LABELS, errorBox, downloadBlob, downloadStart, downloadFail, downloadCsv, tableToRows, slug, stamp, colLetter, colIndex, initTooltip,
+    $, $, h, debounce, within, breathe, setButtonBusy, withButtonBusy, toast, spinner, loader, loaderStyle, loaderPref, ellipsis, LOADER_STYLES, LOADER_LABELS, errorBox, downloadBlob, downloadStart, downloadYield, downloadFail, downloadCsv, tableToRows, slug, stamp, colLetter, colIndex, initTooltip,
     phoneDigits, waLink, mailLink, copyText, suggest,
     parseDateTime, printReport, recentList, recentAdd, voiceInput, voicePrefs, setVoicePrefs,
     multiSelect, asValueSet, valueSetLabel,
