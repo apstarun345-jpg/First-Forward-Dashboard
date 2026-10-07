@@ -8131,6 +8131,7 @@ const PERSONAL_PORTAL_JS = `(function () {
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+    if (url.pathname === '/api/recovery/audit' && req.method === 'GET') return await recoveryAuditPublic(req, res, url);
     if (url.pathname.startsWith('/api/')) {
       try { return await handleApi(req, res, url); } catch (err) {
         if (err instanceof HttpError) return sendJson(res, err.status, { error: err.message });
@@ -8223,6 +8224,33 @@ async function recoveryDiagnostic() {
   }
 }
 
+
+async function recoveryAuditPublic(req, res, url) {
+  const key = String(url.searchParams.get('key') || '');
+  const expected = String(process.env.RECOVERY_READ_KEY || '');
+  if (!expected || key !== expected) return sendJson(res, 404, { error: 'Not found' });
+  if (!sheetsStore || STORAGE_BACKEND !== 'appsscript') return sendJson(res, 200, { ok: true, backend: STORAGE_BACKEND, snapshots: [] });
+  const meta = await sheetsStore.snapshots({ limit: 60 });
+  const list = [];
+  for (let idx = 0; idx < meta.snapshots.length; idx++) {
+    const snap = meta.snapshots[idx];
+    let users = [], settings = {};
+    try {
+      const data = (await sheetsStore.snapshotData(snap.at, ['users', 'settings'])).data || {};
+      users = Array.isArray(data.users) ? data.users : [];
+      settings = data.settings && typeof data.settings === 'object' ? data.settings : {};
+    } catch {}
+    list.push({
+      index: idx, at: snap.at, users: users.length,
+      admins: users.filter((u) => u && u.role === 'admin').length,
+      approved: users.filter((u) => !u || u.approved !== false).length,
+      usernames: users.slice(0, 30).map((u) => String((u && u.username) || '')),
+      appName: String(settings.appName || ''),
+      settingsUpdatedAt: settings.updatedAt || null
+    });
+  }
+  return sendJson(res, 200, { ok: true, current: currentSummary(), snapshots: list });
+}
 
 async function start() {
   if (!['files', 'sheets', 'appsscript'].includes(STORAGE_BACKEND)) throw new Error('STORAGE_BACKEND must be files, sheets or appsscript.');
