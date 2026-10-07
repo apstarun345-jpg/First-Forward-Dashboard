@@ -8163,7 +8163,7 @@ const PERSONAL_PORTAL_JS = `(function () {
 let appReady = false;
 
 const server = http.createServer(async (req, res) => {
-  // Render needs an open port while durable storage boots; serve 503 until initialization is safe.
+  // Render gets the TCP port immediately; app routes stay 503 until durable storage is ready.
   if (!appReady) {
     res.statusCode = 503;
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -8194,9 +8194,9 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-  appReady = true;
-  console.log('✅ Durable storage loaded — dashboard is ready.');
-  console.log(`First Forward Dashboard socket listening on 0.0.0.0:${server.address().port} — bootstrapping durable storage…`);
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`First Forward Dashboard socket listening on 0.0.0.0:${PORT} — bootstrapping durable storage…`);
+});
 
 async function readLocalStore() {
   return {
@@ -8424,7 +8424,8 @@ async function start() {
   else console.error(`🔴 Push self-test FAIL: ${selfTest.error} — phone par notifications nahi aayengi jab tak ye theek nahi hota.`);
   pruneStalePushSubs();
   ensureVapidDurable();
-  server.listen(PORT, '0.0.0.0', () => {
+  appReady = true;
+  console.log('✅ Durable storage loaded — dashboard is ready.');
     console.log(`First Forward Dashboard → http://0.0.0.0:${server.address().port}`);
     console.log(`Sheet ${db.settings.sheetId} · cache ${cacheMs() / 1000}s · storage ${sheetsStore ? `Google Sheets / encrypted APP_STORAGE (${STORAGE_BACKEND})` : DATA_DIR} · users ${db.users.length} · push ${vapidKeys ? `${pushSubs().length} device(s), VAPID from ${vapidSource}, TTL ${PUSH_TTL}s` : 'DISABLED (no VAPID key)'}${GVIZ_BASE !== 'https://docs.google.com' ? ` · upstream ${GVIZ_BASE}` : ''}`);
     setTimeout(() => checkReports(true).catch(() => {}), 5000);
@@ -8442,7 +8443,6 @@ async function start() {
     // 🧓 Stock ageing index pehle se bana lo (pehla user 1-2 min intezaar na kare). Render par default ON; STOCK_AGE_WARM=0 se band.
     const warmStockAge = process.env.STOCK_AGE_WARM ? process.env.STOCK_AGE_WARM !== '0' : !!process.env.RENDER;
     if (warmStockAge) setTimeout(() => stockAgeIndex(false).catch((err) => console.warn('stock ageing warm-up:', err.message)), 12000).unref();
-  });
 }
 start().catch((err) => {
   console.error('Startup stopped to protect stored data:', err);
