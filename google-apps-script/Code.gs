@@ -358,6 +358,43 @@ function doPost(e) {
       var rows = Array.isArray(body.rows) ? body.rows.slice(0, 500) : [];
       rows.forEach(function (r) { if (!Array.isArray(r)) throw new Error('rows must be arrays of values'); });
       var startRow = sh.getLastRow() + 1;
+
+      // 🧩 Tag Requests: Agent groups are separated by exactly one blank row.
+      // This works even when Admin changes the column order, because the Agent column
+      // is located from the actual header rather than a fixed position.
+      if (/^tag requests$/i.test(tabName) && header.length && rows.length) {
+        var agentCol = -1;
+        for (var hi = 0; hi < header.length; hi++) {
+          if (/^agent(?:\s+name)?$/i.test(String(header[hi] || '').trim())) { agentCol = hi; break; }
+        }
+        if (agentCol >= 0) {
+          var firstIncoming = null;
+          for (var ri = 0; ri < rows.length; ri++) {
+            var rv = rows[ri] || [];
+            var rowHas = rv.some(function (v) { return String(v == null ? '' : v).trim() !== ''; });
+            if (rowHas) { firstIncoming = rv; break; }
+          }
+          var lastDataRow = sh.getLastRow();
+          if (firstIncoming && lastDataRow >= 2) {
+            var widthCheck = Math.max(header.length, agentCol + 1);
+            if (sh.getMaxColumns() < widthCheck) sh.insertColumnsAfter(sh.getMaxColumns(), widthCheck - sh.getMaxColumns());
+            var prevVals = sh.getRange(lastDataRow, 1, 1, widthCheck).getDisplayValues()[0];
+            var prevHasData = prevVals.some(function (v) { return String(v || '').trim() !== ''; });
+            var prevAgent = String(prevVals[agentCol] || '').trim().replace(/\s+/g, ' ').toUpperCase();
+            var firstAgent = String(firstIncoming[agentCol] || '').trim().replace(/\s+/g, ' ').toUpperCase();
+            var spacerAlreadyThere = false;
+            if (lastDataRow > 2) {
+              var beforeVals = sh.getRange(lastDataRow - 1, 1, 1, widthCheck).getDisplayValues()[0];
+              spacerAlreadyThere = beforeVals.every(function (v) { return String(v || '').trim() === ''; });
+            }
+            if (prevHasData && prevAgent && firstAgent && prevAgent !== firstAgent && !spacerAlreadyThere) {
+              sh.insertRowsAfter(lastDataRow, 1);
+              startRow = lastDataRow + 2;
+            }
+          }
+        }
+      }
+
       if (startRow <= 1 && header.length) {
         if (sh.getMaxColumns() < header.length) sh.insertColumnsAfter(sh.getMaxColumns(), header.length - sh.getMaxColumns());
         sh.getRange(1, 1, 1, header.length).setValues([header]);
