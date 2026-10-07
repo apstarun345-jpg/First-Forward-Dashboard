@@ -559,9 +559,27 @@ window.FF = window.FF || {};
     gvLookupCache = null;
   }
   function findFfAgent(name, id) {
-    const list = ffPeopleLookup().byName.get(norm(name)) || [];
-    if (id) { const wantId = clean(id).toUpperCase(); const byId = list.find((a) => clean(a.agentId || a.id).toUpperCase() === wantId || clean(a.id).toUpperCase() === wantId); if (byId) return byId; }
-    return list[0] || null;
+    const index = ffPeopleLookup();
+    const wantId = clean(id).replace(/\.0+$/, '').toUpperCase();
+    // Exact ID must win across ALL FF identity sources. The old lookup searched only the
+    // same-name bucket, so an old/new ID pair with the same name could silently open the wrong agent.
+    if (wantId) {
+      const idRows = index.byId.get(wantId) || [];
+      if (idRows.length) {
+        const scored = idRows.slice().sort((a, b) => {
+          const rich = (x) => ['curTotal','lastTotal','stockTotal','curVc4','lastVc4','tlName','tlId'].reduce((n, k) => n + (x[k] !== undefined && x[k] !== null && x[k] !== '' ? 1 : 0), 0);
+          return rich(b) - rich(a);
+        });
+        return scored[0];
+      }
+    }
+    const list = index.byName.get(norm(name)) || [];
+    if (!list.length) return null;
+    // Without an exact ID, prefer the row carrying actual performance KPIs, then stock.
+    return list.slice().sort((a, b) => {
+      const score = (x) => (x.curTotal != null ? 8 : 0) + (x.lastTotal != null ? 8 : 0) + (x.tlName ? 3 : 0) + (x.tlId ? 2 : 0) + (x.stockTotal != null ? 1 : 0);
+      return score(b) - score(a);
+    })[0] || null;
   }
   function findGvAgent(name, id) {
     const index = gvPeopleLookup();
