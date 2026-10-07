@@ -1208,7 +1208,7 @@ FF.pages = FF.pages || {};
             <b>${esc(p.name)}</b>
             ${p.id ? `<small class="mono">(${esc(p.id)})</small>` : ''}
             ${p.mobile && canContacts() ? `<small class="dim">📞${esc(mob10(p.mobile))}</small>` : ''}
-            ${!isTl && p.tl ? `<small class="dim">· TL: ${esc(p.tl)}${p.tlId ? ` (${esc(p.tlId)})` : ''}</small>` : ''}
+            ${!isTl && p.tl ? `<span class="dim">· TL: </span><span class="mp-linkish" data-as-open-tl="1" data-as-tl-name="${esc(p.tl)}" data-as-tl-id="${esc(p.tlId || '')}" title="TL report kholo">${esc(p.tl)}</span>` : ''}
             <small class="dim">· MTD ${fmt(p.cur)} · Last ${fmt(p.last)} · Stock ${fmt(p.stock)}</small>
           </button>`;
         }).join('');
