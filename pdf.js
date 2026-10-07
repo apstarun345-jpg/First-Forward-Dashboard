@@ -203,6 +203,42 @@ window.FF = window.FF || {};
           if (legacy.foot && legacy.foot.length) { const footRow = legacy.foot.map((v) => (v == null ? '' : v)); footRow.bold = true; lrows.push(footRow); }
           return api.table(cols, lrows, { headColor: legacy.headColor, boldLast: false });
         }
+        // v3.63 — accept both PDF table APIs used by the dashboard.
+        // Agent/TL Summary passes { columns: [...], rows: [...], foot: [...] }.
+        if (columns && !Array.isArray(columns)) {
+          if (Array.isArray(columns.headers)) {
+            const legacy = columns;
+            const align = Array.isArray(legacy.align) ? legacy.align : [];
+            const cols = legacy.headers.map((h, i) => ({ h, align: align[i] === 'right' ? 'right' : 'left', bold: i === 0 && !!legacy.boldFirst }));
+            const lrows = (legacy.rows || []).map((r) => (Array.isArray(r) ? r : [r]));
+            if (Array.isArray(legacy.foot) && legacy.foot.length) {
+              const footRow = legacy.foot.map((v) => (v == null ? '' : v));
+              footRow.bold = true;
+              lrows.push(footRow);
+            }
+            return api.table(cols, lrows, { headColor: legacy.headColor, boldLast: false });
+          }
+          if (Array.isArray(columns.columns)) {
+            const modern = columns;
+            const cols = modern.columns.map((col) => {
+              const x = col && typeof col === 'object' ? col : {};
+              return {
+                h: x.h == null ? '' : String(x.h),
+                w: Number.isFinite(Number(x.w)) && Number(x.w) > 0 ? Number(x.w) : 1,
+                align: x.align === 'right' ? 'right' : 'left',
+                bold: x.bold === true
+              };
+            });
+            const lrows = (Array.isArray(modern.rows) ? modern.rows : []).map((r) => (Array.isArray(r) ? r : [r]));
+            if (Array.isArray(modern.foot) && modern.foot.length) {
+              const footRow = modern.foot.map((v) => (v == null ? '' : v));
+              footRow.bold = true;
+              lrows.push(footRow);
+            }
+            return api.table(cols, lrows, { headColor: modern.headColor, boldLast: false });
+          }
+          throw new TypeError('PDF table columns must be an array or a supported table object.');
+        }
         const t = topt || {};
         const avail = W - 2 * M, tot = columns.reduce((s, c) => s + (c.w || 1), 0);
         const xs = []; let acc = M;
