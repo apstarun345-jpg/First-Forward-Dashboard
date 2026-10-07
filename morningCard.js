@@ -189,10 +189,12 @@ window.FF = window.FF || {};
         yest: yesterdayStats(), mtd: mtdStats(), top3: topAgents(), riskList: await risks(), expect: expectedToday()
       };
       const url = paintCard(stats);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = U.slug(`good-morning-${U.dateKey(new Date())}`) + '.png';
-      document.body.appendChild(a); a.click(); a.remove();
+      const name = U.slug(`good-morning-${U.dateKey(new Date())}`) + '.png';
+      if (U.downloadBlob) U.downloadBlob(name, url);
+      else {
+        const a = document.createElement('a');
+        a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+      }
       const text = waText(stats);
       const wa = `https://wa.me/?text=${encodeURIComponent(text)}`;
       U.toast('📲 Card download ho gaya — ab WhatsApp me attach karo', 'ok');
