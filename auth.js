@@ -387,7 +387,7 @@ window.FF = window.FF || {};
     // Render may expose the shell a few seconds before durable storage finishes loading.
     // /api/auth/me returns 503 + booting:true during that window; retry automatically
     // instead of trapping the user on a manual connection error screen.
-    const maxBootRetries = 7;
+    const maxBootRetries = 12;
     for (let attempt = 0; attempt <= maxBootRetries; attempt++) {
       try {
         const me = await api('/api/auth/me');
