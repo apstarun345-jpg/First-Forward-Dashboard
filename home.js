@@ -607,7 +607,7 @@ FF.pages = FF.pages || {};
         <div class="home-hero-main">
           ${avatar}
           <div>
-            <h1>${esc(greeting())}, <span class="home-name">${esc(u.name || u.username || 'there')}</span> 👋</h1>
+            <h1 class="home-greeting"><span class="home-greeting-text">${esc(greeting())}</span>, <span class="home-name">${esc(u.name || u.username || 'there')}</span> <span class="home-wave" aria-hidden="true">👋</span></h1>
             <p class="sub">GV ka aaj ka live data · ${esc(U.labelYM(U.ymKey(TODAY()), true))} ke KPI cards · charts · GV &amp; FF stock</p>
             <div class="home-quick-stats" id="home-quick"></div>
           </div>
