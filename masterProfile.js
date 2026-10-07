@@ -343,6 +343,7 @@ window.FF = window.FF || {};
     return { growth, current: cur, last, curRows, lastRows, day, currentEnd: curEnd, previousEnd: prevEnd, label: U.labelDateKey(curEnd), currentYm: curYm, previousYm: prevYm };
   }
 
+  const projFallback = (issued, days, monthKey) => days > 0 ? Math.round((Number(issued) || 0) / days * U.daysInMonth(monthKey)) : (Number(issued) || 0);
   /** Growth % (sheet ka apna, warna totals se) + month-end projection us channel ke basis par. */
   function growthBlock(o, totals, ym, ch) {
     const b = basis(ch);
@@ -350,12 +351,15 @@ window.FF = window.FF || {};
     const comparable = comparableMtdGrowth({ ...t, kind: o.kind || '', name: o.name || '', id: o.id || '', ch }, ch);
     const sheet = pctText(o.growth);
     const g = comparable && comparable.growth !== null ? comparable.growth : (sheet !== null ? sheet : U.growth(num(t.curTotal), num(t.lastTotal)));
+    const projectedCurrent = comparable ? Math.round((num(comparable.current) / Math.max(1, num(comparable.day))) * U.daysInMonth(comparable.currentYm || ym)) : projFallback(num(t.curTotal), b.days, ym);
+    const projectedGrowth = num(t.lastTotal) > 0 ? ((projectedCurrent - num(t.lastTotal)) / num(t.lastTotal)) * 100 : null;
     const proj = (k) => U.projectMonthEnd(t[k], b.days, ym);
     const growthText = g === null ? '' : `${g >= 0 ? '▲ +' : '▼ '}${Math.abs(g).toFixed(1)}%`;
     const growthBasis = { ...b, growthThrough: comparable ? comparable.label : '', growthCurrent: comparable ? comparable.current : null, growthLast: comparable ? comparable.last : null };
     return {
       text: growthText,
-      num: g, basis: growthBasis, growthThrough: comparable ? comparable.label : '',
+      num: projectedGrowth !== null ? projectedGrowth : g, mtdGrowthNum: g, projectedGrowth, projectedCurrent,
+      basis: { ...growthBasis, projectedCurrent, previousFull: num(t.lastTotal) }, growthThrough: comparable ? comparable.label : '',
       comparableCurrent: comparable ? comparable.current : null,
       comparableLast: comparable ? comparable.last : null,
       cur: num(t.curTotal), last: num(t.lastTotal),
@@ -1106,6 +1110,7 @@ window.FF = window.FF || {};
     out.classBins = classBinsFromRows(ac.filter(isMine), curYm, lastYm);
     out.issuanceSources = { cur: 'First Forward EIR', last: 'First Forward EIR', classes: 'First Forward EIR' };
     attachGrowth(out, a || {}, curYm);
+    attachLinkedTl(out);
     if (a && !out.direct && a.tlName && (!FF.config.isRealTl || FF.config.isRealTl(a.tlName))) {
       const teamStock = tlStockComposition('ff', a.tlName, a.tlId, ffPeopleLookup().rows, stk, stk);
       out.tlStock = { ...teamStock.stock, has: true, own: teamStock.own, agents: teamStock.agents };
@@ -1435,6 +1440,7 @@ window.FF = window.FF || {};
     }
     out.tl = { name: out.direct ? '' : (truth && truth.tlName) || (out.tl && out.tl.name) || '', id: out.direct ? '' : (truth && truth.tlId) || (out.tl && out.tl.id) || '' };
     out.issuanceSources = { current: curExact ? 'GV Master' : 'GV Truth', last: lastExact ? 'GV Master' : 'GV Truth', stock: out.stockSource || (truthStock ? 'GV Truth' : 'GV REPORT fallback') };
+    attachLinkedTl(out);
     out.dispatch.cover = out.dispatch.avgVc4 > 0 ? out.stock.vc4 / out.dispatch.avgVc4 : null;
     out.dispatch.sugVc4 = suggest(out.dispatch.avgVc4, out.stock.vc4);
     out.dispatch.sugComm = suggest(out.dispatch.avgComm, out.stock.comm);
@@ -1687,10 +1693,27 @@ window.FF = window.FF || {};
     'ff-tl': (p, l) => withCalc(ffTlProfile(p, l)), 'gv-tl': (p, l) => withCalc(gvTlProfile(p, l))
   };
   const supports = (person) => !!(person && BUILDERS[person.kind]);
+  /** Agent → same-channel TL snapshot. Identity always carries channel + TL ID. */
+  function attachLinkedTl(out) {
+    if (!out || /-tl$/.test(String(out.kind || '')) || out.direct || !out.tl || !out.tl.name) return out;
+    try {
+      const ch = /^gv/i.test(out.ch || out.channel || '') ? 'gv' : 'ff';
+      const kind = ch === 'gv' ? 'gv-tl' : 'ff-tl';
+      const tl = quick({ kind: kind, name: out.tl.name, sub: out.tl.id || '', tlSet: new Set(), classMap: new Map(), bars: new Set() });
+      if (!tl) return out;
+      const tt = tl.totals || {}, ts = tl.stock || {};
+      out.linkedTl = { kind: kind, ch: ch, name: tl.name || out.tl.name, id: tl.id || out.tl.id || '',
+        stock: { vc4: num(ts.vc4), comm: num(ts.comm), total: num(ts.total) },
+        totals: { curVc4: num(tt.curVc4), curComm: num(tt.curComm), curTotal: num(tt.curTotal), lastVc4: num(tt.lastVc4), lastComm: num(tt.lastComm), lastTotal: num(tt.lastTotal) },
+        projected: tl.projT1 ? num(tl.projT1.total) : 0,
+        growthNum: Number.isFinite(Number(tl.projectedGrowthNum)) ? Number(tl.projectedGrowthNum) : null };
+    } catch {}
+    return out;
+  }
   /** Sync (already-loaded data) — light snapshot for suggestion rows / kundli cards. */
   function quick(person) {
     if (!supports(person)) return null;
-    const key = `${person.kind}|${norm(person.name)}`;
+    const key = `${person.kind}|${norm(person.name)}|${normId(person.sub || person.id || '')}`;
     if (quickCache.has(key)) return quickCache.get(key);
     let v = null;
     try { v = BUILDERS[person.kind](person, true); } catch { v = null; }
