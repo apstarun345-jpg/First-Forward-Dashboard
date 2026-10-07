@@ -983,7 +983,6 @@ FF.pages = FF.pages || {};
       onPick: (it) => {
         // Hard cleanup + suspend current instance so no async refresh can reopen the dropdown.
         try { if (suggestApi && suggestApi.suspend) suggestApi.suspend(); } catch {}
-        try { if (U.destroyAllSuggestions) U.destroyAllSuggestions(); } catch {}
         try { if (suggestApi && suggestApi.close) suggestApi.close(); } catch {}
         if (it.none) return;
         if (it.barcode) { openPanel(it.barcode); return; }              // 🏷️ barcode/tag = tag-level rows (list yahan theek)
@@ -992,7 +991,6 @@ FF.pages = FF.pages || {};
       },
       onEnter: (q) => {
         try { if (suggestApi && suggestApi.suspend) suggestApi.suspend(); } catch {}
-        try { if (U.destroyAllSuggestions) U.destroyAllSuggestions(); } catch {}
         try { if (suggestApi && suggestApi.close) suggestApi.close(); } catch {}
         if (clean(q).length >= 2) openSearchPage(q);
       }
