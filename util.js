@@ -615,6 +615,23 @@ window.FF = window.FF || {};
     );
     return host;
   }
+  function downloadStart(filename, title) { downloadStatus(title || 'Preparing download…', filename, false); }
+  function downloadFail(filename, message) {
+    try {
+      const ui = getDownloadUi();
+      const titleEl = ui.querySelector('[data-dl-title]');
+      const fileEl = ui.querySelector('[data-dl-file]');
+      const spin = ui.querySelector('[data-dl-spin]');
+      const bar = ui.querySelector('[data-dl-bar]');
+      if (titleEl) titleEl.textContent = 'Download failed ✕';
+      if (fileEl) fileEl.textContent = String(message || filename || 'Please try again');
+      if (spin) { spin.style.borderTopColor = '#ef4444'; spin.style.borderColor = 'rgba(239,68,68,.20)'; }
+      if (bar) { bar.style.background = '#ef4444'; bar.style.width = '100%'; }
+      ui.style.display = 'block';
+      clearTimeout(downloadUiTimer);
+      downloadUiTimer = setTimeout(() => { if (downloadUi) downloadUi.style.display = 'none'; }, 1800);
+    } catch { /* feedback must never break export */ }
+  }
   function downloadStatus(title, filename, done) {
     try {
       const ui = getDownloadUi();
@@ -1537,7 +1554,7 @@ window.FF = window.FF || {};
     weekday, daysInMonth, prevMonthKey, nextMonthKey, weekStart, timeLabel,
     barcode, barcodeKey,
     sum, groupSum, topEntries, sortBy, uniq,
-    $, $$, h, debounce, within, breathe, setButtonBusy, withButtonBusy, toast, spinner, loader, loaderStyle, loaderPref, ellipsis, LOADER_STYLES, LOADER_LABELS, errorBox, downloadBlob, downloadCsv, tableToRows, slug, stamp, colLetter, colIndex, initTooltip,
+    $, $, h, debounce, within, breathe, setButtonBusy, withButtonBusy, toast, spinner, loader, loaderStyle, loaderPref, ellipsis, LOADER_STYLES, LOADER_LABELS, errorBox, downloadBlob, downloadStart, downloadFail, downloadCsv, tableToRows, slug, stamp, colLetter, colIndex, initTooltip,
     phoneDigits, waLink, mailLink, copyText, suggest,
     parseDateTime, printReport, recentList, recentAdd, voiceInput, voicePrefs, setVoicePrefs,
     multiSelect, asValueSet, valueSetLabel,
