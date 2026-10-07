@@ -316,7 +316,7 @@ test('🚦 startup readiness — Render health stays green and storage retry is 
 test('🏷️ v3.61 wiring — version pins + automatic cache-busting', async () => {
   const pkg = JSON.parse(await read('package.json'));
   assert.equal(pkg.version, '3.65.0');
-  assert.match(await read('server.js'), /APP_VERSION = '3\.64\.0'/);
+  assert.match(await read('server.js'), /APP_VERSION = '3\.65\.0'/);
   const idx = await read('index.html');
   assert.match(idx, /styles\.css\?v=114/); assert.match(idx, /config\.js\?v=110/); assert.match(idx, /home\.js\?v=91/); assert.match(idx, /app\.js\?v=110/); assert.match(idx, /lazy\.js\?v=110/);
   // masterSearch ab shell-extra hai (first paint ke baad load hota hai) — index.html me eager nahi.
