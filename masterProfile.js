@@ -1153,7 +1153,7 @@ window.FF = window.FF || {};
     out.classBins = classBinsFromRows(ac.filter(isMine), curYm, lastYm);
     out.issuanceSources = { cur: 'First Forward EIR', last: 'First Forward EIR', classes: 'First Forward EIR' };    // Prefer exact EIR agent rows for month totals; performance snapshot can be stale/empty for this identity.    if (eirBins.available.cur || eirBins.available.last) {      out.totals.curVc4 = num(eirBins.cur.VC4); out.totals.curComm = num(eirBins.cur.VC20) + num(eirBins.cur['VC5+']); out.totals.curTotal = num(eirBins.cur.total);      out.totals.lastVc4 = num(eirBins.last.VC4); out.totals.lastComm = num(eirBins.last.VC20) + num(eirBins.last['VC5+']); out.totals.lastTotal = num(eirBins.last.total);      out.classBins = eirBins;    }
     attachGrowth(out, a || {}, curYm);
-    attachLinkedTl(out);
+    attachLinkedTl(out, light);
     if (a && !out.direct && a.tlName && (!FF.config.isRealTl || FF.config.isRealTl(a.tlName))) {
       const teamStock = tlStockComposition('ff', a.tlName, a.tlId, ffPeopleLookup().rows, stk, stk);
       out.tlStock = { ...teamStock.stock, has: true, own: teamStock.own, agents: teamStock.agents };
@@ -1738,23 +1738,32 @@ window.FF = window.FF || {};
   };
   const supports = (person) => !!(person && BUILDERS[person.kind]);
   /** Agent → same-channel TL snapshot. Identity always carries channel + TL ID. */
-  function attachLinkedTl(out) {
+  /** Agent → same-channel TL snapshot. Full agent profile also receives TL class-wise rows. */
+  function attachLinkedTl(out, light) {
     if (!out || /-tl$/.test(String(out.kind || '')) || out.direct || !out.tl || !out.tl.name) return out;
     try {
       const ch = /^gv/i.test(out.ch || out.channel || '') ? 'gv' : 'ff';
       const kind = ch === 'gv' ? 'gv-tl' : 'ff-tl';
-      const tl = quick({ kind: kind, name: out.tl.name, sub: out.tl.id || '', tlSet: new Set(), classMap: new Map(), bars: new Set() });
-      if (!tl) return out;
+      const who = { kind: kind, name: out.tl.name, sub: out.tl.id || '', tlSet: new Set(), classMap: new Map(), bars: new Set() };
+      let tl = quick(who);
+      if (!tl && !light) { try { tl = BUILDERS[kind](who, false); } catch {} }
+      if (!tl) {
+        out.linkedTl = { kind: kind, ch: ch, name: out.tl.name, id: out.tl.id || '', stock: { vc4: 0, comm: 0, total: 0 }, totals: { curVc4: 0, curComm: 0, curTotal: 0, lastVc4: 0, lastComm: 0, lastTotal: 0 }, classes: [], projected: 0, growthNum: null };
+        return out;
+      }
+      if (!light && !tl.classes) { try { tl = BUILDERS[kind](who, false) || tl; } catch {} }
       const tt = tl.totals || {}, ts = tl.stock || {};
       out.linkedTl = { kind: kind, ch: ch, name: tl.name || out.tl.name, id: tl.id || out.tl.id || '',
         stock: { vc4: num(ts.vc4), comm: num(ts.comm), total: num(ts.total) },
         totals: { curVc4: num(tt.curVc4), curComm: num(tt.curComm), curTotal: num(tt.curTotal), lastVc4: num(tt.lastVc4), lastComm: num(tt.lastComm), lastTotal: num(tt.lastTotal) },
-        projected: tl.projT1 ? num(tl.projT1.total) : 0,
+        classes: Array.isArray(tl.classes) ? tl.classes.slice() : [], projected: tl.projT1 ? num(tl.projT1.total) : 0,
         growthNum: Number.isFinite(Number(tl.projectedGrowthNum)) ? Number(tl.projectedGrowthNum) : null };
-    } catch {}
+    } catch {
+      out.linkedTl = null;
+    }
     return out;
   }
-  /** Sync (already-loaded data) — light snapshot for suggestion rows / kundli cards. */
+    /** Sync (already-loaded data) — light snapshot for suggestion rows / kundli cards. */
   function quick(person) {
     if (!supports(person)) return null;
     const key = `${person.kind}|${norm(person.name)}|${normId(person.sub || person.id || '')}`;
