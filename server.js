@@ -8169,14 +8169,16 @@ async function autoRecoverHistoryOnce() {
   try {
     const meta = await sheetsStore.snapshots({ limit: 20 });
     const snapshots = meta.snapshots || [];
+    const cutoff = Date.parse(String(process.env.AUTO_RECOVER_HISTORY_BEFORE || ''));
     for (const snap of snapshots) {
+      const snapTime = Date.parse(snap.at) || 0;
       let data;
       try { data = (await sheetsStore.snapshotData(snap.at, ['users', 'settings', 'resets', 'notify'])).data || {}; }
       catch (err) { console.warn('🛟 history snapshot skipped:', err.message); continue; }
       const users = Array.isArray(data.users) ? data.users : [];
+      const id = String(hint).toLowerCase();
       const target = users.find((u) => {
         if (!u) return false;
-        const id = String(hint).toLowerCase();
         if (String(u.username || '').trim().toLowerCase() === id) return true;
         if (u.email && String(u.email).trim().toLowerCase() === id) return true;
         const digits = hint.replace(/\\D/g, '');
@@ -8184,11 +8186,12 @@ async function autoRecoverHistoryOnce() {
         return !!digits && digits.length >= 7 && !!md &&
           (md === digits || (md.length >= 10 && digits.length >= 10 && md.slice(-10) === digits.slice(-10)));
       });
-      if (!target) continue;
-      console.warn('🛟 Restoring users/settings from APP_STORAGE_HISTORY snapshot:', snap.at);
-      return { data, at: snap.at, users: users.length, username: target.username || '' };
+      if (target || (Number.isFinite(cutoff) && snapTime <= cutoff && users.length >= 2)) {
+        console.warn('🛟 Restoring users/settings from APP_STORAGE_HISTORY snapshot:', snap.at, target ? '(login matched)' : '(pre-cutoff fallback)');
+        return { data, at: snap.at, users: users.length, username: target ? (target.username || '') : '' };
+      }
     }
-    console.warn('🛟 No APP_STORAGE_HISTORY snapshot matched the recovery login hint.');
+    console.warn('🛟 No APP_STORAGE_HISTORY snapshot matched the recovery login hint or cutoff fallback.');
   } catch (err) {
     console.warn('🛟 AUTO_RECOVER_HISTORY failed:', err.message);
   }
