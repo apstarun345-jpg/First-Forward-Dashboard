@@ -355,7 +355,7 @@ window.FF = window.FF || {};
     const projectedGrowth = num(t.lastTotal) > 0 ? ((projectedCurrent - num(t.lastTotal)) / num(t.lastTotal)) * 100 : null;
     const proj = (k) => U.projectMonthEnd(t[k], b.days, ym);
     const growthText = g === null ? '' : `${g >= 0 ? '▲ +' : '▼ '}${Math.abs(g).toFixed(1)}%`;
-    const growthBasis = { ...b, growthThrough: comparable ? comparable.label : '', growthCurrent: comparable ? comparable.current : null, growthLast: comparable ? comparable.last : null };
+    const growthBasis = { ...b, growthThrough: comparable ? comparable.label : '', growthCurrent: comparable ? comparable.current : null, growthLast: comparable ? comparable.last : null, growthElapsed: comparable ? comparable.day : null };
     return {
       text: growthText,
       num: projectedGrowth !== null ? projectedGrowth : g, mtdGrowthNum: g, projectedGrowth, projectedCurrent,
