@@ -145,6 +145,15 @@ test('Global search bar is eagerly mounted across the app and covers both channe
   assert.match(search, /details\.assignment/);
 });
 
+test('👥 TL Master Profile — missing agent name cannot crash localeCompare and TL agent table remains renderable', async () => {
+  const mp = await read('masterProfile.js');
+  assert.ok(!mp.includes("x.name.localeCompare(y.name)"), 'TL/GV agent sorting never calls localeCompare on an undefined name');
+  assert.match(mp, /String\(x && x\.name \|\| ''\)\.localeCompare\(String\(y && y\.name \|\| ''\)\)/, 'sorting normalizes missing names');
+  assert.match(mp, /const agents = selfSplit\.team\.filter\(\(a\) => a && clean\(a\.name \|\| a\.agentName\)\);/, 'FF TL agent roster ignores nameless rows before table/render');
+  assert.match(mp, /const rowsA = agents\.filter\(\(a\) => a && clean\(a\.name \|\| a\.agentName\)\)\.map/, 'GV TL agent roster ignores nameless rows too');
+  assert.match(mp, /function tlAgentsTable\(pr\)/, 'TL-specific agent box/table renderer remains wired');
+  assert.match(mp, /<section class=\"mp-sec\" data-mp-sec=\"agents\">/, 'TL agent box section is rendered');
+});
 test('🔎 topbar search remounts and routes through canonical Master Search page', async () => {
   const app = await read('app.js');
   assert.match(app, /FF\.masterSearch\.mountTopbar\(true\)/, 'shell wave remounts topbar search');
