@@ -1861,7 +1861,8 @@ window.FF = window.FF || {};
     await releaseWorkspaceBoot();
 
     maybeOnboarding();
-    if (FF.config.loginAnimation !== false) FF.auth.splash(FF.auth.user);
+    // Directly show the rendered Home/workspace after the boot animation. Do not add a second
+    // welcome/waiting overlay here — it made users wait twice before seeing the dashboard.
     registerServiceWorker(); // push notifications ke liye SW pehle ready ho
     liveShareChip();
     // 🐚 Bell · KPI drill drawer · search · assistant · office bell · live assist → first paint ke
