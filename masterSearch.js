@@ -804,6 +804,7 @@ FF.pages = FF.pages || {};
       if (pdfBtn) {
         const pdfName = `master-search-${U.slug(res.q || 'results')}-${U.stamp()}.pdf`;
         if (U.downloadStart) U.downloadStart(pdfName, 'Preparing PDF…');
+        if (U.downloadYield) await U.downloadYield();
         try {
           if (!FF.pdf && FF.lazy && FF.lazy.need) await FF.lazy.need('pdf');
           if (!FF.pdf) return;
