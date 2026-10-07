@@ -733,6 +733,8 @@ FF.pages = FF.pages || {};
   }
 
   async function exportPdfData(rows, model, btn, titleOverride, metric) {
+    const pdfName = `unusual-activity-${U.slug(titleOverride || state.flag)}-${model.from}_${model.to}.pdf`;
+    if (U.downloadStart) U.downloadStart(pdfName, 'Preparing PDF…');
     try {
       if (!FF.pdf && FF.lazy && FF.lazy.need) await FF.lazy.need('pdf');
       if (!FF.pdf) { U.toast('PDF module load nahi hua', 'err'); return; }
@@ -801,7 +803,7 @@ FF.pages = FF.pages || {};
         meta: `Generated ${new Date().toLocaleString('en-IN')}`,
         body: kpiHtml + evHtml + tblHtml
       });
-      await FF.pdf.download([page], `unusual-activity-${U.slug(titleOverride || state.flag)}-${model.from}_${model.to}.pdf`);
+      await FF.pdf.download([page], pdfName);
       U.toast('Forensic PDF downloaded ✓', 'ok');
     } catch (err) {
       U.toast((err && err.message) || 'PDF export failed', 'err');
