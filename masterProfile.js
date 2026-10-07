@@ -1122,7 +1122,8 @@ window.FF = window.FF || {};
         const out = { kind: 'ff-agent', channel: 'First Forward', ch: 'ff', name: p.name, id: (a && (a.agentId || a.id)) || p.sub || '', found: !!a };
     const ac = rowsOf('agentClass'), agRows = rowsOf('agents'), stk = rowsOf('stockAgents');
     const n = norm(p.name);
-    const curYm = latestYm(ac.length ? ac : agRows), lastYm = U.prevMonthKey(curYm);
+    // FF reporting always uses the real calendar month pair; EIR may lag by one day, but month identity must not.
+    const curYm = U.ymKey(new Date()), lastYm = U.prevMonthKey(curYm);
     const identityIds = new Set([p.sub, a && a.agentId, a && a.id].map((v) => clean(v).replace(/\.0+$/, '').toUpperCase()).filter(Boolean));
     const personId = clean((a && (a.agentId || a.id)) || p.sub).replace(/\.0+$/, '').toUpperCase();
     const rowAgentId = (r) => clean(r.agentId || r.id).replace(/\.0+$/, '').toUpperCase();
@@ -1252,7 +1253,8 @@ window.FF = window.FF || {};
     if (!selfA && num(stockComposition.own.total) > 0) selfA = agentRow({ name: p.name, agentId: tlId, tlName: p.name, stockTotal: stockComposition.own.total, stockVc4: stockComposition.own.vc4, stockNvc4: stockComposition.own.comm }, true);
     if (selfA) selfA.classStock = selfClassStock(selfRow || { name: selfA.name, agentId: selfA.id, tlId, tlName: p.name }, stockDetails, 'ff', stockComposition);
     const ac = rowsOf('agentClass'), agRows = rowsOf('agents'), stk = rowsOf('stockAgents');
-    const curYm = latestYm(ac.length ? ac : agRows), lastYm = U.prevMonthKey(curYm);
+    // FF reporting always uses the real calendar month pair; EIR may lag by one day, but month identity must not.
+    const curYm = U.ymKey(new Date()), lastYm = U.prevMonthKey(curYm);
     const teamClassRows = ac.filter((r) => norm(r.tlName) === n && (!r.channel || /first/i.test(r.channel)));
     const out = {
       kind: 'ff-tl', channel: 'First Forward', ch: 'ff', name: p.name, id: tlId, found: !!underTl.length,
