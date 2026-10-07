@@ -33,7 +33,8 @@ FF.pages = FF.pages || {};
   // ---------------------------------------------------------------- index builders
   function newIndex() {
     return {
-      people: new Map(),   // `${kind}|${normName(name)}` → { kind, name, sub, tlSet, classMap, bars, last, n }
+      people: new Map(),   // `${kind}|${identity}` → person; identity is ID first, name fallback
+      peopleByName: new Map(), // `${kind}|${normName(name)}` → same-name candidates for no-ID/ID-safe merging
       personGrams: new Map(), // normalized 2-character search gram → people (substring lookup)
       bars: new Map(),     // normBar(barcode) → { key, ff: [], gv: [] }
       barKeys: [],         // barcode keys, insertion order — search seedha isi par chalti hai (neeche search() dekho)
@@ -67,21 +68,33 @@ FF.pages = FF.pages || {};
   function person(idx, kind, name, tlName, cls, sub) {
     const nm = clean(name);
     if (!nm) return null;
-    // 🧍 Placeholder TL names ("APS", "Direct", "Unassigned") kabhi TL card nahi banate.
     if (kind === 'ff-tl' || kind === 'gv-tl') { if (!FF.config.isRealTl(nm)) return null; }
-    const identity = clean(sub).replace(/\.0+$/, '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-    const k = `${kind}|${identity || normName(nm)}`;
-    let p = idx.people.get(k);
-    if (!p) { p = { kind, name: nm, sub: sub || '', tlSet: new Set(), tlIds: new Set(), ids: new Set(), alias: new Set(), classMap: new Map(), bars: new Set(), last: '', n: 0, direct: false }; idx.people.set(k, p); }
-    if (sub && !p.sub) p.sub = clean(sub);
+    const identity = normId(sub);
+    const exactKey = `${kind}|${identity || normName(nm)}`;
+    let p = identity ? idx.people.get(exactKey) : null;
+    const nameKey = `${kind}|${normName(nm)}`;
+    if (!p) {
+      const sameName = idx.peopleByName.get(nameKey) || [];
+      // Merge only when the current record has no identity OR an existing record has no identity.
+      // Two explicit different IDs with the same name remain separate.
+      p = sameName.find((x) => !identity || !normId(x.sub) || normId(x.sub) === identity) || null;
+    }
+    if (!p) {
+      p = { kind, name: nm, sub: sub ? clean(sub) : '', tlSet: new Set(), tlIds: new Set(), ids: new Set(), alias: new Set(), classMap: new Map(), bars: new Set(), last: '', n: 0, direct: false };
+      idx.people.set(exactKey, p);
+      const arr = idx.peopleByName.get(nameKey) || []; arr.push(p); idx.peopleByName.set(nameKey, arr);
+    } else if (identity && !normId(p.sub)) {
+      for (const [k, value] of idx.people.entries()) if (value === p && k !== exactKey) idx.people.delete(k);
+      p.sub = clean(sub); idx.people.set(exactKey, p);
+    }
     const tl = clean(tlName);
     if (kind === 'ff-agent' || kind === 'gv-agent') {
       const info = tlInfoOf(idx, kind, tl);
       if (info.direct) { p.direct = true; p.directLabel = info.label; }
     }
     if (tl && !(p.direct && !tlInfoOf(idx, 'tl', tl).real)) p.tlSet.add(tl);
-    const c = clean(cls);
-    if (c) p.classMap.set(c, (p.classMap.get(c) || 0) + 1);
+    const cls = clean(cls);
+    if (cls) p.classMap.set(cls, (p.classMap.get(cls) || 0) + 1);
     return p;
   }
   function pushBucket(map, key, value) {
