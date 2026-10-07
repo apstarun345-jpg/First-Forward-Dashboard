@@ -155,6 +155,23 @@ test('🔎 topbar search remounts and routes through canonical Master Search pag
   assert.match(search, /const ch = \^\(gv-\|ff-\)/);
 });
 
+test('🧭 identity routing — exact canonical GV ID cannot open the FF duplicate', async () => {
+  const ms = await read('masterSearch.js');
+  assert.match(ms, /function canonicalPerson\(p, idx\)/);
+  assert.match(ms, /const canonical = idx\.ids && idx\.ids\.get\(id\)/);
+  assert.match(ms, /if \(exactIdGroup && !chFilter\)/);
+  assert.match(ms, /if \(matchId\(exactIdGroup\.gv\)\) exactIdChannel = 'gv'/);
+  assert.match(ms, /openGroup\(preferred, exactIdChannel \|\| undefined\)/);
+});
+
+test('📋 summary lists — Agent/TL Summary inherits canonical Master Profile KPIs', async () => {
+  const as = await read('agentSummary.js');
+  assert.match(as, /Canonical KPI enrichment/);
+  assert.match(as, /MP\(\) && MP\(\)\.quick/);
+  assert.match(as, /base\.cur = Number\(q\.totals && q\.totals\.curTotal\)/);
+  assert.match(as, /base\.stock = Number\(q\.stock && q\.stock\.total\)/);
+  assert.match(as, /base\.last = Number\(q\.totals && q\.totals\.lastTotal\)/);
+});
 test('📦 GV individual stock — card fallback matches Tag Assignment class-wise stock', async () => {
   const mp = await read('masterProfile.js');
   assert.match(mp, /GV individual-agent card must use the same Tag Assignment stock source/);
