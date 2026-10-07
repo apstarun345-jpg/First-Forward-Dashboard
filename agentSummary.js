@@ -126,7 +126,32 @@ FF.pages = FF.pages || {};
         }
       }
     }
-    return [...map.values()].map((p) => ({ ...p, altIds: [...(p.altIds || [])] })).sort((a, b) => (b.cur + b.stock) - (a.cur + a.stock));
+    // Canonical KPI enrichment: Summary search chips/list must show the same identity + stock + MTD/last
+    // values as Master Search / masterProfile, not a stale GV REPORT snapshot.
+    return [...map.values()].map((p) => {
+      const base = { ...p, altIds: [...(p.altIds || [])] };
+      try {
+        const q = MP() && MP().quick ? MP().quick({
+          kind: p.kind, name: p.name, sub: p.id || '', tlSet: p.tl ? new Set([p.tl]) : new Set(),
+          classMap: new Map(), bars: new Set()
+        }) : null;
+        if (q) {
+          base.cur = Number(q.totals && q.totals.curTotal) || 0;
+          base.last = Number(q.totals && q.totals.lastTotal) || 0;
+          base.stock = Number(q.stock && q.stock.total) || 0;
+          base.curVc4 = Number(q.totals && q.totals.curVc4) || 0;
+          base.curComm = Number(q.totals && q.totals.curComm) || 0;
+          base.lastVc4 = Number(q.totals && q.totals.lastVc4) || 0;
+          base.lastComm = Number(q.totals && q.totals.lastComm) || 0;
+          base.tl = q.tl && q.tl.name ? q.tl.name : base.tl;
+          base.tlId = q.tl && q.tl.id ? q.tl.id : base.tlId;
+          base.priority = q.priority || base.priority;
+          base.direct = !!q.direct;
+          base.directLabel = q.directLabel || base.directLabel || '';
+        }
+      } catch { /* keep lightweight fallback */ }
+      return base;
+    }).sort((a, b) => (b.cur + b.stock) - (a.cur + a.stock));
   }
 
   // ---- v3.34 speed: caches (stale-while-revalidate) ------------------------------------------------
