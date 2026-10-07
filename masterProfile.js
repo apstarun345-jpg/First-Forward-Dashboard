@@ -2113,7 +2113,7 @@ window.FF = window.FF || {};
     </div>
     <div class="mp-cells">
       ${cell(isTl ? 'TL mobile' : 'Mobile', mobileCell(pr.mobile))}
-      ${isTl ? cell('Agents', `<span class="mp-linkish" data-kpi="${esc(peopleSpec)}" role="button" tabindex="0" title="In agents ki poori list">${fmt(pr.agentCount)} 👉</span>${pr.selfAgent ? '<small class="dim"> + TL (apna stock alag)</small>' : ''}`) : cell('TL', pr.direct ? `<span class="direct-chip">🚫 ${esc(pr.directLabel || 'Direct')}</span>` : esc((pr.tl && pr.tl.name) || '—'))}
+      ${isTl ? cell('Agents', `<span class="mp-linkish" data-kpi="${esc(peopleSpec)}" role="button" tabindex="0" title="In agents ki poori list">${fmt(pr.agentCount)} 👉</span>${pr.selfAgent ? '<small class="dim"> + TL (apna stock alag)</small>' : ''}`) : cell('TL', pr.direct ? `<span class="direct-chip">🚫 ${esc(pr.directLabel || 'Direct')}</span>` : (pr.tl && pr.tl.name ? `<button type="button" class="mp-link-btn" data-mp-open-tl="1" data-mp-tl-name="${esc(pr.tl.name)}" data-mp-tl-id="${esc(pr.tl.id || '')}">${esc(pr.tl.name)}</button>` : '—'))}
       ${isTl ? '' : cell('TL ID', esc((pr.tl && pr.tl.id) || '—'))}
       ${isTl ? '' : cell("TL's mobile", mobileCell(pr.tl && pr.tl.mobile))}
       ${cell('Status', esc(pr.status || '—'))}
@@ -2311,6 +2311,8 @@ window.FF = window.FF || {};
         if (target && target.scrollIntoView) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
         return;
       }
+      const tlOpen = e.target.closest('[data-mp-open-tl]');
+      if (tlOpen && FF.app && FF.app.navigate) { FF.app.navigate('masterSearch', { q: tlOpen.dataset.mpTlName || '', id: tlOpen.dataset.mpTlId || '', ch: cur && cur.ch ? cur.ch : '' }); return; }
       const a360 = e.target.closest('[data-mp-a360]');
       if (a360) { if (FF.cockpit && FF.cockpit.agent360) FF.cockpit.agent360({ name: a360.dataset.mpA360 }).catch(() => {}); return; }
       const row = e.target.closest('[data-mp-agent]');
