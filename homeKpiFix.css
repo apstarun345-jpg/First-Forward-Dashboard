@@ -9,3 +9,7 @@
 .page-home .kpi .kpi-foot .pct-inline.pos{color:#dcfce7!important}
 .page-home .kpi .kpi-foot .pct-inline.neg{color:#fee2e2!important}
 .page-home .kpi .kpi-foot .pct-inline.flat{color:#fff!important}
+
+
+/* v3.65 — Home greeting visibility: keep the time greeting readable on every theme/device. */
+.home-hero.v2 .home-greeting,.home-hero.v2 .home-greeting-text{color:#111827 !important;-webkit-text-fill-color:#111827 !important;opacity:1 !important;visibility:visible !important;display:inline !important;font-weight:900 !important}.home-hero.v2 .home-greeting-text{background:linear-gradient(135deg,#4338ca,#7c3aed,#db2777);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent !important}html[data-theme="dark"] .home-hero.v2 .home-greeting{color:#f8fafc !important;-webkit-text-fill-color:#f8fafc !important}html[data-theme="dark"] .home-hero.v2 .home-greeting-text{-webkit-text-fill-color:transparent !important}@media (max-width:600px){.home-hero.v2 .home-greeting{font-size:19px !important;line-height:1.3 !important}}
