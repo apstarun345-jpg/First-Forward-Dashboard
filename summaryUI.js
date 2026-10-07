@@ -565,9 +565,11 @@ window.FF = window.FF || {};
 
   function personSpec(p, ch) {
     const isTl = /tl$/.test(String(p.kind || ''));
-    return ch === 'gv'
-      ? { kind: isTl ? 'gv-tl' : 'gv-agent', name: p.name, id: p.id, tlName: p.tl, tlId: p.tlId, mobile: p.mobile, direct: p.isDirect }
-      : { kind: isTl ? 'ff-tl' : 'ff-agent', name: p.name, id: p.id, tl: p.tl, tlId: p.tlId, mobile: p.mobile, direct: p.isDirect, sub: p.id || '' };
+    const id = p.id || p.sub || '';
+    if (ch === 'gv') {
+      return { kind: isTl ? 'gv-tl' : 'gv-agent', name: p.name, id, sub: id, tlName: p.tl, tlId: p.tlId, mobile: p.mobile, direct: p.isDirect };
+    }
+    return { kind: isTl ? 'ff-tl' : 'ff-agent', name: p.name, id, sub: id, tl: p.tl, tlId: p.tlId, mobile: p.mobile, direct: p.isDirect };
   }
 
   function makePage(ch) {
