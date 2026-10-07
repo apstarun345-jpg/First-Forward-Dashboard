@@ -723,6 +723,7 @@ window.FF = window.FF || {};
             else if (kind === 'pdf') {
               const filename = ch + '-' + U.slug(S.view.name) + '-' + U.stamp() + '.pdf';
               if (U.downloadStart) U.downloadStart(filename, 'Preparing PDF…');
+              if (U.downloadYield) await U.downloadYield();
               try {
                 if (!FF.pdf && FF.lazy && FF.lazy.need) await FF.lazy.need('pdf');
                 if (!FF.pdf || !FF.pdf.doc || typeof FF.pdf.download !== 'function') throw new Error('PDF module load nahi hua');
