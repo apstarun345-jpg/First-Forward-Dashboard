@@ -569,13 +569,13 @@ function captureRows_(sh, kinds) {
       if (wanted.has(kind)) rows.push({ row: i + 2, values: values[i].slice() });
     }
   }
-  return { lastRow: lastRow, lastCol: lastCol, rows: rows };
+  return { lastRow: lastRow, lastCol: lastCol, kinds: kinds.slice(), rows: rows };
 }
 
 function restoreCapturedRows_(sh, snap) {
-  const wanted = new Set(snap.rows.map(function (x) {
+  const wanted = new Set((snap.kinds || snap.rows.map(function (x) {
     return x && x.values ? String(x.values[0] || '') : '';
-  }).filter(Boolean));
+  })).filter(Boolean));
   // Roll back ONLY the record kinds in this transaction. Never clear unrelated APP_STORAGE rows.
   const lastRow = sh.getLastRow();
   const lastCol = Math.max(4, sh.getLastColumn());
