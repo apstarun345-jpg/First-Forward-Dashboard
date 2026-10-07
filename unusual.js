@@ -806,6 +806,7 @@ FF.pages = FF.pages || {};
       await FF.pdf.download([page], pdfName);
       U.toast('Forensic PDF downloaded ✓', 'ok');
     } catch (err) {
+      if (U.downloadFail) U.downloadFail(pdfName, (err && err.message) || 'PDF export failed');
       U.toast((err && err.message) || 'PDF export failed', 'err');
     } finally {
       if (btn) U.setButtonBusy(btn, false);
