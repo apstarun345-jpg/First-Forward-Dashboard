@@ -1118,7 +1118,7 @@ window.FF = window.FF || {};
     if (U.downloadYield) await U.downloadYield();
     try {
       if (!FF.pdf && FF.lazy && FF.lazy.need) await FF.lazy.need('pdf');
-      if (!FF.pdf || !FF.pdf.doc) { U.toast('PDF module load nahi hua', 'err'); return; }
+      if (!FF.pdf || !FF.pdf.doc) throw new Error('PDF module load nahi hua');
       if (btn) U.setButtonBusy(btn, true, 'PDF…');
       const d = extractDrawerData();
       // v3.34 — structured API (kpis + table) se multi-page PDF; finish() ab Blob deta hai.
