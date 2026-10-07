@@ -164,8 +164,7 @@ window.FF = window.FF || {};
   function formHtml(mode, msg) {
     const c = FF.config;
     const signupOk = c.allowSignup !== false;
-    return `<div class="auth-shell pro-shell">
-      ${visualHtml()}
+    return `<div class="auth-shell pro-shell login-only-shell">
       <div class="auth-panel pro-panel">
         <div class="auth-card pro-card">
           <div class="auth-brand-sm pro-brand-sm login-app-brand">
@@ -206,7 +205,7 @@ window.FF = window.FF || {};
             <p class="dim small pro-note">${mode === 'signup' ? 'New account requires admin approval. You will receive access after verification.' : 'Need access? Contact your administrator for account creation and permissions.'}</p>
           </form>
         </div>
-        <p class="auth-foot dim small pro-foot">© 2026 ${esc(c.footerText || c.appName || c.brand || 'First Forward Dashboard')} • Designed &amp; Developed by ${esc(c.developerName || 'Tarun Kumawat')}<br><span>${esc(c.brand || '')} • Live data from Google Sheets • Secure &amp; Enterprise Ready${state.settings && state.settings.updatedAt ? ` • Updated ${U.timeLabel(new Date(state.settings.updatedAt).getTime())}` : ''}</span></p>
+        <p class="auth-foot dim small pro-foot">© 2026 ${esc(c.footerText || c.appName || c.brand || 'First Forward Dashboard')} • <strong class="developer-credit">Designed &amp; Developed by Tarun Kumawat</strong><br><span>${esc(c.brand || '')} • Live data from Google Sheets • Secure &amp; Enterprise Ready${state.settings && state.settings.updatedAt ? ` • Updated ${U.timeLabel(new Date(state.settings.updatedAt).getTime())}` : ''}</span></p>
       </div>
     </div>`;
   }
@@ -384,6 +383,14 @@ window.FF = window.FF || {};
   }
 
   async function init() {
+    // Intentional logout: skip the workspace splash/API round-trip and show the real login screen immediately.
+    try {
+      if (sessionStorage.getItem('ff_skip_workspace_boot_once') === '1') {
+        sessionStorage.removeItem('ff_skip_workspace_boot_once');
+        showLogin('login');
+        return false;
+      }
+    } catch {}
     // Render may expose the shell a few seconds before durable storage finishes loading.
     // /api/auth/me returns 503 + booting:true during that window; retry automatically
     // instead of trapping the user on a manual connection error screen.
@@ -419,7 +426,8 @@ window.FF = window.FF || {};
   }
 
   async function logout() {
-    // ⚡ Instant UI — don't wait for the network round-trip before clearing state.
+    // ⚡ Instant UI — don't wait for network/bootstrap/splash before showing the login page.
+    try { sessionStorage.setItem('ff_skip_workspace_boot_once', '1'); } catch {}
     state.user = null;
     stopViewAs(); // 👁 preview session ke saath chala jaye
     try { localStorage.removeItem('ff_user'); } catch { /* ignore */ }
