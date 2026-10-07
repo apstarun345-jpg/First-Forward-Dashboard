@@ -1840,23 +1840,22 @@ window.FF = window.FF || {};
     document.body.classList.remove('ready');
     bootSetMessage('Loading your workspace…', 'Loading live dashboard data…');
 
+    // Start the full sheet preload in the background. It must NEVER block the first Home paint.
+    // The previous boot waited here; on a slow phone that left the safety fallback card visible.
     const preloadPromise = FF.preloader ? FF.preloader.preloadAll(false) : Promise.resolve();
-    // Background module warming begins while critical data loads, but it never controls first paint.
-    const warmPromise = FF.lazy && FF.lazy.ensureAll ? FF.lazy.ensureAll().catch(() => {}) : Promise.resolve();
-    let preloadState;
-    try {
-      preloadState = await preloadPromise;
-      bootSetMessage('Preparing your dashboard…', preloadState && preloadState.errors && preloadState.errors.length ? 'Using available cached data…' : 'Live data ready — preparing cards…');
-    } catch {
-      bootSetMessage('Preparing your dashboard…', 'Using available cached data…');
-    }
+    preloadPromise.then((state) => {
+      bootSetMessage('Workspace ready ✓', state && state.errors && state.errors.length ? 'Using available cached data…' : 'Live data is loading in the background…');
+    }).catch(() => {
+      bootSetMessage('Workspace ready ✓', 'Using available cached data…');
+    });
 
-    // Render the actual first route while splash stays on top. renderCurrent() waits for its page
-    // module and async render, so when splash exits the dashboard is already populated.
+    // IMPORTANT: do not start ensureAll() here. It downloads every page module and competes with
+    // Home/data requests during the first paint. lazy.warm() starts later after Home is visible.
+    // Render Home immediately while the non-critical preload continues in the background.
     await renderCurrent({ bootGate: true });
 
-    // Background module warming must NEVER hold the first screen hostage.
-    // Do not await warmPromise here; it continues in the background after the shell is visible.
+    // Home is already rendered (or its own async data is continuing). Release the short boot
+    // animation without waiting for every sheet/module.
     bootSetMessage('Workspace ready ✓', 'Your dashboard data is loaded.');
     await releaseWorkspaceBoot();
 
