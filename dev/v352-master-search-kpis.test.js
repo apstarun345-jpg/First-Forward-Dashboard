@@ -301,10 +301,12 @@ test('🚦 startup readiness — Render health stays green and storage retry is 
   assert.match(server, /url\.pathname === '\/api\/health'.*ready: false/s);
   assert.match(server, /Retry-After.*3/);
   assert.match(server, /StorageStore|AppsScriptStore/);
+  assert.match(server, /await waitForBoot\(\)/, 'API requests wait on one server-side boot promise');
   assert.doesNotMatch(server, /for \(let attempt = 0; attempt < 5; attempt\+\+\) \{[\s\S]{0,500}sheetsStore\.read\(\)/);
   const auth = await read('auth.js');
   assert.match(auth, /booting = err && err\.status === 503 && err\.data && err\.data\.booting/);
-  assert.match(auth, /maxBootRetries = 7/);
+  assert.match(auth, /maxBootRetries = 2/);
+  assert.match(auth, /path === '\/api\/auth\/me' \? 120000/, 'auth readiness call can wait for durable startup');
   const storage = await read('apps-script-storage.js');
   assert.match(storage, /APPS_SCRIPT_ATTEMPTS/);
   assert.match(storage, /APPS_SCRIPT_TIMEOUT_MS/);
@@ -313,8 +315,8 @@ test('🚦 startup readiness — Render health stays green and storage retry is 
 
 test('🏷️ v3.61 wiring — version pins + automatic cache-busting', async () => {
   const pkg = JSON.parse(await read('package.json'));
-  assert.equal(pkg.version, '3.64.0');
-  assert.match(await read('server.js'), /APP_VERSION = '3\.62\.0'/);
+  assert.equal(pkg.version, '3.65.0');
+  assert.match(await read('server.js'), /APP_VERSION = '3\.65\.0'/);
   const idx = await read('index.html');
   assert.match(idx, /styles\.css\?v=114/); assert.match(idx, /config\.js\?v=110/); assert.match(idx, /home\.js\?v=91/); assert.match(idx, /app\.js\?v=110/); assert.match(idx, /lazy\.js\?v=110/);
   // masterSearch ab shell-extra hai (first paint ke baad load hota hai) — index.html me eager nahi.

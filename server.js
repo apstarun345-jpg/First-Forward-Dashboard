@@ -64,7 +64,7 @@ const MIME = {
 const BLOCKED_FILES = new Set(['server.js', 'sheets-storage.js', 'apps-script-storage.js', 'mailer.js', 'stock-age.js', 'DEPLOYMENT.md', 'SHEETS_STORAGE.md', 'STORAGE_SETUP.md', 'RECOVERY.md', 'package.json', 'package-lock.json', 'render.yaml', 'README.md', '.env']);
 const BLOCKED_DIRS = new Set(['data', 'dev', 'node_modules', '.git', 'google-apps-script']);
 // /api/health ka version ab package.json se aata hai (pehle yahan hardcoded purana string tha).
-let APP_VERSION = '3.64.0';
+let APP_VERSION = '3.65.0';
 try { APP_VERSION = String(JSON.parse(readFileSync(path.join(__dirname, 'package.json'), 'utf8')).version || APP_VERSION); } catch { /* keep fallback */ }
 
 // ---------------------------------------------------------------------------------------------
@@ -8194,6 +8194,29 @@ const PERSONAL_PORTAL_JS = `(function () {
 
 let appReady = false;
 const bootState = { startedAt: Date.now(), stage: 'starting', error: null };
+let bootPromise = null;
+// API callers should not see a retry loop while durable storage is being initialized.
+// One request waits for the same startup promise; health/version remain available immediately.
+const BOOT_REQUEST_WAIT_MS = Math.max(30000, Number(process.env.BOOT_REQUEST_WAIT_MS || 75000));
+
+function waitForBoot() {
+  if (appReady) return Promise.resolve();
+  const pending = bootPromise;
+  if (!pending) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error('Workspace startup is taking longer than expected.'));
+    }, BOOT_REQUEST_WAIT_MS);
+    if (timer.unref) timer.unref();
+    pending.then(
+      () => { if (!settled) { settled = true; clearTimeout(timer); resolve(); } },
+      (err) => { if (!settled) { settled = true; clearTimeout(timer); reject(err); } }
+    );
+  });
+}
 
 function bootResponse(res, status = 503) {
   res.statusCode = status;
@@ -8233,8 +8256,23 @@ const server = http.createServer(async (req, res) => {
     if (!appReady && url.pathname === '/api/version' && req.method === 'GET') {
       return sendJson(res, 200, { version: SW_VERSION || 'dev', ready: false, booting: true });
     }
-    // Static app assets can load during storage boot; only data/auth API calls wait for readiness.
-    if (!appReady && url.pathname.startsWith('/api/')) return bootResponse(res, 503);
+    // Static app assets can load during storage boot. Data/auth APIs wait for the SAME
+    // startup promise, so a slow Google Apps Script read does not create a browser retry loop.
+    if (!appReady && url.pathname.startsWith('/api/')) {
+      try {
+        await waitForBoot();
+      } catch (err) {
+        const message = bootState.error || String(err && err.message || err);
+        return sendJson(res, 503, {
+          ok: false,
+          booting: false,
+          ready: false,
+          stage: bootState.stage,
+          error: message
+        }, { 'Retry-After': '5', 'Cache-Control': 'no-store' });
+      }
+      if (!appReady) return bootResponse(res, 503);
+    }
     if (url.pathname.startsWith('/api/')) {
       try { return await handleApi(req, res, url); } catch (err) {
         if (err instanceof HttpError) return sendJson(res, err.status, { error: err.message });
@@ -8511,7 +8549,10 @@ async function start() {
     const warmStockAge = process.env.STOCK_AGE_WARM ? process.env.STOCK_AGE_WARM !== '0' : !!process.env.RENDER;
     if (warmStockAge) setTimeout(() => stockAgeIndex(false).catch((err) => console.warn('stock ageing warm-up:', err.message)), 12000).unref();
 }
-start().catch((err) => {
+// Start exactly once and keep the promise available to API requests that arrive while
+// Render is still warming durable storage.
+bootPromise = start();
+bootPromise.catch((err) => {
   bootState.stage = 'failed';
   bootState.error = String(err && err.message || err);
   console.error('Startup stopped to protect stored data:', err);
