@@ -3,6 +3,48 @@
 window.FF = window.FF || {};
 (function (FF) {
   'use strict';
+  // 🚀 v3.66 — Real workspace boot gate.
+  // Splash stays visible for at least 3.6s, but it can only release after critical data + the
+  // initial route have finished rendering. This prevents a half-loaded dashboard/zero KPI first paint.
+  const WORKSPACE_BOOT_MIN_MS = 3600;
+  const workspaceBootStarted = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  let workspaceBootReleased = false;
+  function bootElapsed() {
+    const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    return now - workspaceBootStarted;
+  }
+  function bootSetMessage(title, sub) {
+    try {
+      const boot = U.$('#app-boot');
+      if (!boot) return;
+      const p = boot.querySelector('p'); const small = boot.querySelector('small');
+      if (p && title) p.textContent = title;
+      if (small && sub) small.textContent = sub;
+    } catch {}
+  }
+  function removeBootOverlay() {
+    const boot = U.$('#app-boot');
+    if (!boot || workspaceBootReleased) return;
+    workspaceBootReleased = true;
+    document.body.classList.add('ready');
+    document.body.classList.add('workspace-ready');
+    boot.classList.add('boot-exit');
+    setTimeout(() => { try { boot.remove(); } catch {} }, 360);
+  }
+  // auth.js calls this immediately after /api/auth/me. Keep the splash held for an authenticated
+  // session; showLogin() still removes it normally when there is no authenticated user.
+  window.__FF_FINISH_BOOT = () => {
+    try {
+      if (FF.auth && FF.auth.user) return; // onLogin() owns the authenticated boot release
+    } catch {}
+    removeBootOverlay();
+  };
+  async function releaseWorkspaceBoot() {
+    const wait = Math.max(0, WORKSPACE_BOOT_MIN_MS - bootElapsed());
+    if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
+    removeBootOverlay();
+  }
+
   const U = FF.util;
   const esc = U.esc;
 
@@ -1743,22 +1785,49 @@ window.FF = window.FF || {};
     if (!on) { if (chip) chip.remove(); return; }
     if (!chip) { chip = U.h('<a class="live-share-chip" id="live-share-chip" href="#/settings?tab=account" title="Admin aapka page, cursor aur clicks live dekh sakta hai. Settings → My account me band kar sakte ho.">👁 Admin live view on</a>'); foot.insertBefore(chip, foot.firstChild); }
   }
-  function onLogin() {
+  async function onLogin() {
     if (EMBED_LIVE) {
-      // Admin live-view mirror: render only the page, no timers / prompts / notifications.
-      document.body.classList.add('embed-live', 'ready');
+      document.body.classList.add('embed-live');
       renderSidebar();
       FF.auth.applyTheme();
-      if (FF.preloader) FF.preloader.preloadAll(false).catch(console.warn);
-      renderCurrent();
+      const prep = FF.preloader ? FF.preloader.preloadAll(false) : Promise.resolve();
+      await prep.catch(console.warn);
+      await renderCurrent({ bootGate: true });
+      document.body.classList.add('ready');
+      await releaseWorkspaceBoot();
       return;
     }
+
     renderSidebar();
     FF.auth.applyTheme();
-    document.body.classList.add('ready');
-    // Start one shared load BEFORE rendering; page requests join it.
-    if (FF.preloader) FF.preloader.preloadAll(false).catch(console.warn);
-    renderCurrent();
+    // Keep the entire shell hidden until critical data + the initial route are populated.
+    document.body.classList.remove('ready');
+    bootSetMessage('Loading your workspace…', 'Loading live dashboard data…');
+
+    const preloadPromise = FF.preloader ? FF.preloader.preloadAll(false) : Promise.resolve();
+    // Background module warming begins while critical data loads, but it never controls first paint.
+    const warmPromise = FF.lazy && FF.lazy.ensureAll ? FF.lazy.ensureAll().catch(() => {}) : Promise.resolve();
+    let preloadState;
+    try {
+      preloadState = await preloadPromise;
+      bootSetMessage('Preparing your dashboard…', preloadState && preloadState.errors && preloadState.errors.length ? 'Using available cached data…' : 'Live data ready — preparing cards…');
+    } catch {
+      bootSetMessage('Preparing your dashboard…', 'Using available cached data…');
+    }
+
+    // Render the actual first route while splash stays on top. renderCurrent() waits for its page
+    // module and async render, so when splash exits the dashboard is already populated.
+    await renderCurrent({ bootGate: true });
+
+    // Give background modules a chance to finish before reveal when they are already close; never
+    // block indefinitely on a non-critical module.
+    await Promise.race([warmPromise, new Promise((resolve) => setTimeout(resolve, 1200))]);
+
+    bootSetMessage('Workspace ready ✓', 'Your dashboard data is loaded.');
+    await releaseWorkspaceBoot();
+
+    maybeOnboarding();
+    if (FF.config.loginAnimation !== false) FF.auth.splash(FF.auth.user);
     maybeOnboarding();
     if (FF.config.loginAnimation !== false) FF.auth.splash(FF.auth.user);
     registerServiceWorker(); // push notifications ke liye SW pehle ready ho
