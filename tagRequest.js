@@ -2953,7 +2953,21 @@ body.colorful .from-hdr { color: #166534; }
     const cfg = s.config;
     if (!cfg) return '<section class="card" id="tr-sheet-card"><div class="card-body dim small">📗 Google Sheet sync load ho raha hai…</div></section>';
     const fields = s.fields || {};
-    const colBox = Object.entries(fields).map(([k, label]) => `<label class="tr-col-opt"><input type="checkbox" data-tr-col="${esc(k)}" ${cfg.columns.includes(k) ? 'checked' : ''}> ${esc(label)}</label>`).join('');
+    const savedCols = Array.isArray(cfg.columns) ? cfg.columns.filter((k) => fields[k]) : [];
+    const orderedCols = [...savedCols, ...Object.keys(fields).filter((k) => !savedCols.includes(k))];
+    const colBox = orderedCols.map((k, idx) => {
+      const label = fields[k];
+      const checked = savedCols.includes(k);
+      return `<div class="tr-col-order" draggable="true" data-tr-order-key="${esc(k)}">
+        <span class="tr-drag" title="Drag karke order badlo">☷</span>
+        <input type="checkbox" data-tr-col="${esc(k)}" ${checked ? 'checked' : ''}>
+        <span class="tr-col-label">${esc(label)}</span>
+        <span class="tr-col-move">
+          <button type="button" class="btn tiny" data-tr-col-up title="Upar">↑</button>
+          <button type="button" class="btn tiny" data-tr-col-down title="Neeche">↓</button>
+        </span>
+      </div>`;
+    }).join('');
     const targetId = sheetIdOfLink(cfg.sheetLink) || cfg.spreadsheetId || '';
     const noAgentCols = !['agentMobile', 'agentAddress', 'agentPincode'].some((k) => cfg.columns.includes(k));
     return `<section class="card" id="tr-sheet-card"><div class="card-head"><h3>📗 Google Sheet me direct entry <span class="badge ${cfg.enabled ? 'green' : ''}">${cfg.enabled ? 'ON' : 'OFF'}</span></h3>
@@ -2979,8 +2993,8 @@ body.colorful .from-hdr { color: #166534; }
               <label class="tr-col-opt"><input type="checkbox" data-tr-sheet="onStatus" ${cfg.onStatus !== false ? 'checked' : ''}> Status change par (approved/dispatched)</label>
             </span></label>
         </div>
-        <label class="field" style="display:block;margin-top:8px"><span class="dim small">Kaunse columns sheet me aayein (order = checkbox order)</span>
-          <div class="tr-cols-grid">${colBox}</div></label>
+        <label class="field" style="display:block;margin-top:8px"><span class="dim small"><b>Kaunse columns sheet me aayein + kis order me aayein</b> — checkbox = ON/OFF · ☷ Drag ya ↑↓ = order. Example: <b>Agent Name → Agent ID → Date → Time…</b></span>
+          <div class="tr-cols-grid tr-cols-order" data-tr-cols-order>${colBox}</div></label>
         <div class="btn-row" style="margin-top:10px">
           <button class="btn primary" data-tr-sheet-act="save">💾 Save settings</button>
           <button class="btn" data-tr-sheet-act="toggle">${cfg.enabled ? '⏸ Sync OFF karo' : '▶️ Sync ON karo'}</button>
@@ -3085,14 +3099,61 @@ body.colorful .from-hdr { color: #166534; }
     function attach() {
       const card = rootEl.querySelector('#tr-sheet-card');
       if (!card) return;
-      const act = (name, fn) => { const b = card.querySelector(`[data-tr-sheet-act="${name}"]`); if (b) b.addEventListener('click', fn); };
+      const orderBox = card.querySelector('[data-tr-cols-order]');
+      let dragKey = '';
+      if (orderBox) {
+        orderBox.addEventListener('dragstart', (e) => {
+          const row = e.target.closest && e.target.closest('.tr-col-order');
+          if (!row) return;
+          dragKey = row.dataset.trOrderKey || '';
+          row.classList.add('dragging');
+          try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dragKey); } catch {}
+        });
+        orderBox.addEventListener('dragend', (e) => {
+          const row = e.target.closest && e.target.closest('.tr-col-order');
+          if (row) row.classList.remove('dragging');
+          dragKey = '';
+        });
+        orderBox.addEventListener('dragover', (e) => {
+          const row = e.target.closest && e.target.closest('.tr-col-order');
+          if (!row || !dragKey) return;
+          e.preventDefault();
+          row.classList.add('drag-over');
+        });
+        orderBox.addEventListener('dragleave', (e) => {
+          const row = e.target.closest && e.target.closest('.tr-col-order');
+          if (row) row.classList.remove('drag-over');
+        });
+        orderBox.addEventListener('drop', (e) => {
+          const target = e.target.closest && e.target.closest('.tr-col-order');
+          if (!target || !dragKey) return;
+          e.preventDefault();
+          target.classList.remove('drag-over');
+          const dragged = orderBox.querySelector(`.tr-col-order[data-tr-order-key="${CSS.escape(dragKey)}"]`);
+          if (!dragged || dragged === target) return;
+          const rect = target.getBoundingClientRect();
+          if (e.clientY < rect.top + rect.height / 2) target.before(dragged); else target.after(dragged);
+        });
+        orderBox.addEventListener('click', (e) => {
+          const btn = e.target.closest && e.target.closest('[data-tr-col-up],[data-tr-col-down]');
+          if (!btn) return;
+          const row = btn.closest('.tr-col-order');
+          if (!row) return;
+          if (btn.hasAttribute('data-tr-col-up') && row.previousElementSibling) row.previousElementSibling.before(row);
+          if (btn.hasAttribute('data-tr-col-down') && row.nextElementSibling) row.nextElementSibling.after(row);
+        });
+      }
+            const act = (name, fn) => { const b = card.querySelector(`[data-tr-sheet-act="${name}"]`); if (b) b.addEventListener('click', fn); };
       const collect = () => ({
         sheetLink: (card.querySelector('[data-tr-sheet="sheetLink"]') || {}).value || '',
         tab: (card.querySelector('[data-tr-sheet="tab"]') || {}).value || 'Tag Requests',
         rowMode: (card.querySelector('[data-tr-sheet="rowMode"]') || {}).value || 'agent-class-gap',
         onSubmit: !!(card.querySelector('[data-tr-sheet="onSubmit"]') || {}).checked,
         onStatus: !!(card.querySelector('[data-tr-sheet="onStatus"]') || {}).checked,
-        columns: [...card.querySelectorAll('[data-tr-col]:checked')].map((x) => x.dataset.trCol)
+        columns: [...card.querySelectorAll('.tr-col-order')].filter((row) => {
+          const cb = row.querySelector('[data-tr-col]');
+          return cb && cb.checked;
+        }).map((row) => row.dataset.trOrderKey).filter(Boolean)
       });
       act('save', () => {
         const btn = card.querySelector('[data-tr-sheet-act="save"]');
