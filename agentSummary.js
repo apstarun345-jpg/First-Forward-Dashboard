@@ -454,7 +454,8 @@ FF.pages = FF.pages || {};
       // v3.40 — TL ki APNI stock row agents se alag (masterProfile bhi alag rakhta hai): count me nahi ginti,
       // par UI/exports me dikhni chahiye — isliye `selfAgent` + composition ka `stockSplit` yahan pass hota hai.
       selfAgent: raw.selfAgent ? normAgentRow(raw.selfAgent) : null,
-      stockSplit: raw.stockSplit || null
+      stockSplit: raw.stockSplit || null,
+      linkedTl: raw.linkedTl || null
     };
     const activityData = activityContext(person, isTl ? (p.selfAgent ? [p.selfAgent, ...p.agents] : p.agents) : [p], ch);
     if (isTl) {
@@ -1044,18 +1045,33 @@ FF.pages = FF.pages || {};
     const shBtns = can('share') ? `<button class="btn" data-as-act="share">📲 Share / WhatsApp</button>
           <button class="btn" data-as-act="wa">💬 WA Text</button>
           <button class="btn" data-as-act="copy">📋 Copy</button>` : '';
+    const lt = !r.isTl ? (p.linkedTl || null) : null;
+    const ltScope = lt ? `tl=${encodeURIComponent(lt.name)}${lt.id ? `&tlId=${encodeURIComponent(lt.id)}` : ''}` : '';
+    const ltCurSpec = lt ? `src=${r.ch}&scope=mtd&ym=${encodeURIComponent(p.curYm || '')}&${ltScope}` : '';
+    const ltLastSpec = lt ? `src=${r.ch}&scope=month&ym=${encodeURIComponent(p.lastYm || '')}&${ltScope}` : '';
+    const ltStockSpec = lt ? `src=${r.ch}&scope=stock&${ltScope}` : '';
+    const agentTlBlock = lt ? `<section class="card as-agent-tl-card"><div class="card-head"><h3>👤 Agent + 👥 TL — ek nazar me</h3><button type="button" class="btn small primary" data-as-open-tl="1" data-as-tl-name="${esc(lt.name)}" data-as-tl-id="${esc(lt.id || '')}">👥 TL Report</button></div><div class="kpi-grid seven">
+      ${card({ key: 'agent-stock', icon: '📦', tone: 'g5', label: 'Agent Stock', value: t.stockTotal, unit: 'tags', sub: `VC4 <b>${fmt(t.stockVc4)}</b> · Comm <b>${fmt(t.stockComm)}</b>`, why: 'Agent stock · Tag Assignment', explain: 'Agent ke paas actual stock.' })}
+      ${card({ key: 'tl-stock', icon: '📦', tone: 'g5', label: 'TL Stock', value: lt.stock.total, unit: 'tags', sub: `VC4 <b>${fmt(lt.stock.vc4)}</b> · Comm <b>${fmt(lt.stock.comm)}</b>`, why: 'TL stock', explain: 'Isi agent ke linked TL ka total stock.' })}
+      ${card({ key: 'agent-cur', icon: '🏷️', tone: 'g1', label: `Agent Current · ${p.curYm || 'MTD'}`, value: t.curTotal, unit: 'tags', sub: `VC4 <b>${fmt(t.curVc4)}</b> · Comm <b>${fmt(t.curComm)}</b>`, why: 'Agent issuance', explain: 'Current month MTD.' })}
+      ${card({ key: 'agent-last', icon: '📅', tone: 'g3', label: `Agent Last · ${p.lastYm || 'Last'}`, value: t.lastTotal, unit: 'tags', sub: `VC4 <b>${fmt(t.lastVc4)}</b> · Comm <b>${fmt(t.lastComm)}</b>`, why: 'Agent issuance', explain: 'Previous month full total.' })}
+      ${card({ key: 'tl-cur', icon: '🏷️', tone: 'g1', label: `TL Current · ${p.curYm || 'MTD'}`, value: lt.totals.curTotal, unit: 'tags', sub: `VC4 <b>${fmt(lt.totals.curVc4)}</b> · Comm <b>${fmt(lt.totals.curComm)}</b>`, why: 'TL issuance', explain: 'Linked TL current month.' })}
+      ${card({ key: 'tl-last', icon: '📅', tone: 'g3', label: `TL Last · ${p.lastYm || 'Last'}`, value: lt.totals.lastTotal, unit: 'tags', sub: `VC4 <b>${fmt(lt.totals.lastVc4)}</b> · Comm <b>${fmt(lt.totals.lastComm)}</b>`, why: 'TL issuance', explain: 'Linked TL previous full month.' })}
+      ${card({ key: 'agent-growth', icon: '📈', tone: 'g7', label: 'Projected Growth', value: t.growth, unit: '%', sub: `Expected current ${fmt(p.expected)} vs last full ${fmt(t.lastTotal)}`, why: 'Run-rate projection', explain: 'Yesterday tak current MTD ÷ elapsed days × current month days, then previous full month se comparison.' })}
+    </div><p class="dim small as-linked-tl">👥 Linked TL: <button type="button" class="mp-link-btn" data-as-open-tl="1" data-as-tl-name="${esc(lt.name)}" data-as-tl-id="${esc(lt.id || '')}">${esc(lt.name)}</button>${lt.id ? ` · ID ${esc(lt.id)}` : ''}</p></section>` : '';
     return `<div class="as-report">
       <div class="as-head v2">
         <div class="as-ava ${r.ch === 'gv' ? 'gv' : 'ff'}">${r.isTl ? '👥' : '🧑‍💼'}</div>
         <div class="as-who">
           <div class="badge-row"><span class="badge ${r.ch === 'gv' ? 'green' : 'blue'}">${r.ch === 'gv' ? '🟩 GV Partner' : '🟦 First Forward'}</span><span class="badge purple">${r.isTl ? '👥 Team Leader' : '🧑‍💼 Agent'}</span>${p.direct ? `<span class="direct-chip">🚫 ${esc(p.directLabel || 'Direct (no TL)')}</span>` : ''}${p.priority ? `<span class="badge ${/high/i.test(p.priority) ? 'red' : /med/i.test(p.priority) ? 'amber' : 'green'}">🔺 ${esc(p.priority)}</span>` : ''}${p.activityStatus ? `<span class="badge ${p.activityStatus === 'Active' ? 'green' : 'red'}">${esc(p.activityStatus)}${p.inactiveDuration ? ` · ${esc(p.inactiveDuration)}` : ''}</span>` : ''}<span class="badge amber" title="Ye numbers report tab se aate hain">📄 ${r.ch === 'gv' ? 'GV REPORT tab' : 'REPORT tab'}</span></div>
           <h2>${esc(p.name)}</h2>
-          <p class="as-id-line dim">${p.id ? `ID: <b>${esc(p.id)}</b> · ` : ''}${p.tlName && !r.isTl ? `TL: <b>${esc(p.tlName)}</b>${p.tlId ? ` (${esc(p.tlId)})` : ''}` : r.isTl ? `Team: <b>${fmt((p.agents || []).length)}</b> agents${p.selfAgent ? ' + TL khud (own stock)' : ''}` : ''}${p.mobile && canContacts() ? ` · 📞 <a href="tel:${esc(p.mobile)}">${esc(p.mobile)}</a>` : ''}</p>
+          <p class="as-id-line dim">${p.id ? `ID: <b>${esc(p.id)}</b> · ` : ''}${p.tlName && !r.isTl ? `TL: <button type="button" class="mp-link-btn" data-as-open-tl="1" data-as-tl-name="${esc(p.tlName)}" data-as-tl-id="${esc(p.tlId || '')}">${esc(p.tlName)}</button>${p.tlId ? ` (${esc(p.tlId)})` : ''}` : r.isTl ? `Team: <b>${fmt((p.agents || []).length)}</b> agents${p.selfAgent ? ' + TL khud (own stock)' : ''}` : ''}${p.mobile && canContacts() ? ` · 📞 <a href="tel:${esc(p.mobile)}">${esc(p.mobile)}</a>` : ''}</p>
           ${r.isTl ? `<p class="as-tl-note"><b>👥 TL data = own + agents</b> — Stock ${fmt(t.stockTotal)} · Total Issuance ${fmt(t.curTotal)} · Last Month ${fmt(t.lastTotal)} (neeche Team Agents table me split)</p>` : ''}
         </div>
         ${expBtns || shBtns ? `<div class="as-actions">${expBtns}${shBtns}</div>` : ''}
       </div>
 
+      ${agentTlBlock}
       <div class="kpi-grid six">
         <div class="kpi g1" data-kpi="${esc(curSpec)}" title="Click karke ${esc(p.curYm || 'is mahine')} ka exact issuance data dekhein"><div class="kpi-top"><span class="kpi-title">🏷️ Total Issuance · ${esc(p.curYm || 'MTD')}</span><span class="kpi-icon">${r.isTl ? '👥' : '🏷️'}</span></div><div class="kpi-value">${fmt(t.curTotal)}</div><div class="kpi-foot">VC4 <b>${fmt(t.curVc4)}</b> · Comm <b>${fmt(t.curComm)}</b>${r.isTl ? ' · own + agents' : ''}</div></div>
         <div class="kpi g3" data-kpi="${esc(lastSpec)}" title="Click karke ${esc(p.lastYm || 'pichhle mahine')} ka exact issuance data dekhein"><div class="kpi-top"><span class="kpi-title">📅 Last Month Issuance</span><span class="kpi-icon">📅</span></div><div class="kpi-value">${fmt(t.lastTotal)}</div><div class="kpi-foot">${esc(p.lastYm || 'Last month')} · VC4 <b>${fmt(t.lastVc4)}</b> · Comm <b>${fmt(t.lastComm)}</b>${r.isTl ? ' · own + agents' : ''}</div></div>
@@ -1341,6 +1357,8 @@ FF.pages = FF.pages || {};
           window.open(link, '_blank', 'noopener');
           return;
         }
+        const tlOpen = e.target.closest('[data-as-open-tl]');
+        if (tlOpen && state.report && FF.app && FF.app.navigate) { FF.app.navigate('masterSearch', { q: tlOpen.dataset.asTlName || '', id: tlOpen.dataset.asTlId || '', ch: state.report.ch || '' }); return; }
         const sw = e.target.closest('[data-as-switch]');
         if (sw && state.report) {
           const target = sw.dataset.asSwitch;
