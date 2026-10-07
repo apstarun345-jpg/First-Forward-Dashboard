@@ -1390,6 +1390,7 @@ FF.pages = FF.pages || {};
           const r = state.report, fname = `${r.ch}-${r.isTl ? 'tl' : 'agent'}-${U.slug(r.p.name)}-${U.stamp()}`;
           const k = act.dataset.asAct;
           if (k === 'pdf' && U.downloadStart) U.downloadStart(`${fname}.pdf`, 'Preparing PDF…');
+          if (k === 'pdf' && U.downloadYield) await U.downloadYield();
           // 🔐 v3.35 — render-time hide ke baad bhi yahan check (defense in depth, same toast strings)
           if (['pdf', 'excel', 'csv'].includes(k) && !can('export')) { U.toast('Download permission nahi hai', 'err'); return; }
           if (['share', 'wa', 'copy'].includes(k) && !can('share')) { U.toast('Share permission nahi hai', 'err'); return; }
