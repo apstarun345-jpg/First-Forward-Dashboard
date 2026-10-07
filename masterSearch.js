@@ -33,8 +33,7 @@ FF.pages = FF.pages || {};
   // ---------------------------------------------------------------- index builders
   function newIndex() {
     return {
-      people: new Map(),   // `${kind}|${identity}` → person; identity is ID first, name fallback
-      peopleByName: new Map(), // `${kind}|${normName(name)}` → same-name candidates for no-ID/ID-safe merging
+      people: new Map(),   // `${kind}|${normName(name)}` → { kind, name, sub, tlSet, classMap, bars, last, n }
       personGrams: new Map(), // normalized 2-character search gram → people (substring lookup)
       bars: new Map(),     // normBar(barcode) → { key, ff: [], gv: [] }
       barKeys: [],         // barcode keys, insertion order — search seedha isi par chalti hai (neeche search() dekho)
@@ -68,33 +67,21 @@ FF.pages = FF.pages || {};
   function person(idx, kind, name, tlName, cls, sub) {
     const nm = clean(name);
     if (!nm) return null;
+    // 🧍 Placeholder TL names ("APS", "Direct", "Unassigned") kabhi TL card nahi banate.
     if (kind === 'ff-tl' || kind === 'gv-tl') { if (!FF.config.isRealTl(nm)) return null; }
-    const identity = normId(sub);
-    const exactKey = `${kind}|${identity || normName(nm)}`;
-    let p = identity ? idx.people.get(exactKey) : null;
-    const nameKey = `${kind}|${normName(nm)}`;
-    if (!p) {
-      const sameName = idx.peopleByName.get(nameKey) || [];
-      // Merge only when the current record has no identity OR an existing record has no identity.
-      // Two explicit different IDs with the same name remain separate.
-      p = sameName.find((x) => !identity || !normId(x.sub) || normId(x.sub) === identity) || null;
-    }
-    if (!p) {
-      p = { kind, name: nm, sub: sub ? clean(sub) : '', tlSet: new Set(), tlIds: new Set(), ids: new Set(), alias: new Set(), classMap: new Map(), bars: new Set(), last: '', n: 0, direct: false };
-      idx.people.set(exactKey, p);
-      const arr = idx.peopleByName.get(nameKey) || []; arr.push(p); idx.peopleByName.set(nameKey, arr);
-    } else if (identity && !normId(p.sub)) {
-      for (const [k, value] of idx.people.entries()) if (value === p && k !== exactKey) idx.people.delete(k);
-      p.sub = clean(sub); idx.people.set(exactKey, p);
-    }
+    const identity = clean(sub).replace(/\.0+$/, '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const k = `${kind}|${identity || normName(nm)}`;
+    let p = idx.people.get(k);
+    if (!p) { p = { kind, name: nm, sub: sub || '', tlSet: new Set(), tlIds: new Set(), ids: new Set(), alias: new Set(), classMap: new Map(), bars: new Set(), last: '', n: 0, direct: false }; idx.people.set(k, p); }
+    if (sub && !p.sub) p.sub = clean(sub);
     const tl = clean(tlName);
     if (kind === 'ff-agent' || kind === 'gv-agent') {
       const info = tlInfoOf(idx, kind, tl);
       if (info.direct) { p.direct = true; p.directLabel = info.label; }
     }
     if (tl && !(p.direct && !tlInfoOf(idx, 'tl', tl).real)) p.tlSet.add(tl);
-    const cls = clean(cls);
-    if (cls) p.classMap.set(cls, (p.classMap.get(cls) || 0) + 1);
+    const c = clean(cls);
+    if (c) p.classMap.set(c, (p.classMap.get(c) || 0) + 1);
     return p;
   }
   function pushBucket(map, key, value) {
@@ -861,19 +848,12 @@ FF.pages = FF.pages || {};
   /** 🔎 Naya flow (v3.46): naam / ID search → seedha Management → **Master Search page**,
    *  jahan click karte hi uska poora related data (FF + GV) khul jaata hai — koi results list / modal box nahi.
    *  Barcode / tag-ID searches purane panel (tag-level rows) me hi jaate hain. */
-  function openSearchPage(q, person) {
-    const name = clean(typeof q === 'object' ? (q.name || '') : q);
+  function openSearchPage(q) {
+    const name = clean(q);
     if (name.length < 2) { U.toast('Kam se kam 2 letter / digit type karo', 'warn'); return false; }
-    const params = { q: name };
-    if (person && person.id) params.id = person.id;
-    if (person && person.kind) params.ch = String(person.kind).startsWith('gv') ? 'gv' : 'ff';
     state.lastQuery = name;
-    try { if (FF.app && FF.app.navigate) { FF.app.navigate('masterSearch', params); return true; } } catch { /* fall through */ }
-    try {
-      const qs = Object.entries(params).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
-      location.hash = `#/masterSearch?${qs}`;
-      return true;
-    } catch { return false; }
+    try { if (FF.app && FF.app.navigate) { FF.app.navigate('masterSearch', { q: name }); return true; } } catch { /* fall through */ }
+    try { location.hash = `#/masterSearch?q=${encodeURIComponent(name)}`; return true; } catch { return false; }
   }
 
   function mountTopbar(force) {
@@ -921,7 +901,7 @@ FF.pages = FF.pages || {};
       onPick: (it) => {
         if (it.none) return;
         if (it.barcode) { openPanel(it.barcode); return; }              // 🏷️ barcode/tag = tag-level rows (list yahan theek)
-        if (it.person && it.person.name) { openSearchPage(it.person.name, it.person); return; }   // 🧑 naam → poora data page
+        if (it.person && it.person.name) { openSearchPage(it.person.name); return; }   // 🧑 naam → poora data page
         openSearchPage(it.label);
       },
       onEnter: (q) => { if (clean(q).length >= 2) openSearchPage(q); }
@@ -1404,10 +1384,7 @@ FF.pages = FF.pages || {};
       if (!state.light) { out.innerHTML = '<div class="card"><div class="card-body empty">Search index load nahi hua — internet check karke “🔄 Index refresh” dabao.</div></div>'; return; }
       const res = search(q);
       const channelPeople = (res.people || []).filter((p) => !chFilter || chOfP(p) === chFilter);
-      const forcedId = clean((params && params.id) || '');
-      const forcedNormId = forcedId ? normId(forcedId) : '';
-      const forcedPeople = forcedNormId ? channelPeople.filter((p) => normId(p.sub) === forcedNormId || (p.ids && [...p.ids].some((id) => normId(id) === forcedNormId))) : [];
-      const people = forcedPeople.length ? forcedPeople : preferNameMatches(channelPeople, q);
+      const people = preferNameMatches(channelPeople, q);
       const sr = SR();
       groups = sr ? sr.groupPeople(people) : people.map(fallbackGroup);
       // Exact-name cross-channel match: keep one group with a visible FF/GV chooser so
