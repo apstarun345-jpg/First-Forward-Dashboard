@@ -1141,3 +1141,102 @@ html.pwa-standalone .main { padding-bottom: calc(var(--mobile-nav-h) + env(safe-
   html.mobile-ui .kpi-value { font-size: 27px !important; }
   html.mobile-ui #mobile-nav .mobile-nav-item small { font-size: 10px !important; }
 }
+
+
+/* ==========================================================================================
+   v3.70 — ANDROID-LIKE LARGE TYPOGRAPHY
+   Mobile/PWA only. No data/settings/auth/API logic changes.
+   Existing layout structure is preserved; only visual text sizing + control readability is enlarged.
+   ========================================================================================== */
+html.mobile-ui body {
+  font-size: 30px !important;
+  line-height: 1.45 !important;
+}
+html.mobile-ui .topbar .top-title { font-size: 32px !important; }
+html.mobile-ui .page-head h1,
+html.mobile-ui .page-title,
+html.mobile-ui h1 { font-size: 46px !important; line-height: 1.16 !important; }
+html.mobile-ui h2 { font-size: 40px !important; line-height: 1.18 !important; }
+html.mobile-ui h3 { font-size: 34px !important; line-height: 1.22 !important; }
+html.mobile-ui p,
+html.mobile-ui li { font-size: 30px !important; line-height: 1.48 !important; }
+
+html.mobile-ui .card-head h3,
+html.mobile-ui .card-head .title,
+html.mobile-ui .section-title { font-size: 30px !important; }
+html.mobile-ui .card-head p,
+html.mobile-ui .card-head .sub { font-size: 24px !important; }
+
+html.mobile-ui label,
+html.mobile-ui .field label,
+html.mobile-ui .form-label { font-size: 26px !important; }
+html.mobile-ui input,
+html.mobile-ui select,
+html.mobile-ui textarea,
+html.mobile-ui .input {
+  font-size: 30px !important;
+  line-height: 1.35 !important;
+}
+html.mobile-ui .btn {
+  font-size: 26px !important;
+  line-height: 1.2 !important;
+}
+html.mobile-ui .btn.small {
+  font-size: 24px !important;
+}
+html.mobile-ui .icon-btn { font-size: 30px !important; }
+
+html.mobile-ui .kpi-title,
+html.mobile-ui .kpi-label {
+  font-size: 22px !important;
+}
+html.mobile-ui .kpi-value {
+  font-size: clamp(42px, 12vw, 68px) !important;
+}
+html.mobile-ui .kpi-foot { font-size: 22px !important; }
+html.mobile-ui .mini-label { font-size: 22px !important; }
+html.mobile-ui .mini-value { font-size: 38px !important; }
+html.mobile-ui .mini-foot { font-size: 24px !important; }
+
+html.mobile-ui small,
+html.mobile-ui .small,
+html.mobile-ui .dim,
+html.mobile-ui .muted,
+html.mobile-ui .sub { font-size: 24px !important; line-height: 1.38 !important; }
+
+html.mobile-ui .mobile-nav-item small {
+  font-size: 22px !important;
+}
+html.mobile-ui .sidebar .nav-text b { font-size: 30px !important; }
+html.mobile-ui .sidebar .nav-text small { font-size: 24px !important; }
+html.mobile-ui .sidebar .nav-sec { font-size: 24px !important; }
+
+html.mobile-ui table th { font-size: 24px !important; }
+html.mobile-ui table td { font-size: 24px !important; }
+html.mobile-ui .tr-req-tbl .tr-big-num { font-size: 28px !important; }
+html.mobile-ui .tr-req-tbl .tr-class-break b { font-size: 21px !important; }
+html.mobile-ui .tr-req-tbl .tr-class-label { font-size: 18px !important; }
+html.mobile-ui .tr-req-tbl .tr-class-grid > span b { font-size: 19px !important; }
+html.mobile-ui .tr-req-tbl .tr-class-grid > span strong { font-size: 21px !important; }
+
+html.mobile-ui .chip,
+html.mobile-ui .home-exp-chip,
+html.mobile-ui .nav-pill,
+html.mobile-ui .pct,
+html.mobile-ui .sug-wo,
+html.mobile-ui .sug-wo-inline { font-size: 22px !important; }
+
+@media (max-width:380px) {
+  html.mobile-ui .topbar .top-title { font-size: 28px !important; }
+  html.mobile-ui .page-head h1,
+  html.mobile-ui .page-title,
+  html.mobile-ui h1 { font-size: 40px !important; }
+  html.mobile-ui .kpi-value { font-size: 40px !important; }
+  html.mobile-ui .mobile-nav-item small { font-size: 19px !important; }
+}
+
+/* Keep login/splash typography independent from this mobile dashboard scaling. */
+html.mobile-ui .app-boot,
+html.mobile-ui .auth-screen,
+html.mobile-ui .auth-shell,
+html.mobile-ui .pro-panel { font-size: initial; }
