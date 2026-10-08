@@ -505,7 +505,8 @@ body.auth-open .sidebar, body.auth-open .content { filter: blur(6px); pointer-ev
 .btn.danger { color: #b91c1c; border-color: #fecaca; background: #fff5f5; }
 .btn.primary { background: linear-gradient(135deg, var(--brand), var(--brand-2)); color: #fff; border-color: transparent; }
 @media (max-width: 760px) { .auth-card { grid-template-columns: 1fr; } .auth-hero { min-height: 160px; } .auth-form { padding: 24px 20px; } }
-body:not(.ready) .content, body:not(.ready) .sidebar { visibility: hidden; }
+/* v3.71 — Boot overlay is visual-only. Let the authenticated workspace render behind it. */
+body:not(.ready) .content, body:not(.ready) .sidebar { visibility: visible; }
 body.ready .content, body.ready .sidebar { visibility: visible; }
 
 /* ---------- quick-find / suggestions ---------- */
