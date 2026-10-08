@@ -6388,5 +6388,6 @@ html[data-theme="dark"] .tr-col-move .btn.tiny { background: #1e293b !important;
   .ask-head { gap: 5px; padding: 10px 9px; }
   .ask-head small { display: none; }
   .ask-head b { font-size: 12px; }
+  .ask-head > span[style*="flex:1"] { display: none; }
   .ask-ico[data-act="close"] { flex-basis: 34px; width: 34px; height: 34px; }
 }
