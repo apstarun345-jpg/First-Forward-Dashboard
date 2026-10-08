@@ -835,8 +835,9 @@ window.FF = window.FF || {};
   // ff-login event (auth.js dispatch) — fresh login par turant greeting; build se pehle bhi aaye to miss nahi hona chahiye.
   let pendingGreet = null;
   function onLoginEvent() {
-    if (mounted && panel) { startGreeting('login'); }
-    else pendingGreet = 'login';
+    // Assistant popup is opt-in: logging in must not force-open the panel.
+    // Keep the greeting available through FF.assistant.startGreeting() when explicitly requested.
+    pendingGreet = null;
   }
   try { if (typeof window !== 'undefined' && window.addEventListener) window.addEventListener('ff-login', onLoginEvent); } catch { /* non-browser */ }
 
@@ -1242,9 +1243,8 @@ window.FF = window.FF || {};
       syncWake(); // wake word on/off ya word badla → listener restart
     });
 
-    // 🌅 greeting — fresh login (ff-login event) turant; warna pehli baar tab open hone par.
-    if (pendingGreet) { const k = pendingGreet; pendingGreet = null; setTimeout(() => startGreeting(k), 650); }
-    else setTimeout(maybeGreet, 1400);
+    // Popup stays closed on app startup. User can open it from the floating 🎙 button.
+    // Do not auto-run login/restore greeting here; it previously forced the panel open on launch.
     // 👂 Wake word ("Hey Gems") — first user gesture ke baad sunna shuru.
     bindWakeGesture();
   }
