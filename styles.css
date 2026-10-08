@@ -6361,3 +6361,32 @@ html[data-theme="dark"] .tr-col-order {
 html[data-theme="dark"] .tr-col-order * { color: #e2e8f0 !important; }
 html[data-theme="dark"] .tr-drag { color: #94a3b8 !important; }
 html[data-theme="dark"] .tr-col-move .btn.tiny { background: #1e293b !important; border-color: #475569 !important; }
+
+
+/* v3.72 — Assistant popup close control remains visible on narrow mobile screens. */
+.ask-head { min-width: 0; }
+.ask-head b { flex: 0 1 auto; min-width: 0; white-space: nowrap; }
+.ask-head small { min-width: 0; }
+.ask-ico[data-act="close"] {
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid rgba(255,255,255,.5);
+  border-radius: 10px;
+  background: rgba(255,255,255,.3);
+  color: #fff;
+  font-size: 17px;
+  line-height: 1;
+  font-weight: 900;
+  box-shadow: 0 2px 8px rgba(15,23,42,.12);
+}
+.ask-ico[data-act="close"]:hover,
+.ask-ico[data-act="close"]:focus-visible { background: rgba(255,255,255,.48); outline: 2px solid rgba(255,255,255,.8); outline-offset: 1px; }
+@media (max-width: 480px) {
+  .ask-head { gap: 5px; padding: 10px 9px; }
+  .ask-head small { display: none; }
+  .ask-head b { font-size: 12px; }
+  .ask-ico[data-act="close"] { flex-basis: 34px; width: 34px; height: 34px; }
+}
