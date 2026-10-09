@@ -64,7 +64,9 @@ test('v3.51 — sheet ek agent = ek chhoti row (classes merged) + 🚚 courier c
     const cfg = await jsonCall(server.base, '/api/tag-request-sheet', 'GET', undefined, admin);
     assert.equal(cfg.res.status, 200, JSON.stringify(cfg.json));
     assert.equal(cfg.json.config.rowMode, 'agent-class-gap', 'default ab agent class rows + blank spacer hai');
-    assert.equal(cfg.json.config.v, 2, 'migration version mark');
+    assert.equal(cfg.json.config.v, 5, 'approval-only sync policy version');
+    assert.equal(cfg.json.config.onSubmit, false, 'submit par sheet entry OFF');
+    assert.equal(cfg.json.config.onStatus, true, 'approval sync enabled');
     assert.ok(cfg.json.config.columns.includes('cls'), 'classes cell');
     assert.ok(cfg.json.config.columns.includes('courier'), '🚚 courier column');
     assert.ok(!cfg.json.config.columns.includes('remark'), 'lambi purani columns default me nahi');
@@ -81,11 +83,16 @@ test('v3.51 — sheet ek agent = ek chhoti row (classes merged) + 🚚 courier c
     }, admin);
     const created = await jsonCall(server.base, '/api/tag-requests', 'POST', { note: 'v3.51', courier: 'DTDC', rows: rows() }, admin);
     assert.equal(created.res.status, 201, JSON.stringify(created.json));
-    await sleep(1300);
+    await sleep(700);
+    assert.equal(mock.appends.length, 0, 'Pending submission par sheet append nahi');
 
-    // 4) sheet me sirf 2 rows (Rahul ek + Priya ek), Rahul ki saari classes EK cell me
+    // Admin approval only: sheet me sirf 2 rows (Rahul ek + Priya ek).
+    const reqId = created.json.request && created.json.request.id;
+    const approved = await jsonCall(server.base, `/api/tag-requests/${encodeURIComponent(reqId)}`, 'PUT', { status: 'approved' }, admin);
+    assert.equal(approved.res.status, 200, JSON.stringify(approved.json));
+    await sleep(1300);
     const tab = mock.appends.find((t) => t.tab === 'Tag Dispatch');
-    assert.ok(tab, 'sheet push hui');
+    assert.ok(tab, 'approval ke baad sheet push hui');
     assert.deepEqual(tab.header, ['Agent', 'Tag Class', 'Approved qty', 'Courier']);
     assert.equal(tab.rows.length, 2, 'ek agent = ek row (pehle 3 rows ban rahi thi)');
     assert.deepEqual(tab.rows[0], ['Rahul Sharma', 'VC4 25 · VC6 4', 29, 'DTDC']);
@@ -93,7 +100,6 @@ test('v3.51 — sheet ek agent = ek chhoti row (classes merged) + 🚚 courier c
 
     // 5) admin list me courier dikhta hai + admin badal sakta hai
     const list = await jsonCall(server.base, '/api/tag-requests', 'GET', undefined, admin);
-    const reqId = created.json.request && created.json.request.id;
     const found = list.json.requests.find((r) => r.id === reqId);
     assert.ok(found, 'request list me mili');
     assert.equal(found.courier, 'DTDC');
@@ -130,8 +136,10 @@ test('v3.51 — purani (v1) class-wise config ek baar me chhote agent-mode par m
     server = await startServer(dir, mock.url);
     const admin = (await jsonCall(server.base, '/api/auth/login', 'POST', { username: 'owner', password: 'initial-password' })).cookie;
     const cfg = await jsonCall(server.base, '/api/tag-request-sheet', 'GET', undefined, admin);
-    assert.equal(cfg.json.config.rowMode, 'agent', 'v1 class mode → agent mode');
-    assert.equal(cfg.json.config.v, 3);
+    assert.equal(cfg.json.config.rowMode, 'agent-class-gap', 'legacy config uses the current agent-group layout');
+    assert.equal(cfg.json.config.v, 5, 'approval-only sync policy migrated');
+    assert.equal(cfg.json.config.onSubmit, false);
+    assert.equal(cfg.json.config.onStatus, true);
     assert.ok(cfg.json.config.columns.includes('courier'), 'naya compact column set');
     assert.ok(!cfg.json.config.columns.includes('remark'), 'purani lambi columns hata di');
   } finally {
