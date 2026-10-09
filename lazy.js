@@ -61,6 +61,7 @@ window.FF = window.FF || {};
     home: ['home'],
     tagRequest: ['pdf', 'performance', 'tagRequest'],   // performance = FF REPORT (stock / priority) — employee link par bhi
     masterSearch: [...PROFILE_DEPS, 'searchReport', 'masterSearch'],
+    bulkTagStatus: ['bulkTagStatus'],
     tagIssued: ['tagIssued'],
     performance: [...PROFILE_DEPS, 'agentBoard', 'performance'],
     targets: ['targets'],
