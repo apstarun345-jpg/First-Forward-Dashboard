@@ -327,6 +327,8 @@
     }
     live.lastPerson = p;
     live.lastRenderAt = Date.now();
+    // A recovered/returning session must make the page mirror visible again.
+    frame.hidden = !live.mirror;
     U.$('#lv-name', m).textContent = p.name || p.username;
     const online = p.online && p.visible !== false;
     // ⏱ exact instant — har render par ms-level timestamp (network lag bhi dikhta hai)
