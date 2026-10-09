@@ -2301,7 +2301,7 @@ body.colorful .from-hdr { color: #166534; }
       <button class="btn small" data-tr-op="color1" data-key="${k}" title="Colorful Label Print / PDF">🎨</button>
       <button class="btn small" data-tr-op="pdf1" data-key="${k}" title="Is request ka label PDF download">📄</button>
       <button class="btn small" data-tr-op="copy" data-key="${k}" title="Label text copy (WhatsApp ke liye)">📋</button>
-      ${isAdmin() ? `<button class="btn small" data-tr-op="push" data-key="${k}" title="Google Sheet me entry">📗</button>` : ''}
+      ${isAdmin() && r.status === 'approved' && !(r.sheetApprovalSync && r.sheetApprovalSync.at) && !(r.sheetSync && r.sheetSync.at && !r.sheetSync.error) ? `<button class="btn small" data-tr-op="push" data-key="${k}" title="Approved request ko Google Sheet me bhejo">📗</button>` : ''}
       ${canDeleteReq(r) ? `<button class="btn small" data-tr-op="del" data-key="${k}" title="Request delete">🗑</button>` : ''}
     </div>`;
   }
