@@ -54,9 +54,9 @@ window.FF = window.FF || {};
     const el = target.closest('button,a,[role="tab"],label,select,input,textarea,[data-tr-act]') || target;
     if (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) {
       const label = (el.labels && el.labels.length ? el.labels[0].innerText : '') || el.getAttribute('aria-label') || el.name || 'form field';
-      return `Form field: ${String(label).replace(/\\s+/g, ' ').trim().slice(0, 60)}`;
+      return `Form field: ${String(label).replace(/\s+/g, ' ').trim().slice(0, 60)}`;
     }
-    const label = (el.getAttribute('aria-label') || el.title || el.innerText || el.textContent || 'Page action').replace(/\\s+/g, ' ').trim();
+    const label = (el.getAttribute('aria-label') || el.title || el.innerText || el.textContent || 'Page action').replace(/\s+/g, ' ').trim();
     return label.slice(0, 80) || 'Page action';
   }
   function queueLiveEvent(kind, label) {
