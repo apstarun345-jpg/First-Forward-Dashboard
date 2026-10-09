@@ -1786,7 +1786,8 @@ body.colorful .from-hdr { color: #166534; }
     });
     const office = clean(state.employee.office);
     const liveShare = isPublic() && FF.publicForm && typeof FF.publicForm.liveShareCredentials === 'function' ? FF.publicForm.liveShareCredentials() : null;
-    return { employee: { name: clean(state.employee.name), ...(office && formCfg().askOffice ? { office } : {}) }, employeeToken: isPublic() ? state.employeeToken : '', ...(liveShare ? { liveShare } : {}), note: clean(state.note), courier: clean(state.courier), agents };
+    const publicVisitId = isPublic() && FF.publicForm && typeof FF.publicForm.publicVisitId === 'function' ? FF.publicForm.publicVisitId() : '';
+    return { employee: { name: clean(state.employee.name), ...(office && formCfg().askOffice ? { office } : {}) }, employeeToken: isPublic() ? state.employeeToken : '', ...(publicVisitId ? { publicVisitId } : {}), ...(liveShare ? { liveShare } : {}), note: clean(state.note), courier: clean(state.courier), agents };
   }
   const withTimeout = (p, ms) => Promise.race([p, new Promise((resolve) => setTimeout(resolve, ms))]);
   async function submit() {
