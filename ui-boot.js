@@ -42,8 +42,13 @@
   }
 
   try {
-    // Only honour the explicit toolbar choice. Legacy ff_theme values from older releases
-    // must not switch the whole application into dark mode during initial paint.
+    // One-time migration after the previous global dark-paint bug: restore the normal light
+    // appearance once, then continue remembering future theme changes made with the toolbar.
+    if (localStorage.getItem('ff_theme_scope_migrated_v1') !== '1') {
+      localStorage.setItem('ff_theme_explicit', 'light');
+      localStorage.setItem('ff_theme', 'light');
+      localStorage.setItem('ff_theme_scope_migrated_v1', '1');
+    }
     const explicitTheme = localStorage.getItem('ff_theme_explicit');
     document.documentElement.dataset.theme = explicitTheme === 'dark' ? 'dark' : 'light';
   } catch {
