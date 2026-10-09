@@ -3128,6 +3128,13 @@ body.colorful .from-hdr { color: #166534; }
       if (!card) return;
       const orderBox = card.querySelector('[data-tr-cols-order]');
       let dragKey = '';
+      const refreshOrderIndexes = () => {
+        if (!orderBox) return;
+        orderBox.querySelectorAll('.tr-col-order').forEach((row, idx) => {
+          const n = row.querySelector('.tr-col-index');
+          if (n) n.textContent = String(idx + 1);
+        });
+      };
       if (orderBox) {
         orderBox.addEventListener('dragstart', (e) => {
           const row = e.target.closest && e.target.closest('.tr-col-order');
@@ -3160,6 +3167,7 @@ body.colorful .from-hdr { color: #166534; }
           if (!dragged || dragged === target) return;
           const rect = target.getBoundingClientRect();
           if (e.clientY < rect.top + rect.height / 2) target.before(dragged); else target.after(dragged);
+          refreshOrderIndexes();
         });
         orderBox.addEventListener('click', (e) => {
           const btn = e.target.closest && e.target.closest('[data-tr-col-up],[data-tr-col-down]');
@@ -3168,6 +3176,7 @@ body.colorful .from-hdr { color: #166534; }
           if (!row) return;
           if (btn.hasAttribute('data-tr-col-up') && row.previousElementSibling) row.previousElementSibling.before(row);
           if (btn.hasAttribute('data-tr-col-down') && row.nextElementSibling) row.nextElementSibling.after(row);
+          refreshOrderIndexes();
         });
       }
             const act = (name, fn) => { const b = card.querySelector(`[data-tr-sheet-act="${name}"]`); if (b) b.addEventListener('click', fn); };
