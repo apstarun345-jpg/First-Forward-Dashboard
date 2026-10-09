@@ -29,12 +29,18 @@ FF.pages = FF.pages || {};
   const view = { ym: '', source: 'all', sort: 'cur', q: '', onlyWithTarget: false, tab: 'targets', tlSort: 'cur' };
   let list = [];            // unified agent rows
   let selected = new Set(); // keys
-  let targetDrafts = new Map(); // key → number (unsaved)
+  let targetDrafts = new Map(); // legacy overall target per agent (unsaved)
+  let classTargetDrafts = new Map(); // key → { vc4, vc20, vc5p } (unsaved)
   let savedTargets = [];    // settings.targets (current month)
+  const CLASS_TARGETS = [{ key: 'vc4', label: 'VC4' }, { key: 'vc20', label: 'VC20' }, { key: 'vc5p', label: 'VC5+' }];
+  const normalizedClassTargets = (value) => Object.fromEntries(CLASS_TARGETS.map((c) => [c.key, Math.max(0, Math.floor(Number(value && value[c.key]) || 0))]));
+  const classTargetsFor = (key) => normalizedClassTargets(classTargetDrafts.get(key));
+  const hasClassTargets = (key) => CLASS_TARGETS.some((c) => classTargetsFor(key)[c.key] > 0);
+  const hasAnyTarget = (key) => (Number(targetDrafts.get(key)) || 0) > 0 || hasClassTargets(key);
 
   const card = (title, body, right) => `<section class="card"><div class="card-head"><h3>${title}</h3>${right ? `<div class="card-right">${right}</div>` : ''}</div><div class="card-body">${body}</div></section>`;
   const pct = (a, b) => (b ? (a / b) * 100 : null);
-  const allSavedTargets = () => ((FF.auth.settings && FF.auth.settings.targets) || []).filter((t) => t && t.ym && t.key && Number(t.target) > 0);
+  const allSavedTargets = () => ((FF.auth.settings && FF.auth.settings.targets) || []).filter((t) => t && t.ym && t.key && ((Number(t.target) || 0) > 0 || CLASS_TARGETS.some((c) => Number(t.classTargets && t.classTargets[c.key]) > 0)));
 
   // ---- data prep ---------------------------------------------------------------------------------
   async function prep() {
@@ -87,6 +93,7 @@ FF.pages = FF.pages || {};
     // saved targets for this month
     savedTargets = allSavedTargets().filter((t) => t.ym === view.ym);
     targetDrafts = new Map(savedTargets.map((t) => [t.key, Number(t.target) || 0]));
+    classTargetDrafts = new Map(savedTargets.map((t) => [t.key, normalizedClassTargets(t.classTargets)]));
     return { rows, months, cur, last, latest, gvOk: masterR.status === 'fulfilled' };
   }
 
@@ -94,7 +101,7 @@ FF.pages = FF.pages || {};
   function filteredRows() {
     let r = list;
     if (view.source !== 'all') r = r.filter((x) => x.source === view.source);
-    if (view.onlyWithTarget) r = r.filter((x) => (targetDrafts.get(x.key) || 0) > 0);
+    if (view.onlyWithTarget) r = r.filter((x) => hasAnyTarget(x.key));
     const q = norm(view.q);
     if (q) r = r.filter((x) => norm(x.name).includes(q) || norm(x.tl).includes(q));
     const sorters = {
@@ -124,12 +131,13 @@ FF.pages = FF.pages || {};
   function exportExcel() {
     if (!FF.auth.can('export')) { U.toast('Download permission nahi hai', 'err'); return; }
     const rows = filteredRows();
-    const header = ['Source', 'Agent', 'TL', 'Target', `${U.labelYM(view.ym)} issuance`, 'Last month', 'VC4 (4-wheeler payable)', 'VC20', 'VC5+', 'All Commercial (VC20+VC5+)', 'VC4 %', 'Growth %', 'Progress %', 'Status'];
+    const header = ['Source', 'Agent', 'TL', 'Overall target', 'VC4 target', 'VC20 target', 'VC5+ target', `${U.labelYM(view.ym)} issuance`, 'Last month', 'VC4 (4-wheeler payable)', 'VC20', 'VC5+', 'All Commercial (VC20+VC5+)', 'VC4 %', 'Growth %', 'Overall progress %', 'Status'];
     const body = rows.map((r) => {
       const t = targetDrafts.get(r.key) || 0;
       const p = pct(r.cur, t);
       const status = !t ? 'No target' : p >= 100 ? '✅ Achieved' : p >= 70 ? '🟢 On track' : p >= 40 ? '🟠 Behind' : '🔴 Far behind';
-      return [r.source === 'ff' ? 'First Forward' : 'GV Partner', r.name, r.tl, t || '', r.cur, r.last, r.vc4, r.vc20, r.vc5p, r.comm, r.cur ? Number(((r.vc4 / r.cur) * 100).toFixed(1)) : 0, r.growth === null ? '' : Number(r.growth.toFixed(1)), p === null ? '' : Math.round(p), status];
+      const ct = classTargetsFor(r.key);
+      return [r.source === 'ff' ? 'First Forward' : 'GV Partner', r.name, r.tl, t || '', ct.vc4 || '', ct.vc20 || '', ct.vc5p || '', r.cur, r.last, r.vc4, r.vc20, r.vc5p, r.comm, r.cur ? Number(((r.vc4 / r.cur) * 100).toFixed(1)) : 0, r.growth === null ? '' : Number(r.growth.toFixed(1)), p === null ? '' : Math.round(p), status];
     });
     const withT = rows.filter((r) => (targetDrafts.get(r.key) || 0) > 0);
     const achieved = withT.filter((r) => r.cur >= (targetDrafts.get(r.key) || 0)).length;
@@ -152,19 +160,33 @@ FF.pages = FF.pages || {};
   // ---- save ---------------------------------------------------------------------------------------
   async function saveTargets() {
     if (!FF.auth.isAdmin()) { U.toast('Targets sirf admin save kar sakta hai', 'err'); return; }
+    const allBefore = allSavedTargets();
     const byKey = new Map(savedTargets.map((t) => [t.key, t]));
-    for (const [key, val] of targetDrafts) {
-      if (!val) continue;
-      const row = list.find((r) => r.key === key);
-      byKey.set(key, { key, ym: view.ym, source: row ? row.source : 'ff', agent: row ? row.name : key.split('|')[1], tl: row ? row.tl : '', target: val, by: FF.auth.user.username, at: new Date().toISOString() });
+    const rowsByKey = new Map(list.map((r) => [r.key, r]));
+    const editedKeys = new Set([...targetDrafts.keys(), ...classTargetDrafts.keys()]);
+    for (const key of editedKeys) {
+      const target = Math.max(0, Math.floor(Number(targetDrafts.get(key)) || 0));
+      const classTargets = classTargetsFor(key);
+      const hasClass = CLASS_TARGETS.some((c) => classTargets[c.key] > 0);
+      if (!target && !hasClass) { byKey.delete(key); continue; }
+      const row = rowsByKey.get(key), prev = byKey.get(key) || {};
+      byKey.set(key, {
+        ...prev, key, ym: view.ym,
+        source: row ? row.source : prev.source || (key.split('|')[0] === 'gv' ? 'gv' : 'ff'),
+        agent: row ? row.name : prev.agent || key.split('|')[1],
+        tl: row ? row.tl : prev.tl || '',
+        target, classTargets,
+        by: FF.auth.user.username, at: new Date().toISOString()
+      });
     }
-    // drafts set to 0 → remove saved target for this month
-    for (const t of savedTargets) { if ((targetDrafts.get(t.key) || 0) === 0 && targetDrafts.has(t.key)) byKey.delete(t.key); }
-    const others = allSavedTargets().filter((t) => t.ym !== view.ym);
+    const others = allBefore.filter((t) => t.ym !== view.ym);
     try {
       const out = await FF.auth.api('/api/settings', 'PUT', { settings: { targets: [...others, ...byKey.values()] } });
       FF.auth.applySettings(out.settings);
-      U.toast('Targets save ho gaye ✓ (Google Sheet storage me bhi backup hoga)', 'ok');
+      U.toast('Targets save ho gaye ✓ (overall + VC4 / VC20 / VC5+ · Google Sheet backup ke saath)', 'ok');
+      savedTargets = allSavedTargets().filter((t) => t.ym === view.ym);
+      targetDrafts = new Map(savedTargets.map((t) => [t.key, Number(t.target) || 0]));
+      classTargetDrafts = new Map(savedTargets.map((t) => [t.key, normalizedClassTargets(t.classTargets)]));
       draw();
     } catch (err) { U.toast(err.message, 'err'); }
   }
