@@ -189,9 +189,13 @@ test('public employee tag request — bina login submit, status, admin visibilit
 
     const created2 = await jsonCall(server.base, '/api/public/tag-request', 'POST', { employee: { name: 'Neha Gupta', mobile: '9812300011', address: '5, MG Road, Jaipur', pincode: '302001' }, rows: rows() }, '', '10.0.0.11');
     assert.equal(created2.res.status, 201, JSON.stringify(created2.json));
+    await sleep(600);
+    assert.equal(mock.appends.length, 0, 'Pending public request must not append to Google Sheet');
+    const approval = await jsonCall(server.base, '/api/tag-requests/' + encodeURIComponent(created2.json.request.id), 'PUT', { status: 'approved' }, admin);
+    assert.equal(approval.res.status, 200, JSON.stringify(approval.json));
     await sleep(1500);
     const appended = mock.appends.find((t) => t.tab === 'Tag Dispatch');
-    assert.ok(appended, `sheet append hua — got ${JSON.stringify(mock.appends.map((t) => t.tab))}`);
+    assert.ok(appended, `approval ke baad sheet append hua — got ${JSON.stringify(mock.appends.map((t) => t.tab))}`);
     assert.equal(appended.spreadsheetId, OTHER_SHEET, 'entry alag sheet (link wale ID) me gayi');
     assert.deepEqual(appended.header, ['Date', 'By', 'Employee', 'Employee mobile', 'Employee address', 'Pincode', 'Agent', 'Tag Class', 'Approved qty'], 'employee ki delivery details bhi sheet me jaati hain');
     assert.equal(appended.rows.length, 2);
