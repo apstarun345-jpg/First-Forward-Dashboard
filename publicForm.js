@@ -67,6 +67,7 @@ window.FF = window.FF || {};
   }
   async function sendLivePresence(force = false) {
     if (!liveShare.enabled || !liveShare.sessionId || !liveShare.token || liveShare.busy) return;
+    if (!force && liveShare.lastSent && Date.now() - liveShare.lastSent < 750) return;
     if (!force && !liveShare.dirty && Date.now() - liveShare.lastSent < 3000) return;
     liveShare.busy = true;
     const events = liveShare.events.slice(0, 15);
@@ -166,6 +167,7 @@ window.FF = window.FF || {};
       clearInterval(liveShare.timer); clearInterval(liveShare.heartbeat);
       liveShare.timer = setInterval(() => sendLivePresence(), 250);
       liveShare.heartbeat = setInterval(() => sendLivePresence(true), 3000);
+      liveShare.busy = false; syncLiveShareBanner();
       await sendLivePresence(true);
       if (FF.util && FF.util.toast) FF.util.toast('Live page sharing ON — aap kabhi bhi Stop kar sakte hain.', 'ok');
     } catch (err) {
