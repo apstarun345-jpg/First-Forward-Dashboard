@@ -6586,3 +6586,26 @@ html[data-theme="dark"] .main,
 html[data-theme="dark"] .content {
   color: var(--ink, #e2e8f0);
 }
+
+
+/* v3.75 — Tag Request form labels and admin date filters. */
+.page-tagRequest .tr-agent-card .field > span,
+.page-tagRequest .tr-emp-card .field > span,
+.page-tagRequest .tr-form-extra .field > span,
+.page-tagRequest .tr-contact-grid .field > span,
+.page-tagRequest .tr-emp-grid .field > span,
+.page-tagRequest .tr-req-toolbar .tr-date-filter > b {
+  color: #172033 !important;
+  font-weight: 800 !important;
+}
+.page-tagRequest .tr-agent-card .field > span small,
+.page-tagRequest .tr-contact-grid .field > span small,
+.page-tagRequest .tr-emp-grid .field > span small {
+  font-weight: 600 !important;
+}
+.page-tagRequest .tr-date-filter { display:inline-flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.page-tagRequest .tr-date-filter input[type="date"] { min-width: 145px; min-height: 38px; color:#111827; background:#fff; border:1px solid #cbd5e1; }
+@media(max-width:700px){
+  .page-tagRequest .tr-date-filter { width:100%; justify-content:space-between; }
+  .page-tagRequest .tr-date-filter input[type="date"] { flex:1; min-width:0; }
+}
