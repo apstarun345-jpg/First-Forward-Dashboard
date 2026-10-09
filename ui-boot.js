@@ -42,8 +42,11 @@
   }
 
   try {
-    if (localStorage.getItem('ff_theme') === 'dark') {
-      document.documentElement.dataset.theme = 'dark';
-    }
-  } catch { /* local storage can be disabled in private browsing */ }
+    // Only honour the explicit toolbar choice. Legacy ff_theme values from older releases
+    // must not switch the whole application into dark mode during initial paint.
+    const explicitTheme = localStorage.getItem('ff_theme_explicit');
+    document.documentElement.dataset.theme = explicitTheme === 'dark' ? 'dark' : 'light';
+  } catch {
+    document.documentElement.dataset.theme = 'light';
+  }
 })();
