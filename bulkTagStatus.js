@@ -11,10 +11,21 @@ window.FF = window.FF || {};
   const MAX_RECORDS = 250;
   const QUERY_CHUNK = 25;
   const MAX_UPLOAD_BYTES = 12 * 1024 * 1024;
+  const AUDIT_PAGE_SIZE = 25000;
+  const AUDIT_HARD_CAP = 250000;
+  const AUDIT_DETAIL_PAGE_SIZE = 50;
   const state = {
     root: null, results: [], filter: 'all', query: '', busy: false,
     fresh: true, selectedFile: '', lastCheckedAt: '', warnings: [],
-    parsedCount: 0, errors: {}, queryGeneration: 0
+    parsedCount: 0, errors: {}, queryGeneration: 0,
+    audit: {
+      loading: false, loaded: false, generation: 0, fresh: true,
+      groups: [], detailRows: [], detailHeaders: [], expandedDate: '',
+      detailPage: 0, detailLoading: false, warnings: [], error: '',
+      eirBlankRows: 0, skippedNoTagId: 0, gvTagCount: 0, checkedAt: '',
+      truncatedEir: false, truncatedGv: false, eirSheet: 'EIR', eirCols: [],
+      tagColumn: '', dateColumn: '', issuingColumn: '', masterTagColumn: ''
+    }
   };
 
   const esc = (v) => typeof U.esc === 'function'
