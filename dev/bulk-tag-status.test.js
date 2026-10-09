@@ -95,7 +95,7 @@ test('Bulk Tag Status treats GV out-of-stock statuses as review, not available s
   const record = { line: 1, fields: [{ kind: 'Barcode', value: 'GV-SERIAL-1' }] };
   const out = BTS.resolveStatus(record, {
     eir: [], ffStock: [], gvMaster: [],
-    gvStock: [{ _keys: ['GV-SERIAL-1'], serial: 'GV-SERIAL-1', status: 'RETURNED', cls: 'VC4' }]
+    gvStock: [{ _keys: ['GVSERIAL1'], serial: 'GV-SERIAL-1', status: 'RETURNED', cls: 'VC4' }]
   }, {});
   assert.equal(out.statusCode, 'gv-status-review');
 });
