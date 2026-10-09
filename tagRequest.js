@@ -3011,8 +3011,8 @@ body.colorful .from-hdr { color: #166534; }
             </select></label>
           <label class="field"><span class="dim small">Kab entry ho</span>
             <span class="tr-check-row">
-              <label class="tr-col-opt"><input type="checkbox" data-tr-sheet="onSubmit" ${cfg.onSubmit !== false ? 'checked' : ''}> Nayi request par</label>
-              <label class="tr-col-opt"><input type="checkbox" data-tr-sheet="onStatus" ${cfg.onStatus !== false ? 'checked' : ''}> Status change par (approved/dispatched)</label>
+              <span class="tr-col-opt"><input type="checkbox" checked disabled> Sirf Approved hone par — ek baar</span>
+              <span class="dim small">Pending, Dispatched ya Rejected par nayi entry nahi hogi.</span>
             </span></label>
         </div>
         <label class="field" style="display:block;margin-top:8px"><span class="dim small"><b>Kaunse columns sheet me aayein + kis order me aayein</b> — checkbox = ON/OFF · ☷ Drag ya ↑↓ = order. Example: <b>Agent Name → Agent ID → Date → Time…</b></span>
@@ -3023,7 +3023,7 @@ body.colorful .from-hdr { color: #166534; }
           <button class="btn" data-tr-sheet-act="test">🔌 Sheet check karo</button>
           ${cfg.sheetLink ? `<a class="btn" href="${esc(cfg.sheetLink)}" target="_blank" rel="noopener">↗ Sheet kholo</a>` : ''}
         </div>
-        <p class="dim small" style="margin-top:8px">${targetId ? `🎯 Entries <b>is sheet</b> me jaayengi (ID …${esc(String(targetId).slice(-8))} · tab <b>${esc(cfg.tab || '')}</b>). Us sheet par Apps Script wale Google account ka <b>Editor</b> access hona chahiye — Sheet → Share.` : 'Entries is waqt usi sheet me hoti hain jisme Apps Script bana hai (Settings → Backup). Kahin aur bhejna ho to upar <b>alag sheet ka link</b> paste karo.'} Tab na ho to ban jaata hai; pehli entry par header row apne aap likhi jaati hai. Default me <b>ek agent ki saari class rows ek saath</b> jaati hain, phir <b>1 blank row</b> aur phir next agent — isse multiple agents clearly separate rehte hain. Har submit me har agent ki apni entry aati hai aur <b>🚚 courier</b> column me label wala courier naam bhi likha jaata hai. Table ki har row me <b>📗</b> button se manual entry bhi kar sakte ho.</p>
+        <p class="dim small" style="margin-top:8px">${targetId ? `🎯 Entries <b>is sheet</b> me jaayengi (ID …${esc(String(targetId).slice(-8))} · tab <b>${esc(cfg.tab || '')}</b>). Us sheet par Apps Script wale Google account ka <b>Editor</b> access hona chahiye — Sheet → Share.` : 'Entries is waqt usi sheet me hoti hain jisme Apps Script bana hai (Settings → Backup). Kahin aur bhejna ho to upar <b>alag sheet ka link</b> paste karo.'} Tab na ho to ban jaata hai; pehli entry par header row apne aap likhi jaati hai. Default me <b>ek agent ki saari class rows ek saath</b> jaati hain, phir <b>1 blank row</b> aur phir next agent — isse multiple agents clearly separate rehte hain. Google Sheet me entry <b>sirf admin ke Approved karne par</b> hoti hai — Pending, Dispatched aur Rejected par koi nayi row nahi banti. Approved request ki entry ek hi baar hogi; dobara status badalne ya manual button dabane se duplicate entry roki jayegi. <b>🚚 Courier</b> column me label wala courier naam bhi likha jaata hai.</p>
       </div></section>`;
   }
   /** Employee link (bina login) ka admin control: ON/OFF, fields, title, link copy. */
@@ -3192,8 +3192,8 @@ body.colorful .from-hdr { color: #166534; }
         sheetLink: (card.querySelector('[data-tr-sheet="sheetLink"]') || {}).value || '',
         tab: (card.querySelector('[data-tr-sheet="tab"]') || {}).value || 'Tag Requests',
         rowMode: (card.querySelector('[data-tr-sheet="rowMode"]') || {}).value || 'agent-class-gap',
-        onSubmit: !!(card.querySelector('[data-tr-sheet="onSubmit"]') || {}).checked,
-        onStatus: !!(card.querySelector('[data-tr-sheet="onStatus"]') || {}).checked,
+        onSubmit: false,
+        onStatus: true,
         columns: [...card.querySelectorAll('.tr-col-order')].filter((row) => {
           const cb = row.querySelector('[data-tr-col]');
           return cb && cb.checked;
@@ -3223,7 +3223,7 @@ body.colorful .from-hdr { color: #166534; }
         const cfg = collect();
         cfg.enabled = !(state.sheet.config && state.sheet.config.enabled);
         FF.auth.api('/api/tag-request-sheet', 'PUT', { config: cfg })
-          .then((out) => { state.sheet.config = out.config; state.sheet.connected = !!out.connected; U.toast(out.config.enabled ? '▶️ Google Sheet sync ON — nayi requests direct sheet me jayengi' : '⏸ Sheet sync OFF', out.config.enabled ? 'ok' : 'info'); if (replaceCard('#tr-sheet-card', sheetCardHtml())) attach(); })
+          .then((out) => { state.sheet.config = out.config; state.sheet.connected = !!out.connected; U.toast(out.config.enabled ? '▶️ Google Sheet sync ON — sirf Approved request ek baar entry hogi' : '⏸ Sheet sync OFF', out.config.enabled ? 'ok' : 'info'); if (replaceCard('#tr-sheet-card', sheetCardHtml())) attach(); })
           .catch((err) => U.toast('Toggle fail: ' + ((err && err.message) || ''), 'err'));
       });
       act('test', () => {
