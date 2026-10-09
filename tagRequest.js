@@ -2818,6 +2818,7 @@ body.colorful .from-hdr { color: #166534; }
       const chip = t.closest && t.closest('[data-tr-chip]');
       if (chip) { state.filter.status = chip.dataset.trChip; state.limit = PAGE_ROWS; state.edit = null; renderReqTable(); return; }
       const act = t.closest && t.closest('[data-tr-act]');
+      if (act && act.dataset.trAct === 'date-clear') { state.filter.fromDate = ''; state.filter.toDate = ''; state.limit = PAGE_ROWS; renderReqTable(); return; }
       if (act && act.dataset.trAct === 'req-refresh') { loadRequests(true).then(() => { renderReqTable(); U.toast('↻ Requests taaza', 'ok'); }); return; }
       if (act && act.dataset.trAct === 'more') { state.limit += PAGE_ROWS; renderReqTable(); return; }
       if (act && act.dataset.trAct === 'recover') { openRecovery(); return; }
@@ -2867,6 +2868,12 @@ body.colorful .from-hdr { color: #166534; }
     });
     card.addEventListener('change', (e) => {
       const t = e.target;
+      if (t.matches && t.matches('[data-tr-date]')) {
+        state.filter[t.dataset.trDate] = t.value || '';
+        state.limit = PAGE_ROWS;
+        renderReqTable();
+        return;
+      }
       if (t.matches && t.matches('[data-tr-sel]')) {
         if (t.checked) state.sel.add(t.dataset.trSel); else state.sel.delete(t.dataset.trSel);
         updateSelUi();
