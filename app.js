@@ -98,6 +98,7 @@ window.FF = window.FF || {};
     { id: 'targets', icon: '🎯', label: 'Agent Targets', desc: 'Shortlist · target · progress · Excel', perm: 'targets', group: 'Management' },
     { id: 'tagRequest', icon: '🏷️', label: 'Tag Request', desc: 'IDFC agents · employee + har agent ka mobile/address/pincode + class-wise qty → admin table (select · print · approve)', perm: 'tagRequest', group: 'Management' },
     { id: 'masterSearch', icon: '🔎', label: 'Master Search', desc: 'GV + FF · naam / ID / mobile → seedha poora profile (koi list nahi)', perm: 'masterSearch', group: 'Management' },
+    { id: 'bulkTagStatus', icon: '🔍', label: 'Bulk Tag Status', desc: 'Bulk VRN / Tag ID / Barcode → GV issued, FF issued ya stock status', perm: 'bulkTagStatus', group: 'Management' },
     { id: 'rangeReport', icon: '📅', label: 'Range Report', desc: 'Custom from→to report · FF + GV · Excel', perm: 'rangeReport', group: 'Management' },
     { id: 'teamMap', icon: '🗺️', label: 'Team map', desc: 'Location + office distance (admin)', perm: 'teamMap', group: 'Management', feat: 'teamMap', adminOnly: true },
     { id: 'dashboard', icon: '📊', label: 'Dashboard', desc: 'KPIs & charts (EIR)', perm: 'dashboard', group: 'First Forward' },
