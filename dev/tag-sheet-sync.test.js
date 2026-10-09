@@ -112,16 +112,16 @@ test('tag request sheet sync — config, auto append on submit/status, manual pu
     assert.deepEqual(tab.rows[0].slice(2, 5), ['Rahul Sharma', 'TL One', 'VC4']);
     assert.equal(tab.rows[0][5], 25);
 
-    // 6) Approved → Dispatched does not append the same request again.
+    // 6) Manual duplicate push while still Approved is blocked.
+    const manual = await jsonCall(server.base, '/api/tag-request-sheet/push', 'POST', { id: reqId }, admin);
+    assert.equal(manual.res.status, 409, JSON.stringify(manual.json));
+    assert.equal(tab.rows.length, 3, 'manual push duplicate ko rokta hai');
+
+    // 7) Approved → Dispatched does not append the same request again.
     await jsonCall(server.base, `/api/tag-requests/${encodeURIComponent(reqId)}`, 'PUT', { status: 'dispatched' }, admin);
     await sleep(900);
     tab = mock.appends.find((t) => t.tab === 'Tag Dispatch');
     assert.equal(tab.rows.length, 3, 'Dispatched par second entry nahi honi chahiye');
-
-    // 7) Manual duplicate push is blocked.
-    const manual = await jsonCall(server.base, '/api/tag-request-sheet/push', 'POST', { id: reqId }, admin);
-    assert.equal(manual.res.status, 409, JSON.stringify(manual.json));
-    assert.equal(tab.rows.length, 3, 'manual push duplicate ko rokta hai');
 
     // 8) Request row mode also waits for approval and writes only one aggregate row.
     await jsonCall(server.base, '/api/tag-request-sheet', 'PUT', { config: { rowMode: 'request', columns: ['by', 'agent', 'cls', 'approved'] } }, admin);
