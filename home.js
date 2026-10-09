@@ -714,7 +714,7 @@ FF.pages = FF.pages || {};
     const savedTargetsForMonth = ((FF.auth.settings && FF.auth.settings.targets) || []).filter((t) => t && t.ym === currentTargetYm && classTargetsConfigured(t) && ((targetSource(t) === 'ff' && canFf) || (targetSource(t) === 'gv' && canGv)));
     const needsFfTargetData = savedTargetsForMonth.some((t) => targetSource(t) === 'ff');
     const needsGvTargetData = savedTargetsForMonth.some((t) => targetSource(t) === 'gv');
-    const targetClassDataP = savedTargetsForMonth.length ? Promise.all([
+    const targetAchievementDataP = savedTargetsForMonth.length ? Promise.all([
       needsFfTargetData
         ? S.need('agentClass').then((rows) => ({ rows: Array.isArray(rows) ? rows : [], error: '' })).catch((err) => ({ rows: null, error: err && err.message || 'Agent class data unavailable' }))
         : Promise.resolve({ rows: [], error: '' }),
