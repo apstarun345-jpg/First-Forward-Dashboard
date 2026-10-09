@@ -590,6 +590,355 @@ window.FF = window.FF || {};
       }
     }
   }
+
+  // --------------------------------------- EIR blank-issuer audit
+  function columnName(index) {
+    if (U.colLetter) return U.colLetter(index);
+    let n = Number(index) + 1, out = '';
+    while (n > 0) { const r = (n - 1) % 26; out = String.fromCharCode(65 + r) + out; n = Math.floor((n - 1) / 26); }
+    return out;
+  }
+  function headerIndex(cols, aliases) {
+    for (const alias of aliases || []) {
+      const wanted = normId(alias);
+      for (let i = 0; i < (cols || []).length; i++) {
+        const label = normId(cols[i] && cols[i].label || '');
+        if (label && label === wanted) return i;
+      }
+    }
+    return -1;
+  }
+  function rowText(row, index, cols) {
+    if (index < 0 || index >= (row || []).length) return '';
+    return clean(D.cellText ? D.cellText(row[index], (cols || [])[index]) : row[index]);
+  }
+  function dateKeyFromCell(cell, colMeta) {
+    let d = D.cellDate ? D.cellDate(cell, colMeta) : null;
+    if (!(d instanceof Date) || isNaN(d.getTime())) {
+      const textValue = D.cellText ? D.cellText(cell, colMeta) : cell;
+      d = U.parseDate ? U.parseDate(textValue) : null;
+    }
+    if (!(d instanceof Date) || isNaN(d.getTime())) return '';
+    return U.dateKey ? U.dateKey(d) : [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-');
+  }
+  function auditDateLabel(key) {
+    if (!key || key === '__NO_DATE__') return 'Date not available';
+    const d = U.parseDate ? U.parseDate(key) : new Date(key + 'T00:00:00');
+    return d && !isNaN(d.getTime()) && U.labelDate ? U.labelDate(d, true) : key;
+  }
+  function queryGid(sheet) {
+    const cfg = FF.config || {};
+    const tab = cfg.tabBy ? cfg.tabBy(sheet) : null;
+    if (sheet === 'GV Master') return (cfg.gv && cfg.gv.master && cfg.gv.master.gid) || (tab && tab.gid) || '';
+    return (tab && tab.gid) || '';
+  }
+  async function discoverColumns(sheet, fresh) {
+    const table = await D.query(sheet, 'select * limit 1', {
+      gid: queryGid(sheet), fresh: !!fresh, timeoutMs: 55000
+    });
+    if (!table || !Array.isArray(table.cols) || !table.cols.length) throw new Error(sheet + ' ke column headings nahi mile.');
+    return table.cols;
+  }
+  function buildAuditGroups(candidateRows, gvTagIds, tagIndex, dateIndex, issuerIndex, cols) {
+    const groups = new Map();
+    let eirBlankRows = 0, skippedNoTagId = 0;
+    for (const row of candidateRows || []) {
+      if (rowText(row, issuerIndex, cols)) continue;
+      eirBlankRows++;
+      const tagId = rowText(row, tagIndex, cols);
+      const normalized = normId(tagId);
+      if (!normalized) { skippedNoTagId++; continue; }
+      if (gvTagIds.has(normalized)) continue;
+      const dateKey = dateKeyFromCell(row[dateIndex], cols[dateIndex]) || '__NO_DATE__';
+      let group = groups.get(dateKey);
+      if (!group) {
+        group = { key: dateKey, tagIds: new Map(), eirRows: 0 };
+        groups.set(dateKey, group);
+      }
+      group.eirRows++;
+      if (!group.tagIds.has(normalized)) group.tagIds.set(normalized, tagId);
+    }
+    const list = [...groups.values()].map((g) => ({
+      key: g.key, label: auditDateLabel(g.key),
+      count: g.tagIds.size, eirRows: g.eirRows,
+      tagIds: [...g.tagIds.values()], normalizedIds: [...g.tagIds.keys()]
+    })).sort((a, b) => {
+      if (a.key === '__NO_DATE__') return 1;
+      if (b.key === '__NO_DATE__') return -1;
+      return b.key.localeCompare(a.key);
+    });
+    return { groups: list, eirBlankRows, skippedNoTagId };
+  }
+  async function fetchPagedRows(sheet, selectPart, wherePart, fresh, onPage) {
+    const rows = [];
+    let offset = 0, truncated = false, cols = [];
+    while (offset < AUDIT_HARD_CAP) {
+      const tq = 'select ' + selectPart + ' where ' + wherePart + ' limit ' + AUDIT_PAGE_SIZE + ' offset ' + offset;
+      const table = await D.query(sheet, tq, { gid: queryGid(sheet), fresh: !!fresh, timeoutMs: 55000 });
+      const pageRows = table && Array.isArray(table.rows) ? table.rows : [];
+      if (!cols.length && table && Array.isArray(table.cols)) cols = table.cols;
+      rows.push(...pageRows);
+      offset += pageRows.length;
+      if (typeof onPage === 'function') onPage(rows.length);
+      if (pageRows.length < AUDIT_PAGE_SIZE) return { rows, cols, truncated: false };
+      if (offset >= AUDIT_HARD_CAP) {
+        const probe = await D.query(sheet, 'select ' + selectPart + ' where ' + wherePart + ' limit 1 offset ' + offset, {
+          gid: queryGid(sheet), fresh: !!fresh, timeoutMs: 55000
+        });
+        truncated = !!(probe && probe.rows && probe.rows.length);
+        break;
+      }
+    }
+    return { rows, cols, truncated };
+  }
+  async function fetchMasterTagIds(tagCol, fresh, onPage) {
+    const ids = new Set();
+    let offset = 0, truncated = false;
+    while (offset < AUDIT_HARD_CAP) {
+      const tq = 'select ' + tagCol + ' where ' + tagCol + ' is not null limit ' + AUDIT_PAGE_SIZE + ' offset ' + offset;
+      const table = await D.query('GV Master', tq, { gid: queryGid('GV Master'), fresh: !!fresh, timeoutMs: 55000 });
+      const rows = table && Array.isArray(table.rows) ? table.rows : [];
+      rows.forEach((row) => {
+        const id = normId(rowText(row, 0, table.cols || []));
+        if (id) ids.add(id);
+      });
+      offset += rows.length;
+      if (typeof onPage === 'function') onPage(ids.size);
+      if (rows.length < AUDIT_PAGE_SIZE) return { ids, truncated: false };
+      if (offset >= AUDIT_HARD_CAP) {
+        const probe = await D.query('GV Master', 'select ' + tagCol + ' where ' + tagCol + ' is not null limit 1 offset ' + offset, {
+          gid: queryGid('GV Master'), fresh: !!fresh, timeoutMs: 55000
+        });
+        truncated = !!(probe && probe.rows && probe.rows.length);
+        break;
+      }
+    }
+    return { ids, truncated };
+  }
+  async function runBlankIssuerAudit(root) {
+    const audit = state.audit;
+    if (audit.loading) return;
+    const generation = ++audit.generation;
+    audit.loading = true; audit.loaded = false; audit.error = ''; audit.warnings = [];
+    audit.groups = []; audit.detailRows = []; audit.detailHeaders = []; audit.expandedDate = ''; audit.detailPage = 0;
+    audit.fresh = !!(root.querySelector('#bts-fresh') || {}).checked;
+    audit.truncatedEir = false; audit.truncatedGv = false;
+    renderAudit(root);
+    const button = root.querySelector('#bts-audit-scan');
+    if (button) { button.disabled = true; button.textContent = '⏳ Scanning…'; }
+    try {
+      const eCfg = (FF.config && FF.config.eir) || {};
+      const mCfg = (((FF.config || {}).gv || {}).master) || {};
+      const eirName = eCfg.sheet || 'EIR';
+      const eirCols = await discoverColumns(eirName, audit.fresh);
+      const issuerIdx = headerIndex(eirCols, ['TAG_ISSUING_AGENT_ID']);
+      if (issuerIdx < 0) throw new Error('EIR heading "TAG_ISSUING_AGENT_ID" nahi mila. EIR ki header row aur exact column heading check karein.');
+      let tagIdx = headerIndex(eirCols, ['TAG_ID_NUMBER', 'TAG_ID', 'TAGID', 'FASTAG_TAG_ID', 'FASTAG_ID']);
+      if (tagIdx < 0) {
+        const fallback = col(eCfg.tagId, 'A');
+        tagIdx = U.colIndex ? U.colIndex(fallback) : -1;
+      }
+      let dateIdx = headerIndex(eirCols, ['TAG_ISSUANCE_DATE', 'TAG_ISSUED_DATE', 'ISSUANCE_DATE', 'ISSUE_DATE', 'TXN_DATE', 'TRANSACTION_DATE', 'DATE']);
+      if (dateIdx < 0) {
+        const fallback = col(eCfg.date, 'AA');
+        dateIdx = U.colIndex ? U.colIndex(fallback) : -1;
+      }
+      if (tagIdx < 0 || tagIdx >= eirCols.length) throw new Error('EIR mein Tag ID column identify nahi hua.');
+      if (dateIdx < 0 || dateIdx >= eirCols.length) throw new Error('EIR mein date column identify nahi hua.');
+      const issuerCol = columnName(issuerIdx), tagCol = columnName(tagIdx), dateCol = columnName(dateIdx);
+      audit.eirSheet = eirName; audit.eirCols = eirCols;
+      audit.tagColumn = tagCol; audit.dateColumn = dateCol; audit.issuingColumn = issuerCol;
+      paintAuditProgress(root, 'GV Master ke Tag IDs load ho rahe hain…', 5);
+      const masterCols = await discoverColumns('GV Master', audit.fresh);
+      let gvTagIdx = headerIndex(masterCols, ['TAG_ID_NUMBER', 'TAG_ID', 'TAGID', 'FASTAG_TAG_ID', 'FASTAG_ID']);
+      if (gvTagIdx < 0) {
+        const fallback = col(mCfg.tagId, 'I');
+        gvTagIdx = U.colIndex ? U.colIndex(fallback) : -1;
+      }
+      if (gvTagIdx < 0 || gvTagIdx >= masterCols.length) throw new Error('GV Master mein Tag ID column identify nahi hua.');
+      const gvTagCol = columnName(gvTagIdx);
+      audit.masterTagColumn = gvTagCol;
+      const master = await fetchMasterTagIds(gvTagCol, audit.fresh, (n) => paintAuditProgress(root, 'GV Master tag IDs loaded: ' + n.toLocaleString('en-IN'), 5 + Math.min(35, n / AUDIT_HARD_CAP * 35)));
+      audit.truncatedGv = master.truncated;
+      if (master.truncated) audit.warnings.push('GV Master 2,50,000 rows scan limit tak pahunch gaya. Summary ko partial samjhein; sabhi tags exclude hone ki guarantee nahi hai.');
+      paintAuditProgress(root, 'EIR ke blank TAG_ISSUING_AGENT_ID rows scan ho rahe hain…', 42);
+      const eir = await fetchPagedRows(eirName, [tagCol, dateCol, issuerCol].join(', '), issuerCol + ' is null', audit.fresh, (n) => paintAuditProgress(root, 'EIR blank issuer rows scanned: ' + n.toLocaleString('en-IN'), 42 + Math.min(45, n / AUDIT_HARD_CAP * 45)));
+      const remapped = buildAuditGroups(eir.rows, master.ids, 0, 1, 2, eir.cols);
+      audit.groups = remapped.groups;
+      audit.eirBlankRows = remapped.eirBlankRows;
+      audit.skippedNoTagId = remapped.skippedNoTagId;
+      audit.gvTagCount = master.ids.size;
+      audit.truncatedEir = eir.truncated;
+      if (audit.truncatedEir) audit.warnings.push('EIR scan 2,50,000 rows limit tak pahunch gaya. Date-wise counts partial hain.');
+      if (audit.truncatedGv) audit.warnings.push('GV Master scan limit ki wajah se kuch IDs exclude na ho paaye hon; latest full check zaroor verify karein.');
+      audit.loaded = true;
+      audit.checkedAt = new Date().toISOString();
+      paintAuditProgress(root, 'Scan complete · ' + audit.groups.reduce((n, g) => n + g.count, 0).toLocaleString('en-IN') + ' eligible unique tags', 100);
+      renderAudit(root);
+      showToast('✅ Date-wise EIR audit complete: ' + audit.groups.reduce((n, g) => n + g.count, 0).toLocaleString('en-IN') + ' unique tags.', 'ok');
+    } catch (err) {
+      if (generation === audit.generation) {
+        audit.error = clean(err && err.message || err);
+        audit.loaded = false;
+        renderAudit(root);
+        showToast('EIR blank-issuer audit fail: ' + audit.error, 'err');
+      }
+    } finally {
+      if (generation === audit.generation) {
+        audit.loading = false;
+        if (button) { button.disabled = false; button.textContent = '🔄 Scan & Count by Date'; }
+        renderAudit(root);
+      }
+    }
+  }
+  function paintAuditProgress(root, label, percent) {
+    const wrap = root && root.querySelector('#bts-audit-progress');
+    const text = root && root.querySelector('#bts-audit-progress-label');
+    const bar = root && root.querySelector('#bts-audit-progress-fill');
+    if (text) text.textContent = label || '';
+    if (bar) bar.style.width = Math.max(0, Math.min(100, Number(percent) || 0)) + '%';
+    if (wrap) wrap.hidden = !label;
+  }
+  function auditCsvDownload(filename, headers, rows) {
+    const csv = [headers, ...(rows || [])].map((row) => row.map((v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"').join(',')).join('\r\n');
+    const blob = new Blob(['\uFEFF', csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1500);
+  }
+  async function loadAuditDateDetails(root, dateKey) {
+    const audit = state.audit;
+    const group = audit.groups.find((g) => g.key === dateKey);
+    if (!group || audit.detailLoading) return;
+    const generation = audit.generation;
+    audit.detailLoading = true; audit.expandedDate = dateKey; audit.detailRows = []; audit.detailPage = 0;
+    renderAudit(root);
+    try {
+      const requested = new Set(group.normalizedIds);
+      const issuerCol = audit.issuingColumn, dateCol = audit.dateColumn;
+      let resultRows = [], queryTruncated = false;
+      if (dateKey !== '__NO_DATE__') {
+        const where = issuerCol + " is null and " + dateCol + " = date '" + dateKey + "'";
+        try {
+          const result = await fetchPagedRows(audit.eirSheet, '*', where, audit.fresh, () => {});
+          resultRows = result.rows; queryTruncated = result.truncated;
+        } catch (err) {
+          audit.warnings.push('Date-wise full-row query failed; exact Tag ID fallback use hoga: ' + clean(err && err.message || err));
+        }
+      }
+      const tagIndex = U.colIndex ? U.colIndex(audit.tagColumn) : -1;
+      const dateIndex = U.colIndex ? U.colIndex(audit.dateColumn) : -1;
+      const issuerIndex = U.colIndex ? U.colIndex(audit.issuingColumn) : -1;
+      const filtered = (rows) => rows.filter((row) => {
+        const id = normId(rowText(row, tagIndex, audit.eirCols));
+        const issuing = rowText(row, issuerIndex, audit.eirCols);
+        const day = dateKeyFromCell(row[dateIndex], audit.eirCols[dateIndex]) || '__NO_DATE__';
+        return requested.has(id) && !issuing && day === dateKey;
+      });
+      let matching = filtered(resultRows);
+      // Some sheets store date-time or text-formatted values. If direct date query has no exact
+      // rows, look up the date's candidate Tag IDs and re-check date + blank issuer client-side.
+      if (!matching.length && requested.size) {
+        audit.warnings.push('Date filter ne direct rows nahi diye; exact Tag ID fallback use kiya gaya.');
+        const ids = [...group.tagIds];
+        const blocks = chunks(ids, 25);
+        const fallbackRows = [];
+        for (let i = 0; i < blocks.length; i++) {
+          if (generation !== audit.generation) return;
+          const predicates = blocks[i].map((id) => audit.tagColumn + ' = ' + (D.lit ? D.lit(id) : '"' + id.replace(/"/g, '') + '"'));
+          const where = issuerCol + ' is null and (' + predicates.join(' or ') + ')';
+          const t = await D.query(audit.eirSheet, 'select * where ' + where + ' limit 5000', {
+            gid: queryGid(audit.eirSheet), fresh: audit.fresh, timeoutMs: 55000
+          });
+          fallbackRows.push(...(t.rows || []));
+          if ((t.rows || []).length >= 5000) queryTruncated = true;
+        }
+        resultRows = fallbackRows;
+        matching = filtered(resultRows);
+      }
+      audit.detailHeaders = audit.eirCols.map((colDef, i) => ({
+        letter: columnName(i), label: clean(colDef && colDef.label) || columnName(i),
+        header: columnName(i) + ' · ' + (clean(colDef && colDef.label) || 'Column ' + columnName(i))
+      }));
+      audit.detailRows = matching.map((row) => audit.detailHeaders.map((h, i) => rowText(row, i, audit.eirCols)));
+      audit.detailLoading = false;
+      if (queryTruncated) audit.warnings.push('Is date ki detailed query 2,50,000 row limit tak pahunch gayi; export/details partial ho sakte hain.');
+      if (!audit.detailRows.length) audit.warnings.push('Summary mein tags mile the, lekin detailed query mein exact match verify nahi hua. EIR row format/date type check karein.');
+      renderAudit(root);
+    } catch (err) {
+      audit.detailLoading = false;
+      audit.warnings.push('Detail query failed: ' + clean(err && err.message || err));
+      renderAudit(root);
+      showToast('Date detail load fail: ' + clean(err && err.message || err), 'err');
+    }
+  }
+  function renderAudit(root) {
+    if (!root || state.root !== root) return;
+    const audit = state.audit;
+    const summaryHost = root.querySelector('#bts-audit-summary');
+    const detailHost = root.querySelector('#bts-audit-details');
+    const exportButton = root.querySelector('#bts-audit-export');
+    if (exportButton) exportButton.disabled = !audit.groups.length;
+    paintAuditProgress(root, audit.loading ? 'EIR audit scan chal raha hai…' : '', audit.loaded ? 100 : 0);
+    if (!summaryHost) return;
+    if (audit.error) {
+      summaryHost.innerHTML = '<div class="bts-audit-error"><b>Audit scan nahi ho paya</b><p>' + esc(audit.error) + '</p><small>Exact EIR heading TAG_ISSUING_AGENT_ID, Tag ID aur date column verify karein.</small></div>';
+    } else if (!audit.loaded) {
+      summaryHost.innerHTML = '<div class="bts-empty"><span class="bts-empty-icon">🧾</span><b>Date-wise audit abhi run nahi hua</b><small>Scan karne par EIR mein blank TAG_ISSUING_AGENT_ID rows ko GV Master ke Tag IDs se compare kiya jayega. Sirf GV Master mein absent tags count honge.</small></div>';
+    } else {
+      const groups = audit.groups || [];
+      const eligible = groups.reduce((n, g) => n + g.count, 0);
+      const warnHtml = audit.warnings.length ? '<div class="bts-warnings"><b>⚠️ Audit warning</b><ul>' + uniq(audit.warnings).slice(0, 5).map((w) => '<li>' + esc(w) + '</li>').join('') + '</ul></div>' : '';
+      const rows = groups.map((g) => '<tr><td><button type="button" class="btn small bts-audit-date" data-bts-audit-date="' + esc(g.key) + '">' + esc(g.label) + '</button></td><td class="num"><button type="button" class="btn small primary bts-audit-count" data-bts-audit-date="' + esc(g.key) + '" title="Is date ka poora data dekhein">' + g.count.toLocaleString('en-IN') + '</button></td><td class="num">' + g.eirRows.toLocaleString('en-IN') + '</td></tr>').join('');
+      summaryHost.innerHTML = '<div class="bts-audit-metrics"><div><span>Eligible unique tags</span><b>' + eligible.toLocaleString('en-IN') + '</b></div><div><span>Blank issuer rows scanned</span><b>' + audit.eirBlankRows.toLocaleString('en-IN') + '</b></div><div><span>GV Master tag IDs compared</span><b>' + audit.gvTagCount.toLocaleString('en-IN') + '</b></div><div><span>Rows skipped (Tag ID blank)</span><b>' + audit.skippedNoTagId.toLocaleString('en-IN') + '</b></div></div>' + warnHtml
+        + (groups.length ? '<div class="bts-table-wrap bts-audit-summary-wrap"><table class="tbl compact bts-audit-summary-table"><thead><tr><th>EIR date</th><th class="num">Unique missing-in-GV Tag IDs · click count</th><th class="num">EIR rows</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
+        + '<p class="dim small">Scanned ' + esc(audit.checkedAt ? new Date(audit.checkedAt).toLocaleString() : '—') + ' · EIR column ' + esc(audit.issuingColumn) + ' (TAG_ISSUING_AGENT_ID) blank · Tag ID column ' + esc(audit.tagColumn) + ' · date column ' + esc(audit.dateColumn) + (audit.truncatedEir || audit.truncatedGv ? ' · <b>PARTIAL SCAN</b>' : '') + '</p>'
+        : '<div class="bts-empty"><b>No matching tags</b><small>Blank TAG_ISSUING_AGENT_ID rows mein aisa Tag ID nahi mila jo GV Master se absent ho.</small></div>');
+    }
+    if (!detailHost) return;
+    const g = audit.groups.find((x) => x.key === audit.expandedDate);
+    if (!g) {
+      detailHost.hidden = true;
+      detailHost.innerHTML = '';
+      return;
+    }
+    detailHost.hidden = false;
+    if (audit.detailLoading) {
+      detailHost.innerHTML = '<div class="bts-empty"><span class="bts-spin"></span><b>' + esc(g.label) + ' ka detail load ho raha hai…</b><small>EIR se matching full rows read ki ja rahi hain.</small></div>';
+      return;
+    }
+    const start = audit.detailPage * AUDIT_DETAIL_PAGE_SIZE;
+    const pageRows = audit.detailRows.slice(start, start + AUDIT_DETAIL_PAGE_SIZE);
+    const tableHeader = audit.detailHeaders.map((h) => '<th title="' + esc(h.label) + '">' + esc(h.header) + '</th>').join('');
+    const tableRows = pageRows.map((row) => '<tr>' + row.map((v) => '<td>' + esc(v) + '</td>').join('') + '</tr>').join('');
+    const pages = Math.max(1, Math.ceil(audit.detailRows.length / AUDIT_DETAIL_PAGE_SIZE));
+    detailHost.innerHTML = '<div class="bts-audit-detail-head"><div><h4>📄 ' + esc(g.label) + ' · ' + audit.detailRows.length.toLocaleString('en-IN') + ' matching EIR rows</h4><p class="dim small">Full EIR columns · horizontal scroll se saare fields dekhein. Summary count unique Tag IDs ka hai; duplicate EIR rows bhi detail mein aayengi.</p></div><div class="bts-export-actions"><button type="button" class="btn small" data-bts-audit-action="back">← Date list</button><button type="button" class="btn small" data-bts-audit-action="export" ' + (!audit.detailRows.length ? 'disabled' : '') + '>⬇ Download all rows CSV</button></div></div>'
+      + (audit.detailRows.length ? '<div class="bts-table-wrap bts-audit-detail-wrap"><table class="tbl compact bts-audit-detail-table"><thead><tr>' + tableHeader + '</tr></thead><tbody>' + tableRows + '</tbody></table></div><div class="bts-audit-pager"><span>Rows ' + (start + 1).toLocaleString('en-IN') + '–' + Math.min(start + pageRows.length, audit.detailRows.length).toLocaleString('en-IN') + ' of ' + audit.detailRows.length.toLocaleString('en-IN') + ' · page ' + (audit.detailPage + 1) + ' / ' + pages + '</span><div><button type="button" class="btn small" data-bts-audit-action="prev" ' + (audit.detailPage <= 0 ? 'disabled' : '') + '>← Previous</button><button type="button" class="btn small" data-bts-audit-action="next" ' + (audit.detailPage + 1 >= pages ? 'disabled' : '') + '>Next →</button></div></div>'
+      : '<div class="bts-empty"><b>Exact full rows nahi mile</b><small>Audit warning dekhein; source date type ya Tag ID formatting match na karne se detail query empty ho sakti hai.</small></div>');
+  }
+  function handleAuditSummaryClick(root, event) {
+    const target = event && event.target;
+    const btn = target && target.closest ? target.closest('[data-bts-audit-date]') : null;
+    if (btn) loadAuditDateDetails(root, btn.getAttribute('data-bts-audit-date') || btn.dataset.btsAuditDate);
+  }
+  function handleAuditDetailClick(root, event) {
+    const target = event && event.target;
+    const btn = target && target.closest ? target.closest('[data-bts-audit-action]') : null;
+    if (!btn) return;
+    const action = btn.getAttribute('data-bts-audit-action') || (btn.dataset && btn.dataset.btsAuditAction) || '';
+    const audit = state.audit;
+    if (action === 'back') {
+      audit.expandedDate = ''; audit.detailRows = []; audit.detailHeaders = []; audit.detailPage = 0;
+      renderAudit(root);
+    } else if (action === 'prev') {
+      audit.detailPage = Math.max(0, audit.detailPage - 1); renderAudit(root);
+    } else if (action === 'next') {
+      audit.detailPage = Math.min(Math.max(0, Math.ceil(audit.detailRows.length / AUDIT_DETAIL_PAGE_SIZE) - 1), audit.detailPage + 1); renderAudit(root);
+    } else if (action === 'export') {
+      auditCsvDownload('EIR-Blank-Issuing-Agent-' + (audit.expandedDate || 'No-Date') + '.csv', audit.detailHeaders.map((h) => h.header), audit.detailRows);
+    }
+  }
+
   function statCardsHtml(results) {
     const r = results || [];
     const count = (pred) => r.filter(pred).length;
