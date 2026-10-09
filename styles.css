@@ -6289,7 +6289,9 @@ html.ff-no-anim .app-boot .boot-progress::after { animation: boot-slide 1.2s eas
 
 
 /* v3.66 — Login-only polish + instant logout + stable branded background */
-body,html { background: #0b1020; }
+/* Keep the dark canvas scoped to the login screen only. The previous body,html rule
+   painted every authenticated page dark even while the selected theme was Light. */
+html, body { background: var(--bg, #f3f4fb); }
 body.auth-open { background: radial-gradient(circle at 50% 35%, #1e2a62 0, #11182f 38%, #070b16 100%) !important; }
 .auth-screen.pro { min-height: 100vh; background: radial-gradient(circle at 50% 35%, #1e2a62 0, #11182f 38%, #070b16 100%) !important; }
 .login-only-shell { grid-template-columns: minmax(360px, 620px) !important; justify-content: center !important; min-height: 100vh; padding: 32px 18px; }
@@ -6507,4 +6509,80 @@ html[data-theme="dark"] .main:has(#tr-body) .tr-suggest {
   background: #fff !important;
   color: #0f172a !important;
   border-color: #cbd5e1 !important;
+}
+
+
+/* v3.74 — Global readability and safe theme canvas repair.
+   The login keeps its branded dark background; authenticated pages follow the selected theme.
+   Reinforce contrast for common controls without flattening colourful KPI or status cards. */
+html:not([data-theme="dark"]) {
+  color-scheme: light;
+  --bg: #f3f6fc;
+  --card: #ffffff;
+  --ink: #111827;
+  --muted: #526176;
+  --line: #d9e1ee;
+}
+html:not([data-theme="dark"]) body:not(.auth-open) {
+  background: var(--bg, #f3f6fc) !important;
+  color: var(--ink, #111827);
+}
+html:not([data-theme="dark"]) .content,
+html:not([data-theme="dark"]) .main,
+html:not([data-theme="dark"]) .app-footer {
+  color: var(--ink, #111827);
+}
+html:not([data-theme="dark"]) .topbar {
+  background: rgba(255, 255, 255, .94);
+  border-bottom-color: #d9e1ee;
+}
+html:not([data-theme="dark"]) .card,
+html:not([data-theme="dark"]) .finder,
+html:not([data-theme="dark"]) .table-wrap,
+html:not([data-theme="dark"]) .user-menu,
+html:not([data-theme="dark"]) .notification-pop,
+html:not([data-theme="dark"]) .drawer,
+html:not([data-theme="dark"]) .suggest {
+  color: #111827;
+}
+html:not([data-theme="dark"]) .card :is(p, span, label, td, th, li, small, strong, b, em),
+html:not([data-theme="dark"]) .finder :is(p, span, label, small, strong, b),
+html:not([data-theme="dark"]) .drawer :is(p, span, label, td, th, li, small, strong, b, em) {
+  text-decoration-color: currentColor;
+}
+html:not([data-theme="dark"]) :is(input, select, textarea, .input, .ctrl-row input) {
+  color: #111827;
+  background-color: #ffffff;
+  border-color: #cbd5e1;
+}
+html:not([data-theme="dark"]) :is(input, select, textarea, .input, .ctrl-row input)::placeholder {
+  color: #64748b;
+  opacity: 1;
+}
+html:not([data-theme="dark"]) :is(button, .btn, .icon-btn):not(.primary):not(.nav-item):not(.seg-btn) {
+  text-shadow: none;
+}
+html:not([data-theme="dark"]) .dim,
+html:not([data-theme="dark"]) .muted,
+html:not([data-theme="dark"]) .sub,
+html:not([data-theme="dark"]) .foot-note,
+html:not([data-theme="dark"]) .cell-sub,
+html:not([data-theme="dark"]) .pager,
+html:not([data-theme="dark"]) .ctrl-note {
+  color: #526176;
+}
+html:not([data-theme="dark"]) .tbl th,
+html:not([data-theme="dark"]) .tbl tfoot td {
+  color: #334155;
+}
+html:not([data-theme="dark"]) .tbl td {
+  color: #111827;
+}
+html[data-theme="dark"] body:not(.auth-open) {
+  background: var(--bg, #0b1020) !important;
+  color: var(--ink, #e2e8f0);
+}
+html[data-theme="dark"] .main,
+html[data-theme="dark"] .content {
+  color: var(--ink, #e2e8f0);
 }
