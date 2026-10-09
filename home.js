@@ -715,7 +715,9 @@ FF.pages = FF.pages || {};
     const needsFfTargetData = savedTargetsForMonth.some((t) => targetSource(t) === 'ff');
     const needsGvTargetData = savedTargetsForMonth.some((t) => targetSource(t) === 'gv');
     const targetClassDataP = savedTargetsForMonth.length ? Promise.all([
-      S.need('agentClass').then((rows) => ({ rows: Array.isArray(rows) ? rows : [], error: '' })).catch((err) => ({ rows: null, error: err && err.message || 'Agent class data unavailable' })),
+      needsFfTargetData
+        ? S.need('agentClass').then((rows) => ({ rows: Array.isArray(rows) ? rows : [], error: '' })).catch((err) => ({ rows: null, error: err && err.message || 'Agent class data unavailable' }))
+        : Promise.resolve({ rows: [], error: '' }),
       needsGvTargetData ? gvMasterP.then((ok) => ({ ok: !!ok, error: G.error && G.error('master') || '' })).catch((err) => ({ ok: false, error: err && err.message || 'GV Master unavailable' })) : Promise.resolve({ ok: true, error: '' })
     ]).then(([ffData, gvData]) => {
       let gvRows = [];
