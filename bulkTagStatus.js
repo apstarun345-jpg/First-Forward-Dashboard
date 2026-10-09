@@ -767,6 +767,6 @@ window.FF = window.FF || {};
     resolveStatus,
     get maxRecords() { return MAX_RECORDS; },
     get state() { return state; },
-    _test: { normId, parseInputText, matrixToRecords, resolveStatus, stockOwner, hasOutStatus }
+    _test: { normId, headerKind, parseInputText, matrixToRecords, resolveStatus, stockOwner, hasOutStatus, restoreFormattedIdentifier }
   };
 })(window.FF);
