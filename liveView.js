@@ -321,7 +321,7 @@
     if (!p) {
       live.lastPerson = null;
       status.innerHTML = '<span class="presence-state">OFFLINE</span>';
-      pageEl.textContent = live.publicSessionId ? 'Employee link live share band ya expire ho gaya.' : 'Is user ki koi live activity nahi mili (app band hai ya sharing off hai).';
+      pageEl.textContent = live.publicSessionId ? 'Employee link visit inactive ya expire ho gaya.' : 'Is user ki koi live activity nahi mili (app band hai ya sharing off hai).';
       frame.hidden = true; blank.hidden = false; blank.textContent = '😴 Live activity available nahi hai'; cursor.hidden = true;
       return;
     }
@@ -332,13 +332,13 @@
     U.$('#lv-name', m).textContent = p.name || p.username;
     const online = p.online && p.visible !== false;
     // ⏱ exact instant — har render par ms-level timestamp (network lag bhi dikhta hai)
-    status.innerHTML = `<span class="presence-state ${online && p.active ? 'live' : ''}">${online ? (p.active ? '● LIVE' : 'IDLE') : 'AWAY'}</span> <small class="dim">synced <span class="live-instant">${esc(exactClock(Date.now()))}</span></small>`;
+    status.innerHTML = `<span class="presence-state ${online && p.active ? 'live' : ''}">${online ? (p.sharing ? (p.active ? '● LIVE SHARE' : 'IDLE') : (p.active ? '● LINK OPEN' : 'IDLE')) : 'AWAY'}</span> <small class="dim">synced <span class="live-instant">${esc(exactClock(Date.now()))}</span></small>`;
     const inst = U.$('#lv-instant', m);
     if (inst) inst.textContent = `render ${exactClock(Date.now())} · poll ${(live.speed / 1000).toFixed(1)}s`;
     const clockBox = U.$('#lv-data-clock', m);
     if (clockBox && live.publicSessionId) {
       const ids = Array.isArray(p.requestIds) ? p.requestIds.slice(0, 5).map(esc).join(', ') : '';
-      clockBox.innerHTML = `<div class="notify-line muted" style="border-radius:10px;margin-top:10px"><b style="color:#e2e8f0">Employee link session</b><br>Live Share: <b style="color:#5eead4">employee opted in</b><br>${ids ? `Request ID(s): <b>${ids}</b>` : 'Request IDs submission ke baad yahan dikhengi.'}</div>`;
+      clockBox.innerHTML = `<div class="notify-line muted" style="border-radius:10px;margin-top:10px"><b style="color:#e2e8f0">Employee link activity</b><br>${p.sharing ? 'Live interaction sharing: <b style="color:#5eead4">employee opted in</b>' : 'Page Preview only: <b style="color:#facc15">visitor screen, cursor aur typed values share nahi ho rahe</b>'}<br>${ids ? `Request ID(s): <b>${ids}</b>` : 'Request IDs submission ke baad yahan dikhengi.'}</div>`;
     } else if (clockBox) {
       const ffLoad = FF.store && FF.store.loadedAt ? exactClock(FF.store.loadedAt) : '—';
       const gvLoad = FF.gv && FF.gv.loadedAt ? exactClock(FF.gv.loadedAt) : '—';
@@ -354,7 +354,7 @@
       </div>`;
     }
     m.classList.toggle('is-live', !!(online && p.active));
-    pageEl.textContent = `${p.title || ''} · #/${p.page || ''}`;
+    pageEl.textContent = `${p.title || ''} · #/${p.page || ''}${p.sharing ? ' · Live Share ON' : ' · Preview only — visitor ka actual screen data nahi'}`;
     fit(p);
     // page mirror
     const page = String(p.page || 'home').replace(/^#?\/?/, '');
