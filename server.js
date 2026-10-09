@@ -5594,13 +5594,7 @@ async function handleApi(req, res, url) {
     if (addressEntries.length) {
       syncAddressBookToSheet(created).then(() => persist('notify').catch(() => {})).catch((err) => console.warn('tag request address sync:', err && err.message));
     }
-    if (tagSheetConfig().enabled && tagSheetConfig().onSubmit) {
-      pushTagRequestsToSheet(created, 'new').then(() => persist('notify').catch(() => {})).catch((err) => {
-        console.warn('tag-request sheet sync:', err.message);
-        const at = new Date().toISOString();
-        created.forEach((r) => { r.sheetSync = { at, event: 'new', error: String(err.message || err).slice(0, 160) }; });
-      });
-    }
+    // v5: Batch Pending requests sync only after each request is approved by admin.
     return {
       batch, created,
       total: created.reduce((s, r) => s + r.total, 0),
@@ -5632,7 +5626,7 @@ async function handleApi(req, res, url) {
     const w = workspaceStore();
     if (!w.tagRequestSheet || typeof w.tagRequestSheet !== 'object') {
       w.tagRequestSheet = {
-        enabled: false, tab: 'Tag Requests', sheetLink: '', spreadsheetId: '', onSubmit: true, onStatus: true, v: 3,
+        enabled: false, tab: 'Tag Requests', sheetLink: '', spreadsheetId: '', onSubmit: false, onStatus: true, v: 5,
         rowMode: 'agent-class-gap', columns: [...TAG_SHEET_DEFAULT_COLUMNS]
       };
     }
@@ -5653,9 +5647,13 @@ async function handleApi(req, res, url) {
       if (!Array.isArray(cfg.columns) || !cfg.columns.length || same) cfg.columns = [...TAG_SHEET_DEFAULT_COLUMNS];
       cfg.v = 4;
     }
+    // v5 — Sheet entry sirf admin ke Approved karne par, ek baar hi.
+    // Purane configs ki onSubmit/status-change policy ko forcibly normalize karo.
+    cfg.onSubmit = false;
+    cfg.onStatus = true;
+    cfg.v = Math.max(5, Number(cfg.v) || 5);
     // v3.27 — link me sheet ka ID ho to wahi (alag sheet) target banta hai.
     if (cfg.spreadsheetId === undefined) cfg.spreadsheetId = sheetIdFromLink(cfg.sheetLink) || '';
-    if (cfg.v === undefined) cfg.v = 3;
     return cfg;
   };
   // 📇 Central Agent Address Book — Address tab in the configured request spreadsheet.
@@ -5942,6 +5940,26 @@ async function handleApi(req, res, url) {
     const reqs = (Array.isArray(list) ? list : [list]).filter(Boolean);
     const cfg = tagSheetConfig();
     const store = sheetSyncStore();
+
+    // Central guard protects against stale paths/buttons: only an approval or approved manual retry.
+    const validEvent = event === 'status:approved' || event === 'manual';
+    if (!validEvent) {
+      if (throwOnFail) throw new HttpError(400, 'Google Sheet entry sirf Approved status par hoti hai.');
+      return null;
+    }
+    const notApproved = reqs.find((r) => !r || r.status !== 'approved');
+    if (notApproved) {
+      if (throwOnFail) throw new HttpError(400, 'Pehle Tag Request ko Approved karo; Pending/Dispatched request sheet me nahi likhi ja sakti.');
+      return null;
+    }
+    const alreadySynced = reqs.find((r) =>
+      (r.sheetApprovalSync && r.sheetApprovalSync.at) ||
+      (r.sheetSync && r.sheetSync.at && !r.sheetSync.error)
+    );
+    if (alreadySynced) {
+      if (throwOnFail) throw new HttpError(409, 'Ye request pehle hi Google Sheet me sync ho chuki hai. Duplicate entry rok di gayi.');
+      return null;
+    }
     if (!cfg.enabled || !store) {
       if (throwOnFail) throw new HttpError(400, !store ? 'Apps Script connect nahi hai — pehle Settings → Backup me APPS_SCRIPT_URL/SECRET configure karo (ya sheet storage setup).' : 'Sheet sync OFF hai — pehle Tag Request page par 📗 Google Sheet sync ON karo.');
       return null;
@@ -5973,10 +5991,13 @@ async function handleApi(req, res, url) {
     }
     const at = new Date().toISOString();
     reqs.forEach((r, i) => {
-      r.sheetSync = {
+      const syncInfo = {
         at, event, added: reqs.length === 1 ? (Number(out.added) || counts[i]) : counts[i], tab: out.tab || tabName,
         spreadsheet: out.spreadsheet || '', url: out.url || '', targetId
       };
+      r.sheetSync = syncInfo;
+      // Persistent marker prevents future status toggles/manual clicks creating a duplicate.
+      r.sheetApprovalSync = { ...syncInfo, event: 'approved' };
     });
     return out;
   }
@@ -6038,14 +6059,7 @@ async function handleApi(req, res, url) {
        rememberAddressBook([addressEntryFromRequest(row)].filter(Boolean));
        await persist('notify').catch(() => {});
        syncAddressBookToSheet([row]).then(() => persist('notify').catch(() => {})).catch(() => {});
-    // 📗 Google Sheet sync ON ho to entry direct configured sheet me chali jaati hai (fire & forget —
-    // sheet fail hone se request submit kabhi rukti nahi; status drawer me dikh jaata hai).
-    if (tagSheetConfig().enabled && tagSheetConfig().onSubmit) {
-      pushTagRequestToSheet(row, 'new').then(() => persist('notify').catch(() => {})).catch((err) => {
-        console.warn('tag-request sheet sync:', err.message);
-        row.sheetSync = { at: new Date().toISOString(), event: 'new', error: String(err.message || err).slice(0, 160) };
-      });
-    }
+    // v5: Pending submission sirf dashboard me save hoti hai; Google Sheet entry Approved par hogi.
     // Admin ko notification (routed: Settings → notification routes se off ho sakta hai) + requester ko confirmation.
     try {
       recordNotification({
@@ -6131,11 +6145,12 @@ async function handleApi(req, res, url) {
     }
     row.updatedAt = new Date().toISOString(); row.updatedBy = user.username;
     await persist('notify');
-    // 📗 Status change (approved/dispatched/rejected) par bhi sheet me fresh entry — config ON ho to.
-    if (body.status && body.status !== prevStatus && tagSheetConfig().enabled && tagSheetConfig().onStatus) {
-      pushTagRequestToSheet(row, `status:${body.status}`).then(() => persist('notify').catch(() => {})).catch((err) => {
-        console.warn('tag-request sheet sync (status):', err.message);
-        row.sheetSync = { at: new Date().toISOString(), event: `status:${body.status}`, error: String(err.message || err).slice(0, 160) };
+    // 📗 v5: Sheet sync ONLY on the first transition to Approved.
+    // Pending submit, Dispatched, Rejected, and later status changes never append another row.
+    if (body.status === 'approved' && prevStatus !== 'approved' && tagSheetConfig().enabled) {
+      pushTagRequestToSheet(row, 'status:approved').then(() => persist('notify').catch(() => {})).catch((err) => {
+        console.warn('tag-request sheet sync (approved):', err.message);
+        row.sheetSync = { at: new Date().toISOString(), event: 'status:approved', error: String(err.message || err).slice(0, 160) };
       });
     }
     // Requester ko status update ka notification (admin ne kuch badla to).
@@ -6460,13 +6475,7 @@ async function handleApi(req, res, url) {
        rememberAddressBook([addressEntryFromRequest(row)].filter(Boolean));
        await persist('notify').catch(() => {});
        syncAddressBookToSheet(body.agents || [row]).then(() => persist('notify').catch(() => {})).catch(() => {});
-    // 📗 Sheet sync ON ho to public request bhi seedha usi Google Sheet me entry banati hai.
-    if (tagSheetConfig().enabled && tagSheetConfig().onSubmit) {
-      pushTagRequestToSheet(row, 'new').then(() => persist('notify').catch(() => {})).catch((err) => {
-        console.warn('public tag-request sheet sync:', err.message);
-        row.sheetSync = { at: new Date().toISOString(), event: 'new', error: String(err.message || err).slice(0, 160) };
-      });
-    }
+    // v5: Public Pending request bhi Google Sheet me nahi likhi jaati; approval ka wait karti hai.
     try {
       recordNotification({
         type: 'request', title: `🏷️ Tag request (employee link)${dupes.length ? ' 🔁 duplicate' : ''} · ${employeeName}`,
@@ -6709,8 +6718,10 @@ async function handleApi(req, res, url) {
       }
     }
     if (typeof c.spreadsheetId === 'string') cfg.spreadsheetId = sheetIdFromLink(c.spreadsheetId);
-    if (c.onSubmit !== undefined) cfg.onSubmit = !!c.onSubmit;
-    if (c.onStatus !== undefined) cfg.onStatus = !!c.onStatus;
+    // v5 policy: never write on submit; only the first transition to Approved writes.
+    // Ignore stale browser clients that still send the old onSubmit/onStatus checkboxes.
+    cfg.onSubmit = false;
+    cfg.onStatus = true;
     if (c.rowMode !== undefined && ['class', 'agent', 'agent-class-gap', 'request'].includes(c.rowMode)) cfg.rowMode = c.rowMode;
     if (Array.isArray(c.columns)) {
       const cols = c.columns.map((x) => String(x)).filter((x) => TAG_SHEET_FIELDS[x]);
