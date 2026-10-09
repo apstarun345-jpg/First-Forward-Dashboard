@@ -80,6 +80,7 @@ export const PAGE_PERMISSIONS = [
   { key: 'tagIssued', label: 'GV & FF Tag Issued (date-wise)', group: 'Pages' },
   { key: 'tagRequest', label: 'Management · Tag Request (IDFC agents · class-wise stock/tag request form)', group: 'Management' },
   { key: 'masterSearch', label: 'Management · Master Search (GV + FF naam/ID → seedha poora profile)', group: 'Management' },
+  { key: 'bulkTagStatus', label: 'Management · Bulk Tag Status (VRN / Tag ID / Barcode → GV / FF / stock lookup)', group: 'Management' },
   { key: 'targets', label: 'Targets · agent-wise monthly targets', group: 'Pages' },
   { key: 'dashboard', label: 'First Forward · Dashboard', group: 'First Forward' },
   { key: 'trend', label: 'First Forward · Trend', group: 'First Forward' },
