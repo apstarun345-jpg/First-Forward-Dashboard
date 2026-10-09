@@ -423,3 +423,49 @@ test('public Tag Request live share — opt-in, admin-only preview, request asso
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+test('public Tag Request link visit — admin notification feed, passive preview, heartbeat and request association', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'apna-public-visit-'));
+  const mock = await startMockAppsScript({ secret: SECRET });
+  let server;
+  try {
+    server = await startServer(dir, mock.url);
+    const login = await jsonCall(server.base, '/api/auth/login', 'POST', { username: 'owner', password: 'initial-password' });
+    const admin = login.cookie;
+    assert.ok(admin, 'admin login cookie');
+
+    const opened = await jsonCall(server.base, '/api/public/tag-request/visit', 'POST', { visible: true }, '', '10.2.0.9');
+    assert.equal(opened.res.status, 200, JSON.stringify(opened.json));
+    assert.ok(opened.json.visitId, 'server-issued passive visit ID');
+
+    const list1 = await jsonCall(server.base, '/api/public/live-presence', 'GET', undefined, admin);
+    assert.equal(list1.res.status, 200, JSON.stringify(list1.json));
+    let visit = list1.json.sessions.find((x) => x.sessionId === opened.json.visitId);
+    assert.ok(visit, 'link visitor appears in Admin activity list');
+    assert.equal(visit.sharing, false, 'passive visit must not imply screen-sharing consent');
+    assert.equal(visit.pointer, null, 'passive visit exposes no pointer telemetry');
+    assert.equal(visit.lastEvent.label, 'Employee Tag Request link opened');
+
+    const heartbeat = await jsonCall(server.base, '/api/public/tag-request/visit', 'POST', { visitId: opened.json.visitId, visible: true }, '', '10.2.0.9');
+    assert.equal(heartbeat.res.status, 200, JSON.stringify(heartbeat.json));
+    assert.equal(heartbeat.json.visitId, opened.json.visitId, 'same tab heartbeat keeps the same visit');
+
+    const submit = await jsonCall(server.base, '/api/public/tag-request', 'POST', {
+      employee: { name: 'Public Link Employee', mobile: '9876501122', address: '9, Public Link Road, Jaipur', pincode: '302019' },
+      publicVisitId: opened.json.visitId,
+      agents: [{ agentId: '1001', agentName: 'Rahul Sharma', channel: 'ff', mobile: '9876501123', address: '12, Gandhi Nagar, Jaipur', pincode: '302015', rows: [{ cls: 'VC4', approved: 5 }] }]
+    }, '', '10.2.0.9');
+    assert.equal(submit.res.status, 201, JSON.stringify(submit.json));
+
+    const detail = await jsonCall(server.base, '/api/public/live-presence?sessionId=' + encodeURIComponent(opened.json.visitId), 'GET', undefined, admin);
+    assert.equal(detail.res.status, 200, JSON.stringify(detail.json));
+    assert.equal(detail.json.person.name, 'Public Link Employee');
+    assert.deepEqual(detail.json.person.requestIds, [String(submit.json.request.id)]);
+    assert.equal(detail.json.person.sharing, false, 'request association must not turn on live telemetry');
+    assert.ok(detail.json.person.events.some((x) => /submitted/i.test(x.label)));
+  } finally {
+    if (server) await server.stop();
+    await mock.close();
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
