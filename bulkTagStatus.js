@@ -1017,6 +1017,7 @@ window.FF = window.FF || {};
     state.root = root;
     root.innerHTML = '<div class="bts-page">'
       + '<section class="bts-hero"><div class="bts-hero-icon">🔎</div><div class="bts-hero-copy"><span class="bts-eyebrow">MANAGEMENT TOOL</span><h1>Bulk Tag Status</h1><p>Vehicle number, Tag ID ya barcode paste/upload karke pata karein ki tag <b>GV</b> se issue hua, <b>First Forward</b> se issue hua, ya stock mein hai.</p></div><div class="bts-hero-chip">FF + GV · Exact lookup</div></section>'
+      + '<section class="card bts-audit-card"><div class="card-head"><div><h3>🧾 EIR Blank Issuing Agent · Date-wise Audit</h3><p class="dim small">EIR mein <b>TAG_ISSUING_AGENT_ID blank</b> ho aur Tag ID <b>GV Master mein na ho</b> — aise tags date-wise count honge.</p></div><div class="bts-audit-actions"><button type="button" class="btn primary" id="bts-audit-scan"' + (state.audit.loading ? ' disabled' : '') + '>🔄 Scan &amp; Count by Date</button><button type="button" class="btn small" id="bts-audit-export" disabled>⬇ Download date counts CSV</button></div></div><div class="card-body"><div class="bts-audit-rule"><span>① EIR: TAG_ISSUING_AGENT_ID blank</span><span>② EIR Tag ID ≠ GV Master Tag ID</span><span class="bts-audit-note">Count = unique Tag IDs. Count par click karke selected date ka full EIR data dekhein. Uses the Fresh source check option above.</span></div><div class="bts-progress" id="bts-audit-progress" hidden><div class="bts-progress-track"><span id="bts-audit-progress-fill"></span></div><small id="bts-audit-progress-label"></small></div><div id="bts-audit-summary"><div class="bts-empty"><span class="bts-empty-icon">🧾</span><b>Date-wise audit abhi run nahi hua</b><small>Scan &amp; Count by Date dabayein.</small></div></div><div id="bts-audit-details" hidden></div></div></section>'
       + '<div class="bts-kpis" id="bts-kpis">' + statCardsHtml(state.results) + '</div>'
       + '<section class="card bts-input-card"><div class="card-head"><h3>📥 Bulk input</h3><span class="dim small">Maximum ' + MAX_RECORDS + ' input rows per check</span></div>'
       + '<div class="card-body"><div class="bts-input-grid"><div class="bts-paste-col"><label for="bts-paste"><b>Paste identifiers / Excel table</b></label><textarea id="bts-paste" class="input bts-textarea" rows="8" placeholder="RJ14AB1234&#10;TAGID12345678&#10;34161FA82032001">' + esc(state.query || '') + '</textarea><div class="bts-input-hint">One per line is easiest. Excel se copy kiya hua table bhi paste kar sakte hain; headers <b>VRN</b>, <b>Tag ID</b>, <b>Barcode</b> hon to columns identify ho jaate hain.</div></div>'
@@ -1028,10 +1029,24 @@ window.FF = window.FF || {};
       + '</div>';
     bind(root);
     renderResults(root);
+    renderAudit(root);
   }
   function bind(root) {
     const check = root.querySelector('#bts-check');
     if (check) check.addEventListener('click', () => checkStatus(root));
+    const auditScan = root.querySelector('#bts-audit-scan');
+    if (auditScan) auditScan.addEventListener('click', () => runBlankIssuerAudit(root));
+    const auditExport = root.querySelector('#bts-audit-export');
+    if (auditExport) auditExport.addEventListener('click', () => {
+      const a = state.audit;
+      const headers = ['EIR Date', 'Unique Tag ID Count', 'EIR Rows'];
+      const rows = a.groups.map((g) => [g.label, g.count, g.eirRows]);
+      if (rows.length) auditCsvDownload('EIR-Blank-Issuing-Agent-Datewise-Counts.csv', headers, rows);
+    });
+    const auditSummary = root.querySelector('#bts-audit-summary');
+    if (auditSummary) auditSummary.addEventListener('click', (event) => handleAuditSummaryClick(root, event));
+    const auditDetails = root.querySelector('#bts-audit-details');
+    if (auditDetails) auditDetails.addEventListener('click', (event) => handleAuditDetailClick(root, event));
     const paste = root.querySelector('#bts-paste');
     if (paste) paste.addEventListener('input', () => { state.query = paste.value; });
     const filter = root.querySelector('#bts-filter');
