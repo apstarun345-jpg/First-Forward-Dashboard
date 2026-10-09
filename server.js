@@ -666,6 +666,40 @@ function pageLinkFor(option, query) {
 }
 // Ephemeral in-memory presence: page + viewport-relative pointer only (never GPS or screen contents).
 const livePresence = new Map();
+// Optional, explicitly consented sessions for the public employee Tag Request link.
+// Tokens stay server-side; public GET responses never include them. Sessions are ephemeral by design.
+const publicLiveSessions = new Map();
+const PUBLIC_LIVE_TTL_MS = 15 * 60 * 1000;
+function prunePublicLiveSessions(now = Date.now()) {
+  for (const [id, entry] of publicLiveSessions) {
+    if (now - Number(entry.lastSeen || entry.startedAt || now) > PUBLIC_LIVE_TTL_MS || now - Number(entry.startedAt || now) > 8 * 60 * 60e3) publicLiveSessions.delete(id);
+  }
+}
+function publicLiveSummary(entry, now = Date.now(), includeEvents = false) {
+  if (!entry) return null;
+  const lastSeen = Number(entry.lastSeen || entry.startedAt || now);
+  const age = Math.max(0, now - lastSeen);
+  const out = {
+    sessionId: entry.sessionId,
+    mode: entry.mode === 'visit' ? 'visit' : 'share',
+    sharing: entry.mode !== 'visit',
+    name: entry.name || 'New Link Visitor',
+    username: `public:${String(entry.sessionId || '').slice(-8)}`,
+    page: 'tag-request', title: 'Employee Tag Request',
+    visible: entry.visible !== false,
+    // Only consented sessions expose pointer/viewport/scroll telemetry. Passive visits get a safe page preview.
+    pointer: entry.mode === 'visit' ? null : (entry.pointer || null),
+    viewport: entry.mode === 'visit' ? null : (entry.viewport || null),
+    scroll: entry.mode === 'visit' ? null : (entry.scroll || null),
+    lastSeen, updatedAt: Number(entry.updatedAt || lastSeen), startedAt: Number(entry.startedAt || lastSeen),
+    requestIds: Array.isArray(entry.requestIds) ? entry.requestIds.slice(0, 30) : [],
+    lastEvent: Array.isArray(entry.events) && entry.events.length ? entry.events[entry.events.length - 1] : null,
+    active: age < 90e3 && entry.visible !== false && entry.engaged !== false,
+    online: age < 45e3 && entry.visible !== false
+  };
+  if (includeEvents) out.events = Array.isArray(entry.events) ? entry.events.slice(-80) : [];
+  return out;
+}
 function noteActivity(user, page) {
   if (!user || user.role === 'admin') return null;
   const cleanPage = String(page || 'dashboard').replace(/[^a-zA-Z0-9 _-]/g, '').slice(0, 80) || 'dashboard';
@@ -6378,6 +6412,95 @@ async function handleApi(req, res, url) {
     }
     return out.slice(-6).reverse();
   };
+  // ---- public employee-link visits (presence + admin notification; no screen telemetry) --------
+  if (p === '/api/public/tag-request/visit' && method === 'POST') {
+    const cfg = publicTagFormConfig();
+    if (cfg.enabled === false) throw new HttpError(403, 'Tag Request form abhi band hai.');
+    const body = await readBody(req);
+    const ip = clientIp(req);
+    if (!publicRateOk(`public-link-visit:${ip}`, 60, 10 * 60e3)) throw new HttpError(429, 'Bahut zyada link visits. Thodi der baad try karein.');
+    const now = Date.now();
+    prunePublicLiveSessions(now);
+    let id = String(body.visitId || '').slice(0, 100);
+    let entry = id ? publicLiveSessions.get(id) : null;
+    if (!entry || entry.mode !== 'visit') {
+      id = crypto.randomBytes(18).toString('base64url');
+      entry = { sessionId: id, mode: 'visit', name: 'New Link Visitor', startedAt: now, lastSeen: now, updatedAt: now, visible: true, engaged: true, pointer: null, viewport: null, scroll: null, events: [{ at: now, kind: 'open', label: 'Employee Tag Request link opened', page: 'tag-request' }], requestIds: [] };
+      publicLiveSessions.set(id, entry);
+      try {
+        recordNotification({ type: 'activity', title: '🔗 Employee Tag Request link opened', body: 'A visitor opened the public Employee Tag Request link. Open Admin Notifications → Employee link activity to see status and page preview.', target: 'admin', routeKey: 'tagRequest', meta: { publicSessionId: id, publicLink: true, link: '#/tagRequest?view=requests' } });
+      } catch { /* notification must not block public form */ }
+    } else {
+      entry.lastSeen = now; entry.updatedAt = now;
+      entry.visible = body.visible !== false;
+      entry.engaged = entry.visible;
+    }
+    return sendJson(res, 200, { ok: true, visitId: id, active: true, checkAt: new Date(now).toISOString() });
+  }
+  // ---- optional public Tag Request live sharing (explicit employee opt-in) ---------------------
+  if (p === '/api/public/live-presence/start' && method === 'POST') {
+    const cfg = publicTagFormConfig();
+    if (cfg.enabled === false) throw new HttpError(403, 'Tag Request form abhi band hai.');
+    const body = await readBody(req);
+    if (body.consent !== true) throw new HttpError(400, 'Live sharing start karne ke liye consent zaroori hai.');
+    const ip = clientIp(req);
+    if (!publicRateOk(`live-share-start:${ip}`, 8, 60 * 60e3)) throw new HttpError(429, 'Bahut saare live-share sessions start hue hain. Kuch der baad try karein.');
+    const now = Date.now();
+    prunePublicLiveSessions(now);
+    const sessionId = crypto.randomBytes(18).toString('base64url');
+    const token = crypto.randomBytes(32).toString('base64url');
+    const entry = { sessionId, token, name: 'Employee link visitor', startedAt: now, lastSeen: now, updatedAt: now, visible: true, engaged: true, pointer: null, viewport: null, scroll: null, events: [{ at: now, kind: 'share', label: 'Live sharing started by employee', page: 'tag-request' }], requestIds: [], ip: String(ip || '').slice(0, 45) };
+    publicLiveSessions.set(sessionId, entry);
+    try {
+      recordNotification({ type: 'activity', title: '👁 Employee link live sharing started', body: 'An employee explicitly enabled live page preview for the Tag Request link.', target: 'admin', routeKey: 'tagRequest', meta: { publicSessionId: sessionId, publicLink: true, link: '#/tagRequest?view=requests' } });
+    } catch { /* notification is helpful but not required for sharing */ }
+    return sendJson(res, 201, { ok: true, sessionId, token, person: publicLiveSummary(entry, now, true) });
+  }
+  if (p === '/api/public/live-presence/stop' && method === 'POST') {
+    const body = await readBody(req);
+    const id = String(body.sessionId || '').slice(0, 100);
+    const entry = publicLiveSessions.get(id);
+    if (entry && String(body.token || '') === entry.token) publicLiveSessions.delete(id);
+    return sendJson(res, 200, { ok: true });
+  }
+  if (p === '/api/public/live-presence' && method === 'POST') {
+    const body = await readBody(req);
+    const id = String(body.sessionId || '').slice(0, 100);
+    const entry = publicLiveSessions.get(id);
+    if (!entry || !body.token || String(body.token) !== entry.token) throw new HttpError(401, 'Live sharing session expire ho gayi. Dobara start karein.');
+    const now = Date.now();
+    if (now - Number(entry.startedAt || now) > 8 * 60 * 60e3) { publicLiveSessions.delete(id); throw new HttpError(401, 'Live sharing session expire ho gayi.'); }
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, Number(v) || 0));
+    const cleanLive = (v, max = 100) => String(v || '').replace(/[\u0000-\u001f<>]/g, '').replace(/\s+/g, ' ').slice(0, max);
+    if (Object.prototype.hasOwnProperty.call(body, 'pointer')) entry.pointer = body.pointer && typeof body.pointer === 'object' ? { x: clamp(body.pointer.x, 0, 100), y: clamp(body.pointer.y, 0, 100) } : null;
+    if (body.viewport && typeof body.viewport === 'object') entry.viewport = { w: clamp(body.viewport.w, 200, 8000), h: clamp(body.viewport.h, 200, 8000) };
+    if (body.scroll && typeof body.scroll === 'object') entry.scroll = { y: clamp(body.scroll.y, 0, 1e6), h: clamp(body.scroll.h, 0, 1e6) };
+    entry.visible = body.visible !== false;
+    entry.engaged = body.engaged === true;
+    entry.updatedAt = now;
+    entry.lastSeen = now;
+    if (Array.isArray(body.events)) {
+      for (const ev of body.events.slice(-15)) {
+        if (!ev || typeof ev !== 'object') continue;
+        const kind = cleanLive(ev.kind, 20);
+        const label = cleanLive(ev.label, 100);
+        if (!label) continue;
+        entry.events.push({ at: now, kind: ['click', 'focus', 'change', 'scroll', 'tab', 'submit', 'share'].includes(kind) ? kind : 'action', label, page: 'tag-request' });
+      }
+      entry.events = entry.events.slice(-80);
+    }
+    prunePublicLiveSessions(now);
+    return sendJson(res, 200, { ok: true, updatedAt: now });
+  }
+  if (p === '/api/public/live-presence' && method === 'GET') {
+    if (!user || user.role !== 'admin') throw new HttpError(403, 'Admin only');
+    const now = Date.now();
+    prunePublicLiveSessions(now);
+    const sessionId = String(url.searchParams.get('sessionId') || '').slice(0, 100);
+    if (sessionId) return sendJson(res, 200, { person: publicLiveSummary(publicLiveSessions.get(sessionId), now, true), checkAt: new Date(now).toISOString() });
+    const sessions = [...publicLiveSessions.values()].sort((a, b) => Number(b.lastSeen || 0) - Number(a.lastSeen || 0)).map((entry) => publicLiveSummary(entry, now, false));
+    return sendJson(res, 200, { sessions, checkAt: new Date(now).toISOString() });
+  }
   if (p === '/api/public/tag-request' && method === 'GET') {
     return sendJson(res, 200, { ok: true, config: publicTagView() });
   }
@@ -6410,6 +6533,27 @@ async function handleApi(req, res, url) {
         courier: shortText(body.courier, 40),
         source: 'public-link', ip: String(ip || '').slice(0, 45), note, updatedBy: 'public-link'
       });
+      // Link the passive visit for useful request context; only consented share sessions receive live telemetry.
+      // Never store a live-share token in request or notification records.
+      let linkedLiveSession = null;
+      const liveShare = body.liveShare && typeof body.liveShare === 'object' ? body.liveShare : null;
+      if (liveShare && liveShare.sessionId && liveShare.token) {
+        const candidate = publicLiveSessions.get(String(liveShare.sessionId).slice(0, 100));
+        if (candidate && candidate.mode !== 'visit' && String(liveShare.token) === candidate.token) linkedLiveSession = candidate;
+      }
+      const visitId = String(body.publicVisitId || '').slice(0, 100);
+      if (!linkedLiveSession && visitId) {
+        const candidate = publicLiveSessions.get(visitId);
+        if (candidate && candidate.mode === 'visit') linkedLiveSession = candidate;
+      }
+      if (linkedLiveSession) {
+        const now = Date.now();
+        linkedLiveSession.name = employeeName;
+        linkedLiveSession.requestIds = [...new Set([...(linkedLiveSession.requestIds || []), ...out.created.map((r) => String(r.id || '')).filter(Boolean)])].slice(0, 30);
+        linkedLiveSession.lastSeen = now; linkedLiveSession.updatedAt = now;
+        linkedLiveSession.events.push({ at: now, kind: 'submit', label: `Tag Request submitted · ${out.created.length} agent(s)`, page: 'tag-request' });
+        linkedLiveSession.events = linkedLiveSession.events.slice(-80);
+      }
       const n = out.created.length;
       const dupIds = [...new Set(out.created.flatMap((r) => r.dupOf || []))];
       try {
@@ -6417,7 +6561,7 @@ async function handleApi(req, res, url) {
           type: 'request', title: `🏷️ Tag request (employee link)${out.dupCount ? ' 🔁 duplicate' : ''} · ${employeeName}`,
           body: `${n} agent${n > 1 ? 's' : ''} · ${out.total} tags — ${tagBatchLine(out.created)}${office ? ` · ${office}` : ''}${note ? ` · ${note.slice(0, 80)}` : ''}${out.dupCount ? ` · 🔁 ${out.dupCount} agent ki request pehle se active (${dupIds.slice(0, 3).join(', ')})` : ''}`,
           target: 'admin', routeKey: 'tagRequest',
-          meta: { requestId: out.created[0].id, requestIds: out.created.map((r) => r.id), batch: out.batch, rows: out.rows, agents: n, total: out.total, publicLink: true, note, duplicates: out.dupCount, dupOf: dupIds, link: '#/tagRequest?view=requests' }
+          meta: { requestId: out.created[0].id, requestIds: out.created.map((r) => r.id), batch: out.batch, rows: out.rows, agents: n, total: out.total, publicLink: true, note, duplicates: out.dupCount, dupOf: dupIds, ...(linkedLiveSession ? { publicSessionId: linkedLiveSession.sessionId } : {}), link: '#/tagRequest?view=requests' }
         });
       } catch { /* notification optional */ }
       logAudit({ username: 'public-link', role: 'public', name: employeeName }, 'tag_request_public_created', {

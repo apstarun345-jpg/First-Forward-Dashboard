@@ -357,3 +357,115 @@ test('👤 employee-status — apni requests + counts, admin approve par status 
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+test('public Tag Request live share — opt-in, admin-only preview, request association and revocation', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'apna-public-live-'));
+  const mock = await startMockAppsScript({ secret: SECRET });
+  let server;
+  try {
+    server = await startServer(dir, mock.url);
+    const login = await jsonCall(server.base, '/api/auth/login', 'POST', { username: 'owner', password: 'initial-password' });
+    const admin = login.cookie;
+    assert.ok(admin, 'admin login cookie');
+
+    const missingConsent = await jsonCall(server.base, '/api/public/live-presence/start', 'POST', { consent: false }, '', '10.2.0.1');
+    assert.equal(missingConsent.res.status, 400, 'live-share opt-in mandatory');
+    const privateList = await jsonCall(server.base, '/api/public/live-presence');
+    assert.equal(privateList.res.status, 403, 'public visitors cannot list live sessions');
+
+    const started = await jsonCall(server.base, '/api/public/live-presence/start', 'POST', { consent: true }, '', '10.2.0.1');
+    assert.equal(started.res.status, 201, JSON.stringify(started.json));
+    const { sessionId, token } = started.json;
+    assert.ok(sessionId && token, 'session ID + private token issued');
+    assert.ok(!JSON.stringify(started.json.person).includes(token), 'preview data must not leak the token');
+
+    const pulse = await jsonCall(server.base, '/api/public/live-presence', 'POST', {
+      sessionId, token, page: 'tag-request', visible: true, engaged: true,
+      pointer: { x: 18, y: 42 }, viewport: { w: 390, h: 844 }, scroll: { y: 140, h: 1800 },
+      events: [{ kind: 'focus', label: 'Form field: Employee name' }, { kind: 'click', label: 'Submit request' }]
+    }, '', '10.2.0.1');
+    assert.equal(pulse.res.status, 200, JSON.stringify(pulse.json));
+
+    const submit = await jsonCall(server.base, '/api/public/tag-request', 'POST', {
+      employee: { name: 'Live Share Employee', mobile: '9876501122', address: '9, Live Share Road, Jaipur', pincode: '302019' },
+      agents: [{ agentId: '1001', agentName: 'Rahul Sharma', channel: 'ff', mobile: '9876501123', address: '12, Gandhi Nagar, Jaipur', pincode: '302015', rows: [{ cls: 'VC4', approved: 5 }] }],
+      liveShare: { sessionId, token }
+    }, '', '10.2.0.1');
+    assert.equal(submit.res.status, 201, JSON.stringify(submit.json));
+
+    const list = await jsonCall(server.base, '/api/public/live-presence', 'GET', undefined, admin);
+    assert.equal(list.res.status, 200, JSON.stringify(list.json));
+    const item = list.json.sessions.find((x) => x.sessionId === sessionId);
+    assert.ok(item, 'opted-in public session shown to admin');
+    assert.equal(item.name, 'Live Share Employee', 'employee name linked only after form submit');
+    assert.deepEqual(item.requestIds, [String(submit.json.request.id)]);
+    assert.ok(item.lastEvent && /submitted/i.test(item.lastEvent.label));
+    assert.ok(!JSON.stringify(list.json).includes(token), 'admin list excludes private session tokens');
+
+    const detail = await jsonCall(server.base, '/api/public/live-presence?sessionId=' + encodeURIComponent(sessionId), 'GET', undefined, admin);
+    assert.equal(detail.res.status, 200);
+    assert.equal(detail.json.person.pointer.x, 18);
+    assert.equal(detail.json.person.events.some((x) => x.label === 'Form field: Employee name'), true);
+    assert.ok(!JSON.stringify(detail.json).includes(token), 'session detail excludes private session token');
+
+    const wrongStop = await jsonCall(server.base, '/api/public/live-presence/stop', 'POST', { sessionId, token: 'incorrect-token' });
+    assert.equal(wrongStop.res.status, 200);
+    const stillThere = await jsonCall(server.base, '/api/public/live-presence?sessionId=' + encodeURIComponent(sessionId), 'GET', undefined, admin);
+    assert.ok(stillThere.json.person, 'wrong token cannot revoke session');
+
+    const stopped = await jsonCall(server.base, '/api/public/live-presence/stop', 'POST', { sessionId, token });
+    assert.equal(stopped.res.status, 200);
+    const gone = await jsonCall(server.base, '/api/public/live-presence?sessionId=' + encodeURIComponent(sessionId), 'GET', undefined, admin);
+    assert.equal(gone.json.person, null, 'employee can end live share and revoke admin preview');
+  } finally {
+    if (server) await server.stop();
+    await mock.close();
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('public Tag Request link visit — admin notification feed, passive preview, heartbeat and request association', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'apna-public-visit-'));
+  const mock = await startMockAppsScript({ secret: SECRET });
+  let server;
+  try {
+    server = await startServer(dir, mock.url);
+    const login = await jsonCall(server.base, '/api/auth/login', 'POST', { username: 'owner', password: 'initial-password' });
+    const admin = login.cookie;
+    assert.ok(admin, 'admin login cookie');
+
+    const opened = await jsonCall(server.base, '/api/public/tag-request/visit', 'POST', { visible: true }, '', '10.2.0.9');
+    assert.equal(opened.res.status, 200, JSON.stringify(opened.json));
+    assert.ok(opened.json.visitId, 'server-issued passive visit ID');
+
+    const list1 = await jsonCall(server.base, '/api/public/live-presence', 'GET', undefined, admin);
+    assert.equal(list1.res.status, 200, JSON.stringify(list1.json));
+    let visit = list1.json.sessions.find((x) => x.sessionId === opened.json.visitId);
+    assert.ok(visit, 'link visitor appears in Admin activity list');
+    assert.equal(visit.sharing, false, 'passive visit must not imply screen-sharing consent');
+    assert.equal(visit.pointer, null, 'passive visit exposes no pointer telemetry');
+    assert.equal(visit.lastEvent.label, 'Employee Tag Request link opened');
+
+    const heartbeat = await jsonCall(server.base, '/api/public/tag-request/visit', 'POST', { visitId: opened.json.visitId, visible: true }, '', '10.2.0.9');
+    assert.equal(heartbeat.res.status, 200, JSON.stringify(heartbeat.json));
+    assert.equal(heartbeat.json.visitId, opened.json.visitId, 'same tab heartbeat keeps the same visit');
+
+    const submit = await jsonCall(server.base, '/api/public/tag-request', 'POST', {
+      employee: { name: 'Public Link Employee', mobile: '9876501122', address: '9, Public Link Road, Jaipur', pincode: '302019' },
+      publicVisitId: opened.json.visitId,
+      agents: [{ agentId: '1001', agentName: 'Rahul Sharma', channel: 'ff', mobile: '9876501123', address: '12, Gandhi Nagar, Jaipur', pincode: '302015', rows: [{ cls: 'VC4', approved: 5 }] }]
+    }, '', '10.2.0.9');
+    assert.equal(submit.res.status, 201, JSON.stringify(submit.json));
+
+    const detail = await jsonCall(server.base, '/api/public/live-presence?sessionId=' + encodeURIComponent(opened.json.visitId), 'GET', undefined, admin);
+    assert.equal(detail.res.status, 200, JSON.stringify(detail.json));
+    assert.equal(detail.json.person.name, 'Public Link Employee');
+    assert.deepEqual(detail.json.person.requestIds, [String(submit.json.request.id)]);
+    assert.equal(detail.json.person.sharing, false, 'request association must not turn on live telemetry');
+    assert.ok(detail.json.person.events.some((x) => /submitted/i.test(x.label)));
+  } finally {
+    if (server) await server.stop();
+    await mock.close();
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
