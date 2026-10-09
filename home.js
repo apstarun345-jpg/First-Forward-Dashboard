@@ -488,6 +488,10 @@ FF.pages = FF.pages || {};
       kpi('g7', 'Chassis', '🔧', U.fmt(sc.chassis), `${momChip(sc.chassis, lastSum.chassis)}<br>${splitFoot(M.summary(sf.ff, curKey).chassis, M.summary(sf.gv, curKey).chassis)}`, `src=both&scope=mtd&ym=${curKey}&f=chassis`),
       kpi('g2', `Expected in ${U.labelYM(curKey)}`, '🎯', U.fmt(expected),
         `run-rate <b>${U.fmt(rate, true)}</b>/din · ${observedDay}/${daysInMonth} reported din · aaj exclude<br><span class="dim">report till <b>${observedDay ? esc(U.labelDateKey(`${curKey}-${String(observedDay).padStart(2,'0')}`)) : '—'}</b> · last month full <b>${U.fmt(lastTotalFull)}</b> · expected <b>${U.fmt(lastExpected)}</b></span>`,
+        `src=both&scope=mtd&ym=${curKey}`),
+      kpi('g13', 'Run Rate · Per Day', '⚡',
+        `<div class="hm-runrate-list"><div><span>VC4</span><b>${U.fmt(observedDay ? reportedSc.vc4 / observedDay : 0, true)}</b></div><div><span>VC20</span><b>${U.fmt(observedDay ? reportedSc.vc20 / observedDay : 0, true)}</b></div><div><span>VC5+</span><b>${U.fmt(observedDay ? reportedSc.vc5p / observedDay : 0, true)}</b></div></div>`,
+        `Daily average · EIR till ${esc(ctx.receivedDate ? U.labelDate(ctx.receivedDate, true) : '—')} · 1 day lag`,
         `src=both&scope=mtd&ym=${curKey}`)
     ];
     return card(`📅 ${esc(monthLabel)} · KPI cards <span class="dim">· issuance EIR se (GV = master ID ${esc(FF.config.eir.gvMasterId || '5845036')}, baaki FF)${sg.liveToday ? ' · GV aaj GV Master se live' : ''} · har card ke andar last month vs current month + %</span>`,
