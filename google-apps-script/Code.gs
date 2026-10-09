@@ -60,6 +60,126 @@ const GV_SHEET_NAME = String(PropertiesService.getScriptProperties().getProperty
 const TAG_REQUEST_SPREADSHEET_ID = '13eyCSDnXysQM-nWymBE5yPeKw8fnbVCY-hCTqJSPUsM';
 const TAG_REQUEST_DEFAULT_TAB = 'Tag Requests';
 
+/**
+ * 📗 Tag Request column-order safety (v3.66).
+ * The admin can reorder columns after a tab already has data. Never append values
+ * against a stale row-1 header: migrate the existing data by header name first.
+ * The selected columns become the first columns in the exact saved order; existing
+ * non-selected columns are retained at the end so historical information is not lost.
+ */
+function tagSheetColumnKey_(value) {
+  var key = String(value == null ? '' : value).trim().toLowerCase()
+    .replace(/[^a-z0-9%]+/g, ' ').replace(/\\s+/g, ' ').trim();
+  var aliases = {
+    'agent name': 'agent',
+    'tl name': 'tl',
+    'employee name': 'employee',
+    'suggested after stock': 'suggested stock',
+    'suggested stock': 'suggested stock',
+    'suggested without stock': 'suggested without stock',
+    'suggested w o stock': 'suggested without stock'
+  };
+  return aliases[key] || key;
+}
+
+function alignTagRequestSheetColumns_(sh, desiredHeader, incomingRows) {
+  var incomingHeader = Array.isArray(desiredHeader) ? desiredHeader.map(function (h) { return String(h == null ? '' : h).trim(); }) : [];
+  var rows = Array.isArray(incomingRows) ? incomingRows : [];
+  if (!incomingHeader.length || sh.getLastRow() < 1) return { header: incomingHeader, rows: rows };
+
+  var lastRow = sh.getLastRow();
+  var lastCol = sh.getLastColumn();
+  if (lastCol < 1) return { header: incomingHeader, rows: rows };
+
+  var oldRange = sh.getRange(1, 1, lastRow, lastCol);
+  var oldValues = oldRange.getValues();
+  var oldFormulas = oldRange.getFormulas();
+  var oldFormats = oldRange.getNumberFormats();
+  var oldHeader = oldRange.getDisplayValues()[0].map(function (h) { return String(h == null ? '' : h).trim(); });
+  var nonEmptyOld = oldHeader.filter(function (h) { return !!h; });
+  if (!nonEmptyOld.length) {
+    throw new Error('Existing sheet me row 1 par column headings nahi mile. Pehli row me headings rakho ya naya tab select karo; wrong-column entry rok di gayi.');
+  }
+
+  var incomingKeys = incomingHeader.map(tagSheetColumnKey_);
+  var seenIncoming = {};
+  incomingKeys.forEach(function (k) {
+    if (!k) throw new Error('Selected columns me blank heading hai; settings me columns check karo.');
+    if (seenIncoming[k]) throw new Error('Duplicate column heading "' + k + '" hai; settings me duplicate column hatao.');
+    seenIncoming[k] = true;
+  });
+
+  var oldKeys = oldHeader.map(tagSheetColumnKey_);
+  var seenOld = {};
+  oldKeys.forEach(function (k, col) {
+    if (!k) {
+      // A blank title is harmless only when the column is truly empty.
+      for (var rr = 1; rr < lastRow; rr++) {
+        var v = oldValues[rr][col];
+        var formula = oldFormulas[rr][col];
+        if ((v !== '' && v !== null) || formula) {
+          throw new Error('Existing sheet me column ' + (col + 1) + ' ka header khaali hai lekin data hai. Header fix karo; data safe rakhne ke liye entry roki gayi.');
+        }
+      }
+      return;
+    }
+    if (seenOld[k]) throw new Error('Existing sheet me duplicate heading "' + k + '" hai. Duplicate headings fix karo; wrong-column entry roki gayi.');
+    seenOld[k] = true;
+  });
+
+  var matches = incomingKeys.filter(function (k) { return !!seenOld[k]; }).length;
+  if (matches < Math.min(2, incomingHeader.length)) {
+    throw new Error('Google Sheet ki row 1 ke headings selected columns se match nahi hue. Headings ko Tag Request settings ke labels se match karo ya naya tab select karo; data galat column me likhne se rok diya.');
+  }
+
+  // Desired order first. Keep legacy/unselected columns afterwards, including their data.
+  var targetHeader = incomingHeader.slice();
+  var targetKeys = {};
+  incomingKeys.forEach(function (k) { targetKeys[k] = true; });
+  oldHeader.forEach(function (h, idx) {
+    var k = oldKeys[idx];
+    if (h && k && !targetKeys[k]) {
+      targetHeader.push(h);
+      targetKeys[k] = true;
+    }
+  });
+
+  var sameLayout = targetHeader.length === oldHeader.length &&
+    targetHeader.every(function (h, idx) { return tagSheetColumnKey_(h) === oldKeys[idx]; });
+  if (sameLayout) return { header: incomingHeader, rows: rows };
+
+  var oldColByKey = {};
+  oldKeys.forEach(function (k, idx) { if (k) oldColByKey[k] = idx; });
+  var rewritten = [targetHeader.slice()];
+  var rewrittenFormats = [targetHeader.map(function () { return '@'; })];
+  for (var r = 1; r < lastRow; r++) {
+    var newRow = [];
+    var newFormats = [];
+    targetHeader.forEach(function (h) {
+      var oldCol = oldColByKey[tagSheetColumnKey_(h)];
+      if (oldCol === undefined) {
+        newRow.push('');
+        newFormats.push('@');
+      } else {
+        newRow.push(oldFormulas[r][oldCol] || oldValues[r][oldCol]);
+        newFormats.push(oldFormats[r][oldCol] || '@');
+      }
+    });
+    rewritten.push(newRow);
+    rewrittenFormats.push(newFormats);
+  }
+
+  if (sh.getMaxColumns() < targetHeader.length) {
+    sh.insertColumnsAfter(sh.getMaxColumns(), targetHeader.length - sh.getMaxColumns());
+  }
+  var destination = sh.getRange(1, 1, rewritten.length, targetHeader.length);
+  destination.setValues(rewritten);
+  destination.setNumberFormats(rewrittenFormats);
+  try { sh.getRange(1, 1, 1, targetHeader.length).setFontWeight('bold'); } catch (e) { /* cosmetic */ }
+  return { header: incomingHeader, rows: rows };
+}
+
+
 const TAB = 'APP_STORAGE';
 const CHUNK = 45000; // a Google Sheets cell holds max 50,000 characters
 const KINDS = ['users', 'sessions', 'settings', 'resets', 'notify'];
@@ -357,6 +477,11 @@ function doPost(e) {
       var header = Array.isArray(body.header) ? body.header.map(function (h) { return String(h == null ? '' : h); }) : [];
       var rows = Array.isArray(body.rows) ? body.rows.slice(0, 500) : [];
       rows.forEach(function (r) { if (!Array.isArray(r)) throw new Error('rows must be arrays of values'); });
+      // Reconcile the existing tab with the saved column order before calculating row positions.
+      // Without this step, changing the admin order would append new values under the old headings.
+      var aligned = alignTagRequestSheetColumns_(sh, header, rows);
+      header = aligned.header;
+      rows = aligned.rows;
       var startRow = sh.getLastRow() + 1;
 
       // 🧩 Tag Requests: Agent groups are separated by exactly one blank row.
