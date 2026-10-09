@@ -10,15 +10,58 @@ const code = await fs.readFile(path.join(ROOT, 'bulkTagStatus.js'), 'utf8');
 const FF = {
   util: {
     esc: (v) => String(v == null ? '' : v),
-    parseDate: () => null
+    parseDate: (v) => {
+      if (v && typeof v.getTime === 'function') return v;
+      if (typeof v === 'string' && /^Date\(/.test(v)) {
+        const m = v.match(/^Date\((\d{4}),(\d{1,2}),(\d{1,2})/);
+        if (m) return new Date(Number(m[1]), Number(m[2]), Number(m[3]));
+      }
+      if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)) return new Date(v + 'T00:00:00');
+      return null;
+    },
+    dateKey: (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'),
+    labelDate: (d) => d.toISOString().slice(0, 10)
   },
-  data: {},
+  data: {
+    cellText: (cell) => !cell || cell.v === null || cell.v === undefined ? '' : (cell.f !== undefined ? String(cell.f) : String(cell.v)),
+    cellDate: (cell) => cell && cell.v && typeof cell.v.getTime === 'function' ? cell.v : null
+  },
   config: {},
   pages: {}
 };
 const context = { window: { FF }, console };
 vm.runInNewContext(code, context, { filename: 'bulkTagStatus.js' });
 const BTS = FF.bulkTagStatus._test;
+
+
+test('Bulk Tag Status audit counts unique blank-issuer Tag IDs by date and excludes IDs found in GV Master', () => {
+  const cell = (v, f) => v === null || v === undefined ? { v: null } : { v, ...(f === undefined ? {} : { f }) };
+  const cols = [
+    { label: 'TAG_ID' }, { label: 'ISSUE_DATE', type: 'date' }, { label: 'TAG_ISSUING_AGENT_ID' }
+  ];
+  const rows = [
+    [cell('T100'), cell('Date(2026,9,9)', '2026-10-09'), cell(null)],
+    [cell('T100'), cell('Date(2026,9,9)', '2026-10-09'), cell(null)],
+    [cell('T200'), cell('Date(2026,9,9)', '2026-10-09'), cell(null)],
+    [cell('T300'), cell('Date(2026,9,8)', '2026-10-08'), cell('FF001')],
+    [cell(null), cell('Date(2026,9,9)', '2026-10-09'), cell(null)],
+    [cell('T400'), cell(null), cell(null)]
+  ];
+  const built = BTS.buildAuditGroups(rows, new Set(['T200']), 0, 1, 2, cols);
+  const dated = built.groups.find((g) => g.key === '2026-10-09');
+  const noDate = built.groups.find((g) => g.key === '__NO_DATE__');
+  assert.equal(dated.count, 1);
+  assert.equal(dated.eirRows, 2);
+  assert.deepEqual(dated.normalizedIds, ['T100']);
+  assert.equal(noDate.count, 1);
+  assert.equal(built.eirBlankRows, 5);
+  assert.equal(built.skippedNoTagId, 1);
+});
+
+test('Bulk Tag Status locates the exact TAG_ISSUING_AGENT_ID header', () => {
+  const cols = [{ label: 'TAG_ID' }, { label: 'Tag Issuing Agent Id' }, { label: 'ISSUE_DATE' }];
+  assert.equal(BTS.headerIndex(cols, ['TAG_ISSUING_AGENT_ID']), 1);
+});
 
 test('Bulk Tag Status parses header-based VRN / Tag ID / Barcode tables', () => {
   const parsed = BTS.parseInputText([
