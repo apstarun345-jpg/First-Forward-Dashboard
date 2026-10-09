@@ -500,6 +500,61 @@ FF.pages = FF.pages || {};
       `<a class="btn small" href="#/tagIssued?period=month">🏷️ Tag Issued →</a><a class="btn small" href="#/trend">📈 Trend →</a>`);
   }
 
+  // 🎯 Class-wise target achievement. Actual counts are scoped to agents who have a target for that class.
+  const TARGET_CLASSES = [{ key: 'vc4', label: 'VC4', group: 'VC4', icon: '🚗', color: 'g3', gvField: 'vc4' }, { key: 'vc20', label: 'VC20', group: 'VC20', icon: '🛻', color: 'g8', gvField: 'vc20' }, { key: 'vc5p', label: 'VC5+', group: 'VC5+', icon: '🚚', color: 'g6', gvField: 'vc5p' }];
+  const targetAgentKey = (source, name) => `${source}|${U.clean(name).toUpperCase().replace(/\\s+/g, ' ')}`;
+  const targetSource = (t) => { const raw = String(t && t.source || String(t && t.key || '').split('|')[0]).toLowerCase(); return /gv/.test(raw) ? 'gv' : 'ff'; };
+  const classTargetsConfigured = (t) => TARGET_CLASSES.some((c) => Number(t && t.classTargets && t.classTargets[c.key]) > 0);
+  function targetAchievementSummary(targets, ym, ffClassRows, gvAgentRows, allowedChannels) {
+    const allowed = new Set(allowedChannels || ['ff', 'gv']);
+    const stats = Object.fromEntries(TARGET_CLASSES.map((c) => [c.key, { key: c.key, label: c.label, icon: c.icon, target: 0, issued: 0, remaining: 0, pct: null }]));
+    const eligible = Object.fromEntries(TARGET_CLASSES.map((c) => [c.key, new Set()]));
+    for (const t of targets || []) {
+      if (!t || t.ym !== ym) continue;
+      const source = targetSource(t); if (!allowed.has(source)) continue;
+      const name = t.agent || String(t.key || '').split('|').slice(1).join('|');
+      const key = targetAgentKey(source, name);
+      for (const c of TARGET_CLASSES) {
+        const target = Math.max(0, Number(t.classTargets && t.classTargets[c.key]) || 0);
+        if (!target) continue;
+        stats[c.key].target += target; eligible[c.key].add(key);
+      }
+    }
+    const add = (source, name, group, value) => {
+      const cls = TARGET_CLASSES.find((c) => c.group === String(group || '').toUpperCase());
+      if (!cls || !eligible[cls.key].has(targetAgentKey(source, name))) return;
+      stats[cls.key].issued += Math.max(0, Number(value) || 0);
+    };
+    for (const row of ffClassRows || []) {
+      if (!row || row.ym !== ym || String(row.channel || '').toLowerCase() !== 'first forward') continue;
+      add('ff', row.name || row.agentName, row.group, row.n);
+    }
+    for (const row of gvAgentRows || []) {
+      if (!row) continue;
+      add('gv', row.agentName || row.name, 'VC4', row.vc4);
+      add('gv', row.agentName || row.name, 'VC20', row.vc20);
+      add('gv', row.agentName || row.name, 'VC5+', row.vc5p);
+    }
+    for (const c of TARGET_CLASSES) {
+      const row = stats[c.key]; row.remaining = Math.max(0, row.target - row.issued);
+      row.pct = row.target > 0 ? (row.issued / row.target) * 100 : null;
+    }
+    const totalTarget = TARGET_CLASSES.reduce((sum, c) => sum + stats[c.key].target, 0);
+    const totalIssued = TARGET_CLASSES.reduce((sum, c) => sum + stats[c.key].issued, 0);
+    return { classes: stats, totalTarget, totalIssued, totalRemaining: Math.max(0, totalTarget - totalIssued), totalPct: totalTarget > 0 ? (totalIssued / totalTarget) * 100 : null, configured: totalTarget > 0 };
+  }
+  function targetAchievementHtml(summary, ym) {
+    const metric = (cls, title, icon, row) => kpi(cls, title, icon, row.pct === null ? '—' : `${Math.round(row.pct)}%`,
+      row.target > 0 ? `Target <b>${U.fmt(row.target)}</b> · Issued <b>${U.fmt(row.issued)}</b><br>Remaining <b>${U.fmt(row.remaining)}</b>` : 'Class-wise target set nahi hai');
+    if (!summary || !summary.configured) return card('🎯 Target Achievement · VC4 / VC20 / VC5+',
+      '<div class="hm-target-empty"><b>Class-wise targets abhi set nahi hain.</b><p>Agent Targets page par VC4, VC20 aur VC5+ ke targets save karo. Purana overall target alag se preserve rahega.</p><a class="btn small primary" href="#/targets">🎯 Set class-wise targets</a></div>', '');
+    const cards = TARGET_CLASSES.map((c) => metric(c.color, `${c.label} Achievement`, c.icon, summary.classes[c.key])).join('');
+    const total = { target: summary.totalTarget, issued: summary.totalIssued, remaining: summary.totalRemaining, pct: summary.totalPct };
+    return card(`🎯 Target Achievement <span class="dim">· ${esc(U.labelYM(ym, true))}</span>`,
+      `<div class="kpi-grid mini hm-target-grid">${cards}${metric('g1', 'Total Achievement', '🏆', total)}</div><p class="dim small hm-target-note">Issued count sirf un agents ka hai jinke us class ke liye target set hain. Actual class counts existing EIR / GV Master data se calculate hote hain; extra target API call nahi hoti.</p>`,
+      '<a class="btn small" href="#/targets">⚙️ Manage targets →</a>');
+  }
+
   // ---------------------------------------------------------------- management pulse (uses already-loaded data; no extra API call)
   function managementPulseHtml(ctx, sf, liveState, stock) {
     const reportDay = Math.max(1, Number(ctx && ctx.observedDay) || 1);
@@ -627,6 +682,7 @@ FF.pages = FF.pages || {};
       </div>
       <div id="home-gv-live">${U.spinner('GV aaj ka live data aaya ja raha hai…')}</div>
       <div id="home-month">${U.spinner('EIR se month KPI cards ban rahe hain…')}</div>
+      <div id="home-target-achievement">${U.spinner('Class-wise target achievement calculate ho raha hai…')}</div>
       <div id="home-pulse"></div>
       <div id="home-charts">${U.spinner('Charts…')}</div>
       <div id="home-stock">${U.spinner('Stock (StockDataa + Tag Assignment)…')}</div>
@@ -639,6 +695,7 @@ FF.pages = FF.pages || {};
     const monthMount = U.$('#home-month', root);
     const chartMount = U.$('#home-charts', root);
     const pulseMount = U.$('#home-pulse', root);
+    const targetAchievementMount = U.$('#home-target-achievement', root);
     const stockMount = U.$('#home-stock', root);
 
     // ⚡ Home first paint: GV-only today endpoint is intentionally separate from the heavier
@@ -653,9 +710,23 @@ FF.pages = FF.pages || {};
     const stockP = canFf ? S.need('stock').catch(() => null) : Promise.resolve(null);
     const gvStockP = canGv ? G.need('stockClass').catch(() => null) : Promise.resolve(null);
     const gvMasterP = canGv ? G.need('master').catch(() => null) : Promise.resolve(null);
+    const currentTargetYm = U.ymKey(TODAY());
+    const savedTargetsForMonth = ((FF.auth.settings && FF.auth.settings.targets) || []).filter((t) => t && t.ym === currentTargetYm && classTargetsConfigured(t) && ((targetSource(t) === 'ff' && canFf) || (targetSource(t) === 'gv' && canGv)));
+    const needsFfTargetData = savedTargetsForMonth.some((t) => targetSource(t) === 'ff');
+    const needsGvTargetData = savedTargetsForMonth.some((t) => targetSource(t) === 'gv');
+    const targetClassDataP = savedTargetsForMonth.length ? Promise.all([
+      S.need('agentClass').then((rows) => ({ rows: Array.isArray(rows) ? rows : [], error: '' })).catch((err) => ({ rows: null, error: err && err.message || 'Agent class data unavailable' })),
+      needsGvTargetData ? gvMasterP.then((ok) => ({ ok: !!ok, error: G.error && G.error('master') || '' })).catch((err) => ({ ok: false, error: err && err.message || 'GV Master unavailable' })) : Promise.resolve({ ok: true, error: '' })
+    ]).then(([ffData, gvData]) => {
+      let gvRows = [];
+      if (needsGvTargetData && gvData.ok && G.agentRollup) { try { gvRows = G.agentRollup(currentTargetYm) || []; } catch { gvRows = []; } }
+      const error = (needsFfTargetData && ffData.error) || (needsGvTargetData && (!gvData.ok || gvData.error) ? (gvData.error || 'GV Master data unavailable') : '');
+      return { ffRows: ffData.rows || [], gvRows, error };
+    }) : Promise.resolve(null);
 
     // Repaint kit (GV Master load hone par month cards dobara banti hain — aaj ke live rows ke saath).
     const ui = { ready: false, sf: null, ctx: null, sc: null, wdBars: null, liveToday: false };
+    let targetAchievementData = { ready: !savedTargetsForMonth.length, ffRows: [], gvRows: [], error: '' };
     let liveFromFeed = null;
     let feedLiveRows = [];
     let liveRows = [];
@@ -720,6 +791,15 @@ FF.pages = FF.pages || {};
       if (!monthMount || !monthMount.isConnected || !ui.ready) return;
       monthMount.innerHTML = monthKpiHtml(ui.ctx, ui.sf, { liveToday: ui.liveToday }, ui.sc, ui.sf.rows);
     }
+    function paintTargetAchievement() {
+      if (!targetAchievementMount || !targetAchievementMount.isConnected) return;
+      const targets = ((FF.auth.settings && FF.auth.settings.targets) || []).filter((t) => t && t.ym === currentTargetYm && classTargetsConfigured(t) && ((targetSource(t) === 'ff' && canFf) || (targetSource(t) === 'gv' && canGv)));
+      if (!targets.length) { targetAchievementMount.innerHTML = targetAchievementHtml({ configured: false }, currentTargetYm); return; }
+      if (!targetAchievementData.ready) { targetAchievementMount.innerHTML = U.spinner('Saved class-wise targets ke against issuance calculate ho raha hai…'); return; }
+      if (targetAchievementData.error) { targetAchievementMount.innerHTML = card('🎯 Target Achievement · VC4 / VC20 / VC5+', `<div class="hm-target-empty">Class-wise issuance load nahi ho paaya: ${esc(targetAchievementData.error)}<br><a class="btn small" href="#/targets">Targets check karo</a></div>`, ''); return; }
+      const summary = targetAchievementSummary(targets, currentTargetYm, targetAchievementData.ffRows, targetAchievementData.gvRows, [canFf ? 'ff' : '', canGv ? 'gv' : ''].filter(Boolean));
+      targetAchievementMount.innerHTML = targetAchievementHtml(summary, currentTargetYm);
+    }
     function paintPulse(stock) {
       if (!pulseMount || !pulseMount.isConnected || !ui.ready) return;
       pulseMount.innerHTML = managementPulseHtml(ui.ctx, ui.sf, liveState, stock || null);
@@ -772,7 +852,14 @@ FF.pages = FF.pages || {};
       });
     }
     bindExplorerEvents();
-    function paintAll() { paintLive(); paintMonth(); paintPulse(); paintCharts(); }
+    function paintAll() { paintLive(); paintMonth(); paintTargetAchievement(); paintPulse(); paintCharts(); }
+    targetAchievementDataP.then((result) => {
+      if (result) targetAchievementData = { ready: true, ...result };
+      paintTargetAchievement();
+    }).catch((err) => {
+      targetAchievementData = { ready: true, ffRows: [], gvRows: [], error: err && err.message || 'Class-wise target data unavailable' };
+      paintTargetAchievement();
+    });
 
     // 🟢 First visible live source: only GV Master + today, no FF/history wait.
     paintLive();
@@ -871,6 +958,7 @@ FF.pages = FF.pages || {};
     const sc = M.summary(st.rows, ctx.curKey);
     ui.ready = true; ui.sf = sf; ui.ctx = ctx; ui.sc = sc; ui.liveToday = st.gvLiveAdded;
     paintMonth();
+    paintTargetAchievement();
     paintPulse();
     paintCharts();
     // ---- 📦 Stock (FF = StockDataa · GV = Tag Assignment) ----------------------------------------
@@ -933,7 +1021,7 @@ FF.pages = FF.pages || {};
   }
 
   FF.pages.home = {
-    title: 'Home', render, monthKpiHtml, streams, liveRowsFromFeed,
+    title: 'Home', render, monthKpiHtml, streams, liveRowsFromFeed, targetAchievementSummary, targetAchievementHtml,
     explorer: {
       state: explorerFilters, filterRows: filterExplorerRows, totals: explorerTotals, daily: explorerDaily, html: explorerHtml,
       dateKey: explorerDateKey, rangePreset: explorerRangePreset, reset: resetExplorerFilters,
