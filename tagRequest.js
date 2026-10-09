@@ -1357,9 +1357,9 @@ body.colorful .from-hdr { color: #166534; }
           <div class="tr-row-meta">${agentMetaHtml(row)}</div>
           <div class="tr-tl-slot">${tlPanelHtml(row)}</div>
           <div class="tr-contact-grid">
-            <label class="field tr-span-all"><span class="dim small">🚚 Dispatch name${row.isTl ? ' *' : ''} <small class="dim">(label par jis naam se tag jayega — agent ka naam alag ho sakta hai${row.isTl ? ' · TL ko dispatch nahi hota, isliye zaroori' : ''})</small></span>
+            <label class="field tr-span-all"><span class="dim small">🚚 Dispatch name${row.isTl ? ' *' : ''}</span>
               <input class="input${badCls(row.id, 'dispatchName')}" data-tr-a="dispatchName" maxlength="120" placeholder="Jis naam par dispatch karna hai (khaali = agent ka naam)" autocomplete="off" value="${esc(row.dispatchName)}"></label>
-            <label class="field"><span class="dim small">📱 Agent mobile number${askMobile ? ' *' : ''}</span>
+            <label class="field"><span class="dim small">📱 Mobile number${askMobile ? ' *' : ''}</span>
               <input class="input${badCls(row.id, 'mobile')}" data-tr-a="mobile" inputmode="tel" maxlength="16" placeholder="10 digit mobile" autocomplete="off" value="${esc(row.mobile)}"></label>
             <label class="field"><span class="dim small">📮 Pincode${askAddress ? ' *' : ''}</span>
               <input class="input${badCls(row.id, 'pincode')}" data-tr-a="pincode" inputmode="numeric" maxlength="6" placeholder="6 digit pincode" autocomplete="off" value="${esc(row.pincode)}"></label>
@@ -1388,7 +1388,6 @@ body.colorful .from-hdr { color: #166534; }
     const busy = state.busy === 'send';
     body.innerHTML = `
       ${employeeCardHtml()}
-      ${employeeHistoryPanelHtml()}
       ${stockBoardHtml()}
       <section class="card tr-agents-card"><div class="card-head"><h3>🧑‍🤝‍🧑 Agent request <span class="count" data-tr-agents>${fmt(state.rows.length)} agent${state.rows.length === 1 ? '' : 's'}</span></h3>
         <div class="card-right dim">Har agent: naam · mobile · address · pincode · class-wise qty (0/khaali = nahi chahiye) · total <b data-tr-total>${fmt(grandTotal())}</b> tags</div></div>
@@ -1413,8 +1412,6 @@ body.colorful .from-hdr { color: #166534; }
     rootEl.querySelectorAll('.tr-agent-card').forEach(bindAgentCard);
     bindStockBoard(rootEl);
     bindFormGlobal();
-    // 🌐 Employee link: "👤 Meri requests" panel — Form tab par hi (employee ko Status tab kholna nahi padta).
-    if (isPublic()) { bindEmployeePanel(rootEl.querySelector('#tr-emp-history-panel')); ensureEmployeeSummaryLoaded(repaintEmployeePanel); }
   }
   /** Index aane par sirf meta + hints update (typing ke beech focus na toote). */
   function refreshFormMeta() {
