@@ -295,6 +295,32 @@ test('🔎 dropdown suggestions — partial names use direct fallback and both i
   assert.match(ms, /sug = U\.suggest\(input, \{\s*min: 1, max: 14/);
   assert.doesNotMatch(ms, /clearTimeout\(t\).*run\(input\.value, \{ open: false \}\)/s);
 });
+test('🎨 theme — normal light UI by default; dark splash styling is scoped only to the splash', async () => {
+  const index = await read('index.html');
+  const boot = await read('ui-boot.js');
+  assert.match(index, /#app-boot\{background:#0b1020 !important;color:#fff !important\}/);
+  assert.doesNotMatch(index, /html,body\{background:#0b1020 !important;color:#fff !important\}/);
+  assert.match(index, /styles\.css\?v=118/);
+  assert.match(index, /ui-boot\.js\?v=108/);
+  assert.match(index, /config\.js\?v=111/);
+  assert.match(boot, /localStorage\.getItem\('ff_theme_explicit'\)/);
+  assert.doesNotMatch(boot, /localStorage\.getItem\('ff_theme'\) === 'dark'/);
+});
+
+test('🏷️ Tag Request — column order list always renders with fallback fields and readable drag rows', async () => {
+  const tag = await read('tagRequest.js');
+  const css = await read('styles.css');
+  assert.match(tag, /const FALLBACK_SHEET_FIELDS = \{/);
+  assert.match(tag, /s\.fields && Object\.keys\(s\.fields\)\.length \? s\.fields : FALLBACK_SHEET_FIELDS/);
+  assert.match(tag, /data-tr-cols-order aria-label="Google Sheet column order"/);
+  assert.match(tag, /columns available · checked columns will be written in this exact order/);
+  assert.match(tag, /const refreshOrderIndexes = \(\) =>/);
+  assert.match(tag, /refreshOrderIndexes\(\);/);
+  assert.match(css, /\.tr-cols-order\{[\s\S]{0,500}display:flex !important/);
+  assert.match(css, /\.tr-cols-order \.tr-col-order\*\{color:#0f172a !important\}/);
+  assert.match(css, /html\[data-theme="dark"\] \.tr-cols-order \.tr-col-order \*\{color:#e2e8f0 !important\}/);
+});
+
 test('🚦 startup readiness — Render health stays green and storage retry is bounded', async () => {
   const server = await read('server.js');
   assert.match(server, /const bootState = \{ startedAt: Date\.now\(\), stage: 'starting', error: null \}/);
