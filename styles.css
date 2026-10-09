@@ -138,6 +138,18 @@ button { font: inherit; }
 .hm-runrate-list > div.is-total span { font-weight: 900; }
 .hm-runrate-list > div.is-total b { font-weight: 950; }
 
+/* Home target-achievement cards reuse the same gradient KPI surface as the monthly cards. */
+.kpi-grid.mini.hm-target-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 4px; }
+.hm-target-grid .kpi { min-height: 112px; }
+.hm-target-grid .kpi-value { font-size: clamp(23px, 2vw, 28px); }
+.hm-target-note { margin: 10px 2px 0; }
+.hm-target-empty { padding: 8px 2px 4px; line-height: 1.55; }
+.hm-target-empty p { margin: 4px 0 10px; }
+.tg-class-bulk { flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line); }
+.tg-class-bulk .tgt-input { width: 112px; }
+@media (max-width: 900px) { .kpi-grid.mini.hm-target-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 460px) { .kpi-grid.mini.hm-target-grid { grid-template-columns: 1fr 1fr; gap: 8px; } .hm-target-grid .kpi { padding: 11px; min-height: 116px; } .hm-target-grid .kpi-value { font-size: 22px; } .tg-class-bulk .tgt-input { width: 90px; } }
+
 
 .kpi-foot { font-size: 12px; opacity: .95; z-index: 1; margin-top: auto; }
 .kpi-foot b { font-weight: 800; }
