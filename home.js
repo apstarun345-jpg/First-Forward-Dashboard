@@ -541,7 +541,7 @@ FF.pages = FF.pages || {};
     }
     const totalTarget = TARGET_CLASSES.reduce((sum, c) => sum + stats[c.key].target, 0);
     const totalIssued = TARGET_CLASSES.reduce((sum, c) => sum + stats[c.key].issued, 0);
-    return { classes: stats, totalTarget, totalIssued, totalRemaining: Math.max(0, totalTarget - totalIssued), totalPct: totalTarget > 0 ? (totalIssued / totalTarget) * 100 : null, configured: totalTarget > 0 };
+    return { classes: stats, totalTarget, totalIssued, totalRemaining: TARGET_CLASSES.reduce((sum, c) => sum + stats[c.key].remaining, 0), totalPct: totalTarget > 0 ? (totalIssued / totalTarget) * 100 : null, configured: totalTarget > 0 };
   }
   function targetAchievementHtml(summary, ym) {
     const metric = (cls, title, icon, row) => kpi(cls, title, icon, row.pct === null ? '—' : `${Math.round(row.pct)}%`,
