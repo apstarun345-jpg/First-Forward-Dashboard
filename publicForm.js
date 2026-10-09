@@ -20,6 +20,8 @@ window.FF = window.FF || {};
   const U = FF.util;
   const esc = U.esc;
   const state = { config: null, error: '', at: 0 };
+  const publicVisit = { id: '', timer: null, busy: false, bound: false };
+  const PUBLIC_VISIT_KEY = 'ff_public_tag_request_visit_v1';
   const LIVE_SHARE_KEY = 'ff_public_tag_live_share_v1';
   const liveShare = { sessionId: '', token: '', enabled: false, busy: false, sending: false, timer: null, heartbeat: null, events: [], pointer: null, scrollY: 0, lastInteraction: Date.now(), lastSent: 0, dirty: false, banner: null, listenersBound: false, lastPointerAt: 0 };
   const isLiveMirror = () => { try { return new URLSearchParams(location.search).get('embed') === 'live'; } catch { return false; } };
@@ -230,6 +232,32 @@ window.FF = window.FF || {};
     return json || {};
   }
 
+  // Passive link presence: notify Admin that the public form was opened, without cursor,
+  // field contents, or screen telemetry. The session ID is random and tab-scoped.
+  async function pulsePublicVisit() {
+    if (isLiveMirror() || publicVisit.busy) return;
+    publicVisit.busy = true;
+    try {
+      const out = await api('/api/public/tag-request/visit', 'POST', {
+        visitId: publicVisit.id || '', visible: document.visibilityState === 'visible'
+      });
+      publicVisit.id = String(out.visitId || publicVisit.id || '');
+      if (publicVisit.id) try { sessionStorage.setItem(PUBLIC_VISIT_KEY, publicVisit.id); } catch { /* optional */ }
+    } catch { /* visit tracking must never block form usage */ }
+    finally { publicVisit.busy = false; }
+  }
+  function startPublicVisit() {
+    if (isLiveMirror()) return;
+    if (!publicVisit.id) try { publicVisit.id = sessionStorage.getItem(PUBLIC_VISIT_KEY) || ''; } catch { /* optional */ }
+    pulsePublicVisit();
+    if (!publicVisit.timer) publicVisit.timer = setInterval(pulsePublicVisit, 25000);
+    if (!publicVisit.bound) {
+      publicVisit.bound = true;
+      document.addEventListener('visibilitychange', pulsePublicVisit);
+      window.addEventListener('pageshow', pulsePublicVisit);
+    }
+  }
+
   /** Login screen ki jagah public form ka shell — sidebar/topbar chhupa hua (body.public-form). */
   function shell() {
     document.body.classList.add('public-form');
@@ -265,6 +293,7 @@ window.FF = window.FF || {};
         'Admin ne employee link filhaal OFF kar rakha hai. Apne manager se naya link maango.')}</div>`;
       return false;
     }
+    startPublicVisit();
     // Public form ka data sirf scoped public proxy se aata hai (login wala /api/gviz band rehta hai).
     FF.config.proxyPath = '/api/public/gviz';
     try {
@@ -290,5 +319,5 @@ window.FF = window.FF || {};
     return true;
   }
 
-  FF.publicForm = { active, boot, api, get config() { return state.config; }, liveShareCredentials() { return liveShare.enabled && liveShare.sessionId && liveShare.token ? { sessionId: liveShare.sessionId, token: liveShare.token } : null; } };
+  FF.publicForm = { active, boot, api, get config() { return state.config; }, publicVisitId() { return publicVisit.id || ''; }, liveShareCredentials() { return liveShare.enabled && liveShare.sessionId && liveShare.token ? { sessionId: liveShare.sessionId, token: liveShare.token } : null; } };
 })(window.FF);
