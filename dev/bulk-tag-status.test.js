@@ -52,7 +52,8 @@ test('Bulk Tag Status audit counts unique blank-issuer Tag IDs by date and exclu
   const noDate = built.groups.find((g) => g.key === '__NO_DATE__');
   assert.equal(dated.count, 1);
   assert.equal(dated.eirRows, 2);
-  assert.deepEqual(dated.normalizedIds, ['T100']);
+  assert.equal(dated.normalizedIds.length, 1);
+  assert.equal(dated.normalizedIds[0], 'T100');
   assert.equal(noDate.count, 1);
   assert.equal(built.eirBlankRows, 5);
   assert.equal(built.skippedNoTagId, 1);
