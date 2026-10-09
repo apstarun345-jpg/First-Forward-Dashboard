@@ -2,9 +2,9 @@
  *
  * Contract lock (server.js + google-apps-script/Code.gs 'appendrows'):
  *   • admin GET/PUT /api/tag-request-sheet — config durable (notify kind),
- *   • enabled + onSubmit → nayi request par sheet me header + rows append,
- *   • enabled + onStatus → status change par doosri entry (event status:…),
- *   • manual push (/api/tag-request-sheet/push) — admin drawer wala raasta,
+ *   • Pending submit never appends to Tag Requests sheet,
+ *   • first transition to Approved appends exactly once; Dispatched/status edits do not append,
+ *   • manual push is limited to approved requests and blocks duplicates,
  *   • rowMode agent/request — aggregation sahi, columns config ke hisaab se.
  */
 import test from 'node:test';
