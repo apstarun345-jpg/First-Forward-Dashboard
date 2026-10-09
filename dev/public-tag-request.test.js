@@ -387,7 +387,7 @@ test('public Tag Request live share — opt-in, admin-only preview, request asso
     assert.equal(pulse.res.status, 200, JSON.stringify(pulse.json));
 
     const submit = await jsonCall(server.base, '/api/public/tag-request', 'POST', {
-      employee: { name: 'Live Share Employee', mobile: '9876501122' },
+      employee: { name: 'Live Share Employee', mobile: '9876501122', address: '9, Live Share Road, Jaipur', pincode: '302019' },
       agents: [{ agentId: '1001', agentName: 'Rahul Sharma', channel: 'ff', mobile: '9876501123', address: '12, Gandhi Nagar, Jaipur', pincode: '302015', rows: [{ cls: 'VC4', approved: 5 }] }],
       liveShare: { sessionId, token }
     }, '', '10.2.0.1');
