@@ -246,6 +246,15 @@ FF.pages = FF.pages || {};
           <button class="btn small" id="tg-bulk-all">Poori list par apply</button>
           <label class="check" style="margin-left:auto"><input type="checkbox" id="tg-only" ${view.onlyWithTarget ? 'checked' : ''}> Sirf target wale</label>
         </div>
+        <div class="finder-row tg-class-bulk">
+          <b class="small">Class-wise bulk:</b>
+          <input class="input tgt-input" type="number" min="0" id="tg-bulk-vc4" placeholder="VC4 target">
+          <input class="input tgt-input" type="number" min="0" id="tg-bulk-vc20" placeholder="VC20 target">
+          <input class="input tgt-input" type="number" min="0" id="tg-bulk-vc5p" placeholder="VC5+ target">
+          <button class="btn small" id="tg-bulk-class-apply">Selected par apply</button>
+          <button class="btn small" id="tg-bulk-class-all">Filtered list par apply</button>
+          <small class="dim">Blank class unchanged rahegi · 0 se clear kar sakte ho</small>
+        </div>
       </div>
       <div id="tg-inner">${U.spinner('Agents aggregate ho rahe hain…')}</div>`;
     const inner = U.$('#tg-inner', root);
@@ -277,6 +286,7 @@ FF.pages = FF.pages || {};
       </div>`;
       const rowHtml = (r) => {
         const t = targetDrafts.get(r.key) || 0;
+        const ct = classTargetsFor(r.key);
         const p = t ? Math.min(150, Math.round((r.cur / t) * 100)) : 0;
         const bar = t ? `<div class="tgt-track"><div class="tgt-fill ${p >= 100 ? 'ok' : p >= 60 ? 'mid' : 'low'}" style="width:${Math.min(100, p)}%"></div></div><small class="dim">${p}%</small>` : '<span class="dim">—</span>';
         const g = r.growth === null ? '<span class="dim">new</span>' : U.deltaHtml(r.growth, { decimals: 0 });
@@ -291,12 +301,15 @@ FF.pages = FF.pages || {};
           <td class="num">${U.fmt(r.vc5p)}</td>
           <td class="num"><b>${U.fmt(r.comm)}</b> <small class="dim">(V20+V5+)</small></td>
           <td class="num">${g}</td>
-          <td class="num"><input class="input tgt-input" type="number" min="0" data-target="${esc(r.key)}" value="${t || ''}" placeholder="0"></td>
+          <td class="num"><input class="input tgt-input" type="number" min="0" data-target="${esc(r.key)}" value="${t || ''}" placeholder="0" aria-label="Overall target for ${esc(r.name)}"></td>
+          <td class="num"><input class="input tgt-input" type="number" min="0" data-class-target="vc4" data-class-target-key="${esc(r.key)}" value="${ct.vc4 || ''}" placeholder="0" aria-label="VC4 target for ${esc(r.name)}"></td>
+          <td class="num"><input class="input tgt-input" type="number" min="0" data-class-target="vc20" data-class-target-key="${esc(r.key)}" value="${ct.vc20 || ''}" placeholder="0" aria-label="VC20 target for ${esc(r.name)}"></td>
+          <td class="num"><input class="input tgt-input" type="number" min="0" data-class-target="vc5p" data-class-target-key="${esc(r.key)}" value="${ct.vc5p || ''}" placeholder="0" aria-label="VC5+ target for ${esc(r.name)}"></td>
           <td style="min-width:110px">${bar}</td></tr>`;
       };
       inner.innerHTML = `${kpis}
         ${card(`🎯 Target table <span class="dim">· ${U.fmt(rows.length)} agents · ${esc(srcLbl)} · ${esc(U.labelYM(view.ym))}${isCurMonth ? ' (MTD)' : ''}</span>`,
-        rows.length ? `<div class="table-wrap tall"><table class="tbl sticky-first"><thead><tr><th><label class="check"><input type="checkbox" id="tg-all" ${rows.length && rows.every((r) => selected.has(r.key)) ? 'checked' : ''}></label></th><th>Agent / TL</th><th>Source</th><th class="num">Last month</th><th class="num">${esc(U.labelYM(view.ym))}</th><th class="num">VC4</th><th class="num">VC20</th><th class="num">VC5+</th><th class="num" title="All Commercial = VC20 + VC5+ (NVC4)">All Comm</th><th class="num">Growth</th><th class="num">Target</th><th>Progress</th></tr></thead><tbody>${rows.slice(0, 400).map(rowHtml).join('')}</tbody></table></div>${rows.length > 400 ? '<p class="dim small">Pehle 400 rows — filter/search se list chhoti karo.</p>' : ''}` : '<div class="empty-state">Koi agent match nahi hua — filter badlo.</div>',
+        rows.length ? `<div class="table-wrap tall"><table class="tbl sticky-first"><thead><tr><th><label class="check"><input type="checkbox" id="tg-all" ${rows.length && rows.every((r) => selected.has(r.key)) ? 'checked' : ''}></label></th><th>Agent / TL</th><th>Source</th><th class="num">Last month</th><th class="num">${esc(U.labelYM(view.ym))}</th><th class="num">VC4</th><th class="num">VC20</th><th class="num">VC5+</th><th class="num" title="All Commercial = VC20 + VC5+ (NVC4)">All Comm</th><th class="num">Growth</th><th class="num">Overall target</th><th class="num">VC4 target</th><th class="num">VC20 target</th><th class="num">VC5+ target</th><th>Progress</th></tr></thead><tbody>${rows.slice(0, 400).map(rowHtml).join('')}</tbody></table></div>${rows.length > 400 ? '<p class="dim small">Pehle 400 rows — filter/search se list chhoti karo.</p>' : ''}` : '<div class="empty-state">Koi agent match nahi hua — filter badlo.</div>',
         `<button class="btn small" id="tg-select-page">☑ Visible select</button><button class="btn small" id="tg-clear-sel">✕ Selection clear</button><button class="btn small primary" id="tg-save" ${FF.auth.isAdmin() ? '' : 'disabled title="Admin only"'}>💾 Save targets</button><button class="btn small" id="tg-xlsx">⬇ Excel</button>`)}
         <p class="dim small">🚗 <b>VC4</b> = 4-wheeler (payable) · 🛻 <b>VC20</b> / <b>VC5+</b> = bade commercial vehicles · <b>All Comm = VC20 + VC5+ (NVC4)</b>. Targets month <b>${esc(U.labelYM(view.ym, true))}</b> ke liye save hote hain (settings me — Google Sheet storage backup ke saath). Progress = issuance ÷ target. ${FF.auth.isAdmin() ? '' : '<b>Save sirf admin kar sakta hai.</b>'}</p>`;
       const cnt = U.$('#tg-sel-count', body);
@@ -335,7 +348,7 @@ FF.pages = FF.pages || {};
         if (!selected.size) return U.toast('Pehle agents select karo (Quick select ya checkbox)', 'err');
         if (!v) return U.toast('Target value daalo', 'err');
         selected.forEach((k) => targetDrafts.set(k, v));
-        U.toast(`${selected.size} agents ko target ${U.fmt(v)} set hua — Save dabana mat bhoolna`, 'ok');
+        U.toast(`${selected.size} agents ko overall target ${U.fmt(v)} set hua — Save dabana mat bhoolna`, 'ok');
         draw(); return;
       }
       if (e.target.closest('#tg-bulk-all')) {
@@ -344,6 +357,25 @@ FF.pages = FF.pages || {};
         filteredRows().forEach((r) => targetDrafts.set(r.key, v));
         draw(); return;
       }
+      const applyClassBulk = (rows) => {
+        const values = CLASS_TARGETS.map((c) => {
+          const input = U.$(`#tg-bulk-${c.key}`, body);
+          return { key: c.key, value: input && input.value !== '' ? Math.max(0, Math.floor(Number(input.value) || 0)) : null };
+        }).filter((x) => x.value !== null);
+        if (!values.length) { U.toast('VC4 / VC20 / VC5+ me kam se kam ek target daalo', 'err'); return; }
+        rows.forEach((r) => {
+          const ct = classTargetsFor(r.key);
+          values.forEach((x) => { ct[x.key] = x.value; });
+          classTargetDrafts.set(r.key, ct);
+        });
+        U.toast(`${values.map((x) => x.key.toUpperCase() + ' ' + U.fmt(x.value)).join(' · ')} targets ${rows.length} agents par apply hue — Save dabana mat bhoolna`, 'ok');
+        draw();
+      };
+      if (e.target.closest('#tg-bulk-class-apply')) {
+        if (!selected.size) return U.toast('Pehle agents select karo (Quick select ya checkbox)', 'err');
+        applyClassBulk(list.filter((r) => selected.has(r.key))); return;
+      }
+      if (e.target.closest('#tg-bulk-class-all')) { applyClassBulk(filteredRows()); return; }
       const pick = e.target.closest('[data-pick]');
       if (pick) {
         const tr = pick.closest('tr'); const key = tr && tr.dataset.key;
@@ -352,7 +384,15 @@ FF.pages = FF.pages || {};
     });
     body.addEventListener('change', (e) => {
       const inp = e.target.closest('[data-target]');
-      if (inp) { const v = Number(inp.value) || 0; targetDrafts.set(inp.dataset.target, v); }
+      if (inp) { const v = Math.max(0, Math.floor(Number(inp.value) || 0)); targetDrafts.set(inp.dataset.target, v); return; }
+      const classInp = e.target.closest('[data-class-target]');
+      if (classInp) {
+        const key = classInp.dataset.classTargetKey, cls = classInp.dataset.classTarget;
+        if (!key || !CLASS_TARGETS.some((c) => c.key === cls)) return;
+        const ct = classTargetsFor(key);
+        ct[cls] = Math.max(0, Math.floor(Number(classInp.value) || 0));
+        classTargetDrafts.set(key, ct);
+      }
     });
   }
 
