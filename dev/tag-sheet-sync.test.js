@@ -85,6 +85,8 @@ test('tag request sheet sync — config, auto append on submit/status, manual pu
     }, admin);
     assert.equal(put.res.status, 200, JSON.stringify(put.json));
     assert.equal(put.json.config.tab, 'Tag Dispatch');
+    assert.equal(put.json.config.onSubmit, false, 'Pending submit par sheet sync forcibly OFF hai');
+    assert.equal(put.json.config.onStatus, true, 'Approval transition sync enabled hai');
     assert.deepEqual(put.json.config.columns, ['date', 'by', 'agent', 'tl', 'cls', 'approved', 'status']);
 
     // 3) connection test
@@ -92,47 +94,61 @@ test('tag request sheet sync — config, auto append on submit/status, manual pu
     assert.equal(tst.res.status, 200, JSON.stringify(tst.json));
     assert.equal(tst.json.ok, true);
 
-    // 4) nayi request → auto append (3 rows, header ke saath)
+    // 4) Pending submission must not create any Google Sheet rows.
     const created = await jsonCall(server.base, '/api/tag-requests', 'POST', requestBody(), admin);
     assert.equal(created.res.status, 201, JSON.stringify(created.json));
     const reqId = created.json.request.id;
-    await sleep(1200); // fire & forget push ka wait
+    await sleep(700);
     let tab = mock.appends.find((t) => t.tab === 'Tag Dispatch');
-    assert.ok(tab, `sheet me "Tag Dispatch" tab banana chahiye — got ${JSON.stringify(mock.appends.map((t) => t.tab))}`);
-    assert.deepEqual(tab.header, ['Date', 'By', 'Agent', 'TL', 'Tag Class', 'Approved qty', 'Status']);
-    assert.equal(tab.rows.length, 3, 'har agent × class ki alag row');
-    assert.deepEqual(tab.rows[0].slice(2, 5), ['Rahul Sharma', 'TL One', 'VC4']);
-    assert.equal(tab.rows[0][5], 25);
+    assert.equal(tab ? tab.rows.length : 0, 0, 'Pending submit par koi Sheet rows nahi');
 
-    // 5) status change → doosri entry (event status:approved)
+    // 5) Pending → Approved: exactly one append (3 class rows).
     await jsonCall(server.base, `/api/tag-requests/${encodeURIComponent(reqId)}`, 'PUT', { status: 'approved' }, admin);
     await sleep(1200);
     tab = mock.appends.find((t) => t.tab === 'Tag Dispatch');
-    assert.equal(tab.rows.length, 6, 'status change par bhi rows append honi chahiye');
+    assert.ok(tab, `sheet me "Tag Dispatch" tab banana chahiye — got ${JSON.stringify(mock.appends.map((t) => t.tab))}`);
+    assert.deepEqual(tab.header, ['Date', 'By', 'Agent', 'TL', 'Tag Class', 'Approved qty', 'Status']);
+    assert.equal(tab.rows.length, 3, 'approval par har agent × class ki alag row');
+    assert.deepEqual(tab.rows[0].slice(2, 5), ['Rahul Sharma', 'TL One', 'VC4']);
+    assert.equal(tab.rows[0][5], 25);
 
-    // 6) manual push — drawer wala button
-    const manual = await jsonCall(server.base, '/api/tag-request-sheet/push', 'POST', { id: reqId }, admin);
-    assert.equal(manual.res.status, 200, JSON.stringify(manual.json));
-    assert.equal(manual.json.added, 3);
-    tab = mock.appends.find((t) => t.tab === 'Tag Dispatch');
-    assert.equal(tab.rows.length, 9);
-
-    // 7) rowMode request — poori request ki ek row
-    await jsonCall(server.base, '/api/tag-request-sheet', 'PUT', { config: { rowMode: 'request', columns: ['by', 'agent', 'cls', 'approved'] } }, admin);
-    await jsonCall(server.base, '/api/tag-request-sheet/push', 'POST', { id: reqId }, admin);
-    tab = mock.appends.find((t) => t.tab === 'Tag Dispatch');
-    assert.equal(tab.rows.length, 10, 'request mode me ek hi total row');
-    assert.equal(tab.rows[9][3], 38, 'total approved = 25 + 4 + 9');
-
-    // 8) sync OFF → nayi request par kuch append nahi
-    await jsonCall(server.base, '/api/tag-request-sheet', 'PUT', { config: { enabled: false } }, admin);
-    await jsonCall(server.base, '/api/tag-requests', 'POST', requestBody(), admin);
+    // 6) Approved → Dispatched does not append the same request again.
+    await jsonCall(server.base, `/api/tag-requests/${encodeURIComponent(reqId)}`, 'PUT', { status: 'dispatched' }, admin);
     await sleep(900);
     tab = mock.appends.find((t) => t.tab === 'Tag Dispatch');
-    assert.equal(tab.rows.length, 10, 'sync OFF me nayi rows nahi aani chahiye');
+    assert.equal(tab.rows.length, 3, 'Dispatched par second entry nahi honi chahiye');
 
-    // 9) manual push while OFF → 400 (clear error)
-    const offPush = await jsonCall(server.base, '/api/tag-request-sheet/push', 'POST', { id: reqId }, admin);
+    // 7) Manual duplicate push is blocked.
+    const manual = await jsonCall(server.base, '/api/tag-request-sheet/push', 'POST', { id: reqId }, admin);
+    assert.equal(manual.res.status, 409, JSON.stringify(manual.json));
+    assert.equal(tab.rows.length, 3, 'manual push duplicate ko rokta hai');
+
+    // 8) Request row mode also waits for approval and writes only one aggregate row.
+    await jsonCall(server.base, '/api/tag-request-sheet', 'PUT', { config: { rowMode: 'request', columns: ['by', 'agent', 'cls', 'approved'] } }, admin);
+    const created2 = await jsonCall(server.base, '/api/tag-requests', 'POST', requestBody(), admin);
+    assert.equal(created2.res.status, 201, JSON.stringify(created2.json));
+    const reqId2 = created2.json.request.id;
+    await sleep(700);
+    tab = mock.appends.find((t) => t.tab === 'Tag Dispatch');
+    assert.equal(tab.rows.length, 3, 'nayi request Pending rehti hai, Sheet unchanged');
+    await jsonCall(server.base, `/api/tag-requests/${encodeURIComponent(reqId2)}`, 'PUT', { status: 'approved' }, admin);
+    await sleep(1200);
+    tab = mock.appends.find((t) => t.tab === 'Tag Dispatch');
+    assert.equal(tab.rows.length, 4, 'request mode approval par ek total row');
+    assert.equal(tab.rows[3][3], 38, 'total approved = 25 + 4 + 9');
+
+    // 9) Sync OFF means even approval cannot append.
+    await jsonCall(server.base, '/api/tag-request-sheet', 'PUT', { config: { enabled: false } }, admin);
+    const created3 = await jsonCall(server.base, '/api/tag-requests', 'POST', requestBody(), admin);
+    assert.equal(created3.res.status, 201, JSON.stringify(created3.json));
+    const reqId3 = created3.json.request.id;
+    await jsonCall(server.base, `/api/tag-requests/${encodeURIComponent(reqId3)}`, 'PUT', { status: 'approved' }, admin);
+    await sleep(900);
+    tab = mock.appends.find((t) => t.tab === 'Tag Dispatch');
+    assert.equal(tab.rows.length, 4, 'sync OFF me approval par bhi rows nahi aani chahiye');
+
+    // 10) Manual push while OFF returns a clear error.
+    const offPush = await jsonCall(server.base, '/api/tag-request-sheet/push', 'POST', { id: reqId2 }, admin);
     assert.equal(offPush.res.status, 400, 'sync OFF par manual push reject hona chahiye');
   } finally {
     if (server) await server.stop();
