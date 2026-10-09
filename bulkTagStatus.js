@@ -62,7 +62,7 @@ window.FF = window.FF || {};
   function headerKind(value) {
     const h = normHeader(value);
     if (!h) return '';
-    if (/\b(vrn|vehicle no|vehicle number|vehicle registration|registration no|registration number|reg no|reg number|number plate|license plate|licence plate)\b/.test(h)) return 'VRN';
+    if (/\b(vrn|vehicle no|vehicle number|vehicle reg no|vehicle reg number|vehicle registration|registration no|registration number|reg no|reg number|registration mark|number plate|license plate|licence plate)\b/.test(h)) return 'VRN';
     if (/\b(tag id|tagid|fastag id|fastag tag|tag number|tag no)\b/.test(h)) return 'Tag ID';
     if (/\b(barcode|bar code|serial|serial no|serial number|sno|barcode no)\b/.test(h)) return 'Barcode';
     return '';
@@ -198,6 +198,22 @@ window.FF = window.FF || {};
     for (const ch of letters) n = n * 26 + ch.charCodeAt(0) - 64;
     return Math.max(0, n - 1);
   }
+
+  // Preserve leading zeroes where Excel stored an identifier as a number with a zero mask.
+  // This only formats simple identifier masks; dates, percentages and decimals stay untouched.
+  function restoreFormattedIdentifier(value, formatCode) {
+    const raw = String(value == null ? '' : value);
+    const format = String(formatCode || '').split(';')[0];
+    if (!/^\d+$/.test(raw) || !format || /[dDyYhHsS%]|[Ee][+-]?0/.test(format)) return raw;
+    const mask = format.replace(/"[^"]*"/g, '').replace(/\\(.)/g, '$1').replace(/[_*]./g, '').split('.')[0];
+    if (!mask.includes('0') || /[#?]/.test(mask) || !/^[0 .\-()/]+$/.test(mask)) return raw;
+    const width = (mask.match(/0/g) || []).length;
+    if (width <= raw.length) return raw;
+    const digits = raw.padStart(width, '0');
+    let pos = 0;
+    return mask.replace(/0/g, () => digits[pos++] || '0');
+  }
+
   async function readXlsxMatrix(file) {
     const zip = await unzipXlsx(file);
     const wb = zip.get('xl/workbook.xml');
@@ -217,6 +233,19 @@ window.FF = window.FF || {};
     if (!sheetText) throw new Error('Excel ki first worksheet data nahi mili.');
     const ssText = zip.get('xl/sharedStrings.xml') || '';
     const shared = [];
+    const styleFormats = [];
+    const stylesText = zip.get('xl/styles.xml') || '';
+    if (stylesText) {
+      const stylesDoc = parseXml(stylesText);
+      const customFormats = new Map();
+      [...stylesDoc.getElementsByTagName('numFmt')].forEach((nf) => {
+        customFormats.set(Number(nf.getAttribute('numFmtId')), nf.getAttribute('formatCode') || '');
+      });
+      const cellXfs = stylesDoc.getElementsByTagName('cellXfs')[0];
+      if (cellXfs) [...cellXfs.getElementsByTagName('xf')].forEach((xf) => {
+        styleFormats.push(customFormats.get(Number(xf.getAttribute('numFmtId'))) || '');
+      });
+    }
     if (ssText) {
       const sdoc = parseXml(ssText);
       [...sdoc.getElementsByTagName('si')].forEach((si) => {
@@ -239,6 +268,7 @@ window.FF = window.FF || {};
         if (type === 's') value = shared[Number(value)] || '';
         else if (type === 'inlineStr') value = [...cell.getElementsByTagName('t')].map((t) => t.textContent || '').join('');
         else if (type === 'b') value = value === '1' ? 'TRUE' : 'FALSE';
+        else if (!type) value = restoreFormattedIdentifier(value, styleFormats[Number(cell.getAttribute('s') || 0)] || '');
         row[i] = String(value == null ? '' : value);
       });
       out.push(row.map((x) => x == null ? '' : x));
@@ -511,7 +541,11 @@ window.FF = window.FF || {};
         paintProgress(root, 'Source query ' + (bi + 1) + ' / ' + batches.length + ' · ' + batch.length + ' identifiers', percent);
         const jobs = specs.map(async (spec) => {
           const tq = makeQuery(spec, batch);
-          if (!tq || !spec.cols.length || !spec.defs.length) return { key: spec.key, rows: [] };
+          if (!tq || !spec.cols.length || !spec.defs.length) {
+            batch.forEach((t) => sourceFailures[spec.key].add(normId(t)));
+            sourceFailureMessages[spec.key] = 'Column mapping missing/invalid in Settings for ' + spec.sheet;
+            return { key: spec.key, error: sourceFailureMessages[spec.key] };
+          }
           try {
             const table = await D.query(spec.sheet, tq, {
               gid: spec.gid,
