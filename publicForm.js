@@ -21,7 +21,7 @@ window.FF = window.FF || {};
   const esc = U.esc;
   const state = { config: null, error: '', at: 0 };
   const LIVE_SHARE_KEY = 'ff_public_tag_live_share_v1';
-  const liveShare = { sessionId: '', token: '', enabled: false, busy: false, timer: null, heartbeat: null, events: [], pointer: null, scrollY: 0, lastInteraction: Date.now(), lastSent: 0, dirty: false, banner: null, listenersBound: false, lastPointerAt: 0 };
+  const liveShare = { sessionId: '', token: '', enabled: false, busy: false, sending: false, timer: null, heartbeat: null, events: [], pointer: null, scrollY: 0, lastInteraction: Date.now(), lastSent: 0, dirty: false, banner: null, listenersBound: false, lastPointerAt: 0 };
   const isLiveMirror = () => { try { return new URLSearchParams(location.search).get('embed') === 'live'; } catch { return false; } };
   const liveEsc = (v) => String(v == null ? '' : v).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   function addLiveShareStyles() {
@@ -66,10 +66,10 @@ window.FF = window.FF || {};
     liveShare.dirty = true;
   }
   async function sendLivePresence(force = false) {
-    if (!liveShare.enabled || !liveShare.sessionId || !liveShare.token || liveShare.busy) return;
+    if (!liveShare.enabled || !liveShare.sessionId || !liveShare.token || liveShare.sending) return;
     if (!force && liveShare.lastSent && Date.now() - liveShare.lastSent < 750) return;
     if (!force && !liveShare.dirty && Date.now() - liveShare.lastSent < 3000) return;
-    liveShare.busy = true;
+    liveShare.sending = true;
     const events = liveShare.events.slice(0, 15);
     const payload = {
       sessionId: liveShare.sessionId, token: liveShare.token, page: 'tag-request',
@@ -92,7 +92,7 @@ window.FF = window.FF || {};
         liveShare.timer = liveShare.heartbeat = null;
         persistLiveShare(); syncLiveShareBanner();
       }
-    } finally { liveShare.busy = false; }
+    } finally { liveShare.sending = false; }
   }
   function bindLiveShareEvents() {
     if (liveShare.listenersBound) return;
