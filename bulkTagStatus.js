@@ -930,7 +930,7 @@ window.FF = window.FF || {};
   function handleAuditSummaryClick(root, event) {
     const target = event && event.target;
     const btn = target && target.closest ? target.closest('[data-bts-audit-date]') : null;
-    if (btn) loadAuditDateDetails(root, btn.getAttribute('data-bts-audit-date') || btn.dataset.btsAuditDate);
+    if (btn) return loadAuditDateDetails(root, btn.getAttribute('data-bts-audit-date') || btn.dataset.btsAuditDate);
   }
   function handleAuditDetailClick(root, event) {
     const target = event && event.target;
