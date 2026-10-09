@@ -176,6 +176,15 @@ for (const ds of FF.store.DATASETS ? Object.keys(FF.store.DATASETS) : ['daily', 
 await run('store.suggestions', async () => { const s = FF.store.suggestions({ agents: true, tls: true }); if (!s.length) throw new Error('no suggestions'); if (s.some((x) => /^APS$/i.test(x.label) && x.kind === 'tl')) throw new Error('APS leaked into TL suggestions'); log(`      ${s.length} suggestions, e.g. ${s.slice(0, 3).map((x) => `${x.kind}:${x.label}`).join(', ')}`); });
 
 const pages = FF.pages;
+await run('Bulk Tag Status · paste / Excel upload / results page', async () => {
+  if (!pages.bulkTagStatus || typeof pages.bulkTagStatus.render !== 'function') throw new Error('Bulk Tag Status page module register nahi hua');
+  const r = root();
+  await pages.bulkTagStatus.render(r, {}, {});
+  const html = r.innerHTML || '';
+  for (const label of ['Bulk Tag Status', 'bts-paste', 'bts-file', 'Check Status', 'GV Master', 'EIR', 'StockDataa', 'Tag Assignment', 'Download Excel template']) {
+    if (!html.includes(label)) throw new Error('Bulk Tag Status UI me "' + label + '" missing');
+  }
+}, true);
 await run('raw sheets stay lazy and load only when their tab opens', async () => {
   const before = sheetNetworkRequests;
   await FF.preloader.preloadAll(false);
