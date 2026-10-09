@@ -319,9 +319,10 @@
     const m = live.modal;
     const status = U.$('#lv-status', m), pageEl = U.$('#lv-page', m), blank = U.$('#lv-blank', m), frame = U.$('#lv-frame', m), cursor = U.$('#lv-cursor', m), overlay = U.$('#lv-overlay', m);
     if (!p) {
+      live.lastPerson = null;
       status.innerHTML = '<span class="presence-state">OFFLINE</span>';
-      pageEl.textContent = 'Is user ki koi live activity nahi mili (app band hai ya sharing off hai).';
-      blank.hidden = false; blank.textContent = '😴 User abhi app par nahi hai'; cursor.hidden = true;
+      pageEl.textContent = live.publicSessionId ? 'Employee link live share band ya expire ho gaya.' : 'Is user ki koi live activity nahi mili (app band hai ya sharing off hai).';
+      frame.hidden = true; blank.hidden = false; blank.textContent = '😴 Live activity available nahi hai'; cursor.hidden = true;
       return;
     }
     live.lastPerson = p;
@@ -333,7 +334,10 @@
     const inst = U.$('#lv-instant', m);
     if (inst) inst.textContent = `render ${exactClock(Date.now())} · poll ${(live.speed / 1000).toFixed(1)}s`;
     const clockBox = U.$('#lv-data-clock', m);
-    if (clockBox) {
+    if (clockBox && live.publicSessionId) {
+      const ids = Array.isArray(p.requestIds) ? p.requestIds.slice(0, 5).map(esc).join(', ') : '';
+      clockBox.innerHTML = `<div class="notify-line muted" style="border-radius:10px;margin-top:10px"><b style="color:#e2e8f0">Employee link session</b><br>Live Share: <b style="color:#5eead4">employee opted in</b><br>${ids ? `Request ID(s): <b>${ids}</b>` : 'Request IDs submission ke baad yahan dikhengi.'}</div>`;
+    } else if (clockBox) {
       const ffLoad = FF.store && FF.store.loadedAt ? exactClock(FF.store.loadedAt) : '—';
       const gvLoad = FF.gv && FF.gv.loadedAt ? exactClock(FF.gv.loadedAt) : '—';
       const today = U.dateKey(new Date());
