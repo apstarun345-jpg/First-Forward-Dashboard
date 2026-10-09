@@ -2952,8 +2952,21 @@ body.colorful .from-hdr { color: #166534; }
     const s = state.sheet;
     const cfg = s.config;
     if (!cfg) return '<section class="card" id="tr-sheet-card"><div class="card-body dim small">📗 Google Sheet sync load ho raha hai…</div></section>';
-    const fields = s.fields || {};
-    const savedCols = Array.isArray(cfg.columns) ? cfg.columns.filter((k) => fields[k]) : [];
+    // API response is expected to return fields, but render a complete list even if an
+    // older backend/deploy responds without TAG_SHEET_FIELDS.
+    const FALLBACK_SHEET_FIELDS = {
+      event: 'Event', date: 'Date', time: 'Time', requestId: 'Request ID', by: 'By', status: 'Status',
+      agentId: 'Agent ID', agent: 'Agent Name', tl: 'TL Name', channel: 'Channel', cls: 'Tag Class',
+      last: 'Last Month', cur: 'Current MTD', growth: 'Growth %', stock: 'Stock', cover: 'Cover (days)',
+      priority: 'Priority', sugNet: 'Suggested after stock', sugGross: 'Suggested without stock',
+      approved: 'Approved qty', remark: 'Remark', note: 'Note', adminNote: 'Admin note',
+      empName: 'Employee Name', empMobile: 'Employee mobile', empAddress: 'Employee address', empPincode: 'Employee pincode',
+      agentMobile: 'Agent mobile', agentAddress: 'Agent address', agentPincode: 'Agent pincode', requested: 'Requested qty',
+      courier: 'Courier'
+    };
+    const fields = s.fields && Object.keys(s.fields).length ? s.fields : FALLBACK_SHEET_FIELDS;
+    const configuredCols = Array.isArray(cfg.columns) ? cfg.columns : [];
+    const savedCols = configuredCols.filter((k) => fields[k]);
     const orderedCols = [...savedCols, ...Object.keys(fields).filter((k) => !savedCols.includes(k))];
     const colBox = orderedCols.map((k, idx) => {
       const label = clean(fields[k] || k.replace(/([A-Z])/g, ' $1')).replace(/^./, (x) => x.toUpperCase());
@@ -2970,7 +2983,7 @@ body.colorful .from-hdr { color: #166534; }
       </div>`;
     }).join('');
     const targetId = sheetIdOfLink(cfg.sheetLink) || cfg.spreadsheetId || '';
-    const noAgentCols = !['agentMobile', 'agentAddress', 'agentPincode'].some((k) => cfg.columns.includes(k));
+    const noAgentCols = !['agentMobile', 'agentAddress', 'agentPincode'].some((k) => configuredCols.includes(k));
     return `<section class="card" id="tr-sheet-card"><div class="card-head"><h3>📗 Google Sheet me direct entry <span class="badge ${cfg.enabled ? 'green' : ''}">${cfg.enabled ? 'ON' : 'OFF'}</span></h3>
       <div class="card-right dim">Admin — tag requests ko seedha apni Google Sheet me likho</div></div>
       <div class="card-body">
@@ -2995,7 +3008,7 @@ body.colorful .from-hdr { color: #166534; }
             </span></label>
         </div>
         <label class="field" style="display:block;margin-top:8px"><span class="dim small"><b>Kaunse columns sheet me aayein + kis order me aayein</b> — checkbox = ON/OFF · ☷ Drag ya ↑↓ = order. Example: <b>Agent Name → Agent ID → Date → Time…</b></span>
-          <div class="tr-cols-grid tr-cols-order" data-tr-cols-order>${colBox}</div></label>
+          <div class="tr-cols-grid tr-cols-order" data-tr-cols-order aria-label="Google Sheet column order">${colBox || '<div class="tr-col-empty">Column definitions load nahi hui — defaults shown after refresh.</div>'}</div><p class="dim small"><b>${orderedCols.length}</b> columns available · checked columns will be written in this exact order.</p></label>
         <div class="btn-row" style="margin-top:10px">
           <button class="btn primary" data-tr-sheet-act="save">💾 Save settings</button>
           <button class="btn" data-tr-sheet-act="toggle">${cfg.enabled ? '⏸ Sync OFF karo' : '▶️ Sync ON karo'}</button>
