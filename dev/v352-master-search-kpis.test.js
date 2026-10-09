@@ -303,6 +303,8 @@ test('🎨 theme — normal light UI by default; dark splash styling is scoped o
   assert.match(index, /styles\.css\?v=118/);
   assert.match(index, /ui-boot\.js\?v=108/);
   assert.match(index, /config\.js\?v=111/);
+  assert.match(boot, /localStorage\.getItem\('ff_theme_scope_migrated_v1'\) !== '1'/);
+  assert.match(boot, /localStorage\.setItem\('ff_theme_explicit', 'light'\)/);
   assert.match(boot, /localStorage\.getItem\('ff_theme_explicit'\)/);
   assert.doesNotMatch(boot, /localStorage\.getItem\('ff_theme'\) === 'dark'/);
 });
