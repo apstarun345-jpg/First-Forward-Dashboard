@@ -321,7 +321,9 @@ window.FF = window.FF || {};
     return uniq(terms);
   }
   function stockOwner(r) {
-    return !!(clean(r.agentId) || clean(r.agentName) || clean(r.agentAllocatedAt) || clean(r.gvId) || clean(r.gvName));
+    // GV unique-id/name fields can be partner metadata; only an actual Agent ID/name or allocation
+    // timestamp classifies inventory as allocated. This avoids labelling ordinary GV stock as issued.
+    return !!(clean(r.agentId) || clean(r.agentName) || clean(r.agentAllocatedAt) || clean(r.allocatedAt));
   }
   function hasOutStatus(value) {
     const v = clean(value).toUpperCase();
@@ -376,10 +378,10 @@ window.FF = window.FF || {};
     const gvStock = matches.gvStock;
     if (gvIssued && ffIssued) {
       code = 'multi-issued'; label = 'GV + FF records'; note = 'Same identifier dono issuance sources mein mila. Duplicate/cross-channel record ko verify karein.';
-    } else if (gvIssued && (matches.ffStock.length > 0 || matches.gvStock.some((r) => hasOutStatus(r.status)))) {
-      code = 'multi-stock'; label = 'Issued + inventory overlap'; note = 'GV issuance ke saath inventory/status record bhi mila. Tag identity aur live stock location verify karein.';
-    } else if (ffIssued && matches.gvStock.length > 0) {
-      code = 'multi-stock'; label = 'Issued + GV inventory overlap'; note = 'FF issuance ke saath GV Tag Assignment mein match mila. Duplicate/cross-channel record verify karein.';
+    } else if (gvIssued && (matches.ffStock.length > 0 || matches.gvStock.length > 0)) {
+      code = 'multi-stock'; label = 'GV issued + inventory overlap'; note = 'GV issuance ke saath kisi inventory source mein bhi match mila. Tag identity aur live stock location verify karein.';
+    } else if (ffIssued && (matches.ffStock.length > 0 || matches.gvStock.length > 0)) {
+      code = 'multi-stock'; label = 'FF issued + inventory overlap'; note = 'FF issuance ke saath kisi inventory source mein bhi match mila. Duplicate/stale inventory record verify karein.';
     } else if (gvIssued) {
       code = 'gv-issued'; label = 'GV ISSUED'; note = 'GV Master issuance record mila.';
     } else if (ffIssued) {
