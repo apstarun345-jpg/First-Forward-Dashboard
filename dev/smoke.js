@@ -279,8 +279,10 @@ await run('page home — GV aaj live + month KPI + charts + stock (master search
   }
   if (!/pct-inline (pos|neg|flat)/.test(all)) throw new Error('month KPI cards me last-month % chip nahi mila');
   if (!all.includes('Run Rate · Per Day') || !all.includes('hm-runrate-list')) throw new Error('Home class-wise run-rate KPI missing');
+  if (!all.includes('Total Run Rate') || !all.includes('Total Expected')) throw new Error('Home KPI totals missing');
+  if (!all.includes('hm-expected-list')) throw new Error('Expected-in-month class breakdown missing');
   for (const label of ['VC4', 'VC20', 'VC5+']) {
-    if (!all.includes(label)) throw new Error(`Home run-rate KPI me class ${label} missing`);
+    if (!all.includes(label)) throw new Error(`Home KPI me class ${label} missing`);
   }
   if (process.env.HOME_DUMP) log('      HOME >>> ' + r.innerHTML.replace(/\s+/g, ' ').slice(0, Number(process.env.HOME_DUMP) || 4000));
 }, true);
