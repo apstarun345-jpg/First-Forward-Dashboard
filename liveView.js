@@ -153,7 +153,8 @@
     return { kicker: item.type === 'settings' ? '⚙️ Settings change' : '👤 User change', title: item.title, sub: esc(item.body), body };
   }
 
-  function liveBtn(username) {
+  function liveBtn(username, publicSessionId) {
+    if (publicSessionId) return `<div class="btn-row" style="margin-top:14px"><button class="btn primary" data-lv-watch-public="${esc(publicSessionId)}">👁 Employee link ka live preview</button></div>`;
     return username ? `<div class="btn-row" style="margin-top:14px"><button class="btn primary" data-lv-watch="${esc(username)}">👁 ${esc(username)} ka live view</button></div>` : '';
   }
 
@@ -166,7 +167,7 @@
     const body = `<p class="dim small">${esc(when(item.createdAt))}</p>
       <div class="kd-scroll"><table class="kd-tbl"><tbody>${rows || '<tr><td class="dim">No extra detail</td></tr>'}</tbody></table></div>${loc}
       ${m.page ? `<p><a class="btn small" href="#/${esc(String(m.page).split('?')[0])}" data-lv-close>↗ Wahi page kholo</a></p>` : ''}
-      ${liveBtn(m.username)}`;
+      ${liveBtn(m.username, m.publicSessionId)}`;
     return { kicker: '🔔 Activity', title: item.title, sub: esc(item.body), body };
   }
 
@@ -188,7 +189,7 @@
   }
 
   // ---- 👁 Live view ------------------------------------------------------------------------------
-  const live = { user: '', timer: null, modal: null, lastPage: '', lastEventAt: 0, mirror: true, busy: false, speed: 1000, lastRenderAt: 0 };
+  const live = { user: '', publicSessionId: '', timer: null, modal: null, lastPage: '', lastEventAt: 0, mirror: true, busy: false, speed: 1000, lastRenderAt: 0 };
   /** Exact instant label — HH:MM:SS.mmm (jaise live telemetry me hota hai). */
   const exactClock = (ts) => {
     const d = new Date(ts || Date.now());
@@ -207,17 +208,18 @@
     clearInterval(live.timer); live.timer = null;
     clearInterval(live.clockTimer); live.clockTimer = null;
     if (live.modal) live.modal.remove();
-    live.modal = null; live.user = ''; live.lastPage = ''; live.lastEventAt = 0;
+    live.modal = null; live.user = ''; live.publicSessionId = ''; live.lastPage = ''; live.lastEventAt = 0;
     document.body.classList.remove('no-scroll');
     document.removeEventListener('keydown', escClose);
   }
   function escClose(e) { if (e.key === 'Escape') stopWatch(); }
 
-  function watch(username) {
+  function watch(username, options = {}) {
     if (!FF.auth.isAdmin || !FF.auth.isAdmin()) { U.toast('Live view sirf admin ke liye hai', 'err'); return; }
     stopWatch();
     FF.app.closeDrawer();
     live.user = String(username || '');
+    live.publicSessionId = String(options.publicSessionId || '');
     live.mirror = localStorage.getItem('ff_live_mirror') !== '0';
     const modal = U.h(`<div class="live-modal" role="dialog" aria-label="Live view">
       <div class="live-head">
@@ -294,11 +296,18 @@
     screen.appendChild(r); setTimeout(() => r.remove(), 900);
   }
 
+  function watchPublic(sessionId) {
+    if (!sessionId) { U.toast('Live session ID missing hai', 'err'); return; }
+    return watch('Employee link visitor', { publicSessionId: String(sessionId) });
+  }
+
   async function tick() {
     if (!live.user || live.busy) return;
     live.busy = true;
     try {
-      const out = await FF.auth.api(`/api/presence?user=${encodeURIComponent(live.user)}`);
+      const out = live.publicSessionId
+        ? await FF.auth.api(`/api/public/live-presence?sessionId=${encodeURIComponent(live.publicSessionId)}`)
+        : await FF.auth.api(`/api/presence?user=${encodeURIComponent(live.user)}`);
       if (!live.modal) return;
       render(out.person);
     } catch (err) {
@@ -345,9 +354,11 @@
     const page = String(p.page || 'home').replace(/^#?\/?/, '');
     if (live.mirror && page !== live.lastPage) {
       live.lastPage = page;
-      const base = `${location.pathname}?embed=live#/${page}`;
+      const base = live.publicSessionId ? '/tag-request?embed=live' : `${location.pathname}?embed=live#/${page}`;
       try {
-        if (frame.contentWindow && frame.dataset.loaded === '1') frame.contentWindow.location.hash = `#/${page}`;
+        if (live.publicSessionId) {
+          if (frame.dataset.loaded !== '1') { frame.src = base; frame.onload = () => { frame.dataset.loaded = '1'; syncScroll(p); }; }
+        } else if (frame.contentWindow && frame.dataset.loaded === '1') frame.contentWindow.location.hash = `#/${page}`;
         else { frame.src = base; frame.onload = () => { frame.dataset.loaded = '1'; syncScroll(p); }; }
       } catch (_) { frame.src = base; }
     }
@@ -392,10 +403,12 @@
   document.addEventListener('click', (e) => {
     const k = e.target.closest('[data-lv-kpi]');
     if (k) { e.preventDefault(); if (FF.kpiDetail) FF.kpiDetail.open({ scope: 'day', date: k.dataset.lvKpi, src: k.dataset.lvSrc || 'both', title: `Tags issued · ${U.labelDateKey(k.dataset.lvKpi)}` }); return; }
+    const pw = e.target.closest('[data-lv-watch-public]');
+    if (pw) { e.preventDefault(); watchPublic(pw.dataset.lvWatchPublic); return; }
     const w = e.target.closest('[data-lv-watch]');
     if (w) { e.preventDefault(); watch(w.dataset.lvWatch); return; }
     if (e.target.closest('[data-lv-close]')) FF.app.closeDrawer();
   });
 
-  FF.liveView = { openNotification, watch, stop: stopWatch };
+  FF.liveView = { openNotification, watch, watchPublic, stop: stopWatch };
 })(window.FF);
