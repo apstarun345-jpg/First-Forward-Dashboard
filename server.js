@@ -681,11 +681,16 @@ function publicLiveSummary(entry, now = Date.now(), includeEvents = false) {
   const age = Math.max(0, now - lastSeen);
   const out = {
     sessionId: entry.sessionId,
-    name: entry.name || 'Employee link visitor',
+    mode: entry.mode === 'visit' ? 'visit' : 'share',
+    sharing: entry.mode !== 'visit',
+    name: entry.name || 'New Link Visitor',
     username: `public:${String(entry.sessionId || '').slice(-8)}`,
     page: 'tag-request', title: 'Employee Tag Request',
-    visible: entry.visible !== false, pointer: entry.pointer || null,
-    viewport: entry.viewport || null, scroll: entry.scroll || null,
+    visible: entry.visible !== false,
+    // Only consented sessions expose pointer/viewport/scroll telemetry. Passive visits get a safe page preview.
+    pointer: entry.mode === 'visit' ? null : (entry.pointer || null),
+    viewport: entry.mode === 'visit' ? null : (entry.viewport || null),
+    scroll: entry.mode === 'visit' ? null : (entry.scroll || null),
     lastSeen, updatedAt: Number(entry.updatedAt || lastSeen), startedAt: Number(entry.startedAt || lastSeen),
     requestIds: Array.isArray(entry.requestIds) ? entry.requestIds.slice(0, 30) : [],
     lastEvent: Array.isArray(entry.events) && entry.events.length ? entry.events[entry.events.length - 1] : null,
@@ -6407,6 +6412,31 @@ async function handleApi(req, res, url) {
     }
     return out.slice(-6).reverse();
   };
+  // ---- public employee-link visits (presence + admin notification; no screen telemetry) --------
+  if (p === '/api/public/tag-request/visit' && method === 'POST') {
+    const cfg = publicTagFormConfig();
+    if (cfg.enabled === false) throw new HttpError(403, 'Tag Request form abhi band hai.');
+    const body = await readBody(req);
+    const ip = clientIp(req);
+    if (!publicRateOk(`public-link-visit:${ip}`, 60, 10 * 60e3)) throw new HttpError(429, 'Bahut zyada link visits. Thodi der baad try karein.');
+    const now = Date.now();
+    prunePublicLiveSessions(now);
+    let id = String(body.visitId || '').slice(0, 100);
+    let entry = id ? publicLiveSessions.get(id) : null;
+    if (!entry || entry.mode !== 'visit') {
+      id = crypto.randomBytes(18).toString('base64url');
+      entry = { sessionId: id, mode: 'visit', name: 'New Link Visitor', startedAt: now, lastSeen: now, updatedAt: now, visible: true, engaged: true, pointer: null, viewport: null, scroll: null, events: [{ at: now, kind: 'open', label: 'Employee Tag Request link opened', page: 'tag-request' }], requestIds: [] };
+      publicLiveSessions.set(id, entry);
+      try {
+        recordNotification({ type: 'activity', title: '🔗 Employee Tag Request link opened', body: 'A visitor opened the public Employee Tag Request link. Open Admin Notifications → Employee link activity to see status and page preview.', target: 'admin', routeKey: 'tagRequest', meta: { publicSessionId: id, publicLink: true, link: '#/tagRequest?view=requests' } });
+      } catch { /* notification must not block public form */ }
+    } else {
+      entry.lastSeen = now; entry.updatedAt = now;
+      entry.visible = body.visible !== false;
+      entry.engaged = entry.visible;
+    }
+    return sendJson(res, 200, { ok: true, visitId: id, active: true, checkAt: new Date(now).toISOString() });
+  }
   // ---- optional public Tag Request live sharing (explicit employee opt-in) ---------------------
   if (p === '/api/public/live-presence/start' && method === 'POST') {
     const cfg = publicTagFormConfig();
@@ -6503,21 +6533,26 @@ async function handleApi(req, res, url) {
         courier: shortText(body.courier, 40),
         source: 'public-link', ip: String(ip || '').slice(0, 45), note, updatedBy: 'public-link'
       });
-      // Link an explicitly shared live session to the employee/request only after submit;
-      // never store the session token in the request or notification records.
+      // Link the passive visit for useful request context; only consented share sessions receive live telemetry.
+      // Never store a live-share token in request or notification records.
       let linkedLiveSession = null;
       const liveShare = body.liveShare && typeof body.liveShare === 'object' ? body.liveShare : null;
       if (liveShare && liveShare.sessionId && liveShare.token) {
         const candidate = publicLiveSessions.get(String(liveShare.sessionId).slice(0, 100));
-        if (candidate && String(liveShare.token) === candidate.token) {
-          const now = Date.now();
-          candidate.name = employeeName;
-          candidate.requestIds = out.created.map((r) => String(r.id || '')).filter(Boolean).slice(0, 30);
-          candidate.lastSeen = now; candidate.updatedAt = now;
-          candidate.events.push({ at: now, kind: 'submit', label: `Tag Request submitted · ${out.created.length} agent(s)`, page: 'tag-request' });
-          candidate.events = candidate.events.slice(-80);
-          linkedLiveSession = candidate;
-        }
+        if (candidate && candidate.mode !== 'visit' && String(liveShare.token) === candidate.token) linkedLiveSession = candidate;
+      }
+      const visitId = String(body.publicVisitId || '').slice(0, 100);
+      if (!linkedLiveSession && visitId) {
+        const candidate = publicLiveSessions.get(visitId);
+        if (candidate && candidate.mode === 'visit') linkedLiveSession = candidate;
+      }
+      if (linkedLiveSession) {
+        const now = Date.now();
+        linkedLiveSession.name = employeeName;
+        linkedLiveSession.requestIds = [...new Set([...(linkedLiveSession.requestIds || []), ...out.created.map((r) => String(r.id || '')).filter(Boolean)])].slice(0, 30);
+        linkedLiveSession.lastSeen = now; linkedLiveSession.updatedAt = now;
+        linkedLiveSession.events.push({ at: now, kind: 'submit', label: `Tag Request submitted · ${out.created.length} agent(s)`, page: 'tag-request' });
+        linkedLiveSession.events = linkedLiveSession.events.slice(-80);
       }
       const n = out.created.length;
       const dupIds = [...new Set(out.created.flatMap((r) => r.dupOf || []))];
