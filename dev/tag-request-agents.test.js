@@ -134,11 +134,15 @@ test('v3.30 per-agent tag requests — split, validation, mobile status, duplica
     assert.equal(savedContact.json.contact.address, '12, Gandhi Nagar, Tonk Road, Jaipur');
     assert.equal(savedContact.json.contact.pincode, '302015');
 
-    // 📗 sheet: ek hi appendrows call, rows order me, agent ka delivery address
-    await sleep(1200);
+    // 📗 Pending submit must not append rows; only each admin approval syncs its request.
+    await sleep(500);
+    assert.equal(mock.calls.filter((c) => c.action === 'appendrows').length - appendCallsBefore, 0, 'Pending public submit → no Tag Requests appendrows');
+    await jsonCall(server.base, `/api/tag-requests/${encodeURIComponent(rq1.id)}`, 'PUT', { status: 'approved' }, admin);
+    await jsonCall(server.base, `/api/tag-requests/${encodeURIComponent(rq2.id)}`, 'PUT', { status: 'approved' }, admin);
+    await sleep(1400);
     const tab = mock.appends.find((t) => t.tab === 'Agent Requests');
-    assert.ok(tab, 'sheet tab bana');
-    assert.equal(mock.calls.filter((c) => c.action === 'appendrows').length - appendCallsBefore, 1, 'ek submit (2 agents) = ek appendrows call');
+    assert.ok(tab, 'sheet tab approval ke baad bana');
+    assert.equal(mock.calls.filter((c) => c.action === 'appendrows').length - appendCallsBefore, 2, 'har approved agent request ki ek appendrows call');
     assert.deepEqual(tab.header, ['Employee', 'Agent', 'Agent mobile', 'Agent address', 'Agent pincode', 'Tag Class', 'Requested qty', 'Approved qty']);
     assert.equal(tab.rows.length, 3, 'Rahul VC4 + VC5, Priya VC6');
     assert.deepEqual(tab.rows[0], ['Ramesh Yadav', 'Rahul Sharma', '9876500001', '12, Gandhi Nagar, Tonk Road, Jaipur', '302015', 'VC4', 25, 25]);
