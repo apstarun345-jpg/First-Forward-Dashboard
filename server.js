@@ -5952,16 +5952,16 @@ async function handleApi(req, res, url) {
       if (throwOnFail) throw new HttpError(400, 'Pehle Tag Request ko Approved karo; Pending/Dispatched request sheet me nahi likhi ja sakti.');
       return null;
     }
+    if (!cfg.enabled || !store) {
+      if (throwOnFail) throw new HttpError(400, !store ? 'Apps Script connect nahi hai — pehle Settings → Backup me APPS_SCRIPT_URL/SECRET configure karo (ya sheet storage setup).' : 'Sheet sync OFF hai — pehle Tag Request page par 📗 Google Sheet sync ON karo.');
+      return null;
+    }
     const alreadySynced = reqs.find((r) =>
       (r.sheetApprovalSync && r.sheetApprovalSync.at) ||
       (r.sheetSync && r.sheetSync.at && !r.sheetSync.error)
     );
     if (alreadySynced) {
       if (throwOnFail) throw new HttpError(409, 'Ye request pehle hi Google Sheet me sync ho chuki hai. Duplicate entry rok di gayi.');
-      return null;
-    }
-    if (!cfg.enabled || !store) {
-      if (throwOnFail) throw new HttpError(400, !store ? 'Apps Script connect nahi hai — pehle Settings → Backup me APPS_SCRIPT_URL/SECRET configure karo (ya sheet storage setup).' : 'Sheet sync OFF hai — pehle Tag Request page par 📗 Google Sheet sync ON karo.');
       return null;
     }
     let header = [];
