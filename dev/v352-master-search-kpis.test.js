@@ -317,7 +317,7 @@ test('🏷️ Tag Request — column order list always renders with fallback fie
   assert.match(tag, /const refreshOrderIndexes = \(\) =>/);
   assert.match(tag, /refreshOrderIndexes\(\);/);
   assert.match(css, /\.tr-cols-order\{[\s\S]{0,500}display:flex !important/);
-  assert.match(css, /\.tr-cols-order \.tr-col-order\*\{color:#0f172a !important\}/);
+  assert.match(css, /\.tr-cols-order \.tr-col-order \*\{color:#0f172a !important\}/);
   assert.match(css, /html\[data-theme="dark"\] \.tr-cols-order \.tr-col-order \*\{color:#e2e8f0 !important\}/);
 });
 
