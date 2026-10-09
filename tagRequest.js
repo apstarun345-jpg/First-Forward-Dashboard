@@ -79,7 +79,7 @@ FF.pages = FF.pages || {};
     notifyCheck: { open: false, busy: false, data: null, err: '' },
     // 📥 requests table
     requests: [], requestsAt: 0, reqLoaded: false, reqError: '',
-    sel: new Set(), filter: { status: 'all', channel: 'both', q: '' }, edit: null, limit: PAGE_ROWS, dview: [],
+    sel: new Set(), filter: { status: 'all', channel: 'both', q: '', fromDate: '', toDate: '' }, edit: null, limit: PAGE_ROWS, dview: [],
     // 📦 "sabhi agents ka stock" board — employee link par bhi (search + channel filter + paging)
     stockBoard: { q: '', channel: 'both', limit: 40 },
     sheet: { loaded: false, busy: false, config: null, fields: null, connected: false, hint: '', publicForm: null }
@@ -2176,6 +2176,9 @@ body.colorful .from-hdr { color: #166534; }
     const dq = digits(f.q);
     return list.filter((dr) => {
       if (f.status !== 'all' && (dr.req.status || 'pending') !== f.status) return false;
+      const at = new Date(dr.req.at || 0).getTime();
+      if (f.fromDate) { const from = new Date(f.fromDate + 'T00:00:00').getTime(); if (Number.isFinite(from) && at < from) return false; }
+      if (f.toDate) { const to = new Date(f.toDate + 'T23:59:59.999').getTime(); if (Number.isFinite(to) && at > to) return false; }
       const channel = f.channel || 'both';
       if (isAdmin() && channel !== 'both' && dr.agent.channel !== channel) return false;
       if (!q) return true;
@@ -2453,6 +2456,7 @@ body.colorful .from-hdr { color: #166534; }
         </div>
         <div class="tr-req-filter">
           ${channelFilterHtml(displayRows(state.requests))}
+          ${isAdmin() ? `<label class="tr-date-filter"><b>From</b><input class="input" type="date" data-tr-date="fromDate" aria-label="From date" value="${esc(state.filter.fromDate || '')}"></label><label class="tr-date-filter"><b>To</b><input class="input" type="date" data-tr-date="toDate" aria-label="To date" value="${esc(state.filter.toDate || '')}"></label><button type="button" class="btn small" data-tr-act="date-clear">Clear dates</button>` : ''}
           <div class="tr-chips" data-tr-chips>${chipsHtml(displayRows(state.requests))}</div>
           <input class="input tr-req-search" data-tr-search type="search" placeholder="🔎 Agent / employee / mobile / PIN / ID" value="${esc(state.filter.q)}">
           <button type="button" class="btn" data-tr-act="req-refresh" title="Nayi requests laao">↻</button>
