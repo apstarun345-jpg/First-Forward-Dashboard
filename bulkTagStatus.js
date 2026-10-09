@@ -714,11 +714,13 @@ window.FF = window.FF || {};
           matrix = parseDelimited(text, detectDelimiter(text));
         }
         if (!matrix.length) throw new Error('File mein data nahi mila.');
-        if (matrix.length > 5001) throw new Error('5,000 se zyada rows hain. Chhote batches mein split karein.');
+        if (matrix.length > 5001) throw new Error('Excel/CSV file mein 5,000 se zyada rows hain. Chhote batches mein split karein.');
+        const preview = matrixToRecords(matrix);
+        if (preview.records.length > MAX_RECORDS) throw new Error('Is page par maximum ' + MAX_RECORDS + ' input rows per check hain. File ko chhote batches mein split karein.');
         const tsv = matrixToTsv(matrix);
         if (paste) { paste.value = tsv; state.query = tsv; }
         state.selectedFile = selected.name;
-        if (info) info.textContent = selected.name + ' · ' + Math.max(0, matrix.length - 1) + ' data rows loaded';
+        if (info) info.textContent = selected.name + ' · ' + preview.records.length + ' input rows loaded';
         showToast('📄 File read ho gayi. Preview check karke Check Status dabayein.', 'ok');
       } catch (err) {
         if (info) info.textContent = 'Upload error';
