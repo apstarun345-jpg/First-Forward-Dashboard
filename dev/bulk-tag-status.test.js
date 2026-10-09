@@ -35,6 +35,13 @@ test('Bulk Tag Status parses header-based VRN / Tag ID / Barcode tables', () => 
   assert.equal(parsed.records[0].fields[2].kind, 'Barcode');
 });
 
+test('Bulk Tag Status preserves leading zeroes from simple Excel number masks', () => {
+  assert.equal(BTS.restoreFormattedIdentifier('1234', '00000000'), '00001234');
+  assert.equal(BTS.restoreFormattedIdentifier('1234', '00-0000'), '00-1234');
+  assert.equal(BTS.restoreFormattedIdentifier('20261009', 'dd/mm/yyyy'), '20261009');
+  assert.equal(BTS.headerKind('Vehicle Reg No'), 'VRN');
+});
+
 test('Bulk Tag Status parses newline-separated identifiers without a header', () => {
   const parsed = BTS.parseInputText('RJ14 AB 1234\nTAG-00001234\n34161FA82032001');
   assert.equal(parsed.headerFound, false);
