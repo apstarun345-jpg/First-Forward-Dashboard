@@ -6431,3 +6431,80 @@ html[data-theme="dark"] .tr-cols-order .tr-col-order *{color:#e2e8f0 !important;
 html[data-theme="dark"] .tr-cols-order .tr-col-order .tr-col-index{background:#312e81 !important;color:#e0e7ff !important;}
 html[data-theme="dark"] .tr-cols-order .tr-col-order .tr-drag{color:#94a3b8 !important;}
 html[data-theme="dark"] .tr-cols-order .tr-col-order .tr-col-move .btn.tiny{background:#1e293b !important;border-color:#475569 !important;color:#e2e8f0 !important;}
+
+
+/* v3.66 — Tag Request admin/form: force a clean light canvas even when the dashboard theme is dark. */
+/* Scope this only to the authenticated Tag Request page. The app's body can be in dark mode,
+   but this operational form should stay clear/light for reading and data entry. */
+.content:has(#tr-body),
+.main:has(#tr-body) {
+  background: #f1f5f9 !important;
+  color: #0f172a !important;
+}
+.main:has(#tr-body) {
+  background-image: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 70%, #eef2ff 100%) !important;
+}
+.main:has(#tr-body) #tr-body {
+  background: transparent !important;
+  color: #0f172a !important;
+}
+.main:has(#tr-body) .page-head,
+.main:has(#tr-body) .page-head h1,
+.main:has(#tr-body) .page-head .sub {
+  color: #0f172a;
+}
+html[data-theme="dark"] .main:has(#tr-body) .dim,
+html[data-theme="dark"] .main:has(#tr-body) .muted,
+html[data-theme="dark"] .main:has(#tr-body) label,
+html[data-theme="dark"] .main:has(#tr-body) .small {
+  color: #64748b;
+}
+/* Undo only Tag Request's dark-mode card fills, keeping its normal light card design. */
+html[data-theme="dark"] .main:has(#tr-body) .tr-agent-card,
+html[data-theme="dark"] .main:has(#tr-body) .tr-row-card,
+html[data-theme="dark"] .main:has(#tr-body) .tr-st-card,
+html[data-theme="dark"] .main:has(#tr-body) .tr-qty-list,
+html[data-theme="dark"] .main:has(#tr-body) .tr-selall,
+html[data-theme="dark"] .main:has(#tr-body) .tr-box,
+html[data-theme="dark"] .main:has(#tr-body) .tr-class-tbl,
+html[data-theme="dark"] .main:has(#tr-body) .tr-tl-panel,
+html[data-theme="dark"] .main:has(#tr-body) .tr-req-wrap,
+html[data-theme="dark"] .main:has(#tr-body) .tr-tl-agents .table-wrap {
+  background: #fff !important;
+  color: #0f172a !important;
+  border-color: #dbe3ef !important;
+}
+html[data-theme="dark"] .main:has(#tr-body) .tr-agent-card .dim,
+html[data-theme="dark"] .main:has(#tr-body) .tr-row-card .dim,
+html[data-theme="dark"] .main:has(#tr-body) .tr-box small,
+html[data-theme="dark"] .main:has(#tr-body) .tr-box em {
+  color: #64748b !important;
+}
+html[data-theme="dark"] .main:has(#tr-body) .tr-contact-grid textarea.input,
+html[data-theme="dark"] .main:has(#tr-body) .tr-agent-card input.input,
+html[data-theme="dark"] .main:has(#tr-body) .tr-emp-grid input.input,
+html[data-theme="dark"] .main:has(#tr-body) .tr-emp-grid textarea.input {
+  background: #fff !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+html[data-theme="dark"] .main:has(#tr-body) .tr-submit-bar {
+  background: rgba(255,255,255,.96) !important;
+  color: #0f172a !important;
+  border-color: #dbe3ef !important;
+  box-shadow: 0 10px 28px rgba(15,23,42,.10) !important;
+}
+html[data-theme="dark"] .main:has(#tr-body) .tr-qty-groups {
+  background: #f0f9ff !important;
+  border-color: #dbeafe !important;
+}
+html[data-theme="dark"] .main:has(#tr-body) .tr-foot-chip {
+  background: #f8fafc !important;
+  color: #1e3a8a !important;
+  border-color: #dbeafe !important;
+}
+html[data-theme="dark"] .main:has(#tr-body) .tr-suggest {
+  background: #fff !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
