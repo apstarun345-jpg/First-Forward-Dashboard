@@ -129,6 +129,12 @@ button { font: inherit; }
 .kpi-icon { font-size: 20px; background: rgba(255,255,255,.22); width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; flex: none; }
 .kpi-value { font-size: 30px; font-weight: 800; letter-spacing: -1px; margin: 8px 0 4px; z-index: 1; line-height: 1.1; }
 .kpi-value small { font-size: 16px; font-weight: 700; opacity: .9; }
+/* Home run-rate KPI: three class averages, same visual scale as the other mini KPI values. */
+.hm-runrate-list { display: flex; flex-direction: column; gap: 2px; width: 100%; }
+.hm-runrate-list > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 22px; line-height: 1.05; letter-spacing: -.25px; font-variant-numeric: tabular-nums; }
+.hm-runrate-list > div span { font-weight: 750; }
+.hm-runrate-list > div b { font-weight: 900; }
+
 .kpi-foot { font-size: 12px; opacity: .95; z-index: 1; margin-top: auto; }
 .kpi-foot b { font-weight: 800; }
 /* % rule site-wide: minus RED, plus GREEN + bold — coloured KPI cards par bhi readable */
