@@ -40,7 +40,8 @@ FF.pages = FF.pages || {};
 
   const card = (title, body, right) => `<section class="card"><div class="card-head"><h3>${title}</h3>${right ? `<div class="card-right">${right}</div>` : ''}</div><div class="card-body">${body}</div></section>`;
   const pct = (a, b) => (b ? (a / b) * 100 : null);
-  const allSavedTargets = () => ((FF.auth.settings && FF.auth.settings.targets) || []).filter((t) => t && t.ym && t.key && ((Number(t.target) || 0) > 0 || CLASS_TARGETS.some((c) => Number(t.classTargets && t.classTargets[c.key]) > 0)));
+  const allSavedTargets = () => ((FF.auth.settings && FF.auth.settings.targets) || []).filter((t) => t && t.ym && t.key && Number(t.target) > 0);
+  const allSavedTargetEntries = () => ((FF.auth.settings && FF.auth.settings.targets) || []).filter((t) => t && t.ym && t.key && ((Number(t.target) || 0) > 0 || CLASS_TARGETS.some((c) => Number(t.classTargets && t.classTargets[c.key]) > 0)));
 
   // ---- data prep ---------------------------------------------------------------------------------
   async function prep() {
@@ -91,7 +92,7 @@ FF.pages = FF.pages || {};
     for (const [k, a] of gvLast) { if (!gvCur.has(k)) push('gv', a.agentName, a.tlName, 0, a.total, 0, 0, 0); }
 
     // saved targets for this month
-    savedTargets = allSavedTargets().filter((t) => t.ym === view.ym);
+    savedTargets = allSavedTargetEntries().filter((t) => t.ym === view.ym);
     targetDrafts = new Map(savedTargets.map((t) => [t.key, Number(t.target) || 0]));
     classTargetDrafts = new Map(savedTargets.map((t) => [t.key, normalizedClassTargets(t.classTargets)]));
     return { rows, months, cur, last, latest, gvOk: masterR.status === 'fulfilled' };
@@ -160,7 +161,7 @@ FF.pages = FF.pages || {};
   // ---- save ---------------------------------------------------------------------------------------
   async function saveTargets() {
     if (!FF.auth.isAdmin()) { U.toast('Targets sirf admin save kar sakta hai', 'err'); return; }
-    const allBefore = allSavedTargets();
+    const allBefore = allSavedTargetEntries();
     const byKey = new Map(savedTargets.map((t) => [t.key, t]));
     const rowsByKey = new Map(list.map((r) => [r.key, r]));
     const editedKeys = new Set([...targetDrafts.keys(), ...classTargetDrafts.keys()]);
@@ -184,7 +185,7 @@ FF.pages = FF.pages || {};
       const out = await FF.auth.api('/api/settings', 'PUT', { settings: { targets: [...others, ...byKey.values()] } });
       FF.auth.applySettings(out.settings);
       U.toast('Targets save ho gaye ✓ (overall + VC4 / VC20 / VC5+ · Google Sheet backup ke saath)', 'ok');
-      savedTargets = allSavedTargets().filter((t) => t.ym === view.ym);
+      savedTargets = allSavedTargetEntries().filter((t) => t.ym === view.ym);
       targetDrafts = new Map(savedTargets.map((t) => [t.key, Number(t.target) || 0]));
       classTargetDrafts = new Map(savedTargets.map((t) => [t.key, normalizedClassTargets(t.classTargets)]));
       draw();
