@@ -9,7 +9,7 @@ window.FF = window.FF || {};
   const D = FF.data || {};
   const PAGE_TITLE = 'Bulk Tag Status';
   const MAX_RECORDS = 250;
-  const QUERY_CHUNK = 60;
+  const QUERY_CHUNK = 25;
   const MAX_UPLOAD_BYTES = 12 * 1024 * 1024;
   const state = {
     root: null, results: [], filter: 'all', query: '', busy: false,
@@ -376,6 +376,10 @@ window.FF = window.FF || {};
     const gvStock = matches.gvStock;
     if (gvIssued && ffIssued) {
       code = 'multi-issued'; label = 'GV + FF records'; note = 'Same identifier dono issuance sources mein mila. Duplicate/cross-channel record ko verify karein.';
+    } else if (gvIssued && (matches.ffStock.length > 0 || matches.gvStock.some((r) => hasOutStatus(r.status)))) {
+      code = 'multi-stock'; label = 'Issued + inventory overlap'; note = 'GV issuance ke saath inventory/status record bhi mila. Tag identity aur live stock location verify karein.';
+    } else if (ffIssued && matches.gvStock.length > 0) {
+      code = 'multi-stock'; label = 'Issued + GV inventory overlap'; note = 'FF issuance ke saath GV Tag Assignment mein match mila. Duplicate/cross-channel record verify karein.';
     } else if (gvIssued) {
       code = 'gv-issued'; label = 'GV ISSUED'; note = 'GV Master issuance record mila.';
     } else if (ffIssued) {
@@ -383,9 +387,10 @@ window.FF = window.FF || {};
     } else {
       const ffOwned = ffStock.filter(stockOwner);
       const ffFree = ffStock.filter((r) => !stockOwner(r));
-      const gvOwned = gvStock.filter(stockOwner);
-      const gvFree = gvStock.filter((r) => !stockOwner(r));
       const gvOut = gvStock.filter((r) => hasOutStatus(r.status));
+      const gvCurrent = gvStock.filter((r) => !hasOutStatus(r.status));
+      const gvOwned = gvCurrent.filter(stockOwner);
+      const gvFree = gvCurrent.filter((r) => !stockOwner(r));
       const cats = [];
       if (ffOwned.length) cats.push({ code: 'ff-allocated', label: 'FF allocated stock', rows: ffOwned });
       if (ffFree.length) cats.push({ code: 'ff-stock', label: 'FF stock', rows: ffFree });
@@ -668,7 +673,10 @@ window.FF = window.FF || {};
         const name = selected.name.toLowerCase();
         if (selected.size > MAX_UPLOAD_BYTES) throw new Error('File 12 MB se badi hai. Chhoti file upload karein.');
         if (name.endsWith('.xlsx')) matrix = await readXlsxMatrix(selected);
-        else matrix = parseDelimited(await selected.text(), detectDelimiter(await selected.text()));
+        else {
+          const text = await selected.text();
+          matrix = parseDelimited(text, detectDelimiter(text));
+        }
         if (!matrix.length) throw new Error('File mein data nahi mila.');
         if (matrix.length > 5001) throw new Error('5,000 se zyada rows hain. Chhote batches mein split karein.');
         const tsv = matrixToTsv(matrix);
