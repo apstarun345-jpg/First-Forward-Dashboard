@@ -216,6 +216,49 @@ await run('targets 4-way header (VC20 · VC5+ · All Comm)', async () => {
   const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
   for (const s of ['VC20', 'VC5+', 'All Comm']) if (!html.includes(s)) throw new Error(`targets table me "${s}" nahi mila`);
 }, true);
+
+await run('targets separate class-wise fields + bulk controls', async () => {
+  const r = root(); await pages.targets.render(r, { tab: 'targets' }, {});
+  const html = r.innerHTML + [...REG.values()].map((e) => e.innerHTML).join('\n');
+  for (const label of ['Overall target', 'VC4 target', 'VC20 target', 'VC5+ target', 'data-class-target="vc4"', 'data-class-target="vc20"', 'data-class-target="vc5p"', 'tg-bulk-class-apply', 'tg-bulk-class-all']) {
+    if (!html.includes(label)) throw new Error(`class target UI me "${label}" missing`);
+  }
+}, true);
+
+await run('Home Target Achievement class-wise maths and target-agent scope', async () => {
+  const ym = FF.util.ymKey(new Date());
+  const targets = [
+    { ym, key: 'ff|ALPHA', source: 'ff', agent: 'Alpha', target: 25, classTargets: { vc4: 10, vc20: 2, vc5p: 0 } },
+    { ym, key: 'gv|BETA', source: 'gv', agent: 'Beta', target: 10, classTargets: { vc4: 5, vc20: 0, vc5p: 3 } }
+  ];
+  const ffRows = [
+    { ym, channel: 'First Forward', name: 'Alpha', group: 'VC4', n: 6 },
+    { ym, channel: 'First Forward', name: 'Alpha', group: 'VC20', n: 4 },
+    { ym, channel: 'First Forward', name: 'Alpha', group: 'VC5+', n: 50 },
+    { ym, channel: 'First Forward', name: 'Unmatched Agent', group: 'VC4', n: 900 }
+  ];
+  const gvRows = [
+    { agentName: 'Beta', vc4: 2, vc20: 500, vc5p: 4 },
+    { agentName: 'Unmatched Agent', vc4: 900, vc20: 900, vc5p: 900 }
+  ];
+  const result = pages.home.targetAchievementSummary(targets, ym, ffRows, gvRows, ['ff', 'gv']);
+  const expect = (got, wanted, label) => { if (Number(got) !== wanted) throw new Error(`${label}: expected ${wanted}, got ${got}`); };
+  expect(result.classes.vc4.target, 15, 'VC4 target');
+  expect(result.classes.vc4.issued, 8, 'VC4 issued should include only target agents');
+  expect(result.classes.vc4.remaining, 7, 'VC4 remaining');
+  expect(result.classes.vc20.target, 2, 'VC20 target');
+  expect(result.classes.vc20.issued, 4, 'VC20 issued should skip GV agent with no VC20 target');
+  expect(result.classes.vc5p.target, 3, 'VC5+ target');
+  expect(result.classes.vc5p.issued, 4, 'VC5+ issued');
+  expect(result.totalTarget, 20, 'Total class target');
+  expect(result.totalIssued, 16, 'Total class issued');
+  expect(result.totalRemaining, 7, 'Total remaining is sum of class gaps, not netted across classes');
+  expect(result.totalPct, 80, 'Total achievement %');
+  const html = pages.home.targetAchievementHtml(result, ym);
+  for (const label of ['Target Achievement', 'VC4 Achievement', 'VC20 Achievement', 'VC5+ Achievement', 'Total Achievement', 'Remaining']) {
+    if (!html.includes(label)) throw new Error(`Home achievement card me "${label}" missing`);
+  }
+}, true);
 await run('rangeReport.render default', () => pages.rangeReport.render(root(), {}, {}), true);
 await run('rangeReport.render custom range', () => { const d = new Date(); d.setDate(d.getDate() - 20); return pages.rangeReport.render(root(), { from: FF.util.dateKey(d), to: FF.util.dateKey(new Date()) }, {}); }, true);
 await run('stock.render overview', () => pages.stock.render(root(), {}, {}), true);
