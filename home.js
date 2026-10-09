@@ -502,7 +502,7 @@ FF.pages = FF.pages || {};
 
   // 🎯 Class-wise target achievement. Actual counts are scoped to agents who have a target for that class.
   const TARGET_CLASSES = [{ key: 'vc4', label: 'VC4', group: 'VC4', icon: '🚗', color: 'g3', gvField: 'vc4' }, { key: 'vc20', label: 'VC20', group: 'VC20', icon: '🛻', color: 'g8', gvField: 'vc20' }, { key: 'vc5p', label: 'VC5+', group: 'VC5+', icon: '🚚', color: 'g6', gvField: 'vc5p' }];
-  const targetAgentKey = (source, name) => `${source}|${U.clean(name).toUpperCase().replace(/\\s+/g, ' ')}`;
+  const targetAgentKey = (source, name) => `${source}|${U.clean(name).toUpperCase().replace(/\s+/g, ' ')}`;
   const targetSource = (t) => { const raw = String(t && t.source || String(t && t.key || '').split('|')[0]).toLowerCase(); return /gv/.test(raw) ? 'gv' : 'ff'; };
   const classTargetsConfigured = (t) => TARGET_CLASSES.some((c) => Number(t && t.classTargets && t.classTargets[c.key]) > 0);
   function targetAchievementSummary(targets, ym, ffClassRows, gvAgentRows, allowedChannels) {
