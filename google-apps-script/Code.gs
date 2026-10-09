@@ -69,7 +69,7 @@ const TAG_REQUEST_DEFAULT_TAB = 'Tag Requests';
  */
 function tagSheetColumnKey_(value) {
   var key = String(value == null ? '' : value).trim().toLowerCase()
-    .replace(/[^a-z0-9%]+/g, ' ').replace(/\\s+/g, ' ').trim();
+    .replace(/[^a-z0-9%]+/g, ' ').replace(/\s+/g, ' ').trim();
   var aliases = {
     'agent name': 'agent',
     'tl name': 'tl',
