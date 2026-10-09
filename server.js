@@ -689,7 +689,7 @@ function publicLiveSummary(entry, now = Date.now(), includeEvents = false) {
     lastSeen, updatedAt: Number(entry.updatedAt || lastSeen), startedAt: Number(entry.startedAt || lastSeen),
     requestIds: Array.isArray(entry.requestIds) ? entry.requestIds.slice(0, 30) : [],
     lastEvent: Array.isArray(entry.events) && entry.events.length ? entry.events[entry.events.length - 1] : null,
-    active: age < 90e3 && entry.visible !== false,
+    active: age < 90e3 && entry.visible !== false && entry.engaged !== false,
     online: age < 45e3 && entry.visible !== false
   };
   if (includeEvents) out.events = Array.isArray(entry.events) ? entry.events.slice(-80) : [];
@@ -6441,7 +6441,7 @@ async function handleApi(req, res, url) {
     const now = Date.now();
     if (now - Number(entry.startedAt || now) > 8 * 60 * 60e3) { publicLiveSessions.delete(id); throw new HttpError(401, 'Live sharing session expire ho gayi.'); }
     const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, Number(v) || 0));
-    const cleanLive = (v, max = 100) => String(v || '').replace(/[\\u0000-\\u001f<>]/g, '').replace(/\\s+/g, ' ').slice(0, max);
+    const cleanLive = (v, max = 100) => String(v || '').replace(/[\u0000-\u001f<>]/g, '').replace(/\s+/g, ' ').slice(0, max);
     if (Object.prototype.hasOwnProperty.call(body, 'pointer')) entry.pointer = body.pointer && typeof body.pointer === 'object' ? { x: clamp(body.pointer.x, 0, 100), y: clamp(body.pointer.y, 0, 100) } : null;
     if (body.viewport && typeof body.viewport === 'object') entry.viewport = { w: clamp(body.viewport.w, 200, 8000), h: clamp(body.viewport.h, 200, 8000) };
     if (body.scroll && typeof body.scroll === 'object') entry.scroll = { y: clamp(body.scroll.y, 0, 1e6), h: clamp(body.scroll.h, 0, 1e6) };
