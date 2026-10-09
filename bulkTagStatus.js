@@ -625,11 +625,11 @@ window.FF = window.FF || {};
   }
   function dateKeyFromCell(cell, colMeta) {
     let d = D.cellDate ? D.cellDate(cell, colMeta) : null;
-    if (!(d instanceof Date) || isNaN(d.getTime())) {
+    if (!d || typeof d.getTime !== 'function' || !Number.isFinite(d.getTime())) {
       const textValue = D.cellText ? D.cellText(cell, colMeta) : cell;
       d = U.parseDate ? U.parseDate(textValue) : null;
     }
-    if (!(d instanceof Date) || isNaN(d.getTime())) return '';
+    if (!d || typeof d.getTime !== 'function' || !Number.isFinite(d.getTime())) return '';
     return U.dateKey ? U.dateKey(d) : [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-');
   }
   function auditDateLabel(key) {
