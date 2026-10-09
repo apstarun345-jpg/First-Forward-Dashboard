@@ -6391,3 +6391,43 @@ html[data-theme="dark"] .tr-col-move .btn.tiny { background: #1e293b !important;
   .ask-head > span[style*="flex:1"] { display: none; }
   .ask-ico[data-act="close"] { flex-basis: 34px; width: 34px; height: 34px; }
 }
+
+
+/* v3.73 — Restore normal light UI by default and keep Tag Request column-order list visibly draggable. */
+.tr-cols-order{
+  display:flex !important;
+  flex-direction:column !important;
+  gap:6px !important;
+  max-height:min(460px,58vh) !important;
+  overflow-y:auto !important;
+  overflow-x:hidden !important;
+  padding:8px !important;
+  margin-top:8px !important;
+  border:1px solid var(--line,#dbe3ef) !important;
+  border-radius:12px !important;
+  background:var(--bg,#f3f4fb) !important;
+  scrollbar-width:thin;
+}
+.tr-cols-order .tr-col-order{
+  flex:0 0 auto !important;
+  display:grid !important;
+  grid-template-columns:28px 22px minmax(0,1fr) auto !important;
+  align-items:center !important;
+  min-height:44px !important;
+  padding:7px 9px !important;
+  background:#fff !important;
+  border:1px solid #dbe3ef !important;
+  color:#0f172a !important;
+}
+.tr-cols-order .tr-col-order *{color:#0f172a !important;}
+.tr-cols-order .tr-col-order .tr-col-index{background:#eef2ff !important;color:#3730a3 !important;}
+.tr-cols-order .tr-col-order .tr-drag{color:#64748b !important;}
+.tr-cols-order .tr-col-order .tr-col-label{font-size:13px !important;font-weight:800 !important;opacity:1 !important;}
+.tr-cols-order .tr-col-order .tr-col-move .btn.tiny{background:#f8fafc !important;border-color:#cbd5e1 !important;color:#1e293b !important;}
+.tr-col-empty{padding:14px;border:1px dashed var(--line);border-radius:10px;color:var(--muted);background:var(--card);font-size:12px;}
+html[data-theme="dark"] .tr-cols-order{background:#0b1020 !important;border-color:#334155 !important;}
+html[data-theme="dark"] .tr-cols-order .tr-col-order{background:#111827 !important;border-color:#334155 !important;color:#e2e8f0 !important;}
+html[data-theme="dark"] .tr-cols-order .tr-col-order *{color:#e2e8f0 !important;}
+html[data-theme="dark"] .tr-cols-order .tr-col-order .tr-col-index{background:#312e81 !important;color:#e0e7ff !important;}
+html[data-theme="dark"] .tr-cols-order .tr-col-order .tr-drag{color:#94a3b8 !important;}
+html[data-theme="dark"] .tr-cols-order .tr-col-order .tr-col-move .btn.tiny{background:#1e293b !important;border-color:#475569 !important;color:#e2e8f0 !important;}
