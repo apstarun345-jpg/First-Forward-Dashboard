@@ -97,11 +97,11 @@ window.FF = window.FF || {};
   const ALIASES = {
     first: ['firstbarcode', 'startbarcode', 'frombarcode', 'barcodefrom', 'startserial', 'firstserial', 'from'],
     last: ['lastbarcode', 'endbarcode', 'tobarcode', 'barcodeto', 'endserial', 'lastserial', 'to'],
-    barcode: ['barcode', 'barcodenumber', 'barcodeid', 'tagbarcode', 'barcodevalue'],
+    barcode: ['barcode', 'barcodeno', 'barcodenumber', 'barcodeid', 'tagbarcode', 'barcodevalue', 'tagbarcodeid'],
     serialNo: ['serialno', 'serialnumber', 'serial', 'serialid'],
-    tagId: ['tagid', 'tagidnumber', 'tag', 'tagnumber', 'fastagid', 'fastagtagid'],
-    vcType: ['vctype', 'vehicletype', 'vehicleclass', 'vehicleclasstype', 'classtype', 'class', 'classofvehicle'],
-    agentId: ['agentid', 'agentcode', 'employeeid', 'mappedagentid', 'newagentid']
+    tagId: ['tagid', 'tagidnumber', 'tagnumber', 'tagnumber', 'fastagid', 'fastagtagid', 'tagno', 'tagnumberid', 'tag_id'],
+    vcType: ['vctype', 'vehicletyp', 'vehicletype', 'vehicleclass', 'vehicleclasstype', 'classtype', 'vclass', 'vcclass', 'classvctype', 'class', 'classofvehicle'],
+    agentId: ['agentid', 'agentcode', 'employeeid', 'mappedagentid', 'newagentid', 'allocatedagentid', 'allottedagentid', 'agentidnumber']
   };
   function headerMap(header) {
     const h = header.map(norm), found = {};
@@ -338,7 +338,7 @@ window.FF = window.FF || {};
       const good = state.rows.filter((r) => r.stock && r.tagId && r.serialNo && r.vcType && r.agentId && !r.status.startsWith('Duplicate') && !r.mapped).length;
       setStatus('Lookup complete: ' + good + ' row ready. Mapping se pehle Agent ID aur VC type review karein.', good ? 'success' : 'warn');
     } catch (err) { setStatus('Lookup fail: ' + (err.message || err), 'error'); }
-    finally { state.busy = false; if (old) old.disabled = false; if (mapBtn) mapBtn.disabled = false; }
+    finally { state.busy = false; if (old) old.disabled = false; if (mapBtn) mapBtn.disabled = !state.configured; }
   }
   async function quickMap() {
     if (state.busy) return;
