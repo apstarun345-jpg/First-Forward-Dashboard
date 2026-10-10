@@ -994,7 +994,7 @@ FF.pages = FF.pages || {};
     paintPulse({ total: ffStock.total + gvStock.total });
     // GV agent-wise stock (agar permission/load ho to) — top holders
     if (canGv) {
-      G.need('stockAgent').then((rows) => {
+      G.need('stockAgent', { only: true }).then((rows) => {
         if (!rows || !stockMount.isConnected) return;
         const top = [...rows].sort((a, b) => (b.n || 0) - (a.n || 0)).slice(0, 5).map((r) => ({ name: r.agentName || r.agentId || '—', n: r.n }));
         const host = stockMount.querySelectorAll('.hm-toplist')[1];
