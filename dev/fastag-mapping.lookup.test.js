@@ -29,6 +29,8 @@ function makePage() {
       assert.equal(sheet, 'StockDataa');
       queryLog.push({ tq, range: opts.range });
       if (opts.range === 'A1:M2') return table([]);
+      const page = tq.match(/where\s+D\s+is\s+not\s+null\s+limit\s+(\d+)\s+offset\s+(\d+)/i);
+      if (page) return Number(page[2]) === 0 ? table([stock]) : table([]);
       const range = tq.match(/where\s+([A-M])\s*>=\s*(?:"([^"]*)"|(\d+))\s+and\s+([A-M])\s*<=\s*(?:"([^"]*)"|(\d+))/i);
       if (range) {
         const letter = range[1].toUpperCase();
@@ -139,18 +141,15 @@ test('FASTag Mapping expands first/last barcode from StockDataa and applies the 
   assert.match(html, /TAG-12345/);
   assert.match(html, /VC20/);
   assert.match(html, /RANGE-TARGET-99/);
-  assert.ok(queryLog.some((q) => /where D >= "8900000000123456" and D <= "8900000000123456"/.test(q.tq)), 'quoted barcode fallback attempted when numeric match returns zero rows');
-  assert.ok(/where D >= 8900000000123456 and D <= 8900000000123456/.test(queryLog[0].tq), 'numeric range query is attempted before text range');
+  assert.ok(queryLog.some((q) => /where D is not null limit 5000 offset 0/i.test(q.tq)), 'range lookup scans StockDataa in bounded pages rather than using a slow range predicate');
 });
 
-test('FASTag Mapping automatically splits a timed-out numeric range and still finds the available barcode', async () => {
+test('FASTag Mapping paginates StockDataa and completes a numeric barcode range without a broad-query timeout', async () => {
   const { root, selectors, FF, queryLog } = makePage();
   const originalQuery = FF.data.query;
   FF.data.query = async (sheet, tq, opts) => {
-    const m = tq.match(/where D >= (?:"(\d+)"|(\d+)) and D <= (?:"(\d+)"|(\d+))/i);
-    if (m) {
-      const from = m[1] || m[2], to = m[3] || m[4];
-      if (BigInt(to) - BigInt(from) > 3n) throw new Error('StockDataa range lookup timed out');
+    if (/where D is not null limit 5000 offset 0/i.test(tq)) {
+      assert.equal(opts.timeoutMs, 55000, 'bounded page query has an explicit timeout');
     }
     return originalQuery(sheet, tq, opts);
   };
@@ -162,5 +161,5 @@ test('FASTag Mapping automatically splits a timed-out numeric range and still fi
   const html = selectors.get('#fm-results').innerHTML;
   assert.match(html, /TAG-12345/);
   assert.match(html, /AUTO-SPLIT-AGENT/);
-  assert.ok(queryLog.length > 0, 'smaller range queries were eventually issued');
+  assert.ok(queryLog.some((q) => /where D is not null limit 5000 offset 0/i.test(q.tq)), 'bounded page scan was issued');
 });
