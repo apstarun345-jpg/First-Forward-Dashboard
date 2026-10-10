@@ -282,8 +282,9 @@ window.FF = window.FF || {};
     const level = Number(depth || 0);
     const schema = await stockSchema(), c = cols();
     const index = schema.index.barcode, field = schema.letters[index] || c.barcode;
-    const numericRange = isDigitKey(from) && isDigitKey(to) &&
-      from.length === to.length && from[0] !== '0' && to[0] !== '0';
+    const digitRange = isDigitKey(from) && isDigitKey(to) && from.length === to.length;
+    const numericRange = digitRange && from[0] !== '0' && to[0] !== '0';
+    const splittableRange = digitRange && compareBarcode(from, to) < 0 && level < 3;
     const preferredModes = numericRange ? [true, false] : [false, true];
     const inRequestedRange = (rows) => (rows || []).filter((row) =>
       compareBarcode(row.barcode, from) >= 0 && compareBarcode(row.barcode, to) <= 0);
@@ -304,13 +305,15 @@ window.FF = window.FF || {};
         if (rows.length) break;
       } catch (err) {
         lastError = err;
+        // Don't wait for a second full timeout before splitting a numeric range.
+        if (isLookupTimeout(err) && splittableRange) break;
       }
     }
 
     // If Google times out while comparing a broad barcode interval, split it automatically.
     // Numeric ranges are split as integers, preserving fixed-width barcodes and avoiding
     // asking the operator to manually upload smaller ranges. Cap depth to prevent query storms.
-    const canSplit = numericRange && compareBarcode(from, to) < 0 && level < 3 && lastError && isLookupTimeout(lastError);
+    const canSplit = splittableRange && lastError && isLookupTimeout(lastError);
     if (!rows.length && canSplit) {
       if (level === 0) setStatus('StockDataa range slow hai — system automatically chhote parts me retry kar raha hai…', 'info');
       const lower = BigInt(from), upper = BigInt(to), middle = (lower + upper) / 2n;
