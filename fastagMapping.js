@@ -329,6 +329,11 @@ window.FF = window.FF || {};
     });
     root.addEventListener('change', (event) => {
       const t = event.target;
+      if (t.id === 'fm-select-all') {
+        const checks = state.root.querySelectorAll('[data-fm-select]');
+        checks.forEach((cb) => { const row = state.rows[Number(cb.dataset.fmSelect)]; if (row && !cb.disabled) row.selected = t.checked; });
+        renderTable(); return;
+      }
       if (t.matches('[data-fm-select]')) { const row = state.rows[Number(t.dataset.fmSelect)]; if (row) row.selected = t.checked; return; }
       if (t.matches('[data-fm-agent]')) {
         const row = state.rows[Number(t.dataset.fmAgent)];
