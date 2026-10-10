@@ -210,6 +210,23 @@ test('v3.30 per-agent tag requests — split, validation, mobile status, duplica
     assert.equal(again.res.status, 201, JSON.stringify(again.json));
     assert.equal(again.json.requests[0].duplicates, 1);
     assert.equal(again.json.warnings[0].code, 'duplicate');
+
+    // 🔒 Retry safety: identical submit key returns the original batch; changed payload cannot reuse it.
+    const idemKey = 'idem_test_submission_key_20261010';
+    const idemBody = {
+      employee: { name: 'Idempotency QA', office: 'Jaipur office' },
+      submissionId: idemKey,
+      agents: [rahul({ agentName: 'Idempotency Test Agent', agentId: '99887766', mobile: '9812345678', address: '99, Idempotency Road, Jaipur', pincode: '302016', rows: [{ cls: 'VC7', requested: 4, approved: 4 }] })]
+    };
+    const idemFirst = await jsonCall(server.base, '/api/public/tag-request', 'POST', idemBody, '', '10.1.0.50');
+    assert.equal(idemFirst.res.status, 201, JSON.stringify(idemFirst.json));
+    const idemRetry = await jsonCall(server.base, '/api/public/tag-request', 'POST', idemBody, '', '10.1.0.51');
+    assert.equal(idemRetry.res.status, 201, JSON.stringify(idemRetry.json));
+    assert.equal(idemRetry.json.requests[0].id, idemFirst.json.requests[0].id, 'retry must return the original request, not create another');
+    const changedIdem = await jsonCall(server.base, '/api/public/tag-request', 'POST', {
+      ...idemBody, agents: [rahul({ agentName: 'Idempotency Test Agent', agentId: '99887766', mobile: '9812345678', address: '99, Idempotency Road, Jaipur', pincode: '302016', rows: [{ cls: 'VC7', requested: 5, approved: 5 }] })]
+    }, '', '10.1.0.52');
+    assert.equal(changedIdem.res.status, 409, 'same key with changed payload must be rejected');
     const list2 = await jsonCall(server.base, '/api/tag-requests', 'GET', undefined, admin);
     const dupRow = list2.json.requests.find((r) => r.id === again.json.request.id);
     assert.deepEqual(dupRow.dupOf, [rq1.id], 'admin list me 🔁 dupOf');
