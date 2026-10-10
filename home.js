@@ -458,6 +458,12 @@ FF.pages = FF.pages || {};
     // when FF/EIR is T+1, so today's partial day never inflates the monthly run-rate.
     const reportedRows = (sf.rows || []).filter((r) => r.ym !== curKey || Number(r.day) <= reportDay);
     const reportedSc = M.summary(reportedRows, curKey);
+    // Use the same report-cutoff snapshot for totals AND the FF/GV breakdown cards.
+    // This prevents live GV / future-dated EIR rows from making card splits exceed MTD totals.
+    const reportedFfRows = (sf.ff || []).filter((r) => r.ym !== curKey || Number(r.day) <= reportDay);
+    const reportedGvRows = (sf.gv || []).filter((r) => r.ym !== curKey || Number(r.day) <= reportDay);
+    const reportedFf = M.summary(reportedFfRows, curKey);
+    const reportedGv = M.summary(reportedGvRows, curKey);
     const rate = observedDay ? reportedSc.total / observedDay : 0;
     const commercialRate = observedDay ? reportedSc.comm / observedDay : 0;
     const expected = observedDay ? Math.round(rate * daysInMonth) : 0;
@@ -478,14 +484,14 @@ FF.pages = FF.pages || {};
         `${momChip(lastDayNow, lastDayPrev, `${prevLabel} ${Math.min(yDay, U.daysInMonth(prevKey))}`)}<br>${splitFoot(yFf, yGv)}`,
         `src=both&scope=day&date=${yKey}`),
       kpi('g1', `${monthLabel} total (MTD)`, '🏷️', U.fmt(sc.total),
-        `${momChip(sc.total, lastSum.total, `${prevLabel} ${observedDay} din`)}<br>${splitFoot(sf.ff ? M.summary(sf.ff, curKey).total : 0, sf.gv ? M.summary(sf.gv, curKey).total : 0)}`,
+        `${momChip(sc.total, lastSum.total, `${prevLabel} ${observedDay} din`)}<br>${splitFoot(reportedFf.total, reportedGv.total)}`,
         `src=both&scope=mtd&ym=${curKey}`),
-      kpi('g3', 'VC4', '🚗', U.fmt(sc.vc4), `${momChip(sc.vc4, lastSum.vc4)}<br>${splitFoot(M.summary(sf.ff, curKey).vc4, M.summary(sf.gv, curKey).vc4)}`, `src=both&scope=mtd&ym=${curKey}&f=vc4`),
-      kpi('g8', 'VC20', '🛻', U.fmt(sc.vc20), `${momChip(sc.vc20, lastSum.vc20)}<br>${splitFoot(M.summary(sf.ff, curKey).vc20, M.summary(sf.gv, curKey).vc20)}`, `src=both&scope=mtd&ym=${curKey}&f=vc20`),
-      kpi('g6', 'VC5+', '🚚', U.fmt(sc.vc5p), `${momChip(sc.vc5p, lastSum.vc5p)}<br>${splitFoot(M.summary(sf.ff, curKey).vc5p, M.summary(sf.gv, curKey).vc5p)}`, `src=both&scope=mtd&ym=${curKey}&f=vc5p`),
+      kpi('g3', 'VC4', '🚗', U.fmt(sc.vc4), `${momChip(sc.vc4, lastSum.vc4)}<br>${splitFoot(reportedFf.vc4, reportedGv.vc4)}`, `src=both&scope=mtd&ym=${curKey}&f=vc4`),
+      kpi('g8', 'VC20', '🛻', U.fmt(sc.vc20), `${momChip(sc.vc20, lastSum.vc20)}<br>${splitFoot(reportedFf.vc20, reportedGv.vc20)}`, `src=both&scope=mtd&ym=${curKey}&f=vc20`),
+      kpi('g6', 'VC5+', '🚚', U.fmt(sc.vc5p), `${momChip(sc.vc5p, lastSum.vc5p)}<br>${splitFoot(reportedFf.vc5p, reportedGv.vc5p)}`, `src=both&scope=mtd&ym=${curKey}&f=vc5p`),
       kpi('g12', 'All Commercial · VC20 + VC5+', '🚛', U.fmt(sc.comm), `${momChip(sc.comm, lastSum.comm, `${prevLabel} · same ${Math.min(compareDay, U.daysInMonth(prevKey))} reported din`)}<br>Last month full <b>${U.fmt(lastFull.comm)}</b> · Expected this month <b>${U.fmt(expectedCommercial)}</b> <span class="dim">(report till ${observedDay ? esc(U.labelDateKey(`${curKey}-${String(observedDay).padStart(2,'0')}`)) : '—'})</span>`, `src=both&scope=mtd&ym=${curKey}&f=comm`),
-      kpi('g5', 'Replacement', '🔁', U.fmt(sc.replacement), `${momChip(sc.replacement, lastSum.replacement)}<br>${splitFoot(M.summary(sf.ff, curKey).replacement, M.summary(sf.gv, curKey).replacement)}`, `src=both&scope=mtd&ym=${curKey}&f=repl`),
-      kpi('g7', 'Chassis', '🔧', U.fmt(sc.chassis), `${momChip(sc.chassis, lastSum.chassis)}<br>${splitFoot(M.summary(sf.ff, curKey).chassis, M.summary(sf.gv, curKey).chassis)}`, `src=both&scope=mtd&ym=${curKey}&f=chassis`),
+      kpi('g5', 'Replacement', '🔁', U.fmt(sc.replacement), `${momChip(sc.replacement, lastSum.replacement)}<br>${splitFoot(reportedFf.replacement, reportedGv.replacement)}`, `src=both&scope=mtd&ym=${curKey}&f=repl`),
+      kpi('g7', 'Chassis', '🔧', U.fmt(sc.chassis), `${momChip(sc.chassis, lastSum.chassis)}<br>${splitFoot(reportedFf.chassis, reportedGv.chassis)}`, `src=both&scope=mtd&ym=${curKey}&f=chassis`),
       kpi('g2', `Expected in ${U.labelYM(curKey)}`, '🎯',
         `<div class="hm-runrate-list hm-expected-list"><div><span>VC4</span><b>${U.fmt(observedDay ? Math.round((reportedSc.vc4 / observedDay) * daysInMonth) : 0)}</b></div><div><span>VC20</span><b>${U.fmt(observedDay ? Math.round((reportedSc.vc20 / observedDay) * daysInMonth) : 0)}</b></div><div><span>VC5+</span><b>${U.fmt(observedDay ? Math.round((reportedSc.vc5p / observedDay) * daysInMonth) : 0)}</b></div><div class="is-total"><span>Total Expected</span><b>${U.fmt(expected)}</b></div></div>`,
         `EIR forecast · ${observedDay}/${daysInMonth} reported days · today excluded<br><span class="dim">Report till <b>${observedDay ? esc(U.labelDateKey(`${curKey}-${String(observedDay).padStart(2,'0')}`)) : '—'}</b> · last month full <b>${U.fmt(lastTotalFull)}</b> · expected <b>${U.fmt(lastExpected)}</b></span>`,
