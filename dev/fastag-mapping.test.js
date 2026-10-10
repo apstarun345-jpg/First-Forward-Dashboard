@@ -21,7 +21,7 @@ test('FASTag Mapping is registered under GV Partner and loads lazily', async () 
 test('FASTag Mapping supports barcode ranges, multiple identifiers, StockDataa fields and full CSV', async () => {
   const page = await read('fastagMapping.js');
   for (const required of [
-    'firstBarcode', 'lastBarcode', 'tagId', 'serialNo', 'agentId',
+    'firstbarcode', 'lastbarcode', 'tagId', 'serialNo', 'agentId',
     "D.query('StockDataa'", "vcType: val('vcType')", "stockAgentId: val('agentId')",
     'fm-quick-map', 'fastag-mapping-template.csv', 'Full details CSV',
     'Mapped successfully', 'Duplicate conflict'
