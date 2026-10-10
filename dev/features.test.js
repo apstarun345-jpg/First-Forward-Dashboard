@@ -578,8 +578,9 @@ test('🔗 personal links (agent+TL) /p/ pages, 🗺 team location, 🏆 anomaly
     const htmlA = await pageAAuth.text();
     assert.ok(htmlA.includes('Rahul Dravid'), 'verified page contains agent name');
     assert.ok(htmlA.includes('Welcome Back, <b>Rahul Dravid</b>'), 'verified personal report greets the authenticated agent');
-    assert.ok(htmlA.includes('Daily Issuance · Last 14 Days'), 'daily issuance graph has an explicit title');
-    assert.ok(htmlA.includes('pl-tbl-date-matrix') && htmlA.includes('Agent Name') && htmlA.includes('14-Day Total'), 'date matrix uses agent rows and date columns');
+    assert.ok(htmlA.includes('Daily Issuance · Current Month') && htmlA.includes('MTD ISSUED') && htmlA.includes("today's incomplete report excluded"), 'current-month graph shows an issued-count total through yesterday');
+    assert.ok(htmlA.includes('pl-tbl-date-matrix') && htmlA.includes('Agent Name') && htmlA.includes('MTD Total'), 'date matrix uses agent rows and current-month date columns');
+    assert.ok(!htmlA.includes('Last 14 Days') && !htmlA.includes('14-Day Total'), 'personal report no longer renders a 14-day issuance view');
     assert.ok(htmlA.includes('pl-exp-stock-csv'), 'stock CSV action is available when stock and export are permitted');
     assert.ok(htmlA.includes('MTD issued') && htmlA.includes('Last'), 'overview KPI and 14-day chart render');
     assert.ok(htmlA.includes('Class-wise Stock') && htmlA.includes('Date-wise Issuance') && htmlA.includes('Performance &amp; Growth'), 'all allowed report sections are included');
@@ -616,7 +617,8 @@ test('🔗 personal links (agent+TL) /p/ pages, 🗺 team location, 🏆 anomaly
     const htmlT = await pageTAuth.text();
     assert.ok(htmlT.includes('Zoya Khan'), 'verified TL name appears');
     assert.ok(htmlT.includes('Welcome Back, <b>Zoya Khan</b>'), 'verified TL report greets the authenticated team leader');
-    assert.ok(htmlT.includes('pl-tbl-date-matrix') && htmlT.includes('Agent Name'), 'TL report includes the agent-by-date issuance matrix');
+    assert.ok(htmlT.includes('pl-tbl-date-matrix') && htmlT.includes('Agent Name') && htmlT.includes('MTD Total'), 'TL report includes the current-month agent-by-date issuance matrix');
+    assert.ok(htmlT.includes('Daily Issuance · Current Month') && htmlT.includes('MTD ISSUED'), 'TL graph shows current-month total through yesterday');
     assert.ok(htmlT.includes('Team · agent-wise issuance'), 'TL agent-wise issuance is included');
     assert.ok(htmlT.includes('Team (is mahine)'), 'TL team performance list included');
 
