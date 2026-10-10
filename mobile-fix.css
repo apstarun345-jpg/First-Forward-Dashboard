@@ -1542,3 +1542,10 @@ html.mobile-ui #mobile-nav .mobile-nav-item small {
   html.mobile-ui #mobile-nav .mobile-nav-item small { font-size: 10px !important; }
 }
 
+/* Keep the HTML hidden contract stronger than responsive display overrides. */
+html.mobile-ui .topbar [hidden],
+html.mobile-ui #top-actions [hidden],
+html.mobile-ui #mobile-nav[hidden],
+html.mobile-ui #mobile-nav [hidden] {
+  display: none !important;
+}
