@@ -366,7 +366,7 @@ window.FF = window.FF || {};
     const growthBasis = { ...b, growthThrough: comparableUsable ? comparable.label : '', growthCurrent: comparableUsable ? comparable.current : num(t.curTotal), growthLast: comparableUsable ? comparable.last : num(t.lastTotal), growthElapsed: comparableUsable ? comparable.day : b.days };
     return {
       text: growthText,
-      num: projectedGrowth !== null ? projectedGrowth : g, mtdGrowthNum: g, projectedGrowth, projectedCurrent,
+      num: g, mtdGrowthNum: g, projectedGrowth, projectedCurrent,
       basis: { ...growthBasis, projectedCurrent, previousFull: num(t.lastTotal) }, growthThrough: comparable ? comparable.label : '',
       comparableCurrent: comparable ? comparable.current : null,
       comparableLast: comparable ? comparable.last : null,
@@ -461,16 +461,64 @@ window.FF = window.FF || {};
   }
   function ffPeopleLookup() {
     if (!ffLookupCache) {
-      const base = ffAgents();
+      const base = ffAgents() || [];
       const extraAgents = rowsOf('agents') || [];
-      const stockOnly = rowsOf('stockAgents') || [];
-      // Merge all FF identity sources for lookup only. This does NOT change KPI calculations.
-      const merged = [...base, ...extraAgents, ...stockOnly];
+      // Performance and raw Agent sheets can contain the same employee. StockDataa is
+      // class/holder-level inventory (multiple rows per person), never an identity roster.
+      // Include stock-only holders later in ffTlProfile after matching stock holders to these people.
+      const rows = [], byId = new Map(), byNameTl = new Map();
+      const identityOf = (a) => {
+        const id = normId(a && (a.agentId || a.id));
+        if (id) return `#${id}`;
+        const name = norm(a && (a.name || a.agentName));
+        const tlId = normId(a && (a.tlId || a.supervisorId));
+        const tlName = norm(a && (a.tlName || a.tl));
+        return name ? `n:${name}|tl:${tlId || tlName}` : '';
+      };
+      const add = (raw, primary) => {
+        if (!raw || typeof raw !== 'object') return;
+        const key = identityOf(raw);
+        if (!key) return;
+        const name = norm(raw.name || raw.agentName);
+        const tlKey = normId(raw.tlId || raw.supervisorId) || norm(raw.tlName || raw.tl);
+        const nameTl = name ? `n:${name}|tl:${tlKey}` : '';
+        let existing = key.startsWith('#') ? byId.get(key) : byNameTl.get(key);
+        // If one adapter has an ID and the other lacks it, allow a match only when the
+        // normalized name + TL identity also matches. This avoids merging same-name agents
+        // assigned to different TLs.
+        if (!existing && nameTl) existing = byNameTl.get(nameTl);
+        if (!existing) {
+          const entry = { ...raw };
+          if (!entry.name && entry.agentName) entry.name = entry.agentName;
+          if (!entry.agentName && entry.name) entry.agentName = entry.name;
+          if (!entry.agentId && entry.id) entry.agentId = entry.id;
+          rows.push(entry);
+          if (key.startsWith('#')) byId.set(key, entry);
+          if (nameTl) byNameTl.set(nameTl, entry);
+          return;
+        }
+        // Performance rows are inserted first/canonical. Other identity sources fill blanks;
+        // never add a second roster row just because the same employee appeared in another sheet.
+        Object.entries(raw).forEach(([field, value]) => {
+          if ((existing[field] === undefined || existing[field] === null || existing[field] === '')
+            && value !== undefined && value !== null && value !== '') existing[field] = value;
+        });
+        if (raw.tlExcluded === true) existing.tlExcluded = true;
+        if (raw.directAgent === true) existing.directAgent = true;
+        const mergedId = normId(existing.agentId || existing.id);
+        if (mergedId) byId.set(`#${mergedId}`, existing);
+        const mergedName = norm(existing.name || existing.agentName);
+        const mergedTl = normId(existing.tlId || existing.supervisorId) || norm(existing.tlName || existing.tl);
+        if (mergedName) byNameTl.set(`n:${mergedName}|tl:${mergedTl}`, existing);
+        if (primary && !existing.agentId && raw.id) existing.agentId = raw.id;
+      };
+      base.forEach((r) => add(r, true));
+      extraAgents.forEach((r) => add(r, false));
       ffLookupCache = buildPeopleLookup(
-        merged,
+        rows,
         (a) => a.name || a.agentName,
         (a) => [a.agentId, a.id],
-        (a) => a.tlName
+        (a) => a.tlName || a.tl
       );
     }
     return ffLookupCache;
