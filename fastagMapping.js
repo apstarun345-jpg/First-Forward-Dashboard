@@ -195,8 +195,9 @@ window.FF = window.FF || {};
         // Record which exact headers were discovered; all three mapping keys are mandatory.
         return { letters: STOCK_LETTERS, index, labels };
       } catch (err) {
-        // Schema discovery must not block lookup if the sheet does not expose headers.
-        return fallback;
+        // Never silently fall back to guessed column letters for the three mapping-critical fields.
+        // A wrong column can map the wrong physical tag; report the header/query issue instead.
+        throw new Error(err && err.message ? err.message : 'StockDataa header lookup failed.');
       }
     })();
     return schemaPromise;
@@ -225,31 +226,37 @@ window.FF = window.FF || {};
     const schema = await stockSchema(), fieldIndex = schema.index[fieldName], field = schema.letters[fieldIndex] || cols()[fieldName];
     if (!field) throw new Error('StockDataa me ' + fieldName + ' column resolve nahi hua.');
     const found = new Map();
-    for (let i = 0; i < unique.length; i += 15) {
-      const batch = unique.slice(i, i + 15);
-      const make = (numeric) => 'select A,B,C,D,E,F,G,H,I,J,K,L,M where ' + batch.map((x) => field + ' = ' + literal(x, numeric)).join(' or ');
-      // Google gviz sometimes returns an empty table (not an error) when a numeric-looking ID
-      // is compared using the other data type. Try both number and quoted-string comparisons.
-      const attempts = await Promise.allSettled([
-        D.query('StockDataa', make(true), { timeoutMs: 40000, retries: 0 }),
-        D.query('StockDataa', make(false), { timeoutMs: 40000, retries: 0 })
-      ]);
-      let succeeded = false;
-      for (const result of attempts) {
-        if (result.status !== 'fulfilled') continue;
-        succeeded = true;
-        for (const row of stockRows(result.value, schema)) {
-          const sourceValue = fieldName === 'tagId' ? row.tagId : (fieldName === 'serialNo' ? row.serialNo : row.barcode);
-          if (!batch.some((value) => idKey(value) === idKey(sourceValue))) continue;
-          const k = idKey(row.tagId) + '|' + idKey(row.barcode) + '|' + idKey(row.serialNo);
-          if (!found.has(k)) found.set(k, row);
+    const batches = [];
+    for (let i = 0; i < unique.length; i += 15) batches.push(unique.slice(i, i + 15));
+    let cursor = 0;
+    // A few batched queries in parallel speed up larger uploads without flooding gviz.
+    const workers = Array.from({ length: Math.min(3, batches.length) }, async () => {
+      while (cursor < batches.length) {
+        const batch = batches[cursor++];
+        const make = (numeric) => 'select A,B,C,D,E,F,G,H,I,J,K,L,M where ' + batch.map((x) => field + ' = ' + literal(x, numeric)).join(' or ');
+        // gviz may return zero rows instead of an error for the wrong number/string type.
+        const attempts = await Promise.allSettled([
+          D.query('StockDataa', make(true), { timeoutMs: 40000, retries: 0 }),
+          D.query('StockDataa', make(false), { timeoutMs: 40000, retries: 0 })
+        ]);
+        let succeeded = false;
+        for (const result of attempts) {
+          if (result.status !== 'fulfilled') continue;
+          succeeded = true;
+          for (const row of stockRows(result.value, schema)) {
+            const sourceValue = fieldName === 'tagId' ? row.tagId : row.barcode;
+            if (!batch.some((value) => idKey(value) === idKey(sourceValue))) continue;
+            const k = idKey(row.tagId) + '|' + idKey(row.barcode);
+            found.set(k, row);
+          }
+        }
+        if (!succeeded) {
+          const err = attempts.find((x) => x.status === 'rejected');
+          throw new Error('StockDataa lookup failed: ' + (err && err.reason && err.reason.message || 'Google Sheets query error'));
         }
       }
-      if (!succeeded) {
-        const err = attempts.find((x) => x.status === 'rejected');
-        throw new Error('StockDataa lookup failed: ' + (err && err.reason && err.reason.message || 'Google Sheets query error'));
-      }
-    }
+    });
+    await Promise.all(workers);
     return [...found.values()];
   }
   async function queryRange(from, to) {
@@ -309,15 +316,15 @@ window.FF = window.FF || {};
     state.busy = true; setStatus('StockDataa se matching details lookup ho rahi hain…', 'info');
     const old = U.$('#fm-lookup', state.root), mapBtn = U.$('#fm-map', state.root); if (old) old.disabled = true; if (mapBtn) mapBtn.disabled = true;
     try {
-      const barcodes = waiting.flatMap((x) => x.type === 'range' ? [] : [x.barcode].filter(Boolean));
-      const serials = waiting.flatMap((x) => x.type === 'range' ? [] : [x.serialNo].filter(Boolean));
+      const barcodes = waiting.flatMap((x) => x.type === 'range' ? [] : [x.barcode || x.serialNo].filter(Boolean));
       const tagIds = waiting.flatMap((x) => x.tagId ? [x.tagId] : []);
+      // serialNo is a payload field, not a separate StockDataa lookup column: it is BARCODE.
+      // Query each physical StockDataa column only once to reduce Google Sheets request time.
       const found = await Promise.all([
         queryField('barcode', barcodes),
-        queryField('serialNo', serials),
         queryField('tagId', tagIds)
       ]);
-      const byBarcode = found[0], bySerial = found[1], byTag = found[2];
+      const byBarcode = found[0], byTag = found[1];
       for (const item of waiting.filter((x) => x.type === 'range')) { try { item._rangeRows = await queryRange(item.first, item.last); } catch (err) { item._lookupError = err.message || String(err); } }
       for (const item of waiting) {
         if (item._lookupError) { state.rows.push({ id: nextId++, source: item.source, request: item.first + ' – ' + item.last, selected: false, status: 'Lookup error', message: item._lookupError, stock: {}, agentId: '' }); continue; }
@@ -329,7 +336,7 @@ window.FF = window.FF || {};
           const tagMatches = item.tagId ? byTag.filter((r) => idKey(r.tagId) === idKey(item.tagId)) : [];
           const barcodeKey = item.barcode || item.serialNo || '';
           const valueMatches = barcodeKey
-            ? [...byBarcode, ...bySerial].filter((r) => idKey(r.barcode) === idKey(barcodeKey) || idKey(r.serialNo) === idKey(barcodeKey))
+            ? byBarcode.filter((r) => idKey(r.barcode) === idKey(barcodeKey) || idKey(r.serialNo) === idKey(barcodeKey))
             : [];
           const dedup = new Map();
           (tagMatches.length ? tagMatches : valueMatches).forEach((r) => dedup.set(idKey(r.tagId) + '|' + idKey(r.barcode) + '|' + idKey(r.serialNo), r));
