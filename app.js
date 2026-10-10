@@ -1531,6 +1531,26 @@ window.FF = window.FF || {};
         openNotifications();
       });
     }
+    // 🔎 Search can be clicked before palette.js/masterSearch.js have loaded.
+    // The primary listener is added by palette.js; this fallback only takes over while
+    // that module is absent, so the same physical click still opens search on a cold launch.
+    const globalSearchBtn = U.$('#global-search-btn');
+    if (globalSearchBtn && !globalSearchBtn.__ffFallbackWired) {
+      globalSearchBtn.__ffFallbackWired = true;
+      globalSearchBtn.addEventListener('click', (e) => {
+        if (FF.palette && typeof FF.palette.toggle === 'function') return;
+        e.preventDefault(); e.stopPropagation();
+        ensureShell(['palette', 'masterSearch']).then(() => {
+          if (FF.palette && typeof FF.palette.toggle === 'function') {
+            FF.palette.toggle();
+          } else if (FF.masterSearch && typeof FF.masterSearch.openSearchPage === 'function') {
+            FF.masterSearch.openSearchPage('');
+          } else {
+            navigate('masterSearch');
+          }
+        }).catch(() => U.toast('Search module load nahi hua — reload karke dobara try karein', 'warn'));
+      });
+    }
     document.addEventListener('keydown', (e) => {
       // ⌨️ Ctrl/⌘+K — palette first paint ke baad load hota hai, isliye pehli dabane par load karke kholo.
       if ((e.ctrlKey || e.metaKey) && !e.altKey && String(e.key).toLowerCase() === 'k' && !FF.palette) {
