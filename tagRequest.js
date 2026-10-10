@@ -1032,7 +1032,7 @@ body.colorful .from-hdr { color: #166534; }
 
   // ---- 📝 form ----------------------------------------------------------------------------------------
   const rowTotal = (row) => CLASS_LIST.reduce((s, c) => s + Math.max(0, Math.round(num(row.q[c]))), 0);
-  const rowHasContent = (row) => !!(String(row.name || row.agentId || '').trim() || digits(row.mobile) || clean(row.address) || digits(row.pincode) || (isFastag() && rowTotal(row) > 0) || (!isFastag() && (clean(state.serialNumber) || clean(state.deviceName) || clean(state.materialDescription))));
+  const rowHasContent = (row) => !!(String(row.name || row.agentId || '').trim() || digits(row.mobile) || clean(row.address) || digits(row.pincode) || (isFastag() && rowTotal(row) > 0));
   const errOf = (rowId, field) => (state.errs[rowId] && state.errs[rowId][field]) || '';
   const badCls = (rowId, field) => (errOf(rowId, field) ? ' tr-bad' : '');
   function employeeCardHtml() {
@@ -1690,7 +1690,7 @@ body.colorful .from-hdr { color: #166534; }
     if (itemName) itemName.addEventListener('change', () => { state.itemName = normalizeItemName(itemName.value); renderForm(); });
     ['serialNumber', 'deviceName', 'materialDescription'].forEach((key) => {
       const input = root.querySelector(`[data-tr-field="${key}"]`);
-      if (input) input.addEventListener('input', () => { state[key] = input.value; });
+      if (input) input.addEventListener('input', () => { state[key] = input.value; if (clean(input.value).length >= 2 && state.errs.item && state.errs.item[key]) { delete state.errs.item[key]; input.classList.remove('tr-bad'); } });
     });
     const note = root.querySelector('[data-tr-field="note"]');
     if (note) note.addEventListener('input', () => { state.note = note.value; });
@@ -1821,9 +1821,9 @@ body.colorful .from-hdr { color: #166534; }
       renderForm();
       const n = Object.values(state.errs).reduce((s, e) => s + Object.keys(e || {}).length, 0);
       U.toast(`⚠️ ${n} jagah details adhoori hain — laal box dekho`, 'err');
-      const card = first.rowId === 'employee' ? rootEl.querySelector('#tr-employee-card') : rootEl.querySelector(`[data-tr-row="${first.rowId}"]`);
+      const card = first.rowId === 'employee' ? rootEl.querySelector('#tr-employee-card') : first.rowId === 'item' ? rootEl.querySelector('.tr-form-extra') : rootEl.querySelector(`[data-tr-row="${first.rowId}"]`);
       if (card && card.scrollIntoView) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      const sel = first.rowId === 'employee' ? '[data-tr-emp="name"]' : first.field === 'agent' ? '.tr-agent' : first.field === 'qty' ? '.tr-qty' : `[data-tr-a="${first.field}"]`;
+      const sel = first.rowId === 'employee' ? '[data-tr-emp="name"]' : first.rowId === 'item' ? `[data-tr-field="${first.field}"]` : first.field === 'agent' ? '.tr-agent' : first.field === 'qty' ? '.tr-qty' : `[data-tr-a="${first.field}"]`;
       const inp = card ? card.querySelector(sel) : null;
       if (inp && inp.focus) setTimeout(() => inp.focus({ preventScroll: true }), 250);
       return;
