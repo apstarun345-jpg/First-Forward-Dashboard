@@ -1310,7 +1310,7 @@ body.colorful .from-hdr { color: #166534; }
     const dateTime = lastAt ? (() => {
       try {
         const d = new Date(lastAt);
-        return d.toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+        return d.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
       } catch { return ''; }
     })() : '';
     const dateHtml = dateTime ? `<div class="tr-cs-last">📅 Last request: <b>${esc(dateTime)}</b></div>` : '';
