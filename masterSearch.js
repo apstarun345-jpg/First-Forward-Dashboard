@@ -22,7 +22,17 @@ FF.pages = FF.pages || {};
   // removal so the sheet's UNIQUE_ID / TL ID still matches the value typed by the user.
   const normId = (v) => clean(v).replace(/\.0+$/, '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   const normName = (v) => clean(v).toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
-  const normBar = normId;
+  function expandNumericId(value) {
+    const raw = clean(value).replace(/[,\s-]/g, '');
+    const m = raw.match(/^([+-]?)(\d+)(?:\.(\d*))?[eE]([+-]?\d+)$/);
+    if (!m) return raw;
+    const sign = m[1] || '', whole = m[2], fraction = m[3] || '', digits = whole + fraction;
+    const decimalAt = whole.length + Number(m[4]);
+    if (decimalAt <= 0) return sign + '0.' + '0'.repeat(Math.min(1000, -decimalAt)) + digits;
+    if (decimalAt >= digits.length) return sign + digits + '0'.repeat(Math.min(1000, decimalAt - digits.length));
+    return sign + digits.slice(0, decimalAt) + '.' + digits.slice(decimalAt);
+  }
+  const normBar = (v) => normId(expandNumericId(v));
   const KIND_LABEL = { 'ff-agent': 'FF Agent', 'gv-agent': 'GV Agent', 'ff-tl': 'FF TL', 'gv-tl': 'GV TL', 'gv-id': 'GV ID', 'agent-id': 'Agent ID' };
   const KIND_ICON = { 'ff-agent': '🧑‍💼', 'gv-agent': '🧑‍💼', 'ff-tl': '👥', 'gv-tl': '👥', 'gv-id': '🆔', 'agent-id': '🆔' };
 
@@ -338,20 +348,52 @@ FF.pages = FF.pages || {};
       }
       for (const r of details.assignment || []) {
         if (await stop()) return state.full;
-        const key = normBar(r.serial || r.tagId);
+        const keys = [...new Set([r.serial, r.tagId].map(normBar).filter(Boolean))];
+        if (!keys.length) continue;
+        const owner = clean(r.agentName || r.agentId);
+        for (const key of keys) {
+          const e = barEntry(idx, key);
+          if (!e.gv.some((x) => normId(x.gvId) === normId(r.gvUniqueId) && normName(x.agentName) === normName(owner) && normId(x.tagId) === normId(r.tagId))) {
+            e.gv.push({ barcode: key, tagId: clean(r.tagId), agentId: clean(r.agentId), agentName: owner, tlName: clean(r.tlName), cls: clean(r.cls), gvId: clean(r.gvUniqueId), gvName: clean(r.gvUniqueName), allocated: stamp(r.allocatedAt), source: 'Tag Assignment' });
+          }
+          const p = person(idx, 'gv-agent', owner, r.tlName, r.cls, r.agentId);
+          if (p) { p.bars.add(key); if (!p.last) p.last = stamp(r.allocatedAt); }
+          if (clean(r.tlName)) { const t = person(idx, 'gv-tl', r.tlName, '', r.cls, ''); if (t) t.bars.add(key); }
+          if (clean(r.gvUniqueName) || clean(r.gvUniqueId)) {
+            const g = person(idx, 'gv-id', r.gvUniqueName || r.gvUniqueId, r.tlName, r.cls, r.gvUniqueId);
+            if (g) g.bars.add(key);
+          }
+        }
+      }
+      // Index issued tags from GV Master too (they may no longer exist in the stock/assignment tabs).
+      for (const r of details.rawMaster || []) {
+        if (await stop()) return state.full;
+        const keys = [...new Set([r.serial, r.tagId].map(normBar).filter(Boolean))];
+        if (!keys.length) continue;
+        const owner = clean(r.agentName || r.agentId);
+        for (const key of keys) {
+          const e = barEntry(idx, key);
+          if (!e.gv.some((x) => x.source === 'GV Master' && normName(x.agentName) === normName(owner) && normId(x.tagId) === normId(r.tagId))) {
+            e.gv.push({ barcode: key, tagId: clean(r.tagId), agentId: clean(r.agentId), agentName: owner, tlName: clean(r.tlName), cls: clean(r.cls), gvId: clean(r.gvUniqueId), gvName: clean(r.gvUniqueName), allocated: stamp(r.date), source: 'GV Master' });
+          }
+          const p = person(idx, 'gv-agent', owner, r.tlName, r.cls, r.agentId);
+          if (p) { p.bars.add(key); if (!p.last) p.last = stamp(r.date); }
+          if (clean(r.tlName)) { const t = person(idx, 'gv-tl', r.tlName, '', r.cls, ''); if (t) t.bars.add(key); }
+        }
+      }
+      // EIR is FF's issue ledger: retain a tag lookup even when the tag is no longer in StockDataa.
+      for (const r of details.eir || []) {
+        if (await stop()) return state.full;
+        const key = normBar(r.tagId);
         if (!key) continue;
         const e = barEntry(idx, key);
         const owner = clean(r.agentName || r.agentId);
-        if (!e.gv.some((x) => normId(x.gvId) === normId(r.gvUniqueId) && normName(x.agentName) === normName(owner))) {
-          e.gv.push({ barcode: key, tagId: clean(r.tagId), agentId: clean(r.agentId), agentName: owner, tlName: clean(r.tlName), cls: clean(r.cls), gvId: clean(r.gvUniqueId), gvName: clean(r.gvUniqueName), allocated: stamp(r.allocatedAt) });
+        if (!e.ff.some((x) => x.source === 'EIR' && normId(x.tagId) === normId(r.tagId) && normId(x.agentId) === normId(r.agentId))) {
+          e.ff.push({ barcode: key, tagId: clean(r.tagId), agentId: clean(r.agentId), agentName: owner, tlName: clean(r.tlName), cls: clean(r.cls), allocated: stamp(r.date), source: 'EIR' });
         }
-        const p = person(idx, 'gv-agent', owner, r.tlName, r.cls, r.agentId);
-        if (p) { p.bars.add(key); if (!p.last) p.last = stamp(r.allocatedAt); }
-        if (clean(r.tlName)) { const t = person(idx, 'gv-tl', r.tlName, '', r.cls, ''); if (t) t.bars.add(key); }
-        if (clean(r.gvUniqueName) || clean(r.gvUniqueId)) {
-          const g = person(idx, 'gv-id', r.gvUniqueName || r.gvUniqueId, r.tlName, r.cls, r.gvUniqueId);
-          if (g) g.bars.add(key);
-        }
+        const p = person(idx, 'ff-agent', owner, r.tlName, r.cls, r.agentId);
+        if (p) { p.bars.add(key); if (!p.last) p.last = stamp(r.date); }
+        if (clean(r.tlName)) { const t = person(idx, 'ff-tl', r.tlName, '', r.cls, ''); if (t) t.bars.add(key); }
       }
       indexLookups(idx);
       if (generation !== state.generation) return state.full;
@@ -422,7 +464,8 @@ FF.pages = FF.pages || {};
     const nql = query.toLowerCase();
     const nn = normName(query);
     const ni = normId(query);
-    const wantsTags = ni.length >= 4 && /\d/.test(query);
+    const barcodeQuery = normBar(query);
+    const wantsTags = barcodeQuery.length >= 4 && /\d/.test(query);
 
     // people by name / TL / id / GV id — 2-gram index avoids scanning every person on each key.
     if (nn.length >= 2) {
@@ -453,7 +496,7 @@ FF.pages = FF.pages || {};
       const substring = ni.length >= 6;
       for (let i = 0; i < keys.length; i++) {
         const key = keys[i];
-        if (key === ni || key.startsWith(ni) || (substring && key.includes(ni))) { const entry = idx.bars.get(key); if (entry) out.tags.push(entry); }
+        if (key === barcodeQuery || key.startsWith(barcodeQuery) || (substring && key.includes(barcodeQuery))) { const entry = idx.bars.get(key); if (entry) out.tags.push(entry); }
       }
       out.tags.sort((a, b) => a.key.length - b.key.length || (b.ff.length + b.gv.length) - (a.ff.length + a.gv.length));
       if (out.tags.length > 120) out.tags.length = 120;
