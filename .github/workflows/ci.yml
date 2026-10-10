@@ -24,5 +24,7 @@ jobs:
         run: npm install --no-package-lock --ignore-scripts
       - name: Syntax check all dashboard modules
         run: npm run check
-      - name: Run regression tests
+      - name: Run targeted Tag Request idempotency regression
+        run: node --test dev/tag-request-idempotency.test.js
+      - name: Run full regression suite
         run: npm test
