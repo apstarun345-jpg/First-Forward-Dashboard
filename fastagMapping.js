@@ -260,10 +260,10 @@ window.FF = window.FF || {};
     return [...unique.values()];
   }
   function addResult(item, stock, matchedBy) {
-    const row = Object.assign({ id: nextId++, source: item.source || 'Manual', request: item.type === 'range' ? item.first + ' – ' + item.last : (item.tagId || item.barcode || ''),
-      agentId: clean(item.agentId) || (stock && stock.stockAgentId) || '', stock: stock || {}, matchedBy: matchedBy || '', selected: true, mapped: false, apiStatus: '', message: '',
+    const row = Object.assign({ id: nextId++, source: item.source || 'Manual', request: item.type === 'range' ? item.first + ' – ' + item.last : (item.tagId || item.barcode || item.serialNo || ''),
+      agentId: clean(item.agentId), stock: stock || {}, matchedBy: matchedBy || '', selected: true, mapped: false, apiStatus: '', message: '',
       status: stock ? 'Ready to review' : 'Not found in StockDataa' }, stock || {});
-    row.stock = stock || {}; row.agentId = clean(item.agentId) || (stock && stock.stockAgentId) || '';
+    row.stock = stock || {}; row.agentId = clean(item.agentId);
     row.mapped = false; row.apiStatus = ''; row.message = '';
     row.status = !stock ? 'Not found in StockDataa' : (!row.tagId ? 'Missing tag ID' : (!row.serialNo ? 'Missing serial number / barcode' : (!row.vcType ? 'Missing VC type' : (!row.agentId ? 'Missing agent ID' : 'Ready to map'))));
     state.rows.push(row); return row;
@@ -300,9 +300,14 @@ window.FF = window.FF || {};
     const old = U.$('#fm-lookup', state.root), mapBtn = U.$('#fm-map', state.root); if (old) old.disabled = true; if (mapBtn) mapBtn.disabled = true;
     try {
       const barcodes = waiting.flatMap((x) => x.type === 'range' ? [] : [x.barcode].filter(Boolean));
+      const serials = waiting.flatMap((x) => x.type === 'range' ? [] : [x.serialNo].filter(Boolean));
       const tagIds = waiting.flatMap((x) => x.tagId ? [x.tagId] : []);
-      const found = await Promise.all([queryField(cols().barcode, barcodes, true), queryField(cols().tagId, tagIds, false)]);
-      const byBarcode = found[0], byTag = found[1];
+      const found = await Promise.all([
+        queryField('barcode', barcodes),
+        queryField('serialNo', serials),
+        queryField('tagId', tagIds)
+      ]);
+      const byBarcode = found[0], bySerial = found[1], byTag = found[2];
       for (const item of waiting.filter((x) => x.type === 'range')) { try { item._rangeRows = await queryRange(item.first, item.last); } catch (err) { item._lookupError = err.message || String(err); } }
       for (const item of waiting) {
         if (item._lookupError) { state.rows.push({ id: nextId++, source: item.source, request: item.first + ' – ' + item.last, selected: false, status: 'Lookup error', message: item._lookupError, stock: {}, agentId: '' }); continue; }
@@ -310,9 +315,21 @@ window.FF = window.FF || {};
         if (item.type === 'range') {
           if (compareBarcode(item.first, item.last) > 0) { state.rows.push({ id: nextId++, source: item.source, request: item.first + ' – ' + item.last, selected: false, status: 'Invalid barcode range', message: 'First barcode last se bada hai.', stock: {}, agentId: '' }); continue; }
           candidates = (item._rangeRows || []).filter((r) => compareBarcode(r.barcode, item.first) >= 0 && compareBarcode(r.barcode, item.last) <= 0);
-        } else if (item.tagId) candidates = byTag.filter((r) => r.tagId === item.tagId);
-        else if (item.barcode) candidates = byBarcode.filter((r) => r.barcode === item.barcode);
-        if (item.tagId && item.barcode) candidates = candidates.filter((r) => r.barcode === item.barcode);
+        } else {
+          const tagMatches = item.tagId ? byTag.filter((r) => idKey(r.tagId) === idKey(item.tagId)) : [];
+          const barcodeKey = item.barcode || item.serialNo || '';
+          const valueMatches = barcodeKey
+            ? [...byBarcode, ...bySerial].filter((r) => idKey(r.barcode) === idKey(barcodeKey) || idKey(r.serialNo) === idKey(barcodeKey))
+            : [];
+          const dedup = new Map();
+          (tagMatches.length ? tagMatches : valueMatches).forEach((r) => dedup.set(idKey(r.tagId) + '|' + idKey(r.barcode) + '|' + idKey(r.serialNo), r));
+          candidates = [...dedup.values()];
+          // When both are given, prefer exact identifier pair only if it matches a real StockDataa row.
+          if (tagMatches.length && barcodeKey) {
+            const paired = candidates.filter((r) => idKey(r.barcode) === idKey(barcodeKey) || idKey(r.serialNo) === idKey(barcodeKey));
+            if (paired.length) candidates = paired;
+          }
+        }
         if (!candidates.length) { addResult(item, null, item.type); continue; }
         if (state.rows.length + candidates.length > MAX_RESULTS) { state.rows.push({ id: nextId++, source: item.source, request: item.type === 'range' ? item.first + ' – ' + item.last : (item.tagId || item.barcode || ''), selected: false, status: 'Result limit reached', message: 'Ek lookup me maximum ' + MAX_RESULTS + ' matched tags. Range ko chhote parts me divide karein.', stock: {}, agentId: '' }); continue; }
         for (const stock of candidates) addResult(item, stock, item.type === 'range' ? 'Barcode range' : (item.tagId ? 'Tag ID' : 'Barcode'));
@@ -379,10 +396,11 @@ window.FF = window.FF || {};
     else { const text = [headers, ...rows].map((r) => r.map(csvCell).join(',')).join('\r\n'); const url = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' })); const a = document.createElement('a'); a.href = url; a.download = 'fastag-mapping-' + Date.now() + '.csv'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
   }
   function templateCsv() {
-    const headers = ['firstBarcode','lastBarcode','barcode','tagId','serialNo','agentId'];
-    const rows = [['8900000000000001','8900000000000010','','','','TARGET_AGENT_ID'],['','','8900000000000025','','','TARGET_AGENT_ID'],['','','','TAG_ID_HERE','','TARGET_AGENT_ID'],['','','','','SERIAL_OR_BARCODE','TARGET_AGENT_ID']];
-    const text = [headers, ...rows].map((r) => r.map(csvCell).join(',')).join('\r\n');
-    const url = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' })); const a = document.createElement('a'); a.href = url; a.download = 'fastag-mapping-template.csv'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    // Exact requested API/output schema: no helper columns in the downloadable template.
+    const headers = ['tagId', 'serialNo', 'vcType', 'agentId'];
+    const text = headers.map(csvCell).join(',');
+    const url = URL.createObjectURL(new Blob([text + '\r\n'], { type: 'text/csv;charset=utf-8' }));
+    const a = document.createElement('a'); a.href = url; a.download = 'fastag-mapping-template.csv'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   function render(root) {
     state.root = root;
