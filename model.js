@@ -88,7 +88,7 @@ window.FF = window.FF || {};
     if (typeof G.get === 'function' && !Array.isArray(G.get('master')) && typeof G.need === 'function') {
       // GV Master background me load ho raha hai to uska intezaar (max 10s) — warna aaj ka GV
       // number ek adhoori EIR row se ban jaata.
-      await Promise.race([G.need('master').catch(() => {}), new Promise((resolve) => setTimeout(resolve, 10000))]);
+      await Promise.race([G.need('master', { only: true }).catch(() => {}), new Promise((resolve) => setTimeout(resolve, 10000))]);
     }
     if (typeof G.get !== 'function' || !Array.isArray(G.get('master'))) return rows;
     const tk = U.dateKey(new Date());
