@@ -1032,7 +1032,7 @@ body.colorful .from-hdr { color: #166534; }
 
   // ---- 📝 form ----------------------------------------------------------------------------------------
   const rowTotal = (row) => CLASS_LIST.reduce((s, c) => s + Math.max(0, Math.round(num(row.q[c]))), 0);
-  const rowHasContent = (row) => !!(String(row.name || row.agentId || '').trim() || digits(row.mobile) || clean(row.address) || digits(row.pincode) || rowTotal(row) > 0);
+  const rowHasContent = (row) => !!(String(row.name || row.agentId || '').trim() || digits(row.mobile) || clean(row.address) || digits(row.pincode) || (isFastag() && rowTotal(row) > 0) || (!isFastag() && (clean(state.serialNumber) || clean(state.deviceName) || clean(state.materialDescription)));
   const errOf = (rowId, field) => (state.errs[rowId] && state.errs[rowId][field]) || '';
   const badCls = (rowId, field) => (errOf(rowId, field) ? ' tr-bad' : '');
   function employeeCardHtml() {
@@ -1340,7 +1340,7 @@ body.colorful .from-hdr { color: #166534; }
     const cfg = formCfg();
     const askMobile = cfg.askMobile !== false, askAddress = cfg.askAddress !== false;
     const rec = exactAgent(row);
-    const total = rowTotal(row);
+    const total = isFastag() ? rowTotal(row) : 0;
     const errs = state.errs[row.id] || {};
     const errList = Object.values(errs).filter(Boolean);
     const qtyRows = CLASS_LIST.map((c) => `<label class="tr-qty-row" title="${esc(CLASS_LABEL[c])} — kitni tags chahiye (0 ya khaali = nahi chahiye)">
@@ -1350,7 +1350,7 @@ body.colorful .from-hdr { color: #166534; }
     return `<div class="tr-agent-card${errList.length ? ' tr-has-err' : ''}" data-tr-row="${row.id}">
       <div class="tr-agent-head">
         <span class="tr-agent-num">🧑 Agent ${i + 1}</span>
-        <span class="tr-agent-total"><b data-tr-agent-total>${fmt(total)}</b> tags</span>
+        <span class="tr-agent-total"><b data-tr-agent-total>${fmt(total)}</b> ${isFastag() ? "tags" : "FASTags"}</span>
         ${state.rows.length > 1 ? `<button type="button" class="btn small" data-tr-del="${row.id}" title="Is agent ko form se hatao">✕ Hatao</button>` : ''}
       </div>
       <div class="tr-agent-grid">
@@ -1396,7 +1396,7 @@ body.colorful .from-hdr { color: #166534; }
       ${employeeCardHtml()}
       ${stockBoardHtml()}
       <section class="card tr-agents-card"><div class="card-head"><h3>🧑‍🤝‍🧑 Agent request <span class="count" data-tr-agents>${fmt(state.rows.length)} agent${state.rows.length === 1 ? '' : 's'}</span></h3>
-        <div class="card-right dim">Har agent: naam · mobile · address · pincode · class-wise qty (0/khaali = nahi chahiye) · total <b data-tr-total>${fmt(grandTotal())}</b> tags</div></div>
+        <div class="card-right dim">Har agent: naam · mobile · address · pincode · ${isFastag() ? 'class-wise FASTag qty (0/khaali = nahi chahiye)' : 'item details'} · total <b data-tr-total>${fmt(isFastag() ? grandTotal() : 0)}</b> tags</div></div>
         <div class="card-body">
           <div class="tr-rows">${state.rows.map(agentCardHtml).join('')}</div>
           <div class="tr-add-row"><button type="button" class="btn tr-add-btn" data-tr-act="add">➕ Add new agent</button>
@@ -1406,15 +1406,16 @@ body.colorful .from-hdr { color: #166534; }
               <select class="input" data-tr-field="courier"><option value="" ${state.courier ? '' : 'selected'}>🚚 courier chuno…</option>${courierOptions().map((c) => `<option value="${esc(c)}" ${c.toLowerCase() === String(state.courier || '').toLowerCase() ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></label>`}
             <label class="field"><span class="dim small">📦 Item Name</span>
               <select class="input" data-tr-field="itemName" aria-label="Item Name">${ITEM_NAME_OPTIONS.map((name) => `<option value="${esc(name)}" ${normalizeItemName(state.itemName) === name ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select></label>
-            ${normalizeItemName(state.itemName) === 'Biomatric Device' ? `<label class="field"><span class="dim small">🔢 Serial Number *</span><input class="input" data-tr-field="serialNumber" value="${esc(state.serialNumber || '')}" placeholder="Device ka serial number" maxlength="100"></label><label class="field"><span class="dim small">🖥️ Device Name *</span><input class="input" data-tr-field="deviceName" value="${esc(state.deviceName || '')}" placeholder="Biometric device ka naam" maxlength="120"></label>` : ''}
-            ${normalizeItemName(state.itemName) === 'Matarial' ? `<label class="field"><span class="dim small">📦 Material details *</span><input class="input" data-tr-field="materialDescription" value="${esc(state.materialDescription || '')}" placeholder="Kya material hai? Naam / details likhein" maxlength="200"></label>` : ''}
+            ${normalizeItemName(state.itemName) === 'FASTag' ? '<p class="dim small tr-item-help">🏷️ FASTag select hai — neeche har agent ke liye class-wise quantity bharein.</p>' : ''}
+            ${normalizeItemName(state.itemName) === 'Biomatric Device' ? `<label class="field"><span class="dim small">🔢 Serial Number *</span><input class="input${errOf('item', 'serialNumber') ? ' tr-bad' : ''}" data-tr-field="serialNumber" value="${esc(state.serialNumber || '')}" placeholder="Device ka serial number" maxlength="100"></label><label class="field"><span class="dim small">🖥️ Device Name *</span><input class="input${errOf('item', 'deviceName') ? ' tr-bad' : ''}" data-tr-field="deviceName" value="${esc(state.deviceName || '')}" placeholder="Biometric device ka naam" maxlength="120"></label>` : ''}
+            ${normalizeItemName(state.itemName) === 'Matarial' ? `<label class="field tr-span-all"><span class="dim small">📦 Material details *</span><input class="input${errOf('item', 'materialDescription') ? ' tr-bad' : ''}" data-tr-field="materialDescription" value="${esc(state.materialDescription || '')}" placeholder="Kya material hai? Jaise printer, cable, scanner..." maxlength="200"></label>` : ''}
             ${cfg.askNote === false ? '' : `<label class="field tr-note-field"><span class="dim small">Note (optional — admin ke liye)</span>
               <input class="input" data-tr-field="note" value="${esc(state.note)}" placeholder="e.g. urgent — kal dispatch chahiye" maxlength="300"></label>`}
           </div>
         </div></section>
       ${dupWarningHtml()}
       <div class="tr-submit-bar">
-        <div class="tr-submit-sum"><b data-tr-total2>${fmt(grandTotal())}</b> tags · <b data-tr-filled>${fmt(filledCount())}</b> agent</div>
+        <div class="tr-submit-sum"><b data-tr-total2>${fmt(isFastag() ? grandTotal() : 0)}</b> ${isFastag() ? "tags" : "FASTags"} · <b data-tr-filled>${fmt(filledCount())}</b> agent</div>
         <button type="button" class="btn" data-tr-act="clear">🧹 Clear</button>
         <button type="button" class="btn primary tr-send-btn" data-tr-act="send" ${busy ? 'disabled' : ''}>${busy ? '⏳ Bhej rahe hain…' : '📤 Request submit karo'}</button>
       </div>
@@ -1444,10 +1445,10 @@ body.colorful .from-hdr { color: #166534; }
   }
   function updateTotals(card, row) {
     if (card && row) {
-      const t = fmt(rowTotal(row));
+      const t = fmt(isFastag() ? rowTotal(row) : 0);
       card.querySelectorAll('[data-tr-agent-total],[data-tr-agent-total2]').forEach((el) => { el.textContent = t; });
     }
-    const g = fmt(grandTotal());
+    const g = fmt(isFastag() ? grandTotal() : 0);
     rootEl.querySelectorAll('[data-tr-total],[data-tr-total2]').forEach((el) => { el.textContent = g; });
     rootEl.querySelectorAll('[data-tr-filled]').forEach((el) => { el.textContent = fmt(filledCount()); });
   }
@@ -1723,7 +1724,7 @@ body.colorful .from-hdr { color: #166534; }
     });
     act('clear', () => {
       if (filledCount() && !window.confirm('Poora form khaali kar dein? (employee naam bana rahega)')) return;
-      state.rows = [newRow()]; state.note = ''; state.errs = {}; state.submitKey = ''; state.dup = { list: [], force: false, busy: false };
+      state.rows = [newRow()]; state.note = ''; state.errs = {}; state.serialNumber = ''; state.deviceName = ''; state.materialDescription = ''; state.submitKey = ''; state.dup = { list: [], force: false, busy: false };
       renderForm();
     });
     act('send', () => submit());
@@ -1755,8 +1756,9 @@ body.colorful .from-hdr { color: #166534; }
       if (clean(state.deviceName).length < 2) mark('item', 'deviceName', 'Device name likho');
     }
     if (normalizeItemName(state.itemName) === 'Matarial' && clean(state.materialDescription).length < 2) mark('item', 'materialDescription', 'Material ka naam / details likho');
+    if (!isFastag() && !state.rows.some((r) => String(r.name || r.agentId || '').trim() || digits(r.mobile) || clean(r.address))) mark(state.rows[0].id, 'agent', 'Device / material request ke liye agent ya delivery details bharein');
     const filled = state.rows.filter(rowHasContent);
-    if (!filled.length) mark(state.rows[0].id, 'agent', 'Kam se kam ek agent ka naam + qty bharo');
+    if (!filled.length) mark(state.rows[0].id, 'agent', isFastag() ? 'Kam se kam ek agent ka naam + qty bharo' : 'Device / material request ke liye agent ya delivery details bharein');
     const seen = new Map();
     filled.forEach((row) => {
       const n = state.rows.indexOf(row) + 1;
@@ -1771,12 +1773,12 @@ body.colorful .from-hdr { color: #166534; }
       if (isFastag() && !rowTotal(row)) mark(row.id, 'qty', 'Kam se kam ek class me qty daalo');
       const rec = exactAgent(row);
       const key = rec ? `${rec.channel}|${norm(rec.name)}` : `?|${norm(row.name || row.agentId)}`;
-      if (String(row.name || row.agentId || '').trim()) {
+      if (isFastag() && String(row.name || row.agentId || '').trim()) {
         if (seen.has(key)) mark(row.id, 'agent', `Ye agent upar (Agent ${seen.get(key)}) me pehle se hai — wahi qty badha do`);
         else seen.set(key, n);
       }
     });
-    const classRows = filled.reduce((s, r) => s + CLASS_LIST.filter((c) => num(r.q[c]) > 0).length, 0);
+    const classRows = isFastag() ? filled.reduce((s, r) => s + CLASS_LIST.filter((c) => num(r.q[c]) > 0).length, 0) : 0;
     const maxRows = Math.min(150, Math.max(5, Number(cfg.maxRows) || 60));
     if (classRows > maxRows && !first) mark(filled[filled.length - 1].id, 'qty', `Ek baar me max ${maxRows} class-rows — kuch agents agli request me bhejo`);
     state.errs = errs;
@@ -1787,7 +1789,7 @@ body.colorful .from-hdr { color: #166534; }
     const agents = state.rows.filter(rowHasContent).map((row) => {
       const rec = exactAgent(row);
       const channel = rec ? rec.channel : (row.channel === 'gv' ? 'gv' : 'ff');
-      const rows = CLASS_LIST.filter((c) => num(row.q[c]) > 0).map((c) => {
+      const rows = (isFastag() ? CLASS_LIST : []).filter((c) => num(row.q[c]) > 0).map((c) => {
         const qty = Math.max(0, Math.round(num(row.q[c])));
         if (!rec) return { cls: c, requested: qty, approved: qty };
         const d = classData(rec, c);
@@ -1808,7 +1810,7 @@ body.colorful .from-hdr { color: #166534; }
     const office = clean(state.employee.office);
     const liveShare = isPublic() && FF.publicForm && typeof FF.publicForm.liveShareCredentials === 'function' ? FF.publicForm.liveShareCredentials() : null;
     const publicVisitId = isPublic() && FF.publicForm && typeof FF.publicForm.publicVisitId === 'function' ? FF.publicForm.publicVisitId() : '';
-    return { employee: { name: clean(state.employee.name), ...(office && formCfg().askOffice ? { office } : {}) }, employeeToken: isPublic() ? state.employeeToken : '', ...(publicVisitId ? { publicVisitId } : {}), ...(liveShare ? { liveShare } : {}), note: clean(state.note), courier: clean(state.courier), itemName: normalizeItemName(state.itemName), serialNumber: clean(state.serialNumber || ''), deviceName: clean(state.deviceName || ''), materialDescription: clean(state.materialDescription || ''), agents };
+    return { employee: { name: clean(state.employee.name), ...(office && formCfg().askOffice ? { office } : {}) }, employeeToken: isPublic() ? state.employeeToken : '', ...(publicVisitId ? { publicVisitId } : {}), ...(liveShare ? { liveShare } : {}), note: clean(state.note), courier: clean(state.courier), itemName: normalizeItemName(state.itemName), serialNumber: normalizeItemName(state.itemName) === 'Biomatric Device' ? clean(state.serialNumber || '') : '', deviceName: normalizeItemName(state.itemName) === 'Biomatric Device' ? clean(state.deviceName || '') : '', materialDescription: normalizeItemName(state.itemName) === 'Matarial' ? clean(state.materialDescription || '') : '', agents };
   }
   const withTimeout = (p, ms) => Promise.race([p, new Promise((resolve) => setTimeout(resolve, ms))]);
   async function submit() {
