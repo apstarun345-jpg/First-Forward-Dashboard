@@ -59,3 +59,22 @@ test('Home replaces partial same-day EIR GV with the live GV Master feed, withou
   assert.equal(stream.ff.reduce((n, row) => n + row.n, 0), 3, 'First Forward stays unchanged');
   assert.equal(stream.gv.reduce((n, row) => n + row.n, 0), 10, 'partial EIR GV 2 replaced by live Master total 10');
 });
+test('Home FF/GV MTD split uses the same one-day-lag cutoff as the month total', () => {
+  const now = new Date();
+  const curYm = U.ymKey(now), prevYm = U.prevMonthKey(curYm);
+  const observedDay = Math.max(1, now.getDate() - 1);
+  const futureDay = Math.min(U.daysInMonth(curYm), observedDay + 1);
+  const dayKey = curYm + '-' + String(observedDay).padStart(2, '0');
+  const futureKey = curYm + '-' + String(futureDay).padStart(2, '0');
+  const currentRows = [
+    { key: dayKey, ym: curYm, day: observedDay, channel: 'First Forward', cls: 'VC4', group: 'VC4', n: 4, type: 'ISSUANCE' },
+    { key: dayKey, ym: curYm, day: observedDay, channel: 'GV Partner', cls: 'VC20', group: 'VC20', n: 6, type: 'ISSUANCE' },
+    { key: futureKey, ym: curYm, day: futureDay, channel: 'First Forward', cls: 'VC4', group: 'VC4', n: 100, type: 'ISSUANCE' }
+  ];
+  const ctx = { curKey: curYm, prevKey: prevYm, observedDay, compareDay: observedDay, daysInMonth: U.daysInMonth(curYm) };
+  const sf = { rows: currentRows, ff: currentRows.filter((r) => r.channel !== 'GV Partner'), gv: currentRows.filter((r) => r.channel === 'GV Partner') };
+  const html = FF.pages.home.monthKpiHtml(ctx, sf, { liveToday: true }, M.summary(currentRows, curYm), []);
+  assert.match(html, /GV <b>6<\\/b>/, 'GV split matches the 6 eligible GV tags');
+  assert.match(html, /First Forward <b>4<\\/b>/, 'future-dated 100 FF tags do not inflate the displayed split');
+  assert.match(html, /total \\(MTD\\)/);
+});
