@@ -34,7 +34,7 @@ test('GV Master truth mapping stays authoritative', () => {
   assert.match(home, /Expected this month/);
   assert.match(home, /ffIssuanceLagDays/);
   assert.match(home, /reportedSc/);
-  assert.match(home, /aaj exclude/);
+  assert.match(home, /GV ka AAJ ka data EIR me nahi hota \(T\+1\)/, 'GV today is read from GV Master, not the delayed EIR feed');
   assert.match(home, /reported din/);
   assert.match(home, /FF\.data\.gvToday/);
   assert.match(home, /AAJ KA LIVE|Aaj ka live/);
