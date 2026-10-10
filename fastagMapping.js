@@ -187,7 +187,7 @@ window.FF = window.FF || {};
         const work = batches[cursor++], batch = work.values;
         const make = (numeric, vals) => 'select A,B,C,D,E,F,G,H,I,J,K,L,M where ' + vals.map((x) => field + ' = ' + literal(x, numeric)).join(' or ');
         const queryRows = async (tq) => {
-          const table = await D.query('StockDataa', tq, { timeoutMs: 65000, retries: 0, directFirst: true });
+          const table = await D.query('StockDataa', tq, { timeoutMs: 55000, directTimeoutMs: 12000, retries: 0, directFirst: true });
           return stockRows(table, schema);
         };
         let rows = [];
@@ -197,7 +197,7 @@ window.FF = window.FF || {};
           firstError = err;
           // A query timeout/abort is not a type mismatch; retrying it with a second 65s query
           // would make the UI even slower. Give the user a concise, actionable message instead.
-          if (/abort|timed?\s*out|timeout/i.test(String(err && (err.message || err)))) {
+          if (/abort|timed?\s*out|timeout|HTTP 502|HTTP 503|fetch failed|upstream/i.test(String(err && (err.message || err)))) {
             throw new Error('StockDataa lookup timed out. Chhoti barcode range try karein ya thodi der baad retry karein.');
           }
         }
@@ -213,7 +213,7 @@ window.FF = window.FF || {};
             rows = rows.concat(fallbackRows);
           } catch (err) {
             if (!rows.length) {
-              if (/abort|timed?\s*out|timeout/i.test(String(err && (err.message || err)))) {
+              if (/abort|timed?\s*out|timeout|HTTP 502|HTTP 503|fetch failed|upstream/i.test(String(err && (err.message || err)))) {
                 throw new Error('StockDataa lookup timed out. Chhoti barcode range try karein ya thodi der baad retry karein.');
               }
               throw new Error('StockDataa lookup failed: ' + String(err && (err.message || err) || (firstError && firstError.message) || 'Google Sheets query error'));
@@ -235,7 +235,7 @@ window.FF = window.FF || {};
     const index = schema.index.barcode, field = schema.letters[index] || c.barcode;
     const make = (numeric) => 'select A,B,C,D,E,F,G,H,I,J,K,L,M where ' + field + ' >= ' + literal(from, numeric) + ' and ' + field + ' <= ' + literal(to, numeric);
     const run = async (numeric) => {
-      const table = await D.query('StockDataa', make(numeric), { timeoutMs: 65000, retries: 0, directFirst: true });
+      const table = await D.query('StockDataa', make(numeric), { timeoutMs: 55000, directTimeoutMs: 12000, retries: 0, directFirst: true });
       return stockRows(table, schema);
     };
     let rows = [];
@@ -243,7 +243,7 @@ window.FF = window.FF || {};
     try { rows = await run(false); }
     catch (err) {
       firstError = err;
-      if (/abort|timed?\s*out|timeout/i.test(String(err && (err.message || err)))) {
+      if (/abort|timed?\s*out|timeout|HTTP 502|HTTP 503|fetch failed|upstream/i.test(String(err && (err.message || err)))) {
         throw new Error('StockDataa range lookup timed out. Barcode range ko chhote parts me divide karke retry karein.');
       }
     }
@@ -251,7 +251,7 @@ window.FF = window.FF || {};
     if (!rows.length && isDigitKey(from) && isDigitKey(to)) {
       try { rows = await run(true); }
       catch (err) {
-        if (/abort|timed?\s*out|timeout/i.test(String(err && (err.message || err)))) {
+        if (/abort|timed?\s*out|timeout|HTTP 502|HTTP 503|fetch failed|upstream/i.test(String(err && (err.message || err)))) {
           throw new Error('StockDataa range lookup timed out. Barcode range ko chhote parts me divide karke retry karein.');
         }
         if (firstError) throw new Error('StockDataa range lookup failed: ' + String(err && (err.message || err) || firstError.message || 'Google Sheets query error'));
