@@ -36,8 +36,8 @@ test('FASTag Mapping template is exactly the requested four columns; lookup trie
   assert.match(page, /D\.query\('StockDataa', query/);
   assert.match(page, /queryField\('tagId', tagIds\)/);
   assert.match(page, /queryField\('barcode', barcodes\)/);
-  assert.match(page, /Har row me tagId ya serialNo\/barcode aur agentId dein/);
-  assert.match(page, /vcType StockDataa se auto-fetch hoga/);
+  assert.match(page, /Range upload mein barcode series StockDataa se expand hogi/);
+  assert.match(page, /TAG_ID, BARCODE aur TAG_CLASS auto-fill honge/);
   assert.match(page, /if \(!value \|\| !agentId\)/);
 });
 
