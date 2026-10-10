@@ -100,7 +100,7 @@ window.FF = window.FF || {};
     barcode: ['barcode', 'barcodeno', 'barcodenumber', 'barcodeid', 'tagbarcode', 'barcodevalue', 'tagbarcodeid'],
     serialNo: ['serialno', 'serialnumber', 'serial', 'serialid'],
     tagId: ['tagid', 'tagidnumber', 'tagnumber', 'tagnumber', 'fastagid', 'fastagtagid', 'tagno', 'tagnumberid', 'tag_id'],
-    vcType: ['vctype', 'vehicletyp', 'vehicletype', 'vehicleclass', 'vehicleclasstype', 'classtype', 'vclass', 'vcclass', 'classvctype', 'class', 'classofvehicle'],
+    vcType: ['vctype', 'tagclass', 'tag_class', 'vehicletyp', 'vehicletype', 'vehicleclass', 'vehicleclasstype', 'classtype', 'vclass', 'vcclass', 'classvctype', 'class', 'classofvehicle'],
     agentId: ['agentid', 'agentcode', 'employeeid', 'mappedagentid', 'newagentid', 'allocatedagentid', 'allottedagentid', 'agentidnumber']
   };
   function headerMap(header) {
@@ -158,23 +158,32 @@ window.FF = window.FF || {};
         // Read only the header and one data row, not the whole 100k+ StockDataa tab.
         const table = await D.query('StockDataa', 'select A,B,C,D,E,F,G,H,I,J,K,L,M', { range: 'A1:M2', timeoutMs: 18000, retries: 0 });
         const labels = (table.cols || []).map((c) => norm(c.label || c.id));
-        const choose = (key) => {
-          const idx = labels.findIndex((label) => ALIASES[key] && ALIASES[key].includes(label));
-          return idx >= 0 ? idx : fallback.index[key];
-        };
+        // Depending on how Google Sheets infers gviz headers, TAG_ID/BARCODE/TAG_CLASS may appear
+        // either as column labels or as the first returned row. Search both representations.
+        const rowLabels = D.textRows(table).slice(0, 2).map((row) => row.map(norm));
+        const headerCandidates = [labels, ...rowLabels];
         const findAny = (aliases) => {
-          const idx = labels.findIndex((label) => aliases.includes(label));
-          return idx >= 0 ? idx : -1;
+          for (const candidate of headerCandidates) {
+            const idx = candidate.findIndex((label) => aliases.includes(label));
+            if (idx >= 0) return idx;
+          }
+          return -1;
         };
         const index = { ...fallback.index };
-        index.tagId = choose('tagId');
-        index.barcode = choose('barcode');
-        // If StockDataa really has a distinct Serial No column, use it. Otherwise its Barcode column
-        // is the API serialNo (the existing StockDataa layout is D=Barcode).
-        const serialIdx = findAny(ALIASES.serialNo);
-        index.serialNo = serialIdx >= 0 ? serialIdx : index.barcode;
-        index.vcType = choose('vcType');
-        index.agentId = choose('agentId');
+        const tagIdIdx = findAny(ALIASES.tagId);
+        const barcodeIdx = findAny(ALIASES.barcode);
+        const vcTypeIdx = findAny(ALIASES.vcType);
+        if (tagIdIdx < 0 || barcodeIdx < 0 || vcTypeIdx < 0) {
+          throw new Error('StockDataa header detect nahi hue. TAG_ID, BARCODE aur TAG_CLASS headers verify karein (A:M row 1).');
+        }
+        index.tagId = tagIdIdx;
+        index.barcode = barcodeIdx;
+        // The API serialNo must always be populated from StockDataa BARCODE.
+        // If an independent Serial No column exists, it is intentionally ignored for FASTag API mapping.
+        index.serialNo = barcodeIdx;
+        index.vcType = vcTypeIdx;
+        const agentIdx = findAny(ALIASES.agentId);
+        index.agentId = agentIdx >= 0 ? agentIdx : fallback.index.agentId;
         const pick = (aliases, def) => { const idx = findAny(aliases); return idx >= 0 ? idx : def; };
         index.id = pick(['id', 'stockid', 'stockrowid'], fallback.index.id);
         index.name = pick(['name', 'inventoryname', 'itemname', 'productname', 'description'], fallback.index.name);
@@ -183,6 +192,7 @@ window.FF = window.FF || {};
         index.agentName = pick(['agentname', 'mappedagentname', 'employeename'], fallback.index.agentName);
         index.agentAllocatedAt = pick(['agentallocatedat', 'agentassignedat', 'agentallocationdate'], fallback.index.agentAllocatedAt);
         index.tlName = pick(['tlname', 'teamleadername', 'teamleadname'], fallback.index.tlName);
+        // Record which exact headers were discovered; all three mapping keys are mandatory.
         return { letters: STOCK_LETTERS, index, labels };
       } catch (err) {
         // Schema discovery must not block lookup if the sheet does not expose headers.
@@ -326,8 +336,8 @@ window.FF = window.FF || {};
           candidates = [...dedup.values()];
           // When both are given, prefer exact identifier pair only if it matches a real StockDataa row.
           if (tagMatches.length && barcodeKey) {
-            const paired = candidates.filter((r) => idKey(r.barcode) === idKey(barcodeKey) || idKey(r.serialNo) === idKey(barcodeKey));
-            if (paired.length) candidates = paired;
+            // Both identifiers supplied means they must point to the same StockDataa row.
+            candidates = candidates.filter((r) => idKey(r.barcode) === idKey(barcodeKey) || idKey(r.serialNo) === idKey(barcodeKey));
           }
         }
         if (!candidates.length) { addResult(item, null, item.type); continue; }
