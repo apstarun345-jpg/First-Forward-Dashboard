@@ -1377,7 +1377,7 @@ body.colorful .from-hdr { color: #166534; }
           ${errList.length ? `<ul class="tr-err-list">${errList.map((m) => `<li>⚠️ ${esc(m)}</li>`).join('')}</ul>` : ''}
           <div class="tr-agent-summary-below-address">${agentGroupSummaryHtml(rec)}</div>
         </div>
-        <div class="tr-qty-list${badCls(row.id, 'qty')}" role="group" aria-label="Class-wise qty" ${isFastag() ? '' : 'hidden'}>
+        <div class="tr-qty-list${badCls(row.id, 'qty')}" role="group" aria-label="Class-wise qty" style="${isFastag() ? '' : 'display:none'}">
           <div class="tr-qty-head"><span>Tag class</span><span>Qty</span></div>
           ${qtyRows}
           <div class="tr-qty-foot"><span>Requested total</span><b data-tr-agent-total2>${fmt(total)}</b></div>
