@@ -2185,6 +2185,33 @@ FF.pages = FF.pages || {};
     if (age(latestFf) > 2) add(age(latestFf) > 7 ? 'high' : 'medium','Stale data','EIR',`First Forward issuance is ${age(latestFf)} days stale`,1,[latestFf ? U.dateKey(latestFf) : 'No valid date'],'Refresh source or check EIR date mapping.','Latest date');
     if (age(latestGv) > 2) add(age(latestGv) > 7 ? 'high' : 'medium','Stale data','GV Master',`GV issuance is ${age(latestGv)} days stale`,1,[latestGv ? U.dateKey(latestGv) : 'No valid date'],'Refresh source or check GV Master date mapping.','Latest date');
     if (details.truncated && (details.truncated.stock || details.truncated.assignment)) add('high','Scan coverage','Detailed loaders','Raw detail scan hit the 250,000-row safety cap',1,[details.truncated.stock ? 'StockDataa capped' : '', details.truncated.assignment ? 'Tag Assignment capped' : ''].filter(Boolean),'Archive old rows or split the source so every detail row can be validated.','Source');
+    // 🕵️ Anomaly Detective: month-to-date issuance ko last month's daily pace se compare karo.
+    // Partial month ko full month se compare nahi karte; only reliable report rows with a meaningful baseline are flagged.
+    const now = new Date();
+    const elapsedDays = Math.max(1, now.getDate());
+    const previousMonthDays = new Date(now.getFullYear(), now.getMonth(), 0).getDate();
+    const scanPace = (list, source, nameOf) => {
+      (Array.isArray(list) ? list : []).forEach((r) => {
+        const current = Number(r && r.curTotal) || 0;
+        const previous = Number(r && r.lastTotal) || 0;
+        // Avoid noise from tiny/brand-new agents; 20 previous-month tags is the minimum baseline.
+        if (previous < 20 || !Number.isFinite(current) || !Number.isFinite(previous)) return;
+        const currentDaily = current / elapsedDays;
+        const previousDaily = previous / previousMonthDays;
+        const pacePct = previousDaily > 0 ? (currentDaily / previousDaily) * 100 : 100;
+        const name = clean(nameOf(r) || r.agentId || r.id || 'Unknown agent');
+        const id = clean(r.agentId || r.id || '');
+        const sample = `${name}${id ? ` [${id}]` : ''} · MTD ${current} / last month ${previous} · pace ${pacePct.toFixed(0)}% of prior daily rate`;
+        if (current === 0) {
+          add('medium', 'Issuance anomaly', source, `${source} previously active agents with zero MTD issuance`, 1, [sample], 'Verify agent availability, mapping and source refresh before taking action.', 'Agent · MTD / last month');
+        } else if (pacePct <= 30) {
+          add(pacePct <= 10 ? 'high' : 'medium', 'Issuance anomaly', source, `${source} issuance pace dropped ${Math.round(100 - pacePct)}% vs last month`, 1, [sample], 'Check agent activity, reporting completeness and any operational blockers; this is a review signal, not an automatic penalty.', 'Agent · normalized daily pace');
+        }
+      });
+    };
+    scanPace(ffReport, 'FF REPORT', (r) => r.name || r.agentName);
+    scanPace(gvReport, 'GV REPORT', (r) => r.agentName || r.name);
+
     const severityRank = { high: 0, medium: 1, low: 2 };
     issues.sort((a, b) => (severityRank[a.severity] - severityRank[b.severity]) || b.count - a.count);
     const bySource = new Map();
@@ -2215,7 +2242,7 @@ FF.pages = FF.pages || {};
     const findingHeaders = ['Severity', 'Category', 'Source', 'Finding', 'Records', 'Samples'];
     const sampleHeaders = ['Severity', 'Category', 'Source', 'Finding', 'Sample field', 'Sample value', '#'];
     const dqSourceTone = (i) => `c${(i % 6) + 1}`;
-    root.innerHTML = head('🧪', 'Data Quality Center', 'Duplicates · missing identities/TLs · unassigned stock · invalid/stale dates · cross-sheet mismatches — har check ka table, samples aur recommended correction', `${exportButtons('dq-export')} ${printButton}`) + `
+    root.innerHTML = head('🕵️', 'Anomaly Detective', 'Issuance pace drops · zero-issuance agents · duplicate IDs · missing identity/TL · stale data · cross-sheet mismatches — evidence aur recommended checks', `${exportButtons('dq-export')} ${printButton}`) + `
       <div class="source-row">${Object.entries(data.scanned).map(([k,n]) => sourceChip(k, `${U.fmt(n)} rows scanned`)).join('')}<span class="dim small">Checked ${esc(dateTimeText(data.checkedAt))}</span></div>
       ${vividMetrics([
         { label: 'Findings', value: U.fmt(data.issues.length), foot: `${U.fmt(data.checksRun)} checks run · ${U.fmt(data.passed)} clean`, tone: data.issues.length ? 'g4' : 'g9', icon: '🔍' },
