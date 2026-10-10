@@ -1377,7 +1377,16 @@ FF.pages = FF.pages || {};
       if (!host || !MP()) return;
       const chans = ['ff', 'gv'].filter((c) => g[c]);
       const html = {};
-      const paint = () => { if (host.isConnected !== false && current === g) host.innerHTML = chans.map((c) => html[c] || '').join(''); };
+      const sourceKey = g && (g._sourceKey || g.key);
+      // A channel-filtered view is a derived object, while `current` deliberately remains the
+      // original dual-channel group so the user can switch back to "Dono". Compare source keys,
+      // not object identity, or async KPI upgrades remain stuck on the loading placeholder.
+      const paint = () => {
+        const activeKey = current && (current._sourceKey || current.key);
+        if (host.isConnected !== false && current && (current === g || (sourceKey && activeKey === sourceKey))) {
+          host.innerHTML = chans.map((ch) => html[ch] || '').join('');
+        }
+      };
       chans.forEach((c) => {
         let q = null;
         try { q = MP().quick(g[c]); } catch { q = null; }
@@ -1404,7 +1413,8 @@ FF.pages = FF.pages || {};
         ff: channel === 'ff' ? g.ff : null,
         gv: channel === 'gv' ? g.gv : null,
         _selectedChannel: channel,
-        _channelChoice: true
+        _channelChoice: true,
+        _sourceKey: g.key || normName(g.name)
       };
     }
     const channelChoiceHtml = (g, selected) => {
