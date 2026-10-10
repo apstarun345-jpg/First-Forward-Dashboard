@@ -167,6 +167,7 @@ window.FF = window.FF || {};
   // One 24×24 stroke icon set now keeps every tab the same size, baseline and visual weight.
   const NAV_ICONS = {
     home: '<path d="M3.6 10.9 12 3.9l8.4 7"/><path d="M6.2 9.6V19a1.4 1.4 0 0 0 1.4 1.4h2.9v-4.7h3v4.7h2.9A1.4 1.4 0 0 0 17.8 19V9.6"/>',
+    search: '<circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4.5 4.5"/>',
     tag: '<path d="M20.4 13.4 13.4 20.4a2 2 0 0 1-2.8 0l-7-7A2 2 0 0 1 3 12V4.5A1.5 1.5 0 0 1 4.5 3H12a2 2 0 0 1 1.4.6l7 7a2 2 0 0 1 0 2.8Z"/><circle cx="7.9" cy="7.9" r="1.4"/>',
     bell: '<path d="M6.4 9.7a5.6 5.6 0 0 1 11.2 0c0 3.3.8 4.8 1.6 5.7.4.5 0 1.3-.7 1.3H5.5c-.7 0-1.1-.8-.7-1.3.8-.9 1.6-2.4 1.6-5.7Z"/><path d="M9.9 19.6a2.2 2.2 0 0 0 4.2 0"/>',
     team: '<path d="M8.2 20.4h7.6"/><path d="M12 16.7v3.7"/><path d="M6.6 4.6h10.8v4.5a5.4 5.4 0 0 1-10.8 0V4.6Z"/><path d="M6.6 6.6H4.9a2 2 0 0 0 2 3.6"/><path d="M17.4 6.6h1.7a2 2 0 0 1-2 3.6"/>',
@@ -187,6 +188,7 @@ window.FF = window.FF || {};
     // Search remains available from the top search/command palette; More exposes every route.
     const items = [
       { kind: 'route', id: 'home', icon: 'home', label: 'Home' },
+      { kind: 'action', id: 'search', icon: 'search', label: 'Search' },
       { kind: 'route', id: 'tagIssued', icon: 'tag', label: 'Tag Issued' },
       { kind: 'action', id: 'notifications', icon: 'bell', label: 'Alerts' },
       { kind: 'route', id: 'performance', icon: 'team', label: 'Team' },
