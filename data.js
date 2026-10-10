@@ -55,18 +55,48 @@ window.FF = window.FF || {};
     return { cols, rows, headers: table.parsedNumHeaders || 0, warnings: json.warnings || [] };
   }
 
+  function expandScientificIdentifier(value) {
+    const raw = String(value == null ? '' : value).trim();
+    const m = raw.match(/^([+-]?)(\d+)(?:\.(\d*))?[eE]([+-]?\d+)$/);
+    if (!m) return raw;
+    const sign = m[1] || '', whole = m[2], fraction = m[3] || '';
+    const digits = whole + fraction;
+    const decimalAt = whole.length + Number(m[4]);
+    if (decimalAt <= 0) return sign + '0.' + '0'.repeat(Math.min(1000, -decimalAt)) + digits;
+    if (decimalAt >= digits.length) return sign + digits + '0'.repeat(Math.min(1000, decimalAt - digits.length));
+    return sign + digits.slice(0, decimalAt) + '.' + digits.slice(decimalAt);
+  }
+
+  function identifierText(cell) {
+    if (!cell) return '';
+    const raw = cell.v === null || cell.v === undefined ? '' : String(cell.v).trim();
+    const formatted = cell.f === null || cell.f === undefined ? '' : String(cell.f).trim();
+    // Sheets may return barcode/serial display values with commas, spaces or separators.
+    // Preserve leading zeroes from a digit-formatted cell, but remove presentation separators.
+    if (formatted && /^\d[\d,\s-]*$/.test(formatted)) return formatted.replace(/[,\s-]/g, '');
+    if (!raw) return formatted;
+    if (/^[+-]?\d+(?:\.\d+)?[eE][+-]?\d+$/.test(raw)) return expandScientificIdentifier(raw);
+    // Text values stay text; only remove a trailing numeric-cell .0 (not meaningful in an ID).
+    if (/^\d+\.0+$/.test(raw)) return raw.replace(/\.0+$/, '');
+    if (typeof cell.v === 'number' && Number.isFinite(cell.v)) return String(cell.v);
+    return raw;
+  }
+
+  function isIdentifierColumn(col) {
+    const label = String(col && (col.label || col.id) || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    return /^(?:TAGID(?:NUMBER|NO)?|TAGNUMBER|BARCODE(?:ID|NO|NUMBER)?|SERIAL(?:NO|NUMBER|ID)?|SNO|FASTAGID|FASTAGTAGID|TAGBARCODE(?:ID)?)$/.test(label);
+  }
+
   function cellText(cell, col) {
     if (!cell || cell.v === null || cell.v === undefined) return '';
-    // 🔢 Barcode/16-digit serial: sheet ka "formatted" text (6.08E+15) dikhta tha — us se digits hi
-    // gum ho jaate the. Bade integer ke liye exact value do, display format util.barcode() banata hai.
-    const v0 = cell.v;
-    if (typeof v0 === 'number' && Number.isInteger(v0) && Math.abs(v0) >= 1e15) return String(v0);
-    if (typeof v0 === 'string' && /^-?\d(?:\.\d+)?e\+?\d+$/i.test(v0.trim())) {
-      const num = Number(v0);
-      if (Number.isFinite(num)) return BigInt(Math.round(num)).toString();
-    }
-    if (cell.f !== null && cell.f !== undefined) return String(cell.f);
     const v = cell.v;
+    // Identifier columns must never display Google Sheets' 6.08E+15 / comma-formatted version.
+    // This single path feeds the EIR / StockDataa sheet grid and other tables using D.textRows().
+    if (isIdentifierColumn(col)) return identifierText(cell);
+    // Keep exact integer digits when gviz returns a numeric barcode without a recognized header.
+    if (typeof v === 'number' && Number.isInteger(v) && Math.abs(v) >= 1e15) return String(v);
+    if (typeof v === 'string' && /^-?\d(?:\.\d+)?e\+?\d+$/i.test(v.trim())) return expandScientificIdentifier(v);
+    if (cell.f !== null && cell.f !== undefined) return String(cell.f);
     if (typeof v === 'string' && /^Date\(/.test(v)) {
       const d = U.parseDate(v);
       return d ? U.labelDate(d, true) : v;
@@ -228,6 +258,6 @@ window.FF = window.FF || {};
   // Escape a literal for the gviz query language (double-quoted string).
   function lit(value) { return `"${String(value).replace(/["\\]/g, '')}"`; }
 
-  FF.data = { query, today, gvToday, clearCache, status, parseGviz, cellText, cellNumber, cellDate, textRows, looksLikeEIR, lit, QueryError,
+  FF.data = { query, today, gvToday, clearCache, status, parseGviz, cellText, identifierText, isIdentifierColumn, cellNumber, cellDate, textRows, looksLikeEIR, lit, QueryError,
     get lastLoadAt() { return lastLoadAt; }, get lastSource() { return lastSource; } };
 })(window.FF);
