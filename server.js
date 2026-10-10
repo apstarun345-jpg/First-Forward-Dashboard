@@ -7754,11 +7754,15 @@ const escHtml = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;
 const pad2 = (n) => String(n).padStart(2, '0');
 function gvizLiteral(name) { return `'${String(name).replace(/\\/g, '').replace(/'/g, "\\'")}'`; }
 function personalWindow() {
-  const today = dateKeyNow();
-  const [y, m] = today.split('-').map(Number);
+  const todayKey = dateKeyNow();
+  const [y, m] = todayKey.split('-').map(Number);
   const prev = new Date(Date.UTC(y, m - 2, 1));
+  // Keep previous-month rows for the comparison KPI, but never include today's partial data.
   const start = `${prev.getUTCFullYear()}-${pad2(prev.getUTCMonth() + 1)}-01`;
-  return { start, today };
+  const yesterday = new Date(`${todayKey}T00:00:00Z`);
+  yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+  const reportThrough = `${yesterday.getUTCFullYear()}-${pad2(yesterday.getUTCMonth() + 1)}-${pad2(yesterday.getUTCDate())}`;
+  return { start, currentStart: `${todayKey.slice(0, 7)}-01`, today: reportThrough };
 }
 function personalConfig(link) {
   const source = link.source === 'gv' ? 'gv' : 'ff';
@@ -7862,8 +7866,12 @@ async function personalAgentTl(link) {
 }
 
 function personalStats(rows) {
-  const ym = dateKeyNow().slice(0, 7);
   const todayKey = dateKeyNow();
+  const ym = todayKey.slice(0, 7);
+  const asOfDate = new Date(`${todayKey}T00:00:00Z`);
+  asOfDate.setUTCDate(asOfDate.getUTCDate() - 1);
+  const asOfDay = Math.max(0, asOfDate.getUTCDate());
+  const asOfKey = `${asOfDate.getUTCFullYear()}-${pad2(asOfDate.getUTCMonth() + 1)}-${pad2(asOfDate.getUTCDate())}`;
   const daily = new Map();
   const cls = {};
   for (const r of rows) {
@@ -7874,21 +7882,24 @@ function personalStats(rows) {
   for (const [d, n] of daily) if (d.startsWith(ym)) { mtd += n; if (n > 0) mtdActiveDays++; }
   const prev = new Date(`${todayKey}T00:00:00Z`); prev.setUTCMonth(prev.getUTCMonth() - 1);
   const prevYm = `${prev.getUTCFullYear()}-${pad2(prev.getUTCMonth() + 1)}`;
-  const dayNow = Number(todayKey.slice(8, 10));
   let prevSame = 0;
-  for (const [d, n] of daily) if (d.startsWith(prevYm) && Number(d.slice(8, 10)) <= dayNow) prevSame += n;
+  for (const [d, n] of daily) if (d.startsWith(prevYm) && Number(d.slice(8, 10)) <= asOfDay) prevSame += n;
   const keyAt = (offset) => {
     const d = new Date(`${todayKey}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + offset);
     return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`;
   };
-  // Real calendar days (zeros included), not the last 14 *active* rows.
-  const last14 = Array.from({ length: 14 }, (_, i) => { const date = keyAt(i - 13); return { date, n: daily.get(date) || 0 }; });
+  // Calendar days for the current month only, ending yesterday. Zeros are retained.
+  const monthDays = Array.from({ length: asOfDay }, (_, i) => {
+    const date = `${ym}-${pad2(i + 1)}`;
+    return { date, n: daily.get(date) || 0 };
+  });
+  // Streak is measured from yesterday; today's incomplete data cannot reset it.
   let streak = 0;
-  for (let i = 0; i < 366; i++) { if ((daily.get(keyAt(-i)) || 0) > 0) streak++; else break; }
+  for (let i = 1; i <= 366; i++) { if ((daily.get(keyAt(-i)) || 0) > 0) streak++; else break; }
   let best = { date: '', n: 0 };
-  for (const [d, n] of daily) if (d.startsWith(ym) && n > best.n) best = { date: d, n };
+  for (const [d, n] of daily) if (d.startsWith(ym) && d <= asOfKey && n > best.n) best = { date: d, n };
   const clsTotal = Object.values(cls).reduce((a, b) => a + b, 0);
-  return { mtd, mtdActiveDays, prevSame, last14, streak, best, cls, clsTotal, activeDays: last14.filter((x) => x.n > 0).length };
+  return { mtd, mtdActiveDays, prevSame, monthDays, streak, best, cls, clsTotal, activeDays: monthDays.filter((x) => x.n > 0).length };
 }
 
 async function servePersonalPage(req, res, rawToken) {
@@ -7930,9 +7941,35 @@ async function servePersonalPage(req, res, rawToken) {
   const link = { ...savedLink, source: savedLink.source === 'gv' ? 'gv' : 'ff' };
   try {
     const needsIssuance = hasSec('overview') || hasSec('issuance') || hasSec('performance');
-    const rows = needsIssuance ? await personalDailyRows(link) : [];
+    const needsStock = hasSec('stock') || hasSec('ageing');
+    // Start independent sheet/index work together so verified links don't wait for serial requests.
+    const rowsPromise = needsIssuance ? personalDailyRows(link) : Promise.resolve([]);
+    const teamPromise = link.kind === 'tl' && (hasSec('issuance') || hasSec('performance'))
+      ? personalTeamAgents(link) : Promise.resolve(new Map());
+    const tlNamePromise = link.kind !== 'tl' && hasVisibleSection
+      ? personalAgentTl(link) : Promise.resolve('');
+    const stockPromise = needsStock ? (async () => {
+      let timer = null;
+      try {
+        const sidx = await Promise.race([
+          stockAgeIndex(false),
+          new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error('stock timeout')), 10000);
+            if (timer && timer.unref) timer.unref();
+          })
+        ]);
+        return personalStock(sidx, link.source, link.kind === 'tl' ? 'tl' : 'agent', link.name);
+      } catch (err) {
+        console.warn('personal stock:', err.message);
+        return null;
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    })() : Promise.resolve(null);
+    const rows = await rowsPromise;
     if (needsIssuance && !rows.length) return fail(404, `"${link.name}" ka data abhi sheet me nahi mila (ya naam alag hai).`);
     const st = personalStats(rows);
+    const reportThrough = st.monthDays && st.monthDays.length ? st.monthDays[st.monthDays.length - 1].date : '';
     let team = [];
     let goal = null, target = null;
     const ym = dateKeyNow().slice(0, 7);
@@ -7940,7 +7977,7 @@ async function servePersonalPage(req, res, rawToken) {
     let byAgentMap = new Map();
     if (link.kind === 'tl' && (hasSec('overview') || hasSec('issuance') || hasSec('performance'))) {
       goal = ((Array.isArray(db.settings.tlTargets) ? db.settings.tlTargets : []).find((t) => t && t.ym === ym && normPerson(t.tl) === normPerson(link.name)) || null);
-      if (hasSec('issuance') || hasSec('performance')) byAgentMap = await personalTeamAgents(link);
+      if (hasSec('issuance') || hasSec('performance')) byAgentMap = await teamPromise;
       for (const [name, m] of byAgentMap) {
         let mtdA = 0;
         for (const [d, n] of m) if (d.startsWith(ym)) mtdA += n;
@@ -7952,20 +7989,14 @@ async function servePersonalPage(req, res, rawToken) {
       target = ((Array.isArray(db.settings.targets) ? db.settings.targets : []).find((t) => t && t.ym === ym && (t.source || 'ff') === link.source && normPerson(t.agent) === normPerson(link.name)) || null);
     }
     const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
-    const maxBar = Math.max(1, ...st.last14.map((x) => x.n));
-    const bars = st.last14.map((x) => `<div class="pb-col" title="${escHtml(x.date)}: ${x.n}"><div class="pb-bar" style="height:${Math.max(4, Math.round((x.n / maxBar) * 100))}%"></div><span>${escHtml(x.date.slice(8, 10))}</span></div>`).join('');
+    const maxBar = Math.max(1, ...st.monthDays.map((x) => x.n));
+    const bars = st.monthDays.map((x) => `<div class="pb-col" title="${escHtml(x.date)}: ${nf(x.n)} tags"><div class="pb-bar" style="height:${Math.max(4, Math.round((x.n / maxBar) * 100))}%"></div><span>${escHtml(x.date.slice(8, 10))}</span></div>`).join('');
     const clsRows = Object.entries(st.cls).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<div class="pb-kv"><span>${escHtml(k)}</span><b>${v}</b> <i>${pct(v, st.clsTotal)}%</i></div>`).join('') || '<p class="dim">—</p>';
     const goalHtml = goal ? `<div class="pb-goal"><div class="pb-goal-top"><span>🎯 TL goal ${escHtml(ym)}</span><b>${st.mtd} / ${Number(goal.target) || 0} (${pct(st.mtd, Number(goal.target))}%)</b></div><div class="pb-track"><div class="pb-fill" style="width:${Math.min(100, pct(st.mtd, Number(goal.target)))}%"></div></div></div>` : '';
     const targetHtml = target ? `<div class="pb-kv"><span>🎯 Your target ${escHtml(ym)}</span><b>${st.mtd} / ${Number(target.target) || 0} (${pct(st.mtd, Number(target.target))}%)</b></div>` : '';
     const prevYm = (() => { const dd = new Date(`${dateKeyNow()}T00:00:00Z`); dd.setUTCDate(1); dd.setUTCMonth(dd.getUTCMonth() - 1); return `${dd.getUTCFullYear()}-${pad2(dd.getUTCMonth() + 1)}`; })();
     const lastMonthTotal = rows.reduce((a, r) => a + (String(r.date).startsWith(prevYm) ? r.n : 0), 0);
-    let stockInfo = null;
-    if (hasSec('stock') || hasSec('ageing')) {
-      try {
-        const sidx = await Promise.race([stockAgeIndex(false), new Promise((_, rej) => setTimeout(() => rej(new Error('stock timeout')), 25000))]);
-        stockInfo = personalStock(sidx, link.source, link.kind === 'tl' ? 'tl' : 'agent', link.name);
-      } catch (err) { console.warn('personal stock:', err.message); }
-    }
+    const stockInfo = await stockPromise;
     const nf = (n) => Number(n || 0).toLocaleString('en-IN');
     const stCore = stockInfo ? stockInfo.t[0] : 0, stComm = stockInfo ? stockInfo.t[1] : 0;
     const stTotal = stCore + stComm;
@@ -8010,7 +8041,7 @@ async function servePersonalPage(req, res, rawToken) {
 
     // 2B. 📅 Date × Agent matrix — agent rows, calendar-date columns, limited to the last 14 days.
     // Agent links show their own row; TL links show each agent in that TL's team.
-    const matrixDates = st.last14.map((x) => x.date);
+    const matrixDates = st.monthDays.map((x) => x.date);
     const matrixAgentMaps = new Map();
     if (link.kind === 'tl') {
       for (const [agentName, dayMap] of byAgentMap) matrixAgentMaps.set(agentName, dayMap);
@@ -8029,12 +8060,12 @@ async function servePersonalPage(req, res, rawToken) {
       .slice(0, 80);
     const matrixTableHtml = `<section class="pb-card pb-matrix-card">
       <div class="pb-card-head">
-        <div><h3>🗓️ Daily Issuance · Agent × Date</h3><p class="pb-matrix-note">Rows = Agent Name · Columns = date · Last 14 calendar days</p></div>
+        <div><h3>🗓️ Daily Issuance · Agent × Date</h3><p class="pb-matrix-note">Rows = Agent Name · Columns = date · Current month through yesterday</p></div>
         ${expBtns('pl-tbl-date-matrix', `${link.name} - Agent Date-wise Daily Issuance`)}
       </div>
       <div class="pb-scroll"><table class="pb-tbl pb-date-matrix" id="pl-tbl-date-matrix">
-        <thead><tr><th>Agent Name</th>${matrixDates.map((date) => `<th title="${escHtml(date)}">${escHtml(date.slice(8, 10) + '-' + date.slice(5, 7))}</th>`).join('')}<th>14-Day Total</th></tr></thead>
-        <tbody>${matrixRows.length ? matrixRows.map((r) => `<tr><td><b>${escHtml(r.name)}</b></td>${r.counts.map((n, i) => `<td class="${n > 0 ? 'pb-cell-active' : ''}" title="${escHtml(matrixDates[i])}">${nf(n)}</td>`).join('')}<td><b>${nf(r.total)}</b></td></tr>`).join('') : `<tr><td colspan="${matrixDates.length + 2}" class="dim">In last 14 days, no issuance record was found for this team.</td></tr>`}
+        <thead><tr><th>Agent Name</th>${matrixDates.map((date) => `<th title="${escHtml(date)}">${escHtml(date.slice(8, 10) + '-' + date.slice(5, 7))}</th>`).join('')}<th>MTD Total</th></tr></thead>
+        <tbody>${matrixRows.length ? matrixRows.map((r) => `<tr><td><b>${escHtml(r.name)}</b></td>${r.counts.map((n, i) => `<td class="${n > 0 ? 'pb-cell-active' : ''}" title="${escHtml(matrixDates[i])}">${nf(n)}</td>`).join('')}<td><b>${nf(r.total)}</b></td></tr>`).join('') : `<tr><td colspan="${matrixDates.length + 2}" class="dim">No issuance record found for the current month through yesterday.</td></tr>`}
         </tbody>
       </table></div>
     </section>`;
@@ -8087,7 +8118,7 @@ async function servePersonalPage(req, res, rawToken) {
     </tbody><tfoot><tr><td>Summary Total</td><td>MTD: ${nf(st.mtd)}</td><td>Last Month: ${nf(lastMonthTotal)}</td>${perfStockTotal}</tr></tfoot></table></div></section>`;
 
     const stockKpis = hasSec('stock') ? `<section class="pb-kpis"><div class="pb-kpi stock"><small>📦 Stock (total)</small><b>${stockInfo ? nf(stTotal) : '—'}</b><span>${stockInfo ? `🚗 ${nf(stCore)} · 🚚 ${nf(stComm)}` : 'stock data abhi nahi mila'}</span></div></section>` : '';
-    const tlName = link.kind === 'tl' || !hasVisibleSection ? '' : (await personalAgentTl(link));
+    const tlName = await tlNamePromise;
 
     // Build only tabs that the admin granted; an "All" view can expose only emitted sections.
     const tabDefs = [
@@ -8124,13 +8155,13 @@ async function servePersonalPage(req, res, rawToken) {
             <div class="pb-kpi streak"><small>🔥 Active Streak</small><b>${nf(st.streak)}</b><span>din se active 🔥</span></div>
             <div class="pb-kpi best"><small>🏆 Best Day</small><b>${nf(st.best.n)}</b><span>${escHtml(st.best.date)}</span></div>
           </section>
-          <section class="pb-card"><div class="pb-card-head"><div><h3>📊 Daily Issuance · Last ${st.last14.length} Days</h3><p class="pb-matrix-note">Roz kitne FASTag issue hue · date-wise trend</p></div><span class="pb-btn">${nf(st.last14.reduce((a, b) => a + b.n, 0))} tags</span></div><div class="pb-bars">${bars || '<p class="dim">data nahi</p>'}</div></section>
+          <section class="pb-card"><div class="pb-card-head"><div><h3>📊 Daily Issuance · Current Month (${escHtml(ym)})</h3><p class="pb-matrix-note">Current month · data through ${escHtml(reportThrough || 'no completed day')} · today's incomplete report excluded</p></div><span class="pb-btn pb-count-badge"><small>MTD ISSUED</small><b>${nf(st.mtd)} tags</b></span></div><div class="pb-bars">${bars || '<p class="dim">data nahi</p>'}</div></section>
           <section class="pb-grid2">
             <div class="pb-card"><h3>🏷️ Class mix (MTD)</h3>${clsRows}</div>
             <div class="pb-card"><h3>📈 Snapshot</h3>
-              <div class="pb-kv"><span>Active days (last 14)</span><b>${st.activeDays}</b></div>
+              <div class="pb-kv"><span>Active days (current month)</span><b>${st.activeDays}</b></div>
               <div class="pb-kv"><span>MTD avg / active day</span><b>${st.mtdActiveDays ? (st.mtd / st.mtdActiveDays).toFixed(1) : '—'}</b></div>
-              <div class="pb-kv"><span>Total rows (14 din chart)</span><b>${st.last14.reduce((a, b) => a + b.n, 0)}</b></div>
+              <div class="pb-kv"><span>Total issued (current month)</span><b>${st.last14.reduce((a, b) => a + b.n, 0)}</b></div>
             </div>
           </section>
         </div>` : ''}
@@ -8166,7 +8197,7 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background
 .pb-card-acts,.pb-global-exp{display:inline-flex;gap:6px;align-items:center}
 .pb-btn{border:1px solid #cbd5e1;background:#f8fafc;color:#1e293b;border-radius:8px;padding:5px 10px;font-size:12px;font-weight:700;cursor:pointer;transition:.15s}
 .pb-btn:hover{background:#e2e8f0}
-.pb-btn-pdf{background:#eff6ff;border-color:#93c5fd;color:#1d4ed8}.pb-btn-stock{background:linear-gradient(120deg,#ecfdf5,#d1fae5);border-color:#6ee7b7;color:#047857}.pb-btn-stock:hover{background:#a7f3d0}
+.pb-btn-pdf{background:#eff6ff;border-color:#93c5fd;color:#1d4ed8}.pb-btn-stock{background:linear-gradient(120deg,#ecfdf5,#d1fae5);border-color:#6ee7b7;color:#047857}.pb-btn-stock:hover{background:#a7f3d0}.pb-count-badge{min-width:128px;display:flex;flex-direction:column;align-items:center;justify-content:center;background:linear-gradient(135deg,#dcfce7,#ccfbf1);border-color:#6ee7b7;color:#065f46;padding:7px 14px}.pb-count-badge small{font-size:10px;letter-spacing:.09em;font-weight:900}.pb-count-badge b{font-size:20px;line-height:1.25}
 .pb-tabs-bar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px;background:#fff;padding:8px 10px;border-radius:12px;border:1px solid #e5e9f5}
 .pb-tabs{display:flex;flex-wrap:wrap;gap:6px}
 .pb-tab{border:1px solid transparent;background:#f1f5f9;color:#475569;border-radius:8px;padding:7px 12px;font-size:12.5px;font-weight:700;cursor:pointer;transition:.15s}
@@ -8175,8 +8206,8 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background
 .pb-kpi{background:#fff;border:1px solid #e5e9f5;border-radius:15px;padding:15px 12px;text-align:center;box-shadow:0 3px 12px rgba(15,23,42,.035);transition:transform .16s,box-shadow .16s}.pb-kpi:hover{transform:translateY(-2px);box-shadow:0 7px 18px rgba(15,23,42,.075)}.pb-kpis .pb-kpi:nth-child(4n+1){background:linear-gradient(140deg,#eef2ff,#fff);border-color:#c7d2fe}.pb-kpis .pb-kpi:nth-child(4n+2){background:linear-gradient(140deg,#ecfeff,#fff);border-color:#a5f3fc}.pb-kpis .pb-kpi:nth-child(4n+3){background:linear-gradient(140deg,#fff7ed,#fff);border-color:#fed7aa}.pb-kpis .pb-kpi:nth-child(4n+4){background:linear-gradient(140deg,#fdf2f8,#fff);border-color:#fbcfe8}
 .pb-kpi small{color:#64748b;font-size:11.5px;display:block}.pb-kpi b{font-size:26px;display:block;margin:2px 0}.pb-kpi span{font-size:12px;color:#64748b}
 .pb-kpi .up,.pb-up{color:#10b981;font-weight:700}.pb-kpi .down{color:#ef4444;font-weight:700}
-.pb-bars{display:flex;align-items:flex-end;gap:5px;height:120px;margin-top:8px}
-.pb-col{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%}
+.pb-bars{display:flex;align-items:flex-end;gap:5px;height:120px;margin-top:8px;overflow-x:auto;padding-bottom:4px}
+.pb-col{flex:1 0 16px;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%}
 .pb-bar{width:100%;background:linear-gradient(180deg,var(--a),#93c5fd);border-radius:5px 5px 2px 2px;min-height:4px}
 .pb-col span{font-size:9.5px;color:#94a3b8;margin-top:3px}
 .pb-grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
