@@ -81,7 +81,7 @@ window.FF = window.FF || {};
     let target = 'xl/worksheets/sheet1.xml';
     const rid = (workbook.match(/<sheet\b[^>]*\br:id="([^"]+)"/) || [])[1];
     if (rid && rels) {
-      const re = /<Relationship\b([^]*)?\/?>/g; let m;
+      const re = /<Relationship\b([^>]*)\/?>/g; let m;
       while ((m = re.exec(rels))) {
         const id = (m[1].match(/\bId="([^"]+)"/) || [])[1], relTarget = (m[1].match(/\bTarget="([^"]+)"/) || [])[1];
         if (id === rid && relTarget) { const targetPath = relTarget.replace(/^\//, ''); target = targetPath.startsWith('xl/') ? targetPath : 'xl/' + targetPath.replace(/^\.\//, ''); break; }
@@ -170,7 +170,7 @@ window.FF = window.FF || {};
     summary.innerHTML = '<div class="grid g-4"><div class="card"><div class="card-body"><small>Rows</small><h2>' + U.fmt(state.rows.length) + '</h2></div></div><div class="card"><div class="card-body"><small>Ready to map</small><h2>' + U.fmt(ready) + '</h2></div></div><div class="card"><div class="card-body"><small>Mapped successfully</small><h2>' + U.fmt(done) + '</h2></div></div><div class="card"><div class="card-body"><small>Needs review</small><h2>' + U.fmt(state.rows.length - ready - done) + '</h2></div></div></div>';
     if (!state.rows.length) { host.innerHTML = '<div class="empty-state">Upload a file or add a barcode / Tag ID above to start.</div>'; return; }
     const body = state.rows.map((r, i) => {
-      const disabled = !r.stock || !r.tagId || !r.serialNo || !r.vcType || !r.agentId || r.status.startsWith('Duplicate conflict') || r.mapped;
+      const disabled = !r.stock || !r.tagId || !r.serialNo || !r.vcType || !r.agentId || r.status.startsWith('Duplicate') || r.mapped;
       return '<tr><td><input type="checkbox" data-fm-select="' + i + '"' + (r.selected ? ' checked' : '') + (disabled ? ' disabled' : '') + '></td><td>' + esc(r.barcode) + '</td><td>' + esc(r.tagId) + '</td><td>' + esc(r.serialNo) + '</td><td>' + esc(r.vcType) + '</td><td>' + esc(r.stockAgentId) + '</td><td><input class="input fm-agent-edit" data-fm-agent="' + i + '" value="' + esc(r.agentId) + '" placeholder="Agent ID"' + (r.mapped ? ' disabled' : '') + '></td><td>' + esc(r.stockAgentName) + '</td><td>' + esc(r.tlName) + '</td><td><span class="badge ' + (r.mapped ? 'green' : (disabled ? 'amber' : 'gray')) + '">' + esc(r.apiStatus || r.status) + '</span><small class="dim fm-status-msg">' + esc(r.message) + '</small></td><td><button class="btn small" data-fm-remove="' + i + '"' + (state.busy ? ' disabled' : '') + '>Remove</button></td></tr>';
     }).join('');
     host.innerHTML = '<div class="table-wrap"><table class="tbl compact"><thead><tr><th><input type="checkbox" id="fm-select-all" aria-label="Select ready rows"></th><th>Barcode</th><th>Tag ID</th><th>Serial No</th><th>VC Type</th><th>Stock Agent ID</th><th>Agent ID to map</th><th>Agent name</th><th>TL</th><th>Mapping status</th><th></th></tr></thead><tbody>' + body + '</tbody></table></div>';
@@ -215,6 +215,29 @@ window.FF = window.FF || {};
     } catch (err) { setStatus('Lookup fail: ' + (err.message || err), 'error'); }
     finally { state.busy = false; if (old) old.disabled = false; if (mapBtn) mapBtn.disabled = false; }
   }
+  async function quickMap() {
+    if (state.busy) return;
+    const value = clean(U.$('#fm-identifier', state.root).value);
+    const kind = U.$('#fm-kind', state.root).value;
+    const agentId = clean(U.$('#fm-agent-id', state.root).value);
+    if (!value) { setStatus('Barcode ya Tag ID required hai.', 'warn'); return; }
+    const previous = new Map(state.rows.map((r) => [r.id, r.selected]));
+    const oldIds = new Set(state.rows.map((r) => r.id));
+    state.items.push({ id: nextId++, type: kind, barcode: kind === 'barcode' ? value : '', tagId: kind === 'tagId' ? value : '', agentId, source: 'Quick Map', selected: true });
+    U.$('#fm-identifier', state.root).value = '';
+    await lookup();
+    const added = state.rows.filter((r) => !oldIds.has(r.id));
+    const ready = added.filter((r) => r.stock && r.tagId && r.serialNo && r.vcType && r.agentId && !r.status.startsWith('Duplicate'));
+    if (!ready.length) {
+      state.rows.forEach((r) => { if (previous.has(r.id)) r.selected = previous.get(r.id); });
+      renderTable(); setStatus('Quick Map ruk gaya: StockDataa record ya required mapping detail nahi mili. Row check karein.', 'warn'); return;
+    }
+    state.rows.forEach((r) => { r.selected = ready.includes(r); });
+    renderTable();
+    await mapReady();
+    state.rows.forEach((r) => { if (previous.has(r.id)) r.selected = previous.get(r.id); });
+    renderTable();
+  }
   async function mapReady() {
     if (state.busy) return;
     const ready = state.rows.filter((r) => r.selected && r.stock && r.tagId && r.serialNo && r.vcType && r.agentId && !r.status.startsWith('Duplicate') && !r.mapped);
@@ -256,7 +279,7 @@ window.FF = window.FF || {};
     state.root = root;
     root.innerHTML = '<div class="page-head"><div><h1>🧭 FASTag Mapping</h1><p class="sub">GV Partner · StockDataa se Tag ID, Serial/Barcode, VC Type aur Agent details fetch karke securely map karein.</p></div><div class="head-actions"><span id="fm-api-status" class="badge amber">Mapping API status checking…</span></div></div>' +
       '<div class="grid g-2"><section class="card"><div class="card-head"><h3>📂 Upload mapping file</h3><button class="btn small" id="fm-template">⬇ CSV template</button></div><div class="card-body"><p class="dim small">CSV, TSV, TXT ya Excel .xlsx file upload karein. Header names firstBarcode, lastBarcode, barcode, tagId, serialNo, agentId ho sakte hain. First + last barcode dene par range expand hogi.</p><input class="input" id="fm-file" type="file" accept=".csv,.tsv,.txt,.xlsx"><div id="fm-file-note" class="dim small">No file selected.</div><button class="btn primary" id="fm-upload-add">Add file rows</button></div></section>' +
-      '<section class="card"><div class="card-head"><h3>⌨️ Quick mapping</h3></div><div class="card-body"><label>Lookup by</label><select id="fm-kind" class="input"><option value="barcode">Barcode / Serial No</option><option value="tagId">Tag ID</option></select><label>Barcode / Tag ID</label><input class="input" id="fm-identifier" placeholder="Barcode ya Tag ID enter karein"><label>Agent ID to map (optional)</label><input class="input" id="fm-agent-id" placeholder="Blank = StockDataa Agent ID use hoga"><button class="btn" id="fm-add-single">Add lookup</button><hr><h4>Barcode range</h4><div class="grid g-3"><div><label>First barcode</label><input class="input" id="fm-first" placeholder="Start barcode"></div><div><label>Last barcode</label><input class="input" id="fm-last" placeholder="End barcode"></div><div><label>Agent ID (optional)</label><input class="input" id="fm-range-agent" placeholder="Target Agent ID"></div></div><button class="btn" id="fm-add-range">Add range</button></div></section></div>' +
+      '<section class="card"><div class="card-head"><h3>⌨️ Quick mapping</h3></div><div class="card-body"><label>Lookup by</label><select id="fm-kind" class="input"><option value="barcode">Barcode / Serial No</option><option value="tagId">Tag ID</option></select><label>Barcode / Tag ID</label><input class="input" id="fm-identifier" placeholder="Barcode ya Tag ID enter karein"><label>Agent ID to map (optional)</label><input class="input" id="fm-agent-id" placeholder="Blank = StockDataa Agent ID use hoga"><div class="btn-row"><button class="btn" id="fm-add-single">Add to queue</button><button class="btn primary" id="fm-quick-map">⚡ Quick map</button></div><hr><h4>Barcode range</h4><div class="grid g-3"><div><label>First barcode</label><input class="input" id="fm-first" placeholder="Start barcode"></div><div><label>Last barcode</label><input class="input" id="fm-last" placeholder="End barcode"></div><div><label>Agent ID (optional)</label><input class="input" id="fm-range-agent" placeholder="Target Agent ID"></div></div><button class="btn" id="fm-add-range">Add range</button></div></section></div>' +
       '<section class="card"><div class="card-head"><div><h3>🔎 StockDataa lookup & mapping queue</h3><p class="dim small">Lookup ke baad preview/review karein. Target Agent ID edit kar sakte hain; API call sirf selected complete rows par hoga.</p></div><div class="head-actions"><button class="btn" id="fm-lookup">🔎 Lookup StockDataa</button><button class="btn primary" id="fm-map">🚀 Map ready rows</button><button class="btn" id="fm-csv">⬇ Full details CSV</button><button class="btn" id="fm-clear">Clear</button></div></div><div class="card-body"><div id="fm-message" class="notice info">API status check ho raha hai…</div><div id="fm-summary"></div><div id="fm-results"><div class="empty-state">Upload a file or add a barcode / Tag ID above to start.</div></div></div></section>';
     state.items = []; state.rows = []; state.busy = false;
     const status = U.$('#fm-api-status', root);
@@ -283,6 +306,7 @@ window.FF = window.FF || {};
         } catch (err) { setStatus('File read error: ' + (err.message || err), 'error'); }
         return;
       }
+      if (target.id === 'fm-quick-map') return quickMap();
       if (target.id === 'fm-add-single') {
         const value = clean(U.$('#fm-identifier', root).value), kind = U.$('#fm-kind', root).value, agentId = clean(U.$('#fm-agent-id', root).value);
         if (!value) { setStatus('Barcode ya Tag ID required hai.', 'warn'); return; }
