@@ -8007,6 +8007,38 @@ async function servePersonalPage(req, res, rawToken) {
     const dSum = (k) => dateRowsList.reduce((a, x) => a + x[k], 0);
     const dateTableHtml = `<section class="pb-card"><div class="pb-card-head"><h3>📅 Date-wise Issuance (${dateRowsList.length} active days)</h3>${expBtns('pl-tbl-date-iss', `${link.name} - Date-wise Issuance`)}</div><div class="pb-scroll"><table class="pb-tbl" id="pl-tbl-date-iss"><thead><tr><th>Date</th><th>VC4</th><th>VC20</th><th>🚚 VC5+</th><th>Total Issued</th></tr></thead><tbody>${dateRowsList.map((d) => `<tr><td><b>${escHtml(d.date)}</b></td><td>${nf(d.vc4)}</td><td>${nf(d.vc20)}</td><td>${nf(d.comm)}</td><td><b>${nf(d.total)}</b></td></tr>`).join('')}</tbody><tfoot><tr><td>Grand Total</td><td>${nf(dSum('vc4'))}</td><td>${nf(dSum('vc20'))}</td><td>${nf(dSum('comm'))}</td><td>${nf(dSum('total'))}</td></tr></tfoot></table></div></section>`;
 
+
+    // 2B. 📅 Date × Agent matrix — agent rows, calendar-date columns, limited to the last 14 days.
+    // Agent links show their own row; TL links show each agent in that TL's team.
+    const matrixDates = st.last14.map((x) => x.date);
+    const matrixAgentMaps = new Map();
+    if (link.kind === 'tl') {
+      for (const [agentName, dayMap] of byAgentMap) matrixAgentMaps.set(agentName, dayMap);
+    } else {
+      const ownDays = new Map();
+      for (const r of rows) ownDays.set(r.date, (ownDays.get(r.date) || 0) + r.n);
+      matrixAgentMaps.set(link.name, ownDays);
+    }
+    const matrixRows = [...matrixAgentMaps.entries()]
+      .map(([name, dayMap]) => {
+        const counts = matrixDates.map((date) => dayMap.get(date) || 0);
+        return { name, counts, total: counts.reduce((sum, n) => sum + n, 0) };
+      })
+      .filter((r) => link.kind !== 'tl' || r.total > 0)
+      .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name))
+      .slice(0, 80);
+    const matrixTableHtml = `<section class="pb-card pb-matrix-card">
+      <div class="pb-card-head">
+        <div><h3>🗓️ Daily Issuance · Agent × Date</h3><p class="pb-matrix-note">Rows = Agent Name · Columns = date · Last 14 calendar days</p></div>
+        ${expBtns('pl-tbl-date-matrix', `${link.name} - Agent Date-wise Daily Issuance`)}
+      </div>
+      <div class="pb-scroll"><table class="pb-tbl pb-date-matrix" id="pl-tbl-date-matrix">
+        <thead><tr><th>Agent Name</th>${matrixDates.map((date) => `<th title="${escHtml(date)}">${escHtml(date.slice(8, 10) + '-' + date.slice(5, 7))}</th>`).join('')}<th>14-Day Total</th></tr></thead>
+        <tbody>${matrixRows.length ? matrixRows.map((r) => `<tr><td><b>${escHtml(r.name)}</b></td>${r.counts.map((n, i) => `<td class="${n > 0 ? 'pb-cell-active' : ''}" title="${escHtml(matrixDates[i])}">${nf(n)}</td>`).join('')}<td><b>${nf(r.total)}</b></td></tr>`).join('') : `<tr><td colspan="${matrixDates.length + 2}" class="dim">In last 14 days, no issuance record was found for this team.</td></tr>`}
+        </tbody>
+      </table></div>
+    </section>`;
+
     // 3. 🧓 Stock Ageing Table (Group-wise + Agent-wise for TL)
     const totAgeC = [0, 1, 2, 3].map((i) => (stockInfo ? stockInfo.c[0][i] + stockInfo.c[1][i] : 0));
     const maxOld = stockInfo ? Math.max(stockInfo.o[0] || 0, stockInfo.o[1] || 0) : 0;
@@ -8067,12 +8099,13 @@ async function servePersonalPage(req, res, rawToken) {
     ].filter((t) => t.show);
     if (tabDefs.length > 1) tabDefs.push({ id: 'all', label: '🌐 All Allowed Sections', show: true });
     const firstTab = (tabDefs[0] && tabDefs[0].id) || 'overview';
-    const tabsBarHtml = tabDefs.length ? `<div class="pb-tabs-bar"><div class="pb-tabs" id="pl-tabs">${tabDefs.map((t) => `<button type="button" class="pb-tab ${t.id === firstTab ? 'on' : ''}" data-pl-tab="${t.id}">${t.label}</button>`).join('')}</div>${canExport ? `<div class="pb-global-exp"><button type="button" class="pb-btn" id="pl-exp-all-csv">⬇ Full CSV</button><button type="button" class="pb-btn pb-btn-pdf" id="pl-exp-all-pdf">📄 Full PDF</button></div>` : ''}</div>` : '';
+    const stockQuickCsv = canExport && hasSec('stock') ? '<button type="button" class="pb-btn pb-btn-stock" id="pl-exp-stock-csv">📦 Stock CSV</button>' : '';
+    const tabsBarHtml = tabDefs.length ? `<div class="pb-tabs-bar"><div class="pb-tabs" id="pl-tabs">${tabDefs.map((t) => `<button type="button" class="pb-tab ${t.id === firstTab ? 'on' : ''}" data-pl-tab="${t.id}">${t.label}</button>`).join('')}</div>${canExport ? `<div class="pb-global-exp">${stockQuickCsv}<button type="button" class="pb-btn" id="pl-exp-all-csv">⬇ Full CSV</button><button type="button" class="pb-btn pb-btn-pdf" id="pl-exp-all-pdf">📄 Full PDF</button></div>` : ''}</div>` : '';
     const noSectionsHtml = tabDefs.length ? '' : '<section class="pb-card pb-no-sections"><h3>🔒 No report sections enabled</h3><p class="dim">The administrator has not granted any report sections for this link. Contact them to request access.</p></section>';
 
     const html = personalShell({
       title: `${link.name} · Performance`,
-      heading: `${link.kind === 'tl' ? '👥' : '🧑‍💼'} ${escHtml(link.name)}`,
+      heading: `👋 Welcome Back, <b>${escHtml(link.name)}</b>`,
       sub: `${link.source === 'gv' ? 'GV Partner' : 'First Forward'} · ${link.kind === 'tl' ? 'Team Leader' : 'Agent'}${tlName ? ` · ${link.kind === 'tl' ? '' : 'TL '}<b>${escHtml(tlName)}</b>` : ''} · personal view · read-only`,
       token,
       requireAuth,
@@ -8086,12 +8119,12 @@ async function servePersonalPage(req, res, rawToken) {
           ${goalHtml || targetHtml ? `<section class="pb-card pb-goalcard">${goalHtml}${targetHtml}</section>` : ''}
           ${stockKpis}
           <section class="pb-kpis">
-            <div class="pb-kpi"><small>MTD issued</small><b>${st.mtd}</b><span>${escHtml(ym)}</span></div>
-            <div class="pb-kpi"><small>Pichhle mahine same period</small><b>${st.prevSame}</b><span class="${diff >= 0 ? 'up' : 'down'}">${diff >= 0 ? '▲' : '▼'} ${Math.abs(diff)}</span></div>
-            <div class="pb-kpi"><small>Streak</small><b>${st.streak}</b><span>din se active 🔥</span></div>
-            <div class="pb-kpi"><small>Best day</small><b>${st.best.n}</b><span>${escHtml(st.best.date)}</span></div>
+            <div class="pb-kpi issuance"><small>📈 MTD Issued</small><b>${nf(st.mtd)}</b><span>${escHtml(ym)}</span></div>
+            <div class="pb-kpi previous"><small>🗓️ Same Period · Last Month</small><b>${nf(st.prevSame)}</b><span class="${diff >= 0 ? 'up' : 'down'}">${diff >= 0 ? '▲' : '▼'} ${Math.abs(diff)}</span></div>
+            <div class="pb-kpi streak"><small>🔥 Active Streak</small><b>${nf(st.streak)}</b><span>din se active 🔥</span></div>
+            <div class="pb-kpi best"><small>🏆 Best Day</small><b>${nf(st.best.n)}</b><span>${escHtml(st.best.date)}</span></div>
           </section>
-          <section class="pb-card"><h3>📅 Last ${st.last14.length} din</h3><div class="pb-bars">${bars || '<p class="dim">data nahi</p>'}</div></section>
+          <section class="pb-card"><div class="pb-card-head"><div><h3>📊 Daily Issuance · Last ${st.last14.length} Days</h3><p class="pb-matrix-note">Roz kitne FASTag issue hue · date-wise trend</p></div><span class="pb-btn">${nf(st.last14.reduce((a, b) => a + b.n, 0))} tags</span></div><div class="pb-bars">${bars || '<p class="dim">data nahi</p>'}</div></section>
           <section class="pb-grid2">
             <div class="pb-card"><h3>🏷️ Class mix (MTD)</h3>${clsRows}</div>
             <div class="pb-card"><h3>📈 Snapshot</h3>
@@ -8102,7 +8135,7 @@ async function servePersonalPage(req, res, rawToken) {
           </section>
         </div>` : ''}
         ${hasSec('stock') ? `<div class="pl-pane" data-pl-pane="stock" hidden>${classStockCardHtml}</div>` : ''}
-        ${hasSec('issuance') ? `<div class="pl-pane" data-pl-pane="issuance" hidden>${classIssuanceHtml}${teamTable}${dateTableHtml}</div>` : ''}
+        ${hasSec('issuance') ? `<div class="pl-pane" data-pl-pane="issuance" hidden>${classIssuanceHtml}${teamTable}${matrixTableHtml}${dateTableHtml}</div>` : ''}
         ${hasSec('performance') ? `<div class="pl-pane" data-pl-pane="performance" hidden>${perfCardHtml}${teamHtml}</div>` : ''}
         ${hasSec('ageing') ? `<div class="pl-pane" data-pl-pane="ageing" hidden>${ageHtml}${agentAgeTable}</div>` : ''}
         <p class="pb-foot">Read-only link · data live sheet se · ${escHtml(db.settings.brand || 'Dashboard')}</p>
@@ -8121,25 +8154,25 @@ function personalShell({ title, heading, sub, body, token = '', requireAuth = fa
 <style>
 :root{--a:${escHtml(accent)}}
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#f4f6fb;color:#0f172a;padding:18px;line-height:1.45}
-.pb-wrap{max-width:940px;margin:0 auto}
-.pb-head{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:14px;background:#fff;padding:14px 16px;border-radius:14px;border:1px solid #e5e9f5;box-shadow:0 2px 10px rgba(15,23,42,.04)}
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:radial-gradient(ellipse at 8% 0%,#e0e7ff 0,transparent 35%),radial-gradient(ellipse at 100% 8%,#cffafe 0,transparent 32%),#f4f6fb;color:#0f172a;padding:18px;line-height:1.5}
+.pb-wrap{max-width:1180px;margin:0 auto}
+.pb-head{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px;background:linear-gradient(120deg,#fff 0%,#eef2ff 56%,#ecfeff 100%);padding:17px 19px;border-radius:18px;border:1px solid #c7d2fe;box-shadow:0 8px 26px rgba(79,70,229,.10)}
 .pb-head-left{display:flex;align-items:center;gap:12px}
-.pb-logo{width:44px;height:44px;border-radius:12px;background:var(--a);color:#fff;display:grid;place-items:center;font-weight:800;font-size:17px;flex-shrink:0}
+.pb-logo{width:48px;height:48px;border-radius:15px;background:linear-gradient(135deg,var(--a),#06b6d4);color:#fff;display:grid;place-items:center;font-weight:900;font-size:17px;flex-shrink:0;box-shadow:0 5px 14px rgba(79,70,229,.20)}
 .pb-head h1{font-size:20px}.pb-head p{font-size:12.5px;color:#64748b}
-.pb-card{background:#fff;border:1px solid #e5e9f5;border-radius:14px;padding:14px;margin-bottom:12px;box-shadow:0 2px 10px rgba(15,23,42,.04)}
+.pb-card{background:linear-gradient(180deg,#fff 0%,#fcfdff 100%);border:1px solid #e0e7ff;border-radius:16px;padding:16px;margin-bottom:14px;box-shadow:0 5px 18px rgba(15,23,42,.045);transition:box-shadow .18s,border-color .18s}.pb-card:hover{border-color:#c7d2fe;box-shadow:0 8px 24px rgba(79,70,229,.075)}
 .pb-card-head{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px}
 .pb-card h3{font-size:14px;color:#1e293b;margin:0;font-weight:700}
 .pb-card-acts,.pb-global-exp{display:inline-flex;gap:6px;align-items:center}
 .pb-btn{border:1px solid #cbd5e1;background:#f8fafc;color:#1e293b;border-radius:8px;padding:5px 10px;font-size:12px;font-weight:700;cursor:pointer;transition:.15s}
 .pb-btn:hover{background:#e2e8f0}
-.pb-btn-pdf{background:#eff6ff;border-color:#93c5fd;color:#1d4ed8}
+.pb-btn-pdf{background:#eff6ff;border-color:#93c5fd;color:#1d4ed8}.pb-btn-stock{background:linear-gradient(120deg,#ecfdf5,#d1fae5);border-color:#6ee7b7;color:#047857}.pb-btn-stock:hover{background:#a7f3d0}
 .pb-tabs-bar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px;background:#fff;padding:8px 10px;border-radius:12px;border:1px solid #e5e9f5}
 .pb-tabs{display:flex;flex-wrap:wrap;gap:6px}
 .pb-tab{border:1px solid transparent;background:#f1f5f9;color:#475569;border-radius:8px;padding:7px 12px;font-size:12.5px;font-weight:700;cursor:pointer;transition:.15s}
 .pb-tab.on{background:var(--a);color:#fff;box-shadow:0 2px 6px rgba(37,99,235,.25)}
 .pb-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:12px}
-.pb-kpi{background:#fff;border:1px solid #e5e9f5;border-radius:14px;padding:12px;text-align:center}
+.pb-kpi{background:#fff;border:1px solid #e5e9f5;border-radius:15px;padding:15px 12px;text-align:center;box-shadow:0 3px 12px rgba(15,23,42,.035);transition:transform .16s,box-shadow .16s}.pb-kpi:hover{transform:translateY(-2px);box-shadow:0 7px 18px rgba(15,23,42,.075)}.pb-kpis .pb-kpi:nth-child(4n+1){background:linear-gradient(140deg,#eef2ff,#fff);border-color:#c7d2fe}.pb-kpis .pb-kpi:nth-child(4n+2){background:linear-gradient(140deg,#ecfeff,#fff);border-color:#a5f3fc}.pb-kpis .pb-kpi:nth-child(4n+3){background:linear-gradient(140deg,#fff7ed,#fff);border-color:#fed7aa}.pb-kpis .pb-kpi:nth-child(4n+4){background:linear-gradient(140deg,#fdf2f8,#fff);border-color:#fbcfe8}
 .pb-kpi small{color:#64748b;font-size:11.5px;display:block}.pb-kpi b{font-size:26px;display:block;margin:2px 0}.pb-kpi span{font-size:12px;color:#64748b}
 .pb-kpi .up,.pb-up{color:#10b981;font-weight:700}.pb-kpi .down{color:#ef4444;font-weight:700}
 .pb-bars{display:flex;align-items:flex-end;gap:5px;height:120px;margin-top:8px}
@@ -8155,8 +8188,8 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background
 .pb-track{height:10px;background:#eef0f8;border-radius:99px;overflow:hidden}.pb-fill{height:100%;background:var(--a);border-radius:99px}
 .pb-foot{text-align:center;color:#94a3b8;font-size:11.5px;margin-top:16px}
 .dim{color:#94a3b8}
-.pb-tbl{width:100%;border-collapse:collapse;font-size:12.5px}.pb-tbl th{background:#1e1b4b;color:#fff;text-align:center;padding:8px 8px;font-weight:600;white-space:nowrap}.pb-tbl th:first-child,.pb-tbl td:first-child{text-align:left}
-.pb-tbl td{padding:8px 8px;border-bottom:1px solid #eef2f9;text-align:center}.pb-tbl td:first-child{font-weight:600;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pb-tbl tbody tr:nth-child(even) td{background:#f7f8ff}.pb-tbl tfoot td{font-weight:800;background:#eef2ff;border-top:2px solid #c7d2fe}
+.pb-tbl{width:100%;border-collapse:collapse;font-size:12.5px}.pb-tbl th{background:linear-gradient(120deg,#312e81,#4338ca 55%,#2563eb);color:#fff;text-align:center;padding:10px 9px;font-weight:750;white-space:nowrap}.pb-tbl th:first-child,.pb-tbl td:first-child{text-align:left}
+.pb-tbl td{padding:9px 9px;border-bottom:1px solid #eef2f9;text-align:center}.pb-tbl tbody tr:hover td{background:#eef2ff}.pb-tbl td:first-child{font-weight:600;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pb-tbl tbody tr:nth-child(even) td{background:#f7f8ff}.pb-tbl tfoot td{font-weight:800;background:#eef2ff;border-top:2px solid #c7d2fe}
 .pb-scroll{overflow:auto;margin:0 -4px}.pb-hot{color:#dc2626;font-weight:700}.pb-warn{color:#d97706;font-weight:700}
 .pb-kpi.stock{background:linear-gradient(135deg,#eef2ff,#f5f3ff);border-color:#c7d2fe}.pb-kpi.last{background:linear-gradient(135deg,#fdf4ff,#fff);border-color:#f0abfc}
 .pb-locked{display:none !important}
@@ -8169,7 +8202,7 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background
 .pb-inp:focus{border-color:var(--a);box-shadow:0 0 0 3px rgba(37,99,235,.15)}
 .pb-auth-btn{background:var(--a);color:#fff;border:0;border-radius:10px;padding:11px 16px;font-size:14px;font-weight:800;cursor:pointer;margin-top:4px}
 .pb-auth-err{background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;padding:8px 10px;border-radius:8px;font-size:12.5px;font-weight:600}
-.pb-no-sections{text-align:center;border:1px dashed #cbd5e1;background:#f8fafc}.pb-no-sections p{margin-top:6px;font-size:13px}
+.pb-no-sections{text-align:center;border:1px dashed #cbd5e1;background:#f8fafc}.pb-no-sections p{margin-top:6px;font-size:13px}.pb-date-matrix{min-width:1180px}.pb-date-matrix th:first-child,.pb-date-matrix td:first-child{position:sticky;left:0;z-index:2;min-width:175px}.pb-date-matrix thead th:first-child{background:linear-gradient(135deg,#4338ca,#2563eb);z-index:3}.pb-date-matrix tbody td:first-child{background:#eef2ff}.pb-date-matrix .pb-cell-active{color:#4338ca;font-weight:850;background:#e0e7ff!important}.pb-matrix-note{font-size:12px;color:#64748b;margin-top:3px}
 @media(max-width:560px){body{padding:10px}.pb-head{padding:12px}.pb-grid2{grid-template-columns:1fr}.pb-tabs-bar{align-items:flex-start}.pb-tbl{min-width:620px}}
 </style></head><body><div class="pb-wrap" id="pl-root" data-token="${escHtml(token)}" data-require-auth="${requireAuth ? '1' : '0'}" data-authorized="${authorized ? '1' : '0'}" data-person="${escHtml(personName)}">
 <header class="pb-head"><div class="pb-head-left"><div class="pb-logo">${escHtml(String(db.settings.brand || 'FF').split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase())}</div>
@@ -8344,6 +8377,12 @@ const PERSONAL_PORTAL_JS = `(function () {
         var title2 = pdfBtn.getAttribute('data-pl-title') || (person + ' Report');
         exportPdfTables(title2, [{ title: title2, headers: data2.headers, rows: data2.rows }]);
       }
+      return;
+    }
+    var stockBtn = e.target.closest && e.target.closest('#pl-exp-stock-csv');
+    if (stockBtn) {
+      var stockData = extractTable(document.getElementById('pl-tbl-cls-stock'));
+      if (stockData && stockData.rows.length) downloadCsv((person + '-stock').toLowerCase().replace(/[^a-z0-9]+/g, '-') + '.csv', stockData.headers, stockData.rows);
       return;
     }
     if (e.target.id === 'pl-exp-all-csv') {
