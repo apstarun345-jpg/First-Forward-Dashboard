@@ -167,16 +167,38 @@ window.FF = window.FF || {};
     fallback.index.vcType = colIndex('E');
     return fallback;
   }
-  function tableCellText(cell, col) {
+  // Expand scientific notation without routing through Number(), which can round long IDs.
+  function expandIdentifierNumber(value) {
+    const raw = clean(value);
+    const m = raw.match(/^([+-]?)(\\d+)(?:\\.(\\d*))?[eE]([+-]?\\d+)$/);
+    if (!m) return raw;
+    const sign = m[1] || '', whole = m[2], frac = m[3] || '', exponent = Number(m[4]);
+    const digits = whole + frac;
+    const decimalAt = whole.length + exponent;
+    if (decimalAt <= 0) return sign + '0.' + '0'.repeat(Math.min(1000, -decimalAt)) + digits;
+    if (decimalAt >= digits.length) return sign + digits + '0'.repeat(Math.min(1000, decimalAt - digits.length));
+    return sign + digits.slice(0, decimalAt) + '.' + digits.slice(decimalAt);
+  }
+  function tableCellText(cell, col, key) {
     if (!cell) return '';
-    // For barcodes/serials prefer the formatted sheet value (cell.f) before JS numeric coercion.
-    if (cell.f !== null && cell.f !== undefined && String(cell.f).trim() !== '') return clean(cell.f);
+    // Identifiers must come from the underlying cell value, not its display format:
+    // cell.f may be "8,900,000,000,123,456" or "8.9E+15", breaking exact matches/API payloads.
+    if (key === 'tagId' || key === 'barcode' || key === 'serialNo') {
+      if (cell.v !== null && cell.v !== undefined && clean(cell.v) !== '') {
+        const raw = clean(cell.v);
+        if (typeof cell.v === 'number' || /^[+-]?\\d+(?:\\.\\d+)?[eE][+-]?\\d+$/.test(raw)) {
+          return expandIdentifierNumber(raw);
+        }
+        return raw;
+      }
+      return clean(cell.f);
+    }
     return clean(D.cellText(cell, col));
   }
   function stockRows(table, schema) {
     const ix = schema && schema.index ? schema.index : fallbackSchema().index;
     return (table.rows || []).map((row) => {
-      const val = (key) => tableCellText(row[ix[key]], table.cols && table.cols[ix[key]]);
+      const val = (key) => tableCellText(row[ix[key]], table.cols && table.cols[ix[key]], key);
       return {
         stockRowId: val('id'), inventoryName: val('name'), tagId: val('tagId'), barcode: val('barcode'), serialNo: val('serialNo') || val('barcode'),
         vcType: val('vcType'), tagType: val('tagType'), barcodeAllocatedAt: val('barcodeAllocatedAt'), stockAgentId: val('agentId'),
@@ -184,7 +206,7 @@ window.FF = window.FF || {};
       };
     }).filter((r) => r.tagId || r.barcode || r.serialNo);
   }
-  const idKey = (v) => clean(v).toLowerCase();
+  const idKey = (v) => expandIdentifierNumber(clean(v)).toLowerCase().replace(/[\\s,\\u00a0]/g, '');
   async function queryField(fieldName, values) {
     const unique = [...new Set(values.map(clean).filter(Boolean))];
     if (!unique.length) return [];
