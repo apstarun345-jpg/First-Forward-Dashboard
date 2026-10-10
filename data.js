@@ -150,7 +150,12 @@ window.FF = window.FF || {};
         let fatal = false;
         for (const url of attempts) {
           try {
-            const { text, source } = await fetchText(url, o.timeoutMs);
+            // Direct-first inventory lookups get a short direct attempt, then enough time for
+            // the server proxy (whose upstream timeout is 45s) to return a response cleanly.
+            const attemptTimeout = o.directFirst && url === directUrl
+              ? Math.max(1000, Number(o.directTimeoutMs || 12000))
+              : o.timeoutMs;
+            const { text, source } = await fetchText(url, attemptTimeout);
             const table = parseGviz(text);
             table.source = source;
             table.sheet = sheetName;
