@@ -115,6 +115,8 @@ FF.pages = FF.pages || {};
   const AGENT_BOOK_KEY = 'ff_tr_agent_contacts';
   const EMPLOYEE_TOKEN_KEY = 'ff_tr_employee_token';
   const COURIER_KEY = 'ff_tr_courier';   // 🚚 pichhla chuna hua courier — dobara type na karna pade
+  const ITEM_NAME_OPTIONS = ['FASTag', 'Biomatric Device', 'Matarial'];
+  const normalizeItemName = (value) => ITEM_NAME_OPTIONS.find((x) => x.toLowerCase() === clean(value).toLowerCase()) || 'FASTag';
   /** 🚚 Courier list — Settings → 🏷️ Tag Request → courier names se aati hai (default Delhivery / DTDC). */
   function courierOptions() {
     const cfg = formCfg() || {};
