@@ -9,7 +9,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const source = await fs.readFile(path.join(ROOT, 'fastagMapping.js'), 'utf8');
 
 function makePage() {
-  const labels = ['Stock ID','Inventory Name','Tag ID','Barcode','VC Type','Tag Type','Barcode Allocated At','Agent ID','Agent Name','Agent Allocated At','TL Name','Extra L','Extra M'];
+  const labels = ['STOCK_ID','INVENTORY_NAME','TAG_ID','BARCODE','TAG_CLASS','TAG_TYPE','BARCODE_ALLOCATED_AT','AGENT_ID','AGENT_NAME','AGENT_ALLOCATED_AT','TL_NAME','EXTRA_L','EXTRA_M'];
   const letters = 'ABCDEFGHIJKLM'.split('');
   const stock = ['STOCK-1','Test tag','TAG-12345','8900000000123456','VC20','RFID','2026-10-01','OLD-AGENT','Old Agent','2026-10-01','TL Test','',''];
   const cols = labels.map((label, i) => ({ id: letters[i], label, type: 'string' }));
