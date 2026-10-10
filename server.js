@@ -7990,6 +7990,7 @@ async function servePersonalPage(req, res, rawToken) {
       target = ((Array.isArray(db.settings.targets) ? db.settings.targets : []).find((t) => t && t.ym === ym && (t.source || 'ff') === link.source && normPerson(t.agent) === normPerson(link.name)) || null);
     }
     const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
+    const nf = (n) => Number(n || 0).toLocaleString('en-IN');
     const maxBar = Math.max(1, ...st.monthDays.map((x) => x.n));
     const bars = st.monthDays.map((x) => `<div class="pb-col" title="${escHtml(x.date)}: ${nf(x.n)} tags"><div class="pb-bar" style="height:${Math.max(4, Math.round((x.n / maxBar) * 100))}%"></div><span>${escHtml(x.date.slice(8, 10))}</span></div>`).join('');
     const clsRows = Object.entries(st.cls).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<div class="pb-kv"><span>${escHtml(k)}</span><b>${v}</b> <i>${pct(v, st.clsTotal)}%</i></div>`).join('') || '<p class="dim">—</p>';
@@ -7998,7 +7999,6 @@ async function servePersonalPage(req, res, rawToken) {
     const prevYm = (() => { const dd = new Date(`${dateKeyNow()}T00:00:00Z`); dd.setUTCDate(1); dd.setUTCMonth(dd.getUTCMonth() - 1); return `${dd.getUTCFullYear()}-${pad2(dd.getUTCMonth() + 1)}`; })();
     const lastMonthTotal = rows.reduce((a, r) => a + (String(r.date).startsWith(prevYm) ? r.n : 0), 0);
     const stockInfo = await stockPromise;
-    const nf = (n) => Number(n || 0).toLocaleString('en-IN');
     const stCore = stockInfo ? stockInfo.t[0] : 0, stComm = stockInfo ? stockInfo.t[1] : 0;
     const stTotal = stCore + stComm;
     const expBtns = (tblId, label) => canExport ? `<div class="pb-card-acts"><button type="button" class="pb-btn" data-pl-csv="${escHtml(tblId)}" data-pl-title="${escHtml(label)}">⬇ CSV</button><button type="button" class="pb-btn pb-btn-pdf" data-pl-pdf="${escHtml(tblId)}" data-pl-title="${escHtml(label)}">📄 PDF</button></div>` : '';
