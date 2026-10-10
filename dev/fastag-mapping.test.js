@@ -22,11 +22,23 @@ test('FASTag Mapping supports barcode ranges, multiple identifiers, StockDataa f
   const page = await read('fastagMapping.js');
   for (const required of [
     'firstBarcode', 'lastBarcode', 'tagId', 'serialNo', 'agentId',
-    "D.query('StockDataa'", 'vcType: clean(r[4])', 'stockAgentId: clean(r[7])',
+    "D.query('StockDataa'", "vcType: val('vcType')", "stockAgentId: val('agentId')",
     'fm-quick-map', 'fastag-mapping-template.csv', 'Full details CSV',
     'Mapped successfully', 'Duplicate conflict'
   ]) assert.ok(page.includes(required), 'missing feature: ' + required);
   assert.match(page, /accept="\.csv,\.tsv,\.txt,\.xlsx"/);
+});
+
+test('FASTag Mapping template is exactly the requested four columns; lookup tries text and numeric matches', async () => {
+  const page = await read('fastagMapping.js');
+  assert.match(page, /const headers = \['tagId', 'serialNo', 'vcType', 'agentId'\]/);
+  assert.match(page, /D\.query\('StockDataa', make\(true\)/);
+  assert.match(page, /D\.query\('StockDataa', make\(false\)/);
+  assert.match(page, /queryField\('tagId', tagIds\)/);
+  assert.match(page, /queryField\('barcode', barcodes\)/);
+  assert.match(page, /Har row me tagId ya serialNo\/barcode aur agentId dein/);
+  assert.match(page, /vcType StockDataa se auto-fetch hoga/);
+  assert.match(page, /if \(!value \|\| !agentId\)/);
 });
 
 test('FASTag Mapping write API is authenticated/admin-only and never embeds its secret in frontend', async () => {
