@@ -170,7 +170,7 @@ window.FF = window.FF || {};
   // Expand scientific notation without routing through Number(), which can round long IDs.
   function expandIdentifierNumber(value) {
     const raw = clean(value);
-    const m = raw.match(/^([+-]?)(\\d+)(?:\\.(\\d*))?[eE]([+-]?\\d+)$/);
+    const m = raw.match(/^([+-]?)(\d+)(?:\.(\d*))?[eE]([+-]?\d+)$/);
     if (!m) return raw;
     const sign = m[1] || '', whole = m[2], frac = m[3] || '', exponent = Number(m[4]);
     const digits = whole + frac;
@@ -186,7 +186,7 @@ window.FF = window.FF || {};
     if (key === 'tagId' || key === 'barcode' || key === 'serialNo') {
       if (cell.v !== null && cell.v !== undefined && clean(cell.v) !== '') {
         const raw = clean(cell.v);
-        if (typeof cell.v === 'number' || /^[+-]?\\d+(?:\\.\\d+)?[eE][+-]?\\d+$/.test(raw)) {
+        if (typeof cell.v === 'number' || /^[+-]?\d+(?:\.\d+)?[eE][+-]?\d+$/.test(raw)) {
           return expandIdentifierNumber(raw);
         }
         return raw;
@@ -206,7 +206,7 @@ window.FF = window.FF || {};
       };
     }).filter((r) => r.tagId || r.barcode || r.serialNo);
   }
-  const idKey = (v) => expandIdentifierNumber(clean(v)).toLowerCase().replace(/[\\s,\\u00a0]/g, '');
+  const idKey = (v) => expandIdentifierNumber(clean(v)).toLowerCase().replace(/[\s,\u00a0]/g, '');
   async function queryField(fieldName, values) {
     const unique = [...new Set(values.map(clean).filter(Boolean))];
     if (!unique.length) return [];
