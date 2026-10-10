@@ -132,9 +132,10 @@ window.FF = window.FF || {};
   }
   function isDigitKey(v) { return /^\d+$/.test(clean(v)); }
   function compareBarcode(a, b) {
-    const x = clean(a), y = clean(b);
+    const rawX = clean(a), rawY = clean(b);
+    const x = rawX.replace(/[,\s-]/g, ''), y = rawY.replace(/[,\s-]/g, '');
     if (isDigitKey(x) && isDigitKey(y)) { const xx = BigInt(x), yy = BigInt(y); return xx < yy ? -1 : (xx > yy ? 1 : 0); }
-    return x.localeCompare(y, undefined, { numeric: true, sensitivity: 'base' });
+    return rawX.localeCompare(rawY, undefined, { numeric: true, sensitivity: 'base' });
   }
   function literal(v, numeric) {
     const s = clean(v);
@@ -278,62 +279,49 @@ window.FF = window.FF || {};
     (rows || []).forEach((row) => unique.set(idKey(row.tagId) + '|' + idKey(row.barcode), row));
     return [...unique.values()];
   }
-  async function queryRange(from, to, depth) {
-    const level = Number(depth || 0);
-    const schema = await stockSchema(), c = cols();
-    const index = schema.index.barcode, field = schema.letters[index] || c.barcode;
-    const digitRange = isDigitKey(from) && isDigitKey(to) && from.length === to.length;
-    const numericRange = digitRange && from[0] !== '0' && to[0] !== '0';
-    const splittableRange = digitRange && compareBarcode(from, to) < 0 && level < 3;
-    const preferredModes = numericRange ? [true, false] : [false, true];
-    const inRequestedRange = (rows) => (rows || []).filter((row) =>
-      compareBarcode(row.barcode, from) >= 0 && compareBarcode(row.barcode, to) <= 0);
-    const run = async (numeric, lower, upper) => {
-      const make = () => 'select A,B,C,D,E,F,G,H,I,J,K,L,M where ' +
-        field + ' >= ' + literal(lower, numeric) + ' and ' + field + ' <= ' + literal(upper, numeric);
-      const table = await D.query('StockDataa', make(), {
-        timeoutMs: 55000, directTimeoutMs: 12000, retries: 0, directFirst: true
-      });
-      return inRequestedRange(stockRows(table, schema));
+  async function queryRange(from, to) {
+    const schema = await stockSchema();
+    const normalizeBoundary = (value) => {
+      const raw = clean(value);
+      return /^[\d,\s-]+$/.test(raw) ? raw.replace(/[,\s-]/g, '') : raw;
     };
+    from = normalizeBoundary(from);
+    to = normalizeBoundary(to);
+    if (compareBarcode(from, to) > 0) throw new Error('First barcode last se bada hai.');
 
-    let rows = [];
-    let lastError = null;
-    for (const numeric of preferredModes) {
+    // Do not run a full-sheet range predicate (D >= x and D <= y): Google Sheets may scan
+    // the entire mixed text/numeric barcode column and time out. Read bounded pages and filter
+    // locally; this also avoids silently missing rows whose BARCODE is stored as text.
+    const PAGE_SIZE = 5000, HARD_CAP = 250000;
+    const selected = 'select A,B,C,D,E,F,G,H,I,J,K where D is not null';
+    const matched = new Map();
+    let offset = 0, finished = false;
+    while (offset < HARD_CAP && !finished) {
+      const offsets = [offset, offset + PAGE_SIZE].filter((x) => x < HARD_CAP);
+      let pages;
       try {
-        rows = await run(numeric, from, to);
-        if (rows.length) break;
+        pages = await Promise.all(offsets.map((start) =>
+          D.query('StockDataa', selected + ' limit ' + PAGE_SIZE + ' offset ' + start,
+            { timeoutMs: 55000, retries: 0 })
+        ));
       } catch (err) {
-        lastError = err;
-        // Don't wait for a second full timeout before splitting a numeric range.
-        if (isLookupTimeout(err) && splittableRange) break;
+        throw new Error('StockDataa paged barcode lookup failed near rows ' + (offset + 1) + '–' + (offset + offsets.length * PAGE_SIZE) + ': ' + String(err && (err.message || err) || 'Google Sheets query error'));
       }
-    }
-
-    // If Google times out while comparing a broad barcode interval, split it automatically.
-    // Numeric ranges are split as integers, preserving fixed-width barcodes and avoiding
-    // asking the operator to manually upload smaller ranges. Cap depth to prevent query storms.
-    const canSplit = splittableRange && lastError && isLookupTimeout(lastError);
-    if (!rows.length && canSplit) {
-      if (level === 0) setStatus('StockDataa range slow hai — system automatically chhote parts me retry kar raha hai…', 'info');
-      const lower = BigInt(from), upper = BigInt(to), middle = (lower + upper) / 2n;
-      if (middle >= lower && middle < upper) {
-        const fmt = (n) => n.toString().padStart(from.length, '0');
-        const halves = await Promise.all([
-          queryRange(from, fmt(middle), level + 1),
-          queryRange(fmt(middle + 1n), to, level + 1)
-        ]);
-        return dedupeStockRows(halves.flat());
+      for (const page of pages) {
+        const rows = stockRows(page, schema);
+        for (const row of rows) {
+          if (!row.barcode) continue;
+          if (compareBarcode(row.barcode, from) < 0 || compareBarcode(row.barcode, to) > 0) continue;
+          matched.set(idKey(row.tagId) + '|' + idKey(row.barcode), row);
+        }
+        if ((page.rows || []).length < PAGE_SIZE) { finished = true; break; }
       }
+      offset += pages.length * PAGE_SIZE;
     }
-
-    if (!rows.length && lastError) {
-      if (isLookupTimeout(lastError)) {
-        throw new Error('StockDataa range lookup timed out after trying numeric/text matching. Try a narrower range or retry shortly.');
-      }
-      throw new Error('StockDataa range lookup failed: ' + String(lastError && (lastError.message || lastError) || 'Google Sheets query error'));
+    if (!finished && offset >= HARD_CAP) {
+      throw new Error('StockDataa mein 250,000 rows scan ho chuki hain. Exact match ke liye chhoti barcode range dein.');
     }
-    return dedupeStockRows(rows);
+    return [...matched.values()];
   }
   function addResult(item, stock, matchedBy) {
     const row = Object.assign({ id: nextId++, source: item.source || 'Manual', request: item.type === 'range' ? item.first + ' – ' + item.last : (item.tagId || item.barcode || item.serialNo || ''),
