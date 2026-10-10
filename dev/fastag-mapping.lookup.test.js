@@ -21,6 +21,19 @@ function makePage() {
       assert.equal(sheet, 'StockDataa');
       queryLog.push({ tq, range: opts.range });
       if (opts.range === 'A1:M2') return table([]);
+      const range = tq.match(/where\s+([A-M])\s*>=\s*(?:"([^"]*)"|(\d+))\s+and\s+([A-M])\s*<=\s*(?:"([^"]*)"|(\d+))/i);
+      if (range) {
+        const letter = range[1].toUpperCase();
+        const from = range[2] !== undefined ? range[2] : range[3];
+        const to = range[5] !== undefined ? range[5] : range[6];
+        const value = String(stock[letters.indexOf(letter)] ?? '');
+        // Simulate a numeric range query silently missing text-formatted barcode values.
+        if (letter === 'D' && range[2] === undefined) return table([]);
+        const compare = (a, b) => /^\d+$/.test(a) && /^\d+$/.test(b)
+          ? (BigInt(a) < BigInt(b) ? -1 : (BigInt(a) > BigInt(b) ? 1 : 0))
+          : a.localeCompare(b, undefined, { numeric: true });
+        return table(compare(value, from) >= 0 && compare(value, to) <= 0 ? [stock] : []);
+      }
       const where = tq.match(/where\s+([A-M])\s*=\s*(?:"([^"]*)"|(\d+))/i);
       if (!where) return table([]);
       const letter = where[1].toUpperCase();
@@ -105,4 +118,17 @@ test('FASTag Mapping looks up Tag ID separately and never silently uses the stoc
   assert.match(html, /VC20/);
   assert.match(html, /TARGET-88/);
   assert.doesNotMatch(html, /value="OLD-AGENT"/);
+});
+test('FASTag Mapping expands first/last barcode from StockDataa and applies the supplied Agent ID to every matched row', async () => {
+  const { root, selectors, queryLog } = makePage();
+  selectors.get('#fm-first').value = '8900000000123456';
+  selectors.get('#fm-last').value = '8900000000123456';
+  selectors.get('#fm-range-agent').value = 'RANGE-TARGET-99';
+  await click(root, 'fm-add-range');
+  await click(root, 'fm-lookup');
+  const html = selectors.get('#fm-results').innerHTML;
+  assert.match(html, /TAG-12345/);
+  assert.match(html, /VC20/);
+  assert.match(html, /RANGE-TARGET-99/);
+  assert.ok(queryLog.some((q) => /where D >= "8900000000123456" and D <= "8900000000123456"/.test(q.tq)), 'quoted barcode range fallback attempted');
 });
