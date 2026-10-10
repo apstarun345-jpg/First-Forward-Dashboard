@@ -54,7 +54,9 @@ window.FF = window.FF || {};
     ['top gv agents', T('🟩 Top GV agents', '🟩 Top GV agents')],
     ['briefing do', T('☀️ Briefing', '☀️ Briefing')],
     ['aaj ka total issuance', T('📊 Aaj ka total', "📊 Today's total")],
-    ['stock kya hai', T('📦 Stock status', '📦 Stock status')]
+    ['stock kya hai', T('📦 Stock status', '📦 Stock status')],
+    ['system health', T('🩺 System health', '🩺 System health')],
+    ['site speed', T('⚡ Site speed', '⚡ Site speed')]
   ];
 
   const setLang = (v) => { lang = v === 'en' ? 'en' : 'hi'; U.setVoicePrefs({ lang }); syncLangUI(); };
@@ -107,6 +109,28 @@ window.FF = window.FF || {};
     const words = new Set(q.split(' '));
     const has = (...keys) => keys.some((k) => q.includes(k));
     const hasW = (...ws) => ws.some((w) => words.has(w));
+    // Operations queries use lightweight server endpoints and must not trigger a full Sheets load.
+    if (has('SYSTEM HEALTH', 'SITE HEALTH', 'SERVER STATUS', 'HEALTH CHECK', 'SYSTEM STATUS', 'SITE KI HEALTH', 'SERVER HEALTH')) {
+      const h = await safe(FF.auth && FF.auth.api ? FF.auth.api('/api/health') : Promise.reject(new Error('Login required')), null);
+      if (!h || !h.ok) return ans('🩺 Live health check nahi ho paaya. Login/session check karke dobara try karein.', '🩺 Live health check could not complete. Check your login/session and retry.');
+      const st = h.storage || {}, push = h.push || {}, age = h.stockAge || {};
+      const storageOk = st.durable === true && !st.error;
+      const pushText = !push.enabled ? 'not configured' : (push.selfTest && push.selfTest.ok ? 'self-test OK' : 'needs attention');
+      return ans(
+        `🩺 <b>Live System Health</b><br>API: <b>OK</b> · version <b>${esc(h.version || '—')}</b><br>Storage: <b>${esc(st.backend || 'unknown')}</b> · ${storageOk ? 'durable' : 'check storage status'}<br>Mobile push: <b>${esc(pushText)}</b><br>Stock-age index: <b>${age.ready ? 'ready' : age.building ? 'building' : 'not ready'}</b><br>Server cache: <b>${esc(String(h.cached ?? '—'))}</b> entries · TTL ${esc(String(h.cacheSeconds ?? '—'))}s`,
+        `🩺 <b>Live System Health</b><br>API: <b>OK</b> · version <b>${esc(h.version || '—')}</b><br>Storage: <b>${esc(st.backend || 'unknown')}</b> · ${storageOk ? 'durable' : 'check storage status'}<br>Mobile push: <b>${esc(pushText)}</b><br>Stock-age index: <b>${age.ready ? 'ready' : age.building ? 'building' : 'not ready'}</b><br>Server cache: <b>${esc(String(h.cached ?? '—'))}</b> entries · TTL ${esc(String(h.cacheSeconds ?? '—'))}s`,
+        [['site speed', 'Site speed'], ['data kab update hua', 'Data freshness'], ['help', 'Help']]
+      );
+    }
+    if (has('SITE SPEED', 'SYSTEM PERFORMANCE', 'SERVER PERFORMANCE', 'SLOW QUERY', 'PERFORMANCE CHECK')) {
+      if (!(FF.auth && FF.auth.isAdmin && FF.auth.isAdmin())) return ans('⚡ Detailed server performance admin-only hai. Admin account se ye command chalao.', '⚡ Detailed server performance is admin-only. Run this from an admin account.');
+      const r = await safe(FF.auth.api('/api/perf'), null), perf = r && r.perf;
+      if (!perf) return ans('⚡ Performance data abhi available nahi. Home/Trend khol kar kuch der baad dobara check karo.', '⚡ Performance data is not available yet. Open Home/Trend and retry shortly.');
+      const slow = (perf.slowest || []).slice(0, 3);
+      const q = perf.queries || [], calls = q.reduce((n, x) => n + (Number(x.calls) || 0), 0), hits = q.reduce((n, x) => n + (Number(x.cacheHits) || 0), 0);
+      const hitPct = calls ? Math.round(hits / calls * 100) : 0;
+      return ans(`⚡ <b>Server performance</b><br>Cache hit rate: <b>${hitPct}%</b> · ${esc(String(perf.cacheEntries || 0))}/${esc(String(perf.cacheEntriesMax || 0))} cache entries<br>${slow.length ? 'Slowest queries:<br>' + slow.map((x) => `• ${esc(x.key)} — avg ${esc(String(x.avgMs))} ms / max ${esc(String(x.maxMs))} ms`).join('<br>') : 'Abhi query timing record nahi hai.'}`, `⚡ <b>Server performance</b><br>Cache hit rate: <b>${hitPct}%</b> · ${esc(String(perf.cacheEntries || 0))}/${esc(String(perf.cacheEntriesMax || 0))} cache entries<br>${slow.length ? 'Slowest queries:<br>' + slow.map((x) => `• ${esc(x.key)} — avg ${esc(String(x.avgMs))} ms / max ${esc(String(x.maxMs))} ms`).join('<br>') : 'No query timings recorded yet.'}`, [['system health', 'System health'], ['data kab update hua', 'Data freshness']]);
+    }
     const D = await loadAll();
     const m = ymNow();
 
