@@ -56,7 +56,7 @@ test('🔍 Master Search — type karte hi suggestions, result ke upar KPI strip
   assert.match(ms, /async function paintKpis\(g, host\)/, 'quick → full upgrade painter');
   assert.match(ms, /<div id="msp-kpis"/, 'openGroup me KPI host');
   assert.match(ms, /paintKpis\(viewGroup, U\.\$\('#msp-kpis', out\)\)/, 'KPI cards use the selected FF/GV channel view');
-  for (const s of ['📦 Stock', 'Issued this month', 'Last month', '🚦 Priority', 'Sug. VC4', 'Sug. Commercial', 'Dispatch · all tags', '📈 Growth']) assert.ok(ms.includes(s), `KPI box "${s}"`);
+  for (const s of ['📦 Stock', 'Issued this month', 'Last month', '🚦 Priority', 'Sug. VC4', 'Sug. Commercial', 'Dispatch · all tags', '📈 Growth', 'Expected this month · Run-rate']) assert.ok(ms.includes(s), `KPI box "${s}"`);
   // trend: stacked VC4 / VC20 / VC5+ series (pehle sirf 'Total tags')
   const trend = ms.slice(ms.indexOf('function trendHtml'), ms.indexOf('function paintTrend'));
   assert.ok(!trend.includes("name: 'Total tags'"), 'single Total series gayi');
