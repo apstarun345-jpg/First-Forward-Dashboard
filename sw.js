@@ -1,7 +1,7 @@
 // Versioned app shell + offline data cache.
 // Auth login/logout/password endpoints are NEVER cached. Stable feed snapshots (/api/today),
 // /api/auth/me and /api/settings are network-first with a cached fallback; raw /api/gviz stays live-only.
-const CACHE_NAME = 'apnapayment-v121';
+const CACHE_NAME = 'apnapayment-v122';
 const DATA_CACHE = 'ff-data-v5';
 const STASH_CACHE = 'ff-push-stash-v1'; // pushsubscriptionchange ke waqt bani subscription yahan rakho
 // A same-origin browser tab and an installed PWA are both WindowClients. Remember the display
