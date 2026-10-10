@@ -647,8 +647,8 @@ FF.pages = FF.pages || {};
       t.pincode ? `PIN Code - ${t.pincode} (Pincode: ${t.pincode})` : '',
       ...(agentRef(it) ? [agentRef(it)] : []),
       '',
-      `🏷️ FASTags: 
-      `📦 Item Name: ${it.itemName || 'FASTag'}`,${it.total} tags${it.classes.length ? ` (${it.classes.map((c) => `${c.cls}×${c.qty}`).join(', ')})` : ''} · Date: ${it.date}`,
+      `📦 Item Name: ${it.itemName || 'FASTag'}`,
+      `🏷️ FASTags: ${it.total} tags${it.classes.length ? ` (${it.classes.map((c) => `${c.cls}×${c.qty}`).join(', ')})` : ''} · Date: ${it.date}`,
       it.courier ? `🚚 Courier: ${it.courier}` : '',
       '',
       `📤 FROM (SENDER):`,
