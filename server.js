@@ -7181,7 +7181,7 @@ async function handleApi(req, res, url) {
       if (!data.tagId || !data.serialNo || !data.vcType || !data.agentId) {
         return { index, success: false, status: 'Validation failed', message: 'tagId, serialNo, vcType aur agentId sab required hain.' };
       }
-      if ([data.tagId, data.serialNo, data.vcType, data.agentId].some((v) => /[,\\r\\n]/.test(v))) {
+      if ([data.tagId, data.serialNo, data.vcType, data.agentId].some((v) => /[,\r\n]/.test(v))) {
         return { index, success: false, status: 'Invalid characters', message: 'Mapping values me comma ya newline allowed nahi.' };
       }
       let lastMessage = 'API unavailable', lastCode = 0;
