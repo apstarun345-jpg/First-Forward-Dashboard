@@ -577,6 +577,10 @@ test('🔗 personal links (agent+TL) /p/ pages, 🗺 team location, 🏆 anomaly
     assert.equal(pageAAuth.status, 200, `verified agent report 200 — ${pageAAuth.status}`);
     const htmlA = await pageAAuth.text();
     assert.ok(htmlA.includes('Rahul Dravid'), 'verified page contains agent name');
+    assert.ok(htmlA.includes('Welcome Back, <b>Rahul Dravid</b>'), 'verified personal report greets the authenticated agent');
+    assert.ok(htmlA.includes('Daily Issuance · Last 14 Days'), 'daily issuance graph has an explicit title');
+    assert.ok(htmlA.includes('pl-tbl-date-matrix') && htmlA.includes('Agent Name') && htmlA.includes('14-Day Total'), 'date matrix uses agent rows and date columns');
+    assert.ok(htmlA.includes('pl-exp-stock-csv'), 'stock CSV action is available when stock and export are permitted');
     assert.ok(htmlA.includes('MTD issued') && htmlA.includes('Last'), 'overview KPI and 14-day chart render');
     assert.ok(htmlA.includes('Class-wise Stock') && htmlA.includes('Date-wise Issuance') && htmlA.includes('Performance &amp; Growth'), 'all allowed report sections are included');
     assert.ok(htmlA.includes('data-pl-csv') && htmlA.includes('data-pl-pdf') && htmlA.includes('pl-exp-all-pdf'), 'section and full CSV/PDF export actions are available');
@@ -611,6 +615,8 @@ test('🔗 personal links (agent+TL) /p/ pages, 🗺 team location, 🏆 anomaly
     assert.equal(pageTAuth.status, 200, 'verified TL report 200');
     const htmlT = await pageTAuth.text();
     assert.ok(htmlT.includes('Zoya Khan'), 'verified TL name appears');
+    assert.ok(htmlT.includes('Welcome Back, <b>Zoya Khan</b>'), 'verified TL report greets the authenticated team leader');
+    assert.ok(htmlT.includes('pl-tbl-date-matrix') && htmlT.includes('Agent Name'), 'TL report includes the agent-by-date issuance matrix');
     assert.ok(htmlT.includes('Team · agent-wise issuance'), 'TL agent-wise issuance is included');
     assert.ok(htmlT.includes('Team (is mahine)'), 'TL team performance list included');
 
