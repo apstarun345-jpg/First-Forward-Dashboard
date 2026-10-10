@@ -486,7 +486,12 @@ window.FF = window.FF || {};
         // If one adapter has an ID and the other lacks it, allow a match only when the
         // normalized name + TL identity also matches. This avoids merging same-name agents
         // assigned to different TLs.
-        if (!existing && nameTl) existing = byNameTl.get(nameTl);
+        if (!existing && nameTl) {
+          const candidate = byNameTl.get(nameTl);
+          const candidateId = normId(candidate && (candidate.agentId || candidate.id));
+          // Name+TL may bridge an ID-less adapter row, but never merge two different known IDs.
+          if (candidate && (!normId(raw.agentId || raw.id) || !candidateId)) existing = candidate;
+        }
         if (!existing) {
           const entry = { ...raw };
           if (!entry.name && entry.agentName) entry.name = entry.agentName;
@@ -514,6 +519,37 @@ window.FF = window.FF || {};
       };
       base.forEach((r) => add(r, true));
       extraAgents.forEach((r) => add(r, false));
+      // Keep genuine stock-only holders searchable without treating every class row as a person.
+      // One synthetic roster entry is made per distinct holder; stock details remain authoritative
+      // for TL stock aggregation below and are excluded from the REPORT snapshot input.
+      const stockHolders = new Map();
+      (rowsOf('stockAgents') || []).forEach((r) => {
+        const id = normId(r && (r.agentId || r.id));
+        const name = norm(r && (r.agentName || r.name));
+        if (!id && !name) return;
+        const tlKey = normId(r && (r.tlId || r.supervisorId)) || norm(r && (r.tlName || r.tl));
+        const key = id ? `#${id}` : `n:${name}|tl:${tlKey}`;
+        const entry = stockHolders.get(key) || {
+          agentId: clean(r.agentId || r.id), id: clean(r.agentId || r.id),
+          agentName: clean(r.agentName || r.name), name: clean(r.agentName || r.name),
+          tlId: clean(r.tlId || r.supervisorId), tlName: clean(r.tlName || r.tl),
+          stockVc4: 0, stockNvc4: 0, stockTotal: 0, stockByClass: {}, _stockOnlyIdentity: true
+        };
+        const qty = Math.max(0, num(r.n));
+        const cls = clean(r.cls) || 'Commercial';
+        entry.stockTotal += qty;
+        entry.stockByClass[cls] = (entry.stockByClass[cls] || 0) + qty;
+        if (is4(cls)) entry.stockVc4 += qty; else entry.stockNvc4 += qty;
+        stockHolders.set(key, entry);
+      });
+      stockHolders.forEach((holder) => {
+        const id = normId(holder.agentId || holder.id);
+        const nameTl = `n:${norm(holder.agentName || holder.name)}|tl:${normId(holder.tlId) || norm(holder.tlName)}`;
+        const existingById = id ? byId.get(`#${id}`) : null;
+        const existingByName = byNameTl.get(nameTl);
+        if (existingById || existingByName) return;
+        add(holder, false);
+      });
       ffLookupCache = buildPeopleLookup(
         rows,
         (a) => a.name || a.agentName,
@@ -1243,7 +1279,9 @@ window.FF = window.FF || {};
   function ffTlProfile(p, light) {
     const n = norm(p.name);
     const ffRows = ffPeopleLookup();
-    const allAgents = ffRows.rows;
+    // Inventory-only identities must remain visible in the roster but must not become
+    // synthetic REPORT snapshots when calculating own/team stock composition.
+    const allAgents = ffRows.rows.filter((a) => !a._stockOnlyIdentity);
     const nameRows = ffRows.byTl.get(n) || [];
     const requestedTlId = clean(p.sub || p.id).toUpperCase();
     const exactTlRows = requestedTlId ? nameRows.filter((a) => clean(a.tlId).toUpperCase() === requestedTlId) : [];
