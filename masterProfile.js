@@ -28,6 +28,9 @@ window.FF = window.FF || {};
     normMemo.set(key, out);
     return out;
   };
+  // Shared ID normalizer for quick snapshots and report tables. The GV index below has its
+  // own local variant; quick() is outside that scope, so it must not rely on that local binding.
+  const normId = (v) => clean(v).replace(/\.0+$/, '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   const isHM = (p) => /high|medium/i.test(String(p || ''));
   const suggestDays = () => Number(FF.config && FF.config.features && FF.config.features.suggestDays) || 15;
   /** Net = avg/day × din − stock (stock ghatane ke baad). */
