@@ -5680,7 +5680,7 @@ async function handleApi(req, res, url) {
     agentMobile: 'Agent mobile', agentAddress: 'Agent address', agentPincode: 'Agent pincode', requested: 'Requested qty',
     // v3.51 — 🚚 courier naam (Delhivery / DTDC) — label + sheet dono me
     courier: 'Courier',
-    itemName: 'Item Name'
+    itemName: 'Item Name', serialNumber: 'Serial Number', deviceName: 'Device Name', materialDescription: 'Material Details'
   };
   // 🪶 v3.51 — sheet ko chhota rakho: har AGENT ki EK row (saari classes ek hi cell me) + kam columns.
   const TAG_SHEET_DEFAULT_COLUMNS = ['agent', 'agentId', 'date', 'time', 'tl', 'channel', 'cls', 'agentMobile', 'agentPincode', 'stock', 'last', 'cur', 'growth', 'approved', 'courier', 'itemName', 'status'];
@@ -5912,6 +5912,9 @@ async function handleApi(req, res, url) {
       case 'requested': return x.requested === undefined || x.requested === null ? Number(x.approved) || 0 : Number(x.requested) || 0;
       case 'courier': return req.courier || '';
       case 'itemName': return ['FASTag', 'Biomatric Device', 'Matarial'].includes(req.itemName) ? req.itemName : 'FASTag';
+      case 'serialNumber': return req.serialNumber || '';
+      case 'deviceName': return req.deviceName || '';
+      case 'materialDescription': return req.materialDescription || '';
       case 'status': return req.status || '';
       case 'agentId': return x.agentId || '';
       case 'agent': return x.agentName || '';
