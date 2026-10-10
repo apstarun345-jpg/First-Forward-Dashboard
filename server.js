@@ -5603,12 +5603,29 @@ async function handleApi(req, res, url) {
   }
   /** Drafts → requests (ek batch): store + persist + 📗 sheet (EK appendrows call, order bana rahe). */
   async function createTagBatch(drafts, ctx) {
+    const submissionId = /^[A-Za-z0-9_-]{16,100}$/.test(String(ctx.submissionId || '')) ? String(ctx.submissionId) : '';
+    const submissionFingerprint = submissionId ? crypto.createHash('sha256').update(JSON.stringify({
+      by: ctx.by, source: ctx.source || '', employee: ctx.employee || {}, note: ctx.note || '', courier: ctx.courier || '',
+      agents: drafts.map((d) => ({ agent: { id: d.agent && d.agent.agentId || '', name: d.agent && d.agent.name || '', mobile: d.agent && d.agent.mobile || '', address: d.agent && d.agent.address || '', pincode: d.agent && d.agent.pincode || '', channel: d.agent && d.agent.channel || '' }, rows: (d.rows || []).map((r) => ({ cls: r.cls, requested: r.requested, approved: r.approved })) }))
+    })).digest('hex') : '';
+    // Idempotency is server-side and durable: a timeout/retry with the same key returns the original batch.
+    // Reusing a key for changed details is rejected rather than silently returning the wrong request.
+    if (submissionId) {
+      const prior = (workspaceStore().tagRequests || []).filter((r) => r && r.submissionId === submissionId);
+      if (prior.length) {
+        if (prior.some((r) => r.submissionFingerprint !== submissionFingerprint)) throw new HttpError(409, 'Is submit key par pehle alag details bheji gayi thi. Form reload karke nayi request shuru karein.');
+        const batch = prior[0].batch;
+        const created = prior.filter((r) => r.batch === batch);
+        return { batch, created, total: created.reduce((s, r) => s + (Number(r.total) || 0), 0), rows: created.reduce((s, r) => s + (r.rows || []).length, 0), dupCount: created.filter((r) => r.dupCount).length, idempotentReplay: true };
+      }
+    }
     const now = new Date().toISOString();
     const usedIds = new Set((workspaceStore().tagRequests || []).map((r) => String((r && r.id) || '').trim()));
     const batch = workspaceId('tagbatch');
     const created = drafts.map((d) => ({
       id: nextTagReqId(usedIds), at: now, batch, by: ctx.by, byName: ctx.byName,
       employee: ctx.employee, employeeToken: ctx.employeeToken || '', agent: d.agent,
+      ...(submissionId ? { submissionId, submissionFingerprint } : {}),
       ...(ctx.courier ? { courier: ctx.courier } : {}),
       ...(ctx.source ? { source: ctx.source, ip: ctx.ip } : {}),
       status: 'pending', note: ctx.note || '', adminNote: '',
@@ -6060,9 +6077,9 @@ async function handleApi(req, res, url) {
       const emp = body.employee && typeof body.employee === 'object' ? body.employee : {};
       const employee = { name: shortText(emp.name, 80) || user.name || user.username, ...(shortText(emp.office || emp.branch, 80) ? { office: shortText(emp.office || emp.branch, 80) } : {}) };
       drafts.forEach((d) => { d.dupes = tagAgentDupes([{ ...d.agent, rows: d.rows }]); });
-      const out = await createTagBatch(drafts, { by: user.username, byName: user.name || user.username, employee, note: shortText(body.note, 300), courier: shortText(body.courier, 40), updatedBy: user.username });
+      const out = await createTagBatch(drafts, { by: user.username, byName: user.name || user.username, employee, note: shortText(body.note, 300), courier: shortText(body.courier, 40), updatedBy: user.username, submissionId: body.submissionId });
       const n = out.created.length;
-      try {
+      if (!out.idempotentReplay) try {
         recordNotification({
           type: 'request', title: `🏷️ Tag request${out.dupCount ? ' 🔁 duplicate' : ''} · ${employee.name}`,
           body: `${n} agent${n > 1 ? 's' : ''} · ${out.total} tags — ${tagBatchLine(out.created)}${body.note ? ` · ${shortText(body.note, 80)}` : ''}`,
@@ -6531,7 +6548,7 @@ async function handleApi(req, res, url) {
         by: `public:${normUser(employeeName) || 'employee'}`, byName: employeeName,
         employee: { name: employeeName, ...(office ? { office } : {}) }, employeeToken,
         courier: shortText(body.courier, 40),
-        source: 'public-link', ip: String(ip || '').slice(0, 45), note, updatedBy: 'public-link'
+        source: 'public-link', ip: String(ip || '').slice(0, 45), note, updatedBy: 'public-link', submissionId: body.submissionId
       });
       // Link the passive visit for useful request context; only consented share sessions receive live telemetry.
       // Never store a live-share token in request or notification records.
@@ -6557,7 +6574,7 @@ async function handleApi(req, res, url) {
       const n = out.created.length;
       const dupIds = [...new Set(out.created.flatMap((r) => r.dupOf || []))];
       try {
-        recordNotification({
+        if (!out.idempotentReplay) recordNotification({
           type: 'request', title: `🏷️ Tag request (employee link)${out.dupCount ? ' 🔁 duplicate' : ''} · ${employeeName}`,
           body: `${n} agent${n > 1 ? 's' : ''} · ${out.total} tags — ${tagBatchLine(out.created)}${office ? ` · ${office}` : ''}${note ? ` · ${note.slice(0, 80)}` : ''}${out.dupCount ? ` · 🔁 ${out.dupCount} agent ki request pehle se active (${dupIds.slice(0, 3).join(', ')})` : ''}`,
           target: 'admin', routeKey: 'tagRequest',
