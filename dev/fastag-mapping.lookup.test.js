@@ -139,5 +139,28 @@ test('FASTag Mapping expands first/last barcode from StockDataa and applies the 
   assert.match(html, /TAG-12345/);
   assert.match(html, /VC20/);
   assert.match(html, /RANGE-TARGET-99/);
-  assert.ok(queryLog.some((q) => /where D >= "8900000000123456" and D <= "8900000000123456"/.test(q.tq)), 'quoted barcode range fallback attempted');
+  assert.ok(queryLog.some((q) => /where D >= "8900000000123456" and D <= "8900000000123456"/.test(q.tq)), 'quoted barcode fallback attempted when numeric match returns zero rows');
+  assert.ok(/where D >= 8900000000123456 and D <= 8900000000123456/.test(queryLog[0].tq), 'numeric range query is attempted before text range');
+});
+
+test('FASTag Mapping automatically splits a timed-out numeric range and still finds the available barcode', async () => {
+  const { root, selectors, FF, queryLog } = makePage();
+  const originalQuery = FF.data.query;
+  FF.data.query = async (sheet, tq, opts) => {
+    const m = tq.match(/where D >= (?:"(\\d+)"|(\\d+)) and D <= (?:"(\\d+)"|(\\d+))/i);
+    if (m) {
+      const from = m[1] || m[2], to = m[3] || m[4];
+      if (BigInt(to) - BigInt(from) > 3n) throw new Error('StockDataa range lookup timed out');
+    }
+    return originalQuery(sheet, tq, opts);
+  };
+  selectors.get('#fm-first').value = '8900000000123451';
+  selectors.get('#fm-last').value = '8900000000123461';
+  selectors.get('#fm-range-agent').value = 'AUTO-SPLIT-AGENT';
+  await click(root, 'fm-add-range');
+  await click(root, 'fm-lookup');
+  const html = selectors.get('#fm-results').innerHTML;
+  assert.match(html, /TAG-12345/);
+  assert.match(html, /AUTO-SPLIT-AGENT/);
+  assert.ok(queryLog.length > 0, 'smaller range queries were eventually issued');
 });
