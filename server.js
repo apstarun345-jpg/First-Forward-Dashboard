@@ -8028,6 +8028,8 @@ async function servePersonalPage(req, res, rawToken) {
     // 2. 📅 Date-wise Issuance Table
     const byDateMap = new Map();
     rows.forEach((r) => {
+      // The daily detail table is current-month only; prior month stays available for comparisons.
+      if (!String(r.date || '').startsWith(ym)) return;
       const d = byDateMap.get(r.date) || { date: r.date, vc4: 0, vc20: 0, comm: 0, total: 0 };
       if (r.cls === 'VC4') d.vc4 += r.n;
       else if (r.cls === 'VC20') d.vc20 += r.n;
@@ -8040,7 +8042,7 @@ async function servePersonalPage(req, res, rawToken) {
     const dateTableHtml = `<section class="pb-card"><div class="pb-card-head"><h3>📅 Date-wise Issuance (${dateRowsList.length} active days)</h3>${expBtns('pl-tbl-date-iss', `${link.name} - Date-wise Issuance`)}</div><div class="pb-scroll"><table class="pb-tbl" id="pl-tbl-date-iss"><thead><tr><th>Date</th><th>VC4</th><th>VC20</th><th>🚚 VC5+</th><th>Total Issued</th></tr></thead><tbody>${dateRowsList.map((d) => `<tr><td><b>${escHtml(d.date)}</b></td><td>${nf(d.vc4)}</td><td>${nf(d.vc20)}</td><td>${nf(d.comm)}</td><td><b>${nf(d.total)}</b></td></tr>`).join('')}</tbody><tfoot><tr><td>Grand Total</td><td>${nf(dSum('vc4'))}</td><td>${nf(dSum('vc20'))}</td><td>${nf(dSum('comm'))}</td><td>${nf(dSum('total'))}</td></tr></tfoot></table></div></section>`;
 
 
-    // 2B. 📅 Date × Agent matrix — agent rows, calendar-date columns, limited to the last 14 days.
+    // 2B. 📅 Date × Agent matrix — agent rows, calendar-date columns, current month through yesterday.
     // Agent links show their own row; TL links show each agent in that TL's team.
     const matrixDates = st.monthDays.map((x) => x.date);
     const matrixAgentMaps = new Map();
