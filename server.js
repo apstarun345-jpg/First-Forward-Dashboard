@@ -5580,7 +5580,7 @@ async function handleApi(req, res, url) {
     const rows = r.rows || [];
     const names = [...new Set(rows.map((x) => x.agentName).filter(Boolean))];
     return {
-      id: r.id, at: r.at, status: r.status || 'pending', total: Number(r.total) || 0, byName: r.byName || '', batch: r.batch || '', courier: r.courier || '', itemName: ['FASTag', 'Biomatric Device', 'Matarial'].includes(r.itemName) ? r.itemName : 'FASTag',
+      id: r.id, at: r.at, status: r.status || 'pending', total: Number(r.total) || 0, byName: r.byName || '', batch: r.batch || '', courier: r.courier || '', itemName: ['FASTag', 'Biomatric Device', 'Matarial'].includes(r.itemName) ? r.itemName : 'FASTag', serialNumber: r.serialNumber || '', deviceName: r.deviceName || '', materialDescription: r.materialDescription || '',
       agentName: (r.agent && r.agent.name) || names[0] || '', agentId: (r.agent && r.agent.agentId) || (rows[0] && rows[0].agentId) || '',
       rows: rows.length, agents: Math.max(1, names.length),
       classes: rows.map((x) => ({ cls: x.cls, requested: x.requested === undefined ? Number(x.approved) || 0 : Number(x.requested) || 0, approved: Number(x.approved) || 0, ...(names.length > 1 ? { agent: x.agentName || '' } : {}) })),
