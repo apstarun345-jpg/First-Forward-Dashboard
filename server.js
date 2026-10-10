@@ -5455,10 +5455,16 @@ async function handleApi(req, res, url) {
     priority: shortText(t.priority, 20), reqApproved: Number(t.reqApproved) || 0, agents: Number(t.agents) || 0,
     sugNet: Number(t.sugNet) || 0, sugGross: Number(t.sugGross) || 0, cover: t.cover === undefined || t.cover === null ? null : Number(t.cover) || 0
   }));
+  // Internal idempotency keys must never be returned by request-list/create APIs.
+  const tagRequestClientView = (r) => {
+    if (!r || typeof r !== 'object') return r;
+    const { submissionId, submissionFingerprint, ...safe } = r;
+    return safe;
+  };
   const visibleTagRequests = (user) => {
     const all = workspaceStore().tagRequests || [];
     const list = user.role === 'admin' ? all : all.filter((r) => r.by === user.username);
-    return list.slice(-TAG_REQUEST_CAP).reverse();
+    return list.slice(-TAG_REQUEST_CAP).reverse().map(tagRequestClientView);
   };
 
   // ---- 🧑‍🤝‍🧑 v3.30 — har AGENT ki alag request (agent ka mobile · full address · pincode ke saath) ----
@@ -6093,7 +6099,7 @@ async function handleApi(req, res, url) {
         });
       } catch { /* notification optional */ }
       if (!out.idempotentReplay) logAudit(user, 'tag_request_created', { target: out.batch, note: `${n} agents · ${out.total} tags · ${out.created.map((r) => r.id).join(',')}`.slice(0, 300), ip: clientIp(req) });
-      return sendJson(res, 201, { ok: true, request: out.created[0], requests: out.created, batch: { id: out.batch, total: out.total, agents: n, rows: out.rows } });
+      return sendJson(res, 201, { ok: true, request: tagRequestClientView(out.created[0]), requests: out.created.map(tagRequestClientView), batch: { id: out.batch, total: out.total, agents: n, rows: out.rows } });
     }
     const rows = tagRequestRows(body.rows);
     if (!rows.length) throw new HttpError(400, 'Kam se kam ek row chahiye (agent + tag class).');
