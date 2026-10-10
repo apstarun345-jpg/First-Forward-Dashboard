@@ -1032,7 +1032,7 @@ body.colorful .from-hdr { color: #166534; }
 
   // ---- 📝 form ----------------------------------------------------------------------------------------
   const rowTotal = (row) => CLASS_LIST.reduce((s, c) => s + Math.max(0, Math.round(num(row.q[c]))), 0);
-  const rowHasContent = (row) => !!(String(row.name || row.agentId || '').trim() || digits(row.mobile) || clean(row.address) || digits(row.pincode) || (isFastag() && rowTotal(row) > 0) || (!isFastag() && (clean(state.serialNumber) || clean(state.deviceName) || clean(state.materialDescription)));
+  const rowHasContent = (row) => !!(String(row.name || row.agentId || '').trim() || digits(row.mobile) || clean(row.address) || digits(row.pincode) || (isFastag() && rowTotal(row) > 0) || (!isFastag() && (clean(state.serialNumber) || clean(state.deviceName) || clean(state.materialDescription))));
   const errOf = (rowId, field) => (state.errs[rowId] && state.errs[rowId][field]) || '';
   const badCls = (rowId, field) => (errOf(rowId, field) ? ' tr-bad' : '');
   function employeeCardHtml() {
