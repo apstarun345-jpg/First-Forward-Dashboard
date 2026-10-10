@@ -64,7 +64,7 @@ test('v3.51 — sheet ek agent = ek chhoti row (classes merged) + 🚚 courier c
     const cfg = await jsonCall(server.base, '/api/tag-request-sheet', 'GET', undefined, admin);
     assert.equal(cfg.res.status, 200, JSON.stringify(cfg.json));
     assert.equal(cfg.json.config.rowMode, 'agent-class-gap', 'default ab agent class rows + blank spacer hai');
-    assert.equal(cfg.json.config.v, 5, 'approval-only sync policy version');
+    assert.equal(cfg.json.config.v, 6, 'Item Name sheet-column migration version');
     assert.equal(cfg.json.config.onSubmit, false, 'submit par sheet entry OFF');
     assert.equal(cfg.json.config.onStatus, true, 'approval sync enabled');
     assert.ok(cfg.json.config.columns.includes('cls'), 'classes cell');
@@ -141,7 +141,7 @@ test('v3.51 — purani (v1) class-wise config ek baar me chhote agent-mode par m
     const admin = (await jsonCall(server.base, '/api/auth/login', 'POST', { username: 'owner', password: 'initial-password' })).cookie;
     const cfg = await jsonCall(server.base, '/api/tag-request-sheet', 'GET', undefined, admin);
     assert.equal(cfg.json.config.rowMode, 'agent-class-gap', 'legacy config uses the current agent-group layout');
-    assert.equal(cfg.json.config.v, 5, 'approval-only sync policy migrated');
+    assert.equal(cfg.json.config.v, 6, 'Item Name sheet-column migration migrated');
     assert.equal(cfg.json.config.onSubmit, false);
     assert.equal(cfg.json.config.onStatus, true);
     assert.ok(cfg.json.config.columns.includes('courier'), 'naya compact column set');
