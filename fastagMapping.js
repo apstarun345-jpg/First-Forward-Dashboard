@@ -246,6 +246,7 @@ window.FF = window.FF || {};
     renderTable();
   }
   async function mapReady() {
+    if (!state.configured) { setStatus('Mapping API secret configured nahi hai. Render me GV_TAG_MAPPING_SECRET set karein; lookup/CSV abhi bhi use kar sakte hain.', 'warn'); return; }
     if (state.busy) return;
     const ready = state.rows.filter((r) => r.selected && r.stock && r.tagId && r.serialNo && r.vcType && r.agentId && !r.status.startsWith('Duplicate') && !r.mapped);
     if (!ready.length) { setStatus('Koi selected, complete row ready nahi hai. Pehle lookup karein aur Agent ID verify karein.', 'warn'); return; }
@@ -268,7 +269,7 @@ window.FF = window.FF || {};
       }
       setStatus('Mapping complete. Success: ' + success + ' · Failed: ' + failed + '. Full CSV download kar sakte hain.', failed ? 'warn' : 'success');
     } catch (err) { setStatus('Mapping request fail: ' + (err.message || err) + '. Result table se CSV download kar sakte hain.', 'error'); }
-    finally { state.busy = false; if (mapBtn) mapBtn.disabled = false; renderTable(); }
+    finally { state.busy = false; if (mapBtn) mapBtn.disabled = !state.configured; renderTable(); }
   }
   function downloadCsv() {
     const headers = ['Request','Source','StockDataa Row ID','Inventory Name','Barcode','Tag ID','Serial No','VC Type','Tag Type','Barcode Allocated At','Stock Agent ID','Agent ID Mapped','Agent Name','TL Name','Agent Allocated At','Matched By','Selected','API Status','Message'];
@@ -287,12 +288,13 @@ window.FF = window.FF || {};
     root.innerHTML = '<div class="page-head"><div><h1>🧭 FASTag Mapping</h1><p class="sub">GV Partner · StockDataa se Tag ID, Serial/Barcode, VC Type aur Agent details fetch karke securely map karein.</p></div><div class="head-actions"><span id="fm-api-status" class="badge amber">Mapping API status checking…</span></div></div>' +
       '<div class="grid g-2"><section class="card"><div class="card-head"><h3>📂 Upload mapping file</h3><button class="btn small" id="fm-template">⬇ CSV template</button></div><div class="card-body"><p class="dim small">CSV, TSV, TXT ya Excel .xlsx file upload karein. Header names firstBarcode, lastBarcode, barcode, tagId, serialNo, agentId ho sakte hain. First + last barcode dene par range expand hogi.</p><input class="input" id="fm-file" type="file" accept=".csv,.tsv,.txt,.xlsx"><div id="fm-file-note" class="dim small">No file selected.</div><button class="btn primary" id="fm-upload-add">Add file rows</button></div></section>' +
       '<section class="card"><div class="card-head"><h3>⌨️ Quick mapping</h3></div><div class="card-body"><label>Lookup by</label><select id="fm-kind" class="input"><option value="barcode">Barcode / Serial No</option><option value="tagId">Tag ID</option></select><label>Barcode / Tag ID</label><input class="input" id="fm-identifier" placeholder="Barcode ya Tag ID enter karein"><label>Agent ID to map (optional)</label><input class="input" id="fm-agent-id" placeholder="Blank = StockDataa Agent ID use hoga"><div class="btn-row"><button class="btn" id="fm-add-single">Add to queue</button><button class="btn primary" id="fm-quick-map">⚡ Quick map</button></div><hr><h4>Barcode range</h4><div class="grid g-3"><div><label>First barcode</label><input class="input" id="fm-first" placeholder="Start barcode"></div><div><label>Last barcode</label><input class="input" id="fm-last" placeholder="End barcode"></div><div><label>Agent ID (optional)</label><input class="input" id="fm-range-agent" placeholder="Target Agent ID"></div></div><button class="btn" id="fm-add-range">Add range</button></div></section></div>' +
-      '<section class="card"><div class="card-head"><div><h3>🔎 StockDataa lookup & mapping queue</h3><p class="dim small">Lookup ke baad preview/review karein. Target Agent ID edit kar sakte hain; API call sirf selected complete rows par hoga.</p></div><div class="head-actions"><button class="btn" id="fm-lookup">🔎 Lookup StockDataa</button><button class="btn primary" id="fm-map">🚀 Map ready rows</button><button class="btn" id="fm-csv">⬇ Full details CSV</button><button class="btn" id="fm-clear">Clear</button></div></div><div class="card-body"><div id="fm-message" class="notice info">API status check ho raha hai…</div><div id="fm-summary"></div><div id="fm-results"><div class="empty-state">Upload a file or add a barcode / Tag ID above to start.</div></div></div></section>';
+      '<section class="card"><div class="card-head"><div><h3>🔎 StockDataa lookup & mapping queue</h3><p class="dim small">Lookup ke baad preview/review karein. Target Agent ID edit kar sakte hain; API call sirf selected complete rows par hoga.</p></div><div class="head-actions"><button class="btn" id="fm-lookup">🔎 Lookup StockDataa</button><button class="btn primary" id="fm-map" disabled>🚀 Map ready rows</button><button class="btn" id="fm-csv">⬇ Full details CSV</button><button class="btn" id="fm-clear">Clear</button></div></div><div class="card-body"><div id="fm-message" class="notice info">API status check ho raha hai…</div><div id="fm-summary"></div><div id="fm-results"><div class="empty-state">Upload a file or add a barcode / Tag ID above to start.</div></div></div></section>';
     state.items = []; state.rows = []; state.busy = false;
     const status = U.$('#fm-api-status', root);
     fetch(API_STATUS, { credentials: 'same-origin', cache: 'no-store', headers: { 'X-Requested-With': 'FF-Dashboard' } }).then((r) => r.json()).then((j) => {
       state.configured = !!j.configured;
       if (status) { status.className = 'badge ' + (state.configured ? 'green' : 'amber'); status.textContent = state.configured ? 'Mapping API configured' : 'API secret missing in Render'; }
+      const mapButton = U.$('#fm-map', root); if (mapButton) mapButton.disabled = !state.configured;
       setStatus(state.configured ? 'Ready. Upload file ya manual barcode / Tag ID add karein.' : 'API key configure nahi hai. Render environment me GV_TAG_MAPPING_SECRET set karne ke baad mapping enabled hogi; secret browser/GitHub me save nahi hota.', state.configured ? 'success' : 'warn');
     }).catch(() => { if (status) status.textContent = 'API status unavailable'; setStatus('API status verify nahi ho paya. Login/session aur server status check karein.', 'warn'); });
     root.addEventListener('click', async (event) => {
