@@ -189,7 +189,7 @@ window.FF = window.FF || {};
     const items = [
       { kind: 'route', id: 'home', icon: 'home', label: 'Home' },
       { kind: 'action', id: 'search', icon: 'search', label: 'Search' },
-      { kind: 'route', id: 'tagIssued', icon: 'tag', label: 'Tag Issued' },
+      { kind: 'route', id: 'tagIssued', icon: 'tag', label: 'Tags' },
       { kind: 'action', id: 'notifications', icon: 'bell', label: 'Alerts' },
       { kind: 'route', id: 'performance', icon: 'team', label: 'Team' },
       { kind: 'action', id: 'more', icon: 'more', label: 'More' }
