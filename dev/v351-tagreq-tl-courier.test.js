@@ -87,9 +87,12 @@ test('🚚 courier — form payload, label (print) aur admin row me dropdown', (
   const html = TR.labelsHtml([req], { size: 12, rows: 4 });
   assert.match(html, /🚚 Courier: <b>DTDC<\/b>/, 'label par courier chip');
   assert.ok(TR.labelText(TR._test.labelItem(req)).includes('🚚 Courier: DTDC'), 'plain text label me courier');
+  assert.ok(TR.labelText(TR._test.labelItem({ ...req, itemName: 'Matarial' })).includes('Item Name: Matarial'), 'Item Name plain text label');
 
   const [dr] = TR._test.displayRows([req]);
   const row = TR._test.reqRowHtml(dr);
+  assert.ok(row.includes('data-tr-item-name'), 'admin per-request Item Name dropdown');
+  assert.match(row, /Biomatric Device/);
   assert.ok(row.includes('data-tr-courier'), 'admin per-request courier dropdown');
   assert.match(row, /🚚 DTDC/, 'row me courier badge');
   const keep = FF.auth.user;
