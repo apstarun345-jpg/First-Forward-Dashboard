@@ -80,6 +80,7 @@ test('🖨️ print selected — har request ka label sirf EK baar, TO = agent k
 
 test('📋 labelText — agent ka mobile/address/PIN; purani request me employee + agent line', () => {
   const t = TR.labelText(rahul);
+  assert.ok(t.includes('Item Name: FASTag'), 'legacy request defaults to FASTag item label');
   for (const s of ['FROM: Apna Payment Pvt Ltd', 'TO: Rahul Sharma', 'Mob: 9876500001', 'Address: 12, Gandhi Nagar', 'Pincode: 302015', 'tagreq_aaa111', '20 tags', 'VC4×20']) assert.ok(t.includes(s), `labelText me "${s}"`);
   assert.ok(!t.includes('VC5×0'));
   const old = TR.labelText(legacy);
@@ -164,7 +165,7 @@ test('📥 request row — ek hi row me sab (koi Kholo nahi): stock 🚗/🚚, i
   const [dr] = TR._test.displayRows([rahul]);
   const html = TR._test.reqRowHtml(dr);
   assert.ok(!/Kholo|data-tr-open/.test(html), 'drawer / Kholo button nahi');
-  for (const s of ['data-tr-sel="tagreq_aaa111::agent"', 'Ramesh Yadav', 'Jaipur office', 'Rahul Sharma', '#1001', 'TL TL One', '☏ 9876500001', 'Gandhi Nagar', '📮 302015']) assert.ok(html.includes(s), `row me "${s}"`);
+  for (const s of ['data-tr-sel="tagreq_aaa111::agent"', 'Ramesh Yadav', 'Jaipur office', 'Rahul Sharma', '#1001', 'TL TL One', '☏ 9876500001', 'Gandhi Nagar', '📮 302015', 'Item Name']) assert.ok(html.includes(s), `row me "${s}"`);
   for (const m of ['stock', 'core', 'comm', 'last', 'cur', 'rate', 'exp', 'growth', 'suggest']) assert.ok(html.includes(`data-tr-m="${m}"`), `metric cell ${m}`);
   assert.match(html, /data-tr-m="stock"><i class="tr-src snap"[^>]*><\/i><b>17<\/b>/, 'stock total (snapshot)');
   assert.match(html, /data-tr-m="core"><b>14<\/b>/);
@@ -380,4 +381,13 @@ test('📇 purana address suggestion — same agent dobara chuno to purana mobil
   assert.equal(TR._test.contactSuggestHtml({ id: 'r5', suggest: { mobile: '', address: '', pincode: '' } }), '');
   // Purani request (device book) se aaya ho to source wahi dikhe.
   assert.ok(TR._test.contactSuggestHtml({ id: 'r6', suggest: { ...saved, source: 'Request' }, mobile: '', address: '', pincode: '' }).includes('Pichli request'));
+});
+
+test('📦 Item Name — options, FASTag default, payload and print label', () => {
+  assert.deepEqual(TR._test.ITEM_NAME_OPTIONS, ['FASTag', 'Biomatric Device', 'Matarial']);
+  assert.equal(TR._test.normalizeItemName(''), 'FASTag');
+  const result = TR._test.payload([{ agentName: 'Agent X', agentId: 'A-1', q: { VC4: 1 } }], { name: 'Employee X' }).payload;
+  assert.equal(result.itemName, 'FASTag');
+  const req = { id: 'tagreq_item', at: Date.now(), status: 'pending', itemName: 'Matarial', rows: [{ cls: 'VC4', approved: 1, agentName: 'Agent X' }] };
+  assert.ok(TR.labelText(TR._test.labelItem(req)).includes('Item Name: Matarial'));
 });
