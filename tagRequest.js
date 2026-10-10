@@ -1707,7 +1707,7 @@ body.colorful .from-hdr { color: #166534; }
     });
     act('clear', () => {
       if (filledCount() && !window.confirm('Poora form khaali kar dein? (employee naam bana rahega)')) return;
-      state.rows = [newRow()]; state.note = ''; state.errs = {}; state.dup = { list: [], force: false, busy: false };
+      state.rows = [newRow()]; state.note = ''; state.errs = {}; state.submitKey = ''; state.dup = { list: [], force: false, busy: false };
       renderForm();
     });
     act('send', () => submit());
