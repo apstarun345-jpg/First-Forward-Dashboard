@@ -32,8 +32,9 @@ test('FASTag Mapping supports barcode ranges, multiple identifiers, StockDataa f
 test('FASTag Mapping template is exactly the requested four columns; lookup tries text and numeric matches', async () => {
   const page = await read('fastagMapping.js');
   assert.match(page, /saveCsvFile\('fastag-mapping-template\.csv', \['tagId', 'serialNo', 'vcType', 'agentId'\]/);
-  assert.match(page, /\[make\(true\), make\(false\)\]/);
-  assert.match(page, /D\.query\('StockDataa', query/);
+  assert.match(page, /const schema = await stockSchema\(\)/);
+  assert.match(page, /D\.query\('StockDataa', tq, \{ timeoutMs: 65000, retries: 0, directFirst: true \}\)/);
+  assert.match(page, /const queries = work\.numeric/);
   assert.match(page, /queryField\('tagId', tagIds\)/);
   assert.match(page, /queryField\('barcode', barcodes\)/);
   assert.match(page, /Range upload mein barcode series StockDataa se expand hogi/);
@@ -46,7 +47,8 @@ test('StockDataa column mapping uses TAG_ID, BARCODE and TAG_CLASS; separate ran
   assert.match(page, /tagId: \['tagid'[\s\S]*?\]/);
   assert.match(page, /barcode: \['barcode'[\s\S]*?\]/);
   assert.match(page, /vcType: \['vctype', 'tagclass'/);
-  assert.match(page, /index\.serialNo = barcodeIdx/);
+  assert.match(page, /fallback\.index\.serialNo = colIndex\('D'\)/);
+  assert.match(page, /fallback\.index\.vcType = colIndex\('E'\)/);
   assert.match(page, /saveCsvFile\('fastag-mapping-template\.csv', \['tagId', 'serialNo', 'vcType', 'agentId'\]/);
   assert.match(page, /saveCsvFile\('fastag-range-template\.csv', \['firstBarcode', 'lastBarcode', 'agentId'\]/);
   assert.match(page, /saveCsvFile\('fastag-mapping-api-rows-/);
