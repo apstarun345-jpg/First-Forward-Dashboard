@@ -5683,7 +5683,7 @@ async function handleApi(req, res, url) {
     itemName: 'Item Name', serialNumber: 'Serial Number', deviceName: 'Device Name', materialDescription: 'Material Details'
   };
   // 🪶 v3.51 — sheet ko chhota rakho: har AGENT ki EK row (saari classes ek hi cell me) + kam columns.
-  const TAG_SHEET_DEFAULT_COLUMNS = ['agent', 'agentId', 'date', 'time', 'tl', 'channel', 'cls', 'agentMobile', 'agentPincode', 'stock', 'last', 'cur', 'growth', 'approved', 'courier', 'itemName', 'status'];
+  const TAG_SHEET_DEFAULT_COLUMNS = ['agent', 'agentId', 'date', 'time', 'tl', 'channel', 'cls', 'agentMobile', 'agentAddress', 'agentPincode', 'stock', 'last', 'cur', 'growth', 'approved', 'courier', 'itemName', 'status'];
   const tagSheetConfig = () => {
     const w = workspaceStore();
     if (!w.tagRequestSheet || typeof w.tagRequestSheet !== 'object') {
@@ -5741,7 +5741,7 @@ async function handleApi(req, res, url) {
     const pincode = tagDigits(a.pincode || a.pin).slice(0, 6);
     const tl = shortText(a.tl || a.tlName, 120);
     if ((!agentId && name.length < 2) || (!address && !pincode && tagDigits(mobile).length < 10)) return null;
-    return { key: addressBookKey({ channel, agentId, agentName: name }), agentId, agent: name, channel, mobile, address, pincode, tl, dispatchName: shortText(a.dispatchName || '', 120), updatedAt: new Date().toISOString() };
+    return { key: addressBookKey({ channel, agentId, agentName: name }), agentId, agent: name, channel, mobile, address, pincode, tl, dispatchName: shortText(a.dispatchName || a.dispatch || a.deliveryName || '', 120), updatedAt: new Date().toISOString() };
   };
   function addressBookMemoryEntries() {
     const w = workspaceStore();
@@ -5753,7 +5753,7 @@ async function handleApi(req, res, url) {
     (Array.isArray(list) ? list : []).forEach((e) => {
       if (!e || !e.key) return;
       const old = mem[e.key] || {};
-      mem[e.key] = { ...old, ...e, mobile: e.mobile || old.mobile || '', address: e.address || old.address || '', pincode: e.pincode || old.pincode || '', tl: e.tl || old.tl || '', updatedAt: e.updatedAt || old.updatedAt || new Date().toISOString() };
+      mem[e.key] = { ...old, ...e, mobile: e.mobile || old.mobile || '', address: e.address || old.address || '', pincode: e.pincode || old.pincode || '', dispatchName: e.dispatchName || old.dispatchName || '', tl: e.tl || old.tl || '', updatedAt: e.updatedAt || old.updatedAt || new Date().toISOString() };
     });
     return mem;
   }
@@ -5827,7 +5827,7 @@ async function handleApi(req, res, url) {
     const requestList = Array.isArray(workspaceStore().tagRequests) ? workspaceStore().tagRequests : [];
     let latest = null, latestAt = 0;
     requestList.forEach((r) => {
-      if (!r || r.source !== 'public-link' || !r.agent) return;
+      if (!r || !r.agent) return;
       const rch = String(r.agent.channel || 'ff').toLowerCase() === 'gv' ? 'gv' : 'ff';
       if (rch !== ch) return;
       const rid = String(r.agent.agentId || '').trim();
