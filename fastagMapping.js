@@ -412,19 +412,32 @@ window.FF = window.FF || {};
     if (U.downloadCsv) U.downloadCsv('fastag-mapping-' + U.stamp() + '.csv', headers, rows);
     else { const text = [headers, ...rows].map((r) => r.map(csvCell).join(',')).join('\r\n'); const url = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' })); const a = document.createElement('a'); a.href = url; a.download = 'fastag-mapping-' + Date.now() + '.csv'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
   }
-  function templateCsv() {
-    // Exact requested API/output schema: no helper columns in the downloadable template.
-    const headers = ['tagId', 'serialNo', 'vcType', 'agentId'];
-    const text = headers.map(csvCell).join(',');
+  function saveCsvFile(filename, headers, rows) {
+    const text = [headers, ...rows].map((r) => r.map(csvCell).join(',')).join('\r\n');
     const url = URL.createObjectURL(new Blob([text + '\r\n'], { type: 'text/csv;charset=utf-8' }));
-    const a = document.createElement('a'); a.href = url; a.download = 'fastag-mapping-template.csv'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    const a = document.createElement('a'); a.href = url; a.download = filename; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  function templateCsv() {
+    // Exact API payload shape. Class/Tag ID are filled from StockDataa during lookup.
+    saveCsvFile('fastag-mapping-template.csv', ['tagId', 'serialNo', 'vcType', 'agentId'], []);
+  }
+  function rangeTemplateCsv() {
+    // Input helper for bulk expansion: one row = first barcode + last barcode + target agent.
+    saveCsvFile('fastag-range-template.csv', ['firstBarcode', 'lastBarcode', 'agentId'], []);
+  }
+  function apiCsv() {
+    const rows = state.rows
+      .filter((r) => r.stock && r.tagId && r.serialNo && r.vcType && r.agentId && !String(r.status || '').startsWith('Duplicate'))
+      .map((r) => [r.tagId, r.serialNo, r.vcType, r.agentId]);
+    saveCsvFile('fastag-mapping-api-rows-' + U.stamp() + '.csv', ['tagId', 'serialNo', 'vcType', 'agentId'], rows);
+    setStatus('API CSV ready: ' + rows.length + ' valid rows · 4 columns only.', rows.length ? 'success' : 'warn');
   }
   function render(root) {
     state.root = root;
     root.innerHTML = '<div class="page-head"><div><h1>🧭 FASTag Mapping</h1><p class="sub">GV Partner · StockDataa se Tag ID, Serial/Barcode, VC Type aur Agent details fetch karke securely map karein.</p></div><div class="head-actions"><span id="fm-api-status" class="badge amber">Mapping API status checking…</span></div></div>' +
-      '<div class="grid g-2"><section class="card"><div class="card-head"><h3>📂 Upload mapping file</h3><button class="btn small" id="fm-template">⬇ CSV template</button></div><div class="card-body"><p class="dim small">Template me sirf tagId, serialNo, vcType, agentId columns hain. Har row me tagId ya serialNo/barcode aur agentId dein; vcType StockDataa se auto-fetch hoga. Barcode ranges neeche quick mapping me dein.</p><input class="input" id="fm-file" type="file" accept=".csv,.tsv,.txt,.xlsx"><div id="fm-file-note" class="dim small">No file selected.</div><button class="btn primary" id="fm-upload-add">Add file rows</button></div></section>' +
+      '<div class="grid g-2"><section class="card"><div class="card-head"><h3>📂 Upload mapping file</h3><div class="head-actions"><button class="btn small" id="fm-template">⬇ 4-column API template</button><button class="btn small" id="fm-range-template">⬇ Range input template</button></div></div><div class="card-body"><p class="dim small">API template: tagId, serialNo, vcType, agentId. Range template: firstBarcode, lastBarcode, agentId. Range upload mein barcode series StockDataa se expand hogi; TAG_ID, BARCODE aur TAG_CLASS auto-fill honge.</p><input class="input" id="fm-file" type="file" accept=".csv,.tsv,.txt,.xlsx"><div id="fm-file-note" class="dim small">No file selected.</div><button class="btn primary" id="fm-upload-add">Add file rows</button></div></section>' +
       '<section class="card"><div class="card-head"><h3>⌨️ Quick mapping</h3></div><div class="card-body"><label>Lookup by</label><select id="fm-kind" class="input"><option value="barcode">Barcode / Serial No</option><option value="tagId">Tag ID</option></select><label>Barcode / Tag ID</label><input class="input" id="fm-identifier" placeholder="Barcode ya Tag ID enter karein"><label>Target Agent ID (required)</label><input class="input" id="fm-agent-id" placeholder="Jis Agent ID se map karna hai"><div class="btn-row"><button class="btn" id="fm-add-single">Add to queue</button><button class="btn primary" id="fm-quick-map">⚡ Quick map</button></div><hr><h4>Barcode range</h4><div class="grid g-3"><div><label>First barcode</label><input class="input" id="fm-first" placeholder="Start barcode"></div><div><label>Last barcode</label><input class="input" id="fm-last" placeholder="End barcode"></div><div><label>Target Agent ID (required)</label><input class="input" id="fm-range-agent" placeholder="Jis Agent ID se map karna hai"></div></div><button class="btn" id="fm-add-range">Add range</button></div></section></div>' +
-      '<section class="card"><div class="card-head"><div><h3>🔎 StockDataa lookup & mapping queue</h3><p class="dim small">Lookup ke baad preview/review karein. Target Agent ID edit kar sakte hain; API call sirf selected complete rows par hoga.</p></div><div class="head-actions"><button class="btn" id="fm-lookup">🔎 Lookup StockDataa</button><button class="btn primary" id="fm-map" disabled>🚀 Map ready rows</button><button class="btn" id="fm-csv">⬇ Full details CSV</button><button class="btn" id="fm-clear">Clear</button></div></div><div class="card-body"><div id="fm-message" class="notice info">API status check ho raha hai…</div><div id="fm-summary"></div><div id="fm-results"><div class="empty-state">Upload a file or add a barcode / Tag ID above to start.</div></div></div></section>';
+      '<section class="card"><div class="card-head"><div><h3>🔎 StockDataa lookup & mapping queue</h3><p class="dim small">Lookup ke baad preview/review karein. Target Agent ID edit kar sakte hain; API call sirf selected complete rows par hoga.</p></div><div class="head-actions"><button class="btn" id="fm-lookup">🔎 Lookup StockDataa</button><button class="btn primary" id="fm-map" disabled>🚀 Map ready rows</button><button class="btn" id="fm-api-csv">⬇ API CSV · 4 columns</button><button class="btn" id="fm-csv">⬇ Full details CSV</button><button class="btn" id="fm-clear">Clear</button></div></div><div class="card-body"><div id="fm-message" class="notice info">API status check ho raha hai…</div><div id="fm-summary"></div><div id="fm-results"><div class="empty-state">Upload a file or add a barcode / Tag ID above to start.</div></div></div></section>';
     state.items = []; state.rows = []; state.busy = false;
     const status = U.$('#fm-api-status', root);
     fetch(API_STATUS, { credentials: 'same-origin', cache: 'no-store', headers: { 'X-Requested-With': 'FF-Dashboard' } }).then((r) => r.json()).then((j) => {
@@ -436,6 +449,8 @@ window.FF = window.FF || {};
     root.addEventListener('click', async (event) => {
       const target = event.target.closest('button'); if (!target) return;
       if (target.id === 'fm-template') return templateCsv();
+      if (target.id === 'fm-range-template') return rangeTemplateCsv();
+      if (target.id === 'fm-api-csv') return apiCsv();
       if (target.id === 'fm-upload-add') {
         const file = U.$('#fm-file', root).files[0];
         if (!file) { setStatus('Pehle file choose karein.', 'warn'); return; }
