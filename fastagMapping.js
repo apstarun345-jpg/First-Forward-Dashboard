@@ -199,7 +199,10 @@ window.FF = window.FF || {};
         // A wrong column can map the wrong physical tag; report the header/query issue instead.
         throw new Error(err && err.message ? err.message : 'StockDataa header lookup failed.');
       }
-    })();
+    })().catch((err) => {
+      schemaPromise = null; // a transient gviz failure should be retryable on the next click
+      throw err;
+    });
     return schemaPromise;
   }
   function tableCellText(cell, col) {
@@ -235,10 +238,14 @@ window.FF = window.FF || {};
         const batch = batches[cursor++];
         const make = (numeric) => 'select A,B,C,D,E,F,G,H,I,J,K,L,M where ' + batch.map((x) => field + ' = ' + literal(x, numeric)).join(' or ');
         // gviz may return zero rows instead of an error for the wrong number/string type.
-        const attempts = await Promise.allSettled([
-          D.query('StockDataa', make(true), { timeoutMs: 40000, retries: 0 }),
-          D.query('StockDataa', make(false), { timeoutMs: 40000, retries: 0 })
-        ]);
+        // Alphanumeric identifiers are always string comparisons, so do not issue duplicate queries.
+        // Numeric-looking barcodes/tag IDs are tried in both formats because Sheets may store either type.
+        const queries = batch.some(isDigitKey)
+          ? [make(true), make(false)]
+          : [make(false)];
+        const attempts = await Promise.allSettled(queries.map((query) =>
+          D.query('StockDataa', query, { timeoutMs: 40000, retries: 0 })
+        ));
         let succeeded = false;
         for (const result of attempts) {
           if (result.status !== 'fulfilled') continue;
@@ -264,7 +271,7 @@ window.FF = window.FF || {};
     const index = schema.index.barcode, field = schema.letters[index] || c.barcode;
     const make = (numeric) => 'select A,B,C,D,E,F,G,H,I,J,K,L,M where ' + field + ' >= ' + literal(from, numeric) + ' and ' + field + ' <= ' + literal(to, numeric);
     const attempts = await Promise.allSettled([
-      D.query('StockDataa', make(true), { timeoutMs: 50000, retries: 0 }),
+      D.query('StockDataa', make(isDigitKey(from) && isDigitKey(to)), { timeoutMs: 50000, retries: 0 }),
       D.query('StockDataa', make(false), { timeoutMs: 50000, retries: 0 })
     ]);
     const fulfilled = attempts.filter((x) => x.status === 'fulfilled').flatMap((x) => stockRows(x.value, schema));
