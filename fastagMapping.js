@@ -141,70 +141,16 @@ window.FF = window.FF || {};
     if (numeric && isDigitKey(s) && !(s.length > 1 && s[0] === '0')) return s;
     return '"' + s.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
   }
-  let schemaPromise = null;
-  const STOCK_LETTERS = 'ABCDEFGHIJKLM'.split('');
-  const fallbackSchema = () => {
-    const c = cols();
-    return {
-      letters: STOCK_LETTERS,
-      index: { id: colIndex(c.id), name: colIndex(c.name), tagId: colIndex(c.tagId), barcode: colIndex(c.barcode), serialNo: colIndex(c.barcode), vcType: colIndex(c.cls), tagType: colIndex(c.tagType), barcodeAllocatedAt: colIndex(c.bcAllocatedAt), agentId: colIndex(c.agentId), agentName: colIndex(c.agentName), agentAllocatedAt: colIndex(c.agentAllocatedAt), tlName: colIndex(c.tlName) }
-    };
-  };
+  // Project StockDataa configuration defines TAG_ID=C, BARCODE=D, TAG_CLASS=E.
+  // Reuse that known mapping instead of spending another round-trip on a header-only query;
+  // the previous header probe was also timing out before the actual lookup could start.
   async function stockSchema() {
-    if (schemaPromise) return schemaPromise;
-    schemaPromise = (async () => {
-      const fallback = fallbackSchema();
-      try {
-        // Read only the header and one data row, not the whole 100k+ StockDataa tab.
-        const table = await D.query('StockDataa', 'select A,B,C,D,E,F,G,H,I,J,K,L,M', { range: 'A1:M2', timeoutMs: 18000, retries: 0 });
-        const labels = (table.cols || []).map((c) => norm(c.label || c.id));
-        // Depending on how Google Sheets infers gviz headers, TAG_ID/BARCODE/TAG_CLASS may appear
-        // either as column labels or as the first returned row. Search both representations.
-        const rowLabels = D.textRows(table).slice(0, 2).map((row) => row.map(norm));
-        const headerCandidates = [labels, ...rowLabels];
-        const findAny = (aliases) => {
-          for (const candidate of headerCandidates) {
-            const idx = candidate.findIndex((label) => aliases.includes(label));
-            if (idx >= 0) return idx;
-          }
-          return -1;
-        };
-        const index = { ...fallback.index };
-        const tagIdIdx = findAny(ALIASES.tagId);
-        const barcodeIdx = findAny(ALIASES.barcode);
-        const vcTypeIdx = findAny(ALIASES.vcType);
-        if (tagIdIdx < 0 || barcodeIdx < 0 || vcTypeIdx < 0) {
-          throw new Error('StockDataa header detect nahi hue. TAG_ID, BARCODE aur TAG_CLASS headers verify karein (A:M row 1).');
-        }
-        index.tagId = tagIdIdx;
-        index.barcode = barcodeIdx;
-        // The API serialNo must always be populated from StockDataa BARCODE.
-        // If an independent Serial No column exists, it is intentionally ignored for FASTag API mapping.
-        index.serialNo = barcodeIdx;
-        index.vcType = vcTypeIdx;
-        index.agentId = findAny(ALIASES.agentId);
-        // Extra CSV fields are optional: don't guess unrelated columns when StockDataa only exposes
-        // the three mapping columns (TAG_ID, BARCODE, TAG_CLASS).
-        const pick = (aliases) => findAny(aliases);
-        index.id = pick(['id', 'stockid', 'stockrowid']);
-        index.name = pick(['name', 'inventoryname', 'itemname', 'productname', 'description']);
-        index.tagType = pick(['tagtype', 'fastagtype', 'producttype']);
-        index.barcodeAllocatedAt = pick(['barcodeallocatedat', 'barcodeassignedat', 'barcodeallocationdate']);
-        index.agentName = pick(['agentname', 'mappedagentname', 'employeename']);
-        index.agentAllocatedAt = pick(['agentallocatedat', 'agentassignedat', 'agentallocationdate']);
-        index.tlName = pick(['tlname', 'teamleadername', 'teamleadname']);
-        // Record which exact headers were discovered; all three mapping keys are mandatory.
-        return { letters: STOCK_LETTERS, index, labels };
-      } catch (err) {
-        // Never silently fall back to guessed column letters for the three mapping-critical fields.
-        // A wrong column can map the wrong physical tag; report the header/query issue instead.
-        throw new Error(err && err.message ? err.message : 'StockDataa header lookup failed.');
-      }
-    })().catch((err) => {
-      schemaPromise = null; // a transient gviz failure should be retryable on the next click
-      throw err;
-    });
-    return schemaPromise;
+    const fallback = fallbackSchema();
+    fallback.index.tagId = colIndex('C');
+    fallback.index.barcode = colIndex('D');
+    fallback.index.serialNo = colIndex('D');
+    fallback.index.vcType = colIndex('E');
+    return fallback;
   }
   function tableCellText(cell, col) {
     if (!cell) return '';
@@ -231,38 +177,53 @@ window.FF = window.FF || {};
     if (!field) throw new Error('StockDataa me ' + fieldName + ' column resolve nahi hua.');
     const found = new Map();
     const batches = [];
-    // Group by type so alphanumeric tag IDs only need one query; numeric IDs try number + text.
     for (const numeric of [true, false]) {
-      const valuesOfType = unique.filter((value) => isDigitKey(value) === numeric);
-      for (let i = 0; i < valuesOfType.length; i += 15) {
-        batches.push({ values: valuesOfType.slice(i, i + 15), numeric });
-      }
+      const typedValues = unique.filter((value) => isDigitKey(value) === numeric);
+      for (let i = 0; i < typedValues.length; i += 15) batches.push({ values: typedValues.slice(i, i + 15), numeric });
     }
     let cursor = 0;
-    // A few batched queries in parallel speed up larger uploads without flooding gviz.
     const workers = Array.from({ length: Math.min(3, batches.length) }, async () => {
       while (cursor < batches.length) {
         const work = batches[cursor++], batch = work.values;
-        const make = (numeric) => 'select A,B,C,D,E,F,G,H,I,J,K,L,M where ' + batch.map((x) => field + ' = ' + literal(x, numeric)).join(' or ');
-        // gviz can return zero rows instead of an error when ID column types do not match.
-        const queries = work.numeric ? [make(true), make(false)] : [make(false)];
-        const attempts = await Promise.allSettled(queries.map((query) =>
-          D.query('StockDataa', query, { timeoutMs: 40000, retries: 0 })
-        ));
-        let succeeded = false;
-        for (const result of attempts) {
-          if (result.status !== 'fulfilled') continue;
-          succeeded = true;
-          for (const row of stockRows(result.value, schema)) {
-            const sourceValue = fieldName === 'tagId' ? row.tagId : row.barcode;
-            if (!batch.some((value) => idKey(value) === idKey(sourceValue))) continue;
-            const k = idKey(row.tagId) + '|' + idKey(row.barcode);
-            found.set(k, row);
+        const make = (numeric, vals) => 'select A,B,C,D,E,F,G,H,I,J,K,L,M where ' + vals.map((x) => field + ' = ' + literal(x, numeric)).join(' or ');
+        const queryRows = async (tq) => {
+          const table = await D.query('StockDataa', tq, { timeoutMs: 65000, retries: 0, directFirst: true });
+          return stockRows(table, schema);
+        };
+        let rows = [];
+        let firstError = null;
+        try { rows = await queryRows(make(work.numeric, batch)); }
+        catch (err) {
+          firstError = err;
+          // A query timeout/abort is not a type mismatch; retrying it with a second 65s query
+          // would make the UI even slower. Give the user a concise, actionable message instead.
+          if (/abort|timed?\s*out|timeout/i.test(String(err && (err.message || err)))) {
+            throw new Error('StockDataa lookup timed out. Chhoti barcode range try karein ya thodi der baad retry karein.');
           }
         }
-        if (!succeeded) {
-          const err = attempts.find((x) => x.status === 'rejected');
-          throw new Error('StockDataa lookup failed: ' + (err && err.reason && err.reason.message || 'Google Sheets query error'));
+        let missing = batch.filter((value) => !rows.some((r) => {
+          const sourceValue = fieldName === 'tagId' ? r.tagId : r.barcode;
+          return idKey(value) === idKey(sourceValue);
+        }));
+        // Try the other data type only for values not found by the first query.
+        // This avoids running number + text scans concurrently for every barcode.
+        if (missing.length && work.numeric) {
+          try {
+            const fallbackRows = await queryRows(make(!work.numeric, missing));
+            rows = rows.concat(fallbackRows);
+          } catch (err) {
+            if (!rows.length) {
+              if (/abort|timed?\s*out|timeout/i.test(String(err && (err.message || err)))) {
+                throw new Error('StockDataa lookup timed out. Chhoti barcode range try karein ya thodi der baad retry karein.');
+              }
+              throw new Error('StockDataa lookup failed: ' + String(err && (err.message || err) || (firstError && firstError.message) || 'Google Sheets query error'));
+            }
+          }
+        }
+        for (const row of rows) {
+          const sourceValue = fieldName === 'tagId' ? row.tagId : row.barcode;
+          if (!batch.some((value) => idKey(value) === idKey(sourceValue))) continue;
+          found.set(idKey(row.tagId) + '|' + idKey(row.barcode), row);
         }
       }
     });
@@ -273,17 +234,32 @@ window.FF = window.FF || {};
     const schema = await stockSchema(), c = cols();
     const index = schema.index.barcode, field = schema.letters[index] || c.barcode;
     const make = (numeric) => 'select A,B,C,D,E,F,G,H,I,J,K,L,M where ' + field + ' >= ' + literal(from, numeric) + ' and ' + field + ' <= ' + literal(to, numeric);
-    const queries = isDigitKey(from) && isDigitKey(to) ? [make(true), make(false)] : [make(false)];
-    const attempts = await Promise.allSettled(queries.map((query) =>
-      D.query('StockDataa', query, { timeoutMs: 50000, retries: 0 })
-    ));
-    const fulfilled = attempts.filter((x) => x.status === 'fulfilled').flatMap((x) => stockRows(x.value, schema));
-    if (!fulfilled.length && !attempts.some((x) => x.status === 'fulfilled')) {
-      const err = attempts.find((x) => x.status === 'rejected');
-      throw new Error('Barcode range query failed: ' + (err && err.reason && err.reason.message || 'Google Sheets query error'));
+    const run = async (numeric) => {
+      const table = await D.query('StockDataa', make(numeric), { timeoutMs: 65000, retries: 0, directFirst: true });
+      return stockRows(table, schema);
+    };
+    let rows = [];
+    let firstError = null;
+    try { rows = await run(false); }
+    catch (err) {
+      firstError = err;
+      if (/abort|timed?\s*out|timeout/i.test(String(err && (err.message || err)))) {
+        throw new Error('StockDataa range lookup timed out. Barcode range ko chhote parts me divide karke retry karein.');
+      }
+    }
+    // Numeric-only range fallback when string comparison has no matching stock rows.
+    if (!rows.length && isDigitKey(from) && isDigitKey(to)) {
+      try { rows = await run(true); }
+      catch (err) {
+        if (/abort|timed?\s*out|timeout/i.test(String(err && (err.message || err)))) {
+          throw new Error('StockDataa range lookup timed out. Barcode range ko chhote parts me divide karke retry karein.');
+        }
+        if (firstError) throw new Error('StockDataa range lookup failed: ' + String(err && (err.message || err) || firstError.message || 'Google Sheets query error'));
+        throw err;
+      }
     }
     const unique = new Map();
-    fulfilled.forEach((row) => unique.set(idKey(row.tagId) + '|' + idKey(row.barcode) + '|' + idKey(row.serialNo), row));
+    rows.forEach((row) => unique.set(idKey(row.tagId) + '|' + idKey(row.barcode), row));
     return [...unique.values()];
   }
   function addResult(item, stock, matchedBy) {
