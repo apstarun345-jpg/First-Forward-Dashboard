@@ -6,7 +6,7 @@ import vm from 'node:vm';
 const source = (name) => readFileSync(new URL(`../${name}`, import.meta.url), 'utf8');
 const bootScript = source('ui-boot.js');
 const html = source('index.html');
-const css = source('styles.css') + '\n' + source('mobile-fix.css') + '\n' + source('pwa-premium.css');
+const css = source('styles.css') + '\n' + source('pwa-premium.css') + '\n' + source('ux-fast.css') + '\n' + source('mobile-fix.css');
 const mobileCss = source('mobile-fix.css');
 const app = source('app.js');
 const sw = source('sw.js');
@@ -93,6 +93,13 @@ test('fixed bottom nav stays hidden before login and above-app sheets layer abov
   assert.match(css, /html\.mobile-ui \.drawer\s*\{\s*z-index:\s*10003 !important/);
   assert.match(app, /document\.body\.classList\.add\('has-mobile-nav'\)/);
   assert.match(app, /document\.body\.classList\.remove\('has-mobile-nav'\)/);
+});
+
+test('mobile layout stylesheet is loaded after premium and UX overrides', () => {
+  const mobileLink = html.indexOf('href="mobile-fix.css?');
+  const premiumLink = html.indexOf('href="pwa-premium.css?');
+  const uxLink = html.indexOf('href="ux-fast.css?');
+  assert.ok(mobileLink > premiumLink && mobileLink > uxLink, 'mobile-fix must be the last stylesheet so app controls/layout fixes win');
 });
 
 test('mobile PWA typography and touch controls remain readable', () => {
