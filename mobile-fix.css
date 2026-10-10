@@ -1549,3 +1549,62 @@ html.mobile-ui #mobile-nav[hidden],
 html.mobile-ui #mobile-nav [hidden] {
   display: none !important;
 }
+
+/* Saved Views modal — accessible, touch-friendly, and usable in the installed PWA. */
+.ff-saved-views-backdrop {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 10080 !important;
+  display: grid !important;
+  place-items: center !important;
+  padding: max(16px, env(safe-area-inset-top,0px)) max(12px, env(safe-area-inset-right,0px)) max(16px, env(safe-area-inset-bottom,0px)) max(12px, env(safe-area-inset-left,0px)) !important;
+  background: rgba(15, 23, 42, .58) !important;
+  backdrop-filter: blur(9px);
+  -webkit-backdrop-filter: blur(9px);
+}
+.ff-saved-views-card {
+  width: min(560px, 100%) !important;
+  max-width: 100% !important;
+  max-height: min(84dvh, 760px) !important;
+  overflow: auto !important;
+  overscroll-behavior: contain;
+  background: var(--card, #fff) !important;
+  color: var(--ink, #0f172a) !important;
+  border: 1px solid var(--line, #e2e8f0) !important;
+  border-radius: 22px !important;
+  box-shadow: 0 24px 80px rgba(15, 23, 42, .25) !important;
+  padding: clamp(16px, 4vw, 26px) !important;
+}
+.ff-saved-views-head,
+.ff-saved-view-save-row,
+.ff-saved-view-row,
+.ff-saved-views-foot {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+}
+.ff-saved-views-head { justify-content: space-between !important; margin-bottom: 16px !important; }
+.ff-saved-views-head > div { min-width: 0; }
+.ff-saved-views-head small { display:block; color:var(--brand,#4f46e5); font-size:11px !important; font-weight:850 !important; letter-spacing:.12em; }
+.ff-saved-views-head h2 { margin:5px 0 4px !important; font-size:clamp(22px,5vw,28px) !important; line-height:1.2 !important; }
+.ff-saved-views-head p { margin:0 !important; color:var(--muted,#64748b) !important; font-size:14px !important; }
+.ff-saved-view-form { padding:14px !important; border:1px solid var(--line,#e2e8f0) !important; border-radius:16px !important; background:var(--bg,#f8fafc) !important; }
+.ff-saved-view-form label { display:block; margin-bottom:7px !important; font-size:13px !important; font-weight:800 !important; }
+.ff-saved-view-save-row input { min-width:0 !important; flex:1 1 auto !important; width:100% !important; min-height:46px !important; font-size:16px !important; }
+.ff-saved-view-save-row button { flex:0 0 auto !important; min-height:46px !important; white-space:nowrap !important; }
+.ff-saved-view-list { display:grid !important; gap:8px !important; margin:14px 0 !important; }
+.ff-saved-view-row { min-width:0; border:1px solid var(--line,#e2e8f0) !important; border-radius:14px !important; padding:7px !important; }
+.ff-saved-view-open { display:grid !important; flex:1 1 auto !important; min-width:0 !important; text-align:left !important; padding:8px !important; border:0 !important; background:transparent !important; color:inherit !important; cursor:pointer; gap:4px !important; }
+.ff-saved-view-open b { font-size:15px !important; overflow-wrap:anywhere; }
+.ff-saved-view-open small { color:var(--muted,#64748b) !important; font-size:12px !important; overflow-wrap:anywhere; }
+.ff-saved-view-open span { color:var(--brand,#4f46e5) !important; font-size:12px !important; font-weight:800 !important; }
+.ff-saved-view-delete { flex:0 0 42px !important; width:42px !important; min-width:42px !important; height:42px !important; min-height:42px !important; }
+.ff-saved-view-empty { margin:0 !important; padding:16px 8px !important; text-align:center !important; color:var(--muted,#64748b) !important; font-size:14px !important; }
+.ff-saved-views-foot { justify-content:space-between !important; padding-top:5px !important; color:var(--muted,#64748b) !important; font-size:12px !important; }
+.ff-saved-views-foot button { min-height:42px !important; }
+@media (max-width: 440px) {
+  .ff-saved-views-card { border-radius:18px !important; padding:14px !important; }
+  .ff-saved-view-save-row { align-items:stretch !important; flex-direction:column !important; }
+  .ff-saved-view-save-row button { width:100% !important; }
+}
+
