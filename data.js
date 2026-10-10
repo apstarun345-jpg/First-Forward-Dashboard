@@ -127,8 +127,19 @@ window.FF = window.FF || {};
 
     const extra = { ...(o.fresh ? { fresh: '1' } : {}), ...(range ? { range } : {}) };
     const attempts = [];
-    if (FF.config.proxyPath && FF.config.proxy !== false) attempts.push(buildUrl(FF.config.proxyPath, sheetName, tq, gid, extra));
-    if (FF.config.directFallback !== false) attempts.push(buildUrl(directBase(sheetName), sheetName, tq, gid, range ? { range } : null));
+    const proxyUrl = FF.config.proxyPath && FF.config.proxy !== false
+      ? buildUrl(FF.config.proxyPath, sheetName, tq, gid, extra) : '';
+    const directUrl = FF.config.directFallback !== false
+      ? buildUrl(directBase(sheetName), sheetName, tq, gid, range ? { range } : null) : '';
+    // Large inventory exact-match lookups may be faster against Google directly. Mapping opts in
+    // per request; all other dashboard requests retain the normal proxy/cache-first behavior.
+    if (o.directFirst) {
+      if (directUrl) attempts.push(directUrl);
+      if (proxyUrl) attempts.push(proxyUrl);
+    } else {
+      if (proxyUrl) attempts.push(proxyUrl);
+      if (directUrl) attempts.push(directUrl);
+    }
 
     const promise = (async () => {
       let lastErr = null;
