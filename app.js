@@ -1618,16 +1618,32 @@ window.FF = window.FF || {};
     if (globalSearchBtn && !globalSearchBtn.__ffFallbackWired) {
       globalSearchBtn.__ffFallbackWired = true;
       globalSearchBtn.addEventListener('click', (e) => {
+        const focusMasterSearch = () => {
+          if (!FF.masterSearch || typeof FF.masterSearch.mountTopbar !== 'function') return false;
+          FF.masterSearch.mountTopbar();
+          const input = U.$('#master-search-input');
+          if (!input) return false;
+          input.focus(); input.select();
+          return true;
+        };
+        // When the inline universal search is ready, focus its suggestion input and stop the
+        // palette's second click handler from opening a competing overlay on the same tap.
+        if (focusMasterSearch()) {
+          e.preventDefault();
+          if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+          else e.stopPropagation();
+          return;
+        }
+        // If the command palette is ready but Master Search isn't, let palette.js handle the click.
         if (FF.palette && typeof FF.palette.toggle === 'function') return;
-        e.preventDefault(); e.stopPropagation();
-        ensureShell(['palette', 'masterSearch']).then(() => {
-          if (FF.palette && typeof FF.palette.toggle === 'function') {
-            FF.palette.toggle();
-          } else if (FF.masterSearch && typeof FF.masterSearch.openSearchPage === 'function') {
-            FF.masterSearch.openSearchPage('');
-          } else {
-            navigate('masterSearch');
-          }
+        e.preventDefault();
+        if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+        else e.stopPropagation();
+        ensureShell(['masterSearch', 'palette']).then(() => {
+          if (focusMasterSearch()) return;
+          if (FF.palette && typeof FF.palette.toggle === 'function') FF.palette.toggle();
+          else if (FF.masterSearch && typeof FF.masterSearch.openSearchPage === 'function') FF.masterSearch.openSearchPage('');
+          else navigate('masterSearch');
         }).catch(() => U.toast('Search module load nahi hua — reload karke dobara try karein', 'warn'));
       });
     }
