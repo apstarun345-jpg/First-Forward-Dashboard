@@ -69,6 +69,8 @@ test('v3.51 — sheet ek agent = ek chhoti row (classes merged) + 🚚 courier c
     assert.equal(cfg.json.config.onStatus, true, 'approval sync enabled');
     assert.ok(cfg.json.config.columns.includes('cls'), 'classes cell');
     assert.ok(cfg.json.config.columns.includes('courier'), '🚚 courier column');
+    assert.ok(cfg.json.config.columns.includes('itemName'), '📦 Item Name column');
+    assert.equal(cfg.json.fields.itemName, 'Item Name');
     assert.ok(!cfg.json.config.columns.includes('remark'), 'lambi purani columns default me nahi');
     assert.equal(cfg.json.fields.courier, 'Courier');
 
@@ -81,7 +83,7 @@ test('v3.51 — sheet ek agent = ek chhoti row (classes merged) + 🚚 courier c
     await jsonCall(server.base, '/api/tag-request-sheet', 'PUT', {
       config: { enabled: true, tab: 'Tag Dispatch', onSubmit: true, onStatus: false, rowMode: 'agent', columns: ['agent', 'cls', 'approved', 'courier'] }
     }, admin);
-    const created = await jsonCall(server.base, '/api/tag-requests', 'POST', { note: 'v3.51', courier: 'DTDC', rows: rows() }, admin);
+    const created = await jsonCall(server.base, '/api/tag-requests', 'POST', { note: 'v3.70.2', courier: 'DTDC', itemName: 'Matarial', rows: rows() }, admin);
     assert.equal(created.res.status, 201, JSON.stringify(created.json));
     await sleep(700);
     assert.equal(mock.appends.length, 0, 'Pending submission par sheet append nahi');
@@ -103,8 +105,10 @@ test('v3.51 — sheet ek agent = ek chhoti row (classes merged) + 🚚 courier c
     const found = list.json.requests.find((r) => r.id === reqId);
     assert.ok(found, 'request list me mili');
     assert.equal(found.courier, 'DTDC');
-    const upd = await jsonCall(server.base, `/api/tag-requests/${encodeURIComponent(reqId)}`, 'PUT', { courier: 'Delhivery' }, admin);
+    assert.equal(found.itemName, 'Matarial', 'Item Name saved with request');
+    const upd = await jsonCall(server.base, `/api/tag-requests/${encodeURIComponent(reqId)}`, 'PUT', { courier: 'Delhivery', itemName: 'Biomatric Device' }, admin);
     assert.equal(upd.json.request.courier, 'Delhivery', 'admin courier badal sakta hai');
+    assert.equal(upd.json.request.itemName, 'Biomatric Device', 'admin Item Name badal sakta hai');
     const upd2 = await jsonCall(server.base, `/api/tag-requests/${encodeURIComponent(reqId)}`, 'PUT', { courier: '' }, admin);
     assert.ok(!upd2.json.request.courier, 'courier hata bhi sakta hai');
 
