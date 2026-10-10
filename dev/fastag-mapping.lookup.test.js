@@ -15,7 +15,12 @@ function makePage() {
   const cols = labels.map((label, i) => ({ id: letters[i], label, type: 'string' }));
   const queryLog = [];
   const cell = (v) => v == null ? null : ({ v, f: String(v) });
-  const table = (rows) => ({ cols, rows: rows.map((r) => r.map(cell)) });
+  const table = (rows) => ({ cols, rows: rows.map((r) => r.map((v, i) => {
+    const c = cell(v);
+    // Simulate Google Sheets formatting a numeric-looking barcode with thousands separators.
+    if (i === 3 && /^\d{13,}$/.test(String(v ?? ''))) c.f = String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    return c;
+  })) });
   const D = {
     async query(sheet, tq, opts = {}) {
       assert.equal(sheet, 'StockDataa');
@@ -101,6 +106,7 @@ test('FASTag Mapping finds a text-stored barcode even when numeric gviz equality
   const html = selectors.get('#fm-results').innerHTML;
   assert.match(html, /TAG-12345/);
   assert.match(html, /VC20/);
+  assert.match(html, /8900000000123456/, 'raw barcode stays unformatted for matching/API payload');
   assert.match(html, /TARGET-77/);
   assert.ok(queryLog.some((q) => /where D = 8900000000123456/.test(q.tq)), 'numeric query attempted');
   assert.ok(queryLog.some((q) => /where D = "8900000000123456"/.test(q.tq)), 'quoted string fallback attempted');
