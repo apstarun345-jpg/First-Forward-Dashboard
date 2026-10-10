@@ -2185,16 +2185,16 @@ FF.pages = FF.pages || {};
     if (age(latestFf) > 2) add(age(latestFf) > 7 ? 'high' : 'medium','Stale data','EIR',`First Forward issuance is ${age(latestFf)} days stale`,1,[latestFf ? U.dateKey(latestFf) : 'No valid date'],'Refresh source or check EIR date mapping.','Latest date');
     if (age(latestGv) > 2) add(age(latestGv) > 7 ? 'high' : 'medium','Stale data','GV Master',`GV issuance is ${age(latestGv)} days stale`,1,[latestGv ? U.dateKey(latestGv) : 'No valid date'],'Refresh source or check GV Master date mapping.','Latest date');
     if (details.truncated && (details.truncated.stock || details.truncated.assignment)) add('high','Scan coverage','Detailed loaders','Raw detail scan hit the 250,000-row safety cap',1,[details.truncated.stock ? 'StockDataa capped' : '', details.truncated.assignment ? 'Tag Assignment capped' : ''].filter(Boolean),'Archive old rows or split the source so every detail row can be validated.','Source');
-    // 🕵️ Anomaly Detective: month-to-date issuance ko last month's daily pace se compare karo.
-    // Partial month ko full month se compare nahi karte; only reliable report rows with a meaningful baseline are flagged.
+    // 🕵️ Anomaly Detective: compare MTD daily pace with last month's daily pace.
+    // This normalizes for the incomplete current month and ignores tiny baselines to reduce noise.
     const now = new Date();
     const elapsedDays = Math.max(1, now.getDate());
     const previousMonthDays = new Date(now.getFullYear(), now.getMonth(), 0).getDate();
     const scanPace = (list, source, nameOf) => {
+      const zero = [], droppedHigh = [], droppedMedium = [];
       (Array.isArray(list) ? list : []).forEach((r) => {
         const current = Number(r && r.curTotal) || 0;
         const previous = Number(r && r.lastTotal) || 0;
-        // Avoid noise from tiny/brand-new agents; 20 previous-month tags is the minimum baseline.
         if (previous < 20 || !Number.isFinite(current) || !Number.isFinite(previous)) return;
         const currentDaily = current / elapsedDays;
         const previousDaily = previous / previousMonthDays;
@@ -2202,12 +2202,13 @@ FF.pages = FF.pages || {};
         const name = clean(nameOf(r) || r.agentId || r.id || 'Unknown agent');
         const id = clean(r.agentId || r.id || '');
         const sample = `${name}${id ? ` [${id}]` : ''} · MTD ${current} / last month ${previous} · pace ${pacePct.toFixed(0)}% of prior daily rate`;
-        if (current === 0) {
-          add('medium', 'Issuance anomaly', source, `${source} previously active agents with zero MTD issuance`, 1, [sample], 'Verify agent availability, mapping and source refresh before taking action.', 'Agent · MTD / last month');
-        } else if (pacePct <= 30) {
-          add(pacePct <= 10 ? 'high' : 'medium', 'Issuance anomaly', source, `${source} issuance pace dropped ${Math.round(100 - pacePct)}% vs last month`, 1, [sample], 'Check agent activity, reporting completeness and any operational blockers; this is a review signal, not an automatic penalty.', 'Agent · normalized daily pace');
-        }
+        if (current === 0) zero.push(sample);
+        else if (pacePct <= 10) droppedHigh.push(sample);
+        else if (pacePct <= 30) droppedMedium.push(sample);
       });
+      if (zero.length) add('medium', 'Issuance anomaly', source, `${source} previously active agents with zero MTD issuance`, zero.length, zero, 'Verify agent availability, mapping and source refresh before taking action.', 'Agent · MTD / last month');
+      if (droppedHigh.length) add('high', 'Issuance anomaly', source, `${source} issuance pace dropped over 90% vs last month`, droppedHigh.length, droppedHigh, 'Check agent activity and reporting completeness; this is a review signal, not an automatic penalty.', 'Agent · normalized daily pace');
+      if (droppedMedium.length) add('medium', 'Issuance anomaly', source, `${source} issuance pace dropped 70–90% vs last month`, droppedMedium.length, droppedMedium, 'Check agent activity, reporting completeness and operational blockers.', 'Agent · normalized daily pace');
     };
     scanPace(ffReport, 'FF REPORT', (r) => r.name || r.agentName);
     scanPace(gvReport, 'GV REPORT', (r) => r.agentName || r.name);
