@@ -37,6 +37,11 @@ function makePage() {
   };
   const selectors = new Map();
   const fakeNode = () => ({ value: '', innerHTML: '', textContent: '', className: '', disabled: false, files: [], checked: false });
+  // The fake page does not parse root.innerHTML like a browser, so pre-create inputs that the UI binds by ID.
+  for (const sel of ['#fm-api-status','#fm-message','#fm-summary','#fm-results','#fm-lookup','#fm-map',
+    '#fm-kind','#fm-identifier','#fm-agent-id','#fm-first','#fm-last','#fm-range-agent','#fm-file','#fm-file-note']) {
+    selectors.set(sel, fakeNode());
+  }
   const root = {
     innerHTML: '',
     handlers: {},
