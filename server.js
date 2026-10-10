@@ -6092,7 +6092,7 @@ async function handleApi(req, res, url) {
           target: `user:${user.username}`, meta: { requestId: out.created[0].id, link: '#/tagRequest?view=requests' }
         });
       } catch { /* notification optional */ }
-      logAudit(user, 'tag_request_created', { target: out.batch, note: `${n} agents · ${out.total} tags · ${out.created.map((r) => r.id).join(',')}`.slice(0, 300), ip: clientIp(req) });
+      if (!out.idempotentReplay) logAudit(user, 'tag_request_created', { target: out.batch, note: `${n} agents · ${out.total} tags · ${out.created.map((r) => r.id).join(',')}`.slice(0, 300), ip: clientIp(req) });
       return sendJson(res, 201, { ok: true, request: out.created[0], requests: out.created, batch: { id: out.batch, total: out.total, agents: n, rows: out.rows } });
     }
     const rows = tagRequestRows(body.rows);
@@ -6581,7 +6581,7 @@ async function handleApi(req, res, url) {
           meta: { requestId: out.created[0].id, requestIds: out.created.map((r) => r.id), batch: out.batch, rows: out.rows, agents: n, total: out.total, publicLink: true, note, duplicates: out.dupCount, dupOf: dupIds, ...(linkedLiveSession ? { publicSessionId: linkedLiveSession.sessionId } : {}), link: '#/tagRequest?view=requests' }
         });
       } catch { /* notification optional */ }
-      logAudit({ username: 'public-link', role: 'public', name: employeeName }, 'tag_request_public_created', {
+      if (!out.idempotentReplay) logAudit({ username: 'public-link', role: 'public', name: employeeName }, 'tag_request_public_created', {
         target: out.batch, note: `${n} agents · ${out.total} tags · ${employeeName} · ${out.created.map((r) => `${r.id}${r.agent.mobile ? ` 📱${r.agent.mobile}` : ''}`).join(', ')}${out.dupCount ? ` · 🔁 ${dupIds.join(',')}` : ''}`.slice(0, 400), ip
       });
       const dupReqs = out.created.filter((r) => r.dupCount);
