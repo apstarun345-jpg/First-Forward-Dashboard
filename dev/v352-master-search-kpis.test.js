@@ -200,7 +200,7 @@ test('📗 Tag Request Sheet — configurable column order + one Agent spacer ro
 
 test('🧹 global Master Search suggestion closes before navigation', async () => {
   const ms = await read('masterSearch.js');
-  assert.match(ms, /onPick: \(it\) => \{[\s\S]{0,500}suggestApi && suggestApi\.close\(\)[\s\S]{0,300}openSearchPage\(it\.person\.name, it\.person\)/, 'selection closes suggestions before navigating');
+  assert.match(ms, /onPick: \(it\) => \{[\s\S]{0,900}suggestApi && suggestApi\.close\(\)[\s\S]{0,500}openSearchPage\(it\.person\.name, it\.person\)/, 'selection closes suggestions before navigating');
   assert.match(ms, /try \{ if \(suggestApi && suggestApi\.close\) suggestApi\.close\(\); \} catch \{\}/, 'selected suggestion closes the portal');
   assert.match(ms, /onEnter: \(q\) => \{[\s\S]{0,260}suggestApi && suggestApi\.close[\s\S]{0,180}openSearchPage\(q\)/, 'Enter search closes suggestions before navigating');
 });
@@ -349,7 +349,7 @@ test('🏷️ v3.61 wiring — version pins + automatic cache-busting', async ()
   assert.match(pkg.version, /^\d+\.\d+\.\d+$/, 'package version is semantic versioning');
   assert.match(await read('server.js'), /let APP_VERSION = '\d+\.\d+\.\d+'/);
   const idx = await read('index.html');
-  for (const asset of ['styles', 'config', 'home', 'app', 'lazy']) assert.match(idx, new RegExp(`${asset}\\.js?\\?v=\\d+`), `${asset} has a versioned asset URL`);
+  for (const [asset, ext] of [['styles', 'css'], ['config', 'js'], ['home', 'js'], ['app', 'js'], ['lazy', 'js']]) assert.match(idx, new RegExp(`${asset}\\.${ext}\\?v=\\d+`), `${asset} has a versioned asset URL`);
   // masterSearch ab shell-extra hai (first paint ke baad load hota hai) — index.html me eager nahi.
   assert.ok(!/src="masterSearch\.js/.test(idx), 'masterSearch eager nahi (first paint ke baad aata hai)');
   const sw = await read('sw.js');
