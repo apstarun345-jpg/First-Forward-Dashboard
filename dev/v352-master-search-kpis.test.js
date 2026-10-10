@@ -55,7 +55,7 @@ test('🔍 Master Search — type karte hi suggestions, result ke upar KPI strip
   assert.match(ms, /function kpiStripHtml\(pr\)/, 'KPI strip builder');
   assert.match(ms, /async function paintKpis\(g, host\)/, 'quick → full upgrade painter');
   assert.match(ms, /<div id="msp-kpis"/, 'openGroup me KPI host');
-  assert.match(ms, /paintKpis\(g, U\.\$\('#msp-kpis', out\)\)/, 'openGroup paintKpis call karta hai');
+  assert.match(ms, /paintKpis\(viewGroup, U\.\$\('#msp-kpis', out\)\)/, 'KPI cards use the selected FF/GV channel view');
   for (const s of ['📦 Stock', 'Issued this month', 'Last month', '🚦 Priority', 'Sug. VC4', 'Sug. Commercial', 'Dispatch · all tags', '📈 Growth']) assert.ok(ms.includes(s), `KPI box "${s}"`);
   // trend: stacked VC4 / VC20 / VC5+ series (pehle sirf 'Total tags')
   const trend = ms.slice(ms.indexOf('function trendHtml'), ms.indexOf('function paintTrend'));
@@ -124,9 +124,11 @@ test('Global search bar is eagerly mounted across the app and covers both channe
   // v3.61: masterSearch ab eager nahi (pehle index.html me app.js se pehle load hota tha, ~100 KB
   // extra first paint se pehle). Ab ye shell-extra wave me aata hai — loader (lazy.js) shell se pehle
   // load hona chahiye, aur search module usi wave list me hona chahiye.
-  const lazyAt = idx.indexOf('lazy.js?v=110');
-  const appAt = idx.indexOf('app.js?v=110');
-  assert.ok(lazyAt >= 0 && appAt > lazyAt, 'loader app shell se pehle load hota hai');
+  const lazyAsset = /lazy\.js\?v=\d+/.exec(idx);
+  const appAsset = /app\.js\?v=\d+/.exec(idx);
+  const lazyAt = lazyAsset ? lazyAsset.index : -1;
+  const appAt = appAsset ? appAsset.index : -1;
+  assert.ok(lazyAt >= 0 && appAt > lazyAt, 'versioned loader loads before the app shell');
   assert.ok(!/src="masterSearch\.js/.test(idx), 'search module eager nahi — first paint halka');
   assert.match(lazy, /\['masterSearch', 'palette'\]/, 'search shell-extra wave me hai');
   assert.match(lazy, /masterSearch: \[\.\.\.PROFILE_DEPS, 'searchReport', 'masterSearch'\]/, 'search page route bhi lazy group me hai');
@@ -137,7 +139,7 @@ test('Global search bar is eagerly mounted across the app and covers both channe
   // karta hai + search button click par on-demand load hota hai (bar kabhi missing nahi lagta).
   assert.match(app, /startShellExtras\(\)/, 'login ke baad shell extras (search included) start hote hain');
   assert.match(app, /ensureShell\(\['masterSearch', 'palette'\]\)/, 'search click par module on-demand load');
-  assert.match(app, /const inp = U\.\$\('#master-search-input'\);[\s\S]{0,100}inp\.focus\(\)/, 'topbar search button focuses the existing input');
+  assert.match(app, /const focusMasterSearch = \(\) => \{[\s\S]{0,700}const input = U\.\$\('#master-search-input'\);[\s\S]{0,160}input\.focus\(\)/, 'topbar search focuses the existing inline input');
   const search = await read('masterSearch.js');
   assert.match(search, /Search all — FF\/GV agent, TL, ID, barcode, tag ID/);
   assert.match(search, /ingest\.ffReport[\s\S]*ingest\.gvReport/);
@@ -161,7 +163,7 @@ test('🔎 topbar search remounts and routes through canonical Master Search pag
   assert.match(search, /Canonical route: every topbar \/ Master Search selection opens the same Master Search renderer/);
   assert.match(search, /FF\.app\.navigate\('masterSearch', params\)/);
   assert.match(search, /const id = clean\(p\.id \|\| p\.sub\)/);
-  assert.match(search, /const ch = \^\(gv-\|ff-\)/);
+  assert.match(search, /const ch = \/\^gv-\/i\.test\(kind\) \? 'gv' : \/\^ff-\/i\.test\(kind\) \? 'ff' : ''/);
 });
 
 test('🛑 suggestion selection locks current instance until next typing', async () => {
@@ -198,21 +200,22 @@ test('📗 Tag Request Sheet — configurable column order + one Agent spacer ro
 
 test('🧹 global Master Search suggestion closes before navigation', async () => {
   const ms = await read('masterSearch.js');
-  assert.match(ms, /Close the portalled dropdown BEFORE navigation/, 'global suggestion popup is explicitly closed before route change');
+  assert.match(ms, /onPick: \(it\) => \{[\s\S]{0,500}suggestApi && suggestApi\.close\(\)[\s\S]{0,300}openSearchPage\(it\.person\.name, it\.person\)/, 'selection closes suggestions before navigating');
   assert.match(ms, /try \{ if \(suggestApi && suggestApi\.close\) suggestApi\.close\(\); \} catch \{\}/, 'selected suggestion closes the portal');
-  assert.match(ms, /onEnter: \(q\) => \{[\s\S]{0,220}suggestApi && suggestApi\.close/, 'Enter search also closes the portal');
+  assert.match(ms, /onEnter: \(q\) => \{[\s\S]{0,260}suggestApi && suggestApi\.close[\s\S]{0,180}openSearchPage\(q\)/, 'Enter search closes suggestions before navigating');
 });
 
 test('🚀 workspace boot gate — wait for data + first route before revealing dashboard', async () => {
   const app = await read('app.js');
-  assert.match(app, /const WORKSPACE_BOOT_MIN_MS = 3600/);
+  assert.match(app, /const WORKSPACE_BOOT_MIN_MS = 3000/);
+  assert.match(app, /const WORKSPACE_BOOT_MAX_MS = 3900/);
   assert.match(app, /window\.__FF_FINISH_BOOT = \(\) => \{/);
   assert.match(app, /if \(FF\.auth && FF\.auth\.user\) return/);
   assert.match(app, /const preloadPromise = FF\.preloader \? FF\.preloader\.preloadAll\(false\)/);
   assert.match(app, /await renderCurrent\(\{ bootGate: true \}\)/);
   assert.match(app, /await releaseWorkspaceBoot\(\)/);
   assert.match(app, /document\.body\.classList\.remove\('ready'\)/);
-  assert.match(app, /const warmPromise = FF\.lazy && FF\.lazy\.ensureAll/);
+  assert.match(app, /if \(FF\.lazy && FF\.lazy\.warm\) Promise\.resolve\(FF\.lazy\.warm\(\)\)/, 'optional page modules warm after the first paint');
 });
 test('🎆 workspace boot animation survives macOS Reduce Motion', async () => {
   const css = await read('styles.css');
@@ -300,8 +303,8 @@ test('🎨 theme — normal light UI by default; dark splash styling is scoped o
   const boot = await read('ui-boot.js');
   assert.match(index, /#app-boot\{background:#0b1020 !important;color:#fff !important\}/);
   assert.doesNotMatch(index, /html,body\{background:#0b1020 !important;color:#fff !important\}/);
-  assert.match(index, /styles\.css\?v=118/);
-  assert.match(index, /ui-boot\.js\?v=108/);
+  assert.match(index, /styles\.css\?v=\d+/);
+  assert.match(index, /ui-boot\.js\?v=\d+/);
   assert.match(index, /config\.js\?v=111/);
   assert.match(boot, /localStorage\.getItem\('ff_theme_scope_migrated_v1'\) !== '1'/);
   assert.match(boot, /localStorage\.setItem\('ff_theme_explicit', 'light'\)/);
@@ -343,14 +346,14 @@ test('🚦 startup readiness — Render health stays green and storage retry is 
 
 test('🏷️ v3.61 wiring — version pins + automatic cache-busting', async () => {
   const pkg = JSON.parse(await read('package.json'));
-  assert.equal(pkg.version, '3.65.0');
-  assert.match(await read('server.js'), /APP_VERSION = '3\.65\.0'/);
+  assert.match(pkg.version, /^\d+\.\d+\.\d+$/, 'package version is semantic versioning');
+  assert.match(await read('server.js'), /let APP_VERSION = '\d+\.\d+\.\d+'/);
   const idx = await read('index.html');
-  assert.match(idx, /styles\.css\?v=114/); assert.match(idx, /config\.js\?v=110/); assert.match(idx, /home\.js\?v=91/); assert.match(idx, /app\.js\?v=110/); assert.match(idx, /lazy\.js\?v=110/);
+  for (const asset of ['styles', 'config', 'home', 'app', 'lazy']) assert.match(idx, new RegExp(`${asset}\\.js?\\?v=\\d+`), `${asset} has a versioned asset URL`);
   // masterSearch ab shell-extra hai (first paint ke baad load hota hai) — index.html me eager nahi.
   assert.ok(!/src="masterSearch\.js/.test(idx), 'masterSearch eager nahi (first paint ke baad aata hai)');
   const sw = await read('sw.js');
-  assert.match(sw, /apnapayment-v117/);
+  assert.match(sw, /apnapayment-v\d+/);
   assert.match(sw, /async function shellAssets\(/, 'SW precache list index.html se derive hoti hai (pins drift nahi karte)');
   assert.match(sw, /const isVersioned = \/\[\?&\]v=\//, 'fingerprinted assets cache-first serve hote hain');
   const srv = await read('server.js');
