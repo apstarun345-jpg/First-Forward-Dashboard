@@ -74,7 +74,7 @@ window.FF = window.FF || {};
     // Sheets may return barcode/serial display values with commas, spaces or separators.
     // Preserve leading zeroes from a digit-formatted cell, but remove presentation separators.
     if (formatted && /^\d[\d,\s-]*$/.test(formatted)) return formatted.replace(/[,\s-]/g, '');
-    if (!raw) return formatted;
+    if (!raw) return /^[+-]?\\d+(?:\\.\\d+)?[eE][+-]?\\d+$/.test(formatted) ? expandScientificIdentifier(formatted) : formatted;
     if (/^[+-]?\d+(?:\.\d+)?[eE][+-]?\d+$/.test(raw)) return expandScientificIdentifier(raw);
     // Text values stay text; only remove a trailing numeric-cell .0 (not meaningful in an ID).
     if (/^\d+\.0+$/.test(raw)) return raw.replace(/\.0+$/, '');
