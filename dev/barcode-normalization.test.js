@@ -26,6 +26,7 @@ test('identifier cell text strips sheet display commas while preserving barcode 
   assert.equal(D.cellText({ v: '8900000000123456', f: '8.9E+15' }, { label: 'TAG_ID' }), '8900000000123456');
   assert.equal(D.cellText({ v: '0000012345', f: '0000012345' }, { label: 'SERIAL_NO' }), '0000012345');
   assert.equal(D.cellText({ v: '6.081160110558601E+15', f: '6.08E+15' }, { label: 'BARCODE' }), '6081160110558601');
+  assert.equal(D.cellText({ v: null, f: '6.081160110558601E+15' }, { label: 'BARCODE' }), '6081160110558601', 'formatted-only scientific identifier is expanded when precision is present');
 });
 
 test('identifier formatting is column-aware; ordinary numeric amount formatting is unchanged', () => {
