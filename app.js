@@ -1510,11 +1510,89 @@ window.FF = window.FF || {};
       if (action === 'notifications') { openNotifications('center'); return; }
       if (action === 'more') { U.$('#menu-btn')?.click(); return; }
     });
+    // Saved Views are a built-in personal workspace tool. Do not leave the star button
+    // pointing at an optional module that is not part of this app bundle.
+    const SAVED_VIEWS_KEY = 'ff_saved_views_v1';
+    const readSavedViews = () => {
+      try {
+        const value = JSON.parse(localStorage.getItem(SAVED_VIEWS_KEY) || '[]');
+        return Array.isArray(value) ? value.filter((v) => v && typeof v.name === 'string' && typeof v.hash === 'string').slice(0, 20) : [];
+      } catch { return []; }
+    };
+    function openSavedViews() {
+      const prior = U.$('#ff-saved-views');
+      if (prior) prior.remove();
+      const overlay = document.createElement('div');
+      overlay.id = 'ff-saved-views';
+      overlay.className = 'ff-saved-views-backdrop';
+      overlay.innerHTML = `<section class="ff-saved-views-card" role="dialog" aria-modal="true" aria-labelledby="ff-saved-views-title">
+        <header class="ff-saved-views-head"><div><small>PERSONAL WORKSPACE</small><h2 id="ff-saved-views-title">Saved Views</h2><p>Current page, report and filters save karke baad mein ek tap mein kholo.</p></div>
+        <button type="button" class="icon-btn" data-sv-close aria-label="Close saved views">✕</button></header>
+        <form class="ff-saved-view-form" id="ff-saved-view-form">
+          <label for="ff-saved-view-name">View name</label>
+          <div class="ff-saved-view-save-row"><input id="ff-saved-view-name" name="name" maxlength="60" required placeholder="e.g. My TL · Current Month"><button class="btn primary" type="submit">☆ Save current</button></div>
+        </form>
+        <div class="ff-saved-view-list" id="ff-saved-view-list"></div>
+        <footer class="ff-saved-views-foot"><span>Saved on this device/browser.</span><button type="button" class="btn" data-sv-close>Done</button></footer>
+      </section>`;
+      document.body.appendChild(overlay);
+      const list = U.$('#ff-saved-view-list');
+      const renderList = () => {
+        const views = readSavedViews();
+        list.innerHTML = views.length ? views.map((v, i) => {
+          const route = String(v.hash || '').replace(/^#\/?/, '').replace(/\?.*$/, '').replace(/\//g, ' · ');
+          return `<article class="ff-saved-view-row"><button type="button" class="ff-saved-view-open" data-sv-open="${i}"><b>${U.esc(v.name)}</b><small>${U.esc(route || 'Home')}</small><span>Open view →</span></button><button type="button" class="icon-btn ff-saved-view-delete" data-sv-delete="${i}" aria-label="Delete ${U.esc(v.name)}" title="Delete saved view">🗑</button></article>`;
+        }).join('') : '<p class="ff-saved-view-empty">Abhi koi saved view nahi hai. Upar current report ko naam dekar save karein.</p>';
+      };
+      renderList();
+      const form = U.$('#ff-saved-view-form');
+      form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        const input = U.$('#ff-saved-view-name');
+        const name = String(input && input.value || '').trim().slice(0, 60);
+        if (!name) { input && input.focus(); return; }
+        const views = readSavedViews();
+        const hash = String(window.location.hash || '#/home');
+        const normalizedName = name.toLocaleLowerCase();
+        const existing = views.findIndex((v) => v.name.toLocaleLowerCase() === normalizedName);
+        const entry = { name, hash, savedAt: new Date().toISOString() };
+        if (existing >= 0) views[existing] = entry;
+        else views.unshift(entry);
+        try {
+          localStorage.setItem(SAVED_VIEWS_KEY, JSON.stringify(views.slice(0, 20)));
+          U.toast(existing >= 0 ? 'Saved view updated ✓' : 'View saved ✓', 'ok');
+          renderList();
+          input.value = '';
+        } catch { U.toast('View save nahi hua — browser storage available nahi hai', 'err'); }
+      });
+      overlay.addEventListener('click', (event) => {
+        const close = event.target.closest('[data-sv-close]');
+        if (close || event.target === overlay) { overlay.remove(); return; }
+        const open = event.target.closest('[data-sv-open]');
+        if (open) {
+          const view = readSavedViews()[Number(open.dataset.svOpen)];
+          if (!view || !/^#\//.test(view.hash)) { U.toast('Saved route invalid hai; view dobara save karein', 'warn'); return; }
+          overlay.remove();
+          if (window.location.hash === view.hash) renderCurrent();
+          else window.location.hash = view.hash;
+          return;
+        }
+        const del = event.target.closest('[data-sv-delete]');
+        if (del) {
+          const views = readSavedViews();
+          const index = Number(del.dataset.svDelete);
+          if (Number.isInteger(index) && index >= 0 && index < views.length) {
+            views.splice(index, 1);
+            try { localStorage.setItem(SAVED_VIEWS_KEY, JSON.stringify(views)); renderList(); }
+            catch { U.toast('Saved view delete nahi hua', 'err'); }
+          }
+        }
+      });
+      const input = U.$('#ff-saved-view-name');
+      if (input) input.focus();
+    }
     const saveViewBtn = U.$('#save-view-btn');
-    if (saveViewBtn) saveViewBtn.addEventListener('click', () => {
-      if (FF.workspace && FF.workspace.openSave) FF.workspace.openSave();
-      else U.toast('Saved views module ready nahi hai', 'warn');
-    });
+    if (saveViewBtn) saveViewBtn.addEventListener('click', openSavedViews);
     const pwaBtn = U.$('#pwa-install');
     if (pwaBtn) pwaBtn.addEventListener('click', promptInstall);
     const ub = U.$('#user-btn');
