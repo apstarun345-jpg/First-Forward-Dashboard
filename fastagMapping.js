@@ -270,37 +270,67 @@ window.FF = window.FF || {};
     await Promise.all(workers);
     return [...found.values()];
   }
-  async function queryRange(from, to) {
+  function isLookupTimeout(err) {
+    return /abort|timed?\s*out|timeout|HTTP 502|HTTP 503|fetch failed|upstream/i.test(String(err && (err.message || err)));
+  }
+  function dedupeStockRows(rows) {
+    const unique = new Map();
+    (rows || []).forEach((row) => unique.set(idKey(row.tagId) + '|' + idKey(row.barcode), row));
+    return [...unique.values()];
+  }
+  async function queryRange(from, to, depth) {
+    const level = Number(depth || 0);
     const schema = await stockSchema(), c = cols();
     const index = schema.index.barcode, field = schema.letters[index] || c.barcode;
-    const make = (numeric) => 'select A,B,C,D,E,F,G,H,I,J,K,L,M where ' + field + ' >= ' + literal(from, numeric) + ' and ' + field + ' <= ' + literal(to, numeric);
-    const run = async (numeric) => {
-      const table = await D.query('StockDataa', make(numeric), { timeoutMs: 55000, directTimeoutMs: 12000, retries: 0, directFirst: true });
-      return stockRows(table, schema);
+    const numericRange = isDigitKey(from) && isDigitKey(to) &&
+      from.length === to.length && from[0] !== '0' && to[0] !== '0';
+    const preferredModes = numericRange ? [true, false] : [false, true];
+    const inRequestedRange = (rows) => (rows || []).filter((row) =>
+      compareBarcode(row.barcode, from) >= 0 && compareBarcode(row.barcode, to) <= 0);
+    const run = async (numeric, lower, upper) => {
+      const make = () => 'select A,B,C,D,E,F,G,H,I,J,K,L,M where ' +
+        field + ' >= ' + literal(lower, numeric) + ' and ' + field + ' <= ' + literal(upper, numeric);
+      const table = await D.query('StockDataa', make(), {
+        timeoutMs: 55000, directTimeoutMs: 12000, retries: 0, directFirst: true
+      });
+      return inRequestedRange(stockRows(table, schema));
     };
+
     let rows = [];
-    let firstError = null;
-    try { rows = await run(false); }
-    catch (err) {
-      firstError = err;
-      if (/abort|timed?\s*out|timeout|HTTP 502|HTTP 503|fetch failed|upstream/i.test(String(err && (err.message || err)))) {
-        throw new Error('StockDataa range lookup timed out. Barcode range ko chhote parts me divide karke retry karein.');
+    let lastError = null;
+    for (const numeric of preferredModes) {
+      try {
+        rows = await run(numeric, from, to);
+        if (rows.length) break;
+      } catch (err) {
+        lastError = err;
       }
     }
-    // Numeric-only range fallback when string comparison has no matching stock rows.
-    if (!rows.length && isDigitKey(from) && isDigitKey(to)) {
-      try { rows = await run(true); }
-      catch (err) {
-        if (/abort|timed?\s*out|timeout|HTTP 502|HTTP 503|fetch failed|upstream/i.test(String(err && (err.message || err)))) {
-          throw new Error('StockDataa range lookup timed out. Barcode range ko chhote parts me divide karke retry karein.');
-        }
-        if (firstError) throw new Error('StockDataa range lookup failed: ' + String(err && (err.message || err) || firstError.message || 'Google Sheets query error'));
-        throw err;
+
+    // If Google times out while comparing a broad barcode interval, split it automatically.
+    // Numeric ranges are split as integers, preserving fixed-width barcodes and avoiding
+    // asking the operator to manually upload smaller ranges. Cap depth to prevent query storms.
+    const canSplit = numericRange && compareBarcode(from, to) < 0 && level < 3 && lastError && isLookupTimeout(lastError);
+    if (!rows.length && canSplit) {
+      if (level === 0) setStatus('StockDataa range slow hai — system automatically chhote parts me retry kar raha hai…', 'info');
+      const lower = BigInt(from), upper = BigInt(to), middle = (lower + upper) / 2n;
+      if (middle >= lower && middle < upper) {
+        const fmt = (n) => n.toString().padStart(from.length, '0');
+        const halves = await Promise.all([
+          queryRange(from, fmt(middle), level + 1),
+          queryRange(fmt(middle + 1n), to, level + 1)
+        ]);
+        return dedupeStockRows(halves.flat());
       }
     }
-    const unique = new Map();
-    rows.forEach((row) => unique.set(idKey(row.tagId) + '|' + idKey(row.barcode), row));
-    return [...unique.values()];
+
+    if (!rows.length && lastError) {
+      if (isLookupTimeout(lastError)) {
+        throw new Error('StockDataa range lookup timed out after trying numeric/text matching. Try a narrower range or retry shortly.');
+      }
+      throw new Error('StockDataa range lookup failed: ' + String(lastError && (lastError.message || lastError) || 'Google Sheets query error'));
+    }
+    return dedupeStockRows(rows);
   }
   function addResult(item, stock, matchedBy) {
     const row = Object.assign({ id: nextId++, source: item.source || 'Manual', request: item.type === 'range' ? item.first + ' – ' + item.last : (item.tagId || item.barcode || item.serialNo || ''),
