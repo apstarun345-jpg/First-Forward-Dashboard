@@ -1973,19 +1973,18 @@ window.FF = window.FF || {};
     document.body.classList.remove('ready');
     bootSetMessage('Loading your workspace…', 'Loading live dashboard data…');
 
-    // Start the full sheet preload in the background. It must NEVER block the first Home paint.
-    // The previous boot waited here; on a slow phone that left the safety fallback card visible.
+    // IMPORTANT: do not preload every sheet yet. On first login this competed with Home's
+    // EIR daily + GV Master requests (Google gviz serializes expensive queries on the same sheet).
+    // Render the requested page using its own critical datasets first; preload the rest afterward.
+    await renderCurrent({ bootGate: true });
+
+    // Start non-critical sheet preload only after the first page has finished rendering.
     const preloadPromise = FF.preloader ? FF.preloader.preloadAll(false) : Promise.resolve();
     preloadPromise.then((state) => {
       bootSetMessage('Workspace ready ✓', state && state.errors && state.errors.length ? 'Using available cached data…' : 'Live data is loading in the background…');
     }).catch(() => {
       bootSetMessage('Workspace ready ✓', 'Using available cached data…');
     });
-
-    // IMPORTANT: do not start ensureAll() here. It downloads every page module and competes with
-    // Home/data requests during the first paint. lazy.warm() starts later after Home is visible.
-    // Render Home immediately while the non-critical preload continues in the background.
-    await renderCurrent({ bootGate: true });
 
     // Home is already rendered (or its own async data is continuing). Release the short boot
     // animation without waiting for every sheet/module.
