@@ -230,19 +230,21 @@ window.FF = window.FF || {};
     if (!field) throw new Error('StockDataa me ' + fieldName + ' column resolve nahi hua.');
     const found = new Map();
     const batches = [];
-    for (let i = 0; i < unique.length; i += 15) batches.push(unique.slice(i, i + 15));
+    // Group by type so alphanumeric tag IDs only need one query; numeric IDs try number + text.
+    for (const numeric of [true, false]) {
+      const valuesOfType = unique.filter((value) => isDigitKey(value) === numeric);
+      for (let i = 0; i < valuesOfType.length; i += 15) {
+        batches.push({ values: valuesOfType.slice(i, i + 15), numeric });
+      }
+    }
     let cursor = 0;
     // A few batched queries in parallel speed up larger uploads without flooding gviz.
     const workers = Array.from({ length: Math.min(3, batches.length) }, async () => {
       while (cursor < batches.length) {
-        const batch = batches[cursor++];
+        const work = batches[cursor++], batch = work.values;
         const make = (numeric) => 'select A,B,C,D,E,F,G,H,I,J,K,L,M where ' + batch.map((x) => field + ' = ' + literal(x, numeric)).join(' or ');
-        // gviz may return zero rows instead of an error for the wrong number/string type.
-        // Alphanumeric identifiers are always string comparisons, so do not issue duplicate queries.
-        // Numeric-looking barcodes/tag IDs are tried in both formats because Sheets may store either type.
-        const queries = batch.some(isDigitKey)
-          ? [make(true), make(false)]
-          : [make(false)];
+        // gviz can return zero rows instead of an error when ID column types do not match.
+        const queries = work.numeric ? [make(true), make(false)] : [make(false)];
         const attempts = await Promise.allSettled(queries.map((query) =>
           D.query('StockDataa', query, { timeoutMs: 40000, retries: 0 })
         ));
@@ -270,10 +272,10 @@ window.FF = window.FF || {};
     const schema = await stockSchema(), c = cols();
     const index = schema.index.barcode, field = schema.letters[index] || c.barcode;
     const make = (numeric) => 'select A,B,C,D,E,F,G,H,I,J,K,L,M where ' + field + ' >= ' + literal(from, numeric) + ' and ' + field + ' <= ' + literal(to, numeric);
-    const attempts = await Promise.allSettled([
-      D.query('StockDataa', make(isDigitKey(from) && isDigitKey(to)), { timeoutMs: 50000, retries: 0 }),
-      D.query('StockDataa', make(false), { timeoutMs: 50000, retries: 0 })
-    ]);
+    const queries = isDigitKey(from) && isDigitKey(to) ? [make(true), make(false)] : [make(false)];
+    const attempts = await Promise.allSettled(queries.map((query) =>
+      D.query('StockDataa', query, { timeoutMs: 50000, retries: 0 })
+    ));
     const fulfilled = attempts.filter((x) => x.status === 'fulfilled').flatMap((x) => stockRows(x.value, schema));
     if (!fulfilled.length && !attempts.some((x) => x.status === 'fulfilled')) {
       const err = attempts.find((x) => x.status === 'rejected');
@@ -332,7 +334,16 @@ window.FF = window.FF || {};
         queryField('tagId', tagIds)
       ]);
       const byBarcode = found[0], byTag = found[1];
-      for (const item of waiting.filter((x) => x.type === 'range')) { try { item._rangeRows = await queryRange(item.first, item.last); } catch (err) { item._lookupError = err.message || String(err); } }
+      const ranges = waiting.filter((x) => x.type === 'range');
+      let rangeCursor = 0;
+      const rangeWorkers = Array.from({ length: Math.min(3, ranges.length) }, async () => {
+        while (rangeCursor < ranges.length) {
+          const item = ranges[rangeCursor++];
+          try { item._rangeRows = await queryRange(item.first, item.last); }
+          catch (err) { item._lookupError = err.message || String(err); }
+        }
+      });
+      await Promise.all(rangeWorkers);
       for (const item of waiting) {
         if (item._lookupError) { state.rows.push({ id: nextId++, source: item.source, request: item.first + ' – ' + item.last, selected: false, status: 'Lookup error', message: item._lookupError, stock: {}, agentId: '' }); continue; }
         let candidates = [];
