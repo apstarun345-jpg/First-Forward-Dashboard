@@ -1988,32 +1988,12 @@ window.FF = window.FF || {};
     //    roz kaam aane wale 3 modules, desktop par poori list. (wowzone jaise modules lazy hain →
     //    warm ke baad shell extras dobara mount karne padte hain.)
     if (FF.lazy && FF.lazy.warm) Promise.resolve(FF.lazy.warm()).then(() => setTimeout(mountShellExtras, 400)).catch(() => {});
-    // 🔍 Global search button — features.search OFF ho to hide
+    // 🔍 Respect the search feature flag only. The click handler is wired once in bind():
+    // it handles cold-start lazy loading too, avoiding two listeners opening two search UIs.
     const gsBtn = U.$('#global-search-btn');
-    if (gsBtn) {
-      gsBtn.hidden = FF.config.feat && FF.config.feat('search') === false;
-      if (!gsBtn.__ffWired) {
-        gsBtn.__ffWired = true;
-        gsBtn.addEventListener('click', () => {
-          const focusSearch = () => {
-            if (FF.masterSearch && FF.masterSearch.mountTopbar) {
-              FF.masterSearch.mountTopbar();
-              const inp = U.$('#master-search-input');
-              if (inp) { inp.focus(); inp.select(); return true; }
-            }
-            if (FF.palette) { FF.palette.toggle(); return true; }
-            return false;
-          };
-          if (focusSearch()) return;
-          // Module abhi load nahi hua (first paint ke baad aata hai) → load karke kholo.
-          ensureShell(['masterSearch', 'palette']).then(focusSearch);
-        });
-      }
-    }
-    // 🧹 v3.62 — Saved Views page hata di gayi, isliye topbar ka ☆ (save current view) button bhi
-    // hamesha chhupa rehta hai (pehle wo ek dead page kholta tha).
-    const svBtn = U.$('#save-view-btn');
-    if (svBtn) svBtn.hidden = true;
+    if (gsBtn) gsBtn.hidden = FF.config.feat && FF.config.feat('search') === false;
+    // ☆ Saved Views now opens the built-in personal views manager wired in bind(); keep it visible
+    // after login instead of hiding the button for the old removed Saved Views page.
     startVersionWatch(); // 🔄 update-available toast (features.updateToast)
     const u = FF.auth.user;
     if (FF.auth.isAdmin()) FF.auth.api('/api/health').then(h => { storageBanner(h.storage); pushBanner(h.push); setPendingSignups(h.pendingSignups); renderSidebar(); }).catch(() => {});
