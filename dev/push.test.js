@@ -140,7 +140,7 @@ function startMockPushService() {
 
 // ---- server harness (cloud storage + throwaway container disk, like Render) ----------------------
 async function startServer(env) {
-  const child = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: { ...process.env, PORT: '0', RENDER: '', APPS_SCRIPT_ALLOW_LOCAL: '1', ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: { ...process.env, PORT: '0', RENDER: '', APPS_SCRIPT_ALLOW_LOCAL: '1', ...env, ALLOW_FRESH_RENDER: env.ALLOW_FRESH_RENDER || '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
   let log = '';
   child.stderr.on('data', (d) => { log += d; });
   const base = await new Promise((resolve, reject) => {
