@@ -42,7 +42,7 @@ test('Home shows a clickable All Commercial KPI with last-month actual and curre
   assert.match(html, /All Commercial · VC20 \+ VC5\+/);
   assert.match(html, /data-kpi="src=both&amp;scope=mtd&amp;ym=[^&]+&amp;f=comm"/, 'card drills into current-month Commercial');
   assert.match(html, /Last month full <b>13<\/b>/, 'full prior-month Commercial shown');
-  assert.match(html, new RegExp(`Expected this month <b>${expected}<\\/b>`), 'Commercial expected month-end shown');
+  assert.match(html, new RegExp(`Expected this month <b>${expected}<\/b>`), 'Commercial expected month-end shown');
   assert.match(html, /data-kpi-value|kpi-value/);
 });
 
@@ -74,7 +74,7 @@ test('Home FF/GV MTD split uses the same one-day-lag cutoff as the month total',
   const ctx = { curKey: curYm, prevKey: prevYm, observedDay, compareDay: observedDay, daysInMonth: U.daysInMonth(curYm) };
   const sf = { rows: currentRows, ff: currentRows.filter((r) => r.channel !== 'GV Partner'), gv: currentRows.filter((r) => r.channel === 'GV Partner') };
   const html = FF.pages.home.monthKpiHtml(ctx, sf, { liveToday: true }, M.summary(currentRows, curYm), []);
-  assert.match(html, /GV <b>6<\\/b>/, 'GV split matches the 6 eligible GV tags');
-  assert.match(html, /First Forward <b>4<\\/b>/, 'future-dated 100 FF tags do not inflate the displayed split');
-  assert.match(html, /total \\(MTD\\)/);
+  assert.match(html, /GV <b>6<\/b>/, 'GV split matches the 6 eligible GV tags');
+  assert.match(html, /First Forward <b>4<\/b>/, 'future-dated 100 FF tags do not inflate the displayed split');
+  assert.match(html, /total \(MTD\)/);
 });
