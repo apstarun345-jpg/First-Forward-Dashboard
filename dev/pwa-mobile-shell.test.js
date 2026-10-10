@@ -115,6 +115,14 @@ test('mobile nav exposes Search and the first search click loads the lazy palett
   const navPart = app.slice(app.indexOf('function renderMobileNav'), app.indexOf('function updateFocusMode'));
   assert.match(navPart, /id: 'search', icon: 'search', label: 'Search'/);
   assert.match(app, /const globalSearchBtn = U\.\$\('#global-search-btn'\)/);
-  assert.match(app, /ensureShell\(\['palette', 'masterSearch'\]\)\.then\(/);
+  assert.match(app, /ensureShell\(\['masterSearch', 'palette'\]\)\.then\(/);
   assert.match(app, /if \(FF\.palette && typeof FF\.palette\.toggle === 'function'\) \{/);
+});
+
+test('visible topbar actions do not point to missing modules', () => {
+  assert.match(app, /const SAVED_VIEWS_KEY = 'ff_saved_views_v1'/, 'save-view control has a built-in manager');
+  assert.match(app, /if \(saveViewBtn\) saveViewBtn\.addEventListener\('click', openSavedViews\)/, 'star button opens Saved Views');
+  assert.doesNotMatch(app, /svBtn\.hidden = true/, 'Saved Views is not hidden after login');
+  assert.match(app, /function openSavedViews\(\)[\s\S]*?data-sv-open=[\s\S]*?data-sv-delete=/, 'saved views can be opened and deleted');
+  assert.match(app, /focusMasterSearch\(\)[\s\S]*?stopImmediatePropagation/, 'search uses one active handler instead of opening two layers');
 });
