@@ -7870,7 +7870,8 @@ function personalStats(rows) {
   const ym = todayKey.slice(0, 7);
   const asOfDate = new Date(`${todayKey}T00:00:00Z`);
   asOfDate.setUTCDate(asOfDate.getUTCDate() - 1);
-  const asOfDay = Math.max(0, asOfDate.getUTCDate());
+  // Day count stays in this month; on the 1st, no current-month day is complete yet.
+  const asOfDay = Math.max(0, Number(todayKey.slice(8, 10)) - 1);
   const asOfKey = `${asOfDate.getUTCFullYear()}-${pad2(asOfDate.getUTCMonth() + 1)}-${pad2(asOfDate.getUTCDate())}`;
   const daily = new Map();
   const cls = {};
