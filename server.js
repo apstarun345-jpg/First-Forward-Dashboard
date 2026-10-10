@@ -8119,7 +8119,7 @@ async function servePersonalPage(req, res, rawToken) {
           ${goalHtml || targetHtml ? `<section class="pb-card pb-goalcard">${goalHtml}${targetHtml}</section>` : ''}
           ${stockKpis}
           <section class="pb-kpis">
-            <div class="pb-kpi issuance"><small>📈 MTD Issued</small><b>${nf(st.mtd)}</b><span>${escHtml(ym)}</span></div>
+            <div class="pb-kpi issuance"><small>📈 MTD issued</small><b>${nf(st.mtd)}</b><span>${escHtml(ym)}</span></div>
             <div class="pb-kpi previous"><small>🗓️ Same Period · Last Month</small><b>${nf(st.prevSame)}</b><span class="${diff >= 0 ? 'up' : 'down'}">${diff >= 0 ? '▲' : '▼'} ${Math.abs(diff)}</span></div>
             <div class="pb-kpi streak"><small>🔥 Active Streak</small><b>${nf(st.streak)}</b><span>din se active 🔥</span></div>
             <div class="pb-kpi best"><small>🏆 Best Day</small><b>${nf(st.best.n)}</b><span>${escHtml(st.best.date)}</span></div>
