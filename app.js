@@ -184,8 +184,8 @@ window.FF = window.FF || {};
       document.body.classList.remove('has-mobile-nav');
       return;
     }
-    // Native-app style: keep five primary destinations/actions visible and thumb-friendly.
-    // Search remains available from the top search/command palette; More exposes every route.
+    // Native-app style: keep six primary destinations/actions visible and thumb-friendly.
+    // Search has its own bottom-tab shortcut; More exposes every route.
     const items = [
       { kind: 'route', id: 'home', icon: 'home', label: 'Home' },
       { kind: 'action', id: 'search', icon: 'search', label: 'Search' },
