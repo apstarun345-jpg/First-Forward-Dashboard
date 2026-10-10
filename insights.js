@@ -210,12 +210,27 @@ FF.pages = FF.pages || {};
       const i = eirIndex.get(String(col || '').trim().toUpperCase());
       return i === undefined ? '' : (identifier ? readId(row[i]) : D.cellText(row[i]));
     };
-    mem.detailsPromise = Promise.all([
-      querySelectedRows(s.sheet || 'StockDataa', stockCols, s.tagId || s.barcode, fresh),
-      querySelectedRows('Tag Assignment', assignCols, a.tagId || a.serial, fresh),
+    const stockWhere = [s.tagId, s.barcode].filter(Boolean).map((col) => col + ' is not null').join(' or ');
+    const assignmentWhere = [a.tagId, a.serial].filter(Boolean).map((col) => col + ' is not null').join(' or ');
+    mem.detailsPromise = Promise.allSettled([
+      querySelectedRows(s.sheet || 'StockDataa', stockCols, stockWhere || s.tagId || s.barcode, fresh),
+      querySelectedRows('Tag Assignment', assignCols, assignmentWhere || a.tagId || a.serial, fresh),
       querySelectedRows('GV Master', masterCols, masterWhere, fresh),
       querySelectedRows(e.sheet || 'EIR', eirCols, eirWhere, fresh)
-    ]).then(([stockResult, assignmentResult, masterResult, eirResult]) => {
+    ]).then((settled) => {
+      const errors = {};
+      const resultFor = (result, key) => {
+        if (result.status === 'fulfilled') return result.value;
+        errors[key] = String(result.reason && (result.reason.message || result.reason) || 'Source load failed');
+        return { rows: [], truncated: false };
+      };
+      const stockResult = resultFor(settled[0], 'StockDataa');
+      const assignmentResult = resultFor(settled[1], 'Tag Assignment');
+      const masterResult = resultFor(settled[2], 'GV Master');
+      const eirResult = resultFor(settled[3], 'EIR');
+      if (settled.every((result) => result.status === 'rejected')) {
+        throw new Error('Barcode detail sources failed: ' + Object.entries(errors).map(([key, value]) => key + ': ' + value).join(' | '));
+      }
       const stockIds = new Set([s.barcode, s.tagId].filter(Boolean));
       const assignmentIds = new Set([a.serial, a.tagId].filter(Boolean));
       const stock = stockResult.rows.map((r) => {
@@ -240,7 +255,7 @@ FF.pages = FF.pages || {};
         gvId: eirVal(r, e.gvId), gvName: eirVal(r, e.gvName), gvTl: eirVal(r, e.gvTl), vrnType: eirVal(r, e.vrnType)
       })).filter((r) => r.tagId || r.vrn);
       mem.details = {
-        stock, assignment, rawMaster, eir,
+        stock, assignment, rawMaster, eir, errors,
         truncated: { stock: stockResult.truncated, assignment: assignmentResult.truncated, rawMaster: masterResult.truncated, eir: eirResult.truncated },
         loadedAt: Date.now()
       };
