@@ -1973,5 +1973,35 @@ window.FF = window.FF || {};
   }
 
   FF.app = { openDataFreshness, storageBanner, pushBanner, liveShareChip, applySavedTweaks, navigate, updateParams, clearGlobalFilters, refresh, syncNow, checkFeedChange, announceDataUpdate, parseHash, resolvePage, pageKnown, firstAllowedPage, firstAllowedRoute, openDrawer, closeDrawer, currentDrawerSnapshot, restoreDrawerSnapshot, exportDrawerCsv, exportDrawerPdf, renderSidebar, renderCurrent, renderTopUser, updateStatus, onLogin, onBackgroundDataUpdated, promptInstall, enhanceCharts, enhanceTables, themeMode, toggleThemeMode, lang, setLang, toggleLangMenu, renderGlobalFilters, renderMobileNav, focusMode: updateFocusMode, openAccessibility: renderA11yPanel, tableDensity, setTableDensity, PAGES, refreshPendingBadge, setPendingSignups, shareWhatsApp, checkVersion, exportCSV: () => exportCurrentCsv('csv'), exportXLSX: () => exportCurrentCsv('xlsx'), toggleTheme: toggleThemeMode, toggleLang: toggleLangQuick, get pendingSignups() { return pendingSignups; }, get current() { return current; }, currentFilters: () => (FF.filters ? FF.filters.current() : currentFilterValues()) };
+  // 📶 PWA reliability: reflect connectivity immediately and refresh read-only dashboard data
+  // after reconnect. Never auto-resubmit a Tag Request or any other mutation.
+  if (!window.__ffConnectivityHandlers) {
+    window.__ffConnectivityHandlers = true;
+    const paintConnectivity = (online) => {
+      const el = U.$('#offline-state');
+      if (el) {
+        el.hidden = !!online;
+        el.textContent = online ? '' : '📴 Offline · cached snapshot only';
+        el.className = `offline-state${online ? '' : ' is-offline'}`;
+        el.title = online ? '' : 'Connection wapas aane par data refresh hoga. Request automatic repeat nahi hogi.';
+      }
+      try { updateStatus(); } catch {}
+    };
+    window.addEventListener('offline', () => {
+      paintConnectivity(false);
+      if (FF.util && FF.util.toast) FF.util.toast('Internet disconnected — cached data available. Request automatic submit nahi hogi.', 'warn');
+    });
+    window.addEventListener('online', () => {
+      paintConnectivity(true);
+      if (FF.util && FF.util.toast) FF.util.toast('Internet wapas aa gaya. Dashboard data refresh ho raha hai…', 'ok');
+      if (FF.auth && FF.auth.user && document.visibilityState === 'visible') {
+        Promise.resolve().then(() => syncNow({ auto: true })).catch(() => {}).finally(() => {
+          try { updateStatus(); } catch {}
+        });
+      }
+    });
+    paintConnectivity(typeof navigator === 'undefined' || navigator.onLine !== false);
+  }
+
   document.addEventListener('DOMContentLoaded', init);
 })(window.FF);
