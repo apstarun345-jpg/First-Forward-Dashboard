@@ -37,8 +37,9 @@ test('barcode: 16-digit serial dash format me dikhta hai (608116-011-0558601)', 
 
 test('data.cellText: bade numeric barcode par formatted 6.08E+15 nahi, exact digits', async () => {
   const src = await read('data.js');
-  assert.match(src, /Math\.abs\(v0\) >= 1e15/, 'bade integer ke liye exact digits (formatted text nahi)');
-  assert.match(src, /e\+?\d+/i, 'scientific-notation string bhi digits me convert hoti hai');
+  assert.match(src, /function identifierText\(/, 'BARCODE/TAG_ID ke liye dedicated ID normalizer');
+  assert.match(src, /function isIdentifierColumn\(/, 'normalization EIR/StockDataa identifier columns par apply hoti hai');
+  assert.match(src, /expandScientificIdentifier\(/, 'scientific notation ko precision-safe digits me badla jata hai');
 });
 
 // ------------------------------------------------------------------------------------------------
