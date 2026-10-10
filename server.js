@@ -92,6 +92,7 @@ export const PAGE_PERMISSIONS = [
   { key: 'gvPerformance', label: 'GV Partner · Performance', group: 'GV Partner' },
   { key: 'gvStock', label: 'GV Partner · Stock', group: 'GV Partner' },
   { key: 'gvStockReport', label: 'GV Partner · GV Stock Report (GV REPORT-wise)', group: 'GV Partner' },
+  { key: 'fastagMapping', label: 'GV Partner · FASTag Mapping (admin-only API mapping)', group: 'GV Partner' },
   { key: 'directAgents', label: 'Cross-channel · Direct Agents & TLs (FF APS + GV no-TL rule)', group: 'Cross Channel' },
   { key: 'newAgents', label: 'Cross-channel · New Agents & TL Changes (FF + GV)', group: 'Cross Channel' },
   { key: 'unusual', label: 'Cross-channel · Unusual Agent Activity (wrong VRN / replacement / chassis)', group: 'Cross Channel' },
@@ -7154,6 +7155,73 @@ async function handleApi(req, res, url) {
     if (!s) throw new HttpError(404, 'Session nahi mila.');
     if (!laParty(s, user)) throw new HttpError(403, 'Is session ke hissa nahi ho.');
     return sendJson(res, 200, { ok: true, session: laView(s) });
+  }
+
+  // ---- FASTag inventory mapping (admin-only; third-party secret stays server-side) ----
+  if (p === '/api/fastag-mapping/status' && method === 'GET') {
+    requireAdmin(user);
+    return sendJson(res, 200, { ok: true, configured: !!String(process.env.GV_TAG_MAPPING_SECRET || '').trim() });
+  }
+  if (p === '/api/fastag-mapping/map' && method === 'POST') {
+    requireAdmin(user);
+    const secret = String(process.env.GV_TAG_MAPPING_SECRET || '').trim();
+    if (!secret) throw new HttpError(503, 'Mapping API configured nahi hai. Render environment me GV_TAG_MAPPING_SECRET set karein.');
+    const body = await readBody(req);
+    const rows = Array.isArray(body && body.rows) ? body.rows : [];
+    if (!rows.length) throw new HttpError(400, 'Mapping rows required.');
+    if (rows.length > 100) throw new HttpError(413, 'Ek API batch me maximum 100 mapping rows allowed hain.');
+    const apiUrl = 'https://www.apnapayment.com/api/agent/inventory/update';
+    const callOne = async (row, index) => {
+      const data = {
+        tagId: String(row && row.tagId || '').trim().slice(0, 180),
+        serialNo: String(row && row.serialNo || '').trim().slice(0, 180),
+        vcType: String(row && row.vcType || '').trim().slice(0, 80),
+        agentId: String(row && row.agentId || '').trim().slice(0, 100)
+      };
+      if (!data.tagId || !data.serialNo || !data.vcType || !data.agentId) {
+        return { index, success: false, status: 'Validation failed', message: 'tagId, serialNo, vcType aur agentId sab required hain.' };
+      }
+      if ([data.tagId, data.serialNo, data.vcType, data.agentId].some((v) => /[,\\r\\n]/.test(v))) {
+        return { index, success: false, status: 'Invalid characters', message: 'Mapping values me comma ya newline allowed nahi.' };
+      }
+      let lastMessage = 'API unavailable', lastCode = 0;
+      for (let attempt = 0; attempt <= 2; attempt++) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 25000);
+        try {
+          const response = await fetch(apiUrl, {
+            method: 'POST', signal: controller.signal,
+            headers: { 'Content-Type': 'application/json', 'X-Secret-Key': secret },
+            body: JSON.stringify({ bank_id: 1, sno: [data.tagId, data.serialNo, data.vcType, data.agentId].join(',') })
+          });
+          clearTimeout(timer);
+          const text = (await response.text()).slice(0, 4000);
+          let parsed = null;
+          try { parsed = JSON.parse(text); } catch { /* response may be plain text */ }
+          lastCode = response.status;
+          const success = response.ok && parsed && parsed.success === true;
+          const message = String(success ? (parsed.message || 'Mapping successful') : ((parsed && (parsed.message || parsed.error || parsed.errors)) || text || ('HTTP ' + response.status))).replace(/<[^>]*>/g, ' ').slice(0, 350);
+          if (success) return { index, success: true, httpCode: response.status, status: 'Success', message };
+          lastMessage = message;
+          if (![429, 500, 502, 503, 504].includes(response.status) || attempt === 2) {
+            return { index, success: false, httpCode: response.status, status: response.status === 409 ? 'Conflict' : 'Failed', message: lastMessage };
+          }
+        } catch (err) {
+          clearTimeout(timer);
+          lastMessage = err && err.name === 'AbortError' ? 'Mapping API timeout' : 'Mapping API network error: ' + String(err && err.message || err).slice(0, 180);
+          if (attempt === 2) return { index, success: false, httpCode: lastCode, status: 'Network error', message: lastMessage };
+        }
+        await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)));
+      }
+      return { index, success: false, httpCode: lastCode, status: 'Failed', message: lastMessage };
+    };
+    const results = new Array(rows.length);
+    let cursor = 0;
+    const workers = Array.from({ length: Math.min(8, rows.length) }, async () => {
+      while (cursor < rows.length) { const i = cursor++; results[i] = await callOne(rows[i], i); }
+    });
+    await Promise.all(workers);
+    return sendJson(res, 200, { ok: true, results, success: results.filter((r) => r.success).length, failed: results.filter((r) => !r.success).length });
   }
 
   // ---- gviz ----
