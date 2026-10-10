@@ -41,6 +41,20 @@ test('FASTag Mapping template is exactly the requested four columns; lookup trie
   assert.match(page, /if \(!value \|\| !agentId\)/);
 });
 
+test('StockDataa column mapping uses TAG_ID, BARCODE and TAG_CLASS; separate range upload + API CSV schemas', async () => {
+  const page = await read('fastagMapping.js');
+  assert.match(page, /tagId: \['tagid'[\s\S]*?\]/);
+  assert.match(page, /barcode: \['barcode'[\s\S]*?\]/);
+  assert.match(page, /vcType: \['vctype', 'tagclass'/);
+  assert.match(page, /index\.serialNo = barcodeIdx/);
+  assert.match(page, /const headers = \['tagId', 'serialNo', 'vcType', 'agentId'\]/);
+  assert.match(page, /saveCsvFile\('fastag-range-template\.csv', \['firstBarcode', 'lastBarcode', 'agentId'\]/);
+  assert.match(page, /saveCsvFile\('fastag-mapping-api-rows-/);
+  assert.match(page, /\['tagId', 'serialNo', 'vcType', 'agentId'\], rows/);
+  assert.match(page, /queryField\('barcode', barcodes\)[\s\S]*?queryField\('tagId', tagIds\)/);
+  assert.match(page, /Array\.from\(\{ length: Math\.min\(3, batches\.length\) \}/);
+});
+
 test('FASTag Mapping write API is authenticated/admin-only and never embeds its secret in frontend', async () => {
   const server = await read('server.js');
   const page = await read('fastagMapping.js');
