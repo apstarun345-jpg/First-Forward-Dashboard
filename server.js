@@ -6556,6 +6556,8 @@ async function handleApi(req, res, url) {
         courier: shortText(body.courier, 40),
         source: 'public-link', ip: String(ip || '').slice(0, 45), note, updatedBy: 'public-link', submissionId: body.submissionId
       });
+      // A replay must return the original token, not the fresh unused token generated for this retry.
+      const responseEmployeeToken = out.created[0].employeeToken || employeeToken;
       // Link the passive visit for useful request context; only consented share sessions receive live telemetry.
       // Never store a live-share token in request or notification records.
       let linkedLiveSession = null;
@@ -6594,7 +6596,7 @@ async function handleApi(req, res, url) {
       return sendJson(res, 201, {
         ok: true,
         batch: { id: out.batch, total: out.total, agents: n, rows: out.rows },
-         employeeToken,
+         employeeToken: responseEmployeeToken,
         request: tagBatchSummary(out.created[0]),
         requests: out.created.map(tagBatchSummary),
         warnings: dupReqs.length ? [{
