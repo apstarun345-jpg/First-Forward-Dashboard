@@ -3364,7 +3364,7 @@ body.colorful .from-hdr { color: #166534; }
       employeeStatusPage, employeeStatusFiltersHtml, employeeStatusHistoryHtml,
       employeeHistoryInnerHtml, employeeHistoryChipsHtml, employeeHistoryPanelHtml, contactSuggestHtml,
       recTotals, suggestItems, suggestHtml, stockBoardHtml, stockBoardTableHtml, stockBoardRows, stockBoardChipsHtml,
-      classBreakdownRows, classBreakdownHtml, tlPanelHtml, findTlRecord, courierOptions, requestColumnCount,
+      classBreakdownRows, classBreakdownHtml, tlPanelHtml, findTlRecord, courierOptions, ITEM_NAME_OPTIONS, normalizeItemName, requestColumnCount,
       setIndex: (idx) => { state.index = idx || null; },
       setStockBoard: (patch) => { state.stockBoard = { ...state.stockBoard, ...(patch || {}) }; },
       // 🧪 Public (employee link) mode + employee identity/history — panel generators inhi par chalte hain.
