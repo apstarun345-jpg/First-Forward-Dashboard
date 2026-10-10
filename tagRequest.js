@@ -67,7 +67,7 @@ FF.pages = FF.pages || {};
     view: 'form', rows: [], note: '', result: null, problems: [], busy: '', submitKey: '',
     index: null, indexPromise: null, exact: null, exactPromise: null,
     // 📝 form
-    employee: { name: '', office: '' }, employeeToken: '', employeeSummary: null, employeeSummaryPromise: null, errs: {}, formCfg: null, formCfgPromise: null, courier: '',
+    employee: { name: '', office: '' }, employeeToken: '', employeeSummary: null, employeeSummaryPromise: null, errs: {}, formCfg: null, formCfgPromise: null, courier: '', itemName: 'FASTag',
     // 🌐 public (bina login)
     publicMode: false, publicCfg: null, done: null,
     status: { q: '', list: null, busy: false, err: '', searched: '' },
@@ -622,7 +622,8 @@ FF.pages = FF.pages || {};
       employee: (r.employee && r.employee.name) || r.byName || r.by || '',
       agentName, agentId: (r.agent && r.agent.agentId) || (rows[0] && rows[0].agentId) || '',
       agents: agents.length, forTl: !!(r.agent && r.agent.kind === 'tl'), tl: (r.agent && r.agent.tl) || (rows[0] && rows[0].tl !== '—' ? rows[0].tl : '') || '',
-      courier: clean(r.courier || '')          // 🚚 label par courier ka naam
+      courier: clean(r.courier || ''),         // 🚚 label par courier ka naam
+      itemName: normalizeItemName(r.itemName)  // 📦 printed item
     };
   }
   /** Label par agent / TL ka reference line (dispatch name alag ho ya purani employee request ho tab). */
@@ -646,7 +647,8 @@ FF.pages = FF.pages || {};
       t.pincode ? `PIN Code - ${t.pincode} (Pincode: ${t.pincode})` : '',
       ...(agentRef(it) ? [agentRef(it)] : []),
       '',
-      `🏷️ FASTags: ${it.total} tags${it.classes.length ? ` (${it.classes.map((c) => `${c.cls}×${c.qty}`).join(', ')})` : ''} · Date: ${it.date}`,
+      `🏷️ FASTags: 
+      `📦 Item Name: ${it.itemName || 'FASTag'}`,${it.total} tags${it.classes.length ? ` (${it.classes.map((c) => `${c.cls}×${c.qty}`).join(', ')})` : ''} · Date: ${it.date}`,
       it.courier ? `🚚 Courier: ${it.courier}` : '',
       '',
       `📤 FROM (SENDER):`,
@@ -671,7 +673,8 @@ FF.pages = FF.pages || {};
       const agentLine = agentRef(it) ? `<div class="to-agent">${esc(agentRef(it))}</div>` : '';
       const meta = `Req #${esc(it.id.slice(-10))} · ${esc(it.date)}${it.courier ? ` · 🚚 Courier: ${esc(it.courier)}` : ''}${it.employee ? ` · Emp: ${esc(it.employee)}` : ''}${it.tl ? ` · TL ${esc(it.tl)}` : ''}${it.agentId && t.who === 'agent' ? ` · ID ${esc(it.agentId)}` : ''}`;
       const courierChip = it.courier ? `<div class="to-courier">🚚 Courier: <b>${esc(it.courier)}</b></div>` : '';
-      return `<div class="lbl"><div class="lbl-top-bar"><span class="tag">TO</span><span class="to-hdr-title">📬 DELIVER TO (RECEIVER)</span><span class="lbl-id">#${esc(it.id.slice(-10))}</span></div><div class="to"><div class="to-row"><span class="lbl-k">Name - </span><b class="to-name">${esc(t.name || '')}</b>${t.mobile ? `<div class="to-mob">☏ ${esc(t.mobile)}</div>` : ''}</div>${t.address ? `<div class="to-addr"><span class="lbl-k">Address - </span>${esc(t.address)}</div>` : ''}${t.pincode ? `<div class="to-pin"><span class="lbl-k">PIN Code - </span>PIN: ${esc(t.pincode)}</div>` : ''}${courierChip}${agentLine}</div><div class="cls">🏷️ ${cls} = <b>${fmt(it.total)} tags</b></div>${fromLine}<div class="meta">${meta}</div></div>`;
+      const itemNameChip = `<div class="to-item-name">📦 Item Name: <b>${esc(it.itemName || 'FASTag')}</b></div>`;
+      return `<div class="lbl"><div class="lbl-top-bar"><span class="tag">TO</span><span class="to-hdr-title">📬 DELIVER TO (RECEIVER)</span><span class="lbl-id">#${esc(it.id.slice(-10))}</span></div><div class="to"><div class="to-row"><span class="lbl-k">Name - </span><b class="to-name">${esc(t.name || '')}</b>${t.mobile ? `<div class="to-mob">☏ ${esc(t.mobile)}</div>` : ''}</div>${t.address ? `<div class="to-addr"><span class="lbl-k">Address - </span>${esc(t.address)}</div>` : ''}${t.pincode ? `<div class="to-pin"><span class="lbl-k">PIN Code - </span>PIN: ${esc(t.pincode)}</div>` : ''}${itemNameChip}${courierChip}${agentLine}</div><div class="cls">🏷️ ${cls} = <b>${fmt(it.total)} tags</b></div>${fromLine}<div class="meta">${meta}</div></div>`;
     }).join('');
     const totalTags = list.reduce((s, it) => s + num(it.total), 0);
     return `<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -1398,6 +1401,8 @@ body.colorful .from-hdr { color: #166534; }
           <div class="tr-form-extra">
             ${cfg.askCourier === false ? '' : `<label class="field"><span class="dim small">🚚 Courier (optional — label par chhapta hai)</span>
               <select class="input" data-tr-field="courier"><option value="" ${state.courier ? '' : 'selected'}>🚚 courier chuno…</option>${courierOptions().map((c) => `<option value="${esc(c)}" ${c.toLowerCase() === String(state.courier || '').toLowerCase() ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></label>`}
+            <label class="field"><span class="dim small">📦 Item Name</span>
+              <select class="input" data-tr-field="itemName" aria-label="Item Name">${ITEM_NAME_OPTIONS.map((name) => `<option value="${esc(name)}" ${normalizeItemName(state.itemName) === name ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select></label>
             ${cfg.askNote === false ? '' : `<label class="field tr-note-field"><span class="dim small">Note (optional — admin ke liye)</span>
               <input class="input" data-tr-field="note" value="${esc(state.note)}" placeholder="e.g. urgent — kal dispatch chahiye" maxlength="300"></label>`}
           </div>
@@ -1675,6 +1680,8 @@ body.colorful .from-hdr { color: #166534; }
     if (courier) {
       courier.addEventListener('change', () => { state.courier = clean(courier.value); saveCourier(); });
     }
+    const itemName = root.querySelector('[data-tr-field="itemName"]');
+    if (itemName) itemName.addEventListener('change', () => { state.itemName = normalizeItemName(itemName.value); });
     const note = root.querySelector('[data-tr-field="note"]');
     if (note) note.addEventListener('input', () => { state.note = note.value; });
     root.querySelectorAll('[data-tr-emp]').forEach((inp) => inp.addEventListener('input', () => {
@@ -1787,7 +1794,7 @@ body.colorful .from-hdr { color: #166534; }
     const office = clean(state.employee.office);
     const liveShare = isPublic() && FF.publicForm && typeof FF.publicForm.liveShareCredentials === 'function' ? FF.publicForm.liveShareCredentials() : null;
     const publicVisitId = isPublic() && FF.publicForm && typeof FF.publicForm.publicVisitId === 'function' ? FF.publicForm.publicVisitId() : '';
-    return { employee: { name: clean(state.employee.name), ...(office && formCfg().askOffice ? { office } : {}) }, employeeToken: isPublic() ? state.employeeToken : '', ...(publicVisitId ? { publicVisitId } : {}), ...(liveShare ? { liveShare } : {}), note: clean(state.note), courier: clean(state.courier), agents };
+    return { employee: { name: clean(state.employee.name), ...(office && formCfg().askOffice ? { office } : {}) }, employeeToken: isPublic() ? state.employeeToken : '', ...(publicVisitId ? { publicVisitId } : {}), ...(liveShare ? { liveShare } : {}), note: clean(state.note), courier: clean(state.courier), itemName: normalizeItemName(state.itemName), agents };
   }
   const withTimeout = (p, ms) => Promise.race([p, new Promise((resolve) => setTimeout(resolve, ms))]);
   async function submit() {
@@ -1917,7 +1924,8 @@ body.colorful .from-hdr { color: #166534; }
       <div class="tr-st-top"><span class="badge ${v.tone}">${v.label}</span><b class="tr-st-agent">${esc(s.agentName || '—')}</b>${s.agents > 1 ? `<small class="dim"> +${s.agents - 1} agents</small>` : ''}<span class="tr-st-total"><b>${fmt(s.total)}</b> tags</span></div>
       ${steps}
       ${cls ? `<div class="tr-st-classes">${cls}</div>` : ''}
-      <div class="dim small">📅 ${esc(longDate(s.at))} · ${esc(ago(s.at))}${s.employeeName ? ` · 👤 employee: ${esc(s.employeeName)}` : (s.byName ? ` · 👤 entry: ${esc(s.byName)}` : '')} · <span class="mono">${esc(s.id)}</span>${s.sheetSynced ? ' · 📗 sheet entry' : ''}</div>
+      <div class="dim small">📅 ${esc(longDate(s.at))}      <div class="dim small">📦 Item Name: <b>${esc(normalizeItemName(s.itemName))}</b></div>
+ · ${esc(ago(s.at))}${s.employeeName ? ` · 👤 employee: ${esc(s.employeeName)}` : (s.byName ? ` · 👤 entry: ${esc(s.byName)}` : '')} · <span class="mono">${esc(s.id)}</span>${s.sheetSynced ? ' · 📗 sheet entry' : ''}</div>
       ${s.adminNote ? `<div class="notice green" style="margin-top:8px">💬 Admin note: ${esc(s.adminNote)}</div>` : ''}
     </div>`;
   }
@@ -2327,7 +2335,7 @@ body.colorful .from-hdr { color: #166534; }
       <td class="tr-c-emp"><b>${esc(empName)}</b>${e.office ? `<small class="dim">${esc(e.office)}</small>` : ''}${entryBy}${r.source === 'public-link' ? '<span class="badge" title="Employee link se aayi (bina login)">🌐 link</span>' : ''}</td>
       <td class="tr-c-agent"><b>${esc(dr.agent.name)}</b>${dr.agent.kind === 'tl' ? ' <span class="badge purple">TL</span>' : ''}${dr.agent.dispatchName ? `<small class="dim"> 🚚 ${esc(dr.agent.dispatchName)}</small>` : ''}<small class="dim">${dr.agent.agentId ? `#${esc(dr.agent.agentId)}` : ''}${dr.agent.tl ? `${dr.agent.agentId ? ' · ' : ''}TL ${esc(dr.agent.tl)}` : ''}</small>
         <span class="tr-tags"><span class="badge ${dr.agent.channel === 'gv' ? 'green' : 'blue'}">${dr.agent.channel === 'gv' ? '🟩 GV' : '🟦 FF'}</span>${dr.agent.unmatched ? '<span class="badge amber" title="Sheet data me nahi mila — naya agent?">🆕 verify</span>' : ''}${dr.siblings > 1 ? `<span class="badge gray" title="Purani request — ek request me ${dr.siblings} agents">🔗 ${dr.siblings} agents</span>` : ''}</span></td>
-      ${isAdmin() ? `<td class="tr-c-courier"><span class="badge ${r.courier ? 'blue' : 'gray'}">🚚 ${esc(r.courier || '—')}</span></td>` : ''}
+      ${isAdmin() ? `<td class="tr-c-courier"><span class="badge ${r.courier ? 'blue' : 'gray'}">🚚 ${esc(r.courier || '—')}</span></td><td class="tr-c-item-name"><select class="input tr-item-name-sel" data-tr-item-name data-key="${esc(dr.key)}" aria-label="Item Name" title="📦 Item Name">${ITEM_NAME_OPTIONS.map((name) => `<option value="${esc(name)}" ${normalizeItemName(r.itemName) === name ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select></td>` : ''}
       <td class="tr-c-addr">${c.who === 'employee' && (c.mobile || c.address) ? '<small class="dim">employee ka address:</small>' : ''}${c.mobile ? `<a class="tr-mob" href="tel:${esc(String(c.mobile).replace(/[^\d+]/g, ''))}">☏ ${esc(c.mobile)}</a>` : ''}${c.address ? `<div class="tr-addr">${esc(c.address)}</div>` : ''}${c.pincode ? `<b class="tr-pin">📮 ${esc(c.pincode)}</b>` : ''}${!c.mobile && !c.address && !c.pincode ? '<span class="dim small">—</span>' : ''}</td>
       ${metricCellsHtml(dr)}
       <td class="tr-c-cls">${classCellHtml(dr)}</td>
@@ -2488,7 +2496,7 @@ body.colorful .from-hdr { color: #166534; }
             <th rowspan="2" class="tr-th-employee">👤 Employee</th>
             <th rowspan="2" class="tr-th-agent">🧑 Agent</th>
             <th rowspan="2" class="tr-th-contact">Mobile · Address</th>
-            ${isAdmin() ? '<th rowspan="2" class="tr-th-courier">Courier</th>' : ''}
+            ${isAdmin() ? '<th rowspan="2" class="tr-th-courier">Courier</th><th rowspan="2" class="tr-th-item-name">Item Name</th>' : ''}
             <th colspan="3" class="section has tr-th-stock">STOCK<small class="tr-th-sub">total · class-wise</small></th>
             <th colspan="5" class="section has tr-th-issuance">ISSUANCE<small class="tr-th-sub">class-wise · monthly run</small></th>
             ${isAdmin() ? '<th rowspan="2" class="tr-th-suggest">🎯 SUGGESTION<small class="tr-th-sub">after stock · without stock deduction</small></th>' : ''}
@@ -2899,6 +2907,22 @@ body.colorful .from-hdr { color: #166534; }
         return;
       }
       if (t.matches && t.matches('[data-tr-courier]')) {
+      if (t.matches && t.matches('[data-tr-item-name]')) {
+        const dr = findDr(t.dataset.key);
+        if (!dr) return;
+        const val = normalizeItemName(t.value);
+        if (val === normalizeItemName(dr.req.itemName)) return;
+        t.disabled = true;
+        putRequest(dr.req, { itemName: val }).then(() => {
+          U.toast('Item Name: ' + val, 'ok');
+          renderReqTable();
+        }).catch((err) => {
+          U.toast('Item Name save nahi hua: ' + ((err && err.message) || ''), 'err');
+          renderReqTable();
+        });
+        return;
+      }
+
         const dr = findDr(t.dataset.key);
         if (!dr) return;
         const val = clean(t.value);
@@ -3257,6 +3281,7 @@ body.colorful .from-hdr { color: #166534; }
     if (state.publicMode && !state.publicCfg && FF.publicForm && FF.publicForm.config) state.publicCfg = FF.publicForm.config;
     loadEmployee();
     loadCourier();
+    state.itemName = 'FASTag';
     if (!state.publicMode && !clean(state.employee.name)) state.employee.name = (FF.auth && FF.auth.user && (FF.auth.user.name || FF.auth.user.username)) || '';
     const views = state.publicMode ? ['form', 'status', 'done'] : ['form', 'requests', 'settings'];
     if (params && params.view) {
@@ -3367,3 +3392,4 @@ body.colorful .from-hdr { color: #166534; }
     open: (agent) => { if (agent) state.rows = [newRow({ agentId: /^\d+$/.test(String(agent)) ? String(agent) : '', name: /^\d+$/.test(String(agent)) ? '' : String(agent) })]; state.view = 'form'; }
   };
 })(window.FF);
+const COURIER_KEY = 'ff_tr_courier';   // 🚚 pichhla chuna hua courier — dobara type na karna pade

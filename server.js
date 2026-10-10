@@ -5579,7 +5579,7 @@ async function handleApi(req, res, url) {
     const rows = r.rows || [];
     const names = [...new Set(rows.map((x) => x.agentName).filter(Boolean))];
     return {
-      id: r.id, at: r.at, status: r.status || 'pending', total: Number(r.total) || 0, byName: r.byName || '', batch: r.batch || '', courier: r.courier || '',
+      id: r.id, at: r.at, status: r.status || 'pending', total: Number(r.total) || 0, byName: r.byName || '', batch: r.batch || '', courier: r.courier || '', itemName: ['FASTag', 'Biomatric Device', 'Matarial'].includes(r.itemName) ? r.itemName : 'FASTag',
       agentName: (r.agent && r.agent.name) || names[0] || '', agentId: (r.agent && r.agent.agentId) || (rows[0] && rows[0].agentId) || '',
       rows: rows.length, agents: Math.max(1, names.length),
       classes: rows.map((x) => ({ cls: x.cls, requested: x.requested === undefined ? Number(x.approved) || 0 : Number(x.requested) || 0, approved: Number(x.approved) || 0, ...(names.length > 1 ? { agent: x.agentName || '' } : {}) })),
@@ -5611,7 +5611,7 @@ async function handleApi(req, res, url) {
   async function createTagBatch(drafts, ctx) {
     const submissionId = /^[A-Za-z0-9_-]{16,100}$/.test(String(ctx.submissionId || '')) ? String(ctx.submissionId) : '';
     const submissionFingerprint = submissionId ? crypto.createHash('sha256').update(JSON.stringify({
-      by: ctx.by, source: ctx.source || '', employee: ctx.employee || {}, note: ctx.note || '', courier: ctx.courier || '',
+      by: ctx.by, source: ctx.source || '', employee: ctx.employee || {}, note: ctx.note || '', courier: ctx.courier || '', itemName: ctx.itemName || 'FASTag',
       agents: drafts.map((d) => ({ agent: { id: d.agent && d.agent.agentId || '', name: d.agent && d.agent.name || '', mobile: d.agent && d.agent.mobile || '', address: d.agent && d.agent.address || '', pincode: d.agent && d.agent.pincode || '', channel: d.agent && d.agent.channel || '' }, rows: (d.rows || []).map((r) => ({ cls: r.cls, requested: r.requested, approved: r.approved })) }))
     })).digest('hex') : '';
     // Idempotency is server-side and durable: a timeout/retry with the same key returns the original batch.
@@ -5633,6 +5633,7 @@ async function handleApi(req, res, url) {
       employee: ctx.employee, employeeToken: ctx.employeeToken || '', agent: d.agent,
       ...(submissionId ? { submissionId, submissionFingerprint } : {}),
       ...(ctx.courier ? { courier: ctx.courier } : {}),
+      itemName: ['FASTag', 'Biomatric Device', 'Matarial'].includes(ctx.itemName) ? ctx.itemName : 'FASTag',
       ...(ctx.source ? { source: ctx.source, ip: ctx.ip } : {}),
       status: 'pending', note: ctx.note || '', adminNote: '',
       rows: d.rows, total: d.total, ...(d.metrics ? { metrics: d.metrics } : {}),
@@ -5676,10 +5677,11 @@ async function handleApi(req, res, url) {
     // v3.30 — delivery ab AGENT ke address par (employee form me agent ka mobile/address/pincode bharta hai)
     agentMobile: 'Agent mobile', agentAddress: 'Agent address', agentPincode: 'Agent pincode', requested: 'Requested qty',
     // v3.51 — 🚚 courier naam (Delhivery / DTDC) — label + sheet dono me
-    courier: 'Courier'
+    courier: 'Courier',
+    itemName: 'Item Name'
   };
   // 🪶 v3.51 — sheet ko chhota rakho: har AGENT ki EK row (saari classes ek hi cell me) + kam columns.
-  const TAG_SHEET_DEFAULT_COLUMNS = ['agent', 'agentId', 'date', 'time', 'tl', 'channel', 'cls', 'agentMobile', 'agentPincode', 'stock', 'last', 'cur', 'growth', 'approved', 'courier', 'status'];
+  const TAG_SHEET_DEFAULT_COLUMNS = ['agent', 'agentId', 'date', 'time', 'tl', 'channel', 'cls', 'agentMobile', 'agentPincode', 'stock', 'last', 'cur', 'growth', 'approved', 'courier', 'itemName', 'status'];
   const tagSheetConfig = () => {
     const w = workspaceStore();
     if (!w.tagRequestSheet || typeof w.tagRequestSheet !== 'object') {
@@ -5710,6 +5712,10 @@ async function handleApi(req, res, url) {
     cfg.onSubmit = false;
     cfg.onStatus = true;
     cfg.v = Math.max(5, Number(cfg.v) || 5);
+    // v6 — update untouched v5 default columns with Item Name, preserve custom columns/order.
+    const legacyV5Columns = ['agent', 'agentId', 'date', 'time', 'tl', 'channel', 'cls', 'agentMobile', 'agentPincode', 'stock', 'last', 'cur', 'growth', 'approved', 'courier', 'status'];
+    if (Array.isArray(cfg.columns) && cfg.columns.length === legacyV5Columns.length && cfg.columns.every((x, i) => x === legacyV5Columns[i])) cfg.columns = [...TAG_SHEET_DEFAULT_COLUMNS];
+    cfg.v = Math.max(6, Number(cfg.v) || 6);
     // v3.27 — link me sheet ka ID ho to wahi (alag sheet) target banta hai.
     if (cfg.spreadsheetId === undefined) cfg.spreadsheetId = sheetIdFromLink(cfg.sheetLink) || '';
     return cfg;
@@ -5903,6 +5909,7 @@ async function handleApi(req, res, url) {
       case 'agentPincode': return (req.agent && req.agent.pincode) || '';
       case 'requested': return x.requested === undefined || x.requested === null ? Number(x.approved) || 0 : Number(x.requested) || 0;
       case 'courier': return req.courier || '';
+      case 'itemName': return ['FASTag', 'Biomatric Device', 'Matarial'].includes(req.itemName) ? req.itemName : 'FASTag';
       case 'status': return req.status || '';
       case 'agentId': return x.agentId || '';
       case 'agent': return x.agentName || '';
@@ -6083,7 +6090,7 @@ async function handleApi(req, res, url) {
       const emp = body.employee && typeof body.employee === 'object' ? body.employee : {};
       const employee = { name: shortText(emp.name, 80) || user.name || user.username, ...(shortText(emp.office || emp.branch, 80) ? { office: shortText(emp.office || emp.branch, 80) } : {}) };
       drafts.forEach((d) => { d.dupes = tagAgentDupes([{ ...d.agent, rows: d.rows }]); });
-      const out = await createTagBatch(drafts, { by: user.username, byName: user.name || user.username, employee, note: shortText(body.note, 300), courier: shortText(body.courier, 40), updatedBy: user.username, submissionId: body.submissionId });
+      const out = await createTagBatch(drafts, { by: user.username, byName: user.name || user.username, employee, note: shortText(body.note, 300), courier: shortText(body.courier, 40), itemName: ['FASTag', 'Biomatric Device', 'Matarial'].includes(body.itemName) ? body.itemName : 'FASTag', updatedBy: user.username, submissionId: body.submissionId });
       const n = out.created.length;
       if (!out.idempotentReplay) try {
         recordNotification({
@@ -6110,6 +6117,7 @@ async function handleApi(req, res, url) {
       id: nextTagReqId(), at: now, by: user.username, byName: user.name || user.username,
       status: 'pending', note: shortText(body.note, 300), adminNote: '',
       ...(shortText(body.courier, 40) ? { courier: shortText(body.courier, 40) } : {}),
+      itemName: ['FASTag', 'Biomatric Device', 'Matarial'].includes(body.itemName) ? body.itemName : 'FASTag',
       rows, tls: tagRequestTls(body.tls), total, updatedAt: now, updatedBy: user.username
     };
     storeTagRequests([row]);
@@ -6201,6 +6209,7 @@ async function handleApi(req, res, url) {
       const c = shortText(body.courier, 40);
       if (c) row.courier = c; else delete row.courier;
     }
+    if (body.itemName !== undefined) row.itemName = ['FASTag', 'Biomatric Device', 'Matarial'].includes(body.itemName) ? body.itemName : 'FASTag';
     row.updatedAt = new Date().toISOString(); row.updatedBy = user.username;
     await persist('notify');
     // 📗 v5: Sheet sync ONLY on the first transition to Approved.
@@ -6554,6 +6563,7 @@ async function handleApi(req, res, url) {
         by: `public:${normUser(employeeName) || 'employee'}`, byName: employeeName,
         employee: { name: employeeName, ...(office ? { office } : {}) }, employeeToken,
         courier: shortText(body.courier, 40),
+        itemName: ['FASTag', 'Biomatric Device', 'Matarial'].includes(body.itemName) ? body.itemName : 'FASTag',
         source: 'public-link', ip: String(ip || '').slice(0, 45), note, updatedBy: 'public-link', submissionId: body.submissionId
       });
       // A replay must return the original token, not the fresh unused token generated for this retry.
