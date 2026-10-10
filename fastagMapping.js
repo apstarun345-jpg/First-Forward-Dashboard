@@ -6,6 +6,7 @@ window.FF = window.FF || {};
   const API_STATUS = '/api/fastag-mapping/status';
   const API_MAP = '/api/fastag-mapping/map';
   const MAX_INPUTS = 2500;
+  const MAX_RESULTS = 3000;
   let nextId = 1;
   const state = { items: [], rows: [], configured: false, busy: false, root: null };
   const esc = (v) => U.esc(String(v == null ? '' : v));
@@ -117,6 +118,11 @@ window.FF = window.FF || {};
     return out;
   }
   function isDigitKey(v) { return /^\d+$/.test(clean(v)); }
+  function compareBarcode(a, b) {
+    const x = clean(a), y = clean(b);
+    if (isDigitKey(x) && isDigitKey(y)) { const xx = BigInt(x), yy = BigInt(y); return xx < yy ? -1 : (xx > yy ? 1 : 0); }
+    return x.localeCompare(y, undefined, { numeric: true, sensitivity: 'base' });
+  }
   function literal(v, numeric) {
     const s = clean(v);
     if (numeric && isDigitKey(s) && !(s.length > 1 && s[0] === '0')) return s;
@@ -201,12 +207,13 @@ window.FF = window.FF || {};
         if (item._lookupError) { state.rows.push({ id: nextId++, source: item.source, request: item.first + ' – ' + item.last, selected: false, status: 'Lookup error', message: item._lookupError, stock: {}, agentId: '' }); continue; }
         let candidates = [];
         if (item.type === 'range') {
-          if (clean(item.first) > clean(item.last)) { state.rows.push({ id: nextId++, source: item.source, request: item.first + ' – ' + item.last, selected: false, status: 'Invalid barcode range', message: 'First barcode last se bada hai.', stock: {}, agentId: '' }); continue; }
-          candidates = (item._rangeRows || []).filter((r) => clean(r.barcode) >= clean(item.first) && clean(r.barcode) <= clean(item.last));
+          if (compareBarcode(item.first, item.last) > 0) { state.rows.push({ id: nextId++, source: item.source, request: item.first + ' – ' + item.last, selected: false, status: 'Invalid barcode range', message: 'First barcode last se bada hai.', stock: {}, agentId: '' }); continue; }
+          candidates = (item._rangeRows || []).filter((r) => compareBarcode(r.barcode, item.first) >= 0 && compareBarcode(r.barcode, item.last) <= 0);
         } else if (item.tagId) candidates = byTag.filter((r) => r.tagId === item.tagId);
         else if (item.barcode) candidates = byBarcode.filter((r) => r.barcode === item.barcode);
         if (item.tagId && item.barcode) candidates = candidates.filter((r) => r.barcode === item.barcode);
         if (!candidates.length) { addResult(item, null, item.type); continue; }
+        if (state.rows.length + candidates.length > MAX_RESULTS) { state.rows.push({ id: nextId++, source: item.source, request: item.type === 'range' ? item.first + ' – ' + item.last : (item.tagId || item.barcode || ''), selected: false, status: 'Result limit reached', message: 'Ek lookup me maximum ' + MAX_RESULTS + ' matched tags. Range ko chhote parts me divide karein.', stock: {}, agentId: '' }); continue; }
         for (const stock of candidates) addResult(item, stock, item.type === 'range' ? 'Barcode range' : (item.tagId ? 'Tag ID' : 'Barcode'));
       }
       checkDuplicates(); renderTable();
@@ -316,7 +323,7 @@ window.FF = window.FF || {};
       if (target.id === 'fm-add-range') {
         const first = clean(U.$('#fm-first', root).value), last = clean(U.$('#fm-last', root).value);
         if (!first || !last) { setStatus('First aur Last barcode dono required hain.', 'warn'); return; }
-        if (first > last) { setStatus('First barcode, last barcode se bada nahi ho sakta.', 'warn'); return; }
+        if (compareBarcode(first, last) > 0) { setStatus('First barcode, last barcode se bada nahi ho sakta.', 'warn'); return; }
         state.items.push({ id: nextId++, type: 'range', first, last, agentId: clean(U.$('#fm-range-agent', root).value), source: 'Manual range', selected: true });
         U.$('#fm-first', root).value = ''; U.$('#fm-last', root).value = ''; setStatus('Barcode range added. Lookup karein.', 'success'); return;
       }
