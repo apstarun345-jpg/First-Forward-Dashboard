@@ -163,52 +163,87 @@ FF.pages = FF.pages || {};
 
   // ---- detailed rows used only by cross-channel and quality pages -------------------------------
   async function querySelectedRows(sheet, columns, whereColumn, fresh) {
-    const rows = [], pageSize = 25000, hardCap = 250000, pageBatch = 3;
-    const fetchPage = (offset) => D.query(sheet, `select ${columns.join(', ')} where ${whereColumn} is not null limit ${pageSize} offset ${offset}`, { fresh: !!fresh });
+    const rows = [], pageSize = 10000, hardCap = 250000, pageBatch = 2;
+    const selected = [...new Set((columns || []).map((x) => String(x || '').trim().toUpperCase()).filter(Boolean))];
+    if (!selected.length || !whereColumn) return { rows, truncated: false };
+    const condition = /\bis\s+not\s+null\b/i.test(String(whereColumn))
+      ? String(whereColumn) : String(whereColumn) + ' is not null';
+    const fetchPage = (offset) => D.query(sheet, \`select \${selected.join(', ')} where (\${condition}) limit \${pageSize} offset \${offset}\`, { fresh: !!fresh, timeoutMs: 55000 });
     let offset = 0;
     while (offset < hardCap) {
-      // Fetch the first page alone, then overlap the next small page batch. Large detail scans
-      // finish in fewer network round trips without pulling whole inventory tabs into the UI.
-      const first = await fetchPage(offset);
-      rows.push(...first.rows);
-      if (first.rows.length < pageSize) return { rows, truncated: false };
-      offset += pageSize;
-      if (offset >= hardCap) break;
-      const offsets = Array.from({ length: Math.min(pageBatch, Math.ceil((hardCap - offset) / pageSize)) }, (_, i) => offset + i * pageSize);
-      const pages = await Promise.all(offsets.map(fetchPage));
-      for (let i = 0; i < pages.length; i++) {
-        rows.push(...pages[i].rows);
-        offset = offsets[i] + pageSize;
-        if (pages[i].rows.length < pageSize) return { rows, truncated: false };
+      // Smaller pages keep Google/Render responses bounded; only two pages per sheet run concurrently.
+      const count = Math.min(pageBatch, Math.ceil((hardCap - offset) / pageSize));
+      const pages = await Promise.all(Array.from({ length: count }, (_, i) => fetchPage(offset + i * pageSize)));
+      let consumed = 0;
+      for (const page of pages) {
+        rows.push(...(page.rows || []));
+        consumed++;
+        if ((page.rows || []).length < pageSize) return { rows, truncated: false };
       }
+      offset += consumed * pageSize;
     }
     return { rows, truncated: rows.length >= hardCap };
   }
   async function loadDetails(fresh) {
     if (mem.details && !fresh) return mem.details;
     if (mem.detailsPromise && !fresh) return mem.detailsPromise;
-    const s = FF.config.stock || {}, a = (FF.config.gv && FF.config.gv.assignment) || {}, gm = (FF.config.gv && FF.config.gv.master) || {};
-    const stockCols = [s.barcode, s.tagId, s.agentId, s.agentName, s.tlName, s.cls, s.agentAllocatedAt, s.bcAllocatedAt].filter(Boolean);
+    const s = FF.config.stock || {}, a = (FF.config.gv && FF.config.gv.assignment) || {}, gm = (FF.config.gv && FF.config.gv.master) || {}, e = FF.config.eir || {};
+    const stockCols = [...new Set([s.barcode, s.tagId, s.agentId, s.agentName, s.tlName, s.cls, s.agentAllocatedAt, s.bcAllocatedAt].filter(Boolean))];
     const assignCols = [...new Set([a.serial, a.tagId, a.agentId, a.agentName, a.tlId, a.tlName, a.cls, a.gvUniqueId, a.gvUniqueName, a.allocatedAt].filter(Boolean))];
+    const masterCols = [...new Set([gm.uniqueId, gm.agentName, gm.tlId, gm.tlName, gm.tagId, gm.serial, gm.date, gm.gvUniqueId, gm.gvUniqueName, gm.vClass, gm.cch, gm.tagType].filter(Boolean))];
+    const eirCols = [...new Set([e.tagId, e.vrn, e.agentId, e.agentName, e.tlId, e.tlName, e.cls, e.date, e.masterId, e.gvId, e.gvName, e.gvTl, e.vrnType].filter(Boolean))];
+    const masterWhere = [gm.uniqueId, gm.tagId, gm.serial].filter(Boolean).map((col) => col + ' is not null').join(' or ') || (masterCols[0] || gm.uniqueId);
+    const eirWhere = [e.tagId, e.vrn].filter(Boolean).map((col) => col + ' is not null').join(' or ') || (eirCols[0] || e.tagId);
+    const readId = (cell) => D.identifierText ? D.identifierText(cell) : D.cellText(cell);
+    const readSelected = (row, columns, idColumns) => {
+      const o = {};
+      columns.forEach((col, i) => { o[col] = idColumns.has(col) ? readId(row[i]) : D.cellText(row[i]); });
+      return o;
+    };
+    const masterIndex = new Map(masterCols.map((col, i) => [col, i]));
+    const eirIndex = new Map(eirCols.map((col, i) => [col, i]));
+    const masterVal = (row, col, identifier = false) => {
+      const i = masterIndex.get(String(col || '').trim().toUpperCase());
+      return i === undefined ? '' : (identifier ? readId(row[i]) : D.cellText(row[i]));
+    };
+    const eirVal = (row, col, identifier = false) => {
+      const i = eirIndex.get(String(col || '').trim().toUpperCase());
+      return i === undefined ? '' : (identifier ? readId(row[i]) : D.cellText(row[i]));
+    };
     mem.detailsPromise = Promise.all([
       querySelectedRows(s.sheet || 'StockDataa', stockCols, s.tagId || s.barcode, fresh),
       querySelectedRows('Tag Assignment', assignCols, a.tagId || a.serial, fresh),
-      D.query('GV Master', '', { fresh: !!fresh })
-    ]).then(([stockResult, assignmentResult, masterTable]) => {
+      querySelectedRows('GV Master', masterCols, masterWhere, fresh),
+      querySelectedRows(e.sheet || 'EIR', eirCols, eirWhere, fresh)
+    ]).then(([stockResult, assignmentResult, masterResult, eirResult]) => {
+      const stockIds = new Set([s.barcode, s.tagId].filter(Boolean));
+      const assignmentIds = new Set([a.serial, a.tagId].filter(Boolean));
       const stock = stockResult.rows.map((r) => {
-        const o = {}; stockCols.forEach((col, i) => { o[col] = D.cellText(r[i]); });
+        const o = readSelected(r, stockCols, stockIds);
         return { barcode: clean(o[s.barcode]), tagId: clean(o[s.tagId]), agentId: clean(o[s.agentId]), agentName: clean(o[s.agentName]), tlName: clean(o[s.tlName]), cls: G.normClass ? G.normClass(o[s.cls]) : clean(o[s.cls]), agentAllocatedAt: clean(o[s.agentAllocatedAt]), bcAllocatedAt: clean(o[s.bcAllocatedAt]) };
       }).filter((r) => r.barcode || r.tagId);
       const assignment = assignmentResult.rows.map((r) => {
-        const o = {}; assignCols.forEach((col, i) => { o[col] = D.cellText(r[i]); });
+        const o = readSelected(r, assignCols, assignmentIds);
         return { serial: clean(o[a.serial]), tagId: clean(o[a.tagId]), agentId: clean(o[a.agentId]), agentName: clean(o[a.agentName]), tlId: clean(o[a.tlId]), tlName: clean(o[a.tlName]), cls: G.normClass ? G.normClass(o[a.cls]) : clean(o[a.cls]), gvUniqueId: clean(o[a.gvUniqueId]), gvUniqueName: clean(o[a.gvUniqueName]), allocatedAt: a.allocatedAt ? clean(o[a.allocatedAt]) : '' };
       }).filter((r) => r.serial || r.tagId);
-      const rawMaster = masterTable.rows.map((r) => ({
-        agentId: colGet(r, gm.uniqueId), agentName: colGet(r, gm.agentName), tlId: colGet(r, gm.tlId), tlName: colGet(r, gm.tlName),
-        tagId: colGet(r, gm.tagId), serial: colGet(r, gm.serial), rawDate: colGet(r, gm.date), date: D.cellDate(r[gm.date ? U.colIndex(gm.date) : -1]),
-        gvUniqueId: colGet(r, gm.gvUniqueId), gvUniqueName: colGet(r, gm.gvUniqueName)
+      const rawMaster = masterResult.rows.map((r) => ({
+        agentId: masterVal(r, gm.uniqueId), agentName: masterVal(r, gm.agentName), tlId: masterVal(r, gm.tlId), tlName: masterVal(r, gm.tlName),
+        tagId: masterVal(r, gm.tagId, true), serial: masterVal(r, gm.serial, true), rawDate: masterVal(r, gm.date),
+        date: D.cellDate(r[masterIndex.get(String(gm.date || '').trim().toUpperCase())]),
+        gvUniqueId: masterVal(r, gm.gvUniqueId), gvUniqueName: masterVal(r, gm.gvUniqueName),
+        cls: masterVal(r, gm.vClass || gm.cch || gm.tagType)
       })).filter((r) => Object.values(r).some(Boolean));
-      mem.details = { stock, assignment, rawMaster, truncated: { stock: stockResult.truncated, assignment: assignmentResult.truncated }, loadedAt: Date.now() };
+      const eir = eirResult.rows.map((r) => ({
+        tagId: eirVal(r, e.tagId, true), vrn: eirVal(r, e.vrn), agentId: eirVal(r, e.agentId), agentName: eirVal(r, e.agentName),
+        tlId: eirVal(r, e.tlId), tlName: eirVal(r, e.tlName), cls: eirVal(r, e.cls), rawDate: eirVal(r, e.date),
+        date: D.cellDate(r[eirIndex.get(String(e.date || '').trim().toUpperCase())]), masterId: eirVal(r, e.masterId),
+        gvId: eirVal(r, e.gvId), gvName: eirVal(r, e.gvName), gvTl: eirVal(r, e.gvTl), vrnType: eirVal(r, e.vrnType)
+      })).filter((r) => r.tagId || r.vrn);
+      mem.details = {
+        stock, assignment, rawMaster, eir,
+        truncated: { stock: stockResult.truncated, assignment: assignmentResult.truncated, rawMaster: masterResult.truncated, eir: eirResult.truncated },
+        loadedAt: Date.now()
+      };
       mem.detailsPromise = null;
       return mem.details;
     }).catch((err) => { mem.detailsPromise = null; throw err; });
