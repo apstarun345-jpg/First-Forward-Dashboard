@@ -8162,7 +8162,7 @@ async function servePersonalPage(req, res, rawToken) {
             <div class="pb-card"><h3>📈 Snapshot</h3>
               <div class="pb-kv"><span>Active days (current month)</span><b>${st.activeDays}</b></div>
               <div class="pb-kv"><span>MTD avg / active day</span><b>${st.mtdActiveDays ? (st.mtd / st.mtdActiveDays).toFixed(1) : '—'}</b></div>
-              <div class="pb-kv"><span>Total issued (current month)</span><b>${st.last14.reduce((a, b) => a + b.n, 0)}</b></div>
+              <div class="pb-kv"><span>Total issued (current month)</span><b>${nf(st.mtd)}</b></div>
             </div>
           </section>
         </div>` : ''}
