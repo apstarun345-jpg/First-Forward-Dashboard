@@ -64,7 +64,7 @@ FF.pages = FF.pages || {};
   ];
 
   const state = {
-    view: 'form', rows: [], note: '', result: null, problems: [], busy: '',
+    view: 'form', rows: [], note: '', result: null, problems: [], busy: '', submitKey: '',
     index: null, indexPromise: null, exact: null, exactPromise: null,
     // 📝 form
     employee: { name: '', office: '' }, employeeToken: '', employeeSummary: null, employeeSummaryPromise: null, errs: {}, formCfg: null, formCfgPromise: null, courier: '',
@@ -1812,6 +1812,10 @@ body.colorful .from-hdr { color: #166534; }
     // Snapshot ke liye index — slow network par form atke nahi (max ~6s, phir bina snapshot ke bhejo)
     try { await withTimeout(Promise.all([buildIndex(), isPublic() ? null : withTimeout(loadExactStock(), 2500)]), 6000); } catch { /* snapshot optional */ }
     const payload = buildPayload();
+    // Same key across network retries prevents one tap from creating two batches.
+    // The server verifies the payload fingerprint before replaying a previous result.
+    if (!state.submitKey) state.submitKey = (window.crypto && typeof window.crypto.randomUUID === 'function') ? window.crypto.randomUUID() : `tr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
+    payload.submissionId = state.submitKey;
     const api = isPublic() ? publicApi : (path, method, body) => FF.auth.api(path, method, body);
     try {
       if (!state.dup.force) {
@@ -1832,6 +1836,7 @@ body.colorful .from-hdr { color: #166534; }
       setBtn('📤 Bhej rahe hain…');
       const path = isPublic() ? '/api/public/tag-request' : '/api/tag-requests';
       const out = await api(path, 'POST', payload);
+      state.submitKey = ''; // success means the next intentional request gets a fresh key
       rememberAgents(payload.agents);
       saveEmployee();
       const reqs = (out && out.requests) || (out && out.request ? [out.request] : []);
