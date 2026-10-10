@@ -17,8 +17,11 @@ function makePage() {
   const cell = (v) => v == null ? null : ({ v, f: String(v) });
   const table = (rows) => ({ cols, rows: rows.map((r) => r.map((v, i) => {
     const c = cell(v);
-    // Simulate Google Sheets formatting a numeric-looking barcode with thousands separators.
-    if (i === 3 && /^\d{13,}$/.test(String(v ?? ''))) c.f = String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    // Simulate Google Sheets returning a numeric raw value plus a formatted display value.
+    if (i === 3 && /^\d{13,}$/.test(String(v ?? ''))) {
+      c.v = Number(v);
+      c.f = String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    }
     return c;
   })) });
   const D = {
