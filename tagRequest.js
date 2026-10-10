@@ -67,7 +67,7 @@ FF.pages = FF.pages || {};
     view: 'form', rows: [], note: '', result: null, problems: [], busy: '', submitKey: '',
     index: null, indexPromise: null, exact: null, exactPromise: null,
     // 📝 form
-    employee: { name: '', office: '' }, employeeToken: '', employeeSummary: null, employeeSummaryPromise: null, errs: {}, formCfg: null, formCfgPromise: null, courier: '', itemName: 'FASTag',
+    employee: { name: '', office: '' }, employeeToken: '', employeeSummary: null, employeeSummaryPromise: null, errs: {}, formCfg: null, formCfgPromise: null, courier: '', itemName: 'FASTag', serialNumber: '', deviceName: '', materialDescription: '',
     // 🌐 public (bina login)
     publicMode: false, publicCfg: null, done: null,
     status: { q: '', list: null, busy: false, err: '', searched: '' },
@@ -116,6 +116,7 @@ FF.pages = FF.pages || {};
   const EMPLOYEE_TOKEN_KEY = 'ff_tr_employee_token';
   const COURIER_KEY = 'ff_tr_courier';   // 🚚 pichhla chuna hua courier — dobara type na karna pade
   const ITEM_NAME_OPTIONS = ['FASTag', 'Biomatric Device', 'Matarial'];
+  const isFastag = () => normalizeItemName(state.itemName) === 'FASTag';
   const normalizeItemName = (value) => ITEM_NAME_OPTIONS.find((x) => x.toLowerCase() === clean(value).toLowerCase()) || 'FASTag';
   /** 🚚 Courier list — Settings → 🏷️ Tag Request → courier names se aati hai (default Delhivery / DTDC). */
   function courierOptions() {
@@ -1376,7 +1377,7 @@ body.colorful .from-hdr { color: #166534; }
           ${errList.length ? `<ul class="tr-err-list">${errList.map((m) => `<li>⚠️ ${esc(m)}</li>`).join('')}</ul>` : ''}
           <div class="tr-agent-summary-below-address">${agentGroupSummaryHtml(rec)}</div>
         </div>
-        <div class="tr-qty-list${badCls(row.id, 'qty')}" role="group" aria-label="Class-wise qty">
+        <div class="tr-qty-list${badCls(row.id, 'qty')}" role="group" aria-label="Class-wise qty" ${isFastag() ? '' : 'hidden'}>
           <div class="tr-qty-head"><span>Tag class</span><span>Qty</span></div>
           ${qtyRows}
           <div class="tr-qty-foot"><span>Requested total</span><b data-tr-agent-total2>${fmt(total)}</b></div>
@@ -1405,6 +1406,8 @@ body.colorful .from-hdr { color: #166534; }
               <select class="input" data-tr-field="courier"><option value="" ${state.courier ? '' : 'selected'}>🚚 courier chuno…</option>${courierOptions().map((c) => `<option value="${esc(c)}" ${c.toLowerCase() === String(state.courier || '').toLowerCase() ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></label>`}
             <label class="field"><span class="dim small">📦 Item Name</span>
               <select class="input" data-tr-field="itemName" aria-label="Item Name">${ITEM_NAME_OPTIONS.map((name) => `<option value="${esc(name)}" ${normalizeItemName(state.itemName) === name ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select></label>
+            ${normalizeItemName(state.itemName) === 'Biomatric Device' ? `<label class="field"><span class="dim small">🔢 Serial Number *</span><input class="input" data-tr-field="serialNumber" value="${esc(state.serialNumber || '')}" placeholder="Device ka serial number" maxlength="100"></label><label class="field"><span class="dim small">🖥️ Device Name *</span><input class="input" data-tr-field="deviceName" value="${esc(state.deviceName || '')}" placeholder="Biometric device ka naam" maxlength="120"></label>` : ''}
+            ${normalizeItemName(state.itemName) === 'Matarial' ? `<label class="field"><span class="dim small">📦 Material details *</span><input class="input" data-tr-field="materialDescription" value="${esc(state.materialDescription || '')}" placeholder="Kya material hai? Naam / details likhein" maxlength="200"></label>` : ''}
             ${cfg.askNote === false ? '' : `<label class="field tr-note-field"><span class="dim small">Note (optional — admin ke liye)</span>
               <input class="input" data-tr-field="note" value="${esc(state.note)}" placeholder="e.g. urgent — kal dispatch chahiye" maxlength="300"></label>`}
           </div>
@@ -1683,7 +1686,11 @@ body.colorful .from-hdr { color: #166534; }
       courier.addEventListener('change', () => { state.courier = clean(courier.value); saveCourier(); });
     }
     const itemName = root.querySelector('[data-tr-field="itemName"]');
-    if (itemName) itemName.addEventListener('change', () => { state.itemName = normalizeItemName(itemName.value); });
+    if (itemName) itemName.addEventListener('change', () => { state.itemName = normalizeItemName(itemName.value); renderForm(); });
+    ['serialNumber', 'deviceName', 'materialDescription'].forEach((key) => {
+      const input = root.querySelector(`[data-tr-field="${key}"]`);
+      if (input) input.addEventListener('input', () => { state[key] = input.value; });
+    });
     const note = root.querySelector('[data-tr-field="note"]');
     if (note) note.addEventListener('input', () => { state.note = note.value; });
     root.querySelectorAll('[data-tr-emp]').forEach((inp) => inp.addEventListener('input', () => {
@@ -1743,6 +1750,11 @@ body.colorful .from-hdr { color: #166534; }
     let first = null;
     const mark = (rowId, field, msg) => { (errs[rowId] = errs[rowId] || {})[field] = msg; if (!first) first = { rowId, field }; };
     if (clean(state.employee.name).length < 2) mark('employee', 'name', 'Employee name zaroori hai (kam se kam 2 akshar)');
+    if (normalizeItemName(state.itemName) === 'Biomatric Device') {
+      if (clean(state.serialNumber).length < 2) mark('item', 'serialNumber', 'Biometric device ka serial number likho');
+      if (clean(state.deviceName).length < 2) mark('item', 'deviceName', 'Device name likho');
+    }
+    if (normalizeItemName(state.itemName) === 'Matarial' && clean(state.materialDescription).length < 2) mark('item', 'materialDescription', 'Material ka naam / details likho');
     const filled = state.rows.filter(rowHasContent);
     if (!filled.length) mark(state.rows[0].id, 'agent', 'Kam se kam ek agent ka naam + qty bharo');
     const seen = new Map();
@@ -1756,7 +1768,7 @@ body.colorful .from-hdr { color: #166534; }
         if (clean(row.address).length < 8) mark(row.id, 'address', 'Agent ka full address likho (house / street / area / city)');
         if (!/^\d{6}$/.test(digits(row.pincode))) mark(row.id, 'pincode', '6 digit pincode daalo');
       } else if (row.pincode && !/^\d{6}$/.test(digits(row.pincode))) mark(row.id, 'pincode', 'Pincode 6 digit ka hona chahiye');
-      if (!rowTotal(row)) mark(row.id, 'qty', 'Kam se kam ek class me qty daalo');
+      if (isFastag() && !rowTotal(row)) mark(row.id, 'qty', 'Kam se kam ek class me qty daalo');
       const rec = exactAgent(row);
       const key = rec ? `${rec.channel}|${norm(rec.name)}` : `?|${norm(row.name || row.agentId)}`;
       if (String(row.name || row.agentId || '').trim()) {
@@ -1796,7 +1808,7 @@ body.colorful .from-hdr { color: #166534; }
     const office = clean(state.employee.office);
     const liveShare = isPublic() && FF.publicForm && typeof FF.publicForm.liveShareCredentials === 'function' ? FF.publicForm.liveShareCredentials() : null;
     const publicVisitId = isPublic() && FF.publicForm && typeof FF.publicForm.publicVisitId === 'function' ? FF.publicForm.publicVisitId() : '';
-    return { employee: { name: clean(state.employee.name), ...(office && formCfg().askOffice ? { office } : {}) }, employeeToken: isPublic() ? state.employeeToken : '', ...(publicVisitId ? { publicVisitId } : {}), ...(liveShare ? { liveShare } : {}), note: clean(state.note), courier: clean(state.courier), itemName: normalizeItemName(state.itemName), agents };
+    return { employee: { name: clean(state.employee.name), ...(office && formCfg().askOffice ? { office } : {}) }, employeeToken: isPublic() ? state.employeeToken : '', ...(publicVisitId ? { publicVisitId } : {}), ...(liveShare ? { liveShare } : {}), note: clean(state.note), courier: clean(state.courier), itemName: normalizeItemName(state.itemName), serialNumber: clean(state.serialNumber || ''), deviceName: clean(state.deviceName || ''), materialDescription: clean(state.materialDescription || ''), agents };
   }
   const withTimeout = (p, ms) => Promise.race([p, new Promise((resolve) => setTimeout(resolve, ms))]);
   async function submit() {
