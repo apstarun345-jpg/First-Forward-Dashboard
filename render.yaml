@@ -27,6 +27,9 @@ services:
         sync: false
       - key: APPS_SCRIPT_SECRET
         sync: false
+      # FASTag Mapping: rotate the API key if the old hardcoded key was shared; store the NEW key only here.
+      - key: GV_TAG_MAPPING_SECRET
+        sync: false
       # Persistent disk mount — isse har deploy par users/settings reset nahi honge
       - key: DATA_DIR
         value: "/data"
