@@ -168,7 +168,7 @@ FF.pages = FF.pages || {};
     if (!selected.length || !whereColumn) return { rows, truncated: false };
     const condition = /\bis\s+not\s+null\b/i.test(String(whereColumn))
       ? String(whereColumn) : String(whereColumn) + ' is not null';
-    const fetchPage = (offset) => D.query(sheet, \`select \${selected.join(', ')} where (\${condition}) limit \${pageSize} offset \${offset}\`, { fresh: !!fresh, timeoutMs: 55000 });
+    const fetchPage = (offset) => D.query(sheet, 'select ' + selected.join(', ') + ' where (' + condition + ') limit ' + pageSize + ' offset ' + offset, { fresh: !!fresh, timeoutMs: 55000 });
     let offset = 0;
     while (offset < hardCap) {
       // Smaller pages keep Google/Render responses bounded; only two pages per sheet run concurrently.
