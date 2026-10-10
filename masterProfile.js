@@ -547,7 +547,8 @@ window.FF = window.FF || {};
         const nameTl = `n:${norm(holder.agentName || holder.name)}|tl:${normId(holder.tlId) || norm(holder.tlName)}`;
         const existingById = id ? byId.get(`#${id}`) : null;
         const existingByName = byNameTl.get(nameTl);
-        if (existingById || existingByName) return;
+        const existingNameId = normId(existingByName && (existingByName.agentId || existingByName.id));
+        if (existingById || (existingByName && (!id || !existingNameId || existingNameId === id))) return;
         add(holder, false);
       });
       ffLookupCache = buildPeopleLookup(
