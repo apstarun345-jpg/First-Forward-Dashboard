@@ -712,17 +712,17 @@ FF.pages = FF.pages || {};
     const feedP = (canFf || canGv)
       ? FF.data.today().catch((err) => ({ requestError: err && err.message ? err.message : 'today feed request failed' }))
       : Promise.resolve(null);
-    const dailyP = (canFf || canGv) ? S.need('daily').catch(() => null) : Promise.resolve(null);
-    const stockP = canFf ? S.need('stock').catch(() => null) : Promise.resolve(null);
-    const gvStockP = canGv ? G.need('stockClass').catch(() => null) : Promise.resolve(null);
-    const gvMasterP = canGv ? G.need('master').catch(() => null) : Promise.resolve(null);
+    const dailyP = (canFf || canGv) ? S.need('daily', { only: true }).catch(() => null) : Promise.resolve(null);
+    const stockP = canFf ? S.need('stock', { only: true }).catch(() => null) : Promise.resolve(null);
+    const gvStockP = canGv ? G.need('stockClass', { only: true }).catch(() => null) : Promise.resolve(null);
+    const gvMasterP = canGv ? G.need('master', { only: true }).catch(() => null) : Promise.resolve(null);
     const currentTargetYm = U.ymKey(TODAY());
     const savedTargetsForMonth = ((FF.auth.settings && FF.auth.settings.targets) || []).filter((t) => t && t.ym === currentTargetYm && classTargetsConfigured(t) && ((targetSource(t) === 'ff' && canFf) || (targetSource(t) === 'gv' && canGv)));
     const needsFfTargetData = savedTargetsForMonth.some((t) => targetSource(t) === 'ff');
     const needsGvTargetData = savedTargetsForMonth.some((t) => targetSource(t) === 'gv');
     const targetAchievementDataP = savedTargetsForMonth.length ? Promise.all([
       needsFfTargetData
-        ? S.need('agentClass').then((rows) => ({ rows: Array.isArray(rows) ? rows : [], error: '' })).catch((err) => ({ rows: null, error: err && err.message || 'Agent class data unavailable' }))
+        ? S.need('agentClass', { only: true }).then((rows) => ({ rows: Array.isArray(rows) ? rows : [], error: '' })).catch((err) => ({ rows: null, error: err && err.message || 'Agent class data unavailable' }))
         : Promise.resolve({ rows: [], error: '' }),
       needsGvTargetData ? gvMasterP.then((ok) => ({ ok: !!ok, error: G.error && G.error('master') || '' })).catch((err) => ({ ok: false, error: err && err.message || 'GV Master unavailable' })) : Promise.resolve({ ok: true, error: '' })
     ]).then(([ffData, gvData]) => {
