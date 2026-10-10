@@ -5718,8 +5718,16 @@ async function handleApi(req, res, url) {
     const legacyV5Columns = ['agent', 'agentId', 'date', 'time', 'tl', 'channel', 'cls', 'agentMobile', 'agentPincode', 'stock', 'last', 'cur', 'growth', 'approved', 'courier', 'status'];
     if (Array.isArray(cfg.columns) && cfg.columns.length === legacyV5Columns.length && cfg.columns.every((x, i) => x === legacyV5Columns[i])) cfg.columns = [...TAG_SHEET_DEFAULT_COLUMNS];
     cfg.v = Math.max(6, Number(cfg.v) || 6);
-    // v7 — existing sheet configs keep their custom order, but include Agent address so it is never silently omitted.
-    if (Array.isArray(cfg.columns) && !cfg.columns.includes('agentAddress')) cfg.columns.splice(Math.max(0, cfg.columns.indexOf('agentMobile') + 1), 0, 'agentAddress');
+    // v7 — add Agent address only to legacy agent-contact layouts. Do not mutate explicitly
+    // configured employee-only or custom export columns (for example empAddress without agentMobile).
+    const hasLegacyAgentContactLayout = Array.isArray(cfg.columns)
+      && (cfg.columns.includes('agentMobile') || cfg.columns.includes('agentPincode'));
+    if (hasLegacyAgentContactLayout && !cfg.columns.includes('agentAddress')) {
+      const mobileIndex = cfg.columns.indexOf('agentMobile');
+      const pinIndex = cfg.columns.indexOf('agentPincode');
+      const insertAt = mobileIndex >= 0 ? mobileIndex + 1 : pinIndex;
+      cfg.columns.splice(Math.max(0, insertAt), 0, 'agentAddress');
+    }
     cfg.v = Math.max(7, Number(cfg.v) || 7);
     // v3.27 — link me sheet ka ID ho to wahi (alag sheet) target banta hai.
     if (cfg.spreadsheetId === undefined) cfg.spreadsheetId = sheetIdFromLink(cfg.sheetLink) || '';
