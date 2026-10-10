@@ -184,6 +184,9 @@ window.FF = window.FF || {};
     // Identifiers must come from the underlying cell value, not its display format:
     // cell.f may be "8,900,000,000,123,456" or "8.9E+15", breaking exact matches/API payloads.
     if (key === 'tagId' || key === 'barcode' || key === 'serialNo') {
+      const display = clean(cell.f);
+      // A formatted digit string may intentionally preserve leading zeroes; remove grouping commas only.
+      if (/^\d[\d,]*$/.test(display)) return display.replace(/,/g, '');
       if (cell.v !== null && cell.v !== undefined && clean(cell.v) !== '') {
         const raw = clean(cell.v);
         if (typeof cell.v === 'number' || /^[+-]?\d+(?:\.\d+)?[eE][+-]?\d+$/.test(raw)) {
@@ -191,7 +194,7 @@ window.FF = window.FF || {};
         }
         return raw;
       }
-      return clean(cell.f);
+      return display;
     }
     return clean(D.cellText(cell, col));
   }
