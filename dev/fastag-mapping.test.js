@@ -33,8 +33,9 @@ test('FASTag Mapping template is exactly the requested four columns; lookup trie
   const page = await read('fastagMapping.js');
   assert.match(page, /saveCsvFile\('fastag-mapping-template\.csv', \['tagId', 'serialNo', 'vcType', 'agentId'\]/);
   assert.match(page, /const schema = await stockSchema\(\)/);
-  assert.match(page, /D\.query\('StockDataa', tq, \{ timeoutMs: 65000, retries: 0, directFirst: true \}\)/);
-  assert.match(page, /const queries = work\.numeric/);
+  assert.match(page, /D\.query\('StockDataa', tq, \{ timeoutMs: 55000, directTimeoutMs: 12000, retries: 0, directFirst: true \}\)/);
+  assert.match(page, /queryRows\(make\(work\.numeric, batch\)\)/);
+  assert.match(page, /queryRows\(make\(!work\.numeric, missing\)\)/);
   assert.match(page, /queryField\('tagId', tagIds\)/);
   assert.match(page, /queryField\('barcode', barcodes\)/);
   assert.match(page, /Range upload mein barcode series StockDataa se expand hogi/);
