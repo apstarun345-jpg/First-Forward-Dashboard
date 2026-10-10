@@ -147,7 +147,7 @@ test('FASTag Mapping automatically splits a timed-out numeric range and still fi
   const { root, selectors, FF, queryLog } = makePage();
   const originalQuery = FF.data.query;
   FF.data.query = async (sheet, tq, opts) => {
-    const m = tq.match(/where D >= (?:"(\\d+)"|(\\d+)) and D <= (?:"(\\d+)"|(\\d+))/i);
+    const m = tq.match(/where D >= (?:"(\d+)"|(\d+)) and D <= (?:"(\d+)"|(\d+))/i);
     if (m) {
       const from = m[1] || m[2], to = m[3] || m[4];
       if (BigInt(to) - BigInt(from) > 3n) throw new Error('StockDataa range lookup timed out');
