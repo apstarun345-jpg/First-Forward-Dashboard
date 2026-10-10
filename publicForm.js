@@ -194,7 +194,7 @@ window.FF = window.FF || {};
     addLiveShareStyles();
     const banner = document.createElement('section');
     banner.className = 'tr-live-share';
-    banner.innerHTML = `<div class="tr-live-share-main"><div class="tr-live-share-icon" aria-hidden="true">👁️</div><div class="tr-live-share-copy"><b>Optional Live View · Admin Support</b><p>Aap Live Share enable karenge to Admin is page ka layout, cursor/scroll position aur generic action labels real-time dekh sakega. Form mein type kiye gaye naam, mobile, address, quantities ya doosre field values live monitoring ke through share nahi honge. Sharing ko kabhi bhi band kar sakte hain.</p><div class="tr-live-share-controls"><button class="btn primary" type="button" data-public-live-toggle>👁 Start Live Share</button><span class="tr-live-share-status" data-public-live-status>Live sharing OFF · Aap jab chahein enable kar sakte hain</span></div></div></div>`;
+    banner.innerHTML = `<div class="tr-live-share-main"><div class="tr-live-share-icon" aria-hidden="true">👁️</div><div class="tr-live-share-copy"><b>Start Live Share</b><div class="tr-live-share-controls"><button class="btn primary" type="button" data-public-live-toggle>👁 Start Live Share</button><span class="tr-live-share-status" data-public-live-status>Live sharing OFF</span></div></div></div>`;
     banner.querySelector('[data-public-live-toggle]').addEventListener('click', () => liveShare.enabled ? stopLiveShare() : startLiveShare());
     liveShare.banner = banner;
     main.insertBefore(banner, root);
