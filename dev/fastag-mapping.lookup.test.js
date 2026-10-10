@@ -33,7 +33,11 @@ function makePage() {
       const match = String(stock[col] ?? '').toLowerCase() === String(queryValue).toLowerCase();
       return table(match ? [stock] : []);
     },
-    cellText(c) { return c && c.v != null ? String(c.v) : ''; }
+    cellText(c) { return c && c.v != null ? String(c.v) : ''; },
+    textRows(t) { return (t.rows || []).map((row) => t.cols.map((col, i) => {
+      const value = row[i];
+      return value && value.v != null ? (value.f != null ? String(value.f) : String(value.v)) : '';
+    })); }
   };
   const selectors = new Map();
   const fakeNode = () => ({ value: '', innerHTML: '', textContent: '', className: '', disabled: false, files: [], checked: false });
