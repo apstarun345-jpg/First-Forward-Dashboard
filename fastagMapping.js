@@ -141,6 +141,21 @@ window.FF = window.FF || {};
     if (numeric && isDigitKey(s) && !(s.length > 1 && s[0] === '0')) return s;
     return '"' + s.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
   }
+  const STOCK_LETTERS = 'ABCDEFGHIJKLM'.split('');
+  const fallbackSchema = () => {
+    const s = cols();
+    return {
+      letters: STOCK_LETTERS,
+      index: {
+        id: colIndex(s.id), name: colIndex(s.name),
+        tagId: colIndex('C'), barcode: colIndex('D'), serialNo: colIndex('D'),
+        vcType: colIndex('E'), tagType: colIndex(s.tagType), barcodeAllocatedAt: colIndex(s.bcAllocatedAt),
+        agentId: colIndex(s.agentId), agentName: colIndex(s.agentName),
+        agentAllocatedAt: colIndex(s.agentAllocatedAt), tlName: colIndex(s.tlName)
+      },
+      labels: []
+    };
+  };
   // Project StockDataa configuration defines TAG_ID=C, BARCODE=D, TAG_CLASS=E.
   // Reuse that known mapping instead of spending another round-trip on a header-only query;
   // the previous header probe was also timing out before the actual lookup could start.
