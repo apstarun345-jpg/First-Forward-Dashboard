@@ -5504,6 +5504,7 @@ async function handleApi(req, res, url) {
       const label = agent.name || agent.agentId || `Agent ${i + 1}`;
       const rowsIn = (Array.isArray(a.rows) ? a.rows : []).slice(0, 20);
       const hasQty = rowsIn.some((x) => Math.round(Number(x && x.approved) || 0) > 0);
+      const itemName = ['FASTag', 'Biomatric Device', 'Matarial'].includes(rl.itemName) ? rl.itemName : 'FASTag';
       if (!agent.name && !agent.agentId && !agent.mobile && !hasQty) return; // poora khaali block — chhod do
       if (agent.name.length < 2 && !agent.agentId) throw new HttpError(400, `Agent ${i + 1}: agent ka naam / ID zaroori hai.`);
       const mob = tagDigits(agent.mobile);
@@ -5521,7 +5522,7 @@ async function handleApi(req, res, url) {
         byCls.set(x.cls, { ...x, requested: asked });
       });
       const rows = [...byCls.values()];
-      if (!rows.length) throw new HttpError(400, `${label}: kam se kam ek class me qty daalo.`);
+      if (!rows.length && itemName === 'FASTag') throw new HttpError(400, `${label}: kam se kam ek class me qty daalo.`);
       const total = rows.reduce((s, x) => s + x.approved, 0);
       if (total > 100000) throw new HttpError(400, `${label}: quantity bahut zyada hai — dobara check karo.`);
       drafts.push({ agent, rows, total, metrics: tagRequestMetrics(a.metrics) });
@@ -5611,7 +5612,7 @@ async function handleApi(req, res, url) {
   async function createTagBatch(drafts, ctx) {
     const submissionId = /^[A-Za-z0-9_-]{16,100}$/.test(String(ctx.submissionId || '')) ? String(ctx.submissionId) : '';
     const submissionFingerprint = submissionId ? crypto.createHash('sha256').update(JSON.stringify({
-      by: ctx.by, source: ctx.source || '', employee: ctx.employee || {}, note: ctx.note || '', courier: ctx.courier || '', itemName: ctx.itemName || 'FASTag',
+      by: ctx.by, source: ctx.source || '', employee: ctx.employee || {}, note: ctx.note || '', courier: ctx.courier || '', itemName: ctx.itemName || 'FASTag', serialNumber: ctx.serialNumber || '', deviceName: ctx.deviceName || '', materialDescription: ctx.materialDescription || '',
       agents: drafts.map((d) => ({ agent: { id: d.agent && d.agent.agentId || '', name: d.agent && d.agent.name || '', mobile: d.agent && d.agent.mobile || '', address: d.agent && d.agent.address || '', pincode: d.agent && d.agent.pincode || '', channel: d.agent && d.agent.channel || '' }, rows: (d.rows || []).map((r) => ({ cls: r.cls, requested: r.requested, approved: r.approved })) }))
     })).digest('hex') : '';
     // Idempotency is server-side and durable: a timeout/retry with the same key returns the original batch.
@@ -5634,6 +5635,7 @@ async function handleApi(req, res, url) {
       ...(submissionId ? { submissionId, submissionFingerprint } : {}),
       ...(ctx.courier ? { courier: ctx.courier } : {}),
       itemName: ['FASTag', 'Biomatric Device', 'Matarial'].includes(ctx.itemName) ? ctx.itemName : 'FASTag',
+      ...(ctx.serialNumber ? { serialNumber: ctx.serialNumber } : {}), ...(ctx.deviceName ? { deviceName: ctx.deviceName } : {}), ...(ctx.materialDescription ? { materialDescription: ctx.materialDescription } : {}),
       ...(ctx.source ? { source: ctx.source, ip: ctx.ip } : {}),
       status: 'pending', note: ctx.note || '', adminNote: '',
       rows: d.rows, total: d.total, ...(d.metrics ? { metrics: d.metrics } : {}),
@@ -6085,12 +6087,12 @@ async function handleApi(req, res, url) {
     // 🧑‍🤝‍🧑 v3.30 — naya form: employee + har agent ka block → har agent ki ALAG request (batch).
     if (Array.isArray(body.agents) && body.agents.length) {
       const pcfg = publicTagFormConfig(); // wahi mandatory fields jo employee link par hain (ek jaisa form)
-      const drafts = tagAgentDrafts(body.agents, { askMobile: pcfg.askMobile !== false, askAddress: pcfg.askAddress !== false });
+      const drafts = tagAgentDrafts(body.agents, { askMobile: pcfg.askMobile !== false, askAddress: pcfg.askAddress !== false, itemName: body.itemName });
       if (!drafts.length) throw new HttpError(400, 'Kam se kam ek agent chahiye (naam + class qty).');
       const emp = body.employee && typeof body.employee === 'object' ? body.employee : {};
       const employee = { name: shortText(emp.name, 80) || user.name || user.username, ...(shortText(emp.office || emp.branch, 80) ? { office: shortText(emp.office || emp.branch, 80) } : {}) };
       drafts.forEach((d) => { d.dupes = tagAgentDupes([{ ...d.agent, rows: d.rows }]); });
-      const out = await createTagBatch(drafts, { by: user.username, byName: user.name || user.username, employee, note: shortText(body.note, 300), courier: shortText(body.courier, 40), itemName: ['FASTag', 'Biomatric Device', 'Matarial'].includes(body.itemName) ? body.itemName : 'FASTag', updatedBy: user.username, submissionId: body.submissionId });
+      const out = await createTagBatch(drafts, { by: user.username, byName: user.name || user.username, employee, note: shortText(body.note, 300), courier: shortText(body.courier, 40), itemName: ['FASTag', 'Biomatric Device', 'Matarial'].includes(body.itemName) ? body.itemName : 'FASTag', serialNumber: shortText(body.serialNumber, 100), deviceName: shortText(body.deviceName, 120), materialDescription: shortText(body.materialDescription, 200), updatedBy: user.username, submissionId: body.submissionId });
       const n = out.created.length;
       if (!out.idempotentReplay) try {
         recordNotification({
@@ -6547,7 +6549,7 @@ async function handleApi(req, res, url) {
     // (naam · mobile · full address · pincode · class-wise qty). Har agent = alag request (ek batch).
     if (Array.isArray(body.agents) && body.agents.length) {
       const office = shortText(emp.office || emp.branch, 80);
-      const drafts = tagAgentDrafts(body.agents, { askMobile: cfg.askMobile !== false, askAddress: cfg.askAddress !== false });
+      const drafts = tagAgentDrafts(body.agents, { askMobile: cfg.askMobile !== false, askAddress: cfg.askAddress !== false, itemName: body.itemName });
       if (!drafts.length) throw new HttpError(400, 'Kam se kam ek agent chahiye (naam + mobile + class qty).');
       const maxRows = Math.min(150, Math.max(5, Number(cfg.maxRows) || 60));
       const rowCount = drafts.reduce((s, d) => s + d.rows.length, 0);
@@ -6564,6 +6566,7 @@ async function handleApi(req, res, url) {
         employee: { name: employeeName, ...(office ? { office } : {}) }, employeeToken,
         courier: shortText(body.courier, 40),
         itemName: ['FASTag', 'Biomatric Device', 'Matarial'].includes(body.itemName) ? body.itemName : 'FASTag',
+        serialNumber: shortText(body.serialNumber, 100), deviceName: shortText(body.deviceName, 120), materialDescription: shortText(body.materialDescription, 200),
         source: 'public-link', ip: String(ip || '').slice(0, 45), note, updatedBy: 'public-link', submissionId: body.submissionId
       });
       // A replay must return the original token, not the fresh unused token generated for this retry.
