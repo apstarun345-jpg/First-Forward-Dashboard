@@ -335,16 +335,18 @@ FF.pages = FF.pages || {};
       const stop = async () => { if (++tick % 3000) return false; await U.breathe(); return generation !== state.generation; };
       for (const r of details.stock || []) {
         if (await stop()) return state.full;
-        const key = normBar(r.barcode || r.tagId);
-        if (!key) continue;
-        const e = barEntry(idx, key);
+        const keys = [...new Set([r.barcode, r.tagId].map(normBar).filter(Boolean))];
+        if (!keys.length) continue;
         const owner = clean(r.agentName || r.agentId);
-        if (!e.ff.some((x) => normName(x.agentName) === normName(owner) && normId(x.agentId) === normId(r.agentId))) {
-          e.ff.push({ barcode: key, tagId: clean(r.tagId), agentId: clean(r.agentId), agentName: owner, tlName: clean(r.tlName), cls: clean(r.cls), allocated: stamp(r.agentAllocatedAt || r.bcAllocatedAt) });
+        for (const key of keys) {
+          const e = barEntry(idx, key);
+          if (!e.ff.some((x) => normName(x.agentName) === normName(owner) && normId(x.agentId) === normId(r.agentId) && normId(x.tagId) === normId(r.tagId))) {
+            e.ff.push({ barcode: key, tagId: clean(r.tagId), agentId: clean(r.agentId), agentName: owner, tlName: clean(r.tlName), cls: clean(r.cls), allocated: stamp(r.agentAllocatedAt || r.bcAllocatedAt), source: 'StockDataa' });
+          }
+          const p = person(idx, 'ff-agent', owner, r.tlName, r.cls, r.agentId);
+          if (p) { p.bars.add(key); if (!p.last) p.last = stamp(r.agentAllocatedAt || r.bcAllocatedAt); }
+          if (clean(r.tlName)) { const t = person(idx, 'ff-tl', r.tlName, '', r.cls, ''); if (t) t.bars.add(key); }
         }
-        const p = person(idx, 'ff-agent', owner, r.tlName, r.cls, r.agentId);
-        if (p) { p.bars.add(key); if (!p.last) p.last = stamp(r.agentAllocatedAt || r.bcAllocatedAt); }
-        if (clean(r.tlName)) { const t = person(idx, 'ff-tl', r.tlName, '', r.cls, ''); if (t) t.bars.add(key); }
       }
       for (const r of details.assignment || []) {
         if (await stop()) return state.full;
