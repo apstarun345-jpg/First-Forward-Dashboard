@@ -190,22 +190,10 @@ window.FF = window.FF || {};
     liveShare.busy = false; syncLiveShareBanner();
   }
   function installLiveShareBanner(main, root) {
-    if (isLiveMirror() || !main || !root || liveShare.banner) return;
-    addLiveShareStyles();
-    const banner = document.createElement('section');
-    banner.className = 'tr-live-share';
-    banner.innerHTML = `<div class="tr-live-share-main"><div class="tr-live-share-icon" aria-hidden="true">👁️</div><div class="tr-live-share-copy"><b>Start Live Share</b><div class="tr-live-share-controls"><button class="btn primary" type="button" data-public-live-toggle>👁 Start Live Share</button><span class="tr-live-share-status" data-public-live-status>Live sharing OFF</span></div></div></div>`;
-    banner.querySelector('[data-public-live-toggle]').addEventListener('click', () => liveShare.enabled ? stopLiveShare() : startLiveShare());
-    liveShare.banner = banner;
-    main.insertBefore(banner, root);
-    if (restoreLiveShare()) {
-      bindLiveShareEvents();
-      queueLiveEvent('share', 'Live sharing resumed after page reload');
-      sendLivePresence(true);
-      liveShare.timer = setInterval(() => sendLivePresence(), 250);
-      liveShare.heartbeat = setInterval(() => sendLivePresence(true), 3000);
-    }
-    syncLiveShareBanner();
+    // Employee public link must not show a Live Share start/stop control or consent banner.
+    // Passive link-open presence and Admin page preview work independently.
+    if (!main || !root) return;
+    if (liveShare.banner) { liveShare.banner.remove(); liveShare.banner = null; }
   }
 
   /** Is URL par public form chalana hai? (clean path ya purana hash wala link) */
