@@ -88,11 +88,13 @@ window.FF = window.FF || {};
   }
 
   function cellText(cell, col) {
-    if (!cell || cell.v === null || cell.v === undefined) return '';
+    if (!cell) return '';
+    // Some gviz cells carry a usable formatted identifier without a raw v field.
+    if (isIdentifierColumn(col)) return identifierText(cell);
+    if (cell.v === null || cell.v === undefined) return '';
     const v = cell.v;
     // Identifier columns must never display Google Sheets' 6.08E+15 / comma-formatted version.
     // This single path feeds the EIR / StockDataa sheet grid and other tables using D.textRows().
-    if (isIdentifierColumn(col)) return identifierText(cell);
     // Keep exact integer digits when gviz returns a numeric barcode without a recognized header.
     if (typeof v === 'number' && Number.isInteger(v) && Math.abs(v) >= 1e15) return String(v);
     if (typeof v === 'string' && /^-?\d(?:\.\d+)?e\+?\d+$/i.test(v.trim())) return expandScientificIdentifier(v);
