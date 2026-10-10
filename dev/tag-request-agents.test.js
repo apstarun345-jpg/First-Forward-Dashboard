@@ -223,6 +223,7 @@ test('v3.30 per-agent tag requests — split, validation, mobile status, duplica
     const idemRetry = await jsonCall(server.base, '/api/public/tag-request', 'POST', idemBody, '', '10.1.0.51');
     assert.equal(idemRetry.res.status, 201, JSON.stringify(idemRetry.json));
     assert.equal(idemRetry.json.requests[0].id, idemFirst.json.requests[0].id, 'retry must return the original request, not create another');
+    assert.equal(idemRetry.json.employeeToken, idemFirst.json.employeeToken, 'retry must preserve the original employee history token');
     const changedIdem = await jsonCall(server.base, '/api/public/tag-request', 'POST', {
       ...idemBody, agents: [rahul({ agentName: 'Idempotency Test Agent', agentId: '99887766', mobile: '9812345678', address: '99, Idempotency Road, Jaipur', pincode: '302016', rows: [{ cls: 'VC7', requested: 5, approved: 5 }] })]
     }, '', '10.1.0.52');
