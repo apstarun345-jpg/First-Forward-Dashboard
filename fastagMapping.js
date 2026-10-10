@@ -182,16 +182,17 @@ window.FF = window.FF || {};
         // If an independent Serial No column exists, it is intentionally ignored for FASTag API mapping.
         index.serialNo = barcodeIdx;
         index.vcType = vcTypeIdx;
-        const agentIdx = findAny(ALIASES.agentId);
-        index.agentId = agentIdx >= 0 ? agentIdx : fallback.index.agentId;
-        const pick = (aliases, def) => { const idx = findAny(aliases); return idx >= 0 ? idx : def; };
-        index.id = pick(['id', 'stockid', 'stockrowid'], fallback.index.id);
-        index.name = pick(['name', 'inventoryname', 'itemname', 'productname', 'description'], fallback.index.name);
-        index.tagType = pick(['tagtype', 'fastagtype', 'producttype'], fallback.index.tagType);
-        index.barcodeAllocatedAt = pick(['barcodeallocatedat', 'barcodeassignedat', 'barcodeallocationdate'], fallback.index.barcodeAllocatedAt);
-        index.agentName = pick(['agentname', 'mappedagentname', 'employeename'], fallback.index.agentName);
-        index.agentAllocatedAt = pick(['agentallocatedat', 'agentassignedat', 'agentallocationdate'], fallback.index.agentAllocatedAt);
-        index.tlName = pick(['tlname', 'teamleadername', 'teamleadname'], fallback.index.tlName);
+        index.agentId = findAny(ALIASES.agentId);
+        // Extra CSV fields are optional: don't guess unrelated columns when StockDataa only exposes
+        // the three mapping columns (TAG_ID, BARCODE, TAG_CLASS).
+        const pick = (aliases) => findAny(aliases);
+        index.id = pick(['id', 'stockid', 'stockrowid']);
+        index.name = pick(['name', 'inventoryname', 'itemname', 'productname', 'description']);
+        index.tagType = pick(['tagtype', 'fastagtype', 'producttype']);
+        index.barcodeAllocatedAt = pick(['barcodeallocatedat', 'barcodeassignedat', 'barcodeallocationdate']);
+        index.agentName = pick(['agentname', 'mappedagentname', 'employeename']);
+        index.agentAllocatedAt = pick(['agentallocatedat', 'agentassignedat', 'agentallocationdate']);
+        index.tlName = pick(['tlname', 'teamleadername', 'teamleadname']);
         // Record which exact headers were discovered; all three mapping keys are mandatory.
         return { letters: STOCK_LETTERS, index, labels };
       } catch (err) {
