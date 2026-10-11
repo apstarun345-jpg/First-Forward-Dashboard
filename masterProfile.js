@@ -1533,8 +1533,9 @@ window.FF = window.FF || {};
     // Agent ka rule: naam (normalised) YA exact id — id case-sensitive rehta hai (gvAgentRows jaisa hi),
     // warna sheet me 'g001' vs 'G001' jaise farq par doosre agent ki rows jud jaati hain.
     const myMasterRows = gvCanonicalIssuanceRows().filter((row) => {
-      if (out.id) return clean(row.agentId).replace(/\.0+$/, '').toUpperCase() === clean(out.id).replace(/\.0+$/, '').toUpperCase();
-      return norm(row.agentName) === norm(out.name);
+      const wantedId = clean(out.id).replace(/\.0+$/, '');
+      const rowId = clean(row.agentId).replace(/\.0+$/, '');
+      return (!!wantedId && rowId === wantedId) || norm(row.agentName) === norm(out.name);
     });
     const curExact = exactGvMonth(myMasterRows, curYmTruth);
     const lastExact = exactGvMonth(myMasterRows, lastYmTruth);
@@ -1597,9 +1598,10 @@ window.FF = window.FF || {};
     out.dispatch.sugVc4Gross = suggestGro(out.dispatch.avgVc4);
     out.dispatch.sugCommGross = suggestGro(out.dispatch.avgComm);
     if (light) return out;
+    const wantedClassId = clean(out.id).replace(/\.0+$/, '');
     const master = gvClassRows((m) => {
-      if (out.id) return clean(m.agentId).replace(/\.0+$/, '').toUpperCase() === clean(out.id).replace(/\.0+$/, '').toUpperCase();
-      return norm(m.agentName) === n;
+      const rowId = clean(m.agentId).replace(/\.0+$/, '');
+      return (!!wantedClassId && rowId === wantedClassId) || norm(m.agentName) === n;
     });
     const curYm = globalCurYm, lastYm = globalLastYm;
     out.classBins = classBinsFromRows(master, curYm, lastYm);
