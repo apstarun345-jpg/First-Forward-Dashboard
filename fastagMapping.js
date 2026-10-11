@@ -427,25 +427,35 @@ window.FF = window.FF || {};
     if (isDigitKey(from) && isDigitKey(to) && !(from.length > 1 && from[0] === '0') && !(to.length > 1 && to[0] === '0')) {
       variants.push(fastSelect + 'D >= ' + literal(from, true) + ' and D <= ' + literal(to, true) + ' limit ' + (MAX_RESULTS + 1));
     }
-    const fastDedupe = new Map();
-    let fastError = null;
-    // String query first because StockDataa BARCODE often arrives as text despite containing
-    // digits. If it returns matching rows, proceed immediately; numeric query is only needed
-    // when the text variant is empty or rejected.
-    for (const tq of variants) {
-      try {
-        const table = await D.query('StockDataa', tq, {
+    // Run text + numeric interval predicates at the same time. StockDataa columns can
+    // contain digit-only text as well as numeric cells; don't let a slow/empty first variant
+    // hold up the other variant. Resolve on the first usable, client-validated result.
+    const fastRows = await new Promise((resolve) => {
+      let settled = 0, done = false;
+      const matches = (rows) => (rows || []).filter((row) =>
+        row.barcode && compareBarcode(row.barcode, from) >= 0 && compareBarcode(row.barcode, to) <= 0
+      );
+      const finish = (rows) => { if (!done) { done = true; resolve(rows); } };
+      variants.forEach((tq) => {
+        D.query('StockDataa', tq, {
           timeoutMs: 4500, directTimeoutMs: 1800, retries: 0, directFirst: true
+        }).then((table) => {
+          if (done) return;
+          const valid = matches(stockRows(table, schema));
+          if (valid.length) { finish(valid); return; }
+          settled++;
+          if (settled === variants.length) finish([]);
+        }).catch(() => {
+          if (done) return;
+          settled++;
+          if (settled === variants.length) finish([]);
         });
-        for (const row of stockRows(table, schema)) {
-          if (row.barcode && compareBarcode(row.barcode, from) >= 0 && compareBarcode(row.barcode, to) <= 0) {
-            fastDedupe.set(idKey(row.tagId) + '|' + idKey(row.barcode), row);
-          }
-        }
-        if (fastDedupe.size) return rememberRange([...fastDedupe.values()]);
-      } catch (err) {
-        if (!fastError) fastError = err;
-      }
+      });
+    });
+    if (fastRows.length) {
+      const fastDedupe = new Map();
+      for (const row of fastRows) fastDedupe.set(idKey(row.tagId) + '|' + idKey(row.barcode), row);
+      return rememberRange([...fastDedupe.values()]);
     }
     // If the bounded range query returns nothing, fall back to paged local comparison for
     // mixed-type/text-stored IDs. Exact lookup/cached session index should handle most singles.
