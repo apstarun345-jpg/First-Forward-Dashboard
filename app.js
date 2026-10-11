@@ -1066,7 +1066,7 @@ window.FF = window.FF || {};
     if (offlineEl) { offlineEl.hidden = !offline; offlineEl.textContent = offline ? '📴 Offline · last snapshot' : ''; offlineEl.className = `offline-state${offline ? ' is-offline' : ''}`; }
     if (loading) {
       const p = pre && pre.running ? pre.progress : (st.loading ? st.progress : gv.progress);
-      const extra = pre && pre.running ? ` (preloading ${p.loaded}/${p.total})` : st.loading && gv && gv.loading ? ' (FF + GV)' : st.loading ? ' (FF)' : ' (GV)';
+      const extra = pre && pre.running ? ` (FF/GV ${p.loaded}/${p.totalSources} · datasets ${p.done}/${p.total})` : st.loading && gv && gv.loading ? ' (FF + GV)' : st.loading ? ' (FF)' : ' (GV)';
       el.innerHTML = `<span class="dot busy"></span> Loading ${p.done !== undefined ? `${p.done}/${p.total}` : `${p.loaded}/${p.total}`}${extra}…`;
       return;
     }
