@@ -57,10 +57,12 @@ const IDENTIFIER_FIELDS = new Set(['tagId', 'barcode']);
 const lowerBound = (arr, key) => { let lo = 0, hi = arr.length; while (lo < hi) { const mid = (lo + hi) >> 1; if (cmpCanon(arr[mid].k, key) < 0) lo = mid + 1; else hi = mid; } return lo; };
 const upperBound = (arr, key) => { let lo = 0, hi = arr.length; while (lo < hi) { const mid = (lo + hi) >> 1; if (cmpCanon(arr[mid].k, key) <= 0) lo = mid + 1; else hi = mid; } return lo; };
 
-export function createMappingStock({ getConfig, loadPages, normalizeVcType = (v) => clean(v).toUpperCase(), ttlMs = 5 * 60e3, minRefreshMs = 20e3, maxPerRange = 20000, now = Date.now } = {}) {
+export function createMappingStock({ getConfig, loadPages, normalizeVcType = (v) => clean(v).toUpperCase(), ttlMs = 5 * 60e3, minRefreshMs = 20e3, maxPerRange = 20000, now = Date.now, allowRefresh = () => true, onProgress = null } = {}) {
   let index = null;          // { rows, byBarcode, byTag, sorted, builtAt, key }
   let building = null;
   let lastError = '';
+  // 📊 Live build progress — client isse "StockDataa index ban raha hai… 1,20,000 rows" dikhata hai.
+  let progress = null;       // { startedAt, pages, rows, lastPageAt, doneAt, failedAt }
 
   async function build(cfg) {
     const L = cfg.letters;
@@ -68,6 +70,7 @@ export function createMappingStock({ getConfig, loadPages, normalizeVcType = (v)
     if (!L.tagId && !L.barcode) throw new Error('StockDataa me TAG_ID / BARCODE column configure nahi hai.');
     const where = [L.tagId, L.barcode].filter(Boolean).map((c) => `${c} is not null`).join(' or ');
     const rows = [];
+    progress = { startedAt: now(), pages: 0, rows: 0, lastPageAt: 0, doneAt: 0, failedAt: 0 };
     await loadPages(cfg.sheetId, cfg.sheet, letters, where, async (pageRows, at) => {
       const ix = Object.fromEntries(FIELDS.map((f) => [f, L[f] ? at(L[f]) : -1]));
       for (const row of pageRows) {
@@ -78,6 +81,12 @@ export function createMappingStock({ getConfig, loadPages, normalizeVcType = (v)
           rec[i] = IDENTIFIER_FIELDS.has(f) ? identifierText(c) : plainText(c);
         }
         if (rec[2] || rec[3]) rows.push(rec);
+      }
+      if (progress) {
+        progress.pages++;
+        progress.rows = rows.length;
+        progress.lastPageAt = now();
+        if (onProgress) { try { onProgress(progress); } catch { /* progress callback optional */ } }
       }
     });
     const byBarcode = new Map(), byTag = new Map(), sorted = [], text = [];
@@ -97,8 +106,16 @@ export function createMappingStock({ getConfig, loadPages, normalizeVcType = (v)
   function startBuild() {
     if (building) return building;
     const cfg = getConfig();
-    building = build(cfg).then((next) => { index = next; lastError = ''; return next; })
-      .catch((err) => { lastError = (err && err.message) || 'StockDataa index build fail'; throw err; })
+    building = build(cfg).then((next) => {
+      index = next; lastError = '';
+      if (progress) { progress.doneAt = now(); progress.failedAt = 0; }
+      return next;
+    })
+      .catch((err) => {
+        lastError = (err && err.message) || 'StockDataa index build fail';
+        if (progress) progress.failedAt = now();
+        throw err;
+      })
       .finally(() => { building = null; });
     building.catch(() => {});
     return building;
@@ -162,7 +179,8 @@ export function createMappingStock({ getConfig, loadPages, normalizeVcType = (v)
     const out = items.map((item, index) => ({ index, ...resolve(ix, item) }));
     const missing = out.filter((r) => !r.rows.length && !r.error);
     // Miss par ek baar fresh build (abhi-abhi add hui row ke liye) — par har request par nahi.
-    if (missing.length && !refreshed && now() - ix.builtAt >= minRefreshMs) {
+    // Google rate limit (cooldown) ke dauran ye rebuild skip hota hai (allowRefresh server se aata hai).
+    if (missing.length && !refreshed && now() - ix.builtAt >= minRefreshMs && allowRefresh()) {
       try {
         ix = await startBuild(); refreshed = true;
         for (const r of missing) Object.assign(r, resolve(ix, items[r.index]));
@@ -171,7 +189,18 @@ export function createMappingStock({ getConfig, loadPages, normalizeVcType = (v)
     return { results: out, meta: { rows: ix.rows.length, ageSec: Math.round((now() - ix.builtAt) / 1000), refreshed } };
   }
 
-  const status = () => ({ ready: !!index, building: !!building, rows: index ? index.rows.length : 0, ageSec: index ? Math.round((now() - index.builtAt) / 1000) : null, error: lastError });
+  const status = () => ({
+    ready: !!index, building: !!building,
+    rows: index ? index.rows.length : 0,
+    ageSec: index ? Math.round((now() - index.builtAt) / 1000) : null,
+    error: lastError,
+    build: progress ? {
+      pages: progress.pages, rows: progress.rows,
+      startedAt: progress.startedAt ? new Date(progress.startedAt).toISOString() : '',
+      ageSec: Math.round((now() - progress.startedAt) / 1000),
+      done: !!progress.doneAt, failed: !!progress.failedAt
+    } : null
+  });
   return { ensure, lookup, status, _resolve: resolve };
 }
 

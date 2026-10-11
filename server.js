@@ -33,6 +33,51 @@ const DEFAULT_CACHE_SECONDS = Math.max(0, Number(process.env.CACHE_SECONDS || 60
 const MAX_CACHE_ENTRIES = 400;
 const UPSTREAM_TIMEOUT_MS = 45_000;
 const GVIZ_BASE = process.env.GVIZ_BASE || 'https://docs.google.com'; // override only for local testing with a mock
+// 🚦 v3.72 — Google gviz rate limit ("Too Many Requests" HTML page) se bachne ka gate:
+//   • ek saath sirf GVIZ_CONCURRENCY upstream requests jaati hain (baaki queue me wait karti hain),
+//   • 429 / rate-limit page milte hi ek cooldown lag jaata hai — us dauran purana cache serve hota hai
+//     aur nayi requests Google par nahi bheji jaati (warna "Too Many Requests" aur badhta hai).
+//   • Har safal response par counter reset; cooldown apne aap khatam ho jaata hai.
+const GVIZ_CONCURRENCY = Math.max(1, Math.min(24, Number(process.env.GVIZ_CONCURRENCY) || 6));
+const GVIZ_COOLDOWN_MS = Math.max(0, Number(process.env.GVIZ_COOLDOWN_MS ?? 45e3));
+const GVIZ_MAX_COOLDOWN_MS = Math.max(GVIZ_COOLDOWN_MS, 5 * 60e3);
+const GVIZ_MAX_GATE_WAIT_MS = Math.max(0, Number(process.env.GVIZ_GATE_WAIT_MS ?? 8e3));   // cooldown ka zyada se zyada itna intezaar
+const gvizGate = { active: 0, queue: [], cooldownUntil: 0, rateLimited: 0, blocked: 0, lastLimitAt: 0 };
+const gvizCooldownLeft = () => Math.max(0, gvizGate.cooldownUntil - Date.now());
+const gvizCooldownActive = () => gvizCooldownLeft() > 0;
+const gvizSleep = (ms) => new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(30e3, ms))));
+/** Google ka 429 page (kabhi kabhi 200 ke saath bhi) — HTML "Too Many Requests" + normalize.css. */
+function rateLimitPage(body) {
+  const text = String(body || '');
+  if (!text) return false;
+  if (text.includes('setResponse')) return false;      // asli gviz data
+  if (/too many requests/i.test(text)) return true;
+  return /<html/i.test(text) && /normalize\.css|rate.?limit|429/i.test(text);
+}
+const gvizRateLimited = (status, body) => Number(status) === 429 || rateLimitPage(body);
+/** Rate limit note karo → badhta hua cooldown (jitter ke saath). */
+function noteGvizRateLimit() {
+  gvizGate.rateLimited++; gvizGate.lastLimitAt = Date.now();
+  const step = Math.min(GVIZ_MAX_COOLDOWN_MS, GVIZ_COOLDOWN_MS * Math.pow(1.7, Math.min(5, gvizGate.rateLimited - 1)));
+  const until = Date.now() + Math.round(step * (0.85 + Math.random() * 0.3));
+  if (until > gvizGate.cooldownUntil) gvizGate.cooldownUntil = until;
+  return gvizCooldownLeft();
+}
+/** User ko dikhne wala saaf message — Google ka HTML page kabhi UI me nahi jaata. */
+function gvizLimitMessage(ms) {
+  const sec = Math.max(1, Math.ceil((ms === undefined ? gvizCooldownLeft() : ms) / 1000));
+  return `Google Sheets ne rate limit kar diya (429 Too Many Requests). Purana data cache se dikh raha hai; nayi koshish ~${sec} second me apne aap hogi.`;
+}
+async function gvizAcquire() {
+  if (gvizGate.active < GVIZ_CONCURRENCY) { gvizGate.active++; return; }
+  gvizGate.blocked++;
+  await new Promise((resolve) => gvizGate.queue.push(resolve));
+}
+function gvizRelease() {
+  const next = gvizGate.queue.shift();
+  if (next) { next(); return; }   // slot seedha queue ke agle request ko mil gaya
+  gvizGate.active = Math.max(0, gvizGate.active - 1);
+}
 const DATA_DIR = path.resolve(process.env.DATA_DIR || (process.env.RENDER && existsSync('/data') ? '/data' : path.join(__dirname, 'data')));
 // Storage backend: 'appsscript' is chosen automatically when APPS_SCRIPT_URL is configured (recommended on
 // Render free / no-disk plans — see STORAGE_SETUP.md). 'sheets' = service-account mode, 'files' = local JSON.
@@ -988,13 +1033,23 @@ function upstreamUrl(params) {
   return `${GVIZ_BASE}/spreadsheets/d/${sheetId}/gviz/tq?${p.toString()}`;
 }
 async function fetchUpstream(url) {
+  await gvizAcquire();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
   try {
+    // Cooldown ke dauran Google par nayi request nahi bhejni — utna intezaar kar ke hi bhejo
+    // (bahut lamba cooldown ho to GVIZ_GATE_WAIT_MS ke baad chhod dena, warna request latak jaati).
+    const left = gvizCooldownLeft();
+    if (left) await gvizSleep(Math.min(left, GVIZ_MAX_GATE_WAIT_MS));
     const response = await fetch(url, { signal: controller.signal, redirect: 'follow', headers: { 'User-Agent': 'FirstForwardDashboard/2.0' } });
     const body = await response.text();
+    if (gvizRateLimited(response.status, body)) {
+      const retryAfterMs = noteGvizRateLimit();
+      return { status: 429, body, rateLimited: true, retryAfterMs };
+    }
+    if (response.ok) gvizGate.rateLimited = 0;   // safal read → streak reset
     return { status: response.status, body };
-  } finally { clearTimeout(timer); }
+  } finally { clearTimeout(timer); gvizRelease(); }
 }
 /** Reuse the gviz proxy cache for server-rendered personal pages (and stale data if Google blips). */
 async function fetchUpstreamCached(url, options) {
@@ -1003,10 +1058,17 @@ async function fetchUpstreamCached(url, options) {
   // shorter per-query age so a long CACHE_SECONDS value never freezes GV's "today" number.
   const maxAgeMs = options && options.maxAgeMs !== undefined ? Math.max(0, Number(options.maxAgeMs) || 0) : cacheMs();
   if (hit && Date.now() - hit.at < maxAgeMs) return { status: hit.status || 200, body: hit.body, cached: true };
+  // Rate-limit cooldown me Google ke paas jaana hi nahi — jo cache me hai wahi sahi.
+  if (hit && gvizCooldownActive()) return { status: hit.status || 200, body: hit.body, cached: true, stale: true };
   try {
     let job = inflight.get(url);
     if (!job) { job = fetchUpstream(url).finally(() => inflight.delete(url)); inflight.set(url, job); }
     const out = await job;
+    if (out.rateLimited) {
+      // Kabhi bhi rate-limit page cache me nahi jaata; purana accha data hi mileyga.
+      if (hit) return { status: hit.status || 200, body: hit.body, cached: true, stale: true, rateLimited: true, retryAfterMs: out.retryAfterMs };
+      return out;
+    }
     const okBody = out.status >= 200 && out.status < 300 && out.body.includes('setResponse') && !/"status"\s*:\s*"error"/.test(out.body);
     if (okBody) {
       cache.set(url, { at: Date.now(), body: out.body, status: out.status });
@@ -2598,6 +2660,11 @@ async function gvizPageServer(params, sheet) {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const out = await fetchUpstream(upstreamUrl(params));
+      if (out.rateLimited) {
+        const limitErr = new Error(gvizLimitMessage(out.retryAfterMs));
+        limitErr.rateLimited = true; limitErr.retryAfterMs = out.retryAfterMs;
+        throw limitErr;
+      }
       if (out.status < 200 || out.status >= 300) throw new Error(`${sheet}: Google responded ${out.status}`);
       const table = parseGvizServer(out.body);
       // gviz column id (letter) se index — label row ki galti se order na bigde.
@@ -2605,7 +2672,8 @@ async function gvizPageServer(params, sheet) {
       return { rows: table.rows || [], ids };
     } catch (err) {
       lastErr = err;
-      if (attempt === 0) await new Promise((r) => setTimeout(r, 800));
+      // Rate limit par turant dobara maarna ulta nuksaan hai — Retry-After / cooldown ka intezaar.
+      if (attempt === 0) await gvizSleep(lastErr && lastErr.rateLimited ? 2500 : 800);
     }
   }
   throw lastErr;
@@ -2760,7 +2828,9 @@ const mappingStock = createMappingStock({
     };
   },
   loadPages: (sheetId, sheet, letters, where, onPage) => gvizPagesServer(sheetId, sheet, letters, where, onPage),
-  normalizeVcType: (v) => normalizeVcType(v)
+  normalizeVcType: (v) => normalizeVcType(v),
+  // Rate-limit cooldown ke dauran forced rebuild nahi (warna Google par aur requests jaati aur 429 badhta).
+  allowRefresh: () => !gvizCooldownActive()
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -4078,6 +4148,8 @@ function remember(url, body, status) {
 }
 /** Background refresh — user ko kabhi Google ke intezaar me nahi rakhta. */
 async function refreshCache(url) {
+  // Rate-limit cooldown me background refresh nahi (yehi background bhar Google ko 429 par 429 deta hai).
+  if (gvizCooldownActive()) return null;
   try {
     const { status, body } = await upstreamOnce(url);
     if (status >= 200 && status < 300 && goodGvizBody(body)) return remember(url, body, status);
@@ -4114,11 +4186,26 @@ async function handleGviz(req, res, params) {
     return sendCached(req, res, hit, 'STALE');
   }
   try {
-    const { status, body } = await upstreamOnce(url);
+    const { status, body, rateLimited, retryAfterMs } = await upstreamOnce(url);
     const ms = Date.now() - started;
+    if (rateLimited) {
+      // Google ka HTML "Too Many Requests" page kabhi client tak nahi jaata — saaf JSON error.
+      perfNote(params, 'LIMIT', ms);
+      if (hit) return sendCached(req, res, hit, 'STALE');
+      const waitMs = Math.max(1000, Number(retryAfterMs) || gvizCooldownLeft());
+      return sendJson(res, 429,
+        { error: gvizLimitMessage(waitMs), retryAfterSec: Math.max(1, Math.ceil(waitMs / 1000)), rateLimited: true },
+        { 'Retry-After': String(Math.max(1, Math.ceil(waitMs / 1000))), 'X-FF-Rate-Limited': '1' });
+    }
     if (status >= 200 && status < 300 && goodGvizBody(body)) { perfNote(params, 'MISS', ms); return sendCached(req, res, remember(url, body, status), 'MISS'); }
     if (hit) { perfNote(params, 'STALE', ms); return sendCached(req, res, hit, 'STALE'); }
     if (!(status >= 200 && status < 300)) { perfNote(params, 'MISS', ms); return sendJson(res, 502, { error: `Google Sheets responded ${status}. Sheet public ("Anyone with the link") hai?` }); }
+    // 200 par bhi kabhi HTML aata hai (Google ka "Too Many Requests" / login page) — wahi HTML
+    // pehle screen par dikh jaata tha. Ab saaf JSON error hi jaata hai.
+    if (/^\s*<|<\/html>/i.test(String(body || ''))) {
+      perfNote(params, 'MISS', ms);
+      return sendJson(res, 502, { error: rateLimitPage(body) ? gvizLimitMessage() : 'Google ne HTML page bheja (JSON nahi). Sheet public hai ya login maang raha hai — check karein.' });
+    }
     perfNote(params, 'MISS', ms);
     return sendMaybeCompressed(req, res, 200, 'text/plain; charset=utf-8', body, { 'Cache-Control': 'no-store', 'X-Cache': 'MISS', 'X-FF-Source': 'proxy' });
   } catch (error) {
@@ -7193,7 +7280,15 @@ async function handleApi(req, res, url) {
   // ---- FASTag inventory mapping (admin-only; third-party secret stays server-side) ----
   if (p === '/api/fastag-mapping/status' && method === 'GET') {
     requireAdmin(user);
-    return sendJson(res, 200, { ok: true, configured: !!String(process.env.GV_TAG_MAPPING_SECRET || '').trim() });
+    // v3.72 — page khulte hi pata chale ki StockDataa index ready hai ya ban raha hai (aur Google
+    // rate limit me hai ya nahi), taaki "sheet load nahi ho rahi" wali confusion na ho.
+    return sendJson(res, 200, {
+      ok: true,
+      configured: !!String(process.env.GV_TAG_MAPPING_SECRET || '').trim(),
+      index: mappingStock.status(),
+      rateLimited: gvizGate.rateLimited > 0 || gvizCooldownActive(),
+      cooldownSec: Math.ceil(gvizCooldownLeft() / 1000)
+    });
   }
   if (p === '/api/fastag-mapping/lookup' && method === 'POST') {
     requireAdmin(user);
@@ -7212,7 +7307,17 @@ async function handleApi(req, res, url) {
   }
   if (p === '/api/fastag-mapping/index-status' && method === 'GET') {
     requireAdmin(user);
-    return sendJson(res, 200, { ok: true, ...mappingStock.status() });
+    // ?fresh=1 → index peeche se dobara ban jaata hai (jawab turant milta hai, page poll karta rehta hai).
+    const fresh = url.searchParams.get('fresh') === '1';
+    const force = url.searchParams.get('force') === '1';
+    if ((fresh || force) && !mappingStock.status().building) {
+      const job = mappingStock.ensure({ fresh: true });
+      job.catch((err) => console.warn('mapping index refresh:', (err && err.message) || err));
+    }
+    return sendJson(res, 200, {
+      ok: true, ...mappingStock.status(),
+      rateLimited: gvizCooldownActive(), cooldownSec: Math.ceil(gvizCooldownLeft() / 1000)
+    });
   }
   if ((p === '/api/fastag-mapping/sheet/read' || p === '/api/fastag-mapping/sheet/mark') && method === 'POST') {
     requireAdmin(user);
@@ -7293,20 +7398,25 @@ async function handleApi(req, res, url) {
           try { parsed = JSON.parse(text); } catch { /* response may be plain text */ }
           lastCode = response.status;
           const success = response.ok && parsed && parsed.success === true;
-          const message = String(success ? (parsed.message || 'Mapping successful') : ((parsed && (parsed.message || parsed.error || parsed.errors)) || text || ('HTTP ' + response.status))).replace(/<[^>]*>/g, ' ').slice(0, 350);
+          const limited = response.status === 429;
+          const message = String(success ? (parsed.message || 'Mapping successful') : (limited ? 'Mapping API rate limit (429 Too Many Requests)' : ((parsed && (parsed.message || parsed.error || parsed.errors)) || text || ('HTTP ' + response.status)))).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').slice(0, 350);
           if (success) return { index, success: true, httpCode: response.status, status: 'Success', message };
           lastMessage = message;
           if (![429, 500, 502, 503, 504].includes(response.status) || attempt === 2) {
-            return { index, success: false, httpCode: response.status, status: response.status === 409 ? 'Conflict' : 'Failed', message: lastMessage };
+            return { index, success: false, httpCode: response.status, status: response.status === 409 ? 'Conflict' : 'Failed', message: lastMessage, retryable: limited || response.status >= 500 };
           }
+          // Retry-After ho to wahi maano, warna 0.6s → 1.2s → 2.4s (jitter ke saath).
+          const retryAfterSec = Number(response.headers.get('retry-after') || 0);
+          const wait = retryAfterSec > 0 ? Math.min(10e3, retryAfterSec * 1000) : Math.min(8000, 600 * Math.pow(2, attempt) + Math.random() * 400);
+          await new Promise((resolve) => setTimeout(resolve, wait));
         } catch (err) {
           clearTimeout(timer);
           lastMessage = err && err.name === 'AbortError' ? 'Mapping API timeout' : 'Mapping API network error: ' + String(err && err.message || err).slice(0, 180);
-          if (attempt === 2) return { index, success: false, httpCode: lastCode, status: 'Network error', message: lastMessage };
+          if (attempt === 2) return { index, success: false, httpCode: lastCode, status: 'Network error', message: lastMessage, retryable: true };
+          await new Promise((resolve) => setTimeout(resolve, 600 * Math.pow(2, attempt) + Math.random() * 300));
         }
-        await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)));
       }
-      return { index, success: false, httpCode: lastCode, status: 'Failed', message: lastMessage };
+      return { index, success: false, httpCode: lastCode, status: 'Failed', message: lastMessage, retryable: true };
     };
     const results = new Array(rows.length);
     let cursor = 0;
@@ -8991,7 +9101,18 @@ async function start() {
     const warmStockAge = process.env.STOCK_AGE_WARM ? process.env.STOCK_AGE_WARM !== '0' : !!process.env.RENDER;
     if (warmStockAge) setTimeout(() => stockAgeIndex(false).catch((err) => console.warn('stock ageing warm-up:', err.message)), 12000).unref();
     // 🔗 FASTag Mapping ka StockDataa lookup index bhi pehle se garam rakho — pehla Quick Map instant ho.
-    if (warmStockAge) setTimeout(() => mappingStock.ensure().catch((err) => console.warn('mapping index warm-up:', err.message)), 25000).unref();
+    // v3.72: boot ke 25 s ke bajaye 6 s baad shuru, aur fail (jaise Google rate limit) hone par
+    // 30 s / 2 min / 5 min ke gaps me dobara — pehla user "sheet load nahi ho rahi" me na atke.
+    if (warmStockAge) {
+      const warmDelays = [6000, 30e3, 2 * 60e3, 5 * 60e3];
+      warmDelays.forEach((delay, i) => setTimeout(() => {
+        const st = mappingStock.status();
+        if (st.building) return;                 // pehle se ban raha hai
+        if (st.ready && i === 0) return;         // pehla attempt: index pehle hi garam hai
+        if (gvizCooldownActive()) return;        // rate limit — chup-chaap skip (agla attempt try karega)
+        mappingStock.ensure({ fresh: i > 0 }).catch((err) => console.warn('mapping index warm-up:', err.message));
+      }, delay).unref?.());
+    }
 }
 // Start exactly once and keep the promise available to API requests that arrive while
 // Render is still warming durable storage.

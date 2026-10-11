@@ -8,12 +8,28 @@ window.FF = window.FF || {};
   const MAX_INPUTS = 2500;
   const MAX_RESULTS = 20000;
   const API_LOOKUP = '/api/fastag-mapping/lookup';
+  const API_INDEX_STATUS = '/api/fastag-mapping/index-status';
   const API_SHEET_READ = '/api/fastag-mapping/sheet/read';
   const API_SHEET_MARK = '/api/fastag-mapping/sheet/mark';
-  const MAP_BATCH = 100, MAP_PARALLEL = 2, SHOW_STEP = 300;
+  // v3.72 — live counters ke liye chhote batches: 25-row batch har 1-3 s me complete hota hai,
+  // isliye "kitne mapping ho gaye" screen par lagataar badhta dikhta hai (pehle 100-row batch
+  // me ek-ek jump aata tha).
+  const MAP_BATCH = 25, MAP_PARALLEL = 3, SHOW_STEP = 300;
+  const LOOKUP_CHUNK = 400;         // server StockDataa lookup ek saath itne items (chhote chunk = live count)
+  const LOOKUP_PARALLEL = 2;
+  const INDEX_POLL_MS = 2500;       // StockDataa index status itni der me refresh
+  const PROGRESS_STYLE_ID = 'fm-progress-styles';
   const SHEET_CFG_KEY = 'ffFmSheetCfg';
   let nextId = 1;
-  const state = { items: [], rows: [], configured: false, busy: false, root: null, showLimit: 300, sheetCtx: null };
+  const state = { items: [], rows: [], configured: false, busy: false, root: null, showLimit: 300, sheetCtx: null, index: null, indexAt: 0, rateLimited: false };
+  // ── 📊 Live progress (v3.72) ────────────────────────────────────────────────────────────────────
+  // Sheet read / StockDataa lookup / mapping — teeno phases ka live counter (kitne ho gaye,
+  // kitne bache, success/failed, %, ETA) screen par lagataar update hota rehta hai.
+  const prog = { phase: '', title: '', total: 0, done: 0, ok: 0, failed: 0, detail: '', note: '', startedAt: 0, endedAt: 0, retry: '', retryAction: '', rateSec: 0 };
+  const progTimers = { tick: null, index: null };
+  const canInterval = () => typeof setInterval === 'function' && typeof clearInterval === 'function';
+  const later = (fn, ms) => (typeof setTimeout === 'function' ? setTimeout(fn, ms) : 0);
+  const num = (v) => (typeof U.fmt === 'function' ? U.fmt(Number(v) || 0) : String(Number(v) || 0));
   // Small session-local index: repeated Quick Map / barcode lookups should not hit Sheets again.
   const stockByBarcode = new Map();
   const stockByTagId = new Map();
@@ -25,6 +41,113 @@ window.FF = window.FF || {};
   const STOCK_PAGE_TIMEOUT_MS = 16000;
   const esc = (v) => U.esc(String(v == null ? '' : v));
   const clean = (v) => String(v == null ? '' : v).replace(/\u00a0/g, ' ').trim();
+  // ── live progress helpers ───────────────────────────────────────────────────────────────────────
+  function ensureProgressStyles() {
+    if (typeof document === 'undefined' || !document.head || !document.createElement || document.getElementById(PROGRESS_STYLE_ID)) return;
+    const style = document.createElement('style');
+    style.id = PROGRESS_STYLE_ID;
+    style.textContent = [
+      '.fm-progress{margin:0 0 10px;padding:12px 14px;border:1px solid var(--line,#dbe3ef);border-radius:14px;background:linear-gradient(135deg,rgba(79,70,229,.08),rgba(14,165,233,.06))}',
+      '.fm-progress[hidden]{display:none}',
+      '.fm-prog-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px}',
+      '.fm-prog-head b{font-size:14px}',
+      '.fm-prog-pill{margin-left:auto;padding:2px 9px;border-radius:99px;background:rgba(79,70,229,.12);font-weight:800;font-size:11.5px;color:var(--brand,#4f46e5)}',
+      '.fm-prog-pill+.fm-prog-pill{margin-left:0}',
+      '.fm-prog-track{position:relative;height:9px;margin:10px 0 8px;border-radius:99px;background:#e9edf6;overflow:hidden}',
+      '.fm-prog-track>i{display:block;height:100%;width:0;border-radius:99px;background:linear-gradient(90deg,var(--brand,#4f46e5),var(--brand-2,#ec4899));transition:width .35s ease}',
+      '.fm-prog-nums{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;font-weight:650;color:var(--muted,#64748b)}',
+      '.fm-prog-nums b{color:var(--text,#0f172a)}',
+      '.fm-prog-nums .ok b{color:#047857}.fm-prog-nums .bad b{color:#b91c1c}',
+      '.fm-prog-note{margin-top:7px;font-size:12px;color:var(--muted,#64748b)}',
+      '.fm-prog-note.warn{color:#b45309;font-weight:700}',
+      '.fm-prog-retry{margin-top:9px}',
+      '.fm-prog-live{display:inline-block;width:7px;height:7px;border-radius:99px;background:#22c55e;margin-right:5px;animation:fmProgPulse 1.1s ease-in-out infinite}',
+      '@keyframes fmProgPulse{0%,100%{opacity:1}50%{opacity:.25}}'
+    ].join('');
+    document.head.appendChild(style);
+  }
+  const pctOf = (done, total) => (!total ? 0 : Math.max(0, Math.min(100, Math.round((done / total) * 100))));
+  function fmtDur(sec) {
+    const s = Math.max(0, Math.round(Number(sec) || 0));
+    if (s < 60) return s + 's';
+    const m = Math.floor(s / 60);
+    if (m < 60) return m + 'm ' + String(s % 60).padStart(2, '0') + 's';
+    return Math.floor(m / 60) + 'h ' + String(m % 60).padStart(2, '0') + 'm';
+  }
+  function renderProgress() {
+    const host = state.root ? U.$('#fm-progress', state.root) : null;
+    if (!host) return;
+    if (!prog.phase) { if (host.style) host.style.display = 'none'; host.innerHTML = ''; return; }
+    if (host.style) host.style.display = '';
+    const active = !prog.endedAt;
+    const elapsed = Math.max(0, ((prog.endedAt || Date.now()) - prog.startedAt) / 1000);
+    const rate = elapsed > 1 ? prog.done / elapsed : 0;
+    const percent = pctOf(prog.done, prog.total);
+    const remain = active && rate > 0.03 && prog.total > prog.done ? (prog.total - prog.done) / rate : 0;
+    const parts = [];
+    parts.push('<div class="fm-prog-head">' + (active ? '<span class="fm-prog-live"></span>' : '') + '<b>' + esc(prog.title || 'Progress') + '</b>' +
+      '<span class="fm-prog-pill">' + esc(prog.done + (prog.total ? ' / ' + prog.total : '')) + ' rows</span>' +
+      '<span class="fm-prog-pill">' + percent + '%</span></div>');
+    parts.push('<div class="fm-prog-track"><i style="width:' + percent + '%"></i></div>');
+    parts.push('<div class="fm-prog-nums">' +
+      '<span class="ok">✅ Mapped / done <b>' + num(prog.ok) + '</b></span>' +
+      '<span class="bad">❌ Failed <b>' + num(prog.failed) + '</b></span>' +
+      (prog.total ? '<span>⏳ Bachhe <b>' + num(Math.max(0, prog.total - prog.done)) + '</b></span>' : '') +
+      '<span>⏱ ' + fmtDur(elapsed) + (remain ? ' · ETA ~' + fmtDur(remain) : '') + '</span>' +
+      (rate > 0.03 ? '<span>⚡ ' + rate.toFixed(1) + '/s</span>' : '') + '</div>');
+    if (prog.detail) parts.push('<div class="fm-prog-note">' + esc(prog.detail) + '</div>');
+    if (prog.rateSec) parts.push('<div class="fm-prog-note warn">⏳ Google rate limit — ' + fmtDur(prog.rateSec) + ' me apne aap retry hoga (purana cache data dikh raha hai).</div>');
+    if (prog.note) parts.push('<div class="fm-prog-note">' + esc(prog.note) + '</div>');
+    if (prog.retry) parts.push('<div class="btn-row fm-prog-retry"><button class="btn small" id="fm-retry" type="button">🔁 ' + esc(prog.retry) + '</button></div>');
+    host.innerHTML = parts.join('');
+  }
+  function startProgTimer() {
+    if (!canInterval() || progTimers.tick) return;
+    progTimers.tick = setInterval(() => { if (prog.endedAt) stopProgTimer(); else renderProgress(); }, 1000);
+  }
+  function stopProgTimer() {
+    if (progTimers.tick && typeof clearInterval === 'function') clearInterval(progTimers.tick);
+    progTimers.tick = null;
+  }
+  function progressStart(phase, title, total, detail) {
+    ensureProgressStyles();
+    stopProgTimer();
+    Object.assign(prog, { phase, title, total: Math.max(0, Number(total) || 0), done: 0, ok: 0, failed: 0, detail: detail || '', note: '', startedAt: Date.now(), endedAt: 0, retry: '', retryAction: '', rateSec: 0 });
+    startProgTimer();
+    renderProgress();
+  }
+  function progressSet(patch) { if (!prog.phase) return; Object.assign(prog, patch || {}); renderProgress(); }
+  function progressReset() {
+    stopProgTimer();
+    Object.assign(prog, { phase: '', title: '', total: 0, done: 0, ok: 0, failed: 0, detail: '', note: '', startedAt: 0, endedAt: 0, retry: '', retryAction: '', rateSec: 0 });
+    renderProgress();
+  }
+  function progressEnd(note) {
+    if (!prog.phase) return;
+    prog.endedAt = prog.endedAt || Date.now();
+    prog.retry = ''; prog.retryAction = '';
+    if (note) prog.note = note;
+    prog.rateSec = 0;
+    stopProgTimer();
+    renderProgress();
+  }
+  function progressFail(message, retryLabel, retryAction) {
+    if (!prog.phase) progressStart('idle', 'Error', 0, '');
+    prog.endedAt = Date.now();
+    prog.detail = String(message || '').slice(0, 400);
+    prog.retry = retryLabel || '';
+    prog.retryAction = retryAction || '';
+    stopProgTimer();
+    renderProgress();
+  }
+  /** Rate limit (Google 429) abhi active hai? — heavy scans is dauran rok dete hain. */
+  const rateLimitActive = () => !!(FF.data && typeof FF.data.rateLimitStatus === 'function' && FF.data.rateLimitStatus().active);
+  const rateLimitSecs = () => (FF.data && typeof FF.data.rateLimitStatus === 'function' ? FF.data.rateLimitStatus().blockedSec : 0);
+  function rateLimitError() {
+    const e = new Error('Google Sheets ne rate limit kar diya (429 Too Many Requests). ' + (rateLimitSecs() ? '~' + rateLimitSecs() + 's me retry hoga. ' : '') + 'Server ka StockDataa index ready hone par lookup turant ho jaayega — thodi der baad "🔁 Dobara try" dabayein.');
+    e.rateLimited = true;
+    return e;
+  }
   const norm = (v) => clean(v).toLowerCase().replace(/[^a-z0-9]/g, '');
   const cols = () => {
     const s = FF.config.stock || {};
@@ -284,7 +407,7 @@ window.FF = window.FF || {};
       return D.query('StockDataa', rebuilt, opts);
     }
   }
-  async function queryField(fieldName, values) {
+  async function queryField(fieldName, values, tick) {
     const unique = [...new Set(values.map(clean).filter(Boolean))];
     if (!unique.length) return [];
     const schema = await stockSchema(), fieldIndex = schema.index[fieldName], field = schema.letters[fieldIndex] || cols()[fieldName];
@@ -312,6 +435,8 @@ window.FF = window.FF || {};
         const work = batches[cursor++], batch = work.values;
         const make = (numeric, vals) => selectClause() + ' where ' + vals.map((x) => field + ' = ' + literal(x, numeric)).join(' or ');
         const queryRows = async (tq) => {
+          // Google ne rate limit kiya ho to aur queries bharna ulta nuksaan hai — saaf message ke saath ruk jao.
+          if (rateLimitActive()) throw rateLimitError();
           const table = await stockQuery(tq, {
             fresh: true, timeoutMs: STOCK_LOOKUP_TIMEOUT_MS, retries: 0, directFirst: true
           });
@@ -367,6 +492,7 @@ window.FF = window.FF || {};
           if (!batch.some((value) => idKey(value) === idKey(sourceValue))) continue;
           found.set(idKey(row.tagId) + '|' + idKey(row.barcode), row);
         }
+        if (tick) tick(batch.length);   // live progress: ye batch (up to 15 identifiers) ho gaya
       }
     });
     await Promise.all(workers);
@@ -380,12 +506,14 @@ window.FF = window.FF || {};
       const PAGE_SIZE = 5000, HARD_CAP = 250000, PARALLEL_PAGES = 4;
       let offset = 0, finished = false, previousPageFingerprint = '';
       const fetchPage = async (start) => {
+        if (rateLimitActive()) throw rateLimitError();   // scan aadha-adhura chhod kar saaf message do
         const tq = selectClause() + ' where ' + field + ' is not null limit ' + PAGE_SIZE + ' offset ' + start;
         try {
           return await stockQuery(tq, {
             fresh: true, timeoutMs: STOCK_PAGE_TIMEOUT_MS, retries: 0, directFirst: true
           });
         } catch (err) {
+          if (err && err.rateLimited) throw err;
           throw new Error('StockDataa BARCODE scan failed near row ' + (start + 1) + ': ' + String(err && (err.message || err) || 'Google Sheets query error'));
         }
       };
@@ -497,11 +625,13 @@ window.FF = window.FF || {};
     const matched = new Map();
     let offset = 0, finished = false, previousPageFingerprint = '';
     const fetchPage = async (start) => {
+      if (rateLimitActive()) throw rateLimitError();
       try {
         return await stockQuery(selectClause() + ' where D is not null limit ' + PAGE_SIZE + ' offset ' + start, {
           timeoutMs: 4500, directTimeoutMs: 1800, retries: 0, directFirst: true
         });
       } catch (err) {
+        if (err && err.rateLimited) throw err;
         throw new Error('StockDataa paged barcode lookup failed near row ' + (start + 1) + ': ' + String(err && (err.message || err) || 'Google Sheets query error'));
       }
     };
@@ -556,6 +686,64 @@ window.FF = window.FF || {};
     state.rows.push(row); return row;
   }
   function setStatus(message, kind) { const el = U.$('#fm-message', state.root); if (el) { el.className = 'notice ' + (kind || 'info'); el.textContent = message; } }
+  // ── 🗂️ StockDataa index status (server side) — "sheet load nahi ho rahi" ki jagah live sthiti ────
+  function renderIndexChip() {
+    const chip = state.root ? U.$('#fm-index-status', state.root) : null;
+    if (!chip) return;
+    const ix = state.index || {};
+    const build = ix.build || {};
+    const rows = Number(ix.rows) || Number(build.rows) || 0;
+    let text = '', cls = 'badge gray';
+    if (state.rateLimited) {
+      cls = 'badge amber';
+      text = '⏳ Google rate limit' + (ix.cooldownSec ? ' · ' + ix.cooldownSec + 's' : '') + (rows ? ' · index ' + num(rows) + ' rows' : '');
+    } else if (ix.building || (build.pages && !ix.ready)) {
+      cls = 'badge amber';
+      text = '⏳ StockDataa index ban raha hai… ' + num(build.rows || rows) + ' rows' + (build.pages ? ' · ' + num(build.pages) + ' pages' : '');
+    } else if (ix.ready) {
+      cls = 'badge green';
+      text = '✅ StockDataa index ready · ' + num(rows) + ' rows' + (ix.ageSec != null ? ' · ' + fmtDur(ix.ageSec) + ' purana' : '');
+    } else if (ix.error) {
+      cls = 'badge amber';
+      text = '⚠️ StockDataa index: ' + String(ix.error).slice(0, 90);
+    } else {
+      text = 'StockDataa index status…';
+    }
+    chip.className = cls;
+    chip.textContent = text;
+  }
+  async function refreshIndexStatus(fresh) {
+    if (typeof fetch !== 'function') return null;
+    try {
+      const res = await fetch(API_INDEX_STATUS + (fresh ? '?fresh=1' : ''), { credentials: 'same-origin', cache: 'no-store', headers: { 'X-Requested-With': 'FF-Dashboard' } });
+      if (!res || !res.ok) return null;
+      const json = await res.json().catch(() => null);
+      if (!json || json.ok === false) return null;
+      state.index = json; state.indexAt = Date.now(); state.rateLimited = !!json.rateLimited;
+      renderIndexChip();
+      if (json.rateLimited && prog.phase && !prog.endedAt) progressSet({ rateSec: Number(json.cooldownSec) || 0 });
+      else if (prog.rateSec) progressSet({ rateSec: 0 });
+      return json;
+    } catch (_) { return null; }
+  }
+  function stopIndexWatch() {
+    if (progTimers.index && typeof clearInterval === 'function') clearInterval(progTimers.index);
+    progTimers.index = null;
+  }
+  /** Jab tak index ready na ho (ya kaam chal raha ho) har 2.5 s, warna 20 s me ek nazar. */
+  function startIndexWatch() {
+    stopIndexWatch();
+    refreshIndexStatus(false);
+    if (!canInterval()) return;
+    progTimers.index = setInterval(() => {
+      // Page badal gaya / render hone se pehle nikal gaya → poll band (server par bina kaam requests nahi).
+      if (state.root && typeof state.root.isConnected === 'boolean' && !state.root.isConnected) { stopIndexWatch(); return; }
+      const ix = state.index || {};
+      const building = ix.building || !ix.ready;
+      if (!building && !state.busy && Date.now() - state.indexAt > 20000) return;
+      refreshIndexStatus(false);
+    }, INDEX_POLL_MS);
+  }
   const rowReady = (r) => r.stock && r.tagId && r.serialNo && r.vcType && r.agentId && !String(r.status || '').startsWith('Duplicate') && !r.mapped;
   function renderTable() {
     const host = U.$('#fm-results', state.root), summary = U.$('#fm-summary', state.root);
@@ -589,8 +777,40 @@ window.FF = window.FF || {};
       body: JSON.stringify({ fresh: !!fresh, items: waiting.map((x) => ({ type: x.type, barcode: x.barcode || x.serialNo || '', tagId: x.tagId || '', first: x.first || '', last: x.last || '' })) }) });
     if (!res || res.status === undefined || res.status === 404 || res.status === 405) throw legacy('server lookup API missing');
     let json = {}; try { json = await res.json(); } catch (_) {}
+    if (res.status === 429 || json.rateLimited) throw rateLimitError();
     if (!res.ok || !Array.isArray(json.results)) throw new Error(json.error || ('Lookup API HTTP ' + res.status));
     return json;
+  }
+  /** v3.72 — server lookup chhote chunks me: screen par live count badhta rehta hai aur ek chunk
+   *  fail hone par baaki kaam bhi nahi girta (index warm hone par retry turant hota hai). */
+  async function serverLookupChunks(waiting, fresh, onTick) {
+    const chunks = [];
+    for (let i = 0; i < waiting.length; i += LOOKUP_CHUNK) chunks.push({ start: i, items: waiting.slice(i, i + LOOKUP_CHUNK) });
+    const results = new Array(waiting.length);
+    let done = 0, cursor = 0, firstError = null, legacyErr = null, meta = null;
+    const workers = Array.from({ length: Math.max(1, Math.min(LOOKUP_PARALLEL, chunks.length)) }, async () => {
+      while (cursor < chunks.length) {
+        const chunk = chunks[cursor++];
+        try {
+          const out = await serverLookup(chunk.items, fresh);
+          meta = meta || out.meta || null;
+          (out.results || []).forEach((r, j) => {
+            const at = chunk.start + (r && r.index != null ? Number(r.index) : j);
+            if (at >= 0 && at < results.length) results[at] = r;
+          });
+        } catch (err) {
+          if (err && err.legacy) { legacyErr = err; return; }
+          if (!firstError) firstError = err;
+          chunk.items.forEach((_, j) => { results[chunk.start + j] = { index: chunk.start + j, rows: [] }; });
+        }
+        done += chunk.items.length;
+        if (onTick) onTick(Math.min(done, waiting.length));
+      }
+    });
+    await Promise.all(workers);
+    if (legacyErr) throw legacyErr;
+    if (firstError) throw firstError;
+    return { results, meta };
   }
   const requestLabel = (item) => item.type === 'range' ? item.first + ' – ' + item.last : (item.tagId || item.barcode || item.serialNo || '');
   async function lookup() {
@@ -621,25 +841,37 @@ window.FF = window.FF || {};
     const waiting = state.items.splice(0);
     if (waiting.length > MAX_INPUTS) { state.items.unshift.apply(state.items, waiting); setStatus('Ek baar me maximum ' + MAX_INPUTS + ' input selectors allowed hain.', 'warn'); return false; }
     state.busy = true; setStatus('StockDataa se matching details lookup ho rahi hain…', 'info');
+    progressStart('lookup', '🔎 StockDataa lookup', waiting.length, 'Server ke StockDataa index se exact match dhoondha ja raha hai…');
     const rowsBefore = state.rows.length;
     const old = U.$('#fm-lookup', state.root), mapBtn = U.$('#fm-map', state.root); if (old) old.disabled = true; if (mapBtn) mapBtn.disabled = true;
     try {
       let srv = null;
-      try { srv = await serverLookup(waiting, false); }
-      catch (err) { if (!err.legacy) throw err; }
+      try {
+        srv = await serverLookupChunks(waiting, false, (doneCount) => progressSet({
+          done: doneCount,
+          detail: 'StockDataa index lookup: ' + doneCount + ' / ' + waiting.length + ' identifiers check ho gaye'
+        }));
+      } catch (err) { if (!err.legacy) throw err; }
       if (srv) {
         waiting.forEach((item, i) => {
           const r = srv.results[i] || { rows: [] };
           if (r.error) item._lookupError = r.error; else item._srvRows = r.rows || [];
         });
+      } else {
+        progressSet({ detail: 'Server index available nahi — client fallback scan chal raha hai (thodi der lag sakti hai)…' });
       }
       const barcodes = srv ? [] : waiting.flatMap((x) => x.type === 'range' ? [] : [x.barcode || x.serialNo].filter(Boolean));
       const tagIds = srv ? [] : waiting.flatMap((x) => x.tagId ? [x.tagId] : []);
       // serialNo is a payload field, not a separate StockDataa lookup column: it is BARCODE.
       // Query each physical StockDataa column only once to reduce Google Sheets request time.
+      let lookupTicks = 0;
+      const tick = (n) => {
+        lookupTicks += Math.max(0, Number(n) || 0);
+        progressSet({ done: Math.min(waiting.length, lookupTicks), detail: 'Client fallback scan: ' + num(lookupTicks) + ' / ' + num(waiting.length) + ' identifiers' });
+      };
       const found = await Promise.all([
-        queryField('barcode', barcodes),
-        queryField('tagId', tagIds)
+        queryField('barcode', barcodes, tick),
+        queryField('tagId', tagIds, tick)
       ]);
       const byBarcode = found[0], byTag = found[1];
       const ranges = srv ? [] : waiting.filter((x) => x.type === 'range');
@@ -648,7 +880,8 @@ window.FF = window.FF || {};
         while (rangeCursor < ranges.length) {
           const item = ranges[rangeCursor++];
           try { item._rangeRows = await queryRange(item.first, item.last); }
-          catch (err) { item._lookupError = err.message || String(err); }
+          catch (err) { item._lookupError = err.message || String(err); if (err && err.rateLimited) { ranges.length = 0; } }
+          tick(1);
         }
       });
       await Promise.all(rangeWorkers);
@@ -680,12 +913,16 @@ window.FF = window.FF || {};
       }
       checkDuplicates(); renderTable();
       const good = state.rows.filter((r) => r.stock && r.tagId && r.serialNo && r.vcType && r.agentId && !r.status.startsWith('Duplicate') && !r.mapped).length;
+      const notFound = state.rows.slice(rowsBefore).filter((r) => r.status === 'Not found in StockDataa').length;
+      progressSet({ done: waiting.length, total: waiting.length, ok: state.rows.slice(rowsBefore).filter((r) => r.stock && r.tagId).length, failed: notFound + state.rows.slice(rowsBefore).filter((r) => r.status === 'Lookup error').length });
+      progressEnd('Lookup complete — ' + num(good) + ' row ready to map' + (notFound ? ' · ' + num(notFound) + ' StockDataa me nahi mili' : '') + '. Ab Agent ID / VC type review karke "🚀 Map ready rows" dabayein.');
       setStatus('Lookup complete: ' + good + ' row ready. Mapping se pehle Agent ID aur VC type review karein.', good ? 'success' : 'warn');
       return true;
     } catch (err) {
       // Query fail hone par queue wapas daal do — nahi to user dubara Lookup dabaye to
       // "Pehle file upload karein" dikhega aur retry me hi inputs gayab ho jaate the.
       if (state.rows.length === rowsBefore) state.items = waiting.concat(state.items);
+      progressFail((err.message || String(err)) + (state.items.length ? ' · Inputs queue me wapas aa gaye.' : ''), 'Dobara try karo', 'lookup');
       setStatus('Lookup fail: ' + (err.message || err) + (state.items.length ? ' Inputs queue me wapas aa gaye — dobara Lookup dabayein.' : ''), 'error');
       return false;
     }
@@ -743,37 +980,94 @@ window.FF = window.FF || {};
     if (!ready.length) { setStatus('Koi selected, complete row ready nahi hai. Pehle lookup karein aur Agent ID verify karein.', 'warn'); return; }
     if (!confirm('StockDataa se verify ki gayi ' + ready.length + ' mapping(s) external API par bhejni hain?')) return;
     state.busy = true; setStatus('Mapping API call chal rahi hai… please page band na karein.', 'info');
+    progressStart('map', '🚀 Mapping API', ready.length, 'Har ' + MAP_BATCH + '-row batch ka result aate hi live counters update hote hain…');
     const mapBtn = U.$('#fm-map', state.root); if (mapBtn) mapBtn.disabled = true;
+    let success = 0, failed = 0, doneCount = 0, batchesDone = 0, fatal = null;   // catch me bhi chahiye
     try {
-      let success = 0, failed = 0, doneCount = 0, fatal = null;
       const batches = [];
       for (let i = 0; i < ready.length; i += MAP_BATCH) batches.push(ready.slice(i, i + MAP_BATCH));
+      const totalBatches = batches.length;
       let next = 0;
       const runBatch = async (batch) => {
         const res = await fetch(API_MAP, { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'FF-Dashboard' }, body: JSON.stringify({ rows: batch.map((r) => ({ tagId: r.tagId, serialNo: r.serialNo, vcType: normalizeVcType(r.vcType), agentId: r.agentId })) }) });
         let json = {}; try { json = await res.json(); } catch (_) {}
+        if (res.status === 429 || json.rateLimited) throw Object.assign(new Error(json.error || 'Mapping API rate limit (429).'), { rateLimited: true });
         if (!res.ok || !Array.isArray(json.results)) throw new Error(json.error || ('Mapping API HTTP ' + res.status));
         json.results.forEach((out, j) => {
           const r = batch[out.index == null ? j : out.index]; if (!r) return;
           r.apiStatus = out.status || (out.success ? 'Success' : 'Failed'); r.message = out.message || ''; r.mapped = !!out.success;
+          r.retryable = !out.success && !!out.retryable;
           r.status = out.success ? 'Mapped successfully' : 'Mapping failed'; if (out.success) success++; else failed++;
         });
-        doneCount += batch.length;
+        doneCount += batch.length; batchesDone++;
+        // 📊 Live counters — har 25-row batch ke baad screen par turant update.
+        progressSet({
+          done: Math.min(doneCount, ready.length), ok: success, failed,
+          detail: 'Batch ' + batchesDone + ' / ' + totalBatches + ' ho gaya — last batch me ' + batch.filter((r) => r.mapped).length + ' success, ' + batch.filter((r) => !r.mapped).length + ' fail. Bheja ja raha hai: ' + Math.min(MAP_PARALLEL, totalBatches - batchesDone) + ' row-batch(es) parallel.'
+        });
         setStatus('Progress ' + Math.min(doneCount, ready.length) + '/' + ready.length + ' · Success ' + success + ' · Failed ' + failed, 'info');
       };
       // MAP_PARALLEL batches ek saath (har batch me server 10 rows parallel) — pehle ek-ek karke chalte the.
       const pool = Array.from({ length: Math.min(MAP_PARALLEL, batches.length) }, async () => {
-        while (next < batches.length && !fatal) { const batch = batches[next++]; try { await runBatch(batch); } catch (err) { fatal = err; } }
+        while (next < batches.length && !fatal) {
+          const batch = batches[next++];
+          try { await runBatch(batch); }
+          catch (err) {
+            // Rate limit par poori run band nahi — rows retryable rehti hain aur neeche retry pass
+            // me dobara bheji jaati hain (baaki batches chalti rehti hain).
+            if (err && err.rateLimited) {
+              batch.forEach((r) => {
+                if (r.mapped) return;
+                r.retryable = true; r.status = 'Mapping failed';
+                r.apiStatus = 'Rate limited'; r.message = err.message || 'Mapping API rate limit';
+              });
+              doneCount += batch.length; batchesDone++;
+              failed += batch.filter((r) => !r.mapped).length;
+              progressSet({ done: Math.min(doneCount, ready.length), failed, detail: '⚠️ Mapping API ne rate limit kiya — ye ' + batch.length + ' rows retry pass me dobara bheji jaayengi.' });
+              setStatus('Progress ' + Math.min(doneCount, ready.length) + '/' + ready.length + ' · Success ' + success + ' · Failed ' + failed, 'info');
+              await new Promise((r2) => setTimeout(r2, 700));
+              continue;
+            }
+            fatal = err;
+          }
+        }
       });
       await Promise.all(pool);
       if (fatal) throw fatal;
+      // 🔁 Retry pass: sirf woh rows jo rate limit / network / 5xx ki wajah se fail hui (mapped rows chhoote nahi).
+      const retryRows = ready.filter((r) => !r.mapped && r.retryable);
+      if (retryRows.length) {
+        progressSet({ detail: '🔁 Retry pass: ' + num(retryRows.length) + ' row dobara bheji jaa rahi hain…' });
+        const retryBatches = [];
+        for (let i = 0; i < retryRows.length; i += MAP_BATCH) retryBatches.push(retryRows.slice(i, i + MAP_BATCH));
+        let retryNext = 0;
+        const retryPool = Array.from({ length: Math.min(2, retryBatches.length) }, async () => {
+          while (retryNext < retryBatches.length) {
+            const batch = retryBatches[retryNext++];
+            const res = await fetch(API_MAP, { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'FF-Dashboard' }, body: JSON.stringify({ rows: batch.map((r) => ({ tagId: r.tagId, serialNo: r.serialNo, vcType: normalizeVcType(r.vcType), agentId: r.agentId })) }) });
+            let json = {}; try { json = await res.json(); } catch (_) {}
+            if (!res.ok || !Array.isArray(json.results)) continue;
+            json.results.forEach((out, j) => {
+              const r = batch[out.index == null ? j : out.index]; if (!r) return;
+              if (out.success && !r.mapped) { r.mapped = true; success++; failed = Math.max(0, failed - 1); }
+              if (out.success) { r.apiStatus = out.status || 'Success'; r.message = out.message || ''; r.status = 'Mapped successfully'; r.retryable = false; }
+            });
+            progressSet({ ok: success, failed, detail: '🔁 Retry pass chal raha hai… ab tak ' + num(success) + ' mapped, ' + num(failed) + ' failed.' });
+          }
+        });
+        await Promise.all(retryPool);
+      }
       let sheetNote = '';
+      if (state.sheetCtx && state.sheetCtx.colDone) progressSet({ title: '📗 Sheet me "done" likha jaa raha hai', detail: 'Mapped rows ke Done column me "' + state.sheetCtx.doneText + '" likha jaa raha hai…' });
       try { const w = await markSheetDone(); if (w != null) sheetNote = ' · Sheet me "' + state.sheetCtx.doneText + '" likha: ' + w + ' row'; }
       catch (err) { sheetNote = ' · ⚠ Sheet me done nahi likha ja saka: ' + (err.message || err); }
+      progressSet({ done: ready.length, ok: success, failed });
+      progressEnd('✅ Mapping complete — ' + num(success) + ' mapped, ' + num(failed) + ' failed' + sheetNote + '. Full CSV download kar sakte hain.');
       setStatus('Mapping complete. Success: ' + success + ' · Failed: ' + failed + sheetNote + '. Full CSV download kar sakte hain.', (failed || /⚠/.test(sheetNote)) ? 'warn' : 'success');
     } catch (err) {
       // Jo rows map ho chuki hain unka "done" phir bhi sheet me likh do.
       try { await markSheetDone(); } catch (_) { /* original error dikhana zyada zaroori */ }
+      progressFail('Mapping request fail: ' + (err.message || err) + ' · ' + num(success) + ' rows map ho chuki hain (table/CSV me dikhti hain).', 'Adhoori rows dobara try karo', 'map');
       setStatus('Mapping request fail: ' + (err.message || err) + '. Result table se CSV download kar sakte hain.', 'error');
     }
     finally { state.busy = false; if (mapBtn) mapBtn.disabled = !state.configured; renderTable(); }
@@ -810,6 +1104,7 @@ window.FF = window.FF || {};
     saveSheetCfg();
     const columns = (mode === 'range' ? [colFirst, colLast] : [colBarcode]).concat([colAgent]).concat(colDone ? [colDone] : []);
     state.busy = true; setStatus('Google Sheet se rows padh raha hoon…', 'info');
+    progressStart('sheet', '📗 Google Sheet read', 0, 'Apps Script se rows aa rahi hain (sheet: ' + tab + ')…');
     let items = [], skippedDone = 0, invalid = 0, blank = 0;
     try {
       const res = await fetch(API_SHEET_READ, { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'FF-Dashboard' }, body: JSON.stringify({ sheet: link, tab, startRow, columns }) });
@@ -831,13 +1126,23 @@ window.FF = window.FF || {};
           items.push({ id: nextId++, type: isTag ? 'tagId' : 'barcode', tagId: isTag ? v[0] : '', barcode: isTag ? '' : v[0], serialNo: isTag ? '' : v[0], agentId, source: 'Sheet row ' + rowNo, sheetRow: rowNo, selected: true });
         }
       });
-    } catch (err) { state.busy = false; setStatus('Google Sheet read fail: ' + (err.message || err), 'error'); return; }
+    } catch (err) {
+      state.busy = false;
+      progressFail('Google Sheet read fail: ' + (err.message || err) + ' · Sheet shared hai? Apps Script me naya Code.gs deploy hai?', 'Sheet dobara load karo', 'sheet');
+      setStatus('Google Sheet read fail: ' + (err.message || err), 'error');
+      return;
+    }
     state.busy = false;
-    if (!items.length) { setStatus('Sheet me map karne layak naya row nahi mila' + (skippedDone ? ' (' + skippedDone + ' row pehle se "' + doneText + '" hain)' : '') + (invalid ? ' · ' + invalid + ' row me barcode/Agent ID blank' : '') + '.', 'warn'); return; }
+    if (!items.length) {
+      progressEnd('Sheet me map karne layak naya row nahi mila' + (skippedDone ? ' (' + skippedDone + ' row pehle se "' + doneText + '" hain)' : '') + (invalid ? ' · ' + invalid + ' row me barcode/Agent ID blank' : '') + '.');
+      setStatus('Sheet me map karne layak naya row nahi mila' + (skippedDone ? ' (' + skippedDone + ' row pehle se "' + doneText + '" hain)' : '') + (invalid ? ' · ' + invalid + ' row me barcode/Agent ID blank' : '') + '.', 'warn');
+      return;
+    }
     if (items.length > MAX_INPUTS) { setStatus('Ek baar me maximum ' + MAX_INPUTS + ' sheet rows. Start row badal kar baaki alag run karein (abhi ' + items.length + ' mili).', 'warn'); return; }
     state.sheetCtx = { link, tab, colDone, doneText, marked: new Set(), auto: !!auto };
     state.items.push.apply(state.items, items);
     const note = items.length + ' sheet rows queue me' + (skippedDone ? ' · ' + skippedDone + ' pehle se done skip' : '') + (invalid ? ' · ' + invalid + ' invalid skip' : '') + '.';
+    progressSet({ total: items.length, detail: note + ' StockDataa lookup chal raha hai…' });
     setStatus(note + ' StockDataa lookup chal raha hai…', 'info');
     const ok = await lookup();
     if (ok === false) return;
@@ -900,7 +1205,7 @@ window.FF = window.FF || {};
   }
   function render(root) {
     state.root = root;
-    root.innerHTML = '<div class="page-head"><div><h1>🧭 FASTag Mapping</h1><p class="sub">GV Partner · StockDataa se Tag ID, Serial/Barcode, VC Type aur Agent details fetch karke securely map karein.</p></div><div class="head-actions"><span id="fm-api-status" class="badge amber">Mapping API status checking…</span></div></div>' +
+    root.innerHTML = '<div class="page-head"><div><h1>🧭 FASTag Mapping</h1><p class="sub">GV Partner · StockDataa se Tag ID, Serial/Barcode, VC Type aur Agent details fetch karke securely map karein.</p></div><div class="head-actions"><span id="fm-index-status" class="badge gray">StockDataa index status…</span><button class="btn small" id="fm-index-refresh" title="StockDataa index dobara banao (ape ke aap 5 min me refresh hota rehta hai)">🔄 Index refresh</button><span id="fm-api-status" class="badge amber">Mapping API status checking…</span></div></div>' +
       '<div class="grid g-2"><section class="card"><div class="card-head"><h3>📂 Upload mapping file</h3><div class="head-actions"><button class="btn small" id="fm-template">⬇ 4-column API template</button><button class="btn small" id="fm-range-template">⬇ Range input template</button><button class="btn small" id="fm-bc-template-xlsx">⬇ Alag-alag barcode · Excel</button><button class="btn small" id="fm-bc-template">⬇ Alag-alag barcode · CSV</button></div></div><div class="card-body"><p class="dim small">API template: tagId, serialNo, vcType, agentId. Range template: firstBarcode, lastBarcode, agentId. <b>Alag-alag barcode template:</b> A column me barcode, B column me Agent ID (header: barcode, agentId) — har barcode StockDataa me dhoondh kar uske Agent ID se map hoga; header na ho tab bhi A=barcode, B=Agent ID mana jata hai. Range upload mein barcode series StockDataa se expand hogi; TAG_ID, BARCODE aur TAG_CLASS auto-fill honge.</p><input class="input" id="fm-file" type="file" accept=".csv,.tsv,.txt,.xlsx"><div id="fm-file-note" class="dim small">No file selected.</div><button class="btn primary" id="fm-upload-add">Add file rows</button></div></section>' +
       '<section class="card"><div class="card-head"><h3>⌨️ Quick mapping</h3></div><div class="card-body"><label>Lookup by</label><select id="fm-kind" class="input"><option value="barcode">Barcode / Serial No</option><option value="tagId">Tag ID</option></select><label>Barcode / Tag ID</label><input class="input" id="fm-identifier" placeholder="Barcode ya Tag ID enter karein"><label>Target Agent ID (required)</label><input class="input" id="fm-agent-id" placeholder="Jis Agent ID se map karna hai"><div class="btn-row"><button class="btn" id="fm-add-single">Add to queue</button><button class="btn primary" id="fm-quick-map">⚡ Quick map</button></div><hr><h4>Barcode range</h4><div class="grid g-3"><div><label>First barcode</label><input class="input" id="fm-first" placeholder="Start barcode"></div><div><label>Last barcode</label><input class="input" id="fm-last" placeholder="End barcode"></div><div><label>Target Agent ID (required)</label><input class="input" id="fm-range-agent" placeholder="Jis Agent ID se map karna hai"></div></div><button class="btn" id="fm-add-range">Add range</button></div></section></div>' +
       '<section class="card"><div class="card-head"><div><h3>📗 Google Sheet se mapping</h3><p class="dim small">Sheet ka link, tab aur columns chuno — rows padhkar StockDataa se match hongi, map hongi, aur jo row poori map ho jaye uske <b>Done</b> column me "done" likh diya jayega. Pehle se "done" wali rows skip hoti hain.</p></div></div><div class="card-body">' +
@@ -909,15 +1214,26 @@ window.FF = window.FF || {};
         '<div id="fm-gs-first-wrap"><label>First barcode column</label><input class="input" id="fm-gs-first" maxlength="3" placeholder="A" value="A"></div><div id="fm-gs-last-wrap"><label>Last barcode column</label><input class="input" id="fm-gs-last" maxlength="3" placeholder="B" value="B"></div><div id="fm-gs-barcode-wrap" style="display:none"><label>Barcode / Tag ID column</label><input class="input" id="fm-gs-barcode" maxlength="3" placeholder="A" value="A"></div></div>' +
         '<div class="grid g-3"><div><label>Agent ID column</label><input class="input" id="fm-gs-agent" maxlength="3" placeholder="C" value="C"></div><div><label>Done likhne wala column</label><input class="input" id="fm-gs-done" maxlength="3" placeholder="D" value="D"></div><div><label>Done me kya likhna hai</label><input class="input" id="fm-gs-donetext" placeholder="done" value="done"></div></div>' +
         '<div class="btn-row"><button class="btn" id="fm-gs-load">📥 Sheet se load + lookup</button><button class="btn primary" id="fm-gs-auto">⚡ Turant map karo + done likho</button></div><p class="dim small">Pehli baar: Apps Script me naya <code>Code.gs</code> (v3.71) paste karke New version deploy karein, aur sheet ko us Google account ke saath Editor share karein jisse Apps Script chalta hai.</p></div></section>' +
-      '<section class="card"><div class="card-head"><div><h3>🔎 StockDataa lookup & mapping queue</h3><p class="dim small">Lookup ke baad preview/review karein. Target Agent ID edit kar sakte hain; API call sirf selected complete rows par hoga.</p></div><div class="head-actions"><button class="btn" id="fm-lookup">🔎 Lookup StockDataa</button><button class="btn primary" id="fm-map" disabled>🚀 Map ready rows</button><button class="btn" id="fm-api-csv">⬇ API CSV · 4 columns</button><button class="btn" id="fm-csv">⬇ Full details CSV</button><button class="btn" id="fm-clear">Clear</button></div></div><div class="card-body"><div id="fm-message" class="notice info">API status check ho raha hai…</div><div id="fm-summary"></div><div id="fm-results"><div class="empty-state">Upload a file or add a barcode / Tag ID above to start.</div></div></div></section>';
+      '<section class="card"><div class="card-head"><div><h3>🔎 StockDataa lookup & mapping queue</h3><p class="dim small">Lookup ke baad preview/review karein. Target Agent ID edit kar sakte hain; API call sirf selected complete rows par hoga.</p></div><div class="head-actions"><button class="btn" id="fm-lookup">🔎 Lookup StockDataa</button><button class="btn primary" id="fm-map" disabled>🚀 Map ready rows</button><button class="btn" id="fm-api-csv">⬇ API CSV · 4 columns</button><button class="btn" id="fm-csv">⬇ Full details CSV</button><button class="btn" id="fm-clear">Clear</button></div></div><div class="card-body"><div id="fm-progress" class="fm-progress" hidden></div><div id="fm-message" class="notice info">API status check ho raha hai…</div><div id="fm-summary"></div><div id="fm-results"><div class="empty-state">Upload a file or add a barcode / Tag ID above to start.</div></div></div></section>';
     state.items = []; state.rows = []; state.busy = false; state.sheetCtx = null; state.showLimit = SHOW_STEP;
+    state.index = null; state.indexAt = 0; state.rateLimited = false;
+    ensureProgressStyles();
+    progressReset();   // naya render = saaf panel (purane run ka status leak na ho)
     const status = U.$('#fm-api-status', root);
     fetch(API_STATUS, { credentials: 'same-origin', cache: 'no-store', headers: { 'X-Requested-With': 'FF-Dashboard' } }).then((r) => r.json()).then((j) => {
       state.configured = !!j.configured;
       if (status) { status.className = 'badge ' + (state.configured ? 'green' : 'amber'); status.textContent = state.configured ? 'Mapping API configured' : 'API secret missing in Render'; }
       const mapButton = U.$('#fm-map', root); if (mapButton) mapButton.disabled = !state.configured;
+      if (j && j.index) { state.index = Object.assign({}, j.index, { cooldownSec: j.cooldownSec }); state.indexAt = Date.now(); state.rateLimited = !!j.rateLimited; renderIndexChip(); }
       setStatus(state.configured ? 'Ready. Upload file ya manual barcode / Tag ID add karein.' : 'API key configure nahi hai. Render environment me GV_TAG_MAPPING_SECRET set karne ke baad mapping enabled hogi; secret browser/GitHub me save nahi hota.', state.configured ? 'success' : 'warn');
     }).catch(() => { if (status) status.textContent = 'API status unavailable'; setStatus('API status verify nahi ho paya. Login/session aur server status check karein.', 'warn'); });
+    // 🗂️ Index pehle se ban chuka hai ya ban raha hai — yeh live dikhta rehta hai (aur garam na ho to
+    // abhi bana lo, taaki pehla lookup Google ke intezaar me na atke).
+    startIndexWatch();
+    later(() => {
+      const ix = state.index || {};
+      if (!ix.ready && !ix.building) refreshIndexStatus(true);
+    }, 1200);
     root.addEventListener('click', async (event) => {
       const target = event.target.closest('button'); if (!target) return;
       if (target.id === 'fm-template') return templateCsv();
@@ -925,6 +1241,20 @@ window.FF = window.FF || {};
       if (target.id === 'fm-bc-template') return barcodeTemplate('csv');
       if (target.id === 'fm-bc-template-xlsx') return barcodeTemplate('xlsx');
       if (target.id === 'fm-api-csv') return apiCsv();
+      if (target.id === 'fm-retry') {
+        const action = prog.retryAction;
+        prog.retry = ''; prog.retryAction = '';
+        renderProgress();
+        if (action === 'sheet') return sheetRun(false);
+        if (action === 'map') return mapReady();
+        if (!state.items.length) { setStatus('Queue khaali hai — pehle file / sheet se rows load karein.', 'warn'); return; }
+        return lookup();
+      }
+      if (target.id === 'fm-index-refresh') {
+        if (state.busy) { setStatus('Ek kaam chal raha hai — ruk kar index refresh karein.', 'warn'); return; }
+        setStatus('StockDataa index dobara ban raha hai (peeche-pardey) — status upar badge me live dikhega.', 'info');
+        return refreshIndexStatus(true);
+      }
       if (target.id === 'fm-upload-add') {
         const file = U.$('#fm-file', root).files[0];
         if (!file) { setStatus('Pehle file choose karein.', 'warn'); return; }

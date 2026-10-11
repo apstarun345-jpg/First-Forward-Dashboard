@@ -434,9 +434,24 @@ function runQuery(sheet, tq) {
   return table;
 }
 
+// 🔥 Rate-limit drill (v3.72): MOCK_RL_SHEET=StockDataa MOCK_RL_COUNT=3 → pehli N requests
+// Google jaisa 429 "Too Many Requests" HTML page deti hain (normalize.css + <title>), uske baad data.
+// Isse "Too Many Requests" wala asli bug locally reproduce + verify hota hai.
+const RL_SHEET = process.env.MOCK_RL_SHEET || '';
+const RL_COUNT = Math.max(0, Number(process.env.MOCK_RL_COUNT || 0));
+const RL_HTML = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Too Many Requests</title>' +
+  '<link rel="stylesheet" href="/static/error/normalize.css"></head><body><div class="error"><h1>Too Many Requests</h1>' +
+  '<p>Sorry, we were unable to complete your request. Please try again later.</p></div></body></html>';
+let rlServed = 0;
+
 http.createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
   if (!url.pathname.includes('/gviz/tq')) { res.writeHead(404); return res.end('not found'); }
+  if (RL_SHEET && rlServed < RL_COUNT && (url.searchParams.get('sheet') === RL_SHEET || RL_SHEET === '*')) {
+    rlServed++;
+    res.writeHead(429, { 'Content-Type': 'text/html; charset=utf-8', 'Retry-After': '2' });
+    return res.end(RL_HTML);
+  }
   const gid = url.searchParams.get('gid'), name = url.searchParams.get('sheet');
   const sheetName = gid ? GIDS[gid] || 'EIR' : SHEETS[name] ? name : 'EIR'; // Google falls back to the first tab on unknown names
   let sheet = SHEETS[sheetName];

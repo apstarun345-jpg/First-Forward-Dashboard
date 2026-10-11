@@ -176,7 +176,8 @@ test('live query cache override expires old CACHE_SECONDS entries and force bypa
   cache.set(url, { at: Date.now() - 60_000, body: 'old', status: 200 });
   let upstreamCalls = 0;
   const fetchUpstream = async () => ({ status: 200, body: `google.visualization.Query.setResponse(fresh-${++upstreamCalls})` });
-  const fetchCached = new Function('cache', 'inflight', 'cacheMs', 'fetchUpstream', 'MAX_CACHE_ENTRIES', `${source.slice(start, end)}; return fetchUpstreamCached;`)(cache, inflight, () => 600_000, fetchUpstream, 100);
+  // v3.72: fetchUpstreamCached rate-limit cooldown par purana cache deta hai — is test me cooldown off.
+  const fetchCached = new Function('cache', 'inflight', 'cacheMs', 'fetchUpstream', 'MAX_CACHE_ENTRIES', 'gvizCooldownActive', `${source.slice(start, end)}; return fetchUpstreamCached;`)(cache, inflight, () => 600_000, fetchUpstream, 100, () => false);
 
   const refreshed = await fetchCached(url, { maxAgeMs: 30_000 });
   assert.match(refreshed.body, /fresh-1/, 'ten-minute generic cache is bypassed for live feed');
