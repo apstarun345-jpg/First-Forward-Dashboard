@@ -41,6 +41,8 @@ globalThis.document = {
   hidden: false,
   documentElement: { dataset: {}, classList: { toggle() {}, remove() {} } },
   body: { classList: { add() {}, remove() {}, toggle() {} } },
+  querySelector: () => null,
+  querySelectorAll: () => [],
   addEventListener: () => {},
   removeEventListener: () => {}
 };
