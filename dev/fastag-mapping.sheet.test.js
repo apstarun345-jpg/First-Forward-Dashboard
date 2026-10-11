@@ -135,3 +135,22 @@ test('Google Sheet flow: reads rows, server-side lookup (no gviz paging), maps, 
   assert.equal(map.body.rows.length, 3);
   assert.equal(map.body.rows[0].agentId, 'AG1');
 });
+
+test('Alag-alag barcode upload: header-less (A=barcode, B=agent) and "barcode,agentId" header both queue exact rows', async () => {
+  for (const csv of ['barcode,agentId\n8900000000000001,AG1\n8900000000000002,AG2\n', '8900000000000001,AG1\n8900000000000002,AG2\n']) {
+    const calls = [];
+    const fetchImpl = async (url, opts = {}) => {
+      const body = opts.body ? JSON.parse(opts.body) : null; calls.push({ url, body });
+      if (url.endsWith('/status')) return jsonRes(200, { configured: true });
+      if (url.endsWith('/lookup')) return jsonRes(200, { ok: true, results: body.items.map((it, index) => ({ index, rows: [stockRow(Number(it.barcode.slice(-1)))] })) });
+      return jsonRes(404, {});
+    };
+    const { root, selectors } = makePage('VC4', fetchImpl);
+    await new Promise((r) => setTimeout(r, 5));
+    selectors.get('#fm-file').files = [{ name: 'b.csv', text: async () => csv }];
+    await click(root, 'fm-upload-add');
+    await click(root, 'fm-lookup');
+    const lk = calls.find((c) => c.url.endsWith('/lookup'));
+    assert.deepEqual(lk.body.items.map((i) => [i.type, i.barcode]), [['barcode', '8900000000000001'], ['barcode', '8900000000000002']]);
+  }
+});

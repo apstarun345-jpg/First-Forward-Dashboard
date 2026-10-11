@@ -881,6 +881,12 @@ window.FF = window.FF || {};
     // Exact API payload shape. Class/Tag ID are filled from StockDataa during lookup.
     saveCsvFile('fastag-mapping-template.csv', ['tagId', 'serialNo', 'vcType', 'agentId'], []);
   }
+  function barcodeTemplate(kind) {
+    // Alag-alag barcode: A = barcode, B = agentId. Barcode text rehta hai (Excel me 8.9E+15 nahi banta).
+    const headers = ['barcode', 'agentId'];
+    if (kind === 'xlsx' && FF.xlsx && FF.xlsx.download) { FF.xlsx.download('fastag-barcode-agent-template.xlsx', [{ name: 'Barcode Agent', header: headers, rows: [] }]); return; }
+    saveCsvFile('fastag-barcode-agent-template.csv', headers, []);
+  }
   function rangeTemplateCsv() {
     // Input helper for bulk expansion: one row = first barcode + last barcode + target agent.
     saveCsvFile('fastag-range-template.csv', ['firstBarcode', 'lastBarcode', 'agentId'], []);
@@ -895,7 +901,7 @@ window.FF = window.FF || {};
   function render(root) {
     state.root = root;
     root.innerHTML = '<div class="page-head"><div><h1>🧭 FASTag Mapping</h1><p class="sub">GV Partner · StockDataa se Tag ID, Serial/Barcode, VC Type aur Agent details fetch karke securely map karein.</p></div><div class="head-actions"><span id="fm-api-status" class="badge amber">Mapping API status checking…</span></div></div>' +
-      '<div class="grid g-2"><section class="card"><div class="card-head"><h3>📂 Upload mapping file</h3><div class="head-actions"><button class="btn small" id="fm-template">⬇ 4-column API template</button><button class="btn small" id="fm-range-template">⬇ Range input template</button></div></div><div class="card-body"><p class="dim small">API template: tagId, serialNo, vcType, agentId. Range template: firstBarcode, lastBarcode, agentId. Range upload mein barcode series StockDataa se expand hogi; TAG_ID, BARCODE aur TAG_CLASS auto-fill honge.</p><input class="input" id="fm-file" type="file" accept=".csv,.tsv,.txt,.xlsx"><div id="fm-file-note" class="dim small">No file selected.</div><button class="btn primary" id="fm-upload-add">Add file rows</button></div></section>' +
+      '<div class="grid g-2"><section class="card"><div class="card-head"><h3>📂 Upload mapping file</h3><div class="head-actions"><button class="btn small" id="fm-template">⬇ 4-column API template</button><button class="btn small" id="fm-range-template">⬇ Range input template</button><button class="btn small" id="fm-bc-template-xlsx">⬇ Alag-alag barcode · Excel</button><button class="btn small" id="fm-bc-template">⬇ Alag-alag barcode · CSV</button></div></div><div class="card-body"><p class="dim small">API template: tagId, serialNo, vcType, agentId. Range template: firstBarcode, lastBarcode, agentId. <b>Alag-alag barcode template:</b> A column me barcode, B column me Agent ID (header: barcode, agentId) — har barcode StockDataa me dhoondh kar uske Agent ID se map hoga; header na ho tab bhi A=barcode, B=Agent ID mana jata hai. Range upload mein barcode series StockDataa se expand hogi; TAG_ID, BARCODE aur TAG_CLASS auto-fill honge.</p><input class="input" id="fm-file" type="file" accept=".csv,.tsv,.txt,.xlsx"><div id="fm-file-note" class="dim small">No file selected.</div><button class="btn primary" id="fm-upload-add">Add file rows</button></div></section>' +
       '<section class="card"><div class="card-head"><h3>⌨️ Quick mapping</h3></div><div class="card-body"><label>Lookup by</label><select id="fm-kind" class="input"><option value="barcode">Barcode / Serial No</option><option value="tagId">Tag ID</option></select><label>Barcode / Tag ID</label><input class="input" id="fm-identifier" placeholder="Barcode ya Tag ID enter karein"><label>Target Agent ID (required)</label><input class="input" id="fm-agent-id" placeholder="Jis Agent ID se map karna hai"><div class="btn-row"><button class="btn" id="fm-add-single">Add to queue</button><button class="btn primary" id="fm-quick-map">⚡ Quick map</button></div><hr><h4>Barcode range</h4><div class="grid g-3"><div><label>First barcode</label><input class="input" id="fm-first" placeholder="Start barcode"></div><div><label>Last barcode</label><input class="input" id="fm-last" placeholder="End barcode"></div><div><label>Target Agent ID (required)</label><input class="input" id="fm-range-agent" placeholder="Jis Agent ID se map karna hai"></div></div><button class="btn" id="fm-add-range">Add range</button></div></section></div>' +
       '<section class="card"><div class="card-head"><div><h3>📗 Google Sheet se mapping</h3><p class="dim small">Sheet ka link, tab aur columns chuno — rows padhkar StockDataa se match hongi, map hongi, aur jo row poori map ho jaye uske <b>Done</b> column me "done" likh diya jayega. Pehle se "done" wali rows skip hoti hain.</p></div></div><div class="card-body">' +
         '<div class="grid g-3"><div><label>Google Sheet link / ID</label><input class="input" id="fm-gs-link" placeholder="https://docs.google.com/spreadsheets/d/…"></div><div><label>Tab name</label><input class="input" id="fm-gs-tab" placeholder="Sheet1"></div><div><label>Data kis row se shuru (header ke baad)</label><input class="input" id="fm-gs-start" type="number" min="1" value="2"></div></div>' +
@@ -916,6 +922,8 @@ window.FF = window.FF || {};
       const target = event.target.closest('button'); if (!target) return;
       if (target.id === 'fm-template') return templateCsv();
       if (target.id === 'fm-range-template') return rangeTemplateCsv();
+      if (target.id === 'fm-bc-template') return barcodeTemplate('csv');
+      if (target.id === 'fm-bc-template-xlsx') return barcodeTemplate('xlsx');
       if (target.id === 'fm-api-csv') return apiCsv();
       if (target.id === 'fm-upload-add') {
         const file = U.$('#fm-file', root).files[0];
