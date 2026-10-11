@@ -177,17 +177,17 @@ test('🛑 suggestion selection locks current instance until next typing', async
   assert.match(ms, /U\.destroyAllSuggestions\(sug\)/);
   assert.match(ms, /if \(sug && sug\.suspend\) sug\.suspend\(\)/);
 });
-test('🏷️ Master Search barcode status reports FF and GV mapping independently', async () => {
+test('🏷️ Master Search barcode table keeps FF and GV mapping status in separate columns', async () => {
   const ms = await read('masterSearch.js');
   assert.match(ms, /function tagStatus\(t\)/);
-  assert.match(ms, /FF: Mapped/);
-  assert.match(ms, /GV: Mapped/);
-  assert.match(ms, /FF mapped · GV not mapped/);
-  assert.match(ms, /GV mapped · FF not mapped/);
-  assert.match(ms, /FF \+ GV mapped/);
-  assert.match(ms, /esc\(st\.detail \|\| ''\)/, 'both channel-specific statuses render under the summary status');
-  assert.doesNotMatch(ms, /GV only \(StockDataa me nahi\)/, 'misleading legacy one-sided message removed');
+  assert.match(ms, /<th>FF mapping<\/th>/);
+  assert.match(ms, /<th>GV mapping<\/th>/);
+  assert.match(ms, /st\.ff\.tone[\s\S]{0,100}st\.ff\.text/);
+  assert.match(ms, /st\.gv\.tone[\s\S]{0,100}st\.gv\.text/);
+  assert.match(ms, /class="ms-barcode-cell" style="white-space:nowrap"/, 'formatted barcode and hyphen groups stay on one line');
+  assert.doesNotMatch(ms, /GV only \(StockDataa me nahi\)|st\.detail/, 'combined misleading status detail removed');
 });
+
 
 test('🎨 settings/theme — dark mode is opt-in and Tag Request order rows stay readable', async () => {
   const app = await read('app.js');
