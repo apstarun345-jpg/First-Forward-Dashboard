@@ -12,7 +12,9 @@ window.FF = window.FF || {};
   // Small session-local index: repeated Quick Map / barcode lookups should not hit Sheets again.
   const stockByBarcode = new Map();
   const stockByTagId = new Map();
+  const stockRangeCache = new Map();
   const STOCK_LOOKUP_CACHE_MAX = 50000;
+  const STOCK_RANGE_CACHE_MAX = 100;
   const esc = (v) => U.esc(String(v == null ? '' : v));
   const clean = (v) => String(v == null ? '' : v).replace(/\u00a0/g, ' ').trim();
   const norm = (v) => clean(v).toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -376,6 +378,21 @@ window.FF = window.FF || {};
     from = normalizeBoundary(from);
     to = normalizeBoundary(to);
     if (compareBarcode(from, to) > 0) throw new Error('First barcode last se bada hai.');
+    const cacheKey = idKey(from) + '|' + idKey(to);
+    if (stockRangeCache.has(cacheKey)) return stockRangeCache.get(cacheKey).slice();
+    if (idKey(from) === idKey(to)) {
+      const cached = stockByBarcode.get(idKey(from));
+      if (cached) {
+        stockRangeCache.set(cacheKey, [cached]);
+        return [cached];
+      }
+    }
+    const rememberRange = (rows) => {
+      stockRangeCache.delete(cacheKey);
+      stockRangeCache.set(cacheKey, rows.slice());
+      while (stockRangeCache.size > STOCK_RANGE_CACHE_MAX) stockRangeCache.delete(stockRangeCache.keys().next().value);
+      return rows;
+    };
 
     // Fast path: ask Google for the requested barcode interval directly instead of reading
     // up to 250k stock rows. Query numeric/text variants concurrently to handle mixed typing.
@@ -398,7 +415,7 @@ window.FF = window.FF || {};
     }
     const fastDedupe = new Map();
     for (const row of fastRows) fastDedupe.set(idKey(row.tagId) + '|' + idKey(row.barcode), row);
-    if (fastDedupe.size) return [...fastDedupe.values()];
+    if (fastDedupe.size) return rememberRange([...fastDedupe.values()]);
     // If the bounded range query returns nothing, fall back to paged local comparison for
     // mixed-type/text-stored IDs. Exact lookup/cached session index should handle most singles.
     // Multiple range pages are fetched in parallel, stopping as soon as pages are empty.
@@ -450,10 +467,11 @@ window.FF = window.FF || {};
     if (offset >= HARD_CAP && matched.size === 0) {
       throw new Error('StockDataa mein 250,000 rows scan ho chuki hain. Barcode range / source verify karein.');
     }
-    if (!matched.size && fastError && isLookupTimeout(fastError) && finished) {
-      // Keep the useful "not found" outcome when the fallback was able to fully finish.
-    }
-    return [...matched.values()];
+    const result = [...matched.values()];
+    // Cache only complete scans; never cache a partially scanned range as complete.
+    if (finished && matched.size <= MAX_RESULTS) return rememberRange(result);
+    if (!matched.size && fastError && finished) return rememberRange(result);
+    return result;
   }
   function addResult(item, stock, matchedBy) {
     const row = Object.assign({ id: nextId++, source: item.source || 'Manual', request: item.type === 'range' ? item.first + ' – ' + item.last : (item.tagId || item.barcode || item.serialNo || ''),
