@@ -468,6 +468,21 @@ FF.pages = FF.pages || {};
     const commercialRate = observedDay ? reportedSc.comm / observedDay : 0;
     const expected = observedDay ? Math.round(rate * daysInMonth) : 0;
     const expectedCommercial = observedDay ? Math.round(commercialRate * daysInMonth) : 0;
+    // Expected month-end class counts vs the previous full month.
+    const expectedByClass = {
+      vc4: observedDay ? Math.round((reportedSc.vc4 / observedDay) * daysInMonth) : 0,
+      vc20: observedDay ? Math.round((reportedSc.vc20 / observedDay) * daysInMonth) : 0,
+      vc5p: observedDay ? Math.round((reportedSc.vc5p / observedDay) * daysInMonth) : 0
+    };
+    const forecastVsLast = (current, previous) => {
+      if (!previous) return '<span class="hm-expected-change flat">— vs last month</span>';
+      const pct = ((current - previous) / previous) * 100;
+      const state = pct > 0 ? 'pos' : pct < 0 ? 'neg' : 'flat';
+      const arrow = pct > 0 ? '▲' : pct < 0 ? '▼' : '•';
+      return `<span class="hm-expected-change ${state}">${arrow} ${Math.abs(pct).toFixed(1)}% vs last month</span>`;
+    };
+    const expectedClassRow = (label, current, previous) =>
+      `<div class="hm-expected-row"><span class="hm-expected-current"><b>${label}</b><strong>${U.fmt(current)}</strong>${forecastVsLast(current, previous)}</span><span class="hm-expected-previous"><small>Last month</small><b>${U.fmt(previous)}</b></span></div>`;
     const lastExpected = lastSum.total ? Math.round((lastSum.total / Math.min(compareDay, U.daysInMonth(prevKey))) * U.daysInMonth(prevKey)) : 0;
     // Kal ka issuance (last complete day) + pichhle mahine ka wahi tareekh
     const y = new Date(TODAY()); y.setDate(y.getDate() - 1);
@@ -493,7 +508,7 @@ FF.pages = FF.pages || {};
       kpi('g5', 'Replacement', '🔁', U.fmt(sc.replacement), `${momChip(sc.replacement, lastSum.replacement)}<br>${splitFoot(reportedFf.replacement, reportedGv.replacement)}`, `src=both&scope=mtd&ym=${curKey}&f=repl`),
       kpi('g7', 'Chassis', '🔧', U.fmt(sc.chassis), `${momChip(sc.chassis, lastSum.chassis)}<br>${splitFoot(reportedFf.chassis, reportedGv.chassis)}`, `src=both&scope=mtd&ym=${curKey}&f=chassis`),
       kpi('g2', `Expected in ${U.labelYM(curKey)}`, '🎯',
-        `<div class="hm-runrate-list hm-expected-list"><div><span>VC4</span><b>${U.fmt(observedDay ? Math.round((reportedSc.vc4 / observedDay) * daysInMonth) : 0)}</b></div><div><span>VC20</span><b>${U.fmt(observedDay ? Math.round((reportedSc.vc20 / observedDay) * daysInMonth) : 0)}</b></div><div><span>VC5+</span><b>${U.fmt(observedDay ? Math.round((reportedSc.vc5p / observedDay) * daysInMonth) : 0)}</b></div><div class="is-total"><span>Total Expected</span><b>${U.fmt(expected)}</b></div></div>`,
+        `<div class="hm-expected-compare">${expectedClassRow('VC4', expectedByClass.vc4, lastFull.vc4)}${expectedClassRow('VC20', expectedByClass.vc20, lastFull.vc20)}${expectedClassRow('VC5+', expectedByClass.vc5p, lastFull.vc5p)}<div class="hm-expected-total"><span>Total Expected</span><b>${U.fmt(expected)}</b></div></div>`,
         `EIR forecast · ${observedDay}/${daysInMonth} reported days · today excluded<br><span class="dim">Report till <b>${observedDay ? esc(U.labelDateKey(`${curKey}-${String(observedDay).padStart(2,'0')}`)) : '—'}</b> · last month full <b>${U.fmt(lastTotalFull)}</b> · expected <b>${U.fmt(lastExpected)}</b></span>`,
         `src=both&scope=mtd&ym=${curKey}`),
       kpi('g13', 'Run Rate · Per Day', '⚡',
