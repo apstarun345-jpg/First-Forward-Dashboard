@@ -390,10 +390,33 @@ window.FF = window.FF || {};
   }
   async function lookup() {
     if (state.busy) return;
+    // Typed quick inputs ko Lookup click par khud queue me le lo — naye user sirf barcode +
+    // Agent ID daal kar "🔎 Lookup StockDataa" dabata hai aur "Add to queue" bhool jaata hai.
+    // Add-to-queue / Quick map already fields clear kar dete hai, isliye yahan kabhi duplicate nahi hoga.
+    const typedValue = clean(U.$('#fm-identifier', state.root).value);
+    const typedAgent = clean(U.$('#fm-agent-id', state.root).value);
+    const typedFirst = clean(U.$('#fm-first', state.root).value);
+    const typedLast = clean(U.$('#fm-last', state.root).value);
+    const typedRangeAgent = clean(U.$('#fm-range-agent', state.root).value);
+    if (typedValue && typedAgent) {
+      const kind = U.$('#fm-kind', state.root).value === 'tagId' ? 'tagId' : 'barcode';
+      state.items.push({ id: nextId++, type: kind, barcode: kind === 'barcode' ? typedValue : '', serialNo: kind === 'barcode' ? typedValue : '', tagId: kind === 'tagId' ? typedValue : '', agentId: typedAgent, source: 'Manual', selected: true });
+      U.$('#fm-identifier', state.root).value = '';
+    }
+    if (typedFirst && typedLast && typedRangeAgent) {
+      if (compareBarcode(typedFirst, typedLast) > 0) { setStatus('First barcode, last barcode se bada nahi ho sakta.', 'warn'); return; }
+      state.items.push({ id: nextId++, type: 'range', first: typedFirst, last: typedLast, agentId: typedRangeAgent, source: 'Manual range', selected: true });
+      U.$('#fm-first', state.root).value = ''; U.$('#fm-last', state.root).value = '';
+    }
+    if (!state.items.length) {
+      if (typedFirst || typedLast || typedRangeAgent) { setStatus('Barcode range ke liye First barcode, Last barcode aur target Agent ID teeno required hain.', 'warn'); return; }
+      if (typedValue || typedAgent) { setStatus('Barcode/Tag ID aur target Agent ID dono required hain.', 'warn'); return; }
+      setStatus('Pehle file upload karein ya barcode / Tag ID add karein.', 'warn'); return;
+    }
     const waiting = state.items.splice(0);
-    if (!waiting.length) { setStatus('Pehle file upload karein ya barcode / Tag ID add karein.', 'warn'); return; }
     if (waiting.length > MAX_INPUTS) { state.items.unshift.apply(state.items, waiting); setStatus('Ek baar me maximum ' + MAX_INPUTS + ' input selectors allowed hain.', 'warn'); return; }
     state.busy = true; setStatus('StockDataa se matching details lookup ho rahi hain…', 'info');
+    const rowsBefore = state.rows.length;
     const old = U.$('#fm-lookup', state.root), mapBtn = U.$('#fm-map', state.root); if (old) old.disabled = true; if (mapBtn) mapBtn.disabled = true;
     try {
       const barcodes = waiting.flatMap((x) => x.type === 'range' ? [] : [x.barcode || x.serialNo].filter(Boolean));
@@ -443,7 +466,12 @@ window.FF = window.FF || {};
       checkDuplicates(); renderTable();
       const good = state.rows.filter((r) => r.stock && r.tagId && r.serialNo && r.vcType && r.agentId && !r.status.startsWith('Duplicate') && !r.mapped).length;
       setStatus('Lookup complete: ' + good + ' row ready. Mapping se pehle Agent ID aur VC type review karein.', good ? 'success' : 'warn');
-    } catch (err) { setStatus('Lookup fail: ' + (err.message || err), 'error'); }
+    } catch (err) {
+      // Query fail hone par queue wapas daal do — nahi to user dubara Lookup dabaye to
+      // "Pehle file upload karein" dikhega aur retry me hi inputs gayab ho jaate the.
+      if (state.rows.length === rowsBefore) state.items = waiting.concat(state.items);
+      setStatus('Lookup fail: ' + (err.message || err) + (state.items.length ? ' Inputs queue me wapas aa gaye — dobara Lookup dabayein.' : ''), 'error');
+    }
     finally { state.busy = false; if (old) old.disabled = false; if (mapBtn) mapBtn.disabled = !state.configured; }
   }
   async function quickMap() {
