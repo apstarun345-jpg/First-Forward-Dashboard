@@ -686,6 +686,21 @@ FF.pages = FF.pages || {};
     const canFf = FF.auth.can('dashboard') || FF.auth.can('trend') || FF.auth.can('stock') || FF.auth.can('performance');
     const canGv = FF.auth.can('gvDashboard') || FF.auth.can('gvTrend') || FF.auth.can('gvStock') || FF.auth.can('gvPerformance');
 
+    // v3.74 — Smart Home quick-launch actions are route links, filtered through the same
+    // page permissions as the sidebar. They never call or duplicate a data/API workflow.
+    const homeQuickActions = [
+      { id: 'masterSearch', perm: 'masterSearch', icon: '🔎', label: 'Master Search', detail: 'Barcode · Tag ID · Agent' },
+      { id: 'tagIssued', perm: 'tagIssued', icon: '🏷️', label: 'Tag Issued', detail: 'Daily FF + GV issuance' },
+      { id: 'tagRequest', perm: 'tagRequest', icon: '📨', label: 'Tag Requests', detail: 'Create · track · status' },
+      { id: 'performance', perm: 'performance', icon: '🏆', label: 'Team Performance', detail: 'Agent · TL results' },
+      { id: 'stock', perm: 'stock', icon: '📦', label: 'FF Stock', detail: 'StockDataa lookup' },
+      { id: 'gvStock', perm: 'gvStock', icon: '🟩', label: 'GV Stock', detail: 'Tag Assignment stock' }
+    ].filter((action) => FF.auth.can(action.perm));
+    const homeQuickActionsHtml = homeQuickActions.length ? `<section class="home-quick-access" aria-labelledby="home-quick-title">
+      <div class="home-quick-head"><div><h2 id="home-quick-title">Quick access</h2><p>Common tasks · aapke access ke hisaab se</p></div><span class="home-quick-count">${homeQuickActions.length} shortcuts</span></div>
+      <div class="home-quick-grid">${homeQuickActions.map((action) => `<a class="home-launch-tile" href="#/${esc(action.id)}" aria-label="${esc(action.label)}: ${esc(action.detail)}"><span class="home-launch-icon" aria-hidden="true">${action.icon}</span><span class="home-launch-copy"><b>${esc(action.label)}</b><small>${esc(action.detail)}</small></span><span class="home-launch-arrow" aria-hidden="true">›</span></a>`).join('')}</div>
+    </section>` : '';
+
     root.innerHTML = `<div class="home-hero v2">
         <div class="home-hero-main">
           ${avatar}
@@ -703,6 +718,7 @@ FF.pages = FF.pages || {};
           <a class="btn" href="#/tagIssued">🏷️ Tag Issued →</a>
         </div>
       </div>
+      ${homeQuickActionsHtml}
       <div id="home-gv-live">${U.spinner('GV aaj ka live data aaya ja raha hai…')}</div>
       <div id="home-month">${U.spinner('EIR se month KPI cards ban rahe hain…')}</div>
       <div id="home-target-achievement">${U.spinner('Class-wise target achievement calculate ho raha hai…')}</div>
