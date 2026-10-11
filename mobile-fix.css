@@ -1765,3 +1765,123 @@ html.mobile-ui .notify-center-loadmore {
     grid-template-columns: minmax(0, 1fr) !important;
   }
 }
+
+
+/* ==========================================================================================
+   v3.74 — Smart Home quick access + native-scale mobile workspace.
+   Presentation only: the existing routes, auth permissions, data sources and actions stay intact.
+   ========================================================================================== */
+.home-quick-access { margin: 0 0 14px; min-width: 0; }
+.home-quick-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:0 2px 9px; }
+.home-quick-head h2 { margin:0; font-size:18px; line-height:1.25; font-weight:900; letter-spacing:-.2px; }
+.home-quick-head p { margin:3px 0 0; color:var(--muted); font-size:12px; line-height:1.35; }
+.home-quick-count { flex:none; border:1px solid var(--line); background:var(--card); color:var(--muted); border-radius:999px; padding:5px 9px; font-size:11px; font-weight:800; }
+.home-quick-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:9px; }
+.home-launch-tile { display:flex; align-items:center; gap:10px; min-width:0; min-height:76px; padding:12px; border:1px solid var(--line); border-radius:15px; background:var(--card); color:var(--ink); box-shadow:0 2px 8px rgba(15,23,42,.045); text-decoration:none !important; transition:border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
+.home-launch-tile:hover { border-color:color-mix(in srgb,var(--brand) 36%,var(--line)); box-shadow:0 5px 16px rgba(15,23,42,.08); transform:translateY(-1px); }
+.home-launch-tile:active { transform:scale(.985); }
+.home-launch-icon { display:grid; place-items:center; flex:none; width:42px; height:42px; border-radius:13px; background:color-mix(in srgb,var(--brand) 10%,var(--card)); font-size:22px; }
+.home-launch-copy { display:flex; flex-direction:column; gap:3px; min-width:0; }
+.home-launch-copy b { font-size:14px; line-height:1.25; font-weight:850; overflow-wrap:anywhere; }
+.home-launch-copy small { color:var(--muted); font-size:11px; line-height:1.3; overflow-wrap:anywhere; }
+.home-launch-arrow { margin-left:auto; flex:none; font-size:22px; line-height:1; color:var(--muted); }
+html[data-theme="dark"] .home-launch-tile { background:var(--card); color:var(--ink); border-color:var(--line); }
+html[data-theme="dark"] .home-launch-icon { background:color-mix(in srgb,var(--brand) 20%,var(--card)); }
+@media (max-width: 900px) { .home-quick-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media (max-width: 380px) {
+  .home-launch-tile { gap:7px; padding:10px 9px; }
+  .home-launch-icon { width:36px; height:36px; border-radius:11px; font-size:20px; }
+  .home-launch-copy b { font-size:13px; }
+  .home-launch-copy small { font-size:11px; }
+}
+
+/* Native app sizing: override legacy rules that inflated every text/control to 24–46px. */
+html.mobile-ui { --mobile-nav-h: 78px !important; }
+html.mobile-ui body { font-size:17px !important; line-height:1.45 !important; }
+html.mobile-ui .topbar {
+  position:sticky !important; top:0 !important; z-index:1100 !important;
+  display:flex !important; flex-wrap:nowrap !important; overflow:visible !important;
+  min-height:64px !important; height:auto !important;
+  padding:max(7px,env(safe-area-inset-top,0px)) max(10px,env(safe-area-inset-right,0px)) 7px max(10px,env(safe-area-inset-left,0px)) !important;
+  gap:6px !important;
+}
+html.mobile-ui .topbar .top-title { flex:1 1 auto !important; min-width:0 !important; max-width:none !important; font-size:17px !important; line-height:1.2 !important; }
+html.mobile-ui .topbar .top-actions { flex:0 0 auto !important; min-width:0 !important; margin-left:auto !important; gap:4px !important; flex-wrap:nowrap !important; overflow:visible !important; }
+html.mobile-ui #menu-btn, html.mobile-ui #focus-toggle { display:none !important; }
+html.mobile-ui #top-more { display:inline-grid !important; }
+html.mobile-ui .topbar #top-refresh,
+html.mobile-ui .topbar #notification-btn,
+html.mobile-ui .topbar #user-btn,
+html.mobile-ui .topbar #top-more {
+  display:inline-grid !important; place-items:center !important; flex:0 0 auto !important;
+  width:40px !important; min-width:40px !important; height:40px !important; min-height:40px !important;
+  border-radius:12px !important; font-size:20px !important; padding:0 !important;
+}
+html.mobile-ui .topbar .user-btn { width:40px !important; min-width:40px !important; height:40px !important; min-height:40px !important; padding:3px !important; }
+html.mobile-ui .topbar .user-btn-text, html.mobile-ui .topbar .user-btn .chev { display:none !important; }
+html.mobile-ui .top-actions > [data-top-secondary="1"], html.mobile-ui .top-actions #pwa-install { display:none !important; }
+html.mobile-ui .top-actions.more-open { flex:1 0 100% !important; width:100% !important; flex-wrap:wrap !important; justify-content:flex-end !important; gap:6px !important; }
+html.mobile-ui .topbar:has(.top-actions.more-open) { flex-wrap:wrap !important; }
+html.mobile-ui .top-actions.more-open > [data-top-secondary="1"] { display:inline-grid !important; place-items:center !important; width:42px !important; min-width:42px !important; height:42px !important; min-height:42px !important; }
+html.mobile-ui .top-actions.more-open #pwa-install { display:inline-flex !important; min-height:42px !important; font-size:13px !important; }
+html.mobile-ui .main { padding:12px 10px calc(var(--mobile-nav-h) + env(safe-area-inset-bottom,0px) + 16px) !important; }
+html.mobile-ui .page-head h1, html.mobile-ui .page-title, html.mobile-ui h1 { font-size:25px !important; line-height:1.2 !important; letter-spacing:-.25px !important; }
+html.mobile-ui h2 { font-size:21px !important; line-height:1.25 !important; }
+html.mobile-ui h3, html.mobile-ui .card-head h3, html.mobile-ui .card-head .title, html.mobile-ui .section-title { font-size:18px !important; line-height:1.3 !important; }
+html.mobile-ui p, html.mobile-ui li { font-size:15px !important; line-height:1.48 !important; }
+html.mobile-ui small, html.mobile-ui .small, html.mobile-ui .dim, html.mobile-ui .muted, html.mobile-ui .sub { font-size:13px !important; line-height:1.4 !important; }
+html.mobile-ui label, html.mobile-ui .field label, html.mobile-ui .form-label { font-size:14px !important; }
+html.mobile-ui input, html.mobile-ui select, html.mobile-ui textarea, html.mobile-ui .input { font-size:16px !important; line-height:1.35 !important; min-height:44px !important; }
+html.mobile-ui .btn { font-size:15px !important; line-height:1.25 !important; min-height:44px !important; padding:10px 13px !important; }
+html.mobile-ui .btn.small { font-size:13px !important; min-height:38px !important; padding:8px 10px !important; }
+html.mobile-ui .icon-btn { width:42px !important; min-width:42px !important; height:42px !important; min-height:42px !important; font-size:19px !important; border-radius:12px !important; }
+html.mobile-ui .kpi-title, html.mobile-ui .kpi-label { font-size:12px !important; line-height:1.25 !important; }
+html.mobile-ui .kpi-value { font-size:clamp(23px,6.4vw,32px) !important; line-height:1.1 !important; overflow-wrap:anywhere; }
+html.mobile-ui .kpi-foot { font-size:12px !important; line-height:1.35 !important; }
+html.mobile-ui .mini-value { font-size:23px !important; }
+html.mobile-ui table th, html.mobile-ui table td { font-size:14px !important; line-height:1.4 !important; }
+html.mobile-ui .chip, html.mobile-ui .home-exp-chip, html.mobile-ui .nav-pill, html.mobile-ui .pct, html.mobile-ui .sug-wo, html.mobile-ui .sug-wo-inline { font-size:12px !important; }
+html.mobile-ui .chip, html.mobile-ui .home-exp-chip { min-height:34px !important; padding:6px 9px !important; }
+html.mobile-ui a:focus-visible, html.mobile-ui button:focus-visible, html.mobile-ui input:focus-visible, html.mobile-ui select:focus-visible, html.mobile-ui textarea:focus-visible { outline:3px solid #6366f1 !important; outline-offset:2px !important; }
+html.mobile-ui #mobile-nav.mobile-nav {
+  position:fixed !important; inset-inline:0 !important; bottom:0 !important; z-index:1090 !important;
+  display:grid !important; grid-template-columns:repeat(6,minmax(0,1fr)) !important;
+  width:100% !important; height:calc(var(--mobile-nav-h) + env(safe-area-inset-bottom,0px)) !important;
+  min-height:var(--mobile-nav-h) !important; padding:5px 5px max(5px,env(safe-area-inset-bottom,0px)) !important;
+  gap:2px !important; background:rgba(255,255,255,.97) !important; border-top:1px solid #e2e8f0 !important;
+  box-shadow:0 -4px 16px rgba(15,23,42,.09) !important; backdrop-filter:blur(12px) !important; -webkit-backdrop-filter:blur(12px) !important;
+}
+html.mobile-ui #mobile-nav .mobile-nav-item, html.mobile-ui #mobile-nav .mobile-nav-item.mobile-nav-action {
+  display:grid !important; grid-template-rows:27px 18px !important; align-content:center !important; justify-items:center !important;
+  min-width:0 !important; min-height:62px !important; height:62px !important; padding:4px 1px !important; gap:3px !important;
+  border:0 !important; border-radius:12px !important; background:transparent !important; color:#64748b !important;
+}
+html.mobile-ui #mobile-nav .mnav-ico { display:block !important; width:22px !important; height:22px !important; }
+html.mobile-ui #mobile-nav .mobile-nav-item small { font-size:11px !important; line-height:1.2 !important; font-weight:800 !important; white-space:nowrap !important; }
+html.mobile-ui #mobile-nav .mobile-nav-item.active, html.mobile-ui #mobile-nav .mobile-nav-item[aria-current="page"] { background:#eef2ff !important; color:#4338ca !important; box-shadow:inset 0 0 0 1px #d7ddff !important; }
+html.mobile-ui .page-home .home-hero.v2 { padding:14px !important; border-radius:17px !important; gap:12px !important; }
+html.mobile-ui .page-home .home-hero-main { align-items:flex-start !important; gap:10px !important; min-width:0 !important; }
+html.mobile-ui .page-home .home-avatar { width:48px !important; height:48px !important; border-radius:14px !important; flex:none !important; }
+html.mobile-ui .page-home .home-greeting { font-size:22px !important; line-height:1.25 !important; overflow-wrap:anywhere; }
+html.mobile-ui .page-home .home-hero .sub { font-size:13px !important; }
+html.mobile-ui .page-home .home-hero-side { display:grid !important; grid-template-columns:repeat(2,minmax(0,1fr)) !important; width:100% !important; gap:7px !important; }
+html.mobile-ui .page-home .home-hero-side .home-stat { min-width:0 !important; padding:9px 10px !important; }
+html.mobile-ui .page-home .home-hero-side .btn { min-width:0 !important; justify-content:center !important; text-align:center !important; }
+html.mobile-ui .page-home .home-quick-grid { grid-template-columns:repeat(2,minmax(0,1fr)) !important; gap:8px !important; }
+html.mobile-ui .page-home .home-launch-tile { min-height:70px !important; padding:9px !important; gap:7px !important; }
+html.mobile-ui .page-home .home-launch-icon { width:36px !important; height:36px !important; font-size:19px !important; }
+html.mobile-ui .page-home .home-launch-copy b { font-size:13px !important; }
+html.mobile-ui .page-home .home-launch-copy small { font-size:11px !important; }
+@media (max-width:380px) {
+  html.mobile-ui .main { padding-left:8px !important; padding-right:8px !important; }
+  html.mobile-ui .page-home .home-launch-arrow { display:none !important; }
+  html.mobile-ui .page-home .home-greeting { font-size:20px !important; }
+  html.mobile-ui #mobile-nav .mobile-nav-item small { font-size:10px !important; }
+}
+html[data-theme="dark"].mobile-ui body { background:#0b1220 !important; color:#e5e7eb !important; }
+html[data-theme="dark"].mobile-ui .topbar { background:rgba(15,23,42,.98) !important; border-bottom-color:#263449 !important; color:#e5e7eb !important; }
+html[data-theme="dark"].mobile-ui #mobile-nav.mobile-nav { background:rgba(15,23,42,.98) !important; border-top-color:#263449 !important; }
+html[data-theme="dark"].mobile-ui #mobile-nav .mobile-nav-item { color:#cbd5e1 !important; }
+html[data-theme="dark"].mobile-ui #mobile-nav .mobile-nav-item.active, html[data-theme="dark"].mobile-ui #mobile-nav .mobile-nav-item[aria-current="page"] { background:#252346 !important; color:#c4b5fd !important; box-shadow:inset 0 0 0 1px #5145cd !important; }
+html[data-theme="dark"].mobile-ui .home-launch-tile { border-color:#263449 !important; }
+html[data-theme="dark"].mobile-ui .home-launch-icon { background:#27244a !important; }
