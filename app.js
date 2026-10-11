@@ -1955,6 +1955,32 @@ window.FF = window.FF || {};
     if (!on) { if (chip) chip.remove(); return; }
     if (!chip) { chip = U.h('<a class="live-share-chip" id="live-share-chip" href="#/settings?tab=account" title="Admin aapka page, cursor aur clicks live dekh sakta hai. Settings → My account me band kar sakte ho.">👁 Admin live view on</a>'); foot.insertBefore(chip, foot.firstChild); }
   }
+  /**
+   * ⚡ v3.73 — "Opening your workspace" (3–4s) animation ke DAURAN hi saara data background me load
+   * ho (client request). Ye helper home ke critical datasets turant start karta hai:
+   * daily · stock · report · GV master · GV stockClass · aaj ke feeds (today/gvToday).
+   * store/gv ke job-dedupe (`jobs` map) ki wajah se home.render ke need() call in-flight promises
+   * ko hi await karte hain — koi duplicate Google query nahi jaati. preAuth=true → login check ke
+   * parallel me (sirf return visitors par; gv datasets permission-gated hain, unhe preloadAll baad me sambhal leta hai).
+   */
+  function warmCriticalData(preAuth) {
+    try {
+      if (FF.store && FF.store.need) {
+        for (const key of ['daily', 'stock', 'report']) {
+          Promise.resolve(FF.store.need(key, { only: true })).catch(() => {});
+        }
+      }
+      if (FF.data) {
+        if (FF.data.gvToday) Promise.resolve(FF.data.gvToday()).catch(() => {});
+        if (FF.data.today) Promise.resolve(FF.data.today()).catch(() => {});
+      }
+      if (!preAuth && FF.gv && FF.gv.enabled && FF.gv.enabled() && FF.gv.need) {
+        for (const key of ['master', 'stockClass']) {
+          Promise.resolve(FF.gv.need(key, { only: true })).catch(() => {});
+        }
+      }
+    } catch { /* warm-up best-effort — normal render paths apne aap data load karte hain */ }
+  }
   async function onLogin() {
     if (EMBED_LIVE) {
       document.body.classList.add('embed-live');
@@ -1974,12 +2000,12 @@ window.FF = window.FF || {};
     document.body.classList.remove('ready');
     bootSetMessage('Loading your workspace…', 'Loading live dashboard data…');
 
-    // IMPORTANT: do not preload every sheet yet. On first login this competed with Home's
-    // EIR daily + GV Master requests (Google gviz serializes expensive queries on the same sheet).
-    // Render the requested page using its own critical datasets first; preload the rest afterward.
-    await renderCurrent({ bootGate: true });
-
-    // Start non-critical sheet preload only after the first page has finished rendering.
+    // ⚡ v3.73 — data loading SPLASH ke DAURAN hi shuru hoti hai (client request: "3-4 second ke
+    // animation me background me data load, phir Home par sab kuch instant dikhe"). Pehle preload
+    // renderCurrent ke BAAD start hota tha → splash ke seconds bekaar jaate the aur Home par
+    // spinner-filled sections dikhte the. Ab critical datasets turant + preloadAll parallel me —
+    // job-dedupe se home.render ko wahi in-flight promises milte hain (Google par extra load nahi).
+    warmCriticalData(false);
     const preloadPromise = FF.preloader ? FF.preloader.preloadAll(false) : Promise.resolve();
     preloadPromise.then((state) => {
       bootSetMessage('Workspace ready ✓', state && state.errors && state.errors.length ? 'Using available cached data…' : 'Live data is loading in the background…');
@@ -1987,8 +2013,11 @@ window.FF = window.FF || {};
       bootSetMessage('Workspace ready ✓', 'Using available cached data…');
     });
 
-    // Home is already rendered (or its own async data is continuing). Release the short boot
-    // animation without waiting for every sheet/module.
+    // Home ka render (bootGate) apne SAARE sections ke real data ke saath paint hone ke baad hi
+    // resolve hota hai (home.js) — splash hatate hi poora Home bhara hua dikhe, koi spinner nahi.
+    await renderCurrent({ bootGate: true });
+
+    // Release the short boot animation — upar wale data fetches isi animation ke neeche chal chuke hain.
     bootSetMessage('Workspace ready ✓', 'Your dashboard data is loaded.');
     await releaseWorkspaceBoot();
 
@@ -2042,6 +2071,15 @@ window.FF = window.FF || {};
     // 🌐 Public employee link (/tag-request) — yahan login ka koi chakkar nahi: seedha form khulta
     //    hai, sirf employee name mandatory. Baaki poora app pehle jaisa login-protected rehta hai.
     if (FF.publicForm && FF.publicForm.active()) { await FF.publicForm.boot(); return; }
+    // ⚡ v3.73 — return visitor (is device par pehle login ho chuka): /api/auth/me ke PARALLEL me hi
+    //    data warm-up shuru — "Opening your workspace" animation ke 3-4 second me data bhi load hota
+    //    rehta hai. Naye visitor / abhi-logout kiye visitor par koi extra request nahi; session expire
+    //    ho to request silent fail (401, onExpired tab tak no-op) aur onLogin ke baad preloadAll sab sambhal leta hai.
+    try {
+      const justLoggedOut = sessionStorage.getItem('ff_skip_workspace_boot_once') === '1';
+      const returning = !!(localStorage.getItem('ff_user') || localStorage.getItem('ff_feed_sig'));
+      if (returning && !justLoggedOut) warmCriticalData(true);
+    } catch { /* storage blocked — normal flow */ }
     const ok = await FF.auth.init();
     if (ok) onLogin();
   }

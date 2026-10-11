@@ -1,6 +1,15 @@
 /* Early PWA/mobile layout detection and theme boot. Kept external so the server CSP can
    block inline script without accidentally disabling the standalone/mobile layout. */
 (() => {
+  // 🧼 v3.73 — yeh logic pehle index.html ka inline <script> tha; server CSP (`script-src 'self'`)
+  // inline scripts ko block karta hai → feature silently dead tha (logout ke baad splash phir dikhta
+  // tha). Ab external: ui-boot.js head me body-parse se pehle chalta hai, isliye class #app-boot ke
+  // paint hone se pehle lag jaati hai (CSS splash turant hide karta hai — koi flash nahi).
+  try {
+    if (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('ff_skip_workspace_boot_once') === '1') {
+      document.documentElement.classList.add('skip-workspace-boot');
+    }
+  } catch { /* storage blocked — normal splash is fine */ }
   try {
     const media = (query) => !!(window.matchMedia && window.matchMedia(query).matches);
     const standalone = media('(display-mode: standalone)') || navigator.standalone === true;

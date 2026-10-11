@@ -663,7 +663,9 @@ FF.pages = FF.pages || {};
   }
 
   // ---------------------------------------------------------------- render
-  async function render(root) {
+  // renderCtx.bootGate (app.js splash): true ho to render apne SAARE sections ke data paint karne
+  // ke baad hi resolve hota hai — "Opening your workspace" animation hatate hi Home poora bhara dikhe.
+  async function render(root, params, renderCtx) {
     const u = FF.auth.user || {};
     const avatar = u.avatar ? `<img class="home-avatar" src="${esc(u.avatar)}" alt="">` : `<div class="home-avatar mono-logo">${esc((u.name || u.username || 'U').slice(0, 1).toUpperCase())}</div>`;
     const canFf = FF.auth.can('dashboard') || FF.auth.can('trend') || FF.auth.can('stock') || FF.auth.can('performance');
@@ -808,9 +810,11 @@ FF.pages = FF.pages || {};
       const summary = targetAchievementSummary(targets, currentTargetYm, targetAchievementData.ffRows, targetAchievementData.gvRows, [canFf ? 'ff' : '', canGv ? 'gv' : ''].filter(Boolean));
       targetAchievementMount.innerHTML = targetAchievementHtml(summary, currentTargetYm);
     }
+    let lastStockPulse = null; // stock total ek baar aane ke baad repaints (live/master paintAll) me bana rahe
     function paintPulse(stock) {
+      if (stock) lastStockPulse = stock;
       if (!pulseMount || !pulseMount.isConnected || !ui.ready) return;
-      pulseMount.innerHTML = managementPulseHtml(ui.ctx, ui.sf, liveState, stock || null);
+      pulseMount.innerHTML = managementPulseHtml(ui.ctx, ui.sf, liveState, lastStockPulse);
     }
     function paintCharts() {
       if (!chartMount || !chartMount.isConnected || !ui.ready) return;
@@ -993,14 +997,13 @@ FF.pages = FF.pages || {};
     stockMount.innerHTML = stockHtml(ffStock, gvStock, sf);
     paintPulse({ total: ffStock.total + gvStock.total });
     // GV agent-wise stock (agar permission/load ho to) — top holders
-    if (canGv) {
-      G.need('stockAgent', { only: true }).then((rows) => {
-        if (!rows || !stockMount.isConnected) return;
-        const top = [...rows].sort((a, b) => (b.n || 0) - (a.n || 0)).slice(0, 5).map((r) => ({ name: r.agentName || r.agentId || '—', n: r.n }));
-        const host = stockMount.querySelectorAll('.hm-toplist')[1];
-        if (host && top.length) host.innerHTML = top.map((r, i) => `<div class="hm-toprow"><span class="rank">${i + 1}</span><b>${esc(r.name)}</b><span class="tag gv">GV</span><strong>${U.fmt(r.n)}</strong></div>`).join('');
-      }).catch(() => {});
-    }
+    const gvStockAgentP = canGv ? G.need('stockAgent', { only: true }).catch(() => null) : Promise.resolve(null);
+    gvStockAgentP.then((rows) => {
+      if (!rows || !stockMount.isConnected) return;
+      const top = [...rows].sort((a, b) => (b.n || 0) - (a.n || 0)).slice(0, 5).map((r) => ({ name: r.agentName || r.agentId || '—', n: r.n }));
+      const host = stockMount.querySelectorAll('.hm-toplist')[1];
+      if (host && top.length) host.innerHTML = top.map((r, i) => `<div class="hm-toprow"><span class="rank">${i + 1}</span><b>${esc(r.name)}</b><span class="tag gv">GV</span><strong>${U.fmt(r.n)}</strong></div>`).join('');
+    }).catch(() => {});
 
     const morningBtn = U.$('#home-morning-card', root);
     // 📲 Morning card module first paint ke baad load hota hai — click par load karke bana do.
@@ -1026,6 +1029,19 @@ FF.pages = FF.pages || {};
     // hai (toasts, polls, tables), isliye ye observer har mutation par `document.body.contains(root)`
     // chalata tha = scroll/paint ke waqt lagatar main-thread kaam (scroll leg ka ek bada karan).
     // Interval ke andar `root.isConnected` check hi kaafi hai — kaam wahi, cost zero.
+
+    // ⚡ v3.73 — boot gate (client request): "Opening your workspace" animation hatne se pehle Home
+    // ke SAARE sections (GV live · month KPIs · target achievement · charts · stock) apne real
+    // numbers paint kar chuke hone chahiye — Home par spinner-filled screen nahi, poora data instant.
+    // Saare handlers upar paint karte hain; yahan sirf unke settle hone ka intezaar hai (4.2s soft
+    // cap — uske baad bhi background paint chalta rehta hai, par renderCurrent block nahi rehta).
+    if (renderCtx && renderCtx.bootGate) {
+      const pending = [liveP, feedP, dailyP, stockP, gvStockP, gvMasterP, targetAchievementDataP, gvStockAgentP];
+      await Promise.race([
+        Promise.allSettled(pending),
+        new Promise((resolve) => setTimeout(resolve, 4200))
+      ]);
+    }
   }
 
   FF.pages.home = {
