@@ -33,7 +33,7 @@ test('FASTag Mapping template is exactly the requested four columns; lookup trie
   const page = await read('fastagMapping.js');
   assert.match(page, /saveCsvFile\('fastag-mapping-template\.csv', \['tagId', 'serialNo', 'vcType', 'agentId'\]/);
   assert.match(page, /const schema = await stockSchema\(\)/);
-  assert.match(page, /D\.query\('StockDataa', tq, \{[\s\S]{0,120}timeoutMs: 4500, directTimeoutMs: 1800, retries: 0, directFirst: true/);
+  assert.match(page, /D\.query\('StockDataa', tq, \{[\s\S]{0,140}fresh: true, timeoutMs: STOCK_LOOKUP_TIMEOUT_MS, retries: 0, directFirst: true/);
   assert.match(page, /const variants = \[make\(false, batch\), make\(true, batch\)\]/);
   assert.match(page, /queryRows\(tq\)\.then/);
   assert.match(page, /queryField\('tagId', tagIds\)/);

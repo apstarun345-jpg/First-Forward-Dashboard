@@ -15,6 +15,9 @@ window.FF = window.FF || {};
   const stockRangeCache = new Map();
   const STOCK_LOOKUP_CACHE_MAX = 50000;
   const STOCK_RANGE_CACHE_MAX = 100;
+  // A negative gviz response should not hide a newly-added StockDataa row for the cache TTL.
+  const STOCK_LOOKUP_TIMEOUT_MS = 14000;
+  const STOCK_PAGE_TIMEOUT_MS = 16000;
   const esc = (v) => U.esc(String(v == null ? '' : v));
   const clean = (v) => String(v == null ? '' : v).replace(/\u00a0/g, ' ').trim();
   const norm = (v) => clean(v).toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -272,7 +275,7 @@ window.FF = window.FF || {};
         const make = (numeric, vals) => 'select A,B,C,D,E,F,G,H,I,J,K,L,M where ' + vals.map((x) => field + ' = ' + literal(x, numeric)).join(' or ');
         const queryRows = async (tq) => {
           const table = await D.query('StockDataa', tq, {
-            timeoutMs: 4500, directTimeoutMs: 1800, retries: 0, directFirst: true
+            fresh: true, timeoutMs: STOCK_LOOKUP_TIMEOUT_MS, retries: 0, directFirst: true
           });
           return stockRows(table, schema);
         };
@@ -342,7 +345,7 @@ window.FF = window.FF || {};
         const tq = 'select A,B,C,D,E,F,G,H,I,J,K where ' + field + ' is not null limit ' + PAGE_SIZE + ' offset ' + start;
         try {
           return await D.query('StockDataa', tq, {
-            timeoutMs: 4500, directTimeoutMs: 1800, retries: 0, directFirst: true
+            fresh: true, timeoutMs: STOCK_PAGE_TIMEOUT_MS, retries: 0, directFirst: true
           });
         } catch (err) {
           throw new Error('StockDataa BARCODE scan failed near row ' + (start + 1) + ': ' + String(err && (err.message || err) || 'Google Sheets query error'));
@@ -539,7 +542,7 @@ window.FF = window.FF || {};
     });
   }
   async function lookup() {
-    if (state.busy) return;
+    if (state.busy) return false;
     // Typed quick inputs ko Lookup click par khud queue me le lo — naye user sirf barcode +
     // Agent ID daal kar "🔎 Lookup StockDataa" dabata hai aur "Add to queue" bhool jaata hai.
     // Add-to-queue / Quick map already fields clear kar dete hai, isliye yahan kabhi duplicate nahi hoga.
@@ -554,17 +557,17 @@ window.FF = window.FF || {};
       U.$('#fm-identifier', state.root).value = '';
     }
     if (typedFirst && typedLast && typedRangeAgent) {
-      if (compareBarcode(typedFirst, typedLast) > 0) { setStatus('First barcode, last barcode se bada nahi ho sakta.', 'warn'); return; }
+      if (compareBarcode(typedFirst, typedLast) > 0) { setStatus('First barcode, last barcode se bada nahi ho sakta.', 'warn'); return false; }
       state.items.push({ id: nextId++, type: 'range', first: typedFirst, last: typedLast, agentId: typedRangeAgent, source: 'Manual range', selected: true });
       U.$('#fm-first', state.root).value = ''; U.$('#fm-last', state.root).value = '';
     }
     if (!state.items.length) {
-      if (typedFirst || typedLast || typedRangeAgent) { setStatus('Barcode range ke liye First barcode, Last barcode aur target Agent ID teeno required hain.', 'warn'); return; }
-      if (typedValue || typedAgent) { setStatus('Barcode/Tag ID aur target Agent ID dono required hain.', 'warn'); return; }
-      setStatus('Pehle file upload karein ya barcode / Tag ID add karein.', 'warn'); return;
+      if (typedFirst || typedLast || typedRangeAgent) { setStatus('Barcode range ke liye First barcode, Last barcode aur target Agent ID teeno required hain.', 'warn'); return false; }
+      if (typedValue || typedAgent) { setStatus('Barcode/Tag ID aur target Agent ID dono required hain.', 'warn'); return false; }
+      setStatus('Pehle file upload karein ya barcode / Tag ID add karein.', 'warn'); return false;
     }
     const waiting = state.items.splice(0);
-    if (waiting.length > MAX_INPUTS) { state.items.unshift.apply(state.items, waiting); setStatus('Ek baar me maximum ' + MAX_INPUTS + ' input selectors allowed hain.', 'warn'); return; }
+    if (waiting.length > MAX_INPUTS) { state.items.unshift.apply(state.items, waiting); setStatus('Ek baar me maximum ' + MAX_INPUTS + ' input selectors allowed hain.', 'warn'); return false; }
     state.busy = true; setStatus('StockDataa se matching details lookup ho rahi hain…', 'info');
     const rowsBefore = state.rows.length;
     const old = U.$('#fm-lookup', state.root), mapBtn = U.$('#fm-map', state.root); if (old) old.disabled = true; if (mapBtn) mapBtn.disabled = true;
@@ -616,11 +619,13 @@ window.FF = window.FF || {};
       checkDuplicates(); renderTable();
       const good = state.rows.filter((r) => r.stock && r.tagId && r.serialNo && r.vcType && r.agentId && !r.status.startsWith('Duplicate') && !r.mapped).length;
       setStatus('Lookup complete: ' + good + ' row ready. Mapping se pehle Agent ID aur VC type review karein.', good ? 'success' : 'warn');
+      return true;
     } catch (err) {
       // Query fail hone par queue wapas daal do — nahi to user dubara Lookup dabaye to
       // "Pehle file upload karein" dikhega aur retry me hi inputs gayab ho jaate the.
       if (state.rows.length === rowsBefore) state.items = waiting.concat(state.items);
       setStatus('Lookup fail: ' + (err.message || err) + (state.items.length ? ' Inputs queue me wapas aa gaye — dobara Lookup dabayein.' : ''), 'error');
+      return false;
     }
     finally { state.busy = false; if (old) old.disabled = false; if (mapBtn) mapBtn.disabled = !state.configured; }
   }
@@ -634,12 +639,34 @@ window.FF = window.FF || {};
     const oldIds = new Set(state.rows.map((r) => r.id));
     state.items.push({ id: nextId++, type: kind, barcode: kind === 'barcode' ? value : '', tagId: kind === 'tagId' ? value : '', agentId, source: 'Quick Map', selected: true });
     U.$('#fm-identifier', state.root).value = '';
-    await lookup();
+    const lookupOk = await lookup();
+    // Preserve the actual query/timeout message instead of replacing it with a generic warning.
+    if (lookupOk === false) {
+      state.rows.forEach((r) => { if (previous.has(r.id)) r.selected = previous.get(r.id); });
+      renderTable();
+      return;
+    }
     const added = state.rows.filter((r) => !oldIds.has(r.id));
     const ready = added.filter((r) => r.stock && r.tagId && r.serialNo && r.vcType && r.agentId && !r.status.startsWith('Duplicate'));
     if (!ready.length) {
       state.rows.forEach((r) => { if (previous.has(r.id)) r.selected = previous.get(r.id); });
-      renderTable(); setStatus('Quick Map ruk gaya: StockDataa record ya required mapping detail nahi mili. Row check karein.', 'warn'); return;
+      renderTable();
+      const failed = added.find((r) => !r.stock) || added[0];
+      if (failed && !failed.stock) {
+        setStatus('Quick Map: ' + (kind === 'tagId' ? 'Tag ID' : 'Barcode') + ' "' + value +
+          '" ka exact StockDataa match nahi mila. Fresh lookup aur fallback scan chala; value, StockDataa tab aur barcode column verify karein. Queue me input bacha hai—Lookup StockDataa se retry kar sakte hain.', 'warn');
+      } else if (failed && failed.stock) {
+        const missing = [];
+        if (!failed.tagId) missing.push('TAG_ID (column C)');
+        if (!failed.serialNo) missing.push('BARCODE / Serial No (column D)');
+        if (!failed.vcType) missing.push('TAG_CLASS / VC Type (column E)');
+        if (!failed.agentId) missing.push('target Agent ID');
+        setStatus('StockDataa row mil gayi, par required mapping field blank/invalid hai: ' + (missing.join(', ') || failed.status) +
+          '. Table me row check karein; external mapping call nahi ki gayi.', 'warn');
+      } else {
+        setStatus('Quick Map ko ready row nahi mili. Neeche lookup status aur row detail check karein; mapping request send nahi hui.', 'warn');
+      }
+      return;
     }
     state.rows.forEach((r) => { r.selected = ready.includes(r); });
     renderTable();

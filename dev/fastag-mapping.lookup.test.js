@@ -27,7 +27,7 @@ function makePage(stockClass = 'VC20') {
   const D = {
     async query(sheet, tq, opts = {}) {
       assert.equal(sheet, 'StockDataa');
-      queryLog.push({ tq, range: opts.range });
+      queryLog.push({ tq, range: opts.range, fresh: opts.fresh, timeoutMs: opts.timeoutMs });
       if (opts.range === 'A1:M2') return table([]);
       const page = tq.match(/where\s+D\s+is\s+not\s+null\s+limit\s+(\d+)\s+offset\s+(\d+)/i);
       if (page) return Number(page[2]) === 0 ? table([stock]) : table([]);
@@ -150,7 +150,8 @@ test('FASTag Mapping tries the bounded barcode interval before expensive paginat
   FF.data.query = async (sheet, tq, opts) => {
     if (/where D >=/.test(tq)) { queryLog.push({ tq, range: opts?.range }); return { cols: [], rows: [] }; }
     if (/where D is not null limit 5000 offset 0/i.test(tq)) {
-      assert.equal(opts.timeoutMs, 4500, 'fallback page query has a short timeout');
+      assert.equal(opts.timeoutMs, 16000, 'fallback query has a bounded but realistic timeout');
+      assert.equal(opts.fresh, true, 'fallback does not reuse stale cached pages');
     }
     return originalQuery(sheet, tq, opts);
   };
@@ -247,7 +248,7 @@ test('FASTag Mapping continues barcode fallback when the data source returns par
     if (/where\s+D\s*=/.test(tq)) return makeTable([]);
     const page = tq.match(/where\s+D\s+is\s+not\s+null\s+limit\s+(\d+)\s+offset\s+(\d+)/i);
     if (page) {
-      assert.notEqual(opts.fresh, true, 'fallback should reuse cached pages between lookups');
+      assert.equal(opts.fresh, true, 'fallback bypasses stale cached pages after an exact miss');
       assert.equal(opts.directFirst, true, 'fallback attempts Google directly with a short timeout');
       const offset = Number(page[2]);
       // Pretend the backend caps the first response at three rows, below the requested limit.
@@ -288,4 +289,39 @@ test('FASTag Mapping normalizes numeric StockDataa vehicle classes to VC-prefixe
   selectors.get('#fm-agent-id').value = 'TARGET-VC16';
   await click(root, 'fm-lookup');
   assert.match(selectors.get('#fm-results').innerHTML, /VC16/, 'numeric TAG_CLASS 16 is normalized to VC16');
+});
+
+test('FASTag lookup bypasses stale empty-query cache and allows enough proxy response time', async () => {
+  const { root, selectors, queryLog } = makePage();
+  selectors.get('#fm-kind').value = 'barcode';
+  selectors.get('#fm-identifier').value = '8900000000123456';
+  selectors.get('#fm-agent-id').value = 'FRESH-TARGET';
+  await click(root, 'fm-lookup');
+  assert.match(selectors.get('#fm-results').innerHTML, /TAG-12345/);
+  assert.ok(queryLog.some((q) => /where D =/.test(q.tq) && q.fresh === true), 'exact stock lookup bypasses stale browser/proxy cache');
+  assert.ok(queryLog.some((q) => /where D =/.test(q.tq) && q.timeoutMs === 14000), 'exact lookup uses a bounded but realistic timeout');
+});
+
+test('Quick Map preserves the actual StockDataa error instead of replacing it with a generic warning', async () => {
+  const { root, selectors, FF } = makePage();
+  FF.data.query = async (sheet, tq) => {
+    if (/where\\s+D\\s*=/.test(tq)) throw new Error('upstream timeout');
+    return { cols: [], rows: [] };
+  };
+  selectors.get('#fm-kind').value = 'barcode';
+  selectors.get('#fm-identifier').value = '8900000000123456';
+  selectors.get('#fm-agent-id').value = 'ERROR-TARGET';
+  await click(root, 'fm-quick-map');
+  assert.match(selectors.get('#fm-message').textContent, /Lookup fail: StockDataa lookup timeout/i);
+  assert.doesNotMatch(selectors.get('#fm-message').textContent, /Quick Map ruk gaya/);
+});
+
+test('Quick Map names the missing StockDataa field when the record exists but class is blank', async () => {
+  const { root, selectors } = makePage('');
+  selectors.get('#fm-kind').value = 'barcode';
+  selectors.get('#fm-identifier').value = '8900000000123456';
+  selectors.get('#fm-agent-id').value = 'MISSING-CLASS';
+  await click(root, 'fm-quick-map');
+  assert.match(selectors.get('#fm-message').textContent, /TAG_CLASS \/ VC Type \(column E\)/);
+  assert.doesNotMatch(selectors.get('#fm-message').textContent, /Quick Map ruk gaya/);
 });
