@@ -242,8 +242,8 @@ test('FASTag Mapping continues barcode fallback when the data source returns par
   FF.data.query = async (sheet, tq, opts = {}) => {
     queryLog.push({ tq, range: opts.range, fresh: opts.fresh, directFirst: opts.directFirst });
     // Simulate both exact predicates silently missing the barcode.
-    if (/where\\s+D\\s*=/.test(tq)) return makeTable([]);
-    const page = tq.match(/where\\s+D\\s+is\\s+not\\s+null\\s+limit\\s+(\\d+)\\s+offset\\s+(\\d+)/i);
+    if (/where\s+D\s*=/.test(tq)) return makeTable([]);
+    const page = tq.match(/where\s+D\s+is\s+not\s+null\s+limit\s+(\d+)\s+offset\s+(\d+)/i);
     if (page) {
       assert.equal(opts.fresh, true, 'fallback must bypass the cached page');
       assert.equal(opts.directFirst, true, 'fallback should query the source directly first');
