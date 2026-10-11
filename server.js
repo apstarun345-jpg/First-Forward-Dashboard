@@ -6442,9 +6442,12 @@ async function handleApi(req, res, url) {
         if (!save.missing) throw new HttpError(400, 'Storage record me bhi koi extra request nahi hai — “Purani saves dhoondho” se history check karo.');
       } else {
         const out = await tagReqHistorySaves({ limit: 10, includeValues: true });
-        save = at
+        const selected = at
           ? (out.saves.find((s) => String(s.at) === at) || out.saves.find((s) => String(s.at).startsWith(at.slice(0, 19))))
-          : (out.saves.find((s) => s.missing > 0) || null);
+          : null;
+        // History rows can age out of the most-recent page between the recovery scan and Restore.
+        // Recovery is ID-wise merge-only, so safely fall back to the newest snapshot with missing IDs.
+        save = selected || out.saves.find((s) => s.missing > 0) || null;
         if (!save) throw new HttpError(404, at ? 'Ye save sheet history me nahi mili — list dobara load karo.' : 'History me aisi koi save nahi mili jisme missing requests hon.');
         if (save.unavailable) throw new HttpError(400, `Is save ko padha nahi ja saka: ${save.unavailable}`);
       }
