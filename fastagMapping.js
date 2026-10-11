@@ -9,6 +9,10 @@ window.FF = window.FF || {};
   const MAX_RESULTS = 3000;
   let nextId = 1;
   const state = { items: [], rows: [], configured: false, busy: false, root: null };
+  // Small session-local index: repeated Quick Map / barcode lookups should not hit Sheets again.
+  const stockByBarcode = new Map();
+  const stockByTagId = new Map();
+  const STOCK_LOOKUP_CACHE_MAX = 50000;
   const esc = (v) => U.esc(String(v == null ? '' : v));
   const clean = (v) => String(v == null ? '' : v).replace(/\u00a0/g, ' ').trim();
   const norm = (v) => clean(v).toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -199,19 +203,33 @@ window.FF = window.FF || {};
     }
     return clean(D.cellText(cell, col));
   }
+  function rememberStockRows(rows) {
+    for (const row of rows || []) {
+      for (const key of [row.barcode, row.serialNo]) {
+        const k = idKey(key);
+        if (k) { stockByBarcode.delete(k); stockByBarcode.set(k, row); }
+      }
+      const tagKey = idKey(row.tagId);
+      if (tagKey) { stockByTagId.delete(tagKey); stockByTagId.set(tagKey, row); }
+    }
+    for (const index of [stockByBarcode, stockByTagId]) {
+      while (index.size > STOCK_LOOKUP_CACHE_MAX) index.delete(index.keys().next().value);
+    }
+  }
   function stockRows(table, schema) {
     const ix = schema && schema.index ? schema.index : fallbackSchema().index;
-    return (table.rows || []).map((row) => {
+    const rows = (table.rows || []).map((row) => {
       const val = (key) => tableCellText(row[ix[key]], table.cols && table.cols[ix[key]], key);
       const stock = {
         stockRowId: val('id'), inventoryName: val('name'), tagId: val('tagId'), barcode: val('barcode'), serialNo: val('serialNo') || val('barcode'),
         vcType: val('vcType'), tagType: val('tagType'), barcodeAllocatedAt: val('barcodeAllocatedAt'), stockAgentId: val('agentId'),
         stockAgentName: val('agentName'), agentAllocatedAt: val('agentAllocatedAt'), tlName: val('tlName')
       };
-      // Normalize class after reading raw StockDataa cell, so lookup values stay untouched.
       stock.vcType = normalizeVcType(stock.vcType);
       return stock;
     }).filter((r) => r.tagId || r.barcode || r.serialNo);
+    rememberStockRows(rows);
+    return rows;
   }
   function normalizeVcType(value) {
     const raw = clean(value).toUpperCase().replace(/\s+/g, '');
@@ -228,10 +246,21 @@ window.FF = window.FF || {};
     if (!unique.length) return [];
     const schema = await stockSchema(), fieldIndex = schema.index[fieldName], field = schema.letters[fieldIndex] || cols()[fieldName];
     if (!field) throw new Error('StockDataa me ' + fieldName + ' column resolve nahi hua.');
+
+    const index = fieldName === 'tagId' ? stockByTagId : stockByBarcode;
+    const matchesValue = (row, value) => idKey(fieldName === 'tagId' ? row.tagId : row.barcode) === idKey(value);
     const found = new Map();
+    // Instant path for rows found earlier in this session.
+    for (const value of unique) {
+      const hit = index.get(idKey(value));
+      if (hit && matchesValue(hit, value)) found.set(idKey(hit.tagId) + '|' + idKey(hit.barcode), hit);
+    }
+    const pending = unique.filter((value) => ![...found.values()].some((row) => matchesValue(row, value)));
+    if (!pending.length) return [...found.values()];
+
     const batches = [];
     for (const numeric of [true, false]) {
-      const typedValues = unique.filter((value) => isDigitKey(value) === numeric);
+      const typedValues = pending.filter((value) => isDigitKey(value) === numeric);
       for (let i = 0; i < typedValues.length; i += 15) batches.push({ values: typedValues.slice(i, i + 15), numeric });
     }
     let cursor = 0;
@@ -240,40 +269,30 @@ window.FF = window.FF || {};
         const work = batches[cursor++], batch = work.values;
         const make = (numeric, vals) => 'select A,B,C,D,E,F,G,H,I,J,K,L,M where ' + vals.map((x) => field + ' = ' + literal(x, numeric)).join(' or ');
         const queryRows = async (tq) => {
-          // Server proxy first: it can serve warmed/cached gviz responses immediately.
-          // Direct Google fetch remains the fallback, but avoid the old 12s direct-first wait.
-          const table = await D.query('StockDataa', tq, { timeoutMs: 9000, retries: 0 });
+          const table = await D.query('StockDataa', tq, {
+            timeoutMs: 4500, directTimeoutMs: 1800, retries: 0, directFirst: true
+          });
           return stockRows(table, schema);
         };
+
         let rows = [];
-        let firstError = null;
-        try { rows = await queryRows(make(work.numeric, batch)); }
-        catch (err) {
-          firstError = err;
-          // A query timeout/abort is not a type mismatch; retrying it with a second 65s query
-          // would make the UI even slower. Give the user a concise, actionable message instead.
-          if (/abort|timed?\s*out|timeout|HTTP 502|HTTP 503|fetch failed|upstream/i.test(String(err && (err.message || err)))) {
-            throw new Error('StockDataa lookup timed out. Chhoti barcode range try karein ya thodi der baad retry karein.');
+        if (work.numeric) {
+          // Numeric + quoted-text equality in parallel. Previously the text fallback waited
+          // for the numeric request to time out first, doubling the delay for common barcodes.
+          const attempts = await Promise.allSettled([
+            queryRows(make(true, batch)),
+            queryRows(make(false, batch))
+          ]);
+          const failures = attempts.filter((attempt) => attempt.status === 'rejected');
+          rows = attempts.filter((attempt) => attempt.status === 'fulfilled').flatMap((attempt) => attempt.value);
+          if (!attempts.some((attempt) => attempt.status === 'fulfilled') && failures.length) {
+            const err = failures[0].reason;
+            throw new Error(isLookupTimeout(err)
+              ? 'StockDataa lookup timeout. Network/source slow hai; same lookup cache se dobara try karein.'
+              : 'StockDataa lookup failed: ' + String(err && (err.message || err) || 'Google Sheets query error'));
           }
-        }
-        let missing = batch.filter((value) => !rows.some((r) => {
-          const sourceValue = fieldName === 'tagId' ? r.tagId : r.barcode;
-          return idKey(value) === idKey(sourceValue);
-        }));
-        // Try the other data type only for values not found by the first query.
-        // This avoids running number + text scans concurrently for every barcode.
-        if (missing.length && work.numeric) {
-          try {
-            const fallbackRows = await queryRows(make(!work.numeric, missing));
-            rows = rows.concat(fallbackRows);
-          } catch (err) {
-            if (!rows.length) {
-              if (/abort|timed?\s*out|timeout|HTTP 502|HTTP 503|fetch failed|upstream/i.test(String(err && (err.message || err)))) {
-                throw new Error('StockDataa lookup timed out. Chhoti barcode range try karein ya thodi der baad retry karein.');
-              }
-              throw new Error('StockDataa lookup failed: ' + String(err && (err.message || err) || (firstError && firstError.message) || 'Google Sheets query error'));
-            }
-          }
+        } else {
+          rows = await queryRows(make(false, batch));
         }
         for (const row of rows) {
           const sourceValue = fieldName === 'tagId' ? row.tagId : row.barcode;
@@ -284,72 +303,54 @@ window.FF = window.FF || {};
     });
     await Promise.all(workers);
 
-    // Exact gviz equality can return zero rows for mixed numeric/text BARCODE cells.
-    // Keep fallback pages in the normal query cache (no fresh=1), and scan several full
-    // pages concurrently so a first-time lookup does not wait for dozens of sequential trips.
+    // Last-resort scan only when both exact barcode formats returned no row.
+    // Cached rows make a second request for the same barcode memory-only.
     if (fieldName === 'barcode') {
-      const unresolved = () => unique.filter((value) =>
-        ![...found.values()].some((row) => idKey(row.barcode) === idKey(value))
+      const unresolved = () => pending.filter((value) =>
+        ![...found.values()].some((row) => matchesValue(row, value))
       );
       const PAGE_SIZE = 5000, HARD_CAP = 250000, PARALLEL_PAGES = 4;
       let offset = 0, finished = false, previousPageFingerprint = '';
       const fetchPage = async (start) => {
         const tq = 'select A,B,C,D,E,F,G,H,I,J,K where ' + field + ' is not null limit ' + PAGE_SIZE + ' offset ' + start;
         try {
-          // No fresh flag: the data layer and server can reuse pages across lookups.
-          return await D.query('StockDataa', tq, { timeoutMs: 9000, retries: 0 });
+          return await D.query('StockDataa', tq, {
+            timeoutMs: 4500, directTimeoutMs: 1800, retries: 0, directFirst: true
+          });
         } catch (err) {
           throw new Error('StockDataa BARCODE scan failed near row ' + (start + 1) + ': ' + String(err && (err.message || err) || 'Google Sheets query error'));
         }
       };
-      const processPage = (table, start) => {
+      const processPage = (table) => {
         const pageRows = table.rows || [];
         const rows = stockRows(table, schema);
-        const pageFingerprint = rows
-          .map((row) => idKey(row.stockRowId) || (idKey(row.tagId) + '|' + idKey(row.barcode)))
-          .join(',');
+        const pageFingerprint = rows.map((row) => idKey(row.stockRowId) || (idKey(row.tagId) + '|' + idKey(row.barcode))).join(',');
         if (pageRows.length && pageFingerprint && pageFingerprint === previousPageFingerprint) {
-          throw new Error('StockDataa barcode pagination ne same page repeat kiya; source/proxy offset ko sahi rows nahi de raha. Lookup dobara try karein.');
+          throw new Error('StockDataa barcode pagination ne same page repeat kiya; lookup ko rok diya gaya.');
         }
         if (pageRows.length) previousPageFingerprint = pageFingerprint;
         for (const row of rows) {
-          if (!unresolved().some((value) => idKey(value) === idKey(row.barcode))) continue;
+          if (!unresolved().some((value) => matchesValue(row, value))) continue;
           found.set(idKey(row.tagId) + '|' + idKey(row.barcode), row);
         }
-        return { count: pageRows.length, nextOffset: start + pageRows.length };
+        return pageRows.length;
       };
-      // Probe the first page once so capped/short responses can still use exact offsets.
-      // After that, fetch four pages per round in parallel instead of serially waiting per 5k rows.
-      const firstTable = await fetchPage(offset);
-      const first = processPage(firstTable, offset);
-      if (!first.count) {
-        finished = true;
-      } else {
-        offset = first.count < PAGE_SIZE ? first.nextOffset : offset + PAGE_SIZE;
-      }
+      const firstTable = await fetchPage(0);
+      const firstCount = processPage(firstTable);
+      offset = firstCount < PAGE_SIZE ? firstCount : PAGE_SIZE;
+      finished = firstCount === 0;
       while (offset < HARD_CAP && !finished && unresolved().length) {
-        const starts = Array.from({ length: PARALLEL_PAGES }, (_, i) => offset + PAGE_SIZE * i)
-          .filter((start) => start < HARD_CAP);
-        if (!starts.length) break;
+        const starts = Array.from({ length: PARALLEL_PAGES }, (_, i) => offset + PAGE_SIZE * i).filter((start) => start < HARD_CAP);
         const pages = await Promise.all(starts.map((start) => fetchPage(start)));
         let advanceTo = offset;
         for (let i = 0; i < pages.length; i++) {
-          const start = starts[i], stateForPage = processPage(pages[i], start);
-          if (!stateForPage.count) {
-            finished = true;
-            break;
-          }
-          advanceTo = start + PAGE_SIZE;
+          const count = processPage(pages[i]);
+          if (!count) { finished = true; break; }
+          advanceTo = starts[i] + PAGE_SIZE;
           if (!unresolved().length) break;
-          if (stateForPage.count < PAGE_SIZE) {
-            // Resume after a short response by its actual row count to avoid skipped records.
-            advanceTo = stateForPage.nextOffset;
-            break;
-          }
+          if (count < PAGE_SIZE) { advanceTo = starts[i] + count; break; }
         }
-        if (advanceTo <= offset && !finished && unresolved().length) {
-          throw new Error('StockDataa barcode scan ka offset aage nahi badha; lookup ko rok diya gaya.');
-        }
+        if (advanceTo <= offset && !finished && unresolved().length) throw new Error('StockDataa barcode scan offset aage nahi badha.');
         offset = advanceTo;
       }
       if (offset >= HARD_CAP && unresolved().length) {
@@ -376,40 +377,81 @@ window.FF = window.FF || {};
     to = normalizeBoundary(to);
     if (compareBarcode(from, to) > 0) throw new Error('First barcode last se bada hai.');
 
-    // Do not run a full-sheet range predicate (D >= x and D <= y): Google Sheets may scan
-    // the entire mixed text/numeric barcode column and time out. Read bounded pages and filter
-    // locally; this also avoids silently missing rows whose BARCODE is stored as text.
-    const PAGE_SIZE = 5000, HARD_CAP = 250000;
+    // Fast path: ask Google for the requested barcode interval directly instead of reading
+    // up to 250k stock rows. Query numeric/text variants concurrently to handle mixed typing.
+    const fastSelect = 'select A,B,C,D,E,F,G,H,I,J,K where ';
+    const variants = [];
+    variants.push(fastSelect + 'D >= ' + literal(from, false) + ' and D <= ' + literal(to, false) + ' limit ' + (MAX_RESULTS + 1));
+    if (isDigitKey(from) && isDigitKey(to) && !(from.length > 1 && from[0] === '0') && !(to.length > 1 && to[0] === '0')) {
+      variants.push(fastSelect + 'D >= ' + literal(from, true) + ' and D <= ' + literal(to, true) + ' limit ' + (MAX_RESULTS + 1));
+    }
+    const fastAttempts = await Promise.allSettled(variants.map((tq) => D.query('StockDataa', tq, {
+      timeoutMs: 4500, directTimeoutMs: 1800, retries: 0, directFirst: true
+    })));
+    const fastRows = [];
+    let fastError = null;
+    for (const attempt of fastAttempts) {
+      if (attempt.status === 'rejected') { if (!fastError) fastError = attempt.reason; continue; }
+      for (const row of stockRows(attempt.value, schema)) {
+        if (row.barcode && compareBarcode(row.barcode, from) >= 0 && compareBarcode(row.barcode, to) <= 0) fastRows.push(row);
+      }
+    }
+    const fastDedupe = new Map();
+    for (const row of fastRows) fastDedupe.set(idKey(row.tagId) + '|' + idKey(row.barcode), row);
+    if (fastDedupe.size) return [...fastDedupe.values()];
+    // If the bounded range query returns nothing, fall back to paged local comparison for
+    // mixed-type/text-stored IDs. Exact lookup/cached session index should handle most singles.
+    // Multiple range pages are fetched in parallel, stopping as soon as pages are empty.
+    const PAGE_SIZE = 5000, HARD_CAP = 250000, PARALLEL_PAGES = 4;
     const selected = 'select A,B,C,D,E,F,G,H,I,J,K where D is not null';
     const matched = new Map();
-    let offset = 0, finished = false;
-    while (offset < HARD_CAP && !finished) {
-      // Four concurrent pages reduce range lookup round-trips for large StockDataa tabs.
-      const offsets = Array.from({ length: 4 }, (_, i) => offset + PAGE_SIZE * i).filter((x) => x < HARD_CAP);
-      let pages;
+    let offset = 0, finished = false, previousPageFingerprint = '';
+    const fetchPage = async (start) => {
       try {
-        pages = await Promise.all(offsets.map((start) =>
-          D.query('StockDataa', selected + ' limit ' + PAGE_SIZE + ' offset ' + start,
-            { timeoutMs: 55000, retries: 0 })
-        ));
+        return await D.query('StockDataa', selected + ' limit ' + PAGE_SIZE + ' offset ' + start, {
+          timeoutMs: 4500, directTimeoutMs: 1800, retries: 0, directFirst: true
+        });
       } catch (err) {
-        throw new Error('StockDataa paged barcode lookup failed near rows ' + (offset + 1) + '–' + (offset + offsets.length * PAGE_SIZE) + ': ' + String(err && (err.message || err) || 'Google Sheets query error'));
+        throw new Error('StockDataa paged barcode lookup failed near row ' + (start + 1) + ': ' + String(err && (err.message || err) || 'Google Sheets query error'));
       }
-      for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
-        const page = pages[pageIndex];
-        const pageRows = page.rows || [];
-        const rows = stockRows(page, schema);
-        for (const row of rows) {
-          if (!row.barcode) continue;
-          if (compareBarcode(row.barcode, from) < 0 || compareBarcode(row.barcode, to) > 0) continue;
+    };
+    const processPage = (table, start) => {
+      const pageRows = table.rows || [];
+      const rows = stockRows(table, schema);
+      const fingerprint = rows.map((row) => idKey(row.stockRowId) || (idKey(row.tagId) + '|' + idKey(row.barcode))).join(',');
+      if (pageRows.length && fingerprint && fingerprint === previousPageFingerprint) {
+        throw new Error('StockDataa paging ne same page repeat kiya; lookup ko rok diya gaya.');
+      }
+      if (pageRows.length) previousPageFingerprint = fingerprint;
+      for (const row of rows) {
+        if (row.barcode && compareBarcode(row.barcode, from) >= 0 && compareBarcode(row.barcode, to) <= 0) {
           matched.set(idKey(row.tagId) + '|' + idKey(row.barcode), row);
         }
-        if (pageRows.length < PAGE_SIZE) { finished = true; break; }
       }
-      offset += offsets.length * PAGE_SIZE;
+      return pageRows.length;
+    };
+    const firstCount = processPage(await fetchPage(0), 0);
+    offset = firstCount < PAGE_SIZE ? firstCount : PAGE_SIZE;
+    finished = firstCount === 0;
+    while (offset < HARD_CAP && !finished && matched.size <= MAX_RESULTS) {
+      const starts = Array.from({ length: PARALLEL_PAGES }, (_, i) => offset + PAGE_SIZE * i).filter((start) => start < HARD_CAP);
+      const pages = await Promise.all(starts.map((start) => fetchPage(start)));
+      let advanceTo = offset;
+      for (let i = 0; i < pages.length; i++) {
+        const count = processPage(pages[i], starts[i]);
+        if (!count) { finished = true; break; }
+        advanceTo = starts[i] + PAGE_SIZE;
+        if (matched.size > MAX_RESULTS) break;
+        if (count < PAGE_SIZE) { advanceTo = starts[i] + count; break; }
+      }
+      if (advanceTo <= offset && !finished) throw new Error('StockDataa range scan offset aage nahi badha.');
+      offset = advanceTo;
     }
-    if (!finished && offset >= HARD_CAP) {
-      throw new Error('StockDataa mein 250,000 rows scan ho chuki hain. Exact match ke liye chhoti barcode range dein.');
+    if (offset >= HARD_CAP && matched.size === 0) {
+      throw new Error('StockDataa mein 250,000 rows scan ho chuki hain. Barcode range / source verify karein.');
+    }
+    if (!matched.size && fastError && isLookupTimeout(fastError) && finished) {
+      // Keep the useful "not found" outcome when the fallback was able to fully finish.
     }
     return [...matched.values()];
   }
