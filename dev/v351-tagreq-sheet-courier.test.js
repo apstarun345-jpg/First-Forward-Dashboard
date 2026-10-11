@@ -114,7 +114,7 @@ test('v3.51 — sheet ek agent = ek chhoti row (classes merged) + 🚚 courier c
 
     // 6) legacy (v1) config ek hi baar migrate hoti hai — class mode + lambe columns se chhota set
     const cfg2 = await jsonCall(server.base, '/api/tag-request-sheet', 'GET', undefined, admin);
-    assert.equal(cfg2.json.config.rowMode, 'agent-class-gap');
+    assert.equal(cfg2.json.config.rowMode, 'agent', 'admin-selected agent mode remains intact after saving config');
   } finally {
     if (server) await server.stop();
     await mock.close();
