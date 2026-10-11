@@ -6885,7 +6885,7 @@ async function handleApi(req, res, url) {
     // Employee status is private to the submitted link token; never expose another employee's request history.
     const token = String(url.searchParams.get('token') || '').trim();
     const ip = clientIp(req); if (!publicRateOk(`tagemp:${ip}`, 60, 10 * 60e3)) throw new HttpError(429, 'Bahut zyada status checks — thodi der baad try karo.');
-    return sendJson(res, 200, { ok:true, shared:true, ...employeeStatusSummary(token) });
+    return sendJson(res, 200, { ok:true, shared:false, ...employeeStatusSummary(token) });
   }
   // 📇 Agent contact lookup — central Address tab, exact-agent match only.
   if (p === '/api/tag-request/contact' && method === 'GET') {
