@@ -1,4 +1,19 @@
-# First Forward Dashboard — First Forward + GV Partner (v3.62.0)
+# First Forward Dashboard — First Forward + GV Partner (v3.72.0)
+
+## ✨ v3.72.0 — 🚦 "Too Many Requests" fix + 📊 FASTag Mapping live counters
+
+- **Google ka HTML error page kabhi UI me nahi:** 429 / "Too Many Requests" (normalize.css wala) page ab
+  saaf JSON `429` + Hindi message banta hai; proxy purana cache serve karta hai. Rate limit ke baad
+  browser se direct Google calls band (circuit breaker) — sab apne server proxy se.
+- **Rate-limit gate:** ek saath limited upstream requests (`GVIZ_CONCURRENCY`, default 6) + 429 par
+  badhta cooldown (background refresh/warm-up ruk jaate hain).
+- **StockDataa index:** boot ke 6 s baad se garam, fail par auto-retry; page par live badge
+  (`index ready · rows · age` / `ban raha hai` / `rate limit 42s`) + `🔄 Index refresh` button.
+- **Live counters (FASTag Mapping):** naya progress panel — `done / total`, ✅ mapped, ❌ failed,
+  ⏳ bachhe, %, ETA, rows/s — mapping 25-row batches me (3 parallel) + rate-limit par retry pass;
+  fail hone par panel me hi `🔁 Dobara try`.
+
+Release note: [WHATS-NEW-v3.72.0.md](WHATS-NEW-v3.72.0.md).
 
 ## ✨ v3.62.0 — 🧹 Simple + Light + App-jaisa (retired pages, phone speed, scroll fix)
 

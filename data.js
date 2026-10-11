@@ -14,6 +14,22 @@ window.FF = window.FF || {};
   const TODAY_TTL = 25e3;
   let lastLoadAt = null;
   let lastSource = '';
+  // 🚦 Rate limit state (v3.72): Google 429 ("Too Many Requests") dete hi browser se direct Google
+  // calls band ho jaati hain (warna wahi HTML page + slow lookups bante rehte hain) aur thodi der
+  // ke liye sab apne server proxy se hi jaata hai.
+  const rateLimitState = { until: 0, directUntil: 0, hits: 0, lastAt: 0 };
+  function markRateLimited(retryAfterMs) {
+    const wait = Math.max(5000, Math.min(120000, Number(retryAfterMs) || 30e3));
+    rateLimitState.until = Math.max(rateLimitState.until, Date.now() + wait);
+    rateLimitState.directUntil = Math.max(rateLimitState.directUntil, Date.now() + Math.max(wait, 120000));
+    rateLimitState.hits++; rateLimitState.lastAt = Date.now();
+  }
+  const directAllowed = () => FF.config.directFallback !== false && FF.config.gvizDirect !== false && Date.now() >= rateLimitState.directUntil;
+  const rateLimitStatus = () => ({
+    hits: rateLimitState.hits, lastAt: rateLimitState.lastAt, active: Date.now() < rateLimitState.until,
+    blockedSec: Math.max(0, Math.ceil((rateLimitState.until - Date.now()) / 1000)),
+    directBlockedSec: Math.max(0, Math.ceil((rateLimitState.directUntil - Date.now()) / 1000))
+  });
 
   function directBase(sheet) {
     const cfg = FF.config.sheetByName(sheet);
@@ -38,11 +54,37 @@ window.FF = window.FF || {};
   class QueryError extends Error {
     constructor(message, detail) { super(message); this.name = 'QueryError'; this.detail = detail; }
   }
+  /** v3.72 — Google ka "Too Many Requests" / HTML page. Ye kabhi screen par nahi dikhna chahiye:
+   *  user ko saaf message milta hai aur apne server ke cache se data aata rehta hai. */
+  class RateLimitError extends Error {
+    constructor(message, retryAfterMs, detail) { super(message); this.name = 'RateLimitError'; this.retryAfterMs = Math.max(0, Number(retryAfterMs) || 0); this.detail = detail; }
+  }
+  function rateLimitPage(text) {
+    const body = String(text || '');
+    if (!body || body.includes('setResponse')) return false;
+    if (/too many requests/i.test(body)) return true;
+    return /<html/i.test(body) && !/^[\s]*\{/.test(body) && /normalize\.css|rate.?limit|429/i.test(body);
+  }
+  const rateLimitMessage = (retryAfterMs) => {
+    const sec = Math.max(1, Math.ceil((Number(retryAfterMs) || 0) / 1000));
+    return 'Google Sheets ne rate limit kar diya (429 Too Many Requests). ' + (retryAfterMs ? '~' + sec + ' second me apne aap dobara try hoga. ' : '') + 'Purana/cache data dikh raha hai — thodi der baad phir try karein.';
+  };
+  /** Google ke HTML page se sirf chhota, saaf text nikaalo (UI me raw HTML kabhi nahi). */
+  function htmlHint(text) {
+    const body = String(text || '');
+    const title = (body.match(/<title[^>]*>([^<]{1,120})<\/title>/i) || [])[1];
+    if (title) return title.replace(/\s+/g, ' ').trim();
+    return body.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+  }
 
   function parseGviz(text) {
+    if (rateLimitPage(text)) throw new RateLimitError(rateLimitMessage(0), 0, 'html');
     const start = text.indexOf('{');
     const end = text.lastIndexOf('}');
-    if (start < 0 || end < 0) throw new Error('Google Sheet se galat response aaya (JSON nahi mila). Sheet public hai?');
+    if (start < 0 || end < 0) {
+      if (/^\s*</.test(String(text || ''))) throw new Error('Google ne HTML page bheja ("' + htmlHint(text) + '") — JSON nahi mila. Sheet public hai?');
+      throw new Error('Google Sheet se galat response aaya (JSON nahi mila). Sheet public hai?');
+    }
     let json;
     try { json = JSON.parse(text.slice(start, end + 1)); } catch (e) { throw new Error('Response parse nahi hua: ' + e.message); }
     if (json.status === 'error') {
@@ -133,11 +175,28 @@ window.FF = window.FF || {};
         headers: { 'X-Requested-With': 'FF-Dashboard' }
       });
       const text = await res.text();
+      const retryAfterMs = (Number(res.headers.get('retry-after') || 0) || 0) * 1000;
+      const limited = res.status === 429 || res.headers.get('x-ff-rate-limited') === '1';
+      if (limited || (!res.ok && rateLimitPage(text))) {
+        // Apne server ka 429 apna saaf message bhejta hai (JSON error) — wahi use karo, warna
+        // generic rate-limit message. Google ka HTML kabhi message me nahi jaata.
+        let detail = '';
+        try { detail = JSON.parse(text).error || ''; } catch { /* HTML / plain text */ }
+        if (/^\s*</.test(String(text || ''))) detail = '';
+        markRateLimited(retryAfterMs || 30e3);
+        throw new RateLimitError(String(detail || rateLimitMessage(retryAfterMs || 30e3)).slice(0, 300), retryAfterMs, url.startsWith('http') ? 'direct' : 'proxy');
+      }
       if (!res.ok) {
         let detail = '';
         try { detail = JSON.parse(text).error || ''; } catch (e) { /* ignore */ }
         if (res.status === 401 && !url.startsWith('http')) { const e = new Error('Login required'); e.name = 'AuthError'; throw e; }
+        // 5xx bhi HTML ke saath aa sakta hai — kabhi raw page screen par nahi.
+        if (/^\s*</.test(String(text || ''))) detail = detail || htmlHint(text);
         throw new Error(`HTTP ${res.status}${detail ? ' – ' + detail : ''}`);
+      }
+      if (/^\s*<|<\/html>/i.test(String(text || ''))) {
+        if (rateLimitPage(text)) { markRateLimited(retryAfterMs || 30e3); throw new RateLimitError(rateLimitMessage(retryAfterMs || 30e3), retryAfterMs, url.startsWith('http') ? 'direct' : 'proxy'); }
+        throw new Error('Google ne HTML page bheja (' + htmlHint(text) + ') — JSON nahi mila.');
       }
       return { text, source: res.headers.get('x-ff-source') || (url.startsWith('http') ? 'direct' : 'proxy'), cached: res.headers.get('x-cache') === 'HIT' };
     } finally { clearTimeout(timer); }
@@ -161,7 +220,9 @@ window.FF = window.FF || {};
     const attempts = [];
     const proxyUrl = FF.config.proxyPath && FF.config.proxy !== false
       ? buildUrl(FF.config.proxyPath, sheetName, tq, gid, extra) : '';
-    const directUrl = FF.config.directFallback !== false
+    // Browser se Google direct call: sirf tab jab mapping flag allow kare aur rate limit na ho.
+    // (Yehi direct call 429 "Too Many Requests" HTML page laati thi — ab cooldown par band.)
+    const directUrl = directAllowed()
       ? buildUrl(directBase(sheetName), sheetName, tq, gid, range ? { range } : null) : '';
     // Large inventory exact-match lookups may be faster against Google directly. Mapping opts in
     // per request; all other dashboard requests retain the normal proxy/cache-first behavior.
@@ -172,9 +233,12 @@ window.FF = window.FF || {};
       if (proxyUrl) attempts.push(proxyUrl);
       if (directUrl) attempts.push(directUrl);
     }
+    if (!attempts.length && (proxyUrl || directUrl)) attempts.push(proxyUrl || directUrl);
+    if (!attempts.length) throw new Error('Sheet source configure nahi hai (proxy/direct dono band hain).');
 
     const promise = (async () => {
       let lastErr = null;
+      let limitRetried = false;
       // 🔁 Auto-retry (v3.32): network hiccup / Google 429-5xx / timeout par chup-chaap 3 try (backoff 0.7s, 1.8s).
       //    QueryError (galat query) aur login-expiry par retry nahi — wo dobara bhi fail hote.
       const delays = o.retries === 0 ? [] : [700, 1800];
@@ -201,7 +265,29 @@ window.FF = window.FF || {};
             if (err.name === 'AuthError') { if (FF.auth && FF.auth.onExpired) FF.auth.onExpired(); fatal = true; break; }
           }
         }
-        if (fatal || round >= delays.length) break;
+        if (fatal) break;
+        // ⏳ Rate limit par ek chhota sa intezaar kar ke proxy se ek aur koshish (jitter ke saath) —
+        //    parallel requests ek saath wapas na jaayein.
+        if (!limitRetried && lastErr && lastErr.name === 'RateLimitError') {
+          limitRetried = true;
+          // Retry-After ko respect karo; cap FF.config.gvizRateLimitRetryMs se (tests chhota rakh sakte hain).
+          const base = Math.max(600, Number(lastErr.retryAfterMs) || 1500);
+          const cap = Math.max(1, Number((FF.config && FF.config.gvizRateLimitRetryMs) || 6000));
+          const wait = Math.min(cap, base) * (0.8 + Math.random() * 0.4) + 250;
+          await new Promise((r) => setTimeout(r, wait));
+          const retryUrl = proxyUrl || attempts[attempts.length - 1];
+          if (retryUrl) {
+            try {
+              const { text, source } = await fetchText(retryUrl, o.timeoutMs);
+              const table = parseGviz(text);
+              table.source = source; table.sheet = sheetName;
+              lastLoadAt = Date.now(); lastSource = source;
+              try { window.dispatchEvent(new CustomEvent('ff:data-loaded', { detail: { sheet: sheetName, source, at: lastLoadAt, cached: false } })); } catch { /* optional */ }
+              return table;
+            } catch (err) { lastErr = err; }
+          }
+        }
+        if (round >= delays.length) break;
         await new Promise((r) => setTimeout(r, delays[round]));
       }
       throw lastErr || new Error('Fetch failed');
@@ -260,6 +346,6 @@ window.FF = window.FF || {};
   // Escape a literal for the gviz query language (double-quoted string).
   function lit(value) { return `"${String(value).replace(/["\\]/g, '')}"`; }
 
-  FF.data = { query, today, gvToday, clearCache, status, parseGviz, cellText, identifierText, isIdentifierColumn, cellNumber, cellDate, textRows, looksLikeEIR, lit, QueryError,
+  FF.data = { query, today, gvToday, clearCache, status, parseGviz, cellText, identifierText, isIdentifierColumn, cellNumber, cellDate, textRows, looksLikeEIR, lit, QueryError, RateLimitError, rateLimitPage, rateLimitStatus, markRateLimited,
     get lastLoadAt() { return lastLoadAt; }, get lastSource() { return lastSource; } };
 })(window.FF);

@@ -80,6 +80,11 @@ export class AppsScriptStore {
         if (response.status === 429 || response.status >= 500) throw Object.assign(new Error(`Apps Script HTTP ${response.status}`), { retry: true });
         let json;
         try { json = JSON.parse(text); } catch {
+          // 🌐 HTML page kabhi UI me nahi: rate-limit page ko saaf message banao (ek-do retry bhi).
+          const limited = /too many requests|rate.?limit|\b429\b/i.test(text);
+          if (limited) {
+            throw Object.assign(new Error('Google/Apps Script ne rate limit kiya (Too Many Requests) — thodi der baad dobara try karo. Sheet ka data safe hai.'), { retry: true });
+          }
           throw new Error(/<html/i.test(text)
             ? 'Apps Script returned an HTML page. Deploy it as Web app → Execute as: Me, Who has access: Anyone, and use the /exec URL.'
             : 'Apps Script returned an invalid response.');

@@ -47,8 +47,8 @@ test('FASTag Mapping template is exactly the requested four columns; lookup trie
   assert.match(page, /stockQuery\(tq, \{[\s\S]{0,140}fresh: true, timeoutMs: STOCK_LOOKUP_TIMEOUT_MS, retries: 0, directFirst: true/);
   assert.match(page, /const variants = \[make\(false, batch\), make\(true, batch\)\]/);
   assert.match(page, /queryRows\(tq\)\.then/);
-  assert.match(page, /queryField\('tagId', tagIds\)/);
-  assert.match(page, /queryField\('barcode', barcodes\)/);
+  assert.match(page, /queryField\('tagId', tagIds(?:, tick)?\)/);
+  assert.match(page, /queryField\('barcode', barcodes(?:, tick)?\)/);
   assert.match(page, /Range upload mein barcode series StockDataa se expand hogi/);
   assert.match(page, /TAG_ID, BARCODE aur TAG_CLASS auto-fill honge/);
   assert.match(page, /if \(!value \|\| !agentId\)/);
@@ -81,7 +81,7 @@ test('StockDataa column mapping uses TAG_ID, BARCODE and TAG_CLASS; separate ran
   assert.match(page, /saveCsvFile\('fastag-range-template\.csv', \['firstBarcode', 'lastBarcode', 'agentId'\]/);
   assert.match(page, /saveCsvFile\('fastag-mapping-api-rows-/);
   assert.match(page, /\['tagId', 'serialNo', 'vcType', 'agentId'\], rows/);
-  assert.match(page, /queryField\('barcode', barcodes\)[\s\S]*?queryField\('tagId', tagIds\)/);
+  assert.match(page, /queryField\('barcode', barcodes(?:, tick)?\)[\s\S]*?queryField\('tagId', tagIds(?:, tick)?\)/);
   assert.match(page, /Array\.from\(\{ length: Math\.min\(3, batches\.length\) \}/);
 });
 
