@@ -177,6 +177,18 @@ test('🛑 suggestion selection locks current instance until next typing', async
   assert.match(ms, /U\.destroyAllSuggestions\(sug\)/);
   assert.match(ms, /if \(sug && sug\.suspend\) sug\.suspend\(\)/);
 });
+test('🏷️ Master Search barcode status reports FF and GV mapping independently', async () => {
+  const ms = await read('masterSearch.js');
+  assert.match(ms, /function tagStatus\(t\)/);
+  assert.match(ms, /FF: Mapped/);
+  assert.match(ms, /GV: Mapped/);
+  assert.match(ms, /FF mapped · GV not mapped/);
+  assert.match(ms, /GV mapped · FF not mapped/);
+  assert.match(ms, /FF \+ GV mapped/);
+  assert.match(ms, /esc\(st\.detail \|\| ''\)/, 'both channel-specific statuses render under the summary status');
+  assert.doesNotMatch(ms, /GV only \(StockDataa me nahi\)/, 'misleading legacy one-sided message removed');
+});
+
 test('🎨 settings/theme — dark mode is opt-in and Tag Request order rows stay readable', async () => {
   const app = await read('app.js');
   assert.match(app, /ff_theme_explicit/);
