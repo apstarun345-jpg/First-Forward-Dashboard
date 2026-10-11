@@ -2171,11 +2171,11 @@ async function tagReqHistorySaves({ limit = 6, includeValues = false } = {}) {
   const all = sheetsStore.groupSnapshots(hist.entries || []);
   // Ek save (batch) me kai notify records ho sakte hain (node/notification ki writes 1.5s ke andar).
   // Sabse POORA record chuno — bahut baar sabse naya record thoda peecha reh jaata hai.
-  const snaps = all.slice(0, Math.max(1, Math.min(10, limit)))
+  const snaps = all.slice(0, Math.max(1, Math.min(20, limit)))
     .map((snap) => ({ snap, notifies: (snap.entries || []).filter((e) => e.kind === 'notify').slice(0, 4) }))
     .filter((x) => x.notifies.length);
   if (!snaps.length) return { saves: [], total: all.length, truncated: !!hist.truncated };
-  const rows = [...new Set(snaps.flatMap((x) => x.notifies.map((e) => e.row)))].slice(0, 24); // Code.gs max 40
+  const rows = [...new Set(snaps.flatMap((x) => x.notifies.map((e) => e.row)))].slice(0, 40); // Code.gs max 40
   const detailed = await sheetsStore.history({ rows, withData: true });
   const byRow = new Map((detailed.entries || []).map((e) => [e.row, e]));
   const live = workspaceStore().tagRequests || [];
