@@ -610,15 +610,15 @@ window.FF = window.FF || {};
     const visibleItems = items.slice(0, limit);
     host.innerHTML = `
       <div class="notify-center-toolbar">
-        <div class="notify-center-search"><span>🔎</span><input id="notify-center-search" class="input" placeholder="Search title, user, page, type…" value="${U.esc(state.filterSearch)}"></div>
+        <div class="notify-center-search"><span>🔎</span><input id="notify-center-search" class="input" type="search" aria-label="Search notifications" autocomplete="off" placeholder="Search title, user, page, type…" value="${U.esc(state.filterSearch)}"></div>
         <div class="notify-center-filters">
-          <select id="notify-center-priority" class="input">
+          <select id="notify-center-priority" class="input" aria-label="Filter notifications by priority">
             <option value="all" ${state.centerPriority === 'all' ? 'selected' : ''}>All priority · ${state.items.length}</option>
             <option value="critical" ${state.centerPriority === 'critical' ? 'selected' : ''}>🚨 Critical · ${counts.critical}</option>
             <option value="action" ${state.centerPriority === 'action' ? 'selected' : ''}>⚡ Action · ${counts.action}</option>
             <option value="info" ${state.centerPriority === 'info' ? 'selected' : ''}>ℹ️ Info · ${counts.info}</option>
           </select>
-          <select id="notify-center-date" class="input">
+          <select id="notify-center-date" class="input" aria-label="Filter notifications by date">
             <option value="all" ${state.centerDate === 'all' ? 'selected' : ''}>Any time</option>
             <option value="today" ${state.centerDate === 'today' ? 'selected' : ''}>Today</option>
             <option value="7d" ${state.centerDate === '7d' ? 'selected' : ''}>Last 7 days</option>
