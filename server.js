@@ -6440,24 +6440,15 @@ async function handleApi(req, res, url) {
         const list = (Array.isArray(stored.tagRequests) ? stored.tagRequests : []).filter(tagReqValid);
         save = { at: new Date().toISOString(), storage: true, workspace: stored, found: list.length, missing: tagReqMissing(workspaceStore().tagRequests || [], list).length };
         if (!save.missing) throw new HttpError(400, 'Storage record me bhi koi extra request nahi hai — “Purani saves dhoondho” se history check karo.');
-      } else if (at && sheetsStore && typeof sheetsStore.snapshotData === 'function') {
-        // Restore the exact selected snapshot directly from the history index. A second, idempotent
-        // restore must still return 200 after the first restore has added newer history rows.
-        let snap;
-        try { snap = await sheetsStore.snapshotData(at, ['notify']); }
-        catch (err) {
-          throw new HttpError(404, `Ye save sheet history me nahi mili ya padhi nahi ja saki: ${err.message}`);
-        }
-        if (snap.locked && snap.locked.notify) throw new HttpError(400, `Is save ko padha nahi ja saka: ${snap.locked.notify}`);
-        const savedNotify = snap.data && snap.data.notify;
-        if (!savedNotify) throw new HttpError(404, 'Selected save me Tag Request record nahi mila — history list dobara load karo.');
-        const workspace = tagReqWorkspaceOf(savedNotify);
-        const list = (Array.isArray(workspace.tagRequests) ? workspace.tagRequests : []).filter(tagReqValid);
-        save = { at: snap.at || at, workspace, found: list.length, missing: tagReqMissing(workspaceStore().tagRequests || [], list).length };
       } else {
+        // Keep the same snapshot-selection path for repeat restores. A selected history save
+        // is merge-only: after the first restore, the same request IDs produce added=0 and HTTP 200.
         const out = await tagReqHistorySaves({ limit: 20, includeValues: true });
-        save = out.saves.find((s) => s.missing > 0) || null;
-        if (!save) throw new HttpError(404, at ? 'Selected save recent list me nahi mili — recovery list dobara load karo.' : 'History me aisi koi save nahi mili jisme missing requests hon.');
+        const selected = at
+          ? (out.saves.find((x) => String(x.at) === at) || out.saves.find((x) => String(x.at).startsWith(at.slice(0, 19))))
+          : null;
+        save = selected || out.saves.find((x) => x.missing > 0) || null;
+        if (!save) throw new HttpError(404, at ? 'Ye save sheet history me nahi mili — list dobara load karo.' : 'History me aisi koi save nahi mili jisme missing requests hon.');
         if (save.unavailable) throw new HttpError(400, `Is save ko padha nahi ja saka: ${save.unavailable}`);
       }
       const ws = save.workspace || {};
