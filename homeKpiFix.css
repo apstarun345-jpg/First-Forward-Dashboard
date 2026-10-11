@@ -31,3 +31,19 @@
 .page-home .kpi.g11{background:linear-gradient(135deg,#3b82f6,#06b6d4)!important}
 .page-home .kpi.g12{background:linear-gradient(135deg,#22c55e,#84cc16)!important}
 .page-home .kpi{background-clip:border-box!important;-webkit-background-clip:border-box!important}
+
+/* Expected-in-month card: previous full-month class counts + forecast change, scoped to this card only. */
+.page-home .hm-expected-compare{display:flex;flex-direction:column;gap:7px;width:100%;font-variant-numeric:tabular-nums}
+.page-home .hm-expected-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding-bottom:5px;border-bottom:1px solid rgba(255,255,255,.23)}
+.page-home .hm-expected-current{display:flex;flex-direction:column;align-items:flex-start;min-width:0}
+.page-home .hm-expected-current>b{font-size:19px;line-height:1.05}
+.page-home .hm-expected-current>strong{font-size:24px;line-height:1.1;font-weight:900}
+.page-home .hm-expected-change{display:inline-block;font-size:11px;line-height:1.25;font-weight:800;white-space:nowrap;margin-top:2px}
+.page-home .hm-expected-change.pos{color:#dcfce7!important}
+.page-home .hm-expected-change.neg{color:#ffe4e6!important}
+.page-home .hm-expected-change.flat{color:rgba(255,255,255,.9)!important}
+.page-home .hm-expected-previous{display:flex;flex-direction:column;align-items:flex-end;text-align:right;flex:none}
+.page-home .hm-expected-previous small{font-size:10px;line-height:1.2;opacity:.9}
+.page-home .hm-expected-previous b{font-size:17px;line-height:1.2;font-weight:850}
+.page-home .hm-expected-total{display:flex;align-items:center;justify-content:space-between;gap:8px;border-top:1px solid rgba(255,255,255,.55);padding-top:5px;margin-top:1px;font-size:21px;line-height:1.1;font-weight:950}
+@media(max-width:600px){.page-home .hm-expected-row{gap:5px}.page-home .hm-expected-current>strong{font-size:21px}.page-home .hm-expected-current>b{font-size:17px}.page-home .hm-expected-change{font-size:10px}.page-home .hm-expected-previous b{font-size:15px}.page-home .hm-expected-total{font-size:19px}}
