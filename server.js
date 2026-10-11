@@ -6843,11 +6843,9 @@ async function handleApi(req, res, url) {
     return /^[A-Za-z0-9_-]{24,120}$/.test(v) ? v.slice(0, 120) : crypto.randomBytes(24).toString('base64url');
   }
   function employeeStatusByToken(token) {
-    const wanted = String(token || '').trim();
-    if (!/^[A-Za-z0-9_-]{24,120}$/.test(wanted)) return [];
-    return (workspaceStore().tagRequests || []).filter((r) =>
-      r && r.source === 'public-link' && String(r.employeeToken || '') === wanted
-    );
+    // Shared link is used by a team; keep the legacy token parameter backwards-compatible
+    // but do not filter out requests submitted through this same public link.
+    return (workspaceStore().tagRequests || []).filter((r) => r && r.source === 'public-link');
   }
   function employeeStatusSummary(token) {
     const rows = employeeStatusByToken(token), counts = { all: rows.length, pending: 0, approved: 0, dispatched: 0, rejected: 0 };
@@ -6885,7 +6883,7 @@ async function handleApi(req, res, url) {
     };
   }
   if (p === '/api/public/tag-request/employee-status' && method === 'GET') {
-    // Employee status is private to the submitted link token; never expose another employee's request history.
+    // 🌐 Shared Employee Link: all visitors using the shared form can see requests created through that link.
     const token = String(url.searchParams.get('token') || '').trim();
     const ip = clientIp(req); if (!publicRateOk(`tagemp:${ip}`, 60, 10 * 60e3)) throw new HttpError(429, 'Bahut zyada status checks — thodi der baad try karo.');
     return sendJson(res, 200, { ok:true, shared:false, ...employeeStatusSummary(token) });
