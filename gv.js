@@ -219,7 +219,9 @@ window.FF = window.FF || {};
     stockAgentClass: { label: 'Tag Assignment · agent × class' },
     report: { label: 'GV REPORT · performance' }
   };
-  const state = { data: {}, errors: {}, loading: false, loadedAt: null, progress: { done: 0, total: 0 }, promise: null, labels: {}, mapping: {} };
+  const state = { data: {}, errors: {}, loading: false, loadedAt: null, progress: { done: 0, total: 0 }, promise: null, labels: {}, mapping: {}, listeners: new Set() };
+  function emit(event, detail) { state.listeners.forEach((fn) => { try { fn(event, detail); } catch { /* progress observers must not break data loads */ } }); }
+  function on(fn) { state.listeners.add(fn); return () => state.listeners.delete(fn); }
 
   /** Which datasets this user actually needs (permission aware). */
   function wanted() {
@@ -255,7 +257,7 @@ window.FF = window.FF || {};
       if (version !== generation) return;
       jobs.delete(key);
       state.progress.done++;
-
+      emit('progress', { key, ...state.progress });
     });
     jobs.set(key, p);
     return p;
@@ -277,10 +279,12 @@ window.FF = window.FF || {};
     const keys = [...PRIORITY.filter((k) => all.includes(k)), ...all.filter((k) => !PRIORITY.includes(k))];
     const version = generation;
     state.loading = true; state.errors = {}; state.progress = { done: 0, total: keys.length };
+    emit('start', { ...state.progress });
 
     state.promise = runQueue(keys, fresh).then(() => {
       if (version === generation) {
         state.loading = false; state.loadedAt = Date.now();
+        emit('done', { ...state.progress });
         scheduleRetry(version, 0);
       }
       return state.data;
@@ -1319,7 +1323,7 @@ window.FF = window.FF || {};
   }
 
   const GV = {
-    DATASETS, preload, refresh, need, get, error, reset, enabled, wanted, retryNow,
+    DATASETS, preload, refresh, need, get, error, reset, enabled, wanted, retryNow, on,
     normClass, classGroup, clsNum,
     rows, masterRows: rows, issuanceRows, tlIssuanceRows, masterTlIdentity, masterTlIds, agentIssuanceRows, eirDailyRows, liveDailyRows, gvToday, masterTodayRows, todayKey, months, latestDate, summary, dailySeries, weekly, byDim, agentRollup, tlRollup, directRollup, people,
     REPORT_COLS, REPORT_COLS_LABELS, reportMonthBins, reportSheetBins,

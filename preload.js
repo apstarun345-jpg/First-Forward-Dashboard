@@ -4,7 +4,9 @@ window.FF = window.FF || {};
 (function (FF) {
   'use strict';
   let generation = 0;
-  let progressTimer = null;
+  let activeProgressUpdater = null;
+  let stopStoreProgress = null;
+  let stopGvProgress = null;
   const state = { running: false, done: false, progress: { done: 0, total: 0, loaded: 0, totalSources: 0 }, errors: [], promise: null };
 
   // Show real per-dataset progress instead of remaining at 0/2 until each whole
@@ -13,9 +15,13 @@ window.FF = window.FF || {};
     const ff = FF.store && FF.store.state ? FF.store.state.progress || {} : {};
     const gvEnabled = !!(FF.gv && FF.gv.enabled && FF.gv.enabled());
     const gv = gvEnabled && FF.gv.state ? FF.gv.state.progress || {} : {};
+    const datasetDone = Math.max(0, Number(ff.done) || 0) + Math.max(0, Number(gv.done) || 0);
+    const datasetTotal = Math.max(0, Number(ff.total) || 0) + Math.max(0, Number(gv.total) || 0);
+    // Test doubles and older data-store adapters may not expose per-dataset counters.
+    // In that case, fall back to counting the actual preload sources (FF / GV).
     state.progress = {
-      done: Math.max(0, Number(ff.done) || 0) + Math.max(0, Number(gv.done) || 0),
-      total: Math.max(0, Number(ff.total) || 0) + Math.max(0, Number(gv.total) || 0),
+      done: datasetTotal ? datasetDone : completedSources,
+      total: datasetTotal || totalSources,
       loaded: completedSources,
       totalSources
     };
@@ -33,8 +39,10 @@ window.FF = window.FF || {};
       syncProgress(completedSources, tasks.length);
       if (FF.app && FF.app.updateStatus) FF.app.updateStatus();
     };
-    if (progressTimer) clearInterval(progressTimer);
-    progressTimer = setInterval(update, 200);
+    activeProgressUpdater = update;
+    const notifyProgress = () => { if (activeProgressUpdater) activeProgressUpdater(); };
+    if (!stopStoreProgress && FF.store && typeof FF.store.on === 'function') stopStoreProgress = FF.store.on(notifyProgress);
+    if (!stopGvProgress && FF.gv && typeof FF.gv.on === 'function') stopGvProgress = FF.gv.on(notifyProgress);
     const run = async (task) => {
       try { await task(); }
       catch (err) { if (version === generation) state.errors.push(err); }
@@ -51,10 +59,10 @@ window.FF = window.FF || {};
       return state;
     }).finally(() => {
       if (version === generation) {
-        state.running = false;
-        if (progressTimer) clearInterval(progressTimer);
-        progressTimer = null;
         update();
+        state.running = false;
+        activeProgressUpdater = null;
+        if (FF.app && FF.app.updateStatus) FF.app.updateStatus();
       }
     });
     return state.promise;
@@ -74,6 +82,6 @@ window.FF = window.FF || {};
     if (FF.pages.sheet && FF.pages.sheet.reset) FF.pages.sheet.reset();
     return preloadAll(fresh);
   }
-  function reset() { generation++; state.running = false; state.done = false; state.promise = null; state.errors = []; if (progressTimer) clearInterval(progressTimer); progressTimer = null; }
+  function reset() { generation++; state.running = false; state.done = false; state.promise = null; state.errors = []; activeProgressUpdater = null; }
   FF.preloader = { preloadAll, fastSync, lightSync, reset, get state() { return state; }, get running() { return state.running; }, get done() { return state.done; } };
 })(window.FF);
