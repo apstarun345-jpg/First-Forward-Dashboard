@@ -4,28 +4,58 @@ window.FF = window.FF || {};
 (function (FF) {
   'use strict';
   let generation = 0;
-  const state = { running: false, done: false, progress: { total: 0, loaded: 0 }, errors: [], promise: null };
+  let progressTimer = null;
+  const state = { running: false, done: false, progress: { done: 0, total: 0, loaded: 0, totalSources: 0 }, errors: [], promise: null };
 
+  // Show real per-dataset progress instead of remaining at 0/2 until each whole
+  // channel's aggregate preload has finished. The sheet data itself remains lazy/query-based.
+  function syncProgress(completedSources, totalSources) {
+    const ff = FF.store && FF.store.state ? FF.store.state.progress || {} : {};
+    const gvEnabled = !!(FF.gv && FF.gv.enabled && FF.gv.enabled());
+    const gv = gvEnabled && FF.gv.state ? FF.gv.state.progress || {} : {};
+    state.progress = {
+      done: Math.max(0, Number(ff.done) || 0) + Math.max(0, Number(gv.done) || 0),
+      total: Math.max(0, Number(ff.total) || 0) + Math.max(0, Number(gv.total) || 0),
+      loaded: completedSources,
+      totalSources
+    };
+  }
   function preloadAll(fresh = false) {
     if (state.running) return state.promise;
     const version = generation;
-    state.running = true; state.done = false; state.errors = [];
     const tasks = [() => FF.store.preload(fresh)];
     if (FF.gv && FF.gv.enabled()) tasks.push(() => FF.gv.preload(fresh));
-    state.progress = { total: tasks.length, loaded: 0 };
+    let completedSources = 0;
+    state.running = true; state.done = false; state.errors = [];
+    syncProgress(completedSources, tasks.length);
+    const update = () => {
+      if (version !== generation) return;
+      syncProgress(completedSources, tasks.length);
+      if (FF.app && FF.app.updateStatus) FF.app.updateStatus();
+    };
+    if (progressTimer) clearInterval(progressTimer);
+    progressTimer = setInterval(update, 200);
     const run = async (task) => {
       try { await task(); }
       catch (err) { if (version === generation) state.errors.push(err); }
-      finally { if (version === generation) { state.progress.loaded++; if (FF.app && FF.app.updateStatus) FF.app.updateStatus(); } }
+      finally {
+        if (version === generation) { completedSources++; update(); }
+      }
     };
     state.promise = Promise.all(tasks.map(run)).then(() => {
       if (version !== generation) return state;
       state.errors.push(...Object.values(FF.store.state.errors));
       if (FF.gv && FF.gv.enabled()) state.errors.push(...Object.keys(FF.gv.DATASETS).map((key) => FF.gv.error(key)).filter(Boolean));
       state.done = state.errors.length === 0;
+      update();
       return state;
     }).finally(() => {
-      if (version === generation) { state.running = false; if (FF.app && FF.app.updateStatus) FF.app.updateStatus(); }
+      if (version === generation) {
+        state.running = false;
+        if (progressTimer) clearInterval(progressTimer);
+        progressTimer = null;
+        update();
+      }
     });
     return state.promise;
   }
@@ -44,6 +74,6 @@ window.FF = window.FF || {};
     if (FF.pages.sheet && FF.pages.sheet.reset) FF.pages.sheet.reset();
     return preloadAll(fresh);
   }
-  function reset() { generation++; state.running = false; state.done = false; state.promise = null; state.errors = []; }
+  function reset() { generation++; state.running = false; state.done = false; state.promise = null; state.errors = []; if (progressTimer) clearInterval(progressTimer); progressTimer = null; }
   FF.preloader = { preloadAll, fastSync, lightSync, reset, get state() { return state; }, get running() { return state.running; }, get done() { return state.done; } };
 })(window.FF);
