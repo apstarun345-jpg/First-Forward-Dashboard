@@ -427,36 +427,28 @@ window.FF = window.FF || {};
     if (isDigitKey(from) && isDigitKey(to) && !(from.length > 1 && from[0] === '0') && !(to.length > 1 && to[0] === '0')) {
       variants.push(fastSelect + 'D >= ' + literal(from, true) + ' and D <= ' + literal(to, true) + ' limit ' + (MAX_RESULTS + 1));
     }
-    // Run text + numeric interval predicates at the same time. StockDataa columns can
-    // contain digit-only text as well as numeric cells; don't let a slow/empty first variant
-    // hold up the other variant. Resolve on the first usable, client-validated result.
-    const fastRows = await new Promise((resolve) => {
-      let settled = 0, done = false;
-      const matches = (rows) => (rows || []).filter((row) =>
-        row.barcode && compareBarcode(row.barcode, from) >= 0 && compareBarcode(row.barcode, to) <= 0
-      );
-      const finish = (rows) => { if (!done) { done = true; resolve(rows); } };
-      variants.forEach((tq) => {
-        D.query('StockDataa', tq, {
+    // Run text + numeric interval predicates concurrently. Mixed-type barcode cells can
+    // appear in either result, so merge BOTH completed responses before returning; this avoids
+    // a fast partial response silently omitting rows from the other storage type.
+    const fastResults = await Promise.all(variants.map(async (tq) => {
+      try {
+        const table = await D.query('StockDataa', tq, {
           timeoutMs: 4500, directTimeoutMs: 1800, retries: 0, directFirst: true
-        }).then((table) => {
-          if (done) return;
-          const valid = matches(stockRows(table, schema));
-          if (valid.length) { finish(valid); return; }
-          settled++;
-          if (settled === variants.length) finish([]);
-        }).catch(() => {
-          if (done) return;
-          settled++;
-          if (settled === variants.length) finish([]);
         });
-      });
-    });
-    if (fastRows.length) {
-      const fastDedupe = new Map();
-      for (const row of fastRows) fastDedupe.set(idKey(row.tagId) + '|' + idKey(row.barcode), row);
-      return rememberRange([...fastDedupe.values()]);
+        return stockRows(table, schema);
+      } catch {
+        // Preserve the bounded paged fallback if both optimized predicates cannot find rows.
+        return [];
+      }
+    }));
+    const fastDedupe = new Map();
+    for (const rows of fastResults) {
+      for (const row of rows) {
+        if (!row.barcode || compareBarcode(row.barcode, from) < 0 || compareBarcode(row.barcode, to) > 0) continue;
+        fastDedupe.set(idKey(row.tagId) + '|' + idKey(row.barcode), row);
+      }
     }
+    if (fastDedupe.size) return rememberRange([...fastDedupe.values()]);
     // If the bounded range query returns nothing, fall back to paged local comparison for
     // mixed-type/text-stored IDs. Exact lookup/cached session index should handle most singles.
     // Multiple range pages are fetched in parallel, stopping as soon as pages are empty.
