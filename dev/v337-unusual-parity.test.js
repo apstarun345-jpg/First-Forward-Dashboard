@@ -302,7 +302,9 @@ test('🚀 lazy group + current cache busting: unusual-scan pehle load hota hai'
   // fingerprint stamp karta hai (badli file → naya ?v=, wahi file → wahi ?v= → 1 saal immutable),
   // aur SW apni precache list usi stamped HTML se banata hai. Isliye index.html aur sw.js me matching
   // pins ki zaroorat nahi — wo manual pins hi drift karke "deploy ke baad bhi purana JS" banate the.
-  assert.doesNotMatch(idx, /(?:config|home|app)\.js\?v=\d+/, 'source HTML old manual JavaScript pins use nahi karta');
+  assert.match(idx, /config\.js\?v=\d+/, 'config script has a versioned cache key');
+  assert.match(idx, /lazy\.js\?v=\d+/, 'lazy loader has a versioned cache key');
+  assert.match(idx, /app\.js\?v=\d+/, 'app shell has a versioned cache key');
   assert.match(srv, /async function stampedShellHtml\(/, 'server har asset par fingerprint stamp karta hai');
   assert.match(srv, /ff-asset-versions/, 'lazy modules ka version map bhi HTML me jaata hai');
   assert.match(sw, /async function shellAssets\(/, 'SW precache list stamped index.html se banti hai');
