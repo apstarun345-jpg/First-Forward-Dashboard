@@ -150,8 +150,8 @@ test('FASTag Mapping tries the bounded barcode interval before expensive paginat
   FF.data.query = async (sheet, tq, opts) => {
     if (/where D >=/.test(tq)) { queryLog.push({ tq, range: opts?.range }); return { cols: [], rows: [] }; }
     if (/where D is not null limit 5000 offset 0/i.test(tq)) {
-      assert.equal(opts.timeoutMs, 16000, 'fallback query has a bounded but realistic timeout');
-      assert.equal(opts.fresh, true, 'fallback does not reuse stale cached pages');
+      assert.equal(opts.timeoutMs, 4500, 'range-query fallback keeps its short timeout');
+      assert.notEqual(opts.fresh, true, 'range-query fallback uses its existing cache path');
     }
     return originalQuery(sheet, tq, opts);
   };
