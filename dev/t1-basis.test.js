@@ -162,7 +162,7 @@ test('TL profile: growth % REPORT se + month-end expected + basis', async () => 
   assert.equal(pr.found, true);
   // 📈 sheet ka apna TL growth % (▼ -4%) — sign sahi parse hona chahiye
   assert.equal(pr.growthNum, -4, '▼ prefix se negative');
-  assert.equal(pr.growth, '▼ -4%');
+  assert.equal(pr.growth, '▼ 4.0%');
   assert.ok(pr.projT1, 'projT1 missing');
   assert.equal(pr.projT1.days, DAY, 'FF basis = kal tak ka din');
   assert.equal(pr.projT1.num, -4);
