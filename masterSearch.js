@@ -668,12 +668,28 @@ FF.pages = FF.pages || {};
 
   function tagStatus(t) {
     const f = t.ff[0], g = t.gv[0];
-    const isGhostFf = /APNA ?PAY/i.test(f ? f.agentName : '');
-    const isGhostGv = !g || !clean(g.agentName) || /NOT ?ASSIGN|UNASSIGN|^-$/i.test(clean(g.agentName));
-    if (f && g) return normName(f.agentName) === normName(g.agentName) ? { t: 'Matched', tone: 'green' }
-      : isGhostFf || isGhostGv ? { t: 'Normal flow (ghost holder)', tone: 'blue' } : { t: 'Owner mismatch', tone: 'amber' };
-    if (g) return { t: FF.gv && FF.gv.enabled && FF.gv.enabled() ? 'GV only (StockDataa me nahi)' : 'GV only', tone: 'red' };
-    return { t: 'FF only', tone: 'amber' };
+    const ffMapped = !!f;
+    const gvMapped = !!g;
+    const statusParts = [];
+    statusParts.push(ffMapped
+      ? `FF: Mapped${f.agentName ? ` (${f.agentName})` : ''}`
+      : 'FF: Not mapped');
+    statusParts.push(gvMapped
+      ? `GV: Mapped${g.agentName ? ` (${g.agentName})` : ''}`
+      : 'GV: Not mapped');
+    if (ffMapped && gvMapped) {
+      const sameOwner = normName(f.agentName) === normName(g.agentName);
+      const isGhostFf = /APNA ?PAY/i.test(f.agentName || '');
+      const isGhostGv = !clean(g.agentName) || /NOT ?ASSIGN|UNASSIGN|^-$/i.test(clean(g.agentName));
+      return {
+        t: sameOwner ? 'FF + GV mapped' : (isGhostFf || isGhostGv ? 'FF + GV mapped · ghost holder' : 'FF + GV mapped · owner mismatch'),
+        tone: sameOwner ? 'green' : (isGhostFf || isGhostGv ? 'blue' : 'amber'),
+        detail: statusParts.join(' · ')
+      };
+    }
+    if (gvMapped) return { t: 'GV mapped · FF not mapped', tone: 'red', detail: statusParts.join(' · ') };
+    if (ffMapped) return { t: 'FF mapped · GV not mapped', tone: 'amber', detail: statusParts.join(' · ') };
+    return { t: 'Not mapped in FF/GV', tone: 'red', detail: statusParts.join(' · ') };
   }
 
   /** Kundli card ke andar quick stats — mobile · TL · stock · TL stock · priority · suggested (data load hone par). */
@@ -866,7 +882,7 @@ FF.pages = FF.pages || {};
             <td>${esc(f.agentName || '—')}${f.agentId ? `<small>${esc(f.agentId)}</small>` : ''}</td><td>${esc(tlText(f.tlName, 'ff') || '—')}</td>
             <td>${esc(g.agentName || '—')}${g.agentId ? `<small>${esc(g.agentId)}</small>` : ''}</td><td>${esc(tlText(g.tlName, 'gv') || '—')}</td>
             <td>${esc(g.gvName || '—')}${g.gvId ? `<small>${esc(g.gvId)}</small>` : ''}</td><td>${esc(f.cls || g.cls || '—')}</td>
-            <td><span class="badge ${st.tone}">${esc(st.t)}</span></td><td>${esc(f.allocated || g.allocated || '—')}</td></tr>`;
+            <td><span class="badge ${st.tone}">${esc(st.t)}</span><small class="dim">${esc(st.detail || '')}</small></td><td>${esc(f.allocated || g.allocated || '—')}</td></tr>`;
       }).join('')}
         </tbody></table></div>${res.tags.length > 60 ? `<p class="dim small">Pehle 60 rows dikhe — CSV me poori list.</p>` : ''}</section>`);
     }
