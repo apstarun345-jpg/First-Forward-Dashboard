@@ -43,6 +43,7 @@ globalThis.document = {
   body: { classList: { add() {}, remove() {}, toggle() {} } },
   querySelector: () => null,
   querySelectorAll: () => [],
+  getElementById: () => null,
   addEventListener: () => {},
   removeEventListener: () => {}
 };
