@@ -269,6 +269,37 @@ window.FF = window.FF || {};
       }
     });
     await Promise.all(workers);
+
+    // Exact gviz equality can return zero rows for BARCODE values stored with mixed
+    // numeric/text types or display formatting. When that happens, scan the BARCODE
+    // column itself in bounded pages and compare normalized raw/display values locally.
+    // This fallback is barcode-only; Tag ID keeps its exact column lookup.
+    if (fieldName === 'barcode') {
+      const stillMissing = unique.filter((value) => ![...found.values()].some((row) => idKey(row.barcode) === idKey(value)));
+      if (stillMissing.length) {
+        const PAGE_SIZE = 5000, HARD_CAP = 250000;
+        let offset = 0, finished = false;
+        while (offset < HARD_CAP && !finished && stillMissing.some((value) => ![...found.values()].some((row) => idKey(row.barcode) === idKey(value)))) {
+          const tq = 'select A,B,C,D,E,F,G,H,I,J,K where ' + field + ' is not null limit ' + PAGE_SIZE + ' offset ' + offset;
+          let table;
+          try {
+            table = await D.query('StockDataa', tq, { timeoutMs: 55000, directTimeoutMs: 12000, retries: 0 });
+          } catch (err) {
+            throw new Error('StockDataa BARCODE column scan failed near row ' + (offset + 1) + ': ' + String(err && (err.message || err) || 'Google Sheets query error'));
+          }
+          const pageRows = table.rows || [];
+          for (const row of stockRows(table, schema)) {
+            if (!stillMissing.some((value) => idKey(value) === idKey(row.barcode))) continue;
+            found.set(idKey(row.tagId) + '|' + idKey(row.barcode), row);
+          }
+          offset += PAGE_SIZE;
+          if (pageRows.length < PAGE_SIZE) finished = true;
+        }
+        if (offset >= HARD_CAP && stillMissing.some((value) => ![...found.values()].some((row) => idKey(row.barcode) === idKey(value)))) {
+          throw new Error('StockDataa BARCODE column mein 250,000 rows scan ki hain, lekin exact match nahi mila. Barcode value / sheet data verify karein.');
+        }
+      }
+    }
     return [...found.values()];
   }
   function isLookupTimeout(err) {
