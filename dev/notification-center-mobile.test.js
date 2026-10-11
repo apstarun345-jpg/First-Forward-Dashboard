@@ -22,6 +22,7 @@ test('mobile navigation exposes active-page semantics and accessible action labe
   assert.match(app, /aria-current="page"/);
   assert.match(app, /aria-haspopup="dialog" title="Open notification inbox"/);
   assert.match(app, /title="Open global search"/);
+  assert.match(app, /x\.id === 'more' && !\['home', 'tagIssued', 'performance'\]\.includes\(current\.page\)/, 'More stays highlighted while a secondary page is open');
 });
 
 test('notification center and mobile navigation remain touch-friendly in the PWA shell', () => {
