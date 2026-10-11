@@ -168,9 +168,9 @@ test('📥 request row — ek hi row me sab (koi Kholo nahi): stock 🚗/🚚, i
   for (const s of ['data-tr-sel="tagreq_aaa111::agent"', 'Ramesh Yadav', 'Jaipur office', 'Rahul Sharma', '#1001', 'TL TL One', '☏ 9876500001', 'Gandhi Nagar', '📮 302015', 'Item Name']) assert.ok(html.includes(s), `row me "${s}"`);
   for (const m of ['stock', 'core', 'comm', 'last', 'cur', 'rate', 'exp', 'growth', 'suggest']) assert.ok(html.includes(`data-tr-m="${m}"`), `metric cell ${m}`);
   assert.match(html, /data-tr-m="stock"><i class="tr-src snap"[^>]*><\/i><b[^>]*>17<\/b>/, 'stock total (snapshot)');
-  assert.match(html, /data-tr-m="core"><b>14<\/b>/);
-  assert.match(html, /data-tr-m="comm"><b>3<\/b>/);
-  assert.match(html, /data-tr-m="exp"><b>81<\/b>/);
+  assert.match(html, /data-tr-m="core"><b[^>]*>14<\/b>/);
+  assert.match(html, /data-tr-m="comm"><b[^>]*>3<\/b>/);
+  assert.match(html, /data-tr-m="exp"><b[^>]*>81<\/b>/);
   assert.match(html, /▲ \+17\.4%/);
   const suggestions = TR._test.metricNumbers(rahul.metrics);
   const suggestionCell = html.match(/<td class="num tr-m tr-c-suggest"[\s\S]*?<\/td>/);
