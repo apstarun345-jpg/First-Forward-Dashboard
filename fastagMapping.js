@@ -384,7 +384,8 @@ window.FF = window.FF || {};
     const matched = new Map();
     let offset = 0, finished = false;
     while (offset < HARD_CAP && !finished) {
-      const offsets = [offset, offset + PAGE_SIZE].filter((x) => x < HARD_CAP);
+      // Four concurrent pages reduce range lookup round-trips for large StockDataa tabs.
+      const offsets = Array.from({ length: 4 }, (_, i) => offset + PAGE_SIZE * i).filter((x) => x < HARD_CAP);
       let pages;
       try {
         pages = await Promise.all(offsets.map((start) =>
