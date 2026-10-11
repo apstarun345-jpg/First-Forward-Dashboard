@@ -318,33 +318,37 @@ window.FF = window.FF || {};
         }
         return { count: pageRows.length, nextOffset: start + pageRows.length };
       };
+      // Probe the first page once so capped/short responses can still use exact offsets.
+      // After that, fetch four pages per round in parallel instead of serially waiting per 5k rows.
+      const firstTable = await fetchPage(offset);
+      const first = processPage(firstTable, offset);
+      if (!first.count) {
+        finished = true;
+      } else {
+        offset = first.count < PAGE_SIZE ? first.nextOffset : offset + PAGE_SIZE;
+      }
       while (offset < HARD_CAP && !finished && unresolved().length) {
-        const firstTable = await fetchPage(offset);
-        const first = processPage(firstTable, offset);
-        if (!first.count) { finished = true; break; }
-
-        // A genuinely short page may indicate a capped response. Keep sequential,
-        // actual-count paging for that case; full pages are safe to prefetch in parallel.
-        if (first.count < PAGE_SIZE) {
-          offset = first.nextOffset;
-          continue;
-        }
-
-        const starts = Array.from({ length: PARALLEL_PAGES }, (_, i) => offset + PAGE_SIZE * (i + 1))
+        const starts = Array.from({ length: PARALLEL_PAGES }, (_, i) => offset + PAGE_SIZE * i)
           .filter((start) => start < HARD_CAP);
-        if (!starts.length) { offset += PAGE_SIZE; continue; }
+        if (!starts.length) break;
         const pages = await Promise.all(starts.map((start) => fetchPage(start)));
-        let advanceTo = offset + PAGE_SIZE;
+        let advanceTo = offset;
         for (let i = 0; i < pages.length; i++) {
           const start = starts[i], stateForPage = processPage(pages[i], start);
-          if (!stateForPage.count) { finished = true; break; }
+          if (!stateForPage.count) {
+            finished = true;
+            break;
+          }
           advanceTo = start + PAGE_SIZE;
+          if (!unresolved().length) break;
           if (stateForPage.count < PAGE_SIZE) {
-            // Short page: resume from the actual count rather than skip possible rows.
+            // Resume after a short response by its actual row count to avoid skipped records.
             advanceTo = stateForPage.nextOffset;
             break;
           }
-          if (!unresolved().length) break;
+        }
+        if (advanceTo <= offset && !finished && unresolved().length) {
+          throw new Error('StockDataa barcode scan ka offset aage nahi badha; lookup ko rok diya gaya.');
         }
         offset = advanceTo;
       }
