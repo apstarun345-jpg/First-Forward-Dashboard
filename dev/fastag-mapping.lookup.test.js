@@ -305,7 +305,7 @@ test('FASTag lookup bypasses stale empty-query cache and allows enough proxy res
 test('Quick Map preserves the actual StockDataa error instead of replacing it with a generic warning', async () => {
   const { root, selectors, FF } = makePage();
   FF.data.query = async (sheet, tq) => {
-    if (/where\\s+D\\s*=/.test(tq)) throw new Error('upstream timeout');
+    if (tq.includes('where D =')) throw new Error('upstream timeout');
     return { cols: [], rows: [] };
   };
   selectors.get('#fm-kind').value = 'barcode';
