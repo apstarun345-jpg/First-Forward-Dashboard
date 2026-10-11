@@ -204,9 +204,10 @@ test('FASTag Mapping keeps typed range inputs usable when Lookup is clicked dire
 test('FASTag Mapping restores the lookup queue after a failed query so retry works without re-entering inputs', async () => {
   const { root, selectors, FF, queryLog } = makePage();
   const originalQuery = FF.data.query;
-  let failNext = true;
+  let failuresRemaining = 2;
   FF.data.query = async (sheet, tq, opts) => {
-    if (failNext) { failNext = false; const err = new Error('upstream timeout'); err.name = 'Error'; throw err; }
+    // Numeric and quoted equality are attempted in parallel; fail both first-attempt calls.
+    if (failuresRemaining > 0) { failuresRemaining--; const err = new Error('upstream timeout'); err.name = 'Error'; throw err; }
     return originalQuery(sheet, tq, opts);
   };
   selectors.get('#fm-kind').value = 'barcode';
