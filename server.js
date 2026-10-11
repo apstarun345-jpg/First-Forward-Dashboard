@@ -6886,7 +6886,7 @@ async function handleApi(req, res, url) {
     // 🌐 Shared Employee Link: all visitors using the shared form can see requests created through that link.
     const token = String(url.searchParams.get('token') || '').trim();
     const ip = clientIp(req); if (!publicRateOk(`tagemp:${ip}`, 60, 10 * 60e3)) throw new HttpError(429, 'Bahut zyada status checks — thodi der baad try karo.');
-    return sendJson(res, 200, { ok:true, shared:false, ...employeeStatusSummary(token) });
+    return sendJson(res, 200, { ok:true, shared:true, ...employeeStatusSummary(token) });
   }
   // 📇 Agent contact lookup — central Address tab, exact-agent match only.
   if (p === '/api/tag-request/contact' && method === 'GET') {
