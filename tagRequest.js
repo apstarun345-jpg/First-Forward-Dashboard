@@ -2023,7 +2023,7 @@ body.colorful .from-hdr { color: #166534; }
   /** 📝 Form tab par bhi "👤 Meri requests" — employee link kholte hi wahi page par (Status tab kholna nahi padta).
    *  Collapsed, kyunki form upar hi rehna chahiye; counts summary me dikhte hain. */
   function employeeHistoryPanelHtml() {
-    if (!isPublic()) return '';
+    if (!isPublic() || !state.employeeToken) return '';
     const summary = state.employeeSummary;
     return `<section class="card tr-emp-panel" id="tr-emp-history-panel"><details class="tr-emp-details"${state.employeeHistoryOpen ? ' open' : ''}>
         <summary><span class="tr-emp-sum"><b>👤 Meri requests</b>
