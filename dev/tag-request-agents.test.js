@@ -126,7 +126,7 @@ test('v3.30 per-agent tag requests — split, validation, mobile status, duplica
     assert.ok(!JSON.stringify(employeeStatus.json).includes('Gandhi Nagar'), 'employee summary me address expose nahi hota');
     assert.ok(!JSON.stringify(employeeStatus.json).includes('10.1.0.2'), 'employee summary me submitter IP expose nahi hota');
     const otherEmployeeStatus = await jsonCall(server.base, `/api/public/tag-request/employee-status?token=${'x'.repeat(32)}`);
-    assert.equal(otherEmployeeStatus.json.totalRequests, 0, 'doosre employee ka token alag history deta hai');
+    assert.equal(otherEmployeeStatus.json.totalRequests, 2, 'shared employee link shows requests regardless of browser token');
 
     // 📇 Request submit hone ke turant baad purana mobile/address public lookup se suggest ho.
     const savedContact = await jsonCall(server.base, '/api/public/tag-request/contact?agentId=1001&agentName=Rahul%20Sharma&channel=ff');
