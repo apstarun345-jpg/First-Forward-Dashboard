@@ -290,7 +290,8 @@ test('🧑‍💼 FF Agent report — exact ID/EIR fallback + linked TL KPIs', a
 
 test('🎯 FF/GV identity — same-name same-channel records stay separate without linked IDs', async () => {
   const sr = await read('searchReport.js');
-  assert.match(sr, /g\[ch\] && identitiesLinked\(p, g\[ch\]\)/);
+  assert.match(sr, /const roleConflict = isTlKind\(p\.kind\) !== isTlKind\(g\[ch\]\.kind\)/);
+  assert.match(sr, /return identitiesLinked\(p, g\[ch\]\) \|\| roleConflict/);
   const ms = await read('masterSearch.js');
   assert.match(ms, /const personKey = \(p\) => .*normId/);
 });
