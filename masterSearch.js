@@ -667,31 +667,11 @@ FF.pages = FF.pages || {};
     .map(([c, n]) => `<span class="ms-pill">${esc(c)} <b>${U.fmt(n)}</b></span>`).join('') || '<span class="dim small">class data nahi</span>';
 
   function tagStatus(t) {
-    const f = t.ff[0], g = t.gv[0];
-    const ffMapped = !!f;
-    const gvMapped = !!g;
-    const statusParts = [];
-    statusParts.push(ffMapped
-      ? `FF: Mapped${f.agentName ? ` (${f.agentName})` : ''}`
-      : 'FF: Not mapped');
-    statusParts.push(gvMapped
-      ? `GV: Mapped${g.agentName ? ` (${g.agentName})` : ''}`
-      : 'GV: Not mapped');
-    if (ffMapped && gvMapped) {
-      const sameOwner = normName(f.agentName) === normName(g.agentName);
-      const isGhostFf = /APNA ?PAY/i.test(f.agentName || '');
-      const isGhostGv = !clean(g.agentName) || /NOT ?ASSIGN|UNASSIGN|^-$/i.test(clean(g.agentName));
-      return {
-        t: sameOwner ? 'FF + GV mapped' : (isGhostFf || isGhostGv ? 'FF + GV mapped · ghost holder' : 'FF + GV mapped · owner mismatch'),
-        tone: sameOwner ? 'green' : (isGhostFf || isGhostGv ? 'blue' : 'amber'),
-        detail: statusParts.join(' · ')
-      };
-    }
-    if (gvMapped) return { t: 'GV mapped · FF not mapped', tone: 'red', detail: statusParts.join(' · ') };
-    if (ffMapped) return { t: 'FF mapped · GV not mapped', tone: 'amber', detail: statusParts.join(' · ') };
-    return { t: 'Not mapped in FF/GV', tone: 'red', detail: statusParts.join(' · ') };
+    return {
+      ff: t.ff[0] ? { text: 'Mapped', tone: 'green' } : { text: 'Not mapped', tone: 'red' },
+      gv: t.gv[0] ? { text: 'Mapped', tone: 'green' } : { text: 'Not mapped', tone: 'red' }
+    };
   }
-
   /** Kundli card ke andar quick stats — mobile · TL · stock · TL stock · priority · suggested (data load hone par). */
   function kundliProfileStats(p) {
     const q1 = MP() ? MP().quick(p) : null;
@@ -874,15 +854,16 @@ FF.pages = FF.pages || {};
     }
     if (res.tags.length) {
       parts.push(`<section class="ms-section"><h3>🏷️ Tags / barcodes <span class="dim small">${U.fmt(res.tags.length)} match</span></h3>
-        <div class="table-wrap"><table class="tbl compact"><thead><tr><th>Barcode / serial</th><th>Tag ID</th><th>FF holder</th><th>FF TL</th><th>GV holder</th><th>GV TL</th><th>GV unique</th><th>Class</th><th>Status</th><th>Allocated</th></tr></thead><tbody>
+        <div class="table-wrap"><table class="tbl compact"><thead><tr><th>Barcode / serial</th><th>Tag ID</th><th>FF holder</th><th>FF TL</th><th>FF mapping</th><th>GV holder</th><th>GV TL</th><th>GV unique</th><th>GV mapping</th><th>Class</th><th>Allocated</th></tr></thead><tbody>
         ${res.tags.slice(0, 60).map((t) => {
         const f = t.ff[0] || {}, g = t.gv[0] || {};
         const st = tagStatus(t);
-        return `<tr><td><b>${esc(U.barcode(t.key))}</b></td><td>${esc((f.tagId || g.tagId) || '—')}</td>
+        return `<tr><td class="ms-barcode-cell"><b>${esc(U.barcode(t.key))}</b></td><td>${esc((f.tagId || g.tagId) || '—')}</td>
             <td>${esc(f.agentName || '—')}${f.agentId ? `<small>${esc(f.agentId)}</small>` : ''}</td><td>${esc(tlText(f.tlName, 'ff') || '—')}</td>
+            <td><span class="badge ${st.ff.tone}">${esc(st.ff.text)}</span></td>
             <td>${esc(g.agentName || '—')}${g.agentId ? `<small>${esc(g.agentId)}</small>` : ''}</td><td>${esc(tlText(g.tlName, 'gv') || '—')}</td>
-            <td>${esc(g.gvName || '—')}${g.gvId ? `<small>${esc(g.gvId)}</small>` : ''}</td><td>${esc(f.cls || g.cls || '—')}</td>
-            <td><span class="badge ${st.tone}">${esc(st.t)}</span><small class="dim">${esc(st.detail || '')}</small></td><td>${esc(f.allocated || g.allocated || '—')}</td></tr>`;
+            <td>${esc(g.gvName || '—')}${g.gvId ? `<small>${esc(g.gvId)}</small>` : ''}</td><td><span class="badge ${st.gv.tone}">${esc(st.gv.text)}</span></td>
+            <td>${esc(f.cls || g.cls || '—')}</td><td>${esc(f.allocated || g.allocated || '—')}</td></tr>`;
       }).join('')}
         </tbody></table></div>${res.tags.length > 60 ? `<p class="dim small">Pehle 60 rows dikhe — CSV me poori list.</p>` : ''}</section>`);
     }
