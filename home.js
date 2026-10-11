@@ -701,7 +701,7 @@ FF.pages = FF.pages || {};
       <div class="home-quick-grid">${homeQuickActions.map((action) => `<a class="home-launch-tile" href="#/${esc(action.id)}" aria-label="${esc(action.label)}: ${esc(action.detail)}"><span class="home-launch-icon" aria-hidden="true">${action.icon}</span><span class="home-launch-copy"><b>${esc(action.label)}</b><small>${esc(action.detail)}</small></span><span class="home-launch-arrow" aria-hidden="true">›</span></a>`).join('')}</div>
     </section>` : '';
 
-    root.innerHTML = `<div class="home-hero v2">`
+    root.innerHTML = `<div class="home-hero v2">
         <div class="home-hero-main">
           ${avatar}
           <div>
