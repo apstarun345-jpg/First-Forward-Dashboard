@@ -167,7 +167,7 @@ test('📥 request row — ek hi row me sab (koi Kholo nahi): stock 🚗/🚚, i
   assert.ok(!/Kholo|data-tr-open/.test(html), 'drawer / Kholo button nahi');
   for (const s of ['data-tr-sel="tagreq_aaa111::agent"', 'Ramesh Yadav', 'Jaipur office', 'Rahul Sharma', '#1001', 'TL TL One', '☏ 9876500001', 'Gandhi Nagar', '📮 302015', 'Item Name']) assert.ok(html.includes(s), `row me "${s}"`);
   for (const m of ['stock', 'core', 'comm', 'last', 'cur', 'rate', 'exp', 'growth', 'suggest']) assert.ok(html.includes(`data-tr-m="${m}"`), `metric cell ${m}`);
-  assert.match(html, /data-tr-m="stock"><i class="tr-src snap"[^>]*><\/i><b>17<\/b>/, 'stock total (snapshot)');
+  assert.match(html, /data-tr-m="stock"><i class="tr-src snap"[^>]*><\/i><b[^>]*>17<\/b>/, 'stock total (snapshot)');
   assert.match(html, /data-tr-m="core"><b>14<\/b>/);
   assert.match(html, /data-tr-m="comm"><b>3<\/b>/);
   assert.match(html, /data-tr-m="exp"><b>81<\/b>/);
@@ -364,7 +364,7 @@ test('📇 purana address suggestion — same agent dobara chuno to purana mobil
   assert.ok(chip.includes('Rahul Sharma'), 'purana dispatch name dikhta hai');
   assert.ok(chip.includes('24, Shanti Nagar, Sodala, Jaipur'), 'purana address dikhta hai');
   assert.ok(chip.includes('05 Oct 2026'), 'last request date dikhti hai');
-  assert.ok(chip.includes('11:00 am') || chip.includes('11:00 AM'), 'last request time dikhta hai');
+  assert.ok(chip.includes('10:30 am') || chip.includes('10:30 AM'), 'last request time is rendered in Asia/Kolkata time');
   assert.ok(chip.includes('302019'), 'purana pincode dikhta hai');
   assert.ok(chip.includes('Address book'), 'source batata hai ki address kahan se aaya');
 
