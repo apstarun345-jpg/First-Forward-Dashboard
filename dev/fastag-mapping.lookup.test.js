@@ -247,7 +247,7 @@ test('FASTag Mapping continues barcode fallback when the data source returns par
     const page = tq.match(/where\s+D\s+is\s+not\s+null\s+limit\s+(\d+)\s+offset\s+(\d+)/i);
     if (page) {
       assert.notEqual(opts.fresh, true, 'fallback should reuse cached pages between lookups');
-      assert.notEqual(opts.directFirst, true, 'fallback should use the cache-first proxy path');
+      assert.equal(opts.directFirst, true, 'fallback attempts Google directly with a short timeout');
       const offset = Number(page[2]);
       // Pretend the backend caps the first response at three rows, below the requested limit.
       return offset === 0 ? makeTable(distractors) : (offset === 3 ? makeTable([target]) : makeTable([]));
@@ -262,6 +262,22 @@ test('FASTag Mapping continues barcode fallback when the data source returns par
   assert.match(html, /TAG-12345/, 'target row on a later partial page should be found');
   assert.match(html, /VC16/, 'numeric class should still be normalized');
   assert.ok(queryLog.some((q) => /offset 3/i.test(q.tq)), 'scan advances by the actual short page size');
+});
+
+test('FASTag Mapping repeats a known barcode from the in-session index without another Sheets request', async () => {
+  const { root, selectors, queryLog } = makePage();
+  selectors.get('#fm-kind').value = 'barcode';
+  selectors.get('#fm-identifier').value = '8900000000123456';
+  selectors.get('#fm-agent-id').value = 'CACHE-TARGET-1';
+  await click(root, 'fm-lookup');
+  const countAfterFirst = queryLog.length;
+  assert.match(selectors.get('#fm-results').innerHTML, /TAG-12345/);
+  selectors.get('#fm-kind').value = 'barcode';
+  selectors.get('#fm-identifier').value = '8900000000123456';
+  selectors.get('#fm-agent-id').value = 'CACHE-TARGET-2';
+  await click(root, 'fm-lookup');
+  assert.match(selectors.get('#fm-results').innerHTML, /CACHE-TARGET-2/);
+  assert.equal(queryLog.length, countAfterFirst, 'same barcode lookup should use the local cache');
 });
 
 test('FASTag Mapping normalizes numeric StockDataa vehicle classes to VC-prefixed values', async () => {
