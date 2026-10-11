@@ -325,3 +325,18 @@ test('Quick Map names the missing StockDataa field when the record exists but cl
   assert.match(selectors.get('#fm-message').textContent, /TAG_CLASS \/ VC Type \(column E\)/);
   assert.doesNotMatch(selectors.get('#fm-message').textContent, /Quick Map ruk gaya/);
 });
+
+test('Quick Map distinguishes an absent barcode from a row with missing mapping fields', async () => {
+  const { root, selectors, FF } = makePage();
+  FF.data.query = async (sheet, tq, opts = {}) => {
+    if (/where D =/.test(tq)) return { cols: [], rows: [] };
+    if (/where D is not null limit 5000 offset 0/i.test(tq)) return { cols: [], rows: [] };
+    return { cols: [], rows: [] };
+  };
+  selectors.get('#fm-kind').value = 'barcode';
+  selectors.get('#fm-identifier').value = '9999999999999999';
+  selectors.get('#fm-agent-id').value = 'NO-RECORD';
+  await click(root, 'fm-quick-map');
+  assert.match(selectors.get('#fm-message').textContent, /exact StockDataa match nahi mila/);
+  assert.doesNotMatch(selectors.get('#fm-message').textContent, /required mapping field blank\/invalid/);
+});

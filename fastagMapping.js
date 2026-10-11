@@ -651,8 +651,8 @@ window.FF = window.FF || {};
     if (!ready.length) {
       state.rows.forEach((r) => { if (previous.has(r.id)) r.selected = previous.get(r.id); });
       renderTable();
-      const failed = added.find((r) => !r.stock) || added[0];
-      if (failed && !failed.stock) {
+      const failed = added.find((r) => !r.stock || !Object.keys(r.stock || {}).length || r.status === 'Not found in StockDataa') || added[0];
+      if (failed && (!failed.stock || !Object.keys(failed.stock || {}).length || failed.status === 'Not found in StockDataa')) {
         setStatus('Quick Map: ' + (kind === 'tagId' ? 'Tag ID' : 'Barcode') + ' "' + value +
           '" ka exact StockDataa match nahi mila. Fresh lookup aur fallback scan chala; value, StockDataa tab aur barcode column verify karein. Queue me input bacha hai—Lookup StockDataa se retry kar sakte hain.', 'warn');
       } else if (failed && failed.stock) {
