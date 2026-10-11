@@ -340,3 +340,72 @@ test('Quick Map distinguishes an absent barcode from a row with missing mapping 
   assert.match(selectors.get('#fm-message').textContent, /exact StockDataa match nahi mila/);
   assert.doesNotMatch(selectors.get('#fm-message').textContent, /required mapping field blank\/invalid/);
 });
+
+test('normalizeVcType maps every StockDataa class spelling to the canonical VC form', async () => {
+  const { FF } = makePage();
+  const normalizeVcType = FF.pages.fastagMapping.normalizeVcType;
+  // Sheet me plain number (4, 5, 6, 7, 12, 15, 16) → API ko "VC" lagakar jaana chahiye.
+  assert.equal(normalizeVcType('4'), 'VC4');
+  assert.equal(normalizeVcType(5), 'VC5');
+  assert.equal(normalizeVcType(' 6 '), 'VC6');
+  assert.equal(normalizeVcType('7'), 'VC7');
+  assert.equal(normalizeVcType('12'), 'VC12');
+  assert.equal(normalizeVcType('15'), 'VC15');
+  assert.equal(normalizeVcType('16'), 'VC16');
+  // Numeric cell gviz float (4.0) aur leading-zero text ("004") bhi VC4 hi bane.
+  assert.equal(normalizeVcType('4.0'), 'VC4');
+  assert.equal(normalizeVcType('004'), 'VC4');
+  // VC-prefixed / decorated spellings same canonical form me aayein.
+  assert.equal(normalizeVcType('VC5'), 'VC5');
+  assert.equal(normalizeVcType('vc 7'), 'VC7');
+  assert.equal(normalizeVcType('VC-12'), 'VC12');
+  assert.equal(normalizeVcType('Class 4'), 'VC4');
+  assert.equal(normalizeVcType('TAGCLASS16'), 'VC16');
+  // Khaali / pehchana nahi gaya to pehle jaisa safe behavior.
+  assert.equal(normalizeVcType(''), '');
+  assert.equal(normalizeVcType(null), '');
+  assert.equal(normalizeVcType('Truck'), 'TRUCK');
+});
+
+test('11-column StockDataa par lookup ab NO_COLUMN: L nahi deta — select A–K (v3.70.5 regression)', async () => {
+  const { root, selectors, FF } = makePage();
+  const originalQuery = FF.data.query;
+  let sawWideSelect = false;
+  FF.data.query = async (sheet, tq, opts = {}) => {
+    const sel = String(tq).match(/^select\s+([A-Z](?:,[A-Z])*)\s+where/i);
+    const letters = sel ? sel[1].split(',') : [];
+    if (letters.includes('L') || letters.includes('M')) {
+      sawWideSelect = true;
+      throw new Error('Invalid query: NO_COLUMN: L');
+    }
+    return originalQuery(sheet, tq, opts);
+  };
+  selectors.get('#fm-kind').value = 'barcode';
+  selectors.get('#fm-identifier').value = '8900000000123456';
+  selectors.get('#fm-agent-id').value = 'TARGET-SLIM-11';
+  await click(root, 'fm-lookup');
+  assert.match(selectors.get('#fm-results').innerHTML, /TAG-12345/, 'row mil gayi');
+  assert.equal(sawWideSelect, false, '13-column (A–M) select kabhi bheja hi nahi gaya');
+  assert.ok(!/Lookup fail/.test(selectors.get('#fm-message').textContent), 'koi lookup fail message nahi');
+});
+
+test('aur patli sheet (NO_COLUMN: K) par select-list shrink karke retry hota hai', async () => {
+  const { root, selectors, FF } = makePage();
+  const originalQuery = FF.data.query;
+  const selectSizes = [];
+  FF.data.query = async (sheet, tq, opts = {}) => {
+    const sel = String(tq).match(/^select\s+([A-Z](?:,[A-Z])*)\s+where/i);
+    const letters = sel ? sel[1].split(',') : [];
+    selectSizes.push(letters.length);
+    if (letters.includes('K')) throw new Error('Invalid query: NO_COLUMN: K'); // 10-column sheet
+    return originalQuery(sheet, tq, opts);
+  };
+  selectors.get('#fm-kind').value = 'barcode';
+  selectors.get('#fm-identifier').value = '8900000000123456';
+  selectors.get('#fm-agent-id').value = 'TARGET-SLIM-10';
+  await click(root, 'fm-lookup');
+  assert.match(selectors.get('#fm-results').innerHTML, /TAG-12345/, 'shrink-retry ke baad row mil gayi');
+  assert.ok(selectSizes.some((n) => n === 11), 'pehla attempt A–K (11 columns) tha');
+  assert.ok(selectSizes.some((n) => n <= 10), 'NO_COLUMN ke baad select 10 columns (A–J) tak shrink hua');
+  assert.ok(!selectSizes.includes(13), 'kabhi bhi 13 columns (A–M) select nahi hue');
+});

@@ -1998,6 +1998,22 @@ function workspaceStore() {
 }
 const workspaceId = (prefix) => `${prefix}_${Date.now().toString(36)}_${crypto.randomBytes(5).toString('hex')}`;
 const shortText = (value, max) => String(value ?? '').trim().slice(0, max);
+/**
+ * VC class normalizer — StockDataa sheet ke TAG_CLASS column me "4 / 16 / VC4 / vc 4 /
+ * Class 4 / 4.0" kuch bhi likha ho sakta hai, par mapping API (apnapayment
+ * inventory/update) sirf canonical "VC<number>" (VC4, VC5, VC6, VC7, VC12, VC15, VC16)
+ * accept karti hai. Isliye bhejne se pehle hamesha VC prefix laga do — warna
+ * "Invalid vehicle type. Allowed types: VC4…" wala failure aata hai.
+ */
+function normalizeVcType(value) {
+  let raw = String(value ?? '').trim().toUpperCase().replace(/\s+/g, '');
+  if (!raw) return '';
+  raw = raw.replace(/\.0+$/, '').replace(/[^A-Z0-9]/g, ''); // "4.0" → "4" · "VC-4" → "VC4"
+  const m = raw.match(/^(?:TAG|VEHICLE)?CLASS(?:VC)?(\d{1,3})$/) || raw.match(/^VC(\d{1,3})$/);
+  if (m) return 'VC' + Number(m[1]); // "CLASS4" / "VC04" → "VC4" (leading zero bhi saaf)
+  if (/^\d+$/.test(raw)) return 'VC' + Number(raw); // sheet ka plain number → "VC" + digit
+  return raw.slice(0, 80); // kuch aur ho to API khud bata degi — pehle jaisa behaviour
+}
 function visibleWorkspaceView(view, user) {
   return !!view && (view.shared === true || view.owner === user.username || user.role === 'admin');
 }
@@ -7175,7 +7191,9 @@ async function handleApi(req, res, url) {
       const data = {
         tagId: String(row && row.tagId || '').trim().slice(0, 180),
         serialNo: String(row && row.serialNo || '').trim().slice(0, 180),
-        vcType: String(row && row.vcType || '').trim().slice(0, 80),
+        // 🚗 StockDataa TAG_CLASS plain number (4, 5, 6, 7, 12, 16) ho to bhi API ko
+        // hamesha "VC4…" canonical form hi jaaye — tabhi mapping hoti hai.
+        vcType: normalizeVcType(row && row.vcType),
         agentId: String(row && row.agentId || '').trim().slice(0, 100)
       };
       if (!data.tagId || !data.serialNo || !data.vcType || !data.agentId) {
