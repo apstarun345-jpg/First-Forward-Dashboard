@@ -305,7 +305,8 @@ test('🧩 UI + cache-bust wiring: ⏪ button, banner, health summary, naya vers
   assert.match(pkg.version, /^\d+\.\d+\.\d+$/, 'package release version is valid semver');
   assert.notEqual(pkg.version, '3.70.3', 'release version has advanced past the historical Item Name release');
   const idx = await read('index.html');
-  assert.doesNotMatch(idx, /(?:config|lazy)\.js\?v=\d+/, 'source HTML leaves JavaScript cache-busting to the fingerprint stamper');
+  assert.match(idx, /config\.js\?v=\d+/, 'config script has a current cache key');
+  assert.match(idx, /lazy\.js\?v=\d+/, 'lazy script has a current cache key');
   const lazy = await read('lazy.js');
   assert.match(lazy, /const VERSION = \(function/, 'lazy VERSION derive');
   assert.match(lazy, /ff-asset-versions/, 'v3.61: lazy modules ka version server ke fingerprint map se aata hai');
