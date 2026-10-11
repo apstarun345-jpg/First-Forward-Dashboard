@@ -6840,10 +6840,11 @@ async function handleApi(req, res, url) {
     return /^[A-Za-z0-9_-]{24,120}$/.test(v) ? v.slice(0, 120) : crypto.randomBytes(24).toString('base64url');
   }
   function employeeStatusByToken(token) {
-    // 🌐 Shared Employee Link: every visitor using the public link can see every
-    // request created through that link. The old device token is kept in records
-    // for backwards compatibility, but it is no longer used as a visibility filter.
-    return (workspaceStore().tagRequests || []).filter((r) => r && r.source === 'public-link');
+    const wanted = String(token || '').trim();
+    if (!/^[A-Za-z0-9_-]{24,120}$/.test(wanted)) return [];
+    return (workspaceStore().tagRequests || []).filter((r) =>
+      r && r.source === 'public-link' && String(r.employeeToken || '') === wanted
+    );
   }
   function employeeStatusSummary(token) {
     const rows = employeeStatusByToken(token), counts = { all: rows.length, pending: 0, approved: 0, dispatched: 0, rejected: 0 };
@@ -6881,8 +6882,7 @@ async function handleApi(req, res, url) {
     };
   }
   if (p === '/api/public/tag-request/employee-status' && method === 'GET') {
-    // 🌐 Shared public Employee Link: token is optional/backwards-compatible only.
-    // Visibility is intentionally ALL public-link requests, regardless of browser/device.
+    // Employee status is private to the submitted link token; never expose another employee's request history.
     const token = String(url.searchParams.get('token') || '').trim();
     const ip = clientIp(req); if (!publicRateOk(`tagemp:${ip}`, 60, 10 * 60e3)) throw new HttpError(429, 'Bahut zyada status checks — thodi der baad try karo.');
     return sendJson(res, 200, { ok:true, shared:true, ...employeeStatusSummary(token) });
