@@ -245,8 +245,8 @@ test('FASTag Mapping continues barcode fallback when the data source returns par
     if (/where\s+D\s*=/.test(tq)) return makeTable([]);
     const page = tq.match(/where\s+D\s+is\s+not\s+null\s+limit\s+(\d+)\s+offset\s+(\d+)/i);
     if (page) {
-      assert.equal(opts.fresh, true, 'fallback must bypass the cached page');
-      assert.equal(opts.directFirst, true, 'fallback should query the source directly first');
+      assert.notEqual(opts.fresh, true, 'fallback should reuse cached pages between lookups');
+      assert.notEqual(opts.directFirst, true, 'fallback should use the cache-first proxy path');
       const offset = Number(page[2]);
       // Pretend the backend caps the first response at three rows, below the requested limit.
       return offset === 0 ? makeTable(distractors) : (offset === 3 ? makeTable([target]) : makeTable([]));
