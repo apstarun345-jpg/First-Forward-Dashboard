@@ -185,7 +185,7 @@ const CHUNK = 45000; // a Google Sheets cell holds max 50,000 characters
 const KINDS = ['users', 'sessions', 'settings', 'resets', 'notify'];
 const HISTORY_TAB = 'APP_STORAGE_HISTORY';
 const HISTORY_MAX_ROWS = 60; // bounded to 60 snapshots to avoid Google Sheets document size limits
-const CODE_VERSION = 'v3.63';
+const CODE_VERSION = 'v3.71';
 
 /** Run this ONCE from the Apps Script editor (▶ Run) to grant the "send email" permission. */
 function authorizeMail() { Logger.log('Mail quota left today: ' + MailApp.getRemainingDailyQuota()); }
@@ -636,6 +636,53 @@ function doPost(e) {
       return json_({ ok: true, tab: uTab, added: added, updated: updated, deduped: deduped, spreadsheet: uSs.getName(), spreadsheetId: uSs.getId(), url: uSs.getUrl() });
     }
 
+    // 🔗 FASTag Mapping (v3.71) — kisi bhi Google Sheet tab se columns padho / "done" jaisa mark likho.
+    // readrange : { spreadsheetId, tab, startRow, columns:['A','B',...] } → { rows:[[...]], startRow }
+    //             Har row ki values usi order me jis order me columns diye; row i ki sheet row = startRow + i.
+    // writecells: { spreadsheetId, tab, column:'F', writes:[{row, value}] } → { written }
+    //             Sirf us ek column ke cells badalte hain; formulas wale baaki cells jaise the waise rehte hain.
+    if (body.action === 'readrange') {
+      var ssR = target_(body.spreadsheetId);
+      var shR = ssR.getSheetByName(String(body.tab || '').slice(0, 80));
+      if (!shR) return json_({ ok: false, error: 'Tab "' + body.tab + '" is sheet me nahi mila.' });
+      var colsR = (Array.isArray(body.columns) ? body.columns : []).map(function (c) { return colIndex_(c); }).filter(function (n) { return n > 0; }).slice(0, 8);
+      if (!colsR.length) return json_({ ok: false, error: 'columns required' });
+      var startR = Math.max(1, Number(body.startRow) || 1);
+      var lastR = shR.getLastRow();
+      if (lastR < startR) return json_({ ok: true, rows: [], startRow: startR, spreadsheet: ssR.getName() });
+      var widthR = Math.max.apply(null, colsR);
+      var valsR = shR.getRange(startR, 1, lastR - startR + 1, widthR).getValues();
+      var outR = valsR.map(function (r) {
+        return colsR.map(function (ci) {
+          var v = r[ci - 1];
+          if (v === null || v === undefined) return '';
+          if (typeof v === 'number') return (Math.floor(v) === v && Math.abs(v) < 1e21) ? Utilities.formatString('%.0f', v) : String(v);
+          if (v instanceof Date) return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+          return String(v);
+        });
+      });
+      return json_({ ok: true, rows: outR, columns: body.columns, startRow: startR, spreadsheet: ssR.getName() });
+    }
+    if (body.action === 'writecells') {
+      var ssW = target_(body.spreadsheetId);
+      var shW = ssW.getSheetByName(String(body.tab || '').slice(0, 80));
+      if (!shW) return json_({ ok: false, error: 'Tab "' + body.tab + '" is sheet me nahi mila.' });
+      var colW = colIndex_(body.column);
+      if (colW < 1) return json_({ ok: false, error: 'column letter galat hai' });
+      var wr = (Array.isArray(body.writes) ? body.writes : []).filter(function (w) { return w && Number(w.row) >= 1; });
+      if (!wr.length) return json_({ ok: true, written: 0 });
+      var minW = wr[0].row, maxW = wr[0].row;
+      wr.forEach(function (w) { if (w.row < minW) minW = w.row; if (w.row > maxW) maxW = w.row; });
+      if (shW.getMaxRows() < maxW) shW.insertRowsAfter(shW.getMaxRows(), maxW - shW.getMaxRows());
+      if (shW.getMaxColumns() < colW) shW.insertColumnsAfter(shW.getMaxColumns(), colW - shW.getMaxColumns());
+      var rngW = shW.getRange(minW, colW, maxW - minW + 1, 1);
+      var fW = rngW.getFormulas(), vW = rngW.getValues();
+      var merged = vW.map(function (r, i) { return [fW[i][0] ? fW[i][0] : r[0]]; });
+      wr.forEach(function (w) { merged[w.row - minW][0] = String(w.value == null ? '' : w.value); });
+      rngW.setValues(merged);
+      SpreadsheetApp.flush();
+      return json_({ ok: true, written: wr.length });
+    }
     if (body.action === 'read') return json_({ ok: true, records: readAll_(sheet) });
     if (body.action === 'write') {
       const records = body.records || {};
@@ -900,6 +947,15 @@ function verifyWrite_(sh, records, nowIso) {
     for (let j = 0; j < expectedChunks; j++) parts.push(String(found[4 + j] || '').replace(/^~/, ''));
     if (parts.join('') !== expectedData) throw new Error('write verify failed: "' + kind + '" encrypted payload mismatch after save');
   });
+}
+
+
+function colIndex_(letters) {
+  var s = String(letters || '').trim().toUpperCase();
+  if (!/^[A-Z]{1,3}$/.test(s)) return 0;
+  var n = 0;
+  for (var i = 0; i < s.length; i++) n = n * 26 + (s.charCodeAt(i) - 64);
+  return n;
 }
 
 function json_(obj) {

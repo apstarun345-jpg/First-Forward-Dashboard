@@ -16,6 +16,7 @@ import { sheetsStoreFromEnv } from './sheets-storage.js';
 import { appsScriptStoreFromEnv, AppsScriptStore } from './apps-script-storage.js';
 import { sendMail, mailConfigured, diagnoseMail, mailHint, availableProviders, resolveProviders, resetMailMemo, MAIL_PROVIDERS, splitRecipients } from './mailer.js';
 import { DEFAULT_DISPATCH_EMAIL, normalizeDispatchEmail, buildDispatchPlan, dispatchEmailContent } from './dispatch-email.js';
+import { createMappingStock, sheetIdFrom } from './mapping-stock.js';
 import { createStockAgeBuilder, summaryOf as stockAgeSummary, tagsFor as stockAgeTags, personalStock } from './stock-age.js';
 import { loadFfDispatchRows, loadGvDispatchRows } from './dispatch-report.js';
 // 🚨 Unusual Activity ka tag-level scan logic — browser (unusual-scan.js script) aur server dono ek hi
@@ -61,7 +62,7 @@ const MIME = {
   '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.ico': 'image/x-icon',
   '.txt': 'text/plain; charset=utf-8', '.md': 'text/plain; charset=utf-8'
 };
-const BLOCKED_FILES = new Set(['server.js', 'sheets-storage.js', 'apps-script-storage.js', 'mailer.js', 'stock-age.js', 'DEPLOYMENT.md', 'SHEETS_STORAGE.md', 'STORAGE_SETUP.md', 'RECOVERY.md', 'package.json', 'package-lock.json', 'render.yaml', 'README.md', '.env']);
+const BLOCKED_FILES = new Set(['server.js', 'sheets-storage.js', 'apps-script-storage.js', 'mailer.js', 'stock-age.js', 'mapping-stock.js', 'DEPLOYMENT.md', 'SHEETS_STORAGE.md', 'STORAGE_SETUP.md', 'RECOVERY.md', 'package.json', 'package-lock.json', 'render.yaml', 'README.md', '.env']);
 const BLOCKED_DIRS = new Set(['data', 'dev', 'node_modules', '.git', 'google-apps-script']);
 // /api/health ka version ab package.json se aata hai (pehle yahan hardcoded purana string tha).
 let APP_VERSION = '3.65.0';
@@ -2745,6 +2746,22 @@ function stockAgeStatus() {
   const idx = stockAgeState.index;
   return { ready: !!idx, building: !!stockAgeState.promise, ageSec: idx ? Math.round((Date.now() - stockAgeState.at) / 1000) : null, errors: idx && idx.errors ? Object.keys(idx.errors) : [], lastError: stockAgeState.error || '' };
 }
+
+// ---------------------------------------------------------------------------------------------
+// 🔗 FASTag Mapping (v3.71) — StockDataa ka server-side lookup index (barcode / tag ID / range).
+// Browser ab gviz pages nahi kheenchta ("paged barcode lookup failed near row 5001" band).
+// ---------------------------------------------------------------------------------------------
+const mappingStock = createMappingStock({
+  getConfig: () => {
+    const s = db.settings || {}, st = s.stock || {};
+    return {
+      sheetId: s.sheetId, sheet: s.stockSheet || 'StockDataa',
+      letters: { id: colLetter(st.id, 'A'), name: colLetter(st.name, 'B'), tagId: colLetter(st.tagId, 'C'), barcode: colLetter(st.barcode, 'D'), cls: colLetter(st.cls, 'E'), tagType: colLetter(st.tagType, 'F'), bcAt: colLetter(st.bcAllocatedAt, 'G'), agentId: colLetter(st.agentId, 'H'), agentName: colLetter(st.agentName, 'I'), agentAt: colLetter(st.agentAllocatedAt, 'J'), tl: colLetter(st.tlName, 'K') }
+    };
+  },
+  loadPages: (sheetId, sheet, letters, where, onPage) => gvizPagesServer(sheetId, sheet, letters, where, onPage),
+  normalizeVcType: (v) => normalizeVcType(v)
+});
 
 // ---------------------------------------------------------------------------------------------
 // 🚨 Unusual Activity — tag-level VRN scan (v3.37), SERVER SIDE.
@@ -7178,6 +7195,64 @@ async function handleApi(req, res, url) {
     requireAdmin(user);
     return sendJson(res, 200, { ok: true, configured: !!String(process.env.GV_TAG_MAPPING_SECRET || '').trim() });
   }
+  if (p === '/api/fastag-mapping/lookup' && method === 'POST') {
+    requireAdmin(user);
+    const body = await readBody(req);
+    const items = Array.isArray(body && body.items) ? body.items : [];
+    if (!items.length) throw new HttpError(400, 'Lookup items required.');
+    if (items.length > 20000) throw new HttpError(413, 'Ek lookup me maximum 20,000 items.');
+    const clip = (v) => String(v == null ? '' : v).slice(0, 180);
+    const safe = items.map((x) => ({ type: x && x.type === 'range' ? 'range' : (x && x.type === 'tagId' ? 'tagId' : 'barcode'), barcode: clip(x && x.barcode), serialNo: clip(x && x.serialNo), tagId: clip(x && x.tagId), first: clip(x && x.first), last: clip(x && x.last) }));
+    try {
+      const out = await mappingStock.lookup(safe, { fresh: !!(body && body.fresh) });
+      return sendJson(res, 200, { ok: true, ...out });
+    } catch (err) {
+      throw new HttpError(502, 'StockDataa index nahi ban paya: ' + String((err && err.message) || err).slice(0, 240));
+    }
+  }
+  if (p === '/api/fastag-mapping/index-status' && method === 'GET') {
+    requireAdmin(user);
+    return sendJson(res, 200, { ok: true, ...mappingStock.status() });
+  }
+  if ((p === '/api/fastag-mapping/sheet/read' || p === '/api/fastag-mapping/sheet/mark') && method === 'POST') {
+    requireAdmin(user);
+    const url0 = (process.env.APPS_SCRIPT_URL || '').trim(), secret0 = (process.env.APPS_SCRIPT_SECRET || '').trim();
+    if (!url0 || !secret0) throw new HttpError(400, 'Apps Script connect nahi hai — Render me APPS_SCRIPT_URL + APPS_SCRIPT_SECRET set karein.');
+    const body = await readBody(req);
+    const spreadsheetId = sheetIdFrom(body && body.sheet);
+    if (!spreadsheetId) throw new HttpError(400, 'Google Sheet ka valid link ya ID dein.');
+    const tab = String(body && body.tab || '').trim().slice(0, 80);
+    if (!tab) throw new HttpError(400, 'Tab name required.');
+    const letter = (v) => { const c = String(v || '').trim().toUpperCase(); return /^[A-Z]{1,3}$/.test(c) ? c : ''; };
+    const store = new AppsScriptStore({ url: url0, secret: secret0 });
+    store.timeoutMs = 55000; store.attempts = 2; store.label = 'Google Sheet';
+    const hint = (err) => {
+      const m = String((err && err.message) || err);
+      if (/unknown action/i.test(m)) return 'Apps Script purana hai — google-apps-script/Code.gs (v3.71) dobara paste karke Deploy → Manage deployments → Edit → New version → Deploy karein.';
+      return m.slice(0, 300);
+    };
+    if (p.endsWith('/read')) {
+      const columns = [...new Set((Array.isArray(body.columns) ? body.columns : []).map(letter).filter(Boolean))].slice(0, 8);
+      const startRow = Math.max(1, Math.min(1000000, Number(body.startRow) || 2));
+      if (!columns.length) throw new HttpError(400, 'Kam se kam ek column letter dein.');
+      try {
+        const out = await store.call('readrange', { spreadsheetId, tab, startRow, columns });
+        return sendJson(res, 200, { ok: true, spreadsheet: out.spreadsheet || '', columns: out.columns || columns, startRow: out.startRow || startRow, rows: out.rows || [], total: (out.rows || []).length });
+      } catch (err) { throw new HttpError(502, hint(err)); }
+    }
+    const column = letter(body.column);
+    const writes = (Array.isArray(body.writes) ? body.writes : []).map((w) => ({ row: Math.floor(Number(w && w.row)), value: String(w && w.value == null ? '' : w.value).slice(0, 200) })).filter((w) => w.row >= 1 && w.row <= 1000000);
+    if (!column) throw new HttpError(400, 'Done column letter required.');
+    if (!writes.length) return sendJson(res, 200, { ok: true, written: 0 });
+    try {
+      let written = 0;
+      for (let i = 0; i < writes.length; i += 3000) {
+        const out = await store.call('writecells', { spreadsheetId, tab, column, writes: writes.slice(i, i + 3000) });
+        written += Number(out.written) || 0;
+      }
+      return sendJson(res, 200, { ok: true, written });
+    } catch (err) { throw new HttpError(502, hint(err)); }
+  }
   if (p === '/api/fastag-mapping/map' && method === 'POST') {
     requireAdmin(user);
     const secret = String(process.env.GV_TAG_MAPPING_SECRET || '').trim();
@@ -7235,7 +7310,7 @@ async function handleApi(req, res, url) {
     };
     const results = new Array(rows.length);
     let cursor = 0;
-    const workers = Array.from({ length: Math.min(8, rows.length) }, async () => {
+    const workers = Array.from({ length: Math.min(10, rows.length) }, async () => {
       while (cursor < rows.length) { const i = cursor++; results[i] = await callOne(rows[i], i); }
     });
     await Promise.all(workers);
@@ -8915,6 +8990,8 @@ async function start() {
     // 🧓 Stock ageing index pehle se bana lo (pehla user 1-2 min intezaar na kare). Render par default ON; STOCK_AGE_WARM=0 se band.
     const warmStockAge = process.env.STOCK_AGE_WARM ? process.env.STOCK_AGE_WARM !== '0' : !!process.env.RENDER;
     if (warmStockAge) setTimeout(() => stockAgeIndex(false).catch((err) => console.warn('stock ageing warm-up:', err.message)), 12000).unref();
+    // 🔗 FASTag Mapping ka StockDataa lookup index bhi pehle se garam rakho — pehla Quick Map instant ho.
+    if (warmStockAge) setTimeout(() => mappingStock.ensure().catch((err) => console.warn('mapping index warm-up:', err.message)), 25000).unref();
 }
 // Start exactly once and keep the promise available to API requests that arrive while
 // Render is still warming durable storage.

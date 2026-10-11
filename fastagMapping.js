@@ -6,9 +6,14 @@ window.FF = window.FF || {};
   const API_STATUS = '/api/fastag-mapping/status';
   const API_MAP = '/api/fastag-mapping/map';
   const MAX_INPUTS = 2500;
-  const MAX_RESULTS = 3000;
+  const MAX_RESULTS = 20000;
+  const API_LOOKUP = '/api/fastag-mapping/lookup';
+  const API_SHEET_READ = '/api/fastag-mapping/sheet/read';
+  const API_SHEET_MARK = '/api/fastag-mapping/sheet/mark';
+  const MAP_BATCH = 100, MAP_PARALLEL = 2, SHOW_STEP = 300;
+  const SHEET_CFG_KEY = 'ffFmSheetCfg';
   let nextId = 1;
-  const state = { items: [], rows: [], configured: false, busy: false, root: null };
+  const state = { items: [], rows: [], configured: false, busy: false, root: null, showLimit: 300, sheetCtx: null };
   // Small session-local index: repeated Quick Map / barcode lookups should not hit Sheets again.
   const stockByBarcode = new Map();
   const stockByTagId = new Map();
@@ -543,7 +548,7 @@ window.FF = window.FF || {};
   }
   function addResult(item, stock, matchedBy) {
     const row = Object.assign({ id: nextId++, source: item.source || 'Manual', request: item.type === 'range' ? item.first + ' – ' + item.last : (item.tagId || item.barcode || item.serialNo || ''),
-      agentId: clean(item.agentId), stock: stock || {}, matchedBy: matchedBy || '', selected: true, mapped: false, apiStatus: '', message: '',
+      agentId: clean(item.agentId), sheetRow: item.sheetRow, stock: stock || {}, matchedBy: matchedBy || '', selected: true, mapped: false, apiStatus: '', message: '',
       status: stock ? 'Ready to review' : 'Not found in StockDataa' }, stock || {});
     row.stock = stock || {}; row.agentId = clean(item.agentId);
     row.mapped = false; row.apiStatus = ''; row.message = '';
@@ -551,18 +556,21 @@ window.FF = window.FF || {};
     state.rows.push(row); return row;
   }
   function setStatus(message, kind) { const el = U.$('#fm-message', state.root); if (el) { el.className = 'notice ' + (kind || 'info'); el.textContent = message; } }
+  const rowReady = (r) => r.stock && r.tagId && r.serialNo && r.vcType && r.agentId && !String(r.status || '').startsWith('Duplicate') && !r.mapped;
   function renderTable() {
     const host = U.$('#fm-results', state.root), summary = U.$('#fm-summary', state.root);
     if (!host || !summary) return;
-    const ready = state.rows.filter((r) => r.stock && r.tagId && r.serialNo && r.vcType && r.agentId && !r.status.startsWith('Duplicate') && !r.mapped).length;
-    const done = state.rows.filter((r) => r.mapped).length;
+    let ready = 0, done = 0;
+    for (const r of state.rows) { if (r.mapped) done++; else if (rowReady(r)) ready++; }
     summary.innerHTML = '<div class="grid g-4"><div class="card"><div class="card-body"><small>Rows</small><h2>' + U.fmt(state.rows.length) + '</h2></div></div><div class="card"><div class="card-body"><small>Ready to map</small><h2>' + U.fmt(ready) + '</h2></div></div><div class="card"><div class="card-body"><small>Mapped successfully</small><h2>' + U.fmt(done) + '</h2></div></div><div class="card"><div class="card-body"><small>Needs review</small><h2>' + U.fmt(state.rows.length - ready - done) + '</h2></div></div></div>';
-    if (!state.rows.length) { host.innerHTML = '<div class="empty-state">Upload a file or add a barcode / Tag ID above to start.</div>'; return; }
-    const body = state.rows.map((r, i) => {
-      const disabled = !r.stock || !r.tagId || !r.serialNo || !r.vcType || !r.agentId || r.status.startsWith('Duplicate') || r.mapped;
-      return '<tr><td><input type="checkbox" data-fm-select="' + i + '"' + (r.selected ? ' checked' : '') + (disabled ? ' disabled' : '') + '></td><td>' + esc(r.barcode) + '</td><td>' + esc(r.tagId) + '</td><td>' + esc(r.serialNo) + '</td><td>' + esc(r.vcType) + '</td><td>' + esc(r.stockAgentId) + '</td><td><input class="input fm-agent-edit" data-fm-agent="' + i + '" value="' + esc(r.agentId) + '" placeholder="Agent ID"' + (r.mapped ? ' disabled' : '') + '></td><td>' + esc(r.stockAgentName) + '</td><td>' + esc(r.tlName) + '</td><td><span class="badge ' + (r.mapped ? 'green' : (disabled ? 'amber' : 'gray')) + '">' + esc(r.apiStatus || r.status) + '</span><small class="dim fm-status-msg">' + esc(r.message) + '</small></td><td><button class="btn small" data-fm-remove="' + i + '"' + (state.busy ? ' disabled' : '') + '>Remove</button></td></tr>';
+    if (!state.rows.length) { host.innerHTML = '<div class="empty-state">Upload a file, Google Sheet ya barcode / Tag ID add karke start karein.</div>'; return; }
+    const limit = Math.max(SHOW_STEP, state.showLimit || SHOW_STEP), shown = state.rows.slice(0, limit);
+    const body = shown.map((r, i) => {
+      const disabled = !r.stock || !r.tagId || !r.serialNo || !r.vcType || !r.agentId || String(r.status || '').startsWith('Duplicate') || r.mapped;
+      return '<tr><td><input type="checkbox" data-fm-select="' + i + '"' + (r.selected ? ' checked' : '') + (disabled ? ' disabled' : '') + '></td><td>' + esc(r.sheetRow ? r.sheetRow : '') + '</td><td>' + esc(r.barcode) + '</td><td>' + esc(r.tagId) + '</td><td>' + esc(r.serialNo) + '</td><td>' + esc(r.vcType) + '</td><td>' + esc(r.stockAgentId) + '</td><td><input class="input fm-agent-edit" data-fm-agent="' + i + '" value="' + esc(r.agentId) + '" placeholder="Agent ID"' + (r.mapped ? ' disabled' : '') + '></td><td>' + esc(r.stockAgentName) + '</td><td>' + esc(r.tlName) + '</td><td><span class="badge ' + (r.mapped ? 'green' : (disabled ? 'amber' : 'gray')) + '">' + esc(r.apiStatus || r.status) + '</span><small class="dim fm-status-msg">' + esc(r.message) + '</small></td><td><button class="btn small" data-fm-remove="' + i + '"' + (state.busy ? ' disabled' : '') + '>Remove</button></td></tr>';
     }).join('');
-    host.innerHTML = '<div class="table-wrap"><table class="tbl compact"><thead><tr><th><input type="checkbox" id="fm-select-all" aria-label="Select ready rows"></th><th>Barcode</th><th>Tag ID</th><th>Serial No</th><th>VC Type</th><th>Stock Agent ID</th><th>Agent ID to map</th><th>Agent name</th><th>TL</th><th>Mapping status</th><th></th></tr></thead><tbody>' + body + '</tbody></table></div>';
+    const more = state.rows.length > limit ? '<div class="btn-row" style="margin-top:8px"><span class="dim small">Pehli ' + U.fmt(limit) + ' / ' + U.fmt(state.rows.length) + ' rows dikh rahi hain (mapping + CSV me sab rows shamil hain).</span><button class="btn small" id="fm-more">Aur dikhao</button></div>' : '';
+    host.innerHTML = '<div class="table-wrap"><table class="tbl compact"><thead><tr><th><input type="checkbox" id="fm-select-all" aria-label="Select ready rows"></th><th>Sheet row</th><th>Barcode</th><th>Tag ID</th><th>Serial No</th><th>VC Type</th><th>Stock Agent ID</th><th>Agent ID to map</th><th>Agent name</th><th>TL</th><th>Mapping status</th><th></th></tr></thead><tbody>' + body + '</tbody></table></div>' + more;
   }
   function checkDuplicates() {
     const byTag = new Map();
@@ -573,6 +581,18 @@ window.FF = window.FF || {};
       else if (rows.length > 1) rows.slice(1).forEach((r) => { r.status = 'Duplicate skipped — already listed'; r.selected = false; });
     });
   }
+  /** v3.71 — lookup server par: StockDataa ka cached index (ms me). Purane server (404) par legacy path. */
+  async function serverLookup(waiting, fresh) {
+    const legacy = (msg) => Object.assign(new Error(msg), { legacy: true });
+    if (typeof fetch !== 'function') throw legacy('fetch unavailable');
+    const res = await fetch(API_LOOKUP, { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'FF-Dashboard' },
+      body: JSON.stringify({ fresh: !!fresh, items: waiting.map((x) => ({ type: x.type, barcode: x.barcode || x.serialNo || '', tagId: x.tagId || '', first: x.first || '', last: x.last || '' })) }) });
+    if (!res || res.status === undefined || res.status === 404 || res.status === 405) throw legacy('server lookup API missing');
+    let json = {}; try { json = await res.json(); } catch (_) {}
+    if (!res.ok || !Array.isArray(json.results)) throw new Error(json.error || ('Lookup API HTTP ' + res.status));
+    return json;
+  }
+  const requestLabel = (item) => item.type === 'range' ? item.first + ' – ' + item.last : (item.tagId || item.barcode || item.serialNo || '');
   async function lookup() {
     if (state.busy) return false;
     // Typed quick inputs ko Lookup click par khud queue me le lo — naye user sirf barcode +
@@ -604,8 +624,17 @@ window.FF = window.FF || {};
     const rowsBefore = state.rows.length;
     const old = U.$('#fm-lookup', state.root), mapBtn = U.$('#fm-map', state.root); if (old) old.disabled = true; if (mapBtn) mapBtn.disabled = true;
     try {
-      const barcodes = waiting.flatMap((x) => x.type === 'range' ? [] : [x.barcode || x.serialNo].filter(Boolean));
-      const tagIds = waiting.flatMap((x) => x.tagId ? [x.tagId] : []);
+      let srv = null;
+      try { srv = await serverLookup(waiting, false); }
+      catch (err) { if (!err.legacy) throw err; }
+      if (srv) {
+        waiting.forEach((item, i) => {
+          const r = srv.results[i] || { rows: [] };
+          if (r.error) item._lookupError = r.error; else item._srvRows = r.rows || [];
+        });
+      }
+      const barcodes = srv ? [] : waiting.flatMap((x) => x.type === 'range' ? [] : [x.barcode || x.serialNo].filter(Boolean));
+      const tagIds = srv ? [] : waiting.flatMap((x) => x.tagId ? [x.tagId] : []);
       // serialNo is a payload field, not a separate StockDataa lookup column: it is BARCODE.
       // Query each physical StockDataa column only once to reduce Google Sheets request time.
       const found = await Promise.all([
@@ -613,7 +642,7 @@ window.FF = window.FF || {};
         queryField('tagId', tagIds)
       ]);
       const byBarcode = found[0], byTag = found[1];
-      const ranges = waiting.filter((x) => x.type === 'range');
+      const ranges = srv ? [] : waiting.filter((x) => x.type === 'range');
       let rangeCursor = 0;
       const rangeWorkers = Array.from({ length: Math.min(3, ranges.length) }, async () => {
         while (rangeCursor < ranges.length) {
@@ -624,10 +653,11 @@ window.FF = window.FF || {};
       });
       await Promise.all(rangeWorkers);
       for (const item of waiting) {
-        if (item._lookupError) { state.rows.push({ id: nextId++, source: item.source, request: item.first + ' – ' + item.last, selected: false, status: 'Lookup error', message: item._lookupError, stock: {}, agentId: '' }); continue; }
+        if (item._lookupError) { state.rows.push({ id: nextId++, source: item.source, request: requestLabel(item), selected: false, status: 'Lookup error', message: item._lookupError, stock: {}, agentId: '', sheetRow: item.sheetRow }); continue; }
         let candidates = [];
-        if (item.type === 'range') {
-          if (compareBarcode(item.first, item.last) > 0) { state.rows.push({ id: nextId++, source: item.source, request: item.first + ' – ' + item.last, selected: false, status: 'Invalid barcode range', message: 'First barcode last se bada hai.', stock: {}, agentId: '' }); continue; }
+        if (item._srvRows) candidates = item._srvRows;
+        else if (item.type === 'range') {
+          if (compareBarcode(item.first, item.last) > 0) { state.rows.push({ id: nextId++, source: item.source, request: item.first + ' – ' + item.last, selected: false, status: 'Invalid barcode range', message: 'First barcode last se bada hai.', stock: {}, agentId: '', sheetRow: item.sheetRow }); continue; }
           candidates = (item._rangeRows || []).filter((r) => compareBarcode(r.barcode, item.first) >= 0 && compareBarcode(r.barcode, item.last) <= 0);
         } else {
           const tagMatches = item.tagId ? byTag.filter((r) => idKey(r.tagId) === idKey(item.tagId)) : [];
@@ -645,7 +675,7 @@ window.FF = window.FF || {};
           }
         }
         if (!candidates.length) { addResult(item, null, item.type); continue; }
-        if (state.rows.length + candidates.length > MAX_RESULTS) { state.rows.push({ id: nextId++, source: item.source, request: item.type === 'range' ? item.first + ' – ' + item.last : (item.tagId || item.barcode || ''), selected: false, status: 'Result limit reached', message: 'Ek lookup me maximum ' + MAX_RESULTS + ' matched tags. Range ko chhote parts me divide karein.', stock: {}, agentId: '' }); continue; }
+        if (state.rows.length + candidates.length > MAX_RESULTS) { state.rows.push({ id: nextId++, source: item.source, request: item.type === 'range' ? item.first + ' – ' + item.last : (item.tagId || item.barcode || ''), selected: false, status: 'Result limit reached', message: 'Ek lookup me maximum ' + MAX_RESULTS + ' matched tags. Range ko chhote parts me divide karein.', stock: {}, agentId: '', sheetRow: item.sheetRow }); continue; }
         for (const stock of candidates) addResult(item, stock, item.type === 'range' ? 'Barcode range' : (item.tagId ? 'Tag ID' : 'Barcode'));
       }
       checkDuplicates(); renderTable();
@@ -715,9 +745,11 @@ window.FF = window.FF || {};
     state.busy = true; setStatus('Mapping API call chal rahi hai… please page band na karein.', 'info');
     const mapBtn = U.$('#fm-map', state.root); if (mapBtn) mapBtn.disabled = true;
     try {
-      let success = 0, failed = 0;
-      for (let i = 0; i < ready.length; i += 100) {
-        const batch = ready.slice(i, i + 100);
+      let success = 0, failed = 0, doneCount = 0, fatal = null;
+      const batches = [];
+      for (let i = 0; i < ready.length; i += MAP_BATCH) batches.push(ready.slice(i, i + MAP_BATCH));
+      let next = 0;
+      const runBatch = async (batch) => {
         const res = await fetch(API_MAP, { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'FF-Dashboard' }, body: JSON.stringify({ rows: batch.map((r) => ({ tagId: r.tagId, serialNo: r.serialNo, vcType: normalizeVcType(r.vcType), agentId: r.agentId })) }) });
         let json = {}; try { json = await res.json(); } catch (_) {}
         if (!res.ok || !Array.isArray(json.results)) throw new Error(json.error || ('Mapping API HTTP ' + res.status));
@@ -726,11 +758,113 @@ window.FF = window.FF || {};
           r.apiStatus = out.status || (out.success ? 'Success' : 'Failed'); r.message = out.message || ''; r.mapped = !!out.success;
           r.status = out.success ? 'Mapped successfully' : 'Mapping failed'; if (out.success) success++; else failed++;
         });
-        renderTable(); setStatus('Progress ' + Math.min(i + batch.length, ready.length) + '/' + ready.length + ' · Success ' + success + ' · Failed ' + failed, 'info');
-      }
-      setStatus('Mapping complete. Success: ' + success + ' · Failed: ' + failed + '. Full CSV download kar sakte hain.', failed ? 'warn' : 'success');
-    } catch (err) { setStatus('Mapping request fail: ' + (err.message || err) + '. Result table se CSV download kar sakte hain.', 'error'); }
+        doneCount += batch.length;
+        setStatus('Progress ' + Math.min(doneCount, ready.length) + '/' + ready.length + ' · Success ' + success + ' · Failed ' + failed, 'info');
+      };
+      // MAP_PARALLEL batches ek saath (har batch me server 10 rows parallel) — pehle ek-ek karke chalte the.
+      const pool = Array.from({ length: Math.min(MAP_PARALLEL, batches.length) }, async () => {
+        while (next < batches.length && !fatal) { const batch = batches[next++]; try { await runBatch(batch); } catch (err) { fatal = err; } }
+      });
+      await Promise.all(pool);
+      if (fatal) throw fatal;
+      let sheetNote = '';
+      try { const w = await markSheetDone(); if (w != null) sheetNote = ' · Sheet me "' + state.sheetCtx.doneText + '" likha: ' + w + ' row'; }
+      catch (err) { sheetNote = ' · ⚠ Sheet me done nahi likha ja saka: ' + (err.message || err); }
+      setStatus('Mapping complete. Success: ' + success + ' · Failed: ' + failed + sheetNote + '. Full CSV download kar sakte hain.', (failed || /⚠/.test(sheetNote)) ? 'warn' : 'success');
+    } catch (err) {
+      // Jo rows map ho chuki hain unka "done" phir bhi sheet me likh do.
+      try { await markSheetDone(); } catch (_) { /* original error dikhana zyada zaroori */ }
+      setStatus('Mapping request fail: ' + (err.message || err) + '. Result table se CSV download kar sakte hain.', 'error');
+    }
     finally { state.busy = false; if (mapBtn) mapBtn.disabled = !state.configured; renderTable(); }
+  }
+  // ===== 📗 Google Sheet se mapping (v3.71) =====
+  const gs = (id) => { const el = U.$('#fm-gs-' + id, state.root); return el ? clean(el.value) : ''; };
+  const colLetterOk = (v) => /^[A-Za-z]{1,3}$/.test(clean(v));
+  function saveSheetCfg() {
+    try { const cfg = {}; ['link', 'tab', 'start', 'mode', 'first', 'last', 'barcode', 'agent', 'done', 'donetext'].forEach((k) => { cfg[k] = gs(k); }); localStorage.setItem(SHEET_CFG_KEY, JSON.stringify(cfg)); } catch (_) { /* private mode */ }
+  }
+  function restoreSheetCfg(root) {
+    try {
+      const cfg = JSON.parse(localStorage.getItem(SHEET_CFG_KEY) || '{}');
+      Object.keys(cfg).forEach((k) => { const el = U.$('#fm-gs-' + k, root); if (el && cfg[k] != null) el.value = cfg[k]; });
+    } catch (_) { /* first time */ }
+    syncSheetMode(root);
+  }
+  function syncSheetMode(root) {
+    const mode = (U.$('#fm-gs-mode', root) || {}).value || 'range';
+    const show = (id, on) => { const el = U.$('#fm-gs-' + id + '-wrap', root); if (el && el.style) el.style.display = on ? '' : 'none'; };
+    show('first', mode === 'range'); show('last', mode === 'range'); show('barcode', mode !== 'range');
+  }
+  /** Sheet read → queue items → lookup. auto=true: ready rows turant map bhi karo (+ done likho). */
+  async function sheetRun(auto) {
+    if (state.busy) return;
+    const link = gs('link'), tab = gs('tab'), mode = gs('mode') || 'range';
+    const startRow = Math.max(1, Number(gs('start')) || 2), doneText = gs('donetext') || 'done';
+    const colFirst = gs('first').toUpperCase(), colLast = gs('last').toUpperCase(), colBarcode = gs('barcode').toUpperCase(), colAgent = gs('agent').toUpperCase(), colDone = gs('done').toUpperCase();
+    if (!link || !tab) { setStatus('Google Sheet ka link aur tab name dono dein.', 'warn'); return; }
+    if (!colLetterOk(colAgent)) { setStatus('Agent ID column letter dein (jaise C).', 'warn'); return; }
+    if (mode === 'range' && (!colLetterOk(colFirst) || !colLetterOk(colLast))) { setStatus('First barcode aur Last barcode column letters dein (jaise A aur B).', 'warn'); return; }
+    if (mode !== 'range' && !colLetterOk(colBarcode)) { setStatus('Barcode / Tag ID column letter dein.', 'warn'); return; }
+    if (colDone && !colLetterOk(colDone)) { setStatus('Done column letter galat hai (jaise D).', 'warn'); return; }
+    saveSheetCfg();
+    const columns = (mode === 'range' ? [colFirst, colLast] : [colBarcode]).concat([colAgent]).concat(colDone ? [colDone] : []);
+    state.busy = true; setStatus('Google Sheet se rows padh raha hoon…', 'info');
+    let items = [], skippedDone = 0, invalid = 0, blank = 0;
+    try {
+      const res = await fetch(API_SHEET_READ, { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'FF-Dashboard' }, body: JSON.stringify({ sheet: link, tab, startRow, columns }) });
+      let json = {}; try { json = await res.json(); } catch (_) {}
+      if (!res.ok || !Array.isArray(json.rows)) throw new Error(json.error || ('Sheet read HTTP ' + res.status));
+      const nVal = mode === 'range' ? 2 : 1;
+      json.rows.forEach((r, i) => {
+        const rowNo = (json.startRow || startRow) + i, v = r.map(clean);
+        const agentId = v[nVal], doneVal = colDone ? v[nVal + 1] : '';
+        if (!v.slice(0, nVal + 1).some(Boolean)) { blank++; return; }
+        if (doneVal && doneVal.toLowerCase() === doneText.toLowerCase()) { skippedDone++; return; }
+        if (!agentId) { invalid++; return; }
+        if (mode === 'range') {
+          if (!v[0] || !v[1]) { invalid++; return; }
+          items.push({ id: nextId++, type: 'range', first: v[0], last: v[1], agentId, source: 'Sheet row ' + rowNo, sheetRow: rowNo, selected: true });
+        } else {
+          if (!v[0]) { invalid++; return; }
+          const isTag = mode === 'tagId';
+          items.push({ id: nextId++, type: isTag ? 'tagId' : 'barcode', tagId: isTag ? v[0] : '', barcode: isTag ? '' : v[0], serialNo: isTag ? '' : v[0], agentId, source: 'Sheet row ' + rowNo, sheetRow: rowNo, selected: true });
+        }
+      });
+    } catch (err) { state.busy = false; setStatus('Google Sheet read fail: ' + (err.message || err), 'error'); return; }
+    state.busy = false;
+    if (!items.length) { setStatus('Sheet me map karne layak naya row nahi mila' + (skippedDone ? ' (' + skippedDone + ' row pehle se "' + doneText + '" hain)' : '') + (invalid ? ' · ' + invalid + ' row me barcode/Agent ID blank' : '') + '.', 'warn'); return; }
+    if (items.length > MAX_INPUTS) { setStatus('Ek baar me maximum ' + MAX_INPUTS + ' sheet rows. Start row badal kar baaki alag run karein (abhi ' + items.length + ' mili).', 'warn'); return; }
+    state.sheetCtx = { link, tab, colDone, doneText, marked: new Set(), auto: !!auto };
+    state.items.push.apply(state.items, items);
+    const note = items.length + ' sheet rows queue me' + (skippedDone ? ' · ' + skippedDone + ' pehle se done skip' : '') + (invalid ? ' · ' + invalid + ' invalid skip' : '') + '.';
+    setStatus(note + ' StockDataa lookup chal raha hai…', 'info');
+    const ok = await lookup();
+    if (ok === false) return;
+    if (!auto) { setStatus(note + ' Lookup complete — review karke "🚀 Map ready rows" dabayein; mapping ke baad done sheet me likh diya jayega.', 'success'); return; }
+    state.rows.forEach((r) => { r.selected = !!(r.sheetRow && rowReady(r)); });
+    renderTable();
+    await mapReady();
+  }
+  /** Mapping ke baad: jis sheet row ke SAARE tags map ho gaye uske done column me "done" likho. */
+  async function markSheetDone() {
+    const ctx = state.sheetCtx;
+    if (!ctx || !ctx.colDone) return null;
+    const bySheetRow = new Map();
+    for (const r of state.rows) {
+      if (!r.sheetRow || String(r.status || '').startsWith('Duplicate skipped')) continue;
+      const e = bySheetRow.get(r.sheetRow) || { total: 0, ok: 0 };
+      e.total++; if (r.mapped) e.ok++;
+      bySheetRow.set(r.sheetRow, e);
+    }
+    const writes = [];
+    bySheetRow.forEach((e, row) => { if (e.total && e.ok === e.total && !ctx.marked.has(row)) writes.push({ row, value: ctx.doneText }); });
+    if (!writes.length) return 0;
+    const res = await fetch(API_SHEET_MARK, { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'FF-Dashboard' }, body: JSON.stringify({ sheet: ctx.link, tab: ctx.tab, column: ctx.colDone, writes }) });
+    let json = {}; try { json = await res.json(); } catch (_) {}
+    if (!res.ok || !json.ok) throw new Error(json.error || ('Sheet write HTTP ' + res.status));
+    writes.forEach((w) => ctx.marked.add(w.row));
+    return writes.length;
   }
   function downloadCsv() {
     const headers = ['Request','Source','StockDataa Row ID','Inventory Name','Barcode','Tag ID','Serial No','VC Type','Tag Type','Barcode Allocated At','Stock Agent ID','Agent ID Mapped','Agent Name','TL Name','Agent Allocated At','Matched By','Selected','API Status','Message'];
@@ -763,8 +897,14 @@ window.FF = window.FF || {};
     root.innerHTML = '<div class="page-head"><div><h1>🧭 FASTag Mapping</h1><p class="sub">GV Partner · StockDataa se Tag ID, Serial/Barcode, VC Type aur Agent details fetch karke securely map karein.</p></div><div class="head-actions"><span id="fm-api-status" class="badge amber">Mapping API status checking…</span></div></div>' +
       '<div class="grid g-2"><section class="card"><div class="card-head"><h3>📂 Upload mapping file</h3><div class="head-actions"><button class="btn small" id="fm-template">⬇ 4-column API template</button><button class="btn small" id="fm-range-template">⬇ Range input template</button></div></div><div class="card-body"><p class="dim small">API template: tagId, serialNo, vcType, agentId. Range template: firstBarcode, lastBarcode, agentId. Range upload mein barcode series StockDataa se expand hogi; TAG_ID, BARCODE aur TAG_CLASS auto-fill honge.</p><input class="input" id="fm-file" type="file" accept=".csv,.tsv,.txt,.xlsx"><div id="fm-file-note" class="dim small">No file selected.</div><button class="btn primary" id="fm-upload-add">Add file rows</button></div></section>' +
       '<section class="card"><div class="card-head"><h3>⌨️ Quick mapping</h3></div><div class="card-body"><label>Lookup by</label><select id="fm-kind" class="input"><option value="barcode">Barcode / Serial No</option><option value="tagId">Tag ID</option></select><label>Barcode / Tag ID</label><input class="input" id="fm-identifier" placeholder="Barcode ya Tag ID enter karein"><label>Target Agent ID (required)</label><input class="input" id="fm-agent-id" placeholder="Jis Agent ID se map karna hai"><div class="btn-row"><button class="btn" id="fm-add-single">Add to queue</button><button class="btn primary" id="fm-quick-map">⚡ Quick map</button></div><hr><h4>Barcode range</h4><div class="grid g-3"><div><label>First barcode</label><input class="input" id="fm-first" placeholder="Start barcode"></div><div><label>Last barcode</label><input class="input" id="fm-last" placeholder="End barcode"></div><div><label>Target Agent ID (required)</label><input class="input" id="fm-range-agent" placeholder="Jis Agent ID se map karna hai"></div></div><button class="btn" id="fm-add-range">Add range</button></div></section></div>' +
+      '<section class="card"><div class="card-head"><div><h3>📗 Google Sheet se mapping</h3><p class="dim small">Sheet ka link, tab aur columns chuno — rows padhkar StockDataa se match hongi, map hongi, aur jo row poori map ho jaye uske <b>Done</b> column me "done" likh diya jayega. Pehle se "done" wali rows skip hoti hain.</p></div></div><div class="card-body">' +
+        '<div class="grid g-3"><div><label>Google Sheet link / ID</label><input class="input" id="fm-gs-link" placeholder="https://docs.google.com/spreadsheets/d/…"></div><div><label>Tab name</label><input class="input" id="fm-gs-tab" placeholder="Sheet1"></div><div><label>Data kis row se shuru (header ke baad)</label><input class="input" id="fm-gs-start" type="number" min="1" value="2"></div></div>' +
+        '<div class="grid g-3"><div><label>Mapping type</label><select class="input" id="fm-gs-mode"><option value="range">Barcode range (First + Last)</option><option value="barcode">Alag-alag Barcode</option><option value="tagId">Alag-alag Tag ID</option></select></div>' +
+        '<div id="fm-gs-first-wrap"><label>First barcode column</label><input class="input" id="fm-gs-first" maxlength="3" placeholder="A" value="A"></div><div id="fm-gs-last-wrap"><label>Last barcode column</label><input class="input" id="fm-gs-last" maxlength="3" placeholder="B" value="B"></div><div id="fm-gs-barcode-wrap" style="display:none"><label>Barcode / Tag ID column</label><input class="input" id="fm-gs-barcode" maxlength="3" placeholder="A" value="A"></div></div>' +
+        '<div class="grid g-3"><div><label>Agent ID column</label><input class="input" id="fm-gs-agent" maxlength="3" placeholder="C" value="C"></div><div><label>Done likhne wala column</label><input class="input" id="fm-gs-done" maxlength="3" placeholder="D" value="D"></div><div><label>Done me kya likhna hai</label><input class="input" id="fm-gs-donetext" placeholder="done" value="done"></div></div>' +
+        '<div class="btn-row"><button class="btn" id="fm-gs-load">📥 Sheet se load + lookup</button><button class="btn primary" id="fm-gs-auto">⚡ Turant map karo + done likho</button></div><p class="dim small">Pehli baar: Apps Script me naya <code>Code.gs</code> (v3.71) paste karke New version deploy karein, aur sheet ko us Google account ke saath Editor share karein jisse Apps Script chalta hai.</p></div></section>' +
       '<section class="card"><div class="card-head"><div><h3>🔎 StockDataa lookup & mapping queue</h3><p class="dim small">Lookup ke baad preview/review karein. Target Agent ID edit kar sakte hain; API call sirf selected complete rows par hoga.</p></div><div class="head-actions"><button class="btn" id="fm-lookup">🔎 Lookup StockDataa</button><button class="btn primary" id="fm-map" disabled>🚀 Map ready rows</button><button class="btn" id="fm-api-csv">⬇ API CSV · 4 columns</button><button class="btn" id="fm-csv">⬇ Full details CSV</button><button class="btn" id="fm-clear">Clear</button></div></div><div class="card-body"><div id="fm-message" class="notice info">API status check ho raha hai…</div><div id="fm-summary"></div><div id="fm-results"><div class="empty-state">Upload a file or add a barcode / Tag ID above to start.</div></div></div></section>';
-    state.items = []; state.rows = []; state.busy = false;
+    state.items = []; state.rows = []; state.busy = false; state.sheetCtx = null; state.showLimit = SHOW_STEP;
     const status = U.$('#fm-api-status', root);
     fetch(API_STATUS, { credentials: 'same-origin', cache: 'no-store', headers: { 'X-Requested-With': 'FF-Dashboard' } }).then((r) => r.json()).then((j) => {
       state.configured = !!j.configured;
@@ -793,6 +933,9 @@ window.FF = window.FF || {};
         } catch (err) { setStatus('File read error: ' + (err.message || err), 'error'); }
         return;
       }
+      if (target.id === 'fm-gs-load') return sheetRun(false);
+      if (target.id === 'fm-gs-auto') return sheetRun(true);
+      if (target.id === 'fm-more') { state.showLimit = (state.showLimit || SHOW_STEP) + 500; renderTable(); return; }
       if (target.id === 'fm-quick-map') return quickMap();
       if (target.id === 'fm-add-single') {
         const value = clean(U.$('#fm-identifier', root).value), kind = U.$('#fm-kind', root).value, agentId = clean(U.$('#fm-agent-id', root).value);
@@ -811,12 +954,13 @@ window.FF = window.FF || {};
       if (target.id === 'fm-lookup') return lookup();
       if (target.id === 'fm-map') return mapReady();
       if (target.id === 'fm-csv') return downloadCsv();
-      if (target.id === 'fm-clear') { if (state.busy) return; state.items = []; state.rows = []; renderTable(); setStatus('Queue clear ho gayi.', 'info'); return; }
+      if (target.id === 'fm-clear') { if (state.busy) return; state.items = []; state.rows = []; state.sheetCtx = null; state.showLimit = SHOW_STEP; renderTable(); setStatus('Queue clear ho gayi.', 'info'); return; }
       if (target.id === 'fm-select-all') { const checks = state.root.querySelectorAll('[data-fm-select]'); checks.forEach((cb) => { const r = state.rows[Number(cb.dataset.fmSelect)]; if (r && !cb.disabled) r.selected = target.checked; }); renderTable(); return; }
       if (target.hasAttribute('data-fm-remove')) { const idx = Number(target.dataset.fmRemove); if (!state.busy && Number.isInteger(idx)) { state.rows.splice(idx, 1); renderTable(); } }
     });
     root.addEventListener('change', (event) => {
       const t = event.target;
+      if (t.id === 'fm-gs-mode') { syncSheetMode(root); saveSheetCfg(); return; }
       if (t.id === 'fm-select-all') {
         const checks = state.root.querySelectorAll('[data-fm-select]');
         checks.forEach((cb) => { const row = state.rows[Number(cb.dataset.fmSelect)]; if (row && !cb.disabled) row.selected = t.checked; });
@@ -828,6 +972,7 @@ window.FF = window.FF || {};
         if (row && !row.mapped) { row.agentId = clean(t.value); row.status = !row.stock ? row.status : (!row.tagId ? 'Missing tag ID' : (!row.serialNo ? 'Missing serial number / barcode' : (!row.vcType ? 'Missing VC type' : (!row.agentId ? 'Missing agent ID' : 'Ready to map')))); renderTable(); }
       }
     });
+    restoreSheetCfg(root);
     renderTable();
   }
   // normalizeVcType bhi expose hai — tests + doosre pages (bulk tag status) same rule use karein.
