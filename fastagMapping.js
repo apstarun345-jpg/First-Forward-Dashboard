@@ -237,15 +237,48 @@ window.FF = window.FF || {};
     return rows;
   }
   function normalizeVcType(value) {
-    const raw = clean(value).toUpperCase().replace(/\s+/g, '');
+    let raw = clean(value).toUpperCase().replace(/\s+/g, '');
     if (!raw) return '';
-    // StockDataa may contain 4/16 as a number or VC4/VC16 as text.
-    // The mapping API accepts canonical VC-prefixed values.
-    if (/^\d+$/.test(raw)) return 'VC' + raw;
-    if (/^VC\d+$/.test(raw)) return raw;
-    return raw;
+    // StockDataa TAG_CLASS me "4 / 16 / VC4 / vc-4 / Class 4 / 4.0" kuch bhi aa sakta hai.
+    // Mapping API (VC4, VC5, VC6, VC7, VC12, VC15, VC16) sirf canonical "VC<number>" leti hai.
+    raw = raw.replace(/\.0+$/, '').replace(/[^A-Z0-9]/g, ''); // "4.0" → "4" · "VC-4" → "VC4"
+    const m = raw.match(/^(?:TAG|VEHICLE)?CLASS(?:VC)?(\d{1,3})$/) || raw.match(/^VC(\d{1,3})$/);
+    if (m) return 'VC' + Number(m[1]); // "CLASS4" / "VC04" jaise spellings bhi canonical
+    if (/^\d+$/.test(raw)) return 'VC' + Number(raw); // sheet ka plain number → "VC" + digit
+    return raw; // kuch aur ho to API khud bata degi — pehle jaisa behaviour
   }
   const idKey = (v) => expandIdentifierNumber(clean(v)).replace(/[\s,\u00a0-]/g, '').toLowerCase();
+  // gviz rule: sheet ke existing columns se aage ke letters select karne par "Invalid query:
+  // NO_COLUMN: X" aata hai (StockDataa sheet ab patli ho chuki hai — purani hardcoded
+  // "select A..L,M" isliye fail hoti thi). Isliye:
+  //  1) select hamesha schema ke needed letters (config: id..tlName → A..K) tak hi banao;
+  //  2) phir bhi NO_COLUMN aaye to select-list us column tak chhoti karke ek retry (auto-shrink).
+  let stockColumnCap = STOCK_LETTERS.length; // NO_COLUMN aane par ghata jaata hai
+  function selectClause() {
+    const needed = Math.max(...Object.values(fallbackSchema().index)) + 1; // config ka max letter (K → 11)
+    const n = Math.max(1, Math.min(stockColumnCap, needed, STOCK_LETTERS.length));
+    return 'select ' + STOCK_LETTERS.slice(0, n).join(',');
+  }
+  /** D.query + NO_COLUMN auto-shrink retry — sheet jitni patli hai utne hi columns select honge. */
+  async function stockQuery(tq, opts) {
+    try {
+      return await D.query('StockDataa', tq, opts);
+    } catch (err) {
+      const m = String((err && (err.message || err)) || '').match(/NO_COLUMN:\s*([A-Z])/i);
+      if (!m) throw err;
+      const missingIdx = m[1].toUpperCase().charCodeAt(0) - 65; // 0-based column index
+      if (missingIdx < 1) throw err; // column A hi gayab — sheet/data galat hai
+      // Ye letter bheji gayi query ke select me tha? (Concurrent sibling query cap pehle hi
+      // chhota sakti hai — apne tq me letter tha to bhi rebuild karke retry sahi hai.)
+      const selectPart = (String(tq).match(/^select\s+([A-Z](?:\s*,\s*[A-Z])*)\s+where\s/i) || [])[1] || '';
+      const inSelect = new RegExp('(?:^|,)\\s*' + m[1] + '\\s*(?:,|$)', 'i').test(selectPart);
+      if (!inSelect && missingIdx >= stockColumnCap) throw err;
+      stockColumnCap = Math.min(stockColumnCap, missingIdx); // is column aur aage ke letters ab nahi
+      const rebuilt = tq.replace(/^select\s+[A-Z](?:\s*,\s*[A-Z])*\s+where\s/i, selectClause() + ' where ');
+      if (rebuilt === tq) throw err;
+      return D.query('StockDataa', rebuilt, opts);
+    }
+  }
   async function queryField(fieldName, values) {
     const unique = [...new Set(values.map(clean).filter(Boolean))];
     if (!unique.length) return [];
@@ -272,9 +305,9 @@ window.FF = window.FF || {};
     const workers = Array.from({ length: Math.min(3, batches.length) }, async () => {
       while (cursor < batches.length) {
         const work = batches[cursor++], batch = work.values;
-        const make = (numeric, vals) => 'select A,B,C,D,E,F,G,H,I,J,K,L,M where ' + vals.map((x) => field + ' = ' + literal(x, numeric)).join(' or ');
+        const make = (numeric, vals) => selectClause() + ' where ' + vals.map((x) => field + ' = ' + literal(x, numeric)).join(' or ');
         const queryRows = async (tq) => {
-          const table = await D.query('StockDataa', tq, {
+          const table = await stockQuery(tq, {
             fresh: true, timeoutMs: STOCK_LOOKUP_TIMEOUT_MS, retries: 0, directFirst: true
           });
           return stockRows(table, schema);
@@ -342,9 +375,9 @@ window.FF = window.FF || {};
       const PAGE_SIZE = 5000, HARD_CAP = 250000, PARALLEL_PAGES = 4;
       let offset = 0, finished = false, previousPageFingerprint = '';
       const fetchPage = async (start) => {
-        const tq = 'select A,B,C,D,E,F,G,H,I,J,K where ' + field + ' is not null limit ' + PAGE_SIZE + ' offset ' + start;
+        const tq = selectClause() + ' where ' + field + ' is not null limit ' + PAGE_SIZE + ' offset ' + start;
         try {
-          return await D.query('StockDataa', tq, {
+          return await stockQuery(tq, {
             fresh: true, timeoutMs: STOCK_PAGE_TIMEOUT_MS, retries: 0, directFirst: true
           });
         } catch (err) {
@@ -424,18 +457,18 @@ window.FF = window.FF || {};
 
     // Fast path: ask Google for the requested barcode interval directly instead of reading
     // up to 250k stock rows. Query numeric/text variants concurrently to handle mixed typing.
-    const fastSelect = 'select A,B,C,D,E,F,G,H,I,J,K where ';
+    const fastSelect = () => selectClause() + ' where ';
     const variants = [];
-    variants.push(fastSelect + 'D >= ' + literal(from, false) + ' and D <= ' + literal(to, false) + ' limit ' + (MAX_RESULTS + 1));
+    variants.push(fastSelect() + 'D >= ' + literal(from, false) + ' and D <= ' + literal(to, false) + ' limit ' + (MAX_RESULTS + 1));
     if (isDigitKey(from) && isDigitKey(to) && !(from.length > 1 && from[0] === '0') && !(to.length > 1 && to[0] === '0')) {
-      variants.push(fastSelect + 'D >= ' + literal(from, true) + ' and D <= ' + literal(to, true) + ' limit ' + (MAX_RESULTS + 1));
+      variants.push(fastSelect() + 'D >= ' + literal(from, true) + ' and D <= ' + literal(to, true) + ' limit ' + (MAX_RESULTS + 1));
     }
     // Run text + numeric interval predicates concurrently. Mixed-type barcode cells can
     // appear in either result, so merge BOTH completed responses before returning; this avoids
     // a fast partial response silently omitting rows from the other storage type.
     const fastResults = await Promise.all(variants.map(async (tq) => {
       try {
-        const table = await D.query('StockDataa', tq, {
+        const table = await stockQuery(tq, {
           timeoutMs: 4500, directTimeoutMs: 1800, retries: 0, directFirst: true
         });
         return stockRows(table, schema);
@@ -456,12 +489,11 @@ window.FF = window.FF || {};
     // mixed-type/text-stored IDs. Exact lookup/cached session index should handle most singles.
     // Multiple range pages are fetched in parallel, stopping as soon as pages are empty.
     const PAGE_SIZE = 5000, HARD_CAP = 250000, PARALLEL_PAGES = 4;
-    const selected = 'select A,B,C,D,E,F,G,H,I,J,K where D is not null';
     const matched = new Map();
     let offset = 0, finished = false, previousPageFingerprint = '';
     const fetchPage = async (start) => {
       try {
-        return await D.query('StockDataa', selected + ' limit ' + PAGE_SIZE + ' offset ' + start, {
+        return await stockQuery(selectClause() + ' where D is not null limit ' + PAGE_SIZE + ' offset ' + start, {
           timeoutMs: 4500, directTimeoutMs: 1800, retries: 0, directFirst: true
         });
       } catch (err) {
@@ -798,5 +830,6 @@ window.FF = window.FF || {};
     });
     renderTable();
   }
-  FF.pages.fastagMapping = { title: 'FASTag Mapping', render };
+  // normalizeVcType bhi expose hai — tests + doosre pages (bulk tag status) same rule use karein.
+  FF.pages.fastagMapping = { title: 'FASTag Mapping', render, normalizeVcType };
 })(window.FF);

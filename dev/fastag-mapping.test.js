@@ -13,9 +13,20 @@ test('FASTag Mapping is registered under GV Partner and loads lazily', async () 
   ]);
   assert.match(app, /id: 'fastagMapping'[\s\S]{0,220}group: 'GV Partner', adminOnly: true/);
   assert.match(lazy, /fastagMapping: \['fastagMapping'\]/);
-  assert.match(page, /FF\.pages\.fastagMapping = \{ title: 'FASTag Mapping', render \}/);
+  assert.match(page, /FF\.pages\.fastagMapping = \{ title: 'FASTag Mapping', render, normalizeVcType \}/);
   assert.match(pkg, /fastagMapping/);
   assert.match(server, /key: 'fastagMapping', label: 'GV Partner · FASTag Mapping \(admin-only API mapping\)'/);
+});
+
+test('Mapping API ko VC type hamesha canonical "VC<number>" form me jaata hai (StockDataa plain 4/5/12 bhi)', async () => {
+  const [page, server] = await Promise.all([read('fastagMapping.js'), read('server.js')]);
+  // Server side — /api/fastag-mapping/map payload banate waqt normalize kare (stale cached
+  // client ya CSV upload kuch bhi bheje, apnapayment API ko VC4… jaisa hi jaaye).
+  assert.match(server, /function normalizeVcType\(value\)/);
+  assert.match(server, /vcType: normalizeVcType\(row && row\.vcType\)/);
+  // Client side — StockDataa read par aur API send dono jagah same normalizer.
+  assert.match(page, /stock\.vcType = normalizeVcType\(stock\.vcType\)/);
+  assert.match(page, /vcType: normalizeVcType\(r\.vcType\)/);
 });
 
 test('FASTag Mapping supports barcode ranges, multiple identifiers, StockDataa fields and full CSV', async () => {
@@ -33,7 +44,7 @@ test('FASTag Mapping template is exactly the requested four columns; lookup trie
   const page = await read('fastagMapping.js');
   assert.match(page, /saveCsvFile\('fastag-mapping-template\.csv', \['tagId', 'serialNo', 'vcType', 'agentId'\]/);
   assert.match(page, /const schema = await stockSchema\(\)/);
-  assert.match(page, /D\.query\('StockDataa', tq, \{[\s\S]{0,140}fresh: true, timeoutMs: STOCK_LOOKUP_TIMEOUT_MS, retries: 0, directFirst: true/);
+  assert.match(page, /stockQuery\(tq, \{[\s\S]{0,140}fresh: true, timeoutMs: STOCK_LOOKUP_TIMEOUT_MS, retries: 0, directFirst: true/);
   assert.match(page, /const variants = \[make\(false, batch\), make\(true, batch\)\]/);
   assert.match(page, /queryRows\(tq\)\.then/);
   assert.match(page, /queryField\('tagId', tagIds\)/);
@@ -41,6 +52,22 @@ test('FASTag Mapping template is exactly the requested four columns; lookup trie
   assert.match(page, /Range upload mein barcode series StockDataa se expand hogi/);
   assert.match(page, /TAG_ID, BARCODE aur TAG_CLASS auto-fill honge/);
   assert.match(page, /if \(!value \|\| !agentId\)/);
+});
+
+test('StockDataa select sirf needed columns (A–K) tak — patli sheet par NO_COLUMN auto-shrink retry', async () => {
+  const page = await read('fastagMapping.js');
+  // Regression v3.70.5: hardcoded "select A,…,K,L,M" 11-column StockDataa par gviz
+  // "Invalid query: NO_COLUMN: L" deti thi — poora lookup fail ho jaata tha.
+  assert.doesNotMatch(page, /select A,B,C,D,E,F,G,H,I,J,K,L,M/);
+  assert.doesNotMatch(page, /select A,B,C,D,E,F,G,H,I,J,K where/);
+  assert.match(page, /function selectClause\(\)/);
+  assert.match(page, /make = \(numeric, vals\) => selectClause\(\) \+ ' where '/);
+  assert.match(page, /const tq = selectClause\(\) \+ ' where ' \+ field \+ ' is not null limit '/);
+  assert.match(page, /stockQuery\(selectClause\(\) \+ ' where D is not null limit '/);
+  assert.match(page, /const fastSelect = \(\) => selectClause\(\) \+ ' where ';/);
+  assert.match(page, /async function stockQuery\(tq, opts\)/);
+  assert.match(page, /NO_COLUMN:\\s\*\(\[A-Z\]\)/);
+  assert.match(page, /stockColumnCap = Math\.min\(stockColumnCap, missingIdx\)/);
 });
 
 test('StockDataa column mapping uses TAG_ID, BARCODE and TAG_CLASS; separate range upload + API CSV schemas', async () => {
