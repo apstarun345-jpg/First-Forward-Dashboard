@@ -89,6 +89,14 @@ export function createMappingStock({ getConfig, loadPages, normalizeVcType = (v)
         if (onProgress) { try { onProgress(progress); } catch { /* progress callback optional */ } }
       }
     });
+
+    // A transient/misconfigured gviz response can be syntactically valid yet return zero records.
+    // Never mark that as a ready index: Quick Map would otherwise report every existing barcode
+    // as missing, and an empty rebuild could replace a previously useful cache.
+    if (!rows.length) {
+      throw new Error('StockDataa se 0 TAG_ID/BARCODE records read hue. Empty index ready nahi kiya; sheet/tab, TAG_ID column, BARCODE column aur Google access verify karein.');
+    }
+
     const byBarcode = new Map(), byTag = new Map(), sorted = [], text = [];
     const push = (map, key, i) => { if (!key) return; const cur = map.get(key); if (cur) cur.push(i); else map.set(key, [i]); };
     rows.forEach((rec, i) => {
