@@ -8,10 +8,10 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const source = await fs.readFile(path.join(ROOT, 'fastagMapping.js'), 'utf8');
 
-function makePage() {
+function makePage(stockClass = 'VC20') {
   const labels = ['STOCK_ID','INVENTORY_NAME','TAG_ID','BARCODE','TAG_CLASS','TAG_TYPE','BARCODE_ALLOCATED_AT','AGENT_ID','AGENT_NAME','AGENT_ALLOCATED_AT','TL_NAME','EXTRA_L','EXTRA_M'];
   const letters = 'ABCDEFGHIJKLM'.split('');
-  const stock = ['STOCK-1','Test tag','TAG-12345','8900000000123456','VC20','RFID','2026-10-01','OLD-AGENT','Old Agent','2026-10-01','TL Test','',''];
+  const stock = ['STOCK-1','Test tag','TAG-12345','8900000000123456',String(stockClass),'RFID','2026-10-01','OLD-AGENT','Old Agent','2026-10-01','TL Test','',''];
   const cols = labels.map((label, i) => ({ id: letters[i], label, type: 'string' }));
   const queryLog = [];
   const cell = (v) => v == null ? null : ({ v, f: String(v) });
@@ -219,4 +219,14 @@ test('FASTag Mapping restores the lookup queue after a failed query so retry wor
   assert.match(html, /TAG-12345/, 'second attempt retries from the restored queue');
   assert.match(html, /RETRY-TARGET/);
   assert.ok(queryLog.length >= 2, 'queries ran on both attempts');
+});
+
+
+test('FASTag Mapping normalizes numeric StockDataa vehicle classes to VC-prefixed values', async () => {
+  const { root, selectors } = makePage('16');
+  selectors.get('#fm-kind').value = 'barcode';
+  selectors.get('#fm-identifier').value = '8900000000123456';
+  selectors.get('#fm-agent-id').value = 'TARGET-VC16';
+  await click(root, 'fm-lookup');
+  assert.match(selectors.get('#fm-results').innerHTML, /VC16/, 'numeric TAG_CLASS 16 is normalized to VC16');
 });
