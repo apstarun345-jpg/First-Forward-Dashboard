@@ -858,7 +858,7 @@ FF.pages = FF.pages || {};
         ${res.tags.slice(0, 60).map((t) => {
         const f = t.ff[0] || {}, g = t.gv[0] || {};
         const st = tagStatus(t);
-        return `<tr><td class="ms-barcode-cell"><b>${esc(U.barcode(t.key))}</b></td><td>${esc((f.tagId || g.tagId) || '—')}</td>
+        return `<tr><td class="ms-barcode-cell" style="white-space:nowrap"><b>${esc(U.barcode(t.key))}</b></td><td>${esc((f.tagId || g.tagId) || '—')}</td>
             <td>${esc(f.agentName || '—')}${f.agentId ? `<small>${esc(f.agentId)}</small>` : ''}</td><td>${esc(tlText(f.tlName, 'ff') || '—')}</td>
             <td><span class="badge ${st.ff.tone}">${esc(st.ff.text)}</span></td>
             <td>${esc(g.agentName || '—')}${g.agentId ? `<small>${esc(g.agentId)}</small>` : ''}</td><td>${esc(tlText(g.tlName, 'gv') || '—')}</td>
