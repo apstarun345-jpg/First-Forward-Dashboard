@@ -175,3 +175,48 @@ test('FASTag Mapping accepts formatted numeric barcode identifiers', async () =>
   assert.match(html, /TAG-12345/);
   assert.match(html, /TARGET-FORMATTED/);
 });
+
+test('FASTag Mapping Lookup button picks up typed barcode + Agent ID without a separate Add-to-queue click', async () => {
+  const { root, selectors, queryLog } = makePage();
+  selectors.get('#fm-kind').value = 'barcode';
+  selectors.get('#fm-identifier').value = '8900000000123456';
+  selectors.get('#fm-agent-id').value = 'TYPED-TARGET-42';
+  await click(root, 'fm-lookup');
+  const html = selectors.get('#fm-results').innerHTML;
+  assert.match(html, /TAG-12345/, 'typed identifier was auto-queued and looked up');
+  assert.match(html, /TYPED-TARGET-42/);
+  assert.ok(queryLog.length > 0, 'gviz lookup actually ran');
+});
+
+test('FASTag Mapping keeps typed range inputs usable when Lookup is clicked directly', async () => {
+  const { root, selectors, queryLog } = makePage();
+  selectors.get('#fm-first').value = '8900000000123456';
+  selectors.get('#fm-last').value = '8900000000123456';
+  selectors.get('#fm-range-agent').value = 'TYPED-RANGE-7';
+  await click(root, 'fm-lookup');
+  const html = selectors.get('#fm-results').innerHTML;
+  assert.match(html, /TAG-12345/, 'typed range was auto-queued and expanded');
+  assert.match(html, /TYPED-RANGE-7/);
+  assert.ok(queryLog.some((q) => /where D is not null limit 5000 offset 0/i.test(q.tq)), 'paged range scan ran');
+});
+
+test('FASTag Mapping restores the lookup queue after a failed query so retry works without re-entering inputs', async () => {
+  const { root, selectors, FF, queryLog } = makePage();
+  const originalQuery = FF.data.query;
+  let failNext = true;
+  FF.data.query = async (sheet, tq, opts) => {
+    if (failNext) { failNext = false; const err = new Error('upstream timeout'); err.name = 'Error'; throw err; }
+    return originalQuery(sheet, tq, opts);
+  };
+  selectors.get('#fm-kind').value = 'barcode';
+  selectors.get('#fm-identifier').value = '8900000000123456';
+  selectors.get('#fm-agent-id').value = 'RETRY-TARGET';
+  await click(root, 'fm-lookup');
+  assert.match(selectors.get('#fm-message').textContent, /Lookup fail/, 'first attempt reports the failure');
+  assert.match(selectors.get('#fm-message').textContent, /queue me wapas aa gaye/, 'user is told inputs were restored');
+  await click(root, 'fm-lookup');
+  const html = selectors.get('#fm-results').innerHTML;
+  assert.match(html, /TAG-12345/, 'second attempt retries from the restored queue');
+  assert.match(html, /RETRY-TARGET/);
+  assert.ok(queryLog.length >= 2, 'queries ran on both attempts');
+});
