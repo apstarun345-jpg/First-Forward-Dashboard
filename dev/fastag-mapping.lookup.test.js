@@ -163,3 +163,15 @@ test('FASTag Mapping paginates StockDataa and completes a numeric barcode range 
   assert.match(html, /AUTO-SPLIT-AGENT/);
   assert.ok(queryLog.some((q) => /where D is not null limit 5000 offset 0/i.test(q.tq)), 'bounded page scan was issued');
 });
+
+test('FASTag Mapping accepts formatted numeric barcode identifiers', async () => {
+  const { root, selectors } = makePage();
+  selectors.get('#fm-kind').value = 'barcode';
+  selectors.get('#fm-identifier').value = '8,900,000,000,123,456';
+  selectors.get('#fm-agent-id').value = 'TARGET-FORMATTED';
+  await click(root, 'fm-add-single');
+  await click(root, 'fm-lookup');
+  const html = selectors.get('#fm-results').innerHTML;
+  assert.match(html, /TAG-12345/);
+  assert.match(html, /TARGET-FORMATTED/);
+});

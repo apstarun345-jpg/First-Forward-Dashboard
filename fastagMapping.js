@@ -210,7 +210,7 @@ window.FF = window.FF || {};
       };
     }).filter((r) => r.tagId || r.barcode || r.serialNo);
   }
-  const idKey = (v) => expandIdentifierNumber(clean(v)).toLowerCase().replace(/[\s,\u00a0]/g, '');
+  const idKey = (v) => expandIdentifierNumber(clean(v)).replace(/[\s,\u00a0-]/g, '').toLowerCase();
   async function queryField(fieldName, values) {
     const unique = [...new Set(values.map(clean).filter(Boolean))];
     if (!unique.length) return [];
@@ -307,16 +307,18 @@ window.FF = window.FF || {};
       } catch (err) {
         throw new Error('StockDataa paged barcode lookup failed near rows ' + (offset + 1) + '–' + (offset + offsets.length * PAGE_SIZE) + ': ' + String(err && (err.message || err) || 'Google Sheets query error'));
       }
-      for (const page of pages) {
+      for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
+        const page = pages[pageIndex];
+        const pageRows = page.rows || [];
         const rows = stockRows(page, schema);
         for (const row of rows) {
           if (!row.barcode) continue;
           if (compareBarcode(row.barcode, from) < 0 || compareBarcode(row.barcode, to) > 0) continue;
           matched.set(idKey(row.tagId) + '|' + idKey(row.barcode), row);
         }
-        if ((page.rows || []).length < PAGE_SIZE) { finished = true; break; }
+        if (pageRows.length < PAGE_SIZE) { finished = true; break; }
       }
-      offset += pages.length * PAGE_SIZE;
+      offset += offsets.length * PAGE_SIZE;
     }
     if (!finished && offset >= HARD_CAP) {
       throw new Error('StockDataa mein 250,000 rows scan ho chuki hain. Exact match ke liye chhoti barcode range dein.');
