@@ -244,8 +244,8 @@ test('v3.30 per-agent tag requests — split, validation, mobile status, duplica
     const rej = await jsonCall(server.base, `/api/tag-requests/${encodeURIComponent(rq2.id)}`, 'PUT', { status: 'rejected', adminNote: 'Pincode detail confirm karein' }, admin);
     assert.equal(rej.json.request.status, 'rejected');
     const employeeStatusUpdated = await jsonCall(server.base, `/api/public/tag-request/employee-status?token=${encodeURIComponent(employeeToken)}`);
-    assert.equal(employeeStatusUpdated.json.totalRequests, 3);
-    assert.equal(employeeStatusUpdated.json.pending, 1, 'repeat submission remains pending');
+    assert.equal(employeeStatusUpdated.json.totalRequests, 4, 'shared employee link includes a separate employee request too');
+    assert.equal(employeeStatusUpdated.json.pending, 2, 'repeat submission and the other employee request remain pending');
     assert.equal(employeeStatusUpdated.json.approved, 1);
     assert.equal(employeeStatusUpdated.json.rejected, 1);
     assert.equal(employeeStatusUpdated.json.requests.find((r) => r.id === rq1.id).adminNote, 'VC5 abhi stock me nahi');
