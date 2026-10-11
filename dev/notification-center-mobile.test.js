@@ -29,9 +29,34 @@ test('notification center and mobile navigation remain touch-friendly in the PWA
   const html = source('index.html');
   const css = source('mobile-fix.css');
   const sw = source('sw.js');
-  assert.match(html, /mobile-fix\.css\?v=4/);
+  assert.match(html, /mobile-fix\.css\?v=5/);
   assert.match(css, /html\.mobile-ui #mobile-nav \.mobile-nav-item\[aria-current="page"\]/);
   assert.match(css, /html\.mobile-ui \.notify-center-filters\s*\{[\s\S]*?grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
   assert.match(css, /html\.mobile-ui \.notify-center-loadmore\s*\{[\s\S]*?min-height: 48px !important/);
-  assert.match(sw, /apnapayment-v126/);
+  assert.match(sw, /apnapayment-v127/);
+});
+
+
+test('Smart Home provides permission-filtered shortcuts without new data workflows', () => {
+  const home = source('home.js');
+  assert.match(home, /home-quick-access/);
+  assert.match(home, /\.filter\(\(action\) => FF\.auth\.can\(action\.perm\)\)/);
+  assert.match(home, /href="#\/\$\{esc\(action\.id\)\}"/);
+  assert.match(home, /Master Search/);
+  assert.match(home, /Tag Requests/);
+  assert.match(home, /GV Stock/);
+});
+
+test('native mobile workspace uses sane text sizes and a six-item bottom navigation', () => {
+  const app = source('app.js');
+  const css = source('mobile-fix.css');
+  const html = source('index.html');
+  const sw = source('sw.js');
+  assert.match(app, /mobile-nav-action\$\{active \? ' active' : ''\}/);
+  assert.match(app, /\$\{active \? ' aria-current="page"' : ''\}/);
+  assert.match(css, /grid-template-columns:repeat\(6,minmax\(0,1fr\)\) !important/);
+  assert.match(css, /html\.mobile-ui body \{ font-size:17px !important; line-height:1\.45 !important; \}/);
+  assert.match(css, /home-launch-tile/);
+  assert.match(html, /mobile-fix\.css\?v=5/);
+  assert.match(sw, /apnapayment-v127/);
 });
