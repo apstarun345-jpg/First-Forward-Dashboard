@@ -222,6 +222,47 @@ test('FASTag Mapping restores the lookup queue after a failed query so retry wor
 });
 
 
+test('FASTag Mapping continues barcode fallback when the data source returns partial pages', async () => {
+  const { root, selectors, FF, queryLog } = makePage();
+  const originalQuery = FF.data.query;
+  const labels = ['STOCK_ID','INVENTORY_NAME','TAG_ID','BARCODE','TAG_CLASS','TAG_TYPE','BARCODE_ALLOCATED_AT','AGENT_ID','AGENT_NAME','AGENT_ALLOCATED_AT','TL_NAME','EXTRA_L','EXTRA_M'];
+  const cols = labels.map((label, i) => ({ id: 'ABCDEFGHIJKLM'[i], label, type: 'string' }));
+  const makeTable = (rows) => ({
+    cols,
+    rows: rows.map((values) => values.map((v) => v == null ? null : ({ v: String(v), f: String(v) })))
+  });
+  const distractors = [0, 1, 2].map((i) => [
+    'STOCK-' + i, 'Distractor', 'DUMMY-' + i, '700000000000000' + i, '4', 'RFID', '',
+    'OLD-AGENT', 'Old Agent', '', 'TL Test', '', ''
+  ]);
+  const target = [
+    'STOCK-1', 'Test tag', 'TAG-12345', '8900000000123456', '16', 'RFID',
+    '2026-10-01', 'OLD-AGENT', 'Old Agent', '2026-10-01', 'TL Test', '', ''
+  ];
+  FF.data.query = async (sheet, tq, opts = {}) => {
+    queryLog.push({ tq, range: opts.range, fresh: opts.fresh, directFirst: opts.directFirst });
+    // Simulate both exact predicates silently missing the barcode.
+    if (/where\\s+D\\s*=/.test(tq)) return makeTable([]);
+    const page = tq.match(/where\\s+D\\s+is\\s+not\\s+null\\s+limit\\s+(\\d+)\\s+offset\\s+(\\d+)/i);
+    if (page) {
+      assert.equal(opts.fresh, true, 'fallback must bypass the cached page');
+      assert.equal(opts.directFirst, true, 'fallback should query the source directly first');
+      const offset = Number(page[2]);
+      // Pretend the backend caps the first response at three rows, below the requested limit.
+      return offset === 0 ? makeTable(distractors) : (offset === 3 ? makeTable([target]) : makeTable([]));
+    }
+    return originalQuery(sheet, tq, opts);
+  };
+  selectors.get('#fm-kind').value = 'barcode';
+  selectors.get('#fm-identifier').value = '8900000000123456';
+  selectors.get('#fm-agent-id').value = 'TARGET-PAGED';
+  await click(root, 'fm-lookup');
+  const html = selectors.get('#fm-results').innerHTML;
+  assert.match(html, /TAG-12345/, 'target row on a later partial page should be found');
+  assert.match(html, /VC16/, 'numeric class should still be normalized');
+  assert.ok(queryLog.some((q) => /offset 3/i.test(q.tq)), 'scan advances by the actual short page size');
+});
+
 test('FASTag Mapping normalizes numeric StockDataa vehicle classes to VC-prefixed values', async () => {
   const { root, selectors } = makePage('16');
   selectors.get('#fm-kind').value = 'barcode';
