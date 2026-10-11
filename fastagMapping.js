@@ -279,20 +279,45 @@ window.FF = window.FF || {};
 
         let rows = [];
         if (work.numeric) {
-          // Numeric + quoted-text equality in parallel. Previously the text fallback waited
-          // for the numeric request to time out first, doubling the delay for common barcodes.
-          const attempts = await Promise.allSettled([
-            queryRows(make(true, batch)),
-            queryRows(make(false, batch))
-          ]);
-          const failures = attempts.filter((attempt) => attempt.status === 'rejected');
-          rows = attempts.filter((attempt) => attempt.status === 'fulfilled').flatMap((attempt) => attempt.value);
-          if (!attempts.some((attempt) => attempt.status === 'fulfilled') && failures.length) {
-            const err = failures[0].reason;
-            throw new Error(isLookupTimeout(err)
-              ? 'StockDataa lookup timeout. Network/source slow hai; same lookup cache se dobara try karein.'
-              : 'StockDataa lookup failed: ' + String(err && (err.message || err) || 'Google Sheets query error'));
-          }
+          // Launch text + numeric variants together, but resolve as soon as every requested
+          // identifier in this batch has a match. One slow sibling request won't delay Quick Map.
+          rows = await new Promise((resolve, reject) => {
+            const variants = [make(false, batch), make(true, batch)];
+            let settled = 0, successful = 0, done = false;
+            const failures = [], matches = new Map();
+            const finish = (value) => { if (!done) { done = true; resolve(value); } };
+            variants.forEach((tq) => {
+              queryRows(tq).then((resultRows) => {
+                if (done) return;
+                successful++;
+                for (const row of resultRows) {
+                  const sourceValue = fieldName === 'tagId' ? row.tagId : row.barcode;
+                  if (batch.some((value) => idKey(value) === idKey(sourceValue))) {
+                    matches.set(idKey(row.tagId) + '|' + idKey(row.barcode), row);
+                  }
+                }
+                if (batch.every((value) => [...matches.values()].some((row) => matchesValue(row, value)))) {
+                  finish([...matches.values()]);
+                  return;
+                }
+                settled++;
+                if (settled === variants.length) finish([...matches.values()]);
+              }).catch((err) => {
+                if (done) return;
+                failures.push(err);
+                settled++;
+                if (settled === variants.length) {
+                  if (successful) finish([...matches.values()]);
+                  else {
+                    const first = failures[0];
+                    reject(new Error(isLookupTimeout(first)
+                      ? 'StockDataa lookup timeout. Network/source slow hai; same lookup cache se dobara try karein.'
+                      : 'StockDataa lookup failed: ' + String(first && (first.message || first) || 'Google Sheets query error')));
+                  }
+                }
+              });
+            });
+          });
         } else {
           rows = await queryRows(make(false, batch));
         }
@@ -402,20 +427,26 @@ window.FF = window.FF || {};
     if (isDigitKey(from) && isDigitKey(to) && !(from.length > 1 && from[0] === '0') && !(to.length > 1 && to[0] === '0')) {
       variants.push(fastSelect + 'D >= ' + literal(from, true) + ' and D <= ' + literal(to, true) + ' limit ' + (MAX_RESULTS + 1));
     }
-    const fastAttempts = await Promise.allSettled(variants.map((tq) => D.query('StockDataa', tq, {
-      timeoutMs: 4500, directTimeoutMs: 1800, retries: 0, directFirst: true
-    })));
-    const fastRows = [];
+    const fastDedupe = new Map();
     let fastError = null;
-    for (const attempt of fastAttempts) {
-      if (attempt.status === 'rejected') { if (!fastError) fastError = attempt.reason; continue; }
-      for (const row of stockRows(attempt.value, schema)) {
-        if (row.barcode && compareBarcode(row.barcode, from) >= 0 && compareBarcode(row.barcode, to) <= 0) fastRows.push(row);
+    // String query first because StockDataa BARCODE often arrives as text despite containing
+    // digits. If it returns matching rows, proceed immediately; numeric query is only needed
+    // when the text variant is empty or rejected.
+    for (const tq of variants) {
+      try {
+        const table = await D.query('StockDataa', tq, {
+          timeoutMs: 4500, directTimeoutMs: 1800, retries: 0, directFirst: true
+        });
+        for (const row of stockRows(table, schema)) {
+          if (row.barcode && compareBarcode(row.barcode, from) >= 0 && compareBarcode(row.barcode, to) <= 0) {
+            fastDedupe.set(idKey(row.tagId) + '|' + idKey(row.barcode), row);
+          }
+        }
+        if (fastDedupe.size) return rememberRange([...fastDedupe.values()]);
+      } catch (err) {
+        if (!fastError) fastError = err;
       }
     }
-    const fastDedupe = new Map();
-    for (const row of fastRows) fastDedupe.set(idKey(row.tagId) + '|' + idKey(row.barcode), row);
-    if (fastDedupe.size) return rememberRange([...fastDedupe.values()]);
     // If the bounded range query returns nothing, fall back to paged local comparison for
     // mixed-type/text-stored IDs. Exact lookup/cached session index should handle most singles.
     // Multiple range pages are fetched in parallel, stopping as soon as pages are empty.
@@ -470,7 +501,7 @@ window.FF = window.FF || {};
     const result = [...matched.values()];
     // Cache only complete scans; never cache a partially scanned range as complete.
     if (finished && matched.size <= MAX_RESULTS) return rememberRange(result);
-    if (!matched.size && fastError && finished) return rememberRange(result);
+    if (finished && matched.size <= MAX_RESULTS) return rememberRange(result);
     return result;
   }
   function addResult(item, stock, matchedBy) {
