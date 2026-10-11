@@ -148,7 +148,7 @@ test('FASTag Mapping tries the bounded barcode interval before expensive paginat
   const { root, selectors, FF, queryLog } = makePage();
   const originalQuery = FF.data.query;
   FF.data.query = async (sheet, tq, opts) => {
-    if (/where D >=/.test(tq)) return { cols: [], rows: [] };
+    if (/where D >=/.test(tq)) { queryLog.push({ tq, range: opts?.range }); return { cols: [], rows: [] }; }
     if (/where D is not null limit 5000 offset 0/i.test(tq)) {
       assert.equal(opts.timeoutMs, 4500, 'fallback page query has a short timeout');
     }
