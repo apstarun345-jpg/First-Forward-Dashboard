@@ -141,15 +141,16 @@ test('FASTag Mapping expands first/last barcode from StockDataa and applies the 
   assert.match(html, /TAG-12345/);
   assert.match(html, /VC20/);
   assert.match(html, /RANGE-TARGET-99/);
-  assert.ok(queryLog.some((q) => /where D is not null limit 5000 offset 0/i.test(q.tq)), 'range lookup scans StockDataa in bounded pages rather than using a slow range predicate');
+  assert.ok(queryLog.some((q) => /where D >= "8900000000123456" and D <= "8900000000123456"/i.test(q.tq)), 'range lookup tries a narrow interval predicate first');
 });
 
-test('FASTag Mapping paginates StockDataa and completes a numeric barcode range without a broad-query timeout', async () => {
+test('FASTag Mapping tries the bounded barcode interval before expensive pagination', async () => {
   const { root, selectors, FF, queryLog } = makePage();
   const originalQuery = FF.data.query;
   FF.data.query = async (sheet, tq, opts) => {
+    if (/where D >=/.test(tq)) return { cols: [], rows: [] };
     if (/where D is not null limit 5000 offset 0/i.test(tq)) {
-      assert.equal(opts.timeoutMs, 55000, 'bounded page query has an explicit timeout');
+      assert.equal(opts.timeoutMs, 4500, 'fallback page query has a short timeout');
     }
     return originalQuery(sheet, tq, opts);
   };
@@ -161,7 +162,7 @@ test('FASTag Mapping paginates StockDataa and completes a numeric barcode range 
   const html = selectors.get('#fm-results').innerHTML;
   assert.match(html, /TAG-12345/);
   assert.match(html, /AUTO-SPLIT-AGENT/);
-  assert.ok(queryLog.some((q) => /where D is not null limit 5000 offset 0/i.test(q.tq)), 'bounded page scan was issued');
+  assert.ok(queryLog.some((q) => /where D >=/.test(q.tq)), 'narrow interval query was attempted first');
 });
 
 test('FASTag Mapping accepts formatted numeric barcode identifiers', async () => {
@@ -197,7 +198,7 @@ test('FASTag Mapping keeps typed range inputs usable when Lookup is clicked dire
   const html = selectors.get('#fm-results').innerHTML;
   assert.match(html, /TAG-12345/, 'typed range was auto-queued and expanded');
   assert.match(html, /TYPED-RANGE-7/);
-  assert.ok(queryLog.some((q) => /where D is not null limit 5000 offset 0/i.test(q.tq)), 'paged range scan ran');
+  assert.ok(queryLog.some((q) => /where D >=/.test(q.tq)), 'range query used the bounded interval path');
 });
 
 test('FASTag Mapping restores the lookup queue after a failed query so retry works without re-entering inputs', async () => {
