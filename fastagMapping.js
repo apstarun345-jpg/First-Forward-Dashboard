@@ -205,10 +205,19 @@ window.FF = window.FF || {};
       const val = (key) => tableCellText(row[ix[key]], table.cols && table.cols[ix[key]], key);
       return {
         stockRowId: val('id'), inventoryName: val('name'), tagId: val('tagId'), barcode: val('barcode'), serialNo: val('serialNo') || val('barcode'),
-        vcType: val('vcType'), tagType: val('tagType'), barcodeAllocatedAt: val('barcodeAllocatedAt'), stockAgentId: val('agentId'),
+        vcType: normalizeVcType(val('vcType')), tagType: val('tagType'), barcodeAllocatedAt: val('barcodeAllocatedAt'), stockAgentId: val('agentId'),
         stockAgentName: val('agentName'), agentAllocatedAt: val('agentAllocatedAt'), tlName: val('tlName')
       };
     }).filter((r) => r.tagId || r.barcode || r.serialNo);
+  }
+  function normalizeVcType(value) {
+    const raw = clean(value).toUpperCase().replace(/\s+/g, '');
+    if (!raw) return '';
+    // StockDataa may contain 4/16 as a number or VC4/VC16 as text.
+    // The mapping API accepts canonical VC-prefixed values.
+    if (/^\d+$/.test(raw)) return 'VC' + raw;
+    if (/^VC\d+$/.test(raw)) return raw;
+    return raw;
   }
   const idKey = (v) => expandIdentifierNumber(clean(v)).replace(/[\s,\u00a0-]/g, '').toLowerCase();
   async function queryField(fieldName, values) {
@@ -509,7 +518,7 @@ window.FF = window.FF || {};
       let success = 0, failed = 0;
       for (let i = 0; i < ready.length; i += 100) {
         const batch = ready.slice(i, i + 100);
-        const res = await fetch(API_MAP, { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'FF-Dashboard' }, body: JSON.stringify({ rows: batch.map((r) => ({ tagId: r.tagId, serialNo: r.serialNo, vcType: r.vcType, agentId: r.agentId })) }) });
+        const res = await fetch(API_MAP, { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'FF-Dashboard' }, body: JSON.stringify({ rows: batch.map((r) => ({ tagId: r.tagId, serialNo: r.serialNo, vcType: normalizeVcType(r.vcType), agentId: r.agentId })) }) });
         let json = {}; try { json = await res.json(); } catch (_) {}
         if (!res.ok || !Array.isArray(json.results)) throw new Error(json.error || ('Mapping API HTTP ' + res.status));
         json.results.forEach((out, j) => {
