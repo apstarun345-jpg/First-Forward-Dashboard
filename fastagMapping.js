@@ -203,11 +203,14 @@ window.FF = window.FF || {};
     const ix = schema && schema.index ? schema.index : fallbackSchema().index;
     return (table.rows || []).map((row) => {
       const val = (key) => tableCellText(row[ix[key]], table.cols && table.cols[ix[key]], key);
-      return {
+      const stock = {
         stockRowId: val('id'), inventoryName: val('name'), tagId: val('tagId'), barcode: val('barcode'), serialNo: val('serialNo') || val('barcode'),
-        vcType: normalizeVcType(val('vcType')), tagType: val('tagType'), barcodeAllocatedAt: val('barcodeAllocatedAt'), stockAgentId: val('agentId'),
+        vcType: val('vcType'), tagType: val('tagType'), barcodeAllocatedAt: val('barcodeAllocatedAt'), stockAgentId: val('agentId'),
         stockAgentName: val('agentName'), agentAllocatedAt: val('agentAllocatedAt'), tlName: val('tlName')
       };
+      // Normalize class after reading raw StockDataa cell, so lookup values stay untouched.
+      stock.vcType = normalizeVcType(stock.vcType);
+      return stock;
     }).filter((r) => r.tagId || r.barcode || r.serialNo);
   }
   function normalizeVcType(value) {
@@ -287,22 +290,39 @@ window.FF = window.FF || {};
       const stillMissing = unique.filter((value) => ![...found.values()].some((row) => idKey(row.barcode) === idKey(value)));
       if (stillMissing.length) {
         const PAGE_SIZE = 5000, HARD_CAP = 250000;
-        let offset = 0, finished = false;
+        let offset = 0, finished = false, previousPageFingerprint = '';
         while (offset < HARD_CAP && !finished && stillMissing.some((value) => ![...found.values()].some((row) => idKey(row.barcode) === idKey(value)))) {
           const tq = 'select A,B,C,D,E,F,G,H,I,J,K where ' + field + ' is not null limit ' + PAGE_SIZE + ' offset ' + offset;
           let table;
           try {
-            table = await D.query('StockDataa', tq, { timeoutMs: 55000, directTimeoutMs: 12000, retries: 0 });
+            // Bypass cached/possibly truncated proxy pages and prefer Google directly;
+            // fall back to the authenticated proxy only if the direct request fails.
+            table = await D.query('StockDataa', tq, {
+              timeoutMs: 55000, directTimeoutMs: 12000, retries: 0, directFirst: true, fresh: true
+            });
           } catch (err) {
             throw new Error('StockDataa BARCODE column scan failed near row ' + (offset + 1) + ': ' + String(err && (err.message || err) || 'Google Sheets query error'));
           }
           const pageRows = table.rows || [];
-          for (const row of stockRows(table, schema)) {
+          const parsedRows = stockRows(table, schema);
+          const pageFingerprint = parsedRows
+            .map((row) => idKey(row.stockRowId) || (idKey(row.tagId) + '|' + idKey(row.barcode)))
+            .join(',');
+          if (pageRows.length && pageFingerprint && pageFingerprint === previousPageFingerprint) {
+            throw new Error('StockDataa barcode pagination ne same page repeat kiya; source/proxy offset ko sahi rows nahi de raha. Exact lookup dobara try karein.');
+          }
+          if (pageRows.length) previousPageFingerprint = pageFingerprint;
+          for (const row of parsedRows) {
             if (!stillMissing.some((value) => idKey(value) === idKey(row.barcode))) continue;
             found.set(idKey(row.tagId) + '|' + idKey(row.barcode), row);
           }
-          offset += PAGE_SIZE;
-          if (pageRows.length < PAGE_SIZE) finished = true;
+          if (!pageRows.length) {
+            finished = true;
+          } else {
+            // Some proxies cap each response below the requested 5,000 rows.
+            // Advance by the number actually returned so the next page is not skipped.
+            offset += pageRows.length < PAGE_SIZE ? pageRows.length : PAGE_SIZE;
+          }
         }
         if (offset >= HARD_CAP && stillMissing.some((value) => ![...found.values()].some((row) => idKey(row.barcode) === idKey(value)))) {
           throw new Error('StockDataa BARCODE column mein 250,000 rows scan ki hain, lekin exact match nahi mila. Barcode value / sheet data verify karein.');
