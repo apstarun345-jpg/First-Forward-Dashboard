@@ -265,6 +265,16 @@ window.FF = window.FF || {};
     const main = shell();
     try { document.title = 'Tag Request · Employee form'; } catch { /* ignore */ }
     if (main) main.innerHTML = `<div class="tr-public-wrap">${U.spinner('Tag request form khul raha hai…')}</div>`;
+    // Public form ka data sirf scoped public proxy se aata hai (login wala /api/gviz band rehta hai).
+    // Pehle ye render se just pehle set hota tha; ab boot start par hi — koi bhi early query galat
+    // proxy se na jaaye.
+    FF.config.proxyPath = '/api/public/gviz';
+    // ⚡ v3.73 — module download (tagRequest + deps ≈ 400 KB) config fetch ke PARALLEL me shuru —
+    // pehle dono serial the, isliye form khulne me extra round-trip lagta tha ("site loading bahut
+    // jyada"). Module static files hain, koi query nahi karte — parallel load safe hai.
+    const moduleP = (FF.lazy && FF.lazy.ensure)
+      ? FF.lazy.ensure('tagRequest').catch(() => {})
+      : Promise.resolve();
     let cfg;
     try {
       const out = await api('/api/public/tag-request');
@@ -282,10 +292,8 @@ window.FF = window.FF || {};
       return false;
     }
     startPublicVisit();
-    // Public form ka data sirf scoped public proxy se aata hai (login wala /api/gviz band rehta hai).
-    FF.config.proxyPath = '/api/public/gviz';
     try {
-      if (FF.lazy && FF.lazy.ensure) await FF.lazy.ensure('tagRequest');
+      await moduleP;
     } catch { /* neeche check */ }
     if (!FF.pages || !FF.pages.tagRequest) {
       if (main) main.innerHTML = `<div class="tr-public-wrap">${messageCard('⚠️ Form module load nahi hua',
