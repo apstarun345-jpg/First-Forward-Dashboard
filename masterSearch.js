@@ -36,7 +36,7 @@ FF.pages = FF.pages || {};
   const KIND_LABEL = { 'ff-agent': 'FF Agent', 'gv-agent': 'GV Agent', 'ff-tl': 'FF TL', 'gv-tl': 'GV TL', 'gv-id': 'GV ID', 'agent-id': 'Agent ID' };
   const KIND_ICON = { 'ff-agent': '🧑‍💼', 'gv-agent': '🧑‍💼', 'ff-tl': '👥', 'gv-tl': '👥', 'gv-id': '🆔', 'agent-id': '🆔' };
 
-  const state = { generation: 0, light: null, lightPromise: null, full: null, fullPromise: null, lastQuery: '', results: null, listeners: new Set() };
+  const state = { generation: 0, light: null, lightPromise: null, full: null, fullPromise: null, fullError: null, lastQuery: '', results: null, listeners: new Set() };
   const emit = () => state.listeners.forEach((fn) => { try { fn(); } catch { /* ignore */ } });
   const onIndexReady = (fn) => { state.listeners.add(fn); return () => state.listeners.delete(fn); };
 
@@ -404,7 +404,14 @@ FF.pages = FF.pages || {};
       state.fullPromise = null;
       emit();
       return idx;
-    })().catch(() => { if (generation === state.generation) state.fullPromise = null; return state.light; });
+    })().catch((err) => {
+      if (generation === state.generation) {
+        state.fullPromise = null;
+        state.fullError = String(err && (err.message || err) || 'Barcode register load failed');
+        emit();
+      }
+      return state.light;
+    });
     return state.fullPromise;
   }
   /** Kick the heavy layer off in the background (non-blocking) — suggestions upgrade automatically. */
@@ -417,7 +424,10 @@ FF.pages = FF.pages || {};
       if (FF.masterProfile && FF.masterProfile.onData && !state.mpSub) state.mpSub = FF.masterProfile.onData(emit);
       if (FF.masterProfile && FF.masterProfile.warm) return FF.masterProfile.warm();
     }).then(emit).catch(() => {});
-    ready('insights').then(() => { state.fullPromise = null; if (!state.full && !state.fullPromise) return buildFull(); }).catch(() => {});
+    ready('insights').then(() => { state.fullPromise = null; if (!state.full && !state.fullPromise) return buildFull(); }).catch((err) => {
+      state.fullError = String(err && (err.message || err) || 'Barcode register module load failed');
+      emit();
+    });
   }
   const MP = () => (FF.masterProfile && FF.masterProfile.supports ? FF.masterProfile : null);
   const allPeople = () => [...((state.full || state.light || {}).people || new Map()).values()];
@@ -1119,7 +1129,7 @@ FF.pages = FF.pages || {};
   function invalidate() {
     state.generation++;
     state.light = null; state.lightPromise = null;
-    state.full = null; state.fullPromise = null;
+    state.full = null; state.fullPromise = null; state.fullError = null;
     state.results = null;
     emit();
   }
