@@ -40,7 +40,13 @@ window.FF = window.FF || {};
       if (!p || !MP() || !MP().supports(p)) return;
       const name = normName(p.name); if (!name) return;
       const ch = chOf(p.kind), other = ch === 'ff' ? 'gv' : 'ff';
-      const sameChannel = groups.find((g) => normName(g.name) === name && g[ch] && identitiesLinked(p, g[ch]));
+      const sameChannel = groups.find((g) => {
+        if (normName(g.name) !== name || !g[ch]) return false;
+        // A TL's same-name agent row is the TL's own report row; prefer the TL identity there.
+        // Agent↔agent and TL↔TL records still need a real linked ID to avoid merging unrelated people.
+        const roleConflict = isTlKind(p.kind) !== isTlKind(g[ch].kind);
+        return identitiesLinked(p, g[ch]) || roleConflict;
+      });
       if (sameChannel) {
         if (isTlKind(p.kind) && !isTlKind(sameChannel[ch].kind)) sameChannel[ch] = p;
         return;
