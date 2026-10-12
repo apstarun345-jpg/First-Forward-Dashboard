@@ -1636,7 +1636,9 @@ window.FF = window.FF || {};
           return;
         }
         // If the command palette is ready but Master Search isn't, let palette.js handle the click.
-        if (FF.palette && typeof FF.palette.toggle === 'function') return;
+        if (FF.palette && typeof FF.palette.toggle === 'function') {
+          return;
+        }
         e.preventDefault();
         if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
         else e.stopPropagation();
