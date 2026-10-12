@@ -383,6 +383,25 @@ test('📇 purana address suggestion — same agent dobara chuno to purana mobil
   assert.ok(TR._test.contactSuggestHtml({ id: 'r6', suggest: { ...saved, source: 'Request' }, mobile: '', address: '', pincode: '' }).includes('Pichli request'));
 });
 
+test('🚚 employee status card shows dispatch details and only safe HTTPS proof links', () => {
+  const shipped = {
+    id: 'tagreq_dispatch_1', at: '2026-10-12T09:00:00.000Z', status: 'dispatched', total: 20,
+    agentName: 'Agent Dispatch', classes: [{ cls: 'VC4', requested: 20, approved: 20 }],
+    dispatch: { quantity: 18, courier: 'Delhivery', docket: 'DL-8899', dispatchedAt: '2026-10-12T10:00:00.000Z', note: '2 boxes', proofUrl: 'https://tracking.example/proof?id=55&box=2' }
+  };
+  const summary = { totalRequests: 1, pending: 0, approved: 0, dispatched: 1, rejected: 0, requestedTags: 20, approvedTags: 20, requests: [shipped] };
+  const html = TR._test.employeeStatusHistoryHtml(summary, 'all', 1).html;
+  assert.match(html, /Dispatch details/);
+  assert.match(html, /Delhivery/);
+  assert.match(html, /DL-8899/);
+  assert.match(html, /18 tags/);
+  assert.match(html, /tracking\.example/);
+  assert.match(html, /target="_blank" rel="noopener noreferrer"/);
+  const pending = { ...shipped, status: 'pending' };
+  const pendingHtml = TR._test.employeeStatusHistoryHtml({ ...summary, pending: 1, dispatched: 0, requests: [pending] }, 'all', 1).html;
+  assert.doesNotMatch(pendingHtml, /tracking\.example/);
+});
+
 test('📦 Item Name — options, FASTag default, payload and print label', () => {
   assert.deepEqual(TR._test.ITEM_NAME_OPTIONS, ['FASTag', 'Biomatric Device', 'Matarial']);
   assert.equal(TR._test.normalizeItemName(''), 'FASTag');
