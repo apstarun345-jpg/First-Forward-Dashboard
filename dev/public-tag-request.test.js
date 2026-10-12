@@ -324,6 +324,22 @@ test('👤 employee-status — apni requests + counts, admin approve par status 
     assert.equal(three.json.totalRequests, 2);
     assert.equal(three.json.approvedTags, 25, 'approved tags ka total');
 
+    const shipped = await jsonCall(server.base, `/api/tag-requests/${firstId}`, 'PUT', {
+      status: 'dispatched',
+      dispatch: { courier: 'Delhivery', docket: 'EMP-TRACK-55', quantity: 25, dispatchedAt: '2026-10-12T10:00:00.000Z', note: '1 box', proofUrl: 'https://example.test/proof/55' }
+    }, admin);
+    assert.equal(shipped.res.status, 200, JSON.stringify(shipped.json));
+    const afterDispatch = await jsonCall(server.base, '/api/public/tag-request/employee-status?token=' + encodeURIComponent(token));
+    const publicDispatched = afterDispatch.json.requests.find((r) => r.id === firstId);
+    assert.equal(publicDispatched.status, 'dispatched');
+    assert.equal(publicDispatched.dispatch.quantity, 25);
+    assert.equal(publicDispatched.dispatch.courier, 'Delhivery');
+    assert.equal(publicDispatched.dispatch.docket, 'EMP-TRACK-55');
+    assert.equal(publicDispatched.dispatch.proofUrl, 'https://example.test/proof/55');
+    assert.ok(!Object.hasOwn(publicDispatched, 'timeline'), 'shared status never exposes audit timeline');
+    const publicSingle = await jsonCall(server.base, `/api/public/tag-request/status?id=${encodeURIComponent(firstId)}`);
+    assert.equal(publicSingle.json.request.timeline, undefined, 'public single-request status hides audit timeline');
+
     // 4) 📇 wahi agent dobara → purana address server se mil jaata hai (doosre device par bhi)
     const contact = await jsonCall(server.base, '/api/public/tag-request/contact?agentId=1001&agentName=Rahul%20Sharma&channel=ff');
     assert.equal(contact.res.status, 200, JSON.stringify(contact.json));
