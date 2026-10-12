@@ -6315,8 +6315,7 @@ async function handleApi(req, res, url) {
       const quantity = d.quantity === undefined ? auditBefore.total : Number(d.quantity);
       if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100000) throw new HttpError(400, 'Dispatch quantity 1 se 100000 ke beech honi chahiye.');
       if (quantity > auditBefore.total) throw new HttpError(400, `Dispatch quantity approved total (${auditBefore.total}) se zyada nahi ho sakti.`);
-      const targetStatus = body.status === undefined ? auditBefore.status : body.status;
-      if (!['approved', 'dispatched'].includes(targetStatus)) throw new HttpError(409, 'Dispatch se pehle request approve karein.');
+      if (!['approved', 'dispatched'].includes(auditBefore.status)) throw new HttpError(409, 'Dispatch se pehle request approve karein.');
       const dateInput = shortText(d.dispatchedAt, 50);
       const dateMs = dateInput ? Date.parse(dateInput) : Date.now();
       if (!Number.isFinite(dateMs)) throw new HttpError(400, 'Dispatch date/time valid nahi hai.');
