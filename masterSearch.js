@@ -161,7 +161,20 @@ FF.pages = FF.pages || {};
         agents: FF.store.need('agents'), stockAgents: FF.store.need('stockAgents'), gvMaster: FF.gv.need('master'),
         gvReport: FF.gv.need('report'), gvStockAgent: FF.gv.need('stockAgent'), gvStockTl: FF.gv.need('stockTl'),
         // 🔎 FF REPORT: old/alt agent ID (ID column) · TL ID · TL mobile — search me bhi aayenge
-        ffReport: (FF.pages.performance && FF.pages.performance.ensureLoaded ? FF.pages.performance.ensureLoaded().then(() => FF.pages.performance.agents()) : Promise.resolve([]))
+        ffReport: (async () => {
+          // Master Search/top-bar can open before the lazy Performance module exists.
+          // Load it on demand so FF REPORT's canonical TL roster is indexed in both search bars.
+          try {
+            let P = FF.pages && FF.pages.performance;
+            if (!P && FF.lazy && FF.lazy.need) await FF.lazy.need('performance');
+            P = FF.pages && FF.pages.performance;
+            if (P && P.ensureLoaded) await P.ensureLoaded();
+            return P && P.agents ? (P.agents() || []) : [];
+          } catch (err) {
+            console.warn('Master Search FF REPORT index unavailable:', err && err.message);
+            return [];
+          }
+        })()
       };
       const canMob = (() => { try { return !FF.auth || FF.auth.can('contacts'); } catch { return true; } })();
       const addAlias = (p, ...vals) => { if (!p) return; p.alias = p.alias || new Set(); vals.forEach((v) => { const t = clean(v); if (t && !/^na$/i.test(t)) p.alias.add(t); }); };
