@@ -1608,3 +1608,15 @@ html.mobile-ui #mobile-nav [hidden] {
   .ff-saved-view-save-row button { width:100% !important; }
 }
 
+
+
+/* Tag Request dispatch + audit history; only these new controls are styled. */
+.tr-dispatch-form .form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.tr-dispatch-form .field { min-width:0; }
+.tr-timeline-list { display:grid; gap:10px; }
+.tr-timeline-event { display:grid; gap:5px; padding:12px; border:1px solid var(--line); border-radius:12px; background:var(--card); }
+.tr-timeline-event small { overflow-wrap:anywhere; }
+@media (max-width:560px) {
+  .tr-dispatch-form .form-grid { grid-template-columns:minmax(0,1fr); }
+}
+html[data-theme="dark"] .tr-timeline-event { background:var(--card,#111827); border-color:var(--line,#334155); }
