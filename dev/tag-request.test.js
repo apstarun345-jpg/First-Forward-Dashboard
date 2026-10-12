@@ -80,6 +80,8 @@ test('tag request — submit, admin feed, edit, permissions aur restart ke baad 
     assert.match(req.id, /^\d{4}$/);
     assert.equal(req.status, 'pending');
     assert.equal(req.total, 29, 'total = approved qty ka sum');
+    assert.equal(req.timeline[0].action, 'created', 'new requests start an audit timeline');
+    assert.equal(req.timeline[0].statusAfter, 'pending');
     assert.equal(req.rows.length, 2);
     assert.equal(req.tls.length, 1);
     assert.equal(req.tls[0].sugNet, 28, 'TL suggested qty (stock ke baad) bhi save honi chahiye');
@@ -109,6 +111,7 @@ test('tag request — submit, admin feed, edit, permissions aur restart ke baad 
     assert.equal(updated.json.request.rows[0].approved, 30);
     assert.equal(updated.json.request.rows[0].remark, 'ok');
     assert.equal(updated.json.request.adminNote, '2 box kal');
+    assert.ok(updated.json.request.timeline.some((e) => e.action === 'status_changed' && e.statusAfter === 'approved'), 'approval / edits are audited');
 
     // 4) permissions — bina grant wale user ko 403, granted user ko sirf apni requests
     await jsonCall(server.base, '/api/users', 'POST', { username: 'member', name: 'Staff Member', password: 'member-pass-1', role: 'user', permissions: ['home'] }, admin);
@@ -133,6 +136,38 @@ test('tag request — submit, admin feed, edit, permissions aur restart ke baad 
     const requesterAlert = await jsonCall(server.base, '/api/notifications', 'GET', undefined, requester);
     assert.ok((requesterAlert.json.items || []).some((i) => i.type === 'request' && /bhej di gayi/.test(i.title)), 'requester ko confirmation notification chahiye');
 
+    const secondId = second.json.request.id;
+    const userDispatch = await jsonCall(server.base, `/api/tag-requests/${encodeURIComponent(secondId)}`, 'PUT', {
+      status: 'dispatched', dispatch: { courier: 'Delhivery', docket: 'DL-123', quantity: 29 }
+    }, requester);
+    assert.equal(userDispatch.res.status, 403, 'request owner cannot add dispatch metadata');
+    const pendingAfterDenied = await jsonCall(server.base, '/api/tag-requests', 'GET', undefined, requester);
+    assert.equal(pendingAfterDenied.json.requests[0].status, 'pending', 'denied dispatch does not mutate request');
+
+    const secondApproved = await jsonCall(server.base, `/api/tag-requests/${encodeURIComponent(secondId)}`, 'PUT', { status: 'approved' }, admin);
+    assert.equal(secondApproved.res.status, 200, JSON.stringify(secondApproved.json));
+    const invalidProof = await jsonCall(server.base, `/api/tag-requests/${encodeURIComponent(secondId)}`, 'PUT', {
+      status: 'dispatched',
+      dispatch: { courier: 'Delhivery', docket: 'DL-123', quantity: 29, dispatchedAt: '2026-10-12T10:00:00.000Z', proofUrl: 'javascript:alert(1)' }
+    }, admin);
+    assert.equal(invalidProof.res.status, 400, 'unsafe/non-HTTPS proof links are rejected');
+    const stillApproved = await jsonCall(server.base, '/api/tag-requests', 'GET', undefined, admin);
+    assert.equal(stillApproved.json.requests.find((r) => r.id === secondId).status, 'approved', 'invalid proof leaves status unchanged');
+
+    const shipped = await jsonCall(server.base, `/api/tag-requests/${encodeURIComponent(secondId)}`, 'PUT', {
+      status: 'dispatched',
+      dispatch: { courier: 'Delhivery', docket: 'DL-123456', quantity: 29, dispatchedAt: '2026-10-12T10:00:00.000Z', note: '2 boxes', proofUrl: 'https://example.test/dispatch/proof' }
+    }, admin);
+    assert.equal(shipped.res.status, 200, JSON.stringify(shipped.json));
+    assert.equal(shipped.json.request.status, 'dispatched');
+    assert.equal(shipped.json.request.dispatch.docket, 'DL-123456');
+    assert.equal(shipped.json.request.dispatch.quantity, 29);
+    assert.ok(shipped.json.request.timeline.some((e) => e.action === 'dispatch_recorded'), 'dispatch is stored in request history');
+    const dispatchedNotice = await jsonCall(server.base, '/api/notifications', 'GET', undefined, requester);
+    const dispatchAlert = (dispatchedNotice.json.items || []).find((i) => i.title === '🚚 Tag request dispatched' && i.meta && i.meta.requestId === secondId);
+    assert.ok(dispatchAlert, 'requester receives a dispatch notification');
+    assert.match(dispatchAlert.body, /DL-123456/, 'notification includes docket number');
+
     // 5) restart → requests durable (notify kind ke andar save hoti hain)
     await server.stop();
     server = await startServer(dir);
@@ -143,6 +178,10 @@ test('tag request — submit, admin feed, edit, permissions aur restart ke baad 
     assert.ok(first, 'pehli request restart ke baad bhi milni chahiye');
     assert.equal(first.status, 'approved');
     assert.equal(first.total, 35);
+    const secondPersisted = persisted.json.requests.find((r) => r.id === second.json.request.id);
+    assert.equal(secondPersisted.status, 'dispatched');
+    assert.equal(secondPersisted.dispatch.docket, 'DL-123456', 'dispatch metadata survives restart');
+    assert.ok(secondPersisted.timeline.filter((e) => e.action !== 'created').length >= 2, 'approval and dispatch history survives restart');
 
     // 6) delete
     const del = await jsonCall(server.base, `/api/tag-requests/${id}`, 'DELETE', undefined, admin2);
