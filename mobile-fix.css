@@ -1608,3 +1608,12 @@ html.mobile-ui #mobile-nav [hidden] {
   .ff-saved-view-save-row button { width:100% !important; }
 }
 
+/* Tablet PWA: keep the app navigation bar capped and centred instead of stretching edge-to-edge. */
+@media (min-width: 600px) and (pointer: coarse) {
+  html.mobile-ui #mobile-nav.mobile-nav {
+    left: 50% !important;
+    right: auto !important;
+    width: min(560px, calc(100vw - 24px)) !important;
+    transform: translateX(-50%) !important;
+  }
+}

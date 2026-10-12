@@ -24,7 +24,7 @@ function runBoot({ standalone = false, touch = 0, screenWidth = 1440, screenHeig
     navigator: { maxTouchPoints: touch, userAgent, userAgentData: { mobile: /Android|iPhone|iPad|iPod/i.test(userAgent) }, standalone },
     screen: { width: screenWidth, height: screenHeight },
     document: { documentElement: { classList: { add: (name) => classes.add(name) }, dataset } },
-    localStorage: { getItem: (key) => key === 'ff_theme' && dark ? 'dark' : null },
+    localStorage: { getItem: (key) => key === 'ff_theme_scope_migrated_v1' ? '1' : (key === 'ff_theme_explicit' && dark ? 'dark' : null) },
     console: { warn() {} }
   };
   vm.runInNewContext(bootScript, context);
@@ -116,7 +116,7 @@ test('mobile nav exposes Search and the first search click loads the lazy palett
   assert.match(navPart, /id: 'search', icon: 'search', label: 'Search'/);
   assert.match(app, /const globalSearchBtn = U\.\$\('#global-search-btn'\)/);
   assert.match(app, /ensureShell\(\['masterSearch', 'palette'\]\)\.then\(/);
-  assert.match(app, /if \(FF\.palette && typeof FF\.palette\.toggle === 'function'\) \{/);
+  assert.match(app, /if \(FF\.palette && typeof FF\.palette\.toggle === 'function'\) return;/);
 });
 
 test('visible topbar actions do not point to missing modules', () => {

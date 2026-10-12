@@ -2171,11 +2171,11 @@ async function tagReqHistorySaves({ limit = 6, includeValues = false } = {}) {
   const all = sheetsStore.groupSnapshots(hist.entries || []);
   // Ek save (batch) me kai notify records ho sakte hain (node/notification ki writes 1.5s ke andar).
   // Sabse POORA record chuno — bahut baar sabse naya record thoda peecha reh jaata hai.
-  const snaps = all.slice(0, Math.max(1, Math.min(10, limit)))
+  const snaps = all.slice(0, Math.max(1, Math.min(20, limit)))
     .map((snap) => ({ snap, notifies: (snap.entries || []).filter((e) => e.kind === 'notify').slice(0, 4) }))
     .filter((x) => x.notifies.length);
   if (!snaps.length) return { saves: [], total: all.length, truncated: !!hist.truncated };
-  const rows = [...new Set(snaps.flatMap((x) => x.notifies.map((e) => e.row)))].slice(0, 24); // Code.gs max 40
+  const rows = [...new Set(snaps.flatMap((x) => x.notifies.map((e) => e.row)))].slice(0, 40); // Code.gs max 40
   const detailed = await sheetsStore.history({ rows, withData: true });
   const byRow = new Map((detailed.entries || []).map((e) => [e.row, e]));
   const live = workspaceStore().tagRequests || [];
@@ -6441,10 +6441,13 @@ async function handleApi(req, res, url) {
         save = { at: new Date().toISOString(), storage: true, workspace: stored, found: list.length, missing: tagReqMissing(workspaceStore().tagRequests || [], list).length };
         if (!save.missing) throw new HttpError(400, 'Storage record me bhi koi extra request nahi hai — “Purani saves dhoondho” se history check karo.');
       } else {
-        const out = await tagReqHistorySaves({ limit: 10, includeValues: true });
-        save = at
-          ? (out.saves.find((s) => String(s.at) === at) || out.saves.find((s) => String(s.at).startsWith(at.slice(0, 19))))
-          : (out.saves.find((s) => s.missing > 0) || null);
+        // Keep the same snapshot-selection path for repeat restores. A selected history save
+        // is merge-only: after the first restore, the same request IDs produce added=0 and HTTP 200.
+        const out = await tagReqHistorySaves({ limit: 20, includeValues: true });
+        const selected = at
+          ? (out.saves.find((x) => String(x.at) === at) || out.saves.find((x) => String(x.at).startsWith(at.slice(0, 19))))
+          : null;
+        save = selected || out.saves.find((x) => x.missing > 0) || null;
         if (!save) throw new HttpError(404, at ? 'Ye save sheet history me nahi mili — list dobara load karo.' : 'History me aisi koi save nahi mili jisme missing requests hon.');
         if (save.unavailable) throw new HttpError(400, `Is save ko padha nahi ja saka: ${save.unavailable}`);
       }
@@ -6840,9 +6843,8 @@ async function handleApi(req, res, url) {
     return /^[A-Za-z0-9_-]{24,120}$/.test(v) ? v.slice(0, 120) : crypto.randomBytes(24).toString('base64url');
   }
   function employeeStatusByToken(token) {
-    // 🌐 Shared Employee Link: every visitor using the public link can see every
-    // request created through that link. The old device token is kept in records
-    // for backwards compatibility, but it is no longer used as a visibility filter.
+    // Shared link is used by a team; keep the legacy token parameter backwards-compatible
+    // but do not filter out requests submitted through this same public link.
     return (workspaceStore().tagRequests || []).filter((r) => r && r.source === 'public-link');
   }
   function employeeStatusSummary(token) {
@@ -6881,8 +6883,7 @@ async function handleApi(req, res, url) {
     };
   }
   if (p === '/api/public/tag-request/employee-status' && method === 'GET') {
-    // 🌐 Shared public Employee Link: token is optional/backwards-compatible only.
-    // Visibility is intentionally ALL public-link requests, regardless of browser/device.
+    // 🌐 Shared Employee Link: all visitors using the shared form can see requests created through that link.
     const token = String(url.searchParams.get('token') || '').trim();
     const ip = clientIp(req); if (!publicRateOk(`tagemp:${ip}`, 60, 10 * 60e3)) throw new HttpError(429, 'Bahut zyada status checks — thodi der baad try karo.');
     return sendJson(res, 200, { ok:true, shared:true, ...employeeStatusSummary(token) });

@@ -113,3 +113,31 @@ test('helpers: sheet link parsing and barcode compare', () => {
   assert.equal(sheetIdFrom('not a link'), '');
   assert.equal(compareBarcode('0099', '100'), -1);
 });
+
+test('empty StockDataa response is not marked ready and cannot replace a populated index', async () => {
+  let data = [mk(1)];
+  const { store, tick } = makeStock(() => data);
+  const first = await store.lookup([{ type: 'tagId', tagId: 'T1' }]);
+  assert.equal(first.results[0].rows.length, 1);
+  assert.equal(store.status().rows, 1);
+
+  // Simulate a transient Google response that is valid JSON but unexpectedly empty.
+  data = [];
+  tick(30_000);
+  const miss = await store.lookup([{ type: 'tagId', tagId: 'DOES-NOT-EXIST' }]);
+  assert.equal(miss.results[0].rows.length, 0);
+  assert.equal(store.status().ready, true);
+  assert.equal(store.status().rows, 1, 'last known-good index remains available');
+  assert.match(store.status().error, /0 TAG_ID\/BARCODE records read hue/i);
+
+  const stillFound = await store.lookup([{ type: 'tagId', tagId: 'T1' }]);
+  assert.equal(stillFound.results[0].rows.length, 1, 'previously indexed tag must still be findable');
+
+  const cold = makeStock([]).store;
+  await assert.rejects(
+    () => cold.lookup([{ type: 'barcode', barcode: '8900000000000001' }]),
+    /0 TAG_ID\/BARCODE records read hue/i
+  );
+  assert.equal(cold.status().ready, false, 'an empty first build must not advertise a ready index');
+});
+
