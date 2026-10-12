@@ -354,10 +354,16 @@ window.FF = window.FF || {};
     const comparable = comparableMtdGrowth({ ...t, kind: o.kind || '', name: o.name || '', id: o.id || '', ch }, ch);
     // Daily comparable is optional (it may still be loading or may not contain this person's alias).
     // Never treat an empty 0/0 comparable as real data — that was the source of false -100% growth.
-    const comparableUsable = !!(comparable && (num(comparable.curRows) > 0 || num(comparable.lastRows) > 0));
+    const comparableHasRows = !!(comparable && (num(comparable.curRows) > 0 || num(comparable.lastRows) > 0));
+    // Growth is only valid when BOTH comparable periods have matching dated rows.
+    // If only current rows match (e.g. prior-month IDs/date rows are missing), never fall back
+    // to the sheet's full-month-vs-MTD percentage — that creates the misleading -100% card.
+    const comparableUsable = !!(comparable && num(comparable.curRows) > 0 && num(comparable.lastRows) > 0);
     const sheet = pctText(o.growth);
-    const g = comparableUsable && comparable.growth !== null ? comparable.growth : (sheet !== null ? sheet : U.growth(num(t.curTotal), num(t.lastTotal)));
-    const projectedCurrent = comparableUsable
+    const g = comparableUsable
+      ? comparable.growth
+      : comparableHasRows ? null : (sheet !== null ? sheet : U.growth(num(t.curTotal), num(t.lastTotal)));
+    const projectedCurrent = comparable && num(comparable.curRows) > 0
       ? Math.round((num(comparable.current) / Math.max(1, num(comparable.day))) * U.daysInMonth(comparable.currentYm || ym))
       : projFallback(num(t.curTotal), b.days, ym);
     const projectedGrowth = num(t.lastTotal) > 0 ? ((projectedCurrent - num(t.lastTotal)) / num(t.lastTotal)) * 100 : null;
