@@ -199,11 +199,11 @@ window.FF = window.FF || {};
     document.body.classList.add('has-mobile-nav');
     nav.setAttribute('aria-label', 'Primary mobile navigation');
     nav.innerHTML = items.map((x) => {
-      const active = x.kind === 'route' && current.page === x.id;
-      if (x.kind === 'route') return `<a href="#/${x.id}" class="mobile-nav-item ${active ? 'active' : ''}" aria-label="${esc(x.label)}"><span aria-hidden="true">${navIcon(x.icon)}</span><small>${esc(x.label)}</small></a>`;
+      const active = x.kind === 'route' ? current.page === x.id : x.id === 'more' && !['home', 'tagIssued', 'performance'].includes(current.page);
+      if (x.kind === 'route') return `<a href="#/${x.id}" class="mobile-nav-item ${active ? 'active' : ''}" aria-label="${esc(x.label)}"${active ? ' aria-current="page"' : ''}><span aria-hidden="true">${navIcon(x.icon)}</span><small>${esc(x.label)}</small></a>`;
       const badge = x.id === 'notifications' ? '<b class="mobile-nav-badge" id="mobile-notification-count" hidden>0</b>' : '';
-      const menuAttrs = x.id === 'more' ? ' aria-controls="sidebar" aria-expanded="false"' : '';
-      return `<button type="button" class="mobile-nav-item mobile-nav-action" data-mobile-action="${x.id}" aria-label="${esc(x.label)}"${menuAttrs}><span aria-hidden="true">${navIcon(x.icon)}${badge}</span><small>${esc(x.label)}</small></button>`;
+      const menuAttrs = x.id === 'more' ? ' aria-controls="sidebar" aria-expanded="false"' : x.id === 'notifications' ? ' aria-haspopup="dialog" title="Open notification inbox"' : x.id === 'search' ? ' title="Open global search"' : '';
+      return `<button type="button" class="mobile-nav-item mobile-nav-action${active ? ' active' : ''}" data-mobile-action="${x.id}" aria-label="${esc(x.label)}"${active ? ' aria-current="page"' : ''}${menuAttrs}><span aria-hidden="true">${navIcon(x.icon)}${badge}</span><small>${esc(x.label)}</small></button>`;
     }).join('');
     try {
       const count = FF.notifications && FF.notifications.countUnread ? FF.notifications.countUnread() : 0;
