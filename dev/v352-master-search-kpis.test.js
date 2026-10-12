@@ -299,12 +299,16 @@ test('📈 growth — compare yesterday MTD against same calendar day last month
   assert.match(mp, /const yesterday = new Date\(now\.getFullYear\(\), now\.getMonth\(\), now\.getDate\(\) - 1\)/);
   assert.match(mp, /const prevCutDay = Math\.min\(day, prevLastDay\)/);
   assert.ok(mp.includes(String.raw`if (r && r.key && /^\d{4}-\d{1,2}-\d{1,2}$/.test(String(r.key))`), 'ISO date keys must parse for same-period growth');
+  assert.match(mp, /num\(comparable\.curRows\) > 0 && num\(comparable\.lastRows\) > 0/, 'growth needs both comparable periods');
+  assert.match(mp, /comparableHasRows \? null/, 'never use stale sheet growth when a comparable period is missing');
   assert.match(mp, /const growth = last > 0 \? \(\(cur - last\) \/ last\) \* 100/);
   assert.match(mp, /growthThrough: gi\.growthThrough/);
   assert.match(await read('masterSearch.js'), /p1\.growthThrough/);
 });
 test('🔎 dropdown suggestions — partial names use direct fallback and both inputs use 1-char trigger', async () => {
   const ms = await read('masterSearch.js');
+  assert.match(ms, /if \(!P && FF\.lazy && FF\.lazy\.need\) await FF\.lazy\.need\('performance'\)/, 'Master Search must lazy-load the FF TL roster');
+  assert.match(ms, /return P && P\.agents \? \(P\.agents\(\) \|\| \[\]\) : \[\]/, 'both search bars use FF REPORT agent/TL identities');
   assert.match(ms, /direct\/fallback matching/);
   assert.match(ms, /const all = allPeople\(\)/);
   assert.match(ms, /suggestApi = U\.suggest\(input, \{\s*min: 1, max: 16/);
