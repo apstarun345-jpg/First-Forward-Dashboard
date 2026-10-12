@@ -76,7 +76,7 @@ test('miss triggers ONE fresh rebuild after minRefresh (new row added to the she
   data = [mk(1), mk(2)];
   let r = await store.lookup([{ type: 'tagId', tagId: 'T2' }]);   // index abhi bana hai → refresh nahi
   assert.equal(r.results[0].rows.length, 0);
-  tick(30_000);
+  tick(90_000);   // minRefreshMs (60 s) ke baad
   r = await store.lookup([{ type: 'tagId', tagId: 'T2' }]);       // purana + miss → refresh
   assert.equal(r.results[0].rows.length, 1);
   assert.equal(builds(), 2);

@@ -208,12 +208,12 @@ test('⏱️ polling budget: phone/server par background requests ka cadence san
   const home = await read('home.js');
   // Bell poll pehle 5s tha (+ presence 15s + live-assist 3s + push-voice 20s + install-btn 3s):
   // ~41 requests/min per open tab. Render + Apps Script par ye sab ko slow karta tha ("leg").
-  assert.match(notif, /pollMs = \(\) => \(document\.visibilityState === 'visible' \? 15e3 : 60e3\)/, 'bell poll 15s visible / 60s hidden');
+  assert.match(notif, /pollMs = \(\) => \(document\.visibilityState === 'visible' \? 30e3 : 300e3\)/, 'bell poll 30s visible / 5 min hidden (v3.74 bandwidth)');
   assert.match(notif, /setInterval\(\(\) => sendPresence\(\), 45e3\)/, 'presence 45s (pehle 15s)');
   assert.match(notif, /if \(state\.pollBusy\) return;/, 'slow server par requests stack nahi hoti');
   assert.match(notif, /state\.shareWatchTimer/, 'pointer-share timer sirf admin live-view ON par chalta hai');
   assert.match(notif, /if \(force !== true && pop\.hidden && sig === state\.renderSig\) return;/, 'band bell par bekaar DOM rebuild nahi');
-  assert.match(assist, /\}, 20000\);/, 'live-assist inbox poll 20s (pehle 3s)');
+  assert.match(assist, /\}, 45000\);/, 'live-assist inbox poll 45s (v3.74; pehle 20s, usse pehle 3s)');
   assert.match(voice, /const POLL_MS = 60e3;/, 'push voice catch-up poll 60s (pehle 20s)');
   assert.match(app, /setInterval\(updateInstallBtn, 60000\)/, 'install button check 60s (pehle har 3s)');
   assert.match(home, /if \(document\.hidden\) return;/, 'home sync pill background tab me update nahi karta');
@@ -228,7 +228,8 @@ test('Lite mode keeps Home KPI text readable after removing gradient backgrounds
 
 test('app.js: auto-sync 5 min + turant sync triggers (16 heavy queries nahi)', async () => {
   const src = await read('app.js');
-  assert.match(src, /5 \* 60 \* 1000/, 'auto-sync interval 5 min (v3.23 — pehle 15 min tha)');
+  assert.match(src, /10 \* 60 \* 1000/, 'auto-sync interval 10 min (v3.74 bandwidth — data na badle to sirf /api/today)');
+  assert.match(src, /if \(probe && before && !feedChanged\(before, probe\) && Date\.now\(\) - lastHeavySyncAt < HEAVY_SYNC_MAX_AGE\)/, 'auto sync skips heavy datasets when the feed did not change');
   assert.match(src, /function lightSync\(|lightSync/, 'halka refresh use hota hai');
   assert.match(src, /saveData|effectiveType/, 'data-saver / 2G par auto-sync band');
   assert.match(src, /visibilitychange', onVisibleSync/, 'tab wapas visible ho to turant sync');

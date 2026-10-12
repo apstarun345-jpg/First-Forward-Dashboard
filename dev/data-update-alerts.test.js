@@ -159,9 +159,9 @@ test('server.js — reportUpdate route users ko bhi, deep link, corrections par 
   assert.match(src, /reportUpdate: 'both'/, 'data-update notification admin + users dono ko');
   assert.match(src, /delta[^\n]*link: '#\/tagIssued'/, 'report notification me page deep link');
   assert.match(src, /Object\.keys\(classes\)\.length > 0/, 'class-wise corrections bhi "changed"');
-  assert.match(src, /REPORT_CHECK_INTERVALS = Object\.freeze\(\{ ff: 150e3, gv: 15e3 \}\)/, 'GV watcher runs every 15s while FF remains throttled');
+  assert.match(src, /REPORT_CHECK_INTERVALS = Object\.freeze\(\{ ff: 300e3, gv: 60e3 \}\)/, 'GV watcher every 60s, FF 5 min (v3.74 bandwidth; sheet-edit webhook stays instant)');
   assert.match(src, /gvTodayFeed\(!!force\)/, 'GV alert snapshot uses the same live GV Master feed as Home');
-  assert.match(src, /setInterval\(\(\) => checkReports\(false\)\.catch\(\(\) => \{\}\), 15e3\)/, 'closed-app server poll stays alive');
+  assert.match(src, /setInterval\(\(\) => checkReports\(false\)\.catch\(\(\) => \{\}\), 30e3\)/, 'closed-app server poll stays alive');
   assert.match(src, /providerChanged = source === 'gv'/, 'old EIR-based GV snapshots are safely re-baselined');
 });
 

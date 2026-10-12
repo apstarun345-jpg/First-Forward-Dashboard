@@ -448,7 +448,7 @@ window.FF = window.FF || {};
     st.inboxTimer = setInterval(() => {
       if (document && document.visibilityState === 'hidden') return; // background me poll mat karo
       pollInbox();
-    }, 20000);
+    }, 45000);   // 📉 v3.74: 20 s → 45 s
     setTimeout(pollInbox, 1200);
     // 🎙️ Mic permission — site khulne par pehle user gesture par EK HI BAAR (baad me kabhi nahi).
     if (typeof document !== 'undefined' && document.addEventListener && hasMedia()) {

@@ -1754,6 +1754,8 @@ window.FF = window.FF || {};
   // page numbers turant refresh + bell notification + (voice ON ho to) bol kar announce.
   const FEED_SIG_KEY = 'ff_feed_sig';
   let lastSyncAt = 0, syncingNow = null, syncLockUntil = 0;
+  let lastHeavySyncAt = Date.now();          // app load = abhi poora data aaya
+  const HEAVY_SYNC_MAX_AGE = 30 * 60e3;       // data na badle tab bhi har 30 min me ek poora sync
   function feedSig(feed) {
     if (!feed || feed.ok === false) return null;
     // /api/today deliberately returns 200 with ffError/gvError so the dashboard can still show
@@ -1879,12 +1881,25 @@ window.FF = window.FF || {};
     if (syncingNow) return syncingNow;
     syncingNow = (async () => {
       const before = loadFeedSig();
+      // 📉 v3.74 bandwidth: auto sync pehle sirf chhota /api/today (~2 KB) dekhta hai. Sheet me naya data
+      // aaya hi nahi (aur pichhla poora sync 30 min se naya hai) to bhaari datasets (EIR daily, REPORT,
+      // GV Master) dobara download nahi hote. Pehle har 5 min + har baar app par lautne par sab aata tha.
+      if (o.auto && !o.full) {
+        let probe = null;
+        try { probe = feedSig(await FF.data.today({ fresh: true })); } catch { probe = null; }
+        if (probe && before && !feedChanged(before, probe) && Date.now() - lastHeavySyncAt < HEAVY_SYNC_MAX_AGE) {
+          lastSyncAt = Date.now();
+          saveFeedSig(probe);
+          return probe;
+        }
+      }
       try {
         if (o.full && FF.preloader && FF.preloader.fastSync) await FF.preloader.fastSync(true);
         else if (FF.preloader && FF.preloader.lightSync) await FF.preloader.lightSync(true);
         else await FF.store.refresh(['daily', 'report']).catch(() => {});
       } catch (err) { console.warn('syncNow', err && err.message); }
       lastSyncAt = Date.now();
+      lastHeavySyncAt = lastSyncAt;
       let after = null;
       try { after = feedSig(await FF.data.today({ fresh: true })); } catch { /* offline */ }
       if (after) {
@@ -2057,7 +2072,7 @@ window.FF = window.FF || {};
       const conn = (typeof navigator !== 'undefined' && navigator.connection) || null;
       if (conn && (conn.saveData || /^(slow-)?2g$/.test(String(conn.effectiveType || '')))) return; // data-saver/2G par auto-sync band
       syncNow({ auto: true });
-    }, 5 * 60 * 1000);
+    }, 10 * 60 * 1000);   // 📉 v3.74: 5 → 10 min (aur data na badla ho to sirf 2 KB check)
     // 🔄 Tab wapas kholte hi (90s se purana data ho to) instant light sync — "sheet ka data
     //    turant update nahi hota" wali complaint ka fix. Background me chalta hai, page re-render hota hai.
     document.removeEventListener('visibilitychange', onVisibleSync);

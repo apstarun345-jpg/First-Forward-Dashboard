@@ -57,7 +57,7 @@ const IDENTIFIER_FIELDS = new Set(['tagId', 'barcode']);
 const lowerBound = (arr, key) => { let lo = 0, hi = arr.length; while (lo < hi) { const mid = (lo + hi) >> 1; if (cmpCanon(arr[mid].k, key) < 0) lo = mid + 1; else hi = mid; } return lo; };
 const upperBound = (arr, key) => { let lo = 0, hi = arr.length; while (lo < hi) { const mid = (lo + hi) >> 1; if (cmpCanon(arr[mid].k, key) <= 0) lo = mid + 1; else hi = mid; } return lo; };
 
-export function createMappingStock({ getConfig, loadPages, normalizeVcType = (v) => clean(v).toUpperCase(), ttlMs = 5 * 60e3, minRefreshMs = 20e3, maxPerRange = 20000, now = Date.now, allowRefresh = () => true, onProgress = null } = {}) {
+export function createMappingStock({ getConfig, loadPages, normalizeVcType = (v) => clean(v).toUpperCase(), ttlMs = 30 * 60e3, minRefreshMs = 60e3, maxPerRange = 20000, now = Date.now, allowRefresh = () => true, onProgress = null } = {}) {
   let index = null;          // { rows, byBarcode, byTag, sorted, builtAt, key }
   let building = null;
   let lastError = '';

@@ -461,6 +461,11 @@ window.FF = window.FF || {};
 
   async function poll() {
     if (!on() || !featOn()) return;
+    // 📉 v3.74 bandwidth: background tab (doosri app / chhupa tab) me poll nahi — OS push alert waise bhi
+    // aata hai. Wapas aate hi agla poll naya baseline se compare karta hai.
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') { if (!st.hiddenAt) st.hiddenAt = Date.now(); return; }
+    // 2 min se zyada chhupa raha to purane tags ki ek saath ghanti mat bajao — chup-chaap naya baseline lo.
+    if (st.hiddenAt) { const away = Date.now() - st.hiddenAt; st.hiddenAt = 0; if (away > 120e3) st.last = null; }
     let c;
     try { c = await countsToday(); } catch { st.fails++; return; }
     st.fails = 0;
@@ -681,7 +686,7 @@ window.FF = window.FF || {};
     bindUnlock();
     warmVoices();
     if (st.timer) clearInterval(st.timer);
-    st.timer = setInterval(poll, 30000);
+    st.timer = setInterval(poll, 45000);   // 📉 v3.74: 30 s → 45 s (har poll 2 sheet queries)
     setTimeout(poll, 4000); // baseline jaldi le lo
   }
 

@@ -1199,7 +1199,8 @@ window.FF = window.FF || {};
     // 1/3 reh jaati hain (server + battery + 6-connection limit sab par asar). Push (OS panel) waise
     // bhi instant hai, wo is poll par depend nahi karta.
     setTimeout(() => poll(false), 800);
-    const pollMs = () => (document.visibilityState === 'visible' ? 15e3 : 60e3);
+    // 📉 v3.74 bandwidth: visible 15 s → 30 s, background 60 s → 5 min (OS push alerts waise bhi turant aate hain).
+    const pollMs = () => (document.visibilityState === 'visible' ? 30e3 : 300e3);
     state.timer = setInterval(() => poll(false), pollMs());
     document.addEventListener('visibilitychange', () => {
       if (state.timer) { clearInterval(state.timer); state.timer = setInterval(() => poll(false), pollMs()); }

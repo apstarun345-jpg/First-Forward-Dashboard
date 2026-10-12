@@ -964,6 +964,21 @@ function headers(extra = {}) {
 }
 function sendJson(res, status, payload, extra = {}) {
   const body = JSON.stringify(payload);
+  // 📉 v3.74 bandwidth: JSON APIs (notifications, today, tag requests…) bhi compress — pehle sirf
+  // gviz / static compress hote the, JSON 7–50 KB plain jaata tha (Render free 5 GB quota ka bada hissa).
+  const req = res && res.req;
+  if (req && req.headers && body.length > 1024 && !(extra && extra['Content-Encoding'])) {
+    let encoded = null, encoding = '';
+    try {
+      if (accepts(req, 'br')) { encoded = zlib.brotliCompressSync(Buffer.from(body), { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 4 } }); encoding = 'br'; }
+      else if (accepts(req, 'gzip')) { encoded = zlib.gzipSync(body, { level: 6 }); encoding = 'gzip'; }
+    } catch { encoded = null; }
+    if (encoded) {
+      res.writeHead(status, headers({ 'Content-Type': 'application/json; charset=utf-8', 'Content-Encoding': encoding, Vary: 'Accept-Encoding', 'Content-Length': encoded.length, 'Cache-Control': 'no-store', ...extra }));
+      res.end(encoded);
+      return;
+    }
+  }
   res.writeHead(status, headers({ 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': Buffer.byteLength(body), 'Cache-Control': 'no-store', ...extra }));
   res.end(body);
 }
@@ -2642,7 +2657,7 @@ async function stockSnapshotFrom(sheetId, sheet, clsCol, tagCol, label) {
 // 🧓 Stock ageing (v3.31) — StockDataa + Tag Assignment ek baar padh kar compact index (10 min cache).
 // Browser ab 1 lakh rows download nahi karta; har drawer / page sirf agent-TL ke bucket counts leta hai.
 // ---------------------------------------------------------------------------------------------
-const STOCK_AGE_TTL = 10 * 60e3;                 // index itna purana ho to background me refresh (purana turant serve hota hai)
+const STOCK_AGE_TTL = 30 * 60e3;   // 📉 v3.74: 10 → 30 min — har rebuild poora StockDataa + Tag Assignment padhta hai                 // index itna purana ho to background me refresh (purana turant serve hota hai)
 const STOCK_AGE_ERROR_RETRY_MS = Math.max(0, Number(process.env.STOCK_AGE_ERROR_RETRY_MS ?? 30e3));   // fail / adhura index mila → itni der baad dobara koshish (10 min nahi!)
 const STOCK_AGE_PAGE_ROWS = Math.max(1, Number(process.env.STOCK_AGE_PAGE_ROWS) || 25000);
 const STOCK_AGE_MAX_PAGES = 60;                   // 60 × 25k = 15 lakh rows — safety cap
@@ -3806,7 +3821,8 @@ async function maybeAgentAnomaly(force = false) {
 }
 let reportCheckAt = { ff: 0, gv: 0 };
 let reportCheckPromise = null;
-const REPORT_CHECK_INTERVALS = Object.freeze({ ff: 150e3, gv: 15e3 });
+// 📉 v3.74: GV 15 s → 60 s (din me 5,760 → 1,440 Google calls). Sheet edit webhook (/api/push/sheet-update) abhi bhi turant check karata hai.
+const REPORT_CHECK_INTERVALS = Object.freeze({ ff: 300e3, gv: 60e3 });
 const reportWatcherState = {
   ff: { attemptedAt: '', checkedAt: '', error: '' },
   gv: { attemptedAt: '', checkedAt: '', error: '' }
@@ -9088,7 +9104,7 @@ async function start() {
     setTimeout(() => checkReports(true).catch(() => {}), 5000);
     // GV Master is a live source: check every 15s (its shared feed cache caps Google reads at 30s).
     // FF remains at 150s, so the faster GV alert cadence does not multiply EIR queries.
-    setInterval(() => checkReports(false).catch(() => {}), 15e3).unref();
+    setInterval(() => checkReports(false).catch(() => {}), 30e3).unref();
     setTimeout(() => maybeMonthlyReport(), 8000);
     setInterval(() => maybeMonthlyReport(), 60 * 60e3).unref();
     // 🌅 Scheduled checks: daily digest (subah 8 IST ke baad roz ek baar) + mid-month target +
@@ -9103,14 +9119,16 @@ async function start() {
     // 🔗 FASTag Mapping ka StockDataa lookup index bhi pehle se garam rakho — pehla Quick Map instant ho.
     // v3.72: boot ke 25 s ke bajaye 6 s baad shuru, aur fail (jaise Google rate limit) hone par
     // 30 s / 2 min / 5 min ke gaps me dobara — pehla user "sheet load nahi ho rahi" me na atke.
+    // 🔗 FASTag Mapping index: boot par EK baar (agar warm ON). Retry sirf tab jab index bana hi nahi —
+    // 📉 v3.74: pehle 30 s / 2 min / 5 min par ready index ko bhi zabardasti dobara banaya jaata tha
+    // (har Render wake par 4× poora StockDataa download = bandwidth quota ka bada hissa).
     if (warmStockAge) {
       const warmDelays = [6000, 30e3, 2 * 60e3, 5 * 60e3];
-      warmDelays.forEach((delay, i) => setTimeout(() => {
+      warmDelays.forEach((delay) => setTimeout(() => {
         const st = mappingStock.status();
-        if (st.building) return;                 // pehle se ban raha hai
-        if (st.ready && i === 0) return;         // pehla attempt: index pehle hi garam hai
-        if (gvizCooldownActive()) return;        // rate limit — chup-chaap skip (agla attempt try karega)
-        mappingStock.ensure({ fresh: i > 0 }).catch((err) => console.warn('mapping index warm-up:', err.message));
+        if (st.building || st.ready) return;     // ban raha hai / ban chuka — kuch mat karo
+        if (gvizCooldownActive()) return;        // rate limit — agla attempt try karega
+        mappingStock.ensure({ fresh: false }).catch((err) => console.warn('mapping index warm-up:', err.message));
       }, delay).unref?.());
     }
 }
