@@ -1,0 +1,345 @@
+/* 📱 native-shell.css (v3.73) — Android app jaisa shell. Sirf html.native-shell (native-app.js,
+   phone / installed PWA) par lagta hai; desktop par kuch nahi badalta. Sabse aakhir me load hota hai,
+   isliye purane mobile-fix.css layers ke upar ek saaf, ek-jagah wala design hai.
+   Material 3 jaisa: 56px app bar · 72px bottom bar (pill indicator) · bottom sheets · 48px touch targets. */
+html.native-shell {
+  --n-bar-h: 56px;
+  --n-nav-h: 72px;
+  --n-safe-top: env(safe-area-inset-top, 0px);
+  --n-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --n-surface: var(--card, #fff);
+  --n-on-surface: var(--ink, #0f172a);
+  --n-muted: var(--muted, #64748b);
+  --n-line: var(--line, #e6e8f2);
+  --n-accent: var(--brand, #4f46e5);
+  --n-accent-soft: color-mix(in srgb, var(--brand, #4f46e5) 14%, transparent);
+  --n-press: color-mix(in srgb, var(--ink, #0f172a) 9%, transparent);
+  --n-scrim: rgba(15, 23, 42, .45);
+  --n-ease: cubic-bezier(.2, 0, 0, 1);
+}
+html.native-shell[data-theme="dark"] {
+  --n-press: rgba(255, 255, 255, .10);
+  --n-scrim: rgba(0, 0, 0, .6);
+}
+
+/* ---------- Touch: no blue flash, no long-press callout on chrome, crisp press feedback ---------- */
+html.native-shell.mobile-ui body { -webkit-tap-highlight-color: transparent; overscroll-behavior-y: none; }
+html.native-shell.mobile-ui .topbar,
+html.native-shell.mobile-ui #mobile-nav,
+html.native-shell.mobile-ui .sidebar,
+html.native-shell.mobile-ui .nsheet { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+html.native-shell.mobile-ui .nab-btn,
+html.native-shell.mobile-ui .nsheet-item,
+html.native-shell.mobile-ui .nsheet-account,
+html.native-shell.mobile-ui #mobile-nav .mobile-nav-item,
+html.native-shell.mobile-ui .sidebar .nav-item { touch-action: manipulation; }
+
+/* =====================================================================================
+   App bar
+   ===================================================================================== */
+html.native-shell.mobile-ui .topbar {
+  position: sticky !important; top: 0 !important; z-index: 1100 !important;
+  display: flex !important; flex-wrap: nowrap !important; align-items: center !important; gap: 0 !important;
+  height: calc(var(--n-bar-h) + var(--n-safe-top)) !important; min-height: 0 !important; max-height: none !important;
+  padding: var(--n-safe-top) 4px 0 4px !important; margin: 0 !important;
+  overflow: visible !important; overflow-x: visible !important;
+  background: var(--n-surface) !important; color: var(--n-on-surface) !important;
+  border: 0 !important; border-radius: 0 !important; box-shadow: none !important;
+  backdrop-filter: none !important; -webkit-backdrop-filter: none !important; transform: none !important;
+  will-change: auto !important; contain: none !important; filter: none !important; /* warna fixed popovers (theme packs, account) topbar ke andar kaid ho jaate */
+  transition: box-shadow .2s var(--n-ease);
+}
+html.native-shell.mobile-ui.nab-scrolled .topbar { box-shadow: 0 1px 0 var(--n-line), 0 4px 10px rgba(15, 23, 42, .06) !important; }
+html.native-shell.mobile-ui #menu-btn { display: none !important; }
+html.native-shell.mobile-ui .nab-btn {
+  position: relative; flex: 0 0 auto; display: inline-grid; place-items: center;
+  width: 48px; height: 48px; min-width: 48px; min-height: 48px; margin: 0; padding: 0;
+  border: 0; border-radius: 50%; background: transparent; color: inherit; cursor: pointer;
+  box-shadow: none; transition: background-color .15s var(--n-ease);
+}
+html.native-shell.mobile-ui .nab-btn:active { background: var(--n-press); transform: none; }
+html.native-shell.mobile-ui .nab-btn svg { width: 24px; height: 24px; }
+html.native-shell.mobile-ui #top-title {
+  flex: 1 1 auto !important; min-width: 0 !important; margin: 0 0 0 4px !important; padding: 0 !important;
+  font-size: 20px !important; line-height: 1.2 !important; font-weight: 600 !important; letter-spacing: 0 !important;
+  white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important;
+  color: var(--n-on-surface) !important; -webkit-text-fill-color: currentColor !important; background: none !important;
+}
+html.native-shell.mobile-ui .nab-actions { display: flex; align-items: center; flex: 0 0 auto; }
+html.native-shell.mobile-ui .nab-badge {
+  position: absolute; top: 6px; right: 6px; min-width: 18px; height: 18px; padding: 0 5px; box-sizing: border-box;
+  border-radius: 9px; background: #dc2626; color: #fff; font: 700 11px/18px system-ui, sans-serif; text-align: center;
+  box-shadow: 0 0 0 2px var(--n-surface);
+}
+html.native-shell.mobile-ui #offline-state { flex: 0 0 auto; max-width: 92px; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Purane topbar buttons chhupe (⋮ sheet se chalte hain). Container 0-size par popovers ke liye zinda. */
+html.native-shell.mobile-ui #top-actions {
+  position: absolute !important; top: 0 !important; right: 0 !important; width: 0 !important; height: 0 !important;
+  overflow: visible !important; padding: 0 !important; margin: 0 !important; display: block !important; flex: none !important;
+}
+html.native-shell.mobile-ui #top-actions > button,
+html.native-shell.mobile-ui #top-actions > a,
+html.native-shell.mobile-ui #top-actions > .theme-wrap > button,
+html.native-shell.mobile-ui #top-actions > .notification-wrap > button,
+html.native-shell.mobile-ui #top-actions > .user-wrap > button,
+html.native-shell.mobile-ui #top-actions > #master-search { display: none !important; }
+
+/* =====================================================================================
+   Full-screen search
+   ===================================================================================== */
+html.native-shell.mobile-ui.nab-search-open #top-actions > #master-search {
+  display: block !important; position: fixed !important; z-index: 1400 !important;
+  top: 0 !important; left: 0 !important; right: 0 !important; width: auto !important; max-width: none !important; min-width: 0 !important;
+  height: calc(var(--n-bar-h) + var(--n-safe-top)) !important; padding: var(--n-safe-top) 8px 0 4px !important; margin: 0 !important;
+  background: var(--n-surface) !important; box-shadow: 0 1px 0 var(--n-line) !important; order: 0 !important; flex: none !important;
+}
+html.native-shell.mobile-ui.nab-search-open .topbar { z-index: 1401 !important; } /* topbar stacking context search bar ko scrim ke upar rakhe */
+html.native-shell.mobile-ui.nab-search-open body::after {
+  content: ''; position: fixed; inset: 0; z-index: 1350; background: var(--bg, #f3f4fb);
+  animation: nFade .15s var(--n-ease);
+}
+html.native-shell.mobile-ui.nab-search-open .master-search-row { display: flex !important; align-items: center !important; gap: 4px !important; height: var(--n-bar-h); }
+html.native-shell.mobile-ui.nab-search-open .master-search-input { flex: 1 1 auto !important; }
+html.native-shell.mobile-ui.nab-search-open .master-search-input .input {
+  height: 44px !important; min-height: 44px !important; padding: 0 40px 0 38px !important; font-size: 16px !important;
+  border-radius: 22px !important; border: 0 !important; box-shadow: none !important;
+  background: color-mix(in srgb, var(--n-on-surface) 6%, var(--n-surface)) !important; color: var(--n-on-surface) !important;
+}
+html.native-shell.mobile-ui.nab-search-open .ms-kbd { display: none !important; }
+html.native-shell.mobile-ui.nab-search-open .ms-range-btn { width: 44px !important; height: 44px !important; border-radius: 50% !important; flex: 0 0 auto !important; }
+html.native-shell.mobile-ui.nab-search-open .ms-range-pop { position: fixed !important; left: 8px !important; right: 8px !important; top: calc(var(--n-bar-h) + var(--n-safe-top) + 8px) !important; z-index: 1410 !important; }
+html.native-shell.mobile-ui.nab-search-open .ms-hint { position: fixed !important; left: 16px !important; right: 16px !important; top: calc(var(--n-bar-h) + var(--n-safe-top) + 6px) !important; z-index: 1405 !important; }
+html.native-shell.mobile-ui.nab-search-open .suggest:not([hidden]) {
+  left: 0 !important; right: 0 !important; width: auto !important;
+  top: calc(var(--n-bar-h) + var(--n-safe-top)) !important; bottom: 0 !important; max-height: none !important;
+  border: 0 !important; border-radius: 0 !important; box-shadow: none !important; z-index: 1420 !important;
+  padding-bottom: var(--n-safe-bottom) !important; overflow-y: auto !important; background: var(--n-surface) !important;
+}
+html.native-shell.mobile-ui.nab-search-open #mobile-nav { display: none !important; }
+
+/* =====================================================================================
+   Bottom navigation (Material 3: pill indicator, 12px labels)
+   ===================================================================================== */
+html.native-shell.mobile-ui #mobile-nav:not([hidden]) {
+  position: fixed !important; left: 0 !important; right: 0 !important; bottom: 0 !important; top: auto !important; z-index: 1200 !important;
+  display: grid !important; grid-template-columns: repeat(6, minmax(0, 1fr)) !important; align-items: stretch !important; gap: 0 !important;
+  height: calc(var(--n-nav-h) + var(--n-safe-bottom)) !important; min-height: 0 !important;
+  padding: 0 4px var(--n-safe-bottom) !important; margin: 0 !important; width: auto !important; max-width: none !important;
+  background: color-mix(in srgb, var(--n-accent) 4%, var(--n-surface)) !important;
+  border: 0 !important; border-top: 1px solid var(--n-line) !important; border-radius: 0 !important; box-shadow: none !important;
+  backdrop-filter: none !important; -webkit-backdrop-filter: none !important; transform: none !important;
+}
+html.native-shell.mobile-ui #mobile-nav .mobile-nav-item {
+  display: flex !important; flex-direction: column !important; align-items: center !important; justify-content: center !important; gap: 4px !important;
+  min-width: 0 !important; min-height: 0 !important; height: 100% !important; margin: 0 !important; padding: 0 !important;
+  border: 0 !important; border-radius: 0 !important; background: transparent !important; box-shadow: none !important;
+  color: var(--n-muted) !important; text-decoration: none !important; transform: none !important;
+}
+html.native-shell.mobile-ui #mobile-nav .mobile-nav-item > span {
+  position: relative; display: grid !important; place-items: center !important;
+  width: 56px !important; height: 32px !important; border-radius: 16px !important; background: transparent !important;
+  transition: background-color .2s var(--n-ease);
+}
+html.native-shell.mobile-ui #mobile-nav .mnav-ico { width: 24px !important; height: 24px !important; }
+html.native-shell.mobile-ui #mobile-nav .mobile-nav-item small {
+  display: block !important; max-width: 100% !important; overflow: hidden !important; text-overflow: ellipsis !important; white-space: nowrap !important;
+  font-size: 12px !important; line-height: 16px !important; font-weight: 600 !important; letter-spacing: .1px !important; text-align: center !important;
+}
+html.native-shell.mobile-ui #mobile-nav .mobile-nav-item.active { color: var(--n-on-surface) !important; }
+html.native-shell.mobile-ui #mobile-nav .mobile-nav-item.active > span { background: var(--n-accent-soft) !important; color: var(--n-accent) !important; }
+html.native-shell.mobile-ui #mobile-nav .mobile-nav-item.active .mnav-ico { stroke-width: 2.2; }
+html.native-shell.mobile-ui #mobile-nav .mobile-nav-item:active > span { background: var(--n-press) !important; }
+html.native-shell.mobile-ui #mobile-nav .mobile-nav-badge {
+  position: absolute !important; top: -2px !important; left: 32px !important; right: auto !important;
+  min-width: 16px !important; height: 16px !important; padding: 0 4px !important; border-radius: 8px !important;
+  font: 700 10px/16px system-ui, sans-serif !important; background: #dc2626 !important; color: #fff !important;
+}
+@media (min-width: 600px) and (pointer: coarse) {
+  html.native-shell.mobile-ui #mobile-nav:not([hidden]) {
+    left: 50% !important; right: auto !important; width: min(560px, calc(100vw - 24px)) !important;
+    transform: translateX(-50%) !important; bottom: 12px !important; border: 1px solid var(--n-line) !important; border-radius: 24px !important;
+    height: var(--n-nav-h) !important; padding: 0 4px !important; box-shadow: 0 8px 24px rgba(15, 23, 42, .12) !important;
+  }
+}
+
+/* Content kabhi bottom bar ke neeche na chhupe; desktop footers app me nahi */
+html.native-shell.mobile-ui .main { padding-bottom: calc(var(--n-nav-h) + var(--n-safe-bottom) + 20px) !important; }
+html.native-shell.mobile-ui .app-footer,
+html.native-shell.mobile-ui .site-footer { display: none !important; }
+
+/* Floating ask button + location bar bottom bar ke upar, aapas me na takraayen */
+html.native-shell.mobile-ui #ask-fab { bottom: calc(var(--n-nav-h) + var(--n-safe-bottom) + 16px) !important; right: 16px !important; z-index: 1150 !important; }
+/* Location prompt = Android snackbar: ek line, chhote buttons, bottom bar ke theek upar */
+html.native-shell.mobile-ui .loc-banner:not([hidden]) {
+  position: fixed !important; left: 8px !important; right: 8px !important; bottom: calc(var(--n-nav-h) + var(--n-safe-bottom) + 8px) !important; top: auto !important;
+  z-index: 1160 !important; display: flex !important; flex-direction: row !important; flex-wrap: nowrap !important; align-items: center !important; gap: 4px !important;
+  min-height: 48px !important; max-width: none !important; padding: 6px 6px 6px 14px !important; margin: 0 !important; box-sizing: border-box !important;
+  border-radius: 8px !important; box-shadow: 0 4px 14px rgba(0, 0, 0, .28) !important;
+  background: #1f2937 !important; color: #f8fafc !important; font-size: 13.5px !important; line-height: 1.3 !important; transform: none !important;
+}
+html.native-shell.mobile-ui .loc-banner:not([hidden]) > span { flex: 1 1 auto !important; min-width: 0 !important; display: -webkit-box !important; -webkit-line-clamp: 2 !important; -webkit-box-orient: vertical !important; overflow: hidden !important; }
+html.native-shell.mobile-ui .loc-banner:not([hidden]) .btn { flex: 0 0 auto !important; min-height: 36px !important; height: 36px !important; padding: 0 12px !important; font-size: 14px !important; border-radius: 18px !important; margin: 0 !important; }
+html.native-shell.mobile-ui .loc-banner:not([hidden]) #loc-allow { background: transparent !important; color: #a5b4fc !important; border: 0 !important; box-shadow: none !important; font-weight: 700 !important; }
+html.native-shell.mobile-ui .loc-banner:not([hidden]) #loc-dismiss { width: 36px !important; padding: 0 !important; background: transparent !important; color: #cbd5e1 !important; border: 0 !important; box-shadow: none !important; }
+html.native-shell.mobile-ui body:has(.loc-banner:not([hidden])) #ask-fab { bottom: calc(var(--n-nav-h) + var(--n-safe-bottom) + 72px) !important; }
+html.native-shell.mobile-ui #toast { bottom: calc(var(--n-nav-h) + var(--n-safe-bottom) + 16px) !important; left: 16px !important; right: 16px !important; transform: none !important; border-radius: 10px !important; z-index: 1600 !important; }
+
+/* =====================================================================================
+   Navigation drawer (☰ / More) — normal size text, pill active item, 300px wide
+   ===================================================================================== */
+html.native-shell.mobile-ui .sidebar {
+  width: min(320px, 86vw) !important; max-width: 86vw !important; /* z-index mobile-fix (10001) ka hi — backdrop 10000 */
+  padding-top: var(--n-safe-top) !important; padding-bottom: var(--n-safe-bottom) !important;
+  border-radius: 0 16px 16px 0 !important; transition: transform .25s var(--n-ease) !important;
+}
+html.native-shell.mobile-ui body.side-open .side-backdrop { background: var(--n-scrim) !important; }
+html.native-shell.mobile-ui .sidebar .brand { padding: 16px 16px 12px !important; }
+html.native-shell.mobile-ui .sidebar .nav { padding: 4px 12px 12px !important; }
+html.native-shell.mobile-ui .sidebar .nav-sec,
+html.native-shell.mobile-ui .sidebar .nav-sec-toggle {
+  min-height: 44px !important; padding: 0 12px !important; margin: 8px 0 2px !important;
+  font-size: 13px !important; line-height: 1.2 !important; font-weight: 700 !important; letter-spacing: .08em !important; text-transform: uppercase !important;
+}
+html.native-shell.mobile-ui .sidebar .nav-sec * { font-size: inherit !important; }
+html.native-shell.mobile-ui .sidebar .nav-item {
+  display: flex !important; align-items: center !important; gap: 12px !important;
+  min-height: 52px !important; padding: 6px 14px !important; margin: 2px 0 !important; border-radius: 26px !important;
+}
+html.native-shell.mobile-ui .sidebar .nav-ico { flex: 0 0 auto !important; width: 28px !important; height: 28px !important; font-size: 18px !important; line-height: 28px !important; }
+html.native-shell.mobile-ui .sidebar .nav-text { min-width: 0 !important; }
+html.native-shell.mobile-ui .sidebar .nav-text b {
+  display: block !important; font-size: 15px !important; line-height: 1.25 !important; font-weight: 600 !important;
+  white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important;
+}
+html.native-shell.mobile-ui .sidebar .nav-text small {
+  display: block !important; font-size: 12px !important; line-height: 1.3 !important; opacity: .75 !important;
+  white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important;
+}
+html.native-shell.mobile-ui .sidebar .side-foot { padding: 8px 12px !important; font-size: 13px !important; }
+
+/* =====================================================================================
+   Bottom sheets: ⋮ options + KPI drawer + topbar popovers
+   ===================================================================================== */
+html.native-shell .nsheet-scrim {
+  position: fixed; inset: 0; z-index: 1500; display: flex; align-items: flex-end; justify-content: center;
+  background: var(--n-scrim); opacity: 0; transition: opacity .2s var(--n-ease);
+}
+html.native-shell .nsheet-scrim.open { opacity: 1; }
+html.native-shell .nsheet {
+  width: 100%; max-width: 640px; max-height: calc(100dvh - var(--n-safe-top) - 48px); overflow-y: auto; overscroll-behavior: contain;
+  padding: 0 0 calc(12px + var(--n-safe-bottom)); box-sizing: border-box;
+  background: var(--n-surface); color: var(--n-on-surface); border-radius: 28px 28px 0 0;
+  transform: translateY(100%); transition: transform .25s var(--n-ease);
+}
+html.native-shell .nsheet-scrim.open .nsheet { transform: translateY(0); }
+html.native-shell .nsheet-handle { width: 32px; height: 4px; margin: 0 auto; border-radius: 2px; background: color-mix(in srgb, var(--n-on-surface) 30%, transparent); box-sizing: content-box; padding: 14px 40px 14px; background-clip: content-box; }
+html.native-shell .nsheet .nsheet-title { margin: 0 24px 8px !important; padding: 0 !important; font-size: 14px !important; line-height: 1.4 !important; font-weight: 700 !important; color: var(--n-muted) !important; letter-spacing: .06em !important; text-transform: uppercase !important; background: none !important; -webkit-text-fill-color: currentColor !important; }
+html.native-shell .nsheet-list { display: flex; flex-direction: column; padding: 0 8px; }
+html.native-shell .nsheet-item,
+html.native-shell .nsheet-account {
+  display: flex; align-items: center; gap: 16px; width: 100%; min-height: 56px; padding: 8px 16px; margin: 0;
+  border: 0; border-radius: 16px; background: transparent; color: inherit; text-align: left; font: inherit; cursor: pointer;
+}
+html.native-shell .nsheet-item:active,
+html.native-shell .nsheet-account:active { background: var(--n-press); }
+html.native-shell .nsheet-ico { flex: 0 0 auto; width: 28px; text-align: center; font-size: 20px; line-height: 1; }
+html.native-shell .nsheet-txt { min-width: 0; display: flex; flex-direction: column; }
+html.native-shell .nsheet-txt b { font-size: 16px; font-weight: 500; line-height: 1.3; }
+html.native-shell .nsheet-txt small,
+html.native-shell .nsheet-account small { font-size: 12.5px; color: var(--n-muted); line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html.native-shell .nsheet-account { margin: 0 8px 8px; width: calc(100% - 16px); border-bottom: 1px solid var(--n-line); border-radius: 16px 16px 0 0; padding-bottom: 14px; }
+html.native-shell .nsheet-account > span:last-child { display: flex; flex-direction: column; min-width: 0; }
+html.native-shell .nsheet-account b { font-size: 16px; font-weight: 600; }
+html.native-shell .nsheet-avatar { flex: 0 0 auto; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: var(--n-accent); color: #fff; font-weight: 700; font-size: 17px; }
+
+/* KPI / detail drawer → bottom sheet */
+html.native-shell.mobile-ui #drawer {
+  position: fixed !important; left: 0 !important; right: 0 !important; bottom: 0 !important; top: auto !important;
+  width: 100% !important; max-width: none !important; height: auto !important;
+  max-height: calc(100dvh - var(--n-safe-top) - 24px) !important; min-height: 40vh !important;
+  display: flex !important; flex-direction: column !important; z-index: 1450 !important;
+  border-radius: 28px 28px 0 0 !important; border: 0 !important; box-shadow: 0 -8px 30px rgba(0, 0, 0, .18) !important;
+  background: var(--n-surface) !important; padding: 0 0 var(--n-safe-bottom) !important;
+  transform: translateY(105%) !important; visibility: hidden !important; transition: transform .28s var(--n-ease), visibility 0s linear .28s !important;
+}
+html.native-shell.mobile-ui #drawer.open { transform: translateY(0) !important; visibility: visible !important; transition: transform .28s var(--n-ease), visibility 0s !important; }
+html.native-shell.mobile-ui #drawer .drawer-grip { flex: 0 0 auto; cursor: grab; }
+html.native-shell.mobile-ui #drawer .drawer-head { flex: 0 0 auto !important; padding: 0 16px 10px 20px !important; border-bottom: 1px solid var(--n-line) !important; position: static !important; }
+html.native-shell.mobile-ui #drawer #drawer-title { font-size: 22px !important; line-height: 1.25 !important; margin: 2px 0 4px !important; }
+html.native-shell.mobile-ui #drawer .drawer-kicker { font-size: 11.5px !important; letter-spacing: .08em !important; }
+html.native-shell.mobile-ui #drawer .drawer-sub { font-size: 13px !important; }
+html.native-shell.mobile-ui #drawer #drawer-close { width: 44px !important; height: 44px !important; border-radius: 50% !important; }
+html.native-shell.mobile-ui #drawer .drawer-body { flex: 1 1 auto !important; overflow-y: auto !important; overscroll-behavior: contain !important; padding: 12px 16px 20px !important; -webkit-overflow-scrolling: touch; }
+html.native-shell.mobile-ui #drawer-backdrop:not([hidden]) { z-index: 1440 !important; background: var(--n-scrim) !important; }
+
+/* Topbar popovers (notifications list, account menu, theme packs) → bottom sheets */
+/* Popover topbar ke andar rehta hai — khulte waqt topbar ko bottom bar / snackbar / FAB ke upar uthao */
+html.native-shell.mobile-ui .topbar:has(#theme-pop, #user-menu:not([hidden]), #notification-pop:not([hidden]), .ms-range-pop:not([hidden])) { z-index: 1470 !important; }
+html.native-shell.mobile-ui #notification-pop:not([hidden]),
+html.native-shell.mobile-ui #user-menu:not([hidden]),
+html.native-shell.mobile-ui #theme-pop {
+  position: fixed !important; left: 0 !important; right: 0 !important; bottom: 0 !important; top: auto !important;
+  width: auto !important; max-width: none !important; max-height: 80dvh !important; overflow-y: auto !important;
+  margin: 0 !important; padding: 16px 12px calc(16px + var(--n-safe-bottom)) !important; box-sizing: border-box !important;
+  border-radius: 28px 28px 0 0 !important; border: 0 !important; z-index: 1460 !important;
+  background: var(--n-surface) !important; color: var(--n-on-surface) !important;
+  box-shadow: 0 -8px 30px rgba(0, 0, 0, .22), 0 0 0 100vmax var(--n-scrim) !important;
+  transform: none !important; animation: nSheetUp .25s var(--n-ease);
+}
+
+/* =====================================================================================
+   Content polish
+   ===================================================================================== */
+/* Tables: column itni patli nahi ki naam akshar-akshar neeche likhe (A/S/H/O/K) — table swipe hoti hai */
+html.native-shell.mobile-ui .table-wrap { overflow-x: auto !important; -webkit-overflow-scrolling: touch; }
+html.native-shell.mobile-ui .table-wrap > table { width: max-content !important; min-width: 100% !important; }
+html.native-shell.mobile-ui .table-wrap th { white-space: nowrap !important; }
+html.native-shell.mobile-ui .table-wrap td { word-break: normal !important; overflow-wrap: normal !important; max-width: 280px; }
+/* Button rows jo screen se bahar nikalte the (FASTag Mapping toolbar) — wrap ho jaayein */
+html.native-shell.mobile-ui .card-head .head-actions { flex-wrap: wrap !important; max-width: 100% !important; }
+html.native-shell.mobile-ui .card-head { flex-wrap: wrap !important; }
+html.native-shell.mobile-ui input, html.native-shell.mobile-ui select, html.native-shell.mobile-ui textarea { font-size: max(16px, 1em); } /* iOS zoom-on-focus nahi */
+
+/* Page sections (do-card grids) phone par ek column — card aadhi width me tootte the (FASTag Mapping) */
+html.native-shell.mobile-ui .main .grid:has(> section.card) { grid-template-columns: minmax(0, 1fr) !important; }
+/* Android type scale — readable, par dhol jaisa bada nahi */
+html.native-shell.mobile-ui body { font-size: 15px !important; line-height: 1.5 !important; }
+html.native-shell.mobile-ui .main p, html.native-shell.mobile-ui .main li, html.native-shell.mobile-ui #drawer p, html.native-shell.mobile-ui #drawer li { font-size: 15px !important; line-height: 1.5 !important; }
+html.native-shell.mobile-ui .main h2 { font-size: 20px !important; line-height: 1.3 !important; }
+html.native-shell.mobile-ui .main h3 { font-size: 18px !important; line-height: 1.3 !important; }
+html.native-shell.mobile-ui .main .btn, html.native-shell.mobile-ui #drawer .btn { font-size: 15px !important; font-weight: 600 !important; }
+html.native-shell.mobile-ui .main .input, html.native-shell.mobile-ui .main select, html.native-shell.mobile-ui .main textarea { font-size: 16px !important; font-weight: 500 !important; }
+html.native-shell.mobile-ui .main .page-head h1 { font-size: 24px !important; line-height: 1.25 !important; }
+html.native-shell.mobile-ui .main .page-head .sub { font-size: 13.5px !important; line-height: 1.45 !important; }
+html.native-shell.mobile-ui .main .card-head h3 { font-size: 18px !important; line-height: 1.3 !important; }
+html.native-shell.mobile-ui .main .card-head h4, html.native-shell.mobile-ui .main .card-body h4 { font-size: 16px !important; line-height: 1.3 !important; }
+html.native-shell.mobile-ui .main label { font-size: 14px !important; line-height: 1.35 !important; }
+html.native-shell.mobile-ui .main .card-body p, html.native-shell.mobile-ui .main .notice { font-size: 14px !important; line-height: 1.5 !important; }
+
+/* Pull-to-refresh indicator */
+html.native-shell .nptr {
+  position: fixed; top: calc(var(--n-bar-h) + var(--n-safe-top) - 40px); left: 50%; z-index: 1090;
+  width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; opacity: 0;
+  background: var(--n-surface); color: var(--n-accent); box-shadow: 0 2px 8px rgba(0, 0, 0, .2);
+  transform: translate(-50%, 0); pointer-events: none; transition: transform .2s var(--n-ease), opacity .2s;
+}
+html.native-shell .nptr svg { width: 22px; height: 22px; }
+html.native-shell .nptr.armed { background: var(--n-accent); color: #fff; }
+html.native-shell .nptr.spin { opacity: 1; }
+html.native-shell .nptr.spin .nptr-ico { animation: nSpin .8s linear infinite; }
+html.native-shell .nptr-ico { display: grid; place-items: center; }
+
+@keyframes nSpin { to { transform: rotate(360deg); } }
+@keyframes nFade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes nSheetUp { from { transform: translateY(40%); opacity: .4; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  html.native-shell .nsheet, html.native-shell .nsheet-scrim, html.native-shell.mobile-ui #drawer, html.native-shell.mobile-ui .sidebar { transition: none !important; animation: none !important; }
+}
+
+/* Dark mode: gradient text / white avatar jo dark me gayab ho jaate the */
+html.native-shell.mobile-ui[data-theme="dark"] .main .page-head h1 { background: none !important; -webkit-text-fill-color: currentColor !important; color: var(--ink) !important; }
+html.native-shell.mobile-ui[data-theme="dark"] .home-avatar.mono-logo { color: var(--brand) !important; }
+html.native-shell.mobile-ui[data-theme="dark"] .home-greeting .home-name { -webkit-text-fill-color: #6d28d9 !important; }
+/* Page canvas theme ke saath — mobile-fix ka fixed #f6f8fc dark mode me title ko safed-par-safed kar deta tha */
+html.native-shell.mobile-ui, html.native-shell.mobile-ui body, html.native-shell.mobile-ui .content { background: var(--bg) !important; }

@@ -1,4 +1,29 @@
-# 📱 Android app jaisa experience (v3.58)
+# 📱 Android app jaisa experience
+
+## v3.73 — Native Android shell (sabse naya)
+
+Phone / installed app me ab layout Material 3 (Android) jaisa hai — `native-app.js` + `native-shell.css`, sirf `html.mobile-ui` par (desktop bilkul same):
+
+| Pehle | Ab |
+|---|---|
+| Topbar me 12 emoji buttons ki side-scroll patti | 56px app bar: ☰ · page title · 🔍 · 🔔 (badge) · ⋮ |
+| Bhasha / theme / a11y / focus / refresh / office bell / voice / saved view — sab topbar me | ⋮ → **Options bottom sheet** (asli buttons hi chalte hain, koi feature nahi hata) + Account |
+| Search topbar ki patti me chhupa input | Poori screen ka search (← back, suggestions full screen) |
+| Phone ka **Back** button page hi badal deta tha | Back pehle khula sheet / drawer / menu / search / notifications band karta hai |
+| Har tab tap history me jud jaata tha | Home → tab = back se Home · tab → tab = history me dher nahi |
+| Pull-to-refresh band tha | Page top par neeche kheencho → data refresh (app ka apna, browser wala nahi) |
+| KPI detail drawer upar se poori screen | Bottom sheet — handle neeche kheencho to band |
+| Sidebar me 30px text, kata hua | Normal Android drawer (15px, pill active item), left swipe se band |
+| Status bar hamesha kaala | App bar ke rang ka (light / dark) |
+| Location prompt bada dabba | Android snackbar (ek line, Allow · ✕) |
+| Dark mode me kuch page titles safed-par-safed | Theek |
+| Tables me naam akshar-akshar neeche (A/S/H/O/K) | Table swipe hoti hai, naam ek line me |
+
+Installed app khud update ho jaayega (service worker `apnapayment-v126`). Purana app band karke dobara kholo.
+
+---
+
+## v3.58 — pehla app-feel layer
 
 Dashboard ab installed PWA me **native Android app jaisa** chalta hai — browser jaisa feel hata diya gaya hai.
 
