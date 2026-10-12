@@ -5576,16 +5576,17 @@ async function handleApi(req, res, url) {
     priority: shortText(t.priority, 20), reqApproved: Number(t.reqApproved) || 0, agents: Number(t.agents) || 0,
     sugNet: Number(t.sugNet) || 0, sugGross: Number(t.sugGross) || 0, cover: t.cover === undefined || t.cover === null ? null : Number(t.cover) || 0
   }));
-  // Internal idempotency keys must never be returned by request-list/create APIs.
-  const tagRequestClientView = (r) => {
+  // Internal idempotency keys and audit timelines never leak to public/shared employee links.
+  // Only an authenticated admin needs the detailed timeline.
+  const tagRequestClientView = (r, { includeTimeline = false } = {}) => {
     if (!r || typeof r !== 'object') return r;
-    const { submissionId, submissionFingerprint, ...safe } = r;
-    return safe;
+    const { submissionId, submissionFingerprint, timeline, ...safe } = r;
+    return includeTimeline && Array.isArray(timeline) ? { ...safe, timeline: timeline.slice(-100) } : safe;
   };
   const visibleTagRequests = (user) => {
     const all = workspaceStore().tagRequests || [];
     const list = user.role === 'admin' ? all : all.filter((r) => r.by === user.username);
-    return list.slice(-TAG_REQUEST_CAP).reverse().map(tagRequestClientView);
+    return list.slice(-TAG_REQUEST_CAP).reverse().map((r) => tagRequestClientView(r, { includeTimeline: user.role === 'admin' }));
   };
 
   // ---- 🧑‍🤝‍🧑 v3.30 — har AGENT ki alag request (agent ka mobile · full address · pincode ke saath) ----
@@ -5653,7 +5654,19 @@ async function handleApi(req, res, url) {
   /** Store me daalo + cap (purani dispatched → approved → koi bhi) — upar wale helper se. */
   function storeTagRequests(list) {
     const w = workspaceStore();
-    w.tagRequests.push(...list);
+    const createdAt = new Date().toISOString();
+    // Backward-compatible audit trail lives inside the already-persisted request record.
+    for (const r of list || []) {
+      if (!r || typeof r !== 'object') continue;
+      if (!Array.isArray(r.timeline) || !r.timeline.length) {
+        r.timeline = [{
+          at: r.at || createdAt, by: r.by || '', byName: r.byName || r.by || 'System',
+          action: 'created', statusAfter: r.status || 'pending', totalAfter: Number(r.total) || 0,
+          fields: ['request']
+        }];
+      } else r.timeline = r.timeline.slice(-100);
+    }
+    w.tagRequests.push(...(list || []));
     capTagRequests();
     tagReqBaselineSync();
     tagReqForceVerify = true; // 💾 save se pehle storage verify — kisi doosre process ki requests safe rahein
@@ -6243,7 +6256,7 @@ async function handleApi(req, res, url) {
         });
       } catch { /* notification optional */ }
       if (!out.idempotentReplay) logAudit(user, 'tag_request_created', { target: out.batch, note: `${n} agents · ${out.total} tags · ${out.created.map((r) => r.id).join(',')}`.slice(0, 300), ip: clientIp(req) });
-      return sendJson(res, 201, { ok: true, request: tagRequestClientView(out.created[0]), requests: out.created.map(tagRequestClientView), batch: { id: out.batch, total: out.total, agents: n, rows: out.rows } });
+      return sendJson(res, 201, { ok: true, request: tagRequestClientView(out.created[0], { includeTimeline: user.role === 'admin' }), requests: out.created.map((r) => tagRequestClientView(r, { includeTimeline: user.role === 'admin' })), batch: { id: out.batch, total: out.total, agents: n, rows: out.rows } });
     }
     const rows = tagRequestRows(body.rows);
     if (!rows.length) throw new HttpError(400, 'Kam se kam ek row chahiye (agent + tag class).');
@@ -6278,7 +6291,7 @@ async function handleApi(req, res, url) {
       });
     } catch { /* notification optional */ }
     logAudit(user, 'tag_request_created', { target: row.id, note: `${rows.length} rows · ${total} tags`, ip: clientIp(req) });
-    return sendJson(res, 201, { ok: true, request: row });
+    return sendJson(res, 201, { ok: true, request: tagRequestClientView(row, { includeTimeline: user.role === 'admin' }) });
   }
   const tagReqPath = p.match(/^\/api\/tag-requests\/([^/]+)$/);
   if (tagReqPath && method === 'PUT') {
@@ -6289,6 +6302,43 @@ async function handleApi(req, res, url) {
     const owner = row.by === user.username;
     if (user.role !== 'admin' && !(owner && row.status === 'pending')) throw new HttpError(403, 'Sirf admin (ya pending request ka owner) ise update kar sakta hai.');
     const body = await readBody(req);
+    const auditBefore = {
+      status: row.status || 'pending', total: Number(row.total) || 0,
+      adminNote: row.adminNote || '', note: row.note || '', courier: row.courier || '',
+      itemName: row.itemName || 'FASTag', dispatch: row.dispatch ? { ...row.dispatch } : null
+    };
+    let preparedDispatch = null;
+    if (body.dispatch !== undefined) {
+      if (user.role !== 'admin') throw new HttpError(403, 'Dispatch details sirf admin update kar sakta hai.');
+      if (!body.dispatch || typeof body.dispatch !== 'object' || Array.isArray(body.dispatch)) throw new HttpError(400, 'Dispatch details invalid hain.');
+      const d = body.dispatch;
+      const quantity = d.quantity === undefined ? auditBefore.total : Number(d.quantity);
+      if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100000) throw new HttpError(400, 'Dispatch quantity 1 se 100000 ke beech honi chahiye.');
+      if (quantity > auditBefore.total) throw new HttpError(400, `Dispatch quantity approved total (${auditBefore.total}) se zyada nahi ho sakti.`);
+      const targetStatus = body.status === undefined ? auditBefore.status : body.status;
+      if (!['approved', 'dispatched'].includes(targetStatus)) throw new HttpError(409, 'Dispatch se pehle request approve karein.');
+      const dateInput = shortText(d.dispatchedAt, 50);
+      const dateMs = dateInput ? Date.parse(dateInput) : Date.now();
+      if (!Number.isFinite(dateMs)) throw new HttpError(400, 'Dispatch date/time valid nahi hai.');
+      const rawProof = shortText(d.proofUrl, 1000);
+      let proofUrl = '';
+      if (rawProof) {
+        let parsedProof;
+        try { parsedProof = new URL(rawProof); } catch { throw new HttpError(400, 'Dispatch proof ke liye valid HTTPS link daalein.'); }
+        if (parsedProof.protocol !== 'https:' || parsedProof.username || parsedProof.password) throw new HttpError(400, 'Dispatch proof ke liye valid HTTPS link daalein.');
+        proofUrl = parsedProof.href;
+      }
+      const courier = shortText(d.courier, 40) || shortText(row.courier, 40);
+      const docket = shortText(d.docket, 100);
+      const note = shortText(d.note, 300);
+      preparedDispatch = {
+        quantity, dispatchedAt: new Date(dateMs).toISOString(),
+        ...(courier ? { courier } : {}), ...(docket ? { docket } : {}),
+        ...(note ? { note } : {}), ...(proofUrl ? { proofUrl } : {})
+      };
+    } else if (body.status === 'dispatched' && Number(row.total) < 1) {
+      throw new HttpError(400, 'Dispatch se pehle approved quantity dobara check karein.');
+    }
     // Pehle validate, phir badlo — invalid status par aadhi-adhuri edit memory me na reh jaaye.
     if (body.status !== undefined && !['pending', 'approved', 'dispatched', 'rejected'].includes(body.status)) throw new HttpError(400, 'Status invalid hai.');
     if (body.status !== undefined && body.status !== row.status && user.role !== 'admin') throw new HttpError(403, 'Status sirf admin badal sakta hai.');
@@ -6347,7 +6397,36 @@ async function handleApi(req, res, url) {
       if (c) row.courier = c; else delete row.courier;
     }
     if (body.itemName !== undefined) row.itemName = ['FASTag', 'Biomatric Device', 'Matarial'].includes(body.itemName) ? body.itemName : 'FASTag';
+    if (preparedDispatch) row.dispatch = preparedDispatch;
+    else if (body.status === 'dispatched' && prevStatus !== 'dispatched' && !row.dispatch) {
+      row.dispatch = {
+        quantity: Number(row.total) || 0, dispatchedAt: new Date().toISOString(),
+        ...(shortText(row.courier, 40) ? { courier: shortText(row.courier, 40) } : {})
+      };
+    }
     row.updatedAt = new Date().toISOString(); row.updatedBy = user.username;
+    const changedFields = [];
+    if (auditBefore.status !== (row.status || 'pending')) changedFields.push('status');
+    if (auditBefore.total !== (Number(row.total) || 0) || body.rows !== undefined || body.classQty !== undefined) changedFields.push('quantity');
+    if (auditBefore.adminNote !== (row.adminNote || '')) changedFields.push('adminNote');
+    if (auditBefore.note !== (row.note || '')) changedFields.push('note');
+    if (auditBefore.courier !== (row.courier || '')) changedFields.push('courier');
+    if (auditBefore.itemName !== (row.itemName || 'FASTag')) changedFields.push('itemName');
+    if (JSON.stringify(auditBefore.dispatch || null) !== JSON.stringify(row.dispatch || null)) changedFields.push('dispatch');
+    const timeline = Array.isArray(row.timeline) ? row.timeline.slice(-99) : [{
+      at: row.at || row.updatedAt, by: row.by || '', byName: row.byName || row.by || 'System',
+      action: 'created', statusAfter: auditBefore.status, totalAfter: auditBefore.total, fields: ['request']
+    }];
+    timeline.push({
+      at: row.updatedAt, by: user.username, byName: user.name || user.username,
+      action: changedFields.includes('dispatch')
+        ? (row.status === 'dispatched' ? 'dispatch_recorded' : 'dispatch_updated')
+        : (changedFields.includes('status') ? 'status_changed' : 'updated'),
+      statusBefore: auditBefore.status, statusAfter: row.status || 'pending',
+      totalBefore: auditBefore.total, totalAfter: Number(row.total) || 0,
+      fields: changedFields.length ? changedFields : ['record']
+    });
+    row.timeline = timeline.slice(-100);
     await persist('notify');
     // 📗 v5: Sheet sync ONLY on the first transition to Approved.
     // Pending submit, Dispatched, Rejected, and later status changes never append another row.
@@ -6357,18 +6436,30 @@ async function handleApi(req, res, url) {
         row.sheetSync = { at: new Date().toISOString(), event: 'status:approved', error: String(err.message || err).slice(0, 160) };
       });
     }
-    // Requester ko status update ka notification (admin ne kuch badla to).
+    // Lifecycle changes reach the in-app feed and existing web-push delivery pipeline.
     if (user.role === 'admin' && row.by !== user.username) {
       try {
+        const notificationTitle = body.status === 'dispatched' && prevStatus !== 'dispatched'
+          ? '🚚 Tag request dispatched'
+          : body.status === 'approved' && prevStatus !== 'approved'
+            ? '✅ Tag request approved'
+            : body.status === 'rejected' && prevStatus !== 'rejected'
+              ? '⛔ Tag request rejected'
+              : '🏷️ Tag request updated';
+        const dispatchSummary = row.status === 'dispatched' && row.dispatch
+          ? ` · ${Number(row.dispatch.quantity) || row.total} tags · ${row.dispatch.courier || row.courier || 'Courier not set'}${row.dispatch.docket ? ` · Docket ${row.dispatch.docket}` : ''}`
+          : '';
+        const reason = shortText(body.adminNote, 180) || (row.dispatch && row.dispatch.note ? shortText(row.dispatch.note, 180) : '');
         recordNotification({
-          type: 'request', title: `🏷️ Tag request ${body.status ? '· ' + body.status : 'update'}`,
-          body: `Aapki request (${row.rows.length} rows · ${row.total} tags) update hui${body.adminNote ? ` — ${row.adminNote}` : ''}.`,
-          target: `user:${row.by}`, meta: { requestId: row.id, link: '#/tagRequest?view=requests' }
+          type: 'request', title: notificationTitle,
+          body: `Request #${row.id}: ${row.rows.length} rows · ${row.total} approved tags${dispatchSummary}${reason ? ` · ${reason}` : ''}.`,
+          target: `user:${row.by}`,
+          meta: { requestId: row.id, status: row.status, dispatchQuantity: row.status === 'dispatched' && row.dispatch ? Number(row.dispatch.quantity) || 0 : null, link: '#/tagRequest?view=requests' }
         });
       } catch { /* optional */ }
     }
     logAudit(user, 'tag_request_updated', { target: row.id, note: `${row.status} · ${row.total} tags`, ip: clientIp(req) });
-    return sendJson(res, 200, { ok: true, request: row });
+    return sendJson(res, 200, { ok: true, request: tagRequestClientView(row, { includeTimeline: user.role === 'admin' }) });
   }
   if (tagReqPath && method === 'DELETE') {
     if (user.role !== 'admin' && !(user.permissions || []).includes('tagRequest')) throw new HttpError(403, 'Tag Request access disabled.');
@@ -6861,6 +6952,7 @@ async function handleApi(req, res, url) {
       totalRequests: counts.all, pending: counts.pending, approved: counts.approved,
       dispatched: counts.dispatched, rejected: counts.rejected, requestedTags, approvedTags,
       requests: rows.slice(-TAG_REQUEST_CAP).reverse().map((r) => {
+        const st = String(r.status || 'pending').toLowerCase();
         const classes = Array.isArray(r.rows) ? r.rows : [];
         const first = classes[0] || {};
         return {
@@ -6875,7 +6967,15 @@ async function handleApi(req, res, url) {
             approved: Number(x.approved) || 0
           })),
           adminNote: r.adminNote || '', updatedAt: r.updatedAt || r.at || '',
-          sheetSynced: !!r.sheetSync && !r.sheetSync.error
+          sheetSynced: !!r.sheetSync && !r.sheetSync.error,
+          dispatch: (st === 'dispatched' && r.dispatch) ? {
+            quantity: Number(r.dispatch.quantity) || Number(r.total) || 0,
+            dispatchedAt: r.dispatch.dispatchedAt || r.updatedAt || r.at || '',
+            ...(shortText(r.dispatch.courier || r.courier, 40) ? { courier: shortText(r.dispatch.courier || r.courier, 40) } : {}),
+            ...(shortText(r.dispatch.docket, 100) ? { docket: shortText(r.dispatch.docket, 100) } : {}),
+            ...(shortText(r.dispatch.note, 300) ? { note: shortText(r.dispatch.note, 300) } : {}),
+            ...(shortText(r.dispatch.proofUrl, 1000) && /^https:\/\//i.test(String(r.dispatch.proofUrl || '')) ? { proofUrl: shortText(r.dispatch.proofUrl, 1000) } : {})
+          } : null
         };
       })
     };
