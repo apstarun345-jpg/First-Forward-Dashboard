@@ -298,6 +298,7 @@ test('📈 growth — compare yesterday MTD against same calendar day last month
   assert.match(mp, /Comparable MTD growth/);
   assert.match(mp, /const yesterday = new Date\(now\.getFullYear\(\), now\.getMonth\(\), now\.getDate\(\) - 1\)/);
   assert.match(mp, /const prevCutDay = Math\.min\(day, prevLastDay\)/);
+  assert.ok(mp.includes(String.raw`if (r && r.key && /^\d{4}-\d{1,2}-\d{1,2}$/.test(String(r.key))`), 'ISO date keys must parse for same-period growth');
   assert.match(mp, /const growth = last > 0 \? \(\(cur - last\) \/ last\) \* 100/);
   assert.match(mp, /growthThrough: gi\.growthThrough/);
   assert.match(await read('masterSearch.js'), /p1\.growthThrough/);
