@@ -2163,15 +2163,22 @@ async function tagReqStorageWorkspace() {
  * Ek metadata call + ek ciphertext call (bhaari nahi). Har save ke liye: kitni tag requests,
  * unme se kitni abhi live list me nahi (`missing`) aur chhoti sample list.
  */
-async function tagReqHistorySaves({ limit = 6, includeValues = false } = {}) {
+async function tagReqHistorySaves({ limit = 6, includeValues = false, at = '' } = {}) {
   if (!sheetsStore || typeof sheetsStore.history !== 'function' || typeof sheetsStore.groupSnapshots !== 'function') {
     throw new HttpError(400, 'Tag Request recovery sirf Google Sheet storage (Apps Script backend) ke saath chalti hai — Settings → ☁️ Storage & backup → ⏪ Purana data wapas lao dekho.');
   }
   const hist = await sheetsStore.history();
   const all = sheetsStore.groupSnapshots(hist.entries || []);
+  // Explicit restore must continue working after a restore itself creates newer snapshots.
+  // Resolve the requested timestamp from all snapshot metadata, not just the newest 20.
+  const requestedAt = String(at || '').trim();
+  const selectedSnap = requestedAt
+    ? (all.find((snap) => String(snap.at) === requestedAt) || all.find((snap) => String(snap.at).startsWith(requestedAt.slice(0, 19))))
+    : null;
   // Ek save (batch) me kai notify records ho sakte hain (node/notification ki writes 1.5s ke andar).
   // Sabse POORA record chuno — bahut baar sabse naya record thoda peecha reh jaata hai.
-  const snaps = all.slice(0, Math.max(1, Math.min(20, limit)))
+  const candidateSnaps = selectedSnap ? [selectedSnap] : all.slice(0, Math.max(1, Math.min(20, limit)));
+  const snaps = candidateSnaps
     .map((snap) => ({ snap, notifies: (snap.entries || []).filter((e) => e.kind === 'notify').slice(0, 4) }))
     .filter((x) => x.notifies.length);
   if (!snaps.length) return { saves: [], total: all.length, truncated: !!hist.truncated };
@@ -6443,7 +6450,7 @@ async function handleApi(req, res, url) {
       } else {
         // Keep the same snapshot-selection path for repeat restores. A selected history save
         // is merge-only: after the first restore, the same request IDs produce added=0 and HTTP 200.
-        const out = await tagReqHistorySaves({ limit: 20, includeValues: true });
+        const out = await tagReqHistorySaves({ limit: 20, includeValues: true, at });
         const selected = at
           ? (out.saves.find((x) => String(x.at) === at) || out.saves.find((x) => String(x.at).startsWith(at.slice(0, 19))))
           : null;
