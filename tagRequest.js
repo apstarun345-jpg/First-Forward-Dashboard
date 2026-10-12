@@ -1936,6 +1936,11 @@ body.colorful .from-hdr { color: #166534; }
       const changed = num(c.requested) !== num(c.approved) && (s.status !== 'pending' || num(c.requested));
       return `<span class="tr-st-cls"><b>${esc(c.cls)}</b> ${changed ? `<s class="dim">${fmt(c.requested)}</s> → <b>${fmt(c.approved)}</b>` : fmt(c.approved)}${c.agent ? ` <small class="dim">${esc(c.agent)}</small>` : ''}</span>`;
     }).join('');
+    const d = s.status === 'dispatched' && s.dispatch && typeof s.dispatch === 'object' ? s.dispatch : null;
+    const proof = d && /^https:\/\//i.test(String(d.proofUrl || ''))
+      ? ` · <a href="${esc(d.proofUrl)}" target="_blank" rel="noopener noreferrer">Dispatch proof ↗</a>`
+      : '';
+    const dispatchHtml = d ? `<div class="notice blue tr-public-dispatch" style="margin-top:8px">🚚 <b>Dispatch details</b><div class="small">${fmt(d.quantity || s.total)} tags${d.courier ? ` · Courier: ${esc(d.courier)}` : ''}${d.docket ? ` · Docket: ${esc(d.docket)}` : ''}</div><div class="small dim">📅 ${esc(longDate(d.dispatchedAt || s.updatedAt || s.at))}${d.note ? ` · ${esc(d.note)}` : ''}${proof}</div></div>` : '';
     return `<div class="tr-st-card st-${esc(s.status || 'pending')}">
       <div class="tr-st-top"><span class="badge ${v.tone}">${v.label}</span><b class="tr-st-agent">${esc(s.agentName || '—')}</b>${s.agents > 1 ? `<small class="dim"> +${s.agents - 1} agents</small>` : ''}<span class="tr-st-total"><b>${fmt(s.total)}</b> tags</span></div>
       ${steps}
@@ -1943,6 +1948,7 @@ body.colorful .from-hdr { color: #166534; }
       <div class="dim small">📅 ${esc(longDate(s.at))}      <div class="dim small">📦 Item Name: <b>${esc(normalizeItemName(s.itemName))}</b></div>
  · ${esc(ago(s.at))}${s.employeeName ? ` · 👤 employee: ${esc(s.employeeName)}` : (s.byName ? ` · 👤 entry: ${esc(s.byName)}` : '')} · <span class="mono">${esc(s.id)}</span>${s.sheetSynced ? ' · 📗 sheet entry' : ''}</div>
       ${s.adminNote ? `<div class="notice green" style="margin-top:8px">💬 Admin note: ${esc(s.adminNote)}</div>` : ''}
+      ${dispatchHtml}
     </div>`;
   }
   function employeeStatusPage(summary, filter, requestedPage) {
@@ -2332,6 +2338,8 @@ body.colorful .from-hdr { color: #166534; }
       <button class="btn small" data-tr-op="color1" data-key="${k}" title="Colorful Label Print / PDF">🎨</button>
       <button class="btn small" data-tr-op="pdf1" data-key="${k}" title="Is request ka label PDF download">📄</button>
       <button class="btn small" data-tr-op="copy" data-key="${k}" title="Label text copy (WhatsApp ke liye)">📋</button>
+      ${isAdmin() && ['approved', 'dispatched'].includes(r.status || 'pending') ? `<button class="btn small" data-tr-op="dispatch" data-key="${k}" title="Courier, docket, dispatch quantity aur proof save karein">${r.status === 'dispatched' ? '🚚 Edit dispatch' : '🚚 Dispatch'}</button>` : ''}
+      ${isAdmin() ? `<button class="btn small" data-tr-op="history" data-key="${k}" title="Approval aur dispatch history dekhein">🕘 History</button>` : ''}
       ${isAdmin() && r.status === 'approved' && !(r.sheetApprovalSync && r.sheetApprovalSync.at) && !(r.sheetSync && r.sheetSync.at && !r.sheetSync.error) ? `<button class="btn small" data-tr-op="push" data-key="${k}" title="Approved request ko Google Sheet me bhejo">📗</button>` : ''}
       ${canDeleteReq(r) ? `<button class="btn small" data-tr-op="del" data-key="${k}" title="Request delete">🗑</button>` : ''}
     </div>`;
@@ -2680,6 +2688,7 @@ body.colorful .from-hdr { color: #166534; }
     const next = { ...before, rows: Array.isArray(before.rows) ? before.rows.map((x) => ({ ...x })) : [] };
 
     if (payload.status !== undefined) next.status = payload.status;
+    if (payload.dispatch && typeof payload.dispatch === 'object' && !Array.isArray(payload.dispatch)) next.dispatch = { ...(next.dispatch || {}), ...payload.dispatch };
     if (payload.adminNote !== undefined) next.adminNote = String(payload.adminNote || '');
     if (payload.note !== undefined && (next.status || 'pending') === 'pending') next.note = String(payload.note || '');
     if (payload.courier !== undefined) {
@@ -2740,6 +2749,111 @@ body.colorful .from-hdr { color: #166534; }
         throw err;
       });
   }
+  function localDateTimeValue(raw) {
+    let d = raw ? new Date(raw) : new Date();
+    if (!Number.isFinite(d.getTime())) d = new Date();
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+
+  function openDispatchEditor(dr) {
+    if (!isAdmin() || !dr || !dr.req || !FF.app || !FF.app.openDrawer) return;
+    const r = dr.req, d = r.dispatch || {};
+    const body = `<form class="tr-dispatch-form">
+      <p class="dim small">Request <b class="mono">#${esc(r.id)}</b> · ${esc(dr.agent.name || 'Agent')} · Approved quantity ${fmt(r.total)}. Save karne par status <b>Dispatched</b> ho jayega.</p>
+      <div class="form-grid">
+        <label class="field"><span class="dim small">🚚 Courier</span><select class="input" data-tr-dispatch="courier">${courierPickOptions(d.courier || r.courier).map((c) => `<option value="${esc(c)}" ${String(d.courier || r.courier || '').toLowerCase() === c.toLowerCase() ? 'selected' : ''}>${c ? esc(c) : 'Courier chuno'}</option>`).join('')}</select></label>
+        <label class="field"><span class="dim small">📦 Docket / tracking number</span><input class="input" data-tr-dispatch="docket" maxlength="100" value="${esc(d.docket || '')}" placeholder="Courier receipt number"></label>
+        <label class="field"><span class="dim small">🏷️ Dispatch quantity</span><input class="input" data-tr-dispatch="quantity" type="number" min="1" max="100000" step="1" value="${esc(String(Number(d.quantity) || num(r.total) || 1))}" required></label>
+        <label class="field"><span class="dim small">🕒 Dispatch date &amp; time</span><input class="input" data-tr-dispatch="dispatchedAt" type="datetime-local" value="${esc(localDateTimeValue(d.dispatchedAt))}" required></label>
+        <label class="field" style="grid-column:1/-1"><span class="dim small">🔗 Proof link (optional, HTTPS only)</span><input class="input" data-tr-dispatch="proofUrl" type="url" maxlength="1000" value="${esc(d.proofUrl || '')}" placeholder="https://..."></label>
+        <label class="field" style="grid-column:1/-1"><span class="dim small">📝 Dispatch note (optional)</span><textarea class="input" data-tr-dispatch="note" rows="2" maxlength="300" placeholder="Box count, handover detail...">${esc(d.note || '')}</textarea></label>
+      </div>
+      <p class="dim small">Proof link optional hai. Sirf HTTPS URL save hoga; status aur changes ki history automatically record hogi.</p>
+    </form>`;
+    FF.app.openDrawer({
+      kicker: '🚚 Tag Request · Dispatch', title: 'Dispatch details',
+      sub: 'Courier aur docket save karein; employee status page par sirf dispatch ki zaroori details dikhengi.',
+      body, wide: false,
+      actions: '<button type="button" class="btn" data-tr-dispatch-cancel>Cancel</button><button type="button" class="btn primary" data-tr-dispatch-save>🚚 Save &amp; mark dispatched</button>'
+    });
+    const drawer = U.$('#drawer-body');
+    const actions = U.$('#drawer-actions');
+    const field = (name) => drawer && drawer.querySelector(`[data-tr-dispatch="${name}"]`);
+    const save = actions && actions.querySelector('[data-tr-dispatch-save]');
+    const cancel = actions && actions.querySelector('[data-tr-dispatch-cancel]');
+    if (cancel) cancel.addEventListener('click', () => { const close = U.$('#drawer-close'); if (close) close.click(); });
+    if (save) save.addEventListener('click', () => {
+      const quantity = Number(field('quantity') && field('quantity').value);
+      if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100000) {
+        U.toast('Dispatch quantity 1 se 100000 ke beech honi chahiye', 'err');
+        if (field('quantity')) field('quantity').focus();
+        return;
+      }
+      const dt = new Date(field('dispatchedAt') && field('dispatchedAt').value || '');
+      if (!Number.isFinite(dt.getTime())) { U.toast('Dispatch date/time sahi bharein', 'err'); if (field('dispatchedAt')) field('dispatchedAt').focus(); return; }
+      const proofUrl = clean(field('proofUrl') && field('proofUrl').value);
+      if (proofUrl) {
+        let parsed;
+        try { parsed = new URL(proofUrl); } catch { parsed = null; }
+        if (!parsed || parsed.protocol !== 'https:' || parsed.username || parsed.password) {
+          U.toast('Proof ke liye valid HTTPS link daalein', 'err');
+          if (field('proofUrl')) field('proofUrl').focus();
+          return;
+        }
+      }
+      const dispatch = {
+        courier: clean(field('courier') && field('courier').value),
+        docket: clean(field('docket') && field('docket').value),
+        quantity, dispatchedAt: dt.toISOString(),
+        note: clean(field('note') && field('note').value), proofUrl
+      };
+      save.disabled = true;
+      putRequest(r, { status: 'dispatched', dispatch }).then(() => {
+        U.toast('🚚 Dispatch details save ho gayi; employee status update ho gaya', 'ok');
+        renderReqTable();
+        const close = U.$('#drawer-close'); if (close) close.click();
+      }).catch((err) => {
+        U.toast('Dispatch save nahi hua: ' + ((err && err.message) || ''), 'err');
+        save.disabled = false;
+      });
+    });
+  }
+
+  function openRequestTimeline(dr) {
+    if (!isAdmin() || !dr || !dr.req || !FF.app || !FF.app.openDrawer) return;
+    const r = dr.req;
+    const events = Array.isArray(r.timeline) && r.timeline.length ? r.timeline : [{
+      at: r.at, by: r.by || '', byName: r.byName || r.by || 'System',
+      action: 'created', statusAfter: r.status || 'pending', totalAfter: Number(r.total) || 0,
+      fields: ['request']
+    }];
+    const actionLabel = {
+      created: 'Request created', status_changed: 'Status changed',
+      dispatch_recorded: 'Dispatch recorded', dispatch_updated: 'Dispatch details updated',
+      updated: 'Request updated'
+    };
+    const html = [...events].reverse().map((e) => {
+      const action = actionLabel[e.action] || 'Request updated';
+      const transition = e.statusBefore && e.statusAfter && e.statusBefore !== e.statusAfter
+        ? `${esc(STATUS[e.statusBefore] ? STATUS[e.statusBefore].label : e.statusBefore)} → ${esc(STATUS[e.statusAfter] ? STATUS[e.statusAfter].label : e.statusAfter)}`
+        : (e.statusAfter ? esc(STATUS[e.statusAfter] ? STATUS[e.statusAfter].label : e.statusAfter) : '');
+      const fields = Array.isArray(e.fields) && e.fields.length ? e.fields.map((x) => esc(x)).join(' · ') : '';
+      const total = e.totalBefore !== undefined || e.totalAfter !== undefined
+        ? `<small class="dim">Tags: ${fmt(e.totalBefore === undefined ? e.totalAfter : e.totalBefore)} → ${fmt(e.totalAfter === undefined ? e.totalBefore : e.totalAfter)}</small>`
+        : '';
+      return `<article class="tr-timeline-event"><b>${esc(action)}</b>${transition ? `<span class="badge">${transition}</span>` : ''}<small class="dim">${esc(e.byName || e.by || 'System')} · ${esc(longDate(e.at))} · ${esc(ago(e.at))}</small>${fields ? `<small class="dim">Changed: ${fields}</small>` : ''}${total}</article>`;
+    }).join('');
+    FF.app.openDrawer({
+      kicker: '🕘 Tag Request · Audit history', title: `Request #${esc(r.id)} · History`,
+      sub: 'Nayi events sabse upar. Purani requests ki history feature add hone ke baad se record hogi.',
+      body: `<form class="tr-timeline-form"><div class="tr-timeline-list">${html}</div></form>`,
+      wide: false, actions: '<button type="button" class="btn" data-tr-history-close>Close</button>'
+    });
+    const close = U.$('#drawer-actions [data-tr-history-close]');
+    if (close) close.addEventListener('click', () => { const btn = U.$('#drawer-close'); if (btn) btn.click(); });
+  }
+
   function startEdit(dr) {
     const qty = {};
     dr.rows.forEach((x) => { qty[String(x.cls).toUpperCase()] = String(num(x.approved)); });
@@ -2870,6 +2984,8 @@ body.colorful .from-hdr { color: #166534; }
       if (!dr) return;
       const op = opEl.dataset.trOp;
       if (op === 'approve') setStatus(dr, 'approved', opEl);
+      else if (op === 'dispatch') openDispatchEditor(dr);
+      else if (op === 'history') openRequestTimeline(dr);
       else if (op === 'edit') startEdit(dr);
       else if (op === 'cancel') { state.edit = null; renderReqTable(); }
       else if (op === 'save') saveEdit();
