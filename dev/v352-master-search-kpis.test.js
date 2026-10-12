@@ -261,8 +261,8 @@ test('📋 summary lists — Agent/TL Summary inherits canonical Master Profile 
 });
 test('📈 Growth — empty comparable EIR rows must not produce false -100%', async () => {
   const mp = await read('masterProfile.js');
-  assert.match(mp, /const comparableUsable = !!\(comparable && \(num\(comparable\.curRows\) > 0 \|\| num\(comparable\.lastRows\) > 0\)\)/);
-  assert.match(mp, /const projectedCurrent = comparableUsable/);
+  assert.match(mp, /const comparableUsable = !!\(comparable && num\(comparable\.curRows\) > 0 && num\(comparable\.lastRows\) > 0\)/, 'dono periods ki rows ho tabhi MTD growth');
+  assert.match(mp, /const projectedCurrent = comparable && num\(comparable\.curRows\) > 0/);
   assert.match(mp, /: projFallback\(num\(t\.curTotal\), b\.days, ym\)/);
   assert.match(mp, /const projectedGrowth = num\(t\.lastTotal\) > 0/);
 });
@@ -300,7 +300,8 @@ test('📈 growth — compare yesterday MTD against same calendar day last month
   assert.match(mp, /const prevCutDay = Math\.min\(day, prevLastDay\)/);
   assert.ok(mp.includes(String.raw`if (r && r.key && /^\d{4}-\d{1,2}-\d{1,2}$/.test(String(r.key))`), 'ISO date keys must parse for same-period growth');
   assert.match(mp, /num\(comparable\.curRows\) > 0 && num\(comparable\.lastRows\) > 0/, 'growth needs both comparable periods');
-  assert.match(mp, /comparableHasRows \? null/, 'never use stale sheet growth when a comparable period is missing');
+  assert.match(mp, /const g = comparableUsable \? comparable\.growth : rateGrowth/, 'comparable na ho to sheet % nahi, run-rate vs last month avg/day');
+  assert.ok(!/pctText\(o\.growth\)/.test(mp.slice(mp.indexOf('function growthBlock'), mp.indexOf('function attachGrowth'))), 'REPORT sheet ka growth % growthBlock me use nahi');
   assert.match(mp, /const growth = last > 0 \? \(\(cur - last\) \/ last\) \* 100/);
   assert.match(mp, /growthThrough: gi\.growthThrough/);
   assert.match(await read('masterSearch.js'), /p1\.growthThrough/);

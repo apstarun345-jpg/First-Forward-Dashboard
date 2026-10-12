@@ -157,15 +157,19 @@ test('dispatchCalc: explicit elapsed (T-1) se rate/required/net/gross', () => {
   assert.equal(d.elapsed, U.runRateDays());
 });
 
-test('TL profile: growth % REPORT se + month-end expected + basis', async () => {
+// 📈 Growth rule: daily comparable rows na ho to REPORT sheet ka % nahi — is mahine ka run-rate/day vs pichhle mahine ka avg/day.
+const runRateGrowth = (t) => ((t.curTotal / DAY) / (t.lastTotal / U.daysInMonth(U.prevMonthKey(ym))) - 1) * 100;
+
+test('TL profile: growth % (run-rate vs last month avg/day) + month-end expected + basis', async () => {
   const pr = await MP.build(person('ff-tl', 'TL One'));
   assert.equal(pr.found, true);
-  // 📈 sheet ka apna TL growth % (▼ -4%) — sign sahi parse hona chahiye
-  assert.equal(pr.growthNum, -4, '▼ prefix se negative');
-  assert.equal(pr.growth, '▼ -4%');
+  const want = runRateGrowth(pr.totals);
+  assert.ok(Math.abs(pr.growthNum - want) < 0.01, `growth ${pr.growthNum} vs ${want}`);
+  assert.equal(pr.projT1.basis.growthSource, 'runrate', 'daily rows nahi → run-rate basis, sheet % nahi');
+  assert.match(pr.growth, new RegExp('^' + (want >= 0 ? '▲ \\+' : '▼ ')), 'sign sahi');
   assert.ok(pr.projT1, 'projT1 missing');
   assert.equal(pr.projT1.days, DAY, 'FF basis = kal tak ka din');
-  assert.equal(pr.projT1.num, -4);
+  assert.ok(Math.abs(pr.projT1.num - want) < 0.01);
   // totals = 2 agents × (cur 120 + 30) = 300; projection = round(300 / DAY × monthDays)
   assert.equal(pr.totals.curTotal, 150);
   assert.equal(pr.projT1.total, U.projectMonthEnd(150, DAY, ym));
@@ -181,7 +185,7 @@ test('TL profile drawer HTML: growth %, till-date, expected section', async () =
   assert.match(h, /Data till/);
   assert.match(h, /Aage kitne din bache/);
   assert.match(h, /aaj ka data kal aata hai/, 'simple bhasha me basis');
-  assert.match(h, /pct neg/, 'negative growth laal dikhna chahiye');
+  assert.match(h, runRateGrowth(pr.totals) < 0 ? /pct neg/ : /pct pos/, 'growth ka rang sign ke hisaab se');
   assert.ok(!/undefined|NaN/.test(h), 'undefined/NaN nahi aana chahiye');
   assert.ok(!/T-1/.test(h), 'UI me "T-1" jaisa technical shabd nahi hona chahiye');
 });
@@ -210,7 +214,7 @@ test('basisText: dono channels ke liye simple bhasha (technical shabd nahi)', ()
 
 test('agent profile: growth % + expected month-end + dispatch basis', async () => {
   const pr = await MP.build(person('ff-agent', 'Ravi Kumar', 'R101'));
-  assert.equal(pr.growthNum, 15, '▲ +15% → 15');
+  assert.ok(Math.abs(pr.growthNum - runRateGrowth(pr.totals)) < 0.01, 'sheet +15% nahi, run-rate growth');
   assert.equal(pr.projT1.days, DAY);
   assert.equal(pr.projT1.total, U.projectMonthEnd(120, DAY, ym));
   assert.equal(pr.calc.vc4.elapsed, DAY);
@@ -225,9 +229,9 @@ test('agent profile: growth % + expected month-end + dispatch basis', async () =
 test('master search quick snapshot (kundli) me growth + projection aa jata hai', () => {
   const q = MP.quick(person('ff-tl', 'TL One'));
   assert.ok(q, 'quick snapshot nahi bana');
-  assert.equal(q.growthNum, -4);
+  assert.ok(Math.abs(q.growthNum - runRateGrowth(q.totals)) < 0.01);
   assert.equal(q.projT1.days, DAY);
-  assert.equal(q.projT1.num, -4);
+  assert.ok(Math.abs(q.projT1.num - runRateGrowth(q.totals)) < 0.01);
   assert.ok(q.projT1.total > 0);
 });
 
@@ -235,7 +239,7 @@ test('WhatsApp / CSV export me growth + basis + projection shamil', async () => 
   const pr = await MP.build(person('ff-tl', 'TL One'));
   const wa = MP.waText(pr);
   assert.match(wa, /Growth:/);
-  assert.match(wa, /-4\.0%/);
+  assert.match(wa, new RegExp(Math.abs(runRateGrowth(pr.totals)).toFixed(1).replace('.', '\\.') + '%'));
   assert.match(wa, /expected month-end/);
   assert.ok(!/T-1/.test(wa), 'WhatsApp text me "T-1" nahi');
   const csv = MP.csvRows(pr);

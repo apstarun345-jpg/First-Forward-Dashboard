@@ -313,23 +313,23 @@ window.FF = window.FF || {};
     } catch { rows = []; }
     const tl = /-tl$/i.test(String(pr && pr.kind || ''));
     const wantName = norm(pr && pr.name);
-    const wantId = clean(pr && pr.id).replace(/\\.0+$/, '').toUpperCase();
+    const wantId = clean(pr && pr.id).replace(/\.0+$/, '').toUpperCase();
     const belongs = (r) => {
       if (!r) return false;
       if (channel === 'gv') {
         if (tl) {
-          const rid = clean(r.tlId || r.gvTlId || r.supervisorId).replace(/\\.0+$/, '').toUpperCase();
+          const rid = clean(r.tlId || r.gvTlId || r.supervisorId).replace(/\.0+$/, '').toUpperCase();
           return (wantId && rid && rid === wantId) || (!wantId && wantName && norm(r.tlName) === wantName);
         }
-        const rid = clean(r.agentId).replace(/\\.0+$/, '').toUpperCase();
+        const rid = clean(r.agentId).replace(/\.0+$/, '').toUpperCase();
         return (wantId && rid && rid === wantId) || (!wantId && wantName && norm(r.agentName) === wantName);
       }
       if (String(r.channel || '').toLowerCase().includes('gv')) return false;
       if (tl) {
-        const rid = clean(r.tlId).replace(/\\.0+$/, '').toUpperCase();
+        const rid = clean(r.tlId).replace(/\.0+$/, '').toUpperCase();
         return (wantId && rid && rid === wantId) || (!wantId && wantName && norm(r.tlName) === wantName);
       }
-      const rid = clean(r.agentId || r.id).replace(/\\.0+$/, '').toUpperCase();
+      const rid = clean(r.agentId || r.id).replace(/\.0+$/, '').toUpperCase();
       return (wantId && rid && rid === wantId) || (!wantId && wantName && norm(r.agentName || r.name) === wantName);
     };
     let cur = 0, last = 0, curRows = 0, lastRows = 0;
@@ -359,17 +359,22 @@ window.FF = window.FF || {};
     // If only current rows match (e.g. prior-month IDs/date rows are missing), never fall back
     // to the sheet's full-month-vs-MTD percentage — that creates the misleading -100% card.
     const comparableUsable = !!(comparable && num(comparable.curRows) > 0 && num(comparable.lastRows) > 0);
-    const sheet = pctText(o.growth);
-    const g = comparableUsable
-      ? comparable.growth
-      : comparableHasRows ? null : (sheet !== null ? sheet : U.growth(num(t.curTotal), num(t.lastTotal)));
+    // Growth rule (user): last month ke SAME din (1..kal) vs is mahine 1..kal. Agar daily rows se comparable
+    // data na bane to REPORT sheet ka % kabhi nahi lete (wahi -100% bug tha) — run-rate/day vs last month ka
+    // avg/day se nikalte hain: (is mahine ka run-rate ÷ pichle mahine ka avg/day − 1).
+    const elapsedDays = num(b.days), prevDays = U.daysInMonth(U.prevMonthKey(ym));
+    const ratePerDay = elapsedDays > 0 ? num(t.curTotal) / elapsedDays : 0;
+    const prevRatePerDay = prevDays > 0 ? num(t.lastTotal) / prevDays : 0;
+    const rateGrowth = prevRatePerDay > 0 && elapsedDays > 0 ? ((ratePerDay - prevRatePerDay) / prevRatePerDay) * 100 : null;
+    const g = comparableUsable ? comparable.growth : rateGrowth;
+    const growthSource = comparableUsable ? 'mtd' : (rateGrowth === null ? '' : 'runrate');
     const projectedCurrent = comparable && num(comparable.curRows) > 0
       ? Math.round((num(comparable.current) / Math.max(1, num(comparable.day))) * U.daysInMonth(comparable.currentYm || ym))
       : projFallback(num(t.curTotal), b.days, ym);
     const projectedGrowth = num(t.lastTotal) > 0 ? ((projectedCurrent - num(t.lastTotal)) / num(t.lastTotal)) * 100 : null;
     const proj = (k) => U.projectMonthEnd(t[k], b.days, ym);
     const growthText = g === null ? '' : `${g >= 0 ? '▲ +' : '▼ '}${Math.abs(g).toFixed(1)}%`;
-    const growthBasis = { ...b, growthThrough: comparableUsable ? comparable.label : '', growthCurrent: comparableUsable ? comparable.current : num(t.curTotal), growthLast: comparableUsable ? comparable.last : num(t.lastTotal), growthElapsed: comparableUsable ? comparable.day : b.days };
+    const growthBasis = { ...b, growthThrough: comparableUsable ? comparable.label : '', growthCurrent: comparableUsable ? comparable.current : num(t.curTotal), growthLast: comparableUsable ? comparable.last : num(t.lastTotal), growthElapsed: comparableUsable ? comparable.day : b.days, growthSource, ratePerDay, prevRatePerDay, growthLastDays: prevDays };
     return {
       text: growthText,
       num: g, mtdGrowthNum: g, projectedGrowth, projectedCurrent,
@@ -1475,10 +1480,10 @@ window.FF = window.FF || {};
     if (r && out.stock && num(out.stock.total) === 0) {
       try {
         const stockRows = gvRows('stockAgent') || [];
-        const wantId = clean(out.id || p.sub).replace(/\\.0+$/, '').toUpperCase();
+        const wantId = clean(out.id || p.sub).replace(/\.0+$/, '').toUpperCase();
         const wantName = norm(out.name);
         const mine = stockRows.filter((x) => {
-          const xid = clean(x.agentId || x.id).replace(/\\.0+$/, '').toUpperCase();
+          const xid = clean(x.agentId || x.id).replace(/\.0+$/, '').toUpperCase();
           const xname = norm(x.agentName || x.name);
           return (wantId && xid && xid === wantId) || (!wantId && wantName && xname === wantName) || (wantId && !xid && wantName && xname === wantName);
         });
@@ -1569,10 +1574,10 @@ window.FF = window.FF || {};
 
       try {
         const rows = gvRows('stockAgent') || [];
-        const wantId = clean(out.id || p.sub).replace(/\\.0+$/, '').toUpperCase();
+        const wantId = clean(out.id || p.sub).replace(/\.0+$/, '').toUpperCase();
         const wantName = norm(out.name);
         const mine = rows.filter((x) => {
-          const xid = clean(x.agentId || x.id).replace(/\\.0+$/, '').toUpperCase();
+          const xid = clean(x.agentId || x.id).replace(/\.0+$/, '').toUpperCase();
           const xn = norm(x.agentName || x.name);
           return (wantId && xid && xid === wantId) || (wantName && xn === wantName);
         });
@@ -2830,5 +2835,5 @@ window.FF = window.FF || {};
     </div>`;
   }
 
-  FF.masterProfile = { supports, quick, build, buildNow, html, groupBinsFor, csvRows, waText, renderInto, open, warm, load, loadFor, onData, isLoaded: () => loadedOnce, invalidate: resetProfileCache, suggest, suggestGro, findFfAgent, findGvAgent, mobileFor, reportDataRow, issuanceCardsHtml, gvTlSnapshot, peopleTableHtml, personFromRow, get suggestDays() { return suggestDays(); }, _buildSoon: buildSoon, _limits: LIMITS };
+  FF.masterProfile = { _comparableMtdGrowth: comparableMtdGrowth, _growthBlock: growthBlock, supports, quick, build, buildNow, html, groupBinsFor, csvRows, waText, renderInto, open, warm, load, loadFor, onData, isLoaded: () => loadedOnce, invalidate: resetProfileCache, suggest, suggestGro, findFfAgent, findGvAgent, mobileFor, reportDataRow, issuanceCardsHtml, gvTlSnapshot, peopleTableHtml, personFromRow, get suggestDays() { return suggestDays(); }, _buildSoon: buildSoon, _limits: LIMITS };
 })(window.FF);

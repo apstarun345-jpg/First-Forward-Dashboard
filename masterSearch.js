@@ -1416,7 +1416,18 @@ FF.pages = FF.pages || {};
           + box('k5', '🎯 Sug. Commercial', sugPair(d.sugComm, d.sugCommGross || 0), `avg ${U.fmt(d.avgComm, true)}/day × ${U.fmt(d.days)} din − stock ${U.fmt(s.comm)}`, `${spec('mtd', m.cur)}&group=COMM`)
           + box('k9', '🎯 Dispatch · all tags', sugPair(c.net, c.gross), `run-rate ${U.fmt(c.rate, true)}/day × ${U.fmt(c.days)} din − stock ${U.fmt(c.stock)}`);
       }
-      const growthNum = (pr.growthNum !== null && pr.growthNum !== undefined && Number.isFinite(Number(pr.growthNum))) ? Number(pr.growthNum) : U.growth(num(t.curTotal), num(t.lastTotal));
+    /** 📈 Growth tile ka neeche wala text: kya compare hua + run-rate + expected month-end vs last month. */
+    const growthSub = (p1, m) => {
+      const b = (p1 && p1.basis) || {};
+      const sgn = (v) => (v >= 0 ? '+' : '') + Number(v).toFixed(1) + '%';
+      const parts = [];
+      if (b.growthSource === 'mtd' && p1.comparableLast != null) parts.push(`1–${U.fmt(b.growthElapsed)} tareekh: ${U.fmt(p1.comparableCurrent)} vs pichhle mahine ${U.fmt(p1.comparableLast)}`);
+      else if (b.growthSource === 'runrate') parts.push(`run-rate ${U.fmt(b.ratePerDay, true)}/day vs pichhle mahine ${U.fmt(b.prevRatePerDay, true)}/day`);
+      else parts.push('pichhle mahine ka data nahi mila');
+      if (p1 && p1.total) parts.push(`expected month-end ${U.fmt(p1.total)}${Number.isFinite(Number(p1.projectedGrowth)) ? ` (${sgn(p1.projectedGrowth)} vs last month)` : ''}`);
+      return parts.join(' · ');
+    };
+      const growthNum = (pr.growthNum !== null && pr.growthNum !== undefined && Number.isFinite(Number(pr.growthNum))) ? Number(pr.growthNum) : null;
       const growthHtml = (growthNum === null || growthNum === undefined || !Number.isFinite(Number(growthNum))) ? '<span class="dim">—</span>' : U.pctHtml(growthNum, { decimals: 0 });
       const notFound = pr.found === false
         ? `<p class="dim small msp-kpi-note">⚠️ ${ch === 'gv' ? 'GV REPORT' : 'REPORT'} tab me is ${isTl ? 'TL' : 'agent'} ki row nahi mili — stock / priority sheet se nahi aa paaye (naam ki spelling check karo); issuance tag-ledger (EIR) se hai.</p>` : '';
@@ -1433,7 +1444,7 @@ FF.pages = FF.pages || {};
           ${box('k8', `📅 Last month${m.last ? ` · ${esc(ymLabel(m.last))}` : ''}`, U.fmt(t.lastTotal), lastMix, spec('month', m.last))}
           ${box('k3', '🚦 Priority', prioChip(pr.priority), `${c.cover != null ? `cover ${U.fmt(c.cover, true)} din` : 'cover —'} · run-rate ${U.fmt(c.rate, true)}/day (÷ ${U.fmt(c.elapsed)} din)`, isTl ? peopleSpec : '')}
           ${sug}
-          ${box('k0', `📈 Growth${(p1 && (p1.growthThrough || (p1.basis && p1.basis.growthThrough) || (p1.basis && p1.basis.shortLabel))) ? ` <small class="dim">till ${esc(p1.growthThrough || (p1.basis && p1.basis.growthThrough) || p1.basis.shortLabel)}</small>` : ''}`, growthHtml, p1 && p1.total ? `expected month-end ${U.fmt(p1.total)}` : 'last month vs MTD')}
+          ${box('k0', `📈 Growth${(p1 && (p1.growthThrough || (p1.basis && p1.basis.growthThrough) || (p1.basis && p1.basis.shortLabel))) ? ` <small class="dim">till ${esc(p1.growthThrough || (p1.basis && p1.basis.growthThrough) || p1.basis.shortLabel)}</small>` : ''}`, growthHtml, growthSub(p1, m))}
           ${box('k10', '🎯 Expected this month · Run-rate', U.fmt((p1 && p1.basis && Number.isFinite(Number(p1.basis.projectedCurrent))) ? Number(p1.basis.projectedCurrent) : (p1 && Number.isFinite(Number(p1.total)) ? Number(p1.total) : 0)), `Current pace ${U.fmt(c.rate, true)}/day × ${U.fmt(U.daysInMonth(m.cur || U.ymKey(new Date())))} days · report cutoff: previous day`)}
         </div>${notFound}</div></section>`;
     }
