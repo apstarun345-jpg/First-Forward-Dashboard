@@ -368,7 +368,9 @@ window.FF = window.FF || {};
       : projFallback(num(t.curTotal), b.days, ym);
     const projectedGrowth = num(t.lastTotal) > 0 ? ((projectedCurrent - num(t.lastTotal)) / num(t.lastTotal)) * 100 : null;
     const proj = (k) => U.projectMonthEnd(t[k], b.days, ym);
-    const growthText = g === null ? '' : `${g >= 0 ? '▲ +' : '▼ '}${Math.abs(g).toFixed(1)}%`;
+    // Sign hamesha dikhna chahiye: ▲ +15% / ▼ -4% (pehle negative growth ka '-' gayab ho jaata tha → '▼ 4.0%').
+    const growthAbs = g === null ? 0 : Number(Math.abs(g).toFixed(1));
+    const growthText = g === null ? '' : `${g >= 0 ? '▲ +' : '▼ -'}${growthAbs}%`;
     const growthBasis = { ...b, growthThrough: comparableUsable ? comparable.label : '', growthCurrent: comparableUsable ? comparable.current : num(t.curTotal), growthLast: comparableUsable ? comparable.last : num(t.lastTotal), growthElapsed: comparableUsable ? comparable.day : b.days };
     return {
       text: growthText,
