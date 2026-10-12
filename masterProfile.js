@@ -293,7 +293,7 @@ window.FF = window.FF || {};
     const prevEnd = U.dateKey(prevEndDate);
     const rowDateKey = (r) => {
       try {
-        if (r && r.key && /^\\d{4}-\\d{1,2}-\\d{1,2}$/.test(String(r.key))) return U.dateKey(U.fromDateKey(String(r.key)));
+        if (r && r.key && /^\d{4}-\d{1,2}-\d{1,2}$/.test(String(r.key))) return U.dateKey(U.fromDateKey(String(r.key)));
         const raw = r && (r.date || r.d || r.createdAt);
         const d = raw instanceof Date ? raw : U.parseDate(raw);
         return d && !isNaN(d) ? U.dateKey(d) : '';
