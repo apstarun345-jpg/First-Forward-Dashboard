@@ -144,8 +144,21 @@ test('tag request — submit, admin feed, edit, permissions aur restart ke baad 
     const pendingAfterDenied = await jsonCall(server.base, '/api/tag-requests', 'GET', undefined, requester);
     assert.equal(pendingAfterDenied.json.requests[0].status, 'pending', 'denied dispatch does not mutate request');
 
+    const adminPendingDispatch = await jsonCall(server.base, `/api/tag-requests/${encodeURIComponent(secondId)}`, 'PUT', {
+      status: 'dispatched',
+      dispatch: { courier: 'Delhivery', docket: 'DL-EARLY', quantity: 29 }
+    }, admin);
+    assert.equal(adminPendingDispatch.res.status, 409, 'dispatch is blocked until request was approved');
+    const stillPending = await jsonCall(server.base, '/api/tag-requests', 'GET', undefined, admin);
+    assert.equal(stillPending.json.requests.find((r) => r.id === secondId).status, 'pending', 'rejected early dispatch leaves state unchanged');
+
     const secondApproved = await jsonCall(server.base, `/api/tag-requests/${encodeURIComponent(secondId)}`, 'PUT', { status: 'approved' }, admin);
     assert.equal(secondApproved.res.status, 200, JSON.stringify(secondApproved.json));
+    const overQuantity = await jsonCall(server.base, `/api/tag-requests/${encodeURIComponent(secondId)}`, 'PUT', {
+      status: 'dispatched',
+      dispatch: { courier: 'Delhivery', docket: 'DL-OVER', quantity: 30, dispatchedAt: '2026-10-12T10:00:00.000Z' }
+    }, admin);
+    assert.equal(overQuantity.res.status, 400, 'dispatch cannot exceed the approved request quantity');
     const invalidProof = await jsonCall(server.base, `/api/tag-requests/${encodeURIComponent(secondId)}`, 'PUT', {
       status: 'dispatched',
       dispatch: { courier: 'Delhivery', docket: 'DL-123', quantity: 29, dispatchedAt: '2026-10-12T10:00:00.000Z', proofUrl: 'javascript:alert(1)' }
