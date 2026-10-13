@@ -8214,7 +8214,7 @@ function personalStats(rows) {
   let best = { date: '', n: 0 };
   for (const [d, n] of daily) if (d.startsWith(ym) && d <= asOfKey && n > best.n) best = { date: d, n };
   const clsTotal = Object.values(cls).reduce((a, b) => a + b, 0);
-  return { mtd, mtdActiveDays, prevSame, monthDays, streak, best, cls, clsTotal, activeDays: monthDays.filter((x) => x.n > 0).length };
+  return { mtd, mtdActiveDays, prevSame, monthDays, streak, best, cls, clsTotal, asOfDay, activeDays: monthDays.filter((x) => x.n > 0).length };
 }
 
 async function servePersonalPage(req, res, rawToken) {
@@ -8263,19 +8263,24 @@ async function servePersonalPage(req, res, rawToken) {
       ? personalTeamAgents(link) : Promise.resolve(new Map());
     const tlNamePromise = link.kind !== 'tl' && hasVisibleSection
       ? personalAgentTl(link) : Promise.resolve('');
+    // 📦 Stock ka state batana zaroori hai — pehle timeout par chupchap "—" dikhta tha (user ko lagta tha data hi nahi hai).
+    const stockMeta = { state: 'off' };   // off | ok | loading (index ban raha) | nomatch (naam StockDataa me nahi) | error
     const stockPromise = needsStock ? (async () => {
       let timer = null;
       try {
         const sidx = await Promise.race([
           stockAgeIndex(false),
           new Promise((_, reject) => {
-            timer = setTimeout(() => reject(new Error('stock timeout')), 10000);
+            timer = setTimeout(() => reject(new Error('stock timeout')), 22000);
             if (timer && timer.unref) timer.unref();
           })
         ]);
-        return personalStock(sidx, link.source, link.kind === 'tl' ? 'tl' : 'agent', link.name);
+        const sres = personalStock(sidx, link.source, link.kind === 'tl' ? 'tl' : 'agent', link.name);
+        stockMeta.state = sres ? 'ok' : 'nomatch';
+        return sres;
       } catch (err) {
         console.warn('personal stock:', err.message);
+        stockMeta.state = /timeout/.test(err.message) ? 'loading' : 'error';
         return null;
       } finally {
         if (timer) clearTimeout(timer);
@@ -8419,22 +8424,57 @@ async function servePersonalPage(req, res, rawToken) {
     const teamHtml = team.length ? `<section class="pb-card"><h3>👥 Team (is mahine)</h3>${team.map((t, i) => `<div class="pb-rank"><span class="pb-pos">${i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1}</span><span class="pb-name">${escHtml(t.name)}</span><b>${t.mtd}</b></div>`).join('')}</section>` : '';
 
     // 5. 🏆 Performance Scorecard Table
-    const dayNow = Math.max(1, Number(dateKeyNow().slice(8, 10)));
-    const runRate = (st.mtd / dayNow).toFixed(1);
-    const projected = Math.round((st.mtd / dayNow) * 30);
+    // Growth rule (same as main site): pichle mahine ke SAME din (1..kal) vs is mahine 1..kal.
+    // Run-rate = MTD ÷ kal tak ke din (aaj ka din nahi — uska data abhi adhura hota hai).
+    const nowKey = dateKeyNow();
+    const curY = Number(nowKey.slice(0, 4)), curM = Number(nowKey.slice(5, 7));
+    const daysCur = new Date(Date.UTC(curY, curM, 0)).getUTCDate();
+    const daysPrev = new Date(Date.UTC(curY, curM - 1, 0)).getUTCDate();
+    const elapsed = st.asOfDay;
+    const curRate = elapsed > 0 ? st.mtd / elapsed : 0;
+    const lastRate = daysPrev > 0 ? lastMonthTotal / daysPrev : 0;
+    const runRate = curRate.toFixed(1);
+    const projected = Math.round(curRate * daysCur);
     const diff = st.mtd - st.prevSame;
-    const growthPct = st.prevSame > 0 ? `${diff >= 0 ? '+' : ''}${Math.round((diff / st.prevSame) * 100)}%` : 'New';
+    const compG = st.prevSame > 0 ? (diff / st.prevSame) * 100 : null;
+    const rateG = lastRate > 0 && elapsed > 0 ? ((curRate - lastRate) / lastRate) * 100 : null;
+    const growthG = compG !== null ? compG : rateG;
+    const fmtG = (g) => (g === null || !isFinite(g) ? '—' : `${g >= 0 ? '+' : ''}${Math.round(g)}%`);
+    const growthPct = compG !== null ? fmtG(compG) : fmtG(rateG);
+    const growthBasis = compG !== null ? `1–${elapsed} ${prevYm} ke mukable` : 'run-rate vs last month (pichle mahine ka same din data nahi)';
     const perfStockRow = hasSec('stock') ? `<tr><td><b>Current Stock in Hand</b></td><td><b>${nf(stTotal)} tags</b></td><td>🚗 Core: ${nf(stCore)} · 🚚 Comm: ${nf(stComm)}</td><td>≥3M Old: ${nf(totAgeC[1])} tags</td></tr>` : '';
     const perfStockTotal = hasSec('stock') ? `<td>Stock: ${nf(stTotal)}</td>` : '<td>Performance details</td>';
     const perfCardHtml = `<section class="pb-card"><div class="pb-card-head"><h3>🏆 Performance &amp; Growth Scorecard</h3>${expBtns('pl-tbl-perf', `${link.name} - Performance Scorecard`)}</div><div class="pb-scroll"><table class="pb-tbl" id="pl-tbl-perf"><thead><tr><th>Metric</th><th>Current Value</th><th>Benchmark / Reference</th><th>Status / Delta</th></tr></thead><tbody>
-      <tr><td><b>MTD Issued (${escHtml(ym)})</b></td><td><b>${nf(st.mtd)}</b></td><td>Same period (${escHtml(prevYm)}): ${nf(st.prevSame)}</td><td class="${diff >= 0 ? 'pb-up' : 'pb-hot'}">${diff >= 0 ? '▲ +' : '▼ '}${nf(Math.abs(diff))} (${escHtml(growthPct)})</td></tr>
-      <tr><td><b>Last Month Total (${escHtml(prevYm)})</b></td><td><b>${nf(lastMonthTotal)}</b></td><td>Projected Month-End: ${nf(projected)}</td><td>Run Rate: ${runRate} / day</td></tr>
+      <tr><td><b>MTD Issued (${escHtml(ym)})</b></td><td><b>${nf(st.mtd)}</b></td><td>Same days (${escHtml(prevYm)}): ${nf(st.prevSame)} · ${escHtml(growthBasis)}</td><td class="${(growthG || 0) >= 0 ? 'pb-up' : 'pb-hot'}">${diff >= 0 ? '▲ +' : '▼ '}${nf(Math.abs(diff))} (${escHtml(growthPct)})</td></tr>
+      <tr><td><b>Last Month Total (${escHtml(prevYm)})</b></td><td><b>${nf(lastMonthTotal)}</b></td><td>Month-end projection: ${nf(projected)} (${daysCur} din)</td><td>Run rate ${runRate}/din · last month ${lastRate.toFixed(1)}/din · rate growth ${fmtG(rateG)}</td></tr>
       <tr><td><b>Active Days (MTD)</b></td><td><b>${nf(st.mtdActiveDays)} days</b></td><td>Avg / Active Day: ${st.mtdActiveDays ? (st.mtd / st.mtdActiveDays).toFixed(1) : '0'}</td><td>Streak: ${nf(st.streak)} days 🔥</td></tr>
       <tr><td><b>Best Single Day (MTD)</b></td><td><b>${nf(st.best.n)} tags</b></td><td>Date: ${escHtml(st.best.date || '—')}</td><td>Last 14d Active: ${nf(st.activeDays)}/14d</td></tr>
       ${perfStockRow}
     </tbody><tfoot><tr><td>Summary Total</td><td>MTD: ${nf(st.mtd)}</td><td>Last Month: ${nf(lastMonthTotal)}</td>${perfStockTotal}</tr></tfoot></table></div></section>`;
 
-    const stockKpis = hasSec('stock') ? `<section class="pb-kpis"><div class="pb-kpi stock"><small>📦 Stock (total)</small><b>${stockInfo ? nf(stTotal) : '—'}</b><span>${stockInfo ? `🚗 ${nf(stCore)} · 🚚 ${nf(stComm)}` : 'stock data abhi nahi mila'}</span></div></section>` : '';
+    // 📊 Overview summary — MTD, last month, growth, run-rate, projection + stock/ageing (stock ka state bhi dikhe).
+    const stockNote = stockInfo ? '' : ({
+      loading: 'Stock index abhi ban raha hai — page 25 sec mein apne aap refresh hoga.',
+      nomatch: 'Is naam/ID ka stock row StockDataa sheet me nahi mila (naam spelling check karo).',
+      error: 'Stock sheet abhi load nahi hui — thodi der baad refresh karo.'
+    })[stockMeta.state] || '';
+    const tile = (cls, ico, label, val, sub) => `<div class="pb-kpi ${cls}"><small>${ico} ${label}</small><b>${val}</b><span>${sub}</span></div>`;
+    const summaryTiles = [
+      tile('issuance', '📈', `MTD issued (${escHtml(ym)})`, nf(st.mtd), `1–${elapsed} tak`),
+      tile('previous', '🗓️', `Last month (${escHtml(prevYm)})`, nf(lastMonthTotal), `poore ${daysPrev} din ka total`),
+      tile('streak', '⚖️', 'Same days, pichla mahina', nf(st.prevSame), `1–${elapsed} ${escHtml(prevYm)}`),
+      tile('best', '📊', 'Growth', `<span class="${(growthG || 0) >= 0 ? 'up' : 'down'}">${growthPct}</span>`, escHtml(growthBasis)),
+      tile('issuance', '⚡', 'Run rate / din', runRate, `pichla mahina ${lastRate.toFixed(1)}/din · ${fmtG(rateG)}`),
+      tile('previous', '🎯', 'Month-end projection', nf(projected), `is speed par · ${daysCur} din`)
+    ];
+    if (hasSec('stock')) summaryTiles.push(stockInfo
+      ? tile('stock', '📦', 'Stock (total)', nf(stTotal), `🚗 ${nf(stCore)} · 🚚 ${nf(stComm)}`)
+      : tile('stock', '📦', 'Stock (total)', '—', escHtml(stockNote)));
+    if (hasSec('stock') || hasSec('ageing')) summaryTiles.push(stockInfo
+      ? tile('stock', '🧓', 'Purana stock ≥3M', nf(totAgeC[1]), `≥6M: ${nf(totAgeC[3])} · ${stTotal ? Math.round((totAgeC[1] / stTotal) * 100) : 0}% stock`)
+      : tile('stock', '🧓', 'Purana stock ≥3M', '—', escHtml(stockNote)));
+    const stockPendingEl = stockMeta.state === 'loading' ? '<div id="pl-stock-pending" data-refresh-ms="25000" hidden></div>' : '';
+    const summaryHtml = `<section class="pb-kpis pb-kpis-sum">${summaryTiles.join('')}</section>${stockNote && stockMeta.state !== 'loading' ? `<p class="pb-note">⚠️ ${escHtml(stockNote)}</p>` : stockNote ? `<p class="pb-note">⏳ ${escHtml(stockNote)}</p>${stockPendingEl}` : ''}`;
     const tlName = await tlNamePromise;
 
     // Build only tabs that the admin granted; an "All" view can expose only emitted sections.
@@ -8448,7 +8488,8 @@ async function servePersonalPage(req, res, rawToken) {
     if (tabDefs.length > 1) tabDefs.push({ id: 'all', label: '🌐 All Allowed Sections', show: true });
     const firstTab = (tabDefs[0] && tabDefs[0].id) || 'overview';
     const stockQuickCsv = canExport && hasSec('stock') ? '<button type="button" class="pb-btn pb-btn-stock" id="pl-exp-stock-csv">📦 Stock CSV</button>' : '';
-    const tabsBarHtml = tabDefs.length ? `<div class="pb-tabs-bar"><div class="pb-tabs" id="pl-tabs">${tabDefs.map((t) => `<button type="button" class="pb-tab ${t.id === firstTab ? 'on' : ''}" data-pl-tab="${t.id}">${t.label}</button>`).join('')}</div>${canExport ? `<div class="pb-global-exp">${stockQuickCsv}<button type="button" class="pb-btn" id="pl-exp-all-csv">⬇ Full CSV</button><button type="button" class="pb-btn pb-btn-pdf" id="pl-exp-all-pdf">📄 Full PDF</button></div>` : ''}</div>` : '';
+    // 📂 Side panel: sab reports ek jagah, phone par upar horizontal strip. Export buttons bhi yahin.
+    const tabsBarHtml = tabDefs.length ? `<aside class="pl-side" aria-label="Reports"><div class="pl-side-title">📂 Reports</div><div class="pb-tabs" id="pl-tabs">${tabDefs.map((t) => `<button type="button" class="pb-tab ${t.id === firstTab ? 'on' : ''}" data-pl-tab="${t.id}">${t.label}</button>`).join('')}</div>${canExport ? `<div class="pl-side-exp">${stockQuickCsv}<button type="button" class="pb-btn" id="pl-exp-all-csv">⬇ Full CSV</button><button type="button" class="pb-btn pb-btn-pdf" id="pl-exp-all-pdf">📄 Full PDF</button></div>` : ''}</aside>` : '';
     const noSectionsHtml = tabDefs.length ? '' : '<section class="pb-card pb-no-sections"><h3>🔒 No report sections enabled</h3><p class="dim">The administrator has not granted any report sections for this link. Contact them to request access.</p></section>';
 
     const html = personalShell({
@@ -8460,12 +8501,13 @@ async function servePersonalPage(req, res, rawToken) {
       authorized: true,
       personName: link.name,
       body: `
-      <div id="pl-portal-content">
+      <div id="pl-portal-content"><div class="pl-layout">
         ${tabsBarHtml}
+        <div class="pl-main">
         ${noSectionsHtml}
         ${hasSec('overview') ? `<div class="pl-pane" data-pl-pane="overview">
           ${goalHtml || targetHtml ? `<section class="pb-card pb-goalcard">${goalHtml}${targetHtml}</section>` : ''}
-          ${stockKpis}
+          ${summaryHtml}
           <section class="pb-kpis">
             <div class="pb-kpi issuance"><small>📈 MTD issued</small><b>${nf(st.mtd)}</b><span>${escHtml(ym)}</span></div>
             <div class="pb-kpi previous"><small>🗓️ Same Period · Last Month</small><b>${nf(st.prevSame)}</b><span class="${diff >= 0 ? 'up' : 'down'}">${diff >= 0 ? '▲' : '▼'} ${Math.abs(diff)}</span></div>
@@ -8482,12 +8524,13 @@ async function servePersonalPage(req, res, rawToken) {
             </div>
           </section>
         </div>` : ''}
-        ${hasSec('stock') ? `<div class="pl-pane" data-pl-pane="stock" hidden>${classStockCardHtml}</div>` : ''}
+        ${hasSec('stock') ? `<div class="pl-pane" data-pl-pane="stock" hidden>${!stockInfo && stockNote ? `<p class="pb-note">⏳ ${escHtml(stockNote)}</p>` : ''}${classStockCardHtml}</div>` : ''}
         ${hasSec('issuance') ? `<div class="pl-pane" data-pl-pane="issuance" hidden>${classIssuanceHtml}${teamTable}${matrixTableHtml}${dateTableHtml}</div>` : ''}
         ${hasSec('performance') ? `<div class="pl-pane" data-pl-pane="performance" hidden>${perfCardHtml}${teamHtml}</div>` : ''}
         ${hasSec('ageing') ? `<div class="pl-pane" data-pl-pane="ageing" hidden>${ageHtml}${agentAgeTable}</div>` : ''}
         <p class="pb-foot">Read-only link · data live sheet se · ${escHtml(db.settings.brand || 'Dashboard')}</p>
-      </div>`
+        </div>
+      </div></div>`
     });
     return sendHtml(res, 200, html, noStore);
   } catch (err) {
@@ -8552,6 +8595,16 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background
 .pb-auth-err{background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;padding:8px 10px;border-radius:8px;font-size:12.5px;font-weight:600}
 .pb-no-sections{text-align:center;border:1px dashed #cbd5e1;background:#f8fafc}.pb-no-sections p{margin-top:6px;font-size:13px}.pb-date-matrix{min-width:1180px}.pb-date-matrix th:first-child,.pb-date-matrix td:first-child{position:sticky;left:0;z-index:2;min-width:175px}.pb-date-matrix thead th:first-child{background:linear-gradient(135deg,#4338ca,#2563eb);z-index:3}.pb-date-matrix tbody td:first-child{background:#eef2ff}.pb-date-matrix .pb-cell-active{color:#4338ca;font-weight:850;background:#e0e7ff!important}.pb-matrix-note{font-size:12px;color:#64748b;margin-top:3px}
 @media(max-width:560px){body{padding:10px}.pb-head{padding:12px}.pb-grid2{grid-template-columns:1fr}.pb-tabs-bar{align-items:flex-start}.pb-tbl{min-width:620px}}
+.pl-layout{display:grid;grid-template-columns:230px minmax(0,1fr);gap:14px;align-items:start}
+.pl-main{min-width:0}
+.pl-side{position:sticky;top:10px;background:#fff;border:1px solid #e5e9f5;border-radius:16px;padding:12px;box-shadow:0 4px 14px rgba(15,23,42,.05)}
+.pl-side-title{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#64748b;font-weight:800;margin:2px 4px 8px}
+.pl-side .pb-tabs{flex-direction:column;flex-wrap:nowrap;gap:6px}
+.pl-side .pb-tab{text-align:left;width:100%}
+.pl-side-exp{display:flex;flex-direction:column;gap:6px;margin-top:10px;padding-top:10px;border-top:1px dashed #e2e8f0}
+.pl-side-exp .pb-btn{width:100%;text-align:center}
+.pb-note{font-size:12.5px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:8px 12px;margin:0 0 12px}
+@media(max-width:760px){.pl-layout{grid-template-columns:1fr}.pl-side{position:static;padding:8px}.pl-side-title{display:none}.pl-side .pb-tabs{flex-direction:row;flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px}.pl-side .pb-tab{width:auto;white-space:nowrap}.pl-side-exp{flex-direction:row;flex-wrap:wrap;margin-top:8px;padding-top:8px}.pl-side-exp .pb-btn{width:auto}}
 </style></head><body><div class="pb-wrap" id="pl-root" data-token="${escHtml(token)}" data-require-auth="${requireAuth ? '1' : '0'}" data-authorized="${authorized ? '1' : '0'}" data-person="${escHtml(personName)}">
 <header class="pb-head"><div class="pb-head-left"><div class="pb-logo">${escHtml(String(db.settings.brand || 'FF').split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase())}</div>
 <div><h1>${heading || escHtml(title || '')}</h1>${sub ? `<p>${sub}</p>` : ''}</div></div>
@@ -8607,6 +8660,9 @@ const PERSONAL_PORTAL_JS = `(function () {
   var person = root.getAttribute('data-person') || 'Partner';
   var lockBtn = document.getElementById('pl-lock-btn');
   var form = document.getElementById('pl-auth-form');
+  // Stock index abhi ban raha ho to thodi der baad page apne aap refresh (CSP ki wajah se inline script nahi).
+  var pend = document.getElementById('pl-stock-pending');
+  if (pend) setTimeout(function () { window.location.reload(); }, Number(pend.getAttribute('data-refresh-ms')) || 25000);
 
   if (lockBtn) lockBtn.addEventListener('click', function () {
     lockBtn.disabled = true;

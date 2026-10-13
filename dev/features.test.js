@@ -621,6 +621,9 @@ test('🔗 personal links (agent+TL) /p/ pages, 🗺 team location, 🏆 anomaly
     assert.ok(htmlT.includes('Daily Issuance · Current Month') && htmlT.includes('MTD ISSUED'), 'TL graph shows current-month total through yesterday');
     assert.ok(htmlT.includes('Team · agent-wise issuance'), 'TL agent-wise issuance is included');
     assert.ok(htmlT.includes('Team (is mahine)'), 'TL team performance list included');
+    // 📊 Summary + side panel (v3.77): MTD / last month / growth / run-rate / projection tiles, tabs side panel me
+    assert.ok(htmlT.includes('pb-kpis-sum') && htmlT.includes('Run rate') && htmlT.includes('Month-end projection') && htmlT.includes('Last month ('), 'TL summary tiles (MTD, last month, growth, run-rate, projection)');
+    assert.ok(htmlT.includes('class="pl-side"') && htmlT.includes('id="pl-tabs"') && htmlT.includes('class="pl-main"'), 'reports side panel layout');
 
     // ---- 🟩 GV source + restrictive sections: only server-emitted stock section, no issuance/export ----
     const cg = await call('/api/personal-links', 'POST', { source: 'gv', kind: 'agent', name: 'GV Agent One', personId: 'GV-77', mobile: '9012345678', sections: ['stock'] }, adminCookie);
