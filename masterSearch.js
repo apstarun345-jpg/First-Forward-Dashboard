@@ -437,7 +437,9 @@ FF.pages = FF.pages || {};
       if (FF.masterProfile && FF.masterProfile.onData && !state.mpSub) state.mpSub = FF.masterProfile.onData(emit);
       if (FF.masterProfile && FF.masterProfile.warm) return FF.masterProfile.warm();
     }).then(emit).catch(() => {});
-    ready('insights').then(() => { state.fullPromise = null; if (!state.full && !state.fullPromise) return buildFull(); }).catch((err) => {
+    // ⚠️ fullPromise ko yahan reset NAHI karte: har keystroke/render par warmFull() chalta hai, aur reset se
+    // har call naya 2.3 lakh-row barcode build shuru kar deta tha (page hang). buildFull() khud dedupe karta hai.
+    ready('insights').then(() => { if (!state.full && !state.fullPromise) return buildFull(); }).catch((err) => {
       state.fullError = String(err && (err.message || err) || 'Barcode register module load failed');
       emit();
     });
