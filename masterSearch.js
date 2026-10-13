@@ -632,7 +632,15 @@ FF.pages = FF.pages || {};
       people = scored.slice(0, 60).map((x) => x.p);
     }
 
-    const filteredPeople = people;
+    // v3.78 — ranking: jinka NAAM query se match kare (TL cards bhi) pehle; sirf TL naam ki wajah se match
+    // hone wale agents baad me. Pehle agents (zyada bars) upar aate the aur 14 ki cap me TL cards kat jaate the.
+    const nqRank = normName(query);
+    const nameHit = (p) => !!nqRank && normName(p.name).includes(nqRank);
+    const isTlRank = (p) => /tl$/.test(String(p.kind || ''));
+    const filteredPeople = people
+      .map((p, i) => ({ p, i }))
+      .sort((a, b) => (nameHit(b.p) - nameHit(a.p)) || (isTlRank(b.p) - isTlRank(a.p)) || (a.i - b.i))
+      .map((x) => x.p);
     const items = [];
     filteredPeople.slice(0, 14).forEach((rawP) => {
       const p = canonicalPerson(rawP, state.full || state.light);
