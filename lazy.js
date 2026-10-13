@@ -74,7 +74,7 @@ window.FF = window.FF || {};
     gvTrend: ['gvpages'],
     gvStock: ['gvpages'],
     gvStockReport: ['gvpages'],
-    fastagMapping: ['fastagMapping'],
+    fastagMapping: ['fastagMapping', 'masterSearch'],
     gvPerformance: ['gvpages'],
     dualChannel: [...INSIGHT_DEPS],
     masterStock: [...INSIGHT_DEPS],

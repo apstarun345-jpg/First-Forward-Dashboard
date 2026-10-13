@@ -1730,8 +1730,31 @@ FF.pages = FF.pages || {};
 
   FF.pages.masterSearch = { title: 'Master Search', render: pageRender };
 
+  /** v3.78 — barcode suggestions (Fastag Mapping ke barcode box ke liye). Barcode ke prefix/beech ke digits se
+   *  match; har item me tag ID, agent, TL, class. Full (barcode) index ready na ho to pending:true deta hai. */
+  function barcodeSuggest(q, limit) {
+    const want = normBar(q);
+    const idx = state.full || state.light;
+    if (!idx || !idx.bars || !idx.bars.size) { try { warmFull(); } catch { /* ignore */ } return { pending: true, items: [] }; }
+    if (want.length < 3) return { pending: false, items: [] };
+    const cap = Math.max(1, Math.min(30, Number(limit) || 12));
+    const items = [];
+    const keys = idx.barKeys && idx.barKeys.length ? idx.barKeys : [...idx.bars.keys()];
+    const substring = want.length >= 6;
+    for (let i = 0; i < keys.length && items.length < cap; i++) {
+      const key = keys[i];
+      if (!(key.startsWith(want) || (substring && key.includes(want)))) continue;
+      const e = idx.bars.get(key); if (!e) continue;
+      const r = (e.ff[0] || e.gv[0]) || {};
+      const src = e.ff.length ? 'FF' : 'GV';
+      items.push({ barcode: key, tagId: r.tagId || '', agentId: r.agentId || '', agentName: r.agentName || '', tlName: r.tlName || '', cls: r.cls || '', channel: src, owners: e.ff.length + e.gv.length });
+    }
+    items.sort((a, b) => (b.barcode === want) - (a.barcode === want) || (a.barcode.length - b.barcode.length));
+    return { pending: false, items };
+  }
+
   FF.masterSearch = {
-    buildLight, buildFull, warmFull, invalidate, search, preferNameMatches, suggestItems, resultsHtml, openPanel, closePanel,
+    buildLight, buildFull, warmFull, barcodeSuggest, invalidate, search, preferNameMatches, suggestItems, resultsHtml, openPanel, closePanel,
     mountTopbar, openSearchPage, onIndexReady, personByKey, linkedTlFor, teamPeopleFor, _limits: LIMITS,
     get ready() { return !!(state.light); }, get heavyReady() { return !!(state.full && state.full.fullLoaded); },
     get topbarMounted() { return mountedTopbar; },

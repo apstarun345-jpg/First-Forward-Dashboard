@@ -12,7 +12,7 @@ test('FASTag Mapping is registered under GV Partner and loads lazily', async () 
     read('app.js'), read('lazy.js'), read('fastagMapping.js'), read('server.js'), read('package.json')
   ]);
   assert.match(app, /id: 'fastagMapping'[\s\S]{0,220}group: 'GV Partner', adminOnly: true/);
-  assert.match(lazy, /fastagMapping: \['fastagMapping'\]/);
+  assert.match(lazy, /fastagMapping: \['fastagMapping', 'masterSearch'\]/);
   assert.match(page, /FF\.pages\.fastagMapping = \{ title: 'FASTag Mapping', render, normalizeVcType \}/);
   assert.match(pkg, /fastagMapping/);
   assert.match(server, /key: 'fastagMapping', label: 'GV Partner · FASTag Mapping \(admin-only API mapping\)'/);

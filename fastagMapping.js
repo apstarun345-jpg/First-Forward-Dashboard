@@ -1229,6 +1229,37 @@ window.FF = window.FF || {};
     }).catch(() => { if (status) status.textContent = 'API status unavailable'; setStatus('API status verify nahi ho paya. Login/session aur server status check karein.', 'warn'); });
     // 🗂️ Index pehle se ban chuka hai ya ban raha hai — yeh live dikhta rehta hai (aur garam na ho to
     // abhi bana lo, taaki pehla lookup Google ke intezaar me na atke).
+    // ⌨️ v3.78 — barcode type karte hi suggestions (Master Search ke barcode index se). Pick → barcode box me bhar jata hai,
+    // aur status me agent / TL / class dikhta hai. Target Agent ID khud nahi bharta (wo naya agent hai).
+    try {
+      const barBox = U.$('#fm-identifier', root);
+      const kindSel = U.$('#fm-kind', root);
+      if (barBox && U.suggest && FF.masterSearch && FF.masterSearch.barcodeSuggest) {
+        const sug = U.suggest(barBox, {
+          min: 3, max: 12,
+          items: () => {
+            if (!kindSel || kindSel.value !== 'barcode') return [];
+            const r = FF.masterSearch.barcodeSuggest(barBox.value, 12);
+            if (r.pending) return [{ none: true, kind: 'cls', kindLabel: 'Index', label: '⏳ Barcode index is being built…', sub: 'suggestions will appear shortly', value: barBox.value, _pending: true }];
+            return r.items.map((it) => ({
+              kind: 'barcode', kindLabel: it.channel === 'GV' ? 'GV' : 'FF', label: it.barcode,
+              sub: [it.tagId ? 'Tag ' + it.tagId : '', it.agentName ? 'Agent ' + it.agentName : '', it.tlName ? 'TL ' + it.tlName : '', it.cls ? 'Class ' + it.cls : ''].filter(Boolean).join(' · ') || 'StockDataa row',
+              value: it.barcode, inputValue: it.barcode, _item: it
+            }));
+          },
+          onPick: (it) => {
+            if (!it || it.none || it._pending || !it._item) return;
+            barBox.value = it._item.barcode;
+            const i = it._item;
+            setStatus(`Barcode ${i.barcode} · Tag ${i.tagId || '—'} · ${i.agentName || 'agent —'}${i.tlName ? ' (TL ' + i.tlName + ')' : ''}${i.cls ? ' · ' + i.cls : ''}. Enter the target Agent ID and click “Add to queue”.`, 'info');
+            const agentBox = U.$('#fm-agent-id', root); if (agentBox) agentBox.focus();
+          },
+          onEnter: () => {}
+        });
+        if (sug && sug.refresh && FF.masterSearch.onIndexReady) FF.masterSearch.onIndexReady(() => { try { if (barBox.isConnected && document.activeElement === barBox) sug.refresh(); } catch { /* ignore */ } });
+        if (FF.masterSearch.warmFull) { try { FF.masterSearch.warmFull(); } catch { /* ignore */ } }
+      }
+    } catch (err) { console.warn('fastag barcode suggest:', err && err.message); }
     startIndexWatch();
     later(() => {
       const ix = state.index || {};
