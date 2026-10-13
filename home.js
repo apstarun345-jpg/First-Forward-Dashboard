@@ -703,6 +703,7 @@ FF.pages = FF.pages || {};
           <a class="btn" href="#/tagIssued">🏷️ Tag Issued →</a>
         </div>
       </div>
+      <div id="home-todo"></div>
       <div id="home-gv-live">${U.spinner('GV aaj ka live data aaya ja raha hai…')}</div>
       <div id="home-month">${U.spinner('EIR se month KPI cards ban rahe hain…')}</div>
       <div id="home-target-achievement">${U.spinner('Class-wise target achievement calculate ho raha hai…')}</div>
@@ -713,6 +714,27 @@ FF.pages = FF.pages || {};
 
     const quick = U.$('#home-quick', root);
     if (quick) quick.innerHTML = `<div class="chip-row"><span class="chip on">🟩 GV aaj · GV Master (live)</span><span class="chip">🧾 EIR: FF + GV history</span><span class="chip dim">📦 Stock: StockDataa + Tag Assignment</span></div>`;
+
+    // ✅ v3.78 — "Today's work" card: pending Tag Requests + one-click shortcuts (cheap: one small API call).
+    const todoMount = U.$('#home-todo', root);
+    if (todoMount) {
+      const canReq = FF.auth.can('tagRequest') || (u.role === 'admin');
+      const link = (href, icon, label, n, tone) => `<a class="todo-item ${tone || ''}" href="${href}"><span class="todo-ic">${icon}</span><span class="todo-tx"><b>${n == null ? '' : esc(U.fmt(n))}</b> ${esc(label)}</span><span class="todo-go">→</span></a>`;
+      const paint = (pending) => {
+        const items = [];
+        if (canReq) items.push(pending == null ? link('#/tagRequest', '📝', 'Tag requests — open', null) : link('#/tagRequest', pending ? '⏳' : '✅', pending ? `pending tag request${pending === 1 ? '' : 's'}` : 'No pending tag requests', pending || null, pending ? 'warn' : 'ok'));
+        if (FF.auth.can('stock')) items.push(link('#/stock', '📦', 'Check low-stock agents', null));
+        if (FF.auth.can('performance')) items.push(link('#/performance', '🏁', 'Agent performance', null));
+        todoMount.innerHTML = items.length ? `<section class="card todo-card"><div class="card-head"><h3>✅ Today's work</h3></div><div class="todo-row">${items.join('')}</div></section>` : '';
+      };
+      paint(null);
+      if (canReq && FF.auth.api) {
+        FF.auth.api('/api/tag-requests').then((out) => {
+          const list = (out && out.requests) || [];
+          paint(list.filter((r) => String(r && r.status || 'pending').toLowerCase() === 'pending').length);
+        }).catch(() => {});
+      }
+    }
 
     const gvLiveMount = U.$('#home-gv-live', root);
     const monthMount = U.$('#home-month', root);

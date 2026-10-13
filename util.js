@@ -497,14 +497,22 @@ window.FF = window.FF || {};
     try { return await (typeof action === 'function' ? action() : action); }
     finally { setButtonBusy(button, false); }
   }
-  function toast(message, kind) {
+  // toast(message, kind, opts) — opts.action = { label, run } shows an "Undo"-style button (7s window).
+  function toast(message, kind, opts) {
     let el = $('#toast');
     if (!el) { el = h('<div id="toast" class="toast" hidden></div>'); document.body.appendChild(el); }
     el.textContent = message;
     el.className = `toast ${kind || ''}`;
+    const act = opts && opts.action;
+    if (act && typeof act.run === 'function') {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'toast-act'; b.textContent = act.label || 'Undo';
+      b.addEventListener('click', () => { el.hidden = true; clearTimeout(toast.timer); try { act.run(); } catch (e) { /* ignore */ } });
+      el.appendChild(b);
+    }
     el.hidden = false;
     clearTimeout(toast.timer);
-    toast.timer = setTimeout(() => { el.hidden = true; }, 3000);
+    toast.timer = setTimeout(() => { el.hidden = true; }, act ? 7000 : 3000);
   }
   // ---- 🌀 loaders (v3.31) — alag-alag style, hamesha animate (Reduce motion me bhi; CSS dekho) ----------
   const LOADER_STYLES = ['ring', 'dots', 'bars', 'pulse', 'tag', 'orbit'];

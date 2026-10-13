@@ -1672,10 +1672,19 @@ body.colorful .from-hdr { color: #166534; }
       });
     });
     card.querySelectorAll('[data-tr-del]').forEach((b) => b.addEventListener('click', () => {
-      if (rowHasContent(row) && !window.confirm('Is agent ki details form se hata dein?')) return;
+      const idx = state.rows.findIndex((r) => r.id === row.id);
+      const savedErr = state.errs[row.id];
       state.rows = state.rows.filter((r) => r.id !== row.id);
       delete state.errs[row.id];
       if (!state.rows.length) state.rows = [newRow()];
+      if (rowHasContent(row)) {
+        U.toast('Agent removed from the form', 'info', { action: { label: 'Undo', run: () => {
+          if (state.rows.length === 1 && !rowHasContent(state.rows[0])) state.rows = [];
+          state.rows.splice(Math.min(Math.max(idx, 0), state.rows.length), 0, row);
+          if (savedErr) state.errs[row.id] = savedErr;
+          renderForm();
+        } } });
+      }
       renderForm();
     }));
   }

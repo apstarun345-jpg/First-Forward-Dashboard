@@ -6676,3 +6676,16 @@ html[data-theme="dark"] .content {
   .tr-qty-list > .tr-qty-row { border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent); }
   .tr-qty-list > .tr-qty-row:nth-of-type(even) { border-left: 1px solid color-mix(in srgb, var(--line) 70%, transparent); }
 }
+
+/* v3.78 — Today's work card + undo toast */
+.todo-card .card-head h3 { margin: 0; }
+.todo-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; padding: 4px 16px 14px; }
+.todo-item { display: flex; align-items: center; gap: 10px; padding: 11px 13px; border: 1px solid var(--line); border-radius: 12px; background: var(--card, #fff); color: inherit; text-decoration: none; transition: transform .12s, box-shadow .12s, border-color .12s; }
+.todo-item:hover { transform: translateY(-1px); border-color: var(--brand); box-shadow: 0 4px 14px color-mix(in srgb, var(--brand) 14%, transparent); }
+.todo-item.warn { border-color: #f59e0b; background: color-mix(in srgb, #f59e0b 9%, var(--card, #fff)); }
+.todo-item.ok { border-color: #22c55e; }
+.todo-ic { font-size: 20px; flex: none; }
+.todo-tx { flex: 1; min-width: 0; font-size: 13px; }
+.todo-tx b { font-size: 17px; margin-right: 3px; }
+.todo-go { color: var(--muted); font-weight: 800; }
+.toast .toast-act { margin-left: 12px; border: 0; border-radius: 8px; padding: 3px 10px; font-weight: 800; cursor: pointer; background: #fde047; color: #1f2937; }
