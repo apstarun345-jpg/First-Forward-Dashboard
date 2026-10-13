@@ -6689,3 +6689,6 @@ html[data-theme="dark"] .content {
 .todo-tx b { font-size: 17px; margin-right: 3px; }
 .todo-go { color: var(--muted); font-weight: 800; }
 .toast .toast-act { margin-left: 12px; border: 0; border-radius: 8px; padding: 3px 10px; font-weight: 800; cursor: pointer; background: #fde047; color: #1f2937; }
+
+/* v3.78 — perf: skip layout/paint of Home sections that are far below the fold until scrolled near. */
+#home-charts, #home-stock, #home-pulse { content-visibility: auto; contain-intrinsic-size: auto 640px; }

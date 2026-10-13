@@ -1009,7 +1009,18 @@ window.FF = window.FF || {};
     const cur = all[all.length - 1] || U.ymKey(new Date());
     return prevCalendarYm(cur);
   }
+  // v3.78 — perf: this rebuild (tens of thousands of rows) ran on every call; memoise on the identity of
+  // its inputs (store arrays + GV sheets + today) so repeat calls on one render are free. Callers get a copy.
+  let eirRowsMemo = null;
   function eirDailyRows() {
+    const A = [eirDaily(), state.data.master, state.data.stockAgent, state.data.report];
+    const sig = [...A, ...A.map((a) => (a ? a.length : -1)), todayKey()];
+    if (eirRowsMemo && eirRowsMemo.sig.every((v, i) => v === sig[i])) return eirRowsMemo.out.slice();
+    const out = eirDailyRowsBuild();
+    eirRowsMemo = { sig, out };
+    return out.slice();
+  }
+  function eirDailyRowsBuild() {
     const lk = gvPersonLookup();
     const fromEir = (eirDaily() || []).filter((r) => r.channel === 'GV Partner').map((r) => {
       const p = lk.resolve(r.agentId, r.agentName, r.tlId, r.tlName);

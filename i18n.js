@@ -723,23 +723,50 @@ window.FF = window.FF || {};
   // Company / brand ke asli naam kabhi mat badlo (agent names, partner orgs, sheet headers).
   const KEEP = /\b(?:ApnaPayment|Corporation|Private|Pvt|Ltd|LLP|EIR|APS|VC\d+\+?|NRW|GV|FF|REPORT|Excel|CSV|PDF|PWA|WhatsApp|Gmail|StockDataa)\b/;
   const cache = {};
-  function translateText(s, dict, re) {
-    re.lastIndex = 0;
-    return s.replace(re, (m, off, full) => {
-      // asli naam me ghusa hua shabd (e.g. "TO2 Corporation") ko chhedna nahi hai
-      const pre = full.slice(Math.max(0, off - 40), off);
-      // only short fragments need protecting; a long phrase is clearly our own text, not part of a name
-      if (!/\s/.test(m) && KEEP.test(pre + m)) return m;
-      return dict[m] !== undefined ? dict[m] : m;
-    });
+  // v3.78 — perf: the old single giant RegExp (3,000+ alternations) was tried at every character of
+  // every string. Now phrases are bucketed by their first two characters and matched with startsWith,
+  // longest-first inside a bucket — identical results (leftmost, longest, whole-word) at a fraction of the cost.
+  const WORDCH = /[\p{L}\p{N}]/u;
+  function isWord(ch) {
+    if (!ch) return false;
+    const c = ch.charCodeAt(0);
+    if (c < 128) return (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122);
+    return WORDCH.test(ch);
+  }
+  function scanText(s, dict, idx) {
+    const n = s.length;
+    let out = '', last = 0, i = 0, hit = false;
+    while (i < n) {
+      if (i > 0 && isWord(s[i - 1])) { i++; continue; }
+      const bucket = idx.get(s.substr(i, 2));
+      let matched = null;
+      if (bucket) {
+        for (let k = 0; k < bucket.length; k++) {
+          const key = bucket[k];
+          if (!s.startsWith(key, i)) continue;
+          if (isWord(s[i + key.length])) continue;
+          matched = key; break;
+        }
+      }
+      if (matched) {
+        // asli naam me ghusa hua shabd (e.g. "TO2 Corporation") ko chhedna nahi hai
+        let rep = dict[matched];
+        if (!/\s/.test(matched) && KEEP.test(s.slice(Math.max(0, i - 40), i) + matched)) rep = matched;
+        if (rep !== matched) hit = true;
+        out += s.slice(last, i) + rep;
+        i += matched.length; last = i;
+      } else i++;
+    }
+    if (!hit) return s;
+    return out + s.slice(last);
   }
   function matcher(lang) {
     if (cache[lang]) return cache[lang];
     const dict = DICTS[lang] || {};
     const keys = Object.keys(dict).filter((k) => k && k.length > 1).sort((a, b) => b.length - a.length);
-    let re = null;
-    try { re = keys.length ? new RegExp(`(?<![\\p{L}\\p{N}])(?:${keys.map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})(?![\\p{L}\\p{N}])`, 'gu') : null; } catch { re = null; }
-    const m = { dict, re };
+    const idx = new Map();
+    for (const k of keys) { const h = k.slice(0, 2); const l = idx.get(h); if (l) l.push(k); else idx.set(h, [k]); }
+    const m = { dict, idx };
     cache[lang] = m;
     return m;
   }
@@ -752,15 +779,11 @@ window.FF = window.FF || {};
     const s = String(str);
     const mk = mode + '\u0000' + s;
     if (s.length < 400) { const hit = memoT.get(mk); if (hit !== undefined) return hit; }
-    const { dict, re } = matcher(mode);
-    if (!re) return str;
+    const { dict, idx } = matcher(mode);
+    if (!idx.size) return str;
     let out;
     if (dict[s] !== undefined) out = dict[s];                 // poora text exact match
-    else {
-      re.lastIndex = 0;
-      if (!re.test(s)) out = s;                               // koi shabd nahi — jaldi wapas
-      else { re.lastIndex = 0; out = translateText(s, dict, re); }
-    }
+    else out = scanText(s, dict, idx);
     if (s.length < 400) { if (memoT.size > 6000) memoT.clear(); memoT.set(mk, out); }
     return out;
   }
