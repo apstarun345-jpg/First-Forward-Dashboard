@@ -573,13 +573,14 @@ FF.pages = FF.pages || {};
     const gvPeople = res.people.filter((p) => /^gv-/.test(String(p.kind || '')) && (p.kind === 'gv-agent' || p.kind === 'gv-tl'));
     const exactGv = gvPeople.filter((p) => (queryName && normName(p.name) === queryName) || (ni.length >= 4 && identityIds(p).includes(ni)));
     if (!exactGv.length) return res;
+    // TL cards are never suppressed: an FF TL and a GV TL with the same name are two real TLs (both channels).
     res.people = res.people.filter((p) => {
-      if (!/^ff-/.test(String(p.kind || ''))) return true;
+      if (!/^ff-/.test(String(p.kind || '')) || p.kind === 'ff-tl') return true;
       const same = exactGv.filter((g) => normName(g.name) === normName(p.name));
       return !same.length || same.some((g) => identitiesLinked(g, p));
     });
     res.ids = (res.ids || []).filter((v) => {
-      if (!/^ff-/.test(String(v.kind || ''))) return true;
+      if (!/^ff-/.test(String(v.kind || '')) || v.kind === 'ff-tl') return true;
       const same = exactGv.filter((g) => normName(g.name) === normName(v.name));
       return !same.length || same.some((g) => identitiesLinked(g, { sub: v.id, ids: [v.id] }));
     });
