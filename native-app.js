@@ -399,8 +399,32 @@ window.FF = window.FF || {};
     if (text) t.textContent = text;
   }
 
+  /** 📏 Wide phone: page phone ki asli chaudai se kaafi chauda (Chrome "Desktop site" ke saath install,
+   *  display scaling) → shell ko utna hi bada karo taaki icons / bars har phone par ek jaise dikhein. */
+  function syncScale() {
+    let ui = 1;
+    try {
+      const sw = Math.min(Number(screen.width) || 0, Number(screen.height) || 0);   // phone ki chhoti side (CSS px)
+      const portrait = (window.innerHeight || 0) >= (window.innerWidth || 0);
+      const deviceW = portrait ? sw : Math.max(Number(screen.width) || 0, Number(screen.height) || 0);
+      const vw = window.innerWidth || 0;
+      if (sw && sw <= 600 && deviceW && vw > deviceW * 1.15) ui = Math.min(3, vw / deviceW);
+      else {
+        // Phone (UA "Mobile") jiska CSS screen hi chauda hai (Android "Display size" chhota) → ~412px phone maan kar scale.
+        const mobileUa = !!(navigator.userAgentData && navigator.userAgentData.mobile) || /Android.+Mobile|iPhone/i.test(String(navigator.userAgent || ''));
+        const shortVw = Math.min(vw, window.innerHeight || vw);
+        if (mobileUa && shortVw > 600) ui = Math.min(3, shortVw / 412);
+      }
+    } catch { ui = 1; }
+    html.style.setProperty('--n-ui', ui.toFixed(3));
+    html.classList.toggle('wide-phone', ui > 1);
+  }
+
   // ------------------------------------------------------------------------------------------
   function start() {
+    syncScale();
+    window.addEventListener('resize', syncScale, { passive: true });
+    window.addEventListener('orientationchange', () => setTimeout(syncScale, 300));
     buildAppBar();
     wireDrawerSheet();
     wirePullToRefresh();
@@ -423,5 +447,5 @@ window.FF = window.FF || {};
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 
-  FF.nativeApp = { openSearch, exitSearch, openOverflow, closeSheet, goTab, _state: nav };
+  FF.nativeApp = { syncScale, openSearch, exitSearch, openOverflow, closeSheet, goTab, _state: nav };
 })(window.FF);

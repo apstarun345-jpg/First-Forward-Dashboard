@@ -343,3 +343,85 @@ html.native-shell.mobile-ui[data-theme="dark"] .home-avatar.mono-logo { color: v
 html.native-shell.mobile-ui[data-theme="dark"] .home-greeting .home-name { -webkit-text-fill-color: #6d28d9 !important; }
 /* Page canvas theme ke saath — mobile-fix ka fixed #f6f8fc dark mode me title ko safed-par-safed kar deta tha */
 html.native-shell.mobile-ui, html.native-shell.mobile-ui body, html.native-shell.mobile-ui .content { background: var(--bg) !important; }
+
+/* =====================================================================================
+   v3.76 — Bade icons + "wide phone" scaling
+   Kuch phones par app ~900px chaude page me khulta hai (Chrome "Desktop site" ke saath install /
+   display scaling). Tab app bar aur bottom bar ke icons bahut chhote dikhte the aur neeche ki bar
+   tablet wali tairti patti ban kar content par aa jaati thi. native-app.js --n-ui = (page chaudai ÷
+   phone ki asli chaudai) set karta hai; shell ke saare size usi se guna hote hain, isliye har phone
+   par icons ek jaise (bade) dikhte hain. Normal phone par --n-ui = 1.
+   ===================================================================================== */
+html.native-shell { --n-ui: 1; --n-bar-h: calc(58px * var(--n-ui)); --n-nav-h: calc(76px * var(--n-ui)); }
+
+/* App bar */
+html.native-shell.mobile-ui .topbar { padding-left: calc(4px * var(--n-ui)) !important; padding-right: calc(4px * var(--n-ui)) !important; }
+html.native-shell.mobile-ui .nab-btn { width: calc(48px * var(--n-ui)); height: calc(48px * var(--n-ui)); min-width: calc(48px * var(--n-ui)); min-height: calc(48px * var(--n-ui)); }
+html.native-shell.mobile-ui .nab-btn svg { width: calc(27px * var(--n-ui)); height: calc(27px * var(--n-ui)); }
+html.native-shell.mobile-ui #top-title { font-size: calc(21px * var(--n-ui)) !important; margin-left: calc(4px * var(--n-ui)) !important; }
+html.native-shell.mobile-ui .nab-badge {
+  top: calc(5px * var(--n-ui)); right: calc(4px * var(--n-ui)); min-width: calc(19px * var(--n-ui)); height: calc(19px * var(--n-ui));
+  padding: 0 calc(5px * var(--n-ui)); border-radius: calc(10px * var(--n-ui)); font-size: calc(11.5px * var(--n-ui)); line-height: calc(19px * var(--n-ui));
+}
+html.native-shell.mobile-ui.nab-search-open .master-search-input .input { height: calc(44px * var(--n-ui)) !important; min-height: calc(44px * var(--n-ui)) !important; font-size: calc(16px * var(--n-ui)) !important; border-radius: calc(22px * var(--n-ui)) !important; padding-left: calc(38px * var(--n-ui)) !important; }
+
+/* Bottom bar: bade icon + label, pill indicator ke saath */
+html.native-shell.mobile-ui #mobile-nav .mobile-nav-item { gap: calc(4px * var(--n-ui)) !important; }
+html.native-shell.mobile-ui #mobile-nav .mobile-nav-item > span { width: calc(60px * var(--n-ui)) !important; height: calc(34px * var(--n-ui)) !important; border-radius: calc(17px * var(--n-ui)) !important; }
+html.native-shell.mobile-ui #mobile-nav .mnav-ico { width: calc(27px * var(--n-ui)) !important; height: calc(27px * var(--n-ui)) !important; }
+html.native-shell.mobile-ui #mobile-nav .mobile-nav-item small { font-size: calc(12.5px * var(--n-ui)) !important; line-height: calc(16px * var(--n-ui)) !important; }
+html.native-shell.mobile-ui #mobile-nav .mobile-nav-badge {
+  top: calc(-3px * var(--n-ui)) !important; left: calc(36px * var(--n-ui)) !important; min-width: calc(18px * var(--n-ui)) !important; height: calc(18px * var(--n-ui)) !important;
+  padding: 0 calc(4px * var(--n-ui)) !important; border-radius: calc(9px * var(--n-ui)) !important; font-size: calc(10.5px * var(--n-ui)) !important; line-height: calc(18px * var(--n-ui)) !important;
+}
+/* Wide phone = phone hi hai: tablet wali tairti patti nahi, poori chaudai ki bar (content par overlap nahi) */
+@media (min-width: 600px) and (pointer: coarse) {
+  html.native-shell.mobile-ui.wide-phone #mobile-nav:not([hidden]) {
+    left: 0 !important; right: 0 !important; width: auto !important; transform: none !important; bottom: 0 !important;
+    border: 0 !important; border-top: 1px solid var(--n-line) !important; border-radius: 0 !important; box-shadow: none !important;
+    height: calc(var(--n-nav-h) + var(--n-safe-bottom)) !important; padding: 0 calc(4px * var(--n-ui)) var(--n-safe-bottom) !important;
+  }
+}
+
+/* Floating button, snackbar, toast — bar ke upar, ek-doosre se door */
+html.native-shell.mobile-ui #ask-fab {
+  width: calc(54px * var(--n-ui)) !important; height: calc(54px * var(--n-ui)) !important; font-size: calc(23px * var(--n-ui)) !important;
+  right: calc(16px * var(--n-ui)) !important; bottom: calc(var(--n-nav-h) + var(--n-safe-bottom) + 14px * var(--n-ui)) !important;
+}
+html.native-shell.mobile-ui body:has(.loc-banner:not([hidden])) #ask-fab,
+html.native-shell.mobile-ui body:has(#toast:not([hidden])) #ask-fab { bottom: calc(var(--n-nav-h) + var(--n-safe-bottom) + 76px * var(--n-ui)) !important; }
+html.native-shell.mobile-ui .loc-banner:not([hidden]) { font-size: calc(13.5px * var(--n-ui)) !important; min-height: calc(48px * var(--n-ui)) !important; bottom: calc(var(--n-nav-h) + var(--n-safe-bottom) + 8px * var(--n-ui)) !important; }
+html.native-shell.mobile-ui .loc-banner:not([hidden]) .btn { height: calc(36px * var(--n-ui)) !important; min-height: calc(36px * var(--n-ui)) !important; font-size: calc(14px * var(--n-ui)) !important; }
+html.native-shell.mobile-ui #toast {
+  font-size: calc(14px * var(--n-ui)) !important; padding: calc(12px * var(--n-ui)) calc(16px * var(--n-ui)) !important;
+  bottom: calc(var(--n-nav-h) + var(--n-safe-bottom) + 10px * var(--n-ui)) !important; border-radius: calc(10px * var(--n-ui)) !important;
+}
+
+/* ⋮ Options sheet */
+html.native-shell .nsheet { max-width: calc(640px * var(--n-ui)); }
+html.native-shell .nsheet-handle { width: calc(32px * var(--n-ui)); height: calc(4px * var(--n-ui)); padding: calc(14px * var(--n-ui)) calc(40px * var(--n-ui)); }
+html.native-shell .nsheet .nsheet-title { font-size: calc(14px * var(--n-ui)) !important; margin: 0 calc(24px * var(--n-ui)) calc(8px * var(--n-ui)) !important; }
+html.native-shell .nsheet-item, html.native-shell .nsheet-account { min-height: calc(56px * var(--n-ui)); gap: calc(16px * var(--n-ui)); padding: calc(8px * var(--n-ui)) calc(16px * var(--n-ui)); border-radius: calc(16px * var(--n-ui)); }
+html.native-shell .nsheet-ico { width: calc(28px * var(--n-ui)); font-size: calc(21px * var(--n-ui)); }
+html.native-shell .nsheet-txt b, html.native-shell .nsheet-account b { font-size: calc(16px * var(--n-ui)); }
+html.native-shell .nsheet-txt small, html.native-shell .nsheet-account small { font-size: calc(12.5px * var(--n-ui)); }
+html.native-shell .nsheet-avatar { width: calc(40px * var(--n-ui)); height: calc(40px * var(--n-ui)); font-size: calc(17px * var(--n-ui)); }
+
+/* ☰ Side menu */
+html.native-shell.mobile-ui .sidebar { width: min(calc(320px * var(--n-ui)), 86vw) !important; }
+html.native-shell.mobile-ui .sidebar .brand-text b { font-size: calc(16px * var(--n-ui)) !important; }
+html.native-shell.mobile-ui .sidebar .brand-logo { width: calc(44px * var(--n-ui)) !important; height: calc(44px * var(--n-ui)) !important; }
+html.native-shell.mobile-ui .sidebar .nav-sec, html.native-shell.mobile-ui .sidebar .nav-sec-toggle { min-height: calc(44px * var(--n-ui)) !important; font-size: calc(13px * var(--n-ui)) !important; }
+html.native-shell.mobile-ui .sidebar .nav-item { min-height: calc(52px * var(--n-ui)) !important; gap: calc(12px * var(--n-ui)) !important; border-radius: calc(26px * var(--n-ui)) !important; }
+html.native-shell.mobile-ui .sidebar .nav-ico { width: calc(28px * var(--n-ui)) !important; height: calc(28px * var(--n-ui)) !important; font-size: calc(18px * var(--n-ui)) !important; line-height: calc(28px * var(--n-ui)) !important; }
+html.native-shell.mobile-ui .sidebar .nav-text b { font-size: calc(15px * var(--n-ui)) !important; }
+html.native-shell.mobile-ui .sidebar .nav-text small { font-size: calc(12px * var(--n-ui)) !important; }
+html.native-shell.mobile-ui .sidebar .side-foot { font-size: calc(13px * var(--n-ui)) !important; }
+
+/* Pull-to-refresh gola */
+html.native-shell .nptr { width: calc(40px * var(--n-ui)); height: calc(40px * var(--n-ui)); }
+html.native-shell .nptr svg { width: calc(22px * var(--n-ui)); height: calc(22px * var(--n-ui)); }
+/* mobile-fix ka `small { 14px !important }` sheet ki subtitle ko scale hone nahi deta tha */
+html.native-shell .nsheet .nsheet-txt small, html.native-shell .nsheet .nsheet-account small { font-size: calc(12.5px * var(--n-ui)) !important; line-height: 1.3 !important; }
+html.native-shell.mobile-ui .sidebar #user-box b, html.native-shell.mobile-ui .sidebar #user-box strong { font-size: calc(14px * var(--n-ui)) !important; }
+html.native-shell.mobile-ui .sidebar #user-box small, html.native-shell.mobile-ui .sidebar .status { font-size: calc(12px * var(--n-ui)) !important; }
