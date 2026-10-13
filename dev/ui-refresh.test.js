@@ -25,7 +25,7 @@ test('layout + readability fixes from the diagnosis', async () => {
   assert.match(css, /\.metric-grid \{ display: grid;/, 'Direct/New Agents KPI cards were full-width');
   assert.match(css, /overflow-wrap: break-word !important/, 'table columns no longer break letter-by-letter');
   assert.match(css, /\.chip\.on \.count \{ background: rgba\(67, 56, 202, \.14\); color: #3730a3; \}/, 'selected chip count was white on light');
-  const styles = await read('styles.css');
+  const styles = await read('dev/styles-full.css');
   assert.doesNotMatch(styles, /:has\(#tr-body\)/, 'Trend also uses #tr-body — Tag Request light-mode rules must not leak into Trend');
   assert.match(styles, /\.main:has\(\.page-tagRequest\)/);
 });

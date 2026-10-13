@@ -124,7 +124,26 @@ window.FF = window.FF || {};
       el.src = `./${name}.js?v=${assetVersion}`;
       el.defer = true;
       el.async = true;
-      el.onload = () => resolve(name);
+      // v3.78 — page-only English phrases live in i18n-en-<module>.js (loaded alongside the module; optional).
+      // The module waits for it: a page rendered before its phrases arrive would be half-translated.
+      const dictWait = VERSIONS['i18n-en-' + name] ? new Promise((done) => {
+        const dict = document.createElement('script');
+        dict.src = `./i18n-en-${name}.js?v=${VERSIONS['i18n-en-' + name]}`;
+        dict.async = true;
+        dict.onload = dict.onerror = () => done();
+        document.head.appendChild(dict);
+      }) : null;
+      // v3.78 — page-only CSS lives in styles-<module>.css. It is inserted right after styles.css so the
+      // cascade order against the other sheets is unchanged, and the module waits for it (no unstyled flash).
+      const cssWait = VERSIONS['styles-' + name] ? new Promise((done) => {
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = `./styles-${name}.css?v=${VERSIONS['styles-' + name]}`;
+        link.onload = link.onerror = () => done();
+        const base = document.querySelector('link[rel="stylesheet"][href*="styles.css"]');
+        if (base && base.parentNode) base.parentNode.insertBefore(link, base.nextSibling); else document.head.appendChild(link);
+      }) : null;
+      el.onload = () => Promise.all([cssWait, dictWait]).then(() => resolve(name));
       el.onerror = () => reject(new Error(`${name}.js load nahi hua`));
       document.head.appendChild(el);
     }).catch((err) => {
@@ -223,6 +242,28 @@ window.FF = window.FF || {};
   }
   /** Ek shell module turant chahiye (bell click, KPI drill, Ctrl+K) — load karke promise. */
   function shellNeed(names) { return loadList(Array.isArray(names) ? names : [names]); }
+
+  // ⚡ v3.78 — intent prefetch: the moment a pointer rests on / a finger touches / keyboard focus lands on a nav
+  // link, start loading that page's module + CSS + phrases, so by the time the click lands it is already there.
+  (function intentPrefetch() {
+    if (typeof document === 'undefined' || typeof document.addEventListener !== 'function') return;
+    const seen = new Set();
+    const hit = (e) => {
+      try {
+        const dev = deviceProfile();
+        if (dev.saveData) return;
+        const a = e.target && e.target.closest && e.target.closest('a[href^="#/"]');
+        if (!a) return;
+        const id = (a.getAttribute('href') || '').slice(2).split(/[?/]/)[0];
+        if (!id || seen.has(id) || !GROUPS[id]) return;
+        seen.add(id);
+        ensure(id).catch(() => seen.delete(id));
+      } catch { /* prefetch is best-effort */ }
+    };
+    document.addEventListener('pointerover', hit, { passive: true, capture: true });
+    document.addEventListener('touchstart', hit, { passive: true, capture: true });
+    document.addEventListener('focusin', hit, { passive: true, capture: true });
+  })();
 
   FF.lazy = { ensure, ensureAll, need, inject, warm, shell, shellNeed, deviceProfile, GROUPS, WARM, SHELL_WAVES, get loaded() { return [...loaded.keys()]; }, get failed() { return [...failed]; } };
 })(window.FF || {});

@@ -63,7 +63,7 @@ test('🔍 Master Search — type karte hi suggestions, result ke upar KPI strip
   for (const n of ['VC4', 'VC20', 'VC5+']) assert.ok(trend.includes(`name: '${n}'`), `series ${n}`);
   assert.match(trend, /msp-trend-sum[\s\S]*msp-tsum vc4[\s\S]*msp-tsum vc20[\s\S]*msp-tsum vc5p/, 'class-wise total chips');
   assert.ok(!trend.includes("'Sab (kul ${U.fmt"), 'header me literal ${} template bug nahi');
-  const css = await read('styles.css');
+  const css = await read('dev/styles-full.css');
   for (const c of ['.msp-kpis', '.msp-kpi-card', '.msp-trend-sum', '.tr-boxes', '.tr-box.prio']) assert.ok(css.includes(c), `css ${c}`);
 });
 
@@ -193,7 +193,7 @@ test('🎨 settings/theme — dark mode is opt-in and Tag Request order rows sta
   const app = await read('app.js');
   assert.match(app, /ff_theme_explicit/);
   assert.match(app, /return 'light'/);
-  const css = await read('styles.css');
+  const css = await read('dev/styles-full.css');
   assert.match(css, /\.tr-col-label[\s\S]{0,260}color: #0f172a !important/);
   const tr = await read('tagRequest.js');
   assert.match(tr, /tr-col-index/);
@@ -229,7 +229,7 @@ test('🚀 workspace boot gate — wait for data + first route before revealing 
   assert.match(app, /if \(FF\.lazy && FF\.lazy\.warm\) Promise\.resolve\(FF\.lazy\.warm\(\)\)/, 'optional page modules warm after the first paint');
 });
 test('🎆 workspace boot animation survives macOS Reduce Motion', async () => {
-  const css = await read('styles.css');
+  const css = await read('dev/styles-full.css');
   assert.match(css, /\.boot-fireworks \{ position: absolute; inset: 0; pointer-events: none; z-index: 1;/, 'fireworks stay above boot background');
   assert.match(css, /prefers-reduced-motion: reduce\)[\s\S]{0,900}\.app-boot \.boot-fireworks \.fw \{ animation: boot-burst 2\.4s ease-out infinite !important;/, 'fireworks remain animated even when OS Reduce Motion is enabled');
   assert.match(css, /\.app-boot \.boot-welcome \{ animation: boot-title 1\.8s ease-in-out infinite !important;/, 'workspace title animation remains visible');
@@ -331,7 +331,7 @@ test('🎨 theme — normal light UI by default; dark splash styling is scoped o
 
 test('🏷️ Tag Request — column order list always renders with fallback fields and readable drag rows', async () => {
   const tag = await read('tagRequest.js');
-  const css = await read('styles.css');
+  const css = await read('dev/styles-full.css');
   assert.match(tag, /const FALLBACK_SHEET_FIELDS = \{/);
   assert.match(tag, /s\.fields && Object\.keys\(s\.fields\)\.length \? s\.fields : FALLBACK_SHEET_FIELDS/);
   assert.match(tag, /data-tr-cols-order aria-label="Google Sheet column order"/);

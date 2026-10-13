@@ -151,6 +151,6 @@ test('wiring — settings Preview button + app.js banner + preview-aware gates',
   const tag = read('tagRequest.js');
   assert.match(tag, /FF\.auth\.isAdmin \? FF\.auth\.isAdmin\(\)/, 'tag request isAdmin preview-aware');
 
-  const css = read('styles.css');
+  const css = read('dev/styles-full.css');
   assert.match(css, /\.viewas-banner \{ position: fixed; top: 0;/, 'banner CSS strip');
 });

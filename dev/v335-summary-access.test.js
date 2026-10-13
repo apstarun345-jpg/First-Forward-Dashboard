@@ -222,7 +222,7 @@ test('render-time gates source me hain — refresh / ageing drawer / click handl
 });
 
 test('CSS fix — .as-head .dim white (gradient par readable) + .as-drop .dim hardcoded', () => {
-  const css = fs.readFileSync(path.join(ROOT, 'styles.css'), 'utf8');
+  const css = fs.readFileSync(path.join(ROOT, 'dev/styles-full.css'), 'utf8');
   assert.match(css, /\.as-head \.dim \{ color: rgba\(255, 255, 255, \.9\); \}/, 'header dim ko white kiya');
   assert.match(css, /\.as-drop \.dim \{ color: #475569; \}/, 'dropdown dim hardcoded (theme/pack-proof)');
 });

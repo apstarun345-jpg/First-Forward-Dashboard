@@ -6,7 +6,7 @@ import vm from 'node:vm';
 const source = (name) => readFileSync(new URL(`../${name}`, import.meta.url), 'utf8');
 const bootScript = source('ui-boot.js');
 const html = source('index.html');
-const css = source('styles.css') + '\n' + source('pwa-premium.css') + '\n' + source('ux-fast.css') + '\n' + source('mobile-fix.css');
+const css = source('dev/styles-full.css') + '\n' + source('pwa-premium.css') + '\n' + source('ux-fast.css') + '\n' + source('mobile-fix.css');
 const mobileCss = source('mobile-fix.css');
 const app = source('app.js');
 const sw = source('sw.js');

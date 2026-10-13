@@ -14,7 +14,8 @@ function load() {
     const sandbox = { window: {}, console };
     sandbox.window.window = sandbox.window;
     vm.createContext(sandbox);
-    for (const f of ['i18n.js', 'i18n-en.js']) vm.runInContext(fs.readFileSync(path.join(dir, f), 'utf8'), sandbox, { filename: f });
+    const chunks = fs.readdirSync(dir).filter((f) => /^i18n-en-.+\.js$/.test(f)).sort();
+    for (const f of ['i18n.js', 'i18n-en.js', ...chunks]) vm.runInContext(fs.readFileSync(path.join(dir, f), 'utf8'), sandbox, { filename: f });
     const fn = sandbox.window.FF && sandbox.window.FF.i18n && sandbox.window.FF.i18n.t;
     T = typeof fn === 'function' ? (s) => fn(s, 'en') : (s) => s;
   } catch { T = (s) => s; }

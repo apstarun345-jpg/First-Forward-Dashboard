@@ -170,7 +170,7 @@ window.FF = window.FF || {};
     try {
       const res = await fetch(url, { 
         signal: ctrl.signal, 
-        cache: 'no-store', 
+        cache: 'no-cache',   // revalidate every time (ETag → 304 = no body when the sheet is unchanged)
         credentials: 'same-origin',
         headers: { 'X-Requested-With': 'FF-Dashboard' }
       });

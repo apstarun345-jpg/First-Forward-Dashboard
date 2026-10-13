@@ -221,7 +221,7 @@ test('⏱️ polling budget: phone/server par background requests ka cadence san
 });
 
 test('Lite mode keeps Home KPI text readable after removing gradient backgrounds', async () => {
-  const css = await read('styles.css');
+  const css = await read('dev/styles-full.css');
   assert.match(css, /html\.ff-lite \.kpi \{[^}]*background-color:\s*#3730a3\s*!important/i, 'solid dark fallback behind white KPI text');
   assert.match(css, /html\.ff-lite \.kpi \.dim \{[^}]*color:\s*rgba\(255,255,255,\.84\)\s*!important/i, 'muted footnote text stays legible');
 });

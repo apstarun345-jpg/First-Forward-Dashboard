@@ -341,7 +341,7 @@ test('🩺 Settings diagnostics v2: attr repairs, speed prefs, parity probe, fil
   const app = read('app.js');
   assert.ok(app.includes('ff_speed_prefs') && app.includes('ff_diag_attr_repairs'), 'app.js boot par saved prefs/repairs lagata hai');
   assert.ok(app.includes('applySavedTweaks(root)'), 'har page render ke baad repairs dobara lagte hain');
-  const css = read('styles.css');
+  const css = read('dev/styles-full.css');
   assert.ok(css.includes('html.ff-no-anim') && css.includes('html.ff-lite'), 'speed prefs ke CSS rules');
   assert.ok(css.includes('.ua-match') && css.includes('.dkpi-hero') && css.includes('.diag-toolbar'), 'naye UI classes styled hain');
   // Unusual page ka apna 🩺 diagnose (page-level) + fast mode

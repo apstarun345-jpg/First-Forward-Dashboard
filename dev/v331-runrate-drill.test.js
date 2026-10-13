@@ -155,7 +155,7 @@ test('loader: 6 alag style, mix me har baar agla · spinner role=status + animat
 });
 
 test('CSS: reduced-motion (OS + app toggle) me bhi loader animate · app toggle class sahi', () => {
-  const css = fs.readFileSync(path.join(ROOT, 'styles.css'), 'utf8');
+  const css = fs.readFileSync(path.join(ROOT, 'dev/styles-full.css'), 'utf8');
   assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\s*html \.ffl > i[^{]+\{\s*animation-duration: var\(--ffl-dur, 1\.2s\) !important; animation-iteration-count: infinite !important;/);
   assert.match(css, /html\.a11y-motion \.ffl > i/);
   assert.ok(!/\.page-loader-spin, \.skel::after, \.app-boot img \{ animation: none !important; \}/.test(css), 'purana rule jo loader band karta tha hata');

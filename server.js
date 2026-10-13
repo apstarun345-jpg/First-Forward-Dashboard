@@ -4142,7 +4142,7 @@ function sendCached(req, res, entry, tag) {
     return res.end();
   }
   return sendMaybeCompressed(req, res, 200, 'text/plain; charset=utf-8', entry.body, {
-    'Cache-Control': 'no-store', ETag: etag, 'X-Cache': tag, 'X-FF-Source': 'proxy', 'X-FF-Age': String(Math.round((Date.now() - entry.at) / 1000))
+    'Cache-Control': 'private, no-cache', ETag: etag, 'X-Cache': tag, 'X-FF-Source': 'proxy', 'X-FF-Age': String(Math.round((Date.now() - entry.at) / 1000))
   });
 }
 const HOT = new Map();                 // url → { hits, at } — jo queries sach me use hoti hain
