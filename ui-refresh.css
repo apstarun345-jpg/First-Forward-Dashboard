@@ -1,0 +1,188 @@
+/* 🎨 ui-refresh.css (v3.75) — poori site ka UI polish (desktop + phone, light + dark).
+   mobile-fix.css ke baad aur native-shell.css se pehle load hota hai.
+   1) KPI cards: rangeen hi, par ek saath mel khaate gradients, saaf typography, glass icon, rang ke hisaab se glow.
+   2) Chhote KPI / stat cards (mini-kpi, mp-kpi, dkpi) ek jaise.
+   3) Tables: column akshar-akshar nahi tootta; numbers ek seedh me.
+   4) Dark mode: jahan safed dabba + safed text ya kaala text + kaala dabba tha, wo theek.
+   5) Layout gaps: .metric-grid (Direct Agents / New Agents / Control Tower) jo poori width me ek ke neeche ek aate the. */
+
+/* =====================================================================================
+   1) KPI palette — har gN ke 3 rang: gehra (title wala kona) → beech → halka
+   ===================================================================================== */
+.g1  { --k1: #4338ca; --k2: #6366f1; --k3: #8b5cf6; --kglow: rgba(99, 102, 241, .55); }
+.g2  { --k1: #be185d; --k2: #ec4899; --k3: #f43f5e; --kglow: rgba(236, 72, 153, .50); }
+.g3  { --k1: #0369a1; --k2: #0ea5e9; --k3: #6366f1; --kglow: rgba(14, 165, 233, .50); }
+.g4  { --k1: #c2410c; --k2: #f97316; --k3: #f59e0b; --kglow: rgba(249, 115, 22, .50); }
+.g5  { --k1: #047857; --k2: #10b981; --k3: #14b8a6; --kglow: rgba(16, 185, 129, .48); }
+.g6  { --k1: #6d28d9; --k2: #8b5cf6; --k3: #d946ef; --kglow: rgba(139, 92, 246, .52); }
+.g7  { --k1: #b91c1c; --k2: #ef4444; --k3: #f97316; --kglow: rgba(239, 68, 68, .50); }
+.g8  { --k1: #1d4ed8; --k2: #3b82f6; --k3: #06b6d4; --kglow: rgba(59, 130, 246, .50); }
+.g9  { --k1: #0f766e; --k2: #14b8a6; --k3: #22c55e; --kglow: rgba(20, 184, 166, .48); }
+.g10 { --k1: #7e22ce; --k2: #a855f7; --k3: #ec4899; --kglow: rgba(168, 85, 247, .52); }
+.g11 { --k1: #1e40af; --k2: #2563eb; --k3: #0ea5e9; --kglow: rgba(37, 99, 235, .50); }
+.g12 { --k1: #15803d; --k2: #22c55e; --k3: #84cc16; --kglow: rgba(34, 197, 94, .46); }
+.g13 { --k1: #be123c; --k2: #f43f5e; --k3: #fb923c; --kglow: rgba(244, 63, 94, .50); }
+
+/* Background: upar-baayen halki roshni + 3-rang gradient. `.kpi.kpi` + baad me load → purane
+   homeKpiFix (!important) rules par bhi lagta hai. */
+.kpi.kpi[class*="g"],
+.gs-kpi.gs-kpi[class*="g"] {
+  background:
+    radial-gradient(120% 120% at 0% 0%, rgba(255, 255, 255, .20) 0, rgba(255, 255, 255, 0) 45%),
+    linear-gradient(140deg, var(--k1, #4338ca) 0%, var(--k2, #6366f1) 55%, var(--k3, #8b5cf6) 100%) !important;
+}
+.kpi {
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, .16);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .28), 0 14px 26px -16px var(--kglow, rgba(79, 70, 229, .5)), 0 2px 6px -2px rgba(15, 23, 42, .16);
+  transition: transform .18s ease, box-shadow .18s ease;
+  isolation: isolate;
+}
+@media (hover: hover) {
+  .kpi:hover { transform: translateY(-3px); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .3), 0 20px 34px -16px var(--kglow, rgba(79, 70, 229, .6)), 0 4px 10px -4px rgba(15, 23, 42, .2); }
+}
+/* Sajawat: ek halka ring + ek bada narm gola (pehle do bhaari gole the) */
+.kpi::after {
+  width: 150px; height: 150px; right: -48px; top: -56px;
+  background: radial-gradient(circle, rgba(255, 255, 255, .20) 0, rgba(255, 255, 255, .06) 55%, rgba(255, 255, 255, 0) 70%);
+  z-index: 0; pointer-events: none;
+}
+.kpi::before {
+  width: 120px; height: 120px; right: 18px; bottom: -70px;
+  background: none; border: 14px solid rgba(255, 255, 255, .07);
+  z-index: 0; pointer-events: none;
+}
+.kpi .kpi-top, .kpi .kpi-value, .kpi .kpi-foot, .kpi > * { position: relative; z-index: 1; }
+.kpi .kpi-title { font-size: 11.5px; font-weight: 700; letter-spacing: .07em; opacity: .92; line-height: 1.25; }
+.kpi .kpi-icon {
+  width: 38px; height: 38px; border-radius: 12px; font-size: 19px;
+  background: rgba(255, 255, 255, .18);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .30), 0 4px 10px -4px rgba(0, 0, 0, .25);
+  -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
+}
+.kpi .kpi-value {
+  font-variant-numeric: tabular-nums; font-weight: 800; letter-spacing: -.02em;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .14);
+}
+.kpi .kpi-foot { font-size: 12.5px; line-height: 1.4; opacity: .95; }
+.kpi .kpi-foot b { font-weight: 800; }
+.kpi .delta, .kpi .pct-inline { border-radius: 999px; padding: 1px 7px; font-variant-numeric: tabular-nums; }
+.kpi:focus-visible { outline: 3px solid #fde047; outline-offset: 3px; }
+
+/* Layout: .metric-grid ko koi CSS nahi tha → Direct Agents / New Agents me har card poori width */
+.metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; margin: 0 0 18px; }
+.kpi-grid { gap: 14px; }
+
+/* =====================================================================================
+   2) Chhote stat cards — ek jaise radius, accent, numbers
+   ===================================================================================== */
+.mini-kpi {
+  background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--brand);
+  border-radius: 14px; box-shadow: 0 1px 2px rgba(15, 23, 42, .05), 0 6px 16px -10px rgba(15, 23, 42, .18);
+}
+.mini-kpi .mini-value, .mp-kpi b, .dkpi b, .kd-stat b { font-variant-numeric: tabular-nums; }
+.mp-kpi { border-radius: 16px; border-top-width: 4px; box-shadow: 0 1px 2px rgba(15, 23, 42, .04), 0 8px 18px -12px rgba(15, 23, 42, .18); }
+.dkpi { border-radius: 14px; }
+
+/* =====================================================================================
+   3) Tables
+   ===================================================================================== */
+/* overflow-wrap:anywhere se column 1 akshar tak patla ho jaata tha (A/S/H/O/K, ID 5/8/4/6…).
+   break-word me lambi value pehle table ko chauda karti hai, table-wrap swipe/scroll hota hai. */
+.tbl td:not(.num), .data-table td:not(.num) { overflow-wrap: break-word !important; word-break: normal !important; }
+.tbl td.num, .tbl th.num, .data-table td.num, .tbl td b, .tbl tfoot td { font-variant-numeric: tabular-nums; }
+.table-wrap { overflow-x: auto; }
+.tbl tbody tr { transition: background-color .12s ease; }
+
+/* =====================================================================================
+   4) Dark mode repairs (diagnosis me pakde gaye)
+   ===================================================================================== */
+html[data-theme="dark"] .tbl th,
+html[data-theme="dark"] .tbl th.section:not(.has),
+html[data-theme="dark"] .tbl tfoot td,
+html[data-theme="dark"] .total-row td,
+html[data-theme="dark"] .tbl.sticky-first th:first-child { background: #17213a; color: #a9b8d0; }
+html[data-theme="dark"] .tbl.sticky-first td:first-child,
+html[data-theme="dark"] table.matrix th.mx-user,
+html[data-theme="dark"] table.matrix td.mx-user { background: var(--card); box-shadow: 1px 0 0 var(--line); }
+html[data-theme="dark"] .mini-kpi { background: var(--card); border-color: var(--line); }
+html[data-theme="dark"] .dkpi { background: linear-gradient(135deg, #16203a, #121a2e); border-color: #26324f; }
+html[data-theme="dark"] .count.red { background: rgba(239, 68, 68, .18); color: #fca5a5; }
+html[data-theme="dark"] .count.amber { background: rgba(245, 158, 11, .18); color: #fcd34d; }
+html[data-theme="dark"] .sev-pill.medium { background: rgba(245, 158, 11, .16); color: #fcd34d; }
+html[data-theme="dark"] .kd-badge.ff { background: rgba(129, 140, 248, .18); color: #c7d2fe; }
+html[data-theme="dark"] .bts-kpi b, html[data-theme="dark"] .bts-kpi { color: var(--ink); }
+html[data-theme="dark"] .bts-upload-box { background: #16203a; color: var(--ink); border-color: #2a3757; }
+html[data-theme="dark"] .home-avatar.mono-logo { color: var(--brand); }
+html[data-theme="dark"] .home-greeting .home-name { -webkit-text-fill-color: #6d28d9; }
+html[data-theme="dark"] .main .page-head h1 { -webkit-text-fill-color: currentColor; background: none; color: var(--ink); }
+
+/* Tag Request jaan-boojh kar dark mode me bhi light rehta hai (v3.66). Pehle sirf canvas light hota tha,
+   cards dark aur text kaala → kuch dikhta hi nahi tha. Ab poora page light variables par. */
+html[data-theme="dark"] .main:has(.page-tagRequest) {
+  --bg: #f3f6fc; --card: #ffffff; --ink: #111827; --muted: #526176; --line: #d9e1ee; color-scheme: light;
+}
+html[data-theme="dark"] .main:has(.page-tagRequest) .card,
+html[data-theme="dark"] .main:has(.page-tagRequest) .table-wrap,
+html[data-theme="dark"] .main:has(.page-tagRequest) .tbl td { background-color: #ffffff; color: #111827; border-color: #d9e1ee; }
+html[data-theme="dark"] .main:has(.page-tagRequest) .tbl th,
+html[data-theme="dark"] .main:has(.page-tagRequest) .tbl tfoot td { background: #f7f8fc; color: #526176; }
+html[data-theme="dark"] .main:has(.page-tagRequest) .card-head h3,
+html[data-theme="dark"] .main:has(.page-tagRequest) .card h3,
+html[data-theme="dark"] .main:has(.page-tagRequest) .page-head h1 { color: #111827; -webkit-text-fill-color: currentColor; }
+html[data-theme="dark"] .main:has(.page-tagRequest) .input,
+html[data-theme="dark"] .main:has(.page-tagRequest) select { background: #fff; color: #111827; border-color: #cbd5e1; }
+html[data-theme="dark"] .main:has(.page-tagRequest) .btn:not(.primary) { background: #fff; color: #111827; border-color: #d9e1ee; }
+html.native-shell.mobile-ui[data-theme="dark"] .content:has(.page-tagRequest) { background: #f3f6fc !important; }
+
+/* =====================================================================================
+   5) Chhoti polish
+   ===================================================================================== */
+.card { border-radius: 18px; }
+.card-head h3 { letter-spacing: -.01em; }
+:focus-visible { outline-offset: 2px; }
+/* Phone par checkbox / radio ungli se dabane layak */
+html.mobile-ui .main input[type="checkbox"], html.mobile-ui .main input[type="radio"] { width: 20px; height: 20px; min-width: 20px; }
+@media (prefers-reduced-motion: reduce) { .kpi, .kpi:hover { transition: none; transform: none; } }
+html[data-theme="dark"] .main:has(.page-tagRequest) .seg { background: #eef2f8; border-color: #d9e1ee; }
+html[data-theme="dark"] .main:has(.page-tagRequest) .seg > * { color: #334155; }
+html[data-theme="dark"] .main:has(.page-tagRequest) .seg .seg-btn.on { background: #fff !important; color: #4338ca !important; box-shadow: 0 2px 8px rgba(15, 23, 42, .1) !important; }
+html[data-theme="dark"] .main:has(.page-tagRequest) .seg .seg-btn:not(.on) { background: transparent !important; color: #475569 !important; }
+
+/* Phone: mobile-fix ka 24px "mini-foot" (jaise "12 active days") card ke number se bhi bada dikhta tha */
+html.mobile-ui .mini-kpi .mini-foot { font-size: 12.5px !important; line-height: 1.35 !important; font-weight: 600 !important; }
+html.mobile-ui .mini-kpi .mini-label { font-size: 11.5px !important; letter-spacing: .06em; }
+/* Phone: header buttons ek line me ("PDF / Print" teen line me toot-ta tha), patti side me swipe hoti hai */
+html.mobile-ui .page-head .head-actions .btn, html.mobile-ui .card-head .head-actions .btn { white-space: nowrap !important; }
+
+/* Phone: segmented tabs (Form / Tag Requests / Link & Sheet …) apni poori line lein — saare tab dikhein, zaroorat ho to 2 line */
+html.mobile-ui .main .seg { flex: 1 1 100% !important; width: 100% !important; max-width: 100% !important; flex-wrap: wrap !important; box-sizing: border-box; }
+html.mobile-ui .main .seg .seg-btn { flex: 1 1 auto !important; white-space: nowrap; }
+/* Header me tabs + buttons saath hon (Tag Request) to patti wrap ho — tabs apni line, buttons agli line */
+html.mobile-ui .main .page-head .head-actions:has(> .seg) { flex-wrap: wrap !important; overflow: visible !important; }
+
+/* Tag Request (dark mode me light page) ke andar dark-mode wale halke rang → light page ke gehre rang */
+html[data-theme="dark"] .main:has(.page-tagRequest) .tr-sb-total b { color: #0369a1; }
+html[data-theme="dark"] .main:has(.page-tagRequest) .tr-sb-mtd b { color: #6d28d9; }
+html[data-theme="dark"] .main:has(.page-tagRequest) .tr-sb-count { color: #0369a1; background: #e0f2fe; }
+html[data-theme="dark"] .main:has(.page-tagRequest) .badge.blue { color: #1d4ed8; background: #dbeafe; }
+html[data-theme="dark"] .main:has(.page-tagRequest) .badge.green { color: #15803d; background: #dcfce7; }
+html[data-theme="dark"] .main:has(.page-tagRequest) .badge.amber { color: #b45309; background: #fef3c7; }
+html[data-theme="dark"] .main:has(.page-tagRequest) .chip { background: #fff; color: #1e293b; border-color: #d9e1ee; }
+html[data-theme="dark"] .main:has(.page-tagRequest) .chip.on, html[data-theme="dark"] .main:has(.page-tagRequest) .chip.active { background: #eef2ff; color: #4338ca; border-color: #c7d2fe; }
+/* Bulk Tag Status + Settings ke light dabbe dark mode me */
+html[data-theme="dark"] .bts-sample { background: #16203a; border-color: #2a3757; color: var(--ink); }
+html[data-theme="dark"] .bts-file-info { color: var(--muted); }
+html[data-theme="dark"] .location-status { background: #16203a; color: var(--ink); border-color: #2a3757; }
+/* Dispatch Planner KPI numbers (amber / sky) safed par halke the — rang wahi, thoda gehra */
+html:not([data-theme="dark"]) .dp2-kpi > b { color: color-mix(in srgb, var(--kc, #6366f1) 72%, #0f172a); }
+
+/* Selected chip ka count: .chip.on ab halka indigo hai (styles.css:892) par count abhi bhi safed tha → gayab */
+.chip.on .count { background: rgba(67, 56, 202, .14); color: #3730a3; }
+html[data-theme="dark"] .chip.on .count { background: rgba(255, 255, 255, .18); color: #e0e7ff; }
+.as-chswitch .chip.on .count, .home-master-search.v2 .hms-chips .chip.on .count { background: rgba(255, 255, 255, .22); color: #fff; }
+
+/* Rangeen KPI card ke andar sparkline safed — laal line laal card par (ya hari hari par) gayab ho jaati thi.
+   Trend ki disha line ke aakaar aur saath wale ▲/▼ pill se dikhti hai. */
+.kpi .spark path.line { stroke: rgba(255, 255, 255, .95) !important; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .18)); }
+.kpi .spark path.area { fill: #fff !important; opacity: .16 !important; }
