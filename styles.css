@@ -6631,3 +6631,48 @@ html[data-theme="dark"] .content {
   .page-tagRequest .tr-date-filter { width:100%; justify-content:space-between; }
   .page-tagRequest .tr-date-filter input[type="date"] { flex:1; min-width:0; }
 }
+
+/* ───────── v3.77 — desktop topbar: rarely used tools live in a ⋯ popover, search gets the room ───────── */
+@media (min-width: 1001px) {
+  html:not(.mobile-ui) #top-more { display: inline-grid; place-items: center; }
+  html:not(.mobile-ui) .top-title { flex: 0 0 auto; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  html:not(.mobile-ui) .master-search { max-width: 640px; flex: 1 1 360px; margin-left: 12px; }
+  html:not(.mobile-ui) .top-actions { margin-left: 0; flex: 1 1 auto; min-width: 0; flex-wrap: nowrap; justify-content: flex-end; }
+  html:not(.mobile-ui) .top-actions > .master-search { margin-right: auto; }
+  html:not(.mobile-ui) #global-search-btn { display: none; }   /* the search box is right there */
+  html:not(.mobile-ui) .topbar { flex-wrap: nowrap; }
+  html:not(.mobile-ui) .top-actions { position: relative; }
+  html:not(.mobile-ui) .top-more-pop {
+    position: absolute; top: calc(100% + 8px); right: 0; z-index: 70;
+    display: grid; grid-template-columns: repeat(2, minmax(150px, 1fr)); gap: 6px; padding: 10px;
+    background: var(--card, #fff); border: 1px solid var(--line, #e6e8f2); border-radius: 14px;
+    box-shadow: 0 18px 44px rgba(15, 23, 42, .22);
+  }
+  html:not(.mobile-ui) .top-more-pop[hidden] { display: none; }
+  html:not(.mobile-ui) .top-more-pop > *, html:not(.mobile-ui) .top-more-pop .theme-wrap { display: contents; }
+  /* inside the popover every tool is a labelled row, not a bare icon */
+  html:not(.mobile-ui) .top-more-pop .icon-btn {
+    width: auto; height: auto; min-width: 0; padding: 8px 10px; border-radius: 10px;
+    display: flex; align-items: center; gap: 8px; justify-content: flex-start; font-size: 13px; font-weight: 650;
+  }
+  html:not(.mobile-ui) .top-more-pop .icon-btn::after { content: attr(data-label); font-size: 12.5px; color: var(--ink, #0f172a); }
+}
+
+/* v3.77 — long names / sub-lines must stay readable: wrap instead of cutting ("SUNIL MATA…") */
+.hbar-head { flex-wrap: wrap; row-gap: 1px; }
+.hbar-label { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; flex: 0 1 auto; max-width: 100%; }
+.hbar-sub { flex: 1 1 100%; order: 3; white-space: normal; overflow: visible; }
+.hbar-value { order: 2; }
+.hbar-head .hbar-label { order: 1; }
+/* row labels in compact stat tables ("Per day", "Days cover") should not break mid-phrase */
+.tbl td:first-child, .tbl th:first-child { overflow-wrap: normal; }
+.tbl.compact td:first-child { white-space: nowrap; }
+
+/* v3.77 — Tag Request: class quantities in two columns so the agent card is not a tall scroll */
+@media (min-width: 1100px) {
+  .tr-agent-grid { grid-template-columns: minmax(0, 1fr) 340px; }
+  .tr-qty-list { display: grid; grid-template-columns: 1fr 1fr; }
+  .tr-qty-list > .tr-qty-head, .tr-qty-list > .tr-qty-foot, .tr-qty-list > .tr-qty-groups { grid-column: 1 / -1; }
+  .tr-qty-list > .tr-qty-row { border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent); }
+  .tr-qty-list > .tr-qty-row:nth-of-type(even) { border-left: 1px solid color-mix(in srgb, var(--line) 70%, transparent); }
+}

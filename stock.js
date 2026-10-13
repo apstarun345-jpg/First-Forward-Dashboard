@@ -28,13 +28,13 @@ FF.pages = FF.pages || {};
     const heads = ['VC4', 'VC20', 'VC5+', 'All Comm'];
     const per = is.map((v) => (elapsed ? v / elapsed : 0));
     const cell = (i) => per[i] ? coverBadge(st[i] / per[i]) : '<span class="dim">—</span>';
-    return `<table class="tbl compact" style="margin-top:12px"><thead><tr><th></th>${heads.map((h) => `<th class="num" ${h === 'All Comm' ? 'title="VC20 + VC5+"' : ''}>${h}</th>`).join('')}</tr></thead>
+    return `<div class="table-wrap" style="margin-top:12px;overflow-x:auto"><table class="tbl compact"><thead><tr><th></th>${heads.map((h) => `<th class="num" ${h === 'All Comm' ? 'title="VC20 + VC5+"' : ''}>${h}</th>`).join('')}</tr></thead>
       <tbody>
         <tr><td>Stock</td>${st.map((v) => `<td class="num"><b>${U.fmt(v)}</b></td>`).join('')}</tr>
         <tr><td>Issued MTD</td>${is.map((v) => `<td class="num">${U.fmt(v)}</td>`).join('')}</tr>
         <tr><td>Per day</td>${per.map((v) => `<td class="num">${U.fmt(v, 1)}</td>`).join('')}</tr>
         <tr><td>Days cover</td>${heads.map((_, i) => `<td>${cell(i)}</td>`).join('')}</tr>
-      </tbody></table>`;
+      </tbody></table></div>`;
   }
   const compareBar = (a, b, la, lb, ca, cb) => {
     const t = (a || 0) + (b || 0);

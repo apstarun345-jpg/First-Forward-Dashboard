@@ -1488,6 +1488,22 @@ window.FF = window.FF || {};
     const topActions = U.$('#top-actions');
     const moreBtn = U.$('#top-more');
     if (moreBtn && topActions) {
+      // 🖥 Desktop: rarely used tools (language, theme packs, dark mode, accessibility) move into a
+      // labelled ⋯ popover so the search box and the everyday buttons get the room. Nodes are moved,
+      // not cloned, so every handler bound by id keeps working.
+      if (!document.documentElement.classList.contains('mobile-ui')) {
+        const pop = document.createElement('div');
+        pop.className = 'top-more-pop'; pop.id = 'top-more-pop'; pop.hidden = true;
+        ['#lang-toggle', '#theme-pack-btn', '#theme-toggle', '#a11y-btn'].forEach((sel) => {
+          const el = U.$(sel); if (!el) return;
+          pop.appendChild(el.closest('.theme-wrap') || el);
+        });
+        moreBtn.after(pop);
+        const sync = () => { pop.hidden = !topActions.classList.contains('more-open'); };
+        new MutationObserver(sync).observe(topActions, { attributes: true, attributeFilter: ['class'] });
+        pop.addEventListener('click', (e) => { if (e.target.closest('#lang-toggle, #theme-toggle, #a11y-btn')) topActions.classList.remove('more-open'), moreBtn.setAttribute('aria-expanded', 'false'), (moreBtn.textContent = '⋯'); });
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && topActions.classList.contains('more-open')) { topActions.classList.remove('more-open'); moreBtn.textContent = '⋯'; } });
+      }
       moreBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         const open = topActions.classList.toggle('more-open');

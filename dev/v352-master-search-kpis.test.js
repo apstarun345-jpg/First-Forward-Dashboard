@@ -141,7 +141,7 @@ test('Global search bar is eagerly mounted across the app and covers both channe
   assert.match(app, /ensureShell\(\['masterSearch', 'palette'\]\)/, 'search click par module on-demand load');
   assert.match(app, /const focusMasterSearch = \(\) => \{[\s\S]{0,700}const input = U\.\$\('#master-search-input'\);[\s\S]{0,160}input\.focus\(\)/, 'topbar search focuses the existing inline input');
   const search = await read('masterSearch.js');
-  assert.match(search, /Search all — FF\/GV agent, TL, ID, barcode, tag ID/);
+  assert.match(search, /Search agent, TL, ID, barcode/);
   assert.match(search, /ingest\.ffReport[\s\S]*ingest\.gvReport/);
   assert.match(search, /details\.stock/);
   assert.match(search, /details\.assignment/);

@@ -1828,6 +1828,16 @@ body.colorful .from-hdr { color: #166534; }
       if (inp && inp.focus) setTimeout(() => inp.focus({ preventScroll: true }), 250);
       return;
     }
+    // 🧾 Last look before sending: who, how many tags, which courier — one line each.
+    try {
+      if (typeof window !== 'undefined' && typeof window.confirm === 'function' && !state.dup.force) {
+        const filled = state.rows.filter(rowHasContent);
+        const lines = filled.slice(0, 8).map((r) => `• ${String(r.name || r.agentId || '').trim() || 'Agent'} — ${fmt(rowTotal(r))} tags`);
+        if (filled.length > 8) lines.push(`… and ${filled.length - 8} more`);
+        const courier = state.courier ? `\nCourier: ${state.courier}` : '';
+        if (!window.confirm(`Send ${filled.length} request${filled.length === 1 ? '' : 's'} · ${fmt(grandTotal())} tags?\n\n${lines.join('\n')}${courier}`)) return;
+      }
+    } catch { /* confirm unavailable — just send */ }
     state.busy = 'send';
     const btn = rootEl.querySelector('[data-tr-act="send"]');
     const setBtn = (t) => { if (btn) { btn.disabled = true; btn.textContent = t; } };

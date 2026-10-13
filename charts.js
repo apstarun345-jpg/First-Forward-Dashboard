@@ -72,7 +72,7 @@ window.FF = window.FF || {};
       const tip = it.tip || `<b>${esc(it.label)}</b><br>${esc(opts.valueLabel || 'Value')}: <b>${fmtVal(it.value || 0, opts.format)}</b>${cw !== null ? `<br>${esc(opts.compareLabel || 'Compare')}: <b>${fmtVal(it.compare, opts.format)}</b>` : ''}`;
       return `<div class="hbar-row" data-tip="${esc(tip)}" ${it.attr || ''}>
         <div class="hbar-rank">${i + 1}</div>
-        <div class="hbar-main"><div class="hbar-head"><span class="hbar-label" title="${esc(it.label)}">${esc(it.label)}</span>${it.sub ? `<span class="hbar-sub">${esc(it.sub)}</span>` : ''}<span class="hbar-value">${fmtVal(it.value || 0, opts.format)}${g !== null ? ` ${U.deltaHtml(g, { decimals: 0 })}` : ''}</span></div>
+        <div class="hbar-main"><div class="hbar-head"><span class="hbar-label" title="${esc(it.label)}">${esc(it.label)}</span>${it.sub ? `<span class="hbar-sub" title="${esc(it.sub)}">${esc(it.sub)}</span>` : ''}<span class="hbar-value">${fmtVal(it.value || 0, opts.format)}${g !== null ? ` ${U.deltaHtml(g, { decimals: 0 })}` : ''}</span></div>
         <div class="hbar-track">${cw !== null ? `<div class="hbar-compare" style="width:${cw}%"></div>` : ''}<div class="hbar-fill" style="width:${w}%;background:${c}"></div></div></div></div>`;
     }).join('')}${items.length === 0 ? '<div class="empty">No data</div>' : ''}</div>`;
     const cid = `ch${++seq}`;
