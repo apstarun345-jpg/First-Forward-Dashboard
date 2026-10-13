@@ -131,7 +131,7 @@ test('tag request — submit, admin feed, edit, permissions aur restart ke baad 
     const adminAfter = await jsonCall(server.base, '/api/tag-requests', 'GET', undefined, admin);
     assert.equal(adminAfter.json.requests.length, 2, 'admin ko dono dikhni chahiye');
     const requesterAlert = await jsonCall(server.base, '/api/notifications', 'GET', undefined, requester);
-    assert.ok((requesterAlert.json.items || []).some((i) => i.type === 'request' && /bhej di gayi/.test(i.title)), 'requester ko confirmation notification chahiye');
+    assert.ok((requesterAlert.json.items || []).some((i) => i.type === 'request' && /has been sent/.test(i.title)), 'requester ko confirmation notification chahiye');
 
     // 5) restart → requests durable (notify kind ke andar save hoti hain)
     await server.stop();

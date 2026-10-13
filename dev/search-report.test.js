@@ -84,8 +84,9 @@ test('groupPeople: same naam FF + GV = ek group, TL kind agent kind par jeetta h
     person('ff-agent', 'TL One', 'R100'), person('ff-tl', 'TL One', 'T100'), person('gv-tl', 'tl one', 'T100'),
     person('ff-agent', 'Ravi Kumar', 'R101'), person('gv-id', 'zzz')
   ]);
-  assert.equal(groups.length, 2, `TL One (FF+GV) aur Ravi Kumar: ${groups.map((g) => `${g.name}[${g.ff?.kind || '-'}:${g.ff?.sub || '-'}|${g.gv?.kind || '-'}:${g.gv?.sub || '-'}]`).join(', ')}`);
-  const tl = groups.find((g) => /tl one/i.test(g.name));
+  // Same-name people stay separate unless an ID links them (b2dea77): TL One agent R100 ≠ TL One TL T100 (FF+GV linked by T100).
+  assert.equal(groups.length, 3, `TL One agent, TL One (FF+GV, linked by T100) aur Ravi Kumar: ${groups.map((g) => `${g.name}[${g.ff?.kind || '-'}:${g.ff?.sub || '-'}|${g.gv?.kind || '-'}:${g.gv?.sub || '-'}]`).join(', ')}`);
+  const tl = groups.find((g) => /tl one/i.test(g.name) && g.ff && g.ff.kind === 'ff-tl');
   assert.equal(tl.ff.kind, 'ff-tl', 'FF me TL kind ne agent row ko replace kiya');
   assert.equal(tl.gv.kind, 'gv-tl');
   assert.deepEqual(SR.channelsOf(tl), ['ff', 'gv']);

@@ -329,8 +329,8 @@ window.FF = window.FF || {};
       '📴 Offline — last loaded data dikh raha hai': '📴 Offline — showing last loaded data'
     }
   };
-  const LANGS = [['en', '🇬🇧 English'], ['hinglish', '🗣️ Hinglish'], ['hi', '🇮🇳 हिंदी']];
-  function lang() { try { const v = localStorage.getItem('ff_lang'); return v === 'hi' || v === 'en' ? v : 'hinglish'; } catch { return 'hinglish'; } }
+  const LANGS = [['en', '🇬🇧 English'], ['hi', '🇮🇳 हिंदी']];   // English is the default; Hinglish option removed
+  function lang() { try { return localStorage.getItem('ff_lang') === 'hi' ? 'hi' : 'en'; } catch { return 'en'; } }
   function setLang(v) {
     try { localStorage.setItem('ff_lang', v); } catch {}
     if (FF.i18n) FF.i18n.set(v);
@@ -2116,7 +2116,7 @@ window.FF = window.FF || {};
     U.toast('CSV download ho raha hai ✓', 'ok');
   }
   function toggleLangQuick() {
-    const order = ['hinglish', 'en', 'hi'];
+    const order = ['en', 'hi'];
     const next = order[(order.indexOf(lang()) + 1) % order.length];
     setLang(next);
   }

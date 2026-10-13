@@ -16,7 +16,7 @@ window.FF = window.FF || {};
   const norm = (v) => clean(v).toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
   const money = (v) => '₹' + Number(v || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 });
   let mounted = false, panel = null, log = null, speakOn = true, busy = false;
-  let lang = U.voicePrefs().lang === 'en' ? 'en' : 'hi';
+  let lang = U.voicePrefs().lang === 'hi' ? 'hi' : 'en';   // English by default
   // 🧠 conversation context — pichhle agent ka naam follow-up questions ke liye.
   const ctx = { agent: null, chips: [], lastBot: '' };
   // 🎧 hands-free conversation mode (Alexa-style) — jawab ke baad khud dobara sunta hai.
@@ -898,7 +898,7 @@ window.FF = window.FF || {};
         </div>
         <div class="ask-studio-pane on" data-pane="default">
           <p class="ask-studio-note">Browser ki system voices — Hindi/English ke liye alag voice, speed aur pitch choose karo. 🟣 = online voice (zyada natural).</p>
-          <label class="fld"><span>🌐 Assistant language</span><select class="input" data-vkey="lang"><option value="hi" ${p.lang !== 'en' ? 'selected' : ''}>हिंदी / Hinglish</option><option value="en" ${p.lang === 'en' ? 'selected' : ''}>English</option></select></label>
+          <label class="fld"><span>🌐 Assistant language</span><select class="input" data-vkey="lang"><option value="en" ${p.lang !== 'hi' ? 'selected' : ''}>English</option><option value="hi" ${p.lang === 'hi' ? 'selected' : ''}>हिंदी</option></select></label>
           <label class="fld"><span>🗣 Hindi / Hinglish awaaz</span><select class="input" data-vkey="hi">${voiceOptionsHtml(p, 'hi')}</select></label>
           <label class="fld"><span>🗣 English awaaz</span><select class="input" data-vkey="en">${voiceOptionsHtml(p, 'en')}</select></label>
           <label class="fld"><span>⚡ Speed <b data-vval="rate">${Number(p.rate) > 0 ? Number(p.rate) : 1.02}</b></span><input type="range" data-vkey="rate" min="0.5" max="1.5" step="0.05" value="${Number(p.rate) > 0 ? Number(p.rate) : 1.02}"></label>
@@ -981,8 +981,8 @@ window.FF = window.FF || {};
     const resetBtn = dialog.querySelector('[data-reset]');
     if (resetBtn) resetBtn.addEventListener('click', () => {
       U.setVoiceProfile(null);
-      U.setVoicePrefs({ lang: 'hi' });
-      setLang('hi');
+      U.setVoicePrefs({ lang: 'en' });
+      setLang('en');
       U.toast('🎙 Voice settings default par reset ✓', 'ok');
       close(); openVoiceStudio();
     });

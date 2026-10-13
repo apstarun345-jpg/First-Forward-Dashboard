@@ -55,8 +55,9 @@ test('voice prefs — default khali, set karne par localStorage me persist', () 
   assert.equal(JSON.parse(ls.get('ff-voice-prefs')).hi, 'test-voice-uri');
 });
 
-test('assistant default HINGLISH — total stock answer FF+GV combined', async () => {
-  assert.equal(A.getLang(), 'hi');
+test('assistant defaults to English; the Hindi engine still answers after setLang(hi) — total stock FF+GV combined', async () => {
+  assert.equal(A.getLang(), 'en');
+  A.setLang('hi');
   const a = await A.answer('stock kya hai');
   assert.match(a, /Total field stock/);
   assert.match(a, /FF 7/);

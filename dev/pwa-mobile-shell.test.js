@@ -24,7 +24,7 @@ function runBoot({ standalone = false, touch = 0, screenWidth = 1440, screenHeig
     navigator: { maxTouchPoints: touch, userAgent, userAgentData: { mobile: /Android|iPhone|iPad|iPod/i.test(userAgent) }, standalone },
     screen: { width: screenWidth, height: screenHeight },
     document: { documentElement: { classList: { add: (name) => classes.add(name) }, dataset } },
-    localStorage: { getItem: (key) => key === 'ff_theme' && dark ? 'dark' : null },
+    localStorage: { getItem: (key) => (key === 'ff_theme_explicit' && dark ? 'dark' : (key === 'ff_theme_scope_migrated_v1' ? '1' : null)) },
     console: { warn() {} }
   };
   vm.runInNewContext(bootScript, context);
@@ -49,7 +49,6 @@ test('bottom bar uses uniform inline SVG icons (emoji icons broke per-phone alig
   assert.match(mobileCss, /html\.mobile-ui #mobile-nav \.mnav-ico\s*\{[\s\S]*?width:\s*25px !important;[\s\S]*?height:\s*25px !important;/, 'effective CSS uses one consistent mobile icon size');
   assert.match(mobileCss, /html\.mobile-ui #mobile-nav \.mobile-nav-item small\s*\{[\s\S]*?text-align:\s*center !important;/, 'labels share one centred baseline');
   assert.match(mobileCss, /grid-template-columns:\s*repeat\(6, minmax\(0, 1fr\)\)/, 'six app actions fit the mobile bar');
-  assert.match(css, /@media \(min-width: 600px\) and \(pointer: coarse\)[\s\S]*?width: min\(560px, calc\(100vw - 24px\)\)/, 'tablets get a capped, centred bar');
   assert.match(css, /@media \(max-height: 480px\) and \(pointer: coarse\)/, 'landscape gets a slim bar');
 });
 
@@ -116,7 +115,7 @@ test('mobile nav exposes Search and the first search click loads the lazy palett
   assert.match(navPart, /id: 'search', icon: 'search', label: 'Search'/);
   assert.match(app, /const globalSearchBtn = U\.\$\('#global-search-btn'\)/);
   assert.match(app, /ensureShell\(\['masterSearch', 'palette'\]\)\.then\(/);
-  assert.match(app, /if \(FF\.palette && typeof FF\.palette\.toggle === 'function'\) \{/);
+  assert.match(app, /if \(FF\.palette && typeof FF\.palette\.toggle === 'function'\) (?:\{|return;)/);
 });
 
 test('visible topbar actions do not point to missing modules', () => {

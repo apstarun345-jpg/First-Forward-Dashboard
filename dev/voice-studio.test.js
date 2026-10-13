@@ -66,6 +66,7 @@ FF.gv = { need: async (k) => (k === 'master' ? gvMaster : gvStock) };
 
 require(path.join(ROOT, 'assistant.js'));
 const A = FF.assistant;
+A.setLang('hi');   // these tests assert the Hindi (Hinglish) answer engine; the product default is now English
 
 // ================= voice profile DSP =================
 test('resamplePcm — 16kHz → 8kHz half length, 8kHz input unchanged', () => {

@@ -728,7 +728,8 @@ window.FF = window.FF || {};
     return s.replace(re, (m, off, full) => {
       // asli naam me ghusa hua shabd (e.g. "TO2 Corporation") ko chhedna nahi hai
       const pre = full.slice(Math.max(0, off - 40), off);
-      if (KEEP.test(pre + m)) return m;
+      // only short fragments need protecting; a long phrase is clearly our own text, not part of a name
+      if (!/\s/.test(m) && KEEP.test(pre + m)) return m;
       return dict[m] !== undefined ? dict[m] : m;
     });
   }
@@ -743,37 +744,51 @@ window.FF = window.FF || {};
     return m;
   }
   /** Ek string translate karo. Koi shabd na mile to waise hi wapas. */
+  const memoT = new Map();
   function t(str, lang) {
     if (str === null || str === undefined) return str;
     const mode = lang || current();
     if (mode === SOURCE) return str;
+    const s = String(str);
+    const mk = mode + '\u0000' + s;
+    if (s.length < 400) { const hit = memoT.get(mk); if (hit !== undefined) return hit; }
     const { dict, re } = matcher(mode);
     if (!re) return str;
-    const s = String(str);
-    if (dict[s] !== undefined) return dict[s];               // poora text exact match
-    re.lastIndex = 0;
-    if (!re.test(s)) { re.lastIndex = 0; return s; }          // koi shabd nahi — jaldi wapas
-    re.lastIndex = 0;
-    return translateText(s, dict, re);
+    let out;
+    if (dict[s] !== undefined) out = dict[s];                 // poora text exact match
+    else {
+      re.lastIndex = 0;
+      if (!re.test(s)) out = s;                               // koi shabd nahi — jaldi wapas
+      else { re.lastIndex = 0; out = translateText(s, dict, re); }
+    }
+    if (s.length < 400) { if (memoT.size > 6000) memoT.clear(); memoT.set(mk, out); }
+    return out;
+  }
+  /** Add more phrases at runtime (i18n-en.js). Clears the compiled matcher + memo. */
+  function extend(lang, extra) {
+    if (!DICTS[lang] || !extra) return;
+    Object.assign(DICTS[lang], extra);
+    delete cache[lang];
+    memoT.clear();
+    // markup already on the page (topbar, sidebar…) was rendered before this dictionary arrived
+    try { if (FF.i18n && FF.i18n.__observing && typeof document !== 'undefined') translateTree(document.body, current()); } catch { /* ignore */ }
   }
   function current() {
     try {
-      const v = localStorage.getItem('ff_lang');
-      return v === 'hi' || v === 'en' ? v : SOURCE;
-    } catch { return SOURCE; }
+      // English is the default for everyone; only an explicit Hindi choice changes it.
+      return localStorage.getItem('ff_lang') === 'hi' ? 'hi' : 'en';
+    } catch { return 'en'; }
   }
   /** Kya is string me kuch translate hone layak hai? */
   function has(str, lang) {
     const mode = lang || current();
     if (mode === SOURCE || !str) return false;
-    const { dict, re } = matcher(mode);
-    if (dict[String(str)] !== undefined) return true;
-    re.lastIndex = 0;
-    return re.test(String(str));
+    return t(str, mode) !== String(str);
   }
 
   // ── DOM walker ─────────────────────────────────────────────────────────
-  const ATTRS = ['title', 'placeholder', 'aria-label', 'alt', 'data-label'];
+  const ATTRS = ['title', 'placeholder', 'aria-label', 'alt', 'data-label', 'data-tip'];
+  const SKIP_TAGS = { SCRIPT: 1, STYLE: 1, TEXTAREA: 1, NOSCRIPT: 1, CODE: 1 };   // never rewrite code or text a user typed
   function translateTree(root, lang) {
     const mode = lang || current();
     if (mode === SOURCE || !root) return false;
@@ -788,7 +803,10 @@ window.FF = window.FF || {};
       while (n) { nodes.push(n); n = w.nextNode(); }
       for (const node of nodes) {
         const v = node.nodeValue;
-        if (!v || !v.trim() || !has(v, mode)) continue;
+        if (!v || !v.trim()) continue;
+        const pe = node.parentElement;
+        if (pe && SKIP_TAGS[pe.tagName]) continue;
+        if (!has(v, mode)) continue;
         const out = t(v, mode);
         if (out !== v) { node.nodeValue = out; changed = true; }
       }
@@ -817,9 +835,49 @@ window.FF = window.FF || {};
     try { document.title = t(base, mode); } catch { /* ignore */ }
   }
 
+  /** Translate everything that appears later (toasts, popovers, sidebar, assistant, drawers…), not only
+   *  the page root — one batched MutationObserver for the whole document. */
+  function startObserver() {
+    if (typeof MutationObserver === 'undefined' || typeof document === 'undefined' || !document.body || FF.i18n.__observing) return;
+    FF.i18n.__observing = true;
+    const queue = new Set();
+    let scheduled = false;
+    const raf = window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : (fn) => setTimeout(fn, 16);
+    const flush = () => {
+      scheduled = false;
+      const mode = current();
+      const items = [...queue]; queue.clear();
+      for (const n of items) {
+        if (!n.isConnected) continue;
+        if (n.nodeType === 3) {
+          const v = n.nodeValue, pe = n.parentElement;
+          if (!v || !v.trim() || (pe && SKIP_TAGS[pe.tagName])) continue;
+          const out = t(v, mode);
+          if (out !== v) n.nodeValue = out;
+        } else if (n.nodeType === 1) {
+          if (SKIP_TAGS[n.tagName]) continue;
+          translateTree(n, mode);
+        }
+      }
+    };
+    new MutationObserver((muts) => {
+      for (const m of muts) {
+        if (m.type === 'childList') m.addedNodes.forEach((n) => { if (n.nodeType === 1 || n.nodeType === 3) queue.add(n); });
+        else queue.add(m.target);
+      }
+      if (!scheduled && queue.size) { scheduled = true; raf(flush); }
+    }).observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ATTRS });
+    translateTree(document.body, current());   // static markup already on the page
+  }
+
   FF.i18n = {
-    t, has, translateTree, translateTitle, current, set: (v) => { try { localStorage.setItem('ff_lang', v === 'hi' || v === 'en' ? v : SOURCE); } catch { /* ignore */ } },
-    langs: [['en', '🇬🇧 English'], ['hinglish', '🗣️ Hinglish'], ['hi', '🇮🇳 हिंदी']],
+    t, has, translateTree, translateTitle, current, set: (v) => { try { localStorage.setItem('ff_lang', v === 'hi' ? 'hi' : 'en'); } catch { /* ignore */ } },
+    extend,
+    langs: [['en', '🇬🇧 English'], ['hi', '🇮🇳 हिंदी']],
     SOURCE, size: () => Object.keys(EN).length
   };
+  if (typeof document !== 'undefined') {
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', startObserver);
+    else startObserver();
+  }
 })(window.FF);

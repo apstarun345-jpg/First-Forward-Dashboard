@@ -173,7 +173,7 @@ test('features flags: defaults, admin modify (deep-merge), member se 4xx, SMTP s
     // 6) 🔐 Naye IP se login → admin alert; wahi IP dobara → nahi; flag OFF → bilkul nahi.
     await call('/api/auth/login', 'POST', { username: 'staff', password: 'staff-pass-1' }, '', { 'X-Forwarded-For': '203.0.113.7' }); // pehla login already hua (127.0.0.1) — ye naya IP
     items = (await call('/api/notifications', 'GET', null, adminCookie)).json.items || [];
-    const ipAlerts = () => items.filter((i) => /Naye IP/.test(i.title));
+    const ipAlerts = () => items.filter((i) => /new IP/i.test(i.title));
     assert.equal(ipAlerts().length, 1, `naye IP par 1 alert chahiye — got: ${ipAlerts().map((i) => i.title).join(', ')}`);
     assert.equal(ipAlerts()[0].type, 'alert', 'naye IP alert ka type alert hona chahiye (Critical alerts toggle)');
     assert.equal(ipAlerts()[0].meta && ipAlerts()[0].meta.link, '#/settings?tab=users', 'redirect link → Users tab');

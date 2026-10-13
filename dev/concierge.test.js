@@ -49,6 +49,7 @@ FF.gv = { need: async (k) => (k === 'master' ? gvMaster : gvStock) };
 
 require(path.join(ROOT, 'assistant.js'));
 const A = FF.assistant;
+A.setLang('hi');   // concierge tests cover the Hindi (Hinglish) answer engine; the product default is now English
 
 // ================= greeting =================
 test('greetingWord — time-aware wish', () => {

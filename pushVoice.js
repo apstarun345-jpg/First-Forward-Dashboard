@@ -100,7 +100,8 @@ window.FF = window.FF || {};
   // ---- 🔊 bolna -----------------------------------------------------------------------------------
   /** Office Bell ke speaker path se bolo (assistant voice profile + autoplay unlock + queue). */
   function speak(text) {
-    const t = String(text || '').replace(/\s+/g, ' ').trim();
+    let t = String(text || '').replace(/\s+/g, ' ').trim();
+    try { if (FF.i18n && FF.i18n.t && FF.i18n.current() === 'en') t = FF.i18n.t(t); } catch { /* keep original */ }
     if (!t) return Promise.resolve(false);
     const bell = FF.officeBell;
     const hidden = typeof document !== 'undefined' && document.hidden;

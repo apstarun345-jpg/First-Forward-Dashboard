@@ -1996,7 +1996,7 @@ body.colorful .from-hdr { color: #166534; }
    *  use karte hain, taaki filter/paging ek hi jagah se chale aur dono par same dikhe.
    *  `compact` = Form tab ka panel (title summary me pehle se hai, isliye andar sirf ↻ Refresh). */
   function employeeHistoryInnerHtml(compact) {
-    if (!state.employeeToken) return '';
+    if (!isPublic()) return '';   // shared employee link: token optional, all link requests are visible
     const refresh = '<button class="btn small" data-tr-emp-refresh>↻ Refresh</button>';
     if (!state.employeeSummary) {
       return `<div class="tr-es-head">${compact ? '<div></div>' : '<div><b>👤 Meri requests</b><small class="dim">Aapki bheji hui requests ka status yahan dikhega.</small></div>'}${refresh}</div><div class="dim small">Request history load ho rahi hai…</div>`;
@@ -2038,7 +2038,7 @@ body.colorful .from-hdr { color: #166534; }
     if (!scope || !scope.querySelectorAll) return;
     const refresh = scope.querySelector('[data-tr-emp-refresh]');
     if (refresh) refresh.addEventListener('click', () => {
-      if (!state.employeeToken) return;
+      if (!isPublic()) return;
       state.employeeSummary = null;
       repaint();
       loadEmployeeSummary(true).then(() => { if (rootEl && rootEl.isConnected) repaint(); });
@@ -2130,7 +2130,7 @@ body.colorful .from-hdr { color: #166534; }
       </div></section>`;
     // 👤 Meri requests ke controls — wahi shared binder jo Form tab ka panel use karta hai.
     bindEmployeeHistory(body, renderStatus);
-    if (state.employeeToken && !state.employeeSummary && !state.employeeSummaryPromise) loadEmployeeSummary().then(() => {
+    if (isPublic() && !state.employeeSummary && !state.employeeSummaryPromise) loadEmployeeSummary().then(() => {
       if (rootEl && rootEl.isConnected && state.view === 'status') renderStatus();
     });
     const find = () => {

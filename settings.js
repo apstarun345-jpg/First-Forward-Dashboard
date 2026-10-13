@@ -516,7 +516,7 @@ FF.pages = FF.pages || {};
     const vreset = U.$('#voice-reset', body);
     if (vreset) vreset.addEventListener('click', () => {
       U.setVoiceProfile(null);
-      U.setVoicePrefs({ lang: 'hi', hi: '', en: '', rate: 0, pitch: 0 });
+      U.setVoicePrefs({ lang: 'en', hi: '', en: '', rate: 0, pitch: 0 });
       const ls = U.$('#voice-lang', body); if (ls) ls.value = 'hi';
       ['hi', 'en'].forEach((k) => { const sel = U.$(`#voice-${k}`, body); if (sel) sel.value = ''; });
       [['rate', '1.02'], ['pitch', '1']].forEach(([k, v]) => { const el = U.$(`#voice-${k}`, body); if (el) el.value = v; const out = U.$(`[data-vval="${k}"]`, body); if (out) out.textContent = v; });

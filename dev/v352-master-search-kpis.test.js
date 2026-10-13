@@ -130,7 +130,7 @@ test('Global search bar is eagerly mounted across the app and covers both channe
   const appAt = appAsset ? appAsset.index : -1;
   assert.ok(lazyAt >= 0 && appAt > lazyAt, 'versioned loader loads before the app shell');
   assert.ok(!/src="masterSearch\.js/.test(idx), 'search module eager nahi — first paint halka');
-  assert.match(lazy, /\['masterSearch', 'palette'\]/, 'search shell-extra wave me hai');
+  assert.match(lazy, /\['masterSearch', 'palette'/, 'search shell-extra wave me hai');
   assert.match(lazy, /masterSearch: \[\.\.\.PROFILE_DEPS, 'searchReport', 'masterSearch'\]/, 'search page route bhi lazy group me hai');
   const app = await read('app.js');
   assert.match(app, /Global search stays visible on every page/);
@@ -212,9 +212,8 @@ test('📗 Tag Request Sheet — configurable column order + one Agent spacer ro
 
 test('🧹 global Master Search suggestion closes before navigation', async () => {
   const ms = await read('masterSearch.js');
-  assert.match(ms, /onPick: \(it\) => \{[\s\S]{0,900}suggestApi && suggestApi\.close\(\)[\s\S]{0,500}openSearchPage\(it\.person\.name, it\.person\)/, 'selection closes suggestions before navigating');
-  assert.match(ms, /try \{ if \(suggestApi && suggestApi\.close\) suggestApi\.close\(\); \} catch \{\}/, 'selected suggestion closes the portal');
-  assert.match(ms, /onEnter: \(q\) => \{[\s\S]{0,260}suggestApi && suggestApi\.close[\s\S]{0,180}openSearchPage\(q\)/, 'Enter search closes suggestions before navigating');
+  assert.match(ms, /onPick: \(it\) => \{[\s\S]{0,900}sug\.suspend\(\)[\s\S]{0,300}U\.destroyAllSuggestions\(sug\)[\s\S]{0,500}run\(name\)/, 'selection locks/destroys the suggestions before running the search');
+  assert.match(ms, /onEnter: \(q\) => \{[\s\S]{0,160}sug\.suspend\(\)[\s\S]{0,120}run\(q\)/, 'Enter search closes suggestions before running');
 });
 
 test('🚀 workspace boot gate — wait for data + first route before revealing dashboard', async () => {
@@ -340,8 +339,8 @@ test('🏷️ Tag Request — column order list always renders with fallback fie
   assert.match(tag, /const refreshOrderIndexes = \(\) =>/);
   assert.match(tag, /refreshOrderIndexes\(\);/);
   assert.match(css, /\.tr-cols-order\{[\s\S]{0,500}display:flex !important/);
-  assert.match(css, /\.tr-cols-order \.tr-col-order \*\{color:#0f172a !important\}/);
-  assert.match(css, /html\[data-theme="dark"\] \.tr-cols-order \.tr-col-order \*\{color:#e2e8f0 !important\}/);
+  assert.match(css, /\.tr-cols-order \.tr-col-order \*\{color:#0f172a !important;?\}/);
+  assert.match(css, /html\[data-theme="dark"\] \.tr-cols-order \.tr-col-order \*\{color:#e2e8f0 !important;?\}/);
 });
 
 test('🚦 startup readiness — Render health stays green and storage retry is bounded', async () => {

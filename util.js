@@ -372,9 +372,8 @@ window.FF = window.FF || {};
   /** फ़िल्टर/चार्ट की भाषा पकड़ो ताकि नया label सही भाषा में बने. */
   function uiLang() {
     try {
-      const l = localStorage.getItem('ff_lang');
-      return l === 'hi' || l === 'en' ? l : 'hinglish';
-    } catch { return 'hinglish'; }
+      return localStorage.getItem('ff_lang') === 'hi' ? 'hi' : 'en';
+    } catch { return 'en'; }
   }
   function labelYM(key, long) {
     if (!key) return '—';

@@ -126,7 +126,9 @@ test('v3.30 per-agent tag requests — split, validation, mobile status, duplica
     assert.ok(!JSON.stringify(employeeStatus.json).includes('Gandhi Nagar'), 'employee summary me address expose nahi hota');
     assert.ok(!JSON.stringify(employeeStatus.json).includes('10.1.0.2'), 'employee summary me submitter IP expose nahi hota');
     const otherEmployeeStatus = await jsonCall(server.base, `/api/public/tag-request/employee-status?token=${'x'.repeat(32)}`);
-    assert.equal(otherEmployeeStatus.json.totalRequests, 0, 'doosre employee ka token alag history deta hai');
+    // By design (2ea5e15) the employee link shows the shared list for every employee: the token is optional, nothing private is exposed.
+    assert.equal(otherEmployeeStatus.json.totalRequests, 2, 'employee status is the shared list, token or not');
+    assert.ok(!JSON.stringify(otherEmployeeStatus.json).includes('Gandhi Nagar'), 'shared list still hides addresses');
 
     // 📇 Request submit hone ke turant baad purana mobile/address public lookup se suggest ho.
     const savedContact = await jsonCall(server.base, '/api/public/tag-request/contact?agentId=1001&agentName=Rahul%20Sharma&channel=ff');
@@ -244,8 +246,8 @@ test('v3.30 per-agent tag requests — split, validation, mobile status, duplica
     const rej = await jsonCall(server.base, `/api/tag-requests/${encodeURIComponent(rq2.id)}`, 'PUT', { status: 'rejected', adminNote: 'Pincode detail confirm karein' }, admin);
     assert.equal(rej.json.request.status, 'rejected');
     const employeeStatusUpdated = await jsonCall(server.base, `/api/public/tag-request/employee-status?token=${encodeURIComponent(employeeToken)}`);
-    assert.equal(employeeStatusUpdated.json.totalRequests, 3);
-    assert.equal(employeeStatusUpdated.json.pending, 1, 'repeat submission remains pending');
+    assert.equal(employeeStatusUpdated.json.totalRequests, 4);
+    assert.equal(employeeStatusUpdated.json.pending, 2, 'repeat submission remains pending');
     assert.equal(employeeStatusUpdated.json.approved, 1);
     assert.equal(employeeStatusUpdated.json.rejected, 1);
     assert.equal(employeeStatusUpdated.json.requests.find((r) => r.id === rq1.id).adminNote, 'VC5 abhi stock me nahi');

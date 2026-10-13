@@ -186,7 +186,7 @@ test('purana Code.gs (history action nahi) — clear error, chup-chaap fail nahi
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ff-rec3-'));
   let server;
   try {
-    server = await startServer({ DATA_DIR: dir, STORAGE_BACKEND: '', APPS_SCRIPT_URL: `http://127.0.0.1:${old.address().port}/macros/s/old/exec`, APPS_SCRIPT_SECRET: SECRET, ADMIN_USER: '', ADMIN_PASSWORD: '' });
+    server = await startServer({ DATA_DIR: dir, STORAGE_BACKEND: '', APPS_SCRIPT_URL: `http://127.0.0.1:${old.address().port}/macros/s/old/exec`, APPS_SCRIPT_SECRET: SECRET, ADMIN_USER: 'admin', ADMIN_PASSWORD: 'admin123' });
     const c = client(server.base);
     assert.equal((await c.call('/api/auth/login', 'POST', { username: 'admin', password: 'admin123' })).res.status, 200);
     const hist = await c.call('/api/storage/history');

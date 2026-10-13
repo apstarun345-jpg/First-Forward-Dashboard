@@ -10,6 +10,7 @@
 //   brevo       — Brevo (ex-Sendinblue) HTTPS API (BREVO_API_KEY or Settings → Brevo key).
 // No new dependency: SMTP is a tiny hand-written client, the others use global fetch().
 import net from 'node:net';
+import { en } from './enText.js';
 import tls from 'node:tls';
 import dns from 'node:dns/promises';
 import { AppsScriptStore } from './apps-script-storage.js';
@@ -240,6 +241,7 @@ export function mailHint(raw) {
  * In auto mode failures fall through to the next configured transport. Resolves { provider, tried }.
  */
 export async function sendMail(cfg, subject, text, opts = {}, env = process.env) {
+  subject = en(subject); text = en(text); if (opts && opts.html) opts = { ...opts, html: en(opts.html) };
   const order = resolveProviders(cfg, env);
   const pref = String(cfg.provider || env.MAIL_PROVIDER || 'auto').trim().toLowerCase();
   if (!order.length) {

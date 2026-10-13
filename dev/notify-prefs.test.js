@@ -80,7 +80,7 @@ test('signup / reset request / user search / user click sab admin ki feed me aat
     // 2) Naya signup → admin feed me type 'signup' + deep link (tap → seedha Users tab).
     await call('/api/auth/signup', 'POST', { username: 'newbie', name: 'New Bee', email: 'newbie@example.test', password: 'newbie-pass-1' });
     let items = (await call('/api/notifications', 'GET', null, adminCookie)).json.items || [];
-    const signup = items.find((i) => /Naya signup/.test(i.title));
+    const signup = items.find((i) => /New signup/i.test(i.title));
     assert.ok(signup, 'admin ko naye signup ki notification chahiye');
     assert.equal(signup.type, 'signup', 'signup notification ka type signup hona chahiye (Settings ka toggle isi ko control karta hai)');
     assert.equal(signup.meta && signup.meta.link, '#/settings?tab=users', 'signup tap par seedha Users (approval) tab khulna chahiye');

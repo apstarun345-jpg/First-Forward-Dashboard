@@ -10,6 +10,7 @@ import zlib from 'node:zlib';
 import fs from 'node:fs/promises';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { en } from './enText.js';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { sheetsStoreFromEnv } from './sheets-storage.js';
@@ -66,7 +67,7 @@ function noteGvizRateLimit() {
 /** User ko dikhne wala saaf message — Google ka HTML page kabhi UI me nahi jaata. */
 function gvizLimitMessage(ms) {
   const sec = Math.max(1, Math.ceil((ms === undefined ? gvizCooldownLeft() : ms) / 1000));
-  return `Google Sheets ne rate limit kar diya (429 Too Many Requests). Purana data cache se dikh raha hai; nayi koshish ~${sec} second me apne aap hogi.`;
+  return `Google Sheets applied a rate limit (429 Too Many Requests). Cached data is being shown; the next attempt happens automatically in ~${sec} seconds.`;
 }
 async function gvizAcquire() {
   if (gvizGate.active < GVIZ_CONCURRENCY) { gvizGate.active++; return; }
@@ -619,7 +620,7 @@ function recordNotification({ type = 'info', title, body, target = 'admin', meta
     if (audience === 'off') return null;
     target = audience === 'admin' ? 'admin' : 'broadcast';
   }
-  const item = { id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${crypto.randomBytes(6).toString('hex')}`, type, title: String(title || 'Notification').slice(0, 120), body: String(body || '').slice(0, 800), target, ...(routeKey ? { routeKey, audience } : {}), meta, createdAt: new Date().toISOString() };
+  const item = { id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${crypto.randomBytes(6).toString('hex')}`, type, title: en(String(title || 'Notification')).slice(0, 120), body: en(String(body || '')).slice(0, 800), target, ...(routeKey ? { routeKey, audience } : {}), meta, createdAt: new Date().toISOString() };
   notifyItems().push(item);
   if (notifyItems().length > 500) db.notify.items = notifyItems().slice(-500);
   persist('notify');
@@ -963,6 +964,9 @@ function headers(extra = {}) {
   };
 }
 function sendJson(res, status, payload, extra = {}) {
+  if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+    for (const k of ['error', 'message', 'hint', 'detail']) if (typeof payload[k] === 'string') payload = { ...payload, [k]: en(payload[k]) };
+  }
   const body = JSON.stringify(payload);
   // 📉 v3.74 bandwidth: JSON APIs (notifications, today, tag requests…) bhi compress — pehle sirf
   // gviz / static compress hote the, JSON 7–50 KB plain jaata tha (Render free 5 GB quota ka bada hissa).
@@ -8223,8 +8227,8 @@ async function servePersonalPage(req, res, rawToken) {
   const fail = (code, msg) => sendHtml(res, code, personalShell({ title: 'Link unavailable', heading: '🔒 Link unavailable', body: `<p>${escHtml(msg)}</p>` }), noStore);
   if (feats().personalLinks === false) return fail(404, 'Ye feature admin ne band kar rakha hai.');
   const savedLink = (Array.isArray(db.settings.personalLinks) ? db.settings.personalLinks : []).find((l) => l.token === token);
-  if (!savedLink) return fail(404, 'Ye link ya to khatam ho gaya ya galat hai. Admin se naya maango.');
-  if (savedLink.enabled === false) return fail(403, 'Admin ne ye link band kar diya hai.');
+  if (!savedLink) return fail(404, 'This link has either expired or is wrong. Ask the admin for a new one.');
+  if (savedLink.enabled === false) return fail(403, 'The admin has disabled this link.');
   const hasSession = personalLinkSession(req, savedLink);
   if (!hasSession) {
     const idLabel = savedLink.kind === 'tl' ? 'TL ID' : 'Agent ID';
@@ -8287,7 +8291,7 @@ async function servePersonalPage(req, res, rawToken) {
       }
     })() : Promise.resolve(null);
     const rows = await rowsPromise;
-    if (needsIssuance && !rows.length) return fail(404, `"${link.name}" ka data abhi sheet me nahi mila (ya naam alag hai).`);
+    if (needsIssuance && !rows.length) return fail(404, `"${link.name}" 's data is not yet in the sheet (or the name is different).`);
     const st = personalStats(rows);
     const reportThrough = st.monthDays && st.monthDays.length ? st.monthDays[st.monthDays.length - 1].date : '';
     let team = [];
@@ -8441,12 +8445,12 @@ async function servePersonalPage(req, res, rawToken) {
     const growthG = compG !== null ? compG : rateG;
     const fmtG = (g) => (g === null || !isFinite(g) ? '—' : `${g >= 0 ? '+' : ''}${Math.round(g)}%`);
     const growthPct = compG !== null ? fmtG(compG) : fmtG(rateG);
-    const growthBasis = compG !== null ? `1–${elapsed} ${prevYm} ke mukable` : 'run-rate vs last month (pichle mahine ka same din data nahi)';
+    const growthBasis = compG !== null ? `vs 1–${elapsed} ${prevYm}` : 'run-rate vs last month (no same-day data for last month)';
     const perfStockRow = hasSec('stock') ? `<tr><td><b>Current Stock in Hand</b></td><td><b>${nf(stTotal)} tags</b></td><td>🚗 Core: ${nf(stCore)} · 🚚 Comm: ${nf(stComm)}</td><td>≥3M Old: ${nf(totAgeC[1])} tags</td></tr>` : '';
     const perfStockTotal = hasSec('stock') ? `<td>Stock: ${nf(stTotal)}</td>` : '<td>Performance details</td>';
     const perfCardHtml = `<section class="pb-card"><div class="pb-card-head"><h3>🏆 Performance &amp; Growth Scorecard</h3>${expBtns('pl-tbl-perf', `${link.name} - Performance Scorecard`)}</div><div class="pb-scroll"><table class="pb-tbl" id="pl-tbl-perf"><thead><tr><th>Metric</th><th>Current Value</th><th>Benchmark / Reference</th><th>Status / Delta</th></tr></thead><tbody>
       <tr><td><b>MTD Issued (${escHtml(ym)})</b></td><td><b>${nf(st.mtd)}</b></td><td>Same days (${escHtml(prevYm)}): ${nf(st.prevSame)} · ${escHtml(growthBasis)}</td><td class="${(growthG || 0) >= 0 ? 'pb-up' : 'pb-hot'}">${diff >= 0 ? '▲ +' : '▼ '}${nf(Math.abs(diff))} (${escHtml(growthPct)})</td></tr>
-      <tr><td><b>Last Month Total (${escHtml(prevYm)})</b></td><td><b>${nf(lastMonthTotal)}</b></td><td>Month-end projection: ${nf(projected)} (${daysCur} din)</td><td>Run rate ${runRate}/din · last month ${lastRate.toFixed(1)}/din · rate growth ${fmtG(rateG)}</td></tr>
+      <tr><td><b>Last Month Total (${escHtml(prevYm)})</b></td><td><b>${nf(lastMonthTotal)}</b></td><td>Month-end projection: ${nf(projected)} (${daysCur} days)</td><td>Run rate ${runRate}/day · last month ${lastRate.toFixed(1)}/day · rate growth ${fmtG(rateG)}</td></tr>
       <tr><td><b>Active Days (MTD)</b></td><td><b>${nf(st.mtdActiveDays)} days</b></td><td>Avg / Active Day: ${st.mtdActiveDays ? (st.mtd / st.mtdActiveDays).toFixed(1) : '0'}</td><td>Streak: ${nf(st.streak)} days 🔥</td></tr>
       <tr><td><b>Best Single Day (MTD)</b></td><td><b>${nf(st.best.n)} tags</b></td><td>Date: ${escHtml(st.best.date || '—')}</td><td>Last 14d Active: ${nf(st.activeDays)}/14d</td></tr>
       ${perfStockRow}
@@ -8454,18 +8458,18 @@ async function servePersonalPage(req, res, rawToken) {
 
     // 📊 Overview summary — MTD, last month, growth, run-rate, projection + stock/ageing (stock ka state bhi dikhe).
     const stockNote = stockInfo ? '' : ({
-      loading: 'Stock index abhi ban raha hai — page 25 sec mein apne aap refresh hoga.',
-      nomatch: 'Is naam/ID ka stock row StockDataa sheet me nahi mila (naam spelling check karo).',
-      error: 'Stock sheet abhi load nahi hui — thodi der baad refresh karo.'
+      loading: 'Stock index is being built — the page will refresh automatically in 25 sec.',
+      nomatch: 'A stock row for this name/ID was not found in the StockDataa sheet (check the name spelling).',
+      error: 'Stock sheet has not loaded yet — refresh in a while.'
     })[stockMeta.state] || '';
     const tile = (cls, ico, label, val, sub) => `<div class="pb-kpi ${cls}"><small>${ico} ${label}</small><b>${val}</b><span>${sub}</span></div>`;
     const summaryTiles = [
       tile('issuance', '📈', `MTD issued (${escHtml(ym)})`, nf(st.mtd), `1–${elapsed} tak`),
-      tile('previous', '🗓️', `Last month (${escHtml(prevYm)})`, nf(lastMonthTotal), `poore ${daysPrev} din ka total`),
-      tile('streak', '⚖️', 'Same days, pichla mahina', nf(st.prevSame), `1–${elapsed} ${escHtml(prevYm)}`),
+      tile('previous', '🗓️', `Last month (${escHtml(prevYm)})`, nf(lastMonthTotal), `full ${daysPrev}-day total`),
+      tile('streak', '⚖️', 'Same days, last month', nf(st.prevSame), `1–${elapsed} ${escHtml(prevYm)}`),
       tile('best', '📊', 'Growth', `<span class="${(growthG || 0) >= 0 ? 'up' : 'down'}">${growthPct}</span>`, escHtml(growthBasis)),
-      tile('issuance', '⚡', 'Run rate / din', runRate, `pichla mahina ${lastRate.toFixed(1)}/din · ${fmtG(rateG)}`),
-      tile('previous', '🎯', 'Month-end projection', nf(projected), `is speed par · ${daysCur} din`)
+      tile('issuance', '⚡', 'Run rate / day', runRate, `last month ${lastRate.toFixed(1)}/day · ${fmtG(rateG)}`),
+      tile('previous', '🎯', 'Month-end projection', nf(projected), `at this pace · ${daysCur} days`)
     ];
     if (hasSec('stock')) summaryTiles.push(stockInfo
       ? tile('stock', '📦', 'Stock (total)', nf(stTotal), `🚗 ${nf(stCore)} · 🚚 ${nf(stComm)}`)
@@ -8511,7 +8515,7 @@ async function servePersonalPage(req, res, rawToken) {
           <section class="pb-kpis">
             <div class="pb-kpi issuance"><small>📈 MTD issued</small><b>${nf(st.mtd)}</b><span>${escHtml(ym)}</span></div>
             <div class="pb-kpi previous"><small>🗓️ Same Period · Last Month</small><b>${nf(st.prevSame)}</b><span class="${diff >= 0 ? 'up' : 'down'}">${diff >= 0 ? '▲' : '▼'} ${Math.abs(diff)}</span></div>
-            <div class="pb-kpi streak"><small>🔥 Active Streak</small><b>${nf(st.streak)}</b><span>din se active 🔥</span></div>
+            <div class="pb-kpi streak"><small>🔥 Active Streak</small><b>${nf(st.streak)}</b><span>days active 🔥</span></div>
             <div class="pb-kpi best"><small>🏆 Best Day</small><b>${nf(st.best.n)}</b><span>${escHtml(st.best.date)}</span></div>
           </section>
           <section class="pb-card"><div class="pb-card-head"><div><h3>📊 Daily Issuance · Current Month (${escHtml(ym)})</h3><p class="pb-matrix-note">Current month · data through ${escHtml(reportThrough || 'no completed day')} · today's incomplete report excluded</p></div><span class="pb-btn pb-count-badge"><small>MTD ISSUED</small><b>${nf(st.mtd)} tags</b></span></div><div class="pb-bars">${bars || '<p class="dim">data nahi</p>'}</div></section>
@@ -8535,7 +8539,7 @@ async function servePersonalPage(req, res, rawToken) {
     return sendHtml(res, 200, html, noStore);
   } catch (err) {
     console.warn('personal page:', err.message);
-    return fail(500, 'Data load nahi hua — thodi der baad try karo.');
+    return fail(500, 'Data did not load — try again in a while.');
   }
 }
 function personalShell({ title, heading, sub, body, token = '', requireAuth = false, authorized = false, personName = '' }) {
@@ -8611,6 +8615,7 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background
 ${requireAuth ? `<button type="button" class="pb-btn" id="pl-lock-btn" ${authorized ? '' : 'hidden'} title="Lock Personal Link">🔒 Lock</button>` : ''}</header>
 ${body || ''}
 </div>
+<script src="/i18n.js"></script><script src="/i18n-en.js"></script>
 ${token ? '<script src="/pdf.js"></script><script src="/p-portal.js"></script>' : ''}
 </body></html>`;
 }

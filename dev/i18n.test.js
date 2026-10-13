@@ -20,10 +20,10 @@ new Function('window', 'document', 'localStorage', 'NodeFilter', src)(win, undef
 }, { SHOW_TEXT: 4 });
 const i18n = win.FF.i18n;
 
-test('i18n module load hota hai aur teen languages deta hai', () => {
+test('i18n module loads and offers English + Hindi (Hinglish is no longer a user-facing language)', () => {
   assert.ok(i18n, 'FF.i18n missing');
   assert.equal(i18n.SOURCE, 'hinglish', 'source language Hinglish hona chahiye');
-  assert.deepEqual(i18n.langs.map((l) => l[0]), ['en', 'hinglish', 'hi']);
+  assert.deepEqual(i18n.langs.map((l) => l[0]), ['en', 'hi']);
   assert.ok(i18n.size() > 300, `dictionary bahut chhoti: ${i18n.size()}`);
 });
 
