@@ -100,10 +100,16 @@ test('class-wise chart: every class (VC4 · VC20 · VC5 …) with stock vs need 
   assert.deepEqual(an.classChart.map((r) => r.verdict), ['high', 'dead', 'required']);
   assert.equal(an.classChart[0].need, 30); assert.equal(an.classChart[2].diff, -10);
   const h = PS.html(pr);
-  const block = h.slice(h.indexOf('data-ps-classblock'));
-  assert.equal((block.slice(0, block.indexOf('Agent-wise')).match(/class="ps-row/g) || []).length, 3, 'one bullet row per class');
-  assert.equal((h.match(/class="ps-share"/g) || []).length, 1);
-  assert.equal((h.match(/data-ps-cls=/g) || []).length, 3, 'sort by stock / issuance / most short');
+  assert.equal((h.match(/<svg class="ps-svg"/g) || []).length, 1, 'real SVG column chart');
+  assert.equal((h.match(/class="ps-col"/g) || []).length, 3 + 3 + 2 - 1, 'stock / issued / need columns only where the value is non-zero');
+  assert.equal((h.match(/class="ps-cls-row"/g) || []).length, 3, 'one table row per class');
+  assert.equal((h.match(/class="ps-share"/g) || []).length, 1, 'stock share (donut when charts are loaded, bar otherwise)');
+  assert.equal((h.match(/data-ps-cls=/g) || []).length, 4, 'sort by stock / issuance / most short / class order');
+  assert.match(h, /data-ps-geom="42,/);
+  const svg = PS._colsSvg(an.classChart);
+  assert.ok(svg.svg.includes('VC4') && svg.svg.includes('VC20') && svg.svg.includes('VC5'));
+  const tip = PS._tipHtml(an.classChart[2], 155, an);
+  assert.match(tip, /VC5/); assert.match(tip, /Short 10/); assert.match(tip, /15 days/);
 });
 
 test('health bar + rebalance plan: spare tags are matched to short agents before fresh dispatch', () => {

@@ -290,25 +290,91 @@ window.FF = window.FF || {};
     return rows;
   }
 
-  /** 🎯 All classes — stacked share bar + one bullet row per class (bar = stock, tick = need). */
+  const SERIES = { stock: '#6366f1', cur: '#14b8a6', need: '#f59e0b' };
+  function niceMax(v) {
+    if (v <= 4) return 4;
+    const p = Math.pow(10, Math.floor(Math.log10(v)));
+    const f = v / p;
+    return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p;
+  }
+  const short = (r) => Math.max(0, r.need - r.stock);
+  /** Class rows in the order the person picked (stock · issuance · most short · class order). */
+  function sortedClasses(an, st) {
+    const mode = ['stock', 'cur', 'short', 'class'].includes(st.cls) ? st.cls : 'stock';
+    return chartClasses(an).slice().sort((a, b) => (mode === 'cur' ? b.cur - a.cur : mode === 'short' ? short(b) - short(a) : mode === 'class' ? clsSort(a.label, b.label) : b.stock - a.stock)
+      || b.stock - a.stock || clsSort(a.label, b.label));
+  }
+
+  /** 📊 Real SVG column chart — per class: stock · issued this month · N-day need. Hover / tap a class for the details. */
+  function colsSvg(rows) {
+    const n = rows.length, PL = 42, PR = 10, PT = 22, PB = 40, VBH = 250, GW = 52;
+    const VBW = Math.max(340, PL + PR + n * GW), plotW = VBW - PL - PR, plotH = VBH - PT - PB, G = plotW / n;
+    const maxV = niceMax(Math.max(1, ...rows.map((r) => Math.max(r.stock, r.cur, r.need))));
+    const y = (v) => PT + plotH - (v / maxV) * plotH;
+    const bw = Math.max(6, Math.min(18, G * 0.26)), gap = 2;
+    let g = [0, 1, 2, 3, 4].map((i) => { const t = (maxV / 4) * i; return `<line class="ps-grid" x1="${PL}" x2="${VBW - PR}" y1="${y(t).toFixed(1)}" y2="${y(t).toFixed(1)}"/><text class="ps-ax" x="${PL - 6}" y="${(y(t) + 3).toFixed(1)}" text-anchor="end">${fmt(Math.round(t * 10) / 10)}</text>`; }).join('');
+    rows.forEach((r, i) => {
+      const cx = PL + i * G + G / 2, x0 = cx - (3 * bw + 2 * gap) / 2;
+      [r.stock, r.cur, r.need].forEach((v, k) => {
+        if (!v) return;
+        const h = Math.max(1, (v / maxV) * plotH);
+        g += `<rect class="ps-col" x="${(x0 + k * (bw + gap)).toFixed(1)}" y="${(PT + plotH - h).toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="2" fill="${[SERIES.stock, SERIES.cur, SERIES.need][k]}"/>`;
+      });
+      if (r.stock) g += `<text class="ps-val-t" x="${(x0 + bw / 2).toFixed(1)}" y="${(y(r.stock) - 4).toFixed(1)}" text-anchor="middle">${fmt(r.stock)}</text>`;
+      g += `<text class="ps-ax ps-ax-x" x="${cx.toFixed(1)}" y="${PT + plotH + 15}" text-anchor="middle">${esc(r.label)}</text><circle cx="${cx.toFixed(1)}" cy="${PT + plotH + 28}" r="3.5" fill="${VERDICT[r.verdict]}"><title>${esc(r.label)}: ${r.verdict === 'required' ? 'stock required' : r.verdict === 'high' ? 'high stock' : r.verdict === 'dead' ? 'dead stock' : 'balanced'}</title></circle>`;
+    });
+    g += `<rect class="ps-hl" x="0" y="${PT}" width="${G.toFixed(1)}" height="${plotH}" style="display:none"/>`;
+    return { svg: `<svg class="ps-svg" viewBox="0 0 ${VBW} ${VBH}" role="img" aria-label="Class-wise stock, issuance and need" data-ps-geom="${PL},${G.toFixed(3)},${n},${VBW}">${g}</svg>`, width: VBW };
+  }
+
+  function tipHtml(r, total, an) {
+    const row = (c, l, v, sm) => `<div><i style="--c:${c}"></i><span>${l}</span><b>${fmt(v)}</b><small>${sm || ''}</small></div>`;
+    const v = r.verdict === 'required' ? `<b class="ps-neg">Short ${fmt(short(r))}</b> — send tags` : r.verdict === 'high' ? `<b class="ps-warn">Excess ${fmt(Math.max(0, r.stock - r.need))}</b> — more than needed` : r.verdict === 'dead' ? 'Stock but <b>no issuance</b> this month' : '<b>Balanced</b>';
+    return `<strong>${esc(r.label)}</strong>${row(SERIES.stock, 'Stock', r.stock, total ? `${fmt((r.stock / total) * 100, 1)}%` : '')}
+      ${row(SERIES.cur, 'Issued this month', r.cur, `${fmt(r.rate, 1)}/day`)}${row(SERIES.need, `Need · ${an.days} days`, r.need, '')}
+      <div class="pi-tip-t"><span>Last month</span><b>${fmt(r.last)}</b><small>${r.cover === null ? 'no cover' : `${fmt(r.cover, 0)}d cover`}</small></div>
+      <div class="pi-tip-l dim">${v}</div>`;
+  }
+
+  /** Per-class numbers as a table (status, required / excess) — the details the chart summarises. */
+  function classTableHtml(rows, an, colorOf) {
+    const tot = rows.reduce((a, r) => ({ stock: a.stock + r.stock, cur: a.cur + r.cur, last: a.last + r.last, rate: a.rate + r.rate, need: a.need + r.need, req: a.req + short(r), ex: a.ex + Math.max(0, r.stock - r.need) }), { stock: 0, cur: 0, last: 0, rate: 0, need: 0, req: 0, ex: 0 });
+    const label = { required: 'Stock required', high: 'High stock', dead: 'Dead stock', ok: 'Balanced' };
+    const body = rows.map((r) => `<tr class="ps-cls-row"><td><i class="ps-dot" style="background:${colorOf.get(r.label)}"></i><b>${esc(r.label)}</b></td>
+      <td class="num"><b>${fmt(r.stock)}</b></td><td class="num dim">${tot.stock ? `${fmt((r.stock / tot.stock) * 100, 0)}%` : '—'}</td><td class="num">${fmt(r.cur)}</td><td class="num dim">${fmt(r.last)}</td>
+      <td class="num">${fmt(r.rate, 1)}</td><td class="num">${r.cover === null ? '<span class="dim">—</span>' : `${fmt(r.cover, 0)}<small class="dim"> d</small>`}</td><td class="num">${fmt(r.need)}</td>
+      <td class="num">${short(r) ? `<b class="ps-neg">${fmt(short(r))}</b>` : '<span class="dim">—</span>'}</td><td class="num">${r.stock > r.need ? `<b class="ps-warn">${fmt(r.stock - r.need)}</b>` : '<span class="dim">—</span>'}</td>
+      <td>${chip(r.verdict, label[r.verdict])}</td></tr>`).join('');
+    return `<div class="table-wrap pi-table no-tools"><table class="tbl compact ps-cls-tbl"><thead><tr><th>Class</th><th class="num">Stock</th><th class="num">Share</th><th class="num">Issued (month)</th><th class="num">Last month</th><th class="num">Run-rate/day</th><th class="num">Cover</th><th class="num">Need · ${an.days}d</th><th class="num">Required</th><th class="num">Excess</th><th>Status</th></tr></thead>
+      <tbody>${body}</tbody><tfoot><tr class="row-total"><td><b>Total</b></td><td class="num"><b>${fmt(tot.stock)}</b></td><td class="num dim">100%</td><td class="num"><b>${fmt(tot.cur)}</b></td><td class="num dim">${fmt(tot.last)}</td><td class="num">${fmt(tot.rate, 1)}</td><td class="num">${tot.rate > 0 ? `${fmt(tot.stock / tot.rate, 0)}<small class="dim"> d</small>` : '—'}</td><td class="num">${fmt(tot.need)}</td><td class="num"><b class="${tot.req ? 'ps-neg' : ''}">${fmt(tot.req)}</b></td><td class="num"><b class="${tot.ex ? 'ps-warn' : ''}">${fmt(tot.ex)}</b></td><td></td></tr></tfoot></table></div>`;
+  }
+
+  /** 🎯 Class-wise stock — donut (share) + column chart (stock · issued · need) + the numbers table. ALL classes. */
   function classBlockHtml(an, st) {
-    const rows = chartClasses(an);
-    if (!rows.length) return '<div class="ps-block"><div class="ps-block-head"><h6>🎯 Class-wise stock</h6></div><p class="dim small pi-none">No class-wise stock or issuance yet.</p></div>';
-    const mode = ['stock', 'cur', 'short'].includes(st.cls) ? st.cls : 'stock';
-    const colorOf = new Map(rows.slice().sort((a, b) => clsSort(a.label, b.label)).map((r, i) => [r.label, CLS_COLORS[i % CLS_COLORS.length]]));
+    const raw = chartClasses(an);
+    if (!raw.length) return '<div class="ps-block"><div class="ps-block-head"><h6>🎯 Class-wise stock</h6></div><p class="dim small pi-none">No class-wise stock or issuance yet.</p></div>';
+    const mode = ['stock', 'cur', 'short', 'class'].includes(st.cls) ? st.cls : 'stock';
+    const rows = sortedClasses(an, st);
+    const colorOf = new Map(raw.slice().sort((a, b) => clsSort(a.label, b.label)).map((r, i) => [r.label, CLS_COLORS[i % CLS_COLORS.length]]));
     const total = rows.reduce((x, r) => x + r.stock, 0);
     const needSum = rows.reduce((x, r) => x + r.need, 0);
-    const shortSum = rows.reduce((x, r) => x + Math.max(0, r.need - r.stock), 0);
+    const shortSum = rows.reduce((x, r) => x + short(r), 0);
     const stocked = rows.filter((r) => r.stock > 0);
-    const bar = total ? `<div class="ps-share" role="img" aria-label="Stock share by class">${stocked.map((r) => `<i style="flex:${r.stock};background:${colorOf.get(r.label)}" title="${esc(`${r.label}: ${fmt(r.stock)} tags (${fmt((r.stock / total) * 100, 1)}%)`)}"></i>`).join('')}</div>
-      <div class="ps-share-key">${stocked.map((r) => `<span><i style="background:${colorOf.get(r.label)}"></i>${esc(r.label)} <b>${fmt(r.stock)}</b><small class="dim"> ${fmt((r.stock / total) * 100, 0)}%</small></span>`).join('')}</div>` : '';
-    const sorted = rows.slice().sort((a, b) => (mode === 'cur' ? b.cur - a.cur : mode === 'short' ? Math.max(0, b.need - b.stock) - Math.max(0, a.need - a.stock) : b.stock - a.stock) || b.stock - a.stock || clsSort(a.label, b.label));
-    const max = Math.max(1, ...rows.map((r) => Math.max(r.stock, r.need)));
+    let donut;
+    try { donut = total && FF.charts && FF.charts.donut ? FF.charts.donut({ items: stocked.map((r) => ({ label: r.label, value: r.stock, color: colorOf.get(r.label) })), subtitle: 'tags in stock', size: 150 }) : ''; } catch { donut = ''; }
+    if (!donut && total) {
+      donut = `<div class="ps-share" role="img" aria-label="Stock share by class">${stocked.map((r) => `<i style="flex:${r.stock};background:${colorOf.get(r.label)}" title="${esc(`${r.label}: ${fmt(r.stock)} tags`)}"></i>`).join('')}</div>
+        <div class="ps-share-key">${stocked.map((r) => `<span><i style="background:${colorOf.get(r.label)}"></i>${esc(r.label)} <b>${fmt(r.stock)}</b><small class="dim"> ${fmt((r.stock / total) * 100, 0)}%</small></span>`).join('')}</div>`;
+    }
+    const cols = colsSvg(rows);
     const seg = (id, label) => `<button type="button" class="${mode === id ? 'on' : ''}" data-ps-cls="${id}">${label}</button>`;
     return `<div class="ps-block" data-ps-classblock><div class="ps-block-head"><h6>🎯 Class-wise stock <small class="dim">· ${fmt(rows.length)} classes · ${fmt(total)} tags${needSum ? ` · ${an.days}-day need ${fmt(needSum)}` : ''}${shortSum ? ` · <b class="ps-neg">short ${fmt(shortSum)}</b>` : ''}</small></h6>
-      <div class="pi-seg" role="group" aria-label="Sort classes">${seg('stock', 'By stock')}${seg('cur', 'By issuance')}${seg('short', 'Most short')}</div></div>
-      ${bar}
-      ${sorted.map((r) => bullet(r.label, `${fmt(r.cur)} issued · ${fmt(r.rate, 1)}/day${r.cover === null ? '' : ` · ${fmt(r.cover, 0)}d`}`, r.stock, r.need, max, r.verdict, verdictVal(r.verdict, r.need, r.stock), '', colorOf.get(r.label))).join('')}</div>`;
+      <div class="pi-seg" role="group" aria-label="Sort classes">${seg('stock', 'By stock')}${seg('cur', 'By issuance')}${seg('short', 'Most short')}${seg('class', 'Class order')}</div></div>
+      <div class="ps-cls-viz"><div class="ps-cls-donut">${donut}</div>
+        <div class="ps-colchart"><div class="ps-legend ps-legend-cols"><span><i class="s-stock"></i>Stock in hand</span><span><i class="s-cur"></i>Issued this month</span><span><i class="s-need"></i>${an.days}-day need</span></div>
+          <div class="ps-chart-wrap" data-ps-colchart><div class="ps-inner" style="min-width:${Math.round(cols.width * 0.8)}px;max-width:${Math.round(cols.width * 1.35)}px">${cols.svg}<div class="ps-tip" role="status" aria-live="polite" hidden></div></div></div>
+          <p class="dim small">Hover (or tap) a class for stock · issuance · need. Dot under the class: <span class="ps-vdot v-ok"></span>balanced <span class="ps-vdot v-high"></span>high <span class="ps-vdot v-required"></span>short <span class="ps-vdot v-dead"></span>no issuance.</p></div></div>
+      ${classTableHtml(rows, an, colorOf)}</div>`;
   }
 
   function chartHtml(pr, an, st) {
@@ -502,6 +568,8 @@ window.FF = window.FF || {};
       if (chart) { st.chart = chart.dataset.psChart; refresh(sec, 'chart'); return; }
       const cls = e.target.closest('[data-ps-cls]');
       if (cls) { st.cls = cls.dataset.psCls; refresh(sec, 'chart'); return; }
+      const colWrap = e.target.closest('[data-ps-colchart]');
+      if (colWrap) { showTip(colWrap, e.clientX, pr); return; }
       if (e.target.closest('[data-ps-reb-all]')) { st.rebAll = !st.rebAll; refresh(sec, 'reb'); return; }
       if (e.target.closest('[data-ps-total-csv]')) {
         const c = totalCsv(pr, analyze(pr));
@@ -523,7 +591,42 @@ window.FF = window.FF || {};
     el.addEventListener('keydown', (e) => {
       if ((e.key === 'Enter' || e.key === ' ') && e.target.closest && e.target.closest('[data-ps-sort]')) { e.preventDefault(); e.target.click(); }
     });
+    el.addEventListener('mousemove', (e) => {
+      const wrap = e.target.closest && e.target.closest('[data-ps-colchart]');
+      if (wrap) showTip(wrap, e.clientX, cur());
+    });
+    el.addEventListener('mouseout', (e) => {
+      const wrap = e.target.closest && e.target.closest('[data-ps-colchart]');
+      if (wrap && !wrap.contains(e.relatedTarget)) hideTip(wrap);
+    });
   }
 
-  FF.profileStock = { html, bind, analyze, totalCsv, rebCsv, _boxes: BOXES, _classRows: classRows, HIGH_MULT };
+  function hideTip(wrap) {
+    const tip = wrap.querySelector('.ps-tip'), hl = wrap.querySelector('.ps-hl');
+    if (tip) tip.hidden = true;
+    if (hl) hl.style.display = 'none';
+  }
+  function showTip(wrap, clientX, pr) {
+    if (!pr) return;
+    const svg = wrap.querySelector('.ps-svg'), tip = wrap.querySelector('.ps-tip'), hl = wrap.querySelector('.ps-hl');
+    if (!svg || !tip) return;
+    const [pl, g, n, vbw] = String(svg.dataset.psGeom).split(',').map(Number);
+    const rect = svg.getBoundingClientRect();
+    if (!rect.width) return;
+    const idx = Math.floor((((clientX - rect.left) / rect.width) * vbw - pl) / g);
+    if (idx < 0 || idx >= n) { hideTip(wrap); return; }
+    const an = analyze(pr), rows = sortedClasses(an, uiOf(pr)), r = rows[idx];
+    if (!r) { hideTip(wrap); return; }
+    tip.innerHTML = tipHtml(r, rows.reduce((x, c) => x + c.stock, 0), an);
+    tip.hidden = false;
+    if (hl) { hl.setAttribute('x', String(pl + idx * g)); hl.style.display = ''; }
+    const px = clientX - rect.left, tw = tip.offsetWidth || 220;
+    const vis0 = wrap.scrollLeft, vis1 = wrap.scrollLeft + wrap.clientWidth;
+    let left = px + 14;
+    if (left + tw > vis1 - 4) left = px - tw - 14;
+    tip.style.left = `${Math.max(vis0 + 4, Math.min(vis1 - tw - 4, left))}px`;
+    tip.style.top = '8px';
+  }
+
+  FF.profileStock = { html, bind, analyze, totalCsv, rebCsv, _colsSvg: colsSvg, _tipHtml: tipHtml, _boxes: BOXES, _classRows: classRows, HIGH_MULT };
 })(window.FF);

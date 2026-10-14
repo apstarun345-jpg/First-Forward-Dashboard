@@ -6038,6 +6038,16 @@ tr.clickable[data-pick-agent], tr.clickable[data-pick-tl] { cursor: pointer; }
 .ps-share-key i { width: 9px; height: 9px; border-radius: 3px; display: inline-block; }
 .ps-share-key b { color: var(--ink); font-variant-numeric: tabular-nums; }
 .ps-chart-head h5 small { font-weight: 600; }
+/* class-wise column chart + donut */
+.ps-tip { position: absolute; top: 8px; z-index: 5; width: 230px; padding: 9px 11px; border-radius: 12px; background: var(--card); color: var(--ink); border: 1px solid var(--line); box-shadow: 0 14px 30px -12px rgba(15,23,42,.45); font-size: 12px; pointer-events: none; }
+.ps-tip strong { display: block; font-size: 13px; margin-bottom: 5px; }
+.ps-tip > div { display: grid; grid-template-columns: 12px 1fr auto auto; align-items: center; gap: 6px; padding: 1px 0; }
+.ps-tip > div i { width: 9px; height: 9px; border-radius: 3px; background: var(--c); }
+.ps-tip > div b { font-variant-numeric: tabular-nums; text-align: right; }
+.ps-tip > div small { color: var(--muted); font-size: 10.5px; min-width: 48px; text-align: right; }
+.ps-tip .pi-tip-t { grid-template-columns: 1fr auto auto; border-top: 1px dashed var(--line); margin-top: 3px; padding-top: 4px; font-weight: 800; }
+.ps-tip .pi-tip-l { display: block; margin-top: 5px; font-size: 11px; line-height: 1.35; }
+.ps-cls-tbl tfoot td { font-weight: 800; border-top: 2px solid var(--line); }
 /* rebalance plan */
 .ps-reb { border: 1px solid var(--line); border-top: 3px solid #10b981; border-radius: 14px; padding: 12px 14px; margin-top: 16px; background: var(--card); min-width: 0; }
 .ps-reb .pi-top-head { margin-bottom: 6px; }
