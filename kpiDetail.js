@@ -98,7 +98,12 @@ window.FF = window.FF || {};
   function inferSpec(card) {
     const page = currentPage();
     const title = (card.dataset.kpiTitle || (U.$('.kpi-title', card) || {}).textContent || '').trim();
-    const foot = (U.$('.kpi-foot', card) || {}).textContent || '';
+    // <br> se alag hui lines ("…today excluded" <br> "Report till…") chipak na jaayein — drawer ki 📌 line me ' · ' se jodo.
+    const footEl = U.$('.kpi-foot', card);
+    let foot = '';
+    if (footEl) {
+      if (typeof footEl.cloneNode === 'function') { const c = footEl.cloneNode(true); c.querySelectorAll('br').forEach((b) => b.replaceWith(' · ')); foot = c.textContent || ''; } else foot = footEl.textContent || '';
+    }
     const t = `${title} ${card.dataset.kpiScope || ''}`;
     const spec = { src: PAGE_SRC[page] || 'both', title, page };
     if (/\bGV\b/i.test(title) && !/vs|share|compare/i.test(title) && spec.src === 'both') spec.src = 'gv';
@@ -250,6 +255,8 @@ window.FF = window.FF || {};
     const groupFilter = filterOf(spec.f);
     if (groupFilter && !groupFilter.fn(r)) return false;
     if (spec.tagId && String(r.tagId || '').trim().toUpperCase() !== String(spec.tagId).trim().toUpperCase()) return false;
+    // dow = weekday (0=Sun…6=Sat) — "Expected Today" (pichhle same-weekday ka average) jaise cards ke liye
+    if (spec.dow !== undefined && spec.dow !== '' && r.key && new Date(`${r.key}T00:00:00`).getDay() !== Number(spec.dow)) return false;
     if (spec.vrn && String(r.vrn || '').toUpperCase().replace(/[^A-Z0-9]/g, '') !== String(spec.vrn).toUpperCase().replace(/[^A-Z0-9]/g, '')) return false;
     const wantedGroup = String(spec.group || '').trim().toUpperCase();
     if (wantedGroup === 'VC4' && r.group !== 'VC4') return false;
@@ -500,7 +507,7 @@ window.FF = window.FF || {};
     const dayTable = days.length > 1 ? `<section class="kd-sec"><h4>📅 Day-wise (${days.length} days)</h4><div class="table-wrap kd-scroll"><table class="tbl compact kd-tbl"><thead><tr><th>Date</th><th class="num">Total</th><th class="num">VC4</th><th class="num">Commercial</th><th class="num">First Forward</th><th class="num">GV</th><th class="num">Replacement</th><th class="num">Chassis</th></tr></thead><tbody>${days.slice().reverse().map((k) => { const rs = cur.filter((r) => r.key === k); const t = total(rs), v = total(rs.filter((r) => r.group === 'VC4')), g = total(rs.filter((r) => r.channel === 'GV Partner')); return `<tr class="clickable" data-kd-day="${k}"><td><b>${esc(U.labelDateKey(k))}</b> <small class="dim">${esc(U.weekday(U.fromDateKey(k)))}</small></td><td class="num"><b>${U.fmt(t)}</b></td><td class="num">${U.fmt(v)}</td><td class="num">${U.fmt(t - v)}</td><td class="num">${U.fmt(t - g)}</td><td class="num">${U.fmt(g)}</td><td class="num">${U.fmt(total(rs.filter((r) => r.type === 'REPLACEMENT')))}</td><td class="num">${U.fmt(total(rs.filter((r) => /chassis/i.test(r.vrnType))))}</td></tr>`; }).join('')}<tr class="kd-total"><td><b>Grand Total</b></td><td class="num"><b>${U.fmt(ledgerTot)}</b></td><td class="num"><b>${U.fmt(ledgerVc4)}</b></td><td class="num"><b>${U.fmt(ledgerComm)}</b></td><td class="num"><b>${U.fmt(ledgerTot - total(cur.filter((r) => r.channel === 'GV Partner')))}</b></td><td class="num"><b>${U.fmt(total(cur.filter((r) => r.channel === 'GV Partner')))}</b></td><td class="num"><b>${U.fmt(repl)}</b></td><td class="num"><b>${U.fmt(chassis)}</b></td></tr></tbody></table></div><p class="dim small">Kisi bhi din par click karo → us din ka poora breakdown.</p></section>` : '';
     // 📐 Projection / expected card → wahi formula (aaj − 1 basis) jisse card ka number bana
     let formula = '';
-    if (/projected|expected|month-?end/i.test(`${spec.title || ''}`) && p.from.endsWith('-01')) {
+    if (!spec.view && /projected|expected|month-?end/i.test(`${spec.title || ''}`) && p.from.endsWith('-01')) {
       const ym = p.from.slice(0, 7), md = U.daysInMonth(ym);
       const b = U.channelBasis ? U.channelBasis(spec.src === 'ff' ? 'ff' : 'gv') : null;
       const fb = U.channelBasis ? U.channelBasis('ff') : null;
@@ -508,8 +515,28 @@ window.FF = window.FF || {};
       const projDays = bb && bb.ym === ym ? bb.days : Math.round((U.fromDateKey(p.to) - U.fromDateKey(p.from)) / 86400e3) + 1;
       formula = `<div class="kd-formula">📐 Month-end projection = ${U.fmt(tot)} ÷ ${U.fmt(projDays)} din (aaj − 1) × ${U.fmt(md)} din = <b>${U.fmt(U.projectMonthEnd(tot, projDays, ym))}</b></div>`;
     }
+    // 🎯⚡ Home "Expected in <month>" / "Run Rate · Per Day" cards: forecast ka apna data — class-wise reported ÷ din × month-days,
+    // pichhle mahine ke saath. (Pehle ye cards sirf MTD ke tags kholte the, jisme forecast kahin dikhta hi nahi tha.)
+    let forecast = '';
+    if ((spec.view === 'expected' || spec.view === 'runrate') && p.from !== p.to && p.from.endsWith('-01')) {
+      const ym = p.from.slice(0, 7), md = U.daysInMonth(ym);
+      const od = Math.max(1, Number(p.to.slice(8)) || 1);
+      const lym = U.prevMonthKey(ym);
+      const lastAll = all.filter((r) => r.key >= `${lym}-01` && r.key <= `${lym}-${U.pad2(U.daysInMonth(lym))}` && (!filt || filt.fn(r)) && rowMatchesSpec(r, spec));
+      const line = (label, fn) => { const c = total(cur.filter(fn)); return { label, c, rate: c / od, exp: Math.round((c / od) * md), l: total(lastAll.filter(fn)) }; };
+      const lines = [line('VC4', (r) => r.group === 'VC4'), line('VC20', (r) => r.group === 'VC20'), line('VC5+', (r) => r.group !== 'VC4' && r.group !== 'VC20'), line('Total', () => true)];
+      const isRun = spec.view === 'runrate';
+      const head = isRun ? `⚡ Run rate · per day — ${U.labelYM(ym)}` : `🎯 Expected in ${U.labelYM(ym)} — kaise bana`;
+      formula = `<div class="kd-formula">📐 ${isRun ? 'Run rate' : 'Month-end expected'} = ${U.fmt(ledgerTot)} tags ÷ ${U.fmt(od)} reported din${isRun ? '' : ` × ${U.fmt(md)} din`} = <b>${isRun ? `${U.fmt(ledgerTot / od, true)} / day` : U.fmt(Math.round((ledgerTot / od) * md))}</b></div>`;
+      forecast = `<section class="kd-sec"><h4>${head}</h4><div class="table-wrap"><table class="tbl compact kd-tbl"><thead><tr><th>Class</th><th class="num">Reported (1–${U.fmt(od)})</th><th class="num">Per day</th><th class="num">Expected month-end</th><th class="num">${esc(U.labelYM(lym))} (full)</th><th class="num">vs last month</th></tr></thead><tbody>${lines.map((l, i) => `<tr${i === lines.length - 1 ? ' class="kd-total"' : ''}><td><b>${esc(l.label)}</b></td><td class="num">${U.fmt(l.c)}</td><td class="num">${U.fmt(l.rate, true)}</td><td class="num"><b>${U.fmt(l.exp)}</b></td><td class="num">${U.fmt(l.l)}</td><td class="num">${U.deltaHtml(U.growth(l.exp, l.l), { decimals: 1 })}</td></tr>`).join('')}</tbody></table></div><p class="dim small">Sirf <b>reported din</b> (1–${U.fmt(od)}) gine gaye — aaj ka adhura din shaamil nahi, taaki forecast phula hua na dikhe. Neeche day-wise table me har din ka actual hai.</p></section>`;
+    }
+    // 🎯 "Expected Today" card = pichhle same-weekday ka average → wahi din + unka average yahin dikhta hai.
+    if (spec.view === 'weekday' && days.length) {
+      const avg = Math.round(ledgerTot / days.length);
+      formula = `<div class="kd-formula">📐 Expected today = ${days.slice().reverse().map((k) => U.fmt(total(cur.filter((r) => r.key === k)))).join(' + ')} ÷ ${U.fmt(days.length)} same-weekday din = <b>${U.fmt(avg)}</b></div>`;
+    }
     const body = `<div class="kd-hero"><div><span class="kd-kicker">${esc(srcLabel)}</span><div class="kd-big">${U.fmt(tot)} <small>tags</small></div><div class="kd-sub">${esc(periodLabel)}${filt ? ` · filter: <b>${esc(filt.label)}</b>` : ''}</div>${formula}</div><div class="kd-vs">${U.deltaHtml(U.growth(tot, ptot), { decimals: 0 })}<small>vs ${esc(prevLabel)}: <b>${U.fmt(ptot)}</b></small></div></div>
-      ${reconciliationNote}
+      ${forecast}${reconciliationNote}
       <div class="kd-stats">${stat('VC4 (payable)', U.fmt(vc4), pct(vc4, tot), 'blue', { f: 'vc4', cls: '', title: `${spec.title || 'Detail'} · VC4` })}${stat('Commercial', U.fmt(comm), pct(comm, tot), 'violet', { f: 'comm', cls: '', title: `${spec.title || 'Detail'} · Commercial` })}${stat('First Forward', U.fmt(ff), pct(ff, tot), 'indigo', { src: 'ff', channel: '', title: `${spec.title || 'Detail'} · First Forward` })}${stat('GV Partner', U.fmt(gv), pct(gv, tot), 'teal', { src: 'gv', channel: '', title: `${spec.title || 'Detail'} · GV Partner` })}${stat('New issuance', U.fmt(Math.max(0, tot - repl)), pct(Math.max(0, tot - repl), tot), 'green', { type: 'NOT_REPLACEMENT', title: `${spec.title || 'Detail'} · New issuance` })}${stat('Replacement', U.fmt(repl), pct(repl, tot), 'amber', { type: 'REPLACEMENT', title: `${spec.title || 'Detail'} · Replacement` })}${stat('Chassis', U.fmt(chassis), pct(chassis, tot), 'orange', { f: 'chassis', title: `${spec.title || 'Detail'} · Chassis` })}${stat('New / VRN', U.fmt(Math.max(0, newVrn)), pct(Math.max(0, newVrn), tot), 'sky', { vrnBucket: 'New / VRN (New)', title: `${spec.title || 'Detail'} · New / VRN` })}</div>
       <div class="kd-chips">
         ${[['both', 'FF + GV'], ['ff', '🟦 First Forward only'], ['gv', '🟩 GV Partner only']].map(([s, label]) => `<button class="kd-chip ${spec.src === s ? 'green' : ''}" data-kd-spec='${specAttr({ src: s, f: '', agent: '', channel: '', title: `${spec.title || 'Detail'} · ${label}` })}'>${label}</button>`).join('')}
@@ -1292,7 +1319,7 @@ window.FF = window.FF || {};
     const tagRow = e.target.closest('[data-kd-tag]');
     if (tagRow && state.spec) { open({ ...state.spec, tagId: tagRow.dataset.kdTag, scope: 'day', date: tagRow.dataset.kdTagDate, title: `Tag ${tagRow.dataset.kdTag}` }); return; }
     const day = e.target.closest('[data-kd-day]');
-    if (day && state.spec) { open({ ...state.spec, scope: 'day', date: day.dataset.kdDay, title: `${state.spec.title} · ${U.labelDateKey(day.dataset.kdDay)}` }); return; }
+    if (day && state.spec) { open({ ...state.spec, scope: 'day', date: day.dataset.kdDay, view: '', from: '', to: '', cardValue: '', foot: '', title: `${state.spec.title} · ${U.labelDateKey(day.dataset.kdDay)}` }); return; }
     // 👥 agent row par click → us agent ka poora detail (GV agent ya FF agent) usi drawer me.
     const agentRow = e.target.closest('[data-kd-agent]');
     if (agentRow) {

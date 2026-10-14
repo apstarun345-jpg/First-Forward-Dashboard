@@ -814,7 +814,7 @@ FF.pages = FF.pages || {};
       <div class="kpi-grid">
         ${kpiS('g8', 'GV Agents (REPORT)', '🧑‍💼', U.fmt(totals.agents), `${tls.length} TLs · ${U.fmt(gvDirectCount)} direct (no TL) · ${U.fmt(totals.growing)} growing`, 'src=gv&scope=list&list=gvp.all')}
         ${kpiS('g9', 'GV Stock (REPORT)', '📦', U.fmt(totals.stock), `VC4 <b>${U.fmt(totals.stockVc4)}</b> · Comm <b>${U.fmt(totals.stock - totals.stockVc4)}</b>`, 'src=gv&scope=list&list=gvp.stock')}
-        ${kpiS('g3', 'MTD Issuance', '🏷️', U.fmt(totals.cur), `VC4 <b>${U.fmt(totals.curVc4)}</b> · ${U.deltaHtml(U.growth(totals.cur, totals.last), { decimals: 0 })} vs last month (${U.fmt(totals.last)})`, `src=gv&scope=mtd&ym=${U.ymKey(new Date())}`)}
+        ${kpiS('g3', 'MTD Issuance (REPORT)', '🏷️', U.fmt(totals.cur), `VC4 <b>${U.fmt(totals.curVc4)}</b> · ${U.deltaHtml(U.growth(totals.cur, totals.last), { decimals: 0 })} vs last month (${U.fmt(totals.last)})`, 'src=gv&scope=list&list=gvp.mtd')}
         ${kpiS('g1', 'Today Issued', '⚡', U.fmt(totals.today), 'GV Master (live) / GV REPORT "Today Issued"', `src=gv&scope=day&date=${U.dateKey(new Date())}`)}
         ${kpiS('g10', 'High Priority', '🔺', U.fmt(totals.high), `Inactive agents: <b>${U.fmt(totals.inactive)}</b>`, 'src=gv&scope=list&list=gvp.high')}
         ${kpiS('g11', 'Avg Stock / Agent', '🏬', U.fmt(totals.agents ? totals.stock / totals.agents : 0), 'GV REPORT stock column', 'src=gv&scope=list&list=gvp.stock')}
@@ -1041,10 +1041,10 @@ FF.pages = FF.pages || {};
     const cols = () => [['Agent', (r) => `<b>${esc(r.agentName)}</b> <small class="dim">${esc(r.agentId || '')}</small>`], ['TL', (r) => (FF.config.isDirectAgent(r, 'gv') ? `🚫 ${esc(FF.config.directLabel(r, 'gv'))}` : esc(r.tlName || '—'))], ['Priority', (r) => pname(r.priority)], ['Status', (r) => pname(r.agentStatus)], ['Last month', (r) => U.fmt(r.lastTotal), 1], ['MTD', (r) => `<b>${U.fmt(r.curTotal)}</b>`, 1], ['Today', (r) => U.fmt(r.todayIssued), 1], ['Stock', (r) => U.fmt(r.stockTotal), 1]];
     const all = () => (perf.sourceRows && perf.sourceRows.length ? perf.sourceRows : overlayGvReportWithEir(G.get('report') || []));
     const filtered = () => (perf.sourceRows && perf.sourceRows.length ? filteredReport() : all());
-    const make = (name, rowsFn, kicker, sortKey) => FF.kpiDetail.registerList(name, () => {
+    const make = (name, rowsFn, kicker, sortKey, headKey) => FF.kpiDetail.registerList(name, () => {
       const rows = [...rowsFn()].sort((a, b) => (Number(b[sortKey || 'curTotal']) || 0) - (Number(a[sortKey || 'curTotal']) || 0));
       return { kicker, unit: 'agents', rows, columns: cols(), agent: (r) => ({ name: r.agentName, id: r.agentId, ch: 'gv' }),
-        headline: sortKey === 'stockTotal' ? { value: U.sum(rows, (r) => r.stockTotal), unit: 'tags stock' } : null,
+        headline: sortKey === 'stockTotal' ? { value: U.sum(rows, (r) => r.stockTotal), unit: 'tags stock' } : headKey === 'curTotal' ? { value: U.sum(rows, (r) => r.curTotal), unit: 'tags MTD' } : null,
         sub: `MTD <b>${U.fmt(U.sum(rows, (r) => r.curTotal))}</b> · last month <b>${U.fmt(U.sum(rows, (r) => r.lastTotal))}</b> · stock <b>${U.fmt(U.sum(rows, (r) => r.stockTotal))}</b> (VC4 ${U.fmt(U.sum(rows, (r) => r.stockVc4))})`,
         subShort: `stock ${U.fmt(U.sum(rows, (r) => r.stockTotal))}` };
     });
@@ -1061,6 +1061,7 @@ FF.pages = FF.pages || {};
     srMake('gvsr.direct', (r) => FF.config.isDirectAgent(r, 'gv'), 'GV Stock Report · direct agents');
     make('gvp.all', all, 'GV REPORT · all agents');
     make('gvp.stock', all, 'GV REPORT · stock', 'stockTotal');
+    make('gvp.mtd', all, 'GV REPORT · MTD issuance', 'curTotal', 'curTotal');
     make('gvp.high', () => all().filter((r) => /high/i.test(r.priority || '')), 'GV REPORT · High priority');
     make('gvp.f.attention', () => filtered().filter((r) => /high|medium/i.test(r.priority || '') || /inactive/i.test(r.agentStatus || '') || Number(r.stockTotal) === 0 || Number(r.growth) < 0), 'GV · attention list');
     make('gvp.f.high', () => filtered().filter((r) => /high/i.test(r.priority || '')), 'GV · High priority (filtered)');

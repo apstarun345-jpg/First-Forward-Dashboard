@@ -1308,6 +1308,17 @@ window.FF = window.FF || {};
   // while this key is unchanged. Host/test stubs that replace issuanceRows() don't carry it, so they are never cached.
   issuanceRows.inputsKey = inputsKey;
 
+  /** Cards / charts jo `store.daily` (sirf EIR) se bante hain unke GV rows ko drawer wale ledger (issuanceRows = EIR + GV Master
+   *  ka missing hissa + aaj ke live rows) se badal do — taaki card ka number aur click ka drawer ek hi total dikhaye.
+   *  GV Master load nahi hua ho (ya layer khaali ho) to `daily` jaisa ka taisa. FF rows ko haath nahi lagta. */
+  function ledgerDaily(daily) {
+    if (!Array.isArray(daily) || !Array.isArray(state.data.master) || !eirReady()) return daily;
+    let led;
+    try { led = issuanceRows(); } catch { return daily; }
+    if (!Array.isArray(led) || !led.length) return daily;
+    return daily.filter((r) => r.channel !== 'GV Partner').concat(led.filter((r) => r.channel === 'GV Partner').map((r) => (r.key ? r : { ...r, key: U.dateKey(r.d || r.date || new Date(0)) })));
+  }
+
   /** Searchable people list (agents + TLs) for the suggestion dropdowns. */
   function people() {
     const map = new Map(), tls = new Map();
@@ -1336,7 +1347,7 @@ window.FF = window.FF || {};
   const GV = {
     DATASETS, preload, refresh, need, get, error, reset, enabled, wanted, retryNow, on,
     normClass, classGroup, clsNum,
-    rows, masterRows: rows, issuanceRows, tlIssuanceRows, masterTlIdentity, masterTlIds, agentIssuanceRows, eirDailyRows, liveDailyRows, gvToday, masterTodayRows, todayKey, months, latestDate, summary, dailySeries, weekly, byDim, agentRollup, tlRollup, directRollup, people,
+    rows, masterRows: rows, issuanceRows, ledgerDaily, tlIssuanceRows, masterTlIdentity, masterTlIds, agentIssuanceRows, eirDailyRows, liveDailyRows, gvToday, masterTodayRows, todayKey, months, latestDate, summary, dailySeries, weekly, byDim, agentRollup, tlRollup, directRollup, people,
     REPORT_COLS, REPORT_COLS_LABELS, reportMonthBins, reportSheetBins,
     mapping, mappingWarnings, ensureAssignmentMap, stockStatusKind,
     get labels() { return state.labels; },

@@ -22,7 +22,8 @@ FF.pages = FF.pages || {};
     if (!FF.auth.can('export')) { U.toast('Download permission nahi hai', 'err'); return; }
     btn.disabled = true; const label = btn.textContent; btn.textContent = '⏳ Bundle ban raha hai…';
     try {
-      const daily = await S.need('daily');
+      const daily0 = await S.need('daily');
+      const daily = FF.gv && FF.gv.ledgerDaily ? FF.gv.ledgerDaily(daily0) : daily0;   // card / drawer ek ledger
       const [stock, stockAgents, report] = await Promise.all([
         S.need('stock').catch(() => []), S.need('stockAgents').catch(() => []), S.need('report').catch(() => null)
       ]);
@@ -139,7 +140,8 @@ FF.pages = FF.pages || {};
       body.innerHTML = U.errorBox(dailyR.reason, 'data-action="refresh"');
       return;
     }
-    const daily = dailyR.value;
+    // GV rows drawer wale ledger se (EIR + GV Master ka missing hissa) — warna card ka MTD aur click ka total alag aate the.
+    const daily = FF.gv && FF.gv.ledgerDaily ? FF.gv.ledgerDaily(dailyR.value) : dailyR.value;
     const agents = agentsR.status === 'fulfilled' ? agentsR.value : null;
     const status = statusR.status === 'fulfilled' ? statusR.value : null;
     const stock = stockR.status === 'fulfilled' ? stockR.value : null;

@@ -1744,6 +1744,7 @@ html[data-theme="dark"] .ff-switch { background: #33415c; }
 .kd-sub { font-size: 13px; opacity: .92; margin-top: 3px; }
 .kd-vs { text-align: right; font-size: 12px; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; opacity: .95; }
 .kd-hero .delta.up { background: rgba(220,252,231,.95); } .kd-hero .delta.down { background: rgba(254,226,226,.95); }
+.kd-hero .kd-formula { color: rgba(255,255,255,.92); } .kd-hero .kd-formula b { color: #fff; }
 .kd-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin-bottom: 14px; }
 .kd-stat { background: #fff; border: 1px solid var(--line); border-left: 4px solid var(--brand); border-radius: 13px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .kd-stat span { font-size: 11px; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }

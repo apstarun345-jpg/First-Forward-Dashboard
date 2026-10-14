@@ -212,6 +212,40 @@ test('FF TL / agent stock drill with tlId: VC4 · VC20 · VC5+ totals match the 
   assert.match(ag, /Total 56 tags/, 'agent + tlId bhi 0 nahi');
 });
 
+/** Home "Expected" / "Run Rate" cards ab MTD ke tags nahi, apna forecast table kholte hain (reported ÷ din × month-days). */
+test('Expected / Run Rate drawer shows the class-wise forecast table with the card formula', async () => {
+  mountGv();
+  const mk = (key, group, cls, n) => ({ key, ym: key.slice(0, 7), day: Number(key.slice(8)), d: new Date(key + 'T00:00:00'), cls, group, n, type: 'ISSUANCE', vrnType: '', channel: 'First Forward', agentName: 'A', agentId: '1', tlName: 'T' });
+  const daily = [];
+  for (let d = 1; d <= 4; d++) { const k = `2026-10-0${d}`; daily.push(mk(k, 'VC4', 'VC4', 10), mk(k, 'VC20', 'VC20', 2), mk(k, 'VC5+', 'VC5', 3)); }
+  daily.push(mk('2026-09-15', 'VC4', 'VC4', 100), mk('2026-09-16', 'VC20', 'VC20', 20), mk('2026-09-17', 'VC5+', 'VC5', 30));
+  FF.store.get = (k) => (k === 'daily' ? daily : []);
+  FF.store.need = async (k) => FF.store.get(k);
+  const exp = await FF.kpiDetail._issuanceDetail({ src: 'both', scope: 'range', from: '2026-10-01', to: '2026-10-04', view: 'expected', title: 'Expected in Oct 2026' });
+  assert.match(exp.body, /Expected in .* kaise bana/);
+  const cell = (label, idx) => { const tr = [...exp.body.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/g)].map((m) => m[1]).find((r) => r.includes(`<b>${label}</b></td>`)); assert.ok(tr, label); return [...tr.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((m) => m[1].replace(/<[^>]+>/g, '').trim())[idx]; };
+  assert.equal(cell('VC4', 1), '40', 'reported VC4 (4 din)');
+  assert.equal(cell('VC4', 3), '310', 'VC4 expected = 40 ÷ 4 × 31');
+  assert.equal(cell('VC4', 4), '100', 'last month full VC4');
+  assert.equal(cell('Total', 1), '60');
+  assert.equal(cell('Total', 3), '465', 'Total expected = 60 ÷ 4 × 31');
+  assert.match(exp.body, /Month-end expected = 60 tags ÷ 4 reported din × 31 din = <b>465<\/b>/);
+  const run = await FF.kpiDetail._issuanceDetail({ src: 'both', scope: 'range', from: '2026-10-01', to: '2026-10-04', view: 'runrate', title: 'Run Rate · Per Day' });
+  assert.match(run.body, /Run rate = 60 tags ÷ 4 reported din = <b>15(\.0)? \/ day<\/b>/);
+  const plain = await FF.kpiDetail._issuanceDetail({ src: 'both', scope: 'range', from: '2026-10-01', to: '2026-10-04', title: 'Something' });
+  assert.ok(!/kaise bana/.test(plain.body), 'view ke bina forecast table nahi');
+});
+
+test('dow filter keeps only that weekday (Expected Today drawer)', () => {
+  mountGv();
+  const wed = '2026-10-14', thu = '2026-10-15';
+  assert.equal(new Date(`${wed}T00:00:00`).getDay(), 3);
+  const spec = { src: 'gv', dow: '3' };
+  assert.equal(FF.kpiDetail._rowMatchesSpec({ key: wed, group: 'VC4', cls: 'VC4', channel: 'GV Partner' }, spec), true);
+  assert.equal(FF.kpiDetail._rowMatchesSpec({ key: thu, group: 'VC4', cls: 'VC4', channel: 'GV Partner' }, spec), false);
+  assert.equal(FF.kpiDetail._rowMatchesSpec({ key: thu, group: 'VC4', cls: 'VC4', channel: 'GV Partner' }, { src: 'gv' }), true, 'dow ke bina sab din');
+});
+
 // ---------------------------------------------------------------------------------------------
 // 2) Agent / TL Summary — derived drills
 // ---------------------------------------------------------------------------------------------
