@@ -61,6 +61,13 @@
 @media (max-width: 760px) {
 .ps-cls-viz { grid-template-columns: minmax(0, 1fr); }
 }
+.ps-compact .ps-head-compact { margin: 2px 0 6px; padding: 8px 10px; }
+.ps-compact .ps-block { margin-top: 2px; }
+.ps-compact .ps-block-head { display: none; }
+.ps-compact .ps-cls-viz { margin-bottom: 4px; }
+@media (max-width: 760px) {
+.ps-compact .ps-cls-donut { display: none; }
+}
 .ps-moves { display: grid; gap: 6px; }
 .ps-move { display: grid; grid-template-columns: 70px minmax(0, 1fr) 22px minmax(0, 1fr) 64px; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, #10b981 4%, var(--card)); min-width: 0; }
 .ps-mv-cls { justify-self: start; font-size: 11.5px; font-weight: 900; padding: 3px 9px; border-radius: 999px; color: #047857; background: color-mix(in srgb, #10b981 15%, transparent); }

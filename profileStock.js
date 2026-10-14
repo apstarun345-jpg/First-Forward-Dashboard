@@ -22,6 +22,7 @@ window.FF = window.FF || {};
   const norm = (s) => String(s === null || s === undefined ? '' : s).toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
   const normId = (v) => String(v === null || v === undefined ? '' : v).trim().replace(/\.0+$/, '').toUpperCase();
   const MAX_ROWS = 12;
+  const classes = (n) => `${fmt(n)} ${n === 1 ? 'class' : 'classes'}`;
   const REB_ROWS = 10;
   const CLS_COLORS = ['#6366f1', '#0ea5e9', '#10b981', '#f59e0b', '#ec4899', '#a855f7', '#14b8a6', '#f97316', '#64748b', '#84cc16'];
   const clsRank = (c) => { const m = /^VC(\d+)/i.exec(String(c)); return m ? Number(m[1]) : 1000; };
@@ -299,8 +300,9 @@ window.FF = window.FF || {};
   }
   const short = (r) => Math.max(0, r.need - r.stock);
   /** Class rows in the order the person picked (stock · issuance · most short · class order). */
-  function sortedClasses(an, st) {
-    const mode = ['stock', 'cur', 'short', 'class'].includes(st.cls) ? st.cls : 'stock';
+  function sortedClasses(an, st, forced) {
+    const pick = forced || (st && st.cls);
+    const mode = ['stock', 'cur', 'short', 'class'].includes(pick) ? pick : 'stock';
     return chartClasses(an).slice().sort((a, b) => (mode === 'cur' ? b.cur - a.cur : mode === 'short' ? short(b) - short(a) : mode === 'class' ? clsSort(a.label, b.label) : b.stock - a.stock)
       || b.stock - a.stock || clsSort(a.label, b.label));
   }
@@ -350,11 +352,11 @@ window.FF = window.FF || {};
   }
 
   /** 🎯 Class-wise stock — donut (share) + column chart (stock · issued · need) + the numbers table. ALL classes. */
-  function classBlockHtml(an, st) {
+  function classBlockHtml(an, st, compact) {
     const raw = chartClasses(an);
     if (!raw.length) return '<div class="ps-block"><div class="ps-block-head"><h6>🎯 Class-wise stock</h6></div><p class="dim small pi-none">No class-wise stock or issuance yet.</p></div>';
-    const mode = ['stock', 'cur', 'short', 'class'].includes(st.cls) ? st.cls : 'stock';
-    const rows = sortedClasses(an, st);
+    const mode = compact ? 'stock' : (['stock', 'cur', 'short', 'class'].includes(st.cls) ? st.cls : 'stock');
+    const rows = sortedClasses(an, st, mode);
     const colorOf = new Map(raw.slice().sort((a, b) => clsSort(a.label, b.label)).map((r, i) => [r.label, CLS_COLORS[i % CLS_COLORS.length]]));
     const total = rows.reduce((x, r) => x + r.stock, 0);
     const needSum = rows.reduce((x, r) => x + r.need, 0);
@@ -368,13 +370,13 @@ window.FF = window.FF || {};
     }
     const cols = colsSvg(rows);
     const seg = (id, label) => `<button type="button" class="${mode === id ? 'on' : ''}" data-ps-cls="${id}">${label}</button>`;
-    return `<div class="ps-block" data-ps-classblock><div class="ps-block-head"><h6>🎯 Class-wise stock <small class="dim">· ${fmt(rows.length)} classes · ${fmt(total)} tags${needSum ? ` · ${an.days}-day need ${fmt(needSum)}` : ''}${shortSum ? ` · <b class="ps-neg">short ${fmt(shortSum)}</b>` : ''}</small></h6>
-      <div class="pi-seg" role="group" aria-label="Sort classes">${seg('stock', 'By stock')}${seg('cur', 'By issuance')}${seg('short', 'Most short')}${seg('class', 'Class order')}</div></div>
+    return `<div class="ps-block" data-ps-classblock><div class="ps-block-head"><h6>🎯 Class-wise stock <small class="dim">· ${classes(rows.length)} · ${fmt(total)} tags${needSum ? ` · ${an.days}-day need ${fmt(needSum)}` : ''}${shortSum ? ` · <b class="ps-neg">short ${fmt(shortSum)}</b>` : ''}</small></h6>
+      ${compact ? '' : `<div class="pi-seg" role="group" aria-label="Sort classes">${seg('stock', 'By stock')}${seg('cur', 'By issuance')}${seg('short', 'Most short')}${seg('class', 'Class order')}</div>`}</div>
       <div class="ps-cls-viz"><div class="ps-cls-donut">${donut}</div>
         <div class="ps-colchart"><div class="ps-legend ps-legend-cols"><span><i class="s-stock"></i>Stock in hand</span><span><i class="s-cur"></i>Issued this month</span><span><i class="s-need"></i>${an.days}-day need</span></div>
-          <div class="ps-chart-wrap" data-ps-colchart><div class="ps-inner" style="min-width:${Math.round(cols.width * 0.8)}px;max-width:${Math.round(cols.width * 1.35)}px">${cols.svg}<div class="ps-tip" role="status" aria-live="polite" hidden></div></div></div>
+          <div class="ps-chart-wrap" data-ps-colchart data-ps-order="${mode}"><div class="ps-inner" style="min-width:${Math.round(cols.width * 0.8)}px;max-width:${Math.round(cols.width * 1.35)}px">${cols.svg}<div class="ps-tip" role="status" aria-live="polite" hidden></div></div></div>
           <p class="dim small">Hover (or tap) a class for stock · issuance · need. Dot under the class: <span class="ps-vdot v-ok"></span>balanced <span class="ps-vdot v-high"></span>high <span class="ps-vdot v-required"></span>short <span class="ps-vdot v-dead"></span>no issuance.</p></div></div>
-      ${classTableHtml(rows, an, colorOf)}</div>`;
+      ${compact ? '' : classTableHtml(rows, an, colorOf)}</div>`;
   }
 
   function chartHtml(pr, an, st) {
@@ -487,7 +489,25 @@ window.FF = window.FF || {};
       </section>`;
     } catch (e) {
       try { console.warn('profileStock:', e); } catch { /* ignore */ }
-      return '';
+      return `<section class="mp-sec ps"><h4>📦 Stock health</h4><p class="dim small" role="status">⚠️ Stock health could not be built (${esc(e && e.message ? e.message : 'error')}).</p></section>`;
+    }
+  }
+
+  /** Overview tab (visible without opening "Stock & dispatch"): class-wise stock chart + Total stock CSV. */
+  function overviewHtml(pr) {
+    try {
+      if (!pr) return '';
+      const an = analyze(pr);
+      if ((an.isTl && !an.team.length && !an.self) || !chartClasses(an).length) return '';
+      const total = an.isTl ? an.sums.total : (an.me ? an.me.stock : 0);
+      const rows = chartClasses(an), needSum = rows.reduce((x, r) => x + r.need, 0), shortSum = rows.reduce((x, r) => x + short(r), 0);
+      return `<section class="mp-sec ps ps-compact" data-mp-sec="stockoverview" data-ps="${esc(keyOf(pr))}"><h4>📦 Stock by class <small class="dim">· ${classes(rows.length)} · ${fmt(total)} tags${an.isTl ? ` · ${fmt(an.counts.total || 0)} agents + TL own` : ''}${needSum ? ` · ${an.days}-day need ${fmt(needSum)}` : ''}${shortSum ? ` · <b class="ps-neg">short ${fmt(shortSum)}</b>` : ''}</small></h4>
+        <div class="ps-head ps-head-compact"><div class="ps-tools"><button type="button" class="btn small primary" data-ps-total-csv title="Whole stock as one CSV">⬇ Total stock CSV</button>
+          <button type="button" class="btn small" data-mp-go="kpis" data-mp-tab="stock" title="Boxes, high stock, stock required, rebalance plan">📦 Full stock health →</button></div></div>
+        ${classBlockHtml(an, uiOf(pr), true)}</section>`;
+    } catch (e) {
+      try { console.warn('profileStock overview:', e); } catch { /* ignore */ }
+      return `<section class="mp-sec ps"><h4>📦 Stock by class</h4><p class="dim small" role="status">⚠️ Stock chart could not be built (${esc(e && e.message ? e.message : 'error')}).</p></section>`;
     }
   }
 
@@ -615,7 +635,7 @@ window.FF = window.FF || {};
     if (!rect.width) return;
     const idx = Math.floor((((clientX - rect.left) / rect.width) * vbw - pl) / g);
     if (idx < 0 || idx >= n) { hideTip(wrap); return; }
-    const an = analyze(pr), rows = sortedClasses(an, uiOf(pr)), r = rows[idx];
+    const an = analyze(pr), rows = sortedClasses(an, uiOf(pr), wrap.dataset.psOrder), r = rows[idx];
     if (!r) { hideTip(wrap); return; }
     tip.innerHTML = tipHtml(r, rows.reduce((x, c) => x + c.stock, 0), an);
     tip.hidden = false;
@@ -628,5 +648,5 @@ window.FF = window.FF || {};
     tip.style.top = '8px';
   }
 
-  FF.profileStock = { html, bind, analyze, totalCsv, rebCsv, _colsSvg: colsSvg, _tipHtml: tipHtml, _boxes: BOXES, _classRows: classRows, HIGH_MULT };
+  FF.profileStock = { html, overviewHtml, bind, analyze, totalCsv, rebCsv, _colsSvg: colsSvg, _tipHtml: tipHtml, _boxes: BOXES, _classRows: classRows, HIGH_MULT };
 })(window.FF);

@@ -160,3 +160,23 @@ test('total stock CSV: TL = TL own + every agent × class columns + TOTAL; agent
   assert.deepEqual(a.rows.map((r) => r[2]), ['VC4', 'VC20', '2 classes'], 'classes in VC order, then the total row');
   assert.equal(a.rows[2][3], 8, 'TOTAL uses the profile stock total');
 });
+
+test('overview tab card: class chart + Total stock CSV visible without opening the Stock tab', () => {
+  const pr = Object.assign(tl(), { classes: [{ cls: 'VC4', cur: 20, last: 10, stock: 100 }, { cls: 'VC5', cur: 10, last: 5, stock: 5 }] });
+  const h = PS.overviewHtml(pr);
+  assert.match(h, /Stock by class/);
+  assert.ok(h.includes('data-ps-total-csv') && h.includes('data-mp-go="kpis"'), 'CSV + jump to the full stock health');
+  assert.equal((h.match(/<svg class="ps-svg"/g) || []).length, 1);
+  assert.ok(!h.includes('ps-cls-row') && !h.includes('data-ps-cls='), 'compact: no table, no sort buttons');
+  assert.match(h, /data-ps-order="stock"/);
+  const empty = { kind: 'ff-tl', ch: 'ff', name: 'Empty', id: 'E', agents: [row('Nobody', 'N1', 0, 0, 0)], dispatch: { days: 15 }, stock: {}, tlStock: {}, totals: {} };
+  assert.equal(PS.overviewHtml(empty), '', 'no stock / issuance anywhere → no empty card');
+  assert.match(PS.overviewHtml(tl()), /1 class ·/, 'singular wording');
+  const agent = { kind: 'ff-agent', ch: 'ff', name: 'Solo', id: 'S9', stock: { total: 5 }, totals: { curTotal: 10 }, dispatch: { days: 15 }, classes: [{ cls: 'VC4', cur: 10, last: 4, stock: 5 }] };
+  assert.match(PS.overviewHtml(agent), /Stock by class/);
+});
+
+test('a failing build shows a visible note instead of silently hiding the stock section', () => {
+  const bad = { kind: 'ff-tl', ch: 'ff', name: 'Bad', id: 'B', agents: null, get dispatch() { throw new Error('boom'); } };
+  assert.match(PS.html(bad), /Stock health could not be built \(boom\)/);
+});

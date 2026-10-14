@@ -6954,6 +6954,12 @@ tr.clickable[data-pick-agent], tr.clickable[data-pick-tl] { cursor: pointer; }
 .ps-cls-tbl td, .ps-cls-tbl th { white-space: nowrap; }
 .ps-cls-tbl tfoot td { font-weight: 800; border-top: 2px solid var(--line); }
 @media (max-width: 760px) { .ps-cls-viz { grid-template-columns: minmax(0, 1fr); } }
+/* compact stock card on the Overview tab */
+.ps-compact .ps-head-compact { margin: 2px 0 6px; padding: 8px 10px; }
+.ps-compact .ps-block { margin-top: 2px; }
+.ps-compact .ps-block-head { display: none; }
+.ps-compact .ps-cls-viz { margin-bottom: 4px; }
+@media (max-width: 760px) { .ps-compact .ps-cls-donut { display: none; } }
 /* rebalance plan */
 .ps-reb { border: 1px solid var(--line); border-top: 3px solid #10b981; border-radius: 14px; padding: 12px 14px; margin-top: 16px; background: var(--card); min-width: 0; }
 .ps-reb .pi-top-head { margin-bottom: 6px; }

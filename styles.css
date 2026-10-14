@@ -6048,6 +6048,7 @@ tr.clickable[data-pick-agent], tr.clickable[data-pick-tl] { cursor: pointer; }
 .ps-tip .pi-tip-t { grid-template-columns: 1fr auto auto; border-top: 1px dashed var(--line); margin-top: 3px; padding-top: 4px; font-weight: 800; }
 .ps-tip .pi-tip-l { display: block; margin-top: 5px; font-size: 11px; line-height: 1.35; }
 .ps-cls-tbl tfoot td { font-weight: 800; border-top: 2px solid var(--line); }
+/* compact stock card on the Overview tab */
 /* rebalance plan */
 .ps-reb { border: 1px solid var(--line); border-top: 3px solid #10b981; border-radius: 14px; padding: 12px 14px; margin-top: 16px; background: var(--card); min-width: 0; }
 .ps-reb .pi-top-head { margin-bottom: 6px; }

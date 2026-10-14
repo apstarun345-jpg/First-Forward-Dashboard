@@ -2366,7 +2366,8 @@ window.FF = window.FF || {};
     const growthDetails = growthBlock ? `<details class="mp-more"><summary>📈 Growth % &amp; month-end expected — how it is calculated</summary>${growthBlock.replace(/<h4>[\s\S]*?<\/h4>/, '')}</details>` : '';
     const issuanceCharts = chartsHtml(pr, 'issuance');
     const stockCharts = chartsHtml(pr, 'stock');
-    const overviewPane = `${insights || '<p class="dim small">Insights load ho rahe hain…</p>'}${agentTlKpis}`;
+    const stockOverview = FF.profileStock && FF.profileStock.overviewHtml ? FF.profileStock.overviewHtml(pr) : '';
+    const overviewPane = `${stockOverview}${insights || '<p class="dim small">Insights load ho rahe hain…</p>'}${agentTlKpis}`;
     const issuancePane = `<section class="mp-sec" data-mp-sec="issuance"><h4>🧾 Issuance summary${isTl ? ' — TL total' : ''}</h4>${summary}</section>
       <details class="mp-more" data-mp-sec="class" open><summary>🎯 All classes · last month vs this month + stock</summary>${clsTable}</details>
       ${growthDetails}${issuanceCharts ? `<section class="mp-sec" data-mp-sec="charts"><h4>📊 Mix &amp; trend</h4>${issuanceCharts}</section>` : ''}`;
