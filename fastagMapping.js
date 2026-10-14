@@ -685,7 +685,56 @@ window.FF = window.FF || {};
     row.status = !stock ? 'Not found in StockDataa' : (!row.tagId ? 'Missing tag ID' : (!row.serialNo ? 'Missing serial number / barcode' : (!row.vcType ? 'Missing VC type' : (!row.agentId ? 'Missing agent ID' : 'Ready to map'))));
     state.rows.push(row); return row;
   }
-  function setStatus(message, kind) { const el = U.$('#fm-message', state.root); if (el) { el.className = 'notice ' + (kind || 'info'); el.textContent = message; } }
+  function setStatus(message, kind) { const el = U.$('#fm-message', state.root); if (el) { el.className = 'notice ' + (kind || 'info'); el.textContent = message; } syncSteps(); }
+  // 🧭 v3.79 — 4-step header (Add tags → Lookup → Review → Map): which step is next + live counts.
+  function syncSteps() {
+    try {
+      const root = state.root;
+      if (!root || typeof root.querySelectorAll !== 'function') return;
+      const steps = root.querySelectorAll('[data-fm-step]');
+      if (!steps || !steps.length) return;
+      const queued = state.items.length, rows = state.rows.length;
+      let ready = 0, done = 0, review = 0;
+      for (const r of state.rows) { if (r.mapped) done++; else if (rowReady(r)) ready++; else if (!String(r.status || '').startsWith('Duplicate')) review++; }
+      const phase = prog && prog.phase && !prog.endedAt ? prog.phase : '';
+      let active = 1;
+      if (state.busy) active = phase === 'map' ? 4 : 2;
+      else if (queued) active = 2;
+      else if (rows && ready) active = 4;
+      else if (rows && done && !ready) active = 5;
+      else if (rows) active = 3;
+      steps.forEach((li) => {
+        const n = Number(li.getAttribute('data-fm-step'));
+        li.classList.toggle('done', n < active);
+        li.classList.toggle('active', n === active);
+      });
+      const note = (n, text) => { const el = root.querySelector('#fm-step-' + n + '-note'); if (el) el.textContent = text; };
+      note(1, queued ? U.fmt(queued) + ' in queue' : (rows ? 'Add more anytime' : 'Queue empty'));
+      note(2, state.busy && active === 2 ? 'Looking up…' : (queued ? 'Click “Lookup StockDataa”' : (rows ? U.fmt(rows) + ' rows found' : 'Find tags in StockDataa')));
+      note(3, rows ? (review ? U.fmt(review) + ' need review' : 'All rows look OK') : 'Check agent & class');
+      note(4, state.busy && active === 4 ? 'Mapping…' : (done ? U.fmt(done) + ' mapped' + (ready ? ' · ' + U.fmt(ready) + ' ready' : '') : (ready ? U.fmt(ready) + ' ready to map' : 'Send to mapping API')));
+      const qc = root.querySelector('#fm-queue-count');
+      if (qc) { qc.className = 'badge ' + (queued ? 'amber' : 'gray'); qc.textContent = queued ? U.fmt(queued) + ' in queue' : 'Queue empty'; }
+      const lookBtn = root.querySelector('#fm-lookup');
+      if (lookBtn && lookBtn.classList) lookBtn.classList.toggle('primary', active === 2);
+    } catch (_) { /* header is cosmetic — never block mapping */ }
+  }
+  const FM_TAB_KEY = 'ff_fm_tab';
+  function showTab(name, remember) {
+    const root = state.root;
+    if (!root || typeof root.querySelectorAll !== 'function') return;
+    const panes = root.querySelectorAll('[data-fm-pane]');
+    if (!panes || !panes.length) return;
+    const valid = ['single', 'range', 'file', 'sheet'];
+    const tab = valid.includes(name) ? name : 'single';
+    panes.forEach((p) => { p.hidden = p.getAttribute('data-fm-pane') !== tab; });
+    root.querySelectorAll('[data-fm-tab]').forEach((b) => {
+      const on = b.getAttribute('data-fm-tab') === tab;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    if (remember) { try { localStorage.setItem(FM_TAB_KEY, tab); } catch (_) { /* private mode */ } }
+  }
   // ── 🗂️ StockDataa index status (server side) — "sheet load nahi ho rahi" ki jagah live sthiti ────
   function renderIndexChip() {
     const chip = state.root ? U.$('#fm-index-status', state.root) : null;
@@ -751,7 +800,7 @@ window.FF = window.FF || {};
     let ready = 0, done = 0;
     for (const r of state.rows) { if (r.mapped) done++; else if (rowReady(r)) ready++; }
     summary.innerHTML = '<div class="grid g-4"><div class="card"><div class="card-body"><small>Rows</small><h2>' + U.fmt(state.rows.length) + '</h2></div></div><div class="card"><div class="card-body"><small>Ready to map</small><h2>' + U.fmt(ready) + '</h2></div></div><div class="card"><div class="card-body"><small>Mapped successfully</small><h2>' + U.fmt(done) + '</h2></div></div><div class="card"><div class="card-body"><small>Needs review</small><h2>' + U.fmt(state.rows.length - ready - done) + '</h2></div></div></div>';
-    if (!state.rows.length) { host.innerHTML = '<div class="empty-state">Upload a file, Google Sheet ya barcode / Tag ID add karke start karein.</div>'; return; }
+    if (!state.rows.length) { host.innerHTML = '<div class="empty-state">Add tags in step 1, then click “Lookup StockDataa”.</div>'; syncSteps(); return; }
     const limit = Math.max(SHOW_STEP, state.showLimit || SHOW_STEP), shown = state.rows.slice(0, limit);
     const body = shown.map((r, i) => {
       const disabled = !r.stock || !r.tagId || !r.serialNo || !r.vcType || !r.agentId || String(r.status || '').startsWith('Duplicate') || r.mapped;
@@ -759,6 +808,7 @@ window.FF = window.FF || {};
     }).join('');
     const more = state.rows.length > limit ? '<div class="btn-row" style="margin-top:8px"><span class="dim small">Pehli ' + U.fmt(limit) + ' / ' + U.fmt(state.rows.length) + ' rows dikh rahi hain (mapping + CSV me sab rows shamil hain).</span><button class="btn small" id="fm-more">Aur dikhao</button></div>' : '';
     host.innerHTML = '<div class="table-wrap"><table class="tbl compact"><thead><tr><th><input type="checkbox" id="fm-select-all" aria-label="Select ready rows"></th><th>Sheet row</th><th>Barcode</th><th>Tag ID</th><th>Serial No</th><th>VC Type</th><th>Stock Agent ID</th><th>Agent ID to map</th><th>Agent name</th><th>TL</th><th>Mapping status</th><th></th></tr></thead><tbody>' + body + '</tbody></table></div>' + more;
+    syncSteps();
   }
   function checkDuplicates() {
     const byTag = new Map();
@@ -926,7 +976,7 @@ window.FF = window.FF || {};
       setStatus('Lookup fail: ' + (err.message || err) + (state.items.length ? ' Inputs queue me wapas aa gaye — dobara Lookup dabayein.' : ''), 'error');
       return false;
     }
-    finally { state.busy = false; if (old) old.disabled = false; if (mapBtn) mapBtn.disabled = !state.configured; }
+    finally { state.busy = false; if (old) old.disabled = false; if (mapBtn) mapBtn.disabled = !state.configured; syncSteps(); }
   }
   async function quickMap() {
     if (state.busy) return;
@@ -1206,15 +1256,31 @@ window.FF = window.FF || {};
   function render(root) {
     state.root = root;
     root.innerHTML = '<div class="page-head"><div><h1>🧭 FASTag Mapping</h1><p class="sub">GV Partner · StockDataa se Tag ID, Serial/Barcode, VC Type aur Agent details fetch karke securely map karein.</p></div><div class="head-actions"><span id="fm-index-status" class="badge gray">StockDataa index status…</span><button class="btn small" id="fm-index-refresh" title="StockDataa index dobara banao (ape ke aap 5 min me refresh hota rehta hai)">🔄 Index refresh</button><span id="fm-api-status" class="badge amber">Mapping API status checking…</span></div></div>' +
-      '<div class="grid g-2"><section class="card"><div class="card-head"><h3>📂 Upload mapping file</h3><div class="head-actions"><button class="btn small" id="fm-template">⬇ 4-column API template</button><button class="btn small" id="fm-range-template">⬇ Range input template</button><button class="btn small" id="fm-bc-template-xlsx">⬇ Alag-alag barcode · Excel</button><button class="btn small" id="fm-bc-template">⬇ Alag-alag barcode · CSV</button></div></div><div class="card-body"><p class="dim small">API template: tagId, serialNo, vcType, agentId. Range template: firstBarcode, lastBarcode, agentId. <b>Alag-alag barcode template:</b> A column me barcode, B column me Agent ID (header: barcode, agentId) — har barcode StockDataa me dhoondh kar uske Agent ID se map hoga; header na ho tab bhi A=barcode, B=Agent ID mana jata hai. Range upload mein barcode series StockDataa se expand hogi; TAG_ID, BARCODE aur TAG_CLASS auto-fill honge.</p><input class="input" id="fm-file" type="file" accept=".csv,.tsv,.txt,.xlsx"><div id="fm-file-note" class="dim small">No file selected.</div><button class="btn primary" id="fm-upload-add">Add file rows</button></div></section>' +
-      '<section class="card"><div class="card-head"><h3>⌨️ Quick mapping</h3></div><div class="card-body"><label>Lookup by</label><select id="fm-kind" class="input"><option value="barcode">Barcode / Serial No</option><option value="tagId">Tag ID</option></select><label>Barcode / Tag ID</label><input class="input" id="fm-identifier" placeholder="Barcode ya Tag ID enter karein"><label>Target Agent ID (required)</label><input class="input" id="fm-agent-id" placeholder="Jis Agent ID se map karna hai"><div class="btn-row"><button class="btn" id="fm-add-single">Add to queue</button><button class="btn primary" id="fm-quick-map">⚡ Quick map</button></div><hr><h4>Barcode range</h4><div class="grid g-3"><div><label>First barcode</label><input class="input" id="fm-first" placeholder="Start barcode"></div><div><label>Last barcode</label><input class="input" id="fm-last" placeholder="End barcode"></div><div><label>Target Agent ID (required)</label><input class="input" id="fm-range-agent" placeholder="Jis Agent ID se map karna hai"></div></div><button class="btn" id="fm-add-range">Add range</button></div></section></div>' +
-      '<section class="card"><div class="card-head"><div><h3>📗 Google Sheet se mapping</h3><p class="dim small">Sheet ka link, tab aur columns chuno — rows padhkar StockDataa se match hongi, map hongi, aur jo row poori map ho jaye uske <b>Done</b> column me "done" likh diya jayega. Pehle se "done" wali rows skip hoti hain.</p></div></div><div class="card-body">' +
+      // v3.79 — 4-step flow: 1 Add tags (tabs) → 2 Lookup → 3 Review → 4 Map. All input IDs are unchanged.
+      '<ol class="fm-steps" id="fm-steps" aria-label="Mapping steps">' +
+        '<li class="fm-step" data-fm-step="1"><span class="fm-step-dot">1</span><span class="fm-step-tx"><b>Add tags</b><small id="fm-step-1-note">Queue empty</small></span></li>' +
+        '<li class="fm-step" data-fm-step="2"><span class="fm-step-dot">2</span><span class="fm-step-tx"><b>Lookup</b><small id="fm-step-2-note">Find tags in StockDataa</small></span></li>' +
+        '<li class="fm-step" data-fm-step="3"><span class="fm-step-dot">3</span><span class="fm-step-tx"><b>Review</b><small id="fm-step-3-note">Check agent &amp; class</small></span></li>' +
+        '<li class="fm-step" data-fm-step="4"><span class="fm-step-dot">4</span><span class="fm-step-tx"><b>Map</b><small id="fm-step-4-note">Send to mapping API</small></span></li>' +
+      '</ol>' +
+      '<section class="card fm-add-card" id="fm-step-add"><div class="card-head"><div><h3><span class="fm-step-no">1</span> Add tags</h3><p class="dim small">Pick a method. You can mix methods — everything goes into one queue.</p></div><div class="card-right"><span class="badge gray" id="fm-queue-count">Queue empty</span></div></div>' +
+        '<div class="fm-tabs" role="tablist">' +
+          '<button type="button" class="fm-tab" role="tab" data-fm-tab="single">⌨️ Single<span class="fm-tab-long"> barcode / Tag ID</span></button>' +
+          '<button type="button" class="fm-tab" role="tab" data-fm-tab="range">↔️ <span class="fm-tab-long">Barcode </span>Range</button>' +
+          '<button type="button" class="fm-tab" role="tab" data-fm-tab="file">📂 File<span class="fm-tab-long"> upload</span></button>' +
+          '<button type="button" class="fm-tab" role="tab" data-fm-tab="sheet">📗 <span class="fm-tab-long">Google </span>Sheet</button>' +
+        '</div><div class="card-body">' +
+        '<div class="fm-pane" data-fm-pane="single"><div class="grid g-3 fm-fields"><div><label>Lookup by</label><select id="fm-kind" class="input"><option value="barcode">Barcode / Serial No</option><option value="tagId">Tag ID</option></select></div><div><label>Barcode / Tag ID</label><input class="input" id="fm-identifier" placeholder="Barcode ya Tag ID enter karein"></div><div><label>Target Agent ID (required)</label><input class="input" id="fm-agent-id" placeholder="Jis Agent ID se map karna hai"></div></div><div class="btn-row"><button class="btn" id="fm-add-single">Add to queue</button><button class="btn primary" id="fm-quick-map">⚡ Quick map</button></div></div>' +
+        '<div class="fm-pane" data-fm-pane="range" hidden><div class="grid g-3"><div><label>First barcode</label><input class="input" id="fm-first" placeholder="Start barcode"></div><div><label>Last barcode</label><input class="input" id="fm-last" placeholder="End barcode"></div><div><label>Target Agent ID (required)</label><input class="input" id="fm-range-agent" placeholder="Jis Agent ID se map karna hai"></div></div><button class="btn" id="fm-add-range">Add range</button></div>' +
+        '<div class="fm-pane" data-fm-pane="file" hidden><div class="btn-row fm-templates"><button class="btn small" id="fm-template">⬇ 4-column API template</button><button class="btn small" id="fm-range-template">⬇ Range input template</button><button class="btn small" id="fm-bc-template-xlsx">⬇ Alag-alag barcode · Excel</button><button class="btn small" id="fm-bc-template">⬇ Alag-alag barcode · CSV</button></div><p class="dim small">API template: tagId, serialNo, vcType, agentId. Range template: firstBarcode, lastBarcode, agentId. <b>Alag-alag barcode template:</b> A column me barcode, B column me Agent ID (header: barcode, agentId) — har barcode StockDataa me dhoondh kar uske Agent ID se map hoga; header na ho tab bhi A=barcode, B=Agent ID mana jata hai. Range upload mein barcode series StockDataa se expand hogi; TAG_ID, BARCODE aur TAG_CLASS auto-fill honge.</p><input class="input" id="fm-file" type="file" accept=".csv,.tsv,.txt,.xlsx"><div id="fm-file-note" class="dim small">No file selected.</div><button class="btn primary" id="fm-upload-add">Add file rows</button></div>' +
+        '<div class="fm-pane" data-fm-pane="sheet" hidden><p class="dim small">Sheet ka link, tab aur columns chuno — rows padhkar StockDataa se match hongi, map hongi, aur jo row poori map ho jaye uske <b>Done</b> column me "done" likh diya jayega. Pehle se "done" wali rows skip hoti hain.</p>' +
         '<div class="grid g-3"><div><label>Google Sheet link / ID</label><input class="input" id="fm-gs-link" placeholder="https://docs.google.com/spreadsheets/d/…"></div><div><label>Tab name</label><input class="input" id="fm-gs-tab" placeholder="Sheet1"></div><div><label>Data kis row se shuru (header ke baad)</label><input class="input" id="fm-gs-start" type="number" min="1" value="2"></div></div>' +
         '<div class="grid g-3"><div><label>Mapping type</label><select class="input" id="fm-gs-mode"><option value="range">Barcode range (First + Last)</option><option value="barcode">Alag-alag Barcode</option><option value="tagId">Alag-alag Tag ID</option></select></div>' +
         '<div id="fm-gs-first-wrap"><label>First barcode column</label><input class="input" id="fm-gs-first" maxlength="3" placeholder="A" value="A"></div><div id="fm-gs-last-wrap"><label>Last barcode column</label><input class="input" id="fm-gs-last" maxlength="3" placeholder="B" value="B"></div><div id="fm-gs-barcode-wrap" style="display:none"><label>Barcode / Tag ID column</label><input class="input" id="fm-gs-barcode" maxlength="3" placeholder="A" value="A"></div></div>' +
         '<div class="grid g-3"><div><label>Agent ID column</label><input class="input" id="fm-gs-agent" maxlength="3" placeholder="C" value="C"></div><div><label>Done likhne wala column</label><input class="input" id="fm-gs-done" maxlength="3" placeholder="D" value="D"></div><div><label>Done me kya likhna hai</label><input class="input" id="fm-gs-donetext" placeholder="done" value="done"></div></div>' +
-        '<div class="btn-row"><button class="btn" id="fm-gs-load">📥 Sheet se load + lookup</button><button class="btn primary" id="fm-gs-auto">⚡ Turant map karo + done likho</button></div><p class="dim small">Pehli baar: Apps Script me naya <code>Code.gs</code> (v3.71) paste karke New version deploy karein, aur sheet ko us Google account ke saath Editor share karein jisse Apps Script chalta hai.</p></div></section>' +
-      '<section class="card"><div class="card-head"><div><h3>🔎 StockDataa lookup & mapping queue</h3><p class="dim small">Lookup ke baad preview/review karein. Target Agent ID edit kar sakte hain; API call sirf selected complete rows par hoga.</p></div><div class="head-actions"><button class="btn" id="fm-lookup">🔎 Lookup StockDataa</button><button class="btn primary" id="fm-map" disabled>🚀 Map ready rows</button><button class="btn" id="fm-api-csv">⬇ API CSV · 4 columns</button><button class="btn" id="fm-csv">⬇ Full details CSV</button><button class="btn" id="fm-clear">Clear</button></div></div><div class="card-body"><div id="fm-progress" class="fm-progress" hidden></div><div id="fm-message" class="notice info">API status check ho raha hai…</div><div id="fm-summary"></div><div id="fm-results"><div class="empty-state">Upload a file or add a barcode / Tag ID above to start.</div></div></div></section>';
+        '<div class="btn-row"><button class="btn" id="fm-gs-load">📥 Sheet se load + lookup</button><button class="btn primary" id="fm-gs-auto">⚡ Turant map karo + done likho</button></div><p class="dim small">Pehli baar: Apps Script me naya <code>Code.gs</code> (v3.71) paste karke New version deploy karein, aur sheet ko us Google account ke saath Editor share karein jisse Apps Script chalta hai.</p></div>' +
+      '</div></section>' +
+      '<section class="card fm-queue-card"><div class="card-head"><div><h3><span class="fm-step-no">2–4</span> Lookup, review &amp; map</h3><p class="dim small">Lookup ke baad preview/review karein. Target Agent ID edit kar sakte hain; API call sirf selected complete rows par hoga.</p></div><div class="head-actions"><button class="btn" id="fm-lookup">🔎 Lookup StockDataa</button><button class="btn primary" id="fm-map" disabled>🚀 Map ready rows</button><button class="btn" id="fm-api-csv">⬇ API CSV · 4 columns</button><button class="btn" id="fm-csv">⬇ Full details CSV</button><button class="btn" id="fm-clear">Clear</button></div></div><div class="card-body"><div id="fm-progress" class="fm-progress" hidden></div><div id="fm-message" class="notice info">API status check ho raha hai…</div><div id="fm-summary"></div><div id="fm-results"><div class="empty-state">Add tags in step 1, then click “Lookup StockDataa”.</div></div></div></section>';
     state.items = []; state.rows = []; state.busy = false; state.sheetCtx = null; state.showLimit = SHOW_STEP;
     state.index = null; state.indexAt = 0; state.rateLimited = false;
     ensureProgressStyles();
@@ -1261,12 +1327,15 @@ window.FF = window.FF || {};
       }
     } catch (err) { console.warn('fastag barcode suggest:', err && err.message); }
     startIndexWatch();
+    { let saved = ''; try { saved = localStorage.getItem(FM_TAB_KEY) || ''; } catch (_) { saved = ''; } showTab(saved || 'single', false); }
+    syncSteps();
     later(() => {
       const ix = state.index || {};
       if (!ix.ready && !ix.building) refreshIndexStatus(true);
     }, 1200);
     root.addEventListener('click', async (event) => {
       const target = event.target.closest('button'); if (!target) return;
+      if (target.dataset && target.dataset.fmTab) { showTab(target.dataset.fmTab, true); return; }
       if (target.id === 'fm-template') return templateCsv();
       if (target.id === 'fm-range-template') return rangeTemplateCsv();
       if (target.id === 'fm-bc-template') return barcodeTemplate('csv');

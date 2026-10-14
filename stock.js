@@ -11,6 +11,34 @@ FF.pages = FF.pages || {};
   const isVc4 = (cls) => M.classGroup(cls) === 'VC4';
   const view = { scope: '', value: '', cls: '', q: '', direct: false };
 
+  // 👁 v3.79 — quick-look drawer actions (delegated, so they still work after the drawer's ← Back restores it).
+  let qlBound = false;
+  function bindQuickLookActions() {
+    if (qlBound || typeof document === 'undefined' || !document.addEventListener) return;
+    qlBound = true;
+    document.addEventListener('click', async (e) => {
+      const btn = e.target && e.target.closest && e.target.closest('#drawer-actions [data-ql-full], #drawer-actions [data-ql-profile]');
+      if (!btn) return;
+      const name = btn.getAttribute('data-ql-name') || '';
+      const full = btn.hasAttribute('data-ql-full');
+      const kind = btn.getAttribute(full ? 'data-ql-full' : 'data-ql-profile') === 'tl' ? 'tl' : 'agent';
+      const openFull = () => {
+        if (FF.app.closeDrawer) FF.app.closeDrawer();
+        U.recentAdd('stock', { kind, value: name, label: name });
+        FF.app.navigate('stock', kind === 'agent' ? { agent: name } : { tl: name });
+      };
+      if (full) { openFull(); return; }
+      try {
+        if (!(FF.masterProfile && FF.masterProfile.open) && FF.lazy && FF.lazy.inject) await FF.lazy.inject('masterProfile');
+        const person = kind === 'agent'
+          ? { kind: 'ff-agent', name, sub: btn.getAttribute('data-ql-id') || '', tl: btn.getAttribute('data-ql-tl') || '' }
+          : { kind: 'ff-tl', name, sub: '' };
+        if (!FF.masterProfile || !FF.masterProfile.supports(person)) { openFull(); return; }
+        await FF.masterProfile.open(person);
+      } catch (_) { openFull(); }
+    });
+  }
+
   function coverBadge(days) {
     const t = FF.config.thresholds;
     if (days === null || !Number.isFinite(days)) return '<span class="badge gray">no issuance</span>';
@@ -27,13 +55,17 @@ FF.pages = FF.pages || {};
     const is = [isBins.VC4 || 0, isBins.VC20 || 0, isBins['VC5+'] || 0, (isBins.VC20 || 0) + (isBins['VC5+'] || 0)];
     const heads = ['VC4', 'VC20', 'VC5+', 'All Comm'];
     const per = is.map((v) => (elapsed ? v / elapsed : 0));
-    const cell = (i) => per[i] ? coverBadge(st[i] / per[i]) : '<span class="dim">—</span>';
-    return `<div class="table-wrap" style="margin-top:12px;overflow-x:auto"><table class="tbl compact"><thead><tr><th></th>${heads.map((h) => `<th class="num" ${h === 'All Comm' ? 'title="VC20 + VC5+"' : ''}>${h}</th>`).join('')}</tr></thead>
+    // v3.79 — transposed (class = row) so all four classes fit in the narrow 1/3 card; cover is a compact "84d" chip.
+    const t = FF.config.thresholds || {};
+    const cell = (i) => {
+      if (!per[i]) return '<span class="dim" title="No issuance this month">—</span>';
+      const d = st[i] / per[i];
+      const tone = d < t.coverRed ? 'red' : d < t.coverOrange ? 'orange' : 'green';
+      return `<span class="badge ${tone} cls-cover" title="${U.fmt(d)} days of stock at the current issuance rate">${U.fmt(d)}d</span>`;
+    };
+    return `<div class="table-wrap no-tools cls-split" style="margin-top:12px"><table class="tbl compact"><thead><tr><th>Class</th><th class="num">Stock</th><th class="num" title="Issued this month">MTD</th><th class="num">/day</th><th class="num" title="Days of stock at the current issuance rate">Cover</th></tr></thead>
       <tbody>
-        <tr><td>Stock</td>${st.map((v) => `<td class="num"><b>${U.fmt(v)}</b></td>`).join('')}</tr>
-        <tr><td>Issued MTD</td>${is.map((v) => `<td class="num">${U.fmt(v)}</td>`).join('')}</tr>
-        <tr><td>Per day</td>${per.map((v) => `<td class="num">${U.fmt(v, 1)}</td>`).join('')}</tr>
-        <tr><td>Days cover</td>${heads.map((_, i) => `<td>${cell(i)}</td>`).join('')}</tr>
+        ${heads.map((h, i) => `<tr${h === 'All Comm' ? ' class="cls-total" title="VC20 + VC5+"' : ''}><td><b>${h}</b></td><td class="num"><b>${U.fmt(st[i])}</b></td><td class="num">${U.fmt(is[i])}</td><td class="num">${U.fmt(per[i], 1)}</td><td class="num">${cell(i)}</td></tr>`).join('')}
       </tbody></table></div>`;
   }
   const compareBar = (a, b, la, lb, ca, cb) => {
@@ -406,6 +438,35 @@ FF.pages = FF.pages || {};
       box.hidden = false;
       box.innerHTML = `<span class="dim small">🕘 Recent:</span>${recents.map((r) => `<button class="chip recent" data-recent-kind="${esc(r.kind)}" data-recent-value="${esc(r.value)}">${r.kind === 'tl' ? '👥' : r.kind === 'cls' ? '🏷️' : '🧑‍💼'} ${esc(r.label)}</button>`).join('')}<button class="chip ghost" data-recent-clear>✕ Clear</button>`;
     };
+    // 👁 v3.79 — table row click → quick-look side panel (table + filters stay put); "Open full view" keeps the old drill-down.
+    const quickLook = (kind, name) => {
+      if (!FF.app || !FF.app.openDrawer || !P) return false;
+      const list = kind === 'agent' ? P.agents : P.tls;
+      const x = (list || []).find((v) => norm(v.name) === norm(name));
+      if (!x) return false;
+      const bins = x.issBins || { VC4: 0, VC20: 0, 'VC5+': 0 };
+      const classes = x.byClass ? [...x.byClass.entries()].filter(([, n]) => n > 0).sort((p, q) => q[1] - p[1]) : [];
+      const stat = (label, value, sub, txt) => `<div class="ql-stat"><small>${label}</small><b${txt ? ' class="ql-txt"' : ''}>${value}</b>${sub ? `<span class="dim small">${sub}</span>` : ''}</div>`;
+      const team = kind === 'tl' ? P.agents.filter((ag) => norm(ag.tl) === norm(x.name)).sort((p, q) => q.total - p.total) : [];
+      const body = `<div class="ql-grid">
+          ${stat('Total stock', U.fmt(x.total), `VC4 ${U.fmt(x.vc4)} · Comm ${U.fmt(x.comm)}`)}
+          ${stat('Issued this month', U.fmt(x.iss || 0), `VC4 ${U.fmt(bins.VC4)} · VC20 ${U.fmt(bins.VC20)} · VC5+ ${U.fmt(bins['VC5+'])}`)}
+          ${stat('VC4 cover', coverBadge(x.cover), 'days of VC4 stock at the current rate')}
+          ${kind === 'tl' ? stat('Agents', U.fmt(team.length), 'holding stock') : stat('Team Leader', esc(x.tl || '—'), x.id ? `Agent ID ${esc(x.id)}` : '', true)}
+        </div>
+        ${classes.length ? `<h4 class="ql-h">Stock by class</h4><div class="chip-row">${classes.map(([c, n]) => `<span class="chip">${esc(c)} <b>${U.fmt(n)}</b></span>`).join('')}</div>` : ''}
+        ${team.length ? `<h4 class="ql-h">Agents in this team</h4><div class="table-wrap"><table class="tbl compact"><thead><tr><th>Agent</th><th class="num">VC4</th><th class="num">Comm</th><th class="num">Total</th><th class="num">MTD</th></tr></thead><tbody>${team.slice(0, 50).map((ag) => `<tr><td>${esc(ag.name)}</td><td class="num">${U.fmt(ag.vc4)}</td><td class="num">${U.fmt(ag.comm)}</td><td class="num"><b>${U.fmt(ag.total)}</b></td><td class="num">${U.fmt(ag.iss || 0)}</td></tr>`).join('')}</tbody></table></div>${team.length > 50 ? `<div class="dim small">Top 50 of ${U.fmt(team.length)} agents</div>` : ''}` : ''}`;
+      bindQuickLookActions();
+      const canProfile = !!((FF.masterProfile && FF.masterProfile.open) || (FF.lazy && FF.lazy.inject));
+      FF.app.openDrawer({
+        kicker: kind === 'agent' ? '📦 Agent · stock quick look' : '📦 Team Leader · stock quick look',
+        title: x.name,
+        sub: esc(kind === 'agent' ? [x.id ? 'ID ' + x.id : '', x.tl ? 'TL ' + x.tl : ''].filter(Boolean).join(' · ') : `${U.fmt(team.length)} agents`),
+        body,
+        actions: `<button class="btn small primary" data-ql-full="${esc(kind)}" data-ql-name="${esc(x.name)}">Open full stock view →</button>${canProfile ? `<button class="btn small" data-ql-profile="${esc(kind)}" data-ql-name="${esc(x.name)}" data-ql-id="${esc(x.id || '')}" data-ql-tl="${esc(x.tl || '')}">👤 Full profile</button>` : ''}`
+      });
+      return true;
+    };
     const go = (scope, value) => {
       if (FF.notifications && FF.notifications.logClick) {
         FF.notifications.logClick(`Stock ${scope.toUpperCase()}`, value);
@@ -437,8 +498,8 @@ FF.pages = FF.pages || {};
     root.addEventListener('click', (e) => {
       const rc = e.target.closest('[data-recent-clear]'); if (rc) { try { localStorage.removeItem('ff_recent_stock'); } catch {} drawRecent(); return; }
       const r = e.target.closest('[data-recent]'); if (r && r.dataset.recentKind) { go(r.dataset.recentKind, r.dataset.recentValue); return; }
-      const a = e.target.closest('[data-pick-agent]'); if (a) { go('agent', a.dataset.pickAgent); return; }
-      const t = e.target.closest('[data-pick-tl]'); if (t) { go('tl', t.dataset.pickTl); return; }
+      const a = e.target.closest('[data-pick-agent]'); if (a) { if (a.tagName === 'TR' && quickLook('agent', a.dataset.pickAgent)) return; go('agent', a.dataset.pickAgent); return; }
+      const t = e.target.closest('[data-pick-tl]'); if (t) { if (t.tagName === 'TR' && quickLook('tl', t.dataset.pickTl)) return; go('tl', t.dataset.pickTl); return; }
       const dchip = e.target.closest('[data-pick-direct]'); if (dchip) { view.direct = !view.direct; dchip.classList.toggle('on', view.direct); if (!view.scope) { overview(P, body); C.mount(body); } return; }
       const c = e.target.closest('[data-pick-cls]'); if (c) { go('cls', c.dataset.pickCls); return; }
       const x = e.target.closest('#st-xlsx'); if (x && pivot) exportExcel(P, view, pivot, x);

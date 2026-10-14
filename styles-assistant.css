@@ -24,12 +24,9 @@
 }
 .ask-ico[data-act="lang"]:hover { background: rgba(255,255,255,.4); }
 .ask-head { min-width: 0; }
-.ask-head b { flex: 0 1 auto; min-width: 0; white-space: nowrap; }
-.ask-head small { min-width: 0; }
 .ask-ico[data-act="close"]:hover,
 .ask-ico[data-act="close"]:focus-visible { background: rgba(255,255,255,.48); outline: 2px solid rgba(255,255,255,.8); outline-offset: 1px; }
 @media (max-width: 480px) {
 .ask-head { gap: 5px; padding: 10px 9px; }
-.ask-head small { display: none; }
 .ask-ico[data-act="close"] { flex-basis: 34px; width: 34px; height: 34px; }
 }

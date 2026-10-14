@@ -1408,24 +1408,58 @@ window.FF = window.FF || {};
     });
   }
 
+  // ☷ Column chooser helpers — hidden column indexes per page + table, one shared <style> with nth-child rules.
+  let ccSeq = 0, ccOutsideBound = false;
+  const ccRules = new Map();
+  function colStoreKey(table, heads) {
+    const sig = table.id || heads.map((th) => (th.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase().slice(0, 24)).join('|');
+    return `ff_cols:${(current && current.page) || 'page'}:${sig}`.slice(0, 300);
+  }
+  function readHiddenCols(key) {
+    try { const v = JSON.parse(localStorage.getItem(key) || '[]'); return Array.isArray(v) ? v.map(Number).filter(Number.isInteger) : []; } catch { return []; }
+  }
+  function writeHiddenCols(key, set) {
+    try { if (set.size) localStorage.setItem(key, JSON.stringify([...set])); else localStorage.removeItem(key); } catch { /* private mode */ }
+  }
+  function applyHiddenCols(table, set) {
+    if (!table.dataset.cc) table.dataset.cc = String(++ccSeq);
+    const id = table.dataset.cc;
+    if (set.size) ccRules.set(id, [...set].map((i) => `table[data-cc="${id}"] > * > tr > :nth-child(${i + 1})`).join(',\n') + ' { display: none; }');
+    else ccRules.delete(id);
+    // Drop rules for tables that are no longer on the page.
+    for (const k of [...ccRules.keys()]) if (!document.querySelector(`table[data-cc="${k}"]`)) ccRules.delete(k);
+    let style = document.getElementById('ff-cc-style');
+    if (!style) { style = document.createElement('style'); style.id = 'ff-cc-style'; document.head.appendChild(style); }
+    style.textContent = [...ccRules.values()].join('\n');
+  }
+
   function enhanceTables(root) {
     if (!root || !root.querySelectorAll) return;
     polishBarcodes(root);
     setTableDensity(tableDensity());
     root.querySelectorAll('.table-wrap').forEach((wrap) => {
       const table = wrap.querySelector('table');
-      if (!table || wrap.querySelector('.table-tools')) return;
+      if (!table || wrap.classList.contains('no-tools') || wrap.querySelector('.table-tools')) return;
       const toolbar = document.createElement('div');
       toolbar.className = 'table-tools';
       toolbar.innerHTML = `<span class="table-tools-title">Table</span><span class="table-tools-note">${table.tBodies && table.tBodies[0] ? `${table.tBodies[0].rows.length} rows` : 'view'}</span><button type="button" class="btn small" data-table-density title="Toggle compact row density">${tableDensity() === 'compact' ? '↕ Comfortable' : '↕ Compact'}</button><button type="button" class="btn small" data-table-columns title="Choose visible columns">☷ Columns</button><button type="button" class="btn small" data-table-export title="Export this table">⬇ CSV</button>`;
       const menu = document.createElement('div');
       menu.className = 'table-columns-menu'; menu.hidden = true;
-      [...table.querySelectorAll('thead th')].forEach((th, i) => {
+      // v3.79 — column choice is remembered per page + table, and applied with a CSS rule so rows re-rendered
+      // later (search / filter / "show more") stay hidden too.
+      const heads = [...table.querySelectorAll('thead th')];
+      const colKey = colStoreKey(table, heads);
+      const hiddenCols = new Set(readHiddenCols(colKey).filter((i) => i > 0 && i < heads.length));
+      heads.forEach((th, i) => {
         const label = (th.textContent || `Column ${i + 1}`).replace(/\s+/g, ' ').trim().slice(0, 60) || `Column ${i + 1}`;
         const row = document.createElement('label');
-        row.innerHTML = `<input type="checkbox" data-table-col="${i}" checked> <span>${esc(label)}</span>`;
+        row.innerHTML = `<input type="checkbox" data-table-col="${i}"${hiddenCols.has(i) ? '' : ' checked'}${i === 0 ? ' disabled title="First column always stays visible"' : ''}> <span>${esc(label)}</span>`;
         menu.appendChild(row);
       });
+      const resetRow = document.createElement('div');
+      resetRow.className = 'table-columns-foot';
+      resetRow.innerHTML = '<button type="button" class="btn small" data-table-cols-reset>Show all</button>';
+      menu.appendChild(resetRow);
       wrap.insertBefore(toolbar, table);
       wrap.appendChild(menu);
       toolbar.querySelector('[data-table-density]').addEventListener('click', () => {
@@ -1438,10 +1472,33 @@ window.FF = window.FF || {};
         if (!FF.auth.can('export')) { U.toast('Download permission nahi hai', 'err'); return; }
         const rows = U.tableToRows(table); U.downloadCsv(`${U.slug(current.page || 'table')}-${U.stamp()}.csv`, rows[0] || [], rows.slice(1)); U.toast('Table CSV downloaded ✓', 'ok');
       });
+      const colBtn = toolbar.querySelector('[data-table-columns]');
+      const applyCols = () => {
+        applyHiddenCols(table, hiddenCols);
+        writeHiddenCols(colKey, hiddenCols);
+        colBtn.textContent = hiddenCols.size ? `☷ Columns · ${hiddenCols.size} hidden` : '☷ Columns';
+        colBtn.classList.toggle('active', hiddenCols.size > 0);
+      };
       menu.querySelectorAll('[data-table-col]').forEach((input) => input.addEventListener('change', () => {
-        const index = Number(input.dataset.tableCol); const hidden = !input.checked;
-        [...table.querySelectorAll('tr')].forEach((tr) => { const cell = tr.children[index]; if (cell) cell.hidden = hidden; });
+        const index = Number(input.dataset.tableCol);
+        if (input.checked) hiddenCols.delete(index); else hiddenCols.add(index);
+        applyCols();
       }));
+      resetRow.querySelector('[data-table-cols-reset]').addEventListener('click', (e) => {
+        e.stopPropagation();
+        hiddenCols.clear();
+        menu.querySelectorAll('[data-table-col]').forEach((input) => { input.checked = true; });
+        applyCols();
+      });
+      if (hiddenCols.size) applyCols();
+      if (!ccOutsideBound) {
+        ccOutsideBound = true;
+        document.addEventListener('click', (e) => {
+          document.querySelectorAll('.table-columns-menu:not([hidden])').forEach((m) => {
+            if (!m.contains(e.target) && !(e.target.closest && e.target.closest('[data-table-columns]'))) m.hidden = true;
+          });
+        });
+      }
       table.classList.toggle('table-density-compact', tableDensity() === 'compact');
     });
   }

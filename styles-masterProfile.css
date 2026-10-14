@@ -21,7 +21,6 @@
 .mp-people-table tbody tr { cursor: pointer; }
 .mp-people-table tbody tr:hover > td { background: color-mix(in srgb, var(--brand) 6%, transparent); }
 .mppt-who { display: flex; align-items: center; gap: 9px; min-width: 0; }
-.mppt-who .badge { font-size: 9.5px; padding: 1px 7px; }
 .mppt-acts { white-space: nowrap; width: 1%; }
 .mppt-more-row { display: flex; justify-content: center; padding: 10px; border-top: 1px dashed var(--line); }
 @media (max-width: 720px) {

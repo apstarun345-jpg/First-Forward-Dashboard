@@ -2860,6 +2860,7 @@ html[data-theme="dark"] .pf-dispatch-row-total { background: rgba(20,184,166,.10
 /* 🔔 Office Bell (v3.16) */
 .bell-btn { border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 12px; padding: 6px 10px; font-size: 16px; cursor: pointer; line-height: 1; }
 .bell-btn:hover { border-color: var(--brand); }
+.bell-btn.off { opacity: .5; filter: grayscale(.6); }
 .bell-float { background: linear-gradient(135deg, #16a34a, #0d9488); color: #fff; font-weight: 800; padding: 10px 16px; border-radius: 14px; box-shadow: 0 8px 24px rgba(2,6,23,.35); animation: bell-in .45s cubic-bezier(.2,.9,.3,1.4); font-size: 15px; }
 .bell-float.gv { background: linear-gradient(135deg, #0d9488, #0f766e); }
 @keyframes bell-in { from { opacity: 0; transform: translateY(18px) scale(.85); } }
@@ -4210,6 +4211,7 @@ html[data-theme="dark"] .ab-chart-card { border-color: #1f2937; }
 .mp-people-table tfoot .cell-sub { font-weight: 600; }
 .mppt-who b { display: block; font-size: 13.5px; font-weight: 850; overflow-wrap: anywhere; }
 .mppt-who small { display: block; margin-top: 1px; }
+.mppt-who .badge { font-size: 9.5px; padding: 1px 7px; }
 .mp-drill { cursor: pointer; }
 .mp-drill:hover { text-decoration: underline dotted; }
 /* --- 🔎 Home master search v2 (hero bar + channel chips + meta) --- */
@@ -5203,6 +5205,14 @@ html[data-theme="dark"] .home-exp-stat { background: color-mix(in srgb, var(--br
   vertical-align: top !important;
   border-right: 1px solid rgba(148,163,184,.12);
 }
+.tr-req-tbl tbody td.tr-c-addr {
+  min-width: 0 !important;
+  max-width: none !important;
+  padding: 11px 12px !important;
+  vertical-align: top !important;
+  text-align: left !important;
+  background: linear-gradient(180deg, #fbfdff 0%, #f5f8fc 100%) !important;
+}
 .tr-req-tbl tbody td.tr-c-addr::before {
   content: "DELIVERY CONTACT";
   display: block;
@@ -5526,6 +5536,7 @@ body.auth-open { background: radial-gradient(circle at 50% 35%, #1e2a62 0, #1118
 .login-only-shell .pro-card { box-shadow: 0 30px 90px rgba(0,0,0,.34), 0 0 0 1px rgba(255,255,255,.05); }
 .developer-credit { font-weight: 950; color: #facc15; text-shadow: 0 0 12px rgba(250,204,21,.25); }
 .developer-credit::before { content: '✨ '; }
+.tr-col-order.dragging { opacity: .55; }
 .tr-col-order.drag-over { outline: 2px solid #60a5fa; background: #eff6ff; }
 .tr-drag { font-size: 18px; font-weight: 900; color: var(--muted,#64748b); cursor: grab; }
 .btn.tiny { min-width: 28px; min-height: 28px; padding: 3px 7px; font-size: 12px; }
@@ -5540,12 +5551,19 @@ html[data-theme="dark"] .tr-col-order.drag-over { background: #172554; }
 .tr-cols-order,
 .tr-col-order,
 .tr-col-order * { color: var(--ink) !important; }
+.tr-col-move .btn.tiny {
+  color: #1e293b !important;
+  background: #f8fafc !important;
+  border-color: #cbd5e1 !important;
+}
 .tr-col-order.drag-over {
   background: #eff6ff !important;
   outline: 2px solid #60a5fa !important;
 }
 html[data-theme="dark"] .tr-col-order * { color: #e2e8f0 !important; }
 /* v3.72 — Assistant popup close control remains visible on narrow mobile screens. */
+.ask-head b { flex: 0 1 auto; min-width: 0; white-space: nowrap; }
+.ask-head small { min-width: 0; }
 .ask-ico[data-act="close"] {
   flex: 0 0 34px;
   width: 34px;
@@ -5562,6 +5580,7 @@ html[data-theme="dark"] .tr-col-order * { color: #e2e8f0 !important; }
   box-shadow: 0 2px 8px rgba(15,23,42,.12);
 }
 @media (max-width: 480px) {
+.ask-head small { display: none; }
 .ask-head b { font-size: 12px; }
 .ask-head > span[style*="flex:1"] { display: none; }
 }
@@ -5803,3 +5822,27 @@ html:not(.mobile-ui) .top-more-pop .icon-btn::after { content: attr(data-label);
 .toast .toast-act { margin-left: 12px; border: 0; border-radius: 8px; padding: 3px 10px; font-weight: 800; cursor: pointer; background: #fde047; color: #1f2937; }
 /* v3.78 — perf: skip layout/paint of Home sections that are far below the fold until scrolled near. */
 #home-charts, #home-stock, #home-pulse { content-visibility: auto; contain-intrinsic-size: auto 640px; }
+/* v3.79 — column chooser footer + active state; Stock class-split (transposed, fits the 1/3 card) */
+.table-columns-menu { max-height: min(60vh, 420px); overflow-y: auto; }
+.table-columns-foot { display: flex; justify-content: flex-end; padding: 6px 4px 2px; margin-top: 4px; border-top: 1px solid var(--line); }
+.table-tools .btn.active { border-color: color-mix(in srgb, var(--brand) 55%, var(--line)); color: var(--brand); background: color-mix(in srgb, var(--brand) 9%, var(--card)); }
+.cls-split th, .cls-split td { padding-left: 6px; padding-right: 6px; white-space: nowrap; }
+/* v3.79 — Customize Home */
+.home-sec-hidden { display: none !important; }
+.hl-panel .card-head { flex-wrap: wrap; gap: 8px; }
+.hl-list { list-style: none; margin: 0; padding: 4px 14px 14px; display: grid; gap: 6px; }
+.hl-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); cursor: grab; }
+.hl-item.off { opacity: .55; }
+.hl-item.dragging { opacity: .4; border-style: dashed; }
+.hl-item label { flex: 1; display: flex; align-items: center; gap: 8px; font-weight: 650; cursor: pointer; }
+.hl-grip { color: var(--muted); letter-spacing: -2px; user-select: none; }
+.hl-move { display: flex; gap: 4px; }
+.hl-move .btn { min-width: 32px; justify-content: center; }
+/* v3.79 — FASTag Mapping 4-step flow */
+.fm-step-tx b { font-size: 13px; }
+.fm-step-tx small { color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 760px) {
+.fm-step-tx b { font-size: 11.5px; }
+}
+/* v3.79 — Stock quick-look drawer */
+tr.clickable[data-pick-agent], tr.clickable[data-pick-tl] { cursor: pointer; }

@@ -680,6 +680,93 @@ FF.pages = FF.pages || {};
   // ---------------------------------------------------------------- render
   // renderCtx.bootGate (app.js splash): true ho to render apne SAARE sections ke data paint karne
   // ke baad hi resolve hota hai — "Opening your workspace" animation hatate hi Home poora bhara dikhe.
+  const homeLayout = (() => {
+    const SECTIONS = [
+      ['home-todo', "✅ Today's work"],
+      ['home-gv-live', '🟩 GV live today'],
+      ['home-month', '📅 Month KPI cards'],
+      ['home-target-achievement', '🎯 Target achievement'],
+      ['home-pulse', '📡 Management pulse'],
+      ['home-charts', '📊 Charts'],
+      ['home-stock', '📦 Stock']
+    ];
+    const ids = SECTIONS.map((x) => x[0]);
+    const label = (id) => (SECTIONS.find((x) => x[0] === id) || [id, id])[1];
+    const key = () => `ff_home_layout:${(FF.auth.user && (FF.auth.user.username || FF.auth.user.name)) || 'user'}`;
+    const read = () => {
+      let v = null;
+      try { v = JSON.parse(localStorage.getItem(key()) || 'null'); } catch { v = null; }
+      const order = (v && Array.isArray(v.order) ? v.order.filter((id) => ids.includes(id)) : []);
+      ids.forEach((id) => { if (!order.includes(id)) order.splice(Math.min(ids.indexOf(id), order.length), 0, id); });
+      const hidden = new Set(v && Array.isArray(v.hidden) ? v.hidden.filter((id) => ids.includes(id)) : []);
+      return { order, hidden };
+    };
+    const write = (layout) => {
+      try {
+        const isDefault = !layout.hidden.size && layout.order.every((id, i) => id === ids[i]);
+        if (isDefault) localStorage.removeItem(key());
+        else localStorage.setItem(key(), JSON.stringify({ order: layout.order, hidden: [...layout.hidden] }));
+      } catch { /* private mode */ }
+    };
+    function apply(root, layout) {
+      const L = layout || read();
+      const foot = root.querySelector(':scope > .foot-note');
+      L.order.forEach((id) => {
+        const el = root.querySelector(`:scope > #${id}`);
+        if (!el) return;
+        if (foot) root.insertBefore(el, foot); else root.appendChild(el);
+        el.classList.toggle('home-sec-hidden', L.hidden.has(id));
+      });
+    }
+    function panelHtml(L) {
+      return `<div class="card-head"><div><h3>⚙ Customize Home</h3><span class="dim small">Drag or use ↑ ↓ to reorder · untick to hide · saved on this device</span></div><div class="card-right"><button class="btn small" data-hl-reset>Reset</button><button class="btn small primary" data-hl-done>Done</button></div></div>
+        <ol class="hl-list">${L.order.map((id, i) => `<li class="hl-item${L.hidden.has(id) ? ' off' : ''}" draggable="true" data-hl-id="${id}"><span class="hl-grip" aria-hidden="true">⋮⋮</span><label><input type="checkbox" data-hl-show="${id}"${L.hidden.has(id) ? '' : ' checked'}> ${esc(label(id))}</label><span class="hl-move"><button class="btn small" data-hl-up="${id}" ${i === 0 ? 'disabled' : ''} aria-label="Move up">↑</button><button class="btn small" data-hl-down="${id}" ${i === L.order.length - 1 ? 'disabled' : ''} aria-label="Move down">↓</button></span></li>`).join('')}</ol>`;
+    }
+    function toggle(root, btn) {
+      let panel = root.querySelector(':scope > .hl-panel');
+      if (panel) { panel.remove(); btn.setAttribute('aria-expanded', 'false'); return; }
+      const L = read();
+      panel = document.createElement('section');
+      panel.className = 'card hl-panel';
+      const hero = root.querySelector(':scope > .home-hero');
+      if (hero && hero.nextSibling) root.insertBefore(panel, hero.nextSibling); else root.prepend(panel);
+      btn.setAttribute('aria-expanded', 'true');
+      const paint = () => { panel.innerHTML = panelHtml(L); };
+      const commit = () => { write(L); apply(root, L); paint(); };
+      const move = (id, delta) => {
+        const i = L.order.indexOf(id), j = i + delta;
+        if (i < 0 || j < 0 || j >= L.order.length) return;
+        L.order.splice(i, 1); L.order.splice(j, 0, id); commit();
+        const b = panel.querySelector(`[data-hl-${delta < 0 ? 'up' : 'down'}="${id}"]`); if (b && !b.disabled) b.focus();
+      };
+      panel.addEventListener('click', (e) => {
+        const t = e.target.closest('button'); if (!t) return;
+        if (t.dataset.hlUp) move(t.dataset.hlUp, -1);
+        else if (t.dataset.hlDown) move(t.dataset.hlDown, 1);
+        else if (t.hasAttribute('data-hl-reset')) { L.order = ids.slice(); L.hidden.clear(); commit(); U.toast('Home layout reset', 'ok'); }
+        else if (t.hasAttribute('data-hl-done')) { panel.remove(); btn.setAttribute('aria-expanded', 'false'); }
+      });
+      panel.addEventListener('change', (e) => {
+        const id = e.target.dataset && e.target.dataset.hlShow; if (!id) return;
+        if (e.target.checked) L.hidden.delete(id); else L.hidden.add(id);
+        commit();
+      });
+      let dragId = null;
+      panel.addEventListener('dragstart', (e) => { const li = e.target.closest && e.target.closest('[data-hl-id]'); if (!li) return; dragId = li.dataset.hlId; li.classList.add('dragging'); try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dragId); } catch { /* ignore */ } });
+      panel.addEventListener('dragover', (e) => { if (dragId) e.preventDefault(); });
+      panel.addEventListener('drop', (e) => {
+        const li = e.target.closest && e.target.closest('[data-hl-id]');
+        if (!dragId || !li || li.dataset.hlId === dragId) return;
+        e.preventDefault();
+        const to = L.order.indexOf(li.dataset.hlId);
+        L.order.splice(L.order.indexOf(dragId), 1); L.order.splice(to, 0, dragId); dragId = null; commit();
+      });
+      panel.addEventListener('dragend', () => { dragId = null; panel.querySelectorAll('.dragging').forEach((x) => x.classList.remove('dragging')); });
+      paint();
+    }
+    return { apply, toggle, read };
+  })();
+
   async function render(root, params, renderCtx) {
     const u = FF.auth.user || {};
     const avatar = u.avatar ? `<img class="home-avatar" src="${esc(u.avatar)}" alt="">` : `<div class="home-avatar mono-logo">${esc((u.name || u.username || 'U').slice(0, 1).toUpperCase())}</div>`;
@@ -701,6 +788,7 @@ FF.pages = FF.pages || {};
           <button class="btn primary" data-action="refresh">↻ Refresh</button>
           <button class="btn" id="home-morning-card" title="Boss ke liye WhatsApp Good-Morning card (PNG)">📲 Morning Card</button>
           <a class="btn" href="#/tagIssued">🏷️ Tag Issued →</a>
+          <button class="btn" id="home-customize" title="Reorder or hide Home sections" aria-expanded="false">⚙ Customize</button>
         </div>
       </div>
       <div id="home-todo"></div>
@@ -711,6 +799,11 @@ FF.pages = FF.pages || {};
       <div id="home-charts">${U.spinner('Charts…')}</div>
       <div id="home-stock">${U.spinner('Stock (StockDataa + Tag Assignment)…')}</div>
       <p class="foot-note">🟩 GV aaj = <b>GV Master sheet</b> (live) · 🧾 Issuance history = <b>EIR</b> (GV = master ID ${esc(FF.config.eir.gvMasterId || '5845036')}, baaki FF) · 📦 Stock = <b>StockDataa</b> (FF) + <b>Tag Assignment</b> (GV) · 🟦 FF ka issuance T+1 aata hai · 🔎 Global search top bar par hai · full profile/results Management → Master Search me.</p>`;
+
+    // ⚙ v3.79 — Customize Home: reorder / hide sections, saved per user on this device.
+    homeLayout.apply(root);
+    const custBtn = U.$('#home-customize', root);
+    if (custBtn) custBtn.addEventListener('click', () => homeLayout.toggle(root, custBtn));
 
     const quick = U.$('#home-quick', root);
     if (quick) quick.innerHTML = `<div class="chip-row"><span class="chip on">🟩 GV aaj · GV Master (live)</span><span class="chip">🧾 EIR: FF + GV history</span><span class="chip dim">📦 Stock: StockDataa + Tag Assignment</span></div>`;
