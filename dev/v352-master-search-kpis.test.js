@@ -218,7 +218,7 @@ test('🧹 global Master Search suggestion closes before navigation', async () =
 
 test('🚀 workspace boot gate — wait for data + first route before revealing dashboard', async () => {
   const app = await read('app.js');
-  assert.match(app, /const WORKSPACE_BOOT_MIN_MS = 3000/);
+  assert.match(app, /const WORKSPACE_BOOT_MIN_MS = 900/);
   assert.match(app, /const WORKSPACE_BOOT_MAX_MS = 3900/);
   assert.match(app, /window\.__FF_FINISH_BOOT = \(\) => \{/);
   assert.match(app, /if \(FF\.auth && FF\.auth\.user\) return/);

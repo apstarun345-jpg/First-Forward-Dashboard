@@ -2,12 +2,8 @@
 .cmp-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 12.5px; gap: 10px; }
 .cmp-head { flex-wrap: wrap; gap: 4px; }
 .age-cell { font-size: 12px; white-space: nowrap; }
-.cls-split table { width: 100%; }
 .cls-split tr.cls-total td { border-top: 1px dashed var(--line); background: color-mix(in srgb, var(--brand) 4%, transparent); }
 .cls-split .cls-cover { font-size: 10.5px; padding: 2px 7px; }
 .ql-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
 .ql-stat { display: flex; flex-direction: column; gap: 3px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
-.ql-stat small { color: var(--muted); font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
-.ql-stat b { font-size: 20px; }
 .ql-h { margin: 14px 0 8px; font-size: 13px; }
-.ql-stat b.ql-txt { font-size: 15px; line-height: 1.3; }

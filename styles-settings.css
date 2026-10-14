@@ -32,7 +32,7 @@
 .acc-card.t-ws { background: linear-gradient(135deg, #c2410c, #f59e0b); }
 .acc-card.t-act { background: linear-gradient(135deg, #0f766e, #2dd4bf); }
 .acc-card.t-sheet { background: linear-gradient(135deg, #be185d, #fb7185); }
-.acc-card.t-pages { background: linear-gradient(135deg, #6366f1, #a855f7); }
+.acc-card.t-pages { background: linear-gradient(135deg, #6366f1, #0d9488); }
 .gv-rate-settings { display: grid; gap: 8px; margin: 12px 0 4px; }
 .gv-rate-settings-head, .gv-rate-setting-row { display: grid; grid-template-columns: 110px minmax(180px, 1fr) minmax(150px, 1fr); gap: 10px; align-items: center; }
 .gv-rate-setting-row { padding: 10px; border: 1px solid var(--line); border-radius: 11px; background: var(--bg); }

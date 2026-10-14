@@ -3,7 +3,7 @@
 .tb-ico { font-size: 20px; }
 .tb-line { font-size: 13px; }
 .tb-status { font-weight: 800; margin-left: 6px; }
-.tb-fill { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--brand), var(--brand-2, #a855f7)); }
+.tb-fill { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--brand), var(--brand-2, #0d9488)); }
 .target-bar.bad .tb-fill { background: linear-gradient(90deg, #ef4444, #f97316); }
 .target-bar.mid .tb-fill { background: linear-gradient(90deg, #f59e0b, #facc15); }
 .tb-right { white-space: nowrap; }

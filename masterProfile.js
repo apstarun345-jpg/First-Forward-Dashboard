@@ -2342,8 +2342,9 @@ window.FF = window.FF || {};
     const isTlStockVisible = !!tlIdStockTable;
     const actions = `<div class="mp-actions"><button class="btn small primary" data-mp-pdf>📄 PDF</button><button class="btn small" data-mp-csv>⬇ CSV</button><button class="btn small" data-mp-copy>📋 Copy</button><button class="btn small" data-mp-wa>📲 WhatsApp</button>${isTl ? '' : `<button class="btn small" data-mp-a360="${esc(pr.name)}">👁 Agent 360</button>`}<a class="btn small" href="#/masterStock?q=${encodeURIComponent(pr.name)}">🗄️ Register / tags</a></div>`;
     const partial = pr.partial ? '<div class="mp-partial dim small" role="status">⏳ Kuch data abhi load ho raha hai (Google Sheet slow hai) — numbers poore hote hi apne aap update ho jayenge.</div>' : '';
-    const nav = `<nav class="mp-nav" aria-label="Report sections"><span class="dim small">Jao:</span>${[['kpis', '📦 Stock · KPI'], ['issuance', '🧾 Last vs Current'], ['class', '🎯 Class-wise'], ...(isTl && agentsTable ? [['agents', '🧑‍💼 Agents'], ['agentclass', '📦 Agent × Class']] : []), ...(isTl && isTlStockVisible ? [['tlstock', '🆔 TL ID stock']] : []), ['charts', '📊 Charts']].map(([k, l]) => `<button type="button" class="chip" data-mp-go="${k}">${l}</button>`).join('')}</nav>`;
-    return `<div class="mp">${partial}${noData}${head}${nav}${agentTlKpis}<div data-mp-sec="kpis">${kpis}</div>
+    const nav = `<nav class="mp-nav" aria-label="Report sections"><span class="dim small">Jao:</span>${[['insights', isTl ? '📈 Team health' : '📈 Activity'], ['kpis', '📦 Stock · KPI'], ['issuance', '🧾 Last vs Current'], ['class', '🎯 Class-wise'], ...(isTl && agentsTable ? [['agents', '🧑‍💼 Agents'], ['agentclass', '📦 Agent × Class']] : []), ...(isTl && isTlStockVisible ? [['tlstock', '🆔 TL ID stock']] : []), ['charts', '📊 Charts']].map(([k, l]) => `<button type="button" class="chip" data-mp-go="${k}">${l}</button>`).join('')}</nav>`;
+    const insights = FF.profileInsights && FF.profileInsights.html ? FF.profileInsights.html(pr) : '';
+    return `<div class="mp">${partial}${noData}${head}${nav}${insights}${agentTlKpis}<div data-mp-sec="kpis">${kpis}</div>
       ${calcHtml(pr)}
       ${growthHtml(pr)}
       <section class="mp-sec" data-mp-sec="issuance"><h4>🧾 Issuance summary${isTl ? ' — TL total' : ''}</h4>${summary}</section>
@@ -2458,6 +2459,7 @@ window.FF = window.FF || {};
   // ------------------------------------------------------------------ mount helpers
   function bind(el, pr) {
     el.__mpProfile = pr;
+    if (FF.profileInsights && FF.profileInsights.bind) FF.profileInsights.bind(el);
     if (el.__mpBound) return;
     el.__mpBound = true;
     el.addEventListener('click', (e) => {
@@ -2835,5 +2837,55 @@ window.FF = window.FF || {};
     </div>`;
   }
 
-  FF.masterProfile = { _comparableMtdGrowth: comparableMtdGrowth, _growthBlock: growthBlock, supports, quick, build, buildNow, html, groupBinsFor, csvRows, waText, renderInto, open, warm, load, loadFor, onData, isLoaded: () => loadedOnce, invalidate: resetProfileCache, suggest, suggestGro, findFfAgent, findGvAgent, mobileFor, reportDataRow, issuanceCardsHtml, gvTlSnapshot, peopleTableHtml, personFromRow, get suggestDays() { return suggestDays(); }, _buildSoon: buildSoon, _limits: LIMITS };
+
+  /**
+   * 📊 Dated issuance rows behind a profile (used by profileInsights: team-health boxes, top-10, daily chart).
+   * Same sources the profile numbers use — FF: EIR daily rows · GV: GV Master rows (tagged by GV TL ID).
+   * Every row is normalised to { key:'YYYY-MM-DD', ym, agentId, agentName, group:'VC4'|'VC20'|'VC5+', n }.
+   */
+  function insightRows(pr) {
+    if (!pr) return [];
+    const ch = pr.ch === 'gv' ? 'gv' : 'ff';
+    const isTl = /tl$/.test(pr.kind || '');
+    const nameKey = norm(pr.name);
+    const idKey = clean(pr.id).replace(/\.0+$/, '').toUpperCase();
+    let raw = [];
+    if (ch === 'ff') {
+      if (isTl) {
+        for (const r of (rowsOf('daily') || [])) {
+          if (!r || /gv|green/i.test(String(r.channel || ''))) continue;
+          if (norm(r.tlName || r.tl) !== nameKey) continue;
+          const rtl = clean(r.tlId).replace(/\.0+$/, '').toUpperCase();
+          if (idKey && rtl && rtl !== idKey) continue;
+          raw.push(r);
+        }
+      } else {
+        raw = ffAgentIssueRows(pr.name, [pr.id], pr.tl && pr.tl.name, pr.tl && pr.tl.id);
+      }
+    } else if (isTl) {
+      const master = safeCall(() => FF.gv && FF.gv.tlIssuanceRows ? FF.gv.tlIssuanceRows(pr.id, pr.name) : null, null);
+      if (Array.isArray(master) && master.length) raw = master;
+      else {
+        raw = (gvCanonicalIssuanceRows() || []).filter((r) => {
+          const rid = clean(r.gvTlId || r.tlId || r.supervisorId).replace(/\.0+$/, '').toUpperCase();
+          return (idKey && rid && rid === idKey) || (!rid && norm(r.tlName) === nameKey);
+        });
+      }
+    } else {
+      raw = gvAgentRows(gvCanonicalIssuanceRows(), nameKey, pr.id) || [];
+    }
+    const out = [];
+    for (const r of raw) {
+      if (!r) continue;
+      const dk = (r.key && /^\d{4}-\d{1,2}-\d{1,2}$/.test(String(r.key))) ? U.dateKey(U.fromDateKey(String(r.key)))
+        : (() => { const d = r.date || r.d; const dd = d instanceof Date ? d : U.parseDate(d); return dd && !isNaN(dd) ? U.dateKey(dd) : ''; })();
+      if (!dk) continue;
+      const q = r.n === '' || r.n === null || r.n === undefined ? 1 : Math.max(0, num(r.n));
+      if (!q) continue;
+      out.push({ key: dk, ym: dk.slice(0, 7), agentId: clean(r.agentId || r.id), agentName: clean(r.agentName || r.name), group: issueGroup(r), n: q });
+    }
+    return out;
+  }
+
+  FF.masterProfile = { _comparableMtdGrowth: comparableMtdGrowth, _growthBlock: growthBlock, supports, quick, build, buildNow, html, insightRows, groupBinsFor, csvRows, waText, renderInto, open, warm, load, loadFor, onData, isLoaded: () => loadedOnce, invalidate: resetProfileCache, suggest, suggestGro, findFfAgent, findGvAgent, mobileFor, reportDataRow, issuanceCardsHtml, gvTlSnapshot, peopleTableHtml, personFromRow, get suggestDays() { return suggestDays(); }, _buildSoon: buildSoon, _limits: LIMITS };
 })(window.FF);

@@ -51,7 +51,7 @@ window.FF = window.FF || {};
   // stock · priority · suggested dispatch FF.pages.performance se padhta hai. Pehle Master Search /
   // Tag Request / Summary pages par ye module load hi nahi hota tha (sirf Performance page kholne par
   // aata tha) → FF profile me "REPORT me row nahi mili", stock 0, priority —, suggested 0.
-  const PROFILE_DEPS = [...INSIGHT_DEPS, 'gvTruth', 'pdf', 'agentBoard', 'performance', 'masterProfile'];
+  const PROFILE_DEPS = [...INSIGHT_DEPS, 'gvTruth', 'pdf', 'agentBoard', 'performance', 'masterProfile', 'profileInsights'];
   const SUMMARY_DEPS = [...PROFILE_DEPS, 'agentSummary'];
   // 🧹 v3.62 — Wow Zone pages (arena/fame/warRoom/activity/network/radar/reportCards/sprints) hata
   // diye gaye, isliye `wow`/`wowzone` ab kisi page ki dependency nahi hain. `wowzone` (66 KB) sirf
