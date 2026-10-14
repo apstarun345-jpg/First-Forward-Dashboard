@@ -761,6 +761,24 @@ window.FF = window.FF || {};
       Items are matched on label/sub/keywords (case-insensitive); Enter picks the highlighted one, Esc closes.
       The list is portalled to <body> and anchored outside the input, so it can never cover typed text
       or get clipped by a card/table overflow container. */
+  // Optimal-string-alignment distance (insert / delete / replace / swap of neighbours = 1). Small strings only.
+  function editDistance(a, b) {
+    if (a === b) return 0;
+    if (Math.abs(a.length - b.length) > 2) return 9;
+    const m = a.length, n = b.length;
+    let prev2 = null, prev = Array.from({ length: n + 1 }, (_, j) => j);
+    for (let i = 1; i <= m; i++) {
+      const cur = [i];
+      for (let j = 1; j <= n; j++) {
+        const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+        let v = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
+        if (prev2 && i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) v = Math.min(v, prev2[j - 2] + 1);
+        cur.push(v);
+      }
+      prev2 = prev; prev = cur;
+    }
+    return prev[n];
+  }
   let suggestSeq = 0;
   const suggestRegistry = new Set();
   function suggest(input, opts) {
@@ -842,6 +860,36 @@ window.FF = window.FF || {};
         if (starts.length >= o.max) break;
       }
       list = starts.concat(contains).slice(0, o.max);
+      // 🔤 v3.79 — typo-tolerant fallback: "umesh shamra" → UMESH SHARMA. Every typed word (3+ letters) must
+      // match a word of the item by prefix or within 1 edit (2 for 7+ letters, swaps count as 1).
+      if (list.length < o.max && o.fuzzy !== false && /[a-z]{3}/.test(q)) {
+        const words = q.split(/[^a-z0-9]+/).filter(Boolean);
+        if (words.length && words.some((w) => w.length >= 3)) {
+          const seen = new Set(list);
+          const extra = [];
+          for (const it of all) {
+            if (seen.has(it)) continue;
+            const hayWords = norm(`${it.label} ${it.keywords || ''}`).split(/[^a-z0-9]+/).filter(Boolean);
+            if (!hayWords.length) continue;
+            let score = 0, ok = true;
+            for (const w of words) {
+              let best = 9;
+              for (const hw of hayWords) {
+                if (hw.startsWith(w)) { best = 0; break; }
+                if (w.length < 3) continue;
+                const d = editDistance(w, hw.slice(0, Math.max(w.length, Math.min(hw.length, w.length + 1))));
+                best = Math.min(best, d, editDistance(w, hw));
+              }
+              const allowed = w.length < 3 ? 0 : w.length >= 7 ? 2 : 1;
+              if (best > allowed) { ok = false; break; }
+              score += best;
+            }
+            if (ok) extra.push([score, it]);
+          }
+          extra.sort((a, b) => a[0] - b[0]);
+          list = list.concat(extra.slice(0, o.max - list.length).map((x) => x[1]));
+        }
+      }
       active = list.length ? 0 : -1;
       render();
     }

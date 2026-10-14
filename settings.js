@@ -1538,10 +1538,43 @@ FF.pages = FF.pages || {};
         });
         people = { agents: [...agents.values()], tls: [...tls.entries()].map(([name, n]) => ({ name, n })) };
       }
-      if (kindEl.value === 'tl') return (people.tls || []).map((t) => ({ kind: 'tl', kindLabel: 'TL', label: t.name, id: t.id || t.tlId || '', mobile: t.mobile || '', sub: t.n ? `${U.fmtShort(t.n)} tags` : '', value: t.name }));
-      return (people.agents || []).map((a) => ({ kind: 'agent', kindLabel: 'Agent', label: a.name, id: a.id || a.agentId || '', mobile: a.mobile || '', sub: a.tl || (a.id ? `ID ${a.id}` : ''), keywords: a.id || '', value: a.name }));
+      let out;
+      if (kindEl.value === 'tl') out = (people.tls || []).map((t) => ({ kind: 'tl', kindLabel: 'TL', label: t.name, id: t.id || t.tlId || '', mobile: t.mobile || '', sub: t.n ? `${U.fmtShort(t.n)} tags` : '', value: t.name }));
+      else out = (people.agents || []).map((a) => ({ kind: 'agent', kindLabel: 'Agent', label: a.name, id: a.id || a.agentId || '', mobile: a.mobile || '', sub: a.tl || (a.id ? `ID ${a.id}` : ''), keywords: a.id || '', value: a.name }));
+      // 🔎 v3.79 — REPORT alone misses TLs/agents that only appear in StockDataa / EIR / GV Master. Add everyone
+      // the Master Search index knows for this source + kind (same names the top search bar finds).
+      if (msPeople && msPeople.length) {
+        const want = (sourceEl.value === 'gv' ? 'gv-' : 'ff-') + (kindEl.value === 'tl' ? 'tl' : 'agent');
+        const nk = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+        const have = new Map(out.map((it) => [nk(it.label), it]));
+        for (const p of msPeople) {
+          if (!p || p.kind !== want || !p.name) continue;
+          const key = nk(p.name);
+          const mobile = msMobiles.get(want + '|' + key) || '';
+          const prev = have.get(key);
+          if (prev) { if (!prev.id && p.sub) prev.id = p.sub; if (!prev.mobile && mobile) prev.mobile = mobile; continue; }
+          const tl = p.tlSet && p.tlSet.size ? [...p.tlSet][0] : '';
+          const it = want.endsWith('tl')
+            ? { kind: 'tl', kindLabel: 'TL', label: p.name, id: p.sub || '', mobile, sub: p.sub ? `ID ${p.sub}` : 'TL', keywords: p.sub || '', value: p.name }
+            : { kind: 'agent', kindLabel: 'Agent', label: p.name, id: p.sub || '', mobile, sub: tl || (p.sub ? `ID ${p.sub}` : ''), keywords: p.sub || '', value: p.name };
+          have.set(key, it); out.push(it);
+        }
+      }
+      return out;
     };
-    U.suggest(nameEl, {
+    let msPeople = null;
+    const msMobiles = new Map();
+    (async () => {
+      try {
+        if (!FF.masterSearch && FF.lazy && FF.lazy.inject) await FF.lazy.inject('masterSearch');
+        if (!FF.masterSearch || !FF.masterSearch.buildLight) return;
+        const idx = await FF.masterSearch.buildLight();
+        if (idx && idx.mobiles) idx.mobiles.forEach((v) => { if (v && v.name && v.kind) msMobiles.set(v.kind + '|' + String(v.name).toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim(), String(v.mobile || '').replace(/\D/g, '').slice(-10)); });
+        msPeople = idx && idx.people ? [...idx.people.values()] : [];
+        if (plSug && plSug.refresh && nameEl.isConnected && document.activeElement === nameEl && nameEl.value.trim()) plSug.refresh();
+      } catch (err) { console.warn('personal links: master index', err && err.message); }
+    })();
+    const plSug = U.suggest(nameEl, {
       min: 1,
       items: suggestionItems,
       onPick: (it) => {
