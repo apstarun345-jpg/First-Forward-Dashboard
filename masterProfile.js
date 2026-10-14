@@ -2370,8 +2370,16 @@ window.FF = window.FF || {};
     const issuancePane = `<section class="mp-sec" data-mp-sec="issuance"><h4>🧾 Issuance summary${isTl ? ' — TL total' : ''}</h4>${summary}</section>
       <details class="mp-more" data-mp-sec="class" open><summary>🎯 All classes · last month vs this month + stock</summary>${clsTable}</details>
       ${growthDetails}${issuanceCharts ? `<section class="mp-sec" data-mp-sec="charts"><h4>📊 Mix &amp; trend</h4>${issuanceCharts}</section>` : ''}`;
-    const stockPane = `<section class="mp-sec" data-mp-sec="stock"><h4>📦 Stock &amp; dispatch</h4>${stockNotes}</section>
-      ${calcHtml(pr)}${tlIdStockTable}${stockCharts ? `<section class="mp-sec">${stockCharts}</section>` : ''}`;
+    const stockInsights = FF.profileStock && FF.profileStock.html ? FF.profileStock.html(pr) : '';
+    // Stock tab: [stock health — boxes · top 10 · stock-vs-need chart] → dispatch notes + calculation → TL-ID stock.
+    // (The old "stock by class" donut is replaced by the class-wise stock-vs-need bars inside the stock-health block.)
+    // The heading of a reference table becomes the <summary> of a collapsed block (open it only when needed).
+    const asDetails = (inner) => {
+      const m = inner && inner.match(/<h4>([\s\S]*?)<\/h4>/);
+      return m ? `<details class="mp-more"><summary>${m[1]}</summary>${inner.replace(m[0], '')}</details>` : (inner || '');
+    };
+    const stockPane = `${stockInsights}<section class="mp-sec" data-mp-sec="stock">${stockNotes}</section>
+      ${asDetails(calcHtml(pr))}${asDetails(tlIdStockTable)}${stockInsights ? '' : (stockCharts ? `<section class="mp-sec">${stockCharts}</section>` : '')}`;
     return `<div class="mp${embedded ? ' mp-embedded' : ''}">${partial}${noData}${head}${embedded ? '' : `<div class="mp-kpi-top" data-mp-kpis>${kpis}</div>`}${tabBar}
       ${pane('overview', overviewPane)}${pane('issuance', issuancePane)}${pane('stock', stockPane)}${isTl && agentsTable ? pane('agents', agentsTable) : ''}</div>`;
   }
@@ -2481,6 +2489,7 @@ window.FF = window.FF || {};
   function bind(el, pr) {
     el.__mpProfile = pr;
     if (FF.profileInsights && FF.profileInsights.bind) FF.profileInsights.bind(el);
+    if (FF.profileStock && FF.profileStock.bind) FF.profileStock.bind(el);
     if (el.__mpBound) return;
     el.__mpBound = true;
     el.addEventListener('click', (e) => {
