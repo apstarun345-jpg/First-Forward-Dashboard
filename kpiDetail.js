@@ -142,6 +142,8 @@ window.FF = window.FF || {};
     else if (/commercial|nvc4/i.test(title) && !/vc4 vs|vs commercial/i.test(title)) spec.f = 'comm';
     else if (/\bVC4\b/i.test(title) && !/commercial/i.test(title)) spec.f = 'vc4';
     else if (/\bVC20\b/i.test(title)) spec.f = 'vc20';
+    // Dashboard = sirf EIR (GV = master ID wali rows): uske cards ka drawer bhi EIR-only, GV Master ka plus nahi.
+    if (page === 'dashboard' && (spec.src === 'both' || spec.src === 'gv')) spec.eir = '1';
     spec.foot = foot;
     return spec;
   }
@@ -168,10 +170,14 @@ window.FF = window.FF || {};
     if (!G || !G.issuanceRows) return [];
     return G.issuanceRows().map((r) => ({ ...r, raw: null }));
   }
+  /** spec.eir=1 → sirf EIR sheet (store daily): GV = EIR me master ID wali rows (5845036), GV Master ka koi plus nahi.
+   *  Home / Dashboard ke month cards isi se bante hain, isliye unka drawer bhi isi mode me khulta hai. */
+  const eirOnlySpec = (spec) => !!spec && String(spec.eir || '') === '1';
   async function issuanceRows(src, spec) {
+    const eirOnly = eirOnlySpec(spec);
     // GV TL / agent card aur uska click ek hi tag-level source use karein. GV Master column R
     // (GV TL ID) se TL rows seedha chune jaate hain; EIR ke grouped totals ko unke upar add nahi karte.
-    if (src === 'gv' && spec && FF.gv) {
+    if (src === 'gv' && spec && FF.gv && !eirOnly) {
       const G = FF.gv;
       let master = G.get && G.get('master');
       if (!Array.isArray(master) && G.need) {
@@ -196,13 +202,14 @@ window.FF = window.FF || {};
     }
     let daily = FF.store.get('daily');
     if (!daily) { try { daily = await FF.store.need('daily'); } catch { daily = []; } }
+    if (eirOnly && FF.model && FF.model.eirOnlyDaily) daily = FF.model.eirOnlyDaily(daily);   // GV Master ka aaj ka live bhi nahi
     // 🟩 GV ka aaj ka data GV Master se aata hai (model/gv layer ise already splice karta hai),
     // 🟦 FF ka data EIR se. Isliye yahan sirf channel split aur T+1 lag filter hota hai.
     let rows = (daily || []).filter((r) => src === 'both' || (src === 'gv' ? r.channel === 'GV Partner' : r.channel !== 'GV Partner'));
     // 🩹 GV ka ledger = gv layer (EIR + GV Master ka per-tag supplement). Store ke GV rows usi layer se
     // bante hain, tab bhi Master ka jo hissa EIR me missing tha wo sirf `gv.issuanceRows()` me milta hai —
     // isliye GV rows ko wahin se lo, warna KPI ka number (GV Master) aur drill (sirf EIR) alag-alag dikhte hain.
-    if ((src === 'gv' || src === 'both') && FF.gv && typeof FF.gv.issuanceRows === 'function') {
+    if (!eirOnly && (src === 'gv' || src === 'both') && FF.gv && typeof FF.gv.issuanceRows === 'function') {
       const gvRows = FF.gv.issuanceRows();
       if (Array.isArray(gvRows) && gvRows.length) {
         const mapGv = (r) => ({
@@ -220,7 +227,9 @@ window.FF = window.FF || {};
     return rows;
   }
   /** Kis date tak FF reported hai — note ke liye. */
-  const ffPendingNote = () => (FF.filters && FF.filters.ffLagOn && FF.filters.ffLagOn())
+  const ffPendingNote = (spec) => eirOnlySpec(spec)
+    ? `<p class="dim small">🔁 <b>Source:</b> the <b>EIR sheet</b> only (T+1 — data up to yesterday). GV = EIR rows with master ID ${esc(FF.config.eir.gvMasterId || '5845036')}, everything else is First Forward. GV Master is not added on top, so the card number and this list never double count.</p>`
+    : (FF.filters && FF.filters.ffLagOn && FF.filters.ffLagOn())
     ? `<p class="dim small">🔁 <b>Sources:</b> First Forward ka aaj ka issuance <b>EIR</b> se (T+1 — kal aata hai), GV Partner ka aaj ka issuance <b>GV Master</b> sheet se (live). Purane dinon ka ledger EIR hai.</p>` : '';
   function latestKey(rows) { return rows.reduce((m, r) => (r.key > m ? r.key : m), ''); }
   function period(spec, rows) {
@@ -472,7 +481,7 @@ window.FF = window.FF || {};
     const days = [...new Set(cur.map((r) => r.key))].sort();
     const periodLabel = p.from === p.to ? `${U.labelDateKey(p.from, true)} (${U.weekday(U.fromDateKey(p.from))})` : `${U.labelDateKey(p.from, true)} → ${U.labelDateKey(p.to, true)}`;
     // 🟩 GV aaj = GV Master sheet (live) · 🟦 FF = EIR (T+1). Purane dinon ke liye EIR ledger.
-    const srcLabel = useSheet ? 'GV Partner · GV REPORT sheet + GV Master (live)' : spec.src === 'gv' ? 'GV Partner · GV Master sheet (live)' : spec.src === 'ff' ? 'First Forward issuance · EIR sheet (T+1)' : 'First Forward (EIR) + GV Partner (GV Master)';
+    const srcLabel = eirOnlySpec(spec) ? (spec.src === 'gv' ? 'GV Partner · EIR sheet (master ID rows)' : spec.src === 'ff' ? 'First Forward · EIR sheet (T+1)' : 'EIR sheet · First Forward + GV Partner (GV = EIR master ID rows)') : useSheet ? 'GV Partner · GV REPORT sheet + GV Master (live)' : spec.src === 'gv' ? 'GV Partner · GV Master sheet (live)' : spec.src === 'ff' ? 'First Forward issuance · EIR sheet (T+1)' : 'First Forward (EIR) + GV Partner (GV Master)';
     let reconciliationNote = '';
     if (sheetCtx && sheetCtx.isTl) {
       const reportTotal = sheetCtx.fullTotal;
@@ -526,14 +535,14 @@ window.FF = window.FF || {};
       const line = (label, fn) => { const c = total(cur.filter(fn)); return { label, c, rate: c / od, exp: Math.round((c / od) * md), l: total(lastAll.filter(fn)) }; };
       const lines = [line('VC4', (r) => r.group === 'VC4'), line('VC20', (r) => r.group === 'VC20'), line('VC5+', (r) => r.group !== 'VC4' && r.group !== 'VC20'), line('Total', () => true)];
       const isRun = spec.view === 'runrate';
-      const head = isRun ? `⚡ Run rate · per day — ${U.labelYM(ym)}` : `🎯 Expected in ${U.labelYM(ym)} — kaise bana`;
-      formula = `<div class="kd-formula">📐 ${isRun ? 'Run rate' : 'Month-end expected'} = ${U.fmt(ledgerTot)} tags ÷ ${U.fmt(od)} reported din${isRun ? '' : ` × ${U.fmt(md)} din`} = <b>${isRun ? `${U.fmt(ledgerTot / od, true)} / day` : U.fmt(Math.round((ledgerTot / od) * md))}</b></div>`;
-      forecast = `<section class="kd-sec"><h4>${head}</h4><div class="table-wrap"><table class="tbl compact kd-tbl"><thead><tr><th>Class</th><th class="num">Reported (1–${U.fmt(od)})</th><th class="num">Per day</th><th class="num">Expected month-end</th><th class="num">${esc(U.labelYM(lym))} (full)</th><th class="num">vs last month</th></tr></thead><tbody>${lines.map((l, i) => `<tr${i === lines.length - 1 ? ' class="kd-total"' : ''}><td><b>${esc(l.label)}</b></td><td class="num">${U.fmt(l.c)}</td><td class="num">${U.fmt(l.rate, true)}</td><td class="num"><b>${U.fmt(l.exp)}</b></td><td class="num">${U.fmt(l.l)}</td><td class="num">${U.deltaHtml(U.growth(l.exp, l.l), { decimals: 1 })}</td></tr>`).join('')}</tbody></table></div><p class="dim small">Sirf <b>reported din</b> (1–${U.fmt(od)}) gine gaye — aaj ka adhura din shaamil nahi, taaki forecast phula hua na dikhe. Neeche day-wise table me har din ka actual hai.</p></section>`;
+      const head = isRun ? `⚡ Run rate · per day — ${U.labelYM(ym)}` : `🎯 How “Expected in ${U.labelYM(ym)}” is calculated`;
+      formula = `<div class="kd-formula">📐 ${isRun ? 'Run rate' : 'Month-end expected'} = ${U.fmt(ledgerTot)} tags ÷ ${U.fmt(od)} reported days${isRun ? '' : ` × ${U.fmt(md)} days`} = <b>${isRun ? `${U.fmt(ledgerTot / od, true)} / day` : U.fmt(Math.round((ledgerTot / od) * md))}</b></div>`;
+      forecast = `<section class="kd-sec"><h4>${head}</h4><div class="table-wrap"><table class="tbl compact kd-tbl"><thead><tr><th>Class</th><th class="num">Reported (1–${U.fmt(od)})</th><th class="num">Per day</th><th class="num">Expected month-end</th><th class="num">${esc(U.labelYM(lym))} (full)</th><th class="num">vs last month</th></tr></thead><tbody>${lines.map((l, i) => `<tr${i === lines.length - 1 ? ' class="kd-total"' : ''}><td><b>${esc(l.label)}</b></td><td class="num">${U.fmt(l.c)}</td><td class="num">${U.fmt(l.rate, true)}</td><td class="num"><b>${U.fmt(l.exp)}</b></td><td class="num">${U.fmt(l.l)}</td><td class="num">${U.deltaHtml(U.growth(l.exp, l.l), { decimals: 1 })}</td></tr>`).join('')}</tbody></table></div><p class="dim small">Only <b>reported days</b> (1–${U.fmt(od)}) are counted — today’s partial day is excluded so the forecast is not inflated. Day-wise actuals are in the table below.</p></section>`;
     }
     // 🎯 "Expected Today" card = pichhle same-weekday ka average → wahi din + unka average yahin dikhta hai.
     if (spec.view === 'weekday' && days.length) {
       const avg = Math.round(ledgerTot / days.length);
-      formula = `<div class="kd-formula">📐 Expected today = ${days.slice().reverse().map((k) => U.fmt(total(cur.filter((r) => r.key === k)))).join(' + ')} ÷ ${U.fmt(days.length)} same-weekday din = <b>${U.fmt(avg)}</b></div>`;
+      formula = `<div class="kd-formula">📐 Expected today = ${days.slice().reverse().map((k) => U.fmt(total(cur.filter((r) => r.key === k)))).join(' + ')} ÷ ${U.fmt(days.length)} same-weekday days = <b>${U.fmt(avg)}</b></div>`;
     }
     const body = `<div class="kd-hero"><div><span class="kd-kicker">${esc(srcLabel)}</span><div class="kd-big">${U.fmt(tot)} <small>tags</small></div><div class="kd-sub">${esc(periodLabel)}${filt ? ` · filter: <b>${esc(filt.label)}</b>` : ''}</div>${formula}</div><div class="kd-vs">${U.deltaHtml(U.growth(tot, ptot), { decimals: 0 })}<small>vs ${esc(prevLabel)}: <b>${U.fmt(ptot)}</b></small></div></div>
       ${forecast}${reconciliationNote}
@@ -557,7 +566,7 @@ window.FF = window.FF || {};
       ${matrix('🧮 Class × Chassis / VRN', cur, (r) => r.cls, (r) => vrnBucket(r.vrnType).replace(/^New \/ VRN.*/, 'New / VRN'), { head: 'Class', sortCls: true, drillRow: (key) => ({ cls: key, f: '', type: '', vrnBucket: '' }), drillCell: (cls, bucket) => ({ cls, f: '', type: '', vrnBucket: bucket }) })}
       ${matrix('🧮 Class × Channel', cur, (r) => r.cls, (r) => r.channel, { head: 'Class', sortCls: true, drillRow: (key) => ({ cls: key, f: '', type: '', vrnBucket: '' }), drillCell: (cls, channel) => ({ cls, src: /GV Partner/i.test(channel) ? 'gv' : 'ff', channel: '', f: '', type: '', vrnBucket: '' }) })}
       ${dayTable}
-      ${ffPendingNote()}
+      ${ffPendingNote(spec)}
       <section class="kd-sec" id="kd-raw"><h4>📄 Poora data — sab ${U.fmt(ledgerTot || tot)} tags (tag-level list)</h4>
         <p class="dim small">Har tag ki row: Tag ID, VRN, class, type, VRN type, status, agent, TL, channel. ${spec.src === 'gv' ? '' : 'First Forward rows Google Sheet (EIR) se abhi on-demand aayengi.'}</p>
         <div class="btn-row"><button class="btn primary" data-kd-raw>📄 Load all ${U.fmt(ledgerTot || tot)} rows</button></div><div id="kd-raw-body"></div></section>`;
@@ -662,7 +671,7 @@ window.FF = window.FF || {};
     const byVrn = tally(inRange, (r) => vrnBucket(r.vrnType));
     const days = [...byDay.keys()].sort();
     const periodLabel = p.from === p.to ? U.labelDateKey(p.from, true) : `${U.labelDateKey(p.from, true)} → ${U.labelDateKey(p.to, true)}`;
-    const otherRows = (await issuanceRows('both')).filter((r) => (r.agentName || '') !== name);
+    const otherRows = (await issuanceRows('both', spec)).filter((r) => (r.agentName || '') !== name);
     const rank = [...tally(otherRows.concat(inRange), (r) => r.agentName || r.agentId || '—').entries()].sort((a, b) => b[1] - a[1]).findIndex(([k]) => k === name) + 1;
     state.rows = inRange; state.period = p; state.spec = spec; state.raw = null;
     const ledgerVc4 = total(inRange.filter((r) => r.group === 'VC4'));
@@ -740,8 +749,9 @@ window.FF = window.FF || {};
     const wantGv = spec.src === 'gv' || spec.src === 'both';
     const wantFf = spec.src === 'ff' || spec.src === 'both';
     // 🟩 GV side — GV Master tab se (live). Master load ho chuka hai to Google par dobara query nahi.
-    const gvRows = wantGv ? gvMasterRawRows(spec, p) : [];
-    const gvFromMaster = wantGv && gvMasterScopeAvailable(spec);
+    const eirOnly = eirOnlySpec(spec);
+    const gvRows = wantGv && !eirOnly ? gvMasterRawRows(spec, p) : [];
+    const gvFromMaster = wantGv && !eirOnly && gvMasterScopeAvailable(spec);
     out.push(...gvRows);
     // 🟦 FF side (aur GV ka fallback jab GV Master load na hua ho) — EIR tab se.
     const needsEir = wantFf || (wantGv && !gvFromMaster);
@@ -773,7 +783,7 @@ window.FF = window.FF || {};
     out.sort((a, b) => (a[0] < b[0] ? 1 : a[0] > b[0] ? -1 : 0));
     state.raw = out;
     state.rawGv = gvRows.length;
-    state.rawSrc = gvFromMaster && wantGv ? (wantFf ? 'EIR (FF) + GV Master (GV)' : 'GV Master') : (wantGv && wantFf ? 'EIR (FF + GV)' : wantFf ? 'EIR' : 'EIR');
+    state.rawSrc = eirOnly ? 'EIR (FF + GV · master ID rows = GV)' : gvFromMaster && wantGv ? (wantFf ? 'EIR (FF) + GV Master (GV)' : 'GV Master') : (wantGv && wantFf ? 'EIR (FF + GV)' : wantFf ? 'EIR' : 'EIR');
     return out;
   }
   function renderRaw(filter) {
@@ -1195,7 +1205,7 @@ window.FF = window.FF || {};
     return { kicker: 'KPI detail · GV agent stock', title: `${agent} · stock`, sub: `${spec.cls ? `${esc(spec.cls)} · ` : ''}<b>${U.fmt(n)}</b> in-stock tags in Tag Assignment`, body: content || '<div class="empty">Is agent ka stock data nahi mila.</div>' };
   }
   async function tagDetail(spec) {
-    const available = await issuanceRows(spec.src || 'both');
+    const available = await issuanceRows(spec.src || 'both', spec);
     state.spec = spec; state.period = period(spec, available); state.rows = null; state.raw = null;
     const matches = await loadRaw();
     const row = matches[0];

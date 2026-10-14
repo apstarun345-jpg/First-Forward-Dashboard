@@ -40,7 +40,7 @@ test('Home shows a clickable All Commercial KPI with last-month actual and curre
   const expected = Math.round((10 / now.getDate()) * U.daysInMonth(curYm));
 
   assert.match(html, /All Commercial · VC20 \+ VC5\+/);
-  assert.match(html, /data-kpi="src=both&amp;scope=mtd&amp;ym=[^&]+&amp;f=comm"/, 'card drills into current-month Commercial');
+  assert.match(html, /data-kpi="src=both&amp;scope=mtd&amp;ym=[^&]+&amp;f=comm&amp;eir=1"/, 'card drills into current-month Commercial');
   assert.match(html, /Last month full <b>13<\/b>/, 'full prior-month Commercial shown');
   assert.match(html, new RegExp(`Expected this month <b>${expected}<\/b>`), 'Commercial expected month-end shown');
   assert.match(html, /data-kpi-value|kpi-value/);

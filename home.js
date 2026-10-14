@@ -374,24 +374,11 @@ FF.pages = FF.pages || {};
       n: Math.max(0, Number(quantity) || 0), live: true, source: 'gv-today-feed'
     })).filter((row) => row.n > 0);
   }
-  /** 🟩 GV ledger = jis layer se drawer khulta hai (gv.issuanceRows = EIR + GV Master ka wo hissa jo EIR me missing).
-   *  Card ka number bhi isi se banta hai, warna card (sirf EIR) aur click ka drawer (EIR + Master) alag totals dikhate the.
-   *  null = GV Master abhi load nahi hua / layer nahi hai → purana (sirf store) data. */
-  function gvLedgerRows() {
-    const g = FF.gv;
-    if (!g || typeof g.issuanceRows !== 'function' || typeof g.get !== 'function') return null;
-    if (!Array.isArray(g.get('master'))) return null;
-    let led;
-    try { led = g.issuanceRows(); } catch { return null; }
-    if (!Array.isArray(led) || !led.length) return null;
-    return led.map((r) => (r.key ? r : { ...r, key: U.dateKey(r.d || r.date || new Date(0)) }));
-  }
-  /** Pichhle 4 same-weekday (GV ledger se) — Expected Today ka average + unke din. null = ledger ready nahi. */
-  function ledgerWeekdays(dayKeyNow) {
-    const led = gvLedgerRows();
-    if (!led) return null;
+  /** Pichhle 4 same-weekday ke GV din (EIR se: master ID 5845036 wali rows) — Expected Today ka average + unke din.
+   *  null = EIR rows nahi mili. Card aur click ka drawer (eir=1&dow=…) yahi din dikhate hain. */
+  function eirWeekdays(dayKeyNow, rows) {
     const series = {};
-    for (const r of led) { if (r.channel === 'GV Partner' && r.key && r.key < dayKeyNow) series[r.key] = (series[r.key] || 0) + (Number(r.n) || 0); }
+    for (const r of rows || []) { if (r.channel === 'GV Partner' && r.key && r.key < dayKeyNow) series[r.key] = (series[r.key] || 0) + (Number(r.n) || 0); }
     const wd = U.fromDateKey(dayKeyNow).getDay();
     const keys = Object.keys(series).filter((k) => U.fromDateKey(k).getDay() === wd).sort().reverse().slice(0, 4).reverse();
     if (!keys.length) return null;
@@ -405,12 +392,6 @@ FF.pages = FF.pages || {};
     if (replace) rows = rows.filter((r) => !(r.channel === 'GV Partner' && r.key === tk));
     const added = replace ? gvTodayRows.length : 0;
     if (added) rows.push(...gvTodayRows);
-    // GV ke pichhle din drawer wale ledger se (aaj ke live rows upar se hi aa chuke hain).
-    const led = replace ? gvLedgerRows() : null;
-    if (led) {
-      const gvToday = rows.filter((r) => r.channel === 'GV Partner' && r.key === tk);
-      rows = rows.filter((r) => r.channel !== 'GV Partner').concat(led.filter((r) => r.channel === 'GV Partner' && r.key !== tk), gvToday);
-    }
     return {
       rows,
       gvLiveAdded: replace,
@@ -449,7 +430,7 @@ FF.pages = FF.pages || {};
       const t = TODAY(), from = new Date(t), to = new Date(t);
       from.setDate(from.getDate() - 28); to.setDate(to.getDate() - 1);
       const ks = Array.isArray(live.weekdayKeys) && live.weekdayKeys.length ? live.weekdayKeys.slice().sort() : null;
-      return `src=gv&scope=range&from=${ks ? ks[0] : dayKey(from)}&to=${dayKey(to)}&dow=${t.getDay()}&view=weekday`;
+      return `src=gv&scope=range&from=${ks ? ks[0] : dayKey(from)}&to=${dayKey(to)}&dow=${t.getDay()}&view=weekday&eir=1`;
     };
     const cards = [
       kpi('g11', 'Aaj Total (GV live)', '🏷️', U.fmt(live.total),
@@ -505,7 +486,7 @@ FF.pages = FF.pages || {};
     const curGv = M.summary(sf.gv || [], curKey);
     // Expected / Run Rate drawer: report-cutoff tak ka period (aaj ka adhura din shaamil nahi) — card ke formula jaisa.
     const cutKey = reportDay ? `${curKey}-${String(reportDay).padStart(2, '0')}` : '';
-    const fcSpec = (view) => (cutKey ? `src=both&scope=range&from=${curKey}-01&to=${cutKey}&view=${view}` : `src=both&scope=mtd&ym=${curKey}`);
+    const fcSpec = (view) => (cutKey ? `src=both&scope=range&from=${curKey}-01&to=${cutKey}&view=${view}&eir=1` : `src=both&scope=mtd&ym=${curKey}&eir=1`);
     const rate = observedDay ? reportedSc.total / observedDay : 0;
     const commercialRate = observedDay ? reportedSc.comm / observedDay : 0;
     const expected = observedDay ? Math.round(rate * daysInMonth) : 0;
@@ -539,16 +520,16 @@ FF.pages = FF.pages || {};
     const cards = [
       kpi('g9', `Last day · ${U.labelDate(y)}`, '🗓️', U.fmt(lastDayNow),
         `${momChip(lastDayNow, lastDayPrev, `${prevLabel} ${Math.min(yDay, U.daysInMonth(prevKey))}`)}<br>${splitFoot(yFf, yGv)}`,
-        `src=both&scope=day&date=${yKey}`),
+        `src=both&scope=day&date=${yKey}&eir=1`),
       kpi('g1', `${monthLabel} total (MTD)`, '🏷️', U.fmt(sc.total),
         `${momChip(sc.total, lastSum.total, `${prevLabel} ${observedDay} din`)}<br>${splitFoot(curFf.total, curGv.total)}`,
-        `src=both&scope=mtd&ym=${curKey}`),
-      kpi('g3', 'VC4', '🚗', U.fmt(sc.vc4), `${momChip(sc.vc4, lastSum.vc4)}<br>${splitFoot(curFf.vc4, curGv.vc4)}`, `src=both&scope=mtd&ym=${curKey}&f=vc4`),
-      kpi('g8', 'VC20', '🛻', U.fmt(sc.vc20), `${momChip(sc.vc20, lastSum.vc20)}<br>${splitFoot(curFf.vc20, curGv.vc20)}`, `src=both&scope=mtd&ym=${curKey}&f=vc20`),
-      kpi('g6', 'VC5+', '🚚', U.fmt(sc.vc5p), `${momChip(sc.vc5p, lastSum.vc5p)}<br>${splitFoot(curFf.vc5p, curGv.vc5p)}`, `src=both&scope=mtd&ym=${curKey}&f=vc5p`),
-      kpi('g12', 'All Commercial · VC20 + VC5+', '🚛', U.fmt(sc.comm), `${momChip(sc.comm, lastSum.comm, `${prevLabel} · same ${Math.min(compareDay, U.daysInMonth(prevKey))} reported din`)}<br>Last month full <b>${U.fmt(lastFull.comm)}</b> · Expected this month <b>${U.fmt(expectedCommercial)}</b> <span class="dim">(report till ${observedDay ? esc(U.labelDateKey(`${curKey}-${String(observedDay).padStart(2,'0')}`)) : '—'})</span>`, `src=both&scope=mtd&ym=${curKey}&f=comm`),
-      kpi('g5', 'Replacement', '🔁', U.fmt(sc.replacement), `${momChip(sc.replacement, lastSum.replacement)}<br>${splitFoot(curFf.replacement, curGv.replacement)}`, `src=both&scope=mtd&ym=${curKey}&f=repl`),
-      kpi('g7', 'Chassis', '🔧', U.fmt(sc.chassis), `${momChip(sc.chassis, lastSum.chassis)}<br>${splitFoot(curFf.chassis, curGv.chassis)}`, `src=both&scope=mtd&ym=${curKey}&f=chassis`),
+        `src=both&scope=mtd&ym=${curKey}&eir=1`),
+      kpi('g3', 'VC4', '🚗', U.fmt(sc.vc4), `${momChip(sc.vc4, lastSum.vc4)}<br>${splitFoot(curFf.vc4, curGv.vc4)}`, `src=both&scope=mtd&ym=${curKey}&f=vc4&eir=1`),
+      kpi('g8', 'VC20', '🛻', U.fmt(sc.vc20), `${momChip(sc.vc20, lastSum.vc20)}<br>${splitFoot(curFf.vc20, curGv.vc20)}`, `src=both&scope=mtd&ym=${curKey}&f=vc20&eir=1`),
+      kpi('g6', 'VC5+', '🚚', U.fmt(sc.vc5p), `${momChip(sc.vc5p, lastSum.vc5p)}<br>${splitFoot(curFf.vc5p, curGv.vc5p)}`, `src=both&scope=mtd&ym=${curKey}&f=vc5p&eir=1`),
+      kpi('g12', 'All Commercial · VC20 + VC5+', '🚛', U.fmt(sc.comm), `${momChip(sc.comm, lastSum.comm, `${prevLabel} · same ${Math.min(compareDay, U.daysInMonth(prevKey))} reported din`)}<br>Last month full <b>${U.fmt(lastFull.comm)}</b> · Expected this month <b>${U.fmt(expectedCommercial)}</b> <span class="dim">(report till ${observedDay ? esc(U.labelDateKey(`${curKey}-${String(observedDay).padStart(2,'0')}`)) : '—'})</span>`, `src=both&scope=mtd&ym=${curKey}&f=comm&eir=1`),
+      kpi('g5', 'Replacement', '🔁', U.fmt(sc.replacement), `${momChip(sc.replacement, lastSum.replacement)}<br>${splitFoot(curFf.replacement, curGv.replacement)}`, `src=both&scope=mtd&ym=${curKey}&f=repl&eir=1`),
+      kpi('g7', 'Chassis', '🔧', U.fmt(sc.chassis), `${momChip(sc.chassis, lastSum.chassis)}<br>${splitFoot(curFf.chassis, curGv.chassis)}`, `src=both&scope=mtd&ym=${curKey}&f=chassis&eir=1`),
       kpi('g2', `Expected in ${U.labelYM(curKey)}`, '🎯',
         `<div class="hm-expected-compare">${expectedClassRow('VC4', expectedByClass.vc4, lastFull.vc4)}${expectedClassRow('VC20', expectedByClass.vc20, lastFull.vc20)}${expectedClassRow('VC5+', expectedByClass.vc5p, lastFull.vc5p)}<div class="hm-expected-total"><span>Total Expected</span><b>${U.fmt(expected)}</b></div></div>`,
         `EIR forecast · ${observedDay}/${daysInMonth} reported days · today excluded<br><span class="dim">Report till <b>${observedDay ? esc(U.labelDateKey(`${curKey}-${String(observedDay).padStart(2,'0')}`)) : '—'}</b> · last month full <b>${U.fmt(lastTotalFull)}</b> · expected <b>${U.fmt(lastExpected)}</b></span>`,
@@ -558,7 +539,7 @@ FF.pages = FF.pages || {};
         `Daily average · EIR till ${esc(ctx.receivedDate ? U.labelDate(ctx.receivedDate, true) : '—')} · 1 day lag`,
         fcSpec('runrate'), `${U.fmt(rate, true)} / day`)
     ];
-    return card(`📅 ${esc(monthLabel)} · KPI cards <span class="dim">· issuance EIR se (GV = master ID ${esc(FF.config.eir.gvMasterId || '5845036')}, baaki FF)${sg.liveToday ? ' · GV aaj GV Master se live' : ''} · har card ke andar last month vs current month + %</span>`,
+    return card(`📅 ${esc(monthLabel)} · KPI cards <span class="dim">· issuance from the EIR sheet only (GV = master ID ${esc(FF.config.eir.gvMasterId || '5845036')} rows, everything else FF) · last month vs this month + %</span>`,
       `<div class="kpi-grid mini hm-month-grid">${cards.join('')}</div>`,
       `<a class="btn small" href="#/tagIssued?period=month">🏷️ Tag Issued →</a><a class="btn small" href="#/trend">📈 Trend →</a>`);
   }
@@ -835,7 +816,7 @@ FF.pages = FF.pages || {};
       </div>
       <div id="home-todo"></div>
       <div id="home-gv-live">${U.spinner('GV aaj ka live data aaya ja raha hai…')}</div>
-      <div id="home-month">${U.spinner('EIR se month KPI cards ban rahe hain…')}</div>
+      <div id="home-month">${U.spinner('Building month KPI cards from the EIR sheet…')}</div>
       <div id="home-target-achievement">${U.spinner('Class-wise target achievement calculate ho raha hai…')}</div>
       <div id="home-pulse"></div>
       <div id="home-charts">${U.spinner('Charts…')}</div>
@@ -964,11 +945,11 @@ FF.pages = FF.pages || {};
       if (!gvLiveMount || !gvLiveMount.isConnected) return;
       const pace = liveState.total > 0 ? Math.round((liveState.total / hoursGone) * 24) : null;
       liveState.pace = pace;
-      // Expected Today: GV Master load hone ke baad wahi ledger (drawer wala) se — card aur click ek hi din / total dikhayein.
-      const wdLed = ledgerWeekdays(todayK());
-      const bars = wdLed ? wdLed.bars : wdBars;
-      const wdKeys = wdLed ? wdLed.keys : null;
-      const expectedNow = wdLed && wdLed.expected != null ? wdLed.expected : liveState.expected;
+      // Expected Today: pichhle same-weekday EIR (GV = master ID wali rows) se — card aur click ka drawer ek hi din / total dikhayein.
+      const wdEir = ui.daily ? eirWeekdays(todayK(), ui.daily) : null;
+      const bars = wdEir ? wdEir.bars : wdBars;
+      const wdKeys = wdEir ? wdEir.keys : null;
+      const expectedNow = wdEir && wdEir.expected != null ? wdEir.expected : liveState.expected;
       const wdNote = bars ? `pichhle ${bars.labels.length} same-weekday (${bars.labels.map((l) => `${l} = ${U.fmt(bars.values[bars.labels.indexOf(l)])}`).join(' · ')}) ka average` : '';
       gvLiveMount.innerHTML = gvLiveHtml({ ...liveState, expected: expectedNow, pace, weekdayNote: wdNote, weekdayBars: bars, weekdayKeys: wdKeys });
     }
@@ -976,7 +957,10 @@ FF.pages = FF.pages || {};
     //    ReferenceError: paintMonth is not defined → poore KPI cards gayab). Base v3.47 se wapas.
     function paintMonth() {
       if (!monthMount || !monthMount.isConnected || !ui.ready) return;
-      monthMount.innerHTML = monthKpiHtml(ui.ctx, ui.sf, { liveToday: ui.liveToday }, ui.sc, ui.sf.rows);
+      // 📅 Month KPI cards = sirf EIR (GV = master ID 5845036 wali rows). GV Master / live rows card me plus nahi hote (double count).
+      const eir = ui.daily || [];
+      const eirSf = { rows: eir, ff: eir.filter((r) => r.channel !== 'GV Partner'), gv: eir.filter((r) => r.channel === 'GV Partner') };
+      monthMount.innerHTML = monthKpiHtml(ui.ctx, eirSf, { liveToday: false }, M.summary(eir, ui.ctx.curKey), eir);
     }
     function paintTargetAchievement() {
       if (!targetAchievementMount || !targetAchievementMount.isConnected) return;
@@ -1145,8 +1129,9 @@ FF.pages = FF.pages || {};
     const ctx = monthContext(st.rows);
     const sf = { rows: st.rows, ff: st.ff, gv: st.gv };
     const sc = M.summary(st.rows, ctx.curKey);
-    ui.ready = true; ui.sf = sf; ui.ctx = ctx; ui.sc = sc; ui.liveToday = st.gvLiveAdded;
+    ui.ready = true; ui.daily = M.eirOnlyDaily(daily || []); ui.sf = sf; ui.ctx = ctx; ui.sc = sc; ui.liveToday = st.gvLiveAdded;
     paintMonth();
+    paintLive();   // Expected Today ab EIR weekdays se
     paintTargetAchievement();
     paintPulse();
     paintCharts();
@@ -1222,7 +1207,7 @@ FF.pages = FF.pages || {};
   }
 
   FF.pages.home = {
-    title: 'Home', render, monthKpiHtml, streams, ledgerWeekdays, liveRowsFromFeed, targetAchievementSummary, targetAchievementHtml,
+    title: 'Home', render, monthKpiHtml, streams, eirWeekdays, liveRowsFromFeed, targetAchievementSummary, targetAchievementHtml,
     explorer: {
       state: explorerFilters, filterRows: filterExplorerRows, totals: explorerTotals, daily: explorerDaily, html: explorerHtml,
       dateKey: explorerDateKey, rangePreset: explorerRangePreset, reset: resetExplorerFilters,

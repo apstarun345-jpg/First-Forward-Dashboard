@@ -22,8 +22,7 @@ FF.pages = FF.pages || {};
     if (!FF.auth.can('export')) { U.toast('Download permission nahi hai', 'err'); return; }
     btn.disabled = true; const label = btn.textContent; btn.textContent = '⏳ Bundle ban raha hai…';
     try {
-      const daily0 = await S.need('daily');
-      const daily = FF.gv && FF.gv.ledgerDaily ? FF.gv.ledgerDaily(daily0) : daily0;   // card / drawer ek ledger
+      const daily = await S.need('daily');
       const [stock, stockAgents, report] = await Promise.all([
         S.need('stock').catch(() => []), S.need('stockAgents').catch(() => []), S.need('report').catch(() => null)
       ]);
@@ -140,8 +139,7 @@ FF.pages = FF.pages || {};
       body.innerHTML = U.errorBox(dailyR.reason, 'data-action="refresh"');
       return;
     }
-    // GV rows drawer wale ledger se (EIR + GV Master ka missing hissa) — warna card ka MTD aur click ka total alag aate the.
-    const daily = FF.gv && FF.gv.ledgerDaily ? FF.gv.ledgerDaily(dailyR.value) : dailyR.value;
+    const daily = M.eirOnlyDaily(dailyR.value);   // EIR only (GV = master ID wali rows, GV Master live nahi) — card aur drawer (eir=1) ek hi source
     const agents = agentsR.status === 'fulfilled' ? agentsR.value : null;
     const status = statusR.status === 'fulfilled' ? statusR.value : null;
     const stock = stockR.status === 'fulfilled' ? stockR.value : null;
@@ -222,6 +220,13 @@ FF.pages = FF.pages || {};
     // v3.31: ye dashboard EIR ki SAARI rows (FF + GV channel + GV live aaj) se banta hai — isliye drill bhi
     // src=both (pehle src=ff tha → card 34 dikhata, drawer 0). Stock card FF StockDataa ka hi hai.
     const specs = [`src=both&scope=day&date=${latestK}`, `src=both&scope=mtd&ym=${cur}`, `src=both&scope=mtd&ym=${cur}&f=vc4`, `src=both&scope=mtd&ym=${cur}&f=comm`, `src=both&scope=mtd&ym=${cur}`, `src=both&scope=mtd&ym=${cur}`, `src=both&scope=mtd&ym=${cur}&f=repl`, `src=both&scope=mtd&ym=${cur}&f=chassis`, 'src=ff&scope=stock', `src=both&scope=agents&ym=${cur}`, `src=both&scope=mtd&ym=${cur}`, `src=both&scope=status&ym=${cur}`, `src=both&scope=day&date=${latestK}`];
+    // Cards are built from EIR only (GV = master ID rows) → every issuance drill opens in the same EIR-only mode (eir=1),
+    // so the card number and the drawer total can never differ by a GV Master add-on.
+    // Avg / Day and Projected open the forecast drawer (formula + class table) instead of a plain MTD list.
+    const monthFirst = `${cur}-01`;
+    specs[4] = `src=both&scope=range&from=${monthFirst}&to=${latestK}&view=runrate`;
+    specs[5] = `src=both&scope=range&from=${monthFirst}&to=${latestK}&view=expected`;
+    specs.forEach((sp, i) => { if (/scope=(day|mtd|range)\b/.test(sp) && !/[?&]eir=1/.test(sp)) specs[i] = `${sp}&eir=1`; });
     kpis.forEach((html, i) => { if (specs[i]) kpis[i] = html.replace('<div class="kpi ', `<div data-kpi="${esc(specs[i])}" class="kpi `); });
 
     // charts data

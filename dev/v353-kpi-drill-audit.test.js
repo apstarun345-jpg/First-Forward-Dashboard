@@ -222,18 +222,18 @@ test('Expected / Run Rate drawer shows the class-wise forecast table with the ca
   FF.store.get = (k) => (k === 'daily' ? daily : []);
   FF.store.need = async (k) => FF.store.get(k);
   const exp = await FF.kpiDetail._issuanceDetail({ src: 'both', scope: 'range', from: '2026-10-01', to: '2026-10-04', view: 'expected', title: 'Expected in Oct 2026' });
-  assert.match(exp.body, /Expected in .* kaise bana/);
+  assert.match(exp.body, /How “Expected in .*” is calculated/);
   const cell = (label, idx) => { const tr = [...exp.body.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/g)].map((m) => m[1]).find((r) => r.includes(`<b>${label}</b></td>`)); assert.ok(tr, label); return [...tr.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((m) => m[1].replace(/<[^>]+>/g, '').trim())[idx]; };
   assert.equal(cell('VC4', 1), '40', 'reported VC4 (4 din)');
   assert.equal(cell('VC4', 3), '310', 'VC4 expected = 40 ÷ 4 × 31');
   assert.equal(cell('VC4', 4), '100', 'last month full VC4');
   assert.equal(cell('Total', 1), '60');
   assert.equal(cell('Total', 3), '465', 'Total expected = 60 ÷ 4 × 31');
-  assert.match(exp.body, /Month-end expected = 60 tags ÷ 4 reported din × 31 din = <b>465<\/b>/);
+  assert.match(exp.body, /Month-end expected = 60 tags ÷ 4 reported days × 31 days = <b>465<\/b>/);
   const run = await FF.kpiDetail._issuanceDetail({ src: 'both', scope: 'range', from: '2026-10-01', to: '2026-10-04', view: 'runrate', title: 'Run Rate · Per Day' });
-  assert.match(run.body, /Run rate = 60 tags ÷ 4 reported din = <b>15(\.0)? \/ day<\/b>/);
+  assert.match(run.body, /Run rate = 60 tags ÷ 4 reported days = <b>15(\.0)? \/ day<\/b>/);
   const plain = await FF.kpiDetail._issuanceDetail({ src: 'both', scope: 'range', from: '2026-10-01', to: '2026-10-04', title: 'Something' });
-  assert.ok(!/kaise bana/.test(plain.body), 'view ke bina forecast table nahi');
+  assert.ok(!/is calculated/.test(plain.body), 'view ke bina forecast table nahi');
 });
 
 test('dow filter keeps only that weekday (Expected Today drawer)', () => {
@@ -244,6 +244,46 @@ test('dow filter keeps only that weekday (Expected Today drawer)', () => {
   assert.equal(FF.kpiDetail._rowMatchesSpec({ key: wed, group: 'VC4', cls: 'VC4', channel: 'GV Partner' }, spec), true);
   assert.equal(FF.kpiDetail._rowMatchesSpec({ key: thu, group: 'VC4', cls: 'VC4', channel: 'GV Partner' }, spec), false);
   assert.equal(FF.kpiDetail._rowMatchesSpec({ key: thu, group: 'VC4', cls: 'VC4', channel: 'GV Partner' }, { src: 'gv' }), true, 'dow ke bina sab din');
+});
+
+/** eir=1: card sirf EIR se banta hai (GV = master ID wali rows) → drawer me GV Master ka plus nahi aana chahiye. */
+test('eir=1 drawer ignores the GV Master ledger (no EIR + GV Master double count)', async () => {
+  mountGv();
+  const mk = (key, channel, group, cls, n, extra = {}) => ({ key, ym: key.slice(0, 7), day: Number(key.slice(8)), d: new Date(key + 'T00:00:00'), cls, group, n, type: 'ISSUANCE', vrnType: '', channel, agentName: 'A', agentId: '1', tlName: 'T', ...extra });
+  const daily = [mk('2026-10-01', 'First Forward', 'VC4', 'VC4', 10), mk('2026-10-01', 'GV Partner', 'VC4', 'VC4', 5)];
+  FF.store.get = (k) => (k === 'daily' ? daily : []);
+  FF.store.need = async (k) => FF.store.get(k);
+  FF.gv.issuanceRows = () => [mk('2026-10-01', 'GV Partner', 'VC4', 'VC4', 1, { agentName: 'G1', agentId: 'G1' }), mk('2026-10-01', 'GV Partner', 'VC20', 'VC20', 1, { agentName: 'G2', agentId: 'G2' }),
+    mk('2026-10-01', 'GV Partner', 'VC4', 'VC4', 1, { agentName: 'G3', agentId: 'G3' }), mk('2026-10-01', 'GV Partner', 'VC4', 'VC4', 1, { agentName: 'G4', agentId: 'G4' }), mk('2026-10-01', 'GV Partner', 'VC4', 'VC4', 1, { agentName: 'G5', agentId: 'G5' }),
+    mk('2026-10-01', 'GV Partner', 'VC4', 'VC4', 1, { agentName: 'G6', agentId: 'G6' })];
+  const withLedger = await FF.kpiDetail._issuanceDetail({ src: 'both', scope: 'mtd', ym: '2026-10', title: 'MTD' });
+  assert.match(withLedger.sub, /<b>16<\/b> tags/, 'eir ke bina: EIR FF 10 + GV ledger 6 (purana behaviour)');
+  const eirOnly = await FF.kpiDetail._issuanceDetail({ src: 'both', scope: 'mtd', ym: '2026-10', title: 'MTD', eir: '1' });
+  assert.match(eirOnly.sub, /<b>15<\/b> tags/, 'eir=1: EIR FF 10 + EIR GV 5, GV Master ka plus nahi');
+  assert.match(eirOnly.body, /EIR sheet only|the <b>EIR sheet<\/b> only/);
+  const gvOnly = await FF.kpiDetail._issuanceDetail({ src: 'gv', scope: 'mtd', ym: '2026-10', title: 'MTD', eir: '1' });
+  assert.match(gvOnly.sub, /<b>5<\/b> tags/);
+  const day = await FF.kpiDetail._issuanceDetail({ src: 'both', scope: 'range', from: '2026-10-01', to: '2026-10-01', eir: '1', title: 'Day' });
+  assert.match(day.sub, /<b>15<\/b> tags/);
+});
+
+/** Store ka daily aaj ke GV rows GV Master live se replace karta hai; eir=1 drawer + Home card dono asli EIR rows (`eirRows`) lete hain. */
+test('eir=1 drawer uses pristine EIR rows (today GV Master live replace is not counted)', async () => {
+  mountGv();
+  const mk = (key, channel, group, cls, n) => ({ key, ym: key.slice(0, 7), day: Number(key.slice(8)), d: new Date(key + 'T00:00:00'), cls, group, n, type: 'ISSUANCE', vrnType: '', channel, agentName: 'A', agentId: '1', tlName: 'T' });
+  const eirRows = [mk('2026-10-13', 'GV Partner', 'VC4', 'VC4', 4), mk('2026-10-14', 'GV Partner', 'VC4', 'VC4', 2), mk('2026-10-14', 'First Forward', 'VC4', 'VC4', 3)];
+  const withLive = [eirRows[0], eirRows[2], mk('2026-10-14', 'GV Partner', 'VC4', 'VC4', 9)];
+  Object.defineProperty(withLive, 'eirRows', { value: eirRows, enumerable: false });
+  assert.equal(FF.model.eirOnlyDaily(withLive), eirRows, 'eirOnlyDaily returns the stashed EIR rows');
+  const plain = [mk('2026-10-14', 'First Forward', 'VC4', 'VC4', 1)];
+  assert.equal(FF.model.eirOnlyDaily(plain), plain, 'no stash → same array');
+  FF.store.get = (k) => (k === 'daily' ? withLive : []);
+  FF.store.need = async (k) => FF.store.get(k);
+  FF.gv.issuanceRows = () => { throw new Error('ledger must not be read in eir mode'); };
+  const mtd = await FF.kpiDetail._issuanceDetail({ src: 'both', scope: 'mtd', ym: '2026-10', title: 'MTD', eir: '1' });
+  assert.match(mtd.sub, /<b>9<\/b> tags/, 'EIR 4 + 2 GV + 3 FF = 9 (live Master 9 not added)');
+  const gv = await FF.kpiDetail._issuanceDetail({ src: 'gv', scope: 'day', date: '2026-10-14', title: 'GV today', eir: '1' });
+  assert.match(gv.sub, /<b>2<\/b> tags/, 'GV today = EIR 2, not Master 9');
 });
 
 // ---------------------------------------------------------------------------------------------

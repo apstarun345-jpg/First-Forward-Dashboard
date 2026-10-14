@@ -95,8 +95,12 @@ window.FF = window.FF || {};
     const live = G.masterTodayRows();
     const kept = rows.filter((r) => !(r.channel === 'GV Partner' && r.key === tk));
     for (const r of live) kept.push(r);
+    // Asli EIR rows (GV Master ka aaj ka replace hone se pehle) — "sirf EIR" wale cards / drawers (Home month cards, Dashboard) inhe use karte hain.
+    try { Object.defineProperty(kept, 'eirRows', { value: rows, enumerable: false }); } catch { /* frozen */ }
     return kept;
   }
+  /** Daily rows sirf EIR se: GV = master ID wali rows, GV Master ka aaj ka live replace nahi. */
+  const eirOnlyDaily = (daily) => (Array.isArray(daily) && Array.isArray(daily.eirRows) ? daily.eirRows : daily);
 
   /** Today's agent × class × tag-type totals — supports daily leaderboards and profile drill-downs. */
   async function loadAgentDailyClass(opts) {
@@ -472,5 +476,5 @@ window.FF = window.FF || {};
     return map;
   }
 
-  FF.model = { classGroup, channelOf, loadDaily, loadAgentDailyClass, loadAgents, loadStatus, loadStock, loadStockAgents, loadAgentClassMonthly, loadRangePeople, loadStockMovements, loadStockRows, loadStockAgentTypes, loadStockAging, months, latestDate, dailySeries, summary, byDim };
+  FF.model = { classGroup, channelOf, eirOnlyDaily, loadDaily, loadAgentDailyClass, loadAgents, loadStatus, loadStock, loadStockAgents, loadAgentClassMonthly, loadRangePeople, loadStockMovements, loadStockRows, loadStockAgentTypes, loadStockAging, months, latestDate, dailySeries, summary, byDim };
 })(window.FF);
