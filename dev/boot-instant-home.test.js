@@ -29,7 +29,7 @@ test('🚀 splash ke DAURAN data load: critical warm-up + preload renderCurrent 
   assert.ok(renderAt < releaseAt, 'renderCurrent ke baad hi splash release (bootGate = poora data paint)');
   assert.match(app, /function warmCriticalData\(preAuth\)/, 'warm-up helper defined hai');
   // 3-4s animation window wahi raha (client ne isi ko describe kiya tha).
-  assert.match(app, /const WORKSPACE_BOOT_MIN_MS = 3000/);
+  assert.match(app, /const WORKSPACE_BOOT_MIN_MS = 900/);
   assert.match(app, /const WORKSPACE_BOOT_MAX_MS = 3900/);
 });
 
@@ -50,7 +50,7 @@ test('🏠 Home bootGate: splash hatne se pehle saare sections ke data ka inteza
   assert.ok(gateAt > 0, 'bootGate await block hai');
   const gate = home.slice(gateAt, gateAt + 900);
   assert.match(gate, /Promise\.allSettled\(pending\)/, 'saare data promises settle hone ka intezaar');
-  assert.match(gate, /setTimeout\(resolve, 4200\)/, 'soft cap — hung fetch renderCurrent ko hamesha ke liye block nahi karta');
+  assert.match(gate, /setTimeout\(resolve, 1800\)/, 'soft cap — hung fetch renderCurrent ko hamesha ke liye block nahi karta');
   for (const p of ['liveP', 'feedP', 'dailyP', 'stockP', 'gvStockP', 'gvMasterP', 'targetAchievementDataP', 'gvStockAgentP']) {
     assert.ok(gate.includes(p), `bootGate await list me ${p}`);
   }

@@ -1169,7 +1169,7 @@ FF.pages = FF.pages || {};
       const pending = [liveP, feedP, dailyP, stockP, gvStockP, gvMasterP, targetAchievementDataP, gvStockAgentP];
       await Promise.race([
         Promise.allSettled(pending),
-        new Promise((resolve) => setTimeout(resolve, 4200))
+        new Promise((resolve) => setTimeout(resolve, 1800))
       ]);
     }
   }

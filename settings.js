@@ -1560,6 +1560,8 @@ FF.pages = FF.pages || {};
           have.set(key, it); out.push(it);
         }
       }
+      // ⏳ Master Search index abhi load ho raha ho to "No match" nahi, saaf loading line dikhao (pick nahi hota).
+      if (msPeople === null && !out.length) return [{ kind: 'cls', kindLabel: 'Loading', label: '⏳ Names load ho rahe hain…', sub: 'thodi der me suggestions aayenge', keywords: nameEl.value, value: '', _pending: true }];
       return out;
     };
     let msPeople = null;
@@ -1578,6 +1580,7 @@ FF.pages = FF.pages || {};
       min: 1,
       items: suggestionItems,
       onPick: (it) => {
+        if (!it || it._pending) return;
         nameEl.value = it.value || it.label;
         if (pidEl && it.id && !pidEl.value) pidEl.value = it.id;
         if (mobEl && it.mobile && !mobEl.value) mobEl.value = String(it.mobile).replace(/\D/g, '').slice(-10);

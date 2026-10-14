@@ -8291,7 +8291,12 @@ async function servePersonalPage(req, res, rawToken) {
       }
     })() : Promise.resolve(null);
     const rows = await rowsPromise;
-    if (needsIssuance && !rows.length) return fail(404, `"${link.name}" 's data is not yet in the sheet (or the name is different).`);
+    // 🔗 v3.79 — issuance khaali ho to 404 nahi: agar StockDataa me is naam ka stock mil jaye to page stock ke saath
+    // khulta hai (naye TL / naye mahine ke shuru me issuance abhi zero hota hai). Dono na mile to saaf message.
+    if (needsIssuance && !rows.length) {
+      const stockOnly = await stockPromise;
+      if (!stockOnly) return fail(404, `"${link.name}" ka issuance aur stock dono abhi data me nahi mile. Naam ki spelling check karein — Settings → Personal links me naam dobara choose karein.`);
+    }
     const st = personalStats(rows);
     const reportThrough = st.monthDays && st.monthDays.length ? st.monthDays[st.monthDays.length - 1].date : '';
     let team = [];

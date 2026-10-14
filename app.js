@@ -6,7 +6,7 @@ window.FF = window.FF || {};
   // 🚀 v3.66 — Real workspace boot gate.
   // Splash is intentionally short: target 3–4 seconds. It must NEVER remain on screen
   // indefinitely because a slow/non-critical data source is still loading.
-  const WORKSPACE_BOOT_MIN_MS = 3000;
+  const WORKSPACE_BOOT_MIN_MS = 900;   // v3.79 — login splash chhota (pehle 3000ms); Home ke sections data aate hi apne aap bharte hain
   const WORKSPACE_BOOT_MAX_MS = 3900;
   const workspaceBootStarted = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
   let workspaceBootReleased = false;
