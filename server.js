@@ -5926,19 +5926,6 @@ async function handleApi(req, res, url) {
     if (!store) { addressBookRuntime.map = fallback; addressBookRuntime.at = now; return fallback; }
     const cfg = tagSheetConfig();
     const targetId = sheetIdFromLink(cfg.sheetLink) || String(cfg.spreadsheetId || '').trim() || '';
-    if (cfg.rowMode === 'agent-class-gap' && rows.length) {
-      // Separate submissions bhi visually separate hon: agar last successfully-synced request
-      // kisi doosre agent ki thi, to current agent se pehle exactly one blank row bhejo.
-      const currentFirstKey = tagRequestFirstAgentKey(reqs[0]);
-      const currentIds = new Set(reqs.map((r) => String(r && r.id || '')));
-      const previous = (workspaceStore().tagRequests || [])
-        .filter((r) => r && !currentIds.has(String(r.id || '')) && r.sheetSync && !r.sheetSync.error
-          && (targetId ? String(r.sheetSync.targetId || '') === targetId : !String(r.sheetSync.targetId || '')))
-        .sort((a, b) => Date.parse(a.sheetSync.at || a.updatedAt || a.at || 0) - Date.parse(b.sheetSync.at || b.updatedAt || b.at || 0))
-        .pop();
-      const previousLastKey = tagRequestAgentKey(previous);
-      if (currentFirstKey && previousLastKey && currentFirstKey !== previousLastKey) rows.unshift(header.map(() => ''));
-    }
     addressBookRuntime.promise = store.call('readaddresses', { tab: ADDRESS_BOOK_TAB, ...(targetId ? { spreadsheetId: targetId } : {}) })
       .then((out) => {
         const map = fallback;
@@ -6196,11 +6183,24 @@ async function handleApi(req, res, url) {
       if (cfg.rowMode === 'agent-class-gap' && ri < reqs.length - 1) rows.push(header.map(() => ''));
       return out.rows.length;
     });
+    const targetId = sheetIdFromLink(cfg.sheetLink) || String(cfg.spreadsheetId || '').trim() || '';
+    if (cfg.rowMode === 'agent-class-gap' && rows.length) {
+      // Separate submissions bhi visually separate hon: agar last successfully-synced request
+      // kisi doosre agent ki thi, to current agent se pehle exactly one blank row bhejo.
+      const currentFirstKey = tagRequestFirstAgentKey(reqs[0]);
+      const currentIds = new Set(reqs.map((r) => String(r && r.id || '')));
+      const previous = (workspaceStore().tagRequests || [])
+        .filter((r) => r && !currentIds.has(String(r.id || '')) && r.sheetSync && !r.sheetSync.error
+          && (targetId ? String(r.sheetSync.targetId || '') === targetId : !String(r.sheetSync.targetId || '')))
+        .sort((a, b) => Date.parse(a.sheetSync.at || a.updatedAt || a.at || 0) - Date.parse(b.sheetSync.at || b.updatedAt || b.at || 0))
+        .pop();
+      const previousLastKey = tagRequestAgentKey(previous);
+      if (currentFirstKey && previousLastKey && currentFirstKey !== previousLastKey) rows.unshift(header.map(() => ''));
+    }
     if (!rows.length) { if (throwOnFail) throw new HttpError(400, 'Sheet ke liye koi row nahi bani.'); return null; }
     const tabName = String(cfg.tab || 'Tag Requests').slice(0, 80) || 'Tag Requests';
     // v3.27 — sheetLink me ID diya ho to entry US ALAG SHEET me jaati hai (Apps Script openById
     // karta hai). Link khaali ho to purana behaviour: script jis sheet se bandha hai usi me.
-    const targetId = sheetIdFromLink(cfg.sheetLink) || String(cfg.spreadsheetId || '').trim() || '';
     const out = await store.call('appendrows', { tab: tabName, header, rows, ...(targetId ? { spreadsheetId: targetId } : {}) });
     // Purana Code.gs deploy (v3.25) spreadsheetId ignore karta hai — tab wo chup-chaap APP_STORAGE
     // wali sheet me likh deta. Isliye response ke URL se verify karo ki entry SAHI sheet me gayi.
