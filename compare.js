@@ -191,6 +191,8 @@ FF.pages = FF.pages || {};
 
     const topFF = U.topEntries(U.groupSum(ffAgents.filter((a) => a.ym === cur), (a) => a.name, (a) => a.n), 8);
     const topGV = (() => { if (masterR.status !== 'fulfilled' || !cur) return []; return G.agentRollup(cur).slice(0, 8).map((a) => [a.agentName, a.total]); })();
+    const allFF = U.topEntries(U.groupSum(ffAgents.filter((a) => a.ym === cur && a.n > 0), (a) => a.name, (a) => a.n), 100000);
+    const allGV = (() => { if (masterR.status !== 'fulfilled' || !cur) return []; return G.agentRollup(cur).filter((a) => a.total > 0).map((a) => [a.agentName, a.total]); })();
 
     // ---- KPI click detail data (v3.8.3) -----------------------------------------------------------
     const VS_HEADERS = ['Period', 'First Forward', 'GV Partner', 'GV share'];
@@ -227,7 +229,8 @@ FF.pages = FF.pages || {};
       [LBL.comm]: { title: 'Month-wise Commercial · FF vs GV', headers: VS_HEADERS, rows: monthRows('comm') },
       [LBL.avg]: { title: 'Daily run-rate detail', stats: [`FF: ${U.fmt(ffCur ? ffCur.total : 0)} tags ÷ ${ffCur ? ffCur.activeDays : 0} active days`, `GV: ${U.fmt(gvCur ? gvCur.total : 0)} tags ÷ ${gvCur ? gvCur.activeDays : 0} active days`], headers: VS_HEADERS, rows: dailyRows },
       [LBL.proj]: { title: 'Projection vs last month', headers: VS_HEADERS, rows: monthRows('total') },
-      [LBL.agents]: { title: 'Top agents MTD · FF vs GV', headers: ['Channel', 'Agent', 'MTD tags'], rows: [...topFF.map(([n, v]) => ['First Forward', n, U.fmt(v)]), ...topGV.map(([n, v]) => ['GV Partner', n, U.fmt(v)])] },
+      // Card "Active Agents 53 vs 61" ka number = saare active agents — pehle sirf top 8 + 8 (16 rows) khulte the.
+      [LBL.agents]: { title: 'Active agents MTD · FF vs GV (sab)', headers: ['Channel', 'Agent', 'MTD tags'], rows: [...allFF.map(([n, v]) => ['First Forward', n, U.fmt(v)]), ...allGV.map(([n, v]) => ['GV Partner', n, U.fmt(v)])] },
       [LBL.stock]: { title: 'Class-wise field stock · FF vs GV', headers: VS_HEADERS, rows: stockRows },
       [LBL.cover]: { title: 'Stock cover days', stats: [`FF: ${U.fmt(ffStockTotal)} stock ÷ ${U.fmt(ffCur ? ffCur.avgPerDay : 0)}/day = ${ffCur && ffCur.avgPerDay ? U.fmt(ffStockTotal / ffCur.avgPerDay) : '—'} din`, `GV: ${U.fmt(gvStockTotal)} stock ÷ ${U.fmt(gvCur ? gvCur.avgPerDay : 0)}/day = ${gvCur && gvCur.avgPerDay ? U.fmt(gvStockTotal / gvCur.avgPerDay) : '—'} din`], headers: VS_HEADERS, rows: stockRows },
       [LBL.repl]: { title: 'Month-wise replacements · FF vs GV', headers: VS_HEADERS, rows: monthRows('replacement') },

@@ -1761,7 +1761,12 @@ window.FF = window.FF || {};
       // anomaly cards). Unhe yahan se kpiDetail.open() mat karo — warna do drawer khulte the aur aakhri
       // (card se unrelated, MTD-inferred) drawer jeet jaata tha: "card ka data drawer me nahi dikhta".
       const kpi = e.target.closest('.kpi, [data-kpi]');
-      if (kpi && !e.target.closest('a,button:not(.kpi)') && !kpi.closest('[data-kpi-self]')) {
+      // 🩹 v3.78 — `<button class="btn" data-kpi="…">` (jaise "Tag-level stock" / "Tag-Level Rows") khud kpi hai: pehle
+      // `closest('button:not(.kpi)')` use khud match karke click dabata tha → button dabane par kuch nahi khulta tha.
+      // Card ke ANDAR ke alag button/link (CSV, share, link…) par abhi bhi drawer nahi khulta.
+      const innerCtl = kpi ? e.target.closest('a,button:not(.kpi)') : null;
+      const kpiIsButton = !!innerCtl && innerCtl === kpi && innerCtl.tagName === 'BUTTON';
+      if (kpi && (!innerCtl || kpiIsButton) && !kpi.closest('[data-kpi-self]')) {
         if (FF.kpiDetail) { FF.kpiDetail.open(kpi); return; }
         // Drill drawer ka module first paint ke baad load hota hai — click par load karke kholo.
         if (FF.lazy && FF.lazy.shellNeed) {

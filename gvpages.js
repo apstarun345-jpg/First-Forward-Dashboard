@@ -381,13 +381,17 @@ FF.pages = FF.pages || {};
       }
     });
 
+    // Biggest Class / Top TL cards ab apni class / TL ke stock ka drawer kholte hain (pehle poora GV stock khulta tha).
+    const clsRank = classes.map((c) => [c, U.sum(byClass.filter((r) => r.cls === c), (r) => r.n)]).sort((a, b) => b[1] - a[1]);
+    const bigCls = clsRank.length ? clsRank[0][0] : '';
+    const topTl = byTl.find((r) => FF.config.isRealTl(r.tlName) && r.directAgent !== true) || {};
     const kpis = [
       kpi('g9', 'GV Stock in Field', '📦', U.fmt(total), `VC4 <b>${U.fmt(vc4)}</b> (${U.fmtPct(U.pctOf(vc4, total), 0)}) · Commercial <b>${U.fmt(comm)}</b>`),
       kpi('g12', 'Stock Days Cover', '⏳', perDay ? U.fmt(total / perDay) : '—', perDay ? `GV avg ${U.fmt(perDay)} tags/day par` : 'Issuance data load nahi hua'),
       kpi('g10', 'TLs with Stock', '👥', U.fmt(byTl.filter((r) => FF.config.isRealTl(r.tlName) && r.directAgent !== true).length), `🚫 Direct agents (no TL): <b>${U.fmt((byTl.filter((r) => !FF.config.isRealTl(r.tlName) || r.directAgent === true).reduce((a, r) => a + r.n, 0)))}</b> tags`),
       kpi('g8', 'Agents with Stock', '🧑‍💼', U.fmt(byAgent.length), `Avg <b>${U.fmt(byAgent.length ? total / byAgent.length : 0)}</b> tags / agent`),
-      kpi('g3', 'Biggest Class', '🚗', classes.length ? classes.slice().sort((a, b) => (byClass.find((x) => x.cls === b).n) - (byClass.find((x) => x.cls === a).n))[0] : '—', classes.slice().sort((a, b) => (byClass.find((x) => x.cls === b).n) - (byClass.find((x) => x.cls === a).n)).slice(0, 3).map((c) => `${c} <b>${U.fmt(byClass.find((x) => x.cls === c).n)}</b>`).join(' · ')),
-      kpi('g11', 'Top TL by Stock', '🏬', (byTl.find((r) => FF.config.isRealTl(r.tlName) && r.directAgent !== true) || {}).tlName || '—', (byTl.find((r) => FF.config.isRealTl(r.tlName) && r.directAgent !== true) || {}).n ? `${U.fmt(byTl.find((r) => FF.config.isRealTl(r.tlName) && r.directAgent !== true).n)} tags` : '')
+      kpiS('g3', 'Biggest Class', '🚗', bigCls || '—', clsRank.slice(0, 3).map(([c, n]) => `${c} <b>${U.fmt(n)}</b>`).join(' · '), bigCls ? `src=gv&scope=stock&cls=${encodeURIComponent(bigCls)}` : 'src=gv&scope=stock'),
+      kpiS('g11', 'Top TL by Stock', '🏬', topTl.tlName || '—', topTl.n ? `${U.fmt(topTl.n)} tags` : '', topTl.tlName ? `src=gv&scope=stock&tl=${encodeURIComponent(topTl.tlName)}${topTl.tlId ? `&tlId=${encodeURIComponent(topTl.tlId)}` : ''}` : 'src=gv&scope=stock')
     ];
 
     let viewHtml = '';

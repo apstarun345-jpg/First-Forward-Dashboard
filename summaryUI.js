@@ -248,16 +248,20 @@ window.FF = window.FF || {};
         check: checkOf(2), why: 'Tag Assignment (live stock sheet) — final', explain: `${fmt(st.total)} tag rows is waqt in ke paas${st.excluded ? ` · ${fmt(st.excluded)} out-of-stock rows chhod diye` : ''}. Click = TAG_ID/serial list.` }),
       card({ key: 'expected', icon: '🎯', tone: 'g7', label: 'Expected (month-end)', value: expected, unit: 'tags',
         sub: `Runrate <b>${(expectedBase / reportDays).toFixed(1)}</b>/din · ${fmt(reportDays)}/${dim} reported din · aaj exclude`,
-        why: 'Ledger runrate se projection', explain: `${fmt(expectedBase)} ÷ ${fmt(reportDays)} reported din × ${dim} din. Aaj ka live/incomplete day Expected me include nahi hai.` }),
+        why: 'Ledger runrate se projection', explain: `${fmt(expectedBase)} ÷ ${fmt(reportDays)} reported din × ${dim} din. Aaj ka live/incomplete day Expected me include nahi hai.`,
+        drill: { scope: 'days', title: `🎯 Expected month-end · ${fmt(expected)} (din-wise basis)`, basis: `${fmt(expectedBase)} tags ÷ ${fmt(reportDays)} din × ${dim} din = ${fmt(expected)}` } }),
       card({ key: 'days', icon: '📆', tone: 'g8', label: 'Active days (ledger)', value: lt.cur.days, unit: 'din',
         sub: `Avg <b>${lt.cur.days ? (lt.cur.total / lt.cur.days).toFixed(1) : '0'}</b> tag/din`,
-        why: 'GV Master ki dates se', explain: 'Jitne din ledger me is person ka tag dikha.' }),
+        why: 'GV Master ki dates se', explain: 'Jitne din ledger me is person ka tag dikha.',
+        drill: { scope: 'days', title: `📆 Active days · ${fmt(lt.cur.days)} din (din-wise tags)` } }),
       card({ key: 'repl', icon: '🔁', tone: 'g9', label: 'Replacement / Chassis', value: lt.cur.replacement, unit: 'repl',
         sub: `Chassis <b>${fmt(lt.cur.chassis)}</b> · VRN <b>${fmt(lt.cur.vrn)}</b>`,
-        why: 'GV Master status / tag type se', explain: 'Replacement status wali rows alag gini gayi hain.' }),
+        why: 'GV Master status / tag type se', explain: 'Replacement status wali rows alag gini gayi hain.',
+        drill: { scope: 'repl', title: `🔁 Replacement ${fmt(lt.cur.replacement)} · Chassis ${fmt(lt.cur.chassis)} (sirf yehi rows)` } }),
       card({ key: 'sheet', icon: '📑', tone: 'g12', label: 'GV REPORT sheet', value: sh.cur !== null && sh.cur !== undefined ? sh.cur : '—', unit: 'tags',
         sub: sh.found ? `Stock <b>${sh.stockAvailable ? fmt(sh.stock) : '—'}</b> · Last <b>${sh.lastAvailable ? fmt(sh.last) : '—'}</b>` : 'sheet me row nahi mili',
-        why: 'Sirf cross-check (final nahi)', explain: sh.found ? `Sheet me is (${sh.agentId || t.id}) ke liye current month ${sh.curAvailable ? fmt(sh.cur) : 'blank'} hai.` : 'Is person ka row GV REPORT me nahi mila.' })
+        why: 'Sirf cross-check (final nahi)', explain: sh.found ? `Sheet me is (${sh.agentId || t.id}) ke liye current month ${sh.curAvailable ? fmt(sh.cur) : 'blank'} hai.` : 'Is person ka row GV REPORT me nahi mila.',
+        drill: { scope: 'sheet', title: '📑 GV REPORT sheet vs GV Master ledger' } })
     ];
     const m = { y: 0 };
     return {
@@ -297,10 +301,10 @@ window.FF = window.FF || {};
     const cards = [
       card({ key: 'cur', icon: '🏷️', tone: 'g1', label: `Issuance · ${p.curYm || 'MTD'}`, value: t.curTotal, unit: 'tags', sub: `VC4 <b>${fmt(t.curVc4)}</b> · Comm <b>${fmt(t.curComm)}</b>`, why: 'EIR ledger (First Forward sheet)', explain: 'EIR ki tag rows ka jod. Click = day-wise aur class-wise detail.' }),
       card({ key: 'last', icon: '📅', tone: 'g3', label: `Last month · ${p.lastYm || 'prev'}`, value: t.lastTotal, unit: 'tags', sub: `VC4 <b>${fmt(t.lastVc4)}</b> · Comm <b>${fmt(t.lastComm)}</b> · ${val(growth)}`, why: 'EIR ledger + REPORT sheet cross-check', explain: `Pichhle mahine ke tag.` }),
-      card({ key: 'expected', icon: '🎯', tone: 'g7', label: 'Expected (month-end)', value: p.expected, unit: 'tags', sub: `Runrate <b>${fmt(p.runRate, true)}</b>/din`, why: 'Runrate se projection', explain: 'Aaj tak ka issuance ÷ din × month ke din.' }),
+      card({ key: 'expected', icon: '🎯', tone: 'g7', label: 'Expected (month-end)', value: p.expected, unit: 'tags', sub: `Runrate <b>${fmt(p.runRate, true)}</b>/din`, why: 'Runrate se projection', explain: 'Aaj tak ka issuance ÷ din × month ke din.', drill: { scope: 'days', title: `🎯 Expected month-end · ${fmt(p.expected)} (din-wise basis)`, basis: `Run-rate ${fmt(p.runRate, true)}/din × month ke din = ${fmt(p.expected)}` } }),
       card({ key: 'stock', icon: '📦', tone: 'g5', label: 'Stock in hand', value: t.stockTotal, unit: 'tags', sub: `${isTl && p.tlStock && p.tlStock.own ? `TL ke paas <b>${fmt(p.tlStock.own.total)}</b> + agents <b>${fmt(p.tlStock.agents ? p.tlStock.agents.total : 0)}</b> · ` : ''}VC4 <b>${fmt(t.stockVc4)}</b> · Comm <b>${fmt(t.stockComm)}</b>`, why: 'StockDataa (inventory sheet)', explain: 'Field me pada stock — StockDataa ki tag rows.' }),
       card({ key: 'today', icon: '⚡', tone: 'g10', label: 'Today (EIR)', value: FF.store && FF.store.get ? (FF.store.get('daily') || []).filter((r) => r.key === U.dateKey(new Date()) && r.channel !== 'GV Partner' && personMatch(r, person, isTl)).reduce((n, r) => n + (Number(r.n) || 0), 0) : '—', unit: 'tags', why: 'EIR aaj ki rows', explain: 'First Forward ka issuance T+1 aata hai — aaj ka data kal poora hota hai.' }),
-      card({ key: 'days', icon: '📆', tone: 'g8', label: `${p.curYm || 'MTD'} active days`, value: (p.agents && isTl ? (p.agents.filter((a) => a.curTotal > 0).length + ' agents') : ((p.curDays || 0) || '—')), unit: isTl ? '' : 'din', sub: isTl ? `Team issuance <b>${fmt(t.curTotal)}</b>` : `Avg <b>${p.runRate ? fmt(p.runRate, true) : '0'}</b>/din`, why: 'EIR se', explain: 'Kitne din / kitne agents active rahe.' })
+      card({ key: 'days', icon: '📆', tone: 'g8', label: `${p.curYm || 'MTD'} active days`, value: (p.agents && isTl ? (p.agents.filter((a) => a.curTotal > 0).length + ' agents') : ((p.curDays || 0) || '—')), unit: isTl ? '' : 'din', sub: isTl ? `Team issuance <b>${fmt(t.curTotal)}</b>` : `Avg <b>${p.runRate ? fmt(p.runRate, true) : '0'}</b>/din`, why: 'EIR se', explain: 'Kitne din / kitne agents active rahe.', drill: isTl ? { scope: 'agents', title: `📆 Active agents · ${fmt((p.agents || []).filter((a) => a.curTotal > 0).length)} (kis ne kitna issue kiya)` } : { scope: 'days', title: `📆 Active days (din-wise tags)` } })
     ];
     return {
       ch: 'ff', kind: isTl ? 'tl' : 'agent', name: p.name, id: p.id, tlName: p.tlName, tlId: p.tlId, mobile: p.mobile,
@@ -350,9 +354,15 @@ window.FF = window.FF || {};
     host.querySelector('.gs-drawer-backdrop').addEventListener('click', (e) => { if (e.target.classList.contains('gs-drawer-backdrop')) closeDrawer(); });
     let d;
     try {
-      d = v.ch === 'gv'
-        ? await FF.gvTruth.drill({ ...spec, truth: v.truth, kind: v.kind === 'tl' ? 'gv-tl' : 'gv-agent', name: v.name, id: v.id, tlName: v.tlName, tlId: v.tlId })
-        : await ffDrill(spec, v);
+      const baseDrill = (sp) => (v.ch === 'gv'
+        ? FF.gvTruth.drill({ ...sp, truth: v.truth, kind: v.kind === 'tl' ? 'gv-tl' : 'gv-agent', name: v.name, id: v.id, tlName: v.tlName, tlId: v.tlId })
+        : ffDrill(sp, v));
+      // Cards ka number sirf "is mahine ki saari rows" nahi hota — Expected / Active days / Replacement / REPORT-sheet cards
+      // ab apne hisaab ka data kholte hain (pehle sab `cur` ki poori list kholte the = card se alag data).
+      if (spec.scope === 'sheet') d = sheetDrill(v, spec);
+      else if (spec.scope === 'agents' && v.kind === 'tl' && Array.isArray(v.team)) d = agentsDrill(v, spec);
+      else if (spec.scope === 'days' || spec.scope === 'repl') d = deriveDrill(spec.scope, await baseDrill({ ...spec, scope: 'cur' }), spec, v);
+      else d = await baseDrill(spec);
     } catch (err) {
       host.querySelector('.gs-drawer-body').innerHTML = U.errorBox(err, 'data-gs-close');
       return;
@@ -372,6 +382,69 @@ window.FF = window.FF || {};
       U.toast('CSV downloaded ✓', 'ok');
     });
   }
+
+  // ---- derived drills (card ke number ke hisaab ka data) ---------------------------------------------
+  const rawKey = (r) => r.key || (r.date ? U.dateKey(r.date) : '') || (r.d ? U.dateKey(r.d) : '');
+  const rawN = (r) => Number(r.n) || 1;
+  const isReplRow = (r) => /replacement/i.test(`${r.type || ''} ${r.status || ''}`);
+  const isChassisRow = (r) => /chassis/i.test(`${r.vrnType || ''} ${r.tagType || ''}`);
+  const isVc4Row = (r) => String(r.group || r.cls || '').toUpperCase() === 'VC4';
+  function deriveDrill(kind, base, spec, v) {
+    const raw = Array.isArray(base.raw) ? base.raw : [];
+    const sum = (list) => list.reduce((n, r) => n + rawN(r), 0);
+    const label = v.name;
+    if (kind === 'repl') {
+      const hit = raw.filter((r) => isReplRow(r) || isChassisRow(r));
+      const gv = v.ch === 'gv';
+      const kindOf = (r) => [isReplRow(r) ? 'Replacement' : '', isChassisRow(r) ? 'Chassis' : ''].filter(Boolean).join(' + ');
+      return {
+        title: spec.title || '🔁 Replacement / Chassis', source: base.source,
+        note: `${fmt(hit.length)} rows · Replacement ${fmt(sum(hit.filter(isReplRow)))} · Chassis ${fmt(sum(hit.filter(isChassisRow)))} — ${v.ym} me ${label} ke sirf wahi tags jo replacement ya chassis hain (card ke number ki rows).`,
+        columns: gv ? ['DATE', 'VRN / BARCODE', 'TAG_ID', 'CLASS', 'KIND', 'STATUS', 'AGENT', 'TL'] : ['DATE', 'CLASS', 'KIND', 'AGENT', 'TL', 'COUNT'],
+        rows: hit.map((r) => (gv
+          ? [rawKey(r) || '—', r.vrn || '—', r.tagId || '—', r.cls || '—', kindOf(r), r.status || '—', r.agentName || '—', r.tlName || '—']
+          : [rawKey(r), r.cls || '', kindOf(r), r.agentName || '', r.tlName || '', fmt(rawN(r))])),
+        raw: hit
+      };
+    }
+    // days — din-wise tags (Expected ka basis + Active days ka asli hisaab)
+    const byDay = new Map();
+    raw.forEach((r) => { const k = rawKey(r) || '—'; (byDay.get(k) || byDay.set(k, []).get(k)).push(r); });
+    const days = [...byDay.entries()].sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+    const total = sum(raw);
+    const rows = days.map(([k, list]) => { const t = sum(list), vc4 = sum(list.filter(isVc4Row)); return [k, fmt(t), fmt(vc4), fmt(t - vc4), fmt(sum(list.filter(isReplRow))), fmt(sum(list.filter(isChassisRow)))]; });
+    rows.push(['TOTAL', fmt(total), fmt(sum(raw.filter(isVc4Row))), fmt(total - sum(raw.filter(isVc4Row))), fmt(sum(raw.filter(isReplRow))), fmt(sum(raw.filter(isChassisRow)))]);
+    return {
+      title: spec.title || '📆 Din-wise tags', source: base.source,
+      note: `${fmt(days.length)} din · jod ${fmt(total)} tag · ${v.ym}.${spec.basis ? ` Hisaab: ${spec.basis}.` : ''}`,
+      columns: ['DATE', 'TAGS', 'VC4', 'COMMERCIAL', 'REPLACEMENT', 'CHASSIS'], rows, raw
+    };
+  }
+  /** TL ke agents — kis ne is mahine kitna issue kiya (Active agents card ka asli hisaab). */
+  function agentsDrill(v, spec) {
+    const num = (x) => Number(x) || 0;
+    const team = (v.team || []).map((a) => ({ name: a.name || a.agentName || '', id: a.id || a.agentId || '', cur: num(a.curTotal ?? a.cur), vc4: num(a.curVc4), comm: num(a.curComm), last: num(a.lastTotal ?? a.last), stock: num(a.stockTotal ?? a.stock) }));
+    const active = team.filter((a) => a.cur > 0).sort((a, b) => b.cur - a.cur);
+    const sumBy = (k) => active.reduce((n, a) => n + a[k], 0);
+    const rows = active.map((a) => [a.name, a.id || '—', fmt(a.cur), fmt(a.vc4), fmt(a.comm), fmt(a.last), fmt(a.stock)]);
+    rows.push(['TOTAL', '', fmt(sumBy('cur')), fmt(sumBy('vc4')), fmt(sumBy('comm')), fmt(sumBy('last')), fmt(sumBy('stock'))]);
+    return {
+      title: spec.title || '📆 Active agents', source: 'EIR (First Forward sheet)',
+      note: `${fmt(active.length)} / ${fmt(team.length)} agents ne ${v.ym} me issue kiya — TL ${v.name}.`,
+      columns: ['AGENT', 'ID', 'THIS MONTH', 'VC4', 'COMMERCIAL', 'LAST MONTH', 'STOCK'], rows
+    };
+  }
+  /** GV REPORT sheet card ka asli matlab: ledger (final) vs sheet (cross-check) ka farq. */
+  function sheetDrill(v, spec) {
+    const st = v.sheetTotals || {}, tot = v.totals || {};
+    const line = (name, ledger, sheet) => [name, fmt(ledger), sheet === null || sheet === undefined ? '—' : fmt(sheet), sheet === null || sheet === undefined ? '—' : `${ledger - sheet > 0 ? '+' : ''}${fmt(ledger - sheet)}`];
+    return {
+      title: spec.title || '📑 GV REPORT sheet vs ledger', source: 'GV REPORT (cross-check) · GV Master (final)',
+      note: 'GV Master ledger final hai; GV REPORT sheet sirf verify karne ke liye. Farq 0 ho to dono sahi hain.',
+      columns: ['METRIC', 'LEDGER (FINAL)', 'GV REPORT SHEET', 'FARQ'],
+      rows: [line(`Issuance · ${v.ym}`, tot.cur || 0, st.cur), line(`Last month · ${v.lastYm}`, tot.last || 0, st.last), line('Stock in hand', tot.stock || 0, st.stock)]
+    };
+  }
   /** FF ke liye tag rows — EIR daily (issuance) ya StockDataa (stock, on demand). */
   async function ffDrill(spec, v) {
     const isTl = v.kind === 'tl';
@@ -387,7 +460,7 @@ window.FF = window.FF || {};
       return { title: `📦 Stock in hand · ${v.name}`, source: 'StockDataa (First Forward sheet)', note: `${rows.length} tag rows ${isTl ? `${v.name} + uske agents` : v.name} ke paas.`, columns: ['TAG_ID', 'BARCODE', 'CLASS', 'TYPE', 'AGENT', 'TL', 'ALLOCATED'], rows };
     }
     const tk = U.dateKey(new Date());
-    const daily = (FF.store.get('daily') || []).filter((r) => personMatch(r, v.person, isTl));
+    const daily = (FF.store.get('daily') || []).filter((r) => r.channel !== 'GV Partner' && personMatch(r, v.person, isTl));
     const ym = scope === 'last' ? v.rep.p.lastYm : v.ym;
     const rows = scope === 'today' ? daily.filter((r) => r.key === tk) : daily.filter((r) => r.ym === ym);
     const total = rows.reduce((n, r) => n + (Number(r.n) || 0), 0);
@@ -395,7 +468,8 @@ window.FF = window.FF || {};
       title: `🏷️ ${scope === 'today' ? 'Aaj' : ym} · ${v.name}`, source: 'EIR (First Forward sheet)',
       note: `${rows.length} grouped rows · jod = ${fmt(total)} tag. EIR row tag-wise nahi, date + class + type wise grouped hoti hai.`,
       columns: ['DATE', 'CLASS', 'TYPE', 'AGENT', 'TL', 'COUNT'],
-      rows: rows.map((r) => [r.key || (r.d && U.dateKey(r.d)) || '', r.cls || '', r.type || '', r.agentName || '', r.tlName || '', fmt(r.n)])
+      rows: rows.map((r) => [r.key || (r.d && U.dateKey(r.d)) || '', r.cls || '', r.type || '', r.agentName || '', r.tlName || '', fmt(r.n)]),
+      raw: rows
     };
   }
 
@@ -758,5 +832,5 @@ window.FF = window.FF || {};
 
   FF.pages.gvAgentSummary = makePage('gv');
   FF.pages.ffAgentSummary = makePage('ff');
-  FF.summaryUI = { makePage, viewCsv, viewText, openDrill, closeDrawer };
+  FF.summaryUI = { makePage, viewCsv, viewText, openDrill, closeDrawer, _deriveDrill: deriveDrill, _agentsDrill: agentsDrill, _sheetDrill: sheetDrill };
 })(window.FF);

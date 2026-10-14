@@ -57,8 +57,9 @@ FF.pages = FF.pages || {};
   function tableHtml(header, rows, numericFrom) {
     return `<div class="table-wrap"><table class="tbl"><thead><tr>${header.map((h, i) => `<th class="${i >= numericFrom ? 'num' : ''}">${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((c, i) => `<td class="${i >= numericFrom ? 'num' : ''}">${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
   }
-  function kpiMini(label, value, foot, cls) {
-    return `<div class="mini-kpi ${cls || ''}"><span class="mini-label">${esc(label)}</span><span class="mini-value">${value}</span>${foot ? `<span class="mini-foot">${foot}</span>` : ''}</div>`;
+  function kpiMini(label, value, foot, cls, spec) {
+    // spec = kpiDetail drill (data-kpi): tile par click = us number ka exact data (pehle ye tiles clickable hi nahi the).
+    return `<div class="mini-kpi ${cls || ''}"${spec ? ` data-kpi="${esc(spec)}" data-kpi-title="${esc(label)}" role="button" tabindex="0" title="Click karo — is number ka poora data"` : ''}><span class="mini-label">${esc(label)}</span><span class="mini-value">${value}</span>${foot ? `<span class="mini-foot">${foot}</span>` : ''}</div>`;
   }
 
   async function render(root, params, ctx) {
@@ -103,6 +104,16 @@ FF.pages = FF.pages || {};
     const droppedToday = allDailyRaw.filter((r) => isToday(r) || ffLagPending(r)).length;
     const allDaily = allDailyRaw.filter((r) => (chMode === 'gv' ? r.channel === 'GV Partner' : chMode === 'ff' ? r.channel !== 'GV Partner' : true) && !isToday(r) && !ffLagPending(r));
     const monthsList = M.months(allDaily);
+    // 🔎 Tile click → kpiDetail: channel + TL/agent filter wahi jo page par laga hai.
+    const drillSpec = (extra, srcKey) => {
+      const q = new URLSearchParams({ src: srcKey || chMode, ...extra });
+      if (filter.tl) q.set('tl', filter.tl);
+      if (filter.agent) q.set('agent', filter.agent);
+      return q.toString();
+    };
+    const latestYm = () => { const l = M.latestDate(allDaily); return l ? U.ymKey(l) : ''; };
+    const periodSpec = (ym, srcKey) => drillSpec(ym === latestYm() ? { scope: 'mtd', ym } : { scope: 'month', ym }, srcKey);
+    const sameRangeSpec = (ym, lastDay, srcKey) => drillSpec({ scope: 'range', from: `${ym}-01`, to: `${ym}-${U.pad2(lastDay)}` }, srcKey);
     const waBtn = U.$('#tr-wa', root);
     if (waBtn) waBtn.addEventListener('click', () => {
       const cm = monthsList[monthsList.length - 1];
@@ -147,10 +158,10 @@ FF.pages = FF.pages || {};
       const series = keys.map((k) => ({ name: k, values: (s.dims.get(k) || []).slice(0, upto) }));
       const best = s.totals.reduce((acc, v, i) => (v > acc.v ? { v, i } : acc), { v: 0, i: -1 });
       html += `<div class="mini-grid">
-        ${kpiMini(`${U.labelYM(curMonth)} total`, U.fmt(sum.total), `${sum.activeDays} active days`, 'c1')}
-        ${kpiMini('Avg / day', U.fmt(sum.avgPerDay), `Best day: ${best.i >= 0 ? `${best.i + 1} ${U.MONTHS[U.ymParts(curMonth).m - 1]} (${U.fmt(best.v)})` : '—'}`, 'c2')}
-        ${kpiMini('vs last month (same period)', U.deltaHtml(U.growth(sum.total, lastMtd.total)), `${U.labelYM(lastM)} till day ${sum.lastDay}: ${U.fmt(lastMtd.total)}`, 'c3')}
-        ${kpiMini('Projected month-end', U.fmt(sum.projected), `Days in month: ${sum.daysInMonth}`, 'c4')}
+        ${kpiMini(`${U.labelYM(curMonth)} total`, U.fmt(sum.total), `${sum.activeDays} active days`, 'c1', periodSpec(curMonth))}
+        ${kpiMini('Avg / day', U.fmt(sum.avgPerDay), `Best day: ${best.i >= 0 ? `${best.i + 1} ${U.MONTHS[U.ymParts(curMonth).m - 1]} (${U.fmt(best.v)})` : '—'}`, 'c2', periodSpec(curMonth))}
+        ${kpiMini('vs last month (same period)', U.deltaHtml(U.growth(sum.total, lastMtd.total)), `${U.labelYM(lastM)} till day ${sum.lastDay}: ${U.fmt(lastMtd.total)}`, 'c3', sameRangeSpec(lastM, sum.lastDay))}
+        ${kpiMini('Projected month-end', U.fmt(sum.projected), `Days in month: ${sum.daysInMonth}`, 'c4', periodSpec(curMonth))}
       </div>`;
       html += `<section class="card"><div class="card-head"><h3>Daily issuance · ${U.labelYM(curMonth, true)} · by ${esc(dim.label)}</h3></div><div class="card-body">${C.bars({ labels, tipLabels: labels.map((d) => `${d} ${U.MONTHS[U.ymParts(curMonth).m - 1]} (${U.weekday(s.dates[d - 1])})`), series, height: 260, showValues: labels.length <= 31, highlight: best.i })}</div></section>`;
       let cum = 0;
@@ -190,7 +201,7 @@ FF.pages = FF.pages || {};
       const labels = monthsList.map((m) => U.labelYM(m));
       const series = seriesFor(buckets, monthsList);
       const sums = monthsList.map((m) => M.summary(allDaily, m));
-      html += `<div class="mini-grid">${sums.slice(-3).map((s, i) => kpiMini(U.labelYM(s.ym, true), U.fmt(s.total), `${s.activeDays} days · ${U.fmt(s.avgPerDay)}/day${i > 0 || sums.length > 3 ? ` · ${U.deltaHtml(U.growth(s.total, (sums[sums.indexOf(s) - 1] || {}).total || null), { decimals: 0 })} MoM` : ''}`, `c${(i % 4) + 1}`)).join('')}</div>`;
+      html += `<div class="mini-grid">${sums.slice(-3).map((s, i) => kpiMini(U.labelYM(s.ym, true), U.fmt(s.total), `${s.activeDays} days · ${U.fmt(s.avgPerDay)}/day${i > 0 || sums.length > 3 ? ` · ${U.deltaHtml(U.growth(s.total, (sums[sums.indexOf(s) - 1] || {}).total || null), { decimals: 0 })} MoM` : ''}`, `c${(i % 4) + 1}`, periodSpec(s.ym))).join('')}</div>`;
       html += `<section class="card"><div class="card-head"><h3>Monthly issuance · by ${esc(dim.label)}</h3></div><div class="card-body">${C.bars({ labels, series, height: 260, legendAlways: true })}</div></section>`;
       const rows = sums.map((s, i) => {
         const prev = sums[i - 1];
@@ -211,10 +222,10 @@ FF.pages = FF.pages || {};
         const t = ex.rows[ex.rows.length - 1];
         const comm = ex.rows.find((r) => r.label.indexOf('All Commercial') === 0) || { cur: 0, expected: 0 };
         html += `<div class="mini-grid">
-          ${kpiMini(`${chName} · expected month-end`, U.fmt(t.expected), `${U.fmt(t.rate, true)}/day × ${ex.monthDays} din`, 'c1')}
-          ${kpiMini('Issued ab tak', U.fmt(t.cur), `${ex.left} din bache hain`, 'c2')}
-          ${kpiMini('Aage aur kitna', U.fmt(t.pending), `run-rate ${U.fmt(t.rate, true)}/day`, 'c3')}
-          ${kpiMini('Expected vs last month', U.deltaHtml(U.growth(t.expected, lastSum.total), { decimals: 0 }), `${U.labelYM(lastYm)} full: ${U.fmt(lastSum.total)}`, 'c4')}
+          ${kpiMini(`${chName} · expected month-end`, U.fmt(t.expected), `${U.fmt(t.rate, true)}/day × ${ex.monthDays} din`, 'c1', periodSpec(curYm, key))}
+          ${kpiMini('Issued ab tak', U.fmt(t.cur), `${ex.left} din bache hain`, 'c2', periodSpec(curYm, key))}
+          ${kpiMini('Aage aur kitna', U.fmt(t.pending), `run-rate ${U.fmt(t.rate, true)}/day`, 'c3', periodSpec(curYm, key))}
+          ${kpiMini('Expected vs last month', U.deltaHtml(U.growth(t.expected, lastSum.total), { decimals: 0 }), `${U.labelYM(lastYm)} full: ${U.fmt(lastSum.total)}`, 'c4', periodSpec(lastYm, key))}
         </div>
         <section class="card"><div class="card-head"><h3>🎯 Expected this month · ${esc(chName)}</h3><div class="card-right dim">${esc(U.basisText(key, ex.basis))} · ${ex.days}/${ex.monthDays} din</div></div>
         <div class="card-body">${C.bars({ labels: ex.rows.filter((r) => r.label.indexOf('bina replacement') === -1).map((r) => r.label), height: 230, showValues: true, series: [{ name: 'Issued ab tak', values: ex.rows.filter((r) => r.label.indexOf('bina replacement') === -1).map((r) => r.cur), color: '#c7d2fe' }, { name: 'Expected month-end', values: ex.rows.filter((r) => r.label.indexOf('bina replacement') === -1).map((r) => r.expected), color: '#6366f1' }], legendAlways: true })}</div></section>
@@ -239,12 +250,12 @@ FF.pages = FF.pages || {};
       const lastCum = lastVals.map((v) => (v === null ? null : (lc += v)));
       const cm = U.labelYM(cur), lm = U.labelYM(last);
       html += `<div class="mini-grid">
-        ${kpiMini(`${cm} · MTD (till day ${curSum.lastDay})`, U.fmt(curSum.total), `${U.fmt(curSum.avgPerDay)} / day`, 'c1')}
-        ${kpiMini(`${lm} · same period`, U.fmt(lastMtd.total), `${U.fmt(lastMtd.avgPerDay)} / day`, 'c2')}
-        ${kpiMini('Growth (same period)', U.deltaHtml(U.growth(curSum.total, lastMtd.total)), `${curSum.total - lastMtd.total > 0 ? '+' : ''}${U.fmt(curSum.total - lastMtd.total)} tags`, 'c3')}
-        ${kpiMini(`${lm} · full month`, U.fmt(lastFull.total), `${lastFull.activeDays} days`, 'c4')}
-        ${kpiMini(`${cm} · projected`, U.fmt(curSum.projected), U.deltaHtml(U.growth(curSum.projected, lastFull.total)), 'c5')}
-        ${kpiMini('Need / day to beat last month', curSum.lastDay < curSum.daysInMonth ? U.fmt(Math.max(0, (lastFull.total - curSum.total) / (curSum.daysInMonth - curSum.lastDay))) : '—', `${curSum.daysInMonth - curSum.lastDay} days left`, 'c6')}
+        ${kpiMini(`${cm} · MTD (till day ${curSum.lastDay})`, U.fmt(curSum.total), `${U.fmt(curSum.avgPerDay)} / day`, 'c1', periodSpec(cur))}
+        ${kpiMini(`${lm} · same period`, U.fmt(lastMtd.total), `${U.fmt(lastMtd.avgPerDay)} / day`, 'c2', sameRangeSpec(last, curSum.lastDay))}
+        ${kpiMini('Growth (same period)', U.deltaHtml(U.growth(curSum.total, lastMtd.total)), `${curSum.total - lastMtd.total > 0 ? '+' : ''}${U.fmt(curSum.total - lastMtd.total)} tags`, 'c3', periodSpec(cur))}
+        ${kpiMini(`${lm} · full month`, U.fmt(lastFull.total), `${lastFull.activeDays} days`, 'c4', periodSpec(last))}
+        ${kpiMini(`${cm} · projected`, U.fmt(curSum.projected), U.deltaHtml(U.growth(curSum.projected, lastFull.total)), 'c5', periodSpec(cur))}
+        ${kpiMini('Need / day to beat last month', curSum.lastDay < curSum.daysInMonth ? U.fmt(Math.max(0, (lastFull.total - curSum.total) / (curSum.daysInMonth - curSum.lastDay))) : '—', `${curSum.daysInMonth - curSum.lastDay} days left`, 'c6', periodSpec(cur))}
       </div>`;
       html += `<div class="grid g-2">
         <section class="card"><div class="card-head"><h3>Daily · ${cm} vs ${lm}</h3></div><div class="card-body">${C.lines({ labels, tipLabels: labels.map((d) => `Day ${d}`), height: 250, series: [{ name: cm, values: curVals, color: C.COLORS.current }, { name: lm, values: lastVals, color: C.COLORS.last, dash: true, area: false }] })}</div></section>

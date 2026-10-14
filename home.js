@@ -395,7 +395,7 @@ FF.pages = FF.pages || {};
     for (const r of rows || []) {
       const group = r.group === 'VC4' ? 'VC4' : r.group === 'VC20' ? 'VC20' : 'VC5+';
       const key = String(r.agentId || r.agentName || '—').trim() || '—';
-      const cur = maps[group].get(key) || { name: String(r.agentName || r.agentId || '—').trim() || '—', n: 0 };
+      const cur = maps[group].get(key) || { name: String(r.agentName || r.agentId || '—').trim() || '—', id: String(r.agentId || '').trim(), n: 0 };
       cur.n += 1;
       maps[group].set(key, cur);
     }
@@ -428,12 +428,15 @@ FF.pages = FF.pages || {};
         `src=gv&scope=day&date=${tk}`),
       kpi('g10', 'Today Highest Issued', '🏆',
         live.highest ? `<div class="hm-highest-list">
-          <div><span>VC4</span><b>${esc(live.highest.VC4 ? live.highest.VC4.name : '—')}</b><strong>${U.fmt(live.highest.VC4 ? live.highest.VC4.n : 0)}</strong></div>
-          <div><span>VC20</span><b>${esc(live.highest.VC20 ? live.highest.VC20.name : '—')}</b><strong>${U.fmt(live.highest.VC20 ? live.highest.VC20.n : 0)}</strong></div>
-          <div><span>VC5+</span><b>${esc(live.highest['VC5+'] ? live.highest['VC5+'].name : '—')}</b><strong>${U.fmt(live.highest['VC5+'] ? live.highest['VC5+'].n : 0)}</strong></div>
+          ${[['VC4', 'vc4'], ['VC20', 'vc20'], ['VC5+', 'vc5p']].map(([group, f]) => {
+            const best = live.highest[group];
+            // Har class ki row apne top issuer ki aaj ki rows kholti hai (pehle card ek nakli filter naam se poora din kholta tha).
+            const rowSpec = best && best.n ? ` data-kpi="${esc(`src=gv&scope=day&date=${tk}&f=${f}&agent=${encodeURIComponent(best.name)}${best.id ? `&agentId=${encodeURIComponent(best.id)}` : ''}`)}" data-kpi-title="${esc(`Highest ${group} today · ${best.name}`)}" role="button" tabindex="0" title="${esc(`${best.name} ki aaj ki ${group} rows`)}"` : '';
+            return `<div${rowSpec}><span>${group}</span><b>${esc(best ? best.name : '—')}</b><strong>${U.fmt(best ? best.n : 0)}</strong></div>`;
+          }).join('')}
         </div>` : '—',
-        live.highest ? 'Class-wise highest issuer · Today' : 'GV Master load hone par class-wise highest dikhega',
-        `src=gv&scope=day&date=${tk}&f=highest`)
+        live.highest ? 'Class-wise highest issuer · Today — row par click = uski rows' : 'GV Master load hone par class-wise highest dikhega',
+        `src=gv&scope=day&date=${tk}`)
     ];
     const errorNote = live.error
       ? `<p class="hm-warn">⚠️ GV live feed error: ${esc(live.error)}. Connection / sheet mapping check karo; GV Master refresh hote hi snapshot update hoga.</p>`

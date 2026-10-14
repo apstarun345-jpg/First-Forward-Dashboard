@@ -794,9 +794,12 @@ window.FF = window.FF || {};
       if (agentIdWanted) return personKey(r.agentId) === agentIdWanted;
       return !agentNameWanted || personKey(r.agentName) === agentNameWanted;
     };
+    // FF stock datasets (StockDataa) me TL ID column hota hi nahi — row par tlId na ho to TL naam se match karo,
+    // warna profile ke "&tlId=…" wale saare stock clicks (VC4/VC20/VC5+/Tag-level) 0 dikhate the.
     const tlOk = (r) => {
-      if (tlIdWanted) return personKey(r.tlId) === tlIdWanted;
-      return !tlWanted || personKey(r.tlName) === personKey(spec.tl || spec.tlName);
+      if (tlIdWanted && personKey(r.tlId)) return personKey(r.tlId) === tlIdWanted;
+      if (tlWanted) return personKey(r.tlName) === personKey(spec.tl || spec.tlName);
+      return !tlIdWanted;
     };
     // 🧩 TL own/team clicks use the same ID-aware Tag Assignment scope as the KPI.
     const part = U.clean(spec.part || '').toLowerCase();
@@ -885,6 +888,21 @@ window.FF = window.FF || {};
         const v = agentTotals.get(key) || { name: a.agentName, id: a.agentId, tl: a.tlName || '—', tlId: a.tlId || '', agent: a.agentName, ch: 'gv', n: 0, vc4: 0 };
         const n = Number(a.n) || 0; v.n += n; if (useAgentRows ? classKey(a.cls) === 'VC4' : false) v.vc4 += n; agentTotals.set(key, v);
       });
+      // 🩹 v3.78 — "Agents with Stock" / "TLs with Stock" table ka VC4 column pehle hamesha 0 tha (Commercial = poora stock)
+      // kyunki class-split sirf class-filter lagne par jodta tha. Ab class-wise Tag Assignment rows se asli VC4 aata hai.
+      if (!useAgentRows && agentTotals.size) {
+        const vc4ByAgent = new Map();
+        (agentCls || []).forEach((r) => {
+          if (classKey(r.cls) !== 'VC4') return;
+          const k = personKey(r.agentId) ? `#${personKey(r.agentId)}` : personKey(r.agentName);
+          if (k) vc4ByAgent.set(k, (vc4ByAgent.get(k) || 0) + (Number(r.n) || 0));
+        });
+        agentTotals.forEach((v) => {
+          const hit = vc4ByAgent.get(`#${personKey(v.id)}`);
+          const val = hit !== undefined ? hit : (vc4ByAgent.get(personKey(v.name)) || 0);
+          v.vc4 = Math.min(v.n, val);
+        });
+      }
       // v3.40 — GV me bhi FF jaisa "TL × class" matrix: class rows me TL column nahi hota, isliye TL ka
       // mapping 'Stock Agent' (agent × TL) rows se jodte hain (FF drawer ke barabar detail).
       const tlOfAgent = new Map();
@@ -897,7 +915,17 @@ window.FF = window.FF || {};
       if (spec.holders === 'agents') holders = holdersTable('🧑‍💼 GV agents jinke paas stock hai', agentTotals, 'Agent');
       else if (spec.holders === 'tls') {
         const map = new Map();
-        (tls || []).filter((t) => FF.config.isRealTl(t.tlName) && t.directAgent !== true).forEach((t) => map.set(t.tlName, { name: t.tlName, tl: 'GV Partner', ch: 'gv', n: Number(t.n) || 0, vc4: 0 }));
+        const vc4ByTl = new Map();
+        (tlCls || []).forEach((r) => {
+          if (classKey(r.cls) !== 'VC4') return;
+          [personKey(r.tlId) ? `#${personKey(r.tlId)}` : '', personKey(r.tlName)].filter(Boolean).forEach((k) => vc4ByTl.set(k, (vc4ByTl.get(k) || 0) + (Number(r.n) || 0)));
+        });
+        (tls || []).filter((t) => FF.config.isRealTl(t.tlName) && t.directAgent !== true).forEach((t) => {
+          const n = Number(t.n) || 0;
+          const byId = personKey(t.tlId) ? vc4ByTl.get(`#${personKey(t.tlId)}`) : undefined;
+          const vc4 = byId !== undefined ? byId : (vc4ByTl.get(personKey(t.tlName)) || 0);
+          map.set(t.tlName, { name: t.tlName, tl: 'GV Partner', ch: 'gv', n, vc4: Math.min(n, vc4) });
+        });
         holders = holdersTable('👥 GV TLs jinke paas stock hai', map, 'TL');
       }
       parts.push(`<h3 class="kd-h">🟩 GV Partner stock (Tag Assignment)${cf ? ` · ${esc(cf.label)}` : ''}${spec.agent ? ` · ${esc(spec.agent)}` : (tlWanted || tlIdWanted) ? ` · TL ${esc(spec.tl || spec.tlName || spec.tlId)}${partLabel}` : ''} · <b>${U.fmt(tot)}</b></h3>${holders}
