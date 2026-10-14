@@ -37,30 +37,31 @@
 }
 .msp-channel-choice{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:10px 12px;margin:0 0 10px;border:1px solid var(--line);border-left:4px solid var(--brand);border-radius:12px;background:color-mix(in srgb,var(--brand) 5%,var(--card))}
 .msp-channel-choice-btns{display:flex;gap:6px;flex-wrap:wrap}
-.msp-page .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .msp-search-card { margin: 10px 0 14px; }
 .msp-search { display: flex; align-items: center; gap: 8px; position: relative; }
 .msp-search .msp-ico { font-size: 18px; line-height: 1; }
 .msp-filters { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
-.msp-filters .ms-register-state { margin-left: auto; }
 .msp-chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
 .msp-matches { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 0 0 10px; }
 .msp-hero { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 16px; margin-bottom: 10px;
   background: linear-gradient(135deg, color-mix(in srgb, var(--brand) 14%, transparent), color-mix(in srgb, #0d9488 12%, transparent));
   border: 1px solid color-mix(in srgb, var(--brand) 26%, transparent); }
-.msp-hero .msp-hero-id { flex: 1 1 auto; min-width: 0; }
-.msp-hero .msp-hero-act { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
-.msp-today { margin: 0 0 12px; padding: 10px 12px; border-radius: 14px; background: color-mix(in srgb, var(--muted) 5%, transparent);
-  border: 1px solid color-mix(in srgb, var(--muted) 16%, transparent); }
-.msp-today .dgrid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-.msp-today .dcell { border-radius: 12px; padding: 8px 10px; background: var(--card, #fff); border: 1px solid color-mix(in srgb, var(--muted) 18%, transparent); min-width: 0; }
+.msp-pills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; }
+.msp-pill.ff { background: color-mix(in srgb, #0ea5e9 11%, var(--card)); border-color: color-mix(in srgb, #0ea5e9 34%, transparent); }
+.msp-pill.gv { background: color-mix(in srgb, #10b981 11%, var(--card)); border-color: color-mix(in srgb, #10b981 34%, transparent); }
+.msp-pulse { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px 10px; margin: 0 0 12px; padding: 8px 12px; border-radius: 14px; border: 1px solid var(--line); background: color-mix(in srgb, var(--muted) 5%, var(--card)); }
+.msp-pulse-i { display: inline-flex; align-items: baseline; gap: 7px; flex-wrap: wrap; min-width: 0; }
+.msp-kpis-wrap { display: grid; gap: 12px; }
 .msp-report { margin-top: 4px; }
 .msp-team-card { margin-top: 14px; }
 .msp-h { margin: 0 0 8px; }
+@media (max-width: 640px) {
+.msp-chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+.msp-chips .msp-chip, .msp-chips .dim { flex: 0 0 auto; }
+}
 @media (max-width: 760px) {
-.msp-today .dgrid { grid-template-columns: 1fr; }
+.msp-pulse-h { border-right: 0; padding-right: 0; flex: 1 1 100%; }
 .msp-hero { flex-wrap: wrap; }
 .msp-search { flex-wrap: wrap; }
 .msp-search .btn { width: 100%; }
 }
-[data-theme="dark"] .msp-today .dcell { background: color-mix(in srgb, #fff 6%, transparent); }

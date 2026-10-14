@@ -93,7 +93,7 @@ test('class-wise issuance table: last month, this month, stock', async () => {
   assert.deepEqual([vc4.last, vc4.cur, vc4.stock], [60, 90, 10]);
   assert.deepEqual([vc20.last, vc20.cur, vc20.stock], [20, 30, 4]);
   const html = MP.html(pr);
-  assert.match(html, /Issuance class-wise/); assert.match(html, /mp-kpis/); assert.match(html, /Class-wise issuance/);
+  assert.match(html, /All classes · last month vs this month/); assert.match(html, /mp-kpis/); assert.match(html, /Class-wise issuance/);
   // v3.44 — summary ab VC4 · VC20 · VC5+ teen alag rows me (Commercial ek row me nahi chhupta).
   assert.match(html, /mp-group-tbl/);
   for (const label of ['VC4', 'VC20', 'VC5+']) assert.ok(html.includes(`<b>${label}</b>`), `${label} group row missing`);
@@ -122,7 +122,7 @@ test('TL profile: totals, class sums, TL-level vs agent-wise suggestion, agents 
   assert.deepEqual([pr.tlStock.own.total, pr.tlStock.agents.total], [8, 70]);
   assert.equal(pr.dispatch.sumAgentVc4, 80 + 0);
   const html = MP.html(pr);
-  assert.match(html, /TL ke agents/); assert.match(html, /Agent-wise issuance/); assert.match(html, /data-mp-agent="Ravi Kumar"/);
+  assert.match(html, /TL ke agents/); assert.match(html, /data-mp-pane="agents"/); assert.match(html, /data-mp-agent="Ravi Kumar"/);
   // v3.40 — "Own 8 + agents 70" ab do clickable chips hai (har chip ki drawer me sirf wahi hissa khulta hai)
   assert.match(html, /class="mp-part own"[^>]*part=own"[^>]*>Own 8<\/span> \+ <span class="mp-part team"[^>]*part=team"[^>]*>agents 70<\/span>/);
   assert.ok(/part=own/.test(html) && /part=team/.test(html), 'own / agents chips ka drill-down alag');

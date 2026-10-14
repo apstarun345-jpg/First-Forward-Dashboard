@@ -165,7 +165,7 @@ test('drawer: TL ID-wise stock neeche, har agent alag + clickable, VC4 · VC20 �
   assert.match(html, /scope=stock&amp;agent=[^&]*&amp;agentId=APS011919/, 'stock cell clickable (us ID ka stock)');
   assert.match(html, /= TL TOTAL · 🆔 APS011919/, 'footer me TL ID ke saath total');
   assert.ok(html.includes(U.fmt(1054)), 'TL stock total 1,054 drawer me');
-  assert.match(html, /data-mp-go="tlstock"/);
+  assert.match(html, /data-mp-pane="stock"[\s\S]*data-mp-sec="tlstock"/, 'TL ID-wise stock lives inside the Stock & dispatch tab');
   // 🧾 class-wise table ka Total bhi sheet ka (440 ledger jod sirf note me) — warna drawer me do total dikhte the
   assert.match(html, /Total <small class="dim">\(sheet\)<\/small><\/td><td class="num">332<\/td><td class="num">27<\/td>/);
   assert.match(html, /Class rows tag-ledger \(EIR \/ GV Master\) se aate hain/);

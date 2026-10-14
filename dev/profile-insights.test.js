@@ -83,7 +83,21 @@ test('agent profile shows activity boxes and no team list', () => {
   assert.ok(h.includes('Activity &amp; run-rate'));
   assert.ok(!h.includes('data-pi-box'));
   assert.ok(h.includes('Active this month'));
+  // Issued / last month / growth live in the KPI cards of the same view → only status · active days · best day are boxed here
+  assert.equal((h.match(/class="pi-box static/g) || []).length, 3);
+  for (const t of ['Status', 'Active days', 'Best day']) assert.ok(h.includes(t), t);
+  assert.ok(!/<small>Last month/.test(h) && !/<small>Growth</.test(h) && !/<small>Run-rate</.test(h), 'no repeated KPI boxes');
   FF.masterProfile = { insightRows: () => rows };
+});
+
+test('chart card carries a collapsed day-wise table (replaces the old trend card) with CSV', () => {
+  const h = PI.html(pr());
+  assert.match(h, /<details class="pi-days"><summary>[^<]*Day-wise table/);
+  assert.match(h, /data-pi-days-csv/);
+  const an = PI.analyze(pr());
+  const body = h.slice(h.indexOf('pi-days-tbl'));
+  assert.ok(body.includes('row-total'), 'total row');
+  assert.equal((body.match(/<tr/g) || []).length, an.days.filter((x) => x.day <= an.elapsed || x.t > 0).length + 2, 'one row per day + header + total');
 });
 
 test('shows a loading note instead of fake zeros while issuance rows are missing', () => {

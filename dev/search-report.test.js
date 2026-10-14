@@ -139,7 +139,8 @@ test('render(): FF + GV dono ho to ⚖ / 🟦 / 🟩 tabs, ek hi channel ho to s
   SR.render(slot, { key: 'TL ONE', name: 'TL One', ff: person('ff-tl', 'TL One', 'T1'), gv: person('gv-tl', 'TL One', 'GT1') });
   assert.match(slot.innerHTML, /data-sr-tab="both"/); assert.match(slot.innerHTML, /data-sr-tab="ff"/); assert.match(slot.innerHTML, /data-sr-tab="gv"/);
   SR.render(slot, { key: 'RAVI', name: 'Ravi', ff: person('ff-agent', 'Ravi', 'R1'), gv: null });
-  assert.ok(!/data-sr-tab="both"/.test(slot.innerHTML) && !/data-sr-tab="gv"/.test(slot.innerHTML) && /data-sr-tab="ff"/.test(slot.innerHTML));
+  assert.ok(!/data-sr-tab=/.test(slot.innerHTML), 'one channel only → no tab bar at all (nothing to switch)');
+  assert.ok(/data-sr-pane="ff"/.test(slot.innerHTML), 'the FF pane is still rendered');
   FF.masterProfile.renderInto = MPrenderInto;
 });
 
@@ -156,8 +157,8 @@ test('TL profile: agents table me Stock · Last · This month — VC4 / Comm / T
   // footer: agents total + TL own + TL total — issuance bhi
   assert.match(out, /Agents total \(2\)/); assert.match(out, /= TL TOTAL \(own \+ agents\)/);
   // section nav
-  for (const k of ['kpis', 'issuance', 'class', 'agents', 'agentclass', 'charts']) assert.match(out, new RegExp(`data-mp-go="${k}"`), `nav chip ${k}`);
-  assert.match(out, /data-mp-sec="agents"/);
+  for (const k of ['insights', 'issuance', 'kpis', 'agents']) assert.match(out, new RegExp(`data-mp-go="${k}"`), `tab ${k}`);
+  assert.match(out, /data-mp-pane="agents"/);
 });
 
 test('TL profile: Agent × Class stock matrix — cell = agent + class drill, totals reconcile', async () => {

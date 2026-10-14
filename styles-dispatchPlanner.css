@@ -55,7 +55,6 @@ html[data-theme="dark"] .dp2-table thead th.dp2-sort:hover { background: #26356a
 }
 .dp2-lbl { display: flex; align-items: center; gap: 6px; }
 .dp2-pill[aria-pressed="true"] { box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand) 22%, transparent); }
-.dp2-search .msel-btn { flex: 0 0 auto; }
 .dp2-pick { width: 34px; text-align: center; }
 .dp2-selbar { position: sticky; top: 58px; z-index: 12; display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 0 0 12px; padding: 9px 13px; border: 1px solid color-mix(in srgb, var(--brand) 35%, transparent); border-radius: 14px; background: linear-gradient(120deg, color-mix(in srgb, var(--brand) 13%, var(--card)), color-mix(in srgb, var(--brand-2) 9%, var(--card))); box-shadow: 0 8px 24px rgba(79, 70, 229, .16); }
 .dp2-selbar[hidden] { display: none; }

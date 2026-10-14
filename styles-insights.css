@@ -4,18 +4,14 @@
 .gv-personal-table .personal-class-cell .pc-source { font-size: 9.5px; }
 .commission-addon-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 0 0 14px; }
 .commission-addon-grid > .span2 { grid-column: 1 / -1; }
-.commission-trend-card .chart-line { min-height: 248px; margin: 2px 0 8px; }
 .commission-trend-card .linesvg { max-width: 100%; height: auto; }
-.commission-addon-grid .hbars { margin: 2px 0 10px; }
 .commission-addon-grid .card-head > .dim { margin-left: auto; }
 @media (max-width: 760px) {
 .commission-addon-grid { grid-template-columns: 1fr; }
 .commission-addon-grid > .span2 { grid-column: auto; }
 .commission-trend-card .chart-line { min-height: 225px; overflow-x: auto; }
 }
-.ins-detail-dialog .detail-toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; position:sticky; top:44px; z-index:2; background:#0b0d11; padding:2px 0 10px; }
 .ins-detail-dialog .detail-toolbar .btn:hover { background:#222836; }
-.ins-detail-dialog .detail-stats { display:flex; gap:8px; flex-wrap:wrap; margin:0 0 10px; }
 .ins-big { font-size: 28px; font-weight: 850; letter-spacing: -.035em; margin: 10px 0 4px; }
 .split-cards > .span2 { grid-column: 1 / -1; }
 .summary-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
@@ -88,7 +84,6 @@
 .class-board.tone-vc5p .board-head { background: linear-gradient(135deg, #7c3aed, #c026d3); }
 .class-board.tone-all .board-head { background: linear-gradient(135deg, #0f766e, #0d9488); }
 .class-board .board-body { padding: 0 0 4px; }
-.class-board .board-actions { display: flex; gap: 7px; flex-wrap: wrap; padding: 10px 14px 0; }
 .ins-table tbody tr.finding-row { cursor: pointer; }
 .ins-table tbody tr.finding-row td:first-child { border-left: 3px solid transparent; }
 .ins-table tbody tr.finding-row.sev-high td:first-child { border-left-color: var(--red); }
@@ -98,7 +93,6 @@
 .dq-source-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-bottom: 14px; }
 .dq-source-card { border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; background: var(--card); box-shadow: var(--shadow); border-top: 4px solid var(--brand); }
 .dq-source-card.c6 { border-top-color: #8b5cf6; }
-.dq-source-card .dq-counts { display: flex; gap: 10px; margin-top: 7px; flex-wrap: wrap; font-size: 11px; }
 .risk-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px; }
 .risk-chip.covered { background: linear-gradient(135deg, #10b981, #059669); }
 .risk-chip.norate { background: linear-gradient(135deg, #64748b, #334155); }
@@ -109,10 +103,8 @@
 .commission-selfcheck .check-grid > div.bad { border-left-color: var(--red, #ef4444); }
 #cert-winners { white-space: nowrap; }
 .ins-detail-dialog[open] { display: flex; }
-.ins-detail-dialog .detail-stats { padding: 12px 18px 0; margin: 0 !important; }
 .ins-detail-dialog .detail-stats .ins-pill { background: #eef2ff !important; color: #3730a3 !important; border: 1px solid #c7d2fe !important; font-weight: 700; }
 .ins-detail-dialog .detail-toolbar { position: static !important; background: #fff !important; padding: 10px 18px !important; }
 .ins-detail-dialog .ins-table, .ins-detail-dialog .data-table { width: 100%; border-collapse: separate; border-spacing: 0; background: #fff !important; }
 .ins-detail-dialog .detail-more { text-align: center; padding: 0 18px 14px; }
 .ms-hero .ms-hero-ico { font-size: 2.2rem; background: rgba(255, 255, 255, .2); border-radius: 14px; padding: 8px 12px; }
-.ms-hero .ms-hero-stats { margin-left: auto; display: flex; gap: 10px; flex-wrap: wrap; }

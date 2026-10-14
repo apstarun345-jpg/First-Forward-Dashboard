@@ -186,10 +186,8 @@ window.FF = window.FF || {};
     if (!chans.length) return null;
     const tabs = chans.length > 1 ? ['both', ...chans] : [chans[0]];
     const tabLabel = (t) => (t === 'both' ? '⚖ FF + GV' : `${CH[t].icon} ${CH[t].label} <small>${roleOf(g[t].kind)}</small>`);
-    const sub = chans.map((c) => `${CH[c].icon} ${CH[c].label} · ${roleOf(g[c].kind)}${g[c].sub ? ` ${esc(g[c].sub)}` : ''}`).join('  |  ');
     slot.innerHTML = `<div class="sr" data-sr-key="${esc(groupKey(g))}">
-      <div class="sr-head"><span class="ms-avatar">${esc(String(g.name).slice(0, 1).toUpperCase())}</span><div class="sr-id"><b>${esc(g.name)}</b><small>${sub}</small></div></div>
-      <div class="sr-tabs" role="tablist" aria-label="Channel">${tabs.map((t) => `<button type="button" role="tab" class="sr-tab" data-sr-tab="${t}">${tabLabel(t)}</button>`).join('')}</div>
+      ${tabs.length > 1 ? `<div class="sr-tabs" role="tablist" aria-label="Channel">${tabs.map((t) => `<button type="button" role="tab" class="sr-tab" data-sr-tab="${t}">${tabLabel(t)}</button>`).join('')}</div>` : ''}
       ${tabs.map((t) => `<div class="sr-pane" data-sr-pane="${t}" role="tabpanel" hidden></div>`).join('')}
     </div>`;
     const root = slot.querySelector('.sr');
@@ -200,7 +198,7 @@ window.FF = window.FF || {};
       if (pane && !pane.dataset.ready) {
         pane.dataset.ready = '1';
         if (t === 'both') fillCombined(pane, g);
-        else MP().renderInto(pane, g[t]);
+        else MP().renderInto(pane, g[t], { embedded: true });
       }
     };
     root.addEventListener('click', (e) => {

@@ -254,7 +254,23 @@ window.FF = window.FF || {};
       <div class="pi-rates"><span class="pi-chip total"><i></i>Total <b>${fmt(r.t, 1)}</b>/day <small class="dim">${fmt(an.monthTot.cur.t)} tags</small></span>${GROUPS.map(chip).join('')}
         <span class="pi-chip proj">Month-end at this pace <b>${fmt(an.projected)}</b> ${an.growth === null ? '' : pct(an.growth)}<small class="dim"> vs same days last month</small></span></div>
       <div class="pi-chart-wrap" data-pi-chart><div class="pi-inner">${chartSvg(an)}<div class="pi-tip" role="status" aria-live="polite" hidden></div></div></div>
-      <p class="dim small">Hover (or tap) a bar for that day's VC4 · VC20 · VC5+ split and the run-rate till that day. ${esc(live)}. Active on ${an.activeDays} of ${an.elapsed} days${an.best ? ` · best day <b>${esc(dayLabel(an.best.key))}</b> (${fmt(an.best.t)})` : ''}.</p></div>`;
+      <p class="dim small">Hover (or tap) a bar for that day's VC4 · VC20 · VC5+ split and the run-rate till that day. ${esc(live)}. Active on ${an.activeDays} of ${an.elapsed} days${an.best ? ` · best day <b>${esc(dayLabel(an.best.key))}</b> (${fmt(an.best.t)})` : ''}.</p>
+      ${daysTableHtml(an)}</div>`;
+  }
+
+  /** The same numbers as the chart, as a table (collapsed) — replaces the old separate "date-wise trend" card. */
+  function dayRows(an) {
+    return an.days.filter((d) => d.day <= an.elapsed || d.t > 0);
+  }
+  function daysTableHtml(an) {
+    const list = dayRows(an);
+    if (!list.length) return '';
+    const m = an.monthTot.cur;
+    return `<details class="pi-days"><summary>🗓️ Day-wise table · ${list.length} days</summary>
+      <div class="pi-days-bar"><button type="button" class="btn small" data-pi-days-csv>⬇ CSV</button></div>
+      <div class="table-wrap tall"><table class="tbl compact pi-days-tbl"><thead><tr><th>Date</th>${GROUPS.map((k) => `<th class="num">${k}</th>`).join('')}<th class="num">Total</th><th class="num">Run-rate / day</th><th class="num">Same day last month</th></tr></thead>
+      <tbody>${list.slice().reverse().map((d) => `<tr${d.t ? '' : ' class="dim"'}><td>${esc(dayLabel(d.key))}</td>${GROUPS.map((k) => `<td class="num">${fmt(d[k])}</td>`).join('')}<td class="num"><b>${fmt(d.t)}</b></td><td class="num">${fmt(d.rate.t, 1)}</td><td class="num">${fmt(d.last)}</td></tr>`).join('')}</tbody>
+      <tfoot><tr class="row-total"><td>Total</td>${GROUPS.map((k) => `<td class="num">${fmt(m[k])}</td>`).join('')}<td class="num"><b>${fmt(m.t)}</b></td><td class="num">${fmt(an.rate.t, 1)}</td><td class="num">${fmt(an.monthTot.lastMtd)}</td></tr></tfoot></table></div></details>`;
   }
 
   function tipHtml(an, d) {
@@ -269,13 +285,12 @@ window.FF = window.FF || {};
     const a = an.me || { cur: blank(), last: blank(), lastMtd: 0, lastKey: '', ago: null, bucket: 'in3', growth: null, rate: 0, activeDays: 0 };
     const state = { active: ['Active this month', 'green'], in0: ['Inactive this month', 'amber'], in2: ['Inactive 2 months', 'orange'], in3: ['Inactive 2+ months', 'rose'] }[a.bucket];
     const box = (label, value, em, tone, txt) => `<div class="pi-box static t-${tone}${txt ? ' txt' : ''}"><small>${esc(label)}</small><b>${value}</b><em>${em}</em></div>`;
-    return `<div class="pi-boxes">
+    // Issued / last month / growth / run-rate already sit in the KPI cards of this same view — only the
+    // activity facts that are NOT repeated elsewhere are boxed here.
+    return `<div class="pi-boxes pi-boxes-3">
       ${box('Status', esc(state[0]), a.lastKey ? `Last issued ${esc(dayLabel(a.lastKey))} (${a.ago === 0 ? 'today' : `${a.ago}d ago`})` : 'No issuance on record', state[1], true)}
-      ${box(`Issued · ${esc(U.labelYM(an.curYm))}`, fmt(a.cur.t), split(a.cur), 'indigo')}
-      ${box(`Last month · ${esc(U.labelYM(an.lastYm))}`, fmt(a.last.t), split(a.last), 'slate')}
-      ${box('Growth', a.growth === null ? '—' : pct(a.growth), `1–${an.cutDay} vs same days last month (${fmt(a.lastMtd)})`, a.growth !== null && a.growth < 0 ? 'red' : 'green')}
-      ${box('Run-rate', `${fmt(a.rate, 1)}<small class="dim">/day</small>`, `Month-end at this pace ${fmt(Math.round(a.rate * an.dim))}`, 'sky')}
-      ${box('Active days', `${fmt(a.activeDays)}<small class="dim"> / ${an.elapsed}</small>`, an.best ? `Best day ${esc(dayLabel(an.best.key))} · ${fmt(an.best.t)}` : 'No issuing day yet', 'amber')}
+      ${box('Active days', `${fmt(a.activeDays)}<small class="dim"> / ${an.elapsed}</small>`, `${fmt(a.rate, 1)}/day run-rate · month-end at this pace ${fmt(Math.round(a.rate * an.dim))}`, 'amber')}
+      ${box('Best day', an.best ? fmt(an.best.t) : '—', an.best ? esc(dayLabel(an.best.key)) : 'No issuing day yet', 'sky')}
     </div>`;
   }
 
@@ -334,6 +349,12 @@ window.FF = window.FF || {};
       if (sort) { st.sort = sort.dataset.piSort; refresh(sec, 'panel'); return; }
       const top = e.target.closest('[data-pi-top]');
       if (top) { st.top = top.dataset.piTop; refresh(sec, 'top'); return; }
+      if (e.target.closest('[data-pi-days-csv]')) {
+        const an = analyze(pr);
+        U.downloadCsv(`${U.slug(pr.name)}-daywise-${an.curYm}-${U.stamp()}.csv`, ['Date', 'VC4', 'VC20', 'VC5+', 'Total', 'Run-rate/day (cumulative)', 'Same day last month'],
+          dayRows(an).map((d) => [d.key, d.VC4, d.VC20, d['VC5+'], d.t, Math.round(d.rate.t * 10) / 10, d.last]));
+        return;
+      }
       if (e.target.closest('[data-pi-csv]')) {
         const an = analyze(pr); if (!st.box) return;
         const c = csvOf(pr, an, st);

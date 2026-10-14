@@ -10,7 +10,6 @@
 .ua-period-pill:focus-visible, .ua-kpi-card:focus-visible, .ua-suspect-card:focus-visible { outline: 3px solid #fbbf24; outline-offset: 2px; }
 .ua-custom-dates { grid-column: 1 / -1; width: 100%; }
 .ua-control-row { margin-top: 10px; padding-top: 12px; border-top: 1px solid var(--line); gap: 9px 12px; }
-.ua-control-row .seg { margin-right: auto; }
 .ua-control-row #ua-q { flex: 1 1 210px; min-height: 36px; }
 .ua-kpi-card.red { --ua-accent: #e11d48; }
 .ua-kpi-card.amber { --ua-accent: #d97706; }
@@ -32,13 +31,10 @@
 .ua-sc-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; padding: 7px; border-radius: 10px; background: color-mix(in srgb, var(--brand) 5%, var(--card)); }
 .ua-sc-reasons { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 5px; }
 .ua-hit { background: color-mix(in srgb, #ef4444 8%, var(--card)); }
-.ua-filter-command .seg { display: flex; flex-wrap: wrap; gap: 5px; }
 .ua-filter-command .seg-btn { white-space: nowrap; }
 @media (max-width: 900px) {
 .ua-period-bar { grid-template-columns: 1fr; }
 .ua-custom-dates { grid-column: 1; }
-.ua-control-row .seg { width: 100%; margin-right: 0; }
-.ua-control-row .seg-btn { flex: 1 1 auto; }
 }
 @media (max-width: 560px) {
 .ua-head { padding: 15px; }

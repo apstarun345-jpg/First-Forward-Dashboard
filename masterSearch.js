@@ -1215,33 +1215,38 @@ FF.pages = FF.pages || {};
 
     function paintQuick() {
       if (!quick) return;
-      const list = lightPeople()
+      // One chip per NAME (the same TL/agent used to appear twice — once per channel); channel dots show where they exist.
+      const byName = new Map();
+      lightPeople()
         .filter((p) => !chFilter || chOfP(p) === chFilter)
         .sort((a, b) => (isTlP(b) ? 1 : 0) - (isTlP(a) ? 1 : 0) || String(a.name).localeCompare(String(b.name)))
-        .slice(0, 10);
+        .forEach((p) => {
+          const k = normName(p.name);
+          const hit = byName.get(k);
+          if (hit) { hit.chs.add(chOfP(p)); hit.tl = hit.tl || isTlP(p); return; }
+          byName.set(k, { p, chs: new Set([chOfP(p)]), tl: isTlP(p) });
+        });
+      const list = [...byName.values()].slice(0, 10);
       quick.innerHTML = list.length
-        ? `<span class="dim small">⚡ Turant kholo:</span>${list.map((p) => `<button type="button" class="msp-chip" data-msp-name="${esc(p.name)}" data-msp-person="${esc(p.kind + '|' + normId(p.sub || p.id || ''))}">${isTlP(p) ? '👥' : '🧑‍💼'} ${esc(p.name)}</button>`).join('')}`
+        ? `<span class="dim small">⚡ Open instantly:</span>${list.map(({ p, chs, tl }) => `<button type="button" class="msp-chip" data-msp-name="${esc(p.name)}" data-msp-person="${esc(p.kind + '|' + normId(p.sub || p.id || ''))}">${tl ? '👥' : '🧑‍💼'} ${esc(p.name)} <small>${chs.has('ff') ? '🟦' : ''}${chs.has('gv') ? '🟩' : ''}</small></button>`).join('')}`
         : '<span class="dim small">Index ban raha hai — 2 second me suggestions aa jayenge.</span>';
     }
     paintQuick();
 
-    /** 🟩 GV ka aaj / mahina / stock — GV Master ledger + Tag Assignment (live). */
+    /** One slim "pulse" line under the KPI cards — only what the cards above do NOT already show
+     *  (GV: today's live count · FF: latest day + last 7 days). Month / last-month / stock live in the KPI cards. */
+    const pulseItem = (label, value, sub) => `<span class="msp-pulse-i"><small>${label}</small><b>${value}</b>${sub ? `<em>${sub}</em>` : ''}</span>`;
     function gvStripHtml(person) {
       if (!person || chOfP(person) !== 'gv' || !FF.gvTruth || !FF.gvTruth.person) return '';
       let t = null;
       try { t = FF.gvTruth.person(gvSpec(person)); } catch { return ''; }
       if (!t) return '';
-      const g = U.growth(t.ledger.cur.total, t.ledger.last.total);
       const tk = (FF.gv && FF.gv.todayKey) ? FF.gv.todayKey() : U.dateKey(new Date());
-      const warn = (t.warnings && t.warnings.length) ? `<p class="dim small">⚠️ ${esc(t.warnings[0])}</p>` : '';
-      return `<div class="msp-today"><h3>⚡ Aaj ka snapshot <span class="dim">· GV Master (live)</span></h3><div class="dgrid">
-        <div class="dcell"><small>🟩 GV aaj · ${esc(U.labelDateKey(tk))}</small><b>${U.fmt(t.ledger.today.total)}</b><em class="dim">VC4 ${U.fmt(t.ledger.today.vc4)} · Comm ${U.fmt(t.ledger.today.comm)}</em></div>
-        <div class="dcell"><small>🗓️ ${esc(t.ym)} / ${esc(t.lastYm)}</small><b>${U.fmt(t.ledger.cur.total)} / ${U.fmt(t.ledger.last.total)}</b><em>${g === null || g === undefined ? '<span class="dim">—</span>' : U.pctHtml(g, { decimals: 0 })}</em></div>
-        <div class="dcell"><small>📦 Stock · Tag Assignment</small><b>${U.fmt(t.stock.total)}</b><em class="dim">VC4 ${U.fmt(t.stock.vc4)} · Comm ${U.fmt(t.stock.comm)}</em></div>
-      </div>${warn}</div>`;
+      const warn = (t.warnings && t.warnings.length) ? `<span class="msp-pulse-warn" title="${esc(t.warnings.join(' · '))}">⚠️ ${esc(t.warnings[0])}</span>` : '';
+      return `<div class="msp-pulse" data-msp-pulse="gv"><span class="msp-pulse-h">🟩 GV · live</span>${pulseItem(`Today · ${esc(U.labelDateKey(tk))}`, U.fmt(t.ledger.today.total), `VC4 ${U.fmt(t.ledger.today.vc4)} · Comm ${U.fmt(t.ledger.today.comm)}`)}${warn}</div>`;
     }
 
-    /** 🟦 FF ka aaj — EIR daily rows se (First Forward ka data T+1 aata hai). */
+    /** 🟦 FF — EIR daily rows (First Forward data arrives T+1, so "today" alone is usually 0). */
     function ffStripHtml(person) {
       if (!person || chOfP(person) !== 'ff') return '';
       const daily = (FF.store && FF.store.get && FF.store.get('daily')) || [];
@@ -1250,21 +1255,12 @@ FF.pages = FF.pages || {};
       const isT = isTlP(person), id = clean(person.sub || person.id || '');
       const mine = daily.filter((r) => r.channel !== 'GV Partner' && (isT ? normName(r.tlName) === nk : (normName(r.agentName) === nk || (id && normName(r.agentId) === normName(id)))));
       const sumOn = (key) => mine.filter((r) => r.key === key).reduce((s, r) => s + (Number(r.n) || 0), 0);
-      const n = sumOn(tk);
-      // v3.52 — FF ka data T+1 aata hai, isliye sirf "aaj 0" dikhana bekaar tha: ab kal (ya jo aakhri
-      // din data me hai) ka issuance + last 7 din ka jod bhi, VC4 · VC20 · VC5+ ke saath.
       const back = (days) => { const d = new Date(); d.setDate(d.getDate() - days); return U.dateKey(d); };
       const lastKey = mine.map((r) => String(r.key)).filter((k) => k < tk).sort().pop() || back(1);
-      const lastN = sumOn(lastKey);
       const from7 = back(7);
-      const week = mine.filter((r) => String(r.key) >= from7 && String(r.key) < tk);
       const bins = { vc4: 0, vc20: 0, vc5p: 0, total: 0 };
-      week.forEach((r) => { const q = Number(r.n) || 0; bins.total += q; if (r.group === 'VC4') bins.vc4 += q; else if (r.group === 'VC20') bins.vc20 += q; else bins.vc5p += q; });
-      return `<div class="msp-today"><h3>⚡ Aaj ka snapshot <span class="dim">· First Forward (EIR)</span></h3><div class="dgrid">
-        <div class="dcell"><small>🟦 FF aaj · ${esc(U.labelDateKey(tk))}</small><b>${U.fmt(n)}</b><em class="dim">FF ka aaj ka poora data T+1 (kal) aata hai</em></div>
-        <div class="dcell"><small>📅 Aakhri din · ${esc(U.labelDateKey(lastKey))}</small><b>${U.fmt(lastN)}</b><em class="dim">jo aakhri din data me hai</em></div>
-        <div class="dcell"><small>🗓️ Last 7 din (kal tak)</small><b>${U.fmt(bins.total)}</b><em class="dim">VC4 ${U.fmt(bins.vc4)} · VC20 ${U.fmt(bins.vc20)} · VC5+ ${U.fmt(bins.vc5p)}</em></div>
-      </div></div>`;
+      mine.filter((r) => String(r.key) >= from7 && String(r.key) < tk).forEach((r) => { const q = Number(r.n) || 0; bins.total += q; if (r.group === 'VC4') bins.vc4 += q; else if (r.group === 'VC20') bins.vc20 += q; else bins.vc5p += q; });
+      return `<div class="msp-pulse" data-msp-pulse="ff"><span class="msp-pulse-h">🟦 FF · EIR</span>${pulseItem(`Latest day · ${esc(U.labelDateKey(lastKey))}`, U.fmt(sumOn(lastKey)), 'FF data arrives T+1')}${pulseItem('Last 7 days', U.fmt(bins.total), `VC4 ${U.fmt(bins.vc4)} · VC20 ${U.fmt(bins.vc20)} · VC5+ ${U.fmt(bins.vc5p)}`)}</div>`;
     }
 
     // ---- 📅 v3.51 — Date-wise issuance trend (agent / TL) --------------------------------------
@@ -1443,8 +1439,8 @@ FF.pages = FF.pages || {};
       const notFound = pr.found === false
         ? `<p class="dim small msp-kpi-note">⚠️ ${ch === 'gv' ? 'GV REPORT' : 'REPORT'} tab me is ${isTl ? 'TL' : 'agent'} ki row nahi mili — stock / priority sheet se nahi aa paaye (naam ki spelling check karo); issuance tag-ledger (EIR) se hai.</p>` : '';
       return `<section class="card msp-kpi-card" data-msp-kpi-ch="${ch}"><div class="card-head"><div>
-          <h3>${ch === 'gv' ? '🟩 GV Partner' : '🟦 First Forward'} · ${isTl ? 'TL (own + agents)' : 'Agent'} — ek nazar me${pr.id ? ` <small class="dim mono">· ${esc(pr.id)}</small>` : ''}</h3>
-          <p class="dim small">📦 stock · 🏷️ issuance (VC4 · VC20 · VC5+) · 🚦 priority · 🎯 suggested dispatch — ${isTl ? 'TL + saare agents ka jod' : `sirf is agent ka${tlName && !pr.direct ? ` · TL ${esc(tlName)}` : ''}`}${pr.partial ? ' · <span class="badge amber">⏳ data aa raha hai</span>' : ''}</p></div>
+          <h3>${ch === 'gv' ? '🟩 GV Partner' : '🟦 First Forward'} · ${isTl ? 'TL summary' : 'Agent summary'}</h3>
+          <p class="dim small">${isTl ? 'TL + all agents combined' : `This agent only${tlName && !pr.direct ? ` · TL ${esc(tlName)}` : ''}`}${pr.partial ? ' · <span class="badge amber">⏳ loading…</span>' : ''}</p></div>
           <div class="card-right">${prioChip(pr.priority)}</div></div>
         <div class="card-body"><div class="mp-kpis msp-kpis">
           ${box('k1', `📦 Stock${isTl ? ' · TL total' : ' · apna'}`, U.fmt(s.total), `${isTl && ownAgents ? `${ownAgents} · ` : ''}${stockMix}`, spec('stock'))}
@@ -1520,9 +1516,10 @@ FF.pages = FF.pages || {};
       current = g;
       const viewGroup = displayGroupForChannel(g, selected);
       const person = viewGroup.ff || viewGroup.gv;
-      trendFollow(person);
+      if (trendEl) trendEl.hidden = true;     // the person's own day-wise chart + table now live inside the profile (no 2nd copy)
       const linkedTeams = teamPeopleFor(viewGroup);
-      const bits = [viewGroup.ff ? `🟦 FF ${isTlP(viewGroup.ff) ? 'TL' : 'Agent'}${viewGroup.ff.sub ? ` · ${esc(viewGroup.ff.sub)}` : ''}` : '', viewGroup.gv ? `🟩 GV ${isTlP(viewGroup.gv) ? 'TL' : 'Agent'}${viewGroup.gv.sub ? ` · ${esc(viewGroup.gv.sub)}` : ''}` : ''].filter(Boolean).join('  ·  ');
+      const pill = (p, cls, label) => (p ? `<span class="msp-pill ${cls}">${label} ${isTlP(p) ? 'TL' : 'Agent'}${p.sub ? ` <b>${esc(p.sub)}</b>` : ''}</span>` : '');
+      const bits = `${pill(viewGroup.ff, 'ff', '🟦 First Forward')}${pill(viewGroup.gv, 'gv', '🟩 GV Partner')}`;
       const chips = groups.length > 1
         ? `<div class="msp-matches"><span class="dim small">${U.fmt(groups.length)} log mile — click karo:</span>${groups.slice(0, 12).map((gp, i) => `<button type="button" class="msp-chip${gp === g ? ' on' : ''}" data-msp-g="${i}">${esc(gp.name)}${gp.ff && gp.gv ? ' ⚖' : gp.gv ? ' 🟩' : ' 🟦'}</button>`).join('')}</div>`
         : '';
@@ -1534,7 +1531,7 @@ FF.pages = FF.pages || {};
       out.innerHTML = `${channelChoiceHtml(g, selected)}${chips}
         <div class="msp-hero">
           <span class="ms-avatar ${viewGroup.gv ? 'gv' : 'ff'}">${esc(String(g.name || '?').slice(0, 1).toUpperCase())}</span>
-          <div class="msp-hero-id"><b>${esc(g.name)}</b><small>${bits || 'Report'}</small></div>
+          <div class="msp-hero-id"><b>${esc(g.name)}</b><div class="msp-pills">${bits || '<span class="msp-pill">Report</span>'}</div></div>
           ${person ? `<div class="msp-hero-act"><button class="btn small" data-ms-tags="${esc(person.name)}">🏷️ Tag-level rows</button></div>` : ''}
         </div>
         <div id="msp-kpis" class="msp-kpis-wrap">${['ff', 'gv'].filter((c) => viewGroup[c]).map((c) => kpiLoadingHtml(g.name, c)).join('')}</div>
@@ -1570,6 +1567,7 @@ FF.pages = FF.pages || {};
       const seq = ++runSeq;
       const open = !opts || opts.open !== false;
       const q = clean(query);
+      if (trendEl) trendEl.hidden = false;     // empty / list states keep the date-wise finder; openGroup hides it (profile has its own chart)
       if (q.length < 2) { out.innerHTML = '<div class="card"><div class="card-body empty">Kam se kam 2 letter / digit type karo.</div></div>'; return; }
       out.innerHTML = U.spinner(`“${q}” dhoondha ja raha hai…`);
       try { await buildLight(); } catch { /* index fail — neeche message */ }
@@ -1693,7 +1691,7 @@ FF.pages = FF.pages || {};
         return;
       }
       const ch = e.target.closest('[data-msp-ch]');
-      if (ch) { chFilter = ch.dataset.mspCh || ''; $$('[data-msp-ch]', root).forEach((b) => b.classList.toggle('on', b === ch)); paintQuick(); if (input && clean(input.value).length >= 2) run(input.value, { open: false }); return; }
+      if (ch) { chFilter = ch.dataset.mspCh || ''; root.querySelectorAll('[data-msp-ch]').forEach((b) => b.classList.toggle('on', b === ch)); paintQuick(); if (input && clean(input.value).length >= 2) run(input.value, { open: false }); return; }
       const nm = e.target.closest('[data-msp-name]');
       if (nm) {
         const nmKey = normName(nm.dataset.mspName);

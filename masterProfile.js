@@ -1996,20 +1996,21 @@ window.FF = window.FF || {};
       <div class="table-wrap"><table class="tbl compact"><thead><tr><th>Tag</th><th class="num">${esc(monthLabel(m.last) || 'Last month')}</th><th class="num">${esc(monthLabel(m.cur) || 'This month')}</th><th class="num">Run-rate / day</th><th class="num">× ${fmt(days)} din</th><th class="num">Stock</th><th class="num">With stock dispatch · after stock</th><th class="num">W/o stock dispatch · no stock deduction</th><th class="num">Cover</th></tr></thead><tbody>${row('VC4', c.vc4)}${row('Commercial', c.comm)}</tbody><tfoot>${row('Total', c.total, true).replace('<tr class="row-strong">', '<tr class="row-total">')}</tfoot></table></div></section>`;
   }
 
-  function chartsHtml(pr) {
+  function chartsHtml(pr, which) {
     const C = FF.charts;
     if (!C) return '';
     const cls = (pr.classes || []).filter((r) => r.cur || r.last || r.stock);
     const m = pr.months || {};
     const blocks = [];
     const donutItems = cls.filter((r) => r.cur > 0).map((r) => ({ label: r.cls, value: r.cur }));
-    if (donutItems.length) blocks.push(`<div class="mp-chart"><h4>🎨 Class-wise issuance (this month)</h4>${C.donut({ items: donutItems, subtitle: 'issued', size: 150 })}</div>`);
-    if (cls.length) blocks.push(`<div class="mp-chart"><h4>📊 Last vs this month · class-wise</h4>${C.bars({ labels: cls.map((r) => r.cls), height: 170, series: [{ name: monthLabel(m.last) || 'Last', values: cls.map((r) => r.last), color: '#c7d2fe' }, { name: monthLabel(m.cur) || 'This', values: cls.map((r) => r.cur), color: '#6366f1' }], showValues: true })}</div>`);
+    const only = (k) => !which || which === k;      // which: 'issuance' | 'stock' | (all = legacy)
+    if (only('issuance') && donutItems.length) blocks.push(`<div class="mp-chart"><h4>🎨 Class-wise issuance (this month)</h4>${C.donut({ items: donutItems, subtitle: 'issued', size: 150 })}</div>`);
+    if (!which && cls.length) blocks.push(`<div class="mp-chart"><h4>📊 Last vs this month · class-wise</h4>${C.bars({ labels: cls.map((r) => r.cls), height: 170, series: [{ name: monthLabel(m.last) || 'Last', values: cls.map((r) => r.last), color: '#c7d2fe' }, { name: monthLabel(m.cur) || 'This', values: cls.map((r) => r.cur), color: '#6366f1' }], showValues: true })}</div>`);
     const stockItems = cls.filter((r) => r.stock > 0).map((r) => ({ label: r.cls, value: r.stock }));
-    if (stockItems.length) blocks.push(`<div class="mp-chart"><h4>📦 Stock by class</h4>${C.donut({ items: stockItems, subtitle: 'stock', size: 150 })}</div>`);
-    if (pr.trend && pr.trend.length > 1) blocks.push(`<div class="mp-chart"><h4>📈 Monthly trend</h4>${C.bars({ labels: pr.trend.map((t) => monthLabel(t.ym)), height: 170, series: [{ name: 'Issued', values: pr.trend.map((t) => t.n), color: '#10b981' }], showValues: true })}</div>`);
-    if (pr.week && pr.week.some((v) => v > 0)) blocks.push(`<div class="mp-chart"><h4>🗓️ Last 7 days</h4>${C.bars({ labels: (pr.weekLabels && pr.weekLabels.length === pr.week.length ? pr.weekLabels : pr.week.map((_, i) => `D${i + 1}`)), height: 170, series: [{ name: 'Issued', values: pr.week, color: '#f59e0b' }], showValues: true })}</div>`);
-    if (pr.agents && pr.agents.length) {
+    if (only('stock') && stockItems.length) blocks.push(`<div class="mp-chart"><h4>📦 Stock by class</h4>${C.donut({ items: stockItems, subtitle: 'stock', size: 150 })}</div>`);
+    if (only('issuance') && pr.trend && pr.trend.length > 1) blocks.push(`<div class="mp-chart"><h4>📈 Monthly trend</h4>${C.bars({ labels: pr.trend.map((t) => monthLabel(t.ym)), height: 170, series: [{ name: 'Issued', values: pr.trend.map((t) => t.n), color: '#10b981' }], showValues: true })}</div>`);
+    if (!which && pr.week && pr.week.some((v) => v > 0)) blocks.push(`<div class="mp-chart"><h4>🗓️ Last 7 days</h4>${C.bars({ labels: (pr.weekLabels && pr.weekLabels.length === pr.week.length ? pr.weekLabels : pr.week.map((_, i) => `D${i + 1}`)), height: 170, series: [{ name: 'Issued', values: pr.week, color: '#f59e0b' }], showValues: true })}</div>`);
+    if (!which && pr.agents && pr.agents.length) {
       blocks.push(`<div class="mp-chart wide"><h4>🧑‍💼 Agent-wise issuance (this month vs last)</h4>${C.hbars({ items: pr.agents.slice(0, 12).map((a) => ({ label: a.name, sub: a.priority || '', value: a.cur, compare: a.last })), valueLabel: 'This month', compareLabel: 'Last month' })}</div>`);
       blocks.push(`<div class="mp-chart wide"><h4>📦 Agent-wise stock (VC4 / Commercial)</h4>${C.hbars({ items: [...pr.agents].sort((x, y) => y.stockTotal - x.stockTotal).slice(0, 12).map((a) => ({ label: a.name, sub: `VC4 ${fmt(a.stockVc4)} · Comm ${fmt(a.stockComm)}`, value: a.stockTotal })), valueLabel: 'Stock' })}</div>`);
     }
@@ -2245,8 +2246,10 @@ window.FF = window.FF || {};
     return `<h5 class="mp-subh" data-mp-sec="agentclass">📦 Agent-wise × Class stock <span class="dim small">· ${fmt(list.length)} rows · cell par click → barcode tak</span></h5><div class="table-wrap tall"><table class="tbl compact"><thead><tr><th>Agent</th>${cols.map((c) => `<th class="num">${esc(c)}</th>`).join('')}<th class="num">Total</th></tr></thead><tbody>${body}</tbody><tfoot>${foot}</tfoot></table></div>`;
   }
 
-  function html(pr) {
+  function html(pr, opts) {
     if (!pr) return '';
+    const embedded = !!(opts && opts.embedded);   // Master Search page: header + KPI strip live above, so skip them here
+    const drawer = !!(opts && opts.drawer);       // drawer already shows name / ID in its own title bar
     const isTl = /tl$/.test(pr.kind);
     const d = pr.dispatch || {}, s = pr.stock || {}, t = pr.totals || {}, ts = pr.tlStock || {};
     const tlStockLine = ts.own && ts.agents ? `Own ${fmt(ts.own.total)} + agents ${fmt(ts.agents.total)}` : '';
@@ -2273,34 +2276,37 @@ window.FF = window.FF || {};
       : tlStockLine;
     const OWN_SRC = { detail: 'stock detail me TL ki APNI rows se', report: 'REPORT ki TL row se', 'snapshot-team': "sheet ke 'TL stock' total me se agents ka jod ghatane se" };
     const stockNote = isTl ? `<p class="mp-note stock">📦 <b>Stock ka hisaab</b> — TL ke paas <b>${fmt((ts.own || {}).total)}</b> + agents ke paas <b>${fmt((ts.agents || {}).total)}</b> = TL total <b>${fmt(s.total)}</b> (VC4 ${fmt(s.vc4)} · Commercial ${fmt(s.comm)}). Own ${esc(OWN_SRC[split.ownFrom] || 'TL ke paas abhi koi stock nahi')}; agents ka jod ${split.membersFrom === 'detail' ? 'stock detail rows' : 'REPORT agent rows'} se${split.rollupOwnRow ? ' · ⚠️ sheet me TL ki row poore team ka rollup thi, use ALAG se nahi joda (warna TL ka stock do baar judta)' : ''}${split.snapshot && split.snapshot.total ? ` · sheet ka "TL's stock" <b>${fmt(split.snapshot.total)}</b>${Math.abs(num(split.snapshot.total) - num(s.total)) <= 1 ? ' ✓ match' : ` (profile ${fmt(s.total)} — rows load hote hi set hoga)`}` : ''} <span class="dim">— koi double count nahi: own + agents = total.</span></p>` : '';
-    const head = `<div class="mp-head">
+    const headTop = `<div class="mp-head">
       <span class="ms-avatar">${esc(pr.name.slice(0, 1).toUpperCase())}</span>
       <div class="mp-id"><b>${esc(pr.name)}</b><small>${esc(pr.channel)} · ${isTl ? 'Team Leader' : 'Agent'}${pr.id ? ` · ID ${esc(pr.id)}` : ''}${pr.direct ? ` · <span class="direct-chip">🚫 ${esc(pr.directLabel || 'Direct')}</span>` : ''}</small></div>
       <div class="mp-prio">${isTl && pr.priority ? `<span class="mp-linkish" data-kpi="${esc(`${peopleSpec}&level=${encodeURIComponent(pr.priority)}`)}" role="button" tabindex="0" title="${esc(pr.priority)} priority wale agents">${prioChip(pr.priority)}</span>` : prioChip(pr.priority)}${pr.commPriority ? `<small class="dim">Comm: ${esc(pr.commPriority)}</small>` : ''}</div>
-    </div>
-    <div class="mp-cells">
+    </div>`;
+    const cellsHtml = `<div class="mp-cells">
       ${cell(isTl ? 'TL mobile' : 'Mobile', mobileCell(pr.mobile))}
-      ${isTl ? cell('Agents', `<span class="mp-linkish" data-kpi="${esc(peopleSpec)}" role="button" tabindex="0" title="In agents ki poori list">${fmt(pr.agentCount)} 👉</span>${pr.selfAgent ? '<small class="dim"> + TL (apna stock alag)</small>' : ''}`) : cell('TL', pr.direct ? `<span class="direct-chip">🚫 ${esc(pr.directLabel || 'Direct')}</span>` : (pr.tl && pr.tl.name ? `<button type="button" class="mp-link-btn" data-mp-open-tl="1" data-mp-tl-name="${esc(pr.tl.name)}" data-mp-tl-id="${esc(pr.tl.id || '')}">${esc(pr.tl.name)}</button>` : '—'))}
+      ${isTl ? (embedded ? '' : cell('Agents', `<span class="mp-linkish" data-kpi="${esc(peopleSpec)}" role="button" tabindex="0" title="In agents ki poori list">${fmt(pr.agentCount)} 👉</span>${pr.selfAgent ? '<small class="dim"> + TL (apna stock alag)</small>' : ''}`)) : cell('TL', pr.direct ? `<span class="direct-chip">🚫 ${esc(pr.directLabel || 'Direct')}</span>` : (pr.tl && pr.tl.name ? `<button type="button" class="mp-link-btn" data-mp-open-tl="1" data-mp-tl-name="${esc(pr.tl.name)}" data-mp-tl-id="${esc(pr.tl.id || '')}">${esc(pr.tl.name)}</button>` : '—'))}
       ${isTl ? '' : cell('TL ID', esc((pr.tl && pr.tl.id) || '—'))}
       ${isTl ? '' : cell("TL's mobile", mobileCell(pr.tl && pr.tl.mobile))}
       ${cell('Status', esc(pr.status || '—'))}
       ${cell('Last active', esc(pr.lastActive || '—'))}
-      ${growthCell(pr)}
+      ${embedded ? '' : growthCell(pr)}
     </div>`;
+    // Embedded (Master Search): the hero + KPI strip already carry name / ID / growth / agents, so show only
+    // the contact facts that actually have a value (no row of empty "—" cells).
+    const slimCells = () => {
+      const kept = cellsHtml.replace(/<div><small>[^<]*<\/small><b>(?:<span class="dim">—<\/span>|—)<\/b><\/div>/g, '');
+      return /<small>/.test(kept) ? kept : '';
+    };
+    const head = (embedded || drawer) ? slimCells() : headTop + cellsHtml;
     const lt = !isTl ? (pr.linkedTl || null) : null;
     const ltScope = lt ? `tl=${encodeURIComponent(lt.name)}${lt.id ? `&tlId=${encodeURIComponent(lt.id)}` : ''}` : '';
     const ltCurSpec = lt ? `src=${pr.ch}&scope=mtd&ym=${encodeURIComponent(m.cur || '')}&${ltScope}` : '';
     const ltLastSpec = lt ? `src=${pr.ch}&scope=month&ym=${encodeURIComponent(m.last || '')}&${ltScope}` : '';
     const ltStockSpec = lt ? `src=${pr.ch}&scope=stock&${ltScope}` : '';
-    const agentTlKpis = lt ? `<section class="mp-sec mp-agent-tl-sec"><h4>👤 Agent + 👥 TL — ek nazar me</h4><div class="mp-kpis mp-agent-tl-kpis">
-      ${kpi('Agent stock', fmt(s.total), `VC4 ${fmt(s.vc4)} · Comm ${fmt(s.comm)}`, 'k1', stockSpec)}
+    const agentTlKpis = lt ? `<details class="mp-more mp-agent-tl-sec"><summary>👥 TL context · ${esc(lt.name)} <small class="dim">stock · issuance · classes</small></summary><div class="mp-kpis mp-agent-tl-kpis">
       ${kpi('TL stock', fmt(lt.stock.total), `VC4 ${fmt(lt.stock.vc4)} · Comm ${fmt(lt.stock.comm)}`, 'k2', ltStockSpec)}
-      ${kpi(`Agent current · ${monthLabel(m.cur) || 'MTD'}`, fmt(t.curTotal), `VC4 ${fmt(t.curVc4)} · Comm ${fmt(t.curComm)}`, 'k6', curSpec)}
-      ${kpi(`Agent last · ${monthLabel(m.last) || 'Last'}`, fmt(t.lastTotal), `VC4 ${fmt(t.lastVc4)} · Comm ${fmt(t.lastComm)}`, 'k8', lastSpec)}
       ${kpi(`TL current · ${monthLabel(m.cur) || 'MTD'}`, fmt(lt.totals.curTotal), `VC4 ${fmt(lt.totals.curVc4)} · Comm ${fmt(lt.totals.curComm)}`, 'k6', ltCurSpec)}
       ${kpi(`TL last · ${monthLabel(m.last) || 'Last'}`, fmt(lt.totals.lastTotal), `VC4 ${fmt(lt.totals.lastVc4)} · Comm ${fmt(lt.totals.lastComm)}`, 'k8', ltLastSpec)}
-      ${kpi('Projected growth', pr.projectedGrowthNum == null ? '—' : U.pctHtml(pr.projectedGrowthNum, { decimals: 0 }), `Projected current ${fmt(pr.projT1 && pr.projT1.projectedCurrent || 0)} vs previous full month ${fmt(t.lastTotal)} · till ${esc((pr.projT1 && pr.projT1.growthThrough) || 'yesterday')}`, 'k0', '')}
-    </div><div class="table-wrap" style="margin-top:10px"><table class="tbl compact"><thead><tr><th>TL Class-wise Issuance</th><th class="num">Last</th><th class="num">Current MTD</th><th class="num">Growth</th></tr></thead><tbody>${(lt.classes || []).filter((x) => x.cur || x.last).map((x) => `<tr><td><b>${esc(x.cls)}</b></td><td class="num">${fmt(x.last)}</td><td class="num">${fmt(x.cur)}</td><td class="num">${x.last ? U.pctHtml(((x.cur - x.last) / x.last) * 100) : '—'}</td></tr>`).join('') || '<tr><td colspan="4" class="empty">TL class-wise issuance load ho rahi hai…</td></tr>'}</tbody><tfoot><tr class="row-total"><td><b>Total</b></td><td class="num"><b>${fmt(lt.totals.lastTotal)}</b></td><td class="num"><b>${fmt(lt.totals.curTotal)}</b></td><td class="num">${lt.totals.lastTotal ? U.pctHtml(((lt.totals.curTotal - lt.totals.lastTotal) / lt.totals.lastTotal) * 100) : '—'}</td></tr></tfoot></table></div><p class="dim small">👥 TL: <button type="button" class="mp-link-btn" data-mp-open-tl="1" data-mp-tl-name="${esc(lt.name)}" data-mp-tl-id="${esc(lt.id || '')}">${esc(lt.name)}</button>${lt.id ? ` · ID ${esc(lt.id)}` : ''} — click karke isi channel ki TL report kholo.</p></section>` : '';
+    </div><div class="table-wrap" style="margin-top:10px"><table class="tbl compact"><thead><tr><th>TL Class-wise Issuance</th><th class="num">Last</th><th class="num">Current MTD</th><th class="num">Growth</th></tr></thead><tbody>${(lt.classes || []).filter((x) => x.cur || x.last).map((x) => `<tr><td><b>${esc(x.cls)}</b></td><td class="num">${fmt(x.last)}</td><td class="num">${fmt(x.cur)}</td><td class="num">${x.last ? U.pctHtml(((x.cur - x.last) / x.last) * 100) : '—'}</td></tr>`).join('') || '<tr><td colspan="4" class="empty">TL class-wise issuance load ho rahi hai…</td></tr>'}</tbody><tfoot><tr class="row-total"><td><b>Total</b></td><td class="num"><b>${fmt(lt.totals.lastTotal)}</b></td><td class="num"><b>${fmt(lt.totals.curTotal)}</b></td><td class="num">${lt.totals.lastTotal ? U.pctHtml(((lt.totals.curTotal - lt.totals.lastTotal) / lt.totals.lastTotal) * 100) : '—'}</td></tr></tfoot></table></div><p class="dim small">👥 TL: <button type="button" class="mp-link-btn" data-mp-open-tl="1" data-mp-tl-name="${esc(lt.name)}" data-mp-tl-id="${esc(lt.id || '')}">${esc(lt.name)}</button>${lt.id ? ` · ID ${esc(lt.id)}` : ''} — click karke isi channel ki TL report kholo.</p></details>` : '';
     const kpis = `<div class="mp-kpis">
       ${pr.ch === 'gv' ? todayKpiHtml(pr, isTl) : ''}
       ${kpi(isTl ? 'TL stock (total)' : 'Agent Stock', fmt(s.total), `${isTl && ownAgentsChips ? `${ownAgentsChips} · ` : ''}VC4 ${fmt(s.vc4)} · Commercial ${fmt(s.comm)}`, 'k1', stockSpec)}
@@ -2310,8 +2316,8 @@ window.FF = window.FF || {};
       ${kpi(pr.tagRequired ? 'Tags required · Comm.' : 'Suggested Commercial', sg.comm, `avg ${fmt(d.avgComm, true)}/day${pr.tagRequired ? '' : ` · stock − ${fmt(s.comm)}`}`, pr.tagRequired ? 'k7' : 'k5', `${curSpec}&group=COMM`)}
       ${kpi('Issued this month', fmt(t.curTotal), `VC4 ${fmt(t.curVc4)} · Comm ${fmt(t.curComm)}`, 'k6', curSpec)}
       ${kpi('Issued last month', fmt(t.lastTotal), `VC4 ${fmt(t.lastVc4)} · Comm ${fmt(t.lastComm)}`, 'k8', lastSpec)}
-    </div>
-    <p class="mp-note ${pr.tagRequired ? 'tag' : ''}">${sg.note}</p>${stockNote}`;
+    </div>`;
+    const stockNotes = `<p class="mp-note ${pr.tagRequired ? 'tag' : ''}">${sg.note}</p>${stockNote}`;
     // v3.44 — VC4 · VC20 · VC5+ teeno alag rows me (GV me sheet-first, FF me tag-ledger): har cell
     // apni detail kholta hai, aur sheet vs ledger ka farq neeche note me saaf likha rehta hai.
     const summary = groupTableHtml(pr, { cur: curSpec, last: lastSpec, stock: stockSpec });
@@ -2342,17 +2348,32 @@ window.FF = window.FF || {};
     const isTlStockVisible = !!tlIdStockTable;
     const actions = `<div class="mp-actions"><button class="btn small primary" data-mp-pdf>📄 PDF</button><button class="btn small" data-mp-csv>⬇ CSV</button><button class="btn small" data-mp-copy>📋 Copy</button><button class="btn small" data-mp-wa>📲 WhatsApp</button>${isTl ? '' : `<button class="btn small" data-mp-a360="${esc(pr.name)}">👁 Agent 360</button>`}<a class="btn small" href="#/masterStock?q=${encodeURIComponent(pr.name)}">🗄️ Register / tags</a></div>`;
     const partial = pr.partial ? '<div class="mp-partial dim small" role="status">⏳ Kuch data abhi load ho raha hai (Google Sheet slow hai) — numbers poore hote hi apne aap update ho jayenge.</div>' : '';
-    const nav = `<nav class="mp-nav" aria-label="Report sections"><span class="dim small">Jao:</span>${[['insights', isTl ? '📈 Team health' : '📈 Activity'], ['kpis', '📦 Stock · KPI'], ['issuance', '🧾 Last vs Current'], ['class', '🎯 Class-wise'], ...(isTl && agentsTable ? [['agents', '🧑‍💼 Agents'], ['agentclass', '📦 Agent × Class']] : []), ...(isTl && isTlStockVisible ? [['tlstock', '🆔 TL ID stock']] : []), ['charts', '📊 Charts']].map(([k, l]) => `<button type="button" class="chip" data-mp-go="${k}">${l}</button>`).join('')}</nav>`;
     const insights = FF.profileInsights && FF.profileInsights.html ? FF.profileInsights.html(pr) : '';
-    return `<div class="mp">${partial}${noData}${head}${nav}${insights}${agentTlKpis}<div data-mp-sec="kpis">${kpis}</div>
-      ${calcHtml(pr)}
-      ${growthHtml(pr)}
-      <section class="mp-sec" data-mp-sec="issuance"><h4>🧾 Issuance summary${isTl ? ' — TL total' : ''}</h4>${summary}</section>
-      <section class="mp-sec" data-mp-sec="class"><h4>🎯 Issuance class-wise · last month vs this month + stock</h4>${clsTable}</section>
-      ${agentsTable}
-      ${tlIdStockTable}
-      <section class="mp-sec" data-mp-sec="charts"><h4>📊 Charts</h4>${chartsHtml(pr) || '<p class="dim small">Chart ke liye data nahi mila.</p>'}</section>
-      ${actions}</div>`;
+    // 🗂️ v3.80 — one clean layout: [header + KPI strip] → tabs. Growth / dispatch / class / stock tables that
+    // used to repeat the same numbers are merged into their tab (details blocks hold the "how it is calculated").
+    const tabKey = `${pr.kind}|${norm(pr.name)}`;
+    const tabs = [
+      ['insights', 'overview', isTl ? '📈 Team health' : '📈 Activity'],
+      ['issuance', 'issuance', '🧾 Issuance'],
+      ['kpis', 'stock', '📦 Stock & dispatch'],
+      ...(isTl && agentsTable ? [['agents', 'agents', `🧑‍💼 Agents · ${fmt((pr.agents || []).length)}`]] : [])
+    ];
+    let activeTab = tabState.get(tabKey);
+    if (!tabs.some((t) => t[1] === activeTab)) activeTab = 'overview';
+    const tabBar = `<div class="mp-toolbar"><nav class="mp-nav mp-tabs" role="tablist" aria-label="Report sections">${tabs.map(([k, id, l]) => `<button type="button" role="tab" class="mp-tab${id === activeTab ? ' on' : ''}" aria-selected="${id === activeTab}" data-mp-go="${k}" data-mp-tab="${id}">${l}</button>`).join('')}</nav>${actions}</div>`;
+    const pane = (id, inner) => `<div class="mp-pane" role="tabpanel" data-mp-pane="${id}"${id === activeTab ? '' : ' hidden'}>${inner}</div>`;
+    const growthBlock = growthHtml(pr);
+    const growthDetails = growthBlock ? `<details class="mp-more"><summary>📈 Growth % &amp; month-end expected — how it is calculated</summary>${growthBlock.replace(/<h4>[\s\S]*?<\/h4>/, '')}</details>` : '';
+    const issuanceCharts = chartsHtml(pr, 'issuance');
+    const stockCharts = chartsHtml(pr, 'stock');
+    const overviewPane = `${insights || '<p class="dim small">Insights load ho rahe hain…</p>'}${agentTlKpis}`;
+    const issuancePane = `<section class="mp-sec" data-mp-sec="issuance"><h4>🧾 Issuance summary${isTl ? ' — TL total' : ''}</h4>${summary}</section>
+      <details class="mp-more" data-mp-sec="class" open><summary>🎯 All classes · last month vs this month + stock</summary>${clsTable}</details>
+      ${growthDetails}${issuanceCharts ? `<section class="mp-sec" data-mp-sec="charts"><h4>📊 Mix &amp; trend</h4>${issuanceCharts}</section>` : ''}`;
+    const stockPane = `<section class="mp-sec" data-mp-sec="stock"><h4>📦 Stock &amp; dispatch</h4>${stockNotes}</section>
+      ${calcHtml(pr)}${tlIdStockTable}${stockCharts ? `<section class="mp-sec">${stockCharts}</section>` : ''}`;
+    return `<div class="mp${embedded ? ' mp-embedded' : ''}">${partial}${noData}${head}${embedded ? '' : `<div class="mp-kpi-top" data-mp-kpis>${kpis}</div>`}${tabBar}
+      ${pane('overview', overviewPane)}${pane('issuance', issuancePane)}${pane('stock', stockPane)}${isTl && agentsTable ? pane('agents', agentsTable) : ''}</div>`;
   }
 
   // ------------------------------------------------------------------ export / share
@@ -2476,8 +2497,7 @@ window.FF = window.FF || {};
       const go = e.target.closest('[data-mp-go]');
       if (go) {
         const root = go.closest('.mp') || el;
-        const target = root.querySelector(`[data-mp-sec="${go.dataset.mpGo}"]`);
-        if (target && target.scrollIntoView) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        showTab(root, TAB_OF[go.dataset.mpGo] || go.dataset.mpTab, cur);
         return;
       }
       const tlOpen = e.target.closest('[data-mp-open-tl]');
@@ -2490,13 +2510,24 @@ window.FF = window.FF || {};
       if (row && !e.target.closest('[data-kpi]')) open({ kind: row.dataset.mpKind, name: row.dataset.mpAgent, sub: row.dataset.mpId, tlSet: new Set(), classMap: new Map(), bars: new Set() });
     });
   }
+  const tabState = new Map();      // profile → last open tab (survives the re-render when data arrives)
+  const TAB_OF = { insights: 'overview', issuance: 'issuance', class: 'issuance', charts: 'issuance', kpis: 'stock', tlstock: 'stock', agents: 'agents', agentclass: 'agents' };
+  function showTab(root, id, pr) {
+    if (!root || !id) return;
+    const pane = root.querySelector(`[data-mp-pane="${id}"]`);
+    if (!pane) return;
+    root.querySelectorAll('[data-mp-tab]').forEach((b) => { const on = b.dataset.mpTab === id; b.classList.toggle('on', on); b.setAttribute('aria-selected', String(on)); });
+    root.querySelectorAll('[data-mp-pane]').forEach((p) => { p.hidden = p.dataset.mpPane !== id; });
+    if (pr) tabState.set(`${pr.kind}|${norm(pr.name)}`, id);
+    try { if (FF.charts && FF.charts.mount) FF.charts.mount(pane); } catch { /* charts optional */ }
+  }
   const loadingHtml = (name) => `<div class="mp-loading" role="status" aria-live="polite">${U.loader ? U.loader('', { size: 'md' }) : ''} <span><b>${esc(name)}</b> ki poori report ban rahi hai${U.ellipsis ? U.ellipsis() : '…'} <small class="dim">(REPORT + stock + issuance load ho raha hai)</small></span></div>`;
   /** Inline (home / panel) — placeholder pehle, data aane par full profile. */
-  async function renderInto(el, person) {
+  async function renderInto(el, person, opts) {
     if (!el || !supports(person)) return null;
     el.innerHTML = loadingHtml(person.name);
     try {
-      const paint = (profile) => { el.innerHTML = html(profile); if (FF.charts && FF.charts.mount) FF.charts.mount(el); bind(el, profile); };
+      const paint = (profile) => { el.innerHTML = html(profile, opts); if (FF.charts && FF.charts.mount) FF.charts.mount(el); bind(el, profile); };
       const pr = await buildSoon(person, (late) => { if (el.isConnected) paint(late); });
       paint(pr);
       return pr;
@@ -2520,7 +2551,7 @@ window.FF = window.FF || {};
       const paint = (profile) => {
         const body = U.$('#drawer-body');
         if (!body || !slot || !slot.isConnected) return;
-        slot.innerHTML = html(profile);
+        slot.innerHTML = html(profile, { drawer: true });
         if (FF.charts && FF.charts.mount) FF.charts.mount(body);
         bind(body, profile);
       };
