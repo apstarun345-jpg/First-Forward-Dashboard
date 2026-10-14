@@ -18,7 +18,6 @@
 .tr-employee-todo { border-left-color: #ef4444; }
 .tr-employee-todo [data-tr-emp="name"] { border-color: #ef4444; box-shadow: 0 0 0 3px rgba(239, 68, 68, .08); }
 .tr-stock-card > .tr-sb { padding: 0; }
-.tr-stock-card > .tr-sb > summary::-webkit-details-marker { display: none; }
 .tr-sb-tbl .tr-sb-name { text-align: left; }
 .tr-sb-row { cursor: pointer; }
 .tr-sb-empty { padding: 14px; text-align: center; }
@@ -301,7 +300,6 @@ html[data-theme="dark"] .tr-req-tbl .tr-th-suggest .tr-th-sub { color: rgba(255,
   font-size: 10px;
   font-weight: 900;
 }
-html[data-theme="dark"] .tr-drag { color: #94a3b8 !important; }
 html[data-theme="dark"] .tr-col-move .btn.tiny { background: #1e293b !important; border-color: #475569 !important; }
 .tr-cols-order{
   display:flex !important;

@@ -4,9 +4,7 @@
 .msp-trend-chart { margin: 4px 0 12px; }
 .msp-trend-sum { display: flex; flex-wrap: wrap; gap: 8px; margin: 2px 0 10px; }
 .msp-kpis-wrap { display: grid; gap: 10px; margin: 0 0 12px; }
-.msp-kpi.k0 { border-top-color: #ec4899; }
 .msp-kpi.k9 { border-top-color: #22c55e; background: color-mix(in srgb, #22c55e 6%, var(--card)); }
-.msp-kpi.kpi-clickable:hover { box-shadow: 0 4px 14px color-mix(in srgb, var(--brand) 16%, transparent); transform: translateY(-1px); }
 .msp-kpi-note { margin: 8px 0 0; }
 .master-search-input .ms-ico { position: absolute; left: 11px; font-size: 14px; opacity: .7; pointer-events: none; }
 .ms-range-inputs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
@@ -49,8 +47,6 @@
 .msp-pills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; }
 .msp-pill.ff { background: color-mix(in srgb, #0ea5e9 11%, var(--card)); border-color: color-mix(in srgb, #0ea5e9 34%, transparent); }
 .msp-pill.gv { background: color-mix(in srgb, #10b981 11%, var(--card)); border-color: color-mix(in srgb, #10b981 34%, transparent); }
-.msp-pulse { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px 10px; margin: 0 0 12px; padding: 8px 12px; border-radius: 14px; border: 1px solid var(--line); background: color-mix(in srgb, var(--muted) 5%, var(--card)); }
-.msp-pulse-i { display: inline-flex; align-items: baseline; gap: 7px; flex-wrap: wrap; min-width: 0; }
 .msp-kpis-wrap { display: grid; gap: 12px; }
 .msp-report { margin-top: 4px; }
 .msp-team-card { margin-top: 14px; }

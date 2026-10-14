@@ -39,7 +39,6 @@
 @media (max-width: 560px) {
 .ua-head { padding: 15px; }
 .ua-head .head-actions { width: 100%; }
-.ua-head .head-actions .btn { flex: 1 1 auto; }
 .ua-custom-dates { align-items: stretch; }
 .ua-kpi-card { min-height: 134px; padding: 11px; }
 .ua-kpi-card .kpi-title { font-size: 9px; }

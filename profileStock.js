@@ -3,8 +3,9 @@
                       excess tags · balanced · team cover) — click par wahi agents ki list (sort + CSV).
      • TL profile   : Top 10 — high stock · stock required · dead stock.
      • Agent profile: 4 boxes (status · stock split · cover days · required / excess).
-     • Dono me      : "Stock vs need" chart — class-wise (VC4 · VC20 · VC5+) aur TL me agent-wise bullet bars
-                      (bar = stock, tick = N-din ka need).
+     • TL profile   : health bar (balanced / high / required / dead) + ♻️ Rebalance plan (excess tags → short agents) with CSV.
+     • Dono me      : "Stock vs need" chart — ALL classes (VC4 · VC5 · VC6 … share bar + bullet rows) aur TL me agent-wise
+                      bullet bars (bar = stock, tick = N-din ka need). ⬇ Total stock CSV (agent × class) + 🏷️ tag-level drill-down.
    Rules (same as "Suggested dispatch"): need = run-rate/day × suggestDays; required = need − stock (per class);
    high stock = stock ≥ 2× need (issuance stock ke hisab se nahi); dead stock = stock hai par is month koi issuance nahi.
    Numbers profile ke agent rows (REPORT + stock + issuance) se hi aate hain — alag source nahi. UI English. */
@@ -21,6 +22,10 @@ window.FF = window.FF || {};
   const norm = (s) => String(s === null || s === undefined ? '' : s).toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
   const normId = (v) => String(v === null || v === undefined ? '' : v).trim().replace(/\.0+$/, '').toUpperCase();
   const MAX_ROWS = 12;
+  const REB_ROWS = 10;
+  const CLS_COLORS = ['#6366f1', '#0ea5e9', '#10b981', '#f59e0b', '#ec4899', '#a855f7', '#14b8a6', '#f97316', '#64748b', '#84cc16'];
+  const clsRank = (c) => { const m = /^VC(\d+)/i.exec(String(c)); return m ? Number(m[1]) : 1000; };
+  const clsSort = (a, b) => clsRank(a) - clsRank(b) || String(a).localeCompare(String(b), undefined, { numeric: true });
 
   // ------------------------------------------------------------------ box definitions
   const BOXES = [
@@ -50,7 +55,7 @@ window.FF = window.FF || {};
   const cache = new WeakMap();
   const ui = new Map();        // per profile: { box, sort, chart }
   const keyOf = (pr) => `${pr.kind}|${norm(pr.name)}|${normId(pr.id)}`;
-  const uiOf = (pr) => { const k = keyOf(pr); if (!ui.has(k)) ui.set(k, { box: '', sort: '', chart: 'stock' }); return ui.get(k); };
+  const uiOf = (pr) => { const k = keyOf(pr); if (!ui.has(k)) ui.set(k, { box: '', sort: '', chart: 'stock', cls: 'stock', rebAll: false }); return ui.get(k); };
   const daysOf = (pr) => Math.max(1, num(pr.dispatch && pr.dispatch.days) || num(FF.config && FF.config.features && FF.config.features.suggestDays) || 15);
 
   /** One holder (agent / TL-self / the profiled agent) → stock + need + flags. */
@@ -67,7 +72,10 @@ window.FF = window.FF || {};
     const cover = rate > 0 ? stock / rate : null;
     const h = Object.assign({
       name: src.name || src.agentName || 'Unknown', id: src.id || src.agentId || '', mobile: src.mobile || '', priority: src.priority || '', status: src.status || '',
-      isSelf: false, stockVc4: sv, stockComm: sc, stock, cur, rate, need, req, excess, cover,
+      isSelf: false, stockVc4: sv, stockComm: sc, stock, cur, rate, need, req, excess, cover, reliable, classStock: src.classStock || null,
+      exVc4: reliable ? Math.max(0, sv - gv) : 0, exComm: reliable ? Math.max(0, sc - gc) : 0,
+      reqVc4: reliable ? num(src.sugVc4) : 0, reqComm: reliable ? num(src.sugComm) : 0,
+      exAny: reliable ? 0 : excess, reqAny: reliable ? 0 : req,
       required: req > 0,
       oos: stock === 0 && rate > 0,
       dead: stock > 0 && cur === 0,
@@ -114,8 +122,50 @@ window.FF = window.FF || {};
       if (out.noDispatch) { out.me.required = false; out.me.req = 0; out.me.balanced = !out.me.high && !out.me.dead; out.me.verdict = out.me.high ? 'high' : out.me.dead ? 'dead' : 'ok'; }
     }
     out.classRows = classRows(pr, ctx);
+    out.classChart = classChart(pr, ctx);
+    if (isTl) {
+      out.health = { required: 0, high: 0, dead: 0, ok: 0 };
+      out.team.forEach((a) => { out.health[a.verdict] += 1; });
+      out.reb = rebalance(out);
+    }
     cache.set(pr, out);
     return out;
+  }
+
+  /** Every tag class (VC4 · VC5 · VC6 · … · VC20) with stock, this-month issuance and the N-day need. */
+  function classChart(pr, ctx) {
+    const rows = (pr.classes || []).filter((r) => r && (num(r.stock) || num(r.cur) || num(r.last)));
+    const total = rows.reduce((x, r) => x + num(r.stock), 0);
+    return rows.map((r) => {
+      const stock = num(r.stock), cur = num(r.cur), rate = cur / ctx.elapsed;
+      const need = Math.ceil(rate * ctx.days);
+      const verdict = need > stock ? 'required' : (stock > 0 && need > 0 && stock >= HIGH_MULT * need) ? 'high' : (stock > 0 && cur === 0) ? 'dead' : 'ok';
+      return { label: String(r.cls), stock, cur, last: num(r.last), rate, need, diff: stock - need, verdict, cover: rate > 0 ? stock / rate : null, share: total ? stock / total : 0 };
+    }).sort((a, b) => b.stock - a.stock || b.cur - a.cur || a.label.localeCompare(b.label, undefined, { numeric: true }));
+  }
+
+  /** ♻️ Greedy plan: tags above an agent's need (excess) move to agents that are short — per class (VC4 / Commercial). */
+  function rebalance(an) {
+    const pool = (an.self ? [an.self] : []).concat(an.team);
+    const moves = [];
+    [['VC4', 'exVc4', 'reqVc4'], ['Commercial', 'exComm', 'reqComm'], ['Any class', 'exAny', 'reqAny']].forEach(([cls, exK, reqK]) => {
+      const donors = pool.filter((a) => a[exK] > 0).map((a) => ({ a, left: a[exK] })).sort((x, y) => y.left - x.left);
+      const recv = an.team.filter((a) => a[reqK] > 0).map((a) => ({ a, left: a[reqK] })).sort((x, y) => y.left - x.left);
+      let i = 0;
+      for (const r of recv) {
+        while (r.left > 0 && i < donors.length) {
+          const d = donors[i];
+          const q = Math.min(d.left, r.left);
+          if (q > 0) { moves.push({ cls, from: d.a, to: r.a, qty: q }); d.left -= q; r.left -= q; }
+          if (d.left <= 0) i += 1;
+        }
+      }
+    });
+    const short = an.team.reduce((x, a) => x + a.reqVc4 + a.reqComm + a.reqAny, 0);
+    const covered = moves.reduce((x, m) => x + m.qty, 0);
+    const donors = new Set(moves.map((m) => m.from)).size;
+    return { moves, short, covered, remaining: Math.max(0, short - covered), donors, receivers: new Set(moves.map((m) => m.to)).size,
+      spare: pool.reduce((x, a) => x + a.exVc4 + a.exComm + a.exAny, 0) };
   }
 
   /** VC4 · VC20 · VC5+ (or VC4 · Commercial when no class bins): stock vs N-day need. */
@@ -197,7 +247,7 @@ window.FF = window.FF || {};
       <td>${chip(a.verdict, verdictText(a.verdict, a))}</td></tr>`).join('');
     return `<div class="pi-panel-head"><div><b>${esc(box.label)}</b> · ${fmt(list.length)} agent${list.length === 1 ? '' : 's'}<small class="dim"> — ${esc(box.hint)}</small></div>
       <div class="pi-panel-actions"><button type="button" class="btn small" data-ps-csv>⬇ CSV</button><button type="button" class="btn small" data-ps-close>✕ Close</button></div></div>
-      ${list.length ? `<div class="table-wrap pi-table"><table class="tbl compact"><thead><tr><th>#</th>${th('name', 'Agent')}<th>Mobile</th>${th('stock', 'Stock', 'num')}${th('cur', 'Issued (month)', 'num')}${th('rate', 'Run-rate/day', 'num')}${th('cover', 'Cover', 'num')}${th('need', `Need · ${an.days}d`, 'num')}${th('req', 'Required', 'num')}${th('excess', 'Excess', 'num')}<th>Status</th></tr></thead><tbody>${rows}</tbody></table></div>
+      ${list.length ? `<div class="table-wrap pi-table no-tools"><table class="tbl compact"><thead><tr><th>#</th>${th('name', 'Agent')}<th>Mobile</th>${th('stock', 'Stock', 'num')}${th('cur', 'Issued (month)', 'num')}${th('rate', 'Run-rate/day', 'num')}${th('cover', 'Cover', 'num')}${th('need', `Need · ${an.days}d`, 'num')}${th('req', 'Required', 'num')}${th('excess', 'Excess', 'num')}<th>Status</th></tr></thead><tbody>${rows}</tbody></table></div>
       <p class="dim small">Need = run-rate/day × ${an.days} days (same rule as Suggested dispatch). Required = need − stock per class. Excess = stock above need. Tap an agent to open the full profile.</p>`
         : '<p class="dim small pi-none">🎉 Nobody here right now.</p>'}`;
   }
@@ -223,20 +273,46 @@ window.FF = window.FF || {};
   }
 
   // ------------------------------------------------------------------ chart (bullet bars: bar = stock, tick = need)
-  function bullet(label, sub, stock, need, max, verdict, valText, attrs) {
+  function bullet(label, sub, stock, need, max, verdict, valText, attrs, dot) {
     const w = (v) => Math.max(0, Math.min(100, (v / max) * 100));
     return `<div class="ps-row${attrs ? ' clickable' : ''} v-${verdict}" ${attrs || ''} title="${esc(`${label}: stock ${fmt(stock)} · need ${fmt(need)}`)}">
-      <span class="ps-nm"><b>${esc(label)}</b>${sub ? `<small class="dim">${esc(sub)}</small>` : ''}</span>
+      <span class="ps-nm"><b>${dot ? `<i class="ps-dot" style="background:${dot}"></i>` : ''}${esc(label)}</b>${sub ? `<small class="dim">${esc(sub)}</small>` : ''}</span>
       <span class="ps-track"><u class="ps-fill" style="width:${stock ? Math.max(1.5, w(stock)).toFixed(1) : 0}%"></u>${need ? `<i class="ps-need" style="left:${Math.min(99.4, w(need)).toFixed(1)}%"></i>` : ''}</span>
       <span class="ps-val"><b>${fmt(stock)}</b><small>${valText}</small></span></div>`;
   }
+  const verdictVal = (v, need, stock) => (v === 'required' ? `need ${fmt(need)} · <b class="ps-neg">short ${fmt(need - stock)}</b>`
+    : v === 'high' ? `need ${fmt(need)} · <b class="ps-warn">excess ${fmt(stock - need)}</b>`
+      : v === 'dead' ? 'no issuance this month' : `need ${fmt(need)} · ok`);
+
+  /** Class rows used by the chart: every class (pr.classes); falls back to the grouped rows when a profile has none. */
+  function chartClasses(an) {
+    const rows = an.classChart && an.classChart.length ? an.classChart : an.classRows.map((r) => Object.assign({ last: 0, share: 0 }, r));
+    return rows;
+  }
+
+  /** 🎯 All classes — stacked share bar + one bullet row per class (bar = stock, tick = need). */
+  function classBlockHtml(an, st) {
+    const rows = chartClasses(an);
+    if (!rows.length) return '<div class="ps-block"><div class="ps-block-head"><h6>🎯 Class-wise stock</h6></div><p class="dim small pi-none">No class-wise stock or issuance yet.</p></div>';
+    const mode = ['stock', 'cur', 'short'].includes(st.cls) ? st.cls : 'stock';
+    const colorOf = new Map(rows.slice().sort((a, b) => clsSort(a.label, b.label)).map((r, i) => [r.label, CLS_COLORS[i % CLS_COLORS.length]]));
+    const total = rows.reduce((x, r) => x + r.stock, 0);
+    const needSum = rows.reduce((x, r) => x + r.need, 0);
+    const shortSum = rows.reduce((x, r) => x + Math.max(0, r.need - r.stock), 0);
+    const stocked = rows.filter((r) => r.stock > 0);
+    const bar = total ? `<div class="ps-share" role="img" aria-label="Stock share by class">${stocked.map((r) => `<i style="flex:${r.stock};background:${colorOf.get(r.label)}" title="${esc(`${r.label}: ${fmt(r.stock)} tags (${fmt((r.stock / total) * 100, 1)}%)`)}"></i>`).join('')}</div>
+      <div class="ps-share-key">${stocked.map((r) => `<span><i style="background:${colorOf.get(r.label)}"></i>${esc(r.label)} <b>${fmt(r.stock)}</b><small class="dim"> ${fmt((r.stock / total) * 100, 0)}%</small></span>`).join('')}</div>` : '';
+    const sorted = rows.slice().sort((a, b) => (mode === 'cur' ? b.cur - a.cur : mode === 'short' ? Math.max(0, b.need - b.stock) - Math.max(0, a.need - a.stock) : b.stock - a.stock) || b.stock - a.stock || clsSort(a.label, b.label));
+    const max = Math.max(1, ...rows.map((r) => Math.max(r.stock, r.need)));
+    const seg = (id, label) => `<button type="button" class="${mode === id ? 'on' : ''}" data-ps-cls="${id}">${label}</button>`;
+    return `<div class="ps-block" data-ps-classblock><div class="ps-block-head"><h6>🎯 Class-wise stock <small class="dim">· ${fmt(rows.length)} classes · ${fmt(total)} tags${needSum ? ` · ${an.days}-day need ${fmt(needSum)}` : ''}${shortSum ? ` · <b class="ps-neg">short ${fmt(shortSum)}</b>` : ''}</small></h6>
+      <div class="pi-seg" role="group" aria-label="Sort classes">${seg('stock', 'By stock')}${seg('cur', 'By issuance')}${seg('short', 'Most short')}</div></div>
+      ${bar}
+      ${sorted.map((r) => bullet(r.label, `${fmt(r.cur)} issued · ${fmt(r.rate, 1)}/day${r.cover === null ? '' : ` · ${fmt(r.cover, 0)}d`}`, r.stock, r.need, max, r.verdict, verdictVal(r.verdict, r.need, r.stock), '', colorOf.get(r.label))).join('')}</div>`;
+  }
+
   function chartHtml(pr, an, st) {
     const legend = `<div class="ps-legend"><span><i class="v-ok"></i>Balanced</span><span><i class="v-high"></i>High stock</span><span><i class="v-required"></i>Short (required)</span><span><i class="v-dead"></i>No issuance</span><span><i class="tick"></i>${an.days}-day need</span></div>`;
-    const cls = an.classRows;
-    const cmax = Math.max(1, ...cls.map((r) => Math.max(r.stock, r.need)));
-    const clsHtml = cls.length ? cls.map((r) => bullet(r.label, `issued ${fmt(r.cur)} this month · ${fmt(r.rate, 1)}/day`, r.stock, r.need, cmax, r.verdict,
-      r.verdict === 'required' ? `need ${fmt(r.need)} · <b class="ps-neg">short ${fmt(r.need - r.stock)}</b>` : r.verdict === 'high' ? `need ${fmt(r.need)} · <b class="ps-warn">excess ${fmt(r.stock - r.need)}</b>` : r.verdict === 'dead' ? 'no issuance this month' : `need ${fmt(r.need)} · ok`)).join('')
-      : '<p class="dim small pi-none">No class-wise stock or issuance yet.</p>';
     let agentsHtml = '';
     if (an.isTl && an.team.length) {
       const mode = ['stock', 'req', 'excess'].includes(st.chart) ? st.chart : 'stock';
@@ -249,10 +325,58 @@ window.FF = window.FF || {};
         <div class="pi-seg" role="group" aria-label="Sort agents">${seg('stock', 'Highest stock')}${seg('req', 'Most required')}${seg('excess', 'Most excess')}</div></div>
         ${pool.length ? pool.map((a) => bullet(a.name, a.id, a.stock, a.need, amax, a.verdict, a.required ? `need ${fmt(a.need)} · <b class="ps-neg">short ${fmt(a.req)}</b>` : a.excess ? `need ${fmt(a.need)} · <b class="ps-warn">excess ${fmt(a.excess)}</b>` : a.dead ? 'no issuance' : `need ${fmt(a.need)} · ok`, agentAttrs(pr, a))).join('') : '<p class="dim small pi-none">Nobody here.</p>'}</div>`;
     }
-    return `<div class="ps-chart-card"><div class="ps-chart-head"><h5>📊 Stock vs need</h5>${legend}</div>
-      <div class="ps-block"><div class="ps-block-head"><h6>🎯 Class-wise <small class="dim">${an.isTl ? 'whole team incl. TL' : 'this agent'}</small></h6></div>${clsHtml}</div>
+    return `<div class="ps-chart-card"><div class="ps-chart-head"><h5>📊 Stock vs need <small class="dim">${an.isTl ? 'whole team incl. TL' : 'this agent'}</small></h5>${legend}</div>
+      ${classBlockHtml(an, st)}
       ${agentsHtml}
       <p class="dim small">Bar = stock in hand · tick = what ${an.days} days of issuance needs (run-rate/day × ${an.days}). Bar past the tick = excess, short of the tick = tags required.</p></div>`;
+  }
+
+  // ------------------------------------------------------------------ health bar + rebalance plan (TL)
+  function healthHtml(an) {
+    const n = an.team.length;
+    if (!n) return '';
+    const defs = [['ok', 'Balanced'], ['high', 'High stock'], ['required', 'Stock required'], ['dead', 'Dead stock']];
+    const segs = defs.filter(([id]) => an.health[id] > 0);
+    return `<div class="ps-health" role="img" aria-label="Agent stock health"><div class="ps-health-bar">${segs.map(([id, l]) => `<i class="v-${id}" style="flex:${an.health[id]}" title="${esc(`${l}: ${an.health[id]} of ${n} agents`)}"></i>`).join('')}</div>
+      <div class="ps-health-key">${defs.map(([id, l]) => `<span class="${an.health[id] ? '' : 'zero'}"><i class="v-${id}"></i>${l} <b>${fmt(an.health[id])}</b><small class="dim"> ${fmt((an.health[id] / n) * 100, 0)}%</small></span>`).join('')}</div></div>`;
+  }
+
+  function rebHtml(pr, an, st) {
+    const r = an.reb;
+    if (!r) return '';
+    const who = (a) => `<button type="button" class="ps-who" ${agentAttrs(pr, a)}><b>${esc(a.name)}</b>${a.isSelf ? ' <span class="badge">TL own</span>' : ''}<small class="dim">${esc(a.id || '')}</small></button>`;
+    const box = (l, v, em, t) => `<div class="pi-box static t-${t}"><small>${esc(l)}</small><b>${v}</b><em>${em}</em></div>`;
+    const kpis = `<div class="pi-boxes pi-boxes-4">${box('Tags short', fmt(r.short), `${fmt(an.counts.required)} agent${an.counts.required === 1 ? '' : 's'} below their ${an.days}-day need`, 'red')}
+      ${box('Spare tags', fmt(r.spare), 'above need · TL own + agents', 'sky')}
+      ${box('Can be moved', fmt(r.covered), r.covered ? `${fmt(r.donors)} giving → ${fmt(r.receivers)} receiving` : 'no spare to move', 'green')}
+      ${box('Still to dispatch', fmt(r.remaining), r.remaining ? 'fresh tags needed after moving' : 'nothing extra needed', r.remaining ? 'amber' : 'green')}</div>`;
+    let body;
+    if (!r.short) body = '<p class="dim small pi-none">✅ Nobody is short on stock — nothing to rebalance.</p>';
+    else if (!r.moves.length) body = `<p class="dim small pi-none">No spare tags above anyone's need — all ${fmt(r.short)} short tags have to be dispatched fresh.</p>`;
+    else {
+      const list = st.rebAll ? r.moves : r.moves.slice(0, REB_ROWS);
+      const spare = (a) => a.exVc4 + a.exComm + a.exAny;
+      body = `<div class="ps-moves">${list.map((m) => `<div class="ps-move"><span class="ps-mv-cls">${esc(m.cls)}</span>
+        <span class="ps-mv-from"><small class="ps-lbl">From · spare ${fmt(spare(m.from))}</small>${who(m.from)}</span>
+        <span class="ps-arrow" aria-hidden="true">→</span>
+        <span class="ps-mv-to"><small class="ps-lbl">To · short ${fmt(m.to.req)}</small>${who(m.to)}</span>
+        <span class="ps-mv-qty"><b>${fmt(m.qty)}</b><small>tags</small></span></div>`).join('')}</div>
+        ${r.moves.length > REB_ROWS ? `<button type="button" class="btn small ps-more" data-ps-reb-all>${st.rebAll ? 'Show top ' + REB_ROWS + ' only' : `Show all ${fmt(r.moves.length)} moves`}</button>` : ''}`;
+    }
+    return `<div class="ps-reb" data-ps-reb><div class="pi-top-head"><h5>♻️ Rebalance plan <small class="dim">Move spare tags to agents who are short before dispatching new ones</small></h5>
+      ${r.moves.length ? '<button type="button" class="btn small" data-ps-reb-csv>⬇ CSV</button>' : ''}</div>${kpis}${body}
+      <p class="dim small">Greedy match per class (VC4 / Commercial): biggest spare → biggest shortage. Spare = stock above the ${an.days}-day need; the TL's own stock counts as spare when the TL isn't issuing from it.</p></div>`;
+  }
+
+  // ------------------------------------------------------------------ header (downloads)
+  function headHtml(pr, an) {
+    const isTl = an.isTl;
+    const scope = isTl ? `tl=${encodeURIComponent(pr.name)}${pr.stockTlId || pr.id ? `&tlId=${encodeURIComponent(pr.stockTlId || pr.id)}` : ''}`
+      : `agent=${encodeURIComponent(pr.name)}${pr.id ? `&agentId=${encodeURIComponent(pr.id)}` : ''}${pr.tl && pr.tl.id ? `&tl=${encodeURIComponent(pr.tl.name || '')}&tlId=${encodeURIComponent(pr.tl.id)}` : ''}`;
+    const total = isTl ? an.sums.total : (an.me ? an.me.stock : 0);
+    return `<div class="ps-head"><div class="ps-head-sum"><b>${fmt(total)}</b><small class="dim"> tags in stock${isTl ? ` · ${fmt(an.counts.total || 0)} agents + TL own` : ''}</small></div>
+      <div class="ps-tools"><button type="button" class="btn small primary" data-ps-total-csv title="Whole stock — ${isTl ? 'every agent × every class' : 'every class'} — as one CSV">⬇ Total stock CSV</button>
+      <button type="button" class="btn small" data-kpi="${esc(`src=${pr.ch}&scope=stock&${scope}`)}" role="button" tabindex="0" title="Tag-level stock (class → barcode)">🏷️ Tag-level stock</button></div></div>`;
   }
 
   // ------------------------------------------------------------------ agent boxes
@@ -292,8 +416,9 @@ window.FF = window.FF || {};
         return `<section class="mp-sec ps" data-mp-sec="stockhealth" data-ps="${esc(keyOf(pr))}"><h4>${title}</h4>${partial || '<p class="dim small pi-none">No agent rows for this TL yet.</p>'}</section>`;
       }
       return `<section class="mp-sec ps" data-mp-sec="stockhealth" data-ps="${esc(keyOf(pr))}"><h4>${title}</h4>${partial}
-        ${an.isTl ? `${boxesHtml(pr, an, st)}<div class="pi-panel" data-ps-panel>${panelHtml(pr, an, st)}</div>${topHtml(pr, an)}` : agentBoxesHtml(pr, an)}
-        ${chartHtml(pr, an, st)}</section>`;
+        ${headHtml(pr, an)}
+        ${an.isTl ? `${healthHtml(an)}${boxesHtml(pr, an, st)}<div class="pi-panel" data-ps-panel>${panelHtml(pr, an, st)}</div>${chartHtml(pr, an, st)}${topHtml(pr, an)}${rebHtml(pr, an, st)}` : `${agentBoxesHtml(pr, an)}${chartHtml(pr, an, st)}`}
+      </section>`;
     } catch (e) {
       try { console.warn('profileStock:', e); } catch { /* ignore */ }
       return '';
@@ -305,6 +430,42 @@ window.FF = window.FF || {};
     const list = listFor(an, st.box, st.sort || DEFAULT_SORT[st.box]);
     const head = ['Agent', 'Agent ID', 'Mobile', 'Priority', 'Stock VC4', 'Stock Comm', 'Stock total', 'Issued this month', 'Run-rate/day', 'Cover (days)', `Need (${an.days} days)`, 'Required', 'Excess', 'Status'];
     return { head, rows: list.map((a) => [a.name + (a.isSelf ? ' (TL own)' : ''), a.id, a.mobile, a.priority, a.stockVc4, a.stockComm, a.stock, a.cur, Math.round(a.rate * 10) / 10, a.cover === null ? '' : Math.round(a.cover), a.need, a.req, a.excess, verdictText(a.verdict, a)]) };
+  }
+
+  /** ⬇ Total stock — TL: every holder (TL own first) × every class + totals; agent: one row per class + total. */
+  function totalCsv(pr, an) {
+    const r1 = (v) => Math.round(num(v) * 10) / 10;
+    if (an.isTl) {
+      const holders = (an.self ? [an.self] : []).concat(an.team.slice().sort((a, b) => b.stock - a.stock || a.name.localeCompare(b.name)));
+      const set = new Set();
+      holders.forEach((h) => Object.keys(h.classStock || {}).forEach((c) => { if (num(h.classStock[c]) > 0) set.add(c); }));
+      const cols = [...set].sort(clsSort);
+      const split = cols.length ? cols.map((c) => `Stock ${c}`) : ['Stock VC4', 'Stock Comm'];
+      const head = ['Agent', 'Agent ID', 'Role', 'Mobile', 'Priority', ...split, 'Stock total', 'Issued this month', 'Run-rate/day', 'Cover (days)', `Need (${an.days} days)`, 'Required', 'Excess', 'Status'];
+      const splitOf = (h) => (cols.length ? cols.map((c) => num(h.classStock && h.classStock[c])) : [h.stockVc4, h.stockComm]);
+      const rows = holders.map((h) => [h.name, h.id, h.isSelf ? 'TL own' : 'Agent', h.mobile, h.priority, ...splitOf(h), h.stock, h.cur, r1(h.rate), h.cover === null ? '' : Math.round(h.cover), h.need, h.req, h.excess, h.isSelf ? '' : verdictText(h.verdict, h)]);
+      const sum = (f) => holders.reduce((x, h) => x + num(f(h)), 0);
+      rows.push(['TOTAL', '', `${holders.length} holders`, '', '', ...(cols.length ? cols.map((c) => sum((h) => h.classStock && h.classStock[c])) : [sum((h) => h.stockVc4), sum((h) => h.stockComm)]),
+        sum((h) => h.stock), sum((h) => h.cur), r1(sum((h) => h.rate)), '', sum((h) => h.need), sum((h) => h.req), sum((h) => h.excess), '']);
+      return { head, rows, name: `${U.slug(pr.name)}-total-stock-${U.stamp()}.csv` };
+    }
+    const m = an.me;
+    const cls = chartClasses(an).slice().sort((a, b) => clsSort(a.label, b.label));
+    const head = ['Agent', 'Agent ID', 'Class', 'Stock', 'Issued this month', 'Issued last month', 'Run-rate/day', 'Cover (days)', `Need (${an.days} days)`, 'Required', 'Excess', 'Status'];
+    const rows = cls.map((c) => [pr.name, pr.id || '', c.label, c.stock, c.cur, c.last || 0, r1(c.rate), c.cover === null ? '' : Math.round(c.cover), c.need, Math.max(0, c.need - c.stock), Math.max(0, c.stock - c.need),
+      c.verdict === 'required' ? 'Stock required' : c.verdict === 'high' ? 'High stock' : c.verdict === 'dead' ? 'Dead stock' : 'Balanced']);
+    const sum = (f) => cls.reduce((x, c) => x + num(f(c)), 0);
+    rows.push(['TOTAL', '', `${cls.length} classes`, m ? m.stock : sum((c) => c.stock), sum((c) => c.cur), sum((c) => c.last), r1(sum((c) => c.rate)), m && m.cover !== null ? Math.round(m.cover) : '', m ? m.need : sum((c) => c.need), m ? m.req : '', m ? m.excess : '', m ? ({ required: 'Stock required', high: 'High stock', dead: 'Dead stock', ok: 'Balanced' })[m.verdict] : '']);
+    return { head, rows, name: `${U.slug(pr.name)}-total-stock-${U.stamp()}.csv` };
+  }
+
+  function rebCsv(pr, an) {
+    const r = an.reb;
+    const head = ['Class', 'From agent', 'From ID', 'From mobile', 'To agent', 'To ID', 'To mobile', 'Tags to move'];
+    const rows = r.moves.map((m) => [m.cls, m.from.name + (m.from.isSelf ? ' (TL own)' : ''), m.from.id, m.from.mobile, m.to.name, m.to.id, m.to.mobile, m.qty]);
+    rows.push(['TOTAL', '', '', '', '', '', '', r.covered]);
+    rows.push(['Still to dispatch (fresh)', '', '', '', '', '', '', r.remaining]);
+    return { head, rows, name: `${U.slug(pr.name)}-rebalance-plan-${U.stamp()}.csv` };
   }
 
   function bind(el) {
@@ -319,6 +480,8 @@ window.FF = window.FF || {};
         sec.querySelectorAll('[data-ps-box]').forEach((b) => { const on = b.dataset.psBox === st.box; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); });
       } else if (part === 'chart') {
         const card = sec.querySelector('.ps-chart-card'); if (card) card.outerHTML = chartHtml(pr, an, st);
+      } else if (part === 'reb') {
+        const card = sec.querySelector('[data-ps-reb]'); if (card) card.outerHTML = rebHtml(pr, an, st);
       }
     };
     el.addEventListener('click', (e) => {
@@ -337,6 +500,20 @@ window.FF = window.FF || {};
       if (sort) { st.sort = sort.dataset.psSort; refresh(sec, 'panel'); return; }
       const chart = e.target.closest('[data-ps-chart]');
       if (chart) { st.chart = chart.dataset.psChart; refresh(sec, 'chart'); return; }
+      const cls = e.target.closest('[data-ps-cls]');
+      if (cls) { st.cls = cls.dataset.psCls; refresh(sec, 'chart'); return; }
+      if (e.target.closest('[data-ps-reb-all]')) { st.rebAll = !st.rebAll; refresh(sec, 'reb'); return; }
+      if (e.target.closest('[data-ps-total-csv]')) {
+        const c = totalCsv(pr, analyze(pr));
+        U.downloadCsv(c.name, c.head, c.rows);
+        return;
+      }
+      if (e.target.closest('[data-ps-reb-csv]')) {
+        const an = analyze(pr); if (!an.reb || !an.reb.moves.length) return;
+        const c = rebCsv(pr, an);
+        U.downloadCsv(c.name, c.head, c.rows);
+        return;
+      }
       if (e.target.closest('[data-ps-csv]')) {
         const an = analyze(pr); if (!st.box || !BOX_BY_ID[st.box] || !BOX_BY_ID[st.box].pick) return;
         const c = csvOf(pr, an, st);
@@ -348,5 +525,5 @@ window.FF = window.FF || {};
     });
   }
 
-  FF.profileStock = { html, bind, analyze, _boxes: BOXES, _classRows: classRows, HIGH_MULT };
+  FF.profileStock = { html, bind, analyze, totalCsv, rebCsv, _boxes: BOXES, _classRows: classRows, HIGH_MULT };
 })(window.FF);

@@ -1607,3 +1607,36 @@ html.mobile-ui #mobile-nav [hidden] {
   .ff-saved-view-save-row { align-items:stretch !important; flex-direction:column !important; }
   .ff-saved-view-save-row button { width:100% !important; }
 }
+
+/* ── Profile / Master Search type scale — web + app share ONE set of sizes ─────────────────────────
+   Pehle phone / installed app par global "small 13–14px", "p,li 16–17px", ".btn 15px", tab 17px rules is
+   section ke chhote labels ko bada kar dete the, web par wahi 9.5–12px the → app aur web alag dikhte the.
+   Ab Master Search (.msp-*), profile (.mp-*), insights (.pi-*) aur stock (.ps-*) ke sizes yahin se, dono jagah same.
+   Prefix `html :is(.main, #drawer)` (id inside :is) specificity ko native-shell / mobile-ui rules se upar rakhta hai. */
+html {
+  --pf-label: 11px;      /* uppercase captions, small units          */
+  --pf-meta: 11.5px;     /* second lines, em/foot text, legends      */
+  --pf-body: 12.5px;     /* notes, table cells, buttons              */
+  --pf-tab: 13px;
+  --pf-head: 14px;       /* section headings (h4/h5) + KPI card head */
+}
+html :is(.main, #drawer) :is(.msp-page, .mp, .ps, .pi, .msp-kpi-card, .msp-pulse) small { font-size: var(--pf-label) !important; line-height: 1.35 !important; }
+html :is(.main, #drawer) :is(.msp-page, .mp, .ps, .pi) .pi-box b small,
+html :is(.main, #drawer) :is(.msp-page, .mp, .ps, .pi) .mp-kpi b small { font-size: 12px !important; }
+html :is(.main, #drawer) :is(.mp, .ps, .pi) :is(.cell-sub, .ps-nm small, .pi-nm small, .ps-val small, .pi-val small, .ps-who small) { font-size: var(--pf-label) !important; }
+html :is(.main, #drawer) :is(.msp-kpi em, .mp-kpi em, .pi-box em, .msp-pulse-i em) { font-size: var(--pf-meta) !important; font-style: normal !important; font-weight: 500 !important; line-height: 1.35 !important; }
+html :is(.main, #drawer) :is(.msp-page .page-head h1) { font-size: 22px !important; line-height: 1.25 !important; }
+html :is(.main, #drawer) :is(.msp-page .page-head .sub) { font-size: 13px !important; line-height: 1.4 !important; }
+html :is(.main, #drawer) :is(.msp-kpi-card .card-head h3, .mp-sec h4, .pi h4, .pi-top h5, .pi-top-head h5, .ps-chart-head h5, .ps-reb h5, .pi-chart-head h5) { font-size: var(--pf-head) !important; line-height: 1.3 !important; }
+html :is(.main, #drawer) :is(.ps-block-head h6) { font-size: 13px !important; }
+html :is(.main, #drawer) :is(.mp-tab) { font-size: var(--pf-tab) !important; line-height: 1.2 !important; min-height: 40px; }
+html :is(.main, #drawer) :is(.mp-actions .btn, .pi-seg button, .ps-tools .btn, .pi-panel-actions .btn, .ps-more, .pi-days-bar .btn) { font-size: var(--pf-body) !important; min-height: 0 !important; line-height: 1.3 !important; }
+html :is(.main, #drawer) :is(.pi-seg button) { padding: 6px 12px !important; }
+html :is(.main, #drawer) :is(.mp-note, .mp p, .ps p, .pi p, .msp-page .dim.small) { font-size: var(--pf-body) !important; line-height: 1.5 !important; }
+html :is(.main, #drawer) :is(.ps-legend, .ps-health-key, .ps-share-key, .pi-legend, .pi-chip) { font-size: var(--pf-meta) !important; }
+html :is(.main, #drawer) :is(.mp, .ps, .pi) .tbl :is(td, th) { font-size: var(--pf-body) !important; line-height: 1.35 !important; }
+html :is(.main, #drawer) :is(.mp, .ps, .pi) .tbl :is(td, th) small { font-size: var(--pf-label) !important; }
+html :is(.main, #drawer) :is(.mp-more > summary, .pi-days > summary) { font-size: var(--pf-tab) !important; }
+html :is(.main, #drawer) :is(.ps-nm b, .pi-nm b) { font-size: var(--pf-body) !important; }
+html :is(.main, #drawer) :is(.ps-chip) { font-size: var(--pf-label) !important; }
+html :is(.main, #drawer) :is(.msp-page, .mp, .ps, .pi) { line-height: 1.45; }

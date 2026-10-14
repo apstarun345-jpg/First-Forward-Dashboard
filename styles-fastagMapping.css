@@ -21,7 +21,6 @@
 .fm-step-dot { width: 24px; height: 24px; font-size: 12px; }
 }
 .fm-fields { align-items: end; margin-bottom: 4px; }
-.fm-fields > div { min-width: 0; }
 @media (max-width: 760px) {
 .fm-tab-long { display: none; }
 .fm-tab { padding: 9px 10px; }
