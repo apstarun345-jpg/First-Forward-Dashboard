@@ -724,7 +724,8 @@ window.FF = window.FF || {};
     return true;
   }
   function downloadCsv(filename, header, rows) {
-    const quote = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    // 16-digit barcode CSV me bhi 6-3-7 (Excel ka 6.08E+15 bigadna bhi band)
+    const quote = (v) => `"${String(v ?? '').replace(/^(6\d{5})(\d{3})(\d{7})$/, '$1-$2-$3').replace(/"/g, '""')}"`;
     const csv = [header.map(quote).join(','), ...rows.map((r) => r.map(quote).join(','))].join('\r\n');
     downloadBlob(filename, new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }));
   }

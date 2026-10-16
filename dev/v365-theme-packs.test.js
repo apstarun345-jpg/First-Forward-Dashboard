@@ -55,3 +55,8 @@ test('⚡ Cross Channel — heavy detail tables lazy, redesign hook, TL ghost on
   assert.match(read('newAgents.js'), /collectCache/);
   assert.match(read('dev/styles-full.css'), /body\[data-cc\] \.ins-metrics/);
 });
+
+test('🔢 Barcode har jagah 6-3-7 — DOM safety net + CSV', () => {
+  assert.match(read('ui-plus.js'), /FF\.dashBarcodes/);
+  assert.match(read('util.js'), /\$1-\$2-\$3/);
+});

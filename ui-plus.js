@@ -85,7 +85,31 @@
     });
   }).observe(document.documentElement, { childList: true, subtree: true });
 
-  function boot() { applyDensity(density()); mountDensityButton(); if (typeof navigator !== 'undefined' && navigator.onLine === false) goOffline(); }
+
+  // ---- 🔢 Barcode har jagah 6-3-7 (608116-039-0744090): safety net — jo screen/dialog/table raw 16-digit dikhaye use bhi dash me badal do.
+  const BAR_RE = /(^|[^\d-])(6\d{5})(\d{3})(\d{7})(?![\d-])/g;
+  const SKIP = /^(SCRIPT|STYLE|TEXTAREA|INPUT|CODE|PRE|NOSCRIPT|SELECT|OPTION)$/;
+  function dashNode(root) {
+    if (!root) return;
+    const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, { acceptNode: (n) => {
+      const pe = n.parentNode; if (!pe || SKIP.test(pe.nodeName) || (pe.isContentEditable)) return NodeFilter.FILTER_REJECT;
+      return /\d{16}/.test(n.nodeValue) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+    } });
+    const list = []; while (w.nextNode()) list.push(w.currentNode);
+    list.forEach((n) => { const v = n.nodeValue.replace(BAR_RE, '$1$2-$3-$4'); if (v !== n.nodeValue) n.nodeValue = v; });
+  }
+  let barQueue = new Set(), barRaf = 0;
+  function flushBars() { barRaf = 0; const q = barQueue; barQueue = new Set(); q.forEach((n) => { if (n.isConnected) dashNode(n); }); }
+  new MutationObserver((list) => {
+    for (const m of list) {
+      if (m.type === 'characterData') { if (m.target.parentNode && /\d{16}/.test(m.target.nodeValue)) barQueue.add(m.target.parentNode); }
+      else m.addedNodes.forEach((n) => { if (n.nodeType === 1) barQueue.add(n); else if (n.nodeType === 3 && n.parentNode) barQueue.add(n.parentNode); });
+    }
+    if (barQueue.size && !barRaf) barRaf = requestAnimationFrame(flushBars);
+  }).observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+  FF.dashBarcodes = dashNode;
+
+  function boot() { dashNode(document.body); applyDensity(density()); mountDensityButton(); if (typeof navigator !== 'undefined' && navigator.onLine === false) goOffline(); }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
   window.addEventListener('ff:data-loaded', mountDensityButton, { once: true });
   FF.uiPlus = { density, applyDensity, copy, goOffline, goOnline };
