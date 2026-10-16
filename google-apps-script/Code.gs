@@ -113,15 +113,22 @@ function alignTagRequestSheetColumns_(sh, desiredHeader, incomingRows) {
   var seenOld = {};
   oldKeys.forEach(function (k, col) {
     if (!k) {
-      // A blank title is harmless only when the column is truly empty.
+      // A blank title is harmless when the column is truly empty. If it HAS data, do not block the
+      // approval: give it a stable name ("Column F") so the data is kept (moved to the end) and
+      // the header row is filled in.
       for (var rr = 1; rr < lastRow; rr++) {
         var v = oldValues[rr][col];
         var formula = oldFormulas[rr][col];
         if ((v !== '' && v !== null) || formula) {
-          throw new Error('Existing sheet me column ' + (col + 1) + ' ka header khaali hai lekin data hai. Header fix karo; data safe rakhne ke liye entry roki gayi.');
+          var letter = '', n = col + 1;
+          while (n > 0) { var m = (n - 1) % 26; letter = String.fromCharCode(65 + m) + letter; n = Math.floor((n - 1) / 26); }
+          oldHeader[col] = 'Column ' + letter;
+          oldKeys[col] = tagSheetColumnKey_(oldHeader[col]);
+          k = oldKeys[col];
+          break;
         }
       }
-      return;
+      if (!k) return;
     }
     if (seenOld[k]) throw new Error('Existing sheet me duplicate heading "' + k + '" hai. Duplicate headings fix karo; wrong-column entry roki gayi.');
     seenOld[k] = true;
@@ -185,7 +192,7 @@ const CHUNK = 45000; // a Google Sheets cell holds max 50,000 characters
 const KINDS = ['users', 'sessions', 'settings', 'resets', 'notify'];
 const HISTORY_TAB = 'APP_STORAGE_HISTORY';
 const HISTORY_MAX_ROWS = 60; // bounded to 60 snapshots to avoid Google Sheets document size limits
-const CODE_VERSION = 'v3.71';
+const CODE_VERSION = 'v3.72';
 
 /** Run this ONCE from the Apps Script editor (▶ Run) to grant the "send email" permission. */
 function authorizeMail() { Logger.log('Mail quota left today: ' + MailApp.getRemainingDailyQuota()); }
