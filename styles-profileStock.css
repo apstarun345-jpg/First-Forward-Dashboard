@@ -11,7 +11,6 @@
 .ps-legend i.v-dead { background: #94a3b8; }
 .ps-block { margin: 10px 0 4px; min-width: 0; }
 .ps-row { display: grid; grid-template-columns: minmax(120px, 200px) minmax(0, 1fr) minmax(120px, 200px); align-items: center; gap: 10px; padding: 5px 6px; border-radius: 10px; min-width: 0; }
-.ps-row.clickable { cursor: pointer; }
 .ps-row.clickable:hover { background: color-mix(in srgb, var(--brand, #6366f1) 8%, transparent); }
 .ps-track { position: relative; height: 14px; border-radius: 7px; background: color-mix(in srgb, var(--muted) 13%, transparent); }
 .ps-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 7px; background: #10b981; display: block; text-decoration: none; }

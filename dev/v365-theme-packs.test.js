@@ -68,3 +68,10 @@ test('🧠 AI Business Analyst — page registered everywhere', () => {
   assert.match(read('home.js'), /#\/aiAnalyst/);
   assert.match(read('aiAnalyst.js'), /FF\.pages\.aiAnalyst/);
 });
+
+test('🧠 AI Analyst — FF/GV master-ID separation + clickable drill', () => {
+  const src = read('aiAnalyst.js');
+  assert.match(src, /r\.channel !== 'GV Partner'/);
+  assert.match(src, /function openDrill/);
+  assert.match(src, /data-drill/);
+});
