@@ -1068,6 +1068,7 @@ FF.pages = FF.pages || {};
         try { if (suggestApi && suggestApi.suspend) suggestApi.suspend(); } catch {}
         try { if (suggestApi && suggestApi.close) suggestApi.close(); } catch {}
         if (it.none) return;
+        try { remember(it.label || (it.person && it.person.name) || it.barcode); } catch { /* optional */ }
         if (it.barcode) { openPanel(it.barcode); return; }              // 🏷️ barcode/tag = tag-level rows (list yahan theek)
         if (it.person && it.person.name) { openSearchPage(it.person.name, it.person); return; }
         openSearchPage(it.label);
@@ -1075,8 +1076,43 @@ FF.pages = FF.pages || {};
       onEnter: (q) => {
         try { if (suggestApi && suggestApi.suspend) suggestApi.suspend(); } catch {}
         try { if (suggestApi && suggestApi.close) suggestApi.close(); } catch {}
-        if (clean(q).length >= 2) openSearchPage(q);
+        if (clean(q).length >= 2) { try { remember(q); } catch { /* optional */ } openSearchPage(q); }
       }
+    });
+    // 🕘⭐ Recent + pinned searches — shown when the box is focused and empty (this device only).
+    const RKEY = 'ff_ms_recent';
+    const readR = () => { try { const a = JSON.parse(localStorage.getItem(RKEY) || '[]'); return Array.isArray(a) ? a.filter((x) => x && x.label) : []; } catch { return []; } };
+    const writeR = (a) => { try { localStorage.setItem(RKEY, JSON.stringify(a.slice(0, 40))); } catch { /* private mode */ } };
+    const remember = (label) => {
+      label = clean(label); if (label.length < 2) return;
+      const a = readR(); const i = a.findIndex((x) => x.label.toLowerCase() === label.toLowerCase());
+      const pinned = i >= 0 && a[i].pinned; if (i >= 0) a.splice(i, 1);
+      a.unshift({ label, pinned: !!pinned, at: Date.now() });
+      const keep = a.filter((x) => x.pinned).concat(a.filter((x) => !x.pinned).slice(0, 8));
+      writeR(keep);
+    };
+    remember.read = readR; remember.write = writeR;
+    mountTopbar.remember = remember;
+    const panel = U.h('<div class="ms-recent" id="master-search-recent" hidden></div>');
+    wrap.appendChild(panel);
+    const paintRecent = () => {
+      const a = readR();
+      const pinned = a.filter((x) => x.pinned), recent = a.filter((x) => !x.pinned).slice(0, 6);
+      if (!pinned.length && !recent.length) { panel.hidden = true; return; }
+      const row = (x) => `<div class="ms-recent-row"><button type="button" class="ms-recent-go" data-ms-go="${esc(x.label)}">${x.pinned ? '⭐' : '🕘'} ${esc(x.label)}</button><button type="button" class="ms-recent-pin" data-ms-pin="${esc(x.label)}" title="${x.pinned ? 'Pin hatao' : 'Pin karo'}">${x.pinned ? '★' : '☆'}</button></div>`;
+      panel.innerHTML = (pinned.length ? '<div class="ms-recent-h">Pinned</div>' + pinned.map(row).join('') : '') + (recent.length ? '<div class="ms-recent-h">Recent</div>' + recent.map(row).join('') : '');
+      panel.hidden = false;
+    };
+    input.addEventListener('focus', () => { if (!clean(input.value)) paintRecent(); });
+    input.addEventListener('input', () => { panel.hidden = true; });
+    document.addEventListener('mousedown', (e) => { if (!panel.hidden && !wrap.contains(e.target)) panel.hidden = true; });
+    input.addEventListener('keydown', (e) => { if (e.key === 'Escape') panel.hidden = true; });
+    panel.addEventListener('mousedown', (e) => e.preventDefault()); // input ka focus na jaye
+    panel.addEventListener('click', (e) => {
+      const go = e.target.closest && e.target.closest('[data-ms-go]');
+      const pin = e.target.closest && e.target.closest('[data-ms-pin]');
+      if (pin) { const a = readR(); const it = a.find((x) => x.label === pin.dataset.msPin); if (it) { it.pinned = !it.pinned; writeR(a); paintRecent(); } return; }
+      if (go) { panel.hidden = true; input.value = go.dataset.msGo; remember(go.dataset.msGo); openSearchPage(go.dataset.msGo); }
     });
     // Index / data ready hote hi khula dropdown refresh — warna "search ho raha hai…" placeholder agli key tak atka rehta tha.
     let refreshTimer = 0;

@@ -2518,6 +2518,8 @@ body.colorful .from-hdr { color: #166534; }
           <div class="tr-chips" data-tr-chips>${chipsHtml(displayRows(state.requests))}</div>
           <input class="input tr-req-search" data-tr-search type="search" placeholder="🔎 Agent / employee / mobile / PIN / ID" value="${esc(state.filter.q)}">
           <button type="button" class="btn" data-tr-act="req-refresh" title="Nayi requests laao">↻</button>
+          <button type="button" class="btn tr-card-toggle" data-tr-act="card-toggle" title="Phone ke liye card view / poori table">▦ Cards</button>
+          <button type="button" class="btn tr-detail-toggle" data-tr-act="card-details" title="Cards me stock aur issuance numbers dikhao / chhupao">📊 Stock &amp; issuance</button>
         </div>
       </div>
       <div data-tr-rc-banner></div>
@@ -2602,6 +2604,60 @@ body.colorful .from-hdr { color: #166534; }
     const src = info.storageMissing ? 'abhi ke storage record' : 'purani save';
     return `<div class="warn-box" style="margin:0 0 10px">⏪ <b>${fmt(info.missing)} tag request wapas laayi ja sakti hai</b> — ye ${src} me maujood hai par is list me nahi dikh rahi (${info.found ? `${fmt(info.found)} us save me` : ''}${info.at ? ` · ${esc(longDate(info.at))}` : ''}). Kuch bhi apne aap nahi badla. <button type="button" class="btn small primary" data-tr-act="recover">⏪ Wapas lao…</button></div>`;
   }
+  // ---- 📱 Card view (phone) + swipe actions --------------------------------------------------------
+  const cardsOn = () => {
+    try { const v = localStorage.getItem('ff_tr_cards'); if (v === '1') return true; if (v === '0') return false; } catch { /* default */ }
+    return !!(typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(max-width: 720px)').matches);
+  };
+  const cardsDetail = () => { try { return localStorage.getItem('ff_tr_cards_detail') === '1'; } catch { return false; } };
+  function applyCardMode() {
+    const card = rootEl && rootEl.querySelector('#tr-req-card');
+    if (!card) return;
+    const wrap = card.querySelector('.tr-req-wrap');
+    if (!wrap) return;
+    const on = cardsOn();
+    wrap.classList.toggle('tr-cards', on);
+    wrap.classList.toggle('tr-cards-open', on && cardsDetail());
+    const b = card.querySelector('[data-tr-act="card-toggle"]'); if (b) { b.textContent = on ? '☰ Table' : '▦ Cards'; b.classList.toggle('on', on); }
+    const d = card.querySelector('[data-tr-act="card-details"]'); if (d) { d.hidden = !on; d.classList.toggle('on', on && cardsDetail()); }
+    const tbody = wrap.querySelector('[data-tr-tbody]');
+    if (tbody && !tbody.__swipe) { tbody.__swipe = true; bindSwipe(tbody, wrap); }
+  }
+  /** Swipe a card: right → ✅ Approve, left → 🚚 Dispatch (admin only, card view only). Needs a clear, mostly-horizontal move. */
+  function bindSwipe(tbody, wrap) {
+    let row = null, x0 = 0, y0 = 0, dx = 0, lock = false;
+    const reset = () => { if (row) { row.style.transform = ''; row.style.transition = ''; row.removeAttribute('data-swipe'); } row = null; dx = 0; lock = false; };
+    tbody.addEventListener('touchstart', (e) => {
+      if (!isAdmin() || !wrap.classList.contains('tr-cards') || !e.touches || e.touches.length !== 1) return;
+      const t = e.target;
+      if (t.closest && t.closest('input,select,textarea,button,a,.tr-class-grid')) return;
+      row = t.closest && t.closest('tr.tr-req-row');
+      if (!row) return;
+      x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; dx = 0; lock = false;
+    }, { passive: true });
+    tbody.addEventListener('touchmove', (e) => {
+      if (!row || !e.touches) return;
+      const mx = e.touches[0].clientX - x0, my = e.touches[0].clientY - y0;
+      if (!lock) { if (Math.abs(my) > 14 && Math.abs(my) > Math.abs(mx)) { reset(); return; } if (Math.abs(mx) > 14 && Math.abs(mx) > Math.abs(my) * 1.5) lock = true; else return; }
+      dx = Math.max(-130, Math.min(130, mx));
+      row.style.transition = 'none';
+      row.style.transform = `translateX(${dx}px)`;
+      row.setAttribute('data-swipe', dx > 60 ? 'approve' : dx < -60 ? 'dispatch' : '');
+    }, { passive: true });
+    tbody.addEventListener('touchend', () => {
+      if (!row) return;
+      const key = row.dataset.trKey, go = dx > 90 ? 'approved' : dx < -90 ? 'dispatched' : '';
+      reset();
+      if (!go) return;
+      const dr = state.dview.find((x) => x.key === key);
+      if (!dr) return;
+      const cur = dr.req.status || 'pending';
+      if (cur === go) { U.toast(`Already ${STATUS[go].label}`, 'info'); return; }
+      if (go === 'dispatched' && cur !== 'approved') { U.toast('Pehle Approve karo (right swipe), phir Dispatch (left swipe)', 'info'); return; }
+      setStatus(dr, go);
+    }, { passive: true });
+    tbody.addEventListener('touchcancel', reset, { passive: true });
+  }
   function renderReqTable() {
     const card = rootEl.querySelector('#tr-req-card');
     if (!card) return;
@@ -2617,7 +2673,7 @@ body.colorful .from-hdr { color: #166534; }
     if (tbody) {
       if (state.reqError && !state.requests.length) tbody.innerHTML = `<tr><td colspan="${requestColumnCount()}" class="empty">⚠️ Requests load nahi hui: ${esc(state.reqError)} <button class="btn small" data-tr-act="req-refresh">↻ Retry</button></td></tr>`;
       else if (!all.length) tbody.innerHTML = `<tr><td colspan="${requestColumnCount()}" class="empty">Abhi koi tag request nahi hai. 📝 Form bharo → 📤 submit.<br><small class="dim">Employee link se aayi requests bhi yahin dikhengi (🌐 badge ke saath).</small></td></tr>`;
-      else if (!shown.length) tbody.innerHTML = `<tr><td colspan="${requestColumnCount()}" class="empty">Is filter / search me koi request nahi.</td></tr>`;
+      else if (!shown.length) tbody.innerHTML = `<tr><td colspan="${requestColumnCount()}" class="empty">🔎 Is filter / search me koi request nahi. <button type="button" class="btn small" data-tr-chip="all">Sab dikhao</button></td></tr>`;
       else tbody.innerHTML = shown.map(reqRowHtml).join('');
     }
     const channels = card.querySelector('.tr-channel-filter');
@@ -2628,6 +2684,7 @@ body.colorful .from-hdr { color: #166534; }
     if (count) count.textContent = fmt(state.dview.length);
     const foot = card.querySelector('[data-tr-foot]');
     if (foot) foot.innerHTML = reqFootHtml();
+    applyCardMode();
     updateSelUi();
     if (state.edit) {
       const first = card.querySelector('.tr-editing [data-tr-eq]');
@@ -2818,6 +2875,7 @@ body.colorful .from-hdr { color: #166534; }
     renderReqTable();
     p.then(() => {
       U.toast(`${STATUS[status] ? STATUS[status].label : status} — ${dr.agent.name}`, 'ok');
+      if (U.feedback) U.feedback('ok');
     }).catch((err) => {
       U.toast('Status update fail: ' + ((err && err.message) || ''), 'err');
       renderReqTable();
@@ -2904,6 +2962,7 @@ body.colorful .from-hdr { color: #166534; }
     state.sel.clear();
     renderReqTable();
     U.toast(`${STATUS[status].label}: ${ok} updated${fail ? ` · ⚠️ ${fail} failed (restored)` : ''}`, fail ? 'warn' : 'ok');
+    if (U.feedback) U.feedback(fail ? 'warn' : 'done');
   }
   const bulkApprove = () => bulkSetStatus('approved');
   function exportCsv() {
@@ -2953,6 +3012,8 @@ body.colorful .from-hdr { color: #166534; }
       if (chip) { state.filter.status = chip.dataset.trChip; state.limit = PAGE_ROWS; state.edit = null; renderReqTable(); return; }
       const act = t.closest && t.closest('[data-tr-act]');
       if (act && act.dataset.trAct === 'date-clear') { state.filter.fromDate = ''; state.filter.toDate = ''; state.limit = PAGE_ROWS; renderReqTable(); return; }
+      if (act && act.dataset.trAct === 'card-toggle') { try { localStorage.setItem('ff_tr_cards', cardsOn() ? '0' : '1'); } catch { /* private mode */ } applyCardMode(); return; }
+      if (act && act.dataset.trAct === 'card-details') { try { localStorage.setItem('ff_tr_cards_detail', cardsDetail() ? '0' : '1'); } catch { /* private mode */ } applyCardMode(); return; }
       if (act && act.dataset.trAct === 'req-refresh') { loadRequests(true).then(() => { renderReqTable(); U.toast('↻ Requests taaza', 'ok'); }); return; }
       if (act && act.dataset.trAct === 'more') { state.limit += PAGE_ROWS; renderReqTable(); return; }
       if (act && act.dataset.trAct === 'recover') { openRecovery(); return; }

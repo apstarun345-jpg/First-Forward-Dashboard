@@ -192,7 +192,9 @@ window.FF = window.FF || {};
       { kind: 'action', id: 'search', icon: 'search', label: 'Search' },
       { kind: 'route', id: 'tagIssued', icon: 'tag', label: 'Tags' },
       { kind: 'action', id: 'notifications', icon: 'bell', label: 'Alerts' },
-      { kind: 'route', id: 'performance', icon: 'team', label: 'Team' },
+      (FF.auth && FF.auth.can && FF.auth.can('tagRequest') && FF.auth.can('tagRequest') !== false
+        ? { kind: 'route', id: 'tagRequest', icon: 'tag', label: 'Requests' }
+        : { kind: 'route', id: 'performance', icon: 'team', label: 'Team' }),
       { kind: 'action', id: 'more', icon: 'more', label: 'More' }
     ];
     nav.hidden = false;
@@ -381,17 +383,30 @@ window.FF = window.FF || {};
   function themeMode() {
     try {
       const explicit = localStorage.getItem('ff_theme_explicit');
-      if (explicit === 'dark' || explicit === 'light') return explicit;
+      if (explicit === 'dark' || explicit === 'light' || explicit === 'auto') return explicit;
       return 'light';
     } catch { return 'light'; }
   }
+  /** 'auto' follows the phone/computer setting (dark at night when the OS does it). */
+  function resolvedTheme() {
+    const m = themeMode();
+    if (m !== 'auto') return m;
+    try { return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; } catch { return 'light'; }
+  }
   function applyThemeMode() {
-    document.documentElement.dataset.theme = themeMode();
+    const mode = themeMode();
+    document.documentElement.dataset.theme = resolvedTheme();
     const b = U.$('#theme-toggle');
-    if (b) { b.textContent = themeMode() === 'dark' ? '☀️' : '🌙'; b.title = themeMode() === 'dark' ? 'Light mode' : 'Dark mode'; }
+    if (b) {
+      b.textContent = mode === 'dark' ? '☀️' : mode === 'auto' ? '🌓' : '🌙';
+      b.title = mode === 'dark' ? 'Dark mode on — tap for Auto (system)' : mode === 'auto' ? 'Auto (system) — tap for Light' : 'Light mode — tap for Dark';
+    }
+    if (mode === 'auto' && !applyThemeMode.watching && window.matchMedia) {
+      try { window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (themeMode() === 'auto') applyThemeMode(); }); applyThemeMode.watching = true; } catch { /* old browser */ }
+    }
   }
   function toggleThemeMode() {
-    const next = themeMode() === 'dark' ? 'light' : 'dark';
+    const next = ({ light: 'dark', dark: 'auto', auto: 'light' })[themeMode()] || 'dark';
     try {
       localStorage.setItem('ff_theme_explicit', next);
       localStorage.setItem('ff_theme', next); // backward-compatible with older code.
@@ -809,8 +824,63 @@ window.FF = window.FF || {};
     }
     if (FF.masterSearch && FF.masterSearch.mountTopbar) FF.masterSearch.mountTopbar(true);
   }
+  // ---- ✨ small UX extras: success feedback (vibrate + optional sound) and the "?" shortcuts sheet ----
+  U.feedback = function feedback(kind) {
+    try {
+      if (navigator.vibrate) navigator.vibrate(kind === 'warn' ? [60, 40, 60] : kind === 'done' ? [30, 40, 30] : 20);
+    } catch { /* not supported */ }
+    try {
+      if (localStorage.getItem('ff_sound') !== '1') return;
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      const ctx = U.feedback.ctx || (U.feedback.ctx = new AC());
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = 'sine';
+      o.frequency.value = kind === 'warn' ? 330 : kind === 'done' ? 880 : 660;
+      g.gain.setValueAtTime(0.0001, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.08, ctx.currentTime + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.22);
+      o.connect(g); g.connect(ctx.destination);
+      o.start(); o.stop(ctx.currentTime + 0.25);
+    } catch { /* audio blocked until first tap — fine */ }
+  };
+  function openShortcutsSheet() {
+    const old = U.$('#ff-keys-sheet'); if (old) { old.remove(); return; }
+    const sound = (() => { try { return localStorage.getItem('ff_sound') === '1'; } catch { return false; } })();
+    const rows = [
+      ['/', 'Search kholo (agent · TL · ID · barcode)'], ['Ctrl / ⌘ + K', 'Command palette'], ['?', 'Ye list'],
+      ['Esc', 'Popup / dropdown band'], ['G phir H', 'Home'], ['G phir R', 'Tag Request'], ['G phir S', 'Stock']
+    ];
+    const el = U.h(`<div class="ff-keys-sheet" id="ff-keys-sheet" role="dialog" aria-label="Keyboard shortcuts"><div class="ff-keys-card"><div class="ff-keys-head"><b>⌨️ Shortcuts</b><button type="button" class="icon-btn small" data-keys-close aria-label="Close">✕</button></div>
+      <table class="ff-keys-tbl"><tbody>${rows.map(([k, d]) => `<tr><td><kbd>${esc(k)}</kbd></td><td>${esc(d)}</td></tr>`).join('')}</tbody></table>
+      <label class="ff-keys-opt"><input type="checkbox" data-keys-sound ${sound ? 'checked' : ''}> 🔊 Kaam poora hone par halki awaaz (approve / mapping)</label>
+      <small class="dim">Phone par: Tag Request me card ko right swipe = Approve, left swipe = Dispatch.</small></div></div>`);
+    document.body.appendChild(el);
+    const close = () => el.remove();
+    el.addEventListener('click', (e) => { if (e.target === el || (e.target.closest && e.target.closest('[data-keys-close]'))) close(); });
+    const cb = el.querySelector('[data-keys-sound]');
+    if (cb) cb.addEventListener('change', () => { try { localStorage.setItem('ff_sound', cb.checked ? '1' : '0'); } catch { /* private mode */ } if (cb.checked) U.feedback('ok'); });
+  }
+  function bindShellHelp() {
+    if (bindShellHelp.done) return; bindShellHelp.done = true;
+    let goAt = 0;
+    document.addEventListener('keydown', (e) => {
+      const t = e.target, tag = t && t.tagName;
+      if ((tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (t && t.isContentEditable)) || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.key === 'Escape') { const sh = U.$('#ff-keys-sheet'); if (sh) sh.remove(); return; }
+      if (e.key === '?') { e.preventDefault(); openShortcutsSheet(); return; }
+      const k = String(e.key || '').toLowerCase();
+      if (k === 'g') { goAt = Date.now(); return; }
+      if (goAt && Date.now() - goAt < 1200) {
+        const dest = { h: 'home', r: 'tagRequest', s: 'stock' }[k];
+        goAt = 0;
+        if (dest && FF.auth && FF.auth.can && FF.auth.can(dest)) { location.hash = '#/' + dest; }
+      }
+    });
+  }
   function startShellExtras() {
     bindThemePackButton();
+    bindShellHelp();
     if (shellExtrasStarted) return Promise.resolve(false);
     shellExtrasStarted = true;
     const hooks = (wave) => {

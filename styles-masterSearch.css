@@ -61,3 +61,10 @@
 .msp-search { flex-wrap: wrap; }
 .msp-search .btn { width: 100%; }
 }
+.ms-recent { position: absolute; left: 0; right: 0; top: calc(100% + 6px); z-index: 80; max-height: 60vh; overflow: auto; padding: 6px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); box-shadow: 0 14px 36px rgba(15, 23, 42, .22); }
+.ms-recent[hidden] { display: none; }
+.ms-recent-h { padding: 6px 8px 2px; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.ms-recent-row { display: flex; align-items: center; gap: 4px; }
+.ms-recent-go { flex: 1; min-width: 0; text-align: left; padding: 8px 10px; border: 0; border-radius: 10px; background: transparent; color: inherit; font: inherit; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ms-recent-go:hover, .ms-recent-go:focus-visible { background: color-mix(in srgb, var(--brand) 10%, transparent); outline: none; }
+.ms-recent-pin { border: 0; background: transparent; cursor: pointer; font-size: 18px; color: #d97706; padding: 4px 8px; }

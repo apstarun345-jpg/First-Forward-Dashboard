@@ -38,9 +38,10 @@ html .fm-pane .grid.g-3, html.mobile-ui .fm-pane .grid.g-3 { grid-template-colum
 }
 .fm-report { margin-top: 14px; }
 .fm-rep-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr); gap: 14px; align-items: start; }
-.fm-report h4 { margin: 0 0 8px; font-size: 14px; }
-.fm-rep-tbl td.num, .fm-rep-tbl th.num { text-align: right; font-variant-numeric: tabular-nums; }
-.fm-rep-total td { border-top: 2px solid var(--line); background: color-mix(in srgb, var(--muted) 8%, transparent); }
 @media (max-width: 860px) {
 .fm-rep-grid { grid-template-columns: minmax(0, 1fr); }
 }
+.fm-report .table-wrap { max-height: 60vh; overflow: auto; }
+.fm-report .tbl thead th { position: sticky; top: 0; z-index: 2; background: var(--card); box-shadow: 0 1px 0 var(--line); }
+.fm-rep-tbl td:first-child, .fm-rep-tbl th:first-child { position: sticky; left: 0; z-index: 1; background: var(--card); }
+.fm-rep-tbl thead th:first-child { z-index: 3; }

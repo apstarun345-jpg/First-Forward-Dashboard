@@ -59,7 +59,8 @@
       localStorage.setItem('ff_theme_scope_migrated_v1', '1');
     }
     const explicitTheme = localStorage.getItem('ff_theme_explicit');
-    document.documentElement.dataset.theme = explicitTheme === 'dark' ? 'dark' : 'light';
+    const osDark = explicitTheme === 'auto' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    document.documentElement.dataset.theme = (explicitTheme === 'dark' || osDark) ? 'dark' : 'light';
   } catch {
     document.documentElement.dataset.theme = 'light';
   }

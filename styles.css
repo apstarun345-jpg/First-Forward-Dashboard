@@ -5462,6 +5462,15 @@ html[data-theme="dark"] .home-exp-stat { background: color-mix(in srgb, var(--br
   color:#64748b !important;
   white-space:nowrap !important;
 }
+.tr-req-tbl td.tr-m-stock-total {
+  background:linear-gradient(180deg,#faf5ff,#f5f3ff) !important;
+}
+.tr-req-tbl td.tr-m-last {
+  background:linear-gradient(180deg,#f8fbff,#eff6ff) !important;
+}
+.tr-req-tbl td.tr-m-current {
+  background:linear-gradient(180deg,#f0fdf4,#ecfdf5) !important;
+}
 .tr-req-tbl td.tr-m-current .tr-big-num {
   color:#047857 !important;
 }
@@ -5922,6 +5931,7 @@ html:not(.mobile-ui) .top-more-pop .icon-btn::after { content: attr(data-label);
 .table-tools .btn.active { border-color: color-mix(in srgb, var(--brand) 55%, var(--line)); color: var(--brand); background: color-mix(in srgb, var(--brand) 9%, var(--card)); }
 .cls-split table { width: 100%; }
 .cls-split th, .cls-split td { padding-left: 6px; padding-right: 6px; white-space: nowrap; }
+.cls-split tr.cls-total td { border-top: 1px dashed var(--line); background: color-mix(in srgb, var(--brand) 4%, transparent); }
 /* v3.79 — Customize Home */
 .home-sec-hidden { display: none !important; }
 .hl-panel .card-head { flex-wrap: wrap; gap: 8px; }
@@ -6099,3 +6109,22 @@ tr.clickable[data-pick-agent], tr.clickable[data-pick-tl] { cursor: pointer; }
 .pi-table { max-height: 360px; }
 }
 /* 📊 FASTag Mapping report */
+.fm-report h4 { margin: 0 0 8px; font-size: 14px; }
+.fm-rep-tbl td.num, .fm-rep-tbl th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.fm-rep-total td { border-top: 2px solid var(--line); background: color-mix(in srgb, var(--muted) 8%, transparent); }
+/* ===== 📱 Tag Request card view (phone) + swipe ===== */
+.table-wrap.tall.tr-req-wrap.tr-cards, .tr-req-wrap.tr-cards { max-height: none !important; overflow: visible !important; }
+.tr-req-wrap.tr-cards td input:not([type=checkbox]), .tr-req-wrap.tr-cards td select, .tr-req-wrap.tr-cards td textarea { max-width: 100%; width: 100%; box-sizing: border-box; }
+.tr-req-wrap.tr-cards td { display: block; padding: 0 !important; border: 0 !important; width: auto !important; min-width: 0; text-align: left; background: transparent; }
+/* ===== 🕘⭐ Search recents ===== */
+.master-search { position: relative; }
+/* ===== ⌨️ Shortcuts sheet ===== */
+.ff-keys-sheet { position: fixed; inset: 0; z-index: 3000; display: grid; place-items: center; background: rgba(15, 23, 42, .5); padding: 16px; }
+.ff-keys-card { width: min(440px, 100%); max-height: 86vh; overflow: auto; border-radius: 18px; background: var(--card); color: var(--ink, inherit); border: 1px solid var(--line); box-shadow: 0 24px 60px rgba(0, 0, 0, .35); padding: 16px; display: grid; gap: 10px; }
+.ff-keys-head { display: flex; justify-content: space-between; align-items: center; font-size: 16px; }
+.ff-keys-tbl { width: 100%; border-collapse: collapse; }
+.ff-keys-tbl td { padding: 6px 4px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.ff-keys-tbl td:first-child { white-space: nowrap; width: 1%; }
+.ff-keys-tbl kbd { padding: 2px 7px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 6px; background: color-mix(in srgb, var(--muted) 10%, transparent); font: 600 12px ui-monospace, monospace; }
+.ff-keys-opt { display: flex; gap: 8px; align-items: center; font-size: 13.5px; }
+/* ===== 📌 Sticky headers inside scrolling report tables ===== */

@@ -7052,3 +7052,74 @@ tr.clickable[data-pick-agent], tr.clickable[data-pick-tl] { cursor: pointer; }
 .fm-rep-tbl td.num, .fm-rep-tbl th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .fm-rep-total td { border-top: 2px solid var(--line); background: color-mix(in srgb, var(--muted) 8%, transparent); }
 @media (max-width: 860px) { .fm-rep-grid { grid-template-columns: minmax(0, 1fr); } }
+
+/* ===== 📱 Tag Request card view (phone) + swipe ===== */
+.tr-card-toggle.on, .tr-detail-toggle.on { background: color-mix(in srgb, var(--brand) 14%, var(--card)); border-color: var(--brand); }
+.tr-detail-toggle[hidden] { display: none; }
+.table-wrap.tall.tr-req-wrap.tr-cards, .tr-req-wrap.tr-cards { max-height: none !important; overflow: visible !important; }
+.tr-req-wrap.tr-cards .tr-req-tbl { min-width: 0 !important; width: 100% !important; max-width: 100%; display: block; border: 0; table-layout: auto; }
+.tr-req-wrap.tr-cards .tr-req-tbl colgroup,
+.tr-req-wrap.tr-cards .tr-req-tbl thead { display: none; }
+.tr-req-wrap.tr-cards .tr-req-tbl tbody { display: block; }
+.tr-req-wrap.tr-cards tr.tr-req-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) max-content; gap: 6px 10px; align-items: start; position: relative; margin: 0 0 12px; padding: 12px; border: 1px solid var(--line); border-left-width: 5px; border-radius: 14px; background: var(--card); box-shadow: 0 2px 10px rgba(15, 23, 42, .06); transition: transform .18s ease; touch-action: pan-y; }
+.tr-req-wrap.tr-cards tr.tr-req-row.st-pending { border-left-color: #d97706; }
+.tr-req-wrap.tr-cards tr.tr-req-row.st-approved { border-left-color: #16a34a; }
+.tr-req-wrap.tr-cards tr.tr-req-row.st-dispatched { border-left-color: #2563eb; }
+.tr-req-wrap.tr-cards tr.tr-req-row.st-rejected { border-left-color: #dc2626; }
+.tr-req-wrap.tr-cards tr.tr-req-row[data-swipe="approve"] { box-shadow: -8px 0 0 #16a34a inset, 0 2px 10px rgba(22, 163, 74, .35); }
+.tr-req-wrap.tr-cards tr.tr-req-row[data-swipe="dispatch"] { box-shadow: 8px 0 0 #2563eb inset, 0 2px 10px rgba(37, 99, 235, .35); }
+.tr-req-wrap.tr-cards tr.tr-req-row { width: 100%; max-width: 100%; box-sizing: border-box; overflow: hidden; }
+.tr-req-wrap.tr-cards td input:not([type=checkbox]), .tr-req-wrap.tr-cards td select, .tr-req-wrap.tr-cards td textarea { max-width: 100%; width: 100%; box-sizing: border-box; }
+.tr-req-wrap.tr-cards td * { max-width: 100%; }
+.tr-req-wrap.tr-cards td { display: block; padding: 0 !important; border: 0 !important; width: auto !important; min-width: 0; text-align: left; background: transparent; }
+.tr-req-wrap.tr-cards td.tr-c-sel { grid-column: 1; grid-row: 1; }
+.tr-req-wrap.tr-cards td.tr-c-agent { grid-column: 2; grid-row: 1; }
+.tr-req-wrap.tr-cards td.tr-c-total { grid-column: 3; grid-row: 1; text-align: right; font-size: 18px; }
+.tr-req-wrap.tr-cards td.tr-c-date, .tr-req-wrap.tr-cards td.tr-c-emp { grid-column: 2 / 4; display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; font-size: 12.5px; }
+.tr-req-wrap.tr-cards td.tr-c-courier, .tr-req-wrap.tr-cards td.tr-c-item-name { grid-column: 2 / 4; }
+.tr-req-wrap.tr-cards td.tr-c-addr { grid-column: 2 / 4; font-size: 12.5px; }
+.tr-req-wrap.tr-cards td.tr-c-cls { grid-column: 1 / -1; padding-top: 4px !important; }
+.tr-req-wrap.tr-cards td.tr-c-status { grid-column: 1 / -1; }
+.tr-req-wrap.tr-cards td.tr-c-act { grid-column: 1 / -1; display: flex !important; flex-wrap: wrap; gap: 6px; }
+.tr-req-wrap.tr-cards td.tr-m { display: none; }
+.tr-req-wrap.tr-cards.tr-cards-open td.tr-m { display: block; grid-column: 1 / -1; padding: 4px 0 !important; border-top: 1px dashed var(--line) !important; text-align: left; }
+.tr-req-wrap.tr-cards.tr-cards-open td.tr-m::before { content: attr(data-tr-m); display: block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.tr-req-wrap.tr-cards.tr-cards-open td[data-tr-m="stock"]::before { content: "Stock · total"; }
+.tr-req-wrap.tr-cards.tr-cards-open td[data-tr-m="core"]::before { content: "Stock · VC4/VC20"; }
+.tr-req-wrap.tr-cards.tr-cards-open td[data-tr-m="comm"]::before { content: "Stock · VC5+"; }
+.tr-req-wrap.tr-cards.tr-cards-open td[data-tr-m="last"]::before { content: "Last month"; }
+.tr-req-wrap.tr-cards.tr-cards-open td[data-tr-m="cur"]::before { content: "Current month"; }
+.tr-req-wrap.tr-cards.tr-cards-open td[data-tr-m="rate"]::before { content: "Run rate / day"; }
+.tr-req-wrap.tr-cards.tr-cards-open td[data-tr-m="exp"]::before { content: "Expected (month-end)"; }
+.tr-req-wrap.tr-cards.tr-cards-open td[data-tr-m="growth"]::before { content: "Growth"; }
+.tr-req-wrap.tr-cards.tr-cards-open td[data-tr-m="suggest"]::before { content: "Suggestion"; }
+.tr-req-wrap.tr-cards td.empty { grid-column: 1 / -1; text-align: center; padding: 20px 8px !important; }
+
+/* ===== 🕘⭐ Search recents ===== */
+.master-search { position: relative; }
+.ms-recent { position: absolute; left: 0; right: 0; top: calc(100% + 6px); z-index: 80; max-height: 60vh; overflow: auto; padding: 6px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); box-shadow: 0 14px 36px rgba(15, 23, 42, .22); }
+.ms-recent[hidden] { display: none; }
+.ms-recent-h { padding: 6px 8px 2px; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.ms-recent-row { display: flex; align-items: center; gap: 4px; }
+.ms-recent-go { flex: 1; min-width: 0; text-align: left; padding: 8px 10px; border: 0; border-radius: 10px; background: transparent; color: inherit; font: inherit; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ms-recent-go:hover, .ms-recent-go:focus-visible { background: color-mix(in srgb, var(--brand) 10%, transparent); outline: none; }
+.ms-recent-pin { border: 0; background: transparent; cursor: pointer; font-size: 18px; color: #d97706; padding: 4px 8px; }
+
+/* ===== ⌨️ Shortcuts sheet ===== */
+.ff-keys-sheet { position: fixed; inset: 0; z-index: 3000; display: grid; place-items: center; background: rgba(15, 23, 42, .5); padding: 16px; }
+.ff-keys-card { width: min(440px, 100%); max-height: 86vh; overflow: auto; border-radius: 18px; background: var(--card); color: var(--ink, inherit); border: 1px solid var(--line); box-shadow: 0 24px 60px rgba(0, 0, 0, .35); padding: 16px; display: grid; gap: 10px; }
+.ff-keys-head { display: flex; justify-content: space-between; align-items: center; font-size: 16px; }
+.ff-keys-tbl { width: 100%; border-collapse: collapse; }
+.ff-keys-tbl td { padding: 6px 4px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.ff-keys-tbl td:first-child { white-space: nowrap; width: 1%; }
+.ff-keys-tbl kbd { padding: 2px 7px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 6px; background: color-mix(in srgb, var(--muted) 10%, transparent); font: 600 12px ui-monospace, monospace; }
+.ff-keys-opt { display: flex; gap: 8px; align-items: center; font-size: 13.5px; }
+
+/* ===== 📌 Sticky headers inside scrolling report tables ===== */
+.fm-report .table-wrap { max-height: 60vh; overflow: auto; }
+.fm-report .tbl thead th { position: sticky; top: 0; z-index: 2; background: var(--card); box-shadow: 0 1px 0 var(--line); }
+.fm-rep-tbl td:first-child, .fm-rep-tbl th:first-child { position: sticky; left: 0; z-index: 1; background: var(--card); }
+.fm-rep-tbl thead th:first-child { z-index: 3; }
+.tr-req-wrap.tr-cards .tr-req-tbl, .tr-req-wrap.tr-cards .tr-req-tbl td { white-space: normal !important; }
+.tr-req-wrap.tr-cards > table td:first-child { position: static !important; box-shadow: none !important; background: transparent !important; }
+.tr-req-wrap.tr-cards td .tr-class-grid { grid-template-columns: repeat(auto-fit, minmax(54px, 1fr)); }
