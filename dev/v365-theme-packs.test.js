@@ -60,3 +60,11 @@ test('🔢 Barcode har jagah 6-3-7 — DOM safety net + CSV', () => {
   assert.match(read('ui-plus.js'), /FF\.dashBarcodes/);
   assert.match(read('util.js'), /\$1-\$2-\$3/);
 });
+
+test('🧠 AI Business Analyst — page registered everywhere', () => {
+  assert.match(read('app.js'), /id: 'aiAnalyst'/);
+  assert.match(read('lazy.js'), /aiAnalyst: \[/);
+  assert.match(read('server.js'), /key: 'aiAnalyst'/);
+  assert.match(read('home.js'), /#\/aiAnalyst/);
+  assert.match(read('aiAnalyst.js'), /FF\.pages\.aiAnalyst/);
+});

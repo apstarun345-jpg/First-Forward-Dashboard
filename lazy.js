@@ -84,6 +84,7 @@ window.FF = window.FF || {};
     dispatchPlan: [...PROFILE_DEPS, 'dispatchPlanner'],
     directAgents: ['kpiDetail', 'directAgents'],   // KPI drill lists kpiDetail me register hoti hain
     newAgents: [...PROFILE_DEPS, 'newAgents'],
+    aiAnalyst: [...INSIGHT_DEPS, 'aiAnalyst'],
     unusual: ['pdf', 'unusual-scan', 'unusual'],
     ffAgentSummary: [...SUMMARY_DEPS, 'agentSummary', 'gvTruth', 'summaryUI'],
     gvAgentSummary: [...SUMMARY_DEPS, 'gvpages', 'agentSummary', 'gvTruth', 'agentBoard', 'summaryUI'],

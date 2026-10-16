@@ -141,6 +141,7 @@ export const PAGE_PERMISSIONS = [
   { key: 'gvStockReport', label: 'GV Partner · GV Stock Report (GV REPORT-wise)', group: 'GV Partner' },
   { key: 'fastagMapping', label: 'GV Partner · FASTag Mapping (admin-only API mapping)', group: 'GV Partner' },
   { key: 'directAgents', label: 'Cross-channel · Direct Agents & TLs (FF APS + GV no-TL rule)', group: 'Cross Channel' },
+  { key: 'aiAnalyst', label: 'Management · AI Business Analyst (GV + FF review)', group: 'Management' },
   { key: 'newAgents', label: 'Cross-channel · New Agents & TL Changes (FF + GV)', group: 'Cross Channel' },
   { key: 'unusual', label: 'Cross-channel · Unusual Agent Activity (wrong VRN / replacement / chassis)', group: 'Cross Channel' },
   { key: 'ffAgentSummary', label: 'First Forward · Agent / TL Summary (share / PDF)', group: 'First Forward' },

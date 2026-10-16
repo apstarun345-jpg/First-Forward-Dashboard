@@ -6035,6 +6035,9 @@ html:not(.mobile-ui) .top-more-pop .icon-btn::after { content: attr(data-label);
 .fm-pane label { display: block; margin: 0 0 4px; }
 .fm-pane .input { width: 100%; box-sizing: border-box; }
 @media (max-width: 760px) {
+.fm-pane .grid.g-3 { grid-template-columns: 1fr; gap: 8px; }
+}
+@media (max-width: 760px) {
 html .fm-pane .grid.g-3, html.mobile-ui .fm-pane .grid.g-3 { grid-template-columns: minmax(0, 1fr) !important; }
 html .fm-tabs .fm-tab { flex: 1 1 0; min-width: 0; padding: 9px 4px; font-size: 12.5px; text-align: center; }
 }
@@ -6217,6 +6220,7 @@ tr.clickable[data-pick-agent], tr.clickable[data-pick-tl] { cursor: pointer; }
 .ff-keys-tbl kbd { padding: 2px 7px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 6px; background: color-mix(in srgb, var(--muted) 10%, transparent); font: 600 12px ui-monospace, monospace; }
 .ff-keys-opt { display: flex; gap: 8px; align-items: center; font-size: 13.5px; }
 /* ===== 📌 Sticky headers inside scrolling report tables ===== */
+.fm-report .table-wrap { max-height: 60vh; overflow: auto; }
 .fm-rep-tbl td:first-child, .fm-rep-tbl th:first-child { position: sticky; left: 0; z-index: 1; background: var(--card); }
 .tr-req-wrap.tr-cards > table td:first-child { position: static !important; box-shadow: none !important; background: transparent !important; }
 /* ---- v161 UI plus: search chips · copy buttons · offline bar · density ---- */
@@ -6376,3 +6380,5 @@ body[data-cc] .kpi:not(.ua-kpi-card), body[data-cc] .ins-metrics .ins-metric[dat
 body[data-cc] .kpi:not(.ua-kpi-card) * { text-shadow: none !important; }
 body[data-cc] .kpi:not(.ua-kpi-card) .kpi-title, body[data-cc] .kpi:not(.ua-kpi-card) .kpi-foot, body[data-cc] .kpi:not(.ua-kpi-card) .kpi-sub { color: var(--muted) !important; }
 body[data-cc] .kpi:not(.ua-kpi-card) .kpi-value, body[data-cc] .kpi:not(.ua-kpi-card) .kpi-val, body[data-cc] .kpi:not(.ua-kpi-card) .kpi-num { color: var(--cc-a) !important; }
+/* ===== v170 · AI Business Analyst ===== */
+.aa-home-btn { background: linear-gradient(135deg, #7c3aed, #2563eb) !important; color: #fff !important; border: 0 !important; font-weight: 700; }

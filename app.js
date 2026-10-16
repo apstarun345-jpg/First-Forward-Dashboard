@@ -94,6 +94,7 @@ window.FF = window.FF || {};
     // inka module (lazy GROUPS) download bhi nahi hota. Purana bookmark/WhatsApp/notification link
     // khule to RETIRED_PAGES use safe page par redirect kar deta hai.
     { id: 'home', icon: '🏠', label: 'Home', desc: 'Highlights · GV & FF charts', perm: 'home', group: 'Management' },
+    { id: 'aiAnalyst', icon: '🧠', label: 'AI Business Analyst', desc: 'GV + FF poora review · growth kiski wajah se · kaun down · ab kya karein', perm: 'aiAnalyst', group: 'Management' },
     { id: 'tagIssued', icon: '🏷️', label: 'GV & FF Tag Issued', desc: 'Date-wise detailed issuance · VC4 vs Commercial', perm: 'tagIssued', group: 'Management' },
     { id: 'targets', icon: '🎯', label: 'Agent Targets', desc: 'Shortlist · target · progress · Excel', perm: 'targets', group: 'Management' },
     { id: 'tagRequest', icon: '🏷️', label: 'Tag Request', desc: 'IDFC agents · employee + har agent ka mobile/address/pincode + class-wise qty → admin table (select · print · approve)', perm: 'tagRequest', group: 'Management' },
@@ -290,6 +291,7 @@ window.FF = window.FF || {};
     dispatchPlan: { label: 'डिस्पैच प्लानर', desc: 'ऑटो बॉक्स प्लान · प्रिंट पिक-लिस्ट · WhatsApp' },
     compare: { label: 'GV बनाम फर्स्ट फॉरवर्ड', desc: 'दोनों की तुलना' },
     settings: { label: 'सेटिंग्स' },
+    aiAnalyst: { label: 'AI बिज़नेस एनालिस्ट', desc: 'GV + FF पूरा रिव्यू · ग्रोथ किसकी वजह से · कौन डाउन' },
     newAgents: { label: 'नए एजेंट और TL बदलाव', desc: 'नए एजेंट · TL बदला / हटा — FF + GV अलग टेबल' },
     directAgents: { label: 'डायरेक्ट एजेंट और TL', desc: 'FF: TL Name APS · GV: TL ID + Name खाली — पूरी साइट पर एक ही नियम' },
     fastagChampions: { label: 'फास्टैग चैंपियंस', desc: 'टॉप एजेंट/TL — VC4, कॉमर्शियल, चेसिस, रिप्लेसमेंट, रॉन्ग VRN · FF और GV' },

@@ -27,7 +27,6 @@
 }
 .fm-pane .grid { margin-bottom: 10px; }
 @media (max-width: 760px) {
-.fm-pane .grid.g-3 { grid-template-columns: 1fr; gap: 8px; }
 .fm-tabs { gap: 0; }
 .fm-tab { padding: 9px 8px; font-size: 12.5px; }
 }
@@ -36,6 +35,5 @@
 @media (max-width: 860px) {
 .fm-rep-grid { grid-template-columns: minmax(0, 1fr); }
 }
-.fm-report .table-wrap { max-height: 60vh; overflow: auto; }
 .fm-report .tbl thead th { position: sticky; top: 0; z-index: 2; background: var(--card); box-shadow: 0 1px 0 var(--line); }
 .fm-rep-tbl thead th:first-child { z-index: 3; }
