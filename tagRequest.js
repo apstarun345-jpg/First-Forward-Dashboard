@@ -667,7 +667,7 @@ FF.pages = FF.pages || {};
     const it = labelItem(r);
     const t = it.to;
     return [
-      `📬 DELIVER TO (RECEIVER)`,
+      `DELIVER TO`,
       `TO: ${t.name || ''}`,
       `Name - ${t.name || '—'}`,
       t.mobile ? `Mobile Number - ${t.mobile} (Mob: ${t.mobile})` : '',
@@ -679,7 +679,7 @@ FF.pages = FF.pages || {};
       `🏷️ FASTags: ${it.total} tags${it.classes.length ? ` (${it.classes.map((c) => `${c.cls}×${c.qty}`).join(', ')})` : ''} · Date: ${it.date}`,
       it.courier ? `🚚 Courier: ${it.courier}` : '',
       '',
-      `📤 FROM (SENDER):`,
+      `FROM:`,
       `Name - ${f.name}`
     ].filter((x) => x !== '' && x !== undefined).join('\n');
   }
@@ -693,14 +693,14 @@ FF.pages = FF.pages || {};
     const rowsPerPage = [3, 4, 5, 6].includes(Number(o.rows)) ? Number(o.rows) : 5;
     const colorful = o.colorful !== false;
     const hOf = (n) => ((283 - (n - 1) * 2.5) / n).toFixed(1); // label height (mm)
-    const fromLine = `<div class="from"><div class="from-hdr"><span class="from-badge">📤 FROM (SENDER)</span></div><div class="from-body"><span class="lbl-k">Name - </span><b>${esc(f.name)}</b></div></div>`;
+    const fromLine = `<div class="from"><div class="from-hdr"><span class="from-badge">FROM</span></div><div class="from-body"><span class="lbl-k">Name - </span><b>${esc(f.name)}</b></div></div>`;
     const cells = list.map((it) => {
       const t = it.to || {};
       const cls = it.classes.length ? it.classes.map((c) => `${esc(c.cls)} × ${fmt(c.qty)}`).join(' · ') : '—';
       const agentLine = agentRef(it) ? `<div class="to-agent">${esc(agentRef(it))}</div>` : '';
       const courierChip = it.courier ? `<div class="to-courier">🚚 Courier: <b>${esc(it.courier)}</b></div>` : '';
       const itemNameChip = `<div class="to-item-name">📦 Item Name: <b>${esc(it.itemName || 'FASTag')}</b></div>`;
-      return `<div class="lbl"><div class="lbl-top-bar"><span class="tag">TO</span><span class="to-hdr-title">📬 DELIVER TO (RECEIVER)</span></div><div class="to"><div class="to-row"><span class="lbl-k">Name - </span><b class="to-name">${esc(t.name || '')}</b>${t.mobile ? `<div class="to-mob">☏ ${esc(t.mobile)}</div>` : ''}</div>${t.address ? `<div class="to-addr"><span class="lbl-k">Address - </span>${esc(t.address)}</div>` : ''}${t.pincode ? `<div class="to-pin"><span class="lbl-k">PIN Code - </span>PIN: ${esc(t.pincode)}</div>` : ''}${itemNameChip}${courierChip}${agentLine}</div><div class="cls">🏷️ ${cls} = <b>${fmt(it.total)} tags</b></div>${fromLine}</div>`;
+      return `<div class="lbl"><div class="lbl-top-bar"><span class="to-hdr-title">DELIVER TO</span></div><div class="to"><div class="to-row"><span class="lbl-k">Name - </span><b class="to-name">${esc(t.name || '')}</b>${t.mobile ? `<div class="to-mob">☏ ${esc(t.mobile)}</div>` : ''}</div>${t.address ? `<div class="to-addr"><span class="lbl-k">Address - </span>${esc(t.address)}</div>` : ''}${t.pincode ? `<div class="to-pin"><span class="lbl-k">PIN Code - </span>PIN: ${esc(t.pincode)}</div>` : ''}${itemNameChip}${courierChip}${agentLine}</div><div class="cls">🏷️ ${cls} = <b>${fmt(it.total)} tags</b></div>${fromLine}</div>`;
     }).join('');
     const totalTags = list.reduce((s, it) => s + num(it.total), 0);
     return `<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -806,10 +806,10 @@ body.colorful .from-hdr { color: #166534; }
         ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(px(x0), px(y0), px(lw), px(lh), px(1.8)); else ctx.rect(px(x0), px(y0), px(lw), px(lh)); ctx.stroke(); ctx.restore();
 
         const ix = x0 + 2.8, iw = lw - 5.6;
-        // Top header bar: TO DELIVER TO (RECEIVER) + #ID
+        // Top header bar: DELIVER TO
         fnt(0.68, 800);
         ctx.fillStyle = colorful ? '#ffffff' : '#111111';
-        ctx.fillText('TO · DELIVER TO (RECEIVER)', px(ix), px(y0 + 3.8));
+        ctx.fillText('DELIVER TO', px(ix), px(y0 + 3.8));
         if (!colorful) line(ix, y0 + 5.2, ix + iw, false);
 
         let y = y0 + 6.2;
@@ -821,7 +821,7 @@ body.colorful .from-hdr { color: #166534; }
           y += gapAfter || 0;
         };
 
-        // 1. TO (RECEIVER) AT THE TOP
+        // 1. Receiver (DELIVER TO) upar
         text(`Name - ${t.name || '—'}`, 1.08, 800, colorful ? '#1e3a8a' : '#111', 0.3);
         if (t.mobile) text(`Mobile Number - ${t.mobile}`, 0.92, 700, colorful ? '#15803d' : '#111', 0.2);
         if (t.address) text(`Address - ${t.address}`, 0.84, 500, '#1e293b', 0.2);
@@ -830,9 +830,9 @@ body.colorful .from-hdr { color: #166534; }
         const aref = agentRef(it);
         if (aref) text(aref, 0.74, 600, '#334155', 0.2);
 
-        // 2. BOTTOM ANCHOR: Class summary + FROM (SENDER) AT THE BOTTOM
+        // 2. BOTTOM ANCHOR: Class summary + FROM neeche
         const cls = it.classes.length ? it.classes.map((c) => `${c.cls} × ${fmt(c.qty)}`).join(' · ') : '—';
-        const fromStr1 = `FROM (SENDER): Name - ${f.name}`; // sirf naam — mobile/address label par nahi
+        const fromStr1 = `FROM: Name - ${f.name}`; // sirf naam — mobile/address label par nahi
         const fromStr2 = '';
         const meta = ''; // Req / Emp / TL line label par nahi
 

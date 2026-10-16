@@ -81,5 +81,6 @@ test('🏷️ Tag Request label — Deliver To + sender sirf naam, Req/Emp/TL me
   assert.doesNotMatch(src, /Req #\$\{/);
   assert.doesNotMatch(src, /Emp: \$\{/);
   assert.doesNotMatch(src, /<span class="lbl-id">/);
-  assert.match(src, /FROM \(SENDER\): Name - \$\{f\.name\}`/);
+  assert.match(src, /FROM: Name - \$\{f\.name\}`/);
+  assert.doesNotMatch(src, /\(RECEIVER\)|\(SENDER\)/);
 });
