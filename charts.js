@@ -13,6 +13,22 @@ window.FF = window.FF || {};
     ACTIVATED: '#10b981', HOTLISTED: '#ef4444', 'LOW BALANCE': '#f59e0b', ISSUED: '#0ea5e9',
     'With Max': '#6366f1', 'Without max': '#0ea5e9', Chassis: '#f59e0b', 'Wrong VRN': '#ef4444'
   };
+  // 🎨 Theme packs: chart colours follow the pack (`--chart-pal` in themes.css). Mutates PALETTE/COLORS in place,
+  // because other modules hold references (C.PALETTE[i]).
+  const BASE_PALETTE = PALETTE.slice(), BASE_COLORS = Object.assign({}, COLORS);
+  function syncPackPalette() {
+    let list = [];
+    try { list = getComputedStyle(document.documentElement).getPropertyValue('--chart-pal').split(',').map((x) => x.trim()).filter((x) => /^#[0-9a-f]{6}$/i.test(x)); } catch { list = []; }
+    if (list.length < 4) { PALETTE.splice(0, PALETTE.length, ...BASE_PALETTE); Object.keys(COLORS).forEach((k) => delete COLORS[k]); Object.assign(COLORS, BASE_COLORS); return false; }
+    PALETTE.splice(0, PALETTE.length, ...list.concat(BASE_PALETTE).slice(0, 13));
+    const L = (i) => list[i % list.length];
+    Object.assign(COLORS, { VC4: L(0), VC20: L(1), 'VC5+': L(2), NVC4: L(2), Commercial: L(2), ISSUANCE: L(3), REPLACEMENT: L(4), 'First Forward': L(0), 'GV Partner': L(2), current: L(0), last: L(1), ISSUED: L(2), 'With Max': L(0), 'Without max': L(2), Chassis: L(4) });
+    return true;
+  }
+  // Hard-coded default colours passed by pages (e.g. '#14b8a6') are mapped to the same slot of the active pack palette.
+  const PACK_ON = () => PALETTE[0] !== BASE_PALETTE[0] || PALETTE[1] !== BASE_PALETTE[1];
+  const tc = (c) => { if (!c || !PACK_ON()) return c; const i = BASE_PALETTE.indexOf(String(c).toLowerCase()); return i >= 0 ? PALETTE[i] : c; };
+  syncPackPalette();
   let seq = 0;
   const specs = new Map();
 
@@ -26,13 +42,13 @@ window.FF = window.FF || {};
     return step * exp;
   }
   function legend(series) {
-    return `<div class="legend">${series.map((s, i) => `<span class="legend-item"><i style="background:${s.color || color(s.name, i)}"></i>${esc(s.name)}</span>`).join('')}</div>`;
+    return `<div class="legend">${series.map((s, i) => `<span class="legend-item"><i style="background:${tc(s.color) || color(s.name, i)}"></i>${esc(s.name)}</span>`).join('')}</div>`;
   }
 
   /** Vertical (stacked) bars. opts: { labels, series:[{name, values, color}], height, format, showValues, labelEvery, tips } */
   function bars(opts) {
     const { labels } = opts;
-    const series = opts.series.map((s, i) => ({ ...s, color: s.color || color(s.name, i) }));
+    const series = opts.series.map((s, i) => ({ ...s, color: tc(s.color) || color(s.name, i) }));
     const totals = labels.map((_, i) => U.sum(series, (s) => s.values[i] || 0));
     const max = niceMax(Math.max(...totals, 0));
     const height = opts.height || 220;
@@ -65,7 +81,7 @@ window.FF = window.FF || {};
     const items = opts.items || [];
     const max = opts.max || Math.max(1, ...items.map((it) => Math.max(it.value || 0, it.compare || 0)));
     const html = `<div class="hbars">${items.map((it, i) => {
-      const c = it.color || PALETTE[i % PALETTE.length];
+      const c = tc(it.color) || PALETTE[i % PALETTE.length];
       const w = Math.max(0, ((it.value || 0) / max) * 100);
       const cw = it.compare !== undefined && it.compare !== null ? Math.max(0, (it.compare / max) * 100) : null;
       const g = cw !== null ? U.growth(it.value || 0, it.compare) : null;
@@ -90,11 +106,11 @@ window.FF = window.FF || {};
     const segs = items.map((it, i) => {
       const frac = total ? it.value / total : 0;
       const len = frac * circ;
-      const seg = `<circle r="${r}" cx="${cx}" cy="${cy}" fill="none" stroke="${it.color || color(it.label, i)}" stroke-width="14" stroke-dasharray="${len.toFixed(2)} ${(circ - len).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}" data-tip="${esc(`<b>${it.label}</b><br>${fmtVal(it.value, opts.format)} · ${U.fmtPct(frac * 100)}`)}" ${it.attr || ''}></circle>`;
+      const seg = `<circle r="${r}" cx="${cx}" cy="${cy}" fill="none" stroke="${tc(it.color) || color(it.label, i)}" stroke-width="14" stroke-dasharray="${len.toFixed(2)} ${(circ - len).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}" data-tip="${esc(`<b>${it.label}</b><br>${fmtVal(it.value, opts.format)} · ${U.fmtPct(frac * 100)}`)}" ${it.attr || ''}></circle>`;
       offset += len;
       return seg;
     }).join('');
-    const legendHtml = items.map((it, i) => `<div class="donut-leg" ${it.attr || ''}><i style="background:${it.color || color(it.label, i)}"></i><span class="donut-leg-label">${esc(it.label)}</span><b>${fmtVal(it.value, opts.format)}</b><span class="donut-leg-pct">${U.fmtPct(total ? (it.value / total) * 100 : 0)}</span></div>`).join('');
+    const legendHtml = items.map((it, i) => `<div class="donut-leg" ${it.attr || ''}><i style="background:${tc(it.color) || color(it.label, i)}"></i><span class="donut-leg-label">${esc(it.label)}</span><b>${fmtVal(it.value, opts.format)}</b><span class="donut-leg-pct">${U.fmtPct(total ? (it.value / total) * 100 : 0)}</span></div>`).join('');
     const cid = `ch${++seq}`;
     specs.set(cid, { kind: 'donut', opts: { ...opts, items, total } });
     return `<div class="chart-shot" data-cid="${cid}"><div class="donut"><div class="donut-ring" style="width:${size}px;height:${size}px"><svg viewBox="0 0 100 100" width="${size}" height="${size}" style="transform:rotate(-90deg)"><circle r="${r}" cx="${cx}" cy="${cy}" fill="none" stroke="#eef0f6" stroke-width="14"></circle>${segs}</svg>
@@ -112,7 +128,7 @@ window.FF = window.FF || {};
     const W = Math.max(280, el.clientWidth || 640);
     const H = opts.height || 240;
     const L = 46, R = 14, T = 14, B = 26;
-    const series = opts.series.map((s, i) => ({ ...s, color: s.color || color(s.name, i) }));
+    const series = opts.series.map((s, i) => ({ ...s, color: tc(s.color) || color(s.name, i) }));
     const n = opts.labels.length;
     const allVals = series.flatMap((s) => s.values.filter((v) => v !== null && v !== undefined));
     const max = niceMax(Math.max(...allVals, 0));
@@ -249,7 +265,7 @@ window.FF = window.FF || {};
     items.forEach((it, i) => {
       const frac = total ? it.value / total : 0;
       if (frac <= 0) return;
-      ctx.strokeStyle = it.color || color(it.label, i);
+      ctx.strokeStyle = tc(it.color) || color(it.label, i);
       ctx.beginPath(); ctx.arc(cx, cy, r, angle, angle + frac * Math.PI * 2); ctx.stroke();
       angle += frac * Math.PI * 2;
     });
@@ -260,7 +276,7 @@ window.FF = window.FF || {};
     let ly = Math.max(24, cy - items.length * 11);
     ctx.textAlign = 'left';
     items.forEach((it, i) => {
-      ctx.fillStyle = it.color || color(it.label, i); ctx.fillRect(230, ly - 9, 10, 10);
+      ctx.fillStyle = tc(it.color) || color(it.label, i); ctx.fillRect(230, ly - 9, 10, 10);
       ctx.fillStyle = PNG_INK; ctx.font = '12px Inter, sans-serif';
       ctx.fillText(truncText(ctx, it.label, W - 380), 246, ly);
       ctx.font = '700 12px Inter, sans-serif';
@@ -288,7 +304,7 @@ window.FF = window.FF || {};
         ctx.fillStyle = '#cbd5e1';
         ctx.fillRect(trackX, y + rowH / 2 - 5, trackW * Math.max(0, it.compare / max), 10);
       }
-      ctx.fillStyle = it.color || PALETTE[i % PALETTE.length];
+      ctx.fillStyle = tc(it.color) || PALETTE[i % PALETTE.length];
       ctx.fillRect(trackX, y + rowH / 2 - 5, trackW * Math.max(0, (it.value || 0) / max), 10);
       ctx.font = '700 12px Inter, sans-serif'; ctx.textAlign = 'right'; ctx.fillStyle = PNG_INK;
       ctx.fillText(fmtVal(it.value || 0, opts.format), W - 12, y + rowH / 2 + 4);
@@ -318,5 +334,5 @@ window.FF = window.FF || {};
     else U.downloadBlob(name, new Blob([c.toDataURL('image/png')], { type: 'image/png' }));
   }
 
-  FF.charts = { PALETTE, COLORS, color, bars, hbars, donut, lines, mount, legend, spark, download };
+  FF.charts = { PALETTE, COLORS, syncPackPalette, color, bars, hbars, donut, lines, mount, legend, spark, download };
 })(window.FF);

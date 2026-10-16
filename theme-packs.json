@@ -1,0 +1,134 @@
+{
+ "navy": {
+  "name": "Navy & White",
+  "icon": "🧭",
+  "mode": "light",
+  "desc": "Clean white workspace with deep navy accents",
+  "swatch": [
+   "#1e3a8a",
+   "#2563eb",
+   "#08183a",
+   "#f3f6fc"
+  ]
+ },
+ "ocean": {
+  "name": "Ocean",
+  "icon": "🌊",
+  "mode": "light",
+  "desc": "Fresh teal and aqua tones",
+  "swatch": [
+   "#0e7490",
+   "#06b6d4",
+   "#06323d",
+   "#effafb"
+  ]
+ },
+ "forest": {
+  "name": "Forest",
+  "icon": "🌿",
+  "mode": "light",
+  "desc": "Calm natural greens",
+  "swatch": [
+   "#166534",
+   "#16a34a",
+   "#0c2a17",
+   "#f2f9f3"
+  ]
+ },
+ "sunset": {
+  "name": "Sunset",
+  "icon": "🌅",
+  "mode": "light",
+  "desc": "Warm orange and rose",
+  "swatch": [
+   "#c2410c",
+   "#f43f5e",
+   "#3a1408",
+   "#fff7f2"
+  ]
+ },
+ "royal": {
+  "name": "Royal Purple",
+  "icon": "👑",
+  "mode": "light",
+  "desc": "Rich violet and magenta",
+  "swatch": [
+   "#6d28d9",
+   "#c026d3",
+   "#1d0f3d",
+   "#f6f3fd"
+  ]
+ },
+ "gold": {
+  "name": "Gold Corporate",
+  "icon": "🥇",
+  "mode": "light",
+  "desc": "Warm executive reporting",
+  "swatch": [
+   "#b45309",
+   "#d97706",
+   "#2a1c07",
+   "#f8f5ee"
+  ]
+ },
+ "mono": {
+  "name": "Mono",
+  "icon": "🖤",
+  "mode": "light",
+  "desc": "Minimal, print-friendly greys",
+  "swatch": [
+   "#334155",
+   "#64748b",
+   "#0f172a",
+   "#f4f5f7"
+  ]
+ },
+ "glass": {
+  "name": "Glass",
+  "icon": "🧊",
+  "mode": "light",
+  "desc": "Soft frosted indigo and sky",
+  "swatch": [
+   "#4f46e5",
+   "#06b6d4",
+   "#1b1a4e",
+   "#eef1f9"
+  ]
+ },
+ "midnight": {
+  "name": "Midnight Navy",
+  "icon": "🌌",
+  "mode": "dark",
+  "desc": "Dark navy for night work",
+  "swatch": [
+   "#38bdf8",
+   "#818cf8",
+   "#050c19",
+   "#07101f"
+  ]
+ },
+ "neon": {
+  "name": "Neon",
+  "icon": "🌃",
+  "mode": "dark",
+  "desc": "Dark, high-energy TV mode",
+  "swatch": [
+   "#00e5ff",
+   "#ff2bd6",
+   "#07070f",
+   "#0a0a12"
+  ]
+ },
+ "diwali": {
+  "name": "Diwali Festive",
+  "icon": "🪔",
+  "mode": "dark",
+  "desc": "Warm festive lights",
+  "swatch": [
+   "#ff8c00",
+   "#ffd000",
+   "#100803",
+   "#180d05"
+  ]
+ }
+}

@@ -276,7 +276,7 @@ test('theme packs — applyThemePack CSS vars set karta hai + invalid naam defau
   styleProps.clear();
   const applied = WZ.applyThemePack('diwali');
   assert.equal(applied, 'diwali');
-  assert.ok(styleProps.get('--brand'), 'brand var set nahi hua');
+  assert.equal(globalThis.document.documentElement.dataset.theme, 'dark', 'dark pack apna mode force karta hai');
   assert.equal(globalThis.document.documentElement.dataset.themePack, 'diwali');
   assert.equal(WZ.currentPack(), 'diwali');
   const fallback = WZ.applyThemePack('kuch-bhi-nahi');

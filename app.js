@@ -395,7 +395,8 @@ window.FF = window.FF || {};
   }
   function applyThemeMode() {
     const mode = themeMode();
-    document.documentElement.dataset.theme = resolvedTheme();
+    const packMode = document.documentElement.dataset.themePack && window.FF_PACK_MODES && window.FF_PACK_MODES[document.documentElement.dataset.themePack];
+    document.documentElement.dataset.theme = packMode || resolvedTheme();
     const b = U.$('#theme-toggle');
     if (b) {
       b.textContent = mode === 'dark' ? '☀️' : mode === 'auto' ? '🌓' : '🌙';
@@ -406,6 +407,12 @@ window.FF = window.FF || {};
     }
   }
   function toggleThemeMode() {
+    // A theme pack fixes its own light/dark look — the toolbar toggle first returns to the default theme.
+    if (document.documentElement.dataset.themePack && FF.wowzone && FF.wowzone.applyThemePack) {
+      FF.wowzone.applyThemePack('default');
+      U.toast('Theme pack off — default theme. Tap again for dark / auto.', 'info');
+      return;
+    }
     const next = ({ light: 'dark', dark: 'auto', auto: 'light' })[themeMode()] || 'dark';
     try {
       localStorage.setItem('ff_theme_explicit', next);

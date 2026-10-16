@@ -64,4 +64,26 @@
   } catch {
     document.documentElement.dataset.theme = 'light';
   }
+  // 🎨 Theme pack + saved branding — PAINT SE PEHLE (login screen aur login ke baad ka flash khatam).
+  // Pehle pack wowzone.js se aata tha jo login ke BAAD load hota tha, aur branding rang server settings
+  // se login ke baad — isliye pehle default theme dikhta tha, phir badalta tha. Ab dono device par
+  // yaad rehte hain aur head me hi lag jaate hain; themes.css pack ke saare rang CSS se deta hai.
+  const PACK_MODES = { navy: 'light', ocean: 'light', forest: 'light', sunset: 'light', royal: 'light', gold: 'light', mono: 'light', glass: 'light', midnight: 'dark', neon: 'dark', diwali: 'dark' };
+  window.FF_PACK_MODES = PACK_MODES;
+  try {
+    const root = document.documentElement;
+    const pack = localStorage.getItem('ff_theme_pack') || 'default';
+    if (PACK_MODES[pack]) {
+      root.dataset.themePack = pack;
+      root.dataset.theme = PACK_MODES[pack];
+    } else {
+      root.dataset.themePack = '';
+      const b = JSON.parse(localStorage.getItem('ff_brand_cache') || 'null');
+      if (b && typeof b === 'object') {
+        const set = (k, v) => { if (v && /^#[0-9a-f]{3,8}$/i.test(String(v))) root.style.setProperty(k, v); };
+        set('--side-bg', b.sidebarBg); set('--side-bg2', b.sidebarBg2); set('--side-ink', b.sidebarText);
+        set('--brand', b.accent); set('--brand-2', b.accent2); set('--gv', b.gvAccent);
+      }
+    }
+  } catch { /* storage blocked — default look */ }
 })();

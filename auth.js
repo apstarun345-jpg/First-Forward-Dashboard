@@ -89,11 +89,16 @@ window.FF = window.FF || {};
   function applyTheme() {
     const t = FF.config.theme || {};
     const r = document.documentElement.style;
-    if (t.sidebarBg) r.setProperty('--side-bg', t.sidebarBg);
-    if (t.sidebarBg2) r.setProperty('--side-bg2', t.sidebarBg2);
-    if (t.sidebarText) r.setProperty('--side-ink', t.sidebarText);
-    if (t.accent) r.setProperty('--brand', t.accent);
-    if (t.accent2) r.setProperty('--brand-2', t.accent2);
+    // Remember branding on this device so the NEXT page load (and the login screen) paints it immediately (ui-boot.js).
+    try { localStorage.setItem('ff_brand_cache', JSON.stringify({ sidebarBg: t.sidebarBg, sidebarBg2: t.sidebarBg2, sidebarText: t.sidebarText, accent: t.accent, accent2: t.accent2, gvAccent: t.gvAccent })); } catch { /* private mode */ }
+    // A chosen theme pack owns the colours — inline branding vars would override the pack's CSS.
+    if (!document.documentElement.dataset.themePack) {
+      if (t.sidebarBg) r.setProperty('--side-bg', t.sidebarBg);
+      if (t.sidebarBg2) r.setProperty('--side-bg2', t.sidebarBg2);
+      if (t.sidebarText) r.setProperty('--side-ink', t.sidebarText);
+      if (t.accent) r.setProperty('--brand', t.accent);
+      if (t.accent2) r.setProperty('--brand-2', t.accent2);
+    }
     if (t.gvAccent) r.setProperty('--gv', t.gvAccent);
     document.title = FF.config.appName;
     const brand = U.$('#brand-name'); if (brand) brand.textContent = FF.config.brand;

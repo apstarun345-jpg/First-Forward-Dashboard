@@ -17,8 +17,6 @@
 .gs-hero-line { margin: 4px 0 0; display: flex; gap: 14px; flex-wrap: wrap; font-size: 12.5px; opacity: .96; }
 .gs-hero-act { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; z-index: 1; }
 .gs-src { font-size: 10.5px; font-weight: 800; letter-spacing: .02em; padding: 2px 8px; border-radius: 999px; background: rgba(255,255,255,.24); text-transform: uppercase; }
-.gs-source .gs-src.stock { background: #e0f2fe; color: #075985; }
-.gs-source .gs-src.sheet { background: #fef3c7; color: #92400e; }
 .gs-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(215px, 1fr)); gap: 12px; }
 .gs-kpi-top { display: flex; justify-content: space-between; gap: 8px; align-items: center; z-index: 1; }
 .gs-kpi-label { font-size: 11.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; opacity: .97; }
