@@ -927,7 +927,8 @@ window.FF = window.FF || {};
       const HI_TITLES = { Home: 'होम', Dashboard: 'डैशबोर्ड', Trend: 'ट्रेंड', Performance: 'परफ़ॉर्मेंस', Stock: 'स्टॉक', 'Stock Report': 'स्टॉक रिपोर्ट', Targets: 'टार्गेट', Settings: 'सेटिंग्स', 'GV vs First Forward': 'GV बनाम फर्स्ट फॉरवर्ड', Compare: 'तुलना' };
       title = HI_TITLES[title] || title;
     }
-    U.$('#top-title').textContent = title;
+    try { const grp = def && def.group; if (grp === 'Cross Channel') document.body.dataset.cc = '1'; else delete document.body.dataset.cc; } catch {}
+    const _tt = U.$('#top-title'); if (_tt) _tt.textContent = title;
     document.title = `${title} · ${FF.config.appName}`;
   }
 

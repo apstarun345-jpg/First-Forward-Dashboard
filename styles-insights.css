@@ -107,3 +107,5 @@
 .ins-detail-dialog .ins-table, .ins-detail-dialog .data-table { width: 100%; border-collapse: separate; border-spacing: 0; background: #fff !important; }
 .ins-detail-dialog .detail-more { text-align: center; padding: 0 18px 14px; }
 .ms-hero .ms-hero-ico { font-size: 2.2rem; background: rgba(255, 255, 255, .2); border-radius: 14px; padding: 8px 12px; }
+body[data-cc] .ins-metric.has-detail::after { display: none; }
+body[data-cc] .ms-hero { border-radius: 14px; }

@@ -31,9 +31,6 @@
 .fm-tabs { gap: 0; }
 .fm-tab { padding: 9px 8px; font-size: 12.5px; }
 }
-@media (max-width: 760px) {
-html .fm-pane .grid.g-3, html.mobile-ui .fm-pane .grid.g-3 { grid-template-columns: minmax(0, 1fr) !important; }
-}
 .fm-report { margin-top: 14px; }
 .fm-rep-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr); gap: 14px; align-items: start; }
 @media (max-width: 860px) {

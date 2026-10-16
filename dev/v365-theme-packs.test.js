@@ -46,3 +46,12 @@ test('🔁 Dual channel — FF TL ApnaPayment => ghost, review flag nahi', () =>
   assert.match(src, /isGvChannelTl\(ffTl\)/);
   assert.match(src, /const isGvChannelTl/);
 });
+
+test('⚡ Cross Channel — heavy detail tables lazy, redesign hook, TL ghost on Master Stock', () => {
+  assert.match(read('compare.js'), /buildKpiDetails/);
+  assert.match(read('insights.js'), /buildMsSets/);
+  assert.match(read('insights.js'), /isGvChannelTl\(f\.tlName\)/);
+  assert.match(read('app.js'), /dataset\.cc = '1'/);
+  assert.match(read('newAgents.js'), /collectCache/);
+  assert.match(read('dev/styles-full.css'), /body\[data-cc\] \.ins-metrics/);
+});

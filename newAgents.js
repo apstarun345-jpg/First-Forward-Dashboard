@@ -111,7 +111,16 @@ FF.pages = FF.pages || {};
   }
 
   /** Dono channels ka analysis (data load ke baad). */
+  const collectCache = new Map(); const COLLECT_TTL = 90 * 1000;
   async function collect(months) {
+    const hit = collectCache.get(months);
+    if (hit && Date.now() - hit.ts < COLLECT_TTL) return hit.out;
+    const out = await collectRaw(months);
+    collectCache.set(months, { ts: Date.now(), out });
+    return out;
+  }
+  collect.clear = () => collectCache.clear();
+  async function collectRaw(months) {
     const out = { ff: null, gv: null, errors: [] };
     try {
       if (FF.store && FF.store.need) {
@@ -132,11 +141,14 @@ FF.pages = FF.pages || {};
   }
 
   const personOf = (r) => ({ kind: `${r.ch}-agent`, name: r.name, sub: r.id, tlSet: new Set(), classMap: new Map(), bars: new Set() });
+  const enrichCache = new WeakMap();
   function enrich(r) {
+    const c = enrichCache.get(r); if (c && Date.now() - c.ts < COLLECT_TTL) return c.v;
     const MP = FF.masterProfile;
     let q = null;
     try { q = MP && MP.quick ? MP.quick(personOf(r)) : null; } catch { q = null; }
-    return { ...r, q };
+    const v = { ...r, q }; enrichCache.set(r, { ts: Date.now(), v });
+    return v;
   }
 
   // ------------------------------------------------------------------ render
@@ -229,7 +241,7 @@ FF.pages = FF.pages || {};
     const form = U.$('#na-search', root);
     if (form) form.addEventListener('submit', (e) => { e.preventDefault(); FF.app.updateParams({ q: new FormData(form).get('q') || '' }); });
     const rf = U.$('#na-refresh', root);
-    if (rf) rf.addEventListener('click', () => { if (FF.app.refresh) FF.app.refresh(); else render(root, params); });
+    if (rf) rf.addEventListener('click', () => { collect.clear(); if (FF.app.refresh) FF.app.refresh(); else render(root, params); });
     const dl = (name, [head, rows]) => U.downloadCsv(`${name}-${U.stamp()}.csv`, head, rows);
     const c1 = U.$('#na-csv-new', root), c2 = U.$('#na-csv-ev', root);
     if (c1) c1.addEventListener('click', () => dl('new-agents', csvNew(newRows)));

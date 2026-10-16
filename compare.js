@@ -191,6 +191,8 @@ FF.pages = FF.pages || {};
 
     const topFF = U.topEntries(U.groupSum(ffAgents.filter((a) => a.ym === cur), (a) => a.name, (a) => a.n), 8);
     const topGV = (() => { if (masterR.status !== 'fulfilled' || !cur) return []; return G.agentRollup(cur).slice(0, 8).map((a) => [a.agentName, a.total]); })();
+    // Click-detail tables sirf click par banti hain (pehle har render par poori history compute hoti thi → 2s lag).
+    const buildKpiDetails = () => {
     const allFF = U.topEntries(U.groupSum(ffAgents.filter((a) => a.ym === cur && a.n > 0), (a) => a.name, (a) => a.n), 100000);
     const allGV = (() => { if (masterR.status !== 'fulfilled' || !cur) return []; return G.agentRollup(cur).filter((a) => a.total > 0).map((a) => [a.agentName, a.total]); })();
 
@@ -236,6 +238,11 @@ FF.pages = FF.pages || {};
       [LBL.repl]: { title: 'Month-wise replacements · FF vs GV', headers: VS_HEADERS, rows: monthRows('replacement') },
       [LBL.high]: { title: `${highRows.length} high-priority GV agents`, headers: ['Agent', 'Agent ID', 'TL', 'Priority', 'Status', 'Stock'], rows: highRows }
     };
+
+      return kpiDetails;
+    };
+    let _kd = null;
+    const kpiDetails = new Proxy({}, { get: (_, k) => (_kd = _kd || buildKpiDetails())[k] });
 
     body.innerHTML = `
       ${FF.insights.ui.vividMetrics(kpiDefs)}

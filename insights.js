@@ -1537,8 +1537,8 @@ FF.pages = FF.pages || {};
       ${vividMetrics([
         { label: 'Dual (verified) agents', value: U.fmt(rows.length), foot: `${U.fmt(rows.filter((r) => r.methods.length > 1).length)} verified by both signals`, tone: 'g6', icon: '🔗' },
         { label: 'Double-mapped barcodes', value: U.fmt(doubleRows.length), foot: `${U.fmt(doubleAgents)} agents involved · ${U.fmt(matchedRows.length)} clean · ${U.fmt(ghostRows.length)} ghost-holder ignore (Apna Payment / not-assigned)`, tone: doubleRows.length ? 'g7' : 'g9', icon: '🚨' },
-        { label: 'FF tags · matched agents', value: U.fmt(ffIssue), foot: `${U.fmt(ffStock)} tags stock me (First Forward)`, tone: 'g1', icon: '🟦' },
-        { label: 'GV tags · matched agents', value: U.fmt(gvIssue), foot: `${U.fmt(gvStock)} tags stock me (GV Partner)`, tone: 'g5', icon: '🟩' },
+        { label: 'FF issuance · dual agents', value: U.fmt(ffIssue), foot: `${U.fmt(ffStock)} tags abhi stock me (First Forward)`, tone: 'g1', icon: '🟦' },
+        { label: 'GV issuance · dual agents', value: U.fmt(gvIssue), foot: `${U.fmt(gvStock)} tags abhi stock me (GV Partner)`, tone: 'g5', icon: '🟩' },
         { label: 'Combined footprint', value: U.fmt(ffIssue + gvIssue), foot: `${U.fmt(ffStock + gvStock)} stock · gap GV − FF ${netIssuance > 0 ? '+' : ''}${U.fmt(netIssuance)}`, tone: 'g3', icon: '📊' },
         { label: 'Shared / matched barcodes', value: U.fmt(barcodeRows.length), foot: `Repeated rows: ${U.fmt(duplicateBarcodeRows.length)} · today (allocation date): ${U.fmt(dailyDuplicateRows.length)}`, tone: 'g4', icon: '🧾' }
       ])}
@@ -1584,8 +1584,8 @@ FF.pages = FF.pages || {};
     bindMetricDetails(root, 'Dual-channel agent summary', fullCrossHeaders, agentExportRows, {
       'Dual (verified) agents': { title: 'Verified FF ↔ GV agent pairs', headers: fullCrossHeaders, rows: agentExportRows },
       'Double-mapped barcodes': { title: `${U.fmt(doubleRows.length)} double-mapped barcode rows`, headers: barcodeReviewHeaders, rows: doubleCsvRows, stats: [`${U.fmt(ghostRows.length)} ghost-holder matches ignore hue (FF Apna Payment / GV not-assigned)`, 'Sirf asli agent ↔ asli agent conflicts double maane gaye'] },
-      'FF tags · matched agents': { title: 'First Forward tags of matched agents', headers: fullCrossHeaders, rows: agentExportRows },
-      'GV tags · matched agents': { title: 'GV Partner tags of matched agents', headers: fullCrossHeaders, rows: agentExportRows },
+      'FF issuance · dual agents': { title: 'First Forward tags of matched agents', headers: fullCrossHeaders, rows: agentExportRows },
+      'GV issuance · dual agents': { title: 'GV Partner tags of matched agents', headers: fullCrossHeaders, rows: agentExportRows },
       'Combined footprint': { title: 'Combined channel footprint by matched agent', headers: fullCrossHeaders, rows: agentExportRows },
       'Shared / matched barcodes': { title: 'Every shared barcode with mapping flags', headers: barcodeReviewHeaders, rows: allBarcodeRows },
       'Matched FF issuance': { title: 'First Forward side of matched agents', headers: fullCrossHeaders, rows: agentExportRows },
@@ -1887,9 +1887,6 @@ FF.pages = FF.pages || {};
     const gvOnlyHolders = {};
     idx.gvOnly.forEach((r) => { const k = r.agentName || r.agentId || '?'; gvOnlyHolders[k] = (gvOnlyHolders[k] || 0) + 1; });
     const gvOnlyTop = Object.entries(gvOnlyHolders).sort((a, b) => b[1] - a[1]).slice(0, 8);
-    const gvOnlyCsv = idx.gvOnly.map((r) => [r.barcode, r.gvName || '', r.gvId || '', r.agentName || r.agentId || '', r.tlName || '', r.cls || '', dateText(r.allocatedAt)]);
-    const ffOnlyCsv = idx.ffOnly.map((r) => [r.barcode, r.agentName || r.agentId || '', r.tlName || '', r.cls || '', dateText(r.agentAllocatedAt || r.bcAllocatedAt)]);
-    const mismatchCsv = idx.mismatch.map((r) => [r.barcode, r.ff, r.gv, r.cls]);
     const inCls = (c) => clsFilter === 'all' || c === clsFilter;
 
     const holderRows = (kind) => [...idx.people.values()].filter((p) => p.kind === kind && p.bars.size).sort((a, b) => b.bars.size - a.bars.size);
@@ -1929,7 +1926,7 @@ FF.pages = FF.pages || {};
         <div class="card-head"><h3>🔍 Search: “${esc(q)}”</h3><span class="dim small">${tagHits.length} tag · ${peopleHits.length} person matches</span></div>
         ${tagHits.length ? `<div class="table-wrap"><table><thead><tr><th>Barcode</th><th>FF agent</th><th>FF TL</th><th>GV agent</th><th>GV TL</th><th>GV unique</th><th>Class</th><th>Status</th></tr></thead><tbody>${tagHits.map((t) => {
           const f = t.ff[0], g = t.gv[0];
-          const status = f && g ? (normName(f.agentName || f.agentId) === normName(g.agentName || g.agentId) ? statusPill('Matched', 'green') : isGvMasterFfHolder(f.agentName, '') ? statusPill('GV flow · Apna Payment', 'blue') : statusPill('Owner alag', 'amber')) : g ? statusPill('GV-only · StockDataa missing', 'red') : statusPill('FF-only', 'amber');
+          const status = f && g ? (normName(f.agentName || f.agentId) === normName(g.agentName || g.agentId) ? statusPill('Matched', 'green') : (isGvMasterFfHolder(f.agentName, '') || isGvChannelTl(f.tlName)) ? statusPill('GV flow · Apna Payment', 'blue') : statusPill('Owner alag', 'amber')) : g ? statusPill('GV-only · StockDataa missing', 'red') : statusPill('FF-only', 'amber');
           return `<tr><td><b>${esc(t.key)}</b></td><td>${esc(f ? `${f.agentName || f.agentId}` : '—')}</td><td>${esc(f && f.tlName || '—')}</td><td>${esc(g ? `${g.agentName || g.agentId}` : '—')}</td><td>${esc(g && g.tlName || '—')}</td><td>${esc(g ? `${g.gvName || ''} ${g.gvId ? `(${g.gvId})` : ''}` : '—')}</td><td>${esc((f && f.cls) || (g && g.cls) || '—')}</td><td>${status}</td></tr>`;
         }).join('')}</tbody></table></div>` : ''}
         ${peopleHits.length ? `<div class="table-wrap" style="margin-top:12px"><table><thead><tr><th>Person</th><th>Role</th><th>Unique barcodes${clsFilter !== 'all' ? ` (${clsFilter})` : ''}</th><th>Class split</th><th>TL(s)</th><th>Last allocation</th></tr></thead><tbody>${peopleHits.filter((p) => clsFilter === 'all' || p.classes.has(clsFilter)).map((p) => {
@@ -1963,25 +1960,33 @@ FF.pages = FF.pages || {};
         </div>
       </section>`;
 
-    const ffSummaryCsv = [...idx.ffSet].map((k) => { const f = idx.byKey.get(k).ff[0]; return [k, f.agentName || f.agentId || '', f.tlName || '', f.cls || '', idx.gvSet.has(k) ? 'Both' : 'FF only']; });
-    const gvSummaryCsv = [...idx.gvSet].map((k) => { const g = idx.byKey.get(k).gv[0]; return [k, g.gvName || '', g.gvId || '', g.agentName || g.agentId || '', g.tlName || '', g.cls || '', idx.ffSet.has(k) ? 'Both' : 'GV only']; });
-    const bothCsv = [...idx.bothSet].map((k) => { const e = idx.byKey.get(k); const f = e.ff[0], g = e.gv[0]; const same = normName(f.agentName || f.agentId) === normName(g.agentName || g.agentId); return [k, f.agentName || f.agentId || '', g.agentName || g.agentId || '', f.cls || g.cls || '', same ? 'Same holder' : 'Holder alag']; });
-    const personCsv = peopleHits.map((p) => [p.name, { 'ff-agent': 'FF Agent', 'gv-agent': 'GV Agent', 'ff-tl': 'FF TL', 'gv-tl': 'GV TL', 'gv-id': 'GV Unique ID' }[p.kind] || p.kind, p.bars.size, [...p.classes.entries()].map(([c, n]) => `${c}: ${n}`).join(' · '), [...p.tlNames].join(', '), p.last || '']);
-    bindMetricDetails(root, 'Master stock reconciliation', [], [], {
-      'StockDataa unique barcodes': { title: 'FF StockDataa me unique barcodes', headers: ['Barcode', 'FF agent', 'FF TL', 'Class', 'Source'], rows: ffSummaryCsv, stats: [`${U.fmt(idx.stock.length)} FF rows`, `${U.fmt(idx.bothSet.size)} Tag Assignment se match`, `${U.fmt(idx.ffOnly.length)} sirf FF me`] },
-      'Tag Assignment unique serials': { title: 'Tag Assignment me unique serials', headers: ['Serial', 'GV unique', 'GV ID', 'GV agent', 'GV TL', 'Class', 'Source'], rows: gvSummaryCsv, stats: [`${U.fmt(idx.assignment.length)} GV rows`, `${U.fmt(idx.bothSet.size)} StockDataa me bhi hai`, `${U.fmt(idx.gvOnly.length)} StockDataa me missing`] },
-      'Matched in both': { title: `${U.fmt(idx.bothSet.size)} barcodes dono source me`, headers: ['Barcode', 'FF holder', 'GV holder', 'Class', 'Status'], rows: bothCsv, stats: [`${U.fmt(idx.mismatch.length)} me holder alag hai`, `${U.fmt(idx.bothSet.size - idx.mismatch.length)} me holder same`] },
-      'Tag Assignment NOT in StockDataa': { title: `${U.fmt(idx.gvOnly.length)} GV-only barcodes`, headers: ['Barcode', 'GV unique', 'GV ID', 'GV agent', 'GV TL', 'Class', 'Allocated'], rows: gvOnlyCsv },
-      'StockDataa only': { title: `${U.fmt(idx.ffOnly.length)} FF-only barcodes`, headers: ['Barcode', 'FF agent', 'FF TL', 'Class', 'Allocated'], rows: ffOnlyCsv },
-      'Owner mismatch (both)': { title: `${U.fmt(idx.mismatch.length)} holder mismatch`, headers: ['Barcode', 'FF holder', 'GV holder', 'Class'], rows: mismatchCsv, stats: ['Ghost holders (Apna Payment / not-assigned) mismatch me count nahi hote'] },
-      'Top GV-only holder': { title: 'GV-only tags ke top holders', headers: ['Holder', 'GV-only tags'], rows: gvOnlyTop.map(([label, value]) => [label, value]) },
-      'Aged stock · 60+ din': { title: `${U.fmt(idx.aged60.length)} tags 60+ din se parked`, headers: ['Barcode', 'Agent', 'TL', 'Class', 'Allocated', 'Age (din)'], rows: idx.aged60.map((r) => [r.barcode, r.agent, r.tl, r.cls, r.allocated, r.age]), stats: ['Allocation date StockDataa ke agent/bc allocated columns se', 'Inka dispatch ya return review karo'] },
-      'FF agents holding stock': { title: 'FF agent-wise stock (StockDataa)', headers: ['Agent', 'TL', 'Tags', 'Class split', 'Last allocation'], rows: holderTable('ff-agent'), stats: [`${U.fmt(holderRows('ff-agent').length)} agents`, `${U.fmt(U.sum(holderRows('ff-agent'), (p) => p.bars.size))} tags`] },
-      'GV agents holding stock': { title: 'GV agent-wise stock (Tag Assignment)', headers: ['Agent', 'TL', 'Tags', 'Class split', 'Last allocation'], rows: holderTable('gv-agent'), stats: [`${U.fmt(holderRows('gv-agent').length)} agents`, `${U.fmt(U.sum(holderRows('gv-agent'), (p) => p.bars.size))} tags`] },
-      'Match rate': { title: 'Tag Assignment barcodes jo StockDataa me bhi hain', headers: ['Barcode', 'FF holder', 'GV holder', 'Class', 'Status'], rows: bothCsv, stats: [`${U.fmt(idx.bothSet.size)} matched`, `${U.fmt(idx.gvOnly.length)} GV-only`] },
-      'Avg FF stock age': { title: 'Sabse purana FF stock', headers: ['Barcode', 'Agent', 'TL', 'Class', 'Allocated', 'Age (din)'], rows: [...idx.aged60, ...idx.aged30].map((r) => [r.barcode, r.agent, r.tl, r.cls, r.allocated, r.age]), stats: [`Average ${U.fmt(avgAge)} din`, '30+ din purane tags'] },
-      'Aged stock · 30–60 din': { title: `${U.fmt(idx.aged30.length)} tags 30–60 din se parked`, headers: ['Barcode', 'Agent', 'TL', 'Class', 'Allocated', 'Age (din)'], rows: idx.aged30.map((r) => [r.barcode, r.agent, r.tl, r.cls, r.allocated, r.age]) },
-    });
+    // Detail tables (lakhon rows) sirf card click par bante hain — pehle har filter/select par sab compute hota tha (~1s lag).
+    const buildMsSets = () => {
+      const gvOnlyCsv = idx.gvOnly.map((r) => [r.barcode, r.gvName || '', r.gvId || '', r.agentName || r.agentId || '', r.tlName || '', r.cls || '', dateText(r.allocatedAt)]);
+      const ffOnlyCsv = idx.ffOnly.map((r) => [r.barcode, r.agentName || r.agentId || '', r.tlName || '', r.cls || '', dateText(r.agentAllocatedAt || r.bcAllocatedAt)]);
+      const mismatchCsv = idx.mismatch.map((r) => [r.barcode, r.ff, r.gv, r.cls]);
+      const ffSummaryCsv = [...idx.ffSet].map((k) => { const f = idx.byKey.get(k).ff[0]; return [k, f.agentName || f.agentId || '', f.tlName || '', f.cls || '', idx.gvSet.has(k) ? 'Both' : 'FF only']; });
+      const gvSummaryCsv = [...idx.gvSet].map((k) => { const g = idx.byKey.get(k).gv[0]; return [k, g.gvName || '', g.gvId || '', g.agentName || g.agentId || '', g.tlName || '', g.cls || '', idx.ffSet.has(k) ? 'Both' : 'GV only']; });
+      const bothCsv = [...idx.bothSet].map((k) => { const e = idx.byKey.get(k); const f = e.ff[0], g = e.gv[0]; const same = normName(f.agentName || f.agentId) === normName(g.agentName || g.agentId); return [k, f.agentName || f.agentId || '', g.agentName || g.agentId || '', f.cls || g.cls || '', same ? 'Same holder' : 'Holder alag']; });
+      const personCsv = peopleHits.map((p) => [p.name, { 'ff-agent': 'FF Agent', 'gv-agent': 'GV Agent', 'ff-tl': 'FF TL', 'gv-tl': 'GV TL', 'gv-id': 'GV Unique ID' }[p.kind] || p.kind, p.bars.size, [...p.classes.entries()].map(([c, n]) => `${c}: ${n}`).join(' · '), [...p.tlNames].join(', '), p.last || '']);
+      return {
+        'StockDataa unique barcodes': { title: 'FF StockDataa me unique barcodes', headers: ['Barcode', 'FF agent', 'FF TL', 'Class', 'Source'], rows: ffSummaryCsv, stats: [`${U.fmt(idx.stock.length)} FF rows`, `${U.fmt(idx.bothSet.size)} Tag Assignment se match`, `${U.fmt(idx.ffOnly.length)} sirf FF me`] },
+        'Tag Assignment unique serials': { title: 'Tag Assignment me unique serials', headers: ['Serial', 'GV unique', 'GV ID', 'GV agent', 'GV TL', 'Class', 'Source'], rows: gvSummaryCsv, stats: [`${U.fmt(idx.assignment.length)} GV rows`, `${U.fmt(idx.bothSet.size)} StockDataa me bhi hai`, `${U.fmt(idx.gvOnly.length)} StockDataa me missing`] },
+        'Matched in both': { title: `${U.fmt(idx.bothSet.size)} barcodes dono source me`, headers: ['Barcode', 'FF holder', 'GV holder', 'Class', 'Status'], rows: bothCsv, stats: [`${U.fmt(idx.mismatch.length)} me holder alag hai`, `${U.fmt(idx.bothSet.size - idx.mismatch.length)} me holder same`] },
+        'Tag Assignment NOT in StockDataa': { title: `${U.fmt(idx.gvOnly.length)} GV-only barcodes`, headers: ['Barcode', 'GV unique', 'GV ID', 'GV agent', 'GV TL', 'Class', 'Allocated'], rows: gvOnlyCsv },
+        'StockDataa only': { title: `${U.fmt(idx.ffOnly.length)} FF-only barcodes`, headers: ['Barcode', 'FF agent', 'FF TL', 'Class', 'Allocated'], rows: ffOnlyCsv },
+        'Owner mismatch (both)': { title: `${U.fmt(idx.mismatch.length)} holder mismatch`, headers: ['Barcode', 'FF holder', 'GV holder', 'Class'], rows: mismatchCsv, stats: ['Ghost holders (Apna Payment / not-assigned) mismatch me count nahi hote'] },
+        'Top GV-only holder': { title: 'GV-only tags ke top holders', headers: ['Holder', 'GV-only tags'], rows: gvOnlyTop.map(([label, value]) => [label, value]) },
+        'Aged stock · 60+ din': { title: `${U.fmt(idx.aged60.length)} tags 60+ din se parked`, headers: ['Barcode', 'Agent', 'TL', 'Class', 'Allocated', 'Age (din)'], rows: idx.aged60.map((r) => [r.barcode, r.agent, r.tl, r.cls, r.allocated, r.age]), stats: ['Allocation date StockDataa ke agent/bc allocated columns se', 'Inka dispatch ya return review karo'] },
+        'FF agents holding stock': { title: 'FF agent-wise stock (StockDataa)', headers: ['Agent', 'TL', 'Tags', 'Class split', 'Last allocation'], rows: holderTable('ff-agent'), stats: [`${U.fmt(holderRows('ff-agent').length)} agents`, `${U.fmt(U.sum(holderRows('ff-agent'), (p) => p.bars.size))} tags`] },
+        'GV agents holding stock': { title: 'GV agent-wise stock (Tag Assignment)', headers: ['Agent', 'TL', 'Tags', 'Class split', 'Last allocation'], rows: holderTable('gv-agent'), stats: [`${U.fmt(holderRows('gv-agent').length)} agents`, `${U.fmt(U.sum(holderRows('gv-agent'), (p) => p.bars.size))} tags`] },
+        'Match rate': { title: 'Tag Assignment barcodes jo StockDataa me bhi hain', headers: ['Barcode', 'FF holder', 'GV holder', 'Class', 'Status'], rows: bothCsv, stats: [`${U.fmt(idx.bothSet.size)} matched`, `${U.fmt(idx.gvOnly.length)} GV-only`] },
+        'Avg FF stock age': { title: 'Sabse purana FF stock', headers: ['Barcode', 'Agent', 'TL', 'Class', 'Allocated', 'Age (din)'], rows: [...idx.aged60, ...idx.aged30].map((r) => [r.barcode, r.agent, r.tl, r.cls, r.allocated, r.age]), stats: [`Average ${U.fmt(avgAge)} din`, '30+ din purane tags'] },
+        'Aged stock · 30–60 din': { title: `${U.fmt(idx.aged30.length)} tags 30–60 din se parked`, headers: ['Barcode', 'Agent', 'TL', 'Class', 'Allocated', 'Age (din)'], rows: idx.aged30.map((r) => [r.barcode, r.agent, r.tl, r.cls, r.allocated, r.age]) },
+      };
+    };
+    let _msd = null;
+    bindMetricDetails(root, 'Master stock reconciliation', [], [], new Proxy({}, { get: (_, k) => (_msd = _msd || buildMsSets())[k] }));
 
     root.querySelector('#ms-form').addEventListener('submit', (ev) => {
       ev.preventDefault();

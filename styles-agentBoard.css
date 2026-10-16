@@ -31,6 +31,3 @@
 .ab-kpis { grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); }
 .ab-kpi-v { font-size: 21px; }
 }
-html[data-theme="dark"] .ab-tbl tbody tr.ab-self td { background: #3b2410; }
-html[data-theme="dark"] .ab-tbl tfoot tr.ab-ownrow td { background: #06281f; }
-html[data-theme="dark"] .ab-tbl tfoot tr.ab-tltotal td { background: #1e1b4b; }
