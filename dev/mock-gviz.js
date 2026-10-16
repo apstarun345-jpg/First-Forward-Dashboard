@@ -22,7 +22,9 @@ const TLS = [
 const FIRST = ['RAHUL', 'AMIT', 'PRIYA', 'SUNITA', 'VIKAS', 'NEHA', 'RAJESH', 'POOJA', 'MANOJ', 'KIRAN', 'DEEPAK', 'ANITA', 'SANJAY', 'MEENA', 'ARUN', 'SEEMA'];
 const LAST = ['SHARMA', 'VERMA', 'GUPTA', 'SINGH', 'YADAV', 'PATEL', 'JAIN', 'KUMAR', 'MISHRA', 'CHOUDHARY'];
 const AGENTS = [];
-for (let i = 0; i < 60; i++) {
+const N_AGENTS = Math.max(60, Number(process.env.MOCK_AGENTS || 60) || 60);
+for (let k = TLS.length; k < Math.floor(N_AGENTS / 20); k++) TLS.push({ id: 'APN' + (3000 + k), name: 'BIGTL ' + k, mobile: '98' + String(10000000 + k) });
+for (let i = 0; i < N_AGENTS; i++) {
   const direct = i % 4 === 0; // every 4th agent is independent → TL Name "APS"
   const tl = direct ? null : TLS[i % TLS.length];
   const id = String(5846000 + i);

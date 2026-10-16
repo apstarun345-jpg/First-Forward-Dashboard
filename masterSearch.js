@@ -202,7 +202,7 @@ FF.pages = FF.pages || {};
       const ingest = {};
       ingest.ffReport = async (rows) => {
         for (const a of rows || []) {
-          if (++tick % 2500 === 0) await U.breathe();
+          if (++tick % 400 === 0) await U.breathe();
           const ap = person(idx, 'ff-agent', a.name || a.agentId, a.tlName, '', a.agentId || a.id);
           addAlias(ap, a.agentId, a.id, a.gvIdFound);
           [a.agentId, a.id].forEach((v) => { rememberId(ap, v); indexId(v, { name: clean(a.name || v), kind: 'ff-agent', tl: clean(a.tlName) }); });
@@ -220,7 +220,7 @@ FF.pages = FF.pages || {};
       // FF agents (EIR) — id + name + TL + ids
       ingest.agents = async (rows) => {
         for (const a of rows || []) {
-          if (++tick % 2500 === 0) await U.breathe();
+          if (++tick % 400 === 0) await U.breathe();
           const p = person(idx, 'ff-agent', a.name || a.id, a.tlName, '', a.id);
           if (p) { p.bars = p.bars; p.issuanceN = (p.issuanceN || 0) + (Number(a.n) || 0); p.n += Number(a.n) || 0; rememberId(p, a.id); rememberTlId(p, a.tlId); }
           if (clean(a.id)) indexId(a.id, { name: clean(a.name || a.id), kind: 'ff-agent', tl: clean(a.tlName) });
@@ -233,7 +233,7 @@ FF.pages = FF.pages || {};
       // FF stock (agent × class) — IDs + TL from StockDataa
       ingest.stockAgents = async (rows) => {
         for (const r of rows || []) {
-          if (++tick % 2500 === 0) await U.breathe();
+          if (++tick % 400 === 0) await U.breathe();
           const p = person(idx, 'ff-agent', r.agentName || r.agentId, r.tlName, r.cls, r.agentId);
           if (p) { p.n += Number(r.n) || 0; rememberId(p, r.agentId); rememberTlId(p, r.tlId); }
           if (clean(r.agentId)) indexId(r.agentId, { name: clean(r.agentName || r.agentId), kind: 'ff-agent', tl: clean(r.tlName) });
@@ -247,7 +247,7 @@ FF.pages = FF.pages || {};
       // GV Master — agent id / name / TL id / TL name / GV unique id + name
       ingest.gvMaster = async (rows) => {
         for (const r of rows || []) {
-          if (++tick % 2500 === 0) await U.breathe();
+          if (++tick % 400 === 0) await U.breathe();
           const p = person(idx, 'gv-agent', r.agentName || r.agentId, r.tlName, '', r.agentId);
           // GV Master: AGENT_ID is its UNIQUE_ID column. Retain all TL identifiers too:
           // column C (supervisor/TL ID) is the lookup alias, while column R (GV TL ID) is
@@ -274,7 +274,7 @@ FF.pages = FF.pages || {};
       // GV REPORT (agent + TL + supervisor ids)
       ingest.gvReport = async (rows) => {
         for (const r of rows || []) {
-          if (++tick % 2500 === 0) await U.breathe();
+          if (++tick % 400 === 0) await U.breathe();
           const ap = person(idx, 'gv-agent', r.agentName || r.agentId, r.tlName, '', r.agentId);
           rememberId(ap, r.agentId); rememberTlId(ap, r.tlId); rememberTlId(ap, r.supervisorId);
           if (clean(r.agentId)) indexId(r.agentId, { name: clean(r.agentName || r.agentId), kind: 'gv-agent', tl: clean(r.tlName) });
@@ -291,7 +291,7 @@ FF.pages = FF.pages || {};
       // GV stock (Tag Assignment aggregates)
       ingest.gvStockAgent = async (rows) => {
         for (const r of rows || []) {
-          if (++tick % 2500 === 0) await U.breathe();
+          if (++tick % 400 === 0) await U.breathe();
           const p = person(idx, 'gv-agent', r.agentName || r.agentId, r.tlName, '', r.agentId);
           if (p) { p.n += Number(r.n) || 0; rememberId(p, r.agentId); rememberTlId(p, r.tlId); }
           if (clean(r.agentId)) indexId(r.agentId, { name: clean(r.agentName || r.agentId), kind: 'gv-agent', tl: clean(r.tlName) });
@@ -345,7 +345,7 @@ FF.pages = FF.pages || {};
       const details = await FF.insights.loadDetails();
       const stamp = (d) => (d ? (d instanceof Date ? U.dateKey(d) : U.parseDate(d) ? U.dateKey(U.parseDate(d)) : '') : '');
       let tick = 0;
-      const stop = async () => { if (++tick % 3000) return false; await U.breathe(); return generation !== state.generation; };
+      const stop = async () => { if (++tick % 400) return false; await U.breathe(); return generation !== state.generation; };
       for (const r of details.stock || []) {
         if (await stop()) return state.full;
         const keys = [...new Set([r.barcode, r.tagId].map(normBar).filter(Boolean))];
