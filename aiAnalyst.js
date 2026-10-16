@@ -1,6 +1,6 @@
 /* 🧠 AI Business Analyst — First Forward aur GV Partner ka alag-alag + side-by-side business review.
-   • FF = EIR rows jinka master ID ≠ 5845036 · GV = EIR rows jinka master ID = 5845036 (GV FF ki hi API/EIR use karta hai).
-     Dono kabhi mix nahi hote — har number apne channel ka hai; "combined" sirf alag-alag numbers ka jod hai.
+   • FF = EIR (master ID ≠ 5845036) · GV = GV Master sheet (rows seedha GV Master se). Dono kabhi mix nahi hote;
+     har channel ka apna "data tak" din use hota hai (EIR ek din late ho sakta hai); "combined" sirf alag-alag numbers ka jod hai.
    • Har number / card / row / bar clickable hai → wahi data table me khulta hai (search + CSV). Agent row → poori profile.
    • Basis: current month ka run-rate (ab tak ÷ din × mahine ke din) vs pichhla poora mahina. Rule-based, koi bahari AI API nahi. */
 window.FF = window.FF || {};
@@ -30,16 +30,6 @@ FF.pages = FF.pages || {};
       if (r.ym === cur) { o.cur += r.n; if (r.n >= o.tlCurN) { o.tlCurN = r.n; o.tl = r.tlName; } } else { o.last += r.n; if (!o.tl) o.tl = r.tlName; }
     });
     return [...map.values()].map((o) => ({ ...o, direct: FF.config.isDirectAgent ? !!FF.config.isDirectAgent({ tlName: o.tl, name: o.name, agentName: o.name }, 'ff') : false }));
-  }
-  function peopleFromGv(cur, last) {
-    const map = new Map();
-    const add = (list, f) => (list || []).forEach((a) => {
-      const key = clean(a.agentId) ? 'I' + norm(a.agentId) : 'N' + norm(a.agentName);
-      if (!map.has(key)) map.set(key, { key, name: a.agentName, id: clean(a.agentId), tl: a.tlName || '', cur: 0, last: 0, direct: !!a.directAgent });
-      const o = map.get(key); o[f] += a.total || 0; if (f === 'cur' && a.tlName) o.tl = a.tlName; if (!o.tl && a.tlName) o.tl = a.tlName;
-    });
-    add(G.agentRollup(cur), 'cur'); add(G.agentRollup(last), 'last');
-    return [...map.values()];
   }
   function drivers(people, day, dimCur) {
     const rows = people.map((p) => {
@@ -77,6 +67,42 @@ FF.pages = FF.pages || {};
     return { week: s(a), prev: s(b), growth: pct(s(a), s(b)), hasPrev: b.length >= 7 };
   }
 
+
+  // ---- GV Master based aggregation (GV ka har number seedha GV Master rows se — EIR se nahi) ----
+  const gvRows = () => { try { return (G.rows && G.rows()) || []; } catch { return []; } };
+  const isDirectGv = (r) => r.directAgent === true || (FF.config.isDirectAgent ? !!FF.config.isDirectAgent(r, 'gv') : false);
+  function gvMasterIndex() {
+    const rows = gvRows(), byYm = new Map(); let latest = null;
+    rows.forEach((r) => { if (!r.ym) return; if (!byYm.has(r.ym)) byYm.set(r.ym, []); byYm.get(r.ym).push(r); const d = r.date || r.d; if (d && (!latest || d > latest)) latest = d; });
+    return { byYm, latest, months: [...byYm.keys()].sort() };
+  }
+  function gvSummary(idx, ym, upTo) {
+    const s = { ym, total: 0, vc4: 0, vc20: 0, vc5p: 0, comm: 0, replacement: 0, wrongVrn: 0, days: new Set() };
+    (idx.byYm.get(ym) || []).forEach((r) => {
+      if (upTo && r.day > upTo) return;
+      s.total++; if (r.group === 'VC4') s.vc4++; else if (r.group === 'VC20') s.vc20++; else s.vc5p++;
+      if (/replacement/i.test(r.status || '')) s.replacement++;
+      if (r.day) s.days.add(r.day);
+    });
+    s.comm = s.vc20 + s.vc5p; s.activeDays = s.days.size; s.avgPerDay = s.activeDays ? s.total / s.activeDays : 0;
+    return s;
+  }
+  function gvSeries(idx, ym) {
+    const n = U.daysInMonth(ym), t = new Array(n).fill(0);
+    (idx.byYm.get(ym) || []).forEach((r) => { if (r.day) t[r.day - 1]++; });
+    return t;
+  }
+  function gvPeople(idx, cur, last) {
+    const map = new Map();
+    const add = (ym, f) => (idx.byYm.get(ym) || []).forEach((r) => {
+      const id = clean(r.agentId), key = id ? 'I' + norm(id) : 'N' + norm(r.agentName);
+      if (!map.has(key)) map.set(key, { key, name: r.agentName, id, tl: r.tlName || '', cur: 0, last: 0, direct: false, directAll: true });
+      const o = map.get(key); o[f]++; if (!isDirectGv(r)) o.directAll = false; if (r.tlName && (f === 'cur' || !o.tl)) o.tl = r.tlName;
+    });
+    add(cur, 'cur'); add(last, 'last');
+    return [...map.values()].map((o) => ({ ...o, direct: o.directAll }));
+  }
+
   async function analyse(monthParam) {
     const [dailyR, agentsR, stockR, masterR, gvStockR] = await Promise.allSettled([S.need('daily'), S.need('agents'), S.need('stock'), G.need('master'), G.need('stockClass')]);
     const out = { errors: [], gvId: GV_ID() };
@@ -86,11 +112,14 @@ FF.pages = FF.pages || {};
     if (masterR.status !== 'fulfilled') out.errors.push('GV Master data load nahi hua');
     const gvOk = masterR.status === 'fulfilled';
     const agents = agentsR.status === 'fulfilled' ? agentsR.value : [];
-    const ffLatest = ffDaily ? M.latestDate(ffDaily) : null, gvLatest = gvOk ? G.latestDate() : null;
+    const gvIdx = gvOk ? gvMasterIndex() : { byYm: new Map(), latest: null, months: [] };
+    out.gvMonths = gvIdx.months;
+    const ffLatest = ffDaily ? M.latestDate(ffDaily) : null, gvLatest = gvIdx.latest;
+    out.ffLatest = ffLatest; out.gvLatest = gvLatest;
     const latest = ffLatest && gvLatest ? (ffLatest > gvLatest ? ffLatest : gvLatest) : (ffLatest || gvLatest);
     if (!latest) return { ...out, empty: true };
     const latestYM = U.ymKey(latest);
-    out.months = U.uniq([...(ffDaily ? M.months(ffDaily) : []), ...(gvOk ? G.months() : [])]).sort();
+    out.months = U.uniq([...(ffDaily ? M.months(ffDaily) : []), ...gvIdx.months]).sort();
     out.cur = out.months.includes(monthParam) ? monthParam : latestYM;
     out.isCurrent = out.cur === latestYM;
     out.last = U.prevMonthKey(out.cur);
@@ -102,26 +131,28 @@ FF.pages = FF.pages || {};
     const build = (ch) => {
       const isFf = ch === 'ff';
       if (isFf ? !ffDaily : !gvOk) return null;
-      const sum = (ym, d) => (isFf ? M.summary(ffDaily, ym, d) : G.summary(ym, d));
-      const cur = sum(out.cur, out.isCurrent ? 0 : 0), last = sum(out.last), lastMtd = sum(out.last, out.day);
-      const people = isFf ? peopleFromFf(agents, out.cur, out.last) : peopleFromGv(out.cur, out.last);
-      const d = drivers(people, out.day, out.dimCur);
-      const proj = out.isCurrent ? (out.day ? (cur.total / out.day) * out.dimCur : cur.total) : cur.total;
-      const ser = (ym) => { try { return (isFf ? M.dailySeries(ffDaily, ym) : G.dailySeries(ym)).totals || []; } catch { return []; } };
-      const curSeries = ser(out.cur).slice(0, out.day), lastSeries = ser(out.last);
-      while (curSeries.length > 1 && !curSeries[curSeries.length - 1]) curSeries.pop(); // aaj ka adhura (0) din chart na gira de
-      const mo = momentum(lastSeries, curSeries, out.day);
+      // har channel ka apna "data tak" din — FF EIR ek din late aa sakta hai, uski wajah se FF ki projection na giray
+      const chLatest = isFf ? ffLatest : gvLatest;
+      const day = chLatest && U.ymKey(chLatest) === out.cur ? chLatest.getDate() : (out.isCurrent && chLatest && U.ymKey(chLatest) < out.cur ? 0 : out.day);
+      const sum = (ym, d) => (isFf ? M.summary(ffDaily, ym, d) : gvSummary(gvIdx, ym, d));
+      const cur = sum(out.cur), last = sum(out.last), lastMtd = day ? sum(out.last, day) : last;
+      const people = isFf ? peopleFromFf(agents, out.cur, out.last) : gvPeople(gvIdx, out.cur, out.last);
+      const d = drivers(people, day || out.day, out.dimCur);
+      const proj = out.isCurrent ? (day ? (cur.total / day) * out.dimCur : cur.total) : cur.total;
+      const ser = (ym) => { try { return isFf ? (M.dailySeries(ffDaily, ym).totals || []) : gvSeries(gvIdx, ym); } catch { return []; } };
+      const curSeries = ser(out.cur).slice(0, day || out.day), lastSeries = ser(out.last);
+      while (curSeries.length > 1 && !curSeries[curSeries.length - 1]) curSeries.pop();
+      const mo = momentum(lastSeries, curSeries, day || out.day);
       const avg = cur.activeDays ? cur.total / cur.activeDays : 0;
       const stock = U.sum(stockRows[ch], (r) => r.n);
-      const mon = out.months.slice(-6).map((ym) => { const s = sum(ym); return { ym, total: s.total, vc4: s.vc4, vc20: s.vc20, vc5p: s.vc5p, comm: s.comm, repl: s.replacement, wrong: s.wrongVrn }; });
-      return { ch, cur, last, lastMtd, proj, projGrowth: pct(proj, last.total), mtdGrowth: pct(cur.total, lastMtd.total), d,
-        tls: tlRoll(d.rows), conc: concentration(d.rows, cur.total), mo, curSeries, lastSeries, stock, stockRows: stockRows[ch], cover: avg ? stock / avg : 0, avg, mon,
+      const mon = out.months.slice(-6).map((ym) => { const x = sum(ym); return { ym, total: x.total, vc4: x.vc4, vc20: x.vc20, vc5p: x.vc5p, comm: x.comm, repl: x.replacement, wrong: x.wrongVrn }; });
+      return { ch, day, latest: chLatest, source: isFf ? 'EIR' : 'GV Master', cur, last, lastMtd, proj, projGrowth: last.total ? pct(proj, last.total) : null, mtdGrowth: pct(cur.total, lastMtd.total), d,
+        tls: tlRoll(d.rows), conc: concentration(d.rows, cur.total), mo, curSeries, lastSeries, stock, stockRows: stockRows[ch], cover: avg ? stock / avg : 0, avg, mon, noLast: !last.total,
         vc4Share: cur.total ? (cur.vc4 / cur.total) * 100 : 0, vc4ShareLast: last.total ? (last.vc4 / last.total) * 100 : 0,
         replShare: cur.total ? (cur.replacement / cur.total) * 100 : 0, wrongShare: cur.total ? (cur.wrongVrn / cur.total) * 100 : 0 };
     };
     out.channels.ff = build('ff'); out.channels.gv = build('gv');
     // EIR reconciliation: poore EIR ledger me master-ID ke hisaab se FF/GV split (sirf proof ke liye)
-    try { if (dailyAll) { const s = M.summary(dailyAll, out.cur); out.eir = { ff: s.ff, gv: s.gv, total: s.total }; } } catch { /* ignore */ }
     return out;
   }
 
@@ -332,10 +363,11 @@ FF.pages = FF.pages || {};
     const monthOpts = a.months.slice().reverse().map((m) => `<option value="${m}" ${m === a.cur ? 'selected' : ''}>${esc(U.labelYM(m, true))}</option>`).join('');
     U.$('#aa-actions', root).innerHTML = `<label class="aa-month">📅 <select id="aa-month" class="input">${monthOpts}</select></label><button class="btn small" id="aa-csv">⬇ CSV</button><button class="btn small primary" id="aa-refresh">↻ Refresh</button>`;
     const comb = all.reduce((s, c) => ({ cur: s.cur + c.cur.total, proj: s.proj + c.proj, last: s.last + c.last.total }), { cur: 0, proj: 0, last: 0 });
-    const recon = a.eir ? `<span class="aa-pill ok" title="Sirf EIR ledger ka split — GV card me aaj ke live GV Master rows bhi judte hain">EIR ledger ${esc(U.labelYM(a.cur))}: FF ${fmt(a.eir.ff)} · GV (ID ${esc(a.gvId)}) ${fmt(a.eir.gv)}</span>` : '';
+    const dl = (d) => (d ? U.labelDate(d) : '—');
+    const recon = '';
     const tabs = [['all', '🌐 Side by side'], ['ff', '🟦 First Forward'], ['gv', '🟩 GV Partner']].map(([k, l]) => `<button class="btn small ${sel === k ? 'primary' : ''}" data-aa-ch="${k}">${l}</button>`).join('');
     body.innerHTML = `${a.errors.length ? `<div class="alert warn">${a.errors.map(esc).join(' · ')}</div>` : ''}
-      <div class="aa-basis"><span class="aa-pill">🟦 FF = EIR · master ID ≠ ${esc(a.gvId)}</span><span class="aa-pill">🟩 GV = EIR · master ID = ${esc(a.gvId)} (FF ki API)</span>${recon}<span class="aa-pill soft">Dono milakar: ${fmt(comb.cur)} ab tak · ${fmt(comb.proj)} projected (alag IDs, overlap nahi)</span></div>
+      <div class="aa-basis"><span class="aa-pill">🟦 FF = EIR (master ID ≠ ${esc(a.gvId)}) · data ${esc(dl(a.ffLatest))} tak</span><span class="aa-pill">🟩 GV = GV Master · data ${esc(dl(a.gvLatest))} tak</span>${recon}${gv && gv.noLast ? '<span class="aa-pill warn">⚠ GV Master me pichhle mahine ka data nahi — GV comparison limited</span>' : ''}<span class="aa-pill soft">Dono milakar: ${fmt(comb.cur)} ab tak · ${fmt(comb.proj)} projected (alag IDs, overlap nahi)</span></div>
       <div class="aa-scores">${shown.map((c) => scorecard(c, a)).join('')}</div>
       <div class="aa-switch">${tabs}</div>
       <div class="grid g-2 aa-top">
@@ -344,7 +376,7 @@ FF.pages = FF.pages || {};
       </div>
       ${sel === 'all' ? compareTable(a) : ''}
       ${shown.map((c) => channelSection(c, a)).join('')}
-      <p class="foot-note">Projected = ab tak ÷ din × mahine ke din (purane mahine ke liye poora total). "Gaye" = pichhle mahine tags the, is mahine 0. FF aur GV ka data master ID se alag hota hai, isliye koi tag do baar nahi gina jata.</p>`;
+      <p class="foot-note">Projected = ab tak ÷ din × mahine ke din (purane mahine ke liye poora total). "Gaye" = pichhle mahine tags the, is mahine 0. FF = EIR (master ID ≠ 5845036), GV = GV Master — alag sources, isliye koi tag do baar nahi gina jata. Har channel ki projection uska apna "data tak" din use karti hai.</p>`;
     if (C && C.mount) { try { C.mount(body); } catch { /* ignore */ } }
     if (root.__aaClick) root.removeEventListener('click', root.__aaClick);
     root.__aaClick = (e) => {

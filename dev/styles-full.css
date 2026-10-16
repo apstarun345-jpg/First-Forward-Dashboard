@@ -7356,3 +7356,4 @@ html[data-theme="dark"] .aa-chip.up { background: #064e3b; color: #6ee7b7; } htm
 .aa-top { align-items: start; }
 @media (max-width: 1100px) { .aa-top.grid.g-2 { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 640px) { .aa-big { font-size: 30px; } .aa-bar { grid-template-columns: 90px 1fr 56px; } .aa-hero h1 { font-size: 20px; } }
+.aa-pill.warn { border-color: #f59e0b; color: #b45309; background: color-mix(in srgb, #f59e0b 10%, var(--card)); }
