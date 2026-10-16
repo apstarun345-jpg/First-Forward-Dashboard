@@ -1301,11 +1301,47 @@ window.FF = window.FF || {};
       const barBox = U.$('#fm-identifier', root);
       const kindSel = U.$('#fm-kind', root);
       if (barBox && U.suggest && FF.masterSearch && FF.masterSearch.barcodeSuggest) {
+        // Fallback: the Master Search index can miss a barcode that IS in StockDataa (unassigned / not yet indexed / index
+        // still building). For a full-looking barcode ask the same server StockDataa index the real lookup uses (exact match).
+        const srvHits = new Map(); // key → { state: 'loading'|'found'|'none'|'error', rows, at, msg }
+        let srvTimer = null;
+        const bcKey = (v) => String(v == null ? '' : v).replace(/[\s,\u00a0-]/g, '');
+        const srvFetchOne = (k) => {
+          srvHits.set(k, { state: 'loading', rows: [], at: Date.now() });
+          serverLookup([{ type: 'barcode', barcode: k }], false).then((out) => {
+            const rows = (out && out.results && out.results[0] && out.results[0].rows) || [];
+            srvHits.set(k, { state: rows.length ? 'found' : 'none', rows, at: Date.now() });
+          }).catch((err) => {
+            srvHits.set(k, { state: 'error', rows: [], at: Date.now(), msg: (err && err.message) || 'Lookup failed' });
+          }).then(() => { try { if (barBox.isConnected && bcKey(barBox.value) === k && sugRef) sugRef.refresh(); } catch { /* ignore */ } });
+        };
+        const srvFallbackItems = () => {
+          const k = bcKey(barBox.value);
+          if (k.length < 8) return null;
+          let h = srvHits.get(k);
+          if (h && h.state !== 'loading' && Date.now() - h.at > 30000) { srvHits.delete(k); h = null; }
+          if (!h) {
+            if (srvTimer) clearTimeout(srvTimer);
+            srvTimer = setTimeout(() => { if (barBox.isConnected && bcKey(barBox.value) === k && !srvHits.has(k)) srvFetchOne(k); }, 450);
+            return [{ none: true, kind: 'cls', kindLabel: 'StockDataa', label: '🔎 Checking StockDataa…', sub: 'not in the quick index — asking the server', value: barBox.value, _pending: true }];
+          }
+          if (h.state === 'loading') return [{ none: true, kind: 'cls', kindLabel: 'StockDataa', label: '🔎 Checking StockDataa…', sub: 'not in the quick index — asking the server', value: barBox.value, _pending: true }];
+          if (h.state === 'found') {
+            return h.rows.slice(0, 12).map((row) => {
+              const it = { barcode: row.barcode || k, tagId: row.tagId || '', agentId: row.stockAgentId || '', agentName: row.stockAgentName || '', tlName: row.tlName || '', cls: row.vcType || '' };
+              return { kind: 'barcode', kindLabel: 'Stock', label: it.barcode, sub: [it.tagId ? 'Tag ' + it.tagId : '', it.agentName ? 'Agent ' + it.agentName : 'Unassigned', it.tlName ? 'TL ' + it.tlName : '', it.cls ? 'Class ' + it.cls : ''].filter(Boolean).join(' · '), value: it.barcode, inputValue: it.barcode, _item: it };
+            });
+          }
+          if (h.state === 'error') return [{ none: true, kind: 'cls', kindLabel: 'StockDataa', label: '⚠️ Could not check StockDataa', sub: h.msg || 'try “Add to queue” — it runs the full lookup', value: barBox.value, _pending: true }];
+          return null; // 'none' → normal "No match"
+        };
+        let sugRef = null;
         const sug = U.suggest(barBox, {
           min: 3, max: 12,
           items: () => {
             if (!kindSel || kindSel.value !== 'barcode') return [];
             const r = FF.masterSearch.barcodeSuggest(barBox.value, 12);
+            if (!r.items.length) { const fb = srvFallbackItems(); if (fb) return fb; }
             if (r.pending) return [{ none: true, kind: 'cls', kindLabel: 'Index', label: '⏳ Barcode index is being built…', sub: 'suggestions will appear shortly', value: barBox.value, _pending: true }];
             return r.items.map((it) => ({
               kind: 'barcode', kindLabel: it.channel === 'GV' ? 'GV' : 'FF', label: it.barcode,
@@ -1322,6 +1358,7 @@ window.FF = window.FF || {};
           },
           onEnter: () => {}
         });
+        sugRef = sug;
         if (sug && sug.refresh && FF.masterSearch.onIndexReady) FF.masterSearch.onIndexReady(() => { try { if (barBox.isConnected && document.activeElement === barBox) sug.refresh(); } catch { /* ignore */ } });
         if (FF.masterSearch.warmFull) { try { FF.masterSearch.warmFull(); } catch { /* ignore */ } }
       }
