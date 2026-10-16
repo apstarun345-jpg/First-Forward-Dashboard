@@ -6325,7 +6325,7 @@ async function handleApi(req, res, url) {
       const prev = row.status;
       row.status = status; row.updatedAt = now; row.updatedBy = user.username;
       updated.push(row);
-      if (status === 'approved' && prev !== 'approved') toSheet.push(row);
+      if (status === 'approved' && prev !== 'approved') { delete row.sheetApprovalSync; delete row.sheetSync; toSheet.push(row); }
     }
     if (updated.length) persistBackground('notify');
     // 📗 Sheet sync sirf pehli baar Approved par (PUT wala rule) — background me ek-ek karke.
@@ -6424,6 +6424,8 @@ async function handleApi(req, res, url) {
     // 📗 v5: Sheet sync ONLY on the first transition to Approved.
     // Pending submit, Dispatched, Rejected, and later status changes never append another row.
     if (body.status === 'approved' && prevStatus !== 'approved' && tagSheetConfig().enabled) {
+      // Re-approval (e.g. Pending → Approved again) = admin ka naya intent: purana sync marker hata do, entry dobara jaye.
+      delete row.sheetApprovalSync; delete row.sheetSync;
       pushTagRequestToSheet(row, 'status:approved').then(() => persist('notify').catch(() => {})).catch((err) => {
         console.warn('tag-request sheet sync (approved):', err.message);
         row.sheetSync = { at: new Date().toISOString(), event: 'status:approved', error: String(err.message || err).slice(0, 160) };
