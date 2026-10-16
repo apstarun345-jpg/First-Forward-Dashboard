@@ -10,7 +10,6 @@
 .dp-mail-grid .dp-mail-recipients { grid-column: span 2; }
 .dp-mail-weekday[hidden], .dp-mail-monthday[hidden] { display: none !important; }
 .dp-mail-sections { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 11px; background: color-mix(in srgb, var(--brand) 3%, var(--card)); }
-.dp-mail-sections .check, .dp-mail-enable { font-size: 12px; }
 .dp-mail-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .dp-mail-enable { margin-right: auto; }
 .dp2-panel { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 14px 16px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 12px; }

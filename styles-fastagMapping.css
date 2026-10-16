@@ -6,7 +6,6 @@
 .fm-step.active { border-color: var(--brand); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 16%, transparent); }
 .fm-step.active .fm-step-dot { color: #fff; background: var(--brand); }
 .fm-step.done .fm-step-dot { color: #fff; background: #16a34a; font-size: 0; }
-.fm-step.done .fm-step-dot::after { content: '✓'; font-size: 14px; }
 .fm-step-no { display: inline-grid; place-items: center; min-width: 24px; height: 24px; padding: 0 6px; margin-right: 4px; border-radius: 12px; font-size: 12px; font-weight: 800; color: #fff; background: var(--brand); vertical-align: 2px; }
 .fm-tabs { display: flex; gap: 6px; padding: 0 16px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
 .fm-tab { flex: 0 0 auto; padding: 9px 12px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--muted); font: inherit; font-weight: 700; font-size: 13px; cursor: pointer; white-space: nowrap; }
@@ -26,7 +25,6 @@
 .fm-tab { padding: 9px 10px; }
 .fm-tabs { padding: 0 10px; }
 }
-.fm-pane .input { width: 100%; box-sizing: border-box; }
 .fm-pane .grid { margin-bottom: 10px; }
 @media (max-width: 760px) {
 .fm-pane .grid.g-3 { grid-template-columns: 1fr; gap: 8px; }
@@ -43,5 +41,4 @@ html .fm-pane .grid.g-3, html.mobile-ui .fm-pane .grid.g-3 { grid-template-colum
 }
 .fm-report .table-wrap { max-height: 60vh; overflow: auto; }
 .fm-report .tbl thead th { position: sticky; top: 0; z-index: 2; background: var(--card); box-shadow: 0 1px 0 var(--line); }
-.fm-rep-tbl td:first-child, .fm-rep-tbl th:first-child { position: sticky; left: 0; z-index: 1; background: var(--card); }
 .fm-rep-tbl thead th:first-child { z-index: 3; }

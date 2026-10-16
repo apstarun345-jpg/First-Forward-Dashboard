@@ -59,7 +59,6 @@
 .msp-pulse-h { border-right: 0; padding-right: 0; flex: 1 1 100%; }
 .msp-hero { flex-wrap: wrap; }
 .msp-search { flex-wrap: wrap; }
-.msp-search .btn { width: 100%; }
 }
 .ms-recent { position: absolute; left: 0; right: 0; top: calc(100% + 6px); z-index: 80; max-height: 60vh; overflow: auto; padding: 6px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); box-shadow: 0 14px 36px rgba(15, 23, 42, .22); }
 .ms-recent[hidden] { display: none; }
