@@ -804,7 +804,7 @@ window.FF = window.FF || {};
     const limit = Math.max(SHOW_STEP, state.showLimit || SHOW_STEP), shown = state.rows.slice(0, limit);
     const body = shown.map((r, i) => {
       const disabled = !r.stock || !r.tagId || !r.serialNo || !r.vcType || !r.agentId || String(r.status || '').startsWith('Duplicate') || r.mapped;
-      return '<tr><td><input type="checkbox" data-fm-select="' + i + '"' + (r.selected ? ' checked' : '') + (disabled ? ' disabled' : '') + '></td><td>' + esc(r.sheetRow ? r.sheetRow : '') + '</td><td>' + esc(r.barcode) + '</td><td>' + esc(r.tagId) + '</td><td>' + esc(r.serialNo) + '</td><td>' + esc(r.vcType) + '</td><td>' + esc(r.stockAgentId) + '</td><td><input class="input fm-agent-edit" data-fm-agent="' + i + '" value="' + esc(r.agentId) + '" placeholder="Agent ID"' + (r.mapped ? ' disabled' : '') + '></td><td>' + esc(r.stockAgentName) + '</td><td>' + esc(r.tlName) + '</td><td><span class="badge ' + (r.mapped ? 'green' : (disabled ? 'amber' : 'gray')) + '">' + esc(r.apiStatus || r.status) + '</span><small class="dim fm-status-msg">' + esc(r.message) + '</small></td><td><button class="btn small" data-fm-remove="' + i + '"' + (state.busy ? ' disabled' : '') + '>Remove</button></td></tr>';
+      return '<tr><td><input type="checkbox" data-fm-select="' + i + '"' + (r.selected ? ' checked' : '') + (disabled ? ' disabled' : '') + '></td><td>' + esc(r.sheetRow ? r.sheetRow : '') + '</td><td>' + esc(dashBar(r.barcode)) + '</td><td>' + esc(r.tagId) + '</td><td>' + esc(r.serialNo) + '</td><td>' + esc(r.vcType) + '</td><td>' + esc(r.stockAgentId) + '</td><td><input class="input fm-agent-edit" data-fm-agent="' + i + '" value="' + esc(r.agentId) + '" placeholder="Agent ID"' + (r.mapped ? ' disabled' : '') + '></td><td>' + esc(r.stockAgentName) + '</td><td>' + esc(r.tlName) + '</td><td><span class="badge ' + (r.mapped ? 'green' : (disabled ? 'amber' : 'gray')) + '">' + esc(r.apiStatus || r.status) + '</span><small class="dim fm-status-msg">' + esc(r.message) + '</small></td><td><button class="btn small" data-fm-remove="' + i + '"' + (state.busy ? ' disabled' : '') + '>Remove</button></td></tr>';
     }).join('');
     const more = state.rows.length > limit ? '<div class="btn-row" style="margin-top:8px"><span class="dim small">Pehli ' + U.fmt(limit) + ' / ' + U.fmt(state.rows.length) + ' rows dikh rahi hain (mapping + CSV me sab rows shamil hain).</span><button class="btn small" id="fm-more">Aur dikhao</button></div>' : '';
     host.innerHTML = '<div class="table-wrap"><table class="tbl compact"><thead><tr><th><input type="checkbox" id="fm-select-all" aria-label="Select ready rows"></th><th>Sheet row</th><th>Barcode</th><th>Tag ID</th><th>Serial No</th><th>VC Type</th><th>Stock Agent ID</th><th>Agent ID to map</th><th>Agent name</th><th>TL</th><th>Mapping status</th><th></th></tr></thead><tbody>' + body + '</tbody></table></div>' + more;
@@ -814,6 +814,8 @@ window.FF = window.FF || {};
   // ===== 📊 Mapping report (v3.80) — agent × class counts, not-found list, cannot-map sheet =====
   const isDupSkipped = (r) => String(r.status || '').startsWith('Duplicate skipped');
   const isNotFound = (r) => r.status === 'Not found in StockDataa' || !r.stock || !Object.keys(r.stock).length;
+  /** 16-digit barcode ko sheet jaisa dikhao: 608116-011-0558293 (sirf display — lookup / API / CSV me raw digits). */
+  function dashBar(v) { const t = String(v == null ? '' : v).trim(); return /^\d{16}$/.test(t) ? t.slice(0, 6) + '-' + t.slice(6, 9) + '-' + t.slice(9) : t; }
   const rowAgent = (r) => clean(r.agentId) || '(Agent ID missing)';
   function reportModel() {
     const rows = state.rows.filter((r) => !isDupSkipped(r));
@@ -849,8 +851,8 @@ window.FF = window.FF || {};
       return '<tr><td><b>' + esc(a.agentId) + '</b></td><td>' + esc(a.name) + '</td><td>' + esc(a.tl) + '</td>' + m.classList.map((c) => { const n = a.cls.get(c) || 0; tot.cls.set(c, (tot.cls.get(c) || 0) + n); return '<td class="num">' + (n ? num(n) : '–') + '</td>'; }).join('') + '<td class="num"><b>' + num(a.found) + '</b></td><td class="num">' + (a.notFound ? '<span class="badge red">' + num(a.notFound) + '</span>' : '–') + '</td><td class="num">' + num(a.mapped) + '</td></tr>';
     }).join('');
     const foot = '<tr class="fm-rep-total"><td colspan="3"><b>TOTAL</b></td>' + m.classList.map((c) => '<td class="num"><b>' + num(tot.cls.get(c) || 0) + '</b></td>').join('') + '<td class="num"><b>' + num(tot.found) + '</b></td><td class="num"><b>' + num(tot.notFound) + '</b></td><td class="num"><b>' + num(m.agents.reduce((n, a) => n + a.mapped, 0)) + '</b></td></tr>';
-    const nfRows = m.notFound.slice(0, 300).map((r) => '<tr><td>' + esc(r.request || r.barcode || r.tagId) + '</td><td><b>' + esc(rowAgent(r)) + '</b></td><td>' + esc(r.sheetRow || '') + '</td></tr>').join('');
-    const cmRows = m.cannotMap.slice(0, 300).map((r) => '<tr><td>' + esc(r.barcode || r.request) + '</td><td>' + esc(r.tagId) + '</td><td>' + esc(r.vcType) + '</td><td><b>' + esc(rowAgent(r)) + '</b></td><td>' + esc(r.sheetRow || '') + '</td><td>' + esc(reasonOf(r)) + '</td></tr>').join('');
+    const nfRows = m.notFound.slice(0, 300).map((r) => '<tr><td>' + esc(dashBar(r.request || r.barcode || r.tagId)) + '</td><td><b>' + esc(rowAgent(r)) + '</b></td><td>' + esc(r.sheetRow || '') + '</td></tr>').join('');
+    const cmRows = m.cannotMap.slice(0, 300).map((r) => '<tr><td>' + esc(dashBar(r.barcode || r.request)) + '</td><td>' + esc(r.tagId) + '</td><td>' + esc(r.vcType) + '</td><td><b>' + esc(rowAgent(r)) + '</b></td><td>' + esc(r.sheetRow || '') + '</td><td>' + esc(reasonOf(r)) + '</td></tr>').join('');
     return '<section class="card fm-report" id="fm-report"><div class="card-head"><div><h3>📊 Mapping report</h3><p class="dim small">Agent ID ke hisaab se class-wise barcode count · jo nahi mile unki list · jo map nahi ho sakte unki alag sheet.</p></div><div class="head-actions"><button class="btn small primary" id="fm-report-xlsx" type="button">⬇ Report Excel (3 sheets)</button><button class="btn small" id="fm-report-csv" type="button">⬇ Cannot-map CSV</button></div></div><div class="card-body">' +
       '<div class="fm-rep-grid"><div class="fm-rep-main"><h4>Agent × Class</h4><div class="table-wrap"><table class="tbl compact fm-rep-tbl"><thead><tr><th>Agent ID</th><th>Agent</th><th>TL</th>' + th + '<th class="num">Total found</th><th class="num">Not found</th><th class="num">Mapped</th></tr></thead><tbody>' + body + foot + '</tbody></table></div></div>' +
       '<div class="fm-rep-side"><h4>❌ Nahi mile <span class="badge ' + (m.notFound.length ? 'red' : 'green') + '">' + num(m.notFound.length) + '</span></h4>' + (m.notFound.length ? '<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Barcode / Tag</th><th>Agent ID</th><th>Sheet row</th></tr></thead><tbody>' + nfRows + '</tbody></table></div>' + (m.notFound.length > 300 ? '<small class="dim">Pehli 300 dikh rahi hain — Excel me sab hain.</small>' : '') : '<p class="dim small">Sab barcode StockDataa me mile ✅</p>') + '</div></div>' +
@@ -1045,7 +1047,7 @@ window.FF = window.FF || {};
   }
   async function quickMap() {
     if (state.busy) return;
-    const value = clean(U.$('#fm-identifier', state.root).value);
+    const value = clean(U.$('#fm-identifier', state.root).value).replace(/(\d)-(?=\d)/g, '$1');
     const kind = U.$('#fm-kind', state.root).value;
     const agentId = clean(U.$('#fm-agent-id', state.root).value);
     if (!value || !agentId) { setStatus('Barcode/Tag ID aur target Agent ID dono required hain.', 'warn'); return; }
@@ -1394,7 +1396,7 @@ window.FF = window.FF || {};
           if (h.state === 'found') {
             return h.rows.slice(0, 12).map((row) => {
               const it = { barcode: row.barcode || k, tagId: row.tagId || '', agentId: row.stockAgentId || '', agentName: row.stockAgentName || '', tlName: row.tlName || '', cls: row.vcType || '' };
-              return { kind: 'barcode', kindLabel: 'Stock', label: it.barcode, sub: [it.tagId ? 'Tag ' + it.tagId : '', it.agentName ? 'Agent ' + it.agentName : 'Unassigned', it.tlName ? 'TL ' + it.tlName : '', it.cls ? 'Class ' + it.cls : ''].filter(Boolean).join(' · '), value: it.barcode, inputValue: it.barcode, _item: it };
+              return { kind: 'barcode', kindLabel: 'Stock', label: it.barcode, sub: [it.tagId ? 'Tag ' + it.tagId : '', it.agentName ? 'Agent ' + it.agentName : 'Unassigned', it.tlName ? 'TL ' + it.tlName : '', it.cls ? 'Class ' + it.cls : ''].filter(Boolean).join(' · '), value: it.barcode, inputValue: dashBar(it.barcode), _item: it };
             });
           }
           if (h.state === 'error') return [{ none: true, kind: 'cls', kindLabel: 'StockDataa', label: '⚠️ Could not check StockDataa', sub: h.msg || 'try “Add to queue” — it runs the full lookup', value: barBox.value, _pending: true }];
@@ -1409,16 +1411,16 @@ window.FF = window.FF || {};
             if (!r.items.length) { const fb = srvFallbackItems(); if (fb) return fb; }
             if (r.pending) return [{ none: true, kind: 'cls', kindLabel: 'Index', label: '⏳ Barcode index is being built…', sub: 'suggestions will appear shortly', value: barBox.value, _pending: true }];
             return r.items.map((it) => ({
-              kind: 'barcode', kindLabel: it.channel === 'GV' ? 'GV' : 'FF', label: it.barcode,
+              kind: 'barcode', kindLabel: it.channel === 'GV' ? 'GV' : 'FF', label: dashBar(it.barcode),
               sub: [it.tagId ? 'Tag ' + it.tagId : '', (it.agentName || it.agentId) ? 'Agent ' + [it.agentName, it.agentId ? '(' + it.agentId + ')' : ''].filter(Boolean).join(' ') : (it.tlName ? 'Agent — (TL stock)' : ''), it.tlName ? 'TL ' + it.tlName : '', it.cls ? 'Class ' + it.cls : ''].filter(Boolean).join(' · ') || 'StockDataa row',
               value: it.barcode, inputValue: it.barcode, _item: it
             }));
           },
           onPick: (it) => {
             if (!it || it.none || it._pending || !it._item) return;
-            barBox.value = it._item.barcode;
+            barBox.value = dashBar(it._item.barcode);
             const i = it._item;
-            setStatus(`Barcode ${i.barcode} · Tag ${i.tagId || '—'} · ${i.agentName || 'agent —'}${i.tlName ? ' (TL ' + i.tlName + ')' : ''}${i.cls ? ' · ' + i.cls : ''}. Enter the target Agent ID and click “Add to queue”.`, 'info');
+            setStatus(`Barcode ${dashBar(i.barcode)} · Tag ${i.tagId || '—'} · ${i.agentName || 'agent —'}${i.tlName ? ' (TL ' + i.tlName + ')' : ''}${i.cls ? ' · ' + i.cls : ''}. Enter the target Agent ID and click “Add to queue”.`, 'info');
             const agentBox = U.$('#fm-agent-id', root); if (agentBox) agentBox.focus();
           },
           onEnter: () => {}
@@ -1478,7 +1480,7 @@ window.FF = window.FF || {};
       if (target.id === 'fm-more') { state.showLimit = (state.showLimit || SHOW_STEP) + 500; renderTable(); return; }
       if (target.id === 'fm-quick-map') return quickMap();
       if (target.id === 'fm-add-single') {
-        const value = clean(U.$('#fm-identifier', root).value), kind = U.$('#fm-kind', root).value, agentId = clean(U.$('#fm-agent-id', root).value);
+        const value = clean(U.$('#fm-identifier', root).value).replace(/(\d)-(?=\d)/g, '$1'), kind = U.$('#fm-kind', root).value, agentId = clean(U.$('#fm-agent-id', root).value);
         if (!value || !agentId) { setStatus('Barcode/Tag ID aur target Agent ID dono required hain.', 'warn'); return; }
         state.items.push({ id: nextId++, type: kind, barcode: kind === 'barcode' ? value : '', serialNo: kind === 'barcode' ? value : '', tagId: kind === 'tagId' ? value : '', agentId, source: 'Manual', selected: true });
         U.$('#fm-identifier', root).value = ''; setStatus('Manual selector added. Lookup karein.', 'success'); return;

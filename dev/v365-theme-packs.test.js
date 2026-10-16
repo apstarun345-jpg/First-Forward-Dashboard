@@ -32,3 +32,11 @@ test('wowzone picker lists every pack and branding is cached for early paint', (
   assert.match(au, /!document\.documentElement\.dataset\.themePack/);
   assert.match(read('charts.js'), /syncPackPalette/);
 });
+
+test('FASTag Mapping shows 16-digit barcodes sheet-style with dashes (display only)', () => {
+  const fm = read('fastagMapping.js');
+  assert.match(fm, /function dashBar/);
+  assert.match(fm, /label: dashBar\(it\.barcode\)/);
+  assert.match(fm, /inputValue: dashBar\(it\.barcode\)/);
+  assert.match(fm, /value: it\.barcode,/, 'raw digits stay in value for lookup');
+});
