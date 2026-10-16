@@ -591,7 +591,25 @@ FF.pages = FF.pages || {};
 
   /** Suggestions for U.suggest() — label + sub + kind chip. */
   /** Suggestions for U.suggest() — direct/fallback matching so 1-2 letters bhi reliably dropdown me aaye. */
+  // 🎯 Filter chips (All · GV · FF · Agent · TL · Barcode) — top search dropdown ko narrow karte hain.
+  const CHIP_FILTERS = [['', 'All'], ['gv', '🟩 GV'], ['ff', '🟦 FF'], ['agent', 'Agent'], ['tl', 'TL'], ['barcode', 'Barcode']];
+  let chipFilter = '';
+  function chipMatch(it, f) {
+    if (!f || it.none) return true;
+    const pk = String((it.person && it.person.kind) || '');
+    if (f === 'gv' || f === 'ff') return it.kind === f || pk.startsWith(f + '-');
+    if (f === 'agent') return /agent$/.test(pk) || /agent/i.test(String(it.kindLabel || ''));
+    if (f === 'tl') return /tl$/.test(pk) || /\bTL\b/.test(String(it.kindLabel || ''));
+    if (f === 'barcode') return /barcode|tag/i.test(String(it.kindLabel || ''));
+    return true;
+  }
   function suggestItems(q) {
+    const items = suggestItemsRaw(q);
+    if (!chipFilter) return items;
+    const kept = items.filter((it) => chipMatch(it, chipFilter));
+    return kept.length ? kept : [{ kind: 'cls', kindLabel: 'Filter', label: 'Is filter me kuch nahi mila', sub: 'Upar se "All" chip dabao', value: clean(q), none: true }];
+  }
+  function suggestItemsRaw(q) {
     const query = clean(q);
     if (!query) return [];
     if (!state.light) {
@@ -1095,6 +1113,19 @@ FF.pages = FF.pages || {};
     mountTopbar.remember = remember;
     const panel = U.h('<div class="ms-recent" id="master-search-recent" hidden></div>');
     wrap.appendChild(panel);
+    const chips = U.h('<div class="ms-chips" id="master-search-chips" role="group" aria-label="Search filter" hidden></div>');
+    wrap.appendChild(chips);
+    const paintChips = () => { chips.innerHTML = CHIP_FILTERS.map(([k, l]) => `<button type="button" class="ms-chip${chipFilter === k ? ' on' : ''}" data-ms-chip="${k}" aria-pressed="${chipFilter === k}">${l}</button>`).join(''); };
+    paintChips();
+    input.addEventListener('focus', () => { chips.hidden = false; });
+    document.addEventListener('mousedown', (e) => { if (!chips.hidden && !wrap.contains(e.target)) chips.hidden = true; });
+    chips.addEventListener('mousedown', (e) => e.preventDefault());
+    chips.addEventListener('click', (e) => {
+      const b = e.target.closest && e.target.closest('[data-ms-chip]'); if (!b) return;
+      chipFilter = b.dataset.msChip; paintChips();
+      try { if (suggestApi && suggestApi.refresh && clean(input.value).length >= 1) suggestApi.refresh(); } catch { /* ignore */ }
+      input.focus();
+    });
     const paintRecent = () => {
       const a = readR();
       const pinned = a.filter((x) => x.pinned), recent = a.filter((x) => !x.pinned).slice(0, 6);

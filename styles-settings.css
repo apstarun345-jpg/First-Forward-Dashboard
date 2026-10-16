@@ -49,7 +49,6 @@
 .perm-group { display: flex; flex-direction: column; }
 .user-actions { margin-top: 8px; }
 .avatar-edit { display: flex; gap: 14px; align-items: center; padding: 12px; border: 1px dashed var(--line); border-radius: 14px; margin-bottom: 14px; background: #fbfbff; }
-table.matrix th.mx-perm { font-size: 10px; writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; height: 110px; text-align: left; padding: 6px 4px; font-weight: 700; }
 .mx-user-info { display: flex; flex-direction: column; gap: 1px; line-height: 1.2; }
 .mx-quick { white-space: nowrap; }
 .mx-h { margin: 14px 0 4px; font-size: 14px; }

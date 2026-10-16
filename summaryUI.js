@@ -64,10 +64,10 @@ window.FF = window.FF || {};
           ${srcChip(isGv ? '📑 GV REPORT cross-check' : '📑 REPORT sheet', 'sheet')}
         </div>
         <h2>${esc(v.name)}</h2>
-        <p class="gs-hero-line">${v.id ? `<span>ID <b>${esc(v.id)}</b></span>` : ''}
+        <p class="gs-hero-line">${v.id ? `<span>ID <b>${esc(v.id)}</b> <button type="button" class="cp-btn" data-copy="${esc(v.id)}" title="Copy ID" aria-label="Copy ID">📋</button></span>` : ''}
           ${v.tlName && v.kind !== 'tl' ? `<span>TL <b>${esc(v.tlName)}</b>${v.tlId ? ` (${esc(v.tlId)})` : ''}</span>` : ''}
           ${v.kind === 'tl' ? `<span>Team <b>${fmt(v.team ? v.team.length : 0)}</b> agents</span>` : ''}
-          ${v.mobile && canContacts() ? `<span>📞 <a href="tel:${esc(v.mobile)}">${esc(v.mobile)}</a></span>` : ''}
+          ${v.mobile && canContacts() ? `<span>📞 <a href="tel:${esc(v.mobile)}">${esc(v.mobile)}</a> <button type="button" class="cp-btn" data-copy="${esc(v.mobile)}" title="Copy mobile" aria-label="Copy mobile">📋</button><a class="cp-btn" target="_blank" rel="noopener" href="${esc(U.waLink('', v.mobile))}" title="WhatsApp" aria-label="WhatsApp">💬</a></span>` : ''}
           <span>Basis <b>${esc(v.ym)}</b> · last month <b>${esc(v.lastYm)}</b></span></p>
       </div>
       <div class="gs-hero-act">
@@ -290,7 +290,8 @@ window.FF = window.FF || {};
   // ---- FF view model (EIR + REPORT + StockDataa, wahi naya design) ----------------------------------
   async function ffView(spec, listPerson) {
     const person = listPerson || spec;
-    const rep = await FF.agentSummary.buildReport(spec, { age: false });
+    // Cached: same agent/TL dobara kholne par heavy ledger scan dobara nahi (2 min cache) — click lag ka main karan.
+    const rep = await (FF.agentSummary.buildReportCached || FF.agentSummary.buildReport)(spec, { age: false });
     const p = rep.p, t = p.totals || {}, isTl = rep.isTl;
     const growth = t.growth;
     const classes = (p.classTable || []).filter((x) => x.cur || x.last || x.stock);
@@ -706,13 +707,19 @@ window.FF = window.FF || {};
         if (FF.app && FF.app.enhanceTables) { try { FF.app.enhanceTables(body); } catch { /* optional */ } }
         if (age !== false) loadAgeing(v);
       };
+      let pickSeq = 0;
+      // Browser ko ek frame do — spinner/selection turant dikhe, phir heavy report build ho (click "atakta" nahi).
+      const nextFrame = () => new Promise((res) => { let done = false; const go = () => { if (!done) { done = true; res(); } }; try { requestAnimationFrame(() => setTimeout(go, 0)); } catch { /* no raf */ } setTimeout(go, 80); });
       async function pick(person) {
         if (!person) return;
+        const seq = ++pickSeq;
         S.person = person;
         drop.hidden = true;
         if (qEl) qEl.value = person.name;
-        paintSug('');
         body.innerHTML = U.spinner(`${person.name} ka report ban raha hai…`);
+        await nextFrame();
+        if (seq !== pickSeq || !body.isConnected) return;
+        paintSug('');
         let view = null;
         try {
           if (isGv) {
@@ -741,9 +748,10 @@ window.FF = window.FF || {};
           }
           view = await ffView(personSpec(person, 'ff'), person);
         } catch (err) {
-          body.innerHTML = U.errorBox(err, 'data-gs-retry');
+          if (seq === pickSeq) body.innerHTML = U.errorBox(err, 'data-gs-retry');
           return;
         }
+        if (seq !== pickSeq || !body.isConnected) return;   // user ne beech me dusra naam khol diya — purana result na likho
         S.view = view; state.view = view;
         body.innerHTML = reportHtml(view);
         paintExtras(view, true);
@@ -779,6 +787,7 @@ window.FF = window.FF || {};
       }
       if (root.__gsClick) root.removeEventListener('click', root.__gsClick);
       root.__gsClick = async (e) => {
+        if (e.target.closest('[data-gs-retry]')) { if (S.person) pick(S.person); else render(root, params); return; }
         const pickBtn = e.target.closest('[data-gs-pick]');
         if (pickBtn) { const [kind, name] = pickBtn.dataset.gsPick.split('|'); pick(S.list.find((p) => p.kind === kind && norm(p.name) === norm(name)) || { kind, name }); return; }
         if (e.target.closest('[data-gs-search]')) { const hit = matchList(S.list, qEl.value)[0]; if (hit) pick(hit); else U.toast('Koi matching Agent / TL nahi mila', 'warn'); return; }

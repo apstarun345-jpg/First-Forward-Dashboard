@@ -84,6 +84,31 @@ FF.pages = FF.pages || {};
     stockBoard: { q: '', channel: 'both', limit: 40 },
     sheet: { loaded: false, busy: false, config: null, fields: null, connected: false, hint: '', publicForm: null }
   };
+  // ---- Draft auto-save: browser band / refresh / signal chala jaye to bhara hua form wapas milta hai ----
+  const DRAFT_TTL = 24 * 60 * 60 * 1000;
+  const draftKey = () => 'ff_tr_draft_' + (state.publicMode ? 'pub' : 'adm');
+  let draftTimer = 0;
+  function draftHasContent() { return state.rows.some((r) => r.name || r.agentId || r.mobile || r.address || Object.values(r.q || {}).some((v) => Number(v) > 0)); }
+  function saveDraftNow() {
+    try {
+      if (!draftHasContent()) { localStorage.removeItem(draftKey()); return; }
+      localStorage.setItem(draftKey(), JSON.stringify({ at: Date.now(), rows: state.rows, courier: state.courier || '', itemName: state.itemName || '', note: state.note || '' }));
+    } catch { /* storage unavailable */ }
+  }
+  function saveDraftSoon() { clearTimeout(draftTimer); draftTimer = setTimeout(saveDraftNow, 600); }
+  function clearDraft() { clearTimeout(draftTimer); try { localStorage.removeItem(draftKey()); } catch { /* ignore */ } }
+  function restoreDraft() {
+    try {
+      if (draftHasContent()) return false;
+      const d = JSON.parse(localStorage.getItem(draftKey()) || 'null');
+      if (!d || !Array.isArray(d.rows) || !d.rows.length || Date.now() - Number(d.at || 0) > DRAFT_TTL) return false;
+      state.rows = d.rows.map((r) => newRow({ ...r, q: { ...emptyQty(), ...(r.q || {}) } }));
+      if (d.courier) state.courier = d.courier;
+      if (d.itemName) state.itemName = d.itemName;
+      if (d.note) state.note = d.note;
+      return draftHasContent();
+    } catch { return false; }
+  }
   const rid = () => Math.random().toString(36).slice(2, 9);
   const emptyQty = () => { const q = {}; CLASS_LIST.forEach((c) => { q[c] = ''; }); return q; };
   function newRow(patch) { return { id: rid(), agentId: '', name: '', tl: '', channel: '', tlFilter: '', isTl: false, dispatchName: '', q: emptyQty(), mobile: '', address: '', pincode: '', ...(patch || {}) }; }
@@ -1733,7 +1758,7 @@ body.colorful .from-hdr { color: #166534; }
     });
     act('clear', () => {
       if (filledCount() && !window.confirm('Poora form khaali kar dein? (employee naam bana rahega)')) return;
-      state.rows = [newRow()]; state.note = ''; state.errs = {}; state.serialNumber = ''; state.deviceName = ''; state.materialDescription = ''; state.submitKey = ''; state.dup = { list: [], force: false, busy: false };
+      clearDraft(); state.rows = [newRow()]; state.note = ''; state.errs = {}; state.serialNumber = ''; state.deviceName = ''; state.materialDescription = ''; state.submitKey = ''; state.dup = { list: [], force: false, busy: false };
       renderForm();
     });
     act('send', () => submit());
@@ -1882,7 +1907,7 @@ body.colorful .from-hdr { color: #166534; }
       rememberAgents(payload.agents);
       saveEmployee();
       const reqs = (out && out.requests) || (out && out.request ? [out.request] : []);
-      state.rows = [newRow()]; state.note = ''; state.errs = {};
+      clearDraft(); state.rows = [newRow()]; state.note = ''; state.errs = {};
       state.busy = '';
       if (isPublic()) {
         if (out && out.employeeToken) state.employeeToken = String(out.employeeToken);
@@ -2368,10 +2393,10 @@ body.colorful .from-hdr { color: #166534; }
       <td class="tr-c-sel"><input type="checkbox" data-tr-sel="${esc(dr.key)}" ${sel ? 'checked' : ''} aria-label="Select"></td>
       <td class="tr-c-date"><b>${esc(dateLabel(r.at))}</b><small class="dim">${esc(timeLabelShort(r.at))}</small><small class="mono dim" title="${esc(r.id)}">#${esc(String(r.id || '').slice(-6))}</small></td>
       <td class="tr-c-emp"><b>${esc(empName)}</b>${e.office ? `<small class="dim">${esc(e.office)}</small>` : ''}${entryBy}${r.source === 'public-link' ? '<span class="badge" title="Employee link se aayi (bina login)">🌐 link</span>' : ''}</td>
-      <td class="tr-c-agent"><b>${esc(dr.agent.name)}</b>${dr.agent.kind === 'tl' ? ' <span class="badge purple">TL</span>' : ''}${dr.agent.dispatchName ? `<small class="dim"> 🚚 ${esc(dr.agent.dispatchName)}</small>` : ''}<small class="dim">${dr.agent.agentId ? `#${esc(dr.agent.agentId)}` : ''}${dr.agent.tl ? `${dr.agent.agentId ? ' · ' : ''}TL ${esc(dr.agent.tl)}` : ''}</small>
+      <td class="tr-c-agent"><b>${esc(dr.agent.name)}</b>${dr.agent.kind === 'tl' ? ' <span class="badge purple">TL</span>' : ''}${dr.agent.dispatchName ? `<small class="dim"> 🚚 ${esc(dr.agent.dispatchName)}</small>` : ''}<small class="dim">${dr.agent.agentId ? `#${esc(dr.agent.agentId)} <button type="button" class="cp-btn" data-copy="${esc(dr.agent.agentId)}" title="Copy agent ID" aria-label="Copy agent ID">📋</button>` : ''}${dr.agent.tl ? `${dr.agent.agentId ? ' · ' : ''}TL ${esc(dr.agent.tl)}` : ''}</small>
         <span class="tr-tags"><span class="badge ${dr.agent.channel === 'gv' ? 'green' : 'blue'}">${dr.agent.channel === 'gv' ? '🟩 GV' : '🟦 FF'}</span>${dr.agent.unmatched ? '<span class="badge amber" title="Sheet data me nahi mila — naya agent?">🆕 verify</span>' : ''}${dr.siblings > 1 ? `<span class="badge gray" title="Purani request — ek request me ${dr.siblings} agents">🔗 ${dr.siblings} agents</span>` : ''}</span></td>
       ${isAdmin() ? `<td class="tr-c-courier"><span class="badge ${r.courier ? 'blue' : 'gray'}">🚚 ${esc(r.courier || '—')}</span></td><td class="tr-c-item-name"><select class="input tr-item-name-sel" data-tr-item-name data-key="${esc(dr.key)}" aria-label="Item Name" title="📦 Item Name">${ITEM_NAME_OPTIONS.map((name) => `<option value="${esc(name)}" ${normalizeItemName(r.itemName) === name ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select>${r.serialNumber ? `<small class="dim">Serial: ${esc(r.serialNumber)}</small>` : ''}${r.deviceName ? `<small class="dim">Device: ${esc(r.deviceName)}</small>` : ''}${r.materialDescription ? `<small class="dim">Material: ${esc(r.materialDescription)}</small>` : ''} </td>` : ''}
-      <td class="tr-c-addr">${c.who === 'employee' && (c.mobile || c.address) ? '<small class="dim">employee ka address:</small>' : ''}${c.mobile ? `<a class="tr-mob" href="tel:${esc(String(c.mobile).replace(/[^\d+]/g, ''))}">☏ ${esc(c.mobile)}</a>` : ''}${c.address ? `<div class="tr-addr">${esc(c.address)}</div>` : ''}${c.pincode ? `<b class="tr-pin">📮 ${esc(c.pincode)}</b>` : ''}${!c.mobile && !c.address && !c.pincode ? '<span class="dim small">—</span>' : ''}</td>
+      <td class="tr-c-addr">${c.who === 'employee' && (c.mobile || c.address) ? '<small class="dim">employee ka address:</small>' : ''}${c.mobile ? `<a class="tr-mob" href="tel:${esc(String(c.mobile).replace(/[^\d+]/g, ''))}">☏ ${esc(c.mobile)}</a> <button type="button" class="cp-btn" data-copy="${esc(c.mobile)}" title="Copy mobile" aria-label="Copy mobile">📋</button><a class="cp-btn" target="_blank" rel="noopener" href="${esc(U.waLink('', c.mobile))}" title="WhatsApp" aria-label="WhatsApp">💬</a>` : ''}${c.address ? `<div class="tr-addr">${esc(c.address)} <button type="button" class="cp-btn" data-copy="${esc([c.address, c.pincode].filter(Boolean).join(', '))}" title="Copy address" aria-label="Copy address">📋</button></div>` : ''}${c.pincode ? `<b class="tr-pin">📮 ${esc(c.pincode)}</b>` : ''}${!c.mobile && !c.address && !c.pincode ? '<span class="dim small">—</span>' : ''}</td>
       ${metricCellsHtml(dr)}
       <td class="tr-c-cls">${classCellHtml(dr)}</td>
       <td class="num tr-c-total"><b data-tr-rowtotal>${fmt(dr.total)}</b>${dr.requested !== dr.total ? `<small class="dim">req ${fmt(dr.requested)}</small>` : ''}</td>
@@ -3470,8 +3495,11 @@ body.colorful .from-hdr { color: #166534; }
     }
     if (state.publicMode && params && params.mobile) { state.status = { q: String(params.mobile), list: null, busy: false, err: '', searched: '' }; state.view = 'status'; }
     if (!views.includes(state.view) || (state.view === 'settings' && !isAdmin()) || (state.view === 'done' && !state.done)) state.view = 'form';
+    const draftBack = !(params && params.agent) && restoreDraft();
     root.innerHTML = `${headHtml()}<div id="tr-body"></div>`;
     bindCommon(root);
+    if (!root.__trDraft) { root.__trDraft = true; ['input', 'change', 'click'].forEach((ev) => root.addEventListener(ev, saveDraftSoon)); }
+    if (draftBack && U.toast) U.toast('📝 Pichla adhoora form wapas aa gaya (auto-saved draft)', 'info');
     const qp = (params && params.agent) ? String(params.agent) : '';
     if (qp && !state.rows.some((r) => r.name || r.agentId)) state.rows = [newRow({ agentId: /^\d+$/.test(qp) ? qp : '', name: /^\d+$/.test(qp) ? '' : qp })];
     renderRoot();

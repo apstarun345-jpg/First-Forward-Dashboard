@@ -1491,5 +1491,5 @@ FF.pages = FF.pages || {};
 
   FF.pages.ffAgentSummary = makePage('ff');
   FF.pages.gvAgentSummary = makePage('gv');
-  FF.agentSummary = { loadPeople, matchPeople, topSuggestions, buildReport, makePdf, reportText, reportCsv, reportXlsx, reportHtml, monthlyTrend, agentAlerts, activityStatus, buildTeamPack, teamPackPdf, teamPackXlsx, agentWaText, clearCaches };
+  FF.agentSummary = { loadPeople, matchPeople, topSuggestions, buildReport, buildReportCached, makePdf, reportText, reportCsv, reportXlsx, reportHtml, monthlyTrend, agentAlerts, activityStatus, buildTeamPack, teamPackPdf, teamPackXlsx, agentWaText, clearCaches };
 })(window.FF);

@@ -161,27 +161,12 @@ html[data-theme="dark"] .tr-req-tbl .tr-th-suggest .tr-th-sub { color: rgba(255,
 .tr-req-tbl tbody td.tr-c-sel {
   vertical-align: middle !important;
 }
-.tr-req-tbl tbody td.tr-c-date {
-  padding: 13px 8px 10px !important;
-  white-space: nowrap !important;
-}
-.tr-req-tbl tbody td.tr-c-emp {
-  min-width: 0 !important;
-  max-width: none !important;
-  padding: 13px 10px 10px !important;
-}
 .tr-req-tbl tbody td.tr-c-emp > b:first-child {
   display: block !important;
   width: 100% !important;
   white-space: nowrap !important;
   overflow: hidden !important;
   text-overflow: ellipsis !important;
-  line-height: 1.25 !important;
-}
-.tr-req-tbl tbody td.tr-c-agent {
-  min-width: 0 !important;
-  max-width: none !important;
-  padding: 13px 10px 10px !important;
   line-height: 1.25 !important;
 }
 .tr-req-tbl tbody td.tr-c-agent > b:first-child {
@@ -206,18 +191,6 @@ html[data-theme="dark"] .tr-req-tbl .tr-th-suggest .tr-th-sub { color: rgba(255,
   flex-wrap: wrap !important;
   gap: 4px !important;
   margin-top: 6px !important;
-}
-.tr-req-tbl tbody td.tr-c-courier {
-  text-align: center !important;
-  padding-top: 14px !important;
-}
-.tr-req-tbl tbody td.tr-c-cls {
-  padding-top: 11px !important;
-}
-.tr-req-tbl tbody td.tr-c-total,
-.tr-req-tbl tbody td.tr-c-status,
-.tr-req-tbl tbody td.tr-c-act {
-  padding-top: 12px !important;
 }
 .tr-req-tbl tbody .tr-m > b,
 .tr-req-tbl tbody .tr-m > .tr-src {
@@ -327,7 +300,6 @@ html[data-theme="dark"] .tr-cols-order .tr-col-order .tr-col-move .btn.tiny{back
 .tr-qty-list > .tr-qty-row { border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent); }
 .tr-qty-list > .tr-qty-row:nth-of-type(even) { border-left: 1px solid color-mix(in srgb, var(--line) 70%, transparent); }
 }
-.tr-card-toggle.on, .tr-detail-toggle.on { background: color-mix(in srgb, var(--brand) 14%, var(--card)); border-color: var(--brand); }
 .tr-detail-toggle[hidden] { display: none; }
 .tr-req-wrap.tr-cards .tr-req-tbl { min-width: 0 !important; width: 100% !important; max-width: 100%; display: block; border: 0; table-layout: auto; }
 .tr-req-wrap.tr-cards .tr-req-tbl colgroup,
