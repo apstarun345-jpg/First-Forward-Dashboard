@@ -5477,11 +5477,11 @@ html[data-theme="dark"] .home-exp-stat { background: color-mix(in srgb, var(--br
 }
 /* v3.65 — all-class compact metric grids: VC4 / VC5 / VC7 / VC12 / VC16 */
 .tr-req-tbl {
-  min-width: 2680px !important;
+  min-width: 2810px !important;   /* + Item Name column (130px) that had a header and cells but no <col>, shifting every later width by one */
 }
 .tr-req-tbl .tr-class-grid {
   display: grid !important;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(58px, 1fr));   /* never squeeze chips into each other: 2 per row when wide, 1 when narrow */
   gap: 3px 5px;
   margin-top: 5px;
   text-align: left;
@@ -5499,7 +5499,9 @@ html[data-theme="dark"] .home-exp-stat { background: color-mix(in srgb, var(--br
   white-space: nowrap;
   line-height: 1.05 !important;
 }
+.tr-req-tbl .tr-class-grid > span { overflow: hidden; }
 .tr-req-tbl .tr-class-grid > span b {
+  flex: 0 0 auto;
   font-size: 9.5px !important;
   font-weight: 900 !important;
   color: #475569 !important;
@@ -5517,7 +5519,7 @@ html[data-theme="dark"] .home-exp-stat { background: color-mix(in srgb, var(--br
 }
 @media (max-width: 900px) {
 .tr-req-tbl {
-    min-width: 2500px !important;
+    min-width: 2630px !important;
   }
 .tr-req-tbl .tr-class-grid {
     grid-template-columns: repeat(2, minmax(65px, 1fr));

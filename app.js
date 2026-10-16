@@ -1424,7 +1424,9 @@ window.FF = window.FF || {};
   function applyHiddenCols(table, set) {
     if (!table.dataset.cc) table.dataset.cc = String(++ccSeq);
     const id = table.dataset.cc;
-    if (set.size) ccRules.set(id, [...set].map((i) => `table[data-cc="${id}"] > * > tr > :nth-child(${i + 1})`).join(',\n') + ' { display: none; }');
+    // Hide the matching <col> too: with table-layout: fixed the colgroup widths are positional, so a hidden column whose <col>
+    // stayed behind shifted every later width onto the wrong column (class chips in Stock / Current got squeezed and overlapped).
+    if (set.size) ccRules.set(id, [...set].map((i) => `table[data-cc="${id}"] > * > tr > :nth-child(${i + 1}),\ntable[data-cc="${id}"] > colgroup > :nth-child(${i + 1})`).join(',\n') + ' { display: none; }');
     else ccRules.delete(id);
     // Drop rules for tables that are no longer on the page.
     for (const k of [...ccRules.keys()]) if (!document.querySelector(`table[data-cc="${k}"]`)) ccRules.delete(k);

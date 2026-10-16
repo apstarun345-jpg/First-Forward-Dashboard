@@ -67,6 +67,7 @@
 .tr-req-tbl col.tr-col-agent { width: 220px; }
 .tr-req-tbl col.tr-col-contact { width: 280px; }
 .tr-req-tbl col.tr-col-courier { width: 120px; }
+.tr-req-tbl col.tr-col-item-name { width: 130px; }
 .tr-req-tbl col.tr-col-stock-total { width: 88px; }
 .tr-req-tbl col.tr-col-stock-core { width: 96px; }
 .tr-req-tbl col.tr-col-stock-comm { width: 96px; }

@@ -2526,7 +2526,7 @@ body.colorful .from-hdr { color: #166534; }
       <div class="table-wrap tall tr-req-wrap"><table class="tbl tr-req-tbl">
         <colgroup>
           <col class="tr-col-sel"><col class="tr-col-date"><col class="tr-col-employee"><col class="tr-col-agent"><col class="tr-col-contact">
-          ${isAdmin() ? '<col class="tr-col-courier">' : ''}
+          ${isAdmin() ? '<col class="tr-col-courier"><col class="tr-col-item-name">' : ''}
           <col class="tr-col-stock-total"><col class="tr-col-stock-core"><col class="tr-col-stock-comm">
           <col class="tr-col-last"><col class="tr-col-current"><col class="tr-col-rate"><col class="tr-col-expected"><col class="tr-col-growth">
           ${isAdmin() ? '<col class="tr-col-suggest">' : ''}
