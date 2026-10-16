@@ -1819,7 +1819,8 @@ FF.pages = FF.pages || {};
       const key = keys[i];
       if (!(key.startsWith(want) || (substring && key.includes(want)))) continue;
       const e = idx.bars.get(key); if (!e) continue;
-      const r = (e.ff[0] || e.gv[0]) || {};
+      const pool = e.ff.length ? e.ff : e.gv;
+      const r = pool.find((x) => x && (x.agentName || x.agentId)) || pool[0] || {};
       const src = e.ff.length ? 'FF' : 'GV';
       items.push({ barcode: key, tagId: r.tagId || '', agentId: r.agentId || '', agentName: r.agentName || '', tlName: r.tlName || '', cls: r.cls || '', channel: src, owners: e.ff.length + e.gv.length });
     }

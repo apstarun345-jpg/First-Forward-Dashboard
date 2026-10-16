@@ -1410,7 +1410,7 @@ window.FF = window.FF || {};
             if (r.pending) return [{ none: true, kind: 'cls', kindLabel: 'Index', label: '⏳ Barcode index is being built…', sub: 'suggestions will appear shortly', value: barBox.value, _pending: true }];
             return r.items.map((it) => ({
               kind: 'barcode', kindLabel: it.channel === 'GV' ? 'GV' : 'FF', label: it.barcode,
-              sub: [it.tagId ? 'Tag ' + it.tagId : '', it.agentName ? 'Agent ' + it.agentName : '', it.tlName ? 'TL ' + it.tlName : '', it.cls ? 'Class ' + it.cls : ''].filter(Boolean).join(' · ') || 'StockDataa row',
+              sub: [it.tagId ? 'Tag ' + it.tagId : '', (it.agentName || it.agentId) ? 'Agent ' + [it.agentName, it.agentId ? '(' + it.agentId + ')' : ''].filter(Boolean).join(' ') : (it.tlName ? 'Agent — (TL stock)' : ''), it.tlName ? 'TL ' + it.tlName : '', it.cls ? 'Class ' + it.cls : ''].filter(Boolean).join(' · ') || 'StockDataa row',
               value: it.barcode, inputValue: it.barcode, _item: it
             }));
           },
