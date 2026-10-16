@@ -6300,6 +6300,13 @@ async function handleApi(req, res, url) {
     logAudit(user, 'tag_request_created', { target: row.id, note: `${rows.length} rows · ${total} tags`, ip: clientIp(req) });
     return sendJson(res, 201, { ok: true, request: row });
   }
+  // ⚡ Status-only changes answer right after the in-memory update; the storage save runs in the background (one retry).
+  const persistBackground = (kind) => {
+    persist(kind).catch((err) => {
+      console.warn(`persist(${kind}) failed — retrying:`, (err && err.message) || err);
+      setTimeout(() => persist(kind).catch((e) => console.error(`persist(${kind}) retry failed:`, (e && e.message) || e)), 2500);
+    });
+  };
   // ⚡ Bulk status: ek call me kai requests, ek hi storage save (pehle har request ka alag save → 20 requests ≈ 1 minute).
   if (p === '/api/tag-requests/bulk-status' && method === 'POST') {
     if (user.role !== 'admin') throw new HttpError(403, 'Status sirf admin badal sakta hai.');
@@ -6320,7 +6327,7 @@ async function handleApi(req, res, url) {
       updated.push(row);
       if (status === 'approved' && prev !== 'approved') toSheet.push(row);
     }
-    if (updated.length) await persist('notify');
+    if (updated.length) persistBackground('notify');
     // 📗 Sheet sync sirf pehli baar Approved par (PUT wala rule) — background me ek-ek karke.
     if (toSheet.length && tagSheetConfig().enabled) {
       (async () => {
@@ -6412,7 +6419,8 @@ async function handleApi(req, res, url) {
     }
     if (body.itemName !== undefined) row.itemName = ['FASTag', 'Biomatric Device', 'Matarial'].includes(body.itemName) ? body.itemName : 'FASTag';
     row.updatedAt = new Date().toISOString(); row.updatedBy = user.username;
-    await persist('notify');
+    if (Object.keys(body).every((k) => k === 'status')) persistBackground('notify'); // status-only → instant reply
+    else await persist('notify');
     // 📗 v5: Sheet sync ONLY on the first transition to Approved.
     // Pending submit, Dispatched, Rejected, and later status changes never append another row.
     if (body.status === 'approved' && prevStatus !== 'approved' && tagSheetConfig().enabled) {

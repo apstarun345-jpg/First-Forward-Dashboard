@@ -20,7 +20,7 @@ test('bulkSetStatus: admin guard, skips same-status rows, confirms, batches PUTs
   assert.match(fn, /if \(!isAdmin\(\)\)/);
   assert.match(fn, /\(r\.status \|\| 'pending'\) !== status/);
   assert.match(fn, /window\.confirm/);
-  assert.match(fn, /i \+= 10/);
+  assert.match(fn, /i \+= 200/);
   assert.match(fn, /\/api\/tag-requests\/bulk-status/);
   assert.match(fn, /progressUi\(/);
   assert.match(fn, /state\.sel\.clear\(\)/);
@@ -34,5 +34,15 @@ test('progress card shows "n / total" and server has a single-save bulk endpoint
   const server = readFileSync(path.join(ROOT, 'server.js'), 'utf8');
   const ep = server.slice(server.indexOf("p === '/api/tag-requests/bulk-status'"));
   assert.match(ep, /user\.role !== 'admin'/);
-  assert.equal((ep.slice(0, ep.indexOf('tagReqPath')).match(/await persist\('notify'\)/g) || []).length, 1, 'one storage save for the whole chunk');
+  const epBlock = ep.slice(0, ep.indexOf('tagReqPath'));
+  assert.equal((epBlock.match(/persistBackground\('notify'\)/g) || []).length, 1, 'one storage save for the whole bulk call, in the background');
+  assert.doesNotMatch(epBlock, /await persist\('notify'\)\n    \/\/ 📗/);
+});
+
+test('single status change is instant: no progress card, optimistic row flip', () => {
+  const fn = src.slice(src.indexOf('function setStatus(dr, status, btn)'), src.indexOf('/** Full-screen progress card'));
+  assert.doesNotMatch(fn, /progressUi\(/);
+  assert.match(fn, /putRequest\(dr\.req, \{ status \}\)/);
+  const server = readFileSync(path.join(ROOT, 'server.js'), 'utf8');
+  assert.match(server, /every\(\(k\) => k === 'status'\)\) persistBackground\('notify'\)/);
 });

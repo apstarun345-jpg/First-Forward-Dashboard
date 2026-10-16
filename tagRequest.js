@@ -2813,16 +2813,12 @@ body.colorful .from-hdr { color: #166534; }
   }
   function setStatus(dr, status, btn) {
     if (btn) { btn.disabled = true; }
-    // ⚡ Pending / Approved / Rejected / Dispatched — status UI turant badlo; save slow ho to "1 / 1" progress card.
-    const ui = progressUi(`${STATUS[status] ? STATUS[status].label : status} · updating`, 1, 500);
-    ui.label(dr.agent && dr.agent.name ? dr.agent.name : 'Saving…');
+    // ⚡ Single change = instant: row flips right away (optimistic), the save runs in the background; on failure it is restored.
     const p = putRequest(dr.req, { status });
     renderReqTable();
     p.then(() => {
-      ui.set(1);
-      return ui.close().then(() => U.toast(`${STATUS[status] ? STATUS[status].label : status} — ${dr.agent.name}`, 'ok'));
+      U.toast(`${STATUS[status] ? STATUS[status].label : status} — ${dr.agent.name}`, 'ok');
     }).catch((err) => {
-      ui.close();
       U.toast('Status update fail: ' + ((err && err.message) || ''), 'err');
       renderReqTable();
     });
@@ -2831,7 +2827,7 @@ body.colorful .from-hdr { color: #166534; }
   /** Full-screen progress card: "3 / 20" counter that ticks up one by one + bar, so a long save never looks stuck. */
   function progressUi(title, total, delayMs) {
     let el = null, shown = 0, target = 0, timer = null, closed = false, nowText = '', waiters = [];
-    const step = Math.max(15, Math.min(70, Math.round(900 / Math.max(1, total))));
+    const step = Math.max(10, Math.min(45, Math.round(600 / Math.max(1, total))));
     const paint = () => {
       if (!el) return;
       const pct = total ? Math.round((shown / total) * 100) : 0;
@@ -2865,12 +2861,12 @@ body.colorful .from-hdr { color: #166534; }
         await this.settled();
         closed = true;
         if (startTimer) clearTimeout(startTimer);
-        if (el) { el.classList.add('is-done'); await new Promise((r) => setTimeout(r, 650)); el.remove(); el = null; }
+        if (el) { el.classList.add('is-done'); await new Promise((r) => setTimeout(r, 400)); el.remove(); el = null; }
       }
     };
   }
   /** Selected requests → ek saath naya status (Approved / Dispatched / Rejected / Pending). Admin only; sirf wahi requests badalti hain jinka status alag hai.
-   *  Server ko 10-10 ki chunk me ek bulk call (har chunk = ek hi storage save) — progress card me "n / total" live. */
+   *  Rows turant flip hote hain, server ko ek bulk call; progress card me "n / total" live. */
   async function bulkSetStatus(status) {
     if (!isAdmin()) { U.toast('Only admin can change status', 'err'); return; }
     if (!STATUS[status]) { U.toast('Choose a status first', 'info'); return; }
@@ -2881,28 +2877,29 @@ body.colorful .from-hdr { color: #166534; }
     if (!window.confirm(msg)) return;
     rootEl.querySelectorAll('[data-tr-bulk="approve"],[data-tr-bulk="dispatch"],[data-tr-bulk="apply-status"],[data-tr-bulk-status]').forEach((b) => { b.disabled = true; });
     const ui = progressUi(`${STATUS[status].label} · updating requests`, list.length, 0);
+    ui.label('Updating…');
+    // ⚡ Every row flips at once (optimistic) and the counter runs immediately; the server gets ONE call per 200 requests.
+    const locals = list.map((r) => ({ r, local: optimisticRequest(r, { status }) }));
+    renderReqTable();
+    ui.set(list.length);
     let ok = 0, fail = 0;
-    for (let i = 0; i < list.length; i += 10) {
-      const chunk = list.slice(i, i + 10);
-      ui.label(`Saving ${fmt(i + 1)}–${fmt(i + chunk.length)}…`);
-      const locals = chunk.map((r) => ({ r, local: optimisticRequest(r, { status }) }));
-      renderReqTable();
+    for (let i = 0; i < locals.length; i += 200) {
+      const chunk = locals.slice(i, i + 200);
       try {
-        const out = await FF.auth.api('/api/tag-requests/bulk-status', 'POST', { ids: chunk.map((r) => r.id), status });
-        const done = new Set(((out && out.requests) || []).map((x) => x.id));
-        locals.forEach(({ r, local }) => {
-          const fresh = ((out && out.requests) || []).find((x) => x.id === r.id);
-          if (reqMutationSeq.get(r.id) === local.token) { if (fresh) replaceRequest(fresh); reqMutationSeq.delete(r.id); }
-          if (!done.has(r.id) && local.before && local.before.id) replaceRequest(local.before);
+        const out = await FF.auth.api('/api/tag-requests/bulk-status', 'POST', { ids: chunk.map((x) => x.r.id), status });
+        const fresh = new Map(((out && out.requests) || []).map((x) => [x.id, x]));
+        chunk.forEach(({ r, local }) => {
+          const f = fresh.get(r.id);
+          if (reqMutationSeq.get(r.id) === local.token) { if (f) replaceRequest(f); reqMutationSeq.delete(r.id); }
+          if (!f && local.before && local.before.id) replaceRequest(local.before);
         });
-        ok += done.size; fail += chunk.length - done.size;
+        ok += fresh.size; fail += chunk.length - fresh.size;
       } catch (err) {
-        locals.forEach(({ r, local }) => { if (reqMutationSeq.get(r.id) === local.token) { reqMutationSeq.delete(r.id); if (local.before && local.before.id) replaceRequest(local.before); } });
+        chunk.forEach(({ r, local }) => { if (reqMutationSeq.get(r.id) === local.token) { reqMutationSeq.delete(r.id); if (local.before && local.before.id) replaceRequest(local.before); } });
         fail += chunk.length;
       }
-      ui.set(ok + fail);
-      renderReqTable();
     }
+    ui.label(fail ? 'Finishing…' : 'Saved');
     await ui.close();
     state.sel.clear();
     renderReqTable();
