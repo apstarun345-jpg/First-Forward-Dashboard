@@ -802,6 +802,11 @@ window.FF = window.FF || {};
   // topbar search bar waise hi har page par dikhta hai (bas ~1s baad, bina pehla paint roke).
   function mountSearchTopbar() {
     if (FF.config.feat && FF.config.feat('masterSearch') === false) return;
+    if (!(FF.auth && FF.auth.can && FF.auth.can('masterSearch'))) {
+      const stale = document.getElementById('master-search');
+      if (stale && stale.parentNode) stale.parentNode.removeChild(stale);
+      return;
+    }
     if (FF.masterSearch && FF.masterSearch.mountTopbar) FF.masterSearch.mountTopbar(true);
   }
   function startShellExtras() {

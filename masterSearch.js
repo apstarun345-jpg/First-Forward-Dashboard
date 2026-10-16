@@ -1015,6 +1015,13 @@ FF.pages = FF.pages || {};
   }
 
   function mountTopbar(force) {
+    // Access gate: bina 'masterSearch' permission ke top-bar search dikhna hi nahi chahiye.
+    if (!(FF.auth && typeof FF.auth.can === 'function' && FF.auth.can('masterSearch'))) {
+      const stale = document.getElementById('master-search');
+      if (stale && stale.parentNode) stale.parentNode.removeChild(stale);
+      mountedTopbar = false;
+      return false;
+    }
     if (force === true) mountedTopbar = false;
     const actions = U.$('#top-actions');
     // Guard: dobara mount na ho (querySelector par bharosa nahi — DOM shim/iframe me naya element
