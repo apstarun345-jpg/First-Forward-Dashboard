@@ -69,7 +69,7 @@ window.FF = window.FF || {};
       rows.push({
         key: U.dateKey(d), d, date: d, ym: U.ymKey(d), day: d.getDate(), cls, group: classGroup(cls),
         type: D.cellText(r[2]).toUpperCase() || 'ISSUANCE', vrnType: D.cellText(r[3]),
-        channel, agentId, agentName, tlId: U.clean(D.cellText(r[11])), tlName: U.clean(D.cellText(r[5])), n
+        channel, masterId: U.clean(D.cellText(r[4])), agentId, agentName, tlId: U.clean(D.cellText(r[11])), tlName: U.clean(D.cellText(r[5])), n
       });
     }
     return applyGvLiveToday(rows);
@@ -153,7 +153,7 @@ window.FF = window.FF || {};
       const channel = channelOf(D.cellText(r[6]), tlName);
       const id = channel === 'GV Partner' ? (gvId || agentId) : (agentId || gvId);
       const name = channel === 'GV Partner' ? (gvName || agentName || (id ? `Agent ${id}` : 'Unknown')) : (agentName || gvName || (id ? `Agent ${id}` : 'Unknown'));
-      rows.push({ id, name, key: `${channel}|${id}|${name}`, channel, tlId: D.cellText(r[4]), tlName: tlName || '—', gvId, gvName, ym: `${y}-${U.pad2(m + 1)}`, n });
+      rows.push({ id, name, key: `${channel}|${id}|${name}`, channel, tlId: D.cellText(r[4]), tlName: tlName || '—', gvId, gvName, masterId: U.clean(D.cellText(r[6])), ym: `${y}-${U.pad2(m + 1)}`, n });
     }
     return rows;
   }

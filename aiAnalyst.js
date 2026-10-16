@@ -21,9 +21,9 @@ FF.pages = FF.pages || {};
   const healthOf = (g) => (g === null ? ['Naya', 'flat'] : g >= 5 ? ['Growing', 'up'] : g <= -5 ? ['Declining', 'down'] : ['Stable', 'flat']);
 
   // ---------------------------------------------------------------- analysis core
-  function peopleFromFf(agents, cur, last) {
+  function peopleFromFf(agents, cur, last, isFfRow) {
     const map = new Map();
-    (agents || []).filter((r) => r.channel !== 'GV Partner' && (r.ym === cur || r.ym === last)).forEach((r) => {
+    (agents || []).filter((r) => isFfRow(r) && (r.ym === cur || r.ym === last)).forEach((r) => {
       const key = clean(r.id) ? 'I' + norm(r.id) : 'N' + norm(r.name);
       if (!map.has(key)) map.set(key, { key, name: r.name, id: clean(r.id), tl: '', cur: 0, last: 0, tlCurN: 0 });
       const o = map.get(key);
@@ -107,7 +107,11 @@ FF.pages = FF.pages || {};
     const [dailyR, agentsR, stockR, masterR, gvStockR] = await Promise.allSettled([S.need('daily'), S.need('agents'), S.need('stock'), G.need('master'), G.need('stockClass')]);
     const out = { errors: [], gvId: GV_ID() };
     const dailyAll = dailyR.status === 'fulfilled' ? dailyR.value : null;
-    const ffDaily = dailyAll ? dailyAll.filter((r) => r.channel !== 'GV Partner') : null;
+    // FF = EIR me master ID 5845036 ke ALAWA har row (blank ID bhi FF); GV master-ID wali EIR rows FF me kabhi nahi.
+    const gvIdNorm = out.gvId.replace(/\.0+$/, '');
+    const isFfRow = (r) => (r.masterId !== undefined ? clean(r.masterId).replace(/\.0+$/, '') !== gvIdNorm : r.channel !== 'GV Partner');
+    const eirOnly = dailyAll ? (M.eirOnlyDaily ? M.eirOnlyDaily(dailyAll) : dailyAll) : null;
+    const ffDaily = dailyAll ? dailyAll.filter(isFfRow) : null;
     if (!dailyAll) out.errors.push('First Forward EIR data load nahi hua');
     if (masterR.status !== 'fulfilled') out.errors.push('GV Master data load nahi hua');
     const gvOk = masterR.status === 'fulfilled';
@@ -136,7 +140,7 @@ FF.pages = FF.pages || {};
       const day = chLatest && U.ymKey(chLatest) === out.cur ? chLatest.getDate() : (out.isCurrent && chLatest && U.ymKey(chLatest) < out.cur ? 0 : out.day);
       const sum = (ym, d) => (isFf ? M.summary(ffDaily, ym, d) : gvSummary(gvIdx, ym, d));
       const cur = sum(out.cur), last = sum(out.last), lastMtd = day ? sum(out.last, day) : last;
-      const people = isFf ? peopleFromFf(agents, out.cur, out.last) : gvPeople(gvIdx, out.cur, out.last);
+      const people = isFf ? peopleFromFf(agents, out.cur, out.last, isFfRow) : gvPeople(gvIdx, out.cur, out.last);
       const d = drivers(people, day || out.day, out.dimCur);
       const proj = out.isCurrent ? (day ? (cur.total / day) * out.dimCur : cur.total) : cur.total;
       const ser = (ym) => { try { return isFf ? (M.dailySeries(ffDaily, ym).totals || []) : gvSeries(gvIdx, ym); } catch { return []; } };
@@ -152,6 +156,8 @@ FF.pages = FF.pages || {};
         replShare: cur.total ? (cur.replacement / cur.total) * 100 : 0, wrongShare: cur.total ? (cur.wrongVrn / cur.total) * 100 : 0 };
     };
     out.channels.ff = build('ff'); out.channels.gv = build('gv');
+    // EIR hisaab: total = master ID 5845036 wali rows + baaki (FF) — sirf proof ke liye
+    try { if (eirOnly) { let t = 0, g = 0, f = 0; eirOnly.forEach((r) => { if (r.ym !== out.cur) return; t += r.n; if (isFfRow(r)) f += r.n; else g += r.n; }); out.eir = { total: t, ff: f, gvId: g }; } } catch { /* ignore */ }
     // EIR reconciliation: poore EIR ledger me master-ID ke hisaab se FF/GV split (sirf proof ke liye)
     return out;
   }
@@ -364,7 +370,7 @@ FF.pages = FF.pages || {};
     U.$('#aa-actions', root).innerHTML = `<label class="aa-month">📅 <select id="aa-month" class="input">${monthOpts}</select></label><button class="btn small" id="aa-csv">⬇ CSV</button><button class="btn small primary" id="aa-refresh">↻ Refresh</button>`;
     const comb = all.reduce((s, c) => ({ cur: s.cur + c.cur.total, proj: s.proj + c.proj, last: s.last + c.last.total }), { cur: 0, proj: 0, last: 0 });
     const dl = (d) => (d ? U.labelDate(d) : '—');
-    const recon = '';
+    const recon = a.eir ? `<span class="aa-pill ok" title="EIR report ka total, master ID ke hisaab se tod kar">EIR ${esc(U.labelYM(a.cur))}: total ${fmt(a.eir.total)} − ID ${esc(a.gvId)} ${fmt(a.eir.gvId)} = FF ${fmt(a.eir.ff)}</span>` : '';
     const tabs = [['all', '🌐 Side by side'], ['ff', '🟦 First Forward'], ['gv', '🟩 GV Partner']].map(([k, l]) => `<button class="btn small ${sel === k ? 'primary' : ''}" data-aa-ch="${k}">${l}</button>`).join('');
     body.innerHTML = `${a.errors.length ? `<div class="alert warn">${a.errors.map(esc).join(' · ')}</div>` : ''}
       <div class="aa-basis"><span class="aa-pill">🟦 FF = EIR (master ID ≠ ${esc(a.gvId)}) · data ${esc(dl(a.ffLatest))} tak</span><span class="aa-pill">🟩 GV = GV Master · data ${esc(dl(a.gvLatest))} tak</span>${recon}${gv && gv.noLast ? '<span class="aa-pill warn">⚠ GV Master me pichhle mahine ka data nahi — GV comparison limited</span>' : ''}<span class="aa-pill soft">Dono milakar: ${fmt(comb.cur)} ab tak · ${fmt(comb.proj)} projected (alag IDs, overlap nahi)</span></div>
